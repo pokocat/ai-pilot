@@ -49,11 +49,18 @@ export default function Login({ open, onLoggedIn }: Props) {
     if (loading) return;
     setLoading(true);
     try {
-      const r = await api.login(phone);
-      await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
-      onLoggedIn(r.onboarded);
-    } catch (e) {
-      Taro.showToast({ title: (e as Error).message || '登录失败', icon: 'none' });
+      let onboarded: boolean;
+      try {
+        // 在线：真实账号 + 数据隔离
+        const r = await api.login(phone);
+        await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
+        onboarded = r.onboarded;
+      } catch {
+        // 后端不可达：离线 fake 登录，保证无后端也能进入（与全站离线兜底一致）
+        onboarded = store.isOnboarded();
+        await store.afterLogin(`local-${phone}`, onboarded);
+      }
+      onLoggedIn(onboarded);
     } finally {
       setLoading(false);
     }
