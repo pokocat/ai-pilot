@@ -13,12 +13,19 @@ interface Props {
   onConfirm: () => void;
 }
 
+// 本地兜底问卷：后端不可达 / 未播种时也能完整展示 3 个问题（内容与服务端 seed 对齐）。
+const DEFAULT_SURVEY: SurveyQ[] = [
+  { key: 'industry', title: '你的行业？', options: ['SaaS / 软件', '消费 / 零售', '制造', '服务 / 咨询', '其他'] },
+  { key: 'stage', title: '当前阶段？', options: ['起步 / 验证', 'A 轮前后', '规模化', '稳定盈利'] },
+  { key: 'pain', title: '最头疼的事？', options: ['增长乏力', '现金流', '融资', '组织 / 团队', '定位 / 竞争'] },
+];
+
 // 入场仪式：选本命色 →（首登）30 秒建档 → 入局。对齐原型 picker 流程。
 export default function Picker({ open, first, onClose, onConfirm }: Props) {
   const s = useStore();
   const [sel, setSel] = useState(colorIndex(s.colorKey()));
   const [step, setStep] = useState<'color' | 'profile'>('color');
-  const [survey, setSurvey] = useState<SurveyQ[]>([]);
+  const [survey, setSurvey] = useState<SurveyQ[]>(DEFAULT_SURVEY);
   const [answers, setAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -29,7 +36,8 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
   }, [open]);
 
   useEffect(() => {
-    if (first) api.survey().then(setSurvey).catch(() => {});
+    // 后端有数据就用后端的，否则保留本地兜底问卷
+    if (first) api.survey().then((qs) => { if (qs?.length) setSurvey(qs); }).catch(() => {});
   }, [first]);
 
   // custom-tab-bar 是原生层、z-index 压不住，wx.hideTabBar 对自定义底栏又不可靠；
