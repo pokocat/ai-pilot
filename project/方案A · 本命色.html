@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>军师 · 方案A 交互原型</title>
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/frame.css">
+<link rel="stylesheet" href="styles/homeA.css">
+<link rel="stylesheet" href="styles/homeB.css">
+<link rel="stylesheet" href="styles/onboard.css">
+<link rel="stylesheet" href="styles/app.css">
+<link rel="stylesheet" href="styles/screens.css?v=2">
+<link rel="stylesheet" href="styles/hero.css">
+<link rel="stylesheet" href="styles/deliver.css">
+<link rel="stylesheet" href="styles/sessions.css">
+<style>
+  body{ display:flex; align-items:center; justify-content:center; min-height:100vh; padding:36px 20px; }
+  .stage-frame{ display:flex; flex-direction:column; align-items:center; gap:16px; }
+  .stage-cap{ font:500 12px/1 var(--mono); letter-spacing:.2em; text-transform:uppercase; color:var(--ink-3); text-align:center; }
+  .stage-cap b{ color:var(--ink-2); font-weight:600; }
+</style>
+</head>
+<body>
+<div class="stage-frame">
+  <div class="stage-cap"><b>军师 · 可点击原型</b> — 首登选本命色 · 对话即入口 · 5 屏可切换</div>
+  <div class="phone"><div class="screen">
+
+    <div class="statusbar">
+      <span>9:41</span>
+      <span class="right">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".3"/></svg>
+        <svg width="22" height="12" viewBox="0 0 22 12" fill="none"><rect x="1" y="1" width="17" height="10" rx="2.5" stroke="currentColor" stroke-width="1.2" opacity=".5"/><rect x="2.5" y="2.5" width="12" height="7" rx="1.2" fill="currentColor"/><rect x="19.5" y="4" width="1.5" height="4" rx=".7" fill="currentColor" opacity=".5"/></svg>
+      </span>
+    </div>
+
+    <div class="app">
+
+      <!-- ========== 首页：A 对话优先 + 每日一句话献策 ========== -->
+      <section class="app-screen vA on" data-screen="home" data-screen-label="首页">
+        <div class="screen-scroll">
+          <div class="scr-top">
+            <div class="brandrow">
+              <div class="brand">
+                <div class="brand-mk">军</div>
+                <div><div class="brand-nm">军师</div><div class="brand-sub">AI STRATEGIST</div></div>
+              </div>
+              <div class="bell" data-rechoose><i class="ic" data-ic="insight"></i></div>
+            </div>
+            <div class="greet">
+              <h1>傍晚好，王总</h1>
+              <p id="greet-sub">今天有 3 条军师为你准备的洞察 · 随时可开口。</p>
+            </div>
+            <div class="say-strip">
+              <div class="say-k">今日献策 · <span id="say-date">6月1日</span></div>
+              <div class="say-line" id="say-line">先把自己<em>立于不败</em>，再等对手露出破绽。</div>
+            </div>
+          </div>
+
+          <div class="ask">
+            <div class="ask-top">
+              <div class="ask-av"><i class="ic" data-ic="chat"></i></div>
+              <div class="ask-id"><div class="nm">军师</div><div class="st"><span class="dot"></span> 在线 · 随时为你出谋</div></div>
+            </div>
+            <div class="ask-q">今天，想破解哪一局？</div>
+            <div class="ask-field" onclick="document.getElementById('home-input').focus()">
+              <input id="home-input" placeholder="说说你的处境，或直接提问…">
+              <span class="ask-ico"><i class="ic" data-ic="mic"></i></span>
+              <span class="ask-ico"><i class="ic" data-ic="attach"></i></span>
+              <span class="ask-send" id="home-send"><i class="ic" data-ic="send"></i></span>
+            </div>
+            <div class="chips">
+              <span class="chip" data-q="战略体检"><i class="ic" data-ic="target"></i> 战略体检</span>
+              <span class="chip" data-q="增长方案"><i class="ic" data-ic="trend"></i> 增长方案</span>
+              <span class="chip" data-q="融资准备"><i class="ic" data-ic="shield"></i> 融资准备</span>
+            </div>
+          </div>
+
+          <div class="sec pad">
+              <div class="sec-head"><span class="sec-title">军师为你发现</span><span class="sec-more">全部 3 条 <i class="ic" data-ic="arrow" style="width:13px;height:13px"></i></span></div>
+              <div class="insight" data-ask="战略体检">
+                <div class="ins-ic opp"><i class="ic" data-ic="target"></i></div>
+                <div class="ins-body">
+                  <span class="ins-tag opp">智库 · 推荐产出</span>
+                  <div class="ins-ttl">建议先出一份战略诊断报告</div>
+                  <div class="ins-desc">军师可基于你的业务现状，直接产出诊断 + 行动清单。</div>
+                  <span class="ins-act">让智库产出 <i class="ic" data-ic="arrow"></i></span>
+                </div>
+              </div>
+              <div class="insight" data-ask="增长方案">
+                <div class="ins-ic opp"><i class="ic" data-ic="trend"></i></div>
+                <div class="ins-body">
+                  <span class="ins-tag opp">机会 · 增长</span>
+                  <div class="ins-ttl">高价值客群尚未被单独运营</div>
+                  <div class="ins-desc">腰部客群复购集中，具备做会员 / 订阅制的基础。</div>
+                  <span class="ins-act">生成增长方案 <i class="ic" data-ic="arrow"></i></span>
+                </div>
+              </div>
+              <div class="insight" data-ask="融资准备">
+                <div class="ins-ic todo"><i class="ic" data-ic="shield"></i></div>
+                <div class="ins-body">
+                  <span class="ins-tag todo">待办 · 股权</span>
+                  <div class="ins-ttl">期权池预留可能偏紧</div>
+                  <div class="ins-desc">结合你的融资计划，建议尽早梳理股权与期权结构。</div>
+                  <span class="ins-act">让军师拆解 <i class="ic" data-ic="arrow"></i></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="sec pad vA" style="margin-bottom:8px">
+              <div class="sec-head"><span class="sec-title">智库 · 赠送顾问</span><span class="sec-more" onclick="go('kb')">全部 8 位 <i class="ic" data-ic="arrow" style="width:13px;height:13px"></i></span></div>
+              <div class="tools">
+                <div class="tool" data-agent="strat"><div class="tool-ic"><i class="ic" data-ic="target"></i></div><h4>战略诊断官</h4><p>产出诊断报告</p></div>
+                <div class="tool" data-agent="growth"><div class="tool-ic"><i class="ic" data-ic="trend"></i></div><h4>增长操盘手</h4><p>产出增长方案</p></div>
+                <div class="tool" data-agent="fund"><div class="tool-ic"><i class="ic" data-ic="doc"></i></div><h4>融资参谋</h4><p>产出商业计划书</p></div>
+                <div class="tool" data-agent="brand"><div class="tool-ic"><i class="ic" data-ic="image"></i></div><h4>品牌营销官</h4><p>产出营销内容</p></div>
+              </div>
+            </div>
+
+        </div>
+      </section>
+
+      <!-- ========== 智库：你的 AI 智囊团（输出导向） ========== -->
+      <section class="app-screen" data-screen="kb" data-screen-label="智库">
+        <div class="screen-scroll">
+          <div class="agents-hero">
+            <div class="ky">Think Tank · 入驻赠送</div>
+            <h1>你的 AI 智囊团</h1>
+            <p>入驻即赠 8 位商业顾问，开口即出成果——无需你准备材料，点一下就有产出。</p>
+          </div>
+
+          <div class="pad">
+            <div class="zk-team">
+              <div class="zt-h"><span class="t">智囊团已就位</span><span class="tag"><i class="ic" data-ic="crown"></i> 入驻赠送</span></div>
+              <div class="zt-stats">
+                <div><div class="v">8</div><div class="l">在岗顾问</div></div>
+                <div><div class="v">12</div><div class="l">本月已产出</div></div>
+                <div><div class="v">3</div><div class="l">可编排工作流</div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="agents-grid">
+            <div class="gh">内置顾问 · 点一下就出成果</div>
+            <div class="agrid">
+              <div class="acard" data-agent="strat"><span class="gift">赠送</span><div class="ai"><i class="ic" data-ic="target"></i></div><h4>战略诊断官</h4><p>定位 · 增长卡点 · SWOT</p><div class="meta">产出 · 战略诊断报告</div></div>
+              <div class="acard" data-agent="growth"><span class="gift">赠送</span><div class="ai"><i class="ic" data-ic="trend"></i></div><h4>增长操盘手</h4><p>获客 · 转化 · 复购 · 定价</p><div class="meta">产出 · 增长方案</div></div>
+              <div class="acard" data-agent="intel"><span class="gift">赠送</span><div class="ai"><i class="ic" data-ic="chart"></i></div><h4>竞争情报官</h4><p>对手 · 赛道 · 机会窗口</p><div class="meta">产出 · 竞品洞察</div></div>
+              <div class="acard" data-agent="fund"><span class="gift">赠送</span><div class="ai"><i class="ic" data-ic="doc"></i></div><h4>融资参谋</h4><p>BP · 估值逻辑 · 投资人问答</p><div class="meta">产出 · 商业计划书</div></div>
+              <div class="acard" data-agent="model"><span class="gift">赠送</span><div class="ai"><i class="ic" data-ic="layers"></i></div><h4>商业模式设计师</h4><p>画布 · 盈利模型 · 定价结构</p><div class="meta">产出 · 商业模式画布</div></div>
+              <div class="acard" data-agent="org"><span class="gift">赠送</span><div class="ai"><i class="ic" data-ic="user"></i></div><h4>组织人效顾问</h4><p>架构 · 股权 · 激励 · 人效</p><div class="meta">产出 · 组织优化建议</div></div>
+              <div class="acard" data-agent="brand"><span class="gift">赠送</span><div class="ai"><i class="ic" data-ic="image"></i></div><h4>品牌营销官</h4><p>海报 · 短视频 · 文案</p><div class="meta">产出 · 营销内容</div></div>
+              <div class="acard" data-agent="ops"><span class="gift">赠送</span><div class="ai"><i class="ic" data-ic="clock"></i></div><h4>经营参谋</h4><p>经营测算 · 预算 · 复盘</p><div class="meta">产出 · 经营分析</div></div>
+            </div>
+          </div>
+
+          <div class="pad" style="margin-top:18px;margin-bottom:8px">
+            <div class="zk-opt" onclick="go('me')">
+              <span class="zo-ic"><i class="ic" data-ic="attach"></i></span>
+              <div class="zo-b"><div class="zo-t">想让产出更贴合你？</div><div class="zo-s">可选补充背景资料，顾问会更懂你的业务 · 非必填</div></div>
+              <span class="zo-go">可选补充</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 会话列表（对话 Tab 落地页） ========== -->
+      <section class="app-screen" data-screen="sessions" data-screen-label="对话">
+        <div class="screen-scroll">
+          <div class="sess-hero">
+            <div class="h-l"><div class="ky">Conversations</div><h1>对话</h1></div>
+            <div class="sess-new" id="sess-new-btn"><i class="ic" data-ic="chat"></i> 新对话</div>
+          </div>
+          <div style="height:16px"></div>
+          <div class="agent-strip" id="agent-strip"></div>
+          <div class="sess-section">
+            <div class="sl">最近会话</div>
+            <div class="sess-empty" id="sess-empty" style="display:none">
+              <div class="e-ic"><i class="ic" data-ic="chat"></i></div>
+              <div class="et">还没有会话</div>
+              <div class="es">点上方任一顾问开始——每位顾问的对话各自独立、可随时回溯。<br><span id="sess-new-empty" style="color:var(--accent);font-weight:500;cursor:pointer">＋ 发起新对话</span></div>
+            </div>
+            <div class="sess-list" id="sess-list"></div>
+          </div>
+          <div style="height:20px"></div>
+        </div>
+      </section>
+
+      <!-- ========== 对话详情（顾问隔离 · 可回溯） ========== -->
+      <section class="app-screen chat" data-screen="chat" data-screen-label="对话详情">
+        <div class="chat-head">
+          <div class="back" id="chat-hist" title="历史会话"><i class="ic" data-ic="grid"></i></div>
+          <div class="ttl"><span id="chat-agent-name">军师</span><small class="role" id="chat-agent-role">· 通用商业军师</small></div>
+          <div class="chat-new" id="chat-new" title="新对话"><i class="ic" data-ic="spark"></i></div>
+          <div class="chat-av" id="chat-agent-av"><i class="ic" data-ic="spark"></i></div>
+        </div>
+        <div class="mem-bar">
+          <i class="ic" data-ic="layers"></i>
+          <span class="mt" id="chat-mem-text">已了解你的企业档案与历史会话</span>
+          <span class="mlearn" id="chat-mem-learn"><span class="dot"></span>持续学习中</span>
+        </div>
+        <div class="chat-log" id="chat-log"></div>
+        <div class="composer">
+          <div class="box">
+            <span class="ico"><i class="ic" data-ic="attach"></i></span>
+            <input id="chat-input" placeholder="向顾问提问…">
+            <span class="ico"><i class="ic" data-ic="mic"></i></span>
+          </div>
+          <div class="send" id="chat-send"><i class="ic" data-ic="send"></i></div>
+        </div>
+      </section>
+
+      <!-- ========== 智能体 · 训练你的专属智能体 ========== -->
+      <section class="app-screen" data-screen="agents" data-screen-label="智能体">
+        <div class="screen-scroll">
+          <div class="agents-hero">
+            <div class="ky">Agent Studio · 出活</div>
+            <h1>智能体工坊</h1>
+            <p>智库帮你「出谋」，工坊帮你「出活」——把战略落成 IP、宣传片、海报、短视频与文案，并训练只懂你的专属智能体。</p>
+          </div>
+
+          <div class="agents-grid">
+            <div class="gh">创作智能体 · 生成品牌资产</div>
+            <div class="agrid">
+              <div class="acard" data-agent="ip"><span class="gift">招牌</span><div class="ai"><i class="ic" data-ic="crown"></i></div><h4>企业 IP 打造官</h4><p>创始人 / 企业 IP 定位与内容支柱</p><div class="meta">产出 · IP 打造方案</div></div>
+              <div class="acard" data-agent="promo"><span class="gift">招牌</span><div class="ai"><i class="ic" data-ic="video"></i></div><h4>企业宣传片导演</h4><p>叙事主线 · 分镜脚本 · 制作清单</p><div class="meta">产出 · 宣传片脚本</div></div>
+              <div class="acard" data-agent="poster"><div class="ai"><i class="ic" data-ic="image"></i></div><h4>海报设计师</h4><p>主视觉 · 文案 · 多规格物料</p><div class="meta">产出 · 海报方案</div></div>
+              <div class="acard" data-agent="shortvideo"><div class="ai"><i class="ic" data-ic="video"></i></div><h4>短视频策划</h4><p>选题钩子 · 脚本 · 拍摄提示</p><div class="meta">产出 · 短视频脚本</div></div>
+              <div class="acard" data-agent="copy"><div class="ai"><i class="ic" data-ic="pen"></i></div><h4>商业文案官</h4><p>卖点提炼 · 多版文案 · 分场景</p><div class="meta">产出 · 营销文案</div></div>
+              <div class="acard" data-agent="brand"><div class="ai"><i class="ic" data-ic="spark"></i></div><h4>品牌营销官</h4><p>把战略翻译成整套对外内容</p><div class="meta">产出 · 营销内容</div></div>
+            </div>
+          </div>
+
+          <div class="agents-grid" style="padding-top:24px">
+            <div class="gh">训练专属智能体 · 越用越懂你</div>
+            <div class="train-card">
+              <div class="tc-top">
+                <span class="tc-ic"><i class="ic" data-ic="pen"></i></span>
+                <div class="tc-b"><div class="tc-n">品牌文案官</div><div class="tc-d">学习你的语气与调性，产出风格统一的对外文案。</div></div>
+              </div>
+              <div class="tc-foot"><span class="tc-btn" data-train="品牌文案官"><i class="ic" data-ic="spark"></i> 去训练</span><span class="tc-tag">约 3 分钟 · 从历史文案学习</span></div>
+            </div>
+            <div class="train-card">
+              <div class="tc-top">
+                <span class="tc-ic"><i class="ic" data-ic="chart"></i></span>
+                <div class="tc-b"><div class="tc-n">赛道研究员</div><div class="tc-d">持续追踪你所在行业的动态、政策与对手变化。</div></div>
+              </div>
+              <div class="tc-foot"><span class="tc-btn" data-train="赛道研究员"><i class="ic" data-ic="spark"></i> 去训练</span><span class="tc-tag">设定赛道关键词即可</span></div>
+            </div>
+            <div class="train-card">
+              <div class="tc-top">
+                <span class="tc-ic"><i class="ic" data-ic="user"></i></span>
+                <div class="tc-b"><div class="tc-n">客户洞察官</div><div class="tc-d">读懂你的客户反馈与画像，给出更贴合的增长建议。</div></div>
+              </div>
+              <div class="tc-foot"><span class="tc-btn" data-train="客户洞察官"><i class="ic" data-ic="spark"></i> 去训练</span><span class="tc-tag">可对接客户对话/评价</span></div>
+            </div>
+          </div>
+
+          <div class="agents-grid" style="padding-top:24px">
+            <div class="gh">我训练的</div>
+            <div class="train-card run">
+              <div class="tc-top">
+                <span class="tc-ic"><i class="ic" data-ic="agent"></i></span>
+                <div class="tc-b"><div class="tc-n">云栖 · 招商话术官</div><div class="tc-d">正在学习你上传的 6 段成交录音…</div></div>
+              </div>
+              <div class="tc-foot"><div class="tc-bar"><i style="width:72%"></i></div><span class="tc-pct">72%</span></div>
+            </div>
+            <div class="new-agent" data-train="自定义智能体">
+              <div class="na-ic"><i class="ic" data-ic="spark"></i></div>
+              <div class="na-t">从零训练一个智能体</div>
+              <div class="na-s">描述你想要的能力，军师帮你搭好并持续调教</div>
+            </div>
+          </div>
+
+          <div class="pad" style="margin-top:24px;margin-bottom:8px">
+            <div class="agents-flow">
+              <div class="fh"><i class="ic" data-ic="flow"></i><span class="t">出谋 + 出活 · 工作流</span><span class="tag">4 智能体</span></div>
+              <div class="fd">诊断 → 策略 → 文案 → 物料，智库与工坊接力为你从判断到落地。</div>
+              <div class="steps">
+                <div class="stp on"><div class="lk"></div><div class="nd"><i class="ic" data-ic="target"></i></div><div class="l">诊断</div></div>
+                <div class="stp"><div class="lk"></div><div class="nd"><i class="ic" data-ic="spark"></i></div><div class="l">策略</div></div>
+                <div class="stp"><div class="lk"></div><div class="nd"><i class="ic" data-ic="pen"></i></div><div class="l">文案</div></div>
+                <div class="stp"><div class="nd"><i class="ic" data-ic="image"></i></div><div class="l">物料</div></div>
+              </div>
+              <button class="run" data-ask="增长方案"><i class="ic" data-ic="bolt"></i> 启动这条工作流</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 我的 ========== -->
+      <section class="app-screen" data-screen="me" data-screen-label="我的">
+        <div class="screen-scroll" style="padding-bottom:104px">
+          <div class="me-hero">
+            <div class="me-top">
+              <div class="me-av">王</div>
+              <div class="me-id"><div class="nm">王建国</div><div class="co">云栖科技 · 创始人 / CEO</div></div>
+              <div class="me-vip"><i class="ic" data-ic="crown"></i> 决策版</div>
+            </div>
+            <div class="me-stats">
+              <div class="me-stat"><div class="v">68</div><div class="l">军师算力（次）</div></div>
+              <div class="me-stat"><div class="v">12</div><div class="l">已生成方案</div></div>
+              <div class="me-stat"><div class="v">3</div><div class="l">协作智能体</div></div>
+            </div>
+          </div>
+          <div class="me-list">
+            <div class="me-group">
+              <div class="me-row" id="me-color-row">
+                <div class="ri"><i class="ic" data-ic="spark"></i></div>
+                <div class="rl"><div class="t">我的本命色</div><div class="s">决定军师为你定制的界面基调</div></div>
+                <div class="rv"><span class="sw" id="me-color-sw"></span><span id="me-color-name">财金</span><i class="ic" data-ic="arrow"></i></div>
+              </div>
+              <div class="me-row" onclick="go('kb')"><div class="ri"><i class="ic" data-ic="layers"></i></div><div class="rl"><div class="t">我的智库</div><div class="s">8 位赠送顾问 · 本月已产出 12 份</div></div><div class="rv"><i class="ic" data-ic="arrow"></i></div></div>
+              <div class="me-row" id="me-lib-row"><div class="ri"><i class="ic" data-ic="doc"></i></div><div class="rl"><div class="t">我的方案库</div><div class="s" id="me-lib-count">0 份成果</div></div><div class="rv"><i class="ic" data-ic="arrow"></i></div></div>
+            </div>
+            <div class="me-group">
+              <div class="me-row"><div class="ri"><i class="ic" data-ic="crown"></i></div><div class="rl"><div class="t">会员与算力</div><div class="s">决策版 · 剩余 68 次</div></div><div class="rv">升级 <i class="ic" data-ic="arrow"></i></div></div>
+              <div class="me-row"><div class="ri"><i class="ic" data-ic="lock"></i></div><div class="rl"><div class="t">私有化部署 · 企业版</div><div class="s">接入内部系统 · 数据不出内网</div></div><div class="rv">了解 <i class="ic" data-ic="arrow"></i></div></div>
+              <div class="me-row"><div class="ri"><i class="ic" data-ic="shield"></i></div><div class="rl"><div class="t">数据与隐私</div><div class="s">企业级加密 · 仅你可见</div></div><div class="rv"><i class="ic" data-ic="arrow"></i></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== 方案库 ========== -->
+      <section class="app-screen" data-screen="library" data-screen-label="方案库">
+        <div class="screen-scroll">
+          <div class="lib-back" onclick="go('me')"><i class="ic" data-ic="arrow"></i> 我的</div>
+          <div class="lib-hero">
+            <div class="ky">My Deliverables</div>
+            <h1>方案库</h1>
+            <p>军师为你产出的成果都存放在这里，可随时调阅、继续深化或导出。</p>
+          </div>
+          <div class="lib-empty" id="lib-empty" style="display:none">
+            <div class="e-ic"><i class="ic" data-ic="layers"></i></div>
+            <div class="et">还没有保存的成果</div>
+            <div class="es">在对话里让顾问产出报告后，点「存入方案库」即可收藏到这里。</div>
+          </div>
+          <div class="lib-list" id="lib-list"></div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- ========== 持久底栏 ========== -->
+    <nav class="tabbar" id="tabbar">
+      <div class="tab on" data-go="home"><i class="ic" data-ic="home"></i><span>首页</span></div>
+      <div class="tab" data-go="kb"><i class="ic" data-ic="layers"></i><span>智库</span></div>
+      <div class="tab tab-center" data-go="sessions"><div class="tab-fab"><i class="ic" data-ic="chat"></i></div><span class="lbl">对话</span></div>
+      <div class="tab" data-go="agents"><i class="ic" data-ic="agent"></i><span>智能体</span></div>
+      <div class="tab" data-go="me"><i class="ic" data-ic="user"></i><span>我的</span></div>
+    </nav>
+
+    <!-- ========== 新建会话 · 选择顾问 ========== -->
+    <div class="sheet" id="agent-sheet">
+      <div class="sheet-card">
+        <div class="sheet-grab"></div>
+        <div class="sheet-h"><div class="t">向哪位顾问发起？</div><div class="s">每位顾问独立记忆、各自成长——选错也能随时换。</div></div>
+        <div class="sheet-list" id="sheet-list"></div>
+      </div>
+    </div>
+
+    <!-- ========== 本命色浮层（首登 & 设置共用） ========== -->
+    <div class="picker-overlay" id="picker">
+      <div class="pk-scroll">
+        <div class="pk-close" id="pk-close"><i class="ic" data-ic="arrow" style="transform:rotate(90deg)"></i></div>
+        <div class="pk-step on" id="pk-step-color">
+        <div class="ob-head" style="margin-top:6px">
+          <div class="ky">入局之前</div>
+          <h1 id="pk-headline">入局之前，择一本命色</h1>
+          <p>颜色即气场。选定后，军师将以此为你的专属基调，贯穿界面与每一次谋断。</p>
+        </div>
+        <div class="ob-hero" id="pk-hero">
+          <div class="wm" id="pk-wm">势</div>
+          <div class="top"><span class="seal" id="pk-seal">金</span><span class="idx" id="pk-idx">本命色 01 / 06</span></div>
+          <div class="name"><div class="cn" id="pk-cn">财 金</div><div class="en" id="pk-en">CAI JIN · FORTUNE</div></div>
+          <div class="verdict"><span class="lab">军师批语</span><span id="pk-verdict">聚财为势，谋定而动。</span></div>
+        </div>
+        <div class="ob-discs" id="pk-discs"></div>
+        <div class="ob-discnames" id="pk-discnames"></div>
+        <div class="ob-foot">
+          <button class="ob-confirm" id="pk-confirm"><span id="pk-cta">下一步 · 完善档案</span> <i class="ic" data-ic="arrow"></i></button>
+          <span class="ob-skip" id="pk-skip">先随军师默认设置</span>
+        </div>
+        </div>
+
+        <div class="pk-step" id="pk-step-profile">
+          <div class="ob-head" style="margin-top:6px">
+            <div class="ky">30 秒建档</div>
+            <h1>让军师更懂你的生意</h1>
+            <p>3 个问题即可，军师据此让产出更贴合你——也可稍后在「我的」补充。</p>
+          </div>
+          <div class="pf-q" data-k="industry">
+            <div class="ql"><span class="no">1</span>你的行业？</div>
+            <div class="pf-opts"><span class="pf-opt on">SaaS / 软件</span><span class="pf-opt">消费 / 零售</span><span class="pf-opt">制造</span><span class="pf-opt">服务 / 咨询</span><span class="pf-opt">其他</span></div>
+          </div>
+          <div class="pf-q" data-k="stage">
+            <div class="ql"><span class="no">2</span>当前阶段？</div>
+            <div class="pf-opts"><span class="pf-opt">起步 / 验证</span><span class="pf-opt on">A 轮前后</span><span class="pf-opt">规模化</span><span class="pf-opt">稳定盈利</span></div>
+          </div>
+          <div class="pf-q" data-k="pain">
+            <div class="ql"><span class="no">3</span>最头疼的事？</div>
+            <div class="pf-opts"><span class="pf-opt on">增长乏力</span><span class="pf-opt">现金流</span><span class="pf-opt">融资</span><span class="pf-opt">组织 / 团队</span><span class="pf-opt">定位 / 竞争</span></div>
+          </div>
+          <div class="ob-foot">
+            <button class="ob-confirm" id="pf-enter">进入军师 <i class="ic" data-ic="arrow"></i></button>
+            <span class="ob-skip" id="pf-skip">跳过，稍后再填</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div></div>
+</div>
+
+<script src="scripts/icons.js"></script>
+<script src="scripts/app.js"></script>
+<script>
+  // 对话内的话题快捷入口
+  document.addEventListener('click', e=>{
+    const a=e.target.closest('[data-jump]'); if(a){ sendInSession(a.dataset.jump); return; }
+    const t=e.target.closest('[data-train]'); if(t){ toast('已唤起训练向导：'+t.dataset.train+' · 学习中…'); }
+  });
+</script>
+</body>
+</html>

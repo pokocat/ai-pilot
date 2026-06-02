@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>军师 · 首屏 · 献策</title>
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/frame.css">
+<link rel="stylesheet" href="styles/hero.css">
+<style>
+  /* 大气金调，统一首屏气质 */
+  :root{ --accent:#A07D2C; --accent-deep:#6E5621; --accent-soft:#F2EAD6; --accent-ink:#43340F; --accent-bright:#D8B25A; --accent-glow:rgba(200,165,90,.30); }
+  body{ background:var(--bg); padding:54px 40px 80px; }
+  .head{ max-width:1200px; margin:0 auto 44px; }
+  .head .kick{ font:500 12px/1 var(--mono); letter-spacing:.28em; text-transform:uppercase; color:#A07D2C; margin-bottom:16px; }
+  .head h1{ font:600 32px/1.16 var(--serif); }
+  .head h1 .dim{ color:var(--ink-3); }
+  .head p{ margin-top:13px; max-width:720px; color:var(--ink-2); font-size:15px; line-height:1.7; }
+  .rail{ display:flex; gap:72px; justify-content:center; flex-wrap:wrap; align-items:flex-start; }
+  .slot{ width:390px; }
+  .slot-cap{ display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
+  .slot-cap .no{ font:600 13px/1 var(--mono); color:#A07D2C; }
+  .slot-cap .nm{ font:600 18px/1.2 var(--serif); }
+  .slot-desc{ font-size:13px; color:var(--ink-3); margin-bottom:18px; line-height:1.6; }
+</style>
+</head>
+<body>
+
+<header class="head">
+  <div class="kick">军师 · 首屏 — 献策 × 对话</div>
+  <h1>一句话献策 + 大气背景 <span class="dim">×</span> AI 对话入口</h1>
+  <p>把 C 的「一句话献策」刊头气场与 A 的对话内核合到同一屏：顶部是军师的当日献策（衬线大字 + 大气背景），底部是玻璃质感的对话入口——气场负责信任，对话负责"AI 军师"。左为影像版（拖入你的 AI 背景图即生效），右为水墨大气版（纯生成，无需图片）。</p>
+</header>
+
+<div class="rail">
+
+  <!-- ============ 影像版 ============ -->
+  <div class="slot">
+    <div class="slot-cap"><span class="no">A</span><span class="nm">影像版 · 放你的 AI 背景图</span></div>
+    <div class="slot-desc">拖一张 AI 生成的大气图（城市天际线 / 山河 / 抽象气韵）到屏内，文字与对话浮于其上。</div>
+    <div class="phone"><div class="screen">
+      <div class="hero">
+        <div class="hero-bg img">
+          <image-slot id="hero-shot" fit="cover" src="images/tower.jpeg" placeholder="拖入 AI 生成的大气背景图（建议竖构图 1080×2160）"></image-slot>
+        </div>
+        <div class="hero-scrim"></div>
+        <div class="hero-content">
+          <div class="hero-status"><span>9:41</span><span class="right">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+            <svg width="22" height="12" viewBox="0 0 22 12" fill="none"><rect x="1" y="1" width="17" height="10" rx="2.5" stroke="currentColor" stroke-width="1.2" opacity=".55"/><rect x="2.5" y="2.5" width="13" height="7" rx="1.2" fill="currentColor"/><rect x="19.5" y="4" width="1.5" height="4" rx=".7" fill="currentColor" opacity=".55"/></svg>
+          </span></div>
+          <div class="hero-top"><span class="hero-wm">军 师</span><span class="hero-issue">献策 NO.128 · 周三</span></div>
+          <div class="hero-say">
+            <div class="ky">今日献策 · Founder's Strategist</div>
+            <h1>先把自己<em>立于不败</em>，<br>再等对手露出破绽。</h1>
+            <div class="sign"><span class="d"></span> 军师 · 今日手记</div>
+          </div>
+          <div class="hero-ask">
+            <div class="top">
+              <div class="av"><i class="ic" data-ic="chat"></i></div>
+              <div><div class="nm">军师</div><div class="st"><span class="dot"></span> 在线 · 随时为你出谋</div></div>
+            </div>
+            <div class="q">今天，想破解哪一局？</div>
+            <div class="field">
+              <input placeholder="说说你的处境，或直接提问…">
+              <span class="ico"><i class="ic" data-ic="mic"></i></span>
+              <span class="send"><i class="ic" data-ic="send"></i></span>
+            </div>
+            <div class="chips">
+              <span class="chip"><i class="ic" data-ic="target"></i> 战略体检</span>
+              <span class="chip"><i class="ic" data-ic="trend"></i> 增长</span>
+              <span class="chip"><i class="ic" data-ic="shield"></i> 融资</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ============ 水墨大气版 ============ -->
+  <div class="slot">
+    <div class="slot-cap"><span class="no">B</span><span class="nm">水墨大气版 · 纯生成</span></div>
+    <div class="slot-desc">不依赖图片也成立：山峦、晨晖、薄雾由样式生成，先看构图与气质，之后可随时换成真图。</div>
+    <div class="phone"><div class="screen">
+      <div class="hero">
+        <div class="hero-bg ink">
+          <span class="moon"></span>
+          <span class="mist"></span>
+          <span class="ridge r1"></span>
+          <span class="ridge r2"></span>
+        </div>
+        <div class="hero-scrim"></div>
+        <div class="hero-content">
+          <div class="hero-status"><span>9:41</span><span class="right">
+            <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".4"/></svg>
+            <svg width="22" height="12" viewBox="0 0 22 12" fill="none"><rect x="1" y="1" width="17" height="10" rx="2.5" stroke="currentColor" stroke-width="1.2" opacity=".55"/><rect x="2.5" y="2.5" width="13" height="7" rx="1.2" fill="currentColor"/><rect x="19.5" y="4" width="1.5" height="4" rx=".7" fill="currentColor" opacity=".55"/></svg>
+          </span></div>
+          <div class="hero-top"><span class="hero-wm">军 师</span><span class="hero-issue">献策 NO.128 · 周三</span></div>
+          <div class="hero-say">
+            <div class="ky">今日献策 · Founder's Strategist</div>
+            <h1>先把自己<em>立于不败</em>，<br>再等对手露出破绽。</h1>
+            <div class="sign"><span class="d"></span> 军师 · 今日手记</div>
+          </div>
+          <div class="hero-ask">
+            <div class="top">
+              <div class="av"><i class="ic" data-ic="chat"></i></div>
+              <div><div class="nm">军师</div><div class="st"><span class="dot"></span> 在线 · 随时为你出谋</div></div>
+            </div>
+            <div class="q">今天，想破解哪一局？</div>
+            <div class="field">
+              <input placeholder="说说你的处境，或直接提问…">
+              <span class="ico"><i class="ic" data-ic="mic"></i></span>
+              <span class="send"><i class="ic" data-ic="send"></i></span>
+            </div>
+            <div class="chips">
+              <span class="chip"><i class="ic" data-ic="target"></i> 战略体检</span>
+              <span class="chip"><i class="ic" data-ic="trend"></i> 增长</span>
+              <span class="chip"><i class="ic" data-ic="shield"></i> 融资</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+</div>
+
+<script src="image-slot.js"></script>
+<script src="scripts/icons.js"></script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+/* ============ 方案A · 对话优先 ============ */
+.vA .pad{ padding:0 22px; }
+.vA .scr-top{ padding:6px 22px 0; }
+
+/* 品牌行 + 问候 */
+.vA .brandrow{ display:flex; align-items:center; justify-content:space-between; }
+.vA .brand{ display:flex; align-items:center; gap:9px; }
+.vA .brand-mk{
+  width:30px; height:30px; border-radius:8px; background:var(--ink); color:var(--paper);
+  display:flex; align-items:center; justify-content:center; font:600 17px/1 var(--serif);
+}
+.vA .brand-nm{ font:600 17px/1 var(--serif); letter-spacing:.06em; }
+.vA .brand-sub{ font:400 10px/1 var(--mono); letter-spacing:.18em; color:var(--ink-3); margin-top:3px; }
+.vA .bell{ width:38px; height:38px; border-radius:50%; background:var(--surface); border:1px solid var(--line);
+  display:flex; align-items:center; justify-content:center; color:var(--ink-2); }
+.vA .bell .ic{ width:18px; height:18px; }
+.vA .greet{ margin-top:22px; }
+.vA .greet h1{ font:600 25px/1.3 var(--serif); letter-spacing:.01em; }
+.vA .greet p{ color:var(--ink-2); font-size:13.5px; margin-top:6px; line-height:1.6; }
+
+/* 今日一句话献策（每日随机） */
+.vA .say-strip{ margin-top:20px; padding-top:16px; border-top:1px solid var(--line); }
+.vA .say-k{ font:500 10.5px/1 var(--mono); letter-spacing:.18em; color:var(--accent); margin-bottom:11px; }
+.vA .say-line{ font:500 18px/1.5 var(--serif); color:var(--ink); text-wrap:balance; }
+.vA .say-line em{ font-style:normal; color:var(--accent); }
+
+/* 对话主入口卡 */
+.vA .ask{
+  margin:18px 22px 0; background:var(--ink); color:#EDEBE4; border-radius:var(--r-xl);
+  padding:22px 20px 18px; position:relative; overflow:hidden; box-shadow:var(--shadow-md);
+}
+.vA .ask::after{ content:""; position:absolute; right:-50px; top:-50px; width:160px; height:160px;
+  border-radius:50%; background:radial-gradient(circle, var(--accent-glow), transparent 70%); }
+.vA .ask-top{ display:flex; align-items:center; gap:11px; position:relative; }
+.vA .ask-av{ width:40px; height:40px; border-radius:11px; background:var(--accent);
+  display:flex; align-items:center; justify-content:center; color:#fff; }
+.vA .ask-av .ic{ width:22px; height:22px; }
+.vA .ask-id .nm{ font:600 15px/1 var(--serif); letter-spacing:.02em; }
+.vA .ask-id .st{ font-size:11px; color:#9DB4A8; margin-top:5px; display:flex; align-items:center; gap:5px; }
+.vA .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent-bright); display:inline-block; }
+.vA .ask-q{ font:500 18px/1.5 var(--serif); margin:16px 0 14px; position:relative; }
+.vA .ask-field{
+  display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.14); border-radius:14px; padding:11px 12px 11px 15px;
+}
+.vA .ask-field input{ flex:1; background:none; border:0; outline:0; color:#EDEBE4; font-size:13.5px; font-family:var(--sans); }
+.vA .ask-field input::placeholder{ color:#8A958F; }
+.vA .ask-ico{ color:#9DB4A8; display:flex; }
+.vA .ask-ico .ic{ width:19px; height:19px; }
+.vA .ask-send{ width:34px; height:34px; border-radius:10px; background:var(--accent); color:#fff;
+  display:flex; align-items:center; justify-content:center; }
+.vA .ask-send .ic{ width:18px; height:18px; }
+.vA .chips{ display:flex; gap:8px; margin-top:14px; flex-wrap:wrap; position:relative; }
+.vA .chip{ height:30px; padding:0 13px; border-radius:999px; background:rgba(255,255,255,.09);
+  border:1px solid rgba(255,255,255,.13); color:#D8DAD2; font-size:12px; display:flex; align-items:center; gap:6px; }
+.vA .chip .ic{ width:14px; height:14px; color:var(--accent-bright); }
+
+/* 军师发现 — 主动诊断卡 */
+.vA .sec{ margin-top:30px; }
+.vA .insight{ display:flex; gap:13px; background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--r-md); padding:15px 16px; box-shadow:var(--shadow-sm); }
+.vA .insight + .insight{ margin-top:11px; }
+.vA .ins-ic{ width:38px; height:38px; flex:0 0 38px; border-radius:11px; display:flex; align-items:center; justify-content:center; }
+.vA .ins-ic .ic{ width:20px; height:20px; }
+.vA .ins-ic.risk{ background:#F3E7E3; color:var(--danger); }
+.vA .ins-ic.opp{ background:var(--accent-soft); color:var(--accent); }
+.vA .ins-ic.todo{ background:#F2ECDD; color:var(--warn); }
+.vA .ins-body{ flex:1; min-width:0; }
+.vA .ins-tag{ font:500 10px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; }
+.vA .ins-tag.risk{ color:var(--danger); } .vA .ins-tag.opp{ color:var(--accent); } .vA .ins-tag.todo{ color:var(--warn); }
+.vA .ins-ttl{ font-size:14.5px; font-weight:500; margin:6px 0 4px; }
+.vA .ins-desc{ font-size:12.5px; color:var(--ink-2); line-height:1.55; }
+.vA .ins-act{ margin-top:10px; display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:500; color:var(--accent); }
+.vA .ins-act .ic{ width:14px; height:14px; }
+
+/* 工具矩阵 */
+.vA .tools{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.vA .tool{ background:var(--surface); border:1px solid var(--line); border-radius:var(--r-md); padding:16px; box-shadow:var(--shadow-sm); }
+.vA .tool-ic{ width:40px; height:40px; border-radius:11px; background:var(--surface-2); color:var(--ink);
+  display:flex; align-items:center; justify-content:center; margin-bottom:13px; }
+.vA .tool-ic .ic{ width:21px; height:21px; }
+.vA .tool h4{ font-size:14.5px; font-weight:500; }
+.vA .tool p{ font-size:11.5px; color:var(--ink-3); margin-top:5px; }

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>军师 · 首页 V2 配色优化</title>
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/frame.css">
+<link rel="stylesheet" href="styles/homeA.css">
+<link rel="stylesheet" href="styles/hero.css">
+<link rel="stylesheet" href="styles/herov2.css">
+<style>
+  :root{ --accent:#A07D2C; --accent-deep:#6E5621; --accent-soft:#F2EAD6; --accent-ink:#43340F; --accent-bright:#D8B25A; --accent-glow:rgba(200,165,90,.30); }
+  body{ background:var(--bg); padding:54px 40px 80px; }
+  .head{ max-width:1200px; margin:0 auto 44px; }
+  .head .kick{ font:500 12px/1 var(--mono); letter-spacing:.28em; text-transform:uppercase; color:#A07D2C; margin-bottom:16px; }
+  .head h1{ font:600 32px/1.16 var(--serif); }
+  .head h1 .dim{ color:var(--ink-3); }
+  .head p{ margin-top:13px; max-width:720px; color:var(--ink-2); font-size:15px; line-height:1.7; }
+  .rail{ display:flex; gap:72px; justify-content:center; flex-wrap:wrap; align-items:flex-start; }
+  .slot{ width:390px; }
+  .slot-cap{ display:flex; align-items:baseline; gap:10px; margin-bottom:8px; }
+  .slot-cap .no{ font:600 13px/1 var(--mono); color:#A07D2C; }
+  .slot-cap .nm{ font:600 18px/1.2 var(--serif); }
+  .slot-desc{ font-size:13px; color:var(--ink-3); margin-bottom:18px; line-height:1.6; }
+</style>
+</head>
+<body>
+
+<header class="head">
+  <div class="kick">军师 · 首页 V2 — 配色优化</div>
+  <h1>降低黑白反差 <span class="dim">／ 单条献策（去轮播）</span></h1>
+  <p>针对"黑白反差太硬"做两版优化：A 把整屏统一成暖白晨雾，反差最小、最贴近高端机构/投行；B 保留深色气场，但把死黑换成暖墨绿，并加一段向浅色资讯区的过渡，衔接更柔。两版都改为每日一条献策。</p>
+</header>
+
+<div class="rail">
+
+  <!-- ============ A 晨雾浅色 ============ -->
+  <div class="slot">
+    <div class="slot-cap"><span class="no">A</span><span class="nm">晨雾浅色版</span></div>
+    <div class="slot-desc">整屏统一暖白，山雾压淡、对话卡为浅色描边卡——反差最小，安静、克制、机构感最强。</div>
+    <div class="phone"><div class="screen v2a">
+      <div class="statusbar"><span>9:41</span><span class="right">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".3"/></svg>
+        <svg width="22" height="12" viewBox="0 0 22 12" fill="none"><rect x="1" y="1" width="17" height="10" rx="2.5" stroke="currentColor" stroke-width="1.2" opacity=".5"/><rect x="2.5" y="2.5" width="12" height="7" rx="1.2" fill="currentColor"/><rect x="19.5" y="4" width="1.5" height="4" rx=".7" fill="currentColor" opacity=".5"/></svg>
+      </span></div>
+      <div class="screen-scroll" style="padding-bottom:0">
+        <div class="hero-home-v2">
+          <div class="hero-bg"><span class="moon"></span><span class="mist"></span><span class="ridge r1"></span><span class="ridge r2"></span></div>
+          <div class="hero-scrim"></div>
+          <div class="hero-content">
+            <div class="hero-top"><span class="hero-wm">军 师</span>
+              <span style="display:flex;align-items:center;gap:12px"><span class="hero-issue">6月1日 · 周三</span><span class="bell"><i class="ic" data-ic="spark"></i></span></span></div>
+            <div class="hero-say">
+              <div class="ky">今日献策 · Founder's Strategist</div>
+              <div class="say-meta"><b>6月1日</b> · 今日仅此一条</div>
+              <h1>先把自己<em>立于不败</em>，<br>再等对手露出破绽。</h1>
+            </div>
+            <div class="hero-peek"><span class="pdot"></span> 军师今日为你发现 3 件要务 <span class="pmore"><i class="ic" data-ic="arrow"></i></span></div>
+            <div class="hero-ask">
+              <div class="top"><div class="av"><i class="ic" data-ic="chat"></i></div>
+                <div><div class="nm">军师</div><div class="st"><span class="dot"></span> 在线 · 随时为你出谋</div></div></div>
+              <div class="q">今天，想破解哪一局？</div>
+              <div class="field"><input placeholder="说说你的处境，或直接提问…"><span class="ico"><i class="ic" data-ic="mic"></i></span><span class="send"><i class="ic" data-ic="send"></i></span></div>
+              <div class="chips"><span class="chip"><i class="ic" data-ic="target"></i> 战略体检</span><span class="chip"><i class="ic" data-ic="trend"></i> 增长</span><span class="chip"><i class="ic" data-ic="shield"></i> 融资</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-sheet vA">
+          <div class="grab"></div>
+          <div class="sec pad">
+            <div class="sec-head"><span class="sec-title">军师为你发现</span><span class="sec-more">全部 3 条 <i class="ic" data-ic="arrow" style="width:13px;height:13px"></i></span></div>
+            <div class="insight"><div class="ins-ic opp"><i class="ic" data-ic="target"></i></div><div class="ins-body"><span class="ins-tag opp">智库 · 推荐产出</span><div class="ins-ttl">建议先出一份战略诊断报告</div><div class="ins-desc">军师可基于你的业务现状，直接产出诊断 + 行动清单。</div></div></div>
+          </div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <div class="tab on"><i class="ic" data-ic="home"></i><span>首页</span></div>
+        <div class="tab"><i class="ic" data-ic="layers"></i><span>智库</span></div>
+        <div class="tab tab-center"><div class="tab-fab"><i class="ic" data-ic="chat"></i></div></div>
+        <div class="tab"><i class="ic" data-ic="agent"></i><span>智能体</span></div>
+        <div class="tab"><i class="ic" data-ic="user"></i><span>我的</span></div>
+      </nav>
+    </div></div>
+  </div>
+
+  <!-- ============ B 暖墨缓和 ============ -->
+  <div class="slot">
+    <div class="slot-cap"><span class="no">B</span><span class="nm">暖墨缓和版</span></div>
+    <div class="slot-desc">保留深色气场，但把死黑换成暖墨绿，底部向浅色资讯区做渐变过渡——反差柔和、仍大气。</div>
+    <div class="phone"><div class="screen v2b">
+      <div class="statusbar on-dark" style="color:#fff"><span>9:41</span><span class="right">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".3"/></svg>
+        <svg width="22" height="12" viewBox="0 0 22 12" fill="none"><rect x="1" y="1" width="17" height="10" rx="2.5" stroke="currentColor" stroke-width="1.2" opacity=".5"/><rect x="2.5" y="2.5" width="12" height="7" rx="1.2" fill="currentColor"/><rect x="19.5" y="4" width="1.5" height="4" rx=".7" fill="currentColor" opacity=".5"/></svg>
+      </span></div>
+      <div class="screen-scroll" style="padding-bottom:0">
+        <div class="hero-home-v2">
+          <div class="hero-bg"><span class="moon"></span><span class="mist"></span><span class="ridge r1"></span><span class="ridge r2"></span></div>
+          <div class="hero-scrim"></div>
+          <div class="hero-content">
+            <div class="hero-top"><span class="hero-wm">军 师</span>
+              <span style="display:flex;align-items:center;gap:12px"><span class="hero-issue">6月1日 · 周三</span><span class="bell"><i class="ic" data-ic="spark"></i></span></span></div>
+            <div class="hero-say">
+              <div class="ky">今日献策 · Founder's Strategist</div>
+              <div class="say-meta"><b>6月1日</b> · 今日仅此一条</div>
+              <h1>先把自己<em>立于不败</em>，<br>再等对手露出破绽。</h1>
+            </div>
+            <div class="hero-peek"><span class="pdot"></span> 军师今日为你发现 3 件要务 <span class="pmore"><i class="ic" data-ic="arrow"></i></span></div>
+            <div class="hero-ask">
+              <div class="top"><div class="av"><i class="ic" data-ic="chat"></i></div>
+                <div><div class="nm">军师</div><div class="st"><span class="dot"></span> 在线 · 随时为你出谋</div></div></div>
+              <div class="q">今天，想破解哪一局？</div>
+              <div class="field"><input placeholder="说说你的处境，或直接提问…"><span class="ico"><i class="ic" data-ic="mic"></i></span><span class="send"><i class="ic" data-ic="send"></i></span></div>
+              <div class="chips"><span class="chip"><i class="ic" data-ic="target"></i> 战略体检</span><span class="chip"><i class="ic" data-ic="trend"></i> 增长</span><span class="chip"><i class="ic" data-ic="shield"></i> 融资</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-sheet vA">
+          <div class="grab"></div>
+          <div class="sec pad">
+            <div class="sec-head"><span class="sec-title">军师为你发现</span><span class="sec-more">全部 3 条 <i class="ic" data-ic="arrow" style="width:13px;height:13px"></i></span></div>
+            <div class="insight"><div class="ins-ic opp"><i class="ic" data-ic="target"></i></div><div class="ins-body"><span class="ins-tag opp">智库 · 推荐产出</span><div class="ins-ttl">建议先出一份战略诊断报告</div><div class="ins-desc">军师可基于你的业务现状，直接产出诊断 + 行动清单。</div></div></div>
+          </div>
+        </div>
+      </div>
+      <nav class="tabbar">
+        <div class="tab on"><i class="ic" data-ic="home"></i><span>首页</span></div>
+        <div class="tab"><i class="ic" data-ic="layers"></i><span>智库</span></div>
+        <div class="tab tab-center"><div class="tab-fab"><i class="ic" data-ic="chat"></i></div></div>
+        <div class="tab"><i class="ic" data-ic="agent"></i><span>智能体</span></div>
+        <div class="tab"><i class="ic" data-ic="user"></i><span>我的</span></div>
+      </nav>
+    </div></div>
+  </div>
+
+</div>
+
+<script src="scripts/icons.js"></script>
+</body>
+</html>

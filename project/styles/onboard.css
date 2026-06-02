@@ -1,0 +1,69 @@
+/* ============================================================
+   入场仪式 · 选择本命色
+   ============================================================ */
+.flow{ position:relative; width:100%; height:100%; overflow:hidden; }
+.stage-wrap{ position:absolute; inset:0; display:flex; width:200%; height:100%;
+  transition:transform .62s cubic-bezier(.7,.02,.2,1); }
+.flow[data-stage="home"] .stage-wrap{ transform:translateX(-50%); }
+.stage{ width:50%; height:100%; flex:0 0 50%; display:flex; flex-direction:column; position:relative; }
+
+/* —— 选色页 —— */
+.ob{ background:var(--paper); }
+.ob-scroll{ flex:1; display:flex; flex-direction:column; padding:4px 28px 26px; }
+.ob-brand{ display:flex; align-items:center; gap:9px; }
+.ob-brand .mk{ width:28px; height:28px; border-radius:8px; background:var(--ink); color:var(--paper);
+  display:flex; align-items:center; justify-content:center; font:600 15px/1 var(--serif); }
+.ob-brand .nm{ font:600 15px/1 var(--serif); letter-spacing:.14em; }
+
+.ob-head{ margin-top:30px; }
+.ob-head .ky{ font:500 11px/1 var(--mono); letter-spacing:.28em; text-transform:uppercase; color:var(--accent);
+  transition:color .5s; }
+.ob-head h1{ font:600 27px/1.32 var(--serif); margin-top:15px; letter-spacing:.01em; }
+.ob-head p{ font-size:13px; color:var(--ink-2); line-height:1.7; margin-top:11px; max-width:280px; }
+
+/* 本命色 主预览 */
+.ob-hero{ position:relative; margin-top:24px; height:236px; border-radius:var(--r-xl); overflow:hidden;
+  background:linear-gradient(150deg, var(--accent-deep), var(--accent));
+  display:flex; flex-direction:column; justify-content:space-between; padding:22px 24px;
+  box-shadow:var(--shadow-md); transition:background .55s; }
+.ob-hero::after{ content:""; position:absolute; right:-60px; top:-70px; width:220px; height:220px;
+  border-radius:50%; background:radial-gradient(circle, rgba(255,255,255,.22), transparent 68%); }
+.ob-hero .wm{ position:absolute; right:6px; bottom:-44px; font:600 200px/1 var(--serif);
+  color:rgba(255,255,255,.10); pointer-events:none; user-select:none; transition:.4s; }
+.ob-hero .top{ position:relative; display:flex; align-items:center; justify-content:space-between; }
+.ob-hero .seal{ width:34px; height:34px; border-radius:8px; border:1px solid rgba(255,255,255,.4);
+  display:flex; align-items:center; justify-content:center; font:600 16px/1 var(--serif); color:#fff; }
+.ob-hero .idx{ font:500 11px/1 var(--mono); letter-spacing:.2em; color:rgba(255,255,255,.7); }
+.ob-hero .name{ position:relative; }
+.ob-hero .name .cn{ font:600 40px/1 var(--serif); color:#fff; letter-spacing:.14em; }
+.ob-hero .name .en{ font:500 10px/1 var(--mono); letter-spacing:.3em; text-transform:uppercase;
+  color:rgba(255,255,255,.62); margin-top:12px; }
+.ob-hero .verdict{ position:relative; font:500 14.5px/1.6 var(--serif); color:rgba(255,255,255,.94);
+  border-top:1px solid rgba(255,255,255,.22); padding-top:14px; }
+.ob-hero .verdict .lab{ font:500 9.5px/1 var(--mono); letter-spacing:.24em; text-transform:uppercase;
+  color:rgba(255,255,255,.6); display:block; margin-bottom:8px; }
+
+/* 色盘 */
+.ob-discs{ display:flex; justify-content:space-between; margin-top:26px; }
+.ob-disc{ width:46px; height:46px; border-radius:50%; position:relative; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; transition:transform .25s; }
+.ob-disc i{ width:38px; height:38px; border-radius:50%; box-shadow:inset 0 1px 2px rgba(0,0,0,.18);
+  transition:width .22s, height .22s; }
+.ob-disc::before{ content:""; position:absolute; inset:0; border-radius:50%;
+  border:1.5px solid transparent; transition:border-color .22s; }
+.ob-disc.on::before{ border-color:var(--ink); }
+.ob-disc.on i{ width:30px; height:30px; }
+.ob-disc.on{ transform:translateY(-2px); }
+.ob-discnames{ display:flex; justify-content:space-between; margin-top:11px; }
+.ob-discnames span{ width:46px; text-align:center; font-size:10px; color:var(--ink-3); transition:color .3s; }
+.ob-discnames span.on{ color:var(--ink); font-weight:500; }
+
+.ob-foot{ margin-top:auto; padding-top:26px; }
+.ob-confirm{ width:100%; height:54px; border-radius:16px; background:var(--accent); color:#fff;
+  border:0; font:500 15.5px/1 var(--sans); letter-spacing:.06em; display:flex; align-items:center;
+  justify-content:center; gap:9px; cursor:pointer; box-shadow:var(--shadow-md); }
+.ob-confirm .ic{ width:18px; height:18px; }
+.ob-skip{ display:block; text-align:center; margin-top:15px; font-size:12px; color:var(--ink-3); cursor:pointer; }
+
+/* home 阶段：复用 vA，加一个换色入口 */
+.home-stage .bell{ cursor:pointer; }

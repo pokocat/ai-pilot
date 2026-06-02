@@ -1,0 +1,69 @@
+/* ============ 方案C · 编辑式长卷 ============ */
+.vC .scr-top{ padding:8px 24px 0; }
+.vC .pad{ padding:0 24px; }
+
+/* 顶栏 */
+.vC .ctop{ display:flex; align-items:center; justify-content:space-between; }
+.vC .ctop .wm{ font:600 16px/1 var(--serif); letter-spacing:.22em; }
+.vC .ctop .num{ font:400 11px/1 var(--mono); color:var(--ink-3); letter-spacing:.1em; }
+
+/* 刊头 */
+.vC .masthead{ margin-top:20px; }
+.vC .masthead .ky{ font:500 11px/1 var(--mono); letter-spacing:.26em; text-transform:uppercase; color:var(--accent); }
+.vC .masthead h1{ font:600 38px/1.12 var(--serif); letter-spacing:.01em; margin-top:16px; }
+.vC .masthead h1 em{ font-style:normal; color:var(--accent); }
+.vC .masthead .lede{ font-size:13.5px; color:var(--ink-2); line-height:1.7; margin-top:14px; max-width:300px; }
+.vC .rule{ display:flex; align-items:center; gap:12px; margin-top:18px; }
+.vC .rule .ln{ flex:1; height:1px; background:var(--line); }
+.vC .rule .lab{ font:400 11px/1 var(--mono); color:var(--ink-3); letter-spacing:.08em; }
+
+/* 全幅影像占位 */
+.vC .hero-img{ position:relative; height:240px; margin-top:18px; border-radius:var(--r-lg); overflow:hidden;
+  background:
+    repeating-linear-gradient(135deg, #E9E6DE 0 11px, #EFEDE5 11px 22px);
+  border:1px solid var(--line); display:flex; align-items:flex-end; }
+.vC .hero-img .ph-tag{ position:absolute; top:14px; left:14px; font:400 10px/1.4 var(--mono);
+  color:var(--ink-3); background:rgba(251,250,246,.8); padding:6px 9px; border-radius:7px; letter-spacing:.04em; }
+.vC .hero-cap{ position:relative; width:100%; padding:18px; background:linear-gradient(transparent, rgba(22,25,29,.0)); }
+.vC .hero-card{ background:var(--paper); border:1px solid var(--line); border-radius:var(--r-md);
+  padding:14px 16px; display:flex; align-items:center; gap:12px; box-shadow:var(--shadow-md); }
+.vC .hero-card .av{ width:42px; height:42px; border-radius:50%; background:var(--accent); color:#fff;
+  display:flex; align-items:center; justify-content:center; font:600 17px/1 var(--serif); flex:0 0 42px; }
+.vC .hero-card .who .nm{ font:600 14.5px/1 var(--serif); }
+.vC .hero-card .who .ro{ font-size:11px; color:var(--ink-3); margin-top:5px; }
+.vC .hero-card .go{ margin-left:auto; width:36px; height:36px; border-radius:50%; background:var(--ink); color:#fff;
+  display:flex; align-items:center; justify-content:center; }
+.vC .hero-card .go .ic{ width:17px; height:17px; }
+
+/* 主行动 */
+.vC .cta{ margin-top:22px; display:flex; align-items:center; justify-content:space-between;
+  background:var(--accent); color:#EAF2EC; border-radius:var(--r-lg); padding:18px 20px; box-shadow:var(--shadow-md); }
+.vC .cta .t{ font:600 16px/1.3 var(--serif); }
+.vC .cta .s{ font-size:11.5px; color:#BBD3C5; margin-top:6px; }
+.vC .cta .arr{ width:42px; height:42px; border-radius:50%; background:rgba(255,255,255,.14); color:#fff;
+  display:flex; align-items:center; justify-content:center; flex:0 0 42px; }
+.vC .cta .arr .ic{ width:19px; height:19px; }
+
+/* 目录式服务 */
+.vC .toc{ margin-top:30px; }
+.vC .toc-h{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:6px; }
+.vC .toc-h .t{ font:600 17px/1 var(--serif); }
+.vC .toc-h .c{ font:400 11px/1 var(--mono); color:var(--ink-3); }
+.vC .row{ display:flex; align-items:center; gap:15px; padding:17px 2px; border-top:1px solid var(--line); }
+.vC .row .rn{ font:600 13px/1 var(--mono); color:var(--accent); width:26px; flex:0 0 26px; }
+.vC .row .rb{ flex:1; min-width:0; }
+.vC .row .rt{ font-size:15px; font-weight:500; }
+.vC .row .rd{ font-size:12px; color:var(--ink-3); margin-top:5px; line-height:1.5; }
+.vC .row .ri{ color:var(--ink-3); }
+.vC .row .ri .ic{ width:18px; height:18px; }
+
+/* 军师手记 */
+.vC .note{ margin-top:30px; background:var(--surface); border:1px solid var(--line);
+  border-radius:var(--r-lg); padding:20px; box-shadow:var(--shadow-sm); }
+.vC .note .nh{ display:flex; align-items:center; gap:8px; }
+.vC .note .nh .ky{ font:500 10px/1 var(--mono); letter-spacing:.18em; text-transform:uppercase; color:var(--accent); }
+.vC .note .nh .dt{ font:400 11px/1 var(--mono); color:var(--ink-3); margin-left:auto; }
+.vC .note q{ display:block; font:500 17px/1.7 var(--serif); margin:14px 0 0; quotes:none; }
+.vC .note q::before, .vC .note q::after{ content:none; }
+.vC .note .src{ font-size:12px; color:var(--ink-3); margin-top:14px; display:flex; align-items:center; gap:8px; }
+.vC .note .src .d{ width:18px; height:1px; background:var(--ink-3); display:inline-block; }

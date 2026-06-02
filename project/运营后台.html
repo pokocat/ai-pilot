@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>军师 · 运营后台</title>
+<link rel="stylesheet" href="styles/tokens.css">
+<link rel="stylesheet" href="styles/frame.css">
+<style>
+  :root{ --accent:#A07D2C; --accent-deep:#6E5621; --accent-soft:#F2EAD6; --accent-ink:#43340F; --accent-bright:#D8B25A; }
+  body{ background:var(--bg); display:flex; align-items:center; justify-content:center; min-height:100vh; padding:34px 20px; }
+  .wrap{ display:flex; flex-direction:column; align-items:center; gap:15px; }
+  .cap{ font:500 12px/1.5 var(--mono); letter-spacing:.2em; text-transform:uppercase; color:var(--ink-3); text-align:center; max-width:380px; }
+  .cap b{ color:var(--ink-2); font-weight:600; }
+
+  /* 顶栏 */
+  .adm-top{ padding:10px 20px 14px; display:flex; align-items:center; gap:11px; border-bottom:1px solid var(--line-2); }
+  .adm-mk{ width:30px; height:30px; border-radius:8px; background:var(--ink); color:var(--paper); display:flex; align-items:center; justify-content:center; font:600 16px/1 var(--serif); }
+  .adm-tt .t{ font:600 15px/1 var(--serif); letter-spacing:.02em; }
+  .adm-tt .s{ font:400 10px/1 var(--mono); letter-spacing:.14em; color:var(--ink-3); margin-top:5px; }
+  .adm-av{ margin-left:auto; width:32px; height:32px; border-radius:50%; background:var(--accent-soft); color:var(--accent-ink); display:flex; align-items:center; justify-content:center; font:600 12px/1 var(--sans); }
+
+  .adm-scroll{ flex:1; overflow-y:auto; padding-bottom:92px; }
+  .adm-scroll::-webkit-scrollbar{ width:0; }
+  .sc{ display:none; } .sc.on{ display:block; }
+  .sec-h{ padding:18px 20px 10px; display:flex; align-items:baseline; justify-content:space-between; }
+  .sec-h .t{ font:600 17px/1.2 var(--serif); }
+  .sec-h .s{ font-size:11.5px; color:var(--ink-3); }
+  .pad{ padding:0 20px; }
+
+  /* 概览 */
+  .stats{ display:grid; grid-template-columns:1fr 1fr; gap:11px; }
+  .stat{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:15px; box-shadow:var(--shadow-sm); }
+  .stat .v{ font:600 24px/1 var(--serif); }
+  .stat .v small{ font-size:13px; color:var(--ink-3); }
+  .stat .l{ font-size:11.5px; color:var(--ink-3); margin-top:7px; }
+  .stat .d{ font-size:11px; margin-top:8px; display:flex; align-items:center; gap:4px; }
+  .stat .d.up{ color:#2D7A52; } .stat .d.dn{ color:var(--danger); }
+  .feed{ display:flex; flex-direction:column; gap:0; background:var(--surface); border:1px solid var(--line); border-radius:14px; overflow:hidden; box-shadow:var(--shadow-sm); }
+  .fr{ display:flex; align-items:center; gap:11px; padding:13px 15px; }
+  .fr + .fr{ border-top:1px solid var(--line-2); }
+  .fr .fi{ width:30px; height:30px; flex:0 0 30px; border-radius:8px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; }
+  .fr .fi .ic{ width:16px; height:16px; }
+  .fr .fb{ flex:1; min-width:0; } .fr .fb .ft{ font-size:13px; } .fr .fb .fm{ font-size:11px; color:var(--ink-3); margin-top:3px; }
+  .fr .fv{ font:500 12px/1 var(--mono); color:var(--ink-3); }
+
+  /* 通用卡片行 */
+  .crd{ background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:14px 15px; box-shadow:var(--shadow-sm); margin-bottom:11px; }
+  .crd-row{ display:flex; align-items:center; gap:12px; }
+  .crd-ic{ width:38px; height:38px; flex:0 0 38px; border-radius:10px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; }
+  .crd-ic .ic{ width:19px; height:19px; }
+  .crd-b{ flex:1; min-width:0; }
+  .crd-b .ct{ font-size:14px; font-weight:500; display:flex; align-items:center; gap:7px; }
+  .crd-b .cs{ font-size:11.5px; color:var(--ink-3); margin-top:4px; line-height:1.5; }
+  .tag{ font:500 9.5px/1 var(--mono); letter-spacing:.04em; padding:3px 6px; border-radius:5px; background:rgba(155,124,63,.14); color:var(--gold); }
+  .tag.live{ background:#E4EFE8; color:#2D7A52; }
+  .tag.off{ background:var(--surface-2); color:var(--ink-3); }
+
+  /* 开关 */
+  .sw{ width:42px; height:24px; border-radius:999px; background:var(--line); position:relative; cursor:pointer; transition:.2s; flex:0 0 42px; }
+  .sw.on{ background:var(--accent); }
+  .sw i{ position:absolute; top:3px; left:3px; width:18px; height:18px; border-radius:50%; background:#fff; transition:.2s; box-shadow:0 1px 2px rgba(0,0,0,.25); }
+  .sw.on i{ left:21px; }
+
+  /* 献策条目 */
+  .say-row{ display:flex; align-items:center; gap:12px; padding:13px 14px; background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow-sm); margin-bottom:10px; }
+  .say-row .grip{ color:var(--ink-3); cursor:grab; } .say-row .grip .ic{ width:16px; height:16px; }
+  .say-row .sb{ flex:1; min-width:0; }
+  .say-row .stx{ font:500 13.5px/1.45 var(--serif); color:var(--ink); }
+  .say-row .smeta{ font-size:10.5px; color:var(--ink-3); margin-top:6px; }
+  .say-today{ background:linear-gradient(180deg,var(--accent-soft),var(--surface)); border-color:var(--accent); }
+
+  .add-btn{ width:100%; height:46px; border-radius:12px; border:1.5px dashed var(--accent); background:var(--surface); color:var(--accent); font:500 13.5px/1 var(--sans); display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; margin-top:4px; }
+  .add-btn .ic{ width:17px; height:17px; }
+  .edit{ color:var(--ink-3); cursor:pointer; } .edit .ic{ width:17px; height:17px; }
+
+  /* 问卷 */
+  .q-card{ background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:15px; box-shadow:var(--shadow-sm); margin-bottom:12px; }
+  .q-h{ display:flex; align-items:center; gap:9px; margin-bottom:12px; }
+  .q-h .no{ font:600 11px/1 var(--mono); color:var(--accent); width:20px; height:20px; border-radius:6px; background:var(--accent-soft); display:flex; align-items:center; justify-content:center; }
+  .q-h .qt{ font-size:14px; font-weight:500; flex:1; }
+  .q-h .key{ font:400 10px/1 var(--mono); color:var(--ink-3); }
+  .opts{ display:flex; flex-wrap:wrap; gap:7px; }
+  .opt{ height:32px; padding:0 12px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); font-size:12.5px; color:var(--ink-2); display:flex; align-items:center; gap:6px; }
+  .opt .x{ color:var(--ink-3); font-size:13px; } .opt.add-opt{ border-style:dashed; color:var(--accent); border-color:var(--accent); cursor:pointer; }
+
+  /* 套餐 */
+  .plan{ background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px; box-shadow:var(--shadow-sm); margin-bottom:12px; }
+  .plan.feat{ border-color:var(--accent); }
+  .plan-h{ display:flex; align-items:baseline; gap:9px; }
+  .plan-h .pn{ font:600 16px/1 var(--serif); }
+  .plan-h .pp{ margin-left:auto; font:600 18px/1 var(--serif); color:var(--accent-ink); }
+  .plan-h .pp small{ font-size:11px; color:var(--ink-3); font-weight:400; }
+  .plan-meta{ font-size:12px; color:var(--ink-2); margin-top:11px; line-height:1.7; }
+  .plan-meta b{ color:var(--ink); font-weight:600; }
+  .plan-edit{ margin-top:13px; height:36px; border-radius:9px; border:1px solid var(--line); background:transparent; color:var(--ink-2); font-size:12.5px; width:100%; display:flex; align-items:center; justify-content:center; gap:7px; cursor:pointer; }
+  .plan-edit .ic{ width:15px; height:15px; }
+
+  /* 底栏 */
+  .adm-tab{ flex:0 0 76px; display:flex; align-items:flex-start; justify-content:space-around; padding:11px 6px 0; background:rgba(251,250,246,.94); backdrop-filter:blur(12px); border-top:1px solid var(--line-2); }
+  .at{ display:flex; flex-direction:column; align-items:center; gap:5px; color:var(--ink-3); cursor:pointer; width:60px; }
+  .at.on{ color:var(--accent); } .at svg{ width:22px; height:22px; } .at span{ font-size:10px; }
+
+  /* 顾问详情：System 提示词 + Agent Memory */
+  .ad-detail{ position:absolute; inset:0; z-index:30; background:var(--paper); display:flex; flex-direction:column; transform:translateX(100%); transition:transform .3s cubic-bezier(.7,.02,.2,1); }
+  .ad-detail.show{ transform:none; }
+  .ad-dh{ display:flex; align-items:center; gap:12px; padding:8px 18px 14px; border-bottom:1px solid var(--line-2); }
+  .ad-dh .bk{ width:34px; height:34px; border-radius:50%; background:var(--surface); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--ink-2); cursor:pointer; }
+  .ad-dh .bk .ic{ width:18px; height:18px; transform:scaleX(-1); }
+  .ad-dh .di{ width:38px; height:38px; border-radius:11px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; }
+  .ad-dh .di .ic{ width:20px; height:20px; }
+  .ad-dh .dt .t{ font:600 15px/1 var(--serif); }
+  .ad-dh .dt .s{ font-size:11px; color:var(--ink-3); margin-top:5px; }
+  .ad-db{ flex:1; overflow-y:auto; padding:18px 20px 30px; }
+  .ad-db::-webkit-scrollbar{ width:0; }
+  .blk{ margin-bottom:22px; }
+  .blk-h{ display:flex; align-items:center; gap:8px; margin-bottom:11px; }
+  .blk-h .ic{ width:16px; height:16px; color:var(--accent); }
+  .blk-h .t{ font:600 14px/1 var(--serif); }
+  .blk-h .badge{ margin-left:auto; font:500 9.5px/1 var(--mono); letter-spacing:.06em; padding:4px 7px; border-radius:5px; background:var(--accent-soft); color:var(--accent-ink); }
+  .blk-d{ font-size:11.5px; color:var(--ink-3); line-height:1.6; margin-bottom:11px; }
+  .ta{ width:100%; min-height:130px; border:1px solid var(--line); border-radius:12px; background:var(--surface); padding:13px 14px;
+    font:400 12.5px/1.7 var(--sans); color:var(--ink); resize:vertical; box-shadow:var(--shadow-sm); }
+  .ta:focus{ outline:none; border-color:var(--accent); }
+  .var-row{ display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; }
+  .var{ font:500 11px/1 var(--mono); padding:6px 9px; border-radius:7px; background:var(--surface-2); color:var(--accent-ink); border:1px solid var(--line); cursor:pointer; }
+  .cfg{ background:var(--surface); border:1px solid var(--line); border-radius:13px; box-shadow:var(--shadow-sm); overflow:hidden; }
+  .cfg-row{ display:flex; align-items:center; gap:12px; padding:13px 15px; }
+  .cfg-row + .cfg-row{ border-top:1px solid var(--line-2); }
+  .cfg-row .cb{ flex:1; } .cfg-row .ct{ font-size:13.5px; font-weight:500; } .cfg-row .cs{ font-size:11px; color:var(--ink-3); margin-top:4px; line-height:1.5; }
+  .seg{ display:flex; background:var(--surface-2); border-radius:9px; padding:3px; gap:2px; }
+  .seg b{ font:500 11.5px/1 var(--sans); padding:7px 11px; border-radius:7px; color:var(--ink-3); cursor:pointer; }
+  .seg b.on{ background:var(--surface); color:var(--ink); box-shadow:var(--shadow-sm); }
+  .mem-list{ display:flex; flex-direction:column; gap:9px; }
+  .mem-card{ display:flex; align-items:center; gap:11px; background:var(--surface); border:1px solid var(--line); border-radius:11px; padding:12px 14px; box-shadow:var(--shadow-sm); }
+  .mem-card .mi{ width:32px; height:32px; flex:0 0 32px; border-radius:9px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; }
+  .mem-card .mi .ic{ width:16px; height:16px; }
+  .mem-card .mb{ flex:1; min-width:0; } .mem-card .mt{ font-size:12.5px; } .mem-card .mm{ font-size:10.5px; color:var(--ink-3); margin-top:3px; }
+  .mem-meter{ height:6px; border-radius:3px; background:var(--surface-2); overflow:hidden; margin-top:11px; }
+  .mem-meter i{ display:block; height:100%; background:var(--accent); border-radius:3px; }
+  .save-bar{ position:absolute; left:0; right:0; bottom:0; padding:12px 18px calc(12px + env(safe-area-inset-bottom)); background:rgba(251,250,246,.94); backdrop-filter:blur(12px); border-top:1px solid var(--line-2); display:flex; gap:10px; }
+  .save-bar .sv{ flex:1; height:46px; border-radius:12px; background:var(--accent); color:#fff; border:0; font:500 14px/1 var(--sans); display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; }
+  .save-bar .sv .ic{ width:17px; height:17px; }
+  .save-bar .gh{ width:46px; height:46px; border-radius:12px; border:1px solid var(--line); background:transparent; color:var(--ink-2); display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .save-bar .gh .ic{ width:18px; height:18px; }
+  .admin-toast{ position:absolute; left:50%; bottom:96px; transform:translate(-50%,12px); z-index:60; background:var(--ink); color:#F3F1EA; padding:11px 18px; border-radius:999px; font-size:13px; font-weight:500; box-shadow:var(--shadow-md); opacity:0; pointer-events:none; transition:.28s; display:flex; align-items:center; gap:8px; }
+  .admin-toast.show{ opacity:1; transform:translate(-50%,0); } .admin-toast .ic{ width:16px; height:16px; color:var(--accent-bright); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="cap"><b>军师 · 运营后台（移动端）</b><br>配置前端消费的预设：每日献策 / 内置顾问 / 建档问卷 / 套餐算力</div>
+  <div class="phone"><div class="screen">
+    <div class="statusbar"><span>9:41</span><span class="right">
+      <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".3"/></svg>
+      <svg width="22" height="12" viewBox="0 0 22 12" fill="none"><rect x="1" y="1" width="17" height="10" rx="2.5" stroke="currentColor" stroke-width="1.2" opacity=".5"/><rect x="2.5" y="2.5" width="12" height="7" rx="1.2" fill="currentColor"/><rect x="19.5" y="4" width="1.5" height="4" rx=".7" fill="currentColor" opacity=".5"/></svg>
+    </span></div>
+
+    <div class="adm-top">
+      <div class="adm-mk">军</div>
+      <div class="adm-tt"><div class="t">运营后台</div><div class="s">JUNSHI · CONSOLE</div></div>
+      <div class="adm-av">运营</div>
+    </div>
+
+    <div class="adm-scroll">
+
+      <!-- 概览 -->
+      <section class="sc on" data-sc="home">
+        <div class="sec-h"><span class="t">今日概览</span><span class="s">6月1日 · 实时</span></div>
+        <div class="pad">
+          <div class="stats">
+            <div class="stat"><div class="v">1,284</div><div class="l">付费企业</div><div class="d up"><i class="ic" data-ic="up"></i>本周 +36</div></div>
+            <div class="stat"><div class="v">842</div><div class="l">今日活跃</div><div class="d up"><i class="ic" data-ic="up"></i>+8.2%</div></div>
+            <div class="stat"><div class="v">3,170</div><div class="l">今日产出成果</div><div class="d up"><i class="ic" data-ic="up"></i>+12%</div></div>
+            <div class="stat"><div class="v">68<small>%</small></div><div class="l">算力消耗</div><div class="d dn"><i class="ic" data-ic="trend"></i>需关注</div></div>
+          </div>
+        </div>
+        <div class="sec-h"><span class="t">近期动态</span><span class="s">运营事件</span></div>
+        <div class="pad">
+          <div class="feed">
+            <div class="fr"><span class="fi"><i class="ic" data-ic="spark"></i></span><div class="fb"><div class="ft">今日献策已推送</div><div class="fm">「先把自己立于不败…」· 触达 842 人</div></div><span class="fv">08:00</span></div>
+            <div class="fr"><span class="fi"><i class="ic" data-ic="agent"></i></span><div class="fb"><div class="ft">新增内置顾问待审核</div><div class="fm">法务合规官 · 等待上线</div></div><span class="fv">2h</span></div>
+            <div class="fr"><span class="fi"><i class="ic" data-ic="crown"></i></span><div class="fb"><div class="ft">3 家企业升级企业版</div><div class="fm">私有化部署线索 +3</div></div><span class="fv">今天</span></div>
+            <div class="fr"><span class="fi"><i class="ic" data-ic="alert"></i></span><div class="fb"><div class="ft">算力到达 68% 阈值</div><div class="fm">建议检查高消耗智能体</div></div><span class="fv">今天</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 每日献策 -->
+      <section class="sc" data-sc="say">
+        <div class="sec-h"><span class="t">每日献策库</span><span class="s">每日 08:00 随机推一条</span></div>
+        <div class="pad">
+          <div class="say-row say-today">
+            <span class="grip"><i class="ic" data-ic="grid"></i></span>
+            <div class="sb"><div class="stx">先把自己立于不败，再等对手露出破绽。</div><div class="smeta">今日推送 · 6月1日 · 触达 842</div></div>
+            <span class="tag live">今日</span>
+          </div>
+          <div class="say-row">
+            <span class="grip"><i class="ic" data-ic="grid"></i></span>
+            <div class="sb"><div class="stx">现金流不是结果，是你每个决策的回声。</div><div class="smeta">已启用 · 排期池</div></div>
+            <div class="sw on" data-sw><i></i></div>
+          </div>
+          <div class="say-row">
+            <span class="grip"><i class="ic" data-ic="grid"></i></span>
+            <div class="sb"><div class="stx">增长的尽头，是你能服务好的那群人。</div><div class="smeta">已启用 · 排期池</div></div>
+            <div class="sw on" data-sw><i></i></div>
+          </div>
+          <div class="say-row">
+            <span class="grip"><i class="ic" data-ic="grid"></i></span>
+            <div class="sb"><div class="stx">战略是选择不做什么，比做什么更难。</div><div class="smeta">已启用 · 排期池</div></div>
+            <div class="sw on" data-sw><i></i></div>
+          </div>
+          <div class="say-row">
+            <span class="grip"><i class="ic" data-ic="grid"></i></span>
+            <div class="sb"><div class="stx">组织的上限，往往是创始人认知的上限。</div><div class="smeta">已停用</div></div>
+            <div class="sw" data-sw><i></i></div>
+          </div>
+          <div class="add-btn"><i class="ic" data-ic="spark"></i> 新增一条献策</div>
+        </div>
+      </section>
+
+      <!-- 内置顾问 -->
+      <section class="sc" data-sc="agent">
+        <div class="sec-h"><span class="t">内置顾问</span><span class="s">入驻赠送 · 可配置产出</span></div>
+        <div class="pad" id="agent-list"></div>
+      </section>
+
+      <!-- 建档问卷 -->
+      <section class="sc" data-sc="form">
+        <div class="sec-h"><span class="t">首登建档问卷</span><span class="s">用于个性化产出</span></div>
+        <div class="pad">
+          <div class="q-card">
+            <div class="q-h"><span class="no">1</span><span class="qt">你的行业？</span><span class="key">industry</span></div>
+            <div class="opts"><span class="opt">SaaS / 软件 <span class="x">×</span></span><span class="opt">消费 / 零售 <span class="x">×</span></span><span class="opt">制造 <span class="x">×</span></span><span class="opt">服务 / 咨询 <span class="x">×</span></span><span class="opt">其他 <span class="x">×</span></span><span class="opt add-opt">＋ 选项</span></div>
+          </div>
+          <div class="q-card">
+            <div class="q-h"><span class="no">2</span><span class="qt">当前阶段？</span><span class="key">stage</span></div>
+            <div class="opts"><span class="opt">起步 / 验证 <span class="x">×</span></span><span class="opt">A 轮前后 <span class="x">×</span></span><span class="opt">规模化 <span class="x">×</span></span><span class="opt">稳定盈利 <span class="x">×</span></span><span class="opt add-opt">＋ 选项</span></div>
+          </div>
+          <div class="q-card">
+            <div class="q-h"><span class="no">3</span><span class="qt">最头疼的事？</span><span class="key">pain</span></div>
+            <div class="opts"><span class="opt">增长乏力 <span class="x">×</span></span><span class="opt">现金流 <span class="x">×</span></span><span class="opt">融资 <span class="x">×</span></span><span class="opt">组织 / 团队 <span class="x">×</span></span><span class="opt">定位 / 竞争 <span class="x">×</span></span><span class="opt add-opt">＋ 选项</span></div>
+          </div>
+          <div class="add-btn"><i class="ic" data-ic="doc"></i> 新增一个问题</div>
+        </div>
+      </section>
+
+      <!-- 套餐算力 -->
+      <section class="sc" data-sc="plan">
+        <div class="sec-h"><span class="t">套餐与算力</span><span class="s">定价 · 算力规则</span></div>
+        <div class="pad">
+          <div class="plan">
+            <div class="plan-h"><span class="pn">体验版</span><span class="pp">¥0</span></div>
+            <div class="plan-meta"><b>10 次</b> 军师算力 / 月 · 内置顾问 <b>3 位</b> · 不含方案库导出</div>
+            <button class="plan-edit"><i class="ic" data-ic="pen"></i> 编辑套餐</button>
+          </div>
+          <div class="plan feat">
+            <div class="plan-h"><span class="pn">决策版</span><span class="tag">最受欢迎</span><span class="pp">¥1,980<small>/年</small></span></div>
+            <div class="plan-meta"><b>不限量</b> 对话 · <b>68 次</b> 深度产出 / 月 · 内置顾问 <b>8 位</b> · 方案库 + 导出</div>
+            <button class="plan-edit"><i class="ic" data-ic="pen"></i> 编辑套餐</button>
+          </div>
+          <div class="plan">
+            <div class="plan-h"><span class="pn">企业版 · 私有化</span><span class="pp">面议</span></div>
+            <div class="plan-meta"><b>私有化部署</b> · 接入内部系统 · 专属训练 · 数据不出内网</div>
+            <button class="plan-edit"><i class="ic" data-ic="pen"></i> 编辑套餐</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <nav class="adm-tab">
+      <div class="at on" data-go="home"><i class="ic" data-ic="chart"></i><span>概览</span></div>
+      <div class="at" data-go="say"><i class="ic" data-ic="spark"></i><span>献策</span></div>
+      <div class="at" data-go="agent"><i class="ic" data-ic="agent"></i><span>顾问</span></div>
+      <div class="at" data-go="form"><i class="ic" data-ic="doc"></i><span>问卷</span></div>
+      <div class="at" data-go="plan"><i class="ic" data-ic="crown"></i><span>套餐</span></div>
+    </nav>
+
+    <!-- 顾问详情：System 提示词 + Agent Memory -->
+    <div class="ad-detail" id="ad-detail">
+      <div class="ad-dh">
+        <div class="bk" id="ad-back"><i class="ic" data-ic="arrow"></i></div>
+        <div class="di" id="ad-ic"><i class="ic" data-ic="target"></i></div>
+        <div class="dt"><div class="t" id="ad-name">战略诊断官</div><div class="s" id="ad-role">产出 · 战略诊断报告</div></div>
+      </div>
+      <div class="ad-db">
+        <div class="blk">
+          <div class="blk-h"><i class="ic" data-ic="pen"></i><span class="t">System 提示词</span><span class="badge">可优化</span></div>
+          <div class="blk-d">定义这位顾问的角色、产出结构与语气。变量会在运行时注入企业档案与记忆。</div>
+          <textarea class="ta" id="ad-prompt"></textarea>
+          <div class="var-row">
+            <span class="var" data-var="{企业档案}">＋ {企业档案}</span>
+            <span class="var" data-var="{行业基准}">＋ {行业基准}</span>
+            <span class="var" data-var="{长期记忆}">＋ {长期记忆}</span>
+            <span class="var" data-var="{本命色}">＋ {本命色}</span>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="blk-h"><i class="ic" data-ic="layers"></i><span class="t">Agent Memory · 持续学习</span></div>
+          <div class="blk-d">控制这位顾问如何从对话与企业资料中学习、沉淀长期记忆，越用越懂客户。</div>
+          <div class="cfg">
+            <div class="cfg-row"><div class="cb"><div class="ct">开启长期记忆</div><div class="cs">跨会话记住客户的偏好、结论与口径</div></div><div class="sw on" data-sw><i></i></div></div>
+            <div class="cfg-row"><div class="cb"><div class="ct">从对话中自动学习</div><div class="cs">每次对话后提炼要点，写入长期记忆</div></div><div class="sw on" data-sw><i></i></div></div>
+            <div class="cfg-row"><div class="cb"><div class="ct">学习强度</div><div class="cs">更高更敏感，但也更易受单次对话影响</div></div>
+              <div class="seg"><b>保守</b><b class="on">均衡</b><b>激进</b></div></div>
+            <div class="cfg-row"><div class="cb"><div class="ct">记忆留存</div><div class="cs">超出时长的低价值记忆自动淡化</div></div>
+              <div class="seg"><b>30天</b><b class="on">180天</b><b>永久</b></div></div>
+          </div>
+        </div>
+
+        <div class="blk">
+          <div class="blk-h"><i class="ic" data-ic="insight"></i><span class="t">记忆来源</span><span class="badge">3 路</span></div>
+          <div class="mem-list">
+            <div class="mem-card"><span class="mi"><i class="ic" data-ic="chat"></i></span><div class="mb"><div class="mt">对话记忆</div><div class="mm">从历史会话提炼 · 已沉淀 128 条</div></div><div class="sw on" data-sw><i></i></div></div>
+            <div class="mem-card"><span class="mi"><i class="ic" data-ic="doc"></i></span><div class="mb"><div class="mt">企业资料（可选投喂）</div><div class="mm">客户补充的背景资料 · 24 份</div></div><div class="sw on" data-sw><i></i></div></div>
+            <div class="mem-card"><span class="mi"><i class="ic" data-ic="chart"></i></span><div class="mb"><div class="mt">产出反馈</div><div class="mm">采纳 / 修改 / 忽略 信号回流</div></div><div class="sw" data-sw><i></i></div></div>
+          </div>
+          <div class="mem-meter"><i style="width:62%"></i></div>
+          <div class="blk-d" style="margin:9px 0 0">记忆成熟度 62% · 随使用持续提升</div>
+        </div>
+        <div style="height:60px"></div>
+      </div>
+      <div class="save-bar">
+        <button class="gh" id="ad-reset"><i class="ic" data-ic="clock"></i></button>
+        <button class="sv" id="ad-save"><i class="ic" data-ic="check"></i> 保存配置</button>
+      </div>
+    </div>
+
+  </div></div>
+</div>
+
+<script src="scripts/icons.js"></script>
+<script>
+  // 内置顾问列表
+  const AGENTS=[
+    ['target','战略诊断官','产出 · 战略诊断报告',1,'你是「战略诊断官」，服务于创始人/CEO。基于 {企业档案} 与 {行业基准}，并参考 {长期记忆}，对企业做战略诊断。\n\n产出结构固定为三段：\n1) 现状判断 — 一句话定性 + 关键依据\n2) 关键卡点 — 3 条，按影响排序\n3) 30 天行动建议 — 3 条，可执行、可验证\n\n语气：冷静、克制、机构级；不堆砌术语；重大判断标注依据与边界。'],
+    ['trend','增长操盘手','产出 · 增长方案',1,'你是「增长操盘手」。围绕获客、转化、复购、定价四个杠杆，结合 {企业档案} 与 {长期记忆}，给出可直接执行的增长路径。\n\n先给切入点，再给三步路径，最后给预期效果与衡量指标。优先经常性收入与单位经济模型。'],
+    ['chart','竞争情报官','产出 · 竞品洞察',1,'你是「竞争情报官」。基于 {行业基准} 与持续追踪的对手信号，输出竞争格局与机会窗口判断。结论需可溯源，标注信息时效。'],
+    ['doc','融资参谋','产出 · 商业计划书',1,'你是「融资参谋」。帮助创始人把增长逻辑与单位经济（UE）讲清楚，对齐故事与数据。产出融资准备清单与一页纸 BP 大纲，提示估值逻辑与投资人常见问题。'],
+    ['layers','商业模式设计师','产出 · 商业模式画布',1,'你是「商业模式设计师」。用商业模式画布拆解客户的价值主张、客户细分、收入与成本结构，给出盈利模型与定价结构建议。'],
+    ['user','组织人效顾问','产出 · 组织优化建议',1,'你是「组织人效顾问」。围绕架构、股权、激励与人效，结合企业阶段给出组织优化建议，提示关键岗位与期权结构风险。'],
+    ['image','品牌营销官','产出 · 营销内容',1,'你是「品牌营销官」。把战略转化为对外内容（海报、短视频脚本、文案），保持品牌语气统一，服务于增长目标。'],
+    ['clock','经营参谋','产出 · 经营分析',0,'你是「经营参谋」。做经营测算、预算与复盘，用数据支撑判断，给出可跟踪的经营指标与改进建议。'],
+    ['crown','企业IP打造官','产出 · IP 打造方案',1,'你是「企业IP打造官」。基于 {企业档案} 与行业身份，为创始人/企业设计 IP 定位、人设与内容支柱。产出：IP 定位、3 个内容支柱、30 天启动动作。语气专业可感知，避免空话。'],
+    ['video','企业宣传片导演','产出 · 宣传片脚本',1,'你是「企业宣传片导演」。以“客户的改变”为叙事主线，产出 60 秒宣传片脚本：核心叙事、分镜（含时间轴）、制作清单。控制成本，强调可拍性。'],
+    ['image','海报设计师','产出 · 海报方案',0,'你是「海报设计师」。一张海报只讲一件事。产出：主视觉概念、主副文案与版式、多规格产出建议。结合 {本命色} 作为品牌基调。'],
+    ['video','短视频策划','产出 · 短视频脚本',0,'你是「短视频策划」。前 3 秒制造钩子。产出：选题与钩子、脚本结构（钩子/正文/结尾）、拍摄提示。竖屏口播 + 字幕。'],
+    ['pen','商业文案官','产出 · 营销文案',1,'你是「商业文案官」。把价值翻译成客户能复述的一句话。产出：核心卖点、多版文案（朋友圈/官网/私域）、使用场景建议。'],
+  ];
+  const al=document.getElementById('agent-list');
+  AGENTS.forEach((a,i)=>{
+    const el=document.createElement('div'); el.className='crd'; el.style.cursor='pointer';
+    el.innerHTML='<div class="crd-row"><span class="crd-ic"><i class="ic" data-ic="'+a[0]+'"></i></span>'+
+      '<div class="crd-b"><div class="ct">'+a[1]+' <span class="tag">赠送</span></div><div class="cs">'+a[2]+'</div></div>'+
+      '<span class="edit"><i class="ic" data-ic="pen"></i></span></div>';
+    el.onclick=(e)=>{ if(e.target.closest('[data-sw]')) return; openAgent(i); };
+    al.appendChild(el);
+  });
+  const addA=document.createElement('div'); addA.className='add-btn'; addA.innerHTML='<i class="ic" data-ic="agent"></i> 新增 / 训练顾问';
+  al.appendChild(addA);
+
+  // 顾问详情
+  function openAgent(i){
+    const a=AGENTS[i];
+    document.getElementById('ad-ic').innerHTML='<i class="ic" data-ic="'+a[0]+'"></i>';
+    document.getElementById('ad-name').textContent=a[1];
+    document.getElementById('ad-role').textContent=a[2];
+    document.getElementById('ad-prompt').value=a[4];
+    window.paintIcons&&window.paintIcons(document.getElementById('ad-detail'));
+    document.getElementById('ad-detail').classList.add('show');
+  }
+  document.getElementById('ad-back').onclick=()=>document.getElementById('ad-detail').classList.remove('show');
+  document.getElementById('ad-save').onclick=()=>{ document.getElementById('ad-detail').classList.remove('show'); adminToast('配置已保存并下发'); };
+  document.getElementById('ad-reset').onclick=()=>adminToast('已恢复默认提示词');
+  document.querySelectorAll('.var').forEach(v=>v.onclick=()=>{ const ta=document.getElementById('ad-prompt'); ta.value+=(ta.value.endsWith('\n')||!ta.value?'':' ')+v.dataset.var; ta.focus(); });
+  document.querySelectorAll('.seg').forEach(seg=>seg.querySelectorAll('b').forEach(b=>b.onclick=()=>{ seg.querySelectorAll('b').forEach(x=>x.classList.remove('on')); b.classList.add('on'); }));
+  function adminToast(msg){ let t=document.getElementById('admin-toast'); if(!t){ t=document.createElement('div'); t.id='admin-toast'; t.className='admin-toast'; document.querySelector('.screen').appendChild(t);} t.innerHTML='<i class="ic" data-ic="check"></i>'+msg; window.paintIcons&&window.paintIcons(t); t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800); }
+
+  // 开关
+  document.addEventListener('click',e=>{ const s=e.target.closest('[data-sw]'); if(s) s.classList.toggle('on'); });
+  // 底栏导航
+  document.querySelectorAll('.at[data-go]').forEach(t=>t.onclick=()=>{
+    document.querySelectorAll('.sc').forEach(s=>s.classList.toggle('on', s.dataset.sc===t.dataset.go));
+    document.querySelectorAll('.at').forEach(x=>x.classList.toggle('on', x===t));
+    document.querySelector('.adm-scroll').scrollTop=0;
+  });
+  window.paintIcons&&window.paintIcons();
+</script>
+</body>
+</html>

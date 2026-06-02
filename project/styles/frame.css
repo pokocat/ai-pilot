@@ -1,0 +1,89 @@
+/* ============================================================
+   展示画布 + 手机框 + 状态栏 + 底部标签栏（三版共用）
+   ============================================================ */
+body{
+  font-family:var(--sans);
+  background:var(--bg);
+  color:var(--ink);
+  padding:56px 40px 80px;
+}
+
+/* —— 画布头部 —— */
+.canvas-head{ max-width:1340px; margin:0 auto 48px; }
+.canvas-kicker{
+  font:500 12px/1 var(--mono); letter-spacing:.28em; text-transform:uppercase;
+  color:var(--accent); margin-bottom:18px;
+}
+.canvas-title{ font:600 34px/1.15 var(--serif); letter-spacing:.01em; }
+.canvas-title .dim{ color:var(--ink-3); }
+.canvas-sub{ margin-top:14px; max-width:760px; color:var(--ink-2); font-size:15px; line-height:1.7; }
+.legend{ display:flex; gap:26px; flex-wrap:wrap; margin-top:24px; }
+.legend > div{ display:flex; align-items:center; gap:9px; font-size:13px; color:var(--ink-2); }
+.sw{ width:16px; height:16px; border-radius:5px; border:1px solid rgba(0,0,0,.06); }
+
+/* —— 三机位 —— */
+.rail{ display:flex; gap:64px; justify-content:center; flex-wrap:wrap; align-items:flex-start; }
+.slot{ width:390px; }
+.slot-label{ display:flex; align-items:baseline; gap:10px; margin-bottom:18px; padding-left:4px; }
+.slot-no{ font:600 13px/1 var(--mono); color:var(--accent); }
+.slot-name{ font:600 19px/1.2 var(--serif); }
+.slot-desc{ font-size:13px; color:var(--ink-3); margin:-10px 0 18px; padding-left:4px; line-height:1.6; }
+
+/* —— 手机外框 —— */
+.phone{
+  width:390px; height:844px; border-radius:46px; background:#0b0c0e;
+  padding:11px; box-shadow:var(--shadow-lg); position:relative;
+}
+.screen{
+  width:100%; height:100%; border-radius:36px; overflow:hidden;
+  background:var(--paper); position:relative; display:flex; flex-direction:column;
+}
+.screen-scroll{ flex:1; overflow-y:auto; overflow-x:hidden; }
+.screen-scroll::-webkit-scrollbar{ width:0; }
+
+/* —— 状态栏 —— */
+.statusbar{
+  height:50px; flex:0 0 50px; display:flex; align-items:center; justify-content:space-between;
+  padding:0 26px 0 30px; font:600 15px/1 var(--sans); color:var(--ink);
+}
+.statusbar .right{ display:flex; align-items:center; gap:7px; }
+.statusbar .right svg{ display:block; }
+
+/* —— 底部标签栏（悬浮胶囊）—— */
+.tabbar{
+  position:absolute; left:14px; right:14px; bottom:14px; z-index:5;
+  height:70px; display:flex; align-items:center; justify-content:space-between;
+  padding:0 14px; background:rgba(255,255,255,.86);
+  backdrop-filter:blur(18px) saturate(1.4); -webkit-backdrop-filter:blur(18px) saturate(1.4);
+  border:1px solid rgba(255,255,255,.7); border-radius:26px;
+  box-shadow:0 1px 0 rgba(255,255,255,.9) inset, 0 10px 30px rgba(22,25,29,.13), 0 4px 10px rgba(22,25,29,.06);
+}
+/* 让滚动内容不被悬浮栏遮住 */
+.screen-scroll{ padding-bottom:96px; }
+
+.tab{ display:flex; flex-direction:column; align-items:center; gap:5px; flex:1; color:var(--ink-3); cursor:pointer; }
+.tab.on{ color:var(--accent); }
+.tab.on span{ font-weight:500; }
+.tab span{ font-size:10.5px; letter-spacing:.02em; }
+.tab svg{ width:23px; height:23px; }
+
+/* 中间“对话”——柔色圆形高亮，不再凸起 */
+.tab-center{ flex:0 0 auto; }
+.tab-fab{
+  width:50px; height:50px; border-radius:50%; background:var(--accent-soft);
+  display:flex; align-items:center; justify-content:center; color:var(--accent);
+}
+.tab-fab svg{ width:25px; height:25px; }
+.tab-center .lbl{ display:none; }
+
+/* —— 通用原子 —— */
+.eyebrow{ font:500 11px/1 var(--mono); letter-spacing:.2em; text-transform:uppercase; color:var(--accent); }
+.pill{
+  display:inline-flex; align-items:center; gap:6px; height:26px; padding:0 11px;
+  border-radius:999px; font-size:12px; font-weight:500; background:var(--accent-soft); color:var(--accent-ink);
+}
+.pill.ghost{ background:var(--surface-2); color:var(--ink-2); }
+.hairline{ height:1px; background:var(--line); border:0; }
+.sec-head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:14px; }
+.sec-title{ font:600 18px/1.2 var(--serif); letter-spacing:.01em; }
+.sec-more{ font-size:12.5px; color:var(--ink-3); display:flex; align-items:center; gap:3px; }

@@ -1,0 +1,89 @@
+/* ============================================================
+   首页 V2 · 配色优化 — 降低黑白反差，单条献策
+   两套：A 晨雾浅色 / B 暖墨缓和
+   ============================================================ */
+
+/* 单条献策（无轮播）通用 */
+.hero-say .say-meta{ font:500 10.5px/1 var(--mono); letter-spacing:.14em; margin-bottom:13px; }
+.hero-home-v2{ position:relative; height:560px; overflow:hidden; display:flex; flex-direction:column; z-index:1; }
+.hero-home-v2 .hero-content{ padding-top:10px; }
+.hero-home-v2 .hero-ask{ margin-bottom:96px; }
+
+/* ====================================================== */
+/*  A · 晨雾浅色版                                          */
+/* ====================================================== */
+.v2a{ color:var(--ink); }
+.v2a .hero-bg{ background:
+    radial-gradient(120% 68% at 50% 10%, rgba(200,165,90,.22), transparent 54%),
+    radial-gradient(90% 50% at 78% 6%, rgba(200,165,90,.14), transparent 60%),
+    linear-gradient(180deg, #F7F2E8 0%, #EEEADF 48%, #E6E7DC 100%); }
+.v2a .moon{ position:absolute; top:6%; right:13%; width:56px; height:56px; border-radius:50%;
+  background:radial-gradient(circle at 38% 38%, #FBF3DD, #E2BE72 64%, rgba(216,178,90,.25) 100%);
+  box-shadow:0 0 46px rgba(216,178,90,.45); }
+.v2a .mist{ position:absolute; left:0; right:0; bottom:30%; height:24%;
+  background:linear-gradient(180deg, transparent, rgba(255,255,255,.6), transparent); filter:blur(12px);
+  animation:heroDrift 26s ease-in-out infinite alternate; }
+.v2a .ridge{ position:absolute; left:-2%; right:-2%; bottom:0; }
+.v2a .ridge.r1{ height:48%;
+  background:linear-gradient(180deg, rgba(176,190,176,.55), rgba(158,176,160,.32));
+  clip-path:polygon(0 58%,14% 40%,28% 52%,44% 30%,58% 47%,74% 33%,88% 48%,100% 38%,100% 100%,0 100%); filter:blur(.5px); }
+.v2a .ridge.r2{ height:33%;
+  background:linear-gradient(180deg, rgba(140,158,144,.5), rgba(120,140,126,.28));
+  clip-path:polygon(0 72%,20% 56%,38% 67%,56% 49%,74% 62%,100% 47%,100% 100%,0 100%); }
+.v2a .hero-scrim{ background:linear-gradient(180deg,
+    rgba(247,242,232,.55) 0%, transparent 22%, transparent 56%,
+    rgba(245,242,235,.7) 84%, var(--paper) 100%); }
+.v2a .hero-wm{ color:var(--ink); }
+.v2a .hero-issue{ color:var(--ink-3); }
+.v2a .hero-top .bell{ background:rgba(22,25,29,.05); border-color:var(--line); color:var(--ink-2); }
+.v2a .ky{ color:#9A7A2E; }
+.v2a .hero-say h1{ color:var(--ink); text-shadow:none; }
+.v2a .hero-say h1 em{ color:#9A7A2E; }
+.v2a .say-meta{ color:var(--ink-3); } .v2a .say-meta b{ color:#9A7A2E; }
+.v2a .hero-peek{ color:var(--ink-2); }
+.v2a .hero-peek .pdot{ background:var(--accent); box-shadow:0 0 0 4px rgba(160,125,44,.16); }
+.v2a .hero-peek .pmore{ color:var(--ink-3); }
+/* 浅色对话卡 */
+.v2a .hero-ask{ background:var(--surface); border:1px solid var(--line);
+  box-shadow:0 2px 8px rgba(22,25,29,.05), 0 14px 36px rgba(22,25,29,.08); }
+.v2a .hero-ask .nm{ color:var(--ink); }
+.v2a .hero-ask .st{ color:var(--ink-3); }
+.v2a .hero-ask .q{ color:var(--ink); }
+.v2a .hero-ask .field{ background:var(--surface-2); border:1px solid var(--line); }
+.v2a .hero-ask .field input{ color:var(--ink); }
+.v2a .hero-ask .field input::placeholder{ color:var(--ink-3); }
+.v2a .hero-ask .field .ico{ color:var(--ink-3); }
+.v2a .hero-ask .chip{ background:var(--surface-2); border:1px solid var(--line); color:var(--ink-2); }
+.v2a .home-sheet{ box-shadow:none; margin-top:0; background:var(--paper); }
+
+/* ====================================================== */
+/*  B · 暖墨缓和版（深色但不死黑 + 过渡）                     */
+/* ====================================================== */
+.v2b{ color:#F1EDE3; }
+.v2b .hero-bg{ background:
+    radial-gradient(130% 70% at 50% 14%, rgba(216,178,90,.24), transparent 52%),
+    radial-gradient(140% 42% at 50% 60%, rgba(216,178,90,.12), transparent 62%),
+    linear-gradient(180deg, #283029 0%, #313A32 44%, #222A24 100%); }
+.v2b .moon{ position:absolute; top:6%; right:12%; width:58px; height:58px; border-radius:50%;
+  background:radial-gradient(circle at 38% 38%, #F4E9CE, #D8B25A 62%, rgba(216,178,90,.2) 100%);
+  box-shadow:0 0 40px rgba(216,178,90,.4); }
+.v2b .mist{ position:absolute; left:0; right:0; bottom:32%; height:22%;
+  background:linear-gradient(180deg, transparent, rgba(210,222,214,.18), transparent); filter:blur(11px);
+  animation:heroDrift 26s ease-in-out infinite alternate; }
+.v2b .ridge{ position:absolute; left:-2%; right:-2%; bottom:0; }
+.v2b .ridge.r1{ height:50%;
+  background:linear-gradient(180deg, rgba(58,78,68,.6), rgba(34,46,38,.82));
+  clip-path:polygon(0 58%,14% 40%,28% 52%,44% 30%,58% 47%,74% 33%,88% 48%,100% 38%,100% 100%,0 100%); filter:blur(.4px); }
+.v2b .ridge.r2{ height:34%;
+  background:linear-gradient(180deg, rgba(28,38,32,.7), #1B231D);
+  clip-path:polygon(0 72%,20% 56%,38% 67%,56% 49%,74% 62%,100% 47%,100% 100%,0 100%); }
+.v2b .hero-scrim{ background:linear-gradient(180deg,
+    rgba(20,28,22,.42) 0%, transparent 24%, transparent 58%,
+    rgba(20,28,22,.4) 80%, rgba(20,28,22,.72) 100%); }
+.v2b .ky{ color:#E1C079; }
+.v2b .hero-say h1{ color:#F2EEE4; }
+.v2b .hero-say h1 em{ color:#E9D49B; }
+.v2b .say-meta{ color:rgba(255,255,255,.55); } .v2b .say-meta b{ color:#E1C079; }
+/* 暖墨 → 浅色 过渡，柔化反差 */
+.v2b .home-sheet{ margin-top:-30px; border-radius:30px 30px 0 0;
+  background:linear-gradient(180deg, #EFEDE4 0%, var(--paper) 14%); box-shadow:0 -14px 34px rgba(20,28,22,.22); }

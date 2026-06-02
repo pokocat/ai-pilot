@@ -1,0 +1,132 @@
+/* ============================================================
+   首屏 · 献策 — C 刊头一句话 + 大气背景 + A 对话入口
+   ============================================================ */
+.hero{ position:absolute; inset:0; overflow:hidden; display:flex; flex-direction:column; color:#fff; }
+
+/* —— 背景层 —— */
+.hero-bg{ position:absolute; inset:0; z-index:0; }
+.hero-bg image-slot{ width:100%; height:100%; display:block; }
+
+/* 水墨大气（纯 CSS，无需图片） */
+.hero-bg.ink{
+  background:
+    radial-gradient(135% 72% at 50% 14%, rgba(216,178,90,.22), transparent 52%),
+    radial-gradient(90% 50% at 78% 8%, rgba(216,178,90,.12), transparent 60%),
+    radial-gradient(140% 38% at 50% 62%, rgba(216,178,90,.10), transparent 62%),
+    linear-gradient(180deg, #0E1419 0%, #16221F 46%, #0A110F 100%);
+}
+.hero-bg.ink .ridge{ position:absolute; left:-2%; right:-2%; bottom:0; }
+.hero-bg.ink .ridge.r1{ height:50%;
+  background:linear-gradient(180deg, rgba(34,52,46,.6), rgba(10,18,16,.82));
+  clip-path:polygon(0 58%,14% 40%,28% 52%,44% 30%,58% 47%,74% 33%,88% 48%,100% 38%,100% 100%,0 100%);
+  filter:blur(.4px); }
+.hero-bg.ink .ridge.r2{ height:34%;
+  background:linear-gradient(180deg, rgba(8,14,12,.7), #070C0A);
+  clip-path:polygon(0 72%,20% 56%,38% 67%,56% 49%,74% 62%,100% 47%,100% 100%,0 100%); }
+.hero-bg.ink .mist{ position:absolute; left:0; right:0; bottom:32%; height:22%;
+  background:linear-gradient(180deg, transparent, rgba(196,210,203,.16), transparent); filter:blur(11px);
+  animation:heroDrift 26s ease-in-out infinite alternate; }
+.hero-bg.ink::before{ content:""; position:absolute; left:0; right:0; top:-8%; height:56%; pointer-events:none;
+  background:radial-gradient(58% 100% at 28% 42%, rgba(200,212,206,.07), transparent 70%),
+            radial-gradient(48% 100% at 76% 30%, rgba(200,212,206,.055), transparent 70%);
+  filter:blur(7px); animation:heroDrift 34s ease-in-out infinite alternate; }
+@keyframes heroDrift{ from{ transform:translateX(-6%) } to{ transform:translateX(7%) } }
+@media (prefers-reduced-motion:reduce){ .hero-bg.ink .mist, .hero-bg.ink::before{ animation:none } }
+.hero-bg.ink .moon{ position:absolute; top:6%; right:12%; width:58px; height:58px; border-radius:50%;
+  background:radial-gradient(circle at 38% 38%, #F4E9CE, #D8B25A 62%, rgba(216,178,90,.2) 100%);
+  box-shadow:0 0 40px rgba(216,178,90,.45); }
+
+/* 影像版占位提示 */
+.hero-bg.img{ background:linear-gradient(180deg,#11161B,#0A110F); }
+.hero-bg.img::after{ content:""; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(180deg, rgba(8,12,16,.52) 0%, rgba(8,12,16,.14) 26%, transparent 44%,
+    rgba(6,10,14,.5) 68%, rgba(6,10,14,.88) 100%); }
+
+/* —— 压暗，保证文字可读 —— */
+.hero-scrim{ position:absolute; inset:0; z-index:1; pointer-events:none;
+  background:linear-gradient(180deg, rgba(6,10,9,.52) 0%, rgba(6,10,9,.10) 22%, transparent 44%,
+    rgba(6,10,9,.45) 66%, rgba(6,10,9,.82) 88%, rgba(6,10,9,.94) 100%); }
+
+/* —— 内容 —— */
+.hero-content{ position:relative; z-index:2; flex:1; display:flex; flex-direction:column; padding:0 26px; }
+.hero-status{ display:flex; align-items:center; justify-content:space-between; height:50px; flex:0 0 50px;
+  font:600 15px/1 var(--sans); color:#fff; }
+.hero-status .right{ display:flex; align-items:center; gap:7px; }
+
+.hero-top{ display:flex; align-items:center; justify-content:space-between; }
+.hero-wm{ font:600 16px/1 var(--serif); letter-spacing:.26em; color:#fff; }
+.hero-issue{ font:500 10.5px/1 var(--mono); letter-spacing:.18em; color:rgba(255,255,255,.6); }
+
+.hero-say{ margin-top:52px; }
+.hero-say .ky{ font:500 11px/1 var(--mono); letter-spacing:.26em; text-transform:uppercase; color:#E1C079;
+  display:flex; align-items:center; gap:9px; }
+.hero-say .ky::before{ content:""; width:22px; height:1px; background:#E1C079; display:inline-block; }
+.hero-say h1{ font:600 33px/1.36 var(--serif); margin-top:19px; letter-spacing:.012em; text-wrap:balance;
+  text-shadow:0 2px 34px rgba(0,0,0,.45); }
+.hero-say h1 em{ font-style:normal; color:#E9D49B; }
+.hero-say .sign{ margin-top:20px; font-size:12px; color:rgba(255,255,255,.62); display:flex; align-items:center; gap:9px; }
+.hero-say .sign .d{ width:18px; height:1px; background:rgba(255,255,255,.5); }
+
+/* —— A 的对话入口（玻璃质感） —— */
+.hero-ask{ margin-top:auto; margin-bottom:30px; background:rgba(18,24,22,.52);
+  backdrop-filter:blur(18px) saturate(1.3); -webkit-backdrop-filter:blur(18px) saturate(1.3);
+  border:1px solid rgba(255,255,255,.16); border-radius:24px; padding:17px;
+  box-shadow:0 1px 0 rgba(255,255,255,.12) inset, 0 18px 50px rgba(0,0,0,.45); }
+.hero-ask .top{ display:flex; align-items:center; gap:10px; }
+.hero-ask .av{ width:36px; height:36px; border-radius:10px; background:var(--accent); color:#fff;
+  display:flex; align-items:center; justify-content:center; }
+.hero-ask .av .ic{ width:20px; height:20px; }
+.hero-ask .nm{ font:600 14px/1 var(--serif); letter-spacing:.02em; color:#fff; }
+.hero-ask .st{ font-size:10.5px; color:#A9BBB2; margin-top:5px; display:flex; align-items:center; gap:5px; }
+.hero-ask .dot{ width:6px; height:6px; border-radius:50%; background:var(--accent-bright); display:inline-block; }
+.hero-ask .q{ font:500 17px/1.45 var(--serif); margin:14px 0 12px; color:#fff; }
+.hero-ask .field{ display:flex; align-items:center; gap:10px; background:rgba(255,255,255,.10);
+  border:1px solid rgba(255,255,255,.16); border-radius:14px; padding:11px 12px 11px 15px; }
+.hero-ask .field input{ flex:1; background:none; border:0; outline:0; color:#EDEBE4; font-size:13px; font-family:var(--sans); }
+.hero-ask .field input::placeholder{ color:#9AA8A1; }
+.hero-ask .field .ico{ color:#A9BBB2; display:flex; } .hero-ask .field .ico .ic{ width:18px; height:18px; }
+.hero-ask .send{ width:34px; height:34px; border-radius:10px; background:var(--accent); color:#fff;
+  display:flex; align-items:center; justify-content:center; } .hero-ask .send .ic{ width:18px; height:18px; }
+.hero-ask .chips{ display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+.hero-ask .chip{ height:29px; padding:0 12px; border-radius:999px; background:rgba(255,255,255,.10);
+  border:1px solid rgba(255,255,255,.15); color:#DcE2DE; font-size:11.5px; display:flex; align-items:center; gap:6px; }
+.hero-ask .chip .ic{ width:13px; height:13px; color:var(--accent-bright); }
+
+/* 影像版：空占位提示文案 */
+image-slot{ --is-bg:#0E1419; }
+
+/* ============ 接入 App 首页：hero 作为首屏 + 轮播 + 资讯区 ============ */
+.hero-home{ position:relative; height:794px; overflow:hidden; color:#fff; display:flex; flex-direction:column; z-index:1; }
+.app-screen .hero-content{ padding-top:10px; }
+.app-screen .hero-ask{ margin-bottom:120px; }   /* 让出悬浮底栏 */
+
+/* 献策轮播 */
+.say-view{ overflow:hidden; touch-action:pan-y; cursor:grab; }
+.say-view:active{ cursor:grabbing; }
+.say-meta{ font:500 10.5px/1 var(--mono); letter-spacing:.14em; color:rgba(255,255,255,.55); margin-bottom:13px; }
+.say-meta b{ color:#E1C079; font-weight:600; }
+.say-track{ display:flex; transition:transform .55s cubic-bezier(.7,.02,.2,1); }
+.say-slide{ flex:0 0 100%; min-width:100%; }
+.say-slide h1{ font:600 31px/1.36 var(--serif); letter-spacing:.012em; text-wrap:balance;
+  text-shadow:0 2px 34px rgba(0,0,0,.45); }
+.say-slide h1 em{ font-style:normal; color:#E9D49B; }
+.say-dots{ display:flex; gap:7px; margin-top:18px; }
+.say-dots i{ width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,.32); transition:.35s; cursor:pointer; }
+.say-dots i.on{ width:18px; border-radius:3px; background:#E1C079; }
+
+/* 今日发现 peek */
+.hero-peek{ display:flex; align-items:center; gap:9px; margin-top:18px; cursor:pointer;
+  font-size:12.5px; color:rgba(255,255,255,.82); }
+.hero-peek .pdot{ width:7px; height:7px; border-radius:50%; background:#E1C079; box-shadow:0 0 0 4px rgba(225,192,121,.18); }
+.hero-peek .pmore{ margin-left:auto; display:flex; color:rgba(255,255,255,.6); }
+.hero-peek .pmore .ic{ width:15px; height:15px; transform:rotate(90deg); }
+
+/* hero 顶部铃铛 */
+.hero-top .bell{ width:36px; height:36px; border-radius:50%; background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.16); display:flex; align-items:center; justify-content:center; color:#fff; cursor:pointer; }
+.hero-top .bell .ic{ width:17px; height:17px; }
+
+/* 首屏下方的资讯区（浅色 sheet） */
+.home-sheet{ position:relative; z-index:2; background:var(--paper); border-radius:26px 26px 0 0;
+  margin-top:-26px; padding:24px 0 8px; box-shadow:0 -10px 30px rgba(0,0,0,.18); }
+.home-sheet .grab{ width:38px; height:4px; border-radius:2px; background:var(--line); margin:0 auto 18px; }
