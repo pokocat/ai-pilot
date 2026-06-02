@@ -1,6 +1,6 @@
 import Taro from '@tarojs/taro';
 import { colorByKey } from '../data/colors';
-import { api, type Agent, type Me } from './api';
+import { api, getUserId, setUserId, clearUserId, type Agent, type Me } from './api';
 
 // 轻量全局状态：本命色主题 + 用户/智能体缓存 + 订阅。
 // 跨页面共享，避免每页重复拉取。
@@ -49,6 +49,12 @@ export const store = {
   color: () => colorByKey(state.colorKey),
   themeClass: () => `theme-${state.colorKey}`,
   isOnboarded: () => state.onboarded,
+  isAuthed: () => !!getUserId(),
+  setOnboarded(v: boolean) {
+    state.onboarded = v;
+    safeSet(LS_ONBOARDED, v ? '1' : '');
+    emit();
+  },
   me: () => state.me,
   agents: () => state.agents,
   tab: () => state.tab,
@@ -70,14 +76,34 @@ export const store = {
     emit();
   },
   async loadMe() {
+    if (!getUserId()) return; // 未登录不拉取
     try {
       const me = await api.me();
       state.me = me;
       if (me.user.benmingColor && !safeGet(LS_COLOR)) {
         state.colorKey = me.user.benmingColor;
       }
+      if (typeof me.onboarded === 'boolean') state.onboarded = me.onboarded;
       emit();
-    } catch { /* 离线时忽略 */ }
+    } catch { /* 离线 / 401 时忽略 */ }
+  },
+  // 登录成功：落 token、同步账号状态，并拉取该账号数据
+  async afterLogin(token: string, onboarded: boolean, benmingColor?: string) {
+    setUserId(token);
+    state.onboarded = onboarded;
+    safeSet(LS_ONBOARDED, onboarded ? '1' : '');
+    if (benmingColor) { state.colorKey = benmingColor; safeSet(LS_COLOR, benmingColor); }
+    emit();
+    await this.loadMe();
+    await this.loadAgents();
+  },
+  logout() {
+    clearUserId();
+    state.me = null;
+    state.onboarded = false;
+    state.agents = [];
+    safeSet(LS_ONBOARDED, '');
+    emit();
   },
   async loadAgents() {
     try {

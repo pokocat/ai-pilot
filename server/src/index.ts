@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { env } from './env.js';
+import { authRoutes } from './routes/auth.js';
 import { metaRoutes } from './routes/meta.js';
 import { agentRoutes } from './routes/agents.js';
 import { profileRoutes } from './routes/profile.js';
@@ -13,6 +14,7 @@ const app = Fastify({ logger: { level: 'info' } });
 
 await app.register(cors, { origin: true });
 
+await app.register(authRoutes, { prefix: '/api' });
 await app.register(metaRoutes, { prefix: '/api' });
 await app.register(agentRoutes, { prefix: '/api' });
 await app.register(profileRoutes, { prefix: '/api' });

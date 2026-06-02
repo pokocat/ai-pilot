@@ -26,6 +26,13 @@ export default function Profile() {
     { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
     { ic: 'doc', t: '套餐与算力', s: me?.plan?.name ?? '决策版', onClick: () => Taro.showToast({ title: '套餐管理', icon: 'none' }) },
     { ic: 'insight', t: '设置', s: '', onClick: () => Taro.showToast({ title: '设置', icon: 'none' }) },
+    {
+      ic: 'lock', t: '退出登录', s: '',
+      onClick: () =>
+        Taro.showModal({ title: '退出登录', content: '确定退出当前账号？' }).then((r) => {
+          if (r.confirm) { s.logout(); Taro.reLaunch({ url: '/pages/home/index' }); }
+        }),
+    },
   ];
 
   return (
@@ -33,7 +40,7 @@ export default function Profile() {
       <View className="statusbar"><Text>9:41</Text><Text>我的</Text></View>
       <View className="pad">
         <View className="me-card card">
-          <View className="me-av serif" style={{ background: accent }}>王</View>
+          <View className="me-av serif" style={{ background: accent }}>{(me?.user.name ?? '王')[0]}</View>
           <View className="me-info">
             <Text className="me-name">{me?.user.name ?? '王总'}</Text>
             <Text className="me-org">{me?.tenant.name ?? '云栖科技'} · {me?.tenant.industry ?? 'SaaS / 软件'}</Text>

@@ -4,6 +4,7 @@ import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
 import Picker from '../../components/Picker';
+import Login from '../../components/Login';
 import { useStore } from '../../hooks/useStore';
 import { api } from '../../services/api';
 import './index.scss';
@@ -55,6 +56,7 @@ function SayingLine({ html, accent }: { html: string; accent: string }) {
 export default function Home() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
+  const [showLogin, setShowLogin] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerFirst, setPickerFirst] = useState(false);
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
@@ -68,7 +70,10 @@ export default function Home() {
   });
 
   useEffect(() => {
-    if (!s.isOnboarded()) {
+    // 登录门：未登录先登录；已登录但未建档再走本命色/建档
+    if (!s.isAuthed()) {
+      setShowLogin(true);
+    } else if (!s.isOnboarded()) {
       setPickerFirst(true);
       setShowPicker(true);
     }
@@ -184,6 +189,17 @@ export default function Home() {
           ))}
         </View>
       </View>
+
+      <Login
+        open={showLogin}
+        onLoggedIn={(onboarded) => {
+          setShowLogin(false);
+          if (!onboarded) {
+            setPickerFirst(true);
+            setShowPicker(true);
+          }
+        }}
+      />
 
       <Picker
         open={showPicker}

@@ -4,15 +4,20 @@ import { recallMemories } from './memory.js';
 import type { GenContext } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 
-/** 解析当前用户：演示环境用 x-user-id 头或回退到 seed 出的 demo 用户 */
-export async function resolveUser(userIdHeader?: string) {
-  if (userIdHeader) {
-    const u = await prisma.user.findUnique({ where: { id: userIdHeader }, include: { tenant: true } });
-    if (u) return u;
-  }
-  const demo = await prisma.user.findFirst({ include: { tenant: true } });
-  if (!demo) throw new Error('没有可用用户，请先运行 db:seed');
-  return demo;
+function unauthorized() {
+  return Object.assign(new Error('未登录或登录已失效'), { statusCode: 401, code: 'UNAUTHORIZED' });
+}
+
+/**
+ * 解析当前用户：token（x-user-id 头，值为 userId）必须有效。
+ * 不再回退 demo 用户——保证账号间数据隔离；无 token 或失效一律 401。
+ */
+export async function resolveUser(token?: string) {
+  const id = (token ?? '').trim();
+  if (!id) throw unauthorized();
+  const u = await prisma.user.findUnique({ where: { id }, include: { tenant: true } });
+  if (!u) throw unauthorized();
+  return u;
 }
 
 export async function buildGenContext(opts: {

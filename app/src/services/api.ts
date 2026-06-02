@@ -7,7 +7,7 @@ export const BASE_URL =
 
 const USER_KEY = 'junshi.userId';
 
-function userId(): string {
+export function getUserId(): string {
   try {
     return Taro.getStorageSync(USER_KEY) || '';
   } catch {
@@ -17,14 +17,21 @@ function userId(): string {
 export function setUserId(id: string) {
   Taro.setStorageSync(USER_KEY, id);
 }
+export function clearUserId() {
+  try { Taro.removeStorageSync(USER_KEY); } catch { /* noop */ }
+}
 
 async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
   const res = await Taro.request({
     url: `${BASE_URL}${path}`,
     method: method as any,
     data,
-    header: { 'Content-Type': 'application/json', 'x-user-id': userId() },
+    header: { 'Content-Type': 'application/json', 'x-user-id': getUserId() },
   });
+  if (res.statusCode === 401) {
+    clearUserId(); // token 失效：清掉，下次进首页回到登录
+    throw Object.assign(new Error((res.data as any)?.error || '未登录'), { code: 'UNAUTHORIZED', data: res.data });
+  }
   if (res.statusCode >= 400) {
     throw Object.assign(new Error((res.data as any)?.error || `HTTP ${res.statusCode}`), { data: res.data });
   }
@@ -37,7 +44,14 @@ export interface Me {
   tenant: { id: string; name: string; industry?: string; stage?: string };
   plan: { name: string; creditsPerMonth: number } | null;
   creditBalance: number;
-  ai: { provider: string; model: string; claudeReady: boolean };
+  onboarded?: boolean;
+  ai: { provider: string; model: string; ready?: boolean; claudeReady: boolean };
+}
+export interface LoginResult {
+  token: string;
+  isNew: boolean;
+  onboarded: boolean;
+  user: { id: string; name: string; phone: string; benmingColor: string };
 }
 export interface Agent {
   key: string; name: string; role: string; icon: string; type: string;
@@ -73,6 +87,7 @@ export interface LibItem {
 
 // —— API ——
 export const api = {
+  login: (phone: string, name?: string) => request<LoginResult>('/auth/login', 'POST', { phone, name }),
   me: () => request<Me>('/me'),
   setColor: (color: string) => request<{ ok: boolean }>('/me/color', 'PUT', { color }),
   agents: () => request<Agent[]>('/agents'),

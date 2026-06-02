@@ -14,11 +14,13 @@ export async function metaRoutes(app: FastifyInstance) {
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
     });
+    const onboarded = !!(await prisma.profile.findFirst({ where: { tenantId: user.tenantId } }));
     return {
       user: { id: user.id, name: user.name, role: user.role, benmingColor: user.benmingColor },
       tenant: { id: user.tenant.id, name: user.tenant.name, industry: user.tenant.industry, stage: user.tenant.stage },
       plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth } : null,
       creditBalance: credit?.balance ?? 0,
+      onboarded,
       ai: providerInfo(),
     };
   });
