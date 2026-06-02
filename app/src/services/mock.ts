@@ -2,7 +2,10 @@ import Taro from '@tarojs/taro';
 import type {
   Agent, Me, LoginResult, SurveyQuestion, Profile, TodaySaying,
   SessionItem, SessionDetail, SessionMessage, GenRequest, GenResult,
-  Deliverable, LibItem, SaveLibRequest,
+  Deliverable, DeliverableSection, LibItem, SaveLibRequest,
+  ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
+  ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
+  KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
 } from '../../../shared/contracts';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
@@ -25,12 +28,30 @@ const SAYINGS = [
 // ── 每账号(token)隔离、落 Taro storage 的内存库 ──
 interface SessionRec {
   id: string; agentKey: string; title: string;
+  projectId?: string | null;
   createdAt: string; updatedAt: string;
   messages: SessionMessage[];
+}
+interface ReportVersionRec {
+  id: string; version: number; title: string; content: Deliverable; contentHash: string;
+  changeSummary: string | null; authorKind: string; sessionId: string | null; at: string;
+}
+interface ReportDocRec {
+  id: string; title: string; slug: string; type: string; agentKey: string | null;
+  projectId: string | null; currentVersion: number; updatedAt: string; versions: ReportVersionRec[];
+}
+interface KnowledgeRec {
+  id: string; projectId: string | null; kind: string; title: string | null; text: string;
+  sourceType: string; sourceId: string | null; tags: string[]; at: string;
+}
+interface ProjectRec {
+  id: string; name: string; slug: string; icon: string; summary: string | null;
+  status: 'active' | 'archived'; createdAt: string; updatedAt: string;
 }
 interface UserData {
   name: string; phone: string; benmingColor: string; onboarded: boolean;
   profile: Profile | null; sessions: SessionRec[]; library: LibItem[];
+  projects: ProjectRec[]; reports: ReportDocRec[]; knowledge: KnowledgeRec[];
 }
 
 const uid = (p = '') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -40,10 +61,15 @@ const dataKey = (token: string) => `mock.data.${token}`;
 function load(token: string): UserData {
   try {
     const raw = Taro.getStorageSync(dataKey(token));
-    if (raw) return typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (raw) {
+      const d = (typeof raw === 'string' ? JSON.parse(raw) : raw) as UserData;
+      // 兼容旧存档：补齐新增集合
+      d.projects ??= []; d.reports ??= []; d.knowledge ??= [];
+      return d;
+    }
   } catch { /* noop */ }
   const phone = token.replace(/^(mock-|local-)/, '');
-  return { name: `用户${phone.slice(-4)}`, phone, benmingColor: 'gold', onboarded: false, profile: null, sessions: [], library: [] };
+  return { name: `用户${phone.slice(-4)}`, phone, benmingColor: 'gold', onboarded: false, profile: null, sessions: [], library: [], projects: [], reports: [], knowledge: [] };
 }
 function save(token: string, d: UserData) {
   try { Taro.setStorageSync(dataKey(token), JSON.stringify(d)); } catch { /* noop */ }
@@ -74,6 +100,94 @@ function buildDeliverable(deliverableKey: string, d: UserData): Deliverable {
 }
 
 const delay = <T>(v: T, ms = 280): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
+
+// ── 版本化报告 / 知识 / 引用 的本地实现（与后端同口径，纯前端、零依赖） ──
+function slugify(title: string): string {
+  return (title || '未命名报告').trim().toLowerCase().replace(/\s+/g, '-').replace(/[^\w一-鿿-]/g, '').slice(0, 80) || 'report';
+}
+function canonical(obj: unknown): string {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return `[${obj.map(canonical).join(',')}]`;
+  const o = obj as Record<string, unknown>;
+  return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`;
+}
+const sectionsOf = (c: unknown): DeliverableSection[] => (c as { sections?: DeliverableSection[] } | null)?.sections ?? [];
+
+function diffSections(before: object, after: object): { sections: SectionDiff[]; summary: string; titleBefore: string; titleAfter: string } {
+  const bs = sectionsOf(before), as = sectionsOf(after);
+  const bMap = new Map(bs.map((s) => [s.h, s])), aMap = new Map(as.map((s) => [s.h, s]));
+  const out: SectionDiff[] = [];
+  let added = 0, removed = 0, changed = 0;
+  for (const s of as) {
+    const prev = bMap.get(s.h);
+    if (!prev) { out.push({ change: 'added', h: s.h, after: s }); added++; }
+    else if (canonical(prev) !== canonical(s)) { out.push({ change: 'changed', h: s.h, before: prev, after: s }); changed++; }
+    else out.push({ change: 'unchanged', h: s.h, before: prev, after: s });
+  }
+  for (const s of bs) if (!aMap.has(s.h)) { out.push({ change: 'removed', h: s.h, before: s }); removed++; }
+  const titleBefore = (before as { title?: string }).title ?? '', titleAfter = (after as { title?: string }).title ?? '';
+  const parts = [`新增 ${added} 段`, `修改 ${changed} 段`, `删除 ${removed} 段`];
+  if (titleBefore && titleAfter && titleBefore !== titleAfter) parts.unshift('标题有变');
+  return { sections: out, summary: parts.join(' · '), titleBefore, titleAfter };
+}
+
+function keywordScore(q: string, text: string): number {
+  const terms = [...(q.toLowerCase().match(/[a-z0-9]+/g) ?? []), ...(q.match(/[一-鿿]{2,}/g) ?? [])];
+  if (!terms.length) return 0;
+  const lower = text.toLowerCase();
+  let hit = 0; for (const t of terms) if (lower.includes(t)) hit++;
+  return hit / terms.length;
+}
+
+// 把显式引用解析成「标签 + 注入行」，并附带知识库召回，给 mock 产出体现「引用生效」
+function resolveRefs(d: UserData, refs: MessageRef[] | undefined, query: string, projectId?: string | null): { labels: string[]; notes: string[] } {
+  const labels: string[] = [], notes: string[] = [];
+  for (const r of (refs ?? []).slice(0, 6)) {
+    if (r.kind === 'project') { const p = d.projects.find((x) => x.id === r.id); if (p) { labels.push(`项目《${p.name}》`); notes.push(p.summary || p.name); } }
+    else if (r.kind === 'report') { const rep = d.reports.find((x) => x.id === r.id); if (rep) { const v = rep.versions[rep.versions.length - 1]; labels.push(`报告《${rep.title}》v${rep.currentVersion}`); notes.push(v ? sectionsOf(v.content).map((s) => s.h).join('、') : rep.title); } }
+    else if (r.kind === 'knowledge') { const k = d.knowledge.find((x) => x.id === r.id); if (k) { labels.push(`知识「${k.title ?? k.text.slice(0, 12)}」`); notes.push(k.text); } }
+  }
+  // 自动召回：知识库关键词命中
+  const hits = d.knowledge.filter((k) => !projectId || k.projectId === projectId)
+    .map((k) => ({ k, s: keywordScore(query, `${k.title ?? ''} ${k.text}`) }))
+    .filter((x) => x.s > 0.1).sort((a, b) => b.s - a.s).slice(0, 2);
+  for (const h of hits) { labels.push(h.k.title ?? h.k.text.slice(0, 12)); notes.push(h.k.text); }
+  return { labels, notes };
+}
+
+// 本地保存一版报告：同名归一、同内容去重、自动变更摘要
+function saveReportVersionLocal(d: UserData, opts: { title: string; type: string; agentKey?: string | null; projectId?: string | null; content: Deliverable; authorKind?: string; sessionId?: string | null }): SaveReportResult & { reportId: string } {
+  const slug = slugify(opts.title);
+  const hash = canonical(opts.content);
+  let doc = d.reports.find((r) => r.slug === slug);
+  let created = false;
+  if (!doc) {
+    doc = { id: uid('r-'), title: opts.title, slug, type: opts.type, agentKey: opts.agentKey ?? null, projectId: opts.projectId ?? null, currentVersion: 0, updatedAt: now(), versions: [] };
+    d.reports.push(doc); created = true;
+  }
+  const latest = doc.versions[doc.versions.length - 1];
+  if (latest && latest.contentHash === hash) return { reportId: doc.id, version: latest.version, created, changed: false };
+  const changeSummary = created ? '首个版本' : diffSections(latest!.content as object, opts.content as object).summary;
+  const version = doc.currentVersion + 1;
+  doc.versions.push({ id: uid('v-'), version, title: opts.title, content: opts.content, contentHash: hash, changeSummary, authorKind: opts.authorKind ?? 'agent', sessionId: opts.sessionId ?? null, at: now() });
+  doc.currentVersion = version; doc.title = opts.title; doc.type = opts.type; doc.updatedAt = now();
+  if (opts.projectId) doc.projectId = opts.projectId;
+  if (opts.agentKey) doc.agentKey = opts.agentKey;
+  return { reportId: doc.id, version, created, changed: true };
+}
+
+function ingestKnowledgeLocal(d: UserData, opts: { kind: string; title?: string | null; text: string; projectId?: string | null; sourceType: string; sourceId?: string | null; tags?: string[] }): KnowledgeRec {
+  const rec: KnowledgeRec = { id: uid('k-'), projectId: opts.projectId ?? null, kind: opts.kind, title: opts.title ?? null, text: opts.text, sourceType: opts.sourceType, sourceId: opts.sourceId ?? null, tags: opts.tags ?? [], at: now() };
+  d.knowledge.unshift(rec); return rec;
+}
+
+const projItem = (d: UserData, p: ProjectRec): ProjectItem => ({
+  id: p.id, name: p.name, slug: p.slug, icon: p.icon, summary: p.summary, status: p.status,
+  counts: { sessions: d.sessions.filter((s) => s.projectId === p.id).length, reports: d.reports.filter((r) => r.projectId === p.id).length, knowledge: d.knowledge.filter((k) => k.projectId === p.id).length },
+  updatedAt: p.updatedAt,
+});
+const reportItem = (r: ReportDocRec): ReportItem => ({ id: r.id, title: r.title, slug: r.slug, type: r.type, agentKey: r.agentKey, agentName: r.agentKey ? agentOf(r.agentKey).name : undefined, projectId: r.projectId, currentVersion: r.currentVersion, updatedAt: r.updatedAt });
+const knItem = (k: KnowledgeRec): KnowledgeItemT => ({ id: k.id, projectId: k.projectId, kind: k.kind as KnowledgeItemT['kind'], title: k.title, text: k.text, sourceType: k.sourceType, sourceId: k.sourceId, tags: k.tags, at: k.at });
 
 // ── mock api（与后端同口径） ──
 export const mock = {
@@ -131,7 +245,7 @@ export const mock = {
         let snippet = '新对话';
         if (last) { const c = last.content as any; snippet = c.text || (c.title ? `已产出《${c.title}》` : '已回复'); }
         const ag = agentOf(s.agentKey);
-        return { id: s.id, agentKey: s.agentKey, agentName: ag.name, agentIcon: ag.icon, title: s.title, snippet, updatedAt: s.updatedAt };
+        return { id: s.id, agentKey: s.agentKey, agentName: ag.name, agentIcon: ag.icon, title: s.title, snippet, updatedAt: s.updatedAt, projectId: s.projectId };
       }),
     );
   },
@@ -144,7 +258,7 @@ export const mock = {
     return delay({
       id: s.id, agentKey: s.agentKey,
       agent: { key: ag.key, name: ag.name, role: ag.role, icon: ag.icon, greet: ag.greet, chips: ag.chips, memText: ag.memText, learnText: ag.learnText },
-      title: s.title, messages: s.messages,
+      title: s.title, projectId: s.projectId, messages: s.messages,
     });
   },
 
@@ -160,31 +274,43 @@ export const mock = {
     let session = body.sessionId ? d.sessions.find((s) => s.id === body.sessionId) : undefined;
     const agentKey = session?.agentKey ?? body.agentKey ?? agentForText(text);
     const ag = agentOf(agentKey);
+    // 项目归属：已有会话优先，否则用入参（校验存在）
+    const projectId = session?.projectId ?? (body.projectId && d.projects.some((p) => p.id === body.projectId) ? body.projectId : null);
 
     let created = false;
     if (!session) {
-      session = { id: uid('s-'), agentKey: ag.key, title: text.slice(0, 18) || '新对话', createdAt: now(), updatedAt: now(), messages: [] };
+      session = { id: uid('s-'), agentKey: ag.key, projectId, title: text.slice(0, 18) || '新对话', createdAt: now(), updatedAt: now(), messages: [] };
       d.sessions.push(session); created = true;
-    } else if (session.title === '新对话') {
-      session.title = text.slice(0, 18);
+    } else {
+      if (session.title === '新对话') session.title = text.slice(0, 18);
+      if (!session.projectId && projectId) session.projectId = projectId;
     }
-    session.messages.push({ id: uid('m-'), role: 'user', content: { text }, at: now() });
+    session.messages.push({ id: uid('m-'), role: 'user', content: { text }, at: now(), refs: body.refs });
+
+    // 引用解析 + 知识召回（让 mock 也能体现「引用生效」）
+    const { labels, notes } = resolveRefs(d, body.refs, text, projectId);
+    const refSec = notes.slice(0, 4).map((n) => n.replace(/^【[^】]*】/, '').slice(0, 60));
+    const projName = projectId ? d.projects.find((p) => p.id === projectId)?.name : undefined;
 
     let res: GenResult;
     if (ag.deliverableKey) {
       const deliverable = buildDeliverable(ag.deliverableKey, d);
+      if (projName) deliverable.meta = `${deliverable.meta} · ${projName}`;
+      if (refSec.length) deliverable.sections.push({ h: '参考依据', list: refSec });
       const msg: SessionMessage = { id: uid('m-'), role: 'report', content: deliverable, at: now() };
       session.messages.push(msg);
       res = {
         sessionId: session.id, created, agentKey: ag.key, kind: 'report', messageId: msg.id,
         deliverable, memory: ag.key !== 'general' ? { learned: true, agentName: ag.name } : null,
+        knowledgeUsed: labels,
       };
     } else {
       const r = REPLIES['默认'];
-      const reply = { text: r.t, points: r.points, acts: r.acts };
+      const points = refSec.length ? [...r.points, `已参考：${refSec.join('；')}`] : r.points;
+      const reply = { text: r.t, points, acts: r.acts };
       const msg: SessionMessage = { id: uid('m-'), role: 'assistant', content: reply, at: now() };
       session.messages.push(msg);
-      res = { sessionId: session.id, created, agentKey: ag.key, kind: 'chat', messageId: msg.id, reply };
+      res = { sessionId: session.id, created, agentKey: ag.key, kind: 'chat', messageId: msg.id, reply, knowledgeUsed: labels };
     }
     session.updatedAt = now();
     save(token, d);
@@ -196,14 +322,163 @@ export const mock = {
     return delay([...d.library].sort((a, b) => (a.at < b.at ? 1 : -1)));
   },
 
-  async saveToLibrary(body: SaveLibRequest): Promise<{ id: string; at: string }> {
+  async saveToLibrary(body: SaveLibRequest): Promise<{ id: string; at: string; reportId?: string; version?: number }> {
     const { token, d } = current();
     const ag = agentOf(body.agentKey);
+    const sess = body.sessionId ? d.sessions.find((s) => s.id === body.sessionId) : undefined;
+    const projectId = body.projectId ?? sess?.projectId ?? null;
+    // 桥接：存库即写一版版本化报告
+    const saved = saveReportVersionLocal(d, {
+      title: body.title, type: body.type, agentKey: body.agentKey, projectId,
+      content: body.content as Deliverable, authorKind: 'user', sessionId: body.sessionId ?? null,
+    });
     const item: LibItem = {
       id: uid('d-'), title: body.title, type: body.type, agentKey: body.agentKey, agentName: ag.name,
       sessionId: body.sessionId ?? null, content: body.content as Deliverable, at: now(),
+      reportId: saved.reportId, version: saved.version, projectId,
     };
     d.library.unshift(item); save(token, d);
-    return delay({ id: item.id, at: item.at });
+    return delay({ id: item.id, at: item.at, reportId: saved.reportId, version: saved.version });
+  },
+
+  // —— 项目 ——
+  async projects(): Promise<ProjectItem[]> {
+    const { d } = current();
+    return delay([...d.projects].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).map((p) => projItem(d, p)));
+  },
+  async project(id: string): Promise<ProjectDetail> {
+    const { d } = current();
+    const p = d.projects.find((x) => x.id === id);
+    if (!p) throw Object.assign(new Error('project not found'), { code: 'NOT_FOUND' });
+    const sessions: SessionItem[] = d.sessions.filter((s) => s.projectId === id).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).map((s) => {
+      const last = s.messages[s.messages.length - 1]; let snippet = '新对话';
+      if (last) { const c = last.content as any; snippet = c.text || (c.title ? `已产出《${c.title}》` : '已回复'); }
+      const a = agentOf(s.agentKey);
+      return { id: s.id, agentKey: s.agentKey, agentName: a.name, agentIcon: a.icon, title: s.title, snippet, updatedAt: s.updatedAt, projectId: s.projectId };
+    });
+    return delay({
+      ...projItem(d, p),
+      sessions,
+      reports: d.reports.filter((r) => r.projectId === id).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).map(reportItem),
+      knowledge: d.knowledge.filter((k) => k.projectId === id).map(knItem),
+    });
+  },
+  async createProject(body: CreateProjectRequest): Promise<{ id: string; name: string; slug: string }> {
+    const { token, d } = current();
+    let slug = slugify(body.name);
+    if (d.projects.some((p) => p.slug === slug)) slug = `${slug}-${Date.now().toString(36).slice(-4)}`;
+    const p: ProjectRec = { id: uid('p-'), name: body.name, slug, icon: body.icon || 'layers', summary: body.summary ?? null, status: 'active', createdAt: now(), updatedAt: now() };
+    d.projects.unshift(p); save(token, d);
+    return delay({ id: p.id, name: p.name, slug: p.slug });
+  },
+  async updateProject(id: string, body: UpdateProjectRequest): Promise<{ ok: boolean }> {
+    const { token, d } = current();
+    const p = d.projects.find((x) => x.id === id);
+    if (p) {
+      if (body.name) { p.name = body.name; p.slug = slugify(body.name); }
+      if (body.icon) p.icon = body.icon;
+      if (body.summary !== undefined) p.summary = body.summary;
+      if (body.status) p.status = body.status;
+      p.updatedAt = now(); save(token, d);
+    }
+    return delay({ ok: true });
+  },
+  async deleteProject(id: string): Promise<{ ok: boolean }> {
+    const { token, d } = current();
+    d.projects = d.projects.filter((p) => p.id !== id);
+    d.sessions.forEach((s) => { if (s.projectId === id) s.projectId = null; });
+    d.reports.forEach((r) => { if (r.projectId === id) r.projectId = null; });
+    d.knowledge.forEach((k) => { if (k.projectId === id) k.projectId = null; });
+    save(token, d);
+    return delay({ ok: true });
+  },
+
+  // —— 版本化报告 ——
+  async reports(projectId?: string): Promise<ReportItem[]> {
+    const { d } = current();
+    return delay(d.reports.filter((r) => !projectId || r.projectId === projectId).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)).map(reportItem));
+  },
+  async report(id: string): Promise<ReportDetail> {
+    const { d } = current();
+    const r = d.reports.find((x) => x.id === id);
+    if (!r) throw Object.assign(new Error('report not found'), { code: 'NOT_FOUND' });
+    return delay({
+      ...reportItem(r),
+      versions: [...r.versions].sort((a, b) => b.version - a.version).map((v) => ({ id: v.id, version: v.version, title: v.title, changeSummary: v.changeSummary, authorKind: v.authorKind, sessionId: v.sessionId, at: v.at })),
+    });
+  },
+  async reportVersion(id: string, v?: number): Promise<ReportVersionContent> {
+    const { d } = current();
+    const r = d.reports.find((x) => x.id === id);
+    if (!r) throw Object.assign(new Error('report not found'), { code: 'NOT_FOUND' });
+    const ver = v ? r.versions.find((x) => x.version === v) : r.versions[r.versions.length - 1];
+    if (!ver) throw Object.assign(new Error('version not found'), { code: 'NOT_FOUND' });
+    return delay({ reportId: r.id, version: ver.version, title: ver.title, content: ver.content, at: ver.at });
+  },
+  async reportDiff(id: string, from: number, to: number): Promise<ReportDiff> {
+    const { d } = current();
+    const r = d.reports.find((x) => x.id === id);
+    if (!r) throw Object.assign(new Error('report not found'), { code: 'NOT_FOUND' });
+    const vFrom = r.versions.find((x) => x.version === from), vTo = r.versions.find((x) => x.version === to);
+    if (!vFrom || !vTo) throw Object.assign(new Error('version not found'), { code: 'NOT_FOUND' });
+    const dd = diffSections(vFrom.content as object, vTo.content as object);
+    return delay({ reportId: id, from, to, title: { before: dd.titleBefore, after: dd.titleAfter }, sections: dd.sections, summary: dd.summary });
+  },
+  async saveReport(body: SaveReportRequest): Promise<SaveReportResult> {
+    const { token, d } = current();
+    const saved = saveReportVersionLocal(d, { title: body.title, type: body.type || '成果', agentKey: body.agentKey ?? null, projectId: body.projectId ?? null, content: body.content as Deliverable, authorKind: body.authorKind ?? 'user', sessionId: body.sessionId ?? null });
+    save(token, d);
+    return delay({ reportId: saved.reportId, version: saved.version, created: saved.created, changed: saved.changed });
+  },
+
+  // —— 知识库 ——
+  async knowledge(projectId?: string, kind?: string): Promise<KnowledgeItemT[]> {
+    const { d } = current();
+    return delay(d.knowledge.filter((k) => (!projectId || k.projectId === projectId) && (!kind || k.kind === kind)).map(knItem));
+  },
+  async knowledgeSearch(q: string, projectId?: string): Promise<KnowledgeHit[]> {
+    const { d } = current();
+    if (!q.trim()) return delay([]);
+    return delay(
+      d.knowledge.filter((k) => !projectId || k.projectId === projectId)
+        .map((k) => ({ item: knItem(k), score: Number(keywordScore(q, `${k.title ?? ''} ${k.text}`).toFixed(4)), snippet: k.text.slice(0, 120) }))
+        .filter((h) => h.score > 0).sort((a, b) => b.score - a.score).slice(0, 8),
+    );
+  },
+  async createKnowledge(body: CreateKnowledgeRequest): Promise<KnowledgeItemT> {
+    const { token, d } = current();
+    const rec = ingestKnowledgeLocal(d, { kind: body.kind ?? 'document', title: body.title ?? null, text: body.text, projectId: body.projectId ?? null, sourceType: body.sourceType ?? 'manual', sourceId: body.sourceId ?? null, tags: body.tags ?? [] });
+    save(token, d);
+    return delay(knItem(rec));
+  },
+  async deleteKnowledge(id: string): Promise<{ ok: boolean }> {
+    const { token, d } = current();
+    d.knowledge = d.knowledge.filter((k) => k.id !== id); save(token, d);
+    return delay({ ok: true });
+  },
+
+  // —— 对话汇总 ——
+  async summarize(sessionId: string): Promise<SummarizeResult> {
+    const { token, d } = current();
+    const s = d.sessions.find((x) => x.id === sessionId);
+    if (!s) throw Object.assign(new Error('session not found'), { code: 'NOT_FOUND' });
+    const ag = agentOf(s.agentKey);
+    const userPoints: string[] = [], reportTitles: string[] = [], replyPoints: string[] = [];
+    for (const m of s.messages) {
+      const c = m.content as any;
+      if (m.role === 'user' && c.text) userPoints.push(String(c.text).slice(0, 60));
+      else if (m.role === 'report' && c.title) reportTitles.push(c.title);
+      else if (m.role === 'assistant') { if (c.text) replyPoints.push(String(c.text).slice(0, 60)); (c.points ?? []).forEach((p: string) => replyPoints.push(p)); }
+    }
+    const sections: DeliverableSection[] = [{ h: '讨论要点', list: (userPoints.length ? userPoints : ['（本次对话内容较少）']).slice(0, 6) }];
+    if (reportTitles.length) sections.push({ h: '本次产出', list: reportTitles.map((t) => `已产出《${t}》`).slice(0, 6) });
+    sections.push({ h: '关键结论', list: (replyPoints.length ? replyPoints : ['顾问已给出阶段性判断，详见对话原文。']).slice(0, 6) });
+    sections.push({ h: '待办与决策', b: '将上述结论中需要跟进的事项纳入项目推进；重大决策请结合专业意见。' });
+    const deliverable: Deliverable = { title: `《${s.title}》对话纪要`, icon: 'doc', meta: `${ag.name} · 对话汇总`, sections, trust: TRUST_NOTE, actions: ['save_to_library', 'export_pdf'] };
+    const saved = saveReportVersionLocal(d, { title: deliverable.title, type: '对话纪要', agentKey: s.agentKey, projectId: s.projectId ?? null, content: deliverable, authorKind: 'agent', sessionId: s.id });
+    const insight = sections.flatMap((x) => (x.list ?? []).concat(x.b ? [x.b] : [])).join('；').slice(0, 1000);
+    if (insight) ingestKnowledgeLocal(d, { kind: 'insight', title: deliverable.title, text: insight, projectId: s.projectId ?? null, sourceType: 'conversation', sourceId: s.id, tags: [ag.name, '对话纪要'] });
+    save(token, d);
+    return delay({ reportId: saved.reportId, version: saved.version, title: deliverable.title, knowledgeAdded: insight ? 1 : 0 });
   },
 };

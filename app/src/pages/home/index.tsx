@@ -153,6 +153,16 @@ export default function Home() {
           </View>
         </View>
 
+        {/* 项目工作台入口 */}
+        <View className="home-proj card" onClick={() => Taro.navigateTo({ url: '/pages/projects/index' })}>
+          <View className="hp-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="grid" size={18} color={accent} /></View>
+          <View className="hp-b">
+            <Text className="hp-t">项目工作台</Text>
+            <Text className="hp-s">把融资、新品、组织调整建成项目，对话 / 报告 / 知识有序归拢</Text>
+          </View>
+          <Text className="hp-go" style={{ color: accent }}>›</Text>
+        </View>
+
         {/* 军师为你发现 */}
         <View className="sec-head">
           <Text className="sec-title">军师为你发现</Text>

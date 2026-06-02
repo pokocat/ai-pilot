@@ -5,6 +5,9 @@ import { mock } from './mock';
 import type {
   Me, Agent, SurveyQuestion, SessionItem, SessionDetail,
   GenResult, GenRequest, LibItem, LoginResult, Profile, TodaySaying, SaveLibRequest,
+  ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
+  ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
+  KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -14,6 +17,12 @@ export type {
 export type { SurveyQuestion as SurveyQ } from '../../../shared/contracts';
 export type { DeliverableSection as Section } from '../../../shared/contracts';
 export type { ChatReply as ChatReplyT } from '../../../shared/contracts';
+// 新能力类型再导出（项目 / 报告 / 知识 / 引用）
+export type {
+  ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
+  ReportItem, ReportDetail, ReportVersionItem, ReportVersionContent, ReportDiff, SectionDiff,
+  KnowledgeItemT, KnowledgeHit, SummarizeResult, MessageRef, RefKind,
+} from '../../../shared/contracts';
 
 // token 助手（兼容旧导出名）
 export { getToken as getUserId, setToken as setUserId, clearToken as clearUserId } from './token';
@@ -56,5 +65,44 @@ export const api = {
     IS_MOCK ? mock.generate(body) : request<GenResult>('/generate-sync', 'POST', body),
   library: () => (IS_MOCK ? mock.library() : request<LibItem[]>('/library')),
   saveToLibrary: (body: SaveLibRequest) =>
-    IS_MOCK ? mock.saveToLibrary(body) : request<{ id: string; at: string }>('/library', 'POST', body),
+    IS_MOCK ? mock.saveToLibrary(body) : request<{ id: string; at: string; reportId?: string; version?: number }>('/library', 'POST', body),
+
+  // —— 项目（企业事务主线） ——
+  projects: () => (IS_MOCK ? mock.projects() : request<ProjectItem[]>('/projects')),
+  project: (id: string) => (IS_MOCK ? mock.project(id) : request<ProjectDetail>(`/projects/${id}`)),
+  createProject: (body: CreateProjectRequest) =>
+    IS_MOCK ? mock.createProject(body) : request<{ id: string; name: string; slug: string }>('/projects', 'POST', body),
+  updateProject: (id: string, body: UpdateProjectRequest) =>
+    IS_MOCK ? mock.updateProject(id, body) : request<{ ok: boolean }>(`/projects/${id}`, 'PUT', body),
+  deleteProject: (id: string) =>
+    IS_MOCK ? mock.deleteProject(id) : request<{ ok: boolean }>(`/projects/${id}`, 'DELETE'),
+
+  // —— 版本化报告 ——
+  reports: (projectId?: string) =>
+    IS_MOCK ? mock.reports(projectId) : request<ReportItem[]>(`/reports${projectId ? `?projectId=${projectId}` : ''}`),
+  report: (id: string) => (IS_MOCK ? mock.report(id) : request<ReportDetail>(`/reports/${id}`)),
+  reportVersion: (id: string, v?: number) =>
+    IS_MOCK ? mock.reportVersion(id, v) : request<ReportVersionContent>(`/reports/${id}/version${v ? `?v=${v}` : ''}`),
+  reportDiff: (id: string, from: number, to: number) =>
+    IS_MOCK ? mock.reportDiff(id, from, to) : request<ReportDiff>(`/reports/${id}/diff?from=${from}&to=${to}`),
+  saveReport: (body: SaveReportRequest) =>
+    IS_MOCK ? mock.saveReport(body) : request<SaveReportResult>('/reports', 'POST', body),
+
+  // —— 知识库 ——
+  knowledge: (projectId?: string, kind?: string) =>
+    IS_MOCK ? mock.knowledge(projectId, kind)
+      : request<KnowledgeItemT[]>(`/knowledge${projectId || kind ? `?${projectId ? `projectId=${projectId}` : ''}${projectId && kind ? '&' : ''}${kind ? `kind=${kind}` : ''}` : ''}`),
+  knowledgeSearch: (q: string, projectId?: string) =>
+    IS_MOCK ? mock.knowledgeSearch(q, projectId)
+      : request<KnowledgeHit[]>(`/knowledge/search?q=${encodeURIComponent(q)}${projectId ? `&projectId=${projectId}` : ''}`),
+  createKnowledge: (body: CreateKnowledgeRequest) =>
+    IS_MOCK ? mock.createKnowledge(body) : request<KnowledgeItemT>('/knowledge', 'POST', body),
+  deleteKnowledge: (id: string) =>
+    IS_MOCK ? mock.deleteKnowledge(id) : request<{ ok: boolean }>(`/knowledge/${id}`, 'DELETE'),
+
+  // —— 对话汇总（→ 版本化报告 + 知识库） ——
+  summarize: (sessionId: string) =>
+    IS_MOCK ? mock.summarize(sessionId) : request<SummarizeResult>(`/sessions/${sessionId}/summarize`, 'POST', {}),
 };
+
+export type { GenRequest, SaveLibRequest, MessageRef as Ref };

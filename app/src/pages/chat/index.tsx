@@ -4,13 +4,14 @@ import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../components/Icon';
 import ReportCard from '../../components/ReportCard';
 import { useStore } from '../../hooks/useStore';
-import { api, type Agent, type Deliverable, type ChatReplyT } from '../../services/api';
+import { store } from '../../services/store';
+import { api, type Agent, type Deliverable, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT } from '../../services/api';
 import { agentForText } from '../../data/intents';
 import './index.scss';
 
 type Msg =
   | { role: 'greet'; agent: Agent }
-  | { role: 'user'; text: string }
+  | { role: 'user'; text: string; refs?: MessageRef[] }
   | { role: 'assistant'; reply: ChatReplyT }
   | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean }
   | { role: 'memory'; agentName: string };
@@ -21,10 +22,14 @@ export default function Chat() {
   const accent = s.color().vars['--accent'];
   const [agent, setAgent] = useState<Agent | null>(null);
   const [sessionId, setSessionId] = useState<string>('');
+  const [projectId, setProjectId] = useState<string>('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
+  const [refs, setRefs] = useState<MessageRef[]>([]);
+  const [picker, setPicker] = useState(false);
+  const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[] }>({ projects: [], reports: [], knowledge: [] });
   const logRef = useRef<Msg[]>([]);
   logRef.current = msgs;
 
@@ -40,7 +45,8 @@ export default function Chat() {
         await s.loadAgents();
         agents = s.agents();
       }
-      const { sessionId: sid, agentKey, send, fresh } = router.params as Record<string, string>;
+      const { sessionId: sid, agentKey, send, fresh, projectId: pid } = router.params as Record<string, string>;
+      if (pid) setProjectId(pid);
       const key = agentKey || (send ? agentForText(decodeURIComponent(send)) : 'general');
       const fallbackAgent = agents.find((a) => a.key === key) || agents.find((a) => a.key === 'general') || agents[0];
 
@@ -50,6 +56,7 @@ export default function Chat() {
           const ag = agents.find((a) => a.key === detail.agentKey) || (detail.agent as any) || fallbackAgent;
           setAgent(ag);
           setSessionId(sid);
+          if (detail.projectId) setProjectId(detail.projectId);
           restore(ag, detail.messages);
           return;
         }
@@ -63,6 +70,7 @@ export default function Chat() {
           if (latest) {
             const detail = await api.session(latest.id);
             setSessionId(latest.id);
+            if (detail.projectId) setProjectId(detail.projectId);
             restore(fallbackAgent, detail.messages);
             if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key), 300);
             return;
@@ -81,10 +89,10 @@ export default function Chat() {
     })();
   }, []);
 
-  function restore(ag: Agent, messages: { role: string; content: any }[]) {
+  function restore(ag: Agent, messages: { role: string; content: any; refs?: MessageRef[] }[]) {
     const out: Msg[] = [{ role: 'greet', agent: ag }];
     messages.forEach((m) => {
-      if (m.role === 'user') out.push({ role: 'user', text: m.content.text });
+      if (m.role === 'user') out.push({ role: 'user', text: m.content.text, refs: m.refs });
       else if (m.role === 'report') out.push({ role: 'report', deliverable: m.content, animate: false, saved: false });
       else out.push({ role: 'assistant', reply: m.content });
     });
@@ -92,13 +100,13 @@ export default function Chat() {
     setTimeout(scrollToEnd, 60);
   }
 
-  async function doSend(text: string, sid: string, agentKey: string) {
+  async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = []) {
     if (busy) return;
     setBusy(true);
-    setMsgs((m) => [...m, { role: 'user', text }]);
+    setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
     try {
-      const res = await api.generate({ text, sessionId: sid || undefined, agentKey });
+      const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
       if (res.sessionId && !sid) setSessionId(res.sessionId);
       if (res.kind === 'report' && res.deliverable) {
         setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true }]);
@@ -123,16 +131,67 @@ export default function Chat() {
     const v = input.trim();
     if (!v || !agent) return;
     setInput('');
-    doSend(v, sessionId, agent.key);
+    const sending = refs;
+    setRefs([]);
+    doSend(v, sessionId, agent.key, sending);
   };
 
   const saveDeliverable = async (d: Deliverable) => {
     if (!agent) return;
     await api.saveToLibrary({
       title: d.title, type: agent.deliverableKey || d.title, agentKey: agent.key,
-      sessionId: sessionId || undefined, content: d as any,
+      sessionId: sessionId || undefined, content: d as any, projectId: projectId || undefined,
     }).catch(() => {});
     Taro.showToast({ title: '已存入方案库', icon: 'none' });
+  };
+
+  // 生成对话纪要 → 版本化报告 + 沉淀知识库
+  const onSummarize = async () => {
+    if (!sessionId) { Taro.showToast({ title: '先开始对话再生成纪要', icon: 'none' }); return; }
+    Taro.showLoading({ title: '正在生成纪要…' });
+    try {
+      const r = await api.summarize(sessionId);
+      Taro.hideLoading();
+      Taro.showToast({ title: `已生成《${r.title}》v${r.version}`, icon: 'none' });
+      setTimeout(() => Taro.navigateTo({ url: `/pages/report/index?id=${r.reportId}` }), 700);
+    } catch {
+      Taro.hideLoading();
+      Taro.showToast({ title: '生成纪要失败', icon: 'none' });
+    }
+  };
+
+  // 打开 @引用选择器：拉取可引用的 项目/报告/知识
+  const openPicker = async () => {
+    setPicker(true);
+    store.setOverlay(true);
+    const [projects, reports, knowledge] = await Promise.all([
+      api.projects().catch(() => []),
+      api.reports(projectId || undefined).catch(() => []),
+      api.knowledge(projectId || undefined).catch(() => []),
+    ]);
+    setPick({ projects, reports, knowledge });
+  };
+  const closePicker = () => { setPicker(false); store.setOverlay(false); };
+  const toggleRef = (r: MessageRef) => {
+    setRefs((cur) => cur.some((x) => x.kind === r.kind && x.id === r.id) ? cur.filter((x) => !(x.kind === r.kind && x.id === r.id)) : [...cur, r]);
+  };
+  const hasRef = (kind: string, id: string) => refs.some((x) => x.kind === kind && x.id === id);
+  const renderGroup = (title: string, items: { kind: MessageRef['kind']; id: string; label: string; sub?: string; version?: number }[]) => {
+    if (!items.length) return null;
+    return (
+      <View className="ref-group">
+        <Text className="ref-gt">{title}</Text>
+        {items.map((it) => {
+          const on = hasRef(it.kind, it.id);
+          return (
+            <View key={it.kind + it.id} className={`ref-item ${on ? 'on' : ''}`} style={on ? { borderColor: accent } : {}} onClick={() => toggleRef({ kind: it.kind, id: it.id, label: it.label, version: it.version })}>
+              <View className="ref-ib"><Text className="ref-il">{it.label}</Text>{it.sub ? <Text className="ref-is">{it.sub}</Text> : null}</View>
+              <View className="ref-ck" style={on ? { background: accent, borderColor: accent } : {}}>{on ? <Icon name="check" size={12} color="#fff" /> : null}</View>
+            </View>
+          );
+        })}
+      </View>
+    );
   };
 
   return (
@@ -160,6 +219,16 @@ export default function Chat() {
         </View>
       )}
 
+      {/* 项目作用域 + 生成纪要 */}
+      <View className="chat-tools">
+        {projectId ? (
+          <View className="ct-proj" style={{ background: 'var(--accent-soft)' }} onClick={() => Taro.navigateTo({ url: `/pages/project/index?id=${projectId}` })}>
+            <Icon name="layers" size={12} color={accent} /><Text style={{ color: accent }}>项目内对话</Text>
+          </View>
+        ) : <View className="ct-spacer" />}
+        <View className="ct-sum" onClick={onSummarize}><Icon name="doc" size={13} color="#565C63" /><Text>生成纪要</Text></View>
+      </View>
+
       {/* 对话流 */}
       <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false}>
         {msgs.map((m, i) => {
@@ -181,7 +250,14 @@ export default function Chat() {
             );
           }
           if (m.role === 'user') {
-            return <View key={i} className="msg u"><View className="ubub" style={{ background: accent }}><Text>{m.text}</Text></View></View>;
+            return (
+              <View key={i} className="msg u">
+                <View className="ubub" style={{ background: accent }}><Text>{m.text}</Text></View>
+                {m.refs?.length ? (
+                  <View className="uref">{m.refs.map((r, j) => <Text key={j} className="uref-chip">@{r.label}</Text>)}</View>
+                ) : null}
+              </View>
+            );
           }
           if (m.role === 'assistant') {
             return (
@@ -217,17 +293,50 @@ export default function Chat() {
         <View style={{ height: '20px' }} />
       </ScrollView>
 
+      {/* 已选引用 */}
+      {refs.length ? (
+        <View className="ref-row">
+          {refs.map((r, j) => (
+            <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
+              <Text style={{ color: accent }}>@{r.label}</Text><Text className="ref-x">✕</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       {/* 输入区 */}
       <View className="composer">
         <View className="box">
-          <Icon name="attach" size={18} color="#969BA1" />
-          <Input className="cinput" value={input} placeholder="向顾问提问…" confirmType="send" onInput={(e) => setInput(e.detail.value)} onConfirm={onSend} />
+          <View className="cbtn" onClick={openPicker}><Icon name="attach" size={18} color={refs.length ? accent : '#969BA1'} /></View>
+          <Input className="cinput" value={input} placeholder="向顾问提问…（点 📎 引用项目/报告/知识）" confirmType="send" onInput={(e) => setInput(e.detail.value)} onConfirm={onSend} />
           <Icon name="mic" size={18} color="#969BA1" />
         </View>
         <View className={`csend ${busy ? 'busy' : ''}`} style={{ background: accent }} onClick={onSend}>
           <Icon name="send" size={18} color="#fff" />
         </View>
       </View>
+
+      {/* @引用选择器 */}
+      {picker && (
+        <View className="ref-sheet">
+          <View className="ref-mask" onClick={closePicker} />
+          <View className="ref-panel">
+            <View className="ref-ph">
+              <Text className="ref-pt">引用资料</Text>
+              <Text className="ref-done" style={{ color: accent }} onClick={closePicker}>完成{refs.length ? ` (${refs.length})` : ''}</Text>
+            </View>
+            <ScrollView scrollY className="ref-body" enhanced showScrollbar={false}>
+              {renderGroup('项目', pick.projects.map((p) => ({ kind: 'project' as const, id: p.id, label: p.name, sub: `${p.counts.reports} 报告 · ${p.counts.knowledge} 知识` })))}
+              {renderGroup('报告', pick.reports.map((r) => ({ kind: 'report' as const, id: r.id, label: `${r.title} v${r.currentVersion}`, version: r.currentVersion, sub: r.type })))}
+              {renderGroup('知识', pick.knowledge.map((k) => ({ kind: 'knowledge' as const, id: k.id, label: k.title || k.text.slice(0, 14), sub: k.text.slice(0, 24) })))}
+              {(!pick.projects.length && !pick.reports.length && !pick.knowledge.length) ? (
+                <Text className="ref-empty">还没有可引用的项目/报告/知识。先建项目、产出报告或记录知识，这里就能 @ 它们。</Text>
+              ) : null}
+              <View style={{ height: '12px' }} />
+            </ScrollView>
+          </View>
+        </View>
+      )}
     </View>
   );
 }

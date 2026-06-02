@@ -28,6 +28,9 @@ model Tenant {
   memories     Memory[]
   credits      CreditLedger[]
   audits       AuditLog[]
+  projects     Project[]
+  reports      ReportDoc[]
+  knowledge    KnowledgeItem[]
 
   @@map("tenant")
 }
@@ -91,16 +94,18 @@ model Agent {
   sessions     Session[]
   deliverables Deliverable[]
   memories     Memory[]
+  reportDocs   ReportDoc[]
 
   @@map("agent")
 }
 
-/// 会话（按 用户×智能体 隔离，可回溯）
+/// 会话（按 用户×智能体 隔离，可回溯；可归属项目）
 model Session {
   id        String   @id @default(cuid())
   tenantId  String
   userId    String
   agentKey  String
+  projectId String? // 归属项目（散落会话为 null）
   title     String   @default("新对话")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -108,10 +113,12 @@ model Session {
   tenant   Tenant        @relation(fields: [tenantId], references: [id])
   user     User          @relation(fields: [userId], references: [id])
   agent    Agent         @relation(fields: [agentKey], references: [key])
+  project  Project?      @relation(fields: [projectId], references: [id])
   messages Message[]
   deliverables Deliverable[]
 
   @@index([userId, agentKey])
+  @@index([projectId])
   @@map("session")
 }
 
@@ -121,6 +128,7 @@ model Message {
   sessionId   String
   role        String // user | assistant | report
   contentJson Json // { text } | { key, ...deliverable } 等
+  refsJson    Json? // MessageRef[]：本条消息引用的 项目/报告/知识/记忆
   createdAt   DateTime @default(now())
 
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
@@ -129,12 +137,14 @@ model Message {
   @@map("message")
 }
 
-/// 成果（方案库）
+/// 成果（方案库）。存库即桥接到版本化报告（reportId 指向 ReportDoc）。
 model Deliverable {
   id          String   @id @default(cuid())
   tenantId    String
   userId      String
   sessionId   String?
+  projectId   String?
+  reportId    String? // 桥接：该成果对应的版本化报告
   agentKey    String
   title       String
   type        String // 成果类型 = deliverableKey
@@ -152,26 +162,137 @@ model Deliverable {
   @@map("deliverable")
 }
 
-/// 长期记忆（按 用户×智能体 隔离）
+/// 长期记忆（按 用户×智能体 隔离；可归属项目，可语义召回）
 model Memory {
   id        String    @id @default(cuid())
   tenantId  String
   userId    String
   agentKey  String
+  projectId String? // 归属项目（跨智能体共享时可空）
   kind      String // fact | preference | feedback
   text      String    @db.Text
-  embedding Json? // float[]（生产用 pgvector）
+  embedding Json? // float[]（生产用 pgvector；本地降级内存余弦）
   weight    Float     @default(1.0)
   source    String // conversation | document | deliverable_feedback
   createdAt DateTime  @default(now())
   expiresAt DateTime?
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  user   User   @relation(fields: [userId], references: [id])
-  agent  Agent  @relation(fields: [agentKey], references: [key])
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  agent   Agent    @relation(fields: [agentKey], references: [key])
+  project Project? @relation(fields: [projectId], references: [id])
 
   @@index([userId, agentKey])
+  @@index([projectId])
   @@map("memory")
+}
+
+/// 项目（企业事务主线）—— 串起 会话 / 报告 / 知识 / 记忆，租户级
+model Project {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String // 创建者
+  name      String
+  slug      String // 归一化名（租户内唯一）
+  icon      String   @default("layers")
+  summary   String?  @db.Text // LLM 维护的项目滚动摘要（被引用时注入上下文）
+  status    String   @default("active") // active | archived
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant          @relation(fields: [tenantId], references: [id])
+  sessions  Session[]
+  reports   ReportDoc[]
+  knowledge KnowledgeItem[]
+  memories  Memory[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, userId])
+  @@map("project")
+}
+
+/// 逻辑报告（按「报告名(slug)」唯一）—— 版本管理的锚点
+model ReportDoc {
+  id             String   @id @default(cuid())
+  tenantId       String
+  projectId      String?
+  userId         String
+  title          String
+  slug           String // 报告名归一化 → 版本管理 key
+  type           String // 战略体检 / 增长方案 / …
+  agentKey       String?
+  currentVersion Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id])
+  project  Project?        @relation(fields: [projectId], references: [id])
+  agent    Agent?          @relation(fields: [agentKey], references: [key])
+  versions ReportVersion[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, userId])
+  @@index([projectId])
+  @@map("report_doc")
+}
+
+/// 不可变版本快照（内容寻址去重 + 变更摘要）
+model ReportVersion {
+  id            String   @id @default(cuid())
+  reportId      String
+  version       Int
+  title         String
+  contentJson   Json // Deliverable 结构
+  contentHash   String // sha256(canonical(content)) → 去重/校验
+  changeSummary String?  @db.Text // 相对上一版的变更摘要
+  authorKind    String   @default("agent") // agent | user
+  sessionId     String? // 来自哪次对话
+  createdAt     DateTime @default(now())
+
+  report ReportDoc @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, version])
+  @@index([reportId])
+  @@map("report_version")
+}
+
+/// 知识库条目（租户级，可挂项目）—— 统一承载：对话提炼 / 上传文档 / 报告引用
+model KnowledgeItem {
+  id         String   @id @default(cuid())
+  tenantId   String
+  projectId  String?
+  userId     String
+  kind       String // insight | document | decision | todo | report_ref
+  title      String?
+  text       String   @db.Text // 规范化文本（用于检索/注入）
+  sourceType String // conversation | upload | deliverable | manual
+  sourceId   String? // sessionId / reportVersionId / uploadId
+  tagsJson   Json     @default("[]")
+  createdAt  DateTime @default(now())
+
+  tenant  Tenant           @relation(fields: [tenantId], references: [id])
+  project Project?         @relation(fields: [projectId], references: [id])
+  chunks  KnowledgeChunk[]
+
+  @@index([tenantId, projectId])
+  @@map("knowledge_item")
+}
+
+/// 知识切片 + 向量（生产用 pgvector vector 类型 + HNSW；本地降级 Json + 内存余弦）
+model KnowledgeChunk {
+  id        String   @id @default(cuid())
+  itemId    String
+  tenantId  String
+  ord       Int
+  text      String   @db.Text
+  embedding Json? // float[]
+  createdAt DateTime @default(now())
+
+  item KnowledgeItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@index([tenantId])
+  @@map("knowledge_chunk")
 }
 
 /// 每日献策

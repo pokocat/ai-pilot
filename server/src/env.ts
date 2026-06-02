@@ -19,5 +19,9 @@ export const env = {
   openaiModel: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
   openaiTimeoutMs: Number(process.env.OPENAI_TIMEOUT_MS ?? 20000),
 
+  // 嵌入模型（知识库/语义记忆）。留空=用本地确定性嵌入（零依赖、离线）；
+  // 配置后 + openai 兼容真实 key，走 /embeddings 真实向量（生产建议配合 pgvector）。
+  embeddingModel: process.env.EMBEDDING_MODEL ?? '',
+
   moderationEnabled: (process.env.MODERATION_ENABLED ?? 'true') === 'true',
 };

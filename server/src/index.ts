@@ -8,6 +8,9 @@ import { profileRoutes } from './routes/profile.js';
 import { sayingRoutes } from './routes/sayings.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { libraryRoutes } from './routes/library.js';
+import { projectRoutes } from './routes/projects.js';
+import { reportRoutes } from './routes/reports.js';
+import { knowledgeRoutes } from './routes/knowledge.js';
 import { adminRoutes } from './routes/admin.js';
 
 const app = Fastify({ logger: { level: 'info' } });
@@ -21,6 +24,9 @@ await app.register(profileRoutes, { prefix: '/api' });
 await app.register(sayingRoutes, { prefix: '/api' });
 await app.register(sessionRoutes, { prefix: '/api' });
 await app.register(libraryRoutes, { prefix: '/api' });
+await app.register(projectRoutes, { prefix: '/api' });
+await app.register(reportRoutes, { prefix: '/api' });
+await app.register(knowledgeRoutes, { prefix: '/api' });
 await app.register(adminRoutes, { prefix: '/api' });
 
 try {
