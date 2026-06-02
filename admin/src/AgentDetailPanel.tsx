@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
-import { api, type AgentDetail, type MemoryConfig } from './api';
+import { api, type AgentDetail, type MemoryConfig, type MemoryIntensity, type MemorySource } from './api';
 
 const VARS = ['{企业档案}', '{行业基准}', '{长期记忆}', '{本命色}'];
 const INTENSITY = [['conservative', '保守'], ['balanced', '均衡'], ['aggressive', '激进']];
@@ -28,7 +28,7 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
   if (!data || !mem) return null;
 
   const insertVar = (v: string) => setPrompt((p) => (p.endsWith('\n') || !p ? p : p + ' ') + v);
-  const toggleSource = (s: string) =>
+  const toggleSource = (s: MemorySource) =>
     setMem((m) => m && ({ ...m, sources: m.sources.includes(s) ? m.sources.filter((x) => x !== s) : [...m.sources, s] }));
 
   const save = () => api.saveAgent(agentKey, { systemPrompt: prompt, memoryConfig: mem }).then(onSaved).catch(() => {});
@@ -65,7 +65,7 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
             </div>
             <div className="cfg-row">
               <div className="cb"><div className="ct">学习强度</div><div className="cs">更高更敏感，但也更易受单次对话影响</div></div>
-              <div className="seg">{INTENSITY.map(([v, l]) => <b key={v} className={mem.intensity === v ? 'on' : ''} onClick={() => setMem({ ...mem, intensity: v as string })}>{l}</b>)}</div>
+              <div className="seg">{INTENSITY.map(([v, l]) => <b key={v} className={mem.intensity === v ? 'on' : ''} onClick={() => setMem({ ...mem, intensity: v as MemoryIntensity })}>{l}</b>)}</div>
             </div>
             <div className="cfg-row">
               <div className="cb"><div className="ct">记忆留存</div><div className="cs">超出时长的低价值记忆自动淡化</div></div>
@@ -81,7 +81,7 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
               <div key={key} className="mem-card">
                 <span className="mi"><Icon name={ic} size={16} /></span>
                 <div className="mb"><div className="mt">{t}</div><div className="mm">{m}</div></div>
-                <div className={`sw ${mem.sources.includes(key) ? 'on' : ''}`} onClick={() => toggleSource(key)}><i /></div>
+                <div className={`sw ${mem.sources.includes(key as MemorySource) ? 'on' : ''}`} onClick={() => toggleSource(key as MemorySource)}><i /></div>
               </div>
             ))}
           </div>

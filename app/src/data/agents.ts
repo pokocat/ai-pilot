@@ -1,4 +1,4 @@
-import type { Agent } from '../services/api';
+import type { Agent } from '../../../shared/contracts';
 
 // 离线兜底：内置智能体注册表（仅公开字段，对齐后端 seed AGENTS）。
 // 后端可达时由 GET /agents 覆盖；不可达时用它，保证对话/智库/工坊不空白。

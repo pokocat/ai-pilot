@@ -1,26 +1,9 @@
 // 结构化成果数据契约（《投产开发指导》§4.2）。
 // 真实模型输出必须约束成此结构（claude 提供方用 tool/function calling 强约束）。
+// 成果/回复的数据模型统一来自 SSOT（shared/contracts），前后端/运营端同口径。
 
-export interface DeliverableSection {
-  h: string;
-  b?: string;
-  list?: string[];
-}
-
-export interface Deliverable {
-  title: string;
-  icon: string;
-  meta: string;
-  sections: DeliverableSection[];
-  trust: string;
-  actions: string[]; // ["save_to_library", "export_pdf"]
-}
-
-export interface ChatReply {
-  text: string;
-  points?: string[];
-  acts?: [string, string][]; // [icon, label]
-}
+import type { Deliverable, DeliverableSection, ChatReply } from '../../../shared/contracts';
+export type { Deliverable, DeliverableSection, ChatReply };
 
 export interface GenContext {
   agentKey: string;
