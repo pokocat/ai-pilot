@@ -34,8 +34,7 @@ export default function Sessions() {
   const newWith = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&fresh=1` });
 
   return (
-    <Screen>
-      <View className="statusbar"><Text>9:41</Text><Text>对话</Text></View>
+    <Screen topInset>
       <View className="pad">
         <View className="sess-hero">
           <View>

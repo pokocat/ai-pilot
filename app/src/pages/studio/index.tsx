@@ -22,8 +22,7 @@ export default function Studio() {
   const train = (name: string) => Taro.showToast({ title: `开始训练「${name}」`, icon: 'none' });
 
   return (
-    <Screen>
-      <View className="statusbar"><Text>9:41</Text><Text>智能体</Text></View>
+    <Screen topInset>
       <View className="pad">
         <View className="agents-hero">
           <Text className="kicker">Agent Studio · 出活</Text>

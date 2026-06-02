@@ -2,3 +2,7 @@
   height: 100vh;
   box-sizing: border-box;
 }
+/* 自定义导航顶部让位：系统状态栏 + 微信胶囊（真机由 JS 用胶囊实测值覆盖） */
+.nav-inset {
+  height: calc(env(safe-area-inset-top) + 52px);
+}

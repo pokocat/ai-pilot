@@ -12,9 +12,10 @@
 .zt-s .l { display: block; font-size: 11px; color: rgba(255,255,255,.55); margin-top: 2px; }
 
 .gh { font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink-2); margin: 22px 0 12px; }
-.agrid { display: flex; flex-wrap: wrap; gap: 10px; }
+/* 两列：space-between + 48.5%，避免 calc(50%-5px)+gap 取整溢出换行成竖排 */
+.agrid { display: flex; flex-wrap: wrap; justify-content: space-between; }
 .acard {
-  width: calc(50% - 5px); box-sizing: border-box; padding: 15px 14px; border-radius: var(--r-md); position: relative;
+  width: 48.5%; box-sizing: border-box; padding: 15px 14px; border-radius: var(--r-md); position: relative; margin-bottom: 10px;
 }
 .acard .gift {
   position: absolute; top: 12px; right: 12px; color: #fff;

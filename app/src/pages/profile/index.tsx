@@ -36,8 +36,7 @@ export default function Profile() {
   ];
 
   return (
-    <Screen>
-      <View className="statusbar"><Text>9:41</Text><Text>我的</Text></View>
+    <Screen topInset>
       <View className="pad">
         <View className="me-card card">
           <View className="me-av serif" style={{ background: accent }}>{(me?.user.name ?? '王')[0]}</View>

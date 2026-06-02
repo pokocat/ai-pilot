@@ -15,8 +15,7 @@ export default function ThinkTank() {
   const open = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` });
 
   return (
-    <Screen>
-      <View className="statusbar"><Text>9:41</Text><Text>智库</Text></View>
+    <Screen topInset>
       <View className="pad">
         <View className="agents-hero">
           <Text className="kicker">Think Tank · 入驻赠送</Text>

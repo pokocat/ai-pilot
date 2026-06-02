@@ -69,8 +69,10 @@
 .ins-desc { display: block; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .ins-act { display: flex; align-items: center; font-size: 12.5px; font-weight: 600; margin-top: 8px; }
 
-.tools { display: flex; flex-wrap: wrap; gap: 10px; }
-.tool { width: calc(50% - 5px); box-sizing: border-box; padding: 14px; border-radius: var(--r-md); }
+/* 两列：用 space-between + 48.5% 宽，避免 calc(50%-5px)+gap 凑满 100% 时
+   因亚像素取整溢出而换行成竖排 */
+.tools { display: flex; flex-wrap: wrap; justify-content: space-between; }
+.tool { width: 48.5%; box-sizing: border-box; padding: 14px; border-radius: var(--r-md); margin-bottom: 10px; }
 .tool-ic { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 9px; }
 .tool-h { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
 .tool-p { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
