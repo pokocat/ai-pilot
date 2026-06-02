@@ -19,6 +19,10 @@ export default function CustomTabBar() {
   const color = s.color();
   const accent = color.vars['--accent'];
 
+  // 有全屏弹层（如本命色 picker）时隐藏底栏——custom-tab-bar 是原生层，
+  // wx.hideTabBar 对其不可靠，改由我们自己的状态控制，确保弹层按钮不被遮挡。
+  if (s.overlay()) return null;
+
   const switchTo = (i: number) => {
     // 中间「对话」= 直接开新会话（参考主流 AI 应用），历史列表在对话页顶部「历史」入口
     if (i === 2) {

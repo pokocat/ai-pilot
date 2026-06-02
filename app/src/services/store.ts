@@ -14,6 +14,7 @@ interface AppState {
   me: Me | null;
   agents: Agent[];
   tab: number; // 当前底栏选中项（0..4）
+  overlay: boolean; // 是否有全屏弹层（如本命色 picker）打开——打开时隐藏自定义底栏
 }
 
 const state: AppState = {
@@ -22,6 +23,7 @@ const state: AppState = {
   me: null,
   agents: [],
   tab: 0,
+  overlay: false,
 };
 
 type Listener = () => void;
@@ -51,6 +53,8 @@ export const store = {
   agents: () => state.agents,
   tab: () => state.tab,
   setTab(i: number) { state.tab = i; emit(); },
+  overlay: () => state.overlay,
+  setOverlay(v: boolean) { if (state.overlay !== v) { state.overlay = v; emit(); } },
 
   setColor(key: string, persist = true) {
     state.colorKey = key;
