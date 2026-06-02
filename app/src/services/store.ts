@@ -1,5 +1,6 @@
 import Taro from '@tarojs/taro';
 import { colorByKey } from '../data/colors';
+import { DEFAULT_AGENTS } from '../data/agents';
 import { api, getUserId, setUserId, clearUserId, type Agent, type Me } from './api';
 
 // 轻量全局状态：本命色主题 + 用户/智能体缓存 + 订阅。
@@ -21,7 +22,7 @@ const state: AppState = {
   colorKey: safeGet(LS_COLOR) || 'gold',
   onboarded: safeGet(LS_ONBOARDED) === '1',
   me: null,
-  agents: [],
+  agents: DEFAULT_AGENTS, // 离线兜底；后端可达时由 loadAgents 覆盖
   tab: 0,
   overlay: false,
 };
@@ -107,9 +108,10 @@ export const store = {
   },
   async loadAgents() {
     try {
-      state.agents = await api.agents();
+      const list = await api.agents();
+      if (list?.length) state.agents = list; // 后端有数据才覆盖，否则保留兜底
       emit();
-    } catch { /* 离线时忽略 */ }
+    } catch { /* 离线时保留内置兜底 */ }
   },
   agentsByType(type: string) {
     return state.agents.filter((a) => a.type === type);

@@ -35,41 +35,49 @@ export default function Chat() {
   // 初始化：根据路由参数还原会话 / 打开顾问线程 / 新会话
   useEffect(() => {
     (async () => {
-      let agents = s.agents();
+      let agents = s.agents(); // 已含离线兜底，基本不为空
       if (!agents.length) {
         await s.loadAgents();
         agents = s.agents();
       }
       const { sessionId: sid, agentKey, send, fresh } = router.params as Record<string, string>;
-
-      if (sid) {
-        const detail = await api.session(sid);
-        const ag = agents.find((a) => a.key === detail.agentKey) || (detail.agent as any);
-        setAgent(ag);
-        setSessionId(sid);
-        restore(ag, detail.messages);
-        return;
-      }
-
       const key = agentKey || (send ? agentForText(decodeURIComponent(send)) : 'general');
-      const ag = agents.find((a) => a.key === key) || agents.find((a) => a.key === 'general')!;
-      setAgent(ag);
+      const fallbackAgent = agents.find((a) => a.key === key) || agents.find((a) => a.key === 'general') || agents[0];
 
-      // continue：找该顾问最近会话续聊；fresh/new：开新
-      if (!fresh) {
-        const list = await api.sessions().catch(() => []);
-        const latest = list.find((x) => x.agentKey === ag.key);
-        if (latest) {
-          const detail = await api.session(latest.id);
-          setSessionId(latest.id);
+      try {
+        if (sid) {
+          const detail = await api.session(sid);
+          const ag = agents.find((a) => a.key === detail.agentKey) || (detail.agent as any) || fallbackAgent;
+          setAgent(ag);
+          setSessionId(sid);
           restore(ag, detail.messages);
-          if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, ag.key), 300);
           return;
         }
+
+        setAgent(fallbackAgent);
+
+        // continue：找该顾问最近会话续聊；fresh/new：开新
+        if (!fresh) {
+          const list = await api.sessions().catch(() => []);
+          const latest = list.find((x) => x.agentKey === fallbackAgent.key);
+          if (latest) {
+            const detail = await api.session(latest.id);
+            setSessionId(latest.id);
+            restore(fallbackAgent, detail.messages);
+            if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key), 300);
+            return;
+          }
+        }
+        // 全新会话：仅渲染问候（不落库），首条消息时后端创建
+        setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+        if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key), 350);
+      } catch {
+        // 任何拉取失败都不让对话页空白：至少给出问候
+        if (fallbackAgent) {
+          setAgent(fallbackAgent);
+          setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+        }
       }
-      // 全新会话：仅渲染问候（不落库），首条消息时后端创建
-      setMsgs([{ role: 'greet', agent: ag }]);
-      if (send) setTimeout(() => doSend(decodeURIComponent(send), '', ag.key), 350);
     })();
   }, []);
 
