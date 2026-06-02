@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
+import Taro from '@tarojs/taro';
 import { COLORS, colorIndex } from '../../data/colors';
 import { api, type SurveyQ } from '../../services/api';
 import { store } from '../../services/store';
@@ -31,6 +32,14 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
   useEffect(() => {
     if (first) api.survey().then(setSurvey).catch(() => {});
   }, [first]);
+
+  // 微信小程序里 custom-tab-bar 是原生层，会盖在页面弹层之上，z-index 压不住。
+  // 弹层打开时直接隐藏底栏，关闭/卸载时恢复。
+  useEffect(() => {
+    if (open) Taro.hideTabBar({ animation: false }).catch(() => {});
+    else Taro.showTabBar({ animation: false }).catch(() => {});
+    return () => { Taro.showTabBar({ animation: false }).catch(() => {}); };
+  }, [open]);
 
   if (!open) return null;
   const c = COLORS[sel];

@@ -12,6 +12,11 @@
   padding: 26px 22px calc(28px + env(safe-area-inset-bottom));
   position: relative;
   animation: pk-rise .42s cubic-bezier(.2, .8, .2, 1) both;
+  /* 内容（尤其建档步骤的 3 个问题 + 按钮）过高时整卡可滚动，避免被裁切 */
+  max-height: 92vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
 }
 @keyframes pk-rise { from { transform: translateY(60px); opacity: .4; } to { transform: none; opacity: 1; } }
 .pk-close {
