@@ -30,6 +30,11 @@ function greetWord() {
   return '傍晚好';
 }
 
+function todayLabel() {
+  const d = new Date();
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 // 把 "<em>...</em>" 渲染为强调色片段（跨端，避免 dangerouslySetInnerHTML）
 function SayingLine({ html, accent }: { html: string; accent: string }) {
   const parts = html.split(/(<em>.*?<\/em>)/g).filter(Boolean);
@@ -52,8 +57,9 @@ export default function Home() {
   const accent = s.color().vars['--accent'];
   const [showPicker, setShowPicker] = useState(false);
   const [pickerFirst, setPickerFirst] = useState(false);
-  const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: '' });
+  const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
   const [input, setInput] = useState('');
+  const [navTop, setNavTop] = useState<number>();
   const me = s.me();
 
   useDidShow(() => {
@@ -66,7 +72,12 @@ export default function Home() {
       setPickerFirst(true);
       setShowPicker(true);
     }
-    api.todaySaying().then(setSaying).catch(() => {});
+    api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
+    // 自定义导航：把品牌行压到微信胶囊（右上角 ••• ⊙）之下，避免被遮挡
+    try {
+      const r = Taro.getMenuButtonBoundingClientRect?.();
+      if (r && r.bottom) setNavTop(r.bottom + 8);
+    } catch { /* H5 无胶囊，走 CSS 兜底 */ }
   }, []);
 
   const goChat = (params: string) => Taro.navigateTo({ url: `/pages/chat/index?${params}` });
@@ -78,11 +89,9 @@ export default function Home() {
 
   return (
     <Screen>
-      <View className="statusbar"><Text>9:41</Text><Text>军师</Text></View>
-
       <View className="pad">
-        {/* 品牌行 */}
-        <View className="brandrow">
+        {/* 品牌行 —— paddingTop 让位给系统状态栏 + 微信胶囊 */}
+        <View className="brandrow" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
           <View className="brand">
             <View className="brand-mk serif" style={{ background: accent }}>军</View>
             <View>
@@ -102,7 +111,7 @@ export default function Home() {
         </View>
 
         {/* 每日献策 */}
-        <View className="say-strip" style={{ borderColor: 'var(--accent-soft)' }}>
+        <View className="say-strip">
           <Text className="say-k" style={{ color: accent }}>今日献策 · {saying.date}</Text>
           <SayingLine html={saying.text} accent={accent} />
         </View>

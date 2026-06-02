@@ -1,6 +1,7 @@
 .brandrow {
   display: flex; align-items: center; justify-content: space-between;
-  padding-top: 14px;
+  /* 兜底：系统状态栏高度 + 胶囊区高度（真机由 JS 用胶囊实测值覆盖） */
+  padding-top: calc(env(safe-area-inset-top) + 52px);
 }
 .brand { display: flex; align-items: center; gap: 11px; }
 .brand-mk {
@@ -18,12 +19,13 @@
 .greet-h { display: block; font-size: 27px; font-weight: 700; color: var(--ink); }
 .greet-sub { display: block; font-size: 13.5px; color: var(--ink-2); margin-top: 6px; }
 
+/* 今日献策：贴合设计稿——一道分隔线 + 标签 + 大字批语，融入问候区而非独立白卡 */
 .say-strip {
-  margin-top: 16px; padding: 13px 16px; border-radius: 14px;
-  background: var(--surface); border: 1px solid var(--line);
+  margin-top: 18px; padding-top: 16px;
+  border-top: 1px solid var(--line);
 }
 .say-k { font-size: 11px; letter-spacing: .12em; font-weight: 600; }
-.say-line { display: block; font-size: 16px; line-height: 1.55; color: var(--ink); margin-top: 6px; }
+.say-line { display: block; font-size: 17px; line-height: 1.55; color: var(--ink); margin-top: 8px; }
 
 .ask {
   margin-top: 18px; padding: 16px; border-radius: var(--r-lg);
