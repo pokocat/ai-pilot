@@ -1,9 +1,9 @@
-# 军师 · AI 商业军师 —— 产品与工程总说明（agent.md）
+# 军师 · AI 商业军师 —— 产品与工程总说明（AGENTS.md）
 
-> **本文件是本项目的活文档（Single Source of Documentation）。**
+> **本文件是本项目的活文档（Single Source of Documentation），Claude Code 新会话会自动加载它。**
 > ⚠️ **维护约定（所有后续 agent 必须遵守）：每次变更 / 迭代代码后，都要同步更新本文件**——
 > 至少更新对应章节，并在末尾「变更日志」追加一条（日期 · 改动 · 影响）。
-> 文档与代码不一致视为缺陷。提交信息可简写，但 agent.md 必须反映当前真实状态。
+> 文档与代码不一致视为缺陷。提交信息可简写，但 AGENTS.md 必须反映当前真实状态。
 
 ---
 
@@ -25,7 +25,7 @@
 
 ```
 repo/
-├── agent.md            # ← 本文件：产品与工程总说明（活文档）
+├── AGENTS.md           # ← 本文件：产品与工程总说明（活文档，新会话自动加载）
 ├── IMPLEMENTATION.md   # 与《投产开发指导》章节的对应表（设计溯源）
 ├── shared/
 │   └── contracts.d.ts  # ★ SSOT：全栈数据契约（纯类型，运行时擦除）
@@ -230,6 +230,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-02** · 文档落为 `AGENTS.md`（Claude Code 新会话自动加载），确立「每次变更必更文档」约定。
 - **2026-06-02** · 配置化 mock/server 模式 + 全栈数据模型统一到 SSOT(`shared/contracts.d.ts`)；新增 `services/config.ts`/`mock.ts`/`token.ts`；后端/运营端类型改为引自 SSOT。三端构建全绿。
 - **2026-06-02** · 内置离线兜底智能体（`data/agents.ts` 14 个，自后端 seed 生成）+ 成果模板（`data/deliverables.ts`），修复无后端时对话页空白。
 - **2026-06-02** · 各 Tab 页顶部让位微信胶囊（`Screen topInset`，移除伪状态栏）；两列卡片改 `space-between+48.5%` 修复竖排。
