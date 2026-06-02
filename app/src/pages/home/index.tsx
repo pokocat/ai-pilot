@@ -73,10 +73,10 @@ export default function Home() {
       setShowPicker(true);
     }
     api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
-    // 自定义导航：把品牌行压到微信胶囊（右上角 ••• ⊙）之下，避免被遮挡
+    // 自定义导航：品牌行与微信胶囊（右上角 ••• ⊙）顶端对齐，左侧本就空着，不浪费纵向空间
     try {
       const r = Taro.getMenuButtonBoundingClientRect?.();
-      if (r && r.bottom) setNavTop(r.bottom + 8);
+      if (r && r.top) setNavTop(r.top);
     } catch { /* H5 无胶囊，走 CSS 兜底 */ }
   }, []);
 
@@ -90,7 +90,7 @@ export default function Home() {
   return (
     <Screen>
       <View className="pad">
-        {/* 品牌行 —— paddingTop 让位给系统状态栏 + 微信胶囊 */}
+        {/* 品牌行 —— 与微信胶囊顶端对齐（本命色切换已移至「我的」） */}
         <View className="brandrow" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
           <View className="brand">
             <View className="brand-mk serif" style={{ background: accent }}>军</View>
@@ -99,15 +99,12 @@ export default function Home() {
               <Text className="brand-sub">AI STRATEGIST</Text>
             </View>
           </View>
-          <View className="bell" onClick={() => { setPickerFirst(false); setShowPicker(true); }}>
-            <Icon name="insight" size={18} color="#565C63" />
-          </View>
         </View>
 
-        {/* 问候 */}
+        {/* 问候 —— 招呼语 + 精简提示同行 */}
         <View className="greet">
           <Text className="greet-h serif">{greetWord()}，{me?.user.name ?? '王总'}</Text>
-          <Text className="greet-sub">今天有 3 条军师为你准备的洞察 · 随时可开口。</Text>
+          <Text className="greet-tip">今天有 {INSIGHTS.length} 条新洞察</Text>
         </View>
 
         {/* 每日献策 */}

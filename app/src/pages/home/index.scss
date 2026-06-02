@@ -1,7 +1,7 @@
 .brandrow {
-  display: flex; align-items: center; justify-content: space-between;
-  /* 兜底：系统状态栏高度 + 胶囊区高度（真机由 JS 用胶囊实测值覆盖） */
-  padding-top: calc(env(safe-area-inset-top) + 52px);
+  display: flex; align-items: center;
+  /* 兜底：系统状态栏高度（真机由 JS 用胶囊顶端实测值覆盖） */
+  padding-top: calc(env(safe-area-inset-top) + 6px);
 }
 .brand { display: flex; align-items: center; gap: 11px; }
 .brand-mk {
@@ -10,14 +10,11 @@
 }
 .brand-nm { display: block; font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.1; }
 .brand-sub { font-size: 9px; letter-spacing: .22em; color: var(--ink-3); }
-.bell {
-  width: 38px; height: 38px; border-radius: 12px; background: var(--surface);
-  border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
-}
 
-.greet { margin-top: 22px; }
-.greet-h { display: block; font-size: 27px; font-weight: 700; color: var(--ink); }
-.greet-sub { display: block; font-size: 13.5px; color: var(--ink-2); margin-top: 6px; }
+/* 招呼语 + 精简提示：同一行、基线对齐 */
+.greet { margin-top: 16px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+.greet-h { font-size: 27px; font-weight: 700; color: var(--ink); }
+.greet-tip { font-size: 13px; color: var(--ink-2); }
 
 /* 今日献策：贴合设计稿——一道分隔线 + 标签 + 大字批语，融入问候区而非独立白卡 */
 .say-strip {
