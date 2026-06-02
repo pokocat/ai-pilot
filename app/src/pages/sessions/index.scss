@@ -1,0 +1,26 @@
+.sess-hero { display: flex; align-items: flex-end; justify-content: space-between; padding-top: 22px; }
+.sess-hero .h1 { display: block; margin-top: 4px; }
+.sess-new { display: flex; align-items: center; color: #fff; font-size: 13px; font-weight: 600; padding: 9px 15px; border-radius: 999px; }
+
+.agent-strip { white-space: nowrap; margin: 18px 0 4px; width: 100%; }
+.agent-chip { display: inline-flex; flex-direction: column; align-items: center; gap: 6px; width: 64px; margin-right: 6px; vertical-align: top; }
+.ac-ic { width: 48px; height: 48px; border-radius: 15px; display: flex; align-items: center; justify-content: center; }
+.ac-n { font-size: 10.5px; color: var(--ink-2); text-align: center; width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sl { font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink-2); margin: 20px 0 12px; }
+
+.sess-empty { text-align: center; padding: 40px 20px; }
+.e-ic { width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+.et { display: block; font-size: 15px; font-weight: 600; color: var(--ink); }
+.es { display: block; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); margin-top: 6px; }
+.es-link { display: block; font-size: 13px; font-weight: 600; margin-top: 10px; }
+
+.sess-list { display: flex; flex-direction: column; gap: 10px; }
+.sess-item { display: flex; gap: 12px; padding: 14px; border-radius: var(--r-md); }
+.si-ic { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.si-b { flex: 1; min-width: 0; }
+.si-top { display: flex; align-items: center; justify-content: space-between; }
+.si-agent { font-size: 13px; font-weight: 600; color: var(--ink); }
+.si-time { font-size: 11px; color: var(--ink-3); }
+.si-t { display: block; font-size: 13.5px; color: var(--ink); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.si-snip { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

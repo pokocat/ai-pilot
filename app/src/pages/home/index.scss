@@ -1,0 +1,62 @@
+.brandrow {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-top: 14px;
+}
+.brand { display: flex; align-items: center; gap: 11px; }
+.brand-mk {
+  width: 40px; height: 40px; border-radius: 12px; color: #fff;
+  font-size: 21px; font-weight: 700; text-align: center; line-height: 40px;
+}
+.brand-nm { display: block; font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.brand-sub { font-size: 9px; letter-spacing: .22em; color: var(--ink-3); }
+.bell {
+  width: 38px; height: 38px; border-radius: 12px; background: var(--surface);
+  border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+}
+
+.greet { margin-top: 22px; }
+.greet-h { display: block; font-size: 27px; font-weight: 700; color: var(--ink); }
+.greet-sub { display: block; font-size: 13.5px; color: var(--ink-2); margin-top: 6px; }
+
+.say-strip {
+  margin-top: 16px; padding: 13px 16px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.say-k { font-size: 11px; letter-spacing: .12em; font-weight: 600; }
+.say-line { display: block; font-size: 16px; line-height: 1.55; color: var(--ink); margin-top: 6px; }
+
+.ask {
+  margin-top: 18px; padding: 16px; border-radius: var(--r-lg);
+  background: #1B1E22; border: none;
+}
+.ask-top { display: flex; align-items: center; gap: 10px; }
+.ask-av { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.ask-id .nm { display: block; color: #fff; font-size: 14px; font-weight: 600; }
+.ask-id .st { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(255,255,255,.55); margin-top: 2px; }
+.ask-id .st .dot { width: 6px; height: 6px; border-radius: 50%; }
+.ask-q { display: block; color: #fff; font-size: 17px; font-weight: 600; margin: 14px 0 12px; }
+.ask-field {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,.08); border-radius: 13px; padding: 5px 5px 5px 14px;
+}
+.ask-input { flex: 1; color: #fff; font-size: 14px; height: 38px; }
+.ask-input::placeholder, .ask-field .input-placeholder { color: rgba(255,255,255,.4); }
+.ask-send { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.ask .chips { margin-top: 12px; }
+.ask .chip { background: rgba(255,255,255,.1); color: rgba(255,255,255,.9); }
+
+.insight {
+  display: flex; gap: 12px; padding: 14px; margin-bottom: 10px; border-radius: var(--r-md);
+}
+.ins-ic { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ins-body { flex: 1; min-width: 0; }
+.ins-tag { font-size: 11px; font-weight: 600; }
+.ins-ttl { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); margin: 3px 0 4px; }
+.ins-desc { display: block; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.ins-act { display: flex; align-items: center; font-size: 12.5px; font-weight: 600; margin-top: 8px; }
+
+.tools { display: flex; flex-wrap: wrap; gap: 10px; }
+.tool { width: calc(50% - 5px); box-sizing: border-box; padding: 14px; border-radius: var(--r-md); }
+.tool-ic { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 9px; }
+.tool-h { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
+.tool-p { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }

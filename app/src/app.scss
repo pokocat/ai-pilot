@@ -1,0 +1,115 @@
+/* ============================================================
+   军师 · 全局设计系统 —— 对齐原型 styles/tokens.css
+   暖 off-white 底 + 墨色 + 本命色强调；Noto Serif SC 标题 / Noto Sans SC 正文
+   ============================================================ */
+
+page {
+  --bg: #F4F2EC;
+  --paper: #FBFAF6;
+  --surface: #FFFFFF;
+  --surface-2: #F3F1EA;
+
+  --ink: #16191D;
+  --ink-2: #565C63;
+  --ink-3: #969BA1;
+  --line: #E7E4DB;
+  --line-2: #EFEDE5;
+
+  /* 默认本命色 = 财金（金），首登可改 */
+  --accent: #A07D2C;
+  --accent-deep: #6E5621;
+  --accent-soft: #F2EAD6;
+  --accent-ink: #43340F;
+  --accent-bright: #D8B25A;
+  --accent-glow: rgba(200, 165, 90, .30);
+
+  --gold: #9B7C3F;
+  --danger: #9C4A38;
+  --warn: #A8772E;
+
+  --serif: "Noto Serif SC", "Songti SC", "STSong", serif;
+  --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+
+  background: var(--bg);
+  font-family: var(--sans);
+  color: var(--ink);
+}
+
+/* —— 6 套本命色主题（class 挂在每页根 View 上） —— */
+.theme-gold   { --accent:#A07D2C; --accent-deep:#6E5621; --accent-soft:#F2EAD6; --accent-ink:#43340F; --accent-bright:#D8B25A; --accent-glow:rgba(200,165,90,.30); }
+.theme-green  { --accent:#1E5A43; --accent-deep:#163F30; --accent-soft:#E7EEE9; --accent-ink:#0F2B20; --accent-bright:#5FB389; --accent-glow:rgba(99,160,130,.32); }
+.theme-red    { --accent:#9E2B25; --accent-deep:#6F1B17; --accent-soft:#F3E2DF; --accent-ink:#4A1310; --accent-bright:#D98077; --accent-glow:rgba(190,90,80,.30); }
+.theme-blue   { --accent:#1F4E79; --accent-deep:#143350; --accent-soft:#E2EAF1; --accent-ink:#122C44; --accent-bright:#6E98C6; --accent-glow:rgba(90,140,200,.30); }
+.theme-purple { --accent:#5B3A6B; --accent-deep:#3D2748; --accent-soft:#ECE4F1; --accent-ink:#2F1E38; --accent-bright:#A07FB3; --accent-glow:rgba(150,110,170,.30); }
+.theme-iron   { --accent:#33373D; --accent-deep:#212429; --accent-soft:#E8E9EB; --accent-ink:#1B1D21; --accent-bright:#8A9099; --accent-glow:rgba(120,130,140,.28); }
+
+/* —— 页面骨架 —— */
+.page {
+  min-height: 100vh;
+  background: var(--paper);
+  box-sizing: border-box;
+}
+.scroll {
+  height: 100vh;
+  box-sizing: border-box;
+}
+.pad { padding-left: 18px; padding-right: 18px; }
+.gap-sm { height: 8px; }
+.gap { height: 16px; }
+.gap-lg { height: 24px; }
+/* 悬浮底栏留白 */
+.tabbar-space { height: 110px; }
+
+/* —— 文字 —— */
+.serif { font-family: var(--serif); }
+.kicker {
+  font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
+  color: var(--accent); font-weight: 600;
+}
+.h1 { font-family: var(--serif); font-size: 26px; font-weight: 700; color: var(--ink); line-height: 1.3; }
+.muted { color: var(--ink-3); }
+
+/* —— 通用卡片 —— */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: 0 2px 6px rgba(22,25,29,.04), 0 12px 30px rgba(22,25,29,.05);
+}
+
+/* —— 段头 —— */
+.sec-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 18px 0 10px;
+}
+.sec-title { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink); }
+.sec-more { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 3px; }
+
+/* —— chips —— */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 7px 13px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent-ink);
+  font-size: 12.5px; font-weight: 500;
+}
+
+/* —— 状态栏（H5 模拟；小程序用原生） —— */
+.statusbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 20px 0; font-size: 13px; font-weight: 600; color: var(--ink);
+}
+
+/* —— Toast —— */
+.toast {
+  position: fixed; left: 50%; bottom: 130px; transform: translateX(-50%) translateY(8px);
+  background: rgba(22,25,29,.92); color: #fff; padding: 10px 16px; border-radius: 999px;
+  font-size: 13px; display: flex; align-items: center; gap: 6px; z-index: 200;
+  opacity: 0; pointer-events: none; transition: opacity .25s, transform .25s;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

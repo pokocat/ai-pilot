@@ -1,0 +1,27 @@
+.me-card { display: flex; align-items: center; gap: 13px; padding: 18px; border-radius: var(--r-lg); margin-top: 22px; }
+.me-av { width: 52px; height: 52px; border-radius: 16px; color: #fff; font-size: 24px; font-weight: 700; text-align: center; line-height: 52px; }
+.me-info { flex: 1; }
+.me-name { display: block; font-size: 18px; font-weight: 700; color: var(--ink); }
+.me-org { display: block; font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+.me-vip { display: flex; align-items: center; padding: 5px 11px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+
+.credit { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-radius: var(--r-lg); margin-top: 12px; border: none; }
+.cr-k { display: block; font-size: 11px; color: rgba(255,255,255,.55); }
+.cr-v { display: block; font-size: 20px; font-weight: 700; margin-top: 4px; }
+.cr-btn { color: #fff; font-size: 13px; font-weight: 600; padding: 9px 18px; border-radius: 999px; }
+
+.rows { margin-top: 12px; border-radius: var(--r-lg); overflow: hidden; padding: 4px 0; }
+.row { display: flex; align-items: center; gap: 12px; padding: 14px 18px; }
+.row-ic { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.row-t { flex: 1; font-size: 14.5px; color: var(--ink); }
+.row-sw { width: 16px; height: 16px; border-radius: 5px; }
+.row-s { font-size: 12.5px; color: var(--ink-3); margin-left: 6px; }
+.row-go { font-size: 16px; color: var(--ink-3); margin-left: 8px; }
+
+.private { padding: 18px; border-radius: var(--r-lg); margin-top: 12px; border: none; }
+.pv-top { display: flex; align-items: center; justify-content: space-between; }
+.pv-ic { width: 36px; height: 36px; border-radius: 11px; background: rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; }
+.pv-badge { border: 1px solid; padding: 3px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 600; }
+.pv-t { display: block; color: #fff; font-size: 16px; font-weight: 600; margin: 14px 0 6px; }
+.pv-d { display: block; color: rgba(255,255,255,.6); font-size: 12px; line-height: 1.6; }
+.pv-cta { margin-top: 14px; color: var(--accent-bright); font-size: 13px; font-weight: 600; }

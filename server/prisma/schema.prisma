@@ -1,0 +1,258 @@
+// 军师 · AI 商业军师 — 数据模型
+// 对齐《投产开发指导》§3。所有业务表均含 tenantId 做行级隔离。
+//
+// 生产环境：memory.embedding 应使用 pgvector（vector 类型）做向量检索；
+// 本地/演示环境无 pgvector 扩展，这里以 Json（float[]）存储，检索退化为内存余弦相似度。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// 租户（企业）
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  industry  String?
+  stage     String?
+  createdAt DateTime @default(now())
+
+  users        User[]
+  profiles     Profile[]
+  sessions     Session[]
+  deliverables Deliverable[]
+  memories     Memory[]
+  credits      CreditLedger[]
+  audits       AuditLog[]
+
+  @@map("tenant")
+}
+
+/// 用户（企业成员）
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  phone        String   @unique
+  name         String
+  role         String   @default("owner") // owner | member | admin
+  benmingColor String   @default("gold") // 本命色：首登强制选择，金色默认
+  planId       String?
+  createdAt    DateTime @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  plan         Plan?         @relation(fields: [planId], references: [id])
+  sessions     Session[]
+  deliverables Deliverable[]
+  memories     Memory[]
+  credits      CreditLedger[]
+
+  @@map("app_user")
+}
+
+/// 企业档案（首登 30 秒建档 + 可选补充资料）
+model Profile {
+  id        String   @id @default(cuid())
+  tenantId  String
+  industry  String?
+  stage     String?
+  pain      String?
+  extraJson Json?
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@map("profile")
+}
+
+/// 智能体（顾问 / 创作）—— 运营后台可配置
+model Agent {
+  id             String   @id @default(cuid())
+  key            String   @unique // strat / growth / ...
+  name           String
+  role           String
+  icon           String
+  type           String // advisory | creative | general | custom
+  gift           Boolean  @default(true)
+  enabled        Boolean  @default(true)
+  greet          String   @db.Text
+  chipsJson      Json // [["target","战略体检"], ...]
+  memText        String   @db.Text // 记忆条文案
+  learnText      String // “记忆已更新” 等
+  systemPrompt   String   @db.Text
+  deliverableKey String? // 关联的产出模板 key（如「战略体检」）
+  memoryConfig   Json // { longTerm, autoLearn, intensity, retentionDays, sources[] }
+  sort           Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  sessions     Session[]
+  deliverables Deliverable[]
+  memories     Memory[]
+
+  @@map("agent")
+}
+
+/// 会话（按 用户×智能体 隔离，可回溯）
+model Session {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  agentKey  String
+  title     String   @default("新对话")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id])
+  user     User          @relation(fields: [userId], references: [id])
+  agent    Agent         @relation(fields: [agentKey], references: [key])
+  messages Message[]
+  deliverables Deliverable[]
+
+  @@index([userId, agentKey])
+  @@map("session")
+}
+
+/// 消息
+model Message {
+  id          String   @id @default(cuid())
+  sessionId   String
+  role        String // user | assistant | report
+  contentJson Json // { text } | { key, ...deliverable } 等
+  createdAt   DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("message")
+}
+
+/// 成果（方案库）
+model Deliverable {
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String
+  sessionId   String?
+  agentKey    String
+  title       String
+  type        String // 成果类型 = deliverableKey
+  contentJson Json // §4.2 结构化成果
+  pdfUrl      String?
+  status      String   @default("ready") // generating | ready | failed
+  createdAt   DateTime @default(now())
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  user    User     @relation(fields: [userId], references: [id])
+  session Session? @relation(fields: [sessionId], references: [id])
+  agent   Agent    @relation(fields: [agentKey], references: [key])
+
+  @@index([userId])
+  @@map("deliverable")
+}
+
+/// 长期记忆（按 用户×智能体 隔离）
+model Memory {
+  id        String    @id @default(cuid())
+  tenantId  String
+  userId    String
+  agentKey  String
+  kind      String // fact | preference | feedback
+  text      String    @db.Text
+  embedding Json? // float[]（生产用 pgvector）
+  weight    Float     @default(1.0)
+  source    String // conversation | document | deliverable_feedback
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+  agent  Agent  @relation(fields: [agentKey], references: [key])
+
+  @@index([userId, agentKey])
+  @@map("memory")
+}
+
+/// 每日献策
+model Saying {
+  id         String   @id @default(cuid())
+  text       String   @db.Text
+  enabled    Boolean  @default(true)
+  sort       Int      @default(0)
+  pushedDate String? // YYYY-MM-DD 最近推送日期
+  createdAt  DateTime @default(now())
+
+  @@map("saying")
+}
+
+/// 建档问卷（运营可配）
+model SurveyQuestion {
+  id          String  @id @default(cuid())
+  key         String  @unique // industry | stage | pain
+  title       String
+  optionsJson Json // string[]
+  sort        Int     @default(0)
+  enabled     Boolean @default(true)
+
+  @@map("survey_question")
+}
+
+/// 套餐与算力
+model Plan {
+  id               String  @id @default(cuid())
+  name             String
+  price            Int // 分
+  period           String // month | year
+  creditsPerMonth  Int
+  agentCount       Int
+  featuresJson     Json
+  highlighted      Boolean @default(false)
+  sort             Int     @default(0)
+
+  users User[]
+
+  @@map("plan")
+}
+
+/// 算力账户流水
+model CreditLedger {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  delta     Int // 正充值 / 负消耗
+  reason    String
+  balance   Int
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@map("credit_ledger")
+}
+
+/// 审计日志
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  userId      String?
+  action      String
+  payloadJson Json?
+  createdAt   DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+
+  @@map("audit_log")
+}
+
+/// 内容审核日志
+model ModerationLog {
+  id         String   @id @default(cuid())
+  refType    String // input | output
+  refId      String?
+  verdict    String // pass | block
+  detailJson Json?
+  createdAt  DateTime @default(now())
+
+  @@map("moderation_log")
+}

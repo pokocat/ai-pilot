@@ -1,0 +1,18 @@
+.train-card { padding: 15px; border-radius: var(--r-md); margin-bottom: 10px; }
+.tc-top { display: flex; gap: 11px; align-items: flex-start; }
+.tc-ic { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.tc-b { flex: 1; }
+.tc-n { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
+.tc-d { display: block; font-size: 12px; line-height: 1.5; color: var(--ink-2); margin-top: 3px; }
+.tc-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 13px; }
+.tc-btn { display: flex; align-items: center; color: #fff; font-size: 12.5px; font-weight: 600; padding: 8px 14px; border-radius: 999px; }
+.tc-tag { font-size: 11px; color: var(--ink-3); }
+
+.progress { height: 6px; border-radius: 999px; background: var(--surface-2); margin-top: 13px; overflow: hidden; }
+.progress .bar { height: 100%; border-radius: 999px; }
+
+.from-zero {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 15px; border-radius: var(--r-md); margin-top: 4px;
+  border-style: dashed; font-size: 13.5px; font-weight: 600;
+}
