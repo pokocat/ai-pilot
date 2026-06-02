@@ -1,10 +1,17 @@
 // LLM Gateway（《投产开发指导》§5.1）：统一封装模型调用——
 // 路由（mock/claude）、内容审核、Token 计量、结果缓存、故障兜底/降级。
 
-import { env } from '../env.js';
+import { env, isRealKey } from '../env.js';
 import { prisma } from '../db.js';
 import { mockChat, mockDeliverable } from './providers/mock.js';
 import type { Deliverable, ChatReply, GenContext } from './schema.js';
+
+// 当前提供方是否已就绪（key 真实）。未就绪一律走 mock 兜底，保证可用。
+function liveProvider(): 'claude' | 'openai' | null {
+  if (env.aiProvider === 'claude' && isRealKey(env.anthropicApiKey)) return 'claude';
+  if (env.aiProvider === 'openai' && isRealKey(env.openaiApiKey)) return 'openai';
+  return null;
+}
 
 // —— 内容审核（演示用关键词；生产替换为合规审核服务） ——
 const BLOCK_WORDS = ['暴力', '违法集资', '赌博', '毒品'];
@@ -42,9 +49,13 @@ export async function generateDeliverable(ctx: GenContext): Promise<Deliverable>
 
   let result: Deliverable;
   try {
-    if (env.aiProvider === 'claude' && env.anthropicApiKey) {
+    const live = liveProvider();
+    if (live === 'claude') {
       const { claudeDeliverable } = await import('./providers/claude.js');
       result = await claudeDeliverable(ctx);
+    } else if (live === 'openai') {
+      const { openaiDeliverable } = await import('./providers/openai.js');
+      result = await openaiDeliverable(ctx);
     } else {
       result = mockDeliverable(ctx);
     }
@@ -68,9 +79,12 @@ export async function chatComplete(ctx: GenContext): Promise<ChatReply> {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
   try {
-    if (env.aiProvider === 'claude' && env.anthropicApiKey) {
-      const { claudeChat } = await import('./providers/claude.js');
-      const r = await claudeChat(ctx);
+    const live = liveProvider();
+    if (live) {
+      const r =
+        live === 'claude'
+          ? await (await import('./providers/claude.js')).claudeChat(ctx)
+          : await (await import('./providers/openai.js')).openaiChat(ctx);
       await moderate('output', r.text);
       await meter(ctx, 'chat', r.text.length);
       return r;
@@ -82,9 +96,14 @@ export async function chatComplete(ctx: GenContext): Promise<ChatReply> {
 }
 
 export function providerInfo() {
+  const live = liveProvider();
+  const model =
+    env.aiProvider === 'claude' ? env.claudeModel : env.aiProvider === 'openai' ? env.openaiModel : 'template';
   return {
     provider: env.aiProvider,
-    model: env.aiProvider === 'claude' ? env.claudeModel : 'template',
-    claudeReady: env.aiProvider === 'claude' && !!env.anthropicApiKey,
+    model: live ? model : 'template', // 未就绪时实际产出走 mock
+    ready: !!live,
+    // 向后兼容旧字段
+    claudeReady: live === 'claude',
   };
 }
