@@ -136,6 +136,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
   - 其它 Tab 页：`<Screen topInset>`，由 `components/Screen` 注入实测高度的顶部占位（CSS 兜底 `env(safe-area-inset-top)+52px`）。对话/库各自管理顶部 padding。
   - **不要再加伪状态栏 `9:41`**（已全部移除）。
 - **全屏弹层遮挡底栏**：`custom-tab-bar` 是原生层，`wx.hideTabBar` 不可靠。改用全局 `store.overlay` 标志——弹层（登录 / 本命色 picker）打开时底栏组件 `return null`。**新增全屏弹层时务必置 `store.setOverlay(open)`**。
+- **H5 与小程序视觉一致**：小程序使用真实 `page` 节点 + `src/custom-tab-bar` 原生自定义底栏；H5 使用 `src/app.h5.tsx` 手动挂载同款 `CustomTabBar`，并由 `src/app.h5.scss` 给浏览器根节点补设计 token、隐藏 Taro 生成的默认 `weui` tabbar。不要把 H5 兼容样式混入会影响小程序的原生 tabbar 路径。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **深色卡光感**：对话入口卡用 `--accent-deep` 对角渐变 + `--accent-glow` 柔光，随本命色自适应。
 
@@ -345,6 +346,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-03** · **修复 H5/小程序视觉差异**：新增 `app/src/app.h5.tsx` 在 H5 手动挂载同款胶囊自定义底栏，新增 `app/src/app.h5.scss` 给浏览器根节点补设计 token、隐藏 Taro H5 默认 `weui` tabbar，并保持小程序 `page` + 原生 custom-tab-bar 路径不变。
 - **2026-06-03** · **清理本地生成物跟踪噪声**：`.gitignore` 增加本地评审产物、微信开发者工具私有/误生成配置、Taro CLI tarball、根目录空 `package-lock.json` 忽略规则；还原 `server/package-lock.json` 的 npm 元数据抖动，保持工作区只显示真实代码/配置变更。
 - **2026-06-03** · **修复运营后台无尾斜杠访问**：`deploy/nginx.conf.example` 增加 `location = /admin { return 301 /admin/; }`；ECS Nginx 已同步 reload，避免访问 `/admin` 时落入 H5 首页 fallback。
 - **2026-06-03** · **修复对话页未登录错误提示**：`pages/chat` 增加登录态兜底，未登录发送/401 token 失效时弹登录并提示“请先登录/登录态失效”，402 算力不足也显示明确文案，避免统一落成“抱歉，产出失败了”。

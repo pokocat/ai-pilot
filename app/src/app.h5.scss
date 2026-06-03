@@ -1,0 +1,68 @@
+/* H5 兼容层：小程序有真实 page 节点，H5 没有；把设计 token 补到浏览器根节点。 */
+:root,
+html,
+body,
+#app,
+.taro_router,
+.taro-tabbar__container,
+.taro-tabbar__panel,
+.taro_page,
+.page {
+  --bg: #F4F2EC;
+  --paper: #FBFAF6;
+  --surface: #FFFFFF;
+  --surface-2: #F3F1EA;
+
+  --ink: #16191D;
+  --ink-2: #565C63;
+  --ink-3: #969BA1;
+  --line: #E7E4DB;
+  --line-2: #EFEDE5;
+
+  --accent: #A07D2C;
+  --accent-deep: #6E5621;
+  --accent-soft: #F2EAD6;
+  --accent-ink: #43340F;
+  --accent-bright: #D8B25A;
+  --accent-glow: rgba(200, 165, 90, .30);
+
+  --gold: #9B7C3F;
+  --danger: #9C4A38;
+  --warn: #A8772E;
+
+  --serif: "Noto Serif SC", "Songti SC", "STSong", serif;
+  --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 22px;
+  --r-xl: 28px;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+}
+
+#app,
+.taro_router,
+.taro-tabbar__container,
+.taro-tabbar__panel,
+.taro_page {
+  min-height: 100%;
+  background: var(--paper);
+}
+
+/* Taro H5 会生成默认 weui tabbar；H5 使用同小程序一致的胶囊自定义底栏。 */
+.taro-tabbar__tabbar {
+  display: none !important;
+}
+
+.taro-tabbar__panel,
+.taro_page {
+  height: 100vh !important;
+}
