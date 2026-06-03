@@ -29,6 +29,8 @@ export default defineConfig(async (merge, { command, mode }) => {
     h5: {
       publicPath: '/',
       staticDirectory: 'static',
+      // hash 路由：dist/ 可被任意静态服务器直接打开，无需 SPA 回退配置（便于本地 H5 测试）
+      router: { mode: 'hash' },
       esnextModules: ['@tarojs'],
       postcss: {
         autoprefixer: { enable: true, config: {} },

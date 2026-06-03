@@ -79,6 +79,7 @@ repo/
 - `app/src/services/api.ts`：每个方法按 `IS_MOCK` 分流 mock 或真实请求，**两种模式同口径**（同样的入参/返回类型）。
 - `app/src/services/mock.ts`：前端 mock 后端，实现 login/me/agents/survey/profile/sayings/sessions/generate/library 全量接口；mock 数据来自 `app/src/data/agents.ts`、`app/src/data/deliverables.ts`（**由后端 seed 自动生成，勿手改**）。
 - mock 模式下登录/数据按 `mock-<手机号>` token 隔离并持久化，可切换账号验证隔离。
+- **H5 浏览器手测（推荐替代小程序）**：weapp 与 H5 同一套码、无平台分叉。零后端走查 `npm run dev:h5`；连后端测真实变更 `npm run build:h5:server && npm run serve:h5`（→ http://localhost:5173，server 模式，默认指向 :4000）。H5 用 hash 路由，`dist/` 任意静态服务器可开。详见 `docs/TESTING.md` §五。
 
 ---
 
@@ -315,6 +316,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-03** · **H5 浏览器联调打通（替代小程序测试）**：H5 路由设 hash（`config/index.ts`，`dist/` 任意静态服务器可开）；新增 `app/scripts/serve-h5.mjs`（零依赖静态服务器）+ 脚本 `build:h5:server`/`dev:h5:server`/`serve:h5`。**本地实跑**：浏览器(:5173)→后端(:4000) CORS 预检放行 `x-user-id`、登录/产出/算力扣减全通、`/me` 读出 Agnes 配置。weapp 与 H5 无平台分叉、功能对齐。文档 `docs/TESTING.md §五`。
 - **2026-06-03** · **算力计量落地（解锁 TC-K2/K3）**：新增 `services/credits.ts`（按次扣费/余额/不足拦截），`sessions.ts` 两个产出路由接入——报告类产出前校验余额（不足→402 且不建会话）、成功后扣 1 并回填 `GenResult.creditBalance`/SSE `credit` 事件；对话免费；企业版不限量。移除 gateway 空壳 `meter`。`GenResult` 加 `creditBalance?`。集成测试 **33 全过 / 0 跳过**。
 - **2026-06-03** · **集成测试扩容到企业主全旅程**：在原 7 套件基础上新增 TC-I~TC-T（SSE 流式 / 内容审核拦截 / 算力赠送+扣减占位 / 并发冒烟 / 首登建档个性化 / 老用户回流 / 跨智能体协同+引用闭环 / 成果反馈回流 / 记忆 TTL / 跨项目知识隔离 / 每日献策 / 边界健壮性）；`helpers.ts` 加 `seedBaseline`（套餐+智能体+献策+问卷）。**本地 Postgres 16 实跑 31 通过 + 1 skip / 19 套件**。
 - **2026-06-03** · **后端集成测试 + 文档沉淀**：抽出 `src/app.ts`(`buildApp` 工厂)、`index.ts` 改用之；新增 `server/test/`（`helpers.ts` + `integration.test.ts`，Node 原生 test runner + Fastify inject，mock 模型）；`package.json` 加 `test` 脚本。覆盖 7 套件 16 用例（鉴权隔离/多智能体/记忆召回/项目+知识库召回/汇总/报告版本+diff/**★跨用户隔离 TC-G**/模型配置）。新增 `docs/ROADMAP.md`、`docs/TESTING.md`。**本地 Postgres 16 实跑 16/16 全过**。

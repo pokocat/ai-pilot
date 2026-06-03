@@ -63,4 +63,24 @@ AI_PROVIDER=mock npm test
 - 新增 HTTP 流程：用 `api(method, url, { token, body })`（见 `test/helpers.ts`），无 body 的 POST 不要带 body。
 - 新增账号：`login(uniquePhone())` 返回 token（=userId，作 `x-user-id`）。
 - 断言服务层细节（召回/diff/隔离）可直接 import `server/src/services/*`，与路由共用同一 `prisma`。
-- 待补（见 ROADMAP P3）：SSE 流式 `/generate`、内容审核拦截、算力计量、并发/性能。
+- 待补（见 ROADMAP P3）：性能基准（非冒烟）。
+
+## 五、附：H5 浏览器手测（替代小程序，推荐）
+
+一套 Taro 码同出 weapp + H5、功能完全对齐（无任何平台分叉代码）。**用 H5 在浏览器里即可手测全部后端变更**（项目 / 知识 / 版本化报告 / @引用 / 汇总 / 算力扣减），免微信开发者工具。
+
+### 两种模式
+- **mock（零后端，走查 UI）**：`cd app && npm run dev:h5`（纯前端数据源）。
+- **server（连后端，测真实变更）**：
+  1. 起后端：`cd server && export DATABASE_URL=... && npm run db:push && npm run db:seed && AI_PROVIDER=mock npm run dev`（:4000）
+  2. 构建并预览 H5：`cd app && npm run build:h5:server && npm run serve:h5` → 打开 **http://localhost:5173**
+  3. 改模型：`cd admin && npm run dev`（运营后台「模型」页，默认 Agnes；填 key 即切真实模型）
+
+`build:h5:server` = `TARO_APP_MODE=server`；后端地址默认 `http://localhost:4000/api`（可用 `TARO_APP_API` 覆盖）。
+
+### 已验证（本地实跑，浏览器 :5173 → 后端 :4000）
+CORS 预检放行自定义头 `x-user-id`；登录→`/me`→产出全通；**算力实时扣减**（产出前 10 → 报告后 9、`/me` 同步）；`/me` 正确读出 `ai=Agnes 2.0 Flash`。
+
+### 说明
+- H5 用 **hash 路由**，`dist/` 可被任意静态服务器打开；`serve:h5` 是零依赖内置静态服务器（`app/scripts/serve-h5.mjs`）。
+- app 的产出统一走 `generate-sync`(POST)，H5 无 SSE 依赖；SSE `/generate` 仅 Web 端可选（TC-I 已覆盖其事件流）。
