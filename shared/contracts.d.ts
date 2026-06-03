@@ -112,6 +112,7 @@ export interface GenResult {
   deliverable?: Deliverable; reply?: ChatReply;
   memory?: { learned: boolean; agentName: string } | null;
   knowledgeUsed?: string[]; // 本次自动召回/显式引用所用到的知识摘要（用于「参考了哪些资料」提示）
+  creditBalance?: number;   // 扣费后的算力余额（<0 表示不限量套餐；产出后回填，前端可即时刷新）
 }
 
 /* ────────────── 方案库 ────────────── */

@@ -29,10 +29,8 @@ async function moderate(refType: 'input' | 'output', text: string): Promise<bool
   return verdict === 'pass';
 }
 
-// —— Token 计量（演示用估算；生产接真实 usage） ——
-async function meter(_ctx: GenContext, _kind: string, approxTokens: number) {
-  return approxTokens;
-}
+// —— 算力计量：按次扣费在路由层用 services/credits 完成（产出前校验、成功后扣减）；
+//    此处只负责 LLM 调用，不掺计费逻辑。Token 级用量归集留待生产接真实 usage。 ——
 
 // —— 结果缓存（演示用内存缓存；生产用 Redis） ——
 const cache = new Map<string, { v: unknown; at: number }>();
@@ -72,7 +70,6 @@ export async function generateDeliverable(ctx: GenContext): Promise<Deliverable>
   if (!(await moderate('output', outText))) {
     throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
-  await meter(ctx, 'deliverable', outText.length);
   cache.set(ck, { v: result, at: Date.now() });
   return result;
 }
@@ -90,7 +87,6 @@ export async function chatComplete(ctx: GenContext): Promise<ChatReply> {
           ? await (await import('./providers/claude.js')).claudeChat(ctx, cfg)
           : await (await import('./providers/openai.js')).openaiChat(ctx, cfg);
       await moderate('output', r.text);
-      await meter(ctx, 'chat', r.text.length);
       return r;
     }
   } catch (err) {

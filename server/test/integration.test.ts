@@ -258,7 +258,7 @@ describe('TC-J 内容审核拦截', () => {
   });
 });
 
-// ───────────────────────── TC-K 算力（套餐赠送 + 计量） ─────────────────────────
+// ───────────────────────── TC-K 算力（套餐赠送 + 按次计量 + 不足拦截） ─────────────────────────
 describe('TC-K 算力账户', () => {
   test('K1 注册即按套餐赠送算力，/me 可见余额', async () => {
     const t = await login(uniquePhone());
@@ -266,8 +266,28 @@ describe('TC-K 算力账户', () => {
     assert.ok(me.body.creditBalance > 0, '新账号应有赠送算力');
     assert.ok(me.body.plan, '应绑定套餐');
   });
-  // 按次扣减尚未实现（gateway.meter 为占位，未写 credit_ledger）——见 ROADMAP P2。
-  test('K2 产出按次扣减算力', { skip: 'meter() 为占位，未落 credit_ledger（待实现）' }, () => {});
+
+  test('K2 报告类产出按次扣减、自由对话免费，/me 同步', async () => {
+    const t = await login(uniquePhone());
+    const before = (await api('GET', '/api/me', { token: t })).body.creditBalance as number;
+    const r1 = await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
+    assert.equal(r1.body.creditBalance, before - 1, '报告产出应扣 1');
+    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before - 1, '/me 余额应同步');
+    const r2 = await api('POST', '/api/generate-sync', { token: t, body: { text: '随便聊聊', agentKey: 'general' } });
+    assert.equal(r2.body.creditBalance, before - 1, '自由对话不扣费');
+  });
+
+  test('K3 算力不足 → 报告被 402 拦截、不留会话；免费对话仍可用', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    await prisma.creditLedger.create({ data: { tenantId, userId: t, delta: -999, reason: '测试置零', balance: 0 } });
+    const r = await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
+    assert.equal(r.status, 402);
+    assert.equal(r.body.code, 'INSUFFICIENT_CREDITS');
+    assert.equal((await api('GET', '/api/sessions', { token: t })).body.length, 0, '被拦截不应留下会话');
+    const chat = await api('POST', '/api/generate-sync', { token: t, body: { text: '聊聊', agentKey: 'general' } });
+    assert.equal(chat.status, 200, '免费对话不受余额影响');
+  });
 });
 
 // ───────────────────────── TC-L 并发冒烟 ─────────────────────────

@@ -6,6 +6,7 @@ import { generateDeliverable, chatComplete } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
+import { ensureCredits, chargeCredits, CREDIT_COST } from '../services/credits.js';
 import { KEY2AGENT } from '../data/agents.js';
 import type { MessageRef } from '../llm/schema.js';
 
@@ -80,6 +81,16 @@ export async function sessionRoutes(app: FastifyInstance) {
     // 项目归属：新建用入参；已存在但未归属则补挂
     const projectId = await resolveProjectId(user.tenantId, req.body.projectId, session?.projectId);
 
+    // 算力：报告类深度产出按次计费、自由对话免费；不足则 402（早于建会话/落消息）
+    const agentRec = session?.agent ?? await prisma.agent.findUnique({ where: { key: agentKey } });
+    const cost = agentRec?.deliverableKey ? CREDIT_COST.report : CREDIT_COST.chat;
+    try {
+      await ensureCredits(user.id, cost);
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+    }
+
     let created = false;
     if (!session) {
       session = await prisma.session.create({
@@ -114,11 +125,12 @@ export async function sessionRoutes(app: FastifyInstance) {
             tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId,
           });
         }
+        const creditBalance = await chargeCredits(user.tenantId, user.id, cost, `深度产出 · ${agent.name}`);
         return {
           sessionId: session.id, created, agentKey, kind: 'report',
           messageId: msg.id, deliverable,
           memory: learned ? { learned: true, agentName: agent.name } : null,
-          knowledgeUsed,
+          knowledgeUsed, creditBalance,
         };
       }
       const replyChat = await chatComplete(ctx);
@@ -126,10 +138,11 @@ export async function sessionRoutes(app: FastifyInstance) {
         data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object },
       });
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
-      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed };
+      const creditBalance = await chargeCredits(user.tenantId, user.id, cost, `对话 · ${agent.name}`);
+      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, creditBalance };
     } catch (err) {
-      const e = err as Error & { code?: string };
-      return reply.code(e.code === 'MODERATION_BLOCK' ? 422 : 500).send({ error: e.message, code: e.code });
+      const e = err as Error & { code?: string; statusCode?: number };
+      return reply.code(e.statusCode ?? (e.code === 'MODERATION_BLOCK' ? 422 : 500)).send({ error: e.message, code: e.code });
     }
   });
 
@@ -158,6 +171,16 @@ export async function sessionRoutes(app: FastifyInstance) {
       : null;
     const agentKey = session?.agentKey ?? req.body.agentKey ?? KEY2AGENT[text] ?? 'general';
     const projectId = await resolveProjectId(user.tenantId, req.body.projectId, session?.projectId);
+
+    // 算力：起流前校验，不足则正常返回 402（而非 SSE）
+    const agentRec = session?.agent ?? await prisma.agent.findUnique({ where: { key: agentKey } });
+    const cost = agentRec?.deliverableKey ? CREDIT_COST.report : CREDIT_COST.chat;
+    try {
+      await ensureCredits(user.id, cost);
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+    }
 
     setupSSE(reply);
     const send = (event: string, data: unknown) => reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -219,6 +242,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           });
           if (learned) send('memory', { learned: true, agentName: agent.name });
         }
+        const creditBalance = await chargeCredits(user.tenantId, user.id, cost, `产出 · ${agent.name}`);
+        send('credit', { balance: creditBalance });
         send('done', { messageId: msg.id });
       } else {
         send('meta', { kind: 'chat' });
@@ -229,6 +254,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
         });
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+        const creditBalance = await chargeCredits(user.tenantId, user.id, cost, `产出 · ${agent.name}`);
+        send('credit', { balance: creditBalance });
         send('done', { messageId: msg.id });
       }
     } catch (err) {
