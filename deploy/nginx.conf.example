@@ -27,6 +27,10 @@ server {
     }
 
     # —— 运营后台（admin/dist，子路径；需以 base=/admin/ 构建）——
+    location = /admin {
+        return 301 /admin/;              # 避免 /admin 被 H5 fallback 当成主页
+    }
+
     location /admin/ {
         alias /var/www/junshi/admin/;    # ← admin/dist 路径（注意结尾斜杠）
         try_files $uri $uri/ /admin/index.html;
