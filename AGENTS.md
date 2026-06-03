@@ -54,6 +54,8 @@ repo/
 └── project/            # 原始高保真原型（设计事实来源，勿改）
 ```
 
+本地生成物约定：`app/project.config.json` 是正式小程序配置（需跟踪）；`app/project.private.config.json`、根目录误生成的 `project.config.json/project.private.config.json`、`app/.impeccable/`、`app/tarojs-cli-*.tgz`、根目录空 `package-lock.json` 均为本机/工具产物，已在 `.gitignore` 排除，不纳入提交。
+
 ---
 
 ## 3. 技术栈
@@ -343,6 +345,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-03** · **清理本地生成物跟踪噪声**：`.gitignore` 增加本地评审产物、微信开发者工具私有/误生成配置、Taro CLI tarball、根目录空 `package-lock.json` 忽略规则；还原 `server/package-lock.json` 的 npm 元数据抖动，保持工作区只显示真实代码/配置变更。
 - **2026-06-03** · **修复运营后台无尾斜杠访问**：`deploy/nginx.conf.example` 增加 `location = /admin { return 301 /admin/; }`；ECS Nginx 已同步 reload，避免访问 `/admin` 时落入 H5 首页 fallback。
 - **2026-06-03** · **修复对话页未登录错误提示**：`pages/chat` 增加登录态兜底，未登录发送/401 token 失效时弹登录并提示“请先登录/登录态失效”，402 算力不足也显示明确文案，避免统一落成“抱歉，产出失败了”。
 - **2026-06-03** · **H5 server 构建环境注入修复 + IP 测试部署**：`app/config/index.ts` 显式注入 `TARO_APP_MODE/TARO_APP_API`，`app/src/services/config.ts` 直接读取注入常量，避免浏览器运行时拿不到构建期变量而退回 mock/default；已用 `TARO_APP_API=http://8.136.36.175/api` 重新构建 H5 并部署到 ECS（`/`=H5，`/api`=后端，`/admin/`=后台）。

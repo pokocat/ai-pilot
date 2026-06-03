@@ -10,6 +10,18 @@ lib/
 .swc/
 app/.taro-cache/
 
+# 本地工具/评审产物
+app/.impeccable/
+app/tarojs-cli-*.tgz
+
+# 微信开发者工具私有/误生成配置
+/project.config.json
+/project.private.config.json
+app/project.private.config.json
+
+# 根目录无依赖时 npm install 生成的空 lock
+/package-lock.json
+
 # 环境变量（含密钥，不入库；见各自 .env.example）
 .env
 server/.env
