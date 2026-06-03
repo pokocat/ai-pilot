@@ -1,9 +1,14 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { resolveUser, buildGenContext } from '../services/context.js';
 import { generateDeliverable, chatComplete } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
+import { ingestKnowledge } from '../services/knowledge.js';
+import { summarizeSession } from '../services/summarize.js';
+import { ensureCredits, chargeCredits, CREDIT_COST } from '../services/credits.js';
 import { KEY2AGENT } from '../data/agents.js';
+import type { MessageRef } from '../llm/schema.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -31,6 +36,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         title: s.title,
         snippet,
         updatedAt: s.updatedAt,
+        projectId: s.projectId,
       };
     });
   });
@@ -48,7 +54,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       agentKey: s.agentKey,
       agent: { key: s.agent.key, name: s.agent.name, role: s.agent.role, icon: s.agent.icon, greet: s.agent.greet, chips: s.agent.chipsJson, memText: s.agent.memText, learnText: s.agent.learnText },
       title: s.title,
-      messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: m.contentJson, at: m.createdAt })),
+      projectId: s.projectId,
+      messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: m.contentJson, at: m.createdAt, refs: (m.refsJson as MessageRef[] | null) ?? undefined })),
     };
   });
 
@@ -61,32 +68,48 @@ export async function sessionRoutes(app: FastifyInstance) {
 
   // 同步产出（跨端：H5 + 微信小程序均可用；前端做客户端渐进式呈现）。
   // 空会话不预先落库——首条消息时创建会话。
-  app.post<{ Body: { agentKey?: string; sessionId?: string; text: string } }>('/generate-sync', async (req, reply) => {
+  app.post<{ Body: { agentKey?: string; sessionId?: string; text: string; projectId?: string; refs?: MessageRef[] } }>('/generate-sync', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const text = (req.body.text || '').trim();
     if (!text) return reply.code(400).send({ error: 'empty text' });
+    const refs = req.body.refs;
 
     let session = req.body.sessionId
       ? await prisma.session.findFirst({ where: { id: req.body.sessionId, userId: user.id }, include: { agent: true } })
       : null;
     const agentKey = session?.agentKey ?? req.body.agentKey ?? KEY2AGENT[text] ?? 'general';
+    // 项目归属：新建用入参；已存在但未归属则补挂
+    const projectId = await resolveProjectId(user.tenantId, req.body.projectId, session?.projectId);
+
+    // 算力：报告类深度产出按次计费、自由对话免费；不足则 402（早于建会话/落消息）
+    const agentRec = session?.agent ?? await prisma.agent.findUnique({ where: { key: agentKey } });
+    const cost = agentRec?.deliverableKey ? CREDIT_COST.report : CREDIT_COST.chat;
+    try {
+      await ensureCredits(user.id, cost);
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+    }
 
     let created = false;
     if (!session) {
       session = await prisma.session.create({
-        data: { tenantId: user.tenantId, userId: user.id, agentKey, title: text.slice(0, 18) },
+        data: { tenantId: user.tenantId, userId: user.id, agentKey, projectId, title: text.slice(0, 18) },
         include: { agent: true },
       });
       created = true;
-    } else if (session.title === '新对话') {
-      await prisma.session.update({ where: { id: session.id }, data: { title: text.slice(0, 18) } });
+    } else {
+      const patch: { title?: string; projectId?: string } = {};
+      if (session.title === '新对话') patch.title = text.slice(0, 18);
+      if (!session.projectId && projectId) patch.projectId = projectId;
+      if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
     }
-    await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text } } });
+    await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
 
     const agent = session.agent;
     const isDeliverable = !!agent.deliverableKey;
-    const { ctx, memoryConfig } = await buildGenContext({
-      userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text,
+    const { ctx, memoryConfig, knowledgeUsed } = await buildGenContext({
+      userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
     });
 
     try {
@@ -99,13 +122,15 @@ export async function sessionRoutes(app: FastifyInstance) {
         let learned = false;
         if (agentKey !== 'general') {
           learned = await learnFromConversation({
-            tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text,
+            tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId,
           });
         }
+        const creditBalance = await chargeCredits(user.tenantId, user.id, cost, `深度产出 · ${agent.name}`);
         return {
           sessionId: session.id, created, agentKey, kind: 'report',
           messageId: msg.id, deliverable,
           memory: learned ? { learned: true, agentName: agent.name } : null,
+          knowledgeUsed, creditBalance,
         };
       }
       const replyChat = await chatComplete(ctx);
@@ -113,24 +138,49 @@ export async function sessionRoutes(app: FastifyInstance) {
         data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object },
       });
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
-      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat };
+      const creditBalance = await chargeCredits(user.tenantId, user.id, cost, `对话 · ${agent.name}`);
+      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, creditBalance };
     } catch (err) {
-      const e = err as Error & { code?: string };
-      return reply.code(e.code === 'MODERATION_BLOCK' ? 422 : 500).send({ error: e.message, code: e.code });
+      const e = err as Error & { code?: string; statusCode?: number };
+      return reply.code(e.statusCode ?? (e.code === 'MODERATION_BLOCK' ? 422 : 500)).send({ error: e.message, code: e.code });
+    }
+  });
+
+  // 把整段会话汇总为「对话纪要」：版本化报告 + 沉淀进知识库
+  app.post<{ Params: { id: string } }>('/sessions/:id/summarize', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      const res = await summarizeSession({ tenantId: user.tenantId, userId: user.id, sessionId: req.params.id });
+      return res;
+    } catch (err) {
+      const e = err as Error & { statusCode?: number };
+      return reply.code(e.statusCode ?? 500).send({ error: e.message });
     }
   });
 
   // 发送消息并流式产出（SSE，仅 H5/Web）。空会话不预先落库——首条消息时创建会话。
-  app.post<{ Body: { agentKey?: string; sessionId?: string; text: string } }>('/generate', async (req, reply) => {
+  app.post<{ Body: { agentKey?: string; sessionId?: string; text: string; projectId?: string; refs?: MessageRef[] } }>('/generate', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const text = (req.body.text || '').trim();
     if (!text) return reply.code(400).send({ error: 'empty text' });
+    const refs = req.body.refs;
 
     // 确定会话与智能体
     let session = req.body.sessionId
       ? await prisma.session.findFirst({ where: { id: req.body.sessionId, userId: user.id }, include: { agent: true } })
       : null;
     const agentKey = session?.agentKey ?? req.body.agentKey ?? KEY2AGENT[text] ?? 'general';
+    const projectId = await resolveProjectId(user.tenantId, req.body.projectId, session?.projectId);
+
+    // 算力：起流前校验，不足则正常返回 402（而非 SSE）
+    const agentRec = session?.agent ?? await prisma.agent.findUnique({ where: { key: agentKey } });
+    const cost = agentRec?.deliverableKey ? CREDIT_COST.report : CREDIT_COST.chat;
+    try {
+      await ensureCredits(user.id, cost);
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+    }
 
     setupSSE(reply);
     const send = (event: string, data: unknown) => reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -138,16 +188,19 @@ export async function sessionRoutes(app: FastifyInstance) {
     try {
       if (!session) {
         session = await prisma.session.create({
-          data: { tenantId: user.tenantId, userId: user.id, agentKey, title: text.slice(0, 18) },
+          data: { tenantId: user.tenantId, userId: user.id, agentKey, projectId, title: text.slice(0, 18) },
           include: { agent: true },
         });
-        send('session', { id: session.id, agentKey, title: session.title });
-      } else if (session.title === '新对话') {
-        await prisma.session.update({ where: { id: session.id }, data: { title: text.slice(0, 18) } });
+        send('session', { id: session.id, agentKey, title: session.title, projectId });
+      } else {
+        const patch: { title?: string; projectId?: string } = {};
+        if (session.title === '新对话') patch.title = text.slice(0, 18);
+        if (!session.projectId && projectId) patch.projectId = projectId;
+        if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
       }
 
-      // 持久化用户消息
-      await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text } } });
+      // 持久化用户消息（含引用）
+      await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
 
       const agent = session.agent;
       const isDeliverable = !!agent.deliverableKey; // 顾问/创作智能体 → 结构化成果
@@ -156,6 +209,8 @@ export async function sessionRoutes(app: FastifyInstance) {
         tenantId: user.tenantId,
         agentKey,
         userMessage: text,
+        projectId,
+        refs,
       });
 
       if (isDeliverable) {
@@ -183,9 +238,12 @@ export async function sessionRoutes(app: FastifyInstance) {
             agentKey,
             cfg: memoryConfig,
             userText: text,
+            projectId,
           });
           if (learned) send('memory', { learned: true, agentName: agent.name });
         }
+        const creditBalance = await chargeCredits(user.tenantId, user.id, cost, `产出 · ${agent.name}`);
+        send('credit', { balance: creditBalance });
         send('done', { messageId: msg.id });
       } else {
         send('meta', { kind: 'chat' });
@@ -196,6 +254,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
         });
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+        const creditBalance = await chargeCredits(user.tenantId, user.id, cost, `产出 · ${agent.name}`);
+        send('credit', { balance: creditBalance });
         send('done', { messageId: msg.id });
       }
     } catch (err) {
@@ -205,6 +265,16 @@ export async function sessionRoutes(app: FastifyInstance) {
       reply.raw.end();
     }
   });
+}
+
+// 解析本次对话归属项目：已有会话归属优先；否则校验入参项目属于该租户。
+async function resolveProjectId(
+  tenantId: string, bodyProjectId?: string, sessionProjectId?: string | null,
+): Promise<string | null> {
+  if (sessionProjectId) return sessionProjectId;
+  if (!bodyProjectId) return null;
+  const p = await prisma.project.findFirst({ where: { id: bodyProjectId, tenantId }, select: { id: true } });
+  return p?.id ?? null;
 }
 
 function setupSSE(reply: FastifyReply) {

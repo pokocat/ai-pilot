@@ -7,6 +7,9 @@ export default defineAppConfig({
     'pages/profile/index',
     'pages/chat/index',
     'pages/library/index',
+    'pages/projects/index',
+    'pages/project/index',
+    'pages/report/index',
   ],
   window: {
     backgroundTextStyle: 'dark',

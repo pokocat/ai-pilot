@@ -12,7 +12,9 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts"
+    "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
+    "db:pgvector": "psql \"$DATABASE_URL\" -f prisma/pgvector.sql",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

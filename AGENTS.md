@@ -32,6 +32,7 @@
 特色：
 - **本命色**：首登强制选择一种「本命色」主题（金/绿/红/蓝/紫/铁），全站配色随之自适应；可在「我的」重选。
 - **Agent Memory**：顾问从对话/资料/反馈中持续学习，越用越懂客户（运营后台可配策略）。
+- **企业事务操作系统**（★ 新）：以「**项目**」为主线，串起 会话 / **版本化报告** / **知识库** / 长期记忆。对话可 **@ 引用** 项目/报告/某段知识（可溯源注入）；报告按「报告名」版本化、可**看变更（diff）**；对话可一键**汇总成纪要**并沉淀进知识库；知识库用 **语义检索 + 关键词** 混合召回。详见「✦ 企业事务操作系统」章节。
 - **多租户**：每个账号独立租户，业务数据行级隔离。
 
 ---
@@ -44,8 +45,10 @@ repo/
 ├── IMPLEMENTATION.md   # 与《投产开发指导》章节的对应表（设计溯源）
 ├── shared/
 │   └── contracts.d.ts  # ★ SSOT：全栈数据契约（纯类型，运行时擦除）
+├── docs/               # ROADMAP.md（进展/TODO）· TESTING.md（集成测试）· DEPLOYMENT.md（部署架构/上线）
+├── deploy/             # 部署模板：nginx.conf.example · junshi-api.service · Dockerfile.server · docker-compose.yml
 ├── app/                # Taro 移动端（微信小程序 weapp + H5），React + TS
-├── server/             # 后端 API：Fastify + Prisma + PostgreSQL + LLM Gateway
+├── server/             # 后端 API：Fastify + Prisma + PostgreSQL + LLM Gateway（含 src/app.ts 工厂 + test/ 集成测试）
 ├── admin/              # 运营后台：Vite + React + TS
 └── project/            # 原始高保真原型（设计事实来源，勿改）
 ```
@@ -57,7 +60,7 @@ repo/
 | 层 | 技术 |
 |---|---|
 | 移动端 `app/` | Taro 3.6.34 · React 18 · TypeScript · Sass · Webpack5（一套码出 weapp + H5） |
-| 后端 `server/` | Fastify 5 · Prisma 5 · PostgreSQL · Zod · `@anthropic-ai/sdk` · tsx/tsc |
+| 后端 `server/` | Fastify 5 · Prisma 5 · PostgreSQL · Zod · `@anthropic-ai/sdk` · tsx/tsc · 可切换大模型（默认 **Agnes 2.0 Flash**，OpenAI 兼容；后台可切 DeepSeek/Qwen…） |
 | 运营端 `admin/` | Vite 5 · React 18 · TypeScript |
 | 数据契约 | `shared/contracts.d.ts`（被三端 `import type` 引用） |
 
@@ -77,6 +80,7 @@ repo/
 - `app/src/services/api.ts`：每个方法按 `IS_MOCK` 分流 mock 或真实请求，**两种模式同口径**（同样的入参/返回类型）。
 - `app/src/services/mock.ts`：前端 mock 后端，实现 login/me/agents/survey/profile/sayings/sessions/generate/library 全量接口；mock 数据来自 `app/src/data/agents.ts`、`app/src/data/deliverables.ts`（**由后端 seed 自动生成，勿手改**）。
 - mock 模式下登录/数据按 `mock-<手机号>` token 隔离并持久化，可切换账号验证隔离。
+- **H5 浏览器手测（推荐替代小程序）**：weapp 与 H5 同一套码、无平台分叉。零后端走查 `npm run dev:h5`；连后端测真实变更 `npm run build:h5:server && npm run serve:h5`（→ http://localhost:5173，server 模式，默认指向 :4000）。H5 用 hash 路由，`dist/` 任意静态服务器可开。详见 `docs/TESTING.md` §五。
 
 ---
 
@@ -90,6 +94,7 @@ repo/
   - 后端 `server/src/llm/schema.ts`（`Deliverable / DeliverableSection / ChatReply`）
   - 运营端 `admin/src/api.ts`（`Overview / AdminAgent / AgentDetail / Plan / AdminSaying→Saying / SurveyAdmin→SurveyQ`）
 - **改数据模型只改这一处**，三端类型同步。
+- **新增能力的契约**（项目/报告/知识/引用）：`ProjectItem/ProjectDetail`、`ReportItem/ReportDetail/ReportVersionItem/ReportVersionContent/ReportDiff/SectionDiff`、`KnowledgeItemT/KnowledgeHit`、`MessageRef`、`SummarizeResult`，以及 `GenRequest.projectId/refs`、`GenResult.knowledgeUsed`、`SessionItem/SessionDetail.projectId`、`SessionMessage.refs`、`LibItem.reportId/version/projectId`。
 
 > 约定：任何新增/修改的接口字段，先改 `shared/contracts.d.ts`，再改实现。
 
@@ -152,19 +157,28 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `GET /profile` · `PUT /profile` | 企业档案读/写（写=完成建档） | 是 |
 | `GET /sayings/today` | 每日献策 | 否 |
 | `GET /sessions` · `GET/DELETE /sessions/:id` | 会话列表/详情/删除 | 是 |
-| `POST /generate-sync` | 同步产出（weapp+H5 通用） | 是 |
-| `POST /generate` | SSE 流式产出（仅 H5/Web） | 是 |
-| `GET/POST /library` · `DELETE /library/:id` | 方案库 | 是 |
+| `POST /generate-sync` | 同步产出（weapp+H5 通用）·接 `projectId`/`refs` | 是 |
+| `POST /generate` | SSE 流式产出（仅 H5/Web）·接 `projectId`/`refs` | 是 |
+| `POST /sessions/:id/summarize` | 对话汇总 → 版本化报告 + 知识库 | 是 |
+| `GET/POST /library` · `DELETE /library/:id` | 方案库（存库即桥接一版报告） | 是 |
+| `GET/POST /projects` · `GET/PUT/DELETE /projects/:id` | 项目主线（详情聚合会话/报告/知识） | 是 |
+| `GET /reports` · `GET /reports/:id` · `GET /reports/:id/version` · `GET /reports/:id/diff` · `POST /reports` · `DELETE /reports/:id` | 版本化报告（历史/某版/两版 diff/存版） | 是 |
+| `GET/POST /knowledge` · `GET /knowledge/search` · `DELETE /knowledge/:id` | 知识库（摄取/混合检索/删除） | 是 |
+| `GET/PUT /admin/ai-config` · `POST /admin/ai-config/test` | 大模型配置（读/改/测试连接，可随时切换） | 演示无 RBAC |
 | `/admin/*` | 运营后台 API（见 §9） | 演示无 RBAC |
 
 ### 8.2 LLM Gateway（`server/src/llm/`）
 `gateway.ts` 统一封装：路由 provider → 内容审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。
+新增：`extractInsights`（LLM 提炼记忆，mock 兜底截断）、`summarizePoints`（LLM 归纳纪要，mock 兜底确定性）、`pingModel`（测试连接）。
 
-Provider（`AI_PROVIDER`）：
-- **mock**（默认）：模板产出，零成本可离线（`providers/mock.ts`）。
-- **claude**：Anthropic，tool use 强约束结构化成果（`providers/claude.ts`）。
-- **openai**：**OpenAI 通用协议**，兼容 DeepSeek / Moonshot(Kimi) / 通义千问兼容模式 等（`providers/openai.ts`，function calling 强约束）。
-- `env.ts` 的 `isRealKey()` 识别占位/假 key——**fake token 不发网络请求，直接降级 mock**；填真实 key 自动切真实模型。
+**★ 模型由「运营后台 → 模型」可视化配置并随时切换**（存 `AiSetting`，`services/aiConfig.ts` 解析：DB > env 兜底，4s 缓存）。默认 **Agnes 2.0 Flash**（`apihub.agnes-ai.com/v1`，OpenAI 兼容）。
+
+Provider（`provider` 字段，由 `effectiveProvider` 决定实际生效）：
+- **mock**：模板产出，零成本可离线（`providers/mock.ts`）。
+- **claude**：Anthropic，tool use 强约束（`providers/claude.ts`）。
+- **openai**：OpenAI 通用协议，兼容 **Agnes / DeepSeek / Moonshot(Kimi) / 通义千问** 等（`providers/openai.ts`，function calling 强约束）。
+- `isRealKey()` 识别占位/假 key——**未配置真实 key 一律降级 mock**，不发网络请求；后台填入真实 key 即时切真实模型（无需重启/改 env）。
+- baseUrl/model/key/温度/嵌入模型 全部来自运行时配置，providers 接 `ResolvedAiConfig` 入参。
 
 环境变量（见 `server/.env.example`）：
 ```
@@ -176,30 +190,85 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 常见 OpenAI 兼容网关：OpenAI `https://api.openai.com/v1`、DeepSeek `https://api.deepseek.com/v1`、Moonshot `https://api.moonshot.cn/v1`、通义 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
 
 ### 8.3 其它服务
-- `services/context.ts`：`resolveUser`（严格鉴权）、`buildGenContext`（注入档案/基准/记忆/本命色）。
-- `services/memory.ts`：Agent Memory 写入/召回/留存 TTL/反馈回流。
+- `services/context.ts`：`resolveUser`（严格鉴权）、`buildGenContext`（注入 档案/基准/记忆/本命色 + **项目背景 + 显式引用 + 知识库混合召回**）。
+- `services/memory.ts`：Agent Memory 写入（**带向量**）/召回（**语义相关性排序**）/留存 TTL/反馈回流。
+- `services/embedding.ts`（★）：文本向量化。默认本地**确定性嵌入**（零依赖、离线、`EMBED_DIM=256`）；配 `EMBEDDING_MODEL`+真实 openai 兼容 key 走真实 `/embeddings`。`cosine()` 维度不一致返回 0。
+- `services/retrieval.ts`（★）：`hybridSearch`（向量+关键词混合、租户隔离、可按项目过滤）、`resolveReferences`（显式 @ 引用 → 带出处注入）。
+- `services/knowledge.ts`（★）：`ingestKnowledge`（切片+逐片向量化）、`listKnowledge`、`deleteKnowledge`。
+- `services/reports.ts`（★）：`saveReportVersion`（slug 归一 + 内容哈希去重 + 自动变更摘要）、`diffContents`/`getReportDiff`（section 级 diff）、`slugify`。
+- `services/summarize.ts`（★）：`summarizeSession`（整段会话 → 纪要报告 + 沉淀知识；有真实模型走 `summarizePoints`）。
+- `services/credits.ts`（★）：算力计量——`ensureCredits`（产出前校验，不足抛 402）/`chargeCredits`（成功后扣减写流水）/`getBalance`；报告类 `CREDIT_COST.report=1`、对话免费，企业版(creditsPerMonth<0)不限量。在 `sessions.ts` 两个产出路由接入。
+- `services/aiConfig.ts`（★）：大模型配置解析（DB > env），预设 `AI_PRESETS`（Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock）、`isReady`/`effectiveProvider`、脱敏 `publicConfig`。
+- `services/vectorStore.ts`（★）：pgvector ANN 查询/向量列双写（`PGVECTOR_ENABLED` 开启时；默认关闭走内存余弦）。
 - 内容审核 `moderation_log`、审计 `audit_log`（演示级，生产替换合规服务）。
 
 ---
 
 ## 9. 运营后台（admin）
 
-页面/接口：概览看板、每日献策库（增删改启停）、智能体配置（System 提示词 + Agent Memory 策略）、建档问卷、套餐。入口 `admin/src/App.tsx` + `AgentDetailPanel.tsx`，API `admin/src/api.ts`（类型来自 SSOT）。开发期 Vite 代理 `/api → localhost:4000`。
+页面/接口：概览看板、每日献策库（增删改启停）、智能体配置（System 提示词 + Agent Memory 策略）、**模型配置（默认 Agnes，可一键切 DeepSeek/Qwen…，含测试连接，即时生效）**、建档问卷、套餐。入口 `admin/src/App.tsx`（`ModelView`）+ `AgentDetailPanel.tsx`，API `admin/src/api.ts`（类型来自 SSOT）。开发期 Vite 代理 `/api → localhost:4000`。
 
 ---
 
 ## 10. 数据库（Prisma · `server/prisma/schema.prisma`）
 
 租户 `Tenant` / 用户 `User`(phone 唯一) / 档案 `Profile` / 智能体 `Agent` / 会话 `Session` / 消息 `Message` / 成果 `Deliverable` / 记忆 `Memory` / 献策 `Saying` / 问卷 `SurveyQuestion` / 套餐 `Plan` / 算力流水 `CreditLedger` / 审计 `AuditLog` / 审核 `ModerationLog`。业务表均含 `tenantId` 行级隔离。
-> 生产：`Memory.embedding` 应用 pgvector；本地降级为内存余弦相似度。
+
+**新增模型（企业事务操作系统）**：
+- `Project`（项目主线，租户级，`(tenantId,slug)` 唯一）；`Session.projectId` / `Memory.projectId` / `Deliverable.projectId` 归属项目。
+- `ReportDoc`（逻辑报告，`(tenantId,slug)` 唯一，`currentVersion`）+ `ReportVersion`（不可变快照，`contentHash` 去重，`changeSummary` 变更摘要，`(reportId,version)` 唯一）。`Deliverable.reportId` 桥接。
+- `KnowledgeItem`（知识条目，可挂项目）+ `KnowledgeChunk`（切片 + `embedding`）。
+- `Message.refsJson`（本条消息引用的 项目/报告/知识/记忆）。
+- `AiSetting`（单例 id=`default`，大模型配置：provider/baseUrl/model/apiKey/embeddingModel/temperature）；pgvector 开启时 `knowledge_chunk`/`memory` 另有 `embedding_vec vector(N)` 列（由 `prisma/pgvector.sql` 建，非 Prisma 管理）。
+
+> 生产：`Memory.embedding` 与 `KnowledgeChunk.embedding` 应用 **pgvector** 的 `vector` 类型 + HNSW 索引；本地降级为 `Json(float[])` + 内存余弦相似度（与 schema 注释一致）。详见「✦ 升级路径」。
 
 ---
 
+## ✦ 企业事务操作系统：项目 / 知识库 / 版本化报告 / 引用
+
+一条主线 + 四块能力，长在既有 会话/记忆/成果 之上。
+
+| 能力 | 后端落点 | 前端落点 |
+|---|---|---|
+| **项目（主线）** | `routes/projects.ts`、`Session/Memory/Deliverable.projectId` | `pages/projects`（列表+新建）、`pages/project`（详情：会话/报告/知识三段）；首页入口条 + 「我的」入口 |
+| **知识库 + 语义记忆** | `services/{embedding,retrieval,knowledge}.ts`、`routes/knowledge.ts`、`Memory` 改语义召回 | 项目详情「知识」段（列表+手动加）；`@引用` 选择器拉候选 |
+| **版本化报告** | `services/reports.ts`、`routes/reports.ts`、`ReportDoc/ReportVersion`、`/library` 桥接 | `pages/report`（版本时间线 + 查看某版 + 对比上一版 diff）；方案库 `vN` 徽标跳转 |
+| **@ 引用（上下文工程）** | `buildGenContext` 解析 `refs` → `resolveReferences` 注入；`injectVariables` 追加「参考资料」块；`Message.refsJson` 持久化 | 对话页 📎 唤起选择器，已选引用以 chip 呈现并随消息发送/回显 |
+| **对话→汇总报告** | `services/summarize.ts`、`POST /sessions/:id/summarize` | 对话页「生成纪要」按钮 → 版本化报告 + 沉淀知识库 |
+
+要点：
+- **检索**：`hybridSearch` = 向量(语义) × 关键词 加权（`alpha≈0.65`）；演示在内存算余弦，生产换 pgvector `<=>` 下推。
+- **记忆质量**：`learnFromConversation` 写入即向量化；召回按当前问题语义排序（无 query 退回 weight+时间）。
+- **报告版本**：按「报告名 slug」归一，**同名再产出/编辑=新版本**，**同内容（hash）不重复成版**，自动算「新增/修改/删除 N 段」摘要；diff 读时实时计算（section 级匹配 `h`）。
+- **mock 可见**：mock provider 会把「引用/知识/项目」体现在产出里（多一段「参考依据」或一条提示），不接真实模型也能直观验证。
+- **隔离**：项目/报告/知识全部 `tenantId` 过滤；引用解析只取该用户/租户可见资料。
+- **演示数据**：`seed.ts` 灌入项目「2026 融资冲刺」+ 报告「战略诊断报告」v1→v2（可看 diff）+ 2 条知识。
+
+## ✦ 升级路径（多数已落地，余项按需推进）
+
+1. ✅ **pgvector（已实现·待真库验证）**：`services/vectorStore.ts` + `prisma/pgvector.sql`（建 `embedding_vec vector(N)` 列 + HNSW + 回填）。置 `PGVECTOR_ENABLED=true` 后 `hybridSearch`/`recallMemories` 走 `<=>` ANN 下推，写入时向量列双写；默认关闭走内存余弦。⚠️ 本地无扩展未端到端验证——上真库执行 `npm run db:pgvector` 后验。切换嵌入维度需改 SQL 的 N 并重嵌。
+2. ✅ **真实嵌入模型（配置驱动）**：后台填 `embeddingModel`（或 env `EMBEDDING_MODEL`）+ 真实 key → `embedding.ts` 走 `/embeddings`；留空用本地确定性嵌入。
+3. ✅ **Learned Memory / 汇总（LLM 化）**：`extractInsights`/`summarizePoints` 在有真实模型时做结构化抽取/归纳，mock 时确定性兜底。
+4. ✅ **词级 diff**：`reports.ts wordDiff`（LCS），changed 段返回 `words`，报告页句内增删高亮。
+5. ✅ **大模型可切换**：运营后台「模型」页（默认 Agnes 2.0 Flash，一键切 DeepSeek/Qwen/Moonshot/OpenAI/Claude，测试连接，即时生效）；配置存 `AiSetting`。
+6. ⏳ **时序知识图谱**：在向量之上叠加 Graphiti 式时序图，回答「X 时谁负责 Y」类关系/时序问题（图与向量互补，不替换）——尚未做。
+7. ⏳ **运营后台只读看板**：项目/报告/知识尚无 admin 看板（接口已就绪）。
+8. ⏳ **密钥安全**：`AiSetting.apiKey` 当前明文存库（演示）；生产应加密/接密管，并给 admin 加 RBAC。
+
 ## 11. 构建、运行、验证
 
-### 本地 mock（零依赖，推荐日常）
+### ★ 一键开发（PostgreSQL，推荐）
 ```bash
-cd app && npm install && npm run dev:weapp   # 微信开发者工具导入 app/ 目录
+npm run dev            # 根目录：确保 PG → 建库 → 迁移 → (首次)灌种子 → 同时起 后端 + H5 + 运营后台
+```
+- 入口 `scripts/dev.sh`（根 `package.json`）。打开 **H5 http://localhost:5173**（浏览器手测）、后台 http://localhost:5174（改模型）、API :4000。
+- 可配：`AI_PROVIDER=openai npm run dev`（真实模型）、`SEED=1 npm run dev`（强制重灌种子）、`DATABASE_URL=... npm run dev`（指向已有库）、`DB_NAME/DB_USER/DB_PASS/DB_HOST/DB_PORT` 覆盖默认。
+- 演示账号手机号 `13800000000`（含演示项目/报告/知识）；Ctrl+C 一并关闭三端。
+
+### 本地 mock（零依赖，纯前端走查）
+```bash
+cd app && npm install && npm run dev:weapp   # 微信开发者工具导入 app/ 目录；或 npm run dev:h5 浏览器
 ```
 
 ### 真实后端（PostgreSQL）
@@ -216,6 +285,13 @@ cd admin && npm install && npm run dev   # 运营后台
 - `server`：`npx tsc -p tsconfig.json --noEmit` → 0
 - `app`：`npm run build:weapp` → Compiled successfully
 - `admin`：`npx tsc -b && npx vite build` → 0 + built
+
+### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
+- 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
+- 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
+- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 33 用例全过 / 19 套件（0 跳过）**。
+- 覆盖：鉴权隔离、多智能体对话、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、边界健壮性。（K2 按次扣减为占位待实现，已 skip 标注）
+- 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
 
 ### 端到端隔离验证（本地 Postgres + mock provider）
 已用 curl 跑通 **19/19**：无 token→401、新号建号、A/B token+租户不同、A 建档/产出/存库后 A 有数据而 **B 全空（隔离）**、A 复登 token 不变且 onboarded 持久化、demo 号可登录、非法 token→401、非法手机号→400。
@@ -236,6 +312,8 @@ npx miniprogram-ci upload \
 
 ## 12. 上线前硬约束（微信小程序）
 
+> 服务器部署（裸机 Node+Nginx+PG / Docker）见 **`docs/DEPLOYMENT.md`** + `deploy/` 模板（含架构图、Nginx/systemd/compose、HTTPS、模型配置、安全 checklist）。
+
 mock 可随时预览；**正式上传/审核**还需：
 1. **真实 AppID**：已设为 `wx05a49967e2adb557`（`app/project.config.json`）。
 2. **后端公网 HTTPS + ICP 备案域名**，并加入小程序后台 request 合法域名；前端用 `TARO_APP_MODE=server TARO_APP_API` 指向它。
@@ -251,6 +329,10 @@ mock 可随时预览；**正式上传/审核**还需：
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 内容审核/计量/缓存为演示级（关键词 / 内存）；生产替换为合规审核 + Redis + 计费台账。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
+- **pgvector 路径已实现但未真库验证**：本地无扩展，默认 `PGVECTOR_ENABLED=false` 走内存余弦（已验证）；上真库执行 `npm run db:pgvector` 并置 true 后需端到端验一遍（升级路径 1）。
+- **模型密钥明文存库**（`AiSetting.apiKey`，演示）；生产加密/接密管 + admin RBAC（升级路径 8）。
+- **时序知识图谱**（Graphiti 式）未做；运营后台暂无 项目/报告/知识 只读看板（接口已就绪）。
+- **@引用** 选择器候选含 项目/报告/知识；记忆引用未单列候选（可由「知识」覆盖），如需可补一组。
 
 ---
 
@@ -259,7 +341,21 @@ mock 可随时预览；**正式上传/审核**还需：
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
 - **2026-06-03** · `project.config.json` AppID 设为 `wx05a49967e2adb557`；尝试用 miniprogram-ci 上传，被云端网络白名单拦截（`servicewechat.com` 未放行），改为本机上传（见 §13 TODO / §11）。
-
+- **2026-06-03** · **部署文档与模板**：新增 `docs/DEPLOYMENT.md`（架构图 + 裸机/Docker 上线步骤 + Nginx/HTTPS + 模型配置 + 安全 checklist）+ `deploy/`（nginx/systemd/Dockerfile/compose 模板）。实测后端生产构建 `npm run build`→`node dist/index.js` 可跑、admin `--base=/admin/` 资源路径正确。
+- **2026-06-03** · **一键本地开发 + 修复 seed 潜伏 bug**：新增根 `package.json` 的 `npm run dev` + `scripts/dev.sh`（确保 PG/建库/迁移/首次种子/同起 后端+H5+后台，Ctrl+C 全关）。**修复 `prisma/seed.ts` 演示项目 `project.create` 缺必填 `slug`**（该段此前从未真跑过——集成测试用 `seedBaseline` 未覆盖；由一键脚本实跑暴露）。本地实跑：三端就绪、演示账号 13800000000 读到「2026 融资冲刺」项目 + 战略诊断报告 v2 + 2 条知识。
+- **2026-06-03** · **H5 浏览器联调打通（替代小程序测试）**：H5 路由设 hash（`config/index.ts`，`dist/` 任意静态服务器可开）；新增 `app/scripts/serve-h5.mjs`（零依赖静态服务器）+ 脚本 `build:h5:server`/`dev:h5:server`/`serve:h5`。**本地实跑**：浏览器(:5173)→后端(:4000) CORS 预检放行 `x-user-id`、登录/产出/算力扣减全通、`/me` 读出 Agnes 配置。weapp 与 H5 无平台分叉、功能对齐。文档 `docs/TESTING.md §五`。
+- **2026-06-03** · **算力计量落地（解锁 TC-K2/K3）**：新增 `services/credits.ts`（按次扣费/余额/不足拦截），`sessions.ts` 两个产出路由接入——报告类产出前校验余额（不足→402 且不建会话）、成功后扣 1 并回填 `GenResult.creditBalance`/SSE `credit` 事件；对话免费；企业版不限量。移除 gateway 空壳 `meter`。`GenResult` 加 `creditBalance?`。集成测试 **33 全过 / 0 跳过**。
+- **2026-06-03** · **集成测试扩容到企业主全旅程**：在原 7 套件基础上新增 TC-I~TC-T（SSE 流式 / 内容审核拦截 / 算力赠送+扣减占位 / 并发冒烟 / 首登建档个性化 / 老用户回流 / 跨智能体协同+引用闭环 / 成果反馈回流 / 记忆 TTL / 跨项目知识隔离 / 每日献策 / 边界健壮性）；`helpers.ts` 加 `seedBaseline`（套餐+智能体+献策+问卷）。**本地 Postgres 16 实跑 31 通过 + 1 skip / 19 套件**。
+- **2026-06-03** · **后端集成测试 + 文档沉淀**：抽出 `src/app.ts`(`buildApp` 工厂)、`index.ts` 改用之；新增 `server/test/`（`helpers.ts` + `integration.test.ts`，Node 原生 test runner + Fastify inject，mock 模型）；`package.json` 加 `test` 脚本。覆盖 7 套件 16 用例（鉴权隔离/多智能体/记忆召回/项目+知识库召回/汇总/报告版本+diff/**★跨用户隔离 TC-G**/模型配置）。新增 `docs/ROADMAP.md`、`docs/TESTING.md`。**本地 Postgres 16 实跑 16/16 全过**。
+- **2026-06-03** · **接入 Agnes 2.0 Flash + 可切换模型配置 + 四项升级全做**：
+  - 模型配置：新增 `AiSetting` 模型 + `services/aiConfig.ts`（DB>env、预设 Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock、脱敏视图、就绪/降级判定）；Gateway 与 providers/embedding 全面改为「运行时配置驱动」；新增 `/admin/ai-config`(GET/PUT/test)；运营后台新增「模型」页（预设一键切换 + 测试连接 + 即时生效）。默认 Agnes（`apihub.agnes-ai.com/v1`，OpenAI 兼容），未配 key 安全降级 mock。
+  - 升级项：① pgvector 路径（`services/vectorStore.ts` + `prisma/pgvector.sql` + `PGVECTOR_ENABLED`，flag 内 ANN 下推/向量列双写，默认关）；② 真实嵌入配置驱动；③ Learned Memory/汇总 LLM 化（`extractInsights`/`summarizePoints`，mock 兜底）；④ 词级 diff（`reports.ts wordDiff` LCS，报告页句内高亮）。
+  - 校验：三端构建全绿；运行时自检通过（词级 diff `eq/add` 正确；无 DB 时配置链路安全降级 mock、不泄露 key、洞察启发式兜底）。⚠️ pgvector 与真实模型联调需在你的 DB/Key 上验证。
+- **2026-06-02** · **企业事务操作系统落地**：引入「项目」主线 + 知识库（语义记忆/混合检索）+ 版本化报告（slug 归一·内容哈希去重·section 级 diff）+ @引用（上下文工程）+ 对话汇总。
+  - SSOT：`shared/contracts.d.ts` 新增 Project/Report/Knowledge/MessageRef/Summarize 等类型及 Gen/Session/Lib 字段扩展。
+  - 后端：新增 `services/{embedding,retrieval,knowledge,reports,summarize}.ts`、`routes/{projects,reports,knowledge}.ts`；升级 `memory.ts`(向量+语义召回)/`context.ts`(项目背景+引用+召回注入)/`schema.ts`(GenContext+injectVariables)/`library.ts`(桥接报告版本)/`sessions.ts`(projectId/refs+summarize)；Prisma 新增 5 模型 + 字段；`seed.ts` 灌演示项目/报告 v1→v2/知识。
+  - 前端：新增 `pages/{projects,project,report}`；对话页加 @引用选择器/生成纪要/项目作用域；方案库 vN 跳转；首页+「我的」入口。
+  - 校验：三端构建全绿（server tsc=0 / app build:weapp ok / admin tsc+vite ok）；核心逻辑运行时自检通过（向量自相似 1.0/相关 0.86/无关 0.0、slug 归一、diff=新增1·修改1·删0）。
 - **2026-06-02** · 新增 §0「给 Coding Agent 的强制指令」：任何代码变更必须记入文档、暂不做的写入 §13 TODO、完成即移出。
 - **2026-06-02** · 文档落为 `AGENTS.md`（Claude Code 新会话自动加载），确立「每次变更必更文档」约定。
 - **2026-06-02** · 配置化 mock/server 模式 + 全栈数据模型统一到 SSOT(`shared/contracts.d.ts`)；新增 `services/config.ts`/`mock.ts`/`token.ts`；后端/运营端类型改为引自 SSOT。三端构建全绿。

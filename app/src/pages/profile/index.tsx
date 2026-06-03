@@ -14,14 +14,17 @@ export default function Profile() {
   const accent = color.vars['--accent'];
   const me = s.me();
   const [libCount, setLibCount] = useState(0);
+  const [projCount, setProjCount] = useState(0);
   const [showPicker, setShowPicker] = useState(false);
 
   useDidShow(() => {
     s.setTab(4);
     api.library().then((l) => setLibCount(l.length)).catch(() => {});
+    api.projects().then((p) => setProjCount(p.length)).catch(() => {});
   });
 
   const rows = [
+    { ic: 'grid', t: '项目工作台', s: projCount ? `${projCount} 个项目` : '按项目管理事务', onClick: () => Taro.navigateTo({ url: '/pages/projects/index' }) },
     { ic: 'layers', t: '我的方案库', s: `${libCount} 份成果`, onClick: () => Taro.navigateTo({ url: '/pages/library/index' }) },
     { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
     { ic: 'doc', t: '套餐与算力', s: me?.plan?.name ?? '决策版', onClick: () => Taro.showToast({ title: '套餐管理', icon: 'none' }) },

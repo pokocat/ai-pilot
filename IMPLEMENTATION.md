@@ -35,6 +35,22 @@ repo/
 | §8 本命色/多租户 | `tenant_id` 行级隔离；本命色首登强制选择（金色默认）、可在「我的」重选 |
 | §9 合规 | 内容审核（`moderation_log`）、免责页脚、审计日志（演示级，生产需替换合规服务） |
 
+## 新增能力：企业事务操作系统（项目 / 知识库 / 版本化报告 / 引用）
+
+在既有 会话/记忆/成果 之上扩展，详见 `AGENTS.md`「✦ 企业事务操作系统」「✦ 升级路径」。
+
+| 能力 | 实现位置 |
+|---|---|
+| 项目主线 | `server/src/routes/projects.ts`、`Session/Memory/Deliverable.projectId`、`app/src/pages/{projects,project}` |
+| 知识库 + 语义记忆 | `server/src/services/{embedding,retrieval,knowledge}.ts`、`routes/knowledge.ts`、`memory.ts`(语义召回)、项目详情「知识」段 |
+| 版本化报告 | `server/src/services/reports.ts`、`routes/reports.ts`、`ReportDoc/ReportVersion`、`app/src/pages/report`（版本时间线 + diff） |
+| @ 引用（上下文工程） | `buildGenContext`+`resolveReferences`+`injectVariables`、`Message.refsJson`、对话页 📎 选择器 |
+| 对话→汇总报告 | `server/src/services/summarize.ts`、`POST /sessions/:id/summarize`、对话页「生成纪要」 |
+| 可切换大模型（默认 Agnes 2.0 Flash） | `server/src/services/aiConfig.ts`、`routes/admin.ts`(`/admin/ai-config`)、`llm/{gateway,providers}` 配置驱动、运营后台「模型」页 |
+| pgvector / 真实嵌入 / LLM 提炼 / 词级 diff | `services/vectorStore.ts`+`prisma/pgvector.sql`(flag)、`embedding.ts`(配置驱动)、`gateway.extractInsights/summarizePoints`、`reports.wordDiff` |
+
+技术取舍：语义检索用 **pgvector（生产）/ 内存余弦（本地）** 单库收敛，避免独立向量库的运维税；报告版本用 **全量快照 + 内容哈希去重 + 读时 section 级 diff**（小 JSON 文档无需 Dolt 类重型方案）；引用走 **显式注入** 而非纯自动检索（可控、可溯源）。
+
 ## 本地运行
 
 ### 0. 前置

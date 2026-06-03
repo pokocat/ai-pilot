@@ -1,0 +1,21 @@
+# 军师 · 后端镜像（多阶段）。构建上下文 = 仓库根目录（需要 server/ 与 shared/ 同时在场）。
+#   docker build -f deploy/Dockerfile.server -t junshi-api .
+# 注：迁移/灌种子不在镜像内做（种子依赖 tsx + src）；见 docs/DEPLOYMENT.md「迁移与种子」。
+
+FROM node:20-slim AS build
+WORKDIR /repo
+# 保持仓库相对布局：server 通过 ../../../shared 引用类型（编译期擦除）
+COPY shared ./shared
+COPY server ./server
+WORKDIR /repo/server
+RUN npm ci && npx prisma generate && npm run build
+
+FROM node:20-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /repo/server/node_modules ./node_modules
+COPY --from=build /repo/server/dist ./dist
+COPY --from=build /repo/server/prisma ./prisma
+COPY --from=build /repo/server/package.json ./package.json
+EXPOSE 4000
+CMD ["node", "dist/index.js"]

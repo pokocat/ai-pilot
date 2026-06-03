@@ -23,7 +23,9 @@ export default function Library() {
   });
 
   const open = (it: LibItem) => {
-    if (it.sessionId) Taro.navigateTo({ url: `/pages/chat/index?sessionId=${it.sessionId}` });
+    // 有版本化报告 → 进报告页看版本与变更；否则回到产出它的会话继续深化
+    if (it.reportId) Taro.navigateTo({ url: `/pages/report/index?id=${it.reportId}` });
+    else if (it.sessionId) Taro.navigateTo({ url: `/pages/chat/index?sessionId=${it.sessionId}` });
     else Taro.navigateTo({ url: `/pages/chat/index?agentKey=${it.agentKey}&continue=1` });
   };
 
@@ -54,6 +56,7 @@ export default function Library() {
                   <Text className="li-t">{it.title}</Text>
                   <Text className="li-m">{it.agentName} · {fmt(it.at)}</Text>
                 </View>
+                {it.reportId && it.version ? <View className="li-ver" style={{ borderColor: accent, color: accent }}><Text>v{it.version}</Text></View> : null}
                 <Text className="li-go">›</Text>
               </View>
             ))}

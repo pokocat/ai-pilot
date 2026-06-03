@@ -21,7 +21,7 @@ export async function metaRoutes(app: FastifyInstance) {
       plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth } : null,
       creditBalance: credit?.balance ?? 0,
       onboarded,
-      ai: providerInfo(),
+      ai: await providerInfo(),
     };
   });
 

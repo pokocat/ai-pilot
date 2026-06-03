@@ -1,0 +1,11 @@
+{
+  "name": "junshi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "军师 · AI 商业军师 — 本地一键开发编排（后端 + H5 + 运营后台）",
+  "scripts": {
+    "dev": "bash scripts/dev.sh",
+    "dev:seed": "SEED=1 bash scripts/dev.sh",
+    "dev:real": "AI_PROVIDER=openai bash scripts/dev.sh"
+  }
+}

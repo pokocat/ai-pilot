@@ -62,3 +62,37 @@
 .cinput { flex: 1; font-size: 14px; color: var(--ink); height: 44px; }
 .csend { width: 44px; height: 44px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
 .csend.busy { opacity: .5; }
+.composer .cbtn { display: flex; align-items: center; justify-content: center; }
+
+/* 工具栏：项目作用域 + 生成纪要 */
+.chat-tools { display: flex; align-items: center; justify-content: space-between; padding: 0 16px 8px; }
+.chat-tools .ct-spacer { flex: 1; }
+.ct-proj { display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+.ct-sum { display: flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
+
+/* 用户消息上的引用标签 */
+.msg.u .uref { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; margin-top: 5px; }
+.uref-chip { font-size: 10.5px; color: var(--ink-3); background: var(--surface-2); padding: 2px 8px; border-radius: 999px; }
+
+/* 已选引用行（输入区上方） */
+.ref-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 0; background: var(--surface); }
+.ref-chip { display: flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+.ref-chip .ref-x { font-size: 10px; color: var(--ink-3); }
+
+/* @引用选择器底部弹层 */
+.ref-sheet { position: fixed; inset: 0; z-index: 50; }
+.ref-mask { position: absolute; inset: 0; background: rgba(0,0,0,.35); }
+.ref-panel { position: absolute; left: 0; right: 0; bottom: 0; max-height: 66vh; display: flex; flex-direction: column;
+  background: var(--surface); border-radius: 20px 20px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+.ref-ph { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.ref-pt { font-size: 15px; font-weight: 700; color: var(--ink); }
+.ref-done { font-size: 13px; font-weight: 600; }
+.ref-body { flex: 1; min-height: 0; }
+.ref-group { margin-bottom: 12px; }
+.ref-gt { display: block; font-size: 11.5px; font-weight: 700; color: var(--ink-3); margin-bottom: 7px; }
+.ref-item { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 12px; background: var(--surface-2); border: 1.5px solid transparent; margin-bottom: 7px; }
+.ref-ib { flex: 1; min-width: 0; }
+.ref-il { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ref-is { display: block; font-size: 11px; color: var(--ink-3); margin-top: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ref-ck { width: 20px; height: 20px; border-radius: 7px; border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.ref-empty { display: block; font-size: 12.5px; line-height: 1.7; color: var(--ink-3); padding: 20px 8px; text-align: center; }
