@@ -278,8 +278,8 @@ cd admin && npm install && npm run dev   # 运营后台
 ### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
-- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 16 用例 / 7 套件全过**。
-- 覆盖：鉴权隔离、多智能体对话、记忆语义召回、项目+知识库+跨对话召回、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key。
+- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 31 用例通过 + 1 待实现跳过 / 19 套件**。
+- 覆盖：鉴权隔离、多智能体对话、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、边界健壮性。（K2 按次扣减为占位待实现，已 skip 标注）
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
 
 ### 端到端隔离验证（本地 Postgres + mock provider）
@@ -314,6 +314,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-03** · **集成测试扩容到企业主全旅程**：在原 7 套件基础上新增 TC-I~TC-T（SSE 流式 / 内容审核拦截 / 算力赠送+扣减占位 / 并发冒烟 / 首登建档个性化 / 老用户回流 / 跨智能体协同+引用闭环 / 成果反馈回流 / 记忆 TTL / 跨项目知识隔离 / 每日献策 / 边界健壮性）；`helpers.ts` 加 `seedBaseline`（套餐+智能体+献策+问卷）。**本地 Postgres 16 实跑 31 通过 + 1 skip / 19 套件**。
 - **2026-06-03** · **后端集成测试 + 文档沉淀**：抽出 `src/app.ts`(`buildApp` 工厂)、`index.ts` 改用之；新增 `server/test/`（`helpers.ts` + `integration.test.ts`，Node 原生 test runner + Fastify inject，mock 模型）；`package.json` 加 `test` 脚本。覆盖 7 套件 16 用例（鉴权隔离/多智能体/记忆召回/项目+知识库召回/汇总/报告版本+diff/**★跨用户隔离 TC-G**/模型配置）。新增 `docs/ROADMAP.md`、`docs/TESTING.md`。**本地 Postgres 16 实跑 16/16 全过**。
 - **2026-06-03** · **接入 Agnes 2.0 Flash + 可切换模型配置 + 四项升级全做**：
   - 模型配置：新增 `AiSetting` 模型 + `services/aiConfig.ts`（DB>env、预设 Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock、脱敏视图、就绪/降级判定）；Gateway 与 providers/embedding 全面改为「运行时配置驱动」；新增 `/admin/ai-config`(GET/PUT/test)；运营后台新增「模型」页（预设一键切换 + 测试连接 + 即时生效）。默认 Agnes（`apihub.agnes-ai.com/v1`，OpenAI 兼容），未配 key 安全降级 mock。

@@ -5,19 +5,19 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
-import { api, login, seedAgents, cleanBusiness, closeApp, uniquePhone, deliverable } from './helpers.js';
+import { api, login, seedBaseline, cleanBusiness, closeApp, uniquePhone, deliverable } from './helpers.js';
 // 直接断言的服务层（也是后端的一部分）
-import { recallMemories } from '../src/services/memory.js';
+import { recallMemories, recordFeedback } from '../src/services/memory.js';
 import { buildGenContext } from '../src/services/context.js';
 import { hybridSearch, resolveReferences } from '../src/services/retrieval.js';
-import { diffContents, wordDiff } from '../src/services/reports.js';
+import type { MemoryConfig } from '../src/data/agents.js';
 
 const tenantOf = async (token: string) =>
   (await prisma.user.findUnique({ where: { id: token } }))!.tenantId;
 
 before(async () => {
   await cleanBusiness();
-  await seedAgents();
+  await seedBaseline();
 });
 after(async () => {
   await closeApp();
@@ -232,5 +232,179 @@ describe('TC-H 模型配置（默认 Agnes，可切换，不泄露明文 key）'
     assert.equal(r.body.config.ready, false, '无真实 key → 未就绪');
     assert.equal(r.body.config.effectiveProvider, 'mock', '未就绪应实际降级 mock');
     assert.ok(!('apiKey' in r.body.config));
+  });
+});
+
+// ───────────────────────── TC-I 流式产出（SSE） ─────────────────────────
+describe('TC-I 流式产出（SSE /generate）', () => {
+  test('I1 顾问结构化成果按事件流式下发', async () => {
+    const t = await login(uniquePhone());
+    const r = await api('POST', '/api/generate', { token: t, body: { text: '帮我做一次战略体检', agentKey: 'strat' } });
+    assert.equal(r.status, 200);
+    const sse = String(r.body);
+    for (const ev of ['event: begin', 'event: section', 'event: footer', 'event: done']) {
+      assert.ok(sse.includes(ev), `SSE 应包含 ${ev}`);
+    }
+  });
+});
+
+// ───────────────────────── TC-J 内容审核拦截（合规） ─────────────────────────
+describe('TC-J 内容审核拦截', () => {
+  test('J1 命中违规词的输入 → 422 拦截', async () => {
+    const t = await login(uniquePhone());
+    const r = await api('POST', '/api/generate-sync', { token: t, body: { text: '帮我评估一个赌博平台的获客方案', agentKey: 'general' } });
+    assert.equal(r.status, 422, '违规输入应被拦截');
+    assert.equal(r.body.code, 'MODERATION_BLOCK');
+  });
+});
+
+// ───────────────────────── TC-K 算力（套餐赠送 + 计量） ─────────────────────────
+describe('TC-K 算力账户', () => {
+  test('K1 注册即按套餐赠送算力，/me 可见余额', async () => {
+    const t = await login(uniquePhone());
+    const me = await api('GET', '/api/me', { token: t });
+    assert.ok(me.body.creditBalance > 0, '新账号应有赠送算力');
+    assert.ok(me.body.plan, '应绑定套餐');
+  });
+  // 按次扣减尚未实现（gateway.meter 为占位，未写 credit_ledger）——见 ROADMAP P2。
+  test('K2 产出按次扣减算力', { skip: 'meter() 为占位，未落 credit_ledger（待实现）' }, () => {});
+});
+
+// ───────────────────────── TC-L 并发冒烟 ─────────────────────────
+describe('TC-L 并发冒烟', () => {
+  test('L1 同一用户并发多次产出：均成功且会话不串', async () => {
+    const t = await login(uniquePhone());
+    const results = await Promise.all(
+      Array.from({ length: 8 }, (_, i) => api('POST', '/api/generate-sync', { token: t, body: { text: `并发问题 ${i}`, agentKey: 'general' } })),
+    );
+    assert.ok(results.every((r) => r.status === 200), '全部应成功');
+    const ids = new Set(results.map((r) => r.body.sessionId));
+    assert.equal(ids.size, 8, '8 次应产生 8 个独立会话，无串号');
+  });
+});
+
+// ───────────────────────── TC-M 首登建档 → 个性化产出 ─────────────────────────
+describe('TC-M 首登建档 → 个性化产出', () => {
+  test('M1 建档后 onboarded=true，产出按企业档案个性化', async () => {
+    const t = await login(uniquePhone());
+    await api('PUT', '/api/profile', { token: t, body: { industry: '精密制造', stage: '规模化', pain: '现金流' } });
+    const me = await api('GET', '/api/me', { token: t });
+    assert.equal(me.body.onboarded, true, '建档后应标记 onboarded');
+    const r = await api('POST', '/api/generate-sync', { token: t, body: { text: '帮我做一次战略体检', agentKey: 'strat' } });
+    assert.ok(r.body.deliverable.meta.includes('精密制造'), '成果元信息应带入企业档案行业');
+  });
+});
+
+// ───────────────────────── TC-N 老用户回流（持久化） ─────────────────────────
+describe('TC-N 老用户回流持久化', () => {
+  test('N1 同手机号复登 token 不变，历史数据仍在', async () => {
+    const phone = uniquePhone();
+    const t1 = await login(phone, '回流公司');
+    await api('POST', '/api/projects', { token: t1, body: { name: '长期项目' } });
+    const t2 = await login(phone);
+    assert.equal(t2, t1, '同手机号复登应是同一账号');
+    const projects = await api('GET', '/api/projects', { token: t2 });
+    assert.ok(projects.body.some((p: any) => p.name === '长期项目'), '历史项目应仍在');
+  });
+});
+
+// ───────────────────────── TC-O 跨智能体协同 + 引用闭环 ─────────────────────────
+describe('TC-O 一个项目内跨智能体协同 + 引用闭环', () => {
+  test('O1 战略报告 → 融资参谋引用它继续产出，沉淀在同一项目', async () => {
+    const t = await login(uniquePhone());
+    const p = await api('POST', '/api/projects', { token: t, body: { name: 'A 轮冲刺' } });
+    const pid = p.body.id;
+    // 战略诊断官产出并存为报告
+    const gen1 = await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat', projectId: pid } });
+    const lib = await api('POST', '/api/library', { token: t, body: { title: '战略诊断报告', type: '战略体检', agentKey: 'strat', sessionId: gen1.body.sessionId, projectId: pid, content: deliverable('战略诊断报告', [{ h: '核心判断', b: '聚焦高价值客群' }]) } });
+    // 融资参谋引用该报告继续产出
+    const gen2 = await api('POST', '/api/generate-sync', { token: t, body: { text: '据此做融资准备', agentKey: 'fund', projectId: pid, refs: [{ kind: 'report', id: lib.body.reportId, version: 1, label: '战略诊断报告 v1' }] } });
+    assert.ok((gen2.body.knowledgeUsed ?? []).length > 0, '引用应被采纳并体现在产出依据中');
+    // 项目聚合：≥2 会话、≥1 报告
+    const detail = await api('GET', `/api/projects/${pid}`, { token: t });
+    assert.ok(detail.body.counts.sessions >= 2 && detail.body.counts.reports >= 1, '项目应聚合多智能体协同的产物');
+  });
+});
+
+// ───────────────────────── TC-P 成果采纳 → 反馈记忆 ─────────────────────────
+describe('TC-P 成果反馈回流', () => {
+  test('P1 默认配置不写反馈记忆（sources 未含 deliverable_feedback）', async () => {
+    const t = await login(uniquePhone());
+    await api('POST', '/api/library', { token: t, body: { title: '默认成果', type: '战略体检', agentKey: 'strat', content: deliverable('默认成果', [{ h: 'A', b: 'x' }]) } });
+    const mems = await recallMemories(t, 'strat', 10, '采纳');
+    assert.ok(!mems.some((m) => m.includes('采纳了')), '默认配置不应写入反馈记忆');
+  });
+  test('P2 开启 deliverable_feedback 后，采纳信号沉淀为可召回记忆', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    const cfg: MemoryConfig = { longTerm: true, autoLearn: true, intensity: 'balanced', retentionDays: 180, sources: ['deliverable_feedback'] };
+    await recordFeedback({ tenantId, userId: t, agentKey: 'strat', cfg, signal: 'adopt', title: '增长方案' });
+    const mems = await recallMemories(t, 'strat', 5, '采纳 增长方案');
+    assert.ok(mems.some((m) => m.includes('采纳了《增长方案》')), '采纳信号应可召回');
+  });
+});
+
+// ───────────────────────── TC-Q 记忆留存 TTL ─────────────────────────
+describe('TC-Q 记忆留存（TTL 过期不召回）', () => {
+  test('Q1 过期记忆被排除，未过期记忆正常召回', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    const past = new Date(Date.now() - 86400000);
+    const future = new Date(Date.now() + 86400000);
+    await prisma.memory.create({ data: { tenantId, userId: t, agentKey: 'strat', kind: 'preference', text: 'EXPIRED-不该出现', source: 'conversation', weight: 1, expiresAt: past } });
+    await prisma.memory.create({ data: { tenantId, userId: t, agentKey: 'strat', kind: 'preference', text: 'VALID-应保留', source: 'conversation', weight: 1, expiresAt: future } });
+    const mems = await recallMemories(t, 'strat', 10);
+    assert.ok(mems.some((m) => m.includes('VALID')), '未过期记忆应召回');
+    assert.ok(!mems.some((m) => m.includes('EXPIRED')), '过期记忆不应召回');
+  });
+});
+
+// ───────────────────────── TC-R 跨项目知识不串 ─────────────────────────
+describe('TC-R 跨项目知识隔离（同一用户）', () => {
+  test('R1 在项目 A 对话不会召回项目 B 的知识', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    const pa = (await api('POST', '/api/projects', { token: t, body: { name: '供应链项目' } })).body.id;
+    const pb = (await api('POST', '/api/projects', { token: t, body: { name: '出海项目' } })).body.id;
+    await api('POST', '/api/knowledge', { token: t, body: { text: '供应链优化：与晨曦集团锁定年度框采', projectId: pa, title: '供应链' } });
+    await api('POST', '/api/knowledge', { token: t, body: { text: '海外渠道：东南亚先做新加坡样板', projectId: pb, title: '出海' } });
+
+    const { ctx: ctxA } = await buildGenContext({ userId: t, tenantId, agentKey: 'strat', userMessage: '供应链怎么优化', projectId: pa });
+    const joinedA = (ctxA.knowledge ?? []).join('');
+    assert.ok(joinedA.includes('供应链'), '项目 A 应召回 A 的知识');
+    assert.ok(!joinedA.includes('海外渠道'), '项目 A 不应串入项目 B 的知识');
+  });
+});
+
+// ───────────────────────── TC-S 每日献策 ─────────────────────────
+describe('TC-S 每日献策', () => {
+  test('S1 返回当日一条献策', async () => {
+    const r = await api('GET', '/api/sayings/today');
+    assert.equal(r.status, 200);
+    assert.ok(r.body.text && r.body.date, '应返回 文案 + 日期');
+  });
+});
+
+// ───────────────────────── TC-T 边界 / 健壮性 ─────────────────────────
+describe('TC-T 边界与健壮性', () => {
+  test('T1 空输入 → 400', async () => {
+    const t = await login(uniquePhone());
+    const r = await api('POST', '/api/generate-sync', { token: t, body: { text: '   ', agentKey: 'general' } });
+    assert.equal(r.status, 400);
+  });
+  test('T2 空检索词 → 返回空数组（不报错）', async () => {
+    const t = await login(uniquePhone());
+    const r = await api('GET', '/api/knowledge/search?q=', { token: t });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body, []);
+  });
+  test('T3 删除会话后不可再访问，且从列表消失', async () => {
+    const t = await login(uniquePhone());
+    const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '随便聊聊', agentKey: 'general' } });
+    const sid = gen.body.sessionId;
+    assert.equal((await api('DELETE', `/api/sessions/${sid}`, { token: t })).status, 200);
+    assert.equal((await api('GET', `/api/sessions/${sid}`, { token: t })).status, 404);
+    const list = await api('GET', '/api/sessions', { token: t });
+    assert.ok(!list.body.some((s: any) => s.id === sid), '已删会话应从列表消失');
   });
 });

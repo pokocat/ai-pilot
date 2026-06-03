@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { prisma } from '../src/db.js';
 import { AGENTS } from '../src/data/agents.js';
+import { SAYINGS, SURVEY, PLANS } from '../src/data/seedConfig.js';
 
 let app: FastifyInstance | null = null;
 
@@ -31,6 +32,20 @@ export async function seedAgents(): Promise<void> {
       },
     });
   }
+}
+
+/** 灌入基础预设：套餐 + 智能体 + 献策 + 问卷（login 取套餐赠算力、献策/问卷接口依赖）。 */
+export async function seedBaseline(): Promise<void> {
+  await prisma.plan.deleteMany();
+  for (let i = 0; i < PLANS.length; i++) {
+    const p = PLANS[i];
+    await prisma.plan.create({ data: { name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, agentCount: p.agentCount, featuresJson: p.features, highlighted: p.highlighted, sort: i } });
+  }
+  await seedAgents();
+  await prisma.saying.deleteMany();
+  for (let i = 0; i < SAYINGS.length; i++) await prisma.saying.create({ data: { text: SAYINGS[i].text, enabled: SAYINGS[i].enabled, sort: i } });
+  await prisma.surveyQuestion.deleteMany();
+  for (let i = 0; i < SURVEY.length; i++) { const q = SURVEY[i]; await prisma.surveyQuestion.create({ data: { key: q.key, title: q.title, optionsJson: q.options, sort: i } }); }
 }
 
 /** 清空业务数据（按外键顺序）；保留 agent 注册表。 */
