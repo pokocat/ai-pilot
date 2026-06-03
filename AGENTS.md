@@ -45,8 +45,9 @@ repo/
 ├── IMPLEMENTATION.md   # 与《投产开发指导》章节的对应表（设计溯源）
 ├── shared/
 │   └── contracts.d.ts  # ★ SSOT：全栈数据契约（纯类型，运行时擦除）
+├── docs/               # ROADMAP.md（进展/TODO）· TESTING.md（集成测试说明）
 ├── app/                # Taro 移动端（微信小程序 weapp + H5），React + TS
-├── server/             # 后端 API：Fastify + Prisma + PostgreSQL + LLM Gateway
+├── server/             # 后端 API：Fastify + Prisma + PostgreSQL + LLM Gateway（含 src/app.ts 工厂 + test/ 集成测试）
 ├── admin/              # 运营后台：Vite + React + TS
 └── project/            # 原始高保真原型（设计事实来源，勿改）
 ```
@@ -274,6 +275,13 @@ cd admin && npm install && npm run dev   # 运营后台
 - `app`：`npm run build:weapp` → Compiled successfully
 - `admin`：`npx tsc -b && npx vite build` → 0 + built
 
+### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
+- 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
+- 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
+- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 16 用例 / 7 套件全过**。
+- 覆盖：鉴权隔离、多智能体对话、记忆语义召回、项目+知识库+跨对话召回、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key。
+- 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
+
 ### 端到端隔离验证（本地 Postgres + mock provider）
 已用 curl 跑通 **19/19**：无 token→401、新号建号、A/B token+租户不同、A 建档/产出/存库后 A 有数据而 **B 全空（隔离）**、A 复登 token 不变且 onboarded 持久化、demo 号可登录、非法 token→401、非法手机号→400。
 
@@ -306,6 +314,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-03** · **后端集成测试 + 文档沉淀**：抽出 `src/app.ts`(`buildApp` 工厂)、`index.ts` 改用之；新增 `server/test/`（`helpers.ts` + `integration.test.ts`，Node 原生 test runner + Fastify inject，mock 模型）；`package.json` 加 `test` 脚本。覆盖 7 套件 16 用例（鉴权隔离/多智能体/记忆召回/项目+知识库召回/汇总/报告版本+diff/**★跨用户隔离 TC-G**/模型配置）。新增 `docs/ROADMAP.md`、`docs/TESTING.md`。**本地 Postgres 16 实跑 16/16 全过**。
 - **2026-06-03** · **接入 Agnes 2.0 Flash + 可切换模型配置 + 四项升级全做**：
   - 模型配置：新增 `AiSetting` 模型 + `services/aiConfig.ts`（DB>env、预设 Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock、脱敏视图、就绪/降级判定）；Gateway 与 providers/embedding 全面改为「运行时配置驱动」；新增 `/admin/ai-config`(GET/PUT/test)；运营后台新增「模型」页（预设一键切换 + 测试连接 + 即时生效）。默认 Agnes（`apihub.agnes-ai.com/v1`，OpenAI 兼容），未配 key 安全降级 mock。
   - 升级项：① pgvector 路径（`services/vectorStore.ts` + `prisma/pgvector.sql` + `PGVECTOR_ENABLED`，flag 内 ANN 下推/向量列双写，默认关）；② 真实嵌入配置驱动；③ Learned Memory/汇总 LLM 化（`extractInsights`/`summarizePoints`，mock 兜底）；④ 词级 diff（`reports.ts wordDiff` LCS，报告页句内高亮）。
