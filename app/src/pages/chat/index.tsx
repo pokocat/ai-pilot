@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../components/Icon';
+import Login from '../../components/Login';
 import ReportCard from '../../components/ReportCard';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
@@ -28,6 +29,7 @@ export default function Chat() {
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [refs, setRefs] = useState<MessageRef[]>([]);
+  const [showLogin, setShowLogin] = useState(false);
   const [picker, setPicker] = useState(false);
   const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[] }>({ projects: [], reports: [], knowledge: [] });
   const logRef = useRef<Msg[]>([]);
@@ -36,6 +38,17 @@ export default function Chat() {
   const findAgent = (key: string): Agent | undefined => s.agents().find((a) => a.key === key);
 
   const scrollToEnd = () => setScrollTop((t) => t + 100000);
+
+  const isUnauthorized = (e: unknown) =>
+    (e as any)?.code === 'UNAUTHORIZED' || String((e as any)?.message || '').includes('未登录');
+
+  const errorReply = (e: unknown): string => {
+    if (isUnauthorized(e)) return '登录态已失效，请重新登录后再发送。';
+    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '算力不足，请充值后再产出。';
+    const msg = String((e as any)?.message || '');
+    if (msg && msg !== 'undefined') return msg;
+    return '抱歉，产出失败了，请稍后再试。';
+  };
 
   // 初始化：根据路由参数还原会话 / 打开顾问线程 / 新会话
   useEffect(() => {
@@ -79,7 +92,8 @@ export default function Chat() {
         // 全新会话：仅渲染问候（不落库），首条消息时后端创建
         setMsgs([{ role: 'greet', agent: fallbackAgent }]);
         if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key), 350);
-      } catch {
+      } catch (e) {
+        if (isUnauthorized(e)) setShowLogin(true);
         // 任何拉取失败都不让对话页空白：至少给出问候
         if (fallbackAgent) {
           setAgent(fallbackAgent);
@@ -102,6 +116,12 @@ export default function Chat() {
 
   async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = []) {
     if (busy) return;
+    if (!store.isAuthed()) {
+      setShowLogin(true);
+      setMsgs((m) => [...m, { role: 'assistant', reply: { text: '请先登录后再继续对话。' } }]);
+      setTimeout(scrollToEnd, 30);
+      return;
+    }
     setBusy(true);
     setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
@@ -121,7 +141,8 @@ export default function Chat() {
       }
       setTimeout(scrollToEnd, 80);
     } catch (e) {
-      setMsgs((m) => [...m, { role: 'assistant', reply: { text: '抱歉，产出失败了，请稍后再试。' } }]);
+      if (isUnauthorized(e)) setShowLogin(true);
+      setMsgs((m) => [...m, { role: 'assistant', reply: { text: errorReply(e) } }]);
     } finally {
       setBusy(false);
     }
@@ -162,6 +183,11 @@ export default function Chat() {
 
   // 打开 @引用选择器：拉取可引用的 项目/报告/知识
   const openPicker = async () => {
+    if (!store.isAuthed()) {
+      setShowLogin(true);
+      Taro.showToast({ title: '请先登录', icon: 'none' });
+      return;
+    }
     setPicker(true);
     store.setOverlay(true);
     const [projects, reports, knowledge] = await Promise.all([
@@ -337,6 +363,11 @@ export default function Chat() {
           </View>
         </View>
       )}
+
+      <Login
+        open={showLogin}
+        onLoggedIn={() => setShowLogin(false)}
+      />
     </View>
   );
 }
