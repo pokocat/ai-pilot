@@ -69,7 +69,13 @@ AI_PROVIDER=mock npm test
 
 一套 Taro 码同出 weapp + H5、功能完全对齐（无任何平台分叉代码）。**用 H5 在浏览器里即可手测全部后端变更**（项目 / 知识 / 版本化报告 / @引用 / 汇总 / 算力扣减），免微信开发者工具。
 
-### 两种模式
+### 最简：一键起全栈（推荐）
+```bash
+npm run dev   # 根目录：确保 PG → 建库/迁移/首次种子 → 同起 后端 + H5 + 运营后台
+```
+→ 打开 **http://localhost:5173**（H5 手测）、http://localhost:5174（运营后台改模型）；演示账号手机号 `13800000000`。详见 `AGENTS.md §11`。
+
+### 两种模式（手动）
 - **mock（零后端，走查 UI）**：`cd app && npm run dev:h5`（纯前端数据源）。
 - **server（连后端，测真实变更）**：
   1. 起后端：`cd server && export DATABASE_URL=... && npm run db:push && npm run db:seed && AI_PROVIDER=mock npm run dev`（:4000）

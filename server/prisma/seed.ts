@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { AGENTS } from '../src/data/agents.js';
 import { SAYINGS, SURVEY, PLANS } from '../src/data/seedConfig.js';
-import { saveReportVersion } from '../src/services/reports.js';
+import { saveReportVersion, slugify } from '../src/services/reports.js';
 import { ingestKnowledge } from '../src/services/knowledge.js';
 
 const prisma = new PrismaClient();
@@ -121,7 +121,7 @@ async function main() {
   // —— 演示：项目 + 版本化报告(v1→v2 可看变更) + 知识库 ——
   const project = await prisma.project.create({
     data: {
-      tenantId: tenant.id, userId: user.id, name: '2026 融资冲刺', icon: 'doc',
+      tenantId: tenant.id, userId: user.id, name: '2026 融资冲刺', slug: slugify('2026 融资冲刺'), icon: 'doc',
       summary: '目标 A+ 轮 6000 万，Q3 启动；当前重点：把增长逻辑与单位经济讲清楚，对齐故事与数据。',
     },
   });
