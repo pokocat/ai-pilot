@@ -5,12 +5,14 @@
 import type {
   Deliverable, DeliverableSection, ChatReply,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
-  ReportDiff, SectionDiff, SaveReportResult, SummarizeResult,
+  ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
+  AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
 } from '../../../shared/contracts';
 export type {
   Deliverable, DeliverableSection, ChatReply,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
-  ReportDiff, SectionDiff, SaveReportResult, SummarizeResult,
+  ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
+  AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
 };
 
 export interface GenContext {

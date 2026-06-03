@@ -24,4 +24,8 @@ export const env = {
   embeddingModel: process.env.EMBEDDING_MODEL ?? '',
 
   moderationEnabled: (process.env.MODERATION_ENABLED ?? 'true') === 'true',
+
+  // 知识/记忆向量近邻检索：默认关闭走内存余弦（零依赖）；
+  // 置 true 且已执行 prisma/pgvector.sql（建 vector 列 + HNSW）后，走 pgvector 的 <=> 下推。
+  pgvectorEnabled: (process.env.PGVECTOR_ENABLED ?? 'false') === 'true',
 };

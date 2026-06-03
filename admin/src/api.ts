@@ -14,8 +14,9 @@ async function req<T>(path: string, method = 'GET', body?: object): Promise<T> {
 export type { Overview, AdminAgent, AgentDetail, MemoryConfig, MemoryIntensity, MemorySource, Plan } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
+export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider } from '../../shared/contracts';
 
-import type { Overview, AdminAgent, AgentDetail, SurveyAdmin, Plan, AdminSaying } from '../../shared/contracts';
+import type { Overview, AdminAgent, AgentDetail, SurveyAdmin, Plan, AdminSaying, AiConfigView, AiConfigUpdate, AiTestResult } from '../../shared/contracts';
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
@@ -29,4 +30,8 @@ export const api = {
     req<{ ok: boolean }>(`/admin/agents/${key}`, 'PATCH', body),
   survey: () => req<SurveyAdmin[]>('/admin/survey'),
   plans: () => req<Plan[]>('/admin/plans'),
+  // —— 大模型配置（可随时切换） ——
+  aiConfig: () => req<AiConfigView>('/admin/ai-config'),
+  saveAiConfig: (body: AiConfigUpdate) => req<AiConfigView>('/admin/ai-config', 'PUT', body),
+  testAiConfig: (body: AiConfigUpdate) => req<AiTestResult>('/admin/ai-config/test', 'POST', body),
 };

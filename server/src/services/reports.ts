@@ -7,8 +7,40 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '../db.js';
 import type {
-  Deliverable, DeliverableSection, ReportDiff, SectionDiff, SaveReportResult,
+  Deliverable, DeliverableSection, ReportDiff, SectionDiff, WordOp, SaveReportResult,
 } from '../llm/schema.js';
+
+// —— 词级 diff（LCS）：把一段 section 的文本细到「句内增删」高亮 ——
+function tokenize(s: string): string[] {
+  return s.match(/[a-z0-9]+|[一-鿿]|[^\sa-z0-9一-鿿]+|\s+/gi) ?? [];
+}
+export function wordDiff(before: string, after: string): WordOp[] {
+  const a = tokenize(before), b = tokenize(after);
+  const n = a.length, m = b.length;
+  // LCS 长度表
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const ops: WordOp[] = [];
+  const push = (t: WordOp['t'], s: string) => {
+    const last = ops[ops.length - 1];
+    if (last && last.t === t) last.s += s; else ops.push({ t, s });
+  };
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { push('eq', a[i]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { push('del', a[i]); i++; }
+    else { push('add', b[j]); j++; }
+  }
+  while (i < n) { push('del', a[i]); i++; }
+  while (j < m) { push('add', b[j]); j++; }
+  return ops;
+}
+function sectionText(sec?: DeliverableSection): string {
+  if (!sec) return '';
+  return [sec.b, ...(sec.list ?? [])].filter(Boolean).join('\n');
+}
 
 /** 报告名归一化：去空白、压多空格、截断；中文保留，拉丁转小写。 */
 export function slugify(title: string): string {
@@ -54,7 +86,7 @@ export function diffContents(before: object, after: object): { sections: Section
   for (const s of as) {
     const prev = bMap.get(s.h);
     if (!prev) { out.push({ change: 'added', h: s.h, after: s }); added++; }
-    else if (!sameSection(prev, s)) { out.push({ change: 'changed', h: s.h, before: prev, after: s }); changed++; }
+    else if (!sameSection(prev, s)) { out.push({ change: 'changed', h: s.h, before: prev, after: s, words: wordDiff(sectionText(prev), sectionText(s)) }); changed++; }
     else out.push({ change: 'unchanged', h: s.h, before: prev, after: s });
   }
   // 旧版有、新版没有 = 删除

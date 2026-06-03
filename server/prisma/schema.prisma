@@ -377,3 +377,18 @@ model ModerationLog {
 
   @@map("moderation_log")
 }
+
+/// 大模型配置（单例，运营后台可随时切换）。生产应加密存储 apiKey / 接密管。
+model AiSetting {
+  id             String   @id @default("default")
+  provider       String   @default("openai") // mock | claude | openai(兼容 Agnes/DeepSeek/Qwen…)
+  label          String   @default("Agnes 2.0 Flash")
+  baseUrl        String   @default("https://apihub.agnes-ai.com/v1")
+  model          String   @default("agnes-2.0-flash")
+  apiKey         String   @default("") @db.Text
+  embeddingModel String   @default("")
+  temperature    Float    @default(0.7)
+  updatedAt      DateTime @updatedAt
+
+  @@map("ai_setting")
+}

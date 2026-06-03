@@ -2,8 +2,37 @@
 // 演示环境未做 RBAC；生产需鉴权 + 操作审计（见 §7）。
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
+import { getAiConfig, setAiConfig, publicConfig, AI_PRESETS, type ResolvedAiConfig } from '../services/aiConfig.js';
+import { pingModel } from '../llm/gateway.js';
+import type { AiConfigUpdate } from '../llm/schema.js';
 
 export async function adminRoutes(app: FastifyInstance) {
+  // —— 大模型配置（运营后台可随时切换；默认 Agnes 2.0 Flash） ——
+  app.get('/admin/ai-config', async () => {
+    const cfg = await getAiConfig(true);
+    return { config: publicConfig(cfg), presets: AI_PRESETS };
+  });
+  app.put<{ Body: AiConfigUpdate }>('/admin/ai-config', async (req) => {
+    const cfg = await setAiConfig(req.body ?? {});
+    await prisma.auditLog.create({ data: { action: 'admin.ai.update', payloadJson: { provider: cfg.provider, model: cfg.model } } }).catch(() => {});
+    return { config: publicConfig(cfg), presets: AI_PRESETS };
+  });
+  // 测试连接：用「当前保存配置」叠加本次未保存的改动（apiKey 留空则用已存 key）。
+  app.post<{ Body: AiConfigUpdate }>('/admin/ai-config/test', async (req) => {
+    const saved = await getAiConfig(true);
+    const b = req.body ?? {};
+    const merged: ResolvedAiConfig = {
+      ...saved,
+      provider: b.provider ?? saved.provider,
+      baseUrl: b.baseUrl ?? saved.baseUrl,
+      model: b.model ?? saved.model,
+      apiKey: b.apiKey && b.apiKey.length ? b.apiKey : saved.apiKey,
+      embeddingModel: b.embeddingModel ?? saved.embeddingModel,
+      temperature: b.temperature ?? saved.temperature,
+    };
+    return pingModel(merged);
+  });
+
   // —— 概览看板 ——
   app.get('/admin/overview', async () => {
     const [tenants, deliverables, sessions, agents] = await Promise.all([

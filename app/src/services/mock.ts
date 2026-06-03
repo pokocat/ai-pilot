@@ -113,6 +113,21 @@ function canonical(obj: unknown): string {
 }
 const sectionsOf = (c: unknown): DeliverableSection[] => (c as { sections?: DeliverableSection[] } | null)?.sections ?? [];
 
+// 词级 diff（LCS），与后端 reports.ts 同口径
+function tokenizeM(s: string): string[] { return s.match(/[a-z0-9]+|[一-鿿]|[^\sa-z0-9一-鿿]+|\s+/gi) ?? []; }
+function wordDiffM(before: string, after: string): { t: 'eq' | 'add' | 'del'; s: string }[] {
+  const a = tokenizeM(before), b = tokenizeM(after), n = a.length, m = b.length;
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const ops: { t: 'eq' | 'add' | 'del'; s: string }[] = [];
+  const push = (t: 'eq' | 'add' | 'del', s: string) => { const l = ops[ops.length - 1]; if (l && l.t === t) l.s += s; else ops.push({ t, s }); };
+  let i = 0, j = 0;
+  while (i < n && j < m) { if (a[i] === b[j]) { push('eq', a[i]); i++; j++; } else if (dp[i + 1][j] >= dp[i][j + 1]) { push('del', a[i]); i++; } else { push('add', b[j]); j++; } }
+  while (i < n) { push('del', a[i++]); } while (j < m) { push('add', b[j++]); }
+  return ops;
+}
+const secTextM = (sec?: DeliverableSection): string => sec ? [sec.b, ...(sec.list ?? [])].filter(Boolean).join('\n') : '';
+
 function diffSections(before: object, after: object): { sections: SectionDiff[]; summary: string; titleBefore: string; titleAfter: string } {
   const bs = sectionsOf(before), as = sectionsOf(after);
   const bMap = new Map(bs.map((s) => [s.h, s])), aMap = new Map(as.map((s) => [s.h, s]));
@@ -121,7 +136,7 @@ function diffSections(before: object, after: object): { sections: SectionDiff[];
   for (const s of as) {
     const prev = bMap.get(s.h);
     if (!prev) { out.push({ change: 'added', h: s.h, after: s }); added++; }
-    else if (canonical(prev) !== canonical(s)) { out.push({ change: 'changed', h: s.h, before: prev, after: s }); changed++; }
+    else if (canonical(prev) !== canonical(s)) { out.push({ change: 'changed', h: s.h, before: prev, after: s, words: wordDiffM(secTextM(prev), secTextM(s)) }); changed++; }
     else out.push({ change: 'unchanged', h: s.h, before: prev, after: s });
   }
   for (const s of bs) if (!aMap.has(s.h)) { out.push({ change: 'removed', h: s.h, before: s }); removed++; }

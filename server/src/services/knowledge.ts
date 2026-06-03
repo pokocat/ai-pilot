@@ -3,6 +3,7 @@
 
 import { prisma } from '../db.js';
 import { embed } from './embedding.js';
+import { pgvectorEnabled, upsertChunkVector } from './vectorStore.js';
 import type { KnowledgeItemT, KnowledgeKind } from '../llm/schema.js';
 
 // 段落优先切片：按空行/句号聚合到 ~280 字一片，过长再硬切。演示足够；
@@ -62,9 +63,10 @@ export async function ingestKnowledge(opts: IngestOpts): Promise<KnowledgeItemT>
   const chunks = chunkText(text);
   for (let i = 0; i < chunks.length; i++) {
     const embedding = await embed(chunks[i]);
-    await prisma.knowledgeChunk.create({
+    const chunk = await prisma.knowledgeChunk.create({
       data: { itemId: item.id, tenantId: opts.tenantId, ord: i, text: chunks[i], embedding },
     });
+    if (pgvectorEnabled()) await upsertChunkVector(chunk.id, embedding).catch(() => {});
   }
 
   return {

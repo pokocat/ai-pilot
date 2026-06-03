@@ -7,10 +7,20 @@
 import { prisma } from '../db.js';
 import { saveReportVersion } from './reports.js';
 import { ingestKnowledge } from './knowledge.js';
+import { summarizePoints } from '../llm/gateway.js';
 import { TRUST_NOTE } from '../data/deliverables.js';
 import type { Deliverable, SummarizeResult } from '../llm/schema.js';
 
 interface MsgLite { role: string; contentJson: unknown }
+
+function transcriptOf(messages: MsgLite[]): string {
+  return messages.map((m) => {
+    const c = m.contentJson as { text?: string; title?: string; points?: string[] };
+    if (m.role === 'user') return `用户：${c.text ?? ''}`;
+    if (m.role === 'report') return `顾问产出：《${c.title ?? '成果'}》`;
+    return `顾问：${c.text ?? ''}${(c.points ?? []).length ? '（要点：' + (c.points ?? []).join('；') + '）' : ''}`;
+  }).join('\n').slice(0, 6000);
+}
 
 function buildSummary(title: string, agentName: string, messages: MsgLite[]): Deliverable {
   const userPoints: string[] = [];
@@ -66,6 +76,16 @@ export async function summarizeSession(opts: {
   if (!session) throw Object.assign(new Error('session not found'), { statusCode: 404 });
 
   const deliverable = buildSummary(session.title, session.agent.name, session.messages);
+
+  // 有真实模型时用 LLM 归纳覆盖确定性要点（失败/mock 时保留兜底）。
+  const llm = await summarizePoints(transcriptOf(session.messages));
+  if (llm) {
+    const secs: Deliverable['sections'] = [];
+    if (llm.points.length) secs.push({ h: '讨论要点', list: llm.points });
+    if (llm.conclusions.length) secs.push({ h: '关键结论', list: llm.conclusions });
+    if (llm.todos.length) secs.push({ h: '待办与决策', list: llm.todos });
+    if (secs.length) deliverable.sections = secs;
+  }
 
   // 1) 写为版本化报告（归属会话所在项目）
   const saved = await saveReportVersion({

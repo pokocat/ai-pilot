@@ -83,6 +83,14 @@ async function main() {
   }
   console.log(`  ✓ ${SURVEY.length} survey questions`);
 
+  // —— 大模型配置（默认 Agnes 2.0 Flash；key 留空时安全降级 mock，后台填入即切真实） ——
+  await prisma.aiSetting.upsert({
+    where: { id: 'default' },
+    update: { provider: 'openai', label: 'Agnes 2.0 Flash', baseUrl: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash' },
+    create: { id: 'default', provider: 'openai', label: 'Agnes 2.0 Flash', baseUrl: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash', apiKey: '', embeddingModel: '', temperature: 0.7 },
+  });
+  console.log('  ✓ ai-setting=Agnes 2.0 Flash（填 key 后即切真实模型）');
+
   // —— 演示租户与用户（云栖科技 / 王总） ——
   await prisma.auditLog.deleteMany();
   await prisma.profile.deleteMany();

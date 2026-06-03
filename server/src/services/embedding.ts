@@ -8,7 +8,8 @@
 //
 // 注意：同一语料里的向量必须同源同维。切换嵌入来源后需要重新嵌入历史数据（见 AGENTS §16 升级路径）。
 
-import { env, isRealKey } from '../env.js';
+import { isRealKey } from '../env.js';
+import { getAiConfig, type ResolvedAiConfig } from './aiConfig.js';
 
 export const EMBED_DIM = 256;
 
@@ -57,20 +58,20 @@ export function embedLocal(text: string): number[] {
   return v.map((x) => x / norm);
 }
 
-function remoteEnabled(): boolean {
-  return !!env.embeddingModel && env.aiProvider === 'openai' && isRealKey(env.openaiApiKey);
+function remoteEnabled(cfg: ResolvedAiConfig): boolean {
+  return !!cfg.embeddingModel && cfg.provider === 'openai' && isRealKey(cfg.apiKey);
 }
 
-/** 真实嵌入（OpenAI 兼容 /embeddings）。失败抛错，由 embed() 兜底回本地。 */
-async function embedRemote(text: string): Promise<number[]> {
-  const base = env.openaiBaseUrl.replace(/\/+$/, '');
+/** 真实嵌入（OpenAI 兼容 /embeddings，配置驱动）。失败抛错，由 embed() 兜底回本地。 */
+async function embedRemote(cfg: ResolvedAiConfig, text: string): Promise<number[]> {
+  const base = cfg.baseUrl.replace(/\/+$/, '');
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), env.openaiTimeoutMs);
+  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
   try {
     const res = await fetch(`${base}/embeddings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.openaiApiKey}` },
-      body: JSON.stringify({ model: env.embeddingModel, input: text.slice(0, 4000) }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({ model: cfg.embeddingModel, input: text.slice(0, 4000) }),
       signal: ctrl.signal,
     });
     const data = (await res.json().catch(() => ({}))) as { data?: { embedding?: number[] }[] };
@@ -82,11 +83,12 @@ async function embedRemote(text: string): Promise<number[]> {
   }
 }
 
-/** 统一入口：优先真实模型，未配置/失败则本地确定性嵌入兜底。 */
+/** 统一入口：优先真实模型（配置了 embeddingModel + 真实 key），否则本地确定性嵌入兜底。 */
 export async function embed(text: string): Promise<number[]> {
-  if (remoteEnabled()) {
+  const cfg = await getAiConfig();
+  if (remoteEnabled(cfg)) {
     try {
-      return await embedRemote(text);
+      return await embedRemote(cfg, text);
     } catch (err) {
       console.error('[embedding] remote fallback to local:', (err as Error).message);
     }

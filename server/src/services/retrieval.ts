@@ -8,6 +8,7 @@
 
 import { prisma } from '../db.js';
 import { embed, cosine } from './embedding.js';
+import { pgvectorEnabled, vectorSearchChunks } from './vectorStore.js';
 import type { KnowledgeHit, KnowledgeItemT, MessageRef } from '../llm/schema.js';
 
 function toItemT(row: {
@@ -52,6 +53,30 @@ export async function hybridSearch(opts: HybridOpts): Promise<KnowledgeHit[]> {
   const topK = opts.topK ?? 5;
   const alpha = opts.alpha ?? 0.65;
   if (!query.trim()) return [];
+
+  // pgvector 路径（开启时）：用 ANN 取候选，再关键词重排（混合）。
+  if (pgvectorEnabled()) {
+    const qvec = await embed(query);
+    const hits = await vectorSearchChunks(tenantId, projectId, qvec, topK * 4).catch((e) => {
+      console.error('[retrieval] pgvector fallback to in-memory:', (e as Error).message);
+      return null;
+    });
+    if (hits) {
+      if (!hits.length) return [];
+      const items = await prisma.knowledgeItem.findMany({ where: { id: { in: [...new Set(hits.map((h) => h.itemId))] } } });
+      const itemMap = new Map(items.map((i) => [i.id, i]));
+      const best = new Map<string, { score: number; snippet: string; item: (typeof items)[number] }>();
+      for (const h of hits) {
+        const item = itemMap.get(h.itemId);
+        if (!item) continue;
+        const score = alpha * (1 - h.dist) + (1 - alpha) * keywordScore(query, h.text);
+        const prev = best.get(h.itemId);
+        if (!prev || score > prev.score) best.set(h.itemId, { score, snippet: h.text.slice(0, 120), item });
+      }
+      return [...best.values()].sort((a, b) => b.score - a.score).slice(0, topK)
+        .map((x) => ({ item: toItemT(x.item), score: Number(x.score.toFixed(4)), snippet: x.snippet }));
+    }
+  }
 
   const chunks = await prisma.knowledgeChunk.findMany({
     where: { tenantId, ...(projectId ? { item: { projectId } } : {}) },

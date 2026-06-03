@@ -180,9 +180,12 @@ export interface SaveReportResult { reportId: string; version: number; created: 
 
 /* 报告版本差异（section 级，匹配 deliverable 结构） */
 export type SectionChange = 'added' | 'removed' | 'changed' | 'unchanged';
+/** 词级 diff 片段：eq=未变 add=新增 del=删除 */
+export interface WordOp { t: 'eq' | 'add' | 'del'; s: string; }
 export interface SectionDiff {
   change: SectionChange; h: string;
   before?: DeliverableSection; after?: DeliverableSection;
+  words?: WordOp[]; // change=changed 时给出句内词级高亮
 }
 export interface ReportDiff {
   reportId: string; from: number; to: number;
@@ -209,6 +212,34 @@ export interface SummarizeResult {
   reportId: string; version: number; title: string;
   knowledgeAdded: number; // 提炼进知识库的条数
 }
+
+/* ────────────── AI 模型配置（运营后台可随时切换大模型） ────────────── */
+export type AiProvider = 'mock' | 'claude' | 'openai';
+/** 对外暴露的当前配置（不含明文 key） */
+export interface AiConfig {
+  provider: AiProvider;
+  label: string;          // 展示名，如「Agnes 2.0 Flash」
+  baseUrl: string;        // openai 兼容网关地址（带 /v1）
+  model: string;          // 文本模型 id
+  embeddingModel: string; // 嵌入模型 id（留空=本地确定性嵌入）
+  temperature: number;
+  hasKey: boolean;        // 是否已配置 key（不回传明文）
+  ready: boolean;         // 当前是否就绪（provider+key 有效，否则降级 mock）
+  effectiveProvider: AiProvider; // 实际生效（未就绪时为 mock）
+  updatedAt?: string;
+}
+/** 更新入参（apiKey 仅在传入时更新；留空表示不改） */
+export interface AiConfigUpdate {
+  provider?: AiProvider; label?: string; baseUrl?: string; model?: string;
+  apiKey?: string; embeddingModel?: string; temperature?: number;
+}
+/** 预设：一键填好某家大模型的 baseUrl/model */
+export interface AiPreset {
+  id: string; label: string; provider: AiProvider;
+  baseUrl: string; model: string; embeddingModel?: string; note?: string;
+}
+export interface AiConfigView { config: AiConfig; presets: AiPreset[]; }
+export interface AiTestResult { ok: boolean; latencyMs?: number; sample?: string; error?: string; provider?: string; model?: string; }
 
 /* ────────────── 每日献策 ────────────── */
 export interface TodaySaying { text: string; date: string; }

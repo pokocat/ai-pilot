@@ -98,10 +98,18 @@ export default function Report() {
                 <View key={i} className={`rp-dsec ${sd.change}`}>
                   <View className="rp-dh"><Text className={`rp-badge ${sd.change}`}>{badge(sd.change)}</Text><Text className="rp-dh-t">{sd.h}</Text></View>
                   {sd.change === 'changed' ? (
-                    <View className="rp-dchg">
-                      <View className="rp-dbefore"><Text className="rp-dlabel">改前</Text><Text className="rp-dtext">{secText(sd.before)}</Text></View>
-                      <View className="rp-dafter"><Text className="rp-dlabel" style={{ color: accent }}>改后</Text><Text className="rp-dtext">{secText(sd.after)}</Text></View>
-                    </View>
+                    sd.words && sd.words.length ? (
+                      <View className="rp-words">
+                        {sd.words.map((w, k) => (
+                          <Text key={k} className={`rp-w ${w.t}`} style={w.t === 'add' ? { background: 'var(--accent-soft)', color: 'var(--accent-ink)' } : {}}>{w.s}</Text>
+                        ))}
+                      </View>
+                    ) : (
+                      <View className="rp-dchg">
+                        <View className="rp-dbefore"><Text className="rp-dlabel">改前</Text><Text className="rp-dtext">{secText(sd.before)}</Text></View>
+                        <View className="rp-dafter"><Text className="rp-dlabel" style={{ color: accent }}>改后</Text><Text className="rp-dtext">{secText(sd.after)}</Text></View>
+                      </View>
+                    )
                   ) : sd.change === 'unchanged' ? (
                     <Text className="rp-dtext dim">{secText(sd.after)}</Text>
                   ) : (

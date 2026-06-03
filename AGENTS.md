@@ -58,7 +58,7 @@ repo/
 | 层 | 技术 |
 |---|---|
 | 移动端 `app/` | Taro 3.6.34 · React 18 · TypeScript · Sass · Webpack5（一套码出 weapp + H5） |
-| 后端 `server/` | Fastify 5 · Prisma 5 · PostgreSQL · Zod · `@anthropic-ai/sdk` · tsx/tsc |
+| 后端 `server/` | Fastify 5 · Prisma 5 · PostgreSQL · Zod · `@anthropic-ai/sdk` · tsx/tsc · 可切换大模型（默认 **Agnes 2.0 Flash**，OpenAI 兼容；后台可切 DeepSeek/Qwen…） |
 | 运营端 `admin/` | Vite 5 · React 18 · TypeScript |
 | 数据契约 | `shared/contracts.d.ts`（被三端 `import type` 引用） |
 
@@ -161,16 +161,21 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `GET/POST /projects` · `GET/PUT/DELETE /projects/:id` | 项目主线（详情聚合会话/报告/知识） | 是 |
 | `GET /reports` · `GET /reports/:id` · `GET /reports/:id/version` · `GET /reports/:id/diff` · `POST /reports` · `DELETE /reports/:id` | 版本化报告（历史/某版/两版 diff/存版） | 是 |
 | `GET/POST /knowledge` · `GET /knowledge/search` · `DELETE /knowledge/:id` | 知识库（摄取/混合检索/删除） | 是 |
+| `GET/PUT /admin/ai-config` · `POST /admin/ai-config/test` | 大模型配置（读/改/测试连接，可随时切换） | 演示无 RBAC |
 | `/admin/*` | 运营后台 API（见 §9） | 演示无 RBAC |
 
 ### 8.2 LLM Gateway（`server/src/llm/`）
 `gateway.ts` 统一封装：路由 provider → 内容审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。
+新增：`extractInsights`（LLM 提炼记忆，mock 兜底截断）、`summarizePoints`（LLM 归纳纪要，mock 兜底确定性）、`pingModel`（测试连接）。
 
-Provider（`AI_PROVIDER`）：
-- **mock**（默认）：模板产出，零成本可离线（`providers/mock.ts`）。
-- **claude**：Anthropic，tool use 强约束结构化成果（`providers/claude.ts`）。
-- **openai**：**OpenAI 通用协议**，兼容 DeepSeek / Moonshot(Kimi) / 通义千问兼容模式 等（`providers/openai.ts`，function calling 强约束）。
-- `env.ts` 的 `isRealKey()` 识别占位/假 key——**fake token 不发网络请求，直接降级 mock**；填真实 key 自动切真实模型。
+**★ 模型由「运营后台 → 模型」可视化配置并随时切换**（存 `AiSetting`，`services/aiConfig.ts` 解析：DB > env 兜底，4s 缓存）。默认 **Agnes 2.0 Flash**（`apihub.agnes-ai.com/v1`，OpenAI 兼容）。
+
+Provider（`provider` 字段，由 `effectiveProvider` 决定实际生效）：
+- **mock**：模板产出，零成本可离线（`providers/mock.ts`）。
+- **claude**：Anthropic，tool use 强约束（`providers/claude.ts`）。
+- **openai**：OpenAI 通用协议，兼容 **Agnes / DeepSeek / Moonshot(Kimi) / 通义千问** 等（`providers/openai.ts`，function calling 强约束）。
+- `isRealKey()` 识别占位/假 key——**未配置真实 key 一律降级 mock**，不发网络请求；后台填入真实 key 即时切真实模型（无需重启/改 env）。
+- baseUrl/model/key/温度/嵌入模型 全部来自运行时配置，providers 接 `ResolvedAiConfig` 入参。
 
 环境变量（见 `server/.env.example`）：
 ```
@@ -188,14 +193,16 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/retrieval.ts`（★）：`hybridSearch`（向量+关键词混合、租户隔离、可按项目过滤）、`resolveReferences`（显式 @ 引用 → 带出处注入）。
 - `services/knowledge.ts`（★）：`ingestKnowledge`（切片+逐片向量化）、`listKnowledge`、`deleteKnowledge`。
 - `services/reports.ts`（★）：`saveReportVersion`（slug 归一 + 内容哈希去重 + 自动变更摘要）、`diffContents`/`getReportDiff`（section 级 diff）、`slugify`。
-- `services/summarize.ts`（★）：`summarizeSession`（整段会话 → 纪要报告 + 沉淀知识）。
+- `services/summarize.ts`（★）：`summarizeSession`（整段会话 → 纪要报告 + 沉淀知识；有真实模型走 `summarizePoints`）。
+- `services/aiConfig.ts`（★）：大模型配置解析（DB > env），预设 `AI_PRESETS`（Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock）、`isReady`/`effectiveProvider`、脱敏 `publicConfig`。
+- `services/vectorStore.ts`（★）：pgvector ANN 查询/向量列双写（`PGVECTOR_ENABLED` 开启时；默认关闭走内存余弦）。
 - 内容审核 `moderation_log`、审计 `audit_log`（演示级，生产替换合规服务）。
 
 ---
 
 ## 9. 运营后台（admin）
 
-页面/接口：概览看板、每日献策库（增删改启停）、智能体配置（System 提示词 + Agent Memory 策略）、建档问卷、套餐。入口 `admin/src/App.tsx` + `AgentDetailPanel.tsx`，API `admin/src/api.ts`（类型来自 SSOT）。开发期 Vite 代理 `/api → localhost:4000`。
+页面/接口：概览看板、每日献策库（增删改启停）、智能体配置（System 提示词 + Agent Memory 策略）、**模型配置（默认 Agnes，可一键切 DeepSeek/Qwen…，含测试连接，即时生效）**、建档问卷、套餐。入口 `admin/src/App.tsx`（`ModelView`）+ `AgentDetailPanel.tsx`，API `admin/src/api.ts`（类型来自 SSOT）。开发期 Vite 代理 `/api → localhost:4000`。
 
 ---
 
@@ -208,6 +215,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `ReportDoc`（逻辑报告，`(tenantId,slug)` 唯一，`currentVersion`）+ `ReportVersion`（不可变快照，`contentHash` 去重，`changeSummary` 变更摘要，`(reportId,version)` 唯一）。`Deliverable.reportId` 桥接。
 - `KnowledgeItem`（知识条目，可挂项目）+ `KnowledgeChunk`（切片 + `embedding`）。
 - `Message.refsJson`（本条消息引用的 项目/报告/知识/记忆）。
+- `AiSetting`（单例 id=`default`，大模型配置：provider/baseUrl/model/apiKey/embeddingModel/temperature）；pgvector 开启时 `knowledge_chunk`/`memory` 另有 `embedding_vec vector(N)` 列（由 `prisma/pgvector.sql` 建，非 Prisma 管理）。
 
 > 生产：`Memory.embedding` 与 `KnowledgeChunk.embedding` 应用 **pgvector** 的 `vector` 类型 + HNSW 索引；本地降级为 `Json(float[])` + 内存余弦相似度（与 schema 注释一致）。详见「✦ 升级路径」。
 
@@ -233,14 +241,16 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - **隔离**：项目/报告/知识全部 `tenantId` 过滤；引用解析只取该用户/租户可见资料。
 - **演示数据**：`seed.ts` 灌入项目「2026 融资冲刺」+ 报告「战略诊断报告」v1→v2（可看 diff）+ 2 条知识。
 
-## ✦ 升级路径（生产增强，按需推进）
+## ✦ 升级路径（多数已落地，余项按需推进）
 
-1. **激活 pgvector**：把 `Memory.embedding` / `KnowledgeChunk.embedding` 迁到 `vector(N)` 类型，建 HNSW 索引；`hybridSearch`/`recallMemories` 改为 `prisma.$queryRaw` 的 `ORDER BY embedding <=> $q LIMIT k` 下推（替代内存全量余弦）。切换嵌入来源后需**重嵌历史数据**（向量须同源同维）。
-2. **真实嵌入模型**：设 `EMBEDDING_MODEL` + openai 兼容真实 key（`embedding.ts` 已含 `/embeddings` 路径），语义质量更高。
-3. **Learned Memory 提炼**：`learnFromConversation` / `summarize` 现为确定性启发式；接 LLM 做「事实/偏好/决策/待办」结构化抽取（Mem0 思路，写洞察而非堆原文）。
-4. **更细 diff**：现为 section 级；可加 词级 diff（diff-match-patch）高亮句内改动。
-5. **时序知识图谱**：在向量之上叠加 Graphiti 式时序图，回答「X 时谁负责 Y」类关系/时序问题（图与向量互补，不替换）。
-6. **运营后台**：补「项目/报告/知识」只读看板（当前 admin 未覆盖，见 §13 TODO）。
+1. ✅ **pgvector（已实现·待真库验证）**：`services/vectorStore.ts` + `prisma/pgvector.sql`（建 `embedding_vec vector(N)` 列 + HNSW + 回填）。置 `PGVECTOR_ENABLED=true` 后 `hybridSearch`/`recallMemories` 走 `<=>` ANN 下推，写入时向量列双写；默认关闭走内存余弦。⚠️ 本地无扩展未端到端验证——上真库执行 `npm run db:pgvector` 后验。切换嵌入维度需改 SQL 的 N 并重嵌。
+2. ✅ **真实嵌入模型（配置驱动）**：后台填 `embeddingModel`（或 env `EMBEDDING_MODEL`）+ 真实 key → `embedding.ts` 走 `/embeddings`；留空用本地确定性嵌入。
+3. ✅ **Learned Memory / 汇总（LLM 化）**：`extractInsights`/`summarizePoints` 在有真实模型时做结构化抽取/归纳，mock 时确定性兜底。
+4. ✅ **词级 diff**：`reports.ts wordDiff`（LCS），changed 段返回 `words`，报告页句内增删高亮。
+5. ✅ **大模型可切换**：运营后台「模型」页（默认 Agnes 2.0 Flash，一键切 DeepSeek/Qwen/Moonshot/OpenAI/Claude，测试连接，即时生效）；配置存 `AiSetting`。
+6. ⏳ **时序知识图谱**：在向量之上叠加 Graphiti 式时序图，回答「X 时谁负责 Y」类关系/时序问题（图与向量互补，不替换）——尚未做。
+7. ⏳ **运营后台只读看板**：项目/报告/知识尚无 admin 看板（接口已就绪）。
+8. ⏳ **密钥安全**：`AiSetting.apiKey` 当前明文存库（演示）；生产应加密/接密管，并给 admin 加 RBAC。
 
 ## 11. 构建、运行、验证
 
@@ -285,11 +295,10 @@ mock 可随时预览；**正式上传/审核**还需：
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 内容审核/计量/缓存为演示级（关键词 / 内存）；生产替换为合规审核 + Redis + 计费台账。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
-- **知识库/记忆向量**：当前 `embedding` 存 `Json(float[])`、检索为内存余弦 + 本地确定性嵌入；生产应启用 **pgvector + HNSW + 真实嵌入模型**（见「✦ 升级路径」1–2）。`db push` 不需要 pgvector 扩展。
-- **Learned Memory / 汇总** 为确定性启发式（非 LLM 抽取）；可升级为 LLM 结构化提炼（升级路径 3）。
-- **报告 diff** 为 section 级（按小标题匹配）；句内词级高亮待加（升级路径 4）。
-- **运营后台未覆盖** 项目/报告/知识管理；如需在 admin 加只读看板，后端 `/projects`·`/reports`·`/knowledge` 已就绪（升级路径 6）。
-- **@引用** 当前支持 项目/报告/知识/记忆；记忆引用在选择器里暂未列出候选（可由「知识」覆盖），如需可在选择器补一组。
+- **pgvector 路径已实现但未真库验证**：本地无扩展，默认 `PGVECTOR_ENABLED=false` 走内存余弦（已验证）；上真库执行 `npm run db:pgvector` 并置 true 后需端到端验一遍（升级路径 1）。
+- **模型密钥明文存库**（`AiSetting.apiKey`，演示）；生产加密/接密管 + admin RBAC（升级路径 8）。
+- **时序知识图谱**（Graphiti 式）未做；运营后台暂无 项目/报告/知识 只读看板（接口已就绪）。
+- **@引用** 选择器候选含 项目/报告/知识；记忆引用未单列候选（可由「知识」覆盖），如需可补一组。
 
 ---
 
@@ -297,6 +306,10 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-03** · **接入 Agnes 2.0 Flash + 可切换模型配置 + 四项升级全做**：
+  - 模型配置：新增 `AiSetting` 模型 + `services/aiConfig.ts`（DB>env、预设 Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock、脱敏视图、就绪/降级判定）；Gateway 与 providers/embedding 全面改为「运行时配置驱动」；新增 `/admin/ai-config`(GET/PUT/test)；运营后台新增「模型」页（预设一键切换 + 测试连接 + 即时生效）。默认 Agnes（`apihub.agnes-ai.com/v1`，OpenAI 兼容），未配 key 安全降级 mock。
+  - 升级项：① pgvector 路径（`services/vectorStore.ts` + `prisma/pgvector.sql` + `PGVECTOR_ENABLED`，flag 内 ANN 下推/向量列双写，默认关）；② 真实嵌入配置驱动；③ Learned Memory/汇总 LLM 化（`extractInsights`/`summarizePoints`，mock 兜底）；④ 词级 diff（`reports.ts wordDiff` LCS，报告页句内高亮）。
+  - 校验：三端构建全绿；运行时自检通过（词级 diff `eq/add` 正确；无 DB 时配置链路安全降级 mock、不泄露 key、洞察启发式兜底）。⚠️ pgvector 与真实模型联调需在你的 DB/Key 上验证。
 - **2026-06-02** · **企业事务操作系统落地**：引入「项目」主线 + 知识库（语义记忆/混合检索）+ 版本化报告（slug 归一·内容哈希去重·section 级 diff）+ @引用（上下文工程）+ 对话汇总。
   - SSOT：`shared/contracts.d.ts` 新增 Project/Report/Knowledge/MessageRef/Summarize 等类型及 Gen/Session/Lib 字段扩展。
   - 后端：新增 `services/{embedding,retrieval,knowledge,reports,summarize}.ts`、`routes/{projects,reports,knowledge}.ts`；升级 `memory.ts`(向量+语义召回)/`context.ts`(项目背景+引用+召回注入)/`schema.ts`(GenContext+injectVariables)/`library.ts`(桥接报告版本)/`sessions.ts`(projectId/refs+summarize)；Prisma 新增 5 模型 + 字段；`seed.ts` 灌演示项目/报告 v1→v2/知识。
