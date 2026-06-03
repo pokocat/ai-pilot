@@ -220,12 +220,24 @@ cd admin && npm install && npm run dev   # 运营后台
 ### 端到端隔离验证（本地 Postgres + mock provider）
 已用 curl 跑通 **19/19**：无 token→401、新号建号、A/B token+租户不同、A 建档/产出/存库后 A 有数据而 **B 全空（隔离）**、A 复登 token 不变且 onboarded 持久化、demo 号可登录、非法 token→401、非法手机号→400。
 
+### 本机上传到小程序平台（miniprogram-ci）
+> 云端沙箱网络白名单未放行 `servicewechat.com`，需在**本机**执行。
+```bash
+cd app && npm run build:weapp           # 产物在 app/dist（默认 mock 版）
+npx miniprogram-ci upload \
+  --pp ./ \                              # 项目路径=app（其 project.config.json 的 miniprogramRoot=dist/）
+  --pkp /path/to/private.wx05a49967e2adb557.key \
+  --appid wx05a49967e2adb557 \
+  --uv 0.1.0 -r 1 --ud "junshi mock build"
+```
+注意：上传密钥若在小程序后台开启了 **IP 白名单**，须把本机出口 IP 加入；连真实后端版本另需把 API 域名加入 request 合法域名（见 §12）。
+
 ---
 
 ## 12. 上线前硬约束（微信小程序）
 
 mock 可随时预览；**正式上传/审核**还需：
-1. **真实 AppID**（`app/project.config.json` 现为 `touristappid`，仅能预览）。
+1. **真实 AppID**：已设为 `wx05a49967e2adb557`（`app/project.config.json`）。
 2. **后端公网 HTTPS + ICP 备案域名**，并加入小程序后台 request 合法域名；前端用 `TARO_APP_MODE=server TARO_APP_API` 指向它。
 3. **生成式 AI 备案 / 算法备案 + 内容安全**（AI 类小程序审核硬性门槛）。
 4. 真实模型：服务端设 `AI_PROVIDER` + 真实 key（国内合规建议走备案的国产模型，走 openai 兼容协议即可）。
@@ -234,6 +246,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
+- **miniprogram-ci 上传**：云端执行环境的网络白名单未放行 `servicewechat.com`（报 `Host not in allowlist`），无法在本沙箱内直传。需从**本机**执行上传，或放开环境网络策略后重试；另注意上传密钥若开了 IP 白名单，需把执行机出口 IP 加入小程序后台。本机命令见 §11。
 - 登录是 fake（token=userId）；待接短信验证码 + JWT。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 内容审核/计量/缓存为演示级（关键词 / 内存）；生产替换为合规审核 + Redis + 计费台账。
@@ -244,6 +257,8 @@ mock 可随时预览；**正式上传/审核**还需：
 ## 14. 变更日志（每次迭代追加，最新在上）
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
+
+- **2026-06-03** · `project.config.json` AppID 设为 `wx05a49967e2adb557`；尝试用 miniprogram-ci 上传，被云端网络白名单拦截（`servicewechat.com` 未放行），改为本机上传（见 §13 TODO / §11）。
 
 - **2026-06-02** · 新增 §0「给 Coding Agent 的强制指令」：任何代码变更必须记入文档、暂不做的写入 §13 TODO、完成即移出。
 - **2026-06-02** · 文档落为 `AGENTS.md`（Claude Code 新会话自动加载），确立「每次变更必更文档」约定。

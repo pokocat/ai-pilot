@@ -2,7 +2,7 @@
   "miniprogramRoot": "dist/",
   "projectname": "junshi-app",
   "description": "军师 · AI 商业军师",
-  "appid": "touristappid",
+  "appid": "wx05a49967e2adb557",
   "setting": {
     "urlCheck": false,
     "es6": false,
