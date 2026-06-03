@@ -1,0 +1,45 @@
+# 军师 · Docker Compose（DB + 后端 API）。前端 H5/后台为静态产物，建议交给宿主 Nginx（见 deploy/nginx.conf.example）。
+#   1) docker compose up -d db
+#   2) 迁移+种子（从仓库跑，连容器里的 DB）：
+#        cd server && DATABASE_URL="postgresql://junshi:change-me@localhost:5432/junshi?schema=public" \
+#          npm run db:push && npm run db:seed
+#   3) docker compose up -d api
+# ⚠️ 模板：本仓库环境无 docker 守护进程，未实测，按需微调。生产请改强密码 / 用 secrets。
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: junshi
+      POSTGRES_PASSWORD: change-me        # ← 改强密码
+      POSTGRES_DB: junshi
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"                       # 仅迁移/调试用；生产可去掉对外暴露
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U junshi -d junshi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ..                          # 仓库根（compose 在 deploy/ 下时）
+      dockerfile: deploy/Dockerfile.server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://junshi:change-me@db:5432/junshi?schema=public
+      AI_PROVIDER: mock                    # 真实模型建议在运营后台「模型」页配置
+      PORT: "4000"
+      MODERATION_ENABLED: "true"
+      PGVECTOR_ENABLED: "false"
+    ports:
+      - "4000:4000"
+
+volumes:
+  pgdata: {}

@@ -1,0 +1,39 @@
+# 军师 · Nginx 站点示例（单域名反代：H5 + 运营后台 + API + SSE）
+# 用法：拷到 /etc/nginx/sites-available/junshi.conf → 改 server_name / root 路径 → ln -s 到 sites-enabled → nginx -t && systemctl reload nginx
+# HTTPS：装好后跑  certbot --nginx -d yourdomain.com  自动签证书并改 443。
+
+server {
+    listen 80;
+    server_name yourdomain.com;          # ← 改成你的域名
+
+    # H5（Taro 静态产物 app/dist）作为站点根
+    root /var/www/junshi/h5;             # ← 改成你放 app/dist 的路径
+    index index.html;
+
+    client_max_body_size 10m;            # 预留文档上传
+
+    # —— 后端 API（反代到本机 Node :4000）——
+    location /api/ {
+        proxy_pass http://127.0.0.1:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 180s;          # LLM 产出可能较慢
+        # SSE 流式（/api/generate）：关闭缓冲，事件才会实时下发
+        proxy_buffering off;
+        proxy_cache off;
+    }
+
+    # —— 运营后台（admin/dist，子路径；需以 base=/admin/ 构建）——
+    location /admin/ {
+        alias /var/www/junshi/admin/;    # ← admin/dist 路径（注意结尾斜杠）
+        try_files $uri $uri/ /admin/index.html;
+    }
+
+    # —— H5 兜底（hash 路由其实不依赖回退，保留无妨）——
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
