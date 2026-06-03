@@ -3,6 +3,9 @@ import devConfig from './dev';
 import prodConfig from './prod';
 
 export default defineConfig(async (merge, { command, mode }) => {
+  const taroAppMode = process.env.TARO_APP_MODE || 'mock';
+  const taroAppApi = process.env.TARO_APP_API || '';
+
   const baseConfig = {
     projectName: 'junshi-app',
     date: '2026-6-1',
@@ -12,7 +15,10 @@ export default defineConfig(async (merge, { command, mode }) => {
     sourceRoot: 'src',
     outputRoot: 'dist',
     plugins: [],
-    defineConstants: {},
+    defineConstants: {
+      'process.env.TARO_APP_MODE': JSON.stringify(taroAppMode),
+      'process.env.TARO_APP_API': JSON.stringify(taroAppApi),
+    },
     copy: { patterns: [], options: {} },
     framework: 'react',
     compiler: { type: 'webpack5', prebundle: { enable: false } },

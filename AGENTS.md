@@ -76,7 +76,8 @@ repo/
 | **server** | 连真实后端 REST API | `TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp` |
 
 实现要点：
-- `app/src/services/config.ts`：`APP_MODE`（读 `process.env.TARO_APP_MODE`，默认 `mock`）、`IS_MOCK`、`BASE_URL`（读 `TARO_APP_API`）。
+- `app/config/index.ts`：通过 `defineConstants` 显式注入 `process.env.TARO_APP_MODE` / `process.env.TARO_APP_API`，确保 H5/weapp 构建产物在浏览器/小程序运行时拿到构建期模式与 API 地址。
+- `app/src/services/config.ts`：`APP_MODE`（读已注入的 `process.env.TARO_APP_MODE`，默认 `mock`）、`IS_MOCK`、`BASE_URL`（读已注入的 `TARO_APP_API`）。不要在浏览器运行时再用 `typeof process` 包裹，否则 H5 bundle 会退回 mock/default。
 - `app/src/services/api.ts`：每个方法按 `IS_MOCK` 分流 mock 或真实请求，**两种模式同口径**（同样的入参/返回类型）。
 - `app/src/services/mock.ts`：前端 mock 后端，实现 login/me/agents/survey/profile/sayings/sessions/generate/library 全量接口；mock 数据来自 `app/src/data/agents.ts`、`app/src/data/deliverables.ts`（**由后端 seed 自动生成，勿手改**）。
 - mock 模式下登录/数据按 `mock-<手机号>` token 隔离并持久化，可切换账号验证隔离。
@@ -340,6 +341,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-03** · **H5 server 构建环境注入修复 + IP 测试部署**：`app/config/index.ts` 显式注入 `TARO_APP_MODE/TARO_APP_API`，`app/src/services/config.ts` 直接读取注入常量，避免浏览器运行时拿不到构建期变量而退回 mock/default；已用 `TARO_APP_API=http://8.136.36.175/api` 重新构建 H5 并部署到 ECS（`/`=H5，`/api`=后端，`/admin/`=后台）。
 - **2026-06-03** · `project.config.json` AppID 设为 `wx05a49967e2adb557`；尝试用 miniprogram-ci 上传，被云端网络白名单拦截（`servicewechat.com` 未放行），改为本机上传（见 §13 TODO / §11）。
 - **2026-06-03** · **部署文档与模板**：新增 `docs/DEPLOYMENT.md`（架构图 + 裸机/Docker 上线步骤 + Nginx/HTTPS + 模型配置 + 安全 checklist）+ `deploy/`（nginx/systemd/Dockerfile/compose 模板）。实测后端生产构建 `npm run build`→`node dist/index.js` 可跑、admin `--base=/admin/` 资源路径正确。
 - **2026-06-03** · **一键本地开发 + 修复 seed 潜伏 bug**：新增根 `package.json` 的 `npm run dev` + `scripts/dev.sh`（确保 PG/建库/迁移/首次种子/同起 后端+H5+后台，Ctrl+C 全关）。**修复 `prisma/seed.ts` 演示项目 `project.create` 缺必填 `slug`**（该段此前从未真跑过——集成测试用 `seedBaseline` 未覆盖；由一键脚本实跑暴露）。本地实跑：三端就绪、演示账号 13800000000 读到「2026 融资冲刺」项目 + 战略诊断报告 v2 + 2 条知识。
