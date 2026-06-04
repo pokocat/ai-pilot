@@ -42,6 +42,10 @@ export default function Chat() {
   const scrollToEnd = () => setScrollTop((t) => t + 100000);
 
   useEffect(() => {
+    if (busy) setTimeout(scrollToEnd, 40);
+  }, [busy]);
+
+  useEffect(() => {
     try {
       const rect = Taro.getMenuButtonBoundingClientRect?.();
       const sys = Taro.getSystemInfoSync?.();
@@ -339,6 +343,19 @@ export default function Chat() {
             </View>
           );
         })}
+        {busy && agent ? (
+          <View className="msg a thinking">
+            <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent.icon} size={13} color="#fff" /></View><Text>{agent.name}</Text></View>
+            <View className="bubble think-bubble">
+              <View className="think-dots">
+                <View className="think-dot" style={{ background: accent }} />
+                <View className="think-dot d2" style={{ background: accent }} />
+                <View className="think-dot d3" style={{ background: accent }} />
+              </View>
+              <Text className="think-text">正在梳理上下文</Text>
+            </View>
+          </View>
+        ) : null}
         <View style={{ height: '20px' }} />
       </ScrollView>
 
