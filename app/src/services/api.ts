@@ -29,12 +29,23 @@ export { getToken as getUserId, setToken as setUserId, clearToken as clearUserId
 export { BASE_URL };
 
 async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
-  const res = await Taro.request({
-    url: `${BASE_URL}${path}`,
-    method: method as any,
-    data,
-    header: { 'Content-Type': 'application/json', 'x-user-id': getToken() },
-  });
+  const url = `${BASE_URL}${path}`;
+  let res: Taro.request.SuccessCallbackResult;
+  try {
+    res = await Taro.request({
+      url,
+      method: method as any,
+      data,
+      header: { 'Content-Type': 'application/json', 'x-user-id': getToken() },
+    });
+  } catch (e) {
+    const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
+    const origin = BASE_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
+    const message = errMsg.includes('domain') || errMsg.includes('合法域名')
+      ? `小程序请求被合法域名拦截，请在微信后台 request 合法域名配置 ${origin} 后重新打开小程序。`
+      : `网络请求失败，请确认已配置 request 合法域名 ${origin}，并重新打开小程序。`;
+    throw Object.assign(new Error(message), { code: 'NETWORK_ERROR', errMsg, url });
+  }
   if (res.statusCode === 401) {
     clearToken(); // token 失效：清掉，下次进首页回到登录
     throw Object.assign(new Error((res.data as any)?.error || '未登录'), { code: 'UNAUTHORIZED', data: res.data });
