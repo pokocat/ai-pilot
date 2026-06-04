@@ -32,12 +32,26 @@ export default function Chat() {
   const [showLogin, setShowLogin] = useState(false);
   const [picker, setPicker] = useState(false);
   const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[] }>({ projects: [], reports: [], knowledge: [] });
+  const [navStyle, setNavStyle] = useState<{ paddingTop: string; paddingRight: string }>();
   const logRef = useRef<Msg[]>([]);
   logRef.current = msgs;
 
   const findAgent = (key: string): Agent | undefined => s.agents().find((a) => a.key === key);
 
   const scrollToEnd = () => setScrollTop((t) => t + 100000);
+
+  useEffect(() => {
+    try {
+      const rect = Taro.getMenuButtonBoundingClientRect?.();
+      const sys = Taro.getSystemInfoSync?.();
+      if (!rect?.bottom || !sys?.windowWidth) return;
+      const top = Math.max(rect.top || 0, (sys.statusBarHeight || 0) + 6);
+      const right = Math.max(sys.windowWidth - rect.left + 12, 16);
+      setNavStyle({ paddingTop: `${top}px`, paddingRight: `${right}px` });
+    } catch {
+      // H5 或低版本基础库走 CSS env 兜底。
+    }
+  }, []);
 
   const isUnauthorized = (e: unknown) =>
     (e as any)?.code === 'UNAUTHORIZED' || String((e as any)?.message || '').includes('未登录');
@@ -223,7 +237,7 @@ export default function Chat() {
   return (
     <View className={`page chat ${s.themeClass()}`}>
       {/* 顾问身份头 */}
-      <View className="chat-head">
+      <View className="chat-head" style={navStyle}>
         <View className="hbtn" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
           <Icon name="grid" size={20} color="#565C63" />
         </View>

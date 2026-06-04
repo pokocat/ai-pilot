@@ -8,7 +8,7 @@
   background: var(--surface); border-bottom: 1px solid var(--line);
 }
 .hbtn { width: 36px; height: 36px; border-radius: 10px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; }
-.chat-id { flex: 1; display: flex; flex-direction: column; }
+.chat-id { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .chat-id .cn { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink); }
 .chat-id .cr { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
 
