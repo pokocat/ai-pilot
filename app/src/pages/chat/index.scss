@@ -20,7 +20,7 @@
 .mem-bar .mlearn { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--accent-ink); }
 .mem-bar .mlearn .dot { width: 6px; height: 6px; border-radius: 50%; }
 
-.chat-log { flex: 1; padding: 16px; box-sizing: border-box; overflow: hidden; }
+.chat-log { flex: 1; min-height: 0; padding: 16px; box-sizing: border-box; overflow: hidden; }
 
 .msg { margin-bottom: 16px; }
 .msg.u { display: flex; justify-content: flex-end; }
@@ -56,10 +56,10 @@
   background: var(--surface); border-top: 1px solid var(--line);
 }
 .composer .box {
-  flex: 1; display: flex; align-items: center; gap: 9px;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px;
   background: var(--surface-2); border-radius: 14px; padding: 0 13px; height: 44px;
 }
-.cinput { flex: 1; font-size: 14px; color: var(--ink); height: 44px; }
+.cinput { flex: 1; min-width: 0; width: 100%; display: block; font-size: 14px; color: var(--ink); height: 44px; }
 .csend { width: 44px; height: 44px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
 .csend.busy { opacity: .5; }
 .composer .cbtn { display: flex; align-items: center; justify-content: center; }

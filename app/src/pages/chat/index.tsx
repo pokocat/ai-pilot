@@ -26,6 +26,7 @@ export default function Chat() {
   const [projectId, setProjectId] = useState<string>('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
+  const [inputFocus, setInputFocus] = useState(false);
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [refs, setRefs] = useState<MessageRef[]>([]);
@@ -162,10 +163,17 @@ export default function Chat() {
     }
   }
 
-  const onSend = () => {
-    const v = input.trim();
+  const handleInput = (e: { detail: { value: string } }) => {
+    const v = e.detail.value;
+    setInput(v);
+    return v;
+  };
+
+  const onSend = (raw?: string) => {
+    const v = (typeof raw === 'string' ? raw : input).trim();
     if (!v || !agent) return;
     setInput('');
+    setInputFocus(false);
     const sending = refs;
     setRefs([]);
     doSend(v, sessionId, agent.key, sending);
@@ -197,6 +205,7 @@ export default function Chat() {
 
   // 打开 @引用选择器：拉取可引用的 项目/报告/知识
   const openPicker = async () => {
+    setInputFocus(false);
     if (!store.isAuthed()) {
       setShowLogin(true);
       Taro.showToast({ title: '请先登录', icon: 'none' });
@@ -346,12 +355,27 @@ export default function Chat() {
 
       {/* 输入区 */}
       <View className="composer">
-        <View className="box">
-          <View className="cbtn" onClick={openPicker}><Icon name="attach" size={18} color={refs.length ? accent : '#969BA1'} /></View>
-          <Input className="cinput" value={input} placeholder="向顾问提问…（点 📎 引用项目/报告/知识）" confirmType="send" onInput={(e) => setInput(e.detail.value)} onConfirm={onSend} />
+        <View className="box" onClick={() => setInputFocus(true)}>
+          <View className="cbtn" onClick={(e) => { e.stopPropagation?.(); openPicker(); }}><Icon name="attach" size={18} color={refs.length ? accent : '#969BA1'} /></View>
+          <Input
+            className="cinput"
+            type="text"
+            value={input}
+            focus={inputFocus}
+            maxlength={500}
+            cursorSpacing={96}
+            adjustPosition
+            alwaysEmbed
+            placeholder="向顾问提问…（点 📎 引用项目/报告/知识）"
+            confirmType="send"
+            onFocus={() => setInputFocus(true)}
+            onBlur={() => setInputFocus(false)}
+            onInput={handleInput}
+            onConfirm={(e) => onSend(e.detail.value)}
+          />
           <Icon name="mic" size={18} color="#969BA1" />
         </View>
-        <View className={`csend ${busy ? 'busy' : ''}`} style={{ background: accent }} onClick={onSend}>
+        <View className={`csend ${busy ? 'busy' : ''}`} style={{ background: accent }} onClick={() => onSend()}>
           <Icon name="send" size={18} color="#fff" />
         </View>
       </View>
