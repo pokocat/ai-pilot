@@ -8,7 +8,7 @@ interface ScreenProps {
   /** 是否为底栏 tab 页（留出悬浮底栏空间） */
   tab?: boolean;
   scroll?: boolean;
-  /** 顶部让位系统状态栏 + 微信胶囊（自定义导航页用；首页/对话/库自管理，保持 false） */
+  /** Tab 页顶部让位系统状态栏 + 微信胶囊；非 Tab 自定义头使用 SafeHeader。 */
   topInset?: boolean;
   className?: string;
 }

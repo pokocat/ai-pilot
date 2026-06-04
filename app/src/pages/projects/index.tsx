@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Icon from '../../components/Icon';
+import SafeHeader from '../../components/SafeHeader';
 import { useStore } from '../../hooks/useStore';
 import { api, type ProjectItem } from '../../services/api';
 import './index.scss';
@@ -29,11 +30,12 @@ export default function Projects() {
 
   return (
     <View className={`page projects ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-      <View className="pj-head">
-        <View className="hbtn" onClick={() => Taro.navigateBack()}><Text className="back-arrow">‹</Text></View>
-        <Text className="pj-title serif">项目工作台</Text>
-        <View className="hbtn" onClick={() => setCreating((c) => !c)}><Text className="plus" style={{ color: accent }}>＋</Text></View>
-      </View>
+      <SafeHeader
+        title="项目工作台"
+        onBack={() => Taro.navigateBack()}
+        titleClassName="pj-title"
+        right={<View className="safe-hbtn" onClick={() => setCreating((c) => !c)}><Text className="plus" style={{ color: accent }}>＋</Text></View>}
+      />
 
       {creating && (
         <View className="pj-new">

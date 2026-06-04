@@ -80,7 +80,7 @@ export default function ReportCard({ data, animate = false, saved = false, onSav
                 {sec.list.map((x, j) => (
                   <View key={j} className="sli">
                     <View className="dot" style={{ background: accent }} />
-                    <MarkdownText text={x} inline className="sli-t" />
+                    <MarkdownText text={x} className="sli-t" />
                   </View>
                 ))}
               </View>

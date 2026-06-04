@@ -3,6 +3,7 @@ import { View, Text } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../components/Icon';
 import MarkdownText from '../../components/MarkdownText';
+import SafeHeader from '../../components/SafeHeader';
 import { useStore } from '../../hooks/useStore';
 import { api, type ReportDetail, type ReportVersionContent, type ReportDiff } from '../../services/api';
 import './index.scss';
@@ -44,7 +45,7 @@ export default function Report() {
   if (!detail) {
     return (
       <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-        <Head onBack={() => Taro.navigateBack()} title="报告" />
+        <SafeHeader title="报告" onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
         <View className="rp-loading"><Text>加载中…</Text></View>
       </View>
     );
@@ -52,7 +53,7 @@ export default function Report() {
 
   return (
     <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-      <Head onBack={() => Taro.navigateBack()} title={detail.title} />
+      <SafeHeader title={detail.title} onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
 
       <View className="pad">
         {/* 版本时间线 */}
@@ -83,7 +84,7 @@ export default function Report() {
               <View key={i} className="rp-sec">
                 <Text className="rp-sh"><Text className="rp-no" style={{ background: accent }}>{i + 1}</Text>{sec.h}</Text>
                 {sec.b ? <MarkdownText text={sec.b} className="rp-sb" /> : null}
-                {sec.list ? sec.list.map((x, j) => <View key={j} className="rp-li"><View className="dot" style={{ background: accent }} /><MarkdownText text={x} inline className="rp-li-t" /></View>) : null}
+                {sec.list ? sec.list.map((x, j) => <View key={j} className="rp-li"><View className="dot" style={{ background: accent }} /><MarkdownText text={x} className="rp-li-t" /></View>) : null}
               </View>
             ))}
           </View>
@@ -123,16 +124,6 @@ export default function Report() {
         )}
       </View>
       <View style={{ height: '24px' }} />
-    </View>
-  );
-}
-
-function Head({ onBack, title }: { onBack: () => void; title: string }) {
-  return (
-    <View className="rp-head">
-      <View className="hbtn" onClick={onBack}><Text className="back-arrow">‹</Text></View>
-      <Text className="rp-title serif">{title}</Text>
-      <View style={{ width: '36px' }} />
     </View>
   );
 }

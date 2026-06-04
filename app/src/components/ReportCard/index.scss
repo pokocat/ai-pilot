@@ -43,7 +43,7 @@
 .slist { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
 .sli { display: flex; gap: 8px; align-items: flex-start; }
 .sli .dot { width: 5px; height: 5px; border-radius: 50%; margin-top: 8px; flex-shrink: 0; }
-.sli-t { font-size: 13px; line-height: 1.55; color: var(--ink-2); flex: 1; }
+.sli-t { font-size: 13px; line-height: 1.55; color: var(--ink-2); flex: 1; min-width: 0; }
 
 .foot {
   display: flex; gap: 7px; align-items: flex-start;

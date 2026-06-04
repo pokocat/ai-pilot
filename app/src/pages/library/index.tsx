@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
-import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
+import SafeHeader from '../../components/SafeHeader';
 import { useStore } from '../../hooks/useStore';
 import { api, type LibItem } from '../../services/api';
 import './index.scss';
@@ -31,11 +31,7 @@ export default function Library() {
 
   return (
     <View className={`page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-      <View className="lib-head">
-        <View className="hbtn" onClick={() => Taro.navigateBack()}><Text className="back-arrow">‹</Text></View>
-        <Text className="lib-title serif">我的方案库</Text>
-        <View style={{ width: '36px' }} />
-      </View>
+      <SafeHeader title="我的方案库" onBack={() => Taro.navigateBack()} titleClassName="lib-title" />
 
       <View className="pad" style={{ paddingTop: '12px' }}>
         {items.length === 0 ? (

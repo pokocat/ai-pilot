@@ -5,6 +5,7 @@ import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import MarkdownText from '../../components/MarkdownText';
 import ReportCard from '../../components/ReportCard';
+import SafeHeader from '../../components/SafeHeader';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Agent, type Deliverable, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT } from '../../services/api';
@@ -34,7 +35,6 @@ export default function Chat() {
   const [showLogin, setShowLogin] = useState(false);
   const [picker, setPicker] = useState(false);
   const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[] }>({ projects: [], reports: [], knowledge: [] });
-  const [navStyle, setNavStyle] = useState<{ paddingTop: string; paddingRight: string }>();
   const logRef = useRef<Msg[]>([]);
   logRef.current = msgs;
 
@@ -45,19 +45,6 @@ export default function Chat() {
   useEffect(() => {
     if (busy) setTimeout(scrollToEnd, 40);
   }, [busy]);
-
-  useEffect(() => {
-    try {
-      const rect = Taro.getMenuButtonBoundingClientRect?.();
-      const sys = Taro.getSystemInfoSync?.();
-      if (!rect?.bottom || !sys?.windowWidth) return;
-      const top = Math.max(rect.top || 0, (sys.statusBarHeight || 0) + 6);
-      const right = Math.max(sys.windowWidth - rect.left + 12, 16);
-      setNavStyle({ paddingTop: `${top}px`, paddingRight: `${right}px` });
-    } catch {
-      // H5 或低版本基础库走 CSS env 兜底。
-    }
-  }, []);
 
   const isUnauthorized = (e: unknown) =>
     (e as any)?.code === 'UNAUTHORIZED' || String((e as any)?.message || '').includes('未登录');
@@ -251,18 +238,16 @@ export default function Chat() {
   return (
     <View className={`page chat ${s.themeClass()}`}>
       {/* 顾问身份头 */}
-      <View className="chat-head" style={navStyle}>
-        <View className="hbtn" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
-          <Icon name="grid" size={20} color="#565C63" />
-        </View>
+      <SafeHeader
+        className="chat-head"
+        left={<View className="safe-hbtn" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}><Icon name="grid" size={20} color="#565C63" /></View>}
+        right={<View className="safe-hbtn" onClick={() => Taro.redirectTo({ url: '/pages/chat/index?fresh=1' })}><Icon name="spark" size={20} color="#565C63" /></View>}
+      >
         <View className="chat-id">
           <Text className="cn">{agent?.name ?? '军师'}</Text>
           <Text className="cr">· {agent?.role ?? '通用商业军师'}</Text>
         </View>
-        <View className="hbtn" onClick={() => Taro.redirectTo({ url: '/pages/chat/index?fresh=1' })}>
-          <Icon name="spark" size={20} color="#565C63" />
-        </View>
-      </View>
+      </SafeHeader>
 
       {/* 记忆条 */}
       {agent && (
@@ -321,7 +306,7 @@ export default function Chat() {
                   <MarkdownText text={m.reply.text} />
                   {m.reply.points && (
                     <View className="points">
-                      {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><MarkdownText text={p} inline className="pt-t" /></View>)}
+                      {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><MarkdownText text={p} className="pt-t" /></View>)}
                     </View>
                   )}
                 </View>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro, { useRouter, useDidShow } from '@tarojs/taro';
 import Icon from '../../components/Icon';
+import SafeHeader from '../../components/SafeHeader';
 import { useStore } from '../../hooks/useStore';
 import { api, type ProjectDetail } from '../../services/api';
 import './index.scss';
@@ -38,10 +39,7 @@ export default function Project() {
   if (!detail) {
     return (
       <View className={`page project ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-        <View className="pd-head">
-          <View className="hbtn" onClick={() => Taro.navigateBack()}><Text className="back-arrow">‹</Text></View>
-          <Text className="pd-title serif">项目</Text><View style={{ width: '36px' }} />
-        </View>
+        <SafeHeader title="项目" onBack={() => Taro.navigateBack()} titleClassName="pd-title" />
         <View className="pd-loading"><Text>加载中…</Text></View>
       </View>
     );
@@ -55,11 +53,7 @@ export default function Project() {
 
   return (
     <View className={`page project ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-      <View className="pd-head">
-        <View className="hbtn" onClick={() => Taro.navigateBack()}><Text className="back-arrow">‹</Text></View>
-        <Text className="pd-title serif">{detail.name}</Text>
-        <View style={{ width: '36px' }} />
-      </View>
+      <SafeHeader title={detail.name} onBack={() => Taro.navigateBack()} titleClassName="pd-title" />
 
       <View className="pad">
         {detail.summary ? (
