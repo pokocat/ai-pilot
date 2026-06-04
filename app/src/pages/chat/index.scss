@@ -54,7 +54,7 @@
 .points { margin-top: 9px; display: flex; flex-direction: column; gap: 6px; }
 .pt { display: flex; gap: 8px; align-items: flex-start; }
 .pt .pd { width: 5px; height: 5px; border-radius: 50%; margin-top: 8px; }
-.pt Text { font-size: 13px; line-height: 1.5; color: var(--ink-2); flex: 1; }
+.pt .pt-t { font-size: 13px; line-height: 1.5; color: var(--ink-2); flex: 1; }
 .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
 .act-chip {
   display: flex; align-items: center; gap: 5px;

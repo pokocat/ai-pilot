@@ -3,6 +3,7 @@ import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
+import MarkdownText from '../../components/MarkdownText';
 import ReportCard from '../../components/ReportCard';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
@@ -317,10 +318,10 @@ export default function Chat() {
               <View key={i} className="msg a">
                 <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
                 <View className="bubble">
-                  <Text>{m.reply.text}</Text>
+                  <MarkdownText text={m.reply.text} />
                   {m.reply.points && (
                     <View className="points">
-                      {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><Text>{p}</Text></View>)}
+                      {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><MarkdownText text={p} inline className="pt-t" /></View>)}
                     </View>
                   )}
                 </View>

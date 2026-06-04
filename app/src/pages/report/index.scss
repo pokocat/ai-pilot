@@ -38,6 +38,7 @@
 .rp-sb { display: block; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
 .rp-li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.7; color: var(--ink-2); margin-top: 4px; }
 .rp-li .dot { width: 5px; height: 5px; border-radius: 50%; margin-top: 8px; flex-shrink: 0; }
+.rp-li-t { flex: 1; min-width: 0; }
 
 /* 差异 */
 .rp-nodiff { font-size: 13px; color: var(--ink-3); }

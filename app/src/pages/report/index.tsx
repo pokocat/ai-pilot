@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../components/Icon';
+import MarkdownText from '../../components/MarkdownText';
 import { useStore } from '../../hooks/useStore';
 import { api, type ReportDetail, type ReportVersionContent, type ReportDiff } from '../../services/api';
 import './index.scss';
@@ -81,8 +82,8 @@ export default function Report() {
             {content.content.sections.map((sec, i) => (
               <View key={i} className="rp-sec">
                 <Text className="rp-sh"><Text className="rp-no" style={{ background: accent }}>{i + 1}</Text>{sec.h}</Text>
-                {sec.b ? <Text className="rp-sb">{sec.b}</Text> : null}
-                {sec.list ? sec.list.map((x, j) => <View key={j} className="rp-li"><View className="dot" style={{ background: accent }} /><Text>{x}</Text></View>) : null}
+                {sec.b ? <MarkdownText text={sec.b} className="rp-sb" /> : null}
+                {sec.list ? sec.list.map((x, j) => <View key={j} className="rp-li"><View className="dot" style={{ background: accent }} /><MarkdownText text={x} inline className="rp-li-t" /></View>) : null}
               </View>
             ))}
           </View>

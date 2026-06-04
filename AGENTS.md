@@ -141,6 +141,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **标题 Text 块级化**：Taro `<Text>` 默认偏内联；全局 `.kicker` / `.h1` 必须保持 `display: block`，页面 hero 说明文案也需显式 `display: block`，避免真机上标题、kicker、正文挤成一行。
 - **对话输入框小程序兼容**：`pages/chat` 输入框必须由整条 `.box` 触发 focus，`onInput` 返回 `e.detail.value` 并同步 state，`onConfirm` 使用事件值发送；保留 `cursorSpacing/adjustPosition/alwaysEmbed` 和 `.cinput` 的 `min-width:0;width:100%`，避免真机上点得到但输不进或输入宽度塌陷。
 - **对话等待反馈**：`pages/chat` 发送消息后必须立刻在对话流尾部显示“正在梳理上下文”思考气泡与三点动效，直到接口返回；不要只让发送按钮变灰，否则真机会像卡住。
+- **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
 - **真实网络错误不要吞成产出失败**：`services/api.ts` 要捕获 `Taro.request` reject，把 `errMsg` 映射为明确网络/合法域名提示；对话页未收到 HTTP 响应时不能只显示“抱歉，产出失败了”。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **深色卡光感**：对话入口卡用 `--accent-deep` 对角渐变 + `--accent-glow` 柔光，随本命色自适应。
@@ -351,6 +352,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-04** · **格式化 AI 返回 Markdown 文档**：新增 `components/MarkdownText` 轻量 Markdown 渲染器，覆盖标题/段落/列表/引用/加粗/代码；`pages/chat`、`ReportCard`、`pages/report` 接入，避免模型返回的 Markdown 原文未格式化显示。
 - **2026-06-04** · **新增对话 AI 思考动效**：`pages/chat` 在 `busy` 状态下渲染对话流内思考气泡，包含顾问身份、三点 pulse 动画与“正在梳理上下文”提示，并在发送后自动滚到底部，避免等待模型返回时页面像卡死。
 - **2026-06-04** · **明确小程序网络/合法域名错误**：`services/api.ts` 捕获 `Taro.request` reject，根据 `errMsg` 提示 request 合法域名需配置 `https://wxapi.aibuzz.cn` 或网络失败，避免小程序端请求未到服务器时仍显示泛化“产出失败”。
 - **2026-06-04** · **修复小程序对话输入无法输入**：`pages/chat` 输入框新增整条输入区 focus、显式 `type=text`、`cursorSpacing/adjustPosition/alwaysEmbed`，`onInput` 返回当前值并由 `onConfirm` 直接用事件值发送；补 `.chat-log min-height:0` 与 `.cinput min-width/width`，提升真机输入框可点、可输、可发送稳定性。

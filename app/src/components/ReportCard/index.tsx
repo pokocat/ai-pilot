@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Icon from '../Icon';
+import MarkdownText from '../MarkdownText';
 import { useStore } from '../../hooks/useStore';
 import type { Deliverable } from '../../services/api';
 import './index.scss';
@@ -73,13 +74,13 @@ export default function ReportCard({ data, animate = false, saved = false, onSav
               <Text className="no" style={{ background: accent }}>{i + 1}</Text>
               <Text className="sh-t">{sec.h}</Text>
             </View>
-            {sec.b && <Text className="sb">{sec.b}</Text>}
+            {sec.b && <MarkdownText text={sec.b} className="sb" />}
             {sec.list && (
               <View className="slist">
                 {sec.list.map((x, j) => (
                   <View key={j} className="sli">
                     <View className="dot" style={{ background: accent }} />
-                    <Text className="sli-t">{x}</Text>
+                    <MarkdownText text={x} inline className="sli-t" />
                   </View>
                 ))}
               </View>
