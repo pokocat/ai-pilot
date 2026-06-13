@@ -212,6 +212,17 @@ select.ai-input { appearance: none; }
 .ai-btn:disabled { opacity: .5; }
 .ai-note { font-size: 11px; line-height: 1.6; color: var(--ink-3); margin-top: 14px; overflow-wrap: anywhere; }
 
+/* —— 智能体计费 / 新增 / 用户开通 —— */
+.tag.pay { background: rgba(155,124,63,.18); color: var(--accent-ink, var(--gold)); }
+.add-btn.full { width: 100%; margin-bottom: 14px; }
+.mini-btn:disabled { opacity: .5; cursor: default; }
+.crd.new-agent { display: block; padding: 14px; margin-bottom: 14px; }
+.bill-seg { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 10px; }
+.bill-opt { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; cursor: pointer; transition: .15s; }
+.bill-opt.on { border-color: var(--accent); background: var(--accent-soft, rgba(155,124,63,.1)); }
+.bill-opt .bo-t { font: 600 12.5px/1.2 var(--sans); color: var(--ink); }
+.bill-opt .bo-d { font-size: 10.5px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; }
+
 @media (max-width: 380px) {
   .adm-top { padding-inline: 16px; }
   .sec-h { padding-inline: 16px; }

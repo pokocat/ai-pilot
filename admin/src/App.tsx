@@ -5,16 +5,20 @@ import {
   type Overview,
   type Saying,
   type AdminAgent,
+  type AgentBilling,
   type SurveyQ,
   type Plan,
   type AiConfig,
   type AiPreset,
   type AiProvider,
   type AdminUserItem,
+  type AdminUserDetail,
   type AdminUsageView,
   type AdminAuditItem,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
+import AdminLogin from './AdminLogin';
+import { getAdminToken, clearAdminToken } from './auth';
 
 type Tab = 'home' | 'users' | 'usage' | 'agent' | 'audit' | 'model' | 'say' | 'form' | 'plan';
 const TABS: { key: Tab; icon: string; label: string }[] = [
@@ -30,11 +34,24 @@ const TABS: { key: Tab; icon: string; label: string }[] = [
 ];
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => !!getAdminToken());
   const [tab, setTab] = useState<Tab>('home');
   const [detailKey, setDetailKey] = useState<string | null>(null);
+  const [detailUser, setDetailUser] = useState<string | null>(null);
   const [toast, setToast] = useState('');
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 1800); };
+
+  // 任一请求 401/403（密钥失效/被撤销）→ 切回登录页
+  useEffect(() => {
+    const onUnauth = () => setAuthed(false);
+    window.addEventListener('admin:unauth', onUnauth);
+    return () => window.removeEventListener('admin:unauth', onUnauth);
+  }, []);
+
+  const logout = () => { clearAdminToken(); setAuthed(false); };
+
+  if (!authed) return <AdminLogin onAuthed={() => setAuthed(true)} />;
 
   return (
     <div className="phone">
@@ -42,19 +59,19 @@ export default function App() {
         <div className="adm-top">
           <div className="adm-mk">军</div>
           <div className="adm-tt"><div className="t">运营后台</div><div className="s">JUNSHI · CONSOLE</div></div>
-          <div className="adm-av">运营</div>
+          <div className="adm-av" onClick={logout} title="退出登录" style={{ cursor: 'pointer' }}>运营</div>
         </div>
 
         <div className="adm-scroll">
           {tab === 'home' && <OverviewView />}
-          {tab === 'users' && <UsersView />}
+          {tab === 'users' && <UsersView onOpen={setDetailUser} />}
           {tab === 'usage' && <UsageView />}
           {tab === 'say' && <SayingsView toast={showToast} />}
           {tab === 'agent' && <AgentsView onOpen={setDetailKey} toast={showToast} />}
           {tab === 'audit' && <AuditView />}
           {tab === 'model' && <ModelView toast={showToast} />}
           {tab === 'form' && <SurveyView />}
-          {tab === 'plan' && <PlansView />}
+          {tab === 'plan' && <PlansView toast={showToast} />}
         </div>
 
         <nav className="adm-tab">
@@ -71,6 +88,14 @@ export default function App() {
             agentKey={detailKey}
             onClose={() => setDetailKey(null)}
             onSaved={() => { setDetailKey(null); showToast('配置已保存并下发'); }}
+          />
+        )}
+
+        {detailUser && (
+          <UserDetailPanel
+            userId={detailUser}
+            onClose={() => setDetailUser(null)}
+            toast={showToast}
           />
         )}
 
@@ -114,12 +139,12 @@ function OverviewView() {
   );
 }
 
-function UsersView() {
+function UsersView({ onOpen }: { onOpen: (id: string) => void }) {
   const [list, setList] = useState<AdminUserItem[]>([]);
   useEffect(() => { api.users().then(setList).catch(() => {}); }, []);
   return (
     <>
-      <div className="sec-h"><span className="t">注册用户</span><span className="s">小程序账号 · 数据隔离</span></div>
+      <div className="sec-h"><span className="t">注册用户</span><span className="s">点击管理智能体开通</span></div>
       <div className="pad">
         <div className="pill-row">
           <span className="pill"><Icon name="user" size={13} /> {list.length} 用户</span>
@@ -127,7 +152,7 @@ function UsersView() {
           <span className="pill"><Icon name="doc" size={13} /> {sum(list, 'deliverableCount')} 成果</span>
         </div>
         {list.map((u) => (
-          <div key={u.id} className="crd user-card">
+          <div key={u.id} className="crd user-card" onClick={() => onOpen(u.id)}>
             <div className="crd-row">
               <span className="crd-ic"><Icon name="user" size={18} /></span>
               <div className="crd-b">
@@ -135,6 +160,7 @@ function UsersView() {
                 <div className="cs">{u.phone} · {u.tenantName} · {u.planName ?? '未分配套餐'}</div>
               </div>
               <span className="user-balance">{creditText(u.creditBalance)}</span>
+              <span className="edit"><Icon name="pen" size={15} /></span>
             </div>
             <div className="kv-grid">
               <KV k="注册时间" v={fmtTime(u.createdAt)} />
@@ -146,6 +172,56 @@ function UsersView() {
         ))}
       </div>
     </>
+  );
+}
+
+// 单用户：智能体开通管理（运营决定给哪个用户开通哪个付费智能体）
+function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: () => void; toast: (m: string) => void }) {
+  const [data, setData] = useState<AdminUserDetail | null>(null);
+  const [busy, setBusy] = useState('');
+  const load = () => api.userDetail(userId).then(setData).catch(() => {});
+  useEffect(() => { load(); }, [userId]);
+  if (!data) return null;
+  const u = data.user;
+  const toggle = async (key: string, owned: boolean, name: string) => {
+    setBusy(key);
+    try {
+      if (owned) { await api.revokeAgent(userId, key); toast(`已取消「${name}」`); }
+      else { await api.grantAgent(userId, key); toast(`已为该用户开通「${name}」`); }
+      await load();
+    } catch { toast('操作失败'); }
+    setBusy('');
+  };
+  return (
+    <div className="ad-detail show">
+      <div className="ad-dh">
+        <div className="bk" onClick={onClose}><Icon name="arrow" size={18} /></div>
+        <div className="di"><Icon name="user" size={18} /></div>
+        <div className="dt"><div className="t">{u.name}</div><div className="s">{u.phone} · 余额 {creditText(u.creditBalance)}</div></div>
+      </div>
+      <div className="ad-db">
+        <div className="blk">
+          <div className="blk-h"><Icon name="crown" size={15} /><span className="t">付费智能体开通</span><span className="badge">{data.agents.filter((a) => a.owned).length}/{data.agents.length}</span></div>
+          <div className="blk-d">为该用户单独开通付费（解锁类）智能体，免其消耗算力。免费 / 按次智能体所有用户均可直接使用，无需开通。</div>
+          <div className="mem-list">
+            {data.agents.map((a) => (
+              <div key={a.key} className="mem-card">
+                <span className="mi"><Icon name={a.icon} size={16} /></span>
+                <div className="mb">
+                  <div className="mt">{a.name} {a.owned && <span className="tag">{sourceLabel(a.source)}</span>}</div>
+                  <div className="mm">{a.role} · {a.price} 算力解锁</div>
+                </div>
+                <button className={`mini-btn ${a.owned ? 'danger' : 'primary'}`} disabled={busy === a.key} onClick={() => toggle(a.key, a.owned, a.name)}>
+                  {a.owned ? '取消' : '开通'}
+                </button>
+              </div>
+            ))}
+            {!data.agents.length && <div className="blk-d">暂无付费（解锁类）智能体</div>}
+          </div>
+        </div>
+        <div style={{ height: 40 }} />
+      </div>
+    </div>
   );
 }
 
@@ -234,6 +310,8 @@ function SayingsView({ toast }: { toast: (m: string) => void }) {
 
 function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m: string) => void }) {
   const [list, setList] = useState<AdminAgent[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ key: '', name: '', role: '', billing: 'unlock' as AgentBilling, price: 10 });
   const load = () => api.agents().then(setList).catch(() => {});
   useEffect(() => { load(); }, []);
   const toggle = async (e: MouseEvent, a: AdminAgent) => {
@@ -242,17 +320,50 @@ function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m:
     await load();
     toast(a.enabled ? '功能已下架' : '功能已上架');
   };
+  const create = async () => {
+    if (!/^[a-z][a-z0-9_]{1,30}$/.test(form.key)) return toast('key 需小写字母开头');
+    if (!form.name.trim()) return toast('请填写名称');
+    try {
+      await api.createAgent({ key: form.key, name: form.name, role: form.role, billing: form.billing, price: form.billing === 'free' ? 0 : form.price });
+      setAdding(false); setForm({ key: '', name: '', role: '', billing: 'unlock', price: 10 });
+      await load(); toast('已新增智能体（默认下架，点击可配置上架）');
+    } catch { toast('新增失败（key 可能已存在）'); }
+  };
   return (
     <>
-      <div className="sec-h"><span className="t">功能上下架</span><span className="s">前台仅展示已上架功能</span></div>
+      <div className="sec-h"><span className="t">智能体上下架 · 定价</span><span className="s">前台仅展示已上架</span></div>
       <div className="pad">
+        {!adding ? (
+          <button className="add-btn full" onClick={() => setAdding(true)}><Icon name="spark" size={15} /> 新增智能体</button>
+        ) : (
+          <div className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">key（唯一，小写）</div><input className="ai-input" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} placeholder="如 legal" /></div>
+            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="如 法务顾问" /></div>
+            <div className="ai-field"><div className="ai-fl">一句话定位</div><input className="ai-input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="合同 · 风险 · 合规" /></div>
+            <div className="ai-field">
+              <div className="ai-fl">计费</div>
+              <select className="ai-input" value={form.billing} onChange={(e) => setForm({ ...form, billing: e.target.value as AgentBilling })}>
+                <option value="free">免费赠送</option>
+                <option value="unlock">付费解锁</option>
+                <option value="metered">按次计费</option>
+              </select>
+            </div>
+            {form.billing !== 'free' && (
+              <div className="ai-field"><div className="ai-fl">价格（算力次数）</div><input className="ai-input" type="number" min={0} value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} /></div>
+            )}
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => setAdding(false)}>取消</button>
+              <button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 创建</button>
+            </div>
+          </div>
+        )}
         {list.map((a) => (
           <div key={a.key} className="crd" onClick={() => onOpen(a.key)}>
             <div className="crd-row">
               <span className="crd-ic"><Icon name={a.icon} size={18} /></span>
               <div className="crd-b">
-                <div className="ct">{a.name} {a.gift && <span className="tag">赠送</span>} {!a.enabled && <span className="tag off">停用</span>}</div>
-                <div className="cs">{a.deliverableKey ? `产出 · ${a.deliverableKey}` : a.role} · {typeLabel(a.type)} · 会话 {a.sessionCount ?? 0} · 成果 {a.deliverableCount ?? 0}</div>
+                <div className="ct">{a.name} {billingTag(a.billing, a.price)} {!a.enabled && <span className="tag off">停用</span>}</div>
+                <div className="cs">{a.deliverableKey ? `产出 · ${a.deliverableKey}` : a.role} · {typeLabel(a.type)} · 已开通 {a.ownerCount ?? 0} · 成果 {a.deliverableCount ?? 0}</div>
               </div>
               <button className={`mini-btn ${a.enabled ? 'danger' : 'primary'}`} onClick={(e) => toggle(e, a)}>
                 {a.enabled ? '下架' : '上架'}
@@ -286,23 +397,54 @@ function SurveyView() {
   );
 }
 
-function PlansView() {
+function PlansView({ toast }: { toast: (m: string) => void }) {
   const [list, setList] = useState<Plan[]>([]);
-  useEffect(() => { api.plans().then(setList).catch(() => {}); }, []);
-  const price = (p: Plan) => p.price < 0 ? '面议' : p.price === 0 ? '¥0' : `¥${(p.price / 100).toLocaleString()}${p.period === 'year' ? '/年' : '/月'}`;
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: '', priceYuan: 0, creditsPerMonth: 0, agentCount: 0, features: '' });
+  const load = () => api.plans().then(setList).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const priceLabel = (p: Plan) => p.price < 0 ? '面议' : p.price === 0 ? '¥0' : `¥${(p.price / 100).toLocaleString()}${p.period === 'year' ? '/年' : '/月'}`;
+  const startEdit = (p: Plan) => {
+    setEditId(p.id);
+    setForm({ name: p.name, priceYuan: p.price < 0 ? -1 : p.price / 100, creditsPerMonth: p.creditsPerMonth, agentCount: p.agentCount, features: p.featuresJson.join('\n') });
+  };
+  const save = async (id: string) => {
+    try {
+      await api.savePlan(id, {
+        name: form.name,
+        price: form.priceYuan < 0 ? -1 : Math.round(form.priceYuan * 100),
+        creditsPerMonth: form.creditsPerMonth,
+        agentCount: form.agentCount,
+        featuresJson: form.features.split('\n').map((s) => s.trim()).filter(Boolean),
+      });
+      setEditId(null); await load(); toast('套餐已更新');
+    } catch { toast('保存失败'); }
+  };
   return (
     <>
       <div className="sec-h"><span className="t">套餐与算力</span><span className="s">定价 · 算力规则</span></div>
       <div className="pad">
-        {list.map((p) => (
+        {list.map((p) => editId === p.id ? (
+          <div key={p.id} className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">价格（元，-1=面议）</div><input className="ai-input" type="number" value={form.priceYuan} onChange={(e) => setForm({ ...form, priceYuan: Number(e.target.value) })} /></div>
+            <div className="ai-field"><div className="ai-fl">每月算力（-1=不限量）</div><input className="ai-input" type="number" value={form.creditsPerMonth} onChange={(e) => setForm({ ...form, creditsPerMonth: Number(e.target.value) })} /></div>
+            <div className="ai-field"><div className="ai-fl">含智能体数</div><input className="ai-input" type="number" value={form.agentCount} onChange={(e) => setForm({ ...form, agentCount: Number(e.target.value) })} /></div>
+            <div className="ai-field"><div className="ai-fl">权益（每行一条）</div><textarea className="ta" rows={4} value={form.features} onChange={(e) => setForm({ ...form, features: e.target.value })} /></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button>
+              <button className="ai-btn primary" onClick={() => save(p.id)}><Icon name="check" size={14} /> 保存</button>
+            </div>
+          </div>
+        ) : (
           <div key={p.id} className={`plan ${p.highlighted ? 'feat' : ''}`}>
             <div className="plan-h">
               <span className="pn">{p.name}</span>
               {p.highlighted && <span className="tag">最受欢迎</span>}
-              <span className="pp">{price(p)}</span>
+              <span className="pp">{priceLabel(p)}</span>
             </div>
-            <div className="plan-meta">{p.featuresJson.join(' · ')}</div>
-            <button className="plan-edit"><Icon name="pen" size={13} /> 编辑套餐</button>
+            <div className="plan-meta">{p.creditsPerMonth < 0 ? '不限量算力' : `${p.creditsPerMonth} 次/月`} · 含 {p.agentCount} 智能体 · {p.featuresJson.join(' · ')}</div>
+            <button className="plan-edit" onClick={() => startEdit(p)}><Icon name="pen" size={13} /> 编辑套餐</button>
           </div>
         ))}
       </div>
@@ -447,6 +589,10 @@ function auditLabel(action: string) {
     'admin.agent.publish': '功能上架',
     'admin.agent.unpublish': '功能下架',
     'admin.agent.update': '智能体配置变更',
+    'admin.agent.create': '新增智能体',
+    'admin.user.agent.grant': '后台开通智能体',
+    'admin.user.agent.revoke': '取消智能体开通',
+    'user.agent.purchase': '用户解锁智能体',
     'admin.ai.update': '模型配置变更',
     'admin.saying.create': '新增每日献策',
     'admin.saying.update': '更新每日献策',
@@ -466,5 +612,13 @@ function auditLabel(action: string) {
   return labels[action] ?? action;
 }
 
-function typeLabel(t: string) { return t === 'advisory' ? '出谋' : t === 'creative' ? '出活' : '通用'; }
+function typeLabel(t: string) { return t === 'advisory' ? '出谋' : t === 'creative' ? '出活' : t === 'custom' ? '自定义' : '通用'; }
+function billingTag(billing: AgentBilling, price: number) {
+  if (billing === 'free') return <span className="tag">赠送</span>;
+  if (billing === 'metered') return <span className="tag pay">按次 {price}</span>;
+  return <span className="tag pay">{price} 算力</span>;
+}
+function sourceLabel(source: string | null) {
+  return source === 'purchase' ? '已购买' : source === 'admin_grant' ? '后台开通' : source === 'gift' ? '赠送' : '已开通';
+}
 function Loading() { return <div className="pad" style={{ padding: 40, textAlign: 'center', color: '#969BA1' }}>加载中…</div>; }

@@ -55,6 +55,7 @@ model User {
   deliverables Deliverable[]
   memories     Memory[]
   credits      CreditLedger[]
+  agents       UserAgent[] // 已开通的智能体（赠送 / 购买 / 后台开通）
 
   @@map("app_user")
 }
@@ -82,7 +83,9 @@ model Agent {
   role           String
   icon           String
   type           String // advisory | creative | general | custom
-  gift           Boolean  @default(true)
+  gift           Boolean  @default(true) // 注册即赠送（=billing free）；仅用于前台「赠送」标记
+  billing        String   @default("free") // free 免费 | unlock 一次性解锁 | metered 按次计费
+  price          Int      @default(0) // 价格（单位：算力次数）。unlock=解锁一次性消耗；metered=每次产出消耗
   enabled        Boolean  @default(true)
   greet          String   @db.Text
   chipsJson      Json // [["target","战略体检"], ...]
@@ -98,8 +101,28 @@ model Agent {
   deliverables Deliverable[]
   memories     Memory[]
   reportDocs   ReportDoc[]
+  owners       UserAgent[]
 
   @@map("agent")
+}
+
+/// 用户已开通的智能体（行级权益）。free/metered 智能体无需此记录即可使用；
+/// unlock（一次性解锁）智能体需有此记录才可对话产出。
+model UserAgent {
+  id        String   @id @default(cuid())
+  userId    String
+  agentKey  String
+  source    String   @default("purchase") // gift 注册赠送 | purchase 算力解锁 | admin_grant 后台开通
+  pricePaid Int      @default(0) // 解锁时消耗的算力次数（admin_grant=0）
+  createdAt DateTime @default(now())
+  expiresAt DateTime? // 预留：限时开通
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent Agent @relation(fields: [agentKey], references: [key], onDelete: Cascade)
+
+  @@unique([userId, agentKey])
+  @@index([userId])
+  @@map("user_agent")
 }
 
 /// 会话（按 用户×智能体 隔离，可回溯；可归属项目）

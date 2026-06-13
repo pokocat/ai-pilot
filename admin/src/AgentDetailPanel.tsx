@@ -1,25 +1,36 @@
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
-import { api, type AgentDetail, type MemoryConfig, type MemoryIntensity, type MemorySource } from './api';
+import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource } from './api';
 
 const VARS = ['{企业档案}', '{行业基准}', '{长期记忆}', '{本命色}'];
 const INTENSITY = [['conservative', '保守'], ['balanced', '均衡'], ['aggressive', '激进']];
 const RETENTION = [[30, '30天'], [180, '180天'], [-1, '永久']];
+const BILLING: [AgentBilling, string, string][] = [
+  ['free', '免费', '注册即赠送 · 所有用户可用'],
+  ['unlock', '一次性解锁', '用算力购买后永久可用 / 后台可指定开通'],
+  ['metered', '按次计费', '无需解锁，每次产出消耗算力（如图片生成）'],
+];
 const SOURCES = [
   ['conversation', '对话记忆', '从历史会话提炼 · 已沉淀 128 条', 'chat'],
   ['document', '企业资料（可选投喂）', '客户补充的背景资料 · 24 份', 'doc'],
   ['deliverable_feedback', '产出反馈', '采纳 / 修改 / 忽略 信号回流', 'chart'],
 ];
 
-// 顾问详情：System 提示词编辑 + Agent Memory（持续学习）配置 —— 对齐原型 运营后台.html。
+// 顾问详情：基础信息 + 计费/价格 + System 提示词 + Agent Memory（持续学习）配置。
 export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agentKey: string; onClose: () => void; onSaved: () => void }) {
   const [data, setData] = useState<AgentDetail | null>(null);
+  const [name, setName] = useState('');
+  const [role, setRole] = useState('');
+  const [billing, setBilling] = useState<AgentBilling>('free');
+  const [price, setPrice] = useState(0);
   const [prompt, setPrompt] = useState('');
   const [mem, setMem] = useState<MemoryConfig | null>(null);
 
   useEffect(() => {
     api.agent(agentKey).then((d) => {
       setData(d);
+      setName(d.name); setRole(d.role);
+      setBilling(d.billing); setPrice(d.price);
       setPrompt(d.systemPrompt);
       setMem(d.memoryConfig);
     }).catch(() => {});
@@ -31,7 +42,11 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
   const toggleSource = (s: MemorySource) =>
     setMem((m) => m && ({ ...m, sources: m.sources.includes(s) ? m.sources.filter((x) => x !== s) : [...m.sources, s] }));
 
-  const save = () => api.saveAgent(agentKey, { systemPrompt: prompt, memoryConfig: mem }).then(onSaved).catch(() => {});
+  const save = () => api.saveAgent(agentKey, {
+    name, role, gift: billing === 'free', billing,
+    price: billing === 'free' ? 0 : Math.max(0, Math.trunc(price)),
+    systemPrompt: prompt, memoryConfig: mem,
+  }).then(onSaved).catch(() => {});
 
   return (
     <div className="ad-detail show">
@@ -42,6 +57,30 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
       </div>
 
       <div className="ad-db">
+        <div className="blk">
+          <div className="blk-h"><Icon name="agent" size={15} /><span className="t">基础信息</span></div>
+          <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div className="ai-field"><div className="ai-fl">一句话定位</div><input className="ai-input" value={role} onChange={(e) => setRole(e.target.value)} /></div>
+        </div>
+
+        <div className="blk">
+          <div className="blk-h"><Icon name="crown" size={15} /><span className="t">计费与定价</span><span className="badge">{billingLabel(billing)}</span></div>
+          <div className="blk-d">控制这位智能体是注册赠送、付费解锁，还是按次计费（如图片生成类）。价格单位为「算力次数」。</div>
+          <div className="bill-seg">
+            {BILLING.map(([v, l, d]) => (
+              <div key={v} className={`bill-opt ${billing === v ? 'on' : ''}`} onClick={() => { setBilling(v); if (v === 'free') setPrice(0); }}>
+                <div className="bo-t">{l}</div><div className="bo-d">{d}</div>
+              </div>
+            ))}
+          </div>
+          {billing !== 'free' && (
+            <div className="ai-field">
+              <div className="ai-fl">{billing === 'unlock' ? '解锁价格（算力次数）' : '每次产出消耗（算力次数）'}</div>
+              <input className="ai-input" type="number" min={0} value={price} onChange={(e) => setPrice(Number(e.target.value))} />
+            </div>
+          )}
+        </div>
+
         <div className="blk">
           <div className="blk-h"><Icon name="pen" size={15} /><span className="t">System 提示词</span><span className="badge">可优化</span></div>
           <div className="blk-d">定义这位顾问的角色、产出结构与语气。变量会在运行时注入企业档案与记忆。</div>
@@ -97,4 +136,8 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
       </div>
     </div>
   );
+}
+
+function billingLabel(b: AgentBilling) {
+  return b === 'free' ? '免费赠送' : b === 'unlock' ? '付费解锁' : '按次计费';
 }

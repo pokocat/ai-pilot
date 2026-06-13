@@ -40,7 +40,7 @@
 - [ ] 知识库**文档上传**（PDF/图片 OCR）入库。
 
 ### P2 · 生产硬化
-- [ ] **密钥安全**：`AiSetting.apiKey` 现明文存库 → 加密 / 接密管；admin 加登录 + RBAC。
+- [ ] **密钥与后台权限安全**：`AiSetting.apiKey` 现明文存库 → 加密 / 接密管；admin 已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权，仍需细粒度 RBAC、管理员账号体系与密钥轮换策略。
 - [ ] 鉴权升级：`token=userId` → 短信验证码 + JWT。
 - [ ] 内容审核 / 缓存：关键词+内存 → 合规审核服务 + Redis。
 - [x] **算力按次扣减 + 余额不足拦截**（`services/credits.ts`，TC-K 守护）。

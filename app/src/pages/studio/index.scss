@@ -10,7 +10,13 @@
 .acard .gift {
   position: absolute; top: 12px; right: 12px; color: #fff;
   font-size: 9.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px;
+  display: inline-flex; align-items: center;
 }
+.acard .gift.owned { background: rgba(60, 60, 67, .55); }
+.acard .gift.locked-badge { background: rgba(60, 60, 67, .5); padding: 3px 6px; }
+.acard.locked { opacity: .96; }
+.acard.locked .ah { color: var(--ink-2); }
+.acard .ameta.lock { font-weight: 600; }
 .acard .ai { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
 .acard .ah { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); }
 .acard .ap { display: block; font-size: 11px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; min-height: 30px; }

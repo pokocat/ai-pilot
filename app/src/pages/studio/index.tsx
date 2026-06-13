@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
+import AgentUnlock from '../../components/AgentUnlock';
 import { useStore } from '../../hooks/useStore';
+import type { Agent } from '../../services/api';
 import './index.scss';
 
 const TRAIN = [
@@ -15,10 +18,15 @@ const TRAIN = [
 export default function Studio() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
+  const [buying, setBuying] = useState<Agent | null>(null);
   useDidShow(() => s.setTab(3));
 
   const creative = s.agents().filter((a) => a.type === 'creative');
   const open = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` });
+  const tap = (a: Agent) => {
+    if (a.billing === 'unlock' && !a.owned) setBuying(a);
+    else open(a.key);
+  };
   const train = (name: string) => Taro.showToast({ title: `开始训练「${name}」`, icon: 'none' });
 
   return (
@@ -27,20 +35,27 @@ export default function Studio() {
         <View className="agents-hero">
           <Text className="kicker">Agent Studio · 出活</Text>
           <Text className="h1">智能体工坊</Text>
-          <Text className="hero-p">智库帮你「出谋」，工坊帮你「出活」——把战略落成 IP、宣传片、海报、短视频与文案，并训练只懂你的专属智能体。</Text>
+          <Text className="hero-p">智库帮你「出谋」，工坊帮你「出活」——把战略落成 IP、宣传片、海报、短视频与文案。按需解锁或按次使用，灵活付费。</Text>
         </View>
 
         <View className="gh">创作智能体 · 生成品牌资产</View>
         <View className="agrid">
-          {creative.map((a) => (
-            <View key={a.key} className="acard card" onClick={() => open(a.key)}>
-              {a.gift && <View className="gift" style={{ background: accent }}>招牌</View>}
-              <View className="ai" style={{ background: 'var(--accent-soft)' }}><Icon name={a.icon} size={18} color={accent} /></View>
-              <Text className="ah">{a.name}</Text>
-              <Text className="ap">{a.role}</Text>
-              {a.deliverableKey && <Text className="ameta" style={{ color: accent }}>产出 · {a.deliverableKey}</Text>}
-            </View>
-          ))}
+          {creative.map((a) => {
+            const locked = a.billing === 'unlock' && !a.owned;
+            return (
+              <View key={a.key} className={`acard card ${locked ? 'locked' : ''}`} onClick={() => tap(a)}>
+                <Badge agent={a} accent={accent} />
+                <View className="ai" style={{ background: 'var(--accent-soft)' }}><Icon name={a.icon} size={18} color={accent} /></View>
+                <Text className="ah">{a.name}</Text>
+                <Text className="ap">{a.role}</Text>
+                {locked
+                  ? <Text className="ameta lock" style={{ color: accent }}>{a.price} 算力解锁 ›</Text>
+                  : a.billing === 'metered'
+                    ? <Text className="ameta" style={{ color: accent }}>按次 {a.price} 算力 · {a.deliverableKey}</Text>
+                    : a.deliverableKey && <Text className="ameta" style={{ color: accent }}>产出 · {a.deliverableKey}</Text>}
+              </View>
+            );
+          })}
         </View>
 
         <View className="gh">训练专属智能体 · 越用越懂你</View>
@@ -72,6 +87,16 @@ export default function Studio() {
           <Icon name="spark" size={16} color={accent} /><Text style={{ color: accent }}> 从零训练一个智能体</Text>
         </View>
       </View>
+
+      <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); open(a.key); }} />
     </Screen>
   );
+}
+
+// 智能体角标：赠送 / 已解锁 / 按次 / 锁
+function Badge({ agent, accent }: { agent: Agent; accent: string }) {
+  if (agent.billing === 'free') return <View className="gift" style={{ background: accent }}>赠送</View>;
+  if (agent.billing === 'metered') return <View className="gift metered" style={{ background: accent }}>按次 {agent.price}</View>;
+  if (agent.owned) return <View className="gift owned"><Icon name="check" size={9} color="#fff" /><Text> 已解锁</Text></View>;
+  return <View className="gift locked-badge"><Icon name="lock" size={9} color="#fff" /></View>;
 }

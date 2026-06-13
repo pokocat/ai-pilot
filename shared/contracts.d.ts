@@ -5,6 +5,8 @@
 
 /* ────────────── 智能体 ────────────── */
 export type AgentType = 'general' | 'advisory' | 'creative' | 'custom';
+/** 计费模式：free 免费 | unlock 一次性解锁（算力购买/后台开通） | metered 按次计费 */
+export type AgentBilling = 'free' | 'unlock' | 'metered';
 export type MemoryIntensity = 'conservative' | 'balanced' | 'aggressive';
 export type MemorySource = 'conversation' | 'document' | 'deliverable_feedback';
 
@@ -24,6 +26,9 @@ export interface Agent {
   icon: string;
   type: AgentType;
   gift: boolean;
+  billing: AgentBilling; // 计费模式
+  price: number;         // 价格（算力次数）：unlock=解锁消耗；metered=每次产出消耗；free=0
+  owned: boolean;        // 当前用户是否已开通（free/metered 恒为可用，owned 仅对 unlock 有意义）
   enabled: boolean;
   greet: string;
   chips: [string, string][]; // [icon, label]
@@ -32,17 +37,41 @@ export interface Agent {
   deliverableKey: string | null;
 }
 
-/** 运营端列表项（GET /admin/agents） */
-export interface AdminAgent {
-  key: string; name: string; role: string; icon: string; type: string;
-  gift: boolean; enabled: boolean; deliverableKey: string | null;
-  sessionCount?: number; deliverableCount?: number; updatedAt?: string;
+/** 购买/解锁智能体结果（POST /agents/:key/purchase） */
+export interface AgentPurchaseResult {
+  ok: true;
+  agentKey: string;
+  pricePaid: number;     // 本次消耗算力
+  creditBalance: number; // 解锁后余额（<0=不限量）
+  alreadyOwned: boolean; // 幂等：已开通则为 true、不重复扣费
 }
 
-/** 运营端详情（含 System 提示词 + Agent Memory） */
+/** 运营端列表项（GET /admin/agents） */
+export interface AdminAgent {
+  key: string; name: string; role: string; icon: string; type: AgentType;
+  gift: boolean; billing: AgentBilling; price: number; enabled: boolean; deliverableKey: string | null;
+  ownerCount?: number; sessionCount?: number; deliverableCount?: number; updatedAt?: string;
+}
+
+/** 运营端详情（含 System 提示词 + Agent Memory + 计费配置） */
 export interface AgentDetail {
-  key: string; name: string; role: string; icon: string; type: string;
+  key: string; name: string; role: string; icon: string; type: AgentType;
+  gift: boolean; billing: AgentBilling; price: number;
   enabled: boolean; systemPrompt: string; memoryConfig: MemoryConfig; deliverableKey: string | null;
+}
+
+/** 运营端新增智能体入参（POST /admin/agents） */
+export interface AdminAgentCreate {
+  key: string; name: string; role: string; icon?: string; type?: AgentType;
+  gift?: boolean; billing?: AgentBilling; price?: number; enabled?: boolean;
+  greet?: string; deliverableKey?: string | null; systemPrompt?: string;
+}
+/** 运营端更新智能体入参（PATCH /admin/agents/:key） */
+export interface AdminAgentUpdate {
+  name?: string; role?: string; icon?: string; type?: AgentType;
+  gift?: boolean; billing?: AgentBilling; price?: number; enabled?: boolean;
+  greet?: string; deliverableKey?: string | null;
+  systemPrompt?: string; memoryConfig?: MemoryConfig;
 }
 
 /* ────────────── 账号 / 用户 ────────────── */
@@ -263,6 +292,18 @@ export interface PlanPurchaseResult {
   plan: Plan;
   creditBalance: number;
   grantedCredits: number;
+}
+/** 运营端单用户详情 + 智能体开通管理（GET /admin/users/:id） */
+export interface AdminUserAgentRow {
+  key: string; name: string; role: string; icon: string;
+  billing: AgentBilling; price: number;
+  owned: boolean;          // 该用户是否已开通
+  source: string | null;   // gift | purchase | admin_grant | null
+  grantedAt: string | null;
+}
+export interface AdminUserDetail {
+  user: AdminUserItem;
+  agents: AdminUserAgentRow[]; // 全部需开通(unlock)的智能体 + 开通状态
 }
 export interface AdminUserItem {
   id: string;

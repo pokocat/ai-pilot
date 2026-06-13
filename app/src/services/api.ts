@@ -8,7 +8,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
-  Plan, PlanPurchaseResult,
+  Plan, PlanPurchaseResult, AgentPurchaseResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -23,7 +23,7 @@ export type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionItem, ReportVersionContent, ReportDiff, SectionDiff,
   KnowledgeItemT, KnowledgeHit, SummarizeResult, MessageRef, RefKind,
-  Plan, PlanPurchaseResult,
+  Plan, PlanPurchaseResult, AgentPurchaseResult, AgentBilling,
 } from '../../../shared/contracts';
 
 // token 助手（兼容旧导出名）
@@ -71,6 +71,8 @@ export const api = {
   setColor: (color: string) =>
     IS_MOCK ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),
   agents: () => (IS_MOCK ? mock.agents() : request<Agent[]>('/agents')),
+  purchaseAgent: (key: string) =>
+    IS_MOCK ? mock.purchaseAgent(key) : request<AgentPurchaseResult>(`/agents/${key}/purchase`, 'POST', {}),
   survey: () => (IS_MOCK ? mock.survey() : request<SurveyQuestion[]>('/survey')),
   getProfile: () => (IS_MOCK ? mock.getProfile() : request<Profile | null>('/profile')),
   saveProfile: (p: Profile) => (IS_MOCK ? mock.saveProfile(p) : request<Profile>('/profile', 'PUT', p)),

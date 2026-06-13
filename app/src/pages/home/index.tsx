@@ -15,11 +15,12 @@ const INSIGHTS = [
   { ic: 'shield', tag: '待办 · 股权', tagType: 'todo', ttl: '期权池预留可能偏紧', desc: '结合你的融资计划，建议尽早梳理股权与期权结构。', act: '让军师拆解', send: '融资准备' },
 ];
 
+// 首页快捷入口：均为注册赠送的免费顾问，点开即用、不触发解锁
 const TOOLS = [
   { agent: 'strat', ic: 'target', h: '战略诊断官', p: '产出诊断报告' },
   { agent: 'growth', ic: 'trend', h: '增长操盘手', p: '产出增长方案' },
   { agent: 'fund', ic: 'doc', h: '融资参谋', p: '产出商业计划书' },
-  { agent: 'brand', ic: 'image', h: '品牌营销官', p: '产出营销内容' },
+  { agent: 'general', ic: 'spark', h: '军师', p: '随时为你出谋' },
 ];
 
 function greetWord() {
@@ -184,7 +185,7 @@ export default function Home() {
         {/* 智库赠送顾问 */}
         <View className="sec-head">
           <Text className="sec-title">智库 · 赠送顾问</Text>
-          <Text className="sec-more" onClick={() => Taro.switchTab({ url: '/pages/thinktank/index' })}>全部 8 位 ›</Text>
+          <Text className="sec-more" onClick={() => Taro.switchTab({ url: '/pages/thinktank/index' })}>去智库 ›</Text>
         </View>
         <View className="tools">
           {TOOLS.map((t) => (

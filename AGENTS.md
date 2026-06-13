@@ -33,6 +33,7 @@
 特色：
 - **本命色**：首登强制选择一种「本命色」主题（金/绿/红/蓝/紫/铁），全站配色随之自适应；可在「我的」重选。
 - **Agent Memory**：顾问从对话/资料/反馈中持续学习，越用越懂客户（运营后台可配策略）。
+- **智能体权益 / 算力解锁**：智能体支持 `free` 注册赠送、`unlock` 一次性算力解锁、`metered` 按次计费；用户可前台用算力解锁，运营后台也可为指定用户开通/取消付费智能体。
 - **企业事务操作系统**（★ 新）：以「**项目**」为主线，串起 会话 / **版本化报告** / **知识库** / 长期记忆。对话可 **@ 引用** 项目/报告/某段知识（可溯源注入）；报告按「报告名」版本化、可**看变更（diff）**；对话可一键**汇总成纪要**并沉淀进知识库；知识库用 **语义检索 + 关键词** 混合召回。详见「✦ 企业事务操作系统」章节。
 - **多租户**：每个账号独立租户，业务数据行级隔离。
 
@@ -99,6 +100,7 @@ repo/
   - 后端 `server/src/llm/schema.ts`（`Deliverable / DeliverableSection / ChatReply`）
   - 运营端 `admin/src/api.ts`（`Overview / AdminAgent / AgentDetail / Plan / AdminSaying→Saying / SurveyAdmin→SurveyQ`）
 - **改数据模型只改这一处**，三端类型同步。
+- **智能体权益契约**：`AgentBilling`（`free|unlock|metered`）、`Agent.billing/price/owned`、`AgentPurchaseResult`、`AdminAgentCreate/AdminAgentUpdate`、`AdminUserDetail/AdminUserAgentRow`，驱动前台解锁、后台定价与指定用户开通。
 - **新增能力的契约**（项目/报告/知识/引用）：`ProjectItem/ProjectDetail`、`ReportItem/ReportDetail/ReportVersionItem/ReportVersionContent/ReportDiff/SectionDiff`、`KnowledgeItemT/KnowledgeHit`、`MessageRef`、`SummarizeResult`，以及 `GenRequest.projectId/refs`、`GenResult.knowledgeUsed`、`SessionItem/SessionDetail.projectId`、`SessionMessage.refs`、`LibItem.reportId/version/projectId`。
 
 > 约定：任何新增/修改的接口字段，先改 `shared/contracts.d.ts`，再改实现。
@@ -112,6 +114,7 @@ repo/
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
 - **微信密钥**：`WECHAT_MINI_SECRET` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
 - **套餐购买（演示级）**：前台可读 `GET /plans`，登录后 `POST /plans/:id/purchase` 切换套餐并按套餐写入 `CreditLedger`；企业版 `creditsPerMonth<0` 记为不限量（余额 `-1`，产出不扣减）。真实支付/微信支付回调尚未接入，见 §13。
+- **智能体开通**：`free`/`metered` 智能体无需开通即可用；`unlock` 智能体需用户用算力购买（`POST /agents/:key/purchase`）或运营后台开通后才能对话/产出，未开通产出返回 `403 AGENT_LOCKED` 且不落会话。
 - **离线兜底**：server 模式下后端不可达时，登录回退为 `local-<手机号>` 本地会话，保证可体验（无服务端数据）。
 - **退出登录**：「我的」页底部。
 - 端到端隔离已验证（见 §11）。生产应把 `token=userId` 换成**短信验证码 + JWT**，路由隔离逻辑不变。
@@ -126,10 +129,10 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | Tab | 页面 | 说明 |
 |---|---|---|
 | 首页 | `pages/home` | 问候 + 今日献策 + 对话入口卡 + 「军师为你发现」+ 智库赠送顾问 |
-| 智库 | `pages/thinktank` | 顾问型智能体列表（advisory） |
+| 智库 | `pages/thinktank` | 顾问型智能体列表（advisory），含赠送/已解锁/待解锁状态 |
 | 对话 | `pages/sessions` | 会话历史；底栏中间「对话」=开新会话 |
-| 智能体 | `pages/studio` | 创作型智能体（creative）+ 训练专属智能体 |
-| 我的 | `pages/profile` | 账号/项目工作台/方案库/套餐/算力/本命色/退出登录 |
+| 智能体 | `pages/studio` | 创作型智能体（creative），支持按次/解锁展示 + 训练专属智能体 |
+| 我的 | `pages/profile` | 账号/项目工作台/方案库/套餐与算力弹层/本命色/退出登录 |
 
 非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡）、`pages/library`（方案库）。
 
@@ -139,7 +142,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
   - 其它 Tab 页：`<Screen topInset>`，由 `components/Screen` 注入实测高度的顶部占位（CSS 兜底 `env(safe-area-inset-top)+52px`）。
   - 非 Tab 自定义头（对话/项目/方案库/报告等）必须使用 `components/SafeHeader`，由它统一实测 `getMenuButtonBoundingClientRect()` 设置顶部 padding 与右侧胶囊留白；不要在页面 SCSS 里各自写 `env(safe-area-inset-top)` 头部 padding。
   - **不要再加伪状态栏 `9:41`**（已全部移除）。
-- **全屏弹层遮挡底栏**：`custom-tab-bar` 是原生层，不能只靠 z-index。全屏弹层（登录 / 本命色 picker / @引用面板）必须调用 `store.setOverlay(open, key)`：它会按唯一 key 登记来源、同步 `Taro.hideTabBar/showTabBar`、写入 `junshi.tabbarHidden` 供 `custom-tab-bar` 跨实例读取并 `return null`，避免登录页露出底部导航。正常 Tab 页由 `custom-tab-bar` 挂载时调用 `hideNativeTabBarOnly()` 只压住微信原生文字 tabbar，不写入 `junshi.tabbarHidden`，避免悬浮底栏和原生底栏重复出现。**新增全屏弹层时务必使用稳定唯一 key，并在关闭/卸载时清理**。
+- **全屏弹层遮挡底栏**：`custom-tab-bar` 是原生层，不能只靠 z-index。全屏弹层（登录 / 本命色 picker / @引用面板 / 智能体解锁 / 套餐算力）必须调用 `store.setOverlay(open, key)`：它会按唯一 key 登记来源、同步 `Taro.hideTabBar/showTabBar`、写入 `junshi.tabbarHidden` 供 `custom-tab-bar` 跨实例读取并 `return null`，避免登录页露出底部导航。正常 Tab 页由 `custom-tab-bar` 挂载时调用 `hideNativeTabBarOnly()` 只压住微信原生文字 tabbar，不写入 `junshi.tabbarHidden`，避免悬浮底栏和原生底栏重复出现。**新增全屏弹层时务必使用稳定唯一 key，并在关闭/卸载时清理**。
 - **本命色色盘对齐**：`components/Picker` 的色点与名称必须在同一个 `.pk-swatch` 垂直列里渲染；不要拆成上下两条 flex 行，否则选中外圈宽度会导致标签错位。
 - **H5 与小程序视觉一致**：小程序使用真实 `page` 节点 + `src/custom-tab-bar` 原生自定义底栏；H5 使用 `src/app.h5.tsx` 手动挂载同款 `CustomTabBar`，并由 `src/app.h5.scss` 给浏览器根节点补设计 token、隐藏 Taro 生成的默认 `weui` tabbar。不要把 H5 兼容样式混入会影响小程序的原生 tabbar 路径。
 - **标题 Text 块级化**：Taro `<Text>` 默认偏内联；全局 `.kicker` / `.h1` 必须保持 `display: block`，页面 hero 说明文案也需显式 `display: block`，避免真机上标题、kicker、正文挤成一行。
@@ -171,7 +174,8 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `POST /auth/wechat-login` | 小程序微信登录：code 换 openid/unionid 后注册/登录 | 否 |
 | `GET /health` | 健康检查 | 否 |
 | `GET /me` · `PUT /me/color` | 当前用户(+onboarded+ai信息) · 改本命色 | 是 |
-| `GET /agents` · `GET /agents/:key` | 智能体注册表 | 否 |
+| `GET /agents` · `GET /agents/:key` | 智能体注册表；带 token 时回填 `owned` | 否 |
+| `POST /agents/:key/purchase` | 用算力一次性解锁 `unlock` 智能体（幂等，已开通不重复扣费） | 是 |
 | `GET /survey` | 建档问卷 | 否 |
 | `GET /profile` · `PUT /profile` | 企业档案读/写（写=完成建档） | 是 |
 | `GET /sayings/today` | 每日献策 | 否 |
@@ -184,8 +188,8 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `GET/POST /projects` · `GET/PUT/DELETE /projects/:id` | 项目主线（详情聚合会话/报告/知识） | 是 |
 | `GET /reports` · `GET /reports/:id` · `GET /reports/:id/version` · `GET /reports/:id/diff` · `POST /reports` · `DELETE /reports/:id` | 版本化报告（历史/某版/两版 diff/存版） | 是 |
 | `GET/POST /knowledge` · `GET /knowledge/search` · `DELETE /knowledge/:id` | 知识库（摄取/混合检索/删除） | 是 |
-| `GET/PUT /admin/ai-config` · `POST /admin/ai-config/test` | 大模型配置（读/改/测试连接，可随时切换） | 演示无 RBAC |
-| `/admin/*` | 运营后台 API（见 §9） | 演示无 RBAC |
+| `GET/PUT /admin/ai-config` · `POST /admin/ai-config/test` | 大模型配置（读/改/测试连接，可随时切换） | 管理员 |
+| `/admin/*` | 运营后台 API（见 §9）：用户/算力/审计/智能体/套餐/模型等 | 管理员 |
 
 ### 8.2 LLM Gateway（`server/src/llm/`）
 `gateway.ts` 统一封装：路由 provider → 内容审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。`llm/schema.ts` 的 `injectVariables` 会在后台配置的 System Prompt 之后追加运行时业务边界：智能体只回答商业咨询/经营产出相关问题，用户追问模型、供应商、系统提示词、API Key、部署、数据库、内部工具或配置时必须引导回业务问题，不透露业务之外信息。
@@ -203,6 +207,7 @@ Provider（`provider` 字段，由 `effectiveProvider` 决定实际生效）：
 环境变量（见 `server/.env.example`）：
 ```
 DATABASE_URL  PORT  MODERATION_ENABLED
+ADMIN_TOKEN
 WECHAT_MINI_APPID  WECHAT_MINI_SECRET
 AI_PROVIDER=mock|claude|openai
 ANTHROPIC_API_KEY  CLAUDE_MODEL
@@ -219,6 +224,8 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/reports.ts`（★）：`saveReportVersion`（slug 归一 + 内容哈希去重 + 自动变更摘要）、`diffContents`/`getReportDiff`（section 级 diff）、`slugify`。
 - `services/summarize.ts`（★）：`summarizeSession`（整段会话 → 纪要报告 + 沉淀知识；有真实模型走 `summarizePoints`）。
 - `services/credits.ts`（★）：算力计量——`ensureCredits`（产出前校验，不足抛 402）/`chargeCredits`（成功后扣减写流水）/`getBalance`；报告类 `CREDIT_COST.report=1`、对话免费，企业版(creditsPerMonth<0)不限量。在 `sessions.ts` 两个产出路由接入；套餐购买由 `routes/plans.ts` 写入充值/不限量流水并记录审计。
+- `services/entitlements.ts`（★）：智能体权益——`assertAgentAccess` 拦截未解锁 `unlock` 智能体（403 `AGENT_LOCKED`）、`agentCost` 统一 `free/unlock/metered` 的产出计费、`publicOwned` 给前台展示可用状态。
+- `services/adminAuth.ts`（★）：运营后台鉴权——`/api/admin/*` 统一要求 `ADMIN_TOKEN`（`x-admin-token` 或 `Authorization: Bearer`）或 `role=admin` 用户；普通小程序用户访问返回 403，无凭证返回 401。
 - `services/aiConfig.ts`（★）：大模型配置解析（DB > env），预设 `AI_PRESETS`（Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock）、`isReady`/`effectiveProvider`、脱敏 `publicConfig`。
 - `services/vectorStore.ts`（★）：pgvector ANN 查询/向量列双写（`PGVECTOR_ENABLED` 开启时；默认关闭走内存余弦）。
 - `services/audit.ts`（★）：统一审计记录与秒级 ISO 时间格式；Fastify `onResponse` 钩子会记录所有带有效 `x-user-id` 的小程序 `/api/*` 行为（方法/路径/状态码），关键业务动作另写语义日志（登录、建档、产出、存库、汇总、后台配置变更）。
@@ -228,15 +235,16 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 
 ## 9. 运营后台（admin）
 
-页面/接口：概览看板、**注册用户管理**（小程序注册用户、微信绑定、租户/套餐、最后会话、会话/成果数、算力余额）、**算力消耗**（按用户汇总赠送/消耗/余额、30 天活跃、成果数）、**审计日志**（最近 100 条，时间精确到秒，展示用户/租户/动作/payload）、每日献策库（增删改启停）、智能体/功能配置（System 提示词 + Agent Memory 策略 + **上架/下架**，前台 `/agents` 默认只展示已上架功能）、**模型配置（默认 Agnes，可一键切 DeepSeek/Qwen…，含测试连接，即时生效）**、建档问卷、套餐。新增 admin API：`GET /admin/users`、`GET /admin/usage`、`GET /admin/audit-logs`；智能体列表额外返回会话/成果计数与更新时间。入口 `admin/src/App.tsx`（`UsersView/UsageView/AuditView/ModelView`）+ `AgentDetailPanel.tsx`，API `admin/src/api.ts`（类型来自 SSOT）。默认 System Prompt 位于 `server/src/data/agents.ts`，商业咨询类按麦肯锡式问题解决法（MECE、假设驱动、80/20、金字塔原则、So what/Now what、30 天行动清单）设置；上线同步用 `cd server && npm run admin:sync-content`，只更新智能体提示词并追加缺失每日献策，不删除业务数据、不覆盖启停状态。Agent Memory 开关保存到 `Agent.memoryConfig` 并由后端真实读取：`longTerm=false` 时不召回/不写入长期记忆，`autoLearn=false` 或去掉 `conversation` 来源时不从对话学习，`intensity/retentionDays` 影响写入权重和过期时间，`deliverable_feedback` 控制成果反馈回流。开发期 Vite 代理 `/api → localhost:4000`。本地后台使用全屏无边框容器，`admin/src/styles/admin.css` 需要保持视口安全收缩、横向隐藏和长文本断行，底部导航为横向滚动，避免新增模块或模型 URL/API Key/状态文案撑出屏幕。
+页面/接口：概览看板、**注册用户管理**（小程序注册用户、微信绑定、租户/套餐、最后会话、会话/成果数、算力余额，并可点进用户详情为其开通/取消 `unlock` 智能体）、**算力消耗**（按用户汇总赠送/消耗/余额、30 天活跃、成果数）、**审计日志**（最近 100 条，时间精确到秒，展示用户/租户/动作/payload）、每日献策库（增删改启停）、智能体/功能配置（新增智能体、基础信息、`free/unlock/metered` 定价、System 提示词 + Agent Memory 策略 + **上架/下架**，前台 `/agents` 默认只展示已上架功能）、**模型配置（默认 Agnes，可一键切 DeepSeek/Qwen…，含测试连接，即时生效）**、建档问卷、套餐编辑。所有 `/api/admin/*` 路由由 `services/adminAuth.ts` 保护：运营端登录页填写后端 `ADMIN_TOKEN`，请求以 `x-admin-token` 发送；后端也支持 `role=admin` 用户。新增/扩展 admin API：`GET /admin/users/:id`、`POST /admin/users/:id/agents`、`DELETE /admin/users/:id/agents/:key`、`POST /admin/agents`、`PATCH /admin/plans/:id`，并保留 `GET /admin/users`、`GET /admin/usage`、`GET /admin/audit-logs`。入口 `admin/src/App.tsx`（`UsersView/UserDetailPanel/UsageView/AuditView/ModelView/PlansView`）+ `AgentDetailPanel.tsx`，API `admin/src/api.ts`（类型来自 SSOT）。默认 System Prompt 位于 `server/src/data/agents.ts`，商业咨询类按麦肯锡式问题解决法（MECE、假设驱动、80/20、金字塔原则、So what/Now what、30 天行动清单）设置；上线同步用 `cd server && npm run admin:sync-content`，只更新智能体提示词并追加缺失每日献策，不删除业务数据、不覆盖启停状态。Agent Memory 开关保存到 `Agent.memoryConfig` 并由后端真实读取：`longTerm=false` 时不召回/不写入长期记忆，`autoLearn=false` 或去掉 `conversation` 来源时不从对话学习，`intensity/retentionDays` 影响写入权重和过期时间，`deliverable_feedback` 控制成果反馈回流。开发期 Vite 代理 `/api → localhost:4000`。本地后台使用全屏无边框容器，`admin/src/styles/admin.css` 需要保持视口安全收缩、横向隐藏和长文本断行，底部导航为横向滚动，避免新增模块或模型 URL/API Key/状态文案撑出屏幕。
 
 ---
 
 ## 10. 数据库（Prisma · `server/prisma/schema.prisma`）
 
-租户 `Tenant` / 用户 `User`(phone 唯一；`wechatOpenId/wechatUnionId` 可选唯一绑定微信账号) / 档案 `Profile` / 智能体 `Agent` / 会话 `Session` / 消息 `Message` / 成果 `Deliverable` / 记忆 `Memory` / 献策 `Saying` / 问卷 `SurveyQuestion` / 套餐 `Plan` / 算力流水 `CreditLedger` / 审计 `AuditLog` / 审核 `ModerationLog`。业务表均含 `tenantId` 行级隔离。
+租户 `Tenant` / 用户 `User`(phone 唯一；`wechatOpenId/wechatUnionId` 可选唯一绑定微信账号；`role=owner|member|admin`) / 档案 `Profile` / 智能体 `Agent`（`billing/price/gift/enabled` 定义权益与价格）/ 用户智能体权益 `UserAgent` / 会话 `Session` / 消息 `Message` / 成果 `Deliverable` / 记忆 `Memory` / 献策 `Saying` / 问卷 `SurveyQuestion` / 套餐 `Plan` / 算力流水 `CreditLedger` / 审计 `AuditLog` / 审核 `ModerationLog`。业务表均含 `tenantId` 行级隔离。
 
 **新增模型（企业事务操作系统）**：
+- `UserAgent`（用户已开通的智能体，`(userId,agentKey)` 唯一；`source=gift|purchase|admin_grant`，用于 `unlock` 权益校验和后台开通管理）。
 - `Project`（项目主线，租户级，`(tenantId,slug)` 唯一）；`Session.projectId` / `Memory.projectId` / `Deliverable.projectId` 归属项目。
 - `ReportDoc`（逻辑报告，`(tenantId,slug)` 唯一，`currentVersion`）+ `ReportVersion`（不可变快照，`contentHash` 去重，`changeSummary` 变更摘要，`(reportId,version)` 唯一）。`Deliverable.reportId` 桥接。
 - `KnowledgeItem`（知识条目，可挂项目）+ `KnowledgeChunk`（切片 + `embedding`）。
@@ -276,7 +284,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 5. ✅ **大模型可切换**：运营后台「模型」页（默认 Agnes 2.0 Flash，一键切 DeepSeek/Qwen/Moonshot/OpenAI/Claude，测试连接，即时生效）；配置存 `AiSetting`。
 6. ⏳ **时序知识图谱**：在向量之上叠加 Graphiti 式时序图，回答「X 时谁负责 Y」类关系/时序问题（图与向量互补，不替换）——尚未做。
 7. ⏳ **运营后台只读看板**：项目/报告/知识尚无 admin 看板（接口已就绪）。
-8. ⏳ **密钥安全**：`AiSetting.apiKey` 当前明文存库（演示）；生产应加密/接密管，并给 admin 加 RBAC。
+8. ⏳ **密钥与后台权限安全**：`AiSetting.apiKey` 当前明文存库（演示）；生产应加密/接密管。后台已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权，仍需细粒度 RBAC、管理员账号体系与密钥轮换策略。
 
 ## 11. 构建、运行、验证
 
@@ -311,8 +319,8 @@ cd admin && npm install && npm run dev   # 运营后台
 ### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
-- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 37 用例 / 20 套件（0 跳过）**；覆盖微信登录 openid 复登、算力/套餐购买与用户主路径。最近一次本地临时 PostgreSQL 测试库实跑为 2026-06-13，37/37 全过。
-- 覆盖：鉴权隔离、微信 openid 登录/复登、多智能体对话、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
+- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 47 用例 / 21 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益与用户主路径。最近一次本地临时 PostgreSQL 测试库实跑为 2026-06-13，47/47 全过。
+- 覆盖：鉴权隔离、微信 openid 登录/复登、运营后台鉴权、多智能体对话、智能体 `free/unlock/metered` 权益、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
 - CI：`.github/workflows/server-integration.yml` 用 GitHub Actions `postgres:16-alpine` 服务（tmpfs 数据目录）执行 `npm ci`、`prisma generate`、后端 build、`prisma db push`、`npm test`。
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
 
@@ -368,7 +376,7 @@ mock 可随时预览；**正式上传/审核**还需：
 - 套餐购买为演示级（直接切套餐并写入算力流水）；生产需接微信支付/订单状态机/支付回调验签/幂等入账，避免绕过支付直接加算力。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
 - **pgvector 路径已实现但未真库验证**：本地无扩展，默认 `PGVECTOR_ENABLED=false` 走内存余弦（已验证）；上真库执行 `npm run db:pgvector` 并置 true 后需端到端验一遍（升级路径 1）。
-- **模型密钥明文存库**（`AiSetting.apiKey`，演示）；生产加密/接密管 + admin RBAC（升级路径 8）。
+- **模型密钥明文存库**（`AiSetting.apiKey`，演示）；生产加密/接密管。运营后台已有共享密钥/`role=admin` 基线鉴权，但仍需细粒度 RBAC、管理员账号体系与密钥轮换策略（升级路径 8）。
 - **时序知识图谱**（Graphiti 式）未做；运营后台暂无 项目/报告/知识 只读看板（接口已就绪）。
 - **@引用** 选择器候选含 项目/报告/知识；记忆引用未单列候选（可由「知识」覆盖），如需可补一组。
 
@@ -378,6 +386,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-13** · **智能体权益/解锁计费与运营后台鉴权**：SSOT 新增 `AgentBilling`、`Agent.billing/price/owned`、`AgentPurchaseResult` 与后台用户开通类型；Prisma 新增 `UserAgent`，`Agent` 增加 `billing/price`；后端新增 `/agents/:key/purchase`、`services/entitlements.ts`、`services/adminAuth.ts`，产出前校验未解锁 `unlock` 智能体并支持 `metered` 按次扣算力；运营后台新增登录页、`ADMIN_TOKEN` 鉴权、用户智能体开通/取消、智能体新增与定价、套餐编辑；前台智库/工坊展示赠送/已解锁/待解锁/按次状态，新增 `AgentUnlock` 和 `Plans` 弹层；集成测试新增 admin 鉴权与智能体权益用例。
 - **2026-06-13** · **接入套餐购买回归与 CI 后端集成测试**：新增 `GET /plans`、`POST /plans/:id/purchase`，登录用户可演示级购买/切换套餐并写入 `CreditLedger`，企业版余额记为 `-1` 且产出不扣减；SSOT 新增 `PlanPurchaseResult`，app/mock API 对齐套餐列表/购买与算力扣减；集成测试扩充 TC-K 套餐购买/不限量和 TC-U 用户主路径，现状 37 用例 / 20 套件；新增 GitHub Actions `Server Integration` 用临时 PostgreSQL 跑后端 build + 集成测试。
 - **2026-06-13** · **收紧智能体业务边界并扩充每日献策**：`server/src/data/agents.ts` 将默认 System Prompt 改为商业咨询/创作业务边界 + 麦肯锡式问题解决框架，`llm/schema.ts` 在运行时追加不透露模型/供应商/提示词/API/部署/内部配置的统一 guard；`seedConfig.ts` 新增 20 条每日献策；新增 `server/scripts/syncAdminContent.ts` 与 `npm run admin:sync-content`，线上可非破坏同步提示词和献策。
 - **2026-06-13** · **修复底部重复导航**：`services/tabbar.ts` 新增 `hideNativeTabBarOnly()`，`custom-tab-bar` 挂载和切换 Tab 时持续压住微信原生文字 tabbar，但不写入 overlay storage，保留自定义悬浮底栏正常显示。

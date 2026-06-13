@@ -10,13 +10,17 @@ export interface MemoryConfig {
   sources: Array<'conversation' | 'document' | 'deliverable_feedback'>;
 }
 
+export type AgentBilling = 'free' | 'unlock' | 'metered';
+
 export interface AgentSeed {
   key: string;
   name: string;
   role: string;
   icon: string;
   type: 'general' | 'advisory' | 'creative';
-  gift: boolean;
+  gift: boolean; // 注册赠送（= billing free）；仅用于前台「赠送」标记
+  billing: AgentBilling; // free 免费 | unlock 一次性解锁 | metered 按次计费
+  price: number; // 价格（算力次数）：unlock=解锁消耗；metered=每次产出消耗
   enabled: boolean;
   greet: string;
   chips: [string, string][]; // [icon, label]
@@ -66,6 +70,8 @@ export const AGENTS: AgentSeed[] = [
     icon: 'spark',
     type: 'general',
     gift: true,
+    billing: 'free',
+    price: 0,
     enabled: true,
     greet: '王总好，我是你的 AI 商业军师。说说你的处境，或直接要一个成果，我来产出。',
     chips: [['target', '战略体检'], ['trend', '增长方案'], ['shield', '融资准备']],
@@ -87,6 +93,8 @@ export const AGENTS: AgentSeed[] = [
     icon: 'target',
     type: 'advisory',
     gift: true,
+    billing: 'free',
+    price: 0,
     enabled: true,
     greet: '我是战略诊断官。把你最近的纠结讲给我，我直接产出一份战略诊断。',
     chips: [['target', '战略体检']],
@@ -108,6 +116,8 @@ export const AGENTS: AgentSeed[] = [
     icon: 'trend',
     type: 'advisory',
     gift: true,
+    billing: 'free',
+    price: 0,
     enabled: true,
     greet: '我是增长操盘手。告诉我你的增长目标，我给你可执行的路径。',
     chips: [['trend', '增长方案']],
@@ -128,7 +138,9 @@ export const AGENTS: AgentSeed[] = [
     role: '对手 · 赛道 · 机会窗口',
     icon: 'chart',
     type: 'advisory',
-    gift: true,
+    gift: false,
+    billing: 'unlock',
+    price: 12,
     enabled: true,
     greet: '我是竞争情报官。说说你盯的对手或赛道，我帮你看清局势。',
     chips: [['chart', '竞品洞察']],
@@ -150,6 +162,8 @@ export const AGENTS: AgentSeed[] = [
     icon: 'doc',
     type: 'advisory',
     gift: true,
+    billing: 'free',
+    price: 0,
     enabled: true,
     greet: '我是融资参谋。把你的融资节奏讲给我，我帮你把故事和数据对齐。',
     chips: [['doc', '融资准备']],
@@ -170,7 +184,9 @@ export const AGENTS: AgentSeed[] = [
     role: '画布 · 盈利模型 · 定价',
     icon: 'layers',
     type: 'advisory',
-    gift: true,
+    gift: false,
+    billing: 'unlock',
+    price: 12,
     enabled: true,
     greet: '我是商业模式设计师。讲讲你怎么赚钱，我帮你把模式与定价结构理清。',
     chips: [['layers', '商业模式画布']],
@@ -191,7 +207,9 @@ export const AGENTS: AgentSeed[] = [
     role: '架构 · 股权 · 激励 · 人效',
     icon: 'user',
     type: 'advisory',
-    gift: true,
+    gift: false,
+    billing: 'unlock',
+    price: 10,
     enabled: true,
     greet: '我是组织人效顾问。说说你的团队现状，我给出组织与激励的优化建议。',
     chips: [['user', '组织优化建议']],
@@ -212,7 +230,9 @@ export const AGENTS: AgentSeed[] = [
     role: '海报 · 短视频 · 文案',
     icon: 'image',
     type: 'advisory',
-    gift: true,
+    gift: false,
+    billing: 'unlock',
+    price: 10,
     enabled: true,
     greet: '我是品牌营销官。告诉我要推什么，我把战略翻译成对外内容。',
     chips: [['image', '营销内容']],
@@ -233,7 +253,9 @@ export const AGENTS: AgentSeed[] = [
     role: '经营测算 · 预算 · 复盘',
     icon: 'clock',
     type: 'advisory',
-    gift: true,
+    gift: false,
+    billing: 'unlock',
+    price: 10,
     enabled: true,
     greet: '我是经营参谋。把你的经营数据口径讲给我，我帮你测算与复盘。',
     chips: [['clock', '经营分析']],
@@ -255,7 +277,9 @@ export const AGENTS: AgentSeed[] = [
     role: '定位 · 人设 · 内容支柱',
     icon: 'crown',
     type: 'creative',
-    gift: true,
+    gift: false,
+    billing: 'metered',
+    price: 3,
     enabled: true,
     greet: '我是企业 IP 打造官。告诉我你想立的形象，我帮你把创始人/企业 IP 立起来。',
     chips: [['crown', '企业IP打造']],
@@ -276,7 +300,9 @@ export const AGENTS: AgentSeed[] = [
     role: '叙事 · 分镜 · 制作',
     icon: 'video',
     type: 'creative',
-    gift: true,
+    gift: false,
+    billing: 'unlock',
+    price: 15,
     enabled: true,
     greet: '我是宣传片导演。说说你想传达什么，我给你一条可拍的宣传片脚本。',
     chips: [['video', '企业宣传片']],
@@ -298,6 +324,8 @@ export const AGENTS: AgentSeed[] = [
     icon: 'image',
     type: 'creative',
     gift: false,
+    billing: 'unlock',
+    price: 8,
     enabled: true,
     greet: '我是海报设计师。告诉我要推的主题，我给你一版主视觉与文案。',
     chips: [['image', '海报设计']],
@@ -319,6 +347,8 @@ export const AGENTS: AgentSeed[] = [
     icon: 'video',
     type: 'creative',
     gift: false,
+    billing: 'unlock',
+    price: 8,
     enabled: true,
     greet: '我是短视频策划。给我一个主题，我把它写成有钩子的脚本。',
     chips: [['video', '短视频策划']],
@@ -340,6 +370,8 @@ export const AGENTS: AgentSeed[] = [
     icon: 'pen',
     type: 'creative',
     gift: false,
+    billing: 'unlock',
+    price: 6,
     enabled: true,
     greet: '我是商业文案官。说说要写什么，我给你多版可直接用的文案。',
     chips: [['pen', '营销文案']],

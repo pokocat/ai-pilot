@@ -130,4 +130,8 @@ export const store = {
   agentsByType(type: string) {
     return state.agents.filter((a) => a.type === type);
   },
+  // 解锁/购买成功后刷新：余额（me）+ 智能体 owned 状态。
+  async refreshAfterPurchase() {
+    await Promise.all([this.loadMe(), this.loadAgents()]);
+  },
 };

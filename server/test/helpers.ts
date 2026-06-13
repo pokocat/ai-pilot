@@ -23,10 +23,14 @@ export async function seedAgents(): Promise<void> {
   for (const a of AGENTS) {
     await prisma.agent.upsert({
       where: { key: a.key },
-      update: { systemPrompt: a.systemPrompt, memoryConfig: a.memoryConfig as object },
+      update: {
+        systemPrompt: a.systemPrompt, memoryConfig: a.memoryConfig as object,
+        gift: a.gift, billing: a.billing, price: a.price, enabled: a.enabled,
+      },
       create: {
         key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
-        gift: a.gift, enabled: a.enabled, greet: a.greet, chipsJson: a.chips as object,
+        gift: a.gift, billing: a.billing, price: a.price, enabled: a.enabled,
+        greet: a.greet, chipsJson: a.chips as object,
         memText: a.memText, learnText: a.learnText, systemPrompt: a.systemPrompt,
         deliverableKey: a.deliverableKey, memoryConfig: a.memoryConfig as object, sort: a.sort,
       },
@@ -59,6 +63,7 @@ export async function cleanBusiness(): Promise<void> {
   await prisma.session.deleteMany();
   await prisma.memory.deleteMany();
   await prisma.project.deleteMany();
+  await prisma.userAgent.deleteMany();
   await prisma.creditLedger.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.profile.deleteMany();
@@ -71,9 +76,9 @@ export async function cleanBusiness(): Promise<void> {
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export interface ApiRes<T = any> { status: number; body: T; }
 
-/** 统一请求：带可选 token（x-user-id）。 */
+/** 统一请求：带可选 token（x-user-id）。admin 路由默认带测试 ADMIN_TOKEN，可用 adminToken=false 显式关闭。 */
 export async function api<T = any>(
-  method: Method, url: string, opts: { token?: string; body?: unknown } = {},
+  method: Method, url: string, opts: { token?: string; body?: unknown; adminToken?: string | false } = {},
 ): Promise<ApiRes<T>> {
   const a = await getApp();
   const hasBody = opts.body !== undefined;
@@ -81,6 +86,9 @@ export async function api<T = any>(
   const headers: Record<string, string> = {};
   if (hasBody) headers['content-type'] = 'application/json';
   if (opts.token) headers['x-user-id'] = opts.token;
+  const isAdminRoute = url.startsWith('/api/admin/');
+  const adminToken = opts.adminToken === false ? '' : (opts.adminToken ?? (isAdminRoute ? process.env.ADMIN_TOKEN : ''));
+  if (adminToken) headers['x-admin-token'] = adminToken;
   const res = await a.inject({ method, url, headers, payload: hasBody ? (opts.body as object) : undefined });
   let body: any = null;
   try { body = res.json(); } catch { body = res.body; }

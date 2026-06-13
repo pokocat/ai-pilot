@@ -16,6 +16,7 @@ const tenantOf = async (token: string) =>
   (await prisma.user.findUnique({ where: { id: token } }))!.tenantId;
 
 before(async () => {
+  process.env.ADMIN_TOKEN = 'test-admin-token';
   await cleanBusiness();
   await seedBaseline();
 });
@@ -82,6 +83,14 @@ describe('TC-A 鉴权与账号隔离基线', () => {
       delete process.env.WECHAT_MINI_APPID;
       delete process.env.WECHAT_MINI_SECRET;
     }
+  });
+
+  test('A5 admin 接口必须有管理员凭证，普通用户不能访问', async () => {
+    const anon = await api('GET', '/api/admin/overview', { adminToken: false });
+    assert.equal(anon.status, 401);
+    const t = await login(uniquePhone());
+    const owner = await api('GET', '/api/admin/overview', { token: t, adminToken: false });
+    assert.equal(owner.status, 403);
   });
 });
 
@@ -368,6 +377,125 @@ describe('TC-K 算力账户', () => {
     assert.equal(gen.status, 200);
     assert.equal(gen.body.creditBalance, -1, '不限量套餐报告产出后仍为不限量');
     assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, -1);
+  });
+});
+
+// ───────────────────────── TC-V 智能体权益（赠送 / 解锁 / 按次 / 后台开通） ─────────────────────────
+describe('TC-V 智能体权益', () => {
+  test('V1 GET /agents 返回 billing/price/owned；免费可用、付费默认未解锁', async () => {
+    const t = await login(uniquePhone());
+    const list = (await api('GET', '/api/agents', { token: t })).body as any[];
+    const strat = list.find((a) => a.key === 'strat');
+    const copy = list.find((a) => a.key === 'copy');
+    const ip = list.find((a) => a.key === 'ip');
+    assert.equal(strat.billing, 'free');
+    assert.equal(strat.owned, true, '免费智能体恒为已拥有');
+    assert.equal(copy.billing, 'unlock');
+    assert.equal(copy.owned, false, '付费解锁类默认未拥有');
+    assert.ok(copy.price > 0, 'unlock 应有价格');
+    assert.equal(ip.billing, 'metered');
+    assert.equal(ip.owned, true, '按次计费无需解锁，owned=true');
+  });
+
+  test('V2 未解锁 unlock 智能体产出 → 403 AGENT_LOCKED，不留会话', async () => {
+    const t = await login(uniquePhone());
+    const r = await api('POST', '/api/generate-sync', { token: t, body: { text: '写个文案', agentKey: 'copy' } });
+    assert.equal(r.status, 403);
+    assert.equal(r.body.code, 'AGENT_LOCKED');
+    assert.equal((await api('GET', '/api/sessions', { token: t })).body.length, 0, '被拦截不应留下会话');
+  });
+
+  test('V3 用算力解锁 unlock 智能体 → 扣算力、owned=true、随后可产出', async () => {
+    const t = await login(uniquePhone());
+    const before = (await api('GET', '/api/me', { token: t })).body.creditBalance as number;
+    const copy = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'copy');
+    assert.ok(before >= copy.price, '体验版赠送算力应足够解锁 copy');
+
+    const buy = await api('POST', '/api/agents/copy/purchase', { token: t, body: {} });
+    assert.equal(buy.status, 200);
+    assert.equal(buy.body.alreadyOwned, false);
+    assert.equal(buy.body.pricePaid, copy.price);
+    assert.equal(buy.body.creditBalance, before - copy.price, '解锁应扣减算力');
+    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before - copy.price, '/me 同步');
+
+    const owned = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'copy');
+    assert.equal(owned.owned, true);
+
+    const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '写个文案', agentKey: 'copy' } });
+    assert.equal(gen.status, 200);
+    assert.equal(gen.body.kind, 'report');
+  });
+
+  test('V4 解锁幂等：重复购买不再扣费、alreadyOwned=true', async () => {
+    const t = await login(uniquePhone());
+    const first = await api('POST', '/api/agents/copy/purchase', { token: t, body: {} });
+    const balAfter = first.body.creditBalance as number;
+    const again = await api('POST', '/api/agents/copy/purchase', { token: t, body: {} });
+    assert.equal(again.status, 200);
+    assert.equal(again.body.alreadyOwned, true);
+    assert.equal(again.body.pricePaid, 0);
+    assert.equal(again.body.creditBalance, balAfter, '重复购买余额不变');
+  });
+
+  test('V5 算力不足解锁 → 402 INSUFFICIENT_CREDITS，不开通', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    await prisma.creditLedger.create({ data: { tenantId, userId: t, delta: -999, reason: '测试置零', balance: 0 } });
+    const buy = await api('POST', '/api/agents/intel/purchase', { token: t, body: {} });
+    assert.equal(buy.status, 402);
+    assert.equal(buy.body.code, 'INSUFFICIENT_CREDITS');
+    const intel = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'intel');
+    assert.equal(intel.owned, false, '未成功扣费则不开通');
+  });
+
+  test('V6 free 类无需购买 → 返回 400 AGENT_NOT_PURCHASABLE', async () => {
+    const t = await login(uniquePhone());
+    const buy = await api('POST', '/api/agents/strat/purchase', { token: t, body: {} });
+    assert.equal(buy.status, 400);
+    assert.equal(buy.body.code, 'AGENT_NOT_PURCHASABLE');
+  });
+
+  test('V7 metered 智能体免解锁可用，按 price 计费', async () => {
+    const t = await login(uniquePhone());
+    const before = (await api('GET', '/api/me', { token: t })).body.creditBalance as number;
+    const ip = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'ip');
+    const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '帮我打造企业 IP', agentKey: 'ip' } });
+    assert.equal(gen.status, 200, 'metered 无需解锁即可使用');
+    assert.equal(gen.body.kind, 'report');
+    assert.equal(gen.body.creditBalance, before - ip.price, '按次计费应扣 price 算力');
+  });
+
+  test('V8 后台为用户开通/取消 unlock 智能体', async () => {
+    const t = await login(uniquePhone());
+    // 开通前：未拥有 + 产出被拦截
+    assert.equal((await api('POST', '/api/generate-sync', { token: t, body: { text: '竞品分析', agentKey: 'intel' } })).status, 403);
+
+    const grant = await api('POST', `/api/admin/users/${t}/agents`, { body: { agentKey: 'intel' } });
+    assert.equal(grant.status, 200);
+    const detail = await api('GET', `/api/admin/users/${t}`);
+    const row = detail.body.agents.find((a: any) => a.key === 'intel');
+    assert.equal(row.owned, true);
+    assert.equal(row.source, 'admin_grant');
+    // 开通后可产出
+    assert.equal((await api('POST', '/api/generate-sync', { token: t, body: { text: '竞品分析', agentKey: 'intel' } })).status, 200);
+
+    // 取消开通后重新被拦截
+    const revoke = await api('DELETE', `/api/admin/users/${t}/agents/intel`);
+    assert.equal(revoke.status, 200);
+    assert.equal((await api('GET', `/api/agents`, { token: t })).body.find((a: any) => a.key === 'intel').owned, false);
+  });
+
+  test('V9 后台新增智能体 → 后台列表可见且默认下架', async () => {
+    const create = await api('POST', '/api/admin/agents', { body: { key: 'legaltest', name: '法务顾问', role: '合同 · 合规', billing: 'unlock', price: 9 } });
+    assert.equal(create.status, 200);
+    const list = (await api('GET', '/api/admin/agents')).body as any[];
+    const created = list.find((a) => a.key === 'legaltest');
+    assert.ok(created, '后台列表应含新增智能体');
+    assert.equal(created.billing, 'unlock');
+    assert.equal(created.price, 9);
+    assert.equal(created.enabled, false);
+    // 清理，避免污染后续按 agent 计数的断言
+    await prisma.agent.delete({ where: { key: 'legaltest' } });
   });
 });
 

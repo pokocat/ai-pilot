@@ -53,6 +53,7 @@ export default function Chat() {
 
   const errorReply = (e: unknown): string => {
     if (isUnauthorized(e)) return '登录态已失效，请重新登录后再发送。';
+    if ((e as any)?.data?.code === 'AGENT_LOCKED') return '该智能体未解锁，请到「智库 / 工坊」用算力解锁后再使用。';
     if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '算力不足，请充值后再产出。';
     const msg = String((e as any)?.message || '');
     if (msg && msg !== 'undefined') return msg;

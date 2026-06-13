@@ -6,7 +6,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
-  Plan, PlanPurchaseResult,
+  Plan, PlanPurchaseResult, AgentPurchaseResult,
 } from '../../../shared/contracts';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
@@ -83,7 +83,7 @@ interface ProjectRec {
 }
 interface UserData {
   name: string; phone: string; benmingColor: string; onboarded: boolean;
-  planId: string; creditBalance: number;
+  planId: string; creditBalance: number; ownedAgents: string[];
   profile: Profile | null; sessions: SessionRec[]; library: LibItem[];
   projects: ProjectRec[]; reports: ReportDocRec[]; knowledge: KnowledgeRec[];
 }
@@ -101,6 +101,7 @@ function load(token: string): UserData {
       d.projects ??= []; d.reports ??= []; d.knowledge ??= [];
       d.planId ??= 'mock-plan-decision';
       d.creditBalance ??= 68;
+      d.ownedAgents ??= ['intel', 'brand']; // 演示：默认已解锁两个付费智能体
       return d;
     }
   } catch { /* noop */ }
@@ -112,6 +113,7 @@ function load(token: string): UserData {
     onboarded: false,
     planId: 'mock-plan-decision',
     creditBalance: 68,
+    ownedAgents: ['intel', 'brand'],
     profile: null,
     sessions: [],
     library: [],
@@ -312,7 +314,29 @@ export const mock = {
     return delay({ ok: true });
   },
 
-  async agents(): Promise<Agent[]> { return delay(DEFAULT_AGENTS); },
+  async agents(): Promise<Agent[]> {
+    const owned = new Set(current().d.ownedAgents ?? []);
+    return delay(DEFAULT_AGENTS.map((a) => ({ ...a, owned: a.billing !== 'unlock' || owned.has(a.key) })));
+  },
+
+  async purchaseAgent(key: string): Promise<AgentPurchaseResult> {
+    const { token, d } = current();
+    const agent = DEFAULT_AGENTS.find((a) => a.key === key);
+    if (!agent) throw Object.assign(new Error('智能体不存在'), { code: 'AGENT_NOT_FOUND' });
+    if (agent.billing !== 'unlock') throw Object.assign(new Error('该智能体无需购买'), { code: 'AGENT_NOT_PURCHASABLE' });
+    d.ownedAgents ??= [];
+    if (d.ownedAgents.includes(key)) {
+      return delay({ ok: true, agentKey: key, pricePaid: 0, creditBalance: d.creditBalance, alreadyOwned: true });
+    }
+    const unlimited = d.creditBalance < 0;
+    if (!unlimited && d.creditBalance < agent.price) {
+      throw Object.assign(new Error('算力不足，无法解锁该智能体'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
+    }
+    d.ownedAgents.push(key);
+    if (!unlimited) d.creditBalance -= agent.price;
+    save(token, d);
+    return delay({ ok: true, agentKey: key, pricePaid: unlimited ? 0 : agent.price, creditBalance: d.creditBalance, alreadyOwned: false });
+  },
   async survey(): Promise<SurveyQuestion[]> { return delay(SURVEY); },
 
   async getProfile(): Promise<Profile | null> { return delay(current().d.profile); },

@@ -1,14 +1,26 @@
 // 运营后台 API（《投产开发指导》§7）：概览看板 / 每日献策 / 智能体（提示词+记忆）/ 问卷 / 套餐。
-// 演示环境未做 RBAC；生产需鉴权 + 操作审计（见 §7）。
+// 鉴权：本插件内所有 /admin/* 路由统一走 requireAdmin 前置校验（共享密钥 ADMIN_TOKEN 或 role=admin 账号）。
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { getAiConfig, setAiConfig, publicConfig, AI_PRESETS, type ResolvedAiConfig } from '../services/aiConfig.js';
 import { pingModel } from '../llm/gateway.js';
+import { requireAdmin } from '../services/adminAuth.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
 import type { AiConfigUpdate } from '../llm/schema.js';
-import type { AdminAuditItem, AdminUserItem, AdminUsageView } from '../../../shared/contracts';
+import type {
+  AdminAuditItem, AdminUserItem, AdminUsageView,
+  AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
+} from '../../../shared/contracts';
+
+const BILLINGS: AgentBilling[] = ['free', 'unlock', 'metered'];
+function normalizeBilling(b: unknown): AgentBilling {
+  return BILLINGS.includes(b as AgentBilling) ? (b as AgentBilling) : 'free';
+}
 
 export async function adminRoutes(app: FastifyInstance) {
+  // 鉴权：拦截本插件内全部 /admin/* 路由（adminRoutes 为独立封装上下文，不影响其它路由）。
+  app.addHook('preHandler', requireAdmin);
+
   // —— 大模型配置（运营后台可随时切换；默认 Agnes 2.0 Flash） ——
   app.get('/admin/ai-config', async () => {
     const cfg = await getAiConfig(true);
@@ -67,6 +79,60 @@ export async function adminRoutes(app: FastifyInstance) {
   // —— 用户管理：小程序注册用户、账号来源、会话/成果/算力概览 ——
   app.get('/admin/users', async (): Promise<AdminUserItem[]> => {
     return buildAdminUsers();
+  });
+
+  // 单用户详情 + 智能体开通管理（运营决定「给哪个用户开通哪个智能体」）
+  app.get<{ Params: { id: string } }>('/admin/users/:id', async (req, reply): Promise<AdminUserDetail | void> => {
+    const users = await buildAdminUsers();
+    const user = users.find((u) => u.id === req.params.id);
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    const [agents, owned] = await Promise.all([
+      prisma.agent.findMany({ where: { billing: 'unlock' }, orderBy: { sort: 'asc' } }),
+      prisma.userAgent.findMany({ where: { userId: req.params.id } }),
+    ]);
+    const ownedMap = new Map(owned.map((o) => [o.agentKey, o]));
+    const rows: AdminUserAgentRow[] = agents.map((a) => {
+      const row = ownedMap.get(a.key);
+      return {
+        key: a.key, name: a.name, role: a.role, icon: a.icon,
+        billing: a.billing as AgentBilling, price: a.price,
+        owned: !!row, source: row?.source ?? null,
+        grantedAt: row ? isoSecond(row.createdAt) : null,
+      };
+    });
+    return { user, agents: rows };
+  });
+
+  // 后台为用户开通智能体（免费开通，记 admin_grant）
+  app.post<{ Params: { id: string }; Body: { agentKey: string } }>('/admin/users/:id/agents', async (req, reply) => {
+    const agentKey = (req.body?.agentKey ?? '').trim();
+    const [user, agent] = await Promise.all([
+      prisma.user.findUnique({ where: { id: req.params.id } }),
+      agentKey ? prisma.agent.findUnique({ where: { key: agentKey } }) : null,
+    ]);
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    if (!agent) return reply.code(404).send({ error: 'agent not found' });
+    await prisma.userAgent.upsert({
+      where: { userId_agentKey: { userId: user.id, agentKey } },
+      update: {},
+      create: { userId: user.id, agentKey, source: 'admin_grant', pricePaid: 0 },
+    });
+    await recordAudit({
+      tenantId: user.tenantId, userId: user.id,
+      action: 'admin.user.agent.grant', payload: { agentKey, agentName: agent.name },
+    });
+    return { ok: true };
+  });
+
+  // 后台取消用户的智能体开通
+  app.delete<{ Params: { id: string; key: string } }>('/admin/users/:id/agents/:key', async (req) => {
+    await prisma.userAgent.deleteMany({ where: { userId: req.params.id, agentKey: req.params.key } });
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true } });
+    await recordAudit({
+      tenantId: user?.tenantId ?? undefined, userId: req.params.id,
+      action: 'admin.user.agent.revoke', payload: { agentKey: req.params.key },
+    });
+    return { ok: true };
   });
 
   // —— 消耗管理：按用户汇总算力赠送、消耗与余额 ——
@@ -158,18 +224,21 @@ export async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // —— 智能体配置（含 System 提示词 + Agent Memory） ——
+  // —— 智能体配置（含 计费/价格 + System 提示词 + Agent Memory） ——
   app.get('/admin/agents', async () => {
-    const [agents, sessionGroups, deliverableGroups] = await Promise.all([
+    const [agents, sessionGroups, deliverableGroups, ownerGroups] = await Promise.all([
       prisma.agent.findMany({ orderBy: { sort: 'asc' } }),
       prisma.session.groupBy({ by: ['agentKey'], _count: { _all: true } }),
       prisma.deliverable.groupBy({ by: ['agentKey'], _count: { _all: true } }),
+      prisma.userAgent.groupBy({ by: ['agentKey'], _count: { _all: true } }),
     ]);
     const sessions = new Map(sessionGroups.map((g) => [g.agentKey, g._count._all]));
     const deliverables = new Map(deliverableGroups.map((g) => [g.agentKey, g._count._all]));
+    const owners = new Map(ownerGroups.map((g) => [g.agentKey, g._count._all]));
     return agents.map((a) => ({
       key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
-      gift: a.gift, enabled: a.enabled, deliverableKey: a.deliverableKey,
+      gift: a.gift, billing: a.billing, price: a.price, enabled: a.enabled, deliverableKey: a.deliverableKey,
+      ownerCount: owners.get(a.key) ?? 0,
       sessionCount: sessions.get(a.key) ?? 0,
       deliverableCount: deliverables.get(a.key) ?? 0,
       updatedAt: isoSecond(a.updatedAt),
@@ -180,31 +249,86 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!a) return reply.code(404).send({ error: 'not found' });
     return {
       key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
+      gift: a.gift, billing: a.billing, price: a.price,
       enabled: a.enabled, systemPrompt: a.systemPrompt, memoryConfig: a.memoryConfig,
       deliverableKey: a.deliverableKey,
     };
   });
-  app.patch<{ Params: { key: string }; Body: { systemPrompt?: string; memoryConfig?: object; enabled?: boolean } }>(
+  // 新增智能体（后台可上架更多智能体）。key 唯一；缺省字段给安全默认值。
+  app.post<{ Body: AdminAgentCreate }>('/admin/agents', async (req, reply) => {
+    const b = req.body ?? ({} as AdminAgentCreate);
+    const key = (b.key ?? '').trim();
+    const name = (b.name ?? '').trim();
+    if (!/^[a-z][a-z0-9_]{1,30}$/.test(key)) {
+      return reply.code(400).send({ error: 'key 仅限小写字母/数字/下划线，且字母开头', code: 'BAD_KEY' });
+    }
+    if (!name) return reply.code(400).send({ error: '名称不能为空', code: 'BAD_NAME' });
+    if (await prisma.agent.findUnique({ where: { key } })) {
+      return reply.code(409).send({ error: 'key 已存在', code: 'KEY_EXISTS' });
+    }
+    const billing = normalizeBilling(b.billing);
+    const maxSort = await prisma.agent.aggregate({ _max: { sort: true } });
+    const a = await prisma.agent.create({
+      data: {
+        key,
+        name,
+        role: (b.role ?? '').trim() || '自定义智能体',
+        icon: b.icon || 'spark',
+        type: b.type ?? 'custom',
+        gift: billing === 'free',
+        billing,
+        price: billing === 'free' ? 0 : Math.max(0, Math.trunc(b.price ?? 0)),
+        enabled: b.enabled ?? false,
+        greet: b.greet || `你好，我是${name}。`,
+        chipsJson: [],
+        memText: '',
+        learnText: '记忆已更新',
+        systemPrompt: b.systemPrompt || `你是「${name}」，请专注于商业场景，给出可执行的建议与产出。`,
+        deliverableKey: b.deliverableKey ?? null,
+        memoryConfig: { longTerm: true, autoLearn: true, intensity: 'balanced', retentionDays: 180, sources: ['conversation', 'document'] },
+        sort: (maxSort._max.sort ?? 0) + 1,
+      },
+    });
+    await recordAudit({ action: 'admin.agent.create', payload: { key: a.key, name: a.name, billing: a.billing, price: a.price } });
+    return { ok: true, key: a.key };
+  });
+  app.patch<{ Params: { key: string }; Body: AdminAgentUpdate }>(
     '/admin/agents/:key',
-    async (req) => {
-      const before = await prisma.agent.findUnique({ where: { key: req.params.key }, select: { enabled: true } });
+    async (req, reply) => {
+      const before = await prisma.agent.findUnique({ where: { key: req.params.key } });
+      if (!before) return reply.code(404).send({ error: 'not found' });
+      const b = req.body ?? {};
+      const billing = b.billing !== undefined ? normalizeBilling(b.billing) : undefined;
+      const targetBilling = billing ?? (before.billing as AgentBilling);
       const a = await prisma.agent.update({
         where: { key: req.params.key },
         data: {
-          systemPrompt: req.body.systemPrompt,
-          memoryConfig: req.body.memoryConfig,
-          enabled: req.body.enabled,
+          name: b.name?.trim() || undefined,
+          role: b.role?.trim() || undefined,
+          icon: b.icon || undefined,
+          type: b.type || undefined,
+          gift: targetBilling === 'free',
+          billing,
+          // free 计费价格强制归零；否则按入参（非负整数）
+          price: billing === 'free' ? 0 : (typeof b.price === 'number' ? Math.max(0, Math.trunc(b.price)) : undefined),
+          greet: typeof b.greet === 'string' && b.greet.trim() ? b.greet : undefined,
+          deliverableKey: b.deliverableKey === undefined ? undefined : (b.deliverableKey || null),
+          systemPrompt: b.systemPrompt,
+          memoryConfig: b.memoryConfig as object | undefined,
+          enabled: typeof b.enabled === 'boolean' ? b.enabled : undefined,
         },
       });
-      const enabledChanged = typeof req.body.enabled === 'boolean' && before?.enabled !== req.body.enabled;
+      const enabledChanged = typeof b.enabled === 'boolean' && before.enabled !== b.enabled;
       await recordAudit({
         action: enabledChanged ? (a.enabled ? 'admin.agent.publish' : 'admin.agent.unpublish') : 'admin.agent.update',
         payload: {
           key: a.key,
           name: a.name,
           enabled: a.enabled,
-          systemPromptChanged: typeof req.body.systemPrompt === 'string',
-          memoryConfigChanged: !!req.body.memoryConfig,
+          billing: a.billing,
+          price: a.price,
+          systemPromptChanged: typeof b.systemPrompt === 'string',
+          memoryConfigChanged: !!b.memoryConfig,
         },
       });
       return { ok: true, key: a.key };
@@ -300,6 +424,10 @@ function auditLabel(action: string): string {
     'admin.agent.publish': '功能上架',
     'admin.agent.unpublish': '功能下架',
     'admin.agent.update': '智能体配置变更',
+    'admin.agent.create': '新增智能体',
+    'admin.user.agent.grant': '后台开通智能体',
+    'admin.user.agent.revoke': '取消智能体开通',
+    'user.agent.purchase': '用户解锁智能体',
     'admin.ai.update': '模型配置变更',
     'user.plan.purchase': '用户购买套餐',
     'user.http': '用户 API 行为',

@@ -4,6 +4,7 @@ import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
 import Picker from '../../components/Picker';
+import Plans from '../../components/Plans';
 import { useStore } from '../../hooks/useStore';
 import { api } from '../../services/api';
 import './index.scss';
@@ -16,6 +17,7 @@ export default function Profile() {
   const [libCount, setLibCount] = useState(0);
   const [projCount, setProjCount] = useState(0);
   const [showPicker, setShowPicker] = useState(false);
+  const [showPlans, setShowPlans] = useState(false);
 
   useDidShow(() => {
     s.setTab(4);
@@ -27,7 +29,7 @@ export default function Profile() {
     { ic: 'grid', t: '项目工作台', s: projCount ? `${projCount} 个项目` : '按项目管理事务', onClick: () => Taro.navigateTo({ url: '/pages/projects/index' }) },
     { ic: 'layers', t: '我的方案库', s: `${libCount} 份成果`, onClick: () => Taro.navigateTo({ url: '/pages/library/index' }) },
     { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
-    { ic: 'doc', t: '套餐与算力', s: me?.plan?.name ?? '决策版', onClick: () => Taro.showToast({ title: '套餐管理', icon: 'none' }) },
+    { ic: 'doc', t: '套餐与算力', s: me?.plan?.name ?? '决策版', onClick: () => setShowPlans(true) },
     { ic: 'insight', t: '设置', s: '', onClick: () => Taro.showToast({ title: '设置', icon: 'none' }) },
     {
       ic: 'lock', t: '退出登录', s: '',
@@ -57,7 +59,7 @@ export default function Profile() {
             <Text className="cr-k">本月军师算力</Text>
             <Text className="cr-v serif" style={{ color: 'var(--accent-bright)' }}>剩余 {me?.creditBalance ?? 68} 次</Text>
           </View>
-          <View className="cr-btn" style={{ background: accent }} onClick={() => Taro.showToast({ title: '算力充值', icon: 'none' })}>
+          <View className="cr-btn" style={{ background: accent }} onClick={() => setShowPlans(true)}>
             <Text>充值</Text>
           </View>
         </View>
@@ -89,6 +91,7 @@ export default function Profile() {
       </View>
 
       <Picker open={showPicker} first={false} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
+      <Plans open={showPlans} onClose={() => setShowPlans(false)} />
     </Screen>
   );
 }

@@ -10,6 +10,7 @@ async function main() {
   console.log('🌱 seeding 军师 数据库 …');
 
   // 先清理有外键依赖的业务数据，避免重复 seed 时报 FK 约束
+  await prisma.userAgent.deleteMany();
   await prisma.message.deleteMany();
   await prisma.deliverable.deleteMany();
   await prisma.session.deleteMany();
@@ -54,6 +55,8 @@ async function main() {
         icon: a.icon,
         type: a.type,
         gift: a.gift,
+        billing: a.billing,
+        price: a.price,
         enabled: a.enabled,
         greet: a.greet,
         chipsJson: a.chips,
@@ -116,7 +119,14 @@ async function main() {
   await prisma.creditLedger.create({
     data: { tenantId: tenant.id, userId: user.id, delta: 68, reason: '决策版 · 月度充值', balance: 68 },
   });
-  console.log(`  ✓ demo tenant=${tenant.id} user=${user.id}`);
+  // —— 演示：给王总开通 2 个付费智能体（一个购买、一个后台开通），展示「已解锁」态 ——
+  await prisma.userAgent.createMany({
+    data: [
+      { userId: user.id, agentKey: 'intel', source: 'purchase', pricePaid: 12 },
+      { userId: user.id, agentKey: 'brand', source: 'admin_grant', pricePaid: 0 },
+    ],
+  });
+  console.log(`  ✓ demo tenant=${tenant.id} user=${user.id}（已解锁 intel/brand 演示）`);
 
   // —— 演示：项目 + 版本化报告(v1→v2 可看变更) + 知识库 ——
   const project = await prisma.project.create({
