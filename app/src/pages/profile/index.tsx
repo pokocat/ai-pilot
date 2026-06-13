@@ -7,6 +7,7 @@ import Picker from '../../components/Picker';
 import Plans from '../../components/Plans';
 import { useStore } from '../../hooks/useStore';
 import { api } from '../../services/api';
+import type { ClientUnderstanding } from '../../services/api';
 import './index.scss';
 
 export default function Profile() {
@@ -14,6 +15,7 @@ export default function Profile() {
   const color = s.color();
   const accent = color.vars['--accent'];
   const me = s.me();
+  const understanding = me?.understanding;
   const [libCount, setLibCount] = useState(0);
   const [projCount, setProjCount] = useState(0);
   const [showPicker, setShowPicker] = useState(false);
@@ -73,6 +75,46 @@ export default function Profile() {
           </View>
         </View>
 
+        {understanding ? (
+          <View className="brief card">
+            <View className="bf-head">
+              <View>
+                <Text className="bf-k">{understanding.subtitle}</Text>
+                <Text className="bf-t serif">{understanding.title}</Text>
+              </View>
+              <View className={`bf-badge ${understanding.maturity}`}>
+                <Text>{maturityLabel(understanding.maturity)}</Text>
+              </View>
+            </View>
+            <Text className="bf-summary">{understanding.summary}</Text>
+            <View className="bf-counts">
+              <Text>{evidenceLine(understanding)}</Text>
+            </View>
+            {understanding.sections.map((sec) => (
+              <View key={sec.key} className="bf-sec">
+                <Text className="bf-sec-t">{sec.title}</Text>
+                {sec.items.length ? (
+                  sec.items.slice(0, 3).map((item) => <Text key={item} className="bf-item">• {item}</Text>)
+                ) : (
+                  <Text className="bf-empty">{sec.emptyText}</Text>
+                )}
+              </View>
+            ))}
+            {understanding.nextQuestions.length ? (
+              <View className="bf-qs">
+                <Text className="bf-sec-t">下次先问清楚</Text>
+                <View className="bf-chip-wrap">
+                  {understanding.nextQuestions.map((q) => (
+                    <View key={q} className="bf-chip" onClick={() => askQuestion(q)}>
+                      <Text>{q}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         <View className="rows card">
           {rows.map((r) => (
             <View key={r.t} className="row" onClick={r.onClick}>
@@ -109,4 +151,25 @@ export default function Profile() {
 function orgLine(me: { tenant: { name?: string | null; industry?: string | null } } | null): string {
   if (!me) return '';
   return [me.tenant.name, me.tenant.industry].filter(Boolean).join(' · ');
+}
+
+function maturityLabel(v: ClientUnderstanding['maturity']): string {
+  if (v === 'ready') return '可用于咨询';
+  if (v === 'forming') return '正在成稿';
+  return '待补资料';
+}
+
+function evidenceLine(u: ClientUnderstanding): string {
+  const parts = [
+    u.evidenceCount.profile ? '档案 1' : '',
+    u.evidenceCount.memories ? `线索 ${u.evidenceCount.memories}` : '',
+    u.evidenceCount.projects ? `项目 ${u.evidenceCount.projects}` : '',
+    u.evidenceCount.knowledge ? `资料 ${u.evidenceCount.knowledge}` : '',
+    u.evidenceCount.sessions ? `对话 ${u.evidenceCount.sessions}` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : '暂无沉淀资料';
+}
+
+function askQuestion(q: string) {
+  Taro.navigateTo({ url: `/pages/chat/index?send=${encodeURIComponent(q)}` });
 }

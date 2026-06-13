@@ -15,10 +15,35 @@ function referenceNote(ctx: GenContext): string[] {
   return items.slice(0, 4).map((s) => s.replace(/^【[^】]*】/, '').slice(0, 60));
 }
 
+function needsCustomerInput(ctx: GenContext): boolean {
+  const hasContext = !!ctx.companyName || !!ctx.profile || !!ctx.memories.length || !!ctx.references?.length || !!ctx.knowledge?.length || !!ctx.projectSummary;
+  return !hasContext && (ctx.understandingMaturity === 'empty' || ctx.userMessage.trim().length < 24);
+}
+
+function nextQuestions(ctx: GenContext): string[] {
+  const qs = ctx.understandingQuestions?.length
+    ? ctx.understandingQuestions
+    : ['你现在做什么行业或品类？', '业务处在哪个阶段？', '这段时间最卡你的经营问题是什么？'];
+  return qs.slice(0, 3);
+}
+
 export function mockDeliverable(ctx: GenContext): Deliverable {
+  if (needsCustomerInput(ctx)) {
+    return {
+      title: '先补齐经营底稿',
+      icon: 'target',
+      meta: metaOf(ctx),
+      sections: [
+        { h: '需要先确认', b: '现有资料还不足以判断你的真实业务，军师不会替你编造公司背景或经营困难。' },
+        { h: '请补充三点', list: nextQuestions(ctx) },
+      ],
+      trust: TRUST_NOTE,
+      actions: ['save_to_library'],
+    };
+  }
   const key = ctx.deliverableKey ?? '战略体检';
   const tpl = DELIVERABLES[key] ?? DELIVERABLES['战略体检'];
-  const pain = ctx.profile?.pain || '增长与盈利';
+  const pain = ctx.profile?.pain || '当前经营问题';
   const sections = tpl.sections.map((s) => ({
     h: s.h,
     b: s.b ? s.b.replaceAll('{PAIN}', pain) : undefined,
@@ -37,6 +62,13 @@ export function mockDeliverable(ctx: GenContext): Deliverable {
 }
 
 export function mockChat(ctx: GenContext): ChatReply {
+  if (needsCustomerInput(ctx)) {
+    return {
+      text: '我先不替你假设业务背景。要给出贴近你实际情况的判断，需要先补几项经营底稿。',
+      points: nextQuestions(ctx),
+      acts: [['target', '补充经营情况']],
+    };
+  }
   const r = REPLIES['默认'];
   const refs = referenceNote(ctx);
   const points = refs.length ? [...r.points, `已参考：${refs.join('；')}`] : r.points;

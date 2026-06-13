@@ -36,13 +36,15 @@ async function moderate(refType: 'input' | 'output', text: string): Promise<bool
 const cache = new Map<string, { v: unknown; at: number }>();
 const TTL = 5 * 60 * 1000;
 function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string {
-  const refSig = (ctx.references?.length ?? 0) + ':' + (ctx.knowledge?.length ?? 0);
+  const refSig = (ctx.references?.length ?? 0) + ':' + (ctx.knowledge?.length ?? 0) + ':' + (ctx.memories?.length ?? 0);
   const profileSig = [
     ctx.companyName ?? '',
     ctx.profile?.industry ?? '',
     ctx.profile?.stage ?? '',
     ctx.profile?.pain ?? '',
     ctx.projectName ?? '',
+    ctx.understandingMaturity ?? '',
+    ctx.understandingQuestions?.length ?? 0,
   ].join('|');
   return `${kind}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${profileSig}:${refSig}`;
 }

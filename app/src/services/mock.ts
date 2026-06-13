@@ -6,7 +6,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
-  Plan, PlanPurchaseResult, AgentPurchaseResult,
+  Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
 } from '../../../shared/contracts';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
@@ -25,6 +25,7 @@ const SAYINGS = [
   '现金流是<em>呼吸</em>，利润才是<em>体格</em>。',
   '战略的本质，是学会<em>放弃</em>。',
 ];
+const ALIAS_NAMES = ['楚霸王', '魏武王', '孙伯符', '汉高祖', '唐太宗', '秦武安', '赵武灵王', '霍骠姚', '李卫公', '岳武穆', '郭汾阳', '韩淮阴', '李存孝', '李元霸', '宇文成都', '关云长', '赵子龙', '吕奉先'];
 const PLANS: Plan[] = [
   {
     id: 'mock-plan-free',
@@ -143,7 +144,7 @@ function metaOf(d: UserData): string {
 
 function buildDeliverable(deliverableKey: string, d: UserData): Deliverable {
   const tpl = DELIVERABLES[deliverableKey] ?? DELIVERABLES['战略体检'];
-  const pain = d.profile?.pain || '增长与盈利';
+  const pain = d.profile?.pain || '当前经营问题';
   return {
     title: tpl.title,
     icon: tpl.icon,
@@ -155,6 +156,85 @@ function buildDeliverable(deliverableKey: string, d: UserData): Deliverable {
 }
 
 const delay = <T>(v: T, ms = 280): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
+const cleanM = (v: unknown, max = 120): string => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '');
+function pushUniqueM(list: string[], value: unknown, max = 4) {
+  const v = cleanM(value);
+  if (v && !list.includes(v) && list.length < max) list.push(v);
+}
+function extraLinesM(extra: unknown): string[] {
+  if (!extra || typeof extra !== 'object') return [];
+  const out: string[] = [];
+  Object.entries(extra as Record<string, unknown>).forEach(([k, v]) => {
+    const text = cleanM(v, 160);
+    if (!text) return;
+    const label = /[a-zA-Z]/.test(k) ? '' : k;
+    pushUniqueM(out, label ? `${label}：${text}` : text, 4);
+  });
+  return out;
+}
+function buildUnderstandingM(d: UserData): ClientUnderstanding {
+  const identity: string[] = [];
+  pushUniqueM(identity, d.name ? `服务对象：${d.name}` : '');
+  pushUniqueM(identity, d.company ? `企业/品牌：${d.company}` : '');
+  pushUniqueM(identity, d.profile?.industry ? `行业：${d.profile.industry}` : '');
+  pushUniqueM(identity, d.profile?.stage ? `阶段：${d.profile.stage}` : '');
+
+  const journey = extraLinesM(d.profile?.extra);
+  d.projects.slice(0, 4).forEach((p) => pushUniqueM(journey, p.summary ? `项目《${p.name}》：${p.summary}` : `项目《${p.name}》正在推进`, 5));
+  d.sessions.slice(0, 4).forEach((s) => pushUniqueM(journey, `近期讨论：${s.title}`, 5));
+
+  const difficulties: string[] = [];
+  pushUniqueM(difficulties, d.profile?.pain ? `当前最关注：${d.profile.pain}` : '');
+  d.knowledge.slice(0, 5).forEach((k) => {
+    if (/(insight|decision|todo)/i.test(k.kind)) pushUniqueM(difficulties, k.title ? `${k.title}：${k.text}` : k.text, 5);
+  });
+
+  const materials: string[] = [];
+  d.knowledge.slice(0, 4).forEach((k) => pushUniqueM(materials, k.title ? `资料《${k.title}》` : k.text, 6));
+  d.reports.slice(0, 4).forEach((r) => pushUniqueM(materials, `报告《${r.title}》v${r.currentVersion}`, 6));
+
+  const nextQuestions: string[] = [];
+  if (!d.name) nextQuestions.push('以后军师怎么称呼你？');
+  if (!d.company) nextQuestions.push('你的公司、门店或品牌叫什么？');
+  if (!d.profile?.industry) nextQuestions.push('你现在主要做哪个行业或品类？');
+  if (!d.profile?.stage) nextQuestions.push('业务处在起步、增长、规模化还是稳定经营阶段？');
+  if (!d.profile?.pain) nextQuestions.push('这段时间最卡你的经营问题是什么？');
+  if (!journey.length) nextQuestions.push('你是怎么开始这门生意的，中间经历过哪几个关键转折？');
+
+  const evidenceCount = { profile: d.profile ? 1 : 0, memories: 0, projects: d.projects.length, knowledge: d.knowledge.length, sessions: d.sessions.length };
+  const evidenceTotal = evidenceCount.profile + evidenceCount.projects + evidenceCount.knowledge + evidenceCount.sessions;
+  const maturity = evidenceTotal === 0 && !identity.length ? 'empty' : nextQuestions.length > 2 ? 'forming' : 'ready';
+  const summary = maturity === 'empty'
+    ? '军师还没有足够资料形成判断。补齐基本情况后，后续建议会优先依据你的真实业务来推演。'
+    : maturity === 'forming'
+      ? `军师已掌握 ${evidenceTotal} 条经营线索，能做初步判断；关键背景仍需继续补齐，避免替你假设业务事实。`
+      : `军师已沉淀 ${evidenceTotal} 条经营线索，可作为后续咨询、复盘和方案产出的底稿。`;
+
+  return {
+    title: '经营底稿',
+    subtitle: '军师对你的业务理解',
+    maturity,
+    summary,
+    sections: [
+      { key: 'identity', title: '经营身份', items: identity, emptyText: '还没记录你的称呼、公司、行业和阶段。' },
+      { key: 'journey', title: '创业路径', items: journey, emptyText: '还没形成创业路径。可以告诉军师：你怎么开始、做过哪些转折、现在走到哪一步。' },
+      { key: 'difficulties', title: '当前难题', items: difficulties, emptyText: '还没记录明确难题。后续咨询会先追问关键约束，再给建议。' },
+      { key: 'materials', title: '已沉淀资料', items: materials, emptyText: '还没有长期线索。对话、项目、报告和知识库都会逐步沉淀到这里。' },
+    ],
+    nextQuestions: nextQuestions.slice(0, 4),
+    evidenceCount,
+    updatedAt: null,
+  };
+}
+
+function needsInputM(d: UserData, text: string, refs?: MessageRef[], projectId?: string | null): boolean {
+  const hasContext = !!d.company || !!d.profile || d.knowledge.length > 0 || d.projects.length > 0 || !!refs?.length || !!projectId;
+  return !hasContext && text.trim().length < 24;
+}
+
+function inputQuestionsM(d: UserData): string[] {
+  return buildUnderstandingM(d).nextQuestions.slice(0, 3);
+}
 
 // ── 版本化报告 / 知识 / 引用 的本地实现（与后端同口径，纯前端、零依赖） ──
 function slugify(title: string): string {
@@ -261,6 +341,11 @@ const knItem = (k: KnowledgeRec): KnowledgeItemT => ({ id: k.id, projectId: k.pr
 
 // ── mock api（与后端同口径） ──
 export const mock = {
+  async suggestAlias(): Promise<AliasSuggestionResult> {
+    const name = ALIAS_NAMES[Math.floor(Math.random() * ALIAS_NAMES.length)] ?? '楚霸王';
+    return delay({ name, source: '古典武侠/军事花名' }, 120);
+  },
+
   async login(phone: string, name?: string): Promise<LoginResult> {
     const token = `mock-${phone}`;
     const existed = !!Taro.getStorageSync(dataKey(token));
@@ -296,6 +381,7 @@ export const mock = {
       creditBalance: d.creditBalance,
       onboarded: d.onboarded,
       ai: { provider: 'mock', model: 'template', ready: false, claudeReady: false },
+      understanding: buildUnderstandingM(d),
     });
   },
 
@@ -426,7 +512,16 @@ export const mock = {
     const projName = projectId ? d.projects.find((p) => p.id === projectId)?.name : undefined;
 
     let res: GenResult;
-    if (ag.deliverableKey) {
+    if (needsInputM(d, text, body.refs, projectId)) {
+      const reply = {
+        text: '我先不替你假设业务背景。要给出贴近你实际情况的判断，需要先补几项经营底稿。',
+        points: inputQuestionsM(d),
+        acts: [['target', '补充经营情况']] as [string, string][],
+      };
+      const msg: SessionMessage = { id: uid('m-'), role: 'assistant', content: reply, at: now() };
+      session.messages.push(msg);
+      res = { sessionId: session.id, created, agentKey: ag.key, kind: 'chat', messageId: msg.id, reply, knowledgeUsed: labels, creditBalance: d.creditBalance };
+    } else if (ag.deliverableKey) {
       if (d.creditBalance >= 0 && d.creditBalance < 1) {
         throw Object.assign(new Error('权益点不足，请调整方案后再继续'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
       }

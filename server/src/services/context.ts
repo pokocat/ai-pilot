@@ -2,6 +2,7 @@ import { prisma } from '../db.js';
 import { INDUSTRY_BENCHMARK } from '../data/seedConfig.js';
 import { recallMemories } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
+import { buildClientUnderstanding, understandingContextLines } from './understanding.js';
 import type { GenContext, MessageRef } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 
@@ -35,6 +36,9 @@ export async function buildGenContext(opts: {
   const profile = await prisma.profile.findFirst({ where: { tenantId: opts.tenantId }, orderBy: { updatedAt: 'desc' } });
   const user = await prisma.user.findUnique({ where: { id: opts.userId } });
   const tenant = await prisma.tenant.findUnique({ where: { id: opts.tenantId }, select: { name: true } });
+  const understanding = user
+    ? await buildClientUnderstanding({ id: user.id, tenantId: opts.tenantId, name: user.name })
+    : null;
 
   const memoryConfig = agent.memoryConfig as unknown as MemoryConfig;
   // 长期记忆：按当前问题做语义召回；后台关闭 longTerm 后不再注入既有记忆。
@@ -72,6 +76,9 @@ export async function buildGenContext(opts: {
     knowledge,
     projectName,
     projectSummary,
+    understanding: understanding ? understandingContextLines(understanding) : [],
+    understandingQuestions: understanding?.nextQuestions ?? [],
+    understandingMaturity: understanding?.maturity ?? 'empty',
   };
   return { ctx, memoryConfig, knowledgeUsed };
 }

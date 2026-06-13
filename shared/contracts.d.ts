@@ -77,6 +77,25 @@ export interface AdminAgentUpdate {
 /* ────────────── 账号 / 用户 ────────────── */
 export interface AiInfo { provider: string; model: string; ready?: boolean; claudeReady?: boolean; }
 
+export type UnderstandingMaturity = 'empty' | 'forming' | 'ready';
+export interface ClientUnderstandingSection {
+  key: string;
+  title: string;
+  items: string[];
+  emptyText?: string;
+}
+/** 前台「经营底稿」：把真实档案、记忆、项目和知识沉淀整理成客户可读的咨询理解 */
+export interface ClientUnderstanding {
+  title: string;
+  subtitle: string;
+  maturity: UnderstandingMaturity;
+  summary: string;
+  sections: ClientUnderstandingSection[];
+  nextQuestions: string[];
+  evidenceCount: { profile: number; memories: number; projects: number; knowledge: number; sessions: number };
+  updatedAt?: string | null;
+}
+
 export interface Me {
   user: { id: string; name: string; role: string; benmingColor: string };
   tenant: { id: string; name: string; industry?: string | null; stage?: string | null };
@@ -84,9 +103,11 @@ export interface Me {
   creditBalance: number;
   onboarded?: boolean;
   ai: AiInfo;
+  understanding?: ClientUnderstanding;
 }
 
 export interface LoginRequest { phone: string; name?: string; code?: string; }
+export interface AliasSuggestionResult { name: string; source: string; }
 /** 更新身份（称呼 + 公司/品牌名）：首登建档 / 设置页 */
 export interface UpdateIdentityRequest { name?: string; company?: string; }
 export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl?: string; }

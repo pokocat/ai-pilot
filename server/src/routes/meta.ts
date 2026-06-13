@@ -3,6 +3,7 @@ import { prisma } from '../db.js';
 import { providerInfo } from '../llm/gateway.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
+import { buildClientUnderstanding } from '../services/understanding.js';
 
 export async function metaRoutes(app: FastifyInstance) {
   app.get('/health', async () => ({ ok: true }));
@@ -16,6 +17,7 @@ export async function metaRoutes(app: FastifyInstance) {
       orderBy: { createdAt: 'desc' },
     });
     const onboarded = !!(await prisma.profile.findFirst({ where: { tenantId: user.tenantId } }));
+    const understanding = await buildClientUnderstanding(user);
     return {
       user: { id: user.id, name: user.name, role: user.role, benmingColor: user.benmingColor },
       tenant: { id: user.tenant.id, name: user.tenant.name, industry: user.tenant.industry, stage: user.tenant.stage },
@@ -23,6 +25,7 @@ export async function metaRoutes(app: FastifyInstance) {
       creditBalance: credit?.balance ?? 0,
       onboarded,
       ai: await providerInfo(),
+      understanding,
     };
   });
 

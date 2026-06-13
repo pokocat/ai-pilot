@@ -739,6 +739,15 @@ describe('TC-X 身份与账号注销', () => {
     const t = await login(uniquePhone());
     const before = await api('GET', '/api/me', { token: t });
     assert.equal(before.body.user.name, '', '新账号不应有编造的随机名');
+    assert.equal(before.body.understanding.title, '经营底稿', '/me 应返回用户可读的经营理解');
+
+    const alias = await api('GET', '/api/auth/suggest-name');
+    assert.equal(alias.status, 200);
+    assert.ok(alias.body.name && alias.body.source, '应返回一个可填入注册框的花名');
+    const aliasToken = await login(uniquePhone(), alias.body.name);
+    const aliasMe = await api('GET', '/api/me', { token: aliasToken });
+    assert.equal(aliasMe.body.user.name, alias.body.name, '花名只作为用户称呼');
+    assert.equal(aliasMe.body.tenant.name, '', '花名不应被写成公司名');
 
     const upd = await api('PUT', '/api/me', { token: t, body: { name: '王越', company: '云栖科技' } });
     assert.equal(upd.status, 200);

@@ -8,7 +8,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
-  Plan, PlanPurchaseResult, AgentPurchaseResult,
+  Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -24,6 +24,7 @@ export type {
   ReportItem, ReportDetail, ReportVersionItem, ReportVersionContent, ReportDiff, SectionDiff,
   KnowledgeItemT, KnowledgeHit, SummarizeResult, MessageRef, RefKind,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AgentBilling,
+  ClientUnderstanding, ClientUnderstandingSection, UnderstandingMaturity, AliasSuggestionResult,
 } from '../../../shared/contracts';
 
 // token 助手（兼容旧导出名）
@@ -60,6 +61,8 @@ async function request<T>(path: string, method: keyof typeof Taro.request | any 
 
 // —— API：mock 模式走本地数据源，server 模式连真实后端，口径完全一致 ——
 export const api = {
+  suggestAlias: () =>
+    IS_MOCK ? mock.suggestAlias() : request<AliasSuggestionResult>('/auth/suggest-name'),
   login: (phone: string, name?: string) =>
     IS_MOCK ? mock.login(phone, name) : request<LoginResult>('/auth/login', 'POST', { phone, name }),
   wechatLogin: (code: string, nickname?: string) =>

@@ -17,11 +17,13 @@ interface Props {
 export default function Login({ open, onLoggedIn }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
+  const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [sent, setSent] = useState(0); // 验证码倒计时
   const [loading, setLoading] = useState(false);
   const [wechatLoading, setWechatLoading] = useState(false);
+  const [nameLoading, setNameLoading] = useState(false);
 
   // 打开时隐藏底栏（复用 overlay 标志）
   useEffect(() => {
@@ -55,7 +57,7 @@ export default function Login({ open, onLoggedIn }: Props) {
     setWechatLoading(true);
     try {
       const wxCode = await getWechatCode();
-      const r = await api.wechatLogin(wxCode);
+      const r = await api.wechatLogin(wxCode, name.trim() || undefined);
       await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
       onLoggedIn(r.onboarded);
     } catch (e) {
@@ -76,6 +78,20 @@ export default function Login({ open, onLoggedIn }: Props) {
     Taro.showToast({ title: '验证码已发送（演示：888888）', icon: 'none' });
   };
 
+  const suggestName = async () => {
+    if (nameLoading) return;
+    setNameLoading(true);
+    try {
+      const r = await api.suggestAlias();
+      setName(r.name);
+      Taro.showToast({ title: `已填入：${r.name}`, icon: 'none' });
+    } catch (e) {
+      Taro.showToast({ title: (e as Error)?.message || '起名失败，请稍后再试', icon: 'none' });
+    } finally {
+      setNameLoading(false);
+    }
+  };
+
   const submit = async () => {
     if (!phoneOk) { Taro.showToast({ title: '请输入正确手机号', icon: 'none' }); return; }
     if (loading || wechatLoading) return;
@@ -84,7 +100,7 @@ export default function Login({ open, onLoggedIn }: Props) {
       let onboarded: boolean;
       try {
         // 在线：真实账号 + 数据隔离
-        const r = await api.login(phone);
+        const r = await api.login(phone, name.trim() || undefined);
         await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
         onboarded = r.onboarded;
       } catch {
@@ -113,6 +129,23 @@ export default function Login({ open, onLoggedIn }: Props) {
             <View className="lg-sep"><Text>或使用手机号演示登录</Text></View>
           </>
         )}
+
+        <View className="lg-field">
+          <Input
+            className="lg-input"
+            maxlength={20}
+            value={name}
+            placeholder="称呼 / 花名（可选）"
+            onInput={(e) => setName(e.detail.value)}
+          />
+          <Text
+            className={`lg-alias ${nameLoading ? 'off' : ''}`}
+            style={nameLoading ? {} : { color: accent }}
+            onClick={suggestName}
+          >
+            {nameLoading ? '起名中…' : 'AI 起名'}
+          </Text>
+        </View>
 
         <View className="lg-field">
           <Text className="lg-pre">+86</Text>

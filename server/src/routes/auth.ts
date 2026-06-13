@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { code2Session, wechatAccountKey } from '../services/wechat.js';
 import { recordAudit } from '../services/audit.js';
+import { suggestAliasName } from '../data/aliasNames.js';
 
 const loginSchema = z.object({
   phone: z.string().regex(/^1\d{10}$/, '请输入有效的手机号'),
@@ -38,7 +39,7 @@ async function createUserWithTenant(opts: {
   wechatUnionId?: string;
 }): Promise<AuthUser> {
   const plan = await prisma.plan.findFirst({ orderBy: { sort: 'asc' } });
-  const tenant = await prisma.tenant.create({ data: { name: opts.name } });
+  const tenant = await prisma.tenant.create({ data: { name: '' } });
   const user = await prisma.user.create({
     data: {
       tenantId: tenant.id,
@@ -89,6 +90,11 @@ function loginResult(user: AuthUser, isNew: boolean, onboarded: boolean) {
 }
 
 export async function authRoutes(app: FastifyInstance) {
+  app.get('/auth/suggest-name', async () => ({
+    name: suggestAliasName(),
+    source: '古典武侠/军事花名',
+  }));
+
   app.post('/auth/login', async (req, reply) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
