@@ -8,8 +8,8 @@ type UserForUnderstanding = {
   tenant?: { name: string; industry?: string | null; stage?: string | null } | null;
 };
 
-const TITLE = '经营底稿';
-const SUBTITLE = '军师对你的业务理解';
+const TITLE = '军师档案';
+const SUBTITLE = '军师有多了解你的生意';
 
 function clean(v: unknown, max = 120): string {
   return typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '';

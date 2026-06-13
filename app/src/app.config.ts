@@ -6,6 +6,7 @@ export default defineAppConfig({
     'pages/studio/index',
     'pages/profile/index',
     'pages/chat/index',
+    'pages/brief/index',
     'pages/settings/index',
   ],
   subpackages: [

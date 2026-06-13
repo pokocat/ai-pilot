@@ -30,7 +30,7 @@ function nextQuestions(ctx: GenContext): string[] {
 export function mockDeliverable(ctx: GenContext): Deliverable {
   if (needsCustomerInput(ctx)) {
     return {
-      title: '先补齐经营底稿',
+      title: '先补齐军师档案',
       icon: 'target',
       meta: metaOf(ctx),
       sections: [
@@ -64,7 +64,7 @@ export function mockDeliverable(ctx: GenContext): Deliverable {
 export function mockChat(ctx: GenContext): ChatReply {
   if (needsCustomerInput(ctx)) {
     return {
-      text: '我先不替你假设业务背景。要给出贴近你实际情况的判断，需要先补几项经营底稿。',
+      text: '我先不替你假设业务背景。要给出贴近你实际情况的判断，需要先补几项军师档案。',
       points: nextQuestions(ctx),
       acts: [['target', '补充经营情况']],
     };

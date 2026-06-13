@@ -739,7 +739,7 @@ describe('TC-X 身份与账号注销', () => {
     const t = await login(uniquePhone());
     const before = await api('GET', '/api/me', { token: t });
     assert.equal(before.body.user.name, '', '新账号不应有编造的随机名');
-    assert.equal(before.body.understanding.title, '经营底稿', '/me 应返回用户可读的经营理解');
+    assert.equal(before.body.understanding.title, '军师档案', '/me 应返回用户可读的经营理解');
 
     const alias = await api('GET', '/api/auth/suggest-name');
     assert.equal(alias.status, 200);

@@ -211,8 +211,8 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
       : `军师已沉淀 ${evidenceTotal} 条经营线索，可作为后续咨询、复盘和方案产出的底稿。`;
 
   return {
-    title: '经营底稿',
-    subtitle: '军师对你的业务理解',
+    title: '军师档案',
+    subtitle: '军师有多了解你的生意',
     maturity,
     summary,
     sections: [
@@ -514,7 +514,7 @@ export const mock = {
     let res: GenResult;
     if (needsInputM(d, text, body.refs, projectId)) {
       const reply = {
-        text: '我先不替你假设业务背景。要给出贴近你实际情况的判断，需要先补几项经营底稿。',
+        text: '我先不替你假设业务背景。要给出贴近你实际情况的判断，需要先补几项军师档案。',
         points: inputQuestionsM(d),
         acts: [['target', '补充经营情况']] as [string, string][],
       };

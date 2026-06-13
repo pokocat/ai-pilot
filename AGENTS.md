@@ -27,7 +27,7 @@
 
 ## 1. 产品摘要
 
-**军师**是面向创始人 / CEO 的 AI 商业军师，主线是「出谋」（智库顾问产出咨询成果）和「出活」（工坊智能体产出品牌资产）。当前核心能力：本命色、专属理解（Agent Memory）、经营底稿、智能体权益 / 产出额度、项目 / 知识库 / 版本化报告 / @ 引用、多租户隔离。
+**军师**是面向创始人 / CEO 的 AI 商业军师，主线是「出谋」（智库顾问产出咨询成果）和「出活」（工坊智能体产出品牌资产）。当前核心能力：本命色、专属理解（Agent Memory）、军师档案、智能体权益 / 产出额度、项目 / 知识库 / 版本化报告 / @ 引用、多租户隔离。
 
 详细产品说明、文案口径和升级方向统一放在 **`PRODUCT.md`**。工程实现以本文的契约、路径、构建与 TODO 为准。
 
@@ -97,7 +97,7 @@ repo/
 - **改数据模型只改这一处**，三端类型同步。
 - **智能体权益契约**：`AgentBilling`（`free|unlock|metered`）、`Agent.billing/price/owned`、`AgentPurchaseResult`、`AdminAgentCreate/AdminAgentUpdate`、`AdminUserDetail/AdminUserAgentRow`，驱动前台解锁、后台定价与指定用户开通。
 - **新增能力的契约**（项目/报告/知识/引用）：`ProjectItem/ProjectDetail`、`ReportItem/ReportDetail/ReportVersionItem/ReportVersionContent/ReportDiff/SectionDiff`、`KnowledgeItemT/KnowledgeHit`、`MessageRef`、`SummarizeResult`，以及 `GenRequest.projectId/refs`、`GenResult.knowledgeUsed`、`SessionItem/SessionDetail.projectId`、`SessionMessage.refs`、`LibItem.reportId/version/projectId`。
-- **经营底稿契约**：`ClientUnderstanding` / `ClientUnderstandingSection` / `UnderstandingMaturity` 挂在 `/me.understanding`，只整理真实档案、长期记忆、项目、知识、报告与会话线索；`AliasSuggestionResult` 驱动注册花名接口。
+- **军师档案契约**：`ClientUnderstanding` / `ClientUnderstandingSection` / `UnderstandingMaturity` 挂在 `/me.understanding`，只整理真实档案、长期记忆、项目、知识、报告与会话线索；`AliasSuggestionResult` 驱动注册花名接口。
 
 > 约定：任何新增/修改的接口字段，先改 `shared/contracts.d.ts`，再改实现。
 
@@ -128,9 +128,9 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | 智库 | `pages/thinktank` | 顾问型智能体列表（advisory），前台展示可用/已启用/按需/专项能力状态 |
 | 对话 | `pages/sessions` | 会话历史；底栏中间「对话」=开新会话 |
 | 智能体 | `pages/studio` | 创作型智能体（creative），支持按需/专项能力展示 + 专属助手配置 |
-| 我的 | `pages/profile` | 账号/经营底稿/项目工作台/方案库/方案与额度弹层/本命色/退出登录 |
+| 我的 | `pages/profile` | 账号/军师档案入口/项目工作台/方案库/方案与额度弹层/本命色/退出登录 |
 
-非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡）留在主包；项目工作台、项目详情、方案库、报告页已拆到 `packages/work/*` 分包（`packages/work/projects`、`project`、`library`、`report`），由 `pages/profile` 与 `pages/chat` 预加载。
+非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；项目工作台、项目详情、方案库、报告页已拆到 `packages/work/*` 分包（`packages/work/projects`、`project`、`library`、`report`），由 `pages/profile` 与 `pages/chat` 预加载。
 
 ### 7.2 关键 UI 约定（踩过的坑，勿回退）
 - **小程序工程约束清单（先读）**：
@@ -149,7 +149,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **首页标题宋体化**：`pages/home` 通过 `Screen className="home"` 局部定义标题字体栈，品牌名、问候语、今日献策正文、对话卡提问、分区标题与卡片标题使用宋体优先；不要为此改全局 `--serif`，避免影响其它页面。
 - **前台商业文案克制**：面向用户的主路径不要写成“赠送 / 付费解锁 / 充值 / 最受欢迎 / 灵活付费”这类促销口吻；统一用「可用」「已启用」「专项能力」「产出额度」「方案与额度」「常用配置」表达，让用户感到是在调用工作台能力，而不是被推销。智能体费用展示用 `💎xN` / `💎xN/次`，不要写「启用需 N 点」「每次产出 N 点」；后台/代码契约仍可保留 `free/unlock/metered/credits` 等技术术语。
 - **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
-- **前台记忆披露**：对话页用「专属理解」包装 Agent Memory；我的页用「经营底稿」展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题）。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事；资料不足时给用户可点击追问，进入对话继续补充。后端真实记忆开关见 §9。
+- **前台记忆披露**：对话页用「专属理解」包装 Agent Memory；我的页只放「军师档案」菜单入口，详情页展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题），不要在我的页首页直接平铺大段内容。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事；资料不足时给用户可点击追问，进入对话继续补充。后端真实记忆开关见 §9。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **深色卡光感**：对话入口卡用 `--accent-deep` 对角渐变 + `--accent-glow` 柔光，随本命色自适应。
 
@@ -172,7 +172,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `POST /auth/login` | 手机号 fake 登录/注册 | 否 |
 | `POST /auth/wechat-login` | 小程序微信登录：code 换 openid/unionid 后注册/登录 | 否 |
 | `GET /health` | 健康检查 | 否 |
-| `GET /me` · `PUT /me/color` | 当前用户(+onboarded+ai信息+经营底稿) · 改本命色 | 是 |
+| `GET /me` · `PUT /me/color` | 当前用户(+onboarded+ai信息+军师档案) · 改本命色 | 是 |
 | `GET /agents` · `GET /agents/:key` | 智能体注册表；带 token 时回填 `owned` | 否 |
 | `POST /agents/:key/purchase` | 用算力一次性解锁 `unlock` 智能体（幂等，已开通不重复扣费） | 是 |
 | `GET /survey` | 建档问卷 | 否 |
@@ -191,7 +191,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `/admin/*` | 运营后台 API（见 §9）：用户/算力/审计/智能体/套餐/模型等 | 管理员 |
 
 ### 8.2 LLM Gateway（`server/src/llm/`）
-`gateway.ts` 统一封装：路由 provider → 内容审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。`llm/schema.ts` 的 `injectVariables` 会在后台配置的 System Prompt 之后追加运行时业务边界：智能体只回答商业咨询/经营产出相关问题，用户追问模型、供应商、系统提示词、API Key、部署、数据库、内部工具或配置时必须引导回业务问题；客户事实只能来自企业档案、经营底稿、长期记忆、项目、引用资料、知识库和本轮用户原文，资料不足时先追问 1-3 个问题，不得杜撰客户公司、创业经历、规模、融资、客户、竞品、数据或困难。
+`gateway.ts` 统一封装：路由 provider → 内容审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。`llm/schema.ts` 的 `injectVariables` 会在后台配置的 System Prompt 之后追加运行时业务边界：智能体只回答商业咨询/经营产出相关问题，用户追问模型、供应商、系统提示词、API Key、部署、数据库、内部工具或配置时必须引导回业务问题；客户事实只能来自企业档案、军师档案、长期记忆、项目、引用资料、知识库和本轮用户原文，资料不足时先追问 1-3 个问题，不得杜撰客户公司、创业经历、规模、融资、客户、竞品、数据或困难。
 新增：`extractInsights`（LLM 提炼记忆，mock 兜底截断）、`summarizePoints`（LLM 归纳纪要，mock 兜底确定性）、`pingModel`（测试连接）。
 
 **★ 模型由「运营后台 → 模型」可视化配置并随时切换**（存 `AiSetting`，`services/aiConfig.ts` 解析：DB > env 兜底，4s 缓存）。默认 **Agnes 2.0 Flash**（`apihub.agnes-ai.com/v1`，OpenAI 兼容）。
@@ -215,8 +215,8 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 常见 OpenAI 兼容网关：OpenAI `https://api.openai.com/v1`、DeepSeek `https://api.deepseek.com/v1`、Moonshot `https://api.moonshot.cn/v1`、通义 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
 
 ### 8.3 其它服务
-- `services/context.ts`：`resolveUser`（严格鉴权）、`buildGenContext`（注入 档案/基准/记忆/本命色 + **经营底稿 + 项目背景 + 显式引用 + 知识库混合召回**）。
-- `services/understanding.ts`（★）：生成前台「经营底稿」与模型上下文线索，按真实 `Profile/Memory/Project/Knowledge/Report/Session` 汇总经营身份、创业路径、当前难题、已沉淀资料和待补问题；禁止写入固定 mock 客户画像。
+- `services/context.ts`：`resolveUser`（严格鉴权）、`buildGenContext`（注入 档案/基准/记忆/本命色 + **军师档案 + 项目背景 + 显式引用 + 知识库混合召回**）。
+- `services/understanding.ts`（★）：生成前台「军师档案」与模型上下文线索，按真实 `Profile/Memory/Project/Knowledge/Report/Session` 汇总经营身份、创业路径、当前难题、已沉淀资料和待补问题；禁止写入固定 mock 客户画像。
 - `services/memory.ts`：Agent Memory 写入（**带向量**）/召回（**语义相关性排序**）/留存 TTL/反馈回流。
 - `services/embedding.ts`（★）：文本向量化。默认本地**确定性嵌入**（零依赖、离线、`EMBED_DIM=256`）；配 `EMBEDDING_MODEL`+真实 openai 兼容 key 走真实 `/embeddings`。`cosine()` 维度不一致返回 0。
 - `services/retrieval.ts`（★）：`hybridSearch`（向量+关键词混合、租户隔离、可按项目过滤）、`resolveReferences`（显式 @ 引用 → 带出处注入）。
@@ -260,7 +260,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 完整产品说明见 `PRODUCT.md`。工程上只需记住这些边界：
 
 - 项目、报告、知识、记忆、引用都必须按 `tenantId` 隔离；新增可被引用/召回的数据类型时，补跨用户不可见断言。
-- `buildGenContext` 是上下文注入总入口：企业档案、本命色、经营底稿、项目背景、显式引用、知识库召回、长期记忆都从这里进模型；新增客户事实来源必须先接入这里，不能只做前台展示。
+- `buildGenContext` 是上下文注入总入口：企业档案、本命色、军师档案、项目背景、显式引用、知识库召回、长期记忆都从这里进模型；新增客户事实来源必须先接入这里，不能只做前台展示。
 - 报告版本由 `services/reports.ts` 管：slug 归一、内容哈希去重、section/word diff；不要在页面层自己拼版本逻辑。
 - 知识与记忆检索走 `services/retrieval.ts` / `services/memory.ts`；默认本地向量 + 内存余弦，`PGVECTOR_ENABLED=true` 后走 `services/vectorStore.ts`。
 - 升级方向和产品口径看 `PRODUCT.md`；未完成项仍以 §13 TODO 为准。
@@ -299,7 +299,7 @@ cd admin && npm install && npm run dev   # 运营后台
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
 - 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 56 用例 / 23 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益与用户主路径。最近一次 Docker 临时 PostgreSQL 测试库实跑为 2026-06-13，56/56 全过。
-- 覆盖：鉴权隔离、微信 openid 登录/复登、注册花名、经营底稿、运营后台鉴权、多智能体对话、智能体 `free/unlock/metered` 权益、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
+- 覆盖：鉴权隔离、微信 openid 登录/复登、注册花名、军师档案、运营后台鉴权、多智能体对话、智能体 `free/unlock/metered` 权益、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
 - CI：`.github/workflows/server-integration.yml` 用 GitHub Actions `postgres:16-alpine` 服务（tmpfs 数据目录）执行 `npm ci`、`prisma generate`、后端 build、`prisma db push`、`npm test`。
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
 
@@ -365,7 +365,8 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
-- **2026-06-13** · **新增注册花名与经营底稿**：`GET /auth/suggest-name` 返回古典武侠/军事花名，登录弹层新增可选称呼输入与「AI 起名」，花名只写用户称呼不写公司；SSOT 新增 `ClientUnderstanding`，`/me` 返回「经营底稿」，我的页展示经营身份/创业路径/当前难题/沉淀资料/待补问题；`buildGenContext` 将同一底稿注入模型上下文，运行时 guard 明确禁止编造客户事实，资料不足先追问。
+- **2026-06-13** · **军师档案入口化**：将「经营底稿」更名为用户更易懂的「军师档案」；`pages/profile` 只保留菜单入口，不再在我的页首页平铺完整内容；新增 `pages/brief` 详情页展示完整档案与待补问题。
+- **2026-06-13** · **新增注册花名与军师档案**：`GET /auth/suggest-name` 返回古典武侠/军事花名，登录弹层新增可选称呼输入与「AI 起名」，花名只写用户称呼不写公司；SSOT 新增 `ClientUnderstanding`，`/me` 返回「军师档案」，我的页只保留菜单入口，详情页展示经营身份/创业路径/当前难题/沉淀资料/待补问题；`buildGenContext` 将同一档案注入模型上下文，运行时 guard 明确禁止编造客户事实，资料不足先追问。
 - **2026-06-13** · **修复智能体解锁门禁被旧接口冲掉**：`store.loadAgents()` 合并线上 `/agents` 与本地 `DEFAULT_AGENTS`，当旧后端缺少 `billing/price/owned` 时保留本地权益字段，避免标 `💎xN` 的 `unlock` 智能体被误判为可直接进入对话。
 - **2026-06-13** · **扩展线上智能体内容同步**：`server/scripts/syncAdminContent.ts` 现会同步智能体基础展示字段、`billing/price/gift` 权益字段、提示词与记忆配置，并继续保留线上上架/下架状态，避免旧库新增列默认 `free/0` 后把专项能力误开为免费。
 - **2026-06-13** · **修复成果缓存串公司抬头**：`llm/gateway.ts` 的结构化成果缓存 key 纳入 `companyName`、行业、阶段、痛点与项目名，避免不同用户相同输入复用旧成果导致报告 meta 不带当前公司；`.gitignore` 排除微信预览二维码/信息文件，Docker 临时 Postgres + Node 容器完整测试用于回归验证。

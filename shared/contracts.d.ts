@@ -84,7 +84,7 @@ export interface ClientUnderstandingSection {
   items: string[];
   emptyText?: string;
 }
-/** 前台「经营底稿」：把真实档案、记忆、项目和知识沉淀整理成客户可读的咨询理解 */
+/** 前台「军师档案」：把真实档案、记忆、项目和知识沉淀整理成客户可读的咨询理解 */
 export interface ClientUnderstanding {
   title: string;
   subtitle: string;
