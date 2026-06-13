@@ -741,6 +741,15 @@ describe('TC-X 身份与账号注销', () => {
     assert.equal(before.body.user.name, '', '新账号不应有编造的随机名');
     assert.equal(before.body.understanding.title, '军师档案', '/me 应返回用户可读的经营理解');
 
+    const tenantId = await tenantOf(t);
+    await prisma.user.update({ where: { id: t }, data: { name: '用户1018' } });
+    await prisma.tenant.update({ where: { id: tenantId }, data: { name: '企业1018' } });
+    const placeholder = await api('GET', '/api/me', { token: t });
+    const identity = placeholder.body.understanding.sections.find((s: any) => s.key === 'identity');
+    assert.deepEqual(identity.items, [], '历史占位名不应展示为真实经营身份');
+    assert.ok(placeholder.body.understanding.nextQuestions.includes('以后军师怎么称呼你？'), '占位称呼应继续触发追问');
+    assert.ok(placeholder.body.understanding.nextQuestions.includes('你的公司、门店或品牌叫什么？'), '占位公司应继续触发追问');
+
     const alias = await api('GET', '/api/auth/suggest-name');
     assert.equal(alias.status, 200);
     assert.ok(alias.body.name && alias.body.source, '应返回一个可填入注册框的花名');
@@ -765,7 +774,38 @@ describe('TC-X 身份与账号注销', () => {
     assert.ok(!r.body.deliverable.meta.includes('云栖科技'), '不应出现硬编码的占位公司');
   });
 
-  test('X3 注销账号 → 删除数据，原 token 失效', async () => {
+  test('X3 军师档案访谈模式不自动召回旧项目/知识', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    const p = await api('POST', '/api/projects', { token: t, body: { name: '2026 融资冲刺', summary: '旧项目摘要：A 轮估值逻辑' } });
+    const k = await api('POST', '/api/knowledge', {
+      token: t,
+      body: { text: '旧融资报告：高价值客群在制造/医疗，NRR 100-110%', projectId: p.body.id, kind: 'insight', title: '旧融资报告' },
+    });
+    await prisma.memory.create({
+      data: {
+        tenantId, userId: t, agentKey: 'general', kind: 'insight',
+        text: '旧记忆：融资冲刺里提过三层定价',
+        source: 'conversation', weight: 1,
+      },
+    });
+
+    const { ctx, knowledgeUsed } = await buildGenContext({
+      userId: t,
+      tenantId,
+      agentKey: 'general',
+      projectId: p.body.id,
+      refs: [{ kind: 'knowledge', id: k.body.id, label: '旧融资报告' }],
+      userMessage: '请进入军师档案访谈模式，先问我几个简单问题',
+    });
+    assert.deepEqual(ctx.memories, [], '访谈模式不应召回长期记忆');
+    assert.deepEqual(ctx.references, [], '访谈模式不应注入显式旧引用');
+    assert.deepEqual(ctx.knowledge, [], '访谈模式不应自动召回知识库');
+    assert.equal(ctx.projectSummary, null, '访谈模式不应带旧项目摘要展开分析');
+    assert.deepEqual(knowledgeUsed, [], '访谈模式不应声明使用旧资料');
+  });
+
+  test('X4 注销账号 → 删除数据，原 token 失效', async () => {
     const t = await login(uniquePhone());
     await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
     const del = await api('DELETE', '/api/me', { token: t });

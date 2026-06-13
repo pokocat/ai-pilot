@@ -24,8 +24,11 @@
 .lg-input { flex: 1; height: 52px; font-size: 15px; color: var(--ink); }
 .lg-code { font-size: 13px; font-weight: 600; white-space: nowrap; }
 .lg-code.off { color: var(--ink-3); }
-.lg-alias { font-size: 13px; font-weight: 700; white-space: nowrap; }
-.lg-alias.off { color: var(--ink-3); }
+.lg-alias {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+}
+.lg-alias.off { opacity: .7; }
 
 .lg-wx {
   width: 100%; height: 52px; border-radius: 14px; color: #fff;

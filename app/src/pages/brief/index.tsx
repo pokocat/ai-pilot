@@ -55,10 +55,10 @@ export default function BriefPage() {
 
             {understanding.nextQuestions.length ? (
               <View className="bf-sec">
-                <Text className="bf-sec-t">下次先问清楚</Text>
+                <Text className="bf-sec-t">军师下一步会问</Text>
                 <View className="bf-chip-wrap">
                   {understanding.nextQuestions.map((q) => (
-                    <View key={q} className="bf-chip" style={{ background: 'var(--accent-soft)' }} onClick={() => askQuestion(q)}>
+                    <View key={q} className="bf-chip" style={{ background: 'var(--accent-soft)' }} onClick={() => startInterview(q)}>
                       <Text style={{ color: 'var(--accent-ink)' }}>{q}</Text>
                     </View>
                   ))}
@@ -72,8 +72,9 @@ export default function BriefPage() {
           </View>
         )}
 
-        <View className="bf-cta" style={{ background: accent }} onClick={() => askQuestion('帮我补齐军师档案，先问我几个关键问题')}>
-          <Text>补充经营情况</Text>
+        <View className="bf-cta" style={{ background: accent }} onClick={() => startInterview()}>
+          <Icon name="spark" size={17} color="#fff" />
+          <Text>让军师来问我</Text>
         </View>
       </View>
     </View>
@@ -97,6 +98,9 @@ function evidenceLine(u: ClientUnderstanding): string {
   return parts.length ? parts.join(' · ') : '暂无沉淀资料';
 }
 
-function askQuestion(q: string) {
-  Taro.navigateTo({ url: `/pages/chat/index?send=${encodeURIComponent(q)}` });
+function startInterview(focus?: string) {
+  const text = focus
+    ? `请进入军师档案访谈模式，围绕「${focus}」只问我一个简单具体的问题。不要先分析，不要引用旧报告，不要替我假设业务事实。`
+    : '请进入军师档案访谈模式。不要先分析，不要引用旧报告，不要替我假设业务事实；请先用老板能听懂的话问我 3 个简单具体的问题，帮你补齐行业、阶段和当前难题。';
+  Taro.navigateTo({ url: `/pages/chat/index?send=${encodeURIComponent(text)}` });
 }

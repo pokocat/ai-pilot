@@ -20,6 +20,10 @@ function needsCustomerInput(ctx: GenContext): boolean {
   return !hasContext && (ctx.understandingMaturity === 'empty' || ctx.userMessage.trim().length < 24);
 }
 
+function wantsBriefInterview(ctx: GenContext): boolean {
+  return /军师档案访谈模式|补齐军师档案|完善军师档案|更新军师档案|让军师来问/.test(ctx.userMessage);
+}
+
 function nextQuestions(ctx: GenContext): string[] {
   const qs = ctx.understandingQuestions?.length
     ? ctx.understandingQuestions
@@ -28,14 +32,14 @@ function nextQuestions(ctx: GenContext): string[] {
 }
 
 export function mockDeliverable(ctx: GenContext): Deliverable {
-  if (needsCustomerInput(ctx)) {
+  if (wantsBriefInterview(ctx) || needsCustomerInput(ctx)) {
     return {
-      title: '先补齐军师档案',
+      title: '先让军师问清楚',
       icon: 'target',
       meta: metaOf(ctx),
       sections: [
-        { h: '需要先确认', b: '现有资料还不足以判断你的真实业务，军师不会替你编造公司背景或经营困难。' },
-        { h: '请补充三点', list: nextQuestions(ctx) },
+        { h: '先问几个关键问题', b: '我先把你的行业、阶段和当前卡点问清楚，再给下一步判断。' },
+        { h: '请你简单回答', list: nextQuestions(ctx) },
       ],
       trust: TRUST_NOTE,
       actions: ['save_to_library'],
@@ -62,11 +66,11 @@ export function mockDeliverable(ctx: GenContext): Deliverable {
 }
 
 export function mockChat(ctx: GenContext): ChatReply {
-  if (needsCustomerInput(ctx)) {
+  if (wantsBriefInterview(ctx) || needsCustomerInput(ctx)) {
     return {
-      text: '我先不替你假设业务背景。要给出贴近你实际情况的判断，需要先补几项军师档案。',
+      text: '好，我先问清楚，再给判断。你不用写长文，按下面几个问题简单答就行。',
       points: nextQuestions(ctx),
-      acts: [['target', '补充经营情况']],
+      acts: [['spark', '开始补档案']],
     };
   }
   const r = REPLIES['默认'];

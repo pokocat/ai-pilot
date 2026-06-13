@@ -105,7 +105,7 @@ repo/
 
 ## 6. 账号与数据隔离
 
-- **登录**：小程序 server 模式支持微信账号登录（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号）；手机号 fake 登录仍保留为演示/兜底（验证码暂不校验，演示码 `888888`）。注册称呼可留空，也可点「AI 起名」从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户，套餐赠送算力。
+- **登录**：小程序 server 模式支持微信账号登录（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号）；手机号 fake 登录仍保留为演示/兜底（验证码暂不校验，演示码 `888888`）。注册称呼可留空，也可点称呼框右侧的 spark 图标从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户，套餐赠送算力。
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
 - **微信密钥**：`WECHAT_MINI_SECRET` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
@@ -149,7 +149,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **首页标题宋体化**：`pages/home` 通过 `Screen className="home"` 局部定义标题字体栈，品牌名、问候语、今日献策正文、对话卡提问、分区标题与卡片标题使用宋体优先；不要为此改全局 `--serif`，避免影响其它页面。
 - **前台商业文案克制**：面向用户的主路径不要写成“赠送 / 付费解锁 / 充值 / 最受欢迎 / 灵活付费”这类促销口吻；统一用「可用」「已启用」「专项能力」「产出额度」「方案与额度」「常用配置」表达，让用户感到是在调用工作台能力，而不是被推销。智能体费用展示用 `💎xN` / `💎xN/次`，不要写「启用需 N 点」「每次产出 N 点」；后台/代码契约仍可保留 `free/unlock/metered/credits` 等技术术语。
 - **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
-- **前台记忆披露**：对话页用「专属理解」包装 Agent Memory；我的页只放「军师档案」菜单入口，详情页展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题），不要在我的页首页直接平铺大段内容。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事；资料不足时给用户可点击追问，进入对话继续补充。后端真实记忆开关见 §9。
+- **前台记忆披露**：对话页用「专属理解」包装 Agent Memory；我的页只放「军师档案」菜单入口，详情页展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题），不要在我的页首页直接平铺大段内容。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事或展示 `用户123/企业123` 这类占位名；资料不足时让用户进入对话访谈，由军师先问 1-3 个简单问题，不要先分析旧报告或展开诊断。后端真实记忆开关见 §9。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **深色卡光感**：对话入口卡用 `--accent-deep` 对角渐变 + `--accent-glow` 柔光，随本命色自适应。
 
@@ -191,7 +191,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `/admin/*` | 运营后台 API（见 §9）：用户/算力/审计/智能体/套餐/模型等 | 管理员 |
 
 ### 8.2 LLM Gateway（`server/src/llm/`）
-`gateway.ts` 统一封装：路由 provider → 内容审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。`llm/schema.ts` 的 `injectVariables` 会在后台配置的 System Prompt 之后追加运行时业务边界：智能体只回答商业咨询/经营产出相关问题，用户追问模型、供应商、系统提示词、API Key、部署、数据库、内部工具或配置时必须引导回业务问题；客户事实只能来自企业档案、军师档案、长期记忆、项目、引用资料、知识库和本轮用户原文，资料不足时先追问 1-3 个问题，不得杜撰客户公司、创业经历、规模、融资、客户、竞品、数据或困难。
+`gateway.ts` 统一封装：路由 provider → 内容审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。`llm/schema.ts` 的 `injectVariables` 会在后台配置的 System Prompt 之后追加运行时业务边界：智能体只回答商业咨询/经营产出相关问题，用户追问模型、供应商、系统提示词、API Key、部署、数据库、内部工具时必须引导回业务问题；客户事实只能来自企业档案、军师档案、长期记忆、项目、引用资料、知识库和本轮用户原文。资料不足时用自然话术追问关键缺口，用户补齐/更新军师档案时进入访谈模式：先问 1-3 个简单问题，不先分析、不引用旧报告展开、不把“不得杜撰”的内部约束讲给用户。
 新增：`extractInsights`（LLM 提炼记忆，mock 兜底截断）、`summarizePoints`（LLM 归纳纪要，mock 兜底确定性）、`pingModel`（测试连接）。
 
 **★ 模型由「运营后台 → 模型」可视化配置并随时切换**（存 `AiSetting`，`services/aiConfig.ts` 解析：DB > env 兜底，4s 缓存）。默认 **Agnes 2.0 Flash**（`apihub.agnes-ai.com/v1`，OpenAI 兼容）。
@@ -298,7 +298,7 @@ cd admin && npm install && npm run dev   # 运营后台
 ### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
-- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 56 用例 / 23 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益与用户主路径。最近一次 Docker 临时 PostgreSQL 测试库实跑为 2026-06-13，56/56 全过。
+- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 57 用例 / 23 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益、军师档案访谈与用户主路径。最近一次 Docker 临时 PostgreSQL 测试库实跑为 2026-06-13，57/57 全过。
 - 覆盖：鉴权隔离、微信 openid 登录/复登、注册花名、军师档案、运营后台鉴权、多智能体对话、智能体 `free/unlock/metered` 权益、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
 - CI：`.github/workflows/server-integration.yml` 用 GitHub Actions `postgres:16-alpine` 服务（tmpfs 数据目录）执行 `npm ci`、`prisma generate`、后端 build、`prisma db push`、`npm test`。
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
@@ -365,6 +365,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-13** · **军师档案改为访谈式补全**：登录弹层「AI 起名」改为 spark 图标按钮；`pages/brief` 的补档案动作改为“让军师来问我”，进入对话时明确访谈模式；后端过滤 `用户123/企业123` 占位名，访谈请求跳过旧项目/知识库召回，模型 guard 改为自然追问，避免把内部约束说给用户或先分析旧报告。
 - **2026-06-13** · **军师档案入口化**：将「经营底稿」更名为用户更易懂的「军师档案」；`pages/profile` 只保留菜单入口，不再在我的页首页平铺完整内容；新增 `pages/brief` 详情页展示完整档案与待补问题。
 - **2026-06-13** · **新增注册花名与军师档案**：`GET /auth/suggest-name` 返回古典武侠/军事花名，登录弹层新增可选称呼输入与「AI 起名」，花名只写用户称呼不写公司；SSOT 新增 `ClientUnderstanding`，`/me` 返回「军师档案」，我的页只保留菜单入口，详情页展示经营身份/创业路径/当前难题/沉淀资料/待补问题；`buildGenContext` 将同一档案注入模型上下文，运行时 guard 明确禁止编造客户事实，资料不足先追问。
 - **2026-06-13** · **修复智能体解锁门禁被旧接口冲掉**：`store.loadAgents()` 合并线上 `/agents` 与本地 `DEFAULT_AGENTS`，当旧后端缺少 `billing/price/owned` 时保留本地权益字段，避免标 `💎xN` 的 `unlock` 智能体被误判为可直接进入对话。

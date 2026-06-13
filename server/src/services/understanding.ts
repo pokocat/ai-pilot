@@ -15,6 +15,18 @@ function clean(v: unknown, max = 120): string {
   return typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '';
 }
 
+export function isPlaceholderCustomerLabel(v: unknown): boolean {
+  const s = clean(v, 40);
+  if (!s) return true;
+  if (/^(用户|企业|公司|租户)\d+$/.test(s)) return true;
+  return ['用户', '企业', '公司', '微信用户', '匿名用户', '未命名', '测试用户', '测试企业'].includes(s);
+}
+
+export function meaningfulCustomerLabel(v: unknown, max = 120): string {
+  const s = clean(v, max);
+  return isPlaceholderCustomerLabel(s) ? '' : s;
+}
+
 function pushUnique(list: string[], value: unknown, max = 4) {
   const v = clean(value);
   if (v && !list.includes(v) && list.length < max) list.push(v);
@@ -89,9 +101,12 @@ export async function buildClientUnderstanding(user: UserForUnderstanding): Prom
     }),
   ]);
 
+  const userName = meaningfulCustomerLabel(user.name);
+  const tenantName = meaningfulCustomerLabel(tenant?.name);
+
   const identity: string[] = [];
-  pushUnique(identity, user.name ? `服务对象：${user.name}` : '');
-  pushUnique(identity, tenant?.name ? `企业/品牌：${tenant.name}` : '');
+  pushUnique(identity, userName ? `服务对象：${userName}` : '');
+  pushUnique(identity, tenantName ? `企业/品牌：${tenantName}` : '');
   pushUnique(identity, profile?.industry || tenant?.industry ? `行业：${profile?.industry ?? tenant?.industry}` : '');
   pushUnique(identity, profile?.stage || tenant?.stage ? `阶段：${profile?.stage ?? tenant?.stage}` : '');
 
@@ -116,8 +131,8 @@ export async function buildClientUnderstanding(user: UserForUnderstanding): Prom
   for (const r of reports) pushUnique(materials, `报告《${r.title}》v${r.currentVersion}`, 6);
 
   const nextQuestions: string[] = [];
-  if (!clean(user.name)) nextQuestions.push('以后军师怎么称呼你？');
-  if (!clean(tenant?.name)) nextQuestions.push('你的公司、门店或品牌叫什么？');
+  if (!userName) nextQuestions.push('以后军师怎么称呼你？');
+  if (!tenantName) nextQuestions.push('你的公司、门店或品牌叫什么？');
   if (!profile?.industry) nextQuestions.push('你现在主要做哪个行业或品类？');
   if (!profile?.stage) nextQuestions.push('业务处在起步、增长、规模化还是稳定经营阶段？');
   if (!profile?.pain) nextQuestions.push('这段时间最卡你的经营问题是什么？');

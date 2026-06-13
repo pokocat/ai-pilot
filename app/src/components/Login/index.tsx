@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
+import Icon from '../Icon';
 import { api } from '../../services/api';
 import { IS_MOCK } from '../../services/config';
 import { store } from '../../services/store';
@@ -138,13 +139,13 @@ export default function Login({ open, onLoggedIn }: Props) {
             placeholder="称呼 / 花名（可选）"
             onInput={(e) => setName(e.detail.value)}
           />
-          <Text
+          <View
             className={`lg-alias ${nameLoading ? 'off' : ''}`}
-            style={nameLoading ? {} : { color: accent }}
+            style={{ background: nameLoading ? 'var(--surface-2)' : 'var(--accent-soft)' }}
             onClick={suggestName}
           >
-            {nameLoading ? '起名中…' : 'AI 起名'}
-          </Text>
+            <Icon name="spark" size={18} color={nameLoading ? '#9AA0A6' : accent} />
+          </View>
         </View>
 
         <View className="lg-field">

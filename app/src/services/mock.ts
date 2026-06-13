@@ -138,7 +138,7 @@ const agentOf = (key: string): Agent =>
   DEFAULT_AGENTS.find((a) => a.key === key) || DEFAULT_AGENTS.find((a) => a.key === 'general')!;
 
 function metaOf(d: UserData): string {
-  const parts = [d.company, d.profile?.industry].filter(Boolean) as string[];
+  const parts = [meaningfulM(d.company), d.profile?.industry].filter(Boolean) as string[];
   return parts.length ? parts.join(' · ') : '经营快照';
 }
 
@@ -157,6 +157,16 @@ function buildDeliverable(deliverableKey: string, d: UserData): Deliverable {
 
 const delay = <T>(v: T, ms = 280): Promise<T> => new Promise((r) => setTimeout(() => r(v), ms));
 const cleanM = (v: unknown, max = 120): string => (typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '');
+function isPlaceholderM(v: unknown): boolean {
+  const s = cleanM(v, 40);
+  if (!s) return true;
+  if (/^(用户|企业|公司|租户)\d+$/.test(s)) return true;
+  return ['用户', '企业', '公司', '微信用户', '匿名用户', '未命名', '测试用户', '测试企业'].includes(s);
+}
+function meaningfulM(v: unknown, max = 120): string {
+  const s = cleanM(v, max);
+  return isPlaceholderM(s) ? '' : s;
+}
 function pushUniqueM(list: string[], value: unknown, max = 4) {
   const v = cleanM(value);
   if (v && !list.includes(v) && list.length < max) list.push(v);
@@ -173,9 +183,11 @@ function extraLinesM(extra: unknown): string[] {
   return out;
 }
 function buildUnderstandingM(d: UserData): ClientUnderstanding {
+  const userName = meaningfulM(d.name);
+  const companyName = meaningfulM(d.company);
   const identity: string[] = [];
-  pushUniqueM(identity, d.name ? `服务对象：${d.name}` : '');
-  pushUniqueM(identity, d.company ? `企业/品牌：${d.company}` : '');
+  pushUniqueM(identity, userName ? `服务对象：${userName}` : '');
+  pushUniqueM(identity, companyName ? `企业/品牌：${companyName}` : '');
   pushUniqueM(identity, d.profile?.industry ? `行业：${d.profile.industry}` : '');
   pushUniqueM(identity, d.profile?.stage ? `阶段：${d.profile.stage}` : '');
 
@@ -194,8 +206,8 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
   d.reports.slice(0, 4).forEach((r) => pushUniqueM(materials, `报告《${r.title}》v${r.currentVersion}`, 6));
 
   const nextQuestions: string[] = [];
-  if (!d.name) nextQuestions.push('以后军师怎么称呼你？');
-  if (!d.company) nextQuestions.push('你的公司、门店或品牌叫什么？');
+  if (!userName) nextQuestions.push('以后军师怎么称呼你？');
+  if (!companyName) nextQuestions.push('你的公司、门店或品牌叫什么？');
   if (!d.profile?.industry) nextQuestions.push('你现在主要做哪个行业或品类？');
   if (!d.profile?.stage) nextQuestions.push('业务处在起步、增长、规模化还是稳定经营阶段？');
   if (!d.profile?.pain) nextQuestions.push('这段时间最卡你的经营问题是什么？');
@@ -228,12 +240,16 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
 }
 
 function needsInputM(d: UserData, text: string, refs?: MessageRef[], projectId?: string | null): boolean {
-  const hasContext = !!d.company || !!d.profile || d.knowledge.length > 0 || d.projects.length > 0 || !!refs?.length || !!projectId;
+  const hasContext = !!meaningfulM(d.company) || !!d.profile || d.knowledge.length > 0 || d.projects.length > 0 || !!refs?.length || !!projectId;
   return !hasContext && text.trim().length < 24;
 }
 
 function inputQuestionsM(d: UserData): string[] {
   return buildUnderstandingM(d).nextQuestions.slice(0, 3);
+}
+
+function wantsBriefInterviewM(text: string): boolean {
+  return /军师档案访谈模式|补齐军师档案|完善军师档案|更新军师档案|让军师来问/.test(text);
 }
 
 // ── 版本化报告 / 知识 / 引用 的本地实现（与后端同口径，纯前端、零依赖） ──
@@ -512,11 +528,11 @@ export const mock = {
     const projName = projectId ? d.projects.find((p) => p.id === projectId)?.name : undefined;
 
     let res: GenResult;
-    if (needsInputM(d, text, body.refs, projectId)) {
+    if (wantsBriefInterviewM(text) || needsInputM(d, text, body.refs, projectId)) {
       const reply = {
-        text: '我先不替你假设业务背景。要给出贴近你实际情况的判断，需要先补几项军师档案。',
+        text: '好，我先问清楚，再给判断。你不用写长文，按下面几个问题简单答就行。',
         points: inputQuestionsM(d),
-        acts: [['target', '补充经营情况']] as [string, string][],
+        acts: [['spark', '开始补档案']] as [string, string][],
       };
       const msg: SessionMessage = { id: uid('m-'), role: 'assistant', content: reply, at: now() };
       session.messages.push(msg);

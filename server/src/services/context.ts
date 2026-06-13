@@ -2,12 +2,16 @@ import { prisma } from '../db.js';
 import { INDUSTRY_BENCHMARK } from '../data/seedConfig.js';
 import { recallMemories } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
-import { buildClientUnderstanding, understandingContextLines } from './understanding.js';
+import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
 import type { GenContext, MessageRef } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 
 function unauthorized() {
   return Object.assign(new Error('未登录或登录已失效'), { statusCode: 401, code: 'UNAUTHORIZED' });
+}
+
+function isBriefInterviewRequest(text: string): boolean {
+  return /军师档案访谈模式|补齐军师档案|完善军师档案|更新军师档案|让军师来问/.test(text);
 }
 
 /**
@@ -41,22 +45,27 @@ export async function buildGenContext(opts: {
     : null;
 
   const memoryConfig = agent.memoryConfig as unknown as MemoryConfig;
+  const briefInterview = isBriefInterviewRequest(opts.userMessage);
   // 长期记忆：按当前问题做语义召回；后台关闭 longTerm 后不再注入既有记忆。
-  const memories = memoryConfig.longTerm
+  const memories = memoryConfig.longTerm && !briefInterview
     ? await recallMemories(opts.userId, opts.agentKey, 5, opts.userMessage)
     : [];
 
   // 项目背景
   let projectName: string | null = null;
   let projectSummary: string | null = null;
-  if (opts.projectId) {
+  if (opts.projectId && !briefInterview) {
     const proj = await prisma.project.findFirst({ where: { id: opts.projectId, tenantId: opts.tenantId } });
     if (proj) { projectName = proj.name; projectSummary = proj.summary ?? null; }
   }
 
   // 显式引用（可溯源）+ 知识库混合检索（自动召回，项目内优先）
-  const { lines: refLines, labels: refLabels } = await resolveReferences(opts.tenantId, opts.userId, opts.refs);
-  const hits = await hybridSearch({ tenantId: opts.tenantId, projectId: opts.projectId ?? undefined, query: opts.userMessage, topK: 4 });
+  const { lines: refLines, labels: refLabels } = briefInterview
+    ? { lines: [], labels: [] }
+    : await resolveReferences(opts.tenantId, opts.userId, opts.refs);
+  const hits = briefInterview
+    ? []
+    : await hybridSearch({ tenantId: opts.tenantId, projectId: opts.projectId ?? undefined, query: opts.userMessage, topK: 4 });
   const knowledge = hits.map((h) => `【知识：${h.item.title ?? h.item.kind}】${h.snippet}`);
   const knowledgeUsed = [...refLabels, ...hits.map((h) => h.item.title ?? h.snippet.slice(0, 20))];
 
@@ -65,7 +74,7 @@ export async function buildGenContext(opts: {
     agentName: agent.name,
     systemPrompt: agent.systemPrompt,
     deliverableKey: agent.deliverableKey,
-    companyName: tenant?.name || null,
+    companyName: meaningfulCustomerLabel(tenant?.name) || null,
     profile: profile ? { industry: profile.industry, stage: profile.stage, pain: profile.pain } : null,
     memories,
     benmingColor: user?.benmingColor ?? 'gold',
