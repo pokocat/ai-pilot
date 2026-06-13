@@ -33,7 +33,7 @@
 特色：
 - **本命色**：首登强制选择一种「本命色」主题（金/绿/红/蓝/紫/铁），全站配色随之自适应；可在「我的」重选。
 - **Agent Memory**：顾问从对话/资料/反馈中持续学习，越用越懂客户（运营后台可配策略）。
-- **智能体权益 / 算力解锁**：智能体支持 `free` 注册赠送、`unlock` 一次性算力解锁、`metered` 按次计费；用户可前台用算力解锁，运营后台也可为指定用户开通/取消付费智能体。
+- **智能体权益 / 产出额度**：智能体底层支持 `free`、`unlock` 一次性启用、`metered` 按次计费；前台统一用「可用 / 已启用 / 专项能力 / 产出额度 / 方案」表达，避免把主路径写成赠送、解锁、充值或促销货架；运营后台仍可为指定用户开通/取消付费智能体。
 - **企业事务操作系统**（★ 新）：以「**项目**」为主线，串起 会话 / **版本化报告** / **知识库** / 长期记忆。对话可 **@ 引用** 项目/报告/某段知识（可溯源注入）；报告按「报告名」版本化、可**看变更（diff）**；对话可一键**汇总成纪要**并沉淀进知识库；知识库用 **语义检索 + 关键词** 混合召回。详见「✦ 企业事务操作系统」章节。
 - **多租户**：每个账号独立租户，业务数据行级隔离。
 
@@ -55,7 +55,7 @@ repo/
 └── project/            # 原始高保真原型（设计事实来源，勿改）
 ```
 
-本地生成物约定：`app/project.config.json` 是正式小程序配置（需跟踪）；`app/project.private.config.json`、根目录误生成的 `project.config.json/project.private.config.json`、`app/.impeccable/`、`app/tarojs-cli-*.tgz`、根目录空 `package-lock.json` 均为本机/工具产物，已在 `.gitignore` 排除，不纳入提交。
+本地生成物约定：`app/project.config.json` 是正式小程序配置（需跟踪，保持 AppID/miniprogramRoot 正确并开启正式校验/压缩）；`app/project.private.config.json` 可在本机覆盖 DevTools 私有设置（例如局域网真机预览临时 `urlCheck:false`）；根目录误生成的 `project.config.json/project.private.config.json`、`app/.impeccable/`、`app/tarojs-cli-*.tgz`、根目录空 `package-lock.json` 均为本机/工具产物，已在 `.gitignore` 排除，不纳入提交。**不要导入仓库根目录到微信开发者工具，只导入 `app/`。**
 
 ---
 
@@ -113,7 +113,7 @@ repo/
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
 - **微信密钥**：`WECHAT_MINI_SECRET` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
-- **套餐购买（演示级）**：前台可读 `GET /plans`，登录后 `POST /plans/:id/purchase` 切换套餐并按套餐写入 `CreditLedger`；企业版 `creditsPerMonth<0` 记为不限量（余额 `-1`，产出不扣减）。真实支付/微信支付回调尚未接入，见 §13。
+- **方案购买（演示级）**：前台可读 `GET /plans`，登录后 `POST /plans/:id/purchase` 切换方案并按方案写入 `CreditLedger`；前台显示为「方案与产出额度」，企业版 `creditsPerMonth<0` 记为不限量（余额 `-1`，产出不扣减）。真实支付/微信支付回调尚未接入，见 §13。
 - **智能体开通**：`free`/`metered` 智能体无需开通即可用；`unlock` 智能体需用户用算力购买（`POST /agents/:key/purchase`）或运营后台开通后才能对话/产出，未开通产出返回 `403 AGENT_LOCKED` 且不落会话。
 - **离线兜底**：server 模式下后端不可达时，登录回退为 `local-<手机号>` 本地会话，保证可体验（无服务端数据）。
 - **退出登录**：「我的」页底部。
@@ -128,13 +128,13 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 | Tab | 页面 | 说明 |
 |---|---|---|
-| 首页 | `pages/home` | 问候 + 今日献策 + 对话入口卡 + 「军师为你发现」+ 智库赠送顾问 |
-| 智库 | `pages/thinktank` | 顾问型智能体列表（advisory），含赠送/已解锁/待解锁状态 |
+| 首页 | `pages/home` | 问候 + 今日献策 + 对话入口卡 + 「今日经营线索」+ 常用顾问 |
+| 智库 | `pages/thinktank` | 顾问型智能体列表（advisory），前台展示可用/已启用/按需/专项能力状态 |
 | 对话 | `pages/sessions` | 会话历史；底栏中间「对话」=开新会话 |
-| 智能体 | `pages/studio` | 创作型智能体（creative），支持按次/解锁展示 + 训练专属智能体 |
-| 我的 | `pages/profile` | 账号/项目工作台/方案库/套餐与算力弹层/本命色/退出登录 |
+| 智能体 | `pages/studio` | 创作型智能体（creative），支持按需/专项能力展示 + 专属助手配置 |
+| 我的 | `pages/profile` | 账号/项目工作台/方案库/方案与额度弹层/本命色/退出登录 |
 
-非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡）、`pages/library`（方案库）。
+非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡）留在主包；项目工作台、项目详情、方案库、报告页已拆到 `packages/work/*` 分包（`packages/work/projects`、`project`、`library`、`report`），由 `pages/profile` 与 `pages/chat` 预加载。
 
 ### 7.2 关键 UI 约定（踩过的坑，勿回退）
 - **顶部让位胶囊**：自定义导航页内容必须落到「系统状态栏 + 微信胶囊」之下。
@@ -142,17 +142,20 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
   - 其它 Tab 页：`<Screen topInset>`，由 `components/Screen` 注入实测高度的顶部占位（CSS 兜底 `env(safe-area-inset-top)+52px`）。
   - 非 Tab 自定义头（对话/项目/方案库/报告等）必须使用 `components/SafeHeader`，由它统一实测 `getMenuButtonBoundingClientRect()` 设置顶部 padding 与右侧胶囊留白；不要在页面 SCSS 里各自写 `env(safe-area-inset-top)` 头部 padding。
   - **不要再加伪状态栏 `9:41`**（已全部移除）。
-- **全屏弹层遮挡底栏**：`custom-tab-bar` 是原生层，不能只靠 z-index。全屏弹层（登录 / 本命色 picker / @引用面板 / 智能体解锁 / 套餐算力）必须调用 `store.setOverlay(open, key)`：它会按唯一 key 登记来源、同步 `Taro.hideTabBar/showTabBar`、写入 `junshi.tabbarHidden` 供 `custom-tab-bar` 跨实例读取并 `return null`，避免登录页露出底部导航。正常 Tab 页由 `custom-tab-bar` 挂载时调用 `hideNativeTabBarOnly()` 只压住微信原生文字 tabbar，不写入 `junshi.tabbarHidden`，避免悬浮底栏和原生底栏重复出现。**新增全屏弹层时务必使用稳定唯一 key，并在关闭/卸载时清理**。
+- **全屏弹层遮挡底栏**：`custom-tab-bar` 是原生层，不能只靠 z-index。全屏弹层（登录 / 本命色 picker / @引用面板 / 智能体启用 / 方案与额度）必须调用 `store.setOverlay(open, key)`：它会按唯一 key 登记来源、写入 `junshi.tabbarHidden` 供 `custom-tab-bar` 跨实例读取并 `return null`，避免弹层露出底部导航。**微信原生 tabbar 必须始终隐藏**：`services/tabbar.ts` 只允许调用 `Taro.hideTabBar`，不要在关闭弹层时调用 `Taro.showTabBar`，否则真机会偶发出现微信默认底栏 + 自定义胶囊双底栏。正常 Tab 页由 `custom-tab-bar` 挂载时调用 `hideNativeTabBarOnly()` 只压住微信原生文字 tabbar，不写入 overlay storage。**新增全屏弹层时务必使用稳定唯一 key，并在关闭/卸载时清理**。
+- **自定义底栏状态同步**：`custom-tab-bar` 只用 `eventCenter` + 页面 `useDidShow` 同步 overlay 和原生底栏隐藏，不做常驻轮询；如果真机再出现原生底栏回弹，优先在 `hideNativeTabBarOnly()` 的短延时兜底内处理，不恢复高频 interval。
 - **本命色色盘对齐**：`components/Picker` 的色点与名称必须在同一个 `.pk-swatch` 垂直列里渲染；不要拆成上下两条 flex 行，否则选中外圈宽度会导致标签错位。
 - **H5 与小程序视觉一致**：小程序使用真实 `page` 节点 + `src/custom-tab-bar` 原生自定义底栏；H5 使用 `src/app.h5.tsx` 手动挂载同款 `CustomTabBar`，并由 `src/app.h5.scss` 给浏览器根节点补设计 token、隐藏 Taro 生成的默认 `weui` tabbar。不要把 H5 兼容样式混入会影响小程序的原生 tabbar 路径。
 - **标题 Text 块级化**：Taro `<Text>` 默认偏内联；全局 `.kicker` / `.h1` 必须保持 `display: block`，页面 hero 说明文案也需显式 `display: block`，避免真机上标题、kicker、正文挤成一行。
 - **首页标题宋体化**：`pages/home` 通过 `Screen className="home"` 局部定义标题字体栈，品牌名、问候语、今日献策正文、对话卡提问、分区标题与卡片标题使用宋体优先；不要为此改全局 `--serif`，避免影响其它页面。
-- **对话输入框小程序兼容**：`pages/chat` 输入框必须由整条 `.box` 触发 focus，`onInput` 返回 `e.detail.value` 并同步 state，`onConfirm` 使用事件值发送；保留 `cursorSpacing/adjustPosition/alwaysEmbed` 和 `.cinput` 的 `min-width:0;width:100%`，避免真机上点得到但输不进或输入宽度塌陷。
+- **对话输入框小程序兼容**：`pages/chat` 输入框必须由整条 `.box` 触发 focus，`onInput` 返回 `e.detail.value` 并同步 state，`onConfirm` 使用事件值发送；保留 `alwaysEmbed`、`.cinput` 的 `min-width:0;width:100%`，并用 `onKeyboardHeightChange` 写入 `--keyboard-height` 让 `.chat` 自己压缩底部空间；`adjustPosition` 必须为 `false` 且页面配置 `disableScroll: true`，避免真机键盘把整页顶到系统状态栏下方。
 - **对话等待反馈**：`pages/chat` 发送消息后必须立刻在对话流尾部显示“正在梳理上下文”思考气泡与三点动效，直到接口返回；不要只让发送按钮变灰，否则真机会像卡住。
 - **对话入口登录前置**：首页对话入口和 `pages/chat` 首帧都必须先检查登录态；未登录直接弹 `Login` 并提示“请先登录后再开始对话”，不要先等 401，否则 H5/真机会出现白屏闪一下再弹登录。底栏中间「对话」在未登录时只负责提示并跳到 `pages/chat`，由聊天页渲染 `Login`；**不要在 `custom-tab-bar` 内直接渲染 `Login`**，小程序原生 tabbar 层会导致弹层样式失效。
+- **前台商业文案克制**：面向用户的主路径不要写成“赠送 / 付费解锁 / 充值 / 最受欢迎 / 灵活付费”这类促销口吻；统一用「可用」「已启用」「专项能力」「产出额度」「方案与额度」「常用配置」表达，让用户感到是在调用工作台能力，而不是被推销。后台/代码契约仍可保留 `free/unlock/metered/credits` 等技术术语。
 - **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
 - **前台记忆披露**：对话页用「专属理解」包装 Agent Memory，不直接暴露后台术语；问候气泡披露会参考企业档案、对话偏好、引用资料，顶部记忆条展示当前顾问已理解的上下文，学习成功提示用“专属理解已更新/已校准业务偏好和判断口径”。后端真实记忆开关见 §9。
 - **真实网络错误不要吞成产出失败**：`services/api.ts` 要捕获 `Taro.request` reject，把 `errMsg` 映射为明确网络/合法域名提示；对话页未收到 HTTP 响应时不能只显示“抱歉，产出失败了”。
+- **401/网络错误统一处理**：登录态失效或 token 401 不能被页面吞成空列表；`services/store.ts handleApiError` 会清理用户态、提示重新登录并回首页，`NETWORK_ERROR` 保留合法域名/网络提示。需要登录的数据页/弹层 catch 后必须调用它，再决定是否展示空态。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **深色卡光感**：对话入口卡用 `--accent-deep` 对角渐变 + `--accent-glow` 柔光，随本命色自适应。
 
@@ -386,6 +389,11 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-13** · **彻底避免真机默认底栏回弹**：`services/tabbar.ts` 移除 `Taro.showTabBar` 分支，`store.setOverlay(false)` 关闭弹层时只恢复自定义胶囊底栏并继续强制 `hideTabBar`，避免真机偶发出现微信默认底栏与自定义悬浮底栏并存；AGENTS 更新底栏约定，明确 custom tabBar 模式下不得 show 原生 tabbar。
+- **2026-06-13** · **修复对话页键盘顶起整页**：`pages/chat` 禁用页面级滚动，输入框关闭 `adjustPosition` 并改为监听键盘高度设置 `--keyboard-height`，让输入区随键盘上移但头部/问候卡不再被推到系统状态栏下方；AGENTS 同步更新对话输入兼容约定。
+- **2026-06-13** · **修复小程序 High 级 review 项**：`app/project.config.json` 切为正式安全口径（开启 urlCheck/es6/enhance/postcss/minified），删除根目录误生成 DevTools 配置并保留本机 `app/project.private.config.json` 覆盖局域网预览；新增 `store.handleApiError`，会话/项目/方案库/报告/方案与专项能力弹层不再把 401/网络错误吞成空态。
+- **2026-06-13** · **修复小程序 Medium 级 review 项**：`custom-tab-bar` 移除 250ms/1500ms 常驻轮询，改用 `eventCenter` 与页面 `useDidShow` 触发式同步；项目工作台/项目详情/方案库/报告页移动到 `packages/work` 分包，`pages/profile` 与 `pages/chat` 配置预加载，降低后续主包膨胀和启动风险。
+- **2026-06-13** · **前台商业文案去促销化**：首页「智库 · 赠送顾问」改为「常用顾问」，「军师为你发现」改为「今日经营线索」；智库/工坊/专项能力弹层/方案弹层/我的页/对话错误提示统一将“赠送、付费解锁、充值、算力”降级为「可用、已启用、专项能力、方案与产出额度」等工作台口径；同步 mock 与 seed 套餐 feature 文案，避免用户感到首屏在卖权益。
 - **2026-06-13** · **智能体权益/解锁计费与运营后台鉴权**：SSOT 新增 `AgentBilling`、`Agent.billing/price/owned`、`AgentPurchaseResult` 与后台用户开通类型；Prisma 新增 `UserAgent`，`Agent` 增加 `billing/price`；后端新增 `/agents/:key/purchase`、`services/entitlements.ts`、`services/adminAuth.ts`，产出前校验未解锁 `unlock` 智能体并支持 `metered` 按次扣算力；运营后台新增登录页、`ADMIN_TOKEN` 鉴权、用户智能体开通/取消、智能体新增与定价、套餐编辑；前台智库/工坊展示赠送/已解锁/待解锁/按次状态，新增 `AgentUnlock` 和 `Plans` 弹层；集成测试新增 admin 鉴权与智能体权益用例。
 - **2026-06-13** · **接入套餐购买回归与 CI 后端集成测试**：新增 `GET /plans`、`POST /plans/:id/purchase`，登录用户可演示级购买/切换套餐并写入 `CreditLedger`，企业版余额记为 `-1` 且产出不扣减；SSOT 新增 `PlanPurchaseResult`，app/mock API 对齐套餐列表/购买与算力扣减；集成测试扩充 TC-K 套餐购买/不限量和 TC-U 用户主路径，现状 37 用例 / 20 套件；新增 GitHub Actions `Server Integration` 用临时 PostgreSQL 跑后端 build + 集成测试。
 - **2026-06-13** · **收紧智能体业务边界并扩充每日献策**：`server/src/data/agents.ts` 将默认 System Prompt 改为商业咨询/创作业务边界 + 麦肯锡式问题解决框架，`llm/schema.ts` 在运行时追加不透露模型/供应商/提示词/API/部署/内部配置的统一 guard；`seedConfig.ts` 新增 20 条每日献策；新增 `server/scripts/syncAdminContent.ts` 与 `npm run admin:sync-content`，线上可非破坏同步提示词和献策。

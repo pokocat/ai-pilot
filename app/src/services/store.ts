@@ -29,6 +29,48 @@ const state: AppState = {
 };
 const overlayKeys = new Set<string>();
 
+type ApiErrorKind = 'unauthorized' | 'network' | 'other';
+
+function apiErrorCode(e: unknown): string {
+  return String((e as any)?.code || (e as any)?.data?.code || '');
+}
+
+function isUnauthorizedError(e: unknown): boolean {
+  return apiErrorCode(e) === 'UNAUTHORIZED' || String((e as any)?.message || '').includes('未登录');
+}
+
+function resetAuthState() {
+  clearUserId();
+  state.me = null;
+  state.onboarded = false;
+  safeSet(LS_ONBOARDED, '');
+}
+
+function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?: string } = {}): ApiErrorKind {
+  if (isUnauthorizedError(e)) {
+    resetAuthState();
+    emit();
+    if (!options.silent) {
+      Taro.showToast({ title: '登录态已失效，请重新登录', icon: 'none' });
+      setTimeout(() => Taro.reLaunch({ url: '/pages/home/index' }), 250);
+    }
+    return 'unauthorized';
+  }
+
+  if (apiErrorCode(e) === 'NETWORK_ERROR') {
+    if (!options.silent) {
+      const msg = String((e as any)?.message || options.fallbackTitle || '网络请求失败');
+      Taro.showToast({ title: msg, icon: 'none' });
+    }
+    return 'network';
+  }
+
+  if (!options.silent && options.fallbackTitle) {
+    Taro.showToast({ title: options.fallbackTitle, icon: 'none' });
+  }
+  return 'other';
+}
+
 type Listener = () => void;
 const listeners = new Set<Listener>();
 export function subscribe(fn: Listener) {
@@ -63,6 +105,7 @@ export const store = {
   tab: () => state.tab,
   setTab(i: number) { state.tab = i; emit(); },
   overlay: () => state.overlay,
+  handleApiError: reportApiError,
   setOverlay(v: boolean, key = 'global') {
     if (v) overlayKeys.add(key);
     else overlayKeys.delete(key);
@@ -97,7 +140,7 @@ export const store = {
       }
       if (typeof me.onboarded === 'boolean') state.onboarded = me.onboarded;
       emit();
-    } catch { /* 离线 / 401 时忽略 */ }
+    } catch (e) { reportApiError(e, { silent: true }); }
   },
   // 登录成功：落 token、同步账号状态，并拉取该账号数据
   async afterLogin(token: string, onboarded: boolean, benmingColor?: string) {
@@ -130,7 +173,7 @@ export const store = {
   agentsByType(type: string) {
     return state.agents.filter((a) => a.type === type);
   },
-  // 解锁/购买成功后刷新：余额（me）+ 智能体 owned 状态。
+  // 专项能力启用/方案更新后刷新：余额（me）+ 智能体 owned 状态。
   async refreshAfterPurchase() {
     await Promise.all([this.loadMe(), this.loadAgents()]);
   },

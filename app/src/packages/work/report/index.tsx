@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
-import Icon from '../../components/Icon';
-import MarkdownText from '../../components/MarkdownText';
-import SafeHeader from '../../components/SafeHeader';
-import { useStore } from '../../hooks/useStore';
-import { api, type ReportDetail, type ReportVersionContent, type ReportDiff } from '../../services/api';
+import Icon from '../../../components/Icon';
+import MarkdownText from '../../../components/MarkdownText';
+import SafeHeader from '../../../components/SafeHeader';
+import { useStore } from '../../../hooks/useStore';
+import { api, type ReportDetail, type ReportVersionContent, type ReportDiff } from '../../../services/api';
 import './index.scss';
 
 function fmt(iso: string): string {
@@ -30,15 +30,15 @@ export default function Report() {
     api.report(id).then((d) => {
       setDetail(d);
       setSel(d.currentVersion);
-    }).catch(() => setDetail(null));
+    }).catch((e) => { s.handleApiError(e); setDetail(null); });
   }, [id]);
 
   useEffect(() => {
     if (!id || !sel) return;
     if (mode === 'content') {
-      api.reportVersion(id, sel).then(setContent).catch(() => setContent(null));
+      api.reportVersion(id, sel).then(setContent).catch((e) => { s.handleApiError(e); setContent(null); });
     } else {
-      api.reportDiff(id, Math.max(1, sel - 1), sel).then(setDiff).catch(() => setDiff(null));
+      api.reportDiff(id, Math.max(1, sel - 1), sel).then(setDiff).catch((e) => { s.handleApiError(e); setDiff(null); });
     }
   }, [id, sel, mode]);
 

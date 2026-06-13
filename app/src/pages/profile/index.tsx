@@ -21,15 +21,15 @@ export default function Profile() {
 
   useDidShow(() => {
     s.setTab(4);
-    api.library().then((l) => setLibCount(l.length)).catch(() => {});
-    api.projects().then((p) => setProjCount(p.length)).catch(() => {});
+    api.library().then((l) => setLibCount(l.length)).catch((e) => s.handleApiError(e));
+    api.projects().then((p) => setProjCount(p.length)).catch((e) => s.handleApiError(e));
   });
 
   const rows = [
-    { ic: 'grid', t: '项目工作台', s: projCount ? `${projCount} 个项目` : '按项目管理事务', onClick: () => Taro.navigateTo({ url: '/pages/projects/index' }) },
-    { ic: 'layers', t: '我的方案库', s: `${libCount} 份成果`, onClick: () => Taro.navigateTo({ url: '/pages/library/index' }) },
+    { ic: 'grid', t: '项目工作台', s: projCount ? `${projCount} 个项目` : '按项目管理事务', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
+    { ic: 'layers', t: '我的方案库', s: `${libCount} 份成果`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
     { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
-    { ic: 'doc', t: '套餐与算力', s: me?.plan?.name ?? '决策版', onClick: () => setShowPlans(true) },
+    { ic: 'doc', t: '方案与额度', s: me?.plan?.name ?? '决策版', onClick: () => setShowPlans(true) },
     { ic: 'insight', t: '设置', s: '', onClick: () => Taro.showToast({ title: '设置', icon: 'none' }) },
     {
       ic: 'lock', t: '退出登录', s: '',
@@ -56,11 +56,11 @@ export default function Profile() {
 
         <View className="credit card" style={{ background: '#1B1E22' }}>
           <View className="cr-l">
-            <Text className="cr-k">本月军师算力</Text>
+            <Text className="cr-k">本月产出额度</Text>
             <Text className="cr-v serif" style={{ color: 'var(--accent-bright)' }}>剩余 {me?.creditBalance ?? 68} 次</Text>
           </View>
           <View className="cr-btn" style={{ background: accent }} onClick={() => setShowPlans(true)}>
-            <Text>充值</Text>
+            <Text>管理</Text>
           </View>
         </View>
 
@@ -76,14 +76,14 @@ export default function Profile() {
           ))}
         </View>
 
-        {/* 私有化部署 · 企业版（锁定高级能力） */}
+        {/* 私有化部署 · 企业版 */}
         <View className="private card" style={{ background: '#1B1E22' }}>
           <View className="pv-top">
             <View className="pv-ic"><Icon name="lock" size={16} color="var(--accent-bright)" /></View>
             <View className="pv-badge" style={{ borderColor: 'var(--accent-bright)' }}><Text style={{ color: 'var(--accent-bright)' }}>企业版</Text></View>
           </View>
           <Text className="pv-t serif">私有化部署 · 深度经营诊断</Text>
-          <Text className="pv-d">财务 / 合同 / 客户等机密数据不出内网，军师在你的服务器内运行，解锁更深的经营诊断。</Text>
+          <Text className="pv-d">财务 / 合同 / 客户等机密数据不出内网，军师在你的服务器内运行，支撑更深的经营诊断。</Text>
           <View className="pv-cta" onClick={() => Taro.showToast({ title: '已记录企业版意向', icon: 'none' })}>
             <Text>预约了解 ›</Text>
           </View>

@@ -33,7 +33,7 @@ const PLANS: Plan[] = [
     period: 'month',
     creditsPerMonth: 10,
     agentCount: 3,
-    featuresJson: ['10 次军师算力 / 月', '内置顾问 3 位', '不含方案库导出'],
+    featuresJson: ['10 次产出额度 / 月', '基础顾问 3 位', '适合轻量试用'],
     highlighted: false,
   },
   {
@@ -43,7 +43,7 @@ const PLANS: Plan[] = [
     period: 'year',
     creditsPerMonth: 68,
     agentCount: 8,
-    featuresJson: ['不限量对话', '68 次深度产出 / 月', '内置顾问 8 位', '方案库 + 导出'],
+    featuresJson: ['不限量对话', '68 次深度产出 / 月', '顾问助手 8 位', '方案库 + 导出'],
     highlighted: true,
   },
   {
@@ -53,7 +53,7 @@ const PLANS: Plan[] = [
     period: 'year',
     creditsPerMonth: -1,
     agentCount: 14,
-    featuresJson: ['私有化部署', '接入内部系统', '专属训练', '数据不出内网'],
+    featuresJson: ['私有化部署', '接入内部系统', '专属助手配置', '数据不出内网'],
     highlighted: false,
   },
 ];
@@ -101,7 +101,7 @@ function load(token: string): UserData {
       d.projects ??= []; d.reports ??= []; d.knowledge ??= [];
       d.planId ??= 'mock-plan-decision';
       d.creditBalance ??= 68;
-      d.ownedAgents ??= ['intel', 'brand']; // 演示：默认已解锁两个付费智能体
+      d.ownedAgents ??= ['intel', 'brand']; // 演示：默认已启用两个专项智能体
       return d;
     }
   } catch { /* noop */ }
@@ -323,14 +323,14 @@ export const mock = {
     const { token, d } = current();
     const agent = DEFAULT_AGENTS.find((a) => a.key === key);
     if (!agent) throw Object.assign(new Error('智能体不存在'), { code: 'AGENT_NOT_FOUND' });
-    if (agent.billing !== 'unlock') throw Object.assign(new Error('该智能体无需购买'), { code: 'AGENT_NOT_PURCHASABLE' });
+    if (agent.billing !== 'unlock') throw Object.assign(new Error('该智能体无需额外启用'), { code: 'AGENT_NOT_PURCHASABLE' });
     d.ownedAgents ??= [];
     if (d.ownedAgents.includes(key)) {
       return delay({ ok: true, agentKey: key, pricePaid: 0, creditBalance: d.creditBalance, alreadyOwned: true });
     }
     const unlimited = d.creditBalance < 0;
     if (!unlimited && d.creditBalance < agent.price) {
-      throw Object.assign(new Error('算力不足，无法解锁该智能体'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
+      throw Object.assign(new Error('产出额度不足，无法启用该智能体'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
     }
     d.ownedAgents.push(key);
     if (!unlimited) d.creditBalance -= agent.price;
@@ -410,7 +410,7 @@ export const mock = {
     let res: GenResult;
     if (ag.deliverableKey) {
       if (d.creditBalance >= 0 && d.creditBalance < 1) {
-        throw Object.assign(new Error('算力不足，请充值后再产出'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
+        throw Object.assign(new Error('产出额度不足，请调整方案后再继续'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
       }
       const deliverable = buildDeliverable(ag.deliverableKey, d);
       if (projName) deliverable.meta = `${deliverable.meta} · ${projName}`;

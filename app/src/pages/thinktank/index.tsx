@@ -8,7 +8,7 @@ import { useStore } from '../../hooks/useStore';
 import type { Agent } from '../../services/api';
 import './index.scss';
 
-// 智库（出谋）：赠送顾问 + 可解锁的付费顾问，开口即出成果。
+// 智库（出谋）：可用顾问 + 可按需启用的专项顾问，避免首屏售卖感。
 export default function ThinkTank() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -20,7 +20,7 @@ export default function ThinkTank() {
   const lockedCount = consultants.filter((a) => a.billing === 'unlock' && !a.owned).length;
   const open = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` });
 
-  // 卡片点击：未解锁的付费顾问 → 解锁弹层；其余 → 进入对话
+  // 卡片点击：未启用的专项顾问 → 启用弹层；其余 → 进入对话
   const tap = (a: Agent) => {
     if (a.billing === 'unlock' && !a.owned) setBuying(a);
     else open(a.key);
@@ -32,24 +32,24 @@ export default function ThinkTank() {
         <View className="agents-hero">
           <Text className="kicker">Think Tank · 你的智囊团</Text>
           <Text className="h1">你的 AI 智囊团</Text>
-          <Text className="hero-p">注册即赠 {giftCount} 位商业顾问，开口即出成果；更多专项顾问可用算力随时解锁。</Text>
+          <Text className="hero-p">这些顾问已在你的工作台中，可直接用于诊断、增长、融资和组织问题；专项能力按项目节奏启用。</Text>
         </View>
 
         <View className="zk-team" style={{ background: '#1B1E22' }}>
           <View className="zt-h">
             <Text className="t serif">智囊团已就位</Text>
             <View className="tag" style={{ background: 'var(--accent-soft)' }}>
-              <Icon name="crown" size={12} color={accent} /><Text style={{ color: 'var(--accent-ink)' }}> {giftCount} 位赠送</Text>
+              <Icon name="crown" size={12} color={accent} /><Text style={{ color: 'var(--accent-ink)' }}> {giftCount} 位可直接用</Text>
             </View>
           </View>
           <View className="zt-stats">
             <View className="zt-s"><Text className="v serif" style={{ color: 'var(--accent-bright)' }}>{consultants.length}</Text><Text className="l">在岗顾问</Text></View>
-            <View className="zt-s"><Text className="v serif" style={{ color: 'var(--accent-bright)' }}>{giftCount}</Text><Text className="l">已赠送</Text></View>
-            <View className="zt-s"><Text className="v serif" style={{ color: 'var(--accent-bright)' }}>{lockedCount}</Text><Text className="l">可解锁</Text></View>
+            <View className="zt-s"><Text className="v serif" style={{ color: 'var(--accent-bright)' }}>{giftCount}</Text><Text className="l">可直接用</Text></View>
+            <View className="zt-s"><Text className="v serif" style={{ color: 'var(--accent-bright)' }}>{lockedCount}</Text><Text className="l">专项能力</Text></View>
           </View>
         </View>
 
-        <View className="gh">内置顾问 · 点一下就出成果</View>
+        <View className="gh">顾问目录 · 选择问题入口</View>
         <View className="agrid">
           {consultants.map((a) => {
             const locked = a.billing === 'unlock' && !a.owned;
@@ -60,8 +60,8 @@ export default function ThinkTank() {
                 <Text className="ah">{a.name}</Text>
                 <Text className="ap">{a.role}</Text>
                 {locked
-                  ? <Text className="ameta lock" style={{ color: accent }}>{a.price} 算力解锁 ›</Text>
-                  : a.deliverableKey && <Text className="ameta" style={{ color: accent }}>产出 · {a.deliverableKey}</Text>}
+                  ? <Text className="ameta lock" style={{ color: accent }}>需 {a.price} 次额度启用 ›</Text>
+                  : a.deliverableKey && <Text className="ameta" style={{ color: accent }}>擅长 · {a.deliverableKey}</Text>}
               </View>
             );
           })}
@@ -82,10 +82,10 @@ export default function ThinkTank() {
   );
 }
 
-// 智能体角标：赠送 / 已解锁 / 按次 / 解锁价
+// 智能体角标：可用 / 已启用 / 按需 / 锁
 function Badge({ agent, accent }: { agent: Agent; accent: string }) {
-  if (agent.billing === 'free') return <View className="gift" style={{ background: accent }}>赠送</View>;
-  if (agent.billing === 'metered') return <View className="gift metered" style={{ background: accent }}>按次 {agent.price}</View>;
-  if (agent.owned) return <View className="gift owned"><Icon name="check" size={9} color="#fff" /><Text> 已解锁</Text></View>;
+  if (agent.billing === 'free') return <View className="gift" style={{ background: accent }}>可用</View>;
+  if (agent.billing === 'metered') return <View className="gift metered" style={{ background: accent }}>按需</View>;
+  if (agent.owned) return <View className="gift owned"><Icon name="check" size={9} color="#fff" /><Text> 已启用</Text></View>;
   return <View className="gift locked-badge"><Icon name="lock" size={9} color="#fff" /></View>;
 }

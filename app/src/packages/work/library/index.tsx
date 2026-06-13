@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
-import Icon from '../../components/Icon';
-import SafeHeader from '../../components/SafeHeader';
-import { useStore } from '../../hooks/useStore';
-import { api, type LibItem } from '../../services/api';
+import Icon from '../../../components/Icon';
+import SafeHeader from '../../../components/SafeHeader';
+import { useStore } from '../../../hooks/useStore';
+import { api, type LibItem } from '../../../services/api';
 import './index.scss';
 
 function fmt(iso: string): string {
@@ -19,12 +19,12 @@ export default function Library() {
   const [items, setItems] = useState<LibItem[]>([]);
 
   useDidShow(() => {
-    api.library().then(setItems).catch(() => setItems([]));
+    api.library().then(setItems).catch((e) => { s.handleApiError(e); setItems([]); });
   });
 
   const open = (it: LibItem) => {
     // 有版本化报告 → 进报告页看版本与变更；否则回到产出它的会话继续深化
-    if (it.reportId) Taro.navigateTo({ url: `/pages/report/index?id=${it.reportId}` });
+    if (it.reportId) Taro.navigateTo({ url: `/packages/work/report/index?id=${it.reportId}` });
     else if (it.sessionId) Taro.navigateTo({ url: `/pages/chat/index?sessionId=${it.sessionId}` });
     else Taro.navigateTo({ url: `/pages/chat/index?agentKey=${it.agentKey}&continue=1` });
   };

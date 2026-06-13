@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text } from '@tarojs/components';
-import Taro from '@tarojs/taro';
+import Taro, { useDidShow } from '@tarojs/taro';
 import Icon from '../components/Icon';
 import { useStore } from '../hooks/useStore';
 import { hideNativeTabBarOnly, onTabBarHiddenChange, readTabBarHidden } from '../services/tabbar';
@@ -22,18 +22,17 @@ export default function CustomTabBar() {
   const accent = color.vars['--accent'];
   const [nativeHidden, setNativeHidden] = useState(() => readTabBarHidden());
 
-  useEffect(() => {
-    const refresh = () => setNativeHidden(readTabBarHidden());
-    refresh();
+  const syncNativeState = () => {
+    setNativeHidden(readTabBarHidden());
     hideNativeTabBarOnly();
+  };
+
+  useDidShow(syncNativeState);
+
+  useEffect(() => {
+    syncNativeState();
     const off = onTabBarHiddenChange(setNativeHidden);
-    const timer = setInterval(refresh, 250);
-    const nativeTimer = setInterval(hideNativeTabBarOnly, 1500);
-    return () => {
-      off();
-      clearInterval(timer);
-      clearInterval(nativeTimer);
-    };
+    return off;
   }, []);
 
   // 有全屏弹层时隐藏底栏。不要在 custom-tab-bar 内渲染登录弹层，

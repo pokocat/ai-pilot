@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
-import Icon from '../../components/Icon';
-import SafeHeader from '../../components/SafeHeader';
-import { useStore } from '../../hooks/useStore';
-import { api, type ProjectItem } from '../../services/api';
+import Icon from '../../../components/Icon';
+import SafeHeader from '../../../components/SafeHeader';
+import { useStore } from '../../../hooks/useStore';
+import { api, type ProjectItem } from '../../../services/api';
 import './index.scss';
 
 // 项目工作台：企业事务主线。每个项目串起 会话 / 报告 / 知识。
@@ -15,7 +15,7 @@ export default function Projects() {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
 
-  const load = () => api.projects().then(setItems).catch(() => setItems([]));
+  const load = () => api.projects().then(setItems).catch((e) => { s.handleApiError(e); setItems([]); });
   useDidShow(load);
 
   const create = async () => {
@@ -23,9 +23,12 @@ export default function Projects() {
     if (!v) return;
     setName('');
     setCreating(false);
-    const r = await api.createProject({ name: v }).catch(() => null);
+    const r = await api.createProject({ name: v }).catch((e) => {
+      s.handleApiError(e, { fallbackTitle: '创建项目失败' });
+      return null;
+    });
     await load();
-    if (r) Taro.navigateTo({ url: `/pages/project/index?id=${r.id}` });
+    if (r) Taro.navigateTo({ url: `/packages/work/project/index?id=${r.id}` });
   };
 
   return (
@@ -55,7 +58,7 @@ export default function Projects() {
         ) : (
           <View className="pj-list">
             {items.map((p) => (
-              <View key={p.id} className="pj-item card" onClick={() => Taro.navigateTo({ url: `/pages/project/index?id=${p.id}` })}>
+              <View key={p.id} className="pj-item card" onClick={() => Taro.navigateTo({ url: `/packages/work/project/index?id=${p.id}` })}>
                 <View className="pj-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={p.icon || 'layers'} size={20} color={accent} /></View>
                 <View className="pj-b">
                   <Text className="pj-n">{p.name}</Text>

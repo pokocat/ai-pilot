@@ -10,16 +10,16 @@ import { api } from '../../services/api';
 import './index.scss';
 
 const INSIGHTS = [
-  { ic: 'target', tag: '智库 · 推荐产出', tagType: 'opp', ttl: '建议先出一份战略诊断报告', desc: '军师可基于你的业务现状，直接产出诊断 + 行动清单。', act: '让智库产出', send: '战略体检' },
+  { ic: 'target', tag: '建议 · 经营诊断', tagType: 'opp', ttl: '建议先出一份战略诊断报告', desc: '军师可基于你的业务现状，整理诊断与行动清单。', act: '生成诊断', send: '战略体检' },
   { ic: 'trend', tag: '机会 · 增长', tagType: 'opp', ttl: '高价值客群尚未被单独运营', desc: '腰部客群复购集中，具备做会员 / 订阅制的基础。', act: '生成增长方案', send: '增长方案' },
   { ic: 'shield', tag: '待办 · 股权', tagType: 'todo', ttl: '期权池预留可能偏紧', desc: '结合你的融资计划，建议尽早梳理股权与期权结构。', act: '让军师拆解', send: '融资准备' },
 ];
 
-// 首页快捷入口：均为注册赠送的免费顾问，点开即用、不触发解锁
+// 首页快捷入口：展示当前可直接使用的常用顾问，避免把首屏写成权益售卖区。
 const TOOLS = [
-  { agent: 'strat', ic: 'target', h: '战略诊断官', p: '产出诊断报告' },
-  { agent: 'growth', ic: 'trend', h: '增长操盘手', p: '产出增长方案' },
-  { agent: 'fund', ic: 'doc', h: '融资参谋', p: '产出商业计划书' },
+  { agent: 'strat', ic: 'target', h: '战略诊断官', p: '卡点判断与行动清单' },
+  { agent: 'growth', ic: 'trend', h: '增长操盘手', p: '获客、转化与复购路径' },
+  { agent: 'fund', ic: 'doc', h: '融资参谋', p: '融资叙事与问答准备' },
   { agent: 'general', ic: 'spark', h: '军师', p: '随时为你出谋' },
 ];
 
@@ -163,9 +163,9 @@ export default function Home() {
           </View>
         </View>
 
-        {/* 军师为你发现 */}
+        {/* 今日经营线索 */}
         <View className="sec-head">
-          <Text className="sec-title">军师为你发现</Text>
+          <Text className="sec-title">今日经营线索</Text>
           <Text className="sec-more">全部 3 条 ›</Text>
         </View>
         {INSIGHTS.map((it) => (
@@ -182,9 +182,9 @@ export default function Home() {
           </View>
         ))}
 
-        {/* 智库赠送顾问 */}
+        {/* 常用顾问 */}
         <View className="sec-head">
-          <Text className="sec-title">智库 · 赠送顾问</Text>
+          <Text className="sec-title">常用顾问</Text>
           <Text className="sec-more" onClick={() => Taro.switchTab({ url: '/pages/thinktank/index' })}>去智库 ›</Text>
         </View>
         <View className="tools">

@@ -1,5 +1,7 @@
 .chat {
   display: flex; flex-direction: column; height: 100vh;
+  box-sizing: border-box; overflow: hidden;
+  padding-bottom: var(--keyboard-height, 0px);
   background: var(--paper);
 }
 .chat-head { gap: 12px; }

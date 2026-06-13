@@ -11,8 +11,10 @@ export function readTabBarHidden() {
   try { return Taro.getStorageSync(LS_TABBAR_HIDDEN) === '1'; } catch { return false; }
 }
 
-function applyNativeTabBarHidden(hidden: boolean) {
-  callNativeTabBarApi(hidden);
+function applyTabBarState(hidden: boolean) {
+  // app.json 使用 custom tabBar。微信原生 tabbar 必须始终保持隐藏；
+  // hidden 只控制我们自己的胶囊底栏，否则关闭弹层时 showTabBar 会把默认底栏唤出来。
+  hideNativeTabBar();
 
   try {
     const current = Taro.getCurrentInstance?.()?.page as any;
@@ -22,10 +24,9 @@ function applyNativeTabBarHidden(hidden: boolean) {
   } catch { /* noop */ }
 }
 
-function callNativeTabBarApi(hidden: boolean) {
+function hideNativeTabBar() {
   try {
-    const api = hidden ? Taro.hideTabBar : Taro.showTabBar;
-    const result = api?.({ animation: false, fail: () => {} } as any);
+    const result = Taro.hideTabBar?.({ animation: false, fail: () => {} } as any);
     if (result && typeof (result as Promise<unknown>).catch === 'function') {
       (result as Promise<unknown>).catch(() => {});
     }
@@ -36,15 +37,15 @@ export function syncTabBarHidden(hidden: boolean) {
   safeSetHidden(hidden);
   try { Taro.eventCenter?.trigger?.(EVENT_TABBAR_HIDDEN, hidden); } catch { /* noop */ }
 
-  applyNativeTabBarHidden(hidden);
-  setTimeout(() => applyNativeTabBarHidden(hidden), 80);
-  setTimeout(() => applyNativeTabBarHidden(hidden), 240);
+  applyTabBarState(hidden);
+  setTimeout(() => applyTabBarState(hidden), 80);
+  setTimeout(() => applyTabBarState(hidden), 240);
 }
 
 export function hideNativeTabBarOnly() {
-  callNativeTabBarApi(true);
-  setTimeout(() => callNativeTabBarApi(true), 80);
-  setTimeout(() => callNativeTabBarApi(true), 240);
+  hideNativeTabBar();
+  setTimeout(() => hideNativeTabBar(), 80);
+  setTimeout(() => hideNativeTabBar(), 240);
 }
 
 export function onTabBarHiddenChange(fn: (hidden: boolean) => void) {

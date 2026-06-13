@@ -24,7 +24,7 @@ export default function Sessions() {
 
   useDidShow(() => {
     s.setTab(2);
-    api.sessions().then(setSessions).catch(() => setSessions([]));
+    api.sessions().then(setSessions).catch((e) => { s.handleApiError(e); setSessions([]); });
   });
 
   const order = ['general', 'strat', 'growth', 'intel', 'fund', 'model', 'org', 'brand', 'ops'];

@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro, { useRouter, useDidShow } from '@tarojs/taro';
-import Icon from '../../components/Icon';
-import SafeHeader from '../../components/SafeHeader';
-import { useStore } from '../../hooks/useStore';
-import { api, type ProjectDetail } from '../../services/api';
+import Icon from '../../../components/Icon';
+import SafeHeader from '../../../components/SafeHeader';
+import { useStore } from '../../../hooks/useStore';
+import { api, type ProjectDetail } from '../../../services/api';
 import './index.scss';
 
 type Tab = 'sessions' | 'reports' | 'knowledge';
@@ -24,14 +24,18 @@ export default function Project() {
   const [tab, setTab] = useState<Tab>('sessions');
   const [kInput, setKInput] = useState('');
 
-  const load = () => { if (id) api.project(id).then(setDetail).catch(() => setDetail(null)); };
+  const load = () => { if (id) api.project(id).then(setDetail).catch((e) => { s.handleApiError(e); setDetail(null); }); };
   useDidShow(load);
 
   const addKnowledge = async () => {
     const v = kInput.trim();
     if (!v) return;
     setKInput('');
-    await api.createKnowledge({ text: v, projectId: id, kind: 'document', sourceType: 'manual' }).catch(() => {});
+    const saved = await api.createKnowledge({ text: v, projectId: id, kind: 'document', sourceType: 'manual' }).catch((e) => {
+      s.handleApiError(e, { fallbackTitle: '知识保存失败' });
+      return null;
+    });
+    if (!saved) return;
     load();
     Taro.showToast({ title: '已加入知识库', icon: 'none' });
   };
@@ -89,7 +93,7 @@ export default function Project() {
           <View className="pd-list">
             {detail.reports.length === 0 ? <Text className="pd-empty">还没有报告。在对话里产出成果并「存入方案库」，即在此版本化。</Text> :
               detail.reports.map((r) => (
-                <View key={r.id} className="pd-item card" onClick={() => Taro.navigateTo({ url: `/pages/report/index?id=${r.id}` })}>
+                <View key={r.id} className="pd-item card" onClick={() => Taro.navigateTo({ url: `/packages/work/report/index?id=${r.id}` })}>
                   <View className="pd-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={16} color={accent} /></View>
                   <View className="pd-ib"><Text className="pd-it">{r.title}</Text><Text className="pd-im">{r.type} · 更新于 {fmt(r.updatedAt)}</Text></View>
                   <View className="pd-ver" style={{ borderColor: accent, color: accent }}><Text>v{r.currentVersion}</Text></View>

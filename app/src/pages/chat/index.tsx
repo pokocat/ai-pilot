@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../components/Icon';
@@ -19,6 +19,10 @@ type Msg =
   | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean }
   | { role: 'memory'; agentName: string };
 
+type ChatStyle = CSSProperties & {
+  '--keyboard-height'?: string;
+};
+
 export default function Chat() {
   const router = useRouter();
   const s = useStore();
@@ -29,6 +33,7 @@ export default function Chat() {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [inputFocus, setInputFocus] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [refs, setRefs] = useState<MessageRef[]>([]);
@@ -53,8 +58,8 @@ export default function Chat() {
 
   const errorReply = (e: unknown): string => {
     if (isUnauthorized(e)) return '登录态已失效，请重新登录后再发送。';
-    if ((e as any)?.data?.code === 'AGENT_LOCKED') return '该智能体未解锁，请到「智库 / 工坊」用算力解锁后再使用。';
-    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '算力不足，请充值后再产出。';
+    if ((e as any)?.data?.code === 'AGENT_LOCKED') return '该专项顾问尚未启用，请到「智库 / 工坊」查看可用方案。';
+    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '产出额度不足，请在「我的」里调整方案后再继续。';
     const msg = String((e as any)?.message || '');
     if (msg && msg !== 'undefined') return msg;
     return '抱歉，产出失败了，请稍后再试。';
@@ -212,6 +217,12 @@ export default function Chat() {
     doSend(v, sessionId, agent.key, sending);
   };
 
+  const onKeyboardHeightChange = (e: { detail?: { height?: number } }) => {
+    const next = Math.max(0, Number(e.detail?.height || 0));
+    setKeyboardHeight(next);
+    if (next > 0) setTimeout(scrollToEnd, 40);
+  };
+
   const saveDeliverable = async (d: Deliverable) => {
     if (!agent) return;
     await api.saveToLibrary({
@@ -229,7 +240,7 @@ export default function Chat() {
       const r = await api.summarize(sessionId);
       Taro.hideLoading();
       Taro.showToast({ title: `已生成《${r.title}》v${r.version}`, icon: 'none' });
-      setTimeout(() => Taro.navigateTo({ url: `/pages/report/index?id=${r.reportId}` }), 700);
+      setTimeout(() => Taro.navigateTo({ url: `/packages/work/report/index?id=${r.reportId}` }), 700);
     } catch {
       Taro.hideLoading();
       Taro.showToast({ title: '生成纪要失败', icon: 'none' });
@@ -277,7 +288,7 @@ export default function Chat() {
   };
 
   return (
-    <View className={`page chat ${s.themeClass()}`}>
+    <View className={`page chat ${s.themeClass()}`} style={{ '--keyboard-height': `${keyboardHeight}px` } as ChatStyle}>
       {/* 顾问身份头 */}
       <SafeHeader
         className="chat-head"
@@ -302,7 +313,7 @@ export default function Chat() {
       {/* 项目作用域 + 生成纪要 */}
       <View className="chat-tools">
         {projectId ? (
-          <View className="ct-proj" style={{ background: 'var(--accent-soft)' }} onClick={() => Taro.navigateTo({ url: `/pages/project/index?id=${projectId}` })}>
+          <View className="ct-proj" style={{ background: 'var(--accent-soft)' }} onClick={() => Taro.navigateTo({ url: `/packages/work/project/index?id=${projectId}` })}>
             <Icon name="layers" size={12} color={accent} /><Text style={{ color: accent }}>项目内对话</Text>
           </View>
         ) : <View className="ct-spacer" />}
@@ -419,15 +430,16 @@ export default function Chat() {
             value={input}
             focus={inputFocus}
             maxlength={500}
-            cursorSpacing={96}
-            adjustPosition
+            cursorSpacing={24}
+            adjustPosition={false}
             alwaysEmbed
             placeholder="向顾问提问…（点 📎 引用项目/报告/知识）"
             confirmType="send"
             onFocus={() => setInputFocus(true)}
-            onBlur={() => setInputFocus(false)}
+            onBlur={() => { setInputFocus(false); setKeyboardHeight(0); }}
             onInput={handleInput}
             onConfirm={(e) => onSend(e.detail.value)}
+            onKeyboardHeightChange={onKeyboardHeightChange}
           />
           <Icon name="mic" size={18} color="#969BA1" />
         </View>

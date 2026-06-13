@@ -1,4 +1,4 @@
-// 运营可配的预设：每日献策 / 建档问卷 / 套餐算力
+// 运营可配的预设：每日献策 / 建档问卷 / 方案额度
 // 事实来源对齐原型 scripts/app.js 与 运营后台.html。
 
 export const SAYINGS: { text: string; enabled: boolean }[] = [
@@ -53,7 +53,7 @@ export const PLANS: {
     period: 'month',
     creditsPerMonth: 10,
     agentCount: 3,
-    features: ['10 次军师算力 / 月', '内置顾问 3 位', '不含方案库导出'],
+    features: ['10 次产出额度 / 月', '基础顾问 3 位', '适合轻量试用'],
     highlighted: false,
   },
   {
@@ -62,7 +62,7 @@ export const PLANS: {
     period: 'year',
     creditsPerMonth: 68,
     agentCount: 8,
-    features: ['不限量对话', '68 次深度产出 / 月', '内置顾问 8 位', '方案库 + 导出'],
+    features: ['不限量对话', '68 次深度产出 / 月', '顾问助手 8 位', '方案库 + 导出'],
     highlighted: true,
   },
   {
@@ -71,7 +71,7 @@ export const PLANS: {
     period: 'year',
     creditsPerMonth: -1,
     agentCount: 14,
-    features: ['私有化部署', '接入内部系统', '专属训练', '数据不出内网'],
+    features: ['私有化部署', '接入内部系统', '专属助手配置', '数据不出内网'],
     highlighted: false,
   },
 ];

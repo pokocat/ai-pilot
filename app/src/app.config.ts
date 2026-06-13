@@ -6,11 +6,28 @@ export default defineAppConfig({
     'pages/studio/index',
     'pages/profile/index',
     'pages/chat/index',
-    'pages/library/index',
-    'pages/projects/index',
-    'pages/project/index',
-    'pages/report/index',
   ],
+  subpackages: [
+    {
+      root: 'packages/work',
+      pages: [
+        'library/index',
+        'projects/index',
+        'project/index',
+        'report/index',
+      ],
+    },
+  ],
+  preloadRule: {
+    'pages/profile/index': {
+      network: 'all',
+      packages: ['packages/work'],
+    },
+    'pages/chat/index': {
+      network: 'wifi',
+      packages: ['packages/work'],
+    },
+  },
   window: {
     backgroundTextStyle: 'dark',
     navigationBarBackgroundColor: '#FBFAF6',
