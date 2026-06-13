@@ -218,6 +218,19 @@ export const mock = {
     });
   },
 
+  async wechatLogin(code: string, nickname?: string): Promise<LoginResult> {
+    const key = code.replace(/[^\w-]/g, '').slice(0, 40) || 'dev';
+    const token = `mock-wx-${key}`;
+    const existed = !!Taro.getStorageSync(dataKey(token));
+    const d = load(token);
+    if (nickname) d.name = nickname;
+    save(token, d);
+    return delay({
+      token, isNew: !existed, onboarded: d.onboarded,
+      user: { id: token, name: d.name, phone: '', benmingColor: d.benmingColor, wechatLinked: true },
+    });
+  },
+
   async me(): Promise<Me> {
     const { d } = current();
     return delay({

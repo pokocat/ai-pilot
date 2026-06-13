@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
+import { recordAudit } from '../services/audit.js';
 
 export async function profileRoutes(app: FastifyInstance) {
   // 建档问卷（运营可配，首登动态渲染）
@@ -35,6 +36,12 @@ export async function profileRoutes(app: FastifyInstance) {
       await prisma.tenant.update({
         where: { id: user.tenantId },
         data: { industry: p.industry ?? undefined, stage: p.stage ?? undefined },
+      });
+      await recordAudit({
+        tenantId: user.tenantId,
+        userId: user.id,
+        action: existing ? 'user.profile.update' : 'user.profile.create',
+        payload: { industry: p.industry, stage: p.stage, pain: p.pain },
       });
       return { industry: p.industry, stage: p.stage, pain: p.pain };
     },

@@ -60,6 +60,8 @@ async function request<T>(path: string, method: keyof typeof Taro.request | any 
 export const api = {
   login: (phone: string, name?: string) =>
     IS_MOCK ? mock.login(phone, name) : request<LoginResult>('/auth/login', 'POST', { phone, name }),
+  wechatLogin: (code: string, nickname?: string) =>
+    IS_MOCK ? mock.wechatLogin(code, nickname) : request<LoginResult>('/auth/wechat-login', 'POST', { code, nickname }),
   me: () => (IS_MOCK ? mock.me() : request<Me>('/me')),
   setColor: (color: string) =>
     IS_MOCK ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),

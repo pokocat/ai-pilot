@@ -46,16 +46,21 @@
 .pk-en { color: rgba(255, 255, 255, .7); font-size: 10px; letter-spacing: .2em; margin-top: 6px; }
 .pk-verdict { display: block; text-align: center; font-size: 15px; color: var(--ink); margin: 16px 0 18px; }
 
-.pk-discs { display: flex; justify-content: center; gap: 12px; }
+.pk-swatches {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin-bottom: 20px;
+}
+.pk-swatch {
+  width: 46px; display: flex; flex-direction: column; align-items: center;
+}
 .pk-disc {
-  width: 34px; height: 34px; border-radius: 50%; padding: 4px;
+  width: 42px; height: 42px; border-radius: 50%; padding: 4px; box-sizing: border-box;
   border: 2px solid transparent; display: flex; align-items: center; justify-content: center;
 }
 .pk-disc.on { border-color: var(--accent); }
 .disc-dot { width: 100%; height: 100%; border-radius: 50%; }
-.pk-discnames { display: flex; justify-content: center; gap: 12px; margin-top: 7px; margin-bottom: 20px; }
-.pk-discnames Text { width: 34px; text-align: center; font-size: 10px; color: var(--ink-3); }
-.pk-discnames Text.on { color: var(--ink); font-weight: 600; }
+.pk-swatch Text { width: 46px; text-align: center; font-size: 10px; color: var(--ink-3); margin-top: 7px; }
+.pk-swatch Text.on { color: var(--ink); font-weight: 600; }
 
 .pk-cta {
   height: 50px; border-radius: 14px; color: #fff;

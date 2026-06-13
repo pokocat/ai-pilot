@@ -3,6 +3,7 @@ import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { recordFeedback } from '../services/memory.js';
 import { saveReportVersion } from '../services/reports.js';
+import { recordAudit } from '../services/audit.js';
 import type { MemoryConfig } from '../data/agents.js';
 
 export async function libraryRoutes(app: FastifyInstance) {
@@ -79,6 +80,12 @@ export async function libraryRoutes(app: FastifyInstance) {
           title: req.body.title,
         });
       }
+      await recordAudit({
+        tenantId: user.tenantId,
+        userId: user.id,
+        action: 'user.library.create',
+        payload: { deliverableId: d.id, reportId: saved.reportId, version: saved.version, agentKey: req.body.agentKey, projectId },
+      });
       return { id: d.id, at: d.createdAt, reportId: saved.reportId, version: saved.version };
     },
   );
@@ -86,6 +93,12 @@ export async function libraryRoutes(app: FastifyInstance) {
   app.delete<{ Params: { id: string } }>('/library/:id', async (req) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     await prisma.deliverable.deleteMany({ where: { id: req.params.id, userId: user.id } });
+    await recordAudit({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: 'user.library.delete',
+      payload: { deliverableId: req.params.id },
+    });
     return { ok: true };
   });
 }

@@ -2,7 +2,7 @@
 
 > 目的：**大的变更后跑一遍**，守住核心契约——尤其 **跨用户/跨租户数据隔离（防信息泄露）**。
 > 全程 **mock 模型**（不调用真实 LLM）：产出走确定性模板、嵌入走本地确定性向量，结果可复现。
-> 现状：**33 用例全部通过 / 19 套件（0 跳过）**（2026-06-03，本地 Postgres 16 实跑）。
+> 现状：**34 用例 / 19 套件（0 跳过）**；新增微信登录 openid 复登测试。最近一次全量实跑为 2026-06-03 的 33 用例全过；本次环境 `DATABASE_URL` 仍是占位 `HOST:5432`，未实跑集成测试。
 
 ## 一、怎么跑
 
@@ -29,7 +29,7 @@ AI_PROVIDER=mock npm test
 
 | 编号 | 场景 | 关键断言 |
 |---|---|---|
-| **TC-A** | 鉴权与账号隔离基线 | 无/非法 token → 401；手机号登录自动建号；A、B 属不同租户 |
+| **TC-A** | 鉴权与账号隔离基线 | 无/非法 token → 401；手机号登录自动建号；微信 openid 登录/复登；A、B 属不同租户 |
 | **TC-B** | 与不同智能体对话（mock） | general → 自由对话；strat → 结构化成果（多段）；会话持久化可回溯 |
 | **TC-C** | 长期记忆召回 | 对话后写入记忆且下次可召回；**语义召回**——与问题相关的记忆排在前 |
 | **TC-D** | 项目 + 知识库 + 跨对话召回 | 会话归属项目；知识入库→检索命中→**下次对话上下文自动召回**；**对话汇总→版本化报告+沉淀知识库** |
@@ -83,6 +83,12 @@ npm run dev   # 根目录：确保 PG → 建库/迁移/首次种子 → 同起 
   3. 改模型：`cd admin && npm run dev`（运营后台「模型」页，默认 Agnes；填 key 即切真实模型）
 
 `build:h5:server` = `TARO_APP_MODE=server`；后端地址默认 `http://localhost:4000/api`（可用 `TARO_APP_API` 覆盖）。
+
+### 微信小程序账号联调
+1. 服务端 `.env` 填 `WECHAT_MINI_APPID`（与 `app/project.config.json` 一致）和 `WECHAT_MINI_SECRET`，执行 `cd server && npm run db:push && npm run dev`。
+2. 小程序构建走真实后端：`cd app && TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp`。
+3. 微信开发者工具导入 `app/`；本地调试可临时勾选“不校验合法域名”，真机/预览必须在微信后台把 `TARO_APP_API` 的 HTTPS 域名加入 request 合法域名。
+4. 登录弹层会在 weapp + server 模式显示“微信账号登录”；后端用 `wx.login` code 换 openid/unionid 后生成自有 token，`session_key` 不下发前端。
 
 ### 已验证（本地实跑，浏览器 :5173 → 后端 :4000）
 CORS 预检放行自定义头 `x-user-id`；登录→`/me`→产出全通；**算力实时扣减**（产出前 10 → 报告后 9、`/me` 同步）；`/me` 正确读出 `ai=Agnes 2.0 Flash`。

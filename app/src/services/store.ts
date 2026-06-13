@@ -2,6 +2,7 @@ import Taro from '@tarojs/taro';
 import { colorByKey } from '../data/colors';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { api, getUserId, setUserId, clearUserId, type Agent, type Me } from './api';
+import { syncTabBarHidden } from './tabbar';
 
 // 轻量全局状态：本命色主题 + 用户/智能体缓存 + 订阅。
 // 跨页面共享，避免每页重复拉取。
@@ -15,7 +16,7 @@ interface AppState {
   me: Me | null;
   agents: Agent[];
   tab: number; // 当前底栏选中项（0..4）
-  overlay: boolean; // 是否有全屏弹层（如本命色 picker）打开——打开时隐藏自定义底栏
+  overlay: boolean; // 是否有全屏弹层打开——打开时隐藏原生/自定义底栏
 }
 
 const state: AppState = {
@@ -26,6 +27,7 @@ const state: AppState = {
   tab: 0,
   overlay: false,
 };
+const overlayKeys = new Set<string>();
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -61,7 +63,16 @@ export const store = {
   tab: () => state.tab,
   setTab(i: number) { state.tab = i; emit(); },
   overlay: () => state.overlay,
-  setOverlay(v: boolean) { if (state.overlay !== v) { state.overlay = v; emit(); } },
+  setOverlay(v: boolean, key = 'global') {
+    if (v) overlayKeys.add(key);
+    else overlayKeys.delete(key);
+    const next = overlayKeys.size > 0;
+    if (state.overlay !== next) {
+      state.overlay = next;
+      syncTabBarHidden(next);
+      emit();
+    }
+  },
 
   setColor(key: string, persist = true) {
     state.colorKey = key;
@@ -103,6 +114,9 @@ export const store = {
     state.me = null;
     state.onboarded = false;
     state.agents = [];
+    overlayKeys.clear();
+    state.overlay = false;
+    syncTabBarHidden(false);
     safeSet(LS_ONBOARDED, '');
     emit();
   },

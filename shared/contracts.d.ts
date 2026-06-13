@@ -36,6 +36,7 @@ export interface Agent {
 export interface AdminAgent {
   key: string; name: string; role: string; icon: string; type: string;
   gift: boolean; enabled: boolean; deliverableKey: string | null;
+  sessionCount?: number; deliverableCount?: number; updatedAt?: string;
 }
 
 /** 运营端详情（含 System 提示词 + Agent Memory） */
@@ -57,9 +58,10 @@ export interface Me {
 }
 
 export interface LoginRequest { phone: string; name?: string; code?: string; }
+export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl?: string; }
 export interface LoginResult {
   token: string; isNew: boolean; onboarded: boolean;
-  user: { id: string; name: string; phone: string; benmingColor: string };
+  user: { id: string; name: string; phone: string; benmingColor: string; wechatLinked?: boolean };
 }
 
 /* ────────────── 建档 ────────────── */
@@ -255,4 +257,47 @@ export interface AdminSaying { id: string; text: string; enabled: boolean; pushe
 export interface Plan {
   id: string; name: string; price: number; period: string;
   creditsPerMonth: number; agentCount: number; featuresJson: string[]; highlighted: boolean;
+}
+export interface AdminUserItem {
+  id: string;
+  name: string;
+  phone: string;
+  role: string;
+  tenantId: string;
+  tenantName: string;
+  planName: string | null;
+  benmingColor: string;
+  wechatLinked: boolean;
+  createdAt: string;
+  lastSessionAt: string | null;
+  sessionCount: number;
+  deliverableCount: number;
+  creditBalance: number;
+  totalGranted: number;
+  totalSpent: number;
+}
+export interface AdminUsageSummary {
+  registeredUsers: number;
+  activeUsers: number;
+  totalGranted: number;
+  totalSpent: number;
+  currentBalanceTotal: number;
+  unlimitedUsers: number;
+  reportCount: number;
+  creditEvents: number;
+}
+export interface AdminUsageView {
+  summary: AdminUsageSummary;
+  users: AdminUserItem[];
+}
+export interface AdminAuditItem {
+  id: string;
+  action: string;
+  userId: string | null;
+  userName: string | null;
+  userPhone: string | null;
+  tenantId: string | null;
+  tenantName: string | null;
+  payload: unknown;
+  at: string;
 }

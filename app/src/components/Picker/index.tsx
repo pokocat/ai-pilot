@@ -40,11 +40,10 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
     if (first) api.survey().then((qs) => { if (qs?.length) setSurvey(qs); }).catch(() => {});
   }, [first]);
 
-  // custom-tab-bar 是原生层、z-index 压不住，wx.hideTabBar 对自定义底栏又不可靠；
-  // 改用全局 overlay 标志让底栏自己隐藏，弹层按钮不再被遮挡。
+  // custom-tab-bar 是原生层、z-index 压不住；统一交给 store.setOverlay 桥接原生底栏和自定义底栏。
   useEffect(() => {
-    store.setOverlay(open);
-    return () => store.setOverlay(false);
+    store.setOverlay(open, 'benming-picker');
+    return () => store.setOverlay(false, 'benming-picker');
   }, [open]);
 
   if (!open) return null;
@@ -96,20 +95,18 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
 
             <Text className="pk-verdict serif">「{c.verdict}」</Text>
 
-            <View className="pk-discs">
+            <View className="pk-swatches">
               {COLORS.map((cc, i) => (
                 <View
                   key={cc.key}
-                  className={`pk-disc ${i === sel ? 'on' : ''}`}
+                  className="pk-swatch"
                   onClick={() => pick(i)}
                 >
-                  <View className="disc-dot" style={{ background: cc.vars['--accent'] }} />
+                  <View className={`pk-disc ${i === sel ? 'on' : ''}`}>
+                    <View className="disc-dot" style={{ background: cc.vars['--accent'] }} />
+                  </View>
+                  <Text className={i === sel ? 'on' : ''}>{cc.short}</Text>
                 </View>
-              ))}
-            </View>
-            <View className="pk-discnames">
-              {COLORS.map((cc, i) => (
-                <Text key={cc.key} className={i === sel ? 'on' : ''}>{cc.short}</Text>
               ))}
             </View>
 

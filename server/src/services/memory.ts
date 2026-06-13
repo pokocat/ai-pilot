@@ -100,6 +100,7 @@ export async function recordFeedback(opts: {
   title: string;
 }): Promise<void> {
   const { tenantId, userId, agentKey, cfg, signal, title } = opts;
+  if (!cfg.longTerm) return;
   if (!cfg.sources.includes('deliverable_feedback')) return;
   const map = { adopt: '采纳了', edit: '修改了', ignore: '忽略了' };
   const memText = `用户${map[signal]}《${title}》`;

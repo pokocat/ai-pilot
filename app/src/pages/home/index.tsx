@@ -56,7 +56,7 @@ function SayingLine({ html, accent }: { html: string; accent: string }) {
 export default function Home() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
-  const [showLogin, setShowLogin] = useState(false);
+  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
   const [showPicker, setShowPicker] = useState(false);
   const [pickerFirst, setPickerFirst] = useState(false);
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
@@ -85,15 +85,24 @@ export default function Home() {
     } catch { /* H5 无胶囊，走 CSS 兜底 */ }
   }, []);
 
-  const goChat = (params: string) => Taro.navigateTo({ url: `/pages/chat/index?${params}` });
+  const requireLogin = () => {
+    if (s.isAuthed()) return true;
+    setShowLogin(true);
+    Taro.showToast({ title: '请先登录后再开始对话', icon: 'none' });
+    return false;
+  };
+  const goChat = (params: string) => {
+    if (!requireLogin()) return false;
+    Taro.navigateTo({ url: `/pages/chat/index?${params}` });
+    return true;
+  };
   const send = () => {
     const v = input.trim() || '帮我做一次战略体检';
-    goChat(`send=${encodeURIComponent(v)}`);
-    setInput('');
+    if (goChat(`send=${encodeURIComponent(v)}`)) setInput('');
   };
 
   return (
-    <Screen>
+    <Screen className="home">
       <View className="pad">
         {/* 品牌行 —— 与微信胶囊顶端对齐（本命色切换已移至「我的」） */}
         <View className="brandrow" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
@@ -151,16 +160,6 @@ export default function Home() {
               </View>
             ))}
           </View>
-        </View>
-
-        {/* 项目工作台入口 */}
-        <View className="home-proj card" onClick={() => Taro.navigateTo({ url: '/pages/projects/index' })}>
-          <View className="hp-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="grid" size={18} color={accent} /></View>
-          <View className="hp-b">
-            <Text className="hp-t">项目工作台</Text>
-            <Text className="hp-s">把融资、新品、组织调整建成项目，对话 / 报告 / 知识有序归拢</Text>
-          </View>
-          <Text className="hp-go" style={{ color: accent }}>›</Text>
         </View>
 
         {/* 军师为你发现 */}

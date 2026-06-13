@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { api } from '../../services/api';
+import { IS_MOCK } from '../../services/config';
 import { store } from '../../services/store';
 import { useStore } from '../../hooks/useStore';
 import './index.scss';
@@ -12,7 +13,7 @@ interface Props {
   onLoggedIn: (onboarded: boolean) => void;
 }
 
-// fake 登录：手机号 + 验证码（验证码先不校验）。以手机号为账号主键，新号自动建档隔离。
+// 小程序 server 模式优先微信登录；手机号 + fake 验证码保留为演示/兜底。
 export default function Login({ open, onLoggedIn }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -20,11 +21,12 @@ export default function Login({ open, onLoggedIn }: Props) {
   const [code, setCode] = useState('');
   const [sent, setSent] = useState(0); // 验证码倒计时
   const [loading, setLoading] = useState(false);
+  const [wechatLoading, setWechatLoading] = useState(false);
 
   // 打开时隐藏底栏（复用 overlay 标志）
   useEffect(() => {
-    store.setOverlay(open);
-    return () => store.setOverlay(false);
+    store.setOverlay(open, 'login');
+    return () => store.setOverlay(false, 'login');
   }, [open]);
 
   useEffect(() => {
@@ -36,6 +38,36 @@ export default function Login({ open, onLoggedIn }: Props) {
   if (!open) return null;
 
   const phoneOk = /^1\d{10}$/.test(phone);
+  const canWechatLogin = !IS_MOCK && process.env.TARO_ENV === 'weapp';
+
+  const getWechatCode = () => new Promise<string>((resolve, reject) => {
+    Taro.login({
+      success: (res) => {
+        if (res.code) resolve(res.code);
+        else reject(new Error(res.errMsg || 'wx.login 未返回 code'));
+      },
+      fail: (err) => reject(new Error(err.errMsg || 'wx.login 失败')),
+    });
+  });
+
+  const submitWechat = async () => {
+    if (loading || wechatLoading) return;
+    setWechatLoading(true);
+    try {
+      const wxCode = await getWechatCode();
+      const r = await api.wechatLogin(wxCode);
+      await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
+      onLoggedIn(r.onboarded);
+    } catch (e) {
+      const err = e as Error & { data?: { code?: string } };
+      const message = err?.data?.code === 'WECHAT_CONFIG_MISSING'
+        ? '本地未配置微信登录，请用手机号演示登录'
+        : err?.message || '微信登录失败';
+      Taro.showToast({ title: message, icon: 'none' });
+    } finally {
+      setWechatLoading(false);
+    }
+  };
 
   const sendCode = () => {
     if (!phoneOk) { Taro.showToast({ title: '请输入正确手机号', icon: 'none' }); return; }
@@ -46,7 +78,7 @@ export default function Login({ open, onLoggedIn }: Props) {
 
   const submit = async () => {
     if (!phoneOk) { Taro.showToast({ title: '请输入正确手机号', icon: 'none' }); return; }
-    if (loading) return;
+    if (loading || wechatLoading) return;
     setLoading(true);
     try {
       let onboarded: boolean;
@@ -71,7 +103,16 @@ export default function Login({ open, onLoggedIn }: Props) {
       <View className="lg-card">
         <View className="lg-mk serif" style={{ background: accent }}>军</View>
         <Text className="lg-h serif">军师</Text>
-        <Text className="lg-sub">AI 商业军师 · 手机号登录</Text>
+        <Text className="lg-sub">AI 商业军师 · {canWechatLogin ? '微信账号登录' : '手机号登录'}</Text>
+
+        {canWechatLogin && (
+          <>
+            <View className={`lg-wx ${wechatLoading ? 'off' : ''}`} onClick={submitWechat}>
+              <Text>{wechatLoading ? '微信登录中…' : '微信账号登录'}</Text>
+            </View>
+            <View className="lg-sep"><Text>或使用手机号演示登录</Text></View>
+          </>
+        )}
 
         <View className="lg-field">
           <Text className="lg-pre">+86</Text>

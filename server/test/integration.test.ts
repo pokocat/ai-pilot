@@ -44,6 +44,45 @@ describe('TC-A 鉴权与账号隔离基线', () => {
     const r = await api('GET', '/api/me', { token: 'not-a-real-user-id' });
     assert.equal(r.status, 401);
   });
+
+  test('A4 微信登录用 openid 建号，复登命中同一账号', async () => {
+    const oldFetch = globalThis.fetch;
+    process.env.WECHAT_MINI_APPID = 'wx-test-appid';
+    process.env.WECHAT_MINI_SECRET = 'wx-test-secret';
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      assert.equal(url.searchParams.get('appid'), 'wx-test-appid');
+      assert.equal(url.searchParams.get('secret'), 'wx-test-secret');
+      assert.equal(url.searchParams.get('grant_type'), 'authorization_code');
+      return new Response(JSON.stringify({
+        openid: 'openid-test-a',
+        unionid: 'unionid-test-a',
+        session_key: 'should-not-return-to-client',
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+
+    try {
+      const first = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-a' } });
+      assert.equal(first.status, 200);
+      assert.equal(first.body.isNew, true);
+      assert.equal(first.body.user.wechatLinked, true);
+      assert.equal(first.body.user.phone, '');
+      assert.equal(first.body.session_key, undefined, '不应把微信 session_key 下发给前端');
+
+      const second = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-b' } });
+      assert.equal(second.status, 200);
+      assert.equal(second.body.isNew, false);
+      assert.equal(second.body.token, first.body.token, '同一 openid 应复用同一账号');
+
+      const user = await prisma.user.findUnique({ where: { id: first.body.token } });
+      assert.equal(user?.wechatOpenId, 'openid-test-a');
+      assert.equal(user?.wechatUnionId, 'unionid-test-a');
+    } finally {
+      globalThis.fetch = oldFetch;
+      delete process.env.WECHAT_MINI_APPID;
+      delete process.env.WECHAT_MINI_SECRET;
+    }
+  });
 });
 
 // ───────────────────────── TC-B 与不同智能体对话（mock） ─────────────────────────

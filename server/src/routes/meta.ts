@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { providerInfo } from '../llm/gateway.js';
 import { resolveUser } from '../services/context.js';
+import { recordAudit } from '../services/audit.js';
 
 export async function metaRoutes(app: FastifyInstance) {
   app.get('/health', async () => ({ ok: true }));
@@ -29,6 +30,7 @@ export async function metaRoutes(app: FastifyInstance) {
   app.put<{ Body: { color: string } }>('/me/color', async (req) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     await prisma.user.update({ where: { id: user.id }, data: { benmingColor: req.body.color } });
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.color.update', payload: { color: req.body.color } });
     return { ok: true, color: req.body.color };
   });
 }

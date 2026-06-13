@@ -123,6 +123,7 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 | `DATABASE_URL` | Postgres 连接串 | 必填，强密码 |
 | `PORT` | 后端端口 | 4000（被 Nginx 反代） |
 | `AI_PROVIDER` | 兜底 provider | `mock`（真实模型走后台 `AiSetting`） |
+| `WECHAT_MINI_APPID`/`WECHAT_MINI_SECRET` | 小程序 `wx.login` 后端换 openid | AppSecret 只放服务端环境变量，不入前端包 |
 | `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`OPENAI_BASE_URL`/`OPENAI_MODEL` | env 兜底模型 | 一般留空，改用后台配置 |
 | `EMBEDDING_MODEL` | 嵌入模型 | 留空=本地确定性嵌入；配则走 `/embeddings` |
 | `MODERATION_ENABLED` | 内容审核开关 | `true`（演示级关键词；生产换合规服务） |

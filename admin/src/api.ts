@@ -11,15 +11,21 @@ async function req<T>(path: string, method = 'GET', body?: object): Promise<T> {
 }
 
 // 数据模型统一来自 SSOT（shared/contracts），与前端/后端同口径；按运营端旧名再导出。
-export type { Overview, AdminAgent, AgentDetail, MemoryConfig, MemoryIntensity, MemorySource, Plan } from '../../shared/contracts';
+export type { Overview, AdminAgent, AgentDetail, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUsageView, AdminAuditItem } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
 export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider } from '../../shared/contracts';
 
-import type { Overview, AdminAgent, AgentDetail, SurveyAdmin, Plan, AdminSaying, AiConfigView, AiConfigUpdate, AiTestResult } from '../../shared/contracts';
+import type {
+  Overview, AdminAgent, AgentDetail, SurveyAdmin, Plan, AdminSaying,
+  AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUsageView, AdminAuditItem,
+} from '../../shared/contracts';
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
+  users: () => req<AdminUserItem[]>('/admin/users'),
+  usage: () => req<AdminUsageView>('/admin/usage'),
+  auditLogs: () => req<AdminAuditItem[]>('/admin/audit-logs'),
   sayings: () => req<AdminSaying[]>('/admin/sayings'),
   addSaying: (text: string) => req<AdminSaying>('/admin/sayings', 'POST', { text }),
   toggleSaying: (id: string, enabled: boolean) => req<AdminSaying>(`/admin/sayings/${id}`, 'PATCH', { enabled }),

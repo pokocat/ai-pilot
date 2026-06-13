@@ -84,6 +84,7 @@ repo/
 - `app/src/services/api.ts`：每个方法按 `IS_MOCK` 分流 mock 或真实请求，**两种模式同口径**（同样的入参/返回类型）。
 - `app/src/services/mock.ts`：前端 mock 后端，实现 login/me/agents/survey/profile/sayings/sessions/generate/library 全量接口；mock 数据来自 `app/src/data/agents.ts`、`app/src/data/deliverables.ts`（**由后端 seed 自动生成，勿手改**）。
 - mock 模式下登录/数据按 `mock-<手机号>` token 隔离并持久化，可切换账号验证隔离。
+- weapp + server 模式下登录弹层优先提供「微信账号登录」：前端 `Taro.login` 取 code，后端 `/auth/wechat-login` 调微信 `jscode2session` 换 openid/unionid 并签发自有 token；H5/mock 不显示该入口。
 - **H5 浏览器手测（推荐替代小程序）**：weapp 与 H5 同一套码、无平台分叉。零后端走查 `npm run dev:h5`；连后端测真实变更 `npm run build:h5:server && npm run serve:h5`（→ http://localhost:5173，server 模式，默认指向 :4000）。H5 用 hash 路由，`dist/` 任意静态服务器可开。详见 `docs/TESTING.md` §五。
 
 ---
@@ -106,9 +107,10 @@ repo/
 
 ## 6. 账号与数据隔离
 
-- **登录**：以**手机号为账号主键**的 fake 登录（验证码暂不校验，演示码 `888888`）。手机号不存在则自动建号（独立租户+用户，套餐赠送算力）。
+- **登录**：小程序 server 模式支持微信账号登录（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号）；手机号 fake 登录仍保留为演示/兜底（验证码暂不校验，演示码 `888888`）。新账号自动建独立租户+用户，套餐赠送算力。
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
+- **微信密钥**：`WECHAT_MINI_SECRET` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
 - **离线兜底**：server 模式下后端不可达时，登录回退为 `local-<手机号>` 本地会话，保证可体验（无服务端数据）。
 - **退出登录**：「我的」页底部。
 - 端到端隔离已验证（见 §11）。生产应把 `token=userId` 换成**短信验证码 + JWT**，路由隔离逻辑不变。
@@ -126,7 +128,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | 智库 | `pages/thinktank` | 顾问型智能体列表（advisory） |
 | 对话 | `pages/sessions` | 会话历史；底栏中间「对话」=开新会话 |
 | 智能体 | `pages/studio` | 创作型智能体（creative）+ 训练专属智能体 |
-| 我的 | `pages/profile` | 账号/套餐/算力/本命色/退出登录 |
+| 我的 | `pages/profile` | 账号/项目工作台/方案库/套餐/算力/本命色/退出登录 |
 
 非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡）、`pages/library`（方案库）。
 
@@ -136,12 +138,16 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
   - 其它 Tab 页：`<Screen topInset>`，由 `components/Screen` 注入实测高度的顶部占位（CSS 兜底 `env(safe-area-inset-top)+52px`）。
   - 非 Tab 自定义头（对话/项目/方案库/报告等）必须使用 `components/SafeHeader`，由它统一实测 `getMenuButtonBoundingClientRect()` 设置顶部 padding 与右侧胶囊留白；不要在页面 SCSS 里各自写 `env(safe-area-inset-top)` 头部 padding。
   - **不要再加伪状态栏 `9:41`**（已全部移除）。
-- **全屏弹层遮挡底栏**：`custom-tab-bar` 是原生层，`wx.hideTabBar` 不可靠。改用全局 `store.overlay` 标志——弹层（登录 / 本命色 picker）打开时底栏组件 `return null`。**新增全屏弹层时务必置 `store.setOverlay(open)`**。
+- **全屏弹层遮挡底栏**：`custom-tab-bar` 是原生层，不能只靠 z-index。全屏弹层（登录 / 本命色 picker / @引用面板）必须调用 `store.setOverlay(open, key)`：它会按唯一 key 登记来源、同步 `Taro.hideTabBar/showTabBar`、写入 `junshi.tabbarHidden` 供 `custom-tab-bar` 跨实例读取并 `return null`，避免登录页露出底部导航。正常 Tab 页由 `custom-tab-bar` 挂载时调用 `hideNativeTabBarOnly()` 只压住微信原生文字 tabbar，不写入 `junshi.tabbarHidden`，避免悬浮底栏和原生底栏重复出现。**新增全屏弹层时务必使用稳定唯一 key，并在关闭/卸载时清理**。
+- **本命色色盘对齐**：`components/Picker` 的色点与名称必须在同一个 `.pk-swatch` 垂直列里渲染；不要拆成上下两条 flex 行，否则选中外圈宽度会导致标签错位。
 - **H5 与小程序视觉一致**：小程序使用真实 `page` 节点 + `src/custom-tab-bar` 原生自定义底栏；H5 使用 `src/app.h5.tsx` 手动挂载同款 `CustomTabBar`，并由 `src/app.h5.scss` 给浏览器根节点补设计 token、隐藏 Taro 生成的默认 `weui` tabbar。不要把 H5 兼容样式混入会影响小程序的原生 tabbar 路径。
 - **标题 Text 块级化**：Taro `<Text>` 默认偏内联；全局 `.kicker` / `.h1` 必须保持 `display: block`，页面 hero 说明文案也需显式 `display: block`，避免真机上标题、kicker、正文挤成一行。
+- **首页标题宋体化**：`pages/home` 通过 `Screen className="home"` 局部定义标题字体栈，品牌名、问候语、今日献策正文、对话卡提问、分区标题与卡片标题使用宋体优先；不要为此改全局 `--serif`，避免影响其它页面。
 - **对话输入框小程序兼容**：`pages/chat` 输入框必须由整条 `.box` 触发 focus，`onInput` 返回 `e.detail.value` 并同步 state，`onConfirm` 使用事件值发送；保留 `cursorSpacing/adjustPosition/alwaysEmbed` 和 `.cinput` 的 `min-width:0;width:100%`，避免真机上点得到但输不进或输入宽度塌陷。
 - **对话等待反馈**：`pages/chat` 发送消息后必须立刻在对话流尾部显示“正在梳理上下文”思考气泡与三点动效，直到接口返回；不要只让发送按钮变灰，否则真机会像卡住。
+- **对话入口登录前置**：首页对话入口和 `pages/chat` 首帧都必须先检查登录态；未登录直接弹 `Login` 并提示“请先登录后再开始对话”，不要先等 401，否则 H5/真机会出现白屏闪一下再弹登录。底栏中间「对话」在未登录时只负责提示并跳到 `pages/chat`，由聊天页渲染 `Login`；**不要在 `custom-tab-bar` 内直接渲染 `Login`**，小程序原生 tabbar 层会导致弹层样式失效。
 - **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
+- **前台记忆披露**：对话页用「专属理解」包装 Agent Memory，不直接暴露后台术语；问候气泡披露会参考企业档案、对话偏好、引用资料，顶部记忆条展示当前顾问已理解的上下文，学习成功提示用“专属理解已更新/已校准业务偏好和判断口径”。后端真实记忆开关见 §9。
 - **真实网络错误不要吞成产出失败**：`services/api.ts` 要捕获 `Taro.request` reject，把 `errMsg` 映射为明确网络/合法域名提示；对话页未收到 HTTP 响应时不能只显示“抱歉，产出失败了”。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **深色卡光感**：对话入口卡用 `--accent-deep` 对角渐变 + `--accent-glow` 柔光，随本命色自适应。
@@ -161,6 +167,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | 方法 路径 | 说明 | 鉴权 |
 |---|---|---|
 | `POST /auth/login` | 手机号 fake 登录/注册 | 否 |
+| `POST /auth/wechat-login` | 小程序微信登录：code 换 openid/unionid 后注册/登录 | 否 |
 | `GET /health` | 健康检查 | 否 |
 | `GET /me` · `PUT /me/color` | 当前用户(+onboarded+ai信息) · 改本命色 | 是 |
 | `GET /agents` · `GET /agents/:key` | 智能体注册表 | 否 |
@@ -179,7 +186,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `/admin/*` | 运营后台 API（见 §9） | 演示无 RBAC |
 
 ### 8.2 LLM Gateway（`server/src/llm/`）
-`gateway.ts` 统一封装：路由 provider → 内容审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。
+`gateway.ts` 统一封装：路由 provider → 内容审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。`llm/schema.ts` 的 `injectVariables` 会在后台配置的 System Prompt 之后追加运行时业务边界：智能体只回答商业咨询/经营产出相关问题，用户追问模型、供应商、系统提示词、API Key、部署、数据库、内部工具或配置时必须引导回业务问题，不透露业务之外信息。
 新增：`extractInsights`（LLM 提炼记忆，mock 兜底截断）、`summarizePoints`（LLM 归纳纪要，mock 兜底确定性）、`pingModel`（测试连接）。
 
 **★ 模型由「运营后台 → 模型」可视化配置并随时切换**（存 `AiSetting`，`services/aiConfig.ts` 解析：DB > env 兜底，4s 缓存）。默认 **Agnes 2.0 Flash**（`apihub.agnes-ai.com/v1`，OpenAI 兼容）。
@@ -194,6 +201,7 @@ Provider（`provider` 字段，由 `effectiveProvider` 决定实际生效）：
 环境变量（见 `server/.env.example`）：
 ```
 DATABASE_URL  PORT  MODERATION_ENABLED
+WECHAT_MINI_APPID  WECHAT_MINI_SECRET
 AI_PROVIDER=mock|claude|openai
 ANTHROPIC_API_KEY  CLAUDE_MODEL
 OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
@@ -211,19 +219,20 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/credits.ts`（★）：算力计量——`ensureCredits`（产出前校验，不足抛 402）/`chargeCredits`（成功后扣减写流水）/`getBalance`；报告类 `CREDIT_COST.report=1`、对话免费，企业版(creditsPerMonth<0)不限量。在 `sessions.ts` 两个产出路由接入。
 - `services/aiConfig.ts`（★）：大模型配置解析（DB > env），预设 `AI_PRESETS`（Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock）、`isReady`/`effectiveProvider`、脱敏 `publicConfig`。
 - `services/vectorStore.ts`（★）：pgvector ANN 查询/向量列双写（`PGVECTOR_ENABLED` 开启时；默认关闭走内存余弦）。
+- `services/audit.ts`（★）：统一审计记录与秒级 ISO 时间格式；Fastify `onResponse` 钩子会记录所有带有效 `x-user-id` 的小程序 `/api/*` 行为（方法/路径/状态码），关键业务动作另写语义日志（登录、建档、产出、存库、汇总、后台配置变更）。
 - 内容审核 `moderation_log`、审计 `audit_log`（演示级，生产替换合规服务）。
 
 ---
 
 ## 9. 运营后台（admin）
 
-页面/接口：概览看板、每日献策库（增删改启停）、智能体配置（System 提示词 + Agent Memory 策略）、**模型配置（默认 Agnes，可一键切 DeepSeek/Qwen…，含测试连接，即时生效）**、建档问卷、套餐。入口 `admin/src/App.tsx`（`ModelView`）+ `AgentDetailPanel.tsx`，API `admin/src/api.ts`（类型来自 SSOT）。开发期 Vite 代理 `/api → localhost:4000`。
+页面/接口：概览看板、**注册用户管理**（小程序注册用户、微信绑定、租户/套餐、最后会话、会话/成果数、算力余额）、**算力消耗**（按用户汇总赠送/消耗/余额、30 天活跃、成果数）、**审计日志**（最近 100 条，时间精确到秒，展示用户/租户/动作/payload）、每日献策库（增删改启停）、智能体/功能配置（System 提示词 + Agent Memory 策略 + **上架/下架**，前台 `/agents` 默认只展示已上架功能）、**模型配置（默认 Agnes，可一键切 DeepSeek/Qwen…，含测试连接，即时生效）**、建档问卷、套餐。新增 admin API：`GET /admin/users`、`GET /admin/usage`、`GET /admin/audit-logs`；智能体列表额外返回会话/成果计数与更新时间。入口 `admin/src/App.tsx`（`UsersView/UsageView/AuditView/ModelView`）+ `AgentDetailPanel.tsx`，API `admin/src/api.ts`（类型来自 SSOT）。默认 System Prompt 位于 `server/src/data/agents.ts`，商业咨询类按麦肯锡式问题解决法（MECE、假设驱动、80/20、金字塔原则、So what/Now what、30 天行动清单）设置；上线同步用 `cd server && npm run admin:sync-content`，只更新智能体提示词并追加缺失每日献策，不删除业务数据、不覆盖启停状态。Agent Memory 开关保存到 `Agent.memoryConfig` 并由后端真实读取：`longTerm=false` 时不召回/不写入长期记忆，`autoLearn=false` 或去掉 `conversation` 来源时不从对话学习，`intensity/retentionDays` 影响写入权重和过期时间，`deliverable_feedback` 控制成果反馈回流。开发期 Vite 代理 `/api → localhost:4000`。本地后台使用全屏无边框容器，`admin/src/styles/admin.css` 需要保持视口安全收缩、横向隐藏和长文本断行，底部导航为横向滚动，避免新增模块或模型 URL/API Key/状态文案撑出屏幕。
 
 ---
 
 ## 10. 数据库（Prisma · `server/prisma/schema.prisma`）
 
-租户 `Tenant` / 用户 `User`(phone 唯一) / 档案 `Profile` / 智能体 `Agent` / 会话 `Session` / 消息 `Message` / 成果 `Deliverable` / 记忆 `Memory` / 献策 `Saying` / 问卷 `SurveyQuestion` / 套餐 `Plan` / 算力流水 `CreditLedger` / 审计 `AuditLog` / 审核 `ModerationLog`。业务表均含 `tenantId` 行级隔离。
+租户 `Tenant` / 用户 `User`(phone 唯一；`wechatOpenId/wechatUnionId` 可选唯一绑定微信账号) / 档案 `Profile` / 智能体 `Agent` / 会话 `Session` / 消息 `Message` / 成果 `Deliverable` / 记忆 `Memory` / 献策 `Saying` / 问卷 `SurveyQuestion` / 套餐 `Plan` / 算力流水 `CreditLedger` / 审计 `AuditLog` / 审核 `ModerationLog`。业务表均含 `tenantId` 行级隔离。
 
 **新增模型（企业事务操作系统）**：
 - `Project`（项目主线，租户级，`(tenantId,slug)` 唯一）；`Session.projectId` / `Memory.projectId` / `Deliverable.projectId` 归属项目。
@@ -242,7 +251,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 
 | 能力 | 后端落点 | 前端落点 |
 |---|---|---|
-| **项目（主线）** | `routes/projects.ts`、`Session/Memory/Deliverable.projectId` | `pages/projects`（列表+新建）、`pages/project`（详情：会话/报告/知识三段）；首页入口条 + 「我的」入口 |
+| **项目（主线）** | `routes/projects.ts`、`Session/Memory/Deliverable.projectId` | `pages/projects`（列表+新建）、`pages/project`（详情：会话/报告/知识三段）；「我的」入口 |
 | **知识库 + 语义记忆** | `services/{embedding,retrieval,knowledge}.ts`、`routes/knowledge.ts`、`Memory` 改语义召回 | 项目详情「知识」段（列表+手动加）；`@引用` 选择器拉候选 |
 | **版本化报告** | `services/reports.ts`、`routes/reports.ts`、`ReportDoc/ReportVersion`、`/library` 桥接 | `pages/report`（版本时间线 + 查看某版 + 对比上一版 diff）；方案库 `vN` 徽标跳转 |
 | **@ 引用（上下文工程）** | `buildGenContext` 解析 `refs` → `resolveReferences` 注入；`injectVariables` 追加「参考资料」块；`Message.refsJson` 持久化 | 对话页 📎 唤起选择器，已选引用以 chip 呈现并随消息发送/回显 |
@@ -300,8 +309,8 @@ cd admin && npm install && npm run dev   # 运营后台
 ### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
-- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 33 用例全过 / 19 套件（0 跳过）**。
-- 覆盖：鉴权隔离、多智能体对话、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、边界健壮性。（K2 按次扣减为占位待实现，已 skip 标注）
+- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 34 用例 / 19 套件（0 跳过）**；新增微信登录 openid 复登测试。最近一次全量实跑为 2026-06-03 的 33 用例全过；本次环境 `DATABASE_URL` 仍是占位 `HOST:5432`，未实跑集成测试。
+- 覆盖：鉴权隔离、微信 openid 登录/复登、多智能体对话、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、边界健壮性。（K2 按次扣减为占位待实现，已 skip 标注）
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
 
 ### 端到端隔离验证（本地 Postgres + mock provider）
@@ -319,6 +328,18 @@ npx miniprogram-ci upload \
 ```
 注意：上传密钥若在小程序后台开启了 **IP 白名单**，须把本机出口 IP 加入；连真实后端版本另需把 API 域名加入 request 合法域名（见 §12）。
 
+### 微信账号登录联调
+```bash
+cd server
+cp .env.example .env
+# 填 WECHAT_MINI_APPID=wx05a49967e2adb557 与 WECHAT_MINI_SECRET
+npm run db:push && npm run dev
+
+cd ../app
+TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp
+```
+微信开发者工具导入 `app/`；本地调试可勾选“不校验合法域名”，真机/预览必须把 `TARO_APP_API` 的 HTTPS 域名加入小程序后台 request 合法域名。
+
 ---
 
 ## 12. 上线前硬约束（微信小程序）
@@ -328,16 +349,17 @@ npx miniprogram-ci upload \
 
 mock 可随时预览；**正式上传/审核**还需：
 1. **真实 AppID**：已设为 `wx05a49967e2adb557`（`app/project.config.json`）。
-2. **后端公网 HTTPS + ICP 备案域名**，并加入小程序后台 request 合法域名；前端用 `TARO_APP_MODE=server TARO_APP_API` 指向它。
-3. **生成式 AI 备案 / 算法备案 + 内容安全**（AI 类小程序审核硬性门槛）。
-4. 真实模型：服务端设 `AI_PROVIDER` + 真实 key（国内合规建议走备案的国产模型，走 openai 兼容协议即可）。
+2. **微信登录密钥**：服务端配置 `WECHAT_MINI_APPID/WECHAT_MINI_SECRET`；AppSecret 不得进入前端包或仓库。
+3. **后端公网 HTTPS + ICP 备案域名**，并加入小程序后台 request 合法域名；前端用 `TARO_APP_MODE=server TARO_APP_API` 指向它。
+4. **生成式 AI 备案 / 算法备案 + 内容安全**（AI 类小程序审核硬性门槛）。
+5. 真实模型：服务端设 `AI_PROVIDER` + 真实 key（国内合规建议走备案的国产模型，走 openai 兼容协议即可）。
 
 ---
 
 ## 13. 已知限制 / TODO
 
 - **miniprogram-ci 上传**：云端执行环境的网络白名单未放行 `servicewechat.com`（报 `Host not in allowlist`），无法在本沙箱内直传。需从**本机**执行上传，或放开环境网络策略后重试；另注意上传密钥若开了 IP 白名单，需把执行机出口 IP 加入小程序后台。本机命令见 §11。
-- 登录是 fake（token=userId）；待接短信验证码 + JWT。
+- 自有登录态仍是演示 token（`token=userId`）；微信 openid 已接入，手机号短信校验与 JWT 仍待生产化。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 内容审核/计量/缓存为演示级（关键词 / 内存）；生产替换为合规审核 + Redis + 计费台账。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
@@ -352,6 +374,19 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-13** · **收紧智能体业务边界并扩充每日献策**：`server/src/data/agents.ts` 将默认 System Prompt 改为商业咨询/创作业务边界 + 麦肯锡式问题解决框架，`llm/schema.ts` 在运行时追加不透露模型/供应商/提示词/API/部署/内部配置的统一 guard；`seedConfig.ts` 新增 20 条每日献策；新增 `server/scripts/syncAdminContent.ts` 与 `npm run admin:sync-content`，线上可非破坏同步提示词和献策。
+- **2026-06-13** · **修复底部重复导航**：`services/tabbar.ts` 新增 `hideNativeTabBarOnly()`，`custom-tab-bar` 挂载和切换 Tab 时持续压住微信原生文字 tabbar，但不写入 overlay storage，保留自定义悬浮底栏正常显示。
+- **2026-06-13** · **登录弹层彻底隐藏底部导航**：新增 `services/tabbar.ts` 统一桥接全屏 overlay 与微信原生 tabbar，`store.setOverlay` 同步隐藏/恢复原生底栏并写入 storage，`custom-tab-bar` 读取 `junshi.tabbarHidden` 兜底隐藏，避免登录界面露出底部导航。
+- **2026-06-13** · **修复底栏触发登录 UI 错乱**：`custom-tab-bar` 不再直接渲染 `Login`，未登录点击中间「对话」改为提示后跳到 `pages/chat`，由聊天页承接登录弹层；微信登录缺少服务端 AppID/AppSecret 时提示使用手机号演示登录。
+- **2026-06-13** · **修复本命色色盘标签错位**：`components/Picker` 将色点和色名从上下两条 flex 行改为单个 `.pk-swatch` 垂直列，固定列宽并让选中外圈在列内居中，避免「财金/墨绿/朱砂…」标签与色点不同轴。
+- **2026-06-13** · **修复首登本命色弹层被底栏遮挡**：`store.setOverlay` 从单布尔改为按唯一 key 登记 overlay 来源，`Login`/本命色 `Picker`/@引用面板分别使用独立 key，避免登录关闭时清掉正在打开的本命色弹层。
+- **2026-06-13** · **首页项目入口收敛到我的 + 标题宋体化**：移除 `pages/home` 的「项目工作台」入口条，保留「我的」页第一行入口；首页根节点增加 `home` 类并用局部宋体字体栈覆盖品牌、问候、献策、对话题、分区和卡片标题，不影响全局标题字体。
+- **2026-06-12** · **前置未登录对话拦截**：首页对话入口未登录时不再跳转，直接弹登录提示；底栏中间「对话」未登录时在当前页弹登录并在登录后再开新会话；`pages/chat` 首帧检测无 token/401，先渲染兜底问候并立即弹登录，避免先白屏再显示登录。
+- **2026-06-12** · **前台产品化披露 Agent Memory**：`pages/chat` 顶部记忆条改为「专属理解」表达，问候气泡新增轻量说明卡，披露顾问会参考企业档案、对话偏好和引用资料；记忆写入成功提示改为“专属理解已更新/已校准业务偏好和判断口径”，避免直接暴露后台术语。
+- **2026-06-12** · **运营后台改为全屏无边框并补严记忆主开关**：`admin/src/styles/admin.css` 去掉本地后台手机壳边框、圆角、阴影和页面外边距，改为占满视口；`services/context.ts` 在 `longTerm=false` 时不再召回既有长期记忆，`services/memory.ts` 在 `longTerm=false` 时不再写入成果反馈记忆，使 Agent Memory 主开关语义与后台配置一致。
+- **2026-06-12** · **扩充运营后台为真实管理台**：SSOT 新增 `AdminUserItem/AdminUsageView/AdminAuditItem`；后端新增 `/admin/users`、`/admin/usage`、`/admin/audit-logs`，概览改为读取真实用户/会话/成果/算力/审计数据；新增 `services/audit.ts` 统一秒级审计时间与小程序 API 行为审计，登录/建档/产出/存库/汇总/后台配置变更写入语义审计；运营端新增用户、消耗、审计模块，顾问页支持功能上架/下架并记录审计，底部导航改为横向滚动以容纳真实后台模块。
+- **2026-06-12** · **修复运营后台本地预览边框越界**：`admin/src/styles/admin.css` 收紧手机壳宽高为视口安全值，给滚动容器/表单/卡片/flex 子项补 `min-width:0` 与长文本断行，并在窄屏下让新增/模型操作按钮自动换行，避免本地 `npm run dev` 预览时边框或内容横向溢出。
+- **2026-06-12** · **接入微信小程序账号登录**：新增 `POST /auth/wechat-login` 与 `services/wechat.ts`，服务端用 `WECHAT_MINI_APPID/WECHAT_MINI_SECRET` 调 `jscode2session`，按 openid/unionid 注册或复登并保留 `session_key` 不下发；`User` 增加 `wechatOpenId/wechatUnionId/wechatLinkedAt`；小程序 server 模式登录弹层新增「微信账号登录」，H5/mock 保持手机号演示登录；补后端集成测试、`.env.example`、部署/测试文档。
 - **2026-06-04** · **统一非 Tab 页顶部安全区与报告页排版**：新增 `components/SafeHeader`，对话/项目/项目列表/方案库/报告页统一按微信胶囊实测值避让状态栏和右侧胶囊，移除各页独立 `env(safe-area-inset-top)` 头部实现；报告详情页优化版本卡、模式切换与文档正文间距，成果卡/报告/对话要点列表改用块级 Markdown 渲染，避免 `**` 等标记在真机原样显示。
 - **2026-06-04** · **格式化 AI 返回 Markdown 文档**：新增 `components/MarkdownText` 轻量 Markdown 渲染器，覆盖标题/段落/列表/引用/加粗/代码；`pages/chat`、`ReportCard`、`pages/report` 接入，避免模型返回的 Markdown 原文未格式化显示。
 - **2026-06-04** · **新增对话 AI 思考动效**：`pages/chat` 在 `busy` 状态下渲染对话流内思考气泡，包含顾问身份、三点 pulse 动画与“正在梳理上下文”提示，并在发送后自动滚到底部，避免等待模型返回时页面像卡死。

@@ -7,6 +7,7 @@ import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
 import { ensureCredits, chargeCredits, CREDIT_COST } from '../services/credits.js';
+import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
 import type { MessageRef } from '../llm/schema.js';
 
@@ -105,6 +106,12 @@ export async function sessionRoutes(app: FastifyInstance) {
       if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
     }
     await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+    await recordAudit({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: 'user.generate',
+      payload: { mode: 'sync', sessionId: session.id, agentKey, projectId, cost, refs: refs?.length ?? 0 },
+    });
 
     const agent = session.agent;
     const isDeliverable = !!agent.deliverableKey;
@@ -151,6 +158,12 @@ export async function sessionRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {
       const res = await summarizeSession({ tenantId: user.tenantId, userId: user.id, sessionId: req.params.id });
+      await recordAudit({
+        tenantId: user.tenantId,
+        userId: user.id,
+        action: 'user.session.summarize',
+        payload: { sessionId: req.params.id, reportId: res.reportId, version: res.version, knowledgeAdded: res.knowledgeAdded },
+      });
       return res;
     } catch (err) {
       const e = err as Error & { statusCode?: number };
@@ -201,6 +214,12 @@ export async function sessionRoutes(app: FastifyInstance) {
 
       // 持久化用户消息（含引用）
       await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+      await recordAudit({
+        tenantId: user.tenantId,
+        userId: user.id,
+        action: 'user.generate',
+        payload: { mode: 'sse', sessionId: session.id, agentKey, projectId, cost, refs: refs?.length ?? 0 },
+      });
 
       const agent = session.agent;
       const isDeliverable = !!agent.deliverableKey; // 顾问/创作智能体 → 结构化成果

@@ -35,8 +35,11 @@ export async function buildGenContext(opts: {
   const profile = await prisma.profile.findFirst({ where: { tenantId: opts.tenantId }, orderBy: { updatedAt: 'desc' } });
   const user = await prisma.user.findUnique({ where: { id: opts.userId } });
 
-  // 长期记忆：按当前问题做语义召回
-  const memories = await recallMemories(opts.userId, opts.agentKey, 5, opts.userMessage);
+  const memoryConfig = agent.memoryConfig as unknown as MemoryConfig;
+  // 长期记忆：按当前问题做语义召回；后台关闭 longTerm 后不再注入既有记忆。
+  const memories = memoryConfig.longTerm
+    ? await recallMemories(opts.userId, opts.agentKey, 5, opts.userMessage)
+    : [];
 
   // 项目背景
   let projectName: string | null = null;
@@ -68,5 +71,5 @@ export async function buildGenContext(opts: {
     projectName,
     projectSummary,
   };
-  return { ctx, memoryConfig: agent.memoryConfig as unknown as MemoryConfig, knowledgeUsed };
+  return { ctx, memoryConfig, knowledgeUsed };
 }

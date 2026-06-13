@@ -23,7 +23,7 @@ export async function seedAgents(): Promise<void> {
   for (const a of AGENTS) {
     await prisma.agent.upsert({
       where: { key: a.key },
-      update: {},
+      update: { systemPrompt: a.systemPrompt, memoryConfig: a.memoryConfig as object },
       create: {
         key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
         gift: a.gift, enabled: a.enabled, greet: a.greet, chipsJson: a.chips as object,

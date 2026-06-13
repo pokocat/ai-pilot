@@ -13,10 +13,12 @@ import { projectRoutes } from './routes/projects.js';
 import { reportRoutes } from './routes/reports.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { adminRoutes } from './routes/admin.js';
+import { registerHttpAudit } from './services/audit.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: opts.logger ? { level: 'info' } : false });
   await app.register(cors, { origin: true });
+  registerHttpAudit(app);
 
   await app.register(authRoutes, { prefix: '/api' });
   await app.register(metaRoutes, { prefix: '/api' });

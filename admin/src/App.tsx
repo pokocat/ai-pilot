@@ -1,16 +1,32 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 import Icon from './Icon';
-import { api, type Overview, type Saying, type AdminAgent, type SurveyQ, type Plan, type AiConfig, type AiPreset, type AiProvider } from './api';
+import {
+  api,
+  type Overview,
+  type Saying,
+  type AdminAgent,
+  type SurveyQ,
+  type Plan,
+  type AiConfig,
+  type AiPreset,
+  type AiProvider,
+  type AdminUserItem,
+  type AdminUsageView,
+  type AdminAuditItem,
+} from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 
-type Tab = 'home' | 'say' | 'agent' | 'model' | 'form' | 'plan';
+type Tab = 'home' | 'users' | 'usage' | 'agent' | 'audit' | 'model' | 'say' | 'form' | 'plan';
 const TABS: { key: Tab; icon: string; label: string }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
-  { key: 'say', icon: 'spark', label: '献策' },
+  { key: 'users', icon: 'user', label: '用户' },
+  { key: 'usage', icon: 'crown', label: '消耗' },
   { key: 'agent', icon: 'agent', label: '顾问' },
+  { key: 'audit', icon: 'clock', label: '审计' },
   { key: 'model', icon: 'insight', label: '模型' },
+  { key: 'say', icon: 'spark', label: '献策' },
   { key: 'form', icon: 'doc', label: '问卷' },
-  { key: 'plan', icon: 'crown', label: '套餐' },
+  { key: 'plan', icon: 'layers', label: '套餐' },
 ];
 
 export default function App() {
@@ -31,8 +47,11 @@ export default function App() {
 
         <div className="adm-scroll">
           {tab === 'home' && <OverviewView />}
+          {tab === 'users' && <UsersView />}
+          {tab === 'usage' && <UsageView />}
           {tab === 'say' && <SayingsView toast={showToast} />}
-          {tab === 'agent' && <AgentsView onOpen={setDetailKey} />}
+          {tab === 'agent' && <AgentsView onOpen={setDetailKey} toast={showToast} />}
+          {tab === 'audit' && <AuditView />}
           {tab === 'model' && <ModelView toast={showToast} />}
           {tab === 'form' && <SurveyView />}
           {tab === 'plan' && <PlansView />}
@@ -95,6 +114,96 @@ function OverviewView() {
   );
 }
 
+function UsersView() {
+  const [list, setList] = useState<AdminUserItem[]>([]);
+  useEffect(() => { api.users().then(setList).catch(() => {}); }, []);
+  return (
+    <>
+      <div className="sec-h"><span className="t">注册用户</span><span className="s">小程序账号 · 数据隔离</span></div>
+      <div className="pad">
+        <div className="pill-row">
+          <span className="pill"><Icon name="user" size={13} /> {list.length} 用户</span>
+          <span className="pill"><Icon name="chat" size={13} /> {sum(list, 'sessionCount')} 会话</span>
+          <span className="pill"><Icon name="doc" size={13} /> {sum(list, 'deliverableCount')} 成果</span>
+        </div>
+        {list.map((u) => (
+          <div key={u.id} className="crd user-card">
+            <div className="crd-row">
+              <span className="crd-ic"><Icon name="user" size={18} /></span>
+              <div className="crd-b">
+                <div className="ct">{u.name} {u.wechatLinked && <span className="tag">微信</span>}</div>
+                <div className="cs">{u.phone} · {u.tenantName} · {u.planName ?? '未分配套餐'}</div>
+              </div>
+              <span className="user-balance">{creditText(u.creditBalance)}</span>
+            </div>
+            <div className="kv-grid">
+              <KV k="注册时间" v={fmtTime(u.createdAt)} />
+              <KV k="最后会话" v={u.lastSessionAt ? fmtTime(u.lastSessionAt) : '暂无'} />
+              <KV k="会话/成果" v={`${u.sessionCount}/${u.deliverableCount}`} />
+              <KV k="已消耗" v={`${u.totalSpent} 次`} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function UsageView() {
+  const [data, setData] = useState<AdminUsageView | null>(null);
+  useEffect(() => { api.usage().then(setData).catch(() => {}); }, []);
+  if (!data) return <Loading />;
+  const maxSpent = Math.max(1, ...data.users.map((u) => u.totalSpent));
+  return (
+    <>
+      <div className="sec-h"><span className="t">算力消耗</span><span className="s">CreditLedger 汇总</span></div>
+      <div className="pad">
+        <div className="usage-summary">
+          <div><b>{data.summary.totalSpent}</b><span>累计算力消耗</span></div>
+          <div><b>{data.summary.currentBalanceTotal}</b><span>当前余额合计</span></div>
+          <div><b>{data.summary.activeUsers}</b><span>30 天活跃</span></div>
+          <div><b>{data.summary.reportCount}</b><span>成果产出</span></div>
+        </div>
+        {data.users.map((u) => (
+          <div key={u.id} className="usage-row">
+            <div className="usage-h">
+              <div className="usage-name">{u.name}<span>{u.phone}</span></div>
+              <div className="usage-num">{u.totalSpent} 次</div>
+            </div>
+            <div className="usage-meta">赠送 {u.totalGranted} · 余额 {creditText(u.creditBalance)} · 成果 {u.deliverableCount}</div>
+            <div className="meter"><i style={{ width: `${Math.max(3, Math.round((u.totalSpent / maxSpent) * 100))}%` }} /></div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function AuditView() {
+  const [list, setList] = useState<AdminAuditItem[]>([]);
+  useEffect(() => { api.auditLogs().then(setList).catch(() => {}); }, []);
+  return (
+    <>
+      <div className="sec-h"><span className="t">审计日志</span><span className="s">精确到秒 · 最近 100 条</span></div>
+      <div className="pad">
+        {list.map((a) => (
+          <div key={a.id} className="audit-row">
+            <div className="audit-line">
+              <span className="audit-ic"><Icon name={auditIcon(a.action)} size={15} /></span>
+              <div className="audit-main">
+                <div className="audit-title">{auditLabel(a.action)}<span>{a.action}</span></div>
+                <div className="audit-user">{a.userName ?? '系统/运营'} · {a.userPhone ?? a.tenantName ?? '无账号上下文'}</div>
+              </div>
+            </div>
+            <div className="audit-time">{fmtTime(a.at)}</div>
+            <pre className="audit-payload">{payloadText(a.payload)}</pre>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function SayingsView({ toast }: { toast: (m: string) => void }) {
   const [list, setList] = useState<Saying[]>([]);
   const [adding, setAdding] = useState('');
@@ -123,12 +232,19 @@ function SayingsView({ toast }: { toast: (m: string) => void }) {
   );
 }
 
-function AgentsView({ onOpen }: { onOpen: (k: string) => void }) {
+function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m: string) => void }) {
   const [list, setList] = useState<AdminAgent[]>([]);
-  useEffect(() => { api.agents().then(setList).catch(() => {}); }, []);
+  const load = () => api.agents().then(setList).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const toggle = async (e: MouseEvent, a: AdminAgent) => {
+    e.stopPropagation();
+    await api.saveAgent(a.key, { enabled: !a.enabled });
+    await load();
+    toast(a.enabled ? '功能已下架' : '功能已上架');
+  };
   return (
     <>
-      <div className="sec-h"><span className="t">内置顾问</span><span className="s">入驻赠送 · 可配置产出</span></div>
+      <div className="sec-h"><span className="t">功能上下架</span><span className="s">前台仅展示已上架功能</span></div>
       <div className="pad">
         {list.map((a) => (
           <div key={a.key} className="crd" onClick={() => onOpen(a.key)}>
@@ -136,8 +252,11 @@ function AgentsView({ onOpen }: { onOpen: (k: string) => void }) {
               <span className="crd-ic"><Icon name={a.icon} size={18} /></span>
               <div className="crd-b">
                 <div className="ct">{a.name} {a.gift && <span className="tag">赠送</span>} {!a.enabled && <span className="tag off">停用</span>}</div>
-                <div className="cs">{a.deliverableKey ? `产出 · ${a.deliverableKey}` : a.role} · {typeLabel(a.type)}</div>
+                <div className="cs">{a.deliverableKey ? `产出 · ${a.deliverableKey}` : a.role} · {typeLabel(a.type)} · 会话 {a.sessionCount ?? 0} · 成果 {a.deliverableCount ?? 0}</div>
               </div>
+              <button className={`mini-btn ${a.enabled ? 'danger' : 'primary'}`} onClick={(e) => toggle(e, a)}>
+                {a.enabled ? '下架' : '上架'}
+              </button>
               <span className="edit"><Icon name="pen" size={15} /></span>
             </div>
           </div>
@@ -286,6 +405,64 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <div className="ai-field"><div className="ai-fl">{label}</div>{children}</div>;
+}
+
+function KV({ k, v }: { k: string; v: string }) {
+  return <div className="kv"><span>{k}</span><b>{v}</b></div>;
+}
+
+function sum(list: AdminUserItem[], key: 'sessionCount' | 'deliverableCount') {
+  return list.reduce((n, item) => n + item[key], 0);
+}
+
+function fmtTime(s: string) {
+  return s.replace('T', ' ').replace('Z', '');
+}
+
+function creditText(v: number) {
+  return v < 0 ? '不限量' : `${v} 次`;
+}
+
+function payloadText(payload: unknown) {
+  if (!payload) return '{}';
+  const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  return text.length > 180 ? `${text.slice(0, 180)}...` : text;
+}
+
+function auditIcon(action: string) {
+  if (action.includes('agent')) return 'agent';
+  if (action.includes('auth')) return 'user';
+  if (action.includes('generate') || action.includes('credit')) return 'crown';
+  if (action.includes('http')) return 'clock';
+  if (action.includes('ai')) return 'insight';
+  return 'alert';
+}
+
+function auditLabel(action: string) {
+  const labels: Record<string, string> = {
+    'auth.register': '手机号注册',
+    'auth.login': '手机号登录',
+    'auth.wechat_register': '微信注册',
+    'auth.wechat_login': '微信登录',
+    'admin.agent.publish': '功能上架',
+    'admin.agent.unpublish': '功能下架',
+    'admin.agent.update': '智能体配置变更',
+    'admin.ai.update': '模型配置变更',
+    'admin.saying.create': '新增每日献策',
+    'admin.saying.update': '更新每日献策',
+    'admin.saying.delete': '删除每日献策',
+    'admin.survey.update': '问卷配置变更',
+    'admin.plan.update': '套餐配置变更',
+    'user.http': '用户 API 行为',
+    'user.generate': '用户发起产出',
+    'user.profile.create': '用户完成建档',
+    'user.profile.update': '用户更新建档',
+    'user.color.update': '用户更换本命色',
+    'user.library.create': '用户存入方案库',
+    'user.library.delete': '用户删除方案',
+    'user.session.summarize': '用户生成纪要',
+  };
+  return labels[action] ?? action;
 }
 
 function typeLabel(t: string) { return t === 'advisory' ? '出谋' : t === 'creative' ? '出活' : '通用'; }

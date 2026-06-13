@@ -12,7 +12,12 @@ app/.taro-cache/
 
 # 本地工具/评审产物
 app/.impeccable/
-app/tarojs-cli-*.tgz
+*.tgz
+*.zip
+
+# IDE 云连接 / 技能下载 / 对话草稿
+.cc-connect/
+flova_skill_downloads/
 
 # 微信开发者工具私有/误生成配置
 /project.config.json
@@ -25,14 +30,19 @@ app/project.private.config.json
 # 环境变量（含密钥，不入库；见各自 .env.example）
 .env
 server/.env
+admin/.env
 *.local
 
 # 日志
 *.log
 npm-debug.log*
 
+# 测试覆盖率
+coverage/
+
 # 编辑器/系统
 .DS_Store
 .idea/
 .vscode/
 *.tsbuildinfo
+.env

@@ -32,7 +32,7 @@ export default function Chat() {
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [refs, setRefs] = useState<MessageRef[]>([]);
-  const [showLogin, setShowLogin] = useState(false);
+  const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
   const [picker, setPicker] = useState(false);
   const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[] }>({ projects: [], reports: [], knowledge: [] });
   const logRef = useRef<Msg[]>([]);
@@ -46,6 +46,8 @@ export default function Chat() {
     if (busy) setTimeout(scrollToEnd, 40);
   }, [busy]);
 
+  useEffect(() => () => store.setOverlay(false, 'ref-picker'), []);
+
   const isUnauthorized = (e: unknown) =>
     (e as any)?.code === 'UNAUTHORIZED' || String((e as any)?.message || '').includes('未登录');
 
@@ -57,57 +59,95 @@ export default function Chat() {
     return '抱歉，产出失败了，请稍后再试。';
   };
 
-  // 初始化：根据路由参数还原会话 / 打开顾问线程 / 新会话
-  useEffect(() => {
-    (async () => {
-      let agents = s.agents(); // 已含离线兜底，基本不为空
-      if (!agents.length) {
-        await s.loadAgents();
-        agents = s.agents();
-      }
-      const { sessionId: sid, agentKey, send, fresh, projectId: pid } = router.params as Record<string, string>;
-      if (pid) setProjectId(pid);
-      const key = agentKey || (send ? agentForText(decodeURIComponent(send)) : 'general');
-      const fallbackAgent = agents.find((a) => a.key === key) || agents.find((a) => a.key === 'general') || agents[0];
+  const promptLogin = (title = '请先登录后再开始对话') => {
+    setShowLogin(true);
+    Taro.showToast({ title, icon: 'none' });
+  };
 
-      try {
-        if (sid) {
-          const detail = await api.session(sid);
-          const ag = agents.find((a) => a.key === detail.agentKey) || (detail.agent as any) || fallbackAgent;
-          setAgent(ag);
-          setSessionId(sid);
+  async function primeGuestThread() {
+    let agents = s.agents(); // 已含离线兜底，基本不为空
+    if (!agents.length) {
+      await s.loadAgents();
+      agents = s.agents();
+    }
+    const { agentKey, send, projectId: pid } = router.params as Record<string, string>;
+    if (pid) setProjectId(pid);
+    const key = agentKey || (send ? agentForText(decodeURIComponent(send)) : 'general');
+    const fallbackAgent = agents.find((a) => a.key === key) || agents.find((a) => a.key === 'general') || agents[0];
+    if (fallbackAgent) {
+      setAgent(fallbackAgent);
+      setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+    }
+    return fallbackAgent;
+  }
+
+  // 初始化：根据路由参数还原会话 / 打开顾问线程 / 新会话
+  async function initChat() {
+    let agents = s.agents(); // 已含离线兜底，基本不为空
+    if (!agents.length) {
+      await s.loadAgents();
+      agents = s.agents();
+    }
+    const { sessionId: sid, agentKey, send, fresh, projectId: pid } = router.params as Record<string, string>;
+    if (pid) setProjectId(pid);
+    const key = agentKey || (send ? agentForText(decodeURIComponent(send)) : 'general');
+    const fallbackAgent = agents.find((a) => a.key === key) || agents.find((a) => a.key === 'general') || agents[0];
+
+    if (!store.isAuthed()) {
+      if (fallbackAgent) {
+        setAgent(fallbackAgent);
+        setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+      } else {
+        await primeGuestThread();
+      }
+      promptLogin();
+      return;
+    }
+
+    try {
+      if (sid) {
+        const detail = await api.session(sid);
+        const ag = agents.find((a) => a.key === detail.agentKey) || (detail.agent as any) || fallbackAgent;
+        setAgent(ag);
+        setSessionId(sid);
+        if (detail.projectId) setProjectId(detail.projectId);
+        restore(ag, detail.messages);
+        return;
+      }
+
+      setAgent(fallbackAgent);
+
+      // continue：找该顾问最近会话续聊；fresh/new：开新
+      if (!fresh) {
+        const list = await api.sessions().catch((e) => {
+          if (isUnauthorized(e)) throw e;
+          return [];
+        });
+        const latest = list.find((x) => x.agentKey === fallbackAgent.key);
+        if (latest) {
+          const detail = await api.session(latest.id);
+          setSessionId(latest.id);
           if (detail.projectId) setProjectId(detail.projectId);
-          restore(ag, detail.messages);
+          restore(fallbackAgent, detail.messages);
+          if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key), 300);
           return;
         }
-
-        setAgent(fallbackAgent);
-
-        // continue：找该顾问最近会话续聊；fresh/new：开新
-        if (!fresh) {
-          const list = await api.sessions().catch(() => []);
-          const latest = list.find((x) => x.agentKey === fallbackAgent.key);
-          if (latest) {
-            const detail = await api.session(latest.id);
-            setSessionId(latest.id);
-            if (detail.projectId) setProjectId(detail.projectId);
-            restore(fallbackAgent, detail.messages);
-            if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key), 300);
-            return;
-          }
-        }
-        // 全新会话：仅渲染问候（不落库），首条消息时后端创建
-        setMsgs([{ role: 'greet', agent: fallbackAgent }]);
-        if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key), 350);
-      } catch (e) {
-        if (isUnauthorized(e)) setShowLogin(true);
-        // 任何拉取失败都不让对话页空白：至少给出问候
-        if (fallbackAgent) {
-          setAgent(fallbackAgent);
-          setMsgs([{ role: 'greet', agent: fallbackAgent }]);
-        }
       }
-    })();
+      // 全新会话：仅渲染问候（不落库），首条消息时后端创建
+      setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+      if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key), 350);
+    } catch (e) {
+      if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
+      // 任何拉取失败都不让对话页空白：至少给出问候
+      if (fallbackAgent) {
+        setAgent(fallbackAgent);
+        setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+      }
+    }
+  }
+
+  useEffect(() => {
+    initChat();
   }, []);
 
   function restore(ag: Agent, messages: { role: string; content: any; refs?: MessageRef[] }[]) {
@@ -124,7 +164,7 @@ export default function Chat() {
   async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = []) {
     if (busy) return;
     if (!store.isAuthed()) {
-      setShowLogin(true);
+      promptLogin();
       setMsgs((m) => [...m, { role: 'assistant', reply: { text: '请先登录后再继续对话。' } }]);
       setTimeout(scrollToEnd, 30);
       return;
@@ -148,7 +188,7 @@ export default function Chat() {
       }
       setTimeout(scrollToEnd, 80);
     } catch (e) {
-      if (isUnauthorized(e)) setShowLogin(true);
+      if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
       setMsgs((m) => [...m, { role: 'assistant', reply: { text: errorReply(e) } }]);
     } finally {
       setBusy(false);
@@ -204,7 +244,7 @@ export default function Chat() {
       return;
     }
     setPicker(true);
-    store.setOverlay(true);
+    store.setOverlay(true, 'ref-picker');
     const [projects, reports, knowledge] = await Promise.all([
       api.projects().catch(() => []),
       api.reports(projectId || undefined).catch(() => []),
@@ -212,7 +252,7 @@ export default function Chat() {
     ]);
     setPick({ projects, reports, knowledge });
   };
-  const closePicker = () => { setPicker(false); store.setOverlay(false); };
+  const closePicker = () => { setPicker(false); store.setOverlay(false, 'ref-picker'); };
   const toggleRef = (r: MessageRef) => {
     setRefs((cur) => cur.some((x) => x.kind === r.kind && x.id === r.id) ? cur.filter((x) => !(x.kind === r.kind && x.id === r.id)) : [...cur, r]);
   };
@@ -253,7 +293,7 @@ export default function Chat() {
       {agent && (
         <View className="mem-bar">
           <Icon name="layers" size={14} color={accent} />
-          <Text className="mt"> {stripTags(agent.memText)}</Text>
+          <Text className="mt">专属理解：{stripTags(agent.memText)}</Text>
           <View className="mlearn"><View className="dot" style={{ background: accent }} /><Text>{agent.learnText}</Text></View>
         </View>
       )}
@@ -277,6 +317,18 @@ export default function Chat() {
                 <View className="who"><View className="d" style={{ background: accent }}><Icon name={m.agent.icon} size={13} color="#fff" /></View><Text>{m.agent.name}</Text></View>
                 <View className="bubble">
                   <Text>{m.agent.greet}</Text>
+                  <View className="memory-disclosure">
+                    <View className="md-h">
+                      <Icon name="layers" size={13} color={accent} />
+                      <Text style={{ color: accent }}>专属理解</Text>
+                    </View>
+                    <Text className="md-copy">我会参考你在本账号沉淀的企业档案、历史偏好和本次引用资料，让建议保持同一套业务口径。</Text>
+                    <View className="md-tags">
+                      <Text>企业档案</Text>
+                      <Text>对话偏好</Text>
+                      <Text>引用资料</Text>
+                    </View>
+                  </View>
                   <View className="acts">
                     {m.agent.chips.map(([ic, label]) => (
                       <View key={label} className="act-chip" onClick={() => doSend(label, sessionId, m.agent.key)}>
@@ -317,7 +369,7 @@ export default function Chat() {
             return (
               <View key={i} className="mem-learned">
                 <Icon name="spark" size={13} color={accent} />
-                <Text>记忆已更新：{m.agentName} 已从本次对话学到你的业务偏好，下次产出会更贴合。</Text>
+                <Text>专属理解已更新：{m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。</Text>
               </View>
             );
           }
@@ -407,7 +459,10 @@ export default function Chat() {
 
       <Login
         open={showLogin}
-        onLoggedIn={() => setShowLogin(false)}
+        onLoggedIn={() => {
+          setShowLogin(false);
+          initChat();
+        }}
       />
     </View>
   );
