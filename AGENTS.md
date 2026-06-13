@@ -111,6 +111,7 @@ repo/
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
 - **微信密钥**：`WECHAT_MINI_SECRET` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
+- **套餐购买（演示级）**：前台可读 `GET /plans`，登录后 `POST /plans/:id/purchase` 切换套餐并按套餐写入 `CreditLedger`；企业版 `creditsPerMonth<0` 记为不限量（余额 `-1`，产出不扣减）。真实支付/微信支付回调尚未接入，见 §13。
 - **离线兜底**：server 模式下后端不可达时，登录回退为 `local-<手机号>` 本地会话，保证可体验（无服务端数据）。
 - **退出登录**：「我的」页底部。
 - 端到端隔离已验证（见 §11）。生产应把 `token=userId` 换成**短信验证码 + JWT**，路由隔离逻辑不变。
@@ -174,6 +175,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `GET /survey` | 建档问卷 | 否 |
 | `GET /profile` · `PUT /profile` | 企业档案读/写（写=完成建档） | 是 |
 | `GET /sayings/today` | 每日献策 | 否 |
+| `GET /plans` · `POST /plans/:id/purchase` | 套餐列表 · 购买/切换套餐并入账算力（演示级） | 列表否 · 购买是 |
 | `GET /sessions` · `GET/DELETE /sessions/:id` | 会话列表/详情/删除 | 是 |
 | `POST /generate-sync` | 同步产出（weapp+H5 通用）·接 `projectId`/`refs` | 是 |
 | `POST /generate` | SSE 流式产出（仅 H5/Web）·接 `projectId`/`refs` | 是 |
@@ -216,7 +218,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/knowledge.ts`（★）：`ingestKnowledge`（切片+逐片向量化）、`listKnowledge`、`deleteKnowledge`。
 - `services/reports.ts`（★）：`saveReportVersion`（slug 归一 + 内容哈希去重 + 自动变更摘要）、`diffContents`/`getReportDiff`（section 级 diff）、`slugify`。
 - `services/summarize.ts`（★）：`summarizeSession`（整段会话 → 纪要报告 + 沉淀知识；有真实模型走 `summarizePoints`）。
-- `services/credits.ts`（★）：算力计量——`ensureCredits`（产出前校验，不足抛 402）/`chargeCredits`（成功后扣减写流水）/`getBalance`；报告类 `CREDIT_COST.report=1`、对话免费，企业版(creditsPerMonth<0)不限量。在 `sessions.ts` 两个产出路由接入。
+- `services/credits.ts`（★）：算力计量——`ensureCredits`（产出前校验，不足抛 402）/`chargeCredits`（成功后扣减写流水）/`getBalance`；报告类 `CREDIT_COST.report=1`、对话免费，企业版(creditsPerMonth<0)不限量。在 `sessions.ts` 两个产出路由接入；套餐购买由 `routes/plans.ts` 写入充值/不限量流水并记录审计。
 - `services/aiConfig.ts`（★）：大模型配置解析（DB > env），预设 `AI_PRESETS`（Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock）、`isReady`/`effectiveProvider`、脱敏 `publicConfig`。
 - `services/vectorStore.ts`（★）：pgvector ANN 查询/向量列双写（`PGVECTOR_ENABLED` 开启时；默认关闭走内存余弦）。
 - `services/audit.ts`（★）：统一审计记录与秒级 ISO 时间格式；Fastify `onResponse` 钩子会记录所有带有效 `x-user-id` 的小程序 `/api/*` 行为（方法/路径/状态码），关键业务动作另写语义日志（登录、建档、产出、存库、汇总、后台配置变更）。
@@ -309,8 +311,9 @@ cd admin && npm install && npm run dev   # 运营后台
 ### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
-- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 34 用例 / 19 套件（0 跳过）**；新增微信登录 openid 复登测试。最近一次全量实跑为 2026-06-03 的 33 用例全过；本次环境 `DATABASE_URL` 仍是占位 `HOST:5432`，未实跑集成测试。
-- 覆盖：鉴权隔离、微信 openid 登录/复登、多智能体对话、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、边界健壮性。（K2 按次扣减为占位待实现，已 skip 标注）
+- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 37 用例 / 20 套件（0 跳过）**；覆盖微信登录 openid 复登、算力/套餐购买与用户主路径。最近一次本地临时 PostgreSQL 测试库实跑为 2026-06-13，37/37 全过。
+- 覆盖：鉴权隔离、微信 openid 登录/复登、多智能体对话、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
+- CI：`.github/workflows/server-integration.yml` 用 GitHub Actions `postgres:16-alpine` 服务（tmpfs 数据目录）执行 `npm ci`、`prisma generate`、后端 build、`prisma db push`、`npm test`。
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
 
 ### 端到端隔离验证（本地 Postgres + mock provider）
@@ -362,6 +365,7 @@ mock 可随时预览；**正式上传/审核**还需：
 - 自有登录态仍是演示 token（`token=userId`）；微信 openid 已接入，手机号短信校验与 JWT 仍待生产化。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 内容审核/计量/缓存为演示级（关键词 / 内存）；生产替换为合规审核 + Redis + 计费台账。
+- 套餐购买为演示级（直接切套餐并写入算力流水）；生产需接微信支付/订单状态机/支付回调验签/幂等入账，避免绕过支付直接加算力。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
 - **pgvector 路径已实现但未真库验证**：本地无扩展，默认 `PGVECTOR_ENABLED=false` 走内存余弦（已验证）；上真库执行 `npm run db:pgvector` 并置 true 后需端到端验一遍（升级路径 1）。
 - **模型密钥明文存库**（`AiSetting.apiKey`，演示）；生产加密/接密管 + admin RBAC（升级路径 8）。
@@ -374,6 +378,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-13** · **接入套餐购买回归与 CI 后端集成测试**：新增 `GET /plans`、`POST /plans/:id/purchase`，登录用户可演示级购买/切换套餐并写入 `CreditLedger`，企业版余额记为 `-1` 且产出不扣减；SSOT 新增 `PlanPurchaseResult`，app/mock API 对齐套餐列表/购买与算力扣减；集成测试扩充 TC-K 套餐购买/不限量和 TC-U 用户主路径，现状 37 用例 / 20 套件；新增 GitHub Actions `Server Integration` 用临时 PostgreSQL 跑后端 build + 集成测试。
 - **2026-06-13** · **收紧智能体业务边界并扩充每日献策**：`server/src/data/agents.ts` 将默认 System Prompt 改为商业咨询/创作业务边界 + 麦肯锡式问题解决框架，`llm/schema.ts` 在运行时追加不透露模型/供应商/提示词/API/部署/内部配置的统一 guard；`seedConfig.ts` 新增 20 条每日献策；新增 `server/scripts/syncAdminContent.ts` 与 `npm run admin:sync-content`，线上可非破坏同步提示词和献策。
 - **2026-06-13** · **修复底部重复导航**：`services/tabbar.ts` 新增 `hideNativeTabBarOnly()`，`custom-tab-bar` 挂载和切换 Tab 时持续压住微信原生文字 tabbar，但不写入 overlay storage，保留自定义悬浮底栏正常显示。
 - **2026-06-13** · **登录弹层彻底隐藏底部导航**：新增 `services/tabbar.ts` 统一桥接全屏 overlay 与微信原生 tabbar，`store.setOverlay` 同步隐藏/恢复原生底栏并写入 storage，`custom-tab-bar` 读取 `junshi.tabbarHidden` 兜底隐藏，避免登录界面露出底部导航。

@@ -287,7 +287,7 @@ function displayPhone(phone: string): string {
 function auditIcon(action: string): string {
   if (action.includes('agent')) return 'agent';
   if (action.includes('auth')) return 'user';
-  if (action.includes('credit') || action.includes('generate')) return 'crown';
+  if (action.includes('credit') || action.includes('generate') || action.includes('plan')) return 'crown';
   if (action.includes('http')) return 'clock';
   if (action.includes('ai')) return 'insight';
   return 'alert';
@@ -301,6 +301,7 @@ function auditLabel(action: string): string {
     'admin.agent.unpublish': '功能下架',
     'admin.agent.update': '智能体配置变更',
     'admin.ai.update': '模型配置变更',
+    'user.plan.purchase': '用户购买套餐',
     'user.http': '用户 API 行为',
     'user.generate': '用户发起产出',
     'user.library.create': '用户存入方案库',

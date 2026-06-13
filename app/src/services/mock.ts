@@ -6,6 +6,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
+  Plan, PlanPurchaseResult,
 } from '../../../shared/contracts';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
@@ -23,6 +24,38 @@ const SAYINGS = [
   '组织的上限，往往是<em>创始人认知</em>的上限。',
   '现金流是<em>呼吸</em>，利润才是<em>体格</em>。',
   '战略的本质，是学会<em>放弃</em>。',
+];
+const PLANS: Plan[] = [
+  {
+    id: 'mock-plan-free',
+    name: '体验版',
+    price: 0,
+    period: 'month',
+    creditsPerMonth: 10,
+    agentCount: 3,
+    featuresJson: ['10 次军师算力 / 月', '内置顾问 3 位', '不含方案库导出'],
+    highlighted: false,
+  },
+  {
+    id: 'mock-plan-decision',
+    name: '决策版',
+    price: 198000,
+    period: 'year',
+    creditsPerMonth: 68,
+    agentCount: 8,
+    featuresJson: ['不限量对话', '68 次深度产出 / 月', '内置顾问 8 位', '方案库 + 导出'],
+    highlighted: true,
+  },
+  {
+    id: 'mock-plan-enterprise',
+    name: '企业版 · 私有化',
+    price: -1,
+    period: 'year',
+    creditsPerMonth: -1,
+    agentCount: 14,
+    featuresJson: ['私有化部署', '接入内部系统', '专属训练', '数据不出内网'],
+    highlighted: false,
+  },
 ];
 
 // ── 每账号(token)隔离、落 Taro storage 的内存库 ──
@@ -50,6 +83,7 @@ interface ProjectRec {
 }
 interface UserData {
   name: string; phone: string; benmingColor: string; onboarded: boolean;
+  planId: string; creditBalance: number;
   profile: Profile | null; sessions: SessionRec[]; library: LibItem[];
   projects: ProjectRec[]; reports: ReportDocRec[]; knowledge: KnowledgeRec[];
 }
@@ -65,11 +99,26 @@ function load(token: string): UserData {
       const d = (typeof raw === 'string' ? JSON.parse(raw) : raw) as UserData;
       // 兼容旧存档：补齐新增集合
       d.projects ??= []; d.reports ??= []; d.knowledge ??= [];
+      d.planId ??= 'mock-plan-decision';
+      d.creditBalance ??= 68;
       return d;
     }
   } catch { /* noop */ }
   const phone = token.replace(/^(mock-|local-)/, '');
-  return { name: `用户${phone.slice(-4)}`, phone, benmingColor: 'gold', onboarded: false, profile: null, sessions: [], library: [], projects: [], reports: [], knowledge: [] };
+  return {
+    name: `用户${phone.slice(-4)}`,
+    phone,
+    benmingColor: 'gold',
+    onboarded: false,
+    planId: 'mock-plan-decision',
+    creditBalance: 68,
+    profile: null,
+    sessions: [],
+    library: [],
+    projects: [],
+    reports: [],
+    knowledge: [],
+  };
 }
 function save(token: string, d: UserData) {
   try { Taro.setStorageSync(dataKey(token), JSON.stringify(d)); } catch { /* noop */ }
@@ -233,14 +282,28 @@ export const mock = {
 
   async me(): Promise<Me> {
     const { d } = current();
+    const plan = PLANS.find((p) => p.id === d.planId) ?? PLANS[1];
     return delay({
       user: { id: getToken(), name: d.name, role: 'owner', benmingColor: d.benmingColor },
       tenant: { id: `t-${d.phone}`, name: '云栖科技', industry: d.profile?.industry ?? 'SaaS / 软件', stage: d.profile?.stage ?? 'A 轮前后' },
-      plan: { name: '决策版', creditsPerMonth: 200 },
-      creditBalance: 68,
+      plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth } : null,
+      creditBalance: d.creditBalance,
       onboarded: d.onboarded,
       ai: { provider: 'mock', model: 'template', ready: false, claudeReady: false },
     });
+  },
+
+  async plans(): Promise<Plan[]> { return delay(PLANS); },
+
+  async purchasePlan(id: string): Promise<PlanPurchaseResult> {
+    const { token, d } = current();
+    const plan = PLANS.find((p) => p.id === id);
+    if (!plan) throw Object.assign(new Error('套餐不存在'), { code: 'PLAN_NOT_FOUND' });
+    const grantedCredits = plan.creditsPerMonth < 0 ? 0 : plan.creditsPerMonth;
+    d.planId = plan.id;
+    d.creditBalance = plan.creditsPerMonth < 0 ? -1 : (d.creditBalance < 0 ? grantedCredits : d.creditBalance + grantedCredits);
+    save(token, d);
+    return delay({ ok: true, plan, creditBalance: d.creditBalance, grantedCredits });
   },
 
   async setColor(color: string) {
@@ -322,6 +385,9 @@ export const mock = {
 
     let res: GenResult;
     if (ag.deliverableKey) {
+      if (d.creditBalance >= 0 && d.creditBalance < 1) {
+        throw Object.assign(new Error('算力不足，请充值后再产出'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
+      }
       const deliverable = buildDeliverable(ag.deliverableKey, d);
       if (projName) deliverable.meta = `${deliverable.meta} · ${projName}`;
       if (refSec.length) deliverable.sections.push({ h: '参考依据', list: refSec });
@@ -332,6 +398,8 @@ export const mock = {
         deliverable, memory: ag.key !== 'general' ? { learned: true, agentName: ag.name } : null,
         knowledgeUsed: labels,
       };
+      if (d.creditBalance >= 0) d.creditBalance -= 1;
+      res.creditBalance = d.creditBalance;
     } else {
       const r = REPLIES['默认'];
       const points = refSec.length ? [...r.points, `已参考：${refSec.join('；')}`] : r.points;
@@ -339,6 +407,7 @@ export const mock = {
       const msg: SessionMessage = { id: uid('m-'), role: 'assistant', content: reply, at: now() };
       session.messages.push(msg);
       res = { sessionId: session.id, created, agentKey: ag.key, kind: 'chat', messageId: msg.id, reply, knowledgeUsed: labels };
+      res.creditBalance = d.creditBalance;
     }
     session.updatedAt = now();
     save(token, d);

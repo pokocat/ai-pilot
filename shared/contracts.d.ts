@@ -258,6 +258,12 @@ export interface Plan {
   id: string; name: string; price: number; period: string;
   creditsPerMonth: number; agentCount: number; featuresJson: string[]; highlighted: boolean;
 }
+export interface PlanPurchaseResult {
+  ok: true;
+  plan: Plan;
+  creditBalance: number;
+  grantedCredits: number;
+}
 export interface AdminUserItem {
   id: string;
   name: string;

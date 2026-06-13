@@ -432,7 +432,7 @@ function payloadText(payload: unknown) {
 function auditIcon(action: string) {
   if (action.includes('agent')) return 'agent';
   if (action.includes('auth')) return 'user';
-  if (action.includes('generate') || action.includes('credit')) return 'crown';
+  if (action.includes('generate') || action.includes('credit') || action.includes('plan')) return 'crown';
   if (action.includes('http')) return 'clock';
   if (action.includes('ai')) return 'insight';
   return 'alert';
@@ -453,6 +453,7 @@ function auditLabel(action: string) {
     'admin.saying.delete': '删除每日献策',
     'admin.survey.update': '问卷配置变更',
     'admin.plan.update': '套餐配置变更',
+    'user.plan.purchase': '用户购买套餐',
     'user.http': '用户 API 行为',
     'user.generate': '用户发起产出',
     'user.profile.create': '用户完成建档',

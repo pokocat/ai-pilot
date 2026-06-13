@@ -327,6 +327,48 @@ describe('TC-K 算力账户', () => {
     const chat = await api('POST', '/api/generate-sync', { token: t, body: { text: '聊聊', agentKey: 'general' } });
     assert.equal(chat.status, 200, '免费对话不受余额影响');
   });
+
+  test('K4 购买套餐 → 切换套餐、入账算力、后台用量同步', async () => {
+    const t = await login(uniquePhone());
+    const before = (await api('GET', '/api/me', { token: t })).body.creditBalance as number;
+    const plans = await api('GET', '/api/plans');
+    assert.equal(plans.status, 200);
+    const decision = plans.body.find((p: any) => p.name === '决策版');
+    assert.ok(decision, '应返回决策版套餐');
+
+    const buy = await api('POST', `/api/plans/${decision.id}/purchase`, { token: t, body: {} });
+    assert.equal(buy.status, 200);
+    assert.equal(buy.body.plan.name, '决策版');
+    assert.equal(buy.body.grantedCredits, decision.creditsPerMonth);
+    assert.equal(buy.body.creditBalance, before + decision.creditsPerMonth);
+
+    const me = await api('GET', '/api/me', { token: t });
+    assert.equal(me.body.plan.name, '决策版');
+    assert.equal(me.body.creditBalance, before + decision.creditsPerMonth);
+
+    const usage = await api('GET', '/api/admin/usage');
+    const row = usage.body.users.find((u: any) => u.id === t);
+    assert.equal(row.planName, '决策版');
+    assert.equal(row.creditBalance, before + decision.creditsPerMonth);
+    assert.equal(row.totalGranted, before + decision.creditsPerMonth);
+  });
+
+  test('K5 购买企业版不限量后，报告产出不再扣减', async () => {
+    const t = await login(uniquePhone());
+    const plans = await api('GET', '/api/plans');
+    const enterprise = plans.body.find((p: any) => p.creditsPerMonth < 0);
+    assert.ok(enterprise, '应有不限量企业版套餐');
+
+    const buy = await api('POST', `/api/plans/${enterprise.id}/purchase`, { token: t, body: {} });
+    assert.equal(buy.status, 200);
+    assert.equal(buy.body.creditBalance, -1);
+    assert.equal(buy.body.grantedCredits, 0);
+
+    const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
+    assert.equal(gen.status, 200);
+    assert.equal(gen.body.creditBalance, -1, '不限量套餐报告产出后仍为不限量');
+    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, -1);
+  });
 });
 
 // ───────────────────────── TC-L 并发冒烟 ─────────────────────────
@@ -465,5 +507,55 @@ describe('TC-T 边界与健壮性', () => {
     assert.equal((await api('GET', `/api/sessions/${sid}`, { token: t })).status, 404);
     const list = await api('GET', '/api/sessions', { token: t });
     assert.ok(!list.body.some((s: any) => s.id === sid), '已删会话应从列表消失');
+  });
+});
+
+// ───────────────────────── TC-U 用户主要操作路径回归 ─────────────────────────
+describe('TC-U 用户主要操作路径回归', () => {
+  test('U1 登录→建档→项目知识→顾问产出→存库→纪要全链路可用', async () => {
+    const t = await login(uniquePhone(), '主路径公司');
+    const me0 = await api('GET', '/api/me', { token: t });
+    const before = me0.body.creditBalance as number;
+    assert.ok((await api('GET', '/api/agents')).body.length > 0, '应可拉取智能体');
+    assert.ok((await api('GET', '/api/survey')).body.length > 0, '应可拉取建档问卷');
+
+    await api('PUT', '/api/profile', { token: t, body: { industry: '企业服务', stage: 'A 轮前后', pain: '增长乏力' } });
+    const project = await api('POST', '/api/projects', { token: t, body: { name: '主路径增长项目', summary: '验证完整用户路径' } });
+    await api('POST', '/api/knowledge', {
+      token: t,
+      body: { projectId: project.body.id, title: '目标客群', text: '目标客户是 50-500 人规模的企业服务公司，重点关注续费率。' },
+    });
+
+    const gen = await api('POST', '/api/generate-sync', {
+      token: t,
+      body: { text: '围绕目标客群做一次战略体检', agentKey: 'strat', projectId: project.body.id },
+    });
+    assert.equal(gen.status, 200);
+    assert.equal(gen.body.kind, 'report');
+    assert.equal(gen.body.creditBalance, before - 1, '主路径中的报告产出应扣 1 次算力');
+
+    const lib = await api('POST', '/api/library', {
+      token: t,
+      body: {
+        title: '主路径战略体检',
+        type: '战略体检',
+        agentKey: 'strat',
+        sessionId: gen.body.sessionId,
+        projectId: project.body.id,
+        content: gen.body.deliverable,
+      },
+    });
+    assert.equal(lib.status, 200);
+    assert.ok(lib.body.reportId && lib.body.version >= 1, '存库应桥接版本化报告');
+
+    const summary = await api('POST', `/api/sessions/${gen.body.sessionId}/summarize`, { token: t });
+    assert.equal(summary.status, 200);
+    assert.ok(summary.body.reportId && summary.body.knowledgeAdded >= 1, '纪要应生成报告并沉淀知识');
+
+    const detail = await api('GET', `/api/projects/${project.body.id}`, { token: t });
+    assert.ok(detail.body.counts.sessions >= 1, '项目应聚合会话');
+    assert.ok(detail.body.counts.reports >= 2, '项目应聚合存库报告和纪要报告');
+    assert.ok(detail.body.counts.knowledge >= 2, '项目应聚合手动知识和纪要知识');
+    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before - 1, '/me 算力余额应与产出结果一致');
   });
 });

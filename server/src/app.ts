@@ -12,6 +12,7 @@ import { libraryRoutes } from './routes/library.js';
 import { projectRoutes } from './routes/projects.js';
 import { reportRoutes } from './routes/reports.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
+import { planRoutes } from './routes/plans.js';
 import { adminRoutes } from './routes/admin.js';
 import { registerHttpAudit } from './services/audit.js';
 
@@ -30,6 +31,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(projectRoutes, { prefix: '/api' });
   await app.register(reportRoutes, { prefix: '/api' });
   await app.register(knowledgeRoutes, { prefix: '/api' });
+  await app.register(planRoutes, { prefix: '/api' });
   await app.register(adminRoutes, { prefix: '/api' });
 
   await app.ready();

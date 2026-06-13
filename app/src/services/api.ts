@@ -8,6 +8,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
+  Plan, PlanPurchaseResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -22,6 +23,7 @@ export type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionItem, ReportVersionContent, ReportDiff, SectionDiff,
   KnowledgeItemT, KnowledgeHit, SummarizeResult, MessageRef, RefKind,
+  Plan, PlanPurchaseResult,
 } from '../../../shared/contracts';
 
 // token 助手（兼容旧导出名）
@@ -63,6 +65,9 @@ export const api = {
   wechatLogin: (code: string, nickname?: string) =>
     IS_MOCK ? mock.wechatLogin(code, nickname) : request<LoginResult>('/auth/wechat-login', 'POST', { code, nickname }),
   me: () => (IS_MOCK ? mock.me() : request<Me>('/me')),
+  plans: () => (IS_MOCK ? mock.plans() : request<Plan[]>('/plans')),
+  purchasePlan: (id: string) =>
+    IS_MOCK ? mock.purchasePlan(id) : request<PlanPurchaseResult>(`/plans/${id}/purchase`, 'POST', {}),
   setColor: (color: string) =>
     IS_MOCK ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),
   agents: () => (IS_MOCK ? mock.agents() : request<Agent[]>('/agents')),
