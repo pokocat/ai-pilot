@@ -1,9 +1,10 @@
-# 军师 · AI 商业军师 —— 产品与工程总说明（AGENTS.md）
+# 军师 · AI 商业军师 —— 工程总说明（AGENTS.md）
 
 > **本文件是本项目的活文档（Single Source of Documentation），Claude Code 新会话会自动加载它。**
 > ⚠️ **维护约定（所有后续 agent 必须遵守）：每次变更 / 迭代代码后，都要同步更新本文件**——
 > 至少更新对应章节，并在末尾「变更日志」追加一条（日期 · 改动 · 影响）。
 > 文档与代码不一致视为缺陷。提交信息可简写，但 AGENTS.md 必须反映当前真实状态。
+> 产品定位、核心体验和企业事务操作系统的详细说明见 **`PRODUCT.md`**；本文件只保留工程执行必需信息。
 
 ---
 
@@ -18,24 +19,17 @@
 5. **保持构建绿**：较大改动后按 **§11 构建校验基线** 跑通三端。
 6. **新增全屏弹层**记得置 `store.setOverlay(open)`；遵守 **§7.2 UI 约定**，勿回退已修复的坑。
 7. **对话页登录兜底**：未登录/401 token 失效时弹 `Login`，不要把鉴权失败吞成通用“产出失败”。
+8. **小程序改动先查约束清单**：凡改 `app/` 的微信小程序页面、tabbar、弹层、登录、键盘、网络请求、路由分包或项目配置，先对照 **§7.2 小程序工程约束清单**；不确定时按清单保守实现，避免回退真机已修复问题。
 
 > 判定标准：**文档与代码不一致 = 缺陷。** 纯探索 / 未落地的尝试可以不记；一旦落到代码就必须记。
 
 ---
 
-## 1. 产品是什么
+## 1. 产品摘要
 
-**军师**：面向创始人 / CEO 的「AI 商业军师」。两条价值主线：
+**军师**是面向创始人 / CEO 的 AI 商业军师，主线是「出谋」（智库顾问产出咨询成果）和「出活」（工坊智能体产出品牌资产）。当前核心能力：本命色、专属理解（Agent Memory）、智能体权益 / 产出额度、项目 / 知识库 / 版本化报告 / @ 引用、多租户隔离。
 
-- **出谋**（智库）：通用军师 + 多位顾问型智能体（战略诊断、增长、融资、竞品、组织…），基于企业档案与行业基准产出**结构化咨询成果**（诊断报告 / 增长方案 / 融资清单…）。
-- **出活**（智能体工坊）：创作型智能体产出品牌资产（IP / 宣传片 / 海报 / 短视频 / 文案），并可训练「只懂你」的专属智能体。
-
-特色：
-- **本命色**：首登强制选择一种「本命色」主题（金/绿/红/蓝/紫/铁），全站配色随之自适应；可在「我的」重选。
-- **Agent Memory**：顾问从对话/资料/反馈中持续学习，越用越懂客户（运营后台可配策略）。
-- **智能体权益 / 产出额度**：智能体底层支持 `free`、`unlock` 一次性启用、`metered` 按次计费；前台统一用「可用 / 已启用 / 专项能力 / 产出额度 / 方案」表达，避免把主路径写成赠送、解锁、充值或促销货架；运营后台仍可为指定用户开通/取消付费智能体。
-- **企业事务操作系统**（★ 新）：以「**项目**」为主线，串起 会话 / **版本化报告** / **知识库** / 长期记忆。对话可 **@ 引用** 项目/报告/某段知识（可溯源注入）；报告按「报告名」版本化、可**看变更（diff）**；对话可一键**汇总成纪要**并沉淀进知识库；知识库用 **语义检索 + 关键词** 混合召回。详见「✦ 企业事务操作系统」章节。
-- **多租户**：每个账号独立租户，业务数据行级隔离。
+详细产品说明、文案口径和升级方向统一放在 **`PRODUCT.md`**。工程实现以本文的契约、路径、构建与 TODO 为准。
 
 ---
 
@@ -43,7 +37,8 @@
 
 ```
 repo/
-├── AGENTS.md           # ← 本文件：产品与工程总说明（活文档，新会话自动加载）
+├── AGENTS.md           # ← 本文件：工程总说明（活文档，新会话自动加载）
+├── PRODUCT.md          # 产品定位、信息架构、文案口径、企业事务操作系统说明
 ├── IMPLEMENTATION.md   # 与《投产开发指导》章节的对应表（设计溯源）
 ├── shared/
 │   └── contracts.d.ts  # ★ SSOT：全栈数据契约（纯类型，运行时擦除）
@@ -55,7 +50,7 @@ repo/
 └── project/            # 原始高保真原型（设计事实来源，勿改）
 ```
 
-本地生成物约定：`app/project.config.json` 是正式小程序配置（需跟踪，保持 AppID/miniprogramRoot 正确并开启正式校验/压缩）；`app/project.private.config.json` 可在本机覆盖 DevTools 私有设置（例如局域网真机预览临时 `urlCheck:false`）；根目录误生成的 `project.config.json/project.private.config.json`、`app/.impeccable/`、`app/tarojs-cli-*.tgz`、根目录空 `package-lock.json` 均为本机/工具产物，已在 `.gitignore` 排除，不纳入提交。**不要导入仓库根目录到微信开发者工具，只导入 `app/`。**
+本地生成物约定：`app/project.config.json` 是正式小程序配置（需跟踪，保持 AppID/miniprogramRoot 正确并开启正式校验/压缩）；`app/project.private.config.json` 可在本机覆盖 DevTools 私有设置（例如局域网真机预览临时 `urlCheck:false`）；根目录误生成的 `project.config.json/project.private.config.json`、`weapp-preview*.json/png`、`weapp-auto-preview*.json/png`、`app/.impeccable/`、`app/tarojs-cli-*.tgz`、根目录空 `package-lock.json` 均为本机/工具产物，已在 `.gitignore` 排除，不纳入提交。**不要导入仓库根目录到微信开发者工具，只导入 `app/`。**
 
 ---
 
@@ -137,25 +132,23 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡）留在主包；项目工作台、项目详情、方案库、报告页已拆到 `packages/work/*` 分包（`packages/work/projects`、`project`、`library`、`report`），由 `pages/profile` 与 `pages/chat` 预加载。
 
 ### 7.2 关键 UI 约定（踩过的坑，勿回退）
-- **顶部让位胶囊**：自定义导航页内容必须落到「系统状态栏 + 微信胶囊」之下。
-  - 首页：品牌行与胶囊**顶端对齐**（`getMenuButtonBoundingClientRect().top`）。
-  - 其它 Tab 页：`<Screen topInset>`，由 `components/Screen` 注入实测高度的顶部占位（CSS 兜底 `env(safe-area-inset-top)+52px`）。
-  - 非 Tab 自定义头（对话/项目/方案库/报告等）必须使用 `components/SafeHeader`，由它统一实测 `getMenuButtonBoundingClientRect()` 设置顶部 padding 与右侧胶囊留白；不要在页面 SCSS 里各自写 `env(safe-area-inset-top)` 头部 padding。
-  - **不要再加伪状态栏 `9:41`**（已全部移除）。
-- **全屏弹层遮挡底栏**：`custom-tab-bar` 是原生层，不能只靠 z-index。全屏弹层（登录 / 本命色 picker / @引用面板 / 智能体启用 / 方案与额度）必须调用 `store.setOverlay(open, key)`：它会按唯一 key 登记来源、写入 `junshi.tabbarHidden` 供 `custom-tab-bar` 跨实例读取并 `return null`，避免弹层露出底部导航。**微信原生 tabbar 必须始终隐藏**：`services/tabbar.ts` 只允许调用 `Taro.hideTabBar`，不要在关闭弹层时调用 `Taro.showTabBar`，否则真机会偶发出现微信默认底栏 + 自定义胶囊双底栏。正常 Tab 页由 `custom-tab-bar` 挂载时调用 `hideNativeTabBarOnly()` 只压住微信原生文字 tabbar，不写入 overlay storage。**新增全屏弹层时务必使用稳定唯一 key，并在关闭/卸载时清理**。
-- **自定义底栏状态同步**：`custom-tab-bar` 只用 `eventCenter` + 页面 `useDidShow` 同步 overlay 和原生底栏隐藏，不做常驻轮询；如果真机再出现原生底栏回弹，优先在 `hideNativeTabBarOnly()` 的短延时兜底内处理，不恢复高频 interval。
+- **小程序工程约束清单（先读）**：
+  - **项目导入与配置**：微信开发者工具只导入 `app/`；`app/project.config.json` 是正式配置，保持 AppID、`miniprogramRoot=dist/`、`urlCheck/es6/enhance/postcss/minified` 等正式校验/压缩开启；本机调试差异放 `app/project.private.config.json`，不要把根目录误生成的 DevTools 配置纳入提交。
+  - **原生 tabbar 只隐藏不恢复**：custom tabBar 模式下任何路径都不得调用 `Taro.showTabBar`。正常 Tab 挂载/切换只调用 `hideNativeTabBarOnly()` 压住微信原生底栏；全屏 overlay 用 `store.setOverlay(open, stableKey)` 写 storage 并隐藏自定义底栏，关闭/卸载时清理对应 key。
+  - **弹层不进 custom-tab-bar**：`custom-tab-bar` 只做导航和 overlay 状态同步，不渲染 `Login` 或其它全屏业务弹层；未登录点击中间「对话」只提示并跳 `pages/chat`，由聊天页承接登录弹层。
+  - **overlay 同步不用轮询**：底栏状态同步依赖 `eventCenter` + 页面 `useDidShow` + `hideNativeTabBarOnly()` 短延时兜底；不要恢复 250ms/1500ms 常驻 interval。
+  - **顶部安全区统一组件化**：Tab 页用 `Screen topInset`，非 Tab 自定义头用 `SafeHeader`；不要在页面里各写一套 `env(safe-area-inset-top)`，不要加伪状态栏 `9:41`。
+  - **对话键盘按真机口径写**：`pages/chat` 保持页面 `disableScroll: true`、输入 `adjustPosition={false}`、`alwaysEmbed`、整条 `.box` 触发 focus、`onInput` 返回 `e.detail.value`、`onConfirm` 使用事件值发送，并由 `onKeyboardHeightChange` 写 `--keyboard-height` 让 `.chat` 自己压缩底部空间。
+  - **登录/401/网络错误有统一入口**：用户动作前先检查登录态；401 必须清用户态并弹登录/回首页，不能吞成空态或“产出失败”；`Taro.request` reject 要映射成网络/合法域名提示；需要登录的数据页 catch 后先调 `handleApiError`。
+  - **H5 兼容不污染小程序路径**：H5 自定义底栏只放 `app.h5.tsx/app.h5.scss`；小程序继续走真实 `page` 节点 + `src/custom-tab-bar`，不要把 H5/weui 兼容样式混进小程序原生 tabbar 路径。
+  - **主包持续控重**：项目工作台、项目详情、方案库、报告等非首屏工作流留在 `packages/work` 分包；新增重页面优先分包并在入口页配置预加载，除非确实属于首屏主路径。
+  - **真机排版防回退**：标题类 `<Text>` 保持块级化；两列网格用 `space-between + 48.5%`；Markdown 内容用 `MarkdownText`；等待模型返回要显示对话流思考气泡；全屏弹层、色盘、商业文案按下方约定处理。
+- **小程序历史坑只维护一份**：顶部安全区、原生 tabbar、overlay、键盘、登录、H5 样式隔离、网络错误和分包控重以本清单为准；不要在页面里另写一套平行实现。
 - **本命色色盘对齐**：`components/Picker` 的色点与名称必须在同一个 `.pk-swatch` 垂直列里渲染；不要拆成上下两条 flex 行，否则选中外圈宽度会导致标签错位。
-- **H5 与小程序视觉一致**：小程序使用真实 `page` 节点 + `src/custom-tab-bar` 原生自定义底栏；H5 使用 `src/app.h5.tsx` 手动挂载同款 `CustomTabBar`，并由 `src/app.h5.scss` 给浏览器根节点补设计 token、隐藏 Taro 生成的默认 `weui` tabbar。不要把 H5 兼容样式混入会影响小程序的原生 tabbar 路径。
-- **标题 Text 块级化**：Taro `<Text>` 默认偏内联；全局 `.kicker` / `.h1` 必须保持 `display: block`，页面 hero 说明文案也需显式 `display: block`，避免真机上标题、kicker、正文挤成一行。
 - **首页标题宋体化**：`pages/home` 通过 `Screen className="home"` 局部定义标题字体栈，品牌名、问候语、今日献策正文、对话卡提问、分区标题与卡片标题使用宋体优先；不要为此改全局 `--serif`，避免影响其它页面。
-- **对话输入框小程序兼容**：`pages/chat` 输入框必须由整条 `.box` 触发 focus，`onInput` 返回 `e.detail.value` 并同步 state，`onConfirm` 使用事件值发送；保留 `alwaysEmbed`、`.cinput` 的 `min-width:0;width:100%`，并用 `onKeyboardHeightChange` 写入 `--keyboard-height` 让 `.chat` 自己压缩底部空间；`adjustPosition` 必须为 `false` 且页面配置 `disableScroll: true`，避免真机键盘把整页顶到系统状态栏下方。
-- **对话等待反馈**：`pages/chat` 发送消息后必须立刻在对话流尾部显示“正在梳理上下文”思考气泡与三点动效，直到接口返回；不要只让发送按钮变灰，否则真机会像卡住。
-- **对话入口登录前置**：首页对话入口和 `pages/chat` 首帧都必须先检查登录态；未登录直接弹 `Login` 并提示“请先登录后再开始对话”，不要先等 401，否则 H5/真机会出现白屏闪一下再弹登录。底栏中间「对话」在未登录时只负责提示并跳到 `pages/chat`，由聊天页渲染 `Login`；**不要在 `custom-tab-bar` 内直接渲染 `Login`**，小程序原生 tabbar 层会导致弹层样式失效。
-- **前台商业文案克制**：面向用户的主路径不要写成“赠送 / 付费解锁 / 充值 / 最受欢迎 / 灵活付费”这类促销口吻；统一用「可用」「已启用」「专项能力」「产出额度」「方案与额度」「常用配置」表达，让用户感到是在调用工作台能力，而不是被推销。后台/代码契约仍可保留 `free/unlock/metered/credits` 等技术术语。
+- **前台商业文案克制**：面向用户的主路径不要写成“赠送 / 付费解锁 / 充值 / 最受欢迎 / 灵活付费”这类促销口吻；统一用「可用」「已启用」「专项能力」「产出额度」「方案与额度」「常用配置」表达，让用户感到是在调用工作台能力，而不是被推销。智能体费用展示用 `💎xN` / `💎xN/次`，不要写「启用需 N 点」「每次产出 N 点」；后台/代码契约仍可保留 `free/unlock/metered/credits` 等技术术语。
 - **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
 - **前台记忆披露**：对话页用「专属理解」包装 Agent Memory，不直接暴露后台术语；问候气泡披露会参考企业档案、对话偏好、引用资料，顶部记忆条展示当前顾问已理解的上下文，学习成功提示用“专属理解已更新/已校准业务偏好和判断口径”。后端真实记忆开关见 §9。
-- **真实网络错误不要吞成产出失败**：`services/api.ts` 要捕获 `Taro.request` reject，把 `errMsg` 映射为明确网络/合法域名提示；对话页未收到 HTTP 响应时不能只显示“抱歉，产出失败了”。
-- **401/网络错误统一处理**：登录态失效或 token 401 不能被页面吞成空列表；`services/store.ts handleApiError` 会清理用户态、提示重新登录并回首页，`NETWORK_ERROR` 保留合法域名/网络提示。需要登录的数据页/弹层 catch 后必须调用它，再决定是否展示空态。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **深色卡光感**：对话入口卡用 `--accent-deep` 对角渐变 + `--accent-glow` 柔光，随本命色自适应。
 
@@ -258,36 +251,15 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 
 ---
 
-## ✦ 企业事务操作系统：项目 / 知识库 / 版本化报告 / 引用
+## ✦ 企业事务操作系统（工程摘要）
 
-一条主线 + 四块能力，长在既有 会话/记忆/成果 之上。
+完整产品说明见 `PRODUCT.md`。工程上只需记住这些边界：
 
-| 能力 | 后端落点 | 前端落点 |
-|---|---|---|
-| **项目（主线）** | `routes/projects.ts`、`Session/Memory/Deliverable.projectId` | `pages/projects`（列表+新建）、`pages/project`（详情：会话/报告/知识三段）；「我的」入口 |
-| **知识库 + 语义记忆** | `services/{embedding,retrieval,knowledge}.ts`、`routes/knowledge.ts`、`Memory` 改语义召回 | 项目详情「知识」段（列表+手动加）；`@引用` 选择器拉候选 |
-| **版本化报告** | `services/reports.ts`、`routes/reports.ts`、`ReportDoc/ReportVersion`、`/library` 桥接 | `pages/report`（版本时间线 + 查看某版 + 对比上一版 diff）；方案库 `vN` 徽标跳转 |
-| **@ 引用（上下文工程）** | `buildGenContext` 解析 `refs` → `resolveReferences` 注入；`injectVariables` 追加「参考资料」块；`Message.refsJson` 持久化 | 对话页 📎 唤起选择器，已选引用以 chip 呈现并随消息发送/回显 |
-| **对话→汇总报告** | `services/summarize.ts`、`POST /sessions/:id/summarize` | 对话页「生成纪要」按钮 → 版本化报告 + 沉淀知识库 |
-
-要点：
-- **检索**：`hybridSearch` = 向量(语义) × 关键词 加权（`alpha≈0.65`）；演示在内存算余弦，生产换 pgvector `<=>` 下推。
-- **记忆质量**：`learnFromConversation` 写入即向量化；召回按当前问题语义排序（无 query 退回 weight+时间）。
-- **报告版本**：按「报告名 slug」归一，**同名再产出/编辑=新版本**，**同内容（hash）不重复成版**，自动算「新增/修改/删除 N 段」摘要；diff 读时实时计算（section 级匹配 `h`）。
-- **mock 可见**：mock provider 会把「引用/知识/项目」体现在产出里（多一段「参考依据」或一条提示），不接真实模型也能直观验证。
-- **隔离**：项目/报告/知识全部 `tenantId` 过滤；引用解析只取该用户/租户可见资料。
-- **演示数据**：`seed.ts` 灌入项目「2026 融资冲刺」+ 报告「战略诊断报告」v1→v2（可看 diff）+ 2 条知识。
-
-## ✦ 升级路径（多数已落地，余项按需推进）
-
-1. ✅ **pgvector（已实现·待真库验证）**：`services/vectorStore.ts` + `prisma/pgvector.sql`（建 `embedding_vec vector(N)` 列 + HNSW + 回填）。置 `PGVECTOR_ENABLED=true` 后 `hybridSearch`/`recallMemories` 走 `<=>` ANN 下推，写入时向量列双写；默认关闭走内存余弦。⚠️ 本地无扩展未端到端验证——上真库执行 `npm run db:pgvector` 后验。切换嵌入维度需改 SQL 的 N 并重嵌。
-2. ✅ **真实嵌入模型（配置驱动）**：后台填 `embeddingModel`（或 env `EMBEDDING_MODEL`）+ 真实 key → `embedding.ts` 走 `/embeddings`；留空用本地确定性嵌入。
-3. ✅ **Learned Memory / 汇总（LLM 化）**：`extractInsights`/`summarizePoints` 在有真实模型时做结构化抽取/归纳，mock 时确定性兜底。
-4. ✅ **词级 diff**：`reports.ts wordDiff`（LCS），changed 段返回 `words`，报告页句内增删高亮。
-5. ✅ **大模型可切换**：运营后台「模型」页（默认 Agnes 2.0 Flash，一键切 DeepSeek/Qwen/Moonshot/OpenAI/Claude，测试连接，即时生效）；配置存 `AiSetting`。
-6. ⏳ **时序知识图谱**：在向量之上叠加 Graphiti 式时序图，回答「X 时谁负责 Y」类关系/时序问题（图与向量互补，不替换）——尚未做。
-7. ⏳ **运营后台只读看板**：项目/报告/知识尚无 admin 看板（接口已就绪）。
-8. ⏳ **密钥与后台权限安全**：`AiSetting.apiKey` 当前明文存库（演示）；生产应加密/接密管。后台已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权，仍需细粒度 RBAC、管理员账号体系与密钥轮换策略。
+- 项目、报告、知识、记忆、引用都必须按 `tenantId` 隔离；新增可被引用/召回的数据类型时，补跨用户不可见断言。
+- `buildGenContext` 是上下文注入总入口：企业档案、本命色、项目背景、显式引用、知识库召回、长期记忆都从这里进模型。
+- 报告版本由 `services/reports.ts` 管：slug 归一、内容哈希去重、section/word diff；不要在页面层自己拼版本逻辑。
+- 知识与记忆检索走 `services/retrieval.ts` / `services/memory.ts`；默认本地向量 + 内存余弦，`PGVECTOR_ENABLED=true` 后走 `services/vectorStore.ts`。
+- 升级方向和产品口径看 `PRODUCT.md`；未完成项仍以 §13 TODO 为准。
 
 ## 11. 构建、运行、验证
 
@@ -389,6 +361,9 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-13** · **修复成果缓存串公司抬头**：`llm/gateway.ts` 的结构化成果缓存 key 纳入 `companyName`、行业、阶段、痛点与项目名，避免不同用户相同输入复用旧成果导致报告 meta 不带当前公司；`.gitignore` 排除微信预览二维码/信息文件，Docker 临时 Postgres + Node 容器完整测试用于回归验证。
+- **2026-06-13** · **拆分产品说明并统一智能体钻石价格**：新增 `PRODUCT.md` 承接产品定位、信息架构、文案口径、企业事务操作系统和升级方向；`AGENTS.md` 收敛为工程入口与约束摘要。前台智能体费用展示新增 `services/format.ts`，智库/工坊卡片与专项能力弹层将「启用需 N 点」「每次产出 N 点」「用 N 点启用」统一改为 `💎xN` / `💎xN/次` 口径。
+- **2026-06-13** · **沉淀小程序工程约束清单**：§0 新增小程序改动前置检查要求，§7.2 将项目配置、原生 tabbar、overlay key、登录弹层归属、键盘避让、401/网络错误、H5/小程序样式隔离、分包控重与真机排版修复收敛为防回归清单，后续改 `app/` 需先对照执行。
 - **2026-06-13** · **彻底避免真机默认底栏回弹**：`services/tabbar.ts` 移除 `Taro.showTabBar` 分支，`store.setOverlay(false)` 关闭弹层时只恢复自定义胶囊底栏并继续强制 `hideTabBar`，避免真机偶发出现微信默认底栏与自定义悬浮底栏并存；AGENTS 更新底栏约定，明确 custom tabBar 模式下不得 show 原生 tabbar。
 - **2026-06-13** · **修复对话页键盘顶起整页**：`pages/chat` 禁用页面级滚动，输入框关闭 `adjustPosition` 并改为监听键盘高度设置 `--keyboard-height`，让输入区随键盘上移但头部/问候卡不再被推到系统状态栏下方；AGENTS 同步更新对话输入兼容约定。
 - **2026-06-13** · **修复小程序 High 级 review 项**：`app/project.config.json` 切为正式安全口径（开启 urlCheck/es6/enhance/postcss/minified），删除根目录误生成 DevTools 配置并保留本机 `app/project.private.config.json` 覆盖局域网预览；新增 `store.handleApiError`，会话/项目/方案库/报告/方案与专项能力弹层不再把 401/网络错误吞成空态。

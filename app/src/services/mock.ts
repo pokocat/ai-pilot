@@ -33,7 +33,7 @@ const PLANS: Plan[] = [
     period: 'month',
     creditsPerMonth: 10,
     agentCount: 3,
-    featuresJson: ['10 次产出额度 / 月', '基础顾问 3 位', '适合轻量试用'],
+    featuresJson: ['10 点 / 月', '基础顾问 3 位', '适合轻量试用'],
     highlighted: false,
   },
   {
@@ -43,7 +43,7 @@ const PLANS: Plan[] = [
     period: 'year',
     creditsPerMonth: 68,
     agentCount: 8,
-    featuresJson: ['不限量对话', '68 次深度产出 / 月', '顾问助手 8 位', '方案库 + 导出'],
+    featuresJson: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
     highlighted: true,
   },
   {
@@ -82,7 +82,7 @@ interface ProjectRec {
   status: 'active' | 'archived'; createdAt: string; updatedAt: string;
 }
 interface UserData {
-  name: string; phone: string; benmingColor: string; onboarded: boolean;
+  name: string; company: string; phone: string; benmingColor: string; onboarded: boolean;
   planId: string; creditBalance: number; ownedAgents: string[];
   profile: Profile | null; sessions: SessionRec[]; library: LibItem[];
   projects: ProjectRec[]; reports: ReportDocRec[]; knowledge: KnowledgeRec[];
@@ -102,12 +102,15 @@ function load(token: string): UserData {
       d.planId ??= 'mock-plan-decision';
       d.creditBalance ??= 68;
       d.ownedAgents ??= ['intel', 'brand']; // 演示：默认已启用两个专项智能体
+      d.company ??= '';
+      d.name ??= '';
       return d;
     }
   } catch { /* noop */ }
   const phone = token.replace(/^(mock-|local-)/, '');
   return {
-    name: `用户${phone.slice(-4)}`,
+    name: '', // 不编造随机名；首登建档采集真实称呼
+    company: '',
     phone,
     benmingColor: 'gold',
     onboarded: false,
@@ -134,7 +137,8 @@ const agentOf = (key: string): Agent =>
   DEFAULT_AGENTS.find((a) => a.key === key) || DEFAULT_AGENTS.find((a) => a.key === 'general')!;
 
 function metaOf(d: UserData): string {
-  return d.profile?.industry ? `云栖科技 · ${d.profile.industry}` : '云栖科技 · 已就绪';
+  const parts = [d.company, d.profile?.industry].filter(Boolean) as string[];
+  return parts.length ? parts.join(' · ') : '经营快照';
 }
 
 function buildDeliverable(deliverableKey: string, d: UserData): Deliverable {
@@ -287,12 +291,26 @@ export const mock = {
     const plan = PLANS.find((p) => p.id === d.planId) ?? PLANS[1];
     return delay({
       user: { id: getToken(), name: d.name, role: 'owner', benmingColor: d.benmingColor },
-      tenant: { id: `t-${d.phone}`, name: '云栖科技', industry: d.profile?.industry ?? 'SaaS / 软件', stage: d.profile?.stage ?? 'A 轮前后' },
+      tenant: { id: `t-${d.phone}`, name: d.company, industry: d.profile?.industry ?? null, stage: d.profile?.stage ?? null },
       plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth } : null,
       creditBalance: d.creditBalance,
       onboarded: d.onboarded,
       ai: { provider: 'mock', model: 'template', ready: false, claudeReady: false },
     });
+  },
+
+  async updateIdentity(body: { name?: string; company?: string }): Promise<{ ok: boolean; name?: string; company?: string }> {
+    const { token, d } = current();
+    if (typeof body.name === 'string') d.name = body.name.trim().slice(0, 20);
+    if (typeof body.company === 'string') d.company = body.company.trim().slice(0, 40);
+    save(token, d);
+    return delay({ ok: true, name: d.name, company: d.company });
+  },
+
+  async deleteAccount(): Promise<{ ok: boolean }> {
+    const { token } = current();
+    try { Taro.removeStorageSync(dataKey(token)); } catch { /* noop */ }
+    return delay({ ok: true });
   },
 
   async plans(): Promise<Plan[]> { return delay(PLANS); },
@@ -330,7 +348,7 @@ export const mock = {
     }
     const unlimited = d.creditBalance < 0;
     if (!unlimited && d.creditBalance < agent.price) {
-      throw Object.assign(new Error('产出额度不足，无法启用该智能体'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
+      throw Object.assign(new Error('权益点不足，无法启用该智能体'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
     }
     d.ownedAgents.push(key);
     if (!unlimited) d.creditBalance -= agent.price;
@@ -410,7 +428,7 @@ export const mock = {
     let res: GenResult;
     if (ag.deliverableKey) {
       if (d.creditBalance >= 0 && d.creditBalance < 1) {
-        throw Object.assign(new Error('产出额度不足，请调整方案后再继续'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
+        throw Object.assign(new Error('权益点不足，请调整方案后再继续'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
       }
       const deliverable = buildDeliverable(ag.deliverableKey, d);
       if (projName) deliverable.meta = `${deliverable.meta} · ${projName}`;

@@ -100,9 +100,10 @@ export async function authRoutes(app: FastifyInstance) {
     let isNew = false;
     if (!user) {
       isNew = true;
+      // 不再编造「用户1234」这类随机名；称呼/公司在首登建档采集，未填则留空由前端走「完善资料」态。
       user = await createUserWithTenant({
         phone,
-        name: name?.trim() || `用户${phone.slice(-4)}`,
+        name: name?.trim() || '',
         auditAction: 'auth.register',
         auditPayload: { phone },
       });
@@ -127,7 +128,8 @@ export async function authRoutes(app: FastifyInstance) {
 
       if (!user) {
         isNew = true;
-        const name = parsed.data.nickname || `微信用户${wx.openid.slice(-4)}`;
+        // 微信昵称多为匿名「微信用户」，不可靠；留空，首登建档采集真实称呼。
+        const name = parsed.data.nickname?.trim() || '';
         user = await createUserWithTenant({
           phone: wechatAccountKey(wx.openid),
           name,

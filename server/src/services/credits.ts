@@ -13,7 +13,7 @@ export const CREDIT_COST = { report: 1, chat: 0 } as const;
 export class InsufficientCreditsError extends Error {
   statusCode = 402;
   code = 'INSUFFICIENT_CREDITS';
-  constructor(msg = '算力不足，请充值后再产出') { super(msg); }
+  constructor(msg = '权益点不足，请调整方案后再继续') { super(msg); }
 }
 
 const isUnlimited = (balance: number) => balance < 0;

@@ -7,7 +7,8 @@
 
 .credit { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-radius: var(--r-lg); margin-top: 12px; border: none; }
 .cr-k { display: block; font-size: 11px; color: rgba(255,255,255,.55); }
-.cr-v { display: block; font-size: 20px; font-weight: 700; margin-top: 4px; }
+.cr-vrow { display: flex; align-items: center; margin-top: 4px; }
+.cr-v { font-size: 20px; font-weight: 700; }
 .cr-btn { color: #fff; font-size: 13px; font-weight: 600; padding: 9px 18px; border-radius: 999px; }
 
 .rows { margin-top: 12px; border-radius: var(--r-lg); overflow: hidden; padding: 4px 0; }

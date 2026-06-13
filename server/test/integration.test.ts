@@ -687,3 +687,82 @@ describe('TC-U 用户主要操作路径回归', () => {
     assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before - 1, '/me 算力余额应与产出结果一致');
   });
 });
+
+// ───────────────────────── TC-W 运营后台鉴权（防越权调用 /admin/*） ─────────────────────────
+describe('TC-W 运营后台鉴权', () => {
+  test('W1 无任何凭证访问后台接口 → 401', async () => {
+    const r = await api('GET', '/api/admin/overview', { adminToken: false });
+    assert.equal(r.status, 401);
+    assert.equal(r.body.code, 'ADMIN_UNAUTHORIZED');
+  });
+
+  test('W2 普通小程序用户（非管理员）访问后台接口 → 403', async () => {
+    const t = await login(uniquePhone());
+    const r = await api('GET', '/api/admin/overview', { token: t, adminToken: false });
+    assert.equal(r.status, 403);
+    assert.equal(r.body.code, 'ADMIN_FORBIDDEN');
+  });
+
+  test('W3 错误的 admin 密钥 → 401', async () => {
+    const r = await api('GET', '/api/admin/overview', { adminToken: 'wrong-secret' });
+    assert.equal(r.status, 401);
+  });
+
+  test('W4 正确的 admin 密钥 → 200', async () => {
+    const r = await api('GET', '/api/admin/overview'); // helper 自动带正确 ADMIN_TOKEN
+    assert.equal(r.status, 200);
+    assert.ok(Array.isArray(r.body.stats), '应返回看板数据');
+  });
+
+  test('W5 role=admin 账号（仅 x-user-id、无密钥）→ 200', async () => {
+    const t = await login(uniquePhone());
+    await prisma.user.update({ where: { id: t }, data: { role: 'admin' } });
+    const r = await api('GET', '/api/admin/overview', { token: t, adminToken: false });
+    assert.equal(r.status, 200);
+  });
+
+  test('W6 ★ 普通用户无法越权自助开通付费智能体（403 且确实未开通）', async () => {
+    const t = await login(uniquePhone());
+    // 尝试用自己的登录态调用后台开通接口给自己开通 unlock 智能体
+    const grant = await api('POST', `/api/admin/users/${t}/agents`, { token: t, adminToken: false, body: { agentKey: 'intel' } });
+    assert.ok(grant.status === 403 || grant.status === 401, '越权开通应被拒');
+    // 校验确实未开通：产出仍被 AGENT_LOCKED 拦截
+    const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '竞品分析', agentKey: 'intel' } });
+    assert.equal(gen.status, 403);
+    assert.equal(gen.body.code, 'AGENT_LOCKED');
+  });
+});
+
+// ───────────────────────── TC-X 身份与账号注销 ─────────────────────────
+describe('TC-X 身份与账号注销', () => {
+  test('X1 注册不生成随机名；PUT /me 设置称呼+公司后 /me 同步', async () => {
+    const t = await login(uniquePhone());
+    const before = await api('GET', '/api/me', { token: t });
+    assert.equal(before.body.user.name, '', '新账号不应有编造的随机名');
+
+    const upd = await api('PUT', '/api/me', { token: t, body: { name: '王越', company: '云栖科技' } });
+    assert.equal(upd.status, 200);
+    const me = await api('GET', '/api/me', { token: t });
+    assert.equal(me.body.user.name, '王越');
+    assert.equal(me.body.tenant.name, '云栖科技', '公司应写入租户名');
+  });
+
+  test('X2 报告抬头带入真实公司而非硬编码', async () => {
+    const t = await login(uniquePhone());
+    await api('PUT', '/api/me', { token: t, body: { name: '李雷', company: '星澜科技' } });
+    const r = await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
+    assert.equal(r.body.kind, 'report');
+    assert.ok(r.body.deliverable.meta.includes('星澜科技'), '成果抬头应带入真实公司名');
+    assert.ok(!r.body.deliverable.meta.includes('云栖科技'), '不应出现硬编码的占位公司');
+  });
+
+  test('X3 注销账号 → 删除数据，原 token 失效', async () => {
+    const t = await login(uniquePhone());
+    await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
+    const del = await api('DELETE', '/api/me', { token: t });
+    assert.equal(del.status, 200);
+    const after = await api('GET', '/api/me', { token: t });
+    assert.equal(after.status, 401, '注销后原登录态应失效');
+    assert.equal(await prisma.user.count({ where: { id: t } }), 0, '用户记录应被删除');
+  });
+});

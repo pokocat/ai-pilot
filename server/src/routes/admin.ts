@@ -67,7 +67,7 @@ export async function adminRoutes(app: FastifyInstance) {
         { v: String(users), l: '注册用户', d: `${tenants} 个租户`, trend: 'up' },
         { v: String(activeToday.length), l: '今日活跃用户', d: `${sessions} 个会话`, trend: 'up' },
         { v: String(deliverables), l: '累计产出成果', d: `${agents} 个功能上架`, trend: 'up' },
-        { v: String(spent), l: '累计算力消耗', d: '按流水统计', trend: spent > 0 ? 'down' : 'up' },
+        { v: String(spent), l: '累计消耗（点）', d: '按流水统计', trend: spent > 0 ? 'down' : 'up' },
       ],
       live: { tenants, deliverables, sessions, agents },
       feed: recentAudits.length

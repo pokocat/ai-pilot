@@ -14,9 +14,8 @@ function getClient(apiKey: string): Anthropic {
 }
 
 function metaOf(ctx: GenContext): string {
-  const p = ctx.profile;
-  if (p?.industry) return `云栖科技 · ${p.industry}${p.stage ? ' · ' + p.stage : ''}`;
-  return '云栖科技 · 已就绪';
+  const parts = [ctx.companyName, ctx.profile?.industry, ctx.profile?.stage].filter(Boolean) as string[];
+  return parts.length ? parts.join(' · ') : '经营快照';
 }
 
 export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Deliverable> {

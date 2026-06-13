@@ -7,8 +7,8 @@ const INTENSITY = [['conservative', '保守'], ['balanced', '均衡'], ['aggress
 const RETENTION = [[30, '30天'], [180, '180天'], [-1, '永久']];
 const BILLING: [AgentBilling, string, string][] = [
   ['free', '免费', '注册即赠送 · 所有用户可用'],
-  ['unlock', '一次性解锁', '用算力购买后永久可用 / 后台可指定开通'],
-  ['metered', '按次计费', '无需解锁，每次产出消耗算力（如图片生成）'],
+  ['unlock', '一次性解锁', '用权益点购买后永久可用 / 后台可指定开通'],
+  ['metered', '按次计费', '无需解锁，每次产出消耗权益点（如图片生成）'],
 ];
 const SOURCES = [
   ['conversation', '对话记忆', '从历史会话提炼 · 已沉淀 128 条', 'chat'],
@@ -65,7 +65,7 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
 
         <div className="blk">
           <div className="blk-h"><Icon name="crown" size={15} /><span className="t">计费与定价</span><span className="badge">{billingLabel(billing)}</span></div>
-          <div className="blk-d">控制这位智能体是注册赠送、付费解锁，还是按次计费（如图片生成类）。价格单位为「算力次数」。</div>
+          <div className="blk-d">控制这位智能体是注册赠送、付费解锁，还是按次计费（如图片生成类）。价格单位为「权益点」。</div>
           <div className="bill-seg">
             {BILLING.map(([v, l, d]) => (
               <div key={v} className={`bill-opt ${billing === v ? 'on' : ''}`} onClick={() => { setBilling(v); if (v === 'free') setPrice(0); }}>
@@ -75,7 +75,7 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
           </div>
           {billing !== 'free' && (
             <div className="ai-field">
-              <div className="ai-fl">{billing === 'unlock' ? '解锁价格（算力次数）' : '每次产出消耗（算力次数）'}</div>
+              <div className="ai-fl">{billing === 'unlock' ? '解锁价格（权益点）' : '每次产出消耗（权益点）'}</div>
               <input className="ai-input" type="number" min={0} value={price} onChange={(e) => setPrice(Number(e.target.value))} />
             </div>
           )}

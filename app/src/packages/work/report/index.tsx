@@ -25,12 +25,15 @@ export default function Report() {
   const [content, setContent] = useState<ReportVersionContent | null>(null);
   const [diff, setDiff] = useState<ReportDiff | null>(null);
 
+  const [failed, setFailed] = useState(false);
+
   useEffect(() => {
-    if (!id) return;
+    if (!id) { setFailed(true); return; }
+    setFailed(false);
     api.report(id).then((d) => {
       setDetail(d);
       setSel(d.currentVersion);
-    }).catch((e) => { s.handleApiError(e); setDetail(null); });
+    }).catch((e) => { s.handleApiError(e); setDetail(null); setFailed(true); });
   }, [id]);
 
   useEffect(() => {
@@ -46,7 +49,9 @@ export default function Report() {
     return (
       <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
         <SafeHeader title="报告" onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
-        <View className="rp-loading"><Text>加载中…</Text></View>
+        <View className="rp-loading">
+          <Text>{failed ? '报告加载失败，请返回重试' : '加载中…'}</Text>
+        </View>
       </View>
     );
   }

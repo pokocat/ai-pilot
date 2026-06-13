@@ -19,6 +19,28 @@ type Msg =
   | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean }
   | { role: 'memory'; agentName: string };
 
+// 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
+function deliverableToText(d: Deliverable): string {
+  const lines: string[] = [d.title];
+  if (d.meta) lines.push(d.meta);
+  lines.push('');
+  for (const sec of d.sections) {
+    lines.push(`【${sec.h}】`);
+    if (sec.b) lines.push(sec.b);
+    if (sec.list) sec.list.forEach((x) => lines.push(`· ${x}`));
+    lines.push('');
+  }
+  if (d.trust) lines.push(d.trust);
+  return lines.join('\n').trim();
+}
+function copyDeliverable(d: Deliverable) {
+  Taro.setClipboardData({
+    data: deliverableToText(d),
+    success: () => Taro.showToast({ title: '已复制全文', icon: 'success' }),
+    fail: () => Taro.showToast({ title: '复制失败', icon: 'none' }),
+  });
+}
+
 type ChatStyle = CSSProperties & {
   '--keyboard-height'?: string;
 };
@@ -59,7 +81,7 @@ export default function Chat() {
   const errorReply = (e: unknown): string => {
     if (isUnauthorized(e)) return '登录态已失效，请重新登录后再发送。';
     if ((e as any)?.data?.code === 'AGENT_LOCKED') return '该专项顾问尚未启用，请到「智库 / 工坊」查看可用方案。';
-    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '产出额度不足，请在「我的」里调整方案后再继续。';
+    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '权益点不足，请在「我的」里调整方案后再继续。';
     const msg = String((e as any)?.message || '');
     if (msg && msg !== 'undefined') return msg;
     return '抱歉，产出失败了，请稍后再试。';
@@ -389,7 +411,7 @@ export default function Chat() {
           return (
             <View key={i} className="msg a">
               <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
-              <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => Taro.showToast({ title: '正在生成 PDF…', icon: 'none' })} />
+              <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} />
             </View>
           );
         })}

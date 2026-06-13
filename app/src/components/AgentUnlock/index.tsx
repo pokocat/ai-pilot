@@ -5,6 +5,7 @@ import Icon from '../Icon';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Agent } from '../../services/api';
+import { diamondCost } from '../../services/format';
 import './index.scss';
 
 interface Props {
@@ -32,7 +33,7 @@ export default function AgentUnlock({ agent, onClose, onUnlocked }: Props) {
   const confirm = async () => {
     if (busy) return;
     if (!enough) {
-      Taro.showToast({ title: '产出额度不足，请先调整方案', icon: 'none' });
+      Taro.showToast({ title: '权益点不足，请先调整方案', icon: 'none' });
       return;
     }
     setBusy(true);
@@ -45,7 +46,7 @@ export default function AgentUnlock({ agent, onClose, onUnlocked }: Props) {
     } catch (e) {
       const code = (e as any)?.code || (e as any)?.data?.code;
       if (code === 'INSUFFICIENT_CREDITS') {
-        Taro.showToast({ title: '产出额度不足，请先调整方案', icon: 'none' });
+        Taro.showToast({ title: '权益点不足，请先调整方案', icon: 'none' });
       } else {
         s.handleApiError(e, { fallbackTitle: '启用失败，请重试' });
       }
@@ -67,22 +68,24 @@ export default function AgentUnlock({ agent, onClose, onUnlocked }: Props) {
 
         <View className="au-price card">
           <View className="au-pl">
-            <Text className="au-pk">启用所需额度</Text>
-            <Text className="au-pv serif" style={{ color: accent }}>{agent.price} <Text className="unit">次</Text></Text>
+            <Text className="au-pk">启用所需</Text>
+            <View className="au-pv-row">
+              <Text className="au-pv" style={{ color: accent }}>{diamondCost(agent.price)}</Text>
+            </View>
           </View>
           <View className="au-divider" />
           <View className="au-pl">
-            <Text className="au-pk">当前额度</Text>
-            <Text className="au-bal" style={{ color: enough ? 'var(--ink-2)' : '#c0392b' }}>{unlimited ? '不限量' : `${balance} 次`}</Text>
+            <Text className="au-pk">我的余额</Text>
+            <Text className="au-bal" style={{ color: enough ? 'var(--ink-2)' : '#c0392b' }}>{unlimited ? '不限量' : `${balance} 点`}</Text>
           </View>
         </View>
 
-        <Text className="au-note">启用后会加入你的工作台；后续深度产出按当前方案消耗额度。</Text>
+        <Text className="au-note">启用后会加入你的工作台，永久可用；后续深度产出按当前方案消耗权益点。</Text>
 
         {!enough && (
           <View className="au-low">
             <Icon name="alert" size={13} color="#c0392b" />
-            <Text> 当前额度不足，请到「我的 · 方案与额度」调整</Text>
+            <Text> 权益点不足，请到「我的 · 方案与权益点」调整</Text>
           </View>
         )}
 
@@ -93,8 +96,7 @@ export default function AgentUnlock({ agent, onClose, onUnlocked }: Props) {
             style={{ background: accent }}
             onClick={confirm}
           >
-            <Icon name="crown" size={15} color="#fff" />
-            <Text>{busy ? '启用中…' : `用 ${agent.price} 次额度启用`}</Text>
+            <Text>{busy ? '启用中…' : `${diamondCost(agent.price)} 启用`}</Text>
           </View>
         </View>
       </View>

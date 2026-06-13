@@ -27,6 +27,7 @@
 }
 .au-pl { display: flex; flex-direction: column; gap: 5px; }
 .au-pk { font-size: 11px; color: var(--ink-3); }
+.au-pv-row { display: inline-flex; align-items: center; }
 .au-pv { font-size: 22px; font-weight: 700; }
 .au-pv .unit { font-size: 12px; font-weight: 500; }
 .au-bal { font-size: 15px; font-weight: 600; }

@@ -70,6 +70,10 @@ export const api = {
     IS_MOCK ? mock.purchasePlan(id) : request<PlanPurchaseResult>(`/plans/${id}/purchase`, 'POST', {}),
   setColor: (color: string) =>
     IS_MOCK ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),
+  updateIdentity: (body: { name?: string; company?: string }) =>
+    IS_MOCK ? mock.updateIdentity(body) : request<{ ok: boolean; name?: string; company?: string }>('/me', 'PUT', body),
+  deleteAccount: () =>
+    IS_MOCK ? mock.deleteAccount() : request<{ ok: boolean }>('/me', 'DELETE'),
   agents: () => (IS_MOCK ? mock.agents() : request<Agent[]>('/agents')),
   purchaseAgent: (key: string) =>
     IS_MOCK ? mock.purchaseAgent(key) : request<AgentPurchaseResult>(`/agents/${key}/purchase`, 'POST', {}),

@@ -110,7 +110,7 @@ export default function ReportCard({ data, animate = false, saved = false, onSav
             </View>
             <View className="act ghost" onClick={() => onExport?.()}>
               <Icon name="doc" size={14} color="#565C63" />
-              <Text>导出</Text>
+              <Text>复制全文</Text>
             </View>
           </View>
         </>

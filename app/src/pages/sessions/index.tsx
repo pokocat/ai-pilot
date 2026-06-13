@@ -33,6 +33,16 @@ export default function Sessions() {
   const openSession = (id: string) => Taro.navigateTo({ url: `/pages/chat/index?sessionId=${id}` });
   const newWith = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&fresh=1` });
 
+  // 长按会话 → 删除（接口已支持，乐观更新）
+  const confirmDelete = (it: SessionItem) =>
+    Taro.showModal({ title: '删除会话', content: `删除「${it.title}」后不可恢复，确定删除？`, confirmText: '删除', confirmColor: '#c0392b' })
+      .then(async (r) => {
+        if (!r.confirm) return;
+        setSessions((list) => list.filter((x) => x.id !== it.id));
+        await api.deleteSession(it.id).catch((e) => { s.handleApiError(e, { fallbackTitle: '删除失败' }); });
+      })
+      .catch(() => {});
+
   return (
     <Screen topInset>
       <View className="pad">
@@ -58,7 +68,7 @@ export default function Sessions() {
           ))}
         </ScrollView>
 
-        <View className="sl">最近会话</View>
+        <View className="sl">最近会话{sessions.length > 0 ? <Text className="sl-hint"> · 长按可删除</Text> : null}</View>
         {sessions.length === 0 ? (
           <View className="sess-empty">
             <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="chat" size={22} color={accent} /></View>
@@ -69,7 +79,7 @@ export default function Sessions() {
         ) : (
           <View className="sess-list">
             {sessions.map((it) => (
-              <View key={it.id} className="sess-item card" onClick={() => openSession(it.id)}>
+              <View key={it.id} className="sess-item card" onClick={() => openSession(it.id)} onLongPress={() => confirmDelete(it)}>
                 <View className="si-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={it.agentIcon} size={18} color={accent} /></View>
                 <View className="si-b">
                   <View className="si-top">

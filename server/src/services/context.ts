@@ -34,6 +34,7 @@ export async function buildGenContext(opts: {
   if (!agent) throw new Error(`未知智能体：${opts.agentKey}`);
   const profile = await prisma.profile.findFirst({ where: { tenantId: opts.tenantId }, orderBy: { updatedAt: 'desc' } });
   const user = await prisma.user.findUnique({ where: { id: opts.userId } });
+  const tenant = await prisma.tenant.findUnique({ where: { id: opts.tenantId }, select: { name: true } });
 
   const memoryConfig = agent.memoryConfig as unknown as MemoryConfig;
   // 长期记忆：按当前问题做语义召回；后台关闭 longTerm 后不再注入既有记忆。
@@ -60,6 +61,7 @@ export async function buildGenContext(opts: {
     agentName: agent.name,
     systemPrompt: agent.systemPrompt,
     deliverableKey: agent.deliverableKey,
+    companyName: tenant?.name || null,
     profile: profile ? { industry: profile.industry, stage: profile.stage, pain: profile.pain } : null,
     memories,
     benmingColor: user?.benmingColor ?? 'gold',

@@ -166,7 +166,7 @@ function UsersView({ onOpen }: { onOpen: (id: string) => void }) {
               <KV k="注册时间" v={fmtTime(u.createdAt)} />
               <KV k="最后会话" v={u.lastSessionAt ? fmtTime(u.lastSessionAt) : '暂无'} />
               <KV k="会话/成果" v={`${u.sessionCount}/${u.deliverableCount}`} />
-              <KV k="已消耗" v={`${u.totalSpent} 次`} />
+              <KV k="已消耗" v={`${u.totalSpent} 点`} />
             </div>
           </div>
         ))}
@@ -202,14 +202,14 @@ function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: 
       <div className="ad-db">
         <div className="blk">
           <div className="blk-h"><Icon name="crown" size={15} /><span className="t">付费智能体开通</span><span className="badge">{data.agents.filter((a) => a.owned).length}/{data.agents.length}</span></div>
-          <div className="blk-d">为该用户单独开通付费（解锁类）智能体，免其消耗算力。免费 / 按次智能体所有用户均可直接使用，无需开通。</div>
+          <div className="blk-d">为该用户单独开通付费（解锁类）智能体，免其消耗权益点。免费 / 按次智能体所有用户均可直接使用，无需开通。</div>
           <div className="mem-list">
             {data.agents.map((a) => (
               <div key={a.key} className="mem-card">
                 <span className="mi"><Icon name={a.icon} size={16} /></span>
                 <div className="mb">
                   <div className="mt">{a.name} {a.owned && <span className="tag">{sourceLabel(a.source)}</span>}</div>
-                  <div className="mm">{a.role} · {a.price} 算力解锁</div>
+                  <div className="mm">{a.role} · {a.price} 点解锁</div>
                 </div>
                 <button className={`mini-btn ${a.owned ? 'danger' : 'primary'}`} disabled={busy === a.key} onClick={() => toggle(a.key, a.owned, a.name)}>
                   {a.owned ? '取消' : '开通'}
@@ -232,10 +232,10 @@ function UsageView() {
   const maxSpent = Math.max(1, ...data.users.map((u) => u.totalSpent));
   return (
     <>
-      <div className="sec-h"><span className="t">算力消耗</span><span className="s">CreditLedger 汇总</span></div>
+      <div className="sec-h"><span className="t">权益点消耗</span><span className="s">CreditLedger 汇总</span></div>
       <div className="pad">
         <div className="usage-summary">
-          <div><b>{data.summary.totalSpent}</b><span>累计算力消耗</span></div>
+          <div><b>{data.summary.totalSpent}</b><span>累计消耗（点）</span></div>
           <div><b>{data.summary.currentBalanceTotal}</b><span>当前余额合计</span></div>
           <div><b>{data.summary.activeUsers}</b><span>30 天活跃</span></div>
           <div><b>{data.summary.reportCount}</b><span>成果产出</span></div>
@@ -349,7 +349,7 @@ function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m:
               </select>
             </div>
             {form.billing !== 'free' && (
-              <div className="ai-field"><div className="ai-fl">价格（算力次数）</div><input className="ai-input" type="number" min={0} value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} /></div>
+              <div className="ai-field"><div className="ai-fl">价格（权益点）</div><input className="ai-input" type="number" min={0} value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} /></div>
             )}
             <div className="ai-actions">
               <button className="ai-btn ghost" onClick={() => setAdding(false)}>取消</button>
@@ -422,13 +422,13 @@ function PlansView({ toast }: { toast: (m: string) => void }) {
   };
   return (
     <>
-      <div className="sec-h"><span className="t">套餐与算力</span><span className="s">定价 · 算力规则</span></div>
+      <div className="sec-h"><span className="t">套餐与权益点</span><span className="s">定价 · 权益点规则</span></div>
       <div className="pad">
         {list.map((p) => editId === p.id ? (
           <div key={p.id} className="crd new-agent">
             <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
             <div className="ai-field"><div className="ai-fl">价格（元，-1=面议）</div><input className="ai-input" type="number" value={form.priceYuan} onChange={(e) => setForm({ ...form, priceYuan: Number(e.target.value) })} /></div>
-            <div className="ai-field"><div className="ai-fl">每月算力（-1=不限量）</div><input className="ai-input" type="number" value={form.creditsPerMonth} onChange={(e) => setForm({ ...form, creditsPerMonth: Number(e.target.value) })} /></div>
+            <div className="ai-field"><div className="ai-fl">每月权益点（-1=不限量）</div><input className="ai-input" type="number" value={form.creditsPerMonth} onChange={(e) => setForm({ ...form, creditsPerMonth: Number(e.target.value) })} /></div>
             <div className="ai-field"><div className="ai-fl">含智能体数</div><input className="ai-input" type="number" value={form.agentCount} onChange={(e) => setForm({ ...form, agentCount: Number(e.target.value) })} /></div>
             <div className="ai-field"><div className="ai-fl">权益（每行一条）</div><textarea className="ta" rows={4} value={form.features} onChange={(e) => setForm({ ...form, features: e.target.value })} /></div>
             <div className="ai-actions">
@@ -443,7 +443,7 @@ function PlansView({ toast }: { toast: (m: string) => void }) {
               {p.highlighted && <span className="tag">最受欢迎</span>}
               <span className="pp">{priceLabel(p)}</span>
             </div>
-            <div className="plan-meta">{p.creditsPerMonth < 0 ? '不限量算力' : `${p.creditsPerMonth} 次/月`} · 含 {p.agentCount} 智能体 · {p.featuresJson.join(' · ')}</div>
+            <div className="plan-meta">{p.creditsPerMonth < 0 ? '不限量权益点' : `${p.creditsPerMonth} 点/月`} · 含 {p.agentCount} 智能体 · {p.featuresJson.join(' · ')}</div>
             <button className="plan-edit" onClick={() => startEdit(p)}><Icon name="pen" size={13} /> 编辑套餐</button>
           </div>
         ))}
@@ -562,7 +562,7 @@ function fmtTime(s: string) {
 }
 
 function creditText(v: number) {
-  return v < 0 ? '不限量' : `${v} 次`;
+  return v < 0 ? '不限量' : `${v} 点`;
 }
 
 function payloadText(payload: unknown) {
@@ -616,7 +616,7 @@ function typeLabel(t: string) { return t === 'advisory' ? '出谋' : t === 'crea
 function billingTag(billing: AgentBilling, price: number) {
   if (billing === 'free') return <span className="tag">赠送</span>;
   if (billing === 'metered') return <span className="tag pay">按次 {price}</span>;
-  return <span className="tag pay">{price} 算力</span>;
+  return <span className="tag pay">{price} 点</span>;
 }
 function sourceLabel(source: string | null) {
   return source === 'purchase' ? '已购买' : source === 'admin_grant' ? '后台开通' : source === 'gift' ? '赠送' : '已开通';

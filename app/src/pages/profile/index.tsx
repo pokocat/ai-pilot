@@ -29,8 +29,8 @@ export default function Profile() {
     { ic: 'grid', t: '项目工作台', s: projCount ? `${projCount} 个项目` : '按项目管理事务', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
     { ic: 'layers', t: '我的方案库', s: `${libCount} 份成果`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
     { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
-    { ic: 'doc', t: '方案与额度', s: me?.plan?.name ?? '决策版', onClick: () => setShowPlans(true) },
-    { ic: 'insight', t: '设置', s: '', onClick: () => Taro.showToast({ title: '设置', icon: 'none' }) },
+    { ic: 'doc', t: '方案与权益点', s: me?.plan?.name ?? '', onClick: () => setShowPlans(true) },
+    { ic: 'insight', t: '设置', s: '', onClick: () => Taro.navigateTo({ url: '/pages/settings/index' }) },
     {
       ic: 'lock', t: '退出登录', s: '',
       onClick: () =>
@@ -43,21 +43,30 @@ export default function Profile() {
   return (
     <Screen topInset>
       <View className="pad">
-        <View className="me-card card">
-          <View className="me-av serif" style={{ background: accent }}>{(me?.user.name ?? '王')[0]}</View>
+        <View className="me-card card" onClick={() => Taro.navigateTo({ url: '/pages/settings/index' })}>
+          <View className="me-av serif" style={{ background: accent }}>
+            {me?.user.name ? me.user.name[0] : <Icon name="user" size={20} color="#fff" />}
+          </View>
           <View className="me-info">
-            <Text className="me-name">{me?.user.name ?? '王总'}</Text>
-            <Text className="me-org">{me?.tenant.name ?? '云栖科技'} · {me?.tenant.industry ?? 'SaaS / 软件'}</Text>
+            <Text className="me-name">{me?.user.name || '完善你的资料 ›'}</Text>
+            <Text className="me-org">{orgLine(me) || '点此设置称呼与公司，让产出更贴合你'}</Text>
           </View>
-          <View className="me-vip" style={{ background: 'var(--accent-soft)' }}>
-            <Icon name="crown" size={12} color={accent} /><Text style={{ color: 'var(--accent-ink)' }}> {me?.plan?.name ?? '决策版'}</Text>
-          </View>
+          {me?.plan?.name ? (
+            <View className="me-vip" style={{ background: 'var(--accent-soft)' }}>
+              <Icon name="crown" size={12} color={accent} /><Text style={{ color: 'var(--accent-ink)' }}> {me.plan.name}</Text>
+            </View>
+          ) : null}
         </View>
 
         <View className="credit card" style={{ background: '#1B1E22' }}>
           <View className="cr-l">
-            <Text className="cr-k">本月产出额度</Text>
-            <Text className="cr-v serif" style={{ color: 'var(--accent-bright)' }}>剩余 {me?.creditBalance ?? 68} 次</Text>
+            <Text className="cr-k">本月权益点</Text>
+            <View className="cr-vrow">
+              <Icon name="diamond" size={16} color={color.vars['--accent-bright']} />
+              <Text className="cr-v serif" style={{ color: 'var(--accent-bright)' }}>
+                {me ? (me.creditBalance < 0 ? ' 不限量' : ` ${me.creditBalance} 点`) : ' —'}
+              </Text>
+            </View>
           </View>
           <View className="cr-btn" style={{ background: accent }} onClick={() => setShowPlans(true)}>
             <Text>管理</Text>
@@ -79,7 +88,7 @@ export default function Profile() {
         {/* 私有化部署 · 企业版 */}
         <View className="private card" style={{ background: '#1B1E22' }}>
           <View className="pv-top">
-            <View className="pv-ic"><Icon name="lock" size={16} color="var(--accent-bright)" /></View>
+            <View className="pv-ic"><Icon name="shield" size={18} color={color.vars['--accent-bright']} /></View>
             <View className="pv-badge" style={{ borderColor: 'var(--accent-bright)' }}><Text style={{ color: 'var(--accent-bright)' }}>企业版</Text></View>
           </View>
           <Text className="pv-t serif">私有化部署 · 深度经营诊断</Text>
@@ -94,4 +103,10 @@ export default function Profile() {
       <Plans open={showPlans} onClose={() => setShowPlans(false)} />
     </Screen>
   );
+}
+
+// 企业行：公司 · 行业，缺失项自动省略；都没有则返回空（由调用方走「完善资料」提示）。
+function orgLine(me: { tenant: { name?: string | null; industry?: string | null } } | null): string {
+  if (!me) return '';
+  return [me.tenant.name, me.tenant.industry].filter(Boolean).join(' · ');
 }

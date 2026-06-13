@@ -53,7 +53,7 @@ export const PLANS: {
     period: 'month',
     creditsPerMonth: 10,
     agentCount: 3,
-    features: ['10 次产出额度 / 月', '基础顾问 3 位', '适合轻量试用'],
+    features: ['10 点 / 月', '基础顾问 3 位', '适合轻量试用'],
     highlighted: false,
   },
   {
@@ -62,7 +62,7 @@ export const PLANS: {
     period: 'year',
     creditsPerMonth: 68,
     agentCount: 8,
-    features: ['不限量对话', '68 次深度产出 / 月', '顾问助手 8 位', '方案库 + 导出'],
+    features: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
     highlighted: true,
   },
   {

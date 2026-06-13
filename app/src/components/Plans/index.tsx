@@ -18,7 +18,7 @@ function priceLabel(p: Plan): string {
   return `¥${(p.price / 100).toLocaleString()}/${p.period === 'year' ? '年' : '月'}`;
 }
 
-// 方案与产出额度：前台用“额度/方案”表达，避免把工作台写成促销货架。
+// 方案与权益点：产出与启用专项顾问统一消耗「权益点」，以钻石标识。
 export default function Plans({ open, onClose }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -45,7 +45,7 @@ export default function Plans({ open, onClose }: Props) {
     try {
       const r = await api.purchasePlan(p.id);
       await store.loadMe();
-      Taro.showToast({ title: r.grantedCredits > 0 ? `本月额度已更新：${r.grantedCredits} 次` : '方案已更新', icon: 'success' });
+      Taro.showToast({ title: r.grantedCredits > 0 ? `已到账 ${r.grantedCredits} 点` : '方案已更新', icon: 'success' });
     } catch (e) {
       s.handleApiError(e, { fallbackTitle: '方案更新失败，请重试' });
     } finally {
@@ -58,10 +58,13 @@ export default function Plans({ open, onClose }: Props) {
       <View className="plans-sheet" onClick={(e) => e.stopPropagation()}>
         <View className="ps-grip" />
         <View className="ps-head">
-          <Text className="ps-title">方案与产出额度</Text>
-          <Text className="ps-bal">当前额度 · <Text style={{ color: accent, fontWeight: 700 }}>{balance < 0 ? '不限量' : `${balance} 次`}</Text></Text>
+          <Text className="ps-title">方案与权益点</Text>
+          <View className="ps-bal">
+            <Icon name="diamond" size={13} color={accent} />
+            <Text style={{ color: accent, fontWeight: 700 }}> {balance < 0 ? '不限量' : `${balance} 点`}</Text>
+          </View>
         </View>
-        <Text className="ps-sub">产出额度用于深度报告和专项顾问。选择方案后，本月额度会同步更新。</Text>
+        <Text className="ps-sub">权益点用于深度报告与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>
 
         <ScrollView scrollY className="ps-list">
           {plans.map((p) => {
@@ -74,7 +77,7 @@ export default function Plans({ open, onClose }: Props) {
                   {current && <View className="pp-tag cur"><Text>当前</Text></View>}
                   <Text className="pp-price serif" style={{ color: accent }}>{priceLabel(p)}</Text>
                 </View>
-                <Text className="pp-credit">{p.creditsPerMonth < 0 ? '不限量产出额度' : `${p.creditsPerMonth} 次产出额度 / 月`} · 含 {p.agentCount} 个助手</Text>
+                <Text className="pp-credit">{p.creditsPerMonth < 0 ? '不限量权益点' : `${p.creditsPerMonth} 点 / 月`} · 含 {p.agentCount} 个助手</Text>
                 <View className="pp-feats">
                   {p.featuresJson.map((f) => (
                     <View key={f} className="pp-feat"><Icon name="check" size={11} color={accent} /><Text> {f}</Text></View>

@@ -73,9 +73,9 @@ export const AGENTS: AgentSeed[] = [
     billing: 'free',
     price: 0,
     enabled: true,
-    greet: '王总好，我是你的 AI 商业军师。说说你的处境，或直接要一个成果，我来产出。',
+    greet: '你好，我是你的 AI 商业军师。说说你的处境，或直接要一个成果，我来产出。',
     chips: [['target', '战略体检'], ['trend', '增长方案'], ['shield', '融资准备']],
-    memText: '已了解你的<b>企业档案</b>与历史会话',
+    memText: '会结合你的<b>企业档案</b>持续为你出谋',
     learnText: '持续学习中',
     deliverableKey: null,
     systemPrompt: businessPrompt(
@@ -98,7 +98,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是战略诊断官。把你最近的纠结讲给我，我直接产出一份战略诊断。',
     chips: [['target', '战略体检']],
-    memText: '记得你最关注<b>「增长乏力」</b>，已沉淀 2 次诊断',
+    memText: '会记住你的关注点与历次<b>诊断结论</b>',
     learnText: '记忆已更新',
     deliverableKey: '战略体检',
     systemPrompt: businessPrompt(
@@ -121,7 +121,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是增长操盘手。告诉我你的增长目标，我给你可执行的路径。',
     chips: [['trend', '增长方案']],
-    memText: '已学习你的<b>客群结构与定价</b>',
+    memText: '会沉淀你的<b>客群结构与定价</b>',
     learnText: '记忆已更新',
     deliverableKey: '增长方案',
     systemPrompt: businessPrompt(
@@ -144,7 +144,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是竞争情报官。说说你盯的对手或赛道，我帮你看清局势。',
     chips: [['chart', '竞品洞察']],
-    memText: '持续追踪你的 <b>3 个对手</b>',
+    memText: '持续追踪你关注的<b>对手与赛道</b>',
     learnText: '情报已更新',
     deliverableKey: '竞品洞察',
     systemPrompt: businessPrompt(
@@ -167,7 +167,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是融资参谋。把你的融资节奏讲给我，我帮你把故事和数据对齐。',
     chips: [['doc', '融资准备']],
-    memText: '记得你的<b>轮次与期权结构</b>',
+    memText: '会记住你的<b>轮次与资本结构</b>',
     learnText: '记忆已更新',
     deliverableKey: '融资准备',
     systemPrompt: businessPrompt(
@@ -190,7 +190,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是商业模式设计师。讲讲你怎么赚钱，我帮你把模式与定价结构理清。',
     chips: [['layers', '商业模式画布']],
-    memText: '已掌握你的<b>收入与成本结构</b>',
+    memText: '会沉淀你的<b>收入与成本结构</b>',
     learnText: '记忆已更新',
     deliverableKey: '商业模式画布',
     systemPrompt: businessPrompt(
@@ -213,7 +213,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是组织人效顾问。说说你的团队现状，我给出组织与激励的优化建议。',
     chips: [['user', '组织优化建议']],
-    memText: '了解你的<b>团队规模与关键岗</b>',
+    memText: '会记住你的<b>团队结构与关键岗</b>',
     learnText: '记忆已更新',
     deliverableKey: '组织优化建议',
     systemPrompt: businessPrompt(
@@ -236,7 +236,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是品牌营销官。告诉我要推什么，我把战略翻译成对外内容。',
     chips: [['image', '营销内容']],
-    memText: '已熟悉你的<b>品牌语气与客群</b>',
+    memText: '会沉淀你的<b>品牌语气与客群</b>',
     learnText: '记忆已更新',
     deliverableKey: '营销内容',
     systemPrompt: businessPrompt(
@@ -259,7 +259,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是经营参谋。把你的经营数据口径讲给我，我帮你测算与复盘。',
     chips: [['clock', '经营分析']],
-    memText: '已对齐你的<b>经营指标口径</b>',
+    memText: '会对齐你的<b>经营指标口径</b>',
     learnText: '记忆已更新',
     deliverableKey: '经营分析',
     systemPrompt: businessPrompt(
@@ -283,7 +283,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是企业 IP 打造官。告诉我你想立的形象，我帮你把创始人/企业 IP 立起来。',
     chips: [['crown', '企业IP打造']],
-    memText: '已熟悉你的<b>行业身份与风格</b>',
+    memText: '会沉淀你的<b>行业身份与风格</b>',
     learnText: '记忆已更新',
     deliverableKey: '企业IP打造',
     systemPrompt: creativePrompt(
@@ -306,7 +306,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是宣传片导演。说说你想传达什么，我给你一条可拍的宣传片脚本。',
     chips: [['video', '企业宣传片']],
-    memText: '记得你的<b>品牌调性与卖点</b>',
+    memText: '会记住你的<b>品牌调性与卖点</b>',
     learnText: '记忆已更新',
     deliverableKey: '企业宣传片',
     systemPrompt: creativePrompt(
@@ -329,7 +329,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是海报设计师。告诉我要推的主题，我给你一版主视觉与文案。',
     chips: [['image', '海报设计']],
-    memText: '已掌握你的<b>品牌色与版式偏好</b>',
+    memText: '会沉淀你的<b>品牌色与版式偏好</b>',
     learnText: '记忆已更新',
     deliverableKey: '海报设计',
     systemPrompt: creativePrompt(
@@ -352,7 +352,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是短视频策划。给我一个主题，我把它写成有钩子的脚本。',
     chips: [['video', '短视频策划']],
-    memText: '了解你的<b>客群与平台</b>',
+    memText: '会记住你的<b>客群与投放平台</b>',
     learnText: '记忆已更新',
     deliverableKey: '短视频策划',
     systemPrompt: creativePrompt(
@@ -375,7 +375,7 @@ export const AGENTS: AgentSeed[] = [
     enabled: true,
     greet: '我是商业文案官。说说要写什么，我给你多版可直接用的文案。',
     chips: [['pen', '营销文案']],
-    memText: '已熟悉你的<b>语气与卖点</b>',
+    memText: '会沉淀你的<b>语气与卖点</b>',
     learnText: '记忆已更新',
     deliverableKey: '营销文案',
     systemPrompt: creativePrompt(

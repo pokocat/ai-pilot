@@ -69,6 +69,11 @@
 }
 .pk-skip { display: block; text-align: center; font-size: 13px; color: var(--ink-3); margin-top: 14px; }
 
+.pf-id { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+.pf-input {
+  height: 46px; padding: 0 14px; border: 1px solid var(--line, #e7e4db); border-radius: 12px;
+  background: var(--surface-2, #f3f1ea); font-size: 14.5px; color: var(--ink);
+}
 .pf-list { display: flex; flex-direction: column; gap: 18px; margin-bottom: 22px; }
 .pf-qt { display: block; font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 10px; }
 .pf-opts { display: flex; flex-wrap: wrap; gap: 8px; }

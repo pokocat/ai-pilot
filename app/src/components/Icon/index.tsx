@@ -35,6 +35,7 @@ const PATHS: Record<string, string> = {
   crown: '<path d="M4 8l3.5 3L12 5l4.5 6L20 8l-1.5 9h-13L4 8Z"/>',
   upload: '<path d="M12 15V4M8 8l4-4 4 4"/><path d="M5 14v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4"/>',
   lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2.2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15" r="1.1" fill="CCC" stroke="none"/>',
+  diamond: '<path d="M6 4h12l3 5-9 12L3 9l3-5Z"/><path d="M3 9h18M9 4l-3 5 6 12 6-12-3-5"/>',
 };
 
 function dataUri(name: string, color: string): string {

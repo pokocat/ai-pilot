@@ -37,7 +37,14 @@ const cache = new Map<string, { v: unknown; at: number }>();
 const TTL = 5 * 60 * 1000;
 function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string {
   const refSig = (ctx.references?.length ?? 0) + ':' + (ctx.knowledge?.length ?? 0);
-  return `${kind}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${ctx.profile?.pain ?? ''}:${refSig}`;
+  const profileSig = [
+    ctx.companyName ?? '',
+    ctx.profile?.industry ?? '',
+    ctx.profile?.stage ?? '',
+    ctx.profile?.pain ?? '',
+    ctx.projectName ?? '',
+  ].join('|');
+  return `${kind}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${profileSig}:${refSig}`;
 }
 
 export async function generateDeliverable(ctx: GenContext): Promise<Deliverable> {

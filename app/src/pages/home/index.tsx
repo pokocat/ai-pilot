@@ -9,10 +9,11 @@ import { useStore } from '../../hooks/useStore';
 import { api } from '../../services/api';
 import './index.scss';
 
+// 推荐产出（非"为你发现"——不臆造用户尚未提供的业务结论）。点开即把该主题发给军师。
 const INSIGHTS = [
-  { ic: 'target', tag: '建议 · 经营诊断', tagType: 'opp', ttl: '建议先出一份战略诊断报告', desc: '军师可基于你的业务现状，整理诊断与行动清单。', act: '生成诊断', send: '战略体检' },
-  { ic: 'trend', tag: '机会 · 增长', tagType: 'opp', ttl: '高价值客群尚未被单独运营', desc: '腰部客群复购集中，具备做会员 / 订阅制的基础。', act: '生成增长方案', send: '增长方案' },
-  { ic: 'shield', tag: '待办 · 股权', tagType: 'todo', ttl: '期权池预留可能偏紧', desc: '结合你的融资计划，建议尽早梳理股权与期权结构。', act: '让军师拆解', send: '融资准备' },
+  { ic: 'target', tag: '推荐产出', tagType: 'opp', ttl: '做一次战略诊断', desc: '梳理定位、增长卡点与下一步，产出一份可执行的诊断报告。', act: '生成诊断', send: '战略体检' },
+  { ic: 'trend', tag: '推荐产出', tagType: 'opp', ttl: '理清你的增长杠杆', desc: '从获客、转化、复购、定价四个维度，找到最该发力的地方。', act: '生成增长方案', send: '增长方案' },
+  { ic: 'doc', tag: '推荐产出', tagType: 'opp', ttl: '梳理融资准备', desc: '把增长逻辑、单位经济与资金用途讲清楚，让故事和数据对齐。', act: '生成融资准备', send: '融资准备' },
 ];
 
 // 首页快捷入口：展示当前可直接使用的常用顾问，避免把首屏写成权益售卖区。
@@ -118,8 +119,8 @@ export default function Home() {
 
         {/* 问候 —— 招呼语 + 精简提示同行 */}
         <View className="greet">
-          <Text className="greet-h serif">{greetWord()}，{me?.user.name ?? '王总'}</Text>
-          <Text className="greet-tip">今天有 {INSIGHTS.length} 条新洞察</Text>
+          <Text className="greet-h serif">{greetWord()}{me?.user.name ? `，${me.user.name}` : ''}</Text>
+          <Text className="greet-tip">{INSIGHTS.length} 条今日建议，随时为你出谋</Text>
         </View>
 
         {/* 每日献策 */}
@@ -156,17 +157,17 @@ export default function Home() {
           <View className="chips">
             {[['target', '战略体检'], ['trend', '增长方案'], ['shield', '融资准备']].map(([ic, q]) => (
               <View key={q} className="chip" onClick={() => goChat(`send=${encodeURIComponent(q)}`)}>
-                <Icon name={ic} size={13} color="var(--accent-ink)" />
+                <Icon name={ic} size={13} color={s.color().vars['--accent-ink']} />
                 <Text>{q}</Text>
               </View>
             ))}
           </View>
         </View>
 
-        {/* 今日经营线索 */}
+        {/* 推荐产出 —— 点开即出成果 */}
         <View className="sec-head">
-          <Text className="sec-title">今日经营线索</Text>
-          <Text className="sec-more">全部 3 条 ›</Text>
+          <Text className="sec-title">推荐产出</Text>
+          <Text className="sec-more">点开即出成果</Text>
         </View>
         {INSIGHTS.map((it) => (
           <View key={it.send} className="insight card" onClick={() => goChat(`send=${encodeURIComponent(it.send)}`)}>

@@ -223,6 +223,20 @@ select.ai-input { appearance: none; }
 .bill-opt .bo-t { font: 600 12.5px/1.2 var(--sans); color: var(--ink); }
 .bill-opt .bo-d { font-size: 10.5px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; }
 
+/* —— 运营后台登录页 —— */
+.admin-login { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 22px; }
+.al-mk { width: 52px; height: 52px; border-radius: 14px; background: var(--ink); color: var(--paper); display: flex; align-items: center; justify-content: center; font: 600 28px/1 var(--serif); }
+.al-t { font: 600 19px/1 var(--serif); color: var(--ink); margin-top: 16px; }
+.al-s { font: 400 10px/1 var(--mono); letter-spacing: .16em; color: var(--ink-3); margin-top: 7px; }
+.al-card { width: 100%; max-width: 340px; margin-top: 26px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: var(--shadow-md); }
+.al-label { font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
+.al-input { width: 100%; height: 44px; padding: 0 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); font: 400 14px/1 var(--sans); color: var(--ink); outline: none; }
+.al-input:focus { border-color: var(--accent); background: var(--surface); }
+.al-err { display: flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 12px; color: var(--danger); }
+.al-btn { width: 100%; height: 44px; margin-top: 14px; border: none; border-radius: 11px; background: var(--accent); color: #fff; font: 600 14px/1 var(--sans); display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; }
+.al-btn:disabled { opacity: .6; cursor: default; }
+.al-note { font-size: 11px; line-height: 1.6; color: var(--ink-3); margin-top: 14px; }
+
 @media (max-width: 380px) {
   .adm-top { padding-inline: 16px; }
   .sec-h { padding-inline: 16px; }

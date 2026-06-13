@@ -27,6 +27,8 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
   const [step, setStep] = useState<'color' | 'profile'>('color');
   const [survey, setSurvey] = useState<SurveyQ[]>(DEFAULT_SURVEY);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [name, setName] = useState('');
+  const [company, setCompany] = useState('');
 
   useEffect(() => {
     if (open) {
@@ -65,8 +67,13 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
     else confirmColor();
   };
 
-  const finishProfile = () => {
-    if (Object.keys(answers).length) api.saveProfile(answers).catch(() => {});
+  const finishProfile = async () => {
+    const id: { name?: string; company?: string } = {};
+    if (name.trim()) id.name = name.trim();
+    if (company.trim()) id.company = company.trim();
+    if (id.name || id.company) await api.updateIdentity(id).catch(() => {});
+    if (Object.keys(answers).length) await api.saveProfile(answers).catch(() => {});
+    await store.loadMe();
     confirmColor();
   };
 
@@ -120,7 +127,24 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
           <>
             <Text className="pk-idx">30 秒建档</Text>
             <Text className="pk-headline serif">让军师更懂你的处境</Text>
-            <Text className="pk-sub">3 个问题，产出会据此为你量身定制。</Text>
+            <Text className="pk-sub">先认识一下你，产出会据此量身定制。</Text>
+
+            <View className="pf-id">
+              <Input
+                className="pf-input"
+                value={name}
+                maxlength={20}
+                placeholder="怎么称呼你？如「王越」"
+                onInput={(e) => setName(e.detail.value)}
+              />
+              <Input
+                className="pf-input"
+                value={company}
+                maxlength={40}
+                placeholder="公司 / 品牌名（选填）"
+                onInput={(e) => setCompany(e.detail.value)}
+              />
+            </View>
 
             <View className="pf-list">
               {survey.map((q, qi) => (

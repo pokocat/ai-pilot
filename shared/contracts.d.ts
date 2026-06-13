@@ -87,6 +87,8 @@ export interface Me {
 }
 
 export interface LoginRequest { phone: string; name?: string; code?: string; }
+/** 更新身份（称呼 + 公司/品牌名）：首登建档 / 设置页 */
+export interface UpdateIdentityRequest { name?: string; company?: string; }
 export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl?: string; }
 export interface LoginResult {
   token: string; isNew: boolean; onboarded: boolean;

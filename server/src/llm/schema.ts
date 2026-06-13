@@ -20,6 +20,7 @@ export interface GenContext {
   agentName: string;
   systemPrompt: string;
   deliverableKey: string | null;
+  companyName?: string | null; // 用户公司/品牌名（=租户名），用于产出抬头；为空则省略
   profile: { industry?: string | null; stage?: string | null; pain?: string | null } | null;
   memories: string[]; // 召回的长期记忆文本
   benmingColor: string;

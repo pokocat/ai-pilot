@@ -5,6 +5,7 @@ import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
 import AgentUnlock from '../../components/AgentUnlock';
 import { useStore } from '../../hooks/useStore';
+import { diamondCost } from '../../services/format';
 import type { Agent } from '../../services/api';
 import './index.scss';
 
@@ -60,7 +61,7 @@ export default function ThinkTank() {
                 <Text className="ah">{a.name}</Text>
                 <Text className="ap">{a.role}</Text>
                 {locked
-                  ? <Text className="ameta lock" style={{ color: accent }}>需 {a.price} 次额度启用 ›</Text>
+                  ? <Text className="ameta lock" style={{ color: accent }}>{diamondCost(a.price)} ›</Text>
                   : a.deliverableKey && <Text className="ameta" style={{ color: accent }}>擅长 · {a.deliverableKey}</Text>}
               </View>
             );

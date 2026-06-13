@@ -46,7 +46,7 @@ export async function agentRoutes(app: FastifyInstance) {
 
     const unlimited = balance < 0; // 不限量套餐：解锁免扣
     if (!unlimited && balance < agent.price) {
-      return reply.code(402).send({ error: '算力不足，无法解锁该智能体', code: 'INSUFFICIENT_CREDITS' });
+      return reply.code(402).send({ error: '权益点不足，无法启用该智能体', code: 'INSUFFICIENT_CREDITS' });
     }
     const newBalance = unlimited ? -1 : balance - agent.price;
 
