@@ -157,6 +157,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 ### 7.4 状态与主题
 - `services/store.ts`：轻量全局 store（订阅式）。本命色 / 用户 / 智能体缓存 / tab / overlay / 登录态。
+- `loadAgents()` 必须保留 `DEFAULT_AGENTS` 的 `billing/price/owned` 兜底字段；线上旧 `/agents` 若缺权益字段，不能覆盖掉前台解锁门禁，否则 `💎xN` 专项能力会被误判为可直接进入。
 - `data/colors.ts`：6 套本命色主题变量（`--accent` 系列）。
 
 ---
@@ -361,6 +362,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-13** · **修复智能体解锁门禁被旧接口冲掉**：`store.loadAgents()` 合并线上 `/agents` 与本地 `DEFAULT_AGENTS`，当旧后端缺少 `billing/price/owned` 时保留本地权益字段，避免标 `💎xN` 的 `unlock` 智能体被误判为可直接进入对话。
 - **2026-06-13** · **修复成果缓存串公司抬头**：`llm/gateway.ts` 的结构化成果缓存 key 纳入 `companyName`、行业、阶段、痛点与项目名，避免不同用户相同输入复用旧成果导致报告 meta 不带当前公司；`.gitignore` 排除微信预览二维码/信息文件，Docker 临时 Postgres + Node 容器完整测试用于回归验证。
 - **2026-06-13** · **拆分产品说明并统一智能体钻石价格**：新增 `PRODUCT.md` 承接产品定位、信息架构、文案口径、企业事务操作系统和升级方向；`AGENTS.md` 收敛为工程入口与约束摘要。前台智能体费用展示新增 `services/format.ts`，智库/工坊卡片与专项能力弹层将「启用需 N 点」「每次产出 N 点」「用 N 点启用」统一改为 `💎xN` / `💎xN/次` 口径。
 - **2026-06-13** · **沉淀小程序工程约束清单**：§0 新增小程序改动前置检查要求，§7.2 将项目配置、原生 tabbar、overlay key、登录弹层归属、键盘避让、401/网络错误、H5/小程序样式隔离、分包控重与真机排版修复收敛为防回归清单，后续改 `app/` 需先对照执行。

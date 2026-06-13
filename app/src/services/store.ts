@@ -166,7 +166,21 @@ export const store = {
   async loadAgents() {
     try {
       const list = await api.agents();
-      if (list?.length) state.agents = list; // 后端有数据才覆盖，否则保留兜底
+      if (list?.length) {
+        const fallback = new Map(DEFAULT_AGENTS.map((a) => [a.key, a]));
+        state.agents = list.map((a) => {
+          const base = fallback.get(a.key);
+          return base
+            ? {
+                ...base,
+                ...a,
+                billing: a.billing ?? base.billing,
+                price: typeof a.price === 'number' ? a.price : base.price,
+                owned: typeof a.owned === 'boolean' ? a.owned : base.owned,
+              }
+            : a;
+        });
+      }
       emit();
     } catch { /* 离线时保留内置兜底 */ }
   },
