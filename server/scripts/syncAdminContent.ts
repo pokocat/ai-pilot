@@ -13,8 +13,21 @@ async function syncAgents() {
     await prisma.agent.upsert({
       where: { key: a.key },
       update: {
+        name: a.name,
+        role: a.role,
+        icon: a.icon,
+        type: a.type,
+        gift: a.gift,
+        billing: a.billing,
+        price: a.price,
+        greet: a.greet,
+        chipsJson: a.chips as object,
+        memText: a.memText,
+        learnText: a.learnText,
         systemPrompt: a.systemPrompt,
+        deliverableKey: a.deliverableKey,
         memoryConfig: a.memoryConfig as object,
+        sort: a.sort,
       },
       create: {
         key: a.key,
