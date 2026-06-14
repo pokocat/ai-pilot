@@ -7,7 +7,7 @@ import { useStore } from '../../../hooks/useStore';
 import { api, type MyCreditItem } from '../../../services/api';
 import './index.scss';
 
-// 钻石明细：余额 + 本月产出额度（token 池，只看 %）+ 消耗流水。
+// 钻石明细：余额 + 本月 AI 应用额度（token 池，只看 %）+ 消耗流水。
 // 从「我的」独立成页，避免底部 tab 栏遮挡弹层。
 export default function Credits() {
   const s = useStore();
@@ -34,10 +34,10 @@ export default function Credits() {
             </Text>
           </View>
 
-          {/* 本月产出额度（token 消耗池）—— 客户端只看 % */}
+          {/* 本月 AI 应用额度（token 消耗池）—— 客户端只看 % */}
           <View className="cd-quota">
             <View className="cd-qhead">
-              <Text className="cd-ql">本月产出额度</Text>
+              <Text className="cd-ql">本月 AI 应用额度</Text>
               <Text className="cd-qv serif">{quotaLabel(me?.tokenQuota)}</Text>
             </View>
             <View className="cd-track">
@@ -69,11 +69,12 @@ export default function Credits() {
   );
 }
 
-// 本月 token 额度（客户端只看 %，不显示 token 数）。limit<0=不限量。
+// 本月 AI 应用额度（客户端只看 %，不显示 token 数）。limit<0=不限量；limit=0=未开通（无额度）。
 function quotaLabel(q?: { limit: number; used: number; unlimited: boolean }): string {
   if (!q) return '—';
   if (q.unlimited || q.limit < 0) return '不限量';
-  const pct = q.limit > 0 ? Math.min(100, Math.round((q.used / q.limit) * 100)) : 0;
+  if (q.limit === 0) return '未开通'; // 无额度：与「已用 0%」区分，避免误以为额度充足
+  const pct = Math.min(100, Math.round((q.used / q.limit) * 100));
   return `本月已用 ${pct}%`;
 }
 function quotaPct(q?: { limit: number; used: number; unlimited: boolean }): number {
