@@ -16,6 +16,16 @@ interface FetchCall { url: string; init: RequestInit; body: any; }
 let lastCall: FetchCall | null = null;
 const realFetch = globalThis.fetch;
 
+// 把伪 body（{answer, conversation_id}）转成 Dify streaming SSE 流，供 readDifyStream 解析。
+function sseBody(body: Record<string, unknown>): ReadableStream<Uint8Array> {
+  const events: string[] = [];
+  if (body.answer !== undefined) events.push(JSON.stringify({ event: 'message', answer: body.answer }));
+  events.push(JSON.stringify({ event: 'message_end', conversation_id: body.conversation_id ?? undefined, metadata: { usage: { prompt_tokens: 10, completion_tokens: 5 } } }));
+  const text = events.map((e) => `data: ${e}\n\n`).join('');
+  const enc = new TextEncoder();
+  return new ReadableStream({ start(c) { c.enqueue(enc.encode(text)); c.close(); } });
+}
+
 function stubFetch(impl: (call: FetchCall) => { ok: boolean; status: number; body: unknown } | Promise<never>): void {
   globalThis.fetch = (async (url: any, init: any = {}) => {
     const parsed = init?.body ? JSON.parse(init.body) : undefined;
@@ -23,7 +33,7 @@ function stubFetch(impl: (call: FetchCall) => { ok: boolean; status: number; bod
     lastCall = call;
     const out = impl(call); // 可能 throw（模拟网络错误）
     const { ok, status, body } = await out;
-    return { ok, status, json: async () => body } as unknown as Response;
+    return { ok, status, json: async () => body, body: ok ? sseBody(body as Record<string, unknown>) : null } as unknown as Response;
   }) as unknown as typeof fetch;
 }
 
@@ -113,11 +123,11 @@ describe('difyChat 请求构造', () => {
     assert.equal(h['Content-Type'], 'application/json');
   });
 
-  test('body：query=userMessage，blocking 模式，conversation_id 与 user 来自 runtime', async () => {
+  test('body：query=userMessage，streaming 模式，conversation_id 与 user 来自 runtime', async () => {
     stubFetch(okResponse({ answer: 'ok' }));
     await difyChat(makeCtx({ userMessage: '增长怎么做' }, { conversationId: 'conv-9', user: 'u-9' }));
     assert.equal(lastCall!.body.query, '增长怎么做');
-    assert.equal(lastCall!.body.response_mode, 'blocking');
+    assert.equal(lastCall!.body.response_mode, 'streaming');
     assert.equal(lastCall!.body.conversation_id, 'conv-9');
     assert.equal(lastCall!.body.user, 'u-9');
   });

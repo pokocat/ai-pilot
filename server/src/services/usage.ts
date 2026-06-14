@@ -13,6 +13,7 @@ export interface UsageMeta {
   userId?: string | null;
   sessionId?: string | null;
   agentKey?: string | null;
+  ratio?: number; // 该智能体计费比例：creditCost(本次扣额) = ceil(totalTokens × ratio)
 }
 
 /**

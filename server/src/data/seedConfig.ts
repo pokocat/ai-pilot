@@ -43,6 +43,7 @@ export const PLANS: {
   price: number; // 分
   period: string;
   creditsPerMonth: number;
+  tokenQuotaPerMonth: number;
   agentCount: number;
   features: string[];
   highlighted: boolean;
@@ -52,6 +53,7 @@ export const PLANS: {
     price: 0,
     period: 'month',
     creditsPerMonth: 10,
+    tokenQuotaPerMonth: 100000,
     agentCount: 3,
     features: ['10 点 / 月', '基础顾问 3 位', '适合轻量试用'],
     highlighted: false,
@@ -61,6 +63,7 @@ export const PLANS: {
     price: 198000,
     period: 'year',
     creditsPerMonth: 68,
+    tokenQuotaPerMonth: 1000000,
     agentCount: 8,
     features: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
     highlighted: true,
@@ -70,6 +73,7 @@ export const PLANS: {
     price: -1, // 面议
     period: 'year',
     creditsPerMonth: -1,
+    tokenQuotaPerMonth: -1,
     agentCount: 14,
     features: ['私有化部署', '接入内部系统', '专属助手配置', '数据不出内网'],
     highlighted: false,

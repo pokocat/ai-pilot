@@ -278,7 +278,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const owners = new Map(ownerGroups.map((g) => [g.agentKey, g._count._all]));
     return agents.map((a) => ({
       key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
-      gift: a.gift, billing: a.billing, price: a.price, enabled: a.enabled, deliverableKey: a.deliverableKey,
+      gift: a.gift, billing: a.billing, price: a.price, billingRatio: a.billingRatio, meterUnit: a.meterUnit, enabled: a.enabled, deliverableKey: a.deliverableKey,
       ownerCount: owners.get(a.key) ?? 0,
       sessionCount: sessions.get(a.key) ?? 0,
       deliverableCount: deliverables.get(a.key) ?? 0,
@@ -290,7 +290,7 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!a) return reply.code(404).send({ error: 'not found' });
     return {
       key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
-      gift: a.gift, billing: a.billing, price: a.price,
+      gift: a.gift, billing: a.billing, price: a.price, billingRatio: a.billingRatio, meterUnit: a.meterUnit,
       enabled: a.enabled, systemPrompt: a.systemPrompt, memoryConfig: a.memoryConfig,
       deliverableKey: a.deliverableKey,
       runtime: runtimeView(a),
@@ -320,6 +320,8 @@ export async function adminRoutes(app: FastifyInstance) {
         gift: billing === 'free',
         billing,
         price: billing === 'free' ? 0 : Math.max(0, Math.trunc(b.price ?? 0)),
+        billingRatio: typeof b.billingRatio === 'number' && b.billingRatio > 0 ? b.billingRatio : 1,
+        meterUnit: b.meterUnit === 'image' ? 'image' : 'text',
         enabled: b.enabled ?? false,
         greet: b.greet || `你好，我是${name}。`,
         chipsJson: [],
@@ -353,6 +355,8 @@ export async function adminRoutes(app: FastifyInstance) {
           billing,
           // free 计费价格强制归零；否则按入参（非负整数）
           price: billing === 'free' ? 0 : (typeof b.price === 'number' ? Math.max(0, Math.trunc(b.price)) : undefined),
+          billingRatio: typeof b.billingRatio === 'number' && b.billingRatio > 0 ? b.billingRatio : undefined,
+          meterUnit: b.meterUnit === 'text' || b.meterUnit === 'image' ? b.meterUnit : undefined,
           greet: typeof b.greet === 'string' && b.greet.trim() ? b.greet : undefined,
           deliverableKey: b.deliverableKey === undefined ? undefined : (b.deliverableKey || null),
           systemPrompt: b.systemPrompt,
@@ -420,7 +424,7 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // —— 套餐 ——
   app.get('/admin/plans', async () => prisma.plan.findMany({ orderBy: { sort: 'asc' } }));
-  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; creditsPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean } }>(
     '/admin/plans/:id',
     async (req) => {
       const plan = await prisma.plan.update({ where: { id: req.params.id }, data: req.body });

@@ -97,7 +97,7 @@ export const api = {
   createAgent: (body: AdminAgentCreate) => req<{ ok: boolean; key: string }>('/admin/agents', 'POST', body),
   survey: () => req<SurveyAdmin[]>('/admin/survey'),
   plans: () => req<Plan[]>('/admin/plans'),
-  savePlan: (id: string, body: Partial<Pick<Plan, 'name' | 'price' | 'creditsPerMonth' | 'agentCount' | 'featuresJson' | 'highlighted'>>) =>
+  savePlan: (id: string, body: Partial<Pick<Plan, 'name' | 'price' | 'creditsPerMonth' | 'tokenQuotaPerMonth' | 'agentCount' | 'featuresJson' | 'highlighted'>>) =>
     req<Plan>(`/admin/plans/${id}`, 'PATCH', body),
   // —— 大模型配置（可随时切换） ——
   aiConfig: () => req<AiConfigView>('/admin/ai-config'),

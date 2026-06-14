@@ -20,9 +20,9 @@ function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
 // 把「产出 + 真实 token + 来源」打包，便于在输出审核/缓存前统一记账。
 type Sourced<T> = { result: T; usage: Usage; provider: string; model: string };
 
-// 仅对真实计费 provider（claude/openai）记账；mock/dify（无 usage）跳过。记账内部 catch，不影响产出。
+// 对真实计费 provider（claude/openai/dify）记账；mock 与 0-token（缓存命中）跳过。记账内部 catch，不影响产出。
 async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ctx: GenContext, meta?: UsageMeta): Promise<void> {
-  if (s.provider !== 'claude' && s.provider !== 'openai') return;
+  if (s.provider !== 'claude' && s.provider !== 'openai' && s.provider !== 'dify') return;
   await recordTokenUsage({
     tenantId: meta?.tenantId ?? null,
     userId: meta?.userId ?? null,
@@ -32,6 +32,8 @@ async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ct
     provider: s.provider,
     model: s.model,
     usage: s.usage,
+    // 本次扣的月度额度 = ceil(真实token × ratio)，写入 token_usage 作为后台消耗明细口径
+    creditCost: Math.ceil((Math.max(0, s.usage.inputTokens) + Math.max(0, s.usage.outputTokens)) * (meta?.ratio ?? 1)),
   });
 }
 
@@ -56,9 +58,9 @@ async function runtimeChat(ctx: GenContext): Promise<Sourced<ChatReply>> {
   const rt = ctx.runtime!;
   if (rt.mode === 'dify') {
     const { difyChat } = await import('./providers/dify.js');
-    const { reply, conversationId } = await difyChat(ctx);
+    const { reply, conversationId, usage } = await difyChat(ctx);
     await persistDifyConversation(ctx, conversationId);
-    return { result: reply, usage: ZERO_USAGE, provider: 'dify', model: 'dify' };
+    return { result: reply, usage, provider: 'dify', model: 'dify' };
   }
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
   if (!isRealKey(cfg.apiKey)) return { result: mockChat(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
@@ -71,9 +73,9 @@ async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>
   const rt = ctx.runtime!;
   if (rt.mode === 'dify') {
     const { difyDeliverable } = await import('./providers/dify.js');
-    const { deliverable, conversationId } = await difyDeliverable(ctx);
+    const { deliverable, conversationId, usage } = await difyDeliverable(ctx);
     await persistDifyConversation(ctx, conversationId);
-    return { result: deliverable, usage: ZERO_USAGE, provider: 'dify', model: 'dify' };
+    return { result: deliverable, usage, provider: 'dify', model: 'dify' };
   }
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
   if (!isRealKey(cfg.apiKey)) return { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
@@ -115,7 +117,7 @@ function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string 
   return `${kind}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${profileSig}:${refSig}`;
 }
 
-export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Promise<Deliverable> {
+export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Promise<{ result: Deliverable; usage: Usage }> {
   if (!(await moderate('input', ctx.userMessage))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
@@ -134,13 +136,13 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
     if (!(await moderate('output', outText))) {
       throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
     }
-    return sourced.result;
+    return { result: sourced.result, usage: sourced.usage };
   }
 
   const cfg = await getAiConfig();
   const ck = cacheKey('deliverable', ctx, cfg);
   const cached = cache.get(ck);
-  if (cached && Date.now() - cached.at < TTL) return cached.v as Deliverable; // 缓存命中：0 token，不记账
+  if (cached && Date.now() - cached.at < TTL) return { result: cached.v as Deliverable, usage: ZERO_USAGE }; // 缓存命中：0 token，不计额度
 
   let sourced: Sourced<Deliverable>;
   try {
@@ -167,10 +169,10 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
     throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
   cache.set(ck, { v: sourced.result, at: Date.now() });
-  return sourced.result;
+  return { result: sourced.result, usage: sourced.usage };
 }
 
-export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<ChatReply> {
+export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{ result: ChatReply; usage: Usage }> {
   if (!(await moderate('input', ctx.userMessage))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
@@ -181,10 +183,10 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<C
       const s = await runtimeChat(ctx);
       await maybeRecord(s, 'chat', ctx, meta);
       await moderate('output', s.result.text);
-      return s.result;
+      return { result: s.result, usage: s.usage };
     } catch (err) {
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
-      return mockChat(ctx);
+      return { result: mockChat(ctx), usage: ZERO_USAGE };
     }
   }
 
@@ -199,12 +201,12 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<C
       const s: Sourced<ChatReply> = { result: m.result, usage: m.usage, provider: live, model: cfg.model };
       await maybeRecord(s, 'chat', ctx, meta);
       await moderate('output', s.result.text);
-      return s.result;
+      return { result: s.result, usage: s.usage };
     }
   } catch (err) {
     console.error('[gateway] chat fallback to mock:', (err as Error).message);
   }
-  return mockChat(ctx);
+  return { result: mockChat(ctx), usage: ZERO_USAGE };
 }
 
 /**

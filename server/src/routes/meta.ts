@@ -4,6 +4,7 @@ import { providerInfo } from '../llm/gateway.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { buildClientUnderstanding } from '../services/understanding.js';
+import { getQuotaState } from '../services/tokenQuota.js';
 
 export async function metaRoutes(app: FastifyInstance) {
   app.get('/health', async () => ({ ok: true }));
@@ -18,14 +19,29 @@ export async function metaRoutes(app: FastifyInstance) {
     });
     const onboarded = !!(await prisma.profile.findFirst({ where: { tenantId: user.tenantId } }));
     const understanding = await buildClientUnderstanding(user);
+    const quota = await getQuotaState(user.id); // 本月 token 额度（客户端只看进度 %）
     return {
       user: { id: user.id, name: user.name, role: user.role, benmingColor: user.benmingColor },
       tenant: { id: user.tenant.id, name: user.tenant.name, industry: user.tenant.industry, stage: user.tenant.stage },
-      plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth } : null,
+      plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth } : null,
       creditBalance: credit?.balance ?? 0,
+      tokenQuota: { limit: quota.quota, used: quota.used, remaining: quota.balance, unlimited: quota.unlimited },
       onboarded,
       ai: await providerInfo(),
       understanding,
+    };
+  });
+
+  // 钻石(点)消耗明细：解锁 / 图片按张 / 充值 / 赠送 流水（客户端「钻石管理」展示）
+  app.get('/me/credits', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const rows = await prisma.creditLedger.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    return {
+      items: rows.map((r) => ({ at: r.createdAt.toISOString(), reason: r.reason, delta: r.delta, balance: r.balance })),
     };
   });
 
@@ -70,6 +86,7 @@ export async function metaRoutes(app: FastifyInstance) {
         await tx.project.deleteMany({ where: { tenantId } });
         await tx.creditLedger.deleteMany({ where: { tenantId } });
         await tx.tokenUsage.deleteMany({ where: { tenantId } });
+        await tx.tokenWallet.deleteMany({ where: { tenantId } });
         await tx.profile.deleteMany({ where: { tenantId } });
         await tx.auditLog.deleteMany({ where: { tenantId } });
         await tx.userAgent.deleteMany({ where: { userId: user.id } });
@@ -80,6 +97,7 @@ export async function metaRoutes(app: FastifyInstance) {
         await tx.userAgent.deleteMany({ where: { userId: user.id } });
         await tx.creditLedger.deleteMany({ where: { userId: user.id } });
         await tx.tokenUsage.deleteMany({ where: { userId: user.id } });
+        await tx.tokenWallet.deleteMany({ where: { userId: user.id } });
         await tx.deliverable.deleteMany({ where: { userId: user.id } });
         await tx.session.deleteMany({ where: { userId: user.id } });
         await tx.memory.deleteMany({ where: { userId: user.id } });

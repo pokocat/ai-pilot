@@ -521,13 +521,13 @@ function SurveyView() {
 function PlansView({ toast }: { toast: (m: string) => void }) {
   const [list, setList] = useState<Plan[]>([]);
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', priceYuan: 0, creditsPerMonth: 0, agentCount: 0, features: '' });
+  const [form, setForm] = useState({ name: '', priceYuan: 0, creditsPerMonth: 0, tokenQuotaPerMonth: 0, agentCount: 0, features: '' });
   const load = () => api.plans().then(setList).catch(() => {});
   useEffect(() => { load(); }, []);
   const priceLabel = (p: Plan) => p.price < 0 ? '面议' : p.price === 0 ? '¥0' : `¥${(p.price / 100).toLocaleString()}${p.period === 'year' ? '/年' : '/月'}`;
   const startEdit = (p: Plan) => {
     setEditId(p.id);
-    setForm({ name: p.name, priceYuan: p.price < 0 ? -1 : p.price / 100, creditsPerMonth: p.creditsPerMonth, agentCount: p.agentCount, features: p.featuresJson.join('\n') });
+    setForm({ name: p.name, priceYuan: p.price < 0 ? -1 : p.price / 100, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount, features: p.featuresJson.join('\n') });
   };
   const save = async (id: string) => {
     try {
@@ -535,6 +535,7 @@ function PlansView({ toast }: { toast: (m: string) => void }) {
         name: form.name,
         price: form.priceYuan < 0 ? -1 : Math.round(form.priceYuan * 100),
         creditsPerMonth: form.creditsPerMonth,
+        tokenQuotaPerMonth: form.tokenQuotaPerMonth,
         agentCount: form.agentCount,
         featuresJson: form.features.split('\n').map((s) => s.trim()).filter(Boolean),
       });
@@ -549,7 +550,8 @@ function PlansView({ toast }: { toast: (m: string) => void }) {
           <div key={p.id} className="crd new-agent">
             <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
             <div className="ai-field"><div className="ai-fl">价格（元，-1=面议）</div><input className="ai-input" type="number" value={form.priceYuan} onChange={(e) => setForm({ ...form, priceYuan: Number(e.target.value) })} /></div>
-            <div className="ai-field"><div className="ai-fl">每月权益点（-1=不限量）</div><input className="ai-input" type="number" value={form.creditsPerMonth} onChange={(e) => setForm({ ...form, creditsPerMonth: Number(e.target.value) })} /></div>
+            <div className="ai-field"><div className="ai-fl">每月赠送钻石（-1=不限量）</div><input className="ai-input" type="number" value={form.creditsPerMonth} onChange={(e) => setForm({ ...form, creditsPerMonth: Number(e.target.value) })} /></div>
+            <div className="ai-field"><div className="ai-fl">每月 token 额度（产出消耗池，-1=不限量）</div><input className="ai-input" type="number" value={form.tokenQuotaPerMonth} onChange={(e) => setForm({ ...form, tokenQuotaPerMonth: Number(e.target.value) })} /></div>
             <div className="ai-field"><div className="ai-fl">含智能体数</div><input className="ai-input" type="number" value={form.agentCount} onChange={(e) => setForm({ ...form, agentCount: Number(e.target.value) })} /></div>
             <div className="ai-field"><div className="ai-fl">权益（每行一条）</div><textarea className="ta" rows={4} value={form.features} onChange={(e) => setForm({ ...form, features: e.target.value })} /></div>
             <div className="ai-actions">

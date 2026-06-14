@@ -8,7 +8,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
-  Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult,
+  Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -25,6 +25,7 @@ export type {
   KnowledgeItemT, KnowledgeHit, SummarizeResult, MessageRef, RefKind,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AgentBilling,
   ClientUnderstanding, ClientUnderstandingSection, UnderstandingMaturity, AliasSuggestionResult,
+  TokenQuotaView, MyCreditItem, MyCreditsView,
 } from '../../../shared/contracts';
 
 // token 助手（兼容旧导出名）
@@ -68,6 +69,7 @@ export const api = {
   wechatLogin: (code: string, nickname?: string) =>
     IS_MOCK ? mock.wechatLogin(code, nickname) : request<LoginResult>('/auth/wechat-login', 'POST', { code, nickname }),
   me: () => (IS_MOCK ? mock.me() : request<Me>('/me')),
+  myCredits: () => (IS_MOCK ? mock.myCredits() : request<MyCreditsView>('/me/credits')),
   plans: () => (IS_MOCK ? mock.plans() : request<Plan[]>('/plans')),
   purchasePlan: (id: string) =>
     IS_MOCK ? mock.purchasePlan(id) : request<PlanPurchaseResult>(`/plans/${id}/purchase`, 'POST', {}),

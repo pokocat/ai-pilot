@@ -34,6 +34,7 @@ async function main() {
           price: p.price,
           period: p.period,
           creditsPerMonth: p.creditsPerMonth,
+          tokenQuotaPerMonth: p.tokenQuotaPerMonth,
           agentCount: p.agentCount,
           featuresJson: p.features,
           highlighted: p.highlighted,
@@ -57,6 +58,8 @@ async function main() {
         gift: a.gift,
         billing: a.billing,
         price: a.price,
+        billingRatio: a.billingRatio,
+        meterUnit: a.meterUnit,
         enabled: a.enabled,
         greet: a.greet,
         chipsJson: a.chips,
@@ -118,6 +121,10 @@ async function main() {
   });
   await prisma.creditLedger.create({
     data: { tenantId: tenant.id, userId: user.id, delta: 68, reason: '决策版 · 月度充值', balance: 68 },
+  });
+  // 演示：决策版月度 token 额度（100 万 token/月，periodKey 留空→首次访问惰性重置为当月）
+  await prisma.tokenWallet.create({
+    data: { tenantId: tenant.id, userId: user.id, quota: 1000000, balance: 1000000, periodKey: '' },
   });
   // —— 演示：给王总开通 2 个付费智能体（一个购买、一个后台开通），展示「已解锁」态 ——
   await prisma.userAgent.createMany({

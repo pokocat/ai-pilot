@@ -30,6 +30,8 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
   const [role, setRole] = useState('');
   const [billing, setBilling] = useState<AgentBilling>('free');
   const [price, setPrice] = useState(0);
+  const [billingRatio, setBillingRatio] = useState(1);
+  const [meterUnit, setMeterUnit] = useState<'text' | 'image'>('text');
   const [prompt, setPrompt] = useState('');
   const [mem, setMem] = useState<MemoryConfig | null>(null);
   // —— 接入方式 ——
@@ -50,6 +52,7 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
       setData(d);
       setName(d.name); setRole(d.role);
       setBilling(d.billing); setPrice(d.price);
+      setBillingRatio(d.billingRatio ?? 1); setMeterUnit(d.meterUnit ?? 'text');
       setPrompt(d.systemPrompt);
       setMem(d.memoryConfig);
       const r = d.runtime;
@@ -98,6 +101,8 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
     api.saveAgent(agentKey, {
       name, role, gift: billing === 'free', billing,
       price: billing === 'free' ? 0 : Math.max(0, Math.trunc(price)),
+      billingRatio: meterUnit === 'text' ? Math.max(0.1, billingRatio) : 1,
+      meterUnit,
       systemPrompt: prompt, memoryConfig: mem, runtime,
     }).then(onSaved).catch(() => {});
   };
@@ -136,8 +141,25 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
           </div>
           {billing !== 'free' && (
             <div className="ai-field">
-              <div className="ai-fl">{billing === 'unlock' ? '解锁价格（权益点）' : '每次产出消耗（权益点）'}</div>
+              <div className="ai-fl">{meterUnit === 'image' ? '每张消耗（钻石）' : '解锁价格（钻石）'}</div>
               <input className="ai-input" type="number" min={0} value={price} onChange={(e) => setPrice(Number(e.target.value))} />
+            </div>
+          )}
+          <div className="ai-field">
+            <div className="ai-fl">计费单位</div>
+            <div className="bill-seg">
+              <div className={`bill-opt ${meterUnit === 'text' ? 'on' : ''}`} onClick={() => setMeterUnit('text')}>
+                <div className="bo-t">文本 · token 额度</div><div className="bo-d">产出按 token×比例 扣本月额度</div>
+              </div>
+              <div className={`bill-opt ${meterUnit === 'image' ? 'on' : ''}`} onClick={() => setMeterUnit('image')}>
+                <div className="bo-t">图片 · 按张钻石</div><div className="bo-d">每次产出按张扣钻石</div>
+              </div>
+            </div>
+          </div>
+          {meterUnit === 'text' && (
+            <div className="ai-field">
+              <div className="ai-fl">计费比例（token×ratio 扣额度；标准 1.0，Dify 可设 2.0）</div>
+              <input className="ai-input" type="number" min={0} step={0.1} value={billingRatio} onChange={(e) => setBillingRatio(Number(e.target.value))} />
             </div>
           )}
         </div>

@@ -7,6 +7,7 @@ import type {
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
+  MyCreditItem, MyCreditsView, TokenQuotaView,
 } from '../../../shared/contracts';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
@@ -33,6 +34,7 @@ const PLANS: Plan[] = [
     price: 0,
     period: 'month',
     creditsPerMonth: 10,
+    tokenQuotaPerMonth: 100000,
     agentCount: 3,
     featuresJson: ['10 点 / 月', '基础顾问 3 位', '适合轻量试用'],
     highlighted: false,
@@ -43,6 +45,7 @@ const PLANS: Plan[] = [
     price: 198000,
     period: 'year',
     creditsPerMonth: 68,
+    tokenQuotaPerMonth: 1000000,
     agentCount: 8,
     featuresJson: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
     highlighted: true,
@@ -53,6 +56,7 @@ const PLANS: Plan[] = [
     price: -1,
     period: 'year',
     creditsPerMonth: -1,
+    tokenQuotaPerMonth: -1,
     agentCount: 14,
     featuresJson: ['私有化部署', '接入内部系统', '专属助手配置', '数据不出内网'],
     highlighted: false,
@@ -84,7 +88,8 @@ interface ProjectRec {
 }
 interface UserData {
   name: string; company: string; phone: string; benmingColor: string; onboarded: boolean;
-  planId: string; creditBalance: number; ownedAgents: string[];
+  planId: string; creditBalance: number; tokenUsed: number; ownedAgents: string[];
+  creditLog: MyCreditItem[];
   profile: Profile | null; sessions: SessionRec[]; library: LibItem[];
   projects: ProjectRec[]; reports: ReportDocRec[]; knowledge: KnowledgeRec[];
 }
@@ -102,6 +107,8 @@ function load(token: string): UserData {
       d.projects ??= []; d.reports ??= []; d.knowledge ??= [];
       d.planId ??= 'mock-plan-decision';
       d.creditBalance ??= 68;
+      d.tokenUsed ??= 0;
+      d.creditLog ??= [];
       d.ownedAgents ??= ['intel', 'brand']; // 演示：默认已启用两个专项智能体
       d.company ??= '';
       d.name ??= '';
@@ -117,6 +124,8 @@ function load(token: string): UserData {
     onboarded: false,
     planId: 'mock-plan-decision',
     creditBalance: 68,
+    tokenUsed: 0,
+    creditLog: [],
     ownedAgents: ['intel', 'brand'],
     profile: null,
     sessions: [],
@@ -136,6 +145,28 @@ function current(): { token: string; d: UserData } {
 
 const agentOf = (key: string): Agent =>
   DEFAULT_AGENTS.find((a) => a.key === key) || DEFAULT_AGENTS.find((a) => a.key === 'general')!;
+
+// —— 双轴计费 mock 辅助：钻石(creditBalance) 管解锁；月度 token 额度按 tokenUsed/limit 计 ——
+function planOf(d: UserData): Plan { return PLANS.find((p) => p.id === d.planId) ?? PLANS[1]; }
+function mockQuota(d: UserData): TokenQuotaView {
+  const limit = planOf(d).tokenQuotaPerMonth;
+  if (limit < 0) return { limit: -1, used: 0, remaining: -1, unlimited: true };
+  const used = d.tokenUsed ?? 0;
+  return { limit, used, remaining: limit - used, unlimited: false };
+}
+function ensureMockQuota(d: UserData): void {
+  const limit = planOf(d).tokenQuotaPerMonth;
+  if (limit >= 0 && (d.tokenUsed ?? 0) >= limit) {
+    throw Object.assign(new Error('本月 token 额度已用尽，请升级套餐或下月再用'), { code: 'INSUFFICIENT_QUOTA', data: { code: 'INSUFFICIENT_QUOTA' } });
+  }
+}
+function chargeMockQuota(d: UserData, ratio: number, inputLen: number, outputLen: number): TokenQuotaView {
+  if (planOf(d).tokenQuotaPerMonth >= 0) {
+    const pseudo = Math.max(80, Math.round((inputLen + outputLen) / 3));
+    d.tokenUsed = (d.tokenUsed ?? 0) + Math.ceil(pseudo * (ratio > 0 ? ratio : 1));
+  }
+  return mockQuota(d);
+}
 
 function metaOf(d: UserData): string {
   const parts = [meaningfulM(d.company), d.profile?.industry].filter(Boolean) as string[];
@@ -393,8 +424,9 @@ export const mock = {
     return delay({
       user: { id: getToken(), name: d.name, role: 'owner', benmingColor: d.benmingColor },
       tenant: { id: `t-${d.phone}`, name: d.company, industry: d.profile?.industry ?? null, stage: d.profile?.stage ?? null },
-      plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth } : null,
+      plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth } : null,
       creditBalance: d.creditBalance,
+      tokenQuota: mockQuota(d),
       onboarded: d.onboarded,
       ai: { provider: 'mock', model: 'template', ready: false, claudeReady: false },
       understanding: buildUnderstandingM(d),
@@ -417,6 +449,11 @@ export const mock = {
 
   async plans(): Promise<Plan[]> { return delay(PLANS); },
 
+  async myCredits(): Promise<MyCreditsView> {
+    const { d } = current();
+    return delay({ items: [...(d.creditLog ?? [])].reverse() });
+  },
+
   async purchasePlan(id: string): Promise<PlanPurchaseResult> {
     const { token, d } = current();
     const plan = PLANS.find((p) => p.id === id);
@@ -424,8 +461,10 @@ export const mock = {
     const grantedCredits = plan.creditsPerMonth < 0 ? 0 : plan.creditsPerMonth;
     d.planId = plan.id;
     d.creditBalance = plan.creditsPerMonth < 0 ? -1 : (d.creditBalance < 0 ? grantedCredits : d.creditBalance + grantedCredits);
+    d.tokenUsed = 0; // 套餐授予/重置当月 token 额度
+    (d.creditLog ??= []).push({ at: now(), reason: `${plan.name} · 套餐购买`, delta: grantedCredits, balance: d.creditBalance });
     save(token, d);
-    return delay({ ok: true, plan, creditBalance: d.creditBalance, grantedCredits });
+    return delay({ ok: true, plan, creditBalance: d.creditBalance, grantedCredits, grantedTokens: plan.tokenQuotaPerMonth });
   },
 
   async setColor(color: string) {
@@ -453,7 +492,10 @@ export const mock = {
       throw Object.assign(new Error('权益点不足，无法启用该智能体'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
     }
     d.ownedAgents.push(key);
-    if (!unlimited) d.creditBalance -= agent.price;
+    if (!unlimited) {
+      d.creditBalance -= agent.price;
+      (d.creditLog ??= []).push({ at: now(), reason: `解锁智能体 · ${agent.name}`, delta: -agent.price, balance: d.creditBalance });
+    }
     save(token, d);
     return delay({ ok: true, agentKey: key, pricePaid: unlimited ? 0 : agent.price, creditBalance: d.creditBalance, alreadyOwned: false });
   },
@@ -538,9 +580,7 @@ export const mock = {
       session.messages.push(msg);
       res = { sessionId: session.id, created, agentKey: ag.key, kind: 'chat', messageId: msg.id, reply, knowledgeUsed: labels, creditBalance: d.creditBalance };
     } else if (ag.deliverableKey) {
-      if (d.creditBalance >= 0 && d.creditBalance < 1) {
-        throw Object.assign(new Error('权益点不足，请调整方案后再继续'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
-      }
+      ensureMockQuota(d); // 文本产出：本月 token 额度足够才放行
       const deliverable = buildDeliverable(ag.deliverableKey, d);
       if (projName) deliverable.meta = `${deliverable.meta} · ${projName}`;
       if (refSec.length) deliverable.sections.push({ h: '参考依据', list: refSec });
@@ -551,15 +591,17 @@ export const mock = {
         deliverable, memory: ag.key !== 'general' ? { learned: true, agentName: ag.name } : null,
         knowledgeUsed: labels,
       };
-      if (d.creditBalance >= 0) d.creditBalance -= 1;
+      res.tokenQuota = chargeMockQuota(d, ag.billingRatio, text.length, JSON.stringify(deliverable).length);
       res.creditBalance = d.creditBalance;
     } else {
+      ensureMockQuota(d); // 对话也走 token 额度
       const r = REPLIES['默认'];
       const points = refSec.length ? [...r.points, `已参考：${refSec.join('；')}`] : r.points;
       const reply = { text: r.t, points, acts: r.acts };
       const msg: SessionMessage = { id: uid('m-'), role: 'assistant', content: reply, at: now() };
       session.messages.push(msg);
       res = { sessionId: session.id, created, agentKey: ag.key, kind: 'chat', messageId: msg.id, reply, knowledgeUsed: labels };
+      res.tokenQuota = chargeMockQuota(d, ag.billingRatio, text.length, JSON.stringify(reply).length);
       res.creditBalance = d.creditBalance;
     }
     session.updatedAt = now();

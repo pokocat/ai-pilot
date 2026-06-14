@@ -2,7 +2,7 @@ import type { Agent } from '../../../shared/contracts';
 
 // 离线兜底：内置智能体注册表（仅公开字段，对齐后端 seed AGENTS）。
 // 后端可达时由 GET /agents 覆盖（含真实 owned）；不可达时用它，保证对话/智库/工坊不空白。
-export const DEFAULT_AGENTS: Agent[] = [
+const RAW_AGENTS: Omit<Agent, 'billingRatio' | 'meterUnit'>[] = [
   {
     "key": "general",
     "name": "军师",
@@ -320,3 +320,5 @@ export const DEFAULT_AGENTS: Agent[] = [
     "deliverableKey": "营销文案"
   }
 ];
+// 公开字段默认双轴计费：文本类、计费比例 1.0（真实值由后端 GET /agents 覆盖）。
+export const DEFAULT_AGENTS: Agent[] = RAW_AGENTS.map((a) => ({ ...a, billingRatio: 1, meterUnit: 'text' as const }));

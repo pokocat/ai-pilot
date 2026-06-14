@@ -52,7 +52,9 @@ export interface Agent {
   type: AgentType;
   gift: boolean;
   billing: AgentBilling; // 计费模式
-  price: number;         // 价格（算力次数）：unlock=解锁消耗；metered=每次产出消耗；free=0
+  price: number;         // 钻石(点)价：unlock=解锁消耗；metered+image=每张消耗；free=0
+  billingRatio: number;  // 文本类 token 计费比例：扣额=ceil(真实token×ratio)
+  meterUnit: 'text' | 'image'; // text=产出扣月度 token 额度 | image=按张扣钻石
   owned: boolean;        // 当前用户是否已开通（free/metered 恒为可用，owned 仅对 unlock 有意义）
   enabled: boolean;
   greet: string;
@@ -74,14 +76,14 @@ export interface AgentPurchaseResult {
 /** 运营端列表项（GET /admin/agents） */
 export interface AdminAgent {
   key: string; name: string; role: string; icon: string; type: AgentType;
-  gift: boolean; billing: AgentBilling; price: number; enabled: boolean; deliverableKey: string | null;
+  gift: boolean; billing: AgentBilling; price: number; billingRatio?: number; meterUnit?: 'text' | 'image'; enabled: boolean; deliverableKey: string | null;
   ownerCount?: number; sessionCount?: number; deliverableCount?: number; updatedAt?: string;
 }
 
 /** 运营端详情（含 System 提示词 + Agent Memory + 计费配置） */
 export interface AgentDetail {
   key: string; name: string; role: string; icon: string; type: AgentType;
-  gift: boolean; billing: AgentBilling; price: number;
+  gift: boolean; billing: AgentBilling; price: number; billingRatio: number; meterUnit: 'text' | 'image';
   enabled: boolean; systemPrompt: string; memoryConfig: MemoryConfig; deliverableKey: string | null;
   runtime: AgentRuntimeView; // 接入方式（跟随全局 / 自定义端点 / Dify 应用）
 }
@@ -89,13 +91,13 @@ export interface AgentDetail {
 /** 运营端新增智能体入参（POST /admin/agents） */
 export interface AdminAgentCreate {
   key: string; name: string; role: string; icon?: string; type?: AgentType;
-  gift?: boolean; billing?: AgentBilling; price?: number; enabled?: boolean;
+  gift?: boolean; billing?: AgentBilling; price?: number; billingRatio?: number; meterUnit?: 'text' | 'image'; enabled?: boolean;
   greet?: string; deliverableKey?: string | null; systemPrompt?: string;
 }
 /** 运营端更新智能体入参（PATCH /admin/agents/:key） */
 export interface AdminAgentUpdate {
   name?: string; role?: string; icon?: string; type?: AgentType;
-  gift?: boolean; billing?: AgentBilling; price?: number; enabled?: boolean;
+  gift?: boolean; billing?: AgentBilling; price?: number; billingRatio?: number; meterUnit?: 'text' | 'image'; enabled?: boolean;
   greet?: string; deliverableKey?: string | null;
   systemPrompt?: string; memoryConfig?: MemoryConfig;
   runtime?: AgentRuntimeUpdate; // 接入方式配置
@@ -135,11 +137,28 @@ export interface ClientUnderstanding {
   updatedAt?: string | null;
 }
 
+/** 本月 token 额度（客户端「钻石管理」只看进度 %）。limit/remaining<0=不限量 */
+export interface TokenQuotaView {
+  limit: number;     // 本月授予总额度，-1=不限量
+  used: number;      // 本月已用
+  remaining: number; // 剩余（可为负=已耗尽）
+  unlimited: boolean;
+}
+/** 钻石(点)消耗明细一条（GET /me/credits）：解锁 / 图片按张 / 充值 / 赠送 */
+export interface MyCreditItem {
+  at: string;      // ISO 时间
+  reason: string;  // 事由，如「解锁智能体 · 竞品军师」「决策版 · 月度充值」
+  delta: number;   // +充值/赠送  -消耗
+  balance: number; // 该笔后的钻石余额
+}
+export interface MyCreditsView { items: MyCreditItem[]; }
+
 export interface Me {
   user: { id: string; name: string; role: string; benmingColor: string };
   tenant: { id: string; name: string; industry?: string | null; stage?: string | null };
-  plan: { name: string; creditsPerMonth: number } | null;
-  creditBalance: number;
+  plan: { name: string; creditsPerMonth: number; tokenQuotaPerMonth: number } | null;
+  creditBalance: number; // 钻石(点)余额：解锁 / 图片按张
+  tokenQuota: TokenQuotaView; // 本月 token 额度（文本产出消耗池）
   onboarded?: boolean;
   ai: AiInfo;
   understanding?: ClientUnderstanding;
@@ -205,7 +224,8 @@ export interface GenResult {
   deliverable?: Deliverable; reply?: ChatReply;
   memory?: { learned: boolean; agentName: string } | null;
   knowledgeUsed?: string[]; // 本次自动召回/显式引用所用到的知识摘要（用于「参考了哪些资料」提示）
-  creditBalance?: number;   // 扣费后的算力余额（<0 表示不限量套餐；产出后回填，前端可即时刷新）
+  creditBalance?: number;   // 扣费后的钻石余额（<0=不限量；图片类按张扣后回填）
+  tokenQuota?: TokenQuotaView | null; // 文本产出后回填本月额度（即时刷新进度 %；图片类为 null）
 }
 
 /* ────────────── 方案库 ────────────── */
@@ -347,13 +367,14 @@ export interface Overview {
 export interface AdminSaying { id: string; text: string; enabled: boolean; pushedDate: string | null; }
 export interface Plan {
   id: string; name: string; price: number; period: string;
-  creditsPerMonth: number; agentCount: number; featuresJson: string[]; highlighted: boolean;
+  creditsPerMonth: number; tokenQuotaPerMonth: number; agentCount: number; featuresJson: string[]; highlighted: boolean;
 }
 export interface PlanPurchaseResult {
   ok: true;
   plan: Plan;
   creditBalance: number;
   grantedCredits: number;
+  grantedTokens?: number; // 本次授予/重置的月度 token 额度
 }
 /** 运营端单用户详情 + 智能体开通管理（GET /admin/users/:id） */
 export interface AdminUserAgentRow {

@@ -99,7 +99,8 @@ async function ownedKeysForHeader(token?: string): Promise<Set<string>> {
 function publicAgent(
   a: {
     key: string; name: string; role: string; icon: string; type: string; gift: boolean;
-    billing: string; price: number; enabled: boolean; greet: string; chipsJson: unknown;
+    billing: string; price: number; billingRatio: number; meterUnit: string;
+    enabled: boolean; greet: string; chipsJson: unknown;
     memText: string; learnText: string; deliverableKey: string | null;
   },
   owned: Set<string>,
@@ -113,6 +114,8 @@ function publicAgent(
     gift: a.gift,
     billing: a.billing as AgentView['billing'],
     price: a.price,
+    billingRatio: a.billingRatio,
+    meterUnit: (a.meterUnit as AgentView['meterUnit']) || 'text',
     owned: publicOwned(a.billing, owned.has(a.key)),
     enabled: a.enabled,
     greet: a.greet,

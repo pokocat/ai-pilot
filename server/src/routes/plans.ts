@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { getBalance } from '../services/credits.js';
+import { setQuota } from '../services/tokenQuota.js';
 import { recordAudit } from '../services/audit.js';
 import type { Plan as PlanView, PlanPurchaseResult } from '../../../shared/contracts';
 
@@ -11,6 +12,7 @@ function publicPlan(plan: {
   price: number;
   period: string;
   creditsPerMonth: number;
+  tokenQuotaPerMonth: number;
   agentCount: number;
   featuresJson: unknown;
   highlighted: boolean;
@@ -21,6 +23,7 @@ function publicPlan(plan: {
     price: plan.price,
     period: plan.period,
     creditsPerMonth: plan.creditsPerMonth,
+    tokenQuotaPerMonth: plan.tokenQuotaPerMonth,
     agentCount: plan.agentCount,
     featuresJson: Array.isArray(plan.featuresJson) ? plan.featuresJson.map(String) : [],
     highlighted: plan.highlighted,
@@ -55,13 +58,15 @@ export async function planRoutes(app: FastifyInstance) {
         },
       }),
     ]);
+    // 月度 token 额度：覆盖式授予当月额度（区别于钻石的叠加充值）
+    await setQuota(user.tenantId, user.id, plan.tokenQuotaPerMonth);
     await recordAudit({
       tenantId: user.tenantId,
       userId: user.id,
       action: 'user.plan.purchase',
-      payload: { planId: plan.id, planName: plan.name, grantedCredits, creditBalance },
+      payload: { planId: plan.id, planName: plan.name, grantedCredits, creditBalance, grantedTokens: plan.tokenQuotaPerMonth },
     });
 
-    return { ok: true, plan: publicPlan(plan), creditBalance, grantedCredits };
+    return { ok: true, plan: publicPlan(plan), creditBalance, grantedCredits, grantedTokens: plan.tokenQuotaPerMonth };
   });
 }

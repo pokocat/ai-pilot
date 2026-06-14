@@ -21,6 +21,8 @@ export interface AgentSeed {
   gift: boolean; // 注册赠送（= billing free）；仅用于前台「赠送」标记
   billing: AgentBilling; // free 免费 | unlock 一次性解锁 | metered 按次计费
   price: number; // 价格（算力次数）：unlock=解锁消耗；metered=每次产出消耗
+  billingRatio?: number; // 文本类 token 计费比例（扣额=真实token×ratio），默认 1.0
+  meterUnit?: 'text' | 'image'; // text=扣 token 额度 | image=按张扣钻石；默认 text
   enabled: boolean;
   greet: string;
   chips: [string, string][]; // [icon, label]
@@ -280,6 +282,7 @@ export const AGENTS: AgentSeed[] = [
     gift: false,
     billing: 'metered',
     price: 3,
+    meterUnit: 'image', // 图片/创意类：按张扣钻石（不走 token 额度）
     enabled: true,
     greet: '我是企业 IP 打造官。告诉我你想立的形象，我帮你把创始人/企业 IP 立起来。',
     chips: [['crown', '企业IP打造']],

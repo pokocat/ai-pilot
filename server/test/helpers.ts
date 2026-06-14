@@ -25,11 +25,11 @@ export async function seedAgents(): Promise<void> {
       where: { key: a.key },
       update: {
         systemPrompt: a.systemPrompt, memoryConfig: a.memoryConfig as object,
-        gift: a.gift, billing: a.billing, price: a.price, enabled: a.enabled,
+        gift: a.gift, billing: a.billing, price: a.price, billingRatio: a.billingRatio ?? 1, meterUnit: a.meterUnit ?? 'text', enabled: a.enabled,
       },
       create: {
         key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
-        gift: a.gift, billing: a.billing, price: a.price, enabled: a.enabled,
+        gift: a.gift, billing: a.billing, price: a.price, billingRatio: a.billingRatio ?? 1, meterUnit: a.meterUnit ?? 'text', enabled: a.enabled,
         greet: a.greet, chipsJson: a.chips as object,
         memText: a.memText, learnText: a.learnText, systemPrompt: a.systemPrompt,
         deliverableKey: a.deliverableKey, memoryConfig: a.memoryConfig as object, sort: a.sort,
@@ -43,7 +43,7 @@ export async function seedBaseline(): Promise<void> {
   await prisma.plan.deleteMany();
   for (let i = 0; i < PLANS.length; i++) {
     const p = PLANS[i];
-    await prisma.plan.create({ data: { name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, agentCount: p.agentCount, featuresJson: p.features, highlighted: p.highlighted, sort: i } });
+    await prisma.plan.create({ data: { name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount, featuresJson: p.features, highlighted: p.highlighted, sort: i } });
   }
   await seedAgents();
   await prisma.saying.deleteMany();
@@ -66,6 +66,7 @@ export async function cleanBusiness(): Promise<void> {
   await prisma.userAgent.deleteMany();
   await prisma.creditLedger.deleteMany();
   await prisma.tokenUsage.deleteMany();
+  await prisma.tokenWallet.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.profile.deleteMany();
   await prisma.user.deleteMany();

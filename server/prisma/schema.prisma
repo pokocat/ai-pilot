@@ -32,6 +32,7 @@ model Tenant {
   reports      ReportDoc[]
   knowledge    KnowledgeItem[]
   tokenUsages  TokenUsage[]
+  tokenWallets TokenWallet[]
 
   @@map("tenant")
 }
@@ -58,6 +59,7 @@ model User {
   credits      CreditLedger[]
   agents       UserAgent[] // 已开通的智能体（赠送 / 购买 / 后台开通）
   tokenUsages  TokenUsage[]
+  tokenWallet  TokenWallet?
 
   @@map("app_user")
 }
@@ -116,6 +118,8 @@ model Agent {
   gift           Boolean  @default(true) // 注册即赠送（=billing free）；仅用于前台「赠送」标记
   billing        String   @default("free") // free 免费 | unlock 一次性解锁 | metered 按次计费
   price          Int      @default(0) // 价格（单位：算力次数）。unlock=解锁一次性消耗；metered=每次产出消耗
+  billingRatio   Float    @default(1) // 文本类 token 计费比例：扣额=ceil(真实token×ratio)。如标准 1.0、Dify 2.0
+  meterUnit      String   @default("text") // text=扣月度 token 额度 | image=按张扣钻石(点)
   enabled        Boolean  @default(true)
   greet          String   @db.Text
   chipsJson      Json // [["target","战略体检"], ...]
@@ -395,7 +399,8 @@ model Plan {
   name             String
   price            Int // 分
   period           String // month | year
-  creditsPerMonth  Int
+  creditsPerMonth  Int // 钻石(点)：每月赠送，用于一次性解锁 + 图片按张
+  tokenQuotaPerMonth Int   @default(0) // 月度 token 额度（文本产出消耗池），-1=不限量
   agentCount       Int
   featuresJson     Json
   highlighted      Boolean @default(false)
@@ -420,6 +425,22 @@ model CreditLedger {
   user   User   @relation(fields: [userId], references: [id])
 
   @@map("credit_ledger")
+}
+
+/// 月度 Token 额度账户（文本产出消耗池，区别于钻石 CreditLedger）。每用户单行，惰性按月重置。
+model TokenWallet {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String   @unique
+  quota     Int      @default(0) // 本月授予总额度；<0=不限量
+  balance   Int      @default(0) // 本月剩余（可透支为负=已耗尽）；不限量时忽略
+  periodKey String   @default("") // YYYY-MM，惰性重置锚点
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@map("token_wallet")
 }
 
 /// Token 用量流水（P1：旁路统计，不参与按次扣费）。一次真实模型调用记一行；mock / 缓存命中不记。

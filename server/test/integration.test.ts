@@ -12,6 +12,7 @@ import { buildGenContext } from '../src/services/context.js';
 import { hybridSearch, resolveReferences } from '../src/services/retrieval.js';
 import type { MemoryConfig } from '../src/data/agents.js';
 import { recordTokenUsage, tokenUsageSummary } from '../src/services/usage.js';
+import { setQuota, getQuotaState, chargeQuota, ensureQuota } from '../src/services/tokenQuota.js';
 
 const tenantOf = async (token: string) =>
   (await prisma.user.findUnique({ where: { id: token } }))!.tenantId;
@@ -320,22 +321,23 @@ describe('TC-K 算力账户', () => {
     const t = await login(uniquePhone());
     const before = (await api('GET', '/api/me', { token: t })).body.creditBalance as number;
     const r1 = await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
-    assert.equal(r1.body.creditBalance, before - 1, '报告产出应扣 1');
-    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before - 1, '/me 余额应同步');
+    assert.equal(r1.body.creditBalance, before, '文本报告走 token 额度，不扣钻石');
+    assert.ok(r1.body.tokenQuota, '产出应回填本月额度状态');
+    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before, '/me 钻石余额不变');
     const r2 = await api('POST', '/api/generate-sync', { token: t, body: { text: '随便聊聊', agentKey: 'general' } });
-    assert.equal(r2.body.creditBalance, before - 1, '自由对话不扣费');
+    assert.equal(r2.body.creditBalance, before, '对话同样走 token 额度，不扣钻石');
   });
 
-  test('K3 算力不足 → 报告被 402 拦截、不留会话；免费对话仍可用', async () => {
+  test('K3 额度不足 → 产出被 402 INSUFFICIENT_QUOTA 拦截、不留会话', async () => {
     const t = await login(uniquePhone());
     const tenantId = await tenantOf(t);
-    await prisma.creditLedger.create({ data: { tenantId, userId: t, delta: -999, reason: '测试置零', balance: 0 } });
+    await setQuota(tenantId, t, 0); // 置零本月 token 额度
     const r = await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
     assert.equal(r.status, 402);
-    assert.equal(r.body.code, 'INSUFFICIENT_CREDITS');
+    assert.equal(r.body.code, 'INSUFFICIENT_QUOTA');
     assert.equal((await api('GET', '/api/sessions', { token: t })).body.length, 0, '被拦截不应留下会话');
     const chat = await api('POST', '/api/generate-sync', { token: t, body: { text: '聊聊', agentKey: 'general' } });
-    assert.equal(chat.status, 200, '免费对话不受余额影响');
+    assert.equal(chat.status, 402, '额度耗尽：对话也走 token 额度，同样拦截');
   });
 
   test('K4 购买套餐 → 切换套餐、入账算力、后台用量同步', async () => {
@@ -661,7 +663,7 @@ describe('TC-U 用户主要操作路径回归', () => {
     });
     assert.equal(gen.status, 200);
     assert.equal(gen.body.kind, 'report');
-    assert.equal(gen.body.creditBalance, before - 1, '主路径中的报告产出应扣 1 次算力');
+    assert.equal(gen.body.creditBalance, before, '文本报告走 token 额度，不扣钻石');
 
     const lib = await api('POST', '/api/library', {
       token: t,
@@ -685,7 +687,7 @@ describe('TC-U 用户主要操作路径回归', () => {
     assert.ok(detail.body.counts.sessions >= 1, '项目应聚合会话');
     assert.ok(detail.body.counts.reports >= 2, '项目应聚合存库报告和纪要报告');
     assert.ok(detail.body.counts.knowledge >= 2, '项目应聚合手动知识和纪要知识');
-    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before - 1, '/me 算力余额应与产出结果一致');
+    assert.equal((await api('GET', '/api/me', { token: t })).body.creditBalance, before, '/me 钻石余额不变（文本走额度）');
   });
 });
 
@@ -850,5 +852,56 @@ describe('TC-Y Token 用量计量', () => {
     const del = await api('DELETE', '/api/me', { token: t });
     assert.equal(del.status, 200);
     assert.equal(await prisma.tokenUsage.count({ where: { tenantId } }), 0, '注销后该租户 token 流水应清空');
+  });
+});
+
+// ───────────────────────── TC-Z 月度 Token 额度（双轴计费 P2） ─────────────────────────
+describe('TC-Z 月度 Token 额度', () => {
+  test('Z1 setQuota/charge/ensure：ceil(token×ratio) 扣减、透支后拦截', async () => {
+    const t = await login(uniquePhone(), '额度甲');
+    const tenantId = await tenantOf(t);
+    await setQuota(tenantId, t, 1000);
+    let st = await getQuotaState(t);
+    assert.equal(st.quota, 1000);
+    assert.equal(st.used, 0);
+    assert.equal(st.unlimited, false);
+    st = await chargeQuota(t, 300, 1.5); // ceil(300×1.5)=450
+    assert.equal(st.used, 450);
+    assert.equal(st.balance, 550);
+    await ensureQuota(t); // 余额>0 放行（不抛）
+    await chargeQuota(t, 1000, 1); // 透支到负
+    await assert.rejects(() => ensureQuota(t), (e: unknown) => (e as { code?: string }).code === 'INSUFFICIENT_QUOTA');
+  });
+
+  test('Z2 不限量(quota=-1) 放行且不扣', async () => {
+    const t = await login(uniquePhone(), '额度乙');
+    const tenantId = await tenantOf(t);
+    await setQuota(tenantId, t, -1);
+    await ensureQuota(t);
+    const st = await chargeQuota(t, 99999, 5);
+    assert.equal(st.unlimited, true);
+  });
+
+  test('Z3 /me 含 tokenQuota；/me/credits 返回钻石流水', async () => {
+    const t = await login(uniquePhone(), '额度丙');
+    const tenantId = await tenantOf(t);
+    await setQuota(tenantId, t, 500);
+    const me = await api('GET', '/api/me', { token: t });
+    assert.equal(me.status, 200);
+    assert.equal(me.body.tokenQuota.limit, 500);
+    assert.ok('creditBalance' in me.body, '应保留钻石轴');
+    const cr = await api('GET', '/api/me/credits', { token: t });
+    assert.equal(cr.status, 200);
+    assert.ok(Array.isArray(cr.body.items));
+  });
+
+  test('Z4 注销连带清除 token_wallet（外键安全）', async () => {
+    const t = await login(uniquePhone(), '额度丁');
+    const tenantId = await tenantOf(t);
+    await setQuota(tenantId, t, 1000);
+    assert.equal(await prisma.tokenWallet.count({ where: { userId: t } }), 1);
+    const del = await api('DELETE', '/api/me', { token: t });
+    assert.equal(del.status, 200);
+    assert.equal(await prisma.tokenWallet.count({ where: { tenantId } }), 0, '注销后租户额度账户应清空');
   });
 });
