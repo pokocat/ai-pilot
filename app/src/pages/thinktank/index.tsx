@@ -36,7 +36,7 @@ export default function ThinkTank() {
           <Text className="hero-p">这些顾问已在你的工作台中，可直接用于诊断、增长、融资和组织问题；专项能力按项目节奏启用。</Text>
         </View>
 
-        <View className="zk-team" style={{ background: '#1B1E22' }}>
+        <View className="zk-team">
           <View className="zt-h">
             <Text className="t serif">智囊团已就位</Text>
             <View className="tag" style={{ background: 'var(--accent-soft)' }}>

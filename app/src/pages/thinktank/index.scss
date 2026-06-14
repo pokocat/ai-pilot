@@ -2,7 +2,21 @@
 .agents-hero .h1 { display: block; margin: 6px 0 8px; }
 .hero-p { display: block; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
 
-.zk-team { border-radius: var(--r-lg); padding: 18px; margin-top: 18px; }
+/* 智囊团卡：本命色暗调对角渐变 + 左上柔光，呼应首页军师卡，避免一块死黑 */
+.zk-team {
+  border-radius: var(--r-lg); padding: 18px; margin-top: 18px;
+  position: relative; overflow: hidden;
+  background:
+    radial-gradient(135% 95% at 16% -8%, var(--accent-glow) 0%, rgba(0, 0, 0, 0) 52%),
+    linear-gradient(157deg, var(--accent-deep) 0%, #1B1E22 56%);
+  border: 1px solid rgba(255, 255, 255, .06);
+  box-shadow: 0 14px 34px rgba(17, 20, 24, .18);
+}
+.zk-team::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, .14) 30%, rgba(255, 255, 255, 0) 80%);
+}
+.zk-team > View { position: relative; }
 .zt-h { display: flex; align-items: center; justify-content: space-between; }
 .zt-h .t { color: #fff; font-size: 16px; font-weight: 600; }
 .zt-h .tag { display: flex; align-items: center; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }

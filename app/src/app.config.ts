@@ -17,6 +17,7 @@ export default defineAppConfig({
         'projects/index',
         'project/index',
         'report/index',
+        'credits/index',
       ],
     },
   ],

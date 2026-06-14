@@ -6,7 +6,7 @@ import Icon from '../../components/Icon';
 import Picker from '../../components/Picker';
 import Plans from '../../components/Plans';
 import { useStore } from '../../hooks/useStore';
-import { api, type MyCreditItem } from '../../services/api';
+import { api } from '../../services/api';
 import './index.scss';
 
 export default function Profile() {
@@ -18,14 +18,11 @@ export default function Profile() {
   const [projCount, setProjCount] = useState(0);
   const [showPicker, setShowPicker] = useState(false);
   const [showPlans, setShowPlans] = useState(false);
-  const [showCredits, setShowCredits] = useState(false);
-  const [creditItems, setCreditItems] = useState<MyCreditItem[]>([]);
 
   useDidShow(() => {
     s.setTab(4);
     api.library().then((l) => setLibCount(l.length)).catch((e) => s.handleApiError(e));
     api.projects().then((p) => setProjCount(p.length)).catch((e) => s.handleApiError(e));
-    api.myCredits().then((r) => setCreditItems(r.items)).catch(() => {});
   });
 
   const rows = [
@@ -34,7 +31,7 @@ export default function Profile() {
     { ic: 'layers', t: '我的方案库', s: `${libCount} 份成果`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
     { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
     { ic: 'doc', t: '套餐与额度', s: me?.plan?.name ?? '', onClick: () => setShowPlans(true) },
-    { ic: 'layers', t: '钻石消耗明细', s: '', onClick: () => setShowCredits(true) },
+    { ic: 'layers', t: '钻石消耗明细', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/credits/index' }) },
     { ic: 'insight', t: '设置', s: '', onClick: () => Taro.navigateTo({ url: '/pages/settings/index' }) },
     {
       ic: 'lock', t: '退出登录', s: '',
@@ -63,7 +60,7 @@ export default function Profile() {
           ) : null}
         </View>
 
-        <View className="credit card" style={{ background: '#1B1E22' }}>
+        <View className="credit card">
           <View className="cr-l">
             <Text className="cr-k">钻石 · 解锁专项顾问</Text>
             <View className="cr-vrow">
@@ -75,17 +72,6 @@ export default function Profile() {
           </View>
           <View className="cr-btn" style={{ background: accent }} onClick={() => setShowPlans(true)}>
             <Text>管理</Text>
-          </View>
-        </View>
-
-        {/* 本月产出额度（token 消耗池）进度 —— 客户端只看 % */}
-        <View className="card" style={{ background: '#1B1E22', padding: '16px 18px' }}>
-          <View style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-            <Text style={{ fontSize: 13, color: 'rgba(255,255,255,.6)' }}>本月产出额度</Text>
-            <Text className="serif" style={{ fontSize: 15, color: 'var(--accent-bright)' }}>{quotaLabel(me?.tokenQuota)}</Text>
-          </View>
-          <View style={{ height: 7, borderRadius: 4, background: 'rgba(255,255,255,.12)', overflow: 'hidden' }}>
-            <View style={{ height: '100%', width: `${quotaPct(me?.tokenQuota)}%`, background: accent, borderRadius: 4 }} />
           </View>
         </View>
 
@@ -117,25 +103,6 @@ export default function Profile() {
 
       <Picker open={showPicker} first={false} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
       <Plans open={showPlans} onClose={() => setShowPlans(false)} />
-      {showCredits && (
-        <View style={{ position: 'fixed', left: 0, right: 0, top: 0, bottom: 0, background: 'rgba(0,0,0,.45)', zIndex: 60, display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowCredits(false)}>
-          <View style={{ width: '100%', maxHeight: '70vh', background: '#fff', borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: '20px 18px', overflowY: 'auto' }} onClick={(e) => e.stopPropagation()}>
-            <Text style={{ fontSize: 16, fontWeight: 600, display: 'block', marginBottom: 4 }}>钻石消耗明细</Text>
-            <Text style={{ fontSize: 12, color: '#aaa', display: 'block', marginBottom: 14 }}>解锁顾问 / 图片产出 / 充值赠送</Text>
-            {creditItems.length === 0 ? (
-              <Text style={{ color: '#999', fontSize: 13 }}>暂无钻石流水。解锁专项顾问或充值后会显示在这里。</Text>
-            ) : creditItems.map((it, i) => (
-              <View key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0', borderBottom: '1px solid #f0f0f0' }}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={{ fontSize: 14, color: '#222', display: 'block' }}>{it.reason}</Text>
-                  <Text style={{ fontSize: 11, color: '#aaa' }}>{fmtAt(it.at)}</Text>
-                </View>
-                <Text className="serif" style={{ fontSize: 16, color: it.delta >= 0 ? '#3A8A55' : '#9C4A38' }}>{it.delta >= 0 ? `+${it.delta}` : it.delta}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-      )}
     </Screen>
   );
 }
@@ -151,21 +118,4 @@ function briefLine(understanding?: { maturity: string; evidenceCount: { memories
   if (understanding.maturity === 'ready') return '可用于咨询';
   const count = understanding.evidenceCount.memories + understanding.evidenceCount.projects + understanding.evidenceCount.knowledge + understanding.evidenceCount.sessions;
   return count ? `已沉淀 ${count} 条线索` : '待补资料';
-}
-
-// 本月 token 额度（客户端只看 %，不显示 token 数）。limit<0=不限量。
-function quotaLabel(q?: { limit: number; used: number; unlimited: boolean }): string {
-  if (!q) return '—';
-  if (q.unlimited || q.limit < 0) return '不限量';
-  const pct = q.limit > 0 ? Math.min(100, Math.round((q.used / q.limit) * 100)) : 0;
-  return `本月已用 ${pct}%`;
-}
-function quotaPct(q?: { limit: number; used: number; unlimited: boolean }): number {
-  if (!q || q.limit < 0) return q?.unlimited ? 100 : 0;
-  return q.limit > 0 ? Math.min(100, Math.round((q.used / q.limit) * 100)) : 0;
-}
-// ISO → MM-DD HH:mm
-function fmtAt(iso: string): string {
-  const m = iso.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
-  return m ? `${m[2]}-${m[3]} ${m[4]}:${m[5]}` : iso.slice(0, 16);
 }
