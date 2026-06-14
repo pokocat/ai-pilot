@@ -17,6 +17,15 @@ function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
   return eff === 'mock' ? null : eff;
 }
 
+// 真实 provider 调用失败：生产（AI_FALLBACK_MOCK=false）不静默兜底 mock，抛错让前端提示重试，避免答非所问。
+function aiUnavailable(err: unknown): Error {
+  const aborted = /abort/i.test((err as Error)?.message || '');
+  return Object.assign(
+    new Error(aborted ? 'AI 响应超时，请稍后重试' : 'AI 服务暂时不可用，请稍后重试'),
+    { code: 'AI_UNAVAILABLE', statusCode: 503 },
+  );
+}
+
 // 把「产出 + 真实 token + 来源」打包，便于在输出审核/缓存前统一记账。
 type Sourced<T> = { result: T; usage: Usage; provider: string; model: string };
 
@@ -129,6 +138,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
       sourced = await runtimeDeliverable(ctx);
     } catch (err) {
       console.error('[gateway] runtime deliverable fallback to mock:', (err as Error).message);
+      if (!env.aiFallbackMock) throw aiUnavailable(err);
       sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: '' };
     }
     await maybeRecord(sourced, 'deliverable', ctx, meta); // 记账早于输出审核：token 已花，审核拦截也要记
@@ -160,6 +170,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
     }
   } catch (err) {
     console.error('[gateway] deliverable fallback to mock:', (err as Error).message);
+    if (!env.aiFallbackMock) throw aiUnavailable(err);
     sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   }
 
@@ -186,6 +197,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
       return { result: s.result, usage: s.usage };
     } catch (err) {
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
+      if (!env.aiFallbackMock) throw aiUnavailable(err);
       return { result: mockChat(ctx), usage: ZERO_USAGE };
     }
   }
@@ -205,6 +217,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
     }
   } catch (err) {
     console.error('[gateway] chat fallback to mock:', (err as Error).message);
+    if (!env.aiFallbackMock) throw aiUnavailable(err);
   }
   return { result: mockChat(ctx), usage: ZERO_USAGE };
 }
