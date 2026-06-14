@@ -3,8 +3,32 @@ import { INDUSTRY_BENCHMARK } from '../data/seedConfig.js';
 import { recallMemories } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
-import type { GenContext, MessageRef } from '../llm/schema.js';
+import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
+
+// 把 Agent 的「接入方式」解析成运行时覆盖。inherit / 未配置完整 → null（走全局模型）。
+function resolveAgentRuntime(
+  agent: { providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiKey: string | null; difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown },
+  opts: { userId: string; sessionId?: string | null; difyConversationId?: string | null },
+): AgentRuntime | null {
+  if (agent.providerMode === 'openai') {
+    if (!agent.apiBaseUrl || !agent.apiKey) return null; // 配置不全则回退全局
+    return { mode: 'openai', baseUrl: agent.apiBaseUrl, model: agent.apiModel ?? undefined, apiKey: agent.apiKey };
+  }
+  if (agent.providerMode === 'dify') {
+    if (!agent.difyBaseUrl || !agent.difyApiKey) return null; // 配置不全则回退全局
+    return {
+      mode: 'dify',
+      difyBaseUrl: agent.difyBaseUrl,
+      difyApiKey: agent.difyApiKey,
+      difyInputs: (agent.difyInputs as Record<string, string> | null) ?? {},
+      user: opts.userId,
+      sessionId: opts.sessionId ?? null,
+      conversationId: opts.difyConversationId ?? null,
+    };
+  }
+  return null; // inherit
+}
 
 function unauthorized() {
   return Object.assign(new Error('未登录或登录已失效'), { statusCode: 401, code: 'UNAUTHORIZED' });
@@ -34,6 +58,8 @@ export async function buildGenContext(opts: {
   history?: { role: string; text: string }[];
   projectId?: string | null;       // 归属项目 → 注入项目背景 + 项目内知识召回
   refs?: MessageRef[];             // 显式 @ 引用 → 高优先注入、可溯源
+  sessionId?: string | null;       // Dify 多轮回写所需
+  difyConversationId?: string | null; // 已存在的 Dify 会话 id（多轮续接）
 }): Promise<{ ctx: GenContext; memoryConfig: MemoryConfig; knowledgeUsed: string[] }> {
   const agent = await prisma.agent.findUnique({ where: { key: opts.agentKey } });
   if (!agent) throw new Error(`未知智能体：${opts.agentKey}`);
@@ -88,6 +114,7 @@ export async function buildGenContext(opts: {
     understanding: understanding ? understandingContextLines(understanding) : [],
     understandingQuestions: understanding?.nextQuestions ?? [],
     understandingMaturity: understanding?.maturity ?? 'empty',
+    runtime: resolveAgentRuntime(agent, { userId: opts.userId, sessionId: opts.sessionId, difyConversationId: opts.difyConversationId }),
   };
   return { ctx, memoryConfig, knowledgeUsed };
 }

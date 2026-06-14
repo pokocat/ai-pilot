@@ -40,6 +40,18 @@ AI_PROVIDER=mock PGVECTOR_ENABLED=false npm test
 
 CI 只跑后端回归；小程序/后台构建仍按 `AGENTS.md §11` 的三端构建基线执行。
 
+### 纯单元测试（免 DB，可单独跑）
+
+部分模块有不连库、不联网的纯单元测试，stub `globalThis.fetch` 即可，无需准备测试库：
+
+```bash
+cd server
+node --import tsx --test test/dify.test.ts   # Dify 提供方（28 用例）：请求构造/响应解析/inputs 占位符映射/连通性测试
+```
+
+> `npm test` 会把所有 `test/*.test.ts` 一起跑（含需要 DB 的集成测试）；只想验证某个纯单元模块时按上面单跑该文件。
+> Dify / per-agent 接入的设计与配置见 [AGENT_PROVIDERS.md](AGENT_PROVIDERS.md)。
+
 ## 二、覆盖的用例（与代码 `server/test/integration.test.ts` 一一对应）
 
 | 编号 | 场景 | 关键断言 |

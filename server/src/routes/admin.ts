@@ -3,18 +3,53 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { getAiConfig, setAiConfig, publicConfig, AI_PRESETS, type ResolvedAiConfig } from '../services/aiConfig.js';
-import { pingModel } from '../llm/gateway.js';
+import { pingModel, pingAgentRuntime } from '../llm/gateway.js';
 import { requireAdmin } from '../services/adminAuth.js';
+import { tokenUsageSummary } from '../services/usage.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
 import type { AiConfigUpdate } from '../llm/schema.js';
 import type {
-  AdminAuditItem, AdminUserItem, AdminUsageView,
+  AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
+  AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult,
 } from '../../../shared/contracts';
+import type { Prisma } from '@prisma/client';
 
 const BILLINGS: AgentBilling[] = ['free', 'unlock', 'metered'];
 function normalizeBilling(b: unknown): AgentBilling {
   return BILLINGS.includes(b as AgentBilling) ? (b as AgentBilling) : 'free';
+}
+
+const PROVIDER_MODES: AgentProviderMode[] = ['inherit', 'openai', 'dify'];
+
+// 库行 → 脱敏的接入视图（不回明文 key）。
+function runtimeView(a: {
+  providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiKey: string | null;
+  difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown;
+}): AgentRuntimeView {
+  return {
+    providerMode: (PROVIDER_MODES.includes(a.providerMode as AgentProviderMode) ? a.providerMode : 'inherit') as AgentProviderMode,
+    apiBaseUrl: a.apiBaseUrl ?? '',
+    apiModel: a.apiModel ?? '',
+    hasApiKey: !!(a.apiKey && a.apiKey.trim()),
+    difyBaseUrl: a.difyBaseUrl ?? '',
+    hasDifyKey: !!(a.difyApiKey && a.difyApiKey.trim()),
+    difyInputs: (a.difyInputs as Record<string, string> | null) ?? {},
+  };
+}
+
+// 接入更新入参 → Prisma 写入字段。key 仅在显式传入时更新（空串=清空、undefined=不动，避免脱敏回显覆盖真实 key）。
+function runtimeData(rt?: AgentRuntimeUpdate): Prisma.AgentUpdateInput {
+  if (!rt) return {};
+  const d: Prisma.AgentUpdateInput = {};
+  if (rt.providerMode !== undefined) d.providerMode = PROVIDER_MODES.includes(rt.providerMode) ? rt.providerMode : 'inherit';
+  if (rt.apiBaseUrl !== undefined) d.apiBaseUrl = rt.apiBaseUrl.trim() || null;
+  if (rt.apiModel !== undefined) d.apiModel = rt.apiModel.trim() || null;
+  if (rt.apiKey !== undefined) d.apiKey = rt.apiKey || null;
+  if (rt.difyBaseUrl !== undefined) d.difyBaseUrl = rt.difyBaseUrl.trim() || null;
+  if (rt.difyApiKey !== undefined) d.difyApiKey = rt.difyApiKey || null;
+  if (rt.difyInputs !== undefined) d.difyInputs = (rt.difyInputs ?? {}) as Prisma.InputJsonValue;
+  return d;
 }
 
 export async function adminRoutes(app: FastifyInstance) {
@@ -158,6 +193,12 @@ export async function adminRoutes(app: FastifyInstance) {
     };
   });
 
+  // —— Token 用量看板（计费 P1·旁路统计，不参与按次扣费）：近 N 天 token 与估算成本，按模型/天/Top 用户 ——
+  app.get<{ Querystring: { days?: string } }>('/admin/token-usage', async (req): Promise<AdminTokenUsageView> => {
+    const days = Math.min(Math.max(Number(req.query.days ?? 30) || 30, 1), 90);
+    return tokenUsageSummary(days);
+  });
+
   // —— 审计日志：所有带 x-user-id 的小程序 API 行为 + 关键业务/后台操作 ——
   app.get<{ Querystring: { limit?: string; userId?: string; action?: string } }>(
     '/admin/audit-logs',
@@ -252,6 +293,7 @@ export async function adminRoutes(app: FastifyInstance) {
       gift: a.gift, billing: a.billing, price: a.price,
       enabled: a.enabled, systemPrompt: a.systemPrompt, memoryConfig: a.memoryConfig,
       deliverableKey: a.deliverableKey,
+      runtime: runtimeView(a),
     };
   });
   // 新增智能体（后台可上架更多智能体）。key 唯一；缺省字段给安全默认值。
@@ -316,6 +358,7 @@ export async function adminRoutes(app: FastifyInstance) {
           systemPrompt: b.systemPrompt,
           memoryConfig: b.memoryConfig as object | undefined,
           enabled: typeof b.enabled === 'boolean' ? b.enabled : undefined,
+          ...runtimeData(b.runtime), // 接入方式（跟随全局 / 自定义端点 / Dify 应用）
         },
       });
       const enabledChanged = typeof b.enabled === 'boolean' && before.enabled !== b.enabled;
@@ -329,9 +372,38 @@ export async function adminRoutes(app: FastifyInstance) {
           price: a.price,
           systemPromptChanged: typeof b.systemPrompt === 'string',
           memoryConfigChanged: !!b.memoryConfig,
+          providerMode: a.providerMode,
+          runtimeChanged: !!b.runtime,
         },
       });
       return { ok: true, key: a.key };
+    },
+  );
+
+  // 测试某个智能体的接入连接（提交未保存的改动；key 留空则用已存 key）。
+  app.post<{ Params: { key: string }; Body: AgentRuntimeUpdate }>(
+    '/admin/agents/:key/test',
+    async (req, reply): Promise<AiTestResult | void> => {
+      const a = await prisma.agent.findUnique({ where: { key: req.params.key } });
+      if (!a) return reply.code(404).send({ error: 'not found' });
+      const rt = req.body ?? {};
+      const mode = (rt.providerMode ?? a.providerMode) as AgentProviderMode;
+      if (mode === 'dify') {
+        return pingAgentRuntime({
+          mode: 'dify',
+          difyBaseUrl: rt.difyBaseUrl ?? a.difyBaseUrl ?? undefined,
+          difyApiKey: (rt.difyApiKey && rt.difyApiKey.length ? rt.difyApiKey : a.difyApiKey) ?? undefined,
+        });
+      }
+      if (mode === 'openai') {
+        return pingAgentRuntime({
+          mode: 'openai',
+          baseUrl: rt.apiBaseUrl ?? a.apiBaseUrl ?? undefined,
+          model: rt.apiModel ?? a.apiModel ?? undefined,
+          apiKey: (rt.apiKey && rt.apiKey.length ? rt.apiKey : a.apiKey) ?? undefined,
+        });
+      }
+      return { ok: false, provider: 'inherit', error: '当前为「跟随全局模型」，请到「模型配置」页测试连接' };
     },
   );
 
@@ -429,6 +501,9 @@ function auditLabel(action: string): string {
     'admin.user.agent.revoke': '取消智能体开通',
     'user.agent.purchase': '用户解锁智能体',
     'admin.ai.update': '模型配置变更',
+    'admin.account.init': '初始化后台账户',
+    'admin.account.login': '后台账户登录',
+    'admin.account.password': '修改后台密码',
     'user.plan.purchase': '用户购买套餐',
     'user.http': '用户 API 行为',
     'user.generate': '用户发起产出',

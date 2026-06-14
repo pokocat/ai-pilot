@@ -1,7 +1,8 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useState, type MouseEvent, type ReactNode, type CSSProperties } from 'react';
 import Icon from './Icon';
 import {
   api,
+  adminAuth,
   type Overview,
   type Saying,
   type AdminAgent,
@@ -14,17 +15,19 @@ import {
   type AdminUserItem,
   type AdminUserDetail,
   type AdminUsageView,
+  type AdminTokenUsageView,
   type AdminAuditItem,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 
-type Tab = 'home' | 'users' | 'usage' | 'agent' | 'audit' | 'model' | 'say' | 'form' | 'plan';
+type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'agent' | 'audit' | 'model' | 'say' | 'form' | 'plan';
 const TABS: { key: Tab; icon: string; label: string }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
   { key: 'usage', icon: 'crown', label: '消耗' },
+  { key: 'tokens', icon: 'trend', label: 'Token' },
   { key: 'agent', icon: 'agent', label: '顾问' },
   { key: 'audit', icon: 'clock', label: '审计' },
   { key: 'model', icon: 'insight', label: '模型' },
@@ -39,6 +42,8 @@ export default function App() {
   const [detailKey, setDetailKey] = useState<string | null>(null);
   const [detailUser, setDetailUser] = useState<string | null>(null);
   const [toast, setToast] = useState('');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 1800); };
 
@@ -49,7 +54,7 @@ export default function App() {
     return () => window.removeEventListener('admin:unauth', onUnauth);
   }, []);
 
-  const logout = () => { clearAdminToken(); setAuthed(false); };
+  const logout = () => { adminAuth.logout(); clearAdminToken(); setAuthed(false); };
 
   if (!authed) return <AdminLogin onAuthed={() => setAuthed(true)} />;
 
@@ -59,13 +64,25 @@ export default function App() {
         <div className="adm-top">
           <div className="adm-mk">军</div>
           <div className="adm-tt"><div className="t">运营后台</div><div className="s">JUNSHI · CONSOLE</div></div>
-          <div className="adm-av" onClick={logout} title="退出登录" style={{ cursor: 'pointer' }}>运营</div>
+          <div className="adm-av" onClick={() => setMenuOpen((v) => !v)} title="账户" style={{ cursor: 'pointer', position: 'relative' }}>
+            运营
+            {menuOpen && (
+              <div
+                style={{ position: 'absolute', top: '110%', right: 0, background: '#fff', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,.16)', padding: 6, minWidth: 132, zIndex: 30 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={menuItem} onClick={() => { setMenuOpen(false); setPwOpen(true); }}><Icon name="crown" size={14} /> 修改密码</div>
+                <div style={menuItem} onClick={() => { setMenuOpen(false); logout(); }}><Icon name="arrow" size={14} /> 退出登录</div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="adm-scroll">
           {tab === 'home' && <OverviewView />}
           {tab === 'users' && <UsersView onOpen={setDetailUser} />}
           {tab === 'usage' && <UsageView />}
+          {tab === 'tokens' && <TokenUsageView />}
           {tab === 'say' && <SayingsView toast={showToast} />}
           {tab === 'agent' && <AgentsView onOpen={setDetailKey} toast={showToast} />}
           {tab === 'audit' && <AuditView />}
@@ -99,7 +116,44 @@ export default function App() {
           />
         )}
 
+        {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} toast={showToast} />}
+
         {toast && <div className="admin-toast show"><Icon name="check" size={14} />{toast}</div>}
+      </div>
+    </div>
+  );
+}
+
+const menuItem: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px', borderRadius: 8, fontSize: 13, color: '#333', cursor: 'pointer' };
+
+// 修改后台登录密码：需当前密码（或主密钥）+ 新密码。成功后吊销旧会话，需重新登录。
+function ChangePasswordModal({ onClose, toast }: { onClose: () => void; toast: (m: string) => void }) {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = async () => {
+    if (next.length < 6) return setErr('新密码至少 6 位');
+    if (next !== confirm) return setErr('两次输入的新密码不一致');
+    setBusy(true); setErr('');
+    const r = await adminAuth.changePassword({ currentPassword: current, newPassword: next });
+    setBusy(false);
+    if (r.ok) { toast('密码已修改，请用新密码重新登录'); onClose(); window.dispatchEvent(new Event('admin:unauth')); return; }
+    setErr((r.data as { error?: string })?.error || '修改失败');
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }} onClick={onClose}>
+      <div className="al-card" style={{ width: 280, margin: 0 }} onClick={(e) => e.stopPropagation()}>
+        <div className="al-label">修改登录密码</div>
+        <input className="al-input" type="password" value={current} placeholder="当前密码" onChange={(e) => setCurrent(e.target.value)} autoFocus />
+        <input className="al-input" type="password" value={next} placeholder="新密码（至少 6 位）" onChange={(e) => setNext(e.target.value)} />
+        <input className="al-input" type="password" value={confirm} placeholder="确认新密码" onChange={(e) => setConfirm(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
+        {err && <div className="al-err"><Icon name="alert" size={13} /> {err}</div>}
+        <button className="al-btn" onClick={submit} disabled={busy}><Icon name="check" size={15} /> {busy ? '提交中…' : '确认修改'}</button>
+        <div className="al-note" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={onClose}>取消</div>
       </div>
     </div>
   );
@@ -253,6 +307,73 @@ function UsageView() {
       </div>
     </>
   );
+}
+
+function TokenUsageView() {
+  const [data, setData] = useState<AdminTokenUsageView | null>(null);
+  useEffect(() => { api.tokenUsage(30).then(setData).catch(() => {}); }, []);
+  if (!data) return <Loading />;
+  const { totals, byModel, topUsers } = data;
+  const maxModelCost = Math.max(1, ...byModel.map((m) => m.costMicros));
+  const uncalibrated = byModel.some((m) => !m.calibrated);
+  return (
+    <>
+      <div className="sec-h"><span className="t">Token 用量</span><span className="s">近 {data.windowDays} 天 · 估算成本（元）</span></div>
+      <div className="pad">
+        <div className="usage-summary">
+          <div><b>{fmtTokens(totals.totalTokens)}</b><span>总 Token</span></div>
+          <div><b>{fmtCny(totals.costMicros)}</b><span>估算成本</span></div>
+          <div><b>{totals.calls}</b><span>调用次数</span></div>
+          <div><b>{fmtTokens(totals.outputTokens)}</b><span>输出 Token</span></div>
+        </div>
+        {totals.calls === 0 && (
+          <div className="usage-meta" style={{ padding: '10px 0' }}>
+            暂无 token 记录。仅真实 Claude / OpenAI 调用计量；本地模板（mock）与 Dify 不计。
+          </div>
+        )}
+        {byModel.length > 0 && (
+          <>
+            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">按模型</span>{uncalibrated && <span className="s">部分单价待校准</span>}</div>
+            {byModel.map((m) => (
+              <div key={m.model} className="usage-row">
+                <div className="usage-h">
+                  <div className="usage-name">{m.model}{!m.calibrated && <span>待校准</span>}</div>
+                  <div className="usage-num">{fmtCny(m.costMicros)}</div>
+                </div>
+                <div className="usage-meta">{m.calls} 次 · {fmtTokens(m.totalTokens)} token</div>
+                <div className="meter"><i style={{ width: `${Math.max(3, Math.round((m.costMicros / maxModelCost) * 100))}%` }} /></div>
+              </div>
+            ))}
+          </>
+        )}
+        {topUsers.length > 0 && (
+          <>
+            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">Top 用户</span><span className="s">按成本</span></div>
+            {topUsers.map((u) => (
+              <div key={u.userId} className="usage-row">
+                <div className="usage-h">
+                  <div className="usage-name">{u.name ?? '（未命名）'}<span>{u.userId.slice(0, 8)}</span></div>
+                  <div className="usage-num">{fmtCny(u.costMicros)}</div>
+                </div>
+                <div className="usage-meta">{fmtTokens(u.totalTokens)} token</div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n);
+}
+function fmtCny(micros: number): string {
+  const cny = micros / 1e6;
+  if (cny === 0) return '¥0';
+  return cny < 1 ? `¥${cny.toFixed(4)}` : `¥${cny.toFixed(2)}`;
 }
 
 function AuditView() {

@@ -11,6 +11,7 @@ import { recallMemories, recordFeedback } from '../src/services/memory.js';
 import { buildGenContext } from '../src/services/context.js';
 import { hybridSearch, resolveReferences } from '../src/services/retrieval.js';
 import type { MemoryConfig } from '../src/data/agents.js';
+import { recordTokenUsage, tokenUsageSummary } from '../src/services/usage.js';
 
 const tenantOf = async (token: string) =>
   (await prisma.user.findUnique({ where: { id: token } }))!.tenantId;
@@ -813,5 +814,41 @@ describe('TC-X 身份与账号注销', () => {
     const after = await api('GET', '/api/me', { token: t });
     assert.equal(after.status, 401, '注销后原登录态应失效');
     assert.equal(await prisma.user.count({ where: { id: t } }), 0, '用户记录应被删除');
+  });
+});
+
+// ───────────────────────── TC-Y Token 用量计量（计费 P1·旁路统计） ─────────────────────────
+describe('TC-Y Token 用量计量', () => {
+  test('Y1 recordTokenUsage 落库并估算成本；零 token（mock）跳过', async () => {
+    const t = await login(uniquePhone(), 'Token甲');
+    const tenantId = await tenantOf(t);
+    await recordTokenUsage({ tenantId, userId: t, sessionId: null, agentKey: 'strat', kind: 'deliverable', provider: 'openai', model: 'gpt-4o', usage: { inputTokens: 1000, outputTokens: 500, cachedInput: 0 } });
+    await recordTokenUsage({ tenantId, userId: t, kind: 'chat', provider: 'mock', model: 'template', usage: { inputTokens: 0, outputTokens: 0, cachedInput: 0 } });
+    const rows = await prisma.tokenUsage.findMany({ where: { userId: t } });
+    assert.equal(rows.length, 1, '零 token 的 mock 调用不应落库');
+    assert.equal(rows[0].totalTokens, 1500);
+    assert.equal(rows[0].costMicros, 54000); // gpt-4o 元价(美元价×7.2)：1000*18 + 500*72（微元）
+  });
+
+  test('Y2 tokenUsageSummary 与 /admin/token-usage 同口径', async () => {
+    const t = await login(uniquePhone(), 'Token乙');
+    const tenantId = await tenantOf(t);
+    await recordTokenUsage({ tenantId, userId: t, kind: 'deliverable', provider: 'openai', model: 'gpt-4o', usage: { inputTokens: 2000, outputTokens: 1000, cachedInput: 0 } });
+    const sum = await tokenUsageSummary(30);
+    assert.ok(sum.totals.totalTokens >= 3000, '总 token 应累计');
+    assert.ok(sum.byModel.find((m) => m.model === 'gpt-4o')?.calibrated, 'gpt-4o 单价应在价表内');
+    const view = await api('GET', '/api/admin/token-usage'); // helper 自动带 ADMIN_TOKEN
+    assert.equal(view.status, 200);
+    assert.equal(view.body.totals.totalTokens, sum.totals.totalTokens);
+  });
+
+  test('Y3 注销账号连带清除其 token 用量（外键安全）', async () => {
+    const t = await login(uniquePhone(), 'Token丙');
+    const tenantId = await tenantOf(t);
+    await recordTokenUsage({ tenantId, userId: t, kind: 'chat', provider: 'openai', model: 'gpt-4o', usage: { inputTokens: 100, outputTokens: 50, cachedInput: 0 } });
+    assert.equal(await prisma.tokenUsage.count({ where: { userId: t } }), 1);
+    const del = await api('DELETE', '/api/me', { token: t });
+    assert.equal(del.status, 200);
+    assert.equal(await prisma.tokenUsage.count({ where: { tenantId } }), 0, '注销后该租户 token 流水应清空');
   });
 });

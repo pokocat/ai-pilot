@@ -2,14 +2,14 @@
 // 走标准 /v1/chat/completions，兼容 OpenAI / Agnes / DeepSeek / Moonshot(Kimi) / 通义千问兼容模式 等。
 // 结构化成果用 function calling（tools）强约束。baseUrl/model/key/温度 来自运行时配置（可后台切换）。
 
-import { DELIVERABLE_TOOL, injectVariables, type Deliverable, type ChatReply, type GenContext } from '../schema.js';
+import { DELIVERABLE_TOOL, injectVariables, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 
 interface OAMessage { role: 'system' | 'user' | 'assistant'; content: string; }
 interface OAResponse {
   choices?: { message?: { content?: string | null; tool_calls?: { function?: { name?: string; arguments?: string } }[] } }[];
-  usage?: { total_tokens?: number };
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
   error?: { message?: string };
 }
 
@@ -38,7 +38,17 @@ function metaOf(ctx: GenContext): string {
   return parts.length ? parts.join(' · ') : '经营快照';
 }
 
-export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Deliverable> {
+// OpenAI usage → 归一 Usage。prompt_tokens 已含缓存命中，cached 仅作低价子集。
+function usageOf(data: OAResponse): Usage {
+  const u = data.usage;
+  return {
+    inputTokens: u?.prompt_tokens ?? 0,
+    outputTokens: u?.completion_tokens ?? 0,
+    cachedInput: u?.prompt_tokens_details?.cached_tokens ?? 0,
+  };
+}
+
+export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<Deliverable>> {
   const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
   const system = injectVariables(ctx.systemPrompt, ctx);
   const structureHint = tpl
@@ -55,23 +65,28 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     tool_choice: { type: 'function', function: { name: DELIVERABLE_TOOL.name } },
   });
 
+  const usage = usageOf(data);
   const args = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
   if (args) {
     const input = JSON.parse(args) as { title?: string; sections?: Deliverable['sections'] };
     return {
-      title: input.title || tpl?.title || '咨询成果',
-      icon: tpl?.icon ?? 'spark',
-      meta: metaOf(ctx),
-      sections: input.sections ?? [],
-      trust: TRUST_NOTE,
-      actions: ['save_to_library', 'export_pdf'],
+      result: {
+        title: input.title || tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections: input.sections ?? [],
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage,
     };
   }
+  // 真实调用已花 token：没拿到 function 输出也按真实 usage 记账，内容兜底 mock。
   const { mockDeliverable } = await import('./mock.js');
-  return mockDeliverable(ctx);
+  return { result: mockDeliverable(ctx), usage };
 }
 
-export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<ChatReply> {
+export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<ChatReply>> {
   const system = injectVariables(ctx.systemPrompt, ctx);
   const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   const data = await callChat(cfg, {
@@ -83,7 +98,10 @@ export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     ] as OAMessage[],
   });
   const text = (data.choices?.[0]?.message?.content ?? '').trim();
-  return { text: text || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' };
+  return {
+    result: { text: text || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
+    usage: usageOf(data),
+  };
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回 content 文本。 */

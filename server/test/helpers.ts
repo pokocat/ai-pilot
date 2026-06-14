@@ -65,6 +65,7 @@ export async function cleanBusiness(): Promise<void> {
   await prisma.project.deleteMany();
   await prisma.userAgent.deleteMany();
   await prisma.creditLedger.deleteMany();
+  await prisma.tokenUsage.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.profile.deleteMany();
   await prisma.user.deleteMany();

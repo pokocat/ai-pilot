@@ -14,6 +14,7 @@ import { reportRoutes } from './routes/reports.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { planRoutes } from './routes/plans.js';
 import { adminRoutes } from './routes/admin.js';
+import { adminAccountRoutes } from './routes/adminAccount.js';
 import { registerHttpAudit } from './services/audit.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
@@ -32,6 +33,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(reportRoutes, { prefix: '/api' });
   await app.register(knowledgeRoutes, { prefix: '/api' });
   await app.register(planRoutes, { prefix: '/api' });
+  await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin
   await app.register(adminRoutes, { prefix: '/api' });
 
   await app.ready();

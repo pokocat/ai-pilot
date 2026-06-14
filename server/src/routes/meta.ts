@@ -69,6 +69,7 @@ export async function metaRoutes(app: FastifyInstance) {
         await tx.memory.deleteMany({ where: { tenantId } });
         await tx.project.deleteMany({ where: { tenantId } });
         await tx.creditLedger.deleteMany({ where: { tenantId } });
+        await tx.tokenUsage.deleteMany({ where: { tenantId } });
         await tx.profile.deleteMany({ where: { tenantId } });
         await tx.auditLog.deleteMany({ where: { tenantId } });
         await tx.userAgent.deleteMany({ where: { userId: user.id } });
@@ -78,6 +79,7 @@ export async function metaRoutes(app: FastifyInstance) {
         // 多人租户：仅删除该用户自身相关数据
         await tx.userAgent.deleteMany({ where: { userId: user.id } });
         await tx.creditLedger.deleteMany({ where: { userId: user.id } });
+        await tx.tokenUsage.deleteMany({ where: { userId: user.id } });
         await tx.deliverable.deleteMany({ where: { userId: user.id } });
         await tx.session.deleteMany({ where: { userId: user.id } });
         await tx.memory.deleteMany({ where: { userId: user.id } });

@@ -4,16 +4,82 @@
 // provider 与 baseUrl/model/key 由「运营后台可切换的 DB 配置」决定（services/aiConfig），
 // env 仅作兜底；未配置真实 key 时一律降级 mock，保证可用。
 
-import { env } from '../env.js';
+import { env, isRealKey } from '../env.js';
 import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../services/aiConfig.js';
 import { mockChat, mockDeliverable } from './providers/mock.js';
-import type { Deliverable, ChatReply, GenContext, AiTestResult } from './schema.js';
+import { ZERO_USAGE, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
+import { recordTokenUsage, type UsageMeta } from '../services/usage.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
 function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
   const eff = effectiveProvider(cfg);
   return eff === 'mock' ? null : eff;
+}
+
+// 把「产出 + 真实 token + 来源」打包，便于在输出审核/缓存前统一记账。
+type Sourced<T> = { result: T; usage: Usage; provider: string; model: string };
+
+// 仅对真实计费 provider（claude/openai）记账；mock/dify（无 usage）跳过。记账内部 catch，不影响产出。
+async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ctx: GenContext, meta?: UsageMeta): Promise<void> {
+  if (s.provider !== 'claude' && s.provider !== 'openai') return;
+  await recordTokenUsage({
+    tenantId: meta?.tenantId ?? null,
+    userId: meta?.userId ?? null,
+    sessionId: meta?.sessionId ?? null,
+    agentKey: meta?.agentKey ?? ctx.agentKey ?? null,
+    kind,
+    provider: s.provider,
+    model: s.model,
+    usage: s.usage,
+  });
+}
+
+// —— per-agent 接入覆盖（providerMode=openai/dify）：绕过全局 provider 与结果缓存 ——
+
+// 把 per-agent 自定义 OpenAI 端点并入一个 ResolvedAiConfig（其余沿用全局/默认）。
+function openaiOverrideCfg(ctx: GenContext, base: ResolvedAiConfig): ResolvedAiConfig {
+  const rt = ctx.runtime!;
+  return { ...base, provider: 'openai', baseUrl: rt.baseUrl || base.baseUrl, model: rt.model || base.model, apiKey: rt.apiKey || '' };
+}
+
+// Dify 返回的 conversation_id 回写 Session，维持后续多轮上下文。
+async function persistDifyConversation(ctx: GenContext, conversationId: string | null): Promise<void> {
+  const rt = ctx.runtime;
+  if (!rt?.sessionId || !conversationId || conversationId === rt.conversationId) return;
+  await prisma.session
+    .update({ where: { id: rt.sessionId }, data: { difyConversationId: conversationId } })
+    .catch((err) => console.error('[gateway] persist dify conversation failed:', (err as Error).message));
+}
+
+async function runtimeChat(ctx: GenContext): Promise<Sourced<ChatReply>> {
+  const rt = ctx.runtime!;
+  if (rt.mode === 'dify') {
+    const { difyChat } = await import('./providers/dify.js');
+    const { reply, conversationId } = await difyChat(ctx);
+    await persistDifyConversation(ctx, conversationId);
+    return { result: reply, usage: ZERO_USAGE, provider: 'dify', model: 'dify' };
+  }
+  const cfg = openaiOverrideCfg(ctx, await getAiConfig());
+  if (!isRealKey(cfg.apiKey)) return { result: mockChat(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+  const { openaiChat } = await import('./providers/openai.js');
+  const m = await openaiChat(ctx, cfg);
+  return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model };
+}
+
+async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>> {
+  const rt = ctx.runtime!;
+  if (rt.mode === 'dify') {
+    const { difyDeliverable } = await import('./providers/dify.js');
+    const { deliverable, conversationId } = await difyDeliverable(ctx);
+    await persistDifyConversation(ctx, conversationId);
+    return { result: deliverable, usage: ZERO_USAGE, provider: 'dify', model: 'dify' };
+  }
+  const cfg = openaiOverrideCfg(ctx, await getAiConfig());
+  if (!isRealKey(cfg.apiKey)) return { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+  const { openaiDeliverable } = await import('./providers/openai.js');
+  const m = await openaiDeliverable(ctx, cfg);
+  return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model };
 }
 
 // —— 内容审核（演示用关键词；生产替换为合规审核服务） ——
@@ -49,54 +115,91 @@ function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string 
   return `${kind}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${profileSig}:${refSig}`;
 }
 
-export async function generateDeliverable(ctx: GenContext): Promise<Deliverable> {
+export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Promise<Deliverable> {
   if (!(await moderate('input', ctx.userMessage))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
+
+  // per-agent 接入覆盖：绕过全局 provider 与缓存（端点/会话因人/因体而异）。失败兜底 mock。
+  if (ctx.runtime) {
+    let sourced: Sourced<Deliverable>;
+    try {
+      sourced = await runtimeDeliverable(ctx);
+    } catch (err) {
+      console.error('[gateway] runtime deliverable fallback to mock:', (err as Error).message);
+      sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: '' };
+    }
+    await maybeRecord(sourced, 'deliverable', ctx, meta); // 记账早于输出审核：token 已花，审核拦截也要记
+    const outText = sourced.result.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
+    if (!(await moderate('output', outText))) {
+      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
+    }
+    return sourced.result;
+  }
+
   const cfg = await getAiConfig();
   const ck = cacheKey('deliverable', ctx, cfg);
   const cached = cache.get(ck);
-  if (cached && Date.now() - cached.at < TTL) return cached.v as Deliverable;
+  if (cached && Date.now() - cached.at < TTL) return cached.v as Deliverable; // 缓存命中：0 token，不记账
 
-  let result: Deliverable;
+  let sourced: Sourced<Deliverable>;
   try {
     const live = liveProvider(cfg);
     if (live === 'claude') {
       const { claudeDeliverable } = await import('./providers/claude.js');
-      result = await claudeDeliverable(ctx, cfg);
+      const m = await claudeDeliverable(ctx, cfg);
+      sourced = { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model };
     } else if (live === 'openai') {
       const { openaiDeliverable } = await import('./providers/openai.js');
-      result = await openaiDeliverable(ctx, cfg);
+      const m = await openaiDeliverable(ctx, cfg);
+      sourced = { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model };
     } else {
-      result = mockDeliverable(ctx);
+      sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
     }
   } catch (err) {
     console.error('[gateway] deliverable fallback to mock:', (err as Error).message);
-    result = mockDeliverable(ctx);
+    sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   }
 
-  const outText = result.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
+  await maybeRecord(sourced, 'deliverable', ctx, meta);
+  const outText = sourced.result.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
   if (!(await moderate('output', outText))) {
     throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
-  cache.set(ck, { v: result, at: Date.now() });
-  return result;
+  cache.set(ck, { v: sourced.result, at: Date.now() });
+  return sourced.result;
 }
 
-export async function chatComplete(ctx: GenContext): Promise<ChatReply> {
+export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<ChatReply> {
   if (!(await moderate('input', ctx.userMessage))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
+
+  // per-agent 接入覆盖：走该智能体自己的端点 / Dify 应用。失败兜底 mock。
+  if (ctx.runtime) {
+    try {
+      const s = await runtimeChat(ctx);
+      await maybeRecord(s, 'chat', ctx, meta);
+      await moderate('output', s.result.text);
+      return s.result;
+    } catch (err) {
+      console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
+      return mockChat(ctx);
+    }
+  }
+
   const cfg = await getAiConfig();
   try {
     const live = liveProvider(cfg);
     if (live) {
-      const r =
+      const m =
         live === 'claude'
           ? await (await import('./providers/claude.js')).claudeChat(ctx, cfg)
           : await (await import('./providers/openai.js')).openaiChat(ctx, cfg);
-      await moderate('output', r.text);
-      return r;
+      const s: Sourced<ChatReply> = { result: m.result, usage: m.usage, provider: live, model: cfg.model };
+      await maybeRecord(s, 'chat', ctx, meta);
+      await moderate('output', s.result.text);
+      return s.result;
     }
   } catch (err) {
     console.error('[gateway] chat fallback to mock:', (err as Error).message);
@@ -146,6 +249,22 @@ export async function pingModel(cfg: ResolvedAiConfig): Promise<AiTestResult> {
   } catch (err) {
     return { ok: false, latencyMs: Date.now() - t0, error: (err as Error).message, provider: cfg.provider, model: cfg.model };
   }
+}
+
+/** 测试某个智能体的 per-agent 接入（后台「测试连接」用）：openai 自定义端点或 Dify 应用。 */
+export async function pingAgentRuntime(rt: {
+  mode: 'openai' | 'dify';
+  baseUrl?: string; model?: string; apiKey?: string;
+  difyBaseUrl?: string; difyApiKey?: string;
+}): Promise<AiTestResult> {
+  if (rt.mode === 'dify') {
+    const { difyPing } = await import('./providers/dify.js');
+    const r = await difyPing({ difyBaseUrl: rt.difyBaseUrl, difyApiKey: rt.difyApiKey });
+    return { ok: r.ok, latencyMs: r.latencyMs, sample: r.sample, error: r.error, provider: 'dify', model: 'chat-messages' };
+  }
+  const base = await getAiConfig(true);
+  const cfg: ResolvedAiConfig = { ...base, provider: 'openai', baseUrl: rt.baseUrl || base.baseUrl, model: rt.model || base.model, apiKey: rt.apiKey || '' };
+  return pingModel(cfg);
 }
 
 /** 当前生效模型信息（供 /me 展示）。 */

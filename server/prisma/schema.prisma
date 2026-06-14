@@ -31,6 +31,7 @@ model Tenant {
   projects     Project[]
   reports      ReportDoc[]
   knowledge    KnowledgeItem[]
+  tokenUsages  TokenUsage[]
 
   @@map("tenant")
 }
@@ -56,8 +57,37 @@ model User {
   memories     Memory[]
   credits      CreditLedger[]
   agents       UserAgent[] // 已开通的智能体（赠送 / 购买 / 后台开通）
+  tokenUsages  TokenUsage[]
 
   @@map("app_user")
+}
+
+/// 运营后台管理员账户（与小程序用户分离）。主密钥 ADMIN_TOKEN 首次引导初始化一个账户，
+/// 之后用账号密码登录；主密钥保留为应急/找回通道。单账户：最多一行。
+model AdminAccount {
+  id           String         @id @default(cuid())
+  username     String         @unique
+  passwordHash String // scrypt$salt$hash（Node 内置 crypto，无外部依赖）
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  lastLoginAt  DateTime?
+  sessions     AdminSession[]
+
+  @@map("admin_account")
+}
+
+/// 运营后台登录会话：账号密码登录后下发的不透明 token（仍走 x-admin-token 头）。
+model AdminSession {
+  token     String   @id // 随机不透明串
+  accountId String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  account AdminAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@index([expiresAt])
+  @@map("admin_session")
 }
 
 /// 企业档案（首登 30 秒建档 + 可选补充资料）
@@ -94,6 +124,19 @@ model Agent {
   systemPrompt   String   @db.Text
   deliverableKey String? // 关联的产出模板 key（如「战略体检」）
   memoryConfig   Json // { longTerm, autoLearn, intensity, retentionDays, sources[] }
+
+  // —— 运行时接入方式（运营后台可为每个智能体单独配置）——
+  // inherit 跟随全局模型 | openai 自定义 OpenAI 兼容端点 | dify 绑定 Dify 应用
+  providerMode String  @default("inherit")
+  // 自定义 OpenAI 兼容端点（providerMode=openai 时生效）
+  apiBaseUrl   String? // 如 https://api.deepseek.com/v1
+  apiModel     String? // 如 deepseek-chat
+  apiKey       String? @db.Text
+  // Dify 应用（providerMode=dify 时生效）。chat-messages 接口
+  difyBaseUrl  String? // 如 http://ai.aibuzz.cn/v1
+  difyApiKey   String? @db.Text // 每个 Dify 应用专属 key
+  difyInputs   Json? // { difyVarName: "{企业档案}" }：本地上下文按占位符映射成 Dify inputs
+
   sort           Int      @default(0)
   updatedAt      DateTime @updatedAt
 
@@ -133,6 +176,7 @@ model Session {
   agentKey  String
   projectId String? // 归属项目（散落会话为 null）
   title     String   @default("新对话")
+  difyConversationId String? // Dify 应用多轮上下文 id（providerMode=dify 时由 Dify 返回并回写）
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -376,6 +420,33 @@ model CreditLedger {
   user   User   @relation(fields: [userId], references: [id])
 
   @@map("credit_ledger")
+}
+
+/// Token 用量流水（P1：旁路统计，不参与按次扣费）。一次真实模型调用记一行；mock / 缓存命中不记。
+model TokenUsage {
+  id           String   @id @default(cuid())
+  tenantId     String?
+  userId       String?
+  sessionId    String? // 溯源到会话
+  agentKey     String?
+  kind         String // deliverable | chat（v1 仅计这两条主路径）
+  provider     String // claude | openai
+  model        String
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  cachedInput  Int      @default(0) // 命中提示缓存的输入 token（计价更低）
+  totalTokens  Int      @default(0) // = input + output，便于 SUM
+  costMicros   Int      @default(0) // 估算成本，单位 1e-6 元（微元），整数防浮点漂移
+  creditCost   Int      @default(0) // 本次扣的点；P1 恒为 0，P2 接按 token 扣费时填实际
+  createdAt    DateTime @default(now())
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id])
+  user   User?   @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
+  @@index([model, createdAt])
+  @@map("token_usage")
 }
 
 /// 审计日志

@@ -119,11 +119,12 @@ export async function sessionRoutes(app: FastifyInstance) {
     const isDeliverable = !!agent.deliverableKey;
     const { ctx, memoryConfig, knowledgeUsed } = await buildGenContext({
       userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
+      sessionId: session.id, difyConversationId: session.difyConversationId,
     });
 
     try {
       if (isDeliverable) {
-        const deliverable = await generateDeliverable(ctx);
+        const deliverable = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey });
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'report', contentJson: deliverable as object },
         });
@@ -142,7 +143,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           knowledgeUsed, creditBalance,
         };
       }
-      const replyChat = await chatComplete(ctx);
+      const replyChat = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey });
       const msg = await prisma.message.create({
         data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object },
       });
@@ -237,7 +238,7 @@ export async function sessionRoutes(app: FastifyInstance) {
 
       if (isDeliverable) {
         send('meta', { kind: 'report' });
-        const deliverable = await generateDeliverable(ctx);
+        const deliverable = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey });
         send('begin', { title: deliverable.title, icon: deliverable.icon, meta: deliverable.meta });
         // 渐进式呈现：按 section 逐段下发（保留原型骨架→渐显动效）
         for (let i = 0; i < deliverable.sections.length; i++) {
@@ -269,7 +270,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('done', { messageId: msg.id });
       } else {
         send('meta', { kind: 'chat' });
-        const reply2 = await chatComplete(ctx);
+        const reply2 = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey });
         await sleep(700);
         send('chat', reply2);
         const msg = await prisma.message.create({

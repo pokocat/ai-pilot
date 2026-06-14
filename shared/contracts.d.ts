@@ -18,6 +18,31 @@ export interface MemoryConfig {
   sources: MemorySource[];
 }
 
+/** 智能体运行时接入方式：跟随全局模型 / 自定义 OpenAI 兼容端点 / 绑定 Dify 应用 */
+export type AgentProviderMode = 'inherit' | 'openai' | 'dify';
+
+/** 运营端读取的智能体接入配置（apiKey 脱敏为 has*，不回明文） */
+export interface AgentRuntimeView {
+  providerMode: AgentProviderMode;
+  apiBaseUrl: string;   // 自定义 OpenAI 兼容 baseUrl，如 https://api.deepseek.com/v1
+  apiModel: string;     // 自定义模型名，如 deepseek-chat
+  hasApiKey: boolean;   // 自定义端点是否已配置 key
+  difyBaseUrl: string;  // Dify 应用 baseUrl，如 http://ai.aibuzz.cn/v1
+  hasDifyKey: boolean;  // Dify 应用是否已配置 key
+  difyInputs: Record<string, string>; // { Dify输入变量名: "{企业档案}" } 本地上下文按占位符映射
+}
+
+/** 运营端更新智能体接入配置（key 仅在显式传入非空时更新；空串=清空） */
+export interface AgentRuntimeUpdate {
+  providerMode?: AgentProviderMode;
+  apiBaseUrl?: string;
+  apiModel?: string;
+  apiKey?: string;
+  difyBaseUrl?: string;
+  difyApiKey?: string;
+  difyInputs?: Record<string, string>;
+}
+
 /** 对话/前端消费的公开智能体字段（GET /agents） */
 export interface Agent {
   key: string;
@@ -58,6 +83,7 @@ export interface AgentDetail {
   key: string; name: string; role: string; icon: string; type: AgentType;
   gift: boolean; billing: AgentBilling; price: number;
   enabled: boolean; systemPrompt: string; memoryConfig: MemoryConfig; deliverableKey: string | null;
+  runtime: AgentRuntimeView; // 接入方式（跟随全局 / 自定义端点 / Dify 应用）
 }
 
 /** 运营端新增智能体入参（POST /admin/agents） */
@@ -72,7 +98,20 @@ export interface AdminAgentUpdate {
   gift?: boolean; billing?: AgentBilling; price?: number; enabled?: boolean;
   greet?: string; deliverableKey?: string | null;
   systemPrompt?: string; memoryConfig?: MemoryConfig;
+  runtime?: AgentRuntimeUpdate; // 接入方式配置
 }
+
+/* ────────────── 运营后台账户（单一管理员 + 主密钥应急） ────────────── */
+/** 后台登录态（GET /admin/auth/status，公开）：是否已初始化账户、主密钥是否启用 */
+export interface AdminAuthStatus { initialized: boolean; masterKeyEnabled: boolean; }
+/** 初始化账户（POST /admin/auth/init）：需主密钥；仅未初始化时可用 */
+export interface AdminInitRequest { masterKey: string; username: string; password: string; }
+/** 账号密码登录（POST /admin/auth/login） */
+export interface AdminLoginRequest { username: string; password: string; }
+/** 登录/初始化成功：下发会话 token（作为 x-admin-token 发送） */
+export interface AdminAuthResult { token: string; username: string; }
+/** 改密（POST /admin/auth/password，需登录）：主密钥可直接重置，否则需当前密码 */
+export interface AdminChangePasswordRequest { currentPassword?: string; newPassword: string; masterKey?: string; }
 
 /* ────────────── 账号 / 用户 ────────────── */
 export interface AiInfo { provider: string; model: string; ready?: boolean; claudeReady?: boolean; }
@@ -359,6 +398,39 @@ export interface AdminUsageSummary {
 export interface AdminUsageView {
   summary: AdminUsageSummary;
   users: AdminUserItem[];
+}
+// —— Token 用量看板（计费 P1：旁路统计，不参与按次扣费）。成本 costMicros 单位 = 1e-6 元（微元）。 ——
+export interface TokenUsageTotals {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costMicros: number;
+}
+export interface TokenUsageModelStat {
+  model: string;
+  calls: number;
+  totalTokens: number;
+  costMicros: number;
+  calibrated: boolean; // false = 该模型单价未入价表，成本为兜底估算（看板标「待校准」）
+}
+export interface TokenUsageDayStat {
+  day: string; // YYYY-MM-DD（UTC）
+  totalTokens: number;
+  costMicros: number;
+}
+export interface TokenUsageUserStat {
+  userId: string;
+  name: string | null;
+  totalTokens: number;
+  costMicros: number;
+}
+export interface AdminTokenUsageView {
+  windowDays: number;
+  totals: TokenUsageTotals;
+  byModel: TokenUsageModelStat[];
+  byDay: TokenUsageDayStat[];
+  topUsers: TokenUsageUserStat[];
 }
 export interface AdminAuditItem {
   id: string;
