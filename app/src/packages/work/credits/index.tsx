@@ -70,16 +70,22 @@ export default function Credits() {
 }
 
 // 本月 AI 应用额度（客户端只看 %，不显示 token 数）。limit<0=不限量；limit=0=未开通（无额度）。
+// 额度体量大（如百万），小用量整数 % 会被抹成 0：<0.1% 显示「<0.1%」，<10% 保留 1 位小数。
 function quotaLabel(q?: { limit: number; used: number; unlimited: boolean }): string {
   if (!q) return '—';
   if (q.unlimited || q.limit < 0) return '不限量';
   if (q.limit === 0) return '未开通'; // 无额度：与「已用 0%」区分，避免误以为额度充足
-  const pct = Math.min(100, Math.round((q.used / q.limit) * 100));
-  return `本月已用 ${pct}%`;
+  if (q.used <= 0) return '本月已用 0%';
+  const raw = (q.used / q.limit) * 100;
+  if (raw < 0.1) return '本月已用 <0.1%';
+  const pct = raw < 10 ? Math.round(raw * 10) / 10 : Math.round(raw);
+  return `本月已用 ${Math.min(100, pct)}%`;
 }
 function quotaPct(q?: { limit: number; used: number; unlimited: boolean }): number {
   if (!q || q.limit < 0) return q?.unlimited ? 100 : 0;
-  return q.limit > 0 ? Math.min(100, Math.round((q.used / q.limit) * 100)) : 0;
+  if (q.limit <= 0 || q.used <= 0) return 0;
+  const raw = (q.used / q.limit) * 100;
+  return Math.min(100, Math.max(2, raw)); // 有消耗时进度条至少留 2% 可见
 }
 // ISO → MM-DD HH:mm
 function fmtAt(iso: string): string {
