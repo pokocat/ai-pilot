@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
+import Taro from '@tarojs/taro';
+import Icon from '../Icon';
 import { COLORS, colorIndex } from '../../data/colors';
 import { api, type SurveyQ } from '../../services/api';
 import { store } from '../../services/store';
@@ -29,6 +31,7 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [name, setName] = useState('');
   const [company, setCompany] = useState('');
+  const [nameLoading, setNameLoading] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -65,6 +68,20 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
   const next = () => {
     if (first) setStep('profile');
     else confirmColor();
+  };
+
+  const suggestName = async () => {
+    if (nameLoading) return;
+    setNameLoading(true);
+    try {
+      const r = await api.suggestAlias();
+      setName(r.name);
+      Taro.showToast({ title: `已取花名：${r.name}`, icon: 'none' });
+    } catch (e) {
+      Taro.showToast({ title: (e as Error)?.message || '起名失败，请稍后再试', icon: 'none' });
+    } finally {
+      setNameLoading(false);
+    }
   };
 
   const finishProfile = async () => {
@@ -130,13 +147,23 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
             <Text className="pk-sub">先认识一下你，产出会据此量身定制。</Text>
 
             <View className="pf-id">
-              <Input
-                className="pf-input"
-                value={name}
-                maxlength={20}
-                placeholder="怎么称呼你？如「王越」"
-                onInput={(e) => setName(e.detail.value)}
-              />
+              <View className="pf-name">
+                <Input
+                  className="pf-input"
+                  value={name}
+                  maxlength={20}
+                  placeholder="怎么称呼你？如「王越」"
+                  onInput={(e) => setName(e.detail.value)}
+                />
+                <View
+                  className={`pf-alias ${nameLoading ? 'off' : ''}`}
+                  style={{ background: nameLoading ? 'var(--surface-2)' : c.vars['--accent-soft'] }}
+                  onClick={suggestName}
+                >
+                  <Icon name="spark" size={18} color={nameLoading ? '#9AA0A6' : c.vars['--accent']} />
+                  <Text>取花名</Text>
+                </View>
+              </View>
               <Input
                 className="pf-input"
                 value={company}

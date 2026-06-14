@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Input, Button } from '@tarojs/components';
 import Taro from '@tarojs/taro';
-import Icon from '../Icon';
 import { api } from '../../services/api';
 import { store } from '../../services/store';
 import { useStore } from '../../hooks/useStore';
@@ -17,7 +16,6 @@ interface Props {
 export default function Login({ open, onLoggedIn }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
-  const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [sent, setSent] = useState(0); // 验证码倒计时
@@ -25,7 +23,6 @@ export default function Login({ open, onLoggedIn }: Props) {
   const [loading, setLoading] = useState(false);
   const [wechatLoading, setWechatLoading] = useState(false);
   const [onetapLoading, setOnetapLoading] = useState(false);
-  const [nameLoading, setNameLoading] = useState(false);
 
   // 打开时隐藏底栏（复用 overlay 标志）
   useEffect(() => {
@@ -67,7 +64,7 @@ export default function Login({ open, onLoggedIn }: Props) {
     try {
       let loginCode: string | undefined;
       try { loginCode = await getWechatCode(); } catch { /* 关联 openid 失败不阻断登录 */ }
-      const r = await api.wechatPhoneLogin(detail.code, loginCode, name.trim() || undefined);
+      const r = await api.wechatPhoneLogin(detail.code, loginCode);
       await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
       onLoggedIn(r.onboarded);
     } catch (err) {
@@ -82,7 +79,7 @@ export default function Login({ open, onLoggedIn }: Props) {
     setWechatLoading(true);
     try {
       const wxCode = await getWechatCode();
-      const r = await api.wechatLogin(wxCode, name.trim() || undefined);
+      const r = await api.wechatLogin(wxCode);
       await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
       onLoggedIn(r.onboarded);
     } catch (e) {
@@ -112,27 +109,13 @@ export default function Login({ open, onLoggedIn }: Props) {
     }
   };
 
-  const suggestName = async () => {
-    if (nameLoading) return;
-    setNameLoading(true);
-    try {
-      const r = await api.suggestAlias();
-      setName(r.name);
-      Taro.showToast({ title: `已填入：${r.name}`, icon: 'none' });
-    } catch (e) {
-      Taro.showToast({ title: (e as Error)?.message || '起名失败，请稍后再试', icon: 'none' });
-    } finally {
-      setNameLoading(false);
-    }
-  };
-
   const submit = async () => {
     if (!phoneOk) { Taro.showToast({ title: '请输入正确手机号', icon: 'none' }); return; }
     if (!codeOk) { Taro.showToast({ title: '请输入短信验证码', icon: 'none' }); return; }
     if (busy) return;
     setLoading(true);
     try {
-      const r = await api.login(phone, name.trim() || undefined, code);
+      const r = await api.login(phone, undefined, code);
       await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
       onLoggedIn(r.onboarded);
     } catch (e) {
@@ -173,23 +156,6 @@ export default function Login({ open, onLoggedIn }: Props) {
             <View className="lg-sep"><Text>或用短信验证码登录</Text></View>
           </>
         )}
-
-        <View className="lg-field">
-          <Input
-            className="lg-input"
-            maxlength={20}
-            value={name}
-            placeholder="称呼 / 花名（可选）"
-            onInput={(e) => setName(e.detail.value)}
-          />
-          <View
-            className={`lg-alias ${nameLoading ? 'off' : ''}`}
-            style={{ background: nameLoading ? 'var(--surface-2)' : 'var(--accent-soft)' }}
-            onClick={suggestName}
-          >
-            <Icon name="spark" size={18} color={nameLoading ? '#9AA0A6' : accent} />
-          </View>
-        </View>
 
         <View className="lg-field">
           <Text className="lg-pre">+86</Text>
