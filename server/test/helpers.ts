@@ -68,6 +68,7 @@ export async function cleanBusiness(): Promise<void> {
   await prisma.tokenUsage.deleteMany();
   await prisma.tokenWallet.deleteMany();
   await prisma.auditLog.deleteMany();
+  await prisma.smsCode.deleteMany();
   await prisma.profile.deleteMany();
   await prisma.user.deleteMany();
   await prisma.tenant.deleteMany();
@@ -97,7 +98,7 @@ export async function api<T = any>(
   return { status: res.statusCode, body };
 }
 
-/** 登录（手机号 fake 登录）→ 返回 token(=userId)。 */
+/** 登录（手机号兼容免码登录）→ 返回 token(=userId)。 */
 export async function login(phone: string, name?: string): Promise<string> {
   const r = await api<{ token: string }>('POST', '/api/auth/login', { body: { phone, name } });
   if (r.status !== 200) throw new Error(`login failed: ${r.status} ${JSON.stringify(r.body)}`);

@@ -8,7 +8,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
-  Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView,
+  Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -64,10 +64,15 @@ async function request<T>(path: string, method: keyof typeof Taro.request | any 
 export const api = {
   suggestAlias: () =>
     IS_MOCK ? mock.suggestAlias() : request<AliasSuggestionResult>('/auth/suggest-name'),
-  login: (phone: string, name?: string) =>
-    IS_MOCK ? mock.login(phone, name) : request<LoginResult>('/auth/login', 'POST', { phone, name }),
+  sendSmsCode: (phone: string) =>
+    IS_MOCK ? mock.sendSmsCode(phone) : request<SmsSendResult>('/auth/sms/send', 'POST', { phone }),
+  login: (phone: string, name?: string, code?: string) =>
+    IS_MOCK ? mock.login(phone, name, code) : request<LoginResult>('/auth/login', 'POST', { phone, name, code }),
   wechatLogin: (code: string, nickname?: string) =>
     IS_MOCK ? mock.wechatLogin(code, nickname) : request<LoginResult>('/auth/wechat-login', 'POST', { code, nickname }),
+  // 本机号一键登录：phoneCode=getPhoneNumber 的 code，loginCode=wx.login 的 code（用于关联 openid）。
+  wechatPhoneLogin: (phoneCode: string, loginCode?: string, name?: string) =>
+    IS_MOCK ? mock.wechatPhoneLogin(phoneCode, name) : request<LoginResult>('/auth/wechat-phone', 'POST', { phoneCode, loginCode, name }),
   me: () => (IS_MOCK ? mock.me() : request<Me>('/me')),
   myCredits: () => (IS_MOCK ? mock.myCredits() : request<MyCreditsView>('/me/credits')),
   plans: () => (IS_MOCK ? mock.plans() : request<Plan[]>('/plans')),

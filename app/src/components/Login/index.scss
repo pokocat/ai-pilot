@@ -30,6 +30,19 @@
 }
 .lg-alias.off { opacity: .7; }
 
+/* 本机号一键登录：主按钮（本命色）。weapp Button 需清掉默认描边与内边距。 */
+.lg-onetap {
+  width: 100%; height: 52px; line-height: 52px; border-radius: 14px;
+  color: #fff; font-size: 16px; font-weight: 600;
+  margin-bottom: 10px; padding: 0; border: none;
+}
+.lg-onetap::after { border: none; }
+.lg-onetap.off { opacity: .6; }
+.lg-wx-link {
+  display: block; text-align: center; font-size: 13px; font-weight: 500;
+  color: var(--ink-2); margin-bottom: 18px;
+}
+
 .lg-wx {
   width: 100%; height: 52px; border-radius: 14px; color: #fff;
   display: flex; align-items: center; justify-content: center;

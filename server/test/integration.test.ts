@@ -13,6 +13,8 @@ import { hybridSearch, resolveReferences } from '../src/services/retrieval.js';
 import type { MemoryConfig } from '../src/data/agents.js';
 import { recordTokenUsage, tokenUsageSummary } from '../src/services/usage.js';
 import { setQuota, getQuotaState, chargeQuota, ensureQuota } from '../src/services/tokenQuota.js';
+import { percentEncode, canonicalQuery, aliyunSignature } from '../src/services/sms.js';
+import { _resetTokenCache } from '../src/services/wechat.js';
 
 const tenantOf = async (token: string) =>
   (await prisma.user.findUnique({ where: { id: token } }))!.tenantId;
@@ -93,6 +95,101 @@ describe('TC-A 鉴权与账号隔离基线', () => {
     const t = await login(uniquePhone());
     const owner = await api('GET', '/api/admin/overview', { token: t, adminToken: false });
     assert.equal(owner.status, 403);
+  });
+});
+
+// ───────────────────────── TC-F 短信验证码登录 / 一键登录 ─────────────────────────
+describe('TC-F 短信验证码登录 / 一键登录', () => {
+  test('F1 发送验证码 → 演示口径回传 devCode + 冷却/有效期', async () => {
+    const phone = uniquePhone();
+    const r = await api('POST', '/api/auth/sms/send', { body: { phone } });
+    assert.equal(r.status, 200);
+    assert.match(String(r.body.devCode), /^\d{6}$/);
+    assert.ok(r.body.cooldownSec > 0 && r.body.expiresInSec > 0);
+  });
+
+  test('F2 正确验证码 → 登录建号；返回真实手机号', async () => {
+    const phone = uniquePhone();
+    const sent = await api('POST', '/api/auth/sms/send', { body: { phone } });
+    const r = await api('POST', '/api/auth/login', { body: { phone, code: sent.body.devCode, name: '丙公司' } });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.isNew, true);
+    assert.equal(r.body.user.phone, phone);
+    const me = await api('GET', '/api/me', { token: r.body.token });
+    assert.equal(me.status, 200);
+  });
+
+  test('F3 错误验证码 → 400 SMS_CODE_INVALID', async () => {
+    const phone = uniquePhone();
+    await api('POST', '/api/auth/sms/send', { body: { phone } });
+    const r = await api('POST', '/api/auth/login', { body: { phone, code: '000000' } });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.code, 'SMS_CODE_INVALID');
+  });
+
+  test('F4 验证码一次性：消费后再用即失效', async () => {
+    const phone = uniquePhone();
+    const sent = await api('POST', '/api/auth/sms/send', { body: { phone } });
+    const code = sent.body.devCode as string;
+    assert.equal((await api('POST', '/api/auth/login', { body: { phone, code } })).status, 200);
+    assert.equal((await api('POST', '/api/auth/login', { body: { phone, code } })).status, 400);
+  });
+
+  test('F5 冷却内重复发送 → 429 SMS_TOO_FREQUENT', async () => {
+    const phone = uniquePhone();
+    assert.equal((await api('POST', '/api/auth/sms/send', { body: { phone } })).status, 200);
+    const b = await api('POST', '/api/auth/sms/send', { body: { phone } });
+    assert.equal(b.status, 429);
+    assert.equal(b.body.code, 'SMS_TOO_FREQUENT');
+  });
+
+  test('F6 免码登录仍可用（未传 code，向后兼容演示/测试）', async () => {
+    const r = await api('POST', '/api/auth/login', { body: { phone: uniquePhone() } });
+    assert.equal(r.status, 200);
+  });
+
+  test('F7 本机号一键登录：phoneCode 换号 → 登录建号，复登命中同号（mock 微信取号）', async () => {
+    const oldFetch = globalThis.fetch;
+    process.env.WECHAT_MINI_APPID = 'wx-test-appid';
+    process.env.WECHAT_MINI_SECRET = 'wx-test-secret';
+    _resetTokenCache();
+    const phone = uniquePhone();
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url.includes('stable_token')) {
+        return new Response(JSON.stringify({ access_token: 'tok-test', expires_in: 7200 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('getuserphonenumber')) {
+        return new Response(JSON.stringify({ errcode: 0, phone_info: { purePhoneNumber: phone, countryCode: '86' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error('unexpected fetch ' + url);
+    }) as typeof fetch;
+    try {
+      const r = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-123' } });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.isNew, true);
+      assert.equal(r.body.user.phone, phone);
+      const again = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-456' } });
+      assert.equal(again.body.token, r.body.token, '同号应复用同一账号');
+    } finally {
+      globalThis.fetch = oldFetch;
+      delete process.env.WECHAT_MINI_APPID;
+      delete process.env.WECHAT_MINI_SECRET;
+      _resetTokenCache();
+    }
+  });
+
+  test('F8 运营商一键登录入口预留 → 501 NOT_IMPLEMENTED', async () => {
+    const r = await api('POST', '/api/auth/carrier-onetap', { body: { token: 't' } });
+    assert.equal(r.status, 501);
+    assert.equal(r.body.code, 'CARRIER_ONETAP_NOT_IMPLEMENTED');
+  });
+
+  test('F9 阿里云签名工具：百分号编码与排序确定、可复现', () => {
+    assert.equal(percentEncode('a b+c*d~e'), 'a%20b%2Bc%2Ad~e');
+    assert.equal(canonicalQuery({ b: '2', a: '1', Ab: '3' }), 'Ab=3&a=1&b=2');
+    const p = { Action: 'SendSms', PhoneNumbers: '13800138000', SignName: '军师' };
+    assert.equal(aliyunSignature('GET', p, 'sk'), aliyunSignature('GET', p, 'sk'));
   });
 });
 

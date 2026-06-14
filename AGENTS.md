@@ -105,7 +105,7 @@ repo/
 
 ## 6. 账号与数据隔离
 
-- **登录**：小程序 server 模式支持微信账号登录（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号）；手机号 fake 登录仍保留为演示/兜底（验证码暂不校验，演示码 `888888`）。注册称呼可留空，也可点称呼框右侧的 spark 图标从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户，套餐赠送算力。
+- **登录**：小程序 server 模式优先支持本机号一键登录（`getPhoneNumber` code → 服务端 `getuserphonenumber` 换手机号 → 自有 token），也支持微信账号登录（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号）和短信验证码登录（`POST /auth/sms/send` → `POST /auth/login`，生产设 `SMS_PROVIDER=aliyun`、`SMS_REQUIRE_CODE=true`；当前阿里云短信模板 `ALIYUN_SMS_TEMPLATE_CODE=SMS_508120103`）。手机号免码登录仅保留为开发/测试兼容兜底。注册称呼可留空，也可点称呼框右侧的 spark 图标从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户，套餐赠送算力。
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
 - **微信密钥**：`WECHAT_MINI_SECRET` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
@@ -113,7 +113,7 @@ repo/
 - **智能体开通**：`free`/`metered` 智能体无需开通即可用；`unlock` 智能体需用户用算力购买（`POST /agents/:key/purchase`）或运营后台开通后才能对话/产出，未开通产出返回 `403 AGENT_LOCKED` 且不落会话。
 - **离线兜底**：server 模式下后端不可达时，登录回退为 `local-<手机号>` 本地会话，保证可体验（无服务端数据）。
 - **退出登录**：「我的」页底部。
-- 端到端隔离已验证（见 §11）。生产应把 `token=userId` 换成**短信验证码 + JWT**，路由隔离逻辑不变。
+- 端到端隔离已验证（见 §11）。短信验证码已接入；生产仍应把 `token=userId` 换成 **JWT**，路由隔离逻辑不变。
 
 ---
 
@@ -169,8 +169,10 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | 方法 路径 | 说明 | 鉴权 |
 |---|---|---|
 | `GET /auth/suggest-name` | 注册页 AI 起花名（古典武侠/军事花名，只填用户称呼） | 否 |
-| `POST /auth/login` | 手机号 fake 登录/注册 | 否 |
+| `POST /auth/sms/send` | 发送短信验证码（console/阿里云 provider，模板 `SMS_508120103`） | 否 |
+| `POST /auth/login` | 手机号登录/注册；传 `code` 时校验短信验证码，生产可强制 `SMS_REQUIRE_CODE=true` | 否 |
 | `POST /auth/wechat-login` | 小程序微信登录：code 换 openid/unionid 后注册/登录 | 否 |
+| `POST /auth/wechat-phone` | 小程序本机号一键登录：getPhoneNumber code 换手机号后注册/登录 | 否 |
 | `GET /health` | 健康检查 | 否 |
 | `GET /me` · `PUT /me/color` | 当前用户(+onboarded+ai信息+军师档案) · 改本命色 | 是 |
 | `GET /agents` · `GET /agents/:key` | 智能体注册表；带 token 时回填 `owned` | 否 |
@@ -445,7 +447,7 @@ mock 可随时预览；**正式上传/审核**还需：
 ## 13. 已知限制 / TODO
 
 - **miniprogram-ci 上传**：云端执行环境的网络白名单未放行 `servicewechat.com`（报 `Host not in allowlist`），无法在本沙箱内直传。需从**本机**执行上传，或放开环境网络策略后重试；另注意上传密钥若开了 IP 白名单，需把执行机出口 IP 加入小程序后台。本机命令见 §11。
-- 自有登录态仍是演示 token（`token=userId`）；微信 openid 已接入，手机号短信校验与 JWT 仍待生产化。
+- 自有登录态仍是演示 token（`token=userId`）；微信 openid、本机号一键登录与短信验证码校验已接入，JWT/短信强制校验开关生产化仍待落地。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 内容审核/计量/缓存为演示级（关键词 / 内存）；生产替换为合规审核 + Redis + 计费台账。
 - 套餐购买为演示级（直接切套餐并写入算力流水）；生产需接微信支付/订单状态机/支付回调验签/幂等入账，避免绕过支付直接加算力。

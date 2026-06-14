@@ -1,6 +1,6 @@
 {
   "name": "junshi-app",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "军师 · AI 商业军师 — 移动端（Taro 跨端：微信小程序 + H5）",
   "templateInfo": {
@@ -17,7 +17,11 @@
     "dev:h5:server": "TARO_APP_MODE=server taro build --type h5 --watch",
     "serve:h5": "node scripts/serve-h5.mjs"
   },
-  "browserslist": ["last 3 versions", "Android >= 4.1", "ios >= 8"],
+  "browserslist": [
+    "last 3 versions",
+    "Android >= 4.1",
+    "ios >= 8"
+  ],
   "dependencies": {
     "@babel/runtime": "^7.24.0",
     "@tarojs/components": "3.6.34",

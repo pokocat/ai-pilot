@@ -28,4 +28,21 @@ export const env = {
   // 知识/记忆向量近邻检索：默认关闭走内存余弦（零依赖）；
   // 置 true 且已执行 prisma/pgvector.sql（建 vector 列 + HNSW）后，走 pgvector 的 <=> 下推。
   pgvectorEnabled: (process.env.PGVECTOR_ENABLED ?? 'false') === 'true',
+
+  // —— 短信验证码登录 ——
+  // provider=console：开发/演示，只打日志不发真短信，验证码随响应回传（便于联调）。
+  //          aliyun：阿里云短信，需补全下方 ALIYUN_SMS_* 配置。
+  smsProvider: (process.env.SMS_PROVIDER ?? 'console') as 'console' | 'aliyun',
+  smsRequireCode: (process.env.SMS_REQUIRE_CODE ?? 'false') === 'true', // 生产置 true：/auth/login 强制校验验证码
+  smsReturnCode: (process.env.SMS_RETURN_CODE ?? 'false') === 'true',   // 强制把验证码随响应返回（默认仅 console+非生产时返回）
+  smsCodeTtlSec: Number(process.env.SMS_CODE_TTL_SEC ?? 300),           // 验证码有效期
+  smsResendCooldownSec: Number(process.env.SMS_RESEND_COOLDOWN_SEC ?? 60), // 同号两次发送最小间隔
+  smsMaxPerHour: Number(process.env.SMS_MAX_PER_HOUR ?? 5),             // 同号每小时上限
+  smsMaxAttempts: Number(process.env.SMS_MAX_ATTEMPTS ?? 5),            // 同一验证码最多校验次数
+  // 阿里云短信（SMS_PROVIDER=aliyun 时必填）
+  aliyunSmsKeyId: process.env.ALIYUN_SMS_ACCESS_KEY_ID ?? '',
+  aliyunSmsKeySecret: process.env.ALIYUN_SMS_ACCESS_KEY_SECRET ?? '',
+  aliyunSmsSignName: process.env.ALIYUN_SMS_SIGN_NAME ?? '',
+  aliyunSmsTemplateCode: process.env.ALIYUN_SMS_TEMPLATE_CODE ?? '',
+  aliyunSmsRegion: process.env.ALIYUN_SMS_REGION ?? 'cn-hangzhou',
 };

@@ -8,6 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-14** · **配置短信验证码模板并补登录链路文档**：`server/.env.example` 将阿里云短信模板固定为 `SMS_508120103`；AGENTS/DEPLOYMENT/SMS_LOGIN/ROADMAP 同步短信验证码、本机号一键登录与 JWT 待生产化状态，后续线上部署需在服务端环境写入同一模板号。
 - **2026-06-14** · **拆分 AGENTS 变更日志**：新增 `docs/CHANGELOG.md` 承接历史变更日志，`AGENTS.md` 只保留维护约定与入口链接，减少后续 agent 初始加载上下文；§0/§14 同步改为要求在独立 changelog 顶部追加记录。
 - **2026-06-14** · **沉淀常用调试/部署/实时预览指令**：§11 新增本地三端调试、小程序 mock/server 真机预览、`screen` 实时 watch、DevTools `auto-preview/preview`、服务器升级发布与微信小程序上传路径，后续 agent 可直接按 AGENTS 执行常用操作。
 - **2026-06-13** · **新增小程序上传版本记录**：新增 `docs/WEAPP_RELEASES.md` 作为微信小程序上传版本 ledger；§11 上传约束改为引用该文件，要求上传命令版本号/描述与记录一致，AGENTS 不再承载每次上传明细。

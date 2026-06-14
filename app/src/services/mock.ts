@@ -7,7 +7,7 @@ import type {
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
-  MyCreditItem, MyCreditsView, TokenQuotaView,
+  MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
 } from '../../../shared/contracts';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
@@ -97,6 +97,8 @@ interface UserData {
 const uid = (p = '') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 const now = () => new Date().toISOString();
 const dataKey = (token: string) => `mock.data.${token}`;
+// 演示用：记录每个手机号最近一条短信验证码（仅内存，刷新即清）。
+const mockSmsCodes: Record<string, string> = {};
 
 function load(token: string): UserData {
   try {
@@ -393,7 +395,19 @@ export const mock = {
     return delay({ name, source: '古典武侠/军事花名' }, 120);
   },
 
-  async login(phone: string, name?: string): Promise<LoginResult> {
+  // 演示短信：固定回填 888888，按手机号记下最近一条便于 login 校验「错码」路径。
+  async sendSmsCode(phone: string): Promise<SmsSendResult> {
+    mockSmsCodes[phone] = '888888';
+    return delay({ cooldownSec: 60, expiresInSec: 300, devCode: '888888' }, 200);
+  },
+
+  async login(phone: string, name?: string, code?: string): Promise<LoginResult> {
+    // 传了验证码就在本地比对（演示「错码」拦截）；未传则放行（兼容免码演示）。
+    if (code !== undefined) {
+      const expect = mockSmsCodes[phone] ?? '888888';
+      if (code !== expect) throw Object.assign(new Error('验证码错误或已过期'), { code: 'SMS_CODE_INVALID' });
+      delete mockSmsCodes[phone];
+    }
     const token = `mock-${phone}`;
     const existed = !!Taro.getStorageSync(dataKey(token));
     const d = load(token);
@@ -402,6 +416,22 @@ export const mock = {
     return delay({
       token, isNew: !existed, onboarded: d.onboarded,
       user: { id: token, name: d.name, phone, benmingColor: d.benmingColor },
+    });
+  },
+
+  // 本机号一键登录（演示）：用 phoneCode 派生一个稳定手机号，复用手机号建号逻辑。
+  async wechatPhoneLogin(phoneCode: string, name?: string): Promise<LoginResult> {
+    let h = 0;
+    for (let i = 0; i < phoneCode.length; i++) h = (h * 31 + phoneCode.charCodeAt(i)) >>> 0;
+    const phone = ('1' + String(3_900_000_000 + (h % 90_000_000)).padStart(10, '0')).slice(0, 11);
+    const token = `mock-${phone}`;
+    const existed = !!Taro.getStorageSync(dataKey(token));
+    const d = load(token);
+    if (name) d.name = name;
+    save(token, d);
+    return delay({
+      token, isNew: !existed, onboarded: d.onboarded,
+      user: { id: token, name: d.name, phone, benmingColor: d.benmingColor, wechatLinked: true },
     });
   },
 

@@ -168,7 +168,13 @@ export interface LoginRequest { phone: string; name?: string; code?: string; }
 export interface AliasSuggestionResult { name: string; source: string; }
 /** 更新身份（称呼 + 公司/品牌名）：首登建档 / 设置页 */
 export interface UpdateIdentityRequest { name?: string; company?: string; }
+/** 发送短信验证码（POST /auth/sms/send） */
+export interface SmsSendRequest { phone: string; }
+/** 发送结果：cooldownSec 倒计时、expiresInSec 有效期；devCode 仅演示口径回传，便于自动回填。 */
+export interface SmsSendResult { cooldownSec: number; expiresInSec: number; devCode?: string; }
 export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl?: string; }
+/** 本机号一键登录（POST /auth/wechat-phone）：phoneCode=getPhoneNumber 的 code；loginCode=wx.login 的 code（可选，用于关联 openid）。 */
+export interface WechatPhoneLoginRequest { phoneCode: string; loginCode?: string; name?: string; }
 export interface LoginResult {
   token: string; isNew: boolean; onboarded: boolean;
   user: { id: string; name: string; phone: string; benmingColor: string; wechatLinked?: boolean };
