@@ -69,7 +69,7 @@ export default function CustomTabBar() {
               return (
                 <View key={t.path} className="tab tab-center" onClick={() => switchTo(i)}>
                   <View className="center-btn" style={{ background: accent }}>
-                    <Icon name="chat" size={22} color="#fff" />
+                    <Icon name="chat" size={22} color="#FBFAF6" />
                   </View>
                   <Text className="tab-label center-label">{t.text}</Text>
                 </View>

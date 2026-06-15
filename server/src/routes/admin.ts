@@ -304,7 +304,7 @@ export async function adminRoutes(app: FastifyInstance) {
     return t;
   });
 
-  // —— 审计日志：所有带 x-user-id 的小程序 API 行为 + 关键业务/后台操作 ——
+  // —— 审计日志：全量 API 行为 + 登录尝试 + 关键业务/后台操作 ——
   app.get<{ Querystring: { limit?: string; userId?: string; action?: string } }>(
     '/admin/audit-logs',
     async (req): Promise<AdminAuditItem[]> => {
@@ -331,9 +331,16 @@ export async function adminRoutes(app: FastifyInstance) {
       const tenantMap = new Map(tenants.map((t) => [t.id, t.name]));
       return logs.map((l) => {
         const u = l.userId ? userMap.get(l.userId) : null;
+        const payload = auditPayload(l.payloadJson);
         return {
           id: l.id,
           action: l.action,
+          summary: auditSummary(l.action, payload),
+          method: stringOrNull(payload.method),
+          path: stringOrNull(payload.path),
+          statusCode: numberOrNull(payload.statusCode),
+          ip: stringOrNull(nested(payload, 'request', 'ip')),
+          userAgent: stringOrNull(nested(payload, 'request', 'userAgent')),
           userId: l.userId,
           userName: u?.name ?? null,
           userPhone: u ? displayPhone(u.phone) : null,
@@ -590,6 +597,56 @@ function displayPhone(phone: string): string {
   return phone;
 }
 
+function auditPayload(payload: Prisma.JsonValue | null): Record<string, unknown> {
+  return payload && typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+}
+
+function nested(obj: Record<string, unknown>, ...keys: string[]): unknown {
+  let cur: unknown = obj;
+  for (const key of keys) {
+    if (!cur || typeof cur !== 'object' || Array.isArray(cur)) return null;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur ?? null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function shortText(value: unknown, max = 80): string | null {
+  const text = stringOrNull(value);
+  if (!text) return null;
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function auditSummary(action: string, payload: Record<string, unknown>): string | null {
+  const method = stringOrNull(payload.method);
+  const path = stringOrNull(payload.path);
+  const statusCode = numberOrNull(payload.statusCode);
+  const ok = typeof payload.ok === 'boolean' ? payload.ok : null;
+  const code = shortText(payload.code) ?? shortText(payload.errorCode);
+  const error = shortText(payload.error);
+  const phone = stringOrNull(payload.phoneMasked);
+  const duration = numberOrNull(payload.durationMs);
+  const result = ok === true ? '成功' : ok === false ? '失败' : statusCode && statusCode >= 400 ? '失败' : null;
+  const target = method && path ? `${method} ${path}` : auditLabel(action);
+  const parts = [
+    result,
+    target,
+    statusCode ? `HTTP ${statusCode}` : null,
+    duration !== null ? `${duration}ms` : null,
+    phone ? `手机号 ${phone}` : null,
+    code,
+    error,
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : null;
+}
+
 function auditIcon(action: string): string {
   if (action.includes('agent')) return 'agent';
   if (action.includes('auth')) return 'user';
@@ -601,8 +658,19 @@ function auditIcon(action: string): string {
 
 function auditLabel(action: string): string {
   const labels: Record<string, string> = {
+    'auth.http': '登录 API 行为',
+    'admin.http': '后台 API 行为',
     'auth.register': '手机号注册',
+    'auth.login': '手机号登录',
+    'auth.sms.send_attempt': '短信验证码尝试',
+    'auth.login.attempt': '手机号登录尝试',
     'auth.wechat_register': '微信注册',
+    'auth.wechat_login': '微信登录',
+    'auth.wechat_login.attempt': '微信登录尝试',
+    'auth.wechat_phone.attempt': '本机号登录尝试',
+    'auth.carrier_onetap.attempt': '运营商一键登录尝试',
+    'auth.onetap_register': '一键登录注册',
+    'auth.onetap_login': '一键登录',
     'admin.agent.publish': '功能上架',
     'admin.agent.unpublish': '功能下架',
     'admin.agent.update': '智能体配置变更',
@@ -612,8 +680,11 @@ function auditLabel(action: string): string {
     'user.agent.purchase': '用户解锁智能体',
     'admin.ai.update': '模型配置变更',
     'admin.account.init': '初始化后台账户',
+    'admin.account.init_attempt': '后台初始化尝试',
     'admin.account.login': '后台账户登录',
+    'admin.account.login_attempt': '后台登录尝试',
     'admin.account.password': '修改后台密码',
+    'admin.account.password_attempt': '后台改密尝试',
     'user.plan.purchase': '用户购买套餐',
     'user.http': '用户 API 行为',
     'user.generate': '用户发起产出',

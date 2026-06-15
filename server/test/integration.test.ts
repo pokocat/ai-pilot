@@ -185,7 +185,30 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
     assert.equal(r.body.code, 'CARRIER_ONETAP_NOT_IMPLEMENTED');
   });
 
-  test('F9 阿里云签名工具：百分号编码与排序确定、可复现', () => {
+  test('F9 登录尝试和匿名 API 行为都会落审计，且验证码脱敏', async () => {
+    const phone = uniquePhone();
+    await api('POST', '/api/auth/sms/send', { body: { phone } });
+    const bad = await api('POST', '/api/auth/login', { body: { phone, code: '000000' } });
+    assert.equal(bad.status, 400);
+
+    const attempt = await prisma.auditLog.findFirst({ where: { action: 'auth.login.attempt' }, orderBy: { createdAt: 'desc' } });
+    assert.ok(attempt, '失败登录尝试应落审计');
+    const attemptPayload = attempt!.payloadJson as any;
+    assert.equal(attemptPayload.ok, false);
+    assert.equal(attemptPayload.errorCode, 'SMS_CODE_INVALID');
+    assert.equal(attemptPayload.phoneMasked, `${phone.slice(0, 3)}****${phone.slice(-4)}`);
+
+    await api('GET', '/api/me');
+    const http = await prisma.auditLog.findFirst({ where: { action: 'user.http' }, orderBy: { createdAt: 'desc' } });
+    assert.ok(http, '匿名受保护 API 也应落 HTTP 审计');
+    const httpPayload = http!.payloadJson as any;
+    assert.equal(httpPayload.path, '/api/me');
+    assert.equal(httpPayload.statusCode, 401);
+    assert.equal(httpPayload.auth.state, 'anonymous');
+    assert.equal(httpPayload.body?.code, undefined, 'HTTP 审计不应保存验证码明文');
+  });
+
+  test('F10 阿里云签名工具：百分号编码与排序确定、可复现', () => {
     assert.equal(percentEncode('a b+c*d~e'), 'a%20b%2Bc%2Ad~e');
     assert.equal(canonicalQuery({ b: '2', a: '1', Ab: '3' }), 'Ab=3&a=1&b=2');
     const p = { Action: 'SendSms', PhoneNumbers: '13800138000', SignName: '军师' };

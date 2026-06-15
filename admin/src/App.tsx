@@ -526,21 +526,31 @@ function AuditView() {
   useEffect(() => { api.auditLogs().then(setList).catch(() => {}); }, []);
   return (
     <>
-      <div className="sec-h"><span className="t">审计日志</span><span className="s">精确到秒 · 最近 100 条</span></div>
+      <div className="sec-h"><span className="t">审计日志</span><span className="s">登录尝试、API 行为、后台操作 · 最近 100 条</span></div>
       <div className="pad">
         {list.map((a) => (
           <div key={a.id} className="audit-row">
             <div className="audit-line">
               <span className="audit-ic"><Icon name={auditIcon(a.action)} size={15} /></span>
               <div className="audit-main">
-                <div className="audit-title">{auditLabel(a.action)}<span>{a.action}</span></div>
-                <div className="audit-user">{a.userName ?? '系统/运营'} · {a.userPhone ?? a.tenantName ?? '无账号上下文'}</div>
+                <div className="audit-head">
+                  <div className="audit-title">{auditLabel(a.action)}<span>{a.action}</span></div>
+                  <div className="audit-badges">
+                    {a.method && <span className="audit-badge">{a.method}</span>}
+                    {a.statusCode !== null && <span className={`audit-badge ${statusClass(a.statusCode)}`}>{a.statusCode}</span>}
+                  </div>
+                </div>
+                {a.summary && <div className="audit-summary">{a.summary}</div>}
+                {a.path && <div className="audit-path">{a.path}</div>}
+                <div className="audit-user">{actorText(a)}</div>
+                <div className="audit-user">{networkText(a)}</div>
               </div>
             </div>
             <div className="audit-time">{fmtTime(a.at)}</div>
             <pre className="audit-payload">{payloadText(a.payload)}</pre>
           </div>
         ))}
+        {!list.length && <div className="empty">暂无审计记录</div>}
       </div>
     </>
   );
@@ -1037,8 +1047,25 @@ function creditText(v: number) {
 
 function payloadText(payload: unknown) {
   if (!payload) return '{}';
-  const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  return text.length > 180 ? `${text.slice(0, 180)}...` : text;
+  const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+  return text.length > 1600 ? `${text.slice(0, 1600)}\n...(${text.length} chars)` : text;
+}
+
+function actorText(a: AdminAuditItem) {
+  const name = a.userName || (a.action.startsWith('admin.') ? '运营后台' : '匿名/未解析用户');
+  const parts = [name, a.userPhone, a.tenantName, a.userId ? `user:${a.userId}` : null].filter(Boolean);
+  return parts.join(' · ') || '无账号上下文';
+}
+
+function networkText(a: AdminAuditItem) {
+  const ua = a.userAgent ? a.userAgent.slice(0, 90) : null;
+  return [a.ip ? `IP ${a.ip}` : null, ua].filter(Boolean).join(' · ') || '无请求来源信息';
+}
+
+function statusClass(status: number) {
+  if (status >= 500) return 'bad';
+  if (status >= 400) return 'warn';
+  return 'ok';
 }
 
 function auditIcon(action: string) {
@@ -1052,10 +1079,19 @@ function auditIcon(action: string) {
 
 function auditLabel(action: string) {
   const labels: Record<string, string> = {
+    'auth.http': '登录 API 行为',
+    'admin.http': '后台 API 行为',
     'auth.register': '手机号注册',
     'auth.login': '手机号登录',
+    'auth.sms.send_attempt': '短信验证码尝试',
+    'auth.login.attempt': '手机号登录尝试',
     'auth.wechat_register': '微信注册',
     'auth.wechat_login': '微信登录',
+    'auth.wechat_login.attempt': '微信登录尝试',
+    'auth.wechat_phone.attempt': '本机号登录尝试',
+    'auth.carrier_onetap.attempt': '运营商一键登录尝试',
+    'auth.onetap_register': '一键登录注册',
+    'auth.onetap_login': '一键登录',
     'admin.agent.publish': '功能上架',
     'admin.agent.unpublish': '功能下架',
     'admin.agent.update': '智能体配置变更',
@@ -1068,6 +1104,12 @@ function auditLabel(action: string) {
     'admin.ai.model.update': '编辑模型',
     'admin.ai.model.delete': '删除模型',
     'admin.ai.model.activate': '快速切换模型',
+    'admin.account.init': '初始化后台账户',
+    'admin.account.init_attempt': '后台初始化尝试',
+    'admin.account.login': '后台账户登录',
+    'admin.account.login_attempt': '后台登录尝试',
+    'admin.account.password': '修改后台密码',
+    'admin.account.password_attempt': '后台改密尝试',
     'admin.saying.create': '新增每日献策',
     'admin.saying.update': '更新每日献策',
     'admin.saying.delete': '删除每日献策',

@@ -7,7 +7,7 @@
 .home .say-line,
 .home .ask-q,
 .home .sec-title,
-.home .ins-ttl,
+.home .focus-ttl,
 .home .tool-h {
   font-family: var(--home-title-font);
 }
@@ -19,7 +19,7 @@
 }
 .brand { display: flex; align-items: center; gap: 11px; }
 .brand-mk {
-  width: 40px; height: 40px; border-radius: 12px; color: #fff;
+  width: 40px; height: 40px; border-radius: 12px; color: #FBFAF6;
   font-size: 21px; font-weight: 700; text-align: center; line-height: 40px;
 }
 .brand-nm { display: block; font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.1; }
@@ -48,7 +48,7 @@
   border: 1px solid rgba(255, 255, 255, .06);
   box-shadow: 0 14px 34px rgba(17, 20, 24, .22);
 }
-/* 顶部一道极淡的内高光，增强玻璃质感 */
+/* 顶部一道极淡的内高光，压住深色卡的沉重感 */
 .ask::before {
   content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
   background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, .14) 30%, rgba(255, 255, 255, 0) 80%);
@@ -56,15 +56,15 @@
 .ask > View { position: relative; }
 .ask-top { display: flex; align-items: center; gap: 10px; }
 .ask-av { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-.ask-id .nm { display: block; color: #fff; font-size: 14px; font-weight: 600; }
+.ask-id .nm { display: block; color: #FBFAF6; font-size: 14px; font-weight: 600; }
 .ask-id .st { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(255,255,255,.55); margin-top: 2px; }
 .ask-id .st .dot { width: 6px; height: 6px; border-radius: 50%; }
-.ask-q { display: block; color: #fff; font-size: 17px; font-weight: 600; margin: 14px 0 12px; }
+.ask-q { display: block; color: #FBFAF6; font-size: 17px; font-weight: 600; margin: 14px 0 12px; }
 .ask-field {
   display: flex; align-items: center; gap: 8px;
   background: rgba(255,255,255,.08); border-radius: 13px; padding: 5px 5px 5px 14px;
 }
-.ask-input { flex: 1; color: #fff; font-size: 14px; height: 38px; }
+.ask-input { flex: 1; color: #FBFAF6; font-size: 14px; height: 38px; min-width: 0; }
 .ask-input::placeholder, .ask-field .input-placeholder { color: rgba(255,255,255,.4); }
 .ask-send { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
 .ask .chips { margin-top: 12px; }
@@ -73,15 +73,30 @@
   border: 1px solid rgba(255, 255, 255, .14);
 }
 
-.insight {
-  display: flex; gap: 12px; padding: 14px; margin-bottom: 10px; border-radius: var(--r-md);
+.focus-panel { padding: 2px 14px; border-radius: var(--r-md); }
+.focus-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 0; border-bottom: 1px solid var(--line-2);
 }
-.ins-ic { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.ins-body { flex: 1; min-width: 0; }
-.ins-tag { font-size: 11px; font-weight: 600; }
-.ins-ttl { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); margin: 3px 0 4px; }
-.ins-desc { display: block; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
-.ins-act { display: flex; align-items: center; font-size: 12.5px; font-weight: 600; margin-top: 8px; }
+.focus-row.last { border-bottom: 0; }
+.focus-no {
+  width: 26px; flex-shrink: 0;
+  font-size: 10.5px; letter-spacing: .08em; font-weight: 700; color: var(--ink-3);
+}
+.focus-ic {
+  width: 34px; height: 34px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.focus-main { flex: 1; min-width: 0; }
+.focus-ttl { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
+.focus-desc {
+  display: block; font-size: 12px; line-height: 1.45; color: var(--ink-2);
+  margin-top: 3px;
+}
+.focus-act {
+  display: flex; align-items: center; flex-shrink: 0;
+  font-size: 12px; font-weight: 600;
+}
 
 /* 两列：用 space-between + 48.5% 宽，避免 calc(50%-5px)+gap 凑满 100% 时
    因亚像素取整溢出而换行成竖排 */

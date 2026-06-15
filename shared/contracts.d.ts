@@ -553,6 +553,12 @@ export interface AdminTokenUsageView {
 export interface AdminAuditItem {
   id: string;
   action: string;
+  summary: string | null;
+  method: string | null;
+  path: string | null;
+  statusCode: number | null;
+  ip: string | null;
+  userAgent: string | null;
   userId: string | null;
   userName: string | null;
   userPhone: string | null;

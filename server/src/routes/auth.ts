@@ -2,12 +2,13 @@
 // 新账号自动建独立租户(Tenant)+用户(User)，业务数据按 tenantId/userId 行级隔离。
 // 生产仍应把自有登录态替换为 JWT；此处 token 直接复用 userId。
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { code2Session, wechatAccountKey, getPhoneNumberByCode } from '../services/wechat.js';
 import { issueSmsCode, verifySmsCode } from '../services/sms.js';
-import { recordAudit } from '../services/audit.js';
+import { maskAuditPhone, recordAudit, requestMeta, summarizeForAudit } from '../services/audit.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 
 const phoneRule = z.string().regex(/^1\d{10}$/, '请输入有效的手机号');
@@ -44,6 +45,31 @@ type AuthUser = {
   wechatUnionId?: string | null;
   wechatLinkedAt?: Date | null;
 };
+
+function authAttemptPayload(req: FastifyRequest, extra: Record<string, unknown>): Prisma.InputJsonValue {
+  return summarizeForAudit({ ...extra, request: requestMeta(req) }) as Prisma.InputJsonValue;
+}
+
+async function recordAuthAttempt(
+  req: FastifyRequest,
+  action: string,
+  extra: Record<string, unknown>,
+  user?: Pick<AuthUser, 'id' | 'tenantId'> | null,
+) {
+  await recordAudit({
+    tenantId: user?.tenantId,
+    userId: user?.id,
+    action,
+    payload: authAttemptPayload(req, extra),
+  });
+}
+
+function phoneAudit(phone?: string | null) {
+  return {
+    phoneMasked: maskAuditPhone(phone),
+    phoneTail: phone && /^1\d{10}$/.test(phone) ? phone.slice(-4) : null,
+  };
+}
 
 async function createUserWithTenant(opts: {
   phone: string;
@@ -108,11 +134,11 @@ function loginResult(user: AuthUser, isNew: boolean, onboarded: boolean) {
 async function loginOrRegisterByPhone(phone: string, name?: string): Promise<{ user: AuthUser; isNew: boolean }> {
   const existing = await prisma.user.findUnique({ where: { phone } });
   if (existing) {
-    await recordAudit({ tenantId: existing.tenantId, userId: existing.id, action: 'auth.login', payload: { phone } });
+    await recordAudit({ tenantId: existing.tenantId, userId: existing.id, action: 'auth.login', payload: phoneAudit(phone) });
     return { user: existing, isNew: false };
   }
   // 不编造称呼/公司：未填留空，由首登建档采集。
-  const user = await createUserWithTenant({ phone, name: name?.trim() || '', auditAction: 'auth.register', auditPayload: { phone } });
+  const user = await createUserWithTenant({ phone, name: name?.trim() || '', auditAction: 'auth.register', auditPayload: phoneAudit(phone) });
   return { user, isNew: true };
 }
 
@@ -142,11 +168,35 @@ export async function authRoutes(app: FastifyInstance) {
   // 发送短信验证码：限频 + 落库（哈希）+ 发送。console 演示口径会把验证码随响应回传（devCode）。
   app.post('/auth/sms/send', async (req, reply) => {
     const parsed = smsSendSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
+    if (!parsed.success) {
+      await recordAuthAttempt(req, 'auth.sms.send_attempt', {
+        ok: false,
+        statusCode: 400,
+        reason: 'validation',
+        error: parsed.error.issues[0]?.message ?? '参数错误',
+        body: summarizeForAudit(req.body),
+      });
+      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
+    }
     try {
-      return await issueSmsCode(parsed.data.phone, clientIp(req));
+      const out = await issueSmsCode(parsed.data.phone, clientIp(req));
+      await recordAuthAttempt(req, 'auth.sms.send_attempt', {
+        ok: true,
+        statusCode: 200,
+        ...phoneAudit(parsed.data.phone),
+        provider: process.env.SMS_PROVIDER || 'console',
+        devCodeReturned: typeof out === 'object' && out !== null && 'devCode' in out,
+      });
+      return out;
     } catch (e) {
       const err = e as { statusCode?: number; message?: string; code?: string };
+      await recordAuthAttempt(req, 'auth.sms.send_attempt', {
+        ok: false,
+        statusCode: err.statusCode || 500,
+        ...phoneAudit(parsed.data.phone),
+        errorCode: err.code || 'SMS_SEND_FAILED',
+        error: err.message || '验证码发送失败',
+      });
       return reply.code(err.statusCode || 500).send({ error: err.message || '验证码发送失败', code: err.code || 'SMS_SEND_FAILED' });
     }
   });
@@ -154,6 +204,13 @@ export async function authRoutes(app: FastifyInstance) {
   app.post('/auth/login', async (req, reply) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
+      await recordAuthAttempt(req, 'auth.login.attempt', {
+        ok: false,
+        statusCode: 400,
+        reason: 'validation',
+        error: parsed.error.issues[0]?.message ?? '参数错误',
+        body: summarizeForAudit(req.body),
+      });
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
     }
     const { phone, name, code } = parsed.data;
@@ -161,18 +218,53 @@ export async function authRoutes(app: FastifyInstance) {
     // 验证码校验：传了 code 就校验；生产可置 SMS_REQUIRE_CODE=true 强制要求。
     // 默认不强制：保留演示/测试免码登录（与既有 login() 测试辅助兼容）。
     if (code !== undefined || env.smsRequireCode) {
-      if (!code) return reply.code(400).send({ error: '请输入验证码', code: 'SMS_CODE_REQUIRED' });
+      if (!code) {
+        await recordAuthAttempt(req, 'auth.login.attempt', {
+          ok: false,
+          statusCode: 400,
+          ...phoneAudit(phone),
+          hasCode: false,
+          smsRequired: true,
+          errorCode: 'SMS_CODE_REQUIRED',
+        });
+        return reply.code(400).send({ error: '请输入验证码', code: 'SMS_CODE_REQUIRED' });
+      }
       const ok = await verifySmsCode(phone, code);
-      if (!ok) return reply.code(400).send({ error: '验证码错误或已过期', code: 'SMS_CODE_INVALID' });
+      if (!ok) {
+        await recordAuthAttempt(req, 'auth.login.attempt', {
+          ok: false,
+          statusCode: 400,
+          ...phoneAudit(phone),
+          hasCode: true,
+          smsRequired: env.smsRequireCode,
+          errorCode: 'SMS_CODE_INVALID',
+        });
+        return reply.code(400).send({ error: '验证码错误或已过期', code: 'SMS_CODE_INVALID' });
+      }
     }
 
     const { user, isNew } = await loginOrRegisterByPhone(phone, name);
+    await recordAuthAttempt(req, 'auth.login.attempt', {
+      ok: true,
+      statusCode: 200,
+      ...phoneAudit(phone),
+      hasCode: code !== undefined,
+      smsRequired: env.smsRequireCode,
+      isNew,
+    }, user);
     return loginResult(user, isNew, await onboardedOf(user));
   });
 
   app.post('/auth/wechat-login', async (req, reply) => {
     const parsed = wechatLoginSchema.safeParse(req.body);
     if (!parsed.success) {
+      await recordAuthAttempt(req, 'auth.wechat_login.attempt', {
+        ok: false,
+        statusCode: 400,
+        reason: 'validation',
+        error: parsed.error.issues[0]?.message ?? '参数错误',
+        body: summarizeForAudit(req.body),
+      });
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
     }
 
@@ -207,10 +299,25 @@ export async function authRoutes(app: FastifyInstance) {
       if (!isNew) {
         await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'auth.wechat_login', payload: { wechat: true, unionid: !!wx.unionid } });
       }
+      await recordAuthAttempt(req, 'auth.wechat_login.attempt', {
+        ok: true,
+        statusCode: 200,
+        wechat: true,
+        unionid: !!wx.unionid,
+        nicknameProvided: !!parsed.data.nickname,
+        isNew,
+      }, user);
 
       return loginResult(user, isNew, await onboardedOf(user));
     } catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
+      await recordAuthAttempt(req, 'auth.wechat_login.attempt', {
+        ok: false,
+        statusCode: err.statusCode || 500,
+        hasCode: !!parsed.data.code,
+        errorCode: err.code || 'WECHAT_LOGIN_FAILED',
+        error: err.message || '微信登录失败',
+      });
       return reply.code(err.statusCode || 500).send({ error: err.message || '微信登录失败', code: err.code || 'WECHAT_LOGIN_FAILED' });
     }
   });
@@ -218,7 +325,16 @@ export async function authRoutes(app: FastifyInstance) {
   // 本机号一键登录：getPhoneNumber 的 phoneCode 换手机号 → 统一登录建号；可选 loginCode 顺带关联 openid。
   app.post('/auth/wechat-phone', async (req, reply) => {
     const parsed = wechatPhoneSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
+    if (!parsed.success) {
+      await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
+        ok: false,
+        statusCode: 400,
+        reason: 'validation',
+        error: parsed.error.issues[0]?.message ?? '参数错误',
+        body: summarizeForAudit(req.body),
+      });
+      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
+    }
     try {
       const phone = await getPhoneNumberByCode(parsed.data.phoneCode);
       let openid: string | undefined, unionid: string | undefined;
@@ -228,9 +344,26 @@ export async function authRoutes(app: FastifyInstance) {
       const { user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name);
       const linked = openid ? await linkWechatBestEffort(user, openid, unionid) : user;
       await recordAudit({ tenantId: linked.tenantId, userId: linked.id, action: isNew ? 'auth.onetap_register' : 'auth.onetap_login', payload: { onetap: 'wechat', linked: !!openid } });
+      await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
+        ok: true,
+        statusCode: 200,
+        ...phoneAudit(phone),
+        onetap: 'wechat',
+        linked: !!openid,
+        unionid: !!unionid,
+        isNew,
+      }, linked);
       return loginResult(linked, isNew, await onboardedOf(linked));
     } catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
+      await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
+        ok: false,
+        statusCode: err.statusCode || 500,
+        hasPhoneCode: !!parsed.data.phoneCode,
+        hasLoginCode: !!parsed.data.loginCode,
+        errorCode: err.code || 'WECHAT_PHONE_LOGIN_FAILED',
+        error: err.message || '一键登录失败',
+      });
       return reply.code(err.statusCode || 500).send({ error: err.message || '一键登录失败', code: err.code || 'WECHAT_PHONE_LOGIN_FAILED' });
     }
   });
@@ -250,7 +383,22 @@ export async function authRoutes(app: FastifyInstance) {
   });
   app.post('/auth/carrier-onetap', async (req, reply) => {
     const parsed = carrierSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
+    if (!parsed.success) {
+      await recordAuthAttempt(req, 'auth.carrier_onetap.attempt', {
+        ok: false,
+        statusCode: 400,
+        reason: 'validation',
+        error: parsed.error.issues[0]?.message ?? '参数错误',
+        body: summarizeForAudit(req.body),
+      });
+      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
+    }
+    await recordAuthAttempt(req, 'auth.carrier_onetap.attempt', {
+      ok: false,
+      statusCode: 501,
+      provider: parsed.data.provider ?? null,
+      errorCode: 'CARRIER_ONETAP_NOT_IMPLEMENTED',
+    });
     return reply.code(501).send({ error: '运营商一键登录待原生 App 接入', code: 'CARRIER_ONETAP_NOT_IMPLEMENTED' });
   });
 }

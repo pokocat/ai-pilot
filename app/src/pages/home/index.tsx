@@ -9,11 +9,11 @@ import { useStore } from '../../hooks/useStore';
 import { api } from '../../services/api';
 import './index.scss';
 
-// 推荐产出（非"为你发现"——不臆造用户尚未提供的业务结论）。点开即把该主题发给军师。
+// 常见起手式（非"为你发现"——不臆造用户尚未提供的业务结论）。点开即把该主题发给军师。
 const INSIGHTS = [
-  { ic: 'target', tag: '推荐产出', tagType: 'opp', ttl: '做一次战略诊断', desc: '梳理定位、增长卡点与下一步，产出一份可执行的诊断报告。', act: '生成诊断', send: '战略体检' },
-  { ic: 'trend', tag: '推荐产出', tagType: 'opp', ttl: '理清你的增长杠杆', desc: '从获客、转化、复购、定价四个维度，找到最该发力的地方。', act: '生成增长方案', send: '增长方案' },
-  { ic: 'doc', tag: '推荐产出', tagType: 'opp', ttl: '梳理融资准备', desc: '把增长逻辑、单位经济与资金用途讲清楚，让故事和数据对齐。', act: '生成融资准备', send: '融资准备' },
+  { ic: 'target', ttl: '做一次战略诊断', desc: '定位、增长卡点与下一步，整理成可执行报告。', act: '开始诊断', send: '战略体检' },
+  { ic: 'trend', ttl: '理清增长杠杆', desc: '从获客、转化、复购、定价里找到发力点。', act: '梳理增长', send: '增长方案' },
+  { ic: 'doc', ttl: '梳理融资准备', desc: '把增长逻辑、单位经济与资金用途讲清楚。', act: '准备材料', send: '融资准备' },
 ];
 
 // 首页快捷入口：展示当前可直接使用的常用顾问，避免把首屏写成权益售卖区。
@@ -120,7 +120,7 @@ export default function Home() {
         {/* 问候 —— 招呼语 + 精简提示同行 */}
         <View className="greet">
           <Text className="greet-h serif">{greetWord()}{me?.user.name ? `，${me.user.name}` : ''}</Text>
-          <Text className="greet-tip">{INSIGHTS.length} 条今日建议，随时为你出谋</Text>
+          <Text className="greet-tip">{INSIGHTS.length} 个常见议题，可直接开始</Text>
         </View>
 
         {/* 每日献策 */}
@@ -133,55 +133,60 @@ export default function Home() {
         <View className="ask card">
           <View className="ask-top">
             <View className="ask-av" style={{ background: accent }}>
-              <Icon name="chat" size={18} color="#fff" />
+              <Icon name="chat" size={18} color="#FBFAF6" />
             </View>
             <View className="ask-id">
               <Text className="nm">军师</Text>
               <View className="st"><View className="dot" style={{ background: accent }} /><Text>在线 · 随时为你出谋</Text></View>
             </View>
           </View>
-          <Text className="ask-q serif">今天，想破解哪一局？</Text>
+          <Text className="ask-q serif">先说一件最想推进的事</Text>
           <View className="ask-field">
             <Input
               className="ask-input"
               value={input}
-              placeholder="说说你的处境，或直接提问…"
+              placeholder="例如：增长停滞、融资故事、组织卡点"
               confirmType="send"
               onInput={(e) => setInput(e.detail.value)}
               onConfirm={send}
             />
             <View className="ask-send" style={{ background: accent }} onClick={send}>
-              <Icon name="send" size={16} color="#fff" />
+              <Icon name="send" size={16} color="#FBFAF6" />
             </View>
           </View>
           <View className="chips">
-            {[['target', '战略体检'], ['trend', '增长方案'], ['shield', '融资准备']].map(([ic, q]) => (
+            {[['target', '定位卡点', '战略体检'], ['trend', '获客变慢', '增长方案'], ['shield', '融资故事', '融资准备']].map(([ic, label, q]) => (
               <View key={q} className="chip" onClick={() => goChat(`send=${encodeURIComponent(q)}`)}>
                 <Icon name={ic} size={13} color={s.color().vars['--accent-ink']} />
-                <Text>{q}</Text>
+                <Text>{label}</Text>
               </View>
             ))}
           </View>
         </View>
 
-        {/* 推荐产出 —— 点开即出成果 */}
+        {/* 可以先做：单组列表承载多个起手式，避免首屏连续同构卡片抢主行动。 */}
         <View className="sec-head">
-          <Text className="sec-title">推荐产出</Text>
-          <Text className="sec-more">点开即出成果</Text>
+          <Text className="sec-title">可以先做</Text>
+          <Text className="sec-more">定位 · 增长 · 融资</Text>
         </View>
-        {INSIGHTS.map((it) => (
-          <View key={it.send} className="insight card" onClick={() => goChat(`send=${encodeURIComponent(it.send)}`)}>
-            <View className={`ins-ic ${it.tagType}`} style={{ background: 'var(--accent-soft)' }}>
-              <Icon name={it.ic} size={18} color={accent} />
+        <View className="focus-panel card">
+          {INSIGHTS.map((it, i) => (
+            <View key={it.send} className={`focus-row ${i === INSIGHTS.length - 1 ? 'last' : ''}`} onClick={() => goChat(`send=${encodeURIComponent(it.send)}`)}>
+              <Text className="focus-no">0{i + 1}</Text>
+              <View className="focus-ic" style={{ background: 'var(--accent-soft)' }}>
+                <Icon name={it.ic} size={17} color={accent} />
+              </View>
+              <View className="focus-main">
+                <Text className="focus-ttl">{it.ttl}</Text>
+                <Text className="focus-desc">{it.desc}</Text>
+              </View>
+              <View className="focus-act" style={{ color: accent }}>
+                <Text>{it.act}</Text>
+                <Text> ›</Text>
+              </View>
             </View>
-            <View className="ins-body">
-              <Text className="ins-tag" style={{ color: accent }}>{it.tag}</Text>
-              <Text className="ins-ttl">{it.ttl}</Text>
-              <Text className="ins-desc">{it.desc}</Text>
-              <View className="ins-act" style={{ color: accent }}><Text>{it.act}</Text><Text> ›</Text></View>
-            </View>
-          </View>
-        ))}
+          ))}
+        </View>
 
         {/* 常用顾问 */}
         <View className="sec-head">
