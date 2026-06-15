@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-15T16:51:25Z",
+  "title": "Design System: 军师运营后台",
+  "extensions": {
+    "colorMeta": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "Warm Paper",
+        "canonical": "#FBFAF6",
+        "tonalRamp": ["#211F1A", "#3D3930", "#625B4E", "#8B8272", "#B5AD9F", "#D9D3C8", "#F4F1EA", "#FBFAF6"]
+      },
+      "parchment": {
+        "role": "neutral",
+        "displayName": "Parchment Backdrop",
+        "canonical": "#F4F2EC",
+        "tonalRamp": ["#1F1E1A", "#3A372F", "#5D574B", "#857D6F", "#ADA697", "#D2CCC1", "#ECE8DE", "#F4F2EC"]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Clean Surface",
+        "canonical": "#FFFFFF",
+        "tonalRamp": ["#202020", "#404040", "#666666", "#8C8C8C", "#B3B3B3", "#D9D9D9", "#F2F2F2", "#FFFFFF"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Primary Ink",
+        "canonical": "#16191D",
+        "tonalRamp": ["#08090A", "#16191D", "#30353B", "#4F565E", "#727A83", "#9AA1A8", "#CBD0D4", "#EEF0F2"]
+      },
+      "command-gold": {
+        "role": "primary",
+        "displayName": "Command Gold",
+        "canonical": "#A07D2C",
+        "tonalRamp": ["#241A05", "#43340F", "#6E5621", "#8B6B28", "#A07D2C", "#C49B43", "#D8B25A", "#F2EAD6"]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "Risk Red",
+        "canonical": "#9C4A38",
+        "tonalRamp": ["#260D08", "#4A1C13", "#743225", "#9C4A38", "#B86652", "#D39281", "#E8C0B5", "#F6E8E4"]
+      },
+      "success": {
+        "role": "secondary",
+        "displayName": "Operational Success Green",
+        "canonical": "#2D7A52",
+        "tonalRamp": ["#071F13", "#123B25", "#1F5D3D", "#2D7A52", "#4E986F", "#7CBA96", "#B5DCC6", "#E6F4EC"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Serif Metric",
+        "purpose": "Large dashboard figures and major quantified stats."
+      },
+      "headline": {
+        "displayName": "Serif Section Headline",
+        "purpose": "Section headers that need quiet authority."
+      },
+      "title": {
+        "displayName": "Operational Title",
+        "purpose": "Rows, cards, labels, and primary component text."
+      },
+      "body": {
+        "displayName": "Operational Body",
+        "purpose": "Dense but readable admin copy."
+      },
+      "mono": {
+        "displayName": "Console Label",
+        "purpose": "IDs, times, status codes, paths, and technical metadata."
+      }
+    },
+    "shadows": [
+      {
+        "name": "surface-soft",
+        "value": "0 1px 2px rgba(22,25,29,.04), 0 2px 8px rgba(22,25,29,.04)",
+        "purpose": "Default card, row, stat, and list separation."
+      },
+      {
+        "name": "panel-soft",
+        "value": "0 2px 6px rgba(22,25,29,.05), 0 12px 30px rgba(22,25,29,.07)",
+        "purpose": "Login cards, toast surfaces, and elevated account menus."
+      },
+      {
+        "name": "toggle-thumb",
+        "value": "0 1px 2px rgba(0,0,0,.25)",
+        "purpose": "Switch thumb only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "150ms ease-out",
+        "purpose": "Button, chip, and row hover state transitions."
+      },
+      {
+        "name": "panel-slide",
+        "value": "300ms cubic-bezier(.7,.02,.2,1)",
+        "purpose": "Full-screen detail panel reveal."
+      },
+      {
+        "name": "toast-rise",
+        "value": "280ms ease-out",
+        "purpose": "Toast opacity and rise feedback."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "audit-mobile",
+        "value": "640px"
+      },
+      {
+        "name": "compact-phone",
+        "value": "380px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Action Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary save or submit action inside admin forms.",
+      "html": "<button class=\"ds-btn-primary\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12.5l4.5 4.5L19 7\"/></svg>保存</button>",
+      "css": ".ds-btn-primary { height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid #A07D2C; background: #A07D2C; color: #FFFFFF; font: 600 13.5px/1 \"Noto Sans SC\", -apple-system, \"PingFang SC\", \"Segoe UI\", sans-serif; display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; transition: background .16s ease-out, border-color .16s ease-out; } .ds-btn-primary:hover { background: #8B6B28; border-color: #8B6B28; } .ds-btn-primary:focus-visible { outline: 2px solid rgba(160,125,44,.35); outline-offset: 2px; } .ds-btn-primary svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Ghost Action Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action for cancel, test, or non-destructive utility.",
+      "html": "<button class=\"ds-btn-ghost\">取消</button>",
+      "css": ".ds-btn-ghost { height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid #E7E4DB; background: transparent; color: #565C63; font: 600 13.5px/1 \"Noto Sans SC\", -apple-system, \"PingFang SC\", \"Segoe UI\", sans-serif; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: background .16s ease-out, border-color .16s ease-out; } .ds-btn-ghost:hover { background: #F3F1EA; border-color: #E7E4DB; } .ds-btn-ghost:focus-visible { outline: 2px solid rgba(160,125,44,.35); outline-offset: 2px; }"
+    },
+    {
+      "name": "Add Entry Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Full-width add affordance for settings pages such as agents and skill tools.",
+      "html": "<button class=\"ds-add-btn\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 3l1.8 5.6L19.5 10l-5.7 1.4L12 17l-1.8-5.6L4.5 10l5.7-1.4L12 3Z\"/></svg>新增技能</button>",
+      "css": ".ds-add-btn { width: 100%; height: 46px; padding: 0 16px; border-radius: 12px; border: 1.5px dashed #A07D2C; background: #FFFFFF; color: #A07D2C; font: 500 13px/1 \"Noto Sans SC\", -apple-system, \"PingFang SC\", \"Segoe UI\", sans-serif; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; white-space: nowrap; transition: background .16s ease-out; } .ds-add-btn:hover { background: #F2EAD6; } .ds-add-btn:focus-visible { outline: 2px solid rgba(160,125,44,.35); outline-offset: 2px; } .ds-add-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input-default",
+      "description": "Default admin text input for settings and model configuration.",
+      "html": "<label class=\"ds-field\"><span>接口 URL</span><input placeholder=\"https://api.example.com/orders\" /></label>",
+      "css": ".ds-field { display: block; width: 100%; font-family: \"Noto Sans SC\", -apple-system, \"PingFang SC\", \"Segoe UI\", sans-serif; } .ds-field span { display: block; margin-bottom: 6px; color: #969BA1; font-size: 11.5px; line-height: 1.25; } .ds-field input { width: 100%; height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid #E7E4DB; background: #FFFFFF; color: #16191D; font: 400 13px/1 \"Noto Sans SC\", -apple-system, \"PingFang SC\", \"Segoe UI\", sans-serif; } .ds-field input:focus { outline: none; border-color: #A07D2C; } .ds-field input:disabled { opacity: .55; cursor: default; }"
+    },
+    {
+      "name": "Operational Card",
+      "kind": "card",
+      "refersTo": "card-default",
+      "description": "Reusable row/card container for users, agents, tools, and model records.",
+      "html": "<article class=\"ds-card\"><div class=\"ds-card-icon\">军</div><div class=\"ds-card-body\"><h3>增长顾问</h3><p>增长策略 · 已开通 12 · 成果 38</p></div><span class=\"ds-chip\">生效中</span></article>",
+      "css": ".ds-card { display: flex; align-items: center; gap: 12px; padding: 14px 15px; border-radius: 13px; border: 1px solid #E7E4DB; background: #FFFFFF; color: #16191D; box-shadow: 0 1px 2px rgba(22,25,29,.04), 0 2px 8px rgba(22,25,29,.04); font-family: \"Noto Sans SC\", -apple-system, \"PingFang SC\", \"Segoe UI\", sans-serif; } .ds-card-icon { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 10px; background: #F2EAD6; color: #A07D2C; display: flex; align-items: center; justify-content: center; font: 600 16px/1 \"Noto Serif SC\", \"Songti SC\", serif; } .ds-card-body { flex: 1; min-width: 0; } .ds-card h3 { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.35; } .ds-card p { margin: 4px 0 0; color: #969BA1; font-size: 11.5px; line-height: 1.35; } .ds-chip { font: 500 9.5px/1 SFMono-Regular, \"JetBrains Mono\", monospace; padding: 3px 6px; border-radius: 5px; background: rgba(155,124,63,.14); color: #9B7C3F; }"
+    },
+    {
+      "name": "Bottom Navigation Item",
+      "kind": "nav",
+      "refersTo": "chip-default",
+      "description": "Compact scrollable bottom navigation item for the full-screen admin shell.",
+      "html": "<nav class=\"ds-bottom-nav\"><button class=\"ds-nav-item ds-nav-item-active\"><svg viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 8v4.2l3 1.8\"/></svg><span>审计</span></button><button class=\"ds-nav-item\"><svg viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"8\" r=\"3.4\"/><path d=\"M5.5 19.5c.6-3.4 3.2-5.2 6.5-5.2s5.9 1.8 6.5 5.2\"/></svg><span>用户</span></button></nav>",
+      "css": ".ds-bottom-nav { display: flex; gap: 2px; overflow-x: auto; padding: 11px 8px 0; height: 76px; background: rgba(251,250,246,.94); border-top: 1px solid #EFEDE5; font-family: \"Noto Sans SC\", -apple-system, \"PingFang SC\", \"Segoe UI\", sans-serif; } .ds-nav-item { flex: 0 0 56px; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; border: 0; background: transparent; color: #969BA1; cursor: pointer; } .ds-nav-item-active { color: #A07D2C; } .ds-nav-item span { max-width: 100%; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-nav-item svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; } .ds-nav-item:focus-visible { outline: 2px solid rgba(160,125,44,.35); outline-offset: 2px; border-radius: 8px; }"
+    },
+    {
+      "name": "Audit Event Row",
+      "kind": "custom",
+      "refersTo": "card-default",
+      "description": "Clickable dense audit row that becomes a mobile event stream.",
+      "html": "<button class=\"ds-audit-row\"><span class=\"ds-status\">200</span><span class=\"ds-method\">GET</span><span class=\"ds-target\">/api/me</span><span class=\"ds-time\">06-15 20:18</span><span class=\"ds-summary\">用户 API 行为</span></button>",
+      "css": ".ds-audit-row { width: 100%; display: grid; grid-template-columns: 40px 42px minmax(0,1fr) 66px; grid-template-areas: \"status method target time\" \"summary summary summary summary\"; gap: 5px 8px; min-height: 52px; padding: 8px 9px; border: 1px solid #E7E4DB; border-radius: 10px; background: #FFFFFF; color: #565C63; font-family: \"Noto Sans SC\", -apple-system, \"PingFang SC\", \"Segoe UI\", sans-serif; text-align: left; cursor: pointer; transition: background .16s ease-out; } .ds-audit-row:hover { background: rgba(160,125,44,.06); } .ds-audit-row:focus-visible { outline: 2px solid rgba(160,125,44,.35); outline-offset: 2px; } .ds-status { grid-area: status; height: 20px; min-width: 36px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font: 750 10px/1 SFMono-Regular, \"JetBrains Mono\", monospace; background: rgba(34,141,85,.1); color: #1C7C4B; border: 1px solid rgba(34,141,85,.2); } .ds-method { grid-area: method; font: 750 10px/1 SFMono-Regular, \"JetBrains Mono\", monospace; color: #43340F; } .ds-target { grid-area: target; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 650 11px/1 SFMono-Regular, \"JetBrains Mono\", monospace; color: #16191D; } .ds-time { grid-area: time; justify-self: end; font: 650 10px/1 SFMono-Regular, \"JetBrains Mono\", monospace; color: #969BA1; } .ds-summary { grid-area: summary; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #969BA1; font-size: 10.5px; }"
+    },
+    {
+      "name": "Toggle Switch",
+      "kind": "custom",
+      "refersTo": "chip-default",
+      "description": "Binary setting control for enabled states and memory/runtime switches.",
+      "html": "<button class=\"ds-switch ds-switch-on\" aria-pressed=\"true\"><span></span></button>",
+      "css": ".ds-switch { width: 42px; height: 24px; border: 0; border-radius: 999px; background: #E7E4DB; position: relative; cursor: pointer; transition: background .2s ease-out; } .ds-switch span { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: left .2s ease-out; } .ds-switch-on { background: #A07D2C; } .ds-switch-on span { left: 21px; } .ds-switch:focus-visible { outline: 2px solid rgba(160,125,44,.35); outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Warm Command Desk",
+    "overview": "The admin interface is a focused operating desk for a founder-facing AI product: warm enough to belong to 军师, restrained enough for repeated operational work. It uses a paper-and-ink foundation with a single gold command color, so the console feels deliberate rather than promotional. It should feel like a polished internal control room, not a SaaS landing page compressed into an app shell.\n\nThe physical scene is an operator checking users, credits, models, logs, and agent settings from a laptop or phone during active support. The interface must scan quickly, hold dense rows without visual panic, and make destructive or system-level actions legible without theatrical styling. Design serves the task: data first, controls second, decoration last.\n\nThis system explicitly rejects generic AI-tool marketing, neon model dashboards, over-glassy admin chrome, heavy gradients, and card grids that look interchangeable. It also rejects user-facing sales copy inside operational screens: the product language is \"产出额度\", \"专项能力\", \"模型配置\", \"审计\", and \"技能库\", not \"充值\", \"爆款\", or \"最受欢迎\".",
+    "keyCharacteristics": [
+      "Warm neutral surfaces with one restrained gold accent.",
+      "Dense but breathable lists, rows, panels, and tables.",
+      "Serif only for brand marks, page titles, and key numbers.",
+      "Familiar product controls: segmented choices, toggles, text fields, compact buttons.",
+      "Full-screen mobile-first admin shell with no decorative frame."
+    ],
+    "rules": [
+      {
+        "name": "The One Command Color Rule",
+        "body": "Gold is the only brand action color. Do not introduce purple, blue, neon, or rainbow model colors for visual excitement.",
+        "section": "colors"
+      },
+      {
+        "name": "The Status Is Not Brand Rule",
+        "body": "Green, red, and warning ochre are reserved for state. Never use them as decorative accents.",
+        "section": "colors"
+      },
+      {
+        "name": "The Serif Restraint Rule",
+        "body": "Serif is for identity, headings, and numbers. It is prohibited inside buttons, table cells, dense form labels, and routine metadata.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Fluid Type Rule",
+        "body": "Product UI text sizes are fixed. Do not scale font size with viewport width.",
+        "section": "typography"
+      },
+      {
+        "name": "The Quiet Surface Rule",
+        "body": "If a shadow is the first thing you notice, it is too strong. Use borders and tonal layers before increasing shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No Nested Cards Rule",
+        "body": "Page sections can contain repeated cards or rows, but cards must not be placed inside decorative cards.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use Command Gold as the only brand action color.",
+      "Do keep admin surfaces full-screen, borderless, and task-focused.",
+      "Do use add-btn full, ai-btn, mini-btn, ai-field, crd new-agent, and mem-card patterns consistently for new admin settings screens.",
+      "Do use mono for timestamps, status codes, system paths, token counts, and IDs.",
+      "Do keep mobile audit and settings screens vertically scannable with no horizontal content overflow.",
+      "Do use product terms from the app: 专项能力, 产出额度, 模型配置, 技能库, 审计.",
+      "Do make every interactive row visibly clickable through cursor, hover, or focus treatment."
+    ],
+    "donts": [
+      "Don't use 赠送 / 付费解锁 / 充值 / 最受欢迎 / 灵活付费 as user-facing promotional copy in operational surfaces.",
+      "Don't expose Agent Memory to end users; admin can use the term, user-facing surfaces must say 专属理解.",
+      "Don't add purple-blue gradients, neon accents, glassmorphism, decorative orbs, or SaaS hero-metric styling.",
+      "Don't use side-stripe borders greater than 1px as accents on cards, list items, callouts, or alerts.",
+      "Don't create one-off button styles with inline width, padding, and colors when a shared component vocabulary exists.",
+      "Don't put cards inside cards or make page sections look like floating decorative cards.",
+      "Don't hide payload, status, IP, UA, or timestamp details behind vague labels on audit surfaces."
+    ]
+  }
+}
