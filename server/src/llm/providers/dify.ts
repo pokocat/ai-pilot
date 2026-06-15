@@ -134,9 +134,29 @@ export async function difyDeliverable(ctx: GenContext): Promise<{ deliverable: D
   };
 }
 
-/** 连通性测试（后台「测试连接」用）：streaming 发一次最小 query，返回耗时与样例。
- *  注：若 Dify 应用声明了必填 inputs（如 customer_context），inputs:{} 会返回 400，提示运营去配 difyInputs。 */
-export async function difyPing(opts: { difyBaseUrl?: string; difyApiKey?: string }): Promise<{ ok: boolean; latencyMs?: number; sample?: string; error?: string }> {
+// 测试时无真实用户上下文：把映射值里的 {占位符} 换成示例文本，空值也给个非空示例，
+// 这样能满足 Dify 必填输入校验，发出与真实对话「同形」的请求。
+function sampleInputs(map: Record<string, string>): Record<string, string> {
+  const inputs: Record<string, string> = {};
+  for (const [k, tpl] of Object.entries(map)) {
+    if (!k) continue;
+    inputs[k] = String(tpl ?? '').replace(/\{[^}]+\}/g, '示例').trim() || '示例';
+  }
+  return inputs;
+}
+
+// 从 Dify 报错里抽出「缺失的必填输入变量名」，如 "customer_context is required" → ["customer_context"]。
+function parseMissingInputs(msg: string): string[] {
+  const out = new Set<string>();
+  const re = /([A-Za-z_][A-Za-z0-9_]*)(?:\s+in\s+input\s+form)?\s+is\s+required/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(msg))) out.add(m[1]);
+  return [...out];
+}
+
+/** 连通性测试（后台「测试连接」用）：按已配 difyInputs 发一次「真实同形」的 streaming 请求，返回耗时与样例。
+ *  若 Dify 应用声明了未映射的必填 inputs（如 customer_context），返回 missingInputs 供前端自动补进映射框。 */
+export async function difyPing(opts: { difyBaseUrl?: string; difyApiKey?: string; difyInputs?: Record<string, string> }): Promise<{ ok: boolean; latencyMs?: number; sample?: string; error?: string; missingInputs?: string[] }> {
   const base = (opts.difyBaseUrl ?? '').replace(/\/+$/, '');
   if (!base) return { ok: false, error: '未配置 Dify baseUrl' };
   if (!opts.difyApiKey) return { ok: false, error: '未配置 Dify api_key' };
@@ -147,12 +167,15 @@ export async function difyPing(opts: { difyBaseUrl?: string; difyApiKey?: string
     const res = await fetch(`${base}/chat-messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${opts.difyApiKey}` },
-      body: JSON.stringify({ inputs: {}, query: 'ping', response_mode: 'streaming', conversation_id: '', user: 'admin-test' }),
+      body: JSON.stringify({ inputs: sampleInputs(opts.difyInputs ?? {}), query: 'ping', response_mode: 'streaming', conversation_id: '', user: 'admin-test' }),
       signal: ctrl.signal,
     });
     if (!res.ok) {
       const data = (await res.json().catch(() => ({}))) as DifyStreamEvent;
-      return { ok: false, latencyMs: Date.now() - t0, error: `Dify ${res.status}: ${data.message ?? data.code ?? '请求失败'}` };
+      const raw = `${data.message ?? data.code ?? '请求失败'}`;
+      const missing = parseMissingInputs(raw).filter((k) => !(opts.difyInputs ?? {})[k]);
+      const hint = missing.length ? `（已自动补入映射框，请填好占位符后重新测试）` : '';
+      return { ok: false, latencyMs: Date.now() - t0, error: `Dify ${res.status}: ${raw}${hint}`, missingInputs: missing.length ? missing : undefined };
     }
     const { answer } = await readDifyStream(res);
     return { ok: true, latencyMs: Date.now() - t0, sample: answer.slice(0, 40) };

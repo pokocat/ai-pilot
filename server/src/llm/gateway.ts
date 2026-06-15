@@ -270,12 +270,12 @@ export async function pingModel(cfg: ResolvedAiConfig): Promise<AiTestResult> {
 export async function pingAgentRuntime(rt: {
   mode: 'openai' | 'dify';
   baseUrl?: string; model?: string; apiKey?: string;
-  difyBaseUrl?: string; difyApiKey?: string;
+  difyBaseUrl?: string; difyApiKey?: string; difyInputs?: Record<string, string>;
 }): Promise<AiTestResult> {
   if (rt.mode === 'dify') {
     const { difyPing } = await import('./providers/dify.js');
-    const r = await difyPing({ difyBaseUrl: rt.difyBaseUrl, difyApiKey: rt.difyApiKey });
-    return { ok: r.ok, latencyMs: r.latencyMs, sample: r.sample, error: r.error, provider: 'dify', model: 'chat-messages' };
+    const r = await difyPing({ difyBaseUrl: rt.difyBaseUrl, difyApiKey: rt.difyApiKey, difyInputs: rt.difyInputs });
+    return { ok: r.ok, latencyMs: r.latencyMs, sample: r.sample, error: r.error, missingInputs: r.missingInputs, provider: 'dify', model: 'chat-messages' };
   }
   const base = await getAiConfig(true);
   const cfg: ResolvedAiConfig = { ...base, provider: 'openai', baseUrl: rt.baseUrl || base.baseUrl, model: rt.model || base.model, apiKey: rt.apiKey || '' };

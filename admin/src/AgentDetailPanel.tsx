@@ -129,7 +129,22 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
     let runtime: AgentRuntimeUpdate;
     try { runtime = buildRuntime(); } catch (e) { setTest({ ok: false, error: 'Dify inputs JSON 格式错误：' + (e as Error).message }); return; }
     setTesting(true); setTest(null);
-    api.testAgent(agentKey, runtime).then(setTest).catch((e) => setTest({ ok: false, error: e?.message ?? '测试失败' })).finally(() => setTesting(false));
+    api.testAgent(agentKey, runtime).then((r) => {
+      // Dify 报「缺失必填输入变量」时，把缺的 key 自动补进映射框（值留占位待运营填真实占位符）。
+      if (r.missingInputs?.length) addMissingInputs(r.missingInputs);
+      setTest(r);
+    }).catch((e) => setTest({ ok: false, error: e?.message ?? '测试失败' })).finally(() => setTesting(false));
+  };
+
+  // 把缺失的 Dify 输入变量名并入当前映射 JSON（已存在的 key 不覆盖）。
+  const addMissingInputs = (keys: string[]) => {
+    setDifyInputsText((t) => {
+      let obj: Record<string, unknown>;
+      try { const p = JSON.parse(t.trim() || '{}'); obj = (p && typeof p === 'object' && !Array.isArray(p)) ? p : {}; }
+      catch { obj = {}; }
+      for (const k of keys) if (!(k in obj)) obj[k] = '';
+      return JSON.stringify(obj, null, 2);
+    });
   };
 
   return (

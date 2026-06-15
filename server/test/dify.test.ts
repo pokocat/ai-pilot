@@ -288,4 +288,24 @@ describe('difyPing', () => {
     assert.equal(r.ok, false);
     assert.match(r.error!, /ECONNREFUSED/);
   });
+
+  test('发真实同形请求：占位符值 → 示例，空值 → 示例', async () => {
+    stubFetch(okResponse({ answer: '可用' }));
+    await difyPing({ difyBaseUrl: 'http://ai.aibuzz.cn/v1', difyApiKey: 'app-x', difyInputs: { ctx: '{企业档案} 客户{客户名}', blank: '', lit: '常量' } });
+    assert.deepEqual(lastCall!.body.inputs, { ctx: '示例 客户示例', blank: '示例', lit: '常量' });
+  });
+
+  test('缺必填输入 → missingInputs 抽出变量名（排除已映射的 key）', async () => {
+    stubFetch(() => ({ ok: false, status: 400, body: { message: 'customer_context is required' } }));
+    const r = await difyPing({ difyBaseUrl: 'http://ai.aibuzz.cn/v1', difyApiKey: 'app-x', difyInputs: {} });
+    assert.equal(r.ok, false);
+    assert.deepEqual(r.missingInputs, ['customer_context']);
+    assert.match(r.error!, /已自动补入映射框/);
+  });
+
+  test('已映射的 key 不再算缺失（避免重复补）', async () => {
+    stubFetch(() => ({ ok: false, status: 400, body: { message: 'customer_context is required' } }));
+    const r = await difyPing({ difyBaseUrl: 'http://ai.aibuzz.cn/v1', difyApiKey: 'app-x', difyInputs: { customer_context: '{企业档案}' } });
+    assert.equal(r.missingInputs, undefined);
+  });
 });

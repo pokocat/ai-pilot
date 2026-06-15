@@ -397,6 +397,7 @@ export async function adminRoutes(app: FastifyInstance) {
           mode: 'dify',
           difyBaseUrl: rt.difyBaseUrl ?? a.difyBaseUrl ?? undefined,
           difyApiKey: (rt.difyApiKey && rt.difyApiKey.length ? rt.difyApiKey : a.difyApiKey) ?? undefined,
+          difyInputs: rt.difyInputs ?? (a.difyInputs as Record<string, string> | null) ?? undefined,
         });
       }
       if (mode === 'openai') {

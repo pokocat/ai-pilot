@@ -359,7 +359,7 @@ export interface AiPreset {
   baseUrl: string; model: string; embeddingModel?: string; note?: string;
 }
 export interface AiConfigView { config: AiConfig; presets: AiPreset[]; }
-export interface AiTestResult { ok: boolean; latencyMs?: number; sample?: string; error?: string; provider?: string; model?: string; }
+export interface AiTestResult { ok: boolean; latencyMs?: number; sample?: string; error?: string; provider?: string; model?: string; missingInputs?: string[]; }
 
 /* ────────────── 每日献策 ────────────── */
 export interface TodaySaying { text: string; date: string; }
