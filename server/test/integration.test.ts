@@ -837,6 +837,17 @@ describe('TC-W 运营后台鉴权', () => {
     assert.ok(Array.isArray(r.body.stats), '应返回看板数据');
   });
 
+  test('W4b 审计列表默认过滤后台自身行为，显式 includeAdmin 才返回', async () => {
+    await api('GET', '/api/admin/overview');
+    const filtered = await api('GET', '/api/admin/audit-logs');
+    assert.equal(filtered.status, 200);
+    assert.ok((filtered.body as any[]).every((x) => !String(x.action).startsWith('admin.')));
+
+    const all = await api('GET', '/api/admin/audit-logs?includeAdmin=true&limit=200');
+    assert.equal(all.status, 200);
+    assert.ok((all.body as any[]).some((x) => String(x.action).startsWith('admin.')));
+  });
+
   test('W5 role=admin 账号（仅 x-user-id、无密钥）→ 200', async () => {
     const t = await login(uniquePhone());
     await prisma.user.update({ where: { id: t }, data: { role: 'admin' } });

@@ -526,30 +526,26 @@ function AuditView() {
   useEffect(() => { api.auditLogs().then(setList).catch(() => {}); }, []);
   return (
     <>
-      <div className="sec-h"><span className="t">审计日志</span><span className="s">登录尝试、API 行为、后台操作 · 最近 100 条</span></div>
-      <div className="pad">
-        {list.map((a) => (
-          <div key={a.id} className="audit-row">
-            <div className="audit-line">
-              <span className="audit-ic"><Icon name={auditIcon(a.action)} size={15} /></span>
-              <div className="audit-main">
-                <div className="audit-head">
-                  <div className="audit-title">{auditLabel(a.action)}<span>{a.action}</span></div>
-                  <div className="audit-badges">
-                    {a.method && <span className="audit-badge">{a.method}</span>}
-                    {a.statusCode !== null && <span className={`audit-badge ${statusClass(a.statusCode)}`}>{a.statusCode}</span>}
-                  </div>
-                </div>
-                {a.summary && <div className="audit-summary">{a.summary}</div>}
-                {a.path && <div className="audit-path">{a.path}</div>}
-                <div className="audit-user">{actorText(a)}</div>
-                <div className="audit-user">{networkText(a)}</div>
-              </div>
+      <div className="sec-h"><span className="t">审计日志</span><span className="s">默认过滤后台操作 · 用户 API / 登录尝试 · 最近 100 条</span></div>
+      <div className="pad audit-pad">
+        <div className="audit-table-wrap">
+          <div className="audit-table">
+            <div className="audit-row audit-header-row">
+              <span>时间</span><span>状态</span><span>方法</span><span>接口/动作</span><span>用户</span><span>IP</span><span>摘要</span>
             </div>
-            <div className="audit-time">{fmtTime(a.at)}</div>
-            <pre className="audit-payload">{payloadText(a.payload)}</pre>
+            {list.map((a) => (
+              <div key={a.id} className="audit-row">
+                <span className="audit-time">{fmtShortTime(a.at)}</span>
+                <span className={`audit-status ${statusClass(a.statusCode)}`}>{a.statusCode ?? '-'}</span>
+                <span className="audit-method">{a.method ?? actionKind(a.action)}</span>
+                <span className="audit-target" title={auditTarget(a)}>{auditTarget(a)}</span>
+                <span className="audit-actor" title={actorText(a)}>{compactActorText(a)}</span>
+                <span className="audit-ip" title={a.ip ?? ''}>{a.ip ?? '-'}</span>
+                <span className="audit-summary" title={a.summary ?? auditLabel(a.action)}>{a.summary ?? auditLabel(a.action)}</span>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
         {!list.length && <div className="empty">暂无审计记录</div>}
       </div>
     </>
@@ -1041,40 +1037,39 @@ function fmtTime(s: string) {
   return s.replace('T', ' ').replace('Z', '');
 }
 
+function fmtShortTime(s: string) {
+  return fmtTime(s).slice(5);
+}
+
 function creditText(v: number) {
   return v < 0 ? '不限量' : `${v} 点`;
 }
 
-function payloadText(payload: unknown) {
-  if (!payload) return '{}';
-  const text = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
-  return text.length > 1600 ? `${text.slice(0, 1600)}\n...(${text.length} chars)` : text;
-}
-
 function actorText(a: AdminAuditItem) {
-  const name = a.userName || (a.action.startsWith('admin.') ? '运营后台' : '匿名/未解析用户');
+  const name = a.userName || '匿名/未解析用户';
   const parts = [name, a.userPhone, a.tenantName, a.userId ? `user:${a.userId}` : null].filter(Boolean);
   return parts.join(' · ') || '无账号上下文';
 }
 
-function networkText(a: AdminAuditItem) {
-  const ua = a.userAgent ? a.userAgent.slice(0, 90) : null;
-  return [a.ip ? `IP ${a.ip}` : null, ua].filter(Boolean).join(' · ') || '无请求来源信息';
+function compactActorText(a: AdminAuditItem) {
+  return a.userName || a.userPhone || (a.userId ? `user:${a.userId.slice(0, 6)}` : '匿名');
 }
 
-function statusClass(status: number) {
+function auditTarget(a: AdminAuditItem) {
+  return a.path || auditLabel(a.action);
+}
+
+function actionKind(action: string) {
+  if (action.endsWith('.http')) return 'API';
+  if (action.includes('login') || action.includes('auth')) return 'AUTH';
+  return 'ACT';
+}
+
+function statusClass(status: number | null) {
+  if (status === null) return 'muted';
   if (status >= 500) return 'bad';
   if (status >= 400) return 'warn';
   return 'ok';
-}
-
-function auditIcon(action: string) {
-  if (action.includes('agent')) return 'agent';
-  if (action.includes('auth')) return 'user';
-  if (action.includes('generate') || action.includes('credit') || action.includes('plan')) return 'crown';
-  if (action.includes('http')) return 'clock';
-  if (action.includes('ai')) return 'insight';
-  return 'alert';
 }
 
 function auditLabel(action: string) {

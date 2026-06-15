@@ -304,16 +304,19 @@ export async function adminRoutes(app: FastifyInstance) {
     return t;
   });
 
-  // —— 审计日志：全量 API 行为 + 登录尝试 + 关键业务/后台操作 ——
-  app.get<{ Querystring: { limit?: string; userId?: string; action?: string } }>(
+  // —— 审计日志：默认看用户 API / 登录尝试；后台自身行为可用 includeAdmin=true 显式查看 ——
+  app.get<{ Querystring: { limit?: string; userId?: string; action?: string; includeAdmin?: string } }>(
     '/admin/audit-logs',
     async (req): Promise<AdminAuditItem[]> => {
       const take = Math.min(Math.max(Number(req.query.limit ?? 100) || 100, 1), 200);
+      const includeAdmin = req.query.includeAdmin === 'true' || req.query.includeAdmin === '1';
+      const where: Prisma.AuditLogWhereInput = {
+        ...(req.query.userId ? { userId: req.query.userId } : {}),
+        ...(req.query.action ? { action: req.query.action } : {}),
+        ...(!includeAdmin && !req.query.action ? { NOT: { action: { startsWith: 'admin.' } } } : {}),
+      };
       const logs = await prisma.auditLog.findMany({
-        where: {
-          ...(req.query.userId ? { userId: req.query.userId } : {}),
-          ...(req.query.action ? { action: req.query.action } : {}),
-        },
+        where,
         orderBy: { createdAt: 'desc' },
         take,
       });
