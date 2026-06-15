@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
+import NumInput from './NumInput';
 import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult } from './api';
 
 const VARS = ['{企业档案}', '{行业基准}', '{长期记忆}', '{本命色}'];
@@ -46,8 +47,10 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
   const [difyInputsText, setDifyInputsText] = useState('{}');
   const [test, setTest] = useState<AiTestResult | null>(null);
   const [testing, setTesting] = useState(false);
+  const [loadErr, setLoadErr] = useState('');
 
   useEffect(() => {
+    setLoadErr('');
     api.agent(agentKey).then((d) => {
       setData(d);
       setName(d.name); setRole(d.role);
@@ -61,8 +64,23 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
       setDifyBaseUrl(r.difyBaseUrl); setHasDifyKey(r.hasDifyKey); setDifyApiKey('');
       setDifyInputsText(JSON.stringify(r.difyInputs ?? {}, null, 2));
       setTest(null);
-    }).catch(() => {});
+    }).catch((e) => setLoadErr(e?.message || '加载顾问详情失败，请重试'));
   }, [agentKey]);
+
+  // 加载失败时给出可见反馈 + 返回入口，而不是渲染空白（旧版静默吞错，点编辑像「没反应」）
+  if (loadErr) {
+    return (
+      <div className="ad-detail show">
+        <div className="ad-dh">
+          <div className="bk" onClick={onClose}><Icon name="arrow" size={18} /></div>
+          <div className="dt"><div className="t">加载失败</div><div className="s">{agentKey}</div></div>
+        </div>
+        <div className="ad-db">
+          <div className="ai-test err" style={{ marginTop: 0 }}><Icon name="spark" size={14} /> {loadErr}</div>
+        </div>
+      </div>
+    );
+  }
 
   if (!data || !mem) return null;
 
@@ -142,7 +160,7 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
           {billing !== 'free' && (
             <div className="ai-field">
               <div className="ai-fl">{meterUnit === 'image' ? '每张消耗（钻石）' : '解锁价格（钻石）'}</div>
-              <input className="ai-input" type="number" min={0} value={price} onChange={(e) => setPrice(Number(e.target.value))} />
+              <NumInput className="ai-input" min={0} value={price} onChange={setPrice} />
             </div>
           )}
           <div className="ai-field">
@@ -159,7 +177,7 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
           {meterUnit === 'text' && (
             <div className="ai-field">
               <div className="ai-fl">计费比例（token×ratio 扣额度；标准 1.0，Dify 可设 2.0）</div>
-              <input className="ai-input" type="number" min={0} step={0.1} value={billingRatio} onChange={(e) => setBillingRatio(Number(e.target.value))} />
+              <NumInput className="ai-input" min={0} step={0.1} value={billingRatio} onChange={setBillingRatio} />
             </div>
           )}
         </div>

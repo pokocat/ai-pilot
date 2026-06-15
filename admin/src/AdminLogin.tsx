@@ -57,9 +57,8 @@ export default function AdminLogin({ onAuthed }: { onAuthed: () => void }) {
   const onEnter = (fn: () => void) => (e: KeyboardEvent) => { if (e.key === 'Enter') fn(); };
 
   return (
-    <div className="phone">
-      <div className="screen">
-        <div className="admin-login">
+    <div className="screen">
+      <div className="admin-login">
           <div className="al-mk">军</div>
           <div className="al-t">运营后台</div>
           <div className="al-s">JUNSHI · CONSOLE</div>
@@ -101,6 +100,5 @@ export default function AdminLogin({ onAuthed }: { onAuthed: () => void }) {
           )}
         </div>
       </div>
-    </div>
   );
 }

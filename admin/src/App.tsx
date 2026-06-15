@@ -19,6 +19,7 @@ import {
   type AdminAuditItem,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
+import NumInput from './NumInput';
 import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 
@@ -59,9 +60,8 @@ export default function App() {
   if (!authed) return <AdminLogin onAuthed={() => setAuthed(true)} />;
 
   return (
-    <div className="phone">
-      <div className="screen">
-        <div className="adm-top">
+    <div className="screen">
+      <div className="adm-top">
           <div className="adm-mk">军</div>
           <div className="adm-tt"><div className="t">运营后台</div><div className="s">JUNSHI · CONSOLE</div></div>
           <div className="adm-av" onClick={() => setMenuOpen((v) => !v)} title="账户" style={{ cursor: 'pointer', position: 'relative' }}>
@@ -119,7 +119,6 @@ export default function App() {
         {pwOpen && <ChangePasswordModal onClose={() => setPwOpen(false)} toast={showToast} />}
 
         {toast && <div className="admin-toast show"><Icon name="check" size={14} />{toast}</div>}
-      </div>
     </div>
   );
 }
@@ -441,6 +440,10 @@ function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m:
     await load();
     toast(a.enabled ? '功能已下架' : '功能已上架');
   };
+  const openEdit = (e: MouseEvent, key: string) => {
+    e.stopPropagation();
+    onOpen(key);
+  };
   const create = async () => {
     if (!/^[a-z][a-z0-9_]{1,30}$/.test(form.key)) return toast('key 需小写字母开头');
     if (!form.name.trim()) return toast('请填写名称');
@@ -470,7 +473,7 @@ function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m:
               </select>
             </div>
             {form.billing !== 'free' && (
-              <div className="ai-field"><div className="ai-fl">价格（权益点）</div><input className="ai-input" type="number" min={0} value={form.price} onChange={(e) => setForm({ ...form, price: Number(e.target.value) })} /></div>
+              <div className="ai-field"><div className="ai-fl">价格（权益点）</div><NumInput className="ai-input" min={0} value={form.price} onChange={(price) => setForm({ ...form, price })} /></div>
             )}
             <div className="ai-actions">
               <button className="ai-btn ghost" onClick={() => setAdding(false)}>取消</button>
@@ -479,17 +482,27 @@ function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m:
           </div>
         )}
         {list.map((a) => (
-          <div key={a.key} className="crd" onClick={() => onOpen(a.key)}>
+          <div key={a.key} className="crd agent-card" onClick={() => onOpen(a.key)}>
             <div className="crd-row">
               <span className="crd-ic"><Icon name={a.icon} size={18} /></span>
               <div className="crd-b">
                 <div className="ct">{a.name} {billingTag(a.billing, a.price)} {!a.enabled && <span className="tag off">停用</span>}</div>
                 <div className="cs">{a.deliverableKey ? `产出 · ${a.deliverableKey}` : a.role} · {typeLabel(a.type)} · 已开通 {a.ownerCount ?? 0} · 成果 {a.deliverableCount ?? 0}</div>
               </div>
-              <button className={`mini-btn ${a.enabled ? 'danger' : 'primary'}`} onClick={(e) => toggle(e, a)}>
-                {a.enabled ? '下架' : '上架'}
-              </button>
-              <span className="edit"><Icon name="pen" size={15} /></span>
+              <div className="crd-actions">
+                <button type="button" className={`mini-btn ${a.enabled ? 'danger' : 'primary'}`} onClick={(e) => toggle(e, a)}>
+                  {a.enabled ? '下架' : '上架'}
+                </button>
+                <button
+                  type="button"
+                  className="mini-btn edit-action"
+                  onClick={(e) => openEdit(e, a.key)}
+                  aria-label={`编辑${a.name}`}
+                  title={`编辑${a.name}`}
+                >
+                  <Icon name="pen" size={13} /> 编辑
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -549,10 +562,10 @@ function PlansView({ toast }: { toast: (m: string) => void }) {
         {list.map((p) => editId === p.id ? (
           <div key={p.id} className="crd new-agent">
             <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-            <div className="ai-field"><div className="ai-fl">价格（元，-1=面议）</div><input className="ai-input" type="number" value={form.priceYuan} onChange={(e) => setForm({ ...form, priceYuan: Number(e.target.value) })} /></div>
-            <div className="ai-field"><div className="ai-fl">每月赠送钻石（-1=不限量）</div><input className="ai-input" type="number" value={form.creditsPerMonth} onChange={(e) => setForm({ ...form, creditsPerMonth: Number(e.target.value) })} /></div>
-            <div className="ai-field"><div className="ai-fl">每月 token 额度（产出消耗池，-1=不限量）</div><input className="ai-input" type="number" value={form.tokenQuotaPerMonth} onChange={(e) => setForm({ ...form, tokenQuotaPerMonth: Number(e.target.value) })} /></div>
-            <div className="ai-field"><div className="ai-fl">含智能体数</div><input className="ai-input" type="number" value={form.agentCount} onChange={(e) => setForm({ ...form, agentCount: Number(e.target.value) })} /></div>
+            <div className="ai-field"><div className="ai-fl">价格（元，-1=面议）</div><NumInput className="ai-input" value={form.priceYuan} onChange={(priceYuan) => setForm({ ...form, priceYuan })} /></div>
+            <div className="ai-field"><div className="ai-fl">每月赠送钻石（-1=不限量）</div><NumInput className="ai-input" value={form.creditsPerMonth} onChange={(creditsPerMonth) => setForm({ ...form, creditsPerMonth })} /></div>
+            <div className="ai-field"><div className="ai-fl">每月 token 额度（产出消耗池，-1=不限量）</div><NumInput className="ai-input" value={form.tokenQuotaPerMonth} onChange={(tokenQuotaPerMonth) => setForm({ ...form, tokenQuotaPerMonth })} /></div>
+            <div className="ai-field"><div className="ai-fl">含智能体数</div><NumInput className="ai-input" value={form.agentCount} onChange={(agentCount) => setForm({ ...form, agentCount })} /></div>
             <div className="ai-field"><div className="ai-fl">权益（每行一条）</div><textarea className="ta" rows={4} value={form.features} onChange={(e) => setForm({ ...form, features: e.target.value })} /></div>
             <div className="ai-actions">
               <button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button>

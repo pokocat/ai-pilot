@@ -25,20 +25,18 @@ body {
 }
 
 /* 全屏后台容器 */
-.phone {
-  width: 100vw;
-  max-width: none;
+/* 真实端全屏页面：单一根容器，position:relative 作为浮层（详情面板 / toast）定位锚点 */
+.screen {
+  position: relative;
+  width: 100%;
+  min-width: 0;
   height: 100vh;
   height: 100svh;
-  max-height: none;
-  min-height: 0;
-  background: var(--paper);
-  border-radius: 0;
-  box-shadow: none;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
-  border: 0;
+  background: var(--paper);
 }
-.screen { position: relative; width: 100%; min-width: 0; height: 100%; display: flex; flex-direction: column; overflow: hidden; }
 
 .adm-top { min-width: 0; padding: 18px 20px 14px; display: flex; align-items: center; gap: 11px; border-bottom: 1px solid var(--line-2); }
 .adm-mk { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 8px; background: var(--ink); color: var(--paper); display: flex; align-items: center; justify-content: center; font: 600 16px/1 var(--serif); }
@@ -76,9 +74,11 @@ body {
 .tag { font: 500 9.5px/1 var(--mono); padding: 3px 6px; border-radius: 5px; background: rgba(155,124,63,.14); color: var(--gold); }
 .tag.off { background: var(--surface-2); color: var(--ink-3); }
 .edit { color: var(--ink-3); }
+.crd-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
 .mini-btn { flex: 0 0 auto; min-width: 42px; height: 30px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--ink-2); font: 600 11.5px/1 var(--sans); cursor: pointer; }
 .mini-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .mini-btn.danger { border-color: rgba(156,74,56,.35); color: var(--danger); background: rgba(156,74,56,.08); }
+.mini-btn.edit-action { min-width: 72px; height: 34px; padding: 0 12px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; background: var(--surface-2); color: var(--ink-2); touch-action: manipulation; }
 
 .pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .pill { min-width: 0; height: 30px; padding: 0 10px; border-radius: 999px; background: var(--surface); border: 1px solid var(--line); color: var(--ink-2); font-size: 11.5px; display: inline-flex; align-items: center; gap: 6px; box-shadow: var(--shadow-sm); }
@@ -241,6 +241,9 @@ select.ai-input { appearance: none; }
   .adm-top { padding-inline: 16px; }
   .sec-h { padding-inline: 16px; }
   .pad { padding-inline: 16px; }
+  .agent-card .crd-row { align-items: flex-start; }
+  .agent-card .crd-actions { flex-direction: column; gap: 6px; }
+  .agent-card .mini-btn { min-width: 56px; }
   .add-row, .ai-actions { flex-wrap: wrap; }
   .add-input, .add-btn, .ai-btn { flex-basis: 100%; width: 100%; }
 }
