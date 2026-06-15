@@ -34,6 +34,9 @@ export const env = {
   skillToolTimeoutMs: Number(process.env.SKILL_TOOL_TIMEOUT_MS ?? 15000),
   skillToolAllowPrivateNet: (process.env.SKILL_TOOL_ALLOW_PRIVATE_NET ?? 'false') === 'true',
 
+  // 可分享报告页的对外基址（拼分享链接：{publicBaseUrl}/api/r/<id>）。生产配成用户可访问的域名。
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL ?? 'https://wxapi.aibuzz.cn').replace(/\/+$/, ''),
+
   // 知识/记忆向量近邻检索：默认关闭走内存余弦（零依赖）；
   // 置 true 且已执行 prisma/pgvector.sql（建 vector 列 + HNSW）后，走 pgvector 的 <=> 下推。
   pgvectorEnabled: (process.env.PGVECTOR_ENABLED ?? 'false') === 'true',

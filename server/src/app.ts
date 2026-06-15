@@ -11,6 +11,7 @@ import { sessionRoutes } from './routes/sessions.js';
 import { libraryRoutes } from './routes/library.js';
 import { projectRoutes } from './routes/projects.js';
 import { reportRoutes } from './routes/reports.js';
+import { reportShareRoutes } from './routes/reportShare.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { planRoutes } from './routes/plans.js';
 import { adminRoutes } from './routes/admin.js';
@@ -31,6 +32,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(libraryRoutes, { prefix: '/api' });
   await app.register(projectRoutes, { prefix: '/api' });
   await app.register(reportRoutes, { prefix: '/api' });
+  await app.register(reportShareRoutes, { prefix: '/api' }); // 公开报告页(无鉴权,凭 id 分享)
   await app.register(knowledgeRoutes, { prefix: '/api' });
   await app.register(planRoutes, { prefix: '/api' });
   await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin

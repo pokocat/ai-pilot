@@ -502,6 +502,18 @@ model LlmTrace {
   @@map("llm_trace")
 }
 
+/// 服务端渲染的可分享报告 HTML 页（凭不可猜 id 公开访问，发朋友圈用；只含报告正文，不含敏感数据）。
+model ReportHtml {
+  id        String   @id @default(cuid())
+  tenantId  String?
+  title     String
+  html      String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@map("report_html")
+}
+
 /// 运营自助技能库：自定义 HTTP 工具。agent 通过 skillsConfig.tools 按 key 勾选启用。
 model SkillTool {
   id           String   @id @default(cuid())

@@ -129,6 +129,13 @@ export async function sessionRoutes(app: FastifyInstance) {
     try {
       if (isDeliverable) {
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
+        // 渲染可分享的网页版报告(失败不影响产出)
+        try {
+          const { publishReport } = await import('../services/reportHtml.js');
+          deliverable.htmlUrl = await publishReport(user.tenantId, deliverable);
+        } catch (err) {
+          console.error('[sessions] publishReport failed:', (err as Error).message);
+        }
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'report', contentJson: deliverable as object },
         });

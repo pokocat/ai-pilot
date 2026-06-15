@@ -245,6 +245,7 @@ export interface DeliverableSection { h: string; b?: string; list?: string[]; }
 export interface Deliverable {
   title: string; icon: string; meta: string;
   sections: DeliverableSection[]; trust: string; actions: string[];
+  htmlUrl?: string; // 服务端渲染的可分享网页版报告链接（产出时生成）
 }
 /** 成果模板（mock 提供方 / few-shot 结构约束消费） */
 export interface DeliverableTemplate { icon: string; title: string; sections: DeliverableSection[]; }
