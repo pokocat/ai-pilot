@@ -7,12 +7,14 @@ import type {
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
   AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
+  SkillsConfig,
 } from '../../../shared/contracts';
 export type {
   Deliverable, DeliverableSection, ChatReply,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
   AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
+  SkillsConfig,
 };
 
 export interface GenContext {
@@ -35,6 +37,10 @@ export interface GenContext {
   understanding?: string[];   // 「军师档案」：真实档案/记忆/项目/知识沉淀的结构化理解
   understandingQuestions?: string[]; // 资料不足时优先追问的问题
   understandingMaturity?: 'empty' | 'forming' | 'ready';
+  // —— 工具调用所需标识（供 skills 循环组装 ToolContext）——
+  tenantId?: string | null;
+  userId?: string | null;
+  projectId?: string | null;
   // —— 运行时接入覆盖（per-agent 后台配置）。inherit 模式时为 null，走全局模型；否则按 mode 路由 ——
   runtime?: AgentRuntime | null;
 }
@@ -50,6 +56,8 @@ export interface AgentRuntime {
   difyBaseUrl?: string;
   difyApiKey?: string;
   difyInputs?: Record<string, string>;
+  // 自建技能（mode=openai）：启用后走工具调用循环
+  skills?: SkillsConfig | null;
   // 多轮上下文 & 回写（mode=dify）
   user?: string | null;          // Dify 末端用户标识（用 userId，做多用户隔离）
   sessionId?: string | null;

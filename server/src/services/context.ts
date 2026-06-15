@@ -8,12 +8,18 @@ import type { MemoryConfig } from '../data/agents.js';
 
 // 把 Agent 的「接入方式」解析成运行时覆盖。inherit / 未配置完整 → null（走全局模型）。
 function resolveAgentRuntime(
-  agent: { providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiKey: string | null; difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown },
+  agent: { providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiKey: string | null; difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown; skillsConfig: unknown },
   opts: { userId: string; sessionId?: string | null; difyConversationId?: string | null },
 ): AgentRuntime | null {
   if (agent.providerMode === 'openai') {
     if (!agent.apiBaseUrl || !agent.apiKey) return null; // 配置不全则回退全局
-    return { mode: 'openai', baseUrl: agent.apiBaseUrl, model: agent.apiModel ?? undefined, apiKey: agent.apiKey };
+    return {
+      mode: 'openai',
+      baseUrl: agent.apiBaseUrl,
+      model: agent.apiModel ?? undefined,
+      apiKey: agent.apiKey,
+      skills: (agent.skillsConfig as AgentRuntime['skills']) ?? null,
+    };
   }
   if (agent.providerMode === 'dify') {
     if (!agent.difyBaseUrl || !agent.difyApiKey) return null; // 配置不全则回退全局
@@ -114,6 +120,9 @@ export async function buildGenContext(opts: {
     understanding: understanding ? understandingContextLines(understanding) : [],
     understandingQuestions: understanding?.nextQuestions ?? [],
     understandingMaturity: understanding?.maturity ?? 'empty',
+    tenantId: opts.tenantId,
+    userId: opts.userId,
+    projectId: opts.projectId ?? null,
     runtime: resolveAgentRuntime(agent, { userId: opts.userId, sessionId: opts.sessionId, difyConversationId: opts.difyConversationId }),
   };
   return { ctx, memoryConfig, knowledgeUsed };

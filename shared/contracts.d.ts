@@ -21,6 +21,21 @@ export interface MemoryConfig {
 /** 智能体运行时接入方式：跟随全局模型 / 自定义 OpenAI 兼容端点 / 绑定 Dify 应用 */
 export type AgentProviderMode = 'inherit' | 'openai' | 'dify';
 
+/** 自定义 HTTP 工具定义（Phase 2 defer，仅占位） */
+export interface CustomToolDef {
+  name: string;
+  description: string;
+  httpUrl?: string;
+  inputSchema: Record<string, unknown>;
+}
+
+/** 自建技能（工具调用）配置：providerMode=openai 时生效 */
+export interface SkillsConfig {
+  enabled: boolean;
+  tools: string[];              // 勾选的内置工具名，如 ['search_knowledge','recall_memory']
+  customTools?: CustomToolDef[]; // 预留
+}
+
 /** 运营端读取的智能体接入配置（apiKey 脱敏为 has*，不回明文） */
 export interface AgentRuntimeView {
   providerMode: AgentProviderMode;
@@ -30,6 +45,7 @@ export interface AgentRuntimeView {
   difyBaseUrl: string;  // Dify 应用 baseUrl，如 http://ai.aibuzz.cn/v1
   hasDifyKey: boolean;  // Dify 应用是否已配置 key
   difyInputs: Record<string, string>; // { Dify输入变量名: "{企业档案}" } 本地上下文按占位符映射
+  skills: SkillsConfig; // 自建技能配置（关闭时 enabled=false）
 }
 
 /** 运营端更新智能体接入配置（key 仅在显式传入非空时更新；空串=清空） */
@@ -41,6 +57,13 @@ export interface AgentRuntimeUpdate {
   difyBaseUrl?: string;
   difyApiKey?: string;
   difyInputs?: Record<string, string>;
+  skills?: SkillsConfig;
+}
+
+/** 后台可勾选的内置工具元信息（GET /admin/skill-tools） */
+export interface SkillToolMeta {
+  name: string;
+  description: string;
 }
 
 /** 对话/前端消费的公开智能体字段（GET /agents） */
@@ -469,4 +492,31 @@ export interface AdminAuditItem {
   tenantName: string | null;
   payload: unknown;
   at: string;
+}
+
+/** LLM 调用诊断 trace（可观测） */
+export interface AdminTraceItem {
+  id: string;
+  at: string;
+  agentKey: string | null;
+  kind: string;        // deliverable | chat
+  provider: string;    // openai | claude | mock | dify
+  model: string;
+  status: 'ok' | 'error';
+  latencyMs: number;
+  toolCalls: number;
+  totalTokens: number;
+  errorMessage: string | null;
+}
+export interface AdminTraceListView {
+  windowDays: number;
+  totals: { calls: number; errors: number; avgLatencyMs: number };
+  items: AdminTraceItem[];
+}
+export interface AdminTraceDetail extends AdminTraceItem {
+  iterations: number;
+  inputTokens: number;
+  outputTokens: number;
+  promptText: string | null;
+  responseText: string | null;
 }

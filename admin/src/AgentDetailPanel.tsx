@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
 import NumInput from './NumInput';
-import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult } from './api';
+import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta } from './api';
 
 const VARS = ['{企业档案}', '{行业基准}', '{长期记忆}', '{本命色}'];
 const PROVIDER_MODES: [AgentProviderMode, string, string][] = [
@@ -45,6 +45,10 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
   const [difyApiKey, setDifyApiKey] = useState(''); // 留空=不改动已存 key
   const [hasDifyKey, setHasDifyKey] = useState(false);
   const [difyInputsText, setDifyInputsText] = useState('{}');
+  // —— 自建技能（providerMode=openai）——
+  const [skillsEnabled, setSkillsEnabled] = useState(false);
+  const [skillTools, setSkillTools] = useState<string[]>([]);
+  const [availTools, setAvailTools] = useState<SkillToolMeta[]>([]);
   const [test, setTest] = useState<AiTestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [loadErr, setLoadErr] = useState('');
@@ -63,9 +67,13 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
       setApiBaseUrl(r.apiBaseUrl); setApiModel(r.apiModel); setHasApiKey(r.hasApiKey); setApiKey('');
       setDifyBaseUrl(r.difyBaseUrl); setHasDifyKey(r.hasDifyKey); setDifyApiKey('');
       setDifyInputsText(JSON.stringify(r.difyInputs ?? {}, null, 2));
+      setSkillsEnabled(r.skills?.enabled ?? false); setSkillTools(r.skills?.tools ?? []);
       setTest(null);
     }).catch((e) => setLoadErr(e?.message || '加载顾问详情失败，请重试'));
   }, [agentKey]);
+
+  // 可勾选的内置工具元信息（一次性加载）。
+  useEffect(() => { api.skillTools().then(setAvailTools).catch(() => setAvailTools([])); }, []);
 
   // 加载失败时给出可见反馈 + 返回入口，而不是渲染空白（旧版静默吞错，点编辑像「没反应」）
   if (loadErr) {
@@ -105,6 +113,7 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
     if (mode === 'openai') {
       rt.apiBaseUrl = apiBaseUrl; rt.apiModel = apiModel;
       if (apiKey.trim()) rt.apiKey = apiKey.trim();
+      rt.skills = { enabled: skillsEnabled, tools: skillTools };
     } else if (mode === 'dify') {
       rt.difyBaseUrl = difyBaseUrl;
       if (difyApiKey.trim()) rt.difyApiKey = difyApiKey.trim();
@@ -222,6 +231,27 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
               <div className="ai-field"><div className="ai-fl">Base URL</div><input className="ai-input" placeholder="https://api.deepseek.com/v1" value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} /></div>
               <div className="ai-field"><div className="ai-fl">模型</div><input className="ai-input" placeholder="deepseek-chat" value={apiModel} onChange={(e) => setApiModel(e.target.value)} /></div>
               <div className="ai-field"><div className="ai-fl">API Key{hasApiKey ? ' · 已配置' : ''}</div><input className="ai-input" type="password" placeholder={hasApiKey ? '已保存 · 留空则不修改' : 'sk-...'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></div>
+              <div className="cfg">
+                <div className="cfg-row">
+                  <div className="cb"><div className="ct">启用技能（工具调用）</div><div className="cs">让模型自行调用知识库检索 / 记忆召回等工具后再作答</div></div>
+                  <div className={`sw ${skillsEnabled ? 'on' : ''}`} onClick={() => setSkillsEnabled((v) => !v)}><i /></div>
+                </div>
+              </div>
+              {skillsEnabled && (
+                <div className="mem-list" style={{ marginTop: 8 }}>
+                  {availTools.map((t) => {
+                    const on = skillTools.includes(t.name);
+                    return (
+                      <div key={t.name} className="mem-card">
+                        <span className="mi"><Icon name="insight" size={16} /></span>
+                        <div className="mb"><div className="mt">{t.name}</div><div className="mm">{t.description}</div></div>
+                        <div className={`sw ${on ? 'on' : ''}`} onClick={() => setSkillTools((s) => on ? s.filter((x) => x !== t.name) : [...s, t.name])}><i /></div>
+                      </div>
+                    );
+                  })}
+                  {!availTools.length && <div className="blk-d">（暂无可用工具）</div>}
+                </div>
+              )}
             </>
           )}
 

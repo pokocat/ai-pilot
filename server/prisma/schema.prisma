@@ -140,6 +140,8 @@ model Agent {
   difyBaseUrl  String? // 如 http://ai.aibuzz.cn/v1
   difyApiKey   String? @db.Text // 每个 Dify 应用专属 key
   difyInputs   Json? // { difyVarName: "{企业档案}" }：本地上下文按占位符映射成 Dify inputs
+  // 自建技能（工具调用，providerMode=openai 时生效）：{ enabled, tools:[内置工具名], customTools? }
+  skillsConfig Json?
 
   sort           Int      @default(0)
   updatedAt      DateTime @updatedAt
@@ -468,6 +470,35 @@ model TokenUsage {
   @@index([userId, createdAt])
   @@index([model, createdAt])
   @@map("token_usage")
+}
+
+/// LLM 调用诊断 trace（可观测）。与 token_usage 分表：trace 要记 mock/0token/错误，不污染计费口径。
+/// 不挂关系，纯写入 + 索引查询。promptText/responseText 仅在 LLM_TRACE_CAPTURE_TEXT=true 时截断存储。
+model LlmTrace {
+  id           String   @id @default(cuid())
+  tenantId     String?
+  userId       String?
+  sessionId    String?
+  agentKey     String?
+  kind         String // deliverable | chat
+  provider     String // openai | claude | mock | dify
+  model        String
+  status       String // ok | error
+  errorMessage String?  @db.Text
+  latencyMs    Int      @default(0)
+  toolCalls    Int      @default(0) // 启用技能时的工具调用次数
+  iterations   Int      @default(0) // 工具循环轮数
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  totalTokens  Int      @default(0)
+  promptText   String?  @db.Text
+  responseText String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([agentKey, createdAt])
+  @@index([status, createdAt])
+  @@map("llm_trace")
 }
 
 /// 审计日志

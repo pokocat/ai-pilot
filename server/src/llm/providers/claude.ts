@@ -5,6 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { DELIVERABLE_TOOL, injectVariables, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
+import type { LoopMessage, StepFn, Tool, ToolCall } from '../tools/types.js';
 
 // 按 key 缓存 client（后台切换 key 后自动新建）。
 let cached: { key: string; client: Anthropic } | null = null;
@@ -101,4 +102,64 @@ export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: str
     messages: [{ role: 'user', content: user }],
   });
   return res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
+}
+
+// —— 工具调用循环的 provider step（Anthropic tool_use / tool_result 形态）——
+
+// LoopMessage[] → Anthropic system（顶层）+ messages（含 tool_use / tool_result 块）。
+function toClaudeMessages(messages: LoopMessage[]): { system: string; msgs: Anthropic.MessageParam[] } {
+  let system = '';
+  const msgs: Anthropic.MessageParam[] = [];
+  for (const m of messages) {
+    if (m.role === 'system') system = m.text;
+    else if (m.role === 'user') msgs.push({ role: 'user', content: m.text });
+    else if (m.role === 'assistant') msgs.push({ role: 'assistant', content: m.text });
+    else if (m.role === 'assistant_tools') {
+      msgs.push({ role: 'assistant', content: m.calls.map((c) => ({ type: 'tool_use', id: c.id, name: c.name, input: c.args ?? {} })) });
+    } else if (m.role === 'tool_results') {
+      msgs.push({ role: 'user', content: m.results.map((r) => ({ type: 'tool_result', tool_use_id: r.id, content: r.content, is_error: r.isError })) });
+    }
+  }
+  return { system, msgs };
+}
+
+/** 绑定 cfg，返回 provider 无关循环所需的 step 函数。 */
+export function claudeStep(cfg: ResolvedAiConfig): StepFn {
+  return async (messages, tools, opts) => {
+    const finalName = opts.finalTool?.name;
+    const { system, msgs } = toClaudeMessages(messages);
+    const toolDefs: Anthropic.Tool[] = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Tool['input_schema'] }));
+    if (opts.finalTool) toolDefs.push({ name: opts.finalTool.name, description: opts.finalTool.description, input_schema: opts.finalTool.schema as Anthropic.Tool['input_schema'] });
+
+    const req: Anthropic.MessageCreateParamsNonStreaming = {
+      model: cfg.model,
+      max_tokens: opts.finalTool ? 1500 : 800,
+      temperature: cfg.temperature,
+      system,
+      messages: msgs,
+    };
+    if (opts.forceFinal) {
+      // 最后一轮强制收口：deliverable 强制 emit_deliverable；chat 去掉工具直接出文本。
+      if (opts.finalTool) { req.tools = toolDefs; req.tool_choice = { type: 'tool', name: opts.finalTool.name }; }
+    } else if (toolDefs.length) {
+      req.tools = toolDefs;
+      req.tool_choice = { type: 'auto' };
+    }
+
+    const res = await getClient(cfg.apiKey).messages.create(req);
+    const usage = usageOf(res);
+    const toolUses = res.content.filter((c): c is Anthropic.ToolUseBlock => c.type === 'tool_use');
+
+    if (finalName) {
+      const fin = toolUses.find((c) => c.name === finalName);
+      if (fin) return { kind: 'final', toolInput: fin.input as Record<string, unknown>, usage };
+    }
+    const regular = toolUses.filter((c) => c.name !== finalName);
+    if (regular.length) {
+      const mapped: ToolCall[] = regular.map((c) => ({ id: c.id, name: c.name, args: (c.input as Record<string, unknown>) ?? {} }));
+      return { kind: 'tool_calls', calls: mapped, usage };
+    }
+    const text = res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
+    return { kind: 'final', text, usage };
+  };
 }

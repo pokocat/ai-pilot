@@ -6,12 +6,15 @@ import { getAiConfig, setAiConfig, publicConfig, AI_PRESETS, type ResolvedAiConf
 import { pingModel, pingAgentRuntime } from '../llm/gateway.js';
 import { requireAdmin } from '../services/adminAuth.js';
 import { tokenUsageSummary } from '../services/usage.js';
+import { listTraces, getTrace } from '../services/trace.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
+import { builtinToolNames, builtinToolMeta } from '../llm/tools/registry.js';
 import type { AiConfigUpdate } from '../llm/schema.js';
 import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
-  AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult,
+  AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
+  AdminTraceListView, AdminTraceDetail,
 } from '../../../shared/contracts';
 import type { Prisma } from '@prisma/client';
 
@@ -22,10 +25,18 @@ function normalizeBilling(b: unknown): AgentBilling {
 
 const PROVIDER_MODES: AgentProviderMode[] = ['inherit', 'openai', 'dify'];
 
+// 库 skillsConfig → 规范化 SkillsConfig（只保留合法内置工具名）。
+function normalizeSkills(raw: unknown): SkillsConfig {
+  const s = (raw as Partial<SkillsConfig> | null) ?? null;
+  const valid = new Set(builtinToolNames());
+  const tools = Array.isArray(s?.tools) ? s!.tools.filter((t) => typeof t === 'string' && valid.has(t)) : [];
+  return { enabled: !!s?.enabled, tools, customTools: Array.isArray(s?.customTools) ? s!.customTools : undefined };
+}
+
 // 库行 → 脱敏的接入视图（不回明文 key）。
 function runtimeView(a: {
   providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiKey: string | null;
-  difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown;
+  difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown; skillsConfig: unknown;
 }): AgentRuntimeView {
   return {
     providerMode: (PROVIDER_MODES.includes(a.providerMode as AgentProviderMode) ? a.providerMode : 'inherit') as AgentProviderMode,
@@ -35,6 +46,7 @@ function runtimeView(a: {
     difyBaseUrl: a.difyBaseUrl ?? '',
     hasDifyKey: !!(a.difyApiKey && a.difyApiKey.trim()),
     difyInputs: (a.difyInputs as Record<string, string> | null) ?? {},
+    skills: normalizeSkills(a.skillsConfig),
   };
 }
 
@@ -49,6 +61,7 @@ function runtimeData(rt?: AgentRuntimeUpdate): Prisma.AgentUpdateInput {
   if (rt.difyBaseUrl !== undefined) d.difyBaseUrl = rt.difyBaseUrl.trim() || null;
   if (rt.difyApiKey !== undefined) d.difyApiKey = rt.difyApiKey || null;
   if (rt.difyInputs !== undefined) d.difyInputs = (rt.difyInputs ?? {}) as Prisma.InputJsonValue;
+  if (rt.skills !== undefined) d.skillsConfig = normalizeSkills(rt.skills) as unknown as Prisma.InputJsonValue;
   return d;
 }
 
@@ -81,6 +94,9 @@ export async function adminRoutes(app: FastifyInstance) {
     };
     return pingModel(merged);
   });
+
+  // 可勾选的内置技能工具（后台 agent 技能配置用）。新增工具注册进 registry 后自动出现。
+  app.get('/admin/skill-tools', async (): Promise<SkillToolMeta[]> => builtinToolMeta());
 
   // —— 概览看板 ——
   app.get('/admin/overview', async () => {
@@ -197,6 +213,16 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { days?: string } }>('/admin/token-usage', async (req): Promise<AdminTokenUsageView> => {
     const days = Math.min(Math.max(Number(req.query.days ?? 30) || 30, 1), 90);
     return tokenUsageSummary(days);
+  });
+
+  // —— 可观测（调用诊断）：每次 LLM 调用的耗时/状态/错误/工具调用，含错误与 mock ——
+  app.get<{ Querystring: { days?: string; status?: string; agentKey?: string } }>('/admin/observability', async (req): Promise<AdminTraceListView> => {
+    return listTraces({ days: Number(req.query.days) || 7, status: req.query.status, agentKey: req.query.agentKey });
+  });
+  app.get<{ Params: { id: string } }>('/admin/observability/:id', async (req, reply): Promise<AdminTraceDetail | void> => {
+    const t = await getTrace(req.params.id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
+    return t;
   });
 
   // —— 审计日志：所有带 x-user-id 的小程序 API 行为 + 关键业务/后台操作 ——

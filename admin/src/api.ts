@@ -62,8 +62,8 @@ export const adminAuth = {
 };
 
 // 数据模型统一来自 SSOT（shared/contracts），与前端/后端同口径；按运营端旧名再导出。
-export type { Overview, AdminAgent, AgentDetail, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem } from '../../shared/contracts';
-export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate } from '../../shared/contracts';
+export type { Overview, AdminAgent, AgentDetail, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail } from '../../shared/contracts';
+export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsConfig, SkillToolMeta } from '../../shared/contracts';
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
@@ -72,7 +72,7 @@ export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, Ai
 import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, Plan, AdminSaying,
   AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
-  AgentRuntimeUpdate,
+  AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail,
 } from '../../shared/contracts';
 
 export const api = {
@@ -83,6 +83,15 @@ export const api = {
   revokeAgent: (id: string, agentKey: string) => req<{ ok: boolean }>(`/admin/users/${id}/agents/${agentKey}`, 'DELETE'),
   usage: () => req<AdminUsageView>('/admin/usage'),
   tokenUsage: (days = 30) => req<AdminTokenUsageView>(`/admin/token-usage?days=${days}`),
+  traces: (q: { days?: number; status?: string; agentKey?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (q.days) p.set('days', String(q.days));
+    if (q.status) p.set('status', q.status);
+    if (q.agentKey) p.set('agentKey', q.agentKey);
+    const qs = p.toString();
+    return req<AdminTraceListView>(`/admin/observability${qs ? '?' + qs : ''}`);
+  },
+  trace: (id: string) => req<AdminTraceDetail>(`/admin/observability/${id}`),
   auditLogs: () => req<AdminAuditItem[]>('/admin/audit-logs'),
   sayings: () => req<AdminSaying[]>('/admin/sayings'),
   addSaying: (text: string) => req<AdminSaying>('/admin/sayings', 'POST', { text }),
@@ -94,6 +103,7 @@ export const api = {
     req<{ ok: boolean }>(`/admin/agents/${key}`, 'PATCH', body),
   testAgent: (key: string, runtime: AgentRuntimeUpdate) =>
     req<AiTestResult>(`/admin/agents/${key}/test`, 'POST', runtime),
+  skillTools: () => req<SkillToolMeta[]>('/admin/skill-tools'),
   createAgent: (body: AdminAgentCreate) => req<{ ok: boolean; key: string }>('/admin/agents', 'POST', body),
   survey: () => req<SurveyAdmin[]>('/admin/survey'),
   plans: () => req<Plan[]>('/admin/plans'),

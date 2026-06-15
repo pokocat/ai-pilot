@@ -10,6 +10,7 @@ import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../servic
 import { mockChat, mockDeliverable } from './providers/mock.js';
 import { ZERO_USAGE, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
 import { recordTokenUsage, type UsageMeta } from '../services/usage.js';
+import { recordTrace } from '../services/trace.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
 function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
@@ -27,7 +28,35 @@ function aiUnavailable(err: unknown): Error {
 }
 
 // 把「产出 + 真实 token + 来源」打包，便于在输出审核/缓存前统一记账。
-type Sourced<T> = { result: T; usage: Usage; provider: string; model: string };
+// toolCalls/iterations：启用技能的工具调用循环才有，供可观测 trace 记录。
+type Sourced<T> = { result: T; usage: Usage; provider: string; model: string; toolCalls?: number; iterations?: number };
+
+function deliverableText(d: Deliverable): string {
+  return d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
+}
+
+// 计时执行一次 provider 调用并落 trace（成功记 ok + 指标 + 原文；失败记 error 后原样抛出，由调用方兜底）。
+async function traced<T>(
+  run: () => Promise<Sourced<T>>,
+  args: { kind: 'deliverable' | 'chat'; ctx: GenContext; meta?: UsageMeta; provider: string; respText: (r: T) => string },
+): Promise<Sourced<T>> {
+  const t0 = Date.now();
+  try {
+    const s = await run();
+    await recordTrace({
+      meta: args.meta, agentKey: args.ctx.agentKey, kind: args.kind, provider: s.provider, model: s.model,
+      status: 'ok', latencyMs: Date.now() - t0, toolCalls: s.toolCalls, iterations: s.iterations, usage: s.usage,
+      promptText: args.ctx.userMessage, responseText: args.respText(s.result),
+    });
+    return s;
+  } catch (err) {
+    await recordTrace({
+      meta: args.meta, agentKey: args.ctx.agentKey, kind: args.kind, provider: args.provider, model: '',
+      status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: args.ctx.userMessage,
+    });
+    throw err;
+  }
+}
 
 // 对真实计费 provider（claude/openai/dify）记账；mock 与 0-token（缓存命中）跳过。记账内部 catch，不影响产出。
 async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ctx: GenContext, meta?: UsageMeta): Promise<void> {
@@ -73,9 +102,21 @@ async function runtimeChat(ctx: GenContext): Promise<Sourced<ChatReply>> {
   }
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
   if (!isRealKey(cfg.apiKey)) return { result: mockChat(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
-  const { openaiChat } = await import('./providers/openai.js');
-  const m = await openaiChat(ctx, cfg);
+  const oa = await import('./providers/openai.js');
+  const tools = await resolveAgentTools(rt);
+  if (tools.length) {
+    const m = await oa.openaiChatWithTools(ctx, cfg, tools);
+    return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model, toolCalls: m.toolCalls, iterations: m.iterations };
+  }
+  const m = await oa.openaiChat(ctx, cfg);
   return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model };
+}
+
+// 解析该 agent 启用的技能工具（未开启或无勾选 → 空，走单次调用）。
+async function resolveAgentTools(rt: NonNullable<GenContext['runtime']>) {
+  if (rt.mode !== 'openai' || !rt.skills?.enabled || !rt.skills.tools?.length) return [];
+  const { resolveTools } = await import('./tools/registry.js');
+  return resolveTools(rt.skills.tools);
 }
 
 async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>> {
@@ -88,8 +129,13 @@ async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>
   }
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
   if (!isRealKey(cfg.apiKey)) return { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
-  const { openaiDeliverable } = await import('./providers/openai.js');
-  const m = await openaiDeliverable(ctx, cfg);
+  const oa = await import('./providers/openai.js');
+  const tools = await resolveAgentTools(rt);
+  if (tools.length) {
+    const m = await oa.openaiDeliverableWithTools(ctx, cfg, tools);
+    return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model, toolCalls: m.toolCalls, iterations: m.iterations };
+  }
+  const m = await oa.openaiDeliverable(ctx, cfg);
   return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model };
 }
 
@@ -135,7 +181,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   if (ctx.runtime) {
     let sourced: Sourced<Deliverable>;
     try {
-      sourced = await runtimeDeliverable(ctx);
+      sourced = await traced(() => runtimeDeliverable(ctx), { kind: 'deliverable', ctx, meta, provider: ctx.runtime.mode === 'dify' ? 'dify' : 'openai', respText: deliverableText });
     } catch (err) {
       console.error('[gateway] runtime deliverable fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
@@ -156,18 +202,20 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
 
   let sourced: Sourced<Deliverable>;
   try {
-    const live = liveProvider(cfg);
-    if (live === 'claude') {
-      const { claudeDeliverable } = await import('./providers/claude.js');
-      const m = await claudeDeliverable(ctx, cfg);
-      sourced = { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model };
-    } else if (live === 'openai') {
-      const { openaiDeliverable } = await import('./providers/openai.js');
-      const m = await openaiDeliverable(ctx, cfg);
-      sourced = { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model };
-    } else {
-      sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
-    }
+    sourced = await traced(async () => {
+      const live = liveProvider(cfg);
+      if (live === 'claude') {
+        const { claudeDeliverable } = await import('./providers/claude.js');
+        const m = await claudeDeliverable(ctx, cfg);
+        return { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model };
+      }
+      if (live === 'openai') {
+        const { openaiDeliverable } = await import('./providers/openai.js');
+        const m = await openaiDeliverable(ctx, cfg);
+        return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model };
+      }
+      return { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+    }, { kind: 'deliverable', ctx, meta, provider: liveProvider(cfg) ?? 'mock', respText: deliverableText });
   } catch (err) {
     console.error('[gateway] deliverable fallback to mock:', (err as Error).message);
     if (!env.aiFallbackMock) throw aiUnavailable(err);
@@ -191,7 +239,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
   // per-agent 接入覆盖：走该智能体自己的端点 / Dify 应用。失败兜底 mock。
   if (ctx.runtime) {
     try {
-      const s = await runtimeChat(ctx);
+      const s = await traced(() => runtimeChat(ctx), { kind: 'chat', ctx, meta, provider: ctx.runtime.mode === 'dify' ? 'dify' : 'openai', respText: (r) => r.text });
       await maybeRecord(s, 'chat', ctx, meta);
       await moderate('output', s.result.text);
       return { result: s.result, usage: s.usage };
@@ -206,11 +254,13 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
   try {
     const live = liveProvider(cfg);
     if (live) {
-      const m =
-        live === 'claude'
-          ? await (await import('./providers/claude.js')).claudeChat(ctx, cfg)
-          : await (await import('./providers/openai.js')).openaiChat(ctx, cfg);
-      const s: Sourced<ChatReply> = { result: m.result, usage: m.usage, provider: live, model: cfg.model };
+      const s = await traced(async () => {
+        const m =
+          live === 'claude'
+            ? await (await import('./providers/claude.js')).claudeChat(ctx, cfg)
+            : await (await import('./providers/openai.js')).openaiChat(ctx, cfg);
+        return { result: m.result, usage: m.usage, provider: live, model: cfg.model };
+      }, { kind: 'chat', ctx, meta, provider: live, respText: (r) => r.text });
       await maybeRecord(s, 'chat', ctx, meta);
       await moderate('output', s.result.text);
       return { result: s.result, usage: s.usage };

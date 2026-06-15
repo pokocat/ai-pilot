@@ -206,6 +206,7 @@ select.ai-input { appearance: none; }
 .ai-test.ok { background: rgba(45,122,82,.1); color: #2D7A52; } .ai-test.ok svg { color: #2D7A52; }
 .ai-test.err { background: rgba(156,74,56,.1); color: #9C4A38; } .ai-test.err svg { color: #9C4A38; }
 .ai-actions { display: flex; gap: 10px; margin-top: 6px; min-width: 0; }
+.trace-text { white-space: pre-wrap; word-break: break-word; font-size: 12px; line-height: 1.5; background: rgba(0,0,0,.04); border-radius: 8px; padding: 10px 12px; margin: 4px 0 12px; max-height: 320px; overflow: auto; }
 .ai-btn { flex: 1; min-width: 0; height: 44px; border-radius: 12px; font: 600 13.5px/1 var(--sans); display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; border: 1px solid var(--line); white-space: nowrap; }
 .ai-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .ai-btn.ghost { background: transparent; color: var(--ink-2); }

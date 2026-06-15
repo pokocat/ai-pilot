@@ -27,6 +27,9 @@ export const env = {
 
   moderationEnabled: (process.env.MODERATION_ENABLED ?? 'true') === 'true',
 
+  // LLM 调用诊断 trace 是否落库 prompt/输出原文（便于排查，含 PII/敏感内容）。默认关，仅记指标。
+  llmTraceCaptureText: (process.env.LLM_TRACE_CAPTURE_TEXT ?? 'false') === 'true',
+
   // 知识/记忆向量近邻检索：默认关闭走内存余弦（零依赖）；
   // 置 true 且已执行 prisma/pgvector.sql（建 vector 列 + HNSW）后，走 pgvector 的 <=> 下推。
   pgvectorEnabled: (process.env.PGVECTOR_ENABLED ?? 'false') === 'true',

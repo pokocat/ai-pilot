@@ -17,18 +17,21 @@ import {
   type AdminUsageView,
   type AdminTokenUsageView,
   type AdminAuditItem,
+  type AdminTraceListView,
+  type AdminTraceDetail,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
 import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 
-type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'agent' | 'audit' | 'model' | 'say' | 'form' | 'plan';
+type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'audit' | 'model' | 'say' | 'form' | 'plan';
 const TABS: { key: Tab; icon: string; label: string }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
   { key: 'usage', icon: 'crown', label: '消耗' },
   { key: 'tokens', icon: 'trend', label: 'Token' },
+  { key: 'trace', icon: 'insight', label: '诊断' },
   { key: 'agent', icon: 'agent', label: '顾问' },
   { key: 'audit', icon: 'clock', label: '审计' },
   { key: 'model', icon: 'insight', label: '模型' },
@@ -83,6 +86,7 @@ export default function App() {
           {tab === 'users' && <UsersView onOpen={setDetailUser} />}
           {tab === 'usage' && <UsageView />}
           {tab === 'tokens' && <TokenUsageView />}
+          {tab === 'trace' && <ObservabilityView />}
           {tab === 'say' && <SayingsView toast={showToast} />}
           {tab === 'agent' && <AgentsView onOpen={setDetailKey} toast={showToast} />}
           {tab === 'audit' && <AuditView />}
@@ -360,6 +364,61 @@ function TokenUsageView() {
           </>
         )}
       </div>
+    </>
+  );
+}
+
+function ObservabilityView() {
+  const [data, setData] = useState<AdminTraceListView | null>(null);
+  const [status, setStatus] = useState<'' | 'ok' | 'error'>('');
+  const [detail, setDetail] = useState<AdminTraceDetail | null>(null);
+  useEffect(() => { api.traces({ days: 7, status: status || undefined }).then(setData).catch(() => {}); }, [status]);
+  if (!data) return <Loading />;
+  const errRate = data.totals.calls ? Math.round((data.totals.errors / data.totals.calls) * 100) : 0;
+  return (
+    <>
+      <div className="sec-h"><span className="t">调用诊断</span><span className="s">近 {data.windowDays} 天 · 每次 LLM 调用的耗时/状态/工具</span></div>
+      <div className="pad">
+        <div className="usage-summary">
+          <div><b>{data.totals.calls}</b><span>调用次数</span></div>
+          <div><b>{data.totals.errors}</b><span>错误数</span></div>
+          <div><b>{errRate}%</b><span>错误率</span></div>
+          <div><b>{data.totals.avgLatencyMs}ms</b><span>平均延迟</span></div>
+        </div>
+        <div className="bill-seg" style={{ margin: '8px 0' }}>
+          {([['', '全部'], ['ok', '成功'], ['error', '错误']] as const).map(([v, l]) => (
+            <div key={v} className={`bill-opt ${status === v ? 'on' : ''}`} onClick={() => setStatus(v)}><div className="bo-t">{l}</div></div>
+          ))}
+        </div>
+        {data.items.length === 0 && <div className="usage-meta" style={{ padding: '10px 0' }}>暂无调用记录。</div>}
+        {data.items.map((t) => (
+          <div key={t.id} className="usage-row" style={{ cursor: 'pointer' }} onClick={() => api.trace(t.id).then(setDetail).catch(() => {})}>
+            <div className="usage-h">
+              <div className="usage-name">{t.agentKey ?? '（全局）'}<span>{t.kind} · {t.provider}/{t.model || '-'}</span></div>
+              <div className="usage-num" style={{ color: t.status === 'error' ? '#d4503a' : '#1a8a5a' }}>{t.status === 'error' ? '错误' : `${t.latencyMs}ms`}</div>
+            </div>
+            <div className="usage-meta">{new Date(t.at).toLocaleString()} · {t.totalTokens} token{t.toolCalls ? ` · 工具×${t.toolCalls}` : ''}{t.errorMessage ? ` · ${t.errorMessage.slice(0, 40)}` : ''}</div>
+          </div>
+        ))}
+      </div>
+      {detail && (
+        <div className="ad-detail show" onClick={() => setDetail(null)}>
+          <div className="ad-dh"><div className="bk" onClick={() => setDetail(null)}><Icon name="arrow" size={18} /></div><div className="dt"><div className="t">调用详情</div><div className="s">{detail.kind} · {detail.provider}/{detail.model || '-'}</div></div></div>
+          <div className="ad-db" onClick={(e) => e.stopPropagation()}>
+            <div className="usage-summary">
+              <div><b>{detail.status === 'error' ? '错误' : '成功'}</b><span>状态</span></div>
+              <div><b>{detail.latencyMs}ms</b><span>延迟</span></div>
+              <div><b>{detail.toolCalls}/{detail.iterations}</b><span>工具/轮次</span></div>
+              <div><b>{detail.totalTokens}</b><span>token</span></div>
+            </div>
+            {detail.errorMessage && <div className="ai-test err" style={{ marginTop: 8 }}><Icon name="spark" size={14} /> {detail.errorMessage}</div>}
+            <div className="sec-h" style={{ marginTop: 8 }}><span className="t">输入</span></div>
+            <pre className="trace-text">{detail.promptText ?? '（未捕获原文，设 LLM_TRACE_CAPTURE_TEXT=true 开启）'}</pre>
+            <div className="sec-h"><span className="t">输出</span></div>
+            <pre className="trace-text">{detail.responseText ?? '（未捕获原文）'}</pre>
+          </div>
+        </div>
+      )}
     </>
   );
 }
