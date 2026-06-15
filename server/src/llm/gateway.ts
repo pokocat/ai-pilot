@@ -113,10 +113,11 @@ async function runtimeChat(ctx: GenContext): Promise<Sourced<ChatReply>> {
 }
 
 // 解析该 agent 启用的技能工具（未开启或无勾选 → 空，走单次调用）。
+// 内置工具走 registry；自定义 HTTP 工具按 key 查技能库表。
 async function resolveAgentTools(rt: NonNullable<GenContext['runtime']>) {
   if (rt.mode !== 'openai' || !rt.skills?.enabled || !rt.skills.tools?.length) return [];
-  const { resolveTools } = await import('./tools/registry.js');
-  return resolveTools(rt.skills.tools);
+  const { loadToolsByNames } = await import('../services/skillTools.js');
+  return loadToolsByNames(rt.skills.tools);
 }
 
 async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>> {

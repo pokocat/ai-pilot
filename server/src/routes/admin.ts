@@ -8,13 +8,13 @@ import { requireAdmin } from '../services/adminAuth.js';
 import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
-import { builtinToolNames, builtinToolMeta } from '../llm/tools/registry.js';
+import { selectableMeta, listDefs, createTool, updateTool, deleteTool } from '../services/skillTools.js';
 import type { AiConfigUpdate } from '../llm/schema.js';
 import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
   AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
-  AdminTraceListView, AdminTraceDetail,
+  AdminTraceListView, AdminTraceDetail, SkillToolDef, SkillToolUpsert,
 } from '../../../shared/contracts';
 import type { Prisma } from '@prisma/client';
 
@@ -25,12 +25,12 @@ function normalizeBilling(b: unknown): AgentBilling {
 
 const PROVIDER_MODES: AgentProviderMode[] = ['inherit', 'openai', 'dify'];
 
-// 库 skillsConfig → 规范化 SkillsConfig（只保留合法内置工具名）。
+// 库 skillsConfig → 规范化 SkillsConfig。tools 保留所有非空字符串（内置名或自定义工具 key）；
+// 失效/已删的 key 运行时解析自动跳过，不在此处硬卡（解耦 DB）。
 function normalizeSkills(raw: unknown): SkillsConfig {
   const s = (raw as Partial<SkillsConfig> | null) ?? null;
-  const valid = new Set(builtinToolNames());
-  const tools = Array.isArray(s?.tools) ? s!.tools.filter((t) => typeof t === 'string' && valid.has(t)) : [];
-  return { enabled: !!s?.enabled, tools, customTools: Array.isArray(s?.customTools) ? s!.customTools : undefined };
+  const tools = Array.isArray(s?.tools) ? [...new Set(s!.tools.filter((t): t is string => typeof t === 'string' && !!t.trim()))] : [];
+  return { enabled: !!s?.enabled, tools };
 }
 
 // 库行 → 脱敏的接入视图（不回明文 key）。
@@ -95,8 +95,36 @@ export async function adminRoutes(app: FastifyInstance) {
     return pingModel(merged);
   });
 
-  // 可勾选的内置技能工具（后台 agent 技能配置用）。新增工具注册进 registry 后自动出现。
-  app.get('/admin/skill-tools', async (): Promise<SkillToolMeta[]> => builtinToolMeta());
+  // agent 可勾选的工具（内置 + 启用的自定义工具）。
+  app.get('/admin/skill-tools', async (): Promise<SkillToolMeta[]> => selectableMeta());
+
+  // —— 技能库：运营自助管理的自定义 HTTP 工具 CRUD ——
+  app.get('/admin/skill-tools/custom', async (): Promise<SkillToolDef[]> => listDefs());
+  app.post<{ Body: SkillToolUpsert }>('/admin/skill-tools/custom', async (req, reply): Promise<SkillToolDef | void> => {
+    try {
+      const def = await createTool(req.body ?? ({} as SkillToolUpsert));
+      await recordAudit({ action: 'admin.skilltool.create', payload: { key: def.key } });
+      return def;
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+  app.patch<{ Params: { id: string }; Body: SkillToolUpsert }>('/admin/skill-tools/custom/:id', async (req, reply): Promise<SkillToolDef | void> => {
+    try {
+      const def = await updateTool(req.params.id, req.body ?? ({} as SkillToolUpsert));
+      if (!def) return reply.code(404).send({ error: 'not found' });
+      await recordAudit({ action: 'admin.skilltool.update', payload: { id: req.params.id, key: def.key } });
+      return def;
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message });
+    }
+  });
+  app.delete<{ Params: { id: string } }>('/admin/skill-tools/custom/:id', async (req, reply): Promise<{ ok: boolean } | void> => {
+    const ok = await deleteTool(req.params.id);
+    if (!ok) return reply.code(404).send({ error: 'not found' });
+    await recordAudit({ action: 'admin.skilltool.delete', payload: { id: req.params.id } });
+    return { ok: true };
+  });
 
   // —— 概览看板 ——
   app.get('/admin/overview', async () => {

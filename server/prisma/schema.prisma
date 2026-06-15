@@ -501,6 +501,24 @@ model LlmTrace {
   @@map("llm_trace")
 }
 
+/// 运营自助技能库：自定义 HTTP 工具。agent 通过 skillsConfig.tools 按 key 勾选启用。
+model SkillTool {
+  id           String   @id @default(cuid())
+  key          String   @unique // 模型看到的函数名（英文 slug，如 query_order）
+  name         String // 展示名（中文）
+  description  String   @db.Text // 给模型：这个工具做什么、何时调用
+  inputSchema  Json // JSON Schema：参数定义
+  httpMethod   String   @default("POST") // GET | POST
+  httpUrl      String   @db.Text
+  headersJson  Json? // 静态请求头（含鉴权密文）——后台读取时脱敏
+  argsLocation String   @default("body") // body | query：工具参数放 JSON body 还是 query string
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("skill_tool")
+}
+
 /// 审计日志
 model AuditLog {
   id          String   @id @default(cuid())

@@ -60,10 +60,40 @@ export interface AgentRuntimeUpdate {
   skills?: SkillsConfig;
 }
 
-/** 后台可勾选的内置工具元信息（GET /admin/skill-tools） */
+/** agent 可勾选的工具元信息（GET /admin/skill-tools）：内置 + 启用的自定义工具 */
 export interface SkillToolMeta {
+  name: string;        // 工具 key（= skillsConfig.tools 里存的值）
+  description: string;
+  builtin: boolean;    // true=内置（search_knowledge…），false=运营自建
+}
+
+/** 自定义 HTTP 工具：后台读取视图（鉴权头脱敏为 headerKeys/hasHeaders） */
+export interface SkillToolDef {
+  id: string;
+  key: string;
   name: string;
   description: string;
+  inputSchema: Record<string, unknown>;
+  httpMethod: 'GET' | 'POST';
+  httpUrl: string;
+  argsLocation: 'body' | 'query';
+  enabled: boolean;
+  headerKeys: string[];   // 已配置的请求头名（值不回显）
+  hasHeaders: boolean;
+  createdAt: string;
+}
+
+/** 自定义 HTTP 工具：后台新增/更新入参（headers 省略=保留现有，传入=整体替换） */
+export interface SkillToolUpsert {
+  key: string;
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  httpMethod?: 'GET' | 'POST';
+  httpUrl: string;
+  argsLocation?: 'body' | 'query';
+  enabled?: boolean;
+  headers?: Record<string, string>;
 }
 
 /** 对话/前端消费的公开智能体字段（GET /agents） */

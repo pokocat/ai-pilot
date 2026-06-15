@@ -30,6 +30,10 @@ export const env = {
   // LLM 调用诊断 trace 是否落库 prompt/输出原文（便于排查，含 PII/敏感内容）。默认关，仅记指标。
   llmTraceCaptureText: (process.env.LLM_TRACE_CAPTURE_TEXT ?? 'false') === 'true',
 
+  // 自定义技能（HTTP 工具）：单次调用超时；是否允许指向私网/环回（调内网自有服务时才开，默认拒，防 SSRF）。
+  skillToolTimeoutMs: Number(process.env.SKILL_TOOL_TIMEOUT_MS ?? 15000),
+  skillToolAllowPrivateNet: (process.env.SKILL_TOOL_ALLOW_PRIVATE_NET ?? 'false') === 'true',
+
   // 知识/记忆向量近邻检索：默认关闭走内存余弦（零依赖）；
   // 置 true 且已执行 prisma/pgvector.sql（建 vector 列 + HNSW）后，走 pgvector 的 <=> 下推。
   pgvectorEnabled: (process.env.PGVECTOR_ENABLED ?? 'false') === 'true',

@@ -63,7 +63,7 @@ export const adminAuth = {
 
 // 数据模型统一来自 SSOT（shared/contracts），与前端/后端同口径；按运营端旧名再导出。
 export type { Overview, AdminAgent, AgentDetail, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail } from '../../shared/contracts';
-export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsConfig, SkillToolMeta } from '../../shared/contracts';
+export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsConfig, SkillToolMeta, SkillToolDef, SkillToolUpsert } from '../../shared/contracts';
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
@@ -72,7 +72,7 @@ export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, Ai
 import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, Plan, AdminSaying,
   AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
-  AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail,
+  AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, SkillToolDef, SkillToolUpsert,
 } from '../../shared/contracts';
 
 export const api = {
@@ -92,6 +92,10 @@ export const api = {
     return req<AdminTraceListView>(`/admin/observability${qs ? '?' + qs : ''}`);
   },
   trace: (id: string) => req<AdminTraceDetail>(`/admin/observability/${id}`),
+  customSkillTools: () => req<SkillToolDef[]>('/admin/skill-tools/custom'),
+  createSkillTool: (body: SkillToolUpsert) => req<SkillToolDef>('/admin/skill-tools/custom', 'POST', body),
+  updateSkillTool: (id: string, body: SkillToolUpsert) => req<SkillToolDef>(`/admin/skill-tools/custom/${id}`, 'PATCH', body),
+  delSkillTool: (id: string) => req<{ ok: boolean }>(`/admin/skill-tools/custom/${id}`, 'DELETE'),
   auditLogs: () => req<AdminAuditItem[]>('/admin/audit-logs'),
   sayings: () => req<AdminSaying[]>('/admin/sayings'),
   addSaying: (text: string) => req<AdminSaying>('/admin/sayings', 'POST', { text }),
