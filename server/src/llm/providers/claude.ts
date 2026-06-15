@@ -2,10 +2,21 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { DELIVERABLE_TOOL, injectVariables, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, buildSystemParts, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall } from '../tools/types.js';
+
+// system 拆成「稳定前缀(打缓存断点) + 每轮变化的参考资料」两块，命中缓存按 ~1/10 计费。
+// 提示词不足最低缓存阈值(Opus 4.8 约 4096 token、Sonnet 约 2048)时 cache_control 自动忽略，无副作用。
+// 提示词缓存在现网为 GA、无需 beta header；SDK 0.32.1 的 TextBlockParam 类型尚无 cache_control 字段，
+// 但真实 API 接受该字段且 SDK 原样透传，故用局部 cast 下发。命中情况看 usage.cache_read_input_tokens。
+type CachedTextBlock = { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } };
+function systemBlocks(stableText: string, dynamic: string): Anthropic.TextBlockParam[] {
+  const out: CachedTextBlock[] = [{ type: 'text', text: stableText, cache_control: { type: 'ephemeral' } }];
+  if (dynamic) out.push({ type: 'text', text: dynamic });
+  return out as unknown as Anthropic.TextBlockParam[];
+}
 
 // 按 key 缓存 client（后台切换 key 后自动新建）。
 let cached: { key: string; client: Anthropic } | null = null;
@@ -33,7 +44,7 @@ function usageOf(res: Anthropic.Message): Usage {
 
 export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<Deliverable>> {
   const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
-  const system = injectVariables(ctx.systemPrompt, ctx);
+  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'deliverable');
   const structureHint = tpl
     ? `参考产出结构（小标题）：${tpl.sections.map((s) => s.h).join(' / ')}。标题用「${tpl.title}」。`
     : '产出 3–4 段结构化内容。';
@@ -42,7 +53,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     model: cfg.model,
     max_tokens: 1500,
     temperature: cfg.temperature,
-    system: `${system}\n\n${structureHint}\n务必调用 emit_deliverable 工具输出结构化成果，不要输出自由长文。`,
+    system: systemBlocks(`${stable}\n\n${structureHint}\n务必调用 emit_deliverable 工具输出结构化成果，不要输出自由长文。`, dynamic),
     tools: [DELIVERABLE_TOOL],
     tool_choice: { type: 'tool', name: 'emit_deliverable' },
     messages: [{ role: 'user', content: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。` }],
@@ -70,7 +81,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
 }
 
 export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<ChatReply>> {
-  const system = injectVariables(ctx.systemPrompt, ctx);
+  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
   const history = (ctx.history ?? []).map((m) => ({
     role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
     content: m.text,
@@ -79,7 +90,7 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     model: cfg.model,
     max_tokens: 800,
     temperature: cfg.temperature,
-    system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`,
+    system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
     messages: [...history, { role: 'user', content: ctx.userMessage }],
   });
   const text = res.content
@@ -135,7 +146,7 @@ export function claudeStep(cfg: ResolvedAiConfig): StepFn {
       model: cfg.model,
       max_tokens: opts.finalTool ? 1500 : 800,
       temperature: cfg.temperature,
-      system,
+      system: systemBlocks(system, ''),
       messages: msgs,
     };
     if (opts.forceFinal) {

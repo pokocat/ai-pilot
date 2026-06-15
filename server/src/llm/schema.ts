@@ -2,6 +2,9 @@
 // 真实模型输出必须约束成此结构（claude 提供方用 tool/function calling 强约束）。
 // 成果/回复的数据模型统一来自 SSOT（shared/contracts），前后端/运营端同口径。
 
+import { selectModuleText, type PromptKind } from './promptAssembly.js';
+export type { PromptKind };
+
 import type {
   Deliverable, DeliverableSection, ChatReply,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
@@ -141,19 +144,24 @@ export function fillPlaceholders(text: string, ctx: GenContext): string {
   return out;
 }
 
-// 运行时变量注入：把 system prompt 中的占位符替换为真实值；
-// 并把「显式引用 / 项目背景 / 知识库召回」作为可溯源的参考资料块追加到 system 末尾，
-// 这样即便某个智能体的提示词没写对应占位符，真实模型也能用上这些上下文。
-export function injectVariables(prompt: string, ctx: GenContext): string {
+// 把 system prompt 拆成「稳定前缀」与「每轮变化的内容」两段，便于 provider 做提示词缓存：
+//   stable  = 填好占位符的智能体底座 + 固定业务边界（同一 agent 多轮间稳定 → 命中缓存按 ~1/10 计费）
+//   dynamic = 本轮生效的按需模块（如产出时才用的 HTML 规范）+ 客户档案/引用/知识库召回（因人因轮而异）
+// 注意：稳定段必须在前、变化段在后，否则缓存前缀被打断，缓存失效。
+// kind 决定 ===MODULE deliverable=== 这类模块是否在本轮生效（见 promptAssembly）。
+export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptKind): { stable: string; dynamic: string } {
   const understandingText = ctx.understanding?.length ? ctx.understanding.join('\n') : '暂无军师档案';
   const projText = ctx.projectSummary
     ? `${ctx.projectName ? ctx.projectName + '：' : ''}${ctx.projectSummary}`
     : '无特定项目背景';
   const questionText = ctx.understandingQuestions?.length ? ctx.understandingQuestions.join('；') : '无';
 
-  let out = fillPlaceholders(prompt, ctx);
+  const { base, active } = selectModuleText(prompt, { kind, userMessage: ctx.userMessage });
+  const stable = `${fillPlaceholders(base, ctx)}\n\n${RUNTIME_BUSINESS_GUARD}`;
 
-  // 通用追加：用户显式引用 + 项目背景 + 自动召回，统一以「参考资料」块给到模型。
+  const parts: string[] = [];
+  if (active) parts.push(fillPlaceholders(active, ctx)); // 本轮生效的按需模块（在参考资料之前）
+
   const blocks: string[] = [];
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);
@@ -162,7 +170,13 @@ export function injectVariables(prompt: string, ctx: GenContext): string {
   if (ctx.understandingMaturity !== 'ready' && ctx.understandingQuestions?.length) {
     blocks.push(`【资料缺口（不足以判断时先追问）】\n${questionText}`);
   }
-  if (blocks.length) out += `\n\n— 参考资料 —\n${blocks.join('\n\n')}`;
-  out += `\n\n${RUNTIME_BUSINESS_GUARD}`;
-  return out;
+  if (blocks.length) parts.push(`— 参考资料 —\n${blocks.join('\n\n')}`);
+
+  return { stable, dynamic: parts.join('\n\n') };
+}
+
+// 运行时变量注入（拼成单串，供 openai 兼容端点用；其前缀稳定，网关侧自动缓存可命中）。
+export function injectVariables(prompt: string, ctx: GenContext, kind?: PromptKind): string {
+  const { stable, dynamic } = buildSystemParts(prompt, ctx, kind);
+  return dynamic ? `${stable}\n\n${dynamic}` : stable;
 }

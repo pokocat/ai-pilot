@@ -58,7 +58,7 @@ function usageOf(data: OAResponse): Usage {
 
 export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<Deliverable>> {
   const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
-  const system = injectVariables(ctx.systemPrompt, ctx);
+  const system = injectVariables(ctx.systemPrompt, ctx, 'deliverable');
   const structureHint = tpl
     ? `参考产出结构（小标题）：${tpl.sections.map((s) => s.h).join(' / ')}。标题用「${tpl.title}」。`
     : '产出 3–4 段结构化内容。';
@@ -95,7 +95,7 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
 }
 
 export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<ChatReply>> {
-  const system = injectVariables(ctx.systemPrompt, ctx);
+  const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   const data = await callChat(cfg, {
     max_tokens: 800,
@@ -159,7 +159,7 @@ export type LoopMetered<T> = Metered<T> & { toolCalls: number; iterations: numbe
 
 /** 启用技能时的对话：多轮工具调用循环，模型自行决定何时检索知识/召回记忆，最后出文本。 */
 export async function openaiChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig, tools: Tool[]): Promise<LoopMetered<ChatReply>> {
-  const system = injectVariables(ctx.systemPrompt, ctx);
+  const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const r = await runToolLoop({
     step: openaiStep(cfg),
     system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`,
@@ -179,7 +179,7 @@ export async function openaiChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
 /** 启用技能时的产出：循环里可先检索/召回，最后强制 emit_deliverable 收口成结构化成果。 */
 export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedAiConfig, tools: Tool[]): Promise<LoopMetered<Deliverable>> {
   const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
-  const system = injectVariables(ctx.systemPrompt, ctx);
+  const system = injectVariables(ctx.systemPrompt, ctx, 'deliverable');
   const structureHint = tpl
     ? `参考产出结构（小标题）：${tpl.sections.map((s) => s.h).join(' / ')}。标题用「${tpl.title}」。`
     : '产出 3–4 段结构化内容。';
