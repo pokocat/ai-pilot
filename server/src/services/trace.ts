@@ -48,6 +48,7 @@ export async function recordTrace(t: TraceInput): Promise<void> {
         iterations: t.iterations ?? 0,
         inputTokens: Math.max(0, u?.inputTokens ?? 0),
         outputTokens: Math.max(0, u?.outputTokens ?? 0),
+        cachedInput: Math.max(0, u?.cachedInput ?? 0),
         totalTokens: Math.max(0, (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0)),
         promptText: env.llmTraceCaptureText ? clip(t.promptText) : null,
         responseText: env.llmTraceCaptureText ? clip(t.responseText) : null,
@@ -58,11 +59,11 @@ export async function recordTrace(t: TraceInput): Promise<void> {
   }
 }
 
-function toItem(r: { id: string; createdAt: Date; agentKey: string | null; kind: string; provider: string; model: string; status: string; latencyMs: number; toolCalls: number; totalTokens: number; errorMessage: string | null }): AdminTraceItem {
+function toItem(r: { id: string; createdAt: Date; agentKey: string | null; kind: string; provider: string; model: string; status: string; latencyMs: number; toolCalls: number; totalTokens: number; cachedInput: number; errorMessage: string | null }): AdminTraceItem {
   return {
     id: r.id, at: r.createdAt.toISOString(), agentKey: r.agentKey, kind: r.kind, provider: r.provider,
     model: r.model, status: r.status === 'error' ? 'error' : 'ok', latencyMs: r.latencyMs,
-    toolCalls: r.toolCalls, totalTokens: r.totalTokens, errorMessage: r.errorMessage,
+    toolCalls: r.toolCalls, totalTokens: r.totalTokens, cachedInput: r.cachedInput, errorMessage: r.errorMessage,
   };
 }
 

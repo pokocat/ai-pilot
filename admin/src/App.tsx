@@ -401,7 +401,7 @@ function ObservabilityView() {
               <div className="usage-name">{t.agentKey ?? '（全局）'}<span>{t.kind} · {t.provider}/{t.model || '-'}</span></div>
               <div className="usage-num" style={{ color: t.status === 'error' ? '#d4503a' : '#1a8a5a' }}>{t.status === 'error' ? '错误' : `${t.latencyMs}ms`}</div>
             </div>
-            <div className="usage-meta">{new Date(t.at).toLocaleString()} · {t.totalTokens} token{t.toolCalls ? ` · 工具×${t.toolCalls}` : ''}{t.errorMessage ? ` · ${t.errorMessage.slice(0, 40)}` : ''}</div>
+            <div className="usage-meta">{new Date(t.at).toLocaleString()} · {t.totalTokens} token{t.cachedInput ? ` · 缓存命中 ${t.cachedInput}` : ''}{t.toolCalls ? ` · 工具×${t.toolCalls}` : ''}{t.errorMessage ? ` · ${t.errorMessage.slice(0, 40)}` : ''}</div>
           </div>
         ))}
       </div>
@@ -414,6 +414,7 @@ function ObservabilityView() {
               <div><b>{detail.latencyMs}ms</b><span>延迟</span></div>
               <div><b>{detail.toolCalls}/{detail.iterations}</b><span>工具/轮次</span></div>
               <div><b>{detail.totalTokens}</b><span>token</span></div>
+              <div><b>{detail.cachedInput}</b><span>缓存命中</span></div>
             </div>
             {detail.errorMessage && <div className="ai-test err" style={{ marginTop: 8 }}><Icon name="spark" size={14} /> {detail.errorMessage}</div>}
             <div className="sec-h" style={{ marginTop: 8 }}><span className="t">输入</span></div>

@@ -536,6 +536,7 @@ export interface AdminTraceItem {
   latencyMs: number;
   toolCalls: number;
   totalTokens: number;
+  cachedInput: number; // 命中提示缓存的输入 token（>0 即缓存生效）
   errorMessage: string | null;
 }
 export interface AdminTraceListView {
