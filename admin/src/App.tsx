@@ -523,10 +523,11 @@ function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
 
 function AuditView() {
   const [list, setList] = useState<AdminAuditItem[]>([]);
+  const [selected, setSelected] = useState<AdminAuditItem | null>(null);
   useEffect(() => { api.auditLogs().then(setList).catch(() => {}); }, []);
   return (
     <>
-      <div className="sec-h"><span className="t">审计日志</span><span className="s">默认过滤后台操作 · 用户 API / 登录尝试 · 最近 100 条</span></div>
+      <div className="sec-h audit-head"><span className="t">审计日志</span><span className="s">默认过滤后台操作 · 用户 API / 登录尝试 · 最近 100 条</span></div>
       <div className="pad audit-pad">
         <div className="audit-table-wrap">
           <div className="audit-table">
@@ -534,7 +535,13 @@ function AuditView() {
               <span>时间</span><span>状态</span><span>方法</span><span>接口/动作</span><span>用户</span><span>IP</span><span>摘要</span>
             </div>
             {list.map((a) => (
-              <div key={a.id} className="audit-row">
+              <button
+                key={a.id}
+                type="button"
+                className="audit-row audit-data-row"
+                onClick={() => setSelected(a)}
+                aria-label={`查看审计详情：${auditTarget(a)} ${a.summary ?? auditLabel(a.action)}`}
+              >
                 <span className="audit-time">{fmtShortTime(a.at)}</span>
                 <span className={`audit-status ${statusClass(a.statusCode)}`}>{a.statusCode ?? '-'}</span>
                 <span className="audit-method">{a.method ?? actionKind(a.action)}</span>
@@ -542,13 +549,80 @@ function AuditView() {
                 <span className="audit-actor" title={actorText(a)}>{compactActorText(a)}</span>
                 <span className="audit-ip" title={a.ip ?? ''}>{a.ip ?? '-'}</span>
                 <span className="audit-summary" title={a.summary ?? auditLabel(a.action)}>{a.summary ?? auditLabel(a.action)}</span>
-              </div>
+                <span className="audit-mobile-meta">{mobileAuditMeta(a)}</span>
+              </button>
             ))}
           </div>
         </div>
         {!list.length && <div className="empty">暂无审计记录</div>}
       </div>
+      {selected && <AuditDetailPanel item={selected} onClose={() => setSelected(null)} />}
     </>
+  );
+}
+
+function AuditDetailPanel({ item, onClose }: { item: AdminAuditItem; onClose: () => void }) {
+  const target = auditTarget(item);
+  const summary = item.summary ?? auditLabel(item.action);
+  return (
+    <div className="ad-detail audit-detail show">
+      <div className="ad-dh">
+        <button className="bk" type="button" onClick={onClose} aria-label="关闭审计详情"><Icon name="arrow" size={18} /></button>
+        <div className="di"><Icon name="clock" size={18} /></div>
+        <div className="dt"><div className="t">审计详情</div><div className="s">{item.method ?? actionKind(item.action)} · {target}</div></div>
+      </div>
+      <div className="ad-db">
+        <div className="audit-detail-summary">
+          <span className={`audit-status ${statusClass(item.statusCode)}`}>{item.statusCode ?? '-'}</span>
+          <div>
+            <b>{summary}</b>
+            <span>{fmtTime(item.at)}</span>
+          </div>
+        </div>
+
+        <div className="blk">
+          <div className="blk-h"><Icon name="target" size={15} /><span className="t">请求与动作</span></div>
+          <div className="audit-detail-grid">
+            <AuditDetailRow k="动作" v={`${auditLabel(item.action)} (${item.action})`} />
+            <AuditDetailRow k="方法" v={item.method ?? actionKind(item.action)} />
+            <AuditDetailRow k="接口" v={target} wide />
+            <AuditDetailRow k="日志 ID" v={item.id} wide />
+          </div>
+        </div>
+
+        <div className="blk">
+          <div className="blk-h"><Icon name="user" size={15} /><span className="t">账号上下文</span></div>
+          <div className="audit-detail-grid">
+            <AuditDetailRow k="用户" v={actorText(item)} wide />
+            <AuditDetailRow k="租户" v={item.tenantName || item.tenantId || '-'} />
+            <AuditDetailRow k="用户 ID" v={item.userId || '-'} wide />
+          </div>
+        </div>
+
+        <div className="blk">
+          <div className="blk-h"><Icon name="insight" size={15} /><span className="t">网络指纹</span></div>
+          <div className="audit-detail-grid">
+            <AuditDetailRow k="IP" v={item.ip || '-'} />
+            <AuditDetailRow k="UA" v={item.userAgent || '-'} wide />
+          </div>
+        </div>
+
+        <div className="blk">
+          <div className="blk-h"><Icon name="doc" size={15} /><span className="t">Payload</span></div>
+          <pre className="audit-json">{formatPayload(item.payload)}</pre>
+        </div>
+        <div style={{ height: 32 }} />
+      </div>
+    </div>
+  );
+}
+
+function AuditDetailRow({ k, v, wide = false }: { k: string; v: string; wide?: boolean }) {
+  return (
+    <div className={`audit-detail-kv ${wide ? 'wide' : ''}`}>
+      <span>{k}</span>
+      <b>{v || '-'}</b>
+    </div>
   );
 }
 
@@ -1055,6 +1129,10 @@ function compactActorText(a: AdminAuditItem) {
   return a.userName || a.userPhone || (a.userId ? `user:${a.userId.slice(0, 6)}` : '匿名');
 }
 
+function mobileAuditMeta(a: AdminAuditItem) {
+  return [compactActorText(a), a.ip].filter(Boolean).join(' · ');
+}
+
 function auditTarget(a: AdminAuditItem) {
   return a.path || auditLabel(a.action);
 }
@@ -1070,6 +1148,16 @@ function statusClass(status: number | null) {
   if (status >= 500) return 'bad';
   if (status >= 400) return 'warn';
   return 'ok';
+}
+
+function formatPayload(payload: unknown) {
+  if (payload === null || payload === undefined) return '{}';
+  if (typeof payload === 'string') {
+    try { return JSON.stringify(JSON.parse(payload), null, 2); }
+    catch { return payload; }
+  }
+  try { return JSON.stringify(payload, null, 2); }
+  catch { return String(payload); }
 }
 
 function auditLabel(action: string) {

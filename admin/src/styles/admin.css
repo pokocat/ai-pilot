@@ -108,6 +108,9 @@ body {
 .audit-row { display: grid; grid-template-columns: 94px 48px 58px minmax(180px, 1fr) minmax(120px, .7fr) 116px minmax(260px, 1.4fr); align-items: center; column-gap: 9px; min-height: 34px; padding: 0 10px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: 11px; line-height: 1; }
 .audit-row:last-child { border-bottom: 0; }
 .audit-header-row { min-height: 30px; background: var(--surface-2); color: var(--ink-3); font-size: 10px; font-weight: 700; letter-spacing: 0; }
+.audit-data-row { width: 100%; border-top: 0; border-right: 0; border-left: 0; background: transparent; font-family: var(--sans); text-align: left; cursor: pointer; transition: background .16s ease-out; }
+.audit-data-row:hover { background: rgba(160, 125, 44, .06); }
+.audit-data-row:focus-visible { position: relative; z-index: 1; outline: 2px solid rgba(160, 125, 44, .35); outline-offset: -2px; }
 .audit-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .audit-time { font: 650 10.5px/1 var(--mono); color: var(--ink-3); }
 .audit-status { justify-self: start; min-width: 34px; height: 19px; padding: 0 7px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font: 750 10px/1 var(--mono); background: var(--surface-2); color: var(--ink-3); border: 1px solid var(--line); }
@@ -118,6 +121,49 @@ body {
 .audit-target { font: 650 10.5px/1 var(--mono); color: var(--ink); }
 .audit-actor, .audit-ip { color: var(--ink-3); }
 .audit-summary { color: var(--ink-2); }
+.audit-mobile-meta { display: none; }
+.audit-detail-summary { display: flex; align-items: flex-start; gap: 10px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); margin-bottom: 18px; }
+.audit-detail-summary div { flex: 1; min-width: 0; }
+.audit-detail-summary b { display: block; font-size: 13px; line-height: 1.35; color: var(--ink); overflow-wrap: anywhere; }
+.audit-detail-summary span:last-child { display: block; margin-top: 5px; font: 600 10.5px/1 var(--mono); color: var(--ink-3); }
+.audit-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.audit-detail-kv { min-width: 0; padding: 10px 11px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); }
+.audit-detail-kv.wide { grid-column: 1 / -1; }
+.audit-detail-kv span { display: block; margin-bottom: 6px; font-size: 10px; color: var(--ink-3); }
+.audit-detail-kv b { display: block; font: 600 11.5px/1.45 var(--sans); color: var(--ink-2); overflow-wrap: anywhere; word-break: break-word; }
+.audit-json { max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; padding: 12px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); color: var(--ink-2); font: 500 11px/1.55 var(--mono); }
+
+@media (max-width: 640px) {
+  .audit-head { padding: 16px 14px 8px; align-items: flex-start; flex-direction: column; gap: 5px; }
+  .audit-head .s { text-align: left; font-size: 10.5px; line-height: 1.35; }
+  .audit-pad { padding: 6px 14px 0; }
+  .audit-table-wrap { overflow-x: visible; border-radius: 10px; }
+  .audit-table { min-width: 0; }
+  .audit-header-row { display: none; }
+  .audit-row {
+    grid-template-columns: 40px 42px minmax(0, 1fr) 66px;
+    grid-template-areas:
+      "status method target time"
+      "summary summary summary meta";
+    row-gap: 5px;
+    column-gap: 8px;
+    min-height: 52px;
+    padding: 8px 9px;
+    align-items: center;
+    font-size: 11px;
+    line-height: 1.25;
+  }
+  .audit-time { grid-area: time; justify-self: end; font-size: 10px; }
+  .audit-status { grid-area: status; min-width: 36px; height: 20px; padding: 0 6px; }
+  .audit-method { grid-area: method; font-size: 10px; }
+  .audit-target { grid-area: target; font-size: 11px; }
+  .audit-summary { grid-area: summary; font-size: 10.5px; white-space: nowrap; color: var(--ink-3); }
+  .audit-actor, .audit-ip { display: none; }
+  .audit-mobile-meta { grid-area: meta; justify-self: end; display: block; color: var(--ink-3); font-size: 10px; max-width: 66px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .audit-detail .ad-db { padding: 14px 14px 28px; }
+  .audit-detail-grid { grid-template-columns: 1fr; gap: 8px; }
+  .audit-json { max-height: 300px; font-size: 10.5px; }
+}
 
 .sw { width: 42px; height: 24px; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; transition: .2s; flex: 0 0 42px; }
 .sw.on { background: var(--accent); }
