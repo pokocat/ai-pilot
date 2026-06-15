@@ -229,7 +229,7 @@ body {
 .mem-list { display: flex; flex-direction: column; gap: 9px; }
 .mem-card { display: flex; align-items: center; gap: 11px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; padding: 12px 14px; box-shadow: var(--shadow-sm); }
 .mem-card .mi { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; }
-.mem-card .mb { flex: 1; min-width: 0; } .mem-card .mt { font-size: 12.5px; } .mem-card .mm { font-size: 10.5px; color: var(--ink-3); margin-top: 3px; }
+.mem-card .mb { flex: 1; min-width: 0; } .mem-card .mt { font-size: 12.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; } .mem-card .mm { font-size: 10.5px; color: var(--ink-3); margin-top: 3px; }
 .mem-meter { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 11px; }
 .mem-meter i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
 .save-bar { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 18px; background: rgba(251,250,246,.94); backdrop-filter: blur(12px); border-top: 1px solid var(--line-2); display: flex; gap: 10px; }
@@ -278,7 +278,7 @@ select.ai-input { appearance: none; }
 .tag.pay { background: rgba(155,124,63,.18); color: var(--accent-ink, var(--gold)); }
 .add-btn.full { width: 100%; margin-bottom: 14px; }
 .mini-btn:disabled { opacity: .5; cursor: default; }
-.crd.new-agent { display: block; padding: 14px; margin-bottom: 14px; }
+.crd.new-agent { display: block; padding: 14px; margin-bottom: 14px; cursor: default; }
 .bill-seg { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 10px; }
 .bill-opt { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; cursor: pointer; transition: .15s; }
 .bill-opt.on { border-color: var(--accent); background: var(--accent-soft, rgba(155,124,63,.1)); }

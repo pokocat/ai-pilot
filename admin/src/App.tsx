@@ -478,22 +478,24 @@ function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
       <>
         <div className="sec-h"><span className="t">{form.id ? '编辑技能' : '新增技能'}</span><span className="s">自定义 HTTP 工具</span></div>
         <div className="pad">
-          <div className="ai-field"><div className="ai-fl">工具标识 key（英文，模型调用名，保存后不可改）</div><input className="ai-input" placeholder="query_order" value={form.key} disabled={!!form.id} onChange={(e) => set({ key: e.target.value })} /></div>
-          <div className="ai-field"><div className="ai-fl">展示名</div><input className="ai-input" placeholder="查订单" value={form.name} onChange={(e) => set({ name: e.target.value })} /></div>
-          <div className="ai-field"><div className="ai-fl">描述（模型据此判断何时调用，写清楚）</div><textarea className="ta" rows={2} value={form.description} onChange={(e) => set({ description: e.target.value })} /></div>
-          <div className="ai-field"><div className="ai-fl">请求方式</div>
-            <div className="bill-seg">{(['POST', 'GET'] as const).map((m) => <div key={m} className={`bill-opt ${form.httpMethod === m ? 'on' : ''}`} onClick={() => set({ httpMethod: m })}><div className="bo-t">{m}</div></div>)}</div>
-          </div>
-          <div className="ai-field"><div className="ai-fl">接口 URL</div><input className="ai-input" placeholder="https://api.example.com/orders" value={form.httpUrl} onChange={(e) => set({ httpUrl: e.target.value })} /></div>
-          <div className="ai-field"><div className="ai-fl">参数位置</div>
-            <div className="bill-seg">{([['body', 'JSON Body'], ['query', 'Query 参数']] as const).map(([v, l]) => <div key={v} className={`bill-opt ${form.argsLocation === v ? 'on' : ''}`} onClick={() => set({ argsLocation: v })}><div className="bo-t">{l}</div></div>)}</div>
-          </div>
-          <div className="ai-field"><div className="ai-fl">参数 Schema（JSON Schema）</div><textarea className="ta" rows={7} value={form.schemaText} onChange={(e) => set({ schemaText: e.target.value })} /></div>
-          <div className="ai-field"><div className="ai-fl">静态请求头 JSON（含鉴权，如 {'{'}"Authorization":"Bearer xxx"{'}'}）{form.id ? ' · 留空保留现有' : ''}</div><textarea className="ta" rows={3} placeholder={form.id ? '留空则不修改已存请求头' : '{\n  "Authorization": "Bearer ..."\n}'} value={form.headersText} onChange={(e) => set({ headersText: e.target.value })} /></div>
-          <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用</div><div className="cs">关闭后不出现在 agent 勾选列表</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => set({ enabled: !form.enabled })}><i /></div></div></div>
-          <div className="ai-actions" style={{ marginTop: 12 }}>
-            <button className="sv" onClick={save}><Icon name="check" size={16} /> 保存</button>
-            <button className="gh" onClick={() => setForm(null)}>取消</button>
+          <div className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">工具标识 key（英文，模型调用名，保存后不可改）</div><input className="ai-input" placeholder="query_order" value={form.key} disabled={!!form.id} onChange={(e) => set({ key: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">展示名</div><input className="ai-input" placeholder="查订单" value={form.name} onChange={(e) => set({ name: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">描述（模型据此判断何时调用，写清楚）</div><textarea className="ta" rows={2} value={form.description} onChange={(e) => set({ description: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">请求方式</div>
+              <div className="bill-seg">{(['POST', 'GET'] as const).map((m) => <div key={m} className={`bill-opt ${form.httpMethod === m ? 'on' : ''}`} onClick={() => set({ httpMethod: m })}><div className="bo-t">{m}</div></div>)}</div>
+            </div>
+            <div className="ai-field"><div className="ai-fl">接口 URL</div><input className="ai-input" placeholder="https://api.example.com/orders" value={form.httpUrl} onChange={(e) => set({ httpUrl: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">参数位置</div>
+              <div className="bill-seg">{([['body', 'JSON Body'], ['query', 'Query 参数']] as const).map(([v, l]) => <div key={v} className={`bill-opt ${form.argsLocation === v ? 'on' : ''}`} onClick={() => set({ argsLocation: v })}><div className="bo-t">{l}</div></div>)}</div>
+            </div>
+            <div className="ai-field"><div className="ai-fl">参数 Schema（JSON Schema）</div><textarea className="ta" rows={7} value={form.schemaText} onChange={(e) => set({ schemaText: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">静态请求头 JSON（含鉴权，如 {'{'}"Authorization":"Bearer xxx"{'}'}）{form.id ? ' · 留空保留现有' : ''}</div><textarea className="ta" rows={3} placeholder={form.id ? '留空则不修改已存请求头' : '{\n  "Authorization": "Bearer ..."\n}'} value={form.headersText} onChange={(e) => set({ headersText: e.target.value })} /></div>
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用</div><div className="cs">关闭后不出现在 agent 勾选列表</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => set({ enabled: !form.enabled })}><i /></div></div></div>
+            <div className="ai-actions">
+              <button type="button" className="ai-btn ghost" onClick={() => setForm(null)}>取消</button>
+              <button type="button" className="ai-btn primary" onClick={save}><Icon name="check" size={14} /> 保存</button>
+            </div>
           </div>
         </div>
       </>
@@ -504,16 +506,16 @@ function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
     <>
       <div className="sec-h"><span className="t">技能库</span><span className="s">自定义 HTTP 工具 · agent 可勾选启用</span></div>
       <div className="pad">
-        <button className="sv" style={{ width: 'auto', padding: '0 16px', marginBottom: 10 }} onClick={() => setForm({ ...BLANK_SKILL })}><Icon name="spark" size={15} /> 新增技能</button>
+        <button type="button" className="add-btn full" onClick={() => setForm({ ...BLANK_SKILL })}><Icon name="spark" size={15} /> 新增技能</button>
         {list.length === 0 && <div className="usage-meta" style={{ padding: '10px 0' }}>还没有自定义技能。点「新增技能」定义一个 HTTP 工具。</div>}
         {list.map((d) => (
           <div key={d.id} className="mem-card">
             <span className="mi"><Icon name="insight" size={16} /></span>
             <div className="mb" style={{ cursor: 'pointer' }} onClick={() => edit(d)}>
-              <div className="mt">{d.name}<span style={{ opacity: .5, marginLeft: 6 }}>{d.key}</span>{!d.enabled && <span className="tag" style={{ marginLeft: 6 }}>停用</span>}</div>
+              <div className="mt">{d.name}<span className="tag off">{d.key}</span>{!d.enabled && <span className="tag">停用</span>}</div>
               <div className="mm">{d.httpMethod} {d.httpUrl}{d.hasHeaders ? ` · 含鉴权头(${d.headerKeys.join(',')})` : ''}</div>
             </div>
-            <button className="gh" style={{ width: 'auto', padding: '0 10px' }} onClick={() => del(d)}>删除</button>
+            <button type="button" className="mini-btn danger" onClick={() => del(d)}>删除</button>
           </div>
         ))}
       </div>
