@@ -558,7 +558,9 @@ model ModerationLog {
   @@map("moderation_log")
 }
 
-/// 大模型配置（单例，运营后台可随时切换）。生产应加密存储 apiKey / 接密管。
+/// 大模型配置（单例，记录「当前生效」模型 = 运行时实际读取的解析配置）。
+/// 运营后台可在已添加的 AiModel 之间快速切换：切换=把目标 AiModel 拷进本行 + 记 activeModelId。
+/// getAiConfig 仍只读本行，运行时路径不变。生产应加密存储 apiKey / 接密管。
 model AiSetting {
   id             String   @id @default("default")
   provider       String   @default("openai") // mock | claude | openai(兼容 Agnes/DeepSeek/Qwen…)
@@ -568,9 +570,40 @@ model AiSetting {
   apiKey         String   @default("") @db.Text
   embeddingModel String   @default("")
   temperature    Float    @default(0.7)
+  activeModelId  String? // 指向当前生效的 AiModel.id（后台高亮用，运行时不依赖）
+
+  // 向量嵌入接入（开关 + 可独立配凭证；留空回退对话模型的 baseUrl/key）。
+  embeddingEnabled Boolean @default(false)
+  embeddingBaseUrl String  @default("")
+  embeddingApiKey  String  @default("") @db.Text
+
+  // 重排（rerank）接入：开启后 hybridSearch 融合打分再调 rerank API 重排 TopN。
+  rerankEnabled Boolean @default(false)
+  rerankModel   String  @default("")
+  rerankBaseUrl String  @default("")
+  rerankApiKey  String  @default("") @db.Text
+
   updatedAt      DateTime @updatedAt
 
   @@map("ai_setting")
+}
+
+/// 已添加的模型接入点（运营可添加多个，快速切换其一生效）。
+/// 来源三种：内置接入商预设（preset 记其 id）/ 自定义通用兼容协议 / 完全自主定义。
+model AiModel {
+  id             String   @id @default(cuid())
+  provider       String   @default("openai") // mock | claude | openai
+  label          String // 展示名，如「Agnes 2.0 Flash」
+  baseUrl        String   @default("")
+  model          String   @default("")
+  apiKey         String   @default("") @db.Text
+  embeddingModel String   @default("")
+  temperature    Float    @default(0.7)
+  preset         String? // 来源内置接入商 id（自定义/自主定义则空）
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("ai_model")
 }
 
 /// 短信验证码（注册/登录前发放，先于账号存在，故按 phone 关联而非 userId）。

@@ -67,12 +67,13 @@ export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsCon
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
-export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider } from '../../shared/contracts';
+export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider, AiModel, AiModelUpsert, AiModelTest } from '../../shared/contracts';
 
 import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, Plan, AdminSaying,
   AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
   AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, SkillToolDef, SkillToolUpsert,
+  AiModel, AiModelUpsert, AiModelTest,
 } from '../../shared/contracts';
 
 export const api = {
@@ -117,4 +118,10 @@ export const api = {
   aiConfig: () => req<AiConfigView>('/admin/ai-config'),
   saveAiConfig: (body: AiConfigUpdate) => req<AiConfigView>('/admin/ai-config', 'PUT', body),
   testAiConfig: (body: AiConfigUpdate) => req<AiTestResult>('/admin/ai-config/test', 'POST', body),
+  // —— 已添加模型：增删改 + 快速切换 + 探活 ——
+  addAiModel: (body: AiModelUpsert) => req<AiModel>('/admin/ai-models', 'POST', body),
+  updateAiModel: (id: string, body: AiModelUpsert) => req<AiModel>(`/admin/ai-models/${id}`, 'PATCH', body),
+  delAiModel: (id: string) => req<{ ok: boolean }>(`/admin/ai-models/${id}`, 'DELETE'),
+  activateAiModel: (id: string) => req<AiConfigView>(`/admin/ai-models/${id}/activate`, 'POST'),
+  testAiModel: (body: AiModelTest) => req<AiTestResult>('/admin/ai-models/test', 'POST', body),
 };

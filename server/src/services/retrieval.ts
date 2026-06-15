@@ -8,6 +8,7 @@
 
 import { prisma } from '../db.js';
 import { embed, cosine } from './embedding.js';
+import { rerank } from './rerank.js';
 import { pgvectorEnabled, vectorSearchChunks } from './vectorStore.js';
 import type { KnowledgeHit, KnowledgeItemT, MessageRef } from '../llm/schema.js';
 
@@ -47,14 +48,37 @@ export interface HybridOpts {
   alpha?: number; // 向量权重（默认 0.65），(1-alpha) 给关键词
 }
 
-/** 混合检索知识库，返回去重到 KnowledgeItem 粒度的命中。 */
+// 候选项：融合分 + 展示 snippet + 供 rerank 的较长正文 + 原始 item 行。
+type KItemRow = Parameters<typeof toItemT>[0];
+interface Cand { score: number; snippet: string; text: string; item: KItemRow; }
+
+/**
+ * 候选 → 最终命中。rerank 开启且可用时，对「5×TopK 候选池」调 rerank 重排再取 TopK；
+ * 未开启 / 调用失败时 rerank() 返回 null，退回融合分顺序（绝不因 rerank 异常影响检索）。
+ */
+async function finalize(query: string, cands: Cand[], topK: number): Promise<KnowledgeHit[]> {
+  const sorted = cands.sort((a, b) => b.score - a.score);
+  const pool = sorted.slice(0, Math.min(sorted.length, Math.max(topK, topK * 5)));
+  const order = await rerank(query, pool.map((c) => c.text), topK);
+  if (order) {
+    const mapped = order
+      .map((o) => ({ cand: pool[o.index], score: o.score }))
+      .filter((x): x is { cand: Cand; score: number } => !!x.cand)
+      .slice(0, topK)
+      .map((x) => ({ item: toItemT(x.cand.item), score: Number(x.score.toFixed(4)), snippet: x.cand.snippet }));
+    if (mapped.length) return mapped;
+  }
+  return sorted.slice(0, topK).map((c) => ({ item: toItemT(c.item), score: Number(c.score.toFixed(4)), snippet: c.snippet }));
+}
+
+/** 混合检索知识库，返回去重到 KnowledgeItem 粒度的命中（rerank 开启时再重排）。 */
 export async function hybridSearch(opts: HybridOpts): Promise<KnowledgeHit[]> {
   const { tenantId, projectId, query } = opts;
   const topK = opts.topK ?? 5;
   const alpha = opts.alpha ?? 0.65;
   if (!query.trim()) return [];
 
-  // pgvector 路径（开启时）：用 ANN 取候选，再关键词重排（混合）。
+  // pgvector 路径（开启时）：用 ANN 取候选，再关键词混合打分。
   if (pgvectorEnabled()) {
     const qvec = await embed(query);
     const hits = await vectorSearchChunks(tenantId, projectId, qvec, topK * 4).catch((e) => {
@@ -65,16 +89,15 @@ export async function hybridSearch(opts: HybridOpts): Promise<KnowledgeHit[]> {
       if (!hits.length) return [];
       const items = await prisma.knowledgeItem.findMany({ where: { id: { in: [...new Set(hits.map((h) => h.itemId))] } } });
       const itemMap = new Map(items.map((i) => [i.id, i]));
-      const best = new Map<string, { score: number; snippet: string; item: (typeof items)[number] }>();
+      const best = new Map<string, Cand>();
       for (const h of hits) {
         const item = itemMap.get(h.itemId);
         if (!item) continue;
         const score = alpha * (1 - h.dist) + (1 - alpha) * keywordScore(query, h.text);
         const prev = best.get(h.itemId);
-        if (!prev || score > prev.score) best.set(h.itemId, { score, snippet: h.text.slice(0, 120), item });
+        if (!prev || score > prev.score) best.set(h.itemId, { score, snippet: h.text.slice(0, 120), text: h.text.slice(0, 512), item });
       }
-      return [...best.values()].sort((a, b) => b.score - a.score).slice(0, topK)
-        .map((x) => ({ item: toItemT(x.item), score: Number(x.score.toFixed(4)), snippet: x.snippet }));
+      return finalize(query, [...best.values()], topK);
     }
   }
 
@@ -87,7 +110,7 @@ export async function hybridSearch(opts: HybridOpts): Promise<KnowledgeHit[]> {
 
   const qv = await embed(query);
   // 每个 item 取其最佳 chunk 分数
-  const best = new Map<string, { score: number; snippet: string; item: typeof chunks[number]['item'] }>();
+  const best = new Map<string, Cand>();
   for (const c of chunks) {
     const vec = (c.embedding as number[] | null) ?? null;
     const sem = cosine(qv, vec);
@@ -95,14 +118,11 @@ export async function hybridSearch(opts: HybridOpts): Promise<KnowledgeHit[]> {
     const score = alpha * sem + (1 - alpha) * kw;
     const prev = best.get(c.itemId);
     if (!prev || score > prev.score) {
-      best.set(c.itemId, { score, snippet: c.text.slice(0, 120), item: c.item });
+      best.set(c.itemId, { score, snippet: c.text.slice(0, 120), text: c.text.slice(0, 512), item: c.item });
     }
   }
-  return [...best.values()]
-    .filter((x) => x.score > 0.02)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK)
-    .map((x) => ({ item: toItemT(x.item), score: Number(x.score.toFixed(4)), snippet: x.snippet }));
+  const cands = [...best.values()].filter((x) => x.score > 0.02);
+  return finalize(query, cands, topK);
 }
 
 /**

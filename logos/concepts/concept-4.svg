@@ -1,0 +1,17 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <g id="bg">
+    <rect x="0" y="0" width="512" height="512" rx="96" fill="#FAF7F0"/>
+  </g>
+  <g id="grid" fill="none" stroke="#1B1D21" stroke-width="14" stroke-linecap="round">
+    <line x1="136" y1="156" x2="376" y2="156"/>
+    <line x1="136" y1="356" x2="376" y2="356"/>
+    <line x1="156" y1="136" x2="156" y2="376"/>
+    <line x1="356" y1="136" x2="356" y2="376"/>
+  </g>
+  <g id="stone">
+    <circle cx="156" cy="356" r="44" fill="#1B1D21"/>
+    <circle cx="356" cy="156" r="84" fill="#A07D2C"/>
+    <circle cx="356" cy="156" r="84" fill="none" stroke="#6E5621" stroke-width="10"/>
+    <circle cx="330" cy="130" r="20" fill="#D8B25A"/>
+  </g>
+</svg>

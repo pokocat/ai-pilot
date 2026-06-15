@@ -23,9 +23,14 @@ export function maskPhone(p: string): string {
   return /^\d{11}$/.test(p) ? `${p.slice(0, 3)}****${p.slice(7)}` : p;
 }
 
-/** 是否把验证码随响应回传：显式开启，或 console provider 的非生产环境（便于联调/演示）。 */
+/** 测试运行（NODE_ENV=test）：一律不触达真实运营商，验证码改走演示口径回传，避免跑测打爆短信额度。 */
+export function isSmsTestMode(): boolean {
+  return process.env.NODE_ENV === 'test';
+}
+
+/** 是否把验证码随响应回传：测试运行 / 显式开启 / console provider 的非生产环境（便于联调/演示）。 */
 export function shouldReturnDevCode(): boolean {
-  return env.smsReturnCode || (env.smsProvider === 'console' && process.env.NODE_ENV !== 'production');
+  return isSmsTestMode() || env.smsReturnCode || (env.smsProvider === 'console' && process.env.NODE_ENV !== 'production');
 }
 
 // ───────────────────────── 发送 provider ─────────────────────────
@@ -35,6 +40,11 @@ export interface SmsSendOutcome { ok: boolean; provider: string; detail?: string
 /** 发送一条验证码短信。失败返回 ok:false（由上层决定是否阻断）。 */
 export async function sendSmsCode(phone: string, code: string): Promise<SmsSendOutcome> {
   const ttlMin = Math.max(1, Math.round(env.smsCodeTtlSec / 60));
+  // 测试运行：绝不调真实运营商（防止跑测把短信额度打爆 / 误发给真实号码）。
+  if (isSmsTestMode()) {
+    console.log(`[sms:test] → ${maskPhone(phone)} 验证码 ${code}（测试环境不实发，${ttlMin} 分钟内有效）`);
+    return { ok: true, provider: 'test' };
+  }
   if (env.smsProvider === 'aliyun') return sendViaAliyun(phone, code);
   // console：开发/演示通道，不接真实运营商，仅打印（脱敏）。验证码经响应回传给前端自动回填。
   console.log(`[sms:console] → ${maskPhone(phone)} 验证码 ${code}（${ttlMin} 分钟内有效）`);

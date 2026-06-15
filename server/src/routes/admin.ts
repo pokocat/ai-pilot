@@ -2,14 +2,19 @@
 // 鉴权：本插件内所有 /admin/* 路由统一走 requireAdmin 前置校验（共享密钥 ADMIN_TOKEN 或 role=admin 账号）。
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
-import { getAiConfig, setAiConfig, publicConfig, AI_PRESETS, type ResolvedAiConfig } from '../services/aiConfig.js';
+import {
+  getAiConfig, setAiConfig, publicConfig, AI_PRESETS, type ResolvedAiConfig,
+  listModels, addModel, updateModel, deleteModel, activateModel, mergedTestConfig,
+} from '../services/aiConfig.js';
+import { testEmbedding } from '../services/embedding.js';
+import { testRerank } from '../services/rerank.js';
 import { pingModel, pingAgentRuntime } from '../llm/gateway.js';
 import { requireAdmin } from '../services/adminAuth.js';
 import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
 import { selectableMeta, listDefs, createTool, updateTool, deleteTool } from '../services/skillTools.js';
-import type { AiConfigUpdate } from '../llm/schema.js';
+import type { AiConfigUpdate, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
@@ -70,16 +75,52 @@ export async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', requireAdmin);
 
   // —— 大模型配置（运营后台可随时切换；默认 Agnes 2.0 Flash） ——
+  // config=当前生效配置；presets=内置接入商目录（添加向导用）；models=已添加模型（快速切换源）。
   app.get('/admin/ai-config', async () => {
     const cfg = await getAiConfig(true);
-    return { config: publicConfig(cfg), presets: AI_PRESETS };
+    return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
   });
   app.put<{ Body: AiConfigUpdate }>('/admin/ai-config', async (req) => {
     const cfg = await setAiConfig(req.body ?? {});
     await recordAudit({ action: 'admin.ai.update', payload: { provider: cfg.provider, model: cfg.model } });
-    return { config: publicConfig(cfg), presets: AI_PRESETS };
+    return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
   });
-  // 测试连接：用「当前保存配置」叠加本次未保存的改动（apiKey 留空则用已存 key）。
+
+  // —— 已添加模型：增删改 + 快速切换（生效）+ 探活 ——
+  app.post<{ Body: AiModelUpsert }>('/admin/ai-models', async (req, reply) => {
+    const b = req.body;
+    if (!b || !b.label?.trim() || !b.provider) return reply.code(400).send({ error: '缺少展示名或协议' });
+    const m = await addModel(b);
+    await recordAudit({ action: 'admin.ai.model.add', payload: { id: m.id, provider: m.provider, model: m.model } });
+    return m;
+  });
+  app.patch<{ Params: { id: string }; Body: AiModelUpsert }>('/admin/ai-models/:id', async (req, reply) => {
+    const m = await updateModel(req.params.id, req.body ?? ({} as AiModelUpsert));
+    if (!m) return reply.code(404).send({ error: '模型不存在' });
+    await recordAudit({ action: 'admin.ai.model.update', payload: { id: m.id, provider: m.provider, model: m.model } });
+    return m;
+  });
+  app.delete<{ Params: { id: string } }>('/admin/ai-models/:id', async (req, reply) => {
+    const r = await deleteModel(req.params.id);
+    if (!r.ok) return reply.code(409).send({ error: r.reason || '删除失败' });
+    await recordAudit({ action: 'admin.ai.model.delete', payload: { id: req.params.id } });
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string } }>('/admin/ai-models/:id/activate', async (req, reply) => {
+    try {
+      const cfg = await activateModel(req.params.id);
+      await recordAudit({ action: 'admin.ai.model.activate', payload: { id: req.params.id, provider: cfg.provider, model: cfg.model } });
+      return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
+    } catch (err) {
+      return reply.code(404).send({ error: (err as Error).message });
+    }
+  });
+  // 探活：用「添加/编辑表单」字段直测（modelId 传入且 key 空则取该模型已存 key）。
+  app.post<{ Body: AiModelTest }>('/admin/ai-models/test', async (req) => {
+    return pingModel(await mergedTestConfig(req.body ?? ({} as AiModelTest)));
+  });
+  // 测试连接：用「当前保存配置」叠加本次未保存的改动（各 key 留空则用已存 key）。
+  // 对话模型必测；嵌入/重排若开启则一并探活回传。
   app.post<{ Body: AiConfigUpdate }>('/admin/ai-config/test', async (req) => {
     const saved = await getAiConfig(true);
     const b = req.body ?? {};
@@ -91,8 +132,18 @@ export async function adminRoutes(app: FastifyInstance) {
       apiKey: b.apiKey && b.apiKey.length ? b.apiKey : saved.apiKey,
       embeddingModel: b.embeddingModel ?? saved.embeddingModel,
       temperature: b.temperature ?? saved.temperature,
+      embeddingEnabled: b.embeddingEnabled ?? saved.embeddingEnabled,
+      embeddingBaseUrl: b.embeddingBaseUrl ?? saved.embeddingBaseUrl,
+      embeddingApiKey: b.embeddingApiKey && b.embeddingApiKey.length ? b.embeddingApiKey : saved.embeddingApiKey,
+      rerankEnabled: b.rerankEnabled ?? saved.rerankEnabled,
+      rerankModel: b.rerankModel ?? saved.rerankModel,
+      rerankBaseUrl: b.rerankBaseUrl ?? saved.rerankBaseUrl,
+      rerankApiKey: b.rerankApiKey && b.rerankApiKey.length ? b.rerankApiKey : saved.rerankApiKey,
     };
-    return pingModel(merged);
+    const result: AiTestResult = await pingModel(merged);
+    if (merged.embeddingEnabled) result.embedding = await testEmbedding(merged);
+    if (merged.rerankEnabled) result.rerank = await testRerank(merged);
+    return result;
   });
 
   // agent 可勾选的工具（内置 + 启用的自定义工具）。

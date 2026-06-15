@@ -58,22 +58,33 @@ export function embedLocal(text: string): number[] {
   return v.map((x) => x / norm);
 }
 
-function remoteEnabled(cfg: ResolvedAiConfig): boolean {
-  return !!cfg.embeddingModel && cfg.provider === 'openai' && isRealKey(cfg.apiKey);
+/** 解析嵌入接入凭证：开关 + 模型，baseUrl/key 留空回退对话模型。 */
+export interface EmbeddingCreds { enabled: boolean; baseUrl: string; apiKey: string; model: string; }
+export function resolveEmbedding(cfg: ResolvedAiConfig): EmbeddingCreds {
+  return {
+    enabled: !!cfg.embeddingEnabled,
+    model: cfg.embeddingModel,
+    baseUrl: (cfg.embeddingBaseUrl || cfg.baseUrl).replace(/\/+$/, ''),
+    apiKey: cfg.embeddingApiKey || cfg.apiKey,
+  };
+}
+/** 是否可走真实远程嵌入：开关开 + 有模型 + 有 baseUrl + 真实 key（与对话 provider 无关，独立接入）。 */
+export function embeddingUsable(c: EmbeddingCreds): boolean {
+  return c.enabled && !!c.model && !!c.baseUrl && isRealKey(c.apiKey);
 }
 
-/** 真实嵌入（OpenAI 兼容 /embeddings，配置驱动）。失败抛错，由 embed() 兜底回本地。 */
-async function embedRemote(cfg: ResolvedAiConfig, text: string): Promise<number[]> {
-  const base = cfg.baseUrl.replace(/\/+$/, '');
+/** 真实嵌入（OpenAI 兼容 /embeddings）。失败抛错，由 embed() 兜底回本地。 */
+async function embedRemote(c: EmbeddingCreds, text: string, timeoutMs: number): Promise<number[]> {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`${base}/embeddings`, {
+    const res = await fetch(`${c.baseUrl}/embeddings`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({ model: cfg.embeddingModel, input: text.slice(0, 4000) }),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${c.apiKey}` },
+      body: JSON.stringify({ model: c.model, input: text.slice(0, 4000) }),
       signal: ctrl.signal,
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json().catch(() => ({}))) as { data?: { embedding?: number[] }[] };
     const emb = data.data?.[0]?.embedding;
     if (!emb?.length) throw new Error('embeddings 返回为空');
@@ -83,17 +94,31 @@ async function embedRemote(cfg: ResolvedAiConfig, text: string): Promise<number[
   }
 }
 
-/** 统一入口：优先真实模型（配置了 embeddingModel + 真实 key），否则本地确定性嵌入兜底。 */
+/** 统一入口：开启且凭证可用时走真实模型，否则本地确定性嵌入兜底。 */
 export async function embed(text: string): Promise<number[]> {
   const cfg = await getAiConfig();
-  if (remoteEnabled(cfg)) {
+  const c = resolveEmbedding(cfg);
+  if (embeddingUsable(c)) {
     try {
-      return await embedRemote(cfg, text);
+      return await embedRemote(c, text, cfg.timeoutMs);
     } catch (err) {
       console.error('[embedding] remote fallback to local:', (err as Error).message);
     }
   }
   return embedLocal(text);
+}
+
+/** 连通性探活（运营后台「测试连接」用）。 */
+export async function testEmbedding(cfg: ResolvedAiConfig): Promise<{ ok: boolean; dim?: number; error?: string }> {
+  const c = resolveEmbedding(cfg);
+  if (!c.enabled) return { ok: false, error: '未开启嵌入接入' };
+  if (!embeddingUsable(c)) return { ok: false, error: '缺少模型 / baseUrl / 真实 Key（留空则回退对话模型）' };
+  try {
+    const v = await embedRemote(c, '连接测试', cfg.timeoutMs);
+    return { ok: true, dim: v.length };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
 }
 
 /** 余弦相似度（维度不一致返回 0，避免混合来源向量误判）。 */

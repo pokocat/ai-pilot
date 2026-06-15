@@ -1,0 +1,20 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <g id="bg">
+    <rect x="0" y="0" width="512" height="512" fill="#FAF7F0"/>
+  </g>
+  <g id="fan">
+    <g id="blades">
+      <path d="M256 400 L96 232 A220 220 0 0 1 158 175 Z" fill="#6E5621"/>
+      <path d="M256 400 L158 175 A220 220 0 0 1 222 152 Z" fill="#D8B25A"/>
+      <path d="M256 400 L222 152 A220 220 0 0 1 290 152 Z" fill="#A07D2C"/>
+      <path d="M256 400 L290 152 A220 220 0 0 1 354 175 Z" fill="#D8B25A"/>
+      <path d="M256 400 L354 175 A220 220 0 0 1 416 232 Z" fill="#6E5621"/>
+    </g>
+    <g id="handle">
+      <path d="M256 400 L96 232 A220 220 0 0 1 416 232 Z" fill="none" stroke="#1B1D21" stroke-width="10" stroke-linejoin="round"/>
+      <rect x="244" y="394" width="24" height="78" rx="12" fill="#1B1D21"/>
+      <circle cx="256" cy="400" r="22" fill="#1B1D21"/>
+      <circle cx="256" cy="400" r="9" fill="#D8B25A"/>
+    </g>
+  </g>
+</svg>

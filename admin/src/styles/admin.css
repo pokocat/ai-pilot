@@ -212,6 +212,14 @@ select.ai-input { appearance: none; }
 .ai-btn.ghost { background: transparent; color: var(--ink-2); }
 .ai-btn:disabled { opacity: .5; }
 .ai-note { font-size: 11px; line-height: 1.6; color: var(--ink-3); margin-top: 14px; overflow-wrap: anywhere; }
+/* 检索增强：嵌入 / 重排 开关卡片 */
+.ai-sub { border: 1px solid var(--line); border-radius: 12px; padding: 13px 14px; margin-bottom: 12px; background: var(--surface); }
+.ai-sub-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.ai-sub-h .b { min-width: 0; }
+.ai-sub-h .b .t { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.ai-sub-h .b .s { font-size: 11px; color: var(--ink-3); margin-top: 3px; overflow-wrap: anywhere; }
+.ai-sub .ai-field { margin-top: 12px; margin-bottom: 0; }
+.ai-sub .ai-field + .ai-field { margin-top: 10px; }
 
 /* —— 智能体计费 / 新增 / 用户开通 —— */
 .tag.pay { background: rgba(155,124,63,.18); color: var(--accent-ink, var(--gold)); }

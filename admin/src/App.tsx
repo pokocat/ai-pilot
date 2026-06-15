@@ -12,6 +12,8 @@ import {
   type AiConfig,
   type AiPreset,
   type AiProvider,
+  type AiModel,
+  type AiModelUpsert,
   type AdminUserItem,
   type AdminUserDetail,
   type AdminUsageView,
@@ -732,44 +734,205 @@ function PlansView({ toast }: { toast: (m: string) => void }) {
   );
 }
 
-// —— 大模型配置：默认 Agnes 2.0 Flash，可一键切到 DeepSeek/Qwen 等（OpenAI 兼容）或 Claude ——
+// —— 大模型配置：运营自行「添加模型」（内置接入商 / 通用兼容 / 自主定义），添加后进入快速切换 ——
+type ModelMode = 'builtin' | 'compatible' | 'custom';
+interface ModelForm {
+  id?: string;          // 编辑时有
+  mode: ModelMode;
+  preset: string;       // builtin 选中的内置接入商 id（'' = 未选）
+  provider: AiProvider;
+  label: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  embeddingModel: string;
+  temperature: number;
+  hasKey: boolean;      // 编辑时该模型是否已存 key（决定 Key 占位符）
+}
+const BLANK_MODEL: ModelForm = { mode: 'builtin', preset: '', provider: 'openai', label: '', baseUrl: '', model: '', apiKey: '', embeddingModel: '', temperature: 0.7, hasKey: false };
+
 function ModelView({ toast }: { toast: (m: string) => void }) {
   const [cfg, setCfg] = useState<AiConfig | null>(null);
   const [presets, setPresets] = useState<AiPreset[]>([]);
-  const [form, setForm] = useState({ provider: 'openai' as AiProvider, label: '', baseUrl: '', model: '', apiKey: '', embeddingModel: '', temperature: 0.7 });
+  const [models, setModels] = useState<AiModel[]>([]);
+  const [form, setForm] = useState<ModelForm | null>(null);
   const [test, setTest] = useState<{ ok: boolean; msg: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 检索增强（向量嵌入 / 重排）——全局配置，不随对话模型切换变动；可独立配凭证，留空回退当前生效模型。
+  const [aux, setAux] = useState({ embeddingEnabled: false, embeddingModel: '', embeddingBaseUrl: '', embeddingApiKey: '', rerankEnabled: false, rerankModel: '', rerankBaseUrl: '', rerankApiKey: '' });
+  const [auxTest, setAuxTest] = useState<{ ok: boolean; msg: string } | null>(null);
 
   const load = () => api.aiConfig().then((v) => {
-    setCfg(v.config); setPresets(v.presets);
-    setForm({ provider: v.config.provider, label: v.config.label, baseUrl: v.config.baseUrl, model: v.config.model, apiKey: '', embeddingModel: v.config.embeddingModel, temperature: v.config.temperature });
+    setCfg(v.config); setPresets(v.presets); setModels(v.models);
+    setAux({
+      embeddingEnabled: v.config.embeddingEnabled, embeddingModel: v.config.embeddingModel, embeddingBaseUrl: v.config.embeddingBaseUrl, embeddingApiKey: '',
+      rerankEnabled: v.config.rerankEnabled, rerankModel: v.config.rerankModel, rerankBaseUrl: v.config.rerankBaseUrl, rerankApiKey: '',
+    });
   }).catch(() => {});
   useEffect(() => { load(); }, []);
   if (!cfg) return <Loading />;
 
-  const set = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
-  const applyPreset = (p: AiPreset) => { set({ provider: p.provider, label: p.label, baseUrl: p.baseUrl, model: p.model, embeddingModel: p.embeddingModel ?? form.embeddingModel }); setTest(null); };
-  // 保存：apiKey 留空表示不改动已存 key
-  const payload = () => ({ provider: form.provider, label: form.label, baseUrl: form.baseUrl, model: form.model, embeddingModel: form.embeddingModel, temperature: Number(form.temperature), ...(form.apiKey ? { apiKey: form.apiKey } : {}) });
+  const set = (p: Partial<ModelForm>) => setForm((f) => (f ? { ...f, ...p } : f));
 
-  const doTest = async () => {
-    setBusy(true); setTest(null);
+  // 快速切换：点选某个已添加模型 → 即时生效。
+  const activate = (m: AiModel) => {
+    if (m.active || busy) return;
+    setBusy(true);
+    api.activateAiModel(m.id)
+      .then((v) => { setCfg(v.config); setModels(v.models); toast(`已切换到「${m.label}」`); })
+      .catch((e) => toast(e?.message || '切换失败'))
+      .finally(() => setBusy(false));
+  };
+  const del = (m: AiModel) => {
+    if (!confirm(`删除模型「${m.label}」？`)) return;
+    api.delAiModel(m.id).then(() => { toast('已删除'); load(); }).catch((e) => toast(e?.message || '删除失败'));
+  };
+  const edit = (m: AiModel) => {
+    setTest(null);
+    setForm({
+      id: m.id, mode: m.preset ? 'builtin' : m.provider === 'openai' ? 'compatible' : 'custom',
+      preset: m.preset || '', provider: m.provider, label: m.label, baseUrl: m.baseUrl, model: m.model,
+      apiKey: '', embeddingModel: m.embeddingModel, temperature: m.temperature, hasKey: m.hasKey,
+    });
+  };
+
+  // —— 添加/编辑表单 ——
+  if (form) {
+    const setMode = (mode: ModelMode) => {
+      setTest(null);
+      if (mode === 'compatible') set({ mode, provider: 'openai', preset: '' });
+      else if (mode === 'custom') set({ mode, preset: '' });
+      else set({ mode });
+    };
+    const applyPreset = (id: string) => {
+      setTest(null);
+      const p = presets.find((x) => x.id === id);
+      if (!p) { set({ preset: '' }); return; }
+      set({ preset: p.id, provider: p.provider, label: form.label.trim() ? form.label : p.label, baseUrl: p.baseUrl, model: p.model, embeddingModel: p.embeddingModel ?? form.embeddingModel });
+    };
+    const showBaseUrl = form.provider === 'openai';
+    const showKey = form.provider !== 'mock';
+
+    const testModel = async () => {
+      setBusy(true); setTest(null);
+      try {
+        const r = await api.testAiModel({
+          provider: form.provider, label: form.label, baseUrl: form.baseUrl, model: form.model,
+          embeddingModel: form.embeddingModel, temperature: Number(form.temperature),
+          ...(form.apiKey ? { apiKey: form.apiKey } : {}), ...(form.id ? { modelId: form.id } : {}),
+        });
+        setTest({ ok: r.ok, msg: r.ok ? `连通 · ${r.latencyMs}ms · ${r.model}${r.sample ? ' · 「' + r.sample + '」' : ''}` : (r.error || '未连通') });
+      } catch { setTest({ ok: false, msg: '测试请求失败' }); }
+      setBusy(false);
+    };
+    const saveModel = () => {
+      if (!form.label.trim()) { toast('请填写展示名'); return; }
+      if (form.provider !== 'mock' && !form.model.trim()) { toast('请填写模型 model'); return; }
+      const body: AiModelUpsert = {
+        provider: form.provider, label: form.label.trim(), baseUrl: form.baseUrl.trim(), model: form.model.trim(),
+        embeddingModel: form.embeddingModel.trim(), temperature: Number(form.temperature), preset: form.preset || null,
+        ...(form.apiKey ? { apiKey: form.apiKey } : {}),
+      };
+      const p = form.id ? api.updateAiModel(form.id, body) : api.addAiModel(body);
+      p.then(() => { toast(form.id ? '已更新' : '已添加'); setForm(null); load(); }).catch((e) => toast(e?.message || '保存失败'));
+    };
+
+    return (
+      <>
+        <div className="sec-h"><span className="t">{form.id ? '编辑模型' : '添加模型'}</span><span className="s">{form.id ? '保存后若为生效模型则即时更新' : '保存后进入快速切换'}</span></div>
+        <div className="pad">
+          {/* 选择接入商模式 */}
+          <Field label="接入方式">
+            <div className="bill-seg">
+              {([['builtin', '内置接入商'], ['compatible', '通用兼容协议'], ['custom', '完全自主定义']] as const).map(([v, l]) => (
+                <div key={v} className={`bill-opt ${form.mode === v ? 'on' : ''}`} onClick={() => setMode(v)}><div className="bo-t">{l}</div></div>
+              ))}
+            </div>
+          </Field>
+
+          {form.mode === 'builtin' && (
+            <Field label="内置接入商（选择后自动填好网关 / 模型，仍可改）">
+              <select className="ai-input" value={form.preset} onChange={(e) => applyPreset(e.target.value)}>
+                <option value="">— 选择接入商 —</option>
+                {presets.map((p) => <option key={p.id} value={p.id}>{p.label}{p.note ? ` · ${p.note}` : ''}</option>)}
+              </select>
+            </Field>
+          )}
+          {form.mode === 'compatible' && (
+            <div className="ai-note" style={{ marginTop: 0, marginBottom: 12 }}>通用 OpenAI 兼容协议：填入任意兼容厂商的网关地址（带 /v1）与模型名即可。</div>
+          )}
+          {form.mode === 'custom' && (
+            <Field label="协议 provider">
+              <select className="ai-input" value={form.provider} onChange={(e) => set({ provider: e.target.value as AiProvider })}>
+                <option value="openai">openai（兼容 Agnes/DeepSeek/Qwen…）</option>
+                <option value="claude">claude（Anthropic）</option>
+                <option value="mock">mock（本地模板）</option>
+              </select>
+            </Field>
+          )}
+
+          <Field label="展示名"><input className="ai-input" value={form.label} onChange={(e) => set({ label: e.target.value })} placeholder="Agnes 2.0 Flash" /></Field>
+          {showBaseUrl && (
+            <Field label="网关地址 baseUrl（带 /v1）"><input className="ai-input" value={form.baseUrl} onChange={(e) => set({ baseUrl: e.target.value })} placeholder="https://apihub.agnes-ai.com/v1" /></Field>
+          )}
+          {form.provider !== 'mock' && (
+            <Field label="模型 model"><input className="ai-input" value={form.model} onChange={(e) => set({ model: e.target.value })} placeholder="agnes-2.0-flash" /></Field>
+          )}
+          {showKey && (
+            <Field label={`API Key${form.id && form.hasKey ? '（已配置，留空=不改）' : ''}`}>
+              <input className="ai-input" type="password" value={form.apiKey} onChange={(e) => set({ apiKey: e.target.value })} placeholder={form.id && form.hasKey ? '••••••（留空保留现有）' : '粘贴 API Key'} />
+            </Field>
+          )}
+          {form.provider !== 'mock' && (
+            <Field label="嵌入模型 embeddingModel（留空=本地确定性嵌入）"><input className="ai-input" value={form.embeddingModel} onChange={(e) => set({ embeddingModel: e.target.value })} placeholder="text-embedding-3-small / 留空" /></Field>
+          )}
+          <Field label={`温度 temperature · ${form.temperature}`}>
+            <input className="ai-range" type="range" min={0} max={1} step={0.1} value={form.temperature} onChange={(e) => set({ temperature: Number(e.target.value) })} />
+          </Field>
+
+          {test && <div className={`ai-test ${test.ok ? 'ok' : 'err'}`}><Icon name={test.ok ? 'check' : 'alert'} size={13} /> {test.msg}</div>}
+
+          <div className="ai-actions">
+            <button className="ai-btn ghost" onClick={testModel} disabled={busy}><Icon name="spark" size={14} /> 测试连接</button>
+            <button className="ai-btn primary" onClick={saveModel} disabled={busy}><Icon name="check" size={14} /> {form.id ? '保存' : '添加'}</button>
+          </div>
+          <button className="gh" style={{ marginTop: 10 }} onClick={() => setForm(null)}>取消</button>
+        </div>
+      </>
+    );
+  }
+
+  // —— 检索增强（嵌入 / 重排）：全局开关 + 可独立配凭证（留空回退当前生效模型）——
+  const setA = (p: Partial<typeof aux>) => setAux((a) => ({ ...a, ...p }));
+  const auxPayload = () => ({
+    embeddingEnabled: aux.embeddingEnabled, embeddingModel: aux.embeddingModel, embeddingBaseUrl: aux.embeddingBaseUrl,
+    rerankEnabled: aux.rerankEnabled, rerankModel: aux.rerankModel, rerankBaseUrl: aux.rerankBaseUrl,
+    ...(aux.embeddingApiKey ? { embeddingApiKey: aux.embeddingApiKey } : {}),
+    ...(aux.rerankApiKey ? { rerankApiKey: aux.rerankApiKey } : {}),
+  });
+  const testAux = async () => {
+    setBusy(true); setAuxTest(null);
     try {
-      const r = await api.testAiConfig(payload());
-      setTest({ ok: r.ok, msg: r.ok ? `连通 · ${r.latencyMs}ms · ${r.model}${r.sample ? ' · 「' + r.sample + '」' : ''}` : (r.error || '未连通') });
-    } catch { setTest({ ok: false, msg: '测试请求失败' }); }
+      const r = await api.testAiConfig(auxPayload());
+      const parts: string[] = [];
+      if (r.embedding) parts.push(`嵌入 ${r.embedding.ok ? '连通' + (r.embedding.dim ? `·${r.embedding.dim}维` : '') : (r.embedding.error || '未连通')}`);
+      if (r.rerank) parts.push(`重排 ${r.rerank.ok ? '连通' : (r.rerank.error || '未连通')}`);
+      const ok = (!r.embedding || r.embedding.ok) && (!r.rerank || r.rerank.ok);
+      setAuxTest({ ok, msg: parts.length ? parts.join(' ｜ ') : '未开启任何增强项' });
+    } catch { setAuxTest({ ok: false, msg: '测试请求失败' }); }
     setBusy(false);
   };
-  const doSave = async () => {
+  const saveAux = async () => {
     setBusy(true);
-    try { const v = await api.saveAiConfig(payload()); setCfg(v.config); setForm((f) => ({ ...f, apiKey: '' })); toast('模型配置已保存并即时生效'); }
+    try { const v = await api.saveAiConfig(auxPayload()); setCfg(v.config); setAux((a) => ({ ...a, embeddingApiKey: '', rerankApiKey: '' })); toast('检索增强配置已保存并即时生效'); }
     catch { toast('保存失败'); }
     setBusy(false);
   };
 
+  // —— 列表 + 快速切换 ——
   return (
     <>
-      <div className="sec-h"><span className="t">大模型配置</span><span className="s">可随时切换 · 即时生效</span></div>
+      <div className="sec-h"><span className="t">大模型配置</span><span className="s">添加模型 · 一键快速切换 · 即时生效</span></div>
       <div className="pad">
         {/* 当前生效状态 */}
         <div className={`ai-status ${cfg.ready ? 'on' : 'off'}`}>
@@ -784,42 +947,69 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
           </div>
         </div>
 
-        {/* 预设一键切换 */}
+        {/* 快速切换：点选已添加模型即时生效 */}
         <div className="ai-label">快速切换</div>
         <div className="ai-presets">
-          {presets.map((p) => (
-            <button key={p.id} className={`ai-preset ${form.provider === p.provider && form.model === p.model ? 'on' : ''}`} onClick={() => applyPreset(p)} title={p.note}>{p.label}</button>
+          {models.map((m) => (
+            <button key={m.id} className={`ai-preset ${m.active ? 'on' : ''}`} disabled={busy} onClick={() => activate(m)} title={`${m.provider} · ${m.model}${m.hasKey ? '' : ' · 未配 Key'}`}>{m.label}</button>
           ))}
+          <button className="ai-preset" style={{ borderStyle: 'dashed' }} onClick={() => { setTest(null); setForm({ ...BLANK_MODEL }); }}>＋ 添加模型</button>
         </div>
 
-        {/* 表单 */}
-        <Field label="协议 provider">
-          <select className="ai-input" value={form.provider} onChange={(e) => set({ provider: e.target.value as AiProvider })}>
-            <option value="openai">openai（兼容 Agnes/DeepSeek/Qwen…）</option>
-            <option value="claude">claude（Anthropic）</option>
-            <option value="mock">mock（本地模板）</option>
-          </select>
-        </Field>
-        <Field label="展示名"><input className="ai-input" value={form.label} onChange={(e) => set({ label: e.target.value })} placeholder="Agnes 2.0 Flash" /></Field>
-        {form.provider === 'openai' && (
-          <Field label="网关地址 baseUrl（带 /v1）"><input className="ai-input" value={form.baseUrl} onChange={(e) => set({ baseUrl: e.target.value })} placeholder="https://apihub.agnes-ai.com/v1" /></Field>
-        )}
-        <Field label="模型 model"><input className="ai-input" value={form.model} onChange={(e) => set({ model: e.target.value })} placeholder="agnes-2.0-flash" /></Field>
-        <Field label={`API Key${cfg.hasKey ? '（已配置，留空=不改）' : ''}`}>
-          <input className="ai-input" type="password" value={form.apiKey} onChange={(e) => set({ apiKey: e.target.value })} placeholder={cfg.hasKey ? '••••••（留空保留现有）' : '粘贴 API Key'} />
-        </Field>
-        <Field label="嵌入模型 embeddingModel（留空=本地确定性嵌入）"><input className="ai-input" value={form.embeddingModel} onChange={(e) => set({ embeddingModel: e.target.value })} placeholder="text-embedding-3-small / 留空" /></Field>
-        <Field label={`温度 temperature · ${form.temperature}`}>
-          <input className="ai-range" type="range" min={0} max={1} step={0.1} value={form.temperature} onChange={(e) => set({ temperature: Number(e.target.value) })} />
-        </Field>
+        {/* 已添加模型管理 */}
+        <div className="ai-label">已添加模型</div>
+        {models.length === 0 && <div className="usage-meta" style={{ padding: '10px 0' }}>还没有模型。点「添加模型」接入一个大模型。</div>}
+        {models.map((m) => (
+          <div key={m.id} className="mem-card">
+            <span className="mi"><Icon name="insight" size={16} /></span>
+            <div className="mb" style={{ cursor: 'pointer' }} onClick={() => edit(m)}>
+              <div className="mt">{m.label}{m.active && <span className="tag" style={{ marginLeft: 6 }}>生效中</span>}{!m.hasKey && m.provider !== 'mock' && <span className="tag" style={{ marginLeft: 6 }}>未配 Key</span>}</div>
+              <div className="mm">{m.provider} · {m.model || '—'}{m.preset ? ` · 内置:${m.preset}` : ''}</div>
+            </div>
+            {!m.active && <button className="gh" style={{ width: 'auto', padding: '0 10px' }} onClick={() => activate(m)} disabled={busy}>切换</button>}
+            <button className="gh" style={{ width: 'auto', padding: '0 10px' }} onClick={() => del(m)}>删除</button>
+          </div>
+        ))}
+        {/* —— 检索增强：向量嵌入 / 重排（全局开关，不随对话模型切换）—— */}
+        <div className="ai-label" style={{ marginTop: 18 }}>检索增强（知识库 / 记忆）</div>
+        <div className="ai-sub">
+          <div className="ai-sub-h">
+            <div className="b"><div className="t">向量嵌入 Embedding</div><div className="s">关＝本地确定性嵌入（零依赖）；开＝调用嵌入模型，语义召回更准</div></div>
+            <div className={`sw ${aux.embeddingEnabled ? 'on' : ''}`} onClick={() => setA({ embeddingEnabled: !aux.embeddingEnabled })}><i /></div>
+          </div>
+          {aux.embeddingEnabled && (
+            <>
+              <Field label="嵌入模型 model"><input className="ai-input" value={aux.embeddingModel} onChange={(e) => setA({ embeddingModel: e.target.value })} placeholder="text-embedding-3-small / text-embedding-v3" /></Field>
+              <Field label="接入地址 baseUrl（留空＝复用当前生效模型）"><input className="ai-input" value={aux.embeddingBaseUrl} onChange={(e) => setA({ embeddingBaseUrl: e.target.value })} placeholder="留空复用对话模型网关" /></Field>
+              <Field label={`API Key${cfg.hasEmbeddingKey ? '（已配置，留空＝不改）' : '（留空＝复用对话模型）'}`}>
+                <input className="ai-input" type="password" value={aux.embeddingApiKey} onChange={(e) => setA({ embeddingApiKey: e.target.value })} placeholder={cfg.hasEmbeddingKey ? '••••••（留空保留现有）' : '留空复用对话模型 Key'} />
+              </Field>
+            </>
+          )}
+        </div>
 
-        {test && <div className={`ai-test ${test.ok ? 'ok' : 'err'}`}><Icon name={test.ok ? 'check' : 'alert'} size={13} /> {test.msg}</div>}
+        <div className="ai-sub">
+          <div className="ai-sub-h">
+            <div className="b"><div className="t">重排 Rerank</div><div className="s">开＝知识库检索融合打分后，再用 rerank 模型重排候选，提升 TopN 命中</div></div>
+            <div className={`sw ${aux.rerankEnabled ? 'on' : ''}`} onClick={() => setA({ rerankEnabled: !aux.rerankEnabled })}><i /></div>
+          </div>
+          {aux.rerankEnabled && (
+            <>
+              <Field label="重排模型 model"><input className="ai-input" value={aux.rerankModel} onChange={(e) => setA({ rerankModel: e.target.value })} placeholder="bge-reranker-v2-m3 / rerank-3 …" /></Field>
+              <Field label="接入地址 baseUrl（留空＝复用当前生效模型）"><input className="ai-input" value={aux.rerankBaseUrl} onChange={(e) => setA({ rerankBaseUrl: e.target.value })} placeholder="如 https://api.siliconflow.cn/v1" /></Field>
+              <Field label={`API Key${cfg.hasRerankKey ? '（已配置，留空＝不改）' : '（留空＝复用对话模型）'}`}>
+                <input className="ai-input" type="password" value={aux.rerankApiKey} onChange={(e) => setA({ rerankApiKey: e.target.value })} placeholder={cfg.hasRerankKey ? '••••••（留空保留现有）' : '留空复用对话模型 Key'} />
+              </Field>
+            </>
+          )}
+        </div>
 
+        {auxTest && <div className={`ai-test ${auxTest.ok ? 'ok' : 'err'}`}><Icon name={auxTest.ok ? 'check' : 'alert'} size={13} /> {auxTest.msg}</div>}
         <div className="ai-actions">
-          <button className="ai-btn ghost" onClick={doTest} disabled={busy}><Icon name="spark" size={14} /> 测试连接</button>
-          <button className="ai-btn primary" onClick={doSave} disabled={busy}><Icon name="check" size={14} /> 保存并生效</button>
+          <button className="ai-btn ghost" onClick={testAux} disabled={busy}><Icon name="spark" size={14} /> 测试增强项</button>
+          <button className="ai-btn primary" onClick={saveAux} disabled={busy}><Icon name="check" size={14} /> 保存检索增强</button>
         </div>
-        <div className="ai-note">提示：未配置真实 Key 时系统自动降级本地模板（mock），保证可用；填入 Key 后所有顾问产出 / 记忆提炼 / 对话汇总即走该模型。</div>
+        <div className="ai-note">提示：未配置真实 Key 时系统自动降级本地模板（mock）/ 本地嵌入，保证可用；切换后所有顾问产出 / 记忆提炼 / 对话汇总即走该模型。嵌入 / 重排为全局配置，不随对话模型切换变动。</div>
       </div>
     </>
   );
@@ -874,6 +1064,10 @@ function auditLabel(action: string) {
     'admin.user.agent.revoke': '取消智能体开通',
     'user.agent.purchase': '用户解锁智能体',
     'admin.ai.update': '模型配置变更',
+    'admin.ai.model.add': '添加模型',
+    'admin.ai.model.update': '编辑模型',
+    'admin.ai.model.delete': '删除模型',
+    'admin.ai.model.activate': '快速切换模型',
     'admin.saying.create': '新增每日献策',
     'admin.saying.update': '更新每日献策',
     'admin.saying.delete': '删除每日献策',

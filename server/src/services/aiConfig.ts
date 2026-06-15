@@ -6,7 +6,7 @@
 
 import { prisma } from '../db.js';
 import { env, isRealKey } from '../env.js';
-import type { AiProvider, AiConfig, AiPreset } from '../llm/schema.js';
+import type { AiProvider, AiConfig, AiPreset, AiModel, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 
 export interface ResolvedAiConfig {
   provider: AiProvider;
@@ -17,14 +17,29 @@ export interface ResolvedAiConfig {
   embeddingModel: string;
   temperature: number;
   timeoutMs: number;
+  // 向量嵌入接入（独立开关 + 可选凭证；baseUrl/key 留空回退对话模型）。
+  embeddingEnabled: boolean;
+  embeddingBaseUrl: string;
+  embeddingApiKey: string;
+  // 重排接入。
+  rerankEnabled: boolean;
+  rerankModel: string;
+  rerankBaseUrl: string;
+  rerankApiKey: string;
 }
 
-// 一键预设：常见大模型的 baseUrl/model（默认 Agnes 2.0 Flash）。
+// 内置接入商目录：「添加模型」向导选其一即可一键填好 baseUrl/model（仍可改）。
+// 绝大多数国内厂商提供 OpenAI 兼容端点 → provider=openai；Anthropic 用 claude 原生协议。
 export const AI_PRESETS: AiPreset[] = [
   { id: 'agnes', label: 'Agnes 2.0 Flash', provider: 'openai', baseUrl: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash', note: 'SapiensAI · OpenAI 兼容（含 tool calling）' },
-  { id: 'deepseek', label: 'DeepSeek', provider: 'openai', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', note: '深度求索' },
+  { id: 'deepseek', label: 'DeepSeek 深度求索', provider: 'openai', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', note: '深度求索 · OpenAI 兼容' },
   { id: 'qwen', label: '通义千问 Qwen', provider: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', embeddingModel: 'text-embedding-v3', note: '阿里云 · 兼容模式' },
-  { id: 'moonshot', label: 'Moonshot (Kimi)', provider: 'openai', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k', note: '月之暗面' },
+  { id: 'moonshot', label: 'Moonshot 月之暗面 (Kimi)', provider: 'openai', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k', note: 'Kimi · OpenAI 兼容' },
+  { id: 'glm', label: '智谱 GLM', provider: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-plus', embeddingModel: 'embedding-3', note: '智谱清言 · OpenAI 兼容' },
+  { id: 'doubao', label: '火山方舟 · 豆包', provider: 'openai', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-pro-32k', note: '字节火山引擎 · model 填接入点 ID' },
+  { id: 'siliconflow', label: '硅基流动 SiliconFlow', provider: 'openai', baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-72B-Instruct', note: '多模型聚合 · OpenAI 兼容' },
+  { id: 'minimax', label: 'MiniMax', provider: 'openai', baseUrl: 'https://api.minimaxi.com/v1', model: 'abab6.5s-chat', note: 'MiniMax · OpenAI 兼容' },
+  { id: 'baichuan', label: '百川 Baichuan', provider: 'openai', baseUrl: 'https://api.baichuan-ai.com/v1', model: 'Baichuan4', note: '百川智能 · OpenAI 兼容' },
   { id: 'openai', label: 'OpenAI', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', embeddingModel: 'text-embedding-3-small', note: '官方' },
   { id: 'claude', label: 'Claude (Anthropic)', provider: 'claude', baseUrl: '', model: 'claude-sonnet-4-6', note: 'Anthropic 官方协议' },
   { id: 'mock', label: '本地模板 (mock)', provider: 'mock', baseUrl: '', model: 'template', note: '零成本离线，演示兜底' },
@@ -44,6 +59,13 @@ function fromEnv(): ResolvedAiConfig {
     embeddingModel: env.embeddingModel,
     temperature: 0.7,
     timeoutMs: env.openaiTimeoutMs,
+    embeddingEnabled: env.embeddingEnabled,
+    embeddingBaseUrl: env.embeddingBaseUrl,
+    embeddingApiKey: env.embeddingApiKey,
+    rerankEnabled: env.rerankEnabled,
+    rerankModel: env.rerankModel,
+    rerankBaseUrl: env.rerankBaseUrl,
+    rerankApiKey: env.rerankApiKey,
   };
 }
 
@@ -66,6 +88,13 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
         embeddingModel: row.embeddingModel || '',
         temperature: typeof row.temperature === 'number' ? row.temperature : 0.7,
         timeoutMs: env.openaiTimeoutMs,
+        embeddingEnabled: row.embeddingEnabled ?? false,
+        embeddingBaseUrl: row.embeddingBaseUrl || '',
+        embeddingApiKey: row.embeddingApiKey || '',
+        rerankEnabled: row.rerankEnabled ?? false,
+        rerankModel: row.rerankModel || '',
+        rerankBaseUrl: row.rerankBaseUrl || '',
+        rerankApiKey: row.rerankApiKey || '',
       };
     }
   } catch {
@@ -84,10 +113,12 @@ export function effectiveProvider(cfg: ResolvedAiConfig): AiProvider {
   return isReady(cfg) ? cfg.provider : 'mock';
 }
 
-/** 写入配置（apiKey 仅在显式传入非 undefined 时更新）。 */
+/** 写入配置（各 apiKey 仅在显式传入非 undefined 时更新；空串=清空、undefined=不动）。 */
 export async function setAiConfig(patch: {
   provider?: AiProvider; label?: string; baseUrl?: string; model?: string;
   apiKey?: string; embeddingModel?: string; temperature?: number;
+  embeddingEnabled?: boolean; embeddingBaseUrl?: string; embeddingApiKey?: string;
+  rerankEnabled?: boolean; rerankModel?: string; rerankBaseUrl?: string; rerankApiKey?: string;
 }): Promise<ResolvedAiConfig> {
   const data: Record<string, unknown> = {};
   if (patch.provider !== undefined) data.provider = patch.provider;
@@ -97,6 +128,13 @@ export async function setAiConfig(patch: {
   if (patch.apiKey !== undefined) data.apiKey = patch.apiKey; // 空串=清空 key
   if (patch.embeddingModel !== undefined) data.embeddingModel = patch.embeddingModel;
   if (patch.temperature !== undefined) data.temperature = patch.temperature;
+  if (patch.embeddingEnabled !== undefined) data.embeddingEnabled = patch.embeddingEnabled;
+  if (patch.embeddingBaseUrl !== undefined) data.embeddingBaseUrl = patch.embeddingBaseUrl;
+  if (patch.embeddingApiKey !== undefined) data.embeddingApiKey = patch.embeddingApiKey;
+  if (patch.rerankEnabled !== undefined) data.rerankEnabled = patch.rerankEnabled;
+  if (patch.rerankModel !== undefined) data.rerankModel = patch.rerankModel;
+  if (patch.rerankBaseUrl !== undefined) data.rerankBaseUrl = patch.rerankBaseUrl;
+  if (patch.rerankApiKey !== undefined) data.rerankApiKey = patch.rerankApiKey;
 
   await prisma.aiSetting.upsert({
     where: { id: 'default' },
@@ -110,13 +148,165 @@ export async function setAiConfig(patch: {
       apiKey: patch.apiKey ?? '',
       embeddingModel: patch.embeddingModel ?? '',
       temperature: patch.temperature ?? 0.7,
+      embeddingEnabled: patch.embeddingEnabled ?? false,
+      embeddingBaseUrl: patch.embeddingBaseUrl ?? '',
+      embeddingApiKey: patch.embeddingApiKey ?? '',
+      rerankEnabled: patch.rerankEnabled ?? false,
+      rerankModel: patch.rerankModel ?? '',
+      rerankBaseUrl: patch.rerankBaseUrl ?? '',
+      rerankApiKey: patch.rerankApiKey ?? '',
     },
   });
   cache = null;
   return getAiConfig(true);
 }
 
-/** 脱敏对外视图（不含明文 key）。 */
+/* ────────────── 已添加模型（注册表 + 快速切换） ──────────────
+ * AiModel 是运营添加的模型接入点列表；快速切换 = 把某个 AiModel 设为生效。
+ * 「生效」= 把该模型的对话字段拷进单例 AiSetting + 记 activeModelId；
+ * getAiConfig 仍只读 AiSetting，运行时路径不变。嵌入/重排为全局配置，不随切换变动。
+ */
+type ModelRow = {
+  id: string; provider: string; label: string; baseUrl: string; model: string;
+  apiKey: string; embeddingModel: string; temperature: number; preset: string | null; updatedAt: Date;
+};
+
+/** 脱敏对外视图（不回明文 key；active 由 AiSetting.activeModelId 决定）。 */
+export function publicModel(m: ModelRow, activeId: string | null): AiModel {
+  return {
+    id: m.id,
+    provider: (m.provider as AiProvider) ?? 'mock',
+    label: m.label,
+    baseUrl: m.baseUrl,
+    model: m.model,
+    embeddingModel: m.embeddingModel,
+    temperature: m.temperature,
+    hasKey: isRealKey(m.apiKey),
+    preset: m.preset ?? null,
+    active: !!activeId && m.id === activeId,
+    updatedAt: m.updatedAt?.toISOString?.(),
+  };
+}
+
+// 把某个模型的对话字段同步进单例 AiSetting（= 设为生效），并记 activeModelId。
+async function syncActiveSetting(m: ModelRow): Promise<void> {
+  const fields = {
+    provider: m.provider, label: m.label, baseUrl: m.baseUrl, model: m.model,
+    apiKey: m.apiKey, embeddingModel: m.embeddingModel, temperature: m.temperature, activeModelId: m.id,
+  };
+  await prisma.aiSetting.upsert({
+    where: { id: 'default' },
+    update: fields,
+    create: { id: 'default', ...fields },
+  });
+  cache = null;
+}
+
+// 首次进入：库里还没有任何模型时，用当前生效配置（DB 或 env 兜底）落一行并设为生效，平滑迁移。
+async function ensureSeededModels(): Promise<void> {
+  const n = await prisma.aiModel.count();
+  if (n > 0) return;
+  const cfg = await getAiConfig(true);
+  const created = await prisma.aiModel.create({
+    data: {
+      provider: cfg.provider, label: cfg.label || '当前模型', baseUrl: cfg.baseUrl, model: cfg.model,
+      apiKey: cfg.apiKey, embeddingModel: cfg.embeddingModel, temperature: cfg.temperature,
+    },
+  });
+  await syncActiveSetting(created as ModelRow);
+}
+
+/** 已添加模型列表（带 active 标记）；首次自动迁移当前配置。DB 不可达返回空。 */
+export async function listModels(): Promise<AiModel[]> {
+  try {
+    await ensureSeededModels();
+    const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
+    const rows = await prisma.aiModel.findMany({ orderBy: { createdAt: 'asc' } });
+    return rows.map((r) => publicModel(r as ModelRow, setting?.activeModelId ?? null));
+  } catch {
+    return [];
+  }
+}
+
+/** 添加模型（不自动生效；进入快速切换列表，由运营点选生效）。 */
+export async function addModel(input: AiModelUpsert): Promise<AiModel> {
+  const created = await prisma.aiModel.create({
+    data: {
+      provider: input.provider ?? 'openai',
+      label: input.label?.trim() || '未命名模型',
+      baseUrl: input.baseUrl?.trim() ?? '',
+      model: input.model?.trim() ?? '',
+      apiKey: input.apiKey ?? '',
+      embeddingModel: input.embeddingModel?.trim() ?? '',
+      temperature: typeof input.temperature === 'number' ? input.temperature : 0.7,
+      preset: input.preset ?? null,
+    },
+  });
+  const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
+  return publicModel(created as ModelRow, setting?.activeModelId ?? null);
+}
+
+/** 编辑模型（apiKey 留空=不改）；若编辑的是生效模型，同步进 AiSetting 立即生效。 */
+export async function updateModel(id: string, patch: AiModelUpsert): Promise<AiModel | null> {
+  const existing = await prisma.aiModel.findUnique({ where: { id } });
+  if (!existing) return null;
+  const data: Record<string, unknown> = {};
+  if (patch.provider !== undefined) data.provider = patch.provider;
+  if (patch.label !== undefined) data.label = patch.label.trim() || existing.label;
+  if (patch.baseUrl !== undefined) data.baseUrl = patch.baseUrl.trim();
+  if (patch.model !== undefined) data.model = patch.model.trim();
+  if (patch.apiKey !== undefined && patch.apiKey !== '') data.apiKey = patch.apiKey; // 留空=保留现有 key
+  if (patch.embeddingModel !== undefined) data.embeddingModel = patch.embeddingModel.trim();
+  if (patch.temperature !== undefined) data.temperature = patch.temperature;
+  if (patch.preset !== undefined) data.preset = patch.preset;
+  const updated = await prisma.aiModel.update({ where: { id }, data });
+  const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
+  if (setting?.activeModelId === id) await syncActiveSetting(updated as ModelRow);
+  return publicModel(updated as ModelRow, setting?.activeModelId ?? null);
+}
+
+/** 删除模型（生效模型若仍有其它模型则拒绝，提示先切换）。 */
+export async function deleteModel(id: string): Promise<{ ok: boolean; reason?: string }> {
+  const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
+  if (setting?.activeModelId === id) {
+    const others = await prisma.aiModel.count({ where: { id: { not: id } } });
+    if (others > 0) return { ok: false, reason: '当前生效模型不能删除，请先切换到其它模型' };
+    // 删最后一个：清指针；运行时仍用 AiSetting 里已拷贝的配置兜底，不中断。
+    await prisma.aiSetting.update({ where: { id: 'default' }, data: { activeModelId: null } });
+  }
+  await prisma.aiModel.delete({ where: { id } });
+  return { ok: true };
+}
+
+/** 快速切换：把目标模型设为生效（即时）。 */
+export async function activateModel(id: string): Promise<ResolvedAiConfig> {
+  const m = await prisma.aiModel.findUnique({ where: { id } });
+  if (!m) throw new Error('模型不存在');
+  await syncActiveSetting(m as ModelRow);
+  return getAiConfig(true);
+}
+
+/** 把「添加/编辑模型」表单（含未保存改动）解析成可探活的配置；modelId 传入且 key 空则取该模型已存 key。 */
+export async function mergedTestConfig(b: AiModelTest): Promise<ResolvedAiConfig> {
+  const base = await getAiConfig(true); // 复用 timeoutMs / 全局嵌入兜底
+  let apiKey = b.apiKey ?? '';
+  if ((!apiKey || !apiKey.length) && b.modelId) {
+    const row = await prisma.aiModel.findUnique({ where: { id: b.modelId } });
+    apiKey = row?.apiKey ?? '';
+  }
+  return {
+    ...base,
+    provider: b.provider,
+    label: b.label || base.label,
+    baseUrl: b.baseUrl ?? '',
+    model: b.model ?? '',
+    apiKey,
+    embeddingModel: b.embeddingModel ?? base.embeddingModel,
+    temperature: typeof b.temperature === 'number' ? b.temperature : base.temperature,
+  };
+}
+
+/** 脱敏对外视图（不含明文 key；独立嵌入/重排 key 只回传是否已配置）。 */
 export function publicConfig(cfg: ResolvedAiConfig): AiConfig {
   return {
     provider: cfg.provider,
@@ -128,5 +318,12 @@ export function publicConfig(cfg: ResolvedAiConfig): AiConfig {
     hasKey: isRealKey(cfg.apiKey),
     ready: isReady(cfg),
     effectiveProvider: effectiveProvider(cfg),
+    embeddingEnabled: cfg.embeddingEnabled,
+    embeddingBaseUrl: cfg.embeddingBaseUrl,
+    hasEmbeddingKey: isRealKey(cfg.embeddingApiKey),
+    rerankEnabled: cfg.rerankEnabled,
+    rerankModel: cfg.rerankModel,
+    rerankBaseUrl: cfg.rerankBaseUrl,
+    hasRerankKey: isRealKey(cfg.rerankApiKey),
   };
 }

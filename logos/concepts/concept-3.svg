@@ -1,0 +1,77 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="军">
+  <g id="bg">
+    <rect width="512" height="512" fill="#FAF7F0"/>
+  </g>
+  <g id="glyph" fill="#1B1D21">
+    <!-- 丶 top dot of the cover radical -->
+    <path d="M256 64
+             c 14 4 28 14 36 27
+             c 4 7 -2 15 -10 13
+             c -16 -5 -34 -8 -52 -4
+             c -9 2 -14 -8 -7 -14
+             c 9 -8 20 -16 33 -19 Z"/>
+    <!-- 冖 cover: a long horizontal stroke with two dropping ends -->
+    <path d="M104 120
+             c 38 -10 78 -15 118 -16
+             c 56 -2 113 1 167 12
+             c 18 4 28 14 26 26
+             c -2 12 -16 16 -32 13
+             c -50 -10 -103 -13 -154 -12
+             c -38 1 -76 5 -113 14
+             c -14 4 -24 -2 -25 -14
+             c -1 -15 8 -30 13 -37 Z
+             M118 138
+             c -3 28 -6 56 -7 84
+             c -1 12 -16 16 -24 7
+             c -7 -8 -8 -22 -7 -36
+             c 1 -22 6 -44 14 -64 Z
+             M392 134
+             c 8 22 12 46 12 70
+             c 0 14 -2 28 -10 36
+             c -8 8 -22 4 -23 -8
+             c -2 -28 -3 -56 -5 -84 Z"/>
+    <!-- 车 (cart) under the cover: stacked horizontals + central vertical -->
+    <!-- upper horizontal of 车 -->
+    <path d="M150 222
+             c 56 -10 114 -12 171 -7
+             c 16 1 26 11 24 22
+             c -2 11 -15 15 -29 13
+             c -52 -7 -106 -5 -158 4
+             c -13 2 -22 -5 -22 -16
+             c 0 -7 6 -15 14 -20 Z"/>
+    <!-- middle wide horizontal (the box belly of 车) -->
+    <path d="M120 300
+             c 84 -14 172 -16 258 -8
+             c 20 2 32 12 30 24
+             c -2 12 -17 17 -34 15
+             c -80 -9 -163 -7 -242 5
+             c -16 2 -27 -6 -27 -18
+             c 0 -9 7 -18 15 -25 Z"/>
+    <!-- box left vertical of 车 belly -->
+    <path d="M182 232
+             c 6 30 8 62 7 94
+             c -1 13 -16 18 -24 9
+             c -6 -7 -8 -20 -8 -33
+             c 0 -24 4 -49 11 -73 Z"/>
+    <!-- box right vertical of 车 belly -->
+    <path d="M310 230
+             c 8 32 11 66 9 100
+             c -1 13 -16 18 -24 9
+             c -6 -7 -7 -22 -7 -36
+             c 0 -26 5 -52 13 -76 Z"/>
+    <!-- central long vertical (downstroke spine of 车), brush thick-to-thin -->
+    <path d="M236 110
+             c 16 -3 30 3 31 14
+             c 3 78 4 156 1 234
+             c -2 36 -8 72 -23 104
+             c -6 13 -22 16 -29 5
+             c -5 -8 -3 -19 1 -28
+             c 14 -30 19 -64 21 -98
+             c 3 -76 2 -153 -3 -229
+             c -1 -8 0 -16 0 -2 Z"/>
+  </g>
+  <g id="accent">
+    <!-- restrained gold seal dot, lower-right -->
+    <circle cx="420" cy="424" r="22" fill="#A07D2C"/>
+  </g>
+</svg>

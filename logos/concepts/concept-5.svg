@@ -1,0 +1,29 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <g id="bg">
+    <rect x="0" y="0" width="512" height="512" fill="#FAF7F0"/>
+  </g>
+  <g id="ring">
+    <circle cx="256" cy="256" r="196" fill="none" stroke="#1B1D21" stroke-width="12"/>
+  </g>
+  <g id="star">
+    <g id="facets">
+      <!-- North point: bright left half, deep right half -->
+      <polygon points="256,52 256,256 200,200" fill="#D8B25A"/>
+      <polygon points="256,52 312,200 256,256" fill="#6E5621"/>
+      <!-- South point -->
+      <polygon points="256,460 200,312 256,256" fill="#A07D2C"/>
+      <polygon points="256,460 256,256 312,312" fill="#6E5621"/>
+      <!-- East point -->
+      <polygon points="460,256 312,200 256,256" fill="#D8B25A"/>
+      <polygon points="460,256 256,256 312,312" fill="#A07D2C"/>
+      <!-- West point -->
+      <polygon points="52,256 256,256 200,200" fill="#A07D2C"/>
+      <polygon points="52,256 200,312 256,256" fill="#6E5621"/>
+      <!-- Diagonal accent points (NE, SE, SW, NW) -->
+      <polygon points="372,140 312,200 256,256" fill="#D8B25A"/>
+      <polygon points="372,372 312,312 256,256" fill="#A07D2C"/>
+      <polygon points="140,372 200,312 256,256" fill="#6E5621"/>
+      <polygon points="140,140 200,200 256,256" fill="#A07D2C"/>
+    </g>
+  </g>
+</svg>

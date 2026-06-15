@@ -6,6 +6,10 @@ import { prisma } from '../src/db.js';
 import { AGENTS } from '../src/data/agents.js';
 import { SAYINGS, SURVEY, PLANS } from '../src/data/seedConfig.js';
 
+// 安全兜底：标记测试运行，短信等外部服务一律走 mock，绝不真实触达（即使直接 node --test 跑本文件）。
+// SMS 发送在请求时才读 NODE_ENV（isSmsTestMode），此处赋值早于任何发送，足以拦截。
+process.env.NODE_ENV = 'test';
+
 let app: FastifyInstance | null = null;
 
 export async function getApp(): Promise<FastifyInstance> {

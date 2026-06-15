@@ -22,8 +22,18 @@ export const env = {
   aiFallbackMock: (process.env.AI_FALLBACK_MOCK ?? 'true') === 'true',
 
   // 嵌入模型（知识库/语义记忆）。留空=用本地确定性嵌入（零依赖、离线）；
-  // 配置后 + openai 兼容真实 key，走 /embeddings 真实向量（生产建议配合 pgvector）。
+  // 开启后 + 真实 key，走 /embeddings 真实向量（生产建议配合 pgvector）。
+  // baseUrl/key 留空则复用对话模型的 openaiBaseUrl/key。EMBEDDING_ENABLED 缺省时：配了模型即视为开（兼容旧行为）。
   embeddingModel: process.env.EMBEDDING_MODEL ?? '',
+  embeddingEnabled: (process.env.EMBEDDING_ENABLED ?? (process.env.EMBEDDING_MODEL ? 'true' : 'false')) === 'true',
+  embeddingBaseUrl: process.env.EMBEDDING_BASE_URL ?? '',
+  embeddingApiKey: process.env.EMBEDDING_API_KEY ?? '',
+
+  // 重排（rerank）：开启后在 hybridSearch 融合打分之后调 rerank API 重排候选。baseUrl/key 留空回退对话模型。
+  rerankEnabled: (process.env.RERANK_ENABLED ?? 'false') === 'true',
+  rerankModel: process.env.RERANK_MODEL ?? '',
+  rerankBaseUrl: process.env.RERANK_BASE_URL ?? '',
+  rerankApiKey: process.env.RERANK_API_KEY ?? '',
 
   moderationEnabled: (process.env.MODERATION_ENABLED ?? 'true') === 'true',
 

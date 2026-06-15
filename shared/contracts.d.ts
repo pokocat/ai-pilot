@@ -400,20 +400,57 @@ export interface AiConfig {
   hasKey: boolean;        // 是否已配置 key（不回传明文）
   ready: boolean;         // 当前是否就绪（provider+key 有效，否则降级 mock）
   effectiveProvider: AiProvider; // 实际生效（未就绪时为 mock）
+  // 向量嵌入接入（开关 + 独立凭证；baseUrl/key 留空回退对话模型）。
+  embeddingEnabled: boolean;
+  embeddingBaseUrl: string;
+  hasEmbeddingKey: boolean; // 是否已配置独立嵌入 key
+  // 重排接入（开关 + 独立凭证）。
+  rerankEnabled: boolean;
+  rerankModel: string;
+  rerankBaseUrl: string;
+  hasRerankKey: boolean;    // 是否已配置独立 rerank key
   updatedAt?: string;
 }
-/** 更新入参（apiKey 仅在传入时更新；留空表示不改） */
+/** 更新入参（各 apiKey 仅在传入非空时更新；留空表示不改） */
 export interface AiConfigUpdate {
   provider?: AiProvider; label?: string; baseUrl?: string; model?: string;
   apiKey?: string; embeddingModel?: string; temperature?: number;
+  embeddingEnabled?: boolean; embeddingBaseUrl?: string; embeddingApiKey?: string;
+  rerankEnabled?: boolean; rerankModel?: string; rerankBaseUrl?: string; rerankApiKey?: string;
 }
-/** 预设：一键填好某家大模型的 baseUrl/model */
+/** 内置接入商预设：选择后一键填好某家大模型的 baseUrl/model（添加模型向导用） */
 export interface AiPreset {
   id: string; label: string; provider: AiProvider;
   baseUrl: string; model: string; embeddingModel?: string; note?: string;
 }
-export interface AiConfigView { config: AiConfig; presets: AiPreset[]; }
-export interface AiTestResult { ok: boolean; latencyMs?: number; sample?: string; error?: string; provider?: string; model?: string; missingInputs?: string[]; }
+/** 一个已添加的模型接入点（运营可添加多个，快速切换其一生效；不回传明文 key） */
+export interface AiModel {
+  id: string;
+  provider: AiProvider;
+  label: string;          // 展示名，如「Agnes 2.0 Flash」
+  baseUrl: string;        // openai 兼容网关地址（带 /v1）；claude/mock 可空
+  model: string;          // 文本模型 id
+  embeddingModel: string; // 嵌入模型 id（可空）
+  temperature: number;
+  hasKey: boolean;        // 是否已配置 key（不回传明文）
+  preset?: string | null; // 来源内置接入商 id（自定义/自主定义则空）
+  active: boolean;        // 是否当前生效（= AiSetting.activeModelId 指向本行）
+  updatedAt?: string;
+}
+/** 添加/编辑模型入参（apiKey 仅在传入非空时更新；留空表示不改） */
+export interface AiModelUpsert {
+  provider: AiProvider; label: string; baseUrl?: string; model: string;
+  apiKey?: string; embeddingModel?: string; temperature?: number; preset?: string | null;
+}
+/** 测试某个模型入参（连接探活；modelId 传入时，apiKey 留空则取该模型已存 key） */
+export interface AiModelTest extends AiModelUpsert { modelId?: string; }
+export interface AiConfigView { config: AiConfig; presets: AiPreset[]; models: AiModel[]; }
+export interface AiTestResult {
+  ok: boolean; latencyMs?: number; sample?: string; error?: string; provider?: string; model?: string; missingInputs?: string[];
+  // 可选子项：测试连接时若开启嵌入/重排，一并探活回传。
+  embedding?: { ok: boolean; dim?: number; error?: string };
+  rerank?: { ok: boolean; error?: string };
+}
 
 /* ────────────── 每日献策 ────────────── */
 export interface TodaySaying { text: string; date: string; }
