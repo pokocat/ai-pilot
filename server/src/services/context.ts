@@ -120,6 +120,7 @@ export async function buildGenContext(opts: {
     understanding: understanding ? understandingContextLines(understanding) : [],
     understandingQuestions: understanding?.nextQuestions ?? [],
     understandingMaturity: understanding?.maturity ?? 'empty',
+    briefInterview,
     tenantId: opts.tenantId,
     userId: opts.userId,
     projectId: opts.projectId ?? null,
