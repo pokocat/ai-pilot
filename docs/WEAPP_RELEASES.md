@@ -16,6 +16,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-06-16 | `0.2.0` | `知识库:我的资料库+文档上传` | `a50596b` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 490.5 KB / 502279 B | 上传成功 |
 | 2026-06-14 | `0.1.6` | `junshi server build 7820f1c` | `7820f1c` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 481.8 KB / 493328 B | 上传成功 |
 | 2026-06-14 | `0.1.5` | `junshi server build 606fe8d` | `606fe8d` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 481.9 KB / 493455 B | 上传成功 |
 | 2026-06-14 | `0.1.4` | `junshi server build 59a3458` | `59a3458` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 481.7 KB / 493309 B | 上传成功 |
