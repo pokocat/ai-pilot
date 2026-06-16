@@ -29,6 +29,7 @@ export default function Profile() {
     { ic: 'insight', t: '军师档案', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/pages/brief/index' }) },
     { ic: 'grid', t: '项目工作台', s: projCount ? `${projCount} 个项目` : '按项目管理事务', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
     { ic: 'layers', t: '我的方案库', s: `${libCount} 份成果`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
+    { ic: 'attach', t: '我的资料库', s: '上传资料，军师咨询时参考', onClick: () => Taro.navigateTo({ url: '/packages/work/knowledge/index' }) },
     { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
     { ic: 'doc', t: '套餐与额度', s: me?.plan?.name ?? '', onClick: () => setShowPlans(true) },
     { ic: 'layers', t: '钻石消耗明细', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/credits/index' }) },

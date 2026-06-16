@@ -5,13 +5,15 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
-import { api, login, seedBaseline, cleanBusiness, closeApp, uniquePhone, deliverable } from './helpers.js';
+import { api, login, seedBaseline, cleanBusiness, closeApp, uniquePhone, deliverable, getApp } from './helpers.js';
 // 直接断言的服务层（也是后端的一部分）
 import { recallMemories, recordFeedback } from '../src/services/memory.js';
 import { buildGenContext } from '../src/services/context.js';
 import { hybridSearch, resolveReferences } from '../src/services/retrieval.js';
+import { ingestUploadedFile, getKnowledgeDetail } from '../src/services/knowledge.js';
 import type { MemoryConfig } from '../src/data/agents.js';
 import { recordTokenUsage, tokenUsageSummary } from '../src/services/usage.js';
+import { addModel } from '../src/services/aiConfig.js';
 import { setQuota, getQuotaState, chargeQuota, ensureQuota } from '../src/services/tokenQuota.js';
 import { percentEncode, canonicalQuery, aliyunSignature } from '../src/services/sms.js';
 import { _resetTokenCache } from '../src/services/wechat.js';
@@ -233,6 +235,34 @@ describe('TC-B 与不同智能体对话（mock，无真实 LLM）', () => {
     assert.ok((r.body.deliverable?.sections?.length ?? 0) > 0, '成果应有分段内容');
   });
 
+  test('B3b 网页版报告按需生成（产出时不自动生成；幂等；属主隔离）', async () => {
+    const t = await login(uniquePhone());
+    const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '帮我做一次战略体检', agentKey: 'strat' } });
+    assert.equal(gen.body.kind, 'report');
+    assert.equal(gen.body.deliverable?.htmlUrl, undefined, '产出时不应自动生成网页版报告');
+    const sid = gen.body.sessionId, mid = gen.body.messageId;
+    const made = await api('POST', `/api/sessions/${sid}/messages/${mid}/report`, { token: t });
+    assert.equal(made.status, 200);
+    assert.match(made.body.htmlUrl, /\/api\/r\//, '应返回可分享链接');
+    const again = await api('POST', `/api/sessions/${sid}/messages/${mid}/report`, { token: t });
+    assert.equal(again.body.htmlUrl, made.body.htmlUrl, '幂等：再次调用复用同一链接');
+    const other = await login(uniquePhone());
+    const denied = await api('POST', `/api/sessions/${sid}/messages/${mid}/report`, { token: other });
+    assert.equal(denied.status, 404, '非属主不可生成');
+  });
+
+  test('B4 技能与模型接入解耦：inherit(全局模型) agent 也带 ctx.skills', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    await prisma.agent.update({ where: { key: 'strat' }, data: { providerMode: 'inherit', skillsConfig: { enabled: true, tools: ['search_knowledge'] } } });
+    const { buildGenContext } = await import('../src/services/context.js');
+    const { ctx } = await buildGenContext({ userId: t, tenantId, agentKey: 'strat', userMessage: '测试' });
+    assert.equal(ctx.runtime, null, 'inherit → 无 per-agent 接入覆盖');
+    assert.equal(ctx.skills?.enabled, true, 'inherit agent 仍带技能配置（不再被丢弃）');
+    assert.deepEqual(ctx.skills?.tools, ['search_knowledge']);
+    await prisma.agent.update({ where: { key: 'strat' }, data: { skillsConfig: { enabled: false, tools: [] } } });
+  });
+
   test('B3 会话持久化与可回溯', async () => {
     const t = await login(uniquePhone());
     const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '增长方案怎么做', agentKey: 'growth' } });
@@ -402,6 +432,16 @@ describe('TC-H 模型配置（默认 Agnes，可切换，不泄露明文 key）'
     assert.equal(r.body.config.ready, false, '无真实 key → 未就绪');
     assert.equal(r.body.config.effectiveProvider, 'mock', '未就绪应实际降级 mock');
     assert.ok(!('apiKey' in r.body.config));
+  });
+
+  test('H3 空 body 的 application/json POST 不报 400（activate 等无 body 接口；防 FST_ERR_CTP_EMPTY_JSON_BODY 回归）', async () => {
+    const app = await getApp();
+    const res = await app.inject({
+      method: 'POST', url: '/api/admin/ai-models/bogus-id/activate',
+      headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' }, payload: '',
+    });
+    assert.notEqual(res.statusCode, 400, '空 JSON body 不应触发 fastify 空体 400');
+    assert.equal(res.statusCode, 404, '应过 body 解析、走到路由自身的 404（模型不存在）');
   });
 });
 
@@ -711,9 +751,11 @@ describe('TC-Q 记忆留存（TTL 过期不召回）', () => {
   });
 });
 
-// ───────────────────────── TC-R 跨项目知识不串 ─────────────────────────
-describe('TC-R 跨项目知识隔离（同一用户）', () => {
-  test('R1 在项目 A 对话不会召回项目 B 的知识', async () => {
+// ───────────────────────── TC-R 知识按用户检索（项目仅加权，不硬隔离） ─────────────────────────
+// 上下文按「用户」隔离：同一用户的知识跨项目可召回，当前会话项目只做加权提升（非过滤墙）。
+// 真正的硬隔离在「用户/租户」层面（见 TC-G 跨用户隔离）。
+describe('TC-R 知识按用户检索（上下文按用户：项目仅加权）', () => {
+  test('R1 同一用户跨项目知识可召回；当前项目话题正常命中', async () => {
     const t = await login(uniquePhone());
     const tenantId = await tenantOf(t);
     const pa = (await api('POST', '/api/projects', { token: t, body: { name: '供应链项目' } })).body.id;
@@ -721,10 +763,55 @@ describe('TC-R 跨项目知识隔离（同一用户）', () => {
     await api('POST', '/api/knowledge', { token: t, body: { text: '供应链优化：与晨曦集团锁定年度框采', projectId: pa, title: '供应链' } });
     await api('POST', '/api/knowledge', { token: t, body: { text: '海外渠道：东南亚先做新加坡样板', projectId: pb, title: '出海' } });
 
+    // 在项目 A 问 A 的话题 → 召回 A 的知识。
     const { ctx: ctxA } = await buildGenContext({ userId: t, tenantId, agentKey: 'strat', userMessage: '供应链怎么优化', projectId: pa });
-    const joinedA = (ctxA.knowledge ?? []).join('');
-    assert.ok(joinedA.includes('供应链'), '项目 A 应召回 A 的知识');
-    assert.ok(!joinedA.includes('海外渠道'), '项目 A 不应串入项目 B 的知识');
+    assert.ok((ctxA.knowledge ?? []).join('').includes('供应链'), '项目 A 应召回 A 的知识');
+
+    // 在项目 A 问 B 的话题 → 上下文按用户，仍可召回 B 项目的知识（不再按项目硬隔离）。
+    const { ctx: ctxB } = await buildGenContext({ userId: t, tenantId, agentKey: 'strat', userMessage: '海外渠道怎么打 东南亚 新加坡', projectId: pa });
+    assert.ok((ctxB.knowledge ?? []).join('').includes('海外渠道'), '上下文按用户：同一用户其它项目的知识应可召回');
+  });
+});
+
+// ───────────────────────── TC-KB 文档上传管线 ─────────────────────────
+describe('TC-KB 文档上传 → 解析 → 切片 → 嵌入 → 可召回', () => {
+  test('KB1 上传 md 文档：status 走到 ready，切片入库且可检索', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    const content = '本命色营销手册\n\n第一章：品牌定位。我们的本命色是金色，主打高端商务人群。\n\n第二章：渠道策略。优先小红书与抖音种草，月度复盘投放 ROI。';
+    const { id, status } = await ingestUploadedFile({
+      tenantId, userId: t, fileName: '营销手册.md', mime: 'text/markdown', buf: Buffer.from(content, 'utf8'),
+    });
+    assert.equal(status, 'parsing', '上传后初始状态应为 parsing');
+
+    // 解析+嵌入异步进行：轮询直到 ready/failed。
+    let detail = await getKnowledgeDetail(tenantId, id);
+    for (let i = 0; i < 60 && detail?.status !== 'ready' && detail?.status !== 'failed'; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      detail = await getKnowledgeDetail(tenantId, id);
+    }
+    assert.equal(detail?.status, 'ready', `文档应解析就绪（实际 ${detail?.status} / ${detail?.error ?? ''}）`);
+    assert.ok((detail?.chunks.length ?? 0) > 0, '应产生至少 1 个切片');
+    assert.equal(detail?.sourceType, 'upload', 'sourceType=upload');
+    assert.equal(detail?.fileType, 'md', 'fileType=md');
+
+    const hits = await hybridSearch({ tenantId, userId: t, query: '渠道策略 本命色', topK: 5 });
+    assert.ok(hits.some((h) => h.snippet.includes('渠道') || h.snippet.includes('本命色')), '上传文档应可被检索召回');
+  });
+
+  test('KB2 不支持的文件类型 → status=failed 且有 error', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    const { id } = await ingestUploadedFile({
+      tenantId, userId: t, fileName: 'logo.png', mime: 'image/png', buf: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+    });
+    let detail = await getKnowledgeDetail(tenantId, id);
+    for (let i = 0; i < 40 && detail?.status === 'parsing'; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      detail = await getKnowledgeDetail(tenantId, id);
+    }
+    assert.equal(detail?.status, 'failed', '不支持类型应落 failed');
+    assert.ok((detail?.error ?? '').length > 0, '应有错误说明');
   });
 });
 
@@ -952,27 +1039,35 @@ describe('TC-X 身份与账号注销', () => {
 
 // ───────────────────────── TC-Y Token 用量计量（计费 P1·旁路统计） ─────────────────────────
 describe('TC-Y Token 用量计量', () => {
-  test('Y1 recordTokenUsage 落库并估算成本；零 token（mock）跳过', async () => {
+  test('Y1 recordTokenUsage 按已配单价算成本；未配价→0；零 token 跳过', async () => {
     const t = await login(uniquePhone(), 'Token甲');
     const tenantId = await tenantOf(t);
+    // 运营给 gpt-4o 配单价 in 18 / out 72（元/1M）；addModel 会清空费率缓存
+    const priced = await addModel({ provider: 'openai', label: 'GPT4o(测试价)', model: 'gpt-4o', priceInput: 18, priceOutput: 72 });
     await recordTokenUsage({ tenantId, userId: t, sessionId: null, agentKey: 'strat', kind: 'deliverable', provider: 'openai', model: 'gpt-4o', usage: { inputTokens: 1000, outputTokens: 500, cachedInput: 0 } });
+    await recordTokenUsage({ tenantId, userId: t, kind: 'chat', provider: 'openai', model: 'unpriced-model', usage: { inputTokens: 1000, outputTokens: 1000, cachedInput: 0 } });
     await recordTokenUsage({ tenantId, userId: t, kind: 'chat', provider: 'mock', model: 'template', usage: { inputTokens: 0, outputTokens: 0, cachedInput: 0 } });
     const rows = await prisma.tokenUsage.findMany({ where: { userId: t } });
-    assert.equal(rows.length, 1, '零 token 的 mock 调用不应落库');
-    assert.equal(rows[0].totalTokens, 1500);
-    assert.equal(rows[0].costMicros, 54000); // gpt-4o 元价(美元价×7.2)：1000*18 + 500*72（微元）
+    assert.equal(rows.length, 2, '零 token 的 mock 调用不应落库');
+    const g = rows.find((r) => r.model === 'gpt-4o')!;
+    assert.equal(g.totalTokens, 1500);
+    assert.equal(g.costMicros, 54000); // 1000*18 + 500*72（微元）= 已配单价
+    assert.equal(rows.find((r) => r.model === 'unpriced-model')!.costMicros, 0, '未配单价 → 成本计 0，不回退估算');
+    await prisma.aiModel.delete({ where: { id: priced.id } });
   });
 
-  test('Y2 tokenUsageSummary 与 /admin/token-usage 同口径', async () => {
+  test('Y2 tokenUsageSummary 与 /admin/token-usage 同口径；已配价标 calibrated', async () => {
     const t = await login(uniquePhone(), 'Token乙');
     const tenantId = await tenantOf(t);
+    const priced = await addModel({ provider: 'openai', label: 'GPT4o(测试价)', model: 'gpt-4o', priceInput: 18, priceOutput: 72 });
     await recordTokenUsage({ tenantId, userId: t, kind: 'deliverable', provider: 'openai', model: 'gpt-4o', usage: { inputTokens: 2000, outputTokens: 1000, cachedInput: 0 } });
     const sum = await tokenUsageSummary(30);
     assert.ok(sum.totals.totalTokens >= 3000, '总 token 应累计');
-    assert.ok(sum.byModel.find((m) => m.model === 'gpt-4o')?.calibrated, 'gpt-4o 单价应在价表内');
+    assert.ok(sum.byModel.find((m) => m.model === 'gpt-4o')?.calibrated, 'gpt-4o 已配单价 → calibrated=true');
     const view = await api('GET', '/api/admin/token-usage'); // helper 自动带 ADMIN_TOKEN
     assert.equal(view.status, 200);
     assert.equal(view.body.totals.totalTokens, sum.totals.totalTokens);
+    await prisma.aiModel.delete({ where: { id: priced.id } });
   });
 
   test('Y3 注销账号连带清除其 token 用量（外键安全）', async () => {
@@ -983,6 +1078,16 @@ describe('TC-Y Token 用量计量', () => {
     const del = await api('DELETE', '/api/me', { token: t });
     assert.equal(del.status, 200);
     assert.equal(await prisma.tokenUsage.count({ where: { tenantId } }), 0, '注销后该租户 token 流水应清空');
+  });
+
+  test('Y4 嵌入/重排计入「检索基建」用量，与用户产出 totals/byModel 区分', async () => {
+    await recordTokenUsage({ kind: 'embedding', provider: 'openai', model: 'BAAI/bge-m3', usage: { inputTokens: 1234, outputTokens: 0, cachedInput: 0 } });
+    await recordTokenUsage({ kind: 'rerank', provider: 'openai', model: 'BAAI/bge-reranker-v2-m3', usage: { inputTokens: 321, outputTokens: 0, cachedInput: 0 } });
+    const sum = await tokenUsageSummary(30);
+    const emb = sum.infra.find((x) => x.kind === 'embedding' && x.model === 'BAAI/bge-m3');
+    assert.ok(emb && emb.totalTokens >= 1234, 'embedding 应进 infra');
+    assert.ok(sum.infra.some((x) => x.kind === 'rerank'), 'rerank 应进 infra');
+    assert.ok(!sum.byModel.some((m) => m.model === 'BAAI/bge-m3' || m.model === 'BAAI/bge-reranker-v2-m3'), '嵌入/重排不应进用户产出 byModel');
   });
 });
 

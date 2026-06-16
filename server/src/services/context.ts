@@ -97,7 +97,7 @@ export async function buildGenContext(opts: {
     : await resolveReferences(opts.tenantId, opts.userId, opts.refs);
   const hits = briefInterview
     ? []
-    : await hybridSearch({ tenantId: opts.tenantId, projectId: opts.projectId ?? undefined, query: opts.userMessage, topK: 4 });
+    : await hybridSearch({ tenantId: opts.tenantId, userId: opts.userId, projectId: opts.projectId ?? undefined, query: opts.userMessage, topK: 4 });
   const knowledge = hits.map((h) => `【知识：${h.item.title ?? h.item.kind}】${h.snippet}`);
   const knowledgeUsed = [...refLabels, ...hits.map((h) => h.item.title ?? h.snippet.slice(0, 20))];
 
@@ -124,6 +124,8 @@ export async function buildGenContext(opts: {
     tenantId: opts.tenantId,
     userId: opts.userId,
     projectId: opts.projectId ?? null,
+    // 技能与接入方式解耦：所有 agent（含 inherit/全局模型）都带上自建技能配置
+    skills: (agent.skillsConfig as GenContext['skills']) ?? null,
     runtime: resolveAgentRuntime(agent, { userId: opts.userId, sessionId: opts.sessionId, difyConversationId: opts.difyConversationId }),
   };
   return { ctx, memoryConfig, knowledgeUsed };

@@ -344,13 +344,22 @@ model KnowledgeItem {
   sourceType String // conversation | upload | deliverable | manual
   sourceId   String? // sessionId / reportVersionId / uploadId
   tagsJson   Json     @default("[]")
-  createdAt  DateTime @default(now())
+  // —— 文档上传管线（sourceType=upload）：解析状态 + 原件元信息 ——
+  status    String   @default("ready") // ready | parsing | embedding | failed（非上传项一律 ready）
+  fileName  String? // 原始文件名
+  fileType  String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
+  fileSize  Int? // 字节
+  fileKey   String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
+  error     String?  @db.Text // 解析/嵌入失败原因
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   tenant  Tenant           @relation(fields: [tenantId], references: [id])
   project Project?         @relation(fields: [projectId], references: [id])
   chunks  KnowledgeChunk[]
 
   @@index([tenantId, projectId])
+  @@index([tenantId, userId])
   @@map("knowledge_item")
 }
 
@@ -600,6 +609,10 @@ model AiModel {
   embeddingModel String   @default("")
   temperature    Float    @default(0.7)
   preset         String? // 来源内置接入商 id（自定义/自主定义则空）
+  // 内部成本核算单价（元 / 1M token）。0=未配置 → 回退内置价表/兜底。Token 用量看板按此估算总成本。
+  priceInput       Float    @default(0)
+  priceOutput      Float    @default(0)
+  priceCachedInput Float    @default(0) // 命中缓存输入价；0=按 priceInput 计
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

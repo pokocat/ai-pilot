@@ -16,7 +16,7 @@ type Msg =
   | { role: 'greet'; agent: Agent }
   | { role: 'user'; text: string; refs?: MessageRef[] }
   | { role: 'assistant'; reply: ChatReplyT }
-  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean }
+  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string }
   | { role: 'memory'; agentName: string };
 
 // 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
@@ -179,11 +179,11 @@ export default function Chat() {
     initChat();
   }, []);
 
-  function restore(ag: Agent, messages: { role: string; content: any; refs?: MessageRef[] }[]) {
+  function restore(ag: Agent, messages: { id: string; role: string; content: any; refs?: MessageRef[] }[]) {
     const out: Msg[] = [{ role: 'greet', agent: ag }];
     messages.forEach((m) => {
       if (m.role === 'user') out.push({ role: 'user', text: m.content.text, refs: m.refs });
-      else if (m.role === 'report') out.push({ role: 'report', deliverable: m.content, animate: false, saved: false });
+      else if (m.role === 'report') out.push({ role: 'report', deliverable: m.content, animate: false, saved: false, messageId: m.id });
       else out.push({ role: 'assistant', reply: m.content });
     });
     setMsgs(out);
@@ -205,7 +205,7 @@ export default function Chat() {
       const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
       if (res.sessionId && !sid) setSessionId(res.sessionId);
       if (res.kind === 'report' && res.deliverable) {
-        setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true }]);
+        setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true, messageId: res.messageId }]);
         if (res.memory?.learned) {
           setTimeout(() => {
             setMsgs((m) => [...m, { role: 'memory', agentName: res.memory!.agentName }]);
@@ -253,6 +253,24 @@ export default function Chat() {
       sessionId: sessionId || undefined, content: d as any, projectId: projectId || undefined,
     }).catch(() => {});
     Taro.showToast({ title: '已存入方案库', icon: 'none' });
+  };
+
+  // 生成网页版报告（render_report → OSS 托管），复制可分享链接
+  const shareReport = async (messageId?: string) => {
+    if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出成果', icon: 'none' }); return; }
+    Taro.showLoading({ title: '生成网页版…' });
+    try {
+      const r = await api.renderReport(sessionId, messageId);
+      Taro.hideLoading();
+      if (r.htmlUrl) {
+        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '网页版链接已复制 · 粘到聊天/浏览器打开', icon: 'none' }) });
+      } else {
+        Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' });
+      }
+    } catch {
+      Taro.hideLoading();
+      Taro.showToast({ title: '生成失败，请重试', icon: 'none' });
+    }
   };
 
   // 生成对话纪要 → 版本化报告 + 沉淀知识库
@@ -412,7 +430,7 @@ export default function Chat() {
           return (
             <View key={i} className="msg a">
               <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
-              <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} />
+              <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} onShare={() => shareReport(m.messageId)} />
             </View>
           );
         })}

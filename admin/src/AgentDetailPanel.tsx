@@ -113,12 +113,13 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
     if (mode === 'openai') {
       rt.apiBaseUrl = apiBaseUrl; rt.apiModel = apiModel;
       if (apiKey.trim()) rt.apiKey = apiKey.trim();
-      rt.skills = { enabled: skillsEnabled, tools: skillTools };
     } else if (mode === 'dify') {
       rt.difyBaseUrl = difyBaseUrl;
       if (difyApiKey.trim()) rt.difyApiKey = difyApiKey.trim();
       rt.difyInputs = parseDifyInputs();
     }
+    // 技能与「模型接入方式」解耦：inherit（跟随全局模型）/ openai 自定义端点均可配技能；dify 自带编排，不走自建技能
+    if (mode !== 'dify') rt.skills = { enabled: skillsEnabled, tools: skillTools };
     return rt;
   };
 
@@ -231,26 +232,44 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
               <div className="ai-field"><div className="ai-fl">Base URL</div><input className="ai-input" placeholder="https://api.deepseek.com/v1" value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} /></div>
               <div className="ai-field"><div className="ai-fl">模型</div><input className="ai-input" placeholder="deepseek-chat" value={apiModel} onChange={(e) => setApiModel(e.target.value)} /></div>
               <div className="ai-field"><div className="ai-fl">API Key{hasApiKey ? ' · 已配置' : ''}</div><input className="ai-input" type="password" placeholder={hasApiKey ? '已保存 · 留空则不修改' : 'sk-...'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></div>
+            </>
+          )}
+          {/* 技能与「模型接入方式」解耦：跟随全局模型(inherit)或自定义 openai 端点都可配；dify 自带编排不显示 */}
+          {mode !== 'dify' && (
+            <>
               <div className="cfg">
                 <div className="cfg-row">
-                  <div className="cb"><div className="ct">启用技能（工具调用）</div><div className="cs">让模型自行调用知识库检索 / 记忆召回等工具后再作答</div></div>
+                  <div className="cb"><div className="ct">启用技能（工具调用）</div><div className="cs">让模型自行调用知识库检索 / 记忆召回等工具后再作答（用该智能体生效的模型——跟随全局或自定义端点均可，需 OpenAI 兼容模型）</div></div>
                   <div className={`sw ${skillsEnabled ? 'on' : ''}`} onClick={() => setSkillsEnabled((v) => !v)}><i /></div>
                 </div>
               </div>
               {skillsEnabled && (
                 <div className="mem-list" style={{ marginTop: 8 }}>
-                  {availTools.map((t) => {
+                  {availTools.filter((t) => t.kind !== 'output').map((t) => {
                     const on = skillTools.includes(t.name);
                     return (
                       <div key={t.name} className="mem-card">
                         <span className="mi"><Icon name="insight" size={16} /></span>
-                        <div className="mb"><div className="mt">{t.name}</div><div className="mm">{t.description}</div></div>
+                        <div className="mb"><div className="mt">{t.name}{t.builtin && <span className="tag off">内置</span>}</div><div className="mm">{t.description}</div></div>
                         <div className={`sw ${on ? 'on' : ''}`} onClick={() => setSkillTools((s) => on ? s.filter((x) => x !== t.name) : [...s, t.name])}><i /></div>
                       </div>
                     );
                   })}
-                  {!availTools.length && <div className="blk-d">（暂无可用工具）</div>}
+                  {!availTools.some((t) => t.kind !== 'output') && <div className="blk-d">（暂无可用工具）</div>}
                 </div>
+              )}
+              {availTools.some((t) => t.kind === 'output') && (
+                <>
+                  <div className="blk-d" style={{ marginTop: 10 }}>产出处理技能（成果产出后按需生成，无需勾选）</div>
+                  <div className="mem-list" style={{ marginTop: 6 }}>
+                    {availTools.filter((t) => t.kind === 'output').map((t) => (
+                      <div key={t.name} className="mem-card">
+                        <span className="mi"><Icon name="layers" size={16} /></span>
+                        <div className="mb"><div className="mt">{t.name}<span className="tag off">产出处理</span></div><div className="mm">{t.description}</div></div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </>
           )}
@@ -270,8 +289,8 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
 
           {mode !== 'inherit' && (
             <div className="ai-field">
-              <button className="gh" style={{ width: 'auto', padding: '0 14px' }} onClick={runTest} disabled={testing}><Icon name="spark" size={15} /> {testing ? '测试中…' : '测试连接'}</button>
-              {test && <div className="blk-d" style={{ margin: '8px 0 0', color: test.ok ? '#1a8a5a' : '#d4503a' }}>{test.ok ? `连通正常 · ${test.latencyMs ?? '-'}ms${test.sample ? ' · 样例：' + test.sample : ''}` : `失败：${test.error ?? '未知错误'}`}</div>}
+              <button className="ai-btn ghost auto" onClick={runTest} disabled={testing}><Icon name="spark" size={15} /> {testing ? '测试中…' : '测试连接'}</button>
+              {test && <div className={`blk-d ${test.ok ? 'ok' : 'err'}`} style={{ marginTop: 8 }}>{test.ok ? `连通正常 · ${test.latencyMs ?? '-'}ms${test.sample ? ' · 样例：' + test.sample : ''}` : `失败：${test.error ?? '未知错误'}`}</div>}
             </div>
           )}
         </div>

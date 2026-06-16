@@ -6,6 +6,7 @@
 
 import { prisma } from '../db.js';
 import { env, isRealKey } from '../env.js';
+import type { ModelRate } from '../data/modelPrices.js';
 import type { AiProvider, AiConfig, AiPreset, AiModel, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 
 export interface ResolvedAiConfig {
@@ -71,6 +72,36 @@ function fromEnv(): ResolvedAiConfig {
 
 let cache: { cfg: ResolvedAiConfig; at: number } | null = null;
 const TTL = 4000;
+
+// 运营在「模型」配置里填的 token 单价（元/1M）：model 名 → 费率。短缓存，配置变更时清空。
+let rateCache: { map: Map<string, ModelRate>; at: number } | null = null;
+
+async function configuredRates(force = false): Promise<Map<string, ModelRate>> {
+  if (!force && rateCache && Date.now() - rateCache.at < TTL) return rateCache.map;
+  const map = new Map<string, ModelRate>();
+  try {
+    const rows = await prisma.aiModel.findMany({ select: { model: true, priceInput: true, priceOutput: true, priceCachedInput: true } });
+    for (const r of rows) {
+      if (r.model && (r.priceInput > 0 || r.priceOutput > 0)) {
+        map.set(r.model, { in: r.priceInput, out: r.priceOutput, cachedIn: r.priceCachedInput > 0 ? r.priceCachedInput : undefined });
+      }
+    }
+  } catch {
+    /* DB 不可达：留空 → 回退内置价表 */
+  }
+  rateCache = { map, at: Date.now() };
+  return map;
+}
+
+/** 解析某模型的成本费率：只用运营在模型配置里填的单价（精确名/前缀命中）。没配 → 0，不回退、不估算。 */
+export async function resolveModelRate(model: string): Promise<{ rate: ModelRate; calibrated: boolean }> {
+  const cfg = await configuredRates();
+  const exact = cfg.get(model);
+  if (exact) return { rate: exact, calibrated: true };
+  const m = (model || '').toLowerCase();
+  for (const [k, v] of cfg) if (m.startsWith(k.toLowerCase())) return { rate: v, calibrated: true };
+  return { rate: { in: 0, out: 0 }, calibrated: false }; // 没配单价 → 成本计 0
+}
 
 /** 解析当前生效配置（DB 优先，env 兜底，带缓存）。 */
 export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
@@ -168,7 +199,8 @@ export async function setAiConfig(patch: {
  */
 type ModelRow = {
   id: string; provider: string; label: string; baseUrl: string; model: string;
-  apiKey: string; embeddingModel: string; temperature: number; preset: string | null; updatedAt: Date;
+  apiKey: string; embeddingModel: string; temperature: number; preset: string | null;
+  priceInput: number; priceOutput: number; priceCachedInput: number; updatedAt: Date;
 };
 
 /** 脱敏对外视图（不回明文 key；active 由 AiSetting.activeModelId 决定）。 */
@@ -184,15 +216,20 @@ export function publicModel(m: ModelRow, activeId: string | null): AiModel {
     hasKey: isRealKey(m.apiKey),
     preset: m.preset ?? null,
     active: !!activeId && m.id === activeId,
+    priceInput: m.priceInput ?? 0,
+    priceOutput: m.priceOutput ?? 0,
+    priceCachedInput: m.priceCachedInput ?? 0,
     updatedAt: m.updatedAt?.toISOString?.(),
   };
 }
 
 // 把某个模型的对话字段同步进单例 AiSetting（= 设为生效），并记 activeModelId。
+// 注意：嵌入/重排是「全局检索增强」配置，独立于对话模型——切换对话模型不得动 embeddingModel 等，
+// 否则会把全局嵌入模型清空（此前 per-model embeddingModel 多为空，切模型即静默清掉 embedding 生效）。
 async function syncActiveSetting(m: ModelRow): Promise<void> {
   const fields = {
     provider: m.provider, label: m.label, baseUrl: m.baseUrl, model: m.model,
-    apiKey: m.apiKey, embeddingModel: m.embeddingModel, temperature: m.temperature, activeModelId: m.id,
+    apiKey: m.apiKey, temperature: m.temperature, activeModelId: m.id,
   };
   await prisma.aiSetting.upsert({
     where: { id: 'default' },
@@ -240,8 +277,12 @@ export async function addModel(input: AiModelUpsert): Promise<AiModel> {
       embeddingModel: input.embeddingModel?.trim() ?? '',
       temperature: typeof input.temperature === 'number' ? input.temperature : 0.7,
       preset: input.preset ?? null,
+      priceInput: Math.max(0, input.priceInput ?? 0),
+      priceOutput: Math.max(0, input.priceOutput ?? 0),
+      priceCachedInput: Math.max(0, input.priceCachedInput ?? 0),
     },
   });
+  rateCache = null;
   const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
   return publicModel(created as ModelRow, setting?.activeModelId ?? null);
 }
@@ -259,7 +300,11 @@ export async function updateModel(id: string, patch: AiModelUpsert): Promise<AiM
   if (patch.embeddingModel !== undefined) data.embeddingModel = patch.embeddingModel.trim();
   if (patch.temperature !== undefined) data.temperature = patch.temperature;
   if (patch.preset !== undefined) data.preset = patch.preset;
+  if (patch.priceInput !== undefined) data.priceInput = Math.max(0, patch.priceInput);
+  if (patch.priceOutput !== undefined) data.priceOutput = Math.max(0, patch.priceOutput);
+  if (patch.priceCachedInput !== undefined) data.priceCachedInput = Math.max(0, patch.priceCachedInput);
   const updated = await prisma.aiModel.update({ where: { id }, data });
+  rateCache = null;
   const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
   if (setting?.activeModelId === id) await syncActiveSetting(updated as ModelRow);
   return publicModel(updated as ModelRow, setting?.activeModelId ?? null);
@@ -275,6 +320,7 @@ export async function deleteModel(id: string): Promise<{ ok: boolean; reason?: s
     await prisma.aiSetting.update({ where: { id: 'default' }, data: { activeModelId: null } });
   }
   await prisma.aiModel.delete({ where: { id } });
+  rateCache = null;
   return { ok: true };
 }
 

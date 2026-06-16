@@ -7,6 +7,7 @@ import { embed, cosine } from './embedding.js';
 import { extractInsights } from '../llm/gateway.js';
 import { pgvectorEnabled, vectorSearchMemories, upsertMemoryVector } from './vectorStore.js';
 import type { MemoryConfig } from '../data/agents.js';
+import type { AdminUserMemory } from '../../../shared/contracts';
 
 /**
  * 召回长期记忆。
@@ -119,4 +120,32 @@ export async function recordFeedback(opts: {
     },
   });
   if (pgvectorEnabled()) await upsertMemoryVector(m.id, embedding).catch(() => {});
+}
+
+// ——————————————————————————————————————————————————————————————————————————
+// 运营端：查看 / 删除某用户的长期记忆（观测系统"记住"了什么 + 纠正脏记忆 / 隐私删除）。
+// ——————————————————————————————————————————————————————————————————————————
+
+/** 列出某用户全部长期记忆（按顾问分组排序，含过期项；运营端用，不做语义召回）。 */
+export async function listUserMemories(tenantId: string, userId: string): Promise<AdminUserMemory[]> {
+  const rows = await prisma.memory.findMany({
+    where: { tenantId, userId },
+    orderBy: [{ agentKey: 'asc' }, { weight: 'desc' }, { createdAt: 'desc' }],
+    take: 300,
+  });
+  return rows.map((m) => ({
+    id: m.id,
+    agentKey: m.agentKey,
+    kind: m.kind,
+    text: m.text,
+    weight: m.weight,
+    source: m.source,
+    createdAt: m.createdAt.toISOString(),
+    expiresAt: m.expiresAt ? m.expiresAt.toISOString() : null,
+  }));
+}
+
+/** 删除某用户的一条长期记忆（租户+用户双重校验，防越权）。 */
+export async function deleteUserMemory(tenantId: string, userId: string, id: string): Promise<void> {
+  await prisma.memory.deleteMany({ where: { id, tenantId, userId } });
 }

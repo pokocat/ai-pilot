@@ -62,9 +62,10 @@ export interface AgentRuntimeUpdate {
 
 /** agent 可勾选的工具元信息（GET /admin/skill-tools）：内置 + 启用的自定义工具 */
 export interface SkillToolMeta {
-  name: string;        // 工具 key（= skillsConfig.tools 里存的值）
+  name: string;        // 技能 key（= skillsConfig.tools 里存的值）
   description: string;
-  builtin: boolean;    // true=内置（search_knowledge…），false=运营自建
+  builtin: boolean;    // true=代码内置（search_knowledge / render_report…），false=运营自建 HTTP
+  kind: 'tool' | 'output'; // tool=模型主动调用 | output=产出后处理（如 render_report 网页报告）
 }
 
 /** 自定义 HTTP 工具：后台读取视图（鉴权头脱敏为 headerKeys/hasHeaders） */
@@ -381,6 +382,43 @@ export interface CreateKnowledgeRequest {
 }
 export interface KnowledgeHit { item: KnowledgeItemT; score: number; snippet: string; }
 
+/** 知识库「文档视图」一行（用户资料库 / 运营端某用户知识）：解析状态 + 文件元信息 + 切片数。 */
+export interface KnowledgeDocRow {
+  id: string;
+  kind: string;
+  title: string | null;
+  sourceType: string;        // conversation | upload | deliverable | manual
+  status: string;            // ready | parsing | embedding | failed
+  fileName: string | null;
+  fileType: string | null;   // pdf | docx | xlsx | csv | md | txt
+  fileSize: number | null;   // 字节
+  chunkCount: number;
+  projectId: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface KnowledgeChunkRow { id: string; ord: number; text: string; dim: number; }
+/** 知识项详情：含切片正文 + 每片向量维度（排查嵌入用）。 */
+export interface KnowledgeDetail {
+  id: string;
+  kind: string;
+  title: string | null;
+  sourceType: string;
+  status: string;
+  fileName: string | null;
+  fileType: string | null;
+  fileSize: number | null;
+  projectId: string | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  textPreview: string;       // 正文前 2000 字
+  chunks: KnowledgeChunkRow[];
+}
+/** 上传响应：item id + 初始状态（parsing）。前端轮询 detail 看 ready/failed。 */
+export interface KnowledgeUploadResult { id: string; status: string; }
+
 /* ────────────── 对话汇总 ────────────── */
 export interface SummarizeResult {
   reportId: string; version: number; title: string;
@@ -435,12 +473,16 @@ export interface AiModel {
   hasKey: boolean;        // 是否已配置 key（不回传明文）
   preset?: string | null; // 来源内置接入商 id（自定义/自主定义则空）
   active: boolean;        // 是否当前生效（= AiSetting.activeModelId 指向本行）
+  priceInput: number;       // 内部成本核算：元 / 1M 输入 token（0=未配置，回退内置价表）
+  priceOutput: number;      // 元 / 1M 输出 token
+  priceCachedInput: number; // 元 / 1M 命中缓存输入 token（0=按 priceInput 计）
   updatedAt?: string;
 }
 /** 添加/编辑模型入参（apiKey 仅在传入非空时更新；留空表示不改） */
 export interface AiModelUpsert {
   provider: AiProvider; label: string; baseUrl?: string; model: string;
   apiKey?: string; embeddingModel?: string; temperature?: number; preset?: string | null;
+  priceInput?: number; priceOutput?: number; priceCachedInput?: number;
 }
 /** 测试某个模型入参（连接探活；modelId 传入时，apiKey 留空则取该模型已存 key） */
 export interface AiModelTest extends AiModelUpsert { modelId?: string; }
@@ -543,12 +585,87 @@ export interface TokenUsageUserStat {
   totalTokens: number;
   costMicros: number;
 }
+/** 运营端「知识库」视图：看到用户知识库被切片/嵌入加工的状态 + 维度体检。 */
+export interface AdminKnowledgeItemRow {
+  id: string;
+  title: string;
+  kind: string;            // insight | document | decision | todo | report_ref
+  tenantId: string;
+  tenantName: string | null;
+  chunks: number;          // 切片数
+  dims: number[];          // 该项各切片的去重嵌入维度（正常应只有一个 = 当前维度）
+  stale: boolean;          // 有切片维度 ≠ 当前嵌入维度（向量召回静默失效，需重嵌）
+  createdAt: string;
+}
+export interface AdminKnowledgeView {
+  embedDim: number;        // 当前 embed() 维度（256=本地确定性 / 1024=bge-m3 等远程）
+  embedRemote: boolean;    // 远程嵌入是否生效
+  embedModel: string;      // 当前嵌入模型名（远程）/「本地确定性嵌入」
+  totals: { items: number; chunks: number; staleChunks: number; memories: number; staleMemories: number };
+  items: AdminKnowledgeItemRow[];
+}
+export interface ReembedResult { ok: true; chunks: number; memories: number; dim: number; }
+
+/** 检索调试台：对某用户跑真实检索，看命中 / 融合分 / rerank 前后 / 记忆召回 / 最终注入上下文。 */
+export interface RetrievalDebugCand {
+  itemId: string;
+  title: string | null;
+  kind: string;
+  projectId: string | null;
+  snippet: string;
+  semScore: number;            // 向量余弦
+  kwScore: number;             // 关键词命中
+  fusionScore: number;         // 融合分（含当前项目加权）
+  rerankScore: number | null;  // rerank 相关性分（未生效 = null）
+  rerankRank: number | null;   // rerank 后名次（未进入 rerank 取数 = null）
+}
+export interface AdminRetrievalDebug {
+  query: string;
+  agentKey: string;
+  embedDim: number;
+  embedModel: string;
+  embedRemote: boolean;
+  rerankEnabled: boolean;
+  rerankModel: string;
+  rerankApplied: boolean;          // rerank 实际生效（启用 + 返回有效排序）
+  candidates: RetrievalDebugCand[]; // 按融合分降序
+  memories: string[];              // 该用户×该顾问语义召回的记忆
+  contextKnowledge: string[];      // buildGenContext 实际注入的「知识」行
+  understanding: string[];         // 实际注入的「军师档案」行
+}
+
+/** 运营端「用户上下文中心」：某用户的军师档案 + 长期记忆（按顾问）+ 知识库文档，集中观测与纠偏。 */
+export interface AdminUserMemory {
+  id: string;
+  agentKey: string;
+  kind: string;        // fact | preference | feedback
+  text: string;
+  weight: number;
+  source: string;      // conversation | document | deliverable_feedback
+  createdAt: string;
+  expiresAt: string | null;
+}
+export interface AdminUserContext {
+  understanding: ClientUnderstanding;
+  memories: AdminUserMemory[];
+  knowledge: KnowledgeDocRow[];
+}
+
+/** 检索基建（嵌入 / 重排）token 消耗，与「用户产出」用量分开统计。 */
+export interface TokenUsageKindStat {
+  kind: string;   // embedding | rerank
+  model: string;
+  calls: number;
+  totalTokens: number;
+  costMicros: number;
+}
 export interface AdminTokenUsageView {
   windowDays: number;
-  totals: TokenUsageTotals;
-  byModel: TokenUsageModelStat[];
-  byDay: TokenUsageDayStat[];
-  topUsers: TokenUsageUserStat[];
+  totals: TokenUsageTotals;       // 用户产出（chat + deliverable）
+  byModel: TokenUsageModelStat[]; // 用户产出
+  byDay: TokenUsageDayStat[];     // 用户产出
+  topUsers: TokenUsageUserStat[]; // 用户产出
+  infra: TokenUsageKindStat[];    // 检索基建（embedding / rerank），与用户用量区分
 }
 export interface AdminAuditItem {
   id: string;

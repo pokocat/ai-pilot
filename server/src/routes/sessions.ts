@@ -11,7 +11,7 @@ import { ensureQuota, chargeQuota } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
-import type { MessageRef } from '../llm/schema.js';
+import type { MessageRef, Deliverable } from '../llm/schema.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -67,6 +67,36 @@ export async function sessionRoutes(app: FastifyInstance) {
     await prisma.message.deleteMany({ where: { session: { id: req.params.id, userId: user.id } } });
     await prisma.session.deleteMany({ where: { id: req.params.id, userId: user.id } });
     return { ok: true };
+  });
+
+  // 按需运行该成果的「产出处理」技能(kind=output)——HTML 网页报告就是技能库里的 render_report。
+  // 产出时不强制渲染；用户要分享/导出时才调用。默认跑 render_report，并叠加该 agent 勾选的其它 output 技能。幂等：已生成则复用。
+  app.post<{ Params: { id: string; mid: string } }>('/sessions/:id/messages/:mid/report', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const msg = await prisma.message.findFirst({
+      where: { id: req.params.mid, role: 'report', session: { id: req.params.id, userId: user.id } },
+      include: { session: { include: { agent: true } } },
+    });
+    if (!msg) return reply.code(404).send({ error: 'report not found' });
+    const deliverable = msg.contentJson as unknown as Deliverable;
+    if (deliverable?.htmlUrl) return { htmlUrl: deliverable.htmlUrl }; // 已生成过：幂等返回
+
+    const enabled = (msg.session.agent.skillsConfig as { tools?: string[] } | null)?.tools ?? [];
+    const { resolveOutputSkills } = await import('../llm/tools/registry.js');
+    const outputs = resolveOutputSkills(['render_report', ...enabled]); // 本接口默认含网页报告
+    try {
+      let patch: Partial<Deliverable> = {};
+      const octx = { tenantId: user.tenantId, userId: user.id, agentKey: msg.session.agentKey };
+      for (const sk of outputs) patch = { ...patch, ...(await sk.run({ ...deliverable, ...patch }, octx)) };
+      await prisma.message.update({
+        where: { id: msg.id },
+        data: { contentJson: { ...(deliverable as object), ...patch } as Prisma.InputJsonValue },
+      });
+      return patch; // { htmlUrl, ... }
+    } catch (err) {
+      console.error('[sessions] output skill failed:', (err as Error).message);
+      return reply.code(500).send({ error: '报告生成失败', code: 'REPORT_RENDER_FAILED' });
+    }
   });
 
   // 同步产出（跨端：H5 + 微信小程序均可用；前端做客户端渐进式呈现）。
@@ -129,13 +159,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     try {
       if (isDeliverable) {
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
-        // 渲染可分享的网页版报告(失败不影响产出)
-        try {
-          const { publishReport } = await import('../services/reportHtml.js');
-          deliverable.htmlUrl = await publishReport(user.tenantId, deliverable);
-        } catch (err) {
-          console.error('[sessions] publishReport failed:', (err as Error).message);
-        }
+        // 网页版可分享报告改为「按需生成」——见 POST /sessions/:id/messages/:mid/report；产出时不再每次强制渲染存库。
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'report', contentJson: deliverable as object },
         });

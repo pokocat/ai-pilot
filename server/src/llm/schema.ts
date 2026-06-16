@@ -47,6 +47,8 @@ export interface GenContext {
   tenantId?: string | null;
   userId?: string | null;
   projectId?: string | null;
+  // 自建技能（工具调用）：与「模型接入方式」解耦——inherit/全局模型同样可用；由 buildGenContext 从 Agent.skillsConfig 注入。
+  skills?: SkillsConfig | null;
   // —— 运行时接入覆盖（per-agent 后台配置）。inherit 模式时为 null，走全局模型；否则按 mode 路由 ——
   runtime?: AgentRuntime | null;
 }

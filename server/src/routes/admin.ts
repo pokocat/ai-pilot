@@ -14,6 +14,11 @@ import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
 import { selectableMeta, listDefs, createTool, updateTool, deleteTool } from '../services/skillTools.js';
+import { knowledgeView, reembedAll } from '../services/knowledgeAdmin.js';
+import { retrievalDebug } from '../services/retrievalDebug.js';
+import { userContextView } from '../services/adminUserContext.js';
+import { deleteUserMemory } from '../services/memory.js';
+import { getKnowledgeDetail, deleteKnowledge, reembedItem, ingestUploadedFile } from '../services/knowledge.js';
 import type { AiConfigUpdate, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
@@ -73,6 +78,24 @@ function runtimeData(rt?: AgentRuntimeUpdate): Prisma.AgentUpdateInput {
 export async function adminRoutes(app: FastifyInstance) {
   // 鉴权：拦截本插件内全部 /admin/* 路由（adminRoutes 为独立封装上下文，不影响其它路由）。
   app.addHook('preHandler', requireAdmin);
+
+  // —— 知识库视图 + 存量维度体检/重嵌（嵌入来源变更后存量会维度不匹配、向量召回静默失效）——
+  app.get('/admin/knowledge', async () => knowledgeView());
+  app.post('/admin/knowledge/reembed', async () => {
+    const r = await reembedAll();
+    await recordAudit({ action: 'admin.knowledge.reembed', payload: { chunks: r.chunks, memories: r.memories, dim: r.dim } });
+    return r;
+  });
+
+  // —— 检索调试台：对某用户跑真实检索，看命中 / 融合分 / rerank 前后 / 记忆召回 / 最终注入上下文 ——
+  app.post<{ Body: { userId?: string; query?: string; agentKey?: string } }>('/admin/retrieval-test', async (req, reply) => {
+    const userId = (req.body?.userId || '').trim();
+    const query = (req.body?.query || '').trim();
+    if (!userId || !query) return reply.code(400).send({ error: '缺少 userId 或 query' });
+    const result = await retrievalDebug(userId, query, (req.body?.agentKey || '').trim() || undefined);
+    if (!result) return reply.code(404).send({ error: '用户不存在' });
+    return result;
+  });
 
   // —— 大模型配置（运营后台可随时切换；默认 Agnes 2.0 Flash） ——
   // config=当前生效配置；presets=内置接入商目录（添加向导用）；models=已添加模型（快速切换源）。
@@ -263,6 +286,65 @@ export async function adminRoutes(app: FastifyInstance) {
       action: 'admin.user.agent.revoke', payload: { agentKey: req.params.key },
     });
     return { ok: true };
+  });
+
+  // —— 用户上下文中心：军师档案 + 长期记忆（按顾问）+ 知识库文档（观测与纠偏） ——
+  app.get<{ Params: { id: string } }>('/admin/users/:id/context', async (req, reply) => {
+    const view = await userContextView(req.params.id);
+    if (!view) return reply.code(404).send({ error: 'user not found' });
+    return view;
+  });
+
+  // 删除某用户的一条长期记忆（纠正脏记忆 / 隐私删除）
+  app.delete<{ Params: { id: string; mid: string } }>('/admin/users/:id/memories/:mid', async (req, reply) => {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    await deleteUserMemory(user.tenantId, req.params.id, req.params.mid);
+    await recordAudit({ tenantId: user.tenantId, userId: req.params.id, action: 'admin.user.memory.delete', payload: { memoryId: req.params.mid } });
+    return { ok: true };
+  });
+
+  // 某用户知识项详情（切片钻入 + 每片向量维度）
+  app.get<{ Params: { id: string; kid: string } }>('/admin/users/:id/knowledge/:kid', async (req, reply) => {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    const detail = await getKnowledgeDetail(user.tenantId, req.params.kid);
+    if (!detail) return reply.code(404).send({ error: 'knowledge not found' });
+    return detail;
+  });
+
+  // 删除某用户知识项（含 OSS 原件）
+  app.delete<{ Params: { id: string; kid: string } }>('/admin/users/:id/knowledge/:kid', async (req, reply) => {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    await deleteKnowledge(user.tenantId, req.params.kid);
+    await recordAudit({ tenantId: user.tenantId, userId: req.params.id, action: 'admin.user.knowledge.delete', payload: { itemId: req.params.kid } });
+    return { ok: true };
+  });
+
+  // 重嵌某用户知识项（从已存正文重新切片+向量化）
+  app.post<{ Params: { id: string; kid: string } }>('/admin/users/:id/knowledge/:kid/reembed', async (req, reply) => {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    const r = await reembedItem(user.tenantId, req.params.kid);
+    await recordAudit({ tenantId: user.tenantId, userId: req.params.id, action: 'admin.user.knowledge.reembed', payload: { itemId: req.params.kid, chunks: r.chunks } });
+    return r;
+  });
+
+  // 后台代用户上传文档（multipart 单文件）
+  app.post<{ Params: { id: string } }>('/admin/users/:id/knowledge/upload', async (req, reply) => {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    let data;
+    try { data = await req.file(); } catch { return reply.code(413).send({ error: '文件过大（上限 20MB）' }); }
+    if (!data) return reply.code(400).send({ error: '未收到文件' });
+    let buf: Buffer;
+    try { buf = await data.toBuffer(); } catch { return reply.code(413).send({ error: '文件过大（上限 20MB）' }); }
+    if (data.file.truncated) return reply.code(413).send({ error: '文件过大（上限 20MB）' });
+    if (!buf.length) return reply.code(400).send({ error: '空文件' });
+    const r = await ingestUploadedFile({ tenantId: user.tenantId, userId: user.id, fileName: data.filename || '未命名文件', mime: data.mimetype, buf });
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'admin.user.knowledge.upload', payload: { itemId: r.id, fileName: data.filename } });
+    return r;
   });
 
   // —— 消耗管理：按用户汇总算力赠送、消耗与余额 ——

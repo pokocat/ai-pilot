@@ -287,3 +287,26 @@ The detail panel is the standard drill-in pattern for user, agent, trace, and au
 - **Don't** create one-off button styles with inline width, padding, and colors when a shared component vocabulary exists.
 - **Don't** put cards inside cards or make page sections look like floating decorative cards.
 - **Don't** hide payload, status, IP, UA, or timestamp details behind vague labels on audit surfaces.
+
+## Engineering Compliance（代码约束 · 强制）
+
+设计系统不是参考、是约束。运营后台（`admin/`）的**所有**前端变更必须满足下列规则，并通过 `npm run lint:ui`（已接入 `admin` 的 `build`，见 `scripts/audit-admin-ui.mjs`）。违反即缺陷。
+
+### 1. 颜色只用 token，禁止硬编码
+- 颜色一律走 `admin/src/styles/admin.css` 的 `:root` CSS 变量；**`.tsx` 内联样式与 `.css`（`:root` 之外）都不得出现 `#hex` / `rgb()` / `rgba()` 颜色**（纯黑白 `#fff`/`#000` 除外；rgba 仅允许在 CSS 组件类里做同色 tint/scrim）。
+- Token：背景 `--bg/--paper/--surface/--surface-2`；文字 `--ink/--ink-2/--ink-3`；线 `--line/--line-2`；品牌金 `--accent/--accent-deep/--accent-soft/--accent-ink/--accent-bright/--gold`；状态 `--danger`（红）`--success`（绿）；字体 `--serif/--sans/--mono`；阴影 `--shadow-sm`（行/卡）`--shadow-md`（弹层/菜单/toast）。
+- **One Command Color**：金 = 唯一品牌动作色。绿=成功、红=危险、ochre=警告，只表状态、不作装饰。需要新颜色先在 `:root` 加 token，再 `var()` 引用。
+
+### 2. 只用组件类词汇，禁止裸 class / 一次性 inline
+- 用既有组件类，**不得引用 admin.css 里没有定义的 class**（如曾经的裸 `gh`，会退化成无样式原生控件）。常用词汇：
+  - 按钮：`ai-btn`（`.primary`/`.ghost`/`.auto`，44px 表单动作）、`mini-btn`（`.primary`/`.danger`/`.edit-action`，行内紧凑动作）、`add-btn full`（新增入口）、`ai-preset`（`.on`/`.add`，快速切换/添加）。**取消/测试=ghost**。
+  - 容器：`crd`/`crd-row`、`mem-card`、`usage-row`+`usage-num`（`.ok`）、`stat`、`kv`、`tag`（`.off`）、`pill`、`empty`（空态）、`modal-scrim`（弹层遮罩）、`acct-menu`/`acct-menu-item`。
+  - 表单：`ai-field`、`ai-input`、`ai-range`、`ta`、`bill-seg`/`bill-opt`、`blk-d`（`.ok`/`.err`）。
+- **禁止给 `<button>/<input>/<select>` 加一次性 inline `style`**（width/padding/color/border/background）。需要变体就加修饰类（如 `.ai-btn.auto`、`.ai-preset.add`），不要内联。
+- `style={{}}` 仅允许做**随运行时数据变化的布局**（如 `marginTop`、根据数据算的 `width`、进度条 `width: x%`）；颜色/边框/圆角/内边距/阴影一律交给 token 与组件类。
+
+### 3. 字体（Serif Restraint）
+- `--serif` 只用于品牌标记、页面/分区标题、关键数字；**禁止**用在按钮、表格单元格、密集表单标签、常规元数据里（那些用 `--sans`/`--mono`）。
+
+### 4. 提交前必过
+- `cd admin && npm run lint:ui`（设计系统合规）+ `npx tsc --noEmit`（类型）必须全绿；`npm run build` 会自动先跑 lint:ui。新增/改动 UI 前先读本文件与 `Do's and Don'ts`。

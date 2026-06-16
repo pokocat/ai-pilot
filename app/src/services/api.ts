@@ -8,6 +8,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
+  KnowledgeDocRow, KnowledgeDetail,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
 } from '../../../shared/contracts';
 
@@ -23,6 +24,7 @@ export type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionItem, ReportVersionContent, ReportDiff, SectionDiff,
   KnowledgeItemT, KnowledgeHit, SummarizeResult, MessageRef, RefKind,
+  KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AgentBilling,
   ClientUnderstanding, ClientUnderstandingSection, UnderstandingMaturity, AliasSuggestionResult,
   TokenQuotaView, MyCreditItem, MyCreditsView,
@@ -58,6 +60,19 @@ async function request<T>(path: string, method: keyof typeof Taro.request | any 
     throw Object.assign(new Error((res.data as any)?.error || `HTTP ${res.statusCode}`), { data: res.data });
   }
   return res.data as T;
+}
+
+// 文档上传：Taro.uploadFile 走 multipart（request() 只发 JSON，文件需单独上传）。仅 weapp 有文件可选。
+async function uploadKnowledgeFile(filePath: string, projectId?: string): Promise<{ id: string; status: string }> {
+  const url = `${BASE_URL}/knowledge/upload${projectId ? `?projectId=${projectId}` : ''}`;
+  const res = await Taro.uploadFile({ url, filePath, name: 'file', header: { 'x-user-id': getToken() } });
+  if (res.statusCode === 401) { clearToken(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode >= 400) {
+    let msg = `HTTP ${res.statusCode}`;
+    try { msg = (JSON.parse(res.data) as { error?: string }).error || msg; } catch { /* 非 JSON 响应 */ }
+    throw new Error(msg);
+  }
+  try { return JSON.parse(res.data) as { id: string; status: string }; } catch { return { id: '', status: 'parsing' }; }
 }
 
 // —— API：mock 模式走本地数据源，server 模式连真实后端，口径完全一致 ——
@@ -133,10 +148,23 @@ export const api = {
     IS_MOCK ? mock.createKnowledge(body) : request<KnowledgeItemT>('/knowledge', 'POST', body),
   deleteKnowledge: (id: string) =>
     IS_MOCK ? mock.deleteKnowledge(id) : request<{ ok: boolean }>(`/knowledge/${id}`, 'DELETE'),
+  // —— 我的资料库（文档视图 + 上传） ——
+  knowledgeDocs: (projectId?: string) =>
+    IS_MOCK ? Promise.resolve([] as KnowledgeDocRow[]) : request<KnowledgeDocRow[]>(`/knowledge/docs${projectId ? `?projectId=${projectId}` : ''}`),
+  knowledgeDetail: (id: string) =>
+    IS_MOCK ? Promise.reject(new Error('mock 模式无文档详情')) : request<KnowledgeDetail>(`/knowledge/${id}`),
+  reembedKnowledge: (id: string) =>
+    IS_MOCK ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
+  uploadKnowledge: (filePath: string, projectId?: string) =>
+    IS_MOCK ? Promise.resolve({ id: 'mock', status: 'ready' }) : uploadKnowledgeFile(filePath, projectId),
 
   // —— 对话汇总（→ 版本化报告 + 知识库） ——
   summarize: (sessionId: string) =>
     IS_MOCK ? mock.summarize(sessionId) : request<SummarizeResult>(`/sessions/${sessionId}/summarize`, 'POST', {}),
+
+  // —— 报告网页版（render_report → OSS 托管）：产出后按需生成可分享链接 ——
+  renderReport: (sessionId: string, messageId: string): Promise<{ htmlUrl?: string }> =>
+    IS_MOCK ? Promise.resolve({}) : request<{ htmlUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
 };
 
 export type { GenRequest, SaveLibRequest, MessageRef as Ref };
