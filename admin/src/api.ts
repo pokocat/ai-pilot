@@ -91,6 +91,13 @@ export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
 export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider, AiModel, AiModelUpsert, AiModelTest } from '../../shared/contracts';
 export type { AdminKnowledgeView, AdminKnowledgeItemRow, ReembedResult, AdminRetrievalDebug, RetrievalDebugCand } from '../../shared/contracts';
 export type { AdminUserContext, AdminUserMemory, KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow } from '../../shared/contracts';
+// —— 版本化 / 多运营 / 沙盒 / 评测（运营端调优发布） ——
+export type {
+  AgentVersionItem, AgentVersionListView, PublishAgentResult, AgentVersionStatus,
+  AdminAccountItem, AdminMe, SandboxRequest, SandboxResult, SandboxTrace, SandboxTarget, SandboxProfile,
+  EvalSetItem, EvalSetDetail, EvalCaseItem, EvalRunItem, EvalRunDetail, EvalCaseResultItem,
+  PricingTier, SuggestedTier,
+} from '../../shared/contracts';
 
 import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, Plan, AdminSaying,
@@ -98,6 +105,9 @@ import type {
   AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, SkillToolDef, SkillToolUpsert,
   AiModel, AiModelUpsert, AiModelTest, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
   AdminUserContext, KnowledgeDetail,
+  AgentVersionListView, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
+  SandboxRequest, SandboxResult, EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalCaseRequest,
+  EvalRunItem, EvalRunDetail, StartEvalRunRequest, PricingTier,
 } from '../../shared/contracts';
 
 export const api = {
@@ -157,4 +167,34 @@ export const api = {
   delAiModel: (id: string) => req<{ ok: boolean }>(`/admin/ai-models/${id}`, 'DELETE'),
   activateAiModel: (id: string) => req<AiConfigView>(`/admin/ai-models/${id}/activate`, 'POST'),
   testAiModel: (body: AiModelTest) => req<AiTestResult>('/admin/ai-models/test', 'POST', body),
+
+  // —— 当前登录者（按角色显隐账户管理 / 过滤 agent）——
+  me: () => req<AdminMe>('/admin/auth/me'),
+
+  // —— 版本化：历史 / 发布 / 回滚 ——
+  agentVersions: (key: string) => req<AgentVersionListView>(`/admin/agents/${key}/versions`),
+  publishAgent: (key: string, label?: string) => req<PublishAgentResult>(`/admin/agents/${key}/publish`, 'POST', { label }),
+  rollbackAgent: (key: string, versionId: string) => req<{ ok: boolean; version: number }>(`/admin/agents/${key}/rollback`, 'POST', { versionId }),
+
+  // —— 调教沙盒：用草稿/某版本即时试跑 ——
+  sandbox: (key: string, body: SandboxRequest) => req<SandboxResult>(`/admin/agents/${key}/sandbox`, 'POST', body),
+
+  // —— 多运营账户管理（owner）——
+  accounts: () => req<AdminAccountItem[]>('/admin/accounts'),
+  createAccount: (body: CreateAdminAccountRequest) => req<AdminAccountItem>('/admin/accounts', 'POST', body),
+  updateAccount: (id: string, body: UpdateAdminAccountRequest) => req<AdminAccountItem>(`/admin/accounts/${id}`, 'PATCH', body),
+
+  // —— 评测：黄金测试集 + 跑分 ——
+  pricingTiers: () => req<PricingTier[]>('/admin/pricing-tiers'),
+  evalSets: (key: string) => req<EvalSetItem[]>(`/admin/agents/${key}/eval-sets`),
+  createEvalSet: (key: string, name: string) => req<EvalSetItem>(`/admin/agents/${key}/eval-sets`, 'POST', { name }),
+  evalSet: (id: string) => req<EvalSetDetail>(`/admin/eval-sets/${id}`),
+  renameEvalSet: (id: string, name: string) => req<{ ok: boolean }>(`/admin/eval-sets/${id}`, 'PATCH', { name }),
+  delEvalSet: (id: string) => req<{ ok: boolean }>(`/admin/eval-sets/${id}`, 'DELETE'),
+  addEvalCase: (setId: string, body: UpsertEvalCaseRequest) => req<EvalCaseItem>(`/admin/eval-sets/${setId}/cases`, 'POST', body),
+  updateEvalCase: (id: string, body: UpsertEvalCaseRequest) => req<{ ok: boolean }>(`/admin/eval-cases/${id}`, 'PATCH', body),
+  delEvalCase: (id: string) => req<{ ok: boolean }>(`/admin/eval-cases/${id}`, 'DELETE'),
+  startEvalRun: (key: string, body: StartEvalRunRequest) => req<{ runId: string }>(`/admin/agents/${key}/eval-runs`, 'POST', body),
+  evalRuns: (key: string) => req<EvalRunItem[]>(`/admin/agents/${key}/eval-runs`),
+  evalRun: (id: string) => req<EvalRunDetail>(`/admin/eval-runs/${id}`),
 };

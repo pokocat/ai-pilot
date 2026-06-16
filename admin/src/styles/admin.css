@@ -322,3 +322,23 @@ select.ai-input { appearance: none; }
   .add-row, .ai-actions { flex-wrap: wrap; }
   .add-input, .add-btn, .ai-btn { flex-basis: 100%; width: 100%; }
 }
+
+/* —— 调教 studio 子导航（配置 / 沙盒 / 版本 / 评测） —— */
+.studio-nav { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--line-2); background: var(--paper); }
+.studio-nav .sn { flex: 1; text-align: center; padding: 8px 6px; font: 500 12.5px/1 var(--sans); color: var(--ink-3); border-radius: 8px; cursor: pointer; transition: background .15s, color .15s; }
+.studio-nav .sn.on { background: var(--accent-soft); color: var(--accent-ink); }
+
+/* —— 沙盒/评测里渲染的结构化产出 —— */
+.sbx-doc { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow-sm); }
+.sbx-doc-h { font: 600 15px/1.4 var(--serif); color: var(--ink); }
+.sbx-doc-meta { font-size: 11px; color: var(--ink-3); margin-top: 3px; }
+.sbx-sec { margin-top: 12px; }
+.sbx-sec-h { font: 600 13px/1.4 var(--serif); color: var(--accent-deep); }
+.sbx-sec-b { font-size: 13px; line-height: 1.7; color: var(--ink-2); margin-top: 4px; }
+.sbx-sec-l { margin: 6px 0 0; padding-left: 18px; }
+.sbx-sec-l li { font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.sbx-doc-trust { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-2); font-size: 11px; color: var(--ink-3); display: flex; align-items: center; gap: 5px; }
+
+/* 状态色徽标（草稿未发布 / 线上版本）—— 颜色集中在样式表，TSX 只用类名 */
+.tag.warn, .badge.warn { background: #FBE9D8; color: #C1791F; }
+.tag.live { background: #DCEEE2; color: #1A8A5A; }

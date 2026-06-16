@@ -29,6 +29,8 @@ import {
   type AdminUserContext,
   type KnowledgeDetail,
   uploadUserKnowledge,
+  type AdminAccountItem,
+  type AdminMe,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
@@ -36,8 +38,8 @@ import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'model' | 'say' | 'form' | 'plan';
-const TABS: { key: Tab; icon: string; label: string }[] = [
+type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'model' | 'say' | 'form' | 'plan' | 'account';
+const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
   { key: 'usage', icon: 'crown', label: '消耗' },
@@ -47,6 +49,7 @@ const TABS: { key: Tab; icon: string; label: string }[] = [
   { key: 'skilllib', icon: 'layers', label: '技能库' },
   { key: 'knowledge', icon: 'doc', label: '知识库' },
   { key: 'retrieval', icon: 'target', label: '检索' },
+  { key: 'account', icon: 'user', label: '账户', ownerOnly: true },
   { key: 'audit', icon: 'clock', label: '审计' },
   { key: 'model', icon: 'insight', label: '模型' },
   { key: 'say', icon: 'spark', label: '献策' },
@@ -62,6 +65,8 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
+  const [me, setMe] = useState<AdminMe | null>(null);
+  const [agentsKey, setAgentsKey] = useState(0); // 改 key 强制 AgentsView 重载（编辑/发布后刷新徽标）
 
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 1800); };
 
@@ -71,6 +76,10 @@ export default function App() {
     window.addEventListener('admin:unauth', onUnauth);
     return () => window.removeEventListener('admin:unauth', onUnauth);
   }, []);
+
+  // 当前登录者：按角色显隐「账户」管理。
+  useEffect(() => { if (authed) api.me().then(setMe).catch(() => setMe(null)); }, [authed]);
+  const visibleTabs = TABS.filter((t) => !t.ownerOnly || me?.isSuper);
 
   const logout = () => { adminAuth.logout(); clearAdminToken(); setAuthed(false); };
 
@@ -99,10 +108,11 @@ export default function App() {
           {tab === 'tokens' && <TokenUsageView />}
           {tab === 'trace' && <ObservabilityView />}
           {tab === 'say' && <SayingsView toast={showToast} />}
-          {tab === 'agent' && <AgentsView onOpen={setDetailKey} toast={showToast} />}
+          {tab === 'agent' && <AgentsView key={agentsKey} onOpen={setDetailKey} toast={showToast} />}
           {tab === 'skilllib' && <SkillLibraryView toast={showToast} />}
           {tab === 'knowledge' && <KnowledgeView toast={showToast} />}
           {tab === 'retrieval' && <RetrievalDebugView />}
+          {tab === 'account' && me?.isSuper && <AccountsView toast={showToast} />}
           {tab === 'audit' && <AuditView />}
           {tab === 'model' && <ModelView toast={showToast} />}
           {tab === 'form' && <SurveyView />}
@@ -110,7 +120,7 @@ export default function App() {
         </div>
 
         <nav className="adm-tab">
-          {TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <div key={t.key} className={`at ${tab === t.key ? 'on' : ''}`} onClick={() => setTab(t.key)}>
               <Icon name={t.icon} size={20} />
               <span>{t.label}</span>
@@ -121,8 +131,8 @@ export default function App() {
         {detailKey && (
           <AgentDetailPanel
             agentKey={detailKey}
-            onClose={() => setDetailKey(null)}
-            onSaved={() => { setDetailKey(null); showToast('配置已保存并下发'); }}
+            onClose={() => { setDetailKey(null); setAgentsKey((k) => k + 1); }}
+            toast={showToast}
           />
         )}
 
@@ -681,6 +691,79 @@ function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
   );
 }
 
+// 多运营账户管理（仅 owner 可见）：新增 operator、按 agent 授权、停用、重置密码。
+function AccountsView({ toast }: { toast: (m: string) => void }) {
+  const [list, setList] = useState<AdminAccountItem[]>([]);
+  const [agents, setAgents] = useState<{ key: string; name: string }[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ username: '', password: '', role: 'operator', agentKeys: [] as string[] });
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editKeys, setEditKeys] = useState<string[]>([]);
+  const load = () => api.accounts().then(setList).catch(() => {});
+  useEffect(() => { load(); api.agents().then((a) => setAgents(a.map((x) => ({ key: x.key, name: x.name })))).catch(() => {}); }, []);
+  const toggleKey = (keys: string[], k: string) => keys.includes(k) ? keys.filter((x) => x !== k) : [...keys, k];
+
+  const create = async () => {
+    if (!/^[a-zA-Z0-9_.-]{2,40}$/.test(form.username)) return toast('账号 2-40 位字母/数字/._-');
+    if (form.password.length < 6) return toast('密码至少 6 位');
+    try {
+      await api.createAccount({ username: form.username, password: form.password, role: form.role, agentKeys: form.role === 'owner' ? undefined : form.agentKeys });
+      setAdding(false); setForm({ username: '', password: '', role: 'operator', agentKeys: [] }); await load(); toast('已新增账户');
+    } catch (e) { toast((e as Error)?.message || '新增失败'); }
+  };
+  const toggleDisabled = async (a: AdminAccountItem) => { try { await api.updateAccount(a.id, { disabled: !a.disabled }); await load(); toast(a.disabled ? '已启用' : '已停用'); } catch (e) { toast((e as Error)?.message || '操作失败'); } };
+  const resetPw = async (a: AdminAccountItem) => { const pw = window.prompt(`为「${a.username}」设置新密码（≥6 位）：`) || ''; if (pw.length < 6) return; try { await api.updateAccount(a.id, { password: pw }); toast('密码已重置'); } catch { toast('重置失败'); } };
+  const saveKeys = async (a: AdminAccountItem) => { try { await api.updateAccount(a.id, { agentKeys: editKeys }); setEditId(null); await load(); toast('负责 agent 已更新'); } catch { toast('保存失败'); } };
+
+  return (
+    <>
+      <div className="sec-h"><span className="t">运营账户</span><span className="s">owner 管理 · operator 按 agent 授权</span></div>
+      <div className="pad">
+        {!adding ? (
+          <button className="add-btn full" onClick={() => setAdding(true)}><Icon name="spark" size={15} /> 新增运营账户</button>
+        ) : (
+          <div className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">账号</div><input className="ai-input" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="如 zhangsan" /></div>
+            <div className="ai-field"><div className="ai-fl">初始密码（≥6 位）</div><input className="ai-input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">角色</div>
+              <div className="bill-seg">{(['operator', 'owner'] as const).map((r) => <div key={r} className={`bill-opt ${form.role === r ? 'on' : ''}`} onClick={() => setForm({ ...form, role: r })}><div className="bo-t">{r === 'owner' ? 'owner 超管' : 'operator 运营'}</div><div className="bo-d">{r === 'owner' ? '可管账户 · 见全部 agent' : '仅负责选定 agent'}</div></div>)}</div>
+            </div>
+            {form.role !== 'owner' && (
+              <div className="ai-field"><div className="ai-fl">负责的 agent（可多选）</div>
+                <div className="mem-list">{agents.map((a) => <div key={a.key} className="mem-card"><div className="mb"><div className="mt">{a.name}</div><div className="mm">{a.key}</div></div><div className={`sw ${form.agentKeys.includes(a.key) ? 'on' : ''}`} onClick={() => setForm({ ...form, agentKeys: toggleKey(form.agentKeys, a.key) })}><i /></div></div>)}</div>
+              </div>
+            )}
+            <div className="ai-actions"><button className="ai-btn ghost" onClick={() => setAdding(false)}>取消</button><button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 创建</button></div>
+          </div>
+        )}
+        {list.map((a) => (
+          <div key={a.id} className="crd">
+            <div className="crd-row">
+              <span className="crd-ic"><Icon name="user" size={18} /></span>
+              <div className="crd-b">
+                <div className="ct">{a.username} <span className="tag">{a.role}</span> {a.disabled && <span className="tag off">停用</span>}</div>
+                <div className="cs">{a.role === 'owner' ? '全部 agent' : (a.agentKeys.length ? `负责 ${a.agentKeys.length} 个 agent` : '未分配 agent')} · {a.lastLoginAt ? '最近登录 ' + fmtTime(a.lastLoginAt) : '从未登录'}</div>
+              </div>
+            </div>
+            {a.role !== 'owner' && (editId === a.id ? (
+              <div style={{ marginTop: 8 }}>
+                <div className="mem-list">{agents.map((ag) => <div key={ag.key} className="mem-card"><div className="mb"><div className="mt">{ag.name}</div><div className="mm">{ag.key}</div></div><div className={`sw ${editKeys.includes(ag.key) ? 'on' : ''}`} onClick={() => setEditKeys(toggleKey(editKeys, ag.key))}><i /></div></div>)}</div>
+                <div className="ai-actions"><button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button><button className="ai-btn primary" onClick={() => saveKeys(a)}><Icon name="check" size={14} /> 保存</button></div>
+              </div>
+            ) : (
+              <div className="crd-actions" style={{ marginTop: 8 }}>
+                <button className="mini-btn" onClick={() => { setEditId(a.id); setEditKeys(a.agentKeys); }}>分配 agent</button>
+                <button className="mini-btn" onClick={() => resetPw(a)}>重置密码</button>
+                <button className={`mini-btn ${a.disabled ? 'primary' : 'danger'}`} onClick={() => toggleDisabled(a)}>{a.disabled ? '启用' : '停用'}</button>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function AuditView() {
   const [list, setList] = useState<AdminAuditItem[]>([]);
   const [selected, setSelected] = useState<AdminAuditItem | null>(null);
@@ -872,8 +955,8 @@ function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m:
             <div className="crd-row">
               <span className="crd-ic"><Icon name={a.icon} size={18} /></span>
               <div className="crd-b">
-                <div className="ct">{a.name} {billingTag(a.billing, a.price)} {!a.enabled && <span className="tag off">停用</span>}</div>
-                <div className="cs">{a.deliverableKey ? `产出 · ${a.deliverableKey}` : a.role} · {typeLabel(a.type)} · 已开通 {a.ownerCount ?? 0} · 成果 {a.deliverableCount ?? 0}</div>
+                <div className="ct">{a.name} {billingTag(a.billing, a.price)} {!a.enabled && <span className="tag off">停用</span>} {a.draftDirty && <span className="tag warn">待发布</span>}</div>
+                <div className="cs">{a.publishedVersion ? `线上 v${a.publishedVersion}` : '未发布'} · 倍率 ×{a.billingRatio ?? 1} · {a.deliverableKey ? `产出 · ${a.deliverableKey}` : a.role} · 已开通 {a.ownerCount ?? 0}</div>
               </div>
               <div className="crd-actions">
                 <button type="button" className={`mini-btn ${a.enabled ? 'danger' : 'primary'}`} onClick={(e) => toggle(e, a)}>
@@ -1362,6 +1445,11 @@ function auditLabel(action: string) {
     'admin.agent.unpublish': '功能下架',
     'admin.agent.update': '智能体配置变更',
     'admin.agent.create': '新增智能体',
+    'admin.agentversion.publish': '发布新版本',
+    'admin.agentversion.rollback': '回滚版本',
+    'admin.eval.run': '发起评测跑分',
+    'admin.account.create': '新增运营账户',
+    'admin.account.update': '运营账户变更',
     'admin.user.agent.grant': '后台开通智能体',
     'admin.user.agent.revoke': '取消智能体开通',
     'user.agent.purchase': '用户解锁智能体',

@@ -47,6 +47,9 @@ export default function Studio() {
                   : a.billing === 'metered'
                     ? <Text className="ameta" style={{ color: accent }}>{diamondCost(a.price, true)} · {a.deliverableKey}</Text>
                     : a.deliverableKey && <Text className="ameta" style={{ color: accent }}>擅长 · {a.deliverableKey}</Text>}
+                {a.meterUnit !== 'image' && (a.billingRatio ?? 1) > 1 && (
+                  <Text className="ameta" style={{ color: accent, opacity: 0.72 }}>倍率 ×{a.billingRatio} · 额度消耗更快</Text>
+                )}
               </View>
             );
           })}

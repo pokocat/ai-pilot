@@ -132,6 +132,11 @@ export interface AdminAgent {
   key: string; name: string; role: string; icon: string; type: AgentType;
   gift: boolean; billing: AgentBilling; price: number; billingRatio?: number; meterUnit?: 'text' | 'image'; enabled: boolean; deliverableKey: string | null;
   ownerCount?: number; sessionCount?: number; deliverableCount?: number; updatedAt?: string;
+  // 版本化（P0+）
+  publishedVersionId?: string | null; // null=尚未发布，C 端走草稿回退
+  publishedVersion?: number | null;   // 已发布版本号
+  draftDirty?: boolean;               // 草稿有未发布改动
+  canEdit?: boolean;                  // 当前操作者可否编辑（多运营按 agent 授权）
 }
 
 /** 运营端详情（含 System 提示词 + Agent Memory + 计费配置） */
@@ -139,7 +144,13 @@ export interface AgentDetail {
   key: string; name: string; role: string; icon: string; type: AgentType;
   gift: boolean; billing: AgentBilling; price: number; billingRatio: number; meterUnit: 'text' | 'image';
   enabled: boolean; systemPrompt: string; memoryConfig: MemoryConfig; deliverableKey: string | null;
+  greet?: string;
   runtime: AgentRuntimeView; // 接入方式（跟随全局 / 自定义端点 / Dify 应用）
+  // 版本化（P0+）：本详情 = 草稿态；C 端实际跑 publishedVersionId 指向的快照
+  publishedVersionId?: string | null;
+  publishedVersion?: number | null;
+  draftDirty?: boolean;
+  canEdit?: boolean;
 }
 
 /** 运营端新增智能体入参（POST /admin/agents） */
@@ -712,3 +723,91 @@ export interface AdminTraceDetail extends AdminTraceItem {
   promptText: string | null;
   responseText: string | null;
 }
+
+/* ════════════════════════════════════════════════════════════
+ *  运营端「提示词/知识迭代调优 + 版本化发布」（P0–P5）
+ * ════════════════════════════════════════════════════════════ */
+
+/* ────────────── 版本化（草稿 / 发布 / 历史 / 回滚） ────────────── */
+export type AgentVersionStatus = 'draft' | 'published' | 'archived';
+/** 版本历史一行（GET /admin/agents/:key/versions） */
+export interface AgentVersionItem {
+  id: string;
+  version: number;
+  status: AgentVersionStatus;
+  label: string | null;
+  changeSummary: string | null;
+  billing: AgentBilling;
+  price: number;
+  billingRatio: number;       // 该版本的 token 消耗倍率（随版本走）
+  isPublished: boolean;       // 是否为 C 端当前使用的版本
+  createdBy: string | null;   // 操作者展示名（已解析 username）
+  createdAt: string;
+  publishedAt: string | null;
+}
+export interface AgentVersionListView {
+  agentKey: string;
+  publishedVersionId: string | null;
+  draftDirty: boolean;        // 草稿 vs 已发布是否有差异
+  versions: AgentVersionItem[];
+}
+export interface PublishAgentRequest { label?: string }
+export interface PublishAgentResult { ok: true; version: number; versionId: string; changed: boolean; changeSummary: string }
+export interface RollbackAgentRequest { versionId: string }
+
+/* ────────────── 多运营账户（owner 管理 operator + agent 归属） ────────────── */
+export interface AdminAccountItem {
+  id: string; username: string; role: string; // owner | operator
+  disabled: boolean; lastLoginAt: string | null; createdAt: string;
+  agentKeys: string[]; // 该 operator 负责的 agent（owner 隐式全部，返回空数组）
+}
+export interface CreateAdminAccountRequest { username: string; password: string; role?: string; agentKeys?: string[] }
+export interface UpdateAdminAccountRequest { disabled?: boolean; role?: string; password?: string; agentKeys?: string[] }
+/** 当前登录者（GET /admin/auth/me）：前端按角色显隐账户管理、按范围过滤 agent */
+export interface AdminMe { kind: 'master' | 'account' | 'legacyUser'; username: string | null; role: string; isSuper: boolean }
+
+/* ────────────── 调教沙盒（用草稿/某版本即时试跑，返回产出 + 诊断 trace） ────────────── */
+export type SandboxTarget = 'draft' | 'published' | { versionId: string };
+export interface SandboxProfile { companyName?: string; industry?: string; stage?: string; pain?: string }
+export interface SandboxRequest {
+  text: string;
+  target?: SandboxTarget;     // 默认 draft（沙盒就是试草稿）
+  profile?: SandboxProfile;   // 模拟 C 端客户上下文
+}
+export interface SandboxTrace {
+  provider: string; model: string; status: 'ok' | 'error';
+  latencyMs: number; inputTokens: number; outputTokens: number; cachedInput: number; totalTokens: number;
+  toolCalls: number; iterations: number; errorMessage: string | null;
+}
+export interface SandboxResult {
+  kind: 'report' | 'chat';
+  source: 'draft' | 'published' | 'version';
+  versionId: string | null; versionNumber: number | null;
+  billingRatio: number;
+  deliverable?: Deliverable; reply?: ChatReply;
+  charged: number;            // 模拟扣额 = ceil(totalTokens × ratio)（沙盒不真扣，仅展示）
+  trace: SandboxTrace;
+}
+
+/* ────────────── 评测（黄金测试集 + LLM 评委打分 → 建议定价档位） ────────────── */
+export interface EvalCaseItem { id: string; input: string; rubric: string | null; weight: number; sort: number; context?: Record<string, unknown> | null }
+export interface EvalSetItem { id: string; agentKey: string; name: string; caseCount: number; createdAt: string }
+export interface EvalSetDetail extends EvalSetItem { cases: EvalCaseItem[] }
+export interface UpsertEvalSetRequest { name: string }
+export interface UpsertEvalCaseRequest { input: string; rubric?: string; weight?: number; sort?: number; context?: Record<string, unknown> | null }
+export interface EvalRunItem {
+  id: string; agentKey: string; setId: string; setName?: string;
+  targetRef: string; targetLabel: string | null;
+  status: string; score: number | null; judgeModel: string | null; note: string | null;
+  caseCount: number; createdAt: string;
+}
+export interface EvalCaseResultItem {
+  id: string; caseId: string; input: string; output: string;
+  judgeScore: number | null; judgeNote: string | null;
+  inputTokens: number; outputTokens: number; latencyMs: number;
+}
+export interface EvalRunDetail extends EvalRunItem { results: EvalCaseResultItem[]; suggested?: SuggestedTier | null }
+export interface StartEvalRunRequest { setId: string; target?: SandboxTarget }
+/** 评分 → 建议定价档位（旗舰/进阶/标准） */
+export interface PricingTier { id: string; label: string; billingRatio: number; minScore: number }
+export interface SuggestedTier { score: number | null; tier: PricingTier }

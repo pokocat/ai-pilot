@@ -60,6 +60,7 @@ async function traced<T>(
 
 // 对真实计费 provider（claude/openai/dify）记账；mock 与 0-token（缓存命中）跳过。记账内部 catch，不影响产出。
 async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ctx: GenContext, meta?: UsageMeta): Promise<void> {
+  if (meta?.sandbox) return; // 沙盒试跑不计入 token_usage（诊断 trace 仍由 traced() 记录）
   if (s.provider !== 'claude' && s.provider !== 'openai' && s.provider !== 'dify') return;
   await recordTokenUsage({
     tenantId: meta?.tenantId ?? null,
@@ -373,6 +374,19 @@ async function rawJson(
   const m = content.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
+}
+
+/** 通用 JSON 补全（评测评委等内部用）：用就绪模型发一次并解析 JSON；未就绪（mock）/失败返回 null。 */
+export async function completeJson(system: string, user: string): Promise<Record<string, unknown> | null> {
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  if (!live) return null;
+  try {
+    return await rawJson(cfg, live, system, user);
+  } catch (err) {
+    console.error('[gateway] completeJson failed:', (err as Error).message);
+    return null;
+  }
 }
 
 /** 给汇总服务用：以就绪模型把对话纪要文本归纳成「讨论要点/关键结论/待办」三类。 */
