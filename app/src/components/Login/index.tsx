@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Input, Button } from '@tarojs/components';
+import { View, Text, Input, Button, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { api } from '../../services/api';
+import logo from '../../assets/logo.png';
 import { store } from '../../services/store';
 import { useStore } from '../../hooks/useStore';
 import './index.scss';
@@ -136,7 +137,7 @@ export default function Login({ open, onLoggedIn }: Props) {
   return (
     <View className="login">
       <View className="lg-card">
-        <View className="lg-mk serif" style={{ background: accent }}>军</View>
+        <Image className="lg-mk" src={logo} mode="aspectFit" />
         <Text className="lg-h serif">军师</Text>
         <Text className="lg-sub">AI 商业军师 · {isWeapp ? '本机号一键登录' : '手机号登录'}</Text>
 

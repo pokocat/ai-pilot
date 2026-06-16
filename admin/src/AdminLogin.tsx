@@ -2,6 +2,7 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import Icon from './Icon';
 import { adminAuth, verifyAdminToken } from './api';
 import { setAdminToken } from './auth';
+import logo from './assets/logo.png';
 
 // 运营后台登录：
 //   - 未初始化 → 用主密钥（ADMIN_TOKEN）初始化一个管理员账号+密码（自动登录）。
@@ -59,7 +60,7 @@ export default function AdminLogin({ onAuthed }: { onAuthed: () => void }) {
   return (
     <div className="screen">
       <div className="admin-login">
-          <div className="al-mk">军</div>
+          <img className="al-mk" src={logo} alt="军师" />
           <div className="al-t">运营后台</div>
           <div className="al-s">JUNSHI · CONSOLE</div>
 

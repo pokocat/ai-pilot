@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Input } from '@tarojs/components';
+import { View, Text, Input, Image } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
+import logo from '../../assets/logo.png';
 import Icon from '../../components/Icon';
 import Picker from '../../components/Picker';
 import Login from '../../components/Login';
@@ -109,7 +110,7 @@ export default function Home() {
         {/* 品牌行 —— 与微信胶囊顶端对齐（本命色切换已移至「我的」） */}
         <View className="brandrow" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
           <View className="brand">
-            <View className="brand-mk serif" style={{ background: accent }}>军</View>
+            <Image className="brand-mk" src={logo} mode="aspectFit" />
             <View>
               <Text className="brand-nm serif">军师</Text>
               <Text className="brand-sub">AI STRATEGIST</Text>

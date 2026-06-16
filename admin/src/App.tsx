@@ -34,6 +34,7 @@ import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
 import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
+import logo from './assets/logo.png';
 
 type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'model' | 'say' | 'form' | 'plan';
 const TABS: { key: Tab; icon: string; label: string }[] = [
@@ -78,7 +79,7 @@ export default function App() {
   return (
     <div className="screen">
       <div className="adm-top">
-          <div className="adm-mk">军</div>
+          <img className="adm-mk" src={logo} alt="军师" />
           <div className="adm-tt"><div className="t">运营后台</div><div className="s">JUNSHI · CONSOLE</div></div>
           <div className="adm-av" onClick={() => setMenuOpen((v) => !v)} title="账户" style={{ cursor: 'pointer', position: 'relative' }}>
             运营
