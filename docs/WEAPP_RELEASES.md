@@ -16,6 +16,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-06-16 | `0.2.2` | `logo更新:登录/首页品牌标改用新版羽翼logo` | `79d4405` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 597.9 KB / 612234 B | 上传成功 |
 | 2026-06-16 | `0.2.1` | `修复上传引导:从聊天选文件(文件传输助手)` | `e6689ff` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 491.5 KB / 503253 B | 上传成功 |
 | 2026-06-16 | `0.2.0` | `知识库:我的资料库+文档上传` | `a50596b` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 490.5 KB / 502279 B | 上传成功 |
 | 2026-06-14 | `0.1.6` | `junshi server build 7820f1c` | `7820f1c` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 481.8 KB / 493328 B | 上传成功 |
