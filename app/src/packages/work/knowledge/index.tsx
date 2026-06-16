@@ -9,6 +9,7 @@ import './index.scss';
 
 const STATUS: Record<string, string> = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
 const isWeapp = process.env.TARO_ENV === 'weapp';
+const SUPPORTED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
 
 function fmtSize(b: number | null): string {
   if (!b) return '';
@@ -32,12 +33,30 @@ export default function Knowledge() {
   const upload = async () => {
     if (busy) return;
     if (!isWeapp) { Taro.showToast({ title: '请在微信小程序内上传文件', icon: 'none' }); return; }
+    // 微信限制：小程序只能从「聊天里的文件」选取，不能浏览手机本地文件。先把预期讲清楚，
+    // 否则弹出的「选会话」界面会被当成「转发给好友」。
+    const guide = await Taro.showModal({
+      title: '从微信聊天选择文件',
+      content: '微信只允许小程序选取「聊天里的文件」。请先把资料发给「文件传输助手」（电脑端微信也能发），下一步选它即可。这不是转发，是选文件。',
+      confirmText: '去选择',
+      cancelText: '取消',
+    });
+    if (!guide.confirm) return;
     let chosen: Taro.chooseMessageFile.SuccessCallbackResult;
     try {
-      chosen = await Taro.chooseMessageFile({ count: 1, type: 'file' });
-    } catch { return; } // 用户取消选择
+      chosen = await Taro.chooseMessageFile({ count: 1, type: 'file', extension: SUPPORTED_EXT });
+    } catch (e) {
+      const msg = String((e as { errMsg?: string })?.errMsg || '');
+      if (!/cancel/i.test(msg)) Taro.showToast({ title: '没能打开文件选择，请重试', icon: 'none' });
+      return; // 用户取消则静默
+    }
     const f = chosen.tempFiles?.[0];
     if (!f) return;
+    const ext = (f.name?.split('.').pop() || '').toLowerCase();
+    if (!SUPPORTED_EXT.includes(ext)) {
+      Taro.showToast({ title: `不支持的格式 .${ext}（支持 PDF/Word/Excel/MD/TXT）`, icon: 'none' });
+      return;
+    }
     setBusy(true);
     try {
       await api.uploadKnowledge(f.path);
@@ -69,7 +88,7 @@ export default function Knowledge() {
           <View className="kb-up-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="upload" size={20} color={accent} /></View>
           <View className="kb-up-b">
             <Text className="kb-up-t">{busy ? '上传中…' : '上传资料'}</Text>
-            <Text className="kb-up-s">PDF / Word / Excel / Markdown / 文本，军师会读它来给建议</Text>
+            <Text className="kb-up-s">先发到微信聊天（如文件传输助手）再选 · PDF/Word/Excel/MD/TXT</Text>
           </View>
         </View>
 
@@ -77,7 +96,7 @@ export default function Knowledge() {
           <View className="kb-empty">
             <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={22} color={accent} /></View>
             <Text className="et">资料库还是空的</Text>
-            <Text className="es">上传你的业务资料（产品介绍、行业报告、FAQ…），军师在咨询时会自动参考。</Text>
+            <Text className="es">上传你的业务资料（产品介绍、行业报告、FAQ…），军师在咨询时会自动参考。微信里需先把文件发到「文件传输助手」，再回来选取。</Text>
           </View>
         ) : (
           <View className="kb-list">
