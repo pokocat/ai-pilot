@@ -239,19 +239,23 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
 
   // per-agent 接入覆盖：走该智能体自己的端点 / Dify 应用。失败兜底 mock。
   if (ctx.runtime) {
+    let s: Sourced<ChatReply>;
     try {
-      const s = await traced(() => runtimeChat(ctx), { kind: 'chat', ctx, meta, provider: ctx.runtime.mode === 'dify' ? 'dify' : 'openai', respText: (r) => r.text });
+      s = await traced(() => runtimeChat(ctx), { kind: 'chat', ctx, meta, provider: ctx.runtime.mode === 'dify' ? 'dify' : 'openai', respText: (r) => r.text });
       await maybeRecord(s, 'chat', ctx, meta);
-      await moderate('output', s.result.text);
-      return { result: s.result, usage: s.usage };
     } catch (err) {
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       return { result: mockChat(ctx), usage: ZERO_USAGE };
     }
+    if (!(await moderate('output', s.result.text))) {
+      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
+    }
+    return { result: s.result, usage: s.usage };
   }
 
   const cfg = await getAiConfig();
+  let chatResult: Sourced<ChatReply> | null = null;
   try {
     const live = liveProvider(cfg);
     if (live) {
@@ -263,12 +267,17 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
         return { result: m.result, usage: m.usage, provider: live, model: cfg.model };
       }, { kind: 'chat', ctx, meta, provider: live, respText: (r) => r.text });
       await maybeRecord(s, 'chat', ctx, meta);
-      await moderate('output', s.result.text);
-      return { result: s.result, usage: s.usage };
+      chatResult = s;
     }
   } catch (err) {
     console.error('[gateway] chat fallback to mock:', (err as Error).message);
     if (!env.aiFallbackMock) throw aiUnavailable(err);
+  }
+  if (chatResult) {
+    if (!(await moderate('output', chatResult.result.text))) {
+      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
+    }
+    return { result: chatResult.result, usage: chatResult.usage };
   }
   return { result: mockChat(ctx), usage: ZERO_USAGE };
 }
