@@ -244,6 +244,7 @@ body {
 .save-bar { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 18px; background: rgba(251,250,246,.94); backdrop-filter: blur(12px); border-top: 1px solid var(--line-2); display: flex; gap: 10px; }
 .save-bar .sv { flex: 1; height: 46px; border-radius: 12px; background: var(--accent); color: #fff; border: 0; font: 500 14px/1 var(--sans); display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; }
 .save-bar .gh { width: 46px; height: 46px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: var(--ink-2); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.save-bar .gh.gh-wide { width: auto; padding: 0 14px; gap: 6px; }
 .admin-toast { position: absolute; left: 50%; bottom: 96px; transform: translate(-50%, 12px); z-index: 60; background: var(--ink); color: var(--surface-2); padding: 11px 18px; border-radius: 999px; font-size: 13px; font-weight: 500; box-shadow: var(--shadow-md); opacity: 0; pointer-events: none; transition: .28s; display: flex; align-items: center; gap: 8px; }
 .admin-toast.show { opacity: 1; transform: translate(-50%, 0); } .admin-toast svg { color: var(--accent-bright); }
 
