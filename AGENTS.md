@@ -106,7 +106,7 @@ repo/
 
 ## 6. 账号与数据隔离
 
-- **登录**：小程序 server 模式优先支持本机号一键登录（`getPhoneNumber` code → 服务端 `getuserphonenumber` 换手机号 → 自有 token），也支持微信账号登录（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号）和短信验证码登录（`POST /auth/sms/send` → `POST /auth/login`，生产设 `SMS_PROVIDER=aliyun`、`SMS_REQUIRE_CODE=true`；当前阿里云短信模板 `ALIYUN_SMS_TEMPLATE_CODE=SMS_508120103`）。手机号免码登录仅保留为开发/测试兼容兜底。注册称呼可留空，也可点称呼框右侧的 spark 图标从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户，套餐赠送算力。
+- **登录**（2026-06 重构，默认微信优先）：登录页**默认微信账号登录**（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号），一键切换**短信验证码登录**（`POST /auth/sms/send` → `POST /auth/login`，生产设 `SMS_PROVIDER=aliyun`、`SMS_REQUIRE_CODE=true`；当前阿里云短信模板 `ALIYUN_SMS_TEMPLATE_CODE=SMS_508120103`）。微信新账号登录后进「完善资料」步：`chooseAvatar`+`type=nickname`（微信头像昵称填写能力，可改）同步头像/昵称——头像 `POST /me/avatar` 传 OSS public-read 存 `User.avatarUrl`、昵称走 `PUT /me`；并含**可选可跳过的绑定手机号**（`POST /auth/bind-phone`，`scene=bind` 短信码 + 占用守卫）。本机号一键登录端点 `POST /auth/wechat-phone`（`getPhoneNumber` 换号）保留但**不再是登录页主入口**。手机号免码登录仅保留为开发/测试兼容兜底。注册称呼可留空，也可点称呼框右侧的 spark 图标从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户，套餐赠送算力。
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
 - **微信密钥**：`WECHAT_MINI_SECRET` 与消息推送 `WECHAT_MESSAGE_TOKEN` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
@@ -336,6 +336,22 @@ TARO_APP_MODE=server TARO_APP_API="http://$LAN_IP:4000/api" npm run dev:weapp
 /Users/donis/.codex/skills/ai-pilot-weapp-preview/scripts/weapp_preview.sh preview
 ```
 注意：`/api/health` 只证明服务端存活；如果业务接口因 `DATABASE_URL`/Prisma 连不上库报错，应先修数据库。用户只是要可扫码验收时，可先退回 mock 预览保持体验可用。
+
+**小程序发布上线（开发版 → 体验版 → 发布）**
+
+小程序是独立于服务端的发布渠道，**不在 `deploy-prod.sh` 内**；后端用 `deploy-prod.sh` 单独上线，且必须向后兼容线上旧版小程序（新增字段/可选参数/新端点，不改既有响应契约）。发布前务必 **server 模式构建**，否则连的是 mock 而非线上 API：
+```bash
+cd /Users/donis/dev/ai-pilot/app
+npm run build:weapp:server   # = TARO_APP_MODE=server TARO_APP_API=https://wxapi.aibuzz.cn/api npm run build:weapp
+```
+产物在 `app/dist/`（`miniprogramRoot=dist/`）。两种上传方式，**默认用①微信开发者工具**：
+1. **微信开发者工具（首选）**：只导入 `app/`（不要导入仓库根目录或 `app/dist`）→ 右上角「上传」→ 填**版本号**（每次递增，线上最近为 `0.2.2`）+ 项目备注 → 进入 mp 后台「版本管理 · 开发版」。
+2. **CLI / miniprogram-ci（自动化）**：需先在 mp 后台 *开发管理 → 开发设置 → 小程序代码上传* 下载上传密钥 `private.<appid>.key` 并把**本机公网 IP**加进该密钥白名单：
+   ```bash
+   cd app && WEAPP_UPLOAD_KEY=/绝对路径/private.wx05a49967e2adb557.key \
+     npm run upload:weapp -- --version 0.2.3 --desc "本次变更说明"
+   ```
+上传后在 mp 后台 `mp.weixin.qq.com`「版本管理」：**开发版 → 转「体验版」自测 → 「提交审核」→ 审核通过后「发布」** 给全体用户。脚本/工具只产出开发版，转体验版、提交审核、正式发布都在 mp 后台手动操作。
 
 **部署发布**
 
