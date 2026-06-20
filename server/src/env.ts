@@ -18,8 +18,9 @@ export const env = {
   openaiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
   openaiModel: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
   openaiTimeoutMs: Number(process.env.OPENAI_TIMEOUT_MS ?? 20000),
-  // 真实 provider 调用失败时是否静默兜底 mock。生产应设 false：宁可报错重试，也不返回答非所问的模板。
-  aiFallbackMock: (process.env.AI_FALLBACK_MOCK ?? 'true') === 'true',
+  // 真实 provider 调用失败时是否静默兜底 mock。生产必须为 false：宁可报错，也不返回答非所问的模板。
+  // §8.0 生产禁止静默降级：默认 false；联调/演示时显式设 AI_FALLBACK_MOCK=true。
+  aiFallbackMock: (process.env.AI_FALLBACK_MOCK ?? 'false') === 'true',
 
   // 嵌入模型（知识库/语义记忆）。留空=用本地确定性嵌入（零依赖、离线）；
   // 开启后 + 真实 key，走 /embeddings 真实向量（生产建议配合 pgvector）。

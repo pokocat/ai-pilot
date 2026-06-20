@@ -67,8 +67,9 @@ export function verifyUserToken(token?: string): string {
     if (!jwtEnabled()) return ''; // 收到 JWT 但服务端没密钥 → 无法验，拒绝
     const [h, p, sig] = t.split('.');
     const expected = sign(`${h}.${p}`);
-    const a = Buffer.from(sig);
-    const b = Buffer.from(expected);
+    // Compare decoded binary digests, not base64url string bytes, for semantic correctness.
+    const a = Buffer.from(sig, 'base64');
+    const b = Buffer.from(expected, 'base64');
     if (a.length !== b.length || !timingSafeEqual(a, b)) return '';
     try {
       const payload = JSON.parse(fromB64url(p).toString('utf8')) as { sub?: string; exp?: number };
