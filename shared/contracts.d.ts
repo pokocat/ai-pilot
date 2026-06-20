@@ -526,6 +526,12 @@ export interface PlanPurchaseResult {
   grantedCredits: number;
   grantedTokens?: number; // 本次授予/重置的月度 token 额度
 }
+/** 微信支付下单结果（POST /plans/:id/order）：小程序据 pay 调起 wx.requestPayment */
+export interface WechatOrderResult {
+  ok: true;
+  outTradeNo: string;
+  pay: { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string };
+}
 /** 运营端单用户详情 + 智能体开通管理（GET /admin/users/:id） */
 export interface AdminUserAgentRow {
   key: string; name: string; role: string; icon: string;

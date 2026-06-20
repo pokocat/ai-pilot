@@ -15,6 +15,7 @@ import { reportRoutes } from './routes/reports.js';
 import { reportShareRoutes } from './routes/reportShare.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { planRoutes } from './routes/plans.js';
+import { payRoutes } from './routes/pay.js';
 import { adminRoutes } from './routes/admin.js';
 import { adminAccountRoutes } from './routes/adminAccount.js';
 import { registerHttpAudit } from './services/audit.js';
@@ -25,7 +26,9 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // 兼容「Content-Type: application/json 但 body 为空」的 POST（如无 body 的 activate / 报告渲染等接口）。
   // fastify 5.x 默认对空 JSON body 抛 FST_ERR_CTP_EMPTY_JSON_BODY(400)；而前端/小程序的请求封装会无条件带
   // application/json 头，无 body 的 POST 就被拒。这里把空 body 解析成 {}，非空仍正常解析(非法 JSON → 400)。
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    // 保留原文供支付回调等需要验签的路由读取（req.rawBody）。
+    (req as typeof req & { rawBody?: string }).rawBody = body as string;
     const s = (body as string).trim();
     if (!s) return done(null, {});
     try { done(null, JSON.parse(s)); }
@@ -49,6 +52,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(reportShareRoutes, { prefix: '/api' }); // 公开报告页(无鉴权,凭 id 分享)
   await app.register(knowledgeRoutes, { prefix: '/api' });
   await app.register(planRoutes, { prefix: '/api' });
+  await app.register(payRoutes, { prefix: '/api' }); // 支付回调（封装插件含原文 JSON 解析器，验签用）
   await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin
   await app.register(adminRoutes, { prefix: '/api' });
 

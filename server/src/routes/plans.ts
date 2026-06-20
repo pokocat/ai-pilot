@@ -1,10 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
-import { getBalance } from '../services/credits.js';
-import { setQuota } from '../services/tokenQuota.js';
-import { recordAudit } from '../services/audit.js';
-import type { Plan as PlanView, PlanPurchaseResult } from '../../../shared/contracts';
+import { applyPlanPurchase } from '../services/purchase.js';
+import { payConfigured, createJsapiOrder } from '../services/wechatPay.js';
+import type { Plan as PlanView, PlanPurchaseResult, WechatOrderResult } from '../../../shared/contracts';
 
 function publicPlan(plan: {
   id: string;
@@ -36,37 +35,33 @@ export async function planRoutes(app: FastifyInstance) {
     return plans.map(publicPlan);
   });
 
+  // 演示购买：直接发放权益（不经支付）。配齐微信支付凭据后禁用此路径，强制走 /plans/:id/order。
   app.post<{ Params: { id: string } }>('/plans/:id/purchase', async (req, reply): Promise<PlanPurchaseResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    if (payConfigured() && plan.price > 0) {
+      return reply.code(402).send({ error: '该套餐需通过支付购买，请发起支付下单', code: 'PAYMENT_REQUIRED' });
+    }
+    const r = await applyPlanPurchase(user, plan, { reason: `${plan.name} · 套餐购买`, source: 'demo_purchase' });
+    return { ok: true, plan: publicPlan(plan), creditBalance: r.creditBalance, grantedCredits: r.grantedCredits, grantedTokens: r.grantedTokens };
+  });
 
-    const before = await getBalance(user.id);
-    const unlimited = plan.creditsPerMonth < 0;
-    const grantedCredits = unlimited ? 0 : plan.creditsPerMonth;
-    const creditBalance = unlimited ? -1 : (before < 0 ? grantedCredits : before + grantedCredits);
-
-    await prisma.$transaction([
-      prisma.user.update({ where: { id: user.id }, data: { planId: plan.id } }),
-      prisma.creditLedger.create({
-        data: {
-          tenantId: user.tenantId,
-          userId: user.id,
-          delta: grantedCredits,
-          reason: `${plan.name} · 套餐购买`,
-          balance: creditBalance,
-        },
-      }),
-    ]);
-    // 月度 token 额度：覆盖式授予当月额度（区别于钻石的叠加充值）
-    await setQuota(user.tenantId, user.id, plan.tokenQuotaPerMonth);
-    await recordAudit({
-      tenantId: user.tenantId,
-      userId: user.id,
-      action: 'user.plan.purchase',
-      payload: { planId: plan.id, planName: plan.name, grantedCredits, creditBalance, grantedTokens: plan.tokenQuotaPerMonth },
-    });
-
-    return { ok: true, plan: publicPlan(plan), creditBalance, grantedCredits, grantedTokens: plan.tokenQuotaPerMonth };
+  // 微信支付下单（小程序 JSAPI）：创建订单并返回小程序调起支付所需参数。需配齐支付凭据。
+  app.post<{ Params: { id: string }; Body: { openid?: string } }>('/plans/:id/order', async (req, reply): Promise<WechatOrderResult | void> => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
+    if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    if (!payConfigured()) return reply.code(501).send({ error: '微信支付未配置，演示环境请走 /plans/:id/purchase', code: 'PAYMENT_NOT_CONFIGURED' });
+    if (plan.price <= 0) return reply.code(400).send({ error: '免费套餐无需支付', code: 'PLAN_FREE' });
+    const openid = (req.body?.openid || (user as { wechatOpenId?: string | null }).wechatOpenId || '').trim();
+    if (!openid) return reply.code(400).send({ error: '缺少支付用户 openid', code: 'OPENID_REQUIRED' });
+    try {
+      const r = await createJsapiOrder({ user, plan: { id: plan.id, name: plan.name, price: plan.price }, openid });
+      return { ok: true, outTradeNo: r.outTradeNo, pay: r.pay };
+    } catch (e) {
+      const err = e as { message?: string; statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 502).send({ error: err.message ?? '下单失败', code: err.code ?? 'WECHAT_PAY_CREATE_FAILED' });
+    }
   });
 }

@@ -489,6 +489,32 @@ model Plan {
   @@map("plan")
 }
 
+/// 支付订单（套餐购买的状态机 + 幂等入账锚点）。
+/// 状态流：created → paid（回调验签通过）→ applied（权益已发放，幂等终态）；或 closed/failed。
+/// 幂等：appliedAt 为「恰好一次」入账的原子锚点（条件更新抢占，防重复回调/并发双发权益）。
+model PaymentOrder {
+  id            String    @id @default(cuid())
+  outTradeNo    String    @unique // 商户订单号（我们生成，提交给微信）
+  tenantId      String
+  userId        String
+  planId        String
+  amount        Int // 应付金额（分）
+  currency      String    @default("CNY")
+  provider      String    @default("wechat") // wechat | mock（未配支付时的演示通道）
+  status        String    @default("created") // created | paid | applied | failed | closed
+  prepayId      String? // 微信预支付交易会话标识
+  transactionId String? // 微信支付订单号（回调返回）
+  paidAt        DateTime?
+  appliedAt     DateTime? // 权益发放完成时间 = 幂等终态锚点
+  rawNotifyJson Json? // 回调解密后的原文（排查用）
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("payment_order")
+}
+
 /// 算力账户流水
 model CreditLedger {
   id        String   @id @default(cuid())
