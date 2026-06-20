@@ -1,7 +1,7 @@
 # 军师 · 路线图与进展（ROADMAP）
 
 > 活文档。与 `AGENTS.md`（工程总说明）配套：AGENTS 记「当前真实状态」，本文件记「已做 / 待做」。
-> 最近更新：2026-06-03
+> 最近更新：2026-06-20
 
 ## 一、已交付（已合入 `claude/youthful-bell-feC4l`）
 
@@ -33,18 +33,18 @@
 - [ ] 真机/模拟器走查新页面 UI（项目 / 报告 / 对话 @引用），核对像素与本命色。
 
 ### P1 · 功能增强
-- [ ] **时序知识图谱**（Graphiti 式）：向量之上叠加，回答「X 时谁负责 Y」类关系/时序问题。
-- [ ] 运营后台补**项目 / 报告 / 知识只读看板**（后端接口已就绪）。
-- [ ] @引用选择器补**「记忆」候选**分组（当前由「知识」覆盖）。
-- [ ] 报告**任意两版对比** + 报告**重命名 / 删除 / 导出 PDF**。
-- [ ] 知识库**文档上传**（PDF/图片 OCR）入库。
+- [x] **时序知识图谱**（Graphiti 式）：`GraphEntity/GraphRelation`（有效时间窗）+ `services/knowledgeGraph.ts`（去重/软失效/as-of 查询）+ `routes/graph.ts`。抽取依赖真实模型。
+- [x] 运营后台**项目 / 报告 / 知识只读看板**后端接口（`GET /admin/{projects,reports,knowledge}`）；前端看板页待接。
+- [x] @引用选择器**「记忆」候选**分组（`GET /memories`，`resolveReferences` 支持 `kind:memory`）；前端分组待接。
+- [x] 报告**任意两版对比**（`/reports/:id/diff?from=&to=`）+ **重命名**（`PATCH /reports/:id`）+ **删除**。PDF 导出可用既有 HTML 分享页打印。
+- [x] 知识库**文档上传**（`POST /knowledge/upload`，纯文本即入库；PDF/图片走 `services/ocr.ts` 配 `OCR_*` 启用）。
 
 ### P2 · 生产硬化
-- [ ] **密钥与后台权限安全**：`AiSetting.apiKey` 现明文存库 → 加密 / 接密管；admin 已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权，仍需细粒度 RBAC、管理员账号体系与密钥轮换策略。
-- [ ] 鉴权升级：短信验证码/本机号登录已接入；`token=userId` → JWT 仍待生产化。
-- [ ] 内容审核 / 缓存：关键词+内存 → 合规审核服务 + Redis。
+- [x] **密钥加密**：`services/secretBox.ts`（AES-256-GCM）模型/Dify/技能库密钥写时加密读时解密（配 `APP_ENCRYPTION_KEY`，`npm run secrets:encrypt` 回填）。**RBAC**：`AdminAccount.role`（super_admin/operator）+ `requireSuperAdmin` 守护密钥配置/账号管理 + `/admin/accounts` 多账号。仍待：密钥接 KMS/轮换、前端账号管理页。
+- [x] 鉴权升级：JWT（`services/userToken.ts`，配 `APP_JWT_SECRET`，`APP_JWT_REQUIRED` 强制）；短信强制校验开关 `SMS_REQUIRE_CODE` 就绪。
+- [x] 内容审核 / 缓存：`services/moderation.ts`（keyword/http 可插拔）+ `services/cache.ts`（内存/Redis 可选依赖 ioredis）。
 - [x] **算力按次扣减 + 余额不足拦截**（`services/credits.ts`，TC-K 守护）。
-- [ ] 算力进阶：演示级套餐购买已接入；真实微信支付/订单回调/幂等入账、token 级用量归集（按租户×智能体）、并发扣费用事务/行锁防双花仍待做。
+- [x] **微信支付 v3 脚手架 + 幂等入账**：`PaymentOrder` 状态机 + `services/wechatPay.ts`（下单/回调验签解密/`markPaidAndApply` 原子防并发双发）+ `routes/pay.ts`。配 `WECHAT_PAY_*` 启用。仍待：平台证书自动轮换、主动查单对账、退款；token 级用量归集仍为旁路统计。
 
 ### P3 · 收尾
 - [x] 扩充集成测试：SSE `/generate` 流式、内容审核拦截、**算力按次扣减+不足拦截**、并发冒烟（见 `docs/TESTING.md` TC-I/J/K/L）。
@@ -53,5 +53,5 @@
 
 ## 三、风险登记
 - **信息泄露（高）**：跨租户/跨用户数据隔离——已由 `TC-G` 集成测试守护，**大改后必须跑通**（见 `docs/TESTING.md`）。
-- **密钥明文（中）**：模型 key 明文存库，仅演示；生产前必须加密 + RBAC。
+- **密钥明文（已缓解）**：模型/Dify/技能库 key 已支持 AES-256-GCM 加密存库（配 `APP_ENCRYPTION_KEY` 启用 + `npm run secrets:encrypt` 回填）；细粒度 RBAC 已落（super_admin/operator）。仍待密钥接 KMS/轮换。
 - **pgvector 未真验（中）**：路径实现但本地无扩展未端到端跑，启用前在真库验证。

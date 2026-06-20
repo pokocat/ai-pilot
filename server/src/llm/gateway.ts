@@ -11,6 +11,8 @@ import { mockChat, mockDeliverable } from './providers/mock.js';
 import { ZERO_USAGE, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
 import { recordTokenUsage, type UsageMeta } from '../services/usage.js';
 import { recordTrace } from '../services/trace.js';
+import { moderate } from '../services/moderation.js';
+import { cacheGet, cacheSet } from '../services/cache.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
 function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
@@ -143,25 +145,12 @@ async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>
   return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model };
 }
 
-// —— 内容审核（演示用关键词；生产替换为合规审核服务） ——
-const BLOCK_WORDS = ['暴力', '违法集资', '赌博', '毒品'];
-
-async function moderate(refType: 'input' | 'output', text: string): Promise<boolean> {
-  if (!env.moderationEnabled) return true;
-  const hit = BLOCK_WORDS.find((w) => text.includes(w));
-  const verdict = hit ? 'block' : 'pass';
-  await prisma.moderationLog
-    .create({ data: { refType, verdict, detailJson: hit ? { word: hit } : {} } })
-    .catch(() => {});
-  return verdict === 'pass';
-}
-
+// —— 内容审核：见 services/moderation.ts（可插拔 keyword/http provider，落 moderation_log） ——
 // —— 算力计量：按次扣费在路由层用 services/credits 完成（产出前校验、成功后扣减）；
 //    此处只负责 LLM 调用，不掺计费逻辑。Token 级用量归集留待生产接真实 usage。 ——
 
-// —— 结果缓存（演示用内存缓存；生产用 Redis） ——
-const cache = new Map<string, { v: unknown; at: number }>();
-const TTL = 5 * 60 * 1000;
+// —— 结果缓存：见 services/cache.ts（默认内存，配 REDIS_URL+ioredis 切 Redis） ——
+const CACHE_TTL = 5 * 60 * 1000;
 function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string {
   const refSig = (ctx.references?.length ?? 0) + ':' + (ctx.knowledge?.length ?? 0) + ':' + (ctx.memories?.length ?? 0);
   const profileSig = [
@@ -206,8 +195,8 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   // 工具产出依赖实时检索/记忆/HTTP 结果，不走结果缓存。
   const ck = cacheKey('deliverable', ctx, cfg);
   if (!tools.length) {
-    const cached = cache.get(ck);
-    if (cached && Date.now() - cached.at < TTL) return { result: cached.v as Deliverable, usage: ZERO_USAGE }; // 缓存命中：0 token，不计额度
+    const cached = await cacheGet<Deliverable>(ck);
+    if (cached) return { result: cached, usage: ZERO_USAGE }; // 缓存命中：0 token，不计额度（启用技能不缓存）
   }
 
   let sourced: Sourced<Deliverable>;
@@ -237,7 +226,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   if (!(await moderate('output', outText))) {
     throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
-  if (!tools.length) cache.set(ck, { v: sourced.result, at: Date.now() });
+  if (!tools.length) await cacheSet(ck, sourced.result, CACHE_TTL);
   return { result: sourced.result, usage: sourced.usage };
 }
 
@@ -396,6 +385,45 @@ export async function completeJson(system: string, user: string): Promise<Record
     console.error('[gateway] completeJson failed:', (err as Error).message);
     return null;
   }
+}
+/**
+ * 从文本抽取时序知识图谱三元组（实体 + 关系）。
+ * 有真实模型时让模型抽 subject-predicate-object；否则返回空（启发式留给上层，避免误抽）。
+ */
+export async function extractGraphTriples(
+  text: string,
+): Promise<{ entities: { name: string; type: string }[]; relations: { subject: string; predicate: string; object: string }[] }> {
+  const empty = { entities: [], relations: [] };
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  if (!live) return empty;
+  try {
+    const sys =
+      '你是知识图谱抽取器。从文本中抽取「实体」和「关系三元组」，用于构建企业时序知识图谱。' +
+      '实体 type 取值：person/org/product/concept/other。关系为 {subject,predicate,object}，' +
+      'subject/object 必须是实体 name。只输出 JSON：' +
+      '{"entities":[{"name":"","type":""}],"relations":[{"subject":"","predicate":"","object":""}]}。无可抽取则空数组。';
+    const json = await rawJson(cfg, live, sys, text.slice(0, 2000));
+    if (!json) return empty;
+    const entities = ((json.entities as unknown[]) ?? [])
+      .filter((e): e is { name: string; type: string } => !!e && typeof (e as { name?: unknown }).name === 'string')
+      .map((e) => ({ name: String(e.name).slice(0, 80), type: normEntityType((e as { type?: string }).type) }))
+      .slice(0, 20);
+    const relations = ((json.relations as unknown[]) ?? [])
+      .filter((r): r is { subject: string; predicate: string; object: string } =>
+        !!r && typeof (r as { subject?: unknown }).subject === 'string' &&
+        typeof (r as { predicate?: unknown }).predicate === 'string' &&
+        typeof (r as { object?: unknown }).object === 'string')
+      .map((r) => ({ subject: String(r.subject).slice(0, 80), predicate: String(r.predicate).slice(0, 40), object: String(r.object).slice(0, 80) }))
+      .slice(0, 30);
+    return { entities, relations };
+  } catch (err) {
+    console.error('[gateway] extractGraphTriples fallback:', (err as Error).message);
+    return empty;
+  }
+}
+function normEntityType(t?: string): string {
+  return ['person', 'org', 'product', 'concept', 'other'].includes(t ?? '') ? (t as string) : 'other';
 }
 
 /** 给汇总服务用：以就绪模型把对话纪要文本归纳成「讨论要点/关键结论/待办」三类。 */

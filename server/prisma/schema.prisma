@@ -489,6 +489,32 @@ model Plan {
   @@map("plan")
 }
 
+/// 支付订单（套餐购买的状态机 + 幂等入账锚点）。
+/// 状态流：created → paid（回调验签通过）→ applied（权益已发放，幂等终态）；或 closed/failed。
+/// 幂等：appliedAt 为「恰好一次」入账的原子锚点（条件更新抢占，防重复回调/并发双发权益）。
+model PaymentOrder {
+  id            String    @id @default(cuid())
+  outTradeNo    String    @unique // 商户订单号（我们生成，提交给微信）
+  tenantId      String
+  userId        String
+  planId        String
+  amount        Int // 应付金额（分）
+  currency      String    @default("CNY")
+  provider      String    @default("wechat") // wechat | mock（未配支付时的演示通道）
+  status        String    @default("created") // created | paid | applied | failed | closed
+  prepayId      String? // 微信预支付交易会话标识
+  transactionId String? // 微信支付订单号（回调返回）
+  paidAt        DateTime?
+  appliedAt     DateTime? // 权益发放完成时间 = 幂等终态锚点
+  rawNotifyJson Json? // 回调解密后的原文（排查用）
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("payment_order")
+}
+
 /// 算力账户流水
 model CreditLedger {
   id        String   @id @default(cuid())
@@ -675,6 +701,50 @@ model EvalCaseResult {
 
   @@index([runId])
   @@map("eval_case_result")
+}
+
+/// 时序知识图谱 · 实体节点（Graphiti 式）。租户级，按归一名+类型去重。
+model GraphEntity {
+  id        String   @id @default(cuid())
+  tenantId  String
+  projectId String?
+  name      String // 展示名
+  normName  String // 归一名（小写去空白）用于去重
+  type      String   @default("other") // person | org | product | concept | other
+  createdAt DateTime @default(now())
+
+  subjectOf GraphRelation[] @relation("subject")
+  objectOf  GraphRelation[] @relation("object")
+
+  @@unique([tenantId, normName, type])
+  @@index([tenantId, projectId])
+  @@map("graph_entity")
+}
+
+/// 时序知识图谱 · 关系边。带有效时间窗（validFrom/validTo）以回答「X 时谁负责 Y」类时序问题。
+/// 新事实使旧的同主语+谓词关系「失效」（置 validTo / invalidatedAt），保留历史可回溯。
+model GraphRelation {
+  id            String    @id @default(cuid())
+  tenantId      String
+  projectId     String?
+  subjectId     String
+  predicate     String // 谓词，如「负责」「就职于」「持有」
+  objectId      String
+  validFrom     DateTime  @default(now()) // 该事实生效起点
+  validTo       DateTime? // 失效终点（null=至今有效）
+  invalidatedAt DateTime? // 被新事实推翻的时刻（软失效，区别于自然到期）
+  source        String    @default("conversation") // conversation | document | manual
+  sourceId      String?
+  confidence    Float     @default(1.0)
+  createdAt     DateTime  @default(now())
+
+  subject GraphEntity @relation("subject", fields: [subjectId], references: [id], onDelete: Cascade)
+  object  GraphEntity @relation("object", fields: [objectId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, projectId])
+  @@index([subjectId])
+  @@index([objectId])
+  @@map("graph_relation")
 }
 
 /// 审计日志

@@ -1,6 +1,7 @@
 // 账号体系：微信小程序用 openid/unionid/本机号登录；手机号短信登录保留免码兼容兜底。
 // 新账号自动建独立租户(Tenant)+用户(User)，业务数据按 tenantId/userId 行级隔离。
-// 生产仍应把自有登录态替换为 JWT；此处 token 直接复用 userId。
+// 登录态 token 经 services/userToken.ts：配 APP_JWT_SECRET 后签发 HS256 JWT，
+// 未配则回退历史口径 token=userId（校验侧同样兼容，平滑过渡）。
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
@@ -8,6 +9,7 @@ import { prisma } from '../db.js';
 import { env } from '../env.js';
 import { code2Session, wechatAccountKey, getPhoneNumberByCode } from '../services/wechat.js';
 import { issueSmsCode, verifySmsCode } from '../services/sms.js';
+import { signUserToken } from '../services/userToken.js';
 import { maskAuditPhone, recordAudit, requestMeta, summarizeForAudit } from '../services/audit.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 
@@ -117,7 +119,7 @@ async function onboardedOf(user: AuthUser): Promise<boolean> {
 
 function loginResult(user: AuthUser, isNew: boolean, onboarded: boolean) {
   return {
-    token: user.id, // fake token = userId（演示用）
+    token: signUserToken(user.id), // 配 APP_JWT_SECRET → 签发 JWT；未配 → 返回 userId（历史兼容）
     isNew,
     onboarded,
     user: {

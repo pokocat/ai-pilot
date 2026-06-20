@@ -18,6 +18,7 @@ import {
 } from '../services/adminAccount.js';
 import { recomputeDraftDirty, publishDraft, rollbackToVersion, listVersions } from '../services/agentVersions.js';
 import { startEvalRun, suggestTier, PRICING_TIERS } from '../services/evals.js';
+import { encryptSecret, decryptSecretSafe } from '../services/secretBox.js';
 import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
@@ -38,6 +39,7 @@ import type {
   SandboxRequest, SandboxResult, SandboxTarget,
   EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalSetRequest, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, EvalCaseResultItem, StartEvalRunRequest, PricingTier,
+  AdminProjectItem, AdminReportItem,
 } from '../../../shared/contracts';
 import { Prisma } from '@prisma/client';
 
@@ -191,9 +193,9 @@ function runtimeData(rt?: AgentRuntimeUpdate): Prisma.AgentUpdateInput {
   if (rt.providerMode !== undefined) d.providerMode = PROVIDER_MODES.includes(rt.providerMode) ? rt.providerMode : 'inherit';
   if (rt.apiBaseUrl !== undefined) d.apiBaseUrl = rt.apiBaseUrl.trim() || null;
   if (rt.apiModel !== undefined) d.apiModel = rt.apiModel.trim() || null;
-  if (rt.apiKey !== undefined) d.apiKey = rt.apiKey || null;
+  if (rt.apiKey !== undefined) d.apiKey = rt.apiKey ? encryptSecret(rt.apiKey) : null;
   if (rt.difyBaseUrl !== undefined) d.difyBaseUrl = rt.difyBaseUrl.trim() || null;
-  if (rt.difyApiKey !== undefined) d.difyApiKey = rt.difyApiKey || null;
+  if (rt.difyApiKey !== undefined) d.difyApiKey = rt.difyApiKey ? encryptSecret(rt.difyApiKey) : null;
   if (rt.difyInputs !== undefined) d.difyInputs = (rt.difyInputs ?? {}) as Prisma.InputJsonValue;
   if (rt.skills !== undefined) d.skillsConfig = normalizeSkills(rt.skills) as unknown as Prisma.InputJsonValue;
   return d;
@@ -351,6 +353,32 @@ export async function adminRoutes(app: FastifyInstance) {
         ? recentAudits.map((a) => ({ icon: auditIcon(a.action), t: auditLabel(a.action), m: String(a.action), v: isoSecond(a.createdAt).replace('T', ' ').replace('Z', '') }))
         : [{ icon: 'alert', t: '暂无审计事件', m: '用户产生操作后会自动写入审计日志', v: '-' }],
     };
+  });
+
+  // —— 只读看板：项目 / 报告（跨租户运营视图，纯读不改；知识库看板见 /admin/knowledge）——
+  app.get<{ Querystring: { limit?: string } }>('/admin/projects', async (req): Promise<AdminProjectItem[]> => {
+    const take = Math.min(200, Math.max(1, Number(req.query.limit ?? 100)));
+    const rows = await prisma.project.findMany({
+      orderBy: { updatedAt: 'desc' }, take,
+      include: { tenant: { select: { name: true } }, _count: { select: { sessions: true, reports: true, knowledge: true } } },
+    });
+    return rows.map((p) => ({
+      id: p.id, name: p.name, tenantName: p.tenant?.name ?? '', status: p.status,
+      sessions: p._count.sessions, reports: p._count.reports, knowledge: p._count.knowledge,
+      updatedAt: p.updatedAt.toISOString(),
+    }));
+  });
+
+  app.get<{ Querystring: { limit?: string } }>('/admin/reports', async (req): Promise<AdminReportItem[]> => {
+    const take = Math.min(200, Math.max(1, Number(req.query.limit ?? 100)));
+    const rows = await prisma.reportDoc.findMany({
+      orderBy: { updatedAt: 'desc' }, take,
+      include: { tenant: { select: { name: true } }, agent: { select: { name: true } } },
+    });
+    return rows.map((r) => ({
+      id: r.id, title: r.title, type: r.type, tenantName: r.tenant?.name ?? '',
+      agentName: r.agent?.name ?? null, currentVersion: r.currentVersion, updatedAt: r.updatedAt.toISOString(),
+    }));
   });
 
   // —— 用户管理：小程序注册用户、账号来源、会话/成果/算力概览 ——
@@ -744,7 +772,7 @@ export async function adminRoutes(app: FastifyInstance) {
         return pingAgentRuntime({
           mode: 'dify',
           difyBaseUrl: rt.difyBaseUrl ?? a.difyBaseUrl ?? undefined,
-          difyApiKey: (rt.difyApiKey && rt.difyApiKey.length ? rt.difyApiKey : a.difyApiKey) ?? undefined,
+          difyApiKey: (rt.difyApiKey && rt.difyApiKey.length ? rt.difyApiKey : decryptSecretSafe(a.difyApiKey)) || undefined,
           difyInputs: rt.difyInputs ?? (a.difyInputs as Record<string, string> | null) ?? undefined,
         });
       }
@@ -753,7 +781,7 @@ export async function adminRoutes(app: FastifyInstance) {
           mode: 'openai',
           baseUrl: rt.apiBaseUrl ?? a.apiBaseUrl ?? undefined,
           model: rt.apiModel ?? a.apiModel ?? undefined,
-          apiKey: (rt.apiKey && rt.apiKey.length ? rt.apiKey : a.apiKey) ?? undefined,
+          apiKey: (rt.apiKey && rt.apiKey.length ? rt.apiKey : decryptSecretSafe(a.apiKey)) || undefined,
         });
       }
       return { ok: false, provider: 'inherit', error: '当前为「跟随全局模型」，请到「模型配置」页测试连接' };

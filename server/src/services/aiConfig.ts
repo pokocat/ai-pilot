@@ -2,11 +2,13 @@
 // 解析优先级：数据库 AiSetting（单例）> 环境变量兜底。带短缓存，避免每次调用查库。
 // 未配置真实 key 时 effectiveProvider 自动降级 mock，保证演示永远可跑。
 //
-// 安全：apiKey 在库中明文存储仅为演示便利；生产应加密 / 接密管，且对外只回传 hasKey。
+// 安全：apiKey 经 secretBox（AES-256-GCM）加密存库（配置 APP_ENCRYPTION_KEY 后生效，未配则透传明文兼容演示）；
+//       读取边界解密、写入边界加密；对外一律只回传 hasKey，不出明文。
 
 import { prisma } from '../db.js';
 import { env, isRealKey } from '../env.js';
 import type { ModelRate } from '../data/modelPrices.js';
+import { encryptSecret, decryptSecretSafe } from './secretBox.js';
 import type { AiProvider, AiConfig, AiPreset, AiModel, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 
 export interface ResolvedAiConfig {
@@ -115,17 +117,17 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
         label: row.label || cfg.label,
         baseUrl: row.baseUrl || cfg.baseUrl,
         model: row.model || cfg.model,
-        apiKey: row.apiKey || '',
+        apiKey: decryptSecretSafe(row.apiKey),
         embeddingModel: row.embeddingModel || '',
         temperature: typeof row.temperature === 'number' ? row.temperature : 0.7,
         timeoutMs: env.openaiTimeoutMs,
         embeddingEnabled: row.embeddingEnabled ?? false,
         embeddingBaseUrl: row.embeddingBaseUrl || '',
-        embeddingApiKey: row.embeddingApiKey || '',
+        embeddingApiKey: decryptSecretSafe(row.embeddingApiKey),
         rerankEnabled: row.rerankEnabled ?? false,
         rerankModel: row.rerankModel || '',
         rerankBaseUrl: row.rerankBaseUrl || '',
-        rerankApiKey: row.rerankApiKey || '',
+        rerankApiKey: decryptSecretSafe(row.rerankApiKey),
       };
     }
   } catch {
@@ -156,16 +158,16 @@ export async function setAiConfig(patch: {
   if (patch.label !== undefined) data.label = patch.label;
   if (patch.baseUrl !== undefined) data.baseUrl = patch.baseUrl;
   if (patch.model !== undefined) data.model = patch.model;
-  if (patch.apiKey !== undefined) data.apiKey = patch.apiKey; // 空串=清空 key
+  if (patch.apiKey !== undefined) data.apiKey = encryptSecret(patch.apiKey); // 空串=清空 key
   if (patch.embeddingModel !== undefined) data.embeddingModel = patch.embeddingModel;
   if (patch.temperature !== undefined) data.temperature = patch.temperature;
   if (patch.embeddingEnabled !== undefined) data.embeddingEnabled = patch.embeddingEnabled;
   if (patch.embeddingBaseUrl !== undefined) data.embeddingBaseUrl = patch.embeddingBaseUrl;
-  if (patch.embeddingApiKey !== undefined) data.embeddingApiKey = patch.embeddingApiKey;
+  if (patch.embeddingApiKey !== undefined) data.embeddingApiKey = encryptSecret(patch.embeddingApiKey);
   if (patch.rerankEnabled !== undefined) data.rerankEnabled = patch.rerankEnabled;
   if (patch.rerankModel !== undefined) data.rerankModel = patch.rerankModel;
   if (patch.rerankBaseUrl !== undefined) data.rerankBaseUrl = patch.rerankBaseUrl;
-  if (patch.rerankApiKey !== undefined) data.rerankApiKey = patch.rerankApiKey;
+  if (patch.rerankApiKey !== undefined) data.rerankApiKey = encryptSecret(patch.rerankApiKey);
 
   await prisma.aiSetting.upsert({
     where: { id: 'default' },
@@ -176,16 +178,16 @@ export async function setAiConfig(patch: {
       label: patch.label ?? 'Agnes 2.0 Flash',
       baseUrl: patch.baseUrl ?? 'https://apihub.agnes-ai.com/v1',
       model: patch.model ?? 'agnes-2.0-flash',
-      apiKey: patch.apiKey ?? '',
+      apiKey: encryptSecret(patch.apiKey ?? ''),
       embeddingModel: patch.embeddingModel ?? '',
       temperature: patch.temperature ?? 0.7,
       embeddingEnabled: patch.embeddingEnabled ?? false,
       embeddingBaseUrl: patch.embeddingBaseUrl ?? '',
-      embeddingApiKey: patch.embeddingApiKey ?? '',
+      embeddingApiKey: encryptSecret(patch.embeddingApiKey ?? ''),
       rerankEnabled: patch.rerankEnabled ?? false,
       rerankModel: patch.rerankModel ?? '',
       rerankBaseUrl: patch.rerankBaseUrl ?? '',
-      rerankApiKey: patch.rerankApiKey ?? '',
+      rerankApiKey: encryptSecret(patch.rerankApiKey ?? ''),
     },
   });
   cache = null;
@@ -213,7 +215,7 @@ export function publicModel(m: ModelRow, activeId: string | null): AiModel {
     model: m.model,
     embeddingModel: m.embeddingModel,
     temperature: m.temperature,
-    hasKey: isRealKey(m.apiKey),
+    hasKey: isRealKey(decryptSecretSafe(m.apiKey)),
     preset: m.preset ?? null,
     active: !!activeId && m.id === activeId,
     priceInput: m.priceInput ?? 0,
@@ -229,7 +231,8 @@ export function publicModel(m: ModelRow, activeId: string | null): AiModel {
 async function syncActiveSetting(m: ModelRow): Promise<void> {
   const fields = {
     provider: m.provider, label: m.label, baseUrl: m.baseUrl, model: m.model,
-    apiKey: m.apiKey, temperature: m.temperature, activeModelId: m.id,
+    // m.apiKey 来自 AiModel（已密文）；encryptSecret 幂等。embeddingModel 不随切换同步（main 06-16）。
+    apiKey: encryptSecret(m.apiKey), temperature: m.temperature, activeModelId: m.id,
   };
   await prisma.aiSetting.upsert({
     where: { id: 'default' },
@@ -247,7 +250,7 @@ async function ensureSeededModels(): Promise<void> {
   const created = await prisma.aiModel.create({
     data: {
       provider: cfg.provider, label: cfg.label || '当前模型', baseUrl: cfg.baseUrl, model: cfg.model,
-      apiKey: cfg.apiKey, embeddingModel: cfg.embeddingModel, temperature: cfg.temperature,
+      apiKey: encryptSecret(cfg.apiKey), embeddingModel: cfg.embeddingModel, temperature: cfg.temperature,
     },
   });
   await syncActiveSetting(created as ModelRow);
@@ -273,7 +276,7 @@ export async function addModel(input: AiModelUpsert): Promise<AiModel> {
       label: input.label?.trim() || '未命名模型',
       baseUrl: input.baseUrl?.trim() ?? '',
       model: input.model?.trim() ?? '',
-      apiKey: input.apiKey ?? '',
+      apiKey: encryptSecret(input.apiKey ?? ''),
       embeddingModel: input.embeddingModel?.trim() ?? '',
       temperature: typeof input.temperature === 'number' ? input.temperature : 0.7,
       preset: input.preset ?? null,
@@ -296,7 +299,7 @@ export async function updateModel(id: string, patch: AiModelUpsert): Promise<AiM
   if (patch.label !== undefined) data.label = patch.label.trim() || existing.label;
   if (patch.baseUrl !== undefined) data.baseUrl = patch.baseUrl.trim();
   if (patch.model !== undefined) data.model = patch.model.trim();
-  if (patch.apiKey !== undefined && patch.apiKey !== '') data.apiKey = patch.apiKey; // 留空=保留现有 key
+  if (patch.apiKey !== undefined && patch.apiKey !== '') data.apiKey = encryptSecret(patch.apiKey); // 留空=保留现有 key
   if (patch.embeddingModel !== undefined) data.embeddingModel = patch.embeddingModel.trim();
   if (patch.temperature !== undefined) data.temperature = patch.temperature;
   if (patch.preset !== undefined) data.preset = patch.preset;
@@ -338,7 +341,7 @@ export async function mergedTestConfig(b: AiModelTest): Promise<ResolvedAiConfig
   let apiKey = b.apiKey ?? '';
   if ((!apiKey || !apiKey.length) && b.modelId) {
     const row = await prisma.aiModel.findUnique({ where: { id: b.modelId } });
-    apiKey = row?.apiKey ?? '';
+    apiKey = decryptSecretSafe(row?.apiKey); // 库内密文 → 解密供探活
   }
   return {
     ...base,

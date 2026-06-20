@@ -318,6 +318,16 @@ export interface SaveLibRequest {
 
 /* ────────────── 引用（@ 项目/报告/知识/记忆） ────────────── */
 export type RefKind = 'project' | 'report' | 'knowledge' | 'memory';
+/** @引用选择器「记忆」分组候选（GET /memories） */
+export interface MemoryCandidate {
+  id: string;
+  text: string;
+  kind: string;          // fact | preference | feedback
+  agentKey: string;
+  agentName?: string | null;
+  projectId?: string | null;
+  createdAt: string;
+}
 export interface MessageRef {
   kind: RefKind;
   id: string;
@@ -526,6 +536,12 @@ export interface PlanPurchaseResult {
   grantedCredits: number;
   grantedTokens?: number; // 本次授予/重置的月度 token 额度
 }
+/** 微信支付下单结果（POST /plans/:id/order）：小程序据 pay 调起 wx.requestPayment */
+export interface WechatOrderResult {
+  ok: true;
+  outTradeNo: string;
+  pay: { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string };
+}
 /** 运营端单用户详情 + 智能体开通管理（GET /admin/users/:id） */
 export interface AdminUserAgentRow {
   key: string; name: string; role: string; icon: string;
@@ -538,6 +554,10 @@ export interface AdminUserDetail {
   user: AdminUserItem;
   agents: AdminUserAgentRow[]; // 全部需开通(unlock)的智能体 + 开通状态
 }
+/** 只读看板：项目（GET /admin/projects） */
+export interface AdminProjectItem { id: string; name: string; tenantName: string; status: string; sessions: number; reports: number; knowledge: number; updatedAt: string; }
+/** 只读看板：报告（GET /admin/reports） */
+export interface AdminReportItem { id: string; title: string; type: string; tenantName: string; agentName: string | null; currentVersion: number; updatedAt: string; }
 export interface AdminUserItem {
   id: string;
   name: string;

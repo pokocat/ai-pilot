@@ -1,4 +1,6 @@
 import { prisma } from '../db.js';
+import { decryptSecretSafe } from './secretBox.js';
+import { verifyUserToken } from './userToken.js';
 import { INDUSTRY_BENCHMARK } from '../data/seedConfig.js';
 import { recallMemories } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
@@ -18,7 +20,7 @@ function resolveAgentRuntime(
       mode: 'openai',
       baseUrl: agent.apiBaseUrl,
       model: agent.apiModel ?? undefined,
-      apiKey: agent.apiKey,
+      apiKey: decryptSecretSafe(agent.apiKey),
       skills: (agent.skillsConfig as AgentRuntime['skills']) ?? null,
     };
   }
@@ -27,7 +29,7 @@ function resolveAgentRuntime(
     return {
       mode: 'dify',
       difyBaseUrl: agent.difyBaseUrl,
-      difyApiKey: agent.difyApiKey,
+      difyApiKey: decryptSecretSafe(agent.difyApiKey),
       difyInputs: (agent.difyInputs as Record<string, string> | null) ?? {},
       user: opts.userId,
       sessionId: opts.sessionId ?? null,
@@ -50,7 +52,7 @@ function isBriefInterviewRequest(text: string): boolean {
  * 不再回退 demo 用户——保证账号间数据隔离；无 token 或失效一律 401。
  */
 export async function resolveUser(token?: string) {
-  const id = (token ?? '').trim();
+  const id = verifyUserToken(token); // JWT→sub / 历史 token→userId 原样（见 userToken.ts）
   if (!id) throw unauthorized();
   const u = await prisma.user.findUnique({ where: { id }, include: { tenant: true } });
   if (!u) throw unauthorized();

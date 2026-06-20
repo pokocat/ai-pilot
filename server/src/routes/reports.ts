@@ -84,6 +84,16 @@ export async function reportRoutes(app: FastifyInstance) {
     return saved;
   });
 
+  // 重命名报告（仅改展示名，不动 slug 归一键，避免影响版本归组）
+  app.patch<{ Params: { id: string }; Body: { title?: string } }>('/reports/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const title = (req.body?.title ?? '').trim();
+    if (!title) return reply.code(400).send({ error: '缺少 title', code: 'TITLE_REQUIRED' });
+    const r = await prisma.reportDoc.updateMany({ where: { id: req.params.id, tenantId: user.tenantId }, data: { title } });
+    if (r.count === 0) return reply.code(404).send({ error: 'report not found' });
+    return { ok: true, title };
+  });
+
   app.delete<{ Params: { id: string } }>('/reports/:id', async (req) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     await prisma.reportDoc.deleteMany({ where: { id: req.params.id, tenantId: user.tenantId } });
