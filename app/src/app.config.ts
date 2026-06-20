@@ -14,6 +14,7 @@ export default defineAppConfig({
       root: 'packages/work',
       pages: [
         'library/index',
+        'knowledge/index',
         'projects/index',
         'project/index',
         'report/index',

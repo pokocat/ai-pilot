@@ -2,9 +2,9 @@
 // agent 的 skillsConfig.tools 里既可能是内置工具名，也可能是自定义工具 key；本服务统一解析。
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { builtinToolNames, builtinToolMeta, resolveTools } from '../llm/tools/registry.js';
+import { builtinToolNames, nativeSkillMeta, resolveTools, resolveOutputSkills } from '../llm/tools/registry.js';
 import { makeHttpTool } from '../llm/tools/httpTool.js';
-import type { Tool } from '../llm/tools/types.js';
+import type { Tool, OutputSkill } from '../llm/tools/types.js';
 import type { SkillToolDef, SkillToolMeta, SkillToolUpsert } from '../../../shared/contracts';
 
 const KEY_RE = /^[a-z][a-z0-9_]*$/;
@@ -95,11 +95,16 @@ export async function deleteTool(id: string): Promise<boolean> {
   return !!r;
 }
 
-/** agent 勾选列表：内置工具 + 启用的自定义工具。 */
+/** agent 勾选列表（统一技能库）：native 技能(tool + output，带 kind) + 启用的运营自建 HTTP 工具(kind=tool)。 */
 export async function selectableMeta(): Promise<SkillToolMeta[]> {
-  const builtin = builtinToolMeta().map((m) => ({ ...m, builtin: true }));
+  const native = nativeSkillMeta().map((m) => ({ name: m.key, description: m.description, builtin: true, kind: m.kind }));
   const custom = await prisma.skillTool.findMany({ where: { enabled: true }, orderBy: { createdAt: 'desc' } });
-  return [...builtin, ...custom.map((c) => ({ name: c.key, description: c.description, builtin: false }))];
+  return [...native, ...custom.map((c) => ({ name: c.key, description: c.description, builtin: false, kind: 'tool' as const }))];
+}
+
+/** agent 勾选的「产出处理」技能(kind=output)。当前仅 native；未来可扩展 HTTP output。 */
+export async function loadOutputSkillsByNames(names?: string[] | null): Promise<OutputSkill[]> {
+  return resolveOutputSkills(names);
 }
 
 /** 把 agent 勾选的名字解析成 Tool[]：内置走 registry，其余按 key 查启用的自定义工具。 */

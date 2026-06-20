@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "lint:ui": "node ../scripts/audit-admin-ui.mjs",
+    "build": "npm run lint:ui && tsc -b && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -60,6 +60,7 @@ async function traced<T>(
 
 // 对真实计费 provider（claude/openai/dify）记账；mock 与 0-token（缓存命中）跳过。记账内部 catch，不影响产出。
 async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ctx: GenContext, meta?: UsageMeta): Promise<void> {
+  if (meta?.sandbox) return; // 沙盒试跑不计入 token_usage（诊断 trace 仍由 traced() 记录）
   if (s.provider !== 'claude' && s.provider !== 'openai' && s.provider !== 'dify') return;
   await recordTokenUsage({
     tenantId: meta?.tenantId ?? null,
@@ -103,7 +104,7 @@ async function runtimeChat(ctx: GenContext): Promise<Sourced<ChatReply>> {
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
   if (!isRealKey(cfg.apiKey)) return { result: mockChat(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   const oa = await import('./providers/openai.js');
-  const tools = await resolveAgentTools(rt);
+  const tools = await skillToolsFor(ctx);
   if (tools.length) {
     const m = await oa.openaiChatWithTools(ctx, cfg, tools);
     return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model, toolCalls: m.toolCalls, iterations: m.iterations };
@@ -113,11 +114,13 @@ async function runtimeChat(ctx: GenContext): Promise<Sourced<ChatReply>> {
 }
 
 // 解析该 agent 启用的技能工具（未开启或无勾选 → 空，走单次调用）。
-// 内置工具走 registry；自定义 HTTP 工具按 key 查技能库表。
-async function resolveAgentTools(rt: NonNullable<GenContext['runtime']>) {
-  if (rt.mode !== 'openai' || !rt.skills?.enabled || !rt.skills.tools?.length) return [];
+// 与「模型接入方式」解耦：读 ctx.skills（inherit/全局模型、自定义 openai 端点都适用）。
+// 仅在 openai 兼容 provider 下生效——工具调用循环目前是 openai 协议实现；调用方需确保 openai 上下文（claude/mock/dify 不调本函数）。
+async function skillToolsFor(ctx: GenContext) {
+  const sk = ctx.skills;
+  if (!sk?.enabled || !sk.tools?.length) return [];
   const { loadToolsByNames } = await import('../services/skillTools.js');
-  return loadToolsByNames(rt.skills.tools);
+  return loadToolsByNames(sk.tools);
 }
 
 async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>> {
@@ -131,7 +134,7 @@ async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
   if (!isRealKey(cfg.apiKey)) return { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   const oa = await import('./providers/openai.js');
-  const tools = await resolveAgentTools(rt);
+  const tools = await skillToolsFor(ctx);
   if (tools.length) {
     const m = await oa.openaiDeliverableWithTools(ctx, cfg, tools);
     return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model, toolCalls: m.toolCalls, iterations: m.iterations };
@@ -197,26 +200,32 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   }
 
   const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  // 技能启用 + openai 兼容 provider → 走工具调用循环（与接入方式无关：全局模型/inherit 同样可用）。
+  const tools = live === 'openai' ? await skillToolsFor(ctx) : [];
+  // 工具产出依赖实时检索/记忆/HTTP 结果，不走结果缓存。
   const ck = cacheKey('deliverable', ctx, cfg);
-  const cached = cache.get(ck);
-  if (cached && Date.now() - cached.at < TTL) return { result: cached.v as Deliverable, usage: ZERO_USAGE }; // 缓存命中：0 token，不计额度
+  if (!tools.length) {
+    const cached = cache.get(ck);
+    if (cached && Date.now() - cached.at < TTL) return { result: cached.v as Deliverable, usage: ZERO_USAGE }; // 缓存命中：0 token，不计额度
+  }
 
   let sourced: Sourced<Deliverable>;
   try {
     sourced = await traced(async () => {
-      const live = liveProvider(cfg);
       if (live === 'claude') {
         const { claudeDeliverable } = await import('./providers/claude.js');
         const m = await claudeDeliverable(ctx, cfg);
         return { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model };
       }
       if (live === 'openai') {
-        const { openaiDeliverable } = await import('./providers/openai.js');
-        const m = await openaiDeliverable(ctx, cfg);
-        return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model };
+        const oa = await import('./providers/openai.js');
+        const m = tools.length ? await oa.openaiDeliverableWithTools(ctx, cfg, tools) : await oa.openaiDeliverable(ctx, cfg);
+        const mt = m as { toolCalls?: number; iterations?: number };
+        return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model, toolCalls: mt.toolCalls, iterations: mt.iterations };
       }
       return { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
-    }, { kind: 'deliverable', ctx, meta, provider: liveProvider(cfg) ?? 'mock', respText: deliverableText });
+    }, { kind: 'deliverable', ctx, meta, provider: live ?? 'mock', respText: deliverableText });
   } catch (err) {
     console.error('[gateway] deliverable fallback to mock:', (err as Error).message);
     if (!env.aiFallbackMock) throw aiUnavailable(err);
@@ -228,7 +237,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   if (!(await moderate('output', outText))) {
     throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
-  cache.set(ck, { v: sourced.result, at: Date.now() });
+  if (!tools.length) cache.set(ck, { v: sourced.result, at: Date.now() });
   return { result: sourced.result, usage: sourced.usage };
 }
 
@@ -259,12 +268,16 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
   try {
     const live = liveProvider(cfg);
     if (live) {
+      const tools = live === 'openai' ? await skillToolsFor(ctx) : []; // 技能与接入解耦：全局模型也能调工具
       const s = await traced(async () => {
-        const m =
-          live === 'claude'
-            ? await (await import('./providers/claude.js')).claudeChat(ctx, cfg)
-            : await (await import('./providers/openai.js')).openaiChat(ctx, cfg);
-        return { result: m.result, usage: m.usage, provider: live, model: cfg.model };
+        if (live === 'claude') {
+          const m = await (await import('./providers/claude.js')).claudeChat(ctx, cfg);
+          return { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model };
+        }
+        const oa = await import('./providers/openai.js');
+        const m = tools.length ? await oa.openaiChatWithTools(ctx, cfg, tools) : await oa.openaiChat(ctx, cfg);
+        const mt = m as { toolCalls?: number; iterations?: number };
+        return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model, toolCalls: mt.toolCalls, iterations: mt.iterations };
       }, { kind: 'chat', ctx, meta, provider: live, respText: (r) => r.text });
       await maybeRecord(s, 'chat', ctx, meta);
       chatResult = s;
@@ -370,6 +383,19 @@ async function rawJson(
   const m = content.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
+}
+
+/** 通用 JSON 补全（评测评委等内部用）：用就绪模型发一次并解析 JSON；未就绪（mock）/失败返回 null。 */
+export async function completeJson(system: string, user: string): Promise<Record<string, unknown> | null> {
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  if (!live) return null;
+  try {
+    return await rawJson(cfg, live, system, user);
+  } catch (err) {
+    console.error('[gateway] completeJson failed:', (err as Error).message);
+    return null;
+  }
 }
 
 /** 给汇总服务用：以就绪模型把对话纪要文本归纳成「讨论要点/关键结论/待办」三类。 */

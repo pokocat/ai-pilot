@@ -4,7 +4,7 @@
 
 import { hybridSearch } from '../../services/retrieval.js';
 import { recallMemories } from '../../services/memory.js';
-import type { Tool } from './types.js';
+import type { Tool, OutputSkill } from './types.js';
 
 const KNOWLEDGE_MAX = 1500; // 截断工具输出，防多轮 prompt 膨胀
 
@@ -47,5 +47,18 @@ export const recallMemory: Tool = {
     const limit = Math.min(10, Math.max(1, Number(args.limit) || 5));
     const mems = await recallMemories(ctx.userId, ctx.agentKey, limit, query);
     return mems.length ? mems.join('\n') : '（暂无长期记忆）';
+  },
+};
+
+// 产出处理技能：把结构化成果渲染成可分享的网页版报告，回填 htmlUrl。
+// 这是「HTML 生成」作为技能库一员的落地——不再是写死的后处理，而是注册进 registry 的 output 技能。
+export const renderReport: OutputSkill = {
+  key: 'render_report',
+  name: '网页版报告',
+  description: '把产出成果渲染成自包含、可分享的网页版报告，回填分享链接（htmlUrl）。',
+  async run(deliverable, ctx) {
+    const { publishReport } = await import('../../services/reportHtml.js');
+    const htmlUrl = await publishReport(ctx.tenantId, deliverable);
+    return { htmlUrl };
   },
 };

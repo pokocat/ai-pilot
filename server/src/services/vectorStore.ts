@@ -19,18 +19,18 @@ function lit(vec: number[]): string {
 
 export interface ChunkHit { id: string; itemId: string; text: string; dist: number; }
 
-/** 知识切片向量检索（ANN）。projectId 可选过滤。返回按距离升序的候选。 */
+/** 知识切片向量检索（ANN）。userId 可选过滤（上下文按用户隔离）。返回按距离升序的候选。 */
 export async function vectorSearchChunks(
-  tenantId: string, projectId: string | null | undefined, queryVec: number[], k: number,
+  tenantId: string, userId: string | null | undefined, queryVec: number[], k: number,
 ): Promise<ChunkHit[]> {
   const v = lit(queryVec);
-  if (projectId) {
+  if (userId) {
     return prisma.$queryRawUnsafe<ChunkHit[]>(
       `SELECT c.id, c."itemId" AS "itemId", c.text, (c.embedding_vec <=> $1::vector) AS dist
        FROM knowledge_chunk c JOIN knowledge_item i ON i.id = c."itemId"
-       WHERE c."tenantId" = $2 AND i."projectId" = $3 AND c.embedding_vec IS NOT NULL
+       WHERE c."tenantId" = $2 AND i."userId" = $3 AND c.embedding_vec IS NOT NULL
        ORDER BY c.embedding_vec <=> $1::vector LIMIT $4`,
-      v, tenantId, projectId, k,
+      v, tenantId, userId, k,
     );
   }
   return prisma.$queryRawUnsafe<ChunkHit[]>(

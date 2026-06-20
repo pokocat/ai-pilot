@@ -19,8 +19,7 @@
 }
 .brand { display: flex; align-items: center; gap: 11px; }
 .brand-mk {
-  width: 40px; height: 40px; border-radius: 12px; color: #FBFAF6;
-  font-size: 21px; font-weight: 700; text-align: center; line-height: 40px;
+  width: 46px; height: 46px; display: block;
 }
 .brand-nm { display: block; font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.1; }
 .brand-sub { font-size: 9px; letter-spacing: .22em; color: var(--ink-3); }

@@ -12,10 +12,11 @@ interface Props {
   saved?: boolean;
   onSave?: () => void;
   onExport?: () => void;
+  onShare?: () => void; // 生成网页版（OSS 托管）并复制分享链接
 }
 
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
-export default function ReportCard({ data, animate = false, saved = false, onSave, onExport }: Props) {
+export default function ReportCard({ data, animate = false, saved = false, onSave, onExport, onShare }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [revealed, setRevealed] = useState(animate ? 0 : data.sections.length);
@@ -108,6 +109,12 @@ export default function ReportCard({ data, animate = false, saved = false, onSav
               <Icon name={isSaved ? 'check' : 'layers'} size={14} color={isSaved ? accent : '#fff'} />
               <Text>{isSaved ? '已存入方案库' : '存入方案库'}</Text>
             </View>
+            {onShare && (
+              <View className="act ghost" onClick={() => onShare()}>
+                <Icon name="up" size={14} color="#565C63" />
+                <Text>网页版</Text>
+              </View>
+            )}
             <View className="act ghost" onClick={() => onExport?.()}>
               <Icon name="doc" size={14} color="#565C63" />
               <Text>复制全文</Text>

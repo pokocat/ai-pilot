@@ -73,8 +73,8 @@ export function embeddingUsable(c: EmbeddingCreds): boolean {
   return c.enabled && !!c.model && !!c.baseUrl && isRealKey(c.apiKey);
 }
 
-/** 真实嵌入（OpenAI 兼容 /embeddings）。失败抛错，由 embed() 兜底回本地。 */
-async function embedRemote(c: EmbeddingCreds, text: string, timeoutMs: number): Promise<number[]> {
+/** 真实嵌入（OpenAI 兼容 /embeddings）。返回向量 + 本次 token 数（用于基建用量计量）。失败抛错，由 embed() 兜底回本地。 */
+async function embedRemote(c: EmbeddingCreds, text: string, timeoutMs: number): Promise<{ embedding: number[]; tokens: number }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -85,27 +85,40 @@ async function embedRemote(c: EmbeddingCreds, text: string, timeoutMs: number): 
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = (await res.json().catch(() => ({}))) as { data?: { embedding?: number[] }[] };
+    const data = (await res.json().catch(() => ({}))) as { data?: { embedding?: number[] }[]; usage?: { prompt_tokens?: number; total_tokens?: number } };
     const emb = data.data?.[0]?.embedding;
     if (!emb?.length) throw new Error('embeddings 返回为空');
-    return emb;
+    return { embedding: emb, tokens: data.usage?.total_tokens ?? data.usage?.prompt_tokens ?? 0 };
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** 统一入口：开启且凭证可用时走真实模型，否则本地确定性嵌入兜底。 */
+/** 统一入口：开启且凭证可用时走真实模型，否则本地确定性嵌入兜底。真实调用计入「检索基建」用量。 */
 export async function embed(text: string): Promise<number[]> {
   const cfg = await getAiConfig();
   const c = resolveEmbedding(cfg);
   if (embeddingUsable(c)) {
     try {
-      return await embedRemote(c, text, cfg.timeoutMs);
+      const { embedding, tokens } = await embedRemote(c, text, cfg.timeoutMs);
+      const { recordInfraUsage } = await import('./usage.js');
+      recordInfraUsage('embedding', c.model, tokens); // fire-and-forget，与用户产出用量区分
+      return embedding;
     } catch (err) {
       console.error('[embedding] remote fallback to local:', (err as Error).message);
     }
   }
   return embedLocal(text);
+}
+
+/** 探测当前嵌入维度（不记基建用量）：远程可用→远程实测维度，否则本地维度。供「知识库」体检用。 */
+export async function embeddingDim(): Promise<number> {
+  const cfg = await getAiConfig();
+  const c = resolveEmbedding(cfg);
+  if (embeddingUsable(c)) {
+    try { return (await embedRemote(c, '维度探测', cfg.timeoutMs)).embedding.length; } catch { /* 回退本地维度 */ }
+  }
+  return EMBED_DIM;
 }
 
 /** 连通性探活（运营后台「测试连接」用）。 */
@@ -115,7 +128,7 @@ export async function testEmbedding(cfg: ResolvedAiConfig): Promise<{ ok: boolea
   if (!embeddingUsable(c)) return { ok: false, error: '缺少模型 / baseUrl / 真实 Key（留空则回退对话模型）' };
   try {
     const v = await embedRemote(c, '连接测试', cfg.timeoutMs);
-    return { ok: true, dim: v.length };
+    return { ok: true, dim: v.embedding.length };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }

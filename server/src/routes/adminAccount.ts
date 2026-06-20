@@ -3,7 +3,7 @@
 // 公开接口靠主密钥/密码自证；退出/改密用 per-route preHandler requireAdmin（接受会话 token 或主密钥）。
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Prisma } from '@prisma/client';
-import { requireAdmin } from '../services/adminAuth.js';
+import { requireAdmin, actorOf, actorAccountId, isSuperActor } from '../services/adminAuth.js';
 import { recordAudit, requestMeta, summarizeForAudit } from '../services/audit.js';
 import {
   isInitialized, masterKeyConfigured, masterKeyValid,
@@ -11,7 +11,7 @@ import {
   type AccountError,
 } from '../services/adminAccount.js';
 import type {
-  AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest,
+  AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest, AdminMe,
 } from '../../../shared/contracts';
 
 function token(req: { headers: Record<string, unknown> }): string {
@@ -99,11 +99,22 @@ export async function adminAccountRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // 改密：主密钥可直接重置，否则需当前密码。成功后吊销全部会话需重新登录。
+  // 当前登录者身份：前端按角色显隐「账户管理」、按范围过滤可见 agent。
+  app.get('/admin/auth/me', { preHandler: requireAdmin }, async (req): Promise<AdminMe> => {
+    const actor = actorOf(req);
+    return {
+      kind: actor.kind,
+      username: actor.kind === 'account' ? actor.username : null,
+      role: actor.kind === 'account' ? actor.role : 'owner', // master/legacyUser 视为超管
+      isSuper: isSuperActor(actor),
+    };
+  });
+
+  // 改密：改当前登录账户自己（主密钥可直接重置，否则需当前密码）。成功后吊销该账户全部会话需重新登录。
   app.post<{ Body: AdminChangePasswordRequest }>('/admin/auth/password', { preHandler: requireAdmin }, async (req, reply) => {
     const b = req.body ?? ({} as AdminChangePasswordRequest);
     try {
-      await changePassword({ currentPassword: b.currentPassword, newPassword: b.newPassword, masterKey: b.masterKey });
+      await changePassword({ accountId: actorAccountId(actorOf(req)), currentPassword: b.currentPassword, newPassword: b.newPassword, masterKey: b.masterKey });
       await recordAdminAccountAttempt(req, 'admin.account.password_attempt', {
         ok: true,
         statusCode: 200,

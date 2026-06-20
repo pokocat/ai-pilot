@@ -28,8 +28,8 @@ export function rerankUsable(c: RerankCreds): boolean {
   return c.enabled && !!c.model && !!c.baseUrl && isRealKey(c.apiKey);
 }
 
-/** 调 rerank API，返回按相关性降序的 { index, score }（index 相对入参 documents 顺序）。失败抛错。 */
-async function rerankCall(c: RerankCreds, query: string, documents: string[], topN: number, timeoutMs: number): Promise<RerankResult[]> {
+/** 调 rerank API，返回按相关性降序的 { index, score } + 本次 token 数（用于基建用量计量）。失败抛错。 */
+async function rerankCall(c: RerankCreds, query: string, documents: string[], topN: number, timeoutMs: number): Promise<{ results: RerankResult[]; tokens: number }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -47,7 +47,7 @@ async function rerankCall(c: RerankCreds, query: string, documents: string[], to
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json().catch(() => ({}))) as
-      | { results?: { index: number; relevance_score?: number; score?: number }[] }
+      | { results?: { index: number; relevance_score?: number; score?: number }[]; tokens?: { input_tokens?: number; output_tokens?: number }; usage?: { total_tokens?: number } }
       | { index: number; score?: number; relevance_score?: number }[];
     const rows = Array.isArray(data) ? data : data.results;
     if (!Array.isArray(rows)) throw new Error('rerank 返回格式异常');
@@ -55,7 +55,11 @@ async function rerankCall(c: RerankCreds, query: string, documents: string[], to
       .filter((r) => typeof r.index === 'number')
       .map((r) => ({ index: r.index, score: r.relevance_score ?? r.score ?? 0 }));
     if (!out.length) throw new Error('rerank 返回为空');
-    return out.sort((a, b) => b.score - a.score);
+    const meta = Array.isArray(data) ? null : data;
+    const tokens = (meta?.tokens?.input_tokens ?? 0) + (meta?.tokens?.output_tokens ?? 0)
+      || meta?.usage?.total_tokens
+      || Math.ceil((query.length + documents.join('').length) / 4); // provider 不报用量时按字符粗估
+    return { results: out.sort((a, b) => b.score - a.score), tokens };
   } finally {
     clearTimeout(timer);
   }
@@ -71,7 +75,10 @@ export async function rerank(query: string, documents: string[], topN: number): 
   const c = resolveRerank(cfg);
   if (!rerankUsable(c)) return null;
   try {
-    return await rerankCall(c, query, documents, Math.min(topN, documents.length), cfg.timeoutMs);
+    const { results, tokens } = await rerankCall(c, query, documents, Math.min(topN, documents.length), cfg.timeoutMs);
+    const { recordInfraUsage } = await import('./usage.js');
+    recordInfraUsage('rerank', c.model, tokens); // fire-and-forget，计入「检索基建」用量
+    return results;
   } catch (err) {
     console.error('[rerank] fallback to fusion order:', (err as Error).message);
     return null;

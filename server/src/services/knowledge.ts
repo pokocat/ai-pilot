@@ -1,10 +1,15 @@
 // 知识库服务：把「对话提炼 / 报告 / 上传文档 / 手动笔记」统一切片 + 向量化入库，
 // 供混合检索（retrieval.hybridSearch）召回，并可被对话显式 @ 引用。
 
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../db.js';
+import { env } from '../env.js';
 import { embed } from './embedding.js';
 import { pgvectorEnabled, upsertChunkVector } from './vectorStore.js';
+import { parseDocument, detectDocType } from './docParse.js';
+import { ossConfigured, ossPutBuffer, ossDelete, ossSignedUrl } from './ossUpload.js';
 import type { KnowledgeItemT, KnowledgeKind } from '../llm/schema.js';
+import type { KnowledgeDocRow, KnowledgeDetail } from '../../../shared/contracts';
 
 // 段落优先切片：按空行/句号聚合到 ~280 字一片，过长再硬切。演示足够；
 // 生产可换更讲究的语义切片 / 重叠窗口（见 AGENTS §16）。
@@ -27,6 +32,20 @@ export function chunkText(text: string, maxLen = 280): string[] {
   }
   if (buf.trim()) out.push(buf.trim());
   return out;
+}
+
+/** 删除并重建一条 item 的全部切片向量（入库 & 重嵌共用）。返回切片数。 */
+export async function chunkAndEmbed(itemId: string, tenantId: string, text: string): Promise<number> {
+  await prisma.knowledgeChunk.deleteMany({ where: { itemId } });
+  const chunks = chunkText(text);
+  for (let i = 0; i < chunks.length; i++) {
+    const embedding = await embed(chunks[i]);
+    const chunk = await prisma.knowledgeChunk.create({
+      data: { itemId, tenantId, ord: i, text: chunks[i], embedding },
+    });
+    if (pgvectorEnabled()) await upsertChunkVector(chunk.id, embedding).catch(() => {});
+  }
+  return chunks.length;
 }
 
 export interface IngestOpts {
@@ -60,14 +79,7 @@ export async function ingestKnowledge(opts: IngestOpts): Promise<KnowledgeItemT>
     },
   });
 
-  const chunks = chunkText(text);
-  for (let i = 0; i < chunks.length; i++) {
-    const embedding = await embed(chunks[i]);
-    const chunk = await prisma.knowledgeChunk.create({
-      data: { itemId: item.id, tenantId: opts.tenantId, ord: i, text: chunks[i], embedding },
-    });
-    if (pgvectorEnabled()) await upsertChunkVector(chunk.id, embedding).catch(() => {});
-  }
+  await chunkAndEmbed(item.id, opts.tenantId, text);
 
   return {
     id: item.id,
@@ -106,5 +118,145 @@ export async function listKnowledge(
 }
 
 export async function deleteKnowledge(tenantId: string, id: string): Promise<void> {
-  await prisma.knowledgeItem.deleteMany({ where: { id, tenantId } });
+  const item = await prisma.knowledgeItem.findFirst({ where: { id, tenantId }, select: { fileKey: true } });
+  await prisma.knowledgeItem.deleteMany({ where: { id, tenantId } }); // chunks 级联删除
+  if (item?.fileKey) await ossDelete(item.fileKey).catch(() => {}); // 顺带清掉 OSS 原件（best-effort）
+}
+
+// ——————————————————————————————————————————————————————————————————————————
+// 文档上传管线：原件存 OSS（私有）→ 建 item(parsing) → 立即返回 → 异步解析+切片+嵌入 → status。
+// ——————————————————————————————————————————————————————————————————————————
+
+/**
+ * 摄取一个上传的文件：先把原件存到 OSS（私有、不可猜 key；未配置 OSS 则跳过、预览不可用），
+ * 建一条 status=parsing 的 document item 后**立即返回**，解析+嵌入在后台异步进行。
+ */
+export async function ingestUploadedFile(opts: {
+  tenantId: string;
+  userId: string;
+  projectId?: string | null;
+  fileName: string;
+  mime?: string;
+  buf: Buffer;
+}): Promise<{ id: string; status: string }> {
+  const type = detectDocType(opts.fileName, opts.mime); // null → 仍入库，processDocument 会以清晰错误落 failed
+
+  let fileKey: string | null = null;
+  if (ossConfigured()) {
+    const ext = (opts.fileName.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8) || 'bin';
+    const key = `${env.ossKeyPrefix ? env.ossKeyPrefix + '/' : ''}kb/${opts.tenantId}/${randomUUID()}.${ext}`;
+    try {
+      fileKey = await ossPutBuffer(key, opts.buf, opts.mime || 'application/octet-stream');
+    } catch (e) {
+      console.error('[knowledge] OSS put failed, 仅入库文本（无原件预览）:', (e as Error).message);
+    }
+  }
+
+  const item = await prisma.knowledgeItem.create({
+    data: {
+      tenantId: opts.tenantId,
+      userId: opts.userId,
+      projectId: opts.projectId ?? null,
+      kind: 'document',
+      title: opts.fileName,
+      text: '',
+      sourceType: 'upload',
+      status: 'parsing',
+      fileName: opts.fileName,
+      fileType: type ?? null,
+      fileSize: opts.buf.length,
+      fileKey,
+      tagsJson: [],
+    },
+  });
+
+  // 异步处理（不阻塞响应）；buf 由闭包持有直到处理完。失败不抛、落 status=failed。
+  void processDocument(item.id, opts.tenantId, opts.buf, opts.fileName, opts.mime);
+  return { id: item.id, status: item.status };
+}
+
+/** 异步：解析文档 → 落正文 → 切片+嵌入 → status=ready；任何失败落 status=failed + error。绝不抛出。 */
+export async function processDocument(itemId: string, tenantId: string, buf: Buffer, fileName: string, mime?: string): Promise<void> {
+  try {
+    const { text } = await parseDocument(buf, fileName, mime);
+    await prisma.knowledgeItem.update({ where: { id: itemId }, data: { text, status: 'embedding', error: null } });
+    await chunkAndEmbed(itemId, tenantId, text);
+    await prisma.knowledgeItem.update({ where: { id: itemId }, data: { status: 'ready' } });
+  } catch (e) {
+    const msg = ((e as Error).message ?? '解析失败').slice(0, 500);
+    await prisma.knowledgeItem.update({ where: { id: itemId }, data: { status: 'failed', error: msg } }).catch(() => {});
+    console.error(`[knowledge] processDocument ${itemId} failed:`, msg);
+  }
+}
+
+/** 重嵌一条 item：从已存正文重新切片+向量化（不重新解析原件）。空文本则跳过。 */
+export async function reembedItem(tenantId: string, id: string): Promise<{ chunks: number }> {
+  const item = await prisma.knowledgeItem.findFirst({ where: { id, tenantId } });
+  if (!item || !item.text.trim()) return { chunks: 0 };
+  await prisma.knowledgeItem.update({ where: { id }, data: { status: 'embedding', error: null } });
+  const chunks = await chunkAndEmbed(id, tenantId, item.text);
+  await prisma.knowledgeItem.update({ where: { id }, data: { status: 'ready' } });
+  return { chunks };
+}
+
+/** 知识项详情 + 切片（含每片向量维度，便于排查嵌入是否正常）。 */
+export async function getKnowledgeDetail(tenantId: string, id: string): Promise<KnowledgeDetail | null> {
+  const item = await prisma.knowledgeItem.findFirst({
+    where: { id, tenantId },
+    include: { chunks: { orderBy: { ord: 'asc' } } },
+  });
+  if (!item) return null;
+  return {
+    id: item.id,
+    kind: item.kind,
+    title: item.title,
+    sourceType: item.sourceType,
+    status: item.status,
+    fileName: item.fileName,
+    fileType: item.fileType,
+    fileSize: item.fileSize,
+    projectId: item.projectId,
+    error: item.error,
+    createdAt: item.createdAt.toISOString(),
+    updatedAt: item.updatedAt.toISOString(),
+    textPreview: item.text.slice(0, 2000),
+    chunks: item.chunks.map((c) => ({
+      id: c.id,
+      ord: c.ord,
+      text: c.text,
+      dim: Array.isArray(c.embedding) ? (c.embedding as number[]).length : 0,
+    })),
+  };
+}
+
+/** 取知识项原件的有时限签名预览 URL；无原件 / OSS 未配置 → null。 */
+export async function knowledgePreviewUrl(tenantId: string, id: string): Promise<string | null> {
+  const item = await prisma.knowledgeItem.findFirst({ where: { id, tenantId }, select: { fileKey: true } });
+  if (!item?.fileKey || !ossConfigured()) return null;
+  return ossSignedUrl(item.fileKey, 600);
+}
+
+/** 列出某用户的知识库（文档视图：状态 + 文件元信息 + 切片数）。 */
+export async function listKnowledgeDocs(tenantId: string, userId: string, filter?: { projectId?: string }): Promise<KnowledgeDocRow[]> {
+  const rows = await prisma.knowledgeItem.findMany({
+    where: { tenantId, userId, ...(filter?.projectId ? { projectId: filter.projectId } : {}) },
+    orderBy: { updatedAt: 'desc' },
+    take: 200,
+    include: { _count: { select: { chunks: true } } },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind,
+    title: r.title,
+    sourceType: r.sourceType,
+    status: r.status,
+    fileName: r.fileName,
+    fileType: r.fileType,
+    fileSize: r.fileSize,
+    chunkCount: r._count.chunks,
+    projectId: r.projectId,
+    error: r.error,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  }));
 }

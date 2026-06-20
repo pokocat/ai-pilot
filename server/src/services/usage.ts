@@ -3,7 +3,8 @@
 // 统计供运营后台「Token 用量」看板用。Dify 路径 v1 暂不计量（其响应未取 metadata.usage）。
 
 import { prisma } from '../db.js';
-import { estimateCostMicros, rateFor } from '../data/modelPrices.js';
+import { estimateCostMicros } from '../data/modelPrices.js';
+import { resolveModelRate } from './aiConfig.js';
 import type { Usage } from '../llm/schema.js';
 import type { AdminTokenUsageView } from '../../../shared/contracts';
 
@@ -14,6 +15,7 @@ export interface UsageMeta {
   sessionId?: string | null;
   agentKey?: string | null;
   ratio?: number; // 该智能体计费比例：creditCost(本次扣额) = ceil(totalTokens × ratio)
+  sandbox?: boolean; // 运营沙盒试跑：仍记诊断 trace，但不写 token_usage（不污染计费统计、不真扣额度）
 }
 
 /**
@@ -29,6 +31,7 @@ export async function recordTokenUsage(
     const outputTokens = Math.max(0, u.outputTokens);
     const totalTokens = inputTokens + outputTokens;
     if (totalTokens <= 0) return;
+    const { rate } = await resolveModelRate(args.model); // 运营在模型配置里填的单价优先，否则内置价表
     await prisma.tokenUsage.create({
       data: {
         tenantId: args.tenantId ?? null,
@@ -42,13 +45,19 @@ export async function recordTokenUsage(
         outputTokens,
         cachedInput: Math.max(0, u.cachedInput ?? 0),
         totalTokens,
-        costMicros: estimateCostMicros(args.model, u),
+        costMicros: estimateCostMicros(u, rate),
         creditCost: args.creditCost ?? 0,
       },
     });
   } catch (err) {
     console.error('[usage] record failed:', (err as Error).message);
   }
+}
+
+/** 记录「检索基建」（嵌入 / 重排）的 token 消耗，与用户产出用量区分（无 user 归属、不扣额度）。fire-and-forget。 */
+export function recordInfraUsage(kind: 'embedding' | 'rerank', model: string, tokens: number): void {
+  if (!(tokens > 0)) return;
+  void recordTokenUsage({ kind, provider: 'openai', model, usage: { inputTokens: tokens, outputTokens: 0, cachedInput: 0 } });
 }
 
 const dayKey = (d: Date): string => d.toISOString().slice(0, 10); // YYYY-MM-DD（UTC）
@@ -62,7 +71,7 @@ export async function tokenUsageSummary(windowDays = 30): Promise<AdminTokenUsag
   const rows = await prisma.tokenUsage.findMany({
     where: { createdAt: { gte: since } },
     select: {
-      userId: true, model: true, inputTokens: true, outputTokens: true,
+      userId: true, kind: true, model: true, inputTokens: true, outputTokens: true,
       totalTokens: true, costMicros: true, createdAt: true,
     },
     orderBy: { createdAt: 'desc' },
@@ -73,8 +82,18 @@ export async function tokenUsageSummary(windowDays = 30): Promise<AdminTokenUsag
   const modelMap = new Map<string, { calls: number; totalTokens: number; costMicros: number }>();
   const dayMap = new Map<string, { totalTokens: number; costMicros: number }>();
   const userMap = new Map<string, { totalTokens: number; costMicros: number }>();
+  // 检索基建（嵌入 / 重排）单独归集，不混进「用户产出」用量。
+  const USER_KINDS = new Set(['chat', 'deliverable']);
+  const infraMap = new Map<string, { kind: string; model: string; calls: number; totalTokens: number; costMicros: number }>();
 
   for (const r of rows) {
+    if (!USER_KINDS.has(r.kind)) {
+      const key = `${r.kind}|${r.model}`;
+      const it = infraMap.get(key) ?? { kind: r.kind, model: r.model, calls: 0, totalTokens: 0, costMicros: 0 };
+      it.calls += 1; it.totalTokens += r.totalTokens; it.costMicros += r.costMicros;
+      infraMap.set(key, it);
+      continue;
+    }
     totals.calls += 1;
     totals.inputTokens += r.inputTokens;
     totals.outputTokens += r.outputTokens;
@@ -97,9 +116,10 @@ export async function tokenUsageSummary(windowDays = 30): Promise<AdminTokenUsag
     }
   }
 
-  const byModel = [...modelMap.entries()]
-    .map(([model, s]) => ({ model, calls: s.calls, totalTokens: s.totalTokens, costMicros: s.costMicros, calibrated: rateFor(model).calibrated }))
-    .sort((a, b) => b.costMicros - a.costMicros);
+  const byModel = (await Promise.all([...modelMap.entries()].map(async ([model, s]) => ({
+    model, calls: s.calls, totalTokens: s.totalTokens, costMicros: s.costMicros,
+    calibrated: (await resolveModelRate(model)).calibrated,
+  })))).sort((a, b) => b.costMicros - a.costMicros);
 
   const byDay = [...dayMap.entries()]
     .map(([day, s]) => ({ day, totalTokens: s.totalTokens, costMicros: s.costMicros }))
@@ -119,5 +139,6 @@ export async function tokenUsageSummary(windowDays = 30): Promise<AdminTokenUsag
     costMicros: s.costMicros,
   }));
 
-  return { windowDays, totals, byModel, byDay, topUsers };
+  const infra = [...infraMap.values()].sort((a, b) => b.totalTokens - a.totalTokens);
+  return { windowDays, totals, byModel, byDay, topUsers, infra };
 }
