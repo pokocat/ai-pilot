@@ -39,20 +39,20 @@ model Tenant {
 
 /// 用户（企业成员）
 model User {
-  id           String   @id @default(cuid())
-  tenantId     String
-  phone        String   @unique
-  wechatOpenId String?  @unique
-  wechatUnionId String? @unique
-  name         String
-  role         String   @default("owner") // owner | member | admin
-  benmingColor String   @default("gold") // 本命色：首登强制选择，金色默认
-  planId       String?
-  createdAt    DateTime @default(now())
+  id             String    @id @default(cuid())
+  tenantId       String
+  phone          String    @unique
+  wechatOpenId   String?   @unique
+  wechatUnionId  String?   @unique
+  name           String
+  role           String    @default("owner") // owner | member | admin
+  benmingColor   String    @default("gold") // 本命色：首登强制选择，金色默认
+  planId         String?
+  createdAt      DateTime  @default(now())
   wechatLinkedAt DateTime?
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id])
-  plan         Plan?         @relation(fields: [planId], references: [id])
+  tenant       Tenant         @relation(fields: [tenantId], references: [id])
+  plan         Plan?          @relation(fields: [planId], references: [id])
   sessions     Session[]
   deliverables Deliverable[]
   memories     Memory[]
@@ -64,16 +64,19 @@ model User {
   @@map("app_user")
 }
 
-/// 运营后台管理员账户（与小程序用户分离）。主密钥 ADMIN_TOKEN 首次引导初始化一个账户，
-/// 之后用账号密码登录；主密钥保留为应急/找回通道。单账户：最多一行。
+/// 运营后台管理员账户（与小程序用户分离）。主密钥 ADMIN_TOKEN 首次引导初始化首个 owner 账户，
+/// 之后 owner 可在后台新增 operator 账户（多运营协作）；主密钥保留为应急/找回通道。
 model AdminAccount {
-  id           String         @id @default(cuid())
-  username     String         @unique
-  passwordHash String // scrypt$salt$hash（Node 内置 crypto，无外部依赖）
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  lastLoginAt  DateTime?
-  sessions     AdminSession[]
+  id             String              @id @default(cuid())
+  username       String              @unique
+  passwordHash   String // scrypt$salt$hash（Node 内置 crypto，无外部依赖）
+  role           String              @default("operator") // owner 超管（管账户/见全部 agent）| operator 普通运营（仅负责的 agent）
+  disabledAt     DateTime? // 停用：保留账户与审计，禁止登录与操作
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  lastLoginAt    DateTime?
+  sessions       AdminSession[]
+  collaborations AgentCollaborator[]
 
   @@map("admin_account")
 }
@@ -109,23 +112,23 @@ model Profile {
 
 /// 智能体（顾问 / 创作）—— 运营后台可配置
 model Agent {
-  id             String   @id @default(cuid())
-  key            String   @unique // strat / growth / ...
+  id             String  @id @default(cuid())
+  key            String  @unique // strat / growth / ...
   name           String
   role           String
   icon           String
   type           String // advisory | creative | general | custom
-  gift           Boolean  @default(true) // 注册即赠送（=billing free）；仅用于前台「赠送」标记
-  billing        String   @default("free") // free 免费 | unlock 一次性解锁 | metered 按次计费
-  price          Int      @default(0) // 价格（单位：算力次数）。unlock=解锁一次性消耗；metered=每次产出消耗
-  billingRatio   Float    @default(1) // 文本类 token 计费比例：扣额=ceil(真实token×ratio)。如标准 1.0、Dify 2.0
-  meterUnit      String   @default("text") // text=扣月度 token 额度 | image=按张扣钻石(点)
-  enabled        Boolean  @default(true)
-  greet          String   @db.Text
+  gift           Boolean @default(true) // 注册即赠送（=billing free）；仅用于前台「赠送」标记
+  billing        String  @default("free") // free 免费 | unlock 一次性解锁 | metered 按次计费
+  price          Int     @default(0) // 价格（单位：算力次数）。unlock=解锁一次性消耗；metered=每次产出消耗
+  billingRatio   Float   @default(1) // 文本类 token 计费比例：扣额=ceil(真实token×ratio)。如标准 1.0、Dify 2.0
+  meterUnit      String  @default("text") // text=扣月度 token 额度 | image=按张扣钻石(点)
+  enabled        Boolean @default(true)
+  greet          String  @db.Text
   chipsJson      Json // [["target","战略体检"], ...]
-  memText        String   @db.Text // 记忆条文案
+  memText        String  @db.Text // 记忆条文案
   learnText      String // “记忆已更新” 等
-  systemPrompt   String   @db.Text
+  systemPrompt   String  @db.Text
   deliverableKey String? // 关联的产出模板 key（如「战略体检」）
   memoryConfig   Json // { longTerm, autoLearn, intensity, retentionDays, sources[] }
 
@@ -143,27 +146,91 @@ model Agent {
   // 自建技能（工具调用，providerMode=openai 时生效）：{ enabled, tools:[内置工具名], customTools? }
   skillsConfig Json?
 
-  sort           Int      @default(0)
-  updatedAt      DateTime @updatedAt
+  // —— 版本化（P0）：本行 = 运营正在编辑的「工作草稿」；C 端实际读 publishedVersionId 指向的不可变快照 ——
+  publishedVersionId String? // → AgentVersion.id（C 端使用的已发布版本）；null=尚未发布，运行时回退本行草稿
+  draftDirty         Boolean @default(false) // 草稿与已发布版本是否有差异（编辑即置 true，发布后清零）
 
-  sessions     Session[]
-  deliverables Deliverable[]
-  memories     Memory[]
-  reportDocs   ReportDoc[]
-  owners       UserAgent[]
+  sort      Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  sessions      Session[]
+  deliverables  Deliverable[]
+  memories      Memory[]
+  reportDocs    ReportDoc[]
+  owners        UserAgent[]
+  versions      AgentVersion[]
+  collaborators AgentCollaborator[]
 
   @@map("agent")
+}
+
+/// 智能体版本快照（不可变）：发布即冻结当时的「行为 + 定价 + 接入」。C 端按 Agent.publishedVersionId 只读此表。
+/// 调教闭环：运营改 Agent 草稿 → 沙盒试 → 满意后 snapshot 成新 version → 指针指向它。回滚 = 指针重指旧 version。
+model AgentVersion {
+  id            String  @id @default(cuid())
+  agentKey      String
+  version       Int // 每个 agent 内自增 1,2,3…
+  status        String  @default("draft") // draft 草稿快照 | published 已发布 | archived 历史
+  label         String? // 运营起的版本名，如「v3 强化择时方法论」
+  changeSummary String? @db.Text // 相对上一版的字段级变更摘要
+  contentHash   String // sha256(canonical(快照))，去重 + 漂移检测
+
+  // —— 冻结的行为快照（对齐 Agent 上的可调字段）——
+  systemPrompt   String  @db.Text
+  memoryConfig   Json
+  skillsConfig   Json?
+  greet          String  @db.Text
+  deliverableKey String?
+  // 定价随版本走（调教越好→倍率越高→卖越贵）
+  billing        String  @default("free") // free | unlock | metered
+  price          Int     @default(0)
+  billingRatio   Float   @default(1) // token 消耗倍率：扣额=ceil(真实token×ratio)
+  meterUnit      String  @default("text") // text=扣 token 额度 | image=按张扣钻石
+  // 接入方式快照
+  providerMode   String  @default("inherit")
+  apiBaseUrl     String?
+  apiModel       String?
+  apiKey         String? @db.Text
+  difyBaseUrl    String?
+  difyApiKey     String? @db.Text
+  difyInputs     Json?
+
+  createdBy   String? // AdminAccount.id（哪个运营快照/发布的；不挂硬关系，便于停用账户后仍可溯源）
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+
+  agent Agent @relation(fields: [agentKey], references: [key], onDelete: Cascade)
+
+  @@unique([agentKey, version])
+  @@index([agentKey, status])
+  @@map("agent_version")
+}
+
+/// 智能体协作者（多运营）：哪个后台账户能编辑/查看哪个 agent。owner 角色账户隐式拥有全部 agent。
+model AgentCollaborator {
+  id        String   @id @default(cuid())
+  agentKey  String
+  accountId String
+  role      String   @default("editor") // editor 可编辑/发布 | viewer 只读
+  createdAt DateTime @default(now())
+
+  agent   Agent        @relation(fields: [agentKey], references: [key], onDelete: Cascade)
+  account AdminAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([agentKey, accountId])
+  @@index([accountId])
+  @@map("agent_collaborator")
 }
 
 /// 用户已开通的智能体（行级权益）。free/metered 智能体无需此记录即可使用；
 /// unlock（一次性解锁）智能体需有此记录才可对话产出。
 model UserAgent {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
   agentKey  String
-  source    String   @default("purchase") // gift 注册赠送 | purchase 算力解锁 | admin_grant 后台开通
-  pricePaid Int      @default(0) // 解锁时消耗的算力次数（admin_grant=0）
-  createdAt DateTime @default(now())
+  source    String    @default("purchase") // gift 注册赠送 | purchase 算力解锁 | admin_grant 后台开通
+  pricePaid Int       @default(0) // 解锁时消耗的算力次数（admin_grant=0）
+  createdAt DateTime  @default(now())
   expiresAt DateTime? // 预留：限时开通
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -176,21 +243,21 @@ model UserAgent {
 
 /// 会话（按 用户×智能体 隔离，可回溯；可归属项目）
 model Session {
-  id        String   @id @default(cuid())
-  tenantId  String
-  userId    String
-  agentKey  String
-  projectId String? // 归属项目（散落会话为 null）
-  title     String   @default("新对话")
+  id                 String   @id @default(cuid())
+  tenantId           String
+  userId             String
+  agentKey           String
+  projectId          String? // 归属项目（散落会话为 null）
+  title              String   @default("新对话")
   difyConversationId String? // Dify 应用多轮上下文 id（providerMode=dify 时由 Dify 返回并回写）
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  tenant   Tenant        @relation(fields: [tenantId], references: [id])
-  user     User          @relation(fields: [userId], references: [id])
-  agent    Agent         @relation(fields: [agentKey], references: [key])
-  project  Project?      @relation(fields: [projectId], references: [id])
-  messages Message[]
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+  agent        Agent         @relation(fields: [agentKey], references: [key])
+  project      Project?      @relation(fields: [projectId], references: [id])
+  messages     Message[]
   deliverables Deliverable[]
 
   @@index([userId, agentKey])
@@ -406,16 +473,16 @@ model SurveyQuestion {
 
 /// 套餐与算力
 model Plan {
-  id               String  @id @default(cuid())
-  name             String
-  price            Int // 分
-  period           String // month | year
-  creditsPerMonth  Int // 钻石(点)：每月赠送，用于一次性解锁 + 图片按张
-  tokenQuotaPerMonth Int   @default(0) // 月度 token 额度（文本产出消耗池），-1=不限量
-  agentCount       Int
-  featuresJson     Json
-  highlighted      Boolean @default(false)
-  sort             Int     @default(0)
+  id                 String  @id @default(cuid())
+  name               String
+  price              Int // 分
+  period             String // month | year
+  creditsPerMonth    Int // 钻石(点)：每月赠送，用于一次性解锁 + 图片按张
+  tokenQuotaPerMonth Int     @default(0) // 月度 token 额度（文本产出消耗池），-1=不限量
+  agentCount         Int
+  featuresJson       Json
+  highlighted        Boolean @default(false)
+  sort               Int     @default(0)
 
   users User[]
 
@@ -539,6 +606,75 @@ model SkillTool {
   updatedAt    DateTime @updatedAt
 
   @@map("skill_tool")
+}
+
+/// 评测集（黄金测试集）：某 agent 的一组固定测试用例，调教后反复跑，用分数客观衡量「调教得多好」。
+model EvalSet {
+  id        String     @id @default(cuid())
+  agentKey  String
+  name      String
+  createdBy String? // AdminAccount.id
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  cases     EvalCase[]
+
+  @@index([agentKey])
+  @@map("eval_set")
+}
+
+/// 评测用例：一条输入（+可选的模拟客户上下文）+ 给评委的评分标准。
+model EvalCase {
+  id          String  @id @default(cuid())
+  setId       String
+  input       String  @db.Text // 模拟 C 端用户消息
+  contextJson Json? // 可选：模拟 profile / 引用资料，注入沙盒上下文
+  rubric      String? @db.Text // 给 LLM 评委的评分标准（这条好答案长什么样）
+  weight      Float   @default(1)
+  sort        Int     @default(0)
+
+  set EvalSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+
+  @@index([setId])
+  @@map("eval_case")
+}
+
+/// 评测运行：把某个版本（已发布版本 id 或 "draft"）跑过整套用例，LLM 评委逐条打分，汇总加权总分。
+model EvalRun {
+  id          String           @id @default(cuid())
+  agentKey    String
+  setId       String
+  targetRef   String // 被测对象：AgentVersion.id | "draft"
+  targetLabel String? // 展示用，如「草稿」「v3」
+  status      String           @default("running") // running | done | error
+  score       Float? // 0..10 加权平均
+  judgeModel  String?
+  note        String?          @db.Text // 错误信息或汇总评语
+  createdBy   String?
+  createdAt   DateTime         @default(now())
+  results     EvalCaseResult[]
+
+  @@index([agentKey, createdAt])
+  @@map("eval_run")
+}
+
+/// 评测单条结果：该用例在被测版本上的产出 + 评委打分。
+model EvalCaseResult {
+  id           String   @id @default(cuid())
+  runId        String
+  caseId       String
+  input        String   @db.Text // 快照用例输入（用例可能后续被改）
+  output       String   @db.Text // 被测版本的产出
+  judgeScore   Float? // 0..10
+  judgeNote    String?  @db.Text // 评委理由
+  inputTokens  Int      @default(0)
+  outputTokens Int      @default(0)
+  latencyMs    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  run EvalRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("eval_case_result")
 }
 
 /// 审计日志

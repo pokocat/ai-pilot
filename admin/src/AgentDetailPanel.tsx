@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react';
 import Icon from './Icon';
 import NumInput from './NumInput';
 import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta } from './api';
+import StudioSandbox from './StudioSandbox';
+import StudioVersions, { tierName } from './StudioVersions';
+import StudioEval from './StudioEval';
+
+type StudioSection = 'config' | 'sandbox' | 'versions' | 'eval';
+const SECTION_LABEL: Record<StudioSection, string> = { config: '配置', sandbox: '沙盒', versions: '版本', eval: '评测' };
 
 const VARS = ['{企业档案}', '{行业基准}', '{长期记忆}', '{本命色}'];
 const PROVIDER_MODES: [AgentProviderMode, string, string][] = [
@@ -24,9 +30,13 @@ const SOURCES = [
   ['deliverable_feedback', '产出反馈', '采纳 / 修改 / 忽略 信号回流', 'chart'],
 ];
 
-// 顾问详情：基础信息 + 计费/价格 + System 提示词 + Agent Memory（持续学习）配置。
-export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agentKey: string; onClose: () => void; onSaved: () => void }) {
+// 调教 studio：配置（草稿编辑）+ 沙盒（反复试）+ 版本（发布/回滚）+ 评测（打分→建议定价）。
+export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKey: string; onClose: () => void; toast: (m: string) => void }) {
   const [data, setData] = useState<AgentDetail | null>(null);
+  const [section, setSection] = useState<StudioSection>('config');
+  const [dirty, setDirty] = useState(false);          // 草稿与已发布是否有差异
+  const [pubVersion, setPubVersion] = useState<number | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
   const [billing, setBilling] = useState<AgentBilling>('free');
@@ -69,8 +79,12 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
       setDifyInputsText(JSON.stringify(r.difyInputs ?? {}, null, 2));
       setSkillsEnabled(r.skills?.enabled ?? false); setSkillTools(r.skills?.tools ?? []);
       setTest(null);
+      setDirty(d.draftDirty ?? false); setPubVersion(d.publishedVersion ?? null);
     }).catch((e) => setLoadErr(e?.message || '加载顾问详情失败，请重试'));
   }, [agentKey]);
+
+  // 版本/回滚变更后刷新「草稿是否脏 / 线上版本号」标识。
+  const refreshMeta = () => api.agent(agentKey).then((d) => { setDirty(d.draftDirty ?? false); setPubVersion(d.publishedVersion ?? null); }).catch(() => {});
 
   // 可勾选的内置工具元信息（一次性加载）。
   useEffect(() => { api.skillTools().then(setAvailTools).catch(() => setAvailTools([])); }, []);
@@ -123,16 +137,35 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
     return rt;
   };
 
-  const save = () => {
+  // 落库当前草稿（不发布）。C 端继续用已发布版本，直到点「发布新版本」。
+  const saveDraft = async (): Promise<boolean> => {
     let runtime: AgentRuntimeUpdate;
-    try { runtime = buildRuntime(); } catch (e) { setTest({ ok: false, error: 'Dify inputs JSON 格式错误：' + (e as Error).message }); return; }
-    api.saveAgent(agentKey, {
-      name, role, gift: billing === 'free', billing,
-      price: billing === 'free' ? 0 : Math.max(0, Math.trunc(price)),
-      billingRatio: meterUnit === 'text' ? Math.max(0.1, billingRatio) : 1,
-      meterUnit,
-      systemPrompt: prompt, memoryConfig: mem, runtime,
-    }).then(onSaved).catch(() => {});
+    try { runtime = buildRuntime(); } catch (e) { setTest({ ok: false, error: 'Dify inputs JSON 格式错误：' + (e as Error).message }); return false; }
+    try {
+      await api.saveAgent(agentKey, {
+        name, role, gift: billing === 'free', billing,
+        price: billing === 'free' ? 0 : Math.max(0, Math.trunc(price)),
+        billingRatio: meterUnit === 'text' ? Math.max(0.1, billingRatio) : 1,
+        meterUnit,
+        systemPrompt: prompt, memoryConfig: mem, runtime,
+      });
+      return true;
+    } catch (e) { toast((e as Error)?.message || '保存失败'); return false; }
+  };
+
+  const save = async () => { if (await saveDraft()) { setDirty(true); toast('已保存草稿（未发布，C 端不受影响）'); } };
+
+  // 发布：先把当前编辑落库，再冻结成新版本并指向它（C 端立即切换）。
+  const publish = async () => {
+    setPublishing(true);
+    if (!(await saveDraft())) { setPublishing(false); return; }
+    const label = (window.prompt('给这个版本起个名字（可选，便于回滚识别）：') || '').trim();
+    try {
+      const r = await api.publishAgent(agentKey, label || undefined);
+      setDirty(false); setPubVersion(r.version);
+      toast(r.changed ? `已发布 v${r.version} · C 端已切到新版本` : '与当前线上版本相同，未产生新版本');
+    } catch (e) { toast((e as Error)?.message || '发布失败'); }
+    setPublishing(false);
   };
 
   const runTest = () => {
@@ -162,9 +195,23 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
       <div className="ad-dh">
         <div className="bk" onClick={onClose}><Icon name="arrow" size={18} /></div>
         <div className="di"><Icon name={data.icon} size={18} /></div>
-        <div className="dt"><div className="t">{data.name}</div><div className="s">{data.deliverableKey ? `产出 · ${data.deliverableKey}` : data.role}</div></div>
+        <div className="dt">
+          <div className="t">{data.name}{dirty && <span className="tag warn" style={{ marginLeft: 6 }}>草稿未发布</span>}</div>
+          <div className="s">{pubVersion ? `线上 v${pubVersion}` : '尚未发布'} · {data.deliverableKey ? `产出 · ${data.deliverableKey}` : data.role}</div>
+        </div>
       </div>
 
+      <div className="studio-nav">
+        {(['config', 'sandbox', 'versions', 'eval'] as StudioSection[]).map((k) => (
+          <div key={k} className={`sn ${section === k ? 'on' : ''}`} onClick={() => setSection(k)}>{SECTION_LABEL[k]}</div>
+        ))}
+      </div>
+
+      {section === 'sandbox' && <StudioSandbox agentKey={agentKey} draftDirty={dirty} />}
+      {section === 'versions' && <StudioVersions agentKey={agentKey} toast={toast} onChanged={refreshMeta} />}
+      {section === 'eval' && <StudioEval agentKey={agentKey} toast={toast} />}
+
+      {section === 'config' && (<>
       <div className="ad-db">
         <div className="blk">
           <div className="blk-h"><Icon name="agent" size={15} /><span className="t">基础信息</span></div>
@@ -201,8 +248,16 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
           </div>
           {meterUnit === 'text' && (
             <div className="ai-field">
-              <div className="ai-fl">计费比例（token×ratio 扣额度；标准 1.0，Dify 可设 2.0）</div>
+              <div className="ai-fl">定价档位 / 计费比例 —— 调教越好倍率越高卖越贵（当前：{tierName(billingRatio)} ×{billingRatio}）</div>
+              <div className="bill-seg" style={{ marginBottom: 8 }}>
+                {([['标准', 1], ['进阶', 1.5], ['旗舰', 2]] as [string, number][]).map(([l, r]) => (
+                  <div key={l} className={`bill-opt ${billingRatio === r ? 'on' : ''}`} onClick={() => setBillingRatio(r)}>
+                    <div className="bo-t">{l}</div><div className="bo-d">×{r}</div>
+                  </div>
+                ))}
+              </div>
               <NumInput className="ai-input" min={0} step={0.1} value={billingRatio} onChange={setBillingRatio} />
+              <div className="blk-d" style={{ margin: '6px 0 0' }}>倍率随版本走，发布后生效；可在「评测」里跑分，按建议档位定价。</div>
             </div>
           )}
         </div>
@@ -336,9 +391,11 @@ export default function AgentDetailPanel({ agentKey, onClose, onSaved }: { agent
       </div>
 
       <div className="save-bar">
-        <button className="gh" onClick={() => { setPrompt(data.systemPrompt); }}><Icon name="clock" size={16} /></button>
-        <button className="sv" onClick={save}><Icon name="check" size={16} /> 保存配置</button>
+        <button className="gh" onClick={() => { setPrompt(data.systemPrompt); }} title="还原提示词"><Icon name="clock" size={16} /></button>
+        <button className="gh" style={{ width: 'auto', padding: '0 14px' }} onClick={save}><Icon name="check" size={16} /> 存草稿</button>
+        <button className="sv" onClick={publish} disabled={publishing}><Icon name="spark" size={16} /> {publishing ? '发布中…' : '发布新版本'}</button>
       </div>
+      </>)}
     </div>
   );
 }

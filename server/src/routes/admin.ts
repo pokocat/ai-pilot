@@ -3,13 +3,21 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import {
-  getAiConfig, setAiConfig, publicConfig, AI_PRESETS, type ResolvedAiConfig,
+  getAiConfig, setAiConfig, publicConfig, AI_PRESETS, effectiveProvider, type ResolvedAiConfig,
   listModels, addModel, updateModel, deleteModel, activateModel, mergedTestConfig,
 } from '../services/aiConfig.js';
 import { testEmbedding } from '../services/embedding.js';
 import { testRerank } from '../services/rerank.js';
-import { pingModel, pingAgentRuntime } from '../llm/gateway.js';
-import { requireAdmin } from '../services/adminAuth.js';
+import { pingModel, pingAgentRuntime, generateDeliverable, chatComplete } from '../llm/gateway.js';
+import { buildSandboxContext } from '../services/context.js';
+import {
+  requireAdmin, actorOf, isSuperActor, requireAgentAccess, actorAccountId, type AdminActor,
+} from '../services/adminAuth.js';
+import {
+  createOperator, listAccounts, setAccountDisabled, setAccountRole, resetAccountPassword,
+} from '../services/adminAccount.js';
+import { recomputeDraftDirty, publishDraft, rollbackToVersion, listVersions } from '../services/agentVersions.js';
+import { startEvalRun, suggestTier, PRICING_TIERS } from '../services/evals.js';
 import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
@@ -25,8 +33,124 @@ import type {
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
   AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
   AdminTraceListView, AdminTraceDetail, SkillToolDef, SkillToolUpsert,
+  AdminAccountItem, CreateAdminAccountRequest, UpdateAdminAccountRequest,
+  AgentVersionListView, AgentVersionItem, PublishAgentRequest, PublishAgentResult, RollbackAgentRequest,
+  SandboxRequest, SandboxResult, SandboxTarget,
+  EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalSetRequest, UpsertEvalCaseRequest,
+  EvalRunItem, EvalRunDetail, EvalCaseResultItem, StartEvalRunRequest, PricingTier,
 } from '../../../shared/contracts';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+
+// 把 service 抛出的 {statusCode, code} 错误统一回成 HTTP 响应。
+function sendErr(reply: import('fastify').FastifyReply, e: unknown, fallback = 400) {
+  const err = e as { statusCode?: number; code?: string; message?: string };
+  return reply.code(err.statusCode ?? fallback).send({ error: err.message ?? '操作失败', code: err.code });
+}
+
+// 操作者可见/可编辑的 agent → 角色映射；超管返回 null（=全部可编辑）。用于列表过滤与 canEdit。
+async function agentRoleMap(actor: AdminActor): Promise<Map<string, string> | null> {
+  if (isSuperActor(actor)) return null;
+  const accId = actorAccountId(actor);
+  if (!accId) return new Map();
+  const rows = await prisma.agentCollaborator.findMany({ where: { accountId: accId }, select: { agentKey: true, role: true } });
+  return new Map(rows.map((r) => [r.agentKey, r.role]));
+}
+
+// 仅 owner/master/legacy 超管可执行（账户管理、新建 agent）。
+function requireSuper(actor: AdminActor): void {
+  if (!isSuperActor(actor)) throw Object.assign(new Error('需要 owner 权限'), { statusCode: 403, code: 'OWNER_ONLY' });
+}
+
+// 操作者展示名（写进审计 payload.by，便于多运营溯源）。
+function actorName(actor: AdminActor): string {
+  return actor.kind === 'account' ? actor.username : actor.kind === 'master' ? '主密钥' : '管理员';
+}
+
+// 组装某 agent 的版本历史视图（解析 createdBy → username，标注当前已发布版本）。
+async function versionListView(agentKey: string): Promise<AgentVersionListView> {
+  const agent = await prisma.agent.findUnique({ where: { key: agentKey }, select: { publishedVersionId: true, draftDirty: true } });
+  const versions = await listVersions(agentKey);
+  const byIds = [...new Set(versions.map((v) => v.createdBy).filter((x): x is string => !!x))];
+  const accounts = byIds.length ? await prisma.adminAccount.findMany({ where: { id: { in: byIds } }, select: { id: true, username: true } }) : [];
+  const nameMap = new Map(accounts.map((a) => [a.id, a.username]));
+  return {
+    agentKey,
+    publishedVersionId: agent?.publishedVersionId ?? null,
+    draftDirty: agent?.draftDirty ?? false,
+    versions: versions.map((v): AgentVersionItem => ({
+      id: v.id, version: v.version, status: v.status as AgentVersionItem['status'],
+      label: v.label, changeSummary: v.changeSummary,
+      billing: v.billing as AgentVersionItem['billing'], price: v.price, billingRatio: v.billingRatio,
+      isPublished: v.id === agent?.publishedVersionId,
+      createdBy: v.createdBy ? nameMap.get(v.createdBy) ?? null : null,
+      createdAt: isoSecond(v.createdAt),
+      publishedAt: v.publishedAt ? isoSecond(v.publishedAt) : null,
+    })),
+  };
+}
+
+// operator 的 agent 归属 = AgentCollaborator(role=editor) 集合。整体替换为给定 agentKeys。
+async function syncCollaborators(accountId: string, agentKeys: string[]): Promise<void> {
+  const keys = [...new Set((agentKeys ?? []).filter((k) => typeof k === 'string' && k.trim()))];
+  const existing = keys.length ? await prisma.agent.findMany({ where: { key: { in: keys } }, select: { key: true } }) : [];
+  const valid = existing.map((e) => e.key);
+  await prisma.$transaction([
+    prisma.agentCollaborator.deleteMany({ where: { accountId } }),
+    ...valid.map((key) => prisma.agentCollaborator.create({ data: { accountId, agentKey: key, role: 'editor' } })),
+  ]);
+}
+
+// 列出某账户负责的 agentKeys（用于账户列表回显）。
+async function collaboratorKeysByAccount(): Promise<Map<string, string[]>> {
+  const rows = await prisma.agentCollaborator.findMany({ select: { accountId: true, agentKey: true } });
+  const map = new Map<string, string[]>();
+  for (const r of rows) {
+    const arr = map.get(r.accountId) ?? [];
+    arr.push(r.agentKey);
+    map.set(r.accountId, arr);
+  }
+  return map;
+}
+
+// 沙盒被测目标：'draft'=草稿 | {versionId}=某历史版本 | 其它（'published'/未传）=已发布版本。
+function sandboxTarget(t?: SandboxTarget): 'draft' | { versionId: string } | undefined {
+  if (t === 'draft') return 'draft';
+  if (t && typeof t === 'object' && t.versionId) return { versionId: t.versionId };
+  return undefined;
+}
+
+// 沙盒展示用的 provider/model（近似运行时实际路由）。
+async function sandboxProviderInfo(eff: {
+  providerMode: string; apiBaseUrl: string | null; apiKey: string | null; apiModel: string | null; difyBaseUrl: string | null; difyApiKey: string | null;
+}): Promise<{ provider: string; model: string }> {
+  if (eff.providerMode === 'dify' && eff.difyBaseUrl && eff.difyApiKey) return { provider: 'dify', model: 'dify' };
+  if (eff.providerMode === 'openai' && eff.apiBaseUrl && eff.apiKey) {
+    const cfg = await getAiConfig();
+    return { provider: 'openai', model: eff.apiModel || cfg.model };
+  }
+  const cfg = await getAiConfig();
+  const ep = effectiveProvider(cfg);
+  return { provider: ep, model: ep === 'mock' ? 'template' : cfg.model };
+}
+
+// 评测：从 set/case/run 反查 agentKey（用于无 :key 路由的按 agent 授权）。
+async function agentKeyOfSet(setId: string): Promise<string | null> {
+  const s = await prisma.evalSet.findUnique({ where: { id: setId }, select: { agentKey: true } });
+  return s?.agentKey ?? null;
+}
+async function agentKeyOfCase(caseId: string): Promise<string | null> {
+  const c = await prisma.evalCase.findUnique({ where: { id: caseId }, select: { set: { select: { agentKey: true } } } });
+  return c?.set.agentKey ?? null;
+}
+// StartEvalRun 的 target → PreviewTarget + 展示标签。
+async function evalTargetAndLabel(t?: SandboxTarget): Promise<{ target?: 'draft' | { versionId: string }; label: string }> {
+  if (t === 'draft') return { target: 'draft', label: '草稿' };
+  if (t && typeof t === 'object' && t.versionId) {
+    const v = await prisma.agentVersion.findUnique({ where: { id: t.versionId }, select: { version: true } });
+    return { target: { versionId: t.versionId }, label: v ? `v${v.version}` : '指定版本' };
+  }
+  return { target: undefined, label: '已发布' };
+}
 
 const BILLINGS: AgentBilling[] = ['free', 'unlock', 'metered'];
 function normalizeBilling(b: unknown): AgentBilling {
@@ -462,8 +586,10 @@ export async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // —— 智能体配置（含 计费/价格 + System 提示词 + Agent Memory） ——
-  app.get('/admin/agents', async () => {
+  // —— 智能体配置（含 计费/价格 + System 提示词 + Agent Memory + 版本化） ——
+  // 多运营：operator 仅见自己负责的 agent；owner/master 见全部。
+  app.get('/admin/agents', async (req) => {
+    const roles = await agentRoleMap(actorOf(req)); // null = 超管（全部可编辑）
     const [agents, sessionGroups, deliverableGroups, ownerGroups] = await Promise.all([
       prisma.agent.findMany({ orderBy: { sort: 'asc' } }),
       prisma.session.groupBy({ by: ['agentKey'], _count: { _all: true } }),
@@ -473,28 +599,47 @@ export async function adminRoutes(app: FastifyInstance) {
     const sessions = new Map(sessionGroups.map((g) => [g.agentKey, g._count._all]));
     const deliverables = new Map(deliverableGroups.map((g) => [g.agentKey, g._count._all]));
     const owners = new Map(ownerGroups.map((g) => [g.agentKey, g._count._all]));
-    return agents.map((a) => ({
+    const visible = roles ? agents.filter((a) => roles.has(a.key)) : agents;
+    // 已发布版本号
+    const pubIds = visible.map((a) => a.publishedVersionId).filter((x): x is string => !!x);
+    const pubVers = pubIds.length
+      ? await prisma.agentVersion.findMany({ where: { id: { in: pubIds } }, select: { id: true, version: true } })
+      : [];
+    const verMap = new Map(pubVers.map((v) => [v.id, v.version]));
+    return visible.map((a) => ({
       key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
       gift: a.gift, billing: a.billing, price: a.price, billingRatio: a.billingRatio, meterUnit: a.meterUnit, enabled: a.enabled, deliverableKey: a.deliverableKey,
       ownerCount: owners.get(a.key) ?? 0,
       sessionCount: sessions.get(a.key) ?? 0,
       deliverableCount: deliverables.get(a.key) ?? 0,
       updatedAt: isoSecond(a.updatedAt),
+      publishedVersionId: a.publishedVersionId,
+      publishedVersion: a.publishedVersionId ? verMap.get(a.publishedVersionId) ?? null : null,
+      draftDirty: a.draftDirty,
+      canEdit: roles ? roles.get(a.key) === 'editor' : true,
     }));
   });
   app.get<{ Params: { key: string } }>('/admin/agents/:key', async (req, reply) => {
+    try { await requireAgentAccess(actorOf(req), req.params.key, 'viewer'); } catch (e) { return sendErr(reply, e, 403); }
     const a = await prisma.agent.findUnique({ where: { key: req.params.key } });
     if (!a) return reply.code(404).send({ error: 'not found' });
+    const pub = a.publishedVersionId ? await prisma.agentVersion.findUnique({ where: { id: a.publishedVersionId }, select: { version: true } }) : null;
+    const roles = await agentRoleMap(actorOf(req));
     return {
       key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
       gift: a.gift, billing: a.billing, price: a.price, billingRatio: a.billingRatio, meterUnit: a.meterUnit,
       enabled: a.enabled, systemPrompt: a.systemPrompt, memoryConfig: a.memoryConfig,
-      deliverableKey: a.deliverableKey,
+      deliverableKey: a.deliverableKey, greet: a.greet,
       runtime: runtimeView(a),
+      publishedVersionId: a.publishedVersionId,
+      publishedVersion: pub?.version ?? null,
+      draftDirty: a.draftDirty,
+      canEdit: roles ? roles.get(a.key) === 'editor' : true,
     };
   });
-  // 新增智能体（后台可上架更多智能体）。key 唯一；缺省字段给安全默认值。
+  // 新增智能体（仅 owner/超管可上架更多智能体）。key 唯一；缺省字段给安全默认值。
   app.post<{ Body: AdminAgentCreate }>('/admin/agents', async (req, reply) => {
+    try { requireSuper(actorOf(req)); } catch (e) { return sendErr(reply, e, 403); }
     const b = req.body ?? ({} as AdminAgentCreate);
     const key = (b.key ?? '').trim();
     const name = (b.name ?? '').trim();
@@ -536,6 +681,8 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch<{ Params: { key: string }; Body: AdminAgentUpdate }>(
     '/admin/agents/:key',
     async (req, reply) => {
+      const actor = actorOf(req);
+      try { await requireAgentAccess(actor, req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
       const before = await prisma.agent.findUnique({ where: { key: req.params.key } });
       if (!before) return reply.code(404).send({ error: 'not found' });
       const b = req.body ?? {};
@@ -563,6 +710,7 @@ export async function adminRoutes(app: FastifyInstance) {
         },
       });
       const enabledChanged = typeof b.enabled === 'boolean' && before.enabled !== b.enabled;
+      const draftDirty = await recomputeDraftDirty(a.key); // 编辑草稿后按 草稿 vs 已发布 精确重算
       await recordAudit({
         action: enabledChanged ? (a.enabled ? 'admin.agent.publish' : 'admin.agent.unpublish') : 'admin.agent.update',
         payload: {
@@ -575,9 +723,11 @@ export async function adminRoutes(app: FastifyInstance) {
           memoryConfigChanged: !!b.memoryConfig,
           providerMode: a.providerMode,
           runtimeChanged: !!b.runtime,
+          draftDirty,
+          by: actorName(actor),
         },
       });
-      return { ok: true, key: a.key };
+      return { ok: true, key: a.key, draftDirty };
     },
   );
 
@@ -585,6 +735,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Params: { key: string }; Body: AgentRuntimeUpdate }>(
     '/admin/agents/:key/test',
     async (req, reply): Promise<AiTestResult | void> => {
+      try { await requireAgentAccess(actorOf(req), req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
       const a = await prisma.agent.findUnique({ where: { key: req.params.key } });
       if (!a) return reply.code(404).send({ error: 'not found' });
       const rt = req.body ?? {};
@@ -608,6 +759,230 @@ export async function adminRoutes(app: FastifyInstance) {
       return { ok: false, provider: 'inherit', error: '当前为「跟随全局模型」，请到「模型配置」页测试连接' };
     },
   );
+
+  // —— 版本化：历史 / 发布 / 回滚 ——
+  app.get<{ Params: { key: string } }>('/admin/agents/:key/versions', async (req, reply): Promise<AgentVersionListView | void> => {
+    try { await requireAgentAccess(actorOf(req), req.params.key, 'viewer'); } catch (e) { return sendErr(reply, e, 403); }
+    const a = await prisma.agent.findUnique({ where: { key: req.params.key }, select: { key: true } });
+    if (!a) return reply.code(404).send({ error: 'not found' });
+    return versionListView(req.params.key);
+  });
+
+  // 发布：把当前草稿冻结成新版本并指向它（C 端立即切到新版本）。
+  app.post<{ Params: { key: string }; Body: PublishAgentRequest }>('/admin/agents/:key/publish', async (req, reply): Promise<PublishAgentResult | void> => {
+    const actor = actorOf(req);
+    try { await requireAgentAccess(actor, req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    try {
+      const r = await publishDraft(req.params.key, { accountId: actorAccountId(actor), label: req.body?.label });
+      await recordAudit({ action: 'admin.agentversion.publish', payload: { key: req.params.key, version: r.version, changed: r.changed, by: actorName(actor) } });
+      return { ok: true, ...r };
+    } catch (e) { return sendErr(reply, e); }
+  });
+
+  // 回滚：把已发布指针重指到某历史版本（不动草稿）。
+  app.post<{ Params: { key: string }; Body: RollbackAgentRequest }>('/admin/agents/:key/rollback', async (req, reply) => {
+    const actor = actorOf(req);
+    try { await requireAgentAccess(actor, req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    const versionId = (req.body?.versionId ?? '').trim();
+    if (!versionId) return reply.code(400).send({ error: '缺少 versionId', code: 'BAD_VERSION' });
+    try {
+      const r = await rollbackToVersion(req.params.key, versionId);
+      await recordAudit({ action: 'admin.agentversion.rollback', payload: { key: req.params.key, version: r.version, by: actorName(actor) } });
+      return { ok: true, version: r.version };
+    } catch (e) { return sendErr(reply, e); }
+  });
+
+  // —— 调教沙盒：用草稿/某版本即时试跑，返回产出 + 诊断指标（不真扣额度、不污染计费统计）——
+  app.post<{ Params: { key: string }; Body: SandboxRequest }>('/admin/agents/:key/sandbox', async (req, reply): Promise<SandboxResult | void> => {
+    try { await requireAgentAccess(actorOf(req), req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    const b = req.body ?? ({} as SandboxRequest);
+    const text = (b.text ?? '').trim();
+    if (!text) return reply.code(400).send({ error: '请输入测试消息', code: 'EMPTY_TEXT' });
+    const built = await buildSandboxContext({ agentKey: req.params.key, userMessage: text, target: sandboxTarget(b.target), profile: b.profile });
+    if (!built) return reply.code(404).send({ error: 'agent not found' });
+    const { ctx, effective } = built;
+    const t0 = Date.now();
+    const total = (u: { inputTokens: number; outputTokens: number }) => Math.max(0, u.inputTokens) + Math.max(0, u.outputTokens);
+    const ratio = effective.billingRatio > 0 ? effective.billingRatio : 1;
+    try {
+      const { provider, model } = await sandboxProviderInfo(effective);
+      const base = {
+        source: effective.source, versionId: effective.versionId, versionNumber: effective.versionNumber,
+        billingRatio: effective.billingRatio,
+      };
+      if (effective.deliverableKey) {
+        const { result: deliverable, usage } = await generateDeliverable(ctx, { agentKey: effective.key, sandbox: true });
+        const tt = total(usage);
+        return {
+          ...base, kind: 'report', deliverable, charged: Math.ceil(tt * ratio),
+          trace: { provider, model, status: 'ok', latencyMs: Date.now() - t0, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cachedInput: usage.cachedInput, totalTokens: tt, toolCalls: 0, iterations: 0, errorMessage: null },
+        };
+      }
+      const { result: replyChat, usage } = await chatComplete(ctx, { agentKey: effective.key, sandbox: true });
+      const tt = total(usage);
+      return {
+        ...base, kind: 'chat', reply: replyChat, charged: Math.ceil(tt * ratio),
+        trace: { provider, model, status: 'ok', latencyMs: Date.now() - t0, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cachedInput: usage.cachedInput, totalTokens: tt, toolCalls: 0, iterations: 0, errorMessage: null },
+      };
+    } catch (e) {
+      const err = e as Error & { code?: string; statusCode?: number };
+      return reply.code(err.statusCode ?? 500).send({ error: err.message, code: err.code });
+    }
+  });
+
+  // —— 评测：黄金测试集 CRUD + 跑分 + 建议定价档位 ——
+  app.get('/admin/pricing-tiers', async (): Promise<PricingTier[]> => PRICING_TIERS);
+
+  app.get<{ Params: { key: string } }>('/admin/agents/:key/eval-sets', async (req, reply): Promise<EvalSetItem[] | void> => {
+    try { await requireAgentAccess(actorOf(req), req.params.key, 'viewer'); } catch (e) { return sendErr(reply, e, 403); }
+    const sets = await prisma.evalSet.findMany({ where: { agentKey: req.params.key }, orderBy: { createdAt: 'desc' }, include: { _count: { select: { cases: true } } } });
+    return sets.map((s) => ({ id: s.id, agentKey: s.agentKey, name: s.name, caseCount: s._count.cases, createdAt: isoSecond(s.createdAt) }));
+  });
+  app.post<{ Params: { key: string }; Body: UpsertEvalSetRequest }>('/admin/agents/:key/eval-sets', async (req, reply): Promise<EvalSetItem | void> => {
+    const actor = actorOf(req);
+    try { await requireAgentAccess(actor, req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    const name = (req.body?.name ?? '').trim() || '未命名评测集';
+    const s = await prisma.evalSet.create({ data: { agentKey: req.params.key, name, createdBy: actorAccountId(actor) } });
+    return { id: s.id, agentKey: s.agentKey, name: s.name, caseCount: 0, createdAt: isoSecond(s.createdAt) };
+  });
+  app.get<{ Params: { id: string } }>('/admin/eval-sets/:id', async (req, reply): Promise<EvalSetDetail | void> => {
+    const key = await agentKeyOfSet(req.params.id);
+    if (!key) return reply.code(404).send({ error: 'not found' });
+    try { await requireAgentAccess(actorOf(req), key, 'viewer'); } catch (e) { return sendErr(reply, e, 403); }
+    const s = await prisma.evalSet.findUnique({ where: { id: req.params.id }, include: { cases: { orderBy: { sort: 'asc' } } } });
+    if (!s) return reply.code(404).send({ error: 'not found' });
+    return {
+      id: s.id, agentKey: s.agentKey, name: s.name, caseCount: s.cases.length, createdAt: isoSecond(s.createdAt),
+      cases: s.cases.map((c): EvalCaseItem => ({ id: c.id, input: c.input, rubric: c.rubric, weight: c.weight, sort: c.sort, context: (c.contextJson as Record<string, unknown> | null) ?? null })),
+    };
+  });
+  app.patch<{ Params: { id: string }; Body: UpsertEvalSetRequest }>('/admin/eval-sets/:id', async (req, reply) => {
+    const key = await agentKeyOfSet(req.params.id);
+    if (!key) return reply.code(404).send({ error: 'not found' });
+    try { await requireAgentAccess(actorOf(req), key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    await prisma.evalSet.update({ where: { id: req.params.id }, data: { name: (req.body?.name ?? '').trim() || undefined } });
+    return { ok: true };
+  });
+  app.delete<{ Params: { id: string } }>('/admin/eval-sets/:id', async (req, reply) => {
+    const key = await agentKeyOfSet(req.params.id);
+    if (!key) return reply.code(404).send({ error: 'not found' });
+    try { await requireAgentAccess(actorOf(req), key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    await prisma.evalSet.delete({ where: { id: req.params.id } });
+    return { ok: true };
+  });
+  app.post<{ Params: { id: string }; Body: UpsertEvalCaseRequest }>('/admin/eval-sets/:id/cases', async (req, reply): Promise<EvalCaseItem | void> => {
+    const key = await agentKeyOfSet(req.params.id);
+    if (!key) return reply.code(404).send({ error: 'not found' });
+    try { await requireAgentAccess(actorOf(req), key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    const b = req.body ?? ({} as UpsertEvalCaseRequest);
+    const input = (b.input ?? '').trim();
+    if (!input) return reply.code(400).send({ error: '用例输入不能为空', code: 'EMPTY_INPUT' });
+    const maxSort = await prisma.evalCase.aggregate({ where: { setId: req.params.id }, _max: { sort: true } });
+    const c = await prisma.evalCase.create({
+      data: {
+        setId: req.params.id, input, rubric: b.rubric?.trim() || null,
+        weight: typeof b.weight === 'number' && b.weight > 0 ? b.weight : 1,
+        sort: (maxSort._max.sort ?? 0) + 1,
+        contextJson: (b.context ?? undefined) as Prisma.InputJsonValue | undefined,
+      },
+    });
+    return { id: c.id, input: c.input, rubric: c.rubric, weight: c.weight, sort: c.sort, context: (c.contextJson as Record<string, unknown> | null) ?? null };
+  });
+  app.patch<{ Params: { id: string }; Body: UpsertEvalCaseRequest }>('/admin/eval-cases/:id', async (req, reply) => {
+    const key = await agentKeyOfCase(req.params.id);
+    if (!key) return reply.code(404).send({ error: 'not found' });
+    try { await requireAgentAccess(actorOf(req), key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    const b = req.body ?? {};
+    await prisma.evalCase.update({
+      where: { id: req.params.id },
+      data: {
+        input: typeof b.input === 'string' && b.input.trim() ? b.input.trim() : undefined,
+        rubric: b.rubric === undefined ? undefined : (b.rubric.trim() || null),
+        weight: typeof b.weight === 'number' && b.weight > 0 ? b.weight : undefined,
+        sort: typeof b.sort === 'number' ? b.sort : undefined,
+        contextJson: b.context === undefined ? undefined : ((b.context ?? Prisma.JsonNull) as Prisma.InputJsonValue),
+      },
+    });
+    return { ok: true };
+  });
+  app.delete<{ Params: { id: string } }>('/admin/eval-cases/:id', async (req, reply) => {
+    const key = await agentKeyOfCase(req.params.id);
+    if (!key) return reply.code(404).send({ error: 'not found' });
+    try { await requireAgentAccess(actorOf(req), key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    await prisma.evalCase.delete({ where: { id: req.params.id } });
+    return { ok: true };
+  });
+
+  // 跑分（后台异步，前端轮询 run 状态）
+  app.post<{ Params: { key: string }; Body: StartEvalRunRequest }>('/admin/agents/:key/eval-runs', async (req, reply): Promise<{ runId: string } | void> => {
+    const actor = actorOf(req);
+    try { await requireAgentAccess(actor, req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    const setId = (req.body?.setId ?? '').trim();
+    if (!setId) return reply.code(400).send({ error: '缺少 setId', code: 'BAD_SET' });
+    try {
+      const { target, label } = await evalTargetAndLabel(req.body?.target);
+      const runId = await startEvalRun({ agentKey: req.params.key, setId, target, targetLabel: label, accountId: actorAccountId(actor) });
+      await recordAudit({ action: 'admin.eval.run', payload: { key: req.params.key, setId, target: label, by: actorName(actor) } });
+      return { runId };
+    } catch (e) { return sendErr(reply, e); }
+  });
+  app.get<{ Params: { key: string } }>('/admin/agents/:key/eval-runs', async (req, reply): Promise<EvalRunItem[] | void> => {
+    try { await requireAgentAccess(actorOf(req), req.params.key, 'viewer'); } catch (e) { return sendErr(reply, e, 403); }
+    const runs = await prisma.evalRun.findMany({ where: { agentKey: req.params.key }, orderBy: { createdAt: 'desc' }, take: 30, include: { _count: { select: { results: true } } } });
+    return runs.map((r): EvalRunItem => ({
+      id: r.id, agentKey: r.agentKey, setId: r.setId, targetRef: r.targetRef, targetLabel: r.targetLabel,
+      status: r.status, score: r.score, judgeModel: r.judgeModel, note: r.note, caseCount: r._count.results, createdAt: isoSecond(r.createdAt),
+    }));
+  });
+  app.get<{ Params: { id: string } }>('/admin/eval-runs/:id', async (req, reply): Promise<EvalRunDetail | void> => {
+    const run = await prisma.evalRun.findUnique({ where: { id: req.params.id }, include: { results: { orderBy: { createdAt: 'asc' } } } });
+    if (!run) return reply.code(404).send({ error: 'not found' });
+    try { await requireAgentAccess(actorOf(req), run.agentKey, 'viewer'); } catch (e) { return sendErr(reply, e, 403); }
+    return {
+      id: run.id, agentKey: run.agentKey, setId: run.setId, targetRef: run.targetRef, targetLabel: run.targetLabel,
+      status: run.status, score: run.score, judgeModel: run.judgeModel, note: run.note, caseCount: run.results.length, createdAt: isoSecond(run.createdAt),
+      results: run.results.map((r): EvalCaseResultItem => ({
+        id: r.id, caseId: r.caseId, input: r.input, output: r.output, judgeScore: r.judgeScore, judgeNote: r.judgeNote,
+        inputTokens: r.inputTokens, outputTokens: r.outputTokens, latencyMs: r.latencyMs,
+      })),
+      suggested: run.status === 'done' ? suggestTier(run.score) : null,
+    };
+  });
+
+  // —— 多运营账户管理（仅 owner/超管）——
+  app.get('/admin/accounts', async (req, reply): Promise<AdminAccountItem[] | void> => {
+    try { requireSuper(actorOf(req)); } catch (e) { return sendErr(reply, e, 403); }
+    const [rows, keyMap] = await Promise.all([listAccounts(), collaboratorKeysByAccount()]);
+    return rows.map((r) => ({ ...r, agentKeys: r.role === 'owner' ? [] : keyMap.get(r.id) ?? [] }));
+  });
+  app.post<{ Body: CreateAdminAccountRequest }>('/admin/accounts', async (req, reply): Promise<AdminAccountItem | void> => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const b = req.body ?? ({} as CreateAdminAccountRequest);
+    try {
+      const acc = await createOperator(b.username, b.password, b.role);
+      if (acc.role !== 'owner' && Array.isArray(b.agentKeys)) await syncCollaborators(acc.id, b.agentKeys);
+      await recordAudit({ action: 'admin.account.create', payload: { username: acc.username, role: acc.role, by: actorName(actor) } });
+      const keyMap = await collaboratorKeysByAccount();
+      return { ...acc, agentKeys: acc.role === 'owner' ? [] : keyMap.get(acc.id) ?? [] };
+    } catch (e) { return sendErr(reply, e); }
+  });
+  app.patch<{ Params: { id: string }; Body: UpdateAdminAccountRequest }>('/admin/accounts/:id', async (req, reply): Promise<AdminAccountItem | void> => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const b = req.body ?? {};
+    try {
+      let row = (await listAccounts()).find((a) => a.id === req.params.id);
+      if (!row) return reply.code(404).send({ error: '账户不存在', code: 'NOT_FOUND' });
+      if (typeof b.role === 'string') row = await setAccountRole(req.params.id, b.role);
+      if (typeof b.disabled === 'boolean') row = await setAccountDisabled(req.params.id, b.disabled);
+      if (typeof b.password === 'string' && b.password) await resetAccountPassword(req.params.id, b.password);
+      if (Array.isArray(b.agentKeys) && row.role !== 'owner') await syncCollaborators(req.params.id, b.agentKeys);
+      await recordAudit({ action: 'admin.account.update', payload: { id: req.params.id, username: row.username, by: actorName(actor) } });
+      const keyMap = await collaboratorKeysByAccount();
+      return { ...row, agentKeys: row.role === 'owner' ? [] : keyMap.get(row.id) ?? [] };
+    } catch (e) { return sendErr(reply, e); }
+  });
 
   // —— 建档问卷 ——
   app.get('/admin/survey', async () => prisma.surveyQuestion.findMany({ orderBy: { sort: 'asc' } }));

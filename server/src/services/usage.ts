@@ -15,6 +15,7 @@ export interface UsageMeta {
   sessionId?: string | null;
   agentKey?: string | null;
   ratio?: number; // 该智能体计费比例：creditCost(本次扣额) = ceil(totalTokens × ratio)
+  sandbox?: boolean; // 运营沙盒试跑：仍记诊断 trace，但不写 token_usage（不污染计费统计、不真扣额度）
 }
 
 /**

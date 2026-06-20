@@ -5,6 +5,7 @@ import { hybridSearch, resolveReferences } from './retrieval.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
+import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } from './agentVersions.js';
 
 // 把 Agent 的「接入方式」解析成运行时覆盖。inherit / 未配置完整 → null（走全局模型）。
 function resolveAgentRuntime(
@@ -66,9 +67,13 @@ export async function buildGenContext(opts: {
   refs?: MessageRef[];             // 显式 @ 引用 → 高优先注入、可溯源
   sessionId?: string | null;       // Dify 多轮回写所需
   difyConversationId?: string | null; // 已存在的 Dify 会话 id（多轮续接）
-}): Promise<{ ctx: GenContext; memoryConfig: MemoryConfig; knowledgeUsed: string[] }> {
-  const agent = await prisma.agent.findUnique({ where: { key: opts.agentKey } });
-  if (!agent) throw new Error(`未知智能体：${opts.agentKey}`);
+  preview?: PreviewTarget;         // 沙盒/评测：用草稿或指定版本（默认走已发布版本）
+  effective?: EffectiveAgentConfig; // 调用方已解析好的有效配置（避免重复解析、保证与计费一致）
+}): Promise<{ ctx: GenContext; memoryConfig: MemoryConfig; knowledgeUsed: string[]; effective: EffectiveAgentConfig }> {
+  // C 端默认读 Agent.publishedVersionId 指向的已发布快照（resolveEffectiveAgent）；
+  // 草稿/历史版本由 opts.preview 指定（沙盒、评测、AB）。调用方可传 opts.effective 复用。
+  const effective = opts.effective ?? (await resolveEffectiveAgent(opts.agentKey, opts.preview));
+  if (!effective) throw new Error(`未知智能体：${opts.agentKey}`);
   const profile = await prisma.profile.findFirst({ where: { tenantId: opts.tenantId }, orderBy: { updatedAt: 'desc' } });
   const user = await prisma.user.findUnique({ where: { id: opts.userId } });
   const tenant = await prisma.tenant.findUnique({ where: { id: opts.tenantId }, select: { name: true } });
@@ -76,7 +81,7 @@ export async function buildGenContext(opts: {
     ? await buildClientUnderstanding({ id: user.id, tenantId: opts.tenantId, name: user.name })
     : null;
 
-  const memoryConfig = agent.memoryConfig as unknown as MemoryConfig;
+  const memoryConfig = effective.memoryConfig as unknown as MemoryConfig;
   const briefInterview = isBriefInterviewRequest(opts.userMessage);
   // 长期记忆：按当前问题做语义召回；后台关闭 longTerm 后不再注入既有记忆。
   const memories = memoryConfig.longTerm && !briefInterview
@@ -102,10 +107,10 @@ export async function buildGenContext(opts: {
   const knowledgeUsed = [...refLabels, ...hits.map((h) => h.item.title ?? h.snippet.slice(0, 20))];
 
   const ctx: GenContext = {
-    agentKey: agent.key,
-    agentName: agent.name,
-    systemPrompt: agent.systemPrompt,
-    deliverableKey: agent.deliverableKey,
+    agentKey: effective.key,
+    agentName: effective.name,
+    systemPrompt: effective.systemPrompt,
+    deliverableKey: effective.deliverableKey,
     companyName: meaningfulCustomerLabel(tenant?.name) || null,
     profile: profile ? { industry: profile.industry, stage: profile.stage, pain: profile.pain } : null,
     memories,
@@ -124,9 +129,48 @@ export async function buildGenContext(opts: {
     tenantId: opts.tenantId,
     userId: opts.userId,
     projectId: opts.projectId ?? null,
-    // 技能与接入方式解耦：所有 agent（含 inherit/全局模型）都带上自建技能配置
-    skills: (agent.skillsConfig as GenContext['skills']) ?? null,
-    runtime: resolveAgentRuntime(agent, { userId: opts.userId, sessionId: opts.sessionId, difyConversationId: opts.difyConversationId }),
+    // 技能与接入方式解耦：所有 agent（含 inherit/全局模型）都带上自建技能配置（按已发布版本/草稿解析）
+    skills: (effective.skillsConfig as GenContext['skills']) ?? null,
+    runtime: resolveAgentRuntime(effective, { userId: opts.userId, sessionId: opts.sessionId, difyConversationId: opts.difyConversationId }),
   };
-  return { ctx, memoryConfig, knowledgeUsed };
+  return { ctx, memoryConfig, knowledgeUsed, effective };
+}
+
+/**
+ * 运营调教沙盒上下文：用草稿/指定版本 + 模拟客户档案，构建一个「干净」的 GenContext
+ * （不拉真实用户的记忆/知识/项目），让运营聚焦测「提示词 + 配置」本身的行为，结果可复现。
+ */
+export async function buildSandboxContext(opts: {
+  agentKey: string;
+  userMessage: string;
+  target?: PreviewTarget; // 默认已发布版本；沙盒通常传 'draft'
+  profile?: { companyName?: string; industry?: string; stage?: string; pain?: string };
+}): Promise<{ ctx: GenContext; effective: EffectiveAgentConfig } | null> {
+  const effective = await resolveEffectiveAgent(opts.agentKey, opts.target);
+  if (!effective) return null;
+  const p = opts.profile;
+  const hasProfile = !!(p && (p.industry || p.stage || p.pain));
+  const ctx: GenContext = {
+    agentKey: effective.key,
+    agentName: effective.name,
+    systemPrompt: effective.systemPrompt,
+    deliverableKey: effective.deliverableKey,
+    companyName: p?.companyName || null,
+    profile: hasProfile ? { industry: p?.industry ?? null, stage: p?.stage ?? null, pain: p?.pain ?? null } : null,
+    memories: [],
+    benmingColor: 'gold',
+    benchmark: INDUSTRY_BENCHMARK,
+    userMessage: opts.userMessage,
+    references: [],
+    knowledge: [],
+    understanding: [],
+    understandingQuestions: [],
+    understandingMaturity: 'empty',
+    briefInterview: false,
+    tenantId: null,
+    userId: null,
+    projectId: null,
+    runtime: resolveAgentRuntime(effective, { userId: 'sandbox', sessionId: null, difyConversationId: null }),
+  };
+  return { ctx, effective };
 }
