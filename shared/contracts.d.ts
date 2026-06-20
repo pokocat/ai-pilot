@@ -235,8 +235,9 @@ export interface AliasSuggestionResult { name: string; source: string; }
 export interface UpdateIdentityRequest { name?: string; company?: string; avatarUrl?: string; }
 /** 发送短信验证码（POST /auth/sms/send）。scene：login=登录；bind=微信账号绑定手机号。 */
 export interface SmsSendRequest { phone: string; scene?: 'login' | 'bind'; }
-/** 绑定手机号（POST /auth/bind-phone，需登录态）：微信账号补绑真实手机号。 */
-export interface BindPhoneRequest { phone: string; code: string; }
+/** 绑定手机号（POST /auth/bind-phone，需登录态）：微信账号补绑真实手机号。
+ *  二选一：phoneCode=微信一键(getPhoneNumber 的 code)；或 phone+code=短信验证码兜底。 */
+export interface BindPhoneRequest { phoneCode?: string; phone?: string; code?: string; }
 export interface BindPhoneResult { ok: boolean; phone: string; wechatLinked: boolean; }
 /** 发送结果：cooldownSec 倒计时、expiresInSec 有效期；devCode 仅演示口径回传，便于自动回填。 */
 export interface SmsSendResult { cooldownSec: number; expiresInSec: number; devCode?: string; }

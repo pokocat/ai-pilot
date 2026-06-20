@@ -25,8 +25,9 @@ const smsSendSchema = z.object({
   scene: z.enum(['login', 'bind']).optional(), // login=登录验证码；bind=微信账号绑定手机号
 });
 const bindPhoneSchema = z.object({
-  phone: phoneRule,
-  code: z.string().trim().regex(/^\d{4,8}$/, '验证码格式不正确'),
+  phoneCode: z.string().trim().min(1).optional(),                 // 微信一键：getPhoneNumber 返回的一次性 code
+  phone: phoneRule.optional(),                                    // 短信兜底：手机号
+  code: z.string().trim().regex(/^\d{4,8}$/, '验证码格式不正确').optional(), // 短信兜底：验证码
 });
 const wechatLoginSchema = z.object({
   code: z.string().trim().min(1, '缺少微信登录 code'),
@@ -385,7 +386,8 @@ export async function authRoutes(app: FastifyInstance) {
     }
   });
 
-  // 绑定手机号（登录后可选）：微信账号补绑真实手机号。需登录态 + scene=bind 的短信验证码。
+  // 绑定手机号（微信登录后强制）：微信账号补绑真实手机号。需登录态。
+  // 两种取号：①微信一键 phoneCode（getPhoneNumber）②短信 scene=bind 的 phone+code。
   // 该手机号若已被其他账号占用 → 409，不允许跨账号顶号。
   app.post('/auth/bind-phone', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined); // 未登录 → 401
@@ -393,12 +395,30 @@ export async function authRoutes(app: FastifyInstance) {
     if (!parsed.success) {
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
     }
-    const { phone, code } = parsed.data;
-    const ok = await verifySmsCode(phone, code, 'bind');
-    if (!ok) {
-      await recordAuthAttempt(req, 'auth.bind_phone.attempt', { ok: false, statusCode: 400, ...phoneAudit(phone), errorCode: 'SMS_CODE_INVALID' }, user);
-      return reply.code(400).send({ error: '验证码错误或已过期', code: 'SMS_CODE_INVALID' });
+
+    let phone: string;
+    if (parsed.data.phoneCode) {
+      // ① 微信一键：用 getPhoneNumber 的 code 换微信绑定的手机号
+      try {
+        phone = await getPhoneNumberByCode(parsed.data.phoneCode);
+      } catch (e) {
+        const err = e as { message?: string; statusCode?: number; code?: string };
+        await recordAuthAttempt(req, 'auth.bind_phone.attempt', { ok: false, statusCode: err.statusCode || 502, onetap: 'wechat', errorCode: err.code || 'WECHAT_PHONE_FAILED' }, user);
+        return reply.code(err.statusCode || 502).send({ error: err.message || '获取手机号失败', code: err.code || 'WECHAT_PHONE_FAILED' });
+      }
+    } else {
+      // ② 短信兜底：必须 phone + code 且 scene=bind 校验通过
+      if (!parsed.data.phone || !parsed.data.code) {
+        return reply.code(400).send({ error: '请提供手机号与验证码', code: 'BIND_PARAMS_MISSING' });
+      }
+      const ok = await verifySmsCode(parsed.data.phone, parsed.data.code, 'bind');
+      if (!ok) {
+        await recordAuthAttempt(req, 'auth.bind_phone.attempt', { ok: false, statusCode: 400, ...phoneAudit(parsed.data.phone), errorCode: 'SMS_CODE_INVALID' }, user);
+        return reply.code(400).send({ error: '验证码错误或已过期', code: 'SMS_CODE_INVALID' });
+      }
+      phone = parsed.data.phone;
     }
+
     const taken = await prisma.user.findUnique({ where: { phone } });
     if (taken && taken.id !== user.id) {
       await recordAuthAttempt(req, 'auth.bind_phone.attempt', { ok: false, statusCode: 409, ...phoneAudit(phone), errorCode: 'PHONE_TAKEN' }, user);

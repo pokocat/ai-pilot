@@ -100,7 +100,12 @@
 }
 .lg-av-tip { margin-top: 10px; font-size: 12px; color: rgba(243,240,230,.6); }
 
-.lg-bindsec { display: flex; align-items: center; gap: 8px; margin: 4px 0 12px; }
-.lg-bindsec-t { font-size: 13px; font-weight: 500; color: rgba(243,240,230,.82); }
-.lg-bindsec-opt { font-size: 10.5px; color: #D8B25A; padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(216,178,90,.4); }
 .lg-skip { margin-top: 16px; text-align: center; font-size: 13px; color: rgba(243,240,230,.6); }
+
+/* —— 强制绑定手机号：微信一键（getPhoneNumber Button）+ 短信兜底 —— */
+.lg-bind-onetap { margin: 22px 0 0; padding: 0; line-height: normal; }
+.lg-bind-onetap::after { border: none; }
+.lg-sep {
+  display: flex; align-items: center; justify-content: center;
+  margin: 16px 0; font-size: 11px; color: rgba(243,240,230,.45);
+}

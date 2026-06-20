@@ -13,7 +13,7 @@ interface Props {
   onLoggedIn: (onboarded: boolean) => void;
 }
 
-type Stage = 'wechat' | 'phone' | 'complete';
+type Stage = 'wechat' | 'phone' | 'bindphone' | 'complete';
 
 const phoneRe = /^1\d{10}$/;
 const codeRe = /^\d{4,8}$/;
@@ -36,12 +36,16 @@ export default function Login({ open, onLoggedIn }: Props) {
   const [bindCode, setBindCode] = useState('');
   const [bindSent, setBindSent] = useState(0);
   const [bindSending, setBindSending] = useState(false);
+  const [bindLoading, setBindLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // 打开时隐藏底栏（复用 overlay 标志），并回到默认微信登录态
+  // 打开时隐藏底栏（复用 overlay 标志）。已登录但未绑手机 → 直接进强制绑定页；否则回默认微信登录态。
   useEffect(() => {
     store.setOverlay(open, 'login');
-    if (open) setStage('wechat');
+    if (open) {
+      const me = store.me();
+      setStage(store.isAuthed() && me && !me.user.phone ? 'bindphone' : 'wechat');
+    }
     return () => store.setOverlay(false, 'login');
   }, [open]);
 
@@ -74,18 +78,70 @@ export default function Login({ open, onLoggedIn }: Props) {
     });
   });
 
-  // 微信登录成功后：新账号、或老账号尚未补齐头像/昵称 → 进「完善资料」用微信头像昵称填写能力补齐；
-  // 已补齐则直接进入。微信不允许静默读取头像昵称，必须由用户点一下「使用微信头像/昵称」授权填入。
+  // 微信登录成功后：未绑手机 → 强制进「绑定手机号」页（绑定后才能继续）；
+  // 已绑但缺头像/昵称 → 进「完善资料」（可跳过）；都齐 → 直接进入。
   const afterAuthed = (r: { isNew: boolean; onboarded: boolean; user: { wechatLinked?: boolean } }) => {
     const me = store.me();
-    const needsProfile = r.user.wechatLinked && (r.isNew || !me?.user.name || !me?.user.avatarUrl);
-    if (needsProfile) {
+    if (r.user.wechatLinked && !me?.user.phone) {
+      setStage('bindphone');
+    } else if (r.user.wechatLinked && (r.isNew || !me?.user.name || !me?.user.avatarUrl)) {
       setNick(me?.user.name || '');
       setAvatarLocal('');
       setStage('complete');
     } else {
       onLoggedIn(r.onboarded);
     }
+  };
+
+  // 绑定成功后：刷新 me，决定去「完善资料」还是直接进入。
+  const proceedAfterBind = async () => {
+    await store.loadMe();
+    const me = store.me();
+    if (!me?.user.name || !me?.user.avatarUrl) { setNick(me?.user.name || ''); setAvatarLocal(''); setStage('complete'); }
+    else onLoggedIn(store.isOnboarded());
+  };
+
+  // 微信一键绑定手机号：getPhoneNumber 返回一次性 code，后端换号并绑定到当前账号。
+  const onGetBindPhone = async (e: { detail?: { code?: string; errMsg?: string } }) => {
+    const detail = e?.detail || {};
+    if (!detail.code) {
+      if (!/deny|cancel|fail:?\s*用户/i.test(detail.errMsg || '')) Taro.showToast({ title: '一键绑定不可用，请用短信绑定', icon: 'none' });
+      return;
+    }
+    if (bindLoading) return;
+    setBindLoading(true);
+    try {
+      await api.bindPhoneByWechat(detail.code);
+      await proceedAfterBind();
+    } catch (err) {
+      Taro.showToast({ title: (err as Error)?.message || '绑定失败，请重试', icon: 'none' });
+    } finally {
+      setBindLoading(false);
+    }
+  };
+
+  // 短信兜底绑定。
+  const submitBind = async () => {
+    if (!phoneRe.test(bindPhone)) { Taro.showToast({ title: '请输入正确手机号', icon: 'none' }); return; }
+    if (!codeRe.test(bindCode)) { Taro.showToast({ title: '请输入短信验证码', icon: 'none' }); return; }
+    if (bindLoading) return;
+    setBindLoading(true);
+    try {
+      await api.bindPhone(bindPhone, bindCode);
+      await proceedAfterBind();
+    } catch (err) {
+      Taro.showToast({ title: (err as Error)?.message || '绑定失败，请重试', icon: 'none' });
+    } finally {
+      setBindLoading(false);
+    }
+  };
+
+  // 强制绑定页的退出：不绑就退登，回到微信登录。
+  const logoutEscape = () => {
+    if (bindLoading) return;
+    store.logout();
+    setBindPhone(''); setBindCode(''); setBindSent(0);
+    setStage('wechat');
   };
 
   const submitWechat = async () => {
@@ -205,17 +261,6 @@ export default function Login({ open, onLoggedIn }: Props) {
       if (name && name !== (store.me()?.user.name || '')) {
         try { await api.updateIdentity({ name }); } catch { /* 可在设置补填，不阻断 */ }
       }
-      // 可选绑定手机：两项都填了才校验提交；任一格式不对则提示并停留
-      if (bindPhone || bindCode) {
-        if (!phoneRe.test(bindPhone)) { Taro.showToast({ title: '请输入正确手机号', icon: 'none' }); return; }
-        if (!codeRe.test(bindCode)) { Taro.showToast({ title: '请输入验证码', icon: 'none' }); return; }
-        try {
-          await api.bindPhone(bindPhone, bindCode);
-        } catch (e) {
-          Taro.showToast({ title: (e as Error)?.message || '绑定失败，请重试', icon: 'none' });
-          return;
-        }
-      }
       await store.loadMe();
       onLoggedIn(store.isOnboarded());
     } finally {
@@ -296,6 +341,43 @@ export default function Login({ open, onLoggedIn }: Props) {
         </View>
       )}
 
+      {stage === 'bindphone' && (
+        <View className="lg-content">
+          <View className="lg-form">
+            <Text className="lg-kicker">AI 军师</Text>
+            <Text className="lg-h serif">绑定手机号</Text>
+            <Text className="lg-sub">微信登录已完成，绑定手机号后即可开始使用</Text>
+
+            {isWeapp && (
+              <Button className={`lg-wechat lg-bind-onetap ${bindLoading ? 'off' : ''}`} openType="getPhoneNumber" onGetPhoneNumber={onGetBindPhone}>
+                <Icon name="wechat" size={20} color="#07C160" />
+                <Text className="lg-wechat-t">{bindLoading ? '绑定中…' : '微信一键绑定手机号'}</Text>
+              </Button>
+            )}
+
+            <View className="lg-sep"><Text>或用短信验证码绑定</Text></View>
+
+            <View className="lg-field">
+              <Text className="lg-pre">+86</Text>
+              <Input className="lg-input" type="number" maxlength={11} value={bindPhone} placeholder="请输入手机号" placeholderClass="lg-ph" onInput={(e) => setBindPhone(e.detail.value)} />
+            </View>
+            <View className="lg-field">
+              <Input className="lg-input" type="number" maxlength={6} value={bindCode} placeholder="验证码" placeholderClass="lg-ph" onInput={(e) => setBindCode(e.detail.value)} />
+              <Text className={`lg-code ${bindSent > 0 || bindSending ? 'off' : ''}`} onClick={sendBindCode}>
+                {bindSent > 0 ? `${bindSent}s` : bindSending ? '发送中…' : '获取验证码'}
+              </Text>
+            </View>
+            <View className={`lg-cta ${bindLoading ? 'off' : ''}`} onClick={submitBind}>
+              <Text>{bindLoading ? '绑定中…' : '完成绑定'}</Text>
+            </View>
+          </View>
+
+          <View className="lg-actions">
+            <Text className="lg-skip" onClick={logoutEscape}>退出登录</Text>
+          </View>
+        </View>
+      )}
+
       {stage === 'complete' && (
         <View className="lg-content">
           <View className="lg-form lg-complete">
@@ -327,21 +409,6 @@ export default function Login({ open, onLoggedIn }: Props) {
 
             <View className="lg-field">
               <Input className="lg-input" type="nickname" maxlength={20} value={nick} placeholder="点此填写昵称（可用微信昵称）" placeholderClass="lg-ph" onInput={(e) => setNick(e.detail.value)} onBlur={(e) => setNick(e.detail.value)} />
-            </View>
-
-            <View className="lg-bindsec">
-              <Text className="lg-bindsec-t">绑定手机号</Text>
-              <Text className="lg-bindsec-opt">选填</Text>
-            </View>
-            <View className="lg-field">
-              <Text className="lg-pre">+86</Text>
-              <Input className="lg-input" type="number" maxlength={11} value={bindPhone} placeholder="手机号" placeholderClass="lg-ph" onInput={(e) => setBindPhone(e.detail.value)} />
-            </View>
-            <View className="lg-field">
-              <Input className="lg-input" type="number" maxlength={6} value={bindCode} placeholder="验证码" placeholderClass="lg-ph" onInput={(e) => setBindCode(e.detail.value)} />
-              <Text className={`lg-code ${bindSent > 0 || bindSending ? 'off' : ''}`} onClick={sendBindCode}>
-                {bindSent > 0 ? `${bindSent}s` : bindSending ? '发送中…' : '获取验证码'}
-              </Text>
             </View>
 
             <View className={`lg-cta ${saving ? 'off' : ''}`} onClick={finishComplete}>

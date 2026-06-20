@@ -98,9 +98,11 @@ export const api = {
     IS_MOCK ? mock.login(phone, name, code) : request<LoginResult>('/auth/login', 'POST', { phone, name, code }),
   wechatLogin: (code: string, nickname?: string, avatarUrl?: string) =>
     IS_MOCK ? mock.wechatLogin(code, nickname, avatarUrl) : request<LoginResult>('/auth/wechat-login', 'POST', { code, nickname, avatarUrl }),
-  // 绑定手机号（登录后可选）：需登录态 + scene=bind 的短信验证码。
+  // 绑定手机号（微信登录后强制）：需登录态。①微信一键 phoneCode；②短信 phone+code 兜底。
   bindPhone: (phone: string, code: string) =>
     IS_MOCK ? mock.bindPhone(phone, code) : request<BindPhoneResult>('/auth/bind-phone', 'POST', { phone, code }),
+  bindPhoneByWechat: (phoneCode: string) =>
+    IS_MOCK ? mock.bindPhone(undefined, undefined, phoneCode) : request<BindPhoneResult>('/auth/bind-phone', 'POST', { phoneCode }),
   // 本机号一键登录：phoneCode=getPhoneNumber 的 code，loginCode=wx.login 的 code（用于关联 openid）。
   wechatPhoneLogin: (phoneCode: string, loginCode?: string, name?: string) =>
     IS_MOCK ? mock.wechatPhoneLogin(phoneCode, name) : request<LoginResult>('/auth/wechat-phone', 'POST', { phoneCode, loginCode, name }),

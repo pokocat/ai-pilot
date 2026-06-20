@@ -264,6 +264,33 @@ describe('TC-G 绑定手机号 / 头像', () => {
     assert.equal(r.status, 503);
     assert.equal(r.body.code, 'OSS_NOT_CONFIGURED');
   });
+
+  test('G6 微信一键绑定手机号：phoneCode 换号绑定到当前账号（mock 微信取号）', async () => {
+    const oldFetch = globalThis.fetch;
+    process.env.WECHAT_MINI_APPID = 'wx-test-appid';
+    process.env.WECHAT_MINI_SECRET = 'wx-test-secret';
+    _resetTokenCache();
+    const boundPhone = uniquePhone();
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url.includes('stable_token')) return new Response(JSON.stringify({ access_token: 'tok-bind', expires_in: 7200 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      if (url.includes('getuserphonenumber')) return new Response(JSON.stringify({ errcode: 0, phone_info: { purePhoneNumber: boundPhone } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      throw new Error('unexpected fetch ' + url);
+    }) as typeof fetch;
+    try {
+      const token = await login(uniquePhone()); // 已登录账号（演示用手机号占位）
+      const r = await api('POST', '/api/auth/bind-phone', { token, body: { phoneCode: 'pc-bind-1' } });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.phone, boundPhone);
+      const me = await api('GET', '/api/me', { token });
+      assert.equal(me.body.user.phone, boundPhone);
+    } finally {
+      globalThis.fetch = oldFetch;
+      delete process.env.WECHAT_MINI_APPID;
+      delete process.env.WECHAT_MINI_SECRET;
+      _resetTokenCache();
+    }
+  });
 });
 
 // ───────────────────────── TC-B 与不同智能体对话（mock） ─────────────────────────

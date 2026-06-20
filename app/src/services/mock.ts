@@ -451,15 +451,24 @@ export const mock = {
     });
   },
 
-  // 绑定手机号（演示）：校验验证码后把手机号写入当前账号档案。
-  async bindPhone(phone: string, code: string): Promise<{ ok: boolean; phone: string; wechatLinked: boolean }> {
-    const expect = mockSmsCodes[phone] ?? '888888';
-    if (code !== expect) throw Object.assign(new Error('验证码错误或已过期'), { code: 'SMS_CODE_INVALID' });
-    delete mockSmsCodes[phone];
+  // 绑定手机号（演示）：①微信一键 phoneCode → 派生稳定手机号；②短信 phone+code 校验。
+  async bindPhone(phone?: string, code?: string, phoneCode?: string): Promise<{ ok: boolean; phone: string; wechatLinked: boolean }> {
     const { token, d } = current();
-    d.phone = phone;
+    let finalPhone: string;
+    if (phoneCode) {
+      let h = 0;
+      for (let i = 0; i < phoneCode.length; i++) h = (h * 31 + phoneCode.charCodeAt(i)) >>> 0;
+      finalPhone = ('1' + String(3_900_000_000 + (h % 90_000_000)).padStart(10, '0')).slice(0, 11);
+    } else {
+      if (!phone || !code) throw Object.assign(new Error('请提供手机号与验证码'), { code: 'BIND_PARAMS_MISSING' });
+      const expect = mockSmsCodes[phone] ?? '888888';
+      if (code !== expect) throw Object.assign(new Error('验证码错误或已过期'), { code: 'SMS_CODE_INVALID' });
+      delete mockSmsCodes[phone];
+      finalPhone = phone;
+    }
+    d.phone = finalPhone;
     save(token, d);
-    return delay({ ok: true, phone, wechatLinked: !!d.wechatLinked });
+    return delay({ ok: true, phone: finalPhone, wechatLinked: !!d.wechatLinked });
   },
 
   // 上传头像（演示）：无 OSS，直接把传入的本地路径当作头像链接回显。
