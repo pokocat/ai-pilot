@@ -70,10 +70,13 @@ export default function Login({ open, onLoggedIn }: Props) {
     });
   });
 
-  // 微信登录成功后：新账号 → 进「完善资料」同步昵称/头像；老账号直接进入。
+  // 微信登录成功后：新账号、或老账号尚未补齐头像/昵称 → 进「完善资料」用微信头像昵称填写能力补齐；
+  // 已补齐则直接进入。微信不允许静默读取头像昵称，必须由用户点一下「使用微信头像/昵称」授权填入。
   const afterAuthed = (r: { isNew: boolean; onboarded: boolean; user: { wechatLinked?: boolean } }) => {
-    if (r.user.wechatLinked && r.isNew) {
-      setNick(store.me()?.user.name || '');
+    const me = store.me();
+    const needsProfile = r.user.wechatLinked && (r.isNew || !me?.user.name || !me?.user.avatarUrl);
+    if (needsProfile) {
+      setNick(me?.user.name || '');
       setAvatarLocal('');
       setStage('complete');
     } else {
@@ -270,7 +273,7 @@ export default function Login({ open, onLoggedIn }: Props) {
         <View className="lg-content">
           <View className="lg-form lg-complete">
             <Text className="lg-h serif">完善你的资料</Text>
-            <Text className="lg-sub">来自微信，可随时在「设置」中修改</Text>
+            <Text className="lg-sub">点击使用微信头像与昵称，可随时修改</Text>
 
             <View className="lg-av-wrap">
               {isWeapp ? (
@@ -285,11 +288,11 @@ export default function Login({ open, onLoggedIn }: Props) {
                   ? <Image className="lg-av" src={avatarShown} mode="aspectFill" />
                   : <View className="lg-av lg-av-ph"><Icon name="user" size={26} color="rgba(243,240,230,.7)" /></View>
               )}
-              <Text className="lg-av-tip">点击设置头像</Text>
+              <Text className="lg-av-tip">点击使用微信头像</Text>
             </View>
 
             <View className="lg-field">
-              <Input className="lg-input" type="nickname" maxlength={20} value={nick} placeholder="填写昵称" placeholderClass="lg-ph" onInput={(e) => setNick(e.detail.value)} onBlur={(e) => setNick(e.detail.value)} />
+              <Input className="lg-input" type="nickname" maxlength={20} value={nick} placeholder="点此填写昵称（可用微信昵称）" placeholderClass="lg-ph" onInput={(e) => setNick(e.detail.value)} onBlur={(e) => setNick(e.detail.value)} />
             </View>
 
             <View className="lg-bindsec">
