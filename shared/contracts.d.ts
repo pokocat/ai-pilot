@@ -318,6 +318,16 @@ export interface SaveLibRequest {
 
 /* ────────────── 引用（@ 项目/报告/知识/记忆） ────────────── */
 export type RefKind = 'project' | 'report' | 'knowledge' | 'memory';
+/** @引用选择器「记忆」分组候选（GET /memories） */
+export interface MemoryCandidate {
+  id: string;
+  text: string;
+  kind: string;          // fact | preference | feedback
+  agentKey: string;
+  agentName?: string | null;
+  projectId?: string | null;
+  createdAt: string;
+}
 export interface MessageRef {
   kind: RefKind;
   id: string;
