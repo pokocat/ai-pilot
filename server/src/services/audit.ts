@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
+import { verifyUserToken } from './userToken.js';
 
 export function isoSecond(d: Date): string {
   return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -100,10 +101,11 @@ export function registerHttpAudit(app: FastifyInstance) {
     if (!path.startsWith('/api/') || path === '/api/health') return;
 
     const token = (req.headers['x-user-id'] as string | undefined)?.trim();
+    const resolvedId = verifyUserToken(token); // JWT→sub / 历史→userId 原样
     const adminToken = (req.headers['x-admin-token'] as string | undefined)?.trim()
       || ((req.headers.authorization as string | undefined)?.trim().startsWith('Bearer ') ? '[bearer]' : '');
-    const user = token
-      ? await prisma.user.findUnique({ where: { id: token }, select: { id: true, tenantId: true, role: true } }).catch(() => null)
+    const user = resolvedId
+      ? await prisma.user.findUnique({ where: { id: resolvedId }, select: { id: true, tenantId: true, role: true } }).catch(() => null)
       : null;
     const durationMs = Math.max(0, Date.now() - (requestStart.get(req) ?? Date.now()));
     const authState = token ? (user ? 'user_resolved' : 'invalid_user_token') : 'anonymous';

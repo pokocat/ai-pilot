@@ -10,6 +10,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { prisma } from '../db.js';
 import { resolveSession } from './adminAccount.js';
+import { verifyUserToken } from './userToken.js';
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -61,7 +62,8 @@ export async function getAdminActor(req: FastifyRequest): Promise<AdminActor | n
     }
   }
 
-  const uid = ((req.headers['x-user-id'] as string | undefined) ?? '').trim();
+  // 3) 管理员账号（role=admin，兼容旧路径）
+  const uid = verifyUserToken((req.headers['x-user-id'] as string | undefined) ?? '');
   if (uid) {
     const u = await prisma.user.findUnique({ where: { id: uid }, select: { role: true } });
     if (u?.role === 'admin') return { kind: 'legacyUser', id: uid };

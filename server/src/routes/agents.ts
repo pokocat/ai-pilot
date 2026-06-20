@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
+import { verifyUserToken } from '../services/userToken.js';
 import { getBalance } from '../services/credits.js';
 import { ownedAgentKeys, publicOwned } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
@@ -94,7 +95,7 @@ export async function agentRoutes(app: FastifyInstance) {
 
 // 无 token / 无效 token 时返回空集（公开拉取仍可看到列表，只是 unlock 显示未开通）。
 async function ownedKeysForHeader(token?: string): Promise<Set<string>> {
-  const id = (token ?? '').trim();
+  const id = verifyUserToken(token);
   if (!id) return new Set();
   const user = await prisma.user.findUnique({ where: { id }, select: { id: true } });
   if (!user) return new Set();

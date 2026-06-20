@@ -439,7 +439,7 @@ mock 可随时预览；**正式上传/审核**还需：
 ## 13. 已知限制 / TODO
 
 - **miniprogram-ci 上传**：云端执行环境的网络白名单未放行 `servicewechat.com`（报 `Host not in allowlist`），无法在本沙箱内直传。需从**本机**执行上传，或放开环境网络策略后重试；另注意上传密钥若开了 IP 白名单，需把执行机出口 IP 加入小程序后台。本机命令见 §11。
-- 自有登录态仍是演示 token（`token=userId`）；微信 openid、本机号一键登录与短信验证码校验已接入，JWT/短信强制校验开关生产化仍待落地。
+- 自有登录态支持 JWT（`services/userToken.ts`，HS256）：配 `APP_JWT_SECRET` 后登录签发 JWT、`resolveUser`/审计/admin role/entitlement 统一 `verifyUserToken` 校验；未配则回退历史 `token=userId`，`APP_JWT_REQUIRED=true` 可强制只认 JWT。短信强制校验开关（`SMS_REQUIRE_CODE`）已就绪，生产置 true 即可。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 内容审核/计量/缓存为演示级（关键词 / 内存）；生产替换为合规审核 + Redis + 计费台账。
 - 套餐购买为演示级（直接切套餐并写入算力流水）；生产需接微信支付/订单状态机/支付回调验签/幂等入账，避免绕过支付直接加算力。
