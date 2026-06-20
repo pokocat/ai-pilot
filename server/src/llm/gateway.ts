@@ -386,6 +386,45 @@ export async function completeJson(system: string, user: string): Promise<Record
     return null;
   }
 }
+/**
+ * 从文本抽取时序知识图谱三元组（实体 + 关系）。
+ * 有真实模型时让模型抽 subject-predicate-object；否则返回空（启发式留给上层，避免误抽）。
+ */
+export async function extractGraphTriples(
+  text: string,
+): Promise<{ entities: { name: string; type: string }[]; relations: { subject: string; predicate: string; object: string }[] }> {
+  const empty = { entities: [], relations: [] };
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  if (!live) return empty;
+  try {
+    const sys =
+      '你是知识图谱抽取器。从文本中抽取「实体」和「关系三元组」，用于构建企业时序知识图谱。' +
+      '实体 type 取值：person/org/product/concept/other。关系为 {subject,predicate,object}，' +
+      'subject/object 必须是实体 name。只输出 JSON：' +
+      '{"entities":[{"name":"","type":""}],"relations":[{"subject":"","predicate":"","object":""}]}。无可抽取则空数组。';
+    const json = await rawJson(cfg, live, sys, text.slice(0, 2000));
+    if (!json) return empty;
+    const entities = ((json.entities as unknown[]) ?? [])
+      .filter((e): e is { name: string; type: string } => !!e && typeof (e as { name?: unknown }).name === 'string')
+      .map((e) => ({ name: String(e.name).slice(0, 80), type: normEntityType((e as { type?: string }).type) }))
+      .slice(0, 20);
+    const relations = ((json.relations as unknown[]) ?? [])
+      .filter((r): r is { subject: string; predicate: string; object: string } =>
+        !!r && typeof (r as { subject?: unknown }).subject === 'string' &&
+        typeof (r as { predicate?: unknown }).predicate === 'string' &&
+        typeof (r as { object?: unknown }).object === 'string')
+      .map((r) => ({ subject: String(r.subject).slice(0, 80), predicate: String(r.predicate).slice(0, 40), object: String(r.object).slice(0, 80) }))
+      .slice(0, 30);
+    return { entities, relations };
+  } catch (err) {
+    console.error('[gateway] extractGraphTriples fallback:', (err as Error).message);
+    return empty;
+  }
+}
+function normEntityType(t?: string): string {
+  return ['person', 'org', 'product', 'concept', 'other'].includes(t ?? '') ? (t as string) : 'other';
+}
 
 /** 给汇总服务用：以就绪模型把对话纪要文本归纳成「讨论要点/关键结论/待办」三类。 */
 export async function summarizePoints(transcript: string): Promise<{ points: string[]; conclusions: string[]; todos: string[] } | null> {
