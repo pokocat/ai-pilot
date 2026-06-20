@@ -8,6 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-20** · **微信消息推送 URL 验签接口**：新增 `GET/POST /api/wechat/message`，按 `WECHAT_MESSAGE_TOKEN` 校验微信后台 `signature/timestamp/nonce`；GET 验签通过原样返回 `echostr`，POST 支持 XML 推送体并返回 `success`，为后续客服/订阅事件处理预留可信入口。`.env.example`、AGENTS/DEPLOYMENT 同步 Token 与公网 URL 说明，新增 `test/wechatMessage.test.ts`。
 - **2026-06-20** · **时序知识图谱（Graphiti 式，P1 功能增强）**：新增 `GraphEntity/GraphRelation`（关系带 `validFrom/validTo/invalidatedAt` 时间窗）、`services/knowledgeGraph.ts`（实体去重、同主谓新事实软失效旧事实、`queryRelations` as-of 时序查询）、`gateway.extractGraphTriples`（真实模型抽三元组，mock 返回空）、`routes/graph.ts`（`POST /graph/extract`、`GET /graph/entities`、`GET /graph/relations?asOf=`）。新增 `test/knowledgeGraph.test.ts`（4 例）。
 - **2026-06-20** · **@引用「记忆」候选分组（P1 功能增强）**：新增 `GET /memories`（tenant+user 隔离列本人长期记忆，可按项目/智能体/关键词过滤，权重优先）+ `routes/memories.ts`，供 @引用选择器单列「记忆」组（`resolveReferences` 早已支持 `kind:'memory'`）。SSOT 增 `MemoryCandidate`。
 - **2026-06-20** · **运营只读看板（项目/报告）+ 报告重命名（P1 功能增强）**：新增 `GET /admin/projects`、`GET /admin/reports`（跨租户运营视图）；报告新增 `PATCH /reports/:id` 重命名（仅改展示名不动 slug，租户隔离）。SSOT 增 `AdminProjectItem/AdminReportItem`。（知识库看板与文档上传以 main 06-16 实现为准，本分支不再重复。）

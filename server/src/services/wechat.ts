@@ -1,3 +1,5 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
+
 export interface WechatCodeSession {
   openid: string;
   unionid?: string;
@@ -8,6 +10,44 @@ export interface WechatCodeSession {
 
 function httpError(message: string, statusCode: number, code: string) {
   return Object.assign(new Error(message), { statusCode, code });
+}
+
+/** 读取微信消息推送 Token（用于公众平台/小程序后台“消息推送 URL”验签）。 */
+export function wechatMessageToken(): string {
+  return (process.env.WECHAT_MESSAGE_TOKEN || process.env.WECHAT_PUSH_TOKEN || process.env.WECHAT_TOKEN || '').trim();
+}
+
+/** 微信消息推送明文模式签名：sha1(sort(token,timestamp,nonce).join(''))。 */
+export function signWechatMessage(token: string, timestamp: string, nonce: string): string {
+  return createHash('sha1')
+    .update([token, timestamp, nonce].sort().join(''))
+    .digest('hex');
+}
+
+function safeEqualHex(a: string, b: string): boolean {
+  const left = Buffer.from(a.toLowerCase(), 'hex');
+  const right = Buffer.from(b.toLowerCase(), 'hex');
+  if (left.length !== right.length || left.length === 0) return false;
+  try {
+    return timingSafeEqual(left, right);
+  } catch {
+    return false;
+  }
+}
+
+/** 校验微信消息推送 signature。token 未配置或参数不完整时返回 false。 */
+export function verifyWechatMessageSignature(args: {
+  signature?: string;
+  timestamp?: string;
+  nonce?: string;
+  token?: string;
+}): boolean {
+  const token = (args.token ?? wechatMessageToken()).trim();
+  const signature = args.signature?.trim();
+  const timestamp = args.timestamp?.trim();
+  const nonce = args.nonce?.trim();
+  if (!token || !signature || !timestamp || !nonce) return false;
+  return safeEqualHex(signWechatMessage(token, timestamp, nonce), signature);
 }
 
 /** 读取小程序 AppID/AppSecret（主用 WECHAT_MINI_*，兼容旧 WECHAT_*）。 */

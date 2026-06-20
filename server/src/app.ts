@@ -18,6 +18,7 @@ import { memoryRoutes } from './routes/memories.js';
 import { graphRoutes } from './routes/graph.js';
 import { planRoutes } from './routes/plans.js';
 import { payRoutes } from './routes/pay.js';
+import { wechatRoutes } from './routes/wechat.js';
 import { adminRoutes } from './routes/admin.js';
 import { adminAccountRoutes } from './routes/adminAccount.js';
 import { registerHttpAudit } from './services/audit.js';
@@ -57,6 +58,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(graphRoutes, { prefix: '/api' });
   await app.register(planRoutes, { prefix: '/api' });
   await app.register(payRoutes, { prefix: '/api' }); // 支付回调（封装插件含原文 JSON 解析器，验签用）
+  await app.register(wechatRoutes, { prefix: '/api' }); // 微信消息推送 URL 验签 / 可信接收
   await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin
   await app.register(adminRoutes, { prefix: '/api' });
 
