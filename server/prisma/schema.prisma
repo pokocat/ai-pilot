@@ -45,6 +45,7 @@ model User {
   wechatOpenId   String?   @unique
   wechatUnionId  String?   @unique
   name           String
+  avatarUrl      String? // 头像：微信「头像昵称填写能力」选取后上传 OSS 的公网链接；可在设置中修改
   role           String    @default("owner") // owner | member | admin
   benmingColor   String    @default("gold") // 本命色：首登强制选择，金色默认
   planId         String?

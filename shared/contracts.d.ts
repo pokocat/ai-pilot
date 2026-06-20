@@ -219,7 +219,7 @@ export interface MyCreditItem {
 export interface MyCreditsView { items: MyCreditItem[]; }
 
 export interface Me {
-  user: { id: string; name: string; role: string; benmingColor: string };
+  user: { id: string; name: string; role: string; benmingColor: string; avatarUrl?: string | null; phone?: string; wechatLinked?: boolean };
   tenant: { id: string; name: string; industry?: string | null; stage?: string | null };
   plan: { name: string; creditsPerMonth: number; tokenQuotaPerMonth: number } | null;
   creditBalance: number; // 钻石(点)余额：解锁 / 图片按张
@@ -231,10 +231,13 @@ export interface Me {
 
 export interface LoginRequest { phone: string; name?: string; code?: string; }
 export interface AliasSuggestionResult { name: string; source: string; }
-/** 更新身份（称呼 + 公司/品牌名）：首登建档 / 设置页 */
-export interface UpdateIdentityRequest { name?: string; company?: string; }
-/** 发送短信验证码（POST /auth/sms/send） */
-export interface SmsSendRequest { phone: string; }
+/** 更新身份（称呼 + 公司/品牌名 + 头像）：首登建档 / 完善资料 / 设置页 */
+export interface UpdateIdentityRequest { name?: string; company?: string; avatarUrl?: string; }
+/** 发送短信验证码（POST /auth/sms/send）。scene：login=登录；bind=微信账号绑定手机号。 */
+export interface SmsSendRequest { phone: string; scene?: 'login' | 'bind'; }
+/** 绑定手机号（POST /auth/bind-phone，需登录态）：微信账号补绑真实手机号。 */
+export interface BindPhoneRequest { phone: string; code: string; }
+export interface BindPhoneResult { ok: boolean; phone: string; wechatLinked: boolean; }
 /** 发送结果：cooldownSec 倒计时、expiresInSec 有效期；devCode 仅演示口径回传，便于自动回填。 */
 export interface SmsSendResult { cooldownSec: number; expiresInSec: number; devCode?: string; }
 export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl?: string; }
@@ -242,7 +245,7 @@ export interface WechatLoginRequest { code: string; nickname?: string; avatarUrl
 export interface WechatPhoneLoginRequest { phoneCode: string; loginCode?: string; name?: string; }
 export interface LoginResult {
   token: string; isNew: boolean; onboarded: boolean;
-  user: { id: string; name: string; phone: string; benmingColor: string; wechatLinked?: boolean };
+  user: { id: string; name: string; phone: string; benmingColor: string; avatarUrl?: string | null; wechatLinked?: boolean };
 }
 
 /* ────────────── 建档 ────────────── */

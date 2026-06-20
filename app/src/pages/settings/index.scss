@@ -9,6 +9,15 @@
 .set-label { display: block; font-size: 12px; color: var(--ink-3); margin-bottom: 7px; }
 .set-input { height: 26px; font-size: 15.5px; color: var(--ink); }
 
+/* 头像行：标签在左，头像 + 「更换」在右 */
+.set-avatar-row { display: flex; align-items: center; justify-content: space-between; }
+.set-avatar-row .set-label { margin-bottom: 0; }
+.set-avatar-btn { display: flex; align-items: center; gap: 10px; padding: 0; margin: 0; line-height: normal; background: transparent; font-size: inherit; }
+.set-avatar-btn::after { border: none; }
+.set-avatar { width: 44px; height: 44px; border-radius: 50%; }
+.set-avatar-ph { display: flex; align-items: center; justify-content: center; }
+.set-avatar-edit { font-size: 13px; font-weight: 600; }
+
 .set-save {
   height: 46px; border-radius: 12px; margin-top: 14px;
   display: flex; align-items: center; justify-content: center;

@@ -5,6 +5,9 @@ import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { buildClientUnderstanding } from '../services/understanding.js';
 import { getQuotaState } from '../services/tokenQuota.js';
+import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
+
+const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
 export async function metaRoutes(app: FastifyInstance) {
   app.get('/health', async () => ({ ok: true }));
@@ -21,7 +24,15 @@ export async function metaRoutes(app: FastifyInstance) {
     const understanding = await buildClientUnderstanding(user);
     const quota = await getQuotaState(user.id); // 本月 token 额度（客户端只看进度 %）
     return {
-      user: { id: user.id, name: user.name, role: user.role, benmingColor: user.benmingColor },
+      user: {
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        benmingColor: user.benmingColor,
+        avatarUrl: user.avatarUrl,
+        phone: user.phone.startsWith('wx_') ? '' : user.phone, // wx_ 占位号不外露：空串表示尚未绑定手机
+        wechatLinked: !!user.wechatOpenId,
+      },
       tenant: { id: user.tenant.id, name: user.tenant.name, industry: user.tenant.industry, stage: user.tenant.stage },
       plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth } : null,
       creditBalance: credit?.balance ?? 0,
@@ -53,18 +64,49 @@ export async function metaRoutes(app: FastifyInstance) {
     return { ok: true, color: req.body.color };
   });
 
-  // 更新身份：称呼(name) + 公司/品牌(company=租户名)。首登建档与「设置」都走这里。
-  app.put<{ Body: { name?: string; company?: string } }>('/me', async (req) => {
+  // 更新身份：称呼(name) + 公司/品牌(company=租户名) + 头像(avatarUrl)。首登建档 / 完善资料 / 「设置」都走这里。
+  app.put<{ Body: { name?: string; company?: string; avatarUrl?: string } }>('/me', async (req) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const name = typeof req.body.name === 'string' ? req.body.name.trim().slice(0, 20) : undefined;
     const company = typeof req.body.company === 'string' ? req.body.company.trim().slice(0, 40) : undefined;
-    if (name !== undefined) await prisma.user.update({ where: { id: user.id }, data: { name } });
+    const avatarUrl = typeof req.body.avatarUrl === 'string' ? req.body.avatarUrl.trim().slice(0, 500) : undefined;
+    const userData: { name?: string; avatarUrl?: string } = {};
+    if (name !== undefined) userData.name = name;
+    if (avatarUrl !== undefined) userData.avatarUrl = avatarUrl;
+    if (Object.keys(userData).length) await prisma.user.update({ where: { id: user.id }, data: userData });
     if (company !== undefined) await prisma.tenant.update({ where: { id: user.tenantId }, data: { name: company } });
     await recordAudit({
       tenantId: user.tenantId, userId: user.id, action: 'user.identity.update',
-      payload: { nameSet: name !== undefined, companySet: company !== undefined },
+      payload: { nameSet: name !== undefined, companySet: company !== undefined, avatarSet: avatarUrl !== undefined },
     });
-    return { ok: true, name, company };
+    return { ok: true, name, company, avatarUrl };
+  });
+
+  // 上传头像（multipart 单文件）→ OSS public-read → 落库 user.avatarUrl，返回公网链接。
+  // 微信「头像昵称填写能力」chooseAvatar 拿到的是临时文件，需上传到自有存储才能长期展示。
+  app.post('/me/avatar', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    if (!ossConfigured()) return reply.code(503).send({ error: '头像存储未配置', code: 'OSS_NOT_CONFIGURED' });
+    let data;
+    try { data = await req.file(); } catch { return reply.code(413).send({ error: '图片过大（上限 5MB）' }); }
+    if (!data) return reply.code(400).send({ error: '未收到图片' });
+    const ext = AVATAR_MIME[data.mimetype];
+    if (!ext) return reply.code(400).send({ error: '仅支持 JPG / PNG / WebP 图片', code: 'AVATAR_BAD_TYPE' });
+    let buf: Buffer;
+    try { buf = await data.toBuffer(); } catch { return reply.code(413).send({ error: '图片过大（上限 5MB）' }); }
+    if (data.file.truncated || buf.length > 5 * 1024 * 1024) return reply.code(413).send({ error: '图片过大（上限 5MB）' });
+    if (!buf.length) return reply.code(400).send({ error: '空文件' });
+    // 文件名带 user 维度，覆盖式存储（key 含 createdAt 时间戳避免 CDN 缓存旧图）。
+    const key = `avatars/${user.id}/${Date.now()}.${ext}`;
+    let avatarUrl: string;
+    try {
+      avatarUrl = await ossPutPublic(key, buf, data.mimetype);
+    } catch {
+      return reply.code(502).send({ error: '头像上传失败，请稍后再试', code: 'AVATAR_UPLOAD_FAILED' });
+    }
+    await prisma.user.update({ where: { id: user.id }, data: { avatarUrl } });
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.avatar.update', payload: { ok: true } });
+    return { ok: true, avatarUrl };
   });
 
   // 注销账号（合规：彻底删除账号及其数据）。本应用 1 用户 ≈ 1 租户，独占租户时连同租户数据一并清除。

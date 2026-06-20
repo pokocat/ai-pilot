@@ -218,6 +218,54 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
   });
 });
 
+// ───────────────────────── TC-G 绑定手机号（登录后可选） / 头像 ─────────────────────────
+describe('TC-G 绑定手机号 / 头像', () => {
+  test('G1 已登录用户绑定手机号：scene=bind 验证码通过 → 写入并可在 /me 看到', async () => {
+    const token = await login(uniquePhone());
+    const newPhone = uniquePhone();
+    const sent = await api('POST', '/api/auth/sms/send', { body: { phone: newPhone, scene: 'bind' } });
+    assert.equal(sent.status, 200);
+    const r = await api('POST', '/api/auth/bind-phone', { token, body: { phone: newPhone, code: sent.body.devCode } });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.phone, newPhone);
+    const me = await api('GET', '/api/me', { token });
+    assert.equal(me.body.user.phone, newPhone);
+  });
+
+  test('G2 bind 场景与 login 场景的验证码相互独立（错码 → 400）', async () => {
+    const token = await login(uniquePhone());
+    const newPhone = uniquePhone();
+    await api('POST', '/api/auth/sms/send', { body: { phone: newPhone, scene: 'bind' } });
+    const r = await api('POST', '/api/auth/bind-phone', { token, body: { phone: newPhone, code: '000000' } });
+    assert.equal(r.status, 400);
+    assert.equal(r.body.code, 'SMS_CODE_INVALID');
+  });
+
+  test('G3 目标手机号已被其他账号占用 → 409 PHONE_TAKEN，不顶号', async () => {
+    const occupied = uniquePhone();
+    await login(occupied); // 账号 B 占用
+    const token = await login(uniquePhone()); // 账号 A
+    const sent = await api('POST', '/api/auth/sms/send', { body: { phone: occupied, scene: 'bind' } });
+    const r = await api('POST', '/api/auth/bind-phone', { token, body: { phone: occupied, code: sent.body.devCode } });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.code, 'PHONE_TAKEN');
+  });
+
+  test('G4 未登录绑定 → 401', async () => {
+    const r = await api('POST', '/api/auth/bind-phone', { body: { phone: uniquePhone(), code: '123456' } });
+    assert.equal(r.status, 401);
+  });
+
+  test('G5 上传头像：未登录 → 401；已登录但测试环境无 OSS → 503 OSS_NOT_CONFIGURED', async () => {
+    const anon = await api('POST', '/api/me/avatar', {});
+    assert.equal(anon.status, 401);
+    const token = await login(uniquePhone());
+    const r = await api('POST', '/api/me/avatar', { token, body: {} });
+    assert.equal(r.status, 503);
+    assert.equal(r.body.code, 'OSS_NOT_CONFIGURED');
+  });
+});
+
 // ───────────────────────── TC-B 与不同智能体对话（mock） ─────────────────────────
 describe('TC-B 与不同智能体对话（mock，无真实 LLM）', () => {
   test('B1 通用军师 general → 自由对话回复', async () => {

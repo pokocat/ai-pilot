@@ -36,6 +36,8 @@ const PATHS: Record<string, string> = {
   upload: '<path d="M12 15V4M8 8l4-4 4 4"/><path d="M5 14v4a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-4"/>',
   lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2.2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15" r="1.1" fill="CCC" stroke="none"/>',
   diamond: '<path d="M6 4h12l3 5-9 12L3 9l3-5Z"/><path d="M3 9h18M9 4l-3 5 6 12 6-12-3-5"/>',
+  phone: '<rect x="6.5" y="3" width="11" height="18" rx="2.5"/><path d="M10 18h4"/>',
+  wechat: '<path d="M8.4 4C4.9 4 2 6.5 2 9.6c0 1.7.9 3.3 2.4 4.3l-.6 2.2 2.5-1.3c.6.2 1.2.3 1.9.3"/><path d="M22 14.4c0-2.6-2.5-4.7-5.6-4.7-3.1 0-5.6 2.1-5.6 4.7s2.5 4.7 5.6 4.7c.6 0 1.2-.1 1.8-.3l2.2 1.2-.5-1.9c1.3-.9 2.1-2.2 2.1-3.7Z"/><circle cx="6.3" cy="9" r="1" fill="CCC" stroke="none"/><circle cx="10.5" cy="9" r="1" fill="CCC" stroke="none"/><circle cx="14.6" cy="13.8" r=".9" fill="CCC" stroke="none"/><circle cx="18.2" cy="13.8" r=".9" fill="CCC" stroke="none"/>',
 };
 
 function dataUri(name: string, color: string): string {
