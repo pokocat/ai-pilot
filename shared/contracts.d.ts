@@ -544,6 +544,10 @@ export interface AdminUserDetail {
   user: AdminUserItem;
   agents: AdminUserAgentRow[]; // 全部需开通(unlock)的智能体 + 开通状态
 }
+/** 只读看板：项目（GET /admin/projects） */
+export interface AdminProjectItem { id: string; name: string; tenantName: string; status: string; sessions: number; reports: number; knowledge: number; updatedAt: string; }
+/** 只读看板：报告（GET /admin/reports） */
+export interface AdminReportItem { id: string; title: string; type: string; tenantName: string; agentName: string | null; currentVersion: number; updatedAt: string; }
 export interface AdminUserItem {
   id: string;
   name: string;

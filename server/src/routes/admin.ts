@@ -39,6 +39,7 @@ import type {
   SandboxRequest, SandboxResult, SandboxTarget,
   EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalSetRequest, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, EvalCaseResultItem, StartEvalRunRequest, PricingTier,
+  AdminProjectItem, AdminReportItem,
 } from '../../../shared/contracts';
 import { Prisma } from '@prisma/client';
 
@@ -352,6 +353,32 @@ export async function adminRoutes(app: FastifyInstance) {
         ? recentAudits.map((a) => ({ icon: auditIcon(a.action), t: auditLabel(a.action), m: String(a.action), v: isoSecond(a.createdAt).replace('T', ' ').replace('Z', '') }))
         : [{ icon: 'alert', t: '暂无审计事件', m: '用户产生操作后会自动写入审计日志', v: '-' }],
     };
+  });
+
+  // —— 只读看板：项目 / 报告（跨租户运营视图，纯读不改；知识库看板见 /admin/knowledge）——
+  app.get<{ Querystring: { limit?: string } }>('/admin/projects', async (req): Promise<AdminProjectItem[]> => {
+    const take = Math.min(200, Math.max(1, Number(req.query.limit ?? 100)));
+    const rows = await prisma.project.findMany({
+      orderBy: { updatedAt: 'desc' }, take,
+      include: { tenant: { select: { name: true } }, _count: { select: { sessions: true, reports: true, knowledge: true } } },
+    });
+    return rows.map((p) => ({
+      id: p.id, name: p.name, tenantName: p.tenant?.name ?? '', status: p.status,
+      sessions: p._count.sessions, reports: p._count.reports, knowledge: p._count.knowledge,
+      updatedAt: p.updatedAt.toISOString(),
+    }));
+  });
+
+  app.get<{ Querystring: { limit?: string } }>('/admin/reports', async (req): Promise<AdminReportItem[]> => {
+    const take = Math.min(200, Math.max(1, Number(req.query.limit ?? 100)));
+    const rows = await prisma.reportDoc.findMany({
+      orderBy: { updatedAt: 'desc' }, take,
+      include: { tenant: { select: { name: true } }, agent: { select: { name: true } } },
+    });
+    return rows.map((r) => ({
+      id: r.id, title: r.title, type: r.type, tenantName: r.tenant?.name ?? '',
+      agentName: r.agent?.name ?? null, currentVersion: r.currentVersion, updatedAt: r.updatedAt.toISOString(),
+    }));
   });
 
   // —— 用户管理：小程序注册用户、账号来源、会话/成果/算力概览 ——
