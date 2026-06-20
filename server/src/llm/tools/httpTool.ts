@@ -44,7 +44,16 @@ export async function assertSafeUrl(raw: string): Promise<void> {
   let addrs: string[];
   if (isIP(host)) addrs = [host];
   else if (/^localhost$/i.test(host)) throw new Error('目标指向内网/环回，已拒绝');
-  else addrs = (await lookup(host, { all: true })).map((r) => r.address);
+  else {
+    // DNS 解析加 5s 超时防 DNS-hang 攻击（无超时时 lookup() 可永久阻塞）。
+    const dnsTimeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('DNS 解析超时，已拒绝')), 5000),
+    );
+    addrs = await Promise.race([
+      lookup(host, { all: true }).then((rs) => rs.map((r) => r.address)),
+      dnsTimeout,
+    ]);
+  }
   for (const a of addrs) if (isPrivateIp(a)) throw new Error('目标指向内网/环回，已拒绝');
 }
 
@@ -83,7 +92,8 @@ export function makeHttpTool(def: HttpToolDef): Tool {
 
         const res = await fetch(url, { method, headers, body, signal: ctrl.signal });
         const text = (await res.text().catch(() => '')) || '';
-        if (!res.ok) return `（工具调用失败 HTTP ${res.status}）${text.slice(0, 200)}`;
+        // 不把原始错误体返回给 LLM，避免泄露上游服务内部信息。
+        if (!res.ok) return `（工具调用失败 HTTP ${res.status}，请稍后重试）`;
         return text.length > RESP_MAX ? text.slice(0, RESP_MAX) + '…' : text || '（工具返回空）';
       } catch (err) {
         const aborted = /abort/i.test((err as Error).message);
