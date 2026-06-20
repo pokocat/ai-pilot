@@ -1,4 +1,5 @@
 import { prisma } from '../db.js';
+import { decryptSecretSafe } from './secretBox.js';
 import { INDUSTRY_BENCHMARK } from '../data/seedConfig.js';
 import { recallMemories } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
@@ -18,7 +19,7 @@ function resolveAgentRuntime(
       mode: 'openai',
       baseUrl: agent.apiBaseUrl,
       model: agent.apiModel ?? undefined,
-      apiKey: agent.apiKey,
+      apiKey: decryptSecretSafe(agent.apiKey),
       skills: (agent.skillsConfig as AgentRuntime['skills']) ?? null,
     };
   }
@@ -27,7 +28,7 @@ function resolveAgentRuntime(
     return {
       mode: 'dify',
       difyBaseUrl: agent.difyBaseUrl,
-      difyApiKey: agent.difyApiKey,
+      difyApiKey: decryptSecretSafe(agent.difyApiKey),
       difyInputs: (agent.difyInputs as Record<string, string> | null) ?? {},
       user: opts.userId,
       sessionId: opts.sessionId ?? null,

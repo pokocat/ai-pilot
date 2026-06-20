@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { builtinToolNames, nativeSkillMeta, resolveTools, resolveOutputSkills } from '../llm/tools/registry.js';
 import { makeHttpTool } from '../llm/tools/httpTool.js';
+import { encryptSecret, decryptSecretSafe } from './secretBox.js';
 import type { Tool, OutputSkill } from '../llm/tools/types.js';
 import type { SkillToolDef, SkillToolMeta, SkillToolUpsert } from '../../../shared/contracts';
 
@@ -19,6 +20,18 @@ function headersOf(raw: unknown): Record<string, string> {
   const h = (raw as Record<string, unknown> | null) ?? {};
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(h)) if (k && typeof v === 'string') out[k] = v;
+  return out;
+}
+
+// 请求头含鉴权密文：写库前逐值加密，运行时取用前逐值解密（值可能是历史明文，decryptSecretSafe 兼容）。
+function encryptHeaderValues(headers?: Record<string, string> | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers ?? {})) if (k && typeof v === 'string') out[k] = encryptSecret(v);
+  return out;
+}
+function decryptHeaderValues(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headersOf(raw))) out[k] = decryptSecretSafe(v);
   return out;
 }
 
@@ -65,7 +78,7 @@ export async function createTool(input: SkillToolUpsert): Promise<SkillToolDef> 
       inputSchema: (input.inputSchema ?? {}) as Prisma.InputJsonValue,
       httpMethod: HTTP_METHODS.has(input.httpMethod ?? '') ? input.httpMethod! : 'POST',
       httpUrl: input.httpUrl.trim(),
-      headersJson: (input.headers ?? {}) as Prisma.InputJsonValue,
+      headersJson: encryptHeaderValues(input.headers) as Prisma.InputJsonValue,
       argsLocation: input.argsLocation === 'query' ? 'query' : 'body',
       enabled: input.enabled ?? true,
     },
@@ -85,7 +98,7 @@ export async function updateTool(id: string, input: SkillToolUpsert): Promise<Sk
     enabled: input.enabled ?? true,
   };
   // headers 仅在显式传入时整体替换（仿 apiKey：留空=保留现有密文）。
-  if (input.headers !== undefined) d.headersJson = (input.headers ?? {}) as Prisma.InputJsonValue;
+  if (input.headers !== undefined) d.headersJson = encryptHeaderValues(input.headers) as Prisma.InputJsonValue;
   const row = await prisma.skillTool.update({ where: { id }, data: d }).catch(() => null);
   return row ? toDef(row) : null;
 }
@@ -121,7 +134,7 @@ export async function loadToolsByNames(names?: string[] | null): Promise<Tool[]>
         key: r.key, name: r.name, description: r.description,
         inputSchema: (r.inputSchema as Record<string, unknown>) ?? {},
         httpMethod: r.httpMethod, httpUrl: r.httpUrl,
-        headers: headersOf(r.headersJson), argsLocation: r.argsLocation,
+        headers: decryptHeaderValues(r.headersJson), argsLocation: r.argsLocation,
       }));
     }
   }

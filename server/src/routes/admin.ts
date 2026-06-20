@@ -18,6 +18,7 @@ import {
 } from '../services/adminAccount.js';
 import { recomputeDraftDirty, publishDraft, rollbackToVersion, listVersions } from '../services/agentVersions.js';
 import { startEvalRun, suggestTier, PRICING_TIERS } from '../services/evals.js';
+import { encryptSecret, decryptSecretSafe } from '../services/secretBox.js';
 import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
@@ -191,9 +192,9 @@ function runtimeData(rt?: AgentRuntimeUpdate): Prisma.AgentUpdateInput {
   if (rt.providerMode !== undefined) d.providerMode = PROVIDER_MODES.includes(rt.providerMode) ? rt.providerMode : 'inherit';
   if (rt.apiBaseUrl !== undefined) d.apiBaseUrl = rt.apiBaseUrl.trim() || null;
   if (rt.apiModel !== undefined) d.apiModel = rt.apiModel.trim() || null;
-  if (rt.apiKey !== undefined) d.apiKey = rt.apiKey || null;
+  if (rt.apiKey !== undefined) d.apiKey = rt.apiKey ? encryptSecret(rt.apiKey) : null;
   if (rt.difyBaseUrl !== undefined) d.difyBaseUrl = rt.difyBaseUrl.trim() || null;
-  if (rt.difyApiKey !== undefined) d.difyApiKey = rt.difyApiKey || null;
+  if (rt.difyApiKey !== undefined) d.difyApiKey = rt.difyApiKey ? encryptSecret(rt.difyApiKey) : null;
   if (rt.difyInputs !== undefined) d.difyInputs = (rt.difyInputs ?? {}) as Prisma.InputJsonValue;
   if (rt.skills !== undefined) d.skillsConfig = normalizeSkills(rt.skills) as unknown as Prisma.InputJsonValue;
   return d;
@@ -744,7 +745,7 @@ export async function adminRoutes(app: FastifyInstance) {
         return pingAgentRuntime({
           mode: 'dify',
           difyBaseUrl: rt.difyBaseUrl ?? a.difyBaseUrl ?? undefined,
-          difyApiKey: (rt.difyApiKey && rt.difyApiKey.length ? rt.difyApiKey : a.difyApiKey) ?? undefined,
+          difyApiKey: (rt.difyApiKey && rt.difyApiKey.length ? rt.difyApiKey : decryptSecretSafe(a.difyApiKey)) || undefined,
           difyInputs: rt.difyInputs ?? (a.difyInputs as Record<string, string> | null) ?? undefined,
         });
       }
@@ -753,7 +754,7 @@ export async function adminRoutes(app: FastifyInstance) {
           mode: 'openai',
           baseUrl: rt.apiBaseUrl ?? a.apiBaseUrl ?? undefined,
           model: rt.apiModel ?? a.apiModel ?? undefined,
-          apiKey: (rt.apiKey && rt.apiKey.length ? rt.apiKey : a.apiKey) ?? undefined,
+          apiKey: (rt.apiKey && rt.apiKey.length ? rt.apiKey : decryptSecretSafe(a.apiKey)) || undefined,
         });
       }
       return { ok: false, provider: 'inherit', error: '当前为「跟随全局模型」，请到「模型配置」页测试连接' };
