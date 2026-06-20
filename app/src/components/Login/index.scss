@@ -81,8 +81,14 @@
 }
 .lg-cta.off { opacity: .6; }
 
-/* —— 完善资料：头像 + 昵称 + 可选绑定手机 —— */
-.lg-av-wrap { display: flex; flex-direction: column; align-items: center; margin: 4px 0 20px; }
+/* —— 完善资料：一键填入 + 头像 + 昵称 + 可选绑定手机 —— */
+.lg-onetap-wx {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 46px; margin: 18px 0 4px; border-radius: 14px;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(95,179,137,.45);
+}
+.lg-onetap-wx-t { font-size: 14.5px; font-weight: 600; color: #EAF5EE; }
+.lg-av-wrap { display: flex; flex-direction: column; align-items: center; margin: 18px 0 20px; }
 .lg-av-btn { position: relative; width: 82px; height: 82px; padding: 0; margin: 0; background: transparent; line-height: normal; }
 .lg-av-btn::after { border: none; }
 .lg-av { width: 82px; height: 82px; border-radius: 50%; border: 2px solid rgba(216,178,90,.5); box-sizing: border-box; }

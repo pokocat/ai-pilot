@@ -149,6 +149,26 @@ export default function Login({ open, onLoggedIn }: Props) {
     if (url) setAvatarLocal(url);
   };
 
+  // 一键填入：先试 wx.getUserProfile。PC/Mac/旧基础库能拿到真实头像昵称就直接填；
+  // 现代手机端被微信匿名化（昵称「微信用户」+灰头像）则回退到 chooseAvatar + 昵称填充。
+  const useWechatProfile = async () => {
+    if (saving) return;
+    try {
+      const res = await Taro.getUserProfile({ desc: '用于完善你的资料' });
+      const info = (res as { userInfo?: { nickName?: string; avatarUrl?: string } })?.userInfo || {};
+      const anon = !info.nickName || info.nickName === '微信用户';
+      if (anon) {
+        Taro.showToast({ title: '当前微信不支持一键获取，请点头像/昵称选用', icon: 'none' });
+        return;
+      }
+      if (info.avatarUrl) setAvatarLocal(info.avatarUrl);
+      if (info.nickName) setNick(info.nickName);
+      Taro.showToast({ title: '已填入微信头像昵称', icon: 'success' });
+    } catch {
+      // 用户取消授权或接口不可用：不打扰，仍可手动用下方头像/昵称。
+    }
+  };
+
   const sendBindCode = async () => {
     if (!phoneRe.test(bindPhone)) { Taro.showToast({ title: '请输入正确手机号', icon: 'none' }); return; }
     if (bindSent > 0 || bindSending) return;
@@ -169,10 +189,13 @@ export default function Login({ open, onLoggedIn }: Props) {
     if (saving) return;
     setSaving(true);
     try {
-      // 头像：先传到 OSS 持久化（失败仅提示，不阻断进入）
+      // 头像：chooseAvatar 给本地临时文件 → 传 OSS 持久化；getUserProfile 给微信远程 URL → 直接存。
+      // 失败仅提示，不阻断进入。
       if (avatarLocal) {
-        try { await api.uploadAvatar(avatarLocal); }
-        catch { Taro.showToast({ title: '头像稍后可在「设置」中重试', icon: 'none' }); }
+        try {
+          if (/^https?:\/\//.test(avatarLocal)) await api.updateIdentity({ avatarUrl: avatarLocal });
+          else await api.uploadAvatar(avatarLocal);
+        } catch { Taro.showToast({ title: '头像稍后可在「设置」中重试', icon: 'none' }); }
       }
       const name = nick.trim();
       if (name && name !== (store.me()?.user.name || '')) {
@@ -274,6 +297,13 @@ export default function Login({ open, onLoggedIn }: Props) {
           <View className="lg-form lg-complete">
             <Text className="lg-h serif">完善你的资料</Text>
             <Text className="lg-sub">点击使用微信头像与昵称，可随时修改</Text>
+
+            {isWeapp && (
+              <View className="lg-onetap-wx" onClick={useWechatProfile}>
+                <Icon name="wechat" size={18} color="#07C160" />
+                <Text className="lg-onetap-wx-t">一键填入微信头像昵称</Text>
+              </View>
+            )}
 
             <View className="lg-av-wrap">
               {isWeapp ? (
