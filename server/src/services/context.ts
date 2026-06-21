@@ -1,4 +1,5 @@
 import { prisma } from '../db.js';
+import { isAiTestMode } from '../env.js';
 import { decryptSecretSafe } from './secretBox.js';
 import { verifyUserToken } from './userToken.js';
 import { INDUSTRY_BENCHMARK } from '../data/seedConfig.js';
@@ -14,6 +15,7 @@ function resolveAgentRuntime(
   agent: { providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiKey: string | null; difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown; skillsConfig: unknown },
   opts: { userId: string; sessionId?: string | null; difyConversationId?: string | null },
 ): AgentRuntime | null {
+  if (isAiTestMode()) return null; // 测试不走 per-agent 真实接入（openai/dify），回退全局 mock
   if (agent.providerMode === 'openai') {
     if (!agent.apiBaseUrl || !agent.apiKey) return null; // 配置不全则回退全局
     return {

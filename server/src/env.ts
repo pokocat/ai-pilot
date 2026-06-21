@@ -5,6 +5,13 @@ export function isRealKey(k: string): boolean {
   return !!k && !/fake|replace|your[-_]?key|xxxx|0{6,}|^sk-\.{3,}$/i.test(k.trim());
 }
 
+// 测试运行（NODE_ENV=test）：LLM 一律不触达真实 provider（claude/openai/dify），
+// 产出走确定性 mock。与短信 isSmsTestMode 同源——测试绝不调用付费/限流外部 API，
+// 避免被 DB 里残留的真实接入配置（如 general 的 dify 绑定）拖累成偶发 429/超时。
+export function isAiTestMode(): boolean {
+  return process.env.NODE_ENV === 'test';
+}
+
 export const env = {
   port: Number(process.env.PORT ?? 4000),
   aiProvider: (process.env.AI_PROVIDER ?? 'mock') as 'mock' | 'claude' | 'openai',

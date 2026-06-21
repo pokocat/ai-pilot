@@ -4,7 +4,7 @@
 // provider 与 baseUrl/model/key 由「运营后台可切换的 DB 配置」决定（services/aiConfig），
 // env 仅作兜底；未配置真实 key 时一律降级 mock，保证可用。
 
-import { env, isRealKey } from '../env.js';
+import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../services/aiConfig.js';
 import { mockChat, mockDeliverable } from './providers/mock.js';
@@ -16,6 +16,7 @@ import { cacheGet, cacheSet } from '../services/cache.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
 function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
+  if (isAiTestMode()) return null; // 测试一律 mock，不触达真实 provider
   const eff = effectiveProvider(cfg);
   return eff === 'mock' ? null : eff;
 }
