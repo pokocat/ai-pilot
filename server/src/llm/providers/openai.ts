@@ -211,6 +211,47 @@ export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
   return { result: mockDeliverable(ctx), usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations };
 }
 
+export type AdaptiveOut =
+  | { kind: 'report'; deliverable: Deliverable; usage: Usage; toolCalls: number; iterations: number }
+  | { kind: 'chat'; reply: ChatReply; usage: Usage; toolCalls: number; iterations: number };
+
+/** 按需产出：对话优先，模型自行决定是否调用 emit_deliverable。emit→结构化成果(report)；否则→文本对话(chat)。 */
+export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, tools: Tool[]): Promise<AdaptiveOut> {
+  const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
+  const hint = '默认用文字正常对话回答用户。只有当你判断此刻需要交付一份完整的报告或卡片成果时，才调用 emit_deliverable 以结构化分段输出（含标题与各段小标题/正文/要点）；其余所有情况都直接用文字回复，不要调用 emit_deliverable。';
+  const r = await runToolLoop({
+    step: openaiStep(cfg),
+    system: `${system}\n\n${hint}`,
+    history: ctx.history,
+    userMessage: ctx.userMessage,
+    tools,
+    toolCtx: toolCtxOf(ctx),
+    finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
+    forceFinalTool: false, // emit_deliverable 可选，不强制
+  });
+  const input = (r.toolInput ?? null) as { title?: string; sections?: Deliverable['sections'] } | null;
+  if (input?.sections?.length) {
+    const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
+    return {
+      kind: 'report',
+      deliverable: {
+        title: input.title || tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections: input.sections,
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
+    };
+  }
+  return {
+    kind: 'chat',
+    reply: { text: (r.text ?? '').trim() || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
+    usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
+  };
+}
+
 /** 绑定 cfg，返回 provider 无关循环所需的 step 函数。 */
 export function openaiStep(cfg: ResolvedAiConfig): StepFn {
   return async (messages, tools, opts) => {
@@ -223,8 +264,13 @@ export function openaiStep(cfg: ResolvedAiConfig): StepFn {
 
     const body: Record<string, unknown> = { max_tokens: opts.finalTool ? 1500 : 800, messages: toOAMessages(messages) };
     if (opts.forceFinal) {
-      // 最后一轮强制收口：deliverable 强制 emit_deliverable；chat 去掉工具直接出文本。
-      if (opts.finalTool) { body.tools = toolDefs; body.tool_choice = { type: 'function', function: { name: opts.finalTool.name } }; }
+      // 最后一轮收口。deliverable(强制)→强制 emit_deliverable；自适应(forceFinalTool=false)→只给 emit 但 auto(可 emit 可出文本)；chat→去掉工具出文本。
+      if (opts.finalTool && opts.forceFinalTool !== false) {
+        body.tools = toolDefs; body.tool_choice = { type: 'function', function: { name: opts.finalTool.name } };
+      } else if (opts.finalTool) {
+        const emitDef = { type: 'function', function: { name: opts.finalTool.name, description: opts.finalTool.description, parameters: opts.finalTool.schema } };
+        body.tools = [emitDef]; body.tool_choice = 'auto';
+      }
     } else if (toolDefs.length) {
       body.tools = toolDefs;
       body.tool_choice = 'auto';

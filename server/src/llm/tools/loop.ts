@@ -25,6 +25,7 @@ export interface LoopOpts {
   toolCtx: ToolContext;
   maxIterations?: number; // 默认 4
   finalTool?: FinalTool; // 设置=deliverable 路径；不设=chat 路径
+  forceFinalTool?: boolean; // 默认 true（强制收口 emit_deliverable）；false=自适应，emit 可选、最后一轮不强制
 }
 
 export interface LoopResult {
@@ -48,7 +49,7 @@ export async function runToolLoop(opts: LoopOpts): Promise<LoopResult> {
 
   for (let i = 0; i < maxIterations; i++) {
     const forceFinal = i === maxIterations - 1;
-    const out = await opts.step(messages, opts.tools, { forceFinal, finalTool: opts.finalTool });
+    const out = await opts.step(messages, opts.tools, { forceFinal, finalTool: opts.finalTool, forceFinalTool: opts.forceFinalTool });
     usage = addUsage(usage, out.usage);
 
     if (out.kind === 'final') {

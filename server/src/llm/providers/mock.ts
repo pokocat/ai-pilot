@@ -65,6 +65,13 @@ export function mockDeliverable(ctx: GenContext): Deliverable {
   };
 }
 
+/** 按需产出的 mock：消息含明确「出报告/方案」意图 → 结构化成果；否则正常对话。供离线/测试确定性走两条分支。 */
+export function mockAdaptive(ctx: GenContext): { kind: 'report'; deliverable: Deliverable } | { kind: 'chat'; reply: ChatReply } {
+  const wantsReport = /(战略体检|做一?次诊断|出.{0,3}报告|给我.{0,3}报告|要一?份|方案|全案|复盘|诊断报告|产出成果|出个方案)/.test(ctx.userMessage);
+  if (wantsReport && !wantsBriefInterview(ctx)) return { kind: 'report', deliverable: mockDeliverable(ctx) };
+  return { kind: 'chat', reply: mockChat(ctx) };
+}
+
 export function mockChat(ctx: GenContext): ChatReply {
   if (wantsBriefInterview(ctx) || needsCustomerInput(ctx)) {
     return {

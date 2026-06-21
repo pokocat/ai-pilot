@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { resolveUser, buildGenContext } from '../services/context.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
-import { generateDeliverable, chatComplete } from '../llm/gateway.js';
+import { generateDeliverable, chatComplete, generateAdaptive } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
@@ -153,6 +153,8 @@ export async function sessionRoutes(app: FastifyInstance) {
 
     const agent = session.agent;
     const isDeliverable = !!effective?.deliverableKey; // 是否产出 = 已发布版本的 deliverableKey
+    // 按需产出：deliverableKey 已配 + skillsConfig.deliverableMode='on-demand' → 模型自行决定本轮出报告还是对话。
+    const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
     const { ctx, memoryConfig, knowledgeUsed } = await buildGenContext({
       userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
       sessionId: session.id, difyConversationId: session.difyConversationId,
@@ -160,6 +162,32 @@ export async function sessionRoutes(app: FastifyInstance) {
     });
 
     try {
+      if (onDemand) {
+        const out = await generateAdaptive(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
+        const learn = async () => (agentKey === 'general'
+          ? false
+          : learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId }));
+        if (out.kind === 'report') {
+          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: out.deliverable as object } });
+          await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+          const learned = await learn();
+          const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `深度产出 · ${agent.name}`);
+          const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
+          return {
+            sessionId: session.id, created, agentKey, kind: 'report', messageId: msg.id, deliverable: out.deliverable,
+            memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
+          };
+        }
+        const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: out.reply as object } });
+        await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+        const learned = await learn();
+        const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `对话 · ${agent.name}`);
+        const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
+        return {
+          sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: out.reply,
+          memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
+        };
+      }
       if (isDeliverable) {
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         // 网页版可分享报告改为「按需生成」——见 POST /sessions/:id/messages/:mid/report；产出时不再每次强制渲染存库。
@@ -271,6 +299,7 @@ export async function sessionRoutes(app: FastifyInstance) {
 
       const agent = session.agent;
       const isDeliverable = !!effective?.deliverableKey; // 顾问/创作智能体 → 结构化成果（按已发布版本）
+      const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
       const { ctx, memoryConfig } = await buildGenContext({
         userId: user.id,
         tenantId: user.tenantId,
@@ -281,7 +310,40 @@ export async function sessionRoutes(app: FastifyInstance) {
         effective: effective ?? undefined,
       });
 
-      if (isDeliverable) {
+      const learnSse = async () => {
+        if (agentKey === 'general') return;
+        const learned = await learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId });
+        if (learned) send('memory', { learned: true, agentName: agent.name });
+      };
+      if (onDemand) {
+        const out = await generateAdaptive(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
+        if (out.kind === 'report') {
+          const d = out.deliverable;
+          send('meta', { kind: 'report' });
+          send('begin', { title: d.title, icon: d.icon, meta: d.meta });
+          for (let i = 0; i < d.sections.length; i++) { await sleep(520); send('section', { index: i, ...d.sections[i] }); }
+          await sleep(300);
+          send('footer', { trust: d.trust, actions: d.actions });
+          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: d as object } });
+          await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+          await learnSse();
+          const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `产出 · ${agent.name}`);
+          const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
+          send('credit', { balance: creditBalance, tokenQuota });
+          send('done', { messageId: msg.id });
+        } else {
+          send('meta', { kind: 'chat' });
+          await sleep(700);
+          send('chat', out.reply);
+          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: out.reply as object } });
+          await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+          await learnSse();
+          const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `产出 · ${agent.name}`);
+          const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
+          send('credit', { balance: creditBalance, tokenQuota });
+          send('done', { messageId: msg.id });
+        }
+      } else if (isDeliverable) {
         send('meta', { kind: 'report' });
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         send('begin', { title: deliverable.title, icon: deliverable.icon, meta: deliverable.meta });

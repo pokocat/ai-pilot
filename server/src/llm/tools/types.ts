@@ -90,5 +90,6 @@ export type TurnOutput =
 export type StepFn = (
   messages: LoopMessage[],
   tools: Tool[],
-  opts: { forceFinal: boolean; finalTool?: FinalTool },
+  // forceFinalTool=false：自适应路径——finalTool(emit_deliverable) 可选，最后一轮不强制，模型自行 emit 或出文本。
+  opts: { forceFinal: boolean; finalTool?: FinalTool; forceFinalTool?: boolean },
 ) => Promise<TurnOutput>;

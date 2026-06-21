@@ -7,7 +7,7 @@
 import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../services/aiConfig.js';
-import { mockChat, mockDeliverable } from './providers/mock.js';
+import { mockChat, mockDeliverable, mockAdaptive } from './providers/mock.js';
 import { ZERO_USAGE, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
 import { recordTokenUsage, type UsageMeta } from '../services/usage.js';
 import { recordTrace } from '../services/trace.js';
@@ -285,6 +285,80 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
     return { result: chatResult.result, usage: chatResult.usage };
   }
   return { result: mockChat(ctx), usage: ZERO_USAGE };
+}
+
+export type AdaptiveResult =
+  | { kind: 'report'; deliverable: Deliverable; usage: Usage }
+  | { kind: 'chat'; reply: ChatReply; usage: Usage };
+
+/**
+ * 按需产出（skillsConfig.deliverableMode='on-demand'）：模型自行决定本轮出结构化报告还是文本对话。
+ * 仅全局 openai 与 mock 支持「自适应」；claude / per-agent runtime 暂回退为对话（避免误出空报告）。
+ */
+export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promise<AdaptiveResult> {
+  if (!(await moderate('input', ctx.userMessage))) {
+    throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
+  }
+
+  // per-agent 接入覆盖：自适应产出未单独实现 → 回退对话（runtimeChat）。
+  if (ctx.runtime) {
+    const s = await runtimeChat(ctx);
+    await maybeRecord(s, 'chat', ctx, meta);
+    if (!(await moderate('output', s.result.text))) throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
+    return { kind: 'chat', reply: s.result, usage: s.usage };
+  }
+
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  const t0 = Date.now();
+  let out: { kind: 'report'; result: Deliverable } | { kind: 'chat'; result: ChatReply };
+  let provider = 'mock';
+  const model = cfg.model;
+  let toolCalls: number | undefined;
+  let iterations: number | undefined;
+  let usage: Usage = ZERO_USAGE;
+
+  try {
+    if (live === 'openai') {
+      const oa = await import('./providers/openai.js');
+      const tools = await skillToolsFor(ctx);
+      const m = await oa.openaiAdaptive(ctx, cfg, tools);
+      provider = 'openai'; usage = m.usage; toolCalls = m.toolCalls; iterations = m.iterations;
+      out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
+    } else if (live === 'claude') {
+      const m = await (await import('./providers/claude.js')).claudeChat(ctx, cfg); // claude 自适应未实现 → 对话兜底
+      provider = 'claude'; usage = m.usage;
+      out = { kind: 'chat', result: m.result };
+    } else {
+      const m = mockAdaptive(ctx);
+      out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
+    }
+  } catch (err) {
+    await recordTrace({
+      meta, agentKey: ctx.agentKey, kind: 'chat', provider: live ?? 'mock', model: '',
+      status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
+    });
+    console.error('[gateway] adaptive fallback to mock:', (err as Error).message);
+    if (!env.aiFallbackMock) throw aiUnavailable(err);
+    const m = mockAdaptive(ctx);
+    provider = 'mock'; usage = ZERO_USAGE; toolCalls = undefined; iterations = undefined;
+    out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
+  }
+
+  const respText = out.kind === 'report' ? deliverableText(out.result) : out.result.text;
+  const recKind: 'deliverable' | 'chat' = out.kind === 'report' ? 'deliverable' : 'chat';
+  await recordTrace({
+    meta, agentKey: ctx.agentKey, kind: recKind, provider, model,
+    status: 'ok', latencyMs: Date.now() - t0, toolCalls, iterations, usage,
+    promptText: ctx.userMessage, responseText: respText,
+  });
+  await maybeRecord({ result: out.result, usage, provider, model, toolCalls, iterations }, recKind, ctx, meta);
+
+  if (!(await moderate('output', respText))) throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
+
+  return out.kind === 'report'
+    ? { kind: 'report', deliverable: out.result, usage }
+    : { kind: 'chat', reply: out.result, usage };
 }
 
 /**

@@ -34,6 +34,8 @@ export interface SkillsConfig {
   enabled: boolean;
   tools: string[];              // 勾选的内置工具名，如 ['search_knowledge','recall_memory']
   customTools?: CustomToolDef[]; // 预留
+  // 产出模式：'always'(默认)=每轮强制结构化成果(report)；'on-demand'=对话优先，模型自行决定何时产出报告/卡片。
+  deliverableMode?: 'always' | 'on-demand';
 }
 
 /** 运营端读取的智能体接入配置（apiKey 脱敏为 has*，不回明文） */

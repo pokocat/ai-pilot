@@ -310,6 +310,21 @@ describe('TC-B 与不同智能体对话（mock，无真实 LLM）', () => {
     assert.ok((r.body.deliverable?.sections?.length ?? 0) > 0, '成果应有分段内容');
   });
 
+  test('B2b on-demand 产出模式：闲聊出对话(chat)，明确要成果才出 report', async () => {
+    const t = await login(uniquePhone());
+    await prisma.agent.update({ where: { key: 'strat' }, data: { skillsConfig: { enabled: false, tools: [], deliverableMode: 'on-demand' } } });
+    // 闲聊轮 → 文本对话，不应产出结构化成果卡（不挂「存入方案库/网页版」按钮）
+    const chat = await api('POST', '/api/generate-sync', { token: t, body: { text: '最近一直在纠结要不要扩张团队，你怎么看？', agentKey: 'strat' } });
+    assert.equal(chat.body.kind, 'chat', '闲聊轮应是对话');
+    assert.ok(chat.body.reply?.text, '对话应有文本');
+    assert.equal(chat.body.deliverable, undefined, '对话轮不应有结构化成果');
+    // 明确要成果 → 出 report
+    const rep = await api('POST', '/api/generate-sync', { token: t, body: { text: '帮我做一次战略体检', agentKey: 'strat' } });
+    assert.equal(rep.body.kind, 'report', '要报告时应产出结构化成果');
+    assert.ok((rep.body.deliverable?.sections?.length ?? 0) > 0);
+    await prisma.agent.update({ where: { key: 'strat' }, data: { skillsConfig: { enabled: false, tools: [] } } });
+  });
+
   test('B3b 网页版报告按需生成（产出时不自动生成；幂等；属主隔离）', async () => {
     const t = await login(uniquePhone());
     const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '帮我做一次战略体检', agentKey: 'strat' } });
