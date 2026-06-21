@@ -88,11 +88,6 @@ export default function Home() {
     } catch { /* H5 无胶囊，走 CSS 兜底 */ }
   }, []);
 
-  // 强制绑定手机号：已登录但微信账号尚未绑定手机 → 拉起登录弹层（内部直接进绑定页），绑定后才能使用。
-  useEffect(() => {
-    if (s.isAuthed() && me && !me.user.phone) setShowLogin(true);
-  }, [me]);
-
   const requireLogin = () => {
     if (s.isAuthed()) return true;
     setShowLogin(true);

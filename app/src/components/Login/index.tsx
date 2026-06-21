@@ -18,6 +18,10 @@ type Stage = 'wechat' | 'phone' | 'bindphone' | 'complete';
 const phoneRe = /^1\d{10}$/;
 const codeRe = /^\d{4,8}$/;
 
+// 微信「手机号快速验证」(getPhoneNumber) 仅对非个人主体且已开通该能力的小程序可用，
+// 个人主体真机会报 `jsapi has no permission`。开通后把此开关改为 true 即可恢复一键绑定。
+const WX_PHONE_ONETAP = false;
+
 // 登录：常见风格「微信登录为主，手机号验证码可切换」。
 // 微信登录后进入「完善资料」：同步/编辑微信昵称与头像，并可选绑定手机号（可跳过）。
 export default function Login({ open, onLoggedIn }: Props) {
@@ -32,6 +36,7 @@ export default function Login({ open, onLoggedIn }: Props) {
   // 完善资料（微信登录后）
   const [avatarLocal, setAvatarLocal] = useState('');
   const [nick, setNick] = useState('');
+  const [nickFocus, setNickFocus] = useState(false); // 选完头像后自动聚焦昵称，引出微信键盘「使用微信昵称」
   const [bindPhone, setBindPhone] = useState('');
   const [bindCode, setBindCode] = useState('');
   const [bindSent, setBindSent] = useState(0);
@@ -78,7 +83,7 @@ export default function Login({ open, onLoggedIn }: Props) {
     });
   });
 
-  // 微信登录成功后：未绑手机 → 强制进「绑定手机号」页（绑定后才能继续）；
+  // 微信登录成功后：未绑手机 → 进「绑定手机号」页（可跳过）；
   // 已绑但缺头像/昵称 → 进「完善资料」（可跳过）；都齐 → 直接进入。
   const afterAuthed = (r: { isNew: boolean; onboarded: boolean; user: { wechatLinked?: boolean } }) => {
     const me = store.me();
@@ -93,7 +98,7 @@ export default function Login({ open, onLoggedIn }: Props) {
     }
   };
 
-  // 绑定成功后：刷新 me，决定去「完善资料」还是直接进入。
+  // 绑定/跳过后：刷新 me，缺头像/昵称去「完善资料」，否则直接进入。
   const proceedAfterBind = async () => {
     await store.loadMe();
     const me = store.me();
@@ -105,7 +110,11 @@ export default function Login({ open, onLoggedIn }: Props) {
   const onGetBindPhone = async (e: { detail?: { code?: string; errMsg?: string } }) => {
     const detail = e?.detail || {};
     if (!detail.code) {
-      if (!/deny|cancel|fail:?\s*用户/i.test(detail.errMsg || '')) Taro.showToast({ title: '一键绑定不可用，请用短信绑定', icon: 'none' });
+      const em = detail.errMsg || '';
+      // 用户主动取消不打扰；其它失败把真实 errMsg 显出来，便于定位（无权限/未开通/主体不支持等）
+      if (!/deny|cancel|fail:?\s*用户/i.test(em)) {
+        Taro.showModal({ title: '一键绑定失败', content: em || '未返回手机号 code，请用短信绑定', showCancel: false });
+      }
       return;
     }
     if (bindLoading) return;
@@ -136,12 +145,22 @@ export default function Login({ open, onLoggedIn }: Props) {
     }
   };
 
-  // 强制绑定页的退出：不绑就退登，回到微信登录。
+  // 绑定页的退出：退登回到微信登录。logout 会清掉 overlay 标志（露出底部 tabBar），
+  // 但登录层仍开着，需重新置上 overlay 把 tabBar 重新藏住。
   const logoutEscape = () => {
     if (bindLoading) return;
     store.logout();
+    store.setOverlay(true, 'login');
     setBindPhone(''); setBindCode(''); setBindSent(0);
     setStage('wechat');
+  };
+
+  // 暂不绑定：跳过手机号绑定，缺头像/昵称去完善资料，否则直接进入。
+  const skipBind = () => {
+    if (bindLoading) return;
+    const me = store.me();
+    if (!me?.user.name || !me?.user.avatarUrl) { setNick(me?.user.name || ''); setAvatarLocal(''); setStage('complete'); }
+    else onLoggedIn(store.isOnboarded());
   };
 
   const submitWechat = async () => {
@@ -206,7 +225,11 @@ export default function Login({ open, onLoggedIn }: Props) {
   // —— 完善资料：头像 / 昵称 / 可选绑定手机 ——
   const onChooseAvatar = (e: { detail?: { avatarUrl?: string } }) => {
     const url = e?.detail?.avatarUrl;
-    if (url) setAvatarLocal(url);
+    if (url) {
+      setAvatarLocal(url);
+      // 选完头像紧接着聚焦昵称：微信键盘上方会出现「使用微信昵称」，一点即填 → 接近一键。
+      if (!nick) { setNickFocus(false); setTimeout(() => setNickFocus(true), 60); }
+    }
   };
 
   // 一键填入：先试 wx.getUserProfile。PC/Mac/旧基础库能拿到真实头像昵称就直接填；
@@ -346,16 +369,17 @@ export default function Login({ open, onLoggedIn }: Props) {
           <View className="lg-form">
             <Text className="lg-kicker">AI 军师</Text>
             <Text className="lg-h serif">绑定手机号</Text>
-            <Text className="lg-sub">微信登录已完成，绑定手机号后即可开始使用</Text>
+            <Text className="lg-sub">绑定后体验更完整，也可稍后在「设置」中绑定</Text>
 
-            {isWeapp && (
-              <Button className={`lg-wechat lg-bind-onetap ${bindLoading ? 'off' : ''}`} openType="getPhoneNumber" onGetPhoneNumber={onGetBindPhone}>
-                <Icon name="wechat" size={20} color="#07C160" />
-                <Text className="lg-wechat-t">{bindLoading ? '绑定中…' : '微信一键绑定手机号'}</Text>
-              </Button>
+            {isWeapp && WX_PHONE_ONETAP && (
+              <>
+                <Button className={`lg-wechat lg-bind-onetap ${bindLoading ? 'off' : ''}`} openType="getPhoneNumber" onGetPhoneNumber={onGetBindPhone}>
+                  <Icon name="wechat" size={20} color="#07C160" />
+                  <Text className="lg-wechat-t">{bindLoading ? '绑定中…' : '微信一键绑定手机号'}</Text>
+                </Button>
+                <View className="lg-sep"><Text>或用短信验证码绑定</Text></View>
+              </>
             )}
-
-            <View className="lg-sep"><Text>或用短信验证码绑定</Text></View>
 
             <View className="lg-field">
               <Text className="lg-pre">+86</Text>
@@ -373,7 +397,8 @@ export default function Login({ open, onLoggedIn }: Props) {
           </View>
 
           <View className="lg-actions">
-            <Text className="lg-skip" onClick={logoutEscape}>退出登录</Text>
+            <Text className="lg-skip" onClick={skipBind}>暂不绑定，先进去看看</Text>
+            <Text className="lg-skip lg-skip-weak" onClick={logoutEscape}>退出登录</Text>
           </View>
         </View>
       )}
@@ -382,7 +407,7 @@ export default function Login({ open, onLoggedIn }: Props) {
         <View className="lg-content">
           <View className="lg-form lg-complete">
             <Text className="lg-h serif">完善你的资料</Text>
-            <Text className="lg-sub">点击使用微信头像与昵称，可随时修改</Text>
+            <Text className="lg-sub">点头像选用微信头像，会自动让你确认微信昵称，可随时修改</Text>
 
             {canOneTapWx && (
               <View className="lg-onetap-wx" onClick={useWechatProfile}>
@@ -404,11 +429,11 @@ export default function Login({ open, onLoggedIn }: Props) {
                   ? <Image className="lg-av" src={avatarShown} mode="aspectFill" />
                   : <View className="lg-av lg-av-ph"><Icon name="user" size={26} color="rgba(243,240,230,.7)" /></View>
               )}
-              <Text className="lg-av-tip">点击使用微信头像</Text>
+              <Text className="lg-av-tip">点头像 · 使用微信头像</Text>
             </View>
 
             <View className="lg-field">
-              <Input className="lg-input" type="nickname" maxlength={20} value={nick} placeholder="点此填写昵称（可用微信昵称）" placeholderClass="lg-ph" onInput={(e) => setNick(e.detail.value)} onBlur={(e) => setNick(e.detail.value)} />
+              <Input className="lg-input" type="nickname" maxlength={20} value={nick} focus={nickFocus} placeholder="点此选用微信昵称" placeholderClass="lg-ph" onInput={(e) => setNick(e.detail.value)} onBlur={(e) => { setNick(e.detail.value); setNickFocus(false); }} />
             </View>
 
             <View className={`lg-cta ${saving ? 'off' : ''}`} onClick={finishComplete}>
