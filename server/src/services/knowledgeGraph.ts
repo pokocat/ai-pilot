@@ -1,5 +1,6 @@
 // 时序知识图谱服务：抽取 → 落库（实体去重 + 关系时序入边，新事实软失效旧同主谓事实）→ as-of 查询。
 // 回答「X 时谁负责 Y」类问题：关系带 validFrom/validTo，查询给定时刻取当时有效的边。
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { extractGraphTriples } from '../llm/gateway.js';
 
@@ -105,10 +106,10 @@ export async function queryRelations(
 
   // Build AND clauses separately to avoid two `OR` keys overwriting each other when both
   // entityIds and asOf are present (JavaScript object literals silently drop duplicate keys).
-  const andClauses: { OR?: unknown[]; validFrom?: unknown }[] = [];
+  const andClauses: Prisma.GraphRelationWhereInput[] = [];
   if (entityIds) andClauses.push({ OR: [{ subjectId: { in: entityIds } }, { objectId: { in: entityIds } }] });
   if (asOf) {
-    andClauses.push({ validFrom: { lte: asOf } } as never);
+    andClauses.push({ validFrom: { lte: asOf } });
     andClauses.push({ OR: [{ validTo: null }, { validTo: { gt: asOf } }] });
   }
 
