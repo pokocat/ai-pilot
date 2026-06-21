@@ -344,14 +344,20 @@ TARO_APP_MODE=server TARO_APP_API="http://$LAN_IP:4000/api" npm run dev:weapp
 cd /Users/donis/dev/ai-pilot/app
 npm run build:weapp:server   # = TARO_APP_MODE=server TARO_APP_API=https://wxapi.aibuzz.cn/api npm run build:weapp
 ```
-产物在 `app/dist/`（`miniprogramRoot=dist/`）。两种上传方式，**默认用①微信开发者工具**：
-1. **微信开发者工具（首选）**：只导入 `app/`（不要导入仓库根目录或 `app/dist`）→ 右上角「上传」→ 填**版本号**（每次递增，线上最近为 `0.2.2`）+ 项目备注 → 进入 mp 后台「版本管理 · 开发版」。
-2. **CLI / miniprogram-ci（自动化）**：需先在 mp 后台 *开发管理 → 开发设置 → 小程序代码上传* 下载上传密钥 `private.<appid>.key` 并把**本机公网 IP**加进该密钥白名单：
+产物在 `app/dist/`（`miniprogramRoot=dist/`）。**上传这一步由 agent 自己执行，不要甩给用户**——历史反复踩坑：曾误以为上传只能让用户在 GUI 里点，其实开发者工具自带 CLI 可直接上传（用已登录会话、无需密钥）。默认用①：
+1. **微信开发者工具 CLI（首选，agent 直接跑，无需上传密钥）**：复用已登录的 DevTools 会话。前置：DevTools 已打开且开启「设置 → 安全 → 服务端口」。`--project` 指向 `app/`（含 `project.config.json`，**不是** `dist/`）：
+   ```bash
+   /Applications/wechatwebdevtools.app/Contents/MacOS/cli upload \
+     --project /Users/donis/dev/ai-pilot/app \
+     -v <版本号> -d "<本次变更说明>"
+   ```
+   退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。**版本号每次递增，最近一次上传 `0.2.8`**（2026-06-21）；上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 等效（仅当 CLI 不可用时回退）：DevTools 只导入 `app/` → 右上角「上传」→ 填版本号 + 备注。
+2. **miniprogram-ci（CI/headless 备选）**：需在 mp 后台 *开发管理 → 开发设置 → 小程序代码上传* 下载上传密钥 `private.<appid>.key` 并把**本机公网 IP**加进白名单。该密钥本地通常没有，**除非用户给出密钥路径，否则一律用①**：
    ```bash
    cd app && WEAPP_UPLOAD_KEY=/绝对路径/private.wx05a49967e2adb557.key \
-     npm run upload:weapp -- --version 0.2.3 --desc "本次变更说明"
+     npm run upload:weapp -- --version <版本号> --desc "本次变更说明"
    ```
-上传后在 mp 后台 `mp.weixin.qq.com`「版本管理」：**开发版 → 转「体验版」自测 → 「提交审核」→ 审核通过后「发布」** 给全体用户。脚本/工具只产出开发版，转体验版、提交审核、正式发布都在 mp 后台手动操作。
+上传后在 mp 后台 `mp.weixin.qq.com`「版本管理」：**开发版 → 转「体验版」自测 → 「提交审核」→ 审核通过后「发布」** 给全体用户。CLI 只产出开发版；转体验版、提交审核、正式发布是 mp 后台手动步骤（这几步才需要用户操作）。
 
 **部署发布**
 
