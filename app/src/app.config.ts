@@ -35,7 +35,7 @@ export default defineAppConfig({
   window: {
     backgroundTextStyle: 'dark',
     navigationBarBackgroundColor: '#FBFAF6',
-    navigationBarTitleText: '军师',
+    navigationBarTitleText: 'AI 军师',
     navigationBarTextStyle: 'black',
     backgroundColor: '#F4F2EC',
   },

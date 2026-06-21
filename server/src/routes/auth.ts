@@ -10,6 +10,7 @@ import { env } from '../env.js';
 import { code2Session, wechatAccountKey, getPhoneNumberByCode } from '../services/wechat.js';
 import { issueSmsCode, verifySmsCode } from '../services/sms.js';
 import { signUserToken } from '../services/userToken.js';
+import { resolveUser } from '../services/context.js';
 import { maskAuditPhone, recordAudit, requestMeta, summarizeForAudit } from '../services/audit.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 
@@ -19,7 +20,15 @@ const loginSchema = z.object({
   name: z.string().trim().min(1).max(20).optional(),
   code: z.string().trim().regex(/^\d{4,8}$/, '验证码格式不正确').optional(), // 短信验证码；按场景可选/必填
 });
-const smsSendSchema = z.object({ phone: phoneRule });
+const smsSendSchema = z.object({
+  phone: phoneRule,
+  scene: z.enum(['login', 'bind']).optional(), // login=登录验证码；bind=微信账号绑定手机号
+});
+const bindPhoneSchema = z.object({
+  phoneCode: z.string().trim().min(1).optional(),                 // 微信一键：getPhoneNumber 返回的一次性 code
+  phone: phoneRule.optional(),                                    // 短信兜底：手机号
+  code: z.string().trim().regex(/^\d{4,8}$/, '验证码格式不正确').optional(), // 短信兜底：验证码
+});
 const wechatLoginSchema = z.object({
   code: z.string().trim().min(1, '缺少微信登录 code'),
   nickname: z.string().trim().min(1).max(40).optional(),
@@ -42,6 +51,7 @@ type AuthUser = {
   tenantId: string;
   phone: string;
   name: string;
+  avatarUrl?: string | null;
   benmingColor: string;
   wechatOpenId?: string | null;
   wechatUnionId?: string | null;
@@ -78,6 +88,7 @@ async function createUserWithTenant(opts: {
   name: string;
   auditAction: string;
   auditPayload: object;
+  avatarUrl?: string;
   wechatOpenId?: string;
   wechatUnionId?: string;
 }): Promise<AuthUser> {
@@ -88,6 +99,7 @@ async function createUserWithTenant(opts: {
       tenantId: tenant.id,
       phone: opts.phone,
       name: opts.name,
+      avatarUrl: opts.avatarUrl,
       role: 'owner',
       benmingColor: 'gold',
       planId: plan?.id ?? null,
@@ -126,6 +138,7 @@ function loginResult(user: AuthUser, isNew: boolean, onboarded: boolean) {
       id: user.id,
       name: user.name,
       phone: user.phone.startsWith('wx_') ? '' : user.phone,
+      avatarUrl: user.avatarUrl ?? null,
       benmingColor: user.benmingColor,
       wechatLinked: !!user.wechatOpenId,
     },
@@ -180,12 +193,14 @@ export async function authRoutes(app: FastifyInstance) {
       });
       return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
     }
+    const scene = parsed.data.scene ?? 'login';
     try {
-      const out = await issueSmsCode(parsed.data.phone, clientIp(req));
+      const out = await issueSmsCode(parsed.data.phone, clientIp(req), scene);
       await recordAuthAttempt(req, 'auth.sms.send_attempt', {
         ok: true,
         statusCode: 200,
         ...phoneAudit(parsed.data.phone),
+        scene,
         provider: process.env.SMS_PROVIDER || 'console',
         devCodeReturned: typeof out === 'object' && out !== null && 'devCode' in out,
       });
@@ -283,6 +298,7 @@ export async function authRoutes(app: FastifyInstance) {
         user = await createUserWithTenant({
           phone: wechatAccountKey(wx.openid),
           name,
+          avatarUrl: parsed.data.avatarUrl, // 客户端「头像昵称填写能力」选取并上传后回传的公网链接（可选）
           auditAction: 'auth.wechat_register',
           auditPayload: { wechat: true, unionid: !!wx.unionid },
           wechatOpenId: wx.openid,
@@ -368,6 +384,54 @@ export async function authRoutes(app: FastifyInstance) {
       });
       return reply.code(err.statusCode || 500).send({ error: err.message || '一键登录失败', code: err.code || 'WECHAT_PHONE_LOGIN_FAILED' });
     }
+  });
+
+  // 绑定手机号（微信登录后强制）：微信账号补绑真实手机号。需登录态。
+  // 两种取号：①微信一键 phoneCode（getPhoneNumber）②短信 scene=bind 的 phone+code。
+  // 该手机号若已被其他账号占用 → 409，不允许跨账号顶号。
+  app.post('/auth/bind-phone', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined); // 未登录 → 401
+    const parsed = bindPhoneSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? '参数错误' });
+    }
+
+    let phone: string;
+    if (parsed.data.phoneCode) {
+      // ① 微信一键：用 getPhoneNumber 的 code 换微信绑定的手机号
+      try {
+        phone = await getPhoneNumberByCode(parsed.data.phoneCode);
+      } catch (e) {
+        const err = e as { message?: string; statusCode?: number; code?: string };
+        await recordAuthAttempt(req, 'auth.bind_phone.attempt', { ok: false, statusCode: err.statusCode || 502, onetap: 'wechat', errorCode: err.code || 'WECHAT_PHONE_FAILED' }, user);
+        return reply.code(err.statusCode || 502).send({ error: err.message || '获取手机号失败', code: err.code || 'WECHAT_PHONE_FAILED' });
+      }
+    } else {
+      // ② 短信兜底：必须 phone + code 且 scene=bind 校验通过
+      if (!parsed.data.phone || !parsed.data.code) {
+        return reply.code(400).send({ error: '请提供手机号与验证码', code: 'BIND_PARAMS_MISSING' });
+      }
+      const ok = await verifySmsCode(parsed.data.phone, parsed.data.code, 'bind');
+      if (!ok) {
+        await recordAuthAttempt(req, 'auth.bind_phone.attempt', { ok: false, statusCode: 400, ...phoneAudit(parsed.data.phone), errorCode: 'SMS_CODE_INVALID' }, user);
+        return reply.code(400).send({ error: '验证码错误或已过期', code: 'SMS_CODE_INVALID' });
+      }
+      phone = parsed.data.phone;
+    }
+
+    const taken = await prisma.user.findUnique({ where: { phone } });
+    if (taken && taken.id !== user.id) {
+      await recordAuthAttempt(req, 'auth.bind_phone.attempt', { ok: false, statusCode: 409, ...phoneAudit(phone), errorCode: 'PHONE_TAKEN' }, user);
+      return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
+    }
+    let updated: AuthUser;
+    try {
+      updated = await prisma.user.update({ where: { id: user.id }, data: { phone } });
+    } catch {
+      return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
+    }
+    await recordAuthAttempt(req, 'auth.bind_phone.attempt', { ok: true, statusCode: 200, ...phoneAudit(phone) }, updated);
+    return { ok: true, phone, wechatLinked: !!updated.wechatOpenId };
   });
 
   // ───────────────── 预留：原生 App 运营商「本机号码一键登录」 ─────────────────

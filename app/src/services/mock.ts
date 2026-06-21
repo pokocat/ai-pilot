@@ -88,6 +88,7 @@ interface ProjectRec {
 }
 interface UserData {
   name: string; company: string; phone: string; benmingColor: string; onboarded: boolean;
+  avatarUrl?: string; wechatLinked?: boolean;
   planId: string; creditBalance: number; tokenUsed: number; ownedAgents: string[];
   creditLog: MyCreditItem[];
   profile: Profile | null; sessions: SessionRec[]; library: LibItem[];
@@ -395,8 +396,8 @@ export const mock = {
     return delay({ name, source: '古典武侠/军事花名' }, 120);
   },
 
-  // 演示短信：固定回填 888888，按手机号记下最近一条便于 login 校验「错码」路径。
-  async sendSmsCode(phone: string): Promise<SmsSendResult> {
+  // 演示短信：固定回填 888888，按手机号记下最近一条便于 login/bind 校验「错码」路径。
+  async sendSmsCode(phone: string, _scene?: 'login' | 'bind'): Promise<SmsSendResult> {
     mockSmsCodes[phone] = '888888';
     return delay({ cooldownSec: 60, expiresInSec: 300, devCode: '888888' }, 200);
   },
@@ -435,24 +436,54 @@ export const mock = {
     });
   },
 
-  async wechatLogin(code: string, nickname?: string): Promise<LoginResult> {
+  async wechatLogin(code: string, nickname?: string, avatarUrl?: string): Promise<LoginResult> {
     const key = code.replace(/[^\w-]/g, '').slice(0, 40) || 'dev';
     const token = `mock-wx-${key}`;
     const existed = !!Taro.getStorageSync(dataKey(token));
     const d = load(token);
     if (nickname) d.name = nickname;
+    if (avatarUrl) d.avatarUrl = avatarUrl;
+    d.wechatLinked = true;
     save(token, d);
     return delay({
       token, isNew: !existed, onboarded: d.onboarded,
-      user: { id: token, name: d.name, phone: '', benmingColor: d.benmingColor, wechatLinked: true },
+      user: { id: token, name: d.name, phone: '', benmingColor: d.benmingColor, avatarUrl: d.avatarUrl ?? null, wechatLinked: true },
     });
+  },
+
+  // 绑定手机号（演示）：①微信一键 phoneCode → 派生稳定手机号；②短信 phone+code 校验。
+  async bindPhone(phone?: string, code?: string, phoneCode?: string): Promise<{ ok: boolean; phone: string; wechatLinked: boolean }> {
+    const { token, d } = current();
+    let finalPhone: string;
+    if (phoneCode) {
+      let h = 0;
+      for (let i = 0; i < phoneCode.length; i++) h = (h * 31 + phoneCode.charCodeAt(i)) >>> 0;
+      finalPhone = ('1' + String(3_900_000_000 + (h % 90_000_000)).padStart(10, '0')).slice(0, 11);
+    } else {
+      if (!phone || !code) throw Object.assign(new Error('请提供手机号与验证码'), { code: 'BIND_PARAMS_MISSING' });
+      const expect = mockSmsCodes[phone] ?? '888888';
+      if (code !== expect) throw Object.assign(new Error('验证码错误或已过期'), { code: 'SMS_CODE_INVALID' });
+      delete mockSmsCodes[phone];
+      finalPhone = phone;
+    }
+    d.phone = finalPhone;
+    save(token, d);
+    return delay({ ok: true, phone: finalPhone, wechatLinked: !!d.wechatLinked });
+  },
+
+  // 上传头像（演示）：无 OSS，直接把传入的本地路径当作头像链接回显。
+  async uploadAvatar(filePath: string): Promise<{ ok: boolean; avatarUrl: string }> {
+    const { token, d } = current();
+    d.avatarUrl = filePath;
+    save(token, d);
+    return delay({ ok: true, avatarUrl: filePath });
   },
 
   async me(): Promise<Me> {
     const { d } = current();
     const plan = PLANS.find((p) => p.id === d.planId) ?? PLANS[1];
     return delay({
-      user: { id: getToken(), name: d.name, role: 'owner', benmingColor: d.benmingColor },
+      user: { id: getToken(), name: d.name, role: 'owner', benmingColor: d.benmingColor, avatarUrl: d.avatarUrl ?? null, phone: /^1\d{10}$/.test(d.phone) ? d.phone : '', wechatLinked: !!d.wechatLinked },
       tenant: { id: `t-${d.phone}`, name: d.company, industry: d.profile?.industry ?? null, stage: d.profile?.stage ?? null },
       plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth } : null,
       creditBalance: d.creditBalance,
@@ -463,12 +494,13 @@ export const mock = {
     });
   },
 
-  async updateIdentity(body: { name?: string; company?: string }): Promise<{ ok: boolean; name?: string; company?: string }> {
+  async updateIdentity(body: { name?: string; company?: string; avatarUrl?: string }): Promise<{ ok: boolean; name?: string; company?: string; avatarUrl?: string }> {
     const { token, d } = current();
     if (typeof body.name === 'string') d.name = body.name.trim().slice(0, 20);
     if (typeof body.company === 'string') d.company = body.company.trim().slice(0, 40);
+    if (typeof body.avatarUrl === 'string') d.avatarUrl = body.avatarUrl.trim().slice(0, 500);
     save(token, d);
-    return delay({ ok: true, name: d.name, company: d.company });
+    return delay({ ok: true, name: d.name, company: d.company, avatarUrl: d.avatarUrl });
   },
 
   async deleteAccount(): Promise<{ ok: boolean }> {

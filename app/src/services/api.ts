@@ -10,6 +10,7 @@ import type {
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
   KnowledgeDocRow, KnowledgeDetail,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
+  BindPhoneResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -75,16 +76,33 @@ async function uploadKnowledgeFile(filePath: string, projectId?: string): Promis
   try { return JSON.parse(res.data) as { id: string; status: string }; } catch { return { id: '', status: 'parsing' }; }
 }
 
+// 头像上传：multipart 单文件 → 后端存 OSS → 落库 user.avatarUrl，返回公网链接。
+async function uploadAvatarFile(filePath: string): Promise<{ ok: boolean; avatarUrl: string }> {
+  const res = await Taro.uploadFile({ url: `${BASE_URL}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': getToken() } });
+  if (res.statusCode === 401) { clearToken(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode >= 400) {
+    let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
+    try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }
+    throw Object.assign(new Error(msg), { code });
+  }
+  return JSON.parse(res.data) as { ok: boolean; avatarUrl: string };
+}
+
 // —— API：mock 模式走本地数据源，server 模式连真实后端，口径完全一致 ——
 export const api = {
   suggestAlias: () =>
     IS_MOCK ? mock.suggestAlias() : request<AliasSuggestionResult>('/auth/suggest-name'),
-  sendSmsCode: (phone: string) =>
-    IS_MOCK ? mock.sendSmsCode(phone) : request<SmsSendResult>('/auth/sms/send', 'POST', { phone }),
+  sendSmsCode: (phone: string, scene?: 'login' | 'bind') =>
+    IS_MOCK ? mock.sendSmsCode(phone, scene) : request<SmsSendResult>('/auth/sms/send', 'POST', { phone, scene }),
   login: (phone: string, name?: string, code?: string) =>
     IS_MOCK ? mock.login(phone, name, code) : request<LoginResult>('/auth/login', 'POST', { phone, name, code }),
-  wechatLogin: (code: string, nickname?: string) =>
-    IS_MOCK ? mock.wechatLogin(code, nickname) : request<LoginResult>('/auth/wechat-login', 'POST', { code, nickname }),
+  wechatLogin: (code: string, nickname?: string, avatarUrl?: string) =>
+    IS_MOCK ? mock.wechatLogin(code, nickname, avatarUrl) : request<LoginResult>('/auth/wechat-login', 'POST', { code, nickname, avatarUrl }),
+  // 绑定手机号（微信登录后强制）：需登录态。①微信一键 phoneCode；②短信 phone+code 兜底。
+  bindPhone: (phone: string, code: string) =>
+    IS_MOCK ? mock.bindPhone(phone, code) : request<BindPhoneResult>('/auth/bind-phone', 'POST', { phone, code }),
+  bindPhoneByWechat: (phoneCode: string) =>
+    IS_MOCK ? mock.bindPhone(undefined, undefined, phoneCode) : request<BindPhoneResult>('/auth/bind-phone', 'POST', { phoneCode }),
   // 本机号一键登录：phoneCode=getPhoneNumber 的 code，loginCode=wx.login 的 code（用于关联 openid）。
   wechatPhoneLogin: (phoneCode: string, loginCode?: string, name?: string) =>
     IS_MOCK ? mock.wechatPhoneLogin(phoneCode, name) : request<LoginResult>('/auth/wechat-phone', 'POST', { phoneCode, loginCode, name }),
@@ -95,8 +113,10 @@ export const api = {
     IS_MOCK ? mock.purchasePlan(id) : request<PlanPurchaseResult>(`/plans/${id}/purchase`, 'POST', {}),
   setColor: (color: string) =>
     IS_MOCK ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),
-  updateIdentity: (body: { name?: string; company?: string }) =>
-    IS_MOCK ? mock.updateIdentity(body) : request<{ ok: boolean; name?: string; company?: string }>('/me', 'PUT', body),
+  updateIdentity: (body: { name?: string; company?: string; avatarUrl?: string }) =>
+    IS_MOCK ? mock.updateIdentity(body) : request<{ ok: boolean; name?: string; company?: string; avatarUrl?: string }>('/me', 'PUT', body),
+  uploadAvatar: (filePath: string) =>
+    IS_MOCK ? mock.uploadAvatar(filePath) : uploadAvatarFile(filePath),
   deleteAccount: () =>
     IS_MOCK ? mock.deleteAccount() : request<{ ok: boolean }>('/me', 'DELETE'),
   agents: () => (IS_MOCK ? mock.agents() : request<Agent[]>('/agents')),

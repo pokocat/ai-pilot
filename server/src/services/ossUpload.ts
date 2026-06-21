@@ -36,6 +36,18 @@ export async function ossPutHtml(key: string, html: string): Promise<string> {
 }
 
 /**
+ * 上传任意二进制到 OSS `key`，以 **public-read** ACL 存，返回公网可访问链接（env.ossBaseUrl + key）。
+ * 用于头像等可公开、需长期稳定访问的图片（小程序 <image> 直接展示，免签名 URL 过期）。失败抛出。
+ */
+export async function ossPutPublic(key: string, buf: Buffer, contentType: string): Promise<string> {
+  await oss().put(key, buf, {
+    mime: contentType,
+    headers: { 'Content-Type': contentType, 'x-oss-object-acl': 'public-read', 'Cache-Control': 'public, max-age=31536000' },
+  });
+  return `${env.ossBaseUrl}/${key}`;
+}
+
+/**
  * 上传任意二进制到 OSS `key`，以 **private** ACL 存（用户上传的业务资料原件，不公开）。返回对象 key。
  * 预览/下载请用 ossSignedUrl() 取有时限的签名链接，避免裸链外泄。失败抛出。
  */

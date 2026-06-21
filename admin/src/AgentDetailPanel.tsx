@@ -392,7 +392,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
 
       <div className="save-bar">
         <button className="gh" onClick={() => { setPrompt(data.systemPrompt); }} title="还原提示词"><Icon name="clock" size={16} /></button>
-        <button className="gh" style={{ width: 'auto', padding: '0 14px' }} onClick={save}><Icon name="check" size={16} /> 存草稿</button>
+        <button className="gh gh-wide" onClick={save}><Icon name="check" size={16} /> 存草稿</button>
         <button className="sv" onClick={publish} disabled={publishing}><Icon name="spark" size={16} /> {publishing ? '发布中…' : '发布新版本'}</button>
       </div>
       </>)}

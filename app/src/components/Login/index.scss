@@ -1,58 +1,112 @@
+/* ============================================================
+   登录页 —— 主体绿(墨绿)流动背景 + 鎏金点缀。
+   该页固定使用绿色品牌色（登录先于本命色选择），不随主题切换。
+   ============================================================ */
 .login {
-  position: fixed; inset: 0; z-index: 400;
-  background: var(--paper);
-  display: flex; align-items: center; justify-content: center;
-  padding: 0 28px calc(40px + env(safe-area-inset-bottom));
+  position: fixed; inset: 0; z-index: 400; overflow: hidden;
+  background: linear-gradient(162deg, #0A1F16 0%, #123A28 46%, #0C271C 100%);
 }
-.lg-card {
-  width: 100%; max-width: 480px;
-  display: flex; flex-direction: column; align-items: center;
+
+/* —— 流动背景：三团模糊的绿/金光斑缓慢漂移 + 巨大「謀」字水印 —— */
+.lg-bg { position: absolute; inset: 0; overflow: hidden; }
+.lg-blob { position: absolute; border-radius: 50%; filter: blur(38px); }
+.lg-b1 { width: 280px; height: 280px; left: -72px; top: 6%;
+  background: radial-gradient(circle, rgba(95,179,137,.50), rgba(95,179,137,0) 68%);
+  animation: lgF1 16s ease-in-out infinite; }
+.lg-b2 { width: 320px; height: 320px; right: -104px; top: 28%;
+  background: radial-gradient(circle, rgba(46,125,91,.62), rgba(46,125,91,0) 68%);
+  animation: lgF2 22s ease-in-out infinite; }
+.lg-b3 { width: 240px; height: 240px; left: 8%; bottom: -9%;
+  background: radial-gradient(circle, rgba(168,131,52,.30), rgba(168,131,52,0) 70%);
+  animation: lgF3 27s ease-in-out infinite; }
+@keyframes lgF1 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(46px,34px) scale(1.18); } }
+@keyframes lgF2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-40px,-48px) scale(1.22); } }
+@keyframes lgF3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(34px,-26px) scale(1.12); } }
+.lg-wm { position: absolute; right: -24px; top: 14%; font-size: 320px; line-height: 1;
+  font-weight: 700; color: rgba(216,178,90,.07); }
+
+/* —— 内容层 —— */
+.lg-content {
+  position: relative; z-index: 1; height: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column;
+  padding: calc(env(safe-area-inset-top) + 46px) 32px calc(env(safe-area-inset-bottom) + 30px);
 }
-.lg-mk {
-  width: 64px; height: 64px; display: block;
+
+/* —— 品牌区（默认微信登录态） —— */
+.lg-hero { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.lg-mk { width: 64px; height: 64px; }
+.lg-name { margin-top: 16px; display: flex; align-items: baseline; justify-content: center; }
+.lg-name-ai { font-size: 30px; font-weight: 500; letter-spacing: .04em; color: #E9C982; }
+.lg-name-cn { font-size: 30px; font-weight: 700; letter-spacing: .06em; color: #F5F1E6; }
+.lg-rule { width: 30px; height: 2px; margin-top: 16px; background: linear-gradient(90deg, rgba(216,178,90,0), #D8B25A, rgba(216,178,90,0)); }
+.lg-slogan { margin-top: 18px; font-size: 19px; font-weight: 500; letter-spacing: .06em; color: #F1EDDF; }
+.lg-tag { margin-top: 10px; font-size: 12.5px; letter-spacing: .12em; color: rgba(243,240,230,.6); }
+
+/* —— 操作区 —— */
+.lg-actions { display: flex; flex-direction: column; align-items: center; }
+.lg-wechat {
+  width: 100%; height: 52px; border-radius: 16px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  background: #F4F1E8; box-shadow: 0 8px 24px rgba(0,0,0,.20);
 }
-.lg-h { display: block; font-size: 26px; font-weight: 700; color: var(--ink); margin-top: 16px; }
-.lg-sub { display: block; font-size: 12px; letter-spacing: .08em; color: var(--ink-3); margin: 6px 0 30px; }
+.lg-wechat.off { opacity: .6; }
+.lg-wechat-t { font-size: 16px; font-weight: 600; color: #143726; }
+.lg-switch { display: flex; align-items: center; gap: 4px; margin-top: 20px; font-size: 14px; color: rgba(243,240,230,.82); }
+.lg-agree { margin-top: 18px; font-size: 11px; text-align: center; color: rgba(243,240,230,.42); }
+
+/* —— 表单（手机号登录 / 完善资料） —— */
+.lg-form { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.lg-complete { justify-content: flex-start; }
+.lg-kicker { font-size: 11px; letter-spacing: .2em; font-weight: 600; color: #D8B25A; }
+.lg-h { margin-top: 10px; font-size: 25px; font-weight: 700; color: #F5F1E6; }
+.lg-sub { margin-top: 7px; margin-bottom: 24px; font-size: 12.5px; color: rgba(243,240,230,.55); }
 
 .lg-field {
-  width: 100%; display: flex; align-items: center; gap: 10px;
-  background: var(--surface); border: 1px solid var(--line);
-  border-radius: 14px; padding: 0 16px; height: 52px; margin-bottom: 14px;
+  display: flex; align-items: center; gap: 10px; box-sizing: border-box;
+  height: 50px; padding: 0 16px; margin-bottom: 12px; border-radius: 14px;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.16);
 }
-.lg-pre { font-size: 15px; color: var(--ink-2); font-weight: 600; }
-.lg-input { flex: 1; height: 52px; font-size: 15px; color: var(--ink); }
-.lg-code { font-size: 13px; font-weight: 600; white-space: nowrap; }
-.lg-code.off { color: var(--ink-3); }
-
-/* 本机号一键登录：主按钮（本命色）。weapp Button 需清掉默认描边与内边距。 */
-.lg-onetap {
-  width: 100%; height: 52px; line-height: 52px; border-radius: 14px;
-  color: #fff; font-size: 16px; font-weight: 600;
-  margin-bottom: 10px; padding: 0; border: none;
-}
-.lg-onetap::after { border: none; }
-.lg-onetap.off { opacity: .6; }
-.lg-wx-link {
-  display: block; text-align: center; font-size: 13px; font-weight: 500;
-  color: var(--ink-2); margin-bottom: 18px;
-}
-
-.lg-wx {
-  width: 100%; height: 52px; border-radius: 14px; color: #fff;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 600; margin-bottom: 14px;
-  background: #1aad19;
-}
-.lg-wx.off { opacity: .6; }
-.lg-sep {
-  width: 100%; display: flex; align-items: center; justify-content: center;
-  color: var(--ink-3); font-size: 11px; margin: 0 0 14px;
-}
+.lg-pre { font-size: 15px; font-weight: 600; color: #E9C982; }
+.lg-input { flex: 1; height: 50px; font-size: 15px; color: #F3F0E6; }
+.lg-ph { color: rgba(243,240,230,.40); }
+.lg-code { font-size: 13px; font-weight: 600; white-space: nowrap; color: #5FB389; }
+.lg-code.off { color: rgba(243,240,230,.40); }
 
 .lg-cta {
-  width: 100%; height: 52px; border-radius: 14px; color: #fff;
+  margin-top: 8px; height: 52px; border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 600; margin-top: 8px;
+  font-size: 16px; font-weight: 600; color: #2A1E06;
+  background: linear-gradient(135deg, #E6C374, #A87F2C);
+  box-shadow: 0 8px 22px rgba(168,127,44,.30);
 }
 .lg-cta.off { opacity: .6; }
-.lg-tip { display: block; font-size: 11px; color: var(--ink-3); margin-top: 16px; text-align: center; }
+
+/* —— 完善资料：一键填入 + 头像 + 昵称 + 可选绑定手机 —— */
+.lg-onetap-wx {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 46px; margin: 18px 0 4px; border-radius: 14px;
+  background: rgba(255,255,255,.07); border: 1px solid rgba(95,179,137,.45);
+}
+.lg-onetap-wx-t { font-size: 14.5px; font-weight: 600; color: #EAF5EE; }
+.lg-av-wrap { display: flex; flex-direction: column; align-items: center; margin: 18px 0 20px; }
+.lg-av-btn { position: relative; width: 82px; height: 82px; padding: 0; margin: 0; background: transparent; line-height: normal; }
+.lg-av-btn::after { border: none; }
+.lg-av { width: 82px; height: 82px; border-radius: 50%; border: 2px solid rgba(216,178,90,.5); box-sizing: border-box; }
+.lg-av-ph { display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.08); }
+.lg-av-cam {
+  position: absolute; right: -2px; bottom: -2px; width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: #E6C374; border: 2px solid #0E2A1E;
+}
+.lg-av-tip { margin-top: 10px; font-size: 12px; color: rgba(243,240,230,.6); }
+
+.lg-skip { margin-top: 16px; text-align: center; font-size: 13px; color: rgba(243,240,230,.6); }
+.lg-skip-weak { margin-top: 10px; font-size: 12px; color: rgba(243,240,230,.38); }
+
+/* —— 强制绑定手机号：微信一键（getPhoneNumber Button）+ 短信兜底 —— */
+.lg-bind-onetap { margin: 22px 0 0; padding: 0; line-height: normal; }
+.lg-bind-onetap::after { border: none; }
+.lg-sep {
+  display: flex; align-items: center; justify-content: center;
+  margin: 16px 0; font-size: 11px; color: rgba(243,240,230,.45);
+}

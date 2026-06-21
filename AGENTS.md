@@ -106,10 +106,10 @@ repo/
 
 ## 6. 账号与数据隔离
 
-- **登录**：小程序 server 模式优先支持本机号一键登录（`getPhoneNumber` code → 服务端 `getuserphonenumber` 换手机号 → 自有 token），也支持微信账号登录（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号）和短信验证码登录（`POST /auth/sms/send` → `POST /auth/login`，生产设 `SMS_PROVIDER=aliyun`、`SMS_REQUIRE_CODE=true`；当前阿里云短信模板 `ALIYUN_SMS_TEMPLATE_CODE=SMS_508120103`）。手机号免码登录仅保留为开发/测试兼容兜底。注册称呼可留空，也可点称呼框右侧的 spark 图标从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户，套餐赠送算力。
+- **登录**（2026-06 重构，默认微信优先）：登录页**默认微信账号登录**（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号），一键切换**短信验证码登录**（`POST /auth/sms/send` → `POST /auth/login`，生产设 `SMS_PROVIDER=aliyun`、`SMS_REQUIRE_CODE=true`；当前阿里云短信模板 `ALIYUN_SMS_TEMPLATE_CODE=SMS_508120103`）。微信登录后**强制绑定手机号才能继续使用**（`bindphone` 拦截页，无跳过、仅"退出登录"逃生；首页对已登录但 `me.user.phone` 为空的账号也会拉起该页）：`POST /auth/bind-phone` 二选一——①微信一键 `{phoneCode}`（`getPhoneNumber` → 服务端 `getPhoneNumberByCode` 换号）②短信兜底 `{phone,code}`（`scene=bind`）；均带跨账号占用守卫（已被占用→409 `PHONE_TAKEN`）。绑定后再进**可选可跳过的「完善资料」**：`chooseAvatar`+`type=nickname`（微信头像昵称填写能力，可改）同步头像/昵称——头像 `POST /me/avatar` 传 OSS public-read 存 `User.avatarUrl`、昵称走 `PUT /me`。注意微信头像昵称**只能用户点选**（chooseAvatar 默认项「使用微信头像」+ 昵称键盘自动填充），`getUserProfile` 自 2022-10 起手机端返回匿名「微信用户」+灰头像，仅 PC/Mac/旧基础库返回真实（故「一键填入头像昵称」只在 PC/Mac 显示）。本机号一键登录端点 `POST /auth/wechat-phone`（`getPhoneNumber` 换号即登录）保留但**不再是登录页主入口**。手机号免码登录仅保留为开发/测试兼容兜底。注册称呼可留空，也可点称呼框右侧的 spark 图标从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户，套餐赠送算力。
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
-- **微信密钥**：`WECHAT_MINI_SECRET` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
+- **微信密钥**：`WECHAT_MINI_SECRET` 与消息推送 `WECHAT_MESSAGE_TOKEN` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
 - **方案购买（演示级）**：前台可读 `GET /plans`，登录后 `POST /plans/:id/purchase` 切换方案并按方案写入 `CreditLedger`；前台显示为「方案与产出额度」，企业版 `creditsPerMonth<0` 记为不限量（余额 `-1`，产出不扣减）。真实支付/微信支付回调尚未接入，见 §13。
 - **智能体开通**：`free`/`metered` 智能体无需开通即可用；`unlock` 智能体需用户用算力购买（`POST /agents/:key/purchase`）或运营后台开通后才能对话/产出，未开通产出返回 `403 AGENT_LOCKED` 且不落会话。
 - **离线兜底**：server 模式下后端不可达时，登录回退为 `local-<手机号>` 本地会话，保证可体验（无服务端数据）。
@@ -175,6 +175,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `POST /auth/login` | 手机号登录/注册；传 `code` 时校验短信验证码，生产可强制 `SMS_REQUIRE_CODE=true` | 否 |
 | `POST /auth/wechat-login` | 小程序微信登录：code 换 openid/unionid 后注册/登录 | 否 |
 | `POST /auth/wechat-phone` | 小程序本机号一键登录：getPhoneNumber code 换手机号后注册/登录 | 否 |
+| `GET/POST /wechat/message` | 微信后台消息推送 URL 验签：GET 校验 `signature/timestamp/nonce` 后原样返回 `echostr`；POST 验签后返回 `success`（后续事件处理入口） | 否 |
 | `GET /health` | 健康检查 | 否 |
 | `GET /me` · `PUT /me/color` | 当前用户(+onboarded+ai信息+军师档案) · 改本命色 | 是 |
 | `GET /agents` · `GET /agents/:key` | 智能体注册表；带 token 时回填 `owned` | 否 |
@@ -211,7 +212,7 @@ Provider（`provider` 字段，由 `effectiveProvider` 决定实际生效）：
 ```
 DATABASE_URL  PORT  MODERATION_ENABLED
 ADMIN_TOKEN
-WECHAT_MINI_APPID  WECHAT_MINI_SECRET
+WECHAT_MINI_APPID  WECHAT_MINI_SECRET  WECHAT_MESSAGE_TOKEN
 AI_PROVIDER=mock|claude|openai
 ANTHROPIC_API_KEY  CLAUDE_MODEL
 OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
@@ -336,6 +337,22 @@ TARO_APP_MODE=server TARO_APP_API="http://$LAN_IP:4000/api" npm run dev:weapp
 ```
 注意：`/api/health` 只证明服务端存活；如果业务接口因 `DATABASE_URL`/Prisma 连不上库报错，应先修数据库。用户只是要可扫码验收时，可先退回 mock 预览保持体验可用。
 
+**小程序发布上线（开发版 → 体验版 → 发布）**
+
+小程序是独立于服务端的发布渠道，**不在 `deploy-prod.sh` 内**；后端用 `deploy-prod.sh` 单独上线，且必须向后兼容线上旧版小程序（新增字段/可选参数/新端点，不改既有响应契约）。发布前务必 **server 模式构建**，否则连的是 mock 而非线上 API：
+```bash
+cd /Users/donis/dev/ai-pilot/app
+npm run build:weapp:server   # = TARO_APP_MODE=server TARO_APP_API=https://wxapi.aibuzz.cn/api npm run build:weapp
+```
+产物在 `app/dist/`（`miniprogramRoot=dist/`）。两种上传方式，**默认用①微信开发者工具**：
+1. **微信开发者工具（首选）**：只导入 `app/`（不要导入仓库根目录或 `app/dist`）→ 右上角「上传」→ 填**版本号**（每次递增，线上最近为 `0.2.2`）+ 项目备注 → 进入 mp 后台「版本管理 · 开发版」。
+2. **CLI / miniprogram-ci（自动化）**：需先在 mp 后台 *开发管理 → 开发设置 → 小程序代码上传* 下载上传密钥 `private.<appid>.key` 并把**本机公网 IP**加进该密钥白名单：
+   ```bash
+   cd app && WEAPP_UPLOAD_KEY=/绝对路径/private.wx05a49967e2adb557.key \
+     npm run upload:weapp -- --version 0.2.3 --desc "本次变更说明"
+   ```
+上传后在 mp 后台 `mp.weixin.qq.com`「版本管理」：**开发版 → 转「体验版」自测 → 「提交审核」→ 审核通过后「发布」** 给全体用户。脚本/工具只产出开发版，转体验版、提交审核、正式发布都在 mp 后台手动操作。
+
 **部署发布**
 
 服务器部署/升级主文档是 `docs/DEPLOYMENT.md`，模板在 `deploy/`。当前固定线上环境：`ecs-user@8.136.36.175`，SSH key `/Users/donis/dev/aliyun/aiartist.pem`，代码目录 `/opt/junshi`，后台静态 `/var/www/junshi/admin`，H5 静态 `/var/www/junshi/h5`，API systemd 服务 `junshi-api`，公网域名 `https://wxapi.aibuzz.cn`。**不要再探测远端是不是 git 仓库，也不要走远端 `git pull`**：当前 `/opt/junshi` 是本地 `git archive` 上传包式部署，不是 git checkout；例行「提交部署」直接跑仓库脚本。
@@ -419,6 +436,14 @@ cd ../app
 TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp
 ```
 微信开发者工具导入 `app/`；本地调试可勾选“不校验合法域名”，真机/预览必须把 `TARO_APP_API` 的 HTTPS 域名加入小程序后台 request 合法域名。
+
+### 微信消息推送 URL 验签联调
+```bash
+cd server
+# .env 里配置：WECHAT_MESSAGE_TOKEN=与你在微信后台填写的 Token 完全一致
+npm run dev
+```
+微信后台「消息推送 URL」填 `https://你的域名/api/wechat/message`，Token 填 `WECHAT_MESSAGE_TOKEN` 的值。GET 验签通过会原样返回微信传入的 `echostr`；POST 推送会先验签再返回 `success`（当前只建立可信入口，业务事件处理后续再接）。
 
 ---
 

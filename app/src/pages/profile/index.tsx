@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text } from '@tarojs/components';
+import { View, Text, Image } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
@@ -47,9 +47,13 @@ export default function Profile() {
     <Screen topInset>
       <View className="pad">
         <View className="me-card card" onClick={() => Taro.navigateTo({ url: '/pages/settings/index' })}>
-          <View className="me-av serif" style={{ background: accent }}>
-            {me?.user.name ? me.user.name[0] : <Icon name="user" size={20} color="#fff" />}
-          </View>
+          {me?.user.avatarUrl ? (
+            <Image className="me-av" src={me.user.avatarUrl} mode="aspectFill" />
+          ) : (
+            <View className="me-av serif" style={{ background: accent }}>
+              {me?.user.name ? me.user.name[0] : <Icon name="user" size={20} color="#fff" />}
+            </View>
+          )}
           <View className="me-info">
             <Text className="me-name">{me?.user.name || '完善你的资料 ›'}</Text>
             <Text className="me-org">{orgLine(me) || '点此设置称呼与公司，让产出更贴合你'}</Text>

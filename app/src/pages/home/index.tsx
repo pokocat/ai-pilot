@@ -112,7 +112,7 @@ export default function Home() {
           <View className="brand">
             <Image className="brand-mk" src={logo} mode="aspectFit" />
             <View>
-              <Text className="brand-nm serif">军师</Text>
+              <Text className="brand-nm serif">AI 军师</Text>
               <Text className="brand-sub">AI STRATEGIST</Text>
             </View>
           </View>

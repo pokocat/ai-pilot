@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Input } from '@tarojs/components';
+import { View, Text, Input, Button, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import SafeHeader from '../../components/SafeHeader';
 import Icon from '../../components/Icon';
@@ -7,6 +7,8 @@ import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api } from '../../services/api';
 import './index.scss';
+
+const isWeapp = process.env.TARO_ENV === 'weapp';
 
 const VERSION = 'v1.0.0';
 
@@ -21,6 +23,23 @@ export default function Settings() {
   const [name, setName] = useState('');
   const [company, setCompany] = useState('');
   const [saving, setSaving] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarUrl = me?.user.avatarUrl || '';
+
+  const onChooseAvatar = async (e: { detail?: { avatarUrl?: string } }) => {
+    const path = e?.detail?.avatarUrl;
+    if (!path || avatarUploading) return;
+    setAvatarUploading(true);
+    try {
+      await api.uploadAvatar(path);
+      await store.loadMe();
+      Taro.showToast({ title: '头像已更新', icon: 'success' });
+    } catch (err) {
+      s.handleApiError(err, { fallbackTitle: '头像更新失败，请重试' });
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
 
   useEffect(() => {
     setName(me?.user.name ?? '');
@@ -77,6 +96,21 @@ export default function Settings() {
       <View className="pad">
         <Text className="set-sec">个人资料</Text>
         <View className="set-card">
+          <View className="set-field set-avatar-row">
+            <Text className="set-label">头像</Text>
+            {isWeapp ? (
+              <Button className="set-avatar-btn" openType="chooseAvatar" onChooseAvatar={onChooseAvatar}>
+                {avatarUrl
+                  ? <Image className="set-avatar" src={avatarUrl} mode="aspectFill" />
+                  : <View className="set-avatar set-avatar-ph" style={{ background: accent }}><Icon name="user" size={18} color="#fff" /></View>}
+                <Text className="set-avatar-edit" style={{ color: accent }}>{avatarUploading ? '上传中…' : '更换'}</Text>
+              </Button>
+            ) : (
+              avatarUrl
+                ? <Image className="set-avatar" src={avatarUrl} mode="aspectFill" />
+                : <View className="set-avatar set-avatar-ph" style={{ background: accent }}><Icon name="user" size={18} color="#fff" /></View>
+            )}
+          </View>
           <View className="set-field">
             <Text className="set-label">称呼</Text>
             <Input className="set-input" value={name} maxlength={20} placeholder="怎么称呼你？" onInput={(e) => setName(e.detail.value)} />
