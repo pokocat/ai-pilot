@@ -8,7 +8,10 @@ export function isRealKey(k: string): boolean {
 // 测试运行（NODE_ENV=test）：LLM 一律不触达真实 provider（claude/openai/dify），
 // 产出走确定性 mock。与短信 isSmsTestMode 同源——测试绝不调用付费/限流外部 API，
 // 避免被 DB 里残留的真实接入配置（如 general 的 dify 绑定）拖累成偶发 429/超时。
+// 例外：gatewayProvider.test.ts 用 AI_ALLOW_REAL_PROVIDER=1 显式放行真实 provider 代码路径，
+// 以便配合 globalThis.fetch stub 测「429/500/超时 → 兜底/503 映射」——放行的是代码路径，不是网络（fetch 被打桩）。
 export function isAiTestMode(): boolean {
+  if (process.env.AI_ALLOW_REAL_PROVIDER === '1') return false;
   return process.env.NODE_ENV === 'test';
 }
 
