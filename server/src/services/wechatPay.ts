@@ -163,9 +163,10 @@ export async function markPaidAndApply(parsed: {
   }
   if (order.appliedAt) return { applied: false, reason: 'already_applied' }; // 快路径短路
 
-  // 原子抢占：只有把 appliedAt 从 null 改成现在的那一次，才负责发放权益。
+  // 原子抢占：同时限定 status=created（未开始处理）且 appliedAt=null，防止 failed→paid 非法跃迁。
+  // 背景：若先到的 CLOSED 回调把订单置 failed，后到的 SUCCESS 回调不应覆盖写入 paid/applied。
   const claim = await prisma.paymentOrder.updateMany({
-    where: { outTradeNo: parsed.outTradeNo, appliedAt: null },
+    where: { outTradeNo: parsed.outTradeNo, status: 'created', appliedAt: null },
     data: { status: 'paid', paidAt: new Date(), appliedAt: new Date(), transactionId: parsed.transactionId ?? null, rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue },
   });
   if (claim.count !== 1) return { applied: false, reason: 'already_applied' }; // 并发竞争里输掉 → 已被另一次处理

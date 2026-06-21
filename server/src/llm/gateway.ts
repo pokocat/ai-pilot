@@ -162,7 +162,9 @@ function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string 
     ctx.understandingMaturity ?? '',
     ctx.understandingQuestions?.length ?? 0,
   ].join('|');
-  return `${kind}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${profileSig}:${refSig}`;
+  // tenantId is required to prevent cross-tenant cache hits for identical inputs.
+  const tenantSig = ctx.tenantId ?? '';
+  return `${kind}:${tenantSig}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${profileSig}:${refSig}`;
 }
 
 export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Promise<{ result: Deliverable; usage: Usage }> {

@@ -103,15 +103,21 @@ export async function queryRelations(
     if (entityIds.length === 0) return [];
   }
 
+  // Build AND clauses separately to avoid two `OR` keys overwriting each other when both
+  // entityIds and asOf are present (JavaScript object literals silently drop duplicate keys).
+  const andClauses: { OR?: unknown[]; validFrom?: unknown }[] = [];
+  if (entityIds) andClauses.push({ OR: [{ subjectId: { in: entityIds } }, { objectId: { in: entityIds } }] });
+  if (asOf) {
+    andClauses.push({ validFrom: { lte: asOf } } as never);
+    andClauses.push({ OR: [{ validTo: null }, { validTo: { gt: asOf } }] });
+  }
+
   const rows = await prisma.graphRelation.findMany({
     where: {
       tenantId,
       ...(opts.projectId ? { projectId: opts.projectId } : {}),
       ...(opts.predicate ? { predicate: opts.predicate } : {}),
-      ...(entityIds ? { OR: [{ subjectId: { in: entityIds } }, { objectId: { in: entityIds } }] } : {}),
-      ...(asOf
-        ? { validFrom: { lte: asOf }, OR: [{ validTo: null }, { validTo: { gt: asOf } }] }
-        : {}),
+      ...(andClauses.length > 0 ? { AND: andClauses } : {}),
     },
     orderBy: { validFrom: 'desc' },
     take,
