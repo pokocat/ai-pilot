@@ -16,7 +16,7 @@ const PROVIDER_MODES: [AgentProviderMode, string, string][] = [
   ['dify', 'Dify 应用', '绑定一个 Dify 智能体（chat-messages 接口）'],
 ];
 // Dify inputs 可用的本地上下文占位符（值里写这些，运行时按本轮真实数据填充）。
-const INPUT_VARS = ['{企业档案}', '{长期记忆}', '{引用资料}', '{知识库}', '{军师档案}', '{客户名}', '{用户消息}'];
+const INPUT_VARS = ['{企业档案}', '{长期记忆}', '{引用资料}', '{知识库}', '{个人档案}', '{客户名}', '{用户消息}'];
 const INTENSITY = [['conservative', '保守'], ['balanced', '均衡'], ['aggressive', '激进']];
 const RETENTION = [[30, '30天'], [180, '180天'], [-1, '永久']];
 const BILLING: [AgentBilling, string, string][] = [

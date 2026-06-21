@@ -257,7 +257,7 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
       : `军师已沉淀 ${evidenceTotal} 条经营线索，可作为后续咨询、复盘和方案产出的底稿。`;
 
   return {
-    title: '军师档案',
+    title: '个人档案',
     subtitle: '军师有多了解你的生意',
     maturity,
     summary,
@@ -283,7 +283,7 @@ function inputQuestionsM(d: UserData): string[] {
 }
 
 function wantsBriefInterviewM(text: string): boolean {
-  return /军师档案访谈模式|补齐军师档案|完善军师档案|更新军师档案|让军师来问/.test(text);
+  return /个人档案访谈模式|补齐个人档案|完善个人档案|更新个人档案|让军师来问/.test(text);
 }
 
 // ── 版本化报告 / 知识 / 引用 的本地实现（与后端同口径，纯前端、零依赖） ──

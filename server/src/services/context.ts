@@ -46,7 +46,7 @@ function unauthorized() {
 }
 
 function isBriefInterviewRequest(text: string): boolean {
-  return /军师档案访谈模式|补齐军师档案|完善军师档案|更新军师档案|让军师来问/.test(text);
+  return /(?:个人|军师)档案访谈模式|(?:补齐|完善|更新)(?:个人|军师)档案|让军师来问/.test(text);
 }
 
 /**

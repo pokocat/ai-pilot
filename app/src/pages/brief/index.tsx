@@ -20,7 +20,7 @@ export default function BriefPage() {
 
   return (
     <View className={`page brief-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-      <SafeHeader title="军师档案" onBack={() => Taro.navigateBack()} titleClassName="brief-title" />
+      <SafeHeader title="个人档案" onBack={() => Taro.navigateBack()} titleClassName="brief-title" />
 
       <View className="pad">
         <View className="bf-hero" style={{ background: '#1B1E22' }}>
@@ -35,7 +35,7 @@ export default function BriefPage() {
             ) : null}
           </View>
           <Text className="bf-k">军师有多了解你的生意</Text>
-          <Text className="bf-t serif">{understanding?.title ?? '军师档案'}</Text>
+          <Text className="bf-t serif">{understanding?.title ?? '个人档案'}</Text>
           <Text className="bf-summary">{understanding?.summary ?? '登录并补充经营资料后，军师会把对你的理解整理在这里。'}</Text>
           {understanding ? <Text className="bf-counts">{evidenceLine(understanding)}</Text> : null}
         </View>
@@ -68,7 +68,7 @@ export default function BriefPage() {
           </>
         ) : (
           <View className="bf-sec">
-            <Text className="bf-empty">暂无资料。先登录并完成建档，后续对话、项目、报告和知识库都会逐步沉淀到军师档案。</Text>
+            <Text className="bf-empty">暂无资料。先登录并完成建档，后续对话、项目、报告和知识库都会逐步沉淀到个人档案。</Text>
           </View>
         )}
 
@@ -100,7 +100,7 @@ function evidenceLine(u: ClientUnderstanding): string {
 
 function startInterview(focus?: string) {
   const text = focus
-    ? `请进入军师档案访谈模式，围绕「${focus}」只问我一个简单具体的问题。不要先分析，不要引用旧报告，不要替我假设业务事实。`
-    : '请进入军师档案访谈模式。不要先分析，不要引用旧报告，不要替我假设业务事实；请先用老板能听懂的话问我 3 个简单具体的问题，帮你补齐行业、阶段和当前难题。';
+    ? `请进入个人档案访谈模式，围绕「${focus}」只问我一个简单具体的问题。不要先分析，不要引用旧报告，不要替我假设业务事实。`
+    : '请进入个人档案访谈模式。不要先分析，不要引用旧报告，不要替我假设业务事实；请先用老板能听懂的话问我 3 个简单具体的问题，帮你补齐行业、阶段和当前难题。';
   Taro.navigateTo({ url: `/pages/chat/index?send=${encodeURIComponent(text)}` });
 }

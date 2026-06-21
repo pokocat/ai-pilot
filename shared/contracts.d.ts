@@ -190,7 +190,7 @@ export interface ClientUnderstandingSection {
   items: string[];
   emptyText?: string;
 }
-/** 前台「军师档案」：把真实档案、记忆、项目和知识沉淀整理成客户可读的咨询理解 */
+/** 前台「个人档案」：把真实档案、记忆、项目和知识沉淀整理成客户可读的咨询理解 */
 export interface ClientUnderstanding {
   title: string;
   subtitle: string;
@@ -666,10 +666,10 @@ export interface AdminRetrievalDebug {
   candidates: RetrievalDebugCand[]; // 按融合分降序
   memories: string[];              // 该用户×该顾问语义召回的记忆
   contextKnowledge: string[];      // buildGenContext 实际注入的「知识」行
-  understanding: string[];         // 实际注入的「军师档案」行
+  understanding: string[];         // 实际注入的「个人档案」行
 }
 
-/** 运营端「用户上下文中心」：某用户的军师档案 + 长期记忆（按顾问）+ 知识库文档，集中观测与纠偏。 */
+/** 运营端「用户上下文中心」：某用户的个人档案 + 长期记忆（按顾问）+ 知识库文档，集中观测与纠偏。 */
 export interface AdminUserMemory {
   id: string;
   agentKey: string;

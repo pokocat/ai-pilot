@@ -21,7 +21,7 @@ function needsCustomerInput(ctx: GenContext): boolean {
 }
 
 function wantsBriefInterview(ctx: GenContext): boolean {
-  return /军师档案访谈模式|补齐军师档案|完善军师档案|更新军师档案|让军师来问/.test(ctx.userMessage);
+  return /个人档案访谈模式|补齐个人档案|完善个人档案|更新个人档案|让军师来问/.test(ctx.userMessage);
 }
 
 function nextQuestions(ctx: GenContext): string[] {

@@ -8,8 +8,12 @@ type UserForUnderstanding = {
   tenant?: { name: string; industry?: string | null; stage?: string | null } | null;
 };
 
-const TITLE = '军师档案';
+const TITLE = '个人档案';
 const SUBTITLE = '军师有多了解你的生意';
+
+// extraJson 里这些键有专门处理（战略档案 md 整块注入 / 结构化天势字段），
+// 不要再被 profileExtraLines 截断成 160 字塞进「创业路径」。
+const RESERVED_EXTRA_KEYS = new Set(['dossier', 'bazi', '八字', '战略档案', 'decisionLog', 'prophecyLog']);
 
 function clean(v: unknown, max = 120): string {
   return typeof v === 'string' ? v.trim().replace(/\s+/g, ' ').slice(0, max) : '';
@@ -49,6 +53,7 @@ function profileExtraLines(extra: unknown): string[] {
   };
   const entries = Object.entries(extra as Record<string, unknown>);
   for (const [key, value] of entries) {
+    if (RESERVED_EXTRA_KEYS.has(key)) continue;
     const text = clean(value, 160);
     if (!text) continue;
     const label = aliases[key] ?? (/[a-zA-Z]/.test(key) ? '' : key);
@@ -164,17 +169,25 @@ export async function buildClientUnderstanding(user: UserForUnderstanding): Prom
     ? new Date(Math.max(...updatedAtCandidates.map((d) => d.getTime()))).toISOString()
     : null;
 
+  // 战略档案 md：整块注入（§9.2 跨会话续接的核心），存在时作为专门 section，不走截断逻辑。
+  const dossierRaw = profile?.extraJson && typeof profile.extraJson === 'object'
+    ? (profile.extraJson as Record<string, unknown>).dossier
+    : undefined;
+  const dossierText = typeof dossierRaw === 'string' ? dossierRaw.trim().slice(0, 6000) : '';
+  const sections: ClientUnderstandingSection[] = [
+    section('identity', '经营身份', identity, '还没记录你的称呼、公司、行业和阶段。'),
+    section('journey', '创业路径', journey, '还没形成创业路径。可以告诉军师：你怎么开始、做过哪些转折、现在走到哪一步。'),
+    section('difficulties', '当前难题', difficulties, '还没记录明确难题。后续咨询会先追问关键约束，再给建议。'),
+    section('materials', '已沉淀资料', materials, '还没有长期线索。对话、项目、报告和知识库都会逐步沉淀到这里。'),
+  ];
+  if (dossierText) sections.push(section('dossier', '战略档案（持续沉淀）', [dossierText], '尚未沉淀战略档案。'));
+
   return {
     title: TITLE,
     subtitle: SUBTITLE,
     maturity,
     summary,
-    sections: [
-      section('identity', '经营身份', identity, '还没记录你的称呼、公司、行业和阶段。'),
-      section('journey', '创业路径', journey, '还没形成创业路径。可以告诉军师：你怎么开始、做过哪些转折、现在走到哪一步。'),
-      section('difficulties', '当前难题', difficulties, '还没记录明确难题。后续咨询会先追问关键约束，再给建议。'),
-      section('materials', '已沉淀资料', materials, '还没有长期线索。对话、项目、报告和知识库都会逐步沉淀到这里。'),
-    ],
+    sections,
     nextQuestions: nextQuestions.slice(0, 4),
     evidenceCount,
     updatedAt,

@@ -255,7 +255,7 @@ function UsersView({ onOpen }: { onOpen: (id: string) => void }) {
   );
 }
 
-// 用户详情：智能体开通 + 上下文中心（军师档案 / 长期记忆 / 知识库）——观测与纠偏。
+// 用户详情：智能体开通 + 上下文中心（个人档案 / 长期记忆 / 知识库）——观测与纠偏。
 const MATURITY_LABEL: Record<string, string> = { empty: '资料不足', forming: '初步成形', ready: '可作底稿' };
 const KB_STATUS_LABEL: Record<string, string> = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
 function fmtSize(b: number | null): string {
@@ -348,7 +348,7 @@ function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: 
 
         {ctx && (
           <div className="blk">
-            <div className="blk-h"><Icon name="insight" size={15} /><span className="t">军师档案</span><span className="badge">{MATURITY_LABEL[ctx.understanding.maturity] ?? ctx.understanding.maturity}</span></div>
+            <div className="blk-h"><Icon name="insight" size={15} /><span className="t">个人档案</span><span className="badge">{MATURITY_LABEL[ctx.understanding.maturity] ?? ctx.understanding.maturity}</span></div>
             <div className="blk-d">{ctx.understanding.summary}</div>
             <div className="mem-list">
               {ctx.understanding.sections.map((s) => (
@@ -1605,9 +1605,9 @@ function RetrievalDebugView() {
               ? <div className="empty">本轮未注入知识行。</div>
               : res.contextKnowledge.map((k, i) => <div key={i} className="usage-row"><div className="usage-meta">{k}</div></div>)}
 
-            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">最终注入 · 军师档案</span></div>
+            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">最终注入 · 个人档案</span></div>
             {res.understanding.length === 0
-              ? <div className="empty">暂无军师档案行。</div>
+              ? <div className="empty">暂无个人档案行。</div>
               : res.understanding.map((u, i) => <div key={i} className="usage-row"><div className="usage-meta">{u}</div></div>)}
           </>
         )}

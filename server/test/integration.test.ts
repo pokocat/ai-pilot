@@ -1035,7 +1035,7 @@ describe('TC-X 身份与账号注销', () => {
     const t = await login(uniquePhone());
     const before = await api('GET', '/api/me', { token: t });
     assert.equal(before.body.user.name, '', '新账号不应有编造的随机名');
-    assert.equal(before.body.understanding.title, '军师档案', '/me 应返回用户可读的经营理解');
+    assert.equal(before.body.understanding.title, '个人档案', '/me 应返回用户可读的经营理解');
 
     const tenantId = await tenantOf(t);
     await prisma.user.update({ where: { id: t }, data: { name: '用户1018' } });
@@ -1070,7 +1070,7 @@ describe('TC-X 身份与账号注销', () => {
     assert.ok(!r.body.deliverable.meta.includes('云栖科技'), '不应出现硬编码的占位公司');
   });
 
-  test('X3 军师档案访谈模式不自动召回旧项目/知识', async () => {
+  test('X3 个人档案访谈模式不自动召回旧项目/知识', async () => {
     const t = await login(uniquePhone());
     const tenantId = await tenantOf(t);
     const p = await api('POST', '/api/projects', { token: t, body: { name: '2026 融资冲刺', summary: '旧项目摘要：A 轮估值逻辑' } });
@@ -1092,7 +1092,7 @@ describe('TC-X 身份与账号注销', () => {
       agentKey: 'general',
       projectId: p.body.id,
       refs: [{ kind: 'knowledge', id: k.body.id, label: '旧融资报告' }],
-      userMessage: '请进入军师档案访谈模式，先问我几个简单问题',
+      userMessage: '请进入个人档案访谈模式，先问我几个简单问题',
     });
     assert.deepEqual(ctx.memories, [], '访谈模式不应召回长期记忆');
     assert.deepEqual(ctx.references, [], '访谈模式不应注入显式旧引用');

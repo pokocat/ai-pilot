@@ -7,7 +7,7 @@ import { buildSystemParts, type GenContext } from '../src/llm/schema.js';
 function ctx(over: Partial<GenContext> = {}): GenContext {
   return {
     agentKey: 'general', agentName: '军师', systemPrompt: '', deliverableKey: null,
-    profile: null, memories: [], benmingColor: 'gold', benchmark: '基准', userMessage: '请进入军师档案访谈模式',
+    profile: null, memories: [], benmingColor: 'gold', benchmark: '基准', userMessage: '请进入个人档案访谈模式',
     ...over,
   } as GenContext;
 }

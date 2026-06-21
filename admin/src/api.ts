@@ -116,7 +116,7 @@ export const api = {
   userDetail: (id: string) => req<AdminUserDetail>(`/admin/users/${id}`),
   grantAgent: (id: string, agentKey: string) => req<{ ok: boolean }>(`/admin/users/${id}/agents`, 'POST', { agentKey }),
   revokeAgent: (id: string, agentKey: string) => req<{ ok: boolean }>(`/admin/users/${id}/agents/${agentKey}`, 'DELETE'),
-  // —— 用户上下文中心：军师档案 + 长期记忆 + 知识库 ——
+  // —— 用户上下文中心：个人档案 + 长期记忆 + 知识库 ——
   userContext: (id: string) => req<AdminUserContext>(`/admin/users/${id}/context`),
   delUserMemory: (id: string, mid: string) => req<{ ok: boolean }>(`/admin/users/${id}/memories/${mid}`, 'DELETE'),
   userKnowledgeDetail: (id: string, kid: string) => req<KnowledgeDetail>(`/admin/users/${id}/knowledge/${kid}`),

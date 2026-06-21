@@ -440,7 +440,7 @@ export async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // —— 用户上下文中心：军师档案 + 长期记忆（按顾问）+ 知识库文档（观测与纠偏） ——
+  // —— 用户上下文中心：个人档案 + 长期记忆（按顾问）+ 知识库文档（观测与纠偏） ——
   app.get<{ Params: { id: string } }>('/admin/users/:id/context', async (req, reply) => {
     const view = await userContextView(req.params.id);
     if (!view) return reply.code(404).send({ error: 'user not found' });
