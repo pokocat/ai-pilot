@@ -84,12 +84,13 @@ export default function Login({ open, onLoggedIn }: Props) {
   });
 
   // 微信登录成功后：未绑手机 → 进「绑定手机号」页（可跳过）；
-  // 已绑但缺头像/昵称 → 进「完善资料」（可跳过）；都齐 → 直接进入。
+  // 已绑但缺名字 → 进「完善资料」（名字必填、头像可选、不可跳过）；都齐 → 直接进入。
   const afterAuthed = (r: { isNew: boolean; onboarded: boolean; user: { wechatLinked?: boolean } }) => {
     const me = store.me();
     if (r.user.wechatLinked && !me?.user.phone) {
       setStage('bindphone');
-    } else if (r.user.wechatLinked && (r.isNew || !me?.user.name || !me?.user.avatarUrl)) {
+    } else if (!me?.user.name) {
+      // 名字必填：缺名字一律进「完善资料」；头像可选，不因缺头像而拦。
       setNick(me?.user.name || '');
       setAvatarLocal('');
       setStage('complete');
@@ -98,11 +99,11 @@ export default function Login({ open, onLoggedIn }: Props) {
     }
   };
 
-  // 绑定/跳过后：刷新 me，缺头像/昵称去「完善资料」，否则直接进入。
+  // 绑定/跳过后：刷新 me，缺名字去「完善资料」（名字必填，头像可选），否则直接进入。
   const proceedAfterBind = async () => {
     await store.loadMe();
     const me = store.me();
-    if (!me?.user.name || !me?.user.avatarUrl) { setNick(me?.user.name || ''); setAvatarLocal(''); setStage('complete'); }
+    if (!me?.user.name) { setNick(me?.user.name || ''); setAvatarLocal(''); setStage('complete'); }
     else onLoggedIn(store.isOnboarded());
   };
 
@@ -155,11 +156,11 @@ export default function Login({ open, onLoggedIn }: Props) {
     setStage('wechat');
   };
 
-  // 暂不绑定：跳过手机号绑定，缺头像/昵称去完善资料，否则直接进入。
+  // 暂不绑定：跳过手机号绑定（绑定可选），缺名字去完善资料（名字必填），否则直接进入。
   const skipBind = () => {
     if (bindLoading) return;
     const me = store.me();
-    if (!me?.user.name || !me?.user.avatarUrl) { setNick(me?.user.name || ''); setAvatarLocal(''); setStage('complete'); }
+    if (!me?.user.name) { setNick(me?.user.name || ''); setAvatarLocal(''); setStage('complete'); }
     else onLoggedIn(store.isOnboarded());
   };
 
@@ -206,7 +207,10 @@ export default function Login({ open, onLoggedIn }: Props) {
     try {
       const r = await api.login(phone, undefined, code);
       await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
-      onLoggedIn(r.onboarded);
+      // 名字必填：手机号登录的账号若还没称呼，也要先完善（头像可选）。
+      const me = store.me();
+      if (!me?.user.name) { setNick(''); setAvatarLocal(''); setStage('complete'); }
+      else onLoggedIn(r.onboarded);
     } catch (e) {
       const err = e as Error & { code?: string };
       if (err.code === 'NETWORK_ERROR') {
@@ -270,28 +274,33 @@ export default function Login({ open, onLoggedIn }: Props) {
 
   const finishComplete = async () => {
     if (saving) return;
+    const name = nick.trim();
+    // 名字必填：为空则留在本屏并聚焦输入，不放行。
+    if (!name) {
+      Taro.showToast({ title: '请填写你的称呼', icon: 'none' });
+      setNickFocus(false); setTimeout(() => setNickFocus(true), 60);
+      return;
+    }
     setSaving(true);
     try {
-      // 头像：chooseAvatar 给本地临时文件 → 传 OSS 持久化；getUserProfile 给微信远程 URL → 直接存。
-      // 失败仅提示，不阻断进入。
+      // 名字必填：保存失败抛错 → 落到 catch，留在本屏重试，不放行。
+      if (name !== (store.me()?.user.name || '')) await api.updateIdentity({ name });
+      // 头像可选：chooseAvatar 给本地临时文件 → 传 OSS 持久化；getUserProfile 给微信远程 URL → 直接存。
+      // 头像失败仅提示，不阻断进入。
       if (avatarLocal) {
         try {
           if (/^https?:\/\//.test(avatarLocal)) await api.updateIdentity({ avatarUrl: avatarLocal });
           else await api.uploadAvatar(avatarLocal);
         } catch { Taro.showToast({ title: '头像稍后可在「设置」中重试', icon: 'none' }); }
       }
-      const name = nick.trim();
-      if (name && name !== (store.me()?.user.name || '')) {
-        try { await api.updateIdentity({ name }); } catch { /* 可在设置补填，不阻断 */ }
-      }
       await store.loadMe();
       onLoggedIn(store.isOnboarded());
+    } catch {
+      Taro.showToast({ title: '称呼保存失败，请重试', icon: 'none' });
     } finally {
       setSaving(false);
     }
   };
-
-  const skipComplete = () => onLoggedIn(store.isOnboarded());
 
   const avatarShown = avatarLocal || store.me()?.user.avatarUrl || '';
 
@@ -407,7 +416,7 @@ export default function Login({ open, onLoggedIn }: Props) {
         <View className="lg-content">
           <View className="lg-form lg-complete">
             <Text className="lg-h serif">完善你的资料</Text>
-            <Text className="lg-sub">点头像选用微信头像，会自动让你确认微信昵称，可随时修改</Text>
+            <Text className="lg-sub">取个称呼（必填），头像可选 · 点头像/昵称可选用微信资料，均可随时修改</Text>
 
             {canOneTapWx && (
               <View className="lg-onetap-wx" onClick={useWechatProfile}>
@@ -429,17 +438,17 @@ export default function Login({ open, onLoggedIn }: Props) {
                   ? <Image className="lg-av" src={avatarShown} mode="aspectFill" />
                   : <View className="lg-av lg-av-ph"><Icon name="user" size={26} color="rgba(243,240,230,.7)" /></View>
               )}
-              <Text className="lg-av-tip">点头像 · 使用微信头像</Text>
+              <Text className="lg-av-tip">点头像 · 使用微信头像（可选）</Text>
             </View>
 
             <View className="lg-field">
-              <Input className="lg-input" type="nickname" maxlength={20} value={nick} focus={nickFocus} placeholder="点此选用微信昵称" placeholderClass="lg-ph" onInput={(e) => setNick(e.detail.value)} onBlur={(e) => { setNick(e.detail.value); setNickFocus(false); }} />
+              <Input className="lg-input" type="nickname" maxlength={20} value={nick} focus={nickFocus} placeholder="填写称呼（必填，点此可用微信昵称）" placeholderClass="lg-ph" onInput={(e) => setNick(e.detail.value)} onBlur={(e) => { setNick(e.detail.value); setNickFocus(false); }} />
             </View>
 
             <View className={`lg-cta ${saving ? 'off' : ''}`} onClick={finishComplete}>
               <Text>{saving ? '保存中…' : '完成并进入'}</Text>
             </View>
-            <Text className="lg-skip" onClick={() => !saving && skipComplete()}>跳过，稍后再说</Text>
+            <Text className="lg-skip lg-skip-weak" onClick={() => !saving && logoutEscape()}>退出登录</Text>
           </View>
         </View>
       )}
