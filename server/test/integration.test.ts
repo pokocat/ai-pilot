@@ -201,7 +201,11 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
     assert.equal(attemptPayload.phoneMasked, `${phone.slice(0, 3)}****${phone.slice(-4)}`);
 
     await api('GET', '/api/me');
-    const http = await prisma.auditLog.findFirst({ where: { action: 'user.http' }, orderBy: { createdAt: 'desc' } });
+    const recentHttp = await prisma.auditLog.findMany({ where: { action: 'user.http' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 20 });
+    const http = recentHttp.find((row) => {
+      const payload = row.payloadJson as any;
+      return payload?.path === '/api/me' && payload?.statusCode === 401 && payload?.auth?.state === 'anonymous';
+    });
     assert.ok(http, '匿名受保护 API 也应落 HTTP 审计');
     const httpPayload = http!.payloadJson as any;
     assert.equal(httpPayload.path, '/api/me');

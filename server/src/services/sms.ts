@@ -3,6 +3,7 @@
 import crypto from 'node:crypto';
 import { prisma } from '../db.js';
 import { env } from '../env.js';
+import type { Prisma } from '@prisma/client';
 
 function httpError(message: string, statusCode: number, code: string) {
   return Object.assign(new Error(message), { statusCode, code });
@@ -112,28 +113,39 @@ export function aliyunSignature(method: string, params: Record<string, string>, 
 
 export interface IssueResult { cooldownSec: number; expiresInSec: number; devCode?: string; }
 
+async function lockSmsLifecycle(db: Prisma.TransactionClient, phone: string, scene: string): Promise<void> {
+  await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`sms:${scene}:${phone}`}))`;
+}
+
 /** 发放验证码：限频（冷却 + 每小时上限）→ 落库（哈希）→ 发送。devCode 仅在演示口径回传。 */
 export async function issueSmsCode(phone: string, ip?: string, scene = 'login'): Promise<IssueResult> {
   const now = Date.now();
-
-  // 冷却：上一条距今不足 cooldown → 拒绝（防轰炸）。
-  const last = await prisma.smsCode.findFirst({ where: { phone, scene }, orderBy: { createdAt: 'desc' } });
-  if (last) {
-    const sinceSec = (now - last.createdAt.getTime()) / 1000;
-    if (sinceSec < env.smsResendCooldownSec) {
-      throw httpError(`请 ${Math.ceil(env.smsResendCooldownSec - sinceSec)} 秒后再获取`, 429, 'SMS_TOO_FREQUENT');
-    }
-  }
-  // 每小时上限：防止单号被刷爆运营商额度。
-  const hourAgo = new Date(now - 3600_000);
-  const recent = await prisma.smsCode.count({ where: { phone, createdAt: { gte: hourAgo } } });
-  if (recent >= env.smsMaxPerHour) {
-    throw httpError('获取过于频繁，请稍后再试', 429, 'SMS_RATE_LIMITED');
-  }
-
   const code = generateCode();
-  await prisma.smsCode.create({
-    data: { phone, scene, ip, codeHash: hashCode(phone, code), expiresAt: new Date(now + env.smsCodeTtlSec * 1000) },
+
+  await prisma.$transaction(async (tx) => {
+    await lockSmsLifecycle(tx, phone, scene);
+
+    // 冷却：上一条距今不足 cooldown → 拒绝（防轰炸）。
+    const last = await tx.smsCode.findFirst({
+      where: { phone, scene },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+    if (last) {
+      const sinceSec = (now - last.createdAt.getTime()) / 1000;
+      if (sinceSec < env.smsResendCooldownSec) {
+        throw httpError(`请 ${Math.ceil(env.smsResendCooldownSec - sinceSec)} 秒后再获取`, 429, 'SMS_TOO_FREQUENT');
+      }
+    }
+    // 每小时上限：防止单号被刷爆运营商额度。
+    const hourAgo = new Date(now - 3600_000);
+    const recent = await tx.smsCode.count({ where: { phone, createdAt: { gte: hourAgo } } });
+    if (recent >= env.smsMaxPerHour) {
+      throw httpError('获取过于频繁，请稍后再试', 429, 'SMS_RATE_LIMITED');
+    }
+
+    await tx.smsCode.create({
+      data: { phone, scene, ip, codeHash: hashCode(phone, code), expiresAt: new Date(now + env.smsCodeTtlSec * 1000) },
+    });
   });
   const out = await sendSmsCode(phone, code);
   if (!out.ok) throw httpError(out.detail || '短信发送失败，请稍后再试', 502, 'SMS_SEND_FAILED');
@@ -148,16 +160,22 @@ export async function issueSmsCode(phone: string, ip?: string, scene = 'login'):
 /** 校验验证码：取最近一条未消费的；命中即消费，错误累加尝试次数（超限作废）。 */
 export async function verifySmsCode(phone: string, code: string, scene = 'login'): Promise<boolean> {
   const row = await prisma.smsCode.findFirst({
-    where: { phone, scene, consumedAt: null }, orderBy: { createdAt: 'desc' },
+    where: { phone, scene, consumedAt: null }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
   });
   if (!row) return false;
   if (row.expiresAt.getTime() < Date.now()) return false;
   if (row.attempts >= env.smsMaxAttempts) return false;
 
   if (row.codeHash === hashCode(phone, code)) {
-    await prisma.smsCode.update({ where: { id: row.id }, data: { consumedAt: new Date() } });
-    return true;
+    const consumed = await prisma.smsCode.updateMany({
+      where: { id: row.id, consumedAt: null },
+      data: { consumedAt: new Date() },
+    });
+    return consumed.count === 1;
   }
-  await prisma.smsCode.update({ where: { id: row.id }, data: { attempts: { increment: 1 } } });
+  await prisma.smsCode.updateMany({
+    where: { id: row.id, consumedAt: null, attempts: { lt: env.smsMaxAttempts } },
+    data: { attempts: { increment: 1 } },
+  });
   return false;
 }

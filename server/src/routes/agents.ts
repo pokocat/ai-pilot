@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { verifyUserToken } from '../services/userToken.js';
-import { getBalance } from '../services/credits.js';
+import { chargeCredits, getBalance } from '../services/credits.js';
 import { ownedAgentKeys, publicOwned } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import type { Agent as AgentView, AgentPurchaseResult } from '../../../shared/contracts';
@@ -41,55 +41,46 @@ export async function agentRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: '该智能体无需购买', code: 'AGENT_NOT_PURCHASABLE' });
     }
 
-    // 幂等：已开通直接返回当前余额，不重复扣费。
-    const existing = await prisma.userAgent.findUnique({
-      where: { userId_agentKey: { userId: user.id, agentKey: agent.key } },
-    });
-    const balance = await getBalance(user.id);
-    if (existing) {
-      return { ok: true, agentKey: agent.key, pricePaid: 0, creditBalance: balance, alreadyOwned: true };
-    }
-
-    const unlimited = balance < 0; // 不限量套餐：解锁免扣
-    if (!unlimited && balance < agent.price) {
-      return reply.code(402).send({ error: '权益点不足，无法启用该智能体', code: 'INSUFFICIENT_CREDITS' });
-    }
-    const newBalance = unlimited ? -1 : balance - agent.price;
-
     try {
-      await prisma.$transaction([
-        prisma.userAgent.create({
-          data: { userId: user.id, agentKey: agent.key, source: 'purchase', pricePaid: unlimited ? 0 : agent.price },
-        }),
-        ...(unlimited
-          ? []
-          : [
-              prisma.creditLedger.create({
-                data: {
-                  tenantId: user.tenantId,
-                  userId: user.id,
-                  delta: -agent.price,
-                  reason: `解锁智能体 · ${agent.name}`,
-                  balance: newBalance,
-                },
-              }),
-            ]),
-      ]);
+      const purchased = await prisma.$transaction(async (tx) => {
+        const existing = await tx.userAgent.findUnique({
+          where: { userId_agentKey: { userId: user.id, agentKey: agent.key } },
+        });
+        if (existing) {
+          return { alreadyOwned: true, creditBalance: await getBalance(user.id), pricePaid: 0 };
+        }
+        const creditBalance = await chargeCredits(user.tenantId, user.id, agent.price, `解锁智能体 · ${agent.name}`, tx);
+        const pricePaid = creditBalance < 0 ? 0 : agent.price;
+        await tx.userAgent.create({
+          data: { userId: user.id, agentKey: agent.key, source: 'purchase', pricePaid },
+        });
+        return { alreadyOwned: false, creditBalance, pricePaid };
+      });
+      if (!purchased.alreadyOwned) {
+        await recordAudit({
+          tenantId: user.tenantId,
+          userId: user.id,
+          action: 'user.agent.purchase',
+          payload: { agentKey: agent.key, agentName: agent.name, price: agent.price, creditBalance: purchased.creditBalance },
+        });
+      }
+      return {
+        ok: true,
+        agentKey: agent.key,
+        pricePaid: purchased.pricePaid,
+        creditBalance: purchased.creditBalance,
+        alreadyOwned: purchased.alreadyOwned,
+      };
     } catch (e) {
       // 并发重复购买：另一个请求已写入开通记录（唯一约束 userId_agentKey）→ 幂等返回、不重复扣费
       if ((e as { code?: string }).code === 'P2002') {
         return { ok: true, agentKey: agent.key, pricePaid: 0, creditBalance: await getBalance(user.id), alreadyOwned: true };
       }
+      if ((e as { statusCode?: number; code?: string }).code === 'INSUFFICIENT_CREDITS') {
+        return reply.code(402).send({ error: (e as Error).message, code: 'INSUFFICIENT_CREDITS' });
+      }
       throw e;
     }
-    await recordAudit({
-      tenantId: user.tenantId,
-      userId: user.id,
-      action: 'user.agent.purchase',
-      payload: { agentKey: agent.key, agentName: agent.name, price: agent.price, creditBalance: newBalance },
-    });
-
-    return { ok: true, agentKey: agent.key, pricePaid: unlimited ? 0 : agent.price, creditBalance: newBalance, alreadyOwned: false };
   });
 }
 

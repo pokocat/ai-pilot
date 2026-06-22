@@ -7,7 +7,7 @@ import { generateDeliverable, chatComplete, generateAdaptive } from '../llm/gate
 import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
-import { ensureCredits, chargeCredits } from '../services/credits.js';
+import { reserveCredits, type CreditReservation } from '../services/credits.js';
 import { ensureQuota, chargeQuota } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
@@ -121,10 +121,11 @@ export async function sessionRoutes(app: FastifyInstance) {
     const isImage = effective?.meterUnit === 'image';
     const ratio = effective?.billingRatio ?? 1;
     const diamondCost = effective && isImage ? effective.price : 0; // 文本类不扣钻石（走 token 额度）
+    let creditReservation: CreditReservation | null = null;
     try {
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
-      await ensureCredits(user.id, diamondCost);            // 图片按张校验钻石；文本 diamondCost=0 放行
       if (effective && !isImage) await ensureQuota(user.id);  // 文本校验本月 token 额度（余额>0 即放行）
+      creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
       const err = e as Error & { statusCode?: number; code?: string };
       return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
@@ -171,7 +172,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: out.deliverable as object } });
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
-          const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `深度产出 · ${agent.name}`);
+          const creditBalance = creditReservation?.balance ?? 0;
           const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
           return {
             sessionId: session.id, created, agentKey, kind: 'report', messageId: msg.id, deliverable: out.deliverable,
@@ -181,7 +182,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: out.reply as object } });
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const learned = await learn();
-        const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `对话 · ${agent.name}`);
+        const creditBalance = creditReservation?.balance ?? 0;
         const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
         return {
           sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: out.reply,
@@ -201,7 +202,7 @@ export async function sessionRoutes(app: FastifyInstance) {
             tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId,
           });
         }
-        const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `深度产出 · ${agent.name}`);
+        const creditBalance = creditReservation?.balance ?? 0;
         const tokenQuota = isImage ? null : await chargeQuota(user.id, usage.inputTokens + usage.outputTokens, ratio);
         return {
           sessionId: session.id, created, agentKey, kind: 'report',
@@ -215,10 +216,15 @@ export async function sessionRoutes(app: FastifyInstance) {
         data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object },
       });
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
-      const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `对话 · ${agent.name}`);
+      const creditBalance = creditReservation?.balance ?? 0;
       const tokenQuota = isImage ? null : await chargeQuota(user.id, usage.inputTokens + usage.outputTokens, ratio);
       return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, creditBalance, tokenQuota };
     } catch (err) {
+      if (creditReservation?.charged) {
+        await creditReservation.refund().catch((refundErr) => {
+          console.error('[sessions] credit refund failed:', (refundErr as Error).message);
+        });
+      }
       const e = err as Error & { code?: string; statusCode?: number };
       return reply.code(e.statusCode ?? (e.code === 'MODERATION_BLOCK' ? 422 : 500)).send({ error: e.message, code: e.code });
     }
@@ -262,10 +268,11 @@ export async function sessionRoutes(app: FastifyInstance) {
     const isImage = effective?.meterUnit === 'image';
     const ratio = effective?.billingRatio ?? 1;
     const diamondCost = effective && isImage ? effective.price : 0;
+    let creditReservation: CreditReservation | null = null;
     try {
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
-      await ensureCredits(user.id, diamondCost);
       if (effective && !isImage) await ensureQuota(user.id);
+      creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
       const err = e as Error & { statusCode?: number; code?: string };
       return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
@@ -327,7 +334,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: d as object } });
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           await learnSse();
-          const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `产出 · ${agent.name}`);
+          const creditBalance = creditReservation?.balance ?? 0;
           const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
           send('credit', { balance: creditBalance, tokenQuota });
           send('done', { messageId: msg.id });
@@ -338,7 +345,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: out.reply as object } });
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           await learnSse();
-          const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `产出 · ${agent.name}`);
+          const creditBalance = creditReservation?.balance ?? 0;
           const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
           send('credit', { balance: creditBalance, tokenQuota });
           send('done', { messageId: msg.id });
@@ -372,7 +379,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           });
           if (learned) send('memory', { learned: true, agentName: agent.name });
         }
-        const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `产出 · ${agent.name}`);
+        const creditBalance = creditReservation?.balance ?? 0;
         const tokenQuota = isImage ? null : await chargeQuota(user.id, usage.inputTokens + usage.outputTokens, ratio);
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
@@ -385,12 +392,17 @@ export async function sessionRoutes(app: FastifyInstance) {
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
         });
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
-        const creditBalance = await chargeCredits(user.tenantId, user.id, diamondCost, `产出 · ${agent.name}`);
+        const creditBalance = creditReservation?.balance ?? 0;
         const tokenQuota = isImage ? null : await chargeQuota(user.id, usage.inputTokens + usage.outputTokens, ratio);
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       }
     } catch (err) {
+      if (creditReservation?.charged) {
+        await creditReservation.refund().catch((refundErr) => {
+          console.error('[sessions] credit refund failed:', (refundErr as Error).message);
+        });
+      }
       const e = err as Error & { code?: string };
       send('error', { message: e.message, code: e.code ?? 'INTERNAL' });
     } finally {
