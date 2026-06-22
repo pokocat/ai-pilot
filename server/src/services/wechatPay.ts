@@ -163,11 +163,13 @@ export async function markPaidAndApply(parsed: {
   }
   if (order.appliedAt) return { applied: false, reason: 'already_applied' }; // 快路径短路
 
-  // 原子抢占：同时限定 status=created（未开始处理）且 appliedAt=null，防止 failed→paid 非法跃迁。
-  // 背景：若先到的 CLOSED 回调把订单置 failed，后到的 SUCCESS 回调不应覆盖写入 paid/applied。
+  // 原子抢占：status IN ('created','paid') + appliedAt=null。
+  // 'created'→'paid' 覆盖防止新回调并发双扣；'paid'+appliedAt=null 兼容进程崩溃（已抢占但未完成发权益）恢复。
+  // 注：appliedAt 故意不在此处设置，等 applyPlanPurchase 成功后才落库，防止进程崩溃造成永久丢权益。
+  // failed→paid 非法跃迁由 'created'/'paid' 白名单隐式阻断（failed 状态不在 IN 列表内）。
   const claim = await prisma.paymentOrder.updateMany({
-    where: { outTradeNo: parsed.outTradeNo, status: 'created', appliedAt: null },
-    data: { status: 'paid', paidAt: new Date(), appliedAt: new Date(), transactionId: parsed.transactionId ?? null, rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue },
+    where: { outTradeNo: parsed.outTradeNo, status: { in: ['created', 'paid'] }, appliedAt: null },
+    data: { status: 'paid', paidAt: new Date(), transactionId: parsed.transactionId ?? null, rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue },
   });
   if (claim.count !== 1) return { applied: false, reason: 'already_applied' }; // 并发竞争里输掉 → 已被另一次处理
 
@@ -178,6 +180,7 @@ export async function markPaidAndApply(parsed: {
     plan,
     { reason: `${plan.name} · 微信支付`, source: 'wechat_pay' },
   );
-  await prisma.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied' } });
+  // appliedAt 在 applyPlanPurchase 成功后才设置，确保崩溃重试时能重新发放权益。
+  await prisma.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
   return { applied: true };
 }
