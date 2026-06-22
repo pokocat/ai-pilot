@@ -192,6 +192,10 @@ export interface PublishResult {
   changeSummary: string;
 }
 
+async function lockAgentPublish(db: Prisma.TransactionClient, agentKey: string): Promise<void> {
+  await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`agent-publish:${agentKey}`}))`;
+}
+
 /**
  * 发布：把当前草稿（Agent 行）冻结成一个新的已发布版本，指针指向它，清 draftDirty。
  * 去重：草稿与「最新版本」同 hash → 不重复成版，仅确保指针指向它（幂等）。
@@ -200,28 +204,27 @@ export async function publishDraft(
   agentKey: string,
   opts: { accountId?: string | null; label?: string | null } = {},
 ): Promise<PublishResult> {
-  const agent = (await prisma.agent.findUnique({ where: { key: agentKey } })) as Record<string, unknown> | null;
-  if (!agent) throw Object.assign(new Error('agent not found'), { statusCode: 404, code: 'AGENT_NOT_FOUND' });
+  return prisma.$transaction(async (tx) => {
+    await lockAgentPublish(tx, agentKey);
+    const agent = (await tx.agent.findUnique({ where: { key: agentKey } })) as Record<string, unknown> | null;
+    if (!agent) throw Object.assign(new Error('agent not found'), { statusCode: 404, code: 'AGENT_NOT_FOUND' });
 
-  const hash = hashSnapshot(agent);
-  const latest = await prisma.agentVersion.findFirst({ where: { agentKey }, orderBy: { version: 'desc' } });
+    const hash = hashSnapshot(agent);
+    const latest = await tx.agentVersion.findFirst({ where: { agentKey }, orderBy: { version: 'desc' } });
 
-  // 与最新版本同配置：不重复成版，只把指针/状态指向它并清 dirty（幂等发布）。
-  if (latest && latest.contentHash === hash) {
-    if (agent.publishedVersionId !== latest.id || agent.draftDirty) {
-      await prisma.$transaction([
-        prisma.agentVersion.updateMany({ where: { agentKey, status: 'published', NOT: { id: latest.id } }, data: { status: 'archived' } }),
-        prisma.agentVersion.update({ where: { id: latest.id }, data: { status: 'published', publishedAt: new Date() } }),
-        prisma.agent.update({ where: { key: agentKey }, data: { publishedVersionId: latest.id, draftDirty: false } }),
-      ]);
+    // 与最新版本同配置：不重复成版，只把指针/状态指向它并清 dirty（幂等发布）。
+    if (latest && latest.contentHash === hash) {
+      if (agent.publishedVersionId !== latest.id || agent.draftDirty) {
+        await tx.agentVersion.updateMany({ where: { agentKey, status: 'published', NOT: { id: latest.id } }, data: { status: 'archived' } });
+        await tx.agentVersion.update({ where: { id: latest.id }, data: { status: 'published', publishedAt: new Date() } });
+        await tx.agent.update({ where: { key: agentKey }, data: { publishedVersionId: latest.id, draftDirty: false } });
+      }
+      return { version: latest.version, versionId: latest.id, changed: false, changeSummary: latest.changeSummary ?? '无字段变更' };
     }
-    return { version: latest.version, versionId: latest.id, changed: false, changeSummary: latest.changeSummary ?? '无字段变更' };
-  }
 
-  const changeSummary = latest ? diffSnapshots(latest as unknown as Record<string, unknown>, agent) : '首个版本';
-  const nextVersion = (latest?.version ?? 0) + 1;
+    const changeSummary = latest ? diffSnapshots(latest as unknown as Record<string, unknown>, agent) : '首个版本';
+    const nextVersion = (latest?.version ?? 0) + 1;
 
-  const created = await prisma.$transaction(async (tx) => {
     const ver = await tx.agentVersion.create({
       data: {
         agentKey,
@@ -237,10 +240,8 @@ export async function publishDraft(
     });
     await tx.agentVersion.updateMany({ where: { agentKey, status: 'published', NOT: { id: ver.id } }, data: { status: 'archived' } });
     await tx.agent.update({ where: { key: agentKey }, data: { publishedVersionId: ver.id, draftDirty: false } });
-    return ver;
+    return { version: ver.version, versionId: ver.id, changed: true, changeSummary };
   });
-
-  return { version: created.version, versionId: created.id, changed: true, changeSummary };
 }
 
 /** 回滚：把已发布指针重指到某个历史版本（不动草稿）。回滚后按草稿 vs 该版本重算 draftDirty。 */

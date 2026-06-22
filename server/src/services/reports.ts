@@ -6,6 +6,7 @@
 
 import { createHash } from 'node:crypto';
 import { prisma } from '../db.js';
+import type { Prisma } from '@prisma/client';
 import type {
   Deliverable, DeliverableSection, ReportDiff, SectionDiff, WordOp, SaveReportResult,
 } from '../llm/schema.js';
@@ -114,69 +115,77 @@ export interface SaveVersionOpts {
   sessionId?: string | null;
 }
 
+async function lockReportVersion(db: Prisma.TransactionClient, tenantId: string, slug: string): Promise<void> {
+  await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`report:${tenantId}:${slug}`}))`;
+}
+
 /** 保存一版报告：同名归一、同内容去重、自动变更摘要。返回 {reportId, version, created, changed}。 */
 export async function saveReportVersion(opts: SaveVersionOpts): Promise<SaveReportResult & { reportId: string }> {
   const slug = slugify(opts.title);
   const hash = hashContent(opts.content);
 
-  let doc = await prisma.reportDoc.findFirst({ where: { tenantId: opts.tenantId, slug } });
-  let created = false;
-  if (!doc) {
-    doc = await prisma.reportDoc.create({
+  return prisma.$transaction(async (tx) => {
+    await lockReportVersion(tx, opts.tenantId, slug);
+
+    let doc = await tx.reportDoc.findFirst({ where: { tenantId: opts.tenantId, slug } });
+    let created = false;
+    if (!doc) {
+      doc = await tx.reportDoc.create({
+        data: {
+          tenantId: opts.tenantId,
+          userId: opts.userId,
+          projectId: opts.projectId ?? null,
+          title: opts.title,
+          slug,
+          type: opts.type,
+          agentKey: opts.agentKey ?? null,
+          currentVersion: 0,
+        },
+      });
+      created = true;
+    }
+
+    // 内容未变（与最新版同 hash）→ 不重复成版
+    const latest = await tx.reportVersion.findFirst({
+      where: { reportId: doc.id },
+      orderBy: { version: 'desc' },
+    });
+    if (latest && latest.contentHash === hash) {
+      return { reportId: doc.id, version: latest.version, created, changed: false };
+    }
+
+    // 变更摘要：相对上一版
+    let changeSummary: string | null = created ? '首个版本' : null;
+    if (latest) {
+      changeSummary = diffContents(latest.contentJson as object, opts.content).summary;
+    }
+
+    const nextVersion = (doc.currentVersion ?? 0) + 1;
+    await tx.reportVersion.create({
       data: {
-        tenantId: opts.tenantId,
-        userId: opts.userId,
-        projectId: opts.projectId ?? null,
+        reportId: doc.id,
+        version: nextVersion,
         title: opts.title,
-        slug,
-        type: opts.type,
-        agentKey: opts.agentKey ?? null,
-        currentVersion: 0,
+        contentJson: opts.content,
+        contentHash: hash,
+        changeSummary,
+        authorKind: opts.authorKind ?? 'agent',
+        sessionId: opts.sessionId ?? null,
       },
     });
-    created = true;
-  }
+    await tx.reportDoc.update({
+      where: { id: doc.id },
+      data: {
+        currentVersion: nextVersion,
+        title: opts.title,
+        type: opts.type,
+        ...(opts.projectId ? { projectId: opts.projectId } : {}),
+        ...(opts.agentKey ? { agentKey: opts.agentKey } : {}),
+      },
+    });
 
-  // 内容未变（与最新版同 hash）→ 不重复成版
-  const latest = await prisma.reportVersion.findFirst({
-    where: { reportId: doc.id },
-    orderBy: { version: 'desc' },
+    return { reportId: doc.id, version: nextVersion, created, changed: true };
   });
-  if (latest && latest.contentHash === hash) {
-    return { reportId: doc.id, version: latest.version, created, changed: false };
-  }
-
-  // 变更摘要：相对上一版
-  let changeSummary: string | null = created ? '首个版本' : null;
-  if (latest) {
-    changeSummary = diffContents(latest.contentJson as object, opts.content).summary;
-  }
-
-  const nextVersion = (doc.currentVersion ?? 0) + 1;
-  await prisma.reportVersion.create({
-    data: {
-      reportId: doc.id,
-      version: nextVersion,
-      title: opts.title,
-      contentJson: opts.content,
-      contentHash: hash,
-      changeSummary,
-      authorKind: opts.authorKind ?? 'agent',
-      sessionId: opts.sessionId ?? null,
-    },
-  });
-  await prisma.reportDoc.update({
-    where: { id: doc.id },
-    data: {
-      currentVersion: nextVersion,
-      title: opts.title,
-      type: opts.type,
-      ...(opts.projectId ? { projectId: opts.projectId } : {}),
-      ...(opts.agentKey ? { agentKey: opts.agentKey } : {}),
-    },
-  });
-
-  return { reportId: doc.id, version: nextVersion, created, changed: true };
 }
 
 /** 取两版差异（读时实时计算）。 */

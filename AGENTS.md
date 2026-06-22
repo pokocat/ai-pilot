@@ -226,12 +226,14 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/embedding.ts`（★）：文本向量化。默认本地**确定性嵌入**（零依赖、离线、`EMBED_DIM=256`）；配 `EMBEDDING_MODEL`+真实 openai 兼容 key 走真实 `/embeddings`。`cosine()` 维度不一致返回 0。
 - `services/retrieval.ts`（★）：`hybridSearch`（向量+关键词混合、租户隔离、可按项目过滤）、`resolveReferences`（显式 @ 引用 → 带出处注入）。
 - `services/knowledge.ts`（★）：`ingestKnowledge`（切片+逐片向量化）、`listKnowledge`、`deleteKnowledge`。
-- `services/reports.ts`（★）：`saveReportVersion`（slug 归一 + 内容哈希去重 + 自动变更摘要）、`diffContents`/`getReportDiff`（section 级 diff）、`slugify`。
+- `services/reports.ts`（★）：`saveReportVersion`（slug 归一 + 内容哈希去重 + 自动变更摘要；同租户同 slug 用 Postgres advisory lock 串行成版，避免并发版本号冲突）、`diffContents`/`getReportDiff`（section 级 diff）、`slugify`。
 - `services/summarize.ts`（★）：`summarizeSession`（整段会话 → 纪要报告 + 沉淀知识；有真实模型走 `summarizePoints`）。
-- `services/credits.ts`（★）：算力计量——`ensureCredits`（产出前校验，不足抛 402）/`chargeCredits`（成功后扣减写流水）/`getBalance`；报告类 `CREDIT_COST.report=1`、对话免费，企业版(creditsPerMonth<0)不限量。在 `sessions.ts` 两个产出路由接入；套餐购买由 `routes/plans.ts` 写入充值/不限量流水并记录审计。
+- `services/sms.ts`（★）：短信验证码发放/校验；发码限频在同手机号同场景事务锁内完成，校验用条件更新消费，确保并发下同一验证码只能成功一次。
+- `services/credits.ts`（★）：算力计量——`ensureCredits`（只读预检）/`reserveCredits`（已知费用产出前原子预扣）/`chargeCredits`/`refundCredits`/`grantCredits`/`getBalance`；同一用户的 `CreditLedger` 写入用 Postgres advisory lock 串行，避免并发双花或充值丢失。图片/按张类产出在 `sessions.ts` 同步与 SSE 路由中先预扣，异常自动退款；`/agents/:key/purchase` 在同一事务内完成扣费与开通；套餐发放通过 `applyPlanPurchase` 同事务更新套餐、钻石流水与 token 钱包。企业版(creditsPerMonth<0)不限量不扣减。
 - `services/entitlements.ts`（★）：智能体权益——`assertAgentAccess` 拦截未解锁 `unlock` 智能体（403 `AGENT_LOCKED`）、`agentCost` 统一 `free/unlock/metered` 的产出计费、`publicOwned` 给前台展示可用状态。
 - `services/adminAuth.ts`（★）：运营后台鉴权——`/api/admin/*` 统一要求 `ADMIN_TOKEN`（`x-admin-token` 或 `Authorization: Bearer`）或 `role=admin` 用户；普通小程序用户访问返回 403，无凭证返回 401。
 - `services/aiConfig.ts`（★）：大模型配置解析（DB > env），预设 `AI_PRESETS`（Agnes/DeepSeek/Qwen/Moonshot/OpenAI/Claude/mock）、`isReady`/`effectiveProvider`、脱敏 `publicConfig`。
+- `services/agentVersions.ts`（★）：智能体草稿发布/回滚/版本列表；`publishDraft` 对同一 `agentKey` 加事务锁，保证并发发布只生成一个版本或串行递增。
 - `services/vectorStore.ts`（★）：pgvector ANN 查询/向量列双写（`PGVECTOR_ENABLED` 开启时；默认关闭走内存余弦）。
 - `services/audit.ts`（★）：统一审计记录与秒级 ISO 时间格式；Fastify `onResponse` 钩子会记录除 `/api/health` 外的所有 `/api/*` 行为，覆盖匿名、无效 token、登录、后台与用户请求，payload 写入方法/路径/状态码/耗时/IP/UA/鉴权状态/脱敏 body 摘要；登录、短信、后台账号等入口另写成功失败语义审计，关键业务动作继续写语义日志（建档、产出、存库、汇总、后台配置变更）。
 - 内容审核 `moderation_log`、审计 `audit_log`（演示级，生产替换合规服务）。
@@ -410,8 +412,8 @@ cd admin && npm install && npm run dev   # 运营后台
 ### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
-- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 57 用例 / 23 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益、军师档案访谈与用户主路径。最近一次 Docker 临时 PostgreSQL 测试库实跑为 2026-06-13，57/57 全过。
-- 覆盖：鉴权隔离、微信 openid 登录/复登、注册花名、军师档案、运营后台鉴权、多智能体对话、智能体 `free/unlock/metered` 权益、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发冒烟、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
+- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 215 用例 / 50 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益、军师档案访谈与用户主路径。最近一次本地 PostgreSQL 测试库实跑为 2026-06-22，215/215 全过。
+- 覆盖：鉴权隔离、微信 openid 登录/复登、注册花名、军师档案、运营后台鉴权、多智能体对话、智能体 `free/unlock/metered` 权益、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发回归（智能体购买、套餐发放、短信发放/消费、报告版本、智能体发布）、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
 - CI：`.github/workflows/server-integration.yml` 用 GitHub Actions `postgres:16-alpine` 服务（tmpfs 数据目录）执行 `npm ci`、`prisma generate`、后端 build、`prisma db push`、`npm test`。
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
 
