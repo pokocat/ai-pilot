@@ -137,11 +137,12 @@ REMOTE
 log "公网验证"
 curl -fsS "$PUBLIC_BASE/api/health"
 printf "\n"
-curl -fsSI "$PUBLIC_BASE/admin/" >/dev/null
 if [ -n "$PUBLIC_DOMAIN" ]; then
   curl -fsS "$PUBLIC_DOMAIN/api/health"
   printf "\n"
   curl -fsSI "$PUBLIC_DOMAIN/admin/" >/dev/null
+else
+  curl -fsSI "$PUBLIC_BASE/admin/" >/dev/null
 fi
 
 log "完成：$SHA"

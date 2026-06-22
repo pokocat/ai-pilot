@@ -41,3 +41,29 @@ server {
         try_files $uri $uri/ /index.html;
     }
 }
+
+# 可选：如果同时保留裸 IP HTTP 入口，只代理 API，不暴露运营后台。
+# 把 server_name 改为服务器公网 IP；后台统一走域名 HTTPS /admin/。
+#
+# server {
+#     listen 80;
+#     server_name 1.2.3.4;
+#
+#     client_max_body_size 10m;
+#
+#     location /api/ {
+#         proxy_pass http://127.0.0.1:4000;
+#         proxy_http_version 1.1;
+#         proxy_set_header Host              $host;
+#         proxy_set_header X-Real-IP         $remote_addr;
+#         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_read_timeout 180s;
+#         proxy_buffering off;
+#         proxy_cache off;
+#     }
+#
+#     location = /admin { return 404; }
+#     location /admin/ { return 404; }
+#     location / { return 404; }
+# }
