@@ -149,38 +149,46 @@ export function decryptNotifyResource(resource: { ciphertext: string; nonce: str
 
 /**
  * 处理「支付成功」业务：幂等地把订单置 paid→applied 并发放权益。
- * 幂等核心：`updateMany where {appliedAt:null}` 原子抢占——只有抢到的那次发权益，
- * 重复回调 / 并发回调都会落到 count=0 的分支直接跳过（防双发）。
+ * 幂等核心：同一 outTradeNo 先拿 PostgreSQL 事务级 advisory lock，再做条件更新。
+ * 重复回调 / 并发回调会按订单串行化，后到者看到 appliedAt 后直接跳过（防双发）。
  */
 export async function markPaidAndApply(parsed: {
   outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
 }): Promise<{ applied: boolean; reason?: string }> {
-  const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo: parsed.outTradeNo } });
-  if (!order) return { applied: false, reason: 'order_not_found' };
-  if (parsed.tradeState !== 'SUCCESS') {
-    await prisma.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'failed', rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue } }).catch(() => {});
-    return { applied: false, reason: `trade_state_${parsed.tradeState}` };
-  }
-  if (order.appliedAt) return { applied: false, reason: 'already_applied' }; // 快路径短路
+  return prisma.$transaction(async (tx) => {
+    // 对同一订单号串行化回调处理。hashtext(text) 返回 int4，适配 pg_advisory_xact_lock(int)。
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${parsed.outTradeNo}))`;
 
-  // 原子抢占：status IN ('created','paid') + appliedAt=null。
-  // 'created'→'paid' 覆盖防止新回调并发双扣；'paid'+appliedAt=null 兼容进程崩溃（已抢占但未完成发权益）恢复。
-  // 注：appliedAt 故意不在此处设置，等 applyPlanPurchase 成功后才落库，防止进程崩溃造成永久丢权益。
-  // failed→paid 非法跃迁由 'created'/'paid' 白名单隐式阻断（failed 状态不在 IN 列表内）。
-  const claim = await prisma.paymentOrder.updateMany({
-    where: { outTradeNo: parsed.outTradeNo, status: { in: ['created', 'paid'] }, appliedAt: null },
-    data: { status: 'paid', paidAt: new Date(), transactionId: parsed.transactionId ?? null, rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue },
+    const order = await tx.paymentOrder.findUnique({ where: { outTradeNo: parsed.outTradeNo } });
+    if (!order) return { applied: false, reason: 'order_not_found' };
+    if (order.appliedAt || order.status === 'applied') return { applied: false, reason: 'already_applied' };
+
+    if (parsed.tradeState !== 'SUCCESS') {
+      if (order.status === 'created') {
+        await tx.paymentOrder.update({
+          where: { outTradeNo: parsed.outTradeNo },
+          data: { status: 'failed', rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue },
+        });
+      }
+      return { applied: false, reason: `trade_state_${parsed.tradeState}` };
+    }
+
+    // status='created' 首次成功回调；status='paid'+appliedAt=null 用于恢复已确认支付但未完成权益发放的订单。
+    const claim = await tx.paymentOrder.updateMany({
+      where: { outTradeNo: parsed.outTradeNo, status: { in: ['created', 'paid'] }, appliedAt: null },
+      data: { status: 'paid', paidAt: new Date(), transactionId: parsed.transactionId ?? null, rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue },
+    });
+    if (claim.count !== 1) return { applied: false, reason: 'already_applied' };
+
+    const plan = await tx.plan.findUnique({ where: { id: order.planId } });
+    if (!plan) return { applied: false, reason: 'plan_not_found' };
+    await applyPlanPurchase(
+      { id: order.userId, tenantId: order.tenantId },
+      plan,
+      { reason: `${plan.name} · 微信支付`, source: 'wechat_pay' },
+    );
+    // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
+    await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
+    return { applied: true };
   });
-  if (claim.count !== 1) return { applied: false, reason: 'already_applied' }; // 并发竞争里输掉 → 已被另一次处理
-
-  const plan = await prisma.plan.findUnique({ where: { id: order.planId } });
-  if (!plan) return { applied: false, reason: 'plan_not_found' };
-  await applyPlanPurchase(
-    { id: order.userId, tenantId: order.tenantId },
-    plan,
-    { reason: `${plan.name} · 微信支付`, source: 'wechat_pay' },
-  );
-  // appliedAt 在 applyPlanPurchase 成功后才设置，确保崩溃重试时能重新发放权益。
-  await prisma.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
-  return { applied: true };
 }
