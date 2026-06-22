@@ -5,6 +5,7 @@
 // 临界策略：余额>0 放行 → 事后实扣（可透支一次到负）→ 余额≤0 时下次请求 ensureQuota 抛 402。
 
 import { prisma } from '../db.js';
+import type { Prisma } from '@prisma/client';
 
 export class InsufficientQuotaError extends Error {
   statusCode = 402;
@@ -105,9 +106,9 @@ export async function chargeQuota(userId: string, realTokens: number, ratio: num
 }
 
 /** 套餐购买/升级：覆盖式授予当月额度（balance=quota，重置周期键）。quota<0=不限量。 */
-export async function setQuota(tenantId: string, userId: string, quota: number): Promise<void> {
+export async function setQuota(tenantId: string, userId: string, quota: number, db: Prisma.TransactionClient = prisma): Promise<void> {
   const pk = periodKeyOf(new Date());
-  await prisma.tokenWallet.upsert({
+  await db.tokenWallet.upsert({
     where: { userId },
     update: { quota, balance: quota, periodKey: pk, tenantId },
     create: { tenantId, userId, quota, balance: quota, periodKey: pk },
