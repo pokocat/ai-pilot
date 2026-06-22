@@ -186,6 +186,7 @@ export async function markPaidAndApply(parsed: {
       { id: order.userId, tenantId: order.tenantId },
       plan,
       { reason: `${plan.name} · 微信支付`, source: 'wechat_pay' },
+      tx,
     );
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });

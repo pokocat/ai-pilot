@@ -473,7 +473,7 @@ mock 可随时预览；**正式上传/审核**还需：
 - 自有登录态支持 JWT（`services/userToken.ts`，HS256）：配 `APP_JWT_SECRET` 后登录签发 JWT、`resolveUser`/审计/admin role/entitlement 统一 `verifyUserToken` 校验；未配则回退历史 `token=userId`，`APP_JWT_REQUIRED=true` 可强制只认 JWT。短信强制校验开关（`SMS_REQUIRE_CODE`）已就绪，生产置 true 即可。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 内容审核与缓存已抽象可插拔：审核 `services/moderation.ts`（keyword 默认 / `MODERATION_PROVIDER=http` 接合规服务）；缓存 `services/cache.ts`（内存默认 / 配 `REDIS_URL`+ioredis 切 Redis）。计量台账仍为演示级，生产接真实计费台账。
-- 套餐购买已接微信支付 v3 脚手架（`services/wechatPay.ts` + `PaymentOrder` 状态机 + `routes/pay.ts` 回调）：配齐 `WECHAT_PAY_*` 后走 `/plans/:id/order` 下单 + `/pay/wechat/notify` 回调，`markPaidAndApply` 用同订单事务级 advisory lock + `appliedAt` 终态锚点做幂等入账，防重复/并发回调双发；未配齐回退 `/plans/:id/purchase` 演示购买。仍待：平台证书自动下载/轮换、对账兜底（主动查单）、退款。
+- 套餐购买已接微信支付 v3 脚手架（`services/wechatPay.ts` + `PaymentOrder` 状态机 + `routes/pay.ts` 回调）：配齐 `WECHAT_PAY_*` 后走 `/plans/:id/order` 下单 + `/pay/wechat/notify` 回调，`markPaidAndApply` 用同订单事务级 advisory lock + `appliedAt` 终态锚点做幂等入账，套餐权益发放复用同一 Prisma transaction client，防重复/并发回调双发；未配齐回退 `/plans/:id/purchase` 演示购买。仍待：平台证书自动下载/轮换、对账兜底（主动查单）、退款。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
 - **pgvector 路径已实现但未真库验证**：本地无扩展，默认 `PGVECTOR_ENABLED=false` 走内存余弦（已验证）；上真库执行 `npm run db:pgvector` 并置 true 后需端到端验一遍（升级路径 1）。
 - **模型密钥加密存库**：`services/secretBox.ts`（AES-256-GCM）对 模型/Dify/技能库 密钥写时加密、读时解密，配 `APP_ENCRYPTION_KEY` 后生效（未配=透传明文兼容演示），存量跑 `npm run secrets:encrypt` 回填。仍待：密钥接 KMS/密管 + 轮换策略（升级路径 8）。

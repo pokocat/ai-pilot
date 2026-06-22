@@ -8,7 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
-- **2026-06-22** · **修复微信支付回调并发幂等**：`markPaidAndApply` 改为同一 `outTradeNo` 先拿 PostgreSQL 事务级 advisory lock，再读取/抢占/发放/写 `appliedAt`，避免 `status=paid && appliedAt=null` 窗口下并发成功回调重复入账；保留 `paid+appliedAt=null` 订单的后续回调恢复能力。AGENTS 同步购买/支付接口与 TODO 口径。影响面：server 微信支付服务 + 工程文档。
+- **2026-06-22** · **修复微信支付回调并发幂等**：`markPaidAndApply` 改为同一 `outTradeNo` 先拿 PostgreSQL 事务级 advisory lock，再读取/抢占/发放/写 `appliedAt`，避免 `status=paid && appliedAt=null` 窗口下并发成功回调重复入账；套餐权益发放与 token 额度授予支持复用当前 Prisma transaction client，避免 CI 并发回调下事务连接池饥饿；保留 `paid+appliedAt=null` 订单的后续回调恢复能力。AGENTS 同步购买/支付接口与 TODO 口径。影响面：server 微信支付/套餐发放服务 + 工程文档。
 - **2026-06-20** · **微信消息推送 URL 验签接口**：新增 `GET/POST /api/wechat/message`，按 `WECHAT_MESSAGE_TOKEN` 校验微信后台 `signature/timestamp/nonce`；GET 验签通过原样返回 `echostr`，POST 支持 XML 推送体并返回 `success`，为后续客服/订阅事件处理预留可信入口。`.env.example`、AGENTS/DEPLOYMENT 同步 Token 与公网 URL 说明，新增 `test/wechatMessage.test.ts`。
 - **2026-06-20** · **时序知识图谱（Graphiti 式，P1 功能增强）**：新增 `GraphEntity/GraphRelation`（关系带 `validFrom/validTo/invalidatedAt` 时间窗）、`services/knowledgeGraph.ts`（实体去重、同主谓新事实软失效旧事实、`queryRelations` as-of 时序查询）、`gateway.extractGraphTriples`（真实模型抽三元组，mock 返回空）、`routes/graph.ts`（`POST /graph/extract`、`GET /graph/entities`、`GET /graph/relations?asOf=`）。新增 `test/knowledgeGraph.test.ts`（4 例）。
 - **2026-06-20** · **@引用「记忆」候选分组（P1 功能增强）**：新增 `GET /memories`（tenant+user 隔离列本人长期记忆，可按项目/智能体/关键词过滤，权重优先）+ `routes/memories.ts`，供 @引用选择器单列「记忆」组（`resolveReferences` 早已支持 `kind:'memory'`）。SSOT 增 `MemoryCandidate`。
