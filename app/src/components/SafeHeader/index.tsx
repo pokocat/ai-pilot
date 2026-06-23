@@ -52,7 +52,8 @@ export default function SafeHeader({
   }, []);
 
   const fallbackBack = (
-    <View className="safe-hbtn" onClick={onBack ?? (() => Taro.navigateBack())}>
+    // P2-17：图标型返回按钮补可访问性语义（H5 屏读可读；weapp 忽略未知属性，无副作用）。
+    <View className="safe-hbtn" role="button" aria-label="返回" onClick={onBack ?? (() => Taro.navigateBack())}>
       <Text className="safe-back">‹</Text>
     </View>
   );

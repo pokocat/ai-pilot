@@ -500,7 +500,7 @@ export default function Chat() {
           />
           <Icon name="mic" size={18} color="#969BA1" />
         </View>
-        <View className={`csend ${busy ? 'busy' : ''}`} style={{ background: accent }} onClick={() => onSend()}>
+        <View className={`csend ${busy ? 'busy' : ''}`} role="button" aria-label="发送" style={{ background: accent }} onClick={() => onSend()}>
           <Icon name="send" size={18} color="#fff" />
         </View>
       </View>
