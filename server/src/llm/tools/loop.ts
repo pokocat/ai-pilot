@@ -66,11 +66,14 @@ export async function runToolLoop(opts: LoopOpts): Promise<LoopResult> {
         results.push({ id: call.id, name: call.name, content: `（未知工具：${call.name}）`, isError: true });
         continue;
       }
+      const t0 = Date.now();
       try {
         const content = await tool.run(call.args ?? {}, opts.toolCtx);
         results.push({ id: call.id, name: call.name, content, isError: false });
+        void import('../../services/toolStats.js').then((m) => m.recordToolCall(opts.toolCtx.agentKey, call.name, true, Date.now() - t0)); // P2-10 观测
       } catch (err) {
         results.push({ id: call.id, name: call.name, content: `（工具执行出错：${(err as Error).message}）`, isError: true });
+        void import('../../services/toolStats.js').then((m) => m.recordToolCall(opts.toolCtx.agentKey, call.name, false, Date.now() - t0)); // P2-10 观测
       }
     }
     messages.push({ role: 'tool_results', results });

@@ -24,6 +24,7 @@ import { listTraces, getTrace } from '../services/trace.js';
 import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
 import { selectableMeta, listDefs, createTool, updateTool, deleteTool, dryRunTool } from '../services/skillTools.js';
+import { aggregateToolStats } from '../services/toolStats.js';
 import { knowledgeView, reembedAll } from '../services/knowledgeAdmin.js';
 import { retrievalDebug } from '../services/retrievalDebug.js';
 import { userContextView } from '../services/adminUserContext.js';
@@ -34,7 +35,7 @@ import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
   AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
-  AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult,
+  AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult, ToolStatsView,
   AdminAccountItem, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   AgentVersionListView, AgentVersionItem, AgentVersionDetail, PublishAgentRequest, PublishAgentResult, RollbackAgentRequest,
   SandboxRequest, SandboxResult, SandboxTarget,
@@ -300,6 +301,13 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // agent 可勾选的工具（内置 + 启用的自定义工具）。
   app.get('/admin/skill-tools', async (): Promise<SkillToolMeta[]> => selectableMeta());
+
+  // P2-10：per-tool 运行观测（成功率/错误率/延迟），可选按 agentKey + 天数过滤。
+  app.get<{ Querystring: { agentKey?: string; days?: string } }>('/admin/tool-stats', async (req): Promise<ToolStatsView> => {
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 7));
+    const stats = await aggregateToolStats({ agentKey: req.query.agentKey, days });
+    return { sinceDays: days, stats };
+  });
 
   // P2-10：单工具试跑（运营配置后验证工具真能执行）。
   app.post<{ Params: { key: string; name: string }; Body: { args?: Record<string, unknown> } }>('/admin/agents/:key/tools/:name/dry-run', async (req, reply): Promise<AgentToolDryRunResult | void> => {

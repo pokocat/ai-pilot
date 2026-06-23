@@ -75,6 +75,9 @@ export interface SkillToolMeta {
 /** 自定义 HTTP 工具：后台读取视图（鉴权头脱敏为 headerKeys/hasHeaders） */
 // P2-10：后台单工具试跑结果
 export interface AgentToolDryRunResult { ok: boolean; output?: string; error?: string; ms: number }
+// P2-10：per-tool 运行观测（成功率/错误率/延迟）
+export interface ToolStatItem { tool: string; calls: number; errors: number; errorRate: number; avgMs: number }
+export interface ToolStatsView { sinceDays: number; stats: ToolStatItem[] }
 export interface SkillToolDef {
   id: string;
   key: string;

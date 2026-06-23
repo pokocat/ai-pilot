@@ -612,6 +612,20 @@ model LlmTrace {
   @@map("llm_trace")
 }
 
+// P2-10：单工具调用日志，用于 per-tool 成功率/错误率/延迟观测（在工具循环里 fire-and-forget 写入）。
+model ToolCallLog {
+  id        String   @id @default(cuid())
+  agentKey  String?
+  tool      String
+  ok        Boolean
+  ms        Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([tool, createdAt])
+  @@index([agentKey, createdAt])
+  @@map("tool_call_log")
+}
+
 /// 服务端渲染的可分享报告 HTML 页（凭不可猜 id 公开访问，发朋友圈用；只含报告正文，不含敏感数据）。
 model ReportHtml {
   id        String   @id @default(cuid())

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
 import NumInput from './NumInput';
-import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta, type AdminAgentMemoryItem } from './api';
+import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta, type AdminAgentMemoryItem, type ToolStatItem } from './api';
 import StudioSandbox from './StudioSandbox';
 import StudioVersions, { tierName } from './StudioVersions';
 import StudioEval from './StudioEval';
@@ -64,6 +64,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   const [agentMems, setAgentMems] = useState<AdminAgentMemoryItem[] | null>(null); // P1-C4：跨用户已学记忆治理
   const [availTools, setAvailTools] = useState<SkillToolMeta[]>([]);
   const [dryRunning, setDryRunning] = useState(''); // P2-10 工具试跑中的工具名
+  const [toolStats, setToolStats] = useState<ToolStatItem[]>([]); // P2-10 per-tool 运行统计
   const [test, setTest] = useState<AiTestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [loadErr, setLoadErr] = useState('');
@@ -94,6 +95,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
 
   // 可勾选的内置工具元信息（一次性加载）。
   useEffect(() => { api.skillTools().then(setAvailTools).catch(() => setAvailTools([])); }, []);
+  useEffect(() => { api.toolStats(agentKey).then((v) => setToolStats(v.stats)).catch(() => setToolStats([])); }, [agentKey]); // P2-10
 
   // 加载失败时给出可见反馈 + 返回入口，而不是渲染空白（旧版静默吞错，点编辑像「没反应」）
   if (loadErr) {
@@ -350,6 +352,19 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
                       <div key={t.name} className="mem-card">
                         <span className="mi"><Icon name="layers" size={16} /></span>
                         <div className="mb"><div className="mt">{t.name}<span className="tag off">产出处理</span></div><div className="mm">{t.description}</div></div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              {toolStats.length > 0 && (
+                <>
+                  <div className="blk-d" style={{ marginTop: 10 }}>工具运行统计（本 agent · 近 7 天）</div>
+                  <div className="mem-list" style={{ marginTop: 6 }}>
+                    {toolStats.map((s) => (
+                      <div key={s.tool} className="mem-card">
+                        <span className="mi"><Icon name="insight" size={16} /></span>
+                        <div className="mb"><div className="mt">{s.tool}{s.errorRate > 0 && <span className="tag warn" style={{ marginLeft: 6 }}>错误 {s.errorRate}%</span>}</div><div className="mm">{s.calls} 次调用 · 失败 {s.errors} · 均 {s.avgMs}ms</div></div>
                       </div>
                     ))}
                   </div>

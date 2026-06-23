@@ -19,6 +19,7 @@ import { loadHistory } from '../src/routes/sessions.js';
 import { moderate, listModerationLogs } from '../src/services/moderation.js';
 import { chatCompleteStream } from '../src/llm/gateway.js';
 import { dryRunTool } from '../src/services/skillTools.js';
+import { aggregateToolStats } from '../src/services/toolStats.js';
 import { percentEncode, canonicalQuery, aliyunSignature } from '../src/services/sms.js';
 import { _resetTokenCache } from '../src/services/wechat.js';
 
@@ -1416,5 +1417,20 @@ describe('TC-S P1-B3 聊天流式（渐进渲染 · 复用全量审核）', () =
     const bad = await dryRunTool('strat', 'no_such_tool_xyz', {});
     assert.equal(bad.ok, false, '未知/未启用工具应报错');
     assert.match(bad.error ?? '', /不存在|未启用/);
+  });
+
+  test('P2-10 aggregateToolStats 按工具聚合成功率/错误率/延迟', async () => {
+    await prisma.toolCallLog.deleteMany({ where: { tool: 't_stat_x' } });
+    await prisma.toolCallLog.createMany({ data: [
+      { tool: 't_stat_x', ok: true, ms: 10 },
+      { tool: 't_stat_x', ok: true, ms: 30 },
+      { tool: 't_stat_x', ok: false, ms: 20 },
+    ] });
+    const s = (await aggregateToolStats({ days: 1 })).find((x) => x.tool === 't_stat_x');
+    assert.ok(s, '应聚合出该工具');
+    assert.equal(s!.calls, 3);
+    assert.equal(s!.errors, 1);
+    assert.equal(s!.errorRate, 33.3);
+    assert.equal(s!.avgMs, 20);
   });
 });
