@@ -3,6 +3,8 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
+import { deleteUserMemory, updateOwnMemory } from '../services/memory.js';
+import { recordAudit } from '../services/audit.js';
 import type { MemoryCandidate } from '../../../shared/contracts';
 
 export async function memoryRoutes(app: FastifyInstance) {
@@ -30,4 +32,23 @@ export async function memoryRoutes(app: FastifyInstance) {
       }));
     },
   );
+
+  // P1-C2：用户编辑自己的一条长期记忆（记忆主权——让用户能纠正军师记错的事实）。
+  app.patch<{ Params: { id: string }; Body: { text?: string } }>('/memories/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const text = (req.body?.text ?? '').trim();
+    if (!text) return reply.code(400).send({ error: 'empty text' });
+    const ok = await updateOwnMemory(user.tenantId, user.id, req.params.id, text);
+    if (!ok) return reply.code(404).send({ error: 'memory not found' });
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.memory.update', payload: { memoryId: req.params.id } });
+    return { ok: true };
+  });
+
+  // P1-C2：用户删除自己的一条长期记忆（租户+用户双重校验，幂等）。
+  app.delete<{ Params: { id: string } }>('/memories/:id', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    await deleteUserMemory(user.tenantId, user.id, req.params.id);
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.memory.delete', payload: { memoryId: req.params.id } });
+    return { ok: true };
+  });
 }

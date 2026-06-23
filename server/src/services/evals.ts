@@ -20,9 +20,19 @@ export const PRICING_TIERS: PricingTier[] = [
 ];
 
 export function suggestTier(score: number | null): SuggestedTier {
-  const s = score ?? 0;
-  const tier = PRICING_TIERS.find((t) => s >= t.minScore) ?? PRICING_TIERS[PRICING_TIERS.length - 1];
+  // P1-A2：分数为空（未配真实模型 / 全部产出失败）时不给定价档，避免把「无结论」误读成「标准档」。
+  if (score === null) return { score: null, tier: null };
+  const tier = PRICING_TIERS.find((t) => score >= t.minScore) ?? PRICING_TIERS[PRICING_TIERS.length - 1];
   return { score, tier };
+}
+
+// P1-A2：回收卡死的 run（进程重启/异常导致永久 running），下次启动评测时清理。
+const STALE_RUN_MS = 10 * 60 * 1000;
+async function reapStaleRuns(agentKey: string): Promise<void> {
+  const cutoff = new Date(Date.now() - STALE_RUN_MS);
+  await prisma.evalRun
+    .updateMany({ where: { agentKey, status: 'running', createdAt: { lt: cutoff } }, data: { status: 'error', note: '运行超时被回收（进程重启或卡死）' } })
+    .catch(() => {});
 }
 
 function deliverableToText(d: Deliverable): string {
@@ -38,7 +48,7 @@ async function judge(input: string, output: string, rubric: string | null): Prom
     '重点看：是否切题、是否专业可执行、是否符合标准、有无编造。只输出 JSON：{"score": 数字, "note": "一句话理由"}。',
   ].join('\n');
   const user = `【用户问题】\n${input}\n\n【评分标准】\n${rubric || '回答是否专业、切题、可执行、无编造。'}\n\n【被测回答】\n${output.slice(0, 6000)}`;
-  const j = await completeJson(sys, user);
+  const j = await completeJson(sys, user, { temperature: 0 }); // P1-A2：评分用 temperature=0，提升可复现性
   if (!j || typeof j.score !== 'number') return { score: null, note: '未配置真实模型，无法评分（mock）' };
   const score = Math.max(0, Math.min(10, j.score as number));
   return { score, note: typeof j.note === 'string' ? j.note : '' };
@@ -52,6 +62,7 @@ export async function startEvalRun(opts: {
   targetLabel: string;
   accountId?: string | null;
 }): Promise<string> {
+  await reapStaleRuns(opts.agentKey); // P1-A2：先回收卡死的旧 run
   const set = await prisma.evalSet.findUnique({ where: { id: opts.setId }, include: { cases: { orderBy: { sort: 'asc' } } } });
   if (!set || set.agentKey !== opts.agentKey) throw Object.assign(new Error('评测集不存在'), { statusCode: 404, code: 'SET_NOT_FOUND' });
   if (!set.cases.length) throw Object.assign(new Error('评测集为空，请先添加用例'), { statusCode: 400, code: 'EMPTY_SET' });
@@ -86,6 +97,7 @@ async function processRun(runId: string, agentKey: string, cases: CaseRow[], tar
     let output = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    let failed = false;
     try {
       if (built.effective.deliverableKey) {
         const r = await generateDeliverable(built.ctx, { agentKey, sandbox: true });
@@ -98,9 +110,13 @@ async function processRun(runId: string, agentKey: string, cases: CaseRow[], tar
       }
     } catch (e) {
       output = `（产出失败：${(e as Error).message}）`;
+      failed = true;
     }
     const latencyMs = Date.now() - t0;
-    const { score, note } = await judge(c.input, output, c.rubric);
+    // P1-A2：产出失败不送评委打分（否则把「基建失败」混成「答得差」，污染均分），标记 unscored。
+    const { score, note } = failed
+      ? { score: null as number | null, note: '产出失败，本条不计分' }
+      : await judge(c.input, output, c.rubric);
     await prisma.evalCaseResult.create({
       data: { runId, caseId: c.id, input: c.input, output: output.slice(0, 8000), judgeScore: score, judgeNote: note, inputTokens, outputTokens, latencyMs },
     });

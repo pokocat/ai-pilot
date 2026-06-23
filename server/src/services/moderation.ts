@@ -7,11 +7,18 @@
 
 import { env } from '../env.js';
 import { prisma } from '../db.js';
+import type { AdminModerationLogItem } from '../../../shared/contracts';
 
-// 演示用关键词表（生产用合规审核服务替代）。
-const BLOCK_WORDS = ['暴力', '违法集资', '赌博', '毒品'];
+// 演示用关键词表（生产用合规审核服务替代）。P1-B5：可经 MODERATION_KEYWORDS（逗号分隔）覆盖，无需改代码。
+const DEFAULT_BLOCK_WORDS = ['暴力', '违法集资', '赌博', '毒品'];
+function blockWords(): string[] {
+  const custom = (process.env.MODERATION_KEYWORDS ?? '').split(',').map((w) => w.trim()).filter(Boolean);
+  return custom.length ? custom : DEFAULT_BLOCK_WORDS;
+}
 
 export type ModerationVerdict = { pass: boolean; provider: string; detail?: Record<string, unknown> };
+/** P1-B5：审核上下文——沙盒/评测跳过，并把租户/用户/会话写入日志便于追溯。 */
+export interface ModerateOpts { sandbox?: boolean; tenantId?: string | null; userId?: string | null; sessionId?: string | null; }
 
 function moderationProvider(): 'keyword' | 'http' {
   return (process.env.MODERATION_PROVIDER ?? 'keyword') === 'http' ? 'http' : 'keyword';
@@ -21,7 +28,7 @@ function failOpen(): boolean {
 }
 
 function keywordCheck(text: string): ModerationVerdict {
-  const hit = BLOCK_WORDS.find((w) => text.includes(w));
+  const hit = blockWords().find((w) => text.includes(w));
   return { pass: !hit, provider: 'keyword', detail: hit ? { word: hit } : undefined };
 }
 
@@ -59,17 +66,44 @@ async function httpCheck(text: string): Promise<ModerationVerdict> {
  * 审核一段文本。关闭审核（MODERATION_ENABLED=false）时直接放行。
  * 落 moderation_log 后返回是否放行。
  */
-export async function moderate(refType: 'input' | 'output', text: string): Promise<boolean> {
+export async function moderate(refType: 'input' | 'output', text: string, opts?: ModerateOpts): Promise<boolean> {
   if (!env.moderationEnabled) return true;
+  // P1-B5：沙盒/评测不审核、不写日志——避免调教中途被拦，且不污染合规记录。
+  if (opts?.sandbox) return true;
   const verdict = moderationProvider() === 'http' ? await httpCheck(text) : keywordCheck(text);
   await prisma.moderationLog
     .create({
       data: {
         refType,
+        refId: opts?.sessionId ?? null,
+        tenantId: opts?.tenantId ?? null,
+        userId: opts?.userId ?? null,
+        sessionId: opts?.sessionId ?? null,
         verdict: verdict.pass ? 'pass' : 'block',
         detailJson: { provider: verdict.provider, ...(verdict.detail ?? {}) },
       },
     })
     .catch(() => {});
   return verdict.pass;
+}
+
+/** P1-B5：运营查看审核日志（此前 moderation_log 写完无任何读取入口）。 */
+export async function listModerationLogs(opts: { verdict?: string; refType?: string; limit?: number } = {}): Promise<AdminModerationLogItem[]> {
+  const rows = await prisma.moderationLog.findMany({
+    where: {
+      ...(opts.verdict === 'pass' || opts.verdict === 'block' ? { verdict: opts.verdict } : {}),
+      ...(opts.refType === 'input' || opts.refType === 'output' ? { refType: opts.refType } : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(500, Math.max(1, opts.limit ?? 100)),
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    at: r.createdAt.toISOString(),
+    refType: r.refType,
+    verdict: r.verdict === 'block' ? 'block' : 'pass',
+    userId: r.userId,
+    sessionId: r.sessionId,
+    detail: (r.detailJson as Record<string, unknown> | null) ?? null,
+  }));
 }

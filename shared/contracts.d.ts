@@ -752,6 +752,17 @@ export interface AdminTraceDetail extends AdminTraceItem {
   promptText: string | null;
   responseText: string | null;
 }
+// P1-B5：审核日志（运营可查，此前 write-only）
+export interface AdminModerationLogItem {
+  id: string;
+  at: string;
+  refType: string; // input | output
+  verdict: 'pass' | 'block';
+  userId: string | null;
+  sessionId: string | null;
+  detail: Record<string, unknown> | null;
+}
+export interface AdminModerationLogView { items: AdminModerationLogItem[] }
 
 /* ════════════════════════════════════════════════════════════
  *  运营端「提示词/知识迭代调优 + 版本化发布」（P0–P5）
@@ -839,4 +850,4 @@ export interface EvalRunDetail extends EvalRunItem { results: EvalCaseResultItem
 export interface StartEvalRunRequest { setId: string; target?: SandboxTarget }
 /** 评分 → 建议定价档位（旗舰/进阶/标准） */
 export interface PricingTier { id: string; label: string; billingRatio: number; minScore: number }
-export interface SuggestedTier { score: number | null; tier: PricingTier }
+export interface SuggestedTier { score: number | null; tier: PricingTier | null } // P1-A2：score 为空（未配模型/全部失败）时不给定价建议

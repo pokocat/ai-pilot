@@ -39,6 +39,11 @@ function deliverableText(d: Deliverable): string {
   return d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
 }
 
+// P1-B5：审核上下文——沙盒/评测跳过审核，并把租户/用户/会话写入 moderation_log 便于追溯。
+function modOpts(ctx: GenContext, meta?: UsageMeta) {
+  return { sandbox: meta?.sandbox, tenantId: meta?.tenantId ?? ctx.tenantId ?? null, userId: meta?.userId ?? ctx.userId ?? null, sessionId: meta?.sessionId ?? null };
+}
+
 // 计时执行一次 provider 调用并落 trace（成功记 ok + 指标 + 原文；失败记 error 后原样抛出，由调用方兜底）。
 async function traced<T>(
   run: () => Promise<Sourced<T>>,
@@ -181,7 +186,7 @@ function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string 
 }
 
 export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Promise<{ result: Deliverable; usage: Usage }> {
-  if (!(await moderate('input', ctx.userMessage))) {
+  if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
 
@@ -197,7 +202,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
     }
     await maybeRecord(sourced, 'deliverable', ctx, meta); // 记账早于输出审核：token 已花，审核拦截也要记
     const outText = sourced.result.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
-    if (!(await moderate('output', outText))) {
+    if (!(await moderate('output', outText, modOpts(ctx, meta)))) {
       throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
     }
     return { result: sourced.result, usage: sourced.usage };
@@ -239,7 +244,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
 
   await maybeRecord(sourced, 'deliverable', ctx, meta);
   const outText = sourced.result.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
-  if (!(await moderate('output', outText))) {
+  if (!(await moderate('output', outText, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
   if (!tools.length) await cacheSet(ck, sourced.result, CACHE_TTL);
@@ -247,7 +252,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
 }
 
 export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{ result: ChatReply; usage: Usage }> {
-  if (!(await moderate('input', ctx.userMessage))) {
+  if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
 
@@ -262,7 +267,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       return { result: mockChat(ctx), usage: ZERO_USAGE };
     }
-    if (!(await moderate('output', s.result.text))) {
+    if (!(await moderate('output', s.result.text, modOpts(ctx, meta)))) {
       throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
     }
     return { result: s.result, usage: s.usage };
@@ -294,7 +299,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
     if (!env.aiFallbackMock) throw aiUnavailable(err);
   }
   if (chatResult) {
-    if (!(await moderate('output', chatResult.result.text))) {
+    if (!(await moderate('output', chatResult.result.text, modOpts(ctx, meta)))) {
       throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
     }
     return { result: chatResult.result, usage: chatResult.usage };
@@ -311,7 +316,7 @@ export type AdaptiveResult =
  * 仅全局 openai 与 mock 支持「自适应」；claude / per-agent runtime 暂回退为对话（避免误出空报告）。
  */
 export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promise<AdaptiveResult> {
-  if (!(await moderate('input', ctx.userMessage))) {
+  if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
 
@@ -319,7 +324,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
   if (ctx.runtime) {
     const s = await runtimeChat(ctx);
     await maybeRecord(s, 'chat', ctx, meta);
-    if (!(await moderate('output', s.result.text))) throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
+    if (!(await moderate('output', s.result.text, modOpts(ctx, meta)))) throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
     return { kind: 'chat', reply: s.result, usage: s.usage };
   }
 
@@ -369,7 +374,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
   });
   await maybeRecord({ result: out.result, usage, provider, model, toolCalls, iterations }, recKind, ctx, meta);
 
-  if (!(await moderate('output', respText))) throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
+  if (!(await moderate('output', respText, modOpts(ctx, meta)))) throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
 
   return out.kind === 'report'
     ? { kind: 'report', deliverable: out.result, usage }
@@ -467,10 +472,12 @@ async function rawJson(
 }
 
 /** 通用 JSON 补全（评测评委等内部用）：用就绪模型发一次并解析 JSON；未就绪（mock）/失败返回 null。 */
-export async function completeJson(system: string, user: string): Promise<Record<string, unknown> | null> {
-  const cfg = await getAiConfig();
-  const live = liveProvider(cfg);
+export async function completeJson(system: string, user: string, opts?: { temperature?: number }): Promise<Record<string, unknown> | null> {
+  const base = await getAiConfig();
+  const live = liveProvider(base);
   if (!live) return null;
+  // P1-A2：允许指定温度（评委评分用 temperature=0 提升可复现性）。
+  const cfg = opts?.temperature != null ? { ...base, temperature: opts.temperature } : base;
   try {
     return await rawJson(cfg, live, system, user);
   } catch (err) {

@@ -768,10 +768,14 @@ model ModerationLog {
   id         String   @id @default(cuid())
   refType    String // input | output
   refId      String?
+  tenantId   String? // P1-B5：用户/会话/租户关联，使被拦事件可追溯（此前 write-only 黑洞）
+  userId     String?
+  sessionId  String?
   verdict    String // pass | block
   detailJson Json?
   createdAt  DateTime @default(now())
 
+  @@index([verdict, createdAt])
   @@map("moderation_log")
 }
 

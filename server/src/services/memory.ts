@@ -216,3 +216,13 @@ export async function listUserMemories(tenantId: string, userId: string): Promis
 export async function deleteUserMemory(tenantId: string, userId: string, id: string): Promise<void> {
   await prisma.memory.deleteMany({ where: { id, tenantId, userId } });
 }
+
+/** P1-C2：用户编辑自己的一条长期记忆（重写文本并重嵌入）。租户+用户双重校验，防越权。返回是否命中。 */
+export async function updateOwnMemory(tenantId: string, userId: string, id: string, text: string): Promise<boolean> {
+  const t = text.trim();
+  if (!t) return false;
+  const embedding = await embed(t);
+  const r = await prisma.memory.updateMany({ where: { id, tenantId, userId }, data: { text: t, embedding } });
+  if (r.count > 0 && pgvectorEnabled()) await upsertMemoryVector(id, embedding).catch(() => {});
+  return r.count > 0;
+}

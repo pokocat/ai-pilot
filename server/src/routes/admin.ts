@@ -21,6 +21,7 @@ import { startEvalRun, suggestTier, PRICING_TIERS } from '../services/evals.js';
 import { encryptSecret, decryptSecretSafe } from '../services/secretBox.js';
 import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
+import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
 import { selectableMeta, listDefs, createTool, updateTool, deleteTool } from '../services/skillTools.js';
 import { knowledgeView, reembedAll } from '../services/knowledgeAdmin.js';
@@ -33,7 +34,7 @@ import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
   AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
-  AdminTraceListView, AdminTraceDetail, SkillToolDef, SkillToolUpsert,
+  AdminTraceListView, AdminTraceDetail, AdminModerationLogView, SkillToolDef, SkillToolUpsert,
   AdminAccountItem, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   AgentVersionListView, AgentVersionItem, PublishAgentRequest, PublishAgentResult, RollbackAgentRequest,
   SandboxRequest, SandboxResult, SandboxTarget,
@@ -536,6 +537,11 @@ export async function adminRoutes(app: FastifyInstance) {
     const t = await getTrace(req.params.id);
     if (!t) return reply.code(404).send({ error: 'not found' });
     return t;
+  });
+
+  // —— P1-B5：审核日志（此前 moderation_log 写完无读取入口，运营看不到拦了什么）——
+  app.get<{ Querystring: { verdict?: string; refType?: string; limit?: string } }>('/admin/moderation-logs', async (req): Promise<AdminModerationLogView> => {
+    return { items: await listModerationLogs({ verdict: req.query.verdict, refType: req.query.refType, limit: Number(req.query.limit) || 100 }) };
   });
 
   // —— 审计日志：默认看用户 API / 登录尝试；后台自身行为可用 includeAdmin=true 显式查看 ——

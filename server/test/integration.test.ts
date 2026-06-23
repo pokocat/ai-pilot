@@ -16,6 +16,7 @@ import { recordTokenUsage, tokenUsageSummary } from '../src/services/usage.js';
 import { addModel } from '../src/services/aiConfig.js';
 import { setQuota, getQuotaState, chargeQuota, ensureQuota, reserveQuota } from '../src/services/tokenQuota.js';
 import { loadHistory } from '../src/routes/sessions.js';
+import { moderate, listModerationLogs } from '../src/services/moderation.js';
 import { percentEncode, canonicalQuery, aliyunSignature } from '../src/services/sms.js';
 import { _resetTokenCache } from '../src/services/wechat.js';
 
@@ -560,6 +561,18 @@ describe('TC-J 内容审核拦截', () => {
     const r = await api('POST', '/api/generate-sync', { token: t, body: { text: '帮我评估一个赌博平台的获客方案', agentKey: 'general' } });
     assert.equal(r.status, 422, '违规输入应被拦截');
     assert.equal(r.body.code, 'MODERATION_BLOCK');
+  });
+
+  test('J2 P1-B5 沙盒跳过审核 + 拦截日志可查且带 user/session 关联', async () => {
+    const before = (await listModerationLogs({ verdict: 'block' })).length;
+    // 沙盒/评测不审核、不写日志
+    assert.equal(await moderate('input', '这是赌博内容', { sandbox: true }), true, '沙盒应跳过审核（放行）');
+    // 正常拦截：写日志并带 user/session 关联
+    assert.equal(await moderate('input', '这是赌博内容', { userId: 'u_mod', sessionId: 's_mod' }), false);
+    const logs = await listModerationLogs({ verdict: 'block' });
+    assert.ok(logs.length > before, '拦截应写入审核日志');
+    const mine = logs.find((l) => l.sessionId === 's_mod');
+    assert.ok(mine && mine.userId === 'u_mod', '审核日志应带 user/session 关联（此前 write-only 黑洞）');
   });
 });
 
@@ -1209,6 +1222,22 @@ describe('TC-M 记忆召回与去重', () => {
     const rows = await prisma.memory.findMany({ where: { userId: t, agentKey: 'strat' } });
     assert.equal(rows.length, 1, '相同洞察两次写入应去重为 1 行（旧实现会堆 2 行）');
     assert.ok(rows[0].weight > 1.0, '重复出现应加权（>初始 1.0）');
+  });
+
+  test('M4 P1-C2 用户可编辑/删除自己的记忆，且跨用户隔离', async () => {
+    const a = await login(uniquePhone(), '记忆用户A');
+    const ta = await tenantOf(a);
+    const b = await login(uniquePhone(), '记忆用户B');
+    const mem = await prisma.memory.create({ data: { tenantId: ta, userId: a, agentKey: 'strat', kind: 'preference', text: '错误事实：A 在做餐饮', embedding: [], weight: 1, source: 'conversation' } });
+    const wrong = await api('PATCH', `/api/memories/${mem.id}`, { token: b, body: { text: '篡改' } });
+    assert.equal(wrong.status, 404, '跨用户编辑应 404');
+    const edit = await api('PATCH', `/api/memories/${mem.id}`, { token: a, body: { text: '更正：A 在做 SaaS' } });
+    assert.equal(edit.status, 200);
+    assert.equal((await prisma.memory.findUnique({ where: { id: mem.id } }))?.text, '更正：A 在做 SaaS');
+    await api('DELETE', `/api/memories/${mem.id}`, { token: b });
+    assert.ok(await prisma.memory.findUnique({ where: { id: mem.id } }), '跨用户删除不应生效');
+    await api('DELETE', `/api/memories/${mem.id}`, { token: a });
+    assert.equal(await prisma.memory.findUnique({ where: { id: mem.id } }), null);
   });
 });
 
