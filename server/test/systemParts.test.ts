@@ -29,3 +29,14 @@ describe('buildSystemParts · 档案访谈覆盖', () => {
     assert.ok(stable.indexOf('本轮模式覆盖') > stable.indexOf('运行时业务边界'));
   });
 });
+
+describe('buildSystemParts · 本命色语气（P1-B4）', () => {
+  test('注入本命色语气提示，且按颜色不同', () => {
+    const gold = buildSystemParts('你是军师。', ctx({ benmingColor: 'gold' }), 'chat').stable;
+    const red = buildSystemParts('你是军师。', ctx({ benmingColor: 'red' }), 'chat').stable;
+    assert.match(gold, /表达风格参考 · 本命色「gold」/);
+    assert.match(gold, /沉稳持重/);
+    assert.match(red, /进取果决/);
+    assert.notEqual(gold, red, '不同本命色应产出不同 persona 提示');
+  });
+});

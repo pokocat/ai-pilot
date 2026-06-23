@@ -69,77 +69,55 @@ const dayKey = (d: Date): string => d.toISOString().slice(0, 10); // YYYY-MM-DD�
  */
 export async function tokenUsageSummary(windowDays = 30): Promise<AdminTokenUsageView> {
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
-  const rows = await prisma.tokenUsage.findMany({
-    where: { createdAt: { gte: since } },
-    select: {
-      userId: true, kind: true, model: true, inputTokens: true, outputTokens: true,
-      totalTokens: true, costMicros: true, createdAt: true,
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 50000,
-  });
+  // P2-2：全部用 SQL 聚合（groupBy / aggregate / raw 按天截断），不再装载 ≤50k 行内存分桶——避免大窗口静默截断少算。
+  const USER_KINDS = ['chat', 'deliverable'];
+  const userWhere = { createdAt: { gte: since }, kind: { in: USER_KINDS } };
+  const [modelGroups, userGroups, infraGroups, totalAgg, dayRows] = await Promise.all([
+    prisma.tokenUsage.groupBy({ by: ['model'], where: userWhere, _sum: { totalTokens: true, costMicros: true }, _count: { _all: true } }),
+    prisma.tokenUsage.groupBy({ by: ['userId'], where: { ...userWhere, userId: { not: null } }, _sum: { totalTokens: true, costMicros: true }, orderBy: { _sum: { costMicros: 'desc' } }, take: 8 }),
+    prisma.tokenUsage.groupBy({ by: ['kind', 'model'], where: { createdAt: { gte: since }, kind: { notIn: USER_KINDS } }, _sum: { totalTokens: true, costMicros: true }, _count: { _all: true } }),
+    prisma.tokenUsage.aggregate({ where: userWhere, _sum: { inputTokens: true, outputTokens: true, totalTokens: true, costMicros: true }, _count: { _all: true } }),
+    prisma.$queryRaw<{ day: string; totaltokens: bigint | number; costmicros: bigint | number }[]>`
+      SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS day,
+             COALESCE(SUM("totalTokens"), 0) AS totaltokens,
+             COALESCE(SUM("costMicros"), 0) AS costmicros
+      FROM token_usage
+      WHERE "createdAt" >= ${since} AND "kind" IN ('chat', 'deliverable')
+      GROUP BY 1 ORDER BY 1`,
+  ]);
 
-  const totals = { calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, costMicros: 0 };
-  const modelMap = new Map<string, { calls: number; totalTokens: number; costMicros: number }>();
-  const dayMap = new Map<string, { totalTokens: number; costMicros: number }>();
-  const userMap = new Map<string, { totalTokens: number; costMicros: number }>();
-  // 检索基建（嵌入 / 重排）单独归集，不混进「用户产出」用量。
-  const USER_KINDS = new Set(['chat', 'deliverable']);
-  const infraMap = new Map<string, { kind: string; model: string; calls: number; totalTokens: number; costMicros: number }>();
+  const totals = {
+    calls: totalAgg._count._all,
+    inputTokens: totalAgg._sum.inputTokens ?? 0,
+    outputTokens: totalAgg._sum.outputTokens ?? 0,
+    totalTokens: totalAgg._sum.totalTokens ?? 0,
+    costMicros: totalAgg._sum.costMicros ?? 0,
+  };
 
-  for (const r of rows) {
-    if (!USER_KINDS.has(r.kind)) {
-      const key = `${r.kind}|${r.model}`;
-      const it = infraMap.get(key) ?? { kind: r.kind, model: r.model, calls: 0, totalTokens: 0, costMicros: 0 };
-      it.calls += 1; it.totalTokens += r.totalTokens; it.costMicros += r.costMicros;
-      infraMap.set(key, it);
-      continue;
-    }
-    totals.calls += 1;
-    totals.inputTokens += r.inputTokens;
-    totals.outputTokens += r.outputTokens;
-    totals.totalTokens += r.totalTokens;
-    totals.costMicros += r.costMicros;
-
-    const m = modelMap.get(r.model) ?? { calls: 0, totalTokens: 0, costMicros: 0 };
-    m.calls += 1; m.totalTokens += r.totalTokens; m.costMicros += r.costMicros;
-    modelMap.set(r.model, m);
-
-    const dk = dayKey(r.createdAt);
-    const d = dayMap.get(dk) ?? { totalTokens: 0, costMicros: 0 };
-    d.totalTokens += r.totalTokens; d.costMicros += r.costMicros;
-    dayMap.set(dk, d);
-
-    if (r.userId) {
-      const us = userMap.get(r.userId) ?? { totalTokens: 0, costMicros: 0 };
-      us.totalTokens += r.totalTokens; us.costMicros += r.costMicros;
-      userMap.set(r.userId, us);
-    }
-  }
-
-  const byModel = (await Promise.all([...modelMap.entries()].map(async ([model, s]) => ({
-    model, calls: s.calls, totalTokens: s.totalTokens, costMicros: s.costMicros,
-    calibrated: (await resolveModelRate(model)).calibrated,
+  const byModel = (await Promise.all(modelGroups.map(async (g) => ({
+    model: g.model, calls: g._count._all,
+    totalTokens: g._sum.totalTokens ?? 0, costMicros: g._sum.costMicros ?? 0,
+    calibrated: (await resolveModelRate(g.model)).calibrated,
   })))).sort((a, b) => b.costMicros - a.costMicros);
 
-  const byDay = [...dayMap.entries()]
-    .map(([day, s]) => ({ day, totalTokens: s.totalTokens, costMicros: s.costMicros }))
-    .sort((a, b) => (a.day < b.day ? -1 : 1));
+  const byDay = dayRows.map((r) => ({ day: r.day, totalTokens: Number(r.totaltokens), costMicros: Number(r.costmicros) }));
 
-  const topUserEntries = [...userMap.entries()]
-    .sort((a, b) => b[1].costMicros - a[1].costMicros)
-    .slice(0, 8);
+  const topUserEntries = userGroups.filter((g): g is typeof g & { userId: string } => !!g.userId);
   const names = topUserEntries.length
-    ? await prisma.user.findMany({ where: { id: { in: topUserEntries.map(([id]) => id) } }, select: { id: true, name: true } })
+    ? await prisma.user.findMany({ where: { id: { in: topUserEntries.map((g) => g.userId) } }, select: { id: true, name: true } })
     : [];
   const nameMap = new Map(names.map((u) => [u.id, u.name]));
-  const topUsers = topUserEntries.map(([userId, s]) => ({
-    userId,
-    name: nameMap.get(userId) || null,
-    totalTokens: s.totalTokens,
-    costMicros: s.costMicros,
+  const topUsers = topUserEntries.map((g) => ({
+    userId: g.userId,
+    name: nameMap.get(g.userId) || null,
+    totalTokens: g._sum.totalTokens ?? 0,
+    costMicros: g._sum.costMicros ?? 0,
   }));
 
-  const infra = [...infraMap.values()].sort((a, b) => b.totalTokens - a.totalTokens);
+  const infra = infraGroups.map((g) => ({
+    kind: g.kind, model: g.model, calls: g._count._all,
+    totalTokens: g._sum.totalTokens ?? 0, costMicros: g._sum.costMicros ?? 0,
+  })).sort((a, b) => b.totalTokens - a.totalTokens);
+
   return { windowDays, totals, byModel, byDay, topUsers, infra };
 }

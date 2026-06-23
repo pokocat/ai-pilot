@@ -128,6 +128,20 @@ const INTERVIEW_DIRECTIVE = [
   '不要先做诊断、不要引用旧报告、不要解释规则、不要替用户假设业务事实；问完等他回答。',
 ].join('\n');
 
+// P1-B4：本命色 → 表达风格/侧重的一句话提示。让「本命色」真正影响顾问语气（此前仅驱动前端主题色）。
+// 仅微调语气与侧重，不改方法论与业务边界（见 RUNTIME_BUSINESS_GUARD）。运营/产品后续可调此映射或下沉到配置。
+const BENMING_TONE: Record<string, string> = {
+  gold: '沉稳持重，重势能与现金流，谋定而后动',
+  green: '稳健生长，重可持续与复利，不冒进',
+  red: '进取果决，敢在关键机会上集中下注',
+  blue: '冷静理性，数据与逻辑优先，少情绪化',
+  purple: '重格局与远见，品牌与长期定位优先',
+  iron: '务实硬核，重执行、成本与纪律',
+};
+export function benmingTone(color: string): string {
+  return BENMING_TONE[color] ?? BENMING_TONE.gold;
+}
+
 // 占位符 → 真实上下文文本的映射（system prompt 与 Dify inputs 共用，口径一致）。
 export function contextValues(ctx: GenContext): Record<string, string> {
   const understandingText = ctx.understanding?.length ? ctx.understanding.join('\n') : '暂无个人档案';
@@ -137,7 +151,7 @@ export function contextValues(ctx: GenContext): Record<string, string> {
       : '暂无企业档案',
     '{行业基准}': ctx.benchmark,
     '{长期记忆}': ctx.memories.length ? ctx.memories.join('；') : '暂无长期记忆',
-    '{本命色}': ctx.benmingColor,
+    '{本命色}': `${ctx.benmingColor}（${benmingTone(ctx.benmingColor)}）`,
     '{引用资料}': ctx.references?.length ? ctx.references.join('\n') : '无',
     '{项目背景}': ctx.projectSummary
       ? `${ctx.projectName ? ctx.projectName + '：' : ''}${ctx.projectSummary}`
@@ -174,7 +188,9 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   const { base, active } = selectModuleText(prompt, { kind, userMessage: ctx.userMessage });
   // 档案访谈轮：在守则末尾追加覆盖指令，让模型进入访谈而不是回固定话术。
   const guard = ctx.briefInterview ? `${RUNTIME_BUSINESS_GUARD}\n\n${INTERVIEW_DIRECTIVE}` : RUNTIME_BUSINESS_GUARD;
-  const stable = `${fillPlaceholders(base, ctx)}\n\n${guard}`;
+  // P1-B4：注入本命色语气提示（微调语气与侧重，不得违背方法论与边界）。
+  const toneLine = `（表达风格参考 · 本命色「${ctx.benmingColor}」：${benmingTone(ctx.benmingColor)}；据此微调语气与侧重，但不改变方法论与上述业务边界。）`;
+  const stable = `${fillPlaceholders(base, ctx)}\n\n${guard}\n\n${toneLine}`;
 
   const parts: string[] = [];
   if (active) parts.push(fillPlaceholders(active, ctx)); // 本轮生效的按需模块（在参考资料之前）
