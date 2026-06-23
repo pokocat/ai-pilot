@@ -307,6 +307,33 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
   return { result: mockChat(ctx), usage: ZERO_USAGE };
 }
 
+export type ChatStreamEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'done'; result: ChatReply; usage: Usage };
+
+// 按句/词切块，供前端渐进渲染（替代历史「假 sleep」节奏）。
+function* chunkText(text: string): Generator<string> {
+  let buf = '';
+  for (const ch of text) {
+    buf += ch;
+    if (buf.length >= 12 || '。！？\n.!?'.includes(ch)) { yield buf; buf = ''; }
+  }
+  if (buf) yield buf;
+}
+
+/**
+ * P1-B3：聊天流式（渐进渲染）。内容审核是硬约束 → 绝不流式下发未审核的 token，
+ * 故必须先拿到「经输入+输出审核的完整结果」再分块推送。复用 chatComplete（审核/计费/trace/provider 分发全在内，
+ * 零重复、零安全回退），按真实节奏分块，去掉假 sleep 剧场。
+ * 注：real-provider 的「模型 token 级增量」为后续（需 provider SDK 原生流式 + 真机 QA）；
+ * 在「必须先审核全量」的产品约束下，渐进渲染已审核结果才是正确架构。
+ */
+export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): AsyncGenerator<ChatStreamEvent> {
+  const { result, usage } = await chatComplete(ctx, meta);
+  for (const piece of chunkText(result.text)) yield { type: 'delta', text: piece };
+  yield { type: 'done', result, usage };
+}
+
 export type AdaptiveResult =
   | { kind: 'report'; deliverable: Deliverable; usage: Usage }
   | { kind: 'chat'; reply: ChatReply; usage: Usage };

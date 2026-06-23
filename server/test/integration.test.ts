@@ -17,6 +17,7 @@ import { addModel } from '../src/services/aiConfig.js';
 import { setQuota, getQuotaState, chargeQuota, ensureQuota, reserveQuota } from '../src/services/tokenQuota.js';
 import { loadHistory } from '../src/routes/sessions.js';
 import { moderate, listModerationLogs } from '../src/services/moderation.js';
+import { chatCompleteStream } from '../src/llm/gateway.js';
 import { percentEncode, canonicalQuery, aliyunSignature } from '../src/services/sms.js';
 import { _resetTokenCache } from '../src/services/wechat.js';
 
@@ -1375,5 +1376,24 @@ describe('TC-Z 月度 Token 额度', () => {
     const del = await api('DELETE', '/api/me', { token: t });
     assert.equal(del.status, 200);
     assert.equal(await prisma.tokenWallet.count({ where: { tenantId } }), 0, '注销后租户额度账户应清空');
+  });
+});
+
+describe('TC-S P1-B3 聊天流式（渐进渲染 · 复用全量审核）', () => {
+  test('chatCompleteStream 真增量分块 + 拼接还原 + done 收尾', async () => {
+    const t = await login(uniquePhone());
+    const tenantId = await tenantOf(t);
+    const { ctx } = await buildGenContext({ userId: t, tenantId, agentKey: 'strat', userMessage: '帮我系统看看增长策略，多讲一些可执行的细节' });
+    let joined = '';
+    let doneText: string | null = null;
+    let deltaCount = 0;
+    for await (const e of chatCompleteStream(ctx)) {
+      if (e.type === 'delta') { joined += e.text; deltaCount++; }
+      else doneText = e.result.text;
+    }
+    assert.ok(doneText !== null, '应有 done 收尾事件');
+    assert.equal(joined, doneText, '分块拼接应无损还原完整文本');
+    assert.ok(deltaCount >= 1, '至少一块');
+    if ((doneText as string).length > 12) assert.ok(deltaCount > 1, '长文本应拆成多块（真渐进，非一次性）');
   });
 });
