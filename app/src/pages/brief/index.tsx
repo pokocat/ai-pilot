@@ -1,11 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import SafeHeader from '../../components/SafeHeader';
 import Icon from '../../components/Icon';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import type { ClientUnderstanding } from '../../services/api';
+import { api, type ClientUnderstanding, type MemoryCandidate } from '../../services/api';
 import './index.scss';
 
 export default function BriefPage() {
@@ -13,10 +13,16 @@ export default function BriefPage() {
   const color = s.color();
   const accent = color.vars['--accent'];
   const understanding = s.me()?.understanding;
+  const [mems, setMems] = useState<MemoryCandidate[]>([]); // P1-C2：记忆中心（用户可见可删）
 
   useEffect(() => {
     store.loadMe();
+    api.memories().then(setMems).catch(() => {});
   }, []);
+
+  const removeMem = async (id: string) => {
+    try { await api.deleteMemory(id); setMems((cur) => cur.filter((x) => x.id !== id)); } catch { /* noop */ }
+  };
 
   return (
     <View className={`page brief-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -71,6 +77,19 @@ export default function BriefPage() {
             <Text className="bf-empty">暂无资料。先登录并完成建档，后续对话、项目、报告和知识库都会逐步沉淀到个人档案。</Text>
           </View>
         )}
+
+        {mems.length > 0 ? (
+          <View className="bf-sec">
+            <Text className="bf-sec-t">军师记住了什么 · 可删除纠错</Text>
+            {mems.map((m) => (
+              <View key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '7px 0', borderBottom: '1px solid rgba(0,0,0,.05)' }}>
+                <Text style={{ flex: 1, fontSize: '14px', lineHeight: 1.5 }}>{m.text}</Text>
+                <Text style={{ color: accent, marginLeft: '12px', fontSize: '13px', flexShrink: 0 }} onClick={() => removeMem(m.id)}>删除</Text>
+              </View>
+            ))}
+            <Text className="bf-empty" style={{ marginTop: '6px' }}>记错了可直接删除；删除即时生效，后续不再据此判断。</Text>
+          </View>
+        ) : null}
 
         <View className="bf-cta" style={{ background: accent }} onClick={() => startInterview()}>
           <Icon name="spark" size={17} color="#fff" />

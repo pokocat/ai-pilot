@@ -794,6 +794,9 @@ export const mock = {
   async memories(): Promise<MemoryCandidate[]> {
     return delay([]);
   },
+  async deleteMemory(): Promise<{ ok: boolean }> {
+    return delay({ ok: true });
+  },
   async knowledgeSearch(q: string, projectId?: string): Promise<KnowledgeHit[]> {
     const { d } = current();
     if (!q.trim()) return delay([]);

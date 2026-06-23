@@ -169,10 +169,14 @@ export const api = {
     IS_MOCK ? mock.createKnowledge(body) : request<KnowledgeItemT>('/knowledge', 'POST', body),
   deleteKnowledge: (id: string) =>
     IS_MOCK ? mock.deleteKnowledge(id) : request<{ ok: boolean }>(`/knowledge/${id}`, 'DELETE'),
-  // —— 长期记忆（@引用候选；P1-C3）——
+  // —— 长期记忆（@引用候选 P1-C3 + 记忆中心 P1-C2）——
   memories: (agentKey?: string, q?: string) =>
     IS_MOCK ? mock.memories()
       : request<MemoryCandidate[]>(`/memories${agentKey || q ? `?${agentKey ? `agentKey=${agentKey}` : ''}${agentKey && q ? '&' : ''}${q ? `q=${encodeURIComponent(q)}` : ''}` : ''}`),
+  deleteMemory: (id: string) =>
+    IS_MOCK ? mock.deleteMemory() : request<{ ok: boolean }>(`/memories/${id}`, 'DELETE'),
+  updateMemory: (id: string, text: string) =>
+    IS_MOCK ? mock.deleteMemory() : request<{ ok: boolean }>(`/memories/${id}`, 'PATCH', { text }),
   // —— 我的资料库（文档视图 + 上传） ——
   knowledgeDocs: (projectId?: string) =>
     IS_MOCK ? Promise.resolve([] as KnowledgeDocRow[]) : request<KnowledgeDocRow[]>(`/knowledge/docs${projectId ? `?projectId=${projectId}` : ''}`),
