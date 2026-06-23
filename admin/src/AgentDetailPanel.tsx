@@ -25,8 +25,8 @@ const BILLING: [AgentBilling, string, string][] = [
   ['metered', '按次计费', '无需解锁，每次产出消耗权益点（如图片生成）'],
 ];
 const SOURCES = [
-  ['conversation', '对话记忆', '从历史会话提炼 · 已沉淀 128 条', 'chat'],
-  ['document', '企业资料（可选投喂）', '客户补充的背景资料 · 24 份', 'doc'],
+  ['conversation', '对话记忆', '从历史会话提炼洞察', 'chat'],
+  ['document', '企业资料（可选投喂）', '客户补充的背景资料', 'doc'],
   ['deliverable_feedback', '产出反馈', '采纳 / 修改 / 忽略 信号回流', 'chart'],
 ];
 
@@ -384,8 +384,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
               </div>
             ))}
           </div>
-          <div className="mem-meter"><i style={{ width: '62%' }} /></div>
-          <div className="blk-d" style={{ margin: '9px 0 0' }}>记忆成熟度 62% · 随使用持续提升</div>
+          <div className="blk-d" style={{ margin: '9px 0 0' }}>记忆随真实使用持续积累（不展示估算值，避免误导）。</div>
         </div>
         <div style={{ height: 70 }} />
       </div>

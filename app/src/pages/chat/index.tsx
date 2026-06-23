@@ -15,8 +15,8 @@ import './index.scss';
 type Msg =
   | { role: 'greet'; agent: Agent }
   | { role: 'user'; text: string; refs?: MessageRef[] }
-  | { role: 'assistant'; reply: ChatReplyT }
-  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string }
+  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[] }
+  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[] }
   | { role: 'memory'; agentName: string };
 
 // 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
@@ -205,7 +205,7 @@ export default function Chat() {
       const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
       if (res.sessionId && !sid) setSessionId(res.sessionId);
       if (res.kind === 'report' && res.deliverable) {
-        setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true, messageId: res.messageId }]);
+        setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true, messageId: res.messageId, knowledgeUsed: res.knowledgeUsed }]);
         if (res.memory?.learned) {
           setTimeout(() => {
             setMsgs((m) => [...m, { role: 'memory', agentName: res.memory!.agentName }]);
@@ -213,7 +213,7 @@ export default function Chat() {
           }, data_delay(res.deliverable!));
         }
       } else if (res.reply) {
-        setMsgs((m) => [...m, { role: 'assistant', reply: res.reply! }]);
+        setMsgs((m) => [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed }]);
       }
       setTimeout(scrollToEnd, 80);
     } catch (e) {
@@ -431,6 +431,16 @@ export default function Chat() {
             <View key={i} className="msg a">
               <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
               <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} onShare={() => shareReport(m.messageId)} />
+              {m.deliverable.degraded ? (
+                <View style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
+                  <Text>本次为降级模板（未取得完整结构化产出），可重新发送以获取正式成果。</Text>
+                </View>
+              ) : null}
+              {m.knowledgeUsed && m.knowledgeUsed.length ? (
+                <View style={{ marginTop: '6px', fontSize: '12px', opacity: 0.6 }}>
+                  <Text>参考了 {m.knowledgeUsed.length} 份资料：{m.knowledgeUsed.join('、')}</Text>
+                </View>
+              ) : null}
             </View>
           );
         })}
