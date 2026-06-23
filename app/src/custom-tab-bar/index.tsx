@@ -67,7 +67,7 @@ export default function CustomTabBar() {
             const active = i === selected;
             if (t.center) {
               return (
-                <View key={t.path} className="tab tab-center" onClick={() => switchTo(i)}>
+                <View key={t.path} className="tab tab-center" role="tab" aria-label={t.text} onClick={() => switchTo(i)}>
                   <View className="center-btn" style={{ background: accent }}>
                     <Icon name="chat" size={22} color="#FBFAF6" />
                   </View>
@@ -76,7 +76,7 @@ export default function CustomTabBar() {
               );
             }
             return (
-              <View key={t.path} className={`tab ${active ? 'on' : ''}`} onClick={() => switchTo(i)}>
+              <View key={t.path} className={`tab ${active ? 'on' : ''}`} role="tab" aria-label={t.text} aria-selected={active} onClick={() => switchTo(i)}>
                 <Icon name={t.icon} size={21} color={active ? accent : '#969BA1'} />
                 <Text className="tab-label" style={active ? { color: accent } : {}}>
                   {t.text}

@@ -151,7 +151,7 @@ export default function Home() {
               onInput={(e) => setInput(e.detail.value)}
               onConfirm={send}
             />
-            <View className="ask-send" style={{ background: accent }} onClick={send}>
+            <View className="ask-send" role="button" aria-label="发送" style={{ background: accent }} onClick={send}>
               <Icon name="send" size={16} color="#FBFAF6" />
             </View>
           </View>
