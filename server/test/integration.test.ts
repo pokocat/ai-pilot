@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import { api, login, seedBaseline, cleanBusiness, closeApp, uniquePhone, deliverable, getApp } from './helpers.js';
 // 直接断言的服务层（也是后端的一部分）
-import { recallMemories, recordFeedback } from '../src/services/memory.js';
+import { recallMemories, recordFeedback, learnFromConversation, recencyDecay, mmrSelect } from '../src/services/memory.js';
 import { buildGenContext } from '../src/services/context.js';
 import { hybridSearch, resolveReferences } from '../src/services/retrieval.js';
 import { ingestUploadedFile, getKnowledgeDetail } from '../src/services/knowledge.js';
@@ -1183,6 +1183,32 @@ describe('TC-Y Token 用量计量', () => {
     assert.ok(emb && emb.totalTokens >= 1234, 'embedding 应进 infra');
     assert.ok(sum.infra.some((x) => x.kind === 'rerank'), 'rerank 应进 infra');
     assert.ok(!sum.byModel.some((m) => m.model === 'BAAI/bge-m3' || m.model === 'BAAI/bge-reranker-v2-m3'), '嵌入/重排不应进用户产出 byModel');
+  });
+});
+
+// ───────────────────────── TC-M 记忆召回与去重（E1/E2） ─────────────────────────
+describe('TC-M 记忆召回与去重', () => {
+  test('M1 recencyDecay 半衰期 30 天', () => {
+    assert.equal(recencyDecay(0), 1);
+    assert.ok(Math.abs(recencyDecay(30) - 0.5) < 1e-9);
+    assert.ok(Math.abs(recencyDecay(60) - 0.25) < 1e-9);
+  });
+  test('M2 mmrSelect 相关性相近时优先多样性（跳过近重）', () => {
+    const A = { text: 'A', emb: [1, 0, 0], score: 0.90 };
+    const B = { text: 'B', emb: [1, 0, 0], score: 0.88 }; // 与 A 同向（近重）
+    const C = { text: 'C', emb: [0, 1, 0], score: 0.85 }; // 正交（多样）
+    assert.deepEqual(mmrSelect([A, B, C], 2, 0.7), ['A', 'C'], 'MMR 取 A 后应跳过近重 B、选多样 C');
+  });
+  test('M3 E1 去重-on-write：相同洞察去重为一行并加权刷新', async () => {
+    const t = await login(uniquePhone(), '记忆甲');
+    const tenantId = await tenantOf(t);
+    const cfg = { longTerm: true, autoLearn: true, intensity: 'balanced' as const, retentionDays: 180, sources: ['conversation' as const, 'document' as const] };
+    const txt = '我们最大的难题是获客成本太高，转化率只有百分之二';
+    await learnFromConversation({ tenantId, userId: t, agentKey: 'strat', cfg, userText: txt });
+    await learnFromConversation({ tenantId, userId: t, agentKey: 'strat', cfg, userText: txt });
+    const rows = await prisma.memory.findMany({ where: { userId: t, agentKey: 'strat' } });
+    assert.equal(rows.length, 1, '相同洞察两次写入应去重为 1 行（旧实现会堆 2 行）');
+    assert.ok(rows[0].weight > 1.0, '重复出现应加权（>初始 1.0）');
   });
 });
 

@@ -203,6 +203,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         if (agentKey !== 'general') {
           learned = await learnFromConversation({
             tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId,
+            assistantText: `${deliverable.title}：${deliverable.sections.map((s) => s.h).filter(Boolean).join('、')}`,
           });
         }
         const creditBalance = creditReservation?.balance ?? 0;
@@ -391,6 +392,7 @@ export async function sessionRoutes(app: FastifyInstance) {
             cfg: memoryConfig,
             userText: text,
             projectId,
+            assistantText: `${deliverable.title}：${deliverable.sections.map((s) => s.h).filter(Boolean).join('、')}`,
           });
           if (learned) send('memory', { learned: true, agentName: agent.name });
         }

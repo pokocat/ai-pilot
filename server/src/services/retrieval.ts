@@ -30,7 +30,7 @@ function toItemT(row: {
 }
 
 // 关键词得分：query 的 token 命中 chunk 文本的比例（0..1），与向量分互补。
-function keywordScore(query: string, text: string): number {
+export function keywordScore(query: string, text: string): number {
   const q = query.toLowerCase();
   const terms = [...(q.match(/[a-z0-9]+/g) ?? []), ...(q.match(/[一-鿿]{2,}/g) ?? [])];
   if (!terms.length) return 0;
