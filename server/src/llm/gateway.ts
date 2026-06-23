@@ -472,12 +472,14 @@ async function rawJson(
 }
 
 /** 通用 JSON 补全（评测评委等内部用）：用就绪模型发一次并解析 JSON；未就绪（mock）/失败返回 null。 */
-export async function completeJson(system: string, user: string, opts?: { temperature?: number }): Promise<Record<string, unknown> | null> {
+export async function completeJson(system: string, user: string, opts?: { temperature?: number; model?: string }): Promise<Record<string, unknown> | null> {
   const base = await getAiConfig();
   const live = liveProvider(base);
   if (!live) return null;
-  // P1-A2：允许指定温度（评委评分用 temperature=0 提升可复现性）。
-  const cfg = opts?.temperature != null ? { ...base, temperature: opts.temperature } : base;
+  // P1-A2：允许指定温度（评委评分用 temperature=0 提升可复现性）+ 指定模型（评委用独立模型，避免被测模型自评）。
+  const cfg = (opts?.temperature != null || opts?.model)
+    ? { ...base, ...(opts.temperature != null ? { temperature: opts.temperature } : {}), ...(opts.model ? { model: opts.model } : {}) }
+    : base;
   try {
     return await rawJson(cfg, live, system, user);
   } catch (err) {

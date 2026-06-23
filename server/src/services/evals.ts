@@ -48,7 +48,8 @@ async function judge(input: string, output: string, rubric: string | null): Prom
     '重点看：是否切题、是否专业可执行、是否符合标准、有无编造。只输出 JSON：{"score": 数字, "note": "一句话理由"}。',
   ].join('\n');
   const user = `【用户问题】\n${input}\n\n【评分标准】\n${rubric || '回答是否专业、切题、可执行、无编造。'}\n\n【被测回答】\n${output.slice(0, 6000)}`;
-  const j = await completeJson(sys, user, { temperature: 0 }); // P1-A2：评分用 temperature=0，提升可复现性
+  // P1-A2：评分用 temperature=0（可复现）+ 可选独立评委模型 JUDGE_MODEL（避免被测模型自评；留空=同全局模型）。
+  const j = await completeJson(sys, user, { temperature: 0, model: process.env.JUDGE_MODEL || undefined });
   if (!j || typeof j.score !== 'number') return { score: null, note: '未配置真实模型，无法评分（mock）' };
   const score = Math.max(0, Math.min(10, j.score as number));
   return { score, note: typeof j.note === 'string' ? j.note : '' };
@@ -72,7 +73,7 @@ export async function startEvalRun(opts: {
     data: {
       agentKey: opts.agentKey, setId: opts.setId,
       targetRef: typeof opts.target === 'object' ? opts.target.versionId : opts.target === 'draft' ? 'draft' : 'published',
-      targetLabel: opts.targetLabel, status: 'running', judgeModel: cfg.label || cfg.model, createdBy: opts.accountId ?? null,
+      targetLabel: opts.targetLabel, status: 'running', judgeModel: process.env.JUDGE_MODEL || cfg.label || cfg.model, createdBy: opts.accountId ?? null,
     },
   });
   // 后台异步跑分（不阻塞请求）。失败写进 run.note。
