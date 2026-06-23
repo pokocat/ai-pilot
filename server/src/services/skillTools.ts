@@ -127,9 +127,11 @@ export async function loadToolsByNames(names?: string[] | null): Promise<Tool[]>
   const builtinNames = names.filter((n) => builtinSet.has(n));
   const customKeys = names.filter((n) => !builtinSet.has(n));
   const tools: Tool[] = resolveTools(builtinNames);
+  const resolved = new Set<string>(builtinNames);
   if (customKeys.length) {
     const rows = await prisma.skillTool.findMany({ where: { key: { in: customKeys }, enabled: true } });
     for (const r of rows) {
+      resolved.add(r.key);
       tools.push(makeHttpTool({
         key: r.key, name: r.name, description: r.description,
         inputSchema: (r.inputSchema as Record<string, unknown>) ?? {},
@@ -138,5 +140,8 @@ export async function loadToolsByNames(names?: string[] | null): Promise<Tool[]>
       }));
     }
   }
+  // P2-10：配置引用了不存在/未启用的工具时不再静默跳过 —— 告警，便于排查悬挂引用。
+  const missing = names.filter((n) => !resolved.has(n));
+  if (missing.length) console.warn(`[skillTools] 跳过未知/未启用工具(请检查 agent 技能配置与 SkillTool 表): ${missing.join(', ')}`);
   return tools;
 }
