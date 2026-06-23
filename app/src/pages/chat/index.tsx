@@ -9,13 +9,15 @@ import SafeHeader from '../../components/SafeHeader';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Agent, type Deliverable, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../services/api';
+import { STREAM_CHAT } from '../../services/config';
+import { generateStream } from '../../services/streaming';
 import { agentForText } from '../../data/intents';
 import './index.scss';
 
 type Msg =
   | { role: 'greet'; agent: Agent }
   | { role: 'user'; text: string; refs?: MessageRef[] }
-  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; retryText?: string }
+  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; retryText?: string; streaming?: boolean }
   | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[] }
   | { role: 'memory'; agentName: string };
 
@@ -203,20 +205,44 @@ export default function Chat() {
     if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
     try {
-      const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
-      if (res.sessionId && !sid) setSessionId(res.sessionId);
-      if (res.kind === 'report' && res.deliverable) {
-        setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true, messageId: res.messageId, knowledgeUsed: res.knowledgeUsed }]);
-        if (res.memory?.learned) {
-          setTimeout(() => {
-            setMsgs((m) => [...m, { role: 'memory', agentName: res.memory!.agentName }]);
-            scrollToEnd();
-          }, data_delay(res.deliverable!));
+      // P1-B3：纯聊天体（无 deliverableKey）且开关开启 → 流式渐进渲染；其余走同步（零行为变更）。
+      if (STREAM_CHAT && !agent?.deliverableKey) {
+        const patch = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
+          setMsgs((m) => {
+            const i = m.length - 1;
+            if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+              const copy = m.slice(); copy[i] = fn(copy[i] as Extract<Msg, { role: 'assistant' }>); return copy;
+            }
+            return m;
+          });
+        setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
+        await generateStream(
+          { text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined },
+          {
+            onSession: (id) => { if (id && !sid) setSessionId(id); },
+            onToken: (t) => patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })),
+            onChat: (reply) => patch((msg) => ({ ...msg, reply })), // 完整回复权威兜底：token 渲染即便有偏差，最终内容仍正确
+            onDone: () => patch((msg) => ({ ...msg, streaming: false })),
+            onError: (em) => patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: text, streaming: false })),
+          },
+        );
+        setTimeout(scrollToEnd, 80);
+      } else {
+        const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
+        if (res.sessionId && !sid) setSessionId(res.sessionId);
+        if (res.kind === 'report' && res.deliverable) {
+          setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true, messageId: res.messageId, knowledgeUsed: res.knowledgeUsed }]);
+          if (res.memory?.learned) {
+            setTimeout(() => {
+              setMsgs((m) => [...m, { role: 'memory', agentName: res.memory!.agentName }]);
+              scrollToEnd();
+            }, data_delay(res.deliverable!));
+          }
+        } else if (res.reply) {
+          setMsgs((m) => [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed }]);
         }
-      } else if (res.reply) {
-        setMsgs((m) => [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed }]);
+        setTimeout(scrollToEnd, 80);
       }
-      setTimeout(scrollToEnd, 80);
     } catch (e) {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
       setMsgs((m) => [...m, { role: 'assistant', reply: { text: errorReply(e) }, retryText: text }]); // P2-15：保留原文供重试

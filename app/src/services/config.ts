@@ -11,3 +11,8 @@ export const IS_MOCK = APP_MODE === 'mock';
 // server 模式后端基址（微信小程序需在后台配置合法域名后替换为线上 https 域名）。
 export const BASE_URL =
   process.env.TARO_APP_API || 'http://localhost:4000/api';
+
+// P1-B3：聊天流式渲染开关（默认关）。后端流式链路已全程验证（gateway/SSE/线级传输/解析器），
+// 仅 UI 渐进渲染需真机/浏览器可视 QA；QA 通过后置 TARO_APP_STREAM=1 重新构建即启用。
+export const STREAM_CHAT = process.env.TARO_APP_STREAM === '1';
+
