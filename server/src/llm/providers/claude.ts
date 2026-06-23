@@ -63,6 +63,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
   const structureHint = tpl
     ? `参考产出结构（小标题）：${tpl.sections.map((s) => s.h).join(' / ')}。标题用「${tpl.title}」。`
     : '产出 3–4 段结构化内容。';
+  const dlvHistory = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? ('user' as const) : ('assistant' as const), content: m.text }));
 
   const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
     model: cfg.model,
@@ -71,7 +72,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     system: systemBlocks(`${stable}\n\n${structureHint}\n务必调用 emit_deliverable 工具输出结构化成果，不要输出自由长文。`, dynamic),
     tools: [DELIVERABLE_TOOL],
     tool_choice: { type: 'tool', name: 'emit_deliverable' },
-    messages: [{ role: 'user', content: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。` }],
+    messages: [...dlvHistory, { role: 'user', content: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。` }],
   });
   const usage = usageOf(res);
 
@@ -90,9 +91,9 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
       usage,
     };
   }
-  // 真实调用已发生（已花 token）：即便没拿到 tool 输出，也按真实 usage 记账，内容兜底 mock。
+  // 真实调用已发生（已花 token）：即便没拿到 tool 输出，也按真实 usage 记账（成本可观测），内容兜底 mock 并标 degraded（用户侧不计费、提示可重试）。
   const { mockDeliverable } = await import('./mock.js');
-  return { result: mockDeliverable(ctx), usage };
+  return { result: { ...mockDeliverable(ctx), degraded: true }, usage };
 }
 
 export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<ChatReply>> {

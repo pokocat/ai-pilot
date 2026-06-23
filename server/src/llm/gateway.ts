@@ -4,6 +4,7 @@
 // provider 与 baseUrl/model/key 由「运营后台可切换的 DB 配置」决定（services/aiConfig），
 // env 仅作兜底；未配置真实 key 时一律降级 mock，保证可用。
 
+import { createHash } from 'node:crypto';
 import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../services/aiConfig.js';
@@ -152,8 +153,18 @@ async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>
 
 // —— 结果缓存：见 services/cache.ts（默认内存，配 REDIS_URL+ioredis 切 Redis） ——
 const CACHE_TTL = 5 * 60 * 1000;
+// 把一组上下文片段折叠成稳定短哈希：用于缓存键，避免「条数相同但内容不同」误命中（P0-1）。
+function contentSig(parts: (string | null | undefined)[]): string {
+  return createHash('sha1').update(parts.map((p) => p ?? '').join(' ')).digest('hex').slice(0, 16);
+}
 function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string {
-  const refSig = (ctx.references?.length ?? 0) + ':' + (ctx.knowledge?.length ?? 0) + ':' + (ctx.memories?.length ?? 0);
+  // P0-1：引用/知识/记忆/理解按**内容哈希**入键，而非仅条数——否则同租户不同用户、条数偶合即串数据。
+  const ctxSig = contentSig([
+    ...(ctx.references ?? []),
+    ...(ctx.knowledge ?? []),
+    ...(ctx.memories ?? []),
+    ...(ctx.understanding ?? []),
+  ]);
   const profileSig = [
     ctx.companyName ?? '',
     ctx.profile?.industry ?? '',
@@ -163,9 +174,10 @@ function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string 
     ctx.understandingMaturity ?? '',
     ctx.understandingQuestions?.length ?? 0,
   ].join('|');
-  // tenantId is required to prevent cross-tenant cache hits for identical inputs.
+  // tenantId + userId 双重入键：tenantId 防跨租户；userId 防同租户内跨用户命中（成果由 per-user 私有记忆/引用生成）。
   const tenantSig = ctx.tenantId ?? '';
-  return `${kind}:${tenantSig}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${profileSig}:${refSig}`;
+  const userSig = ctx.userId ?? '';
+  return `${kind}:${tenantSig}:${userSig}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${profileSig}:${ctxSig}`;
 }
 
 export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Promise<{ result: Deliverable; usage: Usage }> {

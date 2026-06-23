@@ -14,7 +14,8 @@ import { ingestUploadedFile, getKnowledgeDetail } from '../src/services/knowledg
 import type { MemoryConfig } from '../src/data/agents.js';
 import { recordTokenUsage, tokenUsageSummary } from '../src/services/usage.js';
 import { addModel } from '../src/services/aiConfig.js';
-import { setQuota, getQuotaState, chargeQuota, ensureQuota } from '../src/services/tokenQuota.js';
+import { setQuota, getQuotaState, chargeQuota, ensureQuota, reserveQuota } from '../src/services/tokenQuota.js';
+import { loadHistory } from '../src/routes/sessions.js';
 import { percentEncode, canonicalQuery, aliyunSignature } from '../src/services/sms.js';
 import { _resetTokenCache } from '../src/services/wechat.js';
 
@@ -1185,6 +1186,24 @@ describe('TC-Y Token 用量计量', () => {
   });
 });
 
+// ───────────────────────── TC-H 对话历史注入（P0-3） ─────────────────────────
+describe('TC-H 对话历史注入', () => {
+  test('H1 loadHistory 取会话先前轮次（时序、排除当前、角色交替）', async () => {
+    const t = await login(uniquePhone(), '历史甲');
+    const r1 = await api<{ sessionId: string }>('POST', '/api/generate-sync', { token: t, body: { text: '我们做的是 SaaS 工具', agentKey: 'general' } });
+    assert.equal(r1.status, 200);
+    const sid = r1.body.sessionId;
+    const r2 = await api('POST', '/api/generate-sync', { token: t, body: { text: '那定价该怎么定', sessionId: sid, agentKey: 'general' } });
+    assert.equal(r2.status, 200);
+    // 两轮后会话含 user1/assistant1/user2/assistant2；排除一个不存在 id → 取到全部前序轮次
+    const hist = await loadHistory(sid, '__none__');
+    assert.ok(hist.length >= 4, `应载入≥4 轮历史，实得 ${hist.length}`);
+    assert.equal(hist[0].role, 'user');
+    assert.ok(hist[0].text.includes('SaaS'), '首轮应为用户原话');
+    for (let i = 1; i < hist.length; i++) assert.notEqual(hist[i].role, hist[i - 1].role, '相邻轮次角色应交替（已合并连续同角色）');
+  });
+});
+
 // ───────────────────────── TC-Z 月度 Token 额度（双轴计费 P2） ─────────────────────────
 describe('TC-Z 月度 Token 额度', () => {
   test('Z1 setQuota/charge/ensure：ceil(token×ratio) 扣减、透支后拦截', async () => {
@@ -1210,6 +1229,19 @@ describe('TC-Z 月度 Token 额度', () => {
     await ensureQuota(t);
     const st = await chargeQuota(t, 99999, 5);
     assert.equal(st.unlimited, true);
+  });
+
+  test('Z4 P0-2：并发预留在锁内串行，透支有界（不再无界放行）', async () => {
+    const t = await login(uniquePhone(), '额度丁');
+    const tenantId = await tenantOf(t);
+    await setQuota(tenantId, t, 5000); // RESERVE_TOKENS=2000/次 → 5000 额度恰好放行 3 个并发后转负拦截
+    const results = await Promise.allSettled(Array.from({ length: 20 }, () => reserveQuota(t, 1)));
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    const rejected = results.filter((r) => r.status === 'rejected').length;
+    assert.equal(ok, 3, '每次预留 2000 → 恰好放行 3 个（旧实现 ensureQuota 只判 balance>0 会放行全部 20 个）');
+    assert.equal(rejected, 17);
+    const st = await getQuotaState(t);
+    assert.equal(st.balance, -1000, '透支有界：5000 − 3×2000 = −1000（约一份预留），而非任意负');
   });
 
   test('Z3 /me 含 tokenQuota；/me/credits 返回钻石流水', async () => {

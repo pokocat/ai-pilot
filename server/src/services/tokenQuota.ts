@@ -7,6 +7,11 @@
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
 
+// P0-2：单次产出的悲观额度预留（token 计）。真实成本只有产出后才知道，故产出前先按此预扣、
+// 产出后 settle 按真实 token 多退少补。作用是**并发下把透支限制为有界**（每个在途请求各占一份），
+// 取代旧的「ensureQuota 只判 balance>0 → 无锁事后扣」导致 N 个并发全部放行的无界透支。
+const RESERVE_TOKENS = 2000;
+
 export class InsufficientQuotaError extends Error {
   statusCode = 402;
   code = 'INSUFFICIENT_QUOTA';
@@ -103,6 +108,68 @@ export async function chargeQuota(userId: string, realTokens: number, ratio: num
     select: { quota: true, balance: true },
   });
   return toState(updated.quota, updated.balance);
+}
+
+// 额度账户的 per-user 串行锁（与 credits 同套路）：保证「校验余额 → 扣减」整体原子，杜绝并发无界透支。
+async function lockQuota(db: Prisma.TransactionClient, userId: string): Promise<void> {
+  await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`quota:${userId}`}))`;
+}
+
+/** 产出前的额度预留：成功后产出，产出后必须 settle（多退少补）或失败时 refund（全额退回）。 */
+export interface QuotaReservation {
+  unlimited: boolean;
+  settle: (realTokens: number, ratio: number) => Promise<QuotaState>;
+  refund: () => Promise<void>;
+}
+
+/**
+ * P0-2：产出前在锁内**预扣**一份悲观估算额度（ceil(RESERVE_TOKENS × ratio)），返回结算句柄。
+ * - 余额≤0 → 抛 402（与旧 ensureQuota 语义一致，仍允许「最后一次透支」：余额>0 即可预留一份）。
+ * - 并发：advisory lock 串行化「读余额 + 扣预留」，故第二个并发请求会看到已被预留压低/转负的余额而被拦，透支有界。
+ * - settle：按真实 token 计算实际成本，delta = 预留 − 实际，>0 退回、<0 追扣（幂等：settle/refund 二选一只生效一次）。
+ */
+export async function reserveQuota(userId: string, ratio = 1): Promise<QuotaReservation> {
+  const w = await loadWallet(userId); // 锁外先确保账户存在 + 惰性月度重置（upsert 不宜进事务）
+  if (!w) throw new InsufficientQuotaError('当前套餐无月度 token 额度，请升级套餐');
+  if (isUnlimited(w.quota)) {
+    return { unlimited: true, settle: async () => unlimitedState, refund: async () => {} };
+  }
+  const reserved = Math.ceil(RESERVE_TOKENS * (ratio > 0 ? ratio : 1));
+  await prisma.$transaction(async (tx) => {
+    await lockQuota(tx, userId);
+    const row = await tx.tokenWallet.findUnique({ where: { userId }, select: { balance: true } });
+    if ((row?.balance ?? 0) <= 0) throw new InsufficientQuotaError();
+    await tx.tokenWallet.update({ where: { userId }, data: { balance: { decrement: reserved } } });
+  });
+
+  let done = false;
+  return {
+    unlimited: false,
+    settle: async (realTokens: number, ratio2: number): Promise<QuotaState> => {
+      if (done) return getQuotaState(userId);
+      const cost = Math.ceil(Math.max(0, realTokens) * (ratio2 > 0 ? ratio2 : 1));
+      const delta = reserved - cost; // >0 多退；<0 少补（仍可使最终余额为负=本次透支）
+      const st = await prisma.$transaction(async (tx) => {
+        await lockQuota(tx, userId);
+        const updated = await tx.tokenWallet.update({
+          where: { userId },
+          data: { balance: { increment: delta } },
+          select: { quota: true, balance: true },
+        });
+        return toState(updated.quota, updated.balance);
+      });
+      done = true; // 仅在结算成功后置位；若上面事务抛错，done 仍为 false → 路由 catch 的 refund 会退回预留
+      return st;
+    },
+    refund: async (): Promise<void> => {
+      if (done) return;
+      done = true;
+      await prisma.$transaction(async (tx) => {
+        await lockQuota(tx, userId);
+        await tx.tokenWallet.update({ where: { userId }, data: { balance: { increment: reserved } } });
+      });
+    },
+  };
 }
 
 /** 套餐购买/升级：覆盖式授予当月额度（balance=quota，重置周期键）。quota<0=不限量。 */

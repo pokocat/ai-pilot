@@ -63,10 +63,12 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     ? `参考产出结构（小标题）：${tpl.sections.map((s) => s.h).join(' / ')}。标题用「${tpl.title}」。`
     : '产出 3–4 段结构化内容。';
 
+  const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   const data = await callChat(cfg, {
     max_tokens: 1500,
     messages: [
       { role: 'system', content: `${system}\n\n${structureHint}\n务必调用 emit_deliverable 函数输出结构化成果，不要输出自由长文。` },
+      ...history,
       { role: 'user', content: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。` },
     ] as OAMessage[],
     tools: [{ type: 'function', function: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, parameters: DELIVERABLE_TOOL.input_schema } }],
@@ -89,9 +91,9 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
       usage,
     };
   }
-  // 真实调用已花 token：没拿到 function 输出也按真实 usage 记账，内容兜底 mock。
+  // 真实调用已花 token：没拿到 function 输出也按真实 usage 记账（供成本可观测），内容兜底 mock 并标 degraded（用户侧不计费、提示可重试）。
   const { mockDeliverable } = await import('./mock.js');
-  return { result: mockDeliverable(ctx), usage };
+  return { result: { ...mockDeliverable(ctx), degraded: true }, usage };
 }
 
 export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<ChatReply>> {
@@ -186,6 +188,7 @@ export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
   const r = await runToolLoop({
     step: openaiStep(cfg),
     system: `${system}\n\n${structureHint}\n可先调用工具检索知识/召回记忆，掌握依据后务必调用 emit_deliverable 输出结构化成果，不要输出自由长文。`,
+    history: ctx.history,
     userMessage: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。`,
     tools,
     toolCtx: toolCtxOf(ctx),
@@ -208,7 +211,7 @@ export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
     };
   }
   const { mockDeliverable } = await import('./mock.js');
-  return { result: mockDeliverable(ctx), usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations };
+  return { result: { ...mockDeliverable(ctx), degraded: true }, usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations };
 }
 
 export type AdaptiveOut =

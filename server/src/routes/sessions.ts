@@ -8,7 +8,7 @@ import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
 import { reserveCredits, type CreditReservation } from '../services/credits.js';
-import { ensureQuota, chargeQuota } from '../services/tokenQuota.js';
+import { reserveQuota, type QuotaReservation } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
@@ -122,11 +122,13 @@ export async function sessionRoutes(app: FastifyInstance) {
     const ratio = effective?.billingRatio ?? 1;
     const diamondCost = effective && isImage ? effective.price : 0; // 文本类不扣钻石（走 token 额度）
     let creditReservation: CreditReservation | null = null;
+    let quotaReservation: QuotaReservation | null = null;
     try {
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
-      if (effective && !isImage) await ensureQuota(user.id);  // 文本校验本月 token 额度（余额>0 即放行）
+      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio);  // P0-2：锁内预留额度（并发透支有界）
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
+      if (quotaReservation) await quotaReservation.refund().catch(() => {});
       const err = e as Error & { statusCode?: number; code?: string };
       return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
     }
@@ -144,7 +146,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       if (!session.projectId && projectId) patch.projectId = projectId;
       if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
     }
-    await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+    const userMsg = await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+    const history = await loadHistory(session.id, userMsg.id);
     await recordAudit({
       tenantId: user.tenantId,
       userId: user.id,
@@ -159,7 +162,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     const { ctx, memoryConfig, knowledgeUsed } = await buildGenContext({
       userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
       sessionId: session.id, difyConversationId: session.difyConversationId,
-      effective: effective ?? undefined,
+      effective: effective ?? undefined, history,
     });
 
     try {
@@ -173,7 +176,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
           const creditBalance = creditReservation?.balance ?? 0;
-          const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
+          const tokenQuota = quotaReservation ? await quotaReservation.settle(out.usage.inputTokens + out.usage.outputTokens, ratio) : null;
           return {
             sessionId: session.id, created, agentKey, kind: 'report', messageId: msg.id, deliverable: out.deliverable,
             memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
@@ -183,7 +186,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const learned = await learn();
         const creditBalance = creditReservation?.balance ?? 0;
-        const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(out.usage.inputTokens + out.usage.outputTokens, ratio) : null;
         return {
           sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: out.reply,
           memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
@@ -203,7 +206,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           });
         }
         const creditBalance = creditReservation?.balance ?? 0;
-        const tokenQuota = isImage ? null : await chargeQuota(user.id, usage.inputTokens + usage.outputTokens, ratio);
+        // P0-4：降级（真实模型没出结构化成果、回退模板）不向用户计费——settle(0) 全额退回预留；我们仍在 gateway 侧按真实 token 记账。
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
         return {
           sessionId: session.id, created, agentKey, kind: 'report',
           messageId: msg.id, deliverable,
@@ -217,12 +221,17 @@ export async function sessionRoutes(app: FastifyInstance) {
       });
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
       const creditBalance = creditReservation?.balance ?? 0;
-      const tokenQuota = isImage ? null : await chargeQuota(user.id, usage.inputTokens + usage.outputTokens, ratio);
+      const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
       return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, creditBalance, tokenQuota };
     } catch (err) {
       if (creditReservation?.charged) {
         await creditReservation.refund().catch((refundErr) => {
           console.error('[sessions] credit refund failed:', (refundErr as Error).message);
+        });
+      }
+      if (quotaReservation) {
+        await quotaReservation.refund().catch((refundErr) => {
+          console.error('[sessions] quota refund failed:', (refundErr as Error).message);
         });
       }
       const e = err as Error & { code?: string; statusCode?: number };
@@ -269,11 +278,13 @@ export async function sessionRoutes(app: FastifyInstance) {
     const ratio = effective?.billingRatio ?? 1;
     const diamondCost = effective && isImage ? effective.price : 0;
     let creditReservation: CreditReservation | null = null;
+    let quotaReservation: QuotaReservation | null = null;
     try {
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
-      if (effective && !isImage) await ensureQuota(user.id);
+      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio);
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
+      if (quotaReservation) await quotaReservation.refund().catch(() => {});
       const err = e as Error & { statusCode?: number; code?: string };
       return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
     }
@@ -296,7 +307,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       }
 
       // 持久化用户消息（含引用）
-      await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+      const userMsg = await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+      const history = await loadHistory(session.id, userMsg.id);
       await recordAudit({
         tenantId: user.tenantId,
         userId: user.id,
@@ -317,6 +329,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         sessionId: session.id,
         difyConversationId: session.difyConversationId,
         effective: effective ?? undefined,
+        history,
       });
 
       const learnSse = async () => {
@@ -337,7 +350,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           await learnSse();
           const creditBalance = creditReservation?.balance ?? 0;
-          const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
+          const tokenQuota = quotaReservation ? await quotaReservation.settle(out.usage.inputTokens + out.usage.outputTokens, ratio) : null;
           send('credit', { balance: creditBalance, tokenQuota });
           send('done', { messageId: msg.id });
         } else {
@@ -348,7 +361,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           await learnSse();
           const creditBalance = creditReservation?.balance ?? 0;
-          const tokenQuota = isImage ? null : await chargeQuota(user.id, out.usage.inputTokens + out.usage.outputTokens, ratio);
+          const tokenQuota = quotaReservation ? await quotaReservation.settle(out.usage.inputTokens + out.usage.outputTokens, ratio) : null;
           send('credit', { balance: creditBalance, tokenQuota });
           send('done', { messageId: msg.id });
         }
@@ -382,7 +395,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           if (learned) send('memory', { learned: true, agentName: agent.name });
         }
         const creditBalance = creditReservation?.balance ?? 0;
-        const tokenQuota = isImage ? null : await chargeQuota(user.id, usage.inputTokens + usage.outputTokens, ratio);
+        // P0-4：降级不向用户计费（settle(0) 退回预留）；真实 token 仍在 gateway 侧记账。
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       } else {
@@ -395,7 +409,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         });
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const creditBalance = creditReservation?.balance ?? 0;
-        const tokenQuota = isImage ? null : await chargeQuota(user.id, usage.inputTokens + usage.outputTokens, ratio);
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       }
@@ -405,12 +419,43 @@ export async function sessionRoutes(app: FastifyInstance) {
           console.error('[sessions] credit refund failed:', (refundErr as Error).message);
         });
       }
+      if (quotaReservation) {
+        await quotaReservation.refund().catch((refundErr) => {
+          console.error('[sessions] quota refund failed:', (refundErr as Error).message);
+        });
+      }
       const e = err as Error & { code?: string };
       send('error', { message: e.message, code: e.code ?? 'INTERNAL' });
     } finally {
       reply.raw.end();
     }
   });
+}
+
+// P0-3：取该会话最近 N 轮（排除刚落库的当前用户消息）作为对话历史注入模型——此前完全未注入，
+// 模型每轮无状态，追问「第二点展开/那定价呢」全失忆。report 折叠成一句摘要；合并连续同角色避免非交替报错。
+const HISTORY_TURNS = 8;
+export async function loadHistory(sessionId: string, excludeId: string): Promise<{ role: string; text: string }[]> {
+  const rows = await prisma.message.findMany({
+    where: { sessionId, id: { not: excludeId }, role: { in: ['user', 'assistant', 'report'] } },
+    orderBy: { createdAt: 'desc' },
+    take: HISTORY_TURNS,
+  });
+  const mapped = rows.reverse().map((m) => {
+    const c = m.contentJson as { text?: string; title?: string; sections?: { h?: string }[] };
+    if (m.role === 'report') {
+      const heads = (c.sections ?? []).map((s) => s.h).filter(Boolean).join('、');
+      return { role: 'assistant', text: `（已为你产出《${c.title ?? '成果'}》${heads ? '：' + heads : ''}）` };
+    }
+    return { role: m.role === 'user' ? 'user' : 'assistant', text: (c.text ?? '').trim() };
+  }).filter((m) => m.text);
+  const merged: { role: string; text: string }[] = [];
+  for (const m of mapped) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === m.role) prev.text += '\n' + m.text;
+    else merged.push({ ...m });
+  }
+  return merged;
 }
 
 // 解析本次对话归属项目：已有会话归属优先；否则校验入参项目属于该租户。
