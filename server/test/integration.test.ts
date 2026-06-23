@@ -1396,4 +1396,14 @@ describe('TC-S P1-B3 聊天流式（渐进渲染 · 复用全量审核）', () =
     assert.ok(deltaCount >= 1, '至少一块');
     if ((doneText as string).length > 12) assert.ok(deltaCount > 1, '长文本应拆成多块（真渐进，非一次性）');
   });
+
+  test('/generate SSE 聊天分支真流式：发出 token 增量事件 + chat 兜底 + done（去假 sleep）', async () => {
+    const t = await login(uniquePhone());
+    const res = await api('POST', '/api/generate', { token: t, body: { text: '你好，聊聊增长这件事，多说点', agentKey: 'general' } });
+    assert.equal(res.status, 200);
+    const body = String(res.body);
+    assert.match(body, /event: token/, '应有增量 token 事件（流式）');
+    assert.match(body, /event: chat/, '应有完整 chat 兜底事件（兼容非流式客户端）');
+    assert.match(body, /event: done/, '应有 done 收尾');
+  });
 });

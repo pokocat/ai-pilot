@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { resolveUser, buildGenContext } from '../services/context.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
-import { generateDeliverable, chatComplete, generateAdaptive } from '../llm/gateway.js';
+import { generateDeliverable, chatComplete, generateAdaptive, chatCompleteStream } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
@@ -12,7 +12,7 @@ import { reserveQuota, type QuotaReservation } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
-import type { MessageRef, Deliverable } from '../llm/schema.js';
+import type { MessageRef, Deliverable, ChatReply } from '../llm/schema.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -405,9 +405,14 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('done', { messageId: msg.id });
       } else {
         send('meta', { kind: 'chat' });
-        const { result: reply2, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
-        await sleep(700);
-        send('chat', reply2);
+        // P1-B3：真流式渐进下发——chatCompleteStream 内含输入/输出审核+计费+trace，按句/词推送 token（去掉假 sleep）。
+        let reply2: ChatReply | null = null;
+        let usage = { inputTokens: 0, outputTokens: 0 };
+        for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
+          if (ev.type === 'delta') send('token', { text: ev.text });
+          else { reply2 = ev.result; usage = ev.usage; }
+        }
+        send('chat', reply2); // 完整回复（含 points/acts）兜底，兼容不消费 token 流的客户端
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
         });
