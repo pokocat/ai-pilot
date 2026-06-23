@@ -72,6 +72,9 @@ function fromEnv(): ResolvedAiConfig {
   };
 }
 
+// P2-6：进程内短缓存 + 写时失效（所有 config/model/rate 写路径均清缓存：updateAiConfig / syncActiveSetting
+// /addModel/updateModel/deleteModel）→ 单实例配置变更即时生效。多实例部署下其它实例最多 TTL 陈旧，
+// 需跨进程失效（Redis pub-sub 等基建）才能消除——属基建项，单实例无碍。
 let cache: { cfg: ResolvedAiConfig; at: number } | null = null;
 const TTL = 4000;
 
