@@ -169,7 +169,9 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
     try {
       const r = await api.publishAgent(agentKey, label || undefined);
       setDirty(false); setPubVersion(r.version);
-      toast(r.changed ? `已发布 v${r.version} · C 端已切到新版本` : '与当前线上版本相同，未产生新版本');
+      // P1-A2：发布软门警示（配 EVAL_GATE_MIN 时）——已发布但提示评测分偏低，不拦截。
+      if (r.warning) toast(`已发布 v${r.version}，但 ${r.warning}`);
+      else toast(r.changed ? `已发布 v${r.version} · C 端已切到新版本` : '与当前线上版本相同，未产生新版本');
     } catch (e) { toast((e as Error)?.message || '发布失败'); }
     setPublishing(false);
   };

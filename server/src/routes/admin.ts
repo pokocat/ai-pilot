@@ -17,7 +17,7 @@ import {
   createOperator, listAccounts, setAccountDisabled, setAccountRole, resetAccountPassword,
 } from '../services/adminAccount.js';
 import { recomputeDraftDirty, publishDraft, rollbackToVersion, listVersions, getVersionDetail } from '../services/agentVersions.js';
-import { startEvalRun, suggestTier, PRICING_TIERS } from '../services/evals.js';
+import { startEvalRun, suggestTier, PRICING_TIERS, latestEvalScore } from '../services/evals.js';
 import { encryptSecret, decryptSecretSafe } from '../services/secretBox.js';
 import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
@@ -829,8 +829,16 @@ export async function adminRoutes(app: FastifyInstance) {
     try { await requireAgentAccess(actor, req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
     try {
       const r = await publishDraft(req.params.key, { accountId: actorAccountId(actor), label: req.body?.label });
-      await recordAudit({ action: 'admin.agentversion.publish', payload: { key: req.params.key, version: r.version, changed: r.changed, by: actorName(actor) } });
-      return { ok: true, ...r };
+      // P1-A2：发布软门（opt-in）。设 EVAL_GATE_MIN>0 后，最近评测分低于阈值仅警示、不拦截（block vs warn 属产品策略，默认 warn）。
+      let warning: string | null = null;
+      const gateMin = Number(process.env.EVAL_GATE_MIN);
+      if (Number.isFinite(gateMin) && gateMin > 0) {
+        const score = await latestEvalScore(req.params.key);
+        if (score == null) warning = '尚无评测分，建议先跑一次评测再发布。';
+        else if (score < gateMin) warning = `最近评测分 ${score.toFixed(1)} 低于阈值 ${gateMin}，建议先调教/复评再发布。`;
+      }
+      await recordAudit({ action: 'admin.agentversion.publish', payload: { key: req.params.key, version: r.version, changed: r.changed, by: actorName(actor), warning } });
+      return { ok: true, ...r, warning };
     } catch (e) { return sendErr(reply, e); }
   });
 

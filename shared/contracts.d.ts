@@ -814,7 +814,7 @@ export interface AgentVersionDetail {
   createdAt: string;
 }
 export interface PublishAgentRequest { label?: string }
-export interface PublishAgentResult { ok: true; version: number; versionId: string; changed: boolean; changeSummary: string }
+export interface PublishAgentResult { ok: true; version: number; versionId: string; changed: boolean; changeSummary: string; warning?: string | null } // P1-A2：发布软门警示（opt-in，不拦截）
 export interface RollbackAgentRequest { versionId: string }
 
 /* ────────────── 多运营账户（owner 管理 operator + agent 归属） ────────────── */

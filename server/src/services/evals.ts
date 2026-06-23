@@ -55,6 +55,15 @@ async function judge(input: string, output: string, rubric: string | null): Prom
   return { score, note: typeof j.note === 'string' ? j.note : '' };
 }
 
+/** P1-A2：该 agent 最近一次完成评测的分数（用于发布软门 EVAL_GATE_MIN）。无则 null。 */
+export async function latestEvalScore(agentKey: string): Promise<number | null> {
+  const run = await prisma.evalRun.findFirst({
+    where: { agentKey, status: 'done', score: { not: null } },
+    orderBy: { createdAt: 'desc' }, select: { score: true },
+  });
+  return run?.score ?? null;
+}
+
 /** 启动一次评测：同步建 run（拿到 id），后台异步逐条跑分。返回 runId 供前端轮询。 */
 export async function startEvalRun(opts: {
   agentKey: string;
