@@ -294,7 +294,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
             <>
               <div className="cfg">
                 <div className="cfg-row">
-                  <div className="cb"><div className="ct">启用技能（工具调用）</div><div className="cs">让模型自行调用知识库检索 / 记忆召回等工具后再作答（用该智能体生效的模型——跟随全局或自定义端点均可，需 OpenAI 兼容模型）</div></div>
+                  <div className="cb"><div className="ct">启用技能（工具调用）</div><div className="cs">让模型自行调用知识库检索 / 记忆召回等工具后再作答（需 OpenAI 兼容或 Claude 模型；当前生效模型为 mock 或 Dify 接入时技能不会执行）</div></div>
                   <div className={`sw ${skillsEnabled ? 'on' : ''}`} onClick={() => setSkillsEnabled((v) => !v)}><i /></div>
                 </div>
               </div>
