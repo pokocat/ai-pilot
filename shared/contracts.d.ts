@@ -683,6 +683,18 @@ export interface AdminUserMemory {
   createdAt: string;
   expiresAt: string | null;
 }
+// P1-C4：按 agent 跨用户浏览记忆（治理自动学习写入的脏记忆）
+export interface AdminAgentMemoryItem {
+  id: string;
+  userId: string;
+  kind: string;
+  text: string;
+  weight: number;
+  source: string;
+  createdAt: string;
+  expiresAt: string | null;
+}
+export interface AdminAgentMemoryView { items: AdminAgentMemoryItem[] }
 export interface AdminUserContext {
   understanding: ClientUnderstanding;
   memories: AdminUserMemory[];

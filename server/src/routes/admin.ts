@@ -27,14 +27,14 @@ import { selectableMeta, listDefs, createTool, updateTool, deleteTool } from '..
 import { knowledgeView, reembedAll } from '../services/knowledgeAdmin.js';
 import { retrievalDebug } from '../services/retrievalDebug.js';
 import { userContextView } from '../services/adminUserContext.js';
-import { deleteUserMemory } from '../services/memory.js';
+import { deleteUserMemory, listAgentMemories, deleteAgentMemory } from '../services/memory.js';
 import { getKnowledgeDetail, deleteKnowledge, reembedItem, ingestUploadedFile } from '../services/knowledge.js';
 import type { AiConfigUpdate, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
   AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
-  AdminTraceListView, AdminTraceDetail, AdminModerationLogView, SkillToolDef, SkillToolUpsert,
+  AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert,
   AdminAccountItem, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   AgentVersionListView, AgentVersionItem, PublishAgentRequest, PublishAgentResult, RollbackAgentRequest,
   SandboxRequest, SandboxResult, SandboxTarget,
@@ -454,6 +454,17 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!user) return reply.code(404).send({ error: 'user not found' });
     await deleteUserMemory(user.tenantId, req.params.id, req.params.mid);
     await recordAudit({ tenantId: user.tenantId, userId: req.params.id, action: 'admin.user.memory.delete', payload: { memoryId: req.params.mid } });
+    return { ok: true };
+  });
+
+  // —— P1-C4：按 agent 跨用户浏览/纠正记忆（治理 auto-learn 写入的脏记忆，此前后台只能按单用户查删）——
+  app.get<{ Params: { key: string }; Querystring: { limit?: string } }>('/admin/agents/:key/memories', async (req): Promise<AdminAgentMemoryView> => {
+    return { items: await listAgentMemories(req.params.key, Number(req.query.limit) || 200) };
+  });
+  app.delete<{ Params: { key: string; mid: string } }>('/admin/agents/:key/memories/:mid', async (req, reply) => {
+    const ok = await deleteAgentMemory(req.params.key, req.params.mid);
+    if (!ok) return reply.code(404).send({ error: 'not found' });
+    await recordAudit({ action: 'admin.agent.memory.delete', payload: { agentKey: req.params.key, memoryId: req.params.mid } });
     return { ok: true };
   });
 

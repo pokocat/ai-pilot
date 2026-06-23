@@ -101,8 +101,14 @@ export async function resolveModelRate(model: string): Promise<{ rate: ModelRate
   const exact = cfg.get(model);
   if (exact) return { rate: exact, calibrated: true };
   const m = (model || '').toLowerCase();
-  for (const [k, v] of cfg) if (m.startsWith(k.toLowerCase())) return { rate: v, calibrated: true };
-  return { rate: { in: 0, out: 0 }, calibrated: false }; // 没配单价 → 成本计 0
+  // P2-3：取**最长**匹配前缀（而非插入序第一个），避免 `gpt-4` 遮蔽更精确的 `gpt-4o`。
+  let best: { len: number; v: ModelRate } | null = null;
+  for (const [k, v] of cfg) {
+    const kl = k.toLowerCase();
+    if (m.startsWith(kl) && (!best || kl.length > best.len)) best = { len: kl.length, v };
+  }
+  if (best) return { rate: best.v, calibrated: true };
+  return { rate: { in: 0, out: 0 }, calibrated: false }; // 没配单价 → 成本计 0（calibrated=false 供上层提示「未校准」）
 }
 
 /** 解析当前生效配置（DB 优先，env 兜底，带缓存）。 */
@@ -244,16 +250,20 @@ async function syncActiveSetting(m: ModelRow): Promise<void> {
 
 // 首次进入：库里还没有任何模型时，用当前生效配置（DB 或 env 兜底）落一行并设为生效，平滑迁移。
 async function ensureSeededModels(): Promise<void> {
-  const n = await prisma.aiModel.count();
-  if (n > 0) return;
-  const cfg = await getAiConfig(true);
-  const created = await prisma.aiModel.create({
-    data: {
-      provider: cfg.provider, label: cfg.label || '当前模型', baseUrl: cfg.baseUrl, model: cfg.model,
-      apiKey: encryptSecret(cfg.apiKey), embeddingModel: cfg.embeddingModel, temperature: cfg.temperature,
-    },
+  if ((await prisma.aiModel.count()) > 0) return; // 快路径：已有模型，免锁
+  // P2-5：首次种子在 advisory lock 内串行 + 锁内重检，避免并发首载（GET 触发）各建一份重复种子（TOCTOU）。
+  const created = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('ai-model-seed'))`;
+    if ((await tx.aiModel.count()) > 0) return null;
+    const cfg = await getAiConfig(true);
+    return tx.aiModel.create({
+      data: {
+        provider: cfg.provider, label: cfg.label || '当前模型', baseUrl: cfg.baseUrl, model: cfg.model,
+        apiKey: encryptSecret(cfg.apiKey), embeddingModel: cfg.embeddingModel, temperature: cfg.temperature,
+      },
+    });
   });
-  await syncActiveSetting(created as ModelRow);
+  if (created) await syncActiveSetting(created as ModelRow);
 }
 
 /** 已添加模型列表（带 active 标记）；首次自动迁移当前配置。DB 不可达返回空。 */

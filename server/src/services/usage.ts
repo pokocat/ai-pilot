@@ -55,9 +55,10 @@ export async function recordTokenUsage(
 }
 
 /** 记录「检索基建」（嵌入 / 重排）的 token 消耗，与用户产出用量区分（无 user 归属、不扣额度）。fire-and-forget。 */
-export function recordInfraUsage(kind: 'embedding' | 'rerank', model: string, tokens: number): void {
+// P2-1：provider 不再硬编码 'openai'（嵌入/重排可跑在 Jina/Cohere/SiliconFlow 等任意端点），默认中性 'infra'，可由调用方覆盖。
+export function recordInfraUsage(kind: 'embedding' | 'rerank', model: string, tokens: number, provider = 'infra'): void {
   if (!(tokens > 0)) return;
-  void recordTokenUsage({ kind, provider: 'openai', model, usage: { inputTokens: tokens, outputTokens: 0, cachedInput: 0 } });
+  void recordTokenUsage({ kind, provider, model, usage: { inputTokens: tokens, outputTokens: 0, cachedInput: 0 } });
 }
 
 const dayKey = (d: Date): string => d.toISOString().slice(0, 10); // YYYY-MM-DD（UTC）

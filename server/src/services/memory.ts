@@ -8,7 +8,7 @@ import { keywordScore } from './retrieval.js';
 import { extractInsights } from '../llm/gateway.js';
 import { pgvectorEnabled, vectorSearchMemories, upsertMemoryVector } from './vectorStore.js';
 import type { MemoryConfig } from '../data/agents.js';
-import type { AdminUserMemory } from '../../../shared/contracts';
+import type { AdminUserMemory, AdminAgentMemoryItem } from '../../../shared/contracts';
 
 // —— E2：更聪明的记忆召回 —— 混合(向量+关键词) + 时间衰减(halfLife 30d) + MMR 多样性重排。
 // 取舍：本地确定性嵌入下向量信号弱，故关键词与向量持平(MEM_ALPHA=0.5)；衰减把「旧记忆」平滑降权（取代硬 TTL 悬崖之外的突然消失感）；
@@ -215,6 +215,21 @@ export async function listUserMemories(tenantId: string, userId: string): Promis
 /** 删除某用户的一条长期记忆（租户+用户双重校验，防越权）。 */
 export async function deleteUserMemory(tenantId: string, userId: string, id: string): Promise<void> {
   await prisma.memory.deleteMany({ where: { id, tenantId, userId } });
+}
+
+/** P1-C4：按 agent 跨用户列出记忆（运营治理自动学习写入的脏记忆）。 */
+export async function listAgentMemories(agentKey: string, limit = 200): Promise<AdminAgentMemoryItem[]> {
+  const rows = await prisma.memory.findMany({ where: { agentKey }, orderBy: { createdAt: 'desc' }, take: Math.min(500, Math.max(1, limit)) });
+  return rows.map((m) => ({
+    id: m.id, userId: m.userId, kind: m.kind, text: m.text, weight: m.weight,
+    source: m.source, createdAt: m.createdAt.toISOString(), expiresAt: m.expiresAt ? m.expiresAt.toISOString() : null,
+  }));
+}
+
+/** P1-C4：运营按 id+agentKey 删除一条记忆（纠正脏记忆）。返回是否命中。 */
+export async function deleteAgentMemory(agentKey: string, id: string): Promise<boolean> {
+  const r = await prisma.memory.deleteMany({ where: { id, agentKey } });
+  return r.count > 0;
 }
 
 /** P1-C2：用户编辑自己的一条长期记忆（重写文本并重嵌入）。租户+用户双重校验，防越权。返回是否命中。 */

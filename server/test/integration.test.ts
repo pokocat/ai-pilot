@@ -1239,6 +1239,19 @@ describe('TC-M 记忆召回与去重', () => {
     await api('DELETE', `/api/memories/${mem.id}`, { token: a });
     assert.equal(await prisma.memory.findUnique({ where: { id: mem.id } }), null);
   });
+
+  test('M5 P1-C4 运营按 agent 跨用户浏览并删除记忆', async () => {
+    const u1 = await login(uniquePhone(), '治理甲'); const t1 = await tenantOf(u1);
+    const u2 = await login(uniquePhone(), '治理乙'); const t2 = await tenantOf(u2);
+    await prisma.memory.create({ data: { tenantId: t1, userId: u1, agentKey: 'growth', kind: 'preference', text: 'A 关注获客', embedding: [], weight: 1, source: 'conversation' } });
+    const m2 = await prisma.memory.create({ data: { tenantId: t2, userId: u2, agentKey: 'growth', kind: 'preference', text: 'B 关注复购', embedding: [], weight: 1, source: 'conversation' } });
+    const list = await api<{ items: { id: string; userId: string }[] }>('GET', '/api/admin/agents/growth/memories');
+    assert.equal(list.status, 200);
+    assert.ok(list.body.items.some((x) => x.userId === u1) && list.body.items.some((x) => x.userId === u2), '应跨用户列出该 agent 记忆');
+    const del = await api('DELETE', `/api/admin/agents/growth/memories/${m2.id}`);
+    assert.equal(del.status, 200);
+    assert.equal(await prisma.memory.findUnique({ where: { id: m2.id } }), null);
+  });
 });
 
 // ───────────────────────── TC-H 对话历史注入（P0-3） ─────────────────────────
