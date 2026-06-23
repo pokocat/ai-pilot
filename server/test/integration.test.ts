@@ -574,6 +574,12 @@ describe('TC-J 内容审核拦截', () => {
     const mine = logs.find((l) => l.sessionId === 's_mod');
     assert.ok(mine && mine.userId === 'u_mod', '审核日志应带 user/session 关联（此前 write-only 黑洞）');
   });
+
+  test('J3 P1-B5 归一化挡拆字/插符绕过', async () => {
+    assert.equal(await moderate('input', '帮我做个 赌 博 平台'), false, '空格拆字应被拦');
+    assert.equal(await moderate('input', '赌.博.推广'), false, '插标点应被拦');
+    assert.equal(await moderate('input', '帮我做正常的增长咨询'), true, '正常内容放行');
+  });
 });
 
 // ───────────────────────── TC-K 算力（套餐赠送 + 按次计量 + 不足拦截） ─────────────────────────

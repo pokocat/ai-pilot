@@ -27,8 +27,16 @@ function failOpen(): boolean {
   return (process.env.MODERATION_FAIL_OPEN ?? 'true') === 'true';
 }
 
+// P1-B5：匹配前归一化——去掉空白/零宽/常见标点并小写，挡掉「赌 博」「赌.博」「ＤＢ」类拆字/插符绕过。
+function normalizeForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[！-～]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)) // 全角→半角
+    .replace(/[\s​-‏‪-‮ ·.,，。、!！?？;；:：\-_*~`'"()（）[\]{}<>/\\|]/g, '');
+}
 function keywordCheck(text: string): ModerationVerdict {
-  const hit = blockWords().find((w) => text.includes(w));
+  const norm = normalizeForMatch(text);
+  const hit = blockWords().find((w) => norm.includes(normalizeForMatch(w)));
   return { pass: !hit, provider: 'keyword', detail: hit ? { word: hit } : undefined };
 }
 
