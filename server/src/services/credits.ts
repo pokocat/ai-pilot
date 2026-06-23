@@ -6,7 +6,7 @@
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
 
-export const CREDIT_COST = { report: 1, chat: 0 } as const;
+// P2-4：CREDIT_COST 已移除（仅被死函数 entitlements.agentCost 引用；实际计费走 meterUnit/billingRatio）。
 
 export class InsufficientCreditsError extends Error {
   statusCode = 402;

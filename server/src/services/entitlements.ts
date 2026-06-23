@@ -2,7 +2,6 @@
 // unlock 智能体需用算力解锁（或后台开通）后才可对话产出；metered 智能体按次计费。
 // 价格单位统一为「算力次数」，与 CreditLedger 共用同一账户。
 import { prisma } from '../db.js';
-import { CREDIT_COST } from './credits.js';
 
 export type AgentBilling = 'free' | 'unlock' | 'metered';
 
@@ -41,13 +40,4 @@ export async function assertAgentAccess(userId: string, agent: { key: string; bi
   });
   if (!row) throw new AgentLockedError();
 }
-
-/**
- * 一次产出/对话的算力成本：
- * - metered：结构化产出按 agent.price 收费，纯对话免费；
- * - free/unlock：结构化产出 = CREDIT_COST.report，纯对话 = CREDIT_COST.chat。
- */
-export function agentCost(agent: { billing: string; price: number }, isDeliverable: boolean): number {
-  if (agent.billing === 'metered') return isDeliverable ? agent.price : CREDIT_COST.chat;
-  return isDeliverable ? CREDIT_COST.report : CREDIT_COST.chat;
-}
+// P2-4：移除并行死成本模型 agentCost()/CREDIT_COST（无调用方；实际计费走 meterUnit/billingRatio）。
