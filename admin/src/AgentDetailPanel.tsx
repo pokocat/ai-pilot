@@ -362,7 +362,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           {mode !== 'inherit' && (
             <div className="ai-field">
               <button className="ai-btn ghost auto" onClick={runTest} disabled={testing}><Icon name="spark" size={15} /> {testing ? '测试中…' : '测试连接'}</button>
-              {test && <div className={`blk-d ${test.ok ? 'ok' : 'err'}`} style={{ marginTop: 8 }}>{test.ok ? `连通正常 · ${test.latencyMs ?? '-'}ms${test.sample ? ' · 样例：' + test.sample : ''}` : `失败：${test.error ?? '未知错误'}`}</div>}
+              {test && <div className={`blk-d ${test.ok ? 'ok' : 'err'}`} style={{ marginTop: 8 }}>{test.ok ? `连通正常 · ${test.latencyMs ?? '-'}ms${test.sample ? ' · 样例：' + test.sample : ''} · 注：仅验连通，不验证工具调用（P2-9，需用实际产出确认）` : `失败：${test.error ?? '未知错误'}`}</div>}
             </div>
           )}
         </div>
