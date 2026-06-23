@@ -95,11 +95,7 @@ export const store = {
   themeClass: () => `theme-${state.colorKey}`,
   isOnboarded: () => state.onboarded,
   isAuthed: () => !!getUserId(),
-  setOnboarded(v: boolean) {
-    state.onboarded = v;
-    safeSet(LS_ONBOARDED, v ? '1' : '');
-    emit();
-  },
+  // P2-18：移除死方法 setOnboarded（无调用方，与 completeOnboarding 重复）。
   me: () => state.me,
   agents: () => state.agents,
   tab: () => state.tab,
