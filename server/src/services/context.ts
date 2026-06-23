@@ -112,6 +112,7 @@ export async function buildGenContext(opts: {
 
   const ctx: GenContext = {
     agentKey: effective.key,
+    versionId: effective.versionId,
     agentName: effective.name,
     systemPrompt: effective.systemPrompt,
     deliverableKey: effective.deliverableKey,
@@ -156,6 +157,7 @@ export async function buildSandboxContext(opts: {
   const hasProfile = !!(p && (p.industry || p.stage || p.pain));
   const ctx: GenContext = {
     agentKey: effective.key,
+    versionId: effective.versionId,
     agentName: effective.name,
     systemPrompt: effective.systemPrompt,
     deliverableKey: effective.deliverableKey,

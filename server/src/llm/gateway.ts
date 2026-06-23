@@ -48,14 +48,14 @@ async function traced<T>(
   try {
     const s = await run();
     await recordTrace({
-      meta: args.meta, agentKey: args.ctx.agentKey, kind: args.kind, provider: s.provider, model: s.model,
+      meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind, provider: s.provider, model: s.model,
       status: 'ok', latencyMs: Date.now() - t0, toolCalls: s.toolCalls, iterations: s.iterations, usage: s.usage,
       promptText: args.ctx.userMessage, responseText: args.respText(s.result),
     });
     return s;
   } catch (err) {
     await recordTrace({
-      meta: args.meta, agentKey: args.ctx.agentKey, kind: args.kind, provider: args.provider, model: '',
+      meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind, provider: args.provider, model: '',
       status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: args.ctx.userMessage,
     });
     throw err;
@@ -205,8 +205,8 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
 
   const cfg = await getAiConfig();
   const live = liveProvider(cfg);
-  // 技能启用 + openai 兼容 provider → 走工具调用循环（与接入方式无关：全局模型/inherit 同样可用）。
-  const tools = live === 'openai' ? await skillToolsFor(ctx) : [];
+  // P1-D1：技能启用 + openai/claude 均走工具调用循环（此前只 openai，claude 静默失效）。
+  const tools = (live === 'openai' || live === 'claude') ? await skillToolsFor(ctx) : [];
   // 工具产出依赖实时检索/记忆/HTTP 结果，不走结果缓存。
   const ck = cacheKey('deliverable', ctx, cfg);
   if (!tools.length) {
@@ -218,9 +218,10 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   try {
     sourced = await traced(async () => {
       if (live === 'claude') {
-        const { claudeDeliverable } = await import('./providers/claude.js');
-        const m = await claudeDeliverable(ctx, cfg);
-        return { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model };
+        const cl = await import('./providers/claude.js');
+        const m = tools.length ? await cl.claudeDeliverableWithTools(ctx, cfg, tools) : await cl.claudeDeliverable(ctx, cfg);
+        const mt = m as { toolCalls?: number; iterations?: number };
+        return { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model, toolCalls: mt.toolCalls, iterations: mt.iterations };
       }
       if (live === 'openai') {
         const oa = await import('./providers/openai.js');
@@ -272,11 +273,13 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
   try {
     const live = liveProvider(cfg);
     if (live) {
-      const tools = live === 'openai' ? await skillToolsFor(ctx) : []; // 技能与接入解耦：全局模型也能调工具
+      const tools = (live === 'openai' || live === 'claude') ? await skillToolsFor(ctx) : []; // P1-D1：openai/claude 均支持工具
       const s = await traced(async () => {
         if (live === 'claude') {
-          const m = await (await import('./providers/claude.js')).claudeChat(ctx, cfg);
-          return { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model };
+          const cl = await import('./providers/claude.js');
+          const m = tools.length ? await cl.claudeChatWithTools(ctx, cfg, tools) : await cl.claudeChat(ctx, cfg);
+          const mt = m as { toolCalls?: number; iterations?: number };
+          return { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model, toolCalls: mt.toolCalls, iterations: mt.iterations };
         }
         const oa = await import('./providers/openai.js');
         const m = tools.length ? await oa.openaiChatWithTools(ctx, cfg, tools) : await oa.openaiChat(ctx, cfg);
@@ -347,7 +350,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     }
   } catch (err) {
     await recordTrace({
-      meta, agentKey: ctx.agentKey, kind: 'chat', provider: live ?? 'mock', model: '',
+      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider: live ?? 'mock', model: '',
       status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
     });
     console.error('[gateway] adaptive fallback to mock:', (err as Error).message);

@@ -211,18 +211,24 @@ export async function publishDraft(
 
     const hash = hashSnapshot(agent);
     const latest = await tx.agentVersion.findFirst({ where: { agentKey }, orderBy: { version: 'desc' } });
+    // P1-A4：去重/变更摘要基线取「当前已发布版本」而非「最新版本号」——回滚到 v2 后再发布同 v2 配置应识别为幂等，
+    // 而非因 latest=v5 hash 不同误造 v6；摘要也应相对 v2 而非 v5。无已发布版本时退回 latest（兼容旧/首发）。
+    const published = agent.publishedVersionId
+      ? await tx.agentVersion.findUnique({ where: { id: agent.publishedVersionId as string } })
+      : null;
+    const baseline = published ?? latest;
 
-    // 与最新版本同配置：不重复成版，只把指针/状态指向它并清 dirty（幂等发布）。
-    if (latest && latest.contentHash === hash) {
-      if (agent.publishedVersionId !== latest.id || agent.draftDirty) {
-        await tx.agentVersion.updateMany({ where: { agentKey, status: 'published', NOT: { id: latest.id } }, data: { status: 'archived' } });
-        await tx.agentVersion.update({ where: { id: latest.id }, data: { status: 'published', publishedAt: new Date() } });
-        await tx.agent.update({ where: { key: agentKey }, data: { publishedVersionId: latest.id, draftDirty: false } });
+    // 与基线同配置：不重复成版，只确保指针/状态指向它并清 dirty（幂等发布）。
+    if (baseline && baseline.contentHash === hash) {
+      if (agent.publishedVersionId !== baseline.id || agent.draftDirty) {
+        await tx.agentVersion.updateMany({ where: { agentKey, status: 'published', NOT: { id: baseline.id } }, data: { status: 'archived' } });
+        await tx.agentVersion.update({ where: { id: baseline.id }, data: { status: 'published', publishedAt: new Date() } });
+        await tx.agent.update({ where: { key: agentKey }, data: { publishedVersionId: baseline.id, draftDirty: false } });
       }
-      return { version: latest.version, versionId: latest.id, changed: false, changeSummary: latest.changeSummary ?? '无字段变更' };
+      return { version: baseline.version, versionId: baseline.id, changed: false, changeSummary: baseline.changeSummary ?? '无字段变更' };
     }
 
-    const changeSummary = latest ? diffSnapshots(latest as unknown as Record<string, unknown>, agent) : '首个版本';
+    const changeSummary = baseline ? diffSnapshots(baseline as unknown as Record<string, unknown>, agent) : '首个版本';
     const nextVersion = (latest?.version ?? 0) + 1;
 
     const ver = await tx.agentVersion.create({
@@ -246,30 +252,36 @@ export async function publishDraft(
 
 /** 回滚：把已发布指针重指到某个历史版本（不动草稿）。回滚后按草稿 vs 该版本重算 draftDirty。 */
 export async function rollbackToVersion(agentKey: string, versionId: string): Promise<{ version: number }> {
-  const ver = await prisma.agentVersion.findUnique({ where: { id: versionId } });
-  if (!ver || ver.agentKey !== agentKey) throw Object.assign(new Error('version not found'), { statusCode: 404, code: 'VERSION_NOT_FOUND' });
-  const agent = (await prisma.agent.findUnique({ where: { key: agentKey } })) as Record<string, unknown> | null;
-  const dirty = agent ? hashSnapshot(agent) !== ver.contentHash : false;
-  await prisma.$transaction([
-    prisma.agentVersion.updateMany({ where: { agentKey, status: 'published', NOT: { id: ver.id } }, data: { status: 'archived' } }),
-    prisma.agentVersion.update({ where: { id: ver.id }, data: { status: 'published', publishedAt: new Date() } }),
-    prisma.agent.update({ where: { key: agentKey }, data: { publishedVersionId: ver.id, draftDirty: dirty } }),
-  ]);
-  return { version: ver.version };
+  // P1-A3：与 publishDraft 同把回滚纳入 per-agent advisory lock + 单事务，杜绝「回滚×发布」并发交错留下两行 published / 指针错位。
+  return prisma.$transaction(async (tx) => {
+    await lockAgentPublish(tx, agentKey);
+    const ver = await tx.agentVersion.findUnique({ where: { id: versionId } });
+    if (!ver || ver.agentKey !== agentKey) throw Object.assign(new Error('version not found'), { statusCode: 404, code: 'VERSION_NOT_FOUND' });
+    const agent = (await tx.agent.findUnique({ where: { key: agentKey } })) as Record<string, unknown> | null;
+    const dirty = agent ? hashSnapshot(agent) !== ver.contentHash : false;
+    await tx.agentVersion.updateMany({ where: { agentKey, status: 'published', NOT: { id: ver.id } }, data: { status: 'archived' } });
+    await tx.agentVersion.update({ where: { id: ver.id }, data: { status: 'published', publishedAt: new Date() } });
+    await tx.agent.update({ where: { key: agentKey }, data: { publishedVersionId: ver.id, draftDirty: dirty } });
+    return { version: ver.version };
+  });
 }
 
 /** 编辑草稿后调用：按草稿 vs 已发布版本精确重算 draftDirty（无已发布版本则视为 dirty）。 */
 export async function recomputeDraftDirty(agentKey: string): Promise<boolean> {
-  const agent = (await prisma.agent.findUnique({ where: { key: agentKey } })) as Record<string, unknown> | null;
-  if (!agent) return false;
-  const pubId = agent.publishedVersionId as string | null;
-  let dirty = true;
-  if (pubId) {
-    const pub = await prisma.agentVersion.findUnique({ where: { id: pubId } });
-    if (pub) dirty = pub.contentHash !== hashSnapshot(agent);
-  }
-  await prisma.agent.update({ where: { key: agentKey }, data: { draftDirty: dirty } });
-  return dirty;
+  // P1-A3：同 lock，避免与发布并发交错把 draftDirty 写成陈旧值。
+  return prisma.$transaction(async (tx) => {
+    await lockAgentPublish(tx, agentKey);
+    const agent = (await tx.agent.findUnique({ where: { key: agentKey } })) as Record<string, unknown> | null;
+    if (!agent) return false;
+    const pubId = agent.publishedVersionId as string | null;
+    let dirty = true;
+    if (pubId) {
+      const pub = await tx.agentVersion.findUnique({ where: { id: pubId } });
+      if (pub) dirty = pub.contentHash !== hashSnapshot(agent);
+    }
+    await tx.agent.update({ where: { key: agentKey }, data: { draftDirty: dirty } });
+    return dirty;
+  });
 }
 
 /** 版本历史（倒序）。 */

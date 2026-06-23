@@ -5,7 +5,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { DELIVERABLE_TOOL, buildSystemParts, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
-import type { LoopMessage, StepFn, Tool, ToolCall } from '../tools/types.js';
+import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
+import { runToolLoop } from '../tools/loop.js';
 
 // system 拆成「稳定前缀(打缓存断点) + 每轮变化的参考资料」两块，命中缓存按 ~1/10 计费。
 // 提示词不足最低缓存阈值(Opus 4.8 约 4096 token、Sonnet 约 2048)时 cache_control 自动忽略，无副作用。
@@ -189,4 +190,65 @@ export function claudeStep(cfg: ResolvedAiConfig): StepFn {
     const text = res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
     return { kind: 'final', text, usage };
   };
+}
+
+// —— P1-D1：claude 的工具调用循环（此前 gateway 从不路由工具到 claude，claudeStep 形同死代码）——
+
+type LoopMeteredC<T> = Metered<T> & { toolCalls: number; iterations: number };
+
+function toolCtxOf(ctx: GenContext): ToolContext {
+  return { tenantId: ctx.tenantId ?? null, userId: ctx.userId ?? null, agentKey: ctx.agentKey, projectId: ctx.projectId ?? null, query: ctx.userMessage };
+}
+
+/** 启用技能时的对话（claude）：多轮工具调用循环，模型自行检索知识/召回记忆后出文本。 */
+export async function claudeChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig, tools: Tool[]): Promise<LoopMeteredC<ChatReply>> {
+  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
+  const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
+  const r = await runToolLoop({
+    step: claudeStep(cfg),
+    system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`,
+    history: ctx.history,
+    userMessage: ctx.userMessage,
+    tools,
+    toolCtx: toolCtxOf(ctx),
+  });
+  return {
+    result: { text: (r.text ?? '').trim() || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
+    usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
+  };
+}
+
+/** 启用技能时的产出（claude）：循环里可先检索/召回，最后强制 emit_deliverable 收口。 */
+export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedAiConfig, tools: Tool[]): Promise<LoopMeteredC<Deliverable>> {
+  const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
+  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'deliverable');
+  const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
+  const structureHint = tpl
+    ? `参考产出结构（小标题）：${tpl.sections.map((s) => s.h).join(' / ')}。标题用「${tpl.title}」。`
+    : '产出 3–4 段结构化内容。';
+  const r = await runToolLoop({
+    step: claudeStep(cfg),
+    system: `${system}\n\n${structureHint}\n可先调用工具检索知识/召回记忆，掌握依据后务必调用 emit_deliverable 输出结构化成果，不要输出自由长文。`,
+    history: ctx.history,
+    userMessage: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。`,
+    tools,
+    toolCtx: toolCtxOf(ctx),
+    finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
+  });
+  const input = (r.toolInput ?? {}) as { title?: string; sections?: Deliverable['sections'] };
+  if (input.sections) {
+    return {
+      result: {
+        title: input.title || tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections: input.sections,
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
+    };
+  }
+  const { mockDeliverable } = await import('./mock.js');
+  return { result: { ...mockDeliverable(ctx), degraded: true }, usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations };
 }

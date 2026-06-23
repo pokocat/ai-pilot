@@ -15,6 +15,7 @@ function clip(s?: string | null): string | null {
 export interface TraceInput {
   meta?: UsageMeta;
   agentKey?: string | null;
+  versionId?: string | null;
   kind: 'chat' | 'deliverable';
   provider: string;
   model: string;
@@ -38,6 +39,7 @@ export async function recordTrace(t: TraceInput): Promise<void> {
         userId: t.meta?.userId ?? null,
         sessionId: t.meta?.sessionId ?? null,
         agentKey: t.meta?.agentKey ?? t.agentKey ?? null,
+        versionId: t.versionId ?? null,
         kind: t.kind,
         provider: t.provider,
         model: t.model,
@@ -59,9 +61,9 @@ export async function recordTrace(t: TraceInput): Promise<void> {
   }
 }
 
-function toItem(r: { id: string; createdAt: Date; agentKey: string | null; kind: string; provider: string; model: string; status: string; latencyMs: number; toolCalls: number; totalTokens: number; cachedInput: number; errorMessage: string | null }): AdminTraceItem {
+function toItem(r: { id: string; createdAt: Date; agentKey: string | null; versionId?: string | null; kind: string; provider: string; model: string; status: string; latencyMs: number; toolCalls: number; totalTokens: number; cachedInput: number; errorMessage: string | null }): AdminTraceItem {
   return {
-    id: r.id, at: r.createdAt.toISOString(), agentKey: r.agentKey, kind: r.kind, provider: r.provider,
+    id: r.id, at: r.createdAt.toISOString(), agentKey: r.agentKey, versionId: r.versionId ?? null, kind: r.kind, provider: r.provider,
     model: r.model, status: r.status === 'error' ? 'error' : 'ok', latencyMs: r.latencyMs,
     toolCalls: r.toolCalls, totalTokens: r.totalTokens, cachedInput: r.cachedInput, errorMessage: r.errorMessage,
   };

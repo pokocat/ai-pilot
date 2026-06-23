@@ -583,6 +583,7 @@ model LlmTrace {
   userId       String?
   sessionId    String?
   agentKey     String?
+  versionId    String? // P1-A1：产出所用的已发布版本(AgentVersion.id)，把质量回归归因到具体版本
   kind         String // deliverable | chat
   provider     String // openai | claude | mock | dify
   model        String

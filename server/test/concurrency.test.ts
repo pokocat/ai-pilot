@@ -5,7 +5,7 @@ import { prisma } from '../src/db.js';
 import { api, cleanBusiness, closeApp, getApp, seedBaseline, uniquePhone, deliverable } from './helpers.js';
 import { issueSmsCode, verifySmsCode } from '../src/services/sms.js';
 import { saveReportVersion } from '../src/services/reports.js';
-import { publishDraft } from '../src/services/agentVersions.js';
+import { publishDraft, rollbackToVersion } from '../src/services/agentVersions.js';
 import { applyPlanPurchase } from '../src/services/purchase.js';
 
 before(async () => {
@@ -154,4 +154,43 @@ test('并发发布同一智能体草稿：同内容只生成一个发布版本',
   assert.equal(await prisma.agentVersion.count({ where: { agentKey } }), 1);
   const agent = await prisma.agent.findUnique({ where: { key: agentKey } });
   assert.ok(agent?.publishedVersionId);
+});
+
+test('P1-A4 回滚后再发布同已发布配置：识别为幂等，不造新版本', async () => {
+  const agentKey = 'rollback_dedup_agent';
+  await createUnlockAgent(agentKey, 0);
+  await prisma.agentVersion.deleteMany({ where: { agentKey } });
+  await prisma.agent.update({ where: { key: agentKey }, data: { publishedVersionId: null, systemPrompt: 'V1 内容' } });
+  const v1 = await publishDraft(agentKey);
+  await prisma.agent.update({ where: { key: agentKey }, data: { systemPrompt: 'V2 内容' } });
+  const v2 = await publishDraft(agentKey);
+  assert.equal(v2.version, 2);
+  await rollbackToVersion(agentKey, v1.versionId); // published=v1, latest=v2
+  // 草稿改回与 v1 同配置再发布：基线取「当前已发布 v1」→ 幂等，不应造 v3（旧实现基线取 latest=v2 会误造）。
+  await prisma.agent.update({ where: { key: agentKey }, data: { systemPrompt: 'V1 内容' } });
+  const again = await publishDraft(agentKey);
+  assert.equal(again.changed, false, '草稿==当前已发布(v1) → 幂等');
+  assert.equal(again.version, 1);
+  assert.equal(await prisma.agentVersion.count({ where: { agentKey } }), 2, '仍只有 v1/v2，无 v3');
+});
+
+test('P1-A3 回滚与发布并发：始终恰好一行 published 且指针一致', async () => {
+  const agentKey = 'rollback_race_agent';
+  await createUnlockAgent(agentKey, 0);
+  await prisma.agentVersion.deleteMany({ where: { agentKey } });
+  await prisma.agent.update({ where: { key: agentKey }, data: { publishedVersionId: null, systemPrompt: 'A' } });
+  const v1 = await publishDraft(agentKey);
+  await prisma.agent.update({ where: { key: agentKey }, data: { systemPrompt: 'B' } });
+  const v2 = await publishDraft(agentKey);
+  await prisma.agent.update({ where: { key: agentKey }, data: { systemPrompt: 'C' } });
+  await Promise.all([
+    rollbackToVersion(agentKey, v1.versionId),
+    publishDraft(agentKey),
+    rollbackToVersion(agentKey, v2.versionId),
+  ]);
+  const publishedCount = await prisma.agentVersion.count({ where: { agentKey, status: 'published' } });
+  assert.equal(publishedCount, 1, '并发回滚/发布后必须恰好一行 published');
+  const agent = await prisma.agent.findUnique({ where: { key: agentKey } });
+  const pub = await prisma.agentVersion.findFirst({ where: { agentKey, status: 'published' } });
+  assert.equal(agent?.publishedVersionId, pub?.id, '指针必须与唯一 published 行一致');
 });

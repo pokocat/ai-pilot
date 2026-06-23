@@ -728,6 +728,8 @@ export interface AdminTraceItem {
   id: string;
   at: string;
   agentKey: string | null;
+  versionId?: string | null; // P1-A1：产出所用版本，便于按版本归因质量回归
+
   kind: string;        // deliverable | chat
   provider: string;    // openai | claude | mock | dify
   model: string;

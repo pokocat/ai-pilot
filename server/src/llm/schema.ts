@@ -25,6 +25,7 @@ export type {
 export interface GenContext {
   agentKey: string;
   agentName: string;
+  versionId?: string | null; // P1-A1：产出所用已发布版本（buildGenContext 从 effective 注入，用于 trace 归因）
   systemPrompt: string;
   deliverableKey: string | null;
   companyName?: string | null; // 用户公司/品牌名（=租户名），用于产出抬头；为空则省略
