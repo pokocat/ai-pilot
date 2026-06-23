@@ -800,11 +800,17 @@ function AccountsView({ toast }: { toast: (m: string) => void }) {
 function AuditView() {
   const [list, setList] = useState<AdminAuditItem[]>([]);
   const [selected, setSelected] = useState<AdminAuditItem | null>(null);
-  useEffect(() => { api.auditLogs().then(setList).catch(() => {}); }, []);
+  const [includeAdmin, setIncludeAdmin] = useState(false); // P2-11：可显式查看后台自身操作（多运营问责）
+  useEffect(() => { api.auditLogs({ includeAdmin }).then(setList).catch(() => {}); }, [includeAdmin]);
   return (
     <>
-      <div className="sec-h audit-head"><span className="t">审计日志</span><span className="s">默认过滤后台操作 · 用户 API / 登录尝试 · 最近 100 条</span></div>
+      <div className="sec-h audit-head"><span className="t">审计日志</span><span className="s">{includeAdmin ? '含后台操作' : '默认过滤后台操作'} · 用户 API / 登录尝试 · 最近 100 条</span></div>
       <div className="pad audit-pad">
+        <div className="bill-seg" style={{ margin: '0 0 8px' }}>
+          {([[false, '用户行为'], [true, '含后台操作']] as const).map(([v, l]) => (
+            <div key={String(v)} className={`bill-opt ${includeAdmin === v ? 'on' : ''}`} onClick={() => setIncludeAdmin(v)}><div className="bo-t">{l}</div></div>
+          ))}
+        </div>
         <div className="audit-table-wrap">
           <div className="audit-table">
             <div className="audit-row audit-header-row">

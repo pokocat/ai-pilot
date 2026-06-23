@@ -150,7 +150,14 @@ export const api = {
   createSkillTool: (body: SkillToolUpsert) => req<SkillToolDef>('/admin/skill-tools/custom', 'POST', body),
   updateSkillTool: (id: string, body: SkillToolUpsert) => req<SkillToolDef>(`/admin/skill-tools/custom/${id}`, 'PATCH', body),
   delSkillTool: (id: string) => req<{ ok: boolean }>(`/admin/skill-tools/custom/${id}`, 'DELETE'),
-  auditLogs: () => req<AdminAuditItem[]>('/admin/audit-logs'),
+  auditLogs: (q: { includeAdmin?: boolean; action?: string; userId?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (q.includeAdmin) p.set('includeAdmin', 'true');
+    if (q.action) p.set('action', q.action);
+    if (q.userId) p.set('userId', q.userId);
+    const qs = p.toString();
+    return req<AdminAuditItem[]>(`/admin/audit-logs${qs ? '?' + qs : ''}`);
+  },
   sayings: () => req<AdminSaying[]>('/admin/sayings'),
   addSaying: (text: string) => req<AdminSaying>('/admin/sayings', 'POST', { text }),
   toggleSaying: (id: string, enabled: boolean) => req<AdminSaying>(`/admin/sayings/${id}`, 'PATCH', { enabled }),
