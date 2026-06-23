@@ -21,6 +21,7 @@ import {
   type AdminAuditItem,
   type AdminTraceListView,
   type AdminTraceDetail,
+  type AdminModerationLogView,
   type SkillToolDef,
   type SkillToolUpsert,
   type SkillToolMeta,
@@ -38,7 +39,7 @@ import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'model' | 'say' | 'form' | 'plan' | 'account';
+type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'account';
 const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
@@ -51,6 +52,7 @@ const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'retrieval', icon: 'target', label: '检索' },
   { key: 'account', icon: 'user', label: '账户', ownerOnly: true },
   { key: 'audit', icon: 'clock', label: '审计' },
+  { key: 'moderation', icon: 'shield', label: '审核' },
   { key: 'model', icon: 'insight', label: '模型' },
   { key: 'say', icon: 'spark', label: '献策' },
   { key: 'form', icon: 'doc', label: '问卷' },
@@ -114,6 +116,7 @@ export default function App() {
           {tab === 'retrieval' && <RetrievalDebugView />}
           {tab === 'account' && me?.isSuper && <AccountsView toast={showToast} />}
           {tab === 'audit' && <AuditView />}
+          {tab === 'moderation' && <ModerationView />}
           {tab === 'model' && <ModelView toast={showToast} />}
           {tab === 'form' && <SurveyView />}
           {tab === 'plan' && <PlansView toast={showToast} />}
@@ -575,6 +578,36 @@ function ObservabilityView() {
           </div>
         </div>
       )}
+    </>
+  );
+}
+
+// P1-B5：内容审核日志（此前 moderation_log 写完无读取入口）。默认看被拦截，可切通过/全部。
+function ModerationView() {
+  const [data, setData] = useState<AdminModerationLogView | null>(null);
+  const [verdict, setVerdict] = useState<'' | 'pass' | 'block'>('block');
+  useEffect(() => { api.moderationLogs({ verdict: verdict || undefined, limit: 200 }).then(setData).catch(() => {}); }, [verdict]);
+  if (!data) return <Loading />;
+  return (
+    <>
+      <div className="sec-h"><span className="t">内容审核</span><span className="s">输入/输出审核记录 · 沙盒与评测不计入</span></div>
+      <div className="pad">
+        <div className="bill-seg" style={{ margin: '8px 0' }}>
+          {([['block', '被拦截'], ['pass', '通过'], ['', '全部']] as const).map(([v, l]) => (
+            <div key={v} className={`bill-opt ${verdict === v ? 'on' : ''}`} onClick={() => setVerdict(v)}><div className="bo-t">{l}</div></div>
+          ))}
+        </div>
+        {data.items.length === 0 && <div className="usage-meta" style={{ padding: '10px 0' }}>暂无审核记录。</div>}
+        {data.items.map((m) => (
+          <div key={m.id} className="usage-row">
+            <div className="usage-h">
+              <div className="usage-name">{m.refType === 'input' ? '输入' : '输出'}<span>{m.userId ? `用户 ${m.userId.slice(0, 8)}` : '—'}{m.sessionId ? ` · 会话 ${m.sessionId.slice(0, 8)}` : ''}</span></div>
+              <div className={`usage-num ${m.verdict === 'block' ? '' : 'ok'}`}>{m.verdict === 'block' ? '拦截' : '通过'}</div>
+            </div>
+            <div className="usage-meta">{new Date(m.at).toLocaleString()}{m.detail ? ` · ${JSON.stringify(m.detail).slice(0, 60)}` : ''}</div>
+          </div>
+        ))}
+      </div>
     </>
   );
 }

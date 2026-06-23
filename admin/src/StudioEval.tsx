@@ -127,15 +127,18 @@ function RunResult({ run }: { run: EvalRunDetail }) {
       {run.status !== 'running' && (
         <div className="usage-summary">
           <div><b style={{ color: scoreColor(run.score), fontSize: 22 }}>{run.score?.toFixed(1) ?? '-'}</b><span>加权总分 /10</span></div>
-          {run.suggested && <div><b>{run.suggested.tier.label} ×{run.suggested.tier.billingRatio}</b><span>建议档位</span></div>}
+          {run.suggested?.tier && <div><b>{run.suggested.tier.label} ×{run.suggested.tier.billingRatio}</b><span>建议档位</span></div>}
           <div><b>{run.caseCount}</b><span>用例数</span></div>
         </div>
       )}
       {run.note && <div className="blk-d" style={{ margin: '4px 0 8px' }}>{run.note}</div>}
-      {run.suggested && run.status === 'done' && (
+      {run.suggested?.tier && run.status === 'done' && (
         <div className="ai-test ok" style={{ marginBottom: 8 }}>
           <Icon name="crown" size={13} /> 该版本得分 {run.score?.toFixed(1)} → 建议定价档位「{run.suggested.tier.label}」，即倍率 ×{run.suggested.tier.billingRatio}。到「配置」页把计费比例设为该值即可「调教越好卖越贵」。
         </div>
+      )}
+      {run.status === 'done' && run.suggested && !run.suggested.tier && (
+        <div className="blk-d" style={{ margin: '4px 0 8px' }}>本次无可用评分（未配真实模型或全部产出失败），不给定价建议。</div>
       )}
       {run.results.map((r) => (
         <div key={r.id} className="mem-card" style={{ alignItems: 'flex-start' }}>

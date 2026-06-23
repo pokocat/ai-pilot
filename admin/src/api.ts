@@ -83,7 +83,7 @@ export const adminAuth = {
 };
 
 // 数据模型统一来自 SSOT（shared/contracts），与前端/后端同口径；按运营端旧名再导出。
-export type { Overview, AdminAgent, AgentDetail, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail } from '../../shared/contracts';
+export type { Overview, AdminAgent, AgentDetail, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail, AdminModerationLogView } from '../../shared/contracts';
 export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsConfig, SkillToolMeta, SkillToolDef, SkillToolUpsert } from '../../shared/contracts';
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
@@ -102,7 +102,7 @@ export type {
 import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, Plan, AdminSaying,
   AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
-  AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, SkillToolDef, SkillToolUpsert,
+  AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, SkillToolDef, SkillToolUpsert,
   AiModel, AiModelUpsert, AiModelTest, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
   AdminUserContext, KnowledgeDetail,
   AgentVersionListView, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
@@ -136,6 +136,14 @@ export const api = {
     return req<AdminTraceListView>(`/admin/observability${qs ? '?' + qs : ''}`);
   },
   trace: (id: string) => req<AdminTraceDetail>(`/admin/observability/${id}`),
+  moderationLogs: (q: { verdict?: string; refType?: string; limit?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.verdict) p.set('verdict', q.verdict);
+    if (q.refType) p.set('refType', q.refType);
+    if (q.limit) p.set('limit', String(q.limit));
+    const qs = p.toString();
+    return req<AdminModerationLogView>(`/admin/moderation-logs${qs ? '?' + qs : ''}`);
+  },
   customSkillTools: () => req<SkillToolDef[]>('/admin/skill-tools/custom'),
   createSkillTool: (body: SkillToolUpsert) => req<SkillToolDef>('/admin/skill-tools/custom', 'POST', body),
   updateSkillTool: (id: string, body: SkillToolUpsert) => req<SkillToolDef>(`/admin/skill-tools/custom/${id}`, 'PATCH', body),
