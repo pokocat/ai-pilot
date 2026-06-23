@@ -15,7 +15,7 @@ import './index.scss';
 type Msg =
   | { role: 'greet'; agent: Agent }
   | { role: 'user'; text: string; refs?: MessageRef[] }
-  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[] }
+  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; retryText?: string }
   | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[] }
   | { role: 'memory'; agentName: string };
 
@@ -190,7 +190,7 @@ export default function Chat() {
     setTimeout(scrollToEnd, 60);
   }
 
-  async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = []) {
+  async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true) {
     if (busy) return;
     if (!store.isAuthed()) {
       promptLogin();
@@ -199,7 +199,8 @@ export default function Chat() {
       return;
     }
     setBusy(true);
-    setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
+    // P2-15：重试（echo=false）不重复回显用户气泡（用户消息已在首次尝试时显示）。
+    if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
     try {
       const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
@@ -218,7 +219,7 @@ export default function Chat() {
       setTimeout(scrollToEnd, 80);
     } catch (e) {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
-      setMsgs((m) => [...m, { role: 'assistant', reply: { text: errorReply(e) } }]);
+      setMsgs((m) => [...m, { role: 'assistant', reply: { text: errorReply(e) }, retryText: text }]); // P2-15：保留原文供重试
     } finally {
       setBusy(false);
     }
@@ -416,6 +417,9 @@ export default function Chat() {
                     </View>
                   )}
                 </View>
+                {m.retryText ? (
+                  <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => doSend(m.retryText!, sessionId, agent?.key ?? '', [], false)}>↻ 重试</Text>
+                ) : null}
               </View>
             );
           }
