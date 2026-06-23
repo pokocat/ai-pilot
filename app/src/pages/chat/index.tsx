@@ -433,7 +433,8 @@ export default function Chat() {
           }
           // report
           return (
-            <View key={i} className="msg a">
+            // P2-14：报告气泡用 messageId 作稳定 key，避免「延迟插入记忆」导致索引位移、ReportCard 渐显动画状态错位。
+            <View key={m.messageId ?? `r-${i}`} className="msg a">
               <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
               <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} onShare={() => shareReport(m.messageId)} />
               {m.deliverable.degraded ? (
