@@ -2,12 +2,13 @@
 // C 端只读「已发布」版本；草稿改动需在「配置」页点「发布新版本」才对用户生效。
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
-import { api, type AgentVersionListView } from './api';
+import { api, type AgentVersionListView, type AgentVersionDetail } from './api';
 import { Loading, fmtTime } from './ui';
 
 export default function StudioVersions({ agentKey, onChanged, toast }: { agentKey: string; onChanged: () => void; toast: (m: string) => void }) {
   const [data, setData] = useState<AgentVersionListView | null>(null);
   const [busy, setBusy] = useState('');
+  const [detail, setDetail] = useState<AgentVersionDetail | null>(null); // P1-A6：版本内容查看（回滚前可审）
   const load = () => api.agentVersions(agentKey).then(setData).catch(() => {});
   useEffect(() => { load(); }, [agentKey]);
   if (!data) return <Loading />;
@@ -42,6 +43,7 @@ export default function StudioVersions({ agentKey, onChanged, toast }: { agentKe
               </div>
               <div className="mm">{v.changeSummary || '—'} · 倍率 ×{v.billingRatio} · {tierName(v.billingRatio)} · {v.createdBy || '系统'} · {fmtTime(v.createdAt)}</div>
             </div>
+            <button className="mini-btn" onClick={() => api.agentVersion(agentKey, v.id).then(setDetail).catch(() => toast('加载失败'))}>查看</button>
             {!v.isPublished && (
               <button className="mini-btn primary" disabled={busy === v.id} onClick={() => rollback(v.id, v.version)}>
                 {busy === v.id ? '…' : '回滚'}
@@ -51,6 +53,18 @@ export default function StudioVersions({ agentKey, onChanged, toast }: { agentKe
         ))}
       </div>
       <div style={{ height: 70 }} />
+
+      {detail && (
+        <div className="ad-detail show" onClick={() => setDetail(null)}>
+          <div className="ad-dh"><div className="bk" onClick={() => setDetail(null)}><Icon name="arrow" size={18} /></div><div className="dt"><div className="t">v{detail.version} 内容</div><div className="s">倍率 ×{detail.billingRatio} · {detail.billing}/{detail.meterUnit} · 接入 {detail.providerMode}</div></div></div>
+          <div className="ad-db" onClick={(e) => e.stopPropagation()}>
+            <div className="blk-d">开场白：{detail.greet || '—'}</div>
+            <div className="blk-d">产出模板：{detail.deliverableKey || '（纯对话，不产出报告）'}</div>
+            <div className="sec-h" style={{ marginTop: 8 }}><span className="t">System 提示词</span></div>
+            <pre className="trace-text">{detail.systemPrompt}</pre>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

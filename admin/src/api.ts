@@ -93,7 +93,7 @@ export type { AdminKnowledgeView, AdminKnowledgeItemRow, ReembedResult, AdminRet
 export type { AdminUserContext, AdminUserMemory, KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow } from '../../shared/contracts';
 // —— 版本化 / 多运营 / 沙盒 / 评测（运营端调优发布） ——
 export type {
-  AgentVersionItem, AgentVersionListView, PublishAgentResult, AgentVersionStatus,
+  AgentVersionItem, AgentVersionListView, AgentVersionDetail, PublishAgentResult, AgentVersionStatus,
   AdminAccountItem, AdminMe, SandboxRequest, SandboxResult, SandboxTrace, SandboxTarget, SandboxProfile,
   EvalSetItem, EvalSetDetail, EvalCaseItem, EvalRunItem, EvalRunDetail, EvalCaseResultItem,
   PricingTier, SuggestedTier,
@@ -105,7 +105,7 @@ import type {
   AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert,
   AiModel, AiModelUpsert, AiModelTest, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
   AdminUserContext, KnowledgeDetail,
-  AgentVersionListView, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
+  AgentVersionListView, AgentVersionDetail, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   SandboxRequest, SandboxResult, EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, StartEvalRunRequest, PricingTier,
 } from '../../shared/contracts';
@@ -190,6 +190,7 @@ export const api = {
 
   // —— 版本化：历史 / 发布 / 回滚 ——
   agentVersions: (key: string) => req<AgentVersionListView>(`/admin/agents/${key}/versions`),
+  agentVersion: (key: string, vid: string) => req<AgentVersionDetail>(`/admin/agents/${key}/versions/${vid}`),
   publishAgent: (key: string, label?: string) => req<PublishAgentResult>(`/admin/agents/${key}/publish`, 'POST', { label }),
   rollbackAgent: (key: string, versionId: string) => req<{ ok: boolean; version: number }>(`/admin/agents/${key}/rollback`, 'POST', { versionId }),
 

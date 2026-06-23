@@ -803,6 +803,14 @@ export interface AgentVersionListView {
   draftDirty: boolean;        // 草稿 vs 已发布是否有差异
   versions: AgentVersionItem[];
 }
+// P1-A6：单个版本的完整内容（回滚前可查看，不再「盲滚」）
+export interface AgentVersionDetail {
+  id: string; version: number; status: AgentVersionStatus; label: string | null;
+  systemPrompt: string; greet: string; deliverableKey: string | null;
+  billing: AgentBilling; price: number; billingRatio: number; meterUnit: string; providerMode: string;
+  memText: string | null; learnText: string | null;
+  createdAt: string;
+}
 export interface PublishAgentRequest { label?: string }
 export interface PublishAgentResult { ok: true; version: number; versionId: string; changed: boolean; changeSummary: string }
 export interface RollbackAgentRequest { versionId: string }

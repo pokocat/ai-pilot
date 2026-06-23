@@ -16,7 +16,7 @@ import {
 import {
   createOperator, listAccounts, setAccountDisabled, setAccountRole, resetAccountPassword,
 } from '../services/adminAccount.js';
-import { recomputeDraftDirty, publishDraft, rollbackToVersion, listVersions } from '../services/agentVersions.js';
+import { recomputeDraftDirty, publishDraft, rollbackToVersion, listVersions, getVersionDetail } from '../services/agentVersions.js';
 import { startEvalRun, suggestTier, PRICING_TIERS } from '../services/evals.js';
 import { encryptSecret, decryptSecretSafe } from '../services/secretBox.js';
 import { tokenUsageSummary } from '../services/usage.js';
@@ -36,7 +36,7 @@ import type {
   AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
   AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert,
   AdminAccountItem, CreateAdminAccountRequest, UpdateAdminAccountRequest,
-  AgentVersionListView, AgentVersionItem, PublishAgentRequest, PublishAgentResult, RollbackAgentRequest,
+  AgentVersionListView, AgentVersionItem, AgentVersionDetail, PublishAgentRequest, PublishAgentResult, RollbackAgentRequest,
   SandboxRequest, SandboxResult, SandboxTarget,
   EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalSetRequest, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, EvalCaseResultItem, StartEvalRunRequest, PricingTier,
@@ -811,6 +811,14 @@ export async function adminRoutes(app: FastifyInstance) {
     const a = await prisma.agent.findUnique({ where: { key: req.params.key }, select: { key: true } });
     if (!a) return reply.code(404).send({ error: 'not found' });
     return versionListView(req.params.key);
+  });
+
+  // P1-A6：查看单个版本完整内容（回滚前可审，不再「盲滚」）。
+  app.get<{ Params: { key: string; vid: string } }>('/admin/agents/:key/versions/:vid', async (req, reply): Promise<AgentVersionDetail | void> => {
+    try { await requireAgentAccess(actorOf(req), req.params.key, 'viewer'); } catch (e) { return sendErr(reply, e, 403); }
+    const d = await getVersionDetail(req.params.key, req.params.vid);
+    if (!d) return reply.code(404).send({ error: 'not found' });
+    return d;
   });
 
   // 发布：把当前草稿冻结成新版本并指向它（C 端立即切到新版本）。

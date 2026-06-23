@@ -9,6 +9,7 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
+import type { AgentVersionDetail } from '../../../shared/contracts';
 
 // 冻结进版本的「行为 + 定价 + 接入」字段（Agent 与 AgentVersion 上同名同义）。
 // 改这里就同时影响快照、哈希去重、字段级 diff —— 单一事实来源。
@@ -288,4 +289,17 @@ export async function recomputeDraftDirty(agentKey: string): Promise<boolean> {
 /** 版本历史（倒序）。 */
 export async function listVersions(agentKey: string) {
   return prisma.agentVersion.findMany({ where: { agentKey }, orderBy: { version: 'desc' } });
+}
+
+/** P1-A6：单个版本完整内容（回滚前查看 / A-B 对比用）。租户无关，按 agentKey 校验防越权取错 agent。 */
+export async function getVersionDetail(agentKey: string, versionId: string): Promise<AgentVersionDetail | null> {
+  const v = await prisma.agentVersion.findUnique({ where: { id: versionId } });
+  if (!v || v.agentKey !== agentKey) return null;
+  return {
+    id: v.id, version: v.version, status: v.status as AgentVersionDetail['status'], label: v.label,
+    systemPrompt: v.systemPrompt, greet: v.greet, deliverableKey: v.deliverableKey,
+    billing: v.billing as AgentVersionDetail['billing'], price: v.price, billingRatio: v.billingRatio,
+    meterUnit: v.meterUnit, providerMode: v.providerMode,
+    memText: v.memText, learnText: v.learnText, createdAt: v.createdAt.toISOString(),
+  };
 }
