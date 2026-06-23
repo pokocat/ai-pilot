@@ -23,7 +23,7 @@ import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
-import { selectableMeta, listDefs, createTool, updateTool, deleteTool } from '../services/skillTools.js';
+import { selectableMeta, listDefs, createTool, updateTool, deleteTool, dryRunTool } from '../services/skillTools.js';
 import { knowledgeView, reembedAll } from '../services/knowledgeAdmin.js';
 import { retrievalDebug } from '../services/retrievalDebug.js';
 import { userContextView } from '../services/adminUserContext.js';
@@ -34,7 +34,7 @@ import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
   AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
-  AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert,
+  AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult,
   AdminAccountItem, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   AgentVersionListView, AgentVersionItem, AgentVersionDetail, PublishAgentRequest, PublishAgentResult, RollbackAgentRequest,
   SandboxRequest, SandboxResult, SandboxTarget,
@@ -300,6 +300,12 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // agent 可勾选的工具（内置 + 启用的自定义工具）。
   app.get('/admin/skill-tools', async (): Promise<SkillToolMeta[]> => selectableMeta());
+
+  // P2-10：单工具试跑（运营配置后验证工具真能执行）。
+  app.post<{ Params: { key: string; name: string }; Body: { args?: Record<string, unknown> } }>('/admin/agents/:key/tools/:name/dry-run', async (req, reply): Promise<AgentToolDryRunResult | void> => {
+    try { await requireAgentAccess(actorOf(req), req.params.key, 'editor'); } catch (e) { return sendErr(reply, e, 403); }
+    return dryRunTool(req.params.key, req.params.name, req.body?.args ?? {});
+  });
 
   // —— 技能库：运营自助管理的自定义 HTTP 工具 CRUD ——
   app.get('/admin/skill-tools/custom', async (): Promise<SkillToolDef[]> => listDefs());

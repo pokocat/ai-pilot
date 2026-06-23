@@ -102,7 +102,7 @@ export type {
 import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, Plan, AdminSaying,
   AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
-  AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert,
+  AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult,
   AiModel, AiModelUpsert, AiModelTest, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
   AdminUserContext, KnowledgeDetail,
   AgentVersionListView, AgentVersionDetail, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
@@ -168,6 +168,8 @@ export const api = {
     req<{ ok: boolean }>(`/admin/agents/${key}`, 'PATCH', body),
   testAgent: (key: string, runtime: AgentRuntimeUpdate) =>
     req<AiTestResult>(`/admin/agents/${key}/test`, 'POST', runtime),
+  dryRunTool: (key: string, name: string, args: Record<string, unknown>) =>
+    req<AgentToolDryRunResult>(`/admin/agents/${key}/tools/${encodeURIComponent(name)}/dry-run`, 'POST', { args }),
   skillTools: () => req<SkillToolMeta[]>('/admin/skill-tools'),
   createAgent: (body: AdminAgentCreate) => req<{ ok: boolean; key: string }>('/admin/agents', 'POST', body),
   survey: () => req<SurveyAdmin[]>('/admin/survey'),

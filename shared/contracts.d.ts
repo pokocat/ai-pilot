@@ -73,6 +73,8 @@ export interface SkillToolMeta {
 }
 
 /** 自定义 HTTP 工具：后台读取视图（鉴权头脱敏为 headerKeys/hasHeaders） */
+// P2-10：后台单工具试跑结果
+export interface AgentToolDryRunResult { ok: boolean; output?: string; error?: string; ms: number }
 export interface SkillToolDef {
   id: string;
   key: string;

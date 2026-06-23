@@ -5,8 +5,8 @@ import { prisma } from '../db.js';
 import { builtinToolNames, nativeSkillMeta, resolveTools, resolveOutputSkills } from '../llm/tools/registry.js';
 import { makeHttpTool } from '../llm/tools/httpTool.js';
 import { encryptSecret, decryptSecretSafe } from './secretBox.js';
-import type { Tool, OutputSkill } from '../llm/tools/types.js';
-import type { SkillToolDef, SkillToolMeta, SkillToolUpsert } from '../../../shared/contracts';
+import type { Tool, OutputSkill, ToolContext } from '../llm/tools/types.js';
+import type { SkillToolDef, SkillToolMeta, SkillToolUpsert, AgentToolDryRunResult } from '../../../shared/contracts';
 
 const KEY_RE = /^[a-z][a-z0-9_]*$/;
 const HTTP_METHODS = new Set(['GET', 'POST']);
@@ -144,4 +144,18 @@ export async function loadToolsByNames(names?: string[] | null): Promise<Tool[]>
   const missing = names.filter((n) => !resolved.has(n));
   if (missing.length) console.warn(`[skillTools] 跳过未知/未启用工具(请检查 agent 技能配置与 SkillTool 表): ${missing.join(', ')}`);
   return tools;
+}
+
+/** P2-10：后台单工具试跑——按 name 解析 + 最小上下文执行，返回输出/错误（便于运营在配置后验证工具真能跑）。 */
+export async function dryRunTool(agentKey: string, name: string, args: Record<string, unknown>): Promise<AgentToolDryRunResult> {
+  const tool = (await loadToolsByNames([name]))[0];
+  if (!tool) return { ok: false, error: `工具不存在或未启用：${name}`, ms: 0 };
+  const ctx: ToolContext = { tenantId: null, userId: null, agentKey, projectId: null, query: String((args as { query?: unknown }).query ?? '') };
+  const t0 = Date.now();
+  try {
+    const output = await tool.run(args ?? {}, ctx);
+    return { ok: true, output: output.slice(0, 4000), ms: Date.now() - t0 };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message, ms: Date.now() - t0 };
+  }
 }

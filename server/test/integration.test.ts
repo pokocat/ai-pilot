@@ -18,6 +18,7 @@ import { setQuota, getQuotaState, chargeQuota, ensureQuota, reserveQuota } from 
 import { loadHistory } from '../src/routes/sessions.js';
 import { moderate, listModerationLogs } from '../src/services/moderation.js';
 import { chatCompleteStream } from '../src/llm/gateway.js';
+import { dryRunTool } from '../src/services/skillTools.js';
 import { percentEncode, canonicalQuery, aliyunSignature } from '../src/services/sms.js';
 import { _resetTokenCache } from '../src/services/wechat.js';
 
@@ -1405,5 +1406,15 @@ describe('TC-S P1-B3 聊天流式（渐进渲染 · 复用全量审核）', () =
     assert.match(body, /event: token/, '应有增量 token 事件（流式）');
     assert.match(body, /event: chat/, '应有完整 chat 兜底事件（兼容非流式客户端）');
     assert.match(body, /event: done/, '应有 done 收尾');
+  });
+
+  test('P2-10 dryRunTool：内置工具可试跑 + 未知工具报错', async () => {
+    const ok = await dryRunTool('strat', 'search_knowledge', { query: '测试检索' });
+    assert.equal(ok.ok, true, '内置工具应可试跑');
+    assert.equal(typeof ok.output, 'string', '应返回字符串输出');
+    assert.ok(ok.ms >= 0);
+    const bad = await dryRunTool('strat', 'no_such_tool_xyz', {});
+    assert.equal(bad.ok, false, '未知/未启用工具应报错');
+    assert.match(bad.error ?? '', /不存在|未启用/);
   });
 });

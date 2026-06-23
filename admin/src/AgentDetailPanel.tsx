@@ -63,6 +63,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   const [skillTools, setSkillTools] = useState<string[]>([]);
   const [agentMems, setAgentMems] = useState<AdminAgentMemoryItem[] | null>(null); // P1-C4：跨用户已学记忆治理
   const [availTools, setAvailTools] = useState<SkillToolMeta[]>([]);
+  const [dryRunning, setDryRunning] = useState(''); // P2-10 工具试跑中的工具名
   const [test, setTest] = useState<AiTestResult | null>(null);
   const [testing, setTesting] = useState(false);
   const [loadErr, setLoadErr] = useState('');
@@ -185,6 +186,16 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
       if (r.missingInputs?.length) addMissingInputs(r.missingInputs);
       setTest(r);
     }).catch((e) => setTest({ ok: false, error: e?.message ?? '测试失败' })).finally(() => setTesting(false));
+  };
+
+  // P2-10：单工具试跑（默认 query 入参，烟雾测试工具能否执行；结果走 toast）。
+  const runDry = async (name: string) => {
+    setDryRunning(name);
+    try {
+      const r = await api.dryRunTool(agentKey, name, { query: '测试' });
+      toast(r.ok ? `✓ ${name} · ${r.ms}ms · ${(r.output || '').slice(0, 40) || '(空输出)'}` : `✗ ${name}：${r.error}`);
+    } catch (e) { toast((e as Error)?.message || '试跑失败'); }
+    setDryRunning('');
   };
 
   // 把缺失的 Dify 输入变量名并入当前映射 JSON（已存在的 key 不覆盖）。
@@ -323,6 +334,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
                       <div key={t.name} className="mem-card">
                         <span className="mi"><Icon name="insight" size={16} /></span>
                         <div className="mb"><div className="mt">{t.name}{t.builtin && <span className="tag off">内置</span>}</div><div className="mm">{t.description}</div></div>
+                        {on && <button className="mini-btn" disabled={dryRunning === t.name} onClick={() => runDry(t.name)}>{dryRunning === t.name ? '…' : '试跑'}</button>}
                         <div className={`sw ${on ? 'on' : ''}`} onClick={() => setSkillTools((s) => on ? s.filter((x) => x !== t.name) : [...s, t.name])}><i /></div>
                       </div>
                     );
