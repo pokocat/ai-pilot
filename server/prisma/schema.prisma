@@ -139,6 +139,7 @@ model Agent {
   // 自定义 OpenAI 兼容端点（providerMode=openai 时生效）
   apiBaseUrl   String? // 如 https://api.deepseek.com/v1
   apiModel     String? // 如 deepseek-chat
+  apiTemperature Float? // P2-7：per-agent 温度（providerMode=openai；留空=跟随全局）
   apiKey       String? @db.Text
   // Dify 应用（providerMode=dify 时生效）。chat-messages 接口
   difyBaseUrl  String? // 如 http://ai.aibuzz.cn/v1
@@ -195,6 +196,7 @@ model AgentVersion {
   providerMode   String  @default("inherit")
   apiBaseUrl     String?
   apiModel       String?
+  apiTemperature Float? // P2-7：per-agent 温度（随版本冻结）
   apiKey         String? @db.Text
   difyBaseUrl    String?
   difyApiKey     String? @db.Text

@@ -172,13 +172,14 @@ function normalizeSkills(raw: unknown): SkillsConfig {
 
 // 库行 → 脱敏的接入视图（不回明文 key）。
 function runtimeView(a: {
-  providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiKey: string | null;
+  providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiTemperature: number | null; apiKey: string | null;
   difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown; skillsConfig: unknown;
 }): AgentRuntimeView {
   return {
     providerMode: (PROVIDER_MODES.includes(a.providerMode as AgentProviderMode) ? a.providerMode : 'inherit') as AgentProviderMode,
     apiBaseUrl: a.apiBaseUrl ?? '',
     apiModel: a.apiModel ?? '',
+    apiTemperature: a.apiTemperature ?? null,
     hasApiKey: !!(a.apiKey && a.apiKey.trim()),
     difyBaseUrl: a.difyBaseUrl ?? '',
     hasDifyKey: !!(a.difyApiKey && a.difyApiKey.trim()),
@@ -194,6 +195,7 @@ function runtimeData(rt?: AgentRuntimeUpdate): Prisma.AgentUpdateInput {
   if (rt.providerMode !== undefined) d.providerMode = PROVIDER_MODES.includes(rt.providerMode) ? rt.providerMode : 'inherit';
   if (rt.apiBaseUrl !== undefined) d.apiBaseUrl = rt.apiBaseUrl.trim() || null;
   if (rt.apiModel !== undefined) d.apiModel = rt.apiModel.trim() || null;
+  if (rt.apiTemperature !== undefined) d.apiTemperature = rt.apiTemperature; // P2-7：null=清空（跟随全局）
   if (rt.apiKey !== undefined) d.apiKey = rt.apiKey ? encryptSecret(rt.apiKey) : null;
   if (rt.difyBaseUrl !== undefined) d.difyBaseUrl = rt.difyBaseUrl.trim() || null;
   if (rt.difyApiKey !== undefined) d.difyApiKey = rt.difyApiKey ? encryptSecret(rt.difyApiKey) : null;

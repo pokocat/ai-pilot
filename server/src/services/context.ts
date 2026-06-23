@@ -12,7 +12,7 @@ import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } 
 
 // 把 Agent 的「接入方式」解析成运行时覆盖。inherit / 未配置完整 → null（走全局模型）。
 function resolveAgentRuntime(
-  agent: { providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiKey: string | null; difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown; skillsConfig: unknown },
+  agent: { providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiTemperature: number | null; apiKey: string | null; difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown; skillsConfig: unknown },
   opts: { userId: string; sessionId?: string | null; difyConversationId?: string | null },
 ): AgentRuntime | null {
   if (isAiTestMode()) return null; // 测试不走 per-agent 真实接入（openai/dify），回退全局 mock
@@ -22,6 +22,7 @@ function resolveAgentRuntime(
       mode: 'openai',
       baseUrl: agent.apiBaseUrl,
       model: agent.apiModel ?? undefined,
+      temperature: agent.apiTemperature ?? undefined, // P2-7
       apiKey: decryptSecretSafe(agent.apiKey),
       skills: (agent.skillsConfig as AgentRuntime['skills']) ?? null,
     };

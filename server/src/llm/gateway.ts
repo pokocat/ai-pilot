@@ -90,7 +90,7 @@ async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ct
 // 把 per-agent 自定义 OpenAI 端点并入一个 ResolvedAiConfig（其余沿用全局/默认）。
 function openaiOverrideCfg(ctx: GenContext, base: ResolvedAiConfig): ResolvedAiConfig {
   const rt = ctx.runtime!;
-  return { ...base, provider: 'openai', baseUrl: rt.baseUrl || base.baseUrl, model: rt.model || base.model, apiKey: rt.apiKey || '' };
+  return { ...base, provider: 'openai', baseUrl: rt.baseUrl || base.baseUrl, model: rt.model || base.model, apiKey: rt.apiKey || '', temperature: rt.temperature ?? base.temperature };
 }
 
 // Dify 返回的 conversation_id 回写 Session，维持后续多轮上下文。

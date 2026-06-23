@@ -17,7 +17,7 @@ export const SNAPSHOT_FIELDS = [
   'systemPrompt', 'memoryConfig', 'skillsConfig', 'greet', 'deliverableKey',
   'chipsJson', 'memText', 'learnText', // P1-A5：面向用户的行为内容随版本冻结
   'billing', 'price', 'billingRatio', 'meterUnit',
-  'providerMode', 'apiBaseUrl', 'apiModel', 'apiKey', 'difyBaseUrl', 'difyApiKey', 'difyInputs',
+  'providerMode', 'apiBaseUrl', 'apiModel', 'apiTemperature', 'apiKey', 'difyBaseUrl', 'difyApiKey', 'difyInputs',
 ] as const;
 type SnapshotField = (typeof SNAPSHOT_FIELDS)[number];
 export type SnapshotInput = Record<SnapshotField, unknown>;
@@ -51,6 +51,7 @@ export interface EffectiveAgentConfig {
   providerMode: string;
   apiBaseUrl: string | null;
   apiModel: string | null;
+  apiTemperature: number | null;
   apiKey: string | null;
   difyBaseUrl: string | null;
   difyApiKey: string | null;
@@ -90,6 +91,7 @@ function behaviorFrom(src: Record<string, unknown>): Omit<EffectiveAgentConfig, 
     providerMode: (src.providerMode as string) ?? 'inherit',
     apiBaseUrl: (src.apiBaseUrl as string | null) ?? null,
     apiModel: (src.apiModel as string | null) ?? null,
+    apiTemperature: (src.apiTemperature as number | null) ?? null,
     apiKey: (src.apiKey as string | null) ?? null,
     difyBaseUrl: (src.difyBaseUrl as string | null) ?? null,
     difyApiKey: (src.difyApiKey as string | null) ?? null,

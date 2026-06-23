@@ -60,6 +60,7 @@ export interface AgentRuntime {
   // 自定义 OpenAI 兼容端点（mode=openai）
   baseUrl?: string;
   model?: string;
+  temperature?: number; // P2-7：per-agent 温度（留空=跟随全局）
   apiKey?: string;
   // Dify 应用（mode=dify）
   difyBaseUrl?: string;

@@ -51,6 +51,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   const [mode, setMode] = useState<AgentProviderMode>('inherit');
   const [apiBaseUrl, setApiBaseUrl] = useState('');
   const [apiModel, setApiModel] = useState('');
+  const [apiTemperature, setApiTemperature] = useState(''); // P2-7：per-agent 温度（空=跟随全局）
   const [apiKey, setApiKey] = useState('');        // 留空=不改动已存 key
   const [hasApiKey, setHasApiKey] = useState(false);
   const [difyBaseUrl, setDifyBaseUrl] = useState('');
@@ -78,7 +79,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
       setMem(d.memoryConfig);
       const r = d.runtime;
       setMode(r.providerMode);
-      setApiBaseUrl(r.apiBaseUrl); setApiModel(r.apiModel); setHasApiKey(r.hasApiKey); setApiKey('');
+      setApiBaseUrl(r.apiBaseUrl); setApiModel(r.apiModel); setApiTemperature(r.apiTemperature == null ? '' : String(r.apiTemperature)); setHasApiKey(r.hasApiKey); setApiKey('');
       setDifyBaseUrl(r.difyBaseUrl); setHasDifyKey(r.hasDifyKey); setDifyApiKey('');
       setDifyInputsText(JSON.stringify(r.difyInputs ?? {}, null, 2));
       setSkillsEnabled(r.skills?.enabled ?? false); setSkillTools(r.skills?.tools ?? []);
@@ -130,6 +131,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
     const rt: AgentRuntimeUpdate = { providerMode: mode };
     if (mode === 'openai') {
       rt.apiBaseUrl = apiBaseUrl; rt.apiModel = apiModel;
+      rt.apiTemperature = apiTemperature.trim() === '' || !Number.isFinite(Number(apiTemperature)) ? null : Number(apiTemperature);
       if (apiKey.trim()) rt.apiKey = apiKey.trim();
     } else if (mode === 'dify') {
       rt.difyBaseUrl = difyBaseUrl;
@@ -298,6 +300,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
             <>
               <div className="ai-field"><div className="ai-fl">Base URL</div><input className="ai-input" placeholder="https://api.deepseek.com/v1" value={apiBaseUrl} onChange={(e) => setApiBaseUrl(e.target.value)} /></div>
               <div className="ai-field"><div className="ai-fl">模型</div><input className="ai-input" placeholder="deepseek-chat" value={apiModel} onChange={(e) => setApiModel(e.target.value)} /></div>
+              <div className="ai-field"><div className="ai-fl">温度</div><input className="ai-input" placeholder="留空=跟随全局，如 0.7" value={apiTemperature} onChange={(e) => setApiTemperature(e.target.value)} /></div>
               <div className="ai-field"><div className="ai-fl">API Key{hasApiKey ? ' · 已配置' : ''}</div><input className="ai-input" type="password" placeholder={hasApiKey ? '已保存 · 留空则不修改' : 'sk-...'} value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></div>
             </>
           )}

@@ -43,6 +43,7 @@ export interface AgentRuntimeView {
   providerMode: AgentProviderMode;
   apiBaseUrl: string;   // 自定义 OpenAI 兼容 baseUrl，如 https://api.deepseek.com/v1
   apiModel: string;     // 自定义模型名，如 deepseek-chat
+  apiTemperature: number | null; // P2-7：per-agent 温度（null=跟随全局）
   hasApiKey: boolean;   // 自定义端点是否已配置 key
   difyBaseUrl: string;  // Dify 应用 baseUrl，如 http://ai.aibuzz.cn/v1
   hasDifyKey: boolean;  // Dify 应用是否已配置 key
@@ -55,6 +56,7 @@ export interface AgentRuntimeUpdate {
   providerMode?: AgentProviderMode;
   apiBaseUrl?: string;
   apiModel?: string;
+  apiTemperature?: number | null; // P2-7
   apiKey?: string;
   difyBaseUrl?: string;
   difyApiKey?: string;
