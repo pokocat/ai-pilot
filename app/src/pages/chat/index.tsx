@@ -8,7 +8,7 @@ import ReportCard from '../../components/ReportCard';
 import SafeHeader from '../../components/SafeHeader';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type Agent, type Deliverable, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT } from '../../services/api';
+import { api, type Agent, type Deliverable, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../services/api';
 import { agentForText } from '../../data/intents';
 import './index.scss';
 
@@ -61,7 +61,7 @@ export default function Chat() {
   const [refs, setRefs] = useState<MessageRef[]>([]);
   const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
   const [picker, setPicker] = useState(false);
-  const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[] }>({ projects: [], reports: [], knowledge: [] });
+  const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[]; memories: MemoryCandidate[] }>({ projects: [], reports: [], knowledge: [], memories: [] });
   const logRef = useRef<Msg[]>([]);
   logRef.current = msgs;
 
@@ -298,12 +298,13 @@ export default function Chat() {
     }
     setPicker(true);
     store.setOverlay(true, 'ref-picker');
-    const [projects, reports, knowledge] = await Promise.all([
+    const [projects, reports, knowledge, memories] = await Promise.all([
       api.projects().catch(() => []),
       api.reports(projectId || undefined).catch(() => []),
       api.knowledge(projectId || undefined).catch(() => []),
+      api.memories(agent?.key || undefined).catch(() => []),
     ]);
-    setPick({ projects, reports, knowledge });
+    setPick({ projects, reports, knowledge, memories });
   };
   const closePicker = () => { setPicker(false); store.setOverlay(false, 'ref-picker'); };
   const toggleRef = (r: MessageRef) => {
@@ -512,7 +513,8 @@ export default function Chat() {
               {renderGroup('项目', pick.projects.map((p) => ({ kind: 'project' as const, id: p.id, label: p.name, sub: `${p.counts.reports} 报告 · ${p.counts.knowledge} 知识` })))}
               {renderGroup('报告', pick.reports.map((r) => ({ kind: 'report' as const, id: r.id, label: `${r.title} v${r.currentVersion}`, version: r.currentVersion, sub: r.type })))}
               {renderGroup('知识', pick.knowledge.map((k) => ({ kind: 'knowledge' as const, id: k.id, label: k.title || k.text.slice(0, 14), sub: k.text.slice(0, 24) })))}
-              {(!pick.projects.length && !pick.reports.length && !pick.knowledge.length) ? (
+              {renderGroup('记忆', pick.memories.map((m) => ({ kind: 'memory' as const, id: m.id, label: m.text.slice(0, 18), sub: m.agentName || m.kind })))}
+              {(!pick.projects.length && !pick.reports.length && !pick.knowledge.length && !pick.memories.length) ? (
                 <Text className="ref-empty">还没有可引用的项目/报告/知识。先建项目、产出报告或记录知识，这里就能 @ 它们。</Text>
               ) : null}
               <View style={{ height: '12px' }} />

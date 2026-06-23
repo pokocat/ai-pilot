@@ -5,7 +5,7 @@ import type {
   Deliverable, DeliverableSection, LibItem, SaveLibRequest,
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
-  KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
+  KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
 } from '../../../shared/contracts';
@@ -789,6 +789,10 @@ export const mock = {
   async knowledge(projectId?: string, kind?: string): Promise<KnowledgeItemT[]> {
     const { d } = current();
     return delay(d.knowledge.filter((k) => (!projectId || k.projectId === projectId) && (!kind || k.kind === kind)).map(knItem));
+  },
+  // P1-C3：mock 不维护长期记忆，返回空列表（@记忆 候选在 mock 下为空，server 模式走真实 /memories）。
+  async memories(): Promise<MemoryCandidate[]> {
+    return delay([]);
   },
   async knowledgeSearch(q: string, projectId?: string): Promise<KnowledgeHit[]> {
     const { d } = current();

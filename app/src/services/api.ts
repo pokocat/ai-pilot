@@ -7,7 +7,7 @@ import type {
   GenResult, GenRequest, LibItem, LoginResult, Profile, TodaySaying, SaveLibRequest,
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
-  KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef,
+  KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
   KnowledgeDocRow, KnowledgeDetail,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
   BindPhoneResult,
@@ -20,6 +20,7 @@ export type {
 export type { SurveyQuestion as SurveyQ } from '../../../shared/contracts';
 export type { DeliverableSection as Section } from '../../../shared/contracts';
 export type { ChatReply as ChatReplyT } from '../../../shared/contracts';
+export type { MemoryCandidate } from '../../../shared/contracts';
 // 新能力类型再导出（项目 / 报告 / 知识 / 引用）
 export type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
@@ -168,6 +169,10 @@ export const api = {
     IS_MOCK ? mock.createKnowledge(body) : request<KnowledgeItemT>('/knowledge', 'POST', body),
   deleteKnowledge: (id: string) =>
     IS_MOCK ? mock.deleteKnowledge(id) : request<{ ok: boolean }>(`/knowledge/${id}`, 'DELETE'),
+  // —— 长期记忆（@引用候选；P1-C3）——
+  memories: (agentKey?: string, q?: string) =>
+    IS_MOCK ? mock.memories()
+      : request<MemoryCandidate[]>(`/memories${agentKey || q ? `?${agentKey ? `agentKey=${agentKey}` : ''}${agentKey && q ? '&' : ''}${q ? `q=${encodeURIComponent(q)}` : ''}` : ''}`),
   // —— 我的资料库（文档视图 + 上传） ——
   knowledgeDocs: (projectId?: string) =>
     IS_MOCK ? Promise.resolve([] as KnowledgeDocRow[]) : request<KnowledgeDocRow[]>(`/knowledge/docs${projectId ? `?projectId=${projectId}` : ''}`),
