@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
 import NumInput from './NumInput';
-import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta } from './api';
+import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta, type AdminAgentMemoryItem } from './api';
 import StudioSandbox from './StudioSandbox';
 import StudioVersions, { tierName } from './StudioVersions';
 import StudioEval from './StudioEval';
@@ -58,6 +58,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   // —— 自建技能（providerMode=openai）——
   const [skillsEnabled, setSkillsEnabled] = useState(false);
   const [skillTools, setSkillTools] = useState<string[]>([]);
+  const [agentMems, setAgentMems] = useState<AdminAgentMemoryItem[] | null>(null); // P1-C4：跨用户已学记忆治理
   const [availTools, setAvailTools] = useState<SkillToolMeta[]>([]);
   const [test, setTest] = useState<AiTestResult | null>(null);
   const [testing, setTesting] = useState(false);
@@ -385,6 +386,26 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
             ))}
           </div>
           <div className="blk-d" style={{ margin: '9px 0 0' }}>记忆随真实使用持续积累（不展示估算值，避免误导）。</div>
+        </div>
+
+        {/* P1-C4：跨用户已学记忆治理——浏览并清理 auto-learn 写入的脏记忆 */}
+        <div className="blk">
+          <div className="blk-h"><Icon name="insight" size={15} /><span className="t">已学记忆 · 治理</span>{agentMems && <span className="badge">{agentMems.length}</span>}</div>
+          {!agentMems ? (
+            <button className="ai-btn" onClick={() => api.agentMemories(agentKey).then((r) => setAgentMems(r.items)).catch(() => setAgentMems([]))}>查看该顾问跨用户已学到的记忆</button>
+          ) : agentMems.length === 0 ? (
+            <div className="blk-d">暂无已学记忆。</div>
+          ) : (
+            <div className="mem-list">
+              {agentMems.map((m) => (
+                <div key={m.id} className="mem-card">
+                  <div className="mb"><div className="mt">{m.text.slice(0, 40)}</div><div className="mm">用户 {m.userId.slice(0, 8)} · {m.kind} · {new Date(m.createdAt).toLocaleDateString()}</div></div>
+                  <button className="mini-btn" onClick={() => api.deleteAgentMemory(agentKey, m.id).then(() => setAgentMems((cur) => cur ? cur.filter((x) => x.id !== m.id) : cur)).catch(() => {})}>删除</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="blk-d" style={{ margin: '9px 0 0' }}>清理自动学习写入的脏记忆（跨用户）。删除即时生效。</div>
         </div>
         <div style={{ height: 70 }} />
       </div>

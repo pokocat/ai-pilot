@@ -83,7 +83,7 @@ export const adminAuth = {
 };
 
 // 数据模型统一来自 SSOT（shared/contracts），与前端/后端同口径；按运营端旧名再导出。
-export type { Overview, AdminAgent, AgentDetail, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail, AdminModerationLogView } from '../../shared/contracts';
+export type { Overview, AdminAgent, AgentDetail, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, AdminAgentMemoryItem } from '../../shared/contracts';
 export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsConfig, SkillToolMeta, SkillToolDef, SkillToolUpsert } from '../../shared/contracts';
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
@@ -102,7 +102,7 @@ export type {
 import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, Plan, AdminSaying,
   AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
-  AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, SkillToolDef, SkillToolUpsert,
+  AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert,
   AiModel, AiModelUpsert, AiModelTest, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
   AdminUserContext, KnowledgeDetail,
   AgentVersionListView, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
@@ -144,6 +144,8 @@ export const api = {
     const qs = p.toString();
     return req<AdminModerationLogView>(`/admin/moderation-logs${qs ? '?' + qs : ''}`);
   },
+  agentMemories: (key: string) => req<AdminAgentMemoryView>(`/admin/agents/${key}/memories`),
+  deleteAgentMemory: (key: string, mid: string) => req<{ ok: boolean }>(`/admin/agents/${key}/memories/${mid}`, 'DELETE'),
   customSkillTools: () => req<SkillToolDef[]>('/admin/skill-tools/custom'),
   createSkillTool: (body: SkillToolUpsert) => req<SkillToolDef>('/admin/skill-tools/custom', 'POST', body),
   updateSkillTool: (id: string, body: SkillToolUpsert) => req<SkillToolDef>(`/admin/skill-tools/custom/${id}`, 'PATCH', body),
