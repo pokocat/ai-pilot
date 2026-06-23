@@ -93,14 +93,21 @@ async function ownedKeysForHeader(token?: string): Promise<Set<string>> {
   return ownedAgentKeys(user.id);
 }
 
-// 把「已发布版本」的计费/接入/开场白覆盖到 agent 行（身份字段如 name/icon/chips 不随版本走，仍取 agent 行）。
-type PublishedOverlay = { billing: string; price: number; billingRatio: number; meterUnit: string; greet: string; deliverableKey: string | null } | null;
+// 把「已发布版本」的计费/接入/开场白/行为内容覆盖到 agent 行（身份字段 name/icon/role/type/enabled 仍取 agent 行）。
+// P1-A5：greet/chips/memText/learnText 随版本冻结；旧版本相应列为 null → 回退 Agent 行（无回归）。
+type PublishedOverlay = {
+  billing: string; price: number; billingRatio: number; meterUnit: string; greet: string; deliverableKey: string | null;
+  chipsJson?: unknown; memText?: string | null; learnText?: string | null;
+} | null;
 function overlayPublished<T extends Record<string, unknown>>(a: T, ver: PublishedOverlay): T {
   if (!ver) return a;
   return {
     ...a,
     billing: ver.billing, price: ver.price, billingRatio: ver.billingRatio,
     meterUnit: ver.meterUnit, greet: ver.greet, deliverableKey: ver.deliverableKey,
+    chipsJson: ver.chipsJson ?? a.chipsJson,
+    memText: ver.memText ?? a.memText,
+    learnText: ver.learnText ?? a.learnText,
   };
 }
 

@@ -182,6 +182,10 @@ model AgentVersion {
   skillsConfig   Json?
   greet          String  @db.Text
   deliverableKey String?
+  // P1-A5：面向用户的行为内容也随版本冻结（旧版本为 null → 消费方回退 Agent 行，无回归）
+  chipsJson      Json?
+  memText        String? @db.Text
+  learnText      String?
   // 定价随版本走（调教越好→倍率越高→卖越贵）
   billing        String  @default("free") // free | unlock | metered
   price          Int     @default(0)

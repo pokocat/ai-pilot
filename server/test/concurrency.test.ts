@@ -5,7 +5,7 @@ import { prisma } from '../src/db.js';
 import { api, cleanBusiness, closeApp, getApp, seedBaseline, uniquePhone, deliverable } from './helpers.js';
 import { issueSmsCode, verifySmsCode } from '../src/services/sms.js';
 import { saveReportVersion } from '../src/services/reports.js';
-import { publishDraft, rollbackToVersion } from '../src/services/agentVersions.js';
+import { publishDraft, rollbackToVersion, recomputeDraftDirty } from '../src/services/agentVersions.js';
 import { applyPlanPurchase } from '../src/services/purchase.js';
 
 before(async () => {
@@ -193,4 +193,16 @@ test('P1-A3 回滚与发布并发：始终恰好一行 published 且指针一致
   const agent = await prisma.agent.findUnique({ where: { key: agentKey } });
   const pub = await prisma.agentVersion.findFirst({ where: { agentKey, status: 'published' } });
   assert.equal(agent?.publishedVersionId, pub?.id, '指针必须与唯一 published 行一致');
+});
+
+test('P1-A5 行为内容(chips)随版本冻结，编辑即标 dirty', async () => {
+  const agentKey = 'a5_chips_agent';
+  await createUnlockAgent(agentKey, 0);
+  await prisma.agentVersion.deleteMany({ where: { agentKey } });
+  await prisma.agent.update({ where: { key: agentKey }, data: { publishedVersionId: null, chipsJson: [['target', '体检']] } });
+  const v1 = await publishDraft(agentKey);
+  const ver = await prisma.agentVersion.findUnique({ where: { id: v1.versionId } });
+  assert.deepEqual(ver?.chipsJson, [['target', '体检']], '发布应把 chips 冻结进版本');
+  await prisma.agent.update({ where: { key: agentKey }, data: { chipsJson: [['trend', '增长']] } });
+  assert.equal(await recomputeDraftDirty(agentKey), true, '改 chips 应标记草稿有未发布改动（chips 已纳入版本哈希）');
 });

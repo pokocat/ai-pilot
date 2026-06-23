@@ -14,6 +14,7 @@ import type { Prisma } from '@prisma/client';
 // 改这里就同时影响快照、哈希去重、字段级 diff —— 单一事实来源。
 export const SNAPSHOT_FIELDS = [
   'systemPrompt', 'memoryConfig', 'skillsConfig', 'greet', 'deliverableKey',
+  'chipsJson', 'memText', 'learnText', // P1-A5：面向用户的行为内容随版本冻结
   'billing', 'price', 'billingRatio', 'meterUnit',
   'providerMode', 'apiBaseUrl', 'apiModel', 'apiKey', 'difyBaseUrl', 'difyApiKey', 'difyInputs',
 ] as const;
@@ -21,7 +22,7 @@ type SnapshotField = (typeof SNAPSHOT_FIELDS)[number];
 export type SnapshotInput = Record<SnapshotField, unknown>;
 
 // Json 字段（需按 Prisma.InputJsonValue 写入；可空的传 null）。
-const JSON_FIELDS = new Set<SnapshotField>(['memoryConfig', 'skillsConfig', 'difyInputs']);
+const JSON_FIELDS = new Set<SnapshotField>(['memoryConfig', 'skillsConfig', 'difyInputs', 'chipsJson']);
 
 /** 运行时/计费实际生效的「有效配置」——身份取 Agent 行，行为/定价/接入取已解析到的版本（或草稿回退）。 */
 export interface EffectiveAgentConfig {

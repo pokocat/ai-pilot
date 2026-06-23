@@ -53,10 +53,12 @@ export async function sessionRoutes(app: FastifyInstance) {
       include: { messages: { orderBy: { createdAt: 'asc' } }, agent: true },
     });
     if (!s) return reply.code(404).send({ error: 'session not found' });
+    // P1-A5：会话头的 greet/chips/memText/learnText 与 /agents 列表同口径——取已发布版本，旧版本相应列为 null 则回退 Agent 行。
+    const pub = s.agent.publishedVersionId ? await prisma.agentVersion.findUnique({ where: { id: s.agent.publishedVersionId } }) : null;
     return {
       id: s.id,
       agentKey: s.agentKey,
-      agent: { key: s.agent.key, name: s.agent.name, role: s.agent.role, icon: s.agent.icon, greet: s.agent.greet, chips: s.agent.chipsJson, memText: s.agent.memText, learnText: s.agent.learnText },
+      agent: { key: s.agent.key, name: s.agent.name, role: s.agent.role, icon: s.agent.icon, greet: pub?.greet ?? s.agent.greet, chips: (pub?.chipsJson ?? s.agent.chipsJson), memText: pub?.memText ?? s.agent.memText, learnText: pub?.learnText ?? s.agent.learnText },
       title: s.title,
       projectId: s.projectId,
       messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: m.contentJson, at: m.createdAt, refs: (m.refsJson as MessageRef[] | null) ?? undefined })),
