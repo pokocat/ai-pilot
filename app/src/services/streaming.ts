@@ -1,7 +1,7 @@
 import Taro from '@tarojs/taro';
 import { BASE_URL } from './config';
 import { getToken } from './token';
-import { parseSSE } from './sse';
+import { parseSSE, decodeUtf8, sliceCompleteBlocks } from './sse';
 import type { GenRequest, ChatReply } from '../../../shared/contracts';
 
 export interface StreamHandlers {
@@ -52,9 +52,16 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
   }
 
   // weapp：分块接收（enableChunked / onChunkReceived 为微信扩展，Taro 类型未覆盖，故 as any）。
+  // weapp 运行时无全局 TextDecoder → 按字节累积，切出完整 \n\n block 再 decodeUtf8（规避中文跨 chunk 截断）。
   await new Promise<void>((resolve) => {
-    let buf = '';
-    const dec = new TextDecoder();
+    let bytes = new Uint8Array(0);
+    const feed = (chunk: Uint8Array) => {
+      const merged = new Uint8Array(bytes.length + chunk.length);
+      merged.set(bytes); merged.set(chunk, bytes.length);
+      const { complete, rest } = sliceCompleteBlocks(merged);
+      bytes = new Uint8Array(rest); // 拷成 ArrayBuffer-backed，避免 TS 类型(ArrayBufferLike)不匹配
+      if (complete.length) dispatch(parseSSE(decodeUtf8(complete)).events, h);
+    };
     const task = Taro.request({
       url, method: 'POST', data: body, header,
       enableChunked: true,
@@ -62,10 +69,6 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
       fail: () => { h.onError?.('网络请求失败'); resolve(); },
     } as unknown as Parameters<typeof Taro.request>[0]);
     const onChunk = (task as unknown as { onChunkReceived?: (cb: (r: { data: ArrayBuffer }) => void) => void }).onChunkReceived;
-    onChunk?.call(task, (r: { data: ArrayBuffer }) => {
-      buf += dec.decode(new Uint8Array(r.data), { stream: true });
-      const { events, rest } = parseSSE(buf); buf = rest;
-      dispatch(events, h);
-    });
+    onChunk?.call(task, (r: { data: ArrayBuffer }) => feed(new Uint8Array(r.data)));
   });
 }
