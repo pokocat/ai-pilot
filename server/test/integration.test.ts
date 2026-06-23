@@ -580,6 +580,42 @@ describe('TC-J 内容审核拦截', () => {
     assert.equal(await moderate('input', '赌.博.推广'), false, '插标点应被拦');
     assert.equal(await moderate('input', '帮我做正常的增长咨询'), true, '正常内容放行');
   });
+
+  test('J4 P1-B5 http provider 解析 pass/block + 故障 fail-open（mock 服务验证代码侧完整）', async () => {
+    const { createServer } = await import('node:http');
+    let mode: 'pass' | 'block' | 'error' = 'pass';
+    const server = createServer((_req, res) => {
+      if (mode === 'error') { res.statusCode = 500; res.end('err'); return; }
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify(mode === 'block' ? { block: true, label: '违规', score: 0.9 } : { pass: true }));
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const port = (server.address() as { port: number }).port;
+    const saved: Record<string, string | undefined> = {
+      MODERATION_PROVIDER: process.env.MODERATION_PROVIDER,
+      MODERATION_API_URL: process.env.MODERATION_API_URL,
+      MODERATION_FAIL_OPEN: process.env.MODERATION_FAIL_OPEN,
+    };
+    const restore = (k: string, v: string | undefined) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; };
+    process.env.MODERATION_PROVIDER = 'http';
+    process.env.MODERATION_API_URL = `http://127.0.0.1:${port}/check`;
+    try {
+      mode = 'pass';
+      assert.equal(await moderate('input', '正常内容', { userId: 'u_http' }), true, 'http pass=true → 放行');
+      mode = 'block';
+      assert.equal(await moderate('input', '任意内容'), false, 'http block=true → 拦截');
+      const blocked = await prisma.moderationLog.findFirst({ where: { verdict: 'block' }, orderBy: { createdAt: 'desc' } });
+      assert.equal((blocked?.detailJson as { provider?: string } | null)?.provider, 'http', '日志记录 http provider 来源');
+      mode = 'error';
+      process.env.MODERATION_FAIL_OPEN = 'true';
+      assert.equal(await moderate('input', '任意'), true, '服务 500 + fail-open=true → 放行');
+      process.env.MODERATION_FAIL_OPEN = 'false';
+      assert.equal(await moderate('input', '任意'), false, '服务 500 + fail-open=false → 拦截');
+    } finally {
+      Object.entries(saved).forEach(([k, v]) => restore(k, v));
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
 });
 
 // ───────────────────────── TC-K 算力（套餐赠送 + 按次计量 + 不足拦截） ─────────────────────────
