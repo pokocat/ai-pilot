@@ -314,6 +314,8 @@ export async function sessionRoutes(app: FastifyInstance) {
         userMessage: text,
         projectId,
         refs,
+        sessionId: session.id,
+        difyConversationId: session.difyConversationId,
         effective: effective ?? undefined,
       });
 
