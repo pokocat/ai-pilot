@@ -44,6 +44,8 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   const [billingRatio, setBillingRatio] = useState(1);
   const [meterUnit, setMeterUnit] = useState<'text' | 'image'>('text');
   const [prompt, setPrompt] = useState('');
+  const [greet, setGreet] = useState(''); // P2-13：开场白
+  const [deliverableKey, setDeliverableKey] = useState(''); // P2-13：产出模板键
   const [mem, setMem] = useState<MemoryConfig | null>(null);
   // —— 接入方式 ——
   const [mode, setMode] = useState<AgentProviderMode>('inherit');
@@ -72,6 +74,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
       setBilling(d.billing); setPrice(d.price);
       setBillingRatio(d.billingRatio ?? 1); setMeterUnit(d.meterUnit ?? 'text');
       setPrompt(d.systemPrompt);
+      setGreet(d.greet ?? ''); setDeliverableKey(d.deliverableKey ?? '');
       setMem(d.memoryConfig);
       const r = d.runtime;
       setMode(r.providerMode);
@@ -148,7 +151,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
         price: billing === 'free' ? 0 : Math.max(0, Math.trunc(price)),
         billingRatio: meterUnit === 'text' ? Math.max(0.1, billingRatio) : 1,
         meterUnit,
-        systemPrompt: prompt, memoryConfig: mem, runtime,
+        systemPrompt: prompt, greet, deliverableKey: deliverableKey.trim() || null, memoryConfig: mem, runtime,
       });
       return true;
     } catch (e) { toast((e as Error)?.message || '保存失败'); return false; }
@@ -270,6 +273,14 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           <div className="var-row">
             {VARS.map((v) => <span key={v} className="var" onClick={() => insertVar(v)}>＋ {v}</span>)}
           </div>
+        </div>
+
+        {/* P2-13：开场白 + 产出模板键（此前面板无法编辑，只能改库/建接口） */}
+        <div className="blk">
+          <div className="blk-h"><Icon name="pen" size={15} /><span className="t">开场白 / 产出模板</span></div>
+          <div className="blk-d">开场白：进入对话的问候语。产出模板键：结构化成果模板（留空=纯对话，不产出报告）。</div>
+          <textarea className="ta" value={greet} onChange={(e) => setGreet(e.target.value)} rows={2} placeholder="开场白" />
+          <textarea className="ta" value={deliverableKey} onChange={(e) => setDeliverableKey(e.target.value)} rows={1} placeholder="产出模板键（如 战略体检；留空=纯对话）" />
         </div>
 
         <div className="blk">
