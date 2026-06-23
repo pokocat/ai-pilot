@@ -5,6 +5,7 @@ import prodConfig from './prod';
 export default defineConfig(async (merge, { command, mode }) => {
   const taroAppMode = process.env.TARO_APP_MODE || 'mock';
   const taroAppApi = process.env.TARO_APP_API || '';
+  const taroAppStream = process.env.TARO_APP_STREAM || ''; // P1-B3：聊天流式开关，须注入 defineConstants 否则运行期 process 未定义
 
   const baseConfig = {
     projectName: 'junshi-app',
@@ -18,6 +19,7 @@ export default defineConfig(async (merge, { command, mode }) => {
     defineConstants: {
       'process.env.TARO_APP_MODE': JSON.stringify(taroAppMode),
       'process.env.TARO_APP_API': JSON.stringify(taroAppApi),
+      'process.env.TARO_APP_STREAM': JSON.stringify(taroAppStream),
     },
     copy: { patterns: [], options: {} },
     framework: 'react',
