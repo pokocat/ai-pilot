@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-06-24** · **修复生产部署脚本 SHA 插值**：`scripts/deploy-prod.sh` 将日志与远端命令中的 `$SHA` 改为 `${SHA}`，避免中文标点紧贴变量名时在 `set -u` 下被解析成未绑定变量，恢复 server/admin 部署流程。影响面：生产部署脚本。
+- **2026-06-24** · **切换微信小程序 AppID 上传配置**：`app/project.config.json` 切到 `wx810ebe6dfef8e75f`；小程序上传/预览脚本默认读取项目配置里的 AppID，不再硬编码旧值；`server/.env.example` 与工程文档同步新的 AppID，上传私钥继续只通过本机 ignored key 文件传入。影响面：app 小程序项目配置 + 上传脚本 + server env 示例 + AGENTS。
 - **2026-06-22** · **并发临界区加固**：权益点流水写入改为同用户 advisory lock 串行，新增 `reserveCredits/refundCredits/grantCredits` 支持图片/按张产出前预扣、异常退款与套餐赠送叠加；`/agents/:key/purchase` 在同一事务内完成扣费与开通，`applyPlanPurchase` 同事务更新套餐、钻石流水与 token 钱包，避免不同智能体并发购买双花和并发套餐发放丢充值。短信发放限频加同手机号场景锁，验证码消费改条件更新保证一次性；报告版本保存与智能体发布按资源加事务锁，避免并发版本号冲突；项目创建 slug 唯一键冲突自动重试、改名冲突返回 409。新增 `test/concurrency.test.ts` 覆盖购买、套餐发放、短信、报告版本和发布竞态，并收紧审计回归断言避免同秒日志排序误读。影响面：server credits/tokenQuota/purchase/sessions/agents/sms/reports/agentVersions/projects + tests + AGENTS。
 - **2026-06-22** · **修复微信支付回调并发幂等**：`markPaidAndApply` 改为同一 `outTradeNo` 先拿 PostgreSQL 事务级 advisory lock，再读取/抢占/发放/写 `appliedAt`，避免 `status=paid && appliedAt=null` 窗口下并发成功回调重复入账；套餐权益发放与 token 额度授予支持复用当前 Prisma transaction client，避免 CI 并发回调下事务连接池饥饿；保留 `paid+appliedAt=null` 订单的后续回调恢复能力。AGENTS 同步购买/支付接口与 TODO 口径。影响面：server 微信支付/套餐发放服务 + 工程文档。
 - **2026-06-21** · **关闭裸 IP 运营后台入口**：线上 Nginx 已将 `http://8.136.36.175/admin` 与 `/admin/` 改为 404，后台只保留 `https://wxapi.aibuzz.cn/admin/` 域名入口；`scripts/deploy-prod.sh` 公网 smoke 改为裸 IP 只验 `/api/health`、域名验 `/api/health` 与 `/admin/`，部署文档和 Nginx 模板同步裸 IP server 块约束。

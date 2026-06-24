@@ -32,10 +32,10 @@ die(){ printf "\033[1;31m[deploy] %s\033[0m\n" "$*" >&2; exit 1; }
 [ -f "$SSH_KEY" ] || die "SSH key 不存在：$SSH_KEY"
 
 if ! ( cd "$ROOT" && git diff --quiet && git diff --cached --quiet ); then
-  log "检测到未提交的 tracked 改动；本次仍只部署当前 HEAD=$SHA。"
+  log "检测到未提交的 tracked 改动；本次仍只部署当前 HEAD=${SHA}。"
 fi
 
-log "打包当前 HEAD：$SHA"
+log "打包当前 HEAD：${SHA}"
 ( cd "$ROOT" && git archive --format=tar.gz -o "$ARCHIVE" HEAD )
 
 log "上传 $ARCHIVE -> $DEPLOY_HOST:/tmp/"
@@ -43,7 +43,7 @@ scp "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:/tmp/"
 
 log "远端构建并发布 server + admin"
 ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" \
-  "SHA='$SHA' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' TARO_APP_API='$TARO_APP_API' bash -se" <<'REMOTE'
+  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' TARO_APP_API='$TARO_APP_API' bash -se" <<'REMOTE'
 set -euo pipefail
 
 APP_ROOT="$REMOTE_ROOT"
@@ -53,7 +53,7 @@ ENV_BACKUP="/tmp/junshi-server-env-${SHA}"
 DEPLOY_USER="$(id -un)"
 DEPLOY_GROUP="$(id -gn)"
 
-echo "== prepare release $SHA =="
+echo "== prepare release ${SHA} =="
 rm -rf "$RELEASE"
 mkdir -p "$RELEASE"
 tar -xzf "$ARCHIVE" -C "$RELEASE"
@@ -117,7 +117,7 @@ if [ "$DEPLOY_H5" = "1" ]; then
   sudo cp -R dist/. /var/www/junshi/h5/
 fi
 
-printf '%s\n' "$SHA" | sudo tee "$APP_ROOT/.deploy-version" >/dev/null
+printf '%s\n' "${SHA}" | sudo tee "$APP_ROOT/.deploy-version" >/dev/null
 
 echo "== nginx reload =="
 sudo nginx -t
@@ -131,7 +131,7 @@ if [ "$DEPLOY_H5" = "1" ]; then
   curl -fsSI http://127.0.0.1/ >/dev/null
 fi
 
-echo "DEPLOYED $SHA"
+echo "DEPLOYED ${SHA}"
 REMOTE
 
 log "公网验证"
@@ -145,4 +145,4 @@ else
   curl -fsSI "$PUBLIC_BASE/admin/" >/dev/null
 fi
 
-log "完成：$SHA"
+log "完成：${SHA}"

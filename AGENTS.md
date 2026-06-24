@@ -356,7 +356,7 @@ npm run build:weapp:server   # = TARO_APP_MODE=server TARO_APP_API=https://wxapi
    退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。**版本号每次递增，最近一次上传 `0.2.8`**（2026-06-21）；上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 等效（仅当 CLI 不可用时回退）：DevTools 只导入 `app/` → 右上角「上传」→ 填版本号 + 备注。
 2. **miniprogram-ci（CI/headless 备选）**：需在 mp 后台 *开发管理 → 开发设置 → 小程序代码上传* 下载上传密钥 `private.<appid>.key` 并把**本机公网 IP**加进白名单。该密钥本地通常没有，**除非用户给出密钥路径，否则一律用①**：
    ```bash
-   cd app && WEAPP_UPLOAD_KEY=/绝对路径/private.wx05a49967e2adb557.key \
+   cd app && WEAPP_UPLOAD_KEY=/绝对路径/private.<appid>.key \
      npm run upload:weapp -- --version <版本号> --desc "本次变更说明"
    ```
 上传后在 mp 后台 `mp.weixin.qq.com`「版本管理」：**开发版 → 转「体验版」自测 → 「提交审核」→ 审核通过后「发布」** 给全体用户。CLI 只产出开发版；转体验版、提交审核、正式发布是 mp 后台手动步骤（这几步才需要用户操作）。
@@ -427,8 +427,8 @@ cd admin && npm install && npm run dev   # 运营后台
 cd app && npm run build:weapp           # 产物在 app/dist（默认 mock 版）
 npx miniprogram-ci upload \
   --pp ./ \                              # 项目路径=app（其 project.config.json 的 miniprogramRoot=dist/）
-  --pkp /path/to/private.wx05a49967e2adb557.key \
-  --appid wx05a49967e2adb557 \
+  --pkp /path/to/private.<appid>.key \
+  --appid wx810ebe6dfef8e75f \
   --uv 0.1.0 -r 1 --ud "junshi mock build"
 ```
 注意：上传密钥若在小程序后台开启了 **IP 白名单**，须把本机出口 IP 加入；连真实后端版本另需把 API 域名加入 request 合法域名（见 §12）。
@@ -437,7 +437,7 @@ npx miniprogram-ci upload \
 ```bash
 cd server
 cp .env.example .env
-# 填 WECHAT_MINI_APPID=wx05a49967e2adb557 与 WECHAT_MINI_SECRET
+# 填 WECHAT_MINI_APPID=wx810ebe6dfef8e75f 与 WECHAT_MINI_SECRET
 npm run db:push && npm run dev
 
 cd ../app
@@ -461,7 +461,7 @@ npm run dev
 > 运营后台路径部署在 `/admin/`；Nginx 模板已将 `/admin` 301 到 `/admin/`，避免无尾斜杠时被 H5 fallback 当作移动端首页。
 
 mock 可随时预览；**正式上传/审核**还需：
-1. **真实 AppID**：已设为 `wx05a49967e2adb557`（`app/project.config.json`）。
+1. **真实 AppID**：已设为 `wx810ebe6dfef8e75f`（`app/project.config.json`）。
 2. **微信登录密钥**：服务端配置 `WECHAT_MINI_APPID/WECHAT_MINI_SECRET`；AppSecret 不得进入前端包或仓库。
 3. **后端公网 HTTPS + ICP 备案域名**，并加入小程序后台 request 合法域名；前端用 `TARO_APP_MODE=server TARO_APP_API` 指向它。
 4. **生成式 AI 备案 / 算法备案 + 内容安全**（AI 类小程序审核硬性门槛）。

@@ -9,7 +9,7 @@
 //      TARO_APP_MODE=server TARO_APP_API=https://wxapi.aibuzz.cn/api npm run build:weapp
 //
 // 用法（密钥只给路径，不要贴进聊天）：
-//   WEAPP_UPLOAD_KEY=/绝对路径/private.wx05a49967e2adb557.key \
+//   WEAPP_UPLOAD_KEY=/绝对路径/private.<appid>.key \
 //   npm run upload:weapp -- --version 0.2.0 --desc "知识库：我的资料库 + 上传"
 import ci from 'miniprogram-ci';
 import path from 'node:path';
@@ -19,8 +19,9 @@ import { fileURLToPath } from 'node:url';
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const arg = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : d; };
+const projectConfig = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'project.config.json'), 'utf8'));
 
-const APPID = arg('appid', process.env.WEAPP_APPID || 'wx05a49967e2adb557');
+const APPID = arg('appid', process.env.WEAPP_APPID || projectConfig.appid);
 const KEY = process.env.WEAPP_UPLOAD_KEY || arg('key');
 const VERSION = arg('version', process.env.WEAPP_VERSION);
 const DESC = arg('desc', process.env.WEAPP_DESC || '军师 · 例行更新');

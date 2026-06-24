@@ -7,7 +7,7 @@
 //   2) 先 server 模式构建产物：npm run build:weapp:server
 //
 // 用法（密钥只给路径，别贴聊天）：
-//   WEAPP_UPLOAD_KEY=/abs/path/private.wx05a49967e2adb557.key \
+//   WEAPP_UPLOAD_KEY=/abs/path/private.<appid>.key \
 //   node scripts/weapp-preview.mjs --desc "真机预览"
 import ci from 'miniprogram-ci';
 import path from 'node:path';
@@ -17,8 +17,9 @@ import { fileURLToPath } from 'node:url';
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const arg = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : d; };
+const projectConfig = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'project.config.json'), 'utf8'));
 
-const APPID = arg('appid', process.env.WEAPP_APPID || 'wx05a49967e2adb557');
+const APPID = arg('appid', process.env.WEAPP_APPID || projectConfig.appid);
 const KEY = process.env.WEAPP_UPLOAD_KEY || arg('key');
 const DESC = arg('desc', process.env.WEAPP_DESC || '军师 · 真机预览');
 const PAGE = arg('page', process.env.WEAPP_PAGE || '');           // 可选：指定打开页，如 pages/index/index
