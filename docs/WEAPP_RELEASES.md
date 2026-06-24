@@ -16,6 +16,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-06-24 | `0.2.11` | `体验优化:记忆中心可删改+@记忆引用+参考溯源+失败重试+稳定key+可访问性` | `bc884ba` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | DevTools CLI `upload`(headless) | ~932 KB(dist) | 上传失败:prepare 阶段 `Failed to fetch`(islogin 已登录且正常、4 次清场重试同样);疑代码上传 IP 白名单/上传端点受限。产物已就绪(STREAM off),改用 DevTools GUI 打开 `app/` 一键上传 |
 | 2026-06-21 | `0.2.10` | `入驻页去掉称呼字段(登录已必填)` | `6d7f775` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 615.8 KB / 630573 B | 上传成功 |
 | 2026-06-21 | `0.2.9` | `登录完善资料：称呼必填、头像可选、不可跳过` | `7c10ca5` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 617.0 KB / 631789 B | 上传成功 |
 | 2026-06-16 | `0.2.2` | `logo更新:登录/首页品牌标改用新版羽翼logo` | `79d4405` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 597.9 KB / 612234 B | 上传成功 |
