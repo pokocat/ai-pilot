@@ -19,8 +19,9 @@ const phoneRe = /^1\d{10}$/;
 const codeRe = /^\d{4,8}$/;
 
 // 微信「手机号快速验证」(getPhoneNumber) 仅对非个人主体且已开通该能力的小程序可用，
-// 个人主体真机会报 `jsapi has no permission`。开通后把此开关改为 true 即可恢复一键绑定。
-const WX_PHONE_ONETAP = false;
+// 个人主体真机会报 `jsapi has no permission`。已开通 → 置 true 启用一键获取手机号；
+// 短信验证码始终保留为兜底，故即使个别机型一键失败也能正常绑定。
+const WX_PHONE_ONETAP = true;
 
 // 登录：常见风格「微信登录为主，手机号验证码可切换」。
 // 微信登录后进入「完善资料」：同步/编辑微信昵称与头像，并可选绑定手机号（可跳过）。
@@ -180,6 +181,35 @@ export default function Login({ open, onLoggedIn }: Props) {
       Taro.showToast({ title: message, icon: 'none' });
     } finally {
       setWechatLoading(false);
+    }
+  };
+
+  // 手机号登录页的「微信一键登录」：getPhoneNumber 拿手机号 code + wx.login 拿 loginCode（关联 openid）→ 一键登录/注册。
+  // 与绑定不同：此处用户尚未登录，走 /auth/wechat-phone 直接换号建/取账号。
+  const onGetLoginPhone = async (e: { detail?: { code?: string; errMsg?: string } }) => {
+    const detail = e?.detail || {};
+    if (!detail.code) {
+      const em = detail.errMsg || '';
+      // 用户取消不打扰；其它失败把真实 errMsg 显出来（无权限/未开通/主体不支持等），并提示改用验证码。
+      if (!/deny|cancel|fail:?\s*用户/i.test(em)) {
+        Taro.showModal({ title: '一键登录失败', content: em || '未返回手机号，请用下方验证码登录', showCancel: false });
+      }
+      return;
+    }
+    if (busy) return;
+    setLoading(true);
+    try {
+      const loginCode = await getWechatCode().catch(() => undefined); // 关联 openid，拿不到也不阻断登录
+      const r = await api.wechatPhoneLogin(detail.code, loginCode);
+      await store.afterLogin(r.token, r.onboarded, r.user.benmingColor);
+      // 名字必填：新账号若还没称呼，先去完善（头像可选）。
+      const me = store.me();
+      if (!me?.user.name) { setNick(''); setAvatarLocal(''); setStage('complete'); }
+      else onLoggedIn(r.onboarded);
+    } catch (err) {
+      Taro.showToast({ title: (err as Error)?.message || '登录失败，请重试', icon: 'none' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -347,6 +377,16 @@ export default function Login({ open, onLoggedIn }: Props) {
             <Text className="lg-kicker">AI 军师</Text>
             <Text className="lg-h serif">手机号登录</Text>
             <Text className="lg-sub">未注册的手机号将自动创建账号</Text>
+
+            {isWeapp && WX_PHONE_ONETAP && (
+              <>
+                <Button className={`lg-wechat lg-bind-onetap ${loading ? 'off' : ''}`} openType="getPhoneNumber" onGetPhoneNumber={onGetLoginPhone}>
+                  <Icon name="wechat" size={20} color="#07C160" />
+                  <Text className="lg-wechat-t">{loading ? '登录中…' : '微信一键登录'}</Text>
+                </Button>
+                <View className="lg-sep"><Text>或用短信验证码登录</Text></View>
+              </>
+            )}
 
             <View className="lg-field">
               <Text className="lg-pre">+86</Text>
