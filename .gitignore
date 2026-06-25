@@ -23,6 +23,9 @@ weapp-auto-preview*.png
 .cc-connect/
 flova_skill_downloads/
 
+# Claude Code 本地产物（worktree；settings.local.json 已由 *.local 覆盖；.claude/skills 仍入库）
+.claude/worktrees/
+
 # 微信开发者工具私有/误生成配置
 /project.config.json
 /project.private.config.json
