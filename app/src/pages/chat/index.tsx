@@ -90,6 +90,9 @@ export default function Chat() {
     return '抱歉，产出失败了，请稍后再试。';
   };
 
+  // 审核类错误（输入/输出未通过内容审核）：重试同样内容必再次被拦，故不提供「重试」，也避免叠出重复气泡。
+  const isModerationErr = (s?: string) => !!s && /审核/.test(s);
+
   const promptLogin = (title = '请先登录后再开始对话') => {
     setShowLogin(true);
     Taro.showToast({ title, icon: 'none' });
@@ -228,7 +231,7 @@ export default function Chat() {
             onToken: (t) => patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })),
             onChat: (reply) => patch((msg) => ({ ...msg, reply })), // 完整回复权威兜底：token 渲染即便有偏差，最终内容仍正确
             onDone: () => patch((msg) => ({ ...msg, streaming: false })),
-            onError: (em) => patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: text, streaming: false })),
+            onError: (em) => patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false })),
           },
         );
         setTimeout(scrollToEnd, 80);
@@ -250,7 +253,9 @@ export default function Chat() {
       }
     } catch (e) {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
-      setMsgs((m) => [...m, { role: 'assistant', reply: { text: errorReply(e) }, retryText: text }]); // P2-15：保留原文供重试
+      const reply = errorReply(e);
+      // P2-15：保留原文供重试；但审核类错误不给重试（重试必再被拦）。
+      setMsgs((m) => [...m, { role: 'assistant', reply: { text: reply }, retryText: isModerationErr(reply) ? undefined : text }]);
     } finally {
       setBusy(false);
     }
@@ -441,7 +446,15 @@ export default function Chat() {
               <View key={i} className="msg a">
                 <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
                 <View className="bubble">
-                  <MarkdownText text={m.reply.text} />
+                  {m.streaming && !m.reply.text ? (
+                    <View className="think-dots">
+                      <View className="think-dot" style={{ background: accent }} />
+                      <View className="think-dot d2" style={{ background: accent }} />
+                      <View className="think-dot d3" style={{ background: accent }} />
+                    </View>
+                  ) : (
+                    <MarkdownText text={m.reply.text} />
+                  )}
                   {m.reply.points && (
                     <View className="points">
                       {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><MarkdownText text={p} className="pt-t" /></View>)}
@@ -481,7 +494,8 @@ export default function Chat() {
             </View>
           );
         })}
-        {busy && agent ? (
+        {/* 流式进行中：气泡内已自带「转圈→逐句填字」，不再叠加全局 thinking 指示器（否则出现两条响应）。 */}
+        {busy && agent && !(msgs.length > 0 && (msgs[msgs.length - 1] as { role: string; streaming?: boolean }).streaming) ? (
           <View className="msg a thinking">
             <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent.icon} size={13} color="#fff" /></View><Text>{agent.name}</Text></View>
             <View className="bubble think-bubble">
