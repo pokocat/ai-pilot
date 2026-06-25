@@ -1,6 +1,8 @@
 // 运营可配的预设：每日献策 / 建档问卷 / 方案额度
 // 事实来源对齐原型 scripts/app.js 与 运营后台.html。
 
+import { industryOptionLabels } from './industryPacks.js';
+
 export const SAYINGS: { text: string; enabled: boolean }[] = [
   { text: '先把自己<em>立于不败</em>，再等对手露出破绽。', enabled: true },
   { text: '现金流不是结果，是你每个<em>决策的回声</em>。', enabled: true },
@@ -33,7 +35,8 @@ export const SAYINGS: { text: string; enabled: boolean }[] = [
 ];
 
 export const SURVEY: { key: string; title: string; options: string[] }[] = [
-  { key: 'industry', title: '你的行业？', options: ['SaaS / 软件', '消费 / 零售', '制造', '服务 / 咨询', '其他'] },
+  // 行业选项从行业包（data/industryPacks.ts）派生 —— 单一真相源：新增行业包，选项自动跟上。
+  { key: 'industry', title: '你的行业？', options: industryOptionLabels() },
   { key: 'stage', title: '当前阶段？', options: ['起步 / 验证', 'A 轮前后', '规模化', '稳定盈利'] },
   { key: 'pain', title: '最头疼的事？', options: ['增长乏力', '现金流', '融资', '组织 / 团队', '定位 / 竞争'] },
 ];
@@ -93,6 +96,4 @@ export const PLANS: {
   },
 ];
 
-// 行业基准库（RAG 占位；生产替换为向量检索）
-export const INDUSTRY_BENCHMARK =
-  'SaaS / 软件行业 A 轮前后典型基准：净收入留存 100–110%、毛利率 70%+、获客回收 12–18 个月、经常性收入占比目标 25%+。';
+// 注：行业基准已迁入 data/industryPacks.ts（按行业取，不再是单一写死串）。SaaS 基准 = saas 包的 benchmark。

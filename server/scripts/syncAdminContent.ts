@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AGENTS } from '../src/data/agents.js';
-import { SAYINGS } from '../src/data/seedConfig.js';
+import { SAYINGS, SURVEY } from '../src/data/seedConfig.js';
 
 const prisma = new PrismaClient();
 
@@ -73,10 +73,31 @@ async function syncSayings() {
   return { created, skipped };
 }
 
+// 建档问卷：按 key 非破坏 upsert（更新 title/options/sort，保留运营的 enabled 启停）。
+// 行业题的 options 由 industryOptionLabels() 从行业包派生 → 新增行业包后跑本同步即可下发新选项，不丢数据。
+async function syncSurvey() {
+  let updated = 0;
+  let created = 0;
+
+  for (let i = 0; i < SURVEY.length; i++) {
+    const q = SURVEY[i];
+    const existed = await prisma.surveyQuestion.findUnique({ where: { key: q.key }, select: { key: true } });
+    await prisma.surveyQuestion.upsert({
+      where: { key: q.key },
+      update: { title: q.title, optionsJson: q.options, sort: i }, // 不动 enabled，保留运营启停
+      create: { key: q.key, title: q.title, optionsJson: q.options, sort: i },
+    });
+    existed ? updated++ : created++;
+  }
+
+  return { updated, created };
+}
+
 async function main() {
   const agents = await syncAgents();
   const sayings = await syncSayings();
-  console.log(JSON.stringify({ ok: true, agents, sayings }, null, 2));
+  const survey = await syncSurvey();
+  console.log(JSON.stringify({ ok: true, agents, sayings, survey }, null, 2));
 }
 
 main()

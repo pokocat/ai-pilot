@@ -2,7 +2,7 @@ import { prisma } from '../db.js';
 import { isAiTestMode } from '../env.js';
 import { decryptSecretSafe } from './secretBox.js';
 import { verifyUserToken } from './userToken.js';
-import { INDUSTRY_BENCHMARK } from '../data/seedConfig.js';
+import { resolveIndustryPack } from '../data/industryPacks.js';
 import { recallMemories } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
@@ -121,7 +121,7 @@ export async function buildGenContext(opts: {
     profile: profile ? { industry: profile.industry, stage: profile.stage, pain: profile.pain } : null,
     memories,
     benmingColor: user?.benmingColor ?? 'gold',
-    benchmark: INDUSTRY_BENCHMARK,
+    benchmark: resolveIndustryPack(profile?.industry).benchmark,
     userMessage: opts.userMessage,
     history: opts.history,
     references: refLines,
@@ -166,7 +166,7 @@ export async function buildSandboxContext(opts: {
     profile: hasProfile ? { industry: p?.industry ?? null, stage: p?.stage ?? null, pain: p?.pain ?? null } : null,
     memories: [],
     benmingColor: 'gold',
-    benchmark: INDUSTRY_BENCHMARK,
+    benchmark: resolveIndustryPack(p?.industry).benchmark,
     userMessage: opts.userMessage,
     references: [],
     knowledge: [],
