@@ -349,7 +349,18 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
 
   // per-agent 接入覆盖：自适应产出未单独实现 → 回退对话（runtimeChat）。
   if (ctx.runtime) {
-    const s = await runtimeChat(ctx);
+    let s: Sourced<ChatReply>;
+    try {
+      s = await traced(() => runtimeChat(ctx), {
+        kind: 'chat', ctx, meta,
+        provider: ctx.runtime.mode === 'dify' ? 'dify' : 'openai',
+        respText: (r) => r.text,
+      });
+    } catch (err) {
+      console.error('[gateway] adaptive runtime chat fallback to mock:', (err as Error).message);
+      if (!env.aiFallbackMock) throw aiUnavailable(err);
+      s = { result: mockChat(ctx), usage: ZERO_USAGE, provider: 'mock', model: '' };
+    }
     await maybeRecord(s, 'chat', ctx, meta);
     if (!(await moderate('output', s.result.text, modOpts(ctx, meta)))) throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
     return { kind: 'chat', reply: s.result, usage: s.usage };
