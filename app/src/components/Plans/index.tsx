@@ -35,11 +35,20 @@ export default function Plans({ open, onClose }: Props) {
   if (!open) return null;
   const balance = me?.creditBalance ?? 0;
 
-  // 演示发放（免费套餐 / 未配支付环境回退）：不经支付直接更新方案。
+  // 演示发放（免费套餐 / 演示环境回退）：不经支付直接更新方案。
+  // 生产付费套餐支付未开通时后端会回 PAYMENT_COMING_SOON（不再免费发放）→ 友好提示，不报错。
   const demoGrant = async (p: Plan) => {
-    const r = await api.purchasePlan(p.id);
-    await store.loadMe();
-    Taro.showToast({ title: r.grantedCredits > 0 ? `已到账 ${r.grantedCredits} 点` : '方案已更新', icon: 'success' });
+    try {
+      const r = await api.purchasePlan(p.id);
+      await store.loadMe();
+      Taro.showToast({ title: r.grantedCredits > 0 ? `已到账 ${r.grantedCredits} 点` : '方案已更新', icon: 'success' });
+    } catch (e: any) {
+      if ((e?.code || e?.data?.code) === 'PAYMENT_COMING_SOON') {
+        Taro.showToast({ title: '支付即将开通，敬请期待', icon: 'none' });
+        return;
+      }
+      throw e;
+    }
   };
 
   const buy = async (p: Plan) => {

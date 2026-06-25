@@ -10,6 +10,15 @@ export function sandboxEnabled(): boolean {
 }
 
 /**
+ * 是否允许「演示发放」付费套餐（/purchase 不经支付直接到账）。**默认拒绝（fail-safe）**：
+ * 仅自动化测试（NODE_ENV=test）或显式 `ALLOW_DEMO_PURCHASE=true` 的开发环境才放行。
+ * 生产恒 false（即便支付凭据未配齐），杜绝「点一下白送付费套餐」。免费套餐(price≤0)不受此限。
+ */
+export function demoPurchaseEnabled(): boolean {
+  return process.env.NODE_ENV === 'test' || process.env.ALLOW_DEMO_PURCHASE === 'true';
+}
+
+/**
  * 启动期硬护栏：生产环境若误开 PAY_SANDBOX → 抛错拒绝启动。
  * 在 buildApp() 最早期调用，覆盖 listen 与测试两条入口。
  */

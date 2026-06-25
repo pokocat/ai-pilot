@@ -35,3 +35,25 @@ test('有效用户（免费层不到期）：/generate-sync 不被有效期拦',
   const gen = await api('POST', '/api/generate-sync', { token, body: { text: '你好' } });
   assert.notEqual(gen.status, 403); // mock 模型正常产出/对话，不应被 PLAN_EXPIRED 拦
 });
+
+test('生产硬化：支付未配 + 非演示环境 → 付费套餐 /purchase 拦 PAYMENT_COMING_SOON（不免费发放），免费套餐放行', async () => {
+  const token = await login(uniquePhone(), '生产购买者');
+  const plans = await api('GET', '/api/plans', { token });
+  const paid = (plans.body as Array<{ id: string; price: number }>).find((p) => p.price > 0)!;
+  const free = (plans.body as Array<{ id: string; price: number }>).find((p) => p.price === 0)!;
+
+  const prev = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production'; // 模拟生产：demoPurchaseEnabled() → false
+  try {
+    const blocked = await api('POST', `/api/plans/${paid.id}/purchase`, { token });
+    assert.equal(blocked.status, 402);
+    assert.equal(blocked.body.code, 'PAYMENT_COMING_SOON', '付费套餐在生产不免费发放');
+    const okFree = await api('POST', `/api/plans/${free.id}/purchase`, { token });
+    assert.equal(okFree.status, 200, '免费套餐不受限');
+  } finally {
+    process.env.NODE_ENV = prev;
+  }
+  // 恢复测试环境后（demoPurchaseEnabled=true）→ 付费套餐演示发放仍放行
+  const okPaid = await api('POST', `/api/plans/${paid.id}/purchase`, { token });
+  assert.equal(okPaid.status, 200, '测试/演示环境允许付费套餐演示发放');
+});

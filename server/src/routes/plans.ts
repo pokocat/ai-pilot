@@ -3,7 +3,7 @@ import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { payConfigured, createJsapiOrder } from '../services/wechatPay.js';
-import { sandboxEnabled } from '../services/sandbox.js';
+import { sandboxEnabled, demoPurchaseEnabled } from '../services/sandbox.js';
 import { computeUpgradeProration } from '../services/proration.js';
 import { recordAudit } from '../services/audit.js';
 import type { Plan as PlanView, PlanPurchaseResult, WechatOrderResult } from '../../../shared/contracts';
@@ -38,13 +38,19 @@ export async function planRoutes(app: FastifyInstance) {
     return plans.map(publicPlan);
   });
 
-  // 演示购买：直接发放权益（不经支付）。配齐微信支付凭据后禁用此路径，强制走 /plans/:id/order。
+  // 演示购买：直接发放权益（不经支付）。仅免费套餐 + 演示环境可用；付费套餐必须走支付。
   app.post<{ Params: { id: string } }>('/plans/:id/purchase', async (req, reply): Promise<PlanPurchaseResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
-    if (payConfigured() && plan.price > 0) {
-      return reply.code(402).send({ error: '该套餐需通过支付购买，请发起支付下单', code: 'PAYMENT_REQUIRED' });
+    // 付费套餐绝不免费发放：配了支付 → 强制走下单；未配支付 → 仅测试/显式开启的演示环境可发放，否则提示「支付即将开通」。
+    if (plan.price > 0) {
+      if (payConfigured()) {
+        return reply.code(402).send({ error: '该套餐需通过支付购买，请发起支付下单', code: 'PAYMENT_REQUIRED' });
+      }
+      if (!demoPurchaseEnabled()) {
+        return reply.code(402).send({ error: '支付即将开通，敬请期待', code: 'PAYMENT_COMING_SOON' });
+      }
     }
     const r = await applyPlanPurchase(user, plan, { reason: `${plan.name} · 套餐购买`, source: 'demo_purchase' });
     return { ok: true, plan: publicPlan(plan), creditBalance: r.creditBalance, grantedCredits: r.grantedCredits, grantedTokens: r.grantedTokens };
