@@ -6,6 +6,8 @@
 
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
+import { now } from './clock.js';
+import { periodKeyOf, isExpired, nextResetAt, daysRemaining } from './planTime.js';
 
 // P0-2：单次产出的悲观额度预留（token 计）。真实成本只有产出后才知道，故产出前先按此预扣、
 // 产出后 settle 按真实 token 多退少补。作用是**并发下把透支限制为有界**（每个在途请求各占一份），
@@ -21,8 +23,6 @@ export class InsufficientQuotaError extends Error {
 }
 
 const isUnlimited = (quota: number) => quota < 0;
-// 自然月周期键（UTC），惰性重置锚点。
-const periodKeyOf = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 
 export interface QuotaState {
   quota: number; // 本月授予总额度，-1=不限量
@@ -40,36 +40,50 @@ function toState(quota: number, balance: number): QuotaState {
 }
 
 /**
- * 取/建用户当月额度账户，惰性重置：首次建账、跨月则按当前套餐 tokenQuotaPerMonth 重置 balance。
- * 无 plan 的用户 → quota=0（即无额度，文本产出会被 ensureQuota 拦）。
+ * 取/建用户当月额度账户，惰性重置（购买时快照 B + 订阅锚点子周期 + 过期冻结）：
+ * - **首建账户**：初始额度 = live plan.tokenQuotaPerMonth（购买时快照；之后不再回读 live plan）。
+ * - **跨锚点子周期**：复用 `wallet.quota` 快照重置 balance（**不回读 live plan** → 后台改套餐只影响新购）。
+ * - **已过期**：quota / balance 归 0 冻结（只读锁定的额度侧体现；assertPlanActive 另在 AI 入口拦 403）。
+ * periodKey 语义：付费用户=锚点子周期起始日(YYYY-MM-DD)；免费/历史用户=自然月(YYYY-MM)。见 planTime.periodKeyOf。
  */
 async function loadWallet(userId: string): Promise<{ quota: number; balance: number } | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { tenantId: true, plan: { select: { tokenQuotaPerMonth: true } } },
+    select: { tenantId: true, planActivatedAt: true, planExpiresAt: true, plan: { select: { tokenQuotaPerMonth: true } } },
   });
   if (!user) return null;
-  const planQuota = user.plan?.tokenQuotaPerMonth ?? 0;
-  const pk = periodKeyOf(new Date());
+  const at = now();
+  const expired = isExpired(user.planExpiresAt, at);
+  const planQuota = user.plan?.tokenQuotaPerMonth ?? 0; // 仅用于首建账户的初始快照
+  const pk = periodKeyOf(user.planActivatedAt, at);
+  const initial = expired ? 0 : planQuota;
 
   // 防并发首建竞争（userId 唯一）：upsert 在 Prisma 下并发仍可能 P2002，捕获后回读。
   const w = await prisma.tokenWallet
     .upsert({
       where: { userId },
       update: {},
-      create: { tenantId: user.tenantId, userId, quota: planQuota, balance: planQuota, periodKey: pk },
+      create: { tenantId: user.tenantId, userId, quota: initial, balance: initial, periodKey: pk },
     })
     .catch(async (e: { code?: string }) => {
       if (e.code === 'P2002') return prisma.tokenWallet.findUnique({ where: { userId } });
       throw e;
     });
   if (!w) return null;
+
+  // 跨子周期：复用快照（不回读 live plan）；过期则归 0。
   if (w.periodKey !== pk) {
+    const q = expired ? 0 : w.quota;
     const reset = await prisma.tokenWallet.update({
       where: { userId },
-      data: { quota: planQuota, balance: planQuota, periodKey: pk },
+      data: { quota: q, balance: q, periodKey: pk },
     });
     return { quota: reset.quota, balance: reset.balance };
+  }
+  // 同子周期内刚过期：立即冻结到 0（至多一次过渡写，之后幂等）。
+  if (expired && (w.quota !== 0 || w.balance !== 0)) {
+    const z = await prisma.tokenWallet.update({ where: { userId }, data: { quota: 0, balance: 0 } });
+    return { quota: z.quota, balance: z.balance };
   }
   return { quota: w.quota, balance: w.balance };
 }
@@ -172,12 +186,64 @@ export async function reserveQuota(userId: string, ratio = 1): Promise<QuotaRese
   };
 }
 
-/** 套餐购买/升级：覆盖式授予当月额度（balance=quota，重置周期键）。quota<0=不限量。 */
-export async function setQuota(tenantId: string, userId: string, quota: number, db: Prisma.TransactionClient = prisma): Promise<void> {
-  const pk = periodKeyOf(new Date());
+/**
+ * 套餐购买/升级/续费：覆盖式授予当月额度（balance=quota，重置周期键）。quota<0=不限量。
+ * activatedAt = 套餐激活锚点（购买/升级=now、续费=保留原锚点），用于对齐 periodKey 子周期；
+ * 不传（如测试/历史调用）→ null → 按自然月键，行为同旧版。
+ */
+export async function setQuota(
+  tenantId: string,
+  userId: string,
+  quota: number,
+  activatedAt: Date | null = null,
+  db: Prisma.TransactionClient = prisma,
+): Promise<void> {
+  const pk = periodKeyOf(activatedAt, now());
   await db.tokenWallet.upsert({
     where: { userId },
     update: { quota, balance: quota, periodKey: pk, tenantId },
     create: { tenantId, userId, quota, balance: quota, periodKey: pk },
   });
+}
+
+/** 套餐到期 → AI 交互门禁错误（D4）：拦一切产出/对话，只读放行。 */
+export class PlanExpiredError extends Error {
+  statusCode = 403;
+  code = 'PLAN_EXPIRED';
+  constructor(msg = '套餐已到期，续费后可继续使用（到期后内容只读、AI 交互暂停）') {
+    super(msg);
+  }
+}
+
+/**
+ * AI 交互门禁（D4）：套餐过期 → 抛 PLAN_EXPIRED(403)，拦截一切产出 / 对话 / 图片生成。
+ * 挂在 /generate、/generate-sync、/summarize 等 AI 入口的预校验段（早于 reserveQuota）。
+ * 读类（报告/方案库/历史/导出）不挂此门禁 → 只读放行。
+ */
+export async function assertPlanActive(userId: string): Promise<void> {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { planExpiresAt: true } });
+  if (u && isExpired(u.planExpiresAt, now())) throw new PlanExpiredError();
+}
+
+export interface PlanStatus {
+  active: boolean; // 套餐是否有效（未过期）
+  expired: boolean; // 是否已过期（→ 前端只读模式）
+  expiresAt: string | null; // 绝对到期时间（ISO）；null=不到期
+  daysRemaining: number | null; // 剩余天数（向上取整）；null=不到期
+  nextResetAt: string; // 下次月度额度重置时刻（ISO）
+}
+
+/** 套餐状态（供 /me 展示到期日 / 剩余天数 / 下次额度重置日 + 驱动前端只读态）。 */
+export async function getPlanStatus(userId: string): Promise<PlanStatus> {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { planActivatedAt: true, planExpiresAt: true } });
+  const at = now();
+  const expiresAt = u?.planExpiresAt ?? null;
+  const expired = isExpired(expiresAt, at);
+  return {
+    active: !expired,
+    expired,
+    expiresAt: expiresAt ? expiresAt.toISOString() : null,
+    daysRemaining: daysRemaining(expiresAt, at),
+    nextResetAt: nextResetAt(u?.planActivatedAt ?? null, at).toISOString(),
+  };
 }

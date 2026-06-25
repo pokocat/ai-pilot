@@ -218,6 +218,14 @@ export interface TokenQuotaView {
   remaining: number; // 剩余（可为负=已耗尽）
   unlimited: boolean;
 }
+/** 套餐有效期状态：驱动前端只读态 + 展示到期/剩余天数/下次额度重置日。 */
+export interface PlanStatusView {
+  active: boolean;            // 套餐有效（未过期）
+  expired: boolean;          // 已过期 → 前端只读模式
+  expiresAt: string | null;  // 绝对到期时间（ISO）；null=不到期（免费/企业/历史）
+  daysRemaining: number | null; // 剩余天数；null=不到期
+  nextResetAt: string;       // 下次月度额度重置时刻（ISO）
+}
 /** 钻石(点)消耗明细一条（GET /me/credits）：解锁 / 图片按张 / 充值 / 赠送 */
 export interface MyCreditItem {
   at: string;      // ISO 时间
@@ -233,6 +241,7 @@ export interface Me {
   plan: { name: string; creditsPerMonth: number; tokenQuotaPerMonth: number } | null;
   creditBalance: number; // 钻石(点)余额：解锁 / 图片按张
   tokenQuota: TokenQuotaView; // 本月 token 额度（文本产出消耗池）
+  planStatus?: PlanStatusView; // 套餐有效期状态（过期 → 只读）
   onboarded?: boolean;
   ai: AiInfo;
   understanding?: ClientUnderstanding;
@@ -554,7 +563,10 @@ export interface PlanPurchaseResult {
 export interface WechatOrderResult {
   ok: true;
   outTradeNo: string;
+  amount: number; // 实付金额（分）。月→年升级时 = 折后差价
   pay: { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string };
+  // 月→年升级折算明细（applies=true 时前端可展示「已抵扣 ¥X」）。
+  proration?: { applies: boolean; fullPrice: number; remainingDays: number; remainingValue: number; chargeAmount: number };
 }
 /** 运营端单用户详情 + 智能体开通管理（GET /admin/users/:id） */
 export interface AdminUserAgentRow {

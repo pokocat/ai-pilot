@@ -4,7 +4,7 @@ import { providerInfo } from '../llm/gateway.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { buildClientUnderstanding } from '../services/understanding.js';
-import { getQuotaState } from '../services/tokenQuota.js';
+import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
@@ -23,6 +23,7 @@ export async function metaRoutes(app: FastifyInstance) {
     const onboarded = !!(await prisma.profile.findFirst({ where: { tenantId: user.tenantId } }));
     const understanding = await buildClientUnderstanding(user);
     const quota = await getQuotaState(user.id); // 本月 token 额度（客户端只看进度 %）
+    const planStatus = await getPlanStatus(user.id); // 套餐状态：驱动前端只读模式 + 到期日/剩余天数/下次额度重置日
     return {
       user: {
         id: user.id,
@@ -37,6 +38,7 @@ export async function metaRoutes(app: FastifyInstance) {
       plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth } : null,
       creditBalance: credit?.balance ?? 0,
       tokenQuota: { limit: quota.quota, used: quota.used, remaining: quota.balance, unlimited: quota.unlimited },
+      planStatus, // { active, expired, expiresAt, daysRemaining, nextResetAt } —— 前端据此切只读态、展示到期/重置日
       onboarded,
       ai: await providerInfo(),
       understanding,

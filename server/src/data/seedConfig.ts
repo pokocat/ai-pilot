@@ -58,6 +58,19 @@ export const PLANS: {
     features: ['10 点 / 月', '基础顾问 3 位', '适合轻量试用'],
     highlighted: false,
   },
+  // 决策版·月付（D11 新增付费月付 SKU）：与年付同档月度权益（68 点/月、100 万 token/月、8 助手），
+  // 仅计费周期不同 → 使「月→年升级折算」实际生效（业界 SaaS 通行的月/年同权益、年付更省）。
+  {
+    name: '决策版 · 月付',
+    price: 19800, // ¥198/月（年付 ¥1980 ≈ 10 个月月付价 → 年付立省 2 个月）
+    period: 'month',
+    creditsPerMonth: 68,
+    tokenQuotaPerMonth: 1000000,
+    agentCount: 8,
+    features: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出', '按月付费 · 随时升年付'],
+    highlighted: false,
+  },
+  // 决策版（年付）：旗舰主推（highlighted）。保持名称「决策版」不带后缀 = 头牌方案，亦兼容既有用例/演示数据。
   {
     name: '决策版',
     price: 198000,
@@ -65,7 +78,7 @@ export const PLANS: {
     creditsPerMonth: 68,
     tokenQuotaPerMonth: 1000000,
     agentCount: 8,
-    features: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
+    features: ['年付立省 2 个月（约 ¥396）', '不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
     highlighted: true,
   },
   {

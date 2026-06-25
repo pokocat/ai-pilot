@@ -10,7 +10,7 @@ import type {
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
   KnowledgeDocRow, KnowledgeDetail,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
-  BindPhoneResult,
+  BindPhoneResult, WechatOrderResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -112,6 +112,9 @@ export const api = {
   plans: () => (IS_MOCK ? mock.plans() : request<Plan[]>('/plans')),
   purchasePlan: (id: string) =>
     IS_MOCK ? mock.purchasePlan(id) : request<PlanPurchaseResult>(`/plans/${id}/purchase`, 'POST', {}),
+  // 微信支付下单（小程序 JSAPI）：返回 wx.requestPayment 调起参数 + 月→年折算明细。
+  createOrder: (id: string, openid?: string) =>
+    IS_MOCK ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', openid ? { openid } : {}),
   setColor: (color: string) =>
     IS_MOCK ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),
   updateIdentity: (body: { name?: string; company?: string; avatarUrl?: string }) =>

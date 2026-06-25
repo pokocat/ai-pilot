@@ -40,6 +40,17 @@ const PLANS: Plan[] = [
     highlighted: false,
   },
   {
+    id: 'mock-plan-decision-monthly',
+    name: '决策版 · 月付',
+    price: 19800,
+    period: 'month',
+    creditsPerMonth: 68,
+    tokenQuotaPerMonth: 1000000,
+    agentCount: 8,
+    featuresJson: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出', '按月付费 · 随时升年付'],
+    highlighted: false,
+  },
+  {
     id: 'mock-plan-decision',
     name: '决策版',
     price: 198000,
@@ -47,7 +58,7 @@ const PLANS: Plan[] = [
     creditsPerMonth: 68,
     tokenQuotaPerMonth: 1000000,
     agentCount: 8,
-    featuresJson: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
+    featuresJson: ['年付立省 2 个月（约 ¥396）', '不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
     highlighted: true,
   },
   {
@@ -488,6 +499,7 @@ export const mock = {
       plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth } : null,
       creditBalance: d.creditBalance,
       tokenQuota: mockQuota(d),
+      planStatus: { active: true, expired: false, expiresAt: null, daysRemaining: null, nextResetAt: new Date(Date.now() + 30 * 86400000).toISOString() },
       onboarded: d.onboarded,
       ai: { provider: 'mock', model: 'template', ready: false, claudeReady: false },
       understanding: buildUnderstandingM(d),
@@ -510,6 +522,12 @@ export const mock = {
   },
 
   async plans(): Promise<Plan[]> { return delay(PLANS); },
+
+  // mock 模式无真实微信支付：抛 PAYMENT_NOT_CONFIGURED 让前端回退演示发放（purchasePlan）。
+  async createOrder(_id: string): Promise<never> {
+    await delay(null);
+    throw Object.assign(new Error('微信支付未配置（mock）'), { code: 'PAYMENT_NOT_CONFIGURED' });
+  },
 
   async myCredits(): Promise<MyCreditsView> {
     const { d } = current();

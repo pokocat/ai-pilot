@@ -2,12 +2,29 @@
 // 以便对回调做签名校验（v3 验签需原始报文）。不挂任何鉴权 hook —— 回调靠验签 + AEAD 解密自证。
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { verifyNotifySignature, decryptNotifyResource, markPaidAndApply } from '../services/wechatPay.js';
+import { sandboxEnabled } from '../services/sandbox.js';
+import { requireAdmin } from '../services/adminAuth.js';
 
 interface NotifyBody {
   resource?: { ciphertext: string; nonce: string; associated_data?: string };
 }
 
 export async function payRoutes(app: FastifyInstance) {
+  // 仿真回调（可测性 D9，仅 sandboxEnabled + admin 鉴权）：给 outTradeNo 构造合成成功通知直调 markPaidAndApply，
+  // 绕过验签/解密做离线端到端验证；真实 notify 端点（下方）严格不动。发放标 source='wechat_pay_sandbox'。
+  if (sandboxEnabled()) {
+    app.post<{ Body: { outTradeNo?: string; tradeState?: string } }>('/pay/sandbox/notify', { preHandler: requireAdmin }, async (req, reply) => {
+      const outTradeNo = (req.body?.outTradeNo || '').trim();
+      if (!outTradeNo) return reply.code(400).send({ error: '缺少 outTradeNo', code: 'OUT_TRADE_NO_REQUIRED' });
+      const tradeState = (req.body?.tradeState || 'SUCCESS').trim();
+      const r = await markPaidAndApply(
+        { outTradeNo, transactionId: `sandbox_${outTradeNo}`, tradeState, rawJson: { sandbox: true, outTradeNo, tradeState } },
+        'wechat_pay_sandbox',
+      );
+      return { ok: r.applied, applied: r.applied, reason: r.reason };
+    });
+  }
+
   // 原文(req.rawBody)由 app.ts 的全局 application/json 解析器保留，回调验签直接读取。
   // 微信支付结果通知。成功务必回 200 + {code:'SUCCESS'}，否则微信会重试。
   app.post('/pay/wechat/notify', async (req, reply) => {

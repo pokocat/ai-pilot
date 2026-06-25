@@ -35,6 +35,13 @@ export default function Plans({ open, onClose }: Props) {
   if (!open) return null;
   const balance = me?.creditBalance ?? 0;
 
+  // 演示发放（免费套餐 / 未配支付环境回退）：不经支付直接更新方案。
+  const demoGrant = async (p: Plan) => {
+    const r = await api.purchasePlan(p.id);
+    await store.loadMe();
+    Taro.showToast({ title: r.grantedCredits > 0 ? `已到账 ${r.grantedCredits} 点` : '方案已更新', icon: 'success' });
+  };
+
   const buy = async (p: Plan) => {
     if (busy) return;
     if (p.price < 0) {
@@ -43,11 +50,37 @@ export default function Plans({ open, onClose }: Props) {
     }
     setBusy(p.id);
     try {
-      const r = await api.purchasePlan(p.id);
+      if (p.price === 0) { await demoGrant(p); return; } // 免费层无需支付
+
+      // 付费套餐：先向后端下单（月→年自动折算实付）
+      let order;
+      try {
+        order = await api.createOrder(p.id);
+      } catch (e: any) {
+        const code = e?.code || e?.data?.code;
+        if (code === 'PAYMENT_NOT_CONFIGURED' || code === 'PLAN_FREE') { await demoGrant(p); return; } // 演示环境回退
+        throw e;
+      }
+
+      // 调起微信支付（小程序 JSAPI）
+      await Taro.requestPayment({
+        timeStamp: order.pay.timeStamp,
+        nonceStr: order.pay.nonceStr,
+        package: order.pay.package,
+        signType: order.pay.signType as 'RSA',
+        paySign: order.pay.paySign,
+      });
+      if (order.proration?.applies) {
+        Taro.showToast({ title: `已抵扣 ¥${Math.round(order.proration.remainingValue / 100)}`, icon: 'none' });
+      }
+      // 支付成功 → 微信回调异步发放权益；轻量重试刷新 /me。
       await store.loadMe();
-      Taro.showToast({ title: r.grantedCredits > 0 ? `已到账 ${r.grantedCredits} 点` : '方案已更新', icon: 'success' });
-    } catch (e) {
-      s.handleApiError(e, { fallbackTitle: '方案更新失败，请重试' });
+      await new Promise((r) => setTimeout(r, 1500));
+      await store.loadMe();
+      Taro.showToast({ title: '支付成功，方案已更新', icon: 'success' });
+    } catch (e: any) {
+      if (e?.errMsg && /cancel/i.test(e.errMsg)) Taro.showToast({ title: '已取消支付', icon: 'none' });
+      else s.handleApiError(e, { fallbackTitle: '支付失败，请重试' });
     } finally {
       setBusy('');
     }
@@ -65,6 +98,9 @@ export default function Plans({ open, onClose }: Props) {
           </View>
         </View>
         <Text className="ps-sub">权益点用于深度报告与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>
+        {me?.planStatus?.expired && (
+          <Text className="ps-sub" style={{ color: '#c0392b' }}>当前套餐已到期：内容只读、AI 交互暂停，续费后立即恢复。</Text>
+        )}
 
         <ScrollView scrollY className="ps-list">
           {plans.map((p) => {

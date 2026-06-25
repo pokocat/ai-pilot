@@ -8,7 +8,7 @@ import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
 import { reserveCredits, type CreditReservation } from '../services/credits.js';
-import { reserveQuota, type QuotaReservation } from '../services/tokenQuota.js';
+import { reserveQuota, assertPlanActive, type QuotaReservation } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
@@ -126,6 +126,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     let creditReservation: CreditReservation | null = null;
     let quotaReservation: QuotaReservation | null = null;
     try {
+      await assertPlanActive(user.id); // 过期只读锁定（D4）：到期后拦一切 AI 交互（产出+对话+图片）→ PLAN_EXPIRED(403)
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
       if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio);  // P0-2：锁内预留额度（并发透支有界）
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
@@ -246,6 +247,7 @@ export async function sessionRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/sessions/:id/summarize', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {
+      await assertPlanActive(user.id); // 过期只读锁定（D4）：会话汇总是 AI 产出 → 到期拦 PLAN_EXPIRED(403)
       const res = await summarizeSession({ tenantId: user.tenantId, userId: user.id, sessionId: req.params.id });
       await recordAudit({
         tenantId: user.tenantId,
@@ -255,8 +257,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       });
       return res;
     } catch (err) {
-      const e = err as Error & { statusCode?: number };
-      return reply.code(e.statusCode ?? 500).send({ error: e.message });
+      const e = err as Error & { statusCode?: number; code?: string };
+      return reply.code(e.statusCode ?? 500).send({ error: e.message, code: e.code });
     }
   });
 
@@ -283,6 +285,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     let creditReservation: CreditReservation | null = null;
     let quotaReservation: QuotaReservation | null = null;
     try {
+      await assertPlanActive(user.id); // 过期只读锁定（D4）：到期后拦一切 AI 交互（产出+对话+图片）→ PLAN_EXPIRED(403)
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
       if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio);
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);

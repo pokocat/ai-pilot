@@ -22,8 +22,13 @@ import { wechatRoutes } from './routes/wechat.js';
 import { adminRoutes } from './routes/admin.js';
 import { adminAccountRoutes } from './routes/adminAccount.js';
 import { registerHttpAudit } from './services/audit.js';
+import { sandboxEnabled, assertSandboxSafe } from './services/sandbox.js';
+import { enterNow } from './services/clock.js';
 
 export async function buildApp(opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
+  // 启动期硬护栏：生产环境误开 PAY_SANDBOX → 拒绝启动（可测 seam 绝不漏到线上）。
+  assertSandboxSafe();
+
   const app = Fastify({ logger: opts.logger ? { level: 'info' } : false });
 
   // 兼容「Content-Type: application/json 但 body 为空」的 POST（如无 body 的 activate / 报告渲染等接口）。
@@ -41,6 +46,21 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(cors, { origin: true });
   // 知识库文档上传：单文件、≤20MB（解析器在 docParse 按需动态加载）。
   await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 5 } });
+
+  // 可测性（沙箱专属）：用 x-test-now 头把本次请求的「现在」固定为指定时刻，快进到期/锚点重置做离线验证。
+  // 仅 sandboxEnabled() 为真时注册，生产环境此 hook 完全不存在 → 时间不可被外部篡改。
+  if (sandboxEnabled()) {
+    app.addHook('onRequest', async (req) => {
+      const raw = req.headers['x-test-now'];
+      const v = Array.isArray(raw) ? raw[0] : raw;
+      if (typeof v === 'string' && v.trim()) {
+        const t = v.trim();
+        const d = new Date(/^\d+$/.test(t) ? Number(t) : t);
+        if (!Number.isNaN(d.getTime())) enterNow(d);
+      }
+    });
+  }
+
   registerHttpAudit(app);
 
   await app.register(authRoutes, { prefix: '/api' });

@@ -17,6 +17,7 @@ import { createSign, createVerify, createDecipheriv, randomBytes, randomUUID } f
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { applyPlanPurchase } from './purchase.js';
+import { sandboxEnabled } from './sandbox.js';
 
 const PAY_BASE = 'https://api.mch.weixin.qq.com';
 
@@ -71,29 +72,55 @@ export interface CreateOrderResult {
 
 /**
  * 创建订单 + 调微信 JSAPI 下单，落 PaymentOrder(created) 并回传小程序调起参数。
- * openid 必填（小程序当前用户的 openid）。
+ * openid 必填（小程序当前用户的 openid）。amount 可由调用方传入（如月→年折算后的实付）；默认= plan.price。
+ *
+ * 防陈旧订单被后付：真实单设 time_expire=now+2h，过期后微信侧不可再支付（避免「先下单再升级后又付旧单」类陈旧支付）。
+ * 注：刻意不在本地把旧 created 单改 'closed'——那只改本地状态、微信侧仍可付，会造成「已付但本地非 created → 入账被跳过
+ * → 收钱不发权益」的资损路径。markPaidAndApply 以 appliedAt 做「恰好一次」幂等；用户若真付了两单即两次合法叠加
+ * （各自付费、续费/升级时长叠加），非资损。严格「同一时刻仅一个未付单」需调微信 close-order API，留后续硬化。
  */
 export async function createJsapiOrder(args: {
   user: { id: string; tenantId: string };
   plan: { id: string; name: string; price: number };
   openid: string;
+  amount?: number;
 }): Promise<CreateOrderResult> {
-  const c = cfg();
+  const total = args.amount ?? args.plan.price;
   const outTradeNo = genOutTradeNo();
+
+  // 沙箱（可测性 D9）：跳过真实微信下单，落 provider='mock' 单 + 返回合成调起参数（不签名）。
+  // 由 /pay/sandbox/notify 仿真回调驱动入账；真实 notify 端点严格不动。
+  if (sandboxEnabled()) {
+    await prisma.paymentOrder.create({
+      data: {
+        outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId: args.plan.id,
+        amount: total, provider: 'mock', status: 'created',
+      },
+    });
+    return {
+      outTradeNo,
+      pay: { timeStamp: Math.floor(Date.now() / 1000).toString(), nonceStr: `sandbox${outTradeNo.slice(-8)}`, package: `prepay_id=mock_${outTradeNo}`, signType: 'RSA', paySign: 'SANDBOX_NO_SIGN' },
+    };
+  }
+
+  const c = cfg();
   await prisma.paymentOrder.create({
     data: {
       outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId: args.plan.id,
-      amount: args.plan.price, provider: 'wechat', status: 'created',
+      amount: total, provider: 'wechat', status: 'created',
     },
   });
 
+  // 订单支付截止时刻（RFC3339，真实时钟）：2 小时后微信侧不可再支付，杜绝陈旧 prepay 被后付。
+  const timeExpire = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, '+00:00');
   const body = JSON.stringify({
     appid: c.appId,
     mchid: c.mchId,
     description: `军师 · ${args.plan.name}`,
     out_trade_no: outTradeNo,
+    time_expire: timeExpire,
     notify_url: c.notifyUrl,
-    amount: { total: args.plan.price, currency: 'CNY' },
+    amount: { total, currency: 'CNY' },
     payer: { openid: args.openid },
   });
   const urlPath = '/v3/pay/transactions/jsapi';
@@ -154,7 +181,7 @@ export function decryptNotifyResource(resource: { ciphertext: string; nonce: str
  */
 export async function markPaidAndApply(parsed: {
   outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
-}): Promise<{ applied: boolean; reason?: string }> {
+}, source = 'wechat_pay'): Promise<{ applied: boolean; reason?: string }> {
   return prisma.$transaction(async (tx) => {
     // 对同一订单号串行化回调处理。hashtext(text) 返回 int4，适配 pg_advisory_xact_lock(int)。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${parsed.outTradeNo}))`;
@@ -185,7 +212,7 @@ export async function markPaidAndApply(parsed: {
     await applyPlanPurchase(
       { id: order.userId, tenantId: order.tenantId },
       plan,
-      { reason: `${plan.name} · 微信支付`, source: 'wechat_pay' },
+      { reason: `${plan.name} · ${source === 'wechat_pay_sandbox' ? '微信支付(沙箱)' : '微信支付'}`, source },
       tx,
     );
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。

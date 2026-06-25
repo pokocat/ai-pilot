@@ -3,6 +3,9 @@ import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { payConfigured, createJsapiOrder } from '../services/wechatPay.js';
+import { sandboxEnabled } from '../services/sandbox.js';
+import { computeUpgradeProration } from '../services/proration.js';
+import { recordAudit } from '../services/audit.js';
 import type { Plan as PlanView, PlanPurchaseResult, WechatOrderResult } from '../../../shared/contracts';
 
 function publicPlan(plan: {
@@ -52,13 +55,29 @@ export async function planRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
-    if (!payConfigured()) return reply.code(501).send({ error: '微信支付未配置，演示环境请走 /plans/:id/purchase', code: 'PAYMENT_NOT_CONFIGURED' });
+    if (!payConfigured() && !sandboxEnabled()) return reply.code(501).send({ error: '微信支付未配置，演示环境请走 /plans/:id/purchase', code: 'PAYMENT_NOT_CONFIGURED' });
     if (plan.price <= 0) return reply.code(400).send({ error: '免费套餐无需支付', code: 'PLAN_FREE' });
     const openid = (req.body?.openid || (user as { wechatOpenId?: string | null }).wechatOpenId || '').trim();
     if (!openid) return reply.code(400).send({ error: '缺少支付用户 openid', code: 'OPENID_REQUIRED' });
+    // 月→年升级折算（D5）：实付 = max(0, 年付原价 − 老月付套餐剩余价值)；不触发时 = 原价。
+    const proration = await computeUpgradeProration(user, { id: plan.id, price: plan.price, period: plan.period });
     try {
-      const r = await createJsapiOrder({ user, plan: { id: plan.id, name: plan.name, price: plan.price }, openid });
-      return { ok: true, outTradeNo: r.outTradeNo, pay: r.pay };
+      const r = await createJsapiOrder({ user, plan: { id: plan.id, name: plan.name, price: plan.price }, openid, amount: proration.chargeAmount });
+      if (proration.applies) {
+        await recordAudit({
+          tenantId: user.tenantId, userId: user.id, action: 'user.plan.proration',
+          payload: {
+            outTradeNo: r.outTradeNo, fromPlanId: proration.fromPlanId, fromPlanName: proration.fromPlanName, toPlanId: plan.id,
+            fullPrice: proration.fullPrice, remainingDays: proration.remainingDays, remainingValue: proration.remainingValue, chargeAmount: proration.chargeAmount,
+          },
+        });
+      }
+      return {
+        ok: true, outTradeNo: r.outTradeNo, amount: proration.chargeAmount, pay: r.pay,
+        proration: proration.applies
+          ? { applies: true, fullPrice: proration.fullPrice, remainingDays: proration.remainingDays, remainingValue: proration.remainingValue, chargeAmount: proration.chargeAmount }
+          : undefined,
+      };
     } catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
       return reply.code(err.statusCode ?? 502).send({ error: err.message ?? '下单失败', code: err.code ?? 'WECHAT_PAY_CREATE_FAILED' });

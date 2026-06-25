@@ -39,18 +39,23 @@ model Tenant {
 
 /// 用户（企业成员）
 model User {
-  id             String    @id @default(cuid())
-  tenantId       String
-  phone          String    @unique
-  wechatOpenId   String?   @unique
-  wechatUnionId  String?   @unique
-  name           String
-  avatarUrl      String? // 头像：微信「头像昵称填写能力」选取后上传 OSS 的公网链接；可在设置中修改
-  role           String    @default("owner") // owner | member | admin
-  benmingColor   String    @default("gold") // 本命色：首登强制选择，金色默认
-  planId         String?
-  createdAt      DateTime  @default(now())
-  wechatLinkedAt DateTime?
+  id              String    @id @default(cuid())
+  tenantId        String
+  phone           String    @unique
+  wechatOpenId    String?   @unique
+  wechatUnionId   String?   @unique
+  name            String
+  avatarUrl       String? // 头像：微信「头像昵称填写能力」选取后上传 OSS 的公网链接；可在设置中修改
+  role            String    @default("owner") // owner | member | admin
+  benmingColor    String    @default("gold") // 本命色：首登强制选择，金色默认
+  planId          String?
+  // 套餐有效期（D1/D2）：购买/续费/升级时写入；status 由 now vs planExpiresAt 派生（不存字段）。
+  // planActivatedAt = 当前付费套餐激活时刻，兼作月度额度重置的「订阅锚点」（按激活日的 day-of-month 每月重置）。
+  // planExpiresAt   = 绝对 UTC 到期时间；null = 不到期（免费层 / 企业版私有化 / 历史 grandfather 用户）。
+  planActivatedAt DateTime?
+  planExpiresAt   DateTime?
+  createdAt       DateTime  @default(now())
+  wechatLinkedAt  DateTime?
 
   tenant       Tenant         @relation(fields: [tenantId], references: [id])
   plan         Plan?          @relation(fields: [planId], references: [id])
@@ -135,18 +140,18 @@ model Agent {
 
   // —— 运行时接入方式（运营后台可为每个智能体单独配置）——
   // inherit 跟随全局模型 | openai 自定义 OpenAI 兼容端点 | dify 绑定 Dify 应用
-  providerMode String  @default("inherit")
+  providerMode   String  @default("inherit")
   // 自定义 OpenAI 兼容端点（providerMode=openai 时生效）
-  apiBaseUrl   String? // 如 https://api.deepseek.com/v1
-  apiModel     String? // 如 deepseek-chat
+  apiBaseUrl     String? // 如 https://api.deepseek.com/v1
+  apiModel       String? // 如 deepseek-chat
   apiTemperature Float? // P2-7：per-agent 温度（providerMode=openai；留空=跟随全局）
-  apiKey       String? @db.Text
+  apiKey         String? @db.Text
   // Dify 应用（providerMode=dify 时生效）。chat-messages 接口
-  difyBaseUrl  String? // 如 http://ai.aibuzz.cn/v1
-  difyApiKey   String? @db.Text // 每个 Dify 应用专属 key
-  difyInputs   Json? // { difyVarName: "{企业档案}" }：本地上下文按占位符映射成 Dify inputs
+  difyBaseUrl    String? // 如 http://ai.aibuzz.cn/v1
+  difyApiKey     String? @db.Text // 每个 Dify 应用专属 key
+  difyInputs     Json? // { difyVarName: "{企业档案}" }：本地上下文按占位符映射成 Dify inputs
   // 自建技能（工具调用，providerMode=openai 时生效）：{ enabled, tools:[内置工具名], customTools? }
-  skillsConfig Json?
+  skillsConfig   Json?
 
   // —— 版本化（P0）：本行 = 运营正在编辑的「工作草稿」；C 端实际读 publishedVersionId 指向的不可变快照 ——
   publishedVersionId String? // → AgentVersion.id（C 端使用的已发布版本）；null=尚未发布，运行时回退本行草稿
@@ -419,14 +424,14 @@ model KnowledgeItem {
   sourceId   String? // sessionId / reportVersionId / uploadId
   tagsJson   Json     @default("[]")
   // —— 文档上传管线（sourceType=upload）：解析状态 + 原件元信息 ——
-  status    String   @default("ready") // ready | parsing | embedding | failed（非上传项一律 ready）
-  fileName  String? // 原始文件名
-  fileType  String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
-  fileSize  Int? // 字节
-  fileKey   String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
-  error     String?  @db.Text // 解析/嵌入失败原因
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  status     String   @default("ready") // ready | parsing | embedding | failed（非上传项一律 ready）
+  fileName   String? // 原始文件名
+  fileType   String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
+  fileSize   Int? // 字节
+  fileKey    String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
+  error      String?  @db.Text // 解析/嵌入失败原因
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
 
   tenant  Tenant           @relation(fields: [tenantId], references: [id])
   project Project?         @relation(fields: [projectId], references: [id])
@@ -803,14 +808,14 @@ model ModerationLog {
 /// 运营后台可在已添加的 AiModel 之间快速切换：切换=把目标 AiModel 拷进本行 + 记 activeModelId。
 /// getAiConfig 仍只读本行，运行时路径不变。生产应加密存储 apiKey / 接密管。
 model AiSetting {
-  id             String   @id @default("default")
-  provider       String   @default("openai") // mock | claude | openai(兼容 Agnes/DeepSeek/Qwen…)
-  label          String   @default("Agnes 2.0 Flash")
-  baseUrl        String   @default("https://apihub.agnes-ai.com/v1")
-  model          String   @default("agnes-2.0-flash")
-  apiKey         String   @default("") @db.Text
-  embeddingModel String   @default("")
-  temperature    Float    @default(0.7)
+  id             String  @id @default("default")
+  provider       String  @default("openai") // mock | claude | openai(兼容 Agnes/DeepSeek/Qwen…)
+  label          String  @default("Agnes 2.0 Flash")
+  baseUrl        String  @default("https://apihub.agnes-ai.com/v1")
+  model          String  @default("agnes-2.0-flash")
+  apiKey         String  @default("") @db.Text
+  embeddingModel String  @default("")
+  temperature    Float   @default(0.7)
   activeModelId  String? // 指向当前生效的 AiModel.id（后台高亮用，运行时不依赖）
 
   // 向量嵌入接入（开关 + 可独立配凭证；留空回退对话模型的 baseUrl/key）。
@@ -824,7 +829,7 @@ model AiSetting {
   rerankBaseUrl String  @default("")
   rerankApiKey  String  @default("") @db.Text
 
-  updatedAt      DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 
   @@map("ai_setting")
 }
@@ -832,21 +837,21 @@ model AiSetting {
 /// 已添加的模型接入点（运营可添加多个，快速切换其一生效）。
 /// 来源三种：内置接入商预设（preset 记其 id）/ 自定义通用兼容协议 / 完全自主定义。
 model AiModel {
-  id             String   @id @default(cuid())
-  provider       String   @default("openai") // mock | claude | openai
-  label          String // 展示名，如「Agnes 2.0 Flash」
-  baseUrl        String   @default("")
-  model          String   @default("")
-  apiKey         String   @default("") @db.Text
-  embeddingModel String   @default("")
-  temperature    Float    @default(0.7)
-  preset         String? // 来源内置接入商 id（自定义/自主定义则空）
+  id               String   @id @default(cuid())
+  provider         String   @default("openai") // mock | claude | openai
+  label            String // 展示名，如「Agnes 2.0 Flash」
+  baseUrl          String   @default("")
+  model            String   @default("")
+  apiKey           String   @default("") @db.Text
+  embeddingModel   String   @default("")
+  temperature      Float    @default(0.7)
+  preset           String? // 来源内置接入商 id（自定义/自主定义则空）
   // 内部成本核算单价（元 / 1M token）。0=未配置 → 回退内置价表/兜底。Token 用量看板按此估算总成本。
   priceInput       Float    @default(0)
   priceOutput      Float    @default(0)
   priceCachedInput Float    @default(0) // 命中缓存输入价；0=按 priceInput 计
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   @@map("ai_model")
 }

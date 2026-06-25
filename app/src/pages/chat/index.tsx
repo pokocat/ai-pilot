@@ -200,6 +200,11 @@ export default function Chat() {
       setTimeout(scrollToEnd, 30);
       return;
     }
+    // 过期只读锁定（D4）：到期后前端即拦 AI 交互，提示续费（后端 PLAN_EXPIRED 403 为兜底硬保证）。
+    if (s.me()?.planStatus?.expired) {
+      Taro.showToast({ title: '套餐已到期，续费后可继续对话', icon: 'none' });
+      return;
+    }
     setBusy(true);
     // P2-15：重试（echo=false）不重复回显用户气泡（用户消息已在首次尝试时显示）。
     if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
