@@ -96,6 +96,8 @@ export async function grantCredits(
     await lockCreditAccount(client, userId);
     const bal = await balanceIn(client, userId);
     const unlimited = amount < 0;
+    // 0 发放视作无操作：不写流水（防止重复"购买"免费套餐刷出一堆 +0 垃圾流水）。
+    if (!unlimited && amount === 0) return isUnlimited(bal) ? -1 : bal;
     const delta = unlimited ? 0 : amount;
     const balance = unlimited ? -1 : (isUnlimited(bal) ? amount : bal + amount);
     await client.creditLedger.create({ data: { tenantId, userId, delta, reason, balance } });

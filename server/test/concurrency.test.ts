@@ -87,7 +87,8 @@ test('并发购买不同 unlock 智能体：同一余额账户串行扣减，不
 
 test('并发套餐发放：同一余额账户串行叠加，不丢充值', async () => {
   const { tenantId, userId } = await createUserWithCredits(10);
-  const plan = await prisma.plan.findFirst({ where: { creditsPerMonth: { gt: 0 } }, orderBy: { creditsPerMonth: 'asc' } });
+  // 用付费套餐做载体测并发锁：免费/永久套餐重复购买现已幂等（防刷，见 planExpiry 幂等用例），不再叠加。
+  const plan = await prisma.plan.findFirst({ where: { price: { gt: 0 }, creditsPerMonth: { gt: 0 } }, orderBy: { creditsPerMonth: 'asc' } });
   assert.ok(plan);
 
   await Promise.all(Array.from({ length: 4 }, () =>

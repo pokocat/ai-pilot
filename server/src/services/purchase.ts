@@ -28,7 +28,6 @@ export async function applyPlanPurchase(
   db?: Prisma.TransactionClient,
 ): Promise<GrantResult> {
   const unlimited = plan.creditsPerMonth < 0;
-  const grantedCredits = unlimited ? 0 : plan.creditsPerMonth;
   const at = now();
 
   const apply = async (tx: Prisma.TransactionClient): Promise<GrantResult> => {
@@ -38,6 +37,13 @@ export async function applyPlanPurchase(
       select: { planId: true, planActivatedAt: true, planExpiresAt: true },
     });
     const isRenewal = !noExpiry && prev?.planId === plan.id && !!prev.planExpiresAt && prev.planExpiresAt.getTime() > at.getTime();
+    // 防刷：免费/永久套餐(noExpiry)已在该套餐上时，重复"购买"不再发钻石（钻石是累加流水，且免费路径无支付幂等键兜底；
+    // 付费套餐的重复发放由支付层 outTradeNo 幂等防住）。月度额度由锚点重置链单独发放，不依赖此处重复点击。
+    const skipFreeRegrant = noExpiry && prev?.planId === plan.id;
+    // 实际发放额：保留负数=不限量语义（企业版）；防刷跳过时为 0（grantCredits 对 0 是无操作）。
+    const creditGrantAmount = skipFreeRegrant ? 0 : plan.creditsPerMonth;
+    // 展示/审计额：不限量与跳过均记 0。
+    const grantedCredits = unlimited || skipFreeRegrant ? 0 : plan.creditsPerMonth;
     const activatedAt = isRenewal ? (prev!.planActivatedAt ?? at) : at;
     // 续费：从激活锚点重派生到期（renewExpiry，防月末 clamp 漂移、与额度锚点链对齐）；新购/升级：from now。
     const expiresAt = noExpiry ? null : (isRenewal ? renewExpiry(activatedAt, prev!.planExpiresAt!, plan.period) : computeExpiry(at, plan.period));
@@ -46,7 +52,7 @@ export async function applyPlanPurchase(
       where: { id: user.id },
       data: { planId: plan.id, planActivatedAt: activatedAt, planExpiresAt: expiresAt },
     });
-    const creditBalance = await grantCredits(user.tenantId, user.id, plan.creditsPerMonth, opts.reason, tx);
+    const creditBalance = await grantCredits(user.tenantId, user.id, creditGrantAmount, opts.reason, tx);
     await setQuota(user.tenantId, user.id, plan.tokenQuotaPerMonth, activatedAt, tx);
     await tx.auditLog.create({
       data: {
