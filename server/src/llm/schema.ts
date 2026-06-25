@@ -3,6 +3,7 @@
 // 成果/回复的数据模型统一来自 SSOT（shared/contracts），前后端/运营端同口径。
 
 import { selectModuleText, type PromptKind } from './promptAssembly.js';
+import { resolveIndustryPack, GENERIC_INDUSTRY } from '../data/industryPacks.js';
 export type { PromptKind };
 
 import type {
@@ -146,11 +147,15 @@ export function benmingTone(color: string): string {
 // 占位符 → 真实上下文文本的映射（system prompt 与 Dify inputs 共用，口径一致）。
 export function contextValues(ctx: GenContext): Record<string, string> {
   const understandingText = ctx.understanding?.length ? ctx.understanding.join('\n') : '暂无个人档案';
+  // 行业身份层：按客户画像里的行业解析「行业包」，{行业基准}/{行业要点} 据此因行业而异（替代写死的单一 SaaS 串）。
+  const pack = resolveIndustryPack(ctx.profile?.industry);
   return {
     '{企业档案}': ctx.profile
       ? `行业=${ctx.profile.industry ?? '未知'}；阶段=${ctx.profile.stage ?? '未知'}；最关注=${ctx.profile.pain ?? '未知'}`
       : '暂无企业档案',
-    '{行业基准}': ctx.benchmark,
+    '{行业基准}': pack.benchmark,
+    '{行业身份}': pack.persona,
+    '{行业要点}': pack.levers.join('；'),
     '{长期记忆}': ctx.memories.length ? ctx.memories.join('；') : '暂无长期记忆',
     '{本命色}': `${ctx.benmingColor}（${benmingTone(ctx.benmingColor)}）`,
     '{引用资料}': ctx.references?.length ? ctx.references.join('\n') : '无',
@@ -191,7 +196,13 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   const guard = ctx.briefInterview ? `${RUNTIME_BUSINESS_GUARD}\n\n${INTERVIEW_DIRECTIVE}` : RUNTIME_BUSINESS_GUARD;
   // P1-B4：注入本命色语气提示（微调语气与侧重，不得违背方法论与边界）。
   const toneLine = `（表达风格参考 · 本命色「${ctx.benmingColor}」：${benmingTone(ctx.benmingColor)}；据此微调语气与侧重，但不改变方法论与上述业务边界。）`;
-  const stable = `${fillPlaceholders(base, ctx)}\n\n${guard}\n\n${toneLine}`;
+  // 行业身份层（L1）：客户画像识别出行业时，给任意智能体叠加一层「行业视角」（persona + 关键经营杠杆），
+  // 让军师/各顾问「懂这个行业」。放 stable 段（按用户行业稳定）以命中提示词缓存；未识别行业则不注入。
+  const pack = resolveIndustryPack(ctx.profile?.industry);
+  const industryLine = pack.key === GENERIC_INDUSTRY.key
+    ? ''
+    : `（行业视角 · ${pack.name}：${pack.persona}经营上重点看：${pack.levers.join('、')}。据此理解客户所处行业的结构与常识，但不得据此编造该客户的具体数据。）`;
+  const stable = [fillPlaceholders(base, ctx), guard, toneLine, industryLine].filter(Boolean).join('\n\n');
 
   const parts: string[] = [];
   if (active) parts.push(fillPlaceholders(active, ctx)); // 本轮生效的按需模块（在参考资料之前）
