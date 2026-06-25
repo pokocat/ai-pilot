@@ -15,8 +15,9 @@ import { agentForText } from '../data/intents';
 import { getToken } from './token';
 
 // ── mock 静态数据源（与后端 seed 对齐） ──
+// 行业选项真相源在服务端 industryPacks.ts 的 industryOptionLabels()；此处为离线 mock 兜底，需同步维护。
 const SURVEY: SurveyQuestion[] = [
-  { key: 'industry', title: '你的行业？', options: ['SaaS / 软件', '消费 / 零售', '制造', '服务 / 咨询', '其他'] },
+  { key: 'industry', title: '你的行业？', options: ['SaaS / 软件', '电商 / 跨境', '餐饮 / 食品', '美业 / 医美', '教育 / 培训', '医疗 / 医药', '制造 / 工业', '专业服务 / 咨询', '本地生活服务', '文旅 / 酒店', '房产 / 家居', '消费 / 零售', '其他'] },
   { key: 'stage', title: '当前阶段？', options: ['起步 / 验证', 'A 轮前后', '规模化', '稳定盈利'] },
   { key: 'pain', title: '最头疼的事？', options: ['增长乏力', '现金流', '融资', '组织 / 团队', '定位 / 竞争'] },
 ];

@@ -2,8 +2,9 @@
 //   cd server && node --import tsx --test test/industryPacks.test.ts
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveIndustryPack, GENERIC_INDUSTRY, INDUSTRY_PACKS } from '../src/data/industryPacks.js';
+import { resolveIndustryPack, GENERIC_INDUSTRY, INDUSTRY_PACKS, industryOptionLabels } from '../src/data/industryPacks.js';
 import { buildSystemParts, contextValues, type GenContext } from '../src/llm/schema.js';
+import { SURVEY } from '../src/data/seedConfig.js';
 
 function ctx(over: Partial<GenContext> = {}): GenContext {
   return {
@@ -42,12 +43,19 @@ describe('resolveIndustryPack · 行业解析', () => {
     assert.equal(resolveIndustryPack('qwerty-unknown-xyz').key, GENERIC_INDUSTRY.key);
   });
 
-  test('每个包都有非空 persona / benchmark / levers', () => {
+  test('每个包都有非空 label / persona / benchmark / levers', () => {
     for (const p of [...INDUSTRY_PACKS, GENERIC_INDUSTRY]) {
+      assert.ok(p.label.length > 0, `${p.key} label`);
       assert.ok(p.persona.length > 0, `${p.key} persona`);
       assert.ok(p.benchmark.length > 0, `${p.key} benchmark`);
       assert.ok(p.levers.length >= 3, `${p.key} levers>=3`);
     }
+  });
+
+  test('新增常见行业可解析（本地生活 / 文旅 / 房产家居）', () => {
+    assert.equal(resolveIndustryPack('家政保洁上门').key, 'local_services');
+    assert.equal(resolveIndustryPack('我开民宿和酒店').key, 'culture_tourism');
+    assert.equal(resolveIndustryPack('整装家装公司').key, 'realestate_home');
   });
 
   test('不同行业的基准互不相同', () => {
@@ -56,6 +64,29 @@ describe('resolveIndustryPack · 行业解析', () => {
     const generic = GENERIC_INDUSTRY.benchmark;
     assert.notEqual(saas, catering);
     assert.notEqual(catering, generic);
+  });
+});
+
+describe('建档行业选项 · industryOptionLabels（单一真相源）', () => {
+  test('选项 = 各包 label + 末尾「其他」，数量对齐', () => {
+    const opts = industryOptionLabels();
+    assert.equal(opts.length, INDUSTRY_PACKS.length + 1);
+    assert.equal(opts[opts.length - 1], GENERIC_INDUSTRY.label); // 其他
+    assert.ok(opts.includes('本地生活服务'));
+    assert.ok(opts.includes('文旅 / 酒店'));
+    assert.ok(opts.includes('房产 / 家居'));
+  });
+
+  test('round-trip：每个选项标签解析回它自己的包（防被前序包抢匹配）', () => {
+    for (const p of INDUSTRY_PACKS) {
+      assert.equal(resolveIndustryPack(p.label).key, p.key, `选项「${p.label}」应解析回 ${p.key}`);
+    }
+  });
+
+  test('seedConfig SURVEY 行业题选项 = industryOptionLabels()（派生已接线）', () => {
+    const industryQ = SURVEY.find((q) => q.key === 'industry');
+    assert.ok(industryQ, '存在 industry 题');
+    assert.deepEqual(industryQ!.options, industryOptionLabels());
   });
 });
 

@@ -1,16 +1,20 @@
 // 行业身份层（L1）—— 客户画像里的「行业」决定一层叠加的「行业身份」：
-//   persona（行业视角/身份）+ benchmark（行业基准）+ levers（关键经营杠杆/口径）+ glossary（术语）。
+//   label（建档选项）+ persona（行业视角/身份）+ benchmark（行业基准）+ levers（关键经营杠杆/口径）+ glossary（术语）。
 // 这一层是「叠加在任意智能体之上的 overlay」，不新增可寻址智能体实体——给军师/各顾问换一套
 // 「懂这个行业」的脑子。注入点见 llm/schema.ts（buildSystemParts 的 stable 段 + {行业基准}/{行业要点} 占位符）。
 //
-// 演进路径与 data/agents.ts 一致：先静态注册表，后续可下沉 DB + 运营后台可配，并按 tenantId 隔离自定义包。
+// ★ 单一真相源：本文件即行业的真相源（AI/研发可直接增改）。建档问卷的行业「选项」由 industryOptionLabels()
+//   从这里派生（见 data/seedConfig.ts），所以**新增一个行业包，建档选项也随之多一个**（再跑 db:seed
+//   或 admin:sync-content 下发）。运营仍可在后台「问卷」页临时增改选项；选项串经 resolveIndustryPack()
+//   模糊匹配回包，命中即获富身份，未命中优雅回退通用。
+//   后续如需运营在后台可视化增改「包」本身（身份/基准/杠杆），再把本表下沉 DB + admin CRUD（L1.5）。
+//
 // 路由层（按行业拉起/转接「行业专家 agent」）是 L2/L3，本文件只负责「行业身份」这一层。
-
-import { INDUSTRY_BENCHMARK } from './seedConfig.js';
 
 export interface IndustryPack {
   key: string;
-  name: string;            // 展示名（如「餐饮 / 连锁餐饮」）
+  name: string;            // 展示名（注入「行业视角」行，如「餐饮 / 连锁餐饮 / 食品饮料」）
+  label: string;           // 建档问卷里的简短选项（如「餐饮 / 食品」）；industryOptionLabels() 据此派生
   aliases: string[];       // 用于从 profile.industry 自由文本模糊匹配（归一化后做子串匹配）
   persona: string;         // 行业身份/视角，一句话；注入 stable 段，对任意智能体生效
   benchmark: string;       // 行业基准；填 {行业基准}（替代写死的单一 SaaS 串）
@@ -22,6 +26,7 @@ export interface IndustryPack {
 export const GENERIC_INDUSTRY: IndustryPack = {
   key: 'generic',
   name: '通用',
+  label: '其他',
   aliases: [],
   persona:
     '你面向各行业的创始人 / CEO，先用通用经营框架判断，再用关键问题快速补齐该客户所在行业的特有结构与常识。',
@@ -37,15 +42,18 @@ export const GENERIC_INDUSTRY: IndustryPack = {
 };
 
 // 常见行业包。数组顺序 = 匹配优先级（更具体的垂直行业在前，最泛的「零售 / 消费」在后），
-// 避免「连锁餐饮」被「零售/连锁」抢先命中。
+// 避免「连锁餐饮」被「零售/连锁」抢先命中。新增行业：补一条对象 + 唯一 key + 简短 label + 充分 aliases 即可，
+// 建档选项与注入会自动跟上（注意 label/aliases 不要被更靠前的包抢先命中，见 industryPacks.test.ts 的 round-trip 断言）。
 export const INDUSTRY_PACKS: IndustryPack[] = [
   {
     key: 'saas',
     name: 'SaaS / 软件 / 企业服务',
+    label: 'SaaS / 软件',
     aliases: ['saas', '软件', '企业服务', '工具软件', '系统开发', '信息技术', 'it服务', '互联网产品', 'technology', '云服务'],
     persona:
       '你深谙 SaaS / 软件与企业服务的订阅生意，理解 PLG 与销售驱动两条增长路径，看重经常性收入与净留存而非一次性买断。',
-    benchmark: INDUSTRY_BENCHMARK, // SaaS A 轮前后基准（NDR 100–110%、毛利 70%+、CAC 回收 12–18 月…）
+    benchmark:
+      'SaaS / 软件行业 A 轮前后典型基准：净收入留存 100–110%、毛利率 70%+、获客回收 12–18 个月、年流失率 <10%、经常性收入占比目标 25%+。',
     levers: [
       'MRR / ARR 与净收入留存（NDR）',
       'CAC 回收周期与 LTV/CAC',
@@ -58,6 +66,7 @@ export const INDUSTRY_PACKS: IndustryPack[] = [
   {
     key: 'ecommerce',
     name: '电商 / 跨境电商 / 直播带货',
+    label: '电商 / 跨境',
     aliases: ['电商', '跨境', '网店', '直播带货', '带货', '淘宝', '天猫', '京东', '拼多多', '抖店', 'dtc', '网购', '线上零售', '独立站'],
     persona:
       '你熟悉电商 / 跨境电商与直播带货的流量生意，理解平台规则、投产比与库存周转对生死的直接影响。',
@@ -75,6 +84,7 @@ export const INDUSTRY_PACKS: IndustryPack[] = [
   {
     key: 'catering',
     name: '餐饮 / 连锁餐饮 / 食品饮料',
+    label: '餐饮 / 食品',
     aliases: ['餐饮', '餐厅', '饭店', '连锁餐饮', '食品', '饮料', '咖啡', '茶饮', '奶茶', '烘焙', '火锅', '快餐', '小吃', '正餐'],
     persona:
       '你深耕餐饮与连锁餐饮，理解翻台率、出餐效率与外卖占比，明白餐饮是现金流好但毛利薄、靠精细化运营与标准化复制取胜的生意。',
@@ -92,6 +102,7 @@ export const INDUSTRY_PACKS: IndustryPack[] = [
   {
     key: 'beauty',
     name: '美业 / 医美 / 大健康',
+    label: '美业 / 医美',
     aliases: ['美业', '医美', '美容', '美发', '美甲', '大健康', '养生', 'spa', '护肤', '瘦身', '口腔', '植发', '生活美容'],
     persona:
       '你熟悉美业 / 医美与大健康的服务生意，理解获客成本高、靠会员复购与客单价支撑，重医师 / 手艺人依赖与口碑合规。',
@@ -109,6 +120,7 @@ export const INDUSTRY_PACKS: IndustryPack[] = [
   {
     key: 'education',
     name: '教育 / 培训 / 知识付费',
+    label: '教育 / 培训',
     aliases: ['教育', '培训', '教培', '知识付费', '职业教育', '留学', '课程', '学校', '幼儿', 'k12', '考研', '学历', '早教', '艺术培训'],
     persona:
       '你懂教育培训与知识付费的生意，理解续费率与口碑转介绍是命脉，明白政策合规与交付效果直接决定生死。',
@@ -126,6 +138,7 @@ export const INDUSTRY_PACKS: IndustryPack[] = [
   {
     key: 'healthcare',
     name: '医疗 / 医药 / 器械',
+    label: '医疗 / 医药',
     aliases: ['医疗', '医药', '医院', '器械', '生物医药', '制药', '诊所', '医疗器械', '药店', '健康管理', '体检', '互联网医疗'],
     persona:
       '你熟悉医疗 / 医药 / 器械与生物医药，理解强监管、长周期与准入 / 合规壁垒，明白注册准入与学术推广是核心竞争力。',
@@ -143,6 +156,7 @@ export const INDUSTRY_PACKS: IndustryPack[] = [
   {
     key: 'manufacturing',
     name: '制造 / 工业 / 供应链',
+    label: '制造 / 工业',
     aliases: ['制造', '工厂', '工业', '供应链', '外贸', '硬件', '生产', '加工', '机械', '设备', '五金', '材料', '电子'],
     persona:
       '你熟悉制造 / 工业与供应链生意，看重产能利用率、订单饱和度与账期，明白制造是重资产、靠周转与成本控制取胜。',
@@ -160,6 +174,7 @@ export const INDUSTRY_PACKS: IndustryPack[] = [
   {
     key: 'proservices',
     name: '专业服务 / 咨询 / 广告 / MCN',
+    label: '专业服务 / 咨询',
     aliases: ['咨询', '专业服务', '广告', 'mcn', '设计公司', '律所', '会计', '代运营', '外包', '公关', '猎头', '财税', '人力资源服务'],
     persona:
       '你懂咨询 / 专业服务 / 广告 / MCN 等人力驱动的服务生意，理解人效与项目利润率是核心，规模化受限于交付人才梯队。',
@@ -175,8 +190,63 @@ export const INDUSTRY_PACKS: IndustryPack[] = [
     glossary: '人效=人均创收或利润；工时利用率=可计费工时占比；项目利润率=单项目收入减成本。',
   },
   {
+    key: 'local_services',
+    name: '本地生活服务（家政 / 维修 / 婚庆 / 到店）',
+    label: '本地生活服务',
+    aliases: ['本地生活', '家政', '维修', '婚庆', '保洁', '同城', '到店', '上门', '搬家', '月嫂', '洗护', '宠物服务', '家电清洗'],
+    persona:
+      '你熟悉本地生活服务（家政 / 维修 / 婚庆 / 到店等同城生意），理解履约半径、服务者供给与口碑复购是核心，平台抽佣与自然客占比直接影响利润。',
+    benchmark:
+      '本地生活服务典型基准：毛利率 40–60%、平台抽佣 5–25% 侵蚀利润、复购与口碑转介绍决定 LTV；服务者（师傅）供给与履约准时率是瓶颈，单均与上门密度决定人效。',
+    levers: [
+      '履约半径与上门密度（人效 / 路损）',
+      '服务者供给与稳定性',
+      '平台抽佣 vs 自然客 / 私域占比',
+      '复购与口碑转介绍',
+      '单均价与增值项',
+    ],
+    glossary: '履约半径=可服务的地理范围；上门密度=单位时间订单密度；抽佣=平台对每单收取的佣金。',
+  },
+  {
+    key: 'culture_tourism',
+    name: '文旅 / 酒店 / 民宿',
+    label: '文旅 / 酒店',
+    aliases: ['文旅', '酒店', '民宿', '旅游', '景区', '酒旅', '度假', '营地', '文化旅游', '旅行社', '亲子乐园'],
+    persona:
+      '你熟悉文旅 / 酒店 / 民宿生意，理解入住率与 RevPAR、淡旺季波动与重资产回收周期，OTA 抽佣与复游 / 口碑决定利润。',
+    benchmark:
+      '文旅 / 酒店典型基准：入住率（OCC）60%+ 视为健康、RevPAR 为核心、OTA 抽佣 10–20%、淡旺季波动大；单房回本以年计，靠会员直订与复游降低获客成本。',
+    levers: [
+      '入住率 OCC 与 RevPAR（房价 × 出租率）',
+      'OTA 抽佣 vs 会员直订占比',
+      '淡旺季调价与产能利用',
+      '复游 / 口碑与体验',
+      '重资产回收周期与现金流',
+    ],
+    glossary: 'RevPAR=每可售房收入；OCC=入住率；OTA=在线旅游平台（携程/美团等）；直订=不经平台的直接预订。',
+  },
+  {
+    key: 'realestate_home',
+    name: '房产 / 家居 / 家装建材',
+    label: '房产 / 家居',
+    aliases: ['房产', '地产', '家居', '建材', '装修', '家装', '整装', '定制家具', '门窗', '卫浴', '房地产', '物业', '家具'],
+    persona:
+      '你熟悉房产 / 家居 / 建材 / 装修生意，理解客单高、决策链长、回款与垫资压力大，靠口碑转介绍与交付质量沉淀品牌。',
+    benchmark:
+      '房产 / 家居家装典型基准：客单价高、决策周期长（数周至数月）、毛利率 25–45%（整装更低）；转介绍占比高则获客成本低，垫资与回款账期、交付质量与投诉率是命脉。',
+    levers: [
+      '获客成本与转介绍占比（高客单靠口碑）',
+      '到店 / 上门转化率',
+      '客单价与增项 / 整装率',
+      '回款账期与垫资 / 现金流',
+      '交付质量与投诉 / 返工率',
+    ],
+    glossary: '整装=全屋打包装修；垫资=施工方先行垫付的资金；转介绍=老客带新客。',
+  },
+  {
     key: 'retail',
     name: '消费 / 零售 / 连锁门店',
+    label: '消费 / 零售',
     aliases: ['消费', '零售', '连锁', '门店', '快消', '品牌', '商超', '便利店', '服装', '服饰', '百货', '专卖店', '实体店'],
     persona:
       '你懂消费品牌与连锁零售的渠道生意，看重坪效、单店模型与品牌复购，明白规模复制之前必须先跑通单店模型。',
@@ -214,4 +284,12 @@ export function resolveIndustryPack(industry?: string | null): IndustryPack {
 /** 行业是否被识别（非通用兜底）。供注入层决定是否追加「行业身份」行。 */
 export function hasIndustryIdentity(industry?: string | null): boolean {
   return resolveIndustryPack(industry).key !== GENERIC_INDUSTRY.key;
+}
+
+/**
+ * 建档问卷「行业」题的选项 = 各行业包的 label + 末尾「其他」。
+ * 单一真相源：新增行业包 → 选项自动多一个（见 data/seedConfig.ts 的 SURVEY）。
+ */
+export function industryOptionLabels(): string[] {
+  return [...INDUSTRY_PACKS.map((p) => p.label), GENERIC_INDUSTRY.label];
 }
