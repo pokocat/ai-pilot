@@ -65,7 +65,11 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
     const task = Taro.request({
       url, method: 'POST', data: body, header,
       enableChunked: true,
-      success: () => resolve(),
+      success: () => {
+        // 流结束时冲刷残余字节（若最后一个 done 事件与上一块数据同包到达，可能未含 \n\n 边界）。
+        if (bytes.length) dispatch(parseSSE(decodeUtf8(bytes) + '\n\n').events, h);
+        resolve();
+      },
       fail: () => { h.onError?.('网络请求失败'); resolve(); },
     } as unknown as Parameters<typeof Taro.request>[0]);
     const onChunk = (task as unknown as { onChunkReceived?: (cb: (r: { data: ArrayBuffer }) => void) => void }).onChunkReceived;

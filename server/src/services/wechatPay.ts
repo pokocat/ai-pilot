@@ -124,24 +124,30 @@ export async function createJsapiOrder(args: {
     payer: { openid: args.openid },
   });
   const urlPath = '/v3/pay/transactions/jsapi';
-  const res = await fetch(PAY_BASE + urlPath, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: buildAuthToken('POST', urlPath, body),
-    },
-    body,
-  });
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
+  try {
+    const res = await fetch(PAY_BASE + urlPath, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: buildAuthToken('POST', urlPath, body),
+      },
+      body,
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      await prisma.paymentOrder.update({ where: { outTradeNo }, data: { status: 'failed' } }).catch(() => {});
+      throw Object.assign(new Error(`微信下单失败：HTTP ${res.status} ${errText}`), { code: 'WECHAT_PAY_CREATE_FAILED', statusCode: 502 });
+    }
+    const data = (await res.json()) as { prepay_id?: string };
+    if (!data.prepay_id) throw Object.assign(new Error('微信未返回 prepay_id'), { code: 'WECHAT_PAY_CREATE_FAILED', statusCode: 502 });
+    await prisma.paymentOrder.update({ where: { outTradeNo }, data: { prepayId: data.prepay_id } });
+    return { outTradeNo, pay: buildPayParams(data.prepay_id) };
+  } catch (e) {
+    // 网络层异常（DNS 失败 / 超时 / TLS 错误）：订单已落库为 'created'，须标 failed 防止被后续下单请求复用。
     await prisma.paymentOrder.update({ where: { outTradeNo }, data: { status: 'failed' } }).catch(() => {});
-    throw Object.assign(new Error(`微信下单失败：HTTP ${res.status} ${errText}`), { code: 'WECHAT_PAY_CREATE_FAILED', statusCode: 502 });
+    throw e;
   }
-  const data = (await res.json()) as { prepay_id?: string };
-  if (!data.prepay_id) throw Object.assign(new Error('微信未返回 prepay_id'), { code: 'WECHAT_PAY_CREATE_FAILED', statusCode: 502 });
-  await prisma.paymentOrder.update({ where: { outTradeNo }, data: { prepayId: data.prepay_id } });
-  return { outTradeNo, pay: buildPayParams(data.prepay_id) };
 }
 
 // —— 回调验签（平台证书 RSA-SHA256；配了平台证书才校验）——
