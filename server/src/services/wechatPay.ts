@@ -124,15 +124,21 @@ export async function createJsapiOrder(args: {
     payer: { openid: args.openid },
   });
   const urlPath = '/v3/pay/transactions/jsapi';
-  const res = await fetch(PAY_BASE + urlPath, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: buildAuthToken('POST', urlPath, body),
-    },
-    body,
-  });
+  let res: Response;
+  try {
+    res = await fetch(PAY_BASE + urlPath, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: buildAuthToken('POST', urlPath, body),
+      },
+      body,
+    });
+  } catch (err) {
+    await prisma.paymentOrder.update({ where: { outTradeNo }, data: { status: 'failed' } }).catch(() => {});
+    throw Object.assign(new Error(`微信下单网络异常：${(err as Error).message}`), { code: 'WECHAT_PAY_CREATE_FAILED', statusCode: 502 });
+  }
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
     await prisma.paymentOrder.update({ where: { outTradeNo }, data: { status: 'failed' } }).catch(() => {});
