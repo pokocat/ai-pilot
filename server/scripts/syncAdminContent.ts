@@ -20,6 +20,8 @@ async function syncAgents() {
         gift: a.gift,
         billing: a.billing,
         price: a.price,
+        ...(a.billingRatio !== undefined && { billingRatio: a.billingRatio }),
+        ...(a.meterUnit !== undefined && { meterUnit: a.meterUnit }),
         greet: a.greet,
         chipsJson: a.chips as object,
         memText: a.memText,
