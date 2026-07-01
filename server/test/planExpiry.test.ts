@@ -142,6 +142,21 @@ test('防刷：重复购买免费套餐不重复发钻石（幂等）', async ()
   assert.equal(rows, 1, '仅首次一条发放流水');
 });
 
+test('防刷：重复购买免费套餐不重复刷新 token 额度（与钻石防刷同源，此前遗漏）', async () => {
+  const T0 = new Date('2026-03-01T00:00:00Z');
+  await runWithNow(T0, async () => applyPlanPurchase({ id: userId, tenantId }, await plan(freeId), { reason: 'free', source: 'test' }));
+  await runWithNow(T0, async () => {
+    await chargeQuota(userId, 100_000, 1); // 用光本月 token 额度（free.tokenQuotaPerMonth=100_000）
+    assert.equal((await getQuotaState(userId)).balance, 0, '额度已用尽');
+  });
+  // 连点 3 次「购买」同一免费套餐（无真实支付）：额度不应被刷回满额
+  for (let i = 0; i < 3; i++) {
+    await runWithNow(T0, async () => applyPlanPurchase({ id: userId, tenantId }, await plan(freeId), { reason: 'free', source: 'test' }));
+  }
+  const st = await runWithNow(T0, () => getQuotaState(userId));
+  assert.equal(st.balance, 0, 'token 额度仍为 0，未被重复购买刷新（防刷需覆盖钻石与 token 两条轴）');
+});
+
 // —— 月→年折算（D5）——
 test('折算：月付剩余 10 天 → 升年付抵 ¥66、实付 ¥1914（按老套餐日单价）', async () => {
   const T0 = new Date('2026-01-15T00:00:00Z'); // 月付到期 2026-02-15
