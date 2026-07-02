@@ -90,3 +90,8 @@
   background: var(--surface); font-size: 12.5px; color: var(--ink-2);
 }
 .pf-opt.on Text { color: #fff; }
+
+/* —— 天势档案（生辰采集）步骤 —— */
+.bz-date { display: flex; gap: 8px; margin-top: 10px; }
+.bz-date .bz-y { flex: 1.4; }
+.bz-date .bz-md { flex: 1; }

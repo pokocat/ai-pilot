@@ -21,14 +21,27 @@ const DEFAULT_SURVEY: SurveyQ[] = [
   { key: 'pain', title: '最头疼的事？', options: ['增长乏力', '现金流', '融资', '组织 / 团队', '定位 / 竞争'] },
 ];
 
-// 入场仪式：选本命色 →（首登）30 秒建档 → 入局。对齐原型 picker 流程。
+// 十二时辰（含「不确定」）：值为代表小时，用于服务端排盘；子时按早子 0 点计。
+const SHICHEN: { label: string; hour: number | null }[] = [
+  { label: '不确定', hour: null },
+  { label: '子 23-1', hour: 0 }, { label: '丑 1-3', hour: 2 }, { label: '寅 3-5', hour: 4 },
+  { label: '卯 5-7', hour: 6 }, { label: '辰 7-9', hour: 8 }, { label: '巳 9-11', hour: 10 },
+  { label: '午 11-13', hour: 12 }, { label: '未 13-15', hour: 14 }, { label: '申 15-17', hour: 16 },
+  { label: '酉 17-19', hour: 18 }, { label: '戌 19-21', hour: 20 }, { label: '亥 21-23', hour: 22 },
+];
+
+// 入场仪式：选本命色 →（首登）30 秒建档 → 天势档案（选填）→ 入局。对齐原型 picker 流程。
 export default function Picker({ open, first, onClose, onConfirm }: Props) {
   const s = useStore();
   const [sel, setSel] = useState(colorIndex(s.colorKey()));
-  const [step, setStep] = useState<'color' | 'profile'>('color');
+  const [step, setStep] = useState<'color' | 'profile' | 'bazi'>('color');
   const [survey, setSurvey] = useState<SurveyQ[]>(DEFAULT_SURVEY);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [company, setCompany] = useState('');
+  const [bz, setBz] = useState<{ calendar: 'solar' | 'lunar'; year: string; month: string; day: string; hourIdx: number; gender: 'male' | 'female' | ''; place: string }>({
+    calendar: 'solar', year: '', month: '', day: '', hourIdx: 0, gender: '', place: '',
+  });
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -72,6 +85,26 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
     if (company.trim()) await api.updateIdentity({ company: company.trim() }).catch(() => {});
     if (Object.keys(answers).length) await api.saveProfile(answers).catch(() => {});
     await store.loadMe();
+    if (first) setStep('bazi');
+    else confirmColor();
+  };
+
+  // 天势档案：生辰交给服务端排盘引擎；跳过/不用命理都放行，绝不卡入局。
+  const finishBazi = async () => {
+    const y = parseInt(bz.year, 10); const m = parseInt(bz.month, 10); const d = parseInt(bz.day, 10);
+    if (!y || !m || !d) { confirmColor(); return; } // 没填完整视同跳过
+    if (!bz.gender) return; // 排盘必须有性别（按钮态提示）
+    setSaving(true);
+    await api.saveBazi({
+      calendar: bz.calendar, year: y, month: m, day: d,
+      hour: SHICHEN[bz.hourIdx].hour, gender: bz.gender,
+      birthPlace: bz.place.trim() || undefined,
+    }).catch(() => {});
+    setSaving(false);
+    confirmColor();
+  };
+  const optOutBazi = async () => {
+    await api.saveBazi({ believe: false }).catch(() => {});
     confirmColor();
   };
 
@@ -158,8 +191,82 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
             </View>
 
             <View className="pk-cta" style={{ background: c.vars['--accent'] }} onClick={finishProfile}>
-              <Text>完成 · 进入军师</Text>
+              <Text>{first ? '下一步 · 天势档案' : '完成 · 进入军师'}</Text>
             </View>
+            <Text className="pk-skip" onClick={confirmColor}>暂时跳过</Text>
+          </>
+        )}
+
+        {step === 'bazi' && (
+          <>
+            <Text className="pk-idx">天势档案 · 选填</Text>
+            <Text className="pk-headline serif">让军师看一眼你的天势</Text>
+            <Text className="pk-sub">生辰用于判断你的命格打法与今年攻守节奏（系统排盘，可随时删除）；不想用命理视角，跳过即可。</Text>
+
+            <View className="pf-list">
+              <View className="pf-q">
+                <Text className="pf-qt">1. 生日（{bz.calendar === 'solar' ? '阳历' : '阴历'}）</Text>
+                <View className="pf-opts">
+                  {(['solar', 'lunar'] as const).map((cal) => (
+                    <View
+                      key={cal}
+                      className={`pf-opt ${bz.calendar === cal ? 'on' : ''}`}
+                      style={bz.calendar === cal ? { background: c.vars['--accent'], borderColor: c.vars['--accent'] } : {}}
+                      onClick={() => setBz((v) => ({ ...v, calendar: cal }))}
+                    >
+                      <Text>{cal === 'solar' ? '阳历' : '阴历'}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View className="bz-date">
+                  <Input className="pf-input bz-y" type="number" value={bz.year} maxlength={4} placeholder="年" onInput={(e) => setBz((v) => ({ ...v, year: e.detail.value }))} />
+                  <Input className="pf-input bz-md" type="number" value={bz.month} maxlength={2} placeholder="月" onInput={(e) => setBz((v) => ({ ...v, month: e.detail.value }))} />
+                  <Input className="pf-input bz-md" type="number" value={bz.day} maxlength={2} placeholder="日" onInput={(e) => setBz((v) => ({ ...v, day: e.detail.value }))} />
+                </View>
+              </View>
+
+              <View className="pf-q">
+                <Text className="pf-qt">2. 时辰（不确定也没关系）</Text>
+                <View className="pf-opts">
+                  {SHICHEN.map((t, i) => (
+                    <View
+                      key={t.label}
+                      className={`pf-opt ${bz.hourIdx === i ? 'on' : ''}`}
+                      style={bz.hourIdx === i ? { background: c.vars['--accent'], borderColor: c.vars['--accent'] } : {}}
+                      onClick={() => setBz((v) => ({ ...v, hourIdx: i }))}
+                    >
+                      <Text>{t.label}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              <View className="pf-q">
+                <Text className="pf-qt">3. 性别与出生地</Text>
+                <View className="pf-opts">
+                  {([['male', '男'], ['female', '女']] as const).map(([g, label]) => (
+                    <View
+                      key={g}
+                      className={`pf-opt ${bz.gender === g ? 'on' : ''}`}
+                      style={bz.gender === g ? { background: c.vars['--accent'], borderColor: c.vars['--accent'] } : {}}
+                      onClick={() => setBz((v) => ({ ...v, gender: g }))}
+                    >
+                      <Text>{label}</Text>
+                    </View>
+                  ))}
+                </View>
+                <Input className="pf-input" value={bz.place} maxlength={20} placeholder="出生城市（选填，用于真太阳时校正）" onInput={(e) => setBz((v) => ({ ...v, place: e.detail.value }))} />
+              </View>
+            </View>
+
+            <View
+              className="pk-cta"
+              style={{ background: c.vars['--accent'], opacity: saving || (!!bz.year && !bz.gender) ? 0.6 : 1 }}
+              onClick={() => !saving && finishBazi()}
+            >
+              <Text>{saving ? '排盘中…' : bz.year && !bz.gender ? '请先选择性别' : '完成 · 进入军师'}</Text>
+            </View>
+            <Text className="pk-skip" onClick={optOutBazi}>不用命理视角（可在档案里改）</Text>
             <Text className="pk-skip" onClick={confirmColor}>暂时跳过</Text>
           </>
         )}

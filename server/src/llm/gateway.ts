@@ -13,6 +13,7 @@ import { ZERO_USAGE, type Deliverable, type ChatReply, type GenContext, type AiT
 import { recordTokenUsage, type UsageMeta } from '../services/usage.js';
 import { recordTrace } from '../services/trace.js';
 import { moderate } from '../services/moderation.js';
+import { auditBannedWords } from '../services/bannedWords.js';
 import { cacheGet, cacheSet } from '../services/cache.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
@@ -56,6 +57,15 @@ async function traced<T>(
       meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind, provider: s.provider, model: s.model,
       status: 'ok', latencyMs: Date.now() - t0, toolCalls: s.toolCalls, iterations: s.iterations, usage: s.usage,
       promptText: args.ctx.userMessage, responseText: args.respText(s.result),
+    });
+    // PR-0a 禁用词检查：只记录不拦截（fire-and-forget，绝不影响产出）。
+    void auditBannedWords({
+      tenantId: args.meta?.tenantId ?? args.ctx.tenantId ?? null,
+      userId: args.meta?.userId ?? args.ctx.userId ?? null,
+      sessionId: args.meta?.sessionId ?? null,
+      agentKey: args.ctx.agentKey,
+      kind: args.kind,
+      text: args.respText(s.result),
     });
     return s;
   } catch (err) {

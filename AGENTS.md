@@ -21,6 +21,7 @@
 7. **对话页登录兜底**：未登录/401 token 失效时弹 `Login`，不要把鉴权失败吞成通用“产出失败”。
 8. **小程序改动先查约束清单**：凡改 `app/` 的微信小程序页面、tabbar、弹层、登录、键盘、网络请求、路由分包或项目配置，先对照 **§7.2 小程序工程约束清单**；不确定时按清单保守实现，避免回退真机已修复问题。
 9. **运营后台 UI 改动守设计系统**：凡改 `admin/` 前端（`.tsx`/`admin.css`），必须对齐 **`admin/DESIGN.md`「Engineering Compliance」**——颜色只用 `:root` token（禁硬编码 hex/rgb）、只用已定义的组件类（禁裸 class 与一次性 inline 控件样式）。提交前跑 `cd admin && npm run lint:ui`（`scripts/audit-admin-ui.mjs`，已接入 `build`）保持全绿。
+10. **品牌红线：禁止「米诺 / Mino」**（避免品牌纷争）：任何新增或修改的产品文案、提示词、交付物模板、代码标识符、注释、seed 数据里，一律使用「军师参谋部 / Junshi Strategic Staff」，不得出现「米诺 / Mino」。从 Notion 原稿（含 12 张 B 级卡片骨架、A 级报告模板）移植内容时必须先按 `server/src/data/prompts/README.md` 的映射去品牌再入库。存量残留的清扫任务见 §13 TODO。
 
 > 判定标准：**文档与代码不一致 = 缺陷。** 纯探索 / 未落地的尝试可以不记；一旦落到代码就必须记。
 
@@ -127,11 +128,11 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 | Tab | 页面 | 说明 |
 |---|---|---|
-| 对话 | `pages/sessions` | 「军师消息」微信式列表（第一入口，底栏首位）：顶栏 历史/军师消息/新对话 + 搜索（客户端过滤军师与会话）+ 快捷补给横滑卡（知识库/数据源/模块市场/报告库）+ 总军师置顶（在线点）+ 常驻专业军师线程 + 「专业参谋」分组（其余 advisory，未启用走 `AgentUnlock`）；每行=拟人立绘 + 名号 + 花名 + 真实最近会话摘要/时间；左上「历史」切换到最近会话列表（长按删） |
-| 战局 | `pages/home` | 品牌行 + 今日献策 + 当前案卷行（本地案卷 → 执行页）+ 军师判断卡（纯展示深色卡：真实 `me.understanding.summary`，兜底案卷判断，点按→总军师对话）+ 战局信号（案卷完整度=档案成熟度 / 待补资料 / 风险锁）+ 下一步动作（`nextQuestions` → 访谈）+「现在不能做」（认可方案提取的风险锁，无则隐藏）+ 三势判断方法框架 + 关联模块（模块名+负责军师）+ 动态 CTA（有案卷→执行，无→对话）|
-| 执行 | `pages/studio` | 军令台（本地案卷闭环）：今日战役卡（案卷名+今日完成度进度条）+ 执行信号 + 总军师督战条（立绘）+ 目标阶梯（引导拆解）+ 三视图【今日军令=第 0 号军令补资料 + 军令打卡/长按删/手动添加 + 线索/咨询/成交数据回填 + 复盘前检查（真实状态）· 周计划=近 7 天军令记录 · 复盘=带真实军令与回填数据发给经营参谋 + 提醒节奏（订阅待上线）】+ AI 创作发布（creative 智能体，保留解锁/按需权益）|
-| 智库 | `pages/thinktank` | 分区工作台：方法底座 + 资料（真实 `knowledgeDocs` + AI 分类框架）/ 数据（数据源目录引导）/ 模块（模块 + Skill 市场预览）/ 报告（真实版本化报告 + 方案库入口）|
-| 我的 | `pages/profile` | 账号/军师档案入口/项目工作台/方案库/资料库/数据源绑定/模块与 Skill/军师社群/方案与额度弹层/本命色/退出登录 |
+| 对话 | `pages/sessions` | 「对话」微信式列表（第一入口，底栏首位，对齐设计稿 `page-chat`）：大标题头（对话+副题，右侧 历史/新对话按钮）+ 白底搜索 pill + 快捷补给横滑 6 卡（知识库/数据源/Skill·模块/生成报告/转成军令/今日执行）+ 通栏半透明线程列表（上下发丝线）：总军师置顶（在线点）+ 常驻专业军师 + 「专业参谋」分组（未启用走 `AgentUnlock`）；每行=拟人立绘 + 宋体名号 + 金色花名 + 两行真实最近会话摘要/时间；「历史」切换到最近会话列表（长按删） |
+| 战局 | `pages/home` | 对齐设计稿 `page-battle`：居中页头（左「案卷」→项目工作台 / 右刷新）+ 军师判断 hero（深绿 `--green-hero`：kicker 主要矛盾 + 案卷来源行 + 大宋体判断=真实 `me.understanding.summary` 兜底案卷判断，点按→总军师对话）+ 战局信号 metric 3 卡（案卷完整度=档案成熟度 / 待补资料 / 风险锁）+ 三势判断 force 3 卡（方法框架→发起判断）+ 下一步动作（`nextQuestions` battle-goal 行→访谈）+ 关联模块（linkmod 行：模块名+负责军师金 pill+tier 徽章）+「现在不能做」nono 卡（无则隐藏）+ 今日献策（页尾轻量保留）+ 绿色渐变 CTA（有案卷→执行，无→对话）|
+| 执行 | `pages/studio` | 对齐设计稿 `page-execution`（军令体系用固定金 `--gold`）：exec-nav（案卷/执行/提醒）+ 横滑战役卡组【今日战役深绿卡（案卷+完成度进度条）· 军师献策（案卷军令前三步）· 今日主令（首条未完成军令→生成脚本）· 提醒节奏】+ 执行信号 + 总军师督战紧凑行（去对话）+ 今日最重要 today-focus 深绿条 + 目标阶梯 4 格（引导拆解）+ exec-seg 三视图【今日军令=第 0 号军令补资料（金边 command-card）+ task 卡打卡/长按删/手动添加 + 线索/咨询/成交数据回填（软底+白格）+ 复盘前检查 · 周计划=近 7 天军令记录 · 复盘=带真实军令与回填数据发给经营参谋 + 提醒节奏】+ AI 创作发布（creative 智能体，保留解锁/按需权益）|
+| 智库 | `pages/thinktank` | 对齐设计稿 `page-thinktank`：页头（上传/智库/市场）+ seg 4 分区【案卷资产=上传区（绿调 upload-zone）+ 状态格（已入库/关键缺口/深度整理）+ 资料树（最新上传=真实 `knowledgeDocs` + AI 分类框架）+ 军师提示补充（暖金 asset-gap，真实 `nextQuestions`）· 数据源=绑定目录单卡行 · 能力=费用口径 chips + 免费 Skill/深度 Skill/方案模块分组行 · 报告=真实版本化报告行 + 生成报告/方案库入口】|
+| 我的 | `pages/profile` | 对齐设计稿 `page-profile`：居中「我的军师系统」+ 右「设置」+ 深绿用户卡（头像/称呼/公司/套餐）+ 经营统计 3 卡（案卷/报告/方案真实计数）+ 权益额度 3 卡（钻石/本月额度/套餐→额度弹层）+ 菜单（档案/项目工作台/报告方案库/资料库/数据授权/模块管理/订单明细/提醒日历/本命色/企业版/退出登录）+ 军师社群暖金卡 + 深度能力解锁绿卡 |
 
 非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡 + 参谋室协同导轨「派单/回总军师/转成军令/补上下文」+ 成果卡下「认可方案→存方案库+生成本地案卷军令→去执行」）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；项目工作台、项目详情、方案库、报告、知识库、数据源绑定、模块市场、军师社群已拆到 `packages/work/*` 分包（`projects`、`project`、`library`、`report`、`knowledge`、`credits`、`bindings`、`market`、`community`），由 `pages/profile`、`pages/thinktank` 与 `pages/chat` 预加载。
 
@@ -139,7 +140,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 军师拟人头像：`components/AdvisorAvatar`（圆形立绘 + 白描边 + 可选在线点），当前主用立绘资产在 `src/assets/avatars/generated/*-imagegen.jpg`（6 张 376px JPEG ≈306KB，由 imagegen 生成的古代/神话谋略人物商务漫画头像：general=诸葛亮意象、strat=鬼谷子意象、growth=姜子牙意象、ip=文曲星意象、ops=刘伯温意象、org=张良意象；其余智能体按气质就近复用，未映射的按 key 哈希兜底）。旧版雪碧图裁切 `src/assets/avatars/*.jpg` 已删除（未引用即清理，控主包体积）。对话列表行、chat 头部与消息 who 行统一用它，不要再回退成图标色块。
 
-本地案卷（执行闭环第一版）：`services/dossier.ts`——「认可方案→案卷（军令/风险锁/判断）→打卡→线索/咨询/成交回填→复盘 prompt」全链路在前端本地完成，storage 按登录用户隔离（`junshi.dossier.<token>`）；军令内容只来自用户认可的真实成果（按 行动/风险 类分节标题提取）或用户手动录入，**不预置业务结论**。后端建模（任务/回填/提醒）就绪后整体切 api，页面口径不变。战局页（案卷行/风险锁/CTA）与执行页共用该服务。
+战略案卷（执行闭环，已服务端化 · M0 PR-EX）：`services/dossier.ts` 是页面唯一入口——「认可方案→案卷（军令/风险锁/判断）→打卡→线索/咨询/成交回填→复盘 prompt」。server 模式走 `/casefile*` API（后端 `Casefile/CasefileOrder/CasefileMetric` 三表，按用户行级隔离，换设备不丢；军令/风险仍按 行动/风险 类分节标题启发式提取，服务端 `services/casefile.ts` 与前端 mock 分支同一套规则，**不预置业务结论**）；mock 模式沿用本地 storage 实现（`junshi.dossier.<token>`）。老用户首次拉取会把本地案卷一次性导入服务端（`POST /casefile/import`，服务端幂等 + 本地 `junshi.dossier.migrated.<token>` 标记）。页面接口全部异步（`refreshDossier/acceptDeliverable/toggleOrder/addOrder/removeOrder/saveBackfill` 返回 Promise），打卡在执行页做乐观更新。战局页（案卷行/风险锁/CTA）与执行页共用该服务。
 
 ### 7.2 关键 UI 约定（踩过的坑，勿回退）
 - **小程序工程约束清单（先读）**：
@@ -162,7 +163,8 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
 - **前台记忆披露**：对话页用「专属理解」包装 Agent Memory；我的页只放「军师档案」菜单入口，详情页展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题），不要在我的页首页直接平铺大段内容。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事或展示 `用户123/企业123` 这类占位名；资料不足时让用户进入对话访谈，由军师先问 1-3 个简单问题，不要先分析旧报告或展开诊断。后端真实记忆开关见 §9。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
-- **深色卡光感**：对话入口卡用 `--accent-deep` 对角渐变 + `--accent-glow` 柔光，随本命色自适应。
+- **设计稿角色色固定**：`--green/--green-hero/--gold/--gold-soft/--danger` 等是设计稿固定角色色（绿=主判断/行动、金=军令/权益、红=风险），**不随本命色切换**；本命色 `--accent` 只用于个性化点缀（底栏选中、头像点、按钮等）。默认本命色=墨绿（`data/colors.ts` 首位 + `store` 默认 + 服务端 `benmingColor` 默认 `green`）。
+- **H5 token 双写**：新增/修改 `app.scss` 里 `page {}` 的设计 token 时，必须同步 `app.h5.scss` 的 `:root` 兼容层（H5 没有 `page` 节点），否则 H5 上新 token 全部失效（深绿 hero 曾因此透明）。
 
 ### 7.3 启动流程
 `app.tsx` 启动拉 `loadAgents()` + `loadMe()`（未登录跳过）。首页：未登录→登录弹层；已登录未建档→本命色/30 秒建档 picker。
@@ -191,12 +193,15 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `POST /agents/:key/purchase` | 用算力一次性解锁 `unlock` 智能体（幂等，已开通不重复扣费） | 是 |
 | `GET /survey` | 建档问卷 | 否 |
 | `GET /profile` · `PUT /profile` | 企业档案读/写（写=完成建档） | 是 |
+| `PUT /profile/bazi` · `GET /profile/chart` | 八字采集（→排盘引擎落库；believe=false=不信命理只存偏好；出生城市自动查经度表做真太阳时） · 我的命盘读取 | 是 |
+| `GET /profile/strategic` · `PUT /profile/strategic` | 战略档案（已确认战略事实）读取 · 手动校准（局部更新） | 是 |
 | `GET /sayings/today` | 每日献策 | 否 |
 | `GET /plans` · `POST /plans/:id/purchase` · `POST /plans/:id/order` · `POST /pay/wechat/notify` | 套餐列表 · 演示购买/切换套餐并入账算力 · 微信 JSAPI 下单 · 微信支付回调幂等入账 | 列表否 · 购买/下单是 · 回调否 |
 | `GET /sessions` · `GET/DELETE /sessions/:id` | 会话列表/详情/删除 | 是 |
 | `POST /generate-sync` | 同步产出（weapp+H5 通用）·接 `projectId`/`refs` | 是 |
 | `POST /generate` | SSE 流式产出（仅 H5/Web）·接 `projectId`/`refs` | 是 |
 | `POST /sessions/:id/summarize` | 对话汇总 → 版本化报告 + 知识库 | 是 |
+| `GET /casefile` · `POST /casefile/accept` · `POST/PATCH/DELETE /casefile/orders(:id)` · `PUT /casefile/backfill` · `POST /casefile/import` | 战略案卷（执行闭环）：当前案卷 · 认可方案建案卷+拆军令 · 军令增/打卡/删 · 当日回填 upsert · 本地案卷幂等导入 | 是 |
 | `GET/POST /library` · `DELETE /library/:id` | 方案库（存库即桥接一版报告） | 是 |
 | `GET/POST /projects` · `GET/PUT/DELETE /projects/:id` | 项目主线（详情聚合会话/报告/知识） | 是 |
 | `GET /reports` · `GET /reports/:id` · `GET /reports/:id/version` · `GET /reports/:id/diff` · `POST /reports` · `DELETE /reports/:id` | 版本化报告（历史/某版/两版 diff/存版） | 是 |
@@ -233,7 +238,10 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 常见 OpenAI 兼容网关：OpenAI `https://api.openai.com/v1`、DeepSeek `https://api.deepseek.com/v1`、Moonshot `https://api.moonshot.cn/v1`、通义 `https://dashscope.aliyuncs.com/compatible-mode/v1`。
 
 ### 8.3 其它服务
-- `services/context.ts`：`resolveUser`（严格鉴权）、`buildGenContext`（注入 档案/基准/记忆/本命色 + **军师档案 + 项目背景 + 显式引用 + 知识库混合召回**）。
+- `services/context.ts`：`resolveUser`（严格鉴权）、`buildGenContext`（注入 档案/基准/记忆/本命色 + **军师档案 + 项目背景 + 显式引用 + 知识库混合召回 + 天势档案**）。
+- `services/scheduler.ts`（M1 定时任务框架）：任务注册制 + 进程内周期扫描（生产单实例；`NODE_ENV=test` 不自启，测试直接 `runJob/scan*` 驱动）；任务彼此隔离（单任务崩不影响其它）。已挂：`casefile-idle-recall`（案卷 ≥48h 未推进 → 登记 `system.recall.candidate` 审计，按用户按天幂等）；M2 挂：久不复盘提醒/预言到期验证/里程碑解锁。**微信订阅消息是一次性授权**：发送额度靠前端在打卡/复盘完成动线里逐次请求订阅，定时任务只负责「找出该提醒谁」。
+- `services/strategicProfile.ts`（M1 统一状态层）：战略档案提取（`extractStrategicFacts` 按分节标题确定性规则，只取语义明确分节、不猜）/合并写入（只覆盖出现的字段）/注入块（`strategicBlock`）。逐轮 LLM 结构化抽取与 M2 决策日志共用抽取管道（§13 TODO）。
+- `services/paipan.ts`（★ M1 排盘引擎 v1）：确定性命理/历法计算——干支历/八字/大运用 `lunar-typescript`，紫微命宫/身宫主星用 `iztro`；产出 四柱十神/月令取格（打法映射 `data/baziPlaybook.ts`，源自 V6.0 表）/日主强弱与喜用（v1 计分法，basis 写明依据）/大运时间线/年度逐月攻守；真太阳时 v1 平太阳时校正（经度）。**铁律：算→存（`NatalChart`，带 engineVersion）→拼指令（`chartBriefing` 注入【天势档案】+ 禁止 AI 自算），AI 只做比喻翻译**；「不信命理」注入 `TIANSHI_OPTOUT_LINE` 降级指令。回归口径：同输入同输出（`test/paipan.test.ts` 已知八字校验）。
 - `services/understanding.ts`（★）：生成前台「军师档案」与模型上下文线索，按真实 `Profile/Memory/Project/Knowledge/Report/Session` 汇总经营身份、创业路径、当前难题、已沉淀资料和待补问题；禁止写入固定 mock 客户画像。
 - `services/memory.ts`：Agent Memory 写入（**带向量**）/召回（**语义相关性排序**）/留存 TTL/反馈回流。
 - `services/embedding.ts`（★）：文本向量化。默认本地**确定性嵌入**（零依赖、离线、`EMBED_DIM=256`）；配 `EMBEDDING_MODEL`+真实 openai 兼容 key 走真实 `/embeddings`。`cosine()` 维度不一致返回 0。
@@ -270,6 +278,9 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `KnowledgeItem`（知识条目，可挂项目）+ `KnowledgeChunk`（切片 + `embedding`）。
 - `Message.refsJson`（本条消息引用的 项目/报告/知识/记忆）。
 - `AiSetting`（单例 id=`default`，大模型配置：provider/baseUrl/model/apiKey/embeddingModel/temperature）；pgvector 开启时 `knowledge_chunk`/`memory` 另有 `embedding_vec vector(N)` 列（由 `prisma/pgvector.sql` 建，非 Prisma 管理）。
+- `Casefile` + `CasefileOrder`（军令，`aligned` 对齐性标注）+ `CasefileMetric`（每日回填，`(casefileId,date)` 唯一）——执行闭环（M0 PR-EX），用户级 active 案卷唯一。
+- `NatalChart`（命盘，`userId` 唯一、重排覆盖；`engineVersion` 支持按版本批量复算；`chartJson`=ChartView 全量结构）——排盘引擎（M1 PR-1）。生辰输入与「不信命理」偏好存 `Profile.extraJson.bazi`。
+- `StrategicProfile`（战略档案，`userId` 唯一）——统一状态层（M1 PR-3）：只存**客户已确认**的战略事实（主要矛盾/定位/赛道/阶段 + 预留 十二问/KPI/extra）；回写触发=认可方案（`/casefile/accept` 按分节标题确定性提取）+ 手动校准；注入为【战略档案】块、置于推断型【客户档案】之前。与 `understanding`（证据自动推断）分工明确，不重复。
 
 > 生产：`Memory.embedding` 与 `KnowledgeChunk.embedding` 应用 **pgvector** 的 `vector` 类型 + HNSW 索引；本地降级为 `Json(float[])` + 内存余弦相似度（与 schema 注释一致）。详见「✦ 升级路径」。
 
@@ -484,6 +495,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
+- **存量「米诺 / Mino」品牌残留待清扫**（规则见 §0 #10；新增内容一律禁用，存量后扫）：① `server/src/data/prompts/strat.v6.baseline.md`——2026-06-20 从 prod 拉的原始基线快照，正文含米诺品牌（该目录 README 记录了去品牌映射，运行时不加载、tsc 不打包，风险=仓库存档层面）；② `app/src/data/operatingSystem.ts` SKILL_MARKET 里 `id: 'mino'`（三势初判的内部 id，用户不可见，改名需同步排查引用）；③ `server/src/data/agents.ts` 顶部注释书名号里的《米诺战略参谋部…》字样；④ 两个 prompt 目录并存待合并（运行时加载 `server/prompts/`，基线存档在 `server/src/data/prompts/`）。清扫时机：M1 收尾或专项小 PR。
 - **miniprogram-ci 上传**：云端执行环境的网络白名单未放行 `servicewechat.com`（报 `Host not in allowlist`），无法在本沙箱内直传。需从**本机**执行上传，或放开环境网络策略后重试；另注意上传密钥若开了 IP 白名单，需把执行机出口 IP 加入小程序后台。本机命令见 §11。
 - 自有登录态支持 JWT（`services/userToken.ts`，HS256）：配 `APP_JWT_SECRET` 后登录签发 JWT、`resolveUser`/审计/admin role/entitlement 统一 `verifyUserToken` 校验；未配则回退历史 `token=userId`，`APP_JWT_REQUIRED=true` 可强制只认 JWT。短信强制校验开关（`SMS_REQUIRE_CODE`）已就绪，生产置 true 即可。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
@@ -496,7 +508,10 @@ mock 可随时预览；**正式上传/审核**还需：
 - **时序知识图谱**（Graphiti 式）已落首版：`GraphEntity/GraphRelation`（关系带有效时间窗）+ `services/knowledgeGraph.ts`（实体去重、新事实软失效旧事实、as-of 查询）+ `routes/graph.ts`（抽取/实体/关系查询）。抽取依赖真实模型（mock 返回空）。仍可增强：对话汇总/知识入库时自动触发抽取、图谱可视化前端。
 - **@引用** 选择器候选含 项目/报告/知识/记忆：记忆候选走 `GET /memories`（后端就绪），`resolveReferences` 支持 `kind:'memory'`；前端选择器接「记忆」分组待补。
 - **5-tab 设计还原（2026-07）· 前端已跑通但缺后端建模的能力（gap 清单，按优先级）**：
-  1. **执行闭环服务端化**：案卷/军令/打卡/数据回填目前为前端本地实现（`services/dossier.ts`，storage 按用户隔离，换设备/清缓存即丢）。需后端建模 `Dossier/Order/Backfill`（挂 tenant/user + 可关联 `Deliverable/ReportDoc`），并把「认可方案→拆军令」从前端启发式分节提取升级为 LLM 结构化拆解（gateway 出一个 `extractOrders` 类接口）。
+  1. **拆军令 LLM 结构化升级**：执行闭环已服务端化（`Casefile/CasefileOrder/CasefileMetric` + `/casefile*`，M0 PR-EX 完成）；「认可方案→拆军令」目前仍是分节启发式提取 + 整体 aligned=true 标注，待升级为 LLM 结构化拆解与逐条对齐性标注（M2 复盘阶段接入，配合对齐率计算）。
+  2. **主军师身份的 prod 迁移待执行（M1 PR-5b 仓库已切，线上未动）**：仓库 seed 已将 V6.0 主线人格移交 `general`（strat 回归专业参谋）；但 **prod DB 现状仍是 strat=V6.0 全文、general=通用模板**（seed 不会在 prod 重跑）。上线 M1 时需一次性迁移：把 prod `agent.systemPrompt`(key=general) 更新为 V6.0 全文（注意保留 prod strat 的 `skillsConfig.deliverableMode='on-demand'` 等线上独有配置，迁移前先备份两行），strat 换回专业参谋模板；走 admin「智能体」编辑或 DB UPDATE。
+  3. **总军师派单引擎（consult_specialist）未建**：调度白名单目前语义=「unlock 已解锁 → 可进专属线程深聊」（`assertAgentAccess` 既有行为）；总军师自动派单/结论回流（多 agent 编排 + 未解锁 specialist 标记 skipped）待 M2/M3 建 orchestrate 层时实现。同期把 on-demand 成果产出移交 general（当前 general 无 deliverableKey，成果卡仍由专业军师产出），避免过早切换损失主线程流式体验。
+  4. **排盘引擎 v1 已知边界**（`services/paipan.ts` 头注同步）：称骨暂缓（60 干支年表需可靠来源核对后再上，防带错表）；格局仅月令取格（不处理从格/化格）；身强弱/喜用为 v1 计分启发式；真太阳时只做经度平太阳时（未含均时差；城市→经度映射 `data/cityLongitude.ts` 覆盖 ~48 城，未命中不校正）；阴历闰月后端支持（负 month）但前端采集 UI 暂未提供闰月选项。战略档案 v1 回写触发点=认可方案+手动校准，逐轮 LLM 抽取待 M2 与决策日志共建抽取管道。引擎升级须提 `PAIPAN_ENGINE_VERSION` 并按版本复算，不得悄改历史命盘。
   2. **提醒与日历**：设计要求 09:00 军令 / 21:30 复盘 / 周五周复盘提醒。需微信订阅消息模板 + 服务端定时任务；前端已亮框架（执行页复盘视图）。
   3. **数据源授权绑定**：店铺（淘宝/抖店/小红书）、内容账号、企业工商（企查查类）、企微 CRM 均无真实接入，`packages/work/bindings` 为目录引导（仅财务表走资料库上传）。每类需独立 OAuth/采买与同步管道，且按 PRD 属可单独收费能力。
   4. **模块/Skill 状态持久化**：市场为静态目录，「启用」= 跳军师对话承接；添加/隐藏/排序/基础版-深度版状态、模块↔报告↔任务关联（设计里「报告已回写模块」）需后端 `UserModule` 建模。

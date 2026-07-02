@@ -1,10 +1,12 @@
 import { env } from './env.js';
 import { buildApp } from './app.js';
+import { startScheduler } from './services/scheduler.js';
 
 const app = await buildApp({ logger: true });
 
 try {
   await app.listen({ port: env.port, host: '0.0.0.0' });
+  startScheduler(); // 定时任务（M1 PR-4）：启动即按周期扫描（test 环境内部直接返回）
   app.log.info(`军师 API ready · provider=${env.aiProvider} · http://localhost:${env.port}/api`);
   // P0-5：生产环境若未硬化鉴权，醒目告警（账号接管风险）。代码已就绪，缺的是这几个 env。
   if (process.env.NODE_ENV === 'production') {

@@ -2,6 +2,31 @@
 // + 运营后台.html 的 System 提示词与 Agent Memory 配置。
 // 投产后前端从 GET /agents 拉取（见《投产开发指导》§4.1）。
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+// PR-5a：大部头提示词纳入仓库版本管理（server/prompts/*.md），seed 时随注册表入库。
+// 文件缺失（尚未从线上库取回）→ 返回 null，调用处回退占位模板，行为与旧版一致。
+// 注意：线上库的 agent.systemPrompt 仍是运行时事实来源（运营后台可改）；本文件只保证
+// 「仓库初始化 = V6.0 全文」且提示词变更从此走版本管理。
+function loadPromptFile(name: string): string | null {
+  const candidates = [
+    resolve(process.cwd(), 'prompts', name), // server/ 下运行（dev/test/prod dist）
+    resolve(process.cwd(), 'server', 'prompts', name), // 仓库根运行的兜底
+  ];
+  for (const p of candidates) {
+    try {
+      const t = readFileSync(p, 'utf8').trim();
+      if (t) return t;
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+// 《军师参谋部 · 天势终极版 V6.0》全文（M1 PR-5b：总军师 general 的主线人格）。
+// 文件名沿用 strat.v6.md（历史：V6.0 曾挂在 strat 上；prod 迁移剧本见 AGENTS §13 / prompts README）。
+const MASTER_V6 = loadPromptFile('strat.v6.md');
+
 export interface MemoryConfig {
   longTerm: boolean;
   autoLearn: boolean;
@@ -75,12 +100,14 @@ export const AGENTS: AgentSeed[] = [
     billing: 'free',
     price: 0,
     enabled: true,
-    greet: '你好，我是你的 AI 商业军师。说说你的处境，或直接要一个成果，我来产出。',
+    greet: '坐下来聊聊。我不只看你的生意，也看你这个人和你的节奏。先说说：你是做什么的？现在最让你睡不着觉的一件事是什么？',
     chips: [['target', '战略体检'], ['trend', '增长方案'], ['shield', '融资准备']],
     memText: '会结合你的<b>企业档案</b>持续为你出谋',
     learnText: '持续学习中',
     deliverableKey: null,
-    systemPrompt: businessPrompt(
+    // 总军师主线人格（M1 PR-5b）：V6.0 全文优先（prompts/strat.v6.md）；文件缺失回退通用军师模板。
+    // 命盘/战略档案/案卷等结构化状态由 buildGenContext 注入（天势档案/战略档案块），prompt 内禁止自算。
+    systemPrompt: MASTER_V6 ?? businessPrompt(
       '军师',
       '服务创始人/CEO，基于 {企业档案}、{行业基准}、{长期记忆}、{项目背景} 与 {知识库}，给出商业判断、经营拆解和下一步行动。',
       '先给一句话结论；再用 3 个 MECE 维度拆解依据；最后给 3 条 30 天行动建议。重大判断标注依据与边界，并提示「重大决策请结合专业意见」。',
@@ -103,9 +130,10 @@ export const AGENTS: AgentSeed[] = [
     memText: '会记住你的关注点与历次<b>诊断结论</b>',
     learnText: '记忆已更新',
     deliverableKey: '战略体检',
+    // 战略诊断官回归专业参谋定位（M1 PR-5b：V6.0 主线人格移交总军师 general，避免双人格分裂）。
     systemPrompt: businessPrompt(
       '战略诊断官',
-      '服务创始人/CEO，基于 {企业档案}、{行业基准} 与 {长期记忆} 做战略诊断，识别定位、竞争、资源配置和增长路径的关键卡点。',
+      '服务创始人/CEO，基于 {企业档案}、{行业基准} 与 {长期记忆} 做战略诊断，识别定位、竞争、资源配置和增长路径的关键卡点。诊断结论回流总军师主线。',
       '固定三段：1) 现状判断：一句话定性 + 关键依据；2) 关键卡点：3 条，按影响排序，保持 MECE；3) 30 天行动建议：3 条，可执行、可验证，含指标。',
     ),
     memoryConfig: defaultMemory,

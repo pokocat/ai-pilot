@@ -1,11 +1,14 @@
 import Taro from '@tarojs/taro';
 import { getToken } from './token';
+import { IS_MOCK } from './config';
+import { request } from './api';
 import type { Deliverable } from '../../../shared/contracts';
 
-// 战略案卷 · 前端本地实现（执行闭环的第一版承接）。
-// 「认可方案 → 案卷 → 今日军令 → 打卡 → 数据回填 → 复盘」先在前端跑通：
-// 数据按登录用户隔离存本地 storage；后端建模（任务/回填/提醒）就绪后整体切 api，页面口径不变。
-// 注意：军令内容全部来自用户认可的真实成果或用户手动录入，不预置任何业务结论。
+// 战略案卷 · PR-EX 执行闭环落库：
+// 「认可方案 → 案卷 → 今日军令 → 打卡 → 数据回填 → 复盘」的数据源已切到服务端
+// （POST /casefile/accept 等，按用户行级隔离，换设备不丢）；mock 模式沿用本地 storage 实现。
+// 老用户首次进入时会把本地案卷一次性导入服务端（服务端幂等，已有案卷则跳过）。
+// 军令内容全部来自用户认可的真实成果或用户手动录入，不预置任何业务结论。
 
 export interface DossierOrder {
   id: string;
@@ -14,6 +17,7 @@ export interface DossierOrder {
   tag: string;         // 军令类别徽标（如 军令 · 增长）
   date: string;        // YYYY-MM-DD（属于哪一天的军令）
   done: boolean;
+  aligned?: boolean | null; // 是否对齐主要矛盾（服务端标注；本地/手动为 null）
 }
 
 export interface DailyBackfill {
@@ -36,6 +40,7 @@ export interface Dossier {
 }
 
 const KEY_PREFIX = 'junshi.dossier.';
+const MIGRATED_PREFIX = 'junshi.dossier.migrated.';
 
 function storageKey(): string {
   return `${KEY_PREFIX}${getToken() || 'guest'}`;
@@ -48,7 +53,9 @@ export function today(): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
-export function loadDossier(): Dossier | null {
+// ============ 本地 storage 实现（mock 模式数据源 + 服务端迁移来源） ============
+
+function loadLocal(): Dossier | null {
   try {
     const raw = Taro.getStorageSync(storageKey());
     if (!raw) return null;
@@ -58,13 +65,13 @@ export function loadDossier(): Dossier | null {
   }
 }
 
-function save(d: Dossier) {
+function saveLocal(d: Dossier) {
   d.updatedAt = new Date().toISOString();
   try { Taro.setStorageSync(storageKey(), JSON.stringify(d)); } catch { /* noop */ }
 }
 
 // 从认可的成果中提取「可执行动作」：优先取标题含 行动/动作/下一步/清单/计划/建议 的分节列表，
-// 兜底取任意列表分节；最多 3 条作为今日军令。
+// 兜底取任意列表分节；最多 3 条作为今日军令。（与服务端 services/casefile.ts 同一套启发式）
 function extractOrders(d: Deliverable): { text: string }[] {
   const actionHint = /行动|动作|下一步|清单|计划|建议|怎么做|7 ?天|30 ?天/;
   const listSections = d.sections.filter((s) => s.list && s.list.length);
@@ -85,10 +92,15 @@ function extractRisks(d: Deliverable): string[] {
   return out.slice(0, 3);
 }
 
-// 认可方案 → 生成/更新案卷。同一案卷持续累积军令；新方案覆盖判断与风险。
-export function acceptDeliverable(deliverable: Deliverable, agentName: string): Dossier {
+// 方案首段正文作为案卷主判断。
+function firstJudgment(d: Deliverable): string {
+  const withBody = d.sections.find((s) => s.b);
+  return withBody?.b || d.title || '';
+}
+
+function acceptLocal(deliverable: Deliverable, agentName: string): { dossier: Dossier; newOrders: number } {
   const now = new Date().toISOString();
-  const existing = loadDossier();
+  const existing = loadLocal();
   const orders = extractOrders(deliverable).map((o, i) => ({
     id: `${Date.now()}-${i}`,
     text: o.text,
@@ -117,55 +129,108 @@ export function acceptDeliverable(deliverable: Deliverable, agentName: string): 
         orders,
         backfill: {},
       };
-  save(dossier);
-  return dossier;
+  saveLocal(dossier);
+  return { dossier, newOrders: orders.length };
 }
 
-// 方案首段正文作为案卷主判断。
-function firstJudgment(d: Deliverable): string {
-  const withBody = d.sections.find((s) => s.b);
-  return withBody?.b || d.title || '';
+// ============ 服务端实现（server 模式） ============
+
+type CasefileRes = { casefile: Dossier | null; newOrders?: number; imported?: boolean };
+
+// 一次性迁移：服务端还没有案卷、且本地存有旧案卷 → 导入（服务端幂等）。
+async function migrateLocalIfNeeded(): Promise<Dossier | null> {
+  const token = getToken();
+  if (!token) return null;
+  const flagKey = `${MIGRATED_PREFIX}${token}`;
+  try {
+    if (Taro.getStorageSync(flagKey)) return null;
+  } catch { /* noop */ }
+  const local = loadLocal();
+  if (!local) {
+    try { Taro.setStorageSync(flagKey, '1'); } catch { /* noop */ }
+    return null;
+  }
+  const r = await request<CasefileRes>('/casefile/import', 'POST', { dossier: local });
+  try { Taro.setStorageSync(flagKey, '1'); } catch { /* noop */ }
+  return r.casefile;
 }
 
-export function toggleOrder(orderId: string): Dossier | null {
-  const d = loadDossier();
-  if (!d) return null;
-  d.orders = d.orders.map((o) => (o.id === orderId ? { ...o, done: !o.done } : o));
-  save(d);
-  return d;
+// ============ 页面使用的异步接口（mock/server 同一口径） ============
+
+/** 拉取当前案卷（server 模式含一次性本地迁移；未登录/失败返回 null）。 */
+export async function refreshDossier(): Promise<Dossier | null> {
+  if (IS_MOCK) return loadLocal();
+  if (!getToken()) return null;
+  try {
+    const r = await request<CasefileRes>('/casefile');
+    if (r.casefile) return r.casefile;
+    return await migrateLocalIfNeeded();
+  } catch {
+    return null;
+  }
 }
 
-// 用户手动补一条今日军令（自己的安排也是真实数据）。
-export function addOrder(text: string): Dossier | null {
-  const d = loadDossier();
-  if (!d || !text.trim()) return d;
-  d.orders = [{
-    id: `${Date.now()}-m`,
-    text: text.trim(),
-    from: '我',
-    tag: '军令 · 自定',
-    date: today(),
-    done: false,
-  }, ...d.orders];
-  save(d);
-  return d;
+/** 认可方案 → 生成/更新案卷 + 拆今日军令。 */
+export async function acceptDeliverable(
+  deliverable: Deliverable,
+  agentName: string,
+): Promise<{ dossier: Dossier | null; newOrders: number }> {
+  if (IS_MOCK) return acceptLocal(deliverable, agentName);
+  const r = await request<CasefileRes>('/casefile/accept', 'POST', { deliverable, agentName });
+  return { dossier: r.casefile, newOrders: r.newOrders ?? 0 };
 }
 
-export function removeOrder(orderId: string): Dossier | null {
-  const d = loadDossier();
-  if (!d) return null;
-  d.orders = d.orders.filter((o) => o.id !== orderId);
-  save(d);
-  return d;
+export async function toggleOrder(orderId: string): Promise<Dossier | null> {
+  if (IS_MOCK) {
+    const d = loadLocal();
+    if (!d) return null;
+    d.orders = d.orders.map((o) => (o.id === orderId ? { ...o, done: !o.done } : o));
+    saveLocal(d);
+    return d;
+  }
+  const r = await request<CasefileRes>(`/casefile/orders/${orderId}`, 'PATCH', {});
+  return r.casefile;
 }
 
-export function saveBackfill(values: DailyBackfill): Dossier | null {
-  const d = loadDossier();
-  if (!d) return null;
-  d.backfill[today()] = { ...values, savedAt: new Date().toISOString() };
-  save(d);
-  return d;
+/** 用户手动补一条今日军令（自己的安排也是真实数据）。 */
+export async function addOrder(text: string): Promise<Dossier | null> {
+  if (!text.trim()) return refreshDossier();
+  if (IS_MOCK) {
+    const d = loadLocal();
+    if (!d) return d;
+    d.orders = [{ id: `${Date.now()}-m`, text: text.trim(), from: '我', tag: '军令 · 自定', date: today(), done: false }, ...d.orders];
+    saveLocal(d);
+    return d;
+  }
+  const r = await request<CasefileRes>('/casefile/orders', 'POST', { text: text.trim() });
+  return r.casefile;
 }
+
+export async function removeOrder(orderId: string): Promise<Dossier | null> {
+  if (IS_MOCK) {
+    const d = loadLocal();
+    if (!d) return null;
+    d.orders = d.orders.filter((o) => o.id !== orderId);
+    saveLocal(d);
+    return d;
+  }
+  const r = await request<CasefileRes>(`/casefile/orders/${orderId}`, 'DELETE');
+  return r.casefile;
+}
+
+export async function saveBackfill(values: DailyBackfill): Promise<Dossier | null> {
+  if (IS_MOCK) {
+    const d = loadLocal();
+    if (!d) return null;
+    d.backfill[today()] = { ...values, savedAt: new Date().toISOString() };
+    saveLocal(d);
+    return d;
+  }
+  const r = await request<CasefileRes>('/casefile/backfill', 'PUT', values);
+  return r.casefile;
+}
+
+// ============ 纯函数（对已加载的案卷做视图计算，页面口径不变） ============
 
 export function ordersOf(d: Dossier | null, date: string): DossierOrder[] {
   return d ? d.orders.filter((o) => o.date === date) : [];

@@ -47,7 +47,7 @@ model User {
   name            String
   avatarUrl       String? // 头像：微信「头像昵称填写能力」选取后上传 OSS 的公网链接；可在设置中修改
   role            String    @default("owner") // owner | member | admin
-  benmingColor    String    @default("gold") // 本命色：首登强制选择，金色默认
+  benmingColor    String    @default("green") // 本命色：首登可改，墨绿默认（设计稿主色）
   planId          String?
   // 套餐有效期（D1/D2）：购买/续费/升级时写入；status 由 now vs planExpiresAt 派生（不存字段）。
   // planActivatedAt = 当前付费套餐激活时刻，兼作月度额度重置的「订阅锚点」（按激活日的 day-of-month 每月重置）。
@@ -871,4 +871,115 @@ model SmsCode {
 
   @@index([phone, createdAt])
   @@map("sms_code")
+}
+
+/// 战略案卷（PR-EX 执行闭环落库）：认可方案 → 案卷 → 军令打卡 → 数据回填 → 复盘。
+/// 同一用户同时只有一个 active 案卷（V6.0 单主线叙事）；军令/回填按日累积，
+/// 后续对齐率、连续复盘天数、看板第一层全部以这里的事件为分母（服务端计数，不让 AI 现编）。
+model Casefile {
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String
+  title       String
+  sourceAgent String   @default("军师") // 认可时的军师名
+  judgment    String   @default("") @db.Text // 主判断（来自认可方案首段，战局 hero 读它）
+  risksJson   Json // string[]：「现在不能做」风险锁
+  status      String   @default("active") // active | archived
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders  CasefileOrder[]
+  metrics CasefileMetric[]
+
+  @@index([tenantId, userId, status])
+  @@map("casefile")
+}
+
+/// 军令：案卷拆出的每日行动（执行页打卡对象）。aligned 由 AI 拆解时标注
+/// 是否对齐主要矛盾（对齐率的分子来源）；手动录入为 null=未标注。
+model CasefileOrder {
+  id         String    @id @default(cuid())
+  tenantId   String
+  userId     String
+  casefileId String
+  date       String // YYYY-MM-DD：属于哪一天的军令
+  text       String    @db.Text
+  fromAgent  String    @default("我") // 来源：军师名 / 我
+  tag        String    @default("军令 · 自定") // 类别徽标
+  aligned    Boolean? // 是否对齐主要矛盾（null=未标注）
+  done       Boolean   @default(false)
+  doneAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  casefile Casefile @relation(fields: [casefileId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, date])
+  @@index([casefileId, date])
+  @@map("casefile_order")
+}
+
+/// 数据回填：每日经营三数（线索/咨询/成交）。每案卷每天一条（upsert），
+/// 是复盘的事实依据与看板第一层数据源。
+model CasefileMetric {
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String
+  casefileId String
+  date       String // YYYY-MM-DD
+  leads      Int      @default(0)
+  consults   Int      @default(0)
+  deals      Int      @default(0)
+  savedAt    DateTime @default(now())
+
+  casefile Casefile @relation(fields: [casefileId], references: [id], onDelete: Cascade)
+
+  @@unique([casefileId, date])
+  @@index([tenantId, userId, date])
+  @@map("casefile_metric")
+}
+
+/// 命盘（M1 PR-1 排盘引擎）：确定性排盘结果快照，每用户一张（重排覆盖）。
+/// 铁律：所有命理/历法运算由引擎（services/paipan.ts）算好存这里，AI 只做比喻翻译，禁止自算。
+/// chartJson 内含 engineVersion，引擎升级后可按版本号批量复算。
+model NatalChart {
+  id               String   @id @default(cuid())
+  tenantId         String
+  userId           String   @unique
+  engineVersion    String
+  gender           String // male | female
+  calendar         String // solar | lunar（用户录入用的历法）
+  birthDate        String // 录入原值 YYYY-MM-DD（按 calendar 解释）
+  birthHour        Int? // 0-23；null = 时辰不确定（三柱排盘 + 近似大运）
+  birthMinute      Int?
+  birthPlace       String?
+  longitude        Float? // 东经；提供则做真太阳时校正（v1 平太阳时）
+  trueSolarApplied Boolean  @default(false)
+  chartJson        Json // ChartView：四柱十神/格局打法/大运/流月攻守/紫微主星
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("natal_chart")
+}
+
+/// 战略档案（M1 PR-3 统一状态层）：客户已确认的战略事实，跨会话一等公民。
+/// 与 understanding（证据自动推断的摘要）分工：本表只存「用户认可过/亲口确认」的结论，
+/// 注入时标注为已确认事实、优先于推断。v1 回写触发点 = 认可方案 + 手动编辑；
+/// LLM 逐轮结构化抽取与 M2 决策日志共用同一抽取管道（见 AGENTS §13）。
+model StrategicProfile {
+  id                String   @id @default(cuid())
+  tenantId          String
+  userId            String   @unique
+  mainContradiction String   @default("") @db.Text // 主要矛盾（一句话）
+  positioning       String   @default("") @db.Text // 战略定位
+  track             String   @default("") @db.Text // 聚焦赛道
+  stage             String   @default("") // 三步走当前阶段/经营阶段
+  twelveQJson       Json? // 十二问答案沉淀（M3 状态机写入）
+  kpiJson           Json? // 核心 KPI 基线（M2 看板写入）
+  extraJson         Json? // 前向兼容（叙事线/谶语等 P1 内容）
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("strategic_profile")
 }

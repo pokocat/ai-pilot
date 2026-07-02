@@ -296,12 +296,12 @@ export default function Chat() {
     Taro.showToast({ title: '已存入方案库', icon: 'none' });
   };
 
-  // 认可方案：存入方案库（桥接一版报告）+ 生成本地案卷军令 → 去执行页承接打卡与回填
+  // 认可方案：存入方案库（桥接一版报告）+ 服务端生成案卷军令 → 去执行页承接打卡与回填
   const acceptPlan = async (d: Deliverable) => {
     await saveDeliverable(d);
-    const dossier = acceptDeliverable(d, agent?.name || '军师');
-    const n = dossier.orders.filter((o) => !o.done).length;
-    Taro.showToast({ title: n ? `已生成案卷 · ${n} 条军令待执行` : '已生成案卷', icon: 'none' });
+    const r = await acceptDeliverable(d, agent?.name || '军师').catch(() => null);
+    if (!r) { Taro.showToast({ title: '案卷生成失败，请重试', icon: 'none' }); return; }
+    Taro.showToast({ title: r.newOrders ? `已生成案卷 · ${r.newOrders} 条军令待执行` : '已生成案卷', icon: 'none' });
     setTimeout(() => Taro.switchTab({ url: '/pages/studio/index' }), 620);
   };
 

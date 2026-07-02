@@ -58,6 +58,11 @@ export async function seedBaseline(): Promise<void> {
 
 /** 清空业务数据（按外键顺序）；保留 agent 注册表。 */
 export async function cleanBusiness(): Promise<void> {
+  await prisma.casefileMetric.deleteMany();
+  await prisma.casefileOrder.deleteMany();
+  await prisma.casefile.deleteMany();
+  await prisma.natalChart.deleteMany();
+  await prisma.strategicProfile.deleteMany();
   await prisma.message.deleteMany();
   await prisma.reportVersion.deleteMany();
   await prisma.reportDoc.deleteMany();

@@ -34,6 +34,11 @@ export interface GenContext {
   memories: string[]; // 召回的长期记忆文本
   benmingColor: string;
   benchmark: string;
+  // 天势档案（M1 PR-2）：排盘引擎产出的结构化命盘简报（含使用铁律），或「不信命理」降级指令；
+  // 由 buildGenContext 组装（services/paipan.chartBriefing），无命盘时为空不注入。
+  tianshiLine?: string | null;
+  // 战略档案（M1 PR-3）：客户已确认的战略事实块（认可方案/手动编辑回写），空档案不注入。
+  strategicLine?: string | null;
   userMessage: string;
   history?: { role: string; text: string }[];
   // —— 上下文工程扩展 ——
@@ -202,12 +207,15 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   const industryLine = pack.key === GENERIC_INDUSTRY.key
     ? ''
     : `（行业视角 · ${pack.name}：${pack.persona}经营上重点看：${pack.levers.join('、')}。据此理解客户所处行业的结构与常识，但不得据此编造该客户的具体数据。）`;
-  const stable = [fillPlaceholders(base, ctx), guard, toneLine, industryLine].filter(Boolean).join('\n\n');
+  // 天势档案随用户稳定（重排才变），放 stable 段命中提示词缓存；无命盘/降级为空则不注入。
+  const tianshiLine = ctx.tianshiLine ?? '';
+  const stable = [fillPlaceholders(base, ctx), guard, toneLine, industryLine, tianshiLine].filter(Boolean).join('\n\n');
 
   const parts: string[] = [];
   if (active) parts.push(fillPlaceholders(active, ctx)); // 本轮生效的按需模块（在参考资料之前）
 
   const blocks: string[] = [];
+  if (ctx.strategicLine) blocks.push(ctx.strategicLine); // 战略档案：已确认事实，放在推断的客户档案之前
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);
   if (ctx.references?.length) blocks.push(`【用户引用的资料（请优先采纳并标注出处）】\n${ctx.references.join('\n')}`);

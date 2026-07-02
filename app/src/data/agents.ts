@@ -14,7 +14,7 @@ const RAW_AGENTS: Omit<Agent, 'billingRatio' | 'meterUnit'>[] = [
     "price": 0,
     "owned": true,
     "enabled": true,
-    "greet": "你好，我是你的 AI 商业军师。说说你的处境，或直接要一个成果，我来产出。",
+    "greet": "坐下来聊聊。我不只看你的生意，也看你这个人和你的节奏。先说说：你是做什么的？现在最让你睡不着觉的一件事是什么？",
     "chips": [
       [
         "target",

@@ -36,7 +36,27 @@ export type {
 export { getToken as getUserId, setToken as setUserId, clearToken as clearUserId } from './token';
 export { BASE_URL };
 
-async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
+// 八字采集入参 / 命盘摘要（服务端 ChartView 的宽松视图，前端只读展示）
+export interface BaziBody {
+  calendar?: 'solar' | 'lunar';
+  year?: number; month?: number; day?: number;
+  hour?: number | null; minute?: number;
+  gender?: 'male' | 'female';
+  birthPlace?: string; longitude?: number;
+  believe?: boolean;
+}
+export interface ChartSummary {
+  engineVersion: string;
+  hourKnown: boolean;
+  pillars: { year: { ganZhi: string }; month: { ganZhi: string }; day: { ganZhi: string }; time: { ganZhi: string } | null };
+  dayMaster: { gan: string; element: string; strength: string };
+  pattern: { name: string; traits: string; suits: string[]; avoid: string[] };
+  ziwei: { soulMajorStars: string[]; bodyMajorStars: string[] } | null;
+  monthlyOutlook: { year: number; months: { month: number; phase: string; turning: boolean }[] };
+}
+
+// 导出给领域服务复用（如 services/dossier 案卷闭环）；页面代码仍应走 api.* 方法。
+export async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
   const url = `${BASE_URL}${path}`;
   let res: Taro.request.SuccessCallbackResult;
   try {
@@ -129,6 +149,11 @@ export const api = {
   survey: () => (IS_MOCK ? mock.survey() : request<SurveyQuestion[]>('/survey')),
   getProfile: () => (IS_MOCK ? mock.getProfile() : request<Profile | null>('/profile')),
   saveProfile: (p: Profile) => (IS_MOCK ? mock.saveProfile(p) : request<Profile>('/profile', 'PUT', p)),
+  // 八字采集（M1 PR-2）：录入生辰 → 服务端排盘引擎落库；believe=false 表示不用命理视角
+  saveBazi: (body: BaziBody) =>
+    IS_MOCK ? mock.saveBazi(body) : request<{ believe: boolean; chart: ChartSummary | null }>('/profile/bazi', 'PUT', body),
+  myChart: () =>
+    IS_MOCK ? mock.myChart() : request<{ bazi: BaziBody | null; chart: ChartSummary | null }>('/profile/chart'),
   todaySaying: () => (IS_MOCK ? mock.todaySaying() : request<TodaySaying>('/sayings/today')),
   sessions: () => (IS_MOCK ? mock.sessions() : request<SessionItem[]>('/sessions')),
   session: (id: string) => (IS_MOCK ? mock.session(id) : request<SessionDetail>(`/sessions/${id}`)),

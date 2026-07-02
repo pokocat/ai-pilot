@@ -101,7 +101,7 @@ async function createUserWithTenant(opts: {
       name: opts.name,
       avatarUrl: opts.avatarUrl,
       role: 'owner',
-      benmingColor: 'gold',
+      benmingColor: 'green',
       planId: plan?.id ?? null,
       wechatOpenId: opts.wechatOpenId,
       wechatUnionId: opts.wechatUnionId,
