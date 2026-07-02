@@ -1,5 +1,5 @@
 // 6 套「本命色」主题 —— 事实来源对齐原型 scripts/app.js 的 COLORS。
-// 金色（财金）默认第一并默认选中（首登强制选择）。
+// 墨绿（设计稿主色 #1E5A43）默认第一并默认选中（首登可换）。
 
 export interface BenmingColor {
   key: string;
@@ -14,14 +14,14 @@ export interface BenmingColor {
 
 export const COLORS: BenmingColor[] = [
   {
-    key: 'gold', cn: '财 金', short: '财金', wm: '势', seal: '金', en: 'CAI JIN · FORTUNE',
-    verdict: '聚财为势，谋定而动。',
-    vars: { '--accent': '#A07D2C', '--accent-deep': '#6E5621', '--accent-soft': '#F2EAD6', '--accent-ink': '#43340F', '--accent-bright': '#D8B25A', '--accent-glow': 'rgba(200,165,90,.30)' },
-  },
-  {
     key: 'green', cn: '墨 绿', short: '墨绿', wm: '谋', seal: '绿', en: 'MO LÜ · VERDANT',
     verdict: '稳中求进，守正出奇。',
     vars: { '--accent': '#1E5A43', '--accent-deep': '#163F30', '--accent-soft': '#E7EEE9', '--accent-ink': '#0F2B20', '--accent-bright': '#5FB389', '--accent-glow': 'rgba(99,160,130,.32)' },
+  },
+  {
+    key: 'gold', cn: '财 金', short: '财金', wm: '势', seal: '金', en: 'CAI JIN · FORTUNE',
+    verdict: '聚财为势，谋定而动。',
+    vars: { '--accent': '#A07D2C', '--accent-deep': '#6E5621', '--accent-soft': '#F2EAD6', '--accent-ink': '#43340F', '--accent-bright': '#D8B25A', '--accent-glow': 'rgba(200,165,90,.30)' },
   },
   {
     key: 'red', cn: '朱 砂', short: '朱砂', wm: '决', seal: '朱', en: 'ZHU SHA · CINNABAR',

@@ -1,160 +1,189 @@
+/* 战局页 —— 对齐设计稿 page-battle：深绿 hero / 指标 / 三势 / 动作 / 模块 / 不能做 / CTA */
+
 .home {
   --home-title-font: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
 }
-.home .brand-mk,
-.home .brand-nm,
-.home .greet-h,
-.home .say-line,
-.home .ask-q,
-.home .sec-title,
-.home .force-k,
-.home .goal-t {
-  font-family: var(--home-title-font);
-}
+.home .serif { font-family: var(--home-title-font); }
 
-.brandrow {
-  display: flex; align-items: center;
+/* —— 页头：左「案卷」· 中「战局」· 右刷新 —— */
+.battle-nav {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 44px;
   /* 兜底：系统状态栏高度（真机由 JS 用胶囊顶端实测值覆盖） */
   padding-top: calc(env(safe-area-inset-top) + 6px);
 }
-.brand { display: flex; align-items: center; gap: 11px; }
-.brand-mk {
-  width: 46px; height: 46px; display: block;
+.bn-title { font-size: 25px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.bn-side {
+  position: absolute; bottom: 9px;
+  font-size: 16px; font-weight: 700; color: var(--accent);
 }
-.brand-nm { display: block; font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.1; }
-.brand-sub { font-size: 9px; letter-spacing: .22em; color: var(--ink-3); }
+.bn-side.left { left: 2px; }
+.bn-side.right { right: 2px; font-family: var(--sans); font-size: 18px; font-weight: 800; }
+.bn-side:active { opacity: .7; }
 
-/* 招呼语 + 精简提示：同一行、基线对齐 */
-.greet { margin-top: 16px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
-.greet-h { font-size: 27px; font-weight: 700; color: var(--ink); }
-.greet-tip { font-size: 13px; color: var(--ink-2); }
-
-/* 今日献策：贴合设计稿——一道分隔线 + 标签 + 大字批语，融入问候区而非独立白卡 */
-.say-strip {
-  margin-top: 18px; padding-top: 16px;
-  border-top: 1px solid var(--line);
-}
-.say-k { font-size: 11px; letter-spacing: .12em; font-weight: 600; }
-.say-line { display: block; font-size: 17px; line-height: 1.55; color: var(--ink); margin-top: 8px; }
-
-.ask {
-  margin-top: 18px; padding: 16px; border-radius: var(--r-lg);
-  position: relative; overflow: hidden;
-  /* 深色卡：本命色的暗调对角渐变 + 左上柔光，贴合设计稿的层次与光感 */
-  background:
-    radial-gradient(135% 95% at 16% -8%, var(--accent-glow) 0%, rgba(0, 0, 0, 0) 52%),
-    linear-gradient(157deg, var(--accent-deep) 0%, #1B1E22 56%);
-  border: 1px solid rgba(255, 255, 255, .06);
-  box-shadow: 0 14px 34px rgba(17, 20, 24, .22);
-}
-/* 顶部一道极淡的内高光，压住深色卡的沉重感 */
-.ask::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, .14) 30%, rgba(255, 255, 255, 0) 80%);
-}
-.ask > View { position: relative; }
-.ask-top { display: flex; align-items: center; gap: 10px; }
-.ask-av { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-.ask-id .nm { display: block; color: #FBFAF6; font-size: 14px; font-weight: 600; }
-.ask-id .st { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(255,255,255,.55); margin-top: 2px; }
-.ask-id .st .dot { width: 6px; height: 6px; border-radius: 50%; }
-.ask-q { display: block; color: #FBFAF6; font-size: 18px; line-height: 1.6; font-weight: 600; margin: 14px 0 12px; }
-.ask-go {
-  display: flex; align-items: center; justify-content: space-between;
-  padding-top: 11px; border-top: 1px solid rgba(255, 255, 255, .1);
-  font-size: 12px; font-weight: 600;
-}
-.ask:active { opacity: .88; }
-
-/* 当前案卷行 */
-.dossier-strip {
-  display: flex; align-items: center; gap: 7px;
-  margin-top: 14px; padding: 10px 13px;
-  border-radius: 12px; background: var(--surface-2);
-  border: 1px dashed var(--line);
-}
-.dossier-strip:active { opacity: .75; }
-.dossier-strip .ds-t {
-  flex: 1; min-width: 0; font-size: 12px; color: var(--ink-2);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.dossier-strip .ds-go { flex-shrink: 0; font-size: 12px; font-weight: 600; }
-
-/* 战局信号：三枚真实状态卡 */
-.signal-grid {
-  display: flex; flex-wrap: wrap; justify-content: space-between;
+/* —— 军师判断 hero（深绿） —— */
+.battle-hero {
   margin-top: 12px;
+  padding: 20px 18px 22px;
+  border-radius: 17px;
+  background: var(--green-hero);
+  color: #fff;
+  overflow: hidden;
 }
-.signal-card {
-  width: 31.5%; box-sizing: border-box;
-  padding: 13px 8px; text-align: center; border-radius: var(--r-md);
+.battle-hero:active { opacity: .9; }
+.bh-kicker {
+  display: block;
+  color: rgba(160, 218, 185, .76);
+  font-size: 12.5px; font-weight: 700; letter-spacing: .16em;
 }
-.signal-v { display: block; font-size: 20px; font-weight: 700; line-height: 1.2; color: var(--ink); }
-.signal-v.warn { color: var(--warn); }
-.signal-v.danger { color: var(--danger); }
-.signal-l { display: block; margin-top: 5px; color: var(--ink-3); font-size: 11px; }
+.bh-source {
+  display: block; margin-top: 12px;
+  color: rgba(255, 255, 255, .58);
+  font-size: 12.5px; line-height: 1.45; font-weight: 600;
+}
+.bh-title {
+  display: block; margin-top: 6px;
+  font-size: 22px; line-height: 1.5; font-weight: 700; color: #fff;
+}
 
-/* 现在不能做：认可方案中的风险锁 */
-.dont-card { margin-top: 16px; padding: 14px 16px; border-radius: var(--r-md); }
-.dont-k { display: block; color: var(--danger); font-size: 12px; font-weight: 700; letter-spacing: .18em; margin-bottom: 6px; }
-.dont-row { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; }
-.dont-x { color: var(--danger); font-size: 13px; font-weight: 700; line-height: 1.45; }
-.dont-t { flex: 1; min-width: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
-.dont-src { display: block; margin-top: 7px; font-size: 10.5px; color: var(--ink-3); }
+/* —— 战局信号（metric-grid） —— */
+.metric-grid {
+  display: flex; justify-content: space-between;
+  margin: 12px 0 4px;
+}
+.metric {
+  width: 31.8%; box-sizing: border-box;
+  padding: 14px 10px 12px; border-radius: 15px;
+  text-align: left;
+}
+.metric:active { opacity: .8; }
+.metric-v { display: block; font-size: 20px; font-weight: 700; line-height: 1.2; color: var(--green); }
+.metric-v.warn { color: var(--gold-deep); }
+.metric-v.danger { color: var(--danger); }
+.metric-l { display: block; margin-top: 5px; color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
 
-/* 下一步动作：待补线索行 */
-.goal-panel { padding: 2px 14px; border-radius: var(--r-md); }
-.goal-row {
+/* —— 分区标题（设计稿 h2：绿色小字大间距） —— */
+.battle-h2 {
+  display: block; margin: 22px 0 12px;
+  color: var(--green);
+  font-size: 13px; font-weight: 800; letter-spacing: .18em;
+}
+
+/* —— 三势判断（force-grid） —— */
+.force-grid { display: flex; justify-content: space-between; }
+.force {
+  width: 31.8%; box-sizing: border-box; min-height: 128px;
+  padding: 15px 10px 13px; border-radius: 15px;
+  text-align: center;
+  display: flex; flex-direction: column; align-items: center;
+}
+.force:active { opacity: .8; }
+.force-tag { font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.25; }
+.force-desc {
+  display: block; margin-top: 6px; flex: 1;
+  color: var(--ink-3); font-size: 10.5px; line-height: 1.45;
+}
+.force-go { display: block; margin-top: 6px; color: var(--green); font-size: 11px; font-weight: 700; }
+
+/* —— 下一步动作 / 关联模块（battle-actions） —— */
+.battle-actions {
+  margin-top: 16px;
+  padding: 16px 16px 4px;
+  border-radius: 18px;
+}
+.section-label {
+  display: block; margin-bottom: 4px;
+  color: var(--green);
+  font-size: 13px; font-weight: 800; letter-spacing: .18em; line-height: 1.35;
+}
+.section-label.danger { color: var(--danger); }
+
+.battle-goal {
   display: flex; align-items: center; gap: 12px;
-  padding: 13px 0; border-bottom: 1px solid var(--line-2);
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
 }
-.goal-row:last-child { border-bottom: 0; }
-.goal-p { width: 44px; flex-shrink: 0; font-size: 12px; font-weight: 600; }
-.goal-b { flex: 1; min-width: 0; }
-.goal-t { display: block; font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.5; }
-.goal-m { display: block; margin-top: 3px; color: var(--ink-3); font-size: 11.5px; line-height: 1.45; }
-.goal-go { flex-shrink: 0; font-size: 14px; color: var(--ink-3); }
-
-/* 三势判断：方法框架三卡 */
-.force-grid { display: flex; flex-wrap: wrap; justify-content: space-between; }
-.force-card {
-  width: 31.5%; box-sizing: border-box;
-  padding: 13px 10px; border-radius: var(--r-md); min-height: 118px;
-}
-.force-ic { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; }
-.force-k { display: block; margin-top: 9px; font-size: 14px; font-weight: 600; color: var(--ink); }
-.force-v { display: block; margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
-
-/* 关联模块 */
-.module-panel { padding: 2px 14px; border-radius: var(--r-md); }
-.module-line {
-  display: flex; align-items: center; gap: 9px;
-  padding: 13px 0; border-bottom: 1px solid var(--line-2);
-}
-.module-line:last-child { border-bottom: 0; }
-.module-line:active { opacity: .72; }
-.module-name { flex: 1; min-width: 0; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.35; }
-.module-mini {
+.battle-goal:last-child { border-bottom: 0; }
+.battle-goal:active { opacity: .75; }
+.battle-tag {
   display: inline-flex; align-items: center; justify-content: center;
-  min-height: 22px; padding: 0 8px; border-radius: 999px;
-  color: var(--ink-2); background: var(--surface-2);
-  font-size: 10.5px; font-weight: 600; flex-shrink: 0;
+  min-width: 52px; min-height: 24px; padding: 3px 7px; box-sizing: border-box;
+  border-radius: 9px;
+  background: var(--green-soft); color: var(--green);
+  font-size: 12px; font-weight: 700; line-height: 1.2;
+  flex-shrink: 0;
+}
+.bg-b { flex: 1; min-width: 0; }
+.bg-t { display: block; font-size: 15.5px; font-weight: 700; color: var(--ink); line-height: 1.4; }
+.bg-m { display: block; margin-top: 3px; color: var(--ink-3); font-size: 11.5px; line-height: 1.45; }
+
+.module-card { background: #F0EFE9; }
+.linkmod {
+  display: flex; align-items: center; gap: 9px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+}
+.linkmod:last-child { border-bottom: 0; }
+.linkmod:active { opacity: .72; }
+.linkmod-name { flex: 1; min-width: 0; color: var(--ink); font-size: 15px; font-weight: 700; line-height: 1.35; }
+.linkmod-mini {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 24px; padding: 3px 7px; border-radius: 9px;
+  color: var(--gold-deep); background: var(--gold-soft);
+  font-size: 11.5px; font-weight: 700; flex-shrink: 0;
 }
 .module-tier {
   display: inline-flex; align-items: center; justify-content: center;
-  min-height: 20px; padding: 0 7px; border-radius: 999px;
-  font-size: 10.5px; font-weight: 600; flex-shrink: 0;
+  min-height: 22px; padding: 2px 7px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 700; flex-shrink: 0;
 }
-.tier-free { color: var(--accent-ink); background: var(--accent-soft); }
-.tier-power { color: var(--warn); background: rgba(168,119,46,.12); }
-.tier-plan { color: var(--ink); background: var(--surface-2); }
-.tier-single { color: var(--ink-2); background: var(--surface-2); }
+.tier-free { color: var(--green); background: var(--green-soft); }
+.tier-power { color: var(--blue); background: rgba(36, 95, 136, .10); }
+.tier-plan { color: #fff; background: var(--ink); }
+.tier-single { color: var(--gold-deep); background: var(--gold-soft); }
 
-/* 主行动 CTA */
-.war-cta {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  height: 46px; margin-top: 18px; border-radius: 13px;
-  color: #FBFAF6; font-size: 14px; font-weight: 600;
-  box-shadow: 0 12px 24px var(--accent-glow);
+/* —— 现在不能做（nono-card） —— */
+.nono-card {
+  margin-top: 14px;
+  padding: 18px 17px 16px;
+  border-radius: 18px;
+  background: #F0EFE9;
 }
-.war-cta:active { opacity: .85; }
+.nono {
+  display: block;
+  color: var(--danger);
+  font-size: 14.5px; line-height: 1.45; font-weight: 600;
+  padding: 6px 0;
+}
+.nono-src { display: block; margin-top: 6px; font-size: 10.5px; color: var(--ink-3); }
+
+/* —— 今日献策（保留的每日批语，轻量页尾） —— */
+.say-strip {
+  margin-top: 18px; padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.say-k { font-size: 11px; letter-spacing: .12em; font-weight: 600; }
+.say-line { display: block; font-size: 16px; line-height: 1.55; color: var(--ink); margin-top: 7px; }
+
+/* —— 主行动 CTA（battle-cta） —— */
+.battle-cta {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 56px; margin-top: 16px; padding: 9px 16px;
+  box-sizing: border-box;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--green), var(--green-deep));
+  color: #fff;
+  box-shadow: 0 14px 28px rgba(30, 90, 67, .20);
+}
+.battle-cta:active { opacity: .88; }
+.bc-b { flex: 1; min-width: 0; }
+.bc-t { display: block; font-size: 15.5px; font-weight: 800; }
+.bc-s { display: block; margin-top: 4px; color: rgba(255, 255, 255, .72); font-size: 11px; font-weight: 600; }
+.bc-arrow {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  color: var(--green); background: rgba(255, 255, 255, .9);
+  font-size: 18px; font-weight: 700;
+}

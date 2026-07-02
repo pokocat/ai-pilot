@@ -20,13 +20,15 @@ function relTime(iso: string): string {
   return d === 1 ? '昨天' : `${d} 天前`;
 }
 
-// 快捷补给：把军师判断所需的资料、数据、模块、报告带进对话动线。
+// 快捷补给（对齐设计稿 6 卡）：资料、数据、模块、报告 + 军令 / 执行动线。
 const QUICK_CARDS = [
   { t: '上传知识库', d: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index' },
   { t: '绑定数据源', d: '店铺、账号、企微、财务表', url: '/packages/work/bindings/index' },
-  { t: '模块市场', d: '目标、任务、IP、增长模块', url: '/packages/work/market/index' },
-  { t: '报告库', d: '诊断、复盘、方案沉淀', url: '/packages/work/library/index' },
-];
+  { t: 'Skill / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
+  { t: '生成报告', d: '对话沉淀为报告和案卷', url: '/packages/work/library/index' },
+  { t: '转成军令', d: '认可判断后生成今日军令', tab: '/pages/studio/index' },
+  { t: '今日执行', d: '军令、任务、回填、复盘', tab: '/pages/studio/index' },
+] as { t: string; d: string; url?: string; tab?: string }[];
 
 // 军师消息（对话页，第一入口）：微信式列表——总军师置顶 + 专业军师线程，
 // 每位军师有拟人立绘与花名；最近消息一律取真实会话，无会话则显示职责。
@@ -106,22 +108,29 @@ export default function Sessions() {
   return (
     <Screen topInset>
       <View className="pad council">
-        {/* 顶栏：历史 · 军师消息 · 新对话 */}
-        <View className="council-nav">
-          <Text className={`cn-side ${showHistory ? 'on' : ''}`} style={showHistory ? { color: accent } : {}} onClick={() => setShowHistory((v) => !v)}>历史</Text>
-          <Text className="cn-title serif">军师消息</Text>
-          <View className="cn-new" style={{ background: accent }} onClick={() => newWith('general')}>
-            <Icon name="chat" size={14} color="#FBFAF6" />
+        {/* 顶栏（对齐设计稿 messages-head）：大标题 + 副题，右侧 历史 / 新对话 */}
+        <View className="messages-head">
+          <View className="mh-titles">
+            <Text className="mh-t">对话</Text>
+            <Text className="mh-s">军师参谋室 · 像微信一样管理会话</Text>
+          </View>
+          <View className="mh-tools">
+            <View className={`mh-btn ${showHistory ? 'on' : ''}`} onClick={() => setShowHistory((v) => !v)}>
+              <Text style={showHistory ? { color: accent } : {}}>历史</Text>
+            </View>
+            <View className="mh-btn primary" style={{ background: accent }} onClick={() => newWith('general')}>
+              <Icon name="chat" size={14} color="#FBFAF6" />
+            </View>
           </View>
         </View>
 
-        {/* 搜索 */}
+        {/* 搜索（设计稿 search-pill：白底大圆角） */}
         <View className="council-search">
           <Icon name="target" size={14} color="#969BA1" />
           <Input
             className="cs-input"
             value={query}
-            placeholder="搜索军师、会话、报告或资料"
+            placeholder="搜索军师、案卷、报告或资料"
             onInput={(e) => setQuery(e.detail.value)}
           />
           {query ? <Text className="cs-clear" onClick={() => setQuery('')}>✕</Text> : null}
@@ -129,10 +138,14 @@ export default function Sessions() {
 
         {!showHistory ? (
           <>
-            {/* 快捷补给 */}
+            {/* 快捷补给（设计稿 quick-card-strip：6 卡横滑） */}
             <ScrollView scrollX className="quick-row" enhanced showScrollbar={false}>
               {QUICK_CARDS.map((c) => (
-                <View key={c.t} className="quick-card card" onClick={() => Taro.navigateTo({ url: c.url })}>
+                <View
+                  key={c.t}
+                  className="quick-card card"
+                  onClick={() => (c.tab ? Taro.switchTab({ url: c.tab }) : Taro.navigateTo({ url: c.url! }))}
+                >
                   <Text className="qt">{c.t}</Text>
                   <Text className="qd">{c.d}</Text>
                 </View>
@@ -140,7 +153,7 @@ export default function Sessions() {
             </ScrollView>
 
             {/* 总军师 + 常驻军师线程 */}
-            <View className="wx-list card">
+            <View className="wx-list">
               {master && matchAgent(master, '统筹判断') ? (
                 <View className="wx-item" onClick={() => continueWith('general')}>
                   <AdvisorAvatar agentKey="general" size={50} online />
@@ -169,7 +182,7 @@ export default function Sessions() {
             {moreAgents.some((a) => matchAgent(a)) ? (
               <>
                 <View className="wx-section"><Text>专业参谋</Text></View>
-                <View className="wx-list card">
+                <View className="wx-list">
                   {moreAgents.filter((a) => matchAgent(a)).map((a) => advisorRow(a, a.role, '结论回流总军师主线'))}
                 </View>
               </>
@@ -187,7 +200,7 @@ export default function Sessions() {
                 <Text className="es-link" style={{ color: accent }} onClick={() => newWith('general')}>＋ 发起新对话</Text>
               </View>
             ) : (
-              <View className="wx-list card">
+              <View className="wx-list">
                 {filteredSessions.map((it) => (
                   <View key={it.id} className="wx-item" onClick={() => openSession(it.id)} onLongPress={() => confirmDelete(it)}>
                     <AdvisorAvatar agentKey={it.agentKey} size={50} />

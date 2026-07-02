@@ -20,7 +20,7 @@ interface AppState {
 }
 
 const state: AppState = {
-  colorKey: safeGet(LS_COLOR) || 'gold',
+  colorKey: safeGet(LS_COLOR) || 'green', // 默认墨绿 = 设计稿主色
   onboarded: safeGet(LS_ONBOARDED) === '1',
   me: null,
   agents: DEFAULT_AGENTS, // 离线兜底；后端可达时由 loadAgents 覆盖

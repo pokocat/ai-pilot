@@ -1,75 +1,102 @@
-/* 军师消息（对话页）：微信式列表 + 拟人立绘，视觉沿用暖纸底/宋体标题/卡片体系 */
+/* 对话页 —— 对齐设计稿 page-chat：大标题头 / 白底搜索 pill / 快捷卡 / 微信式线程列表 */
 
-/* —— 顶栏：历史 · 军师消息 · 新对话 —— */
-.council-nav {
-  display: flex; align-items: center; justify-content: space-between;
-  padding-top: 14px;
+/* —— 顶栏（messages-head）：大标题 + 副题，右侧 历史 / 新对话 —— */
+.messages-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  padding: 14px 2px 2px;
 }
-.cn-side { min-width: 48px; font-size: 13px; font-weight: 600; color: var(--ink-3); }
-.cn-side.on { font-weight: 700; }
-.cn-title { flex: 1; text-align: center; font-size: 18px; font-weight: 700; color: var(--ink); }
-.cn-new {
-  width: 32px; height: 32px; border-radius: 11px;
+.mh-titles { min-width: 0; }
+.mh-t {
+  display: block;
+  font-size: 27px; line-height: 1; font-weight: 800; color: var(--ink);
+}
+.mh-s {
+  display: block; margin-top: 8px;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-3);
+}
+.mh-tools { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.mh-btn {
+  height: 32px; min-width: 46px; padding: 0 10px;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 6px 14px var(--accent-glow);
+  border-radius: 12px; background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 12.5px; font-weight: 600; color: var(--ink-2);
 }
-.cn-new:active { opacity: .8; }
+.mh-btn.on { border-color: var(--accent); }
+.mh-btn.primary { min-width: 36px; padding: 0; width: 36px; border: 0; }
+.mh-btn:active { opacity: .8; }
 
-/* —— 搜索 —— */
+/* —— 搜索（search-pill）：白底大圆角 —— */
 .council-search {
-  display: flex; align-items: center; gap: 8px;
-  height: 38px; margin-top: 12px; padding: 0 13px;
-  border-radius: 12px; background: var(--surface-2);
-  border: 1px solid var(--line-2);
+  display: flex; align-items: center; gap: 9px;
+  height: 46px; margin-top: 13px; padding: 0 15px;
+  border-radius: 17px;
+  background: rgba(255, 255, 255, .94);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .72), 0 6px 18px rgba(42, 36, 20, .04);
 }
-.cs-input { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); height: 38px; }
+.cs-input { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; color: var(--ink); height: 46px; }
 .cs-clear { flex-shrink: 0; font-size: 12px; color: var(--ink-3); padding: 4px; }
 
-/* —— 快捷补给横滑卡 —— */
+/* —— 快捷补给横滑卡（quick-card-strip） —— */
 .quick-row { white-space: nowrap; margin-top: 12px; width: 100%; }
 .quick-card {
-  display: inline-flex; flex-direction: column; gap: 4px;
-  width: 132px; box-sizing: border-box;
-  padding: 11px 12px; margin-right: 8px;
-  border-radius: var(--r-md); vertical-align: top;
+  display: inline-flex; flex-direction: column; gap: 6px;
+  width: 132px; min-height: 66px; box-sizing: border-box;
+  padding: 13px 12px; margin-right: 10px;
+  border-radius: 18px; vertical-align: top;
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 8px 22px rgba(42, 36, 20, .055);
 }
 .quick-card:active { opacity: .8; }
-.quick-card .qt { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.quick-card .qt { font-size: 13px; font-weight: 700; color: var(--ink); }
 .quick-card .qd {
-  font-size: 10.5px; line-height: 1.4; color: var(--ink-3);
+  font-size: 11px; line-height: 1.32; color: var(--ink-3);
   white-space: normal;
 }
 
-/* —— 微信式军师线程列表 —— */
-.wx-list { margin-top: 12px; padding: 0 13px; border-radius: var(--r-md); }
+/* —— 微信式军师线程列表（thread-list）：半透明白底 + 上下发丝线，通栏 —— */
+.wx-list {
+  margin: 14px -18px 0;
+  padding: 0 16px;
+  background: rgba(255, 255, 255, .56);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
 .wx-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 13px 0; border-bottom: 1px solid var(--line-2);
+  display: flex; align-items: center; gap: 11px;
+  min-height: 74px; box-sizing: border-box;
+  padding: 12px 0; border-bottom: 1px solid var(--line);
 }
 .wx-item:last-child { border-bottom: 0; }
 .wx-item:active { opacity: .72; }
 .wx-main { flex: 1; min-width: 0; }
-.wx-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.wx-id { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.wx-name { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.wx-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.wx-id { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+.wx-name {
+  font-family: var(--serif);
+  font-size: 15px; font-weight: 700; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .wx-alias {
   font-family: var(--serif);
-  font-size: 11px; color: var(--accent);
-  padding: 1px 6px; border-radius: 999px;
-  background: var(--accent-soft);
+  font-size: 13px; font-weight: 700; color: var(--gold);
 }
-.wx-time { flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
+.wx-time { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--ink-3); }
 .wx-preview {
-  display: block; margin-top: 4px;
-  font-size: 12px; line-height: 1.5; color: var(--ink-3);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12px; line-height: 1.35; color: var(--ink-2);
 }
 
-/* —— 分组标题 —— */
+/* —— 分组标题（thread-section） —— */
 .wx-section {
-  margin: 16px 2px 0;
-  font-family: var(--serif);
-  font-size: 13px; font-weight: 600; color: var(--ink-2);
+  margin: 14px 2px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px; font-weight: 700; color: var(--ink-3);
 }
 
 /* —— 空态 —— */
