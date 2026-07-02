@@ -53,7 +53,10 @@ export async function applyPlanPurchase(
       data: { planId: plan.id, planActivatedAt: activatedAt, planExpiresAt: expiresAt },
     });
     const creditBalance = await grantCredits(user.tenantId, user.id, creditGrantAmount, opts.reason, tx);
-    await setQuota(user.tenantId, user.id, plan.tokenQuotaPerMonth, activatedAt, tx);
+    // skipFreeRegrant 同样必须挡住 token 额度覆盖式授予：setQuota 是硬覆盖 balance=quota（见 tokenQuota.ts），
+    // 与"月度额度由锚点重置链单独发放"这句注释描述的惰性重置是两条独立路径——不挡住这里会让重复点击
+    // 免费套餐的"购买"把已用尽的 token 额度刷回满额，形成与钻石防刷同源但未被堵上的刷额度口子。
+    if (!skipFreeRegrant) await setQuota(user.tenantId, user.id, plan.tokenQuotaPerMonth, activatedAt, tx);
     await tx.auditLog.create({
       data: {
         tenantId: user.tenantId,
