@@ -1,8 +1,167 @@
 .agents-hero { padding-top: 20px; }
 .agents-hero .h1 { margin: 6px 0 8px; }
-.hero-p { display: block; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
 
-.gh { font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink-2); margin: 22px 0 12px; }
+/* —— 今日战役卡：本命色暗调渐变（呼应战局判断卡） —— */
+.battle-hero {
+  margin-top: 8px; padding: 16px; border-radius: var(--r-lg);
+  position: relative; overflow: hidden;
+  background:
+    radial-gradient(135% 95% at 16% -8%, var(--accent-glow) 0%, rgba(0, 0, 0, 0) 52%),
+    linear-gradient(157deg, var(--accent-deep) 0%, #1B1E22 56%);
+  border: 1px solid rgba(255, 255, 255, .06);
+  box-shadow: 0 14px 34px rgba(17, 20, 24, .22);
+}
+.battle-hero::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.14) 30%, rgba(255,255,255,0) 80%);
+}
+.bh-k { display: block; font-size: 11px; letter-spacing: .12em; font-weight: 600; color: rgba(255,255,255,.6); }
+.bh-t { display: block; margin-top: 9px; color: #FBFAF6; font-size: 19px; font-weight: 700; line-height: 1.45; }
+.bh-s { display: block; margin-top: 8px; color: rgba(255,255,255,.66); font-size: 12px; line-height: 1.6; }
+.bh-progress-row { display: flex; align-items: baseline; justify-content: space-between; margin-top: 13px; }
+.bh-pl { font-size: 11.5px; color: rgba(255,255,255,.66); font-weight: 600; }
+.bh-pv { font-size: 18px; color: #FBFAF6; font-weight: 700; }
+.bh-bar { height: 6px; margin-top: 8px; border-radius: 999px; background: rgba(255,255,255,.14); overflow: hidden; }
+.bh-fill { display: block; height: 100%; border-radius: 999px; transition: width .25s ease-out; }
+
+/* —— 执行信号 —— */
+.exec-stats { display: flex; flex-wrap: wrap; justify-content: space-between; margin-top: 12px; }
+.exec-stat { width: 31.5%; box-sizing: border-box; padding: 13px 8px; text-align: center; border-radius: var(--r-md); }
+.stat-n { display: block; font-size: 20px; font-weight: 700; line-height: 1.2; color: var(--ink); }
+.stat-n.warn { color: var(--warn); }
+.stat-l { display: block; margin-top: 5px; color: var(--ink-3); font-size: 11px; }
+
+/* —— 总军师督战条 —— */
+.advisor-strip { display: flex; align-items: center; gap: 11px; margin-top: 12px; padding: 13px 14px; border-radius: var(--r-md); }
+.as-b { flex: 1; min-width: 0; }
+.as-t { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.as-d { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
+.as-btn { flex-shrink: 0; padding: 6px 11px; border-radius: 999px; border: 1px solid; font-size: 12px; font-weight: 600; }
+.as-btn:active { opacity: .7; }
+
+/* —— 目标阶梯 —— */
+.ladder { margin-top: 12px; padding: 13px 14px; border-radius: var(--r-md); }
+.ladder:active { opacity: .8; }
+.ladder-rows { display: flex; }
+.ladder-item { flex: 1; text-align: center; border-right: 1px solid var(--line-2); }
+.ladder-item:last-child { border-right: 0; }
+.ladder-k { font-size: 13px; font-weight: 700; }
+.ladder-cta { display: block; margin-top: 10px; text-align: center; font-size: 11.5px; color: var(--ink-3); }
+
+/* —— 视图切换 —— */
+.mode-strip {
+  display: flex; gap: 6px; padding: 5px; margin-top: 16px;
+  border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line-2);
+}
+.mode-item {
+  flex: 1; height: 34px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-3); font-size: 12.5px; font-weight: 600;
+}
+.mode-item.on { color: #FBFAF6; }
+
+/* —— 第 0 号军令 —— */
+.pre-command { margin-top: 12px; padding: 14px 16px; border-radius: var(--r-md); }
+.pre-command:active { opacity: .8; }
+.pre-badge { display: block; font-size: 11px; font-weight: 600; letter-spacing: .08em; }
+.pre-title { display: block; margin-top: 7px; font-size: 14.5px; font-weight: 600; color: var(--ink); line-height: 1.5; }
+.pre-desc { display: block; margin-top: 5px; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
+.payoff { display: block; margin-top: 8px; font-size: 10.5px; color: var(--ink-3); opacity: .9; }
+
+/* —— 今日军令卡（打卡） —— */
+.order-card { display: flex; align-items: flex-start; gap: 12px; margin-top: 10px; padding: 14px; border-radius: var(--r-md); }
+.order-card.done { opacity: .62; }
+.order-b { flex: 1; min-width: 0; }
+.order-tag { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: .04em; }
+.order-t { display: block; margin-top: 5px; font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.5; }
+.order-card.done .order-t { text-decoration: line-through; }
+.order-m { display: block; margin-top: 4px; font-size: 10.5px; color: var(--ink-3); }
+.order-check {
+  width: 26px; height: 26px; border-radius: 9px; flex-shrink: 0; margin-top: 2px;
+  border: 1.5px solid var(--line); background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* —— 手动加军令 —— */
+.order-add { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.oa-input {
+  flex: 1; min-width: 0; height: 40px; padding: 0 13px;
+  border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line-2);
+  font-size: 13px; color: var(--ink);
+}
+.oa-btn {
+  flex-shrink: 0; height: 40px; padding: 0 16px; border-radius: 12px;
+  display: flex; align-items: center; color: #FBFAF6; font-size: 13px; font-weight: 600;
+}
+.oa-btn:active { opacity: .85; }
+
+/* —— 军令空态 —— */
+.orders-empty { margin-top: 12px; padding: 18px 16px; border-radius: var(--r-md); text-align: center; }
+.orders-empty:active { opacity: .8; }
+.oe-t { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.oe-d { display: block; margin-top: 5px; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
+.oe-go { display: block; margin-top: 8px; font-size: 12.5px; font-weight: 600; }
+
+/* —— 数据回填 —— */
+.data-fill { margin-top: 12px; padding: 14px; border-radius: var(--r-md); }
+.df-head { display: flex; align-items: center; justify-content: space-between; }
+.df-t { font-size: 14px; font-weight: 600; color: var(--ink); }
+.df-s { font-size: 11.5px; font-weight: 600; }
+.df-row { display: flex; gap: 9px; margin-top: 11px; }
+.df-cell {
+  flex: 1; padding: 9px 10px; border-radius: 12px;
+  background: var(--surface-2); border: 1px solid var(--line-2);
+}
+.df-label { display: block; font-size: 10.5px; color: var(--ink-3); }
+.df-input { margin-top: 3px; height: 28px; font-family: var(--serif); font-size: 17px; font-weight: 700; color: var(--ink); }
+.df-save {
+  height: 38px; margin-top: 11px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  color: #FBFAF6; font-size: 13px; font-weight: 600;
+}
+.df-save:active { opacity: .85; }
+
+/* —— 复盘前检查 —— */
+.review-before { margin-top: 12px; padding: 13px 14px; border-radius: var(--r-md); }
+.rb-k { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; margin-bottom: 4px; }
+.rb-line { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-2); }
+.rb-line:last-child { border-bottom: 0; }
+.rb-state { width: 52px; flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--accent); }
+.rb-state.warn { color: var(--warn); }
+.rb-text { flex: 1; min-width: 0; font-size: 12px; line-height: 1.5; color: var(--ink-2); }
+
+/* —— 周计划记录 —— */
+.week-list { margin-top: 12px; padding: 6px 14px; border-radius: var(--r-md); }
+.week-group { padding: 9px 0; border-bottom: 1px solid var(--line-2); }
+.week-group:last-child { border-bottom: 0; }
+.wg-date { display: block; font-size: 13px; font-weight: 700; }
+.wg-row { display: flex; align-items: flex-start; gap: 8px; padding: 5px 0 0; }
+.wg-state { width: 16px; flex-shrink: 0; color: var(--ink-3); font-size: 12px; }
+.wg-state.ok { color: var(--accent); font-weight: 700; }
+.wg-text { flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.wg-text.done { color: var(--ink-3); text-decoration: line-through; }
+
+/* —— 复盘视图 —— */
+.review-card { margin-top: 12px; padding: 15px 16px; border-radius: var(--r-md); }
+.rc-k { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; }
+.rc-t { display: block; margin-top: 7px; font-size: 13.5px; line-height: 1.6; color: var(--ink); }
+.rc-btn {
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  height: 42px; margin-top: 12px; border-radius: 12px;
+  color: #FBFAF6; font-size: 13.5px; font-weight: 600;
+}
+.rc-btn:active { opacity: .85; }
+
+.remind { margin-top: 12px; padding: 4px 14px 6px; border-radius: var(--r-md); }
+.remind-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 2px; }
+.remind-k { font-size: 13px; font-weight: 600; color: var(--ink); }
+.remind-soon { font-size: 10.5px; color: var(--ink-3); }
+.remind-row { display: flex; align-items: center; gap: 11px; padding: 10px 0; border-bottom: 1px solid var(--line-2); }
+.remind-row:last-child { border-bottom: 0; }
+.remind-time { width: 96px; flex-shrink: 0; font-size: 12px; font-weight: 600; }
+.remind-text { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+
+/* —— 创作智能体网格（两列 space-between + 48.5%） —— */
 .agrid { display: flex; flex-wrap: wrap; justify-content: space-between; }
 .acard {
   width: 48.5%; box-sizing: border-box; padding: 15px 14px; border-radius: var(--r-md); position: relative; margin-bottom: 10px;
@@ -22,28 +181,11 @@
 .acard .ap { display: block; font-size: 11px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; min-height: 30px; }
 .acard .ameta { display: block; font-size: 11px; font-weight: 500; margin-top: 4px; }
 
-.train-card { padding: 15px; border-radius: var(--r-md); margin-bottom: 10px; }
-.tc-top { display: flex; gap: 11px; align-items: flex-start; }
-.tc-ic { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.tc-b { flex: 1; }
-.tc-n { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
-.tc-d { display: block; font-size: 12px; line-height: 1.5; color: var(--ink-2); margin-top: 3px; }
-.tc-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 13px; }
-.tc-btn { display: flex; align-items: center; color: #fff; font-size: 12.5px; font-weight: 600; padding: 8px 14px; border-radius: 999px; }
-.tc-tag { font-size: 11px; color: var(--ink-3); }
-
-.progress { height: 6px; border-radius: 999px; background: var(--surface-2); margin-top: 13px; overflow: hidden; }
-.progress .bar { height: 100%; border-radius: 999px; }
-
-.from-zero {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 15px; border-radius: var(--r-md); margin-top: 4px;
-  border-style: dashed; font-size: 13.5px; font-weight: 600;
+/* —— 底部主行动 —— */
+.exec-cta {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 46px; margin-top: 8px; border-radius: 13px;
+  color: #FBFAF6; font-size: 14px; font-weight: 600;
+  box-shadow: 0 12px 24px var(--accent-glow);
 }
-
-.train-soon { padding: 16px; border-radius: var(--r-md); }
-.train-soon .ts-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.train-soon .ts-ic { width: 40px; height: 40px; border-radius: 11px; display: flex; align-items: center; justify-content: center; }
-.train-soon .ts-badge { padding: 3px 9px; border: 1px solid; border-radius: 999px; font-size: 10.5px; font-weight: 600; }
-.train-soon .ts-t { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); }
-.train-soon .ts-d { display: block; font-size: 12px; color: var(--ink-3); margin-top: 6px; line-height: 1.6; }
+.exec-cta:active { opacity: .85; }

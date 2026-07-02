@@ -7,8 +7,8 @@
 .home .say-line,
 .home .ask-q,
 .home .sec-title,
-.home .focus-ttl,
-.home .tool-h {
+.home .force-k,
+.home .goal-t {
   font-family: var(--home-title-font);
 }
 
@@ -58,49 +58,103 @@
 .ask-id .nm { display: block; color: #FBFAF6; font-size: 14px; font-weight: 600; }
 .ask-id .st { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(255,255,255,.55); margin-top: 2px; }
 .ask-id .st .dot { width: 6px; height: 6px; border-radius: 50%; }
-.ask-q { display: block; color: #FBFAF6; font-size: 17px; font-weight: 600; margin: 14px 0 12px; }
-.ask-field {
-  display: flex; align-items: center; gap: 8px;
-  background: rgba(255,255,255,.08); border-radius: 13px; padding: 5px 5px 5px 14px;
-}
-.ask-input { flex: 1; color: #FBFAF6; font-size: 14px; height: 38px; min-width: 0; }
-.ask-input::placeholder, .ask-field .input-placeholder { color: rgba(255,255,255,.4); }
-.ask-send { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-.ask .chips { margin-top: 12px; }
-.ask .chip {
-  background: rgba(255, 255, 255, .08); color: rgba(255, 255, 255, .92);
-  border: 1px solid rgba(255, 255, 255, .14);
-}
-
-.focus-panel { padding: 2px 14px; border-radius: var(--r-md); }
-.focus-row {
-  display: flex; align-items: center; gap: 10px;
-  padding: 14px 0; border-bottom: 1px solid var(--line-2);
-}
-.focus-row.last { border-bottom: 0; }
-.focus-no {
-  width: 26px; flex-shrink: 0;
-  font-size: 10.5px; letter-spacing: .08em; font-weight: 700; color: var(--ink-3);
-}
-.focus-ic {
-  width: 34px; height: 34px; border-radius: 10px;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.focus-main { flex: 1; min-width: 0; }
-.focus-ttl { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
-.focus-desc {
-  display: block; font-size: 12px; line-height: 1.45; color: var(--ink-2);
-  margin-top: 3px;
-}
-.focus-act {
-  display: flex; align-items: center; flex-shrink: 0;
+.ask-q { display: block; color: #FBFAF6; font-size: 18px; line-height: 1.6; font-weight: 600; margin: 14px 0 12px; }
+.ask-go {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-top: 11px; border-top: 1px solid rgba(255, 255, 255, .1);
   font-size: 12px; font-weight: 600;
 }
+.ask:active { opacity: .88; }
 
-/* 两列：用 space-between + 48.5% 宽，避免 calc(50%-5px)+gap 凑满 100% 时
-   因亚像素取整溢出而换行成竖排 */
-.tools { display: flex; flex-wrap: wrap; justify-content: space-between; }
-.tool { width: 48.5%; box-sizing: border-box; padding: 14px; border-radius: var(--r-md); margin-bottom: 10px; }
-.tool-ic { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; margin-bottom: 9px; }
-.tool-h { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
-.tool-p { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+/* 当前案卷行 */
+.dossier-strip {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 14px; padding: 10px 13px;
+  border-radius: 12px; background: var(--surface-2);
+  border: 1px dashed var(--line);
+}
+.dossier-strip:active { opacity: .75; }
+.dossier-strip .ds-t {
+  flex: 1; min-width: 0; font-size: 12px; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dossier-strip .ds-go { flex-shrink: 0; font-size: 12px; font-weight: 600; }
+
+/* 战局信号：三枚真实状态卡 */
+.signal-grid {
+  display: flex; flex-wrap: wrap; justify-content: space-between;
+  margin-top: 12px;
+}
+.signal-card {
+  width: 31.5%; box-sizing: border-box;
+  padding: 13px 8px; text-align: center; border-radius: var(--r-md);
+}
+.signal-v { display: block; font-size: 20px; font-weight: 700; line-height: 1.2; color: var(--ink); }
+.signal-v.warn { color: var(--warn); }
+.signal-v.danger { color: var(--danger); }
+.signal-l { display: block; margin-top: 5px; color: var(--ink-3); font-size: 11px; }
+
+/* 现在不能做：认可方案中的风险锁 */
+.dont-card { margin-top: 16px; padding: 14px 16px; border-radius: var(--r-md); }
+.dont-k { display: block; color: var(--danger); font-size: 12px; font-weight: 700; letter-spacing: .18em; margin-bottom: 6px; }
+.dont-row { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; }
+.dont-x { color: var(--danger); font-size: 13px; font-weight: 700; line-height: 1.45; }
+.dont-t { flex: 1; min-width: 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
+.dont-src { display: block; margin-top: 7px; font-size: 10.5px; color: var(--ink-3); }
+
+/* 下一步动作：待补线索行 */
+.goal-panel { padding: 2px 14px; border-radius: var(--r-md); }
+.goal-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 0; border-bottom: 1px solid var(--line-2);
+}
+.goal-row:last-child { border-bottom: 0; }
+.goal-p { width: 44px; flex-shrink: 0; font-size: 12px; font-weight: 600; }
+.goal-b { flex: 1; min-width: 0; }
+.goal-t { display: block; font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.5; }
+.goal-m { display: block; margin-top: 3px; color: var(--ink-3); font-size: 11.5px; line-height: 1.45; }
+.goal-go { flex-shrink: 0; font-size: 14px; color: var(--ink-3); }
+
+/* 三势判断：方法框架三卡 */
+.force-grid { display: flex; flex-wrap: wrap; justify-content: space-between; }
+.force-card {
+  width: 31.5%; box-sizing: border-box;
+  padding: 13px 10px; border-radius: var(--r-md); min-height: 118px;
+}
+.force-ic { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; }
+.force-k { display: block; margin-top: 9px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.force-v { display: block; margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+
+/* 关联模块 */
+.module-panel { padding: 2px 14px; border-radius: var(--r-md); }
+.module-line {
+  display: flex; align-items: center; gap: 9px;
+  padding: 13px 0; border-bottom: 1px solid var(--line-2);
+}
+.module-line:last-child { border-bottom: 0; }
+.module-line:active { opacity: .72; }
+.module-name { flex: 1; min-width: 0; color: var(--ink); font-size: 14px; font-weight: 600; line-height: 1.35; }
+.module-mini {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 22px; padding: 0 8px; border-radius: 999px;
+  color: var(--ink-2); background: var(--surface-2);
+  font-size: 10.5px; font-weight: 600; flex-shrink: 0;
+}
+.module-tier {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 20px; padding: 0 7px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 600; flex-shrink: 0;
+}
+.tier-free { color: var(--accent-ink); background: var(--accent-soft); }
+.tier-power { color: var(--warn); background: rgba(168,119,46,.12); }
+.tier-plan { color: var(--ink); background: var(--surface-2); }
+.tier-single { color: var(--ink-2); background: var(--surface-2); }
+
+/* 主行动 CTA */
+.war-cta {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 46px; margin-top: 18px; border-radius: 13px;
+  color: #FBFAF6; font-size: 14px; font-weight: 600;
+  box-shadow: 0 12px 24px var(--accent-glow);
+}
+.war-cta:active { opacity: .85; }

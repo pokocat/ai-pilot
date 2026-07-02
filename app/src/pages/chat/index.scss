@@ -5,9 +5,16 @@
   background: var(--paper);
 }
 .chat-head { gap: 12px; }
-.chat-id { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* 顾问身份头：拟人立绘 + 名号/花名 + 职责 */
+.chat-id { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.chat-id-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.chat-id-name { display: flex; align-items: baseline; gap: 6px; }
 .chat-id .cn { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink); }
-.chat-id .cr { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
+.chat-id .calias {
+  font-size: 11px; color: var(--accent);
+  padding: 1px 6px; border-radius: 999px; background: var(--accent-soft);
+}
+.chat-id .cr { font-size: 11px; color: var(--ink-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .mem-bar {
   display: flex; align-items: center; gap: 6px;
@@ -23,7 +30,7 @@
 .msg.u { display: flex; justify-content: flex-end; }
 .ubub { max-width: 80%; color: #fff; padding: 10px 14px; border-radius: 16px 16px 4px 16px; font-size: 14px; line-height: 1.5; }
 .msg.a .who { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
-.msg.a .who .d { width: 22px; height: 22px; border-radius: 7px; display: flex; align-items: center; justify-content: center; }
+.msg.a .who .advisor-avatar { box-shadow: 0 3px 8px rgba(29, 42, 34, .14); }
 .msg.a .who Text { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .bubble {
   background: var(--surface); border: 1px solid var(--line);
@@ -95,6 +102,37 @@
 .chat-tools .ct-spacer { flex: 1; }
 .ct-proj { display: flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
 .ct-sum { display: flex; align-items: center; gap: 5px; padding: 5px 11px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
+
+/* 参谋室协同导轨：派单 / 回总军师 / 补充上下文，单行横滑不占对话高度 */
+.council-rail { padding: 0 0 8px; }
+.council-scroll { white-space: nowrap; width: 100%; padding-left: 16px; box-sizing: border-box; }
+.council-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 11px 5px 5px; margin-right: 8px;
+  border-radius: 999px; background: var(--surface); border: 1px solid var(--line);
+  font-size: 11.5px; font-weight: 600; color: var(--ink-2);
+  vertical-align: top;
+}
+.council-chip:active { opacity: .7; }
+.council-chip .council-ic { width: 24px; height: 24px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.council-chip.master { border-color: var(--accent); color: var(--accent-ink); }
+.council-chip.guide { background: var(--surface-2); border-color: var(--line-2); }
+
+/* 成果卡下的「认可方案 → 去执行」 */
+.accept-card {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px; padding: 11px 12px;
+  background: var(--accent-soft); border-radius: 12px;
+}
+.accept-b { flex: 1; min-width: 0; }
+.accept-t { display: block; font-size: 12.5px; font-weight: 700; color: var(--accent-ink); }
+.accept-d { display: block; margin-top: 2px; font-size: 11px; line-height: 1.5; color: var(--accent-ink); opacity: .8; }
+.accept-btn {
+  display: flex; align-items: center; gap: 5px; flex-shrink: 0;
+  padding: 8px 12px; border-radius: 999px;
+  color: #fff; font-size: 12px; font-weight: 600;
+}
+.accept-btn:active { opacity: .85; }
 
 /* 用户消息上的引用标签 */
 .msg.u .uref { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; margin-top: 5px; }

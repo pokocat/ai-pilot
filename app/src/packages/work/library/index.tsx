@@ -38,9 +38,9 @@ export default function Library() {
           <View className="lib-empty">
             <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="layers" size={22} color={accent} /></View>
             <Text className="et">方案库还是空的</Text>
-            <Text className="es">在对话里让顾问产出成果后，点「存入方案库」即可在此查看与回溯。</Text>
-            <View className="es-btn" style={{ background: accent }} onClick={() => Taro.switchTab({ url: '/pages/thinktank/index' })}>
-              <Text>去智库产出第一份成果</Text>
+            <Text className="es">在对话里让军师产出成果后，点「存入方案库」即可在此查看与回溯。</Text>
+            <View className="es-btn" style={{ background: accent }} onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
+              <Text>去参谋室产出第一份成果</Text>
             </View>
           </View>
         ) : (

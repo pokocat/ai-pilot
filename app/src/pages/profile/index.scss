@@ -5,6 +5,13 @@
 .me-org { display: block; font-size: 12px; color: var(--ink-3); margin-top: 3px; }
 .me-vip { display: flex; align-items: center; padding: 5px 11px; border-radius: 999px; font-size: 11px; font-weight: 600; }
 
+/* 经营统计行：案卷 / 报告 / 方案 */
+.statline { display: flex; flex-wrap: wrap; justify-content: space-between; margin-top: 12px; }
+.statbox { width: 31.5%; box-sizing: border-box; padding: 13px 8px; text-align: center; border-radius: var(--r-md); }
+.statbox:active { opacity: .8; }
+.statbox .stat-n { display: block; font-size: 20px; font-weight: 700; line-height: 1.2; }
+.statbox .stat-l { display: block; margin-top: 5px; color: var(--ink-3); font-size: 11px; }
+
 /* 钻石管理卡：本命色暗调对角渐变 + 左上柔光，呼应首页军师卡，避免一块死黑 */
 .credit {
   display: flex; align-items: center; justify-content: space-between;
@@ -23,6 +30,7 @@
 .cr-k { display: block; font-size: 11px; color: rgba(255,255,255,.55); }
 .cr-vrow { display: flex; align-items: center; margin-top: 4px; }
 .cr-v { font-size: 20px; font-weight: 700; }
+.cr-quota { display: block; margin-top: 5px; font-size: 10.5px; color: rgba(255,255,255,.5); }
 .cr-btn { color: #fff; font-size: 13px; font-weight: 600; padding: 9px 18px; border-radius: 999px; }
 
 .rows { margin-top: 12px; border-radius: var(--r-lg); overflow: hidden; padding: 4px 0; }

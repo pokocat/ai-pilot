@@ -6,12 +6,16 @@ import Login from '../../components/Login';
 import MarkdownText from '../../components/MarkdownText';
 import ReportCard from '../../components/ReportCard';
 import SafeHeader from '../../components/SafeHeader';
+import AdvisorAvatar from '../../components/AdvisorAvatar';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Agent, type Deliverable, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../services/api';
 import { STREAM_CHAT } from '../../services/config';
 import { generateStream } from '../../services/streaming';
 import { agentForText } from '../../data/intents';
+import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../data/council';
+import { CHAT_GUIDES } from '../../data/operatingSystem';
+import { acceptDeliverable } from '../../services/dossier';
 import './index.scss';
 
 type Msg =
@@ -292,6 +296,32 @@ export default function Chat() {
     Taro.showToast({ title: '已存入方案库', icon: 'none' });
   };
 
+  // 认可方案：存入方案库（桥接一版报告）+ 生成本地案卷军令 → 去执行页承接打卡与回填
+  const acceptPlan = async (d: Deliverable) => {
+    await saveDeliverable(d);
+    const dossier = acceptDeliverable(d, agent?.name || '军师');
+    const n = dossier.orders.filter((o) => !o.done).length;
+    Taro.showToast({ title: n ? `已生成案卷 · ${n} 条军令待执行` : '已生成案卷', icon: 'none' });
+    setTimeout(() => Taro.switchTab({ url: '/pages/studio/index' }), 620);
+  };
+
+  // 转成军令：把本轮最新的结构化成果转为今日军令（无成果则引导先产出）
+  const turnIntoOrders = () => {
+    const lastReport = [...logRef.current].reverse().find((m) => m.role === 'report') as Extract<Msg, { role: 'report' }> | undefined;
+    if (!lastReport) {
+      Taro.showToast({ title: '先让军师产出一份方案，认可后即可转成军令', icon: 'none' });
+      return;
+    }
+    acceptPlan(lastReport.deliverable);
+  };
+
+  // 切换军师线程（派单 / 回总军师）：redirectTo 保持页面栈扁平，带 prompt 时直接开场
+  const openThread = (agentKey: string, prompt?: string) => {
+    const url = `/pages/chat/index?agentKey=${agentKey}&fresh=1${prompt ? `&send=${encodeURIComponent(prompt)}` : ''}`;
+    Taro.redirectTo({ url });
+  };
+  const openGuide = (url: string) => Taro.navigateTo({ url });
+
   // 生成网页版报告（render_report → OSS 托管），复制可分享链接
   const shareReport = async (messageId?: string) => {
     if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出成果', icon: 'none' }); return; }
@@ -375,8 +405,14 @@ export default function Chat() {
         right={<View className="safe-hbtn" onClick={() => Taro.redirectTo({ url: '/pages/chat/index?fresh=1' })}><Icon name="spark" size={20} color="#565C63" /></View>}
       >
         <View className="chat-id">
-          <Text className="cn">{agent?.name ?? '军师'}</Text>
-          <Text className="cr">· {agent?.role ?? '通用商业军师'}</Text>
+          <AdvisorAvatar agentKey={agent?.key ?? 'general'} size={34} online />
+          <View className="chat-id-copy">
+            <View className="chat-id-name">
+              <Text className="cn">{agent?.name ?? '军师'}</Text>
+              {ADVISOR_ALIAS[agent?.key ?? ''] ? <Text className="calias serif">{ADVISOR_ALIAS[agent?.key ?? '']}</Text> : null}
+            </View>
+            <Text className="cr">{agent?.role ?? '通用商业军师'}</Text>
+          </View>
         </View>
       </SafeHeader>
 
@@ -399,13 +435,56 @@ export default function Chat() {
         <View className="ct-sum" onClick={onSummarize}><Icon name="doc" size={13} color="#565C63" /><Text>生成纪要</Text></View>
       </View>
 
+      {/* 参谋室协同导轨：总军师可派单给专业军师，专业军师可回总军师；随后是补充上下文入口 */}
+      {agent ? (
+        <View className="council-rail">
+          <ScrollView scrollX enhanced showScrollbar={false} className="council-scroll">
+            {agent.key === 'general' ? (
+              DISPATCH_SUGGESTIONS.map((it) => (
+                <View key={it.agentKey} className="council-chip" onClick={() => openThread(it.agentKey, it.prompt)}>
+                  <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={it.icon} size={13} color={accent} /></View>
+                  <Text>{it.name}</Text>
+                </View>
+              ))
+            ) : (
+              <>
+                <View className="council-chip master" onClick={() => openThread('general', `我在${agent.name}线程里聊到的关键结论，请你汇总进主线判断，并告诉我下一步。`)}>
+                  <View className="council-ic" style={{ background: accent }}><Icon name="spark" size={13} color="#fff" /></View>
+                  <Text>回到总军师</Text>
+                </View>
+                {CORE_SPECIALISTS.filter((t) => t.agentKey !== agent.key).map((t) => {
+                  const a = findAgent(t.agentKey);
+                  if (!a) return null;
+                  return (
+                    <View key={t.agentKey} className="council-chip" onClick={() => openThread(t.agentKey)}>
+                      <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={a.icon} size={13} color={accent} /></View>
+                      <Text>{a.name}</Text>
+                    </View>
+                  );
+                })}
+              </>
+            )}
+            <View className="council-chip guide" onClick={turnIntoOrders}>
+              <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="check" size={13} color={accent} /></View>
+              <Text>转成军令</Text>
+            </View>
+            {CHAT_GUIDES.map((g) => (
+              <View key={g.label} className="council-chip guide" onClick={() => openGuide(g.url)}>
+                <View className="council-ic" style={{ background: 'var(--surface-2)' }}><Icon name={g.icon} size={13} color="#565C63" /></View>
+                <Text>{g.label}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {/* 对话流 */}
       <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false}>
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (
               <View key={i} className="msg a">
-                <View className="who"><View className="d" style={{ background: accent }}><Icon name={m.agent.icon} size={13} color="#fff" /></View><Text>{m.agent.name}</Text></View>
+                <View className="who"><AdvisorAvatar agentKey={m.agent.key} size={24} /><Text>{m.agent.name}</Text></View>
                 <View className="bubble">
                   <Text>{m.agent.greet}</Text>
                   <View className="memory-disclosure">
@@ -444,7 +523,7 @@ export default function Chat() {
           if (m.role === 'assistant') {
             return (
               <View key={i} className="msg a">
-                <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
+                <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
                 <View className="bubble">
                   {m.streaming && !m.reply.text ? (
                     <View className="think-dots">
@@ -479,7 +558,7 @@ export default function Chat() {
           return (
             // P2-14：报告气泡用 messageId 作稳定 key，避免「延迟插入记忆」导致索引位移、ReportCard 渐显动画状态错位。
             <View key={m.messageId ?? `r-${i}`} className="msg a">
-              <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
+              <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
               <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} onShare={() => shareReport(m.messageId)} />
               {m.deliverable.degraded ? (
                 <View style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
@@ -491,13 +570,26 @@ export default function Chat() {
                   <Text>参考了 {m.knowledgeUsed.length} 份资料：{m.knowledgeUsed.join('、')}</Text>
                 </View>
               ) : null}
+              {/* 认可方案 → 沉淀报告并进入执行承接（对齐「认可后拆成军令/复盘」动线） */}
+              {!m.deliverable.degraded ? (
+                <View className="accept-card">
+                  <View className="accept-b">
+                    <Text className="accept-t">认可这份方案？</Text>
+                    <Text className="accept-d">存入方案库沉淀为报告，去执行页承接今日军令与回填复盘。</Text>
+                  </View>
+                  <View className="accept-btn" style={{ background: accent }} onClick={() => acceptPlan(m.deliverable)}>
+                    <Icon name="check" size={13} color="#fff" />
+                    <Text>认可 · 去执行</Text>
+                  </View>
+                </View>
+              ) : null}
             </View>
           );
         })}
         {/* 流式进行中：气泡内已自带「转圈→逐句填字」，不再叠加全局 thinking 指示器（否则出现两条响应）。 */}
         {busy && agent && !(msgs.length > 0 && (msgs[msgs.length - 1] as { role: string; streaming?: boolean }).streaming) ? (
           <View className="msg a thinking">
-            <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent.icon} size={13} color="#fff" /></View><Text>{agent.name}</Text></View>
+            <View className="who"><AdvisorAvatar agentKey={agent.key} size={24} /><Text>{agent.name}</Text></View>
             <View className="bubble think-bubble">
               <View className="think-dots">
                 <View className="think-dot" style={{ background: accent }} />

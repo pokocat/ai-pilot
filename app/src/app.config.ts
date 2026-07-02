@@ -1,9 +1,9 @@
 export default defineAppConfig({
   pages: [
     'pages/home/index',
-    'pages/thinktank/index',
-    'pages/sessions/index',
     'pages/studio/index',
+    'pages/sessions/index',
+    'pages/thinktank/index',
     'pages/profile/index',
     'pages/chat/index',
     'pages/brief/index',
@@ -19,11 +19,18 @@ export default defineAppConfig({
         'project/index',
         'report/index',
         'credits/index',
+        'bindings/index',
+        'market/index',
+        'community/index',
       ],
     },
   ],
   preloadRule: {
     'pages/profile/index': {
+      network: 'all',
+      packages: ['packages/work'],
+    },
+    'pages/thinktank/index': {
       network: 'all',
       packages: ['packages/work'],
     },
@@ -45,10 +52,10 @@ export default defineAppConfig({
     selectedColor: '#16191D',
     backgroundColor: '#FBFAF6',
     list: [
-      { pagePath: 'pages/home/index', text: '首页' },
-      { pagePath: 'pages/thinktank/index', text: '智库' },
       { pagePath: 'pages/sessions/index', text: '对话' },
-      { pagePath: 'pages/studio/index', text: '智能体' },
+      { pagePath: 'pages/home/index', text: '战局' },
+      { pagePath: 'pages/studio/index', text: '执行' },
+      { pagePath: 'pages/thinktank/index', text: '智库' },
       { pagePath: 'pages/profile/index', text: '我的' },
     ],
   },
