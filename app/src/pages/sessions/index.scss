@@ -1,27 +1,80 @@
-.sess-hero { display: flex; align-items: flex-end; justify-content: space-between; padding-top: 22px; }
-.sess-hero .h1 { display: block; margin-top: 4px; }
-.sess-new { display: flex; align-items: center; color: #fff; font-size: 13px; font-weight: 600; padding: 9px 15px; border-radius: 999px; }
+/* 军师消息（对话页）：微信式列表 + 拟人立绘，视觉沿用暖纸底/宋体标题/卡片体系 */
 
-.agent-strip { white-space: nowrap; margin: 18px 0 4px; width: 100%; }
-.agent-chip { display: inline-flex; flex-direction: column; align-items: center; gap: 6px; width: 64px; margin-right: 6px; vertical-align: top; }
-.ac-ic { width: 48px; height: 48px; border-radius: 15px; display: flex; align-items: center; justify-content: center; }
-.ac-n { font-size: 10.5px; color: var(--ink-2); text-align: center; width: 64px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* —— 顶栏：历史 · 军师消息 · 新对话 —— */
+.council-nav {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-top: 14px;
+}
+.cn-side { min-width: 48px; font-size: 13px; font-weight: 600; color: var(--ink-3); }
+.cn-side.on { font-weight: 700; }
+.cn-title { flex: 1; text-align: center; font-size: 18px; font-weight: 700; color: var(--ink); }
+.cn-new {
+  width: 32px; height: 32px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 6px 14px var(--accent-glow);
+}
+.cn-new:active { opacity: .8; }
 
-.sl { font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink-2); margin: 20px 0 12px; }
-.sl-hint { font-family: var(--sans); font-size: 11px; font-weight: 400; color: var(--ink-3); }
+/* —— 搜索 —— */
+.council-search {
+  display: flex; align-items: center; gap: 8px;
+  height: 38px; margin-top: 12px; padding: 0 13px;
+  border-radius: 12px; background: var(--surface-2);
+  border: 1px solid var(--line-2);
+}
+.cs-input { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); height: 38px; }
+.cs-clear { flex-shrink: 0; font-size: 12px; color: var(--ink-3); padding: 4px; }
 
+/* —— 快捷补给横滑卡 —— */
+.quick-row { white-space: nowrap; margin-top: 12px; width: 100%; }
+.quick-card {
+  display: inline-flex; flex-direction: column; gap: 4px;
+  width: 132px; box-sizing: border-box;
+  padding: 11px 12px; margin-right: 8px;
+  border-radius: var(--r-md); vertical-align: top;
+}
+.quick-card:active { opacity: .8; }
+.quick-card .qt { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.quick-card .qd {
+  font-size: 10.5px; line-height: 1.4; color: var(--ink-3);
+  white-space: normal;
+}
+
+/* —— 微信式军师线程列表 —— */
+.wx-list { margin-top: 12px; padding: 0 13px; border-radius: var(--r-md); }
+.wx-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 0; border-bottom: 1px solid var(--line-2);
+}
+.wx-item:last-child { border-bottom: 0; }
+.wx-item:active { opacity: .72; }
+.wx-main { flex: 1; min-width: 0; }
+.wx-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wx-id { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.wx-name { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.wx-alias {
+  font-family: var(--serif);
+  font-size: 11px; color: var(--accent);
+  padding: 1px 6px; border-radius: 999px;
+  background: var(--accent-soft);
+}
+.wx-time { flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
+.wx-preview {
+  display: block; margin-top: 4px;
+  font-size: 12px; line-height: 1.5; color: var(--ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* —— 分组标题 —— */
+.wx-section {
+  margin: 16px 2px 0;
+  font-family: var(--serif);
+  font-size: 13px; font-weight: 600; color: var(--ink-2);
+}
+
+/* —— 空态 —— */
 .sess-empty { text-align: center; padding: 40px 20px; }
 .e-ic { width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
 .et { display: block; font-size: 15px; font-weight: 600; color: var(--ink); }
 .es { display: block; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); margin-top: 6px; }
 .es-link { display: block; font-size: 13px; font-weight: 600; margin-top: 10px; }
-
-.sess-list { display: flex; flex-direction: column; gap: 10px; }
-.sess-item { display: flex; gap: 12px; padding: 14px; border-radius: var(--r-md); }
-.si-ic { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.si-b { flex: 1; min-width: 0; }
-.si-top { display: flex; align-items: center; justify-content: space-between; }
-.si-agent { font-size: 13px; font-weight: 600; color: var(--ink); }
-.si-time { font-size: 11px; color: var(--ink-3); }
-.si-t { display: block; font-size: 13.5px; color: var(--ink); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.si-snip { display: block; font-size: 12px; color: var(--ink-3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

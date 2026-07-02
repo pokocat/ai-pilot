@@ -2,53 +2,96 @@
 .agents-hero .h1 { display: block; margin: 6px 0 8px; }
 .hero-p { display: block; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
 
-/* 智囊团卡：本命色暗调对角渐变 + 左上柔光，呼应首页军师卡，避免一块死黑 */
-.zk-team {
-  border-radius: var(--r-lg); padding: 18px; margin-top: 18px;
-  position: relative; overflow: hidden;
-  background:
-    radial-gradient(135% 95% at 16% -8%, var(--accent-glow) 0%, rgba(0, 0, 0, 0) 52%),
-    linear-gradient(157deg, var(--accent-deep) 0%, #1B1E22 56%);
-  border: 1px solid rgba(255, 255, 255, .06);
-  box-shadow: 0 14px 34px rgba(17, 20, 24, .18);
-}
-.zk-team::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, .14) 30%, rgba(255, 255, 255, 0) 80%);
-}
-.zk-team > View { position: relative; }
-.zt-h { display: flex; align-items: center; justify-content: space-between; }
-.zt-h .t { color: #fff; font-size: 16px; font-weight: 600; }
-.zt-h .tag { display: flex; align-items: center; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-.zt-stats { display: flex; margin-top: 16px; }
-.zt-s { flex: 1; }
-.zt-s .v { display: block; font-size: 28px; font-weight: 700; }
-.zt-s .l { display: block; font-size: 11px; color: rgba(255,255,255,.55); margin-top: 2px; }
-
 .gh { font-family: var(--serif); font-size: 14px; font-weight: 600; color: var(--ink-2); margin: 22px 0 12px; }
-/* 两列：space-between + 48.5%，避免 calc(50%-5px)+gap 取整溢出换行成竖排 */
-.agrid { display: flex; flex-wrap: wrap; justify-content: space-between; }
-.acard {
-  width: 48.5%; box-sizing: border-box; padding: 15px 14px; border-radius: var(--r-md); position: relative; margin-bottom: 10px;
-}
-.acard .gift {
-  position: absolute; top: 12px; right: 12px; color: #fff;
-  font-size: 9.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px;
-  display: inline-flex; align-items: center;
-}
-.acard .gift.owned { background: rgba(60, 60, 67, .55); }
-.acard .gift.locked-badge { background: rgba(60, 60, 67, .5); padding: 3px 6px; }
-.acard.locked { opacity: .96; }
-.acard.locked .ah { color: var(--ink-2); }
-.acard .ameta.lock { font-weight: 600; }
-.acard .ai { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
-.acard .ah { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); }
-.acard .ap { display: block; font-size: 11px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; min-height: 30px; }
-.acard .ameta { display: block; font-size: 11px; font-weight: 500; margin-top: 4px; }
 
-.zk-opt { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--r-md); margin-top: 18px; }
-.zo-ic { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.zo-b { flex: 1; }
-.zo-t { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
-.zo-s { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
-.zo-go { font-size: 12px; font-weight: 600; }
+/* —— 方法底座 —— */
+.method-list { display: flex; flex-direction: column; gap: 10px; }
+.method-card { display: flex; align-items: center; gap: 12px; padding: 13px 14px; border-radius: var(--r-md); }
+.method-seal {
+  width: 42px; height: 42px; border-radius: 13px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700;
+}
+.method-b { flex: 1; min-width: 0; }
+.method-name { display: block; color: var(--ink); font-size: 14px; font-weight: 600; }
+.method-use { display: block; margin-top: 4px; color: var(--ink-3); font-size: 11.5px; line-height: 1.5; }
+
+/* —— 分区切换 —— */
+.think-tabs {
+  display: flex; gap: 6px;
+  padding: 5px; margin-top: 18px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+}
+.think-tab {
+  flex: 1; height: 34px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink-3); font-size: 12.5px; font-weight: 600;
+}
+.think-tab.on { color: #FBFAF6; }
+
+/* —— 资料入口 / 方案库入口 —— */
+.kb-entry { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--r-md); margin-top: 14px; }
+.kb-entry:active { opacity: .85; }
+.kb-ic { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.kb-b { flex: 1; min-width: 0; }
+.kb-t { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
+.kb-s { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
+.kb-go { flex-shrink: 0; font-size: 12px; font-weight: 600; }
+
+.doc-row { display: flex; align-items: center; gap: 9px; padding: 11px 14px; border-radius: var(--r-md); margin-top: 8px; }
+.doc-t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-m { flex-shrink: 0; font-size: 11px; color: var(--ink-3); }
+
+/* —— 分区网格（两列：space-between + 48.5%，防亚像素溢出换行） —— */
+.panel-grid { display: flex; flex-wrap: wrap; justify-content: space-between; margin-top: 14px; }
+.asset-card { width: 48.5%; box-sizing: border-box; padding: 13px; border-radius: var(--r-md); min-height: 112px; margin-bottom: 10px; }
+.asset-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; font-weight: 600; }
+.asset-label { font-size: 11px; font-weight: 600; }
+.asset-title { display: block; margin-top: 9px; color: var(--ink); font-size: 13.5px; font-weight: 600; line-height: 1.4; }
+.asset-desc { display: block; margin-top: 5px; color: var(--ink-3); font-size: 11px; line-height: 1.5; }
+
+/* —— 行式列表（数据源 / 报告） —— */
+.line-list { margin-top: 14px; padding: 0 14px; border-radius: var(--r-md); }
+.line-row { display: flex; align-items: center; gap: 11px; padding: 14px 0; border-bottom: 1px solid var(--line-2); }
+.line-row:last-child { border-bottom: 0; }
+.line-row:active { opacity: .72; }
+.line-ic { width: 36px; height: 36px; border-radius: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.line-b { flex: 1; min-width: 0; }
+.line-title { display: block; color: var(--ink); font-size: 13.5px; font-weight: 600; }
+.line-desc { display: block; margin-top: 3px; color: var(--ink-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.line-state { flex-shrink: 0; font-size: 11px; font-weight: 600; }
+
+/* —— 费用小标签（与战局页同一套） —— */
+.module-tier {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 20px; padding: 0 7px; border-radius: 999px;
+  font-size: 10px; font-weight: 600; flex-shrink: 0;
+}
+.tier-free { color: var(--accent-ink); background: var(--accent-soft); }
+.tier-power { color: var(--warn); background: rgba(168,119,46,.12); }
+.tier-plan { color: var(--ink); background: var(--surface-2); }
+.tier-single { color: var(--ink-2); background: var(--surface-2); }
+
+/* —— 军师提示补充 —— */
+.missing { display: flex; align-items: center; gap: 11px; padding: 12px 14px; border-radius: var(--r-md); margin-bottom: 8px; }
+.missing:active { opacity: .8; }
+.missing-ic { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.missing-t { flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink); }
+.missing-go { flex-shrink: 0; font-size: 12px; font-weight: 600; }
+
+/* —— 报告空态 —— */
+.think-empty { text-align: center; padding: 34px 20px 22px; }
+.think-empty .e-ic { width: 56px; height: 56px; border-radius: 18px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+.think-empty .et { display: block; font-size: 15px; font-weight: 600; color: var(--ink); }
+.think-empty .es { display: block; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); margin-top: 6px; }
+
+/* —— 底部主行动 —— */
+.think-cta {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 46px; margin-top: 18px; border-radius: 13px;
+  color: #FBFAF6; font-size: 14px; font-weight: 600;
+  box-shadow: 0 12px 24px var(--accent-glow);
+}
+.think-cta:active { opacity: .85; }
