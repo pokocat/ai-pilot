@@ -148,6 +148,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
   - **弹层不进 custom-tab-bar**：`custom-tab-bar` 只做导航和 overlay 状态同步，不渲染 `Login` 或其它全屏业务弹层；未登录点击中间「对话」只提示并跳 `pages/chat`，由聊天页承接登录弹层。
   - **overlay 同步不用轮询**：底栏状态同步依赖 `eventCenter` + 页面 `useDidShow` + `hideNativeTabBarOnly()` 短延时兜底；不要恢复 250ms/1500ms 常驻 interval。
   - **顶部安全区统一组件化**：Tab 页用 `Screen topInset`，非 Tab 自定义头用 `SafeHeader`；不要在页面里各写一套 `env(safe-area-inset-top)`，不要加伪状态栏 `9:41`。
+  - **组件样式导入顺序统一**：同一页面同时用 `Icon` 与 `SafeHeader` 时，保持 `Icon` import 在前、`SafeHeader` import 在后，避免 Taro/mini-css-extract-plugin 在 common chunk 报 CSS order warning。
   - **对话键盘按真机口径写**：`pages/chat` 保持页面 `disableScroll: true`、输入 `adjustPosition={false}`、`alwaysEmbed`、整条 `.box` 触发 focus、`onInput` 返回 `e.detail.value`、`onConfirm` 使用事件值发送，并由 `onKeyboardHeightChange` 写 `--keyboard-height` 让 `.chat` 自己压缩底部空间。
   - **登录/401/网络错误有统一入口**：用户动作前先检查登录态；401 必须清用户态并弹登录/回首页，不能吞成空态或“产出失败”；`Taro.request` reject 要映射成网络/合法域名提示；需要登录的数据页 catch 后先调 `handleApiError`。
   - **H5 兼容不污染小程序路径**：H5 自定义底栏只放 `app.h5.tsx/app.h5.scss`；小程序继续走真实 `page` 节点 + `src/custom-tab-bar`，不要把 H5/weui 兼容样式混进小程序原生 tabbar 路径。

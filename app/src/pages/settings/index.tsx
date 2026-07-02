@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Input, Button, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
-import SafeHeader from '../../components/SafeHeader';
 import Icon from '../../components/Icon';
+import SafeHeader from '../../components/SafeHeader';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api } from '../../services/api';
