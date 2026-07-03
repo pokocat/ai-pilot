@@ -47,3 +47,24 @@ test('调度白名单：unlock 专业军师未解锁 → 专属线程 403 AGENT_
   const ok = await api('POST', '/api/generate-sync', { token, body: { text: '你好', agentKey: 'general' } });
   assert.equal(ok.status, 200);
 });
+
+test('总军师成果承接（P0-3）：闲聊保持对话体；聊到要方案 → 按需产出「战略方案」成果卡（可采纳拆军令）', async () => {
+  const token = await login(uniquePhone(), '承接用户');
+  await api('PUT', '/api/profile', { token, body: { industry: '美业 / 医美', stage: '100-500 万', pain: '增长乏力' } });
+  // 注册表口径：general 配 on-demand + 战略方案
+  const general = AGENTS.find((a) => a.key === 'general')!;
+  assert.equal(general.deliverableKey, '战略方案');
+  assert.equal((general.skillsConfig as { deliverableMode?: string }).deliverableMode, 'on-demand');
+  // 闲聊轮：不甩报告
+  const chat = await api('POST', '/api/generate-sync', { token, body: { text: '最近有点迷茫，跟你聊聊', agentKey: 'general' } });
+  assert.equal(chat.status, 200);
+  assert.equal(chat.body.kind, 'chat');
+  // 方案轮：产出结构化成果，且军令/风险锁可被案卷提取（采纳动线的前提）
+  const rep = await api('POST', '/api/generate-sync', { token, body: { text: '聊得差不多了，给我出个方案', agentKey: 'general' } });
+  assert.equal(rep.status, 200);
+  assert.equal(rep.body.kind, 'report');
+  assert.ok(rep.body.deliverable?.sections?.length, '应返回分节成果');
+  const { extractOrders, extractRisks } = await import('../src/services/casefile.ts');
+  assert.ok(extractOrders(rep.body.deliverable).length >= 1, '成果应能拆出军令');
+  assert.ok(extractRisks(rep.body.deliverable).length >= 1, '成果应能提出风险锁');
+});

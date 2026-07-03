@@ -68,6 +68,7 @@ async function main() {
         systemPrompt: a.systemPrompt,
         deliverableKey: a.deliverableKey,
         memoryConfig: a.memoryConfig as object,
+        skillsConfig: (a.skillsConfig as object | undefined) ?? undefined,
         sort: a.sort,
       },
     });

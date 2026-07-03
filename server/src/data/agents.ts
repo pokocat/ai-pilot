@@ -56,6 +56,8 @@ export interface AgentSeed {
   deliverableKey: string | null;
   systemPrompt: string;
   memoryConfig: MemoryConfig;
+  // 自建技能配置（可选）：如 { deliverableMode: 'on-demand' } —— 模型按对话内容自行决定本轮闲聊还是出成果。
+  skillsConfig?: Record<string, unknown>;
   sort: number;
 }
 
@@ -104,7 +106,10 @@ export const AGENTS: AgentSeed[] = [
     chips: [['target', '战略体检'], ['trend', '增长方案'], ['shield', '融资准备']],
     memText: '会结合你的<b>企业档案</b>持续为你出谋',
     learnText: '持续学习中',
-    deliverableKey: null,
+    // P0-3 总军师成果承接：on-demand 模式——日常对话保持闲聊体，聊到方案成熟时模型自行产出
+    // 「战略方案」结构化成果卡（可采纳→拆军令），六轮主线不再以纯文字收尾。
+    deliverableKey: '战略方案',
+    skillsConfig: { deliverableMode: 'on-demand' },
     // 总军师主线人格（M1 PR-5b）：V6.0 全文优先（prompts/strat.v6.md）；文件缺失回退通用军师模板。
     // 命盘/战略档案/案卷等结构化状态由 buildGenContext 注入（天势档案/战略档案块），prompt 内禁止自算。
     systemPrompt: MASTER_V6 ?? businessPrompt(
@@ -424,6 +429,7 @@ export const AGENT_ORDER = ['general', 'strat', 'growth', 'intel', 'fund', 'mode
 
 // 产出 key → 智能体 key（对齐原型 KEY2AGENT）
 export const KEY2AGENT: Record<string, string> = {
+  战略方案: 'general',
   战略体检: 'strat',
   增长方案: 'growth',
   融资准备: 'fund',

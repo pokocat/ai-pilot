@@ -103,6 +103,23 @@ export default function Home() {
     goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('用三势判断（天势、市势、人势）帮我看一遍当前局势，并给出该攻、该守还是该等的结论。')}`);
   const askRisks = () =>
     goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
+  // 天时日历卡（V6.0 ⑨号卡）：命盘 12 月攻守网格 + 年度谶语，打印贴办公室；服务端真实渲染
+  const shareCalendarCard = async (e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    Taro.showLoading({ title: '生成日历卡…' });
+    try {
+      const r = await api.publishCard('calendar');
+      Taro.hideLoading();
+      if (r.htmlUrl) {
+        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '天时日历链接已复制 · 打印贴办公室', icon: 'none' }) });
+      } else {
+        Taro.showToast({ title: '本地预览模式无卡片', icon: 'none' });
+      }
+    } catch {
+      Taro.hideLoading();
+      Taro.showToast({ title: '生成失败，请重试', icon: 'none' });
+    }
+  };
 
   return (
     <Screen className="home">
@@ -150,6 +167,7 @@ export default function Home() {
             <View className={`tianshi-strip ${m.phase === '进攻' ? 'atk' : m.phase === '防守' ? 'def' : ''}`} onClick={startForces}>
               <Text className="ts-k serif">本月天时</Text>
               <Text className="ts-v">{m.phase}月{turning ? ` · 拐点：${turning}` : ''}</Text>
+              <Text className="ts-card" onClick={shareCalendarCard}>日历卡</Text>
               <Text className="ts-go">问军师 ›</Text>
             </View>
           );

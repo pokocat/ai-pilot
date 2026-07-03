@@ -8,6 +8,10 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-03** · **P0-3 总军师成果承接（on-demand）**：general 配 `deliverableKey='战略方案'` + `skillsConfig.deliverableMode='on-demand'`（`data/agents.ts`/`prisma/seed.ts`/`test/helpers.ts` 三处同步），新增「战略方案（破局方案）」模板于 `data/deliverables.ts`（段名对齐案卷提取启发式：军令取「30 天行动军令」、风险锁取「现在不能做」），`KEY2AGENT` 增 战略方案→general；六轮主线聊成熟后总军师直接产出可采纳成果卡，H5 对 general 的逐 token 流式随 deliverableKey 自动关闭（小程序不受影响）。SSE 纯聊天流式测试改用临时无产出体覆盖 + 增 general on-demand 断言；masterIdentity 增承接测试（329 tests）。影响面：server 注册表/模板/seed + 测试 + AGENTS §13 #3。
+
+- **2026-07-03** · **P0-1 两张卡前端入口**：战局页「本月天时」条新增「日历卡」按钮（`publishCard('calendar')` → 复制分享链接）；新建 `packages/work/gift` 送你一卦页（朋友称呼+阳/阴历生辰+十二时辰含不确定+性别 → `publishCard('fate')` 现算不落库出天命速写卡），入口挂「我的」菜单；`app.config.ts` work 分包注册 `gift/index`。影响面：app 战局/我的/分包路由 + 新页面。
+
 - **2026-07-03** · **恢复对话内容长按复制**：`pages/chat` 给自定义消息气泡补齐 `onLongPress` 复制能力，覆盖用户消息、AI 回复（含要点）、问候/专属理解提示、记忆更新提示与结构化成果卡全文；避免小程序自定义 `View/Text` 气泡无法依赖系统文本选择导致长按无效。影响面：app 聊天气泡交互 + AGENTS/CHANGELOG。
 
 - **2026-07-03** · **修复对话等待回复时点击输入框清空草稿**：`pages/chat` 在 `busy` 状态下真正锁定输入区——外层输入槽不再触发 focus，`Input` 置 disabled，`onInput/onSend` 先行拦截并保留当前草稿，发送按钮等待态只置灰不触发发送；AGENTS 同步对话键盘等待态约束。影响面：app 聊天输入区 + AGENTS/CHANGELOG。

@@ -38,6 +38,7 @@ export default function Profile() {
     { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/bindings/index' }) },
     { ic: 'grid', t: '模块管理 · 添加 / 隐藏', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/market/index' }) },
     { ic: 'doc', t: '订单支付 / 钻石明细', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/credits/index' }) },
+    { ic: 'spark', t: '送你一卦 · 给朋友出速写卡', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/gift/index' }) },
     { ic: 'clock', t: '提醒与日历', s: '即将开放', onClick: () => Taro.showToast({ title: '军令与复盘订阅提醒即将开放', icon: 'none' }) },
     { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
     { ic: 'shield', t: '私有化部署 · 企业版', s: '预约', onClick: () => Taro.showToast({ title: '已记录企业版意向', icon: 'none' }) },

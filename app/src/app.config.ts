@@ -22,6 +22,7 @@ export default defineAppConfig({
         'bindings/index',
         'market/index',
         'community/index',
+        'gift/index',
       ],
     },
   ],

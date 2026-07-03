@@ -30,13 +30,15 @@ export async function seedAgents(): Promise<void> {
       update: {
         systemPrompt: a.systemPrompt, memoryConfig: a.memoryConfig as object,
         gift: a.gift, billing: a.billing, price: a.price, billingRatio: a.billingRatio ?? 1, meterUnit: a.meterUnit ?? 'text', enabled: a.enabled,
+        deliverableKey: a.deliverableKey, skillsConfig: (a.skillsConfig as object | undefined) ?? undefined,
       },
       create: {
         key: a.key, name: a.name, role: a.role, icon: a.icon, type: a.type,
         gift: a.gift, billing: a.billing, price: a.price, billingRatio: a.billingRatio ?? 1, meterUnit: a.meterUnit ?? 'text', enabled: a.enabled,
         greet: a.greet, chipsJson: a.chips as object,
         memText: a.memText, learnText: a.learnText, systemPrompt: a.systemPrompt,
-        deliverableKey: a.deliverableKey, memoryConfig: a.memoryConfig as object, sort: a.sort,
+        deliverableKey: a.deliverableKey, memoryConfig: a.memoryConfig as object,
+        skillsConfig: (a.skillsConfig as object | undefined) ?? undefined, sort: a.sort,
       },
     });
   }
