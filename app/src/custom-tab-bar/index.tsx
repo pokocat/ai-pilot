@@ -3,7 +3,7 @@ import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Icon from '../components/Icon';
 import { useStore } from '../hooks/useStore';
-import { hideNativeTabBarOnly, onTabBarHiddenChange, readTabBarHidden } from '../services/tabbar';
+import { hideNativeTabBarOnly, onTabBarHiddenChange, readTabBarHidden, syncTabBarHidden } from '../services/tabbar';
 import './index.scss';
 
 // 悬浮胶囊式底栏 —— 对齐设计稿：五个平铺 tab，「对话」（参谋室，第一入口）居首，选中态为本命色柔底。
@@ -24,7 +24,13 @@ export default function CustomTabBar() {
   const [nativeHidden, setNativeHidden] = useState(() => readTabBarHidden());
 
   const syncNativeState = () => {
-    setNativeHidden(readTabBarHidden());
+    const hidden = readTabBarHidden();
+    if (!s.overlay() && hidden) {
+      syncTabBarHidden(false);
+      setNativeHidden(false);
+      return;
+    }
+    setNativeHidden(hidden);
     hideNativeTabBarOnly();
   };
 

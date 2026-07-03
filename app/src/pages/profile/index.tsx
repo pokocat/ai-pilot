@@ -45,7 +45,7 @@ export default function Profile() {
       ic: 'lock', t: '退出登录', s: '',
       onClick: () =>
         Taro.showModal({ title: '退出登录', content: '确定退出当前账号？' }).then((r) => {
-          if (r.confirm) { s.logout(); Taro.reLaunch({ url: '/pages/home/index' }); }
+          if (r.confirm) { s.logout(); Taro.reLaunch({ url: '/pages/sessions/index' }); }
         }),
     },
   ];

@@ -217,7 +217,7 @@ export default function Chat() {
     if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
     try {
-      // P1-B3：纯聊天体（无 deliverableKey）且开关开启 → 流式渐进渲染；其余走同步（零行为变更）。
+      // P1-B3：纯聊天体（无 deliverableKey）且 H5 流式开关开启 → 流式渐进渲染；小程序固定走同步，避免 SSE 断流但服务端已落库造成当前页误报网络失败。
       if (STREAM_CHAT && !agent?.deliverableKey) {
         const patch = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
           setMsgs((m) => {
@@ -228,7 +228,7 @@ export default function Chat() {
             return m;
           });
         setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
-        await generateStream(
+        const streamOk = await generateStream(
           { text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined },
           {
             onSession: (id) => { if (id && !sid) setSessionId(id); },
@@ -238,6 +238,13 @@ export default function Chat() {
             onError: (em) => patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false })),
           },
         );
+        if (!streamOk) {
+          const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
+          if (res.sessionId && !sid) setSessionId(res.sessionId);
+          if (res.reply) {
+            patch((msg) => ({ ...msg, reply: res.reply!, knowledgeUsed: res.knowledgeUsed, retryText: undefined, streaming: false }));
+          }
+        }
         setTimeout(scrollToEnd, 80);
       } else {
         const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });

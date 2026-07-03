@@ -114,7 +114,7 @@ export default function Home() {
           <Text className="bn-side right" onClick={refresh}>↻</Text>
         </View>
 
-        {/* 军师判断 hero（深绿 #195A42）：主要矛盾 + 案卷来源行 */}
+        {/* 军师判断 hero：主题色主要矛盾 + 案卷来源行 */}
         <View className="battle-hero" onClick={() => goChat('agentKey=general&continue=1')}>
           <Text className="bh-kicker">军师判断 · 主要矛盾</Text>
           <Text className="bh-source">

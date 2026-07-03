@@ -1,4 +1,4 @@
-/* 底栏 —— 对齐设计稿 .nav：平铺 5 tab、纸色背景 + 顶部发丝线，选中态仅变色不加底块 */
+/* 底栏 —— 对齐设计稿 .nav：平铺 5 tab、纸色背景 + 顶部发丝线，选中态用本命色柔底强调 */
 .tabbar {
   position: fixed;
   left: 0; right: 0; bottom: 0;
@@ -19,9 +19,15 @@
 .tab {
   flex: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  transition: color .18s ease-out;
+  min-width: 0;
+  border-radius: 14px;
+  transition: color .18s ease-out, background .18s ease-out, box-shadow .18s ease-out;
 }
 .tab-label {
   font-size: 11px; color: var(--ink-3); line-height: 1; font-weight: 500;
 }
-.tab.on .tab-label { font-weight: 700; }
+.tab.on {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-glow);
+}
+.tab.on .tab-label { font-weight: 800; }

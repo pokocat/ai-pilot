@@ -68,7 +68,7 @@ export default function Settings() {
 
   const logout = () =>
     Taro.showModal({ title: '退出登录', content: '确定退出当前账号？' }).then((r) => {
-      if (r.confirm) { store.logout(); Taro.reLaunch({ url: '/pages/home/index' }); }
+      if (r.confirm) { store.logout(); Taro.reLaunch({ url: '/pages/sessions/index' }); }
     });
 
   const deleteAccount = () =>
@@ -82,7 +82,7 @@ export default function Settings() {
       try {
         await api.deleteAccount();
         store.logout();
-        Taro.reLaunch({ url: '/pages/home/index' });
+        Taro.reLaunch({ url: '/pages/sessions/index' });
         Taro.showToast({ title: '账号已注销', icon: 'none' });
       } catch (e) {
         s.handleApiError(e, { fallbackTitle: '注销失败，请重试' });

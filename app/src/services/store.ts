@@ -52,7 +52,7 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
     emit();
     if (!options.silent) {
       Taro.showToast({ title: '登录态已失效，请重新登录', icon: 'none' });
-      setTimeout(() => Taro.reLaunch({ url: '/pages/home/index' }), 250);
+      setTimeout(() => Taro.reLaunch({ url: '/pages/sessions/index' }), 250);
     }
     return 'unauthorized';
   }

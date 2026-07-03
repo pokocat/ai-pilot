@@ -1,8 +1,8 @@
 export default defineAppConfig({
   pages: [
+    'pages/sessions/index',
     'pages/home/index',
     'pages/studio/index',
-    'pages/sessions/index',
     'pages/thinktank/index',
     'pages/profile/index',
     'pages/chat/index',

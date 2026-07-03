@@ -26,14 +26,14 @@ body,
   --accent-bright: #5FB389;
   --accent-glow: rgba(99, 160, 130, .32);
 
-  /* 设计稿固定角色色（与 app.scss 保持同步） */
-  --green: #1E5A43;
-  --green-deep: #163F30;
-  --green-hero: #195A42;
-  --green-soft: #E7EEE9;
-  --gold: #9B7C3F;
-  --gold-deep: #6F5420;
-  --gold-soft: #F2EAD6;
+  /* 业务主色跟随本命色（与 app.scss 保持同步） */
+  --green: var(--accent);
+  --green-deep: var(--accent-deep);
+  --green-hero: var(--accent);
+  --green-soft: var(--accent-soft);
+  --gold: var(--accent);
+  --gold-deep: var(--accent-deep);
+  --gold-soft: var(--accent-soft);
   --blue: #245F88;
   --danger: #9C4A38;
   --warn: #A8772E;

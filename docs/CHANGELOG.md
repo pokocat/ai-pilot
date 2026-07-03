@@ -8,6 +8,16 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-03** · **小程序聊天禁用 SSE 流式避免假网络失败**：`STREAM_CHAT` 改为仅 H5/Web 生效，小程序端聊天固定走 `/generate-sync`；`generateStream` 加平台守卫并移除 weapp `enableChunked/onChunkReceived` 分支，避免 `/generate` 已在后端生成并落库但微信 chunk/fail 回调让当前页显示“网络请求失败”，返回再进才看到回复。AGENTS 同步小程序端不得调用 SSE `/generate`。影响面：app config + streaming/chat + AGENTS/CHANGELOG。
+
+- **2026-07-03** · **补齐战局页本命色真机联动**：主题类显式覆盖 `--green/--green-hero/--gold/--gold-soft` 等业务 token，避免小程序真机对链式 CSS 变量重算不完整导致 hero/卡片仍保持默认绿；战局页模块 pill、能力标签、CTA 阴影、天时条和 hero 辅助文字改走 `--accent` 系列。PRODUCT/AGENTS 同步“业务主色随本命色联动，语义风险色固定”。影响面：app 全局主题 token + home 样式 + PRODUCT/AGENTS/CHANGELOG。
+
+- **2026-07-03** · **修复小程序底部导航消失与默认入口**：`custom-tab-bar` 在无全屏 overlay 时自动清理过期隐藏标记，避免真机上次异常退出后自定义导航持续不渲染；`app.config.ts` 页面顺序改为 `pages/sessions` 首位，鉴权失效、退出登录和注销后也回到「对话」tab；active tab 增加本命色柔底和描边，选中态更明显。影响面：app.config + custom-tab-bar + store/profile/settings + AGENTS/CHANGELOG。
+
+- **2026-07-03** · **修正本命色全局联动**：`app.scss` / `app.h5.scss` 将 `--green/--green-hero/--green-soft/--gold/--gold-deep/--gold-soft` 改为派生自 `--accent`，让战局 hero、智库上传与按钮、执行行动/军令、我的用户卡与主题卡跟随设置里的本命色；`--danger`、纸张底色、正文墨色等语义/中性色保持固定。AGENTS §7.1/§7.2 同步从“固定角色色”改为“业务主色跟随本命色”。影响面：app 全局主题 token + H5 兼容 token + home 注释 + AGENTS/CHANGELOG。
+
+- **2026-07-03** · **修复线上小程序对话“网络错误”兜底**：公网实测生产 `/api/health`、`/api/agents` 正常，临时诊断用户验证 `/generate-sync` 与 `/generate` 均可返回 200；前端问题定位为小程序聊天默认走流式 `/generate`，`enableChunked`/SSE 失败或无事件时只显示“网络请求失败”且不回退。`generateStream` 现在返回成功/失败并解析 HTTP 错误，小程序/H5 流式失败会在聊天页自动切回稳定的 `/generate-sync`，避免线上用户卡在网络错误气泡。影响面：app 聊天流式服务 + chat 页 + AGENTS。
+
 - **2026-07-02** · **M4 PR-18/19（第一批）：真数据前端落位 + 行业库深度**：① 前端落位——我的页新增「战略段位卡」（段位/连续复盘/使用天数/决策准确率/下一段位要求，`GET /progress`）；战局页新增「本月天时」条（命盘逐月攻守当月窗口+拐点月，进攻绿/防守金调）与「经营数据」卡（近 7 天回填三数聚合=看板第一层 v1，无回填不展示）；执行页提醒卡与复盘视图显示「连续复盘 N 天」（`GET /reviews`）；`api.progress/reviews` + mock 返回空 → 界面优雅隐藏（不造假数字）。② 行业库深度（V6.0 §8）——IndustryPack 新增 decisionChain/ticketRange/benchmarkCases/mingLink 可选字段并入注入行；**美业/医美 与 大健康/养生 拆分为两个行业包**（各自决策链/客单价/天势关联），建档行业选项随之 +1（前端兜底同步）。测试 323/323 ✓；双端 tsc/构建 ✓；H5 mock 走查零报错。影响面：app 三页 + api + server industryPacks/注入行 + AGENTS/CHANGELOG。
 
 - **2026-07-02** · **M3 PR-11/12/13/14：意图路由/诊断轮次/营收分阶段/角色语气（编排与适配收官）**：新增 `services/intent.ts`（全确定性规则）：① 意图路由——「这周复盘/月度总结/Q3 回顾/帮朋友算一卦/什么时候签约/出大事了/很迷茫」正确分流到 复盘(六层)/送卦/择时/紧急/师父 模式，`Session.mode` 粘性存储（本轮检测优先、检测不出沿用），**复盘意图自动落对应层 ReviewLog**（「这周复盘」=week 账）；② 诊断轮次——从会话历史确定性计算「本会话第 N 轮」注入（六轮制不丢位，快速通道提示）；③ 营收分阶段——建档问卷阶段题改「年营收区间」四档（前后端同步，旧标签 `stageOf` 兼容），注入 V6.0 §7 阶段适配指令（生存期只做短期战术等，stable 段）；④ 内在状态→五角色——生存焦虑/增长兴奋/管理痛苦/瓶颈迷茫/意义追问 → 教官/参谋长/大哥/战略家/师父 指令注入；**本命色语气注入移除**（回归纯 UI 品牌色，`{本命色}` 占位符保留），systemParts 测试同步改写。注入结构：【本轮导引】置 dynamic 首位（执行不复述）。测试 +6（317→323）全绿；双端 tsc ✓。影响面：server intent 服务/sessions 路由/schema 注入层/Session.mode + seed 问卷 + app Picker 兜底问卷 + AGENTS/CHANGELOG。

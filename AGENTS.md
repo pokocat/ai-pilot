@@ -124,15 +124,15 @@ repo/
 ### 7.1 页面与导航
 Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-tab-bar`）：
 
-底栏顺序对齐设计稿：**对话 · 战局 · 执行 · 智库 · 我的**（五个平铺 tab，无中间凸起按钮；`store.tab` 索引 0..4 按此顺序）。启动页仍为 `pages/home`（登录门/建档弹层在此承接）。
+底栏顺序对齐设计稿：**对话 · 战局 · 执行 · 智库 · 我的**（五个平铺 tab，无中间凸起按钮；`store.tab` 索引 0..4 按此顺序）。启动页为 `pages/sessions`（进小程序默认落到首位「对话」tab，登录门/建档弹层由对应页面承接）。
 
 | Tab | 页面 | 说明 |
 |---|---|---|
 | 对话 | `pages/sessions` | 「对话」微信式列表（第一入口，底栏首位，对齐设计稿 `page-chat`）：大标题头（对话+副题，右侧 历史/新对话按钮）+ 白底搜索 pill + 快捷补给横滑 6 卡（知识库/数据源/Skill·模块/生成报告/转成军令/今日执行）+ 通栏半透明线程列表（上下发丝线）：总军师置顶（在线点）+ 常驻专业军师 + 「专业参谋」分组（未启用走 `AgentUnlock`）；每行=拟人立绘 + 宋体名号 + 金色花名 + 两行真实最近会话摘要/时间；「历史」切换到最近会话列表（长按删） |
-| 战局 | `pages/home` | 对齐设计稿 `page-battle`：居中页头（左「案卷」→项目工作台 / 右刷新）+ 军师判断 hero（深绿 `--green-hero`：kicker 主要矛盾 + 案卷来源行 + 大宋体判断=真实 `me.understanding.summary` 兜底案卷判断，点按→总军师对话）+ 战局信号 metric 3 卡（案卷完整度=档案成熟度 / 待补资料 / 风险锁）+ 三势判断 force 3 卡（方法框架→发起判断）+ 下一步动作（`nextQuestions` battle-goal 行→访谈）+ 关联模块（linkmod 行：模块名+负责军师金 pill+tier 徽章）+「现在不能做」nono 卡（无则隐藏）+ 今日献策（页尾轻量保留）+ 绿色渐变 CTA（有案卷→执行，无→对话）|
-| 执行 | `pages/studio` | 对齐设计稿 `page-execution`（军令体系用固定金 `--gold`）：exec-nav（案卷/执行/提醒）+ 横滑战役卡组【今日战役深绿卡（案卷+完成度进度条）· 军师献策（案卷军令前三步）· 今日主令（首条未完成军令→生成脚本）· 提醒节奏】+ 执行信号 + 总军师督战紧凑行（去对话）+ 今日最重要 today-focus 深绿条 + 目标阶梯 4 格（引导拆解）+ exec-seg 三视图【今日军令=第 0 号军令补资料（金边 command-card）+ task 卡打卡/长按删/手动添加 + 线索/咨询/成交数据回填（软底+白格）+ 复盘前检查 · 周计划=近 7 天军令记录 · 复盘=带真实军令与回填数据发给经营参谋 + 提醒节奏】+ AI 创作发布（creative 智能体，保留解锁/按需权益）|
+| 战局 | `pages/home` | 对齐设计稿 `page-battle`：居中页头（左「案卷」→项目工作台 / 右刷新）+ 军师判断 hero（`--green-hero` 跟随本命色：kicker 主要矛盾 + 案卷来源行 + 大宋体判断=真实 `me.understanding.summary` 兜底案卷判断，点按→总军师对话）+ 战局信号 metric 3 卡（案卷完整度=档案成熟度 / 待补资料 / 风险锁）+ 三势判断 force 3 卡（方法框架→发起判断）+ 下一步动作（`nextQuestions` battle-goal 行→访谈）+ 关联模块（linkmod 行：模块名+负责军师 pill+tier 徽章）+「现在不能做」nono 卡（无则隐藏）+ 今日献策（页尾轻量保留）+ 本命色渐变 CTA（有案卷→执行，无→对话）|
+| 执行 | `pages/studio` | 对齐设计稿 `page-execution`（军令体系用 `--gold`，现跟随本命色）：exec-nav（案卷/执行/提醒）+ 横滑战役卡组【今日战役本命色卡（案卷+完成度进度条）· 军师献策（案卷军令前三步）· 今日主令（首条未完成军令→生成脚本）· 提醒节奏】+ 执行信号 + 总军师督战紧凑行（去对话）+ 今日最重要 today-focus 本命色条 + 目标阶梯 4 格（引导拆解）+ exec-seg 三视图【今日军令=第 0 号军令补资料（主题色边框 command-card）+ task 卡打卡/长按删/手动添加 + 线索/咨询/成交数据回填（软底+白格）+ 复盘前检查 · 周计划=近 7 天军令记录 · 复盘=带真实军令与回填数据发给经营参谋 + 提醒节奏】+ AI 创作发布（creative 智能体，保留解锁/按需权益）|
 | 智库 | `pages/thinktank` | 对齐设计稿 `page-thinktank`：页头（上传/智库/市场）+ seg 4 分区【案卷资产=上传区（绿调 upload-zone）+ 状态格（已入库/关键缺口/深度整理）+ 资料树（最新上传=真实 `knowledgeDocs` + AI 分类框架）+ 军师提示补充（暖金 asset-gap，真实 `nextQuestions`）· 数据源=绑定目录单卡行 · 能力=费用口径 chips + 免费 Skill/深度 Skill/方案模块分组行 · 报告=真实版本化报告行 + 生成报告/方案库入口】|
-| 我的 | `pages/profile` | 对齐设计稿 `page-profile`：居中「我的军师系统」+ 右「设置」+ 深绿用户卡（头像/称呼/公司/套餐）+ 经营统计 3 卡（案卷/报告/方案真实计数）+ 权益额度 3 卡（钻石/本月额度/套餐→额度弹层）+ 菜单（档案/项目工作台/报告方案库/资料库/数据授权/模块管理/订单明细/提醒日历/本命色/企业版/退出登录）+ 军师社群暖金卡 + 深度能力解锁绿卡 |
+| 我的 | `pages/profile` | 对齐设计稿 `page-profile`：居中「我的军师系统」+ 右「设置」+ 本命色用户卡（头像/称呼/公司/套餐）+ 经营统计 3 卡（案卷/报告/方案真实计数）+ 权益额度 3 卡（钻石/本月额度/套餐→额度弹层）+ 菜单（档案/项目工作台/报告方案库/资料库/数据授权/模块管理/订单明细/提醒日历/本命色/企业版/退出登录）+ 军师社群主题卡 + 深度能力解锁主题卡 |
 
 非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡 + 参谋室协同导轨「派单/回总军师/转成军令/补上下文」+ 成果卡下「认可方案→存方案库+生成本地案卷军令→去执行」）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；项目工作台、项目详情、方案库、报告、知识库、数据源绑定、模块市场、军师社群已拆到 `packages/work/*` 分包（`projects`、`project`、`library`、`report`、`knowledge`、`credits`、`bindings`、`market`、`community`），由 `pages/profile`、`pages/thinktank` 与 `pages/chat` 预加载。
 
@@ -145,13 +145,13 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 ### 7.2 关键 UI 约定（踩过的坑，勿回退）
 - **小程序工程约束清单（先读）**：
   - **项目导入与配置**：微信开发者工具只导入 `app/`；`app/project.config.json` 是正式配置，保持 AppID、`miniprogramRoot=dist/`、`urlCheck/es6/enhance/postcss/minified` 等正式校验/压缩开启；本机调试差异放 `app/project.private.config.json`，不要把根目录误生成的 DevTools 配置纳入提交。
-  - **原生 tabbar 只隐藏不恢复**：custom tabBar 模式下任何路径都不得调用 `Taro.showTabBar`。正常 Tab 挂载/切换只调用 `hideNativeTabBarOnly()` 压住微信原生底栏；全屏 overlay 用 `store.setOverlay(open, stableKey)` 写 storage 并隐藏自定义底栏，关闭/卸载时清理对应 key。
+  - **原生 tabbar 只隐藏不恢复**：custom tabBar 模式下任何路径都不得调用 `Taro.showTabBar`。正常 Tab 挂载/切换只调用 `hideNativeTabBarOnly()` 压住微信原生底栏；全屏 overlay 用 `store.setOverlay(open, stableKey)` 写 storage 并隐藏自定义底栏，关闭/卸载时清理对应 key。custom-tab-bar 在无 overlay 时必须自动清理过期隐藏标记，避免真机重进后导航消失。
   - **弹层不进 custom-tab-bar**：`custom-tab-bar` 只做导航和 overlay 状态同步，不渲染 `Login` 或其它全屏业务弹层；未登录点击中间「对话」只提示并跳 `pages/chat`，由聊天页承接登录弹层。
   - **overlay 同步不用轮询**：底栏状态同步依赖 `eventCenter` + 页面 `useDidShow` + `hideNativeTabBarOnly()` 短延时兜底；不要恢复 250ms/1500ms 常驻 interval。
   - **顶部安全区统一组件化**：Tab 页用 `Screen topInset`，非 Tab 自定义头用 `SafeHeader`；不要在页面里各写一套 `env(safe-area-inset-top)`，不要加伪状态栏 `9:41`。
   - **组件样式导入顺序统一**：同一页面同时用 `Icon` 与 `SafeHeader` 时，保持 `Icon` import 在前、`SafeHeader` import 在后，避免 Taro/mini-css-extract-plugin 在 common chunk 报 CSS order warning。
   - **对话键盘按真机口径写**：`pages/chat` 保持页面 `disableScroll: true`、输入 `adjustPosition={false}`、`alwaysEmbed`、整条 `.box` 触发 focus、`onInput` 返回 `e.detail.value`、`onConfirm` 使用事件值发送，并由 `onKeyboardHeightChange` 写 `--keyboard-height` 让 `.chat` 自己压缩底部空间。
-  - **登录/401/网络错误有统一入口**：用户动作前先检查登录态；401 必须清用户态并弹登录/回首页，不能吞成空态或“产出失败”；`Taro.request` reject 要映射成网络/合法域名提示；需要登录的数据页 catch 后先调 `handleApiError`。
+  - **登录/401/网络错误有统一入口**：用户动作前先检查登录态；401 必须清用户态并弹登录/回首页，不能吞成空态或“产出失败”；`Taro.request` reject 要映射成网络/合法域名提示；需要登录的数据页 catch 后先调 `handleApiError`；聊天页微信小程序端固定走 `/generate-sync`，不要调用 SSE `/generate`（真机 chunk 回调可能失败但后端已落库，导致当前页误报网络失败）；H5/Web 才允许流式。
   - **H5 兼容不污染小程序路径**：H5 自定义底栏只放 `app.h5.tsx/app.h5.scss`；小程序继续走真实 `page` 节点 + `src/custom-tab-bar`，不要把 H5/weui 兼容样式混进小程序原生 tabbar 路径。
   - **主包持续控重**：项目工作台、项目详情、方案库、报告等非首屏工作流留在 `packages/work` 分包；新增重页面优先分包并在入口页配置预加载，除非确实属于首屏主路径。
   - **真机排版防回退**：标题类 `<Text>` 保持块级化；两列网格用 `space-between + 48.5%`；Markdown 内容用 `MarkdownText`；等待模型返回要显示对话流思考气泡；全屏弹层、色盘、商业文案按下方约定处理。
@@ -163,7 +163,8 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
 - **前台记忆披露**：对话页用「专属理解」包装 Agent Memory；我的页只放「军师档案」菜单入口，详情页展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题），不要在我的页首页直接平铺大段内容。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事或展示 `用户123/企业123` 这类占位名；资料不足时让用户进入对话访谈，由军师先问 1-3 个简单问题，不要先分析旧报告或展开诊断。后端真实记忆开关见 §9。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
-- **设计稿角色色固定**：`--green/--green-hero/--gold/--gold-soft/--danger` 等是设计稿固定角色色（绿=主判断/行动、金=军令/权益、红=风险），**不随本命色切换**；本命色 `--accent` 只用于个性化点缀（底栏选中、头像点、按钮等）。默认本命色=墨绿（`data/colors.ts` 首位 + `store` 默认 + 服务端 `benmingColor` 默认 `green`）。
+- **本命色联动**：`--green/--green-hero/--gold/--gold-soft` 等业务主色 token 必须派生自 `--accent`，战局 hero、智库上传、我的用户卡、执行行动色和底栏选中态都要跟随设置里的本命色；`--danger`、正文墨色、纸张底色等语义/中性色保持固定。默认本命色=墨绿（`data/colors.ts` 首位 + `store` 默认 + 服务端 `benmingColor` 默认 `green`）。
+- **小程序主题 token 不只写链式 var**：主题类（`.theme-red` 等）必须显式覆盖 `--green/--green-hero/--gold/--gold-soft` 等业务 token，不能只写 `--green: var(--accent)` 这类间接链，否则真机上部分卡片会保留默认绿。
 - **H5 token 双写**：新增/修改 `app.scss` 里 `page {}` 的设计 token 时，必须同步 `app.h5.scss` 的 `:root` 兼容层（H5 没有 `page` 节点），否则 H5 上新 token 全部失效（深绿 hero 曾因此透明）。
 
 ### 7.3 启动流程
