@@ -188,28 +188,10 @@
   font-size: 18px; font-weight: 700;
 }
 
-/* —— 本月天时（M4 PR-18：命盘逐月攻守当月窗口） —— */
-.tianshi-strip {
-  display: flex; align-items: center; gap: 10px;
-  margin-top: 14px; padding: 12px 14px;
-  border-radius: 15px;
-  background: rgba(255, 255, 255, .88);
-  border: 1px solid var(--line);
-}
-.tianshi-strip:active { opacity: .8; }
-.tianshi-strip.atk,
-.tianshi-strip.def { border-color: var(--accent-glow); background: var(--accent-soft); }
-.ts-k { flex-shrink: 0; font-size: 14px; font-weight: 700; color: var(--ink); }
-.ts-v { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
-.tianshi-strip.atk .ts-v { color: var(--green); }
-.tianshi-strip.def .ts-v { color: var(--accent); }
-.ts-card {
-  flex-shrink: 0; font-size: 11px; font-weight: 700; color: var(--gold-deep);
-  padding: 3px 9px; border-radius: 999px;
-  border: 1px solid rgba(155, 124, 63, .4); background: rgba(155, 124, 63, .08);
-}
-.ts-card:active { opacity: .7; }
-.ts-go { flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--green); }
+/* —— 天势卡内的本月攻守强调色（天时条已并入三势卡，点开原生全年天时页） —— */
+.force-phase { font-weight: 700; color: var(--ink); }
+.force-phase.atk { color: var(--green); }
+.force-phase.def { color: var(--gold-deep); }
 
 /* —— 经营数据（M4 PR-16 看板第一层 v1：近 7 天回填） —— */
 .kpi-card { margin-top: 14px; padding: 16px 16px 14px; border-radius: 18px; }

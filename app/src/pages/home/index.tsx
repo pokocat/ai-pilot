@@ -103,23 +103,8 @@ export default function Home() {
     goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('用三势判断（天势、市势、人势）帮我看一遍当前局势，并给出该攻、该守还是该等的结论。')}`);
   const askRisks = () =>
     goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
-  // 天时日历卡（V6.0 ⑨号卡）：命盘 12 月攻守网格 + 年度谶语，打印贴办公室；服务端真实渲染
-  const shareCalendarCard = async (e: { stopPropagation: () => void }) => {
-    e.stopPropagation();
-    Taro.showLoading({ title: '生成日历卡…' });
-    try {
-      const r = await api.publishCard('calendar');
-      Taro.hideLoading();
-      if (r.htmlUrl) {
-        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '天时日历链接已复制 · 打印贴办公室', icon: 'none' }) });
-      } else {
-        Taro.showToast({ title: '本地预览模式无卡片', icon: 'none' });
-      }
-    } catch {
-      Taro.hideLoading();
-      Taro.showToast({ title: '生成失败，请重试', icon: 'none' });
-    }
-  };
+  // 天势不再引导对话：排盘引擎已算好 → 直接进原生「全年天时」页（无命盘则页内就地补生辰）
+  const openTianshi = () => Taro.navigateTo({ url: '/packages/work/calendar/index' });
 
   return (
     <Screen className="home">
@@ -158,31 +143,34 @@ export default function Home() {
           </View>
         </View>
 
-        {/* 本月天时（M4 PR-18）：命盘逐月攻守的当月窗口——排盘引擎算好的真实数据 */}
-        {(() => {
-          const m = chart?.monthlyOutlook?.months?.find((x) => x.month === new Date().getMonth() + 1);
-          if (!m) return null;
-          const turning = chart!.monthlyOutlook.months.filter((x) => x.turning).map((x) => `${x.month}月`).slice(0, 2).join('、');
-          return (
-            <View className={`tianshi-strip ${m.phase === '进攻' ? 'atk' : m.phase === '防守' ? 'def' : ''}`} onClick={startForces}>
-              <Text className="ts-k serif">本月天时</Text>
-              <Text className="ts-v">{m.phase}月{turning ? ` · 拐点：${turning}` : ''}</Text>
-              <Text className="ts-card" onClick={shareCalendarCard}>日历卡</Text>
-              <Text className="ts-go">问军师 ›</Text>
-            </View>
-          );
-        })()}
-
-        {/* 三势判断（force-grid）：方法框架，结论由真实对话产出 */}
+        {/* 三势判断（force-grid）：天势=排盘引擎已算好 → 点开原生全年天时页（不引导对话）；
+            市势/人势的结论产自真实对话 → 保留发起判断。 */}
         <Text className="battle-h2">三 势 判 断</Text>
         <View className="force-grid">
-          {THREE_FORCES.map((f) => (
-            <View key={f.key} className="force card" onClick={startForces}>
-              <Text className="force-tag serif">{f.key}</Text>
-              <Text className="force-desc">{f.desc}</Text>
-              <Text className="force-go">发起判断 ›</Text>
-            </View>
-          ))}
+          {THREE_FORCES.map((f) => {
+            if (f.key === '天势') {
+              const m = chart?.monthlyOutlook?.months?.find((x) => x.month === new Date().getMonth() + 1);
+              const turning = chart?.monthlyOutlook?.months?.filter((x) => x.turning).map((x) => `${x.month}月`).slice(0, 2).join('、');
+              return (
+                <View key={f.key} className="force card" onClick={openTianshi}>
+                  <Text className="force-tag serif">{f.key}</Text>
+                  {m ? (
+                    <Text className="force-desc">本月 <Text className={`force-phase ${m.phase === '进攻' ? 'atk' : m.phase === '防守' ? 'def' : ''}`}>{m.phase}</Text>{turning ? `，拐点在 ${turning}` : ''}。按你的命盘逐月推演。</Text>
+                  ) : (
+                    <Text className="force-desc">{f.desc}</Text>
+                  )}
+                  <Text className="force-go">{m ? '看全年天时 ›' : '解锁全年天时 ›'}</Text>
+                </View>
+              );
+            }
+            return (
+              <View key={f.key} className="force card" onClick={startForces}>
+                <Text className="force-tag serif">{f.key}</Text>
+                <Text className="force-desc">{f.desc}</Text>
+                <Text className="force-go">发起判断 ›</Text>
+              </View>
+            );
+          })}
         </View>
 
         {/* 下一步动作（battle-actions）：军师档案里真实的待补问题 */}

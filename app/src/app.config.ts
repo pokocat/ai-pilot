@@ -23,6 +23,7 @@ export default defineAppConfig({
         'market/index',
         'community/index',
         'gift/index',
+        'calendar/index',
       ],
     },
   ],

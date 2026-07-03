@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-03** · **天时改原生展示（用户反馈：到处引导对话/网页链接奇怪）**：删除战局页「本月天时」条与「日历卡」按钮；三势里的天势卡直接承载——卡面显示本月攻守+拐点，点开新原生页 `packages/work/calendar`（12 月攻守网格+图例+关键节点说明，`useShareAppMessage` 支持微信右上角转发；无命盘时页内就地补生辰 `saveBazi`，老用户不用回炉建档）；网页版降级为页脚「打印版」次要入口。市势/人势结论产自对话，保留发起判断。影响面：app 战局页 + 新 calendar 分包页 + 路由。
+
 - **2026-07-03** · **P0-3 总军师成果承接（on-demand）**：general 配 `deliverableKey='战略方案'` + `skillsConfig.deliverableMode='on-demand'`（`data/agents.ts`/`prisma/seed.ts`/`test/helpers.ts` 三处同步），新增「战略方案（破局方案）」模板于 `data/deliverables.ts`（段名对齐案卷提取启发式：军令取「30 天行动军令」、风险锁取「现在不能做」），`KEY2AGENT` 增 战略方案→general；六轮主线聊成熟后总军师直接产出可采纳成果卡，H5 对 general 的逐 token 流式随 deliverableKey 自动关闭（小程序不受影响）。SSE 纯聊天流式测试改用临时无产出体覆盖 + 增 general on-demand 断言；masterIdentity 增承接测试（329 tests）。影响面：server 注册表/模板/seed + 测试 + AGENTS §13 #3。
 
 - **2026-07-03** · **P0-1 两张卡前端入口**：战局页「本月天时」条新增「日历卡」按钮（`publishCard('calendar')` → 复制分享链接）；新建 `packages/work/gift` 送你一卦页（朋友称呼+阳/阴历生辰+十二时辰含不确定+性别 → `publishCard('fate')` 现算不落库出天命速写卡），入口挂「我的」菜单；`app.config.ts` work 分包注册 `gift/index`。影响面：app 战局/我的/分包路由 + 新页面。
