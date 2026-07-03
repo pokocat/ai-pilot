@@ -16,6 +16,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-07-03 | `0.2.19` | `修复小程序误上传mock包` | `0862c02+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1112594 B | 上传成功 |
 | 2026-07-03 | `0.2.18` | `小程序聊天改用同步响应` | `06d1377+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1111547 B | 上传成功 |
 | 2026-07-03 | `0.2.17` | `补齐战局页本命色联动` | `06d1377+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1112083 B | 上传成功 |
 | 2026-07-03 | `0.2.16` | `修复导航显示和默认入口` | `06d1377+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1112186 B | 上传成功 |

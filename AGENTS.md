@@ -348,7 +348,7 @@ tail -n 80 /tmp/ai-pilot-weapp-screen.log
   --info-output /Users/donis/dev/ai-pilot/weapp-preview-info.json \
   --lang zh
 ```
-停止实时 watch：`screen -S ai-pilot-weapp-watch -X quit`。如果只是“编译推送一下”，不用常驻 watch，直接 `cd app && npm run build:weapp` 后跑上面的 `auto-preview` 和 `preview` 两条 CLI。
+停止实时 watch：`screen -S ai-pilot-weapp-watch -X quit`。如果只是“编译推送一下”，不用常驻 watch；真机连线上后端验收时必须 `cd app && npm run build:weapp:server` 后跑上面的 `auto-preview` 和 `preview` 两条 CLI，避免默认 `build:weapp` 生成 mock 包。
 
 **小程序连本机后端真机调试**
 
@@ -461,14 +461,14 @@ cd admin && npm install && npm run dev   # 运营后台
 > 云端沙箱网络白名单未放行 `servicewechat.com`，需在**本机**执行。
 > 每次上传前后必须同步 `docs/WEAPP_RELEASES.md`，上传命令里的版本号/描述要与该文件记录一致；不要把每次上传明细塞进 AGENTS.md。
 ```bash
-cd app && npm run build:weapp           # 产物在 app/dist（默认 mock 版）
+cd app && npm run build:weapp:server   # 产物在 app/dist（server 版，连 https://wxapi.aibuzz.cn/api）
 npx miniprogram-ci upload \
   --pp ./ \                              # 项目路径=app（其 project.config.json 的 miniprogramRoot=dist/）
   --pkp /path/to/private.<appid>.key \
   --appid wx810ebe6dfef8e75f \
-  --uv 0.1.0 -r 1 --ud "junshi mock build"
+  --uv 0.1.0 -r 1 --ud "junshi server build"
 ```
-注意：上传密钥若在小程序后台开启了 **IP 白名单**，须把本机出口 IP 加入；连真实后端版本另需把 API 域名加入 request 合法域名（见 §12）。
+注意：上传脚本会拒绝未注入 `https://wxapi.aibuzz.cn/api` 或仍包含 `localhost:4000/api` 的产物；上传密钥若在小程序后台开启了 **IP 白名单**，须把本机出口 IP 加入；连真实后端版本另需把 API 域名加入 request 合法域名（见 §12）。
 
 ### 微信账号登录联调
 ```bash
