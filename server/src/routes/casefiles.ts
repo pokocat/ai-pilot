@@ -9,6 +9,7 @@ import {
   type DeliverableInput,
 } from '../services/casefile.js';
 import { extractStrategicFacts, upsertStrategicProfile } from '../services/strategicProfile.js';
+import { recordDecisionFromAccept } from '../services/decisionLog.js';
 
 export async function casefileRoutes(app: FastifyInstance) {
   // 当前活跃案卷（战局/执行页数据源）；没有则 { casefile: null }
@@ -35,6 +36,13 @@ export async function casefileRoutes(app: FastifyInstance) {
       tenantId: user.tenantId,
       userId: user.id,
       patch: extractStrategicFacts(deliverable),
+    }).catch(() => {});
+    // 决策日志（M2 PR-7）：认可 = 一次战略决策，自动记账（30 天验证期，月复盘对账）
+    await recordDecisionFromAccept({
+      tenantId: user.tenantId,
+      userId: user.id,
+      deliverable,
+      agentName: String(agentName || '军师').slice(0, 40),
     }).catch(() => {});
     await recordAudit({
       tenantId: user.tenantId, userId: user.id,

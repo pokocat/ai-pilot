@@ -983,3 +983,29 @@ model StrategicProfile {
   @@index([tenantId])
   @@map("strategic_profile")
 }
+
+/// 决策日志（M2 PR-7）：V6.0 §9 决策账本——每条决策带验证标准与验证期，
+/// 准确率一律由服务端从状态行统计（禁止 AI 现编）。写入源：认可方案自动记一条 + 手动/AI 工具。
+model DecisionLog {
+  id             String    @id @default(cuid())
+  tenantId       String
+  userId         String
+  seq            Int // 用户内序号（决策 #N，展示与引用用）
+  scene          String    @default("战略规划") // 战略规划 | 复盘 | 紧急战况 | 手动
+  decision       String    @db.Text // 一句话决策
+  reasons        Json // string[]：2-3 个关键理由
+  tianshiRef     String    @default("") // 天势参考（命理层面的支持/警示，来自命盘数据）
+  expected       String    @default("") @db.Text // 预期结果
+  verifyStandard String    @default("") @db.Text // 什么数据能证明正确/错误
+  verifyByDate   String? // YYYY-MM-DD 预计验证时间（scheduler 到期提醒用）
+  status         String    @default("pending") // pending | correct | revise
+  verifiedAt     DateTime?
+  verifyNote     String    @default("") @db.Text // 验证时的事实记录
+  fast           Boolean? // 快决策(当场拍板)/慢决策(深思后定)；null=未标注——快慢准确率分开统计
+  createdAt      DateTime  @default(now())
+
+  @@unique([userId, seq])
+  @@index([tenantId, userId, status])
+  @@index([userId, verifyByDate])
+  @@map("decision_log")
+}

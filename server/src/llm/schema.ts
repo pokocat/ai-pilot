@@ -39,6 +39,8 @@ export interface GenContext {
   tianshiLine?: string | null;
   // 战略档案（M1 PR-3）：客户已确认的战略事实块（认可方案/手动编辑回写），空档案不注入。
   strategicLine?: string | null;
+  // 决策账本（M2 PR-7）：近期决策 + 服务端准确率块，无记录不注入。
+  decisionLine?: string | null;
   userMessage: string;
   history?: { role: string; text: string }[];
   // —— 上下文工程扩展 ——
@@ -216,6 +218,7 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
 
   const blocks: string[] = [];
   if (ctx.strategicLine) blocks.push(ctx.strategicLine); // 战略档案：已确认事实，放在推断的客户档案之前
+  if (ctx.decisionLine) blocks.push(ctx.decisionLine);   // 决策账本：系统计数（准确率等禁止 AI 自算）
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);
   if (ctx.references?.length) blocks.push(`【用户引用的资料（请优先采纳并标注出处）】\n${ctx.references.join('\n')}`);

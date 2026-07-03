@@ -8,6 +8,7 @@ import { hybridSearch, resolveReferences } from './retrieval.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
 import { loadChart, chartBriefing, TIANSHI_OPTOUT_LINE } from './paipan.js';
 import { loadStrategicProfile, strategicBlock } from './strategicProfile.js';
+import { decisionBriefing } from './decisionLog.js';
 import { now } from './clock.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
@@ -91,6 +92,8 @@ export async function buildGenContext(opts: {
 
   // 战略档案（M1 PR-3）：客户已确认的战略事实（认可方案/手动编辑回写），注入优先级高于自动推断。
   const strategicLine = strategicBlock(await loadStrategicProfile(opts.userId));
+  // 决策账本（M2 PR-7）：近期决策 + 服务端准确率（AI 只引用，禁止自行推算）。
+  const decisionLine = await decisionBriefing(opts.userId);
 
   // 天势档案（M1 PR-2）：命盘由排盘引擎算好存库，这里只组装简报注入；
   // 客户选择「不信命理」→ 注入降级指令（不带命盘）；无命盘 → 不注入。
@@ -141,6 +144,7 @@ export async function buildGenContext(opts: {
     benchmark: resolveIndustryPack(profile?.industry).benchmark,
     tianshiLine,
     strategicLine,
+    decisionLine,
     userMessage: opts.userMessage,
     history: opts.history,
     references: refLines,
