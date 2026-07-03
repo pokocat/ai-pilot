@@ -24,7 +24,7 @@ export default defineConfig(async (merge, { command, mode }) => {
     copy: { patterns: [], options: {} },
     framework: 'react',
     compiler: { type: 'webpack5', prebundle: { enable: false } },
-    cache: { enable: false },
+    cache: { enable: true },
     sass: {
       resource: [],
     },

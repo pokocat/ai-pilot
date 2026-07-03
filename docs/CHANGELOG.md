@@ -8,6 +8,16 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-03** · **恢复对话内容长按复制**：`pages/chat` 给自定义消息气泡补齐 `onLongPress` 复制能力，覆盖用户消息、AI 回复（含要点）、问候/专属理解提示、记忆更新提示与结构化成果卡全文；避免小程序自定义 `View/Text` 气泡无法依赖系统文本选择导致长按无效。影响面：app 聊天气泡交互 + AGENTS/CHANGELOG。
+
+- **2026-07-03** · **修复对话等待回复时点击输入框清空草稿**：`pages/chat` 在 `busy` 状态下真正锁定输入区——外层输入槽不再触发 focus，`Input` 置 disabled，`onInput/onSend` 先行拦截并保留当前草稿，发送按钮等待态只置灰不触发发送；AGENTS 同步对话键盘等待态约束。影响面：app 聊天输入区 + AGENTS/CHANGELOG。
+
+- **2026-07-03** · **修复 server 真机预览旧 token 失效后对话页清空**：`pages/sessions` 每次显示都先刷新公开 `/agents` 注册表，即使未登录也保留总军师/专业军师列表；`store.logout()` 不再把 `agents` 清成空数组，改回 `DEFAULT_AGENTS` 离线兜底。影响面：app 对话首页登录兜底 + store 退出态 + AGENTS/CHANGELOG。
+
+- **2026-07-03** · **修复真机登录态失效提示闪烁但不弹登录**：默认首页 `pages/sessions` 补齐 `Login` 承接，未登录/401 时直接打开登录弹层，快捷入口先走登录门；该页捕获 401 时静默清状态并开弹层，不再依赖 `handleApiError` 反复 `reLaunch` 自己。`store.handleApiError` 对 401 toast 加 1.5s 节流，并且当前已在 `pages/sessions/index` 时不再二次 reLaunch，避免多个接口同时 401 造成真机提示闪烁。影响面：app 登录兜底 + store 401 处理 + AGENTS/CHANGELOG。
+
+- **2026-07-03** · **开启 Taro Webpack5 持久化缓存**：`app/config/index.ts` 将 `cache.enable` 从 `false` 改为 `true`，按 Taro 官方建议启用 filesystem cache，提升二次 `dev:weapp`/`build:weapp`/H5 编译速度；AGENTS 补充缓存脏数据时清理本地 `app/node_modules/.cache` 的处理口径。影响面：app 构建配置 + AGENTS/CHANGELOG。
+
 - **2026-07-03** · **小程序上传前阻断 mock/dev 构建**：`weapp-upload.mjs` 与旧 `upload-weapp.js` 上传前扫描 `app/dist`，必须包含预期线上 API（默认 `https://wxapi.aibuzz.cn/api`）且不得残留 `localhost:4000/api`，否则直接失败，避免误把默认 `build:weapp` 的 mock 包上传到微信后台导致对话返回模板答案。AGENTS 同步把“编译推送/本机上传”命令改为 `npm run build:weapp:server`。影响面：app 上传脚本 + AGENTS/CHANGELOG。
 
 - **2026-07-03** · **生产补齐 M0-M4 后端代码与主军师身份迁移收口**：已用 `scripts/deploy-prod.sh` 将 `4902b0b` 发布到 `wxapi.aibuzz.cn` 生产环境（server+admin），新增依赖安装、Prisma schema 同步、后端构建重启、admin 构建发布与 nginx reload 均通过；生产库确认 9 张新增表与 `Session.mode` 已就位。按既定剧本只对 `survey_question` 做两条定向 UPDATE：阶段题改为年营收四档，行业题改为美业/大健康拆分后的行业列表，未重跑 seed。公网验证：`/api/health`、`/api/survey`、`/admin/` 正常，新增鉴权路由返回 401 而非 404，`/api/agents` 返回 general V6 开场白与 `strat=战略诊断官`。影响面：生产 server/admin 部署 + 生产问卷配置 + AGENTS/CHANGELOG。

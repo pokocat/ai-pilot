@@ -3,6 +3,7 @@ import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
+import Login from '../../components/Login';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
 import { useStore } from '../../hooks/useStore';
@@ -39,20 +40,36 @@ export default function Sessions() {
   const [buying, setBuying] = useState<Agent | null>(null);
   const [query, setQuery] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
 
   useDidShow(() => {
     s.setTab(0);
     Taro.getCurrentInstance().page?.getTabBar?.();
-    api.sessions().then(setSessions).catch((e) => { s.handleApiError(e); setSessions([]); });
+    s.loadAgents();
+    if (!s.isAuthed()) {
+      setShowLogin(true);
+      setSessions([]);
+      return;
+    }
+    api.sessions().then(setSessions).catch((e) => {
+      const kind = s.handleApiError(e, { silent: true });
+      if (kind === 'unauthorized') setShowLogin(true);
+      setSessions([]);
+    });
   });
 
   const findAgent = (key: string) => s.agents().find((a) => a.key === key);
   const latestOf = (agentKey: string) => sessions.find((x) => x.agentKey === agentKey);
   const aliasOf = (key: string) => ADVISOR_ALIAS[key] || '';
 
-  const continueWith = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` });
-  const newWith = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&fresh=1` });
-  const openSession = (id: string) => Taro.navigateTo({ url: `/pages/chat/index?sessionId=${id}` });
+  const requireLogin = () => {
+    if (s.isAuthed()) return true;
+    setShowLogin(true);
+    return false;
+  };
+  const continueWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` }); };
+  const newWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&fresh=1` }); };
+  const openSession = (id: string) => { if (requireLogin()) Taro.navigateTo({ url: `/pages/chat/index?sessionId=${id}` }); };
 
   // 线程入口：未启用的专项军师先走启用弹层，其余续接最近线程
   const tapAdvisor = (a: Agent) => {
@@ -144,7 +161,7 @@ export default function Sessions() {
                 <View
                   key={c.t}
                   className="quick-card card"
-                  onClick={() => (c.tab ? Taro.switchTab({ url: c.tab }) : Taro.navigateTo({ url: c.url! }))}
+                  onClick={() => requireLogin() && (c.tab ? Taro.switchTab({ url: c.tab }) : Taro.navigateTo({ url: c.url! }))}
                 >
                   <Text className="qt">{c.t}</Text>
                   <Text className="qd">{c.d}</Text>
@@ -223,6 +240,7 @@ export default function Sessions() {
       </View>
 
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); continueWith(a.key); }} />
+      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); api.sessions().then(setSessions).catch(() => setSessions([])); }} />
     </Screen>
   );
 }
