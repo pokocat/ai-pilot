@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-03** · **生产补齐 M0-M4 后端代码与主军师身份迁移收口**：已用 `scripts/deploy-prod.sh` 将 `4902b0b` 发布到 `wxapi.aibuzz.cn` 生产环境（server+admin），新增依赖安装、Prisma schema 同步、后端构建重启、admin 构建发布与 nginx reload 均通过；生产库确认 9 张新增表与 `Session.mode` 已就位。按既定剧本只对 `survey_question` 做两条定向 UPDATE：阶段题改为年营收四档，行业题改为美业/大健康拆分后的行业列表，未重跑 seed。公网验证：`/api/health`、`/api/survey`、`/admin/` 正常，新增鉴权路由返回 401 而非 404，`/api/agents` 返回 general V6 开场白与 `strat=战略诊断官`。影响面：生产 server/admin 部署 + 生产问卷配置 + AGENTS/CHANGELOG。
+
 - **2026-07-02** · **M4 PR-15/17 第一批：B 级卡片（每日战报/天时日历/天命速写）+ 叙事线/谶语存档**：新增 `services/cardHtml.ts` + `POST /cards/:kind`——①每日战报卡：当日军令完成/对齐率/回填三数/段位/连续复盘天数全部读服务端账本，语录按日确定性轮换（公版语录）；②天时日历卡：命盘 12 月攻守网格+拐点标注+谶语；③天命速写卡（送你一卦·裂变）：命格速写/今年大势/一条建议由命盘确定性生成，**朋友生辰现算不落库**，底部引导找军师参谋部。发布复用 `publishHtml`（reportHtml 抽出的通用链路：存库留底+OSS/后端兜底）。叙事线/谶语：`StrategicProfile.extraJson` 存档（PUT /profile/strategic 接受 narrative/verse），注入块带「跨月复述一致/全年沿用」口径——V6.0「数月后还能复述同一句谶语」达成。前端：执行页复盘视图新增「生成每日战报卡（可分享）」。品牌红线：卡片测试含无米诺断言。测试 +5（323→328）✓；双端构建 ✓。剩余 9 卡+A 级模板+PR-20 智库管道记 §13。影响面：server cardHtml/cards 路由/reportHtml 重构/strategicProfile + app 执行页/api + AGENTS/CHANGELOG。
 
 - **2026-07-03** · **小程序聊天禁用 SSE 流式避免假网络失败**：`STREAM_CHAT` 改为仅 H5/Web 生效，小程序端聊天固定走 `/generate-sync`；`generateStream` 加平台守卫并移除 weapp `enableChunked/onChunkReceived` 分支，避免 `/generate` 已在后端生成并落库但微信 chunk/fail 回调让当前页显示“网络请求失败”，返回再进才看到回复。AGENTS 同步小程序端不得调用 SSE `/generate`。影响面：app config + streaming/chat + AGENTS/CHANGELOG。
