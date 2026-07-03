@@ -262,6 +262,7 @@ model Session {
   projectId          String? // 归属项目（散落会话为 null）
   title              String   @default("新对话")
   difyConversationId String? // Dify 应用多轮上下文 id（providerMode=dify 时由 Dify 返回并回写）
+  mode               String? // 会话模式（M3 PR-11 粘性）：'review:week' | 'urgent' | 'timing' | …；null=strategy
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

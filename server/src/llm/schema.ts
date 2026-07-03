@@ -47,6 +47,10 @@ export interface GenContext {
   prophecyLine?: string | null;
   // 段位·里程碑（M2 PR-10）：真实门槛派生块，新用户零记录不注入。
   progressLine?: string | null;
+  // 本轮导引（M3 PR-11/12/14）：模式/角色语气/诊断轮次指令（每轮变化 → dynamic 首位）。
+  modeLine?: string | null;
+  // 阶段适配（M3 PR-13）：营收阶段指令（随用户稳定 → stable 段）。
+  stageLine?: string | null;
   userMessage: string;
   history?: { role: string; text: string }[];
   // —— 上下文工程扩展 ——
@@ -207,8 +211,7 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   const { base, active } = selectModuleText(prompt, { kind, userMessage: ctx.userMessage });
   // 档案访谈轮：在守则末尾追加覆盖指令，让模型进入访谈而不是回固定话术。
   const guard = ctx.briefInterview ? `${RUNTIME_BUSINESS_GUARD}\n\n${INTERVIEW_DIRECTIVE}` : RUNTIME_BUSINESS_GUARD;
-  // P1-B4：注入本命色语气提示（微调语气与侧重，不得违背方法论与边界）。
-  const toneLine = `（表达风格参考 · 本命色「${ctx.benmingColor}」：${benmingTone(ctx.benmingColor)}；据此微调语气与侧重，但不改变方法论与上述业务边界。）`;
+  // M3 PR-14：本命色回归纯品牌色——不再注入本命色语气（语气由 V6.0 角色系统 + modeLine 驱动）。
   // 行业身份层（L1）：客户画像识别出行业时，给任意智能体叠加一层「行业视角」（persona + 关键经营杠杆），
   // 让军师/各顾问「懂这个行业」。放 stable 段（按用户行业稳定）以命中提示词缓存；未识别行业则不注入。
   const pack = resolveIndustryPack(ctx.profile?.industry);
@@ -217,9 +220,12 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
     : `（行业视角 · ${pack.name}：${pack.persona}经营上重点看：${pack.levers.join('、')}。据此理解客户所处行业的结构与常识，但不得据此编造该客户的具体数据。）`;
   // 天势档案随用户稳定（重排才变），放 stable 段命中提示词缓存；无命盘/降级为空则不注入。
   const tianshiLine = ctx.tianshiLine ?? '';
-  const stable = [fillPlaceholders(base, ctx), guard, toneLine, industryLine, tianshiLine].filter(Boolean).join('\n\n');
+  // 阶段适配（M3 PR-13）随用户档案稳定 → stable 段。
+  const stageLine = ctx.stageLine ?? '';
+  const stable = [fillPlaceholders(base, ctx), guard, industryLine, tianshiLine, stageLine].filter(Boolean).join('\n\n');
 
   const parts: string[] = [];
+  if (ctx.modeLine) parts.push(ctx.modeLine); // 本轮导引（模式/角色/轮次）：每轮变化，dynamic 首位
   if (active) parts.push(fillPlaceholders(active, ctx)); // 本轮生效的按需模块（在参考资料之前）
 
   const blocks: string[] = [];

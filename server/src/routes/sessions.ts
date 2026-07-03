@@ -14,6 +14,8 @@ import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
 import type { MessageRef, Deliverable, ChatReply } from '../llm/schema.js';
 import { extractAndRecordProphecies } from '../services/prophecyLog.js';
+import { resolveMode } from '../services/intent.js';
+import { recordReview } from '../services/reviewLog.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -163,6 +165,14 @@ export async function sessionRoutes(app: FastifyInstance) {
       if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
     }
     const userMsg = await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+    // M3 PR-11：意图路由——本轮检测优先、检测不出沿用会话粘性模式；复盘意图自动落对应层复盘账
+    const { intent, persist: modePersist } = resolveMode(text, session.mode);
+    if (modePersist !== undefined) await prisma.session.update({ where: { id: session.id }, data: { mode: modePersist } });
+    if (intent.mode === 'review' && intent.reviewLayer) {
+      void recordReview({ tenantId: user.tenantId, userId: user.id, layer: intent.reviewLayer }).catch(() => {});
+    }
+    const sessionMode = modePersist !== undefined ? modePersist : session.mode;
+
     const history = await loadHistory(session.id, userMsg.id);
     await recordAudit({
       tenantId: user.tenantId,
@@ -179,6 +189,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
       sessionId: session.id, difyConversationId: session.difyConversationId,
       effective: effective ?? undefined, history,
+      sessionMode,
     });
 
     try {
@@ -331,6 +342,14 @@ export async function sessionRoutes(app: FastifyInstance) {
 
       // 持久化用户消息（含引用）
       const userMsg = await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+    // M3 PR-11：意图路由——本轮检测优先、检测不出沿用会话粘性模式；复盘意图自动落对应层复盘账
+    const { intent, persist: modePersist } = resolveMode(text, session.mode);
+    if (modePersist !== undefined) await prisma.session.update({ where: { id: session.id }, data: { mode: modePersist } });
+    if (intent.mode === 'review' && intent.reviewLayer) {
+      void recordReview({ tenantId: user.tenantId, userId: user.id, layer: intent.reviewLayer }).catch(() => {});
+    }
+    const sessionMode = modePersist !== undefined ? modePersist : session.mode;
+
       const history = await loadHistory(session.id, userMsg.id);
       await recordAudit({
         tenantId: user.tenantId,
@@ -353,6 +372,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         difyConversationId: session.difyConversationId,
         effective: effective ?? undefined,
         history,
+        sessionMode,
       });
 
       const learnSse = async () => {
