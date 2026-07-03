@@ -12,7 +12,9 @@ import { periodKeyOf, isExpired, nextResetAt, daysRemaining } from './planTime.j
 // P0-2：单次产出的悲观额度预留（token 计）。真实成本只有产出后才知道，故产出前先按此预扣、
 // 产出后 settle 按真实 token 多退少补。作用是**并发下把透支限制为有界**（每个在途请求各占一份），
 // 取代旧的「ensureQuota 只判 balance>0 → 无锁事后扣」导致 N 个并发全部放行的无界透支。
-const RESERVE_TOKENS = 2000;
+// 导出供 rawJson 系（extractGraphTriples/summarizePoints 等不回传真实 token 用量）的调用方
+// 按同一基准定额结算：reserveQuota 预留后 settle(RESERVE_TOKENS, ratio) = 全额扣留、不退。
+export const RESERVE_TOKENS = 2000;
 
 export class InsufficientQuotaError extends Error {
   statusCode = 402;

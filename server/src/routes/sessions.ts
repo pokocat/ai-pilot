@@ -3,12 +3,12 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { resolveUser, buildGenContext } from '../services/context.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
-import { generateDeliverable, chatComplete, chatCompleteStream } from '../llm/gateway.js';
+import { generateDeliverable, chatComplete, chatCompleteStream, hasLiveProvider } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
 import { reserveCredits, type CreditReservation } from '../services/credits.js';
-import { reserveQuota, assertPlanActive, ensureQuota, type QuotaReservation } from '../services/tokenQuota.js';
+import { reserveQuota, assertPlanActive, RESERVE_TOKENS, type QuotaReservation } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
@@ -293,12 +293,24 @@ export async function sessionRoutes(app: FastifyInstance) {
   // 把整段会话汇总为「对话纪要」：版本化报告 + 沉淀进知识库
   app.post<{ Params: { id: string } }>('/sessions/:id/summarize', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    // 汇总同样会触发真实模型（summarizePoints），须与 /generate* 一样受月度额度门禁 + 实际扣减。
+    // summarizePoints 走 rawJson，不回传真实 token 用量，故不能只 ensureQuota(仅判断放行、从不扣减)——
+    // 那样只要余额一次性 >0 就能无限次触发真实模型调用，额度系统形同虚设。改用与 /generate* 一致的
+    // reserveQuota 预留 + 按 RESERVE_TOKENS 定额结算（成功=全额扣留，失败=退回）。
+    let quotaReservation: QuotaReservation | null = null;
     try {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：会话汇总是 AI 产出 → 到期拦 PLAN_EXPIRED(403)
-      // 汇总同样会触发真实模型（summarizePoints），须与 /generate* 一样受月度额度门禁，
-      // 否则配额耗尽后仍可无限次触发真实模型调用（额度系统被完全绕过）。
-      await ensureQuota(user.id);
+      quotaReservation = await reserveQuota(user.id, 1);
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+    }
+    try {
+      // mock/demo（未配置真实模型）下 summarizePoints 直接短路返回 null、无真实成本 → 全额退回预留，
+      // 与 /generate* 的 mock 路径（usage=ZERO_USAGE → settle(0) 全退）同一口径，避免误扣。
+      const live = await hasLiveProvider();
       const res = await summarizeSession({ tenantId: user.tenantId, userId: user.id, sessionId: req.params.id });
+      await quotaReservation.settle(live ? RESERVE_TOKENS : 0, 1);
       await recordAudit({
         tenantId: user.tenantId,
         userId: user.id,
@@ -307,6 +319,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       });
       return res;
     } catch (err) {
+      await quotaReservation.refund().catch(() => {});
       const e = err as Error & { statusCode?: number; code?: string };
       return reply.code(e.statusCode ?? 500).send({ error: e.message, code: e.code });
     }
