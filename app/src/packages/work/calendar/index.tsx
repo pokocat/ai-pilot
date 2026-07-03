@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro, { useDidShow, useShareAppMessage } from '@tarojs/taro';
+import Login from '../../../components/Login';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { api, type ChartSummary } from '../../../services/api';
@@ -9,6 +10,8 @@ import './index.scss';
 // 全年天时（战局「天势」卡的落地页）：排盘引擎算好的 12 个月攻守直接原生展示——
 // 不引导对话、不跳网页；右上角微信转发可分享（朋友打开看自己的天时，没命盘就地补生辰）。
 // 网页打印版（publishCard calendar）降级为页脚次要入口，供打印贴办公室。
+// 转发落地约束：被转发者是冷启动直达本页——未登录不外弹（本页自己承接 Login），
+// 401 一律 silent 处理不跳走；返回键无页面栈时兜底切回战局 tab。
 
 const SHICHEN: { label: string; hour: number | null }[] = [
   { label: '不确定', hour: null },
@@ -37,10 +40,26 @@ export default function TianshiCalendar() {
   const [hourIdx, setHourIdx] = useState(0);
   const [gender, setGender] = useState<'male' | 'female'>('male');
   const [busy, setBusy] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
 
+  const authed = s.isAuthed();
+  const loadChart = () => {
+    api.myChart().then((r) => { setChart(r.chart); setLoaded(true); }).catch((e) => {
+      setLoaded(true);
+      // 转发冷启动可能带着过期 token：静默处理，留在本页走登录承接，绝不弹走
+      if (s.handleApiError(e, { silent: true }) === 'unauthorized') setChart(null);
+    });
+  };
   useDidShow(() => {
-    api.myChart().then((r) => { setChart(r.chart); setLoaded(true); }).catch((e) => { setLoaded(true); s.handleApiError(e); });
+    if (!s.isAuthed()) { setLoaded(true); return; }
+    loadChart();
   });
+
+  // 冷启动（被转发者直达本页）无页面栈：返回键兜底切回战局 tab
+  const goBack = () => {
+    if (Taro.getCurrentPages().length > 1) Taro.navigateBack();
+    else Taro.switchTab({ url: '/pages/home/index' }).catch(() => Taro.reLaunch({ url: '/pages/home/index' }));
+  };
 
   useShareAppMessage(() => ({
     title: chart ? `我的 ${chart.monthlyOutlook.year} 年天时日历——看看你全年该攻还是守` : '看看你全年哪几个月该攻、哪几个月该守',
@@ -59,7 +78,8 @@ export default function TianshiCalendar() {
       else Taro.showToast({ title: '生成失败，请检查生辰', icon: 'none' });
     } catch (e) {
       Taro.hideLoading();
-      if (s.handleApiError(e) !== 'unauthorized') Taro.showToast({ title: '排盘失败，请重试', icon: 'none' });
+      if (s.handleApiError(e, { silent: true }) === 'unauthorized') setShowLogin(true);
+      else Taro.showToast({ title: '排盘失败，请重试', icon: 'none' });
     }
     setBusy(false);
   };
@@ -84,9 +104,19 @@ export default function TianshiCalendar() {
 
   return (
     <View className={`page tcal ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-      <SafeHeader title="全年天时" onBack={() => Taro.navigateBack()} />
+      <SafeHeader title="全年天时" onBack={goBack} />
       <View className="pad">
-        {chart ? (
+        {!authed ? (
+          <>
+            <View className="tc-hero">
+              <Text className="tc-year serif">看看你全年该攻还是守</Text>
+              <Text className="tc-sub">军师按你的生辰逐月推演经营节奏：哪几个月适合签约扩张、哪几个月该收缩保现金流、拐点在哪。登录后一分钟生成。</Text>
+            </View>
+            <View className="tc-btn" style={{ background: accent, marginTop: '26px' }} onClick={() => setShowLogin(true)}>
+              <Text>登录 · 看我的全年天时</Text>
+            </View>
+          </>
+        ) : chart ? (
           <>
             <View className="tc-hero">
               <Text className="tc-year serif">{chart.monthlyOutlook.year} 年天时日历</Text>
@@ -169,6 +199,7 @@ export default function TianshiCalendar() {
         ) : null}
         <Text className="tc-foot">命理内容为文化视角的经营节奏参考，不构成决策依据；「人谋可以改命」。</Text>
       </View>
+      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadChart(); }} />
     </View>
   );
 }
