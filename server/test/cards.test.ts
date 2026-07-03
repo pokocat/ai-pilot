@@ -104,3 +104,25 @@ test('叙事线/谶语存档：PUT 往返 + 注入块带「保持前后一致」
   assert.match(block!, /命运叙事线：.*不得重生成矛盾版本/);
   assert.match(block!, /年度谶语：「蛰龙勿用待秋风」/);
 });
+
+test('卡片链接走自有域名（微信可直接打开）+ 小程序码注入降级安全', async () => {
+  const token = await login(uniquePhone(), '域名用户');
+  const r = await api('POST', '/api/cards/daily', { token, body: {} });
+  assert.equal(r.status, 200);
+  // 品牌域名链接（不是 OSS）：{PUBLIC_BASE_URL}/api/r/:id，微信聊天里点开即达
+  assert.match(r.body.htmlUrl, /\/api\/r\/[a-z0-9]+$/i, '卡片应返回自有域名 /api/r/ 链接');
+  assert.ok(!/aliyuncs\.com/.test(r.body.htmlUrl), '卡片不走 OSS 域名');
+
+  // 测试环境铁律：不打微信真实接口 → 无小程序码块
+  const row = await prisma.reportHtml.findFirst({ orderBy: { createdAt: 'desc' } });
+  assert.ok(row && !row.html.includes('长按识别小程序码'), '测试环境不应产生小程序码');
+
+  // 注入器行为：有码 → 页脚出现长按识别块且结构完整；无码 → 原样
+  const { withMiniCode } = await import('../src/services/cardHtml.ts');
+  const html = '<html><body><div class="card">x</div></body></html>';
+  assert.equal(withMiniCode(html, null), html);
+  const withQr = withMiniCode(html, 'data:image/png;base64,AAAA');
+  assert.match(withQr, /mp-code/);
+  assert.match(withQr, /长按识别小程序码/);
+  assert.match(withQr, /<\/div><\/body><\/html>$/);
+});

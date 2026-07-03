@@ -169,3 +169,36 @@ export async function getPhoneNumberByCode(code: string): Promise<string> {
   if (!phone) throw httpError('获取手机号失败：未返回号码', 502, 'WECHAT_PHONE_MISSING');
   return String(phone).trim();
 }
+
+// ───────────────────────── 小程序码（网页卡片 → 小程序回流） ─────────────────────────
+// getwxacode/unlimit：scene 携带来源（如 card=daily），码打在 B 级卡片页脚，微信内长按识别直达小程序。
+// 铁律：测试环境 / 凭据未配置 / 接口失败一律返回 null——卡片降级为无码，绝不让分享链路被外部依赖卡死。
+export async function miniCodeDataUri(scene: string): Promise<string | null> {
+  if (process.env.NODE_ENV === 'test') return null;
+  let token: string;
+  try {
+    token = await getAccessToken();
+  } catch {
+    return null; // 未配置凭据/取 token 失败：降级无码
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`https://api.weixin.qq.com/wxa/getwxacode/unlimit?access_token=${token}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // check_path:false → 不校验 page 已发布；不传 page 默认落在小程序主页，对老版本/体验版都安全
+      body: JSON.stringify({ scene: scene.slice(0, 32), width: 280, check_path: false }),
+      signal: controller.signal,
+    });
+    const type = res.headers.get('content-type') || '';
+    if (!res.ok || !type.includes('image')) return null; // 出错时微信返回 JSON（如 41030）
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 100) return null;
+    return `data:image/png;base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

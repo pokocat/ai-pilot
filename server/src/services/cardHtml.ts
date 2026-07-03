@@ -8,7 +8,8 @@ import { activeCasefile, todayStr } from './casefile.js';
 import { reviewStreak } from './reviewLog.js';
 import { syncProgress } from './progress.js';
 import { loadChart, computeChart, type ChartView, type PaipanInput } from './paipan.js';
-import { publishHtml } from './reportHtml.js';
+import { miniCodeDataUri } from './wechat.js';
+import { env } from '../env.js';
 
 // 经典语录（V6.0 §18 语录库，公版内容）：按日期确定性轮换。
 const QUOTES = [
@@ -51,6 +52,9 @@ const BASE_CSS = `
   .brand { font-family: "Noto Serif SC", serif; font-size: 14px; font-weight: 700; color: #9B7C3F; letter-spacing: .12em; }
   .edition { margin-top: 4px; font-size: 10px; color: #969BA1; letter-spacing: .14em; }
   .refer { margin-top: 8px; font-size: 11px; color: #565C63; }
+  .mp-code { padding: 0 20px 22px; text-align: center; }
+  .mp-code img { width: 96px; height: 96px; display: block; margin: 0 auto 6px; }
+  .mp-code span { font-size: 11px; color: #565C63; font-weight: 600; }
 `;
 
 function page(title: string, body: string): string {
@@ -156,6 +160,21 @@ export function renderFateCard(chart: ChartView, friendName?: string): string {
 export type CardKind = 'daily' | 'calendar' | 'fate';
 
 /** 生成并发布卡片，返回可分享链接。 */
+/** 页脚注入小程序码（长按识别 → 直达小程序，网页卡的回流钩子）；无码（测试/未配置/接口失败）原样返回。 */
+export function withMiniCode(html: string, qrDataUri: string | null): string {
+  if (!qrDataUri) return html;
+  const block = `<div class="mp-code"><img src="${qrDataUri}" alt="军师参谋部小程序码" /><span>长按识别小程序码 · 找军师参谋部</span></div>`;
+  return html.replace('</div></body>', `${block}</div></body>`);
+}
+
+/** 卡片发布：存库留底 → 永远返回自有域名链接（{PUBLIC_BASE_URL}/api/r/:id）。
+ *  刻意不走 OSS——分享出去是品牌域名、微信内直接打开；OSS 托管保留给报告（reportHtml.publishHtml）。 */
+async function publishCardHtml(tenantId: string, title: string, html: string, kind: CardKind): Promise<string> {
+  const finalHtml = withMiniCode(html, await miniCodeDataUri(`card=${kind}`));
+  const row = await prisma.reportHtml.create({ data: { tenantId, title, html: finalHtml } });
+  return `${env.publicBaseUrl}/api/r/${row.id}`;
+}
+
 export async function publishCard(args: {
   tenantId: string;
   userId: string;
@@ -166,17 +185,17 @@ export async function publishCard(args: {
   verse?: string | null;    // calendar 卡：年度谶语（战略档案存档）
 }): Promise<string> {
   if (args.kind === 'daily') {
-    return publishHtml(args.tenantId, '每日战报', await renderDailyCard(args));
+    return publishCardHtml(args.tenantId, '每日战报', await renderDailyCard(args), 'daily');
   }
   if (args.kind === 'calendar') {
     const chart = await loadChart(args.userId);
     if (!chart) throw Object.assign(new Error('还没有命盘，先在建档里补生辰'), { statusCode: 400, code: 'NO_CHART' });
-    return publishHtml(args.tenantId, '天时日历', renderCalendarCard(chart, args.ownerLabel || '主理人', args.verse));
+    return publishCardHtml(args.tenantId, '天时日历', renderCalendarCard(chart, args.ownerLabel || '主理人', args.verse), 'calendar');
   }
   // fate：优先朋友生辰现算（送你一卦，不落库）；否则用自己的命盘
   const chart = args.friendBazi
     ? computeChart(args.friendBazi, now().getFullYear())
     : await loadChart(args.userId);
   if (!chart) throw Object.assign(new Error('缺少生辰：提供朋友生辰，或先补自己的命盘'), { statusCode: 400, code: 'NO_CHART' });
-  return publishHtml(args.tenantId, '天命速写', renderFateCard(chart, args.friendName));
+  return publishCardHtml(args.tenantId, '天命速写', renderFateCard(chart, args.friendName), 'fate');
 }
