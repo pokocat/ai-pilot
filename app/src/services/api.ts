@@ -65,6 +65,74 @@ export interface ChartSummary {
   monthlyOutlook: { year: number; months: { month: number; phase: string; turning: boolean }[] };
 }
 
+type NetworkReason = 'timeout' | 'offline' | 'domain' | 'ssl' | 'dns' | 'unreachable' | 'cancelled' | 'network';
+
+function networkErrorInfo(errMsg: string, origin: string): { reason: NetworkReason; message: string; technicalMessage: string } {
+  const msg = errMsg.toLowerCase();
+  if (/timeout|timed out|超时/.test(msg)) {
+    return {
+      reason: 'timeout',
+      message: '军师响应超时了，请稍后重试。',
+      technicalMessage: `请求超时：${errMsg || 'Taro.request timeout'}。API：${origin}`,
+    };
+  }
+  if (/abort|cancel|canceled|cancelled|取消/.test(msg)) {
+    return {
+      reason: 'cancelled',
+      message: '请求已取消。',
+      technicalMessage: `请求被取消：${errMsg || 'request aborted'}。API：${origin}`,
+    };
+  }
+  if (/domain|合法域名|url not in domain|not in domain list/.test(msg)) {
+    return {
+      reason: 'domain',
+      message: '服务连接配置还没生效，请稍后再试。',
+      technicalMessage: `小程序请求被合法域名拦截，请在微信后台 request 合法域名配置 ${origin} 后重新打开小程序。原始错误：${errMsg}`,
+    };
+  }
+  if (/ssl|certificate|cert|handshake|证书/.test(msg)) {
+    return {
+      reason: 'ssl',
+      message: '服务安全连接异常，请稍后再试。',
+      technicalMessage: `HTTPS/证书连接失败：${errMsg || 'SSL error'}。API：${origin}`,
+    };
+  }
+  if (/dns|name not resolved|resolve host|unknown host|域名解析/.test(msg)) {
+    return {
+      reason: 'dns',
+      message: '暂时解析不到军师服务，请稍后重试。',
+      technicalMessage: `DNS/域名解析失败：${errMsg || 'DNS error'}。API：${origin}`,
+    };
+  }
+  if (/offline|internet disconnected|network unavailable|fail -2|断网|无网络/.test(msg)) {
+    return {
+      reason: 'offline',
+      message: '当前网络不可用，请检查网络后重试。',
+      technicalMessage: `设备网络不可用：${errMsg || 'offline'}。API：${origin}`,
+    };
+  }
+  if (/connection refused|connection reset|econnreset|econnrefused|failed to connect|无法连接/.test(msg)) {
+    return {
+      reason: 'unreachable',
+      message: '暂时连不上军师服务，请稍后重试。',
+      technicalMessage: `服务不可达：${errMsg || 'connection failed'}。API：${origin}`,
+    };
+  }
+  return {
+    reason: 'network',
+    message: '当前网络有点不稳，请稍后重试。',
+    technicalMessage: `网络请求失败：${errMsg || 'unknown request failure'}。API：${origin}`,
+  };
+}
+
+function httpErrorInfo(statusCode: number, data: unknown): { message: string; code?: string } {
+  const body = (data || {}) as { error?: string; code?: string };
+  if (statusCode === 408 || statusCode === 504) return { message: '军师响应超时了，请稍后重试。', code: body.code };
+  if (statusCode === 429) return { message: '请求有点频繁，请稍后再试。', code: body.code };
+  if (statusCode >= 500) return { message: body.error || '军师服务暂时不可用，请稍后重试。', code: body.code };
+  return { message: body.error || `HTTP ${statusCode}`, code: body.code };
+}
+
 // 导出给领域服务复用（如 services/dossier 案卷闭环）；页面代码仍应走 api.* 方法。
 export async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
   const url = `${BASE_URL}${path}`;
@@ -79,21 +147,16 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
   } catch (e) {
     const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
     const origin = BASE_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
-    const isDomainBlocked = errMsg.includes('domain') || errMsg.includes('合法域名');
-    const message = isDomainBlocked
-      ? '军师暂时没有连上服务，请稍后再试。'
-      : '当前网络有点不稳，请稍后重试。';
-    const technicalMessage = isDomainBlocked
-      ? `小程序请求被合法域名拦截，请在微信后台 request 合法域名配置 ${origin} 后重新打开小程序。`
-      : `网络请求失败，请确认已配置 request 合法域名 ${origin}，并重新打开小程序。`;
-    throw Object.assign(new Error(message), { code: 'NETWORK_ERROR', errMsg, url, origin, technicalMessage });
+    const info = networkErrorInfo(errMsg, origin);
+    throw Object.assign(new Error(info.message), { code: 'NETWORK_ERROR', reason: info.reason, errMsg, url, origin, technicalMessage: info.technicalMessage });
   }
   if (res.statusCode === 401) {
     clearToken(); // token 失效：清掉，下次进首页回到登录
     throw Object.assign(new Error((res.data as any)?.error || '未登录'), { code: 'UNAUTHORIZED', data: res.data });
   }
   if (res.statusCode >= 400) {
-    throw Object.assign(new Error((res.data as any)?.error || `HTTP ${res.statusCode}`), { data: res.data });
+    const info = httpErrorInfo(res.statusCode, res.data);
+    throw Object.assign(new Error(info.message), { code: info.code, statusCode: res.statusCode, data: res.data });
   }
   return res.data as T;
 }

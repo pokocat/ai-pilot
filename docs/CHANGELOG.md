@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-03** · **网络错误按真实原因友好分流**：`api.request` 新增 `networkErrorInfo/httpErrorInfo`，将请求失败区分为超时、断网、合法域名配置、SSL/证书、DNS、服务不可达、取消、普通网络波动，并对 HTTP 408/504、429、5xx 做用户友好映射；前台展示真实但不技术化的原因，`reason/technicalMessage/origin/url/statusCode` 保留给开发排查。影响面：app API 错误映射 + AGENTS/CHANGELOG。
+
 - **2026-07-03** · **网络错误提示去技术化**：小程序 `Taro.request` reject 不再把 request 合法域名和 API 域名直接展示给用户，前台只提示“军师暂时没有连上服务/当前网络有点不稳”；原合法域名排查说明保留在错误对象 `technicalMessage`、`origin`、`url` 字段，方便开发排查。影响面：app API 错误映射 + AGENTS/CHANGELOG。
 
 - **2026-07-03** · **卡片分享链接改自有域名 + 小程序码回流**：B 级卡片发布不再走 OSS，改 `cardHtml.publishCardHtml` 直接返回 `{PUBLIC_BASE_URL}/api/r/:id`（品牌域名、微信聊天内点开即达；`/api/r/:id` 本就是不可猜 id 免鉴权公开页）；`wechat.miniCodeDataUri`（getwxacode/unlimit + stable_token 复用，check_path:false，测试/未配凭据/接口失败一律 null 降级）生成小程序码 base64 内嵌卡片页脚「长按识别 · 找军师参谋部」，网页卡自带回流钩子。OSS 托管保留给报告（reportHtml.publishHtml 未动）。影响面：server cardHtml/wechat + cards 测试（330）。
