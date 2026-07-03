@@ -22,6 +22,16 @@ function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
   return eff === 'mock' ? null : eff;
 }
 
+/**
+ * 供 rawJson 系调用方（extractGraphTriples/summarizePoints 等不回传真实 token 用量）判断：
+ * 本次是否会真正触达真实模型。未就绪（mock/测试）时这些函数直接短路返回空，不产生真实成本，
+ * 调用方应据此把预留的额度全额退回，而非按估算定额扣费（避免 mock/demo 环境误扣真实用户额度）。
+ */
+export async function hasLiveProvider(): Promise<boolean> {
+  const cfg = await getAiConfig();
+  return liveProvider(cfg) !== null;
+}
+
 // 真实 provider 调用失败：生产（AI_FALLBACK_MOCK=false）不静默兜底 mock，抛错让前端提示重试，避免答非所问。
 function aiUnavailable(err: unknown): Error {
   const aborted = /abort/i.test((err as Error)?.message || '');
