@@ -169,6 +169,9 @@ export const api = {
     IS_MOCK ? Promise.resolve({ progress: null as ProgressView | null }) : request<{ progress: ProgressView | null }>('/progress'),
   reviews: () =>
     IS_MOCK ? Promise.resolve({ items: [], streak: 0 }) : request<{ items: unknown[]; streak: number }>('/reviews'),
+  // B 级卡片（每日战报/天时日历/天命速写）：返回可分享网页链接；mock 无渲染管道返回 null
+  publishCard: (kind: 'daily' | 'calendar' | 'fate', body?: { friendName?: string; friendBazi?: BaziBody }) =>
+    IS_MOCK ? Promise.resolve({ htmlUrl: null as string | null }) : request<{ htmlUrl: string | null }>(`/cards/${kind}`, 'POST', body ?? {}),
   todaySaying: () => (IS_MOCK ? mock.todaySaying() : request<TodaySaying>('/sayings/today')),
   sessions: () => (IS_MOCK ? mock.sessions() : request<SessionItem[]>('/sessions')),
   session: (id: string) => (IS_MOCK ? mock.session(id) : request<SessionDetail>(`/sessions/${id}`)),

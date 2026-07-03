@@ -114,9 +114,13 @@ ${body}
  *  配了 OSS → 传 OSS 返回公网静态链接(不暴露后端域名);没配/上传失败 → 回退后端 /api/r/:id。
  *  DB report_html 行始终保留(留底 + 兜底兜服务)。 */
 export async function publishReport(tenantId: string | null, d: Deliverable): Promise<string> {
-  const html = renderReportHtml(d);
+  return publishHtml(tenantId, d.title || '咨询成果', renderReportHtml(d));
+}
+
+/** 通用 HTML 发布（报告与 B 级卡片共用）：存库留底 → OSS 公网链接，失败回退后端 /api/r/:id。 */
+export async function publishHtml(tenantId: string | null, title: string, html: string): Promise<string> {
   const row = await prisma.reportHtml.create({
-    data: { tenantId: tenantId ?? null, title: d.title || '咨询成果', html },
+    data: { tenantId: tenantId ?? null, title, html },
   });
   if (ossConfigured()) {
     try {

@@ -111,6 +111,23 @@ export default function Studio() {
       ? `围绕这条军令帮我产出可直接使用的内容脚本：「${firstUndone.text}」。`
       : '基于我们最近认可的方案，帮我生成今天要发布的内容脚本。');
 
+  // 每日战报卡（M4 PR-15）：服务端按真实账本渲染，复制可分享链接
+  const shareDailyCard = async () => {
+    Taro.showLoading({ title: '生成战报卡…' });
+    try {
+      const r = await api.publishCard('daily');
+      Taro.hideLoading();
+      if (r.htmlUrl) {
+        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '战报卡链接已复制 · 可发朋友圈/群', icon: 'none' }) });
+      } else {
+        Taro.showToast({ title: '本地预览模式无卡片', icon: 'none' });
+      }
+    } catch {
+      Taro.hideLoading();
+      Taro.showToast({ title: '生成失败，请重试', icon: 'none' });
+    }
+  };
+
   const dateStr = (() => { const d = new Date(); return `${d.getMonth() + 1}月${d.getDate()}日`; })();
 
   // 今日最重要（today-focus）：先补资料 > 首条未完成军令
@@ -361,6 +378,10 @@ export default function Studio() {
               <View className="rc-btn" onClick={genReview}>
                 <Icon name="doc" size={15} color="#fff" />
                 <Text>生成今日复盘</Text>
+              </View>
+              <View className="rc-btn ghost" onClick={shareDailyCard}>
+                <Icon name="image" size={15} color={accent} />
+                <Text>生成每日战报卡（可分享）</Text>
               </View>
             </View>
             <View className="remind card">

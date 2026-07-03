@@ -126,7 +126,7 @@ export async function profileRoutes(app: FastifyInstance) {
     return { strategic: await loadStrategicProfile(user.id) };
   });
 
-  app.put<{ Body: { mainContradiction?: string; positioning?: string; track?: string; stage?: string } }>(
+  app.put<{ Body: { mainContradiction?: string; positioning?: string; track?: string; stage?: string; narrative?: string; verse?: string } }>(
     '/profile/strategic',
     async (req) => {
       const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
@@ -139,6 +139,8 @@ export async function profileRoutes(app: FastifyInstance) {
           positioning: pick(req.body?.positioning),
           track: pick(req.body?.track),
           stage: pick(req.body?.stage)?.slice(0, 60),
+          narrative: pick(req.body?.narrative)?.slice(0, 500),
+          verse: pick(req.body?.verse)?.slice(0, 40),
         },
       });
       await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.strategic.update', payload: {} });

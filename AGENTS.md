@@ -199,6 +199,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `GET /decisions` · `POST /decisions` · `POST /decisions/:id/verify` | 决策日志：列表+统计 · 手动记录 · 验证（correct/revise，准确率服务端算） | 是 |
 | `GET /prophecies` · `POST /prophecies` · `POST /prophecies/:id/verify` | 预言账本：列表+命中率 · 显式记录 · 对账（hit/miss；抽取只走真实模型不产生伪预言） | 是 |
 | `POST /casefile/review` · `GET /reviews` · `GET /progress` | 发起复盘（day 快照军令/回填事实+连续天数+同步段位） · 复盘账本 · 段位/里程碑 | 是 |
+| `POST /cards/:kind`（daily/calendar/fate） | B 级卡片发布 → 可分享 htmlUrl：每日战报（真实账本） · 天时日历（命盘逐月+谶语） · 天命速写（送卦：朋友生辰现算不落库） | 是 |
 | `GET /sayings/today` | 每日献策 | 否 |
 | `GET /plans` · `POST /plans/:id/purchase` · `POST /plans/:id/order` · `POST /pay/wechat/notify` | 套餐列表 · 演示购买/切换套餐并入账算力 · 微信 JSAPI 下单 · 微信支付回调幂等入账 | 列表否 · 购买/下单是 · 回调否 |
 | `GET /sessions` · `GET/DELETE /sessions/:id` | 会话列表/详情/删除 | 是 |
@@ -243,6 +244,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 
 ### 8.3 其它服务
 - `services/context.ts`：`resolveUser`（严格鉴权）、`buildGenContext`（注入 档案/基准/记忆/本命色 + **军师档案 + 项目背景 + 显式引用 + 知识库混合召回 + 天势档案**）。
+- `services/cardHtml.ts`（M4 PR-15 第一批）：B 级卡片渲染——每日战报（军令/对齐率/回填/段位/连续天数）、天时日历（命盘 12 月攻守+拐点+谶语）、天命速写（送你一卦：命格/大势/建议由命盘确定性生成；朋友生辰 `computeChart` 现算**不落库**）。铁律：卡上每个数字都来自服务端账本，读不到整块不显示；品牌一律军师参谋部（V6.0 原稿外置 CSS 未保留，样式按小程序设计体系重制）；发布走 `reportHtml.publishHtml`（存库留底 + OSS/后端 `/api/r/:id` 兜底）。叙事线/谶语存 `StrategicProfile.extraJson`（PUT /profile/strategic 接受 narrative/verse，注入块带「跨月复述一致/全年沿用」口径）。剩余 9 卡 + A 级模板见 §13。
 - `data/industryPacks.ts` 深度字段（M4 PR-19）：`decisionChain/ticketRange/benchmarkCases/mingLink` 可选，配了才拼进「行业视角」注入行；美业与大健康已拆分为两个包（新增行业包=建档选项自动 +1，app Picker 兜底问卷需手动同步）。
 - `services/intent.ts`（M3 编排与适配，全部确定性规则）：`detectIntent`（V6.0 §3 入口识别：复盘六层触发词/紧急/择时/团队匹配/送你一卦/情绪→师父）→ `modeDirective` 模式指令；`Session.mode` 粘性存储（`resolveMode` 本轮检测优先、检测不出沿用；复盘意图在 sessions 路由自动落对应层 ReviewLog）；`detectInnerState`→`roleDirective` 五角色语气（教官/参谋长/大哥/战略家/师父）；`stageOf/stageDirective` 营收阶段自适应（问卷已改营收区间，旧标签兼容）；诊断轮次由历史用户消息数计算注入。注入位：模式/角色/轮次=【本轮导引】dynamic 首位，阶段=stable。**本命色语气注入已移除（PR-14，本命色回归纯 UI 品牌色）**，`{本命色}` 占位符路径保留。
 - `services/scheduler.ts`（M1 定时任务框架）：任务注册制 + 进程内周期扫描（生产单实例；`NODE_ENV=test` 不自启，测试直接 `runJob/scan*` 驱动）；任务彼此隔离（单任务崩不影响其它）。已挂：`casefile-idle-recall`（案卷 ≥48h 未推进 → 登记 `system.recall.candidate` 审计，按用户按天幂等）；M2 挂：久不复盘提醒/预言到期验证/里程碑解锁。**微信订阅消息是一次性授权**：发送额度靠前端在打卡/复盘完成动线里逐次请求订阅，定时任务只负责「找出该提醒谁」。
@@ -522,7 +524,8 @@ mock 可随时预览；**正式上传/审核**还需：
   1. **拆军令 LLM 结构化升级**：执行闭环已服务端化（`Casefile/CasefileOrder/CasefileMetric` + `/casefile*`，M0 PR-EX 完成）；「认可方案→拆军令」目前仍是分节启发式提取 + 整体 aligned=true 标注，待升级为 LLM 结构化拆解与逐条对齐性标注（M2 复盘阶段接入，配合对齐率计算）。
   2. **主军师身份的 prod 迁移待执行（M1 PR-5b 仓库已切，线上未动）**：仓库 seed 已将 V6.0 主线人格移交 `general`（strat 回归专业参谋）；但 **prod DB 现状仍是 strat=V6.0 全文、general=通用模板**（seed 不会在 prod 重跑）。上线 M1 时需一次性迁移：把 prod `agent.systemPrompt`(key=general) 更新为 V6.0 全文（注意保留 prod strat 的 `skillsConfig.deliverableMode='on-demand'` 等线上独有配置，迁移前先备份两行），strat 换回专业参谋模板；走 admin「智能体」编辑或 DB UPDATE。
   3. **总军师派单引擎（consult_specialist）未建**：调度白名单目前语义=「unlock 已解锁 → 可进专属线程深聊」（`assertAgentAccess` 既有行为）；总军师自动派单/结论回流（多 agent 编排 + 未解锁 specialist 标记 skipped）待 M2/M3 建 orchestrate 层时实现。同期把 on-demand 成果产出移交 general（当前 general 无 deliverableKey，成果卡仍由专业军师产出），避免过早切换损失主线程流式体验。
-  4. **排盘引擎 v1 已知边界**（`services/paipan.ts` 头注同步）：称骨暂缓（60 干支年表需可靠来源核对后再上，防带错表）；格局仅月令取格（不处理从格/化格）；身强弱/喜用为 v1 计分启发式；真太阳时只做经度平太阳时（未含均时差；城市→经度映射 `data/cityLongitude.ts` 覆盖 ~48 城，未命中不校正）；阴历闰月后端支持（负 month）但前端采集 UI 暂未提供闰月选项。战略档案 v1 回写触发点=认可方案+手动校准，逐轮 LLM 抽取待 M2 与决策日志共建抽取管道。引擎升级须提 `PAIPAN_ENGINE_VERSION` 并按版本复算，不得悄改历史命盘。
+  4. **B 级卡片剩余 9 张 + A 级报告模板待做（M4 PR-15 第二批）**：已上线 每日战报/天时日历/天命速写 三张（`services/cardHtml.ts`）；剩余 周/月/季战报、年度里程碑图、紧急决策推演卡、晋升卡、性格操作手册卡、定位一页纸、十二问诊断卡 + A 级七章报告模板——其中战报类依赖对话内容沉淀（复盘产出结构化），晋升卡/性格手册数据已就绪可先做；卡片骨架语义参考 Notion 原稿（须按 §0 #10 去米诺）。另：智库整理管道（PR-20：待整理区→AI 粗分→深度整理付费→确认入库）未开工。
+  5. **排盘引擎 v1 已知边界**（`services/paipan.ts` 头注同步）：称骨暂缓（60 干支年表需可靠来源核对后再上，防带错表）；格局仅月令取格（不处理从格/化格）；身强弱/喜用为 v1 计分启发式；真太阳时只做经度平太阳时（未含均时差；城市→经度映射 `data/cityLongitude.ts` 覆盖 ~48 城，未命中不校正）；阴历闰月后端支持（负 month）但前端采集 UI 暂未提供闰月选项。战略档案 v1 回写触发点=认可方案+手动校准，逐轮 LLM 抽取待 M2 与决策日志共建抽取管道。引擎升级须提 `PAIPAN_ENGINE_VERSION` 并按版本复算，不得悄改历史命盘。
   2. **提醒与日历**：设计要求 09:00 军令 / 21:30 复盘 / 周五周复盘提醒。需微信订阅消息模板 + 服务端定时任务；前端已亮框架（执行页复盘视图）。
   3. **数据源授权绑定**：店铺（淘宝/抖店/小红书）、内容账号、企业工商（企查查类）、企微 CRM 均无真实接入，`packages/work/bindings` 为目录引导（仅财务表走资料库上传）。每类需独立 OAuth/采买与同步管道，且按 PRD 属可单独收费能力。
   4. **模块/Skill 状态持久化**：市场为静态目录，「启用」= 跳军师对话承接；添加/隐藏/排序/基础版-深度版状态、模块↔报告↔任务关联（设计里「报告已回写模块」）需后端 `UserModule` 建模。

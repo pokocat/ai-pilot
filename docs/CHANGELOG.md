@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-02** · **M4 PR-15/17 第一批：B 级卡片（每日战报/天时日历/天命速写）+ 叙事线/谶语存档**：新增 `services/cardHtml.ts` + `POST /cards/:kind`——①每日战报卡：当日军令完成/对齐率/回填三数/段位/连续复盘天数全部读服务端账本，语录按日确定性轮换（公版语录）；②天时日历卡：命盘 12 月攻守网格+拐点标注+谶语；③天命速写卡（送你一卦·裂变）：命格速写/今年大势/一条建议由命盘确定性生成，**朋友生辰现算不落库**，底部引导找军师参谋部。发布复用 `publishHtml`（reportHtml 抽出的通用链路：存库留底+OSS/后端兜底）。叙事线/谶语：`StrategicProfile.extraJson` 存档（PUT /profile/strategic 接受 narrative/verse），注入块带「跨月复述一致/全年沿用」口径——V6.0「数月后还能复述同一句谶语」达成。前端：执行页复盘视图新增「生成每日战报卡（可分享）」。品牌红线：卡片测试含无米诺断言。测试 +5（323→328）✓；双端构建 ✓。剩余 9 卡+A 级模板+PR-20 智库管道记 §13。影响面：server cardHtml/cards 路由/reportHtml 重构/strategicProfile + app 执行页/api + AGENTS/CHANGELOG。
+
 - **2026-07-03** · **小程序聊天禁用 SSE 流式避免假网络失败**：`STREAM_CHAT` 改为仅 H5/Web 生效，小程序端聊天固定走 `/generate-sync`；`generateStream` 加平台守卫并移除 weapp `enableChunked/onChunkReceived` 分支，避免 `/generate` 已在后端生成并落库但微信 chunk/fail 回调让当前页显示“网络请求失败”，返回再进才看到回复。AGENTS 同步小程序端不得调用 SSE `/generate`。影响面：app config + streaming/chat + AGENTS/CHANGELOG。
 
 - **2026-07-03** · **补齐战局页本命色真机联动**：主题类显式覆盖 `--green/--green-hero/--gold/--gold-soft` 等业务 token，避免小程序真机对链式 CSS 变量重算不完整导致 hero/卡片仍保持默认绿；战局页模块 pill、能力标签、CTA 阴影、天时条和 hero 辅助文字改走 `--accent` 系列。PRODUCT/AGENTS 同步“业务主色随本命色联动，语义风险色固定”。影响面：app 全局主题 token + home 样式 + PRODUCT/AGENTS/CHANGELOG。

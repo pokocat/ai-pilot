@@ -311,3 +311,9 @@
   box-shadow: 0 12px 24px rgba(30, 90, 67, .2);
 }
 .exec-cta:active { opacity: .85; }
+
+/* —— 战报卡分享按钮（M4 PR-15）：主按钮下的次级样式 —— */
+.rc-btn.ghost {
+  margin-top: 9px;
+  color: var(--green); background: var(--green-soft);
+}
