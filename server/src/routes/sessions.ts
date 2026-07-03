@@ -8,7 +8,7 @@ import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
 import { reserveCredits, type CreditReservation } from '../services/credits.js';
-import { reserveQuota, assertPlanActive, type QuotaReservation } from '../services/tokenQuota.js';
+import { reserveQuota, assertPlanActive, ensureQuota, type QuotaReservation } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
@@ -248,6 +248,9 @@ export async function sessionRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：会话汇总是 AI 产出 → 到期拦 PLAN_EXPIRED(403)
+      // 汇总同样会触发真实模型（summarizePoints），须与 /generate* 一样受月度额度门禁，
+      // 否则配额耗尽后仍可无限次触发真实模型调用（额度系统被完全绕过）。
+      await ensureQuota(user.id);
       const res = await summarizeSession({ tenantId: user.tenantId, userId: user.id, sessionId: req.params.id });
       await recordAudit({
         tenantId: user.tenantId,

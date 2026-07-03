@@ -3,6 +3,7 @@
 import type { FastifyInstance } from 'fastify';
 import { resolveUser } from '../services/context.js';
 import { ingestTextToGraph, upsertTriples, queryRelations, listEntities, type Triple } from '../services/knowledgeGraph.js';
+import { assertPlanActive, ensureQuota } from '../services/tokenQuota.js';
 
 export async function graphRoutes(app: FastifyInstance) {
   // 从文本抽取并入图（运营/对话汇总可调）。也可直接传 triples 手工录入。
@@ -17,6 +18,15 @@ export async function graphRoutes(app: FastifyInstance) {
       }
       const text = (b.text ?? '').trim();
       if (!text) return reply.code(400).send({ error: '缺少 text 或 triples', code: 'TEXT_REQUIRED' });
+      // text 分支会触发真实模型抽取，须与 /generate* 同口径受套餐到期锁 + 月度额度门禁；
+      // 手工 triples 分支不涉及模型调用，不受此限。
+      try {
+        await assertPlanActive(user.id);
+        await ensureQuota(user.id);
+      } catch (e) {
+        const err = e as Error & { statusCode?: number; code?: string };
+        return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+      }
       const r = await ingestTextToGraph(user.tenantId, b.projectId ?? null, text, { source: b.source ?? 'conversation' });
       return r;
     },
