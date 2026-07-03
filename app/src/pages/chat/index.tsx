@@ -351,17 +351,20 @@ export default function Chat() {
   };
   const openGuide = (url: string) => Taro.navigateTo({ url });
 
-  // 生成网页版报告（render_report → OSS 托管），复制可分享链接
+  // 生成网页版报告（render_report → OSS 托管，接口幂等）→ 直接打开：weapp 走内置 web-view 页，H5 开新窗口。
   const shareReport = async (messageId?: string) => {
     if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出成果', icon: 'none' }); return; }
     Taro.showLoading({ title: '生成网页版…' });
     try {
       const r = await api.renderReport(sessionId, messageId);
       Taro.hideLoading();
-      if (r.htmlUrl) {
-        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '网页版链接已复制 · 粘到聊天/浏览器打开', icon: 'none' }) });
+      if (!r.htmlUrl) { Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' }); return; }
+      if (IS_WEAPP) {
+        Taro.navigateTo({ url: `/packages/work/webview/index?url=${encodeURIComponent(r.htmlUrl)}` });
+      } else if (typeof window !== 'undefined' && window.open) {
+        window.open(r.htmlUrl, '_blank');
       } else {
-        Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' });
+        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '网页版链接已复制', icon: 'none' }) });
       }
     } catch {
       Taro.hideLoading();
