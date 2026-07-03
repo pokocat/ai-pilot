@@ -215,9 +215,16 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   // 行业身份层（L1）：客户画像识别出行业时，给任意智能体叠加一层「行业视角」（persona + 关键经营杠杆），
   // 让军师/各顾问「懂这个行业」。放 stable 段（按用户行业稳定）以命中提示词缓存；未识别行业则不注入。
   const pack = resolveIndustryPack(ctx.profile?.industry);
+  // 深度字段（M4 PR-19）：决策链/客单价/标杆/天势关联，配了才注入
+  const depth = [
+    pack.decisionChain ? `客户决策链：${pack.decisionChain}。` : '',
+    pack.ticketRange ? `客单价参考：${pack.ticketRange}。` : '',
+    pack.benchmarkCases ? `对标参考：${pack.benchmarkCases}。` : '',
+    pack.mingLink ? `天势关联：${pack.mingLink}` : '',
+  ].filter(Boolean).join('');
   const industryLine = pack.key === GENERIC_INDUSTRY.key
     ? ''
-    : `（行业视角 · ${pack.name}：${pack.persona}经营上重点看：${pack.levers.join('、')}。据此理解客户所处行业的结构与常识，但不得据此编造该客户的具体数据。）`;
+    : `（行业视角 · ${pack.name}：${pack.persona}经营上重点看：${pack.levers.join('、')}。${depth}据此理解客户所处行业的结构与常识，但不得据此编造该客户的具体数据。）`;
   // 天势档案随用户稳定（重排才变），放 stable 段命中提示词缓存；无命盘/降级为空则不注入。
   const tianshiLine = ctx.tianshiLine ?? '';
   // 阶段适配（M3 PR-13）随用户档案稳定 → stable 段。

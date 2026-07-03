@@ -45,6 +45,16 @@ export interface BaziBody {
   birthPlace?: string; longitude?: number;
   believe?: boolean;
 }
+export interface ProgressView {
+  rank: string;
+  usageDays: number;
+  streak: number;
+  decisionAccuracy: number | null;
+  prophecyHitRate: number | null;
+  milestones: Record<string, string>;
+  nextRank: { rank: string; requirement: string } | null;
+}
+
 export interface ChartSummary {
   engineVersion: string;
   hourKnown: boolean;
@@ -154,6 +164,11 @@ export const api = {
     IS_MOCK ? mock.saveBazi(body) : request<{ believe: boolean; chart: ChartSummary | null }>('/profile/bazi', 'PUT', body),
   myChart: () =>
     IS_MOCK ? mock.myChart() : request<{ bazi: BaziBody | null; chart: ChartSummary | null }>('/profile/chart'),
+  // 用户进度（段位/里程碑）与复盘账本（M4 PR-18 前端落位；mock 无账本返回空 → 界面隐藏对应区块）
+  progress: () =>
+    IS_MOCK ? Promise.resolve({ progress: null as ProgressView | null }) : request<{ progress: ProgressView | null }>('/progress'),
+  reviews: () =>
+    IS_MOCK ? Promise.resolve({ items: [], streak: 0 }) : request<{ items: unknown[]; streak: number }>('/reviews'),
   todaySaying: () => (IS_MOCK ? mock.todaySaying() : request<TodaySaying>('/sayings/today')),
   sessions: () => (IS_MOCK ? mock.sessions() : request<SessionItem[]>('/sessions')),
   session: (id: string) => (IS_MOCK ? mock.session(id) : request<SessionDetail>(`/sessions/${id}`)),

@@ -7,7 +7,7 @@ import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
 import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
-import type { Agent } from '../../services/api';
+import { api, type Agent } from '../../services/api';
 import {
   addOrder, buildReviewPrompt, ordersOf, recentOrders, refreshDossier,
   removeOrder, saveBackfill, startReview, today, todayProgress, toggleOrder, type Dossier,
@@ -39,6 +39,7 @@ export default function Studio() {
   const [view, setView] = useState<ExecView>('today');
   const [newOrder, setNewOrder] = useState('');
   const [bf, setBf] = useState({ leads: '', consults: '', deals: '' });
+  const [streak, setStreak] = useState<number | null>(null);
   const und = s.me()?.understanding;
 
   useDidShow(() => {
@@ -50,6 +51,8 @@ export default function Studio() {
       const saved = d?.backfill[today()];
       if (saved) setBf({ leads: saved.leads, consults: saved.consults, deals: saved.deals });
     });
+    // 连续复盘天数（服务端计数，M4 PR-18）
+    api.reviews().then((r) => setStreak(r.streak)).catch(() => setStreak(null));
   });
 
   const progress = todayProgress(dossier);
@@ -176,12 +179,12 @@ export default function Studio() {
               </View>
             </View>
 
-            {/* 提醒节奏 */}
+            {/* 提醒节奏（连续复盘天数=服务端真实计数） */}
             <View className="deck-card" onClick={() => setView('review')}>
               <Text className="deck-k green">提醒节奏</Text>
               <Text className="deck-title serif">21:30 复盘</Text>
               <Text className="deck-desc">回填线索、咨询、成交，必要时刷新明日军令。</Text>
-              <Text className="deck-foot muted">订阅提醒 · 即将开放</Text>
+              <Text className="deck-foot muted">{streak ? `连续复盘 ${streak} 天 · 别断` : '订阅提醒 · 即将开放'}</Text>
             </View>
           </View>
         </ScrollView>
@@ -352,7 +355,7 @@ export default function Studio() {
         {view === 'review' ? (
           <>
             <View className="review-card card">
-              <Text className="rc-k">今晚复盘</Text>
+              <Text className="rc-k">今晚复盘{streak ? ` · 已连续 ${streak} 天` : ''}</Text>
               <Text className="rc-t">军师会根据今日军令完成情况和回填数据，判断问题并给出明日军令。</Text>
               <Text className="payoff">读取：今日军令 {progress.done}/{progress.total || 0} · 数据回填{backfillSaved ? '已完成' : '未完成'}</Text>
               <View className="rc-btn" onClick={genReview}>

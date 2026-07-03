@@ -6,7 +6,7 @@ import Icon from '../../components/Icon';
 import Picker from '../../components/Picker';
 import Plans from '../../components/Plans';
 import { useStore } from '../../hooks/useStore';
-import { api } from '../../services/api';
+import { api, type ProgressView } from '../../services/api';
 import './index.scss';
 
 // 我的页 —— 对齐设计稿 page-profile：居中标题 / 深绿用户卡 / 统计与额度 / 菜单 / 老师卡 / 深度能力卡。
@@ -20,12 +20,14 @@ export default function Profile() {
   const [reportCount, setReportCount] = useState(0);
   const [showPicker, setShowPicker] = useState(false);
   const [showPlans, setShowPlans] = useState(false);
+  const [prog, setProg] = useState<ProgressView | null>(null);
 
   useDidShow(() => {
     s.setTab(4);
     api.library().then((l) => setLibCount(l.length)).catch((e) => s.handleApiError(e));
     api.projects().then((p) => setProjCount(p.length)).catch((e) => s.handleApiError(e));
     api.reports().then((r) => setReportCount(r.length)).catch(() => {});
+    api.progress().then((r) => setProg(r.progress)).catch(() => setProg(null));
   });
 
   const rows = [
@@ -104,6 +106,21 @@ export default function Profile() {
             <Text className="aq-l">套餐权益</Text>
           </View>
         </View>
+
+        {/* 战略段位（M4 PR-18）：全部真实计数——连续复盘/使用天数/准确率由服务端算 */}
+        {prog ? (
+          <View className="rank-card card">
+            <View className="rk-badge"><Text className="serif">{prog.rank}</Text></View>
+            <View className="rk-b">
+              <Text className="rk-t serif">战略段位 · {prog.rank}</Text>
+              <Text className="rk-s">
+                连续复盘 {prog.streak} 天 · 使用第 {prog.usageDays} 天
+                {prog.decisionAccuracy !== null ? ` · 决策准确率 ${prog.decisionAccuracy}%` : ''}
+              </Text>
+              {prog.nextRank ? <Text className="rk-next">下一段位 {prog.nextRank.rank}：{prog.nextRank.requirement}</Text> : null}
+            </View>
+          </View>
+        ) : null}
 
         {/* 菜单（design menu：左侧色块图标 + 右值） */}
         <View className="menu card">

@@ -119,3 +119,21 @@
 .ad-t { display: block; color: var(--green); font-size: 14.5px; font-weight: 700; }
 .ad-s { display: block; margin-top: 5px; color: var(--green-deep); font-size: 12px; line-height: 1.5; font-weight: 500; }
 .ad-em { flex-shrink: 0; color: var(--green); font-size: 14px; font-weight: 700; white-space: nowrap; }
+
+/* —— 战略段位卡（M4 PR-18，真实计数） —— */
+.rank-card {
+  display: flex; align-items: center; gap: 13px;
+  margin-top: 12px; padding: 15px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .9);
+}
+.rk-badge {
+  width: 46px; height: 46px; border-radius: 15px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; background: var(--green-hero);
+  font-size: 17px; font-weight: 700;
+}
+.rk-b { flex: 1; min-width: 0; }
+.rk-t { display: block; font-size: 15.5px; font-weight: 700; color: var(--ink); }
+.rk-s { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.45; font-weight: 500; }
+.rk-next { display: block; margin-top: 5px; color: var(--gold-deep); font-size: 11px; line-height: 1.4; font-weight: 600; }

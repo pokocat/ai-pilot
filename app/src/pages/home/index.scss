@@ -187,3 +187,31 @@
   color: var(--green); background: rgba(255, 255, 255, .9);
   font-size: 18px; font-weight: 700;
 }
+
+/* —— 本月天时（M4 PR-18：命盘逐月攻守当月窗口） —— */
+.tianshi-strip {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 14px; padding: 12px 14px;
+  border-radius: 15px;
+  background: rgba(255, 255, 255, .88);
+  border: 1px solid var(--line);
+}
+.tianshi-strip:active { opacity: .8; }
+.tianshi-strip.atk { border-color: rgba(30, 90, 67, .3); background: #F4F8F5; }
+.tianshi-strip.def { border-color: #E8D8B4; background: #FFFBF2; }
+.ts-k { flex-shrink: 0; font-size: 14px; font-weight: 700; color: var(--ink); }
+.ts-v { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.tianshi-strip.atk .ts-v { color: var(--green); }
+.tianshi-strip.def .ts-v { color: var(--gold-deep); }
+.ts-go { flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--green); }
+
+/* —— 经营数据（M4 PR-16 看板第一层 v1：近 7 天回填） —— */
+.kpi-card { margin-top: 14px; padding: 16px 16px 14px; border-radius: 18px; }
+.kpi-card:active { opacity: .85; }
+.kpi-head { display: flex; align-items: center; justify-content: space-between; }
+.kpi-head .section-label { margin-bottom: 0; }
+.kpi-sub { font-size: 11px; color: var(--ink-3); font-weight: 600; }
+.kpi-row { display: flex; justify-content: space-between; margin-top: 12px; }
+.kpi-cell { width: 31.8%; text-align: center; padding: 10px 6px; border-radius: 13px; background: var(--surface-2); }
+.kpi-v { display: block; font-size: 20px; font-weight: 700; color: var(--green); }
+.kpi-l { display: block; margin-top: 4px; font-size: 11px; color: var(--ink-3); font-weight: 600; }

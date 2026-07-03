@@ -6,7 +6,7 @@ import Login from '../../components/Login';
 import Picker from '../../components/Picker';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api } from '../../services/api';
+import { api, type ChartSummary } from '../../services/api';
 import { MODULE_MARKET, THREE_FORCES } from '../../data/operatingSystem';
 import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
 import './index.scss';
@@ -44,6 +44,7 @@ export default function Home() {
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
   const [navTop, setNavTop] = useState<number>();
   const [dossier, setDossier] = useState<Dossier | null>(null);
+  const [chart, setChart] = useState<ChartSummary | null>(null);
   const me = s.me();
   const und = me?.understanding;
 
@@ -53,6 +54,7 @@ export default function Home() {
     refreshDossier().then(setDossier); // 案卷已服务端化（含一次性本地迁移）
     if (s.isAuthed()) {
       store.loadMe(); // 刷新军师档案（对话/资料变化后战局判断随之更新）
+      api.myChart().then((r) => setChart(r.chart)).catch(() => setChart(null)); // 命盘（天时窗口）
     }
   });
 
@@ -139,6 +141,20 @@ export default function Home() {
           </View>
         </View>
 
+        {/* 本月天时（M4 PR-18）：命盘逐月攻守的当月窗口——排盘引擎算好的真实数据 */}
+        {(() => {
+          const m = chart?.monthlyOutlook?.months?.find((x) => x.month === new Date().getMonth() + 1);
+          if (!m) return null;
+          const turning = chart!.monthlyOutlook.months.filter((x) => x.turning).map((x) => `${x.month}月`).slice(0, 2).join('、');
+          return (
+            <View className={`tianshi-strip ${m.phase === '进攻' ? 'atk' : m.phase === '防守' ? 'def' : ''}`} onClick={startForces}>
+              <Text className="ts-k serif">本月天时</Text>
+              <Text className="ts-v">{m.phase}月{turning ? ` · 拐点：${turning}` : ''}</Text>
+              <Text className="ts-go">问军师 ›</Text>
+            </View>
+          );
+        })()}
+
         {/* 三势判断（force-grid）：方法框架，结论由真实对话产出 */}
         <Text className="battle-h2">三 势 判 断</Text>
         <View className="force-grid">
@@ -188,6 +204,30 @@ export default function Home() {
             );
           })}
         </View>
+
+        {/* 经营数据 · 近 7 天回填（M4 PR-16 看板第一层 v1）：数据源=执行页回填，无回填不展示 */}
+        {(() => {
+          const days = Object.keys(dossier?.backfill ?? {}).sort().slice(-7);
+          if (!days.length) return null;
+          const sum = (k: 'leads' | 'consults' | 'deals') => days.reduce((acc, d) => acc + (parseInt(dossier!.backfill[d][k] || '0', 10) || 0), 0);
+          const rows: [string, number][] = [['线索', sum('leads')], ['咨询', sum('consults')], ['成交', sum('deals')]];
+          return (
+            <View className="kpi-card card" onClick={() => Taro.switchTab({ url: '/pages/studio/index' })}>
+              <View className="kpi-head">
+                <Text className="section-label">经 营 数 据</Text>
+                <Text className="kpi-sub">近 {days.length} 天回填</Text>
+              </View>
+              <View className="kpi-row">
+                {rows.map(([label, v]) => (
+                  <View key={label} className="kpi-cell">
+                    <Text className="kpi-v serif">{v}</Text>
+                    <Text className="kpi-l">{label}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          );
+        })()}
 
         {/* 现在不能做（nono-card）：认可方案中提取的风险锁 */}
         {dossier?.risks.length ? (
