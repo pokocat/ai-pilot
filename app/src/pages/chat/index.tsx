@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
-import { View, Text, Input, ScrollView } from '@tarojs/components';
+import { View, Text, Textarea, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
@@ -47,9 +47,29 @@ function copyDeliverable(d: Deliverable) {
   });
 }
 
+function copyText(text: string, title = '已复制') {
+  const data = text.trim();
+  if (!data) return;
+  Taro.setClipboardData({
+    data,
+    success: () => Taro.showToast({ title, icon: 'success' }),
+    fail: () => Taro.showToast({ title: '复制失败', icon: 'none' }),
+  });
+}
+
+function replyToText(reply: ChatReplyT): string {
+  return [reply.text, ...(reply.points ?? [])].filter(Boolean).join('\n\n');
+}
+
 type ChatStyle = CSSProperties & {
   '--keyboard-height'?: string;
 };
+
+// 模型选择：后端统一调度，前端暂固定展示一档（预留多模型切换入口）。
+const FIXED_MODEL = '军师 · 标准';
+
+const IS_WEAPP = process.env.TARO_ENV === 'weapp';
+const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
 
 export default function Chat() {
   const router = useRouter();
@@ -273,12 +293,14 @@ export default function Chat() {
   }
 
   const handleInput = (e: { detail: { value: string } }) => {
+    if (busy) return input;
     const v = e.detail.value;
     setInput(v);
     return v;
   };
 
   const onSend = (raw?: string) => {
+    if (busy) return;
     const v = (typeof raw === 'string' ? raw : input).trim();
     if (!v || !agent) return;
     setInput('');
@@ -359,6 +381,62 @@ export default function Chat() {
     } catch {
       Taro.hideLoading();
       Taro.showToast({ title: '生成纪要失败', icon: 'none' });
+    }
+  };
+
+  // 点加号：上传资料（真实走微信文件选择 + OSS）或引用已有资料
+  const onPlus = () => {
+    if (busy) return;
+    setInputFocus(false);
+    if (!store.isAuthed()) {
+      setShowLogin(true);
+      Taro.showToast({ title: '请先登录', icon: 'none' });
+      return;
+    }
+    Taro.showActionSheet({
+      itemList: ['上传资料（PDF/Word/Excel…）', '引用已有项目 / 报告 / 知识'],
+      success: (r) => {
+        if (r.tapIndex === 0) uploadMaterial();
+        else if (r.tapIndex === 1) openPicker();
+      },
+    });
+  };
+
+  // 上传资料：微信只能选「聊天里的文件」→ 上传解析 → 自动挂为本轮引用
+  const uploadMaterial = async () => {
+    if (!IS_WEAPP) { Taro.showToast({ title: '请在微信小程序内上传文件', icon: 'none' }); return; }
+    const guide = await Taro.showModal({
+      title: '从微信聊天选择文件',
+      content: '微信只允许小程序选取「聊天里的文件」。请先把资料发给「文件传输助手」（电脑端微信也能发），下一步选它即可。这不是转发，是选文件。',
+      confirmText: '去选择',
+      cancelText: '取消',
+    });
+    if (!guide.confirm) return;
+    let chosen: Taro.chooseMessageFile.SuccessCallbackResult;
+    try {
+      chosen = await Taro.chooseMessageFile({ count: 1, type: 'file', extension: UPLOAD_EXT });
+    } catch (e) {
+      const msg = String((e as { errMsg?: string })?.errMsg || '');
+      if (!/cancel/i.test(msg)) Taro.showToast({ title: '没能打开文件选择，请重试', icon: 'none' });
+      return; // 用户取消则静默
+    }
+    const f = chosen.tempFiles?.[0];
+    if (!f) return;
+    const ext = (f.name?.split('.').pop() || '').toLowerCase();
+    if (!UPLOAD_EXT.includes(ext)) {
+      Taro.showToast({ title: `不支持的格式 .${ext}（支持 PDF/Word/Excel/MD/TXT）`, icon: 'none' });
+      return;
+    }
+    Taro.showLoading({ title: '上传中…' });
+    try {
+      const { id } = await api.uploadKnowledge(f.path, projectId || undefined);
+      Taro.hideLoading();
+      const label = f.name || '上传资料';
+      setRefs((cur) => cur.some((x) => x.kind === 'knowledge' && x.id === id) ? cur : [...cur, { kind: 'knowledge', id, label }]);
+      Taro.showToast({ title: '已上传，解析中…可直接发送提问', icon: 'none' });
+    } catch (e) {
+      Taro.hideLoading();
+      Taro.showToast({ title: (e as Error).message || '上传失败', icon: 'none' });
     }
   };
 
@@ -492,7 +570,7 @@ export default function Chat() {
             return (
               <View key={i} className="msg a">
                 <View className="who"><AdvisorAvatar agentKey={m.agent.key} size={24} /><Text>{m.agent.name}</Text></View>
-                <View className="bubble">
+                <View className="bubble" onLongPress={() => copyText(m.agent.greet)}>
                   <Text>{m.agent.greet}</Text>
                   <View className="memory-disclosure">
                     <View className="md-h">
@@ -520,7 +598,7 @@ export default function Chat() {
           if (m.role === 'user') {
             return (
               <View key={i} className="msg u">
-                <View className="ubub" style={{ background: accent }}><Text>{m.text}</Text></View>
+                <View className="ubub" style={{ background: accent }} onLongPress={() => copyText(m.text)}><Text>{m.text}</Text></View>
                 {m.refs?.length ? (
                   <View className="uref">{m.refs.map((r, j) => <Text key={j} className="uref-chip">@{r.label}</Text>)}</View>
                 ) : null}
@@ -531,7 +609,7 @@ export default function Chat() {
             return (
               <View key={i} className="msg a">
                 <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
-                <View className="bubble">
+                <View className="bubble" onLongPress={() => copyText(replyToText(m.reply))}>
                   {m.streaming && !m.reply.text ? (
                     <View className="think-dots">
                       <View className="think-dot" style={{ background: accent }} />
@@ -555,7 +633,7 @@ export default function Chat() {
           }
           if (m.role === 'memory') {
             return (
-              <View key={i} className="mem-learned">
+              <View key={i} className="mem-learned" onLongPress={() => copyText(`专属理解已更新：${m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。`)}>
                 <Icon name="spark" size={13} color={accent} />
                 <Text>专属理解已更新：{m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。</Text>
               </View>
@@ -566,7 +644,9 @@ export default function Chat() {
             // P2-14：报告气泡用 messageId 作稳定 key，避免「延迟插入记忆」导致索引位移、ReportCard 渐显动画状态错位。
             <View key={m.messageId ?? `r-${i}`} className="msg a">
               <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
-              <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} onShare={() => shareReport(m.messageId)} />
+              <View onLongPress={() => copyDeliverable(m.deliverable)}>
+                <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} onShare={() => shareReport(m.messageId)} />
+              </View>
               {m.deliverable.degraded ? (
                 <View style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
                   <Text>本次为降级模板（未取得完整结构化产出），可重新发送以获取正式成果。</Text>
@@ -621,31 +701,49 @@ export default function Chat() {
         </View>
       ) : null}
 
-      {/* 输入区 */}
-      <View className="composer">
-        <View className="box" onClick={() => setInputFocus(true)}>
-          <View className="cbtn" onClick={(e) => { e.stopPropagation?.(); openPicker(); }}><Icon name="attach" size={18} color={refs.length ? accent : '#969BA1'} /></View>
-          <Input
+      {/* 输入区：高度自适应卡片，底排为 加号(资料) / 选模型 / 语音·发送 */}
+      <View className={`composer ${busy ? 'busy' : ''}`}>
+        <View className="box" onClick={() => { if (!busy) setInputFocus(true); }}>
+          <Textarea
             className="cinput"
-            type="text"
             value={input}
             focus={inputFocus}
+            disabled={busy}
             maxlength={500}
             cursorSpacing={24}
             adjustPosition={false}
-            alwaysEmbed
-            placeholder="向顾问提问…（点 📎 引用项目/报告/知识）"
+            autoHeight
+            showConfirmBar={false}
+            placeholder="向军师提问…"
             confirmType="send"
-            onFocus={() => setInputFocus(true)}
+            onFocus={() => { if (!busy) setInputFocus(true); }}
             onBlur={() => { setInputFocus(false); setKeyboardHeight(0); }}
             onInput={handleInput}
             onConfirm={(e) => onSend(e.detail.value)}
             onKeyboardHeightChange={onKeyboardHeightChange}
           />
-          <Icon name="mic" size={18} color="#969BA1" />
-        </View>
-        <View className={`csend ${busy ? 'busy' : ''}`} role="button" aria-label="发送" style={{ background: accent }} onClick={() => onSend()}>
-          <Icon name="send" size={18} color="#fff" />
+          <View className="cbar">
+            <View className="cbar-l">
+              <View className="cbtn plus" onClick={(e) => { e.stopPropagation?.(); onPlus(); }}>
+                <Icon name="plus" size={19} color={refs.length ? accent : '#565C63'} />
+              </View>
+              <View className="cmodel" onClick={(e) => { e.stopPropagation?.(); Taro.showToast({ title: '更多模型即将开放', icon: 'none' }); }}>
+                <Text className="cmodel-name">{FIXED_MODEL}</Text>
+                <Icon name="chevron" size={13} color="#969BA1" />
+              </View>
+            </View>
+            <View className="cbar-r">
+              <View
+                className={`csend ${busy || !input.trim() ? 'off' : ''}`}
+                role="button"
+                aria-label="发送"
+                style={{ background: input.trim() && !busy ? accent : undefined }}
+                onClick={(e) => { e.stopPropagation?.(); onSend(); }}
+              >
+                <Icon name="up" size={18} color="#fff" />
+              </View>
+            </View>
+          </View>
         </View>
       </View>
 

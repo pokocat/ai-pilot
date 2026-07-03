@@ -84,18 +84,42 @@
 .mem-learned Text { font-size: 12px; line-height: 1.5; color: var(--accent-ink); flex: 1; }
 
 .composer {
-  display: flex; align-items: center; gap: 9px;
-  padding: 10px 14px calc(12px + env(safe-area-inset-bottom));
+  padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
   background: var(--surface); border-top: 1px solid var(--line);
 }
+/* 高度自适应输入卡片：文本区在上，工具排在下 */
 .composer .box {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px;
-  background: var(--surface-2); border-radius: 14px; padding: 0 13px; height: 44px;
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--surface-2); border-radius: 22px; padding: 12px 14px 10px;
 }
-.cinput { flex: 1; min-width: 0; width: 100%; display: block; font-size: 14px; color: var(--ink); height: 44px; }
-.csend { width: 44px; height: 44px; border-radius: 13px; display: flex; align-items: center; justify-content: center; }
-.csend.busy { opacity: .5; }
-.composer .cbtn { display: flex; align-items: center; justify-content: center; }
+.cinput {
+  width: 100%; min-height: 24px; max-height: 132px; display: block;
+  font-size: 15px; line-height: 1.5; color: var(--ink); box-sizing: border-box;
+}
+.cinput .taro-textarea-placeholder,
+.cinput .placeholder { color: var(--ink-3); font-size: 15px; }
+.composer.busy .box { opacity: .58; }
+.composer.busy .cinput { color: var(--ink-3); }
+
+/* 底排工具 */
+.cbar { display: flex; align-items: center; justify-content: space-between; }
+.cbar-l, .cbar-r { display: flex; align-items: center; gap: 8px; }
+.composer .cbtn {
+  width: 32px; height: 32px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+}
+.composer .cbtn.plus { background: var(--surface); }
+/* 模型选择器胶囊（暂固定一档） */
+.cmodel {
+  display: flex; align-items: center; gap: 3px;
+  height: 30px; padding: 0 9px 0 11px; border-radius: 999px; background: var(--surface);
+}
+.cmodel-name { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+/* 发送键：有内容才点亮 */
+.csend {
+  width: 34px; height: 34px; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+  transition: opacity .15s ease;
+}
+.csend.off { background: var(--line); opacity: .9; }
 
 /* 工具栏：项目作用域 + 生成纪要 */
 .chat-tools { display: flex; align-items: center; justify-content: space-between; padding: 0 16px 8px; }

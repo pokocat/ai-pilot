@@ -392,9 +392,11 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
       provider = 'openai'; usage = m.usage; toolCalls = m.toolCalls; iterations = m.iterations;
       out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
     } else if (live === 'claude') {
-      const m = await (await import('./providers/claude.js')).claudeChat(ctx, cfg); // claude 自适应未实现 → 对话兜底
-      provider = 'claude'; usage = m.usage;
-      out = { kind: 'chat', result: m.result };
+      const cl = await import('./providers/claude.js');
+      const tools = await skillToolsFor(ctx);
+      const m = await cl.claudeAdaptive(ctx, cfg, tools);
+      provider = 'claude'; usage = m.usage; toolCalls = m.toolCalls; iterations = m.iterations;
+      out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
     } else {
       const m = mockAdaptive(ctx);
       out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };

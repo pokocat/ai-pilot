@@ -17,6 +17,8 @@ const PATHS: Record<string, string> = {
   send: '<path d="M5 12h13M12 5l7 7-7 7"/>',
   arrow: '<path d="M8 5l7 7-7 7"/>',
   up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  chevron: '<path d="M6 9l6 6 6-6"/>',
   alert: '<path d="M12 4 2.5 20h19L12 4Z"/><path d="M12 10v4M12 17h.01"/>',
   trend: '<path d="M4 16l5-5 3.5 3.5L20 7"/><path d="M20 11V7h-4"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
