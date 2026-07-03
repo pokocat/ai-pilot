@@ -79,10 +79,14 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
   } catch (e) {
     const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
     const origin = BASE_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
-    const message = errMsg.includes('domain') || errMsg.includes('合法域名')
+    const isDomainBlocked = errMsg.includes('domain') || errMsg.includes('合法域名');
+    const message = isDomainBlocked
+      ? '军师暂时没有连上服务，请稍后再试。'
+      : '当前网络有点不稳，请稍后重试。';
+    const technicalMessage = isDomainBlocked
       ? `小程序请求被合法域名拦截，请在微信后台 request 合法域名配置 ${origin} 后重新打开小程序。`
       : `网络请求失败，请确认已配置 request 合法域名 ${origin}，并重新打开小程序。`;
-    throw Object.assign(new Error(message), { code: 'NETWORK_ERROR', errMsg, url });
+    throw Object.assign(new Error(message), { code: 'NETWORK_ERROR', errMsg, url, origin, technicalMessage });
   }
   if (res.statusCode === 401) {
     clearToken(); // token 失效：清掉，下次进首页回到登录

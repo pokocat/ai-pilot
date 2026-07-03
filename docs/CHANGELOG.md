@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-03** · **网络错误提示去技术化**：小程序 `Taro.request` reject 不再把 request 合法域名和 API 域名直接展示给用户，前台只提示“军师暂时没有连上服务/当前网络有点不稳”；原合法域名排查说明保留在错误对象 `technicalMessage`、`origin`、`url` 字段，方便开发排查。影响面：app API 错误映射 + AGENTS/CHANGELOG。
+
 - **2026-07-03** · **卡片分享链接改自有域名 + 小程序码回流**：B 级卡片发布不再走 OSS，改 `cardHtml.publishCardHtml` 直接返回 `{PUBLIC_BASE_URL}/api/r/:id`（品牌域名、微信聊天内点开即达；`/api/r/:id` 本就是不可猜 id 免鉴权公开页）；`wechat.miniCodeDataUri`（getwxacode/unlimit + stable_token 复用，check_path:false，测试/未配凭据/接口失败一律 null 降级）生成小程序码 base64 内嵌卡片页脚「长按识别 · 找军师参谋部」，网页卡自带回流钩子。OSS 托管保留给报告（reportHtml.publishHtml 未动）。影响面：server cardHtml/wechat + cards 测试（330）。
 
 - **2026-07-03** · **天时改原生展示（用户反馈：到处引导对话/网页链接奇怪）**：删除战局页「本月天时」条与「日历卡」按钮；三势里的天势卡直接承载——卡面显示本月攻守+拐点，点开新原生页 `packages/work/calendar`（12 月攻守网格+图例+关键节点说明，`useShareAppMessage` 支持微信右上角转发；无命盘时页内就地补生辰 `saveBazi`，老用户不用回炉建档）；网页版降级为页脚「打印版」次要入口。市势/人势结论产自对话，保留发起判断。影响面：app 战局页 + 新 calendar 分包页 + 路由。
