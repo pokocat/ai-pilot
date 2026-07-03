@@ -10,6 +10,8 @@ import {
 } from '../services/casefile.js';
 import { extractStrategicFacts, upsertStrategicProfile } from '../services/strategicProfile.js';
 import { recordDecisionFromAccept } from '../services/decisionLog.js';
+import { listReviews, recordReview, reviewStreak, type ReviewLayer } from '../services/reviewLog.js';
+import { syncProgress } from '../services/progress.js';
 
 export async function casefileRoutes(app: FastifyInstance) {
   // 当前活跃案卷（战局/执行页数据源）；没有则 { casefile: null }
@@ -111,6 +113,36 @@ export async function casefileRoutes(app: FastifyInstance) {
       return { casefile: await casefileView(user.id) };
     },
   );
+
+  // 发起复盘（M2 PR-8）：前端在打开复盘对话时调用，落一条复盘账（day 层快照当日军令/回填事实）。
+  // 同层同日 upsert（一天多次只算一次）；返回连续复盘天数供前端展示。
+  app.post<{ Body: { layer?: string; note?: string } }>('/casefile/review', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const review = await recordReview({
+      tenantId: user.tenantId,
+      userId: user.id,
+      layer: req.body?.layer as ReviewLayer | undefined,
+      note: req.body?.note,
+    });
+    const streak = await reviewStreak(user.id);
+    // 复盘是段位/里程碑的心跳：同步进度（晋升/解锁在响应里带回，前端可承接晋升提示）
+    const progress = await syncProgress(user.id);
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.review.start', payload: { layer: review.layer, date: review.date, streak } });
+    return { review, streak, progress };
+  });
+
+  // 用户进度（段位/里程碑，「我的」页数据源）
+  app.get('/progress', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    return { progress: await syncProgress(user.id) };
+  });
+
+  // 复盘账本（战局/我的页数据源）
+  app.get('/reviews', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const [items, streak] = await Promise.all([listReviews(user.id), reviewStreak(user.id)]);
+    return { items, streak };
+  });
 
   // 本地案卷一次性导入（前端 storage 迁移；服务端已有活跃案卷则跳过 → 幂等）
   app.post<{ Body: { dossier: Parameters<typeof importLocalDossier>[0]['dossier'] } }>('/casefile/import', async (req) => {

@@ -13,8 +13,19 @@ import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
 import type { MessageRef, Deliverable, ChatReply } from '../llm/schema.js';
+import { extractAndRecordProphecies } from '../services/prophecyLog.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// 预言收割（M2 PR-9）：总军师输出后异步抽取「具体、可验证、有期限」的天势判断落账。
+// 真实模型不可用时抽取器返回空（不产生伪预言）；失败静默，绝不影响回复主流程。
+function harvestProphecies(user: { tenantId: string; id: string }, agentKey: string, text: string | null | undefined): void {
+  if (agentKey !== 'general' || !text) return;
+  void extractAndRecordProphecies({ tenantId: user.tenantId, userId: user.id, text }).catch(() => {});
+}
+function harvestText(d: Deliverable): string {
+  return `${d.title}\n${d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n')}`;
+}
 
 export async function sessionRoutes(app: FastifyInstance) {
   // 会话列表（按更新时间倒序，带最后一条摘要）
@@ -128,7 +139,9 @@ export async function sessionRoutes(app: FastifyInstance) {
     try {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：到期后拦一切 AI 交互（产出+对话+图片）→ PLAN_EXPIRED(403)
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
-      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio);  // P0-2：锁内预留额度（并发透支有界）
+      // 复盘保底（M2 PR-6）：复盘类调用（buildReviewPrompt 的确定性前缀）额度耗尽仍每日限次放行
+      const reviewIntent = /^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(text);
+      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio, reviewIntent ? { grace: 'review' } : undefined);  // P0-2：锁内预留额度（并发透支有界）
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
       if (quotaReservation) await quotaReservation.refund().catch(() => {});
@@ -176,6 +189,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           : learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId }));
         if (out.kind === 'report') {
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: out.deliverable as object } });
+          harvestProphecies(user, agentKey, harvestText(out.deliverable));
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
           const creditBalance = creditReservation?.balance ?? 0;
@@ -186,6 +200,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           };
         }
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: out.reply as object } });
+        harvestProphecies(user, agentKey, out.reply.text);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const learned = await learn();
         const creditBalance = creditReservation?.balance ?? 0;
@@ -223,6 +238,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       const msg = await prisma.message.create({
         data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object },
       });
+      harvestProphecies(user, agentKey, replyChat.text);
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
       const creditBalance = creditReservation?.balance ?? 0;
       const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
@@ -287,7 +303,8 @@ export async function sessionRoutes(app: FastifyInstance) {
     try {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：到期后拦一切 AI 交互（产出+对话+图片）→ PLAN_EXPIRED(403)
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
-      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio);
+      const reviewIntent = /^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(text); // 复盘保底（M2 PR-6）
+      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio, reviewIntent ? { grace: 'review' } : undefined);
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
       if (quotaReservation) await quotaReservation.refund().catch(() => {});
@@ -353,6 +370,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           await sleep(300);
           send('footer', { trust: d.trust, actions: d.actions });
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: d as object } });
+          harvestProphecies(user, agentKey, harvestText(d));
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           await learnSse();
           const creditBalance = creditReservation?.balance ?? 0;
@@ -364,6 +382,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           await sleep(700);
           send('chat', out.reply);
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: out.reply as object } });
+          harvestProphecies(user, agentKey, out.reply.text);
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           await learnSse();
           const creditBalance = creditReservation?.balance ?? 0;
@@ -419,6 +438,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
         });
+        harvestProphecies(user, agentKey, reply2?.text);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const creditBalance = creditReservation?.balance ?? 0;
         const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;

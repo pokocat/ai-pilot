@@ -1009,3 +1009,65 @@ model DecisionLog {
   @@index([userId, verifyByDate])
   @@map("decision_log")
 }
+
+/// 复盘日志（M2 PR-8）：V6.0 §10 六层复盘的事件账本。对齐率/连续复盘天数一律由服务端
+/// 从这些行计算（禁止 AI 现编）。day 层由执行页发起复盘时落一条；同层同日 upsert。
+model ReviewLog {
+  id           String   @id @default(cuid())
+  tenantId     String
+  userId       String
+  casefileId   String?
+  layer        String   @default("day") // day | week | month | quarter | year | team
+  date         String // YYYY-MM-DD（覆盖的日期；week/month 取发起日）
+  ordersTotal  Int      @default(0) // 当日军令总数（day 层快照）
+  ordersDone   Int      @default(0) // 已完成军令数
+  alignedTotal Int      @default(0) // 对齐主要矛盾的军令数
+  alignRate    Int? // 对齐率 %（=alignedTotal/ordersTotal；无军令 = null，不编 0%）
+  hasBackfill  Boolean  @default(false) // 当日是否回填了三数
+  note         String   @default("") @db.Text
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, layer, date])
+  @@index([tenantId, userId, layer, date])
+  @@map("review_log")
+}
+
+/// 预言日志（M2 PR-9）：V6.0 §4.8 天机验证——每条预言带验证标准与到期时间，
+/// 命中率一律由服务端统计（禁止 AI 现编）。写入源：真实模型抽取（测试/mock 不产生伪预言）+ 显式记录。
+model ProphecyLog {
+  id             String    @id @default(cuid())
+  tenantId       String
+  userId         String
+  seq            Int // 用户内序号（预言 #N）
+  prophecy       String    @db.Text // 预言内容（具体、可验证）
+  basis          String    @default("") // 依据（八字推演简述）
+  verifyStandard String    @default("") @db.Text // 什么情况算命中/未命中
+  dueDate        String? // YYYY-MM-DD 预计可验证时间
+  status         String    @default("pending") // pending | hit | miss
+  verifiedAt     DateTime?
+  verifyNote     String    @default("") @db.Text
+  dueNotifiedAt  DateTime? // 到期提醒已登记（scheduler 幂等标记）
+  createdAt      DateTime  @default(now())
+
+  @@unique([userId, seq])
+  @@index([tenantId, userId, status])
+  @@index([status, dueDate])
+  @@map("prophecy_log")
+}
+
+/// 用户进度（M2 PR-10）：战略段位与里程碑。段位按真实门槛派生（连续复盘天数 +
+/// 决策准确率 + 天机命中率，V6.0 §11.4），只升不降；里程碑按使用天数解锁（§11.2）。
+/// 全部由服务端 syncProgress 计算落库——绝不出现没有数据支撑的「连续 47 天」。
+model UserProgress {
+  id             String   @id @default(cuid())
+  tenantId       String
+  userId         String   @unique
+  rank           String   @default("新兵") // 新兵 | 尉官 | 校官 | 将军 | 元帅
+  rankAchievedAt DateTime @default(now())
+  milestonesJson Json // { "7": "2026-07-09", "30": ... } 已解锁里程碑 → 解锁日期
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("user_progress")
+}

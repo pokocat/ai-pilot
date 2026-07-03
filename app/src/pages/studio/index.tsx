@@ -10,7 +10,7 @@ import { diamondCost } from '../../services/format';
 import type { Agent } from '../../services/api';
 import {
   addOrder, buildReviewPrompt, ordersOf, recentOrders, refreshDossier,
-  removeOrder, saveBackfill, today, todayProgress, toggleOrder, type Dossier,
+  removeOrder, saveBackfill, startReview, today, todayProgress, toggleOrder, type Dossier,
 } from '../../services/dossier';
 import './index.scss';
 
@@ -97,7 +97,12 @@ export default function Studio() {
   };
   const genOrders = () =>
     goChat('general', '基于我们最近认可的方案，把今天最重要的 1-3 件事拆成今日军令，并给出每件事的完成标准。');
-  const genReview = () => goChat('ops', buildReviewPrompt(dossier));
+  // 发起复盘：先落复盘账（服务端记连续天数，不阻塞跳转），再带真实数据进复盘对话。
+  // 复盘走总军师（M2 PR-6：复盘是留存生命线，订阅内免费，不设解锁墙；经营参谋 ops 保留为可解锁深聊）。
+  const genReview = () => {
+    void startReview('day');
+    goChat('general', buildReviewPrompt(dossier));
+  };
   const genScript = () =>
     goChat('ip', firstUndone
       ? `围绕这条军令帮我产出可直接使用的内容脚本：「${firstUndone.text}」。`

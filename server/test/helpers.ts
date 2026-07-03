@@ -64,6 +64,9 @@ export async function cleanBusiness(): Promise<void> {
   await prisma.natalChart.deleteMany();
   await prisma.strategicProfile.deleteMany();
   await prisma.decisionLog.deleteMany();
+  await prisma.reviewLog.deleteMany();
+  await prisma.prophecyLog.deleteMany();
+  await prisma.userProgress.deleteMany();
   await prisma.message.deleteMany();
   await prisma.reportVersion.deleteMany();
   await prisma.reportDoc.deleteMany();

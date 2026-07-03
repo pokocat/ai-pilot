@@ -589,3 +589,34 @@ export async function summarizePoints(transcript: string): Promise<{ points: str
     return null;
   }
 }
+
+/** 预言抽取（M2 PR-9）：从总军师输出里抽「具体、可验证、有期限」的天势判断。
+ *  只在真实 provider 就绪时运行（测试/mock 返回空 → 绝不产生伪预言）；解析失败即放弃。 */
+export async function extractProphecies(text: string): Promise<{ prophecy: string; basis: string; verifyStandard: string; dueDate: string | null }[]> {
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  if (!live) return [];
+  try {
+    const sys = '你是记录员。从下面军师的话里抽取「预言式判断」——必须同时满足：具体（说了会发生什么）、可验证（能对照事实判定）、有大致时限（某月/某周/某节点）。'
+      + '只输出 JSON：{"prophecies":[{"prophecy":"…","basis":"依据(可空)","verifyStandard":"什么情况算命中","dueDate":"YYYY-MM-DD 或 null"}]}。'
+      + '宽泛建议、方法论、无时限的话都不算预言；没有就输出空数组。最多 2 条。';
+    const json = await rawJson(cfg, live, sys, text.slice(0, 3000));
+    if (!json) return [];
+    return (((json.prophecies as unknown[]) ?? [])
+      .filter((p): p is { prophecy: string } => !!p && typeof (p as { prophecy?: unknown }).prophecy === 'string' && !!(p as { prophecy: string }).prophecy.trim())
+      .map((p) => {
+        const o = p as { prophecy: string; basis?: string; verifyStandard?: string; dueDate?: string | null };
+        const due = typeof o.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate) ? o.dueDate : null;
+        return {
+          prophecy: o.prophecy.trim().slice(0, 300),
+          basis: (o.basis ?? '').trim().slice(0, 200),
+          verifyStandard: (o.verifyStandard ?? '').trim().slice(0, 300),
+          dueDate: due,
+        };
+      })
+      .slice(0, 2));
+  } catch (err) {
+    console.error('[gateway] extractProphecies fallback:', (err as Error).message);
+    return [];
+  }
+}

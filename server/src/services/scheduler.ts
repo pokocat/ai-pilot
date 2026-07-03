@@ -85,5 +85,66 @@ export async function scanIdleCasefiles(): Promise<number> {
   return flagged;
 }
 
-// 注册内置任务（周期：每 6 小时扫一轮；召回按天幂等，多扫无副作用）
+// ============ 任务：久不复盘提醒候选（M2 PR-8） ============
+// 复盘过至少一次、但最近 REVIEW_GAP_DAYS 天没有 day 复盘、且案卷仍活跃 → 登记提醒候选。
+// V6.0 §16 防呆「久不复盘 → 主动提醒 + 说明连续天数中断的影响」；发送走订阅消息通道（授权由前端动线累积）。
+export const REVIEW_GAP_DAYS = 2;
+
+export async function scanReviewGaps(): Promise<number> {
+  const dayStart = new Date(now().getFullYear(), now().getMonth(), now().getDate());
+  const cutoff = new Date(now().getTime() - REVIEW_GAP_DAYS * 86400_000);
+  const iso = (t: Date) => `${t.getFullYear()}-${`${t.getMonth() + 1}`.padStart(2, '0')}-${`${t.getDate()}`.padStart(2, '0')}`;
+  // 有活跃案卷的用户里，找「复盘过但最近断档」的（按用户聚合最近一次 day 复盘日期）
+  const actives = await prisma.casefile.findMany({ where: { status: 'active' }, select: { tenantId: true, userId: true }, take: 500 });
+  let flagged = 0;
+  for (const cf of actives) {
+    const last = await prisma.reviewLog.findFirst({
+      where: { userId: cf.userId, layer: 'day' },
+      orderBy: { date: 'desc' },
+      select: { date: true },
+    });
+    if (!last || last.date >= iso(cutoff)) continue; // 从没复盘过（由召回任务管）或还没断档
+    const already = await prisma.auditLog.findFirst({
+      where: { userId: cf.userId, action: 'system.review.reminder.candidate', createdAt: { gte: dayStart } },
+      select: { id: true },
+    });
+    if (already) continue;
+    await recordAudit({
+      tenantId: cf.tenantId,
+      userId: cf.userId,
+      action: 'system.review.reminder.candidate',
+      payload: { lastReviewDate: last.date, gapDays: REVIEW_GAP_DAYS, reason: '连续复盘中断风险' },
+    });
+    flagged += 1;
+  }
+  if (flagged) console.log(`[scheduler] review reminder candidates: ${flagged}`);
+  return flagged;
+}
+
+// ============ 任务：预言到期验证候选（M2 PR-9） ============
+// pending 且 dueDate ≤ 今天 且未提醒过 → 登记「天机对账」候选（行级 dueNotifiedAt 幂等），
+// 下次日/月复盘时由军师带出来逐条对账（发送提醒走订阅消息通道）。
+export async function scanDueProphecies(): Promise<number> {
+  const d = now();
+  const today = `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+  const due = await prisma.prophecyLog.findMany({
+    where: { status: 'pending', dueNotifiedAt: null, dueDate: { not: null, lte: today } },
+    take: 200,
+  });
+  for (const p of due) {
+    await recordAudit({
+      tenantId: p.tenantId,
+      userId: p.userId,
+      action: 'system.prophecy.due',
+      payload: { prophecyId: p.id, seq: p.seq, dueDate: p.dueDate, prophecy: p.prophecy.slice(0, 100) },
+    });
+    await prisma.prophecyLog.update({ where: { id: p.id }, data: { dueNotifiedAt: new Date() } });
+  }
+  if (due.length) console.log(`[scheduler] prophecies due: ${due.length}`);
+  return due.length;
+}
+
+// 注册内置任务（周期：每 6 小时扫一轮；召回/提醒按天幂等，多扫无副作用）
 registerJob({ name: 'casefile-idle-recall', intervalMs: 6 * 3600_000, run: async () => { await scanIdleCasefiles(); } });
+registerJob({ name: 'review-gap-reminder', intervalMs: 6 * 3600_000, run: async () => { await scanReviewGaps(); } });
+registerJob({ name: 'prophecy-due-scan', intervalMs: 6 * 3600_000, run: async () => { await scanDueProphecies(); } });

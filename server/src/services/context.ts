@@ -9,6 +9,9 @@ import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContext
 import { loadChart, chartBriefing, TIANSHI_OPTOUT_LINE } from './paipan.js';
 import { loadStrategicProfile, strategicBlock } from './strategicProfile.js';
 import { decisionBriefing } from './decisionLog.js';
+import { reviewBriefing } from './reviewLog.js';
+import { prophecyBriefing } from './prophecyLog.js';
+import { progressBriefing } from './progress.js';
 import { now } from './clock.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
@@ -94,6 +97,12 @@ export async function buildGenContext(opts: {
   const strategicLine = strategicBlock(await loadStrategicProfile(opts.userId));
   // 决策账本（M2 PR-7）：近期决策 + 服务端准确率（AI 只引用，禁止自行推算）。
   const decisionLine = await decisionBriefing(opts.userId);
+  // 复盘账本（M2 PR-8）：连续复盘天数 + 最近复盘事实快照（战友见证/钩子的真实素材）。
+  const reviewLine = await reviewBriefing(opts.userId);
+  // 天机账本（M2 PR-9）：待验证预言 + 命中率（月复盘对账素材）。
+  const prophecyLine = await prophecyBriefing(opts.userId);
+  // 段位·里程碑（M2 PR-10）：真实门槛派生（战友见证/晋升话术素材）。
+  const progressLine = await progressBriefing(opts.userId);
 
   // 天势档案（M1 PR-2）：命盘由排盘引擎算好存库，这里只组装简报注入；
   // 客户选择「不信命理」→ 注入降级指令（不带命盘）；无命盘 → 不注入。
@@ -145,6 +154,9 @@ export async function buildGenContext(opts: {
     tianshiLine,
     strategicLine,
     decisionLine,
+    reviewLine,
+    prophecyLine,
+    progressLine,
     userMessage: opts.userMessage,
     history: opts.history,
     references: refLines,

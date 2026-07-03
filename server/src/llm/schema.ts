@@ -41,6 +41,12 @@ export interface GenContext {
   strategicLine?: string | null;
   // 决策账本（M2 PR-7）：近期决策 + 服务端准确率块，无记录不注入。
   decisionLine?: string | null;
+  // 复盘账本（M2 PR-8）：连续复盘天数 + 最近复盘快照块，无记录不注入。
+  reviewLine?: string | null;
+  // 天机账本（M2 PR-9）：待验证预言 + 命中率块，无记录不注入。
+  prophecyLine?: string | null;
+  // 段位·里程碑（M2 PR-10）：真实门槛派生块，新用户零记录不注入。
+  progressLine?: string | null;
   userMessage: string;
   history?: { role: string; text: string }[];
   // —— 上下文工程扩展 ——
@@ -219,6 +225,9 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   const blocks: string[] = [];
   if (ctx.strategicLine) blocks.push(ctx.strategicLine); // 战略档案：已确认事实，放在推断的客户档案之前
   if (ctx.decisionLine) blocks.push(ctx.decisionLine);   // 决策账本：系统计数（准确率等禁止 AI 自算）
+  if (ctx.reviewLine) blocks.push(ctx.reviewLine);       // 复盘账本：连续天数/对齐率（系统计数）
+  if (ctx.prophecyLine) blocks.push(ctx.prophecyLine);   // 天机账本：预言/命中率（系统计数）
+  if (ctx.progressLine) blocks.push(ctx.progressLine);   // 段位·里程碑：真实门槛派生（系统计数）
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);
   if (ctx.references?.length) blocks.push(`【用户引用的资料（请优先采纳并标注出处）】\n${ctx.references.join('\n')}`);

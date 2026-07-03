@@ -196,6 +196,8 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `PUT /profile/bazi` · `GET /profile/chart` | 八字采集（→排盘引擎落库；believe=false=不信命理只存偏好；出生城市自动查经度表做真太阳时） · 我的命盘读取 | 是 |
 | `GET /profile/strategic` · `PUT /profile/strategic` | 战略档案（已确认战略事实）读取 · 手动校准（局部更新） | 是 |
 | `GET /decisions` · `POST /decisions` · `POST /decisions/:id/verify` | 决策日志：列表+统计 · 手动记录 · 验证（correct/revise，准确率服务端算） | 是 |
+| `GET /prophecies` · `POST /prophecies` · `POST /prophecies/:id/verify` | 预言账本：列表+命中率 · 显式记录 · 对账（hit/miss；抽取只走真实模型不产生伪预言） | 是 |
+| `POST /casefile/review` · `GET /reviews` · `GET /progress` | 发起复盘（day 快照军令/回填事实+连续天数+同步段位） · 复盘账本 · 段位/里程碑 | 是 |
 | `GET /sayings/today` | 每日献策 | 否 |
 | `GET /plans` · `POST /plans/:id/purchase` · `POST /plans/:id/order` · `POST /pay/wechat/notify` | 套餐列表 · 演示购买/切换套餐并入账算力 · 微信 JSAPI 下单 · 微信支付回调幂等入账 | 列表否 · 购买/下单是 · 回调否 |
 | `GET /sessions` · `GET/DELETE /sessions/:id` | 会话列表/详情/删除 | 是 |
@@ -281,6 +283,10 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `AiSetting`（单例 id=`default`，大模型配置：provider/baseUrl/model/apiKey/embeddingModel/temperature）；pgvector 开启时 `knowledge_chunk`/`memory` 另有 `embedding_vec vector(N)` 列（由 `prisma/pgvector.sql` 建，非 Prisma 管理）。
 - `Casefile` + `CasefileOrder`（军令，`aligned` 对齐性标注）+ `CasefileMetric`（每日回填，`(casefileId,date)` 唯一）——执行闭环（M0 PR-EX），用户级 active 案卷唯一。
 - `NatalChart`（命盘，`userId` 唯一、重排覆盖；`engineVersion` 支持按版本批量复算；`chartJson`=ChartView 全量结构）——排盘引擎（M1 PR-1）。生辰输入与「不信命理」偏好存 `Profile.extraJson.bazi`。
+- `ReviewLog`（复盘日志，`(userId,layer,date)` 唯一）——M2 PR-8：六层复盘事件账本；day 层由执行页发起复盘时落库（快照当日军令完成/对齐/回填事实）；**对齐率=对齐军令÷总军令、连续复盘天数由服务端从行计算**（今天未复盘不打断，从昨天起算）；scheduler 挂断档提醒（`review-gap-reminder`）。注入【复盘账本】块。
+- `ProphecyLog`（预言账本，`(userId,seq)` 唯一）——M2 PR-9：预言/依据/验证标准/到期时间/状态（pending|hit|miss）；**写入源=真实模型结构化抽取（gateway.extractProphecies，测试/mock 返回空→绝不产生伪预言）+ 显式接口**；总军师输出后 sessions 路由异步收割（有命盘用户才抽）；`prophecy-due-scan` 到期登记对账候选（行级 `dueNotifiedAt` 幂等）；命中率服务端算、无样本 null。注入【天机账本】块。
+- `UserProgress`（用户进度，`userId` 唯一）——M2 PR-10：战略段位（新兵→尉官14天→校官30天+月复盘→将军90天+准确率>60%→元帅180天+>70%+命中率>50%；**只升不降**，null 指标视为不达标不放水）+ 里程碑（使用天数 7/30/90/180/365 解锁，记首次解锁日期）；晋升记审计 `user.rank.promoted`（晋升卡素材）；`syncProgress` 无变化不写库。注入【段位·里程碑】块（新用户零记录不注入）。
+- **复盘保底（M2 PR-6）**：`reserveQuota(userId, ratio, {grace:'review'})`——余额≤0 时复盘类调用（`buildReviewPrompt` 确定性前缀识别）每日最多 `REVIEW_GRACE_PER_DAY`(2) 次放行（透支记账+`system.quota.grace` 审计）；套餐到期锁定不受影响。**复盘动线归属总军师 general（免费），ops 经营参谋保留为可解锁深聊**——复盘是留存生命线，不设解锁墙。
 - `DecisionLog`（决策日志，`(userId,seq)` 唯一自增序号）——M2 PR-7：决策/理由/天势参考/验证标准/验证期/状态（pending|correct|revise）/快慢标注；写入源=认可方案自动记账 + 手动接口（AI 工具位与 LLM 抽取随 PR-9 共建）；**准确率（含快/慢分开）一律服务端从状态行统计，无已验证样本返回 null 不编 0%**；注入【决策账本】块（近 5 条 + 准确率 + 禁止 AI 自算口径）。
 - `StrategicProfile`（战略档案，`userId` 唯一）——统一状态层（M1 PR-3）：只存**客户已确认**的战略事实（主要矛盾/定位/赛道/阶段 + 预留 十二问/KPI/extra）；回写触发=认可方案（`/casefile/accept` 按分节标题确定性提取）+ 手动校准；注入为【战略档案】块、置于推断型【客户档案】之前。与 `understanding`（证据自动推断）分工明确，不重复。
 

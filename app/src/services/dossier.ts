@@ -230,6 +230,18 @@ export async function saveBackfill(values: DailyBackfill): Promise<Dossier | nul
   return r.casefile;
 }
 
+/** 发起复盘（M2 PR-8）：落一条复盘账（服务端快照当日军令/回填事实），返回连续复盘天数。
+ *  mock 模式无复盘账本，返回 null；失败静默（不阻塞进入复盘对话）。 */
+export async function startReview(layer: 'day' | 'week' | 'month' = 'day'): Promise<number | null> {
+  if (IS_MOCK || !getToken()) return null;
+  try {
+    const r = await request<{ streak: number }>('/casefile/review', 'POST', { layer });
+    return r.streak;
+  } catch {
+    return null;
+  }
+}
+
 // ============ 纯函数（对已加载的案卷做视图计算，页面口径不变） ============
 
 export function ordersOf(d: Dossier | null, date: string): DossierOrder[] {
