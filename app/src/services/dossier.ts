@@ -315,9 +315,9 @@ export function buildReviewPrompt(d: Dossier | null): string {
     lines.push('今天没有生成军令。');
   }
   if (bf && (bf.leads || bf.consults || bf.deals)) {
-    lines.push(`今日数据回填：线索 ${bf.leads || 0}，咨询 ${bf.consults || 0}，成交 ${bf.deals || 0}。`);
+    lines.push(`今天记录的数据：线索 ${bf.leads || 0}，咨询 ${bf.consults || 0}，成交 ${bf.deals || 0}。`);
   } else {
-    lines.push('今日数据未回填。');
+    lines.push('今天还没有记录数据。');
   }
   lines.push('请判断今天的主要问题，并给出明天的 1-3 条军令。');
   return lines.join('\n');

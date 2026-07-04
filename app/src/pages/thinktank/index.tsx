@@ -18,7 +18,7 @@ const TABS: { key: ThinkTab; label: string }[] = [
 ];
 
 // 能力面板的费用口径 chips（设计稿 commerce-strip）。
-const COMMERCE = ['免费初判', '深度 Skill', '会员权益', '算力消耗', '高级模块'];
+const COMMERCE = ['免费初判', '进阶方法', '会员权益', '按次付费', '高级模块'];
 
 function relTime(iso: string): string {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -144,7 +144,7 @@ export default function ThinkTank() {
                 <View className="tree-head" onClick={goKnowledge}>
                   <View className="tree-i"><Text>分</Text></View>
                   <View className="tree-b">
-                    <Text className="tree-t serif">AI 分类框架</Text>
+                    <Text className="tree-t serif">资料分类</Text>
                     <Text className="tree-s">上传后按案卷目标自动归类</Text>
                   </View>
                   <Text className="tree-em">8 类</Text>
@@ -200,9 +200,9 @@ export default function ThinkTank() {
             <ScrollView scrollX className="commerce-strip" enhanced showScrollbar={false}>
               {COMMERCE.map((c) => <Text key={c} className="commerce-chip">{c}</Text>)}
             </ScrollView>
-            <Text className="think-h2">免费 Skill</Text>
+            <Text className="think-h2">基础方法</Text>
             {freeSkills.map((k) => skillRow(k, goMarket))}
-            <Text className="think-h2">深度 Skill</Text>
+            <Text className="think-h2">进阶方法</Text>
             {deepSkills.map((k) => skillRow({ ...k, status: k.cost }, goMarket))}
             <Text className="think-h2">方案模块</Text>
             {MODULE_MARKET.slice(0, 4).map((m) => skillRow({ id: m.id, title: m.title, desc: m.desc, status: m.price, tier: m.tier }, goMarket))}

@@ -149,7 +149,7 @@ export default function Profile() {
         <View className="account-depth" onClick={() => setShowPlans(true)}>
           <View className="ad-b">
             <Text className="ad-t">深度能力解锁</Text>
-            <Text className="ad-s">更高产出额度、深度 Skill、数据增强与长期监控</Text>
+            <Text className="ad-s">更高产出额度、进阶方法、数据增强与长期监控</Text>
           </View>
           <Text className="ad-em">管理</Text>
         </View>

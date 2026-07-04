@@ -29,9 +29,9 @@ export const ADVISOR_ALIAS: Record<string, string> = {
 // 常驻专业军师（参谋室置顶线程）：战略 / 增长 / IP / 经营复盘。
 export const CORE_SPECIALISTS: SpecialistMeta[] = [
   { agentKey: 'strat', duty: '主要矛盾 · 取舍', syncDesc: '战略判断沉淀为战局主线' },
-  { agentKey: 'growth', duty: '获客 · 转化 · 复购', syncDesc: '转化路径回流执行指标' },
+  { agentKey: 'growth', duty: '获客 · 转化 · 复购', syncDesc: '转化路径同步进执行指标' },
   { agentKey: 'ip', duty: '定位 · 内容 · 发布', syncDesc: '内容任务写入每日军令' },
-  { agentKey: 'ops', duty: '数据 · 复盘 · 节奏', syncDesc: '回填后刷新明日动作' },
+  { agentKey: 'ops', duty: '数据 · 复盘 · 节奏', syncDesc: '数字更新后，刷新明日动作' },
 ];
 
 // 更多专业军师（顾问目录的其余 advisory 智能体按需展开）。
@@ -42,7 +42,7 @@ export const DISPATCH_SUGGESTIONS = [
   { agentKey: 'strat', icon: 'target', name: '派给战略军师', prompt: '把我刚才的问题交给你重新判断：主要矛盾是什么，该攻该守该等？' },
   { agentKey: 'growth', icon: 'trend', name: '派给增长军师', prompt: '把我刚才的问题拆成获客、转化、复购和可验证的执行指标。' },
   { agentKey: 'ip', icon: 'crown', name: '派给 IP 军师', prompt: '围绕我刚才的问题，拆成定位、选题和发布任务。' },
-  { agentKey: 'ops', icon: 'clock', name: '派给经营复盘', prompt: '基于我刚才的问题，生成今天的复盘清单和需要回填的数据。' },
+  { agentKey: 'ops', icon: 'clock', name: '派给经营复盘', prompt: '基于我刚才的问题，生成今天的复盘清单和需要补充的数据。' },
 ];
 
 // 参谋室「快速诊断」起手式。

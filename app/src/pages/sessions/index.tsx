@@ -23,12 +23,12 @@ function relTime(iso: string): string {
 
 // 快捷补给（对齐设计稿 6 卡）：资料、数据、模块、报告 + 军令 / 执行动线。
 const QUICK_CARDS = [
-  { t: '上传知识库', d: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index' },
+  { t: '上传经营资料', d: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index' },
   { t: '绑定数据源', d: '店铺、账号、企微、财务表', url: '/packages/work/bindings/index' },
-  { t: 'Skill / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
-  { t: '生成报告', d: '对话沉淀为报告和案卷', url: '/packages/work/library/index' },
-  { t: '转成军令', d: '认可判断后生成今日军令', tab: '/pages/studio/index' },
-  { t: '今日执行', d: '军令、任务、回填、复盘', tab: '/pages/studio/index' },
+  { t: '军师方法 / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
+  { t: '生成报告', d: '把讨论整理成一份报告', url: '/packages/work/library/index' },
+  { t: '转成军令', d: '认可方案后拆成今日军令', tab: '/pages/studio/index' },
+  { t: '今日执行', d: '军令、任务、打卡、复盘', tab: '/pages/studio/index' },
 ] as { t: string; d: string; url?: string; tab?: string }[];
 
 // 军师消息（对话页，第一入口）：微信式列表——总军师置顶 + 专业军师线程，
@@ -129,7 +129,7 @@ export default function Sessions() {
         <View className="messages-head">
           <View className="mh-titles">
             <Text className="mh-t">对话</Text>
-            <Text className="mh-s">军师参谋室 · 像微信一样管理会话</Text>
+            <Text className="mh-s">军师参谋室 · 各位军师分线跟进，历史随时回看</Text>
           </View>
           <View className="mh-tools">
             <View className={`mh-btn ${showHistory ? 'on' : ''}`} onClick={() => setShowHistory((v) => !v)}>
@@ -200,7 +200,7 @@ export default function Sessions() {
               <>
                 <View className="wx-section"><Text>专业参谋</Text></View>
                 <View className="wx-list">
-                  {moreAgents.filter((a) => matchAgent(a)).map((a) => advisorRow(a, a.role, '结论回流总军师主线'))}
+                  {moreAgents.filter((a) => matchAgent(a)).map((a) => advisorRow(a, a.role, '结论同步进总军师主线'))}
                 </View>
               </>
             ) : null}
@@ -213,7 +213,7 @@ export default function Sessions() {
               <View className="sess-empty">
                 <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="chat" size={22} color={accent} /></View>
                 <Text className="et">{q ? '没有匹配的会话' : '还没有会话'}</Text>
-                <Text className="es">从总军师或任一专业军师开始——每条线程独立、可随时回溯，关键结论回流主线。</Text>
+                <Text className="es">从总军师开始，或直接找某位专业军师聊——每段对话都单独留档，关键判断会汇总进主线。</Text>
                 <Text className="es-link" style={{ color: accent }} onClick={() => newWith('general')}>＋ 发起新对话</Text>
               </View>
             ) : (

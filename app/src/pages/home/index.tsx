@@ -120,7 +120,7 @@ export default function Home() {
         <View className="battle-hero" onClick={() => goChat('agentKey=general&continue=1')}>
           <Text className="bh-kicker">军师判断 · 主要矛盾</Text>
           <Text className="bh-source">
-            {dossier ? `当前案卷 · ${dossier.title} · 由对话、资料库、数据源共同刷新` : '还没有战略案卷 · 认可军师方案后自动生成'}
+            {dossier ? `当前案卷 · ${dossier.title} · 军师会持续跟进，随你的最新情况调整` : '还没有战略案卷 · 认可军师的方案后，会为你生成一份'}
           </Text>
           <Text className="bh-title serif">
             {und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
@@ -190,7 +190,7 @@ export default function Home() {
               <Text className="battle-tag">先对话</Text>
               <View className="bg-b">
                 <Text className="bg-t serif">和军师聊聊当前处境</Text>
-                <Text className="bg-m">对话后，下一步动作会拆解到这里和执行页</Text>
+                <Text className="bg-m">聊完之后，下一步该做什么会清楚地列在这里</Text>
               </View>
             </View>
           ) : null}
@@ -221,7 +221,7 @@ export default function Home() {
             <View className="kpi-card card" onClick={() => Taro.switchTab({ url: '/pages/studio/index' })}>
               <View className="kpi-head">
                 <Text className="section-label">经 营 数 据</Text>
-                <Text className="kpi-sub">近 {days.length} 天回填</Text>
+                <Text className="kpi-sub">近 {days.length} 天记录</Text>
               </View>
               <View className="kpi-row">
                 {rows.map(([label, v]) => (
@@ -258,8 +258,8 @@ export default function Home() {
           onClick={() => dossier ? Taro.switchTab({ url: '/pages/studio/index' }) : goChat('agentKey=general&continue=1')}
         >
           <View className="bc-b">
-            <Text className="bc-t">{dossier ? '今日执行 · 军令与回填' : '认可判断 → 生成军令与报告'}</Text>
-            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 回填后生成复盘` : '同步到执行页、报告库和每日复盘'}</Text>
+            <Text className="bc-t">{dossier ? '今日执行 · 军令与打卡' : '认可判断，生成军令与报告'}</Text>
+            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 填完进展就能生成复盘` : '认可后会直接排进执行、报告和每日复盘'}</Text>
           </View>
           <View className="bc-arrow"><Text>›</Text></View>
         </View>

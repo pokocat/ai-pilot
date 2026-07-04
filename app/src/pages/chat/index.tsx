@@ -812,7 +812,7 @@ export default function Chat() {
                 <View className="accept-card">
                   <View className="accept-b">
                     <Text className="accept-t">认可这份方案？</Text>
-                    <Text className="accept-d">存入方案库沉淀为报告，去执行页承接今日军令与回填复盘。</Text>
+                    <Text className="accept-d">存入方案库沉淀为报告，去执行页承接今日军令与每日复盘。</Text>
                   </View>
                   <View className="accept-btn" style={{ background: accent }} onClick={() => acceptPlan(m.deliverable)}>
                     <Icon name="check" size={13} color="#fff" />
