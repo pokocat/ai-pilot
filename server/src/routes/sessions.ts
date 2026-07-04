@@ -462,7 +462,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('done', { messageId: msg.id });
       } else {
         send('meta', { kind: 'chat' });
-        // P1-B3：真流式渐进下发——chatCompleteStream 内含输入/输出审核+计费+trace，按句/词推送 token（去掉假 sleep）。
+        // 普通聊天优先走 provider 原生 token 流；只在输入侧先审核，输出完成后记账/trace。
         let reply2: ChatReply | null = null;
         let usage = { inputTokens: 0, outputTokens: 0 };
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {

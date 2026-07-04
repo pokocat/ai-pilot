@@ -1381,7 +1381,7 @@ describe('TC-Z 月度 Token 额度', () => {
   });
 });
 
-describe('TC-S P1-B3 聊天流式（渐进渲染 · 复用全量审核）', () => {
+describe('TC-S P1-B3 聊天流式（渐进渲染 · 输入审核）', () => {
   test('chatCompleteStream 真增量分块 + 拼接还原 + done 收尾', async () => {
     const t = await login(uniquePhone());
     const tenantId = await tenantOf(t);
@@ -1408,12 +1408,15 @@ describe('TC-S P1-B3 聊天流式（渐进渲染 · 复用全量审核）', () =
       memoryConfig: { longTerm: false, autoLearn: false, intensity: 'balanced', retentionDays: 30, sources: [] }, sort: 99,
     } });
     try {
+      const beforeInputLogs = await prisma.moderationLog.count({ where: { userId: t, refType: 'input' } });
       const res = await api('POST', '/api/generate', { token: t, body: { text: '你好，聊聊增长这件事，多说点', agentKey: 'chatonly' } });
       assert.equal(res.status, 200);
       const body = String(res.body);
       assert.match(body, /event: token/, '应有增量 token 事件（流式）');
       assert.match(body, /event: chat/, '应有完整 chat 兜底事件（兼容非流式客户端）');
       assert.match(body, /event: done/, '应有 done 收尾');
+      const afterInputLogs = await prisma.moderationLog.count({ where: { userId: t, refType: 'input' } });
+      assert.equal(afterInputLogs - beforeInputLogs, 1, 'mock/回退分块路径也只能做一次输入审核');
       // 总军师 on-demand：普通问答走纯 chat token 流；明确要报告/方案时才进入结构化成果路径
       const g = await api('POST', '/api/generate', { token: t, body: { text: '随便聊聊', agentKey: 'general' } });
       assert.equal(g.status, 200);

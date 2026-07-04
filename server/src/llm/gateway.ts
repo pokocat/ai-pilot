@@ -1,5 +1,5 @@
 // LLM Gateway（《投产开发指导》§5.1）：统一封装模型调用——
-// 路由（mock/claude/openai 兼容，含 Agnes/DeepSeek/Qwen…）、内容审核、Token 计量、结果缓存、故障兜底/降级。
+// 路由（mock/claude/openai 兼容，含 Agnes/DeepSeek/Qwen…）、输入审核、Token 计量、结果缓存、故障兜底/降级。
 //
 // provider 与 baseUrl/model/key 由「运营后台可切换的 DB 配置」决定（services/aiConfig），
 // env 仅作兜底；未配置真实 key 时一律降级 mock，保证可用。
@@ -210,11 +210,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: '' };
     }
-    await maybeRecord(sourced, 'deliverable', ctx, meta); // 记账早于输出审核：token 已花，审核拦截也要记
-    const outText = sourced.result.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
-    if (!(await moderate('output', outText, modOpts(ctx, meta)))) {
-      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
-    }
+    await maybeRecord(sourced, 'deliverable', ctx, meta);
     return { result: sourced.result, usage: sourced.usage };
   }
 
@@ -253,16 +249,12 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   }
 
   await maybeRecord(sourced, 'deliverable', ctx, meta);
-  const outText = sourced.result.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
-  if (!(await moderate('output', outText, modOpts(ctx, meta)))) {
-    throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
-  }
   if (!tools.length) await cacheSet(ck, sourced.result, CACHE_TTL);
   return { result: sourced.result, usage: sourced.usage };
 }
 
-export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{ result: ChatReply; usage: Usage }> {
-  if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
+export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { inputModerated?: boolean }): Promise<{ result: ChatReply; usage: Usage }> {
+  if (!opts?.inputModerated && !(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
 
@@ -276,9 +268,6 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       return { result: mockChat(ctx), usage: ZERO_USAGE };
-    }
-    if (!(await moderate('output', s.result.text, modOpts(ctx, meta)))) {
-      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
     }
     return { result: s.result, usage: s.usage };
   }
@@ -309,9 +298,6 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
     if (!env.aiFallbackMock) throw aiUnavailable(err);
   }
   if (chatResult) {
-    if (!(await moderate('output', chatResult.result.text, modOpts(ctx, meta)))) {
-      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
-    }
     return { result: chatResult.result, usage: chatResult.usage };
   }
   return { result: mockChat(ctx), usage: ZERO_USAGE };
@@ -331,17 +317,111 @@ function* chunkText(text: string): Generator<string> {
   if (buf) yield buf;
 }
 
-/**
- * P1-B3：聊天流式（渐进渲染）。内容审核是硬约束 → 绝不流式下发未审核的 token，
- * 故必须先拿到「经输入+输出审核的完整结果」再分块推送。复用 chatComplete（审核/计费/trace/provider 分发全在内，
- * 零重复、零安全回退），按真实节奏分块，去掉假 sleep 剧场。
- * 注：real-provider 的「模型 token 级增量」为后续（需 provider SDK 原生流式 + 真机 QA）；
- * 在「必须先审核全量」的产品约束下，渐进渲染已审核结果才是正确架构。
- */
-export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): AsyncGenerator<ChatStreamEvent> {
-  const { result, usage } = await chatComplete(ctx, meta);
+async function* chunkedChatFallback(ctx: GenContext, meta?: UsageMeta, inputModerated = false): AsyncGenerator<ChatStreamEvent> {
+  const { result, usage } = await chatComplete(ctx, meta, { inputModerated });
   for (const piece of chunkText(result.text)) yield { type: 'delta', text: piece };
   yield { type: 'done', result, usage };
+}
+
+async function* tracedChatProviderStream(
+  ctx: GenContext,
+  meta: UsageMeta | undefined,
+  provider: 'openai' | 'claude',
+  model: string,
+  stream: AsyncGenerator<ChatStreamEvent>,
+): AsyncGenerator<ChatStreamEvent> {
+  const t0 = Date.now();
+  let text = '';
+  let done: { result: ChatReply; usage: Usage } | null = null;
+  try {
+    for await (const ev of stream) {
+      if (ev.type === 'delta') {
+        text += ev.text;
+        yield ev;
+      } else {
+        done = { result: ev.result, usage: ev.usage };
+      }
+    }
+    if (!done) throw Object.assign(new Error(`${provider} 流式响应未返回完整结果`), { code: 'AI_EMPTY_RESPONSE' });
+    await recordTrace({
+      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
+      status: 'ok', latencyMs: Date.now() - t0, usage: done.usage,
+      promptText: ctx.userMessage, responseText: done.result.text,
+    });
+    void auditBannedWords({
+      tenantId: meta?.tenantId ?? ctx.tenantId ?? null,
+      userId: meta?.userId ?? ctx.userId ?? null,
+      sessionId: meta?.sessionId ?? null,
+      agentKey: ctx.agentKey,
+      kind: 'chat',
+      text: done.result.text,
+    });
+    await maybeRecord({ result: done.result, usage: done.usage, provider, model }, 'chat', ctx, meta);
+    yield { type: 'done', result: done.result, usage: done.usage };
+  } catch (err) {
+    await recordTrace({
+      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
+      status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
+      responseText: text,
+    });
+    throw err;
+  }
+}
+
+/**
+ * 聊天流式：只在输入侧做审核；合规后优先走 provider 原生 streaming，模型 token/chunk 到达即下发。
+ * 若当前路径暂不支持原生流（Dify、工具调用循环、mock、兼容网关不支持 stream），退回完整结果后分块，保证可用。
+ */
+export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): AsyncGenerator<ChatStreamEvent> {
+  if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
+    throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
+  }
+
+  let emitted = false;
+  try {
+    if (ctx.runtime?.mode === 'openai') {
+      const cfg = openaiOverrideCfg(ctx, await getAiConfig());
+      const tools = await skillToolsFor(ctx);
+      if (isRealKey(cfg.apiKey) && !tools.length) {
+        const oa = await import('./providers/openai.js');
+        for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg))) {
+          if (ev.type === 'delta') emitted = true;
+          yield ev;
+        }
+        return;
+      }
+    }
+
+    if (!ctx.runtime) {
+      const cfg = await getAiConfig();
+      const live = liveProvider(cfg);
+      const tools = (live === 'openai' || live === 'claude') ? await skillToolsFor(ctx) : [];
+      if (live === 'openai' && !tools.length) {
+        const oa = await import('./providers/openai.js');
+        for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg))) {
+          if (ev.type === 'delta') emitted = true;
+          yield ev;
+        }
+        return;
+      }
+      if (live === 'claude' && !tools.length) {
+        const cl = await import('./providers/claude.js');
+        for await (const ev of tracedChatProviderStream(ctx, meta, 'claude', cfg.model, cl.claudeChatStream(ctx, cfg))) {
+          if (ev.type === 'delta') emitted = true;
+          yield ev;
+        }
+        return;
+      }
+    }
+  } catch (err) {
+    if (emitted) throw err;
+    console.error('[gateway] native chat stream fallback:', (err as Error).message);
+    if (!env.aiFallbackMock) {
+      // 保持老行为：流式握手失败时仍尝试非流式 provider；若 provider 真不可用，chatComplete 会抛 AI_UNAVAILABLE。
+    }
+  }
+
+  for await (const ev of chunkedChatFallback(ctx, meta, true)) yield ev;
 }
 
 export type AdaptiveResult =
@@ -367,9 +447,6 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
       console.error('[gateway] runtime adaptive fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       return { kind: 'chat', reply: mockChat(ctx), usage: ZERO_USAGE };
-    }
-    if (!(await moderate('output', s.result.text, modOpts(ctx, meta)))) {
-      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
     }
     return { kind: 'chat', reply: s.result, usage: s.usage };
   }
@@ -421,8 +498,6 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     promptText: ctx.userMessage, responseText: respText,
   });
   await maybeRecord({ result: out.result, usage, provider, model, toolCalls, iterations }, recKind, ctx, meta);
-
-  if (!(await moderate('output', respText, modOpts(ctx, meta)))) throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
 
   return out.kind === 'report'
     ? { kind: 'report', deliverable: out.result, usage }

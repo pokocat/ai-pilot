@@ -38,6 +38,25 @@ function stubFetch(handler: (url?: any, init?: RequestInit) => { ok: boolean; st
     return { ok: r.ok, status: r.status, json: async () => r.body } as unknown as Response;
   }) as unknown as typeof fetch;
 }
+
+function streamResponse(chunks: string[]): Response {
+  const enc = new TextEncoder();
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const c of chunks) controller.enqueue(enc.encode(c));
+      controller.close();
+    },
+  }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
+function stubStream(chunks: string[], inspect?: (body: Record<string, unknown>) => void) {
+  globalThis.fetch = (async (url: any, init?: RequestInit) => {
+    if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    inspect?.(body);
+    return streamResponse(chunks);
+  }) as unknown as typeof fetch;
+}
 // 模拟 AbortController 超时：fetch reject 一个含 abort 字样的错误（aiUnavailable 据此判「超时」）。
 function stubAbort() {
   globalThis.fetch = (async (url: any) => {
@@ -79,6 +98,32 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.kind, 'chat');
     assert.equal(r.body.reply.text, '机构级判断：先稳现金流，再谈增长。');
+  });
+
+  test('/generate 普通聊天 → OpenAI 原生 stream 分段下发，输出不再走阻塞审核', async () => {
+    let called = 0;
+    stubStream([
+      'data: {"choices":[{"delta":{"content":"第一段，"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"赌博风险应直接规避。"}}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":8}}\n\n',
+      'data: [DONE]\n\n',
+    ], (body) => {
+      called++;
+      assert.equal(body.stream, true, '普通聊天必须请求 provider 原生 stream');
+      assert.deepEqual(body.stream_options, { include_usage: true });
+    });
+    const t = await login(uniquePhone());
+    const r = await api('POST', '/api/generate', { token: t, body: { text: '聊聊合规风险', agentKey: 'general' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(called, 1, '原生流式成功时不应再补打一遍非流式请求');
+    const sse = String(r.body);
+    assert.match(sse, /event: token\ndata: \{"text":"第一段，"\}/, '第一段 token 应单独下发');
+    assert.match(sse, /event: token\ndata: \{"text":"赌博风险应直接规避。"\}/, '第二段 token 应单独下发');
+    assert.match(sse, /event: chat/);
+    assert.match(sse, /第一段，赌博风险应直接规避。/);
+    assert.match(sse, /event: done/);
+    const outputLogs = await prisma.moderationLog.count({ where: { userId: t, refType: 'output' } });
+    assert.equal(outputLogs, 0, '输出不再进入阻塞式 moderation_log');
   });
 
   test('429 + AI_FALLBACK_MOCK=false → 503 AI_UNAVAILABLE', async () => {

@@ -20,6 +20,11 @@ interface OAResponse {
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
   error?: { message?: string };
 }
+interface OAStreamChunk {
+  choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
+  usage?: OAResponse['usage'];
+  error?: { message?: string };
+}
 
 const DELIVERABLE_MAX_TOKENS = 2600;
 
@@ -40,6 +45,80 @@ async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>): P
     return data;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function* readOpenAIStream(res: Response): AsyncGenerator<OAStreamChunk> {
+  if (!res.body) throw new Error('OpenAI 兼容接口未返回流式响应体');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    buf = buf.replace(/\r\n/g, '\n');
+    const blocks = buf.split('\n\n');
+    buf = blocks.pop() ?? '';
+    for (const block of blocks) {
+      for (const line of block.split('\n')) {
+        const s = line.trim();
+        if (!s.startsWith('data:')) continue;
+        const raw = s.slice(5).trim();
+        if (!raw || raw === '[DONE]') continue;
+        let data: OAStreamChunk;
+        try { data = JSON.parse(raw) as OAStreamChunk; }
+        catch { continue; }
+        if (data.error?.message) throw new Error(data.error.message);
+        yield data;
+      }
+    }
+  }
+  buf = buf.replace(/\r\n/g, '\n');
+  if (buf.trim()) {
+    for (const line of buf.split('\n')) {
+      const s = line.trim();
+      if (!s.startsWith('data:')) continue;
+      const raw = s.slice(5).trim();
+      if (!raw || raw === '[DONE]') continue;
+      const data = JSON.parse(raw) as OAStreamChunk;
+      if (data.error?.message) throw new Error(data.error.message);
+      yield data;
+    }
+  }
+}
+
+async function callChatStream(cfg: ResolvedAiConfig, body: Record<string, unknown>, includeUsage = true): Promise<AsyncGenerator<OAStreamChunk>> {
+  const base = cfg.baseUrl.replace(/\/+$/, '');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
+  try {
+    const res = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({
+        model: cfg.model,
+        temperature: cfg.temperature,
+        ...body,
+        stream: true,
+        ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const data = (await res.clone().json().catch(async () => {
+        const text = await res.text().catch(() => '');
+        return text ? { error: { message: text } } : {};
+      })) as OAResponse;
+      throw new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`);
+    }
+    return (async function* () {
+      try { yield* readOpenAIStream(res); }
+      finally { clearTimeout(timer); }
+    })();
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
   }
 }
 
@@ -139,6 +218,38 @@ export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     result: { text },
     usage,
   };
+}
+
+export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
+  const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
+  const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
+  const body = {
+    max_tokens: 800,
+    messages: [
+      { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。` },
+      ...history,
+      { role: 'user', content: ctx.userMessage },
+    ] as OAMessage[],
+  };
+  let chunks: AsyncGenerator<OAStreamChunk>;
+  try {
+    chunks = await callChatStream(cfg, body, true);
+  } catch (err) {
+    if (!/stream_options|include_usage/i.test((err as Error).message)) throw err;
+    chunks = await callChatStream(cfg, body, false);
+  }
+  let text = '';
+  let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
+  for await (const chunk of chunks) {
+    if (chunk.usage) usage = usageOf({ usage: chunk.usage });
+    const delta = chunk.choices?.map((c) => c.delta?.content ?? '').join('') ?? '';
+    if (delta) {
+      text += delta;
+      yield { type: 'delta', text: delta };
+    }
+  }
+  const out = requireText(text, usage, 'chat_stream');
+  yield { type: 'done', result: { text: out }, usage };
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回 content 文本。 */

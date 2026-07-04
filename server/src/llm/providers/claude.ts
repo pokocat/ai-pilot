@@ -148,6 +148,35 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
   return { result: { text: requireText(text, usage, 'chat') }, usage };
 }
 
+export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
+  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
+  const history = (ctx.history ?? []).map((m) => ({
+    role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+    content: m.text,
+  }));
+  const stream = getClient(cfg.apiKey, cfg.baseUrl).messages.stream({
+    model: cfg.model,
+    max_tokens: 800,
+    temperature: cfg.temperature,
+    system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
+    messages: [...history, { role: 'user', content: ctx.userMessage }],
+  });
+  let text = '';
+  let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
+  for await (const event of stream) {
+    if (event.type === 'message_start') usage = usageOf(event.message);
+    else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
+    else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+      text += event.delta.text;
+      yield { type: 'delta', text: event.delta.text };
+    }
+  }
+  const final = await stream.finalMessage().catch(() => null);
+  if (final) usage = usageOf(final);
+  const out = requireText(text || final?.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n'), usage, 'chat_stream');
+  yield { type: 'done', result: { text: out }, usage };
+}
+
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
 export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
   const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
