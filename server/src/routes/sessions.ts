@@ -289,7 +289,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
   });
 
-  // 发送消息并流式产出（SSE，仅 H5/Web）。空会话不预先落库——首条消息时创建会话。
+  // 发送消息并流式产出（SSE；H5 ReadableStream / weapp chunk）。空会话不预先落库——首条消息时创建会话。
   app.post<{ Body: { agentKey?: string; sessionId?: string; text: string; projectId?: string; refs?: MessageRef[] } }>('/generate', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const text = (req.body.text || '').trim();
@@ -380,7 +380,24 @@ export async function sessionRoutes(app: FastifyInstance) {
         const learned = await learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId });
         if (learned) send('memory', { learned: true, agentName: agent.name });
       };
-      if (onDemand) {
+      if (onDemand && !wantsDeliverableRequest(text)) {
+        send('meta', { kind: 'chat' });
+        let reply2: ChatReply | null = null;
+        let usage = { inputTokens: 0, outputTokens: 0 };
+        for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
+          if (ev.type === 'delta') send('token', { text: ev.text });
+          else { reply2 = ev.result; usage = ev.usage; }
+        }
+        send('chat', reply2);
+        const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object } });
+        harvestProphecies(user, agentKey, reply2?.text);
+        await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+        await learnSse();
+        const creditBalance = creditReservation?.balance ?? 0;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
+        send('credit', { balance: creditBalance, tokenQuota });
+        send('done', { messageId: msg.id });
+      } else if (onDemand) {
         const out = await generateAdaptive(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         if (out.kind === 'report') {
           const d = out.deliverable;
@@ -527,4 +544,8 @@ function setupSSE(reply: FastifyReply) {
     Connection: 'keep-alive',
     'Access-Control-Allow-Origin': '*',
   });
+}
+
+function wantsDeliverableRequest(text: string): boolean {
+  return /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|转成军令|生成纪要/.test(text);
 }

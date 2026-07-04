@@ -1,6 +1,6 @@
 import { BASE_URL } from './config';
 import { getToken } from './token';
-import { parseSSE } from './sse';
+import { parseSSE, decodeUtf8, sliceCompleteBlocks } from './sse';
 import type { GenRequest, ChatReply } from '../../../shared/contracts';
 
 export interface StreamHandlers {
@@ -32,14 +32,14 @@ async function responseErrorMessage(res: Response): Promise<string> {
   }
 }
 
-function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers): boolean {
+function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers, state: { rendered: boolean }): boolean {
   let ok = true;
   for (const e of events) {
     const d = e.data as { id?: string; text?: string; messageId?: string; message?: string } & ChatReply;
     if (e.event === 'session') h.onSession?.(d?.id ?? '');
-    else if (e.event === 'token') h.onToken?.(d?.text ?? '');
-    else if (e.event === 'chat') h.onChat?.(d);
-    else if (e.event === 'done') h.onDone?.(d?.messageId);
+    else if (e.event === 'token') { state.rendered = true; h.onToken?.(d?.text ?? ''); }
+    else if (e.event === 'chat') { state.rendered = true; h.onChat?.(d); }
+    else if (e.event === 'done') { if (state.rendered) h.onDone?.(d?.messageId); }
     else if (e.event === 'error') { ok = false; h.onError?.(d?.message ?? '生成失败'); }
   }
   return ok;
@@ -48,11 +48,9 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers)
 /**
  * 流式生成（聊天）：消费 /generate SSE，逐 token 回调渐进渲染。
  * H5 走原生 fetch + ReadableStream（解析+传输均已在真实后端验证）。
- * weapp 固定不用此函数，见 STREAM_CHAT；保留平台守卫避免误触发 /generate。
+ * weapp 走 wx.request enableChunked + onChunkReceived；失败返回 false，由聊天页回退 /generate-sync。
  */
 export async function generateStream(body: GenRequest, h: StreamHandlers): Promise<boolean> {
-  if (process.env.TARO_ENV !== 'h5') return false;
-
   const url = `${BASE_URL}/generate`;
   const header = { 'Content-Type': 'application/json', 'x-user-id': getToken() };
 
@@ -66,21 +64,86 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
     let buf = '';
     let ok = true;
     let sawEvent = false;
+    const state = { rendered: false };
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
       const { events, rest } = parseSSE(buf); buf = rest;
       if (events.length) sawEvent = true;
-      ok = dispatch(events, h) && ok;
+      ok = dispatch(events, h, state) && ok;
     }
     if (buf.trim()) {
       const events = parseSSE(buf + '\n\n').events;
       if (events.length) sawEvent = true;
-      ok = dispatch(events, h) && ok;
+      ok = dispatch(events, h, state) && ok;
     }
     if (!sawEvent) h.onError?.('网络请求失败');
-    return ok && sawEvent;
+    return ok && state.rendered;
+  }
+
+  if (process.env.TARO_ENV === 'weapp') {
+    return await new Promise<boolean>((resolve) => {
+      let bytes = new Uint8Array(0);
+      let ok = true;
+      let sawEvent = false;
+      const state = { rendered: false };
+
+      const consumeText = (text: string) => {
+        const { events, rest } = parseSSE(text);
+        if (events.length) sawEvent = true;
+        ok = dispatch(events, h, state) && ok;
+        return rest;
+      };
+
+      const feed = (chunk: Uint8Array) => {
+        const merged = new Uint8Array(bytes.length + chunk.length);
+        merged.set(bytes);
+        merged.set(chunk, bytes.length);
+        const { complete, rest } = sliceCompleteBlocks(merged);
+        bytes = new Uint8Array(rest);
+        if (complete.length) consumeText(decodeUtf8(complete));
+      };
+
+      const finish = (data?: unknown) => {
+        if (bytes.length) {
+          consumeText(decodeUtf8(bytes) + '\n\n');
+          bytes = new Uint8Array(0);
+        }
+        if (!sawEvent && typeof data === 'string' && data.trim()) {
+          consumeText(data.endsWith('\n\n') ? data : `${data}\n\n`);
+        }
+        resolve(ok && state.rendered);
+      };
+
+      const wxApi = (globalThis as unknown as {
+        wx?: {
+          request: (opts: Record<string, unknown>) => { onChunkReceived?: (cb: (r: { data: ArrayBuffer }) => void) => void; abort?: () => void };
+        };
+      }).wx;
+      if (!wxApi?.request) {
+        resolve(false);
+        return;
+      }
+
+      const task = wxApi.request({
+        url,
+        method: 'POST',
+        data: body,
+        header,
+        enableChunked: true,
+        success: (res: { data?: unknown }) => finish(res.data),
+        fail: () => resolve(false),
+      });
+
+      const onChunk = task.onChunkReceived;
+      if (typeof onChunk !== 'function') {
+        task.abort?.();
+        resolve(false);
+        return;
+      }
+      onChunk.call(task, (r: { data: ArrayBuffer }) => feed(new Uint8Array(r.data)));
+    });
   }
 
   return false;

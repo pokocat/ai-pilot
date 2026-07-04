@@ -8,6 +8,12 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-04** · **修复成果型顾问自动发送误入流式导致无返回**：`pages/chat` 的流式判定不再依赖可能滞后的 React `agent` state，改为按本次发送的 `agentKey` 重新读取顾问配置；路由携带 `send=` 自动发送给「战略诊断官」等带 `deliverableKey` 的成果型顾问时，稳定走 `/generate-sync` 成果路径，并显式传入本次 `projectId`，避免首条自动发送丢项目作用域。`generateStream` 成功条件收紧为必须收到可渲染的 `token/chat` 事件，误收到 report SSE（`begin/section/footer`）会返回 `false` 触发同步 fallback，不再留下空回复。影响面：app chat/streaming + AGENTS/CHANGELOG。
+
+- **2026-07-04** · **小程序恢复真流式并锁定基础库 3.16.2**：`project.config.json` 增加 `libVersion=3.16.2`；`STREAM_CHAT` 恢复默认开启，小程序端 `generateStream` 重新启用 `wx.request enableChunked + RequestTask.onChunkReceived` 消费 `/generate` SSE，按字节切完整 SSE block 后 UTF-8 解码，失败/无事件时返回 `false` 由聊天页自动回退 `/generate-sync`，避免先展示假网络错误；H5 继续走 `fetch` ReadableStream。总军师 on-demand 普通问答前后端都放行真 token 流，只有明确要“生成方案/报告/成果卡/纪要/军令”等成果请求才回同步成果路径。影响面：app project config + streaming/config/chat + server sessions + AGENTS/TESTING/CHANGELOG。
+
+- **2026-07-04** · **AI 对话正文去卡片并支持选择复制**：`pages/chat` 普通 AI 回复从白色边框卡片改为无卡片正文排版，用户输入继续保留右侧气泡卡片；`MarkdownText` 增加 `selectable` 支持，AI 回复正文和要点可直接选择文字复制，同时保留长按复制兜底。影响面：app chat/MarkdownText + AGENTS/CHANGELOG。
+
 - **2026-07-04** · **手机号唯一身份口径收口：微信登录后强制绑定**：保留“手机号唯一确定用户身份”的既有方案，撤回微信 openid 作为业务主键的改造方向；小程序登录弹层移除「暂不绑定，先进去看看」，微信账号登录后必须完成手机号绑定或退出登录，避免未绑定微信占位账号与手机号账号割裂。影响面：app 登录弹层 + AGENTS/CHANGELOG。
 
 - **2026-07-03** · **对话输入区升级 + Claude 自适应产出 + 报告 HTML 换 V6.0 卡片风**：小程序聊天输入区从单行 `Input` 改为多行 `Textarea`，底栏补加号、固定模型胶囊和发送态；加号支持微信 `chooseMessageFile` 上传资料到知识库并自动挂本轮引用，也可打开已有项目/报告/知识引用；长按复制与 busy 锁定保留。`generateAdaptive` 的 Claude 分支改走 `claudeAdaptive`，与 OpenAI 一样默认文字对话，只有模型判断需要完整成果时才可选调用 `emit_deliverable`；普通报告 HTML 从旧米色卷轴样式改为 V6.0 天势卡片风（深绿封面、白色章节卡、金印落款、军师参谋部品牌）。影响面：app chat/Icon + server LLM Gateway/Claude provider/reportHtml + AGENTS/CHANGELOG。

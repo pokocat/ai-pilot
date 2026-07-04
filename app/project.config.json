@@ -3,6 +3,7 @@
   "projectname": "junshi-app",
   "description": "军师 · AI 商业军师",
   "appid": "wx810ebe6dfef8e75f",
+  "libVersion": "3.16.2",
   "setting": {
     "urlCheck": true,
     "es6": true,

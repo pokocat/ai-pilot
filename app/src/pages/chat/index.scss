@@ -37,6 +37,30 @@
   border-radius: 4px 16px 16px 16px; padding: 13px 15px;
   font-size: 14px; line-height: 1.6; color: var(--ink);
 }
+.ai-text {
+  max-width: 100%;
+  padding: 1px 4px 0 32px;
+  box-sizing: border-box;
+  font-size: 15.5px;
+  line-height: 1.78;
+  color: var(--ink);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.ai-text .md {
+  gap: 12px;
+}
+.ai-text .md-p,
+.ai-text .md-li-text {
+  font-size: inherit;
+  line-height: inherit;
+  letter-spacing: 0;
+}
+.ai-text .md-h2 { font-size: 16px; }
+.ai-text .md-h3 { font-size: 15.5px; }
+.ai-text .points {
+  margin-top: 12px;
+}
 .thinking { animation: thinking-rise .18s ease-out both; }
 .think-bubble { display: inline-flex; align-items: center; gap: 9px; padding: 12px 14px; }
 .think-dots { display: flex; align-items: center; gap: 4px; }

@@ -117,6 +117,9 @@ export default function Chat() {
   // 审核类错误（输入/输出未通过内容审核）：重试同样内容必再次被拦，故不提供「重试」，也避免叠出重复气泡。
   const isModerationErr = (s?: string) => !!s && /审核/.test(s);
 
+  const wantsDeliverableRequest = (s: string) =>
+    /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|转成军令|生成纪要/.test(s);
+
   const promptLogin = (title = '请先登录后再开始对话') => {
     setShowLogin(true);
     Taro.showToast({ title, icon: 'none' });
@@ -187,13 +190,13 @@ export default function Chat() {
           setSessionId(latest.id);
           if (detail.projectId) setProjectId(detail.projectId);
           restore(fallbackAgent, detail.messages);
-          if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key), 300);
+          if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key, [], true, detail.projectId || pid || ''), 300);
           return;
         }
       }
       // 全新会话：仅渲染问候（不落库），首条消息时后端创建
       setMsgs([{ role: 'greet', agent: fallbackAgent }]);
-      if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key), 350);
+      if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key, [], true, pid || ''), 350);
     } catch (e) {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
       // 任何拉取失败都不让对话页空白：至少给出问候
@@ -219,7 +222,7 @@ export default function Chat() {
     setTimeout(scrollToEnd, 60);
   }
 
-  async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true) {
+  async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true, activeProjectId = projectId) {
     if (busy) return;
     if (!store.isAuthed()) {
       promptLogin();
@@ -237,8 +240,11 @@ export default function Chat() {
     if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
     try {
-      // P1-B3：纯聊天体（无 deliverableKey）且 H5 流式开关开启 → 流式渐进渲染；小程序固定走同步，避免 SSE 断流但服务端已落库造成当前页误报网络失败。
-      if (STREAM_CHAT && !agent?.deliverableKey) {
+      // P1-B3：普通聊天默认真流式；总军师 on-demand 仅在明确要成果/报告时回同步成果路径。
+      // 路由带 send= 自动发送时，React state 里的 agent 可能还没刷新；必须按本次 agentKey 重新取配置。
+      const sendingAgent = findAgent(agentKey) || agent;
+      const canStream = STREAM_CHAT && !!sendingAgent && (!sendingAgent.deliverableKey || (sendingAgent.key === 'general' && !wantsDeliverableRequest(text)));
+      if (canStream) {
         const patch = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
           setMsgs((m) => {
             const i = m.length - 1;
@@ -249,7 +255,7 @@ export default function Chat() {
           });
         setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
         const streamOk = await generateStream(
-          { text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined },
+          { text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined },
           {
             onSession: (id) => { if (id && !sid) setSessionId(id); },
             onToken: (t) => patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })),
@@ -259,7 +265,7 @@ export default function Chat() {
           },
         );
         if (!streamOk) {
-          const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
+          const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
           if (res.sessionId && !sid) setSessionId(res.sessionId);
           if (res.reply) {
             patch((msg) => ({ ...msg, reply: res.reply!, knowledgeUsed: res.knowledgeUsed, retryText: undefined, streaming: false }));
@@ -267,7 +273,7 @@ export default function Chat() {
         }
         setTimeout(scrollToEnd, 80);
       } else {
-        const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
+        const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
         if (res.sessionId && !sid) setSessionId(res.sessionId);
         if (res.kind === 'report' && res.deliverable) {
           setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true, messageId: res.messageId, knowledgeUsed: res.knowledgeUsed }]);
@@ -612,7 +618,7 @@ export default function Chat() {
             return (
               <View key={i} className="msg a">
                 <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
-                <View className="bubble" onLongPress={() => copyText(replyToText(m.reply))}>
+                <View className="ai-text" onLongPress={() => copyText(replyToText(m.reply))}>
                   {m.streaming && !m.reply.text ? (
                     <View className="think-dots">
                       <View className="think-dot" style={{ background: accent }} />
@@ -620,11 +626,11 @@ export default function Chat() {
                       <View className="think-dot d3" style={{ background: accent }} />
                     </View>
                   ) : (
-                    <MarkdownText text={m.reply.text} />
+                    <MarkdownText text={m.reply.text} selectable />
                   )}
                   {m.reply.points && (
                     <View className="points">
-                      {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><MarkdownText text={p} className="pt-t" /></View>)}
+                      {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><MarkdownText text={p} className="pt-t" selectable /></View>)}
                     </View>
                   )}
                 </View>

@@ -12,6 +12,7 @@ export const IS_MOCK = APP_MODE === 'mock';
 export const BASE_URL =
   process.env.TARO_APP_API || 'http://localhost:4000/api';
 
-// P1-B3：聊天流式渲染开关。SSE 只在 H5/Web 使用；
-// 微信小程序真机 chunk 回调不稳定，服务端可能已落库但前端误判网络失败，因此固定走 /generate-sync。
-export const STREAM_CHAT = process.env.TARO_ENV === 'h5' && process.env.TARO_APP_STREAM !== '0';
+// P1-B3：聊天流式渲染开关（默认开）。H5 走 fetch ReadableStream；
+// 微信小程序走 wx.request enableChunked + RequestTask.onChunkReceived。
+// 如需临时回退非流式，构建时置 TARO_APP_STREAM=0。
+export const STREAM_CHAT = process.env.TARO_APP_STREAM !== '0';

@@ -12,30 +12,32 @@ interface Props {
   text: string;
   className?: string;
   inline?: boolean;
+  selectable?: boolean;
 }
 
-export default function MarkdownText({ text, className = '', inline = false }: Props) {
+export default function MarkdownText({ text, className = '', inline = false, selectable = false }: Props) {
   if (inline) {
-    return <Text className={`md-inline ${className}`}>{renderInline(cleanInline(text))}</Text>;
+    const body = selectable ? cleanSelectableInline(text) : renderInline(cleanInline(text));
+    return <Text className={`md-inline ${className}`} {...selectProps(selectable)}>{body}</Text>;
   }
 
   const blocks = parseBlocks(text);
   return (
     <View className={`md ${className}`}>
-      {blocks.map((block, i) => renderBlock(block, i))}
+      {blocks.map((block, i) => renderBlock(block, i, selectable))}
     </View>
   );
 }
 
-function renderBlock(block: Block, key: number) {
+function renderBlock(block: Block, key: number, selectable: boolean) {
   if (block.type === 'heading') {
-    return <Text key={key} className={`md-h md-h${block.level}`}>{renderInline(block.text)}</Text>;
+    return <Text key={key} className={`md-h md-h${block.level}`} {...selectProps(selectable)}>{selectable ? cleanSelectableInline(block.text) : renderInline(block.text)}</Text>;
   }
   if (block.type === 'quote') {
-    return <View key={key} className="md-quote"><Text>{renderInline(block.text)}</Text></View>;
+    return <View key={key} className="md-quote"><Text {...selectProps(selectable)}>{selectable ? cleanSelectableInline(block.text) : renderInline(block.text)}</Text></View>;
   }
   if (block.type === 'code') {
-    return <Text key={key} className="md-codeblock">{block.text}</Text>;
+    return <Text key={key} className="md-codeblock" {...selectProps(selectable)}>{block.text}</Text>;
   }
   if (block.type === 'list') {
     return (
@@ -43,13 +45,17 @@ function renderBlock(block: Block, key: number) {
         {block.items.map((item, i) => (
           <View key={i} className="md-li">
             <Text className="md-marker">{block.ordered ? `${i + 1}.` : '•'}</Text>
-            <Text className="md-li-text">{renderInline(item)}</Text>
+            <Text className="md-li-text" {...selectProps(selectable)}>{selectable ? cleanSelectableInline(item) : renderInline(item)}</Text>
           </View>
         ))}
       </View>
     );
   }
-  return <Text key={key} className="md-p">{renderInline(block.text)}</Text>;
+  return <Text key={key} className="md-p" {...selectProps(selectable)}>{selectable ? cleanSelectableInline(block.text) : renderInline(block.text)}</Text>;
+}
+
+function selectProps(selectable: boolean) {
+  return selectable ? { selectable: true, userSelect: true } : {};
 }
 
 function parseBlocks(input: string): Block[] {
@@ -146,6 +152,12 @@ function cleanInline(text: string): string {
     .replace(/^#+\s*/, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .trim();
+}
+
+function cleanSelectableInline(text: string): string {
+  return cleanInline(text)
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1');
 }
 
 function renderInline(text: string) {
