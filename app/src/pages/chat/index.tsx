@@ -658,7 +658,7 @@ export default function Chat() {
               </View>
               {m.deliverable.degraded ? (
                 <View style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
-                  <Text>本次为降级模板（未取得完整结构化产出），可重新发送以获取正式成果。</Text>
+                  <Text>这版是保底草案，已免扣额度。你可以补充要求后再生成一版。</Text>
                 </View>
               ) : null}
               {m.knowledgeUsed && m.knowledgeUsed.length ? (

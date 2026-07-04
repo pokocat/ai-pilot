@@ -9,6 +9,8 @@ import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/
 import { runToolLoop } from '../tools/loop.js';
 import type { AdaptiveOut } from './openai.js';
 
+const DELIVERABLE_MAX_TOKENS = 2600;
+
 // system 拆成「稳定前缀(打缓存断点) + 每轮变化的参考资料」两块，命中缓存按 ~1/10 计费。
 // 提示词不足最低缓存阈值(Opus 4.8 约 4096 token、Sonnet 约 2048)时 cache_control 自动忽略，无副作用。
 // 提示词缓存在现网为 GA、无需 beta header；SDK 0.32.1 的 TextBlockParam 类型尚无 cache_control 字段，
@@ -76,7 +78,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
 
   const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
     model: cfg.model,
-    max_tokens: 1500,
+    max_tokens: DELIVERABLE_MAX_TOKENS,
     temperature: cfg.temperature,
     system: systemBlocks(`${stable}\n\n${structureHint}\n务必调用 emit_deliverable 工具输出结构化成果，不要输出自由长文。`, dynamic),
     tools: [DELIVERABLE_TOOL],
@@ -102,6 +104,22 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
         usage,
       };
     }
+  }
+  const textSections = normalizeDeliverableSections(
+    res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n'),
+  );
+  if (textSections.length) {
+    return {
+      result: {
+        title: tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections: textSections,
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage,
+    };
   }
   // 真实调用已发生（已花 token）：即便没拿到 tool 输出，也按真实 usage 记账（成本可观测），内容兜底 mock 并标 degraded（用户侧不计费、提示可重试）。
   const { mockDeliverable } = await import('./mock.js');
@@ -170,7 +188,7 @@ export function claudeStep(cfg: ResolvedAiConfig): StepFn {
 
     const req: Anthropic.MessageCreateParamsNonStreaming = {
       model: cfg.model,
-      max_tokens: opts.finalTool ? 1500 : 800,
+      max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : 800,
       temperature: cfg.temperature,
       system: systemBlocks(system, ''),
       messages: msgs,
@@ -255,6 +273,20 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
         sections,
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
+    };
+  }
+  const textSections = normalizeDeliverableSections(r.text);
+  if (textSections.length) {
+    return {
+      result: {
+        title: tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections: textSections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },

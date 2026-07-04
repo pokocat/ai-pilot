@@ -21,6 +21,8 @@ interface OAResponse {
   error?: { message?: string };
 }
 
+const DELIVERABLE_MAX_TOKENS = 2600;
+
 // 统一请求封装：注入 baseUrl/model/key/温度，带超时；错误抛出由 gateway 兜底降级 mock。
 async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>): Promise<OAResponse> {
   const base = cfg.baseUrl.replace(/\/+$/, '');
@@ -72,7 +74,7 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
 
   const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   const data = await callChat(cfg, {
-    max_tokens: 1500,
+    max_tokens: DELIVERABLE_MAX_TOKENS,
     messages: [
       { role: 'system', content: `${system}\n\n${structureHint}\n务必调用 emit_deliverable 函数输出结构化成果，不要输出自由长文。` },
       ...history,
@@ -100,6 +102,20 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
         usage,
       };
     }
+  }
+  const textSections = normalizeDeliverableSections(data.choices?.[0]?.message?.content);
+  if (textSections.length) {
+    return {
+      result: {
+        title: tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections: textSections,
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage,
+    };
   }
   // 真实调用已花 token：没拿到 function 输出也按真实 usage 记账（供成本可观测），内容兜底 mock 并标 degraded（用户侧不计费、提示可重试）。
   const { mockDeliverable } = await import('./mock.js');
@@ -223,6 +239,22 @@ export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
       iterations: r.iterations,
     };
   }
+  const textSections = normalizeDeliverableSections(r.text);
+  if (textSections.length) {
+    return {
+      result: {
+        title: tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections: textSections,
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage: r.usage,
+      toolCalls: r.toolCalls,
+      iterations: r.iterations,
+    };
+  }
   const { mockDeliverable } = await import('./mock.js');
   return { result: { ...mockDeliverable(ctx), degraded: true }, usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations };
 }
@@ -280,7 +312,7 @@ export function openaiStep(cfg: ResolvedAiConfig): StepFn {
       toolDefs.push({ type: 'function', function: { name: opts.finalTool.name, description: opts.finalTool.description, parameters: opts.finalTool.schema } });
     }
 
-    const body: Record<string, unknown> = { max_tokens: opts.finalTool ? 1500 : 800, messages: toOAMessages(messages) };
+    const body: Record<string, unknown> = { max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : 800, messages: toOAMessages(messages) };
     if (opts.forceFinal) {
       // 最后一轮收口。deliverable(强制)→强制 emit_deliverable；自适应(forceFinalTool=false)→只给 emit 但 auto(可 emit 可出文本)；chat→去掉工具出文本。
       if (opts.finalTool && opts.forceFinalTool !== false) {

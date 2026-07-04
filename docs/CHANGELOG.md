@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-04** · **减少报告保底草案并去技术化提示**：报告类真实模型输出上限从 1500 提高到 2600，OpenAI/Claude provider 在强制结构化工具未返回但存在普通文本时，会把文本归一化为报告分段而不是直接标 `degraded`；小程序 degraded 提示从“降级模板/结构化产出”改为业务可理解的“保底草案，已免扣额度”。影响面：server OpenAI/Claude provider + app chat + AGENTS/CHANGELOG。
+
 - **2026-07-04** · **修复报告工具返回非数组 sections 导致流式报错**：新增 `normalizeDeliverableSections`，OpenAI/Claude provider 对 `emit_deliverable` 的 `sections` 做归一化（数组/对象/字符串均转合法分段，解析失败走降级成果），避免 qnaigc 返回 `{sections:{...}}` 时触发 `d.sections.map is not a function` 并让 `/generate` 发出 AI_UNAVAILABLE；回归测试覆盖“出报告”强制工具调用且 `sections` 非数组仍返回 report。影响面：server llm schema + OpenAI/Claude provider + provider 集成测试 + AGENTS/CHANGELOG。
 
 - **2026-07-04** · **修复“出报告”连续报 AI 服务不可用**：总军师 on-demand 在明确“出报告 / 战略体检 / 重新出报告”等成果请求时不再走 `generateAdaptive` 可选工具模式，改为直接 `generateDeliverable` 强制结构化报告，避开 qnaigc/OpenAI 兼容 Claude 在 adaptive 下返回空文本并导致 `/generate-sync` 503 的问题；补充 provider 回归测试，断言“出报告”必须强制调用 `emit_deliverable`。影响面：server sessions + provider 集成测试 + AGENTS/CHANGELOG。
