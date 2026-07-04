@@ -31,10 +31,10 @@ async function resetGeneral() {
 }
 
 // 只拦截 chat/completions；其余出站请求一律报错（不该有——嵌入/检索在测试里走本地确定性，不出网）。
-function stubFetch(handler: () => { ok: boolean; status: number; body: unknown } | Promise<never>) {
-  globalThis.fetch = (async (url: any) => {
+function stubFetch(handler: (url?: any, init?: RequestInit) => { ok: boolean; status: number; body: unknown } | Promise<never>) {
+  globalThis.fetch = (async (url: any, init?: RequestInit) => {
     if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
-    const r = await handler();
+    const r = await handler(url, init);
     return { ok: r.ok, status: r.status, json: async () => r.body } as unknown as Response;
   }) as unknown as typeof fetch;
 }
@@ -113,6 +113,39 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(r.status, 503);
     assert.equal(r.body.code, 'AI_UNAVAILABLE');
     assert.doesNotMatch(String(r.body.error), /我需要更多信息/);
+  });
+
+  test('on-demand 明确“出报告” → 强制结构化成果，不走 adaptive 空文本分支', async () => {
+    env.aiFallbackMock = false;
+    stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { tool_choice?: { function?: { name?: string } } };
+      assert.equal(body.tool_choice?.function?.name, 'emit_deliverable', '明确报告请求必须强制调用结构化成果工具');
+      return {
+        ok: true,
+        status: 200,
+        body: {
+          choices: [{
+            message: {
+              tool_calls: [{
+                function: {
+                  name: 'emit_deliverable',
+                  arguments: JSON.stringify({
+                    title: '测试报告',
+                    sections: [{ h: '判断', b: '先收口到一个主战场。', list: ['保现金流', '聚焦案例'] }],
+                  }),
+                },
+              }],
+            },
+          }],
+          usage: { prompt_tokens: 120, completion_tokens: 80 },
+        },
+      };
+    });
+    const t = await login(uniquePhone());
+    const r = await gen(t, '出报告');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.kind, 'report');
+    assert.equal(r.body.deliverable?.title, '测试报告');
   });
 
   test('超时(abort) + AI_FALLBACK_MOCK=false → 503 且提示「超时」', async () => {

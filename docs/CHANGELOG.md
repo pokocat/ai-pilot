@@ -8,7 +8,9 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
-- **2026-07-04** · **修复总军师普通输入被固定追问兜底**：`/generate-sync` 与 `/generate` 统一 on-demand 意图分流，普通问答走纯 chat，只有“出报告/战略体检/生成方案”等明确成果请求才进入 adaptive 成果路径；OpenAI/Claude provider 遇到空 `content` 改为 AI 服务异常，不再把“我需要更多信息来给你一个可执行的判断…”作为伪成功回复落库。影响面：server sessions + OpenAI/Claude provider + 测试 + AGENTS/CHANGELOG。
+- **2026-07-04** · **修复“出报告”连续报 AI 服务不可用**：总军师 on-demand 在明确“出报告 / 战略体检 / 重新出报告”等成果请求时不再走 `generateAdaptive` 可选工具模式，改为直接 `generateDeliverable` 强制结构化报告，避开 qnaigc/OpenAI 兼容 Claude 在 adaptive 下返回空文本并导致 `/generate-sync` 503 的问题；补充 provider 回归测试，断言“出报告”必须强制调用 `emit_deliverable`。影响面：server sessions + provider 集成测试 + AGENTS/CHANGELOG。
+
+- **2026-07-04** · **修复总军师普通输入被固定追问兜底**：`/generate-sync` 与 `/generate` 统一 on-demand 意图分流，普通问答走纯 chat，只有“出报告/战略体检/生成方案”等明确成果请求才进入结构化成果路径；OpenAI/Claude provider 遇到空 `content` 改为 AI 服务异常，不再把“我需要更多信息来给你一个可执行的判断…”作为伪成功回复落库。影响面：server sessions + OpenAI/Claude provider + 测试 + AGENTS/CHANGELOG。
 
 - **2026-07-04** · **修复对话成果卡“网页版”在小程序内打不开**：报告 HTML 发布链路改为 `htmlUrl` 固定返回自有域名 `{PUBLIC_BASE_URL}/api/r/:id`，避免小程序 `web-view` 直开 OSS 域名时被业务域名白名单拦截；OSS 上传保留为可选 `cdnUrl` 镜像。`POST /sessions/:id/messages/:mid/report` 对已生成过的旧 OSS `htmlUrl` 做兼容迁移，再次点击会自动写回自有域名链接；web-view 页增加安全解码和加载失败复制链接兜底；契约新增 `Deliverable.cdnUrl`，并补覆盖 OSS 旧链接转换的单测。影响面：server reportHtml/render_report/sessions + shared contracts + app webview/api 注释 + AGENTS/CHANGELOG。
 

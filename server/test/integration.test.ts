@@ -1414,7 +1414,7 @@ describe('TC-S P1-B3 聊天流式（渐进渲染 · 复用全量审核）', () =
       assert.match(body, /event: token/, '应有增量 token 事件（流式）');
       assert.match(body, /event: chat/, '应有完整 chat 兜底事件（兼容非流式客户端）');
       assert.match(body, /event: done/, '应有 done 收尾');
-      // 总军师 on-demand：普通问答走纯 chat token 流；明确要报告/方案时才进入 adaptive 成果路径
+      // 总军师 on-demand：普通问答走纯 chat token 流；明确要报告/方案时才进入结构化成果路径
       const g = await api('POST', '/api/generate', { token: t, body: { text: '随便聊聊', agentKey: 'general' } });
       assert.equal(g.status, 200);
       const gb = String(g.body);
