@@ -35,6 +35,14 @@ export function todayStr(): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+function normalizeOrderText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
+
+function orderDedupeKey(date: string, text: string): string {
+  return `${date}\0${normalizeOrderText(text)}`;
+}
+
 // 从认可的成果中提取「可执行动作」：优先取标题含 行动/动作/下一步/清单/计划/建议 的分节列表，
 // 兜底取任意列表分节；最多 3 条作为今日军令。
 export function extractOrders(d: DeliverableInput): string[] {
@@ -43,7 +51,16 @@ export function extractOrders(d: DeliverableInput): string[] {
   const listSections = sections.filter((s) => s.list && s.list.length);
   const preferred = listSections.filter((s) => actionHint.test(s.h));
   const source = (preferred.length ? preferred : listSections).flatMap((s) => s.list || []);
-  return source.slice(0, 3).map((t) => t.trim()).filter(Boolean);
+  const seen = new Set<string>();
+  return source
+    .map(normalizeOrderText)
+    .filter(Boolean)
+    .filter((text) => {
+      if (seen.has(text)) return false;
+      seen.add(text);
+      return true;
+    })
+    .slice(0, 3);
 }
 
 // 「现在不能做」：取标题含 风险/不能/不要/避免/禁 的分节内容。
@@ -75,13 +92,20 @@ export async function casefileView(userId: string, days = 14): Promise<CasefileV
   if (!cf) return null;
   const since = new Date(now().getTime() - days * 86400_000);
   const sinceStr = `${since.getFullYear()}-${`${since.getMonth() + 1}`.padStart(2, '0')}-${`${since.getDate()}`.padStart(2, '0')}`;
-  const [orders, metrics] = await Promise.all([
+  const [ordersRaw, metrics] = await Promise.all([
     prisma.casefileOrder.findMany({
       where: { casefileId: cf.id, date: { gte: sinceStr } },
       orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
     }),
     prisma.casefileMetric.findMany({ where: { casefileId: cf.id, date: { gte: sinceStr } } }),
   ]);
+  const seenOrders = new Set<string>();
+  const orders = ordersRaw.filter((o) => {
+    const key = orderDedupeKey(o.date, o.text);
+    if (seenOrders.has(key)) return false;
+    seenOrders.add(key);
+    return true;
+  });
   const backfill: CasefileView['backfill'] = {};
   metrics.forEach((m) => {
     backfill[m.date] = { leads: String(m.leads || ''), consults: String(m.consults || ''), deals: String(m.deals || ''), savedAt: m.savedAt.toISOString() };
@@ -105,7 +129,7 @@ export async function acceptDeliverable(args: {
   userId: string;
   deliverable: DeliverableInput;
   agentName: string;
-}): Promise<{ casefileId: string; newOrders: number }> {
+}): Promise<{ casefileId: string; newOrders: number; skippedOrders: number }> {
   const { tenantId, userId, deliverable, agentName } = args;
   const orderTexts = extractOrders(deliverable);
   const judgment = firstJudgment(deliverable);
@@ -133,13 +157,27 @@ export async function acceptDeliverable(args: {
         },
       });
 
-  if (orderTexts.length) {
+  const date = todayStr();
+  const existingOrderKeys = new Set(
+    (await prisma.casefileOrder.findMany({
+      where: { casefileId: cf.id, date },
+      select: { text: true },
+    })).map((o) => orderDedupeKey(date, o.text)),
+  );
+  const newOrderTexts = orderTexts.filter((text) => {
+    const key = orderDedupeKey(date, text);
+    if (existingOrderKeys.has(key)) return false;
+    existingOrderKeys.add(key);
+    return true;
+  });
+
+  if (newOrderTexts.length) {
     await prisma.casefileOrder.createMany({
-      data: orderTexts.map((text) => ({
+      data: newOrderTexts.map((text) => ({
         tenantId,
         userId,
         casefileId: cf.id,
-        date: todayStr(),
+        date,
         text,
         fromAgent: agentName,
         tag: `军令 · ${agentName}`,
@@ -149,7 +187,7 @@ export async function acceptDeliverable(args: {
       })),
     });
   }
-  return { casefileId: cf.id, newOrders: orderTexts.length };
+  return { casefileId: cf.id, newOrders: newOrderTexts.length, skippedOrders: orderTexts.length - newOrderTexts.length };
 }
 
 /** 本地案卷一次性导入（前端 storage → 服务端；服务端已有活跃案卷则跳过，保证幂等）。 */

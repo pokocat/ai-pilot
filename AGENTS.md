@@ -140,7 +140,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 军师拟人头像：`components/AdvisorAvatar`（圆形立绘 + 白描边 + 可选在线点），当前主用立绘资产在 `src/assets/avatars/generated/*-imagegen.jpg`（6 张 376px JPEG ≈306KB，由 imagegen 生成的古代/神话谋略人物商务漫画头像：general=诸葛亮意象、strat=鬼谷子意象、growth=姜子牙意象、ip=文曲星意象、ops=刘伯温意象、org=张良意象；其余智能体按气质就近复用，未映射的按 key 哈希兜底）。旧版雪碧图裁切 `src/assets/avatars/*.jpg` 已删除（未引用即清理，控主包体积）。对话列表行、chat 头部与消息 who 行统一用它，不要再回退成图标色块。
 
-战略案卷（执行闭环，已服务端化 · M0 PR-EX）：`services/dossier.ts` 是页面唯一入口——「认可方案→案卷（军令/风险锁/判断）→打卡→线索/咨询/成交回填→复盘 prompt」。server 模式走 `/casefile*` API（后端 `Casefile/CasefileOrder/CasefileMetric` 三表，按用户行级隔离，换设备不丢；军令/风险仍按 行动/风险 类分节标题启发式提取，服务端 `services/casefile.ts` 与前端 mock 分支同一套规则，**不预置业务结论**）；mock 模式沿用本地 storage 实现（`junshi.dossier.<token>`）。老用户首次拉取会把本地案卷一次性导入服务端（`POST /casefile/import`，服务端幂等 + 本地 `junshi.dossier.migrated.<token>` 标记）。页面接口全部异步（`refreshDossier/acceptDeliverable/toggleOrder/addOrder/removeOrder/saveBackfill` 返回 Promise），打卡在执行页做乐观更新。战局页（案卷行/风险锁/CTA）与执行页共用该服务。
+战略案卷（执行闭环，已服务端化 · M0 PR-EX）：`services/dossier.ts` 是页面唯一入口——「认可方案→案卷（军令/风险锁/判断）→打卡→线索/咨询/成交回填→复盘 prompt」。server 模式走 `/casefile*` API（后端 `Casefile/CasefileOrder/CasefileMetric` 三表，按用户行级隔离，换设备不丢；军令/风险仍按 行动/风险 类分节标题启发式提取，服务端 `services/casefile.ts` 与前端 mock 分支同一套规则，**不预置业务结论**；自动拆军令和手动补军令均按「同一案卷 + 同一天 + 标准化文本」幂等，重复认可/重复添加不再追加列表）；mock 模式沿用本地 storage 实现（`junshi.dossier.<token>`）。老用户首次拉取会把本地案卷一次性导入服务端（`POST /casefile/import`，服务端幂等 + 本地 `junshi.dossier.migrated.<token>` 标记）。页面接口全部异步（`refreshDossier/acceptDeliverable/toggleOrder/addOrder/removeOrder/saveBackfill` 返回 Promise），打卡在执行页做乐观更新。战局页（案卷行/风险锁/CTA）与执行页共用该服务。
 
 ### 7.2 关键 UI 约定（踩过的坑，勿回退）
 - **小程序工程约束清单（先读）**：

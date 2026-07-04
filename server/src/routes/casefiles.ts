@@ -49,7 +49,7 @@ export async function casefileRoutes(app: FastifyInstance) {
     await recordAudit({
       tenantId: user.tenantId, userId: user.id,
       action: 'user.casefile.accept',
-      payload: { casefileId: r.casefileId, newOrders: r.newOrders },
+      payload: { casefileId: r.casefileId, newOrders: r.newOrders, skippedOrders: r.skippedOrders },
     });
     return { ...r, casefile: await casefileView(user.id) };
   });
@@ -57,14 +57,22 @@ export async function casefileRoutes(app: FastifyInstance) {
   // 手动补一条今日军令
   app.post<{ Body: { text: string } }>('/casefile/orders', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const text = String(req.body?.text ?? '').trim();
+    const text = String(req.body?.text ?? '').trim().replace(/\s+/g, ' ');
     if (!text) return reply.code(400).send({ error: '军令内容不能为空' });
     const cf = await activeCasefile(user.id);
     if (!cf) return reply.code(409).send({ error: '还没有案卷，先认可一份军师方案', code: 'NO_CASEFILE' });
+    const date = todayStr();
+    const existing = await prisma.casefileOrder.findMany({
+      where: { casefileId: cf.id, date },
+      select: { text: true },
+    });
+    if (existing.some((o) => o.text.trim().replace(/\s+/g, ' ') === text)) {
+      return { casefile: await casefileView(user.id), duplicate: true };
+    }
     await prisma.casefileOrder.create({
       data: {
         tenantId: user.tenantId, userId: user.id, casefileId: cf.id,
-        date: todayStr(), text: text.slice(0, 500), fromAgent: '我', tag: '军令 · 自定',
+        date, text: text.slice(0, 500), fromAgent: '我', tag: '军令 · 自定',
       },
     });
     await prisma.casefile.update({ where: { id: cf.id }, data: { updatedAt: new Date() } });

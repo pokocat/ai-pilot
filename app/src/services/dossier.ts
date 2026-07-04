@@ -53,6 +53,10 @@ export function today(): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+function normalizeOrderText(text: string): string {
+  return text.trim().replace(/\s+/g, ' ');
+}
+
 // ============ 本地 storage 实现（mock 模式数据源 + 服务端迁移来源） ============
 
 function loadLocal(): Dossier | null {
@@ -77,7 +81,17 @@ function extractOrders(d: Deliverable): { text: string }[] {
   const listSections = d.sections.filter((s) => s.list && s.list.length);
   const preferred = listSections.filter((s) => actionHint.test(s.h));
   const source = (preferred.length ? preferred : listSections).flatMap((s) => s.list || []);
-  return source.slice(0, 3).map((text) => ({ text }));
+  const seen = new Set<string>();
+  return source
+    .map(normalizeOrderText)
+    .filter(Boolean)
+    .filter((text) => {
+      if (seen.has(text)) return false;
+      seen.add(text);
+      return true;
+    })
+    .slice(0, 3)
+    .map((text) => ({ text }));
 }
 
 // 「现在不能做」：取标题含 风险/不能/不要/避免/禁 的分节内容。
@@ -98,15 +112,22 @@ function firstJudgment(d: Deliverable): string {
   return withBody?.b || d.title || '';
 }
 
-function acceptLocal(deliverable: Deliverable, agentName: string): { dossier: Dossier; newOrders: number } {
+function acceptLocal(deliverable: Deliverable, agentName: string): { dossier: Dossier; newOrders: number; skippedOrders: number } {
   const now = new Date().toISOString();
   const existing = loadLocal();
-  const orders = extractOrders(deliverable).map((o, i) => ({
+  const date = today();
+  const existingKeys = new Set((existing?.orders || []).map((o) => `${o.date}\0${normalizeOrderText(o.text)}`));
+  const orders = extractOrders(deliverable).filter((o) => {
+    const key = `${date}\0${normalizeOrderText(o.text)}`;
+    if (existingKeys.has(key)) return false;
+    existingKeys.add(key);
+    return true;
+  }).map((o, i) => ({
     id: `${Date.now()}-${i}`,
     text: o.text,
     from: agentName,
     tag: `军令 · ${agentName}`,
-    date: today(),
+    date,
     done: false,
   }));
   const dossier: Dossier = existing
@@ -130,12 +151,12 @@ function acceptLocal(deliverable: Deliverable, agentName: string): { dossier: Do
         backfill: {},
       };
   saveLocal(dossier);
-  return { dossier, newOrders: orders.length };
+  return { dossier, newOrders: orders.length, skippedOrders: extractOrders(deliverable).length - orders.length };
 }
 
 // ============ 服务端实现（server 模式） ============
 
-type CasefileRes = { casefile: Dossier | null; newOrders?: number; imported?: boolean };
+type CasefileRes = { casefile: Dossier | null; newOrders?: number; skippedOrders?: number; imported?: boolean };
 
 // 一次性迁移：服务端还没有案卷、且本地存有旧案卷 → 导入（服务端幂等）。
 async function migrateLocalIfNeeded(): Promise<Dossier | null> {
@@ -174,10 +195,10 @@ export async function refreshDossier(): Promise<Dossier | null> {
 export async function acceptDeliverable(
   deliverable: Deliverable,
   agentName: string,
-): Promise<{ dossier: Dossier | null; newOrders: number }> {
+): Promise<{ dossier: Dossier | null; newOrders: number; skippedOrders: number }> {
   if (IS_MOCK) return acceptLocal(deliverable, agentName);
   const r = await request<CasefileRes>('/casefile/accept', 'POST', { deliverable, agentName });
-  return { dossier: r.casefile, newOrders: r.newOrders ?? 0 };
+  return { dossier: r.casefile, newOrders: r.newOrders ?? 0, skippedOrders: r.skippedOrders ?? 0 };
 }
 
 export async function toggleOrder(orderId: string): Promise<Dossier | null> {
@@ -194,15 +215,19 @@ export async function toggleOrder(orderId: string): Promise<Dossier | null> {
 
 /** 用户手动补一条今日军令（自己的安排也是真实数据）。 */
 export async function addOrder(text: string): Promise<Dossier | null> {
-  if (!text.trim()) return refreshDossier();
+  const normalized = normalizeOrderText(text);
+  if (!normalized) return refreshDossier();
   if (IS_MOCK) {
     const d = loadLocal();
     if (!d) return d;
-    d.orders = [{ id: `${Date.now()}-m`, text: text.trim(), from: '我', tag: '军令 · 自定', date: today(), done: false }, ...d.orders];
+    const date = today();
+    if (!d.orders.some((o) => o.date === date && normalizeOrderText(o.text) === normalized)) {
+      d.orders = [{ id: `${Date.now()}-m`, text: normalized, from: '我', tag: '军令 · 自定', date, done: false }, ...d.orders];
+    }
     saveLocal(d);
     return d;
   }
-  const r = await request<CasefileRes>('/casefile/orders', 'POST', { text: text.trim() });
+  const r = await request<CasefileRes>('/casefile/orders', 'POST', { text: normalized });
   return r.casefile;
 }
 
