@@ -2,7 +2,7 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { DELIVERABLE_TOOL, buildSystemParts, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, buildSystemParts, normalizeDeliverableSections, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
@@ -87,18 +87,21 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
 
   const toolUse = res.content.find((c) => c.type === 'tool_use');
   if (toolUse && toolUse.type === 'tool_use') {
-    const input = toolUse.input as { title: string; sections: Deliverable['sections'] };
-    return {
-      result: {
-        title: input.title || tpl?.title || '咨询成果',
-        icon: tpl?.icon ?? 'spark',
-        meta: metaOf(ctx),
-        sections: input.sections ?? [],
-        trust: TRUST_NOTE,
-        actions: ['save_to_library', 'export_pdf'],
-      },
-      usage,
-    };
+    const input = toolUse.input as { title?: string; sections?: unknown };
+    const sections = normalizeDeliverableSections(input.sections);
+    if (sections.length) {
+      return {
+        result: {
+          title: input.title || tpl?.title || '咨询成果',
+          icon: tpl?.icon ?? 'spark',
+          meta: metaOf(ctx),
+          sections,
+          trust: TRUST_NOTE,
+          actions: ['save_to_library', 'export_pdf'],
+        },
+        usage,
+      };
+    }
   }
   // 真实调用已发生（已花 token）：即便没拿到 tool 输出，也按真实 usage 记账（成本可观测），内容兜底 mock 并标 degraded（用户侧不计费、提示可重试）。
   const { mockDeliverable } = await import('./mock.js');
@@ -243,14 +246,15 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
     toolCtx: toolCtxOf(ctx),
     finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
   });
-  const input = (r.toolInput ?? {}) as { title?: string; sections?: Deliverable['sections'] };
-  if (input.sections) {
+  const input = (r.toolInput ?? {}) as { title?: string; sections?: unknown };
+  const sections = normalizeDeliverableSections(input.sections);
+  if (sections.length) {
     return {
       result: {
         title: input.title || tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
-        sections: input.sections,
+        sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },
@@ -277,16 +281,17 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
     finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
     forceFinalTool: false, // emit_deliverable 可选，不强制
   });
-  const input = (r.toolInput ?? null) as { title?: string; sections?: Deliverable['sections'] } | null;
-  if (input?.sections?.length) {
+  const input = (r.toolInput ?? null) as { title?: string; sections?: unknown } | null;
+  const sections = normalizeDeliverableSections(input?.sections);
+  if (sections.length) {
     const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
     return {
       kind: 'report',
       deliverable: {
-        title: input.title || tpl?.title || '咨询成果',
+        title: input?.title || tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
-        sections: input.sections,
+        sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },

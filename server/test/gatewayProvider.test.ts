@@ -115,7 +115,7 @@ describe('Gateway × Provider 错误路径', () => {
     assert.doesNotMatch(String(r.body.error), /我需要更多信息/);
   });
 
-  test('on-demand 明确“出报告” → 强制结构化成果，不走 adaptive 空文本分支', async () => {
+  test('on-demand 明确“出报告” → 强制结构化成果，sections 非数组也不报 AI_UNAVAILABLE', async () => {
     env.aiFallbackMock = false;
     stubFetch((_url, init) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { tool_choice?: { function?: { name?: string } } };
@@ -131,7 +131,7 @@ describe('Gateway × Provider 错误路径', () => {
                   name: 'emit_deliverable',
                   arguments: JSON.stringify({
                     title: '测试报告',
-                    sections: [{ h: '判断', b: '先收口到一个主战场。', list: ['保现金流', '聚焦案例'] }],
+                    sections: { h: '判断', b: '先收口到一个主战场。', list: ['保现金流', '聚焦案例'] },
                   }),
                 },
               }],
@@ -146,6 +146,7 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.kind, 'report');
     assert.equal(r.body.deliverable?.title, '测试报告');
+    assert.equal(r.body.deliverable?.sections?.[0]?.h, '判断');
   });
 
   test('超时(abort) + AI_FALLBACK_MOCK=false → 503 且提示「超时」', async () => {

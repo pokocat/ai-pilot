@@ -2,7 +2,7 @@
 // 走标准 /v1/chat/completions，兼容 OpenAI / Agnes / DeepSeek / Moonshot(Kimi) / 通义千问兼容模式 等。
 // 结构化成果用 function calling（tools）强约束。baseUrl/model/key/温度 来自运行时配置（可后台切换）。
 
-import { DELIVERABLE_TOOL, injectVariables, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, injectVariables, normalizeDeliverableSections, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import { runToolLoop } from '../tools/loop.js';
@@ -85,18 +85,21 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
   const usage = usageOf(data);
   const args = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
   if (args) {
-    const input = JSON.parse(args) as { title?: string; sections?: Deliverable['sections'] };
-    return {
-      result: {
-        title: input.title || tpl?.title || '咨询成果',
-        icon: tpl?.icon ?? 'spark',
-        meta: metaOf(ctx),
-        sections: input.sections ?? [],
-        trust: TRUST_NOTE,
-        actions: ['save_to_library', 'export_pdf'],
-      },
-      usage,
-    };
+    const input = parseArgs(args) as { title?: string; sections?: unknown };
+    const sections = normalizeDeliverableSections(input.sections);
+    if (sections.length) {
+      return {
+        result: {
+          title: input.title || tpl?.title || '咨询成果',
+          icon: tpl?.icon ?? 'spark',
+          meta: metaOf(ctx),
+          sections,
+          trust: TRUST_NOTE,
+          actions: ['save_to_library', 'export_pdf'],
+        },
+        usage,
+      };
+    }
   }
   // 真实调用已花 token：没拿到 function 输出也按真实 usage 记账（供成本可观测），内容兜底 mock 并标 degraded（用户侧不计费、提示可重试）。
   const { mockDeliverable } = await import('./mock.js');
@@ -203,14 +206,15 @@ export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
     toolCtx: toolCtxOf(ctx),
     finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
   });
-  const input = (r.toolInput ?? {}) as { title?: string; sections?: Deliverable['sections'] };
-  if (input.sections) {
+  const input = (r.toolInput ?? {}) as { title?: string; sections?: unknown };
+  const sections = normalizeDeliverableSections(input.sections);
+  if (sections.length) {
     return {
       result: {
-        title: input.title || tpl?.title || '咨询成果',
+        title: input?.title || tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
-        sections: input.sections,
+        sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },
@@ -241,16 +245,17 @@ export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
     finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
     forceFinalTool: false, // emit_deliverable 可选，不强制
   });
-  const input = (r.toolInput ?? null) as { title?: string; sections?: Deliverable['sections'] } | null;
-  if (input?.sections?.length) {
+  const input = (r.toolInput ?? null) as { title?: string; sections?: unknown } | null;
+  const sections = normalizeDeliverableSections(input?.sections);
+  if (sections.length) {
     const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
     return {
       kind: 'report',
       deliverable: {
-        title: input.title || tpl?.title || '咨询成果',
+        title: input?.title || tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
-        sections: input.sections,
+        sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },

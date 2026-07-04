@@ -101,6 +101,40 @@ export interface Usage {
 export type Metered<T> = { result: T; usage: Usage };
 export const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
 
+function textOf(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : typeof value === 'number' || typeof value === 'boolean' ? String(value) : '';
+}
+
+function listOf(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const list = value.map(textOf).filter(Boolean).slice(0, 12);
+    return list.length ? list : undefined;
+  }
+  const text = textOf(value);
+  return text ? [text] : undefined;
+}
+
+function sectionOf(value: unknown, index: number): DeliverableSection | null {
+  const fallbackTitle = index === 0 ? '正文' : `第 ${index + 1} 部分`;
+  if (typeof value === 'string') {
+    const b = value.trim();
+    return b ? { h: fallbackTitle, b } : null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  const o = value as Record<string, unknown>;
+  const h = textOf(o.h ?? o.title ?? o.heading ?? o.name) || fallbackTitle;
+  const b = textOf(o.b ?? o.body ?? o.text ?? o.content);
+  const list = listOf(o.list ?? o.points ?? o.items ?? o.bullets);
+  if (!b && !list?.length) return null;
+  return { h, ...(b ? { b } : {}), ...(list?.length ? { list } : {}) };
+}
+
+export function normalizeDeliverableSections(input: unknown): DeliverableSection[] {
+  if (Array.isArray(input)) return input.map(sectionOf).filter((s): s is DeliverableSection => !!s).slice(0, 8);
+  const direct = sectionOf(input, 0);
+  return direct ? [direct] : [];
+}
+
 // Anthropic tool 定义：强制模型以结构化成果输出
 export const DELIVERABLE_TOOL = {
   name: 'emit_deliverable',
