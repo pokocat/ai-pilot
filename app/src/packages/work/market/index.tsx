@@ -78,7 +78,7 @@ export default function Market() {
         ))}
 
         <View className="sec-head">
-          <Text className="sec-title">方法市场</Text>
+          <Text className="sec-title">锦囊市场</Text>
           <Text className="sec-more">军师调用的方法能力包</Text>
         </View>
         <View className="skill-grid">
@@ -98,7 +98,7 @@ export default function Market() {
         <View
           className="mm-action"
           style={{ background: accent }}
-          onClick={() => goChat('general', '根据我的情况，帮我判断现在最该启用哪些模块和方法，并说明先后顺序。')}
+          onClick={() => goChat('general', '根据我的情况，帮我判断现在最该启用哪些模块和锦囊，并说明先后顺序。')}
         >
           <Icon name="spark" size={16} color="#FBFAF6" />
           <Text>让总军师帮我编排模块</Text>

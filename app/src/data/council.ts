@@ -29,9 +29,9 @@ export const ADVISOR_ALIAS: Record<string, string> = {
 // 常驻专业军师（参谋室置顶线程）：战略 / 增长 / IP / 经营复盘。
 export const CORE_SPECIALISTS: SpecialistMeta[] = [
   { agentKey: 'strat', duty: '主要矛盾 · 取舍', syncDesc: '战略判断沉淀为战局主线' },
-  { agentKey: 'growth', duty: '获客 · 转化 · 复购', syncDesc: '转化路径同步进执行指标' },
+  { agentKey: 'growth', duty: '获客 · 转化 · 复购', syncDesc: '转化路径直通执行指标' },
   { agentKey: 'ip', duty: '定位 · 内容 · 发布', syncDesc: '内容任务写入每日军令' },
-  { agentKey: 'ops', duty: '数据 · 复盘 · 节奏', syncDesc: '数字更新后，刷新明日动作' },
+  { agentKey: 'ops', duty: '数据 · 复盘 · 节奏', syncDesc: '数据更新，明日打法随调' },
 ];
 
 // 更多专业军师（顾问目录的其余 advisory 智能体按需展开）。

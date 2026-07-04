@@ -25,9 +25,9 @@ function relTime(iso: string): string {
 const QUICK_CARDS = [
   { t: '上传经营资料', d: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index' },
   { t: '绑定数据源', d: '店铺、账号、企微、财务表', url: '/packages/work/bindings/index' },
-  { t: '军师方法 / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
-  { t: '生成报告', d: '把讨论整理成一份报告', url: '/packages/work/library/index' },
-  { t: '转成军令', d: '认可方案后拆成今日军令', tab: '/pages/studio/index' },
+  { t: '军师锦囊 / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
+  { t: '生成报告', d: '把这次对话炼成一份报告', url: '/packages/work/library/index' },
+  { t: '转成军令', d: '认可即拆解为今日军令', tab: '/pages/studio/index' },
   { t: '今日执行', d: '军令、任务、打卡、复盘', tab: '/pages/studio/index' },
 ] as { t: string; d: string; url?: string; tab?: string }[];
 
@@ -129,7 +129,7 @@ export default function Sessions() {
         <View className="messages-head">
           <View className="mh-titles">
             <Text className="mh-t">对话</Text>
-            <Text className="mh-s">军师参谋室 · 各位军师分线跟进，历史随时回看</Text>
+            <Text className="mh-s">军师参谋室 · 分线督办，脉络可溯</Text>
           </View>
           <View className="mh-tools">
             <View className={`mh-btn ${showHistory ? 'on' : ''}`} onClick={() => setShowHistory((v) => !v)}>
@@ -200,7 +200,7 @@ export default function Sessions() {
               <>
                 <View className="wx-section"><Text>专业参谋</Text></View>
                 <View className="wx-list">
-                  {moreAgents.filter((a) => matchAgent(a)).map((a) => advisorRow(a, a.role, '结论同步进总军师主线'))}
+                  {moreAgents.filter((a) => matchAgent(a)).map((a) => advisorRow(a, a.role, '结论直通总军师主线'))}
                 </View>
               </>
             ) : null}
@@ -213,7 +213,7 @@ export default function Sessions() {
               <View className="sess-empty">
                 <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="chat" size={22} color={accent} /></View>
                 <Text className="et">{q ? '没有匹配的会话' : '还没有会话'}</Text>
-                <Text className="es">从总军师开始，或直接找某位专业军师聊——每段对话都单独留档，关键判断会汇总进主线。</Text>
+                <Text className="es">不拘总军师还是专业军师——各线独立留档，要害汇入主线判断。</Text>
                 <Text className="es-link" style={{ color: accent }} onClick={() => newWith('general')}>＋ 发起新对话</Text>
               </View>
             ) : (

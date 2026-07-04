@@ -120,7 +120,7 @@ export default function Home() {
         <View className="battle-hero" onClick={() => goChat('agentKey=general&continue=1')}>
           <Text className="bh-kicker">军师判断 · 主要矛盾</Text>
           <Text className="bh-source">
-            {dossier ? `当前案卷 · ${dossier.title} · 军师会持续跟进，随你的最新情况调整` : '还没有战略案卷 · 认可军师的方案后，会为你生成一份'}
+            {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
           </Text>
           <Text className="bh-title serif">
             {und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
@@ -190,7 +190,7 @@ export default function Home() {
               <Text className="battle-tag">先对话</Text>
               <View className="bg-b">
                 <Text className="bg-t serif">和军师聊聊当前处境</Text>
-                <Text className="bg-m">聊完之后，下一步该做什么会清楚地列在这里</Text>
+                <Text className="bg-m">对话之后，下一步动作自动排定</Text>
               </View>
             </View>
           ) : null}
@@ -259,7 +259,7 @@ export default function Home() {
         >
           <View className="bc-b">
             <Text className="bc-t">{dossier ? '今日执行 · 军令与打卡' : '认可判断，生成军令与报告'}</Text>
-            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 填完进展就能生成复盘` : '认可后会直接排进执行、报告和每日复盘'}</Text>
+            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 录入进展，即可复盘` : '认可即排期执行、生成报告与复盘'}</Text>
           </View>
           <View className="bc-arrow"><Text>›</Text></View>
         </View>

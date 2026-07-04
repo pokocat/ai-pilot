@@ -39,7 +39,7 @@ export const MODULE_MARKET: ModuleItem[] = [
     icon: 'check',
     category: '执行拆解',
     title: '每日军令与周计划',
-    desc: '认可的军师方案会拆成每日任务、提醒、复盘和数据记录。',
+    desc: '认可方案自动拆解为每日任务、提醒、复盘与数据记录。',
     status: '已启用',
     tier: 'free',
     price: '基础版',
