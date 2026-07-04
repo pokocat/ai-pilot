@@ -9,7 +9,7 @@ import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
 import { api, type Agent } from '../../services/api';
 import {
-  addOrder, buildReviewPrompt, ordersOf, recentOrders, refreshDossier,
+  addOrder, buildReviewPrompt, doneOrdersOf, ordersOf, pendingOrdersOf, recentOrders, refreshDossier,
   removeOrder, saveBackfill, startReview, today, todayProgress, toggleOrder, type Dossier,
 } from '../../services/dossier';
 import './index.scss';
@@ -29,6 +29,10 @@ function dateLabel(iso: string): string {
   return `${Number(m)}月${Number(d)}日`;
 }
 
+function orderTagLabel(tag: string): string {
+  return tag.startsWith('军令') ? tag : `军令 · ${tag}`;
+}
+
 // 执行页（军令台）—— 对齐设计稿 page-execution：exec-nav / 横滑战役卡组 / 督战行 / 目标阶梯 / 军令 / 回填 / 复盘。
 // 军令/回填数据存本地案卷（services/dossier，按用户隔离），内容全部来自认可的真实成果或用户录入。
 export default function Studio() {
@@ -40,6 +44,7 @@ export default function Studio() {
   const [newOrder, setNewOrder] = useState('');
   const [bf, setBf] = useState({ leads: '', consults: '', deals: '' });
   const [streak, setStreak] = useState<number | null>(null);
+  const [showDoneArchive, setShowDoneArchive] = useState(false);
   const und = s.me()?.understanding;
 
   useDidShow(() => {
@@ -55,12 +60,15 @@ export default function Studio() {
     api.reviews().then((r) => setStreak(r.streak)).catch(() => setStreak(null));
   });
 
+  const todayDate = today();
   const progress = todayProgress(dossier);
-  const todayOrders = ordersOf(dossier, today());
+  const todayOrders = ordersOf(dossier, todayDate);
+  const pendingTodayOrders = pendingOrdersOf(dossier, todayDate);
+  const doneTodayOrders = doneOrdersOf(dossier, todayDate);
   const weekGroups = recentOrders(dossier);
-  const backfillSaved = !!dossier?.backfill[today()]?.savedAt;
+  const backfillSaved = !!dossier?.backfill[todayDate]?.savedAt;
   const creative = s.agents().filter((a) => a.type === 'creative');
-  const firstUndone = todayOrders.find((o) => !o.done);
+  const firstUndone = pendingTodayOrders[0];
 
   const goChat = (agentKey: string, prompt: string) =>
     Taro.navigateTo({ url: `/pages/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
@@ -136,6 +144,32 @@ export default function Studio() {
     : firstUndone
       ? { t: firstUndone.text, d: '完成后打卡，复盘会读取执行情况', act: () => {} }
       : null;
+  const xianceSteps = pendingTodayOrders.length
+    ? pendingTodayOrders.slice(0, 3).map((o) => o.text)
+    : doneTodayOrders.length
+      ? [
+          `今日 ${doneTodayOrders.length} 条军令已完成，已归档`,
+          '回填线索 / 咨询 / 成交三个数',
+          '21:30 做今日复盘，生成明日军令',
+        ]
+      : [
+          '和军师聊透当前处境，产出一份方案',
+          '认可方案 → 自动拆成今日军令',
+          '每日打卡 + 回填 3 个数，晚间复盘',
+        ];
+  const xianceSource = dossier
+    ? doneTodayOrders.length && !pendingTodayOrders.length
+      ? `源自案卷「${dossier.title}」· 今日完成项已归档`
+      : `源自案卷「${dossier.title}」· 已认可 → 已生成军令`
+    : '认可方案后，这里会换成你的破局三步';
+  const mainOrderTitle = firstUndone ? firstUndone.text : todayOrders.length ? '今日军令已归档' : '今天还没有军令';
+  const mainOrderDesc = firstUndone
+    ? '可让 IP 军师直接生成配套内容脚本。'
+    : todayOrders.length
+      ? '完成项已从待执行列表收起，去回填并做复盘。'
+      : '让军师根据案卷生成今天最重要的 1-3 件事。';
+  const mainOrderAction = firstUndone ? genScript : todayOrders.length ? genReview : genOrders;
+  const mainOrderButton = firstUndone ? '生成脚本' : todayOrders.length ? '生成复盘' : '生成今日军令';
 
   return (
     <Screen topInset>
@@ -171,28 +205,22 @@ export default function Studio() {
             {/* 军师献策（绿框卡）：案卷军令前三步 */}
             <View className="xiance-card">
               <Text className="xiance-k">军师献策 · {dossier ? '本期破局三步' : '如何开始'}</Text>
-              {(todayOrders.length ? todayOrders.slice(0, 3).map((o) => o.text) : [
-                '和军师聊透当前处境，产出一份方案',
-                '认可方案 → 自动拆成今日军令',
-                '每日打卡 + 回填 3 个数，晚间复盘',
-              ]).map((step, i) => (
+              {xianceSteps.map((step, i) => (
                 <View key={step} className="xiance-step">
                   <View className="xiance-no"><Text>{i + 1}</Text></View>
                   <Text className="xiance-text">{step}</Text>
                 </View>
               ))}
-              <Text className="xiance-source">
-                {dossier ? `源自案卷「${dossier.title}」· 已认可 → 已生成军令` : '认可方案后，这里会换成你的破局三步'}
-              </Text>
+              <Text className="xiance-source">{xianceSource}</Text>
             </View>
 
             {/* 今日主令 */}
             <View className="deck-card">
               <Text className="deck-k green">今日主令</Text>
-              <Text className="deck-title serif">{firstUndone ? firstUndone.text : '今天还没有军令'}</Text>
-              <Text className="deck-desc">{firstUndone ? '可让 IP 军师直接生成配套内容脚本。' : '让军师根据案卷生成今天最重要的 1-3 件事。'}</Text>
-              <View className="deck-btn" onClick={firstUndone ? genScript : genOrders}>
-                <Text>{firstUndone ? '生成脚本' : '生成今日军令'}</Text>
+              <Text className="deck-title serif">{mainOrderTitle}</Text>
+              <Text className="deck-desc">{mainOrderDesc}</Text>
+              <View className="deck-btn" onClick={mainOrderAction}>
+                <Text>{mainOrderButton}</Text>
               </View>
             </View>
 
@@ -208,7 +236,7 @@ export default function Studio() {
 
         {/* 执行信号（exec-stats） */}
         <View className="exec-stats">
-          <View className="exec-stat card"><Text className="stat-n serif">{todayOrders.length || '—'}</Text><Text className="stat-l">今日军令</Text></View>
+          <View className="exec-stat card"><Text className="stat-n serif">{todayOrders.length ? pendingTodayOrders.length : '—'}</Text><Text className="stat-l">待执行军令</Text></View>
           <View className="exec-stat card" onClick={() => goChat('general', '帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}>
             <Text className={`stat-n serif ${und?.nextQuestions.length ? 'warn' : ''}`}>{und ? und.nextQuestions.length : '—'}</Text>
             <Text className="stat-l">待补资料</Text>
@@ -269,17 +297,17 @@ export default function Studio() {
             ) : null}
 
             {/* 今日军令打卡（task 卡） */}
-            {todayOrders.length === 0 ? (
+            {pendingTodayOrders.length === 0 && doneTodayOrders.length === 0 ? (
               <View className="orders-empty card" onClick={genOrders}>
                 <Text className="oe-t serif">今天还没有军令</Text>
                 <Text className="oe-d">{dossier ? '让军师根据案卷生成今天最重要的 1-3 件事。' : '认可一份军师方案后，这里会自动生成今日军令。'}</Text>
                 <Text className="oe-go">{dossier ? '生成今日军令 ›' : '去对话 ›'}</Text>
               </View>
             ) : (
-              todayOrders.map((o) => (
+              pendingTodayOrders.map((o) => (
                 <View key={o.id} className={`task card ${o.done ? 'done' : ''}`} onLongPress={() => onRemove(o.id)}>
                   <View className="task-b">
-                    <View className="task-meta-row"><Text className="task-pill">军令 · {o.tag}</Text></View>
+                    <View className="task-meta-row"><Text className="task-pill">{orderTagLabel(o.tag)}</Text></View>
                     <Text className="task-t serif">{o.text}</Text>
                     <View className="task-meta-row"><Text className="task-pill sub">来自 {o.from}</Text><Text className="task-pill sub">长按删除</Text></View>
                   </View>
@@ -289,6 +317,34 @@ export default function Studio() {
                 </View>
               ))
             )}
+
+            {doneTodayOrders.length ? (
+              <View className="done-archive card">
+                <View className="da-head" onClick={() => setShowDoneArchive((v) => !v)}>
+                  <View className="da-b">
+                    <Text className="da-k">已归档</Text>
+                    <Text className="da-t serif">{doneTodayOrders.length} 条完成项已收起</Text>
+                    <Text className="da-d">复盘、周计划和战报仍会读取这些记录。</Text>
+                  </View>
+                  <Text className="da-action">{showDoneArchive ? '收起' : '查看'}</Text>
+                </View>
+                {showDoneArchive ? (
+                  <View className="da-list">
+                    {doneTodayOrders.map((o) => (
+                      <View key={o.id} className="archived-task" onLongPress={() => onRemove(o.id)}>
+                        <View className="task-b">
+                          <View className="task-meta-row"><Text className="task-pill sub">来自 {o.from}</Text><Text className="task-pill sub">长按删除</Text></View>
+                          <Text className="archive-task-text serif">{o.text}</Text>
+                        </View>
+                        <View className="archive-check" onClick={() => onToggle(o.id)}>
+                          <Icon name="check" size={13} color="#fff" />
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
 
             {/* 手动补一条军令 */}
             <View className="order-add">

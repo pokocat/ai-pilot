@@ -198,6 +198,49 @@
 }
 .task.done .task-check { background: var(--green); border-color: var(--green); opacity: 1; }
 
+/* —— 已完成军令归档（默认收起，展开可取消完成） —— */
+.done-archive {
+  margin-top: 14px; padding: 14px 14px 12px;
+  border-radius: 17px;
+  background: rgba(255, 255, 255, .88);
+}
+.da-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.da-head:active { opacity: .82; }
+.da-b { flex: 1; min-width: 0; }
+.da-k {
+  display: block; color: var(--green); font-size: 10.5px; font-weight: 900;
+}
+.da-t {
+  display: block; margin-top: 4px;
+  color: var(--ink); font-size: 15px; font-weight: 800; line-height: 1.35;
+}
+.da-d {
+  display: block; margin-top: 4px;
+  color: var(--ink-3); font-size: 11.5px; line-height: 1.5;
+}
+.da-action {
+  flex-shrink: 0; padding: 6px 10px; border-radius: 999px;
+  color: var(--green); background: var(--green-soft);
+  font-size: 11px; font-weight: 800;
+}
+.da-list { margin-top: 10px; border-top: 1px solid var(--line); }
+.archived-task {
+  display: flex; align-items: flex-start; gap: 11px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(42, 35, 24, .07);
+}
+.archived-task:last-child { border-bottom: 0; padding-bottom: 2px; }
+.archive-task-text {
+  display: block; margin-top: 8px;
+  color: var(--ink-3); font-size: 15px; line-height: 1.45;
+  text-decoration: line-through;
+}
+.archive-check {
+  width: 25px; height: 25px; border-radius: 8px; flex-shrink: 0; margin-top: 2px;
+  background: var(--green); border: 2px solid var(--green);
+  display: flex; align-items: center; justify-content: center;
+}
+
 /* —— 手动加军令 —— */
 .order-add { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .oa-input {

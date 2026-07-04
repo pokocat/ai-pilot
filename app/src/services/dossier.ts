@@ -273,6 +273,14 @@ export function ordersOf(d: Dossier | null, date: string): DossierOrder[] {
   return d ? d.orders.filter((o) => o.date === date) : [];
 }
 
+export function pendingOrdersOf(d: Dossier | null, date: string): DossierOrder[] {
+  return ordersOf(d, date).filter((o) => !o.done);
+}
+
+export function doneOrdersOf(d: Dossier | null, date: string): DossierOrder[] {
+  return ordersOf(d, date).filter((o) => o.done);
+}
+
 // 近 7 天军令（周计划视图：按日期倒序分组）
 export function recentOrders(d: Dossier | null, days = 7): { date: string; orders: DossierOrder[] }[] {
   if (!d) return [];
