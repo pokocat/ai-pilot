@@ -359,9 +359,39 @@ export async function authRoutes(app: FastifyInstance) {
       if (parsed.data.loginCode) {
         try { const wx = await code2Session(parsed.data.loginCode); openid = wx.openid; unionid = wx.unionid; } catch { /* 关联失败不阻断登录 */ }
       }
-      const { user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name);
-      const linked = openid ? await linkWechatBestEffort(user, openid, unionid) : user;
-      await recordAudit({ tenantId: linked.tenantId, userId: linked.id, action: isNew ? 'auth.onetap_register' : 'auth.onetap_login', payload: { onetap: 'wechat', linked: !!openid } });
+
+      // 先按 openid/unionid 找已有微信账号（与 /auth/wechat-login 同一套识别口径）——
+      // 避免同一个人先用「微信一键登录」建号（phone=wx_<openid> 占位）、
+      // 后用本机号一键登录时按手机号查不到旧号从而另建新号，导致身份永久分裂。
+      const byWechat = openid
+        ? await prisma.user.findFirst({ where: { OR: [{ wechatOpenId: openid }, ...(unionid ? [{ wechatUnionId: unionid }] : [])] } })
+        : null;
+
+      let user: AuthUser;
+      let isNew: boolean;
+      if (byWechat) {
+        isNew = false;
+        if (byWechat.phone === phone) {
+          user = byWechat;
+        } else {
+          const taken = await prisma.user.findUnique({ where: { phone } });
+          if (taken && taken.id !== byWechat.id) {
+            await recordAuthAttempt(req, 'auth.wechat_phone.attempt', { ok: false, statusCode: 409, ...phoneAudit(phone), onetap: 'wechat', errorCode: 'PHONE_TAKEN' });
+            return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
+          }
+          try {
+            user = await prisma.user.update({ where: { id: byWechat.id }, data: { phone } });
+          } catch {
+            await recordAuthAttempt(req, 'auth.wechat_phone.attempt', { ok: false, statusCode: 409, ...phoneAudit(phone), onetap: 'wechat', errorCode: 'PHONE_TAKEN' });
+            return reply.code(409).send({ error: '该手机号已被其他账号使用', code: 'PHONE_TAKEN' });
+          }
+        }
+      } else {
+        ({ user, isNew } = await loginOrRegisterByPhone(phone, parsed.data.name));
+        user = openid ? await linkWechatBestEffort(user, openid, unionid) : user;
+      }
+
+      await recordAudit({ tenantId: user.tenantId, userId: user.id, action: isNew ? 'auth.onetap_register' : 'auth.onetap_login', payload: { onetap: 'wechat', linked: !!openid } });
       await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
         ok: true,
         statusCode: 200,
@@ -370,8 +400,8 @@ export async function authRoutes(app: FastifyInstance) {
         linked: !!openid,
         unionid: !!unionid,
         isNew,
-      }, linked);
-      return loginResult(linked, isNew, await onboardedOf(linked));
+      }, user);
+      return loginResult(user, isNew, await onboardedOf(user));
     } catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
       await recordAuthAttempt(req, 'auth.wechat_phone.attempt', {
