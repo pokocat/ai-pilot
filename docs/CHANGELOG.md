@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-04** · **手机号唯一身份口径收口：微信登录后强制绑定**：保留“手机号唯一确定用户身份”的既有方案，撤回微信 openid 作为业务主键的改造方向；小程序登录弹层移除「暂不绑定，先进去看看」，微信账号登录后必须完成手机号绑定或退出登录，避免未绑定微信占位账号与手机号账号割裂。影响面：app 登录弹层 + AGENTS/CHANGELOG。
+
 - **2026-07-03** · **对话输入区升级 + Claude 自适应产出 + 报告 HTML 换 V6.0 卡片风**：小程序聊天输入区从单行 `Input` 改为多行 `Textarea`，底栏补加号、固定模型胶囊和发送态；加号支持微信 `chooseMessageFile` 上传资料到知识库并自动挂本轮引用，也可打开已有项目/报告/知识引用；长按复制与 busy 锁定保留。`generateAdaptive` 的 Claude 分支改走 `claudeAdaptive`，与 OpenAI 一样默认文字对话，只有模型判断需要完整成果时才可选调用 `emit_deliverable`；普通报告 HTML 从旧米色卷轴样式改为 V6.0 天势卡片风（深绿封面、白色章节卡、金印落款、军师参谋部品牌）。影响面：app chat/Icon + server LLM Gateway/Claude provider/reportHtml + AGENTS/CHANGELOG。
 
 - **2026-07-03** · **网络错误按真实原因友好分流**：`api.request` 新增 `networkErrorInfo/httpErrorInfo`，将请求失败区分为超时、断网、合法域名配置、SSL/证书、DNS、服务不可达、取消、普通网络波动，并对 HTTP 408/504、429、5xx 做用户友好映射；前台展示真实但不技术化的原因，`reason/technicalMessage/origin/url/statusCode` 保留给开发排查。影响面：app API 错误映射 + AGENTS/CHANGELOG。
