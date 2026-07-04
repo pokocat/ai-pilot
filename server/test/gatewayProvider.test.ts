@@ -194,6 +194,43 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(r.body.deliverable?.sections?.[0]?.h, '判断');
   });
 
+  test('报告误带代码工作区语境 → gateway 替换为业务兜底成果', async () => {
+    env.aiFallbackMock = false;
+    stubFetch(() => ({
+      ok: true,
+      status: 200,
+      body: {
+        choices: [{
+          message: {
+            tool_calls: [{
+              function: {
+                name: 'emit_deliverable',
+                arguments: JSON.stringify({
+                  title: '战略诊断报告',
+                  sections: [
+                    {
+                      h: '现状诊断',
+                      b: '当前工作区为一个 Git 仓库，但缺少足够的项目文档、业务数据或战略输入材料。',
+                    },
+                    { h: '下一步', list: ['请上传业务文档到工作区'] },
+                  ],
+                }),
+              },
+            }],
+          },
+        }],
+        usage: { prompt_tokens: 120, completion_tokens: 80 },
+      },
+    }));
+    const t = await login(uniquePhone());
+    const r = await gen(t, '出报告');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.kind, 'report');
+    assert.equal(r.body.deliverable?.degraded, true, '跑偏报告应标记 degraded，前台不扣额度');
+    const text = JSON.stringify(r.body.deliverable);
+    assert.doesNotMatch(text, /Git|当前工作区|代码仓库|上传业务文档到工作区/);
+  });
+
   test('超时(abort) + AI_FALLBACK_MOCK=false → 503 且提示「超时」', async () => {
     env.aiFallbackMock = false;
     stubAbort();

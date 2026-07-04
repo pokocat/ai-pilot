@@ -40,6 +40,23 @@ function deliverableText(d: Deliverable): string {
   return d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
 }
 
+const ENGINEERING_CONTEXT_LEAK =
+  /(当前工作区|工作区中未发现|Git\s*仓库|代码仓库|代码项目|代码库|本地仓库|缺少[^。；\n]*(项目文档|业务数据|战略输入材料)|未发现[^。；\n]*(项目文档|业务文档|业务数据|战略规划材料)|上传[^。；\n]*工作区|README|package\.json|Codex|IDE|文件系统|workspace|repository|codebase)/i;
+
+function hasEngineeringContextLeak(d: Deliverable): boolean {
+  const text = [d.title, d.meta, deliverableText(d)].filter(Boolean).join('\n');
+  return ENGINEERING_CONTEXT_LEAK.test(text);
+}
+
+function sanitizeDeliverable(ctx: GenContext, d: Deliverable): Deliverable {
+  if (!hasEngineeringContextLeak(d)) return d;
+  console.warn('[gateway] deliverable contained engineering context; replaced with business fallback', {
+    agentKey: ctx.agentKey,
+    deliverableKey: ctx.deliverableKey,
+  });
+  return { ...mockDeliverable(ctx), degraded: true };
+}
+
 // P1-B5：审核上下文——沙盒/评测跳过审核，并把租户/用户/会话写入 moderation_log 便于追溯。
 function modOpts(ctx: GenContext, meta?: UsageMeta) {
   return { sandbox: meta?.sandbox, tenantId: meta?.tenantId ?? ctx.tenantId ?? null, userId: meta?.userId ?? ctx.userId ?? null, sessionId: meta?.sessionId ?? null };
@@ -210,6 +227,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: '' };
     }
+    sourced.result = sanitizeDeliverable(ctx, sourced.result);
     await maybeRecord(sourced, 'deliverable', ctx, meta);
     return { result: sourced.result, usage: sourced.usage };
   }
@@ -248,6 +266,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
     sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   }
 
+  sourced.result = sanitizeDeliverable(ctx, sourced.result);
   await maybeRecord(sourced, 'deliverable', ctx, meta);
   if (!tools.length) await cacheSet(ck, sourced.result, CACHE_TTL);
   return { result: sourced.result, usage: sourced.usage };
@@ -490,8 +509,9 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
   }
 
-  const respText = out.kind === 'report' ? deliverableText(out.result) : out.result.text;
   const recKind: 'deliverable' | 'chat' = out.kind === 'report' ? 'deliverable' : 'chat';
+  if (out.kind === 'report') out.result = sanitizeDeliverable(ctx, out.result);
+  const respText = out.kind === 'report' ? deliverableText(out.result) : out.result.text;
   await recordTrace({
     meta, agentKey: ctx.agentKey, kind: recKind, provider, model,
     status: 'ok', latencyMs: Date.now() - t0, toolCalls, iterations, usage,

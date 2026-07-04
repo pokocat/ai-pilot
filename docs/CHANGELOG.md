@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-04** · **拦截报告误带代码工作区语境**：LLM 运行时业务边界新增“工作区仅指客户业务项目/档案/知识库”的硬约束，禁止把 Git 仓库、代码库、IDE、文件系统等工程环境当客户资料；gateway 对结构化成果增加工程语境检测，命中“当前工作区/Git 仓库/代码仓库/上传到工作区”等跑偏内容时替换为业务兜底成果并标记 `degraded`，避免错误报告入库或扣用户额度。新增 OpenAI 兼容 stub 回归测试复现“当前工作区为 Git 仓库”。影响面：server llm schema/gateway + provider 集成测试 + AGENTS/CHANGELOG。
+
 - **2026-07-04** · **修复小程序报告“网页版”误变复制链接**：报告卡「网页版」继续走 `packages/work/webview` 直接打开自有域名 `/api/r/:id`；`web-view` 加载失败与 `navigateTo` 失败不再自动写剪贴板，避免小程序内点击后表现成“复制链接”。影响面：app chat/webview + AGENTS/CHANGELOG。
 
 - **2026-07-04** · **普通聊天切换 provider 原生流式并收口为输入审核**：`chatCompleteStream` 改为只对用户输入做前置内容审核，违规输入直接拦截；OpenAI/Claude 普通聊天在无工具调用时优先调用 provider 原生 `stream:true` / Claude stream，token 到达即经 `/generate` SSE 下发，输出不再走阻塞式审核，仅保留 trace 与禁用词审计；Dify、工具循环、mock 或兼容网关不支持 stream 时回退为完整结果分块。新增 OpenAI 兼容 SSE stub 测试覆盖原生 token 事件与输出不写 `moderation_log`。影响面：server LLM gateway + OpenAI/Claude provider + sessions 注释 + provider/集成测试 + AGENTS/CHANGELOG。
