@@ -1,4 +1,3 @@
-import { useRef } from 'react';
 import { WebView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 
@@ -14,20 +13,13 @@ function safeDecode(raw: string): string {
 
 export default function Webview() {
   const router = useRouter();
-  const warned = useRef(false);
   const url = safeDecode((router.params.url as string) || '');
   if (!url) return null;
   return (
     <WebView
       src={url}
       onError={() => {
-        if (warned.current) return;
-        warned.current = true;
-        Taro.setClipboardData({
-          data: url,
-          success: () => Taro.showModal({ title: '网页暂时打不开', content: '链接已复制，可以在浏览器打开。', showCancel: false }),
-          fail: () => Taro.showModal({ title: '网页暂时打不开', content: '请稍后重试。', showCancel: false }),
-        });
+        Taro.showToast({ title: '网页打开失败，请稍后重试', icon: 'none' });
       }}
     />
   );

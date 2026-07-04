@@ -493,7 +493,10 @@ export default function Chat() {
       Taro.hideLoading();
       if (!r.htmlUrl) { Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' }); return; }
       if (IS_WEAPP) {
-        Taro.navigateTo({ url: `/packages/work/webview/index?url=${encodeURIComponent(r.htmlUrl)}` });
+        Taro.navigateTo({
+          url: `/packages/work/webview/index?url=${encodeURIComponent(r.htmlUrl)}`,
+          fail: () => Taro.showToast({ title: '网页打开失败，请稍后重试', icon: 'none' }),
+        });
       } else if (typeof window !== 'undefined' && window.open) {
         window.open(r.htmlUrl, '_blank');
       } else {

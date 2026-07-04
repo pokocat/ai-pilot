@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-04** · **修复小程序报告“网页版”误变复制链接**：报告卡「网页版」继续走 `packages/work/webview` 直接打开自有域名 `/api/r/:id`；`web-view` 加载失败与 `navigateTo` 失败不再自动写剪贴板，避免小程序内点击后表现成“复制链接”。影响面：app chat/webview + AGENTS/CHANGELOG。
+
 - **2026-07-04** · **普通聊天切换 provider 原生流式并收口为输入审核**：`chatCompleteStream` 改为只对用户输入做前置内容审核，违规输入直接拦截；OpenAI/Claude 普通聊天在无工具调用时优先调用 provider 原生 `stream:true` / Claude stream，token 到达即经 `/generate` SSE 下发，输出不再走阻塞式审核，仅保留 trace 与禁用词审计；Dify、工具循环、mock 或兼容网关不支持 stream 时回退为完整结果分块。新增 OpenAI 兼容 SSE stub 测试覆盖原生 token 事件与输出不写 `moderation_log`。影响面：server LLM gateway + OpenAI/Claude provider + sessions 注释 + provider/集成测试 + AGENTS/CHANGELOG。
 
 - **2026-07-04** · **修复“出报告”当前页一直输入中**：小程序聊天页补齐“出报告/重新出报告/战略体检”等成果意图识别，明确成果请求与成果型顾问改走 `/generate` report SSE；收到 `meta` 立即渲染 ReportCard 骨架，`begin/section/footer/done` 增量更新同一卡片，完成前不开放存库/网页版/认可动作；普通聊天流 fallback 若拿到 report 也会替换空 assistant 占位。影响面：app streaming/chat/ReportCard + AGENTS/CHANGELOG。
