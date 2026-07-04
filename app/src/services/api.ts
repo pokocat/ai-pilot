@@ -304,9 +304,9 @@ export const api = {
   summarize: (sessionId: string) =>
     IS_MOCK ? mock.summarize(sessionId) : request<SummarizeResult>(`/sessions/${sessionId}/summarize`, 'POST', {}),
 
-  // —— 报告网页版（render_report → OSS 托管）：产出后按需生成可分享链接 ——
-  renderReport: (sessionId: string, messageId: string): Promise<{ htmlUrl?: string }> =>
-    IS_MOCK ? Promise.resolve({}) : request<{ htmlUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
+  // —— 报告网页版（render_report → 自有域名 /api/r/:id）：产出后按需生成可分享链接 ——
+  renderReport: (sessionId: string, messageId: string): Promise<{ htmlUrl?: string; cdnUrl?: string }> =>
+    IS_MOCK ? Promise.resolve({}) : request<{ htmlUrl?: string; cdnUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
 };
 
 export type { GenRequest, SaveLibRequest, MessageRef as Ref };

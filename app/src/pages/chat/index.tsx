@@ -357,7 +357,7 @@ export default function Chat() {
   };
   const openGuide = (url: string) => Taro.navigateTo({ url });
 
-  // 生成网页版报告（render_report → OSS 托管，接口幂等）→ 直接打开：weapp 走内置 web-view 页，H5 开新窗口。
+  // 生成网页版报告（render_report → 自有域名 /api/r/:id，接口幂等）→ 直接打开：weapp 走内置 web-view 页，H5 开新窗口。
   const shareReport = async (messageId?: string) => {
     if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出成果', icon: 'none' }); return; }
     Taro.showLoading({ title: '生成网页版…' });

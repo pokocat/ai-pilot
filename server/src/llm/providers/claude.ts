@@ -59,6 +59,13 @@ function usageOf(res: Anthropic.Message): Usage {
   };
 }
 
+function requireText(text: string | null | undefined, usage: Usage, where: string): string {
+  const out = (text ?? '').trim();
+  if (out) return out;
+  const detail = usage.outputTokens > 0 ? `，输出 token=${usage.outputTokens}` : '';
+  throw Object.assign(new Error(`Claude 接口返回空文本（${where}${detail}）`), { code: 'AI_EMPTY_RESPONSE' });
+}
+
 export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<Deliverable>> {
   const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
   const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'deliverable');
@@ -116,10 +123,8 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     .map((c) => (c.type === 'text' ? c.text : ''))
     .join('\n')
     .trim();
-  return {
-    result: { text: text || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
-    usage: usageOf(res),
-  };
+  const usage = usageOf(res);
+  return { result: { text: requireText(text, usage, 'chat') }, usage };
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
@@ -218,10 +223,7 @@ export async function claudeChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
     tools,
     toolCtx: toolCtxOf(ctx),
   });
-  return {
-    result: { text: (r.text ?? '').trim() || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
-    usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
-  };
+  return { result: { text: requireText(r.text, r.usage, 'chat_tools') }, usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations };
 }
 
 /** 启用技能时的产出（claude）：循环里可先检索/召回，最后强制 emit_deliverable 收口。 */
@@ -293,7 +295,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
   }
   return {
     kind: 'chat',
-    reply: { text: (r.text ?? '').trim() || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
+    reply: { text: requireText(r.text, r.usage, 'adaptive') },
     usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
   };
 }

@@ -58,7 +58,6 @@ export const renderReport: OutputSkill = {
   description: '把产出成果渲染成自包含、可分享的网页版报告，回填分享链接（htmlUrl）。',
   async run(deliverable, ctx) {
     const { publishReport } = await import('../../services/reportHtml.js');
-    const htmlUrl = await publishReport(ctx.tenantId, deliverable);
-    return { htmlUrl };
+    return publishReport(ctx.tenantId, deliverable);
   },
 };

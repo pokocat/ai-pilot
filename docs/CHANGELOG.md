@@ -8,6 +8,10 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-04** · **修复总军师普通输入被固定追问兜底**：`/generate-sync` 与 `/generate` 统一 on-demand 意图分流，普通问答走纯 chat，只有“出报告/战略体检/生成方案”等明确成果请求才进入 adaptive 成果路径；OpenAI/Claude provider 遇到空 `content` 改为 AI 服务异常，不再把“我需要更多信息来给你一个可执行的判断…”作为伪成功回复落库。影响面：server sessions + OpenAI/Claude provider + 测试 + AGENTS/CHANGELOG。
+
+- **2026-07-04** · **修复对话成果卡“网页版”在小程序内打不开**：报告 HTML 发布链路改为 `htmlUrl` 固定返回自有域名 `{PUBLIC_BASE_URL}/api/r/:id`，避免小程序 `web-view` 直开 OSS 域名时被业务域名白名单拦截；OSS 上传保留为可选 `cdnUrl` 镜像。`POST /sessions/:id/messages/:mid/report` 对已生成过的旧 OSS `htmlUrl` 做兼容迁移，再次点击会自动写回自有域名链接；web-view 页增加安全解码和加载失败复制链接兜底；契约新增 `Deliverable.cdnUrl`，并补覆盖 OSS 旧链接转换的单测。影响面：server reportHtml/render_report/sessions + shared contracts + app webview/api 注释 + AGENTS/CHANGELOG。
+
 - **2026-07-04** · **修复成果型顾问自动发送误入流式导致无返回**：`pages/chat` 的流式判定不再依赖可能滞后的 React `agent` state，改为按本次发送的 `agentKey` 重新读取顾问配置；路由携带 `send=` 自动发送给「战略诊断官」等带 `deliverableKey` 的成果型顾问时，稳定走 `/generate-sync` 成果路径，并显式传入本次 `projectId`，避免首条自动发送丢项目作用域。`generateStream` 成功条件收紧为必须收到可渲染的 `token/chat` 事件，误收到 report SSE（`begin/section/footer`）会返回 `false` 触发同步 fallback，不再留下空回复。影响面：app chat/streaming + AGENTS/CHANGELOG。
 
 - **2026-07-04** · **小程序恢复真流式并锁定基础库 3.16.2**：`project.config.json` 增加 `libVersion=3.16.2`；`STREAM_CHAT` 恢复默认开启，小程序端 `generateStream` 重新启用 `wx.request enableChunked + RequestTask.onChunkReceived` 消费 `/generate` SSE，按字节切完整 SSE block 后 UTF-8 解码，失败/无事件时返回 `false` 由聊天页自动回退 `/generate-sync`，避免先展示假网络错误；H5 继续走 `fetch` ReadableStream。总军师 on-demand 普通问答前后端都放行真 token 流，只有明确要“生成方案/报告/成果卡/纪要/军令”等成果请求才回同步成果路径。影响面：app project config + streaming/config/chat + server sessions + AGENTS/TESTING/CHANGELOG。

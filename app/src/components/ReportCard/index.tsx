@@ -12,7 +12,7 @@ interface Props {
   saved?: boolean;
   onSave?: () => void;
   onExport?: () => void;
-  onShare?: () => void; // 生成网页版（OSS 托管）并复制分享链接
+  onShare?: () => void; // 生成网页版并打开/分享自有域名链接
 }
 
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。

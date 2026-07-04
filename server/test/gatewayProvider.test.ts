@@ -99,6 +99,22 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(r.body.code, 'AI_UNAVAILABLE');
   });
 
+  test('OpenAI 兼容返回空 content → 503，不落固定追问兜底', async () => {
+    env.aiFallbackMock = false;
+    stubFetch(() => ({
+      ok: true, status: 200,
+      body: {
+        choices: [{ finish_reason: 'length', message: { content: '' } }],
+        usage: { prompt_tokens: 120, completion_tokens: 1500 },
+      },
+    }));
+    const t = await login(uniquePhone());
+    const r = await gen(t, '我已经给了背景，继续判断');
+    assert.equal(r.status, 503);
+    assert.equal(r.body.code, 'AI_UNAVAILABLE');
+    assert.doesNotMatch(String(r.body.error), /我需要更多信息/);
+  });
+
   test('超时(abort) + AI_FALLBACK_MOCK=false → 503 且提示「超时」', async () => {
     env.aiFallbackMock = false;
     stubAbort();

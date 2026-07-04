@@ -16,6 +16,7 @@ import type { MessageRef, Deliverable, ChatReply } from '../llm/schema.js';
 import { extractAndRecordProphecies } from '../services/prophecyLog.js';
 import { resolveMode } from '../services/intent.js';
 import { recordReview } from '../services/reviewLog.js';
+import { webviewSafeReportUrl } from '../services/reportHtml.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -95,7 +96,18 @@ export async function sessionRoutes(app: FastifyInstance) {
     });
     if (!msg) return reply.code(404).send({ error: 'report not found' });
     const deliverable = msg.contentJson as unknown as Deliverable;
-    if (deliverable?.htmlUrl) return { htmlUrl: deliverable.htmlUrl }; // 已生成过：幂等返回
+    if (deliverable?.htmlUrl) {
+      const htmlUrl = webviewSafeReportUrl(deliverable.htmlUrl);
+      if (htmlUrl && htmlUrl !== deliverable.htmlUrl) {
+        const patch = { htmlUrl, cdnUrl: deliverable.cdnUrl ?? deliverable.htmlUrl } as Partial<Deliverable>;
+        await prisma.message.update({
+          where: { id: msg.id },
+          data: { contentJson: { ...(deliverable as object), ...patch } as Prisma.InputJsonValue },
+        });
+        return patch;
+      }
+      return { htmlUrl: deliverable.htmlUrl, cdnUrl: deliverable.cdnUrl }; // 已生成过：幂等返回
+    }
 
     const enabled = (msg.session.agent.skillsConfig as { tools?: string[] } | null)?.tools ?? [];
     const { resolveOutputSkills } = await import('../llm/tools/registry.js');
@@ -190,14 +202,27 @@ export async function sessionRoutes(app: FastifyInstance) {
       sessionId: session.id, difyConversationId: session.difyConversationId,
       effective: effective ?? undefined, history,
       sessionMode,
-    });
+      });
 
     try {
       if (onDemand) {
-        const out = await generateAdaptive(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         const learn = async () => (agentKey === 'general'
           ? false
           : learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId }));
+        if (!wantsDeliverableRequest(text)) {
+          const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
+          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object } });
+          harvestProphecies(user, agentKey, replyChat.text);
+          await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+          const learned = await learn();
+          const creditBalance = creditReservation?.balance ?? 0;
+          const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
+          return {
+            sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat,
+            memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
+          };
+        }
+        const out = await generateAdaptive(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         if (out.kind === 'report') {
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: out.deliverable as object } });
           harvestProphecies(user, agentKey, harvestText(out.deliverable));
@@ -547,5 +572,5 @@ function setupSSE(reply: FastifyReply) {
 }
 
 function wantsDeliverableRequest(text: string): boolean {
-  return /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|转成军令|生成纪要/.test(text);
+  return /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|(?:重新)?出.{0,4}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|战略体检|转成军令|生成纪要/.test(text);
 }

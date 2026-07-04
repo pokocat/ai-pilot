@@ -106,25 +106,64 @@ ${body}
 </body></html>`;
 }
 
+export interface PublishedHtml {
+  /** 小程序 web-view 优先打开自有业务域名，避免 OSS 域名未进业务域名白名单导致打不开。 */
+  htmlUrl: string;
+  /** 可选 CDN/OSS 镜像；不作为小程序内打开入口。 */
+  cdnUrl?: string;
+}
+
+export function publicReportUrl(id: string): string {
+  return `${env.publicBaseUrl}/api/r/${id}`;
+}
+
+export function reportHtmlIdFromUrl(url: string | undefined | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const own = new URL(env.publicBaseUrl);
+    if (u.host === own.host) {
+      const match = u.pathname.match(/\/api\/r\/([^/?#]+)$/);
+      if (match) return decodeURIComponent(match[1]);
+    }
+    const ossBase = env.ossBaseUrl ? new URL(env.ossBaseUrl) : null;
+    if ((ossBase && u.host === ossBase.host) || /\.aliyuncs\.com$/i.test(u.host)) {
+      const last = u.pathname.split('/').filter(Boolean).pop() ?? '';
+      const match = last.match(/^([A-Za-z0-9_-]+)\.html$/);
+      if (match) return match[1];
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function webviewSafeReportUrl(url: string | undefined | null): string | null {
+  const id = reportHtmlIdFromUrl(url);
+  return id ? publicReportUrl(id) : (url || null);
+}
+
 /** 渲染 + 存库 + 返回可分享链接。失败抛出,由调用方吞掉(不影响产出)。
- *  配了 OSS → 传 OSS 返回公网静态链接(不暴露后端域名);没配/上传失败 → 回退后端 /api/r/:id。
- *  DB report_html 行始终保留(留底 + 兜底兜服务)。 */
-export async function publishReport(tenantId: string | null, d: Deliverable): Promise<string> {
+ *  小程序打开入口始终是自有域名 /api/r/:id；配了 OSS 时额外上传一份 CDN 镜像。
+ *  DB report_html 行始终保留(留底 + 兜底服务)。 */
+export async function publishReport(tenantId: string | null, d: Deliverable): Promise<PublishedHtml> {
   return publishHtml(tenantId, d.title || '咨询成果', renderReportHtml(d));
 }
 
-/** 通用 HTML 发布（报告与 B 级卡片共用）：存库留底 → OSS 公网链接，失败回退后端 /api/r/:id。 */
-export async function publishHtml(tenantId: string | null, title: string, html: string): Promise<string> {
+/** 通用 HTML 发布：存库留底 → 自有域名入口；OSS 配好时同步一份 CDN 镜像。 */
+export async function publishHtml(tenantId: string | null, title: string, html: string): Promise<PublishedHtml> {
   const row = await prisma.reportHtml.create({
     data: { tenantId: tenantId ?? null, title, html },
   });
+  const htmlUrl = publicReportUrl(row.id);
+  let cdnUrl: string | undefined;
   if (ossConfigured()) {
     try {
       const key = `${env.ossKeyPrefix ? env.ossKeyPrefix + '/' : ''}${row.id}.html`;
-      return await ossPutHtml(key, html);
+      cdnUrl = await ossPutHtml(key, html);
     } catch (err) {
-      console.error('[reportHtml] OSS 上传失败,回退后端链接:', (err as Error).message);
+      console.error('[reportHtml] OSS 上传失败,继续使用自有域名链接:', (err as Error).message);
     }
   }
-  return `${env.publicBaseUrl}/api/r/${row.id}`;
+  return cdnUrl ? { htmlUrl, cdnUrl } : { htmlUrl };
 }

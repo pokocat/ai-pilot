@@ -56,6 +56,13 @@ function usageOf(data: OAResponse): Usage {
   };
 }
 
+function requireText(text: string | null | undefined, usage: Usage, where: string): string {
+  const out = (text ?? '').trim();
+  if (out) return out;
+  const detail = usage.outputTokens > 0 ? `，输出 token=${usage.outputTokens}` : '';
+  throw Object.assign(new Error(`OpenAI 兼容接口返回空文本（${where}${detail}）`), { code: 'AI_EMPTY_RESPONSE' });
+}
+
 export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<Deliverable>> {
   const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
   const system = injectVariables(ctx.systemPrompt, ctx, 'deliverable');
@@ -107,10 +114,11 @@ export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
       { role: 'user', content: ctx.userMessage },
     ] as OAMessage[],
   });
-  const text = (data.choices?.[0]?.message?.content ?? '').trim();
+  const usage = usageOf(data);
+  const text = requireText(data.choices?.[0]?.message?.content, usage, 'chat');
   return {
-    result: { text: text || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
-    usage: usageOf(data),
+    result: { text },
+    usage,
   };
 }
 
@@ -170,8 +178,9 @@ export async function openaiChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
     tools,
     toolCtx: toolCtxOf(ctx),
   });
+  const text = requireText(r.text, r.usage, 'chat_tools');
   return {
-    result: { text: (r.text ?? '').trim() || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
+    result: { text },
     usage: r.usage,
     toolCalls: r.toolCalls,
     iterations: r.iterations,
@@ -248,9 +257,10 @@ export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
       usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
     };
   }
+  const text = requireText(r.text, r.usage, 'adaptive');
   return {
     kind: 'chat',
-    reply: { text: (r.text ?? '').trim() || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
+    reply: { text },
     usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
   };
 }

@@ -168,7 +168,7 @@ export function withMiniCode(html: string, qrDataUri: string | null): string {
 }
 
 /** 卡片发布：存库留底 → 永远返回自有域名链接（{PUBLIC_BASE_URL}/api/r/:id）。
- *  刻意不走 OSS——分享出去是品牌域名、微信内直接打开；OSS 托管保留给报告（reportHtml.publishHtml）。 */
+ *  刻意不走 OSS——分享出去是品牌域名、微信内直接打开；报告内打开同样走自有域名，OSS 仅作镜像。 */
 async function publishCardHtml(tenantId: string, title: string, html: string, kind: CardKind): Promise<string> {
   const finalHtml = withMiniCode(html, await miniCodeDataUri(`card=${kind}`));
   const row = await prisma.reportHtml.create({ data: { tenantId, title, html: finalHtml } });

@@ -1,5 +1,5 @@
 // B 级卡片路由（M4 PR-15 第一批）：每日战报 / 天时日历 / 天命速写（送你一卦）。
-// 返回可分享 htmlUrl（OSS 或后端 /api/r/:id 兜底）；卡上数字全部来自服务端账本。
+// 返回可分享 htmlUrl（自有域名 /api/r/:id）；卡上数字全部来自服务端账本。
 import type { FastifyInstance } from 'fastify';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
