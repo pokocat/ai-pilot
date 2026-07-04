@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-04** · **修复“出报告”当前页一直输入中**：小程序聊天页补齐“出报告/重新出报告/战略体检”等成果意图识别，明确成果请求与成果型顾问改走 `/generate` report SSE；收到 `meta` 立即渲染 ReportCard 骨架，`begin/section/footer/done` 增量更新同一卡片，完成前不开放存库/网页版/认可动作；普通聊天流 fallback 若拿到 report 也会替换空 assistant 占位。影响面：app streaming/chat/ReportCard + AGENTS/CHANGELOG。
+
 - **2026-07-04** · **减少报告保底草案并去技术化提示**：报告类真实模型输出上限从 1500 提高到 2600，OpenAI/Claude provider 在强制结构化工具未返回但存在普通文本时，会把文本归一化为报告分段而不是直接标 `degraded`；小程序 degraded 提示从“降级模板/结构化产出”改为业务可理解的“保底草案，已免扣额度”。影响面：server OpenAI/Claude provider + app chat + AGENTS/CHANGELOG。
 
 - **2026-07-04** · **修复报告工具返回非数组 sections 导致流式报错**：新增 `normalizeDeliverableSections`，OpenAI/Claude provider 对 `emit_deliverable` 的 `sections` 做归一化（数组/对象/字符串均转合法分段，解析失败走降级成果），避免 qnaigc 返回 `{sections:{...}}` 时触发 `d.sections.map is not a function` 并让 `/generate` 发出 AI_UNAVAILABLE；回归测试覆盖“出报告”强制工具调用且 `sections` 非数组仍返回 report。影响面：server llm schema + OpenAI/Claude provider + provider 集成测试 + AGENTS/CHANGELOG。

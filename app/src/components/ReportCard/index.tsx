@@ -9,6 +9,7 @@ import './index.scss';
 interface Props {
   data: Deliverable;
   animate?: boolean; // 渐进式呈现（新产出）vs 直接展示（历史还原）
+  streaming?: boolean; // 服务端 SSE 仍在产出中：展示当前已到达分段，暂不开放操作
   saved?: boolean;
   onSave?: () => void;
   onExport?: () => void;
@@ -16,12 +17,14 @@ interface Props {
 }
 
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
-export default function ReportCard({ data, animate = false, saved = false, onSave, onExport, onShare }: Props) {
+export default function ReportCard({ data, animate = false, streaming = false, saved = false, onSave, onExport, onShare }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [revealed, setRevealed] = useState(animate ? 0 : data.sections.length);
   const [done, setDone] = useState(!animate);
   const [isSaved, setIsSaved] = useState(saved);
+  const shown = streaming ? data.sections.length : revealed;
+  const isDone = !streaming && done;
 
   useEffect(() => {
     if (!animate) return;
@@ -50,7 +53,7 @@ export default function ReportCard({ data, animate = false, saved = false, onSav
           <Text className="t">{data.title}</Text>
           <Text className="m">{data.meta}</Text>
         </View>
-        {done ? (
+        {isDone ? (
           <Text className="status">已生成</Text>
         ) : (
           <View className="gen">
@@ -61,7 +64,7 @@ export default function ReportCard({ data, animate = false, saved = false, onSav
       </View>
 
       <View className="rb">
-        {revealed === 0 && (
+        {shown === 0 && (
           <View className="skeleton">
             <View className="skl h" />
             <View className="skl w90" />
@@ -69,7 +72,7 @@ export default function ReportCard({ data, animate = false, saved = false, onSav
             <View className="skl w50" />
           </View>
         )}
-        {data.sections.slice(0, revealed).map((sec, i) => (
+        {data.sections.slice(0, shown).map((sec, i) => (
           <View key={i} className="rsec reveal">
             <View className="sh">
               <Text className="no" style={{ background: accent }}>{i + 1}</Text>
@@ -90,7 +93,7 @@ export default function ReportCard({ data, animate = false, saved = false, onSav
         ))}
       </View>
 
-      {done && (
+      {isDone && (
         <>
           <View className="foot">
             <Icon name="shield" size={13} color="#969BA1" />

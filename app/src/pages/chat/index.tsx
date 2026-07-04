@@ -9,7 +9,7 @@ import SafeHeader from '../../components/SafeHeader';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type Agent, type Deliverable, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../services/api';
+import { api, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../services/api';
 import { STREAM_CHAT } from '../../services/config';
 import { generateStream } from '../../services/streaming';
 import { agentForText } from '../../data/intents';
@@ -22,7 +22,7 @@ type Msg =
   | { role: 'greet'; agent: Agent }
   | { role: 'user'; text: string; refs?: MessageRef[] }
   | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; retryText?: string; streaming?: boolean }
-  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[] }
+  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; streaming?: boolean }
   | { role: 'memory'; agentName: string };
 
 // 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
@@ -59,6 +59,32 @@ function copyText(text: string, title = '已复制') {
 
 function replyToText(reply: ChatReplyT): string {
   return [reply.text, ...(reply.points ?? [])].filter(Boolean).join('\n\n');
+}
+
+function reportDraft(agent?: Agent | null, partial: Partial<Deliverable> = {}): Deliverable {
+  return {
+    title: partial.title || `${agent?.name || '军师'}正在出报告`,
+    icon: partial.icon || agent?.icon || 'doc',
+    meta: partial.meta || '正在梳理上下文与引用资料',
+    sections: partial.sections || [],
+    trust: partial.trust || '生成完成后会给出判断依据与下一步动作。',
+    actions: partial.actions || ['save_to_library', 'export_pdf'],
+    htmlUrl: partial.htmlUrl,
+    cdnUrl: partial.cdnUrl,
+    degraded: partial.degraded,
+  };
+}
+
+function mergeReportSection(sections: Section[], section: Section & { index?: number }): Section[] {
+  const next = sections.slice();
+  const clean: Section = {
+    h: section.h || `第 ${next.length + 1} 段`,
+    b: section.b,
+    list: Array.isArray(section.list) ? section.list : undefined,
+  };
+  if (typeof section.index === 'number' && section.index >= 0) next[section.index] = clean;
+  else next.push(clean);
+  return next.filter(Boolean);
 }
 
 type ChatStyle = CSSProperties & {
@@ -118,7 +144,7 @@ export default function Chat() {
   const isModerationErr = (s?: string) => !!s && /审核/.test(s);
 
   const wantsDeliverableRequest = (s: string) =>
-    /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|转成军令|生成纪要/.test(s);
+    /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|(?:重新)?出.{0,4}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|战略体检|转成军令|生成纪要/.test(s);
 
   const promptLogin = (title = '请先登录后再开始对话') => {
     setShowLogin(true);
@@ -243,8 +269,55 @@ export default function Chat() {
       // P1-B3：普通聊天默认真流式；总军师 on-demand 仅在明确要成果/报告时回同步成果路径。
       // 路由带 send= 自动发送时，React state 里的 agent 可能还没刷新；必须按本次 agentKey 重新取配置。
       const sendingAgent = findAgent(agentKey) || agent;
-      const canStream = STREAM_CHAT && !!sendingAgent && (!sendingAgent.deliverableKey || (sendingAgent.key === 'general' && !wantsDeliverableRequest(text)));
-      if (canStream) {
+      const deliverableRequested = wantsDeliverableRequest(text);
+      const body = { text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined };
+      const canStreamChat = STREAM_CHAT && !!sendingAgent && (!sendingAgent.deliverableKey || (sendingAgent.key === 'general' && !deliverableRequested));
+      const canStreamReport = STREAM_CHAT && !!sendingAgent && (!!sendingAgent.deliverableKey || deliverableRequested) && (sendingAgent.key !== 'general' || deliverableRequested);
+
+      const showMemoryLearned = (agentName: string, delay: number) => {
+        setTimeout(() => {
+          setMsgs((m) => [...m, { role: 'memory', agentName }]);
+          scrollToEnd();
+        }, delay);
+      };
+      const renderGenerateResult = (res: Awaited<ReturnType<typeof api.generate>>, replaceStreamingAssistant = false) => {
+        if (res.sessionId && !sid) setSessionId(res.sessionId);
+        if (res.kind === 'report' && res.deliverable) {
+          const reportMsg: Extract<Msg, { role: 'report' }> = {
+            role: 'report',
+            deliverable: res.deliverable,
+            animate: true,
+            messageId: res.messageId,
+            knowledgeUsed: res.knowledgeUsed,
+          };
+          setMsgs((m) => {
+            if (replaceStreamingAssistant) {
+              const i = m.length - 1;
+              if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+                const copy = m.slice();
+                copy[i] = reportMsg;
+                return copy;
+              }
+            }
+            return [...m, reportMsg];
+          });
+          if (res.memory?.learned) showMemoryLearned(res.memory.agentName, data_delay(res.deliverable));
+        } else if (res.reply) {
+          setMsgs((m) => {
+            if (replaceStreamingAssistant) {
+              const i = m.length - 1;
+              if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+                const copy = m.slice();
+                copy[i] = { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed };
+                return copy;
+              }
+            }
+            return [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed }];
+          });
+        }
+      };
+
+      if (canStreamChat) {
         const patch = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
           setMsgs((m) => {
             const i = m.length - 1;
@@ -252,10 +325,10 @@ export default function Chat() {
               const copy = m.slice(); copy[i] = fn(copy[i] as Extract<Msg, { role: 'assistant' }>); return copy;
             }
             return m;
-          });
+        });
         setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
         const streamOk = await generateStream(
-          { text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined },
+          body,
           {
             onSession: (id) => { if (id && !sid) setSessionId(id); },
             onToken: (t) => patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })),
@@ -265,27 +338,81 @@ export default function Chat() {
           },
         );
         if (!streamOk) {
-          const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
-          if (res.sessionId && !sid) setSessionId(res.sessionId);
-          if (res.reply) {
-            patch((msg) => ({ ...msg, reply: res.reply!, knowledgeUsed: res.knowledgeUsed, retryText: undefined, streaming: false }));
-          }
+          const res = await api.generate(body);
+          renderGenerateResult(res, true);
+        }
+        setTimeout(scrollToEnd, 80);
+      } else if (canStreamReport) {
+        let reportStarted = false;
+        let learnedAgentName = '';
+        const patchReport = (
+          fn: (d: Deliverable) => Deliverable,
+          extra: Partial<Extract<Msg, { role: 'report' }>> = {},
+        ) => {
+          setMsgs((m) => {
+            const i = m.length - 1;
+            if (i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming) {
+              const copy = m.slice();
+              const cur = copy[i] as Extract<Msg, { role: 'report' }>;
+              copy[i] = { ...cur, ...extra, deliverable: fn(cur.deliverable) };
+              return copy;
+            }
+            return [...m, { role: 'report', deliverable: fn(reportDraft(sendingAgent)), animate: false, streaming: true, ...extra }];
+          });
+        };
+        const startReport = () => {
+          if (reportStarted) return;
+          reportStarted = true;
+          patchReport((d) => d);
+          setTimeout(scrollToEnd, 30);
+        };
+        const streamOk = await generateStream(body, {
+          onSession: (id) => { if (id && !sid) setSessionId(id); },
+          onReportStart: startReport,
+          onReportBegin: (data) => {
+            startReport();
+            patchReport((d) => ({
+              ...d,
+              title: data.title || d.title,
+              icon: data.icon || d.icon,
+              meta: data.meta || d.meta,
+            }));
+          },
+          onReportSection: (section) => {
+            startReport();
+            patchReport((d) => ({ ...d, sections: mergeReportSection(d.sections, section) }));
+            setTimeout(scrollToEnd, 40);
+          },
+          onReportFooter: (data) => {
+            startReport();
+            patchReport((d) => ({
+              ...d,
+              trust: data.trust || d.trust,
+              actions: data.actions?.length ? data.actions : d.actions,
+            }));
+          },
+          onMemory: (data) => {
+            if (data.learned && data.agentName) learnedAgentName = data.agentName;
+          },
+          onDone: (messageId) => {
+            patchReport((d) => d, { streaming: false, messageId });
+            if (learnedAgentName) showMemoryLearned(learnedAgentName, 600);
+            setTimeout(scrollToEnd, 80);
+          },
+          onError: (em) => {
+            if (reportStarted) {
+              patchReport((d) => ({ ...d, trust: em || '生成中断，请重试', degraded: true }), { streaming: false });
+            }
+          },
+        });
+        if (!streamOk && !reportStarted) {
+          const res = await api.generate(body);
+          renderGenerateResult(res);
         }
         setTimeout(scrollToEnd, 80);
       } else {
-        const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
-        if (res.sessionId && !sid) setSessionId(res.sessionId);
-        if (res.kind === 'report' && res.deliverable) {
-          setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true, messageId: res.messageId, knowledgeUsed: res.knowledgeUsed }]);
-          if (res.memory?.learned) {
-            setTimeout(() => {
-              setMsgs((m) => [...m, { role: 'memory', agentName: res.memory!.agentName }]);
-              scrollToEnd();
-            }, data_delay(res.deliverable!));
-          }
-        } else if (res.reply) {
-          setMsgs((m) => [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed }]);
-        }
+        const res = await api.generate(body);
+        renderGenerateResult(res);
         setTimeout(scrollToEnd, 80);
       }
     } catch (e) {
@@ -654,9 +781,16 @@ export default function Chat() {
             <View key={m.messageId ?? `r-${i}`} className="msg a">
               <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
               <View onLongPress={() => copyDeliverable(m.deliverable)}>
-                <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} onShare={() => shareReport(m.messageId)} />
+                <ReportCard
+                  data={m.deliverable}
+                  animate={m.animate}
+                  streaming={m.streaming}
+                  onSave={m.streaming ? undefined : () => saveDeliverable(m.deliverable)}
+                  onExport={m.streaming ? undefined : () => copyDeliverable(m.deliverable)}
+                  onShare={m.streaming ? undefined : () => shareReport(m.messageId)}
+                />
               </View>
-              {m.deliverable.degraded ? (
+              {!m.streaming && m.deliverable.degraded ? (
                 <View style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
                   <Text>这版是保底草案，已免扣额度。你可以补充要求后再生成一版。</Text>
                 </View>
@@ -667,7 +801,7 @@ export default function Chat() {
                 </View>
               ) : null}
               {/* 认可方案 → 沉淀报告并进入执行承接（对齐「认可后拆成军令/复盘」动线） */}
-              {!m.deliverable.degraded ? (
+              {!m.streaming && !m.deliverable.degraded ? (
                 <View className="accept-card">
                   <View className="accept-b">
                     <Text className="accept-t">认可这份方案？</Text>

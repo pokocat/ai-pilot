@@ -1,12 +1,17 @@
 import { BASE_URL } from './config';
 import { getToken } from './token';
 import { parseSSE, decodeUtf8, sliceCompleteBlocks } from './sse';
-import type { GenRequest, ChatReply } from '../../../shared/contracts';
+import type { GenRequest, ChatReply, Deliverable, DeliverableSection } from '../../../shared/contracts';
 
 export interface StreamHandlers {
   onSession?: (id: string) => void;
   onToken?: (text: string) => void;   // 增量 token（渐进渲染）
   onChat?: (reply: ChatReply) => void; // 完整回复兜底（含 points/acts）
+  onReportStart?: () => void; // report meta 已到达：先渲染成果卡骨架，避免当前页长时间只有 thinking
+  onReportBegin?: (data: Pick<Deliverable, 'title' | 'icon' | 'meta'>) => void;
+  onReportSection?: (section: DeliverableSection & { index?: number }) => void;
+  onReportFooter?: (data: Pick<Deliverable, 'trust' | 'actions'>) => void;
+  onMemory?: (data: { learned?: boolean; agentName?: string }) => void;
   onDone?: (messageId?: string) => void;
   onError?: (message: string) => void;
 }
@@ -35,10 +40,35 @@ async function responseErrorMessage(res: Response): Promise<string> {
 function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers, state: { rendered: boolean }): boolean {
   let ok = true;
   for (const e of events) {
-    const d = e.data as { id?: string; text?: string; messageId?: string; message?: string } & ChatReply;
+    const d = e.data as {
+      id?: string; text?: string; messageId?: string; message?: string; kind?: string;
+      title?: string; icon?: string; meta?: string; index?: number; h?: string; b?: string; list?: string[];
+      trust?: string; actions?: string[]; learned?: boolean; agentName?: string;
+    } & ChatReply;
     if (e.event === 'session') h.onSession?.(d?.id ?? '');
     else if (e.event === 'token') { state.rendered = true; h.onToken?.(d?.text ?? ''); }
     else if (e.event === 'chat') { state.rendered = true; h.onChat?.(d); }
+    else if (e.event === 'meta' && d?.kind === 'report' && h.onReportStart) { state.rendered = true; h.onReportStart(); }
+    else if (e.event === 'begin' && h.onReportBegin) {
+      state.rendered = true;
+      h.onReportBegin({ title: d?.title ?? '', icon: d?.icon ?? 'doc', meta: d?.meta ?? '' });
+    }
+    else if (e.event === 'section' && h.onReportSection) {
+      state.rendered = true;
+      h.onReportSection({
+        index: typeof d?.index === 'number' ? d.index : undefined,
+        h: d?.h || '未命名段落',
+        b: d?.b,
+        list: Array.isArray(d?.list) ? d.list : undefined,
+      });
+    }
+    else if (e.event === 'footer' && h.onReportFooter) {
+      h.onReportFooter({
+        trust: d?.trust ?? '',
+        actions: Array.isArray(d?.actions) ? d.actions : [],
+      });
+    }
+    else if (e.event === 'memory') h.onMemory?.({ learned: d?.learned, agentName: d?.agentName });
     else if (e.event === 'done') { if (state.rendered) h.onDone?.(d?.messageId); }
     else if (e.event === 'error') { ok = false; h.onError?.(d?.message ?? '生成失败'); }
   }
