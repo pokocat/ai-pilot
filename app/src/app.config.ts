@@ -55,11 +55,11 @@ export default defineAppConfig({
     selectedColor: '#16191D',
     backgroundColor: '#FBFAF6',
     list: [
-      { pagePath: 'pages/sessions/index', text: '对话' },
-      { pagePath: 'pages/home/index', text: '战局' },
-      { pagePath: 'pages/studio/index', text: '执行' },
-      { pagePath: 'pages/thinktank/index', text: '智库' },
-      { pagePath: 'pages/profile/index', text: '我的' },
+      { pagePath: 'pages/sessions/index', text: '问策' },
+      { pagePath: 'pages/home/index', text: '军情' },
+      { pagePath: 'pages/studio/index', text: '军令' },
+      { pagePath: 'pages/thinktank/index', text: '锦囊' },
+      { pagePath: 'pages/profile/index', text: '主公' },
     ],
   },
 });

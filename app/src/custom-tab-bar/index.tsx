@@ -6,14 +6,14 @@ import { useStore } from '../hooks/useStore';
 import { hideNativeTabBarOnly, onTabBarHiddenChange, readTabBarHidden, syncTabBarHidden } from '../services/tabbar';
 import './index.scss';
 
-// 悬浮胶囊式底栏 —— 对齐设计稿：五个平铺 tab，「对话」（参谋室，第一入口）居首，选中态为本命色柔底。
-// 顺序：对话 · 战局 · 执行 · 智库 · 我的。
+// 悬浮胶囊式底栏 —— 五个平铺 tab，「问策」（参谋室，第一入口）居首，选中态为本命色柔底。
+// 取名与图标对齐军师帐下议事的氛围：问策（对话）· 军情（战局）· 军令（执行）· 锦囊（智库）· 主公（我的）。
 const TABS = [
-  { path: '/pages/sessions/index', icon: 'chat', text: '对话' },
-  { path: '/pages/home/index', icon: 'target', text: '战局' },
-  { path: '/pages/studio/index', icon: 'check', text: '执行' },
-  { path: '/pages/thinktank/index', icon: 'grid', text: '智库' },
-  { path: '/pages/profile/index', icon: 'user', text: '我的' },
+  { path: '/pages/sessions/index', icon: 'fan', text: '问策' },
+  { path: '/pages/home/index', icon: 'flag', text: '军情' },
+  { path: '/pages/studio/index', icon: 'token', text: '军令' },
+  { path: '/pages/thinktank/index', icon: 'pouch', text: '锦囊' },
+  { path: '/pages/profile/index', icon: 'crown', text: '主公' },
 ];
 
 export default function CustomTabBar() {
