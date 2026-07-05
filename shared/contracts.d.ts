@@ -205,6 +205,8 @@ export interface ClientUnderstanding {
   subtitle: string;
   maturity: UnderstandingMaturity;
   summary: string;
+  mainContradiction?: string | null; // 战略档案里的主要矛盾（战局 hero 优先展示真结论，而非通用摘要）
+  positioning?: string | null;       // 战略定位（可选展示）
   sections: ClientUnderstandingSection[];
   nextQuestions: string[];
   evidenceCount: { profile: number; memories: number; projects: number; knowledge: number; sessions: number };

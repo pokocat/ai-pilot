@@ -100,6 +100,8 @@ const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown'
 
 export default function Chat() {
   const router = useRouter();
+  // 三势研判入口带来的势标签（市势/人势）：认可存库时写入报告 type，供战局卡可靠反查
+  const forceTag = decodeURIComponent((router.params as Record<string, string>).force || '');
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -486,7 +488,8 @@ export default function Chat() {
   const saveDeliverable = async (d: Deliverable) => {
     if (!agent) return;
     await api.saveToLibrary({
-      title: d.title, type: agent.deliverableKey || d.title, agentKey: agent.key,
+      // 三势研判入口进来的，type 打成「{势}研判」（如 市势研判），战局卡按 type 可靠反查
+      title: d.title, type: forceTag ? `${forceTag}研判` : (agent.deliverableKey || d.title), agentKey: agent.key,
       sessionId: sessionId || undefined, content: d as any, projectId: projectId || undefined,
     }).catch(() => {});
     Taro.showToast({ title: '已存入方案库', icon: 'none' });

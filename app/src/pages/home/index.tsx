@@ -102,9 +102,10 @@ export default function Home() {
   };
   const startInterview = () =>
     goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
-  // 市势/人势各自独立研判（不再共用同一条指令）：各走自己的 prompt
+  // 市势/人势各自独立研判（不再共用同一条指令）：各走自己的 prompt，并带 force 标签，
+  // 认可存库时写入报告 type=「{势}研判」，战局卡即可可靠反查（不靠 LLM 标题合规）。
   const startForce = (f: ForceItem) =>
-    goChat(`agentKey=${f.agentKey || 'strat'}&fresh=1&send=${encodeURIComponent(f.prompt || '帮我做一次战略研判并给出该攻、该守还是该等的结论。')}`);
+    goChat(`agentKey=${f.agentKey || 'strat'}&fresh=1&force=${encodeURIComponent(f.key)}&send=${encodeURIComponent(f.prompt || '帮我做一次战略研判并给出该攻、该守还是该等的结论。')}`);
   // 反查方案库里该势已研判的方案（标题/类型含关键词，取最新一份）
   const forceReport = (f: ForceItem): ReportItem | undefined =>
     f.match ? reports.find((r) => r.title.includes(f.match!) || r.type.includes(f.match!)) : undefined;
@@ -147,7 +148,7 @@ export default function Home() {
             {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
           </Text>
           <Text className="bh-title serif">
-            {und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
+            {und?.mainContradiction || und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
           </Text>
         </View>
 

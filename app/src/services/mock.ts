@@ -290,6 +290,9 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
     subtitle: '军师有多了解你的生意',
     maturity,
     summary,
+    // 主要矛盾（mock：有痛点时给一句真结论，让战局 hero 走查真数据态）
+    mainContradiction: d.profile?.pain ? `主要矛盾集中在「${d.profile.pain}」——先解决它，其余动作都围绕它排布。` : null,
+    positioning: null,
     sections: [
       { key: 'identity', title: '经营身份', items: identity, emptyText: '还没记录你的称呼、公司、行业和阶段。' },
       { key: 'journey', title: '创业路径', items: journey, emptyText: '还没形成创业路径。可以告诉军师：你怎么开始、做过哪些转折、现在走到哪一步。' },

@@ -1,4 +1,5 @@
 import { prisma } from '../db.js';
+import { loadStrategicProfile } from './strategicProfile.js';
 import type { ClientUnderstanding, ClientUnderstandingSection } from '../../../shared/contracts';
 
 type UserForUnderstanding = {
@@ -182,11 +183,16 @@ export async function buildClientUnderstanding(user: UserForUnderstanding): Prom
   ];
   if (dossierText) sections.push(section('dossier', '战略档案（持续沉淀）', [dossierText], '尚未沉淀战略档案。'));
 
+  // 战略档案真结论（战局 hero 优先展示「主要矛盾」而非通用摘要，修 hero 标签与内容不符）
+  const strategic = await loadStrategicProfile(user.id).catch(() => null);
+
   return {
     title: TITLE,
     subtitle: SUBTITLE,
     maturity,
     summary,
+    mainContradiction: strategic?.mainContradiction || null,
+    positioning: strategic?.positioning || null,
     sections,
     nextQuestions: nextQuestions.slice(0, 4),
     evidenceCount,
