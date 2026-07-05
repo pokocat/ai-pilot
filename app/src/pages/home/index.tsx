@@ -6,8 +6,8 @@ import Login from '../../components/Login';
 import Picker from '../../components/Picker';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type ChartSummary } from '../../services/api';
-import { MODULE_MARKET, THREE_FORCES } from '../../data/operatingSystem';
+import { api, type ChartSummary, type ReportItem } from '../../services/api';
+import { MODULE_MARKET, THREE_FORCES, type ForceItem } from '../../data/operatingSystem';
 import { EMPTY_STATES, QUICKSCAN_OPENER } from '../../data/emptyStates';
 import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
 import './index.scss';
@@ -46,6 +46,7 @@ export default function Home() {
   const [navTop, setNavTop] = useState<number>();
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [chart, setChart] = useState<ChartSummary | null>(null);
+  const [reports, setReports] = useState<ReportItem[]>([]);
   const me = s.me();
   const und = me?.understanding;
 
@@ -56,6 +57,7 @@ export default function Home() {
     if (s.isAuthed()) {
       store.loadMe(); // 刷新军师档案（对话/资料变化后战局判断随之更新）
       api.myChart().then((r) => setChart(r.chart)).catch(() => setChart(null)); // 命盘（天时窗口）
+      api.reports().then(setReports).catch(() => setReports([])); // 方案库（用于三势卡反查已研判方案）
     }
   });
 
@@ -100,8 +102,13 @@ export default function Home() {
   };
   const startInterview = () =>
     goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
-  const startForces = () =>
-    goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('用三势判断（天势、市势、人势）帮我看一遍当前局势，并给出该攻、该守还是该等的结论。')}`);
+  // 市势/人势各自独立研判（不再共用同一条指令）：各走自己的 prompt
+  const startForce = (f: ForceItem) =>
+    goChat(`agentKey=${f.agentKey || 'strat'}&fresh=1&send=${encodeURIComponent(f.prompt || '帮我做一次战略研判并给出该攻、该守还是该等的结论。')}`);
+  // 反查方案库里该势已研判的方案（标题/类型含关键词，取最新一份）
+  const forceReport = (f: ForceItem): ReportItem | undefined =>
+    f.match ? reports.find((r) => r.title.includes(f.match!) || r.type.includes(f.match!)) : undefined;
+  const openReport = (id: string) => Taro.navigateTo({ url: `/packages/work/report/index?id=${id}` });
   const askRisks = () =>
     goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
   // 天势不再引导对话：排盘引擎已算好 → 直接进原生「全年天时」页（无命盘则页内就地补生辰）
@@ -169,7 +176,7 @@ export default function Home() {
         </View>
 
         {/* 三势判断（force-grid）：天势=排盘引擎已算好 → 点开原生全年天时页（不引导对话）；
-            市势/人势的结论产自真实对话 → 保留发起判断。 */}
+            市势/人势=各自独立研判开场（不再共用同一指令）→ 已研判（方案库有对应方案）则点开预览报告详情，否则发起研判。 */}
         <Text className="battle-h2">三 势 判 断</Text>
         <View className="force-grid">
           {THREE_FORCES.map((f) => {
@@ -188,11 +195,13 @@ export default function Home() {
                 </View>
               );
             }
+            // 市势/人势：已研判（方案库有对应方案）→ 点开预览报告详情；否则各走独立 prompt 发起研判
+            const rep = forceReport(f);
             return (
-              <View key={f.key} className="force card" onClick={startForces}>
+              <View key={f.key} className="force card" onClick={rep ? () => openReport(rep.id) : () => startForce(f)}>
                 <Text className="force-tag serif">{f.key}</Text>
-                <Text className="force-desc">{f.desc}</Text>
-                <Text className="force-go">发起判断 ›</Text>
+                <Text className="force-desc">{rep ? `已研判 · ${rep.title}` : f.desc}</Text>
+                <Text className="force-go">{rep ? '查看研判 ›' : '发起判断 ›'}</Text>
               </View>
             );
           })}
