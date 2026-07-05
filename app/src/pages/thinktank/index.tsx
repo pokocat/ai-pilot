@@ -72,10 +72,10 @@ export default function ThinkTank() {
   return (
     <Screen topInset>
       <View className="pad think">
-        {/* 页头：左「上传」· 中「智库」· 右「市场」 */}
+        {/* 页头：左「上传」· 中「锦囊」· 右「市场」 */}
         <View className="think-nav">
           <Text className="tn-side left serif" onClick={goKnowledge}>上传</Text>
-          <Text className="tn-title serif">智库</Text>
+          <Text className="tn-title serif">锦囊</Text>
           <Text className="tn-side right serif" onClick={goMarket}>市场</Text>
         </View>
 

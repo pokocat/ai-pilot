@@ -95,7 +95,7 @@ export default function Home() {
   const refresh = () => {
     refreshDossier().then(setDossier);
     if (s.isAuthed()) store.loadMe();
-    Taro.showToast({ title: '战局已刷新', icon: 'none' });
+    Taro.showToast({ title: '军情已刷新', icon: 'none' });
   };
   const startInterview = () =>
     goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
@@ -109,10 +109,10 @@ export default function Home() {
   return (
     <Screen className="home">
       <View className="pad">
-        {/* 页头（对齐设计稿）：左「案卷」· 中「战局」· 右刷新 */}
+        {/* 页头（对齐设计稿）：左「案卷」· 中「军情」· 右刷新 */}
         <View className="battle-nav" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
           <Text className="bn-side left serif" onClick={() => requireLogin() && Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
-          <Text className="bn-title serif">战局</Text>
+          <Text className="bn-title serif">军情</Text>
           <Text className="bn-side right" onClick={refresh}>↻</Text>
         </View>
 
