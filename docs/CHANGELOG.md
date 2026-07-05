@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-05** · **启用小程序按需注入前置配置**：`app.config.ts` 增加 `lazyCodeLoading: "requiredComponents"`，对齐微信官方按需注入 / 用时注入要求，使小程序只注入当前页面所需页面与自定义组件代码，并为后续自定义组件占位组件触发用时注入保留前置条件。影响面：app 小程序全局配置 + AGENTS/CHANGELOG。
+
 - **2026-07-04** · **接入微信订阅消息触达**：新增 `WechatSubscription/WechatNotificationLog` 两张表，`GET /wechat/subscribe/templates` 返回已配置模板，`POST /wechat/subscribe` 记录 `wx.requestSubscribeMessage` 结果并仅对 `accept` 累计一次性发送额度；新增 `services/wechatSubscribe.ts` 调微信 `subscribe/send`，发送成功扣减额度并写日志。执行页复盘视图「订阅复盘提醒」接入授权；scheduler 新增 21 点后当日复盘提醒并在久不复盘候选时尝试发送；报告保存、会话报告生成和网页版报告渲染完成后尝试发送报告完成提醒。`.env.example`/部署文档补订阅模板配置，单测覆盖订阅额度与发送扣减。影响面：server schema/wechat/scheduler/reports/sessions + shared contracts + app api/studio + docs/tests。
 
 - **2026-07-04** · **完成军令改为归档展示**：执行页「今日军令」只渲染未完成任务，勾选完成后自动从待执行列表收起到默认折叠的「已归档」区；归档区可展开查看、长按删除、点勾取消完成，避免误操作后无法恢复。顶部军师献策、今日主令和执行信号同步改为按待执行/已归档状态展示；周计划、复盘、每日战报仍读取完整 `done` 记录，不删除历史数据。影响面：app 执行页 + dossier 视图 helper + AGENTS/CHANGELOG。
