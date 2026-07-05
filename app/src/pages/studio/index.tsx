@@ -12,11 +12,12 @@ import {
   addOrder, buildReviewPrompt, doneOrdersOf, ordersOf, pendingOrdersOf, recentOrders, refreshDossier,
   removeOrder, saveBackfill, startReview, today, todayProgress, toggleOrder, type Dossier,
 } from '../../services/dossier';
+import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import './index.scss';
 
 type ExecView = 'today' | 'week' | 'review';
 
-// 提醒节奏（订阅消息推送待接入，先亮明框架）。
+// 提醒节奏：微信订阅消息是一次性授权，用户每点一次订阅可触达一次。
 const REMINDERS = [
   { time: '每天 09:00', text: '生成今日军令' },
   { time: '每天 21:30', text: '记录战果，生成当日复盘' },
@@ -113,6 +114,13 @@ export default function Studio() {
   const genReview = () => {
     void startReview('day');
     goChat('general', buildReviewPrompt(dossier));
+  };
+  const subscribeReview = async () => {
+    try {
+      await requestWechatSubscribe('review');
+    } catch {
+      Taro.showToast({ title: '订阅失败，请稍后重试', icon: 'none' });
+    }
   };
   const genScript = () =>
     goChat('ip', firstUndone
@@ -441,7 +449,7 @@ export default function Studio() {
               </View>
             </View>
             <View className="remind card">
-              <View className="remind-head"><Text className="remind-k serif">提醒节奏</Text><Text className="remind-soon">订阅提醒 · 即将开放</Text></View>
+              <View className="remind-head"><Text className="remind-k serif">提醒节奏</Text><Text className="remind-soon" onClick={subscribeReview}>订阅复盘提醒</Text></View>
               {REMINDERS.map((r) => (
                 <View key={r.time} className="remind-row">
                   <Text className="remind-time">{r.time}</Text>

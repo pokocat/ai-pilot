@@ -1,25 +1,120 @@
-# CODING AGENTS: READ THIS FIRST
+# 军师小程序
 
-This is a **handoff bundle** from Claude Design (claude.ai/design).
+更新时间：2026-07-01
 
-A user mocked up designs in HTML/CSS/JS using an AI design tool, then exported this bundle so a coding agent can implement the designs for real.
+“军师”是一个面向企业主、主理人和小团队经营者的 AI 商业军师小程序原型。产品目标不是做通用聊天工具，而是把案卷资料、经营判断、执行军令、智库资料和报告交付串成一套可持续使用的经营决策系统。
 
-## What you should do — IMPORTANT
 
-**Read the chat transcripts first.** There are 1 chat transcript(s) in `chats/`. The transcripts show the full back-and-forth between the user and the design assistant — they tell you **what the user actually wants** and **where they landed** after iterating. Don't skip them. The final HTML files are the output, but the chat is where the intent lives.
+## 核心业务逻辑
 
-**Read `project/方案A · 本命色.html` in full.** The user had this file open when they triggered the handoff, so it's almost certainly the primary design they want built. Read it top to bottom — don't skim. Then **follow its imports**: open every file it pulls in (shared components, CSS, scripts) so you understand how the pieces fit together before you start implementing.
+军师系统围绕“案卷”工作。用户先把企业资料、老板目标、产品服务、历史内容、成交数据、客户问答、财务经营表、截图和参考资料上传到系统，再由 AI 与人工服务共同完成整理、判断、执行和复盘。
 
-**If anything is ambiguous, ask the user to confirm before you start implementing.** It's much cheaper to clarify scope up front than to build the wrong thing.
+五个主 tab：
 
-## About the design files
+- 对话：用户与军师系统的主要入口，用于补充案卷、提问、确认判断和接收军师反馈。
+- 战局：把案卷资料转成经营判断，展示主要矛盾、三势判断、下一步动作、关联模块和当前不能做的事项。
+- 执行：把战局判断拆成今日军令、周计划、数据回填和复盘检查，推动用户真正执行。
+- 智库：承载资料库、数据源绑定、模块/Skill、报告和资料整理入库流程。
+- 我的：承载账户、档案完整度、模块管理、数据授权、订单支付、提醒日历、服务老师和深度能力解锁。
 
-The design medium is **HTML/CSS/JS** — these are prototypes, not production code. Your job is to **recreate them pixel-perfectly** in whatever technology makes sense for the target codebase (React, Vue, native, whatever fits). Match the visual output; don't copy the prototype's internal structure unless it happens to fit.
+## 战局逻辑
 
-**Don't render these files in a browser or take screenshots unless the user asks you to.** Everything you need — dimensions, colors, layout rules — is spelled out in the source. Read the HTML and CSS directly; a screenshot won't tell you anything they don't.
+战局页遵循“先判断，再行动”的结构。系统不会直接让用户投放、招人或扩渠道，而是先识别当前经营卡点。
 
-## Bundle contents
+当前核心判断示例：
 
-- `README.md` — this file
-- `chats/` — conversation transcripts (read these!)
-- `project/` — the `军师app` project files (HTML prototypes, assets, components)
+```text
+不是缺流量，是「信任证明」断在转化前
+```
+
+页面结构：
+
+- 军师判断：输出当前案卷的主要矛盾。
+- 案卷完整度、待补资料、本周风险：告诉用户判断的可信度和缺口。
+- 三势判断：天势、市势、人势，用来解释外部趋势、竞争态势和内部团队状态。
+- 下一步动作：把判断落到可执行任务。
+- 关联模块：提示需要调用的增长、IP、复盘等模块。
+- 现在不能做：明确阻止错误动作，例如追加新渠道投放、过早扩销售团队。
+- 认可判断后生成军令与报告：把战局判断转入执行页和报告交付。
+
+## 执行逻辑
+
+执行页把“判断”翻译成当天和本周的经营动作。
+
+主要模块：
+
+- 今日战役：一句话说明今天要打的仗。
+- 今日军令：任务卡，包含负责人、截止时间、预计耗时、完成状态和所需资料。
+- 数据回填：要求用户提交线索、咨询、成交等关键数据。
+- 复盘前检查：检查短视频、私聊反馈、互动数据、今日复盘是否齐全。
+- 总军师督战：提示当前由哪些军师模块协同执行。
+- 目标阶梯：把 3-5 年、年度、季度、本周目标串起来，避免任务脱离经营目标。
+
+执行页视觉规则：
+
+- 顶部卡片统一尺寸，拥挤时横向滑动。
+- 今日军令卡片使用左侧色条、右上角勾选框、badge、衬线大标题和 chip 标签。
+- `总军师督战` 保持完整卡片，不压缩成窄条。
+
+## 智库与资料整理逻辑
+
+智库不是普通文件列表，而是“资料进入经营系统”的处理管道。
+
+用户上传的资料通常很乱，包括微信聊天记录、表格、截图、文档、历史方案、老板口述、同行参考和内容素材。系统需要先进入待整理区，再逐步处理：
+
+1. 上传资料：新老资料和参考资料先进入待整理区，并消耗免费空间额度。
+2. 树形整理：像电脑文件夹一样一层层打开，支持用户按资料来源、业务目标、资料类型或 AI 粗分结果查看。
+3. AI 粗分：系统按案卷目标拆成增长资料、IP 内容、老板与企业档案、财务经营等一级资料夹。
+4. 深度整理与优化：去重、摘要、提炼问题、补充标签、形成可被军师调用的结构化资料。
+5. 用户确认：优化后的资料进入“待确认入库”，确认后才写入正式知识库。
+6. 付费扩展：免费额度之外可购买空间；深度整理、长期监控、高级 Skill 和深度报告可作为付费产品。
+
+当前静态原型的资料整理区已经改为文件夹树设计：
+
+```text
+知识库 > 待整理区 > AI 粗分结果 > AI 处理与优化 > 待确认入库
+```
+
+## 我的页面
+
+“我的军师系统”用于集中承载账户和商业化能力：
+
+- 用户身份与档案完整度。
+- 会员权益、本月算力、深度报告等状态卡。
+- 个人/企业档案、模块管理、数据授权、报告库、订单支付、提醒日历。
+- 服务老师卡片。
+- 深度能力解锁卡片。
+
+## 视觉方向
+
+当前原型的视觉关键词：
+
+- 微信小程序感底部 tab：贴底白色导航、线性图标、深绿色选中态。
+- 米白背景、深绿主色、金色辅助。
+- 大标题使用宋体/衬线气质，正文和副标题使用克制黑体。
+- 卡片圆角克制，信息密度偏产品工具，不做营销落地页风格。
+- 避免紫色、蓝紫渐变和通用 AI 模板感。
+
+底部 tab 最新方向：
+
+- 底栏从悬浮胶囊改为贴底白色栏。
+- 增加顶部细分割线和轻微毛玻璃背景。
+- 五个 tab 使用线性图标：对话、战局、执行、智库、我的。
+- 选中态为深绿色，未选中态为浅灰色，更接近微信小程序底部导航。
+
+## 商业化与模块逻辑
+
+Skill 和模块需要区分：
+
+- 免费 Skill
+- 单次付费模块
+- 算力消耗模块
+- 会员权益模块
+
+当前示例：
+
+- 三势初判：免费。
+- 增长执行图：算力消耗。
+- IP 内容引擎：基础版。
+- 军令与报告：会员/深度版。
+- 数据源绑定：部分待授权、部分已绑定、部分缺表。
