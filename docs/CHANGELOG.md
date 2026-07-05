@@ -10,6 +10,8 @@
 
 - **2026-07-05** · **战局(军情)页真数据化：hero 真主要矛盾 + 三势研判可靠反查报告**：① hero「主要矛盾」不再渲染通用档案摘要——`ClientUnderstanding` 加 `mainContradiction/positioning`，server `understanding.ts` 从 `StrategicProfile` 带出真结论优先展示（mock 按 `profile.pain` 派生样例），修 hero 标签与内容不符的说假话 bug；② 市势/人势「已研判→查看」从「猜标题」升级为可靠反查——研判入口带 `force` 标签→认可存库时报告 `type` 打成「{势}研判」→战局卡按 type 精确匹配（复用现有 type 字段，无 schema 变更），有则「已研判 · {标题}」点开报告详情。影响面：shared/contracts + server(understanding) + app(home/chat/mock)。（军令卡血缘 L-3 属执行页，留后续。）
 
+- **2026-07-05** · **修复小程序按需注入字段未写入产物**：Taro 3.6.34 对 `app.config.ts` 中的 `lazyCodeLoading: "requiredComponents"` 没有稳定输出到 `dist/app.json`，导致 DevTools 仍按旧 app.json 载入。weapp 构建链新增 `PatchWeappAppJsonPlugin`，在 webpack assets 阶段补写 `dist/app.json.lazyCodeLoading`；AGENTS 同步记录产物校验要求。影响面：app 构建配置 + 小程序 app.json 产物 + AGENTS/CHANGELOG。
+
 - **2026-07-05** · **修复：三势·市势/人势 区分研判 + 已研判卡片可点开报告**：两处业务逻辑问题——① 市势/人势 原本都进战略诊断官发**同一条**指令，现各有独立研判开场（市势=市场与竞争格局；人势=资源与组织承载力，产出各以「市势研判/人势研判」为题），仍走免费 strat 避开 intel/org 解锁墙；② 生成并存入方案库后，战局「市势/人势」卡不能像天势那样点开预览，现按标题/类型关键词反查方案库对应研判方案——已研判则显「已研判 · {标题}」并点开报告详情，否则「发起判断」。`THREE_FORCES` 加 `ForceItem` 类型（agentKey/prompt/match）；home 拉 `api.reports()` 供反查。影响面：app（operatingSystem/home）。
 
 - **2026-07-05** · **集成 main（merge）**：本分支合入 main 最新（底栏/tab 图标与大标题 redesign + 对话页/报告卡/军令卡修复）。自动合并零冲突（名词统一/打磨改动与 main 的 tab redesign 落在不同代码行）。原意 rebase，但本分支含 WO-02→revert 提交对会让 rebase 对重叠文件重复解冲突且有风险，改用 merge 一次性合入，结果等价更稳。
