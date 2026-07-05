@@ -213,12 +213,14 @@ export default function Studio() {
             {/* 军师献策（绿框卡）：案卷军令前三步 */}
             <View className="xiance-card">
               <Text className="xiance-k">军师献策 · {dossier ? '本期破局三步' : '如何开始'}</Text>
-              {xianceSteps.map((step, i) => (
-                <View key={step} className="xiance-step">
-                  <View className="xiance-no"><Text>{i + 1}</Text></View>
-                  <Text className="xiance-text">{step}</Text>
-                </View>
-              ))}
+              <View className="xiance-steps">
+                {xianceSteps.map((step, i) => (
+                  <View key={step} className="xiance-step">
+                    <View className="xiance-no"><Text>{i + 1}</Text></View>
+                    <Text className="xiance-text">{step}</Text>
+                  </View>
+                ))}
+              </View>
               <Text className="xiance-source">{xianceSource}</Text>
             </View>
 
