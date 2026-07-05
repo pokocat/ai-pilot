@@ -4,6 +4,7 @@ import Taro from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { api, type FateCardContent } from '../../../services/api';
+import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
 import './index.scss';
 
 // 送你一卦（天命速写卡 · 裂变）——合规打磨版（AUDIT P-4）：
@@ -40,29 +41,6 @@ export default function Gift() {
   const dateOk = +year >= 1930 && +year <= 2020 && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
   const valid = !!name.trim() && dateOk && consent;
 
-  // 画卡：把服务端返回的卡文本绘到 canvas，导出临时图片路径
-  const drawCard = (content: FateCardContent) =>
-    new Promise<string>((resolve, reject) => {
-      const q = Taro.createSelectorQuery();
-      q.select('#fateCanvas').fields({ node: true, size: true }).exec((res) => {
-        const node = res?.[0]?.node;
-        if (!node) { reject(new Error('canvas 未就绪')); return; }
-        const dpr = (Taro.getSystemInfoSync().pixelRatio) || 2;
-        node.width = CW * dpr;
-        node.height = CH * dpr;
-        const ctx = node.getContext('2d');
-        ctx.scale(dpr, dpr);
-        paintFateCard(ctx, content);
-        setTimeout(() => {
-          Taro.canvasToTempFilePath({
-            canvas: node, x: 0, y: 0, width: CW * dpr, height: CH * dpr, destWidth: CW * 2, destHeight: CH * 2,
-            success: (r) => resolve(r.tempFilePath),
-            fail: (e) => reject(e),
-          });
-        }, 60);
-      });
-    });
-
   const makeCard = async () => {
     if (!valid || busy) return;
     setBusy(true);
@@ -74,7 +52,7 @@ export default function Gift() {
         friendBazi: { calendar, year: +year, month: +month, day: +day, hour: SHICHEN[hourIdx].hour, gender },
         consent: true,
       });
-      const path = await drawCard(content);
+      const path = await renderCardToImage('fateCanvas', CW, CH, (ctx) => paintFateCard(ctx, content));
       Taro.hideLoading();
       setImgPath(path);
       Taro.showToast({ title: '卡已生成 · 保存或发给朋友', icon: 'none' });
@@ -85,18 +63,8 @@ export default function Gift() {
     setBusy(false);
   };
 
-  const shareImage = () => {
-    if (!imgPath) return;
-    Taro.showShareImageMenu({ path: imgPath }).catch(() =>
-      Taro.showToast({ title: '可长按图片保存后转发', icon: 'none' }),
-    );
-  };
-  const saveImage = () => {
-    if (!imgPath) return;
-    Taro.saveImageToPhotosAlbum({ filePath: imgPath })
-      .then(() => Taro.showToast({ title: '已存到相册', icon: 'none' }))
-      .catch(() => Taro.showToast({ title: '未获相册权限，可长按图片保存', icon: 'none' }));
-  };
+  const shareImage = () => imgPath && shareCardImage(imgPath);
+  const saveImage = () => imgPath && saveCardImage(imgPath);
 
   return (
     <View className={`page gift ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -251,32 +219,4 @@ function paintFateCard(ctx: CanvasRenderingContext2D, content: FateCardContent) 
   ctx.fillStyle = '#B4B8BE';
   ctx.font = '20px sans-serif';
   ctx.fillText('命理为文化视角的经营参考，不构成决策依据', W / 2, CH - 44);
-}
-
-// 逐字换行绘制，返回结束 y
-function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number): number {
-  let line = '';
-  let curY = y;
-  for (const ch of text) {
-    const test = line + ch;
-    if (ctx.measureText(test).width > maxW && line) {
-      ctx.fillText(line, x, curY);
-      line = ch;
-      curY += lineH;
-    } else {
-      line = test;
-    }
-  }
-  if (line) { ctx.fillText(line, x, curY); curY += lineH; }
-  return curY;
-}
-
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
 }

@@ -9,6 +9,7 @@ import type {
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
 } from '../../../shared/contracts';
+import type { ChartSummary } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
 import { agentForText } from '../data/intents';
@@ -160,6 +161,22 @@ function current(): { token: string; d: UserData } {
 
 const agentOf = (key: string): Agent =>
   DEFAULT_AGENTS.find((a) => a.key === key) || DEFAULT_AGENTS.find((a) => a.key === 'general')!;
+
+// 确定性样例命盘（mock 专用 UI 预览假数据，结构对齐 ChartSummary；非真排盘）
+function sampleChartM(): ChartSummary {
+  const yr = new Date().getFullYear();
+  const PHASES = ['进攻', '平稳', '防守', '进攻', '平稳', '进攻', '防守', '平稳', '进攻', '平稳', '防守', '平稳'];
+  const TURN = new Set([3, 7, 11]);
+  return {
+    engineVersion: 'paipan-v1',
+    hourKnown: true,
+    pillars: { year: { ganZhi: '庚午' }, month: { ganZhi: '壬午' }, day: { ganZhi: '戊子' }, time: { ganZhi: '甲寅' } },
+    dayMaster: { gan: '戊', element: '土', strength: '身强' },
+    pattern: { name: '正财格', traits: '务实稳健、重信守诺，善守成不喜冒进', suits: ['稳扎稳打、深耕存量'], avoid: ['盲目扩张'] },
+    ziwei: { soulMajorStars: ['紫微', '天府'], bodyMajorStars: ['武曲'] },
+    monthlyOutlook: { year: yr, months: PHASES.map((phase, i) => ({ month: i + 1, phase, turning: TURN.has(i + 1) })) },
+  };
+}
 
 // —— 双轴计费 mock 辅助：钻石(creditBalance) 管解锁；月度 token 额度按 tokenUsed/limit 计 ——
 function planOf(d: UserData): Plan { return PLANS.find((p) => p.id === d.planId) ?? PLANS[1]; }
@@ -589,14 +606,18 @@ export const mock = {
     return delay(d.profile);
   },
 
-  // 八字采集（mock：只存偏好不排盘——排盘是服务端确定性引擎的职责，mock 不伪造命理结论）
-  async saveBazi(body: object): Promise<{ believe: boolean; chart: null }> {
+  // 八字采集（mock）：存偏好 + 返回一份**确定性样例命盘**（固定假数据，非真排盘——真排盘是服务端引擎的职责）。
+  // 有样例盘后，天时日历/战局天势卡/送你一卦等命理 UI 在本地 mock/H5 下可完整走查（修 review 铁律③「mock 命盘恒空」）。
+  async saveBazi(body: object): Promise<{ believe: boolean; chart: ChartSummary | null }> {
     const { token, d } = current();
     (d as { bazi?: object }).bazi = body; save(token, d);
-    return delay({ believe: (body as { believe?: boolean }).believe !== false, chart: null });
+    const believe = (body as { believe?: boolean }).believe !== false;
+    return delay({ believe, chart: believe ? sampleChartM() : null });
   },
-  async myChart(): Promise<{ bazi: object | null; chart: null }> {
-    return delay({ bazi: (current().d as { bazi?: object }).bazi ?? null, chart: null });
+  async myChart(): Promise<{ bazi: object | null; chart: ChartSummary | null }> {
+    const bazi = (current().d as { bazi?: { believe?: boolean } }).bazi ?? null;
+    const chart = bazi && bazi.believe !== false ? sampleChartM() : null;
+    return delay({ bazi, chart });
   },
   // 送你一卦预览（mock：给确定性样例卡文本，不排盘不落库——让画卡/分享链路可本地走查）
   async fateCardPreview(body: { friendName?: string; consent?: boolean }): Promise<{ friendName: string; subtitle: string; sketch: string; trend: string; advice: string }> {
