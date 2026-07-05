@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-05** · **打磨②：天时日历（三势·天势）改 canvas 图片交付**：顺着送你一卦的图片交付，把「全年天时日历」也从公开 HTML 链接（`publishCard('calendar')`→`/api/r/:id`）改成小程序 canvas 出图。新增 `app/src/services/canvasCard.ts`（`renderCardToImage` + `shareCardImage`/`saveCardImage` + `wrapText`/`roundRect`）作送你一卦/天时日历/后续战报卡的**共享出图管道**；gift 页重构复用它（行为不变）；calendar 页撤「生成网页打印版」改「生成天时日历图片」（`paintCalendarCard`：12 月攻守网格/拐点/日主口径/裂变位，固定品牌配色）→ 发好友/存相册，顺带缓解该卡 P-5/F-9/A-10。`mock.ts` 的 `saveBazi/myChart` 返回确定性样例命盘（`sampleChartM`），修 review 铁律③「mock 命盘恒空导致天时/天势卡/送你一卦本地走查断裂」——现 mock/H5 可完整走查。**canvas 出图 weapp-only，需真机复验**（复用已真机验过的送你一卦同一管道）。影响面：app（canvasCard 新增 / gift / calendar / mock）。
+
 - **2026-07-05** · **打磨①：送你一卦合规化（AUDIT P-4/P2）**：`docs/[FABLE5]POLISH_PLAN.md` 打磨方向第一单。把「送你一卦」从「服务端渲 HTML→`reportHtml.create` 永久落库→`/api/r/:id` 无鉴权公开」改为「服务端现算即返卡文本→小程序 canvas 画卡导出**图片**→用户点对点分享」，关掉第三人敏感生辰永久落库+公开访问，并顺带了结 P-5/F-9/A-10（图片无公开 URL、渲染自带）。新增 `POST /cards/fate/preview`（校验+现算+返回 `FateCardContent`，不落库；`consent!==true`→400 PIPL；封禁 `/cards/:kind` 的 fate+friendBazi 落库路径）；抽 `validatePaipanInput`（修 P2 friendBazi 零校验）+ `fateCardContent`，`/profile/bazi` 统一校验口径；SSOT 加 `FateCardContent`；gift 页重写（同意勾选门槛 + canvas 画卡导图 + 发好友/存相册，去公开链接，文案改真话）。**待真机复验 canvas 出图**。影响面：server（cards/profile/paipan/cardHtml）+ shared/contracts + app（gift/api/mock）+ docs。
 
 - **2026-07-05** · **新增 `docs/[FABLE5]POLISH_PLAN.md`**：review 工作流（12 功能区×诊断×对抗性复核）产出 79 条已核实 finding 的逐功能精细打磨方案（含总判断、最先打磨 8 件事、逐功能清单、4+1 批次、7 个产品拍板点、2 条 P0 命理合规红线）。
