@@ -1,23 +1,24 @@
 import { useState } from 'react';
-import { View, Text } from '@tarojs/components';
+import { View, Text, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
-import AdvisorAvatar from '../../components/AdvisorAvatar';
 import { useStore } from '../../hooks/useStore';
 import { api, type KnowledgeDocRow, type ReportItem } from '../../services/api';
-import { DATA_BINDINGS, KNOWLEDGE_FOLDERS } from '../../data/operatingSystem';
+import { DATA_BINDINGS, KNOWLEDGE_FOLDERS, MODULE_MARKET, SKILL_MARKET } from '../../data/operatingSystem';
 import './index.scss';
 
-// 智库页（WO-02：市场目录 → 我的军备库）：只展示已开通能力与资料库/方案库。
-// 未开通能力不再有浏览目录/价格/💎——唯一获得渠道是军师处方（WO-12）与对话推荐。
-type ThinkTab = 'capabilities' | 'assets' | 'plans';
+type ThinkTab = 'assets' | 'data' | 'modules' | 'reports';
 
 const TABS: { key: ThinkTab; label: string }[] = [
-  { key: 'capabilities', label: '我的能力' },
-  { key: 'assets', label: '资料库' },
-  { key: 'plans', label: '方案库' },
+  { key: 'assets', label: '案卷资产' },
+  { key: 'data', label: '数据源' },
+  { key: 'modules', label: '能力' },
+  { key: 'reports', label: '方案' },
 ];
+
+// 能力面板的费用口径 chips（设计稿 commerce-strip）。
+const COMMERCE = ['免费初判', '进阶锦囊', '会员权益', '按次付费', '高级模块'];
 
 function relTime(iso: string): string {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -27,10 +28,12 @@ function relTime(iso: string): string {
   return d === 1 ? '昨天' : `${d} 天前`;
 }
 
+// 智库页 —— 对齐设计稿 page-thinktank：上传区 / 资料树 / 数据源 / 能力（Skill+模块）/ 报告。
+// 资料与报告是真实数据；数据源与模块是能力目录 + 引导态。
 export default function ThinkTank() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
-  const [tab, setTab] = useState<ThinkTab>('capabilities');
+  const [tab, setTab] = useState<ThinkTab>('assets');
   const [docs, setDocs] = useState<KnowledgeDocRow[]>([]);
   const [reports, setReports] = useState<ReportItem[]>([]);
   const und = s.me()?.understanding;
@@ -46,24 +49,34 @@ export default function ThinkTank() {
 
   const goKnowledge = () => Taro.navigateTo({ url: '/packages/work/knowledge/index' });
   const goBindings = () => Taro.navigateTo({ url: '/packages/work/bindings/index' });
+  const goMarket = () => Taro.navigateTo({ url: '/packages/work/market/index' });
   const goLibrary = () => Taro.navigateTo({ url: '/packages/work/library/index' });
-  const goCredits = () => Taro.navigateTo({ url: '/packages/work/credits/index' });
   const openReport = (id: string) => Taro.navigateTo({ url: `/packages/work/report/index?id=${id}` });
-  const openAgent = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` });
   const startInterview = () =>
     Taro.navigateTo({ url: `/pages/chat/index?agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}` });
 
-  // 我的能力 = 已开通能力：free/metered 恒可用，unlock 仅 owned 可见（未开通能力不露出）。
-  const ownedAgents = s.agents().filter((a) => a.enabled !== false && (a.billing === 'free' || a.billing === 'metered' || a.owned));
+  const freeSkills = SKILL_MARKET.filter((k) => k.tier === 'free');
+  const deepSkills = SKILL_MARKET.filter((k) => k.tier !== 'free');
+
+  const skillRow = (it: { id: string; title: string; desc: string; status: string; tier: string }, onTap: () => void) => (
+    <View key={it.id} className="skill card" onClick={onTap}>
+      <View className="skill-ic"><Text className="serif">{it.title.slice(0, 1)}</Text></View>
+      <View className="skill-b">
+        <Text className="skill-name serif">{it.title}</Text>
+        <Text className="skill-sub">{it.desc}</Text>
+      </View>
+      <Text className={`module-state tier-${it.tier}`}>{it.status}</Text>
+    </View>
+  );
 
   return (
     <Screen topInset>
       <View className="pad think">
-        {/* 页头：左「上传」· 中「智库」· 右「方案库」（撤除市场入口） */}
+        {/* 页头：左「上传」· 中「智库」· 右「市场」 */}
         <View className="think-nav">
           <Text className="tn-side left serif" onClick={goKnowledge}>上传</Text>
           <Text className="tn-title serif">智库</Text>
-          <Text className="tn-side right serif" onClick={goLibrary}>方案库</Text>
+          <Text className="tn-side right serif" onClick={goMarket}>市场</Text>
         </View>
 
         {/* 分区切换（设计稿 seg：软底 + 白块选中） */}
@@ -79,32 +92,7 @@ export default function ThinkTank() {
           ))}
         </View>
 
-        {/* 我的能力：已开通军师与能力，每卡「去使用 / 用量」；不展示未开通能力与价格 */}
-        {tab === 'capabilities' ? (
-          <>
-            <Text className="think-h2">已开通能力</Text>
-            {ownedAgents.map((a) => (
-              <View key={a.key} className="skill card cap">
-                <AdvisorAvatar agentKey={a.key} size={44} />
-                <View className="skill-b">
-                  <Text className="skill-name serif">{a.name}</Text>
-                  <Text className="skill-sub">{a.role}</Text>
-                </View>
-                <View className="cap-acts">
-                  <Text className="cap-act" style={{ background: accent }} onClick={() => openAgent(a.key)}>去使用</Text>
-                  <Text className="cap-act ghost" style={{ color: accent, borderColor: accent }} onClick={goCredits}>用量</Text>
-                </View>
-              </View>
-            ))}
-            <View className="cap-hint card">
-              <Text className="ch-t serif">需要新的能力？</Text>
-              <Text className="ch-d">军师会在方案与军令里按你的处境开出所需能力——被点名开出的能力才会出现在这里，不必自己逛市场。</Text>
-              <Text className="ch-go" style={{ color: accent }} onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>去和军师聊聊 ›</Text>
-            </View>
-          </>
-        ) : null}
-
-        {/* 资料库：上传区 + 状态格 + 资料树（真实资料 + AI 分类框架）+ 数据源 */}
+        {/* 案卷资产：上传区 + 状态格 + 资料树（真实资料 + AI 分类框架） */}
         {tab === 'assets' ? (
           <>
             <View className="upload-zone card" onClick={goKnowledge}>
@@ -131,7 +119,7 @@ export default function ThinkTank() {
               </View>
             </View>
 
-            {/* 资料树：最新上传（真实） + AI 分类框架 */}
+            {/* 资料树：最新上传（真实） + AI 分类框架 + 处理与优化（引导） */}
             <View className="library-tree card">
               <View className="tree-node">
                 <View className="tree-head" onClick={goKnowledge}>
@@ -186,26 +174,43 @@ export default function ThinkTank() {
                 ))}
               </View>
             ) : null}
-
-            {/* 数据源（并入资料库）：绑定目录单卡行 */}
-            <View className="binding-panel card">
-              <Text className="bp-h2 serif">数据源</Text>
-              {DATA_BINDINGS.map((b) => (
-                <View key={b.id} className="binding" onClick={goBindings}>
-                  <View className="binding-ic"><Icon name={b.icon} size={16} color={accent} /></View>
-                  <View className="binding-b">
-                    <Text className="binding-t serif">{b.title}</Text>
-                    <Text className="binding-s">{b.provider}</Text>
-                  </View>
-                  <Text className="binding-state">{b.status}</Text>
-                </View>
-              ))}
-            </View>
           </>
         ) : null}
 
-        {/* 方案库：真实版本化方案 + 方案库入口 */}
-        {tab === 'plans' ? (
+        {/* 数据源：能力目录 + 绑定引导（binding 行合入单卡） */}
+        {tab === 'data' ? (
+          <View className="binding-panel card">
+            <Text className="bp-h2 serif">数据源绑定</Text>
+            {DATA_BINDINGS.map((b) => (
+              <View key={b.id} className="binding" onClick={goBindings}>
+                <View className="binding-ic"><Icon name={b.icon} size={16} color={accent} /></View>
+                <View className="binding-b">
+                  <Text className="binding-t serif">{b.title}</Text>
+                  <Text className="binding-s">{b.provider} · {b.price}</Text>
+                </View>
+                <Text className="binding-state">{b.status}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* 能力：Skill 与模块（commerce-strip + 分组行） */}
+        {tab === 'modules' ? (
+          <>
+            <ScrollView scrollX className="commerce-strip" enhanced showScrollbar={false}>
+              {COMMERCE.map((c) => <Text key={c} className="commerce-chip">{c}</Text>)}
+            </ScrollView>
+            <Text className="think-h2">基础锦囊</Text>
+            {freeSkills.map((k) => skillRow(k, goMarket))}
+            <Text className="think-h2">进阶锦囊</Text>
+            {deepSkills.map((k) => skillRow({ ...k, status: k.cost }, goMarket))}
+            <Text className="think-h2">方案模块</Text>
+            {MODULE_MARKET.slice(0, 4).map((m) => skillRow({ id: m.id, title: m.title, desc: m.desc, status: m.price, tier: m.tier }, goMarket))}
+          </>
+        ) : null}
+
+        {/* 报告：真实版本化报告 + 方案库 */}
+        {tab === 'reports' ? (
           <>
             <Text className="think-h2">方案与历史沉淀</Text>
             {reports.length === 0 ? (
@@ -217,7 +222,7 @@ export default function ThinkTank() {
             ) : (
               reports.map((r) => (
                 <View key={r.id} className="report card" onClick={() => openReport(r.id)}>
-                  <View className="report-ic"><Text className="serif">方</Text></View>
+                  <View className="report-ic"><Text className="serif">报</Text></View>
                   <View className="report-b">
                     <Text className="report-t serif">{r.title}</Text>
                     <Text className="report-s">{r.type}{r.agentName ? ` · ${r.agentName}` : ''} · v{r.currentVersion} · {relTime(r.updatedAt)}</Text>
@@ -230,12 +235,12 @@ export default function ThinkTank() {
               <View className="report-ic"><Text className="serif">新</Text></View>
               <View className="report-b">
                 <Text className="report-t serif">从对话生成新方案</Text>
-                <Text className="report-s">同步到资料库和执行模块</Text>
+                <Text className="report-s">同步到知识库和执行模块</Text>
               </View>
               <Text className="report-state">生成</Text>
             </View>
             <View className="report card" onClick={goLibrary}>
-              <View className="report-ic"><Text className="serif">库</Text></View>
+              <View className="report-ic"><Text className="serif">案</Text></View>
               <View className="report-b">
                 <Text className="report-t serif">我的方案库</Text>
                 <Text className="report-s">对话产出的结构化方案，存库即沉淀一版方案</Text>

@@ -21,11 +21,11 @@ function relTime(iso: string): string {
   return d === 1 ? '昨天' : `${d} 天前`;
 }
 
-// 快捷补给（对齐设计稿 6 卡）：资料、数据、能力、方案 + 军令 / 执行动线。
+// 快捷补给（对齐设计稿 6 卡）：资料、数据、模块、报告 + 军令 / 执行动线。
 const QUICK_CARDS = [
   { t: '上传经营资料', d: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index' },
   { t: '绑定数据源', d: '店铺、账号、企微、财务表', url: '/packages/work/bindings/index' },
-  { t: '我的能力', d: '已开通军师与锦囊', tab: '/pages/thinktank/index' },
+  { t: '军师锦囊 / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
   { t: '生成方案', d: '把这次对话炼成一份方案', url: '/packages/work/library/index' },
   { t: '转成军令', d: '认可即拆解为今日军令', tab: '/pages/studio/index' },
   { t: '今日执行', d: '军令、任务、打卡、复盘', tab: '/pages/studio/index' },

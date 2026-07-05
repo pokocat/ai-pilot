@@ -128,13 +128,13 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 | Tab | 页面 | 说明 |
 |---|---|---|
-| 对话 | `pages/sessions` | 「对话」微信式列表（第一入口，底栏首位，对齐设计稿 `page-chat`）：大标题头（对话+副题，右侧 历史/新对话按钮）+ 白底搜索 pill + 快捷补给横滑 6 卡（资料库/数据源/我的能力→智库/生成方案/转成军令/今日执行）+ 通栏半透明线程列表（上下发丝线）：总军师置顶（在线点）+ 常驻专业军师 + 「专业参谋」分组（未启用走 `AgentUnlock`）；每行=拟人立绘 + 宋体名号 + 金色花名 + 两行真实最近会话摘要/时间；「历史」切换到最近会话列表（长按删） |
-| 战局 | `pages/home` | 对齐设计稿 `page-battle`：居中页头（左「案卷」→我的案卷 / 右刷新）+ 军师判断 hero（`--green-hero` 跟随本命色：kicker 主要矛盾 + 案卷来源行 + 大宋体判断=真实 `me.understanding.summary` 兜底案卷判断，点按→总军师对话）+ 战局信号 metric 3 卡（案卷完整度=档案成熟度 / 待补资料 / 风险锁）+ **「下一步」卡**（WO-02/07 Journey 占位：按案卷/档案派生一条动作；冷启动无案卷无判断走 `data/emptyStates.ts` 初诊导流）+ **天势** force 卡（排盘已算→天时日历；市势/人势静态框架卡已按 WO-02 撤下）+ 下一步动作（`nextQuestions` battle-goal 行→访谈）+「现在不能做」nono 卡（无则隐藏）+ 今日献策（页尾轻量保留）+ 本命色渐变 CTA（有案卷→执行，无→对话）|
+| 对话 | `pages/sessions` | 「对话」微信式列表（第一入口，底栏首位，对齐设计稿 `page-chat`）：大标题头（对话+副题，右侧 历史/新对话按钮）+ 白底搜索 pill + 快捷补给横滑 6 卡（资料/数据源/军师锦囊·模块/生成方案/转成军令/今日执行）+ 通栏半透明线程列表（上下发丝线）：总军师置顶（在线点）+ 常驻专业军师 + 「专业参谋」分组（未启用走 `AgentUnlock`）；每行=拟人立绘 + 宋体名号 + 金色花名 + 两行真实最近会话摘要/时间；「历史」切换到最近会话列表（长按删） |
+| 战局 | `pages/home` | 对齐设计稿 `page-battle`：居中页头（左「案卷」→我的案卷 / 右刷新）+ 军师判断 hero（`--green-hero` 跟随本命色：kicker 主要矛盾 + 案卷来源行 + 大宋体判断=真实 `me.understanding.summary` 兜底案卷判断，点按→总军师对话）+ 战局信号 metric 3 卡（案卷完整度=档案成熟度 / 待补资料 / 风险锁）+ **「下一步」卡**（打磨·WO-07 Journey 占位：按案卷/档案派生一条动作；冷启动无案卷无判断走 `data/emptyStates.ts` 初诊导流）+ 三势判断 force 3 卡（方法框架→发起判断）+ 下一步动作（`nextQuestions` battle-goal 行→访谈）+ 关联模块（linkmod 行：模块名+负责军师 pill+tier 徽章）+「现在不能做」nono 卡（无则隐藏）+ 今日献策（页尾轻量保留）+ 本命色渐变 CTA（有案卷→执行，无→对话）|
 | 执行 | `pages/studio` | 对齐设计稿 `page-execution`（军令体系用 `--gold`，现跟随本命色）：exec-nav（案卷/执行/提醒）+ 横滑战役卡组【今日战役本命色卡（案卷+完成度进度条）· 军师献策（优先显示待执行军令，完成后提示归档/回填/复盘）· 今日主令（首条未完成军令→生成脚本，全部完成→生成复盘）· 提醒节奏】+ 执行信号 + 总军师督战紧凑行（去对话）+ 今日最重要 today-focus 本命色条 + 目标阶梯 4 格（引导拆解）+ exec-seg 三视图【今日军令=第 0 号军令补资料（主题色边框 command-card）+ 未完成 task 卡打卡/长按删/手动添加 + 已完成军令默认收起到归档区（可展开取消完成）+ 线索/咨询/成交数据回填（软底+白格）+ 复盘前检查 · 周计划=近 7 天军令记录 · 复盘=带真实军令与回填数据发给经营参谋 + 提醒节奏】+ AI 创作发布（creative 智能体，保留解锁/按需权益）|
-| 智库 | `pages/thinktank` | 「我的军备库」（WO-02：市场目录 → 能力管理，撤除货架）：页头（上传/智库/方案库，**无市场入口**）+ seg 3 分区【我的能力=已开通军师/能力卡（`s.agents()` 过滤 `free/metered/owned`，未开通不露出，每卡「去使用→对话／用量→credits」）+ 军师处方提示 · 资料库=上传区（绿调 upload-zone）+ 状态格 + 资料树（真实 `knowledgeDocs` + AI 分类框架）+ asset-gap（真实 `nextQuestions`）+ 数据源绑定行 · 方案库=真实版本化方案行 + 生成/方案库入口】。**不露出未开通能力/价格/💎**——能力唯一获得渠道是军师处方（WO-12）与对话推荐 |
-| 我的 | `pages/profile` | 对齐设计稿 `page-profile`：居中「我的军师系统」+ 右「设置」+ 本命色用户卡（头像/称呼/公司/套餐）+ 经营统计 3 卡（案卷/方案/资料真实计数）+ 权益额度 3 卡（钻石/本月额度/套餐→额度弹层）+ **战略段位卡（WO-03 冷启动延迟曝光：仅 `streak≥3 或 usageDays≥14` 才渲染）** + 菜单（档案/我的案卷/方案库/资料库/我的能力→智库/数据授权/订单明细/提醒日历/本命色/企业版/退出登录，**已撤「送你一卦」「模块市场」入口**）+ 军师社群主题卡 + 深度能力解锁主题卡 |
+| 智库 | `pages/thinktank` | 对齐设计稿 `page-thinktank`：页头（上传/智库/市场）+ seg 4 分区【案卷资产=上传区（绿调 upload-zone）+ 状态格（已入库/关键缺口/深度整理）+ 资料树（最新上传=真实 `knowledgeDocs` + AI 分类框架）+ 军师提示补充（暖金 asset-gap，真实 `nextQuestions`）· 数据源=绑定目录单卡行 · 能力=费用口径 chips + 免费 Skill/深度 Skill/方案模块分组行 · 方案=真实版本化方案行 + 生成方案/方案库入口】（WO-01 名词统一：报告→方案）|
+| 我的 | `pages/profile` | 对齐设计稿 `page-profile`：居中「我的军师系统」+ 右「设置」+ 本命色用户卡（头像/称呼/公司/套餐）+ 经营统计 3 卡（案卷/方案/资料真实计数）+ 权益额度 3 卡（钻石/本月额度/套餐→额度弹层）+ **战略段位卡（WO-03 冷启动延迟曝光：仅 `streak≥3 或 usageDays≥14` 才渲染）** + 菜单（档案/我的案卷/方案库/资料库/数据授权/模块管理/订单明细/送你一卦/提醒日历/本命色/企业版/退出登录）+ 军师社群主题卡 + 深度能力解锁主题卡 |
 
-非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡 + 参谋室协同导轨「派单/回总军师/转成军令/补上下文」+ 成果卡下「认可方案→存方案库+生成本地案卷军令→去执行」）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；我的案卷（列表/详情，前台名词=案卷，工程模型仍是 Project）、方案库、方案详情、资料库、数据源绑定、能力落地页（`market`，WO-02 后仅作处方跳转落地页，不从 tab/菜单进入）、军师社群已拆到 `packages/work/*` 分包（`projects`、`project`、`library`、`report`、`knowledge`、`credits`、`bindings`、`market`、`community`；`gift` 分包保留但已摘除入口），由 `pages/profile`、`pages/thinktank` 与 `pages/chat` 预加载。
+非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡 + 参谋室协同导轨「派单/回总军师/转成军令/补上下文」+ 成果卡下「认可方案→存方案库+生成本地案卷军令→去执行」）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；我的案卷（列表/详情，前台名词=案卷，工程模型仍是 Project）、方案库、方案详情、资料库、数据源绑定、模块市场、送你一卦、军师社群已拆到 `packages/work/*` 分包（`projects`、`project`、`library`、`report`、`knowledge`、`credits`、`bindings`、`market`、`gift`、`community`），由 `pages/profile`、`pages/thinktank` 与 `pages/chat` 预加载。
 
 静态目录数据：`src/data/operatingSystem.ts`（模块市场/Skill 市场/知识分类框架/数据源目录/对话引导，均为能力目录与引导态文案，费用口径 `💎xN`）、`src/data/council.ts`（参谋室常驻军师/派单建议/快速起手式/`ADVISOR_ALIAS` 军师花名：玄衡/观澜/青衍/鸣璋/照微/云枢…）。**这两个文件不得写入用户业务结论**——用户数据一律走 api（会话/报告/知识/项目/`me.understanding`）。
 
@@ -520,11 +520,11 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
-- **小程序重构（`docs/[FABLE5]REDESIGN_EXEC_SPEC.md` 15 工单）· 批次一减法（WO-01/02/03）已落地（纯前端，2026-07-05）**。**待办**：
-  - **WO-03 §3（服务端注入，本次纯前端范围外）**：`server/src/services/context.ts`【段位·里程碑】块补一条同口径规则——`streak < 3` 时注入块不含具体百分比字段（只含天数），避免军师念「准确率 null%」。需配 server 集成测试（新用户 buildGenContext 产物不含「准确率」）。
-  - **WO-04/05（批次一余下，含合规前置）**：WO-05 命理全局开关（`FeatureFlag` 模型 + 三层开关）+ prompt v7 去机制化手术（合规 P0，建议最先合入）；WO-04 复盘三层 + 军师 4 科室 + week/month ReviewLog 落库。
-  - **批次二/三（WO-06~15）**：速诊、Journey 状态机、行业基准库、经营体检、结构化周报、账本可见页、处方引擎、品牌资产包、成果回流、生态账户设计文档。均含新 Prisma 模型 / 新 API，须先改 `shared/contracts.d.ts`。
-  - **收敛残留**：`market`/`gift` 分包文件与路由保留（处方落地 / 回滚余地），仅摘入口；`operatingSystem.ts` 的 `MODULE_MARKET/SKILL_MARKET/THREE_FORCES` 仍被引用（market 落地页、天势卡），未删。
+- **小程序方向调整（2026-07-05）：从「减法」改为「精细打磨现有功能」**。原 `docs/[FABLE5]*` 三份文档是「先减法后加法」方案；产品侧判断"功能都是客户想要的"，**不再做减法**，改为按文档把各功能逻辑捋顺、补全、打磨。已执行的处置：
+  - **保留**：WO-01（名词统一：前台收敛「案卷/方案/军令/资料」，记忆/专属理解→军师印象；属打磨）+ WO-03（冷启动段位卡延迟曝光 `streak≥3‖usageDays≥14`、空态导流 `data/emptyStates.ts`、战局「下一步」卡；属打磨）。
+  - **已回滚**：WO-02 的真减法——市场货架（thinktank 能力目录 + market 页 + profile 模块管理 + sessions 快捷卡 + CHAT_GUIDES 入口）、战局三势卡（市势/人势）+ 关联模块、送你一卦，全部恢复；`market`/`gift` 恢复为正常可达入口。
+  - **待办（打磨方向，取自 `AUDIT_V6_GLOBAL` 的 P/F/A 问题清单）**：逐功能捋顺逻辑——冷启动 30 天内容、月/季/年复盘 UI 入口与账本落库、诊断轮次用户级持久化、悬念钩子登记兑现、账本用户可见+修正、命理精度声明与合规降级、真实数据接入、行业基准库、处方引擎等。计划用 review 工作流先产出「逐功能捋顺 + 优先级打磨方案」，确认后再改代码。
+  - **WO-03 §3（服务端，仍待）**：`server/src/services/context.ts`【段位·里程碑】块 `streak<3` 时去具体百分比字段（只留天数），配 server 集成测试。
 - **存量「米诺 / Mino」品牌残留待清扫**（规则见 §0 #10；新增内容一律禁用，存量后扫）：① `server/src/data/prompts/strat.v6.baseline.md`——2026-06-20 从 prod 拉的原始基线快照，正文含米诺品牌（该目录 README 记录了去品牌映射，运行时不加载、tsc 不打包，风险=仓库存档层面）；② `app/src/data/operatingSystem.ts` SKILL_MARKET 里 `id: 'mino'`（三势初判的内部 id，用户不可见，改名需同步排查引用）；③ `server/src/data/agents.ts` 顶部注释书名号里的《米诺战略参谋部…》字样；④ 两个 prompt 目录并存待合并（运行时加载 `server/prompts/`，基线存档在 `server/src/data/prompts/`）。清扫时机：M1 收尾或专项小 PR。
 - **miniprogram-ci 上传**：云端执行环境的网络白名单未放行 `servicewechat.com`（报 `Host not in allowlist`），无法在本沙箱内直传。需从**本机**执行上传，或放开环境网络策略后重试；另注意上传密钥若开了 IP 白名单，需把执行机出口 IP 加入小程序后台。本机命令见 §11。
 - 自有登录态支持 JWT（`services/userToken.ts`，HS256）：配 `APP_JWT_SECRET` 后登录签发 JWT、`resolveUser`/审计/admin role/entitlement 统一 `verifyUserToken` 校验；未配则回退历史 `token=userId`，`APP_JWT_REQUIRED=true` 可强制只认 JWT。短信强制校验开关（`SMS_REQUIRE_CODE`）已就绪，生产置 true 即可。

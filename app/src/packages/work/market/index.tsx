@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View, Text, ScrollView } from '@tarojs/components';
-import Taro, { useRouter } from '@tarojs/taro';
+import Taro from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
@@ -9,14 +9,12 @@ import './index.scss';
 
 const CATS = ['全部', '战略目标', '执行拆解', 'IP 增长', '个人成长', '企业经营', '组织管理', '知识资产', '数据增强'];
 
-// 能力落地页（WO-02：不再从 tab/菜单进入，仅作军师处方跳转的落地页）。
-// 处方跳转带 query `from=prescription&pid=xxx`（WO-12 预留）时，顶部显示来源上下文。
+// 模块市场 + Skill 市场：模块是军师方案的功能化承接，不是商品货架。
+// 「启用」= 由对应军师在对话中承接（真实产出）；深度版随权益体系逐步开放。
 export default function Market() {
-  const router = useRouter();
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [cat, setCat] = useState('全部');
-  const fromPrescription = (router.params as Record<string, string>).from === 'prescription';
   const modules = cat === '全部' ? MODULE_MARKET : MODULE_MARKET.filter((m) => m.category === cat);
 
   const goChat = (agentKey: string, prompt: string) =>
@@ -31,26 +29,18 @@ export default function Market() {
 
   return (
     <View className={`page market-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-      <SafeHeader title="军师开出的能力" onBack={() => Taro.navigateBack()} />
+      <SafeHeader title="模块市场" onBack={() => Taro.navigateBack()} />
       <View className="pad" style={{ paddingTop: '12px' }}>
-        {fromPrescription ? (
-          <View className="mm-hero card" style={{ borderColor: accent }}>
-            <Text className="kicker" style={{ color: accent }}>军师处方</Text>
-            <Text className="h1">军师为你开出的能力</Text>
-            <Text className="mm-p">这是军师在你的方案 / 军令里点名承接的能力。开通后回到军令卡即可继续执行。</Text>
-          </View>
-        ) : (
         <View className="mm-hero card">
           <Text className="kicker">Junshi OS</Text>
-          <Text className="h1">能力承接</Text>
-          <Text className="mm-p">能力不是商品货架，而是军师方案的长期承接：基础能力直接用，深度能力按 💎 额度或方案权益启用。</Text>
+          <Text className="h1">模块市场</Text>
+          <Text className="mm-p">模块不是商品货架，而是军师方案的长期承接：基础能力直接用，深度能力按 💎 额度或方案权益启用。</Text>
           <View className="mm-legend">
             {['基础可用', '💎 按次产出', '方案权益', '已启用'].map((label) => (
               <Text key={label} className="mm-tag">{label}</Text>
             ))}
           </View>
         </View>
-        )}
 
         <ScrollView scrollX className="cat-scroll" enhanced showScrollbar={false}>
           {CATS.map((c) => (
