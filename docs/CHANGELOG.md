@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-05** · **小程序重构·批次一减法（WO-01/02/03，纯前端）**：按 `docs/[FABLE5]REDESIGN_EXEC_SPEC.md` 落地批次一三张工单，Project/Casefile 等数据模型与路由不动。**WO-01 名词统一**：前台业务名词收敛为「案卷 / 方案 / 军令 / 资料」；项目→案卷（projects/project 页改「我的案卷/案卷详情」，详情三视图 战况|方案|资料），报告/成果→方案，记忆/专属理解→军师印象；profile 统计三卡改 案卷/方案/资料。**WO-02 撤货架**：智库 tab 改「我的军备库」三段（我的能力/资料库/方案库），未开通能力与价格/💎 不再露出；market 页保留文件与路由（处方落地页，读 `from=prescription` 显示来源）但移除全部 tab/菜单/引导入口；战局页撤市势/人势静态卡（留天势），空出区放「下一步」卡占位（WO-07）；profile 移除「送你一卦」。**WO-03 冷启动**：profile 段位卡延迟曝光（streak≥3 或 usageDays≥14 才渲染）；空态导流文案集中到 `app/src/data/emptyStates.ts`，战局/执行冷启动空态导流初诊（速诊 WO-06 未上线前跳对话预填开场语）。构建 `npm run build:weapp` 全绿。影响面：app（home/studio/thinktank/profile/sessions/chat/brief/projects/project/market/report/library + data/emptyStates·operatingSystem + mock）+ docs（AGENTS §7/§13、CHANGELOG）。**批次一未含**：WO-03 §3 服务端注入块、WO-04/05 及批次二三，见 §13 TODO。
+
 - **2026-07-04** · **接入微信订阅消息触达**：新增 `WechatSubscription/WechatNotificationLog` 两张表，`GET /wechat/subscribe/templates` 返回已配置模板，`POST /wechat/subscribe` 记录 `wx.requestSubscribeMessage` 结果并仅对 `accept` 累计一次性发送额度；新增 `services/wechatSubscribe.ts` 调微信 `subscribe/send`，发送成功扣减额度并写日志。执行页复盘视图「订阅复盘提醒」接入授权；scheduler 新增 21 点后当日复盘提醒并在久不复盘候选时尝试发送；报告保存、会话报告生成和网页版报告渲染完成后尝试发送报告完成提醒。`.env.example`/部署文档补订阅模板配置，单测覆盖订阅额度与发送扣减。影响面：server schema/wechat/scheduler/reports/sessions + shared contracts + app api/studio + docs/tests。
 
 - **2026-07-04** · **完成军令改为归档展示**：执行页「今日军令」只渲染未完成任务，勾选完成后自动从待执行列表收起到默认折叠的「已归档」区；归档区可展开查看、长按删除、点勾取消完成，避免误操作后无法恢复。顶部军师献策、今日主令和执行信号同步改为按待执行/已归档状态展示；周计划、复盘、每日战报仍读取完整 `done` 记录，不删除历史数据。影响面：app 执行页 + dossier 视图 helper + AGENTS/CHANGELOG。
