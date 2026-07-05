@@ -67,7 +67,9 @@ export default function CustomTabBar() {
                 <View className="tab-ic">
                   <Icon name={t.icon} size={22} color={active ? accent : '#969BA1'} />
                 </View>
-                {!active ? <Text className="tab-label">{t.text}</Text> : null}
+                <Text className="tab-label" style={active ? { color: accent } : {}}>
+                  {t.text}
+                </Text>
               </View>
             );
           })}
