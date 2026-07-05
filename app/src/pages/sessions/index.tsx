@@ -125,7 +125,7 @@ export default function Sessions() {
   return (
     <Screen topInset>
       <View className="pad council">
-        {/* 顶栏（对齐设计稿 messages-head）：大标题 + 副题，右侧 历史 / 新对话 */}
+        {/* 顶栏（对齐设计稿 messages-head）：大标题 + 副题，右侧 历史 */}
         <View className="messages-head">
           <View className="mh-titles">
             <Text className="mh-t">对话</Text>
@@ -133,10 +133,7 @@ export default function Sessions() {
           </View>
           <View className="mh-tools">
             <View className={`mh-btn ${showHistory ? 'on' : ''}`} onClick={() => setShowHistory((v) => !v)}>
-              <Text style={showHistory ? { color: accent } : {}}>历史</Text>
-            </View>
-            <View className="mh-btn primary" style={{ background: accent }} onClick={() => newWith('general')}>
-              <Icon name="chat" size={14} color="#FBFAF6" />
+              <Text style={showHistory ? { color: accent } : {}}>{showHistory ? '返回' : '历史'}</Text>
             </View>
           </View>
         </View>

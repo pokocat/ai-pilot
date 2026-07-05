@@ -8,7 +8,7 @@
 .mh-titles { min-width: 0; }
 .mh-t {
   display: block;
-  font-size: 27px; line-height: 1; font-weight: 800; color: var(--ink);
+  font-size: 27px; line-height: 1; font-weight: 600; color: var(--ink);
 }
 .mh-s {
   display: block; margin-top: 8px;
@@ -22,8 +22,7 @@
   border: 1px solid var(--line);
   font-size: 12.5px; font-weight: 600; color: var(--ink-2);
 }
-.mh-btn.on { border-color: var(--accent); }
-.mh-btn.primary { min-width: 36px; padding: 0; width: 36px; border: 0; }
+.mh-btn.on { background: var(--accent-soft); border-color: var(--accent-soft); font-weight: 600; }
 .mh-btn:active { opacity: .8; }
 
 /* —— 搜索（search-pill）：白底大圆角 —— */
@@ -49,7 +48,7 @@
   box-shadow: 0 8px 22px rgba(42, 36, 20, .055);
 }
 .quick-card:active { opacity: .8; }
-.quick-card .qt { font-size: 13px; font-weight: 700; color: var(--ink); }
+.quick-card .qt { font-size: 13px; font-weight: 600; color: var(--ink); }
 .quick-card .qd {
   font-size: 11px; line-height: 1.32; color: var(--ink-3);
   white-space: normal;
@@ -75,12 +74,12 @@
 .wx-id { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
 .wx-name {
   font-family: var(--serif);
-  font-size: 15px; font-weight: 700; color: var(--ink);
+  font-size: 15px; font-weight: 600; color: var(--ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .wx-alias {
   font-family: var(--serif);
-  font-size: 13px; font-weight: 700; color: var(--gold);
+  font-size: 13px; font-weight: 600; color: var(--gold);
 }
 .wx-time { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--ink-3); }
 .wx-preview {
@@ -96,7 +95,7 @@
   margin: 14px 2px 0;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--line);
-  font-size: 12px; font-weight: 700; color: var(--ink-3);
+  font-size: 12px; font-weight: 600; color: var(--ink-3);
 }
 
 /* —— 空态 —— */

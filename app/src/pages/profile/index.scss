@@ -7,11 +7,11 @@
   min-height: 54px; margin-bottom: 6px;
   padding-top: 10px;
 }
-.an-title { font-size: 23px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.an-title { font-size: 23px; font-weight: 600; color: var(--ink); line-height: 1.1; }
 .an-side {
   position: absolute; right: 2px; bottom: 6px;
   color: var(--green);
-  font-size: 16px; font-weight: 700;
+  font-size: 16px; font-weight: 600;
 }
 .an-side:active { opacity: .7; }
 
@@ -31,10 +31,10 @@
   display: flex; align-items: center; justify-content: center;
   background: rgba(255, 255, 255, .14);
   border: 1px solid rgba(255, 255, 255, .22);
-  color: #fff; font-size: 21px; font-weight: 700;
+  color: #fff; font-size: 21px; font-weight: 600;
 }
 .au-b { flex: 1; min-width: 0; }
-.au-name { display: block; font-size: 17px; font-weight: 700; }
+.au-name { display: block; font-size: 17px; font-weight: 600; }
 .au-sub {
   display: block; margin-top: 5px;
   color: rgba(255, 255, 255, .70);
@@ -44,7 +44,7 @@
 .au-vip {
   flex-shrink: 0; padding: 5px 10px; border-radius: 999px;
   background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .24);
-  font-size: 11px; font-weight: 700;
+  font-size: 11px; font-weight: 600;
 }
 
 /* —— 经营统计（account-statline） —— */
@@ -56,7 +56,7 @@
   text-align: center;
 }
 .account-stat:active { opacity: .8; }
-.as-n { display: block; color: var(--green); font-size: 18px; font-weight: 700; }
+.as-n { display: block; color: var(--green); font-size: 18px; font-weight: 600; }
 .as-l { display: block; margin-top: 2px; color: var(--ink-3); font-size: 10.5px; font-weight: 600; }
 
 /* —— 权益额度（account-quota） —— */
@@ -69,7 +69,7 @@
 }
 .account-quota-item:active { opacity: .8; }
 .aq-v {
-  display: block; color: var(--ink-2); font-size: 12.5px; font-weight: 700;
+  display: block; color: var(--ink-2); font-size: 12.5px; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .aq-l { display: block; margin-top: 3px; color: var(--ink-3); font-size: 10.5px; font-weight: 600; }
@@ -106,9 +106,9 @@
   background: #FEF7EA;
 }
 .at-b { flex: 1; min-width: 0; }
-.at-t { display: block; color: var(--gold-deep); font-size: 14.5px; font-weight: 700; }
+.at-t { display: block; color: var(--gold-deep); font-size: 14.5px; font-weight: 600; }
 .at-s { display: block; margin-top: 5px; color: #7D6740; font-size: 12px; line-height: 1.5; font-weight: 500; }
-.at-em { flex-shrink: 0; color: var(--gold-deep); font-size: 14px; font-weight: 700; white-space: nowrap; }
+.at-em { flex-shrink: 0; color: var(--gold-deep); font-size: 14px; font-weight: 600; white-space: nowrap; }
 
 .account-depth {
   margin-bottom: 4px;
@@ -116,9 +116,9 @@
   background: var(--green-soft);
 }
 .ad-b { flex: 1; min-width: 0; }
-.ad-t { display: block; color: var(--green); font-size: 14.5px; font-weight: 700; }
+.ad-t { display: block; color: var(--green); font-size: 14.5px; font-weight: 600; }
 .ad-s { display: block; margin-top: 5px; color: var(--green-deep); font-size: 12px; line-height: 1.5; font-weight: 500; }
-.ad-em { flex-shrink: 0; color: var(--green); font-size: 14px; font-weight: 700; white-space: nowrap; }
+.ad-em { flex-shrink: 0; color: var(--green); font-size: 14px; font-weight: 600; white-space: nowrap; }
 
 /* —— 战略段位卡（M4 PR-18，真实计数） —— */
 .rank-card {
@@ -131,9 +131,9 @@
   width: 46px; height: 46px; border-radius: 15px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   color: #fff; background: var(--green-hero);
-  font-size: 17px; font-weight: 700;
+  font-size: 17px; font-weight: 600;
 }
 .rk-b { flex: 1; min-width: 0; }
-.rk-t { display: block; font-size: 15.5px; font-weight: 700; color: var(--ink); }
+.rk-t { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); }
 .rk-s { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.45; font-weight: 500; }
 .rk-next { display: block; margin-top: 5px; color: var(--gold-deep); font-size: 11px; line-height: 1.4; font-weight: 600; }

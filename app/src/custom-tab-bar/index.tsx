@@ -64,7 +64,9 @@ export default function CustomTabBar() {
             const active = i === selected;
             return (
               <View key={t.path} className={`tab ${active ? 'on' : ''}`} role="tab" aria-label={t.text} aria-selected={active} onClick={() => switchTo(i)}>
-                <Icon name={t.icon} size={21} color={active ? accent : '#969BA1'} />
+                <View className="tab-ic">
+                  <Icon name={t.icon} size={22} color={active ? accent : '#969BA1'} />
+                </View>
                 <Text className="tab-label" style={active ? { color: accent } : {}}>
                   {t.text}
                 </Text>

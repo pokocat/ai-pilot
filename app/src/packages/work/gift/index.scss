@@ -7,7 +7,7 @@
 .gift .pad { padding: 0 18px; }
 
 .gf-hero { margin-top: 12px; padding: 4px 2px 2px; }
-.gf-ht { display: block; font-size: 21px; font-weight: 700; color: var(--ink); }
+.gf-ht { display: block; font-size: 21px; font-weight: 600; color: var(--ink); }
 .gf-hd { display: block; margin-top: 7px; font-size: 12.5px; line-height: 1.7; color: var(--ink-3); }
 
 .gift .pf-q { margin-top: 20px; }
@@ -34,14 +34,14 @@
   background: var(--accent);
   box-shadow: 0 10px 24px var(--accent-glow);
 }
-.gf-btn Text, .gf-btn text { color: #fff; font-size: 15px; font-weight: 700; }
+.gf-btn Text, .gf-btn text { color: #fff; font-size: 15px; font-weight: 600; }
 .gf-btn.off { background: var(--line); box-shadow: none; }
 .gf-btn.off Text, .gf-btn.off text { color: var(--ink-3); }
 .gf-btn:active { opacity: .85; }
 
 .gf-done { margin-top: 18px; padding: 16px; }
 .gf-done:active { opacity: .85; }
-.gf-dt { display: block; font-size: 15px; font-weight: 700; color: var(--gold-deep); }
+.gf-dt { display: block; font-size: 15px; font-weight: 600; color: var(--gold-deep); }
 .gf-dd { display: block; margin-top: 7px; font-size: 12.5px; line-height: 1.7; color: var(--ink-2); }
 .gf-dl { display: block; margin-top: 9px; font-size: 11px; color: var(--ink-3); word-break: break-all; }
 

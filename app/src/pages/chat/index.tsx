@@ -629,8 +629,7 @@ export default function Chat() {
       {/* 顾问身份头 */}
       <SafeHeader
         className="chat-head"
-        left={<View className="safe-hbtn" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}><Icon name="grid" size={20} color="#565C63" /></View>}
-        right={<View className="safe-hbtn" onClick={() => Taro.redirectTo({ url: '/pages/chat/index?fresh=1' })}><Icon name="spark" size={20} color="#565C63" /></View>}
+        left={<View className="safe-hbtn" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}><Icon name="chat" size={19} color="#565C63" /></View>}
       >
         <View className="chat-id">
           <AdvisorAvatar agentKey={agent?.key ?? 'general'} size={34} online />
@@ -812,7 +811,7 @@ export default function Chat() {
                 <View className="accept-card">
                   <View className="accept-b">
                     <Text className="accept-t">认可这份方案？</Text>
-                    <Text className="accept-d">存入方案库沉淀为报告，去执行页承接今日军令与每日复盘。</Text>
+                    <Text className="accept-d">存入方案库沉淀为报告，执行页承接军令与复盘。</Text>
                   </View>
                   <View className="accept-btn" style={{ background: accent }} onClick={() => acceptPlan(m.deliverable)}>
                     <Icon name="check" size={13} color="#fff" />

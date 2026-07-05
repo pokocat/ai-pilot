@@ -5,7 +5,7 @@
 .community-page .class-card { padding: 16px; border-radius: var(--r-md); margin-top: 12px; }
 .community-page .class-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .community-page .class-k { display: block; font-size: 11px; letter-spacing: .12em; color: var(--ink-3); font-weight: 600; }
-.community-page .class-t { display: block; margin-top: 6px; font-size: 17px; font-weight: 700; color: var(--ink); }
+.community-page .class-t { display: block; margin-top: 6px; font-size: 17px; font-weight: 600; color: var(--ink); }
 .community-page .class-st { flex-shrink: 0; font-size: 11.5px; font-weight: 600; }
 .community-page .class-d { display: block; margin-top: 8px; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
 .community-page .class-btn {
@@ -21,7 +21,7 @@
 .community-page .step-no {
   width: 26px; height: 26px; border-radius: 9px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 700;
+  font-size: 13px; font-weight: 600;
 }
 .community-page .step-b { flex: 1; min-width: 0; }
 .community-page .step-t { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); }

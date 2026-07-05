@@ -13,13 +13,13 @@
   /* 兜底：系统状态栏高度（真机由 JS 用胶囊顶端实测值覆盖） */
   padding-top: calc(env(safe-area-inset-top) + 6px);
 }
-.bn-title { font-size: 25px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.bn-title { font-size: 25px; font-weight: 600; color: var(--ink); line-height: 1.1; }
 .bn-side {
   position: absolute; bottom: 9px;
-  font-size: 16px; font-weight: 700; color: var(--accent);
+  font-size: 16px; font-weight: 600; color: var(--accent);
 }
 .bn-side.left { left: 2px; }
-.bn-side.right { right: 2px; font-family: var(--sans); font-size: 18px; font-weight: 800; }
+.bn-side.right { right: 2px; font-family: var(--sans); font-size: 18px; font-weight: 600; }
 .bn-side:active { opacity: .7; }
 
 /* —— 军师判断 hero（深绿） —— */
@@ -35,7 +35,7 @@
 .bh-kicker {
   display: block;
   color: rgba(255, 255, 255, .62);
-  font-size: 12.5px; font-weight: 700; letter-spacing: .16em;
+  font-size: 12.5px; font-weight: 600; letter-spacing: .16em;
 }
 .bh-source {
   display: block; margin-top: 12px;
@@ -44,7 +44,7 @@
 }
 .bh-title {
   display: block; margin-top: 6px;
-  font-size: 22px; line-height: 1.5; font-weight: 700; color: #fff;
+  font-size: 22px; line-height: 1.5; font-weight: 600; color: #fff;
 }
 
 /* —— 战局信号（metric-grid） —— */
@@ -58,7 +58,7 @@
   text-align: left;
 }
 .metric:active { opacity: .8; }
-.metric-v { display: block; font-size: 20px; font-weight: 700; line-height: 1.2; color: var(--green); }
+.metric-v { display: block; font-size: 20px; font-weight: 600; line-height: 1.2; color: var(--green); }
 .metric-v.warn { color: var(--gold-deep); }
 .metric-v.danger { color: var(--danger); }
 .metric-l { display: block; margin-top: 5px; color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
@@ -67,7 +67,7 @@
 .battle-h2 {
   display: block; margin: 22px 0 12px;
   color: var(--green);
-  font-size: 13px; font-weight: 800; letter-spacing: .18em;
+  font-size: 13px; font-weight: 600; letter-spacing: .18em;
 }
 
 /* —— 三势判断（force-grid） —— */
@@ -79,12 +79,12 @@
   display: flex; flex-direction: column; align-items: center;
 }
 .force:active { opacity: .8; }
-.force-tag { font-size: 18px; font-weight: 700; color: var(--ink); line-height: 1.25; }
+.force-tag { font-size: 18px; font-weight: 600; color: var(--ink); line-height: 1.25; }
 .force-desc {
   display: block; margin-top: 6px; flex: 1;
   color: var(--ink-3); font-size: 10.5px; line-height: 1.45;
 }
-.force-go { display: block; margin-top: 6px; color: var(--green); font-size: 11px; font-weight: 700; }
+.force-go { display: block; margin-top: 6px; color: var(--green); font-size: 11px; font-weight: 600; }
 
 /* —— 下一步动作 / 关联模块（battle-actions） —— */
 .battle-actions {
@@ -95,7 +95,7 @@
 .section-label {
   display: block; margin-bottom: 4px;
   color: var(--green);
-  font-size: 13px; font-weight: 800; letter-spacing: .18em; line-height: 1.35;
+  font-size: 13px; font-weight: 600; letter-spacing: .18em; line-height: 1.35;
 }
 .section-label.danger { color: var(--danger); }
 
@@ -111,11 +111,11 @@
   min-width: 52px; min-height: 24px; padding: 3px 7px; box-sizing: border-box;
   border-radius: 9px;
   background: var(--green-soft); color: var(--green);
-  font-size: 12px; font-weight: 700; line-height: 1.2;
+  font-size: 12px; font-weight: 600; line-height: 1.2;
   flex-shrink: 0;
 }
 .bg-b { flex: 1; min-width: 0; }
-.bg-t { display: block; font-size: 15.5px; font-weight: 700; color: var(--ink); line-height: 1.4; }
+.bg-t { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); line-height: 1.4; }
 .bg-m { display: block; margin-top: 3px; color: var(--ink-3); font-size: 11.5px; line-height: 1.45; }
 
 .module-card { background: var(--surface-2); }
@@ -126,17 +126,17 @@
 }
 .linkmod:last-child { border-bottom: 0; }
 .linkmod:active { opacity: .72; }
-.linkmod-name { flex: 1; min-width: 0; color: var(--ink); font-size: 15px; font-weight: 700; line-height: 1.35; }
+.linkmod-name { flex: 1; min-width: 0; color: var(--ink); font-size: 15px; font-weight: 600; line-height: 1.35; }
 .linkmod-mini {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 24px; padding: 3px 7px; border-radius: 9px;
   color: var(--accent); background: var(--accent-soft);
-  font-size: 11.5px; font-weight: 700; flex-shrink: 0;
+  font-size: 11.5px; font-weight: 600; flex-shrink: 0;
 }
 .module-tier {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 22px; padding: 2px 7px; border-radius: 999px;
-  font-size: 10.5px; font-weight: 700; flex-shrink: 0;
+  font-size: 10.5px; font-weight: 600; flex-shrink: 0;
 }
 .tier-free,
 .tier-power,
@@ -178,18 +178,18 @@
 }
 .battle-cta:active { opacity: .88; }
 .bc-b { flex: 1; min-width: 0; }
-.bc-t { display: block; font-size: 15.5px; font-weight: 800; }
+.bc-t { display: block; font-size: 15.5px; font-weight: 600; }
 .bc-s { display: block; margin-top: 4px; color: rgba(255, 255, 255, .72); font-size: 11px; font-weight: 600; }
 .bc-arrow {
   width: 30px; height: 30px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
   color: var(--green); background: rgba(255, 255, 255, .9);
-  font-size: 18px; font-weight: 700;
+  font-size: 18px; font-weight: 600;
 }
 
 /* —— 天势卡内的本月攻守强调色（天时条已并入三势卡，点开原生全年天时页） —— */
-.force-phase { font-weight: 700; color: var(--ink); }
+.force-phase { font-weight: 600; color: var(--ink); }
 .force-phase.atk { color: var(--green); }
 .force-phase.def { color: var(--gold-deep); }
 
@@ -201,5 +201,5 @@
 .kpi-sub { font-size: 11px; color: var(--ink-3); font-weight: 600; }
 .kpi-row { display: flex; justify-content: space-between; margin-top: 12px; }
 .kpi-cell { width: 31.8%; text-align: center; padding: 10px 6px; border-radius: 13px; background: var(--surface-2); }
-.kpi-v { display: block; font-size: 20px; font-weight: 700; color: var(--green); }
+.kpi-v { display: block; font-size: 20px; font-weight: 600; color: var(--green); }
 .kpi-l { display: block; margin-top: 4px; font-size: 11px; color: var(--ink-3); font-weight: 600; }

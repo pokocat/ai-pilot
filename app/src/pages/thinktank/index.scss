@@ -7,11 +7,11 @@
   min-height: 54px; margin-bottom: 4px;
   padding-top: 8px;
 }
-.tn-title { font-size: 25px; font-weight: 700; color: var(--ink); line-height: 1.1; }
+.tn-title { font-size: 25px; font-weight: 600; color: var(--ink); line-height: 1.1; }
 .tn-side {
   position: absolute; bottom: 6px;
   color: var(--green);
-  font-size: 16px; font-weight: 700;
+  font-size: 16px; font-weight: 600;
 }
 .tn-side.left { left: 2px; }
 .tn-side.right { right: 2px; }
@@ -110,7 +110,7 @@
   border-radius: 18px;
   background: #FFFBF2; border-color: #E8D8B4;
 }
-.ag-k { display: block; color: var(--gold-deep); font-size: 12px; font-weight: 700; letter-spacing: .04em; margin-bottom: 2px; }
+.ag-k { display: block; color: var(--gold-deep); font-size: 12px; font-weight: 600; letter-spacing: .04em; margin-bottom: 2px; }
 .ag-row {
   display: flex; align-items: center; gap: 12px;
   min-height: 54px; padding: 10px 0;
@@ -166,7 +166,7 @@
   width: 44px; height: 44px; border-radius: 14px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   color: var(--green); background: var(--green-soft);
-  font-size: 20px; font-weight: 700;
+  font-size: 20px; font-weight: 600;
 }
 .skill-b { flex: 1; min-width: 0; }
 .skill-name { display: block; font-size: 16.5px; font-weight: 600; color: var(--ink); line-height: 1.3; }
@@ -175,7 +175,7 @@
   flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 22px; padding: 3px 8px; border-radius: 999px;
-  font-size: 10.5px; font-weight: 700; white-space: nowrap;
+  font-size: 10.5px; font-weight: 600; white-space: nowrap;
 }
 .tier-free { color: var(--green); background: rgba(31, 104, 77, .10); }
 .tier-power { color: var(--blue); background: rgba(36, 95, 136, .10); }
@@ -193,7 +193,7 @@
   width: 36px; height: 36px; border-radius: 11px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   color: var(--green); background: var(--green-soft);
-  font-size: 15px; font-weight: 700;
+  font-size: 15px; font-weight: 600;
 }
 .report-b { flex: 1; min-width: 0; }
 .report-t { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); line-height: 1.3; }
@@ -201,7 +201,7 @@
   display: block; margin-top: 3px; color: var(--ink-3); font-size: 11.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.report-state { flex-shrink: 0; color: var(--green); font-size: 12px; font-weight: 700; }
+.report-state { flex-shrink: 0; color: var(--green); font-size: 12px; font-weight: 600; }
 
 /* —— 报告空态 —— */
 .think-empty { text-align: center; padding: 30px 20px 22px; }
@@ -213,7 +213,7 @@
 .think-cta {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   height: 48px; margin-top: 18px; border-radius: 15px;
-  color: #FBFAF6; font-size: 14px; font-weight: 700;
+  color: #FBFAF6; font-size: 14px; font-weight: 600;
   background: linear-gradient(135deg, var(--green), var(--green-deep));
   box-shadow: 0 12px 24px rgba(30, 90, 67, .2);
 }

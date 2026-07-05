@@ -23,7 +23,7 @@
 @keyframes lgF2 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(-40px,-48px) scale(1.22); } }
 @keyframes lgF3 { 0%,100% { transform: translate(0,0) scale(1); } 50% { transform: translate(34px,-26px) scale(1.12); } }
 .lg-wm { position: absolute; right: -24px; top: 14%; font-size: 320px; line-height: 1;
-  font-weight: 700; color: rgba(216,178,90,.07); }
+  font-weight: 600; color: rgba(216,178,90,.07); }
 
 /* —— 内容层 —— */
 .lg-content {
@@ -37,7 +37,7 @@
 .lg-mk { width: 64px; height: 64px; }
 .lg-name { margin-top: 16px; display: flex; align-items: baseline; justify-content: center; }
 .lg-name-ai { font-size: 30px; font-weight: 500; letter-spacing: .04em; color: #E9C982; }
-.lg-name-cn { font-size: 30px; font-weight: 700; letter-spacing: .06em; color: #F5F1E6; }
+.lg-name-cn { font-size: 30px; font-weight: 600; letter-spacing: .06em; color: #F5F1E6; }
 .lg-rule { width: 30px; height: 2px; margin-top: 16px; background: linear-gradient(90deg, rgba(216,178,90,0), #D8B25A, rgba(216,178,90,0)); }
 .lg-slogan { margin-top: 18px; font-size: 19px; font-weight: 500; letter-spacing: .06em; color: #F1EDDF; }
 .lg-tag { margin-top: 10px; font-size: 12.5px; letter-spacing: .12em; color: rgba(243,240,230,.6); }
@@ -58,7 +58,7 @@
 .lg-form { flex: 1; display: flex; flex-direction: column; justify-content: center; }
 .lg-complete { justify-content: flex-start; }
 .lg-kicker { font-size: 11px; letter-spacing: .2em; font-weight: 600; color: #D8B25A; }
-.lg-h { margin-top: 10px; font-size: 25px; font-weight: 700; color: #F5F1E6; }
+.lg-h { margin-top: 10px; font-size: 25px; font-weight: 600; color: #F5F1E6; }
 .lg-sub { margin-top: 7px; margin-bottom: 24px; font-size: 12.5px; color: rgba(243,240,230,.55); }
 
 .lg-field {

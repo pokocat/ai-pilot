@@ -19,7 +19,7 @@ type ExecView = 'today' | 'week' | 'review';
 // 提醒节奏（订阅消息推送待接入，先亮明框架）。
 const REMINDERS = [
   { time: '每天 09:00', text: '生成今日军令' },
-  { time: '每天 21:30', text: '记录今天的结果，做当日复盘' },
+  { time: '每天 21:30', text: '记录战果，生成当日复盘' },
   { time: '每周五 18:00', text: '生成周复盘，调整下周打法' },
 ];
 
@@ -149,13 +149,13 @@ export default function Studio() {
     : doneTodayOrders.length
       ? [
           `今日 ${doneTodayOrders.length} 条军令已完成，已归档`,
-          '填写线索 / 咨询 / 成交三个数',
+          '录入线索 / 咨询 / 成交三项数据',
           '21:30 做今日复盘，生成明日军令',
         ]
       : [
           '和军师聊透当前处境，产出一份方案',
           '认可方案，自动拆成今日军令',
-          '每日打卡 + 填 3 个数，晚间复盘',
+          '每日打卡 + 录入数据，晚间复盘',
         ];
   const xianceSource = dossier
     ? doneTodayOrders.length && !pendingTodayOrders.length
@@ -166,7 +166,7 @@ export default function Studio() {
   const mainOrderDesc = firstUndone
     ? '可让 IP 军师直接生成配套内容脚本。'
     : todayOrders.length
-      ? '完成项已从待执行列表收起，去填数据并做复盘。'
+      ? '完成项已归档，去录入数据、做复盘。'
       : '让军师根据案卷生成今天最重要的 1-3 件事。';
   const mainOrderAction = firstUndone ? genScript : todayOrders.length ? genReview : genOrders;
   const mainOrderButton = firstUndone ? '生成脚本' : todayOrders.length ? '生成复盘' : '生成今日军令';
@@ -189,7 +189,7 @@ export default function Studio() {
               <View className="deck-card battle-card">
                 <Text className="deck-k">今日战役 · {dateStr}</Text>
                 <Text className="deck-title serif">{dossier.title}</Text>
-                <Text className="deck-desc">源自你认可的方案 · 由{dossier.sourceAgent}生成，打卡、记录进展后，复盘会调整明天的军令。</Text>
+                <Text className="deck-desc">源自认可方案 · 由{dossier.sourceAgent}生成 · 打卡记录，复盘定夺明日军令。</Text>
                 <View className="deck-progress"><View className="deck-fill" style={{ width: `${progress.percent}%` }} /></View>
                 <Text className="deck-foot">{progress.total ? `完成度 ${progress.percent}% · 21:30 复盘` : '待生成军令 · 21:30 复盘'}</Text>
               </View>
@@ -197,7 +197,7 @@ export default function Studio() {
               <View className="deck-card battle-card" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
                 <Text className="deck-k">今日战役 · {dateStr}</Text>
                 <Text className="deck-title serif">还没有执行中的战役</Text>
-                <Text className="deck-desc">和军师对话并「认可方案」后，方案会拆成军令进入这里，按日打卡、填数据、做复盘。</Text>
+                <Text className="deck-desc">与军师对话并「认可方案」后，方案自动拆解为军令，按日打卡、录入、复盘。</Text>
                 <Text className="deck-foot">去参谋室发起诊断 ›</Text>
               </View>
             )}
@@ -228,8 +228,8 @@ export default function Studio() {
             <View className="deck-card" onClick={() => setView('review')}>
               <Text className="deck-k green">提醒节奏</Text>
               <Text className="deck-title serif">21:30 复盘</Text>
-              <Text className="deck-desc">填写今天的线索、咨询、成交数字，必要时会调整明天的军令。</Text>
-              <Text className="deck-foot muted">{streak ? `连续复盘 ${streak} 天 · 别断` : '订阅提醒 · 即将开放'}</Text>
+              <Text className="deck-desc">录入今日线索、咨询、成交，据此校准明日军令。</Text>
+              <Text className="deck-foot muted">{streak ? `连续复盘 ${streak} 天 · 别断` : '可订阅复盘提醒'}</Text>
             </View>
           </View>
         </ScrollView>
@@ -249,7 +249,7 @@ export default function Studio() {
           <AdvisorAvatar agentKey="general" size={42} online />
           <View className="ac-b">
             <Text className="ac-t serif">总军师督战</Text>
-            <Text className="ac-d">{dossier ? '打卡和数据都会同步给总军师，用来调整明天的安排。' : '认可方案后，各军师的动作会汇总到这里协同推进。'}</Text>
+            <Text className="ac-d">{dossier ? '打卡与数据悉数呈报总军师，据此调度明日安排。' : '认可方案后，各军师的动作会汇总到这里协同推进。'}</Text>
           </View>
           <Text className="ac-go">去对话</Text>
         </View>
@@ -292,7 +292,7 @@ export default function Studio() {
                 <Text className="command-badge">第 0 号军令 · 补资料</Text>
                 <Text className="command-title serif">{und.nextQuestions[0]}</Text>
                 <Text className="command-desc">补齐后，军师会重算判断和任务优先级 · 还有 {und.nextQuestions.length} 条待补</Text>
-                <Text className="payoff">补充后，会更新战局页的判断和你的军师档案</Text>
+                <Text className="payoff">补齐后，战局判断与军师档案同步更新</Text>
               </View>
             ) : null}
 
@@ -324,7 +324,7 @@ export default function Studio() {
                   <View className="da-b">
                     <Text className="da-k">已归档</Text>
                     <Text className="da-t serif">{doneTodayOrders.length} 条完成项已收起</Text>
-                    <Text className="da-d">复盘、周计划和战报还是会用到这些记录。</Text>
+                    <Text className="da-d">复盘、周计划与战报皆据此追溯。</Text>
                   </View>
                   <Text className="da-action">{showDoneArchive ? '收起' : '查看'}</Text>
                 </View>
@@ -379,7 +379,7 @@ export default function Studio() {
                 ))}
               </View>
               <View className="df-save" onClick={onSaveBackfill}><Text>保存数据</Text></View>
-              <Text className="payoff">保存后，军师做今日复盘时会参考这些数字，必要时调整明天的军令</Text>
+              <Text className="payoff">军师复盘时据此校准，必要时调整明日军令</Text>
             </View>
 
             {/* 复盘前检查（review-before，真实状态） */}
@@ -429,8 +429,8 @@ export default function Studio() {
           <>
             <View className="review-card card">
               <Text className="rc-k">今晚复盘{streak ? ` · 已连续 ${streak} 天` : ''}</Text>
-              <Text className="rc-t">军师会根据今天军令的完成情况和你记录的数据，判断问题出在哪，给出明天的军令。</Text>
-              <Text className="payoff">参考依据：今日军令 {progress.done}/{progress.total || 0} · 数据{backfillSaved ? '已记录' : '未记录'}</Text>
+              <Text className="rc-t">军师依今日军令完成度与实绩数据，诊断症结，给出明日军令。</Text>
+              <Text className="payoff">依据：今日军令 {progress.done}/{progress.total || 0} · 数据{backfillSaved ? '已录' : '未录'}</Text>
               <View className="rc-btn" onClick={genReview}>
                 <Icon name="doc" size={15} color="#fff" />
                 <Text>生成今日复盘</Text>
@@ -481,7 +481,7 @@ export default function Studio() {
 
         <View className="exec-cta" onClick={todayOrders.length ? genReview : genOrders}>
           <Icon name={todayOrders.length ? 'doc' : 'check'} size={16} color="#FBFAF6" />
-          <Text>{todayOrders.length ? '记录今日结果 · 生成复盘' : '让军师生成今日军令'}</Text>
+          <Text>{todayOrders.length ? '录入今日战果 · 生成复盘' : '让军师生成今日军令'}</Text>
         </View>
       </View>
 
