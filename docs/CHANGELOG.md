@@ -8,6 +8,10 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-05** · **修复：三势·市势/人势 区分研判 + 已研判卡片可点开报告**：两处业务逻辑问题——① 市势/人势 原本都进战略诊断官发**同一条**指令，现各有独立研判开场（市势=市场与竞争格局；人势=资源与组织承载力，产出各以「市势研判/人势研判」为题），仍走免费 strat 避开 intel/org 解锁墙；② 生成并存入方案库后，战局「市势/人势」卡不能像天势那样点开预览，现按标题/类型关键词反查方案库对应研判方案——已研判则显「已研判 · {标题}」并点开报告详情，否则「发起判断」。`THREE_FORCES` 加 `ForceItem` 类型（agentKey/prompt/match）；home 拉 `api.reports()` 供反查。影响面：app（operatingSystem/home）。
+
+- **2026-07-05** · **集成 main（merge）**：本分支合入 main 最新（底栏/tab 图标与大标题 redesign + 对话页/报告卡/军令卡修复）。自动合并零冲突（名词统一/打磨改动与 main 的 tab redesign 落在不同代码行）。原意 rebase，但本分支含 WO-02→revert 提交对会让 rebase 对重叠文件重复解冲突且有风险，改用 merge 一次性合入，结果等价更稳。
+
 - **2026-07-05** · **打磨②：天时日历（三势·天势）改 canvas 图片交付**：顺着送你一卦的图片交付，把「全年天时日历」也从公开 HTML 链接（`publishCard('calendar')`→`/api/r/:id`）改成小程序 canvas 出图。新增 `app/src/services/canvasCard.ts`（`renderCardToImage` + `shareCardImage`/`saveCardImage` + `wrapText`/`roundRect`）作送你一卦/天时日历/后续战报卡的**共享出图管道**；gift 页重构复用它（行为不变）；calendar 页撤「生成网页打印版」改「生成天时日历图片」（`paintCalendarCard`：12 月攻守网格/拐点/日主口径/裂变位，固定品牌配色）→ 发好友/存相册，顺带缓解该卡 P-5/F-9/A-10。`mock.ts` 的 `saveBazi/myChart` 返回确定性样例命盘（`sampleChartM`），修 review 铁律③「mock 命盘恒空导致天时/天势卡/送你一卦本地走查断裂」——现 mock/H5 可完整走查。**canvas 出图 weapp-only，需真机复验**（复用已真机验过的送你一卦同一管道）。影响面：app（canvasCard 新增 / gift / calendar / mock）。
 
 - **2026-07-05** · **打磨①：送你一卦合规化（AUDIT P-4/P2）**：`docs/[FABLE5]POLISH_PLAN.md` 打磨方向第一单。把「送你一卦」从「服务端渲 HTML→`reportHtml.create` 永久落库→`/api/r/:id` 无鉴权公开」改为「服务端现算即返卡文本→小程序 canvas 画卡导出**图片**→用户点对点分享」，关掉第三人敏感生辰永久落库+公开访问，并顺带了结 P-5/F-9/A-10（图片无公开 URL、渲染自带）。新增 `POST /cards/fate/preview`（校验+现算+返回 `FateCardContent`，不落库；`consent!==true`→400 PIPL；封禁 `/cards/:kind` 的 fate+friendBazi 落库路径）；抽 `validatePaipanInput`（修 P2 friendBazi 零校验）+ `fateCardContent`，`/profile/bazi` 统一校验口径；SSOT 加 `FateCardContent`；gift 页重写（同意勾选门槛 + canvas 画卡导图 + 发好友/存相册，去公开链接，文案改真话）。**待真机复验 canvas 出图**。影响面：server（cards/profile/paipan/cardHtml）+ shared/contracts + app（gift/api/mock）+ docs。
