@@ -182,6 +182,23 @@
 .tier-plan { color: #fff; background: var(--ink); }
 .tier-single { color: var(--gold-deep); background: rgba(241, 230, 207, .92); }
 
+/* —— 我的能力（已开通能力卡：去使用 / 用量） —— */
+.cap { align-items: center; }
+.cap-acts { flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; }
+.cap-act {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 56px; min-height: 26px; padding: 0 12px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; color: #FBFAF6; white-space: nowrap;
+}
+.cap-act:active { opacity: .82; }
+.cap-act.ghost { background: transparent; border: 1px solid var(--line); }
+
+.cap-hint { padding: 15px 16px; margin-top: 6px; border-radius: 16px; }
+.ch-t { display: block; font-size: 15px; font-weight: 600; color: var(--ink); }
+.ch-d { display: block; margin-top: 6px; color: var(--ink-3); font-size: 12px; line-height: 1.55; }
+.ch-go { display: block; margin-top: 10px; font-size: 12.5px; font-weight: 600; }
+.ch-go:active { opacity: .7; }
+
 /* —— 报告行（report） —— */
 .report {
   display: flex; align-items: center; gap: 11px;

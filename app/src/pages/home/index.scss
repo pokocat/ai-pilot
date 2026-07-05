@@ -99,6 +99,13 @@
 }
 .section-label.danger { color: var(--danger); }
 
+/* —— 下一步卡（WO-02/07 占位） —— */
+.nextstep-card { margin-top: 16px; padding: 15px 16px; border-radius: 18px; }
+.nextstep-card:active { opacity: .9; }
+.ns-t { display: block; margin-top: 4px; color: var(--ink); font-size: 18px; font-weight: 600; line-height: 1.3; }
+.ns-d { display: block; margin-top: 6px; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
+.ns-go { display: block; margin-top: 10px; font-size: 13px; font-weight: 600; }
+
 .battle-goal {
   display: flex; align-items: center; gap: 12px;
   padding: 13px 0;

@@ -212,11 +212,11 @@ export const DATA_BINDINGS = [
   },
 ];
 
-// 对话页「补充上下文」引导：把军师判断所需的资料、数据、模块入口带进对话。
+// 对话页「补充上下文」引导：把军师判断所需的资料、数据入口带进对话。
+// WO-02：撤除「模块市场」入口——能力改由军师处方开出，不再让用户逛货架。
 export const CHAT_GUIDES = [
-  { icon: 'upload', label: '上传资料到知识库', url: '/packages/work/knowledge/index', hint: '让军师先读懂你的公司、产品、财务和历史方案' },
+  { icon: 'upload', label: '上传资料到资料库', url: '/packages/work/knowledge/index', hint: '让军师先读懂你的公司、产品、财务和历史方案' },
   { icon: 'attach', label: '绑定店铺/账号数据', url: '/packages/work/bindings/index', hint: '让增长、IP、经营军师基于真实数据判断' },
-  { icon: 'grid', label: '打开模块市场', url: '/packages/work/market/index', hint: '把认可的方案拆成可移动、可增减的模块' },
 ];
 
 // 智库页「军师的方法底座」：判断背后的方法论目录（静态框架，不含用户业务结论）。

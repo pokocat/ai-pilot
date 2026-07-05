@@ -7,7 +7,7 @@ import Picker from '../../components/Picker';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ChartSummary } from '../../services/api';
-import { MODULE_MARKET, THREE_FORCES } from '../../data/operatingSystem';
+import { THREE_FORCES } from '../../data/operatingSystem';
 import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
 import './index.scss';
 
@@ -33,7 +33,7 @@ function SayingLine({ html, accent }: { html: string; accent: string }) {
   );
 }
 
-// 战局页 —— 对齐设计稿 page-battle：军师判断 hero → 信号指标 → 三势 → 下一步动作 → 关联模块 → 不能做 → 认可 CTA。
+// 战局页 —— 对齐设计稿 page-battle：军师判断 hero → 信号指标 → 下一步 → 天势 → 下一步动作 → 不能做 → 认可 CTA。
 // 判断内容一律来自真实军师档案（me.understanding）与案卷，资料不足时引导进入对话访谈，不预置结论。
 export default function Home() {
   const s = useStore();
@@ -99,12 +99,22 @@ export default function Home() {
   };
   const startInterview = () =>
     goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
-  const startForces = () =>
-    goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('用三势判断（天势、市势、人势）帮我看一遍当前局势，并给出该攻、该守还是该等的结论。')}`);
   const askRisks = () =>
     goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
   // 天势不再引导对话：排盘引擎已算好 → 直接进原生「全年天时」页（无命盘则页内就地补生辰）
   const openTianshi = () => Taro.navigateTo({ url: '/packages/work/calendar/index' });
+
+  // 下一步（WO-07 Journey 状态机占位）：先按本地案卷/档案派生，后续替换为服务端 /journey。
+  const nextStep = (() => {
+    if (!s.isAuthed()) return { title: '先登录，和军师开聊', desc: '登录后军师开始为你建档、诊断、排军令。', cta: '去登录', act: () => setShowLogin(true) };
+    if (dossier) {
+      return progress.total && progress.done < progress.total
+        ? { title: `今日执行 · 军令 ${progress.done}/${progress.total}`, desc: '完成今日军令并录入战果，晚间即可复盘。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) }
+        : { title: '录入今日战果 · 生成复盘', desc: '把线索 / 咨询 / 成交录进去，军师据此定明日军令。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) };
+    }
+    if (und?.summary) return { title: '认可一份方案，生成军令', desc: '和军师把打法聊定，认可后自动拆成今日军令。', cta: '去对话', act: () => goChat('agentKey=general&continue=1') };
+    return { title: '军师还没为你建档', desc: '先和军师聊一次，拿到你的初步判断。', cta: '去对话', act: () => goChat('agentKey=general&continue=1') };
+  })();
 
   return (
     <Screen className="home">
@@ -143,31 +153,30 @@ export default function Home() {
           </View>
         </View>
 
-        {/* 三势判断（force-grid）：天势=排盘引擎已算好 → 点开原生全年天时页（不引导对话）；
-            市势/人势的结论产自真实对话 → 保留发起判断。 */}
-        <Text className="battle-h2">三 势 判 断</Text>
+        {/* 下一步（WO-07 Journey 状态机占位）：替换原市势/人势静态框架卡，给用户一条明确动作 */}
+        <View className="nextstep-card card" onClick={nextStep.act}>
+          <Text className="section-label">下 一 步</Text>
+          <Text className="ns-t serif">{nextStep.title}</Text>
+          <Text className="ns-d">{nextStep.desc}</Text>
+          <Text className="ns-go" style={{ color: accent }}>{nextStep.cta} ›</Text>
+        </View>
+
+        {/* 天势（force card）：排盘引擎已算好 → 点开原生全年天时页（不引导对话）。
+            市势/人势静态框架卡已按 WO-02 撤下（无结构化 forces 数据支撑）。 */}
+        <Text className="battle-h2">天 势</Text>
         <View className="force-grid">
-          {THREE_FORCES.map((f) => {
-            if (f.key === '天势') {
-              const m = chart?.monthlyOutlook?.months?.find((x) => x.month === new Date().getMonth() + 1);
-              const turning = chart?.monthlyOutlook?.months?.filter((x) => x.turning).map((x) => `${x.month}月`).slice(0, 2).join('、');
-              return (
-                <View key={f.key} className="force card" onClick={openTianshi}>
-                  <Text className="force-tag serif">{f.key}</Text>
-                  {m ? (
-                    <Text className="force-desc">本月 <Text className={`force-phase ${m.phase === '进攻' ? 'atk' : m.phase === '防守' ? 'def' : ''}`}>{m.phase}</Text>{turning ? `，拐点在 ${turning}` : ''}。按你的命盘逐月推演。</Text>
-                  ) : (
-                    <Text className="force-desc">{f.desc}</Text>
-                  )}
-                  <Text className="force-go">{m ? '看全年天时 ›' : '解锁全年天时 ›'}</Text>
-                </View>
-              );
-            }
+          {THREE_FORCES.filter((f) => f.key === '天势').map((f) => {
+            const m = chart?.monthlyOutlook?.months?.find((x) => x.month === new Date().getMonth() + 1);
+            const turning = chart?.monthlyOutlook?.months?.filter((x) => x.turning).map((x) => `${x.month}月`).slice(0, 2).join('、');
             return (
-              <View key={f.key} className="force card" onClick={startForces}>
+              <View key={f.key} className="force card" onClick={openTianshi}>
                 <Text className="force-tag serif">{f.key}</Text>
-                <Text className="force-desc">{f.desc}</Text>
-                <Text className="force-go">发起判断 ›</Text>
+                {m ? (
+                  <Text className="force-desc">本月 <Text className={`force-phase ${m.phase === '进攻' ? 'atk' : m.phase === '防守' ? 'def' : ''}`}>{m.phase}</Text>{turning ? `，拐点在 ${turning}` : ''}。按你的命盘逐月推演。</Text>
+                ) : (
+                  <Text className="force-desc">{f.desc}</Text>
+                )}
+                <Text className="force-go">{m ? '看全年天时 ›' : '解锁全年天时 ›'}</Text>
               </View>
             );
           })}
@@ -196,20 +205,6 @@ export default function Home() {
           ) : null}
         </View>
 
-        {/* 关联模块（module-card）：军师方案的功能化承接 */}
-        <View className="battle-actions module-card card">
-          <Text className="section-label">关 联 模 块</Text>
-          {MODULE_MARKET.slice(0, 3).map((m) => {
-            const owner = m.agentKey ? s.agents().find((a) => a.key === m.agentKey)?.name : undefined;
-            return (
-              <View key={m.id} className="linkmod" onClick={() => Taro.navigateTo({ url: '/packages/work/market/index' })}>
-                <Text className="linkmod-name serif">{m.title}</Text>
-                <Text className="linkmod-mini">{owner || m.category}</Text>
-                <Text className={`module-tier tier-${m.tier}`}>{m.price}</Text>
-              </View>
-            );
-          })}
-        </View>
 
         {/* 经营数据 · 近 7 天回填（M4 PR-16 看板第一层 v1）：数据源=执行页回填，无回填不展示 */}
         {(() => {
