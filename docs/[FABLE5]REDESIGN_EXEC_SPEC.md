@@ -1,8 +1,8 @@
 # 改造执行设计稿 · 加减法落地规格（供 coding agent 直接执行）
 
-> **上游文档**：`docs/AUDIT_V6_GLOBAL.md`（问题清单）→ `docs/AUDIT_V6_STRATEGY_ADD_SUBTRACT.md`（战略判断）→ **本篇（执行规格）**。
+> **上游文档**：`docs/[FABLE5]AUDIT_V6_GLOBAL.md`（问题清单）→ `docs/AUDIT_V6_STRATEGY_ADD_SUBTRACT.md`（战略判断）→ **本篇（执行规格）**。
 > 本篇把 16 项加减法建议拆成 **15 个 PR 级工单（WO-01 ~ WO-15）**，每个工单含：目标、数据模型、API 契约、前端/服务端/admin 改动点、prompt 变更、验收标准、依赖。文件路径均已对照真实代码库核实。
-> 编写日期 2026-07-04 · 基线分支 `claude/5tab-redesign-junshi`
+> 编写日期 2026-07-04
 
 ---
 
