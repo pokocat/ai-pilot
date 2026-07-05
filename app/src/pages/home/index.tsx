@@ -8,6 +8,7 @@ import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ChartSummary } from '../../services/api';
 import { THREE_FORCES } from '../../data/operatingSystem';
+import { EMPTY_STATES, QUICKSCAN_OPENER } from '../../data/emptyStates';
 import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
 import './index.scss';
 
@@ -104,7 +105,11 @@ export default function Home() {
   // 天势不再引导对话：排盘引擎已算好 → 直接进原生「全年天时」页（无命盘则页内就地补生辰）
   const openTianshi = () => Taro.navigateTo({ url: '/packages/work/calendar/index' });
 
+  // 速诊（WO-06）未上线前，初诊 CTA 先跳对话 tab 并预填开场语。
+  const goQuickScan = () => goChat(`agentKey=general&fresh=1&send=${encodeURIComponent(QUICKSCAN_OPENER)}`);
+
   // 下一步（WO-07 Journey 状态机占位）：先按本地案卷/档案派生，后续替换为服务端 /journey。
+  // 冷启动（无案卷、无军师判断）走 WO-03 集中空态导流文案 → 初诊。
   const nextStep = (() => {
     if (!s.isAuthed()) return { title: '先登录，和军师开聊', desc: '登录后军师开始为你建档、诊断、排军令。', cta: '去登录', act: () => setShowLogin(true) };
     if (dossier) {
@@ -113,7 +118,7 @@ export default function Home() {
         : { title: '录入今日战果 · 生成复盘', desc: '把线索 / 咨询 / 成交录进去，军师据此定明日军令。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) };
     }
     if (und?.summary) return { title: '认可一份方案，生成军令', desc: '和军师把打法聊定，认可后自动拆成今日军令。', cta: '去对话', act: () => goChat('agentKey=general&continue=1') };
-    return { title: '军师还没为你建档', desc: '先和军师聊一次，拿到你的初步判断。', cta: '去对话', act: () => goChat('agentKey=general&continue=1') };
+    return { title: EMPTY_STATES.battle.title, desc: EMPTY_STATES.battle.desc, cta: EMPTY_STATES.battle.cta, act: goQuickScan };
   })();
 
   return (

@@ -13,6 +13,7 @@ import {
   removeOrder, saveBackfill, startReview, today, todayProgress, toggleOrder, type Dossier,
 } from '../../services/dossier';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
+import { EMPTY_STATES } from '../../data/emptyStates';
 import './index.scss';
 
 type ExecView = 'today' | 'week' | 'review';
@@ -204,9 +205,9 @@ export default function Studio() {
             ) : (
               <View className="deck-card battle-card" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
                 <Text className="deck-k">今日战役 · {dateStr}</Text>
-                <Text className="deck-title serif">还没有执行中的战役</Text>
-                <Text className="deck-desc">与军师对话并「认可方案」后，方案自动拆解为军令，按日打卡、录入、复盘。</Text>
-                <Text className="deck-foot">去参谋室发起诊断 ›</Text>
+                <Text className="deck-title serif">{EMPTY_STATES.execution.title}</Text>
+                <Text className="deck-desc">{EMPTY_STATES.execution.desc}</Text>
+                <Text className="deck-foot">{EMPTY_STATES.execution.cta} ›</Text>
               </View>
             )}
 

@@ -107,8 +107,9 @@ export default function Profile() {
           </View>
         </View>
 
-        {/* 战略段位（M4 PR-18）：全部真实计数——连续复盘/使用天数/准确率由服务端算 */}
-        {prog ? (
+        {/* 战略段位（M4 PR-18）：全部真实计数。WO-03 冷启动延迟曝光——攒够连续复盘/使用天数才亮相，
+            不把「新兵·连续 0 天·准确率 —%」的空账本怼给新用户。 */}
+        {prog && (prog.streak >= 3 || prog.usageDays >= 14) ? (
           <View className="rank-card card">
             <View className="rk-badge"><Text className="serif">{prog.rank}</Text></View>
             <View className="rk-b">
