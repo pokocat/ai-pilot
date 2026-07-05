@@ -57,10 +57,10 @@
 .battle-card .deck-desc { color: rgba(255, 255, 255, .78); }
 .battle-card .deck-foot { color: #fff; }
 
-/* 军师献策卡（绿框） */
+/* 军师献策卡（绿框）：军令原文可能是完整长句，逐条截断 + 卡片限高，避免撑爆横滑卡组 */
 .xiance-card {
-  width: 296px; min-height: 188px; box-sizing: border-box;
-  flex: 0 0 auto;
+  width: 296px; min-height: 188px; max-height: 220px; box-sizing: border-box;
+  flex: 0 0 auto; display: flex; flex-direction: column; overflow: hidden;
   padding: 17px 16px 14px;
   border: 1.5px solid var(--green);
   border-radius: 18px;
@@ -68,7 +68,8 @@
   box-shadow: 0 10px 22px rgba(30, 90, 67, .08);
   white-space: normal;
 }
-.xiance-k { display: block; color: var(--green); font-size: 12px; font-weight: 600; letter-spacing: 1.5px; margin-bottom: 8px; }
+.xiance-k { display: block; flex-shrink: 0; color: var(--green); font-size: 12px; font-weight: 600; letter-spacing: 1.5px; margin-bottom: 8px; }
+.xiance-steps { flex: 1; min-height: 0; overflow: hidden; }
 .xiance-step { display: flex; align-items: center; gap: 11px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .xiance-step:last-of-type { border-bottom: 0; }
 .xiance-no {
@@ -77,8 +78,14 @@
   background: var(--green); color: #fff;
   font-size: 12.5px; font-weight: 600;
 }
-.xiance-text { flex: 1; min-width: 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; font-weight: 600; }
-.xiance-source { display: block; margin-top: 10px; color: var(--ink-3); font-size: 10.5px; line-height: 1.45; }
+.xiance-text {
+  flex: 1; min-width: 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; font-weight: 600;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.xiance-source {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden;
+  flex-shrink: 0; margin-top: 10px; color: var(--ink-3); font-size: 10.5px; line-height: 1.45;
+}
 
 /* —— 执行信号（exec-stats，左对齐） —— */
 .exec-stats { display: flex; justify-content: space-between; margin-top: 12px; }

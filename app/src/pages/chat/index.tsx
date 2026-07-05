@@ -345,6 +345,7 @@ export default function Chat() {
         setTimeout(scrollToEnd, 80);
       } else if (canStreamReport) {
         let reportStarted = false;
+        let chatStarted = false;
         let learnedAgentName = '';
         const patchReport = (
           fn: (d: Deliverable) => Deliverable,
@@ -365,6 +366,22 @@ export default function Chat() {
           if (reportStarted) return;
           reportStarted = true;
           patchReport((d) => d);
+          setTimeout(scrollToEnd, 30);
+        };
+        // 兜底：部分请求（如问局势判断而非明确要报告）后端会按普通聊天回，
+        // 而非 report 分段事件；此时不能沿用报告卡骨架（会永久卡在「产出中」），改走普通气泡渲染。
+        const patchChat = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
+          setMsgs((m) => {
+            const i = m.length - 1;
+            if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+              const copy = m.slice(); copy[i] = fn(copy[i] as Extract<Msg, { role: 'assistant' }>); return copy;
+            }
+            return m;
+          });
+        const startChat = () => {
+          if (reportStarted || chatStarted) return;
+          chatStarted = true;
+          setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
           setTimeout(scrollToEnd, 30);
         };
         const streamOk = await generateStream(body, {
@@ -392,21 +409,37 @@ export default function Chat() {
               actions: data.actions?.length ? data.actions : d.actions,
             }));
           },
+          onToken: (t) => {
+            if (reportStarted) return;
+            startChat();
+            patchChat((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } }));
+          },
+          onChat: (reply) => {
+            if (reportStarted) return;
+            startChat();
+            patchChat((msg) => ({ ...msg, reply }));
+          },
           onMemory: (data) => {
             if (data.learned && data.agentName) learnedAgentName = data.agentName;
           },
           onDone: (messageId) => {
-            patchReport((d) => d, { streaming: false, messageId });
+            if (reportStarted) {
+              patchReport((d) => d, { streaming: false, messageId });
+            } else if (chatStarted) {
+              patchChat((msg) => ({ ...msg, streaming: false }));
+            }
             if (learnedAgentName) showMemoryLearned(learnedAgentName, 600);
             setTimeout(scrollToEnd, 80);
           },
           onError: (em) => {
             if (reportStarted) {
               patchReport((d) => ({ ...d, trust: em || '生成中断，请重试', degraded: true }), { streaming: false });
+            } else if (chatStarted) {
+              patchChat((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false }));
             }
           },
         });
-        if (!streamOk && !reportStarted) {
+        if (!streamOk && !reportStarted && !chatStarted) {
           const res = await api.generate(body);
           renderGenerateResult(res);
         }
@@ -631,6 +664,7 @@ export default function Chat() {
       {/* 顾问身份头 */}
       <SafeHeader
         className="chat-head"
+        rightReserve={false}
         left={<View className="safe-hbtn" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}><Icon name="chat" size={19} color="#565C63" /></View>}
       >
         <View className="chat-id">

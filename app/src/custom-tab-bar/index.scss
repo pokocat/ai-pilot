@@ -1,5 +1,5 @@
 /* 底栏 —— 对齐设计稿 首页方案.html .tabbar：脱离边缘的悬浮胶囊 + 玻璃质感，
-   选中态仅在图标上做柔色圆形高亮，不再整格铺色，克制、不抢内容。 */
+   选中态：图标原位稍稍放大 + 文字变色加粗，不加框、不铺色，克制、不抢内容。 */
 .tabbar {
   position: fixed;
   left: 14px; right: 14px;
@@ -28,15 +28,15 @@
   min-width: 0;
 }
 .tab-ic {
-  width: 32px; height: 32px;
+  width: 33px; height: 33px;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 50%;
-  transition: background .18s ease-out;
+  transition: transform .2s ease-out;
 }
 .tab.on .tab-ic {
-  background: var(--accent-soft);
+  transform: scale(1.14);
 }
 .tab-label {
-  font-size: 10.5px; letter-spacing: .01em; color: var(--ink-3); line-height: 1; font-weight: 400;
+  font-family: var(--serif);
+  font-size: 10.5px; letter-spacing: .04em; color: var(--ink-3); line-height: 1; font-weight: 400;
 }
 .tab.on .tab-label { font-weight: 600; }
