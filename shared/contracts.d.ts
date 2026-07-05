@@ -911,3 +911,14 @@ export interface StartEvalRunRequest { setId: string; target?: SandboxTarget }
 /** 评分 → 建议定价档位（旗舰/进阶/标准） */
 export interface PricingTier { id: string; label: string; billingRatio: number; minScore: number }
 export interface SuggestedTier { score: number | null; tier: PricingTier | null } // P1-A2：score 为空（未配模型/全部失败）时不给定价建议
+
+/** 送你一卦「天命速写」卡内容（合规打磨·AUDIT P-4）：服务端由命盘确定性派生的卡文本，
+ *  经 POST /cards/fate/preview 返回——现算即返、不落库、无公开链接；小程序端 canvas 画卡导出图片分享。
+ *  三段文本全部来自排盘引擎结果（非 AI 现编，守数字铁律）。 */
+export interface FateCardContent {
+  friendName: string;
+  subtitle: string; // 「赠与 X · YYYY-MM-DD 生」
+  sketch: string;   // 命格速写
+  trend: string;    // 今年大势
+  advice: string;   // 一条核心建议
+}

@@ -10,6 +10,7 @@ import { syncProgress } from './progress.js';
 import { loadChart, computeChart, type ChartView, type PaipanInput } from './paipan.js';
 import { miniCodeDataUri } from './wechat.js';
 import { env } from '../env.js';
+import type { FateCardContent } from '../../../shared/contracts';
 
 // 经典语录（V6.0 §18 语录库，公版内容）：按日期确定性轮换。
 const QUOTES = [
@@ -134,8 +135,9 @@ ${verse ? `<span class="rank">「${esc(verse)}」</span>` : ''}</div>
   return page('天时日历', body);
 }
 
-/** ⑩ 天命速写（送你一卦 · 裂变）：命格速写 + 今年大势 + 一条建议——全部由命盘确定性生成。 */
-export function renderFateCard(chart: ChartView, friendName?: string): string {
+/** ⑩ 天命速写内容（命格速写 + 今年大势 + 一条建议）——全部由命盘确定性派生（非 AI）。
+ *  抽成数据函数：HTML 卡（renderFateCard）与「送你一卦」小程序画图（/cards/fate/preview）同源。 */
+export function fateCardContent(chart: ChartView, friendName?: string): FateCardContent {
   const atk = chart.monthlyOutlook.months.filter((m) => m.phase === '进攻').map((m) => `${m.month}月`);
   const def = chart.monthlyOutlook.months.filter((m) => m.phase === '防守').map((m) => `${m.month}月`);
   const sketch = `${chart.pattern.name}——${chart.pattern.traits}。${chart.ziwei?.soulMajorStars.length ? `命宫 ${chart.ziwei.soulMajorStars.join('、')}。` : ''}`;
@@ -143,9 +145,19 @@ export function renderFateCard(chart: ChartView, friendName?: string): string {
   const advice = chart.pattern.suits.length
     ? `你的打法在「${chart.pattern.suits[0]}」，${chart.pattern.avoid.length ? `别碰「${chart.pattern.avoid[0]}」` : '顺着天赋走'}。`
     : '先看清势，再落子。';
+  return {
+    friendName: friendName || '',
+    subtitle: `${friendName ? `赠与 ${friendName}` : `${chart.gender === '男' ? '先生' : '女士'}命鉴`} · ${chart.solarDate} 生`,
+    sketch, trend, advice,
+  };
+}
+
+/** ⑩ 天命速写（送你一卦 · 裂变）HTML 版：命格速写 + 今年大势 + 一条建议——全部由命盘确定性生成。 */
+export function renderFateCard(chart: ChartView, friendName?: string): string {
+  const { subtitle, sketch, trend, advice } = fateCardContent(chart, friendName);
   const body = `
 <div class="hd" style="background:linear-gradient(150deg,#16191D,#2A2333)"><span class="badge">◆ 军师参谋部 · 天机速写 ◆</span><h1>天命速写</h1>
-<div class="date">${friendName ? `赠与 ${esc(friendName)}` : `${chart.gender === '男' ? '先生' : '女士'}命鉴`} · ${chart.solarDate} 生</div></div>
+<div class="date">${esc(subtitle)}</div></div>
 <div class="bd">
 <div class="sec"><div class="sec-k">命 格 速 写</div><div class="li">${esc(sketch)}</div></div>
 <div class="sec"><div class="sec-k">今 年 大 势</div><div class="li">${esc(trend)}</div></div>

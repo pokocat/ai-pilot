@@ -11,6 +11,7 @@ import type {
   KnowledgeDocRow, KnowledgeDetail,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
   BindPhoneResult, WechatOrderResult, WechatSubscribeTemplatesResult, WechatSubscribeChoice, WechatSubscribeRecordResult,
+  FateCardContent,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -21,6 +22,7 @@ export type { SurveyQuestion as SurveyQ } from '../../../shared/contracts';
 export type { DeliverableSection as Section } from '../../../shared/contracts';
 export type { ChatReply as ChatReplyT } from '../../../shared/contracts';
 export type { MemoryCandidate } from '../../../shared/contracts';
+export type { FateCardContent } from '../../../shared/contracts';
 // 新能力类型再导出（项目 / 报告 / 知识 / 引用）
 export type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
@@ -243,9 +245,12 @@ export const api = {
     IS_MOCK ? Promise.resolve({ progress: null as ProgressView | null }) : request<{ progress: ProgressView | null }>('/progress'),
   reviews: () =>
     IS_MOCK ? Promise.resolve({ items: [], streak: 0 }) : request<{ items: unknown[]; streak: number }>('/reviews'),
-  // B 级卡片（每日战报/天时日历/天命速写）：返回可分享网页链接；mock 无渲染管道返回 null
-  publishCard: (kind: 'daily' | 'calendar' | 'fate', body?: { friendName?: string; friendBazi?: BaziBody }) =>
+  // B 级卡片（每日战报/天时日历）：返回可分享网页链接；mock 无渲染管道返回 null
+  publishCard: (kind: 'daily' | 'calendar', body?: { friendName?: string; friendBazi?: BaziBody }) =>
     IS_MOCK ? Promise.resolve({ htmlUrl: null as string | null }) : request<{ htmlUrl: string | null }>(`/cards/${kind}`, 'POST', body ?? {}),
+  // 送你一卦「天命速写」预览（合规打磨·P-4）：现算即返、不落库、无公开链接；前端 canvas 画卡导出图片分享
+  fateCardPreview: (body: { friendName: string; friendBazi: BaziBody; consent: boolean }) =>
+    IS_MOCK ? mock.fateCardPreview(body) : request<FateCardContent>('/cards/fate/preview', 'POST', body),
   todaySaying: () => (IS_MOCK ? mock.todaySaying() : request<TodaySaying>('/sayings/today')),
   sessions: () => (IS_MOCK ? mock.sessions() : request<SessionItem[]>('/sessions')),
   session: (id: string) => (IS_MOCK ? mock.session(id) : request<SessionDetail>(`/sessions/${id}`)),

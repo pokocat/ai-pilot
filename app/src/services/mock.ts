@@ -598,6 +598,18 @@ export const mock = {
   async myChart(): Promise<{ bazi: object | null; chart: null }> {
     return delay({ bazi: (current().d as { bazi?: object }).bazi ?? null, chart: null });
   },
+  // 送你一卦预览（mock：给确定性样例卡文本，不排盘不落库——让画卡/分享链路可本地走查）
+  async fateCardPreview(body: { friendName?: string; consent?: boolean }): Promise<{ friendName: string; subtitle: string; sketch: string; trend: string; advice: string }> {
+    const name = (body.friendName || '').trim();
+    const yr = new Date().getFullYear();
+    return delay({
+      friendName: name,
+      subtitle: `${name ? `赠与 ${name}` : '命鉴'} · 1990-06-18 生`,
+      sketch: '正财格——务实稳健、重信守诺，善守成不喜冒进。命宫 紫微、天府。',
+      trend: `今年${yr}：3月、6月、9月是你的进攻窗口；7月、11月记得收着打。`,
+      advice: '你的打法在「稳扎稳打、深耕存量」，别碰「盲目扩张」。',
+    });
+  },
 
   async todaySaying(): Promise<TodaySaying> {
     const n = new Date();

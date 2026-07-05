@@ -1,16 +1,15 @@
 import { useState } from 'react';
-import { View, Text, Input } from '@tarojs/components';
+import { View, Text, Input, Canvas, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
-import { api } from '../../../services/api';
+import { api, type FateCardContent } from '../../../services/api';
 import './index.scss';
 
-// 送你一卦（V6.0 §11.4 裂变机制 · ⑩号天命速写卡）：
-// 采集朋友生辰 → 服务端排盘引擎现算（不落库，隐私干净）→ 出可分享的天命速写卡链接。
-// 卡片底部自带「想要完整的天势×战略诊断？找军师参谋部」引导，形成裂变闭环。
+// 送你一卦（天命速写卡 · 裂变）——合规打磨版（AUDIT P-4）：
+// 朋友生辰 → 服务端现算命盘（不落库、无公开链接）→ 返回卡文本 → 小程序端 canvas 画卡导出**图片**。
+// 图片由用户自己发给朋友/存相册（文件点对点，无可爬取的公开 URL）；采集第三人生辰前必须勾选「已获对方同意」（PIPL）。
 
-// 十二时辰（含「不确定」）：与建档 Picker 同口径；子时按早子 0 点计。
 const SHICHEN: { label: string; hour: number | null }[] = [
   { label: '不确定', hour: null },
   { label: '子 23-1', hour: 0 }, { label: '丑 1-3', hour: 2 }, { label: '寅 3-5', hour: 4 },
@@ -18,6 +17,10 @@ const SHICHEN: { label: string; hour: number | null }[] = [
   { label: '午 11-13', hour: 12 }, { label: '未 13-15', hour: 14 }, { label: '申 15-17', hour: 16 },
   { label: '酉 17-19', hour: 18 }, { label: '戌 19-21', hour: 20 }, { label: '亥 21-23', hour: 22 },
 ];
+
+// 卡片逻辑尺寸（画布按 dpr 放大）
+const CW = 600;
+const CH = 880;
 
 export default function Gift() {
   const s = useStore();
@@ -30,27 +33,51 @@ export default function Gift() {
   const [day, setDay] = useState('');
   const [hourIdx, setHourIdx] = useState(0);
   const [gender, setGender] = useState<'male' | 'female'>('male');
+  const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [url, setUrl] = useState<string | null>(null);
+  const [imgPath, setImgPath] = useState<string | null>(null);
 
-  const valid = name.trim() && +year >= 1930 && +year <= 2020 && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
+  const dateOk = +year >= 1930 && +year <= 2020 && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
+  const valid = !!name.trim() && dateOk && consent;
+
+  // 画卡：把服务端返回的卡文本绘到 canvas，导出临时图片路径
+  const drawCard = (content: FateCardContent) =>
+    new Promise<string>((resolve, reject) => {
+      const q = Taro.createSelectorQuery();
+      q.select('#fateCanvas').fields({ node: true, size: true }).exec((res) => {
+        const node = res?.[0]?.node;
+        if (!node) { reject(new Error('canvas 未就绪')); return; }
+        const dpr = (Taro.getSystemInfoSync().pixelRatio) || 2;
+        node.width = CW * dpr;
+        node.height = CH * dpr;
+        const ctx = node.getContext('2d');
+        ctx.scale(dpr, dpr);
+        paintFateCard(ctx, content);
+        setTimeout(() => {
+          Taro.canvasToTempFilePath({
+            canvas: node, x: 0, y: 0, width: CW * dpr, height: CH * dpr, destWidth: CW * 2, destHeight: CH * 2,
+            success: (r) => resolve(r.tempFilePath),
+            fail: (e) => reject(e),
+          });
+        }, 60);
+      });
+    });
 
   const makeCard = async () => {
     if (!valid || busy) return;
     setBusy(true);
+    setImgPath(null);
     Taro.showLoading({ title: '排盘出卡中…' });
     try {
-      const r = await api.publishCard('fate', {
+      const content = await api.fateCardPreview({
         friendName: name.trim(),
         friendBazi: { calendar, year: +year, month: +month, day: +day, hour: SHICHEN[hourIdx].hour, gender },
+        consent: true,
       });
+      const path = await drawCard(content);
       Taro.hideLoading();
-      if (r.htmlUrl) {
-        setUrl(r.htmlUrl);
-        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '速写卡链接已复制 · 转给朋友', icon: 'none' }) });
-      } else {
-        Taro.showToast({ title: '本地预览模式无卡片', icon: 'none' });
-      }
+      setImgPath(path);
+      Taro.showToast({ title: '卡已生成 · 保存或发给朋友', icon: 'none' });
     } catch (e) {
       Taro.hideLoading();
       if (s.handleApiError(e) !== 'unauthorized') Taro.showToast({ title: '生成失败，请检查生辰后重试', icon: 'none' });
@@ -58,7 +85,18 @@ export default function Gift() {
     setBusy(false);
   };
 
-  const copyAgain = () => url && Taro.setClipboardData({ data: url, success: () => Taro.showToast({ title: '已复制', icon: 'none' }) });
+  const shareImage = () => {
+    if (!imgPath) return;
+    Taro.showShareImageMenu({ path: imgPath }).catch(() =>
+      Taro.showToast({ title: '可长按图片保存后转发', icon: 'none' }),
+    );
+  };
+  const saveImage = () => {
+    if (!imgPath) return;
+    Taro.saveImageToPhotosAlbum({ filePath: imgPath })
+      .then(() => Taro.showToast({ title: '已存到相册', icon: 'none' }))
+      .catch(() => Taro.showToast({ title: '未获相册权限，可长按图片保存', icon: 'none' }));
+  };
 
   return (
     <View className={`page gift ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -66,7 +104,7 @@ export default function Gift() {
       <View className="pad">
         <View className="gf-hero">
           <Text className="gf-ht serif">给朋友出一张「天命速写卡」</Text>
-          <Text className="gf-hd">命格速写 · 今年大势 · 一条核心建议。生辰只用来现场排盘，不会保存。</Text>
+          <Text className="gf-hd">命格速写 · 今年大势 · 一条核心建议。生辰只用于本次现场排盘，服务器不保存、不生成公开链接——出的是一张图片，你自己发给朋友。</Text>
         </View>
 
         <View className="pf-q">
@@ -118,20 +156,127 @@ export default function Gift() {
           </View>
         </View>
 
-        <View className={`gf-btn ${valid && !busy ? '' : 'off'}`} style={valid ? { background: accent } : {}} onClick={makeCard}>
-          <Text>{busy ? '排盘中…' : '出卦 · 生成速写卡'}</Text>
+        {/* 同意声明（PIPL：采集第三人敏感生辰前必须确认已获授权） */}
+        <View className="gf-consent" onClick={() => setConsent((v) => !v)}>
+          <View className="gf-check" style={consent ? { background: accent, borderColor: accent } : {}}>
+            {consent ? <Text className="gf-tick">✓</Text> : null}
+          </View>
+          <Text className="gf-consent-t">我已获得对方同意，使用其生辰为其出一张天命速写卡。</Text>
         </View>
 
-        {url ? (
-          <View className="gf-done card" onClick={copyAgain}>
-            <Text className="gf-dt serif">卡已备好，链接在剪贴板</Text>
-            <Text className="gf-dd">发给朋友或发群里。卡片末尾会替你带一句：想要完整的天势×战略诊断，找军师参谋部。</Text>
-            <Text className="gf-dl">{url}</Text>
+        <View className={`gf-btn ${valid && !busy ? '' : 'off'}`} style={valid ? { background: accent } : {}} onClick={makeCard}>
+          <Text>{busy ? '排盘中…' : imgPath ? '重新出卦' : '出卦 · 生成速写卡'}</Text>
+        </View>
+
+        {imgPath ? (
+          <View className="gf-result">
+            <Image className="gf-img" src={imgPath} mode="widthFix" showMenuByLongpress />
+            <View className="gf-acts">
+              <View className="gf-act" style={{ background: accent }} onClick={shareImage}><Text>发给朋友</Text></View>
+              <View className="gf-act ghost" style={{ borderColor: accent }} onClick={saveImage}><Text style={{ color: accent }}>保存到相册</Text></View>
+            </View>
+            <Text className="gf-tip">也可长按上方图片保存或转发。</Text>
           </View>
         ) : null}
 
-        <Text className="gf-note">朋友的生辰只用于本次排盘，军师不留档。命理内容为文化视角的经营参考，不构成决策依据。</Text>
+        {/* 离屏画布：仅用于生成图片，不直接展示 */}
+        <Canvas type="2d" id="fateCanvas" className="gf-canvas" style={{ width: `${CW}px`, height: `${CH}px` }} />
+
+        <Text className="gf-note">朋友的生辰只用于本次排盘，服务器不留档、不生成公开链接。命理内容为文化视角的经营参考，不构成决策依据。</Text>
       </View>
     </View>
   );
+}
+
+// —— canvas 画卡（深色描金封面 + 暖纸正文，对齐 renderFateCard 视觉体系）——
+function paintFateCard(ctx: CanvasRenderingContext2D, content: FateCardContent) {
+  const W = CW;
+  // 底：暖纸
+  ctx.fillStyle = '#FBFAF6';
+  ctx.fillRect(0, 0, W, CH);
+
+  // 封面（深色渐变）
+  const headH = 210;
+  const g = ctx.createLinearGradient(0, 0, W, headH);
+  g.addColorStop(0, '#16191D');
+  g.addColorStop(1, '#2A2333');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, headH);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#C9A227';
+  ctx.font = '22px sans-serif';
+  ctx.fillText('◆ 军师参谋部 · 天机速写 ◆', W / 2, 56);
+  ctx.fillStyle = '#FBFAF6';
+  ctx.font = 'bold 52px serif';
+  ctx.fillText('天命速写', W / 2, 122);
+  ctx.fillStyle = 'rgba(251,250,246,.72)';
+  ctx.font = '24px sans-serif';
+  ctx.fillText(content.subtitle, W / 2, 168);
+
+  // 正文
+  ctx.textAlign = 'left';
+  let y = headH + 56;
+  const padX = 48;
+  const maxW = W - padX * 2;
+
+  const section = (label: string, body: string, quote = false) => {
+    ctx.fillStyle = quote ? '#1E5A43' : '#8A6D1F';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText(label, padX, y);
+    y += 38;
+    ctx.fillStyle = quote ? '#1E5A43' : '#16191D';
+    ctx.font = `${quote ? 'bold ' : ''}28px serif`;
+    y = wrapText(ctx, body, padX, y, maxW, 42);
+    y += 34;
+  };
+
+  section('命 格 速 写', content.sketch);
+  section('今 年 大 势', content.trend);
+  section('一 条 建 议', `「${content.advice}」`, true);
+
+  // 裂变位
+  const boxY = CH - 210;
+  ctx.fillStyle = '#F1F7F3';
+  roundRect(ctx, padX, boxY, maxW, 108, 16);
+  ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#969BA1';
+  ctx.font = '22px sans-serif';
+  ctx.fillText('想要完整的天势 × 战略诊断？', W / 2, boxY + 46);
+  ctx.fillStyle = '#1E5A43';
+  ctx.font = 'bold 30px serif';
+  ctx.fillText('找军师参谋部', W / 2, boxY + 84);
+
+  ctx.fillStyle = '#B4B8BE';
+  ctx.font = '20px sans-serif';
+  ctx.fillText('命理为文化视角的经营参考，不构成决策依据', W / 2, CH - 44);
+}
+
+// 逐字换行绘制，返回结束 y
+function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number): number {
+  let line = '';
+  let curY = y;
+  for (const ch of text) {
+    const test = line + ch;
+    if (ctx.measureText(test).width > maxW && line) {
+      ctx.fillText(line, x, curY);
+      line = ch;
+      curY += lineH;
+    } else {
+      line = test;
+    }
+  }
+  if (line) { ctx.fillText(line, x, curY); curY += lineH; }
+  return curY;
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
-import { computeAndStoreChart, loadChart } from '../services/paipan.js';
+import { computeAndStoreChart, loadChart, validatePaipanInput } from '../services/paipan.js';
 import { loadStrategicProfile, upsertStrategicProfile } from '../services/strategicProfile.js';
 import { cityLongitude } from '../data/cityLongitude.js';
 import { now } from '../services/clock.js';
@@ -76,30 +76,15 @@ export async function profileRoutes(app: FastifyInstance) {
       return { believe: false, chart: null };
     }
 
-    // 校验（排盘输入必须完整合法；日期合法性由历法库把关）
-    const yearNum = Number(b.year); const monthNum = Number(b.month); const dayNum = Number(b.day);
-    if (b.calendar !== 'solar' && b.calendar !== 'lunar') return reply.code(400).send({ error: '历法必须是 solar 或 lunar' });
-    if (b.gender !== 'male' && b.gender !== 'female') return reply.code(400).send({ error: '缺少性别' });
-    if (!Number.isInteger(yearNum) || yearNum < 1920 || yearNum > now().getFullYear()) return reply.code(400).send({ error: '出生年份不合法' });
-    if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 31) return reply.code(400).send({ error: '出生日期不合法' });
-    if (!Number.isInteger(monthNum) || Math.abs(monthNum) < 1 || Math.abs(monthNum) > 12 || (monthNum < 0 && b.calendar !== 'lunar')) {
-      return reply.code(400).send({ error: '出生月份不合法' });
-    }
-    const hourKnown = b.hour !== null && b.hour !== undefined;
-    if (hourKnown && (!Number.isInteger(Number(b.hour)) || Number(b.hour) < 0 || Number(b.hour) > 23)) {
-      return reply.code(400).send({ error: '时辰不合法（0-23，或不填表示不确定）' });
-    }
+    // 校验（与「送你一卦」fate 预览同一口径，抽成 validatePaipanInput；日期合法性由历法库把关）
+    const v = validatePaipanInput(b, now().getFullYear());
+    if (!v.ok) return reply.code(400).send({ error: v.error });
     try {
       const chart = await computeAndStoreChart({
         tenantId: user.tenantId,
         userId: user.id,
-        input: {
-          calendar: b.calendar, year: yearNum, month: monthNum, day: dayNum,
-          hour: hourKnown ? Number(b.hour) : null, minute: b.minute ?? 0,
-          gender: b.gender, birthPlace: b.birthPlace,
-          // 经度：显式传入优先；否则按出生城市查映射表（未命中不做真太阳时校正）
-          longitude: b.longitude ?? cityLongitude(b.birthPlace),
-        },
+        // 经度：显式传入优先；否则按出生城市查映射表（未命中不做真太阳时校正）
+        input: { ...v.input, longitude: v.input.longitude ?? cityLongitude(b.birthPlace) },
         targetYear: now().getFullYear(),
       });
       await recordAudit({
