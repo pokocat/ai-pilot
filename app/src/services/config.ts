@@ -12,7 +12,7 @@ export const IS_MOCK = APP_MODE === 'mock';
 export const BASE_URL =
   process.env.TARO_APP_API || 'http://localhost:4000/api';
 
-// P1-B3：聊天流式渲染开关（默认开）。后端流式链路已全程验证（gateway/SSE/线级传输/解析器），
-// UI 渐进渲染已通过 QA，现作为默认体验；如需临时回退非流式，构建时置 TARO_APP_STREAM=0 即可。
+// P1-B3：聊天流式渲染开关（默认开）。H5 走 fetch ReadableStream；
+// 微信小程序走 wx.request enableChunked + RequestTask.onChunkReceived。
+// 如需临时回退非流式，构建时置 TARO_APP_STREAM=0。
 export const STREAM_CHAT = process.env.TARO_APP_STREAM !== '0';
-

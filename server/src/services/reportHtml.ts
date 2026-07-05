@@ -35,66 +35,61 @@ function sectionHtml(s: Deliverable['sections'][number], i: number): string {
   const body = s.b ? bodyHtml(s.b) : '';
   const list = s.list?.length ? `<ul>${s.list.map((li) => `<li>${esc(li)}</li>`).join('')}</ul>` : '';
   const inner = body + list || '<p class="b muted">（本节待补充）</p>';
-  return `<section class="card">
-<div class="card-h"><span class="idx">${cnIndex(i + 1)}</span><h2>${esc(s.h)}</h2></div>
+  return `<section class="sec">
+<div class="sec-h"><span class="idx">${cnIndex(i + 1)}</span><h2>${esc(s.h)}</h2></div>
 ${inner}
 </section>`;
 }
 
-/** Deliverable → 自包含战略报告 HTML(内联 CSS,米色底/衬线标题/章节卡片/印章落款)。 */
+/** Deliverable → 自包含战略报告 HTML(内联 CSS,V6.0 天势卡片风:暖纸底/深绿封面/宋体标题/章节白卡/金印落款)。 */
 export function renderReportHtml(d: Deliverable): string {
   const sections = (d.sections ?? []).map(sectionHtml).join('\n');
-  const body = sections || '<section class="card"><p class="b muted">（暂无内容）</p></section>';
+  const body = sections || '<section class="sec"><p class="b muted">（暂无内容）</p></section>';
   const trust = (d.trust && d.trust.trim()) || DEFAULT_TRUST;
   return `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${esc(d.title)} · 军师</title>
+<title>${esc(d.title)} · 军师参谋部</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
-body{background:#EDE7DA;color:#2b2620;font-family:"Noto Serif SC",Georgia,"Songti SC","STSong",serif;line-height:1.85;padding:24px 14px 64px}
-.page{max-width:760px;margin:0 auto;background:#FBF8F1;border:1px solid #e0d7c4;border-radius:16px;box-shadow:0 8px 40px rgba(80,60,30,.10);overflow:hidden}
-/* 封面 */
-.cover{position:relative;padding:40px 30px 30px;background:linear-gradient(180deg,#F5F0E5 0%,#FBF8F1 100%);border-bottom:1px solid #e7dfce;text-align:center}
-.cover::before{content:"";position:absolute;inset:14px 14px auto 14px;height:1px;background:linear-gradient(90deg,transparent,#c9bb9d,transparent)}
-.eyebrow{font-size:12px;letter-spacing:6px;color:#9a7b46;font-weight:600;margin-bottom:18px;padding-left:6px}
-.title{font-size:29px;font-weight:700;color:#5a4326;letter-spacing:2px;line-height:1.35;margin:0 auto;max-width:90%}
-.motto{font-size:13px;color:#8a7a5c;letter-spacing:1px;margin-top:16px;font-style:italic}
-.rule{display:flex;align-items:center;justify-content:center;gap:12px;margin:20px auto 0;color:#c9bb9d}
-.rule::before,.rule::after{content:"";height:1px;width:64px;background:#d8cfbd}
-.rule .d{font-size:11px;color:#b09c72}
-.meta{font-size:12.5px;color:#9a9080;margin-top:14px;letter-spacing:.5px}
-/* 正文章节 */
-.body{padding:26px 30px 8px}
-.card{padding:6px 0 22px;margin:0 0 22px;border-bottom:1px solid #efe8d8}
-.card:last-child{border-bottom:none;margin-bottom:6px}
-.card-h{display:flex;align-items:baseline;gap:12px;margin-bottom:12px}
-.card-h .idx{flex:0 0 auto;font-size:15px;font-weight:700;color:#fff;background:#7a5c2e;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;line-height:1;align-self:center;box-shadow:0 1px 3px rgba(122,92,46,.3)}
-.card-h h2{font-size:18px;color:#4a3a22;font-weight:700;letter-spacing:.5px;line-height:1.5}
-.card .b{font-size:15.5px;color:#3a342b;margin:0 0 10px;padding-left:38px}
-.card .b:last-child{margin-bottom:0}
-.card .b.muted{color:#a59c89}
-.card ul{margin:6px 0 0;padding-left:58px;list-style:none}
-.card li{position:relative;font-size:15.5px;color:#3a342b;margin:8px 0;padding-left:18px}
-.card li::before{content:"";position:absolute;left:0;top:11px;width:7px;height:7px;background:#b08a4a;border-radius:2px;transform:rotate(45deg)}
-/* 落款 */
-.foot{padding:24px 30px 34px;background:linear-gradient(180deg,#FBF8F1 0%,#F4EEE1 100%);border-top:1px solid #e7dfce;text-align:center}
-.seal{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;width:64px;height:64px;border:2px solid #a8401f;border-radius:10px;color:#a8401f;transform:rotate(-4deg);margin-bottom:14px;font-weight:700;line-height:1.1}
-.seal .s1{font-size:21px;letter-spacing:2px}
+body{background:#ECE7DA;color:#16191D;font-family:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;line-height:1.8;padding:24px 14px 60px}
+.page{max-width:680px;margin:0 auto;background:#FBFAF6;border-radius:20px;box-shadow:0 18px 48px rgba(22,25,29,.13);overflow:hidden}
+/* 封面（深绿） */
+.cover{padding:36px 30px 30px;color:#fff;background:linear-gradient(150deg,#1E5A43,#163F30);text-align:center}
+.badge{display:inline-block;padding:5px 13px;border:1px solid rgba(255,255,255,.34);border-radius:999px;font-size:11px;letter-spacing:.2em;color:rgba(255,255,255,.86)}
+.title{font-family:"Noto Serif SC","Songti SC","STSong",serif;font-size:28px;font-weight:700;letter-spacing:2px;line-height:1.4;margin:16px auto 0;max-width:92%}
+.motto{font-size:12.5px;color:rgba(255,255,255,.72);letter-spacing:.5px;margin-top:14px}
+.meta{font-size:12px;color:rgba(255,255,255,.58);margin-top:12px;letter-spacing:.4px}
+/* 正文章节（白卡） */
+.body{padding:24px 22px 8px}
+.sec{padding:16px 18px;margin:0 0 16px;background:#fff;border:1px solid #E7E4DB;border-radius:14px}
+.sec-h{display:flex;align-items:center;gap:11px;margin-bottom:11px}
+.sec-h .idx{flex:0 0 auto;font-family:"Noto Serif SC",serif;font-size:14px;font-weight:700;color:#fff;background:#1E5A43;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.sec-h h2{font-family:"Noto Serif SC","Songti SC",serif;font-size:17px;color:#1E5A43;font-weight:700;letter-spacing:.5px;line-height:1.4}
+.sec .b{font-size:15px;color:#2b2f34;margin:0 0 9px;line-height:1.85}
+.sec .b:last-child{margin-bottom:0}
+.sec .b.muted{color:#a4a29a}
+.sec ul{margin:8px 0 0;padding:0;list-style:none}
+.sec li{position:relative;font-size:15px;color:#2b2f34;margin:9px 0;padding-left:19px;line-height:1.7}
+.sec li::before{content:"";position:absolute;left:2px;top:10px;width:7px;height:7px;background:#9B7C3F;border-radius:2px;transform:rotate(45deg)}
+/* 落款（金印） */
+.foot{padding:22px 30px 30px;text-align:center;border-top:1px solid #E7E4DB;background:#FBF7EC}
+.seal{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;width:60px;height:60px;border:2px solid #1E5A43;border-radius:12px;color:#1E5A43;transform:rotate(-4deg);margin-bottom:13px;font-weight:700;line-height:1.1}
+.seal .s1{font-family:"Noto Serif SC",serif;font-size:19px;letter-spacing:2px}
 .seal .s2{font-size:8px;letter-spacing:1px;margin-top:2px}
-.seal-motto{font-size:13px;color:#7a5c2e;letter-spacing:1px;margin-bottom:14px}
-.trust{font-size:12px;color:#9a9080;line-height:1.7;max-width:520px;margin:0 auto 16px}
-.brand{font-size:12px;color:#b5a98f;letter-spacing:5px;padding-left:5px}
-@media print{body{background:#fff;padding:0}.page{box-shadow:none;border:none}}
+.seal-motto{font-family:"Noto Serif SC",serif;font-size:13px;color:#43340F;letter-spacing:.5px;margin-bottom:13px}
+.trust{font-size:11.5px;color:#8b8f95;line-height:1.7;max-width:520px;margin:0 auto 14px}
+.brand{font-family:"Noto Serif SC",serif;font-size:14px;font-weight:700;color:#9B7C3F;letter-spacing:.12em}
+.edition{margin-top:5px;font-size:10px;color:#a4a29a;letter-spacing:.16em}
+@media print{body{background:#fff;padding:0}.page{box-shadow:none}}
 </style></head>
 <body>
 <div class="page">
 <header class="cover">
-<div class="eyebrow">军师参谋部 · 战略报告</div>
+<span class="badge">◆ 军师参谋部 ◆</span>
 <h1 class="title">${esc(d.title)}</h1>
 <div class="motto">${COVER_MOTTO}</div>
-<div class="rule"><span class="d">◆</span></div>
 ${d.meta ? `<div class="meta">${esc(d.meta)}</div>` : ''}
 </header>
 <main class="body">
@@ -104,27 +99,71 @@ ${body}
 <div class="seal"><span class="s1">军师</span><span class="s2">JUNSHI</span></div>
 <div class="seal-motto">「${SEAL_MOTTO}」</div>
 <div class="trust">${esc(trust)}</div>
-<div class="brand">军师 · JUNSHI</div>
+<div class="brand">军师参谋部</div>
+<div class="edition">军师 · JUNSHI · CELESTIAL MOMENTUM · V6.0</div>
 </footer>
 </div>
 </body></html>`;
 }
 
+export interface PublishedHtml {
+  /** 小程序 web-view 优先打开自有业务域名，避免 OSS 域名未进业务域名白名单导致打不开。 */
+  htmlUrl: string;
+  /** 可选 CDN/OSS 镜像；不作为小程序内打开入口。 */
+  cdnUrl?: string;
+}
+
+export function publicReportUrl(id: string): string {
+  return `${env.publicBaseUrl}/api/r/${id}`;
+}
+
+export function reportHtmlIdFromUrl(url: string | undefined | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const own = new URL(env.publicBaseUrl);
+    if (u.host === own.host) {
+      const match = u.pathname.match(/\/api\/r\/([^/?#]+)$/);
+      if (match) return decodeURIComponent(match[1]);
+    }
+    const ossBase = env.ossBaseUrl ? new URL(env.ossBaseUrl) : null;
+    if ((ossBase && u.host === ossBase.host) || /\.aliyuncs\.com$/i.test(u.host)) {
+      const last = u.pathname.split('/').filter(Boolean).pop() ?? '';
+      const match = last.match(/^([A-Za-z0-9_-]+)\.html$/);
+      if (match) return match[1];
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function webviewSafeReportUrl(url: string | undefined | null): string | null {
+  const id = reportHtmlIdFromUrl(url);
+  return id ? publicReportUrl(id) : (url || null);
+}
+
 /** 渲染 + 存库 + 返回可分享链接。失败抛出,由调用方吞掉(不影响产出)。
- *  配了 OSS → 传 OSS 返回公网静态链接(不暴露后端域名);没配/上传失败 → 回退后端 /api/r/:id。
- *  DB report_html 行始终保留(留底 + 兜底兜服务)。 */
-export async function publishReport(tenantId: string | null, d: Deliverable): Promise<string> {
-  const html = renderReportHtml(d);
+ *  小程序打开入口始终是自有域名 /api/r/:id；配了 OSS 时额外上传一份 CDN 镜像。
+ *  DB report_html 行始终保留(留底 + 兜底服务)。 */
+export async function publishReport(tenantId: string | null, d: Deliverable): Promise<PublishedHtml> {
+  return publishHtml(tenantId, d.title || '咨询成果', renderReportHtml(d));
+}
+
+/** 通用 HTML 发布：存库留底 → 自有域名入口；OSS 配好时同步一份 CDN 镜像。 */
+export async function publishHtml(tenantId: string | null, title: string, html: string): Promise<PublishedHtml> {
   const row = await prisma.reportHtml.create({
-    data: { tenantId: tenantId ?? null, title: d.title || '咨询成果', html },
+    data: { tenantId: tenantId ?? null, title, html },
   });
+  const htmlUrl = publicReportUrl(row.id);
+  let cdnUrl: string | undefined;
   if (ossConfigured()) {
     try {
       const key = `${env.ossKeyPrefix ? env.ossKeyPrefix + '/' : ''}${row.id}.html`;
-      return await ossPutHtml(key, html);
+      cdnUrl = await ossPutHtml(key, html);
     } catch (err) {
-      console.error('[reportHtml] OSS 上传失败,回退后端链接:', (err as Error).message);
+      console.error('[reportHtml] OSS 上传失败,继续使用自有域名链接:', (err as Error).message);
     }
   }
-  return `${env.publicBaseUrl}/api/r/${row.id}`;
+  return cdnUrl ? { htmlUrl, cdnUrl } : { htmlUrl };
 }

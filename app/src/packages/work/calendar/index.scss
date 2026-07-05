@@ -1,0 +1,67 @@
+/* 全年天时：12 月攻守网格原生展示。角色色口径——进攻=绿(行动)、防守=金(权益/蓄)、平稳=中性、拐点=主题深色描边。 */
+.tcal { background: var(--bg); padding-bottom: 40px; }
+.tcal .pad { padding: 0 18px; }
+
+.tc-hero { margin-top: 12px; padding: 2px 2px 0; }
+.tc-year { display: block; font-size: 22px; font-weight: 600; color: var(--ink); }
+.tc-sub { display: block; margin-top: 6px; font-size: 12px; line-height: 1.7; color: var(--ink-3); }
+.tc-now-line { display: block; margin-top: 10px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.tc-now-phase { font-weight: 600; color: var(--green); }
+
+.tc-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.tc-cell {
+  width: calc((100% - 24px) / 4);
+  padding: 12px 4px 10px; border-radius: 13px; text-align: center;
+  background: var(--surface); border: 1px solid var(--line);
+  box-sizing: border-box;
+}
+.tc-cell .tc-m { display: block; font-size: 15px; font-weight: 600; color: var(--ink); }
+.tc-cell .tc-p { display: block; margin-top: 4px; font-size: 10.5px; color: var(--ink-3); font-weight: 600; }
+.tc-cell.atk { background: var(--green-soft); border-color: var(--green); }
+.tc-cell.atk .tc-m, .tc-cell.atk .tc-p { color: var(--green-deep); }
+.tc-cell.def { background: var(--gold-soft); border-color: var(--gold); }
+.tc-cell.def .tc-m, .tc-cell.def .tc-p { color: var(--gold-deep); }
+.tc-cell.turn { border-style: dashed; border-color: var(--accent-deep); }
+.tc-cell.now { box-shadow: 0 0 0 2px var(--accent-glow); }
+
+.tc-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.tc-legend .lg { font-size: 11px; color: var(--ink-3); font-weight: 600; }
+.tc-legend .lg.atk { color: var(--green); }
+.tc-legend .lg.def { color: var(--gold-deep); }
+.tc-legend .lg.turn { color: var(--accent-deep); }
+
+.tc-note { margin-top: 16px; padding: 14px 16px; }
+.tc-nt { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
+.tc-nd { display: block; margin-top: 6px; font-size: 12.5px; line-height: 1.8; color: var(--ink-2); }
+
+.tc-actions { margin-top: 18px; }
+.tc-share-hint { display: block; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+.tc-print { display: block; margin-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--green); }
+.tc-print:active { opacity: .7; }
+
+/* 就地补生辰表单（与建档/送卦同视觉口径） */
+.tc-form { margin-top: 16px; }
+.tcal .pf-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.tcal .pf-opt {
+  padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); font-size: 12.5px; color: var(--ink-2);
+}
+.tcal .pf-opt.on Text, .tcal .pf-opt.on text { color: #fff; }
+.tcal .pf-input {
+  height: 46px; padding: 0 14px; border: 1px solid var(--line, #e7e4db); border-radius: 12px;
+  background: var(--surface-2, #f3f1ea); font-size: 14.5px; color: var(--ink);
+}
+.tc-date { display: flex; gap: 8px; margin-top: 12px; }
+.tc-date .tc-y { flex: 1.4; }
+.tc-date .tc-md { flex: 1; }
+.tc-btn {
+  margin-top: 22px; height: 50px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); box-shadow: 0 10px 24px var(--accent-glow);
+}
+.tc-btn Text, .tc-btn text { color: #fff; font-size: 15px; font-weight: 600; }
+.tc-btn.off { background: var(--line); box-shadow: none; }
+.tc-btn.off Text, .tc-btn.off text { color: var(--ink-3); }
+.tc-btn:active { opacity: .85; }
+
+.tc-foot { display: block; margin-top: 20px; font-size: 11px; line-height: 1.7; color: var(--ink-3); }

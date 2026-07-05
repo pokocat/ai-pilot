@@ -1,10 +1,10 @@
-// 阿里云 OSS 上传（报告网页版静态托管，不暴露后端域名）。用官方 ali-oss SDK——
+// 阿里云 OSS 上传（报告网页版 CDN 镜像、头像/资料原件存储）。用官方 ali-oss SDK——
 // 签名/重试/endpoint/内网切换等细节交给 SDK，便于后续扩展(删除/签名URL/STS/图片产出存储)。
 // 上传走 env.ossEndpoint(可填内网 endpoint，免公网流量、更快);分享链接走 env.ossBaseUrl(公网)。对象 public-read。
 import OSS from 'ali-oss';
 import { env } from '../env.js';
 
-/** OSS 是否已配齐（缺任一项 → 调用方回退后端 /api/r/:id）。测试环境一律视为未配置，绝不打真实 OSS。 */
+/** OSS 是否已配齐（缺任一项 → 调用方跳过 OSS 镜像/原件存储）。测试环境一律视为未配置，绝不打真实 OSS。 */
 export function ossConfigured(): boolean {
   if (process.env.NODE_ENV === 'test') return false;
   return !!(env.ossBucket && env.ossAccessKeyId && env.ossAccessKeySecret && env.ossBaseUrl && (env.ossEndpoint || env.ossRegion));

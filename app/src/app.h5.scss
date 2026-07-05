@@ -19,14 +19,22 @@ body,
   --line: #E7E4DB;
   --line-2: #EFEDE5;
 
-  --accent: #A07D2C;
-  --accent-deep: #6E5621;
-  --accent-soft: #F2EAD6;
-  --accent-ink: #43340F;
-  --accent-bright: #D8B25A;
-  --accent-glow: rgba(200, 165, 90, .30);
+  --accent: #1E5A43;
+  --accent-deep: #163F30;
+  --accent-soft: #E7EEE9;
+  --accent-ink: #0F2B20;
+  --accent-bright: #5FB389;
+  --accent-glow: rgba(99, 160, 130, .32);
 
-  --gold: #9B7C3F;
+  /* 业务主色跟随本命色（与 app.scss 保持同步） */
+  --green: var(--accent);
+  --green-deep: var(--accent-deep);
+  --green-hero: var(--accent);
+  --green-soft: var(--accent-soft);
+  --gold: var(--accent);
+  --gold-deep: var(--accent-deep);
+  --gold-soft: var(--accent-soft);
+  --blue: #245F88;
   --danger: #9C4A38;
   --warn: #A8772E;
 
@@ -45,7 +53,7 @@ body {
   min-height: 100%;
   background: var(--bg);
   color: var(--ink);
-  font-family: var(--sans);
+  font-family: var(--serif);
 }
 
 #app,

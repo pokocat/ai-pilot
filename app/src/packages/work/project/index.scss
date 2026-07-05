@@ -21,7 +21,7 @@
 .pd-it { display: block; font-size: 14px; font-weight: 600; color: var(--ink); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pd-im { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 3px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pd-go { font-size: 16px; color: var(--ink-3); }
-.pd-ver { border: 1px solid; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 700; }
+.pd-ver { border: 1px solid; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 600; }
 
 .pd-kadd { display: flex; gap: 8px; margin-bottom: 4px; }
 .pd-kinput { flex: 1; height: 40px; padding: 0 14px; border-radius: 12px; background: var(--surface-2); font-size: 13px; color: var(--ink); }

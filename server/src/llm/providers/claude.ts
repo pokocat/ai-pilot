@@ -2,11 +2,14 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { DELIVERABLE_TOOL, buildSystemParts, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, buildSystemParts, normalizeDeliverableSections, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
 import { runToolLoop } from '../tools/loop.js';
+import type { AdaptiveOut } from './openai.js';
+
+const DELIVERABLE_MAX_TOKENS = 2600;
 
 // system 拆成「稳定前缀(打缓存断点) + 每轮变化的参考资料」两块，命中缓存按 ~1/10 计费。
 // 提示词不足最低缓存阈值(Opus 4.8 约 4096 token、Sonnet 约 2048)时 cache_control 自动忽略，无副作用。
@@ -58,6 +61,13 @@ function usageOf(res: Anthropic.Message): Usage {
   };
 }
 
+function requireText(text: string | null | undefined, usage: Usage, where: string): string {
+  const out = (text ?? '').trim();
+  if (out) return out;
+  const detail = usage.outputTokens > 0 ? `，输出 token=${usage.outputTokens}` : '';
+  throw Object.assign(new Error(`Claude 接口返回空文本（${where}${detail}）`), { code: 'AI_EMPTY_RESPONSE' });
+}
+
 export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<Deliverable>> {
   const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
   const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'deliverable');
@@ -68,7 +78,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
 
   const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
     model: cfg.model,
-    max_tokens: 1500,
+    max_tokens: DELIVERABLE_MAX_TOKENS,
     temperature: cfg.temperature,
     system: systemBlocks(`${stable}\n\n${structureHint}\n务必调用 emit_deliverable 工具输出结构化成果，不要输出自由长文。`, dynamic),
     tools: [DELIVERABLE_TOOL],
@@ -79,13 +89,32 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
 
   const toolUse = res.content.find((c) => c.type === 'tool_use');
   if (toolUse && toolUse.type === 'tool_use') {
-    const input = toolUse.input as { title: string; sections: Deliverable['sections'] };
+    const input = toolUse.input as { title?: string; sections?: unknown };
+    const sections = normalizeDeliverableSections(input.sections);
+    if (sections.length) {
+      return {
+        result: {
+          title: input.title || tpl?.title || '咨询成果',
+          icon: tpl?.icon ?? 'spark',
+          meta: metaOf(ctx),
+          sections,
+          trust: TRUST_NOTE,
+          actions: ['save_to_library', 'export_pdf'],
+        },
+        usage,
+      };
+    }
+  }
+  const textSections = normalizeDeliverableSections(
+    res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n'),
+  );
+  if (textSections.length) {
     return {
       result: {
-        title: input.title || tpl?.title || '咨询成果',
+        title: tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
-        sections: input.sections ?? [],
+        sections: textSections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },
@@ -115,10 +144,37 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     .map((c) => (c.type === 'text' ? c.text : ''))
     .join('\n')
     .trim();
-  return {
-    result: { text: text || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
-    usage: usageOf(res),
-  };
+  const usage = usageOf(res);
+  return { result: { text: requireText(text, usage, 'chat') }, usage };
+}
+
+export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
+  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
+  const history = (ctx.history ?? []).map((m) => ({
+    role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
+    content: m.text,
+  }));
+  const stream = getClient(cfg.apiKey, cfg.baseUrl).messages.stream({
+    model: cfg.model,
+    max_tokens: 800,
+    temperature: cfg.temperature,
+    system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
+    messages: [...history, { role: 'user', content: ctx.userMessage }],
+  });
+  let text = '';
+  let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
+  for await (const event of stream) {
+    if (event.type === 'message_start') usage = usageOf(event.message);
+    else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
+    else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+      text += event.delta.text;
+      yield { type: 'delta', text: event.delta.text };
+    }
+  }
+  const final = await stream.finalMessage().catch(() => null);
+  if (final) usage = usageOf(final);
+  const out = requireText(text || final?.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n'), usage, 'chat_stream');
+  yield { type: 'done', result: { text: out }, usage };
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
@@ -161,14 +217,19 @@ export function claudeStep(cfg: ResolvedAiConfig): StepFn {
 
     const req: Anthropic.MessageCreateParamsNonStreaming = {
       model: cfg.model,
-      max_tokens: opts.finalTool ? 1500 : 800,
+      max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : 800,
       temperature: cfg.temperature,
       system: systemBlocks(system, ''),
       messages: msgs,
     };
     if (opts.forceFinal) {
-      // 最后一轮强制收口：deliverable 强制 emit_deliverable；chat 去掉工具直接出文本。
-      if (opts.finalTool) { req.tools = toolDefs; req.tool_choice = { type: 'tool', name: opts.finalTool.name }; }
+      // 最后一轮收口。deliverable(强制)→强制 emit_deliverable；自适应(forceFinalTool=false)→只给 emit 但 auto(可 emit 可出文本)；chat→去掉工具出文本。
+      if (opts.finalTool && opts.forceFinalTool !== false) {
+        req.tools = toolDefs; req.tool_choice = { type: 'tool', name: opts.finalTool.name };
+      } else if (opts.finalTool) {
+        const emitDef: Anthropic.Tool = { name: opts.finalTool.name, description: opts.finalTool.description, input_schema: opts.finalTool.schema as Anthropic.Tool['input_schema'] };
+        req.tools = [emitDef]; req.tool_choice = { type: 'auto' };
+      }
     } else if (toolDefs.length) {
       req.tools = toolDefs;
       req.tool_choice = { type: 'auto' };
@@ -212,10 +273,7 @@ export async function claudeChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
     tools,
     toolCtx: toolCtxOf(ctx),
   });
-  return {
-    result: { text: (r.text ?? '').trim() || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
-    usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
-  };
+  return { result: { text: requireText(r.text, r.usage, 'chat_tools') }, usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations };
 }
 
 /** 启用技能时的产出（claude）：循环里可先检索/召回，最后强制 emit_deliverable 收口。 */
@@ -235,14 +293,29 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
     toolCtx: toolCtxOf(ctx),
     finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
   });
-  const input = (r.toolInput ?? {}) as { title?: string; sections?: Deliverable['sections'] };
-  if (input.sections) {
+  const input = (r.toolInput ?? {}) as { title?: string; sections?: unknown };
+  const sections = normalizeDeliverableSections(input.sections);
+  if (sections.length) {
     return {
       result: {
         title: input.title || tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
-        sections: input.sections,
+        sections,
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
+    };
+  }
+  const textSections = normalizeDeliverableSections(r.text);
+  if (textSections.length) {
+    return {
+      result: {
+        title: tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections: textSections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },
@@ -251,4 +324,44 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
   }
   const { mockDeliverable } = await import('./mock.js');
   return { result: { ...mockDeliverable(ctx), degraded: true }, usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations };
+}
+
+/** 按需产出（claude）：对话优先，模型自行决定是否调用 emit_deliverable。emit→结构化成果(report)；否则→文本对话(chat)。
+ *  与 openaiAdaptive 契约一致（forceFinalTool=false → emit 可选）；总军师 general 走此路，平时聊天、时机到位才出报告。 */
+export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, tools: Tool[]): Promise<AdaptiveOut> {
+  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
+  const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
+  const hint = '默认用文字正常对话回答用户。只有当你判断此刻需要交付一份完整的报告或卡片成果时，才调用 emit_deliverable 以结构化分段输出（含标题与各段小标题/正文/要点）；其余所有情况都直接用文字回复，不要调用 emit_deliverable。';
+  const r = await runToolLoop({
+    step: claudeStep(cfg),
+    system: `${system}\n\n${hint}`,
+    history: ctx.history,
+    userMessage: ctx.userMessage,
+    tools,
+    toolCtx: toolCtxOf(ctx),
+    finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
+    forceFinalTool: false, // emit_deliverable 可选，不强制
+  });
+  const input = (r.toolInput ?? null) as { title?: string; sections?: unknown } | null;
+  const sections = normalizeDeliverableSections(input?.sections);
+  if (sections.length) {
+    const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
+    return {
+      kind: 'report',
+      deliverable: {
+        title: input?.title || tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections,
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
+    };
+  }
+  return {
+    kind: 'chat',
+    reply: { text: requireText(r.text, r.usage, 'adaptive') },
+    usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
+  };
 }

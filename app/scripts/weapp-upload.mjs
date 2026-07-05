@@ -26,12 +26,33 @@ const KEY = process.env.WEAPP_UPLOAD_KEY || arg('key');
 const VERSION = arg('version', process.env.WEAPP_VERSION);
 const DESC = arg('desc', process.env.WEAPP_DESC || '军师 · 例行更新');
 const PROJ = path.join(APP_ROOT, 'dist');
+const EXPECTED_API = process.env.WEAPP_EXPECTED_API || process.env.TARO_APP_API || 'https://wxapi.aibuzz.cn/api';
 
 const die = (m) => { console.error(`[weapp] ✗ ${m}`); process.exit(1); };
+function readBuiltJs(dir) {
+  let out = '';
+  for (const name of fs.readdirSync(dir)) {
+    const p = path.join(dir, name);
+    const st = fs.statSync(p);
+    if (st.isDirectory()) out += readBuiltJs(p);
+    else if (name.endsWith('.js')) out += fs.readFileSync(p, 'utf8');
+  }
+  return out;
+}
+function assertServerBuild() {
+  const bundle = readBuiltJs(PROJ);
+  if (!bundle.includes(EXPECTED_API)) {
+    die(`dist 未注入线上 API：${EXPECTED_API}。请先运行 npm run build:weapp:server，避免上传 mock 小程序包。`);
+  }
+  if (bundle.includes('http://localhost:4000/api')) {
+    die('dist 仍包含默认 localhost API，疑似 mock/dev 构建；拒绝上传。');
+  }
+}
 if (!KEY) die('缺少上传密钥：设 WEAPP_UPLOAD_KEY=/path/to/private.<appid>.key（mp 后台下载）');
 if (!fs.existsSync(KEY)) die(`密钥文件不存在：${KEY}`);
 if (!VERSION) die('缺少版本号：加 --version 0.2.0');
 if (!fs.existsSync(path.join(PROJ, 'app.json'))) die(`未找到已构建产物 ${PROJ}/app.json —— 先跑 server 模式 build:weapp`);
+assertServerBuild();
 
 const project = new ci.Project({
   appid: APPID,

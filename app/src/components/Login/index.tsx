@@ -157,14 +157,6 @@ export default function Login({ open, onLoggedIn }: Props) {
     setStage('wechat');
   };
 
-  // 暂不绑定：跳过手机号绑定（绑定可选），缺名字去完善资料（名字必填），否则直接进入。
-  const skipBind = () => {
-    if (bindLoading) return;
-    const me = store.me();
-    if (!me?.user.name) { setNick(me?.user.name || ''); setAvatarLocal(''); setStage('complete'); }
-    else onLoggedIn(store.isOnboarded());
-  };
-
   const submitWechat = async () => {
     if (busy) return;
     setWechatLoading(true);
@@ -446,7 +438,6 @@ export default function Login({ open, onLoggedIn }: Props) {
           </View>
 
           <View className="lg-actions">
-            <Text className="lg-skip" onClick={skipBind}>暂不绑定，先进去看看</Text>
             <Text className="lg-skip lg-skip-weak" onClick={logoutEscape}>退出登录</Text>
           </View>
         </View>

@@ -142,19 +142,40 @@ export interface QuotaReservation {
  * - 并发：advisory lock 串行化「读余额 + 扣预留」，故第二个并发请求会看到已被预留压低/转负的余额而被拦，透支有界。
  * - settle：按真实 token 计算实际成本，delta = 预留 − 实际，>0 退回、<0 追扣（幂等：settle/refund 二选一只生效一次）。
  */
-export async function reserveQuota(userId: string, ratio = 1): Promise<QuotaReservation> {
+// 复盘保底（M2 PR-6）：留存动作不因额度耗尽中断——余额≤0 时，复盘类调用每日最多放行 N 次
+// （照常预留/结算，余额可为负=透支记账，进入后台消耗明细）。仅额度层面的保底；
+// 套餐到期的只读锁定仍由 assertPlanActive 把守，不受影响。
+export const REVIEW_GRACE_PER_DAY = 2;
+
+async function graceUsedToday(userId: string): Promise<number> {
+  const d = now();
+  const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return prisma.auditLog.count({ where: { userId, action: 'system.quota.grace', createdAt: { gte: dayStart } } });
+}
+
+export async function reserveQuota(userId: string, ratio = 1, opts?: { grace?: 'review' }): Promise<QuotaReservation> {
   const w = await loadWallet(userId); // 锁外先确保账户存在 + 惰性月度重置（upsert 不宜进事务）
   if (!w) throw new InsufficientQuotaError('当前套餐无月度 token 额度，请升级套餐');
   if (isUnlimited(w.quota)) {
     return { unlimited: true, settle: async () => unlimitedState, refund: async () => {} };
   }
   const reserved = Math.ceil(RESERVE_TOKENS * (ratio > 0 ? ratio : 1));
+  // 保底资格在锁外预查（并发极端下最多多放行一次，可接受；额度本身仍有界透支）
+  const allowNegative = opts?.grace ? (await graceUsedToday(userId)) < REVIEW_GRACE_PER_DAY : false;
+  let graceGranted = false;
   await prisma.$transaction(async (tx) => {
     await lockQuota(tx, userId);
     const row = await tx.tokenWallet.findUnique({ where: { userId }, select: { balance: true } });
-    if ((row?.balance ?? 0) <= 0) throw new InsufficientQuotaError();
+    if ((row?.balance ?? 0) <= 0) {
+      if (!allowNegative) throw new InsufficientQuotaError();
+      graceGranted = true; // 复盘保底：额度耗尽仍放行（透支记账）
+    }
     await tx.tokenWallet.update({ where: { userId }, data: { balance: { decrement: reserved } } });
   });
+  if (graceGranted) {
+    const { recordAudit } = await import('./audit.js');
+    await recordAudit({ userId, action: 'system.quota.grace', payload: { kind: opts?.grace, reserved } }).catch(() => {});
+  }
 
   let done = false;
   return {

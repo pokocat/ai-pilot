@@ -16,7 +16,7 @@
 .au-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 0 18px; }
 
 .au-ic { width: 56px; height: 56px; border-radius: 17px; display: flex; align-items: center; justify-content: center; }
-.au-name { font-size: 18px; font-weight: 700; color: var(--ink); margin-top: 12px; }
+.au-name { font-size: 18px; font-weight: 600; color: var(--ink); margin-top: 12px; }
 .au-role { font-size: 12.5px; color: var(--ink-3); margin-top: 4px; }
 .au-deliver { font-size: 12px; font-weight: 600; margin-top: 6px; }
 
@@ -28,7 +28,7 @@
 .au-pl { display: flex; flex-direction: column; gap: 5px; }
 .au-pk { font-size: 11px; color: var(--ink-3); }
 .au-pv-row { display: inline-flex; align-items: center; }
-.au-pv { font-size: 22px; font-weight: 700; }
+.au-pv { font-size: 22px; font-weight: 600; }
 .au-pv .unit { font-size: 12px; font-weight: 500; }
 .au-bal { font-size: 15px; font-weight: 600; }
 .au-divider { width: 1px; height: 30px; background: var(--line, #e4e4e7); }

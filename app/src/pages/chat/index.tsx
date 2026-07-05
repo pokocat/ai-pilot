@@ -1,24 +1,28 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
-import { View, Text, Input, ScrollView } from '@tarojs/components';
+import { View, Text, Textarea, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import MarkdownText from '../../components/MarkdownText';
 import ReportCard from '../../components/ReportCard';
 import SafeHeader from '../../components/SafeHeader';
+import AdvisorAvatar from '../../components/AdvisorAvatar';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type Agent, type Deliverable, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../services/api';
+import { api, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../services/api';
 import { STREAM_CHAT } from '../../services/config';
 import { generateStream } from '../../services/streaming';
 import { agentForText } from '../../data/intents';
+import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../data/council';
+import { CHAT_GUIDES } from '../../data/operatingSystem';
+import { acceptDeliverable } from '../../services/dossier';
 import './index.scss';
 
 type Msg =
   | { role: 'greet'; agent: Agent }
   | { role: 'user'; text: string; refs?: MessageRef[] }
   | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; retryText?: string; streaming?: boolean }
-  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[] }
+  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; streaming?: boolean }
   | { role: 'memory'; agentName: string };
 
 // 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
@@ -43,9 +47,55 @@ function copyDeliverable(d: Deliverable) {
   });
 }
 
+function copyText(text: string, title = '已复制') {
+  const data = text.trim();
+  if (!data) return;
+  Taro.setClipboardData({
+    data,
+    success: () => Taro.showToast({ title, icon: 'success' }),
+    fail: () => Taro.showToast({ title: '复制失败', icon: 'none' }),
+  });
+}
+
+function replyToText(reply: ChatReplyT): string {
+  return [reply.text, ...(reply.points ?? [])].filter(Boolean).join('\n\n');
+}
+
+function reportDraft(agent?: Agent | null, partial: Partial<Deliverable> = {}): Deliverable {
+  return {
+    title: partial.title || `${agent?.name || '军师'}正在出报告`,
+    icon: partial.icon || agent?.icon || 'doc',
+    meta: partial.meta || '正在梳理上下文与引用资料',
+    sections: partial.sections || [],
+    trust: partial.trust || '生成完成后会给出判断依据与下一步动作。',
+    actions: partial.actions || ['save_to_library', 'export_pdf'],
+    htmlUrl: partial.htmlUrl,
+    cdnUrl: partial.cdnUrl,
+    degraded: partial.degraded,
+  };
+}
+
+function mergeReportSection(sections: Section[], section: Section & { index?: number }): Section[] {
+  const next = sections.slice();
+  const clean: Section = {
+    h: section.h || `第 ${next.length + 1} 段`,
+    b: section.b,
+    list: Array.isArray(section.list) ? section.list : undefined,
+  };
+  if (typeof section.index === 'number' && section.index >= 0) next[section.index] = clean;
+  else next.push(clean);
+  return next.filter(Boolean);
+}
+
 type ChatStyle = CSSProperties & {
   '--keyboard-height'?: string;
 };
+
+// 模型选择：后端统一调度，前端暂固定展示一档（预留多模型切换入口）。
+const FIXED_MODEL = '军师 · 标准';
+
+const IS_WEAPP = process.env.TARO_ENV === 'weapp';
+const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
 
 export default function Chat() {
   const router = useRouter();
@@ -92,6 +142,9 @@ export default function Chat() {
 
   // 审核类错误（输入/输出未通过内容审核）：重试同样内容必再次被拦，故不提供「重试」，也避免叠出重复气泡。
   const isModerationErr = (s?: string) => !!s && /审核/.test(s);
+
+  const wantsDeliverableRequest = (s: string) =>
+    /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|(?:重新)?出.{0,4}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|战略体检|转成军令|生成纪要/.test(s);
 
   const promptLogin = (title = '请先登录后再开始对话') => {
     setShowLogin(true);
@@ -163,13 +216,13 @@ export default function Chat() {
           setSessionId(latest.id);
           if (detail.projectId) setProjectId(detail.projectId);
           restore(fallbackAgent, detail.messages);
-          if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key), 300);
+          if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key, [], true, detail.projectId || pid || ''), 300);
           return;
         }
       }
       // 全新会话：仅渲染问候（不落库），首条消息时后端创建
       setMsgs([{ role: 'greet', agent: fallbackAgent }]);
-      if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key), 350);
+      if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key, [], true, pid || ''), 350);
     } catch (e) {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
       // 任何拉取失败都不让对话页空白：至少给出问候
@@ -195,7 +248,7 @@ export default function Chat() {
     setTimeout(scrollToEnd, 60);
   }
 
-  async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true) {
+  async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true, activeProjectId = projectId) {
     if (busy) return;
     if (!store.isAuthed()) {
       promptLogin();
@@ -213,8 +266,58 @@ export default function Chat() {
     if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
     try {
-      // P1-B3：纯聊天体（无 deliverableKey）且开关开启 → 流式渐进渲染；其余走同步（零行为变更）。
-      if (STREAM_CHAT && !agent?.deliverableKey) {
+      // P1-B3：普通聊天默认真流式；总军师 on-demand 仅在明确要成果/报告时回同步成果路径。
+      // 路由带 send= 自动发送时，React state 里的 agent 可能还没刷新；必须按本次 agentKey 重新取配置。
+      const sendingAgent = findAgent(agentKey) || agent;
+      const deliverableRequested = wantsDeliverableRequest(text);
+      const body = { text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined };
+      const canStreamChat = STREAM_CHAT && !!sendingAgent && (!sendingAgent.deliverableKey || (sendingAgent.key === 'general' && !deliverableRequested));
+      const canStreamReport = STREAM_CHAT && !!sendingAgent && (!!sendingAgent.deliverableKey || deliverableRequested) && (sendingAgent.key !== 'general' || deliverableRequested);
+
+      const showMemoryLearned = (agentName: string, delay: number) => {
+        setTimeout(() => {
+          setMsgs((m) => [...m, { role: 'memory', agentName }]);
+          scrollToEnd();
+        }, delay);
+      };
+      const renderGenerateResult = (res: Awaited<ReturnType<typeof api.generate>>, replaceStreamingAssistant = false) => {
+        if (res.sessionId && !sid) setSessionId(res.sessionId);
+        if (res.kind === 'report' && res.deliverable) {
+          const reportMsg: Extract<Msg, { role: 'report' }> = {
+            role: 'report',
+            deliverable: res.deliverable,
+            animate: true,
+            messageId: res.messageId,
+            knowledgeUsed: res.knowledgeUsed,
+          };
+          setMsgs((m) => {
+            if (replaceStreamingAssistant) {
+              const i = m.length - 1;
+              if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+                const copy = m.slice();
+                copy[i] = reportMsg;
+                return copy;
+              }
+            }
+            return [...m, reportMsg];
+          });
+          if (res.memory?.learned) showMemoryLearned(res.memory.agentName, data_delay(res.deliverable));
+        } else if (res.reply) {
+          setMsgs((m) => {
+            if (replaceStreamingAssistant) {
+              const i = m.length - 1;
+              if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+                const copy = m.slice();
+                copy[i] = { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed };
+                return copy;
+              }
+            }
+            return [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed }];
+          });
+        }
+      };
+
+      if (canStreamChat) {
         const patch = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
           setMsgs((m) => {
             const i = m.length - 1;
@@ -222,10 +325,10 @@ export default function Chat() {
               const copy = m.slice(); copy[i] = fn(copy[i] as Extract<Msg, { role: 'assistant' }>); return copy;
             }
             return m;
-          });
+        });
         setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
-        await generateStream(
-          { text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined },
+        const streamOk = await generateStream(
+          body,
           {
             onSession: (id) => { if (id && !sid) setSessionId(id); },
             onToken: (t) => patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })),
@@ -234,21 +337,82 @@ export default function Chat() {
             onError: (em) => patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false })),
           },
         );
+        if (!streamOk) {
+          const res = await api.generate(body);
+          renderGenerateResult(res, true);
+        }
+        setTimeout(scrollToEnd, 80);
+      } else if (canStreamReport) {
+        let reportStarted = false;
+        let learnedAgentName = '';
+        const patchReport = (
+          fn: (d: Deliverable) => Deliverable,
+          extra: Partial<Extract<Msg, { role: 'report' }>> = {},
+        ) => {
+          setMsgs((m) => {
+            const i = m.length - 1;
+            if (i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming) {
+              const copy = m.slice();
+              const cur = copy[i] as Extract<Msg, { role: 'report' }>;
+              copy[i] = { ...cur, ...extra, deliverable: fn(cur.deliverable) };
+              return copy;
+            }
+            return [...m, { role: 'report', deliverable: fn(reportDraft(sendingAgent)), animate: false, streaming: true, ...extra }];
+          });
+        };
+        const startReport = () => {
+          if (reportStarted) return;
+          reportStarted = true;
+          patchReport((d) => d);
+          setTimeout(scrollToEnd, 30);
+        };
+        const streamOk = await generateStream(body, {
+          onSession: (id) => { if (id && !sid) setSessionId(id); },
+          onReportStart: startReport,
+          onReportBegin: (data) => {
+            startReport();
+            patchReport((d) => ({
+              ...d,
+              title: data.title || d.title,
+              icon: data.icon || d.icon,
+              meta: data.meta || d.meta,
+            }));
+          },
+          onReportSection: (section) => {
+            startReport();
+            patchReport((d) => ({ ...d, sections: mergeReportSection(d.sections, section) }));
+            setTimeout(scrollToEnd, 40);
+          },
+          onReportFooter: (data) => {
+            startReport();
+            patchReport((d) => ({
+              ...d,
+              trust: data.trust || d.trust,
+              actions: data.actions?.length ? data.actions : d.actions,
+            }));
+          },
+          onMemory: (data) => {
+            if (data.learned && data.agentName) learnedAgentName = data.agentName;
+          },
+          onDone: (messageId) => {
+            patchReport((d) => d, { streaming: false, messageId });
+            if (learnedAgentName) showMemoryLearned(learnedAgentName, 600);
+            setTimeout(scrollToEnd, 80);
+          },
+          onError: (em) => {
+            if (reportStarted) {
+              patchReport((d) => ({ ...d, trust: em || '生成中断，请重试', degraded: true }), { streaming: false });
+            }
+          },
+        });
+        if (!streamOk && !reportStarted) {
+          const res = await api.generate(body);
+          renderGenerateResult(res);
+        }
         setTimeout(scrollToEnd, 80);
       } else {
-        const res = await api.generate({ text, sessionId: sid || undefined, agentKey, projectId: projectId || undefined, refs: sendRefs.length ? sendRefs : undefined });
-        if (res.sessionId && !sid) setSessionId(res.sessionId);
-        if (res.kind === 'report' && res.deliverable) {
-          setMsgs((m) => [...m, { role: 'report', deliverable: res.deliverable!, animate: true, messageId: res.messageId, knowledgeUsed: res.knowledgeUsed }]);
-          if (res.memory?.learned) {
-            setTimeout(() => {
-              setMsgs((m) => [...m, { role: 'memory', agentName: res.memory!.agentName }]);
-              scrollToEnd();
-            }, data_delay(res.deliverable!));
-          }
-        } else if (res.reply) {
-          setMsgs((m) => [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed }]);
-        }
+        const res = await api.generate(body);
+        renderGenerateResult(res);
         setTimeout(scrollToEnd, 80);
       }
     } catch (e) {
@@ -262,12 +426,14 @@ export default function Chat() {
   }
 
   const handleInput = (e: { detail: { value: string } }) => {
+    if (busy) return input;
     const v = e.detail.value;
     setInput(v);
     return v;
   };
 
   const onSend = (raw?: string) => {
+    if (busy) return;
     const v = (typeof raw === 'string' ? raw : input).trim();
     if (!v || !agent) return;
     setInput('');
@@ -292,17 +458,53 @@ export default function Chat() {
     Taro.showToast({ title: '已存入方案库', icon: 'none' });
   };
 
-  // 生成网页版报告（render_report → OSS 托管），复制可分享链接
+  // 认可方案：存入方案库（桥接一版报告）+ 服务端生成案卷军令 → 去执行页承接打卡与回填
+  const acceptPlan = async (d: Deliverable) => {
+    const r = await acceptDeliverable(d, agent?.name || '军师').catch(() => null);
+    if (!r) { Taro.showToast({ title: '案卷生成失败，请重试', icon: 'none' }); return; }
+    if (!r.newOrders && r.skippedOrders) {
+      Taro.showToast({ title: '这份方案已转成军令，不重复添加', icon: 'none' });
+      return;
+    }
+    await saveDeliverable(d);
+    Taro.showToast({ title: r.newOrders ? `已生成案卷 · ${r.newOrders} 条军令待执行` : '已生成案卷', icon: 'none' });
+    setTimeout(() => Taro.switchTab({ url: '/pages/studio/index' }), 620);
+  };
+
+  // 转成军令：把本轮最新的结构化成果转为今日军令（无成果则引导先产出）
+  const turnIntoOrders = () => {
+    const lastReport = [...logRef.current].reverse().find((m) => m.role === 'report') as Extract<Msg, { role: 'report' }> | undefined;
+    if (!lastReport) {
+      Taro.showToast({ title: '先让军师产出一份方案，认可后即可转成军令', icon: 'none' });
+      return;
+    }
+    acceptPlan(lastReport.deliverable);
+  };
+
+  // 切换军师线程（派单 / 回总军师）：redirectTo 保持页面栈扁平，带 prompt 时直接开场
+  const openThread = (agentKey: string, prompt?: string) => {
+    const url = `/pages/chat/index?agentKey=${agentKey}&fresh=1${prompt ? `&send=${encodeURIComponent(prompt)}` : ''}`;
+    Taro.redirectTo({ url });
+  };
+  const openGuide = (url: string) => Taro.navigateTo({ url });
+
+  // 生成网页版报告（render_report → 自有域名 /api/r/:id，接口幂等）→ 直接打开：weapp 走内置 web-view 页，H5 开新窗口。
   const shareReport = async (messageId?: string) => {
     if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出成果', icon: 'none' }); return; }
     Taro.showLoading({ title: '生成网页版…' });
     try {
       const r = await api.renderReport(sessionId, messageId);
       Taro.hideLoading();
-      if (r.htmlUrl) {
-        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '网页版链接已复制 · 粘到聊天/浏览器打开', icon: 'none' }) });
+      if (!r.htmlUrl) { Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' }); return; }
+      if (IS_WEAPP) {
+        Taro.navigateTo({
+          url: `/packages/work/webview/index?url=${encodeURIComponent(r.htmlUrl)}`,
+          fail: () => Taro.showToast({ title: '网页打开失败，请稍后重试', icon: 'none' }),
+        });
+      } else if (typeof window !== 'undefined' && window.open) {
+        window.open(r.htmlUrl, '_blank');
       } else {
-        Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' });
+        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '网页版链接已复制', icon: 'none' }) });
       }
     } catch {
       Taro.hideLoading();
@@ -322,6 +524,62 @@ export default function Chat() {
     } catch {
       Taro.hideLoading();
       Taro.showToast({ title: '生成纪要失败', icon: 'none' });
+    }
+  };
+
+  // 点加号：上传资料（真实走微信文件选择 + OSS）或引用已有资料
+  const onPlus = () => {
+    if (busy) return;
+    setInputFocus(false);
+    if (!store.isAuthed()) {
+      setShowLogin(true);
+      Taro.showToast({ title: '请先登录', icon: 'none' });
+      return;
+    }
+    Taro.showActionSheet({
+      itemList: ['上传资料（PDF/Word/Excel…）', '引用已有项目 / 报告 / 知识'],
+      success: (r) => {
+        if (r.tapIndex === 0) uploadMaterial();
+        else if (r.tapIndex === 1) openPicker();
+      },
+    });
+  };
+
+  // 上传资料：微信只能选「聊天里的文件」→ 上传解析 → 自动挂为本轮引用
+  const uploadMaterial = async () => {
+    if (!IS_WEAPP) { Taro.showToast({ title: '请在微信小程序内上传文件', icon: 'none' }); return; }
+    const guide = await Taro.showModal({
+      title: '从微信聊天选择文件',
+      content: '微信只允许小程序选取「聊天里的文件」。请先把资料发给「文件传输助手」（电脑端微信也能发），下一步选它即可。这不是转发，是选文件。',
+      confirmText: '去选择',
+      cancelText: '取消',
+    });
+    if (!guide.confirm) return;
+    let chosen: Taro.chooseMessageFile.SuccessCallbackResult;
+    try {
+      chosen = await Taro.chooseMessageFile({ count: 1, type: 'file', extension: UPLOAD_EXT });
+    } catch (e) {
+      const msg = String((e as { errMsg?: string })?.errMsg || '');
+      if (!/cancel/i.test(msg)) Taro.showToast({ title: '没能打开文件选择，请重试', icon: 'none' });
+      return; // 用户取消则静默
+    }
+    const f = chosen.tempFiles?.[0];
+    if (!f) return;
+    const ext = (f.name?.split('.').pop() || '').toLowerCase();
+    if (!UPLOAD_EXT.includes(ext)) {
+      Taro.showToast({ title: `不支持的格式 .${ext}（支持 PDF/Word/Excel/MD/TXT）`, icon: 'none' });
+      return;
+    }
+    Taro.showLoading({ title: '上传中…' });
+    try {
+      const { id } = await api.uploadKnowledge(f.path, projectId || undefined);
+      Taro.hideLoading();
+      const label = f.name || '上传资料';
+      setRefs((cur) => cur.some((x) => x.kind === 'knowledge' && x.id === id) ? cur : [...cur, { kind: 'knowledge', id, label }]);
+      Taro.showToast({ title: '已上传，解析中…可直接发送提问', icon: 'none' });
+    } catch (e) {
+      Taro.hideLoading();
+      Taro.showToast({ title: (e as Error).message || '上传失败', icon: 'none' });
     }
   };
 
@@ -371,12 +629,17 @@ export default function Chat() {
       {/* 顾问身份头 */}
       <SafeHeader
         className="chat-head"
-        left={<View className="safe-hbtn" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}><Icon name="grid" size={20} color="#565C63" /></View>}
-        right={<View className="safe-hbtn" onClick={() => Taro.redirectTo({ url: '/pages/chat/index?fresh=1' })}><Icon name="spark" size={20} color="#565C63" /></View>}
+        left={<View className="safe-hbtn" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}><Icon name="chat" size={19} color="#565C63" /></View>}
       >
         <View className="chat-id">
-          <Text className="cn">{agent?.name ?? '军师'}</Text>
-          <Text className="cr">· {agent?.role ?? '通用商业军师'}</Text>
+          <AdvisorAvatar agentKey={agent?.key ?? 'general'} size={34} online />
+          <View className="chat-id-copy">
+            <View className="chat-id-name">
+              <Text className="cn">{agent?.name ?? '军师'}</Text>
+              {ADVISOR_ALIAS[agent?.key ?? ''] ? <Text className="calias serif">{ADVISOR_ALIAS[agent?.key ?? '']}</Text> : null}
+            </View>
+            <Text className="cr">{agent?.role ?? '通用商业军师'}</Text>
+          </View>
         </View>
       </SafeHeader>
 
@@ -399,14 +662,57 @@ export default function Chat() {
         <View className="ct-sum" onClick={onSummarize}><Icon name="doc" size={13} color="#565C63" /><Text>生成纪要</Text></View>
       </View>
 
+      {/* 参谋室协同导轨：总军师可派单给专业军师，专业军师可回总军师；随后是补充上下文入口 */}
+      {agent ? (
+        <View className="council-rail">
+          <ScrollView scrollX enhanced showScrollbar={false} className="council-scroll">
+            {agent.key === 'general' ? (
+              DISPATCH_SUGGESTIONS.map((it) => (
+                <View key={it.agentKey} className="council-chip" onClick={() => openThread(it.agentKey, it.prompt)}>
+                  <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={it.icon} size={13} color={accent} /></View>
+                  <Text>{it.name}</Text>
+                </View>
+              ))
+            ) : (
+              <>
+                <View className="council-chip master" onClick={() => openThread('general', `我在${agent.name}线程里聊到的关键结论，请你汇总进主线判断，并告诉我下一步。`)}>
+                  <View className="council-ic" style={{ background: accent }}><Icon name="spark" size={13} color="#fff" /></View>
+                  <Text>回到总军师</Text>
+                </View>
+                {CORE_SPECIALISTS.filter((t) => t.agentKey !== agent.key).map((t) => {
+                  const a = findAgent(t.agentKey);
+                  if (!a) return null;
+                  return (
+                    <View key={t.agentKey} className="council-chip" onClick={() => openThread(t.agentKey)}>
+                      <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={a.icon} size={13} color={accent} /></View>
+                      <Text>{a.name}</Text>
+                    </View>
+                  );
+                })}
+              </>
+            )}
+            <View className="council-chip guide" onClick={turnIntoOrders}>
+              <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="check" size={13} color={accent} /></View>
+              <Text>转成军令</Text>
+            </View>
+            {CHAT_GUIDES.map((g) => (
+              <View key={g.label} className="council-chip guide" onClick={() => openGuide(g.url)}>
+                <View className="council-ic" style={{ background: 'var(--surface-2)' }}><Icon name={g.icon} size={13} color="#565C63" /></View>
+                <Text>{g.label}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       {/* 对话流 */}
       <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false}>
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (
               <View key={i} className="msg a">
-                <View className="who"><View className="d" style={{ background: accent }}><Icon name={m.agent.icon} size={13} color="#fff" /></View><Text>{m.agent.name}</Text></View>
-                <View className="bubble">
+                <View className="who"><AdvisorAvatar agentKey={m.agent.key} size={24} /><Text>{m.agent.name}</Text></View>
+                <View className="bubble" onLongPress={() => copyText(m.agent.greet)}>
                   <Text>{m.agent.greet}</Text>
                   <View className="memory-disclosure">
                     <View className="md-h">
@@ -434,7 +740,7 @@ export default function Chat() {
           if (m.role === 'user') {
             return (
               <View key={i} className="msg u">
-                <View className="ubub" style={{ background: accent }}><Text>{m.text}</Text></View>
+                <View className="ubub" style={{ background: accent }} onLongPress={() => copyText(m.text)}><Text>{m.text}</Text></View>
                 {m.refs?.length ? (
                   <View className="uref">{m.refs.map((r, j) => <Text key={j} className="uref-chip">@{r.label}</Text>)}</View>
                 ) : null}
@@ -444,8 +750,8 @@ export default function Chat() {
           if (m.role === 'assistant') {
             return (
               <View key={i} className="msg a">
-                <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
-                <View className="bubble">
+                <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
+                <View className="ai-text" onLongPress={() => copyText(replyToText(m.reply))}>
                   {m.streaming && !m.reply.text ? (
                     <View className="think-dots">
                       <View className="think-dot" style={{ background: accent }} />
@@ -453,11 +759,11 @@ export default function Chat() {
                       <View className="think-dot d3" style={{ background: accent }} />
                     </View>
                   ) : (
-                    <MarkdownText text={m.reply.text} />
+                    <MarkdownText text={m.reply.text} selectable />
                   )}
                   {m.reply.points && (
                     <View className="points">
-                      {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><MarkdownText text={p} className="pt-t" /></View>)}
+                      {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><MarkdownText text={p} className="pt-t" selectable /></View>)}
                     </View>
                   )}
                 </View>
@@ -469,7 +775,7 @@ export default function Chat() {
           }
           if (m.role === 'memory') {
             return (
-              <View key={i} className="mem-learned">
+              <View key={i} className="mem-learned" onLongPress={() => copyText(`专属理解已更新：${m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。`)}>
                 <Icon name="spark" size={13} color={accent} />
                 <Text>专属理解已更新：{m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。</Text>
               </View>
@@ -479,16 +785,38 @@ export default function Chat() {
           return (
             // P2-14：报告气泡用 messageId 作稳定 key，避免「延迟插入记忆」导致索引位移、ReportCard 渐显动画状态错位。
             <View key={m.messageId ?? `r-${i}`} className="msg a">
-              <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent?.icon ?? 'spark'} size={13} color="#fff" /></View><Text>{agent?.name}</Text></View>
-              <ReportCard data={m.deliverable} animate={m.animate} onSave={() => saveDeliverable(m.deliverable)} onExport={() => copyDeliverable(m.deliverable)} onShare={() => shareReport(m.messageId)} />
-              {m.deliverable.degraded ? (
+              <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
+              <View onLongPress={() => copyDeliverable(m.deliverable)}>
+                <ReportCard
+                  data={m.deliverable}
+                  animate={m.animate}
+                  streaming={m.streaming}
+                  onSave={m.streaming ? undefined : () => saveDeliverable(m.deliverable)}
+                  onExport={m.streaming ? undefined : () => copyDeliverable(m.deliverable)}
+                  onShare={m.streaming ? undefined : () => shareReport(m.messageId)}
+                />
+              </View>
+              {!m.streaming && m.deliverable.degraded ? (
                 <View style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
-                  <Text>本次为降级模板（未取得完整结构化产出），可重新发送以获取正式成果。</Text>
+                  <Text>这版是保底草案，已免扣额度。你可以补充要求后再生成一版。</Text>
                 </View>
               ) : null}
               {m.knowledgeUsed && m.knowledgeUsed.length ? (
                 <View style={{ marginTop: '6px', fontSize: '12px', opacity: 0.6 }}>
                   <Text>参考了 {m.knowledgeUsed.length} 份资料：{m.knowledgeUsed.join('、')}</Text>
+                </View>
+              ) : null}
+              {/* 认可方案 → 沉淀报告并进入执行承接（对齐「认可后拆成军令/复盘」动线） */}
+              {!m.streaming && !m.deliverable.degraded ? (
+                <View className="accept-card">
+                  <View className="accept-b">
+                    <Text className="accept-t">认可这份方案？</Text>
+                    <Text className="accept-d">存入方案库沉淀为报告，执行页承接军令与复盘。</Text>
+                  </View>
+                  <View className="accept-btn" style={{ background: accent }} onClick={() => acceptPlan(m.deliverable)}>
+                    <Icon name="check" size={13} color="#fff" />
+                    <Text>认可 · 去执行</Text>
+                  </View>
                 </View>
               ) : null}
             </View>
@@ -497,7 +825,7 @@ export default function Chat() {
         {/* 流式进行中：气泡内已自带「转圈→逐句填字」，不再叠加全局 thinking 指示器（否则出现两条响应）。 */}
         {busy && agent && !(msgs.length > 0 && (msgs[msgs.length - 1] as { role: string; streaming?: boolean }).streaming) ? (
           <View className="msg a thinking">
-            <View className="who"><View className="d" style={{ background: accent }}><Icon name={agent.icon} size={13} color="#fff" /></View><Text>{agent.name}</Text></View>
+            <View className="who"><AdvisorAvatar agentKey={agent.key} size={24} /><Text>{agent.name}</Text></View>
             <View className="bubble think-bubble">
               <View className="think-dots">
                 <View className="think-dot" style={{ background: accent }} />
@@ -522,31 +850,49 @@ export default function Chat() {
         </View>
       ) : null}
 
-      {/* 输入区 */}
-      <View className="composer">
-        <View className="box" onClick={() => setInputFocus(true)}>
-          <View className="cbtn" onClick={(e) => { e.stopPropagation?.(); openPicker(); }}><Icon name="attach" size={18} color={refs.length ? accent : '#969BA1'} /></View>
-          <Input
+      {/* 输入区：高度自适应卡片，底排为 加号(资料) / 选模型 / 语音·发送 */}
+      <View className={`composer ${busy ? 'busy' : ''}`}>
+        <View className="box" onClick={() => { if (!busy) setInputFocus(true); }}>
+          <Textarea
             className="cinput"
-            type="text"
             value={input}
             focus={inputFocus}
+            disabled={busy}
             maxlength={500}
             cursorSpacing={24}
             adjustPosition={false}
-            alwaysEmbed
-            placeholder="向顾问提问…（点 📎 引用项目/报告/知识）"
+            autoHeight
+            showConfirmBar={false}
+            placeholder="向军师提问…"
             confirmType="send"
-            onFocus={() => setInputFocus(true)}
+            onFocus={() => { if (!busy) setInputFocus(true); }}
             onBlur={() => { setInputFocus(false); setKeyboardHeight(0); }}
             onInput={handleInput}
             onConfirm={(e) => onSend(e.detail.value)}
             onKeyboardHeightChange={onKeyboardHeightChange}
           />
-          <Icon name="mic" size={18} color="#969BA1" />
-        </View>
-        <View className={`csend ${busy ? 'busy' : ''}`} role="button" aria-label="发送" style={{ background: accent }} onClick={() => onSend()}>
-          <Icon name="send" size={18} color="#fff" />
+          <View className="cbar">
+            <View className="cbar-l">
+              <View className="cbtn plus" onClick={(e) => { e.stopPropagation?.(); onPlus(); }}>
+                <Icon name="plus" size={19} color={refs.length ? accent : '#565C63'} />
+              </View>
+              <View className="cmodel" onClick={(e) => { e.stopPropagation?.(); Taro.showToast({ title: '更多模型即将开放', icon: 'none' }); }}>
+                <Text className="cmodel-name">{FIXED_MODEL}</Text>
+                <Icon name="chevron" size={13} color="#969BA1" />
+              </View>
+            </View>
+            <View className="cbar-r">
+              <View
+                className={`csend ${busy || !input.trim() ? 'off' : ''}`}
+                role="button"
+                aria-label="发送"
+                style={{ background: input.trim() && !busy ? accent : undefined }}
+                onClick={(e) => { e.stopPropagation?.(); onSend(); }}
+              >
+                <Icon name="up" size={18} color="#fff" />
+              </View>
+            </View>
+          </View>
         </View>
       </View>
 

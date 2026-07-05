@@ -32,6 +32,8 @@
     "ali-oss": "^6.21.0",
     "dotenv": "^16.4.5",
     "fastify": "^5.1.0",
+    "iztro": "^2.5.8",
+    "lunar-typescript": "^1.8.6",
     "mammoth": "^1.12.0",
     "pdf-parse": "^2.4.5",
     "xlsx": "^0.18.5",

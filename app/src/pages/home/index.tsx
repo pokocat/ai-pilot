@@ -1,38 +1,15 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Input, Image } from '@tarojs/components';
+import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
-import logo from '../../assets/logo.png';
-import Icon from '../../components/Icon';
-import Picker from '../../components/Picker';
 import Login from '../../components/Login';
+import Picker from '../../components/Picker';
 import { useStore } from '../../hooks/useStore';
-import { api } from '../../services/api';
+import { store } from '../../services/store';
+import { api, type ChartSummary } from '../../services/api';
+import { MODULE_MARKET, THREE_FORCES } from '../../data/operatingSystem';
+import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
 import './index.scss';
-
-// 常见起手式（非"为你发现"——不臆造用户尚未提供的业务结论）。点开即把该主题发给军师。
-const INSIGHTS = [
-  { ic: 'target', ttl: '做一次战略诊断', desc: '定位、增长卡点与下一步，整理成可执行报告。', act: '开始诊断', send: '战略体检' },
-  { ic: 'trend', ttl: '理清增长杠杆', desc: '从获客、转化、复购、定价里找到发力点。', act: '梳理增长', send: '增长方案' },
-  { ic: 'doc', ttl: '梳理融资准备', desc: '把增长逻辑、单位经济与资金用途讲清楚。', act: '准备材料', send: '融资准备' },
-];
-
-// 首页快捷入口：展示当前可直接使用的常用顾问，避免把首屏写成权益售卖区。
-const TOOLS = [
-  { agent: 'strat', ic: 'target', h: '战略诊断官', p: '卡点判断与行动清单' },
-  { agent: 'growth', ic: 'trend', h: '增长操盘手', p: '获客、转化与复购路径' },
-  { agent: 'fund', ic: 'doc', h: '融资参谋', p: '融资叙事与问答准备' },
-  { agent: 'general', ic: 'spark', h: '军师', p: '随时为你出谋' },
-];
-
-function greetWord() {
-  const h = new Date().getHours();
-  if (h < 6) return '夜深了';
-  if (h < 12) return '早上好';
-  if (h < 14) return '中午好';
-  if (h < 18) return '下午好';
-  return '傍晚好';
-}
 
 function todayLabel() {
   const d = new Date();
@@ -56,6 +33,8 @@ function SayingLine({ html, accent }: { html: string; accent: string }) {
   );
 }
 
+// 战局页 —— 对齐设计稿 page-battle：军师判断 hero → 信号指标 → 三势 → 下一步动作 → 关联模块 → 不能做 → 认可 CTA。
+// 判断内容一律来自真实军师档案（me.understanding）与案卷，资料不足时引导进入对话访谈，不预置结论。
 export default function Home() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -63,13 +42,20 @@ export default function Home() {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerFirst, setPickerFirst] = useState(false);
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
-  const [input, setInput] = useState('');
   const [navTop, setNavTop] = useState<number>();
+  const [dossier, setDossier] = useState<Dossier | null>(null);
+  const [chart, setChart] = useState<ChartSummary | null>(null);
   const me = s.me();
+  const und = me?.understanding;
 
   useDidShow(() => {
-    s.setTab(0);
+    s.setTab(1);
     Taro.getCurrentInstance().page?.getTabBar?.();
+    refreshDossier().then(setDossier); // 案卷已服务端化（含一次性本地迁移）
+    if (s.isAuthed()) {
+      store.loadMe(); // 刷新军师档案（对话/资料变化后战局判断随之更新）
+      api.myChart().then((r) => setChart(r.chart)).catch(() => setChart(null)); // 命盘（天时窗口）
+    }
   });
 
   useEffect(() => {
@@ -81,7 +67,7 @@ export default function Home() {
       setShowPicker(true);
     }
     api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
-    // 自定义导航：品牌行与微信胶囊（右上角 ••• ⊙）顶端对齐，左侧本就空着，不浪费纵向空间
+    // 自定义导航：标题行与微信胶囊顶端对齐
     try {
       const r = Taro.getMenuButtonBoundingClientRect?.();
       if (r && r.top) setNavTop(r.top);
@@ -99,111 +85,183 @@ export default function Home() {
     Taro.navigateTo({ url: `/pages/chat/index?${params}` });
     return true;
   };
-  const send = () => {
-    const v = input.trim() || '帮我做一次战略体检';
-    if (goChat(`send=${encodeURIComponent(v)}`)) setInput('');
+
+  const gapCount = und?.nextQuestions.length ?? 0;
+  const riskCount = dossier?.risks.length ?? 0;
+  const progress = todayProgress(dossier);
+  // 案卷完整度：军师档案成熟度（真实状态，不编百分比）
+  const maturityLabel = !s.isAuthed() || !und ? '—' : und.maturity === 'ready' ? '可用' : und.maturity === 'forming' ? '整理中' : '待建档';
+
+  const refresh = () => {
+    refreshDossier().then(setDossier);
+    if (s.isAuthed()) store.loadMe();
+    Taro.showToast({ title: '战局已刷新', icon: 'none' });
   };
+  const startInterview = () =>
+    goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
+  const startForces = () =>
+    goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('用三势判断（天势、市势、人势）帮我看一遍当前局势，并给出该攻、该守还是该等的结论。')}`);
+  const askRisks = () =>
+    goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
+  // 天势不再引导对话：排盘引擎已算好 → 直接进原生「全年天时」页（无命盘则页内就地补生辰）
+  const openTianshi = () => Taro.navigateTo({ url: '/packages/work/calendar/index' });
 
   return (
     <Screen className="home">
       <View className="pad">
-        {/* 品牌行 —— 与微信胶囊顶端对齐（本命色切换已移至「我的」） */}
-        <View className="brandrow" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
-          <View className="brand">
-            <Image className="brand-mk" src={logo} mode="aspectFit" />
-            <View>
-              <Text className="brand-nm serif">AI 军师</Text>
-              <Text className="brand-sub">AI STRATEGIST</Text>
-            </View>
+        {/* 页头（对齐设计稿）：左「案卷」· 中「战局」· 右刷新 */}
+        <View className="battle-nav" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
+          <Text className="bn-side left serif" onClick={() => requireLogin() && Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
+          <Text className="bn-title serif">战局</Text>
+          <Text className="bn-side right" onClick={refresh}>↻</Text>
+        </View>
+
+        {/* 军师判断 hero：主题色主要矛盾 + 案卷来源行 */}
+        <View className="battle-hero" onClick={() => goChat('agentKey=general&continue=1')}>
+          <Text className="bh-kicker">军师判断 · 主要矛盾</Text>
+          <Text className="bh-source">
+            {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
+          </Text>
+          <Text className="bh-title serif">
+            {und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
+          </Text>
+        </View>
+
+        {/* 战局信号（metric-grid）：案卷完整度 / 待补资料 / 风险锁 —— 全部真实状态 */}
+        <View className="metric-grid">
+          <View className="metric card" onClick={() => requireLogin() && Taro.navigateTo({ url: '/pages/brief/index' })}>
+            <Text className="metric-v serif">{maturityLabel}</Text>
+            <Text className="metric-l">案卷完整度</Text>
+          </View>
+          <View className="metric card" onClick={startInterview}>
+            <Text className={`metric-v serif ${gapCount ? 'warn' : ''}`}>{s.isAuthed() && und ? gapCount : '—'}</Text>
+            <Text className="metric-l">待补资料</Text>
+          </View>
+          <View className="metric card" onClick={askRisks}>
+            <Text className={`metric-v serif ${riskCount ? 'danger' : ''}`}>{riskCount || '—'}</Text>
+            <Text className="metric-l">风险锁</Text>
           </View>
         </View>
 
-        {/* 问候 —— 招呼语 + 精简提示同行 */}
-        <View className="greet">
-          <Text className="greet-h serif">{greetWord()}{me?.user.name ? `，${me.user.name}` : ''}</Text>
-          <Text className="greet-tip">{INSIGHTS.length} 个常见议题，可直接开始</Text>
+        {/* 三势判断（force-grid）：天势=排盘引擎已算好 → 点开原生全年天时页（不引导对话）；
+            市势/人势的结论产自真实对话 → 保留发起判断。 */}
+        <Text className="battle-h2">三 势 判 断</Text>
+        <View className="force-grid">
+          {THREE_FORCES.map((f) => {
+            if (f.key === '天势') {
+              const m = chart?.monthlyOutlook?.months?.find((x) => x.month === new Date().getMonth() + 1);
+              const turning = chart?.monthlyOutlook?.months?.filter((x) => x.turning).map((x) => `${x.month}月`).slice(0, 2).join('、');
+              return (
+                <View key={f.key} className="force card" onClick={openTianshi}>
+                  <Text className="force-tag serif">{f.key}</Text>
+                  {m ? (
+                    <Text className="force-desc">本月 <Text className={`force-phase ${m.phase === '进攻' ? 'atk' : m.phase === '防守' ? 'def' : ''}`}>{m.phase}</Text>{turning ? `，拐点在 ${turning}` : ''}。按你的命盘逐月推演。</Text>
+                  ) : (
+                    <Text className="force-desc">{f.desc}</Text>
+                  )}
+                  <Text className="force-go">{m ? '看全年天时 ›' : '解锁全年天时 ›'}</Text>
+                </View>
+              );
+            }
+            return (
+              <View key={f.key} className="force card" onClick={startForces}>
+                <Text className="force-tag serif">{f.key}</Text>
+                <Text className="force-desc">{f.desc}</Text>
+                <Text className="force-go">发起判断 ›</Text>
+              </View>
+            );
+          })}
         </View>
 
-        {/* 每日献策 */}
+        {/* 下一步动作（battle-actions）：军师档案里真实的待补问题 */}
+        <View className="battle-actions card">
+          <Text className="section-label">下 一 步 动 作</Text>
+          {(und?.nextQuestions.length ? und.nextQuestions.slice(0, 3) : []).map((qText) => (
+            <View key={qText} className="battle-goal" onClick={startInterview}>
+              <Text className="battle-tag">补线索</Text>
+              <View className="bg-b">
+                <Text className="bg-t serif">{qText}</Text>
+                <Text className="bg-m">答完后军师会更新当前判断</Text>
+              </View>
+            </View>
+          ))}
+          {!und?.nextQuestions.length ? (
+            <View className="battle-goal" onClick={() => goChat('agentKey=general&continue=1')}>
+              <Text className="battle-tag">先对话</Text>
+              <View className="bg-b">
+                <Text className="bg-t serif">和军师聊聊当前处境</Text>
+                <Text className="bg-m">对话之后，下一步动作自动排定</Text>
+              </View>
+            </View>
+          ) : null}
+        </View>
+
+        {/* 关联模块（module-card）：军师方案的功能化承接 */}
+        <View className="battle-actions module-card card">
+          <Text className="section-label">关 联 模 块</Text>
+          {MODULE_MARKET.slice(0, 3).map((m) => {
+            const owner = m.agentKey ? s.agents().find((a) => a.key === m.agentKey)?.name : undefined;
+            return (
+              <View key={m.id} className="linkmod" onClick={() => Taro.navigateTo({ url: '/packages/work/market/index' })}>
+                <Text className="linkmod-name serif">{m.title}</Text>
+                <Text className="linkmod-mini">{owner || m.category}</Text>
+                <Text className={`module-tier tier-${m.tier}`}>{m.price}</Text>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* 经营数据 · 近 7 天回填（M4 PR-16 看板第一层 v1）：数据源=执行页回填，无回填不展示 */}
+        {(() => {
+          const days = Object.keys(dossier?.backfill ?? {}).sort().slice(-7);
+          if (!days.length) return null;
+          const sum = (k: 'leads' | 'consults' | 'deals') => days.reduce((acc, d) => acc + (parseInt(dossier!.backfill[d][k] || '0', 10) || 0), 0);
+          const rows: [string, number][] = [['线索', sum('leads')], ['咨询', sum('consults')], ['成交', sum('deals')]];
+          return (
+            <View className="kpi-card card" onClick={() => Taro.switchTab({ url: '/pages/studio/index' })}>
+              <View className="kpi-head">
+                <Text className="section-label">经 营 数 据</Text>
+                <Text className="kpi-sub">近 {days.length} 天记录</Text>
+              </View>
+              <View className="kpi-row">
+                {rows.map(([label, v]) => (
+                  <View key={label} className="kpi-cell">
+                    <Text className="kpi-v serif">{v}</Text>
+                    <Text className="kpi-l">{label}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* 现在不能做（nono-card）：认可方案中提取的风险锁 */}
+        {dossier?.risks.length ? (
+          <View className="nono-card card">
+            <Text className="section-label danger">现 在 不 能 做</Text>
+            {dossier.risks.map((r) => (
+              <Text key={r} className="nono">× {r}</Text>
+            ))}
+            <Text className="nono-src">来自你认可的《{dossier.title}》</Text>
+          </View>
+        ) : null}
+
+        {/* 今日献策：保留的每日批语（设计稿外的轻量存在，置于页尾） */}
         <View className="say-strip">
           <Text className="say-k" style={{ color: accent }}>今日献策 · {saying.date}</Text>
           <SayingLine html={saying.text} accent={accent} />
         </View>
 
-        {/* 对话入口卡 */}
-        <View className="ask card">
-          <View className="ask-top">
-            <View className="ask-av" style={{ background: accent }}>
-              <Icon name="chat" size={18} color="#FBFAF6" />
-            </View>
-            <View className="ask-id">
-              <Text className="nm">军师</Text>
-              <View className="st"><View className="dot" style={{ background: accent }} /><Text>在线 · 随时为你出谋</Text></View>
-            </View>
+        {/* 主行动 CTA（battle-cta）：认可判断 → 军令与报告 / 直达执行 */}
+        <View
+          className="battle-cta"
+          onClick={() => dossier ? Taro.switchTab({ url: '/pages/studio/index' }) : goChat('agentKey=general&continue=1')}
+        >
+          <View className="bc-b">
+            <Text className="bc-t">{dossier ? '今日执行 · 军令与打卡' : '认可判断，生成军令与报告'}</Text>
+            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 录入进展，即可复盘` : '认可即排期执行、生成报告与复盘'}</Text>
           </View>
-          <Text className="ask-q serif">先说一件最想推进的事</Text>
-          <View className="ask-field">
-            <Input
-              className="ask-input"
-              value={input}
-              placeholder="例如：增长停滞、融资故事、组织卡点"
-              confirmType="send"
-              onInput={(e) => setInput(e.detail.value)}
-              onConfirm={send}
-            />
-            <View className="ask-send" role="button" aria-label="发送" style={{ background: accent }} onClick={send}>
-              <Icon name="send" size={16} color="#FBFAF6" />
-            </View>
-          </View>
-          <View className="chips">
-            {[['target', '定位卡点', '战略体检'], ['trend', '获客变慢', '增长方案'], ['shield', '融资故事', '融资准备']].map(([ic, label, q]) => (
-              <View key={q} className="chip" onClick={() => goChat(`send=${encodeURIComponent(q)}`)}>
-                <Icon name={ic} size={13} color={s.color().vars['--accent-ink']} />
-                <Text>{label}</Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* 可以先做：单组列表承载多个起手式，避免首屏连续同构卡片抢主行动。 */}
-        <View className="sec-head">
-          <Text className="sec-title">可以先做</Text>
-          <Text className="sec-more">定位 · 增长 · 融资</Text>
-        </View>
-        <View className="focus-panel card">
-          {INSIGHTS.map((it, i) => (
-            <View key={it.send} className={`focus-row ${i === INSIGHTS.length - 1 ? 'last' : ''}`} onClick={() => goChat(`send=${encodeURIComponent(it.send)}`)}>
-              <Text className="focus-no">0{i + 1}</Text>
-              <View className="focus-ic" style={{ background: 'var(--accent-soft)' }}>
-                <Icon name={it.ic} size={17} color={accent} />
-              </View>
-              <View className="focus-main">
-                <Text className="focus-ttl">{it.ttl}</Text>
-                <Text className="focus-desc">{it.desc}</Text>
-              </View>
-              <View className="focus-act" style={{ color: accent }}>
-                <Text>{it.act}</Text>
-                <Text> ›</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
-        {/* 常用顾问 */}
-        <View className="sec-head">
-          <Text className="sec-title">常用顾问</Text>
-          <Text className="sec-more" onClick={() => Taro.switchTab({ url: '/pages/thinktank/index' })}>去智库 ›</Text>
-        </View>
-        <View className="tools">
-          {TOOLS.map((t) => (
-            <View key={t.agent} className="tool card" onClick={() => goChat(`agentKey=${t.agent}&continue=1`)}>
-              <View className="tool-ic" style={{ background: 'var(--accent-soft)' }}>
-                <Icon name={t.ic} size={18} color={accent} />
-              </View>
-              <Text className="tool-h">{t.h}</Text>
-              <Text className="tool-p">{t.p}</Text>
-            </View>
-          ))}
+          <View className="bc-arrow"><Text>›</Text></View>
         </View>
       </View>
 

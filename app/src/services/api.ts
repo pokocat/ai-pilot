@@ -36,7 +36,105 @@ export type {
 export { getToken as getUserId, setToken as setUserId, clearToken as clearUserId } from './token';
 export { BASE_URL };
 
-async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
+// 八字采集入参 / 命盘摘要（服务端 ChartView 的宽松视图，前端只读展示）
+export interface BaziBody {
+  calendar?: 'solar' | 'lunar';
+  year?: number; month?: number; day?: number;
+  hour?: number | null; minute?: number;
+  gender?: 'male' | 'female';
+  birthPlace?: string; longitude?: number;
+  believe?: boolean;
+}
+export interface ProgressView {
+  rank: string;
+  usageDays: number;
+  streak: number;
+  decisionAccuracy: number | null;
+  prophecyHitRate: number | null;
+  milestones: Record<string, string>;
+  nextRank: { rank: string; requirement: string } | null;
+}
+
+export interface ChartSummary {
+  engineVersion: string;
+  hourKnown: boolean;
+  pillars: { year: { ganZhi: string }; month: { ganZhi: string }; day: { ganZhi: string }; time: { ganZhi: string } | null };
+  dayMaster: { gan: string; element: string; strength: string };
+  pattern: { name: string; traits: string; suits: string[]; avoid: string[] };
+  ziwei: { soulMajorStars: string[]; bodyMajorStars: string[] } | null;
+  monthlyOutlook: { year: number; months: { month: number; phase: string; turning: boolean }[] };
+}
+
+type NetworkReason = 'timeout' | 'offline' | 'domain' | 'ssl' | 'dns' | 'unreachable' | 'cancelled' | 'network';
+
+function networkErrorInfo(errMsg: string, origin: string): { reason: NetworkReason; message: string; technicalMessage: string } {
+  const msg = errMsg.toLowerCase();
+  if (/timeout|timed out|超时/.test(msg)) {
+    return {
+      reason: 'timeout',
+      message: '军师响应超时了，请稍后重试。',
+      technicalMessage: `请求超时：${errMsg || 'Taro.request timeout'}。API：${origin}`,
+    };
+  }
+  if (/abort|cancel|canceled|cancelled|取消/.test(msg)) {
+    return {
+      reason: 'cancelled',
+      message: '请求已取消。',
+      technicalMessage: `请求被取消：${errMsg || 'request aborted'}。API：${origin}`,
+    };
+  }
+  if (/domain|合法域名|url not in domain|not in domain list/.test(msg)) {
+    return {
+      reason: 'domain',
+      message: '服务连接配置还没生效，请稍后再试。',
+      technicalMessage: `小程序请求被合法域名拦截，请在微信后台 request 合法域名配置 ${origin} 后重新打开小程序。原始错误：${errMsg}`,
+    };
+  }
+  if (/ssl|certificate|cert|handshake|证书/.test(msg)) {
+    return {
+      reason: 'ssl',
+      message: '服务安全连接异常，请稍后再试。',
+      technicalMessage: `HTTPS/证书连接失败：${errMsg || 'SSL error'}。API：${origin}`,
+    };
+  }
+  if (/dns|name not resolved|resolve host|unknown host|域名解析/.test(msg)) {
+    return {
+      reason: 'dns',
+      message: '暂时解析不到军师服务，请稍后重试。',
+      technicalMessage: `DNS/域名解析失败：${errMsg || 'DNS error'}。API：${origin}`,
+    };
+  }
+  if (/offline|internet disconnected|network unavailable|fail -2|断网|无网络/.test(msg)) {
+    return {
+      reason: 'offline',
+      message: '当前网络不可用，请检查网络后重试。',
+      technicalMessage: `设备网络不可用：${errMsg || 'offline'}。API：${origin}`,
+    };
+  }
+  if (/connection refused|connection reset|econnreset|econnrefused|failed to connect|无法连接/.test(msg)) {
+    return {
+      reason: 'unreachable',
+      message: '暂时连不上军师服务，请稍后重试。',
+      technicalMessage: `服务不可达：${errMsg || 'connection failed'}。API：${origin}`,
+    };
+  }
+  return {
+    reason: 'network',
+    message: '当前网络有点不稳，请稍后重试。',
+    technicalMessage: `网络请求失败：${errMsg || 'unknown request failure'}。API：${origin}`,
+  };
+}
+
+function httpErrorInfo(statusCode: number, data: unknown): { message: string; code?: string } {
+  const body = (data || {}) as { error?: string; code?: string };
+  if (statusCode === 408 || statusCode === 504) return { message: '军师响应超时了，请稍后重试。', code: body.code };
+  if (statusCode === 429) return { message: '请求有点频繁，请稍后再试。', code: body.code };
+  if (statusCode >= 500) return { message: body.error || '军师服务暂时不可用，请稍后重试。', code: body.code };
+  return { message: body.error || `HTTP ${statusCode}`, code: body.code };
+}
+
+// 导出给领域服务复用（如 services/dossier 案卷闭环）；页面代码仍应走 api.* 方法。
+export async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
   const url = `${BASE_URL}${path}`;
   let res: Taro.request.SuccessCallbackResult;
   try {
@@ -49,17 +147,16 @@ async function request<T>(path: string, method: keyof typeof Taro.request | any 
   } catch (e) {
     const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
     const origin = BASE_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
-    const message = errMsg.includes('domain') || errMsg.includes('合法域名')
-      ? `小程序请求被合法域名拦截，请在微信后台 request 合法域名配置 ${origin} 后重新打开小程序。`
-      : `网络请求失败，请确认已配置 request 合法域名 ${origin}，并重新打开小程序。`;
-    throw Object.assign(new Error(message), { code: 'NETWORK_ERROR', errMsg, url });
+    const info = networkErrorInfo(errMsg, origin);
+    throw Object.assign(new Error(info.message), { code: 'NETWORK_ERROR', reason: info.reason, errMsg, url, origin, technicalMessage: info.technicalMessage });
   }
   if (res.statusCode === 401) {
     clearToken(); // token 失效：清掉，下次进首页回到登录
     throw Object.assign(new Error((res.data as any)?.error || '未登录'), { code: 'UNAUTHORIZED', data: res.data });
   }
   if (res.statusCode >= 400) {
-    throw Object.assign(new Error((res.data as any)?.error || `HTTP ${res.statusCode}`), { data: res.data });
+    const info = httpErrorInfo(res.statusCode, res.data);
+    throw Object.assign(new Error(info.message), { code: info.code, statusCode: res.statusCode, data: res.data });
   }
   return res.data as T;
 }
@@ -129,6 +226,19 @@ export const api = {
   survey: () => (IS_MOCK ? mock.survey() : request<SurveyQuestion[]>('/survey')),
   getProfile: () => (IS_MOCK ? mock.getProfile() : request<Profile | null>('/profile')),
   saveProfile: (p: Profile) => (IS_MOCK ? mock.saveProfile(p) : request<Profile>('/profile', 'PUT', p)),
+  // 八字采集（M1 PR-2）：录入生辰 → 服务端排盘引擎落库；believe=false 表示不用命理视角
+  saveBazi: (body: BaziBody) =>
+    IS_MOCK ? mock.saveBazi(body) : request<{ believe: boolean; chart: ChartSummary | null }>('/profile/bazi', 'PUT', body),
+  myChart: () =>
+    IS_MOCK ? mock.myChart() : request<{ bazi: BaziBody | null; chart: ChartSummary | null }>('/profile/chart'),
+  // 用户进度（段位/里程碑）与复盘账本（M4 PR-18 前端落位；mock 无账本返回空 → 界面隐藏对应区块）
+  progress: () =>
+    IS_MOCK ? Promise.resolve({ progress: null as ProgressView | null }) : request<{ progress: ProgressView | null }>('/progress'),
+  reviews: () =>
+    IS_MOCK ? Promise.resolve({ items: [], streak: 0 }) : request<{ items: unknown[]; streak: number }>('/reviews'),
+  // B 级卡片（每日战报/天时日历/天命速写）：返回可分享网页链接；mock 无渲染管道返回 null
+  publishCard: (kind: 'daily' | 'calendar' | 'fate', body?: { friendName?: string; friendBazi?: BaziBody }) =>
+    IS_MOCK ? Promise.resolve({ htmlUrl: null as string | null }) : request<{ htmlUrl: string | null }>(`/cards/${kind}`, 'POST', body ?? {}),
   todaySaying: () => (IS_MOCK ? mock.todaySaying() : request<TodaySaying>('/sayings/today')),
   sessions: () => (IS_MOCK ? mock.sessions() : request<SessionItem[]>('/sessions')),
   session: (id: string) => (IS_MOCK ? mock.session(id) : request<SessionDetail>(`/sessions/${id}`)),
@@ -194,9 +304,9 @@ export const api = {
   summarize: (sessionId: string) =>
     IS_MOCK ? mock.summarize(sessionId) : request<SummarizeResult>(`/sessions/${sessionId}/summarize`, 'POST', {}),
 
-  // —— 报告网页版（render_report → OSS 托管）：产出后按需生成可分享链接 ——
-  renderReport: (sessionId: string, messageId: string): Promise<{ htmlUrl?: string }> =>
-    IS_MOCK ? Promise.resolve({}) : request<{ htmlUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
+  // —— 报告网页版（render_report → 自有域名 /api/r/:id）：产出后按需生成可分享链接 ——
+  renderReport: (sessionId: string, messageId: string): Promise<{ htmlUrl?: string; cdnUrl?: string }> =>
+    IS_MOCK ? Promise.resolve({}) : request<{ htmlUrl?: string; cdnUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
 };
 
 export type { GenRequest, SaveLibRequest, MessageRef as Ref };

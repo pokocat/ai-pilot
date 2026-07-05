@@ -79,9 +79,9 @@ export const env = {
   aliyunSmsTemplateCode: process.env.ALIYUN_SMS_TEMPLATE_CODE ?? '',
   aliyunSmsRegion: process.env.ALIYUN_SMS_REGION ?? 'cn-hangzhou',
 
-  // —— 阿里云 OSS：报告网页版静态托管（不暴露后端域名）——
-  // 全部配齐才启用；否则 publishReport 回退后端 /api/r/:id。上传走 endpoint（内网更快/免流量），
-  // 分享链接用 baseUrl（公网）。对象以 public-read 上传。
+  // —— 阿里云 OSS：报告网页版 CDN 镜像 ——
+  // 全部配齐才启用；报告 htmlUrl 仍返回自有域名 /api/r/:id 供小程序 web-view 打开。
+  // 上传走 endpoint（内网更快/免流量），cdnUrl 用 baseUrl（公网）。对象以 public-read 上传。
   ossEndpoint: process.env.AEP_CDN_OSS_ENDPOINT ?? '',          // 如 oss-cn-hangzhou-internal.aliyuncs.com（内网）
   ossRegion: process.env.AEP_CDN_OSS_REGION ?? 'cn-hangzhou',   // 如 cn-hangzhou（endpoint 缺省时用）
   ossBucket: process.env.AEP_CDN_OSS_BUCKET ?? '',

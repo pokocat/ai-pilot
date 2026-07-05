@@ -10,6 +10,10 @@ import { profileRoutes } from './routes/profile.js';
 import { sayingRoutes } from './routes/sayings.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { libraryRoutes } from './routes/library.js';
+import { casefileRoutes } from './routes/casefiles.js';
+import { decisionRoutes } from './routes/decisions.js';
+import { prophecyRoutes } from './routes/prophecies.js';
+import { cardRoutes } from './routes/cards.js';
 import { projectRoutes } from './routes/projects.js';
 import { reportRoutes } from './routes/reports.js';
 import { reportShareRoutes } from './routes/reportShare.js';
@@ -70,6 +74,10 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(sayingRoutes, { prefix: '/api' });
   await app.register(sessionRoutes, { prefix: '/api' });
   await app.register(libraryRoutes, { prefix: '/api' });
+  await app.register(casefileRoutes, { prefix: '/api' }); // 战略案卷（执行闭环：军令/回填）
+  await app.register(decisionRoutes, { prefix: '/api' }); // 决策日志（M2：记账/验证/准确率）
+  await app.register(prophecyRoutes, { prefix: '/api' }); // 预言账本（M2：天机验证/命中率）
+  await app.register(cardRoutes, { prefix: '/api' }); // B 级卡片（M4：每日战报/天时日历/天命速写）
   await app.register(projectRoutes, { prefix: '/api' });
   await app.register(reportRoutes, { prefix: '/api' });
   await app.register(reportShareRoutes, { prefix: '/api' }); // 公开报告页(无鉴权,凭 id 分享)

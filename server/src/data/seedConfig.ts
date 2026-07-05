@@ -37,7 +37,8 @@ export const SAYINGS: { text: string; enabled: boolean }[] = [
 export const SURVEY: { key: string; title: string; options: string[] }[] = [
   // 行业选项从行业包（data/industryPacks.ts）派生 —— 单一真相源：新增行业包，选项自动跟上。
   { key: 'industry', title: '你的行业？', options: industryOptionLabels() },
-  { key: 'stage', title: '当前阶段？', options: ['起步 / 验证', 'A 轮前后', '规模化', '稳定盈利'] },
+  // M3 PR-13：阶段改营收区间（V6.0 §7 阶段自适应的判定输入）；旧标签在 stageOf() 里保持兼容。
+  { key: 'stage', title: '年营收大概在？', options: ['100 万以下', '100-500 万', '500 万-5000 万', '5000 万以上'] },
   { key: 'pain', title: '最头疼的事？', options: ['增长乏力', '现金流', '融资', '组织 / 团队', '定位 / 竞争'] },
 ];
 

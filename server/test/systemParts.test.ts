@@ -30,13 +30,14 @@ describe('buildSystemParts · 档案访谈覆盖', () => {
   });
 });
 
-describe('buildSystemParts · 本命色语气（P1-B4）', () => {
-  test('注入本命色语气提示，且按颜色不同', () => {
+describe('buildSystemParts · 本命色回归纯品牌色（M3 PR-14）', () => {
+  test('不再注入本命色语气提示（语气由角色系统/modeLine 驱动），占位符仍可用', () => {
     const gold = buildSystemParts('你是军师。', ctx({ benmingColor: 'gold' }), 'chat').stable;
     const red = buildSystemParts('你是军师。', ctx({ benmingColor: 'red' }), 'chat').stable;
-    assert.match(gold, /表达风格参考 · 本命色「gold」/);
-    assert.match(gold, /沉稳持重/);
-    assert.match(red, /进取果决/);
-    assert.notEqual(gold, red, '不同本命色应产出不同 persona 提示');
+    assert.doesNotMatch(gold, /表达风格参考 · 本命色/);
+    assert.equal(gold, red, '本命色不再影响提示词');
+    // {本命色} 占位符路径保留（老提示词若引用仍可填充）
+    const withPlaceholder = buildSystemParts('你的客户本命色是{本命色}。', ctx({ benmingColor: 'red' }), 'chat').stable;
+    assert.match(withPlaceholder, /red/);
   });
 });

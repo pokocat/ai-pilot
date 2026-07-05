@@ -1,0 +1,42 @@
+.community-page .cm-hero { padding: 18px 16px; border-radius: var(--r-lg); }
+.community-page .cm-hero .h1 { margin: 6px 0 8px; }
+.community-page .cm-p { display: block; font-size: 12.5px; line-height: 1.65; color: var(--ink-2); }
+
+.community-page .class-card { padding: 16px; border-radius: var(--r-md); margin-top: 12px; }
+.community-page .class-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.community-page .class-k { display: block; font-size: 11px; letter-spacing: .12em; color: var(--ink-3); font-weight: 600; }
+.community-page .class-t { display: block; margin-top: 6px; font-size: 17px; font-weight: 600; color: var(--ink); }
+.community-page .class-st { flex-shrink: 0; font-size: 11.5px; font-weight: 600; }
+.community-page .class-d { display: block; margin-top: 8px; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
+.community-page .class-btn {
+  display: inline-flex; align-items: center; margin-top: 12px;
+  padding: 7px 12px; border-radius: 999px; border: 1px solid;
+  font-size: 12px; font-weight: 600;
+}
+.community-page .class-btn:active { opacity: .7; }
+
+.community-page .steps { padding: 4px 14px; border-radius: var(--r-md); }
+.community-page .step { display: flex; align-items: flex-start; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--line-2); }
+.community-page .step:last-child { border-bottom: 0; }
+.community-page .step-no {
+  width: 26px; height: 26px; border-radius: 9px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600;
+}
+.community-page .step-b { flex: 1; min-width: 0; }
+.community-page .step-t { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.community-page .step-d { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
+
+.community-page .teacher-card { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--r-md); margin-top: 12px; }
+.community-page .teacher-av { width: 44px; height: 44px; border-radius: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.community-page .teacher-b { flex: 1; min-width: 0; }
+.community-page .teacher-name { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
+.community-page .teacher-role { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
+
+.community-page .cm-submit {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 46px; margin-top: 16px; border-radius: 13px;
+  color: #FBFAF6; font-size: 14px; font-weight: 600;
+  box-shadow: 0 12px 24px var(--accent-glow);
+}
+.community-page .cm-submit:active { opacity: .85; }

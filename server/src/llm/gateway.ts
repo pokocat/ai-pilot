@@ -1,5 +1,5 @@
 // LLM Gateway（《投产开发指导》§5.1）：统一封装模型调用——
-// 路由（mock/claude/openai 兼容，含 Agnes/DeepSeek/Qwen…）、内容审核、Token 计量、结果缓存、故障兜底/降级。
+// 路由（mock/claude/openai 兼容，含 Agnes/DeepSeek/Qwen…）、输入审核、Token 计量、结果缓存、故障兜底/降级。
 //
 // provider 与 baseUrl/model/key 由「运营后台可切换的 DB 配置」决定（services/aiConfig），
 // env 仅作兜底；未配置真实 key 时一律降级 mock，保证可用。
@@ -13,6 +13,7 @@ import { ZERO_USAGE, type Deliverable, type ChatReply, type GenContext, type AiT
 import { recordTokenUsage, type UsageMeta } from '../services/usage.js';
 import { recordTrace } from '../services/trace.js';
 import { moderate } from '../services/moderation.js';
+import { auditBannedWords } from '../services/bannedWords.js';
 import { cacheGet, cacheSet } from '../services/cache.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
@@ -39,6 +40,23 @@ function deliverableText(d: Deliverable): string {
   return d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
 }
 
+const ENGINEERING_CONTEXT_LEAK =
+  /(当前工作区|工作区中未发现|Git\s*仓库|代码仓库|代码项目|代码库|本地仓库|缺少[^。；\n]*(项目文档|业务数据|战略输入材料)|未发现[^。；\n]*(项目文档|业务文档|业务数据|战略规划材料)|上传[^。；\n]*工作区|README|package\.json|Codex|IDE|文件系统|workspace|repository|codebase)/i;
+
+function hasEngineeringContextLeak(d: Deliverable): boolean {
+  const text = [d.title, d.meta, deliverableText(d)].filter(Boolean).join('\n');
+  return ENGINEERING_CONTEXT_LEAK.test(text);
+}
+
+function sanitizeDeliverable(ctx: GenContext, d: Deliverable): Deliverable {
+  if (!hasEngineeringContextLeak(d)) return d;
+  console.warn('[gateway] deliverable contained engineering context; replaced with business fallback', {
+    agentKey: ctx.agentKey,
+    deliverableKey: ctx.deliverableKey,
+  });
+  return { ...mockDeliverable(ctx), degraded: true };
+}
+
 // P1-B5：审核上下文——沙盒/评测跳过审核，并把租户/用户/会话写入 moderation_log 便于追溯。
 function modOpts(ctx: GenContext, meta?: UsageMeta) {
   return { sandbox: meta?.sandbox, tenantId: meta?.tenantId ?? ctx.tenantId ?? null, userId: meta?.userId ?? ctx.userId ?? null, sessionId: meta?.sessionId ?? null };
@@ -56,6 +74,15 @@ async function traced<T>(
       meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind, provider: s.provider, model: s.model,
       status: 'ok', latencyMs: Date.now() - t0, toolCalls: s.toolCalls, iterations: s.iterations, usage: s.usage,
       promptText: args.ctx.userMessage, responseText: args.respText(s.result),
+    });
+    // PR-0a 禁用词检查：只记录不拦截（fire-and-forget，绝不影响产出）。
+    void auditBannedWords({
+      tenantId: args.meta?.tenantId ?? args.ctx.tenantId ?? null,
+      userId: args.meta?.userId ?? args.ctx.userId ?? null,
+      sessionId: args.meta?.sessionId ?? null,
+      agentKey: args.ctx.agentKey,
+      kind: args.kind,
+      text: args.respText(s.result),
     });
     return s;
   } catch (err) {
@@ -200,11 +227,8 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: '' };
     }
-    await maybeRecord(sourced, 'deliverable', ctx, meta); // 记账早于输出审核：token 已花，审核拦截也要记
-    const outText = sourced.result.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
-    if (!(await moderate('output', outText, modOpts(ctx, meta)))) {
-      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
-    }
+    sourced.result = sanitizeDeliverable(ctx, sourced.result);
+    await maybeRecord(sourced, 'deliverable', ctx, meta);
     return { result: sourced.result, usage: sourced.usage };
   }
 
@@ -242,17 +266,14 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
     sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   }
 
+  sourced.result = sanitizeDeliverable(ctx, sourced.result);
   await maybeRecord(sourced, 'deliverable', ctx, meta);
-  const outText = sourced.result.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
-  if (!(await moderate('output', outText, modOpts(ctx, meta)))) {
-    throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
-  }
   if (!tools.length) await cacheSet(ck, sourced.result, CACHE_TTL);
   return { result: sourced.result, usage: sourced.usage };
 }
 
-export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{ result: ChatReply; usage: Usage }> {
-  if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
+export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { inputModerated?: boolean }): Promise<{ result: ChatReply; usage: Usage }> {
+  if (!opts?.inputModerated && !(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
 
@@ -266,9 +287,6 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       return { result: mockChat(ctx), usage: ZERO_USAGE };
-    }
-    if (!(await moderate('output', s.result.text, modOpts(ctx, meta)))) {
-      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
     }
     return { result: s.result, usage: s.usage };
   }
@@ -299,9 +317,6 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta): Promise<{
     if (!env.aiFallbackMock) throw aiUnavailable(err);
   }
   if (chatResult) {
-    if (!(await moderate('output', chatResult.result.text, modOpts(ctx, meta)))) {
-      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
-    }
     return { result: chatResult.result, usage: chatResult.usage };
   }
   return { result: mockChat(ctx), usage: ZERO_USAGE };
@@ -321,17 +336,111 @@ function* chunkText(text: string): Generator<string> {
   if (buf) yield buf;
 }
 
-/**
- * P1-B3：聊天流式（渐进渲染）。内容审核是硬约束 → 绝不流式下发未审核的 token，
- * 故必须先拿到「经输入+输出审核的完整结果」再分块推送。复用 chatComplete（审核/计费/trace/provider 分发全在内，
- * 零重复、零安全回退），按真实节奏分块，去掉假 sleep 剧场。
- * 注：real-provider 的「模型 token 级增量」为后续（需 provider SDK 原生流式 + 真机 QA）；
- * 在「必须先审核全量」的产品约束下，渐进渲染已审核结果才是正确架构。
- */
-export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): AsyncGenerator<ChatStreamEvent> {
-  const { result, usage } = await chatComplete(ctx, meta);
+async function* chunkedChatFallback(ctx: GenContext, meta?: UsageMeta, inputModerated = false): AsyncGenerator<ChatStreamEvent> {
+  const { result, usage } = await chatComplete(ctx, meta, { inputModerated });
   for (const piece of chunkText(result.text)) yield { type: 'delta', text: piece };
   yield { type: 'done', result, usage };
+}
+
+async function* tracedChatProviderStream(
+  ctx: GenContext,
+  meta: UsageMeta | undefined,
+  provider: 'openai' | 'claude',
+  model: string,
+  stream: AsyncGenerator<ChatStreamEvent>,
+): AsyncGenerator<ChatStreamEvent> {
+  const t0 = Date.now();
+  let text = '';
+  let done: { result: ChatReply; usage: Usage } | null = null;
+  try {
+    for await (const ev of stream) {
+      if (ev.type === 'delta') {
+        text += ev.text;
+        yield ev;
+      } else {
+        done = { result: ev.result, usage: ev.usage };
+      }
+    }
+    if (!done) throw Object.assign(new Error(`${provider} 流式响应未返回完整结果`), { code: 'AI_EMPTY_RESPONSE' });
+    await recordTrace({
+      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
+      status: 'ok', latencyMs: Date.now() - t0, usage: done.usage,
+      promptText: ctx.userMessage, responseText: done.result.text,
+    });
+    void auditBannedWords({
+      tenantId: meta?.tenantId ?? ctx.tenantId ?? null,
+      userId: meta?.userId ?? ctx.userId ?? null,
+      sessionId: meta?.sessionId ?? null,
+      agentKey: ctx.agentKey,
+      kind: 'chat',
+      text: done.result.text,
+    });
+    await maybeRecord({ result: done.result, usage: done.usage, provider, model }, 'chat', ctx, meta);
+    yield { type: 'done', result: done.result, usage: done.usage };
+  } catch (err) {
+    await recordTrace({
+      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
+      status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
+      responseText: text,
+    });
+    throw err;
+  }
+}
+
+/**
+ * 聊天流式：只在输入侧做审核；合规后优先走 provider 原生 streaming，模型 token/chunk 到达即下发。
+ * 若当前路径暂不支持原生流（Dify、工具调用循环、mock、兼容网关不支持 stream），退回完整结果后分块，保证可用。
+ */
+export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): AsyncGenerator<ChatStreamEvent> {
+  if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
+    throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
+  }
+
+  let emitted = false;
+  try {
+    if (ctx.runtime?.mode === 'openai') {
+      const cfg = openaiOverrideCfg(ctx, await getAiConfig());
+      const tools = await skillToolsFor(ctx);
+      if (isRealKey(cfg.apiKey) && !tools.length) {
+        const oa = await import('./providers/openai.js');
+        for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg))) {
+          if (ev.type === 'delta') emitted = true;
+          yield ev;
+        }
+        return;
+      }
+    }
+
+    if (!ctx.runtime) {
+      const cfg = await getAiConfig();
+      const live = liveProvider(cfg);
+      const tools = (live === 'openai' || live === 'claude') ? await skillToolsFor(ctx) : [];
+      if (live === 'openai' && !tools.length) {
+        const oa = await import('./providers/openai.js');
+        for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg))) {
+          if (ev.type === 'delta') emitted = true;
+          yield ev;
+        }
+        return;
+      }
+      if (live === 'claude' && !tools.length) {
+        const cl = await import('./providers/claude.js');
+        for await (const ev of tracedChatProviderStream(ctx, meta, 'claude', cfg.model, cl.claudeChatStream(ctx, cfg))) {
+          if (ev.type === 'delta') emitted = true;
+          yield ev;
+        }
+        return;
+      }
+    }
+  } catch (err) {
+    if (emitted) throw err;
+    console.error('[gateway] native chat stream fallback:', (err as Error).message);
+    if (!env.aiFallbackMock) {
+      // 保持老行为：流式握手失败时仍尝试非流式 provider；若 provider 真不可用，chatComplete 会抛 AI_UNAVAILABLE。
+    }
+  }
+
+  for await (const ev of chunkedChatFallback(ctx, meta, true)) yield ev;
 }
 
 export type AdaptiveResult =
@@ -358,9 +467,6 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       return { kind: 'chat', reply: mockChat(ctx), usage: ZERO_USAGE };
     }
-    if (!(await moderate('output', s.result.text, modOpts(ctx, meta)))) {
-      throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
-    }
     return { kind: 'chat', reply: s.result, usage: s.usage };
   }
 
@@ -382,9 +488,11 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
       provider = 'openai'; usage = m.usage; toolCalls = m.toolCalls; iterations = m.iterations;
       out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
     } else if (live === 'claude') {
-      const m = await (await import('./providers/claude.js')).claudeChat(ctx, cfg); // claude 自适应未实现 → 对话兜底
-      provider = 'claude'; usage = m.usage;
-      out = { kind: 'chat', result: m.result };
+      const cl = await import('./providers/claude.js');
+      const tools = await skillToolsFor(ctx);
+      const m = await cl.claudeAdaptive(ctx, cfg, tools);
+      provider = 'claude'; usage = m.usage; toolCalls = m.toolCalls; iterations = m.iterations;
+      out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
     } else {
       const m = mockAdaptive(ctx);
       out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
@@ -401,16 +509,15 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
   }
 
-  const respText = out.kind === 'report' ? deliverableText(out.result) : out.result.text;
   const recKind: 'deliverable' | 'chat' = out.kind === 'report' ? 'deliverable' : 'chat';
+  if (out.kind === 'report') out.result = sanitizeDeliverable(ctx, out.result);
+  const respText = out.kind === 'report' ? deliverableText(out.result) : out.result.text;
   await recordTrace({
     meta, agentKey: ctx.agentKey, kind: recKind, provider, model,
     status: 'ok', latencyMs: Date.now() - t0, toolCalls, iterations, usage,
     promptText: ctx.userMessage, responseText: respText,
   });
   await maybeRecord({ result: out.result, usage, provider, model, toolCalls, iterations }, recKind, ctx, meta);
-
-  if (!(await moderate('output', respText, modOpts(ctx, meta)))) throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
 
   return out.kind === 'report'
     ? { kind: 'report', deliverable: out.result, usage }
@@ -577,5 +684,36 @@ export async function summarizePoints(transcript: string): Promise<{ points: str
   } catch (err) {
     console.error('[gateway] summarizePoints fallback:', (err as Error).message);
     return null;
+  }
+}
+
+/** 预言抽取（M2 PR-9）：从总军师输出里抽「具体、可验证、有期限」的天势判断。
+ *  只在真实 provider 就绪时运行（测试/mock 返回空 → 绝不产生伪预言）；解析失败即放弃。 */
+export async function extractProphecies(text: string): Promise<{ prophecy: string; basis: string; verifyStandard: string; dueDate: string | null }[]> {
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  if (!live) return [];
+  try {
+    const sys = '你是记录员。从下面军师的话里抽取「预言式判断」——必须同时满足：具体（说了会发生什么）、可验证（能对照事实判定）、有大致时限（某月/某周/某节点）。'
+      + '只输出 JSON：{"prophecies":[{"prophecy":"…","basis":"依据(可空)","verifyStandard":"什么情况算命中","dueDate":"YYYY-MM-DD 或 null"}]}。'
+      + '宽泛建议、方法论、无时限的话都不算预言；没有就输出空数组。最多 2 条。';
+    const json = await rawJson(cfg, live, sys, text.slice(0, 3000));
+    if (!json) return [];
+    return (((json.prophecies as unknown[]) ?? [])
+      .filter((p): p is { prophecy: string } => !!p && typeof (p as { prophecy?: unknown }).prophecy === 'string' && !!(p as { prophecy: string }).prophecy.trim())
+      .map((p) => {
+        const o = p as { prophecy: string; basis?: string; verifyStandard?: string; dueDate?: string | null };
+        const due = typeof o.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate) ? o.dueDate : null;
+        return {
+          prophecy: o.prophecy.trim().slice(0, 300),
+          basis: (o.basis ?? '').trim().slice(0, 200),
+          verifyStandard: (o.verifyStandard ?? '').trim().slice(0, 300),
+          dueDate: due,
+        };
+      })
+      .slice(0, 2));
+  } catch (err) {
+    console.error('[gateway] extractProphecies fallback:', (err as Error).message);
+    return [];
   }
 }

@@ -16,6 +16,12 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-07-03 | `0.2.19` | `修复小程序误上传mock包` | `0862c02+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1112594 B | 上传成功 |
+| 2026-07-03 | `0.2.18` | `小程序聊天改用同步响应` | `06d1377+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1111547 B | 上传成功 |
+| 2026-07-03 | `0.2.17` | `补齐战局页本命色联动` | `06d1377+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1112083 B | 上传成功 |
+| 2026-07-03 | `0.2.16` | `修复导航显示和默认入口` | `06d1377+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1112186 B | 上传成功 |
+| 2026-07-03 | `0.2.15` | `修复本命色配色联动` | `06d1377+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1111630 B | 上传成功 |
+| 2026-07-03 | `0.2.14` | `修复对话网络错误兜底` | `06d1377+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1111568 B | 上传成功 |
 | 2026-06-24 | `0.2.13` | `开启聊天流式响应` | `86680ff` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 666.2 KB / 682138 B | 上传成功 |
 | 2026-06-24 | `0.2.12` | `新AppID重新上传` | `86680ff` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 666.2 KB / 682138 B | 上传成功 |
 | 2026-06-24 | `0.2.11` | `体验优化:记忆中心可删改+@记忆引用+参考溯源+失败重试+稳定key+可访问性` | `bc884ba` | `wx05a49967e2adb557` | `https://wxapi.aibuzz.cn/api` | DevTools CLI `upload`(headless) | ~932 KB(dist) | 上传失败:prepare 阶段 `Failed to fetch`(islogin 已登录且正常、4 次清场重试同样);疑代码上传 IP 白名单/上传端点受限。产物已就绪(STREAM off),改用 DevTools GUI 打开 `app/` 一键上传 |

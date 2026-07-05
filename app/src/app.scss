@@ -1,6 +1,7 @@
 /* ============================================================
    军师 · 全局设计系统 —— 对齐原型 styles/tokens.css
-   暖 off-white 底 + 墨色 + 本命色强调；Noto Serif SC 标题 / Noto Sans SC 正文
+   暖 off-white 底 + 墨色 + 本命色强调；正文与标题统一以 Noto Serif SC / 宋体为主，
+   克制字重（不超过 600），Noto Sans SC 仅作系统兜底与个别数字/输入场景使用
    ============================================================ */
 
 page {
@@ -15,15 +16,23 @@ page {
   --line: #E7E4DB;
   --line-2: #EFEDE5;
 
-  /* 默认本命色 = 财金（金），首登可改 */
-  --accent: #A07D2C;
-  --accent-deep: #6E5621;
-  --accent-soft: #F2EAD6;
-  --accent-ink: #43340F;
-  --accent-bright: #D8B25A;
-  --accent-glow: rgba(200, 165, 90, .30);
+  /* 默认本命色 = 墨绿（设计稿主色），首登可改 */
+  --accent: #1E5A43;
+  --accent-deep: #163F30;
+  --accent-soft: #E7EEE9;
+  --accent-ink: #0F2B20;
+  --accent-bright: #5FB389;
+  --accent-glow: rgba(99, 160, 130, .32);
 
-  --gold: #9B7C3F;
+  /* 业务主色跟随本命色：绿=主判断/行动，金=军令/权益；红=风险仍固定 */
+  --green: var(--accent);
+  --green-deep: var(--accent-deep);
+  --green-hero: var(--accent);
+  --green-soft: var(--accent-soft);
+  --gold: var(--accent);
+  --gold-deep: var(--accent-deep);
+  --gold-soft: var(--accent-soft);
+  --blue: #245F88;
   --danger: #9C4A38;
   --warn: #A8772E;
 
@@ -36,17 +45,18 @@ page {
   --r-xl: 28px;
 
   background: var(--bg);
-  font-family: var(--sans);
+  font-family: var(--serif);
   color: var(--ink);
 }
 
 /* —— 6 套本命色主题（class 挂在每页根 View 上） —— */
-.theme-gold   { --accent:#A07D2C; --accent-deep:#6E5621; --accent-soft:#F2EAD6; --accent-ink:#43340F; --accent-bright:#D8B25A; --accent-glow:rgba(200,165,90,.30); }
-.theme-green  { --accent:#1E5A43; --accent-deep:#163F30; --accent-soft:#E7EEE9; --accent-ink:#0F2B20; --accent-bright:#5FB389; --accent-glow:rgba(99,160,130,.32); }
-.theme-red    { --accent:#9E2B25; --accent-deep:#6F1B17; --accent-soft:#F3E2DF; --accent-ink:#4A1310; --accent-bright:#D98077; --accent-glow:rgba(190,90,80,.30); }
-.theme-blue   { --accent:#1F4E79; --accent-deep:#143350; --accent-soft:#E2EAF1; --accent-ink:#122C44; --accent-bright:#6E98C6; --accent-glow:rgba(90,140,200,.30); }
-.theme-purple { --accent:#5B3A6B; --accent-deep:#3D2748; --accent-soft:#ECE4F1; --accent-ink:#2F1E38; --accent-bright:#A07FB3; --accent-glow:rgba(150,110,170,.30); }
-.theme-iron   { --accent:#33373D; --accent-deep:#212429; --accent-soft:#E8E9EB; --accent-ink:#1B1D21; --accent-bright:#8A9099; --accent-glow:rgba(120,130,140,.28); }
+/* 小程序真机对 token 链式引用不稳定，主题类必须同步覆盖业务主色 token。 */
+.theme-gold   { --accent:#A07D2C; --accent-deep:#6E5621; --accent-soft:#F2EAD6; --accent-ink:#43340F; --accent-bright:#D8B25A; --accent-glow:rgba(200,165,90,.30); --green:#A07D2C; --green-deep:#6E5621; --green-hero:#A07D2C; --green-soft:#F2EAD6; --gold:#A07D2C; --gold-deep:#6E5621; --gold-soft:#F2EAD6; }
+.theme-green  { --accent:#1E5A43; --accent-deep:#163F30; --accent-soft:#E7EEE9; --accent-ink:#0F2B20; --accent-bright:#5FB389; --accent-glow:rgba(99,160,130,.32); --green:#1E5A43; --green-deep:#163F30; --green-hero:#1E5A43; --green-soft:#E7EEE9; --gold:#1E5A43; --gold-deep:#163F30; --gold-soft:#E7EEE9; }
+.theme-red    { --accent:#9E2B25; --accent-deep:#6F1B17; --accent-soft:#F3E2DF; --accent-ink:#4A1310; --accent-bright:#D98077; --accent-glow:rgba(190,90,80,.30); --green:#9E2B25; --green-deep:#6F1B17; --green-hero:#9E2B25; --green-soft:#F3E2DF; --gold:#9E2B25; --gold-deep:#6F1B17; --gold-soft:#F3E2DF; }
+.theme-blue   { --accent:#1F4E79; --accent-deep:#143350; --accent-soft:#E2EAF1; --accent-ink:#122C44; --accent-bright:#6E98C6; --accent-glow:rgba(90,140,200,.30); --green:#1F4E79; --green-deep:#143350; --green-hero:#1F4E79; --green-soft:#E2EAF1; --gold:#1F4E79; --gold-deep:#143350; --gold-soft:#E2EAF1; }
+.theme-purple { --accent:#5B3A6B; --accent-deep:#3D2748; --accent-soft:#ECE4F1; --accent-ink:#2F1E38; --accent-bright:#A07FB3; --accent-glow:rgba(150,110,170,.30); --green:#5B3A6B; --green-deep:#3D2748; --green-hero:#5B3A6B; --green-soft:#ECE4F1; --gold:#5B3A6B; --gold-deep:#3D2748; --gold-soft:#ECE4F1; }
+.theme-iron   { --accent:#33373D; --accent-deep:#212429; --accent-soft:#E8E9EB; --accent-ink:#1B1D21; --accent-bright:#8A9099; --accent-glow:rgba(120,130,140,.28); --green:#33373D; --green-deep:#212429; --green-hero:#33373D; --green-soft:#E8E9EB; --gold:#33373D; --gold-deep:#212429; --gold-soft:#E8E9EB; }
 
 /* —— 页面骨架 —— */
 .page {
@@ -62,17 +72,22 @@ page {
 .gap-sm { height: 8px; }
 .gap { height: 16px; }
 .gap-lg { height: 24px; }
-/* 悬浮底栏留白 */
-.tabbar-space { height: 110px; }
+/* 悬浮胶囊底栏留白（14px 浮起 + 66px 栏高 + 呼吸 + 安全区） */
+.tabbar-space {
+  height: calc(96px + constant(safe-area-inset-bottom));
+  height: calc(96px + env(safe-area-inset-bottom));
+}
 
 /* —— 文字 —— */
+/* 输入/编辑场景保留黑体系（宋体在小字号编辑态观感偏弱，对齐原型 app.css 的输入框做法） */
+input, textarea { font-family: var(--sans); }
 .serif { font-family: var(--serif); }
 .kicker {
   display: block;
   font-size: 11px; letter-spacing: .22em; text-transform: uppercase;
   color: var(--accent); font-weight: 600;
 }
-.h1 { display: block; font-family: var(--serif); font-size: 26px; font-weight: 700; color: var(--ink); line-height: 1.3; }
+.h1 { display: block; font-family: var(--serif); font-size: 26px; font-weight: 600; color: var(--ink); line-height: 1.3; }
 .muted { color: var(--ink-3); }
 
 /* —— 通用卡片 —— */

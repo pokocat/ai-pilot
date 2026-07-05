@@ -1,42 +1,139 @@
-.me-card { display: flex; align-items: center; gap: 13px; padding: 18px; border-radius: var(--r-lg); margin-top: 22px; }
-.me-av { width: 52px; height: 52px; border-radius: 16px; color: #fff; font-size: 24px; font-weight: 700; text-align: center; line-height: 52px; }
-.me-info { flex: 1; }
-.me-name { display: block; font-size: 18px; font-weight: 700; color: var(--ink); }
-.me-org { display: block; font-size: 12px; color: var(--ink-3); margin-top: 3px; }
-.me-vip { display: flex; align-items: center; padding: 5px 11px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+/* 我的页 —— 对齐设计稿 page-profile：居中标题 / 深绿用户卡 / 统计与额度 / 菜单 / 老师卡 / 深度能力卡 */
 
-/* 钻石管理卡：本命色暗调对角渐变 + 左上柔光，呼应首页军师卡，避免一块死黑 */
-.credit {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 18px; border-radius: var(--r-lg); margin-top: 12px;
-  position: relative; overflow: hidden;
-  background:
-    radial-gradient(135% 95% at 16% -8%, var(--accent-glow) 0%, rgba(0, 0, 0, 0) 52%),
-    linear-gradient(157deg, var(--accent-deep) 0%, #1B1E22 56%);
-  border: 1px solid rgba(255, 255, 255, .06);
-  box-shadow: 0 14px 34px rgba(17, 20, 24, .18);
+/* —— 页头：居中标题 + 右「设置」 —— */
+.account-nav {
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  min-height: 54px; margin-bottom: 6px;
+  padding-top: 10px;
 }
-.credit::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 0; height: 1px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, .14) 30%, rgba(255, 255, 255, 0) 80%);
+.an-title { font-size: 23px; font-weight: 600; color: var(--ink); line-height: 1.1; }
+.an-side {
+  position: absolute; right: 2px; bottom: 6px;
+  color: var(--green);
+  font-size: 16px; font-weight: 600;
 }
-.cr-k { display: block; font-size: 11px; color: rgba(255,255,255,.55); }
-.cr-vrow { display: flex; align-items: center; margin-top: 4px; }
-.cr-v { font-size: 20px; font-weight: 700; }
-.cr-btn { color: #fff; font-size: 13px; font-weight: 600; padding: 9px 18px; border-radius: 999px; }
+.an-side:active { opacity: .7; }
 
-.rows { margin-top: 12px; border-radius: var(--r-lg); overflow: hidden; padding: 4px 0; }
-.row { display: flex; align-items: center; gap: 12px; padding: 14px 18px; }
-.row-ic { width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
-.row-t { flex: 1; font-size: 14.5px; color: var(--ink); }
-.row-sw { width: 16px; height: 16px; border-radius: 5px; }
-.row-s { font-size: 12.5px; color: var(--ink-3); margin-left: 6px; }
-.row-go { font-size: 16px; color: var(--ink-3); margin-left: 8px; }
+/* —— 用户卡（深绿） —— */
+.account-user-card {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 4px; padding: 14px 16px;
+  border-radius: 18px;
+  background: var(--green-hero);
+  color: #fff;
+}
+.account-user-card:active { opacity: .9; }
+.au-av {
+  width: 46px; height: 46px; border-radius: 15px; flex-shrink: 0;
+}
+.au-av-ph {
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, .14);
+  border: 1px solid rgba(255, 255, 255, .22);
+  color: #fff; font-size: 21px; font-weight: 600;
+}
+.au-b { flex: 1; min-width: 0; }
+.au-name { display: block; font-size: 17px; font-weight: 600; }
+.au-sub {
+  display: block; margin-top: 5px;
+  color: rgba(255, 255, 255, .70);
+  font-size: 11px; line-height: 1.45; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.au-vip {
+  flex-shrink: 0; padding: 5px 10px; border-radius: 999px;
+  background: rgba(255, 255, 255, .14); border: 1px solid rgba(255, 255, 255, .24);
+  font-size: 11px; font-weight: 600;
+}
 
-.private { padding: 18px; border-radius: var(--r-lg); margin-top: 12px; border: none; }
-.pv-top { display: flex; align-items: center; justify-content: space-between; }
-.pv-ic { width: 36px; height: 36px; border-radius: 11px; background: rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; }
-.pv-badge { border: 1px solid; padding: 3px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 600; }
-.pv-t { display: block; color: #fff; font-size: 16px; font-weight: 600; margin: 14px 0 6px; }
-.pv-d { display: block; color: rgba(255,255,255,.6); font-size: 12px; line-height: 1.6; }
-.pv-cta { margin-top: 14px; color: var(--accent-bright); font-size: 13px; font-weight: 600; }
+/* —— 经营统计（account-statline） —— */
+.account-statline { display: flex; justify-content: space-between; margin-top: 10px; }
+.account-stat {
+  width: 31.8%; min-height: 52px; box-sizing: border-box;
+  padding: 10px 8px; border-radius: 16px;
+  background: rgba(255, 255, 255, .86);
+  text-align: center;
+}
+.account-stat:active { opacity: .8; }
+.as-n { display: block; color: var(--green); font-size: 18px; font-weight: 600; }
+.as-l { display: block; margin-top: 2px; color: var(--ink-3); font-size: 10.5px; font-weight: 600; }
+
+/* —— 权益额度（account-quota） —— */
+.account-quota { display: flex; justify-content: space-between; margin-top: 10px; }
+.account-quota-item {
+  width: 31.8%; min-height: 50px; box-sizing: border-box;
+  padding: 9px 8px; border-radius: 16px;
+  background: rgba(255, 255, 255, .72);
+  text-align: center;
+}
+.account-quota-item:active { opacity: .8; }
+.aq-v {
+  display: block; color: var(--ink-2); font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.aq-l { display: block; margin-top: 3px; color: var(--ink-3); font-size: 10.5px; font-weight: 600; }
+
+/* —— 菜单（design menu：左色块图标 + 右值 + ›） —— */
+.menu { margin-top: 12px; padding: 0; overflow: hidden; border-radius: 18px; background: rgba(255, 255, 255, .86); }
+.menu-row {
+  display: flex; align-items: center; gap: 12px;
+  height: 54px; padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.menu-row:last-child { border-bottom: 0; }
+.menu-row:active { background: var(--surface-2); }
+.menu-ic {
+  width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft);
+}
+.menu-t { flex: 1; min-width: 0; font-size: 15px; font-weight: 500; color: var(--ink); }
+.menu-sw { width: 15px; height: 15px; border-radius: 5px; flex-shrink: 0; }
+.menu-s { flex-shrink: 0; font-size: 12.5px; color: var(--ink-3); }
+.menu-go { flex-shrink: 0; font-size: 16px; color: var(--ink-3); }
+
+/* —— 服务老师 / 深度能力（account-teacher / account-depth） —— */
+.account-teacher,
+.account-depth {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 12px; padding: 15px 16px;
+  border-radius: 18px;
+}
+.account-teacher:active, .account-depth:active { opacity: .85; }
+.account-teacher {
+  border: 1px solid #E6D2A6;
+  background: #FEF7EA;
+}
+.at-b { flex: 1; min-width: 0; }
+.at-t { display: block; color: var(--gold-deep); font-size: 14.5px; font-weight: 600; }
+.at-s { display: block; margin-top: 5px; color: #7D6740; font-size: 12px; line-height: 1.5; font-weight: 500; }
+.at-em { flex-shrink: 0; color: var(--gold-deep); font-size: 14px; font-weight: 600; white-space: nowrap; }
+
+.account-depth {
+  margin-bottom: 4px;
+  border: 1px solid #5FB389;
+  background: var(--green-soft);
+}
+.ad-b { flex: 1; min-width: 0; }
+.ad-t { display: block; color: var(--green); font-size: 14.5px; font-weight: 600; }
+.ad-s { display: block; margin-top: 5px; color: var(--green-deep); font-size: 12px; line-height: 1.5; font-weight: 500; }
+.ad-em { flex-shrink: 0; color: var(--green); font-size: 14px; font-weight: 600; white-space: nowrap; }
+
+/* —— 战略段位卡（M4 PR-18，真实计数） —— */
+.rank-card {
+  display: flex; align-items: center; gap: 13px;
+  margin-top: 12px; padding: 15px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, .9);
+}
+.rk-badge {
+  width: 46px; height: 46px; border-radius: 15px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; background: var(--green-hero);
+  font-size: 17px; font-weight: 600;
+}
+.rk-b { flex: 1; min-width: 0; }
+.rk-t { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); }
+.rk-s { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.45; font-weight: 500; }
+.rk-next { display: block; margin-top: 5px; color: var(--gold-deep); font-size: 11px; line-height: 1.4; font-weight: 600; }

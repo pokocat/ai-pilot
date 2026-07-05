@@ -135,7 +135,7 @@ function load(token: string): UserData {
     name: '', // 不编造随机名；首登建档采集真实称呼
     company: '',
     phone,
-    benmingColor: 'gold',
+    benmingColor: 'green',
     onboarded: false,
     planId: 'mock-plan-decision',
     creditBalance: 68,
@@ -587,6 +587,16 @@ export const mock = {
     const { token, d } = current();
     d.profile = { ...d.profile, ...p }; d.onboarded = true; save(token, d);
     return delay(d.profile);
+  },
+
+  // 八字采集（mock：只存偏好不排盘——排盘是服务端确定性引擎的职责，mock 不伪造命理结论）
+  async saveBazi(body: object): Promise<{ believe: boolean; chart: null }> {
+    const { token, d } = current();
+    (d as { bazi?: object }).bazi = body; save(token, d);
+    return delay({ believe: (body as { believe?: boolean }).believe !== false, chart: null });
+  },
+  async myChart(): Promise<{ bazi: object | null; chart: null }> {
+    return delay({ bazi: (current().d as { bazi?: object }).bazi ?? null, chart: null });
   },
 
   async todaySaying(): Promise<TodaySaying> {

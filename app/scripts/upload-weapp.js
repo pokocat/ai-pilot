@@ -21,6 +21,38 @@ const projectConfig = JSON.parse(
 const pkg = JSON.parse(
   fs.readFileSync(path.join(APP_ROOT, 'package.json'), 'utf8'),
 );
+const DIST_ROOT = path.join(APP_ROOT, projectConfig.miniprogramRoot || 'dist/');
+const EXPECTED_API =
+  process.env.WEAPP_EXPECTED_API ||
+  process.env.TARO_APP_API ||
+  'https://wxapi.aibuzz.cn/api';
+
+function readBuiltJs(dir) {
+  let out = '';
+  for (const name of fs.readdirSync(dir)) {
+    const p = path.join(dir, name);
+    const st = fs.statSync(p);
+    if (st.isDirectory()) out += readBuiltJs(p);
+    else if (name.endsWith('.js')) out += fs.readFileSync(p, 'utf8');
+  }
+  return out;
+}
+
+function assertServerBuild() {
+  if (!fs.existsSync(path.join(DIST_ROOT, 'app.json'))) {
+    console.error('Missing built app.json. Run npm run build:weapp:server first.');
+    process.exit(1);
+  }
+  const bundle = readBuiltJs(DIST_ROOT);
+  if (!bundle.includes(EXPECTED_API)) {
+    console.error(`dist missing expected API ${EXPECTED_API}. Run npm run build:weapp:server before upload.`);
+    process.exit(1);
+  }
+  if (bundle.includes('http://localhost:4000/api')) {
+    console.error('dist still contains default localhost API; refusing to upload a mock/dev build.');
+    process.exit(1);
+  }
+}
 
 const privateKeyPath =
   process.env.PRIVATE_KEY_PATH || process.argv[2];
@@ -52,12 +84,13 @@ if (!desc) {
 const project = new ci.Project({
   appid: projectConfig.appid,
   type: 'miniProgram',
-  projectPath: path.join(APP_ROOT, projectConfig.miniprogramRoot || 'dist/'),
+  projectPath: DIST_ROOT,
   privateKeyPath,
   ignores: ['node_modules/**/*'],
 });
 
 (async () => {
+  assertServerBuild();
   console.log(`Uploading appid=${projectConfig.appid} version=${version}`);
   console.log(`desc: ${desc}`);
   const result = await ci.upload({

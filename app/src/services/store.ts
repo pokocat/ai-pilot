@@ -20,7 +20,7 @@ interface AppState {
 }
 
 const state: AppState = {
-  colorKey: safeGet(LS_COLOR) || 'gold',
+  colorKey: safeGet(LS_COLOR) || 'green', // 默认墨绿 = 设计稿主色
   onboarded: safeGet(LS_ONBOARDED) === '1',
   me: null,
   agents: DEFAULT_AGENTS, // 离线兜底；后端可达时由 loadAgents 覆盖
@@ -28,6 +28,7 @@ const state: AppState = {
   overlay: false,
 };
 const overlayKeys = new Set<string>();
+let lastUnauthorizedPromptAt = 0;
 
 type ApiErrorKind = 'unauthorized' | 'network' | 'other';
 
@@ -51,8 +52,15 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
     resetAuthState();
     emit();
     if (!options.silent) {
-      Taro.showToast({ title: '登录态已失效，请重新登录', icon: 'none' });
-      setTimeout(() => Taro.reLaunch({ url: '/pages/home/index' }), 250);
+      const now = Date.now();
+      const shouldPrompt = now - lastUnauthorizedPromptAt > 1500;
+      if (shouldPrompt) {
+        lastUnauthorizedPromptAt = now;
+        Taro.showToast({ title: '登录态已失效，请重新登录', icon: 'none' });
+      }
+      if (currentRoute() !== 'pages/sessions/index') {
+        setTimeout(() => Taro.reLaunch({ url: '/pages/sessions/index' }), 250);
+      }
     }
     return 'unauthorized';
   }
@@ -86,6 +94,15 @@ function safeGet(k: string): string {
 }
 function safeSet(k: string, v: string) {
   try { Taro.setStorageSync(k, v); } catch { /* noop */ }
+}
+function currentRoute(): string {
+  try {
+    const getPages = (globalThis as typeof globalThis & { getCurrentPages?: () => { route?: string }[] }).getCurrentPages;
+    const pages = getPages?.() ?? [];
+    return pages[pages.length - 1]?.route || '';
+  } catch {
+    return '';
+  }
 }
 
 export const store = {
@@ -152,7 +169,7 @@ export const store = {
     clearUserId();
     state.me = null;
     state.onboarded = false;
-    state.agents = [];
+    state.agents = DEFAULT_AGENTS;
     overlayKeys.clear();
     state.overlay = false;
     syncTabBarHidden(false);

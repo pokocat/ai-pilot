@@ -279,7 +279,8 @@ export interface DeliverableSection { h: string; b?: string; list?: string[]; }
 export interface Deliverable {
   title: string; icon: string; meta: string;
   sections: DeliverableSection[]; trust: string; actions: string[];
-  htmlUrl?: string; // 服务端渲染的可分享网页版报告链接（产出时生成）
+  htmlUrl?: string; // 服务端渲染的可分享网页版报告链接（自有域名 /api/r/:id，便于小程序 web-view 打开）
+  cdnUrl?: string; // 可选 OSS/CDN 镜像；不作为小程序内打开入口
   degraded?: boolean; // P0-4：真实模型未产出结构化成果、回退本地模板时为 true（前端提示可重试；用户不计费）
 }
 /** 成果模板（mock 提供方 / few-shot 结构约束消费） */

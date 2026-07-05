@@ -2,7 +2,7 @@
 //   cd server && node --import tsx --test test/reportHtml.test.ts
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderReportHtml } from '../src/llm/../services/reportHtml.js';
+import { renderReportHtml, publicReportUrl, reportHtmlIdFromUrl, webviewSafeReportUrl } from '../src/llm/../services/reportHtml.js';
 import type { Deliverable } from '../src/llm/schema.js';
 
 const D: Deliverable = {
@@ -37,5 +37,11 @@ describe('renderReportHtml', () => {
   test('空 sections → 兜底卡片', () => {
     const html = renderReportHtml({ ...D, sections: [] });
     assert.match(html, /暂无内容/);
+  });
+
+  test('OSS 旧链接转换成小程序 web-view 可打开的自有域名链接', () => {
+    const ossUrl = 'https://example.oss-cn-hangzhou.aliyuncs.com/junshi/cmreport123.html';
+    assert.equal(reportHtmlIdFromUrl(ossUrl), 'cmreport123');
+    assert.equal(webviewSafeReportUrl(ossUrl), publicReportUrl('cmreport123'));
   });
 });

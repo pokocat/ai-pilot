@@ -36,7 +36,7 @@
 .sh { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
 .sh .no {
   width: 18px; height: 18px; border-radius: 6px; color: #fff;
-  font-size: 11px; font-weight: 700; text-align: center; line-height: 18px; flex-shrink: 0;
+  font-size: 11px; font-weight: 600; text-align: center; line-height: 18px; flex-shrink: 0;
 }
 .sh-t { font-family: var(--serif); font-size: 14.5px; font-weight: 600; color: var(--ink); }
 .sb { font-size: 13px; line-height: 1.62; color: var(--ink-2); display: block; }

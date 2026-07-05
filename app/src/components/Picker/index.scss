@@ -26,7 +26,7 @@
   display: flex; align-items: center; justify-content: center; font-size: 14px;
 }
 .pk-idx { font-size: 11px; letter-spacing: .2em; color: var(--ink-3); text-transform: uppercase; }
-.pk-headline { display: block; font-size: 23px; font-weight: 700; color: var(--ink); margin: 6px 0 18px; }
+.pk-headline { display: block; font-size: 23px; font-weight: 600; color: var(--ink); margin: 6px 0 18px; }
 .pk-sub { display: block; font-size: 13px; color: var(--ink-2); margin: -10px 0 18px; }
 
 .pk-hero {
@@ -34,15 +34,15 @@
   display: flex; flex-direction: column; align-items: center; min-height: 150px; justify-content: center;
 }
 .pk-wm {
-  position: absolute; right: 10px; bottom: -18px; font-size: 130px; font-weight: 700;
+  position: absolute; right: 10px; bottom: -18px; font-size: 130px; font-weight: 600;
   color: rgba(255, 255, 255, .12); line-height: 1;
 }
 .pk-seal {
   width: 46px; height: 46px; border: 1.5px solid; border-radius: 8px;
   display: flex; align-items: center; justify-content: center; margin-bottom: 12px;
 }
-.pk-seal Text { color: #fff; font-size: 22px; font-weight: 700; }
-.pk-cn { color: #fff; font-size: 26px; font-weight: 700; letter-spacing: .18em; }
+.pk-seal Text { color: #fff; font-size: 22px; font-weight: 600; }
+.pk-cn { color: #fff; font-size: 26px; font-weight: 600; letter-spacing: .18em; }
 .pk-en { color: rgba(255, 255, 255, .7); font-size: 10px; letter-spacing: .2em; margin-top: 6px; }
 .pk-verdict { display: block; text-align: center; font-size: 15px; color: var(--ink); margin: 16px 0 18px; }
 
@@ -90,3 +90,8 @@
   background: var(--surface); font-size: 12.5px; color: var(--ink-2);
 }
 .pf-opt.on Text { color: #fff; }
+
+/* —— 天势档案（生辰采集）步骤 —— */
+.bz-date { display: flex; gap: 8px; margin-top: 10px; }
+.bz-date .bz-y { flex: 1.4; }
+.bz-date .bz-md { flex: 1; }

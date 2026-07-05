@@ -6,6 +6,14 @@ import { resolveIndustryPack } from '../data/industryPacks.js';
 import { recallMemories } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
+import { loadChart, chartBriefing, TIANSHI_OPTOUT_LINE } from './paipan.js';
+import { loadStrategicProfile, strategicBlock } from './strategicProfile.js';
+import { decisionBriefing } from './decisionLog.js';
+import { reviewBriefing } from './reviewLog.js';
+import { prophecyBriefing } from './prophecyLog.js';
+import { progressBriefing } from './progress.js';
+import { resolveMode, modeDirective, detectInnerState, roleDirective, stageDirective } from './intent.js';
+import { now } from './clock.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } from './agentVersions.js';
@@ -74,6 +82,7 @@ export async function buildGenContext(opts: {
   difyConversationId?: string | null; // 已存在的 Dify 会话 id（多轮续接）
   preview?: PreviewTarget;         // 沙盒/评测：用草稿或指定版本（默认走已发布版本）
   effective?: EffectiveAgentConfig; // 调用方已解析好的有效配置（避免重复解析、保证与计费一致）
+  sessionMode?: string | null;     // 会话粘性模式（M3 PR-11，路由传入 Session.mode）
 }): Promise<{ ctx: GenContext; memoryConfig: MemoryConfig; knowledgeUsed: string[]; effective: EffectiveAgentConfig }> {
   // C 端默认读 Agent.publishedVersionId 指向的已发布快照（resolveEffectiveAgent）；
   // 草稿/历史版本由 opts.preview 指定（沙盒、评测、AB）。调用方可传 opts.effective 复用。
@@ -85,6 +94,43 @@ export async function buildGenContext(opts: {
   const understanding = user
     ? await buildClientUnderstanding({ id: user.id, tenantId: opts.tenantId, name: user.name })
     : null;
+
+  // 战略档案（M1 PR-3）：客户已确认的战略事实（认可方案/手动编辑回写），注入优先级高于自动推断。
+  const strategicLine = strategicBlock(await loadStrategicProfile(opts.userId));
+  // 决策账本（M2 PR-7）：近期决策 + 服务端准确率（AI 只引用，禁止自行推算）。
+  const decisionLine = await decisionBriefing(opts.userId);
+  // 复盘账本（M2 PR-8）：连续复盘天数 + 最近复盘事实快照（战友见证/钩子的真实素材）。
+  const reviewLine = await reviewBriefing(opts.userId);
+  // 天机账本（M2 PR-9）：待验证预言 + 命中率（月复盘对账素材）。
+  const prophecyLine = await prophecyBriefing(opts.userId);
+  // 段位·里程碑（M2 PR-10）：真实门槛派生（战友见证/晋升话术素材）。
+  const progressLine = await progressBriefing(opts.userId);
+
+  // 本轮导引（M3 PR-11/12/14）：模式 + 角色语气 + 诊断轮次，全部确定性识别，识别不出不注入。
+  const { intent } = resolveMode(opts.userMessage, opts.sessionMode);
+  const directives: string[] = [];
+  const md = modeDirective(intent);
+  if (md) directives.push(md);
+  const rd = roleDirective(detectInnerState(opts.userMessage));
+  if (rd) directives.push(rd);
+  if (opts.agentKey === 'general' && intent.mode === 'strategy' && !isBriefInterviewRequest(opts.userMessage)) {
+    const round = (opts.history?.filter((h) => h.role === 'user').length ?? 0) + 1;
+    directives.push(`诊断进度：本会话第 ${round} 轮（六轮深度对话制；客户要求加速时切 3 轮快速通道并说明）。`);
+  }
+  const modeLine = directives.length ? `【本轮导引（系统识别；执行但不要向客户复述本块）】\n${directives.join('\n')}` : null;
+  // 阶段适配（M3 PR-13）：按档案营收阶段切深浅（随用户稳定 → stable 段）。
+  const stageLine = stageDirective(profile?.stage);
+
+  // 天势档案（M1 PR-2）：命盘由排盘引擎算好存库，这里只组装简报注入；
+  // 客户选择「不信命理」→ 注入降级指令（不带命盘）；无命盘 → 不注入。
+  const believe = ((profile?.extraJson as { bazi?: { believe?: boolean } } | null)?.bazi?.believe) !== false;
+  let tianshiLine: string | null = null;
+  if (!believe) {
+    tianshiLine = TIANSHI_OPTOUT_LINE;
+  } else {
+    const chart = await loadChart(opts.userId);
+    if (chart) tianshiLine = chartBriefing(chart, now().getFullYear());
+  }
 
   const memoryConfig = effective.memoryConfig as unknown as MemoryConfig;
   const briefInterview = isBriefInterviewRequest(opts.userMessage);
@@ -120,8 +166,16 @@ export async function buildGenContext(opts: {
     companyName: meaningfulCustomerLabel(tenant?.name) || null,
     profile: profile ? { industry: profile.industry, stage: profile.stage, pain: profile.pain } : null,
     memories,
-    benmingColor: user?.benmingColor ?? 'gold',
+    benmingColor: user?.benmingColor ?? 'green',
     benchmark: resolveIndustryPack(profile?.industry).benchmark,
+    tianshiLine,
+    strategicLine,
+    decisionLine,
+    reviewLine,
+    prophecyLine,
+    progressLine,
+    modeLine,
+    stageLine,
     userMessage: opts.userMessage,
     history: opts.history,
     references: refLines,
@@ -165,7 +219,7 @@ export async function buildSandboxContext(opts: {
     companyName: p?.companyName || null,
     profile: hasProfile ? { industry: p?.industry ?? null, stage: p?.stage ?? null, pain: p?.pain ?? null } : null,
     memories: [],
-    benmingColor: 'gold',
+    benmingColor: 'green',
     benchmark: resolveIndustryPack(p?.industry).benchmark,
     userMessage: opts.userMessage,
     references: [],

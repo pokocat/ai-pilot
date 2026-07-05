@@ -2,7 +2,7 @@
 // 走标准 /v1/chat/completions，兼容 OpenAI / Agnes / DeepSeek / Moonshot(Kimi) / 通义千问兼容模式 等。
 // 结构化成果用 function calling（tools）强约束。baseUrl/model/key/温度 来自运行时配置（可后台切换）。
 
-import { DELIVERABLE_TOOL, injectVariables, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, injectVariables, normalizeDeliverableSections, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import { runToolLoop } from '../tools/loop.js';
@@ -20,6 +20,13 @@ interface OAResponse {
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
   error?: { message?: string };
 }
+interface OAStreamChunk {
+  choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
+  usage?: OAResponse['usage'];
+  error?: { message?: string };
+}
+
+const DELIVERABLE_MAX_TOKENS = 2600;
 
 // 统一请求封装：注入 baseUrl/model/key/温度，带超时；错误抛出由 gateway 兜底降级 mock。
 async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>): Promise<OAResponse> {
@@ -41,6 +48,80 @@ async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>): P
   }
 }
 
+async function* readOpenAIStream(res: Response): AsyncGenerator<OAStreamChunk> {
+  if (!res.body) throw new Error('OpenAI 兼容接口未返回流式响应体');
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    buf = buf.replace(/\r\n/g, '\n');
+    const blocks = buf.split('\n\n');
+    buf = blocks.pop() ?? '';
+    for (const block of blocks) {
+      for (const line of block.split('\n')) {
+        const s = line.trim();
+        if (!s.startsWith('data:')) continue;
+        const raw = s.slice(5).trim();
+        if (!raw || raw === '[DONE]') continue;
+        let data: OAStreamChunk;
+        try { data = JSON.parse(raw) as OAStreamChunk; }
+        catch { continue; }
+        if (data.error?.message) throw new Error(data.error.message);
+        yield data;
+      }
+    }
+  }
+  buf = buf.replace(/\r\n/g, '\n');
+  if (buf.trim()) {
+    for (const line of buf.split('\n')) {
+      const s = line.trim();
+      if (!s.startsWith('data:')) continue;
+      const raw = s.slice(5).trim();
+      if (!raw || raw === '[DONE]') continue;
+      const data = JSON.parse(raw) as OAStreamChunk;
+      if (data.error?.message) throw new Error(data.error.message);
+      yield data;
+    }
+  }
+}
+
+async function callChatStream(cfg: ResolvedAiConfig, body: Record<string, unknown>, includeUsage = true): Promise<AsyncGenerator<OAStreamChunk>> {
+  const base = cfg.baseUrl.replace(/\/+$/, '');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
+  try {
+    const res = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({
+        model: cfg.model,
+        temperature: cfg.temperature,
+        ...body,
+        stream: true,
+        ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
+      }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) {
+      const data = (await res.clone().json().catch(async () => {
+        const text = await res.text().catch(() => '');
+        return text ? { error: { message: text } } : {};
+      })) as OAResponse;
+      throw new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`);
+    }
+    return (async function* () {
+      try { yield* readOpenAIStream(res); }
+      finally { clearTimeout(timer); }
+    })();
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+}
+
 function metaOf(ctx: GenContext): string {
   const parts = [ctx.companyName, ctx.profile?.industry, ctx.profile?.stage].filter(Boolean) as string[];
   return parts.length ? parts.join(' · ') : '经营快照';
@@ -56,6 +137,13 @@ function usageOf(data: OAResponse): Usage {
   };
 }
 
+function requireText(text: string | null | undefined, usage: Usage, where: string): string {
+  const out = (text ?? '').trim();
+  if (out) return out;
+  const detail = usage.outputTokens > 0 ? `，输出 token=${usage.outputTokens}` : '';
+  throw Object.assign(new Error(`OpenAI 兼容接口返回空文本（${where}${detail}）`), { code: 'AI_EMPTY_RESPONSE' });
+}
+
 export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<Deliverable>> {
   const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
   const system = injectVariables(ctx.systemPrompt, ctx, 'deliverable');
@@ -65,7 +153,7 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
 
   const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   const data = await callChat(cfg, {
-    max_tokens: 1500,
+    max_tokens: DELIVERABLE_MAX_TOKENS,
     messages: [
       { role: 'system', content: `${system}\n\n${structureHint}\n务必调用 emit_deliverable 函数输出结构化成果，不要输出自由长文。` },
       ...history,
@@ -78,13 +166,30 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
   const usage = usageOf(data);
   const args = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
   if (args) {
-    const input = JSON.parse(args) as { title?: string; sections?: Deliverable['sections'] };
+    const input = parseArgs(args) as { title?: string; sections?: unknown };
+    const sections = normalizeDeliverableSections(input.sections);
+    if (sections.length) {
+      return {
+        result: {
+          title: input.title || tpl?.title || '咨询成果',
+          icon: tpl?.icon ?? 'spark',
+          meta: metaOf(ctx),
+          sections,
+          trust: TRUST_NOTE,
+          actions: ['save_to_library', 'export_pdf'],
+        },
+        usage,
+      };
+    }
+  }
+  const textSections = normalizeDeliverableSections(data.choices?.[0]?.message?.content);
+  if (textSections.length) {
     return {
       result: {
-        title: input.title || tpl?.title || '咨询成果',
+        title: tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
-        sections: input.sections ?? [],
+        sections: textSections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },
@@ -107,11 +212,44 @@ export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
       { role: 'user', content: ctx.userMessage },
     ] as OAMessage[],
   });
-  const text = (data.choices?.[0]?.message?.content ?? '').trim();
+  const usage = usageOf(data);
+  const text = requireText(data.choices?.[0]?.message?.content, usage, 'chat');
   return {
-    result: { text: text || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
-    usage: usageOf(data),
+    result: { text },
+    usage,
   };
+}
+
+export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
+  const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
+  const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
+  const body = {
+    max_tokens: 800,
+    messages: [
+      { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。` },
+      ...history,
+      { role: 'user', content: ctx.userMessage },
+    ] as OAMessage[],
+  };
+  let chunks: AsyncGenerator<OAStreamChunk>;
+  try {
+    chunks = await callChatStream(cfg, body, true);
+  } catch (err) {
+    if (!/stream_options|include_usage/i.test((err as Error).message)) throw err;
+    chunks = await callChatStream(cfg, body, false);
+  }
+  let text = '';
+  let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
+  for await (const chunk of chunks) {
+    if (chunk.usage) usage = usageOf({ usage: chunk.usage });
+    const delta = chunk.choices?.map((c) => c.delta?.content ?? '').join('') ?? '';
+    if (delta) {
+      text += delta;
+      yield { type: 'delta', text: delta };
+    }
+  }
+  const out = requireText(text, usage, 'chat_stream');
+  yield { type: 'done', result: { text: out }, usage };
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回 content 文本。 */
@@ -170,8 +308,9 @@ export async function openaiChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
     tools,
     toolCtx: toolCtxOf(ctx),
   });
+  const text = requireText(r.text, r.usage, 'chat_tools');
   return {
-    result: { text: (r.text ?? '').trim() || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
+    result: { text },
     usage: r.usage,
     toolCalls: r.toolCalls,
     iterations: r.iterations,
@@ -194,14 +333,31 @@ export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
     toolCtx: toolCtxOf(ctx),
     finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
   });
-  const input = (r.toolInput ?? {}) as { title?: string; sections?: Deliverable['sections'] };
-  if (input.sections) {
+  const input = (r.toolInput ?? {}) as { title?: string; sections?: unknown };
+  const sections = normalizeDeliverableSections(input.sections);
+  if (sections.length) {
     return {
       result: {
-        title: input.title || tpl?.title || '咨询成果',
+        title: input?.title || tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
-        sections: input.sections,
+        sections,
+        trust: TRUST_NOTE,
+        actions: ['save_to_library', 'export_pdf'],
+      },
+      usage: r.usage,
+      toolCalls: r.toolCalls,
+      iterations: r.iterations,
+    };
+  }
+  const textSections = normalizeDeliverableSections(r.text);
+  if (textSections.length) {
+    return {
+      result: {
+        title: tpl?.title || '咨询成果',
+        icon: tpl?.icon ?? 'spark',
+        meta: metaOf(ctx),
+        sections: textSections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },
@@ -232,25 +388,27 @@ export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
     finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
     forceFinalTool: false, // emit_deliverable 可选，不强制
   });
-  const input = (r.toolInput ?? null) as { title?: string; sections?: Deliverable['sections'] } | null;
-  if (input?.sections?.length) {
+  const input = (r.toolInput ?? null) as { title?: string; sections?: unknown } | null;
+  const sections = normalizeDeliverableSections(input?.sections);
+  if (sections.length) {
     const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
     return {
       kind: 'report',
       deliverable: {
-        title: input.title || tpl?.title || '咨询成果',
+        title: input?.title || tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
-        sections: input.sections,
+        sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
       },
       usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
     };
   }
+  const text = requireText(r.text, r.usage, 'adaptive');
   return {
     kind: 'chat',
-    reply: { text: (r.text ?? '').trim() || '我需要更多信息来给你一个可执行的判断，能再补充一点背景吗？' },
+    reply: { text },
     usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
   };
 }
@@ -265,7 +423,7 @@ export function openaiStep(cfg: ResolvedAiConfig): StepFn {
       toolDefs.push({ type: 'function', function: { name: opts.finalTool.name, description: opts.finalTool.description, parameters: opts.finalTool.schema } });
     }
 
-    const body: Record<string, unknown> = { max_tokens: opts.finalTool ? 1500 : 800, messages: toOAMessages(messages) };
+    const body: Record<string, unknown> = { max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : 800, messages: toOAMessages(messages) };
     if (opts.forceFinal) {
       // 最后一轮收口。deliverable(强制)→强制 emit_deliverable；自适应(forceFinalTool=false)→只给 emit 但 auto(可 emit 可出文本)；chat→去掉工具出文本。
       if (opts.finalTool && opts.forceFinalTool !== false) {

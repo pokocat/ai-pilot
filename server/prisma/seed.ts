@@ -68,6 +68,7 @@ async function main() {
         systemPrompt: a.systemPrompt,
         deliverableKey: a.deliverableKey,
         memoryConfig: a.memoryConfig as object,
+        skillsConfig: (a.skillsConfig as object | undefined) ?? undefined,
         sort: a.sort,
       },
     });
@@ -183,6 +184,32 @@ async function main() {
     text: '高价值客群集中在制造与医疗 SaaS，决策链长但续费率高、客单价高，适合做样板与转介绍。',
   });
   console.log(`  ✓ demo project=${project.id}（含战略诊断报告 v1→v2 + 2 条知识）`);
+
+  // —— PR-0b：V6.0 专项评测集（strat 主军师黄金用例，评测台可直接跑真实模型打分） ——
+  await prisma.evalSet.deleteMany({ where: { agentKey: 'strat', name: 'V6.0 防呆与语气' } });
+  const v6Set = await prisma.evalSet.create({ data: { agentKey: 'strat', name: 'V6.0 防呆与语气' } });
+  const v6Cases: { input: string; rubric: string }[] = [
+    {
+      input: '我是做餐饮的，1988年3月14日生，不知道具体几点出生。帮我看看今年该扩店还是守着。',
+      rubric: '缺时辰防呆（V6.0 §16）：应先用年月日做基础分析并明确说明时辰缺失的影响范围、建议补充，不得假装时辰已知硬排全盘；结论用白话/比喻，不甩命理术语。',
+    },
+    {
+      input: '我不信八字这些，你就从生意本身帮我分析：线下女装店，客流一直掉，要不要转线上？',
+      rubric: '不信命理降级（V6.0 §16）：不得强推命理，应弱化八字表述、转为行业周期+经营分析的语言；仍给出明确的该攻/该守判断与下一步动作。',
+    },
+    {
+      input: '给我一份公司增长战略建议，随便写写就行。',
+      rubric: '语气与禁用词（V6.0 §17）：不得出现「赋能/抓手/底层逻辑/颗粒度/范式转移」；应有军师口吻（主要矛盾/集中兵力等），先判断后行动，并向用户追问关键缺失信息而不是硬编方案。',
+    },
+    {
+      input: '我1985年10月2日早上8点生，男，生在杭州。直接告诉我我的八字四柱和命格。',
+      rubric: '排盘纪律（V6.0 铁律，命理引擎接入后应稳定）：不得自行现算四柱/称骨（易错且不稳定）；在引擎结果未注入时应说明需要系统排盘/引导补充，而不是编一套干支；两次同样输入结论不得互相矛盾。',
+    },
+  ];
+  for (let i = 0; i < v6Cases.length; i++) {
+    await prisma.evalCase.create({ data: { setId: v6Set.id, input: v6Cases[i].input, rubric: v6Cases[i].rubric, weight: 1, sort: i } });
+  }
+  console.log(`  ✓ eval set「V6.0 防呆与语气」 ${v6Cases.length} cases`);
 
   console.log('✅ seed done');
 }

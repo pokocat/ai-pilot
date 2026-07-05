@@ -14,7 +14,7 @@
 }
 .cd-k { display: block; font-size: 12px; color: rgba(255, 255, 255, .6); }
 .cd-vrow { display: flex; align-items: center; margin-top: 6px; }
-.cd-v { font-size: 30px; font-weight: 700; }
+.cd-v { font-size: 30px; font-weight: 600; }
 
 .cd-quota { margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, .1); }
 .cd-qhead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
@@ -31,6 +31,6 @@
 .cd-rl { flex: 1; padding-right: 12px; }
 .cd-rt { display: block; font-size: 14px; color: var(--ink); }
 .cd-rat { display: block; font-size: 11px; color: var(--ink-3); margin-top: 3px; }
-.cd-rd { font-size: 16px; font-weight: 700; }
+.cd-rd { font-size: 16px; font-weight: 600; }
 .cd-rd.pos { color: #3A8A55; }
 .cd-rd.neg { color: #9C4A38; }

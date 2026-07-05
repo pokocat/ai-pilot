@@ -6,6 +6,7 @@ import { recordAudit } from '../services/audit.js';
 import { buildClientUnderstanding } from '../services/understanding.js';
 import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
+import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
 
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -35,6 +36,11 @@ export async function metaRoutes(app: FastifyInstance) {
         wechatLinked: !!user.wechatOpenId,
       },
       tenant: { id: user.tenant.id, name: user.tenant.name, industry: user.tenant.industry, stage: user.tenant.stage },
+      // 已解析的行业身份（命中行业包才返回，「其他」/无/不可识别 → null）：供前端展示「· SaaS」行业徽标。
+      // 注：此段 2026-06-25 曾直接改在生产上（行业身份 L1 上线），2026-07-03 移植回仓库对齐。
+      industry: hasIndustryIdentity(user.tenant.industry)
+        ? { code: resolveIndustryPack(user.tenant.industry).key, label: resolveIndustryPack(user.tenant.industry).label }
+        : null,
       plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth } : null,
       creditBalance: credit?.balance ?? 0,
       tokenQuota: { limit: quota.quota, used: quota.used, remaining: quota.balance, unlimited: quota.unlimited },

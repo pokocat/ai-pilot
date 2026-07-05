@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { resolveUser, buildGenContext } from '../services/context.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
-import { generateDeliverable, chatComplete, generateAdaptive, chatCompleteStream } from '../llm/gateway.js';
+import { generateDeliverable, chatComplete, chatCompleteStream } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
@@ -13,8 +13,22 @@ import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
 import type { MessageRef, Deliverable, ChatReply } from '../llm/schema.js';
+import { extractAndRecordProphecies } from '../services/prophecyLog.js';
+import { resolveMode } from '../services/intent.js';
+import { recordReview } from '../services/reviewLog.js';
+import { webviewSafeReportUrl } from '../services/reportHtml.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// 预言收割（M2 PR-9）：总军师输出后异步抽取「具体、可验证、有期限」的天势判断落账。
+// 真实模型不可用时抽取器返回空（不产生伪预言）；失败静默，绝不影响回复主流程。
+function harvestProphecies(user: { tenantId: string; id: string }, agentKey: string, text: string | null | undefined): void {
+  if (agentKey !== 'general' || !text) return;
+  void extractAndRecordProphecies({ tenantId: user.tenantId, userId: user.id, text }).catch(() => {});
+}
+function harvestText(d: Deliverable): string {
+  return `${d.title}\n${d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n')}`;
+}
 
 export async function sessionRoutes(app: FastifyInstance) {
   // 会话列表（按更新时间倒序，带最后一条摘要）
@@ -82,7 +96,18 @@ export async function sessionRoutes(app: FastifyInstance) {
     });
     if (!msg) return reply.code(404).send({ error: 'report not found' });
     const deliverable = msg.contentJson as unknown as Deliverable;
-    if (deliverable?.htmlUrl) return { htmlUrl: deliverable.htmlUrl }; // 已生成过：幂等返回
+    if (deliverable?.htmlUrl) {
+      const htmlUrl = webviewSafeReportUrl(deliverable.htmlUrl);
+      if (htmlUrl && htmlUrl !== deliverable.htmlUrl) {
+        const patch = { htmlUrl, cdnUrl: deliverable.cdnUrl ?? deliverable.htmlUrl } as Partial<Deliverable>;
+        await prisma.message.update({
+          where: { id: msg.id },
+          data: { contentJson: { ...(deliverable as object), ...patch } as Prisma.InputJsonValue },
+        });
+        return patch;
+      }
+      return { htmlUrl: deliverable.htmlUrl, cdnUrl: deliverable.cdnUrl }; // 已生成过：幂等返回
+    }
 
     const enabled = (msg.session.agent.skillsConfig as { tools?: string[] } | null)?.tools ?? [];
     const { resolveOutputSkills } = await import('../llm/tools/registry.js');
@@ -128,7 +153,9 @@ export async function sessionRoutes(app: FastifyInstance) {
     try {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：到期后拦一切 AI 交互（产出+对话+图片）→ PLAN_EXPIRED(403)
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
-      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio);  // P0-2：锁内预留额度（并发透支有界）
+      // 复盘保底（M2 PR-6）：复盘类调用（buildReviewPrompt 的确定性前缀）额度耗尽仍每日限次放行
+      const reviewIntent = /^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(text);
+      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio, reviewIntent ? { grace: 'review' } : undefined);  // P0-2：锁内预留额度（并发透支有界）
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
       if (quotaReservation) await quotaReservation.refund().catch(() => {});
@@ -150,6 +177,14 @@ export async function sessionRoutes(app: FastifyInstance) {
       if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
     }
     const userMsg = await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+    // M3 PR-11：意图路由——本轮检测优先、检测不出沿用会话粘性模式；复盘意图自动落对应层复盘账
+    const { intent, persist: modePersist } = resolveMode(text, session.mode);
+    if (modePersist !== undefined) await prisma.session.update({ where: { id: session.id }, data: { mode: modePersist } });
+    if (intent.mode === 'review' && intent.reviewLayer) {
+      void recordReview({ tenantId: user.tenantId, userId: user.id, layer: intent.reviewLayer }).catch(() => {});
+    }
+    const sessionMode = modePersist !== undefined ? modePersist : session.mode;
+
     const history = await loadHistory(session.id, userMsg.id);
     await recordAudit({
       tenantId: user.tenantId,
@@ -166,32 +201,36 @@ export async function sessionRoutes(app: FastifyInstance) {
       userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
       sessionId: session.id, difyConversationId: session.difyConversationId,
       effective: effective ?? undefined, history,
-    });
+      sessionMode,
+      });
 
     try {
       if (onDemand) {
-        const out = await generateAdaptive(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         const learn = async () => (agentKey === 'general'
           ? false
           : learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId }));
-        if (out.kind === 'report') {
-          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: out.deliverable as object } });
+        if (!wantsDeliverableRequest(text)) {
+          const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
+          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object } });
+          harvestProphecies(user, agentKey, replyChat.text);
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
           const creditBalance = creditReservation?.balance ?? 0;
-          const tokenQuota = quotaReservation ? await quotaReservation.settle(out.usage.inputTokens + out.usage.outputTokens, ratio) : null;
+          const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
           return {
-            sessionId: session.id, created, agentKey, kind: 'report', messageId: msg.id, deliverable: out.deliverable,
+            sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat,
             memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
           };
         }
-        const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: out.reply as object } });
+        const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
+        const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: deliverable as object } });
+        harvestProphecies(user, agentKey, harvestText(deliverable));
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const learned = await learn();
         const creditBalance = creditReservation?.balance ?? 0;
-        const tokenQuota = quotaReservation ? await quotaReservation.settle(out.usage.inputTokens + out.usage.outputTokens, ratio) : null;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
         return {
-          sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: out.reply,
+          sessionId: session.id, created, agentKey, kind: 'report', messageId: msg.id, deliverable,
           memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
         };
       }
@@ -223,6 +262,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       const msg = await prisma.message.create({
         data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object },
       });
+      harvestProphecies(user, agentKey, replyChat.text);
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
       const creditBalance = creditReservation?.balance ?? 0;
       const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
@@ -265,7 +305,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
   });
 
-  // 发送消息并流式产出（SSE，仅 H5/Web）。空会话不预先落库——首条消息时创建会话。
+  // 发送消息并流式产出（SSE；H5 ReadableStream / weapp chunk）。空会话不预先落库——首条消息时创建会话。
   app.post<{ Body: { agentKey?: string; sessionId?: string; text: string; projectId?: string; refs?: MessageRef[] } }>('/generate', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const text = (req.body.text || '').trim();
@@ -290,7 +330,8 @@ export async function sessionRoutes(app: FastifyInstance) {
     try {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：到期后拦一切 AI 交互（产出+对话+图片）→ PLAN_EXPIRED(403)
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
-      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio);
+      const reviewIntent = /^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(text); // 复盘保底（M2 PR-6）
+      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio, reviewIntent ? { grace: 'review' } : undefined);
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
       if (quotaReservation) await quotaReservation.refund().catch(() => {});
@@ -317,6 +358,14 @@ export async function sessionRoutes(app: FastifyInstance) {
 
       // 持久化用户消息（含引用）
       const userMsg = await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
+    // M3 PR-11：意图路由——本轮检测优先、检测不出沿用会话粘性模式；复盘意图自动落对应层复盘账
+    const { intent, persist: modePersist } = resolveMode(text, session.mode);
+    if (modePersist !== undefined) await prisma.session.update({ where: { id: session.id }, data: { mode: modePersist } });
+    if (intent.mode === 'review' && intent.reviewLayer) {
+      void recordReview({ tenantId: user.tenantId, userId: user.id, layer: intent.reviewLayer }).catch(() => {});
+    }
+    const sessionMode = modePersist !== undefined ? modePersist : session.mode;
+
       const history = await loadHistory(session.id, userMsg.id);
       await recordAudit({
         tenantId: user.tenantId,
@@ -339,6 +388,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         difyConversationId: session.difyConversationId,
         effective: effective ?? undefined,
         history,
+        sessionMode,
       });
 
       const learnSse = async () => {
@@ -346,34 +396,38 @@ export async function sessionRoutes(app: FastifyInstance) {
         const learned = await learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId });
         if (learned) send('memory', { learned: true, agentName: agent.name });
       };
-      if (onDemand) {
-        const out = await generateAdaptive(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
-        if (out.kind === 'report') {
-          const d = out.deliverable;
-          send('meta', { kind: 'report' });
-          send('begin', { title: d.title, icon: d.icon, meta: d.meta });
-          for (let i = 0; i < d.sections.length; i++) { await sleep(520); send('section', { index: i, ...d.sections[i] }); }
-          await sleep(300);
-          send('footer', { trust: d.trust, actions: d.actions });
-          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: d as object } });
-          await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
-          await learnSse();
-          const creditBalance = creditReservation?.balance ?? 0;
-          const tokenQuota = quotaReservation ? await quotaReservation.settle(out.usage.inputTokens + out.usage.outputTokens, ratio) : null;
-          send('credit', { balance: creditBalance, tokenQuota });
-          send('done', { messageId: msg.id });
-        } else {
-          send('meta', { kind: 'chat' });
-          await sleep(700);
-          send('chat', out.reply);
-          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: out.reply as object } });
-          await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
-          await learnSse();
-          const creditBalance = creditReservation?.balance ?? 0;
-          const tokenQuota = quotaReservation ? await quotaReservation.settle(out.usage.inputTokens + out.usage.outputTokens, ratio) : null;
-          send('credit', { balance: creditBalance, tokenQuota });
-          send('done', { messageId: msg.id });
+      if (onDemand && !wantsDeliverableRequest(text)) {
+        send('meta', { kind: 'chat' });
+        let reply2: ChatReply | null = null;
+        let usage = { inputTokens: 0, outputTokens: 0 };
+        for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
+          if (ev.type === 'delta') send('token', { text: ev.text });
+          else { reply2 = ev.result; usage = ev.usage; }
         }
+        send('chat', reply2);
+        const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object } });
+        harvestProphecies(user, agentKey, reply2?.text);
+        await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+        await learnSse();
+        const creditBalance = creditReservation?.balance ?? 0;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
+        send('credit', { balance: creditBalance, tokenQuota });
+        send('done', { messageId: msg.id });
+      } else if (onDemand) {
+        send('meta', { kind: 'report' });
+        const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
+        send('begin', { title: deliverable.title, icon: deliverable.icon, meta: deliverable.meta });
+        for (let i = 0; i < deliverable.sections.length; i++) { await sleep(520); send('section', { index: i, ...deliverable.sections[i] }); }
+        await sleep(300);
+        send('footer', { trust: deliverable.trust, actions: deliverable.actions });
+        const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: deliverable as object } });
+        harvestProphecies(user, agentKey, harvestText(deliverable));
+        await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
+        await learnSse();
+        const creditBalance = creditReservation?.balance ?? 0;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
+        send('credit', { balance: creditBalance, tokenQuota });
+        send('done', { messageId: msg.id });
       } else if (isDeliverable) {
         send('meta', { kind: 'report' });
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
@@ -411,7 +465,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('done', { messageId: msg.id });
       } else {
         send('meta', { kind: 'chat' });
-        // P1-B3：真流式渐进下发——chatCompleteStream 内含输入/输出审核+计费+trace，按句/词推送 token（去掉假 sleep）。
+        // 普通聊天优先走 provider 原生 token 流；只在输入侧先审核，输出完成后记账/trace。
         let reply2: ChatReply | null = null;
         let usage = { inputTokens: 0, outputTokens: 0 };
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
@@ -422,6 +476,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
         });
+        harvestProphecies(user, agentKey, reply2?.text);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const creditBalance = creditReservation?.balance ?? 0;
         const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
@@ -490,4 +545,8 @@ function setupSSE(reply: FastifyReply) {
     Connection: 'keep-alive',
     'Access-Control-Allow-Origin': '*',
   });
+}
+
+function wantsDeliverableRequest(text: string): boolean {
+  return /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|(?:重新)?出.{0,4}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|战略体检|转成军令|生成纪要/.test(text);
 }

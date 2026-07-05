@@ -9,10 +9,10 @@
 .bf-hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .bf-hero-ic { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
 .bf-k { display: block; font-size: 11px; color: rgba(255,255,255,.55); }
-.bf-t { display: block; color: #fff; font-size: 22px; font-weight: 700; margin-top: 4px; }
+.bf-t { display: block; color: #fff; font-size: 22px; font-weight: 600; margin-top: 4px; }
 .bf-summary { display: block; color: rgba(255,255,255,.68); font-size: 12.5px; line-height: 1.65; margin-top: 10px; }
 .bf-counts { display: block; color: var(--accent-bright); font-size: 11.5px; margin-top: 12px; }
-.bf-badge { flex: 0 0 auto; padding: 4px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 700; background: rgba(255,255,255,.1); color: var(--accent-bright); }
+.bf-badge { flex: 0 0 auto; padding: 4px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: rgba(255,255,255,.1); color: var(--accent-bright); }
 .bf-badge.empty { color: rgba(255,255,255,.55); }
 .bf-badge.ready { color: #d6f6df; background: rgba(62,151,91,.22); }
 
@@ -22,7 +22,7 @@
   background: var(--surface, #fff);
   box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.04));
 }
-.bf-sec-t { display: block; color: var(--ink); font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.bf-sec-t { display: block; color: var(--ink); font-size: 14px; font-weight: 600; margin-bottom: 8px; }
 .bf-item { display: block; color: var(--ink-2); font-size: 12.5px; line-height: 1.6; margin-top: 5px; }
 .bf-empty { display: block; color: var(--ink-3); font-size: 12.5px; line-height: 1.6; }
 .bf-chip-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -31,5 +31,5 @@
 .bf-cta {
   height: 48px; border-radius: 14px; margin: 16px 0 8px;
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  color: #fff; font-size: 14.5px; font-weight: 700;
+  color: #fff; font-size: 14.5px; font-weight: 600;
 }
