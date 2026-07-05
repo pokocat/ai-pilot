@@ -10,7 +10,7 @@ import type {
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
   KnowledgeDocRow, KnowledgeDetail,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
-  BindPhoneResult, WechatOrderResult,
+  BindPhoneResult, WechatOrderResult, WechatSubscribeTemplatesResult, WechatSubscribeChoice, WechatSubscribeRecordResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -30,6 +30,8 @@ export type {
   Plan, PlanPurchaseResult, AgentPurchaseResult, AgentBilling,
   ClientUnderstanding, ClientUnderstandingSection, UnderstandingMaturity, AliasSuggestionResult,
   TokenQuotaView, MyCreditItem, MyCreditsView,
+  WechatSubscribeScene, WechatSubscribeStatus, WechatSubscribeTemplate, WechatSubscribeTemplatesResult,
+  WechatSubscribeChoice, WechatSubscribeRecordResult,
 } from '../../../shared/contracts';
 
 // token 助手（兼容旧导出名）
@@ -212,6 +214,11 @@ export const api = {
   // 微信支付下单（小程序 JSAPI）：返回 wx.requestPayment 调起参数 + 月→年折算明细。
   createOrder: (id: string, openid?: string) =>
     IS_MOCK ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', openid ? { openid } : {}),
+  wechatSubscribeTemplates: () =>
+    IS_MOCK ? Promise.resolve({ scenes: [] } as WechatSubscribeTemplatesResult) : request<WechatSubscribeTemplatesResult>('/wechat/subscribe/templates'),
+  recordWechatSubscription: (choices: WechatSubscribeChoice[]) =>
+    IS_MOCK ? Promise.resolve({ ok: true, accepted: choices.filter((c) => c.status === 'accept').length } as WechatSubscribeRecordResult)
+      : request<WechatSubscribeRecordResult>('/wechat/subscribe', 'POST', { choices }),
   setColor: (color: string) =>
     IS_MOCK ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),
   updateIdentity: (body: { name?: string; company?: string; avatarUrl?: string }) =>

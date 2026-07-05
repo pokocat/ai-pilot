@@ -7,6 +7,12 @@
 import { prisma } from '../db.js';
 import { recordAudit } from './audit.js';
 import { now } from './clock.js';
+import {
+  hasSentWechatNotificationToday,
+  hasWechatSubscriptionQuota,
+  notifyReviewReminder,
+  sendWechatSubscribeMessage,
+} from './wechatSubscribe.js';
 
 export interface ScheduledJob {
   name: string;
@@ -115,10 +121,49 @@ export async function scanReviewGaps(): Promise<number> {
       action: 'system.review.reminder.candidate',
       payload: { lastReviewDate: last.date, gapDays: REVIEW_GAP_DAYS, reason: '连续复盘中断风险' },
     });
+    if (await hasWechatSubscriptionQuota(cf.userId, 'review')) {
+      notifyReviewReminder({ tenantId: cf.tenantId, userId: cf.userId, lastReviewDate: last.date });
+    }
     flagged += 1;
   }
   if (flagged) console.log(`[scheduler] review reminder candidates: ${flagged}`);
   return flagged;
+}
+
+// ============ 任务：当日复盘订阅提醒 ============
+// 21:30 前后（按服务端本地时区）提醒当天还没做 day 复盘的活跃案卷用户。
+// 发送前检查：用户当天未收到过 review 订阅消息、仍有一次性授权额度、当天未复盘。
+export const REVIEW_REMINDER_HOUR = Number(process.env.REVIEW_REMINDER_HOUR ?? 21);
+
+export async function scanDailyReviewReminders(): Promise<number> {
+  const d = now();
+  if (d.getHours() < REVIEW_REMINDER_HOUR) return 0;
+  const today = `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+  const actives = await prisma.casefile.findMany({
+    where: { status: 'active' },
+    select: { tenantId: true, userId: true },
+    take: 500,
+  });
+  let sent = 0;
+  for (const cf of actives) {
+    const reviewed = await prisma.reviewLog.findUnique({
+      where: { userId_layer_date: { userId: cf.userId, layer: 'day', date: today } },
+      select: { id: true },
+    });
+    if (reviewed) continue;
+    if (await hasSentWechatNotificationToday(cf.userId, 'review')) continue;
+    if (!(await hasWechatSubscriptionQuota(cf.userId, 'review'))) continue;
+    const r = await sendWechatSubscribeMessage({
+      tenantId: cf.tenantId,
+      userId: cf.userId,
+      scene: 'review',
+      title: '今晚复盘提醒',
+      note: '记录今日结果，调整明天军令',
+    });
+    if (r.sent) sent += 1;
+  }
+  if (sent) console.log(`[scheduler] daily review reminders sent: ${sent}`);
+  return sent;
 }
 
 // ============ 任务：预言到期验证候选（M2 PR-9） ============
@@ -147,4 +192,5 @@ export async function scanDueProphecies(): Promise<number> {
 // 注册内置任务（周期：每 6 小时扫一轮；召回/提醒按天幂等，多扫无副作用）
 registerJob({ name: 'casefile-idle-recall', intervalMs: 6 * 3600_000, run: async () => { await scanIdleCasefiles(); } });
 registerJob({ name: 'review-gap-reminder', intervalMs: 6 * 3600_000, run: async () => { await scanReviewGaps(); } });
+registerJob({ name: 'daily-review-reminder', intervalMs: 30 * 60_000, run: async () => { await scanDailyReviewReminders(); } });
 registerJob({ name: 'prophecy-due-scan', intervalMs: 6 * 3600_000, run: async () => { await scanDueProphecies(); } });

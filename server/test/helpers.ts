@@ -82,6 +82,8 @@ export async function cleanBusiness(): Promise<void> {
   await prisma.creditLedger.deleteMany();
   await prisma.tokenUsage.deleteMany();
   await prisma.tokenWallet.deleteMany();
+  await prisma.wechatNotificationLog.deleteMany();
+  await prisma.wechatSubscription.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.smsCode.deleteMany();
   await prisma.profile.deleteMany();

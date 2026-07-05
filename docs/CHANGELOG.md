@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-04** · **接入微信订阅消息触达**：新增 `WechatSubscription/WechatNotificationLog` 两张表，`GET /wechat/subscribe/templates` 返回已配置模板，`POST /wechat/subscribe` 记录 `wx.requestSubscribeMessage` 结果并仅对 `accept` 累计一次性发送额度；新增 `services/wechatSubscribe.ts` 调微信 `subscribe/send`，发送成功扣减额度并写日志。执行页复盘视图「订阅复盘提醒」接入授权；scheduler 新增 21 点后当日复盘提醒并在久不复盘候选时尝试发送；报告保存、会话报告生成和网页版报告渲染完成后尝试发送报告完成提醒。`.env.example`/部署文档补订阅模板配置，单测覆盖订阅额度与发送扣减。影响面：server schema/wechat/scheduler/reports/sessions + shared contracts + app api/studio + docs/tests。
+
 - **2026-07-04** · **完成军令改为归档展示**：执行页「今日军令」只渲染未完成任务，勾选完成后自动从待执行列表收起到默认折叠的「已归档」区；归档区可展开查看、长按删除、点勾取消完成，避免误操作后无法恢复。顶部军师献策、今日主令和执行信号同步改为按待执行/已归档状态展示；周计划、复盘、每日战报仍读取完整 `done` 记录，不删除历史数据。影响面：app 执行页 + dossier 视图 helper + AGENTS/CHANGELOG。
 
 - **2026-07-04** · **修复今日军令重复保存导致执行页过长**：`/casefile/accept` 自动拆军令改为按「同一案卷 + 同一天 + 标准化文本」幂等，重复认可同一成果返回 `newOrders=0/skippedOrders>0`，不再追加重复军令；`casefileView` 读取时过滤历史重复行，手动添加同日同文本军令也直接忽略。小程序 mock 分支同步同口径，聊天页重复点击“认可方案/转成军令”时提示“已转成军令，不重复添加”，不再重复存库或跳转刷长列表。新增 casefile 回归测试覆盖自动/手动重复。影响面：server casefile service/routes + app dossier/chat + casefile 测试 + AGENTS/CHANGELOG。

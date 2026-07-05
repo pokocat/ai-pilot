@@ -12,6 +12,7 @@ import { store } from '../../services/store';
 import { api, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../services/api';
 import { STREAM_CHAT } from '../../services/config';
 import { generateStream } from '../../services/streaming';
+import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import { agentForText } from '../../data/intents';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../data/council';
 import { CHAT_GUIDES } from '../../data/operatingSystem';
@@ -493,6 +494,7 @@ export default function Chat() {
     if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出成果', icon: 'none' }); return; }
     Taro.showLoading({ title: '生成网页版…' });
     try {
+      await requestWechatSubscribe('report').catch(() => {});
       const r = await api.renderReport(sessionId, messageId);
       Taro.hideLoading();
       if (!r.htmlUrl) { Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' }); return; }

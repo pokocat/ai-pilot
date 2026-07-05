@@ -17,6 +17,7 @@ import { extractAndRecordProphecies } from '../services/prophecyLog.js';
 import { resolveMode } from '../services/intent.js';
 import { recordReview } from '../services/reviewLog.js';
 import { webviewSafeReportUrl } from '../services/reportHtml.js';
+import { notifyReportReady } from '../services/wechatSubscribe.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -28,6 +29,9 @@ function harvestProphecies(user: { tenantId: string; id: string }, agentKey: str
 }
 function harvestText(d: Deliverable): string {
   return `${d.title}\n${d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n')}`;
+}
+function notifySessionReport(user: { tenantId: string; id: string }, deliverable: Deliverable): void {
+  notifyReportReady({ tenantId: user.tenantId, userId: user.id, title: deliverable.title || '报告已生成' });
 }
 
 export async function sessionRoutes(app: FastifyInstance) {
@@ -120,6 +124,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         where: { id: msg.id },
         data: { contentJson: { ...(deliverable as object), ...patch } as Prisma.InputJsonValue },
       });
+      notifySessionReport(user, deliverable);
       return patch; // { htmlUrl, ... }
     } catch (err) {
       console.error('[sessions] output skill failed:', (err as Error).message);
@@ -225,6 +230,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: deliverable as object } });
         harvestProphecies(user, agentKey, harvestText(deliverable));
+        notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const learned = await learn();
         const creditBalance = creditReservation?.balance ?? 0;
@@ -240,6 +246,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'report', contentJson: deliverable as object },
         });
+        notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         let learned = false;
         if (agentKey !== 'general') {
@@ -419,6 +426,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('footer', { trust: deliverable.trust, actions: deliverable.actions });
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: deliverable as object } });
         harvestProphecies(user, agentKey, harvestText(deliverable));
+        notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
         const creditBalance = creditReservation?.balance ?? 0;
@@ -440,6 +448,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'report', contentJson: deliverable as object },
         });
+        notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
 
         // 记忆学习（非通用智能体）

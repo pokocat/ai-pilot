@@ -7,6 +7,7 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
+import { notifyReportReady } from './wechatSubscribe.js';
 import type {
   Deliverable, DeliverableSection, ReportDiff, SectionDiff, WordOp, SaveReportResult,
 } from '../llm/schema.js';
@@ -124,7 +125,7 @@ export async function saveReportVersion(opts: SaveVersionOpts): Promise<SaveRepo
   const slug = slugify(opts.title);
   const hash = hashContent(opts.content);
 
-  return prisma.$transaction(async (tx) => {
+  const saved = await prisma.$transaction(async (tx) => {
     await lockReportVersion(tx, opts.tenantId, slug);
 
     let doc = await tx.reportDoc.findFirst({ where: { tenantId: opts.tenantId, slug } });
@@ -186,6 +187,10 @@ export async function saveReportVersion(opts: SaveVersionOpts): Promise<SaveRepo
 
     return { reportId: doc.id, version: nextVersion, created, changed: true };
   });
+  if (saved.changed) {
+    notifyReportReady({ tenantId: opts.tenantId, userId: opts.userId, title: opts.title, reportId: saved.reportId });
+  }
+  return saved;
 }
 
 /** 取两版差异（读时实时计算）。 */

@@ -569,6 +569,26 @@ export interface WechatOrderResult {
   // 月→年升级折算明细（applies=true 时前端可展示「已抵扣 ¥X」）。
   proration?: { applies: boolean; fullPrice: number; remainingDays: number; remainingValue: number; chargeAmount: number };
 }
+export type WechatSubscribeScene = 'review' | 'report';
+export type WechatSubscribeStatus = 'accept' | 'reject' | 'ban' | 'filter';
+export interface WechatSubscribeTemplate {
+  scene: WechatSubscribeScene;
+  templateId: string;
+  title: string;
+  description: string;
+}
+export interface WechatSubscribeTemplatesResult {
+  scenes: WechatSubscribeTemplate[];
+}
+export interface WechatSubscribeChoice {
+  scene: WechatSubscribeScene;
+  templateId: string;
+  status: WechatSubscribeStatus;
+}
+export interface WechatSubscribeRecordResult {
+  ok: boolean;
+  accepted: number;
+}
 /** 运营端单用户详情 + 智能体开通管理（GET /admin/users/:id） */
 export interface AdminUserAgentRow {
   key: string; name: string; role: string; icon: string;

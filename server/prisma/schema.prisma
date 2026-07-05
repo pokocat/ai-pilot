@@ -66,6 +66,8 @@ model User {
   agents       UserAgent[] // 已开通的智能体（赠送 / 购买 / 后台开通）
   tokenUsages  TokenUsage[]
   tokenWallet  TokenWallet?
+  wechatSubscriptions WechatSubscription[]
+  wechatNotifications WechatNotificationLog[]
 
   @@map("app_user")
 }
@@ -872,6 +874,50 @@ model SmsCode {
 
   @@index([phone, createdAt])
   @@map("sms_code")
+}
+
+/// 微信小程序订阅消息授权额度。小程序订阅消息默认是一次性授权：
+/// 前端每次 requestSubscribeMessage accept，服务端给对应 scene/templateId 增加 1 次可发送额度；
+/// 发送成功后扣减，避免把用户拒绝或过期授权误当成长期触达能力。
+model WechatSubscription {
+  id             String    @id @default(cuid())
+  tenantId       String
+  userId         String
+  scene          String // review | report
+  templateId     String
+  status         String    @default("accept") // accept | reject | ban | filter
+  remaining      Int       @default(0)
+  acceptedAt     DateTime?
+  lastSentAt     DateTime?
+  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, scene, templateId])
+  @@index([tenantId, scene])
+  @@map("wechat_subscription")
+}
+
+/// 微信订阅消息发送日志：记录 sent/failed/skipped，用于低频重要触达排查与幂等。
+model WechatNotificationLog {
+  id          String    @id @default(cuid())
+  tenantId    String
+  userId      String
+  scene       String // review | report
+  templateId  String?
+  title       String
+  status      String // sent | failed | skipped
+  reason      String?
+  payloadJson Json?
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, scene, createdAt])
+  @@index([scene, status, createdAt])
+  @@map("wechat_notification_log")
 }
 
 /// 战略案卷（PR-EX 执行闭环落库）：认可方案 → 案卷 → 军令打卡 → 数据回填 → 复盘。

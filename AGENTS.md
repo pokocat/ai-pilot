@@ -188,6 +188,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `POST /auth/wechat-login` | 小程序微信登录：code 换 openid/unionid 后注册/登录 | 否 |
 | `POST /auth/wechat-phone` | 小程序本机号一键登录：getPhoneNumber code 换手机号后注册/登录 | 否 |
 | `GET/POST /wechat/message` | 微信后台消息推送 URL 验签：GET 校验 `signature/timestamp/nonce` 后原样返回 `echostr`；POST 验签后返回 `success`（后续事件处理入口） | 否 |
+| `GET /wechat/subscribe/templates` · `POST /wechat/subscribe` | 已登录用户读取订阅消息模板 · 回写 `wx.requestSubscribeMessage` 结果，`accept` 累计一次性发送额度 | 是 |
 | `GET /health` | 健康检查 | 否 |
 | `GET /me` · `PUT /me/color` | 当前用户(+onboarded+ai信息+军师档案) · 改本命色 | 是 |
 | `GET /agents` · `GET /agents/:key` | 智能体注册表；带 token 时回填 `owned` | 否 |
@@ -237,6 +238,7 @@ Provider（`provider` 字段，由 `effectiveProvider` 决定实际生效）：
 DATABASE_URL  PORT  MODERATION_ENABLED
 ADMIN_TOKEN
 WECHAT_MINI_APPID  WECHAT_MINI_SECRET  WECHAT_MESSAGE_TOKEN
+WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID  WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID  WECHAT_SUBSCRIBE_STATE
 AI_PROVIDER=mock|claude|openai
 ANTHROPIC_API_KEY  CLAUDE_MODEL
 OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
@@ -248,7 +250,8 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/cardHtml.ts`（M4 PR-15 第一批）：B 级卡片渲染——每日战报（军令/对齐率/回填/段位/连续天数）、天时日历（命盘 12 月攻守+拐点+谶语）、天命速写（送你一卦：命格/大势/建议由命盘确定性生成；朋友生辰 `computeChart` 现算**不落库**）。铁律：卡上每个数字都来自服务端账本，读不到整块不显示；品牌一律军师参谋部（V6.0 原稿外置 CSS 未保留，样式按小程序设计体系重制）；卡片发布走自有域名 `{PUBLIC_BASE_URL}/api/r/:id`。`services/reportHtml.ts` 的普通报告模板已改为 V6.0 天势卡片风（暖纸底、深绿封面、白色章节卡、金印落款、军师参谋部品牌）；报告 `htmlUrl` 也固定返回自有域名 `/api/r/:id` 供小程序 web-view 打开，OSS 仅作为可选 `cdnUrl` 镜像，旧 OSS `htmlUrl` 会在再次请求时迁回自有域名；不要回退旧米色卷轴页脚或 OSS 直开入口。叙事线/谶语存 `StrategicProfile.extraJson`（PUT /profile/strategic 接受 narrative/verse，注入块带「跨月复述一致/全年沿用」口径）。剩余 9 卡 + A 级模板见 §13。
 - `data/industryPacks.ts` 深度字段（M4 PR-19）：`decisionChain/ticketRange/benchmarkCases/mingLink` 可选，配了才拼进「行业视角」注入行；美业与大健康已拆分为两个包（新增行业包=建档选项自动 +1，app Picker 兜底问卷需手动同步）。
 - `services/intent.ts`（M3 编排与适配，全部确定性规则）：`detectIntent`（V6.0 §3 入口识别：复盘六层触发词/紧急/择时/团队匹配/送你一卦/情绪→师父）→ `modeDirective` 模式指令；`Session.mode` 粘性存储（`resolveMode` 本轮检测优先、检测不出沿用；复盘意图在 sessions 路由自动落对应层 ReviewLog）；`detectInnerState`→`roleDirective` 五角色语气（教官/参谋长/大哥/战略家/师父）；`stageOf/stageDirective` 营收阶段自适应（问卷已改营收区间，旧标签兼容）；诊断轮次由历史用户消息数计算注入。注入位：模式/角色/轮次=【本轮导引】dynamic 首位，阶段=stable。**本命色语气注入已移除（PR-14，本命色回归纯 UI 品牌色）**，`{本命色}` 占位符路径保留。
-- `services/scheduler.ts`（M1 定时任务框架）：任务注册制 + 进程内周期扫描（生产单实例；`NODE_ENV=test` 不自启，测试直接 `runJob/scan*` 驱动）；任务彼此隔离（单任务崩不影响其它）。已挂：`casefile-idle-recall`（案卷 ≥48h 未推进 → 登记 `system.recall.candidate` 审计，按用户按天幂等）；M2 挂：久不复盘提醒/预言到期验证/里程碑解锁。**微信订阅消息是一次性授权**：发送额度靠前端在打卡/复盘完成动线里逐次请求订阅，定时任务只负责「找出该提醒谁」。
+- `services/wechatSubscribe.ts`：微信小程序订阅消息通道。`GET /wechat/subscribe/templates` 只返回已配置模板；前端 `wx.requestSubscribeMessage` 后 `POST /wechat/subscribe` 回写结果，`accept` 才给 `WechatSubscription.remaining +1`；发送成功后扣减一次额度并写 `WechatNotificationLog`。当前场景：`review`（复盘提醒，模板字段 `thing1/time2/thing3`）与 `report`（报告生成完成，模板字段 `thing1/phrase2/time3/thing4`）。未配模板、无 openid、无额度、微信接口失败都不阻断主流程。
+- `services/scheduler.ts`（M1 定时任务框架）：任务注册制 + 进程内周期扫描（生产单实例；`NODE_ENV=test` 不自启，测试直接 `runJob/scan*` 驱动）；任务彼此隔离（单任务崩不影响其它）。已挂：`casefile-idle-recall`（案卷 ≥48h 未推进 → 登记 `system.recall.candidate` 审计，按用户按天幂等）、`daily-review-reminder`（服务端本地时间 `REVIEW_REMINDER_HOUR` 后，活跃案卷且当天未复盘、当天未发过 review、仍有订阅额度 → 发微信复盘提醒）、`review-gap-reminder`（久不复盘登记候选并尝试发送）、`prophecy-due-scan`（预言到期登记候选）。
 - `services/strategicProfile.ts`（M1 统一状态层）：战略档案提取（`extractStrategicFacts` 按分节标题确定性规则，只取语义明确分节、不猜）/合并写入（只覆盖出现的字段）/注入块（`strategicBlock`）。逐轮 LLM 结构化抽取与 M2 决策日志共用抽取管道（§13 TODO）。
 - `services/paipan.ts`（★ M1 排盘引擎 v1）：确定性命理/历法计算——干支历/八字/大运用 `lunar-typescript`，紫微命宫/身宫主星用 `iztro`；产出 四柱十神/月令取格（打法映射 `data/baziPlaybook.ts`，源自 V6.0 表）/日主强弱与喜用（v1 计分法，basis 写明依据）/大运时间线/年度逐月攻守；真太阳时 v1 平太阳时校正（经度）。**铁律：算→存（`NatalChart`，带 engineVersion）→拼指令（`chartBriefing` 注入【天势档案】+ 禁止 AI 自算），AI 只做比喻翻译**；「不信命理」注入 `TIANSHI_OPTOUT_LINE` 降级指令。回归口径：同输入同输出（`test/paipan.test.ts` 已知八字校验）。
 - `services/understanding.ts`（★）：生成前台「军师档案」与模型上下文线索，按真实 `Profile/Memory/Project/Knowledge/Report/Session` 汇总经营身份、创业路径、当前难题、已沉淀资料和待补问题；禁止写入固定 mock 客户画像。
@@ -290,6 +293,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `Casefile` + `CasefileOrder`（军令，`aligned` 对齐性标注）+ `CasefileMetric`（每日回填，`(casefileId,date)` 唯一）——执行闭环（M0 PR-EX），用户级 active 案卷唯一。
 - `NatalChart`（命盘，`userId` 唯一、重排覆盖；`engineVersion` 支持按版本批量复算；`chartJson`=ChartView 全量结构）——排盘引擎（M1 PR-1）。生辰输入与「不信命理」偏好存 `Profile.extraJson.bazi`。
 - `ReviewLog`（复盘日志，`(userId,layer,date)` 唯一）——M2 PR-8：六层复盘事件账本；day 层由执行页发起复盘时落库（快照当日军令完成/对齐/回填事实）；**对齐率=对齐军令÷总军令、连续复盘天数由服务端从行计算**（今天未复盘不打断，从昨天起算）；scheduler 挂断档提醒（`review-gap-reminder`）。注入【复盘账本】块。
+- `WechatSubscription` + `WechatNotificationLog`：订阅消息一次性授权额度与发送日志。`(userId,scene,templateId)` 唯一；`accept` 增额度，发送成功扣额度；日志记录 `sent/failed/skipped` 便于排查复盘提醒、报告生成触达。
 - `ProphecyLog`（预言账本，`(userId,seq)` 唯一）——M2 PR-9：预言/依据/验证标准/到期时间/状态（pending|hit|miss）；**写入源=真实模型结构化抽取（gateway.extractProphecies，测试/mock 返回空→绝不产生伪预言）+ 显式接口**；总军师输出后 sessions 路由异步收割（有命盘用户才抽）；`prophecy-due-scan` 到期登记对账候选（行级 `dueNotifiedAt` 幂等）；命中率服务端算、无样本 null。注入【天机账本】块。
 - `UserProgress`（用户进度，`userId` 唯一）——M2 PR-10：战略段位（新兵→尉官14天→校官30天+月复盘→将军90天+准确率>60%→元帅180天+>70%+命中率>50%；**只升不降**，null 指标视为不达标不放水）+ 里程碑（使用天数 7/30/90/180/365 解锁，记首次解锁日期）；晋升记审计 `user.rank.promoted`（晋升卡素材）；`syncProgress` 无变化不写库。注入【段位·里程碑】块（新用户零记录不注入）。
 - **复盘保底（M2 PR-6）**：`reserveQuota(userId, ratio, {grace:'review'})`——余额≤0 时复盘类调用（`buildReviewPrompt` 确定性前缀识别）每日最多 `REVIEW_GRACE_PER_DAY`(2) 次放行（透支记账+`system.quota.grace` 审计）；套餐到期锁定不受影响。**复盘动线归属总军师 general（免费），ops 经营参谋保留为可解锁深聊**——复盘是留存生命线，不设解锁墙。
@@ -491,7 +495,12 @@ cd server
 # .env 里配置：WECHAT_MESSAGE_TOKEN=与你在微信后台填写的 Token 完全一致
 npm run dev
 ```
-微信后台「消息推送 URL」填 `https://你的域名/api/wechat/message`，Token 填 `WECHAT_MESSAGE_TOKEN` 的值。GET 验签通过会原样返回微信传入的 `echostr`；POST 推送会先验签再返回 `success`（当前只建立可信入口，业务事件处理后续再接）。
+微信后台「消息推送 URL」填 `https://你的域名/api/wechat/message`，Token 填 `WECHAT_MESSAGE_TOKEN` 的值。GET 验签通过会原样返回微信传入的 `echostr`；POST 推送会先验签再返回 `success`。
+
+订阅消息另配小程序后台「订阅消息」模板：
+- `WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID`：复盘提醒，字段 `thing1=提醒事项`、`time2=提醒时间`、`thing3=备注`。
+- `WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID`：报告生成，字段 `thing1=报告名称`、`phrase2=状态`、`time3=完成时间`、`thing4=备注`。
+- 前端执行页「复盘 → 订阅复盘提醒」会调 `wx.requestSubscribeMessage`，服务端只在用户接受后累计一次可发送额度。
 
 ---
 
@@ -529,7 +538,7 @@ mock 可随时预览；**正式上传/审核**还需：
   3. **总军师派单引擎（consult_specialist）未建**：调度白名单目前语义=「unlock 已解锁 → 可进专属线程深聊」（`assertAgentAccess` 既有行为）；总军师自动派单/结论回流（多 agent 编排 + 未解锁 specialist 标记 skipped）待建 orchestrate 层时实现。~~同期把 on-demand 成果产出移交 general~~ **已完成（2026-07-03 P0-3）**：general 配 `deliverableKey='战略方案'` + `skillsConfig.deliverableMode='on-demand'`（注册表 `data/agents.ts` + `prisma/seed.ts` + 测试基线 `test/helpers.ts` 三处同步；模板在 `data/deliverables.ts`，段名对齐案卷提取启发式——「30 天行动军令」拆军令、「现在不能做」提风险锁）——六轮主线聊成熟后总军师直接产出可采纳成果卡。当前分流：general 普通问答仍逐 token 流式；明确成果请求走 report SSE 卡片流，必要时回退 `/generate-sync`。**生产迁移注意**：`agent` 行与已发布 `agent_version` 快照两处都要 UPDATE 这两个字段。
   4. **B 级卡片剩余 9 张 + A 级报告模板待做（M4 PR-15 第二批）**：已上线 每日战报/天时日历/天命速写 三张（`services/cardHtml.ts`）；剩余 周/月/季战报、年度里程碑图、紧急决策推演卡、晋升卡、性格操作手册卡、定位一页纸、十二问诊断卡 + A 级七章报告模板——其中战报类依赖对话内容沉淀（复盘产出结构化），晋升卡/性格手册数据已就绪可先做；卡片骨架语义参考 Notion 原稿（须按 §0 #10 去米诺）。另：智库整理管道（PR-20：待整理区→AI 粗分→深度整理付费→确认入库）未开工。
   5. **排盘引擎 v1 已知边界**（`services/paipan.ts` 头注同步）：称骨暂缓（60 干支年表需可靠来源核对后再上，防带错表）；格局仅月令取格（不处理从格/化格）；身强弱/喜用为 v1 计分启发式；真太阳时只做经度平太阳时（未含均时差；城市→经度映射 `data/cityLongitude.ts` 覆盖 ~48 城，未命中不校正）；阴历闰月后端支持（负 month）但前端采集 UI 暂未提供闰月选项。战略档案 v1 回写触发点=认可方案+手动校准，逐轮 LLM 抽取待 M2 与决策日志共建抽取管道。引擎升级须提 `PAIPAN_ENGINE_VERSION` 并按版本复算，不得悄改历史命盘。
-  2. **提醒与日历**：设计要求 09:00 军令 / 21:30 复盘 / 周五周复盘提醒。需微信订阅消息模板 + 服务端定时任务；前端已亮框架（执行页复盘视图）。
+  2. **提醒与日历剩余项**：21:30 复盘提醒已接微信订阅消息（执行页授权 + scheduler 发送）；09:00 军令提醒、周五周复盘提醒、日历视图仍待建模与模板配置。
   3. **数据源授权绑定**：店铺（淘宝/抖店/小红书）、内容账号、企业工商（企查查类）、企微 CRM 均无真实接入，`packages/work/bindings` 为目录引导（仅财务表走资料库上传）。每类需独立 OAuth/采买与同步管道，且按 PRD 属可单独收费能力。
   4. **模块/Skill 状态持久化**：市场为静态目录，「启用」= 跳军师对话承接；添加/隐藏/排序/基础版-深度版状态、模块↔报告↔任务关联（设计里「报告已回写模块」）需后端 `UserModule` 建模。
   5. **知识库 AI 自动分类**：设计的「AI 分类文件夹」（企业档案/老板档案/产品服务…8 类 + 份数）未实现——`KnowledgeItem.kind` 现为技术枚举，需入库时 LLM 归类到业务文件夹并出计数接口；前端文件夹网格暂为框架展示（不显示假份数）。
