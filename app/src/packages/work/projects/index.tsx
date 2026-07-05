@@ -7,7 +7,8 @@ import { useStore } from '../../../hooks/useStore';
 import { api, type ProjectItem } from '../../../services/api';
 import './index.scss';
 
-// 项目工作台：企业事务主线。每个项目串起 会话 / 报告 / 知识。
+// 我的案卷（WO-01 名词统一：Project 模型保留，前台统一叫「案卷」）：企业事务主线。
+// 每份案卷串起 战况（会话）/ 方案（报告）/ 资料（知识）。
 export default function Projects() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -24,7 +25,7 @@ export default function Projects() {
     setName('');
     setCreating(false);
     const r = await api.createProject({ name: v }).catch((e) => {
-      s.handleApiError(e, { fallbackTitle: '创建项目失败' });
+      s.handleApiError(e, { fallbackTitle: '创建案卷失败' });
       return null;
     });
     await load();
@@ -34,7 +35,7 @@ export default function Projects() {
   return (
     <View className={`page projects ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
       <SafeHeader
-        title="项目工作台"
+        title="我的案卷"
         onBack={() => Taro.navigateBack()}
         titleClassName="pj-title"
         right={<View className="safe-hbtn" onClick={() => setCreating((c) => !c)}><Text className="plus" style={{ color: accent }}>＋</Text></View>}
@@ -42,7 +43,7 @@ export default function Projects() {
 
       {creating && (
         <View className="pj-new">
-          <Input className="pj-new-input" value={name} placeholder="新建项目名，如「2026 融资冲刺」" confirmType="done" onInput={(e) => setName(e.detail.value)} onConfirm={create} focus />
+          <Input className="pj-new-input" value={name} placeholder="新建案卷名，如「2026 融资冲刺」" confirmType="done" onInput={(e) => setName(e.detail.value)} onConfirm={create} focus />
           <View className="pj-new-btn" style={{ background: accent }} onClick={create}><Text>创建</Text></View>
         </View>
       )}
@@ -51,9 +52,9 @@ export default function Projects() {
         {items.length === 0 ? (
           <View className="pj-empty">
             <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="layers" size={22} color={accent} /></View>
-            <Text className="et">还没有项目</Text>
-            <Text className="es">把一次融资、一个新品上市、一次组织调整建成「项目」，对话、报告、知识都会有序归拢到这里。</Text>
-            <View className="es-btn" style={{ background: accent }} onClick={() => setCreating(true)}><Text>新建第一个项目</Text></View>
+            <Text className="et">还没有案卷</Text>
+            <Text className="es">把一次融资、一个新品上市、一次组织调整建成「案卷」，对话、方案、资料都会有序归拢到这里。</Text>
+            <View className="es-btn" style={{ background: accent }} onClick={() => setCreating(true)}><Text>新建第一份案卷</Text></View>
           </View>
         ) : (
           <View className="pj-list">
@@ -65,8 +66,8 @@ export default function Projects() {
                   {p.summary ? <Text className="pj-s">{p.summary}</Text> : null}
                   <View className="pj-counts">
                     <Text className="pj-c"><Text className="num" style={{ color: accent }}>{p.counts.sessions}</Text> 对话</Text>
-                    <Text className="pj-c"><Text className="num" style={{ color: accent }}>{p.counts.reports}</Text> 报告</Text>
-                    <Text className="pj-c"><Text className="num" style={{ color: accent }}>{p.counts.knowledge}</Text> 知识</Text>
+                    <Text className="pj-c"><Text className="num" style={{ color: accent }}>{p.counts.reports}</Text> 方案</Text>
+                    <Text className="pj-c"><Text className="num" style={{ color: accent }}>{p.counts.knowledge}</Text> 资料</Text>
                   </View>
                 </View>
                 <Text className="pj-go">›</Text>

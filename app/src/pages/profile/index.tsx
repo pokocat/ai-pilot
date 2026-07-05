@@ -32,8 +32,8 @@ export default function Profile() {
 
   const rows = [
     { ic: 'insight', t: '个人 / 企业档案', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/pages/brief/index' }) },
-    { ic: 'grid', t: '项目工作台 · 战略案卷', s: projCount ? `${projCount}` : '', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
-    { ic: 'layers', t: '报告库 / 方案库', s: `${libCount + reportCount}`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
+    { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
+    { ic: 'layers', t: '方案库', s: `${libCount + reportCount}`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
     { ic: 'attach', t: '我的资料库', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/knowledge/index' }) },
     { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/bindings/index' }) },
     { ic: 'grid', t: '模块管理 · 添加 / 隐藏', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/market/index' }) },
@@ -76,19 +76,19 @@ export default function Profile() {
           {me?.plan?.name ? <Text className="au-vip">{me.plan.name}</Text> : null}
         </View>
 
-        {/* 经营统计（account-statline）：案卷 / 报告 / 方案（真实计数） */}
+        {/* 经营统计（account-statline）：案卷 / 方案 / 资料（真实计数，四名词统一） */}
         <View className="account-statline">
           <View className="account-stat card" onClick={() => Taro.navigateTo({ url: '/packages/work/projects/index' })}>
             <Text className="as-n serif">{projCount}</Text>
-            <Text className="as-l">战略案卷</Text>
-          </View>
-          <View className="account-stat card" onClick={() => Taro.switchTab({ url: '/pages/thinktank/index' })}>
-            <Text className="as-n serif">{reportCount}</Text>
-            <Text className="as-l">报告</Text>
+            <Text className="as-l">案卷</Text>
           </View>
           <View className="account-stat card" onClick={() => Taro.navigateTo({ url: '/packages/work/library/index' })}>
-            <Text className="as-n serif">{libCount}</Text>
+            <Text className="as-n serif">{libCount + reportCount}</Text>
             <Text className="as-l">方案</Text>
+          </View>
+          <View className="account-stat card" onClick={() => Taro.navigateTo({ url: '/packages/work/knowledge/index' })}>
+            <Text className="as-n serif">{me?.understanding?.evidenceCount.knowledge ?? 0}</Text>
+            <Text className="as-l">资料</Text>
           </View>
         </View>
 

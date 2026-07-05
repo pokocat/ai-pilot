@@ -64,7 +64,7 @@ function replyToText(reply: ChatReplyT): string {
 
 function reportDraft(agent?: Agent | null, partial: Partial<Deliverable> = {}): Deliverable {
   return {
-    title: partial.title || `${agent?.name || '军师'}正在出报告`,
+    title: partial.title || `${agent?.name || '军师'}正在出方案`,
     icon: partial.icon || agent?.icon || 'doc',
     meta: partial.meta || '正在梳理上下文与引用资料',
     sections: partial.sections || [],
@@ -491,7 +491,7 @@ export default function Chat() {
 
   // 生成网页版报告（render_report → 自有域名 /api/r/:id，接口幂等）→ 直接打开：weapp 走内置 web-view 页，H5 开新窗口。
   const shareReport = async (messageId?: string) => {
-    if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出成果', icon: 'none' }); return; }
+    if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出方案', icon: 'none' }); return; }
     Taro.showLoading({ title: '生成网页版…' });
     try {
       await requestWechatSubscribe('report').catch(() => {});
@@ -539,7 +539,7 @@ export default function Chat() {
       return;
     }
     Taro.showActionSheet({
-      itemList: ['上传资料（PDF/Word/Excel…）', '引用已有项目 / 报告 / 知识'],
+      itemList: ['上传资料（PDF/Word/Excel…）', '引用已有案卷 / 方案 / 资料'],
       success: (r) => {
         if (r.tapIndex === 0) uploadMaterial();
         else if (r.tapIndex === 1) openPicker();
@@ -585,7 +585,7 @@ export default function Chat() {
     }
   };
 
-  // 打开 @引用选择器：拉取可引用的 项目/报告/知识
+  // 打开 @引用选择器：拉取可引用的 案卷/方案/资料
   const openPicker = async () => {
     setInputFocus(false);
     if (!store.isAuthed()) {
@@ -645,20 +645,20 @@ export default function Chat() {
         </View>
       </SafeHeader>
 
-      {/* 记忆条 */}
+      {/* 军师印象条（Agent Memory 用户可见包装） */}
       {agent && (
         <View className="mem-bar">
           <Icon name="layers" size={14} color={accent} />
-          <Text className="mt">专属理解：{stripTags(agent.memText)}</Text>
+          <Text className="mt">军师印象：{stripTags(agent.memText)}</Text>
           <View className="mlearn"><View className="dot" style={{ background: accent }} /><Text>{agent.learnText}</Text></View>
         </View>
       )}
 
-      {/* 项目作用域 + 生成纪要 */}
+      {/* 案卷作用域 + 生成纪要 */}
       <View className="chat-tools">
         {projectId ? (
           <View className="ct-proj" style={{ background: 'var(--accent-soft)' }} onClick={() => Taro.navigateTo({ url: `/packages/work/project/index?id=${projectId}` })}>
-            <Icon name="layers" size={12} color={accent} /><Text style={{ color: accent }}>项目内对话</Text>
+            <Icon name="layers" size={12} color={accent} /><Text style={{ color: accent }}>案卷内对话</Text>
           </View>
         ) : <View className="ct-spacer" />}
         <View className="ct-sum" onClick={onSummarize}><Icon name="doc" size={13} color="#565C63" /><Text>生成纪要</Text></View>
@@ -719,7 +719,7 @@ export default function Chat() {
                   <View className="memory-disclosure">
                     <View className="md-h">
                       <Icon name="layers" size={13} color={accent} />
-                      <Text style={{ color: accent }}>专属理解</Text>
+                      <Text style={{ color: accent }}>军师印象</Text>
                     </View>
                     <Text className="md-copy">我会参考你在本账号沉淀的企业档案、历史偏好和本次引用资料，让建议保持同一套业务口径。</Text>
                     <View className="md-tags">
@@ -777,9 +777,9 @@ export default function Chat() {
           }
           if (m.role === 'memory') {
             return (
-              <View key={i} className="mem-learned" onLongPress={() => copyText(`专属理解已更新：${m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。`)}>
+              <View key={i} className="mem-learned" onLongPress={() => copyText(`军师印象已更新：${m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。`)}>
                 <Icon name="spark" size={13} color={accent} />
-                <Text>专属理解已更新：{m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。</Text>
+                <Text>军师印象已更新：{m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。</Text>
               </View>
             );
           }
@@ -813,7 +813,7 @@ export default function Chat() {
                 <View className="accept-card">
                   <View className="accept-b">
                     <Text className="accept-t">认可这份方案？</Text>
-                    <Text className="accept-d">存入方案库沉淀为报告，执行页承接军令与复盘。</Text>
+                    <Text className="accept-d">存入方案库沉淀为一版方案，执行页承接军令与复盘。</Text>
                   </View>
                   <View className="accept-btn" style={{ background: accent }} onClick={() => acceptPlan(m.deliverable)}>
                     <Icon name="check" size={13} color="#fff" />
@@ -908,12 +908,12 @@ export default function Chat() {
               <Text className="ref-done" style={{ color: accent }} onClick={closePicker}>完成{refs.length ? ` (${refs.length})` : ''}</Text>
             </View>
             <ScrollView scrollY className="ref-body" enhanced showScrollbar={false}>
-              {renderGroup('项目', pick.projects.map((p) => ({ kind: 'project' as const, id: p.id, label: p.name, sub: `${p.counts.reports} 报告 · ${p.counts.knowledge} 知识` })))}
-              {renderGroup('报告', pick.reports.map((r) => ({ kind: 'report' as const, id: r.id, label: `${r.title} v${r.currentVersion}`, version: r.currentVersion, sub: r.type })))}
-              {renderGroup('知识', pick.knowledge.map((k) => ({ kind: 'knowledge' as const, id: k.id, label: k.title || k.text.slice(0, 14), sub: k.text.slice(0, 24) })))}
-              {renderGroup('记忆', pick.memories.map((m) => ({ kind: 'memory' as const, id: m.id, label: m.text.slice(0, 18), sub: m.agentName || m.kind })))}
+              {renderGroup('案卷', pick.projects.map((p) => ({ kind: 'project' as const, id: p.id, label: p.name, sub: `${p.counts.reports} 方案 · ${p.counts.knowledge} 资料` })))}
+              {renderGroup('方案', pick.reports.map((r) => ({ kind: 'report' as const, id: r.id, label: `${r.title} v${r.currentVersion}`, version: r.currentVersion, sub: r.type })))}
+              {renderGroup('资料', pick.knowledge.map((k) => ({ kind: 'knowledge' as const, id: k.id, label: k.title || k.text.slice(0, 14), sub: k.text.slice(0, 24) })))}
+              {renderGroup('军师印象', pick.memories.map((m) => ({ kind: 'memory' as const, id: m.id, label: m.text.slice(0, 18), sub: m.agentName || m.kind })))}
               {(!pick.projects.length && !pick.reports.length && !pick.knowledge.length && !pick.memories.length) ? (
-                <Text className="ref-empty">还没有可引用的项目/报告/知识。先建项目、产出报告或记录知识，这里就能 @ 它们。</Text>
+                <Text className="ref-empty">还没有可引用的案卷/方案/资料。先建案卷、产出方案或记录资料，这里就能 @ 它们。</Text>
               ) : null}
               <View style={{ height: '12px' }} />
             </ScrollView>

@@ -252,14 +252,14 @@ export default function Home() {
           <SayingLine html={saying.text} accent={accent} />
         </View>
 
-        {/* 主行动 CTA（battle-cta）：认可判断 → 军令与报告 / 直达执行 */}
+        {/* 主行动 CTA（battle-cta）：认可判断 → 军令与方案 / 直达执行 */}
         <View
           className="battle-cta"
           onClick={() => dossier ? Taro.switchTab({ url: '/pages/studio/index' }) : goChat('agentKey=general&continue=1')}
         >
           <View className="bc-b">
-            <Text className="bc-t">{dossier ? '今日执行 · 军令与打卡' : '认可判断，生成军令与报告'}</Text>
-            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 录入进展，即可复盘` : '认可即排期执行、生成报告与复盘'}</Text>
+            <Text className="bc-t">{dossier ? '今日执行 · 军令与打卡' : '认可判断，生成军令与方案'}</Text>
+            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 录入进展，即可复盘` : '认可即排期执行、生成方案与复盘'}</Text>
           </View>
           <View className="bc-arrow"><Text>›</Text></View>
         </View>

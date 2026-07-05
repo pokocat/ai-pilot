@@ -238,7 +238,7 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
   pushUniqueM(identity, d.profile?.stage ? `阶段：${d.profile.stage}` : '');
 
   const journey = extraLinesM(d.profile?.extra);
-  d.projects.slice(0, 4).forEach((p) => pushUniqueM(journey, p.summary ? `项目《${p.name}》：${p.summary}` : `项目《${p.name}》正在推进`, 5));
+  d.projects.slice(0, 4).forEach((p) => pushUniqueM(journey, p.summary ? `案卷《${p.name}》：${p.summary}` : `案卷《${p.name}》正在推进`, 5));
   d.sessions.slice(0, 4).forEach((s) => pushUniqueM(journey, `近期讨论：${s.title}`, 5));
 
   const difficulties: string[] = [];
@@ -277,7 +277,7 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
       { key: 'identity', title: '经营身份', items: identity, emptyText: '还没记录你的称呼、公司、行业和阶段。' },
       { key: 'journey', title: '创业路径', items: journey, emptyText: '还没形成创业路径。可以告诉军师：你怎么开始、做过哪些转折、现在走到哪一步。' },
       { key: 'difficulties', title: '当前难题', items: difficulties, emptyText: '还没记录明确难题。后续咨询会先追问关键约束，再给建议。' },
-      { key: 'materials', title: '已沉淀资料', items: materials, emptyText: '还没有长期线索。对话、项目、报告和知识库都会逐步沉淀到这里。' },
+      { key: 'materials', title: '已沉淀资料', items: materials, emptyText: '还没有长期线索。对话、案卷、方案和资料库都会逐步沉淀到这里。' },
     ],
     nextQuestions: nextQuestions.slice(0, 4),
     evidenceCount,
@@ -355,8 +355,8 @@ function keywordScore(q: string, text: string): number {
 function resolveRefs(d: UserData, refs: MessageRef[] | undefined, query: string, projectId?: string | null): { labels: string[]; notes: string[] } {
   const labels: string[] = [], notes: string[] = [];
   for (const r of (refs ?? []).slice(0, 6)) {
-    if (r.kind === 'project') { const p = d.projects.find((x) => x.id === r.id); if (p) { labels.push(`项目《${p.name}》`); notes.push(p.summary || p.name); } }
-    else if (r.kind === 'report') { const rep = d.reports.find((x) => x.id === r.id); if (rep) { const v = rep.versions[rep.versions.length - 1]; labels.push(`报告《${rep.title}》v${rep.currentVersion}`); notes.push(v ? sectionsOf(v.content).map((s) => s.h).join('、') : rep.title); } }
+    if (r.kind === 'project') { const p = d.projects.find((x) => x.id === r.id); if (p) { labels.push(`案卷《${p.name}》`); notes.push(p.summary || p.name); } }
+    else if (r.kind === 'report') { const rep = d.reports.find((x) => x.id === r.id); if (rep) { const v = rep.versions[rep.versions.length - 1]; labels.push(`方案《${rep.title}》v${rep.currentVersion}`); notes.push(v ? sectionsOf(v.content).map((s) => s.h).join('、') : rep.title); } }
     else if (r.kind === 'knowledge') { const k = d.knowledge.find((x) => x.id === r.id); if (k) { labels.push(`知识「${k.title ?? k.text.slice(0, 12)}」`); notes.push(k.text); } }
   }
   // 自动召回：知识库关键词命中
@@ -863,7 +863,7 @@ export const mock = {
     const sections: DeliverableSection[] = [{ h: '讨论要点', list: (userPoints.length ? userPoints : ['（本次对话内容较少）']).slice(0, 6) }];
     if (reportTitles.length) sections.push({ h: '本次产出', list: reportTitles.map((t) => `已产出《${t}》`).slice(0, 6) });
     sections.push({ h: '关键结论', list: (replyPoints.length ? replyPoints : ['顾问已给出阶段性判断，详见对话原文。']).slice(0, 6) });
-    sections.push({ h: '待办与决策', b: '将上述结论中需要跟进的事项纳入项目推进；重大决策请结合专业意见。' });
+    sections.push({ h: '待办与决策', b: '将上述结论中需要跟进的事项纳入案卷推进；重大决策请结合专业意见。' });
     const deliverable: Deliverable = { title: `《${s.title}》对话纪要`, icon: 'doc', meta: `${ag.name} · 对话汇总`, sections, trust: TRUST_NOTE, actions: ['save_to_library', 'export_pdf'] };
     const saved = saveReportVersionLocal(d, { title: deliverable.title, type: '对话纪要', agentKey: s.agentKey, projectId: s.projectId ?? null, content: deliverable, authorKind: 'agent', sessionId: s.id });
     const insight = sections.flatMap((x) => (x.list ?? []).concat(x.b ? [x.b] : [])).join('；').slice(0, 1000);

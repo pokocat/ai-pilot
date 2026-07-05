@@ -74,7 +74,7 @@ export default function BriefPage() {
           </>
         ) : (
           <View className="bf-sec">
-            <Text className="bf-empty">暂无资料。先登录并完成建档，后续对话、项目、报告和知识库都会逐步沉淀到个人档案。</Text>
+            <Text className="bf-empty">暂无资料。先登录并完成建档，后续对话、案卷、方案和资料库都会逐步沉淀到个人档案。</Text>
           </View>
         )}
 
@@ -110,7 +110,7 @@ function evidenceLine(u: ClientUnderstanding): string {
   const parts = [
     u.evidenceCount.profile ? '档案 1' : '',
     u.evidenceCount.memories ? `线索 ${u.evidenceCount.memories}` : '',
-    u.evidenceCount.projects ? `项目 ${u.evidenceCount.projects}` : '',
+    u.evidenceCount.projects ? `案卷 ${u.evidenceCount.projects}` : '',
     u.evidenceCount.knowledge ? `资料 ${u.evidenceCount.knowledge}` : '',
     u.evidenceCount.sessions ? `对话 ${u.evidenceCount.sessions}` : '',
   ].filter(Boolean);

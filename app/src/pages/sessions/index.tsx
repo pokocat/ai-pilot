@@ -26,7 +26,7 @@ const QUICK_CARDS = [
   { t: '上传经营资料', d: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index' },
   { t: '绑定数据源', d: '店铺、账号、企微、财务表', url: '/packages/work/bindings/index' },
   { t: '军师锦囊 / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
-  { t: '生成报告', d: '把这次对话炼成一份报告', url: '/packages/work/library/index' },
+  { t: '生成方案', d: '把这次对话炼成一份方案', url: '/packages/work/library/index' },
   { t: '转成军令', d: '认可即拆解为今日军令', tab: '/pages/studio/index' },
   { t: '今日执行', d: '军令、任务、打卡、复盘', tab: '/pages/studio/index' },
 ] as { t: string; d: string; url?: string; tab?: string }[];
@@ -144,7 +144,7 @@ export default function Sessions() {
           <Input
             className="cs-input"
             value={query}
-            placeholder="搜索军师、案卷、报告或资料"
+            placeholder="搜索军师、案卷、方案或资料"
             onInput={(e) => setQuery(e.detail.value)}
           />
           {query ? <Text className="cs-clear" onClick={() => setQuery('')}>✕</Text> : null}
