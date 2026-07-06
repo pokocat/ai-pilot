@@ -39,6 +39,12 @@ export type {
 
 // token 助手（兼容旧导出名）
 export { getToken as getUserId, setToken as setUserId, clearToken as clearUserId } from './token';
+
+// 登录态失效的全局回调：request()/上传 收到 401 时**无条件**触发（由 store 注册）。
+// 目的：即便调用方 .catch 吞掉了错误，也一定会走到「重新登录」流程——绝不让用户滞留在失效界面看旧缓存。
+// 见 AGENTS.md「登录态失效必须显式打断」铁律。
+let onAuthLost: (() => void) | null = null;
+export function setAuthLostHandler(fn: () => void) { onAuthLost = fn; }
 export { BASE_URL };
 
 // 八字采集入参 / 命盘摘要（服务端 ChartView 的宽松视图，前端只读展示）
@@ -156,7 +162,8 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
     throw Object.assign(new Error(info.message), { code: 'NETWORK_ERROR', reason: info.reason, errMsg, url, origin, technicalMessage: info.technicalMessage });
   }
   if (res.statusCode === 401) {
-    clearToken(); // token 失效：清掉，下次进首页回到登录
+    clearToken(); // token 失效：清掉
+    onAuthLost?.(); // 无条件打断到重新登录，哪怕调用方吞掉下面这个 error
     throw Object.assign(new Error((res.data as any)?.error || '未登录'), { code: 'UNAUTHORIZED', data: res.data });
   }
   if (res.statusCode >= 400) {
@@ -170,7 +177,7 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
 async function uploadKnowledgeFile(filePath: string, projectId?: string): Promise<{ id: string; status: string }> {
   const url = `${BASE_URL}/knowledge/upload${projectId ? `?projectId=${projectId}` : ''}`;
   const res = await Taro.uploadFile({ url, filePath, name: 'file', header: { 'x-user-id': getToken() } });
-  if (res.statusCode === 401) { clearToken(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`;
     try { msg = (JSON.parse(res.data) as { error?: string }).error || msg; } catch { /* 非 JSON 响应 */ }
@@ -182,7 +189,7 @@ async function uploadKnowledgeFile(filePath: string, projectId?: string): Promis
 // 头像上传：multipart 单文件 → 后端存 OSS → 落库 user.avatarUrl，返回公网链接。
 async function uploadAvatarFile(filePath: string): Promise<{ ok: boolean; avatarUrl: string }> {
   const res = await Taro.uploadFile({ url: `${BASE_URL}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': getToken() } });
-  if (res.statusCode === 401) { clearToken(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
     try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }

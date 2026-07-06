@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-07** · **修复：登录态失效时不再静默滞留（全局 401 打断）+ 记忆入口前置**：用户真机实测「军师记忆」空白——排查确认后端已产出真实分类记忆、weapp 也在调 `/me/memory-library`，但**登录 token 失效**导致该接口 401，而页面 `.catch(()=>{})` 吞掉了 401，用户滞留在旧缓存界面、新功能空白却不自知。① **全局修复**：`api.request()`/文件上传收到 401 **无条件**触发 `onAuthLost`（`store` 注册 → 清登录态 + 提示「登录态已失效，请重新登录」+ `reLaunch` 回登录），任何页面的 `.catch` 再也吞不掉掉登录后果；写入 **AGENTS §0 #7 全局铁律**。② **可发现性**：`brief` 页把「军师记忆」六类 + 「完整履历」卡提到 hero 之下最前（原埋在 understanding 长段后），加「整理中」非空态；`profile` 菜单加「完整履历」直达入口 + 「个人档案·军师记忆」。影响面：app（api/store/brief/profile）+ AGENTS + CHANGELOG。⚠ 前端改动需重新 build:weapp 发版；掉登录时**重新登录**即可看到真实记忆。
+
 - **2026-07-06** · **批次B：军师记忆库（P1-P3）+ F-5 诊断轮次持久化 · ✅ 已部署 prod（`deploy-prod.sh`，SHA 77b06c8）**。部署前用 `prisma migrate diff` 预检确认**纯加法零 DROP**；db push 落 5 加法列（strategic_profile: diagRound/diagSessionId/dossierJson/dossierAt；memory: category）+ 顺带补齐 feat 07-04 起滞留未部署的 `wechat_subscription`/`wechat_notification_log` 两表（也是加法）。server tsc 建成、junshi-api 重启健康、公网 /api/health ok。**小程序新页面（记忆库/完整履历）仍需微信 DevTools 手动发版**。明细：
   - **F-5**：`StrategicProfile.diagRound`+`diagSessionId` 用户级持久化诊断轮次（换/删会话不清零）；context.ts 改读 `getDiagRound`、sessions.ts 两路由战略一问一答 `bumpDiagRound`。
   - **P1 记忆库地基**：`Memory.category`（六类 founder/company/status/vision/strategy/rapport）；`extractInsights` 改归类抽取；**recall 改用户级共享事实池**（跨军师，弃 agentKey 隔离，`vectorSearchMemories` agentKey 可空）；**总军师 general 开始写记忆**（删 sessions.ts 4 处 general 短路）。此为用户拍板「用户级共享事实池」方案（取舍点1）。
