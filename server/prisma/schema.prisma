@@ -1021,6 +1021,8 @@ model StrategicProfile {
   positioning       String   @default("") @db.Text // 战略定位
   track             String   @default("") @db.Text // 聚焦赛道
   stage             String   @default("") // 三步走当前阶段/经营阶段
+  diagRound         Int      @default(0) // F-5：当前诊断轮次，用户级持久化（换/删会话不清零）
+  diagSessionId     String? // 最近一次诊断所在会话（切换不重置轮次）
   twelveQJson       Json? // 十二问答案沉淀（M3 状态机写入）
   kpiJson           Json? // 核心 KPI 基线（M2 看板写入）
   extraJson         Json? // 前向兼容（叙事线/谶语等 P1 内容）

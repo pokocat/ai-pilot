@@ -52,6 +52,27 @@ export async function upsertStrategicProfile(args: {
   });
 }
 
+/**
+ * F-5：读用户当前诊断轮次（用户级持久化）。无战略档案行 → 0（尚未进入诊断）。
+ * 换会话/删会话都不影响它，六轮主线不再被一次误操作清零。
+ */
+export async function getDiagRound(userId: string): Promise<number> {
+  const row = await prisma.strategicProfile.findUnique({ where: { userId }, select: { diagRound: true } });
+  return row?.diagRound ?? 0;
+}
+
+/**
+ * F-5：推进诊断轮次（每次总军师战略一问一答开始时 +1，用户级 upsert 保证首轮即落库）。
+ * 语义：diagRound = 当前进行到第几轮；首条战略消息把它从 0 抬到 1。
+ */
+export async function bumpDiagRound(args: { tenantId: string; userId: string; sessionId: string | null }): Promise<void> {
+  await prisma.strategicProfile.upsert({
+    where: { userId: args.userId },
+    update: { diagRound: { increment: 1 }, diagSessionId: args.sessionId ?? undefined },
+    create: { tenantId: args.tenantId, userId: args.userId, diagRound: 1, diagSessionId: args.sessionId ?? undefined },
+  });
+}
+
 export async function loadStrategicProfile(userId: string): Promise<StrategicView | null> {
   const row = await prisma.strategicProfile.findUnique({ where: { userId } });
   if (!row) return null;

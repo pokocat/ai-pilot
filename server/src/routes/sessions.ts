@@ -1,7 +1,8 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { resolveUser, buildGenContext } from '../services/context.js';
+import { resolveUser, buildGenContext, isBriefInterviewRequest } from '../services/context.js';
+import { bumpDiagRound } from '../services/strategicProfile.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
 import { generateDeliverable, chatComplete, chatCompleteStream } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
@@ -188,6 +189,10 @@ export async function sessionRoutes(app: FastifyInstance) {
     if (intent.mode === 'review' && intent.reviewLayer) {
       void recordReview({ tenantId: user.tenantId, userId: user.id, layer: intent.reviewLayer }).catch(() => {});
     }
+    // F-5：总军师战略一问一答开始即推进诊断轮次（用户级持久化，换/删会话不清零）。await 保证本轮 buildGenContext 读到新值。
+    if (agentKey === 'general' && intent.mode === 'strategy' && !isBriefInterviewRequest(text)) {
+      await bumpDiagRound({ tenantId: user.tenantId, userId: user.id, sessionId: session.id });
+    }
     const sessionMode = modePersist !== undefined ? modePersist : session.mode;
 
     const history = await loadHistory(session.id, userMsg.id);
@@ -370,6 +375,10 @@ export async function sessionRoutes(app: FastifyInstance) {
     if (modePersist !== undefined) await prisma.session.update({ where: { id: session.id }, data: { mode: modePersist } });
     if (intent.mode === 'review' && intent.reviewLayer) {
       void recordReview({ tenantId: user.tenantId, userId: user.id, layer: intent.reviewLayer }).catch(() => {});
+    }
+    // F-5：总军师战略一问一答开始即推进诊断轮次（用户级持久化，换/删会话不清零）。await 保证本轮 buildGenContext 读到新值。
+    if (agentKey === 'general' && intent.mode === 'strategy' && !isBriefInterviewRequest(text)) {
+      await bumpDiagRound({ tenantId: user.tenantId, userId: user.id, sessionId: session.id });
     }
     const sessionMode = modePersist !== undefined ? modePersist : session.mode;
 

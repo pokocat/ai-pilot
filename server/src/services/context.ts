@@ -7,7 +7,7 @@ import { recallMemories } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
 import { loadChart, chartBriefing, TIANSHI_OPTOUT_LINE } from './paipan.js';
-import { loadStrategicProfile, strategicBlock } from './strategicProfile.js';
+import { loadStrategicProfile, strategicBlock, getDiagRound } from './strategicProfile.js';
 import { decisionBriefing } from './decisionLog.js';
 import { reviewBriefing } from './reviewLog.js';
 import { prophecyBriefing } from './prophecyLog.js';
@@ -54,7 +54,7 @@ function unauthorized() {
   return Object.assign(new Error('未登录或登录已失效'), { statusCode: 401, code: 'UNAUTHORIZED' });
 }
 
-function isBriefInterviewRequest(text: string): boolean {
+export function isBriefInterviewRequest(text: string): boolean {
   return /(?:个人|军师)档案访谈模式|(?:补齐|完善|更新)(?:个人|军师)档案|让军师来问/.test(text);
 }
 
@@ -114,8 +114,10 @@ export async function buildGenContext(opts: {
   const rd = roleDirective(detectInnerState(opts.userMessage));
   if (rd) directives.push(rd);
   if (opts.agentKey === 'general' && intent.mode === 'strategy' && !isBriefInterviewRequest(opts.userMessage)) {
-    const round = (opts.history?.filter((h) => h.role === 'user').length ?? 0) + 1;
-    directives.push(`诊断进度：本会话第 ${round} 轮（六轮深度对话制；客户要求加速时切 3 轮快速通道并说明）。`);
+    // F-5：诊断轮次改读用户级持久化 diagRound（换/删会话不清零），不再按当前会话历史现算。
+    // 写侧在 routes/sessions.ts 一问一答开始时 bumpDiagRound。
+    const round = await getDiagRound(opts.userId);
+    directives.push(`诊断进度：第 ${round} 轮（六轮深度对话制；客户要求加速时切 3 轮快速通道并说明）。`);
   }
   const modeLine = directives.length ? `【本轮导引（系统识别；执行但不要向客户复述本块）】\n${directives.join('\n')}` : null;
   // 阶段适配（M3 PR-13）：按档案营收阶段切深浅（随用户稳定 → stable 段）。
