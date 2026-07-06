@@ -328,6 +328,7 @@ model Memory {
   agentKey  String
   projectId String? // 归属项目（跨智能体共享时可空）
   kind      String // fact | preference | feedback
+  category  String? // 军师记忆库六类：founder|company|status|vision|strategy|rapport（旧行为 null）
   text      String    @db.Text
   embedding Json? // float[]（生产用 pgvector；本地降级内存余弦）
   weight    Float     @default(1.0)
@@ -341,6 +342,7 @@ model Memory {
   project Project? @relation(fields: [projectId], references: [id])
 
   @@index([userId, agentKey])
+  @@index([userId, category]) // 记忆库按类分组读取
   @@index([projectId])
   @@map("memory")
 }

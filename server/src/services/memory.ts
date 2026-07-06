@@ -53,9 +53,10 @@ export function mmrSelect(
 export async function recallMemories(
   userId: string, agentKey: string, limit = 5, query?: string,
 ): Promise<string[]> {
+  void agentKey; // A-3：用户级共享事实池——跨所有军师召回该用户记忆，不再按 agentKey 隔离（general 学到的，专业军师也记得）。
   const now = new Date();
   const where = {
-    userId, agentKey,
+    userId,
     OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
   };
 
@@ -66,10 +67,10 @@ export async function recallMemories(
     return rows.map((r) => r.text);
   }
 
-  // pgvector 路径（开启时）：ANN 下推
+  // pgvector 路径（开启时）：ANN 下推（agentKey=null → 用户级共享池）
   if (pgvectorEnabled()) {
     const qv = await embed(query);
-    const hits = await vectorSearchMemories(userId, agentKey, qv, limit).catch((e) => {
+    const hits = await vectorSearchMemories(userId, null, qv, limit).catch((e) => {
       console.error('[memory] pgvector fallback to in-memory:', (e as Error).message);
       return null;
     });
@@ -105,10 +106,11 @@ const DEDUP_SIM = 0.92;
 function normText(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, '');
 }
-async function findDuplicateMemory(userId: string, agentKey: string, text: string, emb: number[]): Promise<{ id: string; weight: number } | null> {
+async function findDuplicateMemory(userId: string, text: string, emb: number[]): Promise<{ id: string; weight: number } | null> {
   const norm = normText(text);
   const recent = await prisma.memory.findMany({
-    where: { userId, agentKey, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    // A-3 共享池：跨军师去重（general 与专业军师记同一事实不再堆两行）。
+    where: { userId, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
     orderBy: { createdAt: 'desc' }, take: 50,
     select: { id: true, text: true, weight: true, embedding: true },
   });
@@ -141,17 +143,17 @@ export async function learnFromConversation(opts: {
   if (!insights.length) return false;
   const weight = weightFromIntensity(cfg);
   const expiresAt = ttlFromConfig(cfg);
-  for (const text of insights) {
+  for (const { text, category } of insights) {
     const embedding = await embed(text);
     // E1：与近期记忆近重 → 加权刷新（提权 + 刷新时间，配合 E2 衰减），不再堆重复行。
-    const dup = await findDuplicateMemory(userId, agentKey, text, embedding);
+    const dup = await findDuplicateMemory(userId, text, embedding);
     if (dup) {
       await prisma.memory.update({ where: { id: dup.id }, data: { weight: Math.min(2, dup.weight + 0.1), createdAt: new Date(), expiresAt } });
       if (pgvectorEnabled()) await upsertMemoryVector(dup.id, embedding).catch(() => {});
       continue;
     }
     const m = await prisma.memory.create({
-      data: { tenantId, userId, agentKey, projectId: projectId ?? null, kind: 'preference', text, embedding, weight, source: 'conversation', expiresAt },
+      data: { tenantId, userId, agentKey, projectId: projectId ?? null, kind: 'preference', category, text, embedding, weight, source: 'conversation', expiresAt },
     });
     if (pgvectorEnabled()) await upsertMemoryVector(m.id, embedding).catch(() => {});
   }

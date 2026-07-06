@@ -216,9 +216,8 @@ export async function sessionRoutes(app: FastifyInstance) {
 
     try {
       if (onDemand) {
-        const learn = async () => (agentKey === 'general'
-          ? false
-          : learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId }));
+        // A-3：总军师也写记忆（用户级共享事实池）。
+        const learn = async () => learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId });
         if (!wantsDeliverableRequest(text)) {
           const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object } });
@@ -253,13 +252,11 @@ export async function sessionRoutes(app: FastifyInstance) {
         });
         notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
-        let learned = false;
-        if (agentKey !== 'general') {
-          learned = await learnFromConversation({
-            tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId,
-            assistantText: `${deliverable.title}：${deliverable.sections.map((s) => s.h).filter(Boolean).join('、')}`,
-          });
-        }
+        // A-3：总军师也写记忆（含产出结论）。
+        const learned = await learnFromConversation({
+          tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId,
+          assistantText: `${deliverable.title}：${deliverable.sections.map((s) => s.h).filter(Boolean).join('、')}`,
+        });
         const creditBalance = creditReservation?.balance ?? 0;
         // P0-4：降级（真实模型没出结构化成果、回退模板）不向用户计费——settle(0) 全额退回预留；我们仍在 gateway 侧按真实 token 记账。
         const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
@@ -408,7 +405,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       });
 
       const learnSse = async () => {
-        if (agentKey === 'general') return;
+        // A-3：总军师也写记忆（用户级共享事实池）。
         const learned = await learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId });
         if (learned) send('memory', { learned: true, agentName: agent.name });
       };
@@ -463,8 +460,8 @@ export async function sessionRoutes(app: FastifyInstance) {
         notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
 
-        // 记忆学习（非通用智能体）
-        if (agentKey !== 'general') {
+        // A-3：记忆学习（含总军师；用户级共享事实池）。
+        {
           const learned = await learnFromConversation({
             tenantId: user.tenantId,
             userId: user.id,

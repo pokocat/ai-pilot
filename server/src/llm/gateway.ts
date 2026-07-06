@@ -528,22 +528,41 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
  * 从对话文本提炼结构化「洞察」（Learned Memory）。
  * 有真实模型时让模型抽取 1–3 条事实/偏好/决策；否则启发式兜底（截断原文）。
  */
-export async function extractInsights(text: string, agentName?: string): Promise<string[]> {
-  const fallback = () => {
+// 军师记忆库六类（key），与 app/contracts 的展示标签一一对应（其人/其业/其时/其志/其略/相与之道）。
+export const MEMORY_CATEGORIES = ['founder', 'company', 'status', 'vision', 'strategy', 'rapport'] as const;
+export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
+export interface ExtractedFact { text: string; category: MemoryCategory | null }
+
+export async function extractInsights(text: string, agentName?: string): Promise<ExtractedFact[]> {
+  void agentName;
+  const fallback = (): ExtractedFact[] => {
     const t = text.trim().slice(0, 120);
-    return t ? [`用户在对话中提到：${t}`] : [];
+    return t ? [{ text: `老板在对话中提到：${t}`, category: null }] : [];
   };
   const cfg = await getAiConfig();
   const live = liveProvider(cfg);
   if (!live) return fallback();
   try {
     const sys =
-      '你是记忆抽取器。从用户消息中提炼 1-3 条对长期服务该客户有价值的「洞察」（事实/偏好/决策/约束），' +
-      '每条一句话、可独立理解、不含寒暄。只输出 JSON：{"insights":["...","..."]}。无可提炼则 {"insights":[]}。';
+      '你是「军师」的记忆抽取官。从对话里提炼 1-3 条对长期辅佐这位老板有价值的事实，' +
+      '每条一句话、可独立理解、不含寒暄，并各归入下列六类之一（category 只填英文 key）：\n' +
+      'founder（其人：出身/创业故事/性情/决断习惯/天赋与短板）、' +
+      'company（其业：起家与沿革/行业/发展阶段/团队班底/业务模式）、' +
+      'status（其时：当前经营实况/主要痛点/卡点——经营数字只记老板亲口所报，不得推算）、' +
+      'vision（其志：抱负/远图/想把生意做成什么/使命）、' +
+      'strategy（其略：主要矛盾/战略定位/主攻赛道/当前打法）、' +
+      'rapport（相与之道：沟通偏好/忌讳/对建议的取舍/约定）。\n' +
+      '只输出 JSON：{"facts":[{"text":"...","category":"founder"}]}。无可提炼则 {"facts":[]}。';
     const json = await rawJson(cfg, live, sys, text.slice(0, 1500));
-    const arr = (json?.insights as unknown[])?.filter((x) => typeof x === 'string') as string[];
-    if (arr?.length) return arr.slice(0, 3).map((s) => s.slice(0, 160));
-    return fallback();
+    const arr = (json?.facts as unknown[]) ?? [];
+    const out: ExtractedFact[] = arr
+      .filter((x): x is { text: string; category?: string } => !!x && typeof (x as { text?: unknown }).text === 'string')
+      .slice(0, 3)
+      .map((x) => ({
+        text: x.text.slice(0, 160),
+        category: (MEMORY_CATEGORIES as readonly string[]).includes(x.category ?? '') ? (x.category as MemoryCategory) : null,
+      }));
+    return out.length ? out : fallback();
   } catch (err) {
     console.error('[gateway] extractInsights fallback:', (err as Error).message);
     return fallback();
