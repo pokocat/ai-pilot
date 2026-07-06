@@ -873,13 +873,13 @@ export const mock = {
     const vision: MemoryLibraryEntry[] = [];
     const strategy: MemoryLibraryEntry[] = [];
     const rapport: MemoryLibraryEntry[] = [];
-    if (meaningfulM(d.name)) founder.push(mk('mk-name', `军师称呼主公为「${d.name}」`));
+    if (meaningfulM(d.name)) founder.push(mk('mk-name', `你的称呼：${d.name}`));
     extraLinesM(d.profile?.extra).slice(0, 3).forEach((l, i) => founder.push(mk(`mk-ex${i}`, l)));
-    if (meaningfulM(d.company)) company.push(mk('mk-co', `生意主体：${d.company}`));
-    if (d.profile?.industry) company.push(mk('mk-ind', `行当：${d.profile.industry}`));
+    if (meaningfulM(d.company)) company.push(mk('mk-co', `公司/品牌：${d.company}`));
+    if (d.profile?.industry) company.push(mk('mk-ind', `行业：${d.profile.industry}`));
     if (d.profile?.stage) company.push(mk('mk-stage', `发展阶段：${d.profile.stage}`));
-    d.projects.slice(0, 2).forEach((p, i) => company.push(mk(`mk-pj${i}`, p.summary ? `案卷《${p.name}》：${p.summary}` : `案卷《${p.name}》推进中`)));
-    if (d.profile?.pain) status.push(mk('mk-pain', `眼下最卡：${d.profile.pain}`));
+    d.projects.slice(0, 2).forEach((p, i) => company.push(mk(`mk-pj${i}`, p.summary ? `项目《${p.name}》：${p.summary}` : `项目《${p.name}》推进中`)));
+    if (d.profile?.pain) status.push(mk('mk-pain', `当前最卡：${d.profile.pain}`));
     const und = buildUnderstandingM(d);
     if (und.mainContradiction) strategy.push({ id: 'sp-mc', text: und.mainContradiction, source: 'strategic' });
     if (und.positioning) strategy.push({ id: 'sp-pos', text: `战略定位：${und.positioning}`, source: 'strategic' });

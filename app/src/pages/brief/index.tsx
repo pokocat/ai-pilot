@@ -8,16 +8,16 @@ import { store } from '../../services/store';
 import { api, type ClientUnderstanding, type MemoryLibraryView, type MemoryCategoryKey, type MemoryFillLevel } from '../../services/api';
 import './index.scss';
 
-// 军师记忆库六类展示元数据（军师口吻）。
+// 军师记忆库六类展示元数据（现代白话，面向下沉老板群体；保留军师品牌，去文言）。
 const MEM_CATS: { key: MemoryCategoryKey; title: string; sub: string; icon: string; tint: string; ink: string }[] = [
-  { key: 'founder', title: '其人 · 你是什么样的将才', sub: '出身 · 创业故事 · 性情 · 决断之习 · 天赋软肋', icon: 'insight', tint: '#EEEDFE', ink: '#3C3489' },
-  { key: 'company', title: '其业 · 你这盘生意的来历', sub: '起家 · 沿革 · 行当 · 根基 · 班底 · 路数', icon: 'layers', tint: '#E1F5EE', ink: '#085041' },
-  { key: 'status', title: '其时 · 眼下这一仗', sub: '当下实况 · 症结 · 卡在哪', icon: 'trend', tint: '#FAEEDA', ink: '#633806' },
-  { key: 'vision', title: '其志 · 你想打下的江山', sub: '抱负 · 远图 · 使命所在', icon: 'target', tint: '#FBEAF0', ink: '#72243E' },
-  { key: 'strategy', title: '其略 · 定下的打法', sub: '主要矛盾 · 定位 · 主攻赛道 · 当前策', icon: 'shield', tint: '#FAECE7', ink: '#712B13' },
-  { key: 'rapport', title: '相与之道 · 你我怎么共事', sub: '说话方式 · 忌讳 · 献策取舍 · 约定', icon: 'spark', tint: '#E6F1FB', ink: '#0C447C' },
+  { key: 'founder', title: '创始人 · 你这个人', sub: '创业故事 · 背景 · 性格 · 决策风格 · 天赋与短板', icon: 'insight', tint: '#EEEDFE', ink: '#3C3489' },
+  { key: 'company', title: '企业 · 你的生意', sub: '发展历程 · 行业 · 阶段 · 团队 · 业务模式', icon: 'layers', tint: '#E1F5EE', ink: '#085041' },
+  { key: 'status', title: '现状 · 眼下的经营', sub: '当前经营数据 · 主要痛点 · 卡点', icon: 'trend', tint: '#FAEEDA', ink: '#633806' },
+  { key: 'vision', title: '目标愿景 · 你想做成的事', sub: '抱负 · 长期目标 · 使命', icon: 'target', tint: '#FBEAF0', ink: '#72243E' },
+  { key: 'strategy', title: '战略 · 打法共识', sub: '主要矛盾 · 定位 · 主攻赛道 · 当前策略', icon: 'shield', tint: '#FAECE7', ink: '#712B13' },
+  { key: 'rapport', title: '陪跑 · 相处之道', sub: '沟通偏好 · 忌讳 · 反馈 · 约定', icon: 'spark', tint: '#E6F1FB', ink: '#0C447C' },
 ];
-const FILL_LABEL: Record<MemoryFillLevel, string> = { unknown: '待察', thin: '粗知', known: '了然', settled: '已定' };
+const FILL_LABEL: Record<MemoryFillLevel, string> = { unknown: '待补', thin: '部分', known: '较全', settled: '已确认' };
 
 export default function BriefPage() {
   const s = useStore();
@@ -96,8 +96,8 @@ export default function BriefPage() {
         {lib ? (
           <View className="bf-sec">
             <View className="bf-memhead">
-              <Text className="bf-sec-t">军师记事</Text>
-              <Text className="bf-memcount">{lib.total > 0 ? `已记下 ${lib.total} 桩事` : '尚未开册'}</Text>
+              <Text className="bf-sec-t">军师记忆</Text>
+              <Text className="bf-memcount">{lib.total > 0 ? `已记住 ${lib.total} 条` : '还没开始记'}</Text>
             </View>
             {MEM_CATS.map((c) => {
               const g = lib.groups.find((x) => x.category === c.key);
@@ -117,11 +117,11 @@ export default function BriefPage() {
                       <Text className="bf-memrow-t">· {e.text}</Text>
                       {e.id.startsWith('sp-') ? null : <Text className="bf-memrow-del" style={{ color: accent }} onClick={() => removeEntry(e.id)}>删</Text>}
                     </View>
-                  )) : <Text className="bf-memcat-empty">军师还没摸清这一路，多与我说说。</Text>}
+                  )) : <Text className="bf-memcat-empty">这方面军师还不太了解，多聊聊就补上了。</Text>}
                 </View>
               );
             })}
-            <Text className="bf-empty" style={{ marginTop: '8px' }}>记岔了可点「删」；删了即时生效，军师往后不再据此论断。</Text>
+            <Text className="bf-empty" style={{ marginTop: '8px' }}>记错了点「删」；删掉后军师不再据此判断。</Text>
           </View>
         ) : null}
 
