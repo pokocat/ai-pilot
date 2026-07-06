@@ -8,7 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
-- **2026-07-06** · **批次B：军师记忆库（P1-P3）+ F-5 诊断轮次持久化**（本地分支，⚠ 待 prod db push + 部署）：
+- **2026-07-06** · **批次B：军师记忆库（P1-P3）+ F-5 诊断轮次持久化 · ✅ 已部署 prod（`deploy-prod.sh`，SHA 77b06c8）**。部署前用 `prisma migrate diff` 预检确认**纯加法零 DROP**；db push 落 5 加法列（strategic_profile: diagRound/diagSessionId/dossierJson/dossierAt；memory: category）+ 顺带补齐 feat 07-04 起滞留未部署的 `wechat_subscription`/`wechat_notification_log` 两表（也是加法）。server tsc 建成、junshi-api 重启健康、公网 /api/health ok。**小程序新页面（记忆库/完整履历）仍需微信 DevTools 手动发版**。明细：
   - **F-5**：`StrategicProfile.diagRound`+`diagSessionId` 用户级持久化诊断轮次（换/删会话不清零）；context.ts 改读 `getDiagRound`、sessions.ts 两路由战略一问一答 `bumpDiagRound`。
   - **P1 记忆库地基**：`Memory.category`（六类 founder/company/status/vision/strategy/rapport）；`extractInsights` 改归类抽取；**recall 改用户级共享事实池**（跨军师，弃 agentKey 隔离，`vectorSearchMemories` agentKey 可空）；**总军师 general 开始写记忆**（删 sessions.ts 4 处 general 短路）。此为用户拍板「用户级共享事实池」方案（取舍点1）。
   - **P2 军师记忆**：主公·个人档案页六类结构化卡（现代白话标签：创始人/企业/现状/目标愿景/战略/陪跑；充实度 待补/部分/较全/已确认）+ 逐条可删纠错；`services/memoryLibrary` + `GET /me/memory-library`。
