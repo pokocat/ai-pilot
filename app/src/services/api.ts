@@ -11,7 +11,7 @@ import type {
   KnowledgeDocRow, KnowledgeDetail,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
   BindPhoneResult, WechatOrderResult, WechatSubscribeTemplatesResult, WechatSubscribeChoice, WechatSubscribeRecordResult,
-  FateCardContent, MemoryLibraryView,
+  FateCardContent, MemoryLibraryView, DossierView, DossierReport,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -22,6 +22,7 @@ export type { SurveyQuestion as SurveyQ } from '../../../shared/contracts';
 export type { DeliverableSection as Section } from '../../../shared/contracts';
 export type { ChatReply as ChatReplyT } from '../../../shared/contracts';
 export type { MemoryCandidate, MemoryLibraryView, MemoryLibraryGroup, MemoryLibraryEntry, MemoryCategoryKey, MemoryFillLevel } from '../../../shared/contracts';
+export type { DossierView, DossierReport, DossierSection, DossierBlock } from '../../../shared/contracts';
 export type { FateCardContent } from '../../../shared/contracts';
 // 新能力类型再导出（项目 / 报告 / 知识 / 引用）
 export type {
@@ -301,6 +302,11 @@ export const api = {
   // 军师记忆库（P2）：主公档案页「军师记事」六类结构化
   memoryLibrary: () =>
     IS_MOCK ? mock.memoryLibrary() : request<MemoryLibraryView>('/me/memory-library'),
+  // 完整履历（P3）：读缓存 / 生成
+  dossier: () =>
+    IS_MOCK ? mock.dossier() : request<DossierView>('/me/dossier'),
+  generateDossier: () =>
+    IS_MOCK ? mock.generateDossier() : request<{ report: DossierReport; generatedAt: string }>('/me/dossier/generate', 'POST'),
   deleteMemory: (id: string) =>
     IS_MOCK ? mock.deleteMemory() : request<{ ok: boolean }>(`/memories/${id}`, 'DELETE'),
   updateMemory: (id: string, text: string) =>

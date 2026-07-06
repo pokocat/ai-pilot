@@ -125,6 +125,15 @@ export default function BriefPage() {
           </View>
         ) : null}
 
+        <View className="bf-dossier" onClick={() => Taro.navigateTo({ url: '/packages/work/dossier/index' })}>
+          <View className="bf-dossier-ic"><Icon name="insight" size={18} color="#c5a55a" /></View>
+          <View className="bf-dossier-l">
+            <Text className="bf-dossier-t serif">完整履历 · 创始人战略档案</Text>
+            <Text className="bf-dossier-s">把军师记住的这些，蒸馏成一份完整档案</Text>
+          </View>
+          <Text className="bf-dossier-arrow">›</Text>
+        </View>
+
         <View className="bf-cta" style={{ background: accent }} onClick={() => startInterview()}>
           <Icon name="spark" size={17} color="#fff" />
           <Text>让军师来问我</Text>

@@ -7,6 +7,7 @@ import type {
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
   MemoryLibraryView, MemoryLibraryGroup, MemoryLibraryEntry, MemoryCategoryKey, MemoryFillLevel,
+  DossierView, DossierReport, DossierSection, DossierBlock,
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
 } from '../../../shared/contracts';
@@ -893,6 +894,78 @@ export const mock = {
     }));
     const total = order.reduce((s, c) => s + raw[c].length, 0);
     return delay({ total, groups, updatedAt: new Date().toISOString() });
+  },
+  // 完整履历（P3）：读缓存（未生成 → null）
+  async dossier(): Promise<DossierView> {
+    const { token } = current();
+    try {
+      const raw = Taro.getStorageSync(`mock.dossier.${token}`);
+      if (raw) { const r = (typeof raw === 'string' ? JSON.parse(raw) : raw) as DossierReport; return delay({ report: r, generatedAt: r.generatedAt }); }
+    } catch { /* noop */ }
+    return delay({ report: null, generatedAt: null });
+  },
+  // 完整履历（P3）：生成一份 grounded、专业咨询风的示例档案并缓存
+  async generateDossier(): Promise<{ report: DossierReport; generatedAt: string }> {
+    const { token, d } = current();
+    const name = meaningfulM(d.name) || '创始人';
+    const co = meaningfulM(d.company) || '你的公司';
+    const ind = d.profile?.industry || '所在行业';
+    const stage = d.profile?.stage || '当前阶段';
+    const pain = d.profile?.pain || '获客成本高、复购上不去';
+    const sec = (key: string, no: string, label: string, eyebrow: string, blocks: DossierBlock[]): DossierSection => ({ key, no, label, eyebrow, blocks });
+    const sections: DossierSection[] = [
+      sec('identity', '01', '身份定义', 'IDENTITY', [
+        { type: 'para', text: `${name}，${co}创始人，深耕${ind}，企业处于${stage}。` },
+        { type: 'highlight', title: '一句话定位', text: `扎在社区、靠复购立身的${ind}品牌——不打价格战，打信任和回头率。`, tone: 'gold' },
+        { type: 'para', text: '从一线做起，懂手艺也懂人心；决策偏快、重情义，扩张期需要有人替你踩刹车。' },
+      ]),
+      sec('story', '02', '创业历程', 'THE STORY', [
+        { type: 'para', text: `2015 年从一名技师起步，第一家店开在社区里，靠口碑和回头客一步步站稳。` },
+        { type: 'timeline', items: [
+          { time: '2015', title: '单店起家', desc: '一家社区店，手艺+口碑立身' },
+          { time: '2021', title: '三店连锁', desc: '直营模式跑通，团队扩到 18 人' },
+          { time: '2023', title: '试水加盟', desc: '一年开 5 家又收回 2 家，认识到标准化是命门' },
+        ] },
+      ]),
+      sec('company', '03', '企业全景', 'THE BUSINESS', [
+        { type: 'para', text: `${co}：${ind}，${stage}，3 家直营、团队 18 人。营收结构以到店服务为主，办卡+复购为利润引擎。` },
+        { type: 'stats', items: [
+          { value: '3 家', label: '直营门店' },
+          { value: '18 人', label: '团队规模' },
+          { value: '≈60万', label: '月流水(自报)' },
+        ] },
+        { type: 'para', text: '优势在服务体验与私域粘性；短板在获客过度依赖投放、复购缺乏系统化运营。' },
+      ]),
+      sec('status', '04', '现状与主要矛盾', 'CURRENT STATE', [
+        { type: 'highlight', title: '主要矛盾', text: pain + '——先把复购做起来，再谈开疆。', tone: 'red' },
+        { type: 'para', text: '获客成本一年涨约四成，新客拉来却留不住；问题不在前端流量，在后端的客户经营与复购设计。' },
+      ]),
+      sec('strategy', '05', '战略打法', 'STRATEGY', [
+        { type: 'para', text: '打法一句话：收缩战线、做深复购。把有限的营销预算从"拉新"挪一半到"养客"。' },
+        { type: 'para', text: '主攻赛道：社区高复购的轻医美小店，用会员分层 + 私域运营把 LTV 拉起来。' },
+        { type: 'quote', text: '不打价格战，打信任战。' },
+      ]),
+      sec('vision', '06', '目标愿景', 'VISION', [
+        { type: 'para', text: '想做成「街坊最放心的那一家」——这条愿景还需要与军师聊透，落成可执行的三年目标。' },
+      ]),
+    ];
+    const believe = true; // mock 演示恒显天势段；真实端由 believe 开关 + 命理总开关(P-3) 决定
+    if (believe) sections.push(sec('tianshi', String(sections.length + 1).padStart(2, '0'), '天势档案', 'CELESTIAL', [
+      { type: 'stats', items: [ { value: '乙丑', label: '年柱' }, { value: '戊寅', label: '月柱' }, { value: '辛未', label: '日柱' }, { value: '己亥', label: '时柱' } ] },
+      { type: 'para', text: '日主辛金、身弱见印——适合精细化、口碑型经营，不宜粗放烧钱扩张。今年宜守中求进、把根基做扎实。' },
+    ]));
+    sections.push(sec('letter', String(sections.length + 1).padStart(2, '0'), '军师寄语', 'A NOTE', [
+      { type: 'para', text: `${name}，你缺的从来不是客源，是把客留住的系统。先咬住复购这一件事，其余动作都围绕它排布。别急着开第四家店，先让现有三家的老客活跃起来。` },
+    ]));
+    const report: DossierReport = {
+      name,
+      headline: `扎在社区、靠复购立身的${ind}品牌`,
+      verse: '守得客心三尺暖，何愁门前客不还',
+      sections,
+      generatedAt: new Date().toISOString(),
+    };
+    try { Taro.setStorageSync(`mock.dossier.${token}`, JSON.stringify(report)); } catch { /* noop */ }
+    return delay({ report, generatedAt: report.generatedAt });
   },
   async knowledgeSearch(q: string, projectId?: string): Promise<KnowledgeHit[]> {
     const { d } = current();

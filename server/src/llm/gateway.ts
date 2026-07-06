@@ -569,6 +569,20 @@ export async function extractInsights(text: string, agentName?: string): Promise
   }
 }
 
+/** 通用结构化 JSON 生成（无 live provider 或失败返回 null，调用方决定兜底）。P3 完整履历用。 */
+export async function llmJson(system: string, user: string, maxChars = 9000): Promise<Record<string, unknown> | null> {
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  if (!live) return null;
+  try {
+    const json = await rawJson(cfg, live, system, user.slice(0, maxChars));
+    return json && typeof json === 'object' ? (json as Record<string, unknown>) : null;
+  } catch (err) {
+    console.error('[gateway] llmJson failed:', (err as Error).message);
+    return null;
+  }
+}
+
 /** 测试连接：用给定配置发一次最小补全，返回耗时与样例（后台「测试连接」用）。 */
 export async function pingModel(cfg: ResolvedAiConfig): Promise<AiTestResult> {
   const eff = effectiveProvider(cfg);

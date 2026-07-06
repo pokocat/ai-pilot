@@ -234,6 +234,33 @@ export interface MemoryLibraryView {
   updatedAt: string | null;
 }
 
+// ——— 完整履历（P3：创始人战略档案，原生长页面，商务风）———
+export type DossierBlock =
+  | { type: 'para'; text: string }
+  | { type: 'highlight'; title?: string; text: string; tone?: 'gold' | 'purple' | 'red' | 'blue' | 'green' }
+  | { type: 'stats'; items: { value: string; label: string }[] }
+  | { type: 'timeline'; items: { time: string; title: string; desc: string }[] }
+  | { type: 'quote'; text: string };
+export interface DossierSection {
+  key: string;       // identity | story | company | status | strategy | vision | tianshi | letter
+  no: string;        // 序号，如 "01"
+  label: string;     // 中文小节名（身份定义 / 创业历程 …）
+  eyebrow?: string;  // 英文小标（IDENTITY …），商务风点缀
+  blocks: DossierBlock[];
+}
+export interface DossierReport {
+  name: string;
+  headline: string;      // 封面一句话定位
+  verse?: string | null; // 谶语/slogan（命理开且命盘有值才给）
+  sections: DossierSection[];
+  generatedAt: string;
+}
+/** 完整履历的取用态：有缓存则返回 report，从未生成过 report=null。 */
+export interface DossierView {
+  report: DossierReport | null;
+  generatedAt: string | null;
+}
+
 /** 本月 token 额度（客户端「钻石管理」只看进度 %）。limit/remaining<0=不限量 */
 export interface TokenQuotaView {
   limit: number;     // 本月授予总额度，-1=不限量
