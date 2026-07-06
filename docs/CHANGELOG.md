@@ -8,6 +8,11 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-07** · **L-6 三势真数据化 + tab 页顶部上移**（feat 本地，⚠ 三势含 schema，待 prod db push + 部署；UI 纯前端待发版）：
+  - **三势真数据化**：军情页 市势/人势 原静态「发起判断」→ 结构化研判结论。`StrategicProfile.forcesJson`（加法列，{shishi/renshi:{verdict:攻/守/等/撤,note}}）；`strategicProfile.extractForceVerdict`（认可「市势/人势研判」时 LLM 提炼 verdict+note、关键词兜底、只用报告真实判断）+ `upsertForce`/`loadForces`；`/casefile/accept` 收 `force` 参数；`understanding.forces` 带出 /me；home 卡回显「守 · 一句话」+ 攻/守/等/撤 配色徽。天势继续走命盘 monthlyOutlook。契约 + mock 同口径。
+  - **UI 顶部上移**：tab 页头部从「顶到胶囊底 + 64px 标题行」改为进胶囊带（nav-inset 到胶囊 top，下发 `--cap-right` 让右侧操作按钮避让胶囊，tab-page-head 64→52），回收顶部约 50px，每屏更饱满。5 个 tab 页统一。
+  - 影响面：server(schema/strategicProfile/casefiles/understanding) + shared/contracts + app(dossier/chat/home/mock + Screen/5 tab 页 scss) + docs。
+
 - **2026-07-07** · **修复：登录态失效时不再静默滞留（全局 401 打断）+ 记忆入口前置**：用户真机实测「军师记忆」空白——排查确认后端已产出真实分类记忆、weapp 也在调 `/me/memory-library`，但**登录 token 失效**导致该接口 401，而页面 `.catch(()=>{})` 吞掉了 401，用户滞留在旧缓存界面、新功能空白却不自知。① **全局修复**：`api.request()`/文件上传收到 401 **无条件**触发 `onAuthLost`（`store` 注册 → 清登录态 + 提示「登录态已失效，请重新登录」+ `reLaunch` 回登录），任何页面的 `.catch` 再也吞不掉掉登录后果；写入 **AGENTS §0 #7 全局铁律**。② **可发现性**：`brief` 页把「军师记忆」六类 + 「完整履历」卡提到 hero 之下最前（原埋在 understanding 长段后），加「整理中」非空态；`profile` 菜单加「完整履历」直达入口 + 「个人档案·军师记忆」。影响面：app（api/store/brief/profile）+ AGENTS + CHANGELOG。⚠ 前端改动需重新 build:weapp 发版；掉登录时**重新登录**即可看到真实记忆。
 
 - **2026-07-06** · **批次B：军师记忆库（P1-P3）+ F-5 诊断轮次持久化 · ✅ 已部署 prod（`deploy-prod.sh`，SHA 77b06c8）**。部署前用 `prisma migrate diff` 预检确认**纯加法零 DROP**；db push 落 5 加法列（strategic_profile: diagRound/diagSessionId/dossierJson/dossierAt；memory: category）+ 顺带补齐 feat 07-04 起滞留未部署的 `wechat_subscription`/`wechat_notification_log` 两表（也是加法）。server tsc 建成、junshi-api 重启健康、公网 /api/health ok。**小程序新页面（记忆库/完整履历）仍需微信 DevTools 手动发版**。明细：
