@@ -61,6 +61,50 @@ export default function BriefPage() {
           {understanding ? <Text className="bf-counts">{evidenceLine(understanding)}</Text> : null}
         </View>
 
+        {/* 军师记忆（放最前，最先看到）*/}
+        {lib ? (
+          <View className="bf-sec">
+            <View className="bf-memhead">
+              <Text className="bf-sec-t">军师记忆</Text>
+              <Text className="bf-memcount">{lib.total > 0 ? `已记住 ${lib.total} 条` : '还没开始记'}</Text>
+            </View>
+            {MEM_CATS.map((c) => {
+              const g = lib.groups.find((x) => x.category === c.key);
+              const entries = g?.entries ?? [];
+              return (
+                <View key={c.key} className="bf-memcat">
+                  <View className="bf-memcat-h">
+                    <View className="bf-memcat-ic" style={{ background: c.tint }}><Icon name={c.icon} size={15} color={c.ink} /></View>
+                    <View className="bf-memcat-tt">
+                      <Text className="bf-memcat-t">{c.title}</Text>
+                      <Text className="bf-memcat-s">{c.sub}</Text>
+                    </View>
+                    <Text className="bf-memcat-fill" style={{ color: c.ink }}>{FILL_LABEL[g?.fill ?? 'unknown']}</Text>
+                  </View>
+                  {entries.length ? entries.map((e) => (
+                    <View key={e.id} className="bf-memrow">
+                      <Text className="bf-memrow-t">· {e.text}</Text>
+                      {e.id.startsWith('sp-') ? null : <Text className="bf-memrow-del" style={{ color: accent }} onClick={() => removeEntry(e.id)}>删</Text>}
+                    </View>
+                  )) : <Text className="bf-memcat-empty">这方面军师还不太了解，多聊聊就补上了。</Text>}
+                </View>
+              );
+            })}
+            <Text className="bf-empty" style={{ marginTop: '8px' }}>记错了点「删」；删掉后军师不再据此判断。</Text>
+          </View>
+        ) : (
+          <View className="bf-sec"><Text className="bf-empty">军师记忆整理中…（和军师多聊几句，就会归档到这里）</Text></View>
+        )}
+
+        <View className="bf-dossier" onClick={() => Taro.navigateTo({ url: '/packages/work/dossier/index' })}>
+          <View className="bf-dossier-ic"><Icon name="insight" size={18} color="#c5a55a" /></View>
+          <View className="bf-dossier-l">
+            <Text className="bf-dossier-t serif">完整履历 · 创始人战略档案</Text>
+            <Text className="bf-dossier-s">把军师记住的这些，蒸馏成一份完整档案</Text>
+          </View>
+          <Text className="bf-dossier-arrow">›</Text>
+        </View>
+
         {understanding ? (
           <>
             {understanding.sections.map((sec) => (
@@ -92,47 +136,6 @@ export default function BriefPage() {
             <Text className="bf-empty">暂无资料。先登录并完成建档，后续对话、案卷、方案和资料库都会逐步沉淀到个人档案。</Text>
           </View>
         )}
-
-        {lib ? (
-          <View className="bf-sec">
-            <View className="bf-memhead">
-              <Text className="bf-sec-t">军师记忆</Text>
-              <Text className="bf-memcount">{lib.total > 0 ? `已记住 ${lib.total} 条` : '还没开始记'}</Text>
-            </View>
-            {MEM_CATS.map((c) => {
-              const g = lib.groups.find((x) => x.category === c.key);
-              const entries = g?.entries ?? [];
-              return (
-                <View key={c.key} className="bf-memcat">
-                  <View className="bf-memcat-h">
-                    <View className="bf-memcat-ic" style={{ background: c.tint }}><Icon name={c.icon} size={15} color={c.ink} /></View>
-                    <View className="bf-memcat-tt">
-                      <Text className="bf-memcat-t">{c.title}</Text>
-                      <Text className="bf-memcat-s">{c.sub}</Text>
-                    </View>
-                    <Text className="bf-memcat-fill" style={{ color: c.ink }}>{FILL_LABEL[g?.fill ?? 'unknown']}</Text>
-                  </View>
-                  {entries.length ? entries.map((e) => (
-                    <View key={e.id} className="bf-memrow">
-                      <Text className="bf-memrow-t">· {e.text}</Text>
-                      {e.id.startsWith('sp-') ? null : <Text className="bf-memrow-del" style={{ color: accent }} onClick={() => removeEntry(e.id)}>删</Text>}
-                    </View>
-                  )) : <Text className="bf-memcat-empty">这方面军师还不太了解，多聊聊就补上了。</Text>}
-                </View>
-              );
-            })}
-            <Text className="bf-empty" style={{ marginTop: '8px' }}>记错了点「删」；删掉后军师不再据此判断。</Text>
-          </View>
-        ) : null}
-
-        <View className="bf-dossier" onClick={() => Taro.navigateTo({ url: '/packages/work/dossier/index' })}>
-          <View className="bf-dossier-ic"><Icon name="insight" size={18} color="#c5a55a" /></View>
-          <View className="bf-dossier-l">
-            <Text className="bf-dossier-t serif">完整履历 · 创始人战略档案</Text>
-            <Text className="bf-dossier-s">把军师记住的这些，蒸馏成一份完整档案</Text>
-          </View>
-          <Text className="bf-dossier-arrow">›</Text>
-        </View>
 
         <View className="bf-cta" style={{ background: accent }} onClick={() => startInterview()}>
           <Icon name="spark" size={17} color="#fff" />

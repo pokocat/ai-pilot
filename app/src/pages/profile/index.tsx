@@ -31,7 +31,8 @@ export default function Profile() {
   });
 
   const rows = [
-    { ic: 'insight', t: '个人 / 企业档案', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/pages/brief/index' }) },
+    { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/pages/brief/index' }) },
+    { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: () => Taro.navigateTo({ url: '/packages/work/dossier/index' }) },
     { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
     { ic: 'layers', t: '方案库', s: `${libCount + reportCount}`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
     { ic: 'attach', t: '我的资料库', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/knowledge/index' }) },
