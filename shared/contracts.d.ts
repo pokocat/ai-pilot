@@ -213,6 +213,27 @@ export interface ClientUnderstanding {
   updatedAt?: string | null;
 }
 
+/** 军师记忆库六类 key（其人/其业/其时/其志/其略/相与之道）；展示标签在 app 端映射。 */
+export type MemoryCategoryKey = 'founder' | 'company' | 'status' | 'vision' | 'strategy' | 'rapport';
+/** 充实度：待察 / 粗知 / 了然 / 已定（strategy 类有已确认战略事实时为 settled）。 */
+export type MemoryFillLevel = 'unknown' | 'thin' | 'known' | 'settled';
+export interface MemoryLibraryEntry {
+  id: string;
+  text: string;
+  source: string; // conversation | deliverable_feedback | strategic
+}
+export interface MemoryLibraryGroup {
+  category: MemoryCategoryKey;
+  fill: MemoryFillLevel;
+  entries: MemoryLibraryEntry[];
+}
+/** 军师记忆库：主公档案页「军师记事」按六类结构化呈现（详见 memoryLibrary.ts / P2）。 */
+export interface MemoryLibraryView {
+  total: number;                 // 已归档事实总条数
+  groups: MemoryLibraryGroup[];  // 固定 6 组、固定顺序
+  updatedAt: string | null;
+}
+
 /** 本月 token 额度（客户端「钻石管理」只看进度 %）。limit/remaining<0=不限量 */
 export interface TokenQuotaView {
   limit: number;     // 本月授予总额度，-1=不限量

@@ -6,6 +6,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
+  MemoryLibraryView, MemoryLibraryGroup, MemoryLibraryEntry, MemoryCategoryKey, MemoryFillLevel,
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
 } from '../../../shared/contracts';
@@ -861,6 +862,37 @@ export const mock = {
   },
   async deleteMemory(): Promise<{ ok: boolean }> {
     return delay({ ok: true });
+  },
+  // 军师记忆库（P2）：从 mock 用户数据合成六类结构化记忆，让档案页「军师记事」本地可走查。
+  async memoryLibrary(): Promise<MemoryLibraryView> {
+    const { d } = current();
+    const mk = (id: string, text: string, source = 'conversation'): MemoryLibraryEntry => ({ id, text, source });
+    const founder: MemoryLibraryEntry[] = [];
+    const company: MemoryLibraryEntry[] = [];
+    const status: MemoryLibraryEntry[] = [];
+    const vision: MemoryLibraryEntry[] = [];
+    const strategy: MemoryLibraryEntry[] = [];
+    const rapport: MemoryLibraryEntry[] = [];
+    if (meaningfulM(d.name)) founder.push(mk('mk-name', `军师称呼主公为「${d.name}」`));
+    extraLinesM(d.profile?.extra).slice(0, 3).forEach((l, i) => founder.push(mk(`mk-ex${i}`, l)));
+    if (meaningfulM(d.company)) company.push(mk('mk-co', `生意主体：${d.company}`));
+    if (d.profile?.industry) company.push(mk('mk-ind', `行当：${d.profile.industry}`));
+    if (d.profile?.stage) company.push(mk('mk-stage', `发展阶段：${d.profile.stage}`));
+    d.projects.slice(0, 2).forEach((p, i) => company.push(mk(`mk-pj${i}`, p.summary ? `案卷《${p.name}》：${p.summary}` : `案卷《${p.name}》推进中`)));
+    if (d.profile?.pain) status.push(mk('mk-pain', `眼下最卡：${d.profile.pain}`));
+    const und = buildUnderstandingM(d);
+    if (und.mainContradiction) strategy.push({ id: 'sp-mc', text: und.mainContradiction, source: 'strategic' });
+    if (und.positioning) strategy.push({ id: 'sp-pos', text: `战略定位：${und.positioning}`, source: 'strategic' });
+    const raw: Record<MemoryCategoryKey, MemoryLibraryEntry[]> = { founder, company, status, vision, strategy, rapport };
+    const fillOf = (n: number, settled: boolean): MemoryFillLevel => (settled ? 'settled' : n === 0 ? 'unknown' : n >= 3 ? 'known' : 'thin');
+    const order: MemoryCategoryKey[] = ['founder', 'company', 'status', 'vision', 'strategy', 'rapport'];
+    const groups: MemoryLibraryGroup[] = order.map((c) => ({
+      category: c,
+      entries: raw[c],
+      fill: fillOf(raw[c].length, c === 'strategy' && raw[c].some((e) => e.source === 'strategic')),
+    }));
+    const total = order.reduce((s, c) => s + raw[c].length, 0);
+    return delay({ total, groups, updatedAt: new Date().toISOString() });
   },
   async knowledgeSearch(q: string, projectId?: string): Promise<KnowledgeHit[]> {
     const { d } = current();

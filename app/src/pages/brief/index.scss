@@ -33,3 +33,19 @@
   display: flex; align-items: center; justify-content: center; gap: 8px;
   color: #fff; font-size: 14.5px; font-weight: 600;
 }
+
+/* 军师记事（记忆库六类，P2） */
+.bf-memhead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+.bf-memcount { color: var(--ink-3); font-size: 12px; }
+.bf-memcat { padding: 10px 0; border-top: 1px solid rgba(0,0,0,.06); }
+.bf-memcat:first-of-type { border-top: none; }
+.bf-memcat-h { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.bf-memcat-ic { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.bf-memcat-tt { flex: 1; min-width: 0; }
+.bf-memcat-t { display: block; color: var(--ink); font-size: 13.5px; font-weight: 600; }
+.bf-memcat-s { display: block; color: var(--ink-3); font-size: 11px; margin-top: 1px; }
+.bf-memcat-fill { font-size: 11px; flex-shrink: 0; }
+.bf-memrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 3px 0 3px 37px; }
+.bf-memrow-t { flex: 1; color: var(--ink-2); font-size: 12.5px; line-height: 1.55; }
+.bf-memrow-del { flex-shrink: 0; font-size: 12px; }
+.bf-memcat-empty { display: block; color: var(--ink-3); font-size: 12px; line-height: 1.5; padding-left: 37px; font-style: italic; }
