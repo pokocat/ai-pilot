@@ -126,7 +126,7 @@ export default function Sessions() {
     <Screen topInset>
       <View className="pad council">
         {/* 顶栏（对齐设计稿 messages-head）：大标题「问策」+ 副题，右侧 历史 */}
-        <View className="messages-head">
+        <View className="messages-head tab-page-head">
           <View className="mh-titles">
             <Text className="mh-t">问策</Text>
             <Text className="mh-s">军师参谋室 · 分线督办，脉络可溯</Text>

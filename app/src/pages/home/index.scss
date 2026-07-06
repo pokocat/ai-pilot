@@ -9,13 +9,10 @@
 .battle-nav {
   position: relative;
   display: flex; align-items: center; justify-content: center;
-  min-height: 44px;
-  /* 兜底：系统状态栏高度（真机由 JS 用胶囊顶端实测值覆盖） */
-  padding-top: calc(env(safe-area-inset-top) + 6px);
 }
 .bn-title { font-size: 25px; font-weight: 600; color: var(--ink); line-height: 1.1; }
 .bn-side {
-  position: absolute; bottom: 9px;
+  position: absolute; bottom: 14px;
   font-size: 16px; font-weight: 600; color: var(--accent);
 }
 .bn-side.left { left: 2px; }
