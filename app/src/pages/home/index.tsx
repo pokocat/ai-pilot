@@ -43,7 +43,6 @@ export default function Home() {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerFirst, setPickerFirst] = useState(false);
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
-  const [navTop, setNavTop] = useState<number>();
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [chart, setChart] = useState<ChartSummary | null>(null);
   const [reports, setReports] = useState<ReportItem[]>([]);
@@ -70,11 +69,6 @@ export default function Home() {
       setShowPicker(true);
     }
     api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
-    // 自定义导航：标题行与微信胶囊顶端对齐
-    try {
-      const r = Taro.getMenuButtonBoundingClientRect?.();
-      if (r && r.top) setNavTop(r.top);
-    } catch { /* H5 无胶囊，走 CSS 兜底 */ }
   }, []);
 
   const requireLogin = () => {
@@ -132,10 +126,10 @@ export default function Home() {
   })();
 
   return (
-    <Screen className="home">
+    <Screen topInset className="home">
       <View className="pad">
         {/* 页头（对齐设计稿）：左「案卷」· 中「军情」· 右刷新 */}
-        <View className="battle-nav" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
+        <View className="battle-nav tab-page-head">
           <Text className="bn-side left serif" onClick={() => requireLogin() && Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
           <Text className="bn-title serif">军情</Text>
           <Text className="bn-side right" onClick={refresh}>↻</Text>

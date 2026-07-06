@@ -6,3 +6,10 @@
 .nav-inset {
   height: calc(env(safe-area-inset-top) + 52px);
 }
+
+/* 五个 tab 页共用的标题区高度；顶部安全区只由 Screen topInset 负责。 */
+.tab-page-head {
+  height: 64px;
+  min-height: 64px;
+  box-sizing: border-box;
+}

@@ -184,7 +184,7 @@ export default function Studio() {
     <Screen topInset>
       <View className="pad exec">
         {/* 页头（exec-nav）：左「案卷」· 中「军令」· 右「提醒」 */}
-        <View className="exec-nav">
+        <View className="exec-nav tab-page-head">
           <Text className="en-side left serif" onClick={() => Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
           <Text className="en-title serif">军令</Text>
           <Text className="en-side right serif" onClick={() => setView('review')}>提醒</Text>

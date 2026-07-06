@@ -55,7 +55,7 @@ export default function Profile() {
     <Screen topInset>
       <View className="pad account">
         {/* 页头：居中「我的军师系统」· 右「设置」 */}
-        <View className="account-nav">
+        <View className="account-nav tab-page-head">
           <Text className="an-title serif">我的军师系统</Text>
           <Text className="an-side serif" onClick={() => Taro.navigateTo({ url: '/pages/settings/index' })}>设置</Text>
         </View>
