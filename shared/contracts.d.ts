@@ -199,6 +199,11 @@ export interface ClientUnderstandingSection {
   items: string[];
   emptyText?: string;
 }
+/** L-6 三势真数据化：市势/人势的结构化研判结论（天势走命盘 monthlyOutlook，不入此结构）。 */
+export type ForceVerdict = '攻' | '守' | '等' | '撤';
+export interface ForceView { verdict: ForceVerdict; note: string; }
+export interface ForcesView { shishi?: ForceView | null; renshi?: ForceView | null; }
+
 /** 前台「个人档案」：把真实档案、记忆、项目和知识沉淀整理成客户可读的咨询理解 */
 export interface ClientUnderstanding {
   title: string;
@@ -207,6 +212,7 @@ export interface ClientUnderstanding {
   summary: string;
   mainContradiction?: string | null; // 战略档案里的主要矛盾（战局 hero 优先展示真结论，而非通用摘要）
   positioning?: string | null;       // 战略定位（可选展示）
+  forces?: ForcesView | null;        // L-6：市势/人势研判结论（军情页三势卡回显）
   sections: ClientUnderstandingSection[];
   nextQuestions: string[];
   evidenceCount: { profile: number; memories: number; projects: number; knowledge: number; sessions: number };

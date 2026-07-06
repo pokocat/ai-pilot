@@ -207,3 +207,10 @@
 .kpi-cell { width: 31.8%; text-align: center; padding: 10px 6px; border-radius: 13px; background: var(--surface-2); }
 .kpi-v { display: block; font-size: 20px; font-weight: 600; color: var(--green); }
 .kpi-l { display: block; margin-top: 4px; font-size: 11px; color: var(--ink-3); font-weight: 600; }
+
+/* L-6 三势结论徽（攻/守/等/撤） */
+.force-verdict { font-family: var(--home-title-font); font-weight: 700; }
+.force-verdict.v-atk { color: var(--green); }
+.force-verdict.v-def { color: var(--gold-deep); }
+.force-verdict.v-retreat { color: #c0392b; }
+.force-verdict.v-wait { color: var(--ink-3); }

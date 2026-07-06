@@ -497,7 +497,7 @@ export default function Chat() {
 
   // 认可方案：存入方案库（桥接一版报告）+ 服务端生成案卷军令 → 去执行页承接打卡与回填
   const acceptPlan = async (d: Deliverable) => {
-    const r = await acceptDeliverable(d, agent?.name || '军师').catch(() => null);
+    const r = await acceptDeliverable(d, agent?.name || '军师', forceTag || undefined).catch(() => null);
     if (!r) { Taro.showToast({ title: '案卷生成失败，请重试', icon: 'none' }); return; }
     if (!r.newOrders && r.skippedOrders) {
       Taro.showToast({ title: '这份方案已转成军令，不重复添加', icon: 'none' });

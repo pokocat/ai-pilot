@@ -1027,6 +1027,7 @@ model StrategicProfile {
   diagSessionId     String? // 最近一次诊断所在会话（切换不重置轮次）
   dossierJson       Json? // P3：生成即缓存的「完整履历」结构化档案（DossierReport）
   dossierAt         DateTime? // 履历最近生成时间
+  forcesJson        Json? // L-6 三势真数据化：{shishi/renshi: {verdict:攻|守|等|撤, note}}（天势走命盘不入库）
   twelveQJson       Json? // 十二问答案沉淀（M3 状态机写入）
   kpiJson           Json? // 核心 KPI 基线（M2 看板写入）
   extraJson         Json? // 前向兼容（叙事线/谶语等 P1 内容）

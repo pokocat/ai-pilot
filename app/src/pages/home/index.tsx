@@ -34,6 +34,11 @@ function SayingLine({ html, accent }: { html: string; accent: string }) {
   );
 }
 
+// L-6：三势结论徽配色 —— 攻(进攻绿)/守(防守橙)/撤(危险红)/等(中性灰)
+function verdictClass(v: string): string {
+  return v === '攻' ? 'atk' : v === '守' ? 'def' : v === '撤' ? 'retreat' : 'wait';
+}
+
 // 战局页 —— 对齐设计稿 page-battle：军师判断 hero → 信号指标 → 下一步卡（打磨）→ 三势 → 下一步动作 → 关联模块 → 不能做 → 认可 CTA。
 // 判断内容一律来自真实军师档案（me.understanding）与案卷，资料不足时引导进入对话访谈，不预置结论。
 export default function Home() {
@@ -190,13 +195,18 @@ export default function Home() {
                 </View>
               );
             }
-            // 市势/人势：已研判（方案库有对应方案）→ 点开预览报告详情；否则各走独立 prompt 发起研判
+            // 市势/人势：有结构化研判结论（攻/守/等/撤）→ 回显真结论；否则已研判则点开报告；再否则发起研判
+            const fv = f.key === '市势' ? und?.forces?.shishi : f.key === '人势' ? und?.forces?.renshi : null;
             const rep = forceReport(f);
             return (
               <View key={f.key} className="force card" onClick={rep ? () => openReport(rep.id) : () => startForce(f)}>
                 <Text className="force-tag serif">{f.key}</Text>
-                <Text className="force-desc">{rep ? `已研判 · ${rep.title}` : f.desc}</Text>
-                <Text className="force-go">{rep ? '查看研判 ›' : '发起判断 ›'}</Text>
+                {fv ? (
+                  <Text className="force-desc"><Text className={`force-verdict v-${verdictClass(fv.verdict)}`}>{fv.verdict}</Text>{fv.note ? ` · ${fv.note}` : ''}</Text>
+                ) : (
+                  <Text className="force-desc">{rep ? `已研判 · ${rep.title}` : f.desc}</Text>
+                )}
+                <Text className="force-go">{fv || rep ? '查看研判 ›' : '发起判断 ›'}</Text>
               </View>
             );
           })}
