@@ -8,7 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
-- **2026-07-07** · **L-6 三势真数据化 + tab 页顶部上移**（feat 本地，⚠ 三势含 schema，待 prod db push + 部署；UI 纯前端待发版）：
+- **2026-07-07** · **L-6 三势真数据化 + tab 页顶部上移**（三势后端 ✅ 已部署 prod `deploy-prod.sh` SHA 2114b00：migrate diff 预检确认仅 `strategic_profile ADD COLUMN forcesJson`、零 DROP，db push + 构建 + 重启健康、forcesJson 列已验在；UI 纯前端 + 前端展示待 weapp 发版）：
   - **三势真数据化**：军情页 市势/人势 原静态「发起判断」→ 结构化研判结论。`StrategicProfile.forcesJson`（加法列，{shishi/renshi:{verdict:攻/守/等/撤,note}}）；`strategicProfile.extractForceVerdict`（认可「市势/人势研判」时 LLM 提炼 verdict+note、关键词兜底、只用报告真实判断）+ `upsertForce`/`loadForces`；`/casefile/accept` 收 `force` 参数；`understanding.forces` 带出 /me；home 卡回显「守 · 一句话」+ 攻/守/等/撤 配色徽。天势继续走命盘 monthlyOutlook。契约 + mock 同口径。
   - **UI 顶部上移**：tab 页头部从「顶到胶囊底 + 64px 标题行」改为进胶囊带（nav-inset 到胶囊 top，下发 `--cap-right` 让右侧操作按钮避让胶囊，tab-page-head 64→52），回收顶部约 50px，每屏更饱满。5 个 tab 页统一。
   - 影响面：server(schema/strategicProfile/casefiles/understanding) + shared/contracts + app(dossier/chat/home/mock + Screen/5 tab 页 scss) + docs。
