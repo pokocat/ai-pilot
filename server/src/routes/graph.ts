@@ -3,7 +3,8 @@
 import type { FastifyInstance } from 'fastify';
 import { resolveUser } from '../services/context.js';
 import { ingestTextToGraph, upsertTriples, queryRelations, listEntities, type Triple } from '../services/knowledgeGraph.js';
-import { assertPlanActive, ensureQuota } from '../services/tokenQuota.js';
+import { assertPlanActive, reserveQuota, RESERVE_TOKENS, type QuotaReservation } from '../services/tokenQuota.js';
+import { hasLiveProvider } from '../llm/gateway.js';
 
 export async function graphRoutes(app: FastifyInstance) {
   // 从文本抽取并入图（运营/对话汇总可调）。也可直接传 triples 手工录入。
@@ -18,17 +19,30 @@ export async function graphRoutes(app: FastifyInstance) {
       }
       const text = (b.text ?? '').trim();
       if (!text) return reply.code(400).send({ error: '缺少 text 或 triples', code: 'TEXT_REQUIRED' });
-      // text 分支会触发真实模型抽取，须与 /generate* 同口径受套餐到期锁 + 月度额度门禁；
+      // text 分支会触发真实模型抽取，须与 /generate* 同口径受套餐到期锁 + 月度额度门禁 + 实际扣减；
       // 手工 triples 分支不涉及模型调用，不受此限。
+      // extractGraphTriples 走 rawJson，不回传真实 token 用量，故不能只 ensureQuota(仅判断放行、从不扣减)——
+      // 那样只要余额一次性 >0 就能无限次触发真实模型调用，额度系统形同虚设。改用与 /generate* 一致的
+      // reserveQuota 预留 + 按 RESERVE_TOKENS 定额结算（成功=全额扣留，失败=退回）。
+      let quotaReservation: QuotaReservation | null = null;
       try {
         await assertPlanActive(user.id);
-        await ensureQuota(user.id);
+        quotaReservation = await reserveQuota(user.id, 1);
       } catch (e) {
         const err = e as Error & { statusCode?: number; code?: string };
         return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
       }
-      const r = await ingestTextToGraph(user.tenantId, b.projectId ?? null, text, { source: b.source ?? 'conversation' });
-      return r;
+      try {
+        // mock/demo（未配置真实模型）下 extractGraphTriples 直接短路返回空、无真实成本 → 全额退回预留，
+        // 与 /generate* 的 mock 路径（usage=ZERO_USAGE → settle(0) 全退）同一口径，避免误扣。
+        const live = await hasLiveProvider();
+        const r = await ingestTextToGraph(user.tenantId, b.projectId ?? null, text, { source: b.source ?? 'conversation' });
+        await quotaReservation.settle(live ? RESERVE_TOKENS : 0, 1);
+        return r;
+      } catch (err) {
+        await quotaReservation.refund().catch(() => {});
+        throw err;
+      }
     },
   );
 

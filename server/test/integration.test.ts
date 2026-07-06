@@ -225,6 +225,71 @@ describe('TC-F 短信验证码登录 / 一键登录', () => {
     const p = { Action: 'SendSms', PhoneNumbers: '13800138000', SignName: '军师' };
     assert.equal(aliyunSignature('GET', p, 'sk'), aliyunSignature('GET', p, 'sk'));
   });
+
+  test('F11 先「微信一键登录」建号、后「本机号一键登录」不应另建新号（身份分裂回归）', async () => {
+    const oldFetch = globalThis.fetch;
+    process.env.WECHAT_MINI_APPID = 'wx-test-appid';
+    process.env.WECHAT_MINI_SECRET = 'wx-test-secret';
+    _resetTokenCache();
+    const fragOpenid = 'openid-frag-' + Math.random().toString(36).slice(2);
+    const conflictPhone = uniquePhone();
+    const realPhone = uniquePhone();
+    const phoneByCode: Record<string, string> = {};
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      if (url.includes('stable_token')) {
+        return new Response(JSON.stringify({ access_token: 'tok-frag', expires_in: 7200 }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('jscode2session')) {
+        return new Response(JSON.stringify({ openid: fragOpenid }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.includes('getuserphonenumber')) {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        const phone = phoneByCode[body.code as string];
+        return new Response(JSON.stringify({ errcode: 0, phone_info: { purePhoneNumber: phone, countryCode: '86' } }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error('unexpected fetch ' + url);
+    }) as typeof fetch;
+    try {
+      // 1) 先用「微信一键登录」建号 A（占位手机号 wx_<openid>）。
+      const wxLogin = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-frag' } });
+      assert.equal(wxLogin.status, 200);
+      assert.equal(wxLogin.body.isNew, true);
+      const tokenA = wxLogin.body.token as string;
+
+      // 2) 另一个真实用户 C 已占用 conflictPhone。
+      const tokenC = await login(conflictPhone);
+
+      // 3) 本机号一键登录：同一 openid，但取回的手机号已被 C 占用 → 409 PHONE_TAKEN，不应静默建号/顶号。
+      phoneByCode['pc-conflict'] = conflictPhone;
+      const conflict = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-conflict', loginCode: 'wx-code-frag-again' } });
+      assert.equal(conflict.status, 409);
+      assert.equal(conflict.body.code, 'PHONE_TAKEN');
+      const aAfterConflict = await prisma.user.findUnique({ where: { id: tokenA } });
+      assert.equal(aAfterConflict?.wechatOpenId, fragOpenid, 'A 的 openid 关联不应被冲突尝试破坏');
+      assert.ok(aAfterConflict?.phone.startsWith('wx_'), 'A 的占位手机号不应被冲突尝试改写');
+      const cAfterConflict = await prisma.user.findUnique({ where: { id: tokenC } });
+      assert.equal(cAfterConflict?.phone, conflictPhone, 'C 的账号不应受影响');
+
+      // 4) 本机号一键登录：同一 openid，取回未占用的真实手机号 → 应命中账号 A（同 token），而非另建新号。
+      phoneByCode['pc-real'] = realPhone;
+      const onetap = await api('POST', '/api/auth/wechat-phone', { body: { phoneCode: 'pc-real', loginCode: 'wx-code-frag-again' } });
+      assert.equal(onetap.status, 200);
+      assert.equal(onetap.body.isNew, false);
+      assert.equal(onetap.body.token, tokenA, '同一微信身份的本机号一键登录应复用微信一键登录建的账号，而非另建新号');
+      assert.equal(onetap.body.user.phone, realPhone);
+
+      // 5) 之后再用「微信一键登录」复登，应仍是同一账号且能看到真实手机号（已从占位号更新）。
+      const wxAgain = await api('POST', '/api/auth/wechat-login', { body: { code: 'wx-code-frag-2' } });
+      assert.equal(wxAgain.body.token, tokenA);
+      assert.equal(wxAgain.body.user.phone, realPhone);
+    } finally {
+      globalThis.fetch = oldFetch;
+      delete process.env.WECHAT_MINI_APPID;
+      delete process.env.WECHAT_MINI_SECRET;
+      _resetTokenCache();
+    }
+  });
 });
 
 // ───────────────────────── TC-G 绑定手机号（登录后可选） / 头像 ─────────────────────────

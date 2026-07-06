@@ -204,6 +204,23 @@ export async function sendWechatSubscribeMessage(args: {
     return { sent: false, reason: 'no subscription quota' };
   }
 
+  // 先原子「认领」一份额度，再调用微信推送——不能反过来（旧实现：先发送、发送成功后才扣减）。
+  // 微信推送是不可逆的外部副作用；若像旧实现一样在发送之后才扣减，两个并发请求（如同一用户
+  // 短时间内两次触发报告生成）会都通过上面的 findFirst 校验、都真的把消息推给微信（超出用户
+  // 实际授权的额度重复打扰），事后扣减时才发现只有一份额度可扣——输掉竞态的一方明明已经调用了
+  // 发送接口，却在扣减判定处直接 return（从不调用 logNotification），产生完全不可追溯的「幽灵
+  // 推送」。改为发送前先原子扣减（updateMany + where remaining>0）：认领失败＝额度已被并发请求
+  // 抢走，直接拒绝、不再调用发送接口；认领成功后发送失败/被拒再退回额度——与全仓
+  // reserveCredits/reserveQuota「先预留后结算」惯例一致。
+  const claimed = await prisma.wechatSubscription.updateMany({
+    where: { id: sub.id, remaining: { gt: 0 } },
+    data: { remaining: { decrement: 1 } },
+  });
+  if (claimed.count === 0) {
+    if (args.logSkipped) await logNotification({ ...args, templateId, status: 'skipped', reason: 'no subscription quota' });
+    return { sent: false, reason: 'no subscription quota' };
+  }
+
   const payload = {
     touser: user.wechatOpenId,
     template_id: templateId,
@@ -217,24 +234,25 @@ export async function sendWechatSubscribeMessage(args: {
   try {
     data = await postWechatSubscribe(payload);
   } catch (err) {
+    await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { remaining: { increment: 1 } } }).catch(() => {});
     await logNotification({ ...args, templateId, status: 'failed', reason: (err as Error).message, payload: payload as Prisma.InputJsonValue });
     return { sent: false, reason: (err as Error).message };
   }
 
   if (data.errcode && data.errcode !== 0) {
     if (data.errcode === 43101) {
+      // 用户单侧永久拒绝：不退回（这份额度本就该清零），直接标记禁用。
       await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { remaining: 0, status: 'reject' } }).catch(() => {});
+    } else {
+      // 其它失败（限流/参数错误等）：退回已认领的额度，允许下次重试。
+      await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { remaining: { increment: 1 } } }).catch(() => {});
     }
     const reason = data.errmsg || `wechat errcode ${data.errcode}`;
     await logNotification({ ...args, templateId, status: 'failed', reason, payload: payload as Prisma.InputJsonValue });
     return { sent: false, reason };
   }
 
-  const consumed = await prisma.wechatSubscription.updateMany({
-    where: { id: sub.id, remaining: { gt: 0 } },
-    data: { remaining: { decrement: 1 }, lastSentAt: now() },
-  });
-  if (consumed.count === 0) return { sent: false, reason: 'subscription quota consumed' };
+  await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { lastSentAt: now() } }).catch(() => {});
   await logNotification({ ...args, templateId, status: 'sent', payload: payload as Prisma.InputJsonValue });
   return { sent: true };
 }
