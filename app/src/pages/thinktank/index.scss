@@ -13,7 +13,7 @@
   font-size: 16px; font-weight: 600;
 }
 .tn-side.left { left: 2px; }
-.tn-side.right { right: 2px; }
+.tn-side.right { right: var(--cap-right, 2px); }
 .tn-side:active { opacity: .7; }
 
 /* —— 分区切换（seg：软底 + 白块选中） —— */

@@ -16,7 +16,7 @@
   font-size: 16px; font-weight: 600; color: var(--accent);
 }
 .bn-side.left { left: 2px; }
-.bn-side.right { right: 2px; font-family: var(--sans); font-size: 18px; font-weight: 600; }
+.bn-side.right { right: var(--cap-right, 2px); font-family: var(--sans); font-size: 18px; font-weight: 600; }
 .bn-side:active { opacity: .7; }
 
 /* —— 军师判断 hero（深绿） —— */

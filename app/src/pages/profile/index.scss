@@ -8,7 +8,7 @@
 }
 .an-title { font-size: 23px; font-weight: 600; color: var(--ink); line-height: 1.1; }
 .an-side {
-  position: absolute; right: 2px; bottom: 14px;
+  position: absolute; right: var(--cap-right, 2px); bottom: 14px;
   color: var(--green);
   font-size: 16px; font-weight: 600;
 }
