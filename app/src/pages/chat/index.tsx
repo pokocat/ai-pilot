@@ -897,7 +897,7 @@ export default function Chat() {
             value={input}
             focus={inputFocus}
             disabled={busy}
-            maxlength={500}
+            maxlength={2000}
             cursorSpacing={24}
             adjustPosition={false}
             autoHeight
