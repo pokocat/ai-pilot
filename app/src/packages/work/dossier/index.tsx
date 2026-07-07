@@ -12,10 +12,6 @@ export default function DossierPage() {
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
 
-  useEffect(() => {
-    api.dossier().then((r) => { setReport(r.report); setReady(true); }).catch(() => setReady(true));
-  }, []);
-
   const generate = async () => {
     if (loading) return;
     setLoading(true);
@@ -24,13 +20,27 @@ export default function DossierPage() {
     finally { setLoading(false); }
   };
 
+  useEffect(() => {
+    let cancelled = false;
+    api.dossier().then((r) => {
+      if (cancelled) return;
+      setReady(true);
+      if (r.report) { setReport(r.report); return; }
+      // 无缓存 + 资料够（个人档案非空）→ 首次进详情自动立档，免手动点；资料不足则留手动兜底
+      const maturity = s.me()?.understanding?.maturity;
+      if (maturity && maturity !== 'empty') void generate();
+    }).catch(() => { if (!cancelled) setReady(true); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <View className="page dossier-page">
       <SafeHeader title="完整履历" onBack={() => Taro.navigateBack()} titleClassName="ds-navtitle" />
       {!report ? (
         <View className="ds-empty">
           <Text className="ds-empty-t serif">创始人战略档案</Text>
-          <Text className="ds-empty-d">军师把你的资料——档案、对话、项目、战略——蒸馏成一份完整履历。资料越全，写得越透。</Text>
+          <Text className="ds-empty-d">军师把你的资料——档案、对话、项目、战略——蒸馏成一份完整履历。资料够了会自动为你立档，越全写得越透；也可以现在就手动生成。</Text>
           <View className={`ds-gen ${loading ? 'busy' : ''}`} onClick={generate}>
             <Text>{loading ? '军师执笔中…' : (ready ? '生成完整履历' : '加载中…')}</Text>
           </View>
