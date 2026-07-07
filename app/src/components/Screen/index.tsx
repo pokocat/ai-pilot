@@ -22,12 +22,10 @@ export default function Screen({ children, tab = true, scroll = true, topInset =
     if (!topInset) return;
     try {
       const r = Taro.getMenuButtonBoundingClientRect?.();
-      const sys = Taro.getSystemInfoSync?.();
-      if (!r?.top || !sys?.windowWidth) return;
-      // 头部上移进胶囊带：内容顶到胶囊「顶」（原来顶到胶囊「底」浪费一整行），右侧留出胶囊宽度让操作按钮避让。
-      const top = Math.max(r.top, (sys.statusBarHeight || 0) + 4);
-      const capRight = Math.max(sys.windowWidth - r.left + 8, 16);
-      setVars({ '--nav-inset-h': `${top}px`, '--cap-right': `${capRight}px` } as CSSProperties);
+      if (!r?.bottom) return;
+      // 内容落在胶囊「下方」（真机胶囊位置多变，落带内会与标题/按钮重叠——回归）；比原来 +8 收紧到 +2，标题区也压到 56。
+      // 不再下发 --cap-right：头部在胶囊之下，右侧操作按钮无需避让，保持贴边（避免被推进标题区重叠）。
+      setVars({ '--nav-inset-h': `${r.bottom + 2}px` } as CSSProperties);
     } catch { /* H5 无胶囊，走 CSS 兜底 */ }
   }, [topInset]);
 

@@ -2,15 +2,15 @@
   height: 100vh;
   box-sizing: border-box;
 }
-/* 自定义导航顶部让位：只让到胶囊「顶」（原来让到胶囊「底」+52px 浪费一整行）；
-   真机由 Screen JS 用胶囊 top 实测值覆盖 --nav-inset-h；H5 无胶囊走 safe-area 兜底。 */
+/* 自定义导航顶部让位：内容落到胶囊「底」之下（真机由 Screen JS 用胶囊 bottom+2 覆盖 --nav-inset-h；
+   H5/无胶囊走 safe-area 兜底）。比原来 +52 略收紧到 +46。 */
 .nav-inset {
-  height: var(--nav-inset-h, calc(env(safe-area-inset-top) + 6px));
+  height: var(--nav-inset-h, calc(env(safe-area-inset-top) + 46px));
 }
 
-/* 五个 tab 页共用的标题区高度；标题落在胶囊带内，右侧操作按钮用 --cap-right 避让胶囊。 */
+/* 五个 tab 页共用的标题区高度（56，略收紧于原 64）；头部在胶囊下方，右侧按钮贴边不需避让。 */
 .tab-page-head {
-  height: 52px;
-  min-height: 52px;
+  height: 56px;
+  min-height: 56px;
   box-sizing: border-box;
 }
