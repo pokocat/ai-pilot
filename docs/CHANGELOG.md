@@ -8,6 +8,11 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-07** · **批次C 账本闭环 + 完整履历自动生成 + 放宽长度上限**：
+  - **批次C 账本闭环（F-8/P-2）**（server 待部署无 schema / 账本页待发版）：服务端账本(决策/天机/段位)全建好但 App 够不到→条目永 pending→比率 null→段位不可达。新增 `packages/work/ledger` 页(决策账本/天机账本 双 tab + 待验证条目点验证，调既有 verify 路由)；`decisionStats/prophecyStats` 加 **n≥5 才出比率**(原 >0 即出，1 条 100% 直接喂晋升)+ briefing「先攒够 5 条」口径；Decision/Prophecy View/Stats/Ledger 进 contracts；api+mock 同口径；profile 段位卡可点进账本。H5 实测：4 条验证显「先打满5条」、第5条切「准确率80%」。
+  - **完整履历自动生成**（`f8ee2cc`，前端待发版）：进详情无缓存+资料够(maturity≠empty)→自动立档，免手动点。
+  - **放宽长度上限**（`816cda1`，✅ 已部署 prod）：对话回复 800→4000、报告 2600→8000、输入框 500→2000；对话不再半句截断（回复上限服务端已生效，输入框待发版）。
+
 - **2026-07-07** · **L-6 三势真数据化 + tab 页顶部上移**（三势后端 ✅ 已部署 prod `deploy-prod.sh` SHA 2114b00：migrate diff 预检确认仅 `strategic_profile ADD COLUMN forcesJson`、零 DROP，db push + 构建 + 重启健康、forcesJson 列已验在；UI 纯前端 + 前端展示待 weapp 发版）：
   - **三势真数据化**：军情页 市势/人势 原静态「发起判断」→ 结构化研判结论。`StrategicProfile.forcesJson`（加法列，{shishi/renshi:{verdict:攻/守/等/撤,note}}）；`strategicProfile.extractForceVerdict`（认可「市势/人势研判」时 LLM 提炼 verdict+note、关键词兜底、只用报告真实判断）+ `upsertForce`/`loadForces`；`/casefile/accept` 收 `force` 参数；`understanding.forces` 带出 /me；home 卡回显「守 · 一句话」+ 攻/守/等/撤 配色徽。天势继续走命盘 monthlyOutlook。契约 + mock 同口径。
   - **UI 顶部上移**：tab 页头部从「顶到胶囊底 + 64px 标题行」改为进胶囊带（nav-inset 到胶囊 top，下发 `--cap-right` 让右侧操作按钮避让胶囊，tab-page-head 64→52），回收顶部约 50px，每屏更饱满。5 个 tab 页统一。
