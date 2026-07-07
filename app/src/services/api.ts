@@ -12,6 +12,7 @@ import type {
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
   BindPhoneResult, WechatOrderResult, WechatSubscribeTemplatesResult, WechatSubscribeChoice, WechatSubscribeRecordResult,
   FateCardContent, MemoryLibraryView, DossierView, DossierReport,
+  DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -23,6 +24,7 @@ export type { DeliverableSection as Section } from '../../../shared/contracts';
 export type { ChatReply as ChatReplyT } from '../../../shared/contracts';
 export type { MemoryCandidate, MemoryLibraryView, MemoryLibraryGroup, MemoryLibraryEntry, MemoryCategoryKey, MemoryFillLevel } from '../../../shared/contracts';
 export type { DossierView, DossierReport, DossierSection, DossierBlock } from '../../../shared/contracts';
+export type { DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats } from '../../../shared/contracts';
 export type { FateCardContent } from '../../../shared/contracts';
 // 新能力类型再导出（项目 / 报告 / 知识 / 引用）
 export type {
@@ -250,7 +252,16 @@ export const api = {
     IS_MOCK ? mock.myChart() : request<{ bazi: BaziBody | null; chart: ChartSummary | null }>('/profile/chart'),
   // 用户进度（段位/里程碑）与复盘账本（M4 PR-18 前端落位；mock 无账本返回空 → 界面隐藏对应区块）
   progress: () =>
-    IS_MOCK ? Promise.resolve({ progress: null as ProgressView | null }) : request<{ progress: ProgressView | null }>('/progress'),
+    IS_MOCK ? mock.progress() : request<{ progress: ProgressView | null }>('/progress'),
+  // 账本闭环（F-8/P-2）：决策账本 / 天机账本 + 用户点命中/未中验证
+  decisions: () =>
+    IS_MOCK ? mock.decisions() : request<DecisionLedger>('/decisions'),
+  verifyDecision: (id: string, outcome: 'correct' | 'revise', note?: string) =>
+    IS_MOCK ? mock.verifyDecision(id, outcome) : request<{ decision: DecisionView; stats: DecisionStats }>(`/decisions/${id}/verify`, 'POST', { outcome, note }),
+  prophecies: () =>
+    IS_MOCK ? mock.prophecies() : request<ProphecyLedger>('/prophecies'),
+  verifyProphecy: (id: string, outcome: 'hit' | 'miss', note?: string) =>
+    IS_MOCK ? mock.verifyProphecy(id, outcome) : request<{ prophecy: ProphecyView; stats: ProphecyStats }>(`/prophecies/${id}/verify`, 'POST', { outcome, note }),
   reviews: () =>
     IS_MOCK ? Promise.resolve({ items: [], streak: 0 }) : request<{ items: unknown[]; streak: number }>('/reviews'),
   // B 级卡片（每日战报/天时日历）：返回可分享网页链接；mock 无渲染管道返回 null

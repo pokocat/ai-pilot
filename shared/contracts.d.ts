@@ -267,6 +267,24 @@ export interface DossierView {
   generatedAt: string | null;
 }
 
+// —— 账本闭环（F-8/P-2）：决策账本 + 天机账本，App 可查可验证。服务端 decisionLog.ts/prophecyLog.ts 有同构镜像定义。——
+export interface DecisionView {
+  id: string; seq: number; scene: string; decision: string; reasons: string[];
+  tianshiRef: string; expected: string; verifyStandard: string; verifyByDate: string | null;
+  status: 'pending' | 'correct' | 'revise'; verifyNote: string; fast: boolean | null; createdAt: string;
+}
+export interface DecisionStats {
+  total: number; pending: number; correct: number; revise: number;
+  accuracy: number | null; fastAccuracy: number | null; slowAccuracy: number | null; // n<5 或无样本=null
+}
+export interface DecisionLedger { items: DecisionView[]; stats: DecisionStats; }
+export interface ProphecyView {
+  id: string; seq: number; prophecy: string; basis: string; verifyStandard: string;
+  dueDate: string | null; status: 'pending' | 'hit' | 'miss'; verifyNote: string; createdAt: string;
+}
+export interface ProphecyStats { total: number; pending: number; hit: number; miss: number; hitRate: number | null; }
+export interface ProphecyLedger { items: ProphecyView[]; stats: ProphecyStats; }
+
 /** 本月 token 额度（客户端「钻石管理」只看进度 %）。limit/remaining<0=不限量 */
 export interface TokenQuotaView {
   limit: number;     // 本月授予总额度，-1=不限量

@@ -135,7 +135,7 @@ export async function decisionStats(userId: string): Promise<DecisionStats> {
   const total = rows.length;
   const correct = rows.filter((r) => r.status === 'correct').length;
   const revise = rows.filter((r) => r.status === 'revise').length;
-  const acc = (c: number, r: number) => (c + r > 0 ? Math.round((c / (c + r)) * 100) : null);
+  const acc = (c: number, r: number) => (c + r >= 5 ? Math.round((c / (c + r)) * 100) : null); // P-2 最小样本：<5 条已验证不出比率（避免 1 条即 100% 直接喂晋升）
   const fastRows = rows.filter((r) => r.fast === true);
   const slowRows = rows.filter((r) => r.fast === false);
   return {
@@ -157,8 +157,11 @@ export async function decisionBriefing(userId: string): Promise<string | null> {
     const st = d.status === 'correct' ? '✓正确' : d.status === 'revise' ? '✗需修正' : `待验证${d.verifyByDate ? `(${d.verifyByDate})` : ''}`;
     return `#${d.seq} [${d.createdAt.slice(0, 10)}] ${d.decision.slice(0, 80)} → ${st}`;
   });
-  const accLine = stats.accuracy === null
-    ? `已验证 0 条（共 ${stats.total} 条，尚无准确率——不要编造数字）`
-    : `决策准确率 ${stats.accuracy}%（正确 ${stats.correct} / 需修正 ${stats.revise}，待验证 ${stats.pending}）`;
+  const verified = stats.correct + stats.revise;
+  const accLine = stats.accuracy !== null
+    ? `决策准确率 ${stats.accuracy}%（正确 ${stats.correct} / 需修正 ${stats.revise}，待验证 ${stats.pending}）`
+    : verified > 0
+      ? `已验证 ${verified} 条（先攒够 5 条才出准确率，不要编造数字）`
+      : `已验证 0 条（共 ${stats.total} 条，尚无准确率——不要编造数字）`;
   return `【决策账本（系统计数，引用时以此为准，禁止自行推算）】\n${lines.join('\n')}\n${accLine}`;
 }

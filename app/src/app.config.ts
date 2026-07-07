@@ -25,6 +25,7 @@ export default defineAppConfig({
         'gift/index',
         'calendar/index',
         'dossier/index',
+        'ledger/index',
         'webview/index',
       ],
     },

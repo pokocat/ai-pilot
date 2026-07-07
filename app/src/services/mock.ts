@@ -10,8 +10,9 @@ import type {
   DossierView, DossierReport, DossierSection, DossierBlock,
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
+  DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
 } from '../../../shared/contracts';
-import type { ChartSummary } from './api';
+import type { ChartSummary, ProgressView } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
 import { agentForText } from '../data/intents';
@@ -424,6 +425,54 @@ const projItem = (d: UserData, p: ProjectRec): ProjectItem => ({
 });
 const reportItem = (r: ReportDocRec): ReportItem => ({ id: r.id, title: r.title, slug: r.slug, type: r.type, agentKey: r.agentKey, agentName: r.agentKey ? agentOf(r.agentKey).name : undefined, projectId: r.projectId, currentVersion: r.currentVersion, updatedAt: r.updatedAt });
 const knItem = (k: KnowledgeRec): KnowledgeItemT => ({ id: k.id, projectId: k.projectId, kind: k.kind as KnowledgeItemT['kind'], title: k.title, text: k.text, sourceType: k.sourceType, sourceId: k.sourceId, tags: k.tags, at: k.at });
+
+// —— 账本闭环 mock（决策账本/天机账本，与后端同口径：n<5 不出比率）——
+type LedgerM = { decisions: DecisionView[]; prophecies: ProphecyView[] };
+function seedLedgerM(): LedgerM {
+  const day = new Date().toISOString().slice(0, 10);
+  const dec = (seq: number, decision: string, status: DecisionView['status'], fast: boolean | null, scene = '战略规划'): DecisionView =>
+    ({ id: `d${seq}`, seq, scene, decision, reasons: [], tianshiRef: '', expected: '', verifyStandard: '', verifyByDate: day, status, verifyNote: '', fast, createdAt: `${day} 10:0${seq}` });
+  const pro = (seq: number, prophecy: string, status: ProphecyView['status']): ProphecyView =>
+    ({ id: `p${seq}`, seq, prophecy, basis: '流月', verifyStandard: '', dueDate: day, status, verifyNote: '', createdAt: `${day} 10:0${seq}` });
+  return {
+    decisions: [
+      dec(1, '先收缩到复购最好的两家店，砍掉拖后腿的第4家', 'correct', false),
+      dec(2, '把9800年卡改成体验—复购分层，先拉复购率', 'correct', false),
+      dec(3, '暂缓加盟扩张，先把直营模型跑透', 'revise', true, '紧急战况'),
+      dec(4, '上私域内容获客，替代高价投放', 'pending', null),
+      dec(5, '把技师提成和复购挂钩', 'pending', null),
+      dec(6, '开一条轻医美高毛利线试水', 'pending', null),
+    ],
+    prophecies: [
+      pro(1, '3月忌神当令，现金流会有压力', 'hit'),
+      pro(2, '4月偏财得力，有意外进账', 'hit'),
+      pro(3, '5月官星受克，团队可能有波动', 'miss'),
+      pro(4, '下半年适合签长约、落白纸黑字', 'pending'),
+      pro(5, '秋后有一次扩张窗口', 'pending'),
+    ],
+  };
+}
+function loadLedgerM(token: string): LedgerM {
+  try { const raw = Taro.getStorageSync(`mock.ledger.${token}`); if (raw) return (typeof raw === 'string' ? JSON.parse(raw) : raw) as LedgerM; } catch { /* noop */ }
+  return seedLedgerM();
+}
+function saveLedgerM(token: string, l: LedgerM) { try { Taro.setStorageSync(`mock.ledger.${token}`, JSON.stringify(l)); } catch { /* noop */ } }
+const accM = (c: number, r: number) => (c + r >= 5 ? Math.round((c / (c + r)) * 100) : null);
+function decStatsM(items: DecisionView[]): DecisionStats {
+  const correct = items.filter((i) => i.status === 'correct').length;
+  const revise = items.filter((i) => i.status === 'revise').length;
+  const fast = items.filter((i) => i.fast === true), slow = items.filter((i) => i.fast === false);
+  return {
+    total: items.length, pending: items.length - correct - revise, correct, revise,
+    accuracy: accM(correct, revise),
+    fastAccuracy: accM(fast.filter((i) => i.status === 'correct').length, fast.filter((i) => i.status === 'revise').length),
+    slowAccuracy: accM(slow.filter((i) => i.status === 'correct').length, slow.filter((i) => i.status === 'revise').length),
+  };
+}
+function proStatsM(items: ProphecyView[]): ProphecyStats {
+  const hit = items.filter((i) => i.status === 'hit').length, miss = items.filter((i) => i.status === 'miss').length;
+  return { total: items.length, pending: items.length - hit - miss, hit, miss, hitRate: hit + miss >= 5 ? Math.round((hit / (hit + miss)) * 100) : null };
+}
 
 // ── mock api（与后端同口径） ──
 export const mock = {
@@ -865,6 +914,40 @@ export const mock = {
   },
   async deleteMemory(): Promise<{ ok: boolean }> {
     return delay({ ok: true });
+  },
+  // —— 账本闭环（F-8/P-2）——
+  async progress(): Promise<{ progress: ProgressView | null }> {
+    const { token } = current();
+    const l = loadLedgerM(token);
+    const ds = decStatsM(l.decisions), ps = proStatsM(l.prophecies);
+    return delay({
+      progress: {
+        rank: '尉官', usageDays: 16, streak: 15,
+        decisionAccuracy: ds.accuracy, prophecyHitRate: ps.hitRate,
+        milestones: { '7': '2026-07-01', '14': '2026-07-08' },
+        nextRank: { rank: '校官', requirement: '连续复盘 30 天 + 完成首次月度战报' },
+      },
+    });
+  },
+  async decisions(): Promise<DecisionLedger> {
+    const { token } = current(); const l = loadLedgerM(token); saveLedgerM(token, l);
+    return delay({ items: l.decisions, stats: decStatsM(l.decisions) });
+  },
+  async verifyDecision(id: string, outcome: 'correct' | 'revise'): Promise<{ decision: DecisionView; stats: DecisionStats }> {
+    const { token } = current(); const l = loadLedgerM(token);
+    const it = l.decisions.find((x) => x.id === id); if (it) it.status = outcome;
+    saveLedgerM(token, l);
+    return delay({ decision: it ?? l.decisions[0], stats: decStatsM(l.decisions) });
+  },
+  async prophecies(): Promise<ProphecyLedger> {
+    const { token } = current(); const l = loadLedgerM(token); saveLedgerM(token, l);
+    return delay({ items: l.prophecies, stats: proStatsM(l.prophecies) });
+  },
+  async verifyProphecy(id: string, outcome: 'hit' | 'miss'): Promise<{ prophecy: ProphecyView; stats: ProphecyStats }> {
+    const { token } = current(); const l = loadLedgerM(token);
+    const it = l.prophecies.find((x) => x.id === id); if (it) it.status = outcome;
+    saveLedgerM(token, l);
+    return delay({ prophecy: it ?? l.prophecies[0], stats: proStatsM(l.prophecies) });
   },
   // 军师记忆库（P2）：从 mock 用户数据合成六类结构化记忆，让档案页「军师记事」本地可走查。
   async memoryLibrary(): Promise<MemoryLibraryView> {

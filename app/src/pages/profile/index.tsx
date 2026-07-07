@@ -112,15 +112,15 @@ export default function Profile() {
         {/* 战略段位（M4 PR-18）：全部真实计数。WO-03 冷启动延迟曝光——攒够连续复盘/使用天数才亮相，
             不把「新兵·连续 0 天·准确率 —%」的空账本怼给新用户。 */}
         {prog && (prog.streak >= 3 || prog.usageDays >= 14) ? (
-          <View className="rank-card card">
+          <View className="rank-card card" onClick={() => Taro.navigateTo({ url: '/packages/work/ledger/index' })}>
             <View className="rk-badge"><Text className="serif">{prog.rank}</Text></View>
             <View className="rk-b">
               <Text className="rk-t serif">战略段位 · {prog.rank}</Text>
               <Text className="rk-s">
                 连续复盘 {prog.streak} 天 · 使用第 {prog.usageDays} 天
-                {prog.decisionAccuracy !== null ? ` · 决策准确率 ${prog.decisionAccuracy}%` : ''}
+                {prog.decisionAccuracy !== null ? ` · 决策准确率 ${prog.decisionAccuracy}%` : ' · 先打满 5 个验证'}
               </Text>
-              {prog.nextRank ? <Text className="rk-next">下一段位 {prog.nextRank.rank}：{prog.nextRank.requirement}</Text> : null}
+              {prog.nextRank ? <Text className="rk-next">下一段位 {prog.nextRank.rank}：{prog.nextRank.requirement} ›</Text> : <Text className="rk-next">查看战略账本 ›</Text>}
             </View>
           </View>
         ) : null}

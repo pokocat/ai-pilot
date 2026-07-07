@@ -1,0 +1,33 @@
+.ledger-page { min-height: 100vh; }
+
+.lg-tabs { display: flex; gap: 26px; padding: 6px 20px 0; }
+.lg-tab {
+  font-size: 16px; font-weight: 600; color: var(--ink-3);
+  padding: 6px 0; border-bottom: 2px solid transparent;
+}
+.lg-tab.on { color: var(--ink); border-bottom-color: var(--accent); }
+
+.lg-scroll { height: calc(100vh - 110px); padding: 0 16px; box-sizing: border-box; }
+
+.lg-stat { margin: 12px 0 14px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
+.lg-stat-x { display: block; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; font-weight: 600; }
+
+.lg-item { margin-bottom: 10px; padding: 13px 14px; border-radius: 13px; background: var(--surface-2); }
+.lg-item-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.lg-seq { font-size: 13px; font-weight: 600; color: var(--accent); }
+.lg-badge { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; }
+.lg-badge.b-ok { color: var(--green); background: var(--green-soft); }
+.lg-badge.b-bad { color: var(--danger); background: rgba(192, 57, 43, .1); }
+.lg-badge.b-wait { color: var(--ink-3); background: rgba(0, 0, 0, .05); }
+.lg-text { display: block; font-size: 14px; line-height: 1.55; color: var(--ink); }
+
+.lg-acts { display: flex; gap: 10px; margin-top: 11px; }
+.lg-act {
+  flex: 1; text-align: center; font-size: 13px; font-weight: 600;
+  padding: 8px 0; border-radius: 10px; border: 1px solid var(--line); color: var(--ink-2);
+}
+.lg-act:active { opacity: .7; }
+.lg-due { display: block; margin-top: 8px; font-size: 11px; color: var(--ink-3); }
+
+.lg-empty { display: block; padding: 34px 12px; text-align: center; color: var(--ink-3); font-size: 13px; line-height: 1.6; }
+.lg-note { padding: 14px 4px 0; font-size: 11.5px; color: var(--ink-3); line-height: 1.6; }
