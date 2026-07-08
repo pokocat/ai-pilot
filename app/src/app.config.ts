@@ -26,6 +26,7 @@ export default defineAppConfig({
         'calendar/index',
         'dossier/index',
         'ledger/index',
+        'quickscan/index',
         'webview/index',
       ],
     },

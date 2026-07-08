@@ -8,7 +8,7 @@ import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ChartSummary, type ReportItem } from '../../services/api';
 import { MODULE_MARKET, THREE_FORCES, type ForceItem } from '../../data/operatingSystem';
-import { EMPTY_STATES, QUICKSCAN_OPENER } from '../../data/emptyStates';
+import { EMPTY_STATES } from '../../data/emptyStates';
 import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
 import './index.scss';
 
@@ -114,8 +114,8 @@ export default function Home() {
   // 天势不再引导对话：排盘引擎已算好 → 直接进原生「全年天时」页（无命盘则页内就地补生辰）
   const openTianshi = () => Taro.navigateTo({ url: '/packages/work/calendar/index' });
 
-  // 速诊（WO-06）未上线前，初诊 CTA 先跳对话 tab 并预填开场语。
-  const goQuickScan = () => goChat(`agentKey=general&fresh=1&send=${encodeURIComponent(QUICKSCAN_OPENER)}`);
+  // 速诊（WO-06）：初诊 CTA 进 3 问速诊分包页。
+  const goQuickScan = () => Taro.navigateTo({ url: '/packages/work/quickscan/index' });
 
   // 下一步（WO-07 Journey 状态机占位）：先按本地案卷/档案派生，后续替换为服务端 /journey。
   // 冷启动（无案卷、无军师判断）走 WO-03 集中空态导流文案 → 初诊。

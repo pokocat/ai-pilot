@@ -13,6 +13,7 @@ import type {
   BindPhoneResult, WechatOrderResult, WechatSubscribeTemplatesResult, WechatSubscribeChoice, WechatSubscribeRecordResult,
   FateCardContent, MemoryLibraryView, DossierView, DossierReport,
   DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats,
+  QuickScanRequest, QuickScanResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -26,6 +27,7 @@ export type { MemoryCandidate, MemoryLibraryView, MemoryLibraryGroup, MemoryLibr
 export type { DossierView, DossierReport, DossierSection, DossierBlock } from '../../../shared/contracts';
 export type { DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats } from '../../../shared/contracts';
 export type { FateCardContent } from '../../../shared/contracts';
+export type { QuickScanRequest, QuickScanResult } from '../../../shared/contracts';
 // 新能力类型再导出（项目 / 报告 / 知识 / 引用）
 export type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
@@ -243,6 +245,8 @@ export const api = {
   purchaseAgent: (key: string) =>
     IS_MOCK ? mock.purchaseAgent(key) : request<AgentPurchaseResult>(`/agents/${key}/purchase`, 'POST', {}),
   survey: () => (IS_MOCK ? mock.survey() : request<SurveyQuestion[]>('/survey')),
+  quickScan: (req: QuickScanRequest) =>
+    IS_MOCK ? mock.quickScan(req) : request<QuickScanResult>('/quickscan', 'POST', req),
   getProfile: () => (IS_MOCK ? mock.getProfile() : request<Profile | null>('/profile')),
   saveProfile: (p: Profile) => (IS_MOCK ? mock.saveProfile(p) : request<Profile>('/profile', 'PUT', p)),
   // 八字采集（M1 PR-2）：录入生辰 → 服务端排盘引擎落库；believe=false 表示不用命理视角

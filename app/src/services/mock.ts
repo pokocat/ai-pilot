@@ -11,6 +11,7 @@ import type {
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
+  QuickScanRequest, QuickScanResult,
 } from '../../../shared/contracts';
 import type { ChartSummary, ProgressView } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
@@ -654,6 +655,25 @@ export const mock = {
     return delay({ ok: true, agentKey: key, pricePaid: unlimited ? 0 : agent.price, creditBalance: d.creditBalance, alreadyOwned: false });
   },
   async survey(): Promise<SurveyQuestion[]> { return delay(SURVEY); },
+
+  // 速诊（WO-06）：确定性初诊卡 + 速诊即建档（空则回填 industry/stage/pain，同服务端口径）。
+  async quickScan(req: QuickScanRequest): Promise<QuickScanResult> {
+    const { token, d } = current();
+    d.profile = {
+      ...d.profile,
+      industry: d.profile?.industry || req.industry,
+      stage: d.profile?.stage || req.revenueBand,
+      pain: d.profile?.pain || req.pain,
+    };
+    d.onboarded = true; save(token, d);
+    const pain = (req.pain || '').trim().slice(0, 40) || '增长乏力';
+    return delay({
+      contradiction: `你把力气压在「${pain}」的表象上，真正卡住的是获客与复购的结构没打通。`,
+      judgement: `${req.industry}·${req.revenueBand}这个体量，"${pain}"多半是结果不是原因。先把「谁来、为什么复购、一单挣多少」三笔账摊开，矛盾会自己浮出来。`,
+      firstMove: '今天挑近 30 天成交的 10 位客户，逐个打电话问「为什么选你、还会不会再来」，记成一页纸。',
+      cardUrl: null,
+    });
+  },
 
   async getProfile(): Promise<Profile | null> { return delay(current().d.profile); },
   async saveProfile(p: Profile): Promise<Profile> {
