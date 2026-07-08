@@ -374,9 +374,18 @@ export interface Deliverable {
   htmlUrl?: string; // 服务端渲染的可分享网页版报告链接（自有域名 /api/r/:id，便于小程序 web-view 打开）
   cdnUrl?: string; // 可选 OSS/CDN 镜像；不作为小程序内打开入口
   degraded?: boolean; // P0-4：真实模型未产出结构化成果、回退本地模板时为 true（前端提示可重试；用户不计费）
+  prescriptions?: DeliverablePrescription[]; // WO-12：方案开出的处方（问题→打法→生态工具 key，最多 3 条）
 }
 /** 成果模板（mock 提供方 / few-shot 结构约束消费） */
 export interface DeliverableTemplate { icon: string; title: string; sections: DeliverableSection[]; }
+
+/* ────────────── 处方引擎（WO-12：诊断结论 → 生态工具的结构化桥） ────────────── */
+export interface DeliverablePrescription { problem: string; playbook: string; toolKey: string; }
+export interface PrescriptionView {
+  id: string; problem: string; playbook: string; toolKey: string;
+  toolType: string; externalUrl: string | null; status: string; proposedAt: string;
+}
+export interface PrescriptionListView { items: PrescriptionView[]; }
 
 /* ────────────── 自由对话回复 ────────────── */
 export interface ChatReply { text: string; points?: string[]; acts?: [string, string][]; }

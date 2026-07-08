@@ -54,6 +54,10 @@ export async function casefileRoutes(app: FastifyInstance) {
     }).catch(() => {});
     // WO-07：认可方案 = 拿到作战计划 → journey → executing（plan.accept）
     await import('../services/journey.js').then((m) => m.applyJourneyEvent(user.id, user.tenantId, 'plan.accept')).catch(() => {});
+    // WO-12：认可 = 开方落库（白名单过滤 + 挂案卷；fire-safe，绝不阻断认可）
+    await import('../services/prescription.js')
+      .then((m) => m.persistPrescriptions({ tenantId: user.tenantId, userId: user.id, casefileId: r.casefileId, prescriptions: (deliverable as { prescriptions?: unknown }).prescriptions }))
+      .catch(() => {});
     await recordAudit({
       tenantId: user.tenantId, userId: user.id,
       action: 'user.casefile.accept',

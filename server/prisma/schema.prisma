@@ -29,6 +29,34 @@ model UserJourney {
   @@map("user_journey")
 }
 
+/// WO-12：处方 = 军师在方案里开出的「问题→打法→工具」三元组，带完整转化状态机。工具白名单在服务端，LLM 只能点菜。
+model Prescription {
+  id            String    @id @default(cuid())
+  tenantId      String
+  userId        String
+  casefileId    String?
+  deliverableId String?
+  orderId       String?
+  problem       String    @db.Text
+  playbook      String    @db.Text
+  toolKey       String
+  toolType      String    @default("agent") // agent | external
+  externalUrl   String?
+  status        String    @default("proposed") // proposed→seen→clicked→activated→used→verified | dismissed
+  proposedAt    DateTime  @default(now())
+  seenAt        DateTime?
+  clickedAt     DateTime?
+  activatedAt   DateTime?
+  firstUsedAt   DateTime?
+  outcomeJson   Json?
+  dismissedAt   DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([tenantId])
+  @@map("prescription")
+}
+
 /// 租户（企业）
 model Tenant {
   id        String   @id @default(cuid())
