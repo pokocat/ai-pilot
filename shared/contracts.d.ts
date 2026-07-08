@@ -348,6 +348,15 @@ export interface SurveyQuestion { key: string; title: string; options: string[];
 export interface SurveyAdmin { id: string; key: string; title: string; optionsJson: string[]; enabled: boolean; }
 export interface Profile { industry?: string | null; stage?: string | null; pain?: string | null; extra?: unknown; }
 
+/* ────────────── 3 问速诊（WO-06：行业 + 年营收段 + 最痛的一件事 → 初诊卡） ────────────── */
+export interface QuickScanRequest { industry: string; revenueBand: string; pain: string; }
+export interface QuickScanResult {
+  contradiction: string;  // 主要矛盾假设（1 句）
+  judgement: string;      // 军师判断（2-3 句）
+  firstMove: string;      // 今天就能做的一件事（1 条）
+  cardUrl: string | null; // 分享卡 HTML 链接（PR-B2 生成，暂 null）
+}
+
 /* ────────────── 结构化成果 ────────────── */
 export interface DeliverableSection { h: string; b?: string; list?: string[]; }
 export interface Deliverable {
