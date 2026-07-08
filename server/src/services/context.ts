@@ -16,6 +16,7 @@ import { resolveMode, modeDirective, detectInnerState, roleDirective, stageDirec
 import { now } from './clock.js';
 import { isFeatureEnabled } from './featureFlag.js';
 import { benchmarkBlock } from './benchmark.js';
+import { bizMetricBlock } from './bizMetric.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } from './agentVersions.js';
@@ -109,6 +110,8 @@ export async function buildGenContext(opts: {
   const progressLine = await progressBriefing(opts.userId);
   // 行业基准（WO-08）：DB 分位数块（宁缺勿假，无行业/无数据不注入）。
   const benchmarkLine = await benchmarkBlock(profile?.industry);
+  // 经营序列（WO-10）：本周实报 + 与基准差（服务端算）。无填报不注入。
+  const bizMetricLine = await bizMetricBlock(opts.userId, profile?.industry);
 
   // 本轮导引（M3 PR-11/12/14）：模式 + 角色语气 + 诊断轮次，全部确定性识别，识别不出不注入。
   const { intent } = resolveMode(opts.userMessage, opts.sessionMode);
@@ -183,6 +186,7 @@ export async function buildGenContext(opts: {
     prophecyLine,
     progressLine,
     benchmarkLine,
+    bizMetricLine,
     modeLine,
     stageLine,
     userMessage: opts.userMessage,

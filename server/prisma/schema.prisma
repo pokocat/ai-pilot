@@ -103,6 +103,21 @@ model IndustryBenchmark {
   @@map("industry_benchmark")
 }
 
+/// WO-10：结构化经营周报（字段与 IndustryBenchmark.metricKey 同口径——报什么就能对比什么）。
+model BizMetricWeekly {
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String
+  weekStart   String // YYYY-MM-DD（周一）
+  metricsJson Json // { metricKey: number }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, weekStart])
+  @@index([userId])
+  @@map("biz_metric_weekly")
+}
+
 /// 租户（企业）
 model Tenant {
   id        String   @id @default(cuid())

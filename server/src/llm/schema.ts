@@ -46,6 +46,7 @@ export interface GenContext {
   // 天机账本（M2 PR-9）：待验证预言 + 命中率块，无记录不注入。
   prophecyLine?: string | null;
   benchmarkLine?: string | null; // WO-08：DB 行业基准分位数块
+  bizMetricLine?: string | null; // WO-10：本周经营序列 + 与基准差
   // 段位·里程碑（M2 PR-10）：真实门槛派生块，新用户零记录不注入。
   progressLine?: string | null;
   // 本轮导引（M3 PR-11/12/14）：模式/角色语气/诊断轮次指令（每轮变化 → dynamic 首位）。
@@ -304,6 +305,7 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   if (ctx.prophecyLine) blocks.push(ctx.prophecyLine);   // 天机账本：预言/命中率（系统计数）
   if (ctx.progressLine) blocks.push(ctx.progressLine);   // 段位·里程碑：真实门槛派生（系统计数）
   if (ctx.benchmarkLine) blocks.push(ctx.benchmarkLine); // 行业基准：DB 分位数（WO-08；数字以此为准，禁自算）
+  if (ctx.bizMetricLine) blocks.push(ctx.bizMetricLine); // 经营序列：本周实报 + 与基准差（WO-10；差由系统算）
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);
   if (ctx.references?.length) blocks.push(`【用户引用的资料（请优先采纳并标注出处）】\n${ctx.references.join('\n')}`);

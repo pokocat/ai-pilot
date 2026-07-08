@@ -11,6 +11,7 @@ import { quickscanRoutes } from './routes/quickscan.js';
 import { journeyRoutes } from './routes/journey.js';
 import { prescriptionRoutes } from './routes/prescriptions.js';
 import { brandKitRoutes } from './routes/brandKit.js';
+import { bizMetricRoutes } from './routes/bizMetrics.js';
 import { sayingRoutes } from './routes/sayings.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { libraryRoutes } from './routes/library.js';
@@ -79,6 +80,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(journeyRoutes, { prefix: '/api' }); // 用户 journey 状态机（WO-07：全 tab「下一步」卡）
   await app.register(prescriptionRoutes, { prefix: '/api' }); // 处方引擎（WO-12：诊断结论 → 生态工具的结构化桥）
   await app.register(brandKitRoutes, { prefix: '/api' }); // 品牌资产包（WO-13：档案 → 数字人/短剧预填输入）
+  await app.register(bizMetricRoutes, { prefix: '/api' }); // 结构化经营周报（WO-10：报什么就能对比什么）
   await app.register(sayingRoutes, { prefix: '/api' });
   await app.register(sessionRoutes, { prefix: '/api' });
   await app.register(libraryRoutes, { prefix: '/api' });
