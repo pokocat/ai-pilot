@@ -41,24 +41,46 @@ test('认可方案 → 自动记一条决策（30 天验证期，seq 自增）',
   assert.equal(r.body.stats.pending, 2);
 });
 
-test('手动记录 + 验证 → 准确率由服务端算出（快/慢分开）', async () => {
+test('手动记录 + 验证 → 准确率由服务端算出（快/慢分开；P-2 最小样本：已验证 <5 条不出比率）', async () => {
   const token = await login(uniquePhone(), '验证用户');
-  const d1 = await api('POST', '/api/decisions', { token, body: { decision: '砍掉低毛利产品线', fast: true, verifyStandard: '毛利率回升' } });
-  assert.equal(d1.status, 200);
-  const d2 = await api('POST', '/api/decisions', { token, body: { decision: '全款预付进一批货', fast: true } });
-  const d3 = await api('POST', '/api/decisions', { token, body: { decision: '深思后决定聚焦美业赛道', fast: false } });
+  const record = (fast: boolean, decision: string) => api('POST', '/api/decisions', { token, body: { decision, fast } });
+  const verify = (id: string, outcome: string, note?: string) => api('POST', `/api/decisions/${id}/verify`, { token, body: { outcome, note } });
 
-  await api('POST', `/api/decisions/${d1.body.decision.id}/verify`, { token, body: { outcome: 'correct', note: '毛利率 +6pp' } });
-  await api('POST', `/api/decisions/${d2.body.decision.id}/verify`, { token, body: { outcome: 'revise', note: '库存积压' } });
-  const v3 = await api('POST', `/api/decisions/${d3.body.decision.id}/verify`, { token, body: { outcome: 'correct' } });
+  const d1 = await record(true, '砍掉低毛利产品线');
+  const d2 = await record(true, '全款预付进一批货');
+  const d3 = await record(false, '深思后决定聚焦美业赛道');
 
-  const stats = v3.body.stats;
-  assert.equal(stats.total, 3);
-  assert.equal(stats.correct, 2);
-  assert.equal(stats.revise, 1);
-  assert.equal(stats.accuracy, 67, '2/(2+1)=67%');
-  assert.equal(stats.fastAccuracy, 50, '快决策 1/2');
-  assert.equal(stats.slowAccuracy, 100, '慢决策 1/1');
+  await verify(d1.body.decision.id, 'correct', '毛利率 +6pp');
+  await verify(d2.body.decision.id, 'revise', '库存积压');
+  const v3 = await verify(d3.body.decision.id, 'correct');
+
+  // 已验证仅 3 条（<5）：批次C 最小样本保护——即使全对/全错也不出比率，避免 1 条即 100% 直接喂晋升
+  const before = v3.body.stats;
+  assert.equal(before.total, 3);
+  assert.equal(before.correct, 2);
+  assert.equal(before.revise, 1);
+  assert.equal(before.accuracy, null, '已验证 3 条 <5，不出总比率');
+  assert.equal(before.fastAccuracy, null, '快决策已验证 2 条 <5，不出比率');
+  assert.equal(before.slowAccuracy, null, '慢决策已验证 1 条 <5，不出比率');
+
+  // 各分桶补到 ≥5 条已验证，比率才由服务端算出
+  const more: Array<[boolean, string]> = [
+    [true, 'correct'], [true, 'correct'], [true, 'correct'], // 快：补 3 → 快共 5 条（4 正确 1 修正）=80%
+    [false, 'correct'], [false, 'correct'], [false, 'revise'], [false, 'revise'], // 慢：补 4 → 慢共 5 条（3 正确 2 修正）=60%
+  ];
+  let last = v3;
+  for (const [fast, outcome] of more) {
+    const d = await record(fast, `补测决策-${fast ? '快' : '慢'}-${outcome}`);
+    last = await verify(d.body.decision.id, outcome);
+  }
+
+  const after = last.body.stats;
+  assert.equal(after.total, 10);
+  assert.equal(after.correct, 7);
+  assert.equal(after.revise, 3);
+  assert.equal(after.accuracy, 70, '7/(7+3)=70%（已验证 10 条 ≥5）');
+  assert.equal(after.fastAccuracy, 80, '快决策 4/5=80%（≥5）');
+  assert.equal(after.slowAccuracy, 60, '慢决策 3/5=60%（≥5）');
 
   // 校验：非法 outcome 400
   const bad = await api('POST', `/api/decisions/${d1.body.decision.id}/verify`, { token, body: { outcome: 'maybe' } });
