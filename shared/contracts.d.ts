@@ -387,6 +387,15 @@ export interface PrescriptionView {
 }
 export interface PrescriptionListView { items: PrescriptionView[]; }
 
+/* ────────────── 品牌资产包（WO-13：档案 → 数字人/短剧的预填输入） ────────────── */
+export interface BrandKitPersona { name: string; tagline: string; tone: string; story: string; doNots: string[]; }
+export interface BrandKitVoice { hooks: string[]; openers: string[]; ctas: string[]; taboos: string[]; }
+export interface BrandKitTheme { keywords: string[]; colorHint: string; styleRefs: string[]; }
+export interface BrandKitView {
+  persona: BrandKitPersona; voice: BrandKitVoice; theme: BrandKitTheme;
+  version: number; approved: boolean; generatedAt: string;
+}
+
 /* ────────────── 自由对话回复 ────────────── */
 export interface ChatReply { text: string; points?: string[]; acts?: [string, string][]; }
 export interface ReplyTemplate { t: string; points: string[]; acts: [string, string][]; }

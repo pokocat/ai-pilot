@@ -57,6 +57,22 @@ model Prescription {
   @@map("prescription")
 }
 
+/// WO-13：品牌资产包——档案 → IP 人设/话术/视觉调性，作为数字人/短剧等生态产品的开箱预填输入。
+model BrandKit {
+  id          String    @id @default(cuid())
+  tenantId    String
+  userId      String    @unique
+  personaJson Json // { name, tagline, tone, story, doNots[] }
+  voiceJson   Json // { hooks[], openers[], ctas[], taboos[] }
+  themeJson   Json // { keywords[], colorHint, styleRefs[] }
+  version     Int       @default(1)
+  generatedAt DateTime  @default(now())
+  approvedAt  DateTime? // 用户确认过才可被生态产品读取
+
+  @@index([tenantId])
+  @@map("brand_kit")
+}
+
 /// 租户（企业）
 model Tenant {
   id        String   @id @default(cuid())
