@@ -11,7 +11,7 @@ import type {
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
-  QuickScanRequest, QuickScanResult, JourneyView,
+  QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView,
 } from '../../../shared/contracts';
 import type { ChartSummary, ProgressView } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
@@ -664,6 +664,12 @@ export const mock = {
     }
     return delay({ stage: 'diagnosing', diagRound: 2, nextStep: { key: 'continue_diagnosis', title: '继续第 3 轮诊断', desc: '把打法聊定，认可后自动拆成军令。', route: 'chat' } });
   },
+
+  // WO-12：处方样例（军令页展示「军师配了工具」）。
+  async prescriptions(): Promise<PrescriptionListView> {
+    return delay({ items: [{ id: 'rx1', problem: '获客越来越贵', playbook: '做影响力短视频获客', toolKey: 'brand', toolType: 'agent', externalUrl: null, status: 'proposed', proposedAt: '2026-07-08 10:00' }] });
+  },
+  async prescriptionAction(_id: string, _action: string): Promise<{ ok: boolean }> { return delay({ ok: true }); },
 
   // 速诊（WO-06）：确定性初诊卡 + 速诊即建档（空则回填 industry/stage/pain，同服务端口径）。
   async quickScan(req: QuickScanRequest): Promise<QuickScanResult> {

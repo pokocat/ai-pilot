@@ -15,6 +15,7 @@ import {
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import { EMPTY_STATES } from '../../data/emptyStates';
 import NextStepCard from '../../components/NextStepCard';
+import PrescriptionStrip from '../../components/PrescriptionStrip';
 import './index.scss';
 
 type ExecView = 'today' | 'week' | 'review';
@@ -193,6 +194,9 @@ export default function Studio() {
 
         {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
         <NextStepCard />
+
+        {/* WO-12：处方条——军师为某问题配的工具（唯一销售位，出现在军令语境） */}
+        <PrescriptionStrip />
 
         {/* 战役卡组（exec-deck 横滑）：今日战役 / 军师献策 / 今日主令 / 提醒节奏 */}
         <ScrollView scrollX className="exec-deck" enhanced showScrollbar={false}>
