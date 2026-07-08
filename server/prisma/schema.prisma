@@ -1116,6 +1116,8 @@ model DecisionLog {
   verifiedAt     DateTime?
   verifyNote     String    @default("") @db.Text // 验证时的事实记录
   fast           Boolean? // 快决策(当场拍板)/慢决策(深思后定)；null=未标注——快慢准确率分开统计
+  disputeNote    String? // WO-11：用户异议（复盘时军师带出确认）
+  disputedAt     DateTime?
   createdAt      DateTime  @default(now())
 
   @@unique([userId, seq])
@@ -1161,6 +1163,8 @@ model ProphecyLog {
   verifiedAt     DateTime?
   verifyNote     String    @default("") @db.Text
   dueNotifiedAt  DateTime? // 到期提醒已登记（scheduler 幂等标记）
+  disputeNote    String? // WO-11：用户异议（复盘时军师带出确认）
+  disputedAt     DateTime?
   createdAt      DateTime  @default(now())
 
   @@unique([userId, seq])

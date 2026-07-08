@@ -2,7 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
-import { decisionStats, listDecisions, recordDecision, verifyDecision } from '../services/decisionLog.js';
+import { decisionStats, disputeDecision, listDecisions, recordDecision, verifyDecision } from '../services/decisionLog.js';
 
 export async function decisionRoutes(app: FastifyInstance) {
   // 决策列表 + 统计（战局/我的页数据源）
@@ -47,4 +47,15 @@ export async function decisionRoutes(app: FastifyInstance) {
       return { decision: d, stats: await decisionStats(user.id) };
     },
   );
+
+  // WO-11：对某决策提异议（不改状态，复盘时军师带出确认）
+  app.patch<{ Params: { id: string }; Body: { dispute?: string } }>('/decisions/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const note = String(req.body?.dispute ?? '').trim();
+    if (!note) return reply.code(400).send({ error: '异议内容不能为空' });
+    const ok = await disputeDecision(user.id, req.params.id, note);
+    if (!ok) return reply.code(404).send({ error: '决策不存在' });
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.decision.dispute', payload: { id: req.params.id } });
+    return { ok: true };
+  });
 }

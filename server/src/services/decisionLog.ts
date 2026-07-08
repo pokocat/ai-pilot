@@ -124,6 +124,12 @@ export async function verifyDecision(args: {
   return toView(updated);
 }
 
+/** WO-11：用户对某决策提异议（不改状态，复盘时军师带出确认后再走既有验证更新）。 */
+export async function disputeDecision(userId: string, id: string, note: string): Promise<boolean> {
+  const r = await prisma.decisionLog.updateMany({ where: { id, userId }, data: { disputeNote: note.trim().slice(0, 500), disputedAt: new Date() } });
+  return r.count > 0;
+}
+
 export async function listDecisions(userId: string, limit = 20): Promise<DecisionView[]> {
   const rows = await prisma.decisionLog.findMany({ where: { userId }, orderBy: { seq: 'desc' }, take: limit });
   return rows.map(toView);
@@ -163,5 +169,9 @@ export async function decisionBriefing(userId: string): Promise<string | null> {
     : verified > 0
       ? `已验证 ${verified} 条（先攒够 5 条才出准确率，不要编造数字）`
       : `已验证 0 条（共 ${stats.total} 条，尚无准确率——不要编造数字）`;
-  return `【决策账本（系统计数，引用时以此为准，禁止自行推算）】\n${lines.join('\n')}\n${accLine}`;
+  const disputed = await prisma.decisionLog.findMany({ where: { userId, disputedAt: { not: null } }, select: { seq: true, disputeNote: true }, orderBy: { seq: 'desc' }, take: 5 });
+  const disputeLine = disputed.length
+    ? `\n用户有异议（复盘时先确认再更新，勿视作已定论）：${disputed.map((d) => `#${d.seq}${d.disputeNote ? '：' + d.disputeNote : ''}`).join('；')}`
+    : '';
+  return `【决策账本（系统计数，引用时以此为准，禁止自行推算）】\n${lines.join('\n')}\n${accLine}${disputeLine}`;
 }

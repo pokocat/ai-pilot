@@ -2,7 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
-import { listProphecies, prophecyStats, recordProphecy, verifyProphecy } from '../services/prophecyLog.js';
+import { disputeProphecy, listProphecies, prophecyStats, recordProphecy, verifyProphecy } from '../services/prophecyLog.js';
 
 export async function prophecyRoutes(app: FastifyInstance) {
   app.get('/prophecies', async (req) => {
@@ -43,4 +43,15 @@ export async function prophecyRoutes(app: FastifyInstance) {
       return { prophecy: p, stats: await prophecyStats(user.id) };
     },
   );
+
+  // WO-11：对某预言提异议（不改状态，复盘时军师带出确认）
+  app.patch<{ Params: { id: string }; Body: { dispute?: string } }>('/prophecies/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const note = String(req.body?.dispute ?? '').trim();
+    if (!note) return reply.code(400).send({ error: '异议内容不能为空' });
+    const ok = await disputeProphecy(user.id, req.params.id, note);
+    if (!ok) return reply.code(404).send({ error: '预言不存在' });
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.prophecy.dispute', payload: { id: req.params.id } });
+    return { ok: true };
+  });
 }
