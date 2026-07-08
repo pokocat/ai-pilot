@@ -35,6 +35,7 @@ export default function Profile() {
     { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: () => Taro.navigateTo({ url: '/packages/work/dossier/index' }) },
     { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
     { ic: 'layers', t: '方案库', s: `${libCount + reportCount}`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
+    { ic: 'spark', t: '我的品牌资产', s: '数字人/短视频预填', onClick: () => Taro.navigateTo({ url: '/packages/work/brandkit/index' }) },
     { ic: 'attach', t: '我的资料库', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/knowledge/index' }) },
     { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/bindings/index' }) },
     { ic: 'grid', t: '模块管理 · 添加 / 隐藏', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/market/index' }) },

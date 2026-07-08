@@ -11,7 +11,7 @@ import type {
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
-  QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView,
+  QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
 } from '../../../shared/contracts';
 import type { ChartSummary, ProgressView } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
@@ -670,6 +670,18 @@ export const mock = {
     return delay({ items: [{ id: 'rx1', problem: '获客越来越贵', playbook: '做影响力短视频获客', toolKey: 'brand', toolType: 'agent', externalUrl: null, status: 'proposed', proposedAt: '2026-07-08 10:00' }] });
   },
   async prescriptionAction(_id: string, _action: string): Promise<{ ok: boolean }> { return delay({ ok: true }); },
+
+  // WO-13：品牌资产包（mock 确定性样例；generate 返回一份，approve 置已确认）。
+  async brandKit(): Promise<BrandKitView | null> { return delay(null); },
+  async generateBrandKit(): Promise<BrandKitView> {
+    return delay({
+      persona: { name: '老张', tagline: '美业里最懂一线的操盘手', tone: '实在、有分寸、不画饼', story: '从一线做起，靠口碑把生意做扎实。', doNots: ['不吹牛', '不承诺做不到的效果'] },
+      voice: { hooks: ['同行不会告诉你的一件事', '我踩过的那个坑'], openers: ['先说结论', '今天只讲一件事'], ctas: ['想聊聊就扣 1', '私信「诊断」'], taboos: ['低俗', '攻击同行'] },
+      theme: { keywords: ['务实', '专业', '接地气'], colorHint: '深绿 + 暖金', styleRefs: ['纪实口播', '干货白板'] },
+      version: 1, approved: false, generatedAt: '2026-07-08 10:00',
+    });
+  },
+  async approveBrandKit(): Promise<{ ok: boolean }> { return delay({ ok: true }); },
 
   // 速诊（WO-06）：确定性初诊卡 + 速诊即建档（空则回填 industry/stage/pain，同服务端口径）。
   async quickScan(req: QuickScanRequest): Promise<QuickScanResult> {

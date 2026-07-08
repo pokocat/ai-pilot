@@ -27,6 +27,7 @@ export default defineAppConfig({
         'dossier/index',
         'ledger/index',
         'quickscan/index',
+        'brandkit/index',
         'webview/index',
       ],
     },

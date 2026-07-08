@@ -1,0 +1,106 @@
+.bk-page {
+  min-height: 100vh;
+  background: #f4f2ec;
+  display: flex;
+  flex-direction: column;
+}
+.bk-scroll {
+  flex: 1;
+  padding: 0 32rpx 60rpx;
+  box-sizing: border-box;
+}
+
+.bk-empty {
+  padding: 80rpx 24rpx;
+  text-align: center;
+}
+.bk-empty-t {
+  display: block;
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #16321f;
+}
+.bk-empty-d {
+  display: block;
+  margin: 16rpx 0 40rpx;
+  font-size: 26rpx;
+  line-height: 1.6;
+  color: #8a8f86;
+}
+
+.bk-head {
+  padding: 20rpx 4rpx 0;
+}
+.bk-ver {
+  font-size: 24rpx;
+  color: #9a8a52;
+}
+
+.bk-sec {
+  margin-top: 28rpx;
+  padding: 28rpx 30rpx;
+  background: #fff;
+  border-radius: 20rpx;
+  border: 1rpx solid #ece7d8;
+}
+.bk-sec-t {
+  display: block;
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #16321f;
+  margin-bottom: 18rpx;
+}
+.bk-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+  margin-bottom: 16rpx;
+}
+.bk-k {
+  flex-shrink: 0;
+  width: 120rpx;
+  font-size: 25rpx;
+  color: #9a8f7a;
+}
+.bk-v {
+  flex: 1;
+  font-size: 27rpx;
+  line-height: 1.55;
+  color: #1c2b22;
+}
+.bk-chips {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+.bk-chip {
+  padding: 8rpx 20rpx;
+  background: #f0ede3;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  color: #4a4f48;
+}
+
+.bk-actions {
+  margin-top: 36rpx;
+  display: flex;
+  gap: 20rpx;
+}
+.bk-btn {
+  flex: 1;
+  height: 88rpx;
+  border-radius: 16rpx;
+  background: #16321f;
+  color: #f3e9c8;
+  font-size: 28rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bk-btn.ghost {
+  background: transparent;
+  border: 1rpx solid #16321f;
+  color: #16321f;
+}
