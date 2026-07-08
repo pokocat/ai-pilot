@@ -1187,6 +1187,7 @@ model ReviewLog {
   hasBackfill  Boolean  @default(false) // 当日是否回填了三数
   note         String   @default("") @db.Text
   createdAt    DateTime @default(now())
+  metricsJson  Json? // WO-04：week/month 期聚合 { leads, consults, deals }
 
   @@unique([userId, layer, date])
   @@index([tenantId, userId, layer, date])

@@ -2,8 +2,22 @@
 // day 层触发点：执行页「生成今日复盘」发起复盘对话时落一条（当日军令/回填的事实快照）；
 // 同层同日 upsert（一天多次复盘只算一次，快照取最新）。week/month 等层随 M3 触发词路由接入。
 import { prisma } from '../db.js';
+import type { Prisma } from '@prisma/client';
 import { now } from './clock.js';
 import { activeCasefile, todayStr } from './casefile.js';
+
+function isoDate(d: Date): string { return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`; }
+// 复盘覆盖区间：day=当天；week=本周一→今天；month=当月 1 号→今天（quarter/year/team 暂按当天，随后续聚合）。
+function periodRange(layer: ReviewLayer, today: string): { date: string; from: string } {
+  if (layer === 'week') {
+    const d = now();
+    const back = d.getDay() === 0 ? 6 : d.getDay() - 1;
+    const monday = isoDate(new Date(d.getFullYear(), d.getMonth(), d.getDate() - back));
+    return { date: monday, from: monday };
+  }
+  if (layer === 'month') { const m = `${today.slice(0, 7)}-01`; return { date: m, from: m }; }
+  return { date: today, from: today };
+}
 
 export const REVIEW_LAYERS = ['day', 'week', 'month', 'quarter', 'year', 'team'] as const;
 export type ReviewLayer = (typeof REVIEW_LAYERS)[number];
@@ -28,17 +42,20 @@ export async function recordReview(args: {
   note?: string;
 }): Promise<ReviewView> {
   const layer: ReviewLayer = args.layer && REVIEW_LAYERS.includes(args.layer) ? args.layer : 'day';
-  const date = todayStr();
+  const today = todayStr();
+  const { date, from } = periodRange(layer, today);
   const cf = await activeCasefile(args.userId);
 
-  // day 层事实快照：当日军令完成/对齐情况 + 是否回填
-  let ordersTotal = 0; let ordersDone = 0; let alignedTotal = 0; let hasBackfill = false;
+  // 覆盖区间事实快照：军令完成/对齐 + CasefileMetric(线索/咨询/成交)求和（week/month=期聚合，修 A-4「月复盘 LLM 现编」）。
+  let ordersTotal = 0, ordersDone = 0, alignedTotal = 0, leads = 0, consults = 0, deals = 0, hasBackfill = false;
   if (cf) {
-    const orders = await prisma.casefileOrder.findMany({ where: { casefileId: cf.id, date } });
+    const orders = await prisma.casefileOrder.findMany({ where: { casefileId: cf.id, date: { gte: from, lte: today } } });
     ordersTotal = orders.length;
     ordersDone = orders.filter((o) => o.done).length;
     alignedTotal = orders.filter((o) => o.aligned === true).length;
-    hasBackfill = !!(await prisma.casefileMetric.findUnique({ where: { casefileId_date: { casefileId: cf.id, date } } }));
+    const metrics = await prisma.casefileMetric.findMany({ where: { casefileId: cf.id, date: { gte: from, lte: today } } });
+    for (const m of metrics) { leads += m.leads; consults += m.consults; deals += m.deals; }
+    hasBackfill = metrics.length > 0;
   }
   // 对齐率（V6.0 §10：对齐主要矛盾的事 ÷ 总事数）；无军令 = null，不编 0%
   const alignRate = ordersTotal > 0 ? Math.round((alignedTotal / ordersTotal) * 100) : null;
@@ -47,6 +64,7 @@ export async function recordReview(args: {
     tenantId: args.tenantId,
     casefileId: cf?.id ?? null,
     ordersTotal, ordersDone, alignedTotal, alignRate, hasBackfill,
+    metricsJson: { leads, consults, deals } as Prisma.InputJsonValue,
     note: (args.note ?? '').trim().slice(0, 500),
   };
   const row = await prisma.reviewLog.upsert({
@@ -106,5 +124,11 @@ export async function reviewBriefing(userId: string): Promise<string | null> {
     `最近复盘：${last.date}（${last.layer}）· 军令 ${last.ordersDone}/${last.ordersTotal} 完成` +
       `${last.alignRate !== null ? ` · 对齐率 ${last.alignRate}%` : ''} · 数据回填${last.hasBackfill ? '已完成' : '未完成'}`,
   ];
+  // WO-04：最近一次周/月报的期聚合（线索/咨询/成交），月复盘对账素材（系统求和，非 LLM 现编）。
+  const period = await prisma.reviewLog.findFirst({ where: { userId, layer: { in: ['week', 'month'] } }, orderBy: { date: 'desc' }, select: { layer: true, date: true, metricsJson: true, ordersDone: true, ordersTotal: true } });
+  if (period?.metricsJson) {
+    const m = period.metricsJson as { leads?: number; consults?: number; deals?: number };
+    lines.push(`最近${period.layer === 'month' ? '月报' : '周报'}（${period.date}）：线索 ${m.leads ?? 0} · 咨询 ${m.consults ?? 0} · 成交 ${m.deals ?? 0} · 军令 ${period.ordersDone}/${period.ordersTotal}`);
+  }
   return lines.join('\n');
 }
