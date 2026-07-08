@@ -8,6 +8,7 @@ import { metaRoutes } from './routes/meta.js';
 import { agentRoutes } from './routes/agents.js';
 import { profileRoutes } from './routes/profile.js';
 import { quickscanRoutes } from './routes/quickscan.js';
+import { journeyRoutes } from './routes/journey.js';
 import { sayingRoutes } from './routes/sayings.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { libraryRoutes } from './routes/library.js';
@@ -73,6 +74,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(agentRoutes, { prefix: '/api' });
   await app.register(profileRoutes, { prefix: '/api' });
   await app.register(quickscanRoutes, { prefix: '/api' }); // 3 问速诊（WO-06：获客入口 → 初诊卡）
+  await app.register(journeyRoutes, { prefix: '/api' }); // 用户 journey 状态机（WO-07：全 tab「下一步」卡）
   await app.register(sayingRoutes, { prefix: '/api' });
   await app.register(sessionRoutes, { prefix: '/api' });
   await app.register(libraryRoutes, { prefix: '/api' });

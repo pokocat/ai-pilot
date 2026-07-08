@@ -73,6 +73,8 @@ export async function bumpDiagRound(args: { tenantId: string; userId: string; se
     update: { diagRound: { increment: 1 }, diagSessionId: args.sessionId ?? undefined },
     create: { tenantId: args.tenantId, userId: args.userId, diagRound: 1, diagSessionId: args.sessionId ?? undefined },
   });
+  // WO-07：诊断推进一轮 → journey new/scanned/diagnosing→diagnosing（diag.round）
+  await import('./journey.js').then((m) => m.applyJourneyEvent(args.userId, args.tenantId, 'diag.round')).catch(() => {});
 }
 
 export async function loadStrategicProfile(userId: string): Promise<StrategicView | null> {

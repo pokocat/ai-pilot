@@ -52,6 +52,8 @@ export async function casefileRoutes(app: FastifyInstance) {
       deliverable,
       agentName: String(agentName || '军师').slice(0, 40),
     }).catch(() => {});
+    // WO-07：认可方案 = 拿到作战计划 → journey → executing（plan.accept）
+    await import('../services/journey.js').then((m) => m.applyJourneyEvent(user.id, user.tenantId, 'plan.accept')).catch(() => {});
     await recordAudit({
       tenantId: user.tenantId, userId: user.id,
       action: 'user.casefile.accept',

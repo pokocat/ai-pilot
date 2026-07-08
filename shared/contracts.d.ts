@@ -357,6 +357,15 @@ export interface QuickScanResult {
   cardUrl: string | null; // 分享卡 HTML 链接（PR-B2 生成，暂 null）
 }
 
+/* ────────────── 用户 journey 状态机（WO-07：全 tab「下一步」卡数据源） ────────────── */
+export type JourneyStage = 'new' | 'scanned' | 'diagnosing' | 'plan_ready' | 'executing' | 'reviewing';
+export interface JourneyNextStep { key: string; title: string; desc: string; route: string; }
+export interface JourneyView {
+  stage: JourneyStage;
+  diagRound: number;
+  nextStep: JourneyNextStep | null; // 服务端派生，前端只渲染
+}
+
 /* ────────────── 结构化成果 ────────────── */
 export interface DeliverableSection { h: string; b?: string; list?: string[]; }
 export interface Deliverable {

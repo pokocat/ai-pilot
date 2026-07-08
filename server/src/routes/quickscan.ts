@@ -62,7 +62,8 @@ export async function quickscanRoutes(app: FastifyInstance) {
       await backfillProfile(user.tenantId, { industry, stage: revenueBand, pain });
       // 4) 计一次限流（仅成功后）
       await cacheSet(rlKey, used + 1, DAY_MS);
-      // TODO(WO-07)：UserJourney.quickScanAt 打点 —— 待 UserJourney 模型落地
+      // WO-07：速诊完成 → journey new→scanned（await 保证下一次 /journey 立即可见；内部吞错不阻断）
+      await import('../services/journey.js').then((m) => m.applyJourneyEvent(user.id, user.tenantId, 'quickscan.done')).catch(() => {});
       await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.quickscan', payload: { industry, revenueBand } });
       return result;
     } catch (err) {

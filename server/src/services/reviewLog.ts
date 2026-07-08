@@ -54,6 +54,8 @@ export async function recordReview(args: {
     update: data,
     create: { userId: args.userId, layer, date, ...data },
   });
+  // WO-07：首次日复盘 → journey executing→reviewing（review.first；仅 day 层，重复触发幂等）
+  if (layer === 'day') await import('./journey.js').then((m) => m.applyJourneyEvent(args.userId, args.tenantId, 'review.first')).catch(() => {});
   return {
     id: row.id, layer: row.layer as ReviewLayer, date: row.date,
     ordersTotal: row.ordersTotal, ordersDone: row.ordersDone, alignedTotal: row.alignedTotal,

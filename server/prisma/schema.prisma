@@ -13,6 +13,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// WO-07：用户级 journey 状态机（stage + 关键事件时间戳）。diagRound 仍以 StrategicProfile 为真源，派生时读入。
+model UserJourney {
+  id             String    @id @default(cuid())
+  tenantId       String
+  userId         String    @unique
+  stage          String    @default("new") // new→scanned→diagnosing→plan_ready→executing→reviewing（plan_ready 瞬时）
+  quickScanAt    DateTime?
+  planAcceptedAt DateTime?
+  firstReviewAt  DateTime?
+  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
+
+  @@index([tenantId])
+  @@map("user_journey")
+}
+
 /// 租户（企业）
 model Tenant {
   id        String   @id @default(cuid())
