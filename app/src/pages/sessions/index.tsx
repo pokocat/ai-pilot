@@ -10,6 +10,7 @@ import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
 import { api, type Agent, type SessionItem } from '../../services/api';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, MORE_SPECIALIST_KEYS } from '../../data/council';
+import NextStepCard from '../../components/NextStepCard';
 import './index.scss';
 
 function relTime(iso: string): string {
@@ -137,6 +138,9 @@ export default function Sessions() {
             </View>
           </View>
         </View>
+
+        {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
+        <NextStepCard />
 
         {/* 搜索（设计稿 search-pill：白底大圆角） */}
         <View className="council-search">
