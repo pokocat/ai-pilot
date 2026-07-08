@@ -11,7 +11,7 @@ import type {
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
-  QuickScanRequest, QuickScanResult,
+  QuickScanRequest, QuickScanResult, JourneyView,
 } from '../../../shared/contracts';
 import type { ChartSummary, ProgressView } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
@@ -655,6 +655,15 @@ export const mock = {
     return delay({ ok: true, agentKey: key, pricePaid: unlimited ? 0 : agent.price, creditBalance: d.creditBalance, alreadyOwned: false });
   },
   async survey(): Promise<SurveyQuestion[]> { return delay(SURVEY); },
+
+  // WO-07：journey 视图（mock 按档案是否建档给出 new / diagnosing 的确定性下一步）。
+  async journey(): Promise<JourneyView> {
+    const { d } = current();
+    if (!d.profile?.industry) {
+      return delay({ stage: 'new', diagRound: 0, nextStep: { key: 'quickscan', title: '先做个 3 问速诊', desc: '10 分钟拿到主要矛盾与今天能做的一件事。', route: '/packages/work/quickscan/index' } });
+    }
+    return delay({ stage: 'diagnosing', diagRound: 2, nextStep: { key: 'continue_diagnosis', title: '继续第 3 轮诊断', desc: '把打法聊定，认可后自动拆成军令。', route: 'chat' } });
+  },
 
   // 速诊（WO-06）：确定性初诊卡 + 速诊即建档（空则回填 industry/stage/pain，同服务端口径）。
   async quickScan(req: QuickScanRequest): Promise<QuickScanResult> {

@@ -14,6 +14,7 @@ import {
 } from '../../services/dossier';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import { EMPTY_STATES } from '../../data/emptyStates';
+import NextStepCard from '../../components/NextStepCard';
 import './index.scss';
 
 type ExecView = 'today' | 'week' | 'review';
@@ -189,6 +190,9 @@ export default function Studio() {
           <Text className="en-title serif">军令</Text>
           <Text className="en-side right serif" onClick={() => setView('review')}>提醒</Text>
         </View>
+
+        {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
+        <NextStepCard />
 
         {/* 战役卡组（exec-deck 横滑）：今日战役 / 军师献策 / 今日主令 / 提醒节奏 */}
         <ScrollView scrollX className="exec-deck" enhanced showScrollbar={false}>
