@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-08** · **WO-12 处方落地页（军令处方条 → market 展示开方上下文 + 开通埋点，收口转化动线）**（`refactor/structured-output` 分支，未部署）：market 页读 `from=prescription&pid`：展示「军师为『{问题}』开出 + 打法」上下文条 + 曝光(seen)埋点；「开通完成·回执行」→ activated 埋点 + 返回。至此处方转化动线前端闭环：军令条(clicked) → 落地页(seen) → 开通(activated)。**验证**：`app tsc` 零错、`npm run build:weapp` 编译成功。影响面：app（market/index +pid 处理，内联样式单文件改）。**未含**：LLM 生成处方（deliverable 生成经 `structured()` 从白名单产出）、漏斗报表 E-5、真实购买流对接 activate。
+
 - **2026-07-08** · **WO-13 品牌资产包·前端（三段卡片页 + 主公菜单入口，收口 WO-13 端到端）**（`refactor/structured-output` 分支，未部署）：新增 `packages/work/brandkit` 分包页——IP 人设 / 话术库 / 视觉调性三段卡片 + 生成/重生成 + 确认无误；`api.ts` 加 `brandKit()/generateBrandKit()/approveBrandKit()` + `mock.ts` 确定性样例；`app.config` 注册分包；主公(profile)菜单加「我的品牌资产」入口。**验证**：`app tsc` 我方零错、`npm run build:weapp` 编译成功。影响面：app（packages/work/brandkit 新增 + api/mock/app.config/profile）。
 
 - **2026-07-08** · **WO-14 成果回流·服务端（处方效果回填 → used/verified 闭环）**（`refactor/structured-output` 分支，未部署）：生态引流下半场——处方开通后回填效果，让「处方有效」可验证。`services/prescription.recordOutcome` + `POST /prescriptions/:id/outcome`（body `{period, metrics:{posts,leads,gmv}, note}`）：追加到 `Prescription.outcomeJson`、首期 → used、连续 ≥2 期有正指标 → verified、落 firstUsedAt；静态段 `outcome` 路由优先于 `:action`。复用现有 `outcomeJson` 字段，无 schema 变更。**验证**：`prescription.test.ts` 新增 WO-14 例（首期 used → 二期 verified → 不存在 404）全绿；全量 363 例、0 回归。影响面：server（prescription service + route）。**未含**：月战报注入【处方效果】块 + 周复盘要数 `modeLine`（属复盘注入）、activated 7 天 scheduler 追踪。
