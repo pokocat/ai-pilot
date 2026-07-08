@@ -13,6 +13,12 @@ RUN npm ci && npx prisma generate && npm run build
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+# 例行 QA 2026-07-08：今日军令/复盘归档/段位晋升/夜间复盘推送等「今天几点」判断都基于
+# 进程本地时区（server/src/services/clock.ts 的 now() 是裸 new Date()），node:20-slim
+# 默认 UTC，不固定会导致这些判断全部按 UTC 算，与产品预期的北京时间错开 8 小时。
+ENV TZ=Asia/Shanghai
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
 COPY --from=build /repo/server/node_modules ./node_modules
 COPY --from=build /repo/server/dist ./dist
 COPY --from=build /repo/server/prisma ./prisma

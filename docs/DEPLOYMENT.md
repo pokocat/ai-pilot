@@ -55,6 +55,26 @@
 
 ## 4. 部署步骤（裸机，主路径）
 
+### A0. 时区（务必，例行 QA 2026-07-08 新发现）
+
+`server/src/services/clock.ts` 的 `now()` 用 `new Date()`，`casefile.ts`（今日军令 / 每日复盘归档）、
+`reviewLog.ts`（复盘连续天数、决定 尉官/校官/将军/元帅 段位晋升）、`progress.ts`（里程碑解锁日期）、
+`scheduler.ts`（21:30 前后夜间复盘提醒推送）等所有「今天」「几点」判断都基于 **宿主机本地时区**
+的 `Date` getter（`getHours()`/`getFullYear()`/...）。裸机默认时区未必是 Asia/Shanghai（云厂商镜像
+常见 UTC），务必先确认：
+
+```bash
+timedatectl                                   # 看 Time zone 是否已是 Asia/Shanghai
+sudo timedatectl set-timezone Asia/Shanghai   # 不是则设置（无需重启，Node 进程读实时 tzset）
+date                                          # 复核输出的时区缩写
+```
+
+不设置的后果：夜间复盘提醒会在 UTC 21:30（= 次日凌晨 05:30 北京时间）而非晚间推送；
+00:00–07:59 北京时间活跃的用户，其「今日」军令 / 复盘归档会被错误地记到前一个自然日，
+可能影响连续打卡天数与段位晋升判定。Docker 部署已在 `deploy/Dockerfile.server` 里固定
+`TZ=Asia/Shanghai`，systemd 单元也已加 `Environment=TZ=Asia/Shanghai`，但**裸机直接
+`node dist/index.js` 跑（不经 systemd）时这两处都不生效，只能靠宿主机时区本身正确**。
+
 ### A. PostgreSQL
 ```bash
 sudo apt update && sudo apt install -y postgresql
