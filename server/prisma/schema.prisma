@@ -73,6 +73,16 @@ model BrandKit {
   @@map("brand_kit")
 }
 
+/// WO-05：功能开关（命理等模块一键降级）。id = flag key，如 'fortune'。全局资产，无 tenantId。
+model FeatureFlag {
+  id        String   @id
+  enabled   Boolean  @default(true)
+  payload   Json? // 预留分级参数
+  updatedAt DateTime @updatedAt
+
+  @@map("feature_flag")
+}
+
 /// 租户（企业）
 model Tenant {
   id        String   @id @default(cuid())

@@ -14,6 +14,7 @@ import { prophecyBriefing } from './prophecyLog.js';
 import { progressBriefing } from './progress.js';
 import { resolveMode, modeDirective, detectInnerState, roleDirective, stageDirective } from './intent.js';
 import { now } from './clock.js';
+import { isFeatureEnabled } from './featureFlag.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } from './agentVersions.js';
@@ -125,7 +126,9 @@ export async function buildGenContext(opts: {
 
   // 天势档案（M1 PR-2）：命盘由排盘引擎算好存库，这里只组装简报注入；
   // 客户选择「不信命理」→ 注入降级指令（不带命盘）；无命盘 → 不注入。
-  const believe = ((profile?.extraJson as { bazi?: { believe?: boolean } } | null)?.bazi?.believe) !== false;
+  // WO-05：命理全局开关关闭 → 天势降级为禁令（不注入命盘，禁八字/命格/流月术语），复用「不信命理」opt-out 口径。
+  const fortuneOn = await isFeatureEnabled('fortune');
+  const believe = fortuneOn && (((profile?.extraJson as { bazi?: { believe?: boolean } } | null)?.bazi?.believe) !== false);
   let tianshiLine: string | null = null;
   if (!believe) {
     tianshiLine = TIANSHI_OPTOUT_LINE;
