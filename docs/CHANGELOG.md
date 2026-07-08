@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-08** · **重构①·结构化输出统一原语 `structured()`（借鉴 Vercel AI SDK generateObject / Spring AI StructuredOutputConverter）**（`refactor/structured-output` 分支，未部署）：针对「LLM 调用层手写脆弱、辅助抽取六份雷同正则副本」的架构债起步。`llm/gateway.ts` 新增 `structured(zodSchema, {system,user})` 统一原语——Zod schema 同时充当 **运行时校验 + TS 返回类型 + 归一化(transform)** 的单一真源；抠 JSON/校验失败自动把错误回喂、只修复一轮；无真实 provider（测试/mock）或异常一律返回 null（绝不伪造，沿用 `extractInsights`/`completeJson` 口径）。纯逻辑（抠 JSON + 校验）拆到导出的 `coerceJson`，可零 I/O 单测。首刀移植 `extractProphecies`：原「`rawJson` 正则 + 手写 filter/map/slice + dueDate 校验」约 30 行 → `ProphecyResult` schema + 一行调用，**行为等价**（逐条容错、空 prophecy 丢弃、dueDate 归一为 null、最多 2 条、mock 返空）。顺带把 `rawJson` 抽出 `rawText`（DRY，供 structured 复用；rawJson 行为不变）。这是「LLM 编排层借鉴开源框架思想」重构线第 1 步，也为 FABLE5 加法批次的结构化抽取（WO-06 速诊 / WO-09 finParse / WO-12 处方）铺底座。**验证**：新增 `server/test/structured.test.ts` 9 例全绿（8 纯逻辑 + 1「mock 不伪造」安全性质）；既有 DB-free llm 层测试 28 例全绿（`rawJson→rawText` 回归）；`tsc` 我方文件零错（仅遗留 `paipan` 缺包的 env 噪声）。影响面：server（`llm/gateway.ts` 纯新增 + `extractProphecies` 内部重构，对外签名/行为不变）+ test；无 schema / 无契约 / 无前端改动。
+
 - **2026-07-07** · **批次C 账本闭环 + 完整履历自动生成 + 放宽长度上限**：
   - **批次C 账本闭环（F-8/P-2）**（server 待部署无 schema / 账本页待发版）：服务端账本(决策/天机/段位)全建好但 App 够不到→条目永 pending→比率 null→段位不可达。新增 `packages/work/ledger` 页(决策账本/天机账本 双 tab + 待验证条目点验证，调既有 verify 路由)；`decisionStats/prophecyStats` 加 **n≥5 才出比率**(原 >0 即出，1 条 100% 直接喂晋升)+ briefing「先攒够 5 条」口径；Decision/Prophecy View/Stats/Ledger 进 contracts；api+mock 同口径；profile 段位卡可点进账本。H5 实测：4 条验证显「先打满5条」、第5条切「准确率80%」。
   - **完整履历自动生成**（`f8ee2cc`，前端待发版）：进详情无缓存+资料够(maturity≠empty)→自动立档，免手动点。
