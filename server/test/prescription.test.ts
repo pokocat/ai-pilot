@@ -51,6 +51,16 @@ describe('WO-12 处方引擎', () => {
     assert.equal((await api('POST', '/api/prescriptions/nope/outcome', { token, body: {} })).status, 404);
   });
 
+  test('生成端：军师出方案时携带处方（mock，白名单工具 growth）', async () => {
+    const token = await login(uniquePhone(), '生成处方用户');
+    await api('PUT', '/api/profile', { token, body: { industry: '美业', stage: '规模化', pain: '获客越来越贵' } });
+    const r = await api('POST', '/api/generate-sync', { token, body: { text: '给我出个增长方案', agentKey: 'general' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.kind, 'report');
+    assert.ok(Array.isArray(r.body.deliverable?.prescriptions) && r.body.deliverable.prescriptions.length > 0, '方案携带处方');
+    assert.equal(r.body.deliverable.prescriptions[0].toolKey, 'growth');
+  });
+
   test('无处方的方案 → 不落库；未知动作 400；不存在处方 404', async () => {
     const token = await login(uniquePhone(), '处方用户2');
     await api('POST', '/api/casefile/accept', { token, body: { deliverable: deliverableWith(undefined) } });

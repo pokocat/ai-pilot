@@ -135,6 +135,18 @@ export function normalizeDeliverableSections(input: unknown): DeliverableSection
   return direct ? [direct] : [];
 }
 
+/** WO-12：从 emit_deliverable 的 prescriptions 参数归一化处方（问题/打法/工具 key，最多 3 条）。白名单过滤在落库时做。 */
+export function normalizePrescriptions(input: unknown): { problem: string; playbook: string; toolKey: string }[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const out = input
+    .filter((p): p is Record<string, unknown> => !!p && typeof p === 'object')
+    .filter((p) => typeof p.problem === 'string' && typeof p.playbook === 'string' && typeof p.toolKey === 'string')
+    .map((p) => ({ problem: String(p.problem).slice(0, 300), playbook: String(p.playbook).slice(0, 300), toolKey: String(p.toolKey).trim() }))
+    .filter((p) => p.problem && p.playbook && p.toolKey)
+    .slice(0, 3);
+  return out.length ? out : undefined;
+}
+
 // Anthropic tool 定义：强制模型以结构化成果输出
 export const DELIVERABLE_TOOL = {
   name: 'emit_deliverable',
@@ -155,6 +167,19 @@ export const DELIVERABLE_TOOL = {
             list: { type: 'array', items: { type: 'string' }, description: '要点列表（可选）' },
           },
           required: ['h'],
+        },
+      },
+      prescriptions: {
+        type: 'array',
+        description: '（可选，最多 3 条）若某段打法需要一个工具来承接，从上下文【可开方工具表】里选 toolKey 开处方；表中没有的不要写，不需要工具就不填。',
+        items: {
+          type: 'object',
+          properties: {
+            problem: { type: 'string', description: '针对的问题，一句话' },
+            playbook: { type: 'string', description: '打法，一句话' },
+            toolKey: { type: 'string', description: '工具 key（取自【可开方工具表】）' },
+          },
+          required: ['problem', 'playbook', 'toolKey'],
         },
       },
     },

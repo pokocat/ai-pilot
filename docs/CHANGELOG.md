@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-08** · **WO-12 处方生成端（军师出方案时经 emit_deliverable 携带处方，闭合「生成 → 落库」）**（`refactor/structured-output` 分支，未部署）：处方引擎最后一块——让 AI 真正开方。`DELIVERABLE_TOOL`(emit_deliverable) schema 加可选 `prescriptions` 数组（问题/打法/toolKey，最多 3 条，指引「从【可开方工具表】选，表外不写、不需要不填」）；`schema.normalizePrescriptions` 归一化；claude/openai **全部 5 处报告构造点**（Deliverable / DeliverableWithTools / Adaptive）透传 prescriptions；provider mock 报告携带一条白名单内样例（toolKey=growth），mock/H5 全链路可走通。**安全**：toolKey 白名单过滤在落库（`persistPrescriptions`）做——生成端即使模型乱写也被服务端拦，故无需先注入白名单即安全（注入块提准确率，留作后续）。**验证**：`prescription.test.ts` 新增生成端例（出方案 → `deliverable.prescriptions` 含 growth）全绿；`tsc` 0 错；**全量 `npm test` 364 例、0 回归（生成核心未破坏，stash 对照 clean tree 同 5 例 pre-existing）**。影响面：server（`llm/schema` DELIVERABLE_TOOL + helper、`providers/claude`+`openai` 各报告构造点、`providers/mock`）。**未含**：上下文注入【可开方工具表】（提准确率）、漏斗报表 E-5。
+
 - **2026-07-08** · **WO-12 处方落地页（军令处方条 → market 展示开方上下文 + 开通埋点，收口转化动线）**（`refactor/structured-output` 分支，未部署）：market 页读 `from=prescription&pid`：展示「军师为『{问题}』开出 + 打法」上下文条 + 曝光(seen)埋点；「开通完成·回执行」→ activated 埋点 + 返回。至此处方转化动线前端闭环：军令条(clicked) → 落地页(seen) → 开通(activated)。**验证**：`app tsc` 零错、`npm run build:weapp` 编译成功。影响面：app（market/index +pid 处理，内联样式单文件改）。**未含**：LLM 生成处方（deliverable 生成经 `structured()` 从白名单产出）、漏斗报表 E-5、真实购买流对接 activate。
 
 - **2026-07-08** · **WO-13 品牌资产包·前端（三段卡片页 + 主公菜单入口，收口 WO-13 端到端）**（`refactor/structured-output` 分支，未部署）：新增 `packages/work/brandkit` 分包页——IP 人设 / 话术库 / 视觉调性三段卡片 + 生成/重生成 + 确认无误；`api.ts` 加 `brandKit()/generateBrandKit()/approveBrandKit()` + `mock.ts` 确定性样例；`app.config` 注册分包；主公(profile)菜单加「我的品牌资产」入口。**验证**：`app tsc` 我方零错、`npm run build:weapp` 编译成功。影响面：app（packages/work/brandkit 新增 + api/mock/app.config/profile）。

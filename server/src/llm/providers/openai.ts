@@ -2,7 +2,7 @@
 // 走标准 /v1/chat/completions，兼容 OpenAI / Agnes / DeepSeek / Moonshot(Kimi) / 通义千问兼容模式 等。
 // 结构化成果用 function calling（tools）强约束。baseUrl/model/key/温度 来自运行时配置（可后台切换）。
 
-import { DELIVERABLE_TOOL, injectVariables, normalizeDeliverableSections, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, injectVariables, normalizeDeliverableSections, normalizePrescriptions, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import { runToolLoop } from '../tools/loop.js';
@@ -345,6 +345,7 @@ export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
+        prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
       },
       usage: r.usage,
       toolCalls: r.toolCalls,
@@ -402,6 +403,7 @@ export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
+        prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
       },
       usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
     };
