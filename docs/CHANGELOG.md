@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-08** · **WO-15 生态统一账户与跨产品结算·设计文档（设计先行）**（`refactor/structured-output` 分支）：新增 `docs/ECOSYSTEM_ACCOUNT_DESIGN.md`——生态第二产品立项蓝图，回答身份（手机号+unionid 单库多产品共用 `User`）/钱包（`CreditLedger` 加 `product` 字段、单库事务跨产品扣费）/权益互通（套餐附赠、处方 activate 跨产品支付回调复用 `PaymentOrder` 幂等）/数据授权（service token + `user_grant` 表 + BrandKit export 签名 TTL 1h）/风险（单库 schema 耦合边界、unionid 同主体依赖、拆分触发线）+ 落地顺序。影响面：docs only。**至此 FABLE5 加法路线图 WO-01~15 全部工单落核心**（多个 admin/前端/注入子项按各条 CHANGELOG「未含」列为后续）。
+
 - **2026-07-08** · **WO-09 经营体检·财务解析引擎（`structured()` 消费者 + 纯派生）**（`refactor/structured-output` 分支，未部署）：知识库分析产品化的分析核。`services/finParse`：`FinancialsSchema`（Zod：periods/revenue/cogs/expenses/cash，缺失容错空数组）+ `parseFinancials`（走统一 `structured()` 从财务表文本抽取，无 provider → null）+ `deriveMetrics`（**纯代码算** 毛利率/费用率/现金净流，不交给 LLM）+ `finReportSections`（经营体检 5 段：收入结构｜成本与毛利｜费用异动｜现金流信号｜三个最该动手的地方，数字全部来自结构化数据、禁推算）。**验证**：`finParse.test.ts` 3 例（派生指标算对、5 段骨架 + 现金为负告警、schema 缺字段容错）全绿；`tsc` 0 错；全量 375 例、0 回归。影响面：server（services/finParse 新增，standalone 零改存量）。**未含**（wiring 后续）：`KnowledgeItem.analysisJson` 落库、`POST /knowledge/:id/analyze` 端点 + saveReport 成版、资料卡「生成经营体检」按钮、战局页体检引用。
 
 - **2026-07-08** · **WO-04 复盘周/月账本聚合（修 A-4「月复盘 LLM 现编」）**（`refactor/structured-output` 分支，未部署）：`recordReview` 从「仅 day 层快照」升为**期聚合**——week=本周一 → 今天、month=当月 1 号 → 今天，覆盖区间内 CasefileOrder(完成/对齐) + CasefileMetric(线索/咨询/成交)求和，落 `ReviewLog.metricsJson`（加法列）+ date=期起始（周一/月一号）。`reviewBriefing` 追加「最近月报（线索/咨询/成交/军令）」——月复盘对账素材由系统求和、非 LLM 现编。**day 层行为不变**。**验证**：`reviewPeriod.test.ts`（月复盘聚合当月三数 → month 行 metricsJson + 注入月报块）全绿；`tsc` 0 错；全量 372 例、0 回归（day 层既有复盘测试未破坏）。影响面：server（schema ReviewLog +metricsJson、reviewLog.recordReview 期聚合 + reviewBriefing）。**未含**：季/年/团队降级到月度线、执行页月战报按钮、军师收编 4 科室。
