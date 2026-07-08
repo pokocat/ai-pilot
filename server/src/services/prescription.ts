@@ -1,6 +1,7 @@
 // WO-12 处方引擎：军师在方案里开出的「问题→打法→工具」三元组 + 转化状态机。
 // 处方由服务端确定性写入（认可方案时从 deliverable.prescriptions 落库）；toolKey 只能取自服务端白名单，表外一律丢弃。
 import { prisma } from '../db.js';
+import type { Prisma } from '@prisma/client';
 import { now } from './clock.js';
 import type { PrescriptionView } from '../../../shared/contracts';
 
@@ -61,4 +62,31 @@ export async function listPrescriptions(userId: string): Promise<PrescriptionVie
     id: r.id, problem: r.problem, playbook: r.playbook, toolKey: r.toolKey,
     toolType: r.toolType, externalUrl: r.externalUrl, status: r.status, proposedAt: r.proposedAt.toISOString(),
   }));
+}
+
+// —— WO-14 成果回流：处方开通后回填效果 → 复盘可引用（used→verified 闭环） ——
+export interface OutcomeInput { period?: string; metrics?: { posts?: number; leads?: number; gmv?: number }; note?: string }
+interface OutcomeEntry { period: string; metrics: { posts: number; leads: number; gmv: number }; note: string }
+const nonNeg = (v: unknown): number => (typeof v === 'number' && v >= 0 && Number.isFinite(v) ? v : 0);
+const hasPositive = (m: OutcomeEntry['metrics']): boolean => m.posts > 0 || m.leads > 0 || m.gmv > 0;
+
+/** 回填一期效果：追加到 outcomeJson；首次 outcome → used；连续 ≥2 期有正指标 → verified。返回是否命中。 */
+export async function recordOutcome(userId: string, id: string, input: OutcomeInput): Promise<boolean> {
+  const rx = await prisma.prescription.findFirst({ where: { id, userId, status: { not: 'dismissed' } } });
+  if (!rx) return false;
+  const prev = (Array.isArray(rx.outcomeJson) ? rx.outcomeJson : []) as unknown as OutcomeEntry[];
+  const m = input.metrics ?? {};
+  const entry: OutcomeEntry = {
+    period: (input.period || 'week').slice(0, 16),
+    metrics: { posts: nonNeg(m.posts), leads: nonNeg(m.leads), gmv: nonNeg(m.gmv) },
+    note: (input.note ?? '').trim().slice(0, 300),
+  };
+  const all = [...prev, entry];
+  const positivePeriods = all.filter((e) => hasPositive(e.metrics)).length;
+  const status = positivePeriods >= 2 ? 'verified' : 'used';
+  await prisma.prescription.update({
+    where: { id },
+    data: { outcomeJson: all as unknown as Prisma.InputJsonValue, status, firstUsedAt: rx.firstUsedAt ?? now() },
+  });
+  return true;
 }

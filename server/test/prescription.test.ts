@@ -36,6 +36,21 @@ describe('WO-12 处方引擎', () => {
     assert.equal(after2.body.items.find((i: { id: string }) => i.id === first.id).status, 'clicked');
   });
 
+  test('WO-14 成果回填：首期→used、连续两期有正指标→verified；不存在 404', async () => {
+    const token = await login(uniquePhone(), '回流用户');
+    await api('POST', '/api/casefile/accept', { token, body: { deliverable: deliverableWith([{ problem: '获客', playbook: '短视频', toolKey: 'growth' }]) } });
+    const id = (await api('GET', '/api/prescriptions', { token })).body.items[0].id;
+
+    const o1 = await api('POST', `/api/prescriptions/${id}/outcome`, { token, body: { period: 'week', metrics: { leads: 5 } } });
+    assert.equal(o1.status, 200);
+    assert.equal((await api('GET', '/api/prescriptions', { token })).body.items.find((i: { id: string }) => i.id === id).status, 'used');
+
+    await api('POST', `/api/prescriptions/${id}/outcome`, { token, body: { period: 'week', metrics: { leads: 8 } } });
+    assert.equal((await api('GET', '/api/prescriptions', { token })).body.items.find((i: { id: string }) => i.id === id).status, 'verified', '连续两期正指标 → verified');
+
+    assert.equal((await api('POST', '/api/prescriptions/nope/outcome', { token, body: {} })).status, 404);
+  });
+
   test('无处方的方案 → 不落库；未知动作 400；不存在处方 404', async () => {
     const token = await login(uniquePhone(), '处方用户2');
     await api('POST', '/api/casefile/accept', { token, body: { deliverable: deliverableWith(undefined) } });
