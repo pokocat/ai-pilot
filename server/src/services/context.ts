@@ -15,6 +15,7 @@ import { progressBriefing } from './progress.js';
 import { resolveMode, modeDirective, detectInnerState, roleDirective, stageDirective } from './intent.js';
 import { now } from './clock.js';
 import { isFeatureEnabled } from './featureFlag.js';
+import { benchmarkBlock } from './benchmark.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } from './agentVersions.js';
@@ -106,6 +107,8 @@ export async function buildGenContext(opts: {
   const prophecyLine = await prophecyBriefing(opts.userId);
   // 段位·里程碑（M2 PR-10）：真实门槛派生（战友见证/晋升话术素材）。
   const progressLine = await progressBriefing(opts.userId);
+  // 行业基准（WO-08）：DB 分位数块（宁缺勿假，无行业/无数据不注入）。
+  const benchmarkLine = await benchmarkBlock(profile?.industry);
 
   // 本轮导引（M3 PR-11/12/14）：模式 + 角色语气 + 诊断轮次，全部确定性识别，识别不出不注入。
   const { intent } = resolveMode(opts.userMessage, opts.sessionMode);
@@ -179,6 +182,7 @@ export async function buildGenContext(opts: {
     reviewLine,
     prophecyLine,
     progressLine,
+    benchmarkLine,
     modeLine,
     stageLine,
     userMessage: opts.userMessage,

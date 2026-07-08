@@ -83,6 +83,26 @@ model FeatureFlag {
   @@map("feature_flag")
 }
 
+/// WO-08：行业基准库（内容资产，运营维护）。分位数 p25/p50/p75；宁缺勿假——p50 空的行不注入。
+model IndustryBenchmark {
+  id          String   @id @default(cuid())
+  industry    String // 与 survey 行业口径一致
+  revenueBand String   @default("*") // 营收段，'*'=不分段
+  metricKey   String // 'repurchase_rate' | 'cac' | ...
+  metricName  String // 展示名「复购率」
+  unit        String // '%' | '元' | '天'
+  p25         Float?
+  p50         Float?
+  p75         Float?
+  note        String? // 口径说明
+  source      String? // 数据来源
+  enabled     Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([industry, revenueBand, metricKey])
+  @@map("industry_benchmark")
+}
+
 /// 租户（企业）
 model Tenant {
   id        String   @id @default(cuid())
