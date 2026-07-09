@@ -72,7 +72,10 @@ export default function TianshiCalendar() {
     path: '/packages/work/calendar/index',
   }));
 
-  const valid = +year >= 1930 && +year <= 2020 && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
+  // 例行 QA 2026-07-08：出生年上限曾写死 2020（早于当前年份的过时常量），与
+  // server/src/routes/profile.ts 的动态上限（now().getFullYear()）及主入口 Picker（无年份上限）不一致，
+  // 2021 年及以后出生年份会被前端静默拦下（按钮置灰无提示）。改为跟随当前年份。
+  const valid = +year >= 1930 && +year <= new Date().getFullYear() && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
   const saveBirth = async () => {
     if (!valid || busy) return;
     setBusy(true);

@@ -17,7 +17,7 @@ export async function requestWechatSubscribe(scene: WechatSubscribeScene): Promi
     Taro.showToast({ title: '提醒模板尚未配置', icon: 'none' });
     return false;
   }
-  const res = await Taro.requestSubscribeMessage({ tmplIds: [tpl.templateId] });
+  const res = await Taro.requestSubscribeMessage({ tmplIds: [tpl.templateId] } as any);
   const choice: WechatSubscribeChoice = {
     scene,
     templateId: tpl.templateId,
