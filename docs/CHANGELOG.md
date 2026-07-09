@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-09** · **V7 新版效果图对齐技术迭代方案·设计文档（设计先行，不动代码）**（`claude/ai-pilot-miniapp-tech-plan-5jzsfa` 分支）：新增 `docs/[FABLE5]V7_EFFECT_ALIGN_PLAN.md`——对照业务方新版原型 `ai-pilot-temp/design/junshi-miniapp-effect.html`（深绿+宋体重构版）与现有前后端全量盘点后的 gap 分析与执行规格。第一部分（给人看）：一句话结论「换壳+补三块地基」、差距地图（A 视觉/B 前端/C 后端建模/D 拍板 四级）、4 批次 15 工单策略、9 个产品拍板点（tab 命名/积分去留/算力名词统一/数据源 OAuth 范围等，均带建议默认值）；第二部分（给 coding agent）：V7-01~V7-15 工单（契约/schema/端点/前端改动点/验收标准/依赖图），核心新增建模=智库三段整理管道（KnowledgeItem.stage 生命周期）、三势结构化（ForceView + POST /battle/commit）、军令字段扩展、UserDataSource/UserModule/Sku/ServiceAssignment 四张新表、跨域搜索。影响面：docs only。
+
 - **2026-07-08** · **上线后 QA 三修：初诊后首页刷新 + 初诊复用档案不重复问 + 对话未读信号**（`refactor/structured-output` 分支）：
   - **① 首页初诊卡重复**：home「下一步」卡接服务端 `/journey`（`useDidShow` 刷新）——初诊后 journey new→scanned，卡片变「进参谋室继续诊断」，不再重复「开始初诊」。
   - **② 初诊与注册引导重复问行业/阶段**：注册入场 Picker 已收 `Profile.industry/stage`；速诊页进来 `api.getProfile()` 预填并折叠行业/阶段（「来自你的档案·重新选」），用户只补「最痛的一件事」。纯前端。
