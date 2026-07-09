@@ -1082,6 +1082,26 @@ export async function adminRoutes(app: FastifyInstance) {
       return plan;
     },
   );
+
+  // V7-12：单次付费商品（SKU）目录——运营可改价/启停（key、kind、grantsModuleKey 走代码目录 admin:sync-content，不在此改）。
+  app.get('/admin/skus', async () => prisma.sku.findMany({ orderBy: { sort: 'asc' } }));
+  app.patch<{ Params: { key: string }; Body: { name?: string; desc?: string; priceFen?: number; enabled?: boolean; sort?: number } }>(
+    '/admin/skus/:key',
+    async (req, reply) => {
+      const existing = await prisma.sku.findUnique({ where: { key: req.params.key } });
+      if (!existing) return reply.code(404).send({ error: 'SKU 不存在', code: 'SKU_NOT_FOUND' });
+      const b = req.body ?? {};
+      const data: Record<string, unknown> = {};
+      if (typeof b.name === 'string') data.name = b.name.trim().slice(0, 60);
+      if (typeof b.desc === 'string') data.desc = b.desc.trim().slice(0, 500);
+      if (typeof b.priceFen === 'number' && b.priceFen >= 0) data.priceFen = Math.round(b.priceFen);
+      if (typeof b.enabled === 'boolean') data.enabled = b.enabled;
+      if (typeof b.sort === 'number') data.sort = Math.round(b.sort);
+      const sku = await prisma.sku.update({ where: { key: req.params.key }, data });
+      await recordAudit({ action: 'admin.sku.update', payload: { key: sku.key, priceFen: sku.priceFen, enabled: sku.enabled } });
+      return sku;
+    },
+  );
 }
 
 async function buildAdminUsers(): Promise<AdminUserItem[]> {

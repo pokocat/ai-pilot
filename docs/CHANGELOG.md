@@ -8,6 +8,18 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-09** · **对话页新增「回到最新」浮层按钮**：`pages/chat` 监听聊天 ScrollView 距离底部的距离，用户上滑查看较早历史且离底部较远时显示右下浮层，点击复用回底逻辑快速回到最新消息；按钮避让输入区、引用行与键盘。影响面：app（`pages/chat`）+ AGENTS。
+
+- **2026-07-09** · **修复对话 Markdown 松散有序列表编号全部显示为 1**：`MarkdownText` 解析层支持条目间空行且 marker 均为 `1.` 的模型常见写法，连续归组渲染为 1/2/3…；同时放宽编号列宽，避免两位数挤压正文。影响面：app（`components/MarkdownText`）+ AGENTS。
+
+- **2026-07-09** · **V7 新版效果图对齐·实现（V7-03~V7-15，跳过 V7-01/02；tab 样式与菜单名 by-design 保持不动）**（`claude/ai-pilot-miniapp-tech-plan-5jzsfa` 分支）：按 `docs/[FABLE5]V7_EFFECT_ALIGN_PLAN.md` 落地。**后端全绿（449 例，0 回归，server+app tsc 0 错）**。
+  - **schema 加法**：`Casefile.goalsJson`、`CasefileOrder +ownerName/dueAt(标签串)/etaMinutes/sourceQuote/stepsJson/metricsJson/actionType`、`KnowledgeItem +stage/bizCategory/batchId/dupOfId`、`User.inviteCode @unique`、`PaymentOrder.skuKey`，新表 `Sku/UserDataSource/UserModule/ServiceAssignment`（`prisma db push`）。
+  - **V7-04** 三势结构化（`services/forces.ts`：structured() 产 level/结论/打法，strength 代码按 level 映射禁 AI 自算；落 `StrategicProfile.forcesJson.battle`；注入【战略档案】）+ `POST /forces/refresh`（限频 3/日）+ `POST /battle/commit`（认可判断一键：buildGenContext→generateDeliverable→acceptDeliverable→saveReportVersion，5 分钟幂等）。**V7-05** `acceptDeliverable` 升级 structured() 拆军令 + 启发式确定性兜底（owner=称呼、actionType 关键词映射）+ 军令详情页。**V7-10** `PUT /casefile/goals` + accept 抽取（抽不出留空不编造）+ 注入。**V7-06** 智库三段管道（staging→optimized→confirmed；staged 上传不切片嵌入、对检索不可见，confirm 才 embed；`data/bizCategories.ts` 8 类 + organize 去重/分类 + 免费额度 30 份/200MB + deep-organize 402 占位）。**V7-07** `UserDataSource` 状态机 + 上传替代/预约授权（广告/CRM 不做假授权）。**V7-08** `data/modules.ts` 10 能力目录下沉 + `UserModule` + tier 分流启用（free/credits/sku/member）。**V7-11** scheduler 09:00 军令 + 周五周复盘 job + `GET /reminders`。**V7-12** `Sku` 单次付费（复用 `markPaidAndApply` 幂等，按 skuKey 分流发放 module/service/storage 权益）+ 对外「算力」文案统一（💎 图标保留）。**V7-13** 邀请码惰性生成 + `ServiceAssignment` + 档案工作台（bizCategory 真实计数）。**V7-14** `GET /search` 四域聚合（知识仅 confirmed，staging 隔离）。**V7-15** `GET /sessions` unreadCount + `role='system'` sys-card。
+  - **前端**：全局弹层三件套（PaySheet 台账式/ExceptionSheet 四格/OnboardSheet 4 步 + uploadGuard）、战局三势真渲染 + 认可 CTA 三态、执行军令 meta chips + 军令详情页 + 目标阶梯编辑、我的账户卡 + 档案工作台 + 提醒页、对话跨域搜索 + 未读数、智库四面板重做（管道/数据源/能力/报告）。api/mock 严格 lockstep，SSOT 契约先行。
+  - 影响面：server（schema +9 列 +4 表、多路由、forces/casefile/knowledgePipeline/modules/dataSources/reminders/community/sku/collab 服务、context+schema 注入）+ shared/contracts + app（services/api·mock·dossier、5 tab + 3 全局组件 + command/reminders 分包页）。**未含**：真机回归走查、admin 端 SKU/服务分配可视化、真实 OAuth 数据源、第 7 位军师·明止 agent（按 D-9 不落地）。
+
+- **2026-07-09** · **V7 新版效果图对齐技术迭代方案·设计文档（设计先行，不动代码）**（`claude/ai-pilot-miniapp-tech-plan-5jzsfa` 分支）：新增 `docs/[FABLE5]V7_EFFECT_ALIGN_PLAN.md`——对照业务方新版原型 `ai-pilot-temp/design/junshi-miniapp-effect.html`（深绿+宋体重构版）与现有前后端全量盘点后的 gap 分析与执行规格。第一部分（给人看）：一句话结论「换壳+补三块地基」、差距地图（A 视觉/B 前端/C 后端建模/D 拍板 四级）、4 批次 15 工单策略、9 个产品拍板点（tab 命名/积分去留/算力名词统一/数据源 OAuth 范围等，均带建议默认值）；第二部分（给 coding agent）：V7-01~V7-15 工单（契约/schema/端点/前端改动点/验收标准/依赖图），核心新增建模=智库三段整理管道（KnowledgeItem.stage 生命周期）、三势结构化（ForceView + POST /battle/commit）、军令字段扩展、UserDataSource/UserModule/Sku/ServiceAssignment 四张新表、跨域搜索。影响面：docs only。
+
 - **2026-07-08** · **上线后 QA 三修：初诊后首页刷新 + 初诊复用档案不重复问 + 对话未读信号**（`refactor/structured-output` 分支）：
   - **① 首页初诊卡重复**：home「下一步」卡接服务端 `/journey`（`useDidShow` 刷新）——初诊后 journey new→scanned，卡片变「进参谋室继续诊断」，不再重复「开始初诊」。
   - **② 初诊与注册引导重复问行业/阶段**：注册入场 Picker 已收 `Profile.industry/stage`；速诊页进来 `api.getProfile()` 预填并折叠行业/阶段（「来自你的档案·重新选」），用户只补「最痛的一件事」。纯前端。

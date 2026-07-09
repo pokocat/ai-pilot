@@ -1,0 +1,50 @@
+.pay-mask {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(15, 17, 20, .55);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.pay-panel {
+  width: 100%; max-width: 600px; max-height: 84vh;
+  background: var(--bg, #fff);
+  border-radius: 22px 22px 0 0;
+  padding: 10px 22px calc(22px + env(safe-area-inset-bottom)) 22px;
+  display: flex; flex-direction: column; align-items: stretch;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
+}
+.pay-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 auto 16px; }
+
+.pay-k { font-size: 11px; font-weight: 900; letter-spacing: .16em; color: var(--gold-deep); }
+.pay-title { font-size: 20px; font-weight: 700; color: var(--ink); margin-top: 8px; line-height: 1.3; }
+.pay-desc { font-size: 12.5px; color: var(--ink-2); line-height: 1.55; margin-top: 8px; }
+
+.pay-ledger {
+  margin-top: 16px;
+  border: 1px solid var(--line); border-radius: var(--r-md, 16px);
+  background: var(--surface); overflow: hidden;
+}
+.pay-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 15px;
+}
+.pay-row + .pay-row { border-top: 1px solid var(--line); }
+.pay-rk { font-size: 12.5px; color: var(--ink-3); }
+.pay-rv { font-size: 14px; font-weight: 700; color: var(--ink); }
+.pay-row.warn { background: var(--gold-soft); }
+.pay-row.warn .pay-rk,
+.pay-row.warn .pay-rv { color: var(--gold-deep); }
+
+.pay-result { font-size: 11.5px; color: var(--ink-3); line-height: 1.55; margin-top: 12px; }
+
+.pay-actions { display: flex; gap: 12px; margin-top: 18px; }
+.pay-secondary {
+  flex: 0 0 108px; height: 48px; border-radius: 14px;
+  background: var(--surface-2); color: var(--ink-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14.5px; font-weight: 600;
+}
+.pay-primary {
+  flex: 1; height: 48px; border-radius: 14px; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14.5px; font-weight: 700;
+}
+.pay-primary.busy { opacity: .6; }

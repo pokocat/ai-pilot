@@ -92,8 +92,17 @@ type ChatStyle = CSSProperties & {
   '--keyboard-height'?: string;
 };
 
+type ChatScrollEvent = {
+  detail?: {
+    scrollTop?: number;
+    scrollHeight?: number;
+  };
+};
+
 // 模型选择：后端统一调度，前端暂固定展示一档（预留多模型切换入口）。
 const FIXED_MODEL = '军师 · 标准';
+const JUMP_LATEST_SHOW_DISTANCE = 420;
+const JUMP_LATEST_HIDE_DISTANCE = 140;
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
@@ -113,20 +122,54 @@ export default function Chat() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
+  const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
   const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
   const [picker, setPicker] = useState(false);
   const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[]; memories: MemoryCandidate[] }>({ projects: [], reports: [], knowledge: [], memories: [] });
+  const logHeightRef = useRef(0);
   const logRef = useRef<Msg[]>([]);
   logRef.current = msgs;
 
   const findAgent = (key: string): Agent | undefined => s.agents().find((a) => a.key === key);
 
-  const scrollToEnd = () => setScrollTop((t) => t + 100000);
+  const measureChatLog = () => {
+    Taro.createSelectorQuery()
+      .select('.chat-log')
+      .boundingClientRect((rect) => {
+        const height = Number((rect as { height?: number } | null)?.height || 0);
+        if (height > 0) logHeightRef.current = height;
+      })
+      .exec();
+  };
+
+  const scrollToEnd = () => {
+    setShowJumpLatest(false);
+    setScrollTop((t) => t + 100000);
+  };
+
+  const handleLogScroll = (e: ChatScrollEvent) => {
+    const height = logHeightRef.current;
+    const top = Number(e.detail?.scrollTop || 0);
+    const scrollHeight = Number(e.detail?.scrollHeight || 0);
+    if (!height || !scrollHeight) {
+      measureChatLog();
+      return;
+    }
+    const distanceToBottom = scrollHeight - top - height;
+    setShowJumpLatest((visible) => {
+      if (visible) return distanceToBottom > JUMP_LATEST_HIDE_DISTANCE;
+      return distanceToBottom > JUMP_LATEST_SHOW_DISTANCE;
+    });
+  };
 
   useEffect(() => {
     if (busy) setTimeout(scrollToEnd, 40);
   }, [busy]);
+
+  useEffect(() => {
+    setTimeout(measureChatLog, 80);
+  }, [keyboardHeight, refs.length, msgs.length]);
 
   useEffect(() => () => store.setOverlay(false, 'ref-picker'), []);
 
@@ -137,7 +180,7 @@ export default function Chat() {
     if (isUnauthorized(e)) return '登录态已失效，请重新登录后再发送。';
     if ((e as any)?.data?.code === 'AGENT_LOCKED') return '该专项顾问尚未启用，请到「智库 / 工坊」查看可用方案。';
     if ((e as any)?.data?.code === 'INSUFFICIENT_QUOTA') return '本月 token 额度已用尽，请在「我的」升级套餐或下月再用。';
-    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '钻石不足，请在「我的」充值或解锁后再继续。';
+    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '算力不足，请在「我的」充值或解锁后再继续。';
     const msg = String((e as any)?.message || '');
     if (msg && msg !== 'undefined') return msg;
     return '抱歉，产出失败了，请稍后再试。';
@@ -745,7 +788,7 @@ export default function Chat() {
       ) : null}
 
       {/* 对话流 */}
-      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false}>
+      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (
@@ -877,6 +920,17 @@ export default function Chat() {
         ) : null}
         <View style={{ height: '20px' }} />
       </ScrollView>
+
+      {showJumpLatest ? (
+        <View
+          className={`jump-latest ${refs.length ? 'with-refs' : ''}`}
+          style={{ borderColor: accent }}
+          onClick={scrollToEnd}
+        >
+          <Text style={{ color: accent }}>回到最新</Text>
+          <Icon name="chevron" size={14} color={accent} />
+        </View>
+      ) : null}
 
       {/* 已选引用 */}
       {refs.length ? (

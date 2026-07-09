@@ -29,6 +29,8 @@ export default defineAppConfig({
         'quickscan/index',
         'brandkit/index',
         'webview/index',
+        'command/index',
+        'reminders/index',
       ],
     },
   ],

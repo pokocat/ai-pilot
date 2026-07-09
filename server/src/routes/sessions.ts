@@ -44,26 +44,36 @@ export async function sessionRoutes(app: FastifyInstance) {
       orderBy: { updatedAt: 'desc' },
       include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 }, agent: true },
     });
-    return sessions.map((s) => {
-      const last = s.messages[0];
-      let snippet = '新对话';
-      if (last) {
-        const c = last.contentJson as { text?: string; title?: string };
-        snippet = c.text || (c.title ? `已产出《${c.title}》` : '已回复');
-      }
-      return {
-        id: s.id,
-        agentKey: s.agentKey,
-        agentName: s.agent.name,
-        agentIcon: s.agent.icon,
-        title: s.title,
-        snippet,
-        updatedAt: s.updatedAt,
-        projectId: s.projectId,
-        // 未读：最后一条是 AI 回复且晚于 lastReadAt（退出后台生成完即置——列表红点提示）。
-        hasUnread: !!last && (last.role === 'assistant' || last.role === 'report') && (!s.lastReadAt || last.createdAt > s.lastReadAt),
-      };
-    });
+    const EPOCH = new Date(0);
+    // V7-15 未读数强化：unreadCount = 自 lastReadAt 起的 assistant 消息计数（服务端算；user/report/system 不计）。
+    // 每会话一条 count（会话数远小于消息数，且计数下推到 SQL），均经 session 关系按 userId 收窄——严格 user 域内。
+    return Promise.all(
+      sessions.map(async (s) => {
+        const last = s.messages[0];
+        let snippet = '新对话';
+        if (last) {
+          const c = last.contentJson as { text?: string; title?: string };
+          snippet = c.text || (c.title ? `已产出《${c.title}》` : '已回复');
+        }
+        const unreadCount = await prisma.message.count({
+          where: { session: { id: s.id, userId: user.id }, role: 'assistant', createdAt: { gt: s.lastReadAt ?? EPOCH } },
+        });
+        return {
+          id: s.id,
+          agentKey: s.agentKey,
+          agentName: s.agent.name,
+          agentIcon: s.agent.icon,
+          title: s.title,
+          snippet,
+          updatedAt: s.updatedAt,
+          projectId: s.projectId,
+          unreadCount,
+          // 未读红点（保留兼容既有消费者）：有未读 assistant（=unreadCount>0），或尾条为未读 report
+          //（后台产出即置——列表红点提示，见 generate* 的 role='report' 落库）。
+          hasUnread: unreadCount > 0 || (!!last && last.role === 'report' && (!s.lastReadAt || last.createdAt > s.lastReadAt)),
+        };
+      }),
+    );
   });
 
   // 会话详情（还原全部历史消息）

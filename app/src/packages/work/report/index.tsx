@@ -5,15 +5,29 @@ import Icon from '../../../components/Icon';
 import MarkdownText from '../../../components/MarkdownText';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
+import { store } from '../../../services/store';
+import { acceptDeliverable, refreshDossier, ordersOf, today, type DossierOrder } from '../../../services/dossier';
 import { api, type ReportDetail, type ReportVersionContent, type ReportDiff } from '../../../services/api';
 import './index.scss';
+
+// 编号章节用中文序号（设计规格 §9.1：一 / 二 / 三 / 四）。
+const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+// 同步为军令兜底军令（真实案卷军令缺省时，设计规格 §9.2）。
+const SYNC_FALLBACK: { text: string; tag: string }[] = [
+  { text: '上传近 30 天成交漏斗表', tag: '待补' },
+  { text: '重做案例证明', tag: '今日' },
+  { text: '只投 3 个高意向主题', tag: '本周' },
+];
 
 function fmt(iso: string): string {
   const d = new Date(iso);
   return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
+function coverKicker(type: string, title: string): string {
+  return /季度/.test(`${type}${title}`) ? 'QUARTER PLAN · 执行中' : 'STRATEGY REPORT · 可查看';
+}
 
-// 版本化报告：版本时间线 + 查看某一版内容 + 与上一版的 section 级差异。
+// 版本化报告：版本时间线 + 查看某一版内容（深绿封面 + 编号章节）+ 与上一版 section 级差异 + 同步为军令。
 export default function Report() {
   const router = useRouter();
   const s = useStore();
@@ -24,8 +38,12 @@ export default function Report() {
   const [mode, setMode] = useState<'content' | 'diff'>('content');
   const [content, setContent] = useState<ReportVersionContent | null>(null);
   const [diff, setDiff] = useState<ReportDiff | null>(null);
-
   const [failed, setFailed] = useState(false);
+
+  // V7-09：同步为军令。
+  const [synced, setSynced] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncOrders, setSyncOrders] = useState<DossierOrder[]>([]);
 
   useEffect(() => {
     if (!id) { setFailed(true); return; }
@@ -45,16 +63,43 @@ export default function Report() {
     }
   }, [id, sel, mode]);
 
+  // 已同步检测：案卷标题与报告一致且今日已有军令 → 视为已同步。
+  useEffect(() => {
+    if (!detail) return;
+    refreshDossier().then((d) => {
+      if (d && d.title === detail.title && ordersOf(d, today()).length) setSynced(true);
+    }).catch(() => { /* noop */ });
+  }, [detail?.id]);
+
+  useEffect(() => {
+    store.setOverlay(syncOpen, 'command-sync');
+    return () => store.setOverlay(false, 'command-sync');
+  }, [syncOpen]);
+
+  const sync = async () => {
+    let c = content;
+    if (!c) c = await api.reportVersion(id, sel || (detail?.currentVersion ?? 1)).catch(() => null);
+    if (!c || !detail) { Taro.showToast({ title: '报告内容加载失败，请重试', icon: 'none' }); return; }
+    const r = await acceptDeliverable(c.content, detail.agentName || '军师').catch(() => null);
+    if (!r) { Taro.showToast({ title: '同步失败，请重试', icon: 'none' }); return; }
+    setSynced(true);
+    setSyncOrders(ordersOf(r.dossier, today()));
+    setSyncOpen(true);
+  };
+  const goStudio = () => { setSyncOpen(false); Taro.switchTab({ url: '/pages/studio/index' }); };
+
   if (!detail) {
     return (
       <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-        <SafeHeader title="方案" onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
+        <SafeHeader title="报告" onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
         <View className="rp-loading">
-          <Text>{failed ? '方案加载失败，请返回重试' : '加载中…'}</Text>
+          <Text>{failed ? '报告加载失败，请返回重试' : '加载中…'}</Text>
         </View>
       </View>
     );
   }
+
+  const orders = syncOrders.length ? syncOrders.map((o) => ({ text: o.text, tag: o.dueAt || o.tag || '待执行' })) : SYNC_FALLBACK;
 
   return (
     <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -83,13 +128,23 @@ export default function Report() {
         </View>
 
         {mode === 'content' && content && (
-          <View className="rp-card card">
-            <View className="rp-card-h"><Icon name={(content.content as any).icon || 'doc'} size={18} color={accent} /><View><Text className="rp-card-t">{content.title}</Text><Text className="rp-card-m">{content.content.meta} · v{content.version}</Text></View></View>
+          <View className="rp-reader">
+            {/* 深绿封面 */}
+            <View className="report-cover">
+              <Text className="rc-k">{coverKicker(detail.type, detail.title)}</Text>
+              <Text className="rc-t serif">{content.title}</Text>
+              <Text className="rc-m">{content.content.meta} · v{content.version}</Text>
+            </View>
+
+            {/* 报告主判断引用 */}
+            {content.content.trust ? <Text className="report-quote serif">{content.content.trust}</Text> : null}
+
+            {/* 编号章节 一 / 二 / 三 / 四 */}
             {content.content.sections.map((sec, i) => (
-              <View key={i} className="rp-sec">
-                <Text className="rp-sh"><Text className="rp-no" style={{ background: accent }}>{i + 1}</Text>{sec.h}</Text>
-                {sec.b ? <MarkdownText text={sec.b} className="rp-sb" /> : null}
-                {sec.list ? sec.list.map((x, j) => <View key={j} className="rp-li"><View className="dot" style={{ background: accent }} /><MarkdownText text={x} className="rp-li-t" /></View>) : null}
+              <View key={i} className="report-section card">
+                <Text className="rs-h serif"><Text className="rs-no" style={{ color: accent }}>{CN[i] || `${i + 1}`}</Text>{sec.h}</Text>
+                {sec.b ? <MarkdownText text={sec.b} className="rs-b" /> : null}
+                {sec.list ? sec.list.map((x, j) => <View key={j} className="rs-li"><View className="rs-dot" style={{ background: accent }} /><MarkdownText text={x} className="rs-li-t" /></View>) : null}
               </View>
             ))}
           </View>
@@ -128,7 +183,47 @@ export default function Report() {
           ) : <View className="rp-loading"><Text>计算差异中…</Text></View>
         )}
       </View>
-      <View style={{ height: '24px' }} />
+      <View style={{ height: '96px' }} />
+
+      {/* 底部：同步为军令 / 已同步 → 查看军令 */}
+      <View className="rp-syncbar">
+        {synced ? (
+          <View className="rp-sync-btn done" onClick={goStudio}><Text>已同步 → 查看军令</Text></View>
+        ) : (
+          <View className="rp-sync-btn" style={{ background: accent }} onClick={sync}><Text>同步为军令</Text></View>
+        )}
+      </View>
+
+      {/* 军令同步屏（半屏） */}
+      {syncOpen ? (
+        <View className="cs-mask" onClick={() => setSyncOpen(false)} catchMove>
+          <View className="cs-sheet" onClick={(e) => e.stopPropagation()}>
+            <View className="cs-grip" />
+            <View className="cs-hero">
+              <View className="cs-check" style={{ background: accent }}><Text>✓</Text></View>
+              <Text className="cs-t serif">报告已同步为今日军令</Text>
+              <Text className="cs-d">已把「{detail.title}」里的判断拆成执行动作，并同步到执行页、报告库和今晚 20:30 复盘。</Text>
+            </View>
+            <View className="cs-flow">
+              <Text className="cs-flow-i">报告</Text><Text className="cs-arr">→</Text>
+              <Text className="cs-flow-i on">军令</Text><Text className="cs-arr">→</Text>
+              <Text className="cs-flow-i">复盘</Text>
+            </View>
+            <View className="cs-list">
+              {orders.map((o, i) => (
+                <View key={i} className="cs-cmd">
+                  <View className="cs-cmd-b"><Text className="cs-cmd-t">{o.text}</Text></View>
+                  <Text className="cs-cmd-due">{o.tag}</Text>
+                </View>
+              ))}
+            </View>
+            <View className="cs-actions">
+              <View className="cs-secondary" onClick={() => setSyncOpen(false)}><Text>留在这里</Text></View>
+              <View className="cs-primary" style={{ background: accent }} onClick={goStudio}><Text>去执行</Text></View>
+            </View>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }

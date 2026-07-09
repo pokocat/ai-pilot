@@ -1,5 +1,6 @@
 import { prisma } from '../db.js';
 import { loadStrategicProfile, loadForces } from './strategicProfile.js';
+import { loadBattleForces, battleForcesLine } from './forces.js';
 import type { ClientUnderstanding, ClientUnderstandingSection } from '../../../shared/contracts';
 
 type UserForUnderstanding = {
@@ -186,6 +187,7 @@ export async function buildClientUnderstanding(user: UserForUnderstanding): Prom
   // 战略档案真结论（战局 hero 优先展示「主要矛盾」而非通用摘要，修 hero 标签与内容不符）
   const strategic = await loadStrategicProfile(user.id).catch(() => null);
   const forces = await loadForces(user.id).catch(() => null); // L-6：市势/人势研判结论
+  const battle = await loadBattleForces(user.id).catch(() => null); // V7-04：结构化三势
 
   return {
     title: TITLE,
@@ -195,6 +197,8 @@ export async function buildClientUnderstanding(user: UserForUnderstanding): Prom
     mainContradiction: strategic?.mainContradiction || null,
     positioning: strategic?.positioning || null,
     forces,
+    battleForces: battle?.forces ?? null,
+    battleForcesAt: battle?.at ?? null,
     sections,
     nextQuestions: nextQuestions.slice(0, 4),
     evidenceCount,
@@ -207,6 +211,8 @@ export function understandingContextLines(understanding: ClientUnderstanding): s
   for (const s of understanding.sections) {
     if (s.items.length) lines.push(`${s.title}：${s.items.join('；')}`);
   }
+  const forcesLine = battleForcesLine(understanding.battleForces ?? null); // V7-04：三势摘要（禁 AI 自算）
+  if (forcesLine) lines.push(forcesLine);
   if (understanding.nextQuestions.length) lines.push(`待补问题：${understanding.nextQuestions.join('；')}`);
   return lines;
 }

@@ -41,6 +41,10 @@ export interface GenContext {
   strategicLine?: string | null;
   // 决策账本（M2 PR-7）：近期决策 + 服务端准确率块，无记录不注入。
   decisionLine?: string | null;
+  // V7-10：目标阶梯（客户确认，跨期沿用），无则不注入。
+  goalsLine?: string | null;
+  // V7-07：已接入数据源清单（军师知道有哪些真实证据可要），无则不注入。
+  dataSourceLine?: string | null;
   // 复盘账本（M2 PR-8）：连续复盘天数 + 最近复盘快照块，无记录不注入。
   reviewLine?: string | null;
   // 天机账本（M2 PR-9）：待验证预言 + 命中率块，无记录不注入。
@@ -300,6 +304,7 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
 
   const blocks: string[] = [];
   if (ctx.strategicLine) blocks.push(ctx.strategicLine); // 战略档案：已确认事实，放在推断的客户档案之前
+  if (ctx.goalsLine) blocks.push(`【目标阶梯（客户确认，跨期沿用）】\n${ctx.goalsLine}`); // V7-10
   if (ctx.decisionLine) blocks.push(ctx.decisionLine);   // 决策账本：系统计数（准确率等禁止 AI 自算）
   if (ctx.reviewLine) blocks.push(ctx.reviewLine);       // 复盘账本：连续天数/对齐率（系统计数）
   if (ctx.prophecyLine) blocks.push(ctx.prophecyLine);   // 天机账本：预言/命中率（系统计数）
@@ -307,6 +312,7 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   if (ctx.benchmarkLine) blocks.push(ctx.benchmarkLine); // 行业基准：DB 分位数（WO-08；数字以此为准，禁自算）
   if (ctx.bizMetricLine) blocks.push(ctx.bizMetricLine); // 经营序列：本周实报 + 与基准差（WO-10；差由系统算）
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
+  if (ctx.dataSourceLine) blocks.push(ctx.dataSourceLine); // V7-07：已接入数据源清单（军师可据此要证据）
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);
   if (ctx.references?.length) blocks.push(`【用户引用的资料（请优先采纳并标注出处）】\n${ctx.references.join('\n')}`);
   if (ctx.knowledge?.length) blocks.push(`【知识库相关召回（仅供参考）】\n${ctx.knowledge.join('\n')}`);
