@@ -9,6 +9,7 @@ import { loadDossier, generateDossier } from '../services/dossier.js';
 import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
+import { ensureInviteCode, buildServiceView } from '../services/community.js';
 
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -27,6 +28,8 @@ export async function metaRoutes(app: FastifyInstance) {
     const understanding = await buildClientUnderstanding(user);
     const quota = await getQuotaState(user.id); // 本月 token 额度（客户端只看进度 %）
     const planStatus = await getPlanStatus(user.id); // 套餐状态：驱动前端只读模式 + 到期日/剩余天数/下次额度重置日
+    const inviteCode = await ensureInviteCode(user.id).catch(() => undefined); // V7-13：邀请码（惰性生成）
+    const service = await buildServiceView(user.id).catch(() => null); // V7-13：社群服务分配
     return {
       user: {
         id: user.id,
@@ -50,6 +53,8 @@ export async function metaRoutes(app: FastifyInstance) {
       onboarded,
       ai: await providerInfo(),
       understanding,
+      inviteCode,
+      service,
     };
   });
 

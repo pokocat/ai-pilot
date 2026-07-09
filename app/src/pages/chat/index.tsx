@@ -137,7 +137,7 @@ export default function Chat() {
     if (isUnauthorized(e)) return '登录态已失效，请重新登录后再发送。';
     if ((e as any)?.data?.code === 'AGENT_LOCKED') return '该专项顾问尚未启用，请到「智库 / 工坊」查看可用方案。';
     if ((e as any)?.data?.code === 'INSUFFICIENT_QUOTA') return '本月 token 额度已用尽，请在「我的」升级套餐或下月再用。';
-    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '钻石不足，请在「我的」充值或解锁后再继续。';
+    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '算力不足，请在「我的」充值或解锁后再继续。';
     const msg = String((e as any)?.message || '');
     if (msg && msg !== 'undefined') return msg;
     return '抱歉，产出失败了，请稍后再试。';

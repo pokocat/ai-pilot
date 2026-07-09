@@ -212,7 +212,9 @@ export interface ClientUnderstanding {
   summary: string;
   mainContradiction?: string | null; // 战略档案里的主要矛盾（战局 hero 优先展示真结论，而非通用摘要）
   positioning?: string | null;       // 战略定位（可选展示）
-  forces?: ForcesView | null;        // L-6：市势/人势研判结论（军情页三势卡回显）
+  forces?: ForcesView | null;        // L-6：市势/人势研判结论（军情页三势卡回显，保留兼容）
+  battleForces?: BattleForce[] | null; // V7-04：结构化三势（天势/市势/人势，战局页三势卡真实渲染）
+  battleForcesAt?: string | null;    // V7-04：三势最近生成时间
   sections: ClientUnderstandingSection[];
   nextQuestions: string[];
   evidenceCount: { profile: number; memories: number; projects: number; knowledge: number; sessions: number };
@@ -319,6 +321,8 @@ export interface Me {
   onboarded?: boolean;
   ai: AiInfo;
   understanding?: ClientUnderstanding;
+  inviteCode?: string;             // V7-13：邀请码（惰性生成）
+  service?: ServiceAssignmentView | null; // V7-13：社群服务分配（无则 null）
 }
 
 export interface LoginRequest { phone: string; name?: string; code?: string; }
@@ -406,6 +410,7 @@ export interface SessionItem {
   title: string; snippet: string; updatedAt: string;
   projectId?: string | null; // 归属项目（无则散落）
   hasUnread?: boolean; // 有未读 AI 回复（列表红点；退出后台生成完即置 true，打开会话即清）
+  unreadCount?: number; // V7-15：未读 assistant 消息数（自 lastReadAt 起，服务端算；hasUnread 保留兼容）
 }
 export interface SessionMessage {
   id: string; role: string; content: any; at: string;
@@ -671,6 +676,19 @@ export interface PlanPurchaseResult {
   grantedCredits: number;
   grantedTokens?: number; // 本次授予/重置的月度 token 额度
 }
+/** 小程序调起 wx.requestPayment 的参数（server 侧 RSA 签名产出）。 */
+export interface WechatPayParams { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string; }
+
+/* ────────────── V7-12：单次付费商品（SKU） ────────────── */
+export type SkuKind = 'module' | 'service' | 'storage';
+/** 单次付费商品（GET /skus，公开）。kind=module 启用能力 | service 一次性服务 | storage 空间包。 */
+export interface SkuView {
+  key: string; name: string; desc: string; priceFen: number;
+  kind: SkuKind; grantsModuleKey?: string | null;
+}
+/** 下单结果（POST /skus/:key/order）。payParams 走 wx.requestPayment；demo=演示发放（未配支付时）。 */
+export interface SkuOrderResult { orderId: string; payParams?: WechatPayParams; demo?: boolean; }
+
 /** 微信支付下单结果（POST /plans/:id/order）：小程序据 pay 调起 wx.requestPayment */
 export interface WechatOrderResult {
   ok: true;
@@ -1033,3 +1051,137 @@ export interface FateCardContent {
   trend: string;    // 今年大势
   advice: string;   // 一条核心建议
 }
+
+/* ════════════════════════════════════════════════════════════
+ *  V7 · 新版效果图对齐（战局三势 / 军令结构化 / 智库管道 / 数据源 / 模块 / 目标 / 提醒 / 社群 / 搜索）
+ * ════════════════════════════════════════════════════════════ */
+
+/* ── V7-04：三势结构化 + 战局「认可判断」一键生成 ── */
+export type ForceKind = 'sky' | 'market' | 'people';       // 天势 / 市势 / 人势
+export type ForceLevel = 'strong' | 'mid' | 'weak';
+export type ForceTone = 'ok' | 'warn' | 'danger';
+/** 单条势（战局三势卡）。strength 由服务端按 level+基准映射，前端只渲染进度条（禁止 AI 自算百分比）。 */
+export interface BattleForce {
+  kind: ForceKind;
+  level: ForceLevel;
+  conclusion: string;   // 一句结论，如「行业上行」
+  tactic: string;       // 打法，如「可以借势」
+  tacticTone: ForceTone;
+  note: string;         // 一句说明
+  strength: number;     // 0-100
+}
+/** 战局「认可判断 → 生成军令与报告」一键结果。 */
+export interface BattleCommitResult {
+  reportId: string; reportSlug: string; version: number;
+  libraryId: string | null;
+  newOrders: number;
+  alreadyDone: boolean; // 今日已 commit → 幂等返回上次
+}
+
+/* ── V7-05：军令结构化字段（挂 DossierOrder / 服务端军令视图，全部可选，缺省不渲染） ── */
+export type OrderActionType = 'upload' | 'backfill' | 'review' | 'topics' | 'none';
+export interface OrderMetric { label: string; value: string; }
+export interface OrderStructuredFields {
+  ownerName?: string | null;
+  dueAt?: string | null;
+  etaMinutes?: number | null;
+  sourceQuote?: string | null;
+  steps?: string[];
+  metrics?: OrderMetric[];
+  actionType?: OrderActionType;
+}
+
+/* ── V7-06：智库三段式资料整理管道 ── */
+export type KnowledgeStage = 'staging' | 'optimized' | 'confirmed';
+export interface KnowledgePipelineFolder { key: string; label: string; count: number; stage: KnowledgeStage; }
+export interface KnowledgeBatchTypeStat { label: string; count: number; }
+export interface KnowledgeBatch {
+  id: string; count: number;
+  status: 'uploaded' | 'organizing' | 'organized';
+  typeStats: KnowledgeBatchTypeStat[];
+}
+export interface KnowledgePipelineView {
+  counts: { staging: number; optimized: number; confirmed: number };
+  quota: { usedDocs: number; freeDocs: number; usedBytes: number; freeBytes: number };
+  folders: KnowledgePipelineFolder[];
+  batches: KnowledgeBatch[];
+}
+/** POST /knowledge/organize 结果（AI 粗分 + 去重）。 */
+export interface OrganizeResult { batchId: string; status: 'organized' | 'organizing'; total: number; dedup: number; folders: KnowledgePipelineFolder[]; deep?: boolean; }
+/** POST /knowledge/confirm 结果（optimized/staging → confirmed 并嵌入）。 */
+export interface ConfirmResult { count: number; ingested: number; ids: string[]; }
+/** 智库上传（staged=true 走待整理区）返回。 */
+export interface StagedUploadResult { id: string; status: string; stage?: KnowledgeStage; batchId?: string; }
+
+/* ── V7-07：数据源状态持久化 ── */
+export type DataSourceStatus = 'unbound' | 'auth_requested' | 'uploaded' | 'bound';
+export interface DataSourceView {
+  key: string; label: string; desc: string; icon: string;
+  scope: string[];                   // 读取范围 chips
+  tier: 'basic' | 'advanced';
+  status: DataSourceStatus; statusLabel: string; updatedAt?: string;
+}
+export interface DataSourcesView {
+  bound: number; needed: number; total: number; // hero 三指标（服务端算）
+  sources: DataSourceView[];
+}
+
+/* ── V7-08：能力/模块中心 ── */
+export type ModuleTier = 'free' | 'sku' | 'credits' | 'member';
+export type ModuleGroup = 'free' | 'deep' | 'member';
+export interface ModuleDetail { scene: string; input: string; output: string; cost: string; writeback: string; }
+export interface ModulePrice { skuKey?: string; priceFen?: number; credits?: number; planRequired?: boolean; }
+export interface ModuleView {
+  key: string; label: string; desc: string; iconChar: string;
+  group: ModuleGroup;
+  tier: ModuleTier;
+  price?: ModulePrice;
+  stateLabel: string;                // 「默认启用 / ¥29 启用 / 消耗 80 算力 / 会员可用 / 已启用」
+  enabled: boolean; hidden: boolean; sortOrder: number;
+  detail: ModuleDetail;
+  agentKey?: string | null;          // 免费能力「立即调用」承接军师
+}
+export interface ModulesView { recommended: ModuleView | null; modules: ModuleView[]; }
+
+/* ── V7-10：目标阶梯 ── */
+export interface GoalLadder {
+  longTerm?: string | null;   // 3-5 年
+  annual?: string | null;     // 年度
+  quarterly?: string | null;  // 季度
+  weekly?: string | null;     // 本周
+  updatedAt?: string | null;
+}
+
+/* ── V7-11：提醒体系 ── */
+export type ReminderKind = 'order' | 'review' | 'weekly' | 'custom';
+export interface ReminderItem {
+  key: string; time: string; title: string; desc: string;
+  kind: ReminderKind; subscribed: boolean;
+}
+export interface ReminderView {
+  items: ReminderItem[];
+  subscribeReady: boolean; // 是否已配置订阅模板
+}
+
+/* ── V7-13：社群服务分配 + 档案工作台 ── */
+export interface ServiceAssignmentView {
+  teacherName: string; teacherWechat: string; className: string;
+  groupQrUrl: string; taskDone: number; taskTotal: number; note: string;
+}
+export interface WorkbenchSection { key: string; label: string; hint: string; count: number; ready: boolean; }
+export interface WorkbenchMissing { key: string; title: string; desc: string; }
+export interface WorkbenchView {
+  completeness: number;              // 案卷完整度 %
+  sections: WorkbenchSection[];      // 4 分区（份数=bizCategory 真实计数）
+  missing: WorkbenchMissing[];       // 当前最该补（understanding.nextQuestions 派生）
+}
+/** 运营端设置社群服务（PUT /admin/users/:id/service） */
+export interface ServiceAssignmentUpdate {
+  teacherName?: string; teacherWechat?: string; className?: string;
+  groupQrUrl?: string; taskDone?: number; taskTotal?: number; note?: string;
+}
+
+/* ── V7-14：跨域搜索 ── */
+export type SearchHitKind = 'agent' | 'session' | 'report' | 'knowledge';
+export interface SearchHit { kind: SearchHitKind; id: string; title: string; snippet: string; route: string; }
+export interface SearchResult { q: string; hits: SearchHit[]; }

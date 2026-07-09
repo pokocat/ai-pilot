@@ -1,0 +1,48 @@
+.exception-mask {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(15, 17, 20, .55);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.exception-sheet {
+  width: 100%; max-width: 600px; max-height: 84vh;
+  background: var(--bg, #fff);
+  border-radius: 22px 22px 0 0;
+  padding: 10px 22px calc(22px + env(safe-area-inset-bottom)) 22px;
+  display: flex; flex-direction: column; align-items: stretch;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
+}
+.ex-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 auto 16px; }
+
+.exception-hero {
+  padding: 18px; border-radius: 21px;
+  background: rgba(156, 74, 56, .07);
+  border: 1px solid rgba(156, 74, 56, .16);
+}
+.ex-kicker { font-size: 11px; font-weight: 900; letter-spacing: .14em; color: var(--danger); }
+.ex-title { display: block; font-size: 22px; font-weight: 700; color: var(--ink); margin-top: 8px; line-height: 1.3; }
+.ex-desc { display: block; font-size: 12.5px; font-weight: 650; color: var(--ink-2); line-height: 1.55; margin-top: 8px; }
+
+.detail-mini-grid {
+  margin-top: 14px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.dm-cell {
+  padding: 12px 13px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.dm-k { font-size: 11px; color: var(--ink-3); }
+.dm-v { font-size: 12.5px; font-weight: 700; color: var(--ink); line-height: 1.45; }
+
+.exception-actions { display: flex; gap: 12px; margin-top: 18px; }
+.ex-secondary {
+  flex: 0 0 96px; height: 48px; border-radius: 14px;
+  background: var(--surface-2); color: var(--ink-2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14.5px; font-weight: 600;
+}
+.ex-primary {
+  flex: 1; height: 48px; border-radius: 14px; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14.5px; font-weight: 700;
+}

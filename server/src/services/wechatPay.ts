@@ -16,7 +16,7 @@
 import { createSign, createVerify, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { applyPlanPurchase } from './purchase.js';
+import { applyPlanPurchase, applySkuGrant } from './purchase.js';
 import { sandboxEnabled } from './sandbox.js';
 
 const PAY_BASE = 'https://api.mch.weixin.qq.com';
@@ -81,11 +81,16 @@ export interface CreateOrderResult {
  */
 export async function createJsapiOrder(args: {
   user: { id: string; tenantId: string };
-  plan: { id: string; name: string; price: number };
+  plan?: { id: string; name: string; price: number };  // 套餐订单
+  sku?: { key: string; name: string; priceFen: number }; // V7-12：单次付费商品订单（与 plan 二选一）
   openid: string;
   amount?: number;
 }): Promise<CreateOrderResult> {
-  const total = args.amount ?? args.plan.price;
+  const itemName = args.plan?.name ?? args.sku?.name ?? '专项能力';
+  const itemPrice = args.plan?.price ?? args.sku?.priceFen ?? 0;
+  const planId = args.plan?.id ?? '';
+  const skuKey = args.sku?.key ?? null;
+  const total = args.amount ?? itemPrice;
   const outTradeNo = genOutTradeNo();
 
   // 沙箱（可测性 D9）：跳过真实微信下单，落 provider='mock' 单 + 返回合成调起参数（不签名）。
@@ -93,7 +98,7 @@ export async function createJsapiOrder(args: {
   if (sandboxEnabled()) {
     await prisma.paymentOrder.create({
       data: {
-        outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId: args.plan.id,
+        outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
         amount: total, provider: 'mock', status: 'created',
       },
     });
@@ -106,7 +111,7 @@ export async function createJsapiOrder(args: {
   const c = cfg();
   await prisma.paymentOrder.create({
     data: {
-      outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId: args.plan.id,
+      outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
       amount: total, provider: 'wechat', status: 'created',
     },
   });
@@ -116,7 +121,7 @@ export async function createJsapiOrder(args: {
   const body = JSON.stringify({
     appid: c.appId,
     mchid: c.mchId,
-    description: `军师 · ${args.plan.name}`,
+    description: `军师 · ${itemName}`,
     out_trade_no: outTradeNo,
     time_expire: timeExpire,
     notify_url: c.notifyUrl,
@@ -213,14 +218,27 @@ export async function markPaidAndApply(parsed: {
     });
     if (claim.count !== 1) return { applied: false, reason: 'already_applied' };
 
-    const plan = await tx.plan.findUnique({ where: { id: order.planId } });
-    if (!plan) return { applied: false, reason: 'plan_not_found' };
-    await applyPlanPurchase(
-      { id: order.userId, tenantId: order.tenantId },
-      plan,
-      { reason: `${plan.name} · ${source === 'wechat_pay_sandbox' ? '微信支付(沙箱)' : '微信支付'}`, source },
-      tx,
-    );
+    const payLabel = source === 'wechat_pay_sandbox' ? '微信支付(沙箱)' : '微信支付';
+    if (order.skuKey) {
+      // V7-12：单次付费商品 → 发放对应权益（模块启用/一次性服务/空间加档）。
+      const sku = await tx.sku.findUnique({ where: { key: order.skuKey } });
+      if (!sku) return { applied: false, reason: 'sku_not_found' };
+      await applySkuGrant(
+        { id: order.userId, tenantId: order.tenantId },
+        { key: sku.key, name: sku.name, kind: sku.kind, grantsModuleKey: sku.grantsModuleKey, metaJson: sku.metaJson },
+        { reason: `${sku.name} · ${payLabel}`, source },
+        tx,
+      );
+    } else {
+      const plan = await tx.plan.findUnique({ where: { id: order.planId } });
+      if (!plan) return { applied: false, reason: 'plan_not_found' };
+      await applyPlanPurchase(
+        { id: order.userId, tenantId: order.tenantId },
+        plan,
+        { reason: `${plan.name} · ${payLabel}`, source },
+        tx,
+      );
+    }
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
     return { applied: true };

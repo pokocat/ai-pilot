@@ -1,0 +1,71 @@
+/* 军令详情 —— 对齐设计稿 §5.4：command-detail / command-source / command-step / command-metrics / command-action-card */
+
+.command-page { background: var(--bg); }
+.cmd-loading { padding: 80px 24px 0; text-align: center; color: var(--ink-3); font-size: 14px; }
+
+.command-detail { padding-top: 6px; }
+
+/* —— 头部 —— */
+.command-detail-head { padding: 2px 0; }
+.cd-kicker { display: block; color: var(--gold-deep); font-size: 12px; font-weight: 600; letter-spacing: .12em; }
+.cd-title { display: block; margin-top: 12px; color: var(--ink); font-size: 23px; font-weight: 700; line-height: 1.4; }
+.cd-desc { display: block; margin-top: 10px; color: var(--ink-2); font-size: 13px; font-weight: 600; line-height: 1.55; }
+
+/* —— 来源引用（3px 绿左边框） —— */
+.command-source {
+  display: block; margin-top: 16px; padding: 13px 14px;
+  border-left: 3px solid var(--green); border-radius: 12px;
+  background: rgba(30, 90, 67, .07);
+  color: var(--ink); font-family: var(--serif); font-size: 15px; font-weight: 600; line-height: 1.6;
+}
+
+/* —— 准备 / 处理 / 回写 三步 —— */
+.command-step-list { margin-top: 18px; }
+.command-step { display: flex; align-items: flex-start; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+.command-step:last-child { border-bottom: 0; }
+.cs-no {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--green); color: #fff; font-size: 12.5px; font-weight: 600;
+}
+.cs-body { flex: 1; min-width: 0; }
+.cs-role { display: block; color: var(--green); font-size: 12px; font-weight: 600; }
+.cs-text { display: block; margin-top: 4px; color: var(--ink-2); font-size: 13.5px; line-height: 1.55; }
+
+/* —— 指标三格 —— */
+.command-metrics { display: flex; gap: 9px; margin-top: 18px; }
+.cm-cell {
+  flex: 1; box-sizing: border-box; min-height: 66px;
+  padding: 13px 8px 11px; border-radius: 15px; text-align: center;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.cm-v { display: block; color: var(--green); font-size: 18px; font-weight: 700; line-height: 1.2; }
+.cm-l { display: block; margin-top: 6px; color: var(--ink-3); font-size: 10.5px; font-weight: 600; line-height: 1.35; }
+
+/* —— 下一步动作卡（金左边框） —— */
+.command-action-card {
+  position: relative;
+  margin-top: 18px; padding: 16px;
+  border-left: 4px solid var(--gold); border-radius: 17px;
+  background: rgba(255, 252, 246, .94);
+  box-shadow: 0 16px 34px rgba(42, 36, 20, .08);
+}
+.command-action-card:active { opacity: .85; }
+.ca-tag {
+  position: absolute; top: 16px; right: 16px;
+  padding: 4px 9px; border-radius: 999px;
+  color: var(--gold-deep); background: var(--gold-soft);
+  font-size: 10.5px; font-weight: 600;
+}
+.ca-label { display: block; padding-right: 56px; color: var(--ink); font-size: 16px; font-weight: 700; line-height: 1.4; }
+.ca-hint { display: block; margin-top: 6px; color: var(--ink-3); font-size: 12.5px; line-height: 1.55; }
+
+/* —— 主行动 —— */
+.command-cta {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 48px; margin-top: 22px; border-radius: 15px;
+  color: #FBFAF6; font-size: 14px; font-weight: 600;
+  background: linear-gradient(135deg, var(--green), var(--green-deep));
+  box-shadow: 0 12px 24px rgba(30, 90, 67, .2);
+}
+.command-cta:active { opacity: .85; }

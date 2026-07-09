@@ -159,18 +159,19 @@ model User {
   // planExpiresAt   = 绝对 UTC 到期时间；null = 不到期（免费层 / 企业版私有化 / 历史 grandfather 用户）。
   planActivatedAt DateTime?
   planExpiresAt   DateTime?
+  inviteCode      String?   @unique // V7-13：邀请码（首次读取惰性生成 = "JS"+4 位 base32，跨用户唯一）
   createdAt       DateTime  @default(now())
   wechatLinkedAt  DateTime?
 
-  tenant       Tenant         @relation(fields: [tenantId], references: [id])
-  plan         Plan?          @relation(fields: [planId], references: [id])
-  sessions     Session[]
-  deliverables Deliverable[]
-  memories     Memory[]
-  credits      CreditLedger[]
-  agents       UserAgent[] // 已开通的智能体（赠送 / 购买 / 后台开通）
-  tokenUsages  TokenUsage[]
-  tokenWallet  TokenWallet?
+  tenant              Tenant                  @relation(fields: [tenantId], references: [id])
+  plan                Plan?                   @relation(fields: [planId], references: [id])
+  sessions            Session[]
+  deliverables        Deliverable[]
+  memories            Memory[]
+  credits             CreditLedger[]
+  agents              UserAgent[] // 已开通的智能体（赠送 / 购买 / 后台开通）
+  tokenUsages         TokenUsage[]
+  tokenWallet         TokenWallet?
   wechatSubscriptions WechatSubscription[]
   wechatNotifications WechatNotificationLog[]
 
@@ -362,17 +363,17 @@ model UserAgent {
 
 /// 会话（按 用户×智能体 隔离，可回溯；可归属项目）
 model Session {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   tenantId           String
   userId             String
   agentKey           String
   projectId          String? // 归属项目（散落会话为 null）
-  title              String   @default("新对话")
+  title              String    @default("新对话")
   difyConversationId String? // Dify 应用多轮上下文 id（providerMode=dify 时由 Dify 返回并回写）
   mode               String? // 会话模式（M3 PR-11 粘性）：'review:week' | 'urgent' | 'timing' | …；null=strategy
   lastReadAt         DateTime? // 未读判定：最后一条 AI 回复晚于此即未读；打开会话时置 now
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id])
   user         User          @relation(fields: [userId], references: [id])
@@ -524,25 +525,30 @@ model ReportVersion {
 
 /// 知识库条目（租户级，可挂项目）—— 统一承载：对话提炼 / 上传文档 / 报告引用
 model KnowledgeItem {
-  id         String   @id @default(cuid())
-  tenantId   String
-  projectId  String?
-  userId     String
-  kind       String // insight | document | decision | todo | report_ref
-  title      String?
-  text       String   @db.Text // 规范化文本（用于检索/注入）
-  sourceType String // conversation | upload | deliverable | manual
-  sourceId   String? // sessionId / reportVersionId / uploadId
-  tagsJson   Json     @default("[]")
+  id          String   @id @default(cuid())
+  tenantId    String
+  projectId   String?
+  userId      String
+  kind        String // insight | document | decision | todo | report_ref
+  title       String?
+  text        String   @db.Text // 规范化文本（用于检索/注入）
+  sourceType  String // conversation | upload | deliverable | manual
+  sourceId    String? // sessionId / reportVersionId / uploadId
+  tagsJson    Json     @default("[]")
+  // —— V7-06 三段式资料整理管道（加法，存量数据零迁移）——
+  stage       String   @default("confirmed") // staging 待整理（不进检索）| optimized 已优化（待确认）| confirmed 知识库（已嵌入）
+  bizCategory String? // AI 粗分业务类目 key（见 data/bizCategories.ts）
+  batchId     String? // 同批上传标识（整理动作以批为单位）
+  dupOfId     String? // 规则去重命中的原件 id（同名+同大小）
   // —— 文档上传管线（sourceType=upload）：解析状态 + 原件元信息 ——
-  status     String   @default("ready") // ready | parsing | embedding | failed（非上传项一律 ready）
-  fileName   String? // 原始文件名
-  fileType   String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
-  fileSize   Int? // 字节
-  fileKey    String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
-  error      String?  @db.Text // 解析/嵌入失败原因
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @default(now()) @updatedAt
+  status      String   @default("ready") // ready | parsing | embedding | failed（非上传项一律 ready）
+  fileName    String? // 原始文件名
+  fileType    String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
+  fileSize    Int? // 字节
+  fileKey     String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
+  error       String?  @db.Text // 解析/嵌入失败原因
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 
   tenant  Tenant           @relation(fields: [tenantId], references: [id])
   project Project?         @relation(fields: [projectId], references: [id])
@@ -550,6 +556,7 @@ model KnowledgeItem {
 
   @@index([tenantId, projectId])
   @@index([tenantId, userId])
+  @@index([tenantId, userId, stage]) // V7-06：按管道阶段取用
   @@map("knowledge_item")
 }
 
@@ -620,7 +627,8 @@ model PaymentOrder {
   outTradeNo    String    @unique // 商户订单号（我们生成，提交给微信）
   tenantId      String
   userId        String
-  planId        String
+  planId        String    @default("") // 套餐订单挂 planId；SKU 订单为空串
+  skuKey        String? // V7-12：单次付费商品订单挂 SKU key（与 planId 二选一）
   amount        Int // 应付金额（分）
   currency      String    @default("CNY")
   provider      String    @default("wechat") // wechat | mock（未配支付时的演示通道）
@@ -988,17 +996,17 @@ model SmsCode {
 /// 前端每次 requestSubscribeMessage accept，服务端给对应 scene/templateId 增加 1 次可发送额度；
 /// 发送成功后扣减，避免把用户拒绝或过期授权误当成长期触达能力。
 model WechatSubscription {
-  id             String    @id @default(cuid())
-  tenantId       String
-  userId         String
-  scene          String // review | report
-  templateId     String
-  status         String    @default("accept") // accept | reject | ban | filter
-  remaining      Int       @default(0)
-  acceptedAt     DateTime?
-  lastSentAt     DateTime?
-  updatedAt      DateTime  @updatedAt
-  createdAt      DateTime  @default(now())
+  id         String    @id @default(cuid())
+  tenantId   String
+  userId     String
+  scene      String // review | report
+  templateId String
+  status     String    @default("accept") // accept | reject | ban | filter
+  remaining  Int       @default(0)
+  acceptedAt DateTime?
+  lastSentAt DateTime?
+  updatedAt  DateTime  @updatedAt
+  createdAt  DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1039,6 +1047,7 @@ model Casefile {
   sourceAgent String   @default("军师") // 认可时的军师名
   judgment    String   @default("") @db.Text // 主判断（来自认可方案首段，战局 hero 读它）
   risksJson   Json // string[]：「现在不能做」风险锁
+  goalsJson   Json? // V7-10：目标阶梯 { longTerm?, annual?, quarterly?, weekly?, updatedAt? }
   status      String   @default("active") // active | archived
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -1053,18 +1062,26 @@ model Casefile {
 /// 军令：案卷拆出的每日行动（执行页打卡对象）。aligned 由 AI 拆解时标注
 /// 是否对齐主要矛盾（对齐率的分子来源）；手动录入为 null=未标注。
 model CasefileOrder {
-  id         String    @id @default(cuid())
-  tenantId   String
-  userId     String
-  casefileId String
-  date       String // YYYY-MM-DD：属于哪一天的军令
-  text       String    @db.Text
-  fromAgent  String    @default("我") // 来源：军师名 / 我
-  tag        String    @default("军令 · 自定") // 类别徽标
-  aligned    Boolean? // 是否对齐主要矛盾（null=未标注）
-  done       Boolean   @default(false)
-  doneAt     DateTime?
-  createdAt  DateTime  @default(now())
+  id          String    @id @default(cuid())
+  tenantId    String
+  userId      String
+  casefileId  String
+  date        String // YYYY-MM-DD：属于哪一天的军令
+  text        String    @db.Text
+  fromAgent   String    @default("我") // 来源：军师名 / 我
+  tag         String    @default("军令 · 自定") // 类别徽标
+  aligned     Boolean? // 是否对齐主要矛盾（null=未标注）
+  // V7-05：军令结构化字段（LLM 拆解或启发式缺省填充，全部加法可空）
+  ownerName   String? // 负责人（缺省=用户称呼）
+  dueAt       String? // 截止标签（18:00 / 今日 / 本周 / 待补）
+  etaMinutes  Int? // 预计耗时（分钟）
+  sourceQuote String?   @db.Text // 来源引用（方案原文片段）
+  stepsJson   Json? // string[]：三步骤（准备/处理/回写）
+  metricsJson Json? // { label, value }[]：指标对
+  actionType  String? // upload | backfill | review | topics | none：下一步动作类型
+  done        Boolean   @default(false)
+  doneAt      DateTime?
+  createdAt   DateTime  @default(now())
 
   casefile Casefile @relation(fields: [casefileId], references: [id], onDelete: Cascade)
 
@@ -1122,14 +1139,14 @@ model NatalChart {
 /// 注入时标注为已确认事实、优先于推断。v1 回写触发点 = 认可方案 + 手动编辑；
 /// LLM 逐轮结构化抽取与 M2 决策日志共用同一抽取管道（见 AGENTS §13）。
 model StrategicProfile {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   tenantId          String
-  userId            String   @unique
-  mainContradiction String   @default("") @db.Text // 主要矛盾（一句话）
-  positioning       String   @default("") @db.Text // 战略定位
-  track             String   @default("") @db.Text // 聚焦赛道
-  stage             String   @default("") // 三步走当前阶段/经营阶段
-  diagRound         Int      @default(0) // F-5：当前诊断轮次，用户级持久化（换/删会话不清零）
+  userId            String    @unique
+  mainContradiction String    @default("") @db.Text // 主要矛盾（一句话）
+  positioning       String    @default("") @db.Text // 战略定位
+  track             String    @default("") @db.Text // 聚焦赛道
+  stage             String    @default("") // 三步走当前阶段/经营阶段
+  diagRound         Int       @default(0) // F-5：当前诊断轮次，用户级持久化（换/删会话不清零）
   diagSessionId     String? // 最近一次诊断所在会话（切换不重置轮次）
   dossierJson       Json? // P3：生成即缓存的「完整履历」结构化档案（DossierReport）
   dossierAt         DateTime? // 履历最近生成时间
@@ -1137,8 +1154,8 @@ model StrategicProfile {
   twelveQJson       Json? // 十二问答案沉淀（M3 状态机写入）
   kpiJson           Json? // 核心 KPI 基线（M2 看板写入）
   extraJson         Json? // 前向兼容（叙事线/谶语等 P1 内容）
-  updatedAt         DateTime @updatedAt
-  createdAt         DateTime @default(now())
+  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime  @default(now())
 
   @@index([tenantId])
   @@map("strategic_profile")
@@ -1235,4 +1252,78 @@ model UserProgress {
 
   @@index([tenantId])
   @@map("user_progress")
+}
+
+/// V7-12：单次付费商品目录（SKU）。运营可改价（admin:sync-content 幂等 upsert，代码目录即真相源）。
+/// kind: module=启用某能力(grantsModuleKey) | service=一次性服务(如深度整理) | storage=空间包。
+model Sku {
+  id              String   @id @default(cuid())
+  key             String   @unique // deep-organize | storage-2g | deep-contradiction | ...
+  name            String
+  desc            String   @db.Text
+  priceFen        Int // 售价（分）
+  kind            String   @default("module") // module | service | storage
+  grantsModuleKey String? // kind=module 时发放的能力 key（→ UserModule）
+  metaJson        Json? // 扩展（storage 加档字节数等）
+  enabled         Boolean  @default(true)
+  sort            Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  @@map("sku")
+}
+
+/// V7-07：用户数据源绑定状态（真实 OAuth 后置；v1 只做状态持久化 + 上传替代动线）。
+/// status: unbound 未绑定 | auth_requested 已预约授权 | uploaded 已上传替代资料 | bound 已绑定。
+model UserDataSource {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  sourceKey String // 见 data/dataSources.ts
+  status    String   @default("unbound")
+  method    String? // upload | oauth
+  metaJson  Json? // 关联 knowledgeId / 授权登记信息
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, sourceKey])
+  @@index([tenantId, userId])
+  @@map("user_data_source")
+}
+
+/// V7-08：用户能力/模块启用状态。免费模块无需此行即可用；付费模块启用后写一行。
+/// source: free 免费直启 | purchase 付费(credits/sku) | admin 后台开通。
+model UserModule {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  moduleKey String // 见 data/modules.ts；SKU 一次性服务凭据记为 'sku:'+skuKey
+  enabled   Boolean  @default(true)
+  hidden    Boolean  @default(false) // 我的页可隐藏
+  sortOrder Int      @default(0)
+  source    String   @default("free")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, moduleKey])
+  @@index([tenantId, userId])
+  @@map("user_module")
+}
+
+/// V7-13：社群服务分配（运营手工分班/配老师）。每用户至多一行。
+model ServiceAssignment {
+  id            String   @id @default(cuid())
+  tenantId      String
+  userId        String   @unique
+  teacherName   String   @default("")
+  teacherWechat String   @default("")
+  className     String   @default("")
+  groupQrUrl    String   @default("")
+  taskDone      Int      @default(0)
+  taskTotal     Int      @default(0)
+  note          String   @default("") @db.Text
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("service_assignment")
 }

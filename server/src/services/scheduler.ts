@@ -7,6 +7,7 @@
 import { prisma } from '../db.js';
 import { recordAudit } from './audit.js';
 import { now } from './clock.js';
+import { MORNING_ORDER_JOB, WEEKLY_REVIEW_JOB } from './reminders.js';
 import {
   hasSentWechatNotificationToday,
   hasWechatSubscriptionQuota,
@@ -194,3 +195,6 @@ registerJob({ name: 'casefile-idle-recall', intervalMs: 6 * 3600_000, run: async
 registerJob({ name: 'review-gap-reminder', intervalMs: 6 * 3600_000, run: async () => { await scanReviewGaps(); } });
 registerJob({ name: 'daily-review-reminder', intervalMs: 30 * 60_000, run: async () => { await scanDailyReviewReminders(); } });
 registerJob({ name: 'prophecy-due-scan', intervalMs: 6 * 3600_000, run: async () => { await scanDueProphecies(); } });
+// V7-11：09:00 军令提醒 + 周五周复盘提醒（scan 函数在 services/reminders.ts，job 常量在此注册）。
+registerJob(MORNING_ORDER_JOB);
+registerJob(WEEKLY_REVIEW_JOB);

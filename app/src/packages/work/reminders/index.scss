@@ -1,0 +1,38 @@
+/* V7-11 提醒与日历页 —— 案卷文书风：kicker + 衬线标题 + 提醒行（时间 / 标题 · 说明 / 订阅） */
+
+.rm-hero { padding: 4px 2px 12px; }
+.rm-k { display: block; color: var(--gold-deep); font-size: 11px; font-weight: 800; letter-spacing: .16em; }
+.rm-title { display: block; margin-top: 6px; color: var(--ink); font-size: 22px; font-weight: 700; }
+.rm-desc { display: block; margin-top: 6px; color: var(--ink-2); font-size: 12.5px; line-height: 1.6; font-weight: 500; }
+
+.rm-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+.rm-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px; border-radius: 16px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.rm-time {
+  width: 52px; flex-shrink: 0; text-align: center;
+  padding-right: 12px; border-right: 1px solid var(--line);
+}
+.rm-time-t { color: var(--accent); font-size: 15px; font-weight: 700; }
+.rm-b { flex: 1; min-width: 0; }
+.rm-t { display: block; color: var(--ink); font-size: 15px; font-weight: 600; }
+.rm-s { display: block; margin-top: 3px; color: var(--ink-3); font-size: 12px; line-height: 1.5; font-weight: 500; }
+
+.rm-sub {
+  flex-shrink: 0; padding: 7px 15px; border-radius: 999px;
+  color: #fff; font-size: 12.5px; font-weight: 700;
+}
+.rm-sub:active { opacity: .85; }
+.rm-sub.busy { opacity: .6; }
+
+.rm-state {
+  flex-shrink: 0; padding: 7px 13px; border-radius: 999px;
+  font-size: 12px; font-weight: 700;
+  color: var(--green); background: var(--green-soft);
+}
+.rm-state.muted { color: var(--ink-3); background: var(--surface-2); }
+
+.rm-empty { display: block; margin-top: 20px; color: var(--ink-3); font-size: 13px; line-height: 1.6; text-align: center; }
+.rm-foot { display: block; margin-top: 16px; color: var(--ink-3); font-size: 11px; line-height: 1.6; }

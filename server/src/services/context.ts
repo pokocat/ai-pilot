@@ -8,6 +8,8 @@ import { hybridSearch, resolveReferences } from './retrieval.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
 import { loadChart, chartBriefing, TIANSHI_OPTOUT_LINE } from './paipan.js';
 import { loadStrategicProfile, strategicBlock, getDiagRound } from './strategicProfile.js';
+import { goalsInjectionLine } from './casefile.js';
+import { dataSourcesBlock } from './dataSources.js';
 import { decisionBriefing } from './decisionLog.js';
 import { reviewBriefing } from './reviewLog.js';
 import { prophecyBriefing } from './prophecyLog.js';
@@ -100,6 +102,9 @@ export async function buildGenContext(opts: {
 
   // 战略档案（M1 PR-3）：客户已确认的战略事实（认可方案/手动编辑回写），注入优先级高于自动推断。
   const strategicLine = strategicBlock(await loadStrategicProfile(opts.userId));
+  // V7-10 目标阶梯 + V7-07 已接入数据源清单（宁缺勿假，无则不注入）。
+  const goalsLine = await goalsInjectionLine(opts.userId).catch(() => null);
+  const dataSourceLine = await dataSourcesBlock(opts.userId).catch(() => null);
   // 决策账本（M2 PR-7）：近期决策 + 服务端准确率（AI 只引用，禁止自行推算）。
   const decisionLine = await decisionBriefing(opts.userId);
   // 复盘账本（M2 PR-8）：连续复盘天数 + 最近复盘事实快照（战友见证/钩子的真实素材）。
@@ -181,6 +186,8 @@ export async function buildGenContext(opts: {
     benchmark: resolveIndustryPack(profile?.industry).benchmark,
     tianshiLine,
     strategicLine,
+    goalsLine,
+    dataSourceLine,
     decisionLine,
     reviewLine,
     prophecyLine,

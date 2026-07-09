@@ -14,6 +14,9 @@ import type {
   FateCardContent, MemoryLibraryView, DossierView, DossierReport,
   DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats,
   QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
+  SkuView, SkuOrderResult, BattleForce, BattleCommitResult,
+  DataSourcesView, ModulesView, ModuleView, ReminderView, WorkbenchView, SearchResult,
+  KnowledgePipelineView, OrganizeResult, ConfirmResult, StagedUploadResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -31,6 +34,16 @@ export type { QuickScanRequest, QuickScanResult } from '../../../shared/contract
 export type { JourneyView, JourneyStage, JourneyNextStep } from '../../../shared/contracts';
 export type { PrescriptionView, PrescriptionListView, DeliverablePrescription } from '../../../shared/contracts';
 export type { BrandKitView, BrandKitPersona, BrandKitVoice, BrandKitTheme } from '../../../shared/contracts';
+export type { SkuView, SkuOrderResult, SkuKind, WechatPayParams } from '../../../shared/contracts';
+export type {
+  BattleForce, BattleCommitResult, ForceKind, ForceLevel, ForceTone,
+  DataSourceView, DataSourcesView, DataSourceStatus,
+  ModuleView, ModulesView, ModuleTier, ModuleGroup, ModuleDetail, ModulePrice,
+  ReminderView, ReminderItem, GoalLadder, OrderActionType, OrderMetric, OrderStructuredFields,
+  ServiceAssignmentView, WorkbenchView, WorkbenchSection, WorkbenchMissing,
+  SearchHit, SearchResult, KnowledgeStage, KnowledgePipelineView,
+  KnowledgePipelineFolder, KnowledgeBatch, OrganizeResult, ConfirmResult, StagedUploadResult,
+} from '../../../shared/contracts';
 // 新能力类型再导出（项目 / 报告 / 知识 / 引用）
 export type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
@@ -181,8 +194,12 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
 }
 
 // 文档上传：Taro.uploadFile 走 multipart（request() 只发 JSON，文件需单独上传）。仅 weapp 有文件可选。
-async function uploadKnowledgeFile(filePath: string, projectId?: string): Promise<{ id: string; status: string }> {
-  const url = `${BASE_URL}/knowledge/upload${projectId ? `?projectId=${projectId}` : ''}`;
+async function uploadKnowledgeFile(filePath: string, opts: { projectId?: string; staged?: boolean; batchId?: string } = {}): Promise<{ id: string; status: string; stage?: string; batchId?: string }> {
+  const qs: string[] = [];
+  if (opts.projectId) qs.push(`projectId=${opts.projectId}`);
+  if (opts.staged) qs.push('staged=true');
+  if (opts.batchId) qs.push(`batchId=${opts.batchId}`);
+  const url = `${BASE_URL}/knowledge/upload${qs.length ? `?${qs.join('&')}` : ''}`;
   const res = await Taro.uploadFile({ url, filePath, name: 'file', header: { 'x-user-id': getToken() } });
   if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
   if (res.statusCode >= 400) {
@@ -231,6 +248,10 @@ export const api = {
   // 微信支付下单（小程序 JSAPI）：返回 wx.requestPayment 调起参数 + 月→年折算明细。
   createOrder: (id: string, openid?: string) =>
     IS_MOCK ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', openid ? { openid } : {}),
+  // V7-12：单次付费商品（SKU）目录 + 下单。mock 走假支付成功流并本地发放权益。
+  skus: () => (IS_MOCK ? mock.skus() : request<SkuView[]>('/skus')),
+  createSkuOrder: (key: string, openid?: string) =>
+    IS_MOCK ? mock.createSkuOrder(key) : request<SkuOrderResult>(`/skus/${key}/order`, 'POST', openid ? { openid } : {}),
   wechatSubscribeTemplates: () =>
     IS_MOCK ? Promise.resolve({ scenes: [] } as WechatSubscribeTemplatesResult) : request<WechatSubscribeTemplatesResult>('/wechat/subscribe/templates'),
   recordWechatSubscription: (choices: WechatSubscribeChoice[]) =>
@@ -251,6 +272,9 @@ export const api = {
   quickScan: (req: QuickScanRequest) =>
     IS_MOCK ? mock.quickScan(req) : request<QuickScanResult>('/quickscan', 'POST', req),
   journey: () => (IS_MOCK ? mock.journey() : request<JourneyView>('/journey')),
+  // V7-04：三势刷新 + 认可判断一键生成军令与报告。
+  refreshForces: () => (IS_MOCK ? mock.refreshForces() : request<{ forces: BattleForce[] }>('/forces/refresh', 'POST', {})),
+  battleCommit: () => (IS_MOCK ? mock.battleCommit() : request<BattleCommitResult>('/battle/commit', 'POST', {})),
   prescriptions: () => (IS_MOCK ? mock.prescriptions() : request<PrescriptionListView>('/prescriptions')),
   prescriptionAction: (id: string, action: string) =>
     IS_MOCK ? mock.prescriptionAction(id, action) : request<{ ok: boolean }>(`/prescriptions/${id}/${action}`, 'POST'),
@@ -350,8 +374,40 @@ export const api = {
     IS_MOCK ? Promise.reject(new Error('mock 模式无文档详情')) : request<KnowledgeDetail>(`/knowledge/${id}`),
   reembedKnowledge: (id: string) =>
     IS_MOCK ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
-  uploadKnowledge: (filePath: string, projectId?: string) =>
-    IS_MOCK ? Promise.resolve({ id: 'mock', status: 'ready' }) : uploadKnowledgeFile(filePath, projectId),
+  uploadKnowledge: (filePath: string, projectId?: string, staged?: boolean, batchId?: string) =>
+    IS_MOCK ? mock.uploadKnowledgeStaged(staged, batchId) : uploadKnowledgeFile(filePath, { projectId, staged, batchId }),
+
+  // —— V7-06 智库三段式资料整理管道 ——
+  knowledgePipeline: () => (IS_MOCK ? mock.knowledgePipeline() : request<KnowledgePipelineView>('/knowledge/pipeline')),
+  organizeBatch: (batchId: string) =>
+    IS_MOCK ? mock.organizeBatch(batchId) : request<OrganizeResult>('/knowledge/organize', 'POST', { batchId }),
+  confirmKnowledge: (body: { ids?: string[]; batchId?: string }) =>
+    IS_MOCK ? mock.confirmKnowledge(body) : request<ConfirmResult>('/knowledge/confirm', 'POST', body),
+  deepOrganize: (batchId: string) =>
+    IS_MOCK ? mock.deepOrganize(batchId) : request<OrganizeResult>('/knowledge/deep-organize', 'POST', { batchId }),
+
+  // —— V7-07 数据源状态持久化 ——
+  dataSources: () => (IS_MOCK ? mock.getDataSources() : request<DataSourcesView>('/data-sources')),
+  uploadDataSource: (key: string, knowledgeId?: string) =>
+    IS_MOCK ? mock.uploadDataSource(key) : request<DataSourcesView>(`/data-sources/${key}/upload`, 'POST', knowledgeId ? { knowledgeId } : {}),
+  requestDataSourceAuth: (key: string) =>
+    IS_MOCK ? mock.requestDataSourceAuth(key) : request<DataSourcesView>(`/data-sources/${key}/request-auth`, 'POST', {}),
+
+  // —— V7-08 能力/模块中心 ——
+  modules: () => (IS_MOCK ? mock.modules() : request<ModulesView>('/modules')),
+  enableModule: (key: string) =>
+    IS_MOCK ? mock.enableModule(key) : request<{ module: ModuleView }>(`/modules/${key}/enable`, 'POST', {}).then((r) => r.module),
+  patchModule: (key: string, body: { hidden?: boolean; sortOrder?: number }) =>
+    IS_MOCK ? mock.patchModule(key, body) : request<{ module: ModuleView }>(`/modules/${key}`, 'PATCH', body).then((r) => r.module),
+
+  // —— V7-11 提醒日历 ——
+  reminders: () => (IS_MOCK ? mock.reminders() : request<ReminderView>('/reminders')),
+
+  // —— V7-13 档案工作台 ——
+  workbench: () => (IS_MOCK ? mock.workbench() : request<WorkbenchView>('/me/workbench')),
+
+  // —— V7-14 跨域搜索 ——
+  search: (q: string) => (IS_MOCK ? mock.search(q) : request<SearchResult>(`/search?q=${encodeURIComponent(q)}`)),
 
   // —— 对话汇总（→ 版本化报告 + 知识库） ——
   summarize: (sessionId: string) =>

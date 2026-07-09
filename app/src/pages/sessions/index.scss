@@ -104,3 +104,37 @@
 .et { display: block; font-size: 15px; font-weight: 600; color: var(--ink); }
 .es { display: block; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); margin-top: 6px; }
 .es-link { display: block; font-size: 13px; font-weight: 600; margin-top: 10px; }
+
+/* —— 跨域搜索结果（V7-14）：分组复用 wx-section / wx-list，行不带头像 —— */
+.search-results { margin-top: 4px; }
+.sr-item {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 62px; box-sizing: border-box;
+  padding: 13px 0; border-bottom: 1px solid var(--line);
+}
+.sr-item:last-child { border-bottom: 0; }
+.sr-item:active { opacity: .72; }
+.sr-main { flex: 1; min-width: 0; }
+.sr-title {
+  display: block;
+  font-family: var(--serif);
+  font-size: 15px; font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sr-snippet {
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+  margin-top: 3px; font-size: 12px; line-height: 1.35; color: var(--ink-3);
+}
+.sr-arrow { flex-shrink: 0; font-size: 17px; font-weight: 400; color: var(--ink-3); }
+.sr-hint { padding: 26px 0; text-align: center; font-size: 12.5px; color: var(--ink-3); }
+
+/* —— 未读徽章（V7-15，design §0.2 .unread 数字）+ 旧版 hasUnread 红点回退 —— */
+.unread {
+  min-width: 18px; height: 18px; box-sizing: border-box;
+  padding: 0 5px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; background: var(--danger, #9C4A38);
+  font-size: 10px; font-weight: 900; line-height: 1;
+}
+.unread-dot { width: 7px; height: 7px; border-radius: 50%; background: #e5472d; }
+.wx-id .unread, .wx-id .unread-dot { align-self: center; margin-left: 6px; }
