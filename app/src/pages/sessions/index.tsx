@@ -7,6 +7,7 @@ import Login from '../../components/Login';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
 import OnboardSheet from '../../components/OnboardSheet';
+import Picker from '../../components/Picker';
 import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
 import { api, type Agent, type SessionItem, type SearchHit } from '../../services/api';
@@ -55,6 +56,9 @@ export default function Sessions() {
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [searchedTerm, setSearchedTerm] = useState(''); // 已出结果对应的检索词（判定「检索中」vs「无结果」，避免空态闪一帧）
   const [showOnboard, setShowOnboard] = useState(false);
+  // 首登建档：本命色 + 30 秒建档 Picker（launch 页 sessions 承接，进来即弹，不用切到战局才触发）。
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerFirst, setPickerFirst] = useState(false);
 
   useDidShow(() => {
     s.setTab(0);
@@ -84,7 +88,12 @@ export default function Sessions() {
     try { seen = !!Taro.getStorageSync(onboardKey()); } catch { seen = true; }
     if (!seen) setShowOnboard(true);
   };
-  useEffect(() => { maybeShowOnboard(); }, []);
+  // 已登录但未建档 → 立即弹本命色/建档 Picker；已建档 → 视情况弹一次 4 步引导。
+  const gateOnboarding = () => {
+    if (s.isAuthed() && !s.isOnboarded()) { setPickerFirst(true); setShowPicker(true); return; }
+    maybeShowOnboard();
+  };
+  useEffect(() => { gateOnboarding(); }, []);
 
   // V7-14 跨域搜索：输入 300ms 防抖 → api.search（mock 亦返回本地匹配，同一路径）；空 q 隐藏结果。
   useEffect(() => {
@@ -332,7 +341,14 @@ export default function Sessions() {
 
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); continueWith(a.key); }} />
       <OnboardSheet open={showOnboard} onClose={dismissOnboard} onStart={() => { dismissOnboard(); Taro.switchTab({ url: '/pages/thinktank/index' }); }} />
-      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); api.sessions().then(setSessions).catch(() => setSessions([])); maybeShowOnboard(); }} />
+      <Login open={showLogin} onLoggedIn={(onboarded) => {
+        setShowLogin(false);
+        api.sessions().then(setSessions).catch(() => setSessions([]));
+        // 新用户（未建档）登录后立即弹本命色/建档；已建档则走 4 步引导。
+        if (!onboarded) { setPickerFirst(true); setShowPicker(true); }
+        else maybeShowOnboard();
+      }} />
+      <Picker open={showPicker} first={pickerFirst} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
     </Screen>
   );
 }

@@ -53,6 +53,12 @@ const FORCE_READ: Record<ForceKind, { title: string; body: string; tactic: strin
   market: { title: '对手抢位，不能扩量', body: '同类内容供给变多，用户不是没内容看，而是缺可信判断。单纯加发布和投流，会提高消耗但未必提高咨询质量。', tactic: '破局：案例与证据差异化' },
   people: { title: '团队待整，先轻资产验证', body: '当前团队承载偏弱，销售、内容和复盘链路还没稳定。现在更适合创始人亲自跑小闭环，不急着扩团队。', tactic: '承载：内容 + 私域小闭环' },
 };
+// 尚未生成结构化三势时的默认展示（对齐效果图默认三势）：进战局即见三张卡，不留空态。
+const DEFAULT_FORCES: BattleForce[] = [
+  { kind: 'sky', level: 'strong', conclusion: DEFAULT_CONCLUSION.sky, tactic: '可以借势', tacticTone: 'ok', note: '少追热点，多沉淀判断框架。', strength: 75 },
+  { kind: 'market', level: 'mid', conclusion: DEFAULT_CONCLUSION.market, tactic: '不能扩量', tacticTone: 'warn', note: '老板要少误判，不缺泛内容。', strength: 45 },
+  { kind: 'people', level: 'weak', conclusion: DEFAULT_CONCLUSION.people, tactic: '轻资产验证', tacticTone: 'danger', note: '先用内容和私域跑小闭环。', strength: 35 },
+];
 function forceRead(f: BattleForce): { label: string; title: string; body: string; tactic: string } {
   const label = `${FORCE_KIND_LABEL[f.kind]} · ${FORCE_LEVEL_LABEL[f.level]}`;
   if (f.conclusion === DEFAULT_CONCLUSION[f.kind]) return { label, ...FORCE_READ[f.kind] };
@@ -93,7 +99,8 @@ export default function Home() {
   const [exceptionOpen, setExceptionOpen] = useState(false);
   const me = s.me();
   const und = me?.understanding;
-  const forces: BattleForce[] = und?.battleForces ?? [];
+  // 有真实三势用真实，否则用默认三卡（进战局即见三势，不展示空状态）。刷新/认可后回读 /me 覆盖为真实结论。
+  const forces: BattleForce[] = und?.battleForces?.length ? und.battleForces : DEFAULT_FORCES;
 
   useDidShow(() => {
     s.setTab(1);

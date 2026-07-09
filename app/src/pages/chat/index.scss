@@ -1,4 +1,5 @@
 .chat {
+  position: relative;
   display: flex; flex-direction: column; height: 100vh;
   box-sizing: border-box; overflow: hidden;
   padding-bottom: var(--keyboard-height, 0px);
@@ -25,6 +26,24 @@
 .mem-bar .mlearn .dot { width: 6px; height: 6px; border-radius: 50%; }
 
 .chat-log { flex: 1; min-height: 0; padding: 16px; box-sizing: border-box; overflow: hidden; }
+
+.jump-latest {
+  position: absolute;
+  right: 18px;
+  bottom: calc(104px + var(--keyboard-height, 0px) + env(safe-area-inset-bottom));
+  z-index: 9;
+  display: flex; align-items: center; gap: 5px;
+  height: 34px; padding: 0 12px 0 13px;
+  border-radius: 999px;
+  border: 1px solid;
+  background: rgba(255, 255, 255, .94);
+  box-shadow: 0 8px 22px rgba(42, 35, 24, .12);
+  font-size: 12px; font-weight: 700;
+}
+.jump-latest.with-refs {
+  bottom: calc(144px + var(--keyboard-height, 0px) + env(safe-area-inset-bottom));
+}
+.jump-latest:active { opacity: .82; transform: translateY(1px); }
 
 .msg { margin-bottom: 16px; }
 .msg.u { display: flex; justify-content: flex-end; }
