@@ -5,6 +5,7 @@
 // env 仅作兜底；未配置真实 key 时一律降级 mock，保证可用。
 
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../services/aiConfig.js';
@@ -538,25 +539,58 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
  * 从对话文本提炼结构化「洞察」（Learned Memory）。
  * 有真实模型时让模型抽取 1–3 条事实/偏好/决策；否则启发式兜底（截断原文）。
  */
-export async function extractInsights(text: string, agentName?: string): Promise<string[]> {
-  const fallback = () => {
+// 军师记忆库六类（key），与 app/contracts 的展示标签一一对应（其人/其业/其时/其志/其略/相与之道）。
+export const MEMORY_CATEGORIES = ['founder', 'company', 'status', 'vision', 'strategy', 'rapport'] as const;
+export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
+export interface ExtractedFact { text: string; category: MemoryCategory | null }
+
+export async function extractInsights(text: string, agentName?: string): Promise<ExtractedFact[]> {
+  void agentName;
+  const fallback = (): ExtractedFact[] => {
     const t = text.trim().slice(0, 120);
-    return t ? [`用户在对话中提到：${t}`] : [];
+    return t ? [{ text: `老板在对话中提到：${t}`, category: null }] : [];
   };
   const cfg = await getAiConfig();
   const live = liveProvider(cfg);
   if (!live) return fallback();
   try {
     const sys =
-      '你是记忆抽取器。从用户消息中提炼 1-3 条对长期服务该客户有价值的「洞察」（事实/偏好/决策/约束），' +
-      '每条一句话、可独立理解、不含寒暄。只输出 JSON：{"insights":["...","..."]}。无可提炼则 {"insights":[]}。';
+      '你是「军师」的记忆抽取官。从对话里提炼 1-3 条对长期辅佐这位老板有价值的事实，' +
+      '每条一句话、可独立理解、不含寒暄，并各归入下列六类之一（category 只填英文 key）：\n' +
+      'founder（其人：出身/创业故事/性情/决断习惯/天赋与短板）、' +
+      'company（其业：起家与沿革/行业/发展阶段/团队班底/业务模式）、' +
+      'status（其时：当前经营实况/主要痛点/卡点——经营数字只记老板亲口所报，不得推算）、' +
+      'vision（其志：抱负/远图/想把生意做成什么/使命）、' +
+      'strategy（其略：主要矛盾/战略定位/主攻赛道/当前打法）、' +
+      'rapport（相与之道：沟通偏好/忌讳/对建议的取舍/约定）。\n' +
+      '只输出 JSON：{"facts":[{"text":"...","category":"founder"}]}。无可提炼则 {"facts":[]}。';
     const json = await rawJson(cfg, live, sys, text.slice(0, 1500));
-    const arr = (json?.insights as unknown[])?.filter((x) => typeof x === 'string') as string[];
-    if (arr?.length) return arr.slice(0, 3).map((s) => s.slice(0, 160));
-    return fallback();
+    const arr = (json?.facts as unknown[]) ?? [];
+    const out: ExtractedFact[] = arr
+      .filter((x): x is { text: string; category?: string } => !!x && typeof (x as { text?: unknown }).text === 'string')
+      .slice(0, 3)
+      .map((x) => ({
+        text: x.text.slice(0, 160),
+        category: (MEMORY_CATEGORIES as readonly string[]).includes(x.category ?? '') ? (x.category as MemoryCategory) : null,
+      }));
+    return out.length ? out : fallback();
   } catch (err) {
     console.error('[gateway] extractInsights fallback:', (err as Error).message);
     return fallback();
+  }
+}
+
+/** 通用结构化 JSON 生成（无 live provider 或失败返回 null，调用方决定兜底）。P3 完整履历用。 */
+export async function llmJson(system: string, user: string, maxChars = 9000): Promise<Record<string, unknown> | null> {
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  if (!live) return null;
+  try {
+    const json = await rawJson(cfg, live, system, user.slice(0, maxChars));
+    return json && typeof json === 'object' ? (json as Record<string, unknown>) : null;
+  } catch (err) {
+    console.error('[gateway] llmJson failed:', (err as Error).message);
+    return null;
   }
 }
 
@@ -607,21 +641,70 @@ export async function providerInfo() {
   };
 }
 
-// —— 内部：以「就绪的 provider」发一次返回 JSON 的轻量补全（用于洞察抽取/汇总） ——
+// —— 内部：以「就绪的 provider」发一次返回原始文本的轻量补全 ——
+async function rawText(
+  cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
+): Promise<string> {
+  if (live === 'openai') {
+    const { openaiRaw } = await import('./providers/openai.js');
+    return openaiRaw(cfg, system, user);
+  }
+  const { claudeRaw } = await import('./providers/claude.js');
+  return claudeRaw(cfg, system, user);
+}
+
+// —— 内部：文本 → JSON 对象（正则抠 {…} + JSON.parse）。既有洞察抽取/汇总沿用此松散口径。 ——
 async function rawJson(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
 ): Promise<Record<string, unknown> | null> {
-  let content = '';
-  if (live === 'openai') {
-    const { openaiRaw } = await import('./providers/openai.js');
-    content = await openaiRaw(cfg, system, user);
-  } else {
-    const { claudeRaw } = await import('./providers/claude.js');
-    content = await claudeRaw(cfg, system, user);
-  }
+  const content = await rawText(cfg, live, system, user);
   const m = content.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
+}
+
+/**
+ * 结构化输出统一原语（借鉴 Vercel AI SDK generateObject / Spring AI StructuredOutputConverter）。
+ * 一处收口，取代散落各处的「自拼 system + rawJson + 手写 filter/map/校验」六份脆弱副本：
+ * 传入 Zod schema，它同时充当「运行时校验 + TS 返回类型 + 归一化(transform)」的单一真源。
+ * 纯逻辑（抠 JSON + 校验）拆到 coerceJson，可零 I/O 单测；provider I/O 与「修复一轮」编排在 structured。
+ */
+export function coerceJson<S extends z.ZodTypeAny>(schema: S, text: string): { ok: true; data: z.output<S> } | { ok: false; error: string } {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return { ok: false, error: '未找到 JSON 对象' };
+  let raw: unknown;
+  try { raw = JSON.parse(m[0]); } catch { return { ok: false, error: 'JSON 解析失败' }; }
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) return { ok: true, data: parsed.data };
+  return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ').slice(0, 300) };
+}
+
+/**
+ * 结构化生成：文本 → schema 校验；失败则把校验错误回喂、只修复一轮；仍失败返回 null（调用方兜底）。
+ * 无真实 provider（含测试/mock）或任何异常 → null，绝不伪造（沿用 extractInsights/completeJson 口径）。
+ */
+export async function structured<S extends z.ZodTypeAny>(
+  schema: S,
+  o: { system: string; user: string; maxChars?: number; temperature?: number; model?: string },
+): Promise<z.output<S> | null> {
+  try {
+    const base = await getAiConfig();
+    const live = liveProvider(base);
+    if (!live) return null;
+    const cfg: ResolvedAiConfig = (o.temperature != null || o.model)
+      ? { ...base, ...(o.temperature != null ? { temperature: o.temperature } : {}), ...(o.model ? { model: o.model } : {}) }
+      : base;
+    const user = o.user.slice(0, o.maxChars ?? 4000);
+    const first = coerceJson(schema, await rawText(cfg, live, o.system, user));
+    if (first.ok) return first.data;
+    // 一轮修复：把校验错误回喂，要求只输出合规 JSON。
+    const repairSys = `${o.system}\n\n【纠错】上次输出无法通过校验：${first.error}。请只输出严格符合要求的 JSON，不要任何解释或多余文字。`;
+    const second = coerceJson(schema, await rawText(cfg, live, repairSys, user));
+    return second.ok ? second.data : null;
+  } catch (err) {
+    console.error('[gateway] structured failed:', (err as Error).message);
+    return null;
+  }
 }
 
 /** 通用 JSON 补全（评测评委等内部用）：用就绪模型发一次并解析 JSON；未就绪（mock）/失败返回 null。 */
@@ -698,32 +781,41 @@ export async function summarizePoints(transcript: string): Promise<{ points: str
 }
 
 /** 预言抽取（M2 PR-9）：从总军师输出里抽「具体、可验证、有期限」的天势判断。
- *  只在真实 provider 就绪时运行（测试/mock 返回空 → 绝不产生伪预言）；解析失败即放弃。 */
-export async function extractProphecies(text: string): Promise<{ prophecy: string; basis: string; verifyStandard: string; dueDate: string | null }[]> {
-  const cfg = await getAiConfig();
-  const live = liveProvider(cfg);
-  if (!live) return [];
-  try {
-    const sys = '你是记录员。从下面军师的话里抽取「预言式判断」——必须同时满足：具体（说了会发生什么）、可验证（能对照事实判定）、有大致时限（某月/某周/某节点）。'
-      + '只输出 JSON：{"prophecies":[{"prophecy":"…","basis":"依据(可空)","verifyStandard":"什么情况算命中","dueDate":"YYYY-MM-DD 或 null"}]}。'
-      + '宽泛建议、方法论、无时限的话都不算预言；没有就输出空数组。最多 2 条。';
-    const json = await rawJson(cfg, live, sys, text.slice(0, 3000));
-    if (!json) return [];
-    return (((json.prophecies as unknown[]) ?? [])
-      .filter((p): p is { prophecy: string } => !!p && typeof (p as { prophecy?: unknown }).prophecy === 'string' && !!(p as { prophecy: string }).prophecy.trim())
-      .map((p) => {
-        const o = p as { prophecy: string; basis?: string; verifyStandard?: string; dueDate?: string | null };
-        const due = typeof o.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate) ? o.dueDate : null;
-        return {
-          prophecy: o.prophecy.trim().slice(0, 300),
-          basis: (o.basis ?? '').trim().slice(0, 200),
-          verifyStandard: (o.verifyStandard ?? '').trim().slice(0, 300),
-          dueDate: due,
-        };
-      })
-      .slice(0, 2));
-  } catch (err) {
-    console.error('[gateway] extractProphecies fallback:', (err as Error).message);
-    return [];
-  }
+ *  只在真实 provider 就绪时运行（测试/mock 返回空 → 绝不产生伪预言）；解析失败即放弃。
+ *  重构：走统一 structured() 原语——Zod schema 取代手写正则 + filter/map/slice。 */
+export interface Prophecy { prophecy: string; basis: string; verifyStandard: string; dueDate: string | null }
+
+const PROPHECY_SYS =
+  '你是记录员。从下面军师的话里抽取「预言式判断」——必须同时满足：具体（说了会发生什么）、可验证（能对照事实判定）、有大致时限（某月/某周/某节点）。'
+  + '只输出 JSON：{"prophecies":[{"prophecy":"…","basis":"依据(可空)","verifyStandard":"什么情况算命中","dueDate":"YYYY-MM-DD 或 null"}]}。'
+  + '宽泛建议、方法论、无时限的话都不算预言；没有就输出空数组。最多 2 条。';
+
+// 单条容错到底：缺失/空白/错型不拖垮整批——无效条目归一为 null，由上层过滤（沿用原「filter 掉空 prophecy」口径）。
+const ProphecyItem = z
+  .object({
+    prophecy: z.string(),
+    basis: z.string().nullish(),
+    verifyStandard: z.string().nullish(),
+    dueDate: z.string().nullish(),
+  })
+  .transform((o): Prophecy => ({
+    prophecy: o.prophecy.trim().slice(0, 300),
+    basis: (o.basis ?? '').trim().slice(0, 200),
+    verifyStandard: (o.verifyStandard ?? '').trim().slice(0, 300),
+    dueDate: o.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate) ? o.dueDate : null,
+  }))
+  .refine((p) => p.prophecy.length > 0)
+  .nullable()
+  .catch(null);
+
+/** 预言抽取结果 schema（导出供单测）：整批容错，过滤无效条目，最多 2 条。 */
+export const ProphecyResult = z.object({
+  prophecies: z
+    .preprocess((v) => (Array.isArray(v) ? v : []), z.array(ProphecyItem))
+    .transform((a) => a.filter((x): x is Prophecy => x !== null).slice(0, 2)),
+});
+
+export async function extractProphecies(text: string): Promise<Prophecy[]> {
+  const r = await structured(ProphecyResult, { system: PROPHECY_SYS, user: text, maxChars: 3000 });
+  return r?.prophecies ?? [];
 }

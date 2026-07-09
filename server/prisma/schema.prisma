@@ -13,6 +13,111 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// WO-07：用户级 journey 状态机（stage + 关键事件时间戳）。diagRound 仍以 StrategicProfile 为真源，派生时读入。
+model UserJourney {
+  id             String    @id @default(cuid())
+  tenantId       String
+  userId         String    @unique
+  stage          String    @default("new") // new→scanned→diagnosing→plan_ready→executing→reviewing（plan_ready 瞬时）
+  quickScanAt    DateTime?
+  planAcceptedAt DateTime?
+  firstReviewAt  DateTime?
+  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime  @default(now())
+
+  @@index([tenantId])
+  @@map("user_journey")
+}
+
+/// WO-12：处方 = 军师在方案里开出的「问题→打法→工具」三元组，带完整转化状态机。工具白名单在服务端，LLM 只能点菜。
+model Prescription {
+  id            String    @id @default(cuid())
+  tenantId      String
+  userId        String
+  casefileId    String?
+  deliverableId String?
+  orderId       String?
+  problem       String    @db.Text
+  playbook      String    @db.Text
+  toolKey       String
+  toolType      String    @default("agent") // agent | external
+  externalUrl   String?
+  status        String    @default("proposed") // proposed→seen→clicked→activated→used→verified | dismissed
+  proposedAt    DateTime  @default(now())
+  seenAt        DateTime?
+  clickedAt     DateTime?
+  activatedAt   DateTime?
+  firstUsedAt   DateTime?
+  outcomeJson   Json?
+  dismissedAt   DateTime?
+  updatedAt     DateTime  @updatedAt
+
+  @@index([userId, status])
+  @@index([tenantId])
+  @@map("prescription")
+}
+
+/// WO-13：品牌资产包——档案 → IP 人设/话术/视觉调性，作为数字人/短剧等生态产品的开箱预填输入。
+model BrandKit {
+  id          String    @id @default(cuid())
+  tenantId    String
+  userId      String    @unique
+  personaJson Json // { name, tagline, tone, story, doNots[] }
+  voiceJson   Json // { hooks[], openers[], ctas[], taboos[] }
+  themeJson   Json // { keywords[], colorHint, styleRefs[] }
+  version     Int       @default(1)
+  generatedAt DateTime  @default(now())
+  approvedAt  DateTime? // 用户确认过才可被生态产品读取
+
+  @@index([tenantId])
+  @@map("brand_kit")
+}
+
+/// WO-05：功能开关（命理等模块一键降级）。id = flag key，如 'fortune'。全局资产，无 tenantId。
+model FeatureFlag {
+  id        String   @id
+  enabled   Boolean  @default(true)
+  payload   Json? // 预留分级参数
+  updatedAt DateTime @updatedAt
+
+  @@map("feature_flag")
+}
+
+/// WO-08：行业基准库（内容资产，运营维护）。分位数 p25/p50/p75；宁缺勿假——p50 空的行不注入。
+model IndustryBenchmark {
+  id          String   @id @default(cuid())
+  industry    String // 与 survey 行业口径一致
+  revenueBand String   @default("*") // 营收段，'*'=不分段
+  metricKey   String // 'repurchase_rate' | 'cac' | ...
+  metricName  String // 展示名「复购率」
+  unit        String // '%' | '元' | '天'
+  p25         Float?
+  p50         Float?
+  p75         Float?
+  note        String? // 口径说明
+  source      String? // 数据来源
+  enabled     Boolean  @default(true)
+  updatedAt   DateTime @updatedAt
+
+  @@unique([industry, revenueBand, metricKey])
+  @@map("industry_benchmark")
+}
+
+/// WO-10：结构化经营周报（字段与 IndustryBenchmark.metricKey 同口径——报什么就能对比什么）。
+model BizMetricWeekly {
+  id          String   @id @default(cuid())
+  tenantId    String
+  userId      String
+  weekStart   String // YYYY-MM-DD（周一）
+  metricsJson Json // { metricKey: number }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, weekStart])
+  @@index([userId])
+  @@map("biz_metric_weekly")
+}
+
 /// 租户（企业）
 model Tenant {
   id        String   @id @default(cuid())
@@ -265,6 +370,7 @@ model Session {
   title              String   @default("新对话")
   difyConversationId String? // Dify 应用多轮上下文 id（providerMode=dify 时由 Dify 返回并回写）
   mode               String? // 会话模式（M3 PR-11 粘性）：'review:week' | 'urgent' | 'timing' | …；null=strategy
+  lastReadAt         DateTime? // 未读判定：最后一条 AI 回复晚于此即未读；打开会话时置 now
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -328,6 +434,7 @@ model Memory {
   agentKey  String
   projectId String? // 归属项目（跨智能体共享时可空）
   kind      String // fact | preference | feedback
+  category  String? // 军师记忆库六类：founder|company|status|vision|strategy|rapport（旧行为 null）
   text      String    @db.Text
   embedding Json? // float[]（生产用 pgvector；本地降级内存余弦）
   weight    Float     @default(1.0)
@@ -341,6 +448,7 @@ model Memory {
   project Project? @relation(fields: [projectId], references: [id])
 
   @@index([userId, agentKey])
+  @@index([userId, category]) // 记忆库按类分组读取
   @@index([projectId])
   @@map("memory")
 }
@@ -1021,6 +1129,11 @@ model StrategicProfile {
   positioning       String   @default("") @db.Text // 战略定位
   track             String   @default("") @db.Text // 聚焦赛道
   stage             String   @default("") // 三步走当前阶段/经营阶段
+  diagRound         Int      @default(0) // F-5：当前诊断轮次，用户级持久化（换/删会话不清零）
+  diagSessionId     String? // 最近一次诊断所在会话（切换不重置轮次）
+  dossierJson       Json? // P3：生成即缓存的「完整履历」结构化档案（DossierReport）
+  dossierAt         DateTime? // 履历最近生成时间
+  forcesJson        Json? // L-6 三势真数据化：{shishi/renshi: {verdict:攻|守|等|撤, note}}（天势走命盘不入库）
   twelveQJson       Json? // 十二问答案沉淀（M3 状态机写入）
   kpiJson           Json? // 核心 KPI 基线（M2 看板写入）
   extraJson         Json? // 前向兼容（叙事线/谶语等 P1 内容）
@@ -1049,6 +1162,8 @@ model DecisionLog {
   verifiedAt     DateTime?
   verifyNote     String    @default("") @db.Text // 验证时的事实记录
   fast           Boolean? // 快决策(当场拍板)/慢决策(深思后定)；null=未标注——快慢准确率分开统计
+  disputeNote    String? // WO-11：用户异议（复盘时军师带出确认）
+  disputedAt     DateTime?
   createdAt      DateTime  @default(now())
 
   @@unique([userId, seq])
@@ -1073,6 +1188,7 @@ model ReviewLog {
   hasBackfill  Boolean  @default(false) // 当日是否回填了三数
   note         String   @default("") @db.Text
   createdAt    DateTime @default(now())
+  metricsJson  Json? // WO-04：week/month 期聚合 { leads, consults, deals }
 
   @@unique([userId, layer, date])
   @@index([tenantId, userId, layer, date])
@@ -1094,6 +1210,8 @@ model ProphecyLog {
   verifiedAt     DateTime?
   verifyNote     String    @default("") @db.Text
   dueNotifiedAt  DateTime? // 到期提醒已登记（scheduler 幂等标记）
+  disputeNote    String? // WO-11：用户异议（复盘时军师带出确认）
+  disputedAt     DateTime?
   createdAt      DateTime  @default(now())
 
   @@unique([userId, seq])

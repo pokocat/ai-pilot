@@ -64,4 +64,30 @@
 .tc-btn.off Text, .tc-btn.off text { color: var(--ink-3); }
 .tc-btn:active { opacity: .85; }
 
+/* 生成图片按钮 + 结果 */
+.tc-imgbtn {
+  margin-top: 12px; height: 48px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 24px var(--accent-glow);
+}
+.tc-imgbtn Text, .tc-imgbtn text { color: #fff; font-size: 14.5px; font-weight: 600; }
+.tc-imgbtn.off { background: var(--line); box-shadow: none; }
+.tc-imgbtn.off Text, .tc-imgbtn.off text { color: var(--ink-3); }
+.tc-imgbtn:active { opacity: .85; }
+
+.tc-result { margin-top: 20px; }
+.tc-img { width: 100%; border-radius: 16px; box-shadow: 0 12px 30px rgba(22, 25, 29, .18); }
+.tc-img-acts { display: flex; gap: 12px; margin-top: 16px; }
+.tc-img-act {
+  flex: 1; height: 46px; border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+}
+.tc-img-act:active { opacity: .85; }
+.tc-img-act Text, .tc-img-act text { color: #fff; font-size: 14px; font-weight: 600; }
+.tc-img-act.ghost { background: transparent; border: 1.5px solid var(--accent); }
+.tc-img-tip { display: block; margin-top: 10px; text-align: center; font-size: 11px; color: var(--ink-3); }
+
+/* 离屏画布 */
+.tc-canvas { position: fixed; left: -9999px; top: 0; }
+
 .tc-foot { display: block; margin-top: 20px; font-size: 11px; line-height: 1.7; color: var(--ink-3); }

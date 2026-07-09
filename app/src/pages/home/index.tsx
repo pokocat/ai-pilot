@@ -6,8 +6,9 @@ import Login from '../../components/Login';
 import Picker from '../../components/Picker';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type ChartSummary } from '../../services/api';
-import { MODULE_MARKET, THREE_FORCES } from '../../data/operatingSystem';
+import { api, type ChartSummary, type ReportItem, type JourneyView } from '../../services/api';
+import { MODULE_MARKET, THREE_FORCES, type ForceItem } from '../../data/operatingSystem';
+import { EMPTY_STATES } from '../../data/emptyStates';
 import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
 import './index.scss';
 
@@ -33,7 +34,12 @@ function SayingLine({ html, accent }: { html: string; accent: string }) {
   );
 }
 
-// 战局页 —— 对齐设计稿 page-battle：军师判断 hero → 信号指标 → 三势 → 下一步动作 → 关联模块 → 不能做 → 认可 CTA。
+// L-6：三势结论徽配色 —— 攻(进攻绿)/守(防守橙)/撤(危险红)/等(中性灰)
+function verdictClass(v: string): string {
+  return v === '攻' ? 'atk' : v === '守' ? 'def' : v === '撤' ? 'retreat' : 'wait';
+}
+
+// 战局页 —— 对齐设计稿 page-battle：军师判断 hero → 信号指标 → 下一步卡（打磨）→ 三势 → 下一步动作 → 关联模块 → 不能做 → 认可 CTA。
 // 判断内容一律来自真实军师档案（me.understanding）与案卷，资料不足时引导进入对话访谈，不预置结论。
 export default function Home() {
   const s = useStore();
@@ -42,9 +48,10 @@ export default function Home() {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerFirst, setPickerFirst] = useState(false);
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
-  const [navTop, setNavTop] = useState<number>();
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [chart, setChart] = useState<ChartSummary | null>(null);
+  const [reports, setReports] = useState<ReportItem[]>([]);
+  const [journey, setJourney] = useState<JourneyView | null>(null); // WO-07：下一步卡数据源（初诊后 new→scanned，不再重复「开始初诊」）
   const me = s.me();
   const und = me?.understanding;
 
@@ -55,6 +62,8 @@ export default function Home() {
     if (s.isAuthed()) {
       store.loadMe(); // 刷新军师档案（对话/资料变化后战局判断随之更新）
       api.myChart().then((r) => setChart(r.chart)).catch(() => setChart(null)); // 命盘（天时窗口）
+      api.reports().then(setReports).catch(() => setReports([])); // 方案库（用于三势卡反查已研判方案）
+      api.journey().then(setJourney).catch(() => setJourney(null)); // WO-07：返回首页即刷新 journey，初诊后不再显示「开始初诊」
     }
   });
 
@@ -67,11 +76,6 @@ export default function Home() {
       setShowPicker(true);
     }
     api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
-    // 自定义导航：标题行与微信胶囊顶端对齐
-    try {
-      const r = Taro.getMenuButtonBoundingClientRect?.();
-      if (r && r.top) setNavTop(r.top);
-    } catch { /* H5 无胶囊，走 CSS 兜底 */ }
   }, []);
 
   const requireLogin = () => {
@@ -99,18 +103,44 @@ export default function Home() {
   };
   const startInterview = () =>
     goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
-  const startForces = () =>
-    goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('用三势判断（天势、市势、人势）帮我看一遍当前局势，并给出该攻、该守还是该等的结论。')}`);
+  // 市势/人势各自独立研判（不再共用同一条指令）：各走自己的 prompt，并带 force 标签，
+  // 认可存库时写入报告 type=「{势}研判」，战局卡即可可靠反查（不靠 LLM 标题合规）。
+  const startForce = (f: ForceItem) =>
+    goChat(`agentKey=${f.agentKey || 'strat'}&fresh=1&force=${encodeURIComponent(f.key)}&send=${encodeURIComponent(f.prompt || '帮我做一次战略研判并给出该攻、该守还是该等的结论。')}`);
+  // 反查方案库里该势已研判的方案（标题/类型含关键词，取最新一份）
+  const forceReport = (f: ForceItem): ReportItem | undefined =>
+    f.match ? reports.find((r) => r.title.includes(f.match!) || r.type.includes(f.match!)) : undefined;
+  const openReport = (id: string) => Taro.navigateTo({ url: `/packages/work/report/index?id=${id}` });
   const askRisks = () =>
     goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
   // 天势不再引导对话：排盘引擎已算好 → 直接进原生「全年天时」页（无命盘则页内就地补生辰）
   const openTianshi = () => Taro.navigateTo({ url: '/packages/work/calendar/index' });
 
+  // 速诊（WO-06）：初诊 CTA 进 3 问速诊分包页。
+  const goQuickScan = () => Taro.navigateTo({ url: '/packages/work/quickscan/index' });
+
+  // 下一步（WO-07 Journey 状态机占位）：先按本地案卷/档案派生，后续替换为服务端 /journey。
+  // 冷启动（无案卷、无军师判断）走 WO-03 集中空态导流文案 → 初诊。
+  const nextStep = (() => {
+    if (!s.isAuthed()) return { title: '先登录，和军师开聊', desc: '登录后军师开始为你建档、诊断、排军令。', cta: '去登录', act: () => setShowLogin(true) };
+    if (dossier) {
+      return progress.total && progress.done < progress.total
+        ? { title: `今日执行 · 军令 ${progress.done}/${progress.total}`, desc: '完成今日军令并录入战果，晚间即可复盘。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) }
+        : { title: '录入今日战果 · 生成复盘', desc: '把线索 / 咨询 / 成交录进去，军师据此定明日军令。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) };
+    }
+    if (und?.summary) return { title: '认可一份方案，生成军令', desc: '和军师把打法聊定，认可后自动拆成今日军令。', cta: '去对话', act: () => goChat('agentKey=general&continue=1') };
+    // WO-07：已做过初诊（journey scanned/diagnosing）→ 引导进参谋室继续诊断，不再重复「开始初诊」。
+    if (journey?.nextStep && (journey.stage === 'scanned' || journey.stage === 'diagnosing')) {
+      return { title: journey.nextStep.title, desc: journey.nextStep.desc, cta: '进参谋室', act: () => goChat('agentKey=general&continue=1') };
+    }
+    return { title: EMPTY_STATES.battle.title, desc: EMPTY_STATES.battle.desc, cta: EMPTY_STATES.battle.cta, act: goQuickScan };
+  })();
+
   return (
-    <Screen className="home">
+    <Screen topInset className="home">
       <View className="pad">
         {/* 页头（对齐设计稿）：左「案卷」· 中「军情」· 右刷新 */}
-        <View className="battle-nav" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
+        <View className="battle-nav tab-page-head">
           <Text className="bn-side left serif" onClick={() => requireLogin() && Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
           <Text className="bn-title serif">军情</Text>
           <Text className="bn-side right" onClick={refresh}>↻</Text>
@@ -123,7 +153,7 @@ export default function Home() {
             {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
           </Text>
           <Text className="bh-title serif">
-            {und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
+            {und?.mainContradiction || und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
           </Text>
         </View>
 
@@ -143,8 +173,16 @@ export default function Home() {
           </View>
         </View>
 
+        {/* 下一步卡（打磨·WO-07 Journey 占位）：按案卷/档案派生一条明确动作，冷启动走空态导流 */}
+        <View className="nextstep-card card" onClick={nextStep.act}>
+          <Text className="section-label">下 一 步</Text>
+          <Text className="ns-t serif">{nextStep.title}</Text>
+          <Text className="ns-d">{nextStep.desc}</Text>
+          <Text className="ns-go" style={{ color: accent }}>{nextStep.cta} ›</Text>
+        </View>
+
         {/* 三势判断（force-grid）：天势=排盘引擎已算好 → 点开原生全年天时页（不引导对话）；
-            市势/人势的结论产自真实对话 → 保留发起判断。 */}
+            市势/人势=各自独立研判开场（不再共用同一指令）→ 已研判（方案库有对应方案）则点开预览报告详情，否则发起研判。 */}
         <Text className="battle-h2">三 势 判 断</Text>
         <View className="force-grid">
           {THREE_FORCES.map((f) => {
@@ -163,11 +201,18 @@ export default function Home() {
                 </View>
               );
             }
+            // 市势/人势：有结构化研判结论（攻/守/等/撤）→ 回显真结论；否则已研判则点开报告；再否则发起研判
+            const fv = f.key === '市势' ? und?.forces?.shishi : f.key === '人势' ? und?.forces?.renshi : null;
+            const rep = forceReport(f);
             return (
-              <View key={f.key} className="force card" onClick={startForces}>
+              <View key={f.key} className="force card" onClick={rep ? () => openReport(rep.id) : () => startForce(f)}>
                 <Text className="force-tag serif">{f.key}</Text>
-                <Text className="force-desc">{f.desc}</Text>
-                <Text className="force-go">发起判断 ›</Text>
+                {fv ? (
+                  <Text className="force-desc"><Text className={`force-verdict v-${verdictClass(fv.verdict)}`}>{fv.verdict}</Text>{fv.note ? ` · ${fv.note}` : ''}</Text>
+                ) : (
+                  <Text className="force-desc">{rep ? `已研判 · ${rep.title}` : f.desc}</Text>
+                )}
+                <Text className="force-go">{fv || rep ? '查看研判 ›' : '发起判断 ›'}</Text>
               </View>
             );
           })}
@@ -252,14 +297,14 @@ export default function Home() {
           <SayingLine html={saying.text} accent={accent} />
         </View>
 
-        {/* 主行动 CTA（battle-cta）：认可判断 → 军令与报告 / 直达执行 */}
+        {/* 主行动 CTA（battle-cta）：认可判断 → 军令与方案 / 直达执行 */}
         <View
           className="battle-cta"
           onClick={() => dossier ? Taro.switchTab({ url: '/pages/studio/index' }) : goChat('agentKey=general&continue=1')}
         >
           <View className="bc-b">
-            <Text className="bc-t">{dossier ? '今日执行 · 军令与打卡' : '认可判断，生成军令与报告'}</Text>
-            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 录入进展，即可复盘` : '认可即排期执行、生成报告与复盘'}</Text>
+            <Text className="bc-t">{dossier ? '今日执行 · 军令与打卡' : '认可判断，生成军令与方案'}</Text>
+            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 录入进展，即可复盘` : '认可即排期执行、生成方案与复盘'}</Text>
           </View>
           <View className="bc-arrow"><Text>›</Text></View>
         </View>

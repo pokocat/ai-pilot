@@ -48,9 +48,9 @@ export default function Report() {
   if (!detail) {
     return (
       <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-        <SafeHeader title="报告" onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
+        <SafeHeader title="方案" onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
         <View className="rp-loading">
-          <Text>{failed ? '报告加载失败，请返回重试' : '加载中…'}</Text>
+          <Text>{failed ? '方案加载失败，请返回重试' : '加载中…'}</Text>
         </View>
       </View>
     );

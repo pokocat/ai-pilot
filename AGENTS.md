@@ -18,7 +18,7 @@
 4. **改数据模型先改 SSOT**：任何接口字段/数据结构变化，先改 `shared/contracts.d.ts`，再改前端/后端/运营端实现。
 5. **保持构建绿**：较大改动后按 **§11 构建校验基线** 跑通三端。
 6. **新增全屏弹层**记得置 `store.setOverlay(open)`；遵守 **§7.2 UI 约定**，勿回退已修复的坑。
-7. **对话页登录兜底**：未登录/401 token 失效时弹 `Login`，不要把鉴权失败吞成通用“产出失败”。
+7. **登录态失效必须显式打断（全局铁律）**：任何页面 / 接口收到 401（token 失效或未登录），**绝不能静默降级**——不许让用户滞留在小程序界面看旧缓存 + 新功能空白（用户点名要修的真问题）。机制已集中在 `app/src/services/api.ts`：`request()` 与文件上传收到 401 会**无条件**触发全局 `onAuthLost`（由 `store.ts` 用 `setAuthLostHandler` 注册 → 清登录态 + 提示「登录态已失效，请重新登录」+ `reLaunch` 回登录入口 `pages/sessions`，其 `Login` 弹层按 `!isAuthed()` 拉起）。因此：① 页面 `.catch` 只负责**本地非鉴权兜底**（网络 / 空数据），**不得吞掉鉴权后果**——401 一定已被 `request()` 打断到重新登录；② 新增任何直连后端的鉴权调用，让它经 `request()`（默认即可），别绕过；面向用户的错误优先走 `store.handleApiError`，而非裸 `.catch(()=>{})`。**历史坑**：军师记忆库 / 完整履历页曾用 `.catch(()=>{})` 吞掉 401，掉登录后页面空白、用户不自知仍以为功能坏了（2026-07-07 修）。
 8. **小程序改动先查约束清单**：凡改 `app/` 的微信小程序页面、tabbar、弹层、登录、键盘、网络请求、路由分包或项目配置，先对照 **§7.2 小程序工程约束清单**；不确定时按清单保守实现，避免回退真机已修复问题。
 9. **运营后台 UI 改动守设计系统**：凡改 `admin/` 前端（`.tsx`/`admin.css`），必须对齐 **`admin/DESIGN.md`「Engineering Compliance」**——颜色只用 `:root` token（禁硬编码 hex/rgb）、只用已定义的组件类（禁裸 class 与一次性 inline 控件样式）。提交前跑 `cd admin && npm run lint:ui`（`scripts/audit-admin-ui.mjs`，已接入 `build`）保持全绿。
 10. **品牌红线：禁止「米诺 / Mino」**（避免品牌纷争）：任何新增或修改的产品文案、提示词、交付物模板、代码标识符、注释、seed 数据里，一律使用「军师参谋部 / Junshi Strategic Staff」，不得出现「米诺 / Mino」。从 Notion 原稿（含 12 张 B 级卡片骨架、A 级报告模板）移植内容时必须先按 `server/src/data/prompts/README.md` 的映射去品牌再入库。存量残留的清扫任务见 §13 TODO。
@@ -52,7 +52,7 @@ repo/
 └── project/            # 原始高保真原型（设计事实来源，勿改）
 ```
 
-本地生成物约定：`app/project.config.json` 是正式小程序配置（需跟踪，保持 AppID/miniprogramRoot 正确并开启正式校验/压缩）；`app/project.private.config.json` 可在本机覆盖 DevTools 私有设置（例如局域网真机预览临时 `urlCheck:false`）；根目录误生成的 `project.config.json/project.private.config.json`、`weapp-preview*.json/png`、`weapp-auto-preview*.json/png`、`app/.impeccable/`、`app/tarojs-cli-*.tgz`、根目录空 `package-lock.json` 均为本机/工具产物，已在 `.gitignore` 排除，不纳入提交。**不要导入仓库根目录到微信开发者工具，只导入 `app/`。**
+本地生成物约定：`app/project.config.json` 是正式小程序配置（需跟踪，保持 AppID/miniprogramRoot 正确并开启正式校验/压缩）；`app/src/app.config.ts` 生成正式 `app.json`，`app/config/index.ts` 会在 weapp 构建产物里强制补写 `lazyCodeLoading: "requiredComponents"`（Taro 3.6.34 不稳定透传该字段）；`app/project.private.config.json` 可在本机覆盖 DevTools 私有设置（例如局域网真机预览临时 `urlCheck:false`）；根目录误生成的 `project.config.json/project.private.config.json`、`weapp-preview*.json/png`、`weapp-auto-preview*.json/png`、`app/.impeccable/`、`app/tarojs-cli-*.tgz`、根目录空 `package-lock.json` 均为本机/工具产物，已在 `.gitignore` 排除，不纳入提交。**不要导入仓库根目录到微信开发者工具，只导入 `app/`。**
 
 ---
 
@@ -128,13 +128,13 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 | Tab | 页面 | 说明 |
 |---|---|---|
-| 对话 | `pages/sessions` | 「对话」微信式列表（第一入口，底栏首位，对齐设计稿 `page-chat`）：大标题头（对话+副题，右侧 历史/新对话按钮）+ 白底搜索 pill + 快捷补给横滑 6 卡（知识库/数据源/Skill·模块/生成报告/转成军令/今日执行）+ 通栏半透明线程列表（上下发丝线）：总军师置顶（在线点）+ 常驻专业军师 + 「专业参谋」分组（未启用走 `AgentUnlock`）；每行=拟人立绘 + 宋体名号 + 金色花名 + 两行真实最近会话摘要/时间；「历史」切换到最近会话列表（长按删） |
-| 战局 | `pages/home` | 对齐设计稿 `page-battle`：居中页头（左「案卷」→项目工作台 / 右刷新）+ 军师判断 hero（`--green-hero` 跟随本命色：kicker 主要矛盾 + 案卷来源行 + 大宋体判断=真实 `me.understanding.summary` 兜底案卷判断，点按→总军师对话）+ 战局信号 metric 3 卡（案卷完整度=档案成熟度 / 待补资料 / 风险锁）+ 三势判断 force 3 卡（方法框架→发起判断）+ 下一步动作（`nextQuestions` battle-goal 行→访谈）+ 关联模块（linkmod 行：模块名+负责军师 pill+tier 徽章）+「现在不能做」nono 卡（无则隐藏）+ 今日献策（页尾轻量保留）+ 本命色渐变 CTA（有案卷→执行，无→对话）|
+| 对话 | `pages/sessions` | 「对话」微信式列表（第一入口，底栏首位，对齐设计稿 `page-chat`）：大标题头（对话+副题，右侧 历史/新对话按钮）+ 白底搜索 pill + 快捷补给横滑 6 卡（资料/数据源/军师锦囊·模块/生成方案/转成军令/今日执行）+ 通栏半透明线程列表（上下发丝线）：总军师置顶（在线点）+ 常驻专业军师 + 「专业参谋」分组（未启用走 `AgentUnlock`）；每行=拟人立绘 + 宋体名号 + 金色花名 + 两行真实最近会话摘要/时间；「历史」切换到最近会话列表（长按删） |
+| 战局 | `pages/home` | 对齐设计稿 `page-battle`：居中页头（左「案卷」→我的案卷 / 右刷新）+ 军师判断 hero（`--green-hero` 跟随本命色：kicker 主要矛盾 + 案卷来源行 + 大宋体判断=真实 `me.understanding.summary` 兜底案卷判断，点按→总军师对话）+ 战局信号 metric 3 卡（案卷完整度=档案成熟度 / 待补资料 / 风险锁）+ **「下一步」卡**（打磨·WO-07 Journey 占位：按案卷/档案派生一条动作；冷启动无案卷无判断走 `data/emptyStates.ts` 初诊导流）+ 三势判断 force 3 卡（方法框架→发起判断）+ 下一步动作（`nextQuestions` battle-goal 行→访谈）+ 关联模块（linkmod 行：模块名+负责军师 pill+tier 徽章）+「现在不能做」nono 卡（无则隐藏）+ 今日献策（页尾轻量保留）+ 本命色渐变 CTA（有案卷→执行，无→对话）|
 | 执行 | `pages/studio` | 对齐设计稿 `page-execution`（军令体系用 `--gold`，现跟随本命色）：exec-nav（案卷/执行/提醒）+ 横滑战役卡组【今日战役本命色卡（案卷+完成度进度条）· 军师献策（优先显示待执行军令，完成后提示归档/回填/复盘）· 今日主令（首条未完成军令→生成脚本，全部完成→生成复盘）· 提醒节奏】+ 执行信号 + 总军师督战紧凑行（去对话）+ 今日最重要 today-focus 本命色条 + 目标阶梯 4 格（引导拆解）+ exec-seg 三视图【今日军令=第 0 号军令补资料（主题色边框 command-card）+ 未完成 task 卡打卡/长按删/手动添加 + 已完成军令默认收起到归档区（可展开取消完成）+ 线索/咨询/成交数据回填（软底+白格）+ 复盘前检查 · 周计划=近 7 天军令记录 · 复盘=带真实军令与回填数据发给经营参谋 + 提醒节奏】+ AI 创作发布（creative 智能体，保留解锁/按需权益）|
-| 智库 | `pages/thinktank` | 对齐设计稿 `page-thinktank`：页头（上传/智库/市场）+ seg 4 分区【案卷资产=上传区（绿调 upload-zone）+ 状态格（已入库/关键缺口/深度整理）+ 资料树（最新上传=真实 `knowledgeDocs` + AI 分类框架）+ 军师提示补充（暖金 asset-gap，真实 `nextQuestions`）· 数据源=绑定目录单卡行 · 能力=费用口径 chips + 免费 Skill/深度 Skill/方案模块分组行 · 报告=真实版本化报告行 + 生成报告/方案库入口】|
-| 我的 | `pages/profile` | 对齐设计稿 `page-profile`：居中「我的军师系统」+ 右「设置」+ 本命色用户卡（头像/称呼/公司/套餐）+ 经营统计 3 卡（案卷/报告/方案真实计数）+ 权益额度 3 卡（钻石/本月额度/套餐→额度弹层）+ 菜单（档案/项目工作台/报告方案库/资料库/数据授权/模块管理/订单明细/提醒日历/本命色/企业版/退出登录）+ 军师社群主题卡 + 深度能力解锁主题卡 |
+| 智库 | `pages/thinktank` | 对齐设计稿 `page-thinktank`：页头（上传/智库/市场）+ seg 4 分区【案卷资产=上传区（绿调 upload-zone）+ 状态格（已入库/关键缺口/深度整理）+ 资料树（最新上传=真实 `knowledgeDocs` + AI 分类框架）+ 军师提示补充（暖金 asset-gap，真实 `nextQuestions`）· 数据源=绑定目录单卡行 · 能力=费用口径 chips + 免费 Skill/深度 Skill/方案模块分组行 · 方案=真实版本化方案行 + 生成方案/方案库入口】（WO-01 名词统一：报告→方案）|
+| 我的 | `pages/profile` | 对齐设计稿 `page-profile`：居中「我的军师系统」+ 右「设置」+ 本命色用户卡（头像/称呼/公司/套餐）+ 经营统计 3 卡（案卷/方案/资料真实计数）+ 权益额度 3 卡（钻石/本月额度/套餐→额度弹层）+ **战略段位卡（WO-03 冷启动延迟曝光：仅 `streak≥3 或 usageDays≥14` 才渲染）** + 菜单（档案/我的案卷/方案库/资料库/数据授权/模块管理/订单明细/送你一卦/提醒日历/本命色/企业版/退出登录）+ 军师社群主题卡 + 深度能力解锁主题卡 |
 
-非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡 + 参谋室协同导轨「派单/回总军师/转成军令/补上下文」+ 成果卡下「认可方案→存方案库+生成本地案卷军令→去执行」）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；项目工作台、项目详情、方案库、报告、知识库、数据源绑定、模块市场、军师社群已拆到 `packages/work/*` 分包（`projects`、`project`、`library`、`report`、`knowledge`、`credits`、`bindings`、`market`、`community`），由 `pages/profile`、`pages/thinktank` 与 `pages/chat` 预加载。
+非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡 + 参谋室协同导轨「派单/回总军师/转成军令/补上下文」+ 成果卡下「认可方案→存方案库+生成本地案卷军令→去执行」）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；我的案卷（列表/详情，前台名词=案卷，工程模型仍是 Project）、方案库、方案详情、资料库、数据源绑定、模块市场、送你一卦、军师社群已拆到 `packages/work/*` 分包（`projects`、`project`、`library`、`report`、`knowledge`、`credits`、`bindings`、`market`、`gift`、`community`），由 `pages/profile`、`pages/thinktank` 与 `pages/chat` 预加载。
 
 静态目录数据：`src/data/operatingSystem.ts`（模块市场/Skill 市场/知识分类框架/数据源目录/对话引导，均为能力目录与引导态文案，费用口径 `💎xN`）、`src/data/council.ts`（参谋室常驻军师/派单建议/快速起手式/`ADVISOR_ALIAS` 军师花名：玄衡/观澜/青衍/鸣璋/照微/云枢…）。**这两个文件不得写入用户业务结论**——用户数据一律走 api（会话/报告/知识/项目/`me.understanding`）。
 
@@ -144,11 +144,11 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 ### 7.2 关键 UI 约定（踩过的坑，勿回退）
 - **小程序工程约束清单（先读）**：
-  - **项目导入与配置**：微信开发者工具只导入 `app/`；`app/project.config.json` 是正式配置，保持 AppID、`miniprogramRoot=dist/`、`libVersion=3.16.2`（真流式 `enableChunked` 目标基础库）、`urlCheck/es6/enhance/postcss/minified` 等正式校验/压缩开启；本机调试差异放 `app/project.private.config.json`，不要把根目录误生成的 DevTools 配置纳入提交。
+  - **项目导入与配置**：微信开发者工具只导入 `app/`；`app/project.config.json` 是正式配置，保持 AppID、`miniprogramRoot=dist/`、`libVersion=3.16.2`（真流式 `enableChunked` 目标基础库）、`urlCheck/es6/enhance/postcss/minified` 等正式校验/压缩开启；`app/src/app.config.ts` 保持 `lazyCodeLoading: "requiredComponents"`，且 `app/config/index.ts` 的 weapp webpack 链必须确保 `dist/app.json` 实际写出该字段；本机调试差异放 `app/project.private.config.json`，不要把根目录误生成的 DevTools 配置纳入提交。
   - **原生 tabbar 只隐藏不恢复**：custom tabBar 模式下任何路径都不得调用 `Taro.showTabBar`。正常 Tab 挂载/切换只调用 `hideNativeTabBarOnly()` 压住微信原生底栏；全屏 overlay 用 `store.setOverlay(open, stableKey)` 写 storage 并隐藏自定义底栏，关闭/卸载时清理对应 key。custom-tab-bar 在无 overlay 时必须自动清理过期隐藏标记，避免真机重进后导航消失。
   - **弹层不进 custom-tab-bar**：`custom-tab-bar` 只做导航和 overlay 状态同步，不渲染 `Login` 或其它全屏业务弹层；未登录点击中间「对话」只提示并跳 `pages/chat`，由聊天页承接登录弹层。
   - **overlay 同步不用轮询**：底栏状态同步依赖 `eventCenter` + 页面 `useDidShow` + `hideNativeTabBarOnly()` 短延时兜底；不要恢复 250ms/1500ms 常驻 interval。
-  - **顶部安全区统一组件化**：Tab 页用 `Screen topInset`，非 Tab 自定义头用 `SafeHeader`；不要在页面里各写一套 `env(safe-area-inset-top)`，不要加伪状态栏 `9:41`。
+  - **顶部安全区统一组件化**：Tab 页用 `Screen topInset`，非 Tab 自定义头用 `SafeHeader`；五个 tab 的标题区统一加 `tab-page-head`，安全区让位只由 `Screen` 的 `.nav-inset` 负责，页面内不要再单独测胶囊或写 `env(safe-area-inset-top)`；不要加伪状态栏 `9:41`。
   - **组件样式导入顺序统一**：同一页面同时用 `Icon` 与 `SafeHeader` 时，保持 `Icon` import 在前、`SafeHeader` import 在后，避免 Taro/mini-css-extract-plugin 在 common chunk 报 CSS order warning。
   - **对话键盘按真机口径写**：`pages/chat` 保持页面 `disableScroll: true`、输入 `adjustPosition={false}`、`alwaysEmbed`、整条 `.box` 触发 focus、`onInput` 返回 `e.detail.value`、`onConfirm` 使用事件值发送，并由 `onKeyboardHeightChange` 写 `--keyboard-height` 让 `.chat` 自己压缩底部空间；等待回复 `busy` 时输入框必须真正锁定（不 focus、不更新草稿、不发送、不清空当前内容）；用户消息、AI 回复、记忆提示与成果卡必须支持长按复制（小程序自定义气泡不能依赖系统文本选择）；AI 普通文本回复用无卡片正文样式并开启文字选择复制，用户输入保留右侧气泡卡片。
   - **登录/401/网络错误有统一入口**：用户动作前先检查登录态；401 必须清用户态并弹登录/回首页，不能吞成空态或“产出失败”；默认首页 `pages/sessions` 自己承接 `Login`，在本页 401 时只打开登录弹层，不再反复 `reLaunch` 自己，且未登录/退出态仍要加载公开军师注册表并保留 `DEFAULT_AGENTS` 兜底，避免真机旧 token 失效后对话页清空；`Taro.request` reject 要按真实原因区分 `timeout/offline/domain/ssl/dns/unreachable/cancelled/network` 并映射成用户可读提示，合法域名/API 域名等排查细节只放 `reason/technicalMessage`/日志，不直接展示给用户；HTTP 408/504、429、5xx 也要给用户友好但真实的原因；需要登录的数据页 catch 后先调 `handleApiError`；普通聊天默认走 `/generate` 真流式，小程序用 `enableChunked/onChunkReceived`，H5 用 `fetch` ReadableStream；服务端只对用户输入做前置内容审核，违规输入直接 `MODERATION_BLOCK` 拦截，模型输出不再走阻塞式审核，完成后仅做 trace/禁用词审计；OpenAI/Claude 普通聊天在无工具调用时优先走 provider 原生 streaming，Dify、工具循环、mock 或不支持 stream 的兼容网关回退为完整结果分块；总军师 on-demand 普通问答也走 token 流，`/generate-sync` fallback 同样按意图分流，只有明确“生成方案/报告/成果卡/纪要/军令/出报告/战略体检”等成果请求才走强制结构化成果路径（`generateDeliverable`），不得再进入 adaptive 可选工具路径；OpenAI/Claude provider 返回空文本时必须按 AI 服务异常处理，不得伪装成固定追问；结构化工具返回的 `sections` 必须经 `normalizeDeliverableSections` 归一化，非数组/字符串/对象都不能让报告请求变成 503；模型未调用工具但返回普通长文时要转成报告分段，避免直接降级模板；报告成果不得把运行环境、Git 仓库、代码库、IDE、文件系统或 Codex 工作区当成客户资料，gateway 命中“当前工作区/Git 仓库/代码仓库/上传到工作区”等工程语境时必须替换为业务兜底成果并标 `degraded`；前台 degraded 提示不得暴露“结构化产出/降级模板”等技术术语；明确成果请求（如出报告/重新出报告/战略体检/生成方案）与带 `deliverableKey` 的成果型顾问必须按本次 `agentKey` 配置判定并走 `/generate` report SSE：收到 `meta` 先渲染 ReportCard 骨架，`begin/section/footer/done` 增量更新当前卡片，当前页不得只停在全局 thinking；只有 report 流无可渲染事件/传输失败时才回退 `/generate-sync`；普通聊天流成功仍必须收到可渲染 `token/chat` 事件，误收到 report SSE 时不要留下空回复；报告卡「网页版」在小程序内必须跳转 `packages/work/webview` 直接打开自有域名 `/api/r/:id`，web-view/navigate 失败只提示重试，不得自动复制链接。
@@ -161,7 +161,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **战局页首屏层级**：`pages/home`（战局）的军师判断卡是**纯展示深色卡**（点按整卡进入总军师对话），不要往里塞输入框/chips——对话入口在底栏首位「对话」tab；避免把战局页做成权益/推荐墙。底栏保持浅纸底与明确选中态，避免回退成强玻璃装饰。
 - **前台商业文案克制**：面向用户的主路径不要写成“赠送 / 付费解锁 / 充值 / 最受欢迎 / 灵活付费”这类促销口吻；统一用「可用」「已启用」「专项能力」「产出额度」「方案与额度」「常用配置」表达，让用户感到是在调用工作台能力，而不是被推销。智能体费用展示用 `💎xN` / `💎xN/次`，不要写「启用需 N 点」「每次产出 N 点」；后台/代码契约仍可保留 `free/unlock/metered/credits` 等技术术语。
 - **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；AI 普通回复传 `selectable` 以支持用户选择文字复制；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
-- **前台记忆披露**：对话页用「专属理解」包装 Agent Memory；我的页只放「军师档案」菜单入口，详情页展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题），不要在我的页首页直接平铺大段内容。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事或展示 `用户123/企业123` 这类占位名；资料不足时让用户进入对话访谈，由军师先问 1-3 个简单问题，不要先分析旧报告或展开诊断。后端真实记忆开关见 §9。
+- **前台记忆披露**：对话页用「军师印象」包装 Agent Memory（WO-01 名词统一，原「专属理解」；记忆条/记忆披露/@引用分组一致）；我的页只放「军师档案」菜单入口，详情页展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题），不要在我的页首页直接平铺大段内容。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事或展示 `用户123/企业123` 这类占位名；资料不足时让用户进入对话访谈，由军师先问 1-3 个简单问题，不要先分析旧报告或展开诊断。后端真实记忆开关见 §9。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **本命色联动**：`--green/--green-hero/--gold/--gold-soft` 等业务主色 token 必须派生自 `--accent`，战局 hero、智库上传、我的用户卡、执行行动色和底栏选中态都要跟随设置里的本命色；`--danger`、正文墨色、纸张底色等语义/中性色保持固定。默认本命色=墨绿（`data/colors.ts` 首位 + `store` 默认 + 服务端 `benmingColor` 默认 `green`）。
 - **小程序主题 token 不只写链式 var**：主题类（`.theme-red` 等）必须显式覆盖 `--green/--green-hero/--gold/--gold-soft` 等业务 token，不能只写 `--green: var(--accent)` 这类间接链，否则真机上部分卡片会保留默认绿。
@@ -520,6 +520,14 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
+- **小程序方向调整（2026-07-05）：从「减法」改为「精细打磨现有功能」**。原 `docs/[FABLE5]*` 三份文档是「先减法后加法」方案；产品侧判断"功能都是客户想要的"，**不再做减法**，改为按文档把各功能逻辑捋顺、补全、打磨。已执行的处置：
+  - **保留**：WO-01（名词统一：前台收敛「案卷/方案/军令/资料」，记忆/专属理解→军师印象；属打磨）+ WO-03（冷启动段位卡延迟曝光 `streak≥3‖usageDays≥14`、空态导流 `data/emptyStates.ts`、战局「下一步」卡；属打磨）。
+  - **已回滚**：WO-02 的真减法——市场货架（thinktank 能力目录 + market 页 + profile 模块管理 + sessions 快捷卡 + CHAT_GUIDES 入口）、战局三势卡（市势/人势）+ 关联模块、送你一卦，全部恢复；`market`/`gift` 恢复为正常可达入口。
+  - **打磨方案已产出**：`docs/[FABLE5]POLISH_PLAN.md`（review 工作流 12 功能区 × 诊断 × 对抗性复核，79 条已核实 finding + 4+1 批次 + 7 个产品拍板点 + 2 条 P0 命理合规红线）。后续打磨逐单对照它执行。
+  - **打磨①已落（P-4）**：送你一卦第三人生辰不落库、无公开链接，改小程序 canvas 图片交付 + 同意勾选（见 CHANGELOG 2026-07-05）。**待真机复验 canvas 出图**；server 集成测试需带 Postgres 环境跑。
+  - **命理合规 P-3（下一条 P0，仍待）**：加全局 `AiSetting.tianshiMode(full/downgrade/off)` 凌驾 believe，前端 home 天势卡/calendar/gift 读同一开关（downgrade 去八字/命宫术语、off 隐藏），切换免发版、先于提审接好。
+  - **其余打磨待办**：prompt 去机制化（A-1/P-12，动生产 V6.0 prompt）、UserJourney 诊断轮次持久化（F-5）、账本 App 页+verify 入口+最小样本（F-8/P-2）、复盘周期聚合+grace 全层保底（A-4/A-8）、报告脱敏分享等——见 POLISH_PLAN §3 批次。
+  - **WO-03 §3（服务端，仍待）**：`server/src/services/context.ts`【段位·里程碑】块 `streak<3` 时去具体百分比字段（只留天数），配 server 集成测试。
 - **存量「米诺 / Mino」品牌残留待清扫**（规则见 §0 #10；新增内容一律禁用，存量后扫）：① `server/src/data/prompts/strat.v6.baseline.md`——2026-06-20 从 prod 拉的原始基线快照，正文含米诺品牌（该目录 README 记录了去品牌映射，运行时不加载、tsc 不打包，风险=仓库存档层面）；② `app/src/data/operatingSystem.ts` SKILL_MARKET 里 `id: 'mino'`（三势初判的内部 id，用户不可见，改名需同步排查引用）；③ `server/src/data/agents.ts` 顶部注释书名号里的《米诺战略参谋部…》字样；④ 两个 prompt 目录并存待合并（运行时加载 `server/prompts/`，基线存档在 `server/src/data/prompts/`）。清扫时机：M1 收尾或专项小 PR。
 - **miniprogram-ci 上传**：云端执行环境的网络白名单未放行 `servicewechat.com`（报 `Host not in allowlist`），无法在本沙箱内直传。需从**本机**执行上传，或放开环境网络策略后重试；另注意上传密钥若开了 IP 白名单，需把执行机出口 IP 加入小程序后台。本机命令见 §11。
 - 自有登录态支持 JWT（`services/userToken.ts`，HS256）：配 `APP_JWT_SECRET` 后登录签发 JWT、`resolveUser`/审计/admin role/entitlement 统一 `verifyUserToken` 校验；未配则回退历史 `token=userId`，`APP_JWT_REQUIRED=true` 可强制只认 JWT。短信强制校验开关（`SMS_REQUIRE_CODE`）已就绪，生产置 true 即可。

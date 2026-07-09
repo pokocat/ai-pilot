@@ -6,9 +6,14 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
+  MemoryLibraryView, MemoryLibraryGroup, MemoryLibraryEntry, MemoryCategoryKey, MemoryFillLevel,
+  DossierView, DossierReport, DossierSection, DossierBlock,
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
+  DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
+  QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
 } from '../../../shared/contracts';
+import type { ChartSummary, ProgressView } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
 import { agentForText } from '../data/intents';
@@ -161,6 +166,22 @@ function current(): { token: string; d: UserData } {
 const agentOf = (key: string): Agent =>
   DEFAULT_AGENTS.find((a) => a.key === key) || DEFAULT_AGENTS.find((a) => a.key === 'general')!;
 
+// 确定性样例命盘（mock 专用 UI 预览假数据，结构对齐 ChartSummary；非真排盘）
+function sampleChartM(): ChartSummary {
+  const yr = new Date().getFullYear();
+  const PHASES = ['进攻', '平稳', '防守', '进攻', '平稳', '进攻', '防守', '平稳', '进攻', '平稳', '防守', '平稳'];
+  const TURN = new Set([3, 7, 11]);
+  return {
+    engineVersion: 'paipan-v1',
+    hourKnown: true,
+    pillars: { year: { ganZhi: '庚午' }, month: { ganZhi: '壬午' }, day: { ganZhi: '戊子' }, time: { ganZhi: '甲寅' } },
+    dayMaster: { gan: '戊', element: '土', strength: '身强' },
+    pattern: { name: '正财格', traits: '务实稳健、重信守诺，善守成不喜冒进', suits: ['稳扎稳打、深耕存量'], avoid: ['盲目扩张'] },
+    ziwei: { soulMajorStars: ['紫微', '天府'], bodyMajorStars: ['武曲'] },
+    monthlyOutlook: { year: yr, months: PHASES.map((phase, i) => ({ month: i + 1, phase, turning: TURN.has(i + 1) })) },
+  };
+}
+
 // —— 双轴计费 mock 辅助：钻石(creditBalance) 管解锁；月度 token 额度按 tokenUsed/limit 计 ——
 function planOf(d: UserData): Plan { return PLANS.find((p) => p.id === d.planId) ?? PLANS[1]; }
 function mockQuota(d: UserData): TokenQuotaView {
@@ -238,7 +259,7 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
   pushUniqueM(identity, d.profile?.stage ? `阶段：${d.profile.stage}` : '');
 
   const journey = extraLinesM(d.profile?.extra);
-  d.projects.slice(0, 4).forEach((p) => pushUniqueM(journey, p.summary ? `项目《${p.name}》：${p.summary}` : `项目《${p.name}》正在推进`, 5));
+  d.projects.slice(0, 4).forEach((p) => pushUniqueM(journey, p.summary ? `案卷《${p.name}》：${p.summary}` : `案卷《${p.name}》正在推进`, 5));
   d.sessions.slice(0, 4).forEach((s) => pushUniqueM(journey, `近期讨论：${s.title}`, 5));
 
   const difficulties: string[] = [];
@@ -273,11 +294,16 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
     subtitle: '军师有多了解你的生意',
     maturity,
     summary,
+    // 主要矛盾（mock：有痛点时给一句真结论，让战局 hero 走查真数据态）
+    mainContradiction: d.profile?.pain ? `主要矛盾集中在「${d.profile.pain}」——先解决它，其余动作都围绕它排布。` : null,
+    positioning: null,
+    // L-6 三势：mock 给确定性研判结论，军情页市势/人势卡走真数据态
+    forces: d.profile?.pain ? { shishi: { verdict: '守', note: '先守住复购，别急着抢新客' }, renshi: { verdict: '等', note: '人手紧，先练兵不硬扩' } } : null,
     sections: [
       { key: 'identity', title: '经营身份', items: identity, emptyText: '还没记录你的称呼、公司、行业和阶段。' },
       { key: 'journey', title: '创业路径', items: journey, emptyText: '还没形成创业路径。可以告诉军师：你怎么开始、做过哪些转折、现在走到哪一步。' },
       { key: 'difficulties', title: '当前难题', items: difficulties, emptyText: '还没记录明确难题。后续咨询会先追问关键约束，再给建议。' },
-      { key: 'materials', title: '已沉淀资料', items: materials, emptyText: '还没有长期线索。对话、项目、报告和知识库都会逐步沉淀到这里。' },
+      { key: 'materials', title: '已沉淀资料', items: materials, emptyText: '还没有长期线索。对话、案卷、方案和资料库都会逐步沉淀到这里。' },
     ],
     nextQuestions: nextQuestions.slice(0, 4),
     evidenceCount,
@@ -355,8 +381,8 @@ function keywordScore(q: string, text: string): number {
 function resolveRefs(d: UserData, refs: MessageRef[] | undefined, query: string, projectId?: string | null): { labels: string[]; notes: string[] } {
   const labels: string[] = [], notes: string[] = [];
   for (const r of (refs ?? []).slice(0, 6)) {
-    if (r.kind === 'project') { const p = d.projects.find((x) => x.id === r.id); if (p) { labels.push(`项目《${p.name}》`); notes.push(p.summary || p.name); } }
-    else if (r.kind === 'report') { const rep = d.reports.find((x) => x.id === r.id); if (rep) { const v = rep.versions[rep.versions.length - 1]; labels.push(`报告《${rep.title}》v${rep.currentVersion}`); notes.push(v ? sectionsOf(v.content).map((s) => s.h).join('、') : rep.title); } }
+    if (r.kind === 'project') { const p = d.projects.find((x) => x.id === r.id); if (p) { labels.push(`案卷《${p.name}》`); notes.push(p.summary || p.name); } }
+    else if (r.kind === 'report') { const rep = d.reports.find((x) => x.id === r.id); if (rep) { const v = rep.versions[rep.versions.length - 1]; labels.push(`方案《${rep.title}》v${rep.currentVersion}`); notes.push(v ? sectionsOf(v.content).map((s) => s.h).join('、') : rep.title); } }
     else if (r.kind === 'knowledge') { const k = d.knowledge.find((x) => x.id === r.id); if (k) { labels.push(`知识「${k.title ?? k.text.slice(0, 12)}」`); notes.push(k.text); } }
   }
   // 自动召回：知识库关键词命中
@@ -400,6 +426,54 @@ const projItem = (d: UserData, p: ProjectRec): ProjectItem => ({
 });
 const reportItem = (r: ReportDocRec): ReportItem => ({ id: r.id, title: r.title, slug: r.slug, type: r.type, agentKey: r.agentKey, agentName: r.agentKey ? agentOf(r.agentKey).name : undefined, projectId: r.projectId, currentVersion: r.currentVersion, updatedAt: r.updatedAt });
 const knItem = (k: KnowledgeRec): KnowledgeItemT => ({ id: k.id, projectId: k.projectId, kind: k.kind as KnowledgeItemT['kind'], title: k.title, text: k.text, sourceType: k.sourceType, sourceId: k.sourceId, tags: k.tags, at: k.at });
+
+// —— 账本闭环 mock（决策账本/天机账本，与后端同口径：n<5 不出比率）——
+type LedgerM = { decisions: DecisionView[]; prophecies: ProphecyView[] };
+function seedLedgerM(): LedgerM {
+  const day = new Date().toISOString().slice(0, 10);
+  const dec = (seq: number, decision: string, status: DecisionView['status'], fast: boolean | null, scene = '战略规划'): DecisionView =>
+    ({ id: `d${seq}`, seq, scene, decision, reasons: [], tianshiRef: '', expected: '', verifyStandard: '', verifyByDate: day, status, verifyNote: '', fast, createdAt: `${day} 10:0${seq}` });
+  const pro = (seq: number, prophecy: string, status: ProphecyView['status']): ProphecyView =>
+    ({ id: `p${seq}`, seq, prophecy, basis: '流月', verifyStandard: '', dueDate: day, status, verifyNote: '', createdAt: `${day} 10:0${seq}` });
+  return {
+    decisions: [
+      dec(1, '先收缩到复购最好的两家店，砍掉拖后腿的第4家', 'correct', false),
+      dec(2, '把9800年卡改成体验—复购分层，先拉复购率', 'correct', false),
+      dec(3, '暂缓加盟扩张，先把直营模型跑透', 'revise', true, '紧急战况'),
+      dec(4, '上私域内容获客，替代高价投放', 'pending', null),
+      dec(5, '把技师提成和复购挂钩', 'pending', null),
+      dec(6, '开一条轻医美高毛利线试水', 'pending', null),
+    ],
+    prophecies: [
+      pro(1, '3月忌神当令，现金流会有压力', 'hit'),
+      pro(2, '4月偏财得力，有意外进账', 'hit'),
+      pro(3, '5月官星受克，团队可能有波动', 'miss'),
+      pro(4, '下半年适合签长约、落白纸黑字', 'pending'),
+      pro(5, '秋后有一次扩张窗口', 'pending'),
+    ],
+  };
+}
+function loadLedgerM(token: string): LedgerM {
+  try { const raw = Taro.getStorageSync(`mock.ledger.${token}`); if (raw) return (typeof raw === 'string' ? JSON.parse(raw) : raw) as LedgerM; } catch { /* noop */ }
+  return seedLedgerM();
+}
+function saveLedgerM(token: string, l: LedgerM) { try { Taro.setStorageSync(`mock.ledger.${token}`, JSON.stringify(l)); } catch { /* noop */ } }
+const accM = (c: number, r: number) => (c + r >= 5 ? Math.round((c / (c + r)) * 100) : null);
+function decStatsM(items: DecisionView[]): DecisionStats {
+  const correct = items.filter((i) => i.status === 'correct').length;
+  const revise = items.filter((i) => i.status === 'revise').length;
+  const fast = items.filter((i) => i.fast === true), slow = items.filter((i) => i.fast === false);
+  return {
+    total: items.length, pending: items.length - correct - revise, correct, revise,
+    accuracy: accM(correct, revise),
+    fastAccuracy: accM(fast.filter((i) => i.status === 'correct').length, fast.filter((i) => i.status === 'revise').length),
+    slowAccuracy: accM(slow.filter((i) => i.status === 'correct').length, slow.filter((i) => i.status === 'revise').length),
+  };
+}
+function proStatsM(items: ProphecyView[]): ProphecyStats {
+  const hit = items.filter((i) => i.status === 'hit').length, miss = items.filter((i) => i.status === 'miss').length;
+  return { total: items.length, pending: items.length - hit - miss, hit, miss, hitRate: hit + miss >= 5 ? Math.round((hit / (hit + miss)) * 100) : null };
+}
 
 // ── mock api（与后端同口径） ──
 export const mock = {
@@ -582,6 +656,52 @@ export const mock = {
   },
   async survey(): Promise<SurveyQuestion[]> { return delay(SURVEY); },
 
+  // WO-07：journey 视图（mock 按档案是否建档给出 new / diagnosing 的确定性下一步）。
+  async journey(): Promise<JourneyView> {
+    const { d } = current();
+    if (!d.profile?.industry) {
+      return delay({ stage: 'new', diagRound: 0, nextStep: { key: 'quickscan', title: '先做个 3 问速诊', desc: '10 分钟拿到主要矛盾与今天能做的一件事。', route: '/packages/work/quickscan/index' } });
+    }
+    return delay({ stage: 'diagnosing', diagRound: 2, nextStep: { key: 'continue_diagnosis', title: '继续第 3 轮诊断', desc: '把打法聊定，认可后自动拆成军令。', route: 'chat' } });
+  },
+
+  // WO-12：处方样例（军令页展示「军师配了工具」）。
+  async prescriptions(): Promise<PrescriptionListView> {
+    return delay({ items: [{ id: 'rx1', problem: '获客越来越贵', playbook: '做影响力短视频获客', toolKey: 'brand', toolType: 'agent', externalUrl: null, status: 'proposed', proposedAt: '2026-07-08 10:00' }] });
+  },
+  async prescriptionAction(_id: string, _action: string): Promise<{ ok: boolean }> { return delay({ ok: true }); },
+
+  // WO-13：品牌资产包（mock 确定性样例；generate 返回一份，approve 置已确认）。
+  async brandKit(): Promise<BrandKitView | null> { return delay(null); },
+  async generateBrandKit(): Promise<BrandKitView> {
+    return delay({
+      persona: { name: '老张', tagline: '美业里最懂一线的操盘手', tone: '实在、有分寸、不画饼', story: '从一线做起，靠口碑把生意做扎实。', doNots: ['不吹牛', '不承诺做不到的效果'] },
+      voice: { hooks: ['同行不会告诉你的一件事', '我踩过的那个坑'], openers: ['先说结论', '今天只讲一件事'], ctas: ['想聊聊就扣 1', '私信「诊断」'], taboos: ['低俗', '攻击同行'] },
+      theme: { keywords: ['务实', '专业', '接地气'], colorHint: '深绿 + 暖金', styleRefs: ['纪实口播', '干货白板'] },
+      version: 1, approved: false, generatedAt: '2026-07-08 10:00',
+    });
+  },
+  async approveBrandKit(): Promise<{ ok: boolean }> { return delay({ ok: true }); },
+
+  // 速诊（WO-06）：确定性初诊卡 + 速诊即建档（空则回填 industry/stage/pain，同服务端口径）。
+  async quickScan(req: QuickScanRequest): Promise<QuickScanResult> {
+    const { token, d } = current();
+    d.profile = {
+      ...d.profile,
+      industry: d.profile?.industry || req.industry,
+      stage: d.profile?.stage || req.revenueBand,
+      pain: d.profile?.pain || req.pain,
+    };
+    d.onboarded = true; save(token, d);
+    const pain = (req.pain || '').trim().slice(0, 40) || '增长乏力';
+    return delay({
+      contradiction: `你把力气压在「${pain}」的表象上，真正卡住的是获客与复购的结构没打通。`,
+      judgement: `${req.industry}·${req.revenueBand}这个体量，"${pain}"多半是结果不是原因。先把「谁来、为什么复购、一单挣多少」三笔账摊开，矛盾会自己浮出来。`,
+      firstMove: '今天挑近 30 天成交的 10 位客户，逐个打电话问「为什么选你、还会不会再来」，记成一页纸。',
+      cardUrl: null,
+    });
+  },
+
   async getProfile(): Promise<Profile | null> { return delay(current().d.profile); },
   async saveProfile(p: Profile): Promise<Profile> {
     const { token, d } = current();
@@ -589,14 +709,30 @@ export const mock = {
     return delay(d.profile);
   },
 
-  // 八字采集（mock：只存偏好不排盘——排盘是服务端确定性引擎的职责，mock 不伪造命理结论）
-  async saveBazi(body: object): Promise<{ believe: boolean; chart: null }> {
+  // 八字采集（mock）：存偏好 + 返回一份**确定性样例命盘**（固定假数据，非真排盘——真排盘是服务端引擎的职责）。
+  // 有样例盘后，天时日历/战局天势卡/送你一卦等命理 UI 在本地 mock/H5 下可完整走查（修 review 铁律③「mock 命盘恒空」）。
+  async saveBazi(body: object): Promise<{ believe: boolean; chart: ChartSummary | null }> {
     const { token, d } = current();
     (d as { bazi?: object }).bazi = body; save(token, d);
-    return delay({ believe: (body as { believe?: boolean }).believe !== false, chart: null });
+    const believe = (body as { believe?: boolean }).believe !== false;
+    return delay({ believe, chart: believe ? sampleChartM() : null });
   },
-  async myChart(): Promise<{ bazi: object | null; chart: null }> {
-    return delay({ bazi: (current().d as { bazi?: object }).bazi ?? null, chart: null });
+  async myChart(): Promise<{ bazi: object | null; chart: ChartSummary | null }> {
+    const bazi = (current().d as { bazi?: { believe?: boolean } }).bazi ?? null;
+    const chart = bazi && bazi.believe !== false ? sampleChartM() : null;
+    return delay({ bazi, chart });
+  },
+  // 送你一卦预览（mock：给确定性样例卡文本，不排盘不落库——让画卡/分享链路可本地走查）
+  async fateCardPreview(body: { friendName?: string; consent?: boolean }): Promise<{ friendName: string; subtitle: string; sketch: string; trend: string; advice: string }> {
+    const name = (body.friendName || '').trim();
+    const yr = new Date().getFullYear();
+    return delay({
+      friendName: name,
+      subtitle: `${name ? `赠与 ${name}` : '命鉴'} · 1990-06-18 生`,
+      sketch: '正财格——务实稳健、重信守诺，善守成不喜冒进。命宫 紫微、天府。',
+      trend: `今年${yr}：3月、6月、9月是你的进攻窗口；7月、11月记得收着打。`,
+      advice: '你的打法在「稳扎稳打、深耕存量」，别碰「盲目扩张」。',
+    });
   },
 
   async todaySaying(): Promise<TodaySaying> {
@@ -826,6 +962,143 @@ export const mock = {
   async deleteMemory(): Promise<{ ok: boolean }> {
     return delay({ ok: true });
   },
+  // —— 账本闭环（F-8/P-2）——
+  async progress(): Promise<{ progress: ProgressView | null }> {
+    const { token } = current();
+    const l = loadLedgerM(token);
+    const ds = decStatsM(l.decisions), ps = proStatsM(l.prophecies);
+    return delay({
+      progress: {
+        rank: '尉官', usageDays: 16, streak: 15,
+        decisionAccuracy: ds.accuracy, prophecyHitRate: ps.hitRate,
+        milestones: { '7': '2026-07-01', '14': '2026-07-08' },
+        nextRank: { rank: '校官', requirement: '连续复盘 30 天 + 完成首次月度战报' },
+      },
+    });
+  },
+  async decisions(): Promise<DecisionLedger> {
+    const { token } = current(); const l = loadLedgerM(token); saveLedgerM(token, l);
+    return delay({ items: l.decisions, stats: decStatsM(l.decisions) });
+  },
+  async verifyDecision(id: string, outcome: 'correct' | 'revise'): Promise<{ decision: DecisionView; stats: DecisionStats }> {
+    const { token } = current(); const l = loadLedgerM(token);
+    const it = l.decisions.find((x) => x.id === id); if (it) it.status = outcome;
+    saveLedgerM(token, l);
+    return delay({ decision: it ?? l.decisions[0], stats: decStatsM(l.decisions) });
+  },
+  async prophecies(): Promise<ProphecyLedger> {
+    const { token } = current(); const l = loadLedgerM(token); saveLedgerM(token, l);
+    return delay({ items: l.prophecies, stats: proStatsM(l.prophecies) });
+  },
+  async verifyProphecy(id: string, outcome: 'hit' | 'miss'): Promise<{ prophecy: ProphecyView; stats: ProphecyStats }> {
+    const { token } = current(); const l = loadLedgerM(token);
+    const it = l.prophecies.find((x) => x.id === id); if (it) it.status = outcome;
+    saveLedgerM(token, l);
+    return delay({ prophecy: it ?? l.prophecies[0], stats: proStatsM(l.prophecies) });
+  },
+  // 军师记忆库（P2）：从 mock 用户数据合成六类结构化记忆，让档案页「军师记事」本地可走查。
+  async memoryLibrary(): Promise<MemoryLibraryView> {
+    const { d } = current();
+    const mk = (id: string, text: string, source = 'conversation'): MemoryLibraryEntry => ({ id, text, source });
+    const founder: MemoryLibraryEntry[] = [];
+    const company: MemoryLibraryEntry[] = [];
+    const status: MemoryLibraryEntry[] = [];
+    const vision: MemoryLibraryEntry[] = [];
+    const strategy: MemoryLibraryEntry[] = [];
+    const rapport: MemoryLibraryEntry[] = [];
+    if (meaningfulM(d.name)) founder.push(mk('mk-name', `你的称呼：${d.name}`));
+    extraLinesM(d.profile?.extra).slice(0, 3).forEach((l, i) => founder.push(mk(`mk-ex${i}`, l)));
+    if (meaningfulM(d.company)) company.push(mk('mk-co', `公司/品牌：${d.company}`));
+    if (d.profile?.industry) company.push(mk('mk-ind', `行业：${d.profile.industry}`));
+    if (d.profile?.stage) company.push(mk('mk-stage', `发展阶段：${d.profile.stage}`));
+    d.projects.slice(0, 2).forEach((p, i) => company.push(mk(`mk-pj${i}`, p.summary ? `项目《${p.name}》：${p.summary}` : `项目《${p.name}》推进中`)));
+    if (d.profile?.pain) status.push(mk('mk-pain', `当前最卡：${d.profile.pain}`));
+    const und = buildUnderstandingM(d);
+    if (und.mainContradiction) strategy.push({ id: 'sp-mc', text: und.mainContradiction, source: 'strategic' });
+    if (und.positioning) strategy.push({ id: 'sp-pos', text: `战略定位：${und.positioning}`, source: 'strategic' });
+    const raw: Record<MemoryCategoryKey, MemoryLibraryEntry[]> = { founder, company, status, vision, strategy, rapport };
+    const fillOf = (n: number, settled: boolean): MemoryFillLevel => (settled ? 'settled' : n === 0 ? 'unknown' : n >= 3 ? 'known' : 'thin');
+    const order: MemoryCategoryKey[] = ['founder', 'company', 'status', 'vision', 'strategy', 'rapport'];
+    const groups: MemoryLibraryGroup[] = order.map((c) => ({
+      category: c,
+      entries: raw[c],
+      fill: fillOf(raw[c].length, c === 'strategy' && raw[c].some((e) => e.source === 'strategic')),
+    }));
+    const total = order.reduce((s, c) => s + raw[c].length, 0);
+    return delay({ total, groups, updatedAt: new Date().toISOString() });
+  },
+  // 完整履历（P3）：读缓存（未生成 → null）
+  async dossier(): Promise<DossierView> {
+    const { token } = current();
+    try {
+      const raw = Taro.getStorageSync(`mock.dossier.${token}`);
+      if (raw) { const r = (typeof raw === 'string' ? JSON.parse(raw) : raw) as DossierReport; return delay({ report: r, generatedAt: r.generatedAt }); }
+    } catch { /* noop */ }
+    return delay({ report: null, generatedAt: null });
+  },
+  // 完整履历（P3）：生成一份 grounded、专业咨询风的示例档案并缓存
+  async generateDossier(): Promise<{ report: DossierReport; generatedAt: string }> {
+    const { token, d } = current();
+    const name = meaningfulM(d.name) || '创始人';
+    const co = meaningfulM(d.company) || '你的公司';
+    const ind = d.profile?.industry || '所在行业';
+    const stage = d.profile?.stage || '当前阶段';
+    const pain = d.profile?.pain || '获客成本高、复购上不去';
+    const sec = (key: string, no: string, label: string, eyebrow: string, blocks: DossierBlock[]): DossierSection => ({ key, no, label, eyebrow, blocks });
+    const sections: DossierSection[] = [
+      sec('identity', '01', '身份定义', 'IDENTITY', [
+        { type: 'para', text: `${name}，${co}创始人，深耕${ind}，企业处于${stage}。` },
+        { type: 'highlight', title: '一句话定位', text: `扎在社区、靠复购立身的${ind}品牌——不打价格战，打信任和回头率。`, tone: 'gold' },
+        { type: 'para', text: '从一线做起，懂手艺也懂人心；决策偏快、重情义，扩张期需要有人替你踩刹车。' },
+      ]),
+      sec('story', '02', '创业历程', 'THE STORY', [
+        { type: 'para', text: `2015 年从一名技师起步，第一家店开在社区里，靠口碑和回头客一步步站稳。` },
+        { type: 'timeline', items: [
+          { time: '2015', title: '单店起家', desc: '一家社区店，手艺+口碑立身' },
+          { time: '2021', title: '三店连锁', desc: '直营模式跑通，团队扩到 18 人' },
+          { time: '2023', title: '试水加盟', desc: '一年开 5 家又收回 2 家，认识到标准化是命门' },
+        ] },
+      ]),
+      sec('company', '03', '企业全景', 'THE BUSINESS', [
+        { type: 'para', text: `${co}：${ind}，${stage}，3 家直营、团队 18 人。营收结构以到店服务为主，办卡+复购为利润引擎。` },
+        { type: 'stats', items: [
+          { value: '3 家', label: '直营门店' },
+          { value: '18 人', label: '团队规模' },
+          { value: '≈60万', label: '月流水(自报)' },
+        ] },
+        { type: 'para', text: '优势在服务体验与私域粘性；短板在获客过度依赖投放、复购缺乏系统化运营。' },
+      ]),
+      sec('status', '04', '现状与主要矛盾', 'CURRENT STATE', [
+        { type: 'highlight', title: '主要矛盾', text: pain + '——先把复购做起来，再谈开疆。', tone: 'red' },
+        { type: 'para', text: '获客成本一年涨约四成，新客拉来却留不住；问题不在前端流量，在后端的客户经营与复购设计。' },
+      ]),
+      sec('strategy', '05', '战略打法', 'STRATEGY', [
+        { type: 'para', text: '打法一句话：收缩战线、做深复购。把有限的营销预算从"拉新"挪一半到"养客"。' },
+        { type: 'para', text: '主攻赛道：社区高复购的轻医美小店，用会员分层 + 私域运营把 LTV 拉起来。' },
+        { type: 'quote', text: '不打价格战，打信任战。' },
+      ]),
+      sec('vision', '06', '目标愿景', 'VISION', [
+        { type: 'para', text: '想做成「街坊最放心的那一家」——这条愿景还需要与军师聊透，落成可执行的三年目标。' },
+      ]),
+    ];
+    const believe = true; // mock 演示恒显天势段；真实端由 believe 开关 + 命理总开关(P-3) 决定
+    if (believe) sections.push(sec('tianshi', String(sections.length + 1).padStart(2, '0'), '天势档案', 'CELESTIAL', [
+      { type: 'stats', items: [ { value: '乙丑', label: '年柱' }, { value: '戊寅', label: '月柱' }, { value: '辛未', label: '日柱' }, { value: '己亥', label: '时柱' } ] },
+      { type: 'para', text: '日主辛金、身弱见印——适合精细化、口碑型经营，不宜粗放烧钱扩张。今年宜守中求进、把根基做扎实。' },
+    ]));
+    sections.push(sec('letter', String(sections.length + 1).padStart(2, '0'), '军师寄语', 'A NOTE', [
+      { type: 'para', text: `${name}，你缺的从来不是客源，是把客留住的系统。先咬住复购这一件事，其余动作都围绕它排布。别急着开第四家店，先让现有三家的老客活跃起来。` },
+    ]));
+    const report: DossierReport = {
+      name,
+      headline: `扎在社区、靠复购立身的${ind}品牌`,
+      verse: '守得客心三尺暖，何愁门前客不还',
+      sections,
+      generatedAt: new Date().toISOString(),
+    };
+    try { Taro.setStorageSync(`mock.dossier.${token}`, JSON.stringify(report)); } catch { /* noop */ }
+    return delay({ report, generatedAt: report.generatedAt });
+  },
   async knowledgeSearch(q: string, projectId?: string): Promise<KnowledgeHit[]> {
     const { d } = current();
     if (!q.trim()) return delay([]);
@@ -863,7 +1136,7 @@ export const mock = {
     const sections: DeliverableSection[] = [{ h: '讨论要点', list: (userPoints.length ? userPoints : ['（本次对话内容较少）']).slice(0, 6) }];
     if (reportTitles.length) sections.push({ h: '本次产出', list: reportTitles.map((t) => `已产出《${t}》`).slice(0, 6) });
     sections.push({ h: '关键结论', list: (replyPoints.length ? replyPoints : ['顾问已给出阶段性判断，详见对话原文。']).slice(0, 6) });
-    sections.push({ h: '待办与决策', b: '将上述结论中需要跟进的事项纳入项目推进；重大决策请结合专业意见。' });
+    sections.push({ h: '待办与决策', b: '将上述结论中需要跟进的事项纳入案卷推进；重大决策请结合专业意见。' });
     const deliverable: Deliverable = { title: `《${s.title}》对话纪要`, icon: 'doc', meta: `${ag.name} · 对话汇总`, sections, trust: TRUST_NOTE, actions: ['save_to_library', 'export_pdf'] };
     const saved = saveReportVersionLocal(d, { title: deliverable.title, type: '对话纪要', agentKey: s.agentKey, projectId: s.projectId ?? null, content: deliverable, authorKind: 'agent', sessionId: s.id });
     const insight = sections.flatMap((x) => (x.list ?? []).concat(x.b ? [x.b] : [])).join('；').slice(0, 1000);

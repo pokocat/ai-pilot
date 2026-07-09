@@ -62,6 +62,8 @@ export function mockDeliverable(ctx: GenContext): Deliverable {
     sections,
     trust: TRUST_NOTE,
     actions: ['save_to_library', 'export_pdf'],
+    // WO-12：mock 报告携带一条白名单内处方，让「生成→认可→落处方」在 mock/H5 全链路可走通。
+    prescriptions: [{ problem: pain, playbook: '用影响力短视频承接获客与复购', toolKey: 'growth' }],
   };
 }
 

@@ -31,9 +31,11 @@ export default function Profile() {
   });
 
   const rows = [
-    { ic: 'insight', t: '个人 / 企业档案', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/pages/brief/index' }) },
-    { ic: 'grid', t: '项目工作台 · 战略案卷', s: projCount ? `${projCount}` : '', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
-    { ic: 'layers', t: '报告库 / 方案库', s: `${libCount + reportCount}`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
+    { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/pages/brief/index' }) },
+    { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: () => Taro.navigateTo({ url: '/packages/work/dossier/index' }) },
+    { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
+    { ic: 'layers', t: '方案库', s: `${libCount + reportCount}`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
+    { ic: 'spark', t: '我的品牌资产', s: '数字人/短视频预填', onClick: () => Taro.navigateTo({ url: '/packages/work/brandkit/index' }) },
     { ic: 'attach', t: '我的资料库', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/knowledge/index' }) },
     { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/bindings/index' }) },
     { ic: 'grid', t: '模块管理 · 添加 / 隐藏', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/market/index' }) },
@@ -55,7 +57,7 @@ export default function Profile() {
     <Screen topInset>
       <View className="pad account">
         {/* 页头：居中「我的军师系统」· 右「设置」 */}
-        <View className="account-nav">
+        <View className="account-nav tab-page-head">
           <Text className="an-title serif">我的军师系统</Text>
           <Text className="an-side serif" onClick={() => Taro.navigateTo({ url: '/pages/settings/index' })}>设置</Text>
         </View>
@@ -76,19 +78,19 @@ export default function Profile() {
           {me?.plan?.name ? <Text className="au-vip">{me.plan.name}</Text> : null}
         </View>
 
-        {/* 经营统计（account-statline）：案卷 / 报告 / 方案（真实计数） */}
+        {/* 经营统计（account-statline）：案卷 / 方案 / 资料（真实计数，四名词统一） */}
         <View className="account-statline">
           <View className="account-stat card" onClick={() => Taro.navigateTo({ url: '/packages/work/projects/index' })}>
             <Text className="as-n serif">{projCount}</Text>
-            <Text className="as-l">战略案卷</Text>
-          </View>
-          <View className="account-stat card" onClick={() => Taro.switchTab({ url: '/pages/thinktank/index' })}>
-            <Text className="as-n serif">{reportCount}</Text>
-            <Text className="as-l">报告</Text>
+            <Text className="as-l">案卷</Text>
           </View>
           <View className="account-stat card" onClick={() => Taro.navigateTo({ url: '/packages/work/library/index' })}>
-            <Text className="as-n serif">{libCount}</Text>
+            <Text className="as-n serif">{libCount + reportCount}</Text>
             <Text className="as-l">方案</Text>
+          </View>
+          <View className="account-stat card" onClick={() => Taro.navigateTo({ url: '/packages/work/knowledge/index' })}>
+            <Text className="as-n serif">{me?.understanding?.evidenceCount.knowledge ?? 0}</Text>
+            <Text className="as-l">资料</Text>
           </View>
         </View>
 
@@ -108,17 +110,18 @@ export default function Profile() {
           </View>
         </View>
 
-        {/* 战略段位（M4 PR-18）：全部真实计数——连续复盘/使用天数/准确率由服务端算 */}
-        {prog ? (
-          <View className="rank-card card">
+        {/* 战略段位（M4 PR-18）：全部真实计数。WO-03 冷启动延迟曝光——攒够连续复盘/使用天数才亮相，
+            不把「新兵·连续 0 天·准确率 —%」的空账本怼给新用户。 */}
+        {prog && (prog.streak >= 3 || prog.usageDays >= 14) ? (
+          <View className="rank-card card" onClick={() => Taro.navigateTo({ url: '/packages/work/ledger/index' })}>
             <View className="rk-badge"><Text className="serif">{prog.rank}</Text></View>
             <View className="rk-b">
               <Text className="rk-t serif">战略段位 · {prog.rank}</Text>
               <Text className="rk-s">
                 连续复盘 {prog.streak} 天 · 使用第 {prog.usageDays} 天
-                {prog.decisionAccuracy !== null ? ` · 决策准确率 ${prog.decisionAccuracy}%` : ''}
+                {prog.decisionAccuracy !== null ? ` · 决策准确率 ${prog.decisionAccuracy}%` : ' · 先打满 5 个验证'}
               </Text>
-              {prog.nextRank ? <Text className="rk-next">下一段位 {prog.nextRank.rank}：{prog.nextRank.requirement}</Text> : null}
+              {prog.nextRank ? <Text className="rk-next">下一段位 {prog.nextRank.rank}：{prog.nextRank.requirement} ›</Text> : <Text className="rk-next">查看战略账本 ›</Text>}
             </View>
           </View>
         ) : null}

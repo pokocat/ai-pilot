@@ -44,11 +44,21 @@ export async function vectorSearchChunks(
 
 export interface MemHit { id: string; text: string; weight: number; dist: number; }
 
-/** 长期记忆向量检索（ANN），按 用户×智能体 + 未过期。 */
+/** 长期记忆向量检索（ANN），按用户 + 未过期。agentKey=null → 用户级共享池（跨军师，A-3）；传值则按智能体隔离。 */
 export async function vectorSearchMemories(
-  userId: string, agentKey: string, queryVec: number[], k: number,
+  userId: string, agentKey: string | null, queryVec: number[], k: number,
 ): Promise<MemHit[]> {
   const v = lit(queryVec);
+  if (agentKey === null) {
+    return prisma.$queryRawUnsafe<MemHit[]>(
+      `SELECT id, text, weight, (embedding_vec <=> $1::vector) AS dist
+       FROM memory
+       WHERE "userId" = $2 AND embedding_vec IS NOT NULL
+         AND ("expiresAt" IS NULL OR "expiresAt" > now())
+       ORDER BY embedding_vec <=> $1::vector LIMIT $3`,
+      v, userId, k,
+    );
+  }
   return prisma.$queryRawUnsafe<MemHit[]>(
     `SELECT id, text, weight, (embedding_vec <=> $1::vector) AS dist
      FROM memory

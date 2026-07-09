@@ -112,7 +112,8 @@ function firstJudgment(d: Deliverable): string {
   return withBody?.b || d.title || '';
 }
 
-function acceptLocal(deliverable: Deliverable, agentName: string): { dossier: Dossier; newOrders: number; skippedOrders: number } {
+function acceptLocal(deliverable: Deliverable, agentName: string, force?: string): { dossier: Dossier; newOrders: number; skippedOrders: number } {
+  void force; // mock 三势结论由 buildUnderstandingM 给确定性样例，此处不动态更新
   const now = new Date().toISOString();
   const existing = loadLocal();
   const date = today();
@@ -195,9 +196,10 @@ export async function refreshDossier(): Promise<Dossier | null> {
 export async function acceptDeliverable(
   deliverable: Deliverable,
   agentName: string,
+  force?: string, // L-6：市势/人势研判 → 服务端提炼攻/守/等/撤结论
 ): Promise<{ dossier: Dossier | null; newOrders: number; skippedOrders: number }> {
-  if (IS_MOCK) return acceptLocal(deliverable, agentName);
-  const r = await request<CasefileRes>('/casefile/accept', 'POST', { deliverable, agentName });
+  if (IS_MOCK) return acceptLocal(deliverable, agentName, force);
+  const r = await request<CasefileRes>('/casefile/accept', 'POST', { deliverable, agentName, force });
   return { dossier: r.casefile, newOrders: r.newOrders ?? 0, skippedOrders: r.skippedOrders ?? 0 };
 }
 

@@ -14,7 +14,7 @@ const TABS: { key: ThinkTab; label: string }[] = [
   { key: 'assets', label: '案卷资产' },
   { key: 'data', label: '数据源' },
   { key: 'modules', label: '能力' },
-  { key: 'reports', label: '报告' },
+  { key: 'reports', label: '方案' },
 ];
 
 // 能力面板的费用口径 chips（设计稿 commerce-strip）。
@@ -73,7 +73,7 @@ export default function ThinkTank() {
     <Screen topInset>
       <View className="pad think">
         {/* 页头：左「上传」· 中「锦囊」· 右「市场」 */}
-        <View className="think-nav">
+        <View className="think-nav tab-page-head">
           <Text className="tn-side left serif" onClick={goKnowledge}>上传</Text>
           <Text className="tn-title serif">锦囊</Text>
           <Text className="tn-side right serif" onClick={goMarket}>市场</Text>
@@ -212,12 +212,12 @@ export default function ThinkTank() {
         {/* 报告：真实版本化报告 + 方案库 */}
         {tab === 'reports' ? (
           <>
-            <Text className="think-h2">报告与历史方案</Text>
+            <Text className="think-h2">方案与历史沉淀</Text>
             {reports.length === 0 ? (
               <View className="think-empty">
                 <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={22} color={accent} /></View>
-                <Text className="et">还没有沉淀报告</Text>
-                <Text className="es">对话中点「生成纪要」，或让军师产出成果后存入方案库，报告会按版本沉淀在这里。</Text>
+                <Text className="et">还没有沉淀方案</Text>
+                <Text className="es">对话中点「生成纪要」，或让军师产出方案后存入方案库，方案会按版本沉淀在这里。</Text>
               </View>
             ) : (
               reports.map((r) => (
@@ -234,7 +234,7 @@ export default function ThinkTank() {
             <View className="report card" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
               <View className="report-ic"><Text className="serif">新</Text></View>
               <View className="report-b">
-                <Text className="report-t serif">从对话生成新报告</Text>
+                <Text className="report-t serif">从对话生成新方案</Text>
                 <Text className="report-s">同步到知识库和执行模块</Text>
               </View>
               <Text className="report-state">生成</Text>
@@ -243,7 +243,7 @@ export default function ThinkTank() {
               <View className="report-ic"><Text className="serif">案</Text></View>
               <View className="report-b">
                 <Text className="report-t serif">我的方案库</Text>
-                <Text className="report-s">对话产出的结构化成果，存库即沉淀一版报告</Text>
+                <Text className="report-s">对话产出的结构化方案，存库即沉淀一版方案</Text>
               </View>
               <Text className="report-state">查看</Text>
             </View>

@@ -46,3 +46,30 @@
 .gf-dl { display: block; margin-top: 9px; font-size: 11px; color: var(--ink-3); word-break: break-all; }
 
 .gf-note { display: block; margin-top: 18px; font-size: 11px; line-height: 1.7; color: var(--ink-3); }
+
+/* 同意声明（PIPL） */
+.gf-consent { display: flex; align-items: flex-start; gap: 10px; margin-top: 22px; }
+.gf-consent:active { opacity: .8; }
+.gf-check {
+  width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0; margin-top: 1px;
+  border: 1.5px solid var(--line); box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+}
+.gf-tick { color: #fff; font-size: 13px; line-height: 1; }
+.gf-consent-t { flex: 1; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+
+/* 出卡结果（图片 + 分享/保存） */
+.gf-result { margin-top: 20px; }
+.gf-img { width: 100%; border-radius: 16px; box-shadow: 0 12px 30px rgba(22, 25, 29, .18); }
+.gf-acts { display: flex; gap: 12px; margin-top: 16px; }
+.gf-act {
+  flex: 1; height: 46px; border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+}
+.gf-act:active { opacity: .85; }
+.gf-act Text, .gf-act text { color: #fff; font-size: 14px; font-weight: 600; }
+.gf-act.ghost { background: transparent; border: 1.5px solid var(--accent); }
+.gf-tip { display: block; margin-top: 10px; text-align: center; font-size: 11px; color: var(--ink-3); }
+
+/* 离屏画布：保留可渲染尺寸但移出可视区 */
+.gf-canvas { position: fixed; left: -9999px; top: 0; }

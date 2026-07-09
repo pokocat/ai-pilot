@@ -7,21 +7,22 @@ import { useStore } from '../../../hooks/useStore';
 import { api, type ProjectDetail } from '../../../services/api';
 import './index.scss';
 
-type Tab = 'sessions' | 'reports' | 'knowledge';
+// 案卷详情三视图（WO-01）：战况=会话线索 / 方案=版本化报告 / 资料=知识库。
+type Tab = 'situation' | 'plans' | 'materials';
 
 function fmt(iso: string): string {
   const d = new Date(iso);
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-// 项目详情：一个项目里的 会话 / 报告 / 知识 一站式归拢。
+// 案卷详情：一份案卷里的 战况（会话）/ 方案（报告）/ 资料（知识）一站式归拢。
 export default function Project() {
   const router = useRouter();
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const id = (router.params as Record<string, string>).id || '';
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
-  const [tab, setTab] = useState<Tab>('sessions');
+  const [tab, setTab] = useState<Tab>('situation');
   const [kInput, setKInput] = useState('');
 
   const load = () => { if (id) api.project(id).then(setDetail).catch((e) => { s.handleApiError(e); setDetail(null); }); };
@@ -43,16 +44,16 @@ export default function Project() {
   if (!detail) {
     return (
       <View className={`page project ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-        <SafeHeader title="项目" onBack={() => Taro.navigateBack()} titleClassName="pd-title" />
+        <SafeHeader title="案卷" onBack={() => Taro.navigateBack()} titleClassName="pd-title" />
         <View className="pd-loading"><Text>加载中…</Text></View>
       </View>
     );
   }
 
   const tabs: [Tab, string, number][] = [
-    ['sessions', '会话', detail.counts.sessions],
-    ['reports', '报告', detail.counts.reports],
-    ['knowledge', '知识', detail.counts.knowledge],
+    ['situation', '战况', detail.counts.sessions],
+    ['plans', '方案', detail.counts.reports],
+    ['materials', '资料', detail.counts.knowledge],
   ];
 
   return (
@@ -65,7 +66,7 @@ export default function Project() {
         ) : null}
 
         <View className="pd-cta" style={{ background: accent }} onClick={() => Taro.navigateTo({ url: `/pages/chat/index?projectId=${id}&fresh=1` })}>
-          <Icon name="spark" size={16} color="#fff" /><Text>在本项目里开新对话</Text>
+          <Icon name="spark" size={16} color="#fff" /><Text>在本案卷里开新对话</Text>
         </View>
 
         <View className="pd-seg">
@@ -76,9 +77,14 @@ export default function Project() {
           ))}
         </View>
 
-        {tab === 'sessions' && (
+        {tab === 'situation' && (
           <View className="pd-list">
-            {detail.sessions.length === 0 ? <Text className="pd-empty">还没有归属本项目的对话。</Text> :
+            <View className="pd-item card" onClick={() => Taro.switchTab({ url: '/pages/studio/index' })}>
+              <View className="pd-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="check" size={16} color={accent} /></View>
+              <View className="pd-ib"><Text className="pd-it">在「执行」承接军令与复盘</Text><Text className="pd-im">认可方案后拆成军令，打卡、回填、复盘都在执行页</Text></View>
+              <Text className="pd-go">›</Text>
+            </View>
+            {detail.sessions.length === 0 ? <Text className="pd-empty">还没有归属本案卷的对话。</Text> :
               detail.sessions.map((it) => (
                 <View key={it.id} className="pd-item card" onClick={() => Taro.navigateTo({ url: `/pages/chat/index?sessionId=${it.id}` })}>
                   <View className="pd-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={it.agentIcon || 'chat'} size={16} color={accent} /></View>
@@ -89,9 +95,9 @@ export default function Project() {
           </View>
         )}
 
-        {tab === 'reports' && (
+        {tab === 'plans' && (
           <View className="pd-list">
-            {detail.reports.length === 0 ? <Text className="pd-empty">还没有报告。在对话里产出成果并「存入方案库」，即在此版本化。</Text> :
+            {detail.reports.length === 0 ? <Text className="pd-empty">还没有方案。在对话里产出方案并「存入方案库」，即在此版本化。</Text> :
               detail.reports.map((r) => (
                 <View key={r.id} className="pd-item card" onClick={() => Taro.navigateTo({ url: `/packages/work/report/index?id=${r.id}` })}>
                   <View className="pd-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={16} color={accent} /></View>
@@ -102,15 +108,15 @@ export default function Project() {
           </View>
         )}
 
-        {tab === 'knowledge' && (
+        {tab === 'materials' && (
           <View className="pd-list">
             <View className="pd-kadd">
-              <Input className="pd-kinput" value={kInput} placeholder="记一条知识/决策，回车入库（可被对话引用）" confirmType="done" onInput={(e) => setKInput(e.detail.value)} onConfirm={addKnowledge} />
+              <Input className="pd-kinput" value={kInput} placeholder="记一条资料/决策，回车入库（可被对话引用）" confirmType="done" onInput={(e) => setKInput(e.detail.value)} onConfirm={addKnowledge} />
               <View className="pd-kbtn" style={{ background: accent }} onClick={addKnowledge}><Icon name="check" size={15} color="#fff" /></View>
             </View>
-            {detail.knowledge.length === 0 ? <Text className="pd-empty">知识库为空。对话「生成纪要」或在此手动记录，都会沉淀到这里。</Text> :
+            {detail.knowledge.length === 0 ? <Text className="pd-empty">资料库为空。对话「生成纪要」或在此手动记录，都会沉淀到这里。</Text> :
               detail.knowledge.map((k) => (
-                <View key={k.id} className="pd-kitem card">
+                <View key={k.id} className="pd-kitem card" onClick={() => Taro.navigateTo({ url: '/packages/work/knowledge/index' })}>
                   <View className="pd-ktag" style={{ background: 'var(--accent-soft)', color: accent }}><Text>{kindLabel(k.kind)}</Text></View>
                   <View className="pd-kb">
                     {k.title ? <Text className="pd-kt">{k.title}</Text> : null}
@@ -127,5 +133,5 @@ export default function Project() {
 }
 
 function kindLabel(kind: string): string {
-  return ({ insight: '洞察', document: '资料', decision: '决策', todo: '待办', report_ref: '报告' } as Record<string, string>)[kind] || '资料';
+  return ({ insight: '洞察', document: '资料', decision: '决策', todo: '待办', report_ref: '方案' } as Record<string, string>)[kind] || '资料';
 }

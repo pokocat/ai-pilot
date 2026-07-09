@@ -4,6 +4,8 @@ import { providerInfo } from '../llm/gateway.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { buildClientUnderstanding } from '../services/understanding.js';
+import { buildMemoryLibrary } from '../services/memoryLibrary.js';
+import { loadDossier, generateDossier } from '../services/dossier.js';
 import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
@@ -49,6 +51,24 @@ export async function metaRoutes(app: FastifyInstance) {
       ai: await providerInfo(),
       understanding,
     };
+  });
+
+  // 军师记忆库（P2）：主公档案页「军师记事」六类结构化呈现
+  app.get('/me/memory-library', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    return buildMemoryLibrary(user.id);
+  });
+
+  // 完整履历（P3）：读缓存
+  app.get('/me/dossier', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    return loadDossier(user.id);
+  });
+  // 完整履历（P3）：生成并缓存（LLM 优先、确定性兜底）
+  app.post('/me/dossier/generate', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const report = await generateDossier(user.id, user.tenantId);
+    return { report, generatedAt: report.generatedAt };
   });
 
   // 钻石(点)消耗明细：解锁 / 图片按张 / 充值 / 赠送 流水（客户端「钻石管理」展示）

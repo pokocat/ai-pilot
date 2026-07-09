@@ -214,7 +214,7 @@ export const DATA_BINDINGS = [
 
 // 对话页「补充上下文」引导：把军师判断所需的资料、数据、模块入口带进对话。
 export const CHAT_GUIDES = [
-  { icon: 'upload', label: '上传资料到知识库', url: '/packages/work/knowledge/index', hint: '让军师先读懂你的公司、产品、财务和历史方案' },
+  { icon: 'upload', label: '上传资料到资料库', url: '/packages/work/knowledge/index', hint: '让军师先读懂你的公司、产品、财务和历史方案' },
   { icon: 'attach', label: '绑定店铺/账号数据', url: '/packages/work/bindings/index', hint: '让增长、IP、经营军师基于真实数据判断' },
   { icon: 'grid', label: '打开模块市场', url: '/packages/work/market/index', hint: '把认可的方案拆成可移动、可增减的模块' },
 ];
@@ -228,10 +228,28 @@ export const DOCTRINES = [
 ];
 
 // 战局页「三势判断」方法框架：静态说明 + 发起真实判断的入口（结论必须来自对话，不预置）。
-export const THREE_FORCES = [
+// 市势/人势各有**独立研判开场**（不再共用同一条指令），产出以「市势研判 / 人势研判」为题；
+// 存入方案库后战局卡即可反查该势方案并直接预览（match=标题/类型匹配关键词）。
+export interface ForceItem {
+  key: string;
+  icon: string;
+  desc: string;
+  agentKey?: string; // 承接研判的军师（三势属核心能力，走免费的战略诊断官 strat，避免解锁墙）
+  prompt?: string;   // 该势独立的研判开场
+  match?: string;    // 已存方案库报告的匹配关键词（标题/类型含此词=该势的研判方案）
+}
+export const THREE_FORCES: ForceItem[] = [
   { key: '天势', icon: 'spark', desc: '宏观时机与行业节奏：现在适合进攻、蓄力还是等待。' },
-  { key: '市势', icon: 'chart', desc: '市场与竞争格局：客户要什么、对手在做什么、缺口在哪。' },
-  { key: '人势', icon: 'user', desc: '资源与组织承载力：现有人、钱、精力能撑住哪种打法。' },
+  {
+    key: '市势', icon: 'chart', desc: '市场与竞争格局：客户要什么、对手在做什么、缺口在哪。',
+    agentKey: 'strat', match: '市势',
+    prompt: '帮我做一次「市势研判」：只聚焦市场与竞争格局——我的客户到底要什么、主要对手在做什么、市场缺口和机会窗口在哪，最后给出在市场端该攻、该守还是该等的结论与两三条具体动作。请以「市势研判」为标题产出一份结构化方案。',
+  },
+  {
+    key: '人势', icon: 'user', desc: '资源与组织承载力：现有人、钱、精力能撑住哪种打法。',
+    agentKey: 'strat', match: '人势',
+    prompt: '帮我做一次「人势研判」：只聚焦资源与组织承载力——现有的人、钱、精力和团队能撑住哪种打法，关键短板在哪、该补人还是该练兵、现在扛不扛得起扩张，最后给出结论与优先动作。请以「人势研判」为标题产出一份结构化方案。',
+  },
 ];
 
 // 社群入群三步（服务关系引导，分班与服务老师由运营侧分配后展示）。

@@ -3,7 +3,7 @@
 /* —— 顶栏（messages-head）：大标题 + 副题，右侧 历史 / 新对话 —— */
 .messages-head {
   display: flex; align-items: flex-end; justify-content: space-between;
-  padding: 14px 2px 2px;
+  padding: 0 var(--cap-right, 2px) 8px 2px; /* 右侧留出胶囊宽度，历史/新对话避让 */
 }
 .mh-titles { min-width: 0; }
 .mh-t {

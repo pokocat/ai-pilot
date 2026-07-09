@@ -10,6 +10,7 @@ import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
 import { api, type Agent, type SessionItem } from '../../services/api';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, MORE_SPECIALIST_KEYS } from '../../data/council';
+import NextStepCard from '../../components/NextStepCard';
 import './index.scss';
 
 function relTime(iso: string): string {
@@ -26,7 +27,7 @@ const QUICK_CARDS = [
   { t: '上传经营资料', d: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index' },
   { t: '绑定数据源', d: '店铺、账号、企微、财务表', url: '/packages/work/bindings/index' },
   { t: '军师锦囊 / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
-  { t: '生成报告', d: '把这次对话炼成一份报告', url: '/packages/work/library/index' },
+  { t: '生成方案', d: '把这次对话炼成一份方案', url: '/packages/work/library/index' },
   { t: '转成军令', d: '认可即拆解为今日军令', tab: '/pages/studio/index' },
   { t: '今日执行', d: '军令、任务、打卡、复盘', tab: '/pages/studio/index' },
 ] as { t: string; d: string; url?: string; tab?: string }[];
@@ -110,6 +111,7 @@ export default function Sessions() {
             <View className="wx-id">
               <Text className="wx-name">{a.name}</Text>
               {aliasOf(a.key) ? <Text className="wx-alias">{aliasOf(a.key)}</Text> : null}
+              {last?.hasUnread ? <View style={{ width: '14rpx', height: '14rpx', borderRadius: '50%', background: '#e5472d', marginLeft: '10rpx' }} /> : null}
             </View>
             <Text className="wx-time" style={locked ? { color: accent } : {}}>
               {locked ? diamondCost(a.price) : last ? relTime(last.updatedAt) : ''}
@@ -126,7 +128,7 @@ export default function Sessions() {
     <Screen topInset>
       <View className="pad council">
         {/* 顶栏（对齐设计稿 messages-head）：大标题「问策」+ 副题，右侧 历史 */}
-        <View className="messages-head">
+        <View className="messages-head tab-page-head">
           <View className="mh-titles">
             <Text className="mh-t">问策</Text>
             <Text className="mh-s">军师参谋室 · 分线督办，脉络可溯</Text>
@@ -138,13 +140,16 @@ export default function Sessions() {
           </View>
         </View>
 
+        {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
+        <NextStepCard />
+
         {/* 搜索（设计稿 search-pill：白底大圆角） */}
         <View className="council-search">
           <Icon name="target" size={14} color="#969BA1" />
           <Input
             className="cs-input"
             value={query}
-            placeholder="搜索军师、案卷、报告或资料"
+            placeholder="搜索军师、案卷、方案或资料"
             onInput={(e) => setQuery(e.detail.value)}
           />
           {query ? <Text className="cs-clear" onClick={() => setQuery('')}>✕</Text> : null}
@@ -176,6 +181,7 @@ export default function Sessions() {
                       <View className="wx-id">
                         <Text className="wx-name">总军师</Text>
                         <Text className="wx-alias">{aliasOf('general')}</Text>
+                        {masterLast?.hasUnread ? <View style={{ width: '14rpx', height: '14rpx', borderRadius: '50%', background: '#e5472d', marginLeft: '10rpx' }} /> : null}
                       </View>
                       <Text className="wx-time">{masterLast ? relTime(masterLast.updatedAt) : '在线'}</Text>
                     </View>

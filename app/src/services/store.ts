@@ -1,7 +1,7 @@
 import Taro from '@tarojs/taro';
 import { colorByKey } from '../data/colors';
 import { DEFAULT_AGENTS } from '../data/agents';
-import { api, getUserId, setUserId, clearUserId, type Agent, type Me } from './api';
+import { api, getUserId, setUserId, clearUserId, setAuthLostHandler, type Agent, type Me } from './api';
 import { syncTabBarHidden } from './tabbar';
 
 // 轻量全局状态：本命色主题 + 用户/智能体缓存 + 订阅。
@@ -78,6 +78,10 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
   }
   return 'other';
 }
+
+// 全局登录态失效处理：api.request() 收到 401 时**无条件**回调这里，即便页面 .catch 吞掉了错误，
+// 也会走到「清登录态 + 提示重新登录 + reLaunch 回登录入口」。杜绝用户滞留在失效界面看旧缓存。
+setAuthLostHandler(() => reportApiError({ code: 'UNAUTHORIZED' }));
 
 type Listener = () => void;
 const listeners = new Set<Listener>();

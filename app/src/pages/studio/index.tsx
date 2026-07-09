@@ -13,6 +13,9 @@ import {
   removeOrder, saveBackfill, startReview, today, todayProgress, toggleOrder, type Dossier,
 } from '../../services/dossier';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
+import { EMPTY_STATES } from '../../data/emptyStates';
+import NextStepCard from '../../components/NextStepCard';
+import PrescriptionStrip from '../../components/PrescriptionStrip';
 import './index.scss';
 
 type ExecView = 'today' | 'week' | 'review';
@@ -183,11 +186,17 @@ export default function Studio() {
     <Screen topInset>
       <View className="pad exec">
         {/* 页头（exec-nav）：左「案卷」· 中「军令」· 右「提醒」 */}
-        <View className="exec-nav">
+        <View className="exec-nav tab-page-head">
           <Text className="en-side left serif" onClick={() => Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
           <Text className="en-title serif">军令</Text>
           <Text className="en-side right serif" onClick={() => setView('review')}>提醒</Text>
         </View>
+
+        {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
+        <NextStepCard />
+
+        {/* WO-12：处方条——军师为某问题配的工具（唯一销售位，出现在军令语境） */}
+        <PrescriptionStrip />
 
         {/* 战役卡组（exec-deck 横滑）：今日战役 / 军师献策 / 今日主令 / 提醒节奏 */}
         <ScrollView scrollX className="exec-deck" enhanced showScrollbar={false}>
@@ -204,9 +213,9 @@ export default function Studio() {
             ) : (
               <View className="deck-card battle-card" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
                 <Text className="deck-k">今日战役 · {dateStr}</Text>
-                <Text className="deck-title serif">还没有执行中的战役</Text>
-                <Text className="deck-desc">与军师对话并「认可方案」后，方案自动拆解为军令，按日打卡、录入、复盘。</Text>
-                <Text className="deck-foot">去参谋室发起诊断 ›</Text>
+                <Text className="deck-title serif">{EMPTY_STATES.execution.title}</Text>
+                <Text className="deck-desc">{EMPTY_STATES.execution.desc}</Text>
+                <Text className="deck-foot">{EMPTY_STATES.execution.cta} ›</Text>
               </View>
             )}
 
