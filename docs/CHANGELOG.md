@@ -8,6 +8,12 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-09** · **例行 QA：深度整理一次性凭据从不核销（资损）+ 上传体积前置校验与服务端限额不符**（`qa/routine/2026-07-09-deep-organize-consume-and-upload-limit` 分支）：
+  - **① 深度整理（sku:deep-organize）付费凭据从未核销**：`deepOrganize()` 此前只判断 `UserModule` 存在，从不写回，导致同一笔 ¥39 购买可无限次调用 `POST /knowledge/deep-organize`（与 `applySkuGrant` 注释「记一次性服务凭据…后续核销」及 V7 计划文档「执行 → 核销一次性凭据」的设计矛盾）。改为**原子核销**：`updateMany({ enabled: true } → { enabled: false })` 返回 0 行即 402 `SKU_REQUIRED`，成功核销后才执行；若执行过程抛错（如批次不存在），best-effort 把凭据改回 `enabled: true` 允许用户重试，不白白吃掉已付费凭据。
+  - **② 上传前置校验体积上限与服务端不符**：`app/src/services/uploadGuard.ts` 的 `MAX_UPLOAD_BYTES` 写死 30MB，而 `server/src/app.ts` 的 `@fastify/multipart` 硬限额一直是 20MB——22~29MB 的文件会被客户端放行、上传后却被服务端 413 拒绝，用户只看到一个通用错误提示、体验割裂。改为 20MB 与服务端保持一致。
+  - **验证**：`knowledgePipeline.test.ts` 新增 2 例（同一凭据用过一次后第二批次 402、执行失败不核销允许重试）+ 原有 6 例，8/8 通过；全量 server 测试 455/455 通过、0 回归；`server tsc --noEmit` 0 错。影响面：server（`services/knowledgePipeline.ts`、`test/knowledgePipeline.test.ts`）+ app（`services/uploadGuard.ts`）。
+
+
 - **2026-07-09** · **对话页新增「回到最新」浮层按钮**：`pages/chat` 监听聊天 ScrollView 距离底部的距离，用户上滑查看较早历史且离底部较远时显示右下浮层，点击复用回底逻辑快速回到最新消息；按钮避让输入区、引用行与键盘。影响面：app（`pages/chat`）+ AGENTS。
 
 - **2026-07-09** · **修复对话 Markdown 松散有序列表编号全部显示为 1**：`MarkdownText` 解析层支持条目间空行且 marker 均为 `1.` 的模型常见写法，连续归组渲染为 1/2/3…；同时放宽编号列宽，避免两位数挤压正文。影响面：app（`components/MarkdownText`）+ AGENTS。
