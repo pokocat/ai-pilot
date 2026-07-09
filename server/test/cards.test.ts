@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone, deliverable } from './helpers.ts';
 import { prisma } from '../src/db.ts';
-import { renderDailyCard, renderFateCard, renderCalendarCard } from '../src/services/cardHtml.ts';
+import { renderDailyCard, fateCardContent, renderCalendarCard } from '../src/services/cardHtml.ts';
 import { computeChart } from '../src/services/paipan.ts';
 import { loadStrategicProfile, strategicBlock } from '../src/services/strategicProfile.ts';
 
@@ -72,25 +72,36 @@ test('天时日历卡：无命盘 400；有命盘含 12 个月攻守与拐点标
   assert.doesNotMatch(html, /米诺|Mino/i);
 });
 
-test('天命速写卡（送你一卦）：朋友生辰现算不落库，含命格/大势/引导', async () => {
+test('天命速写卡（送你一卦）：朋友生辰现算不落库、不产出公开链接，需 consent，返回命格/大势/引导文本（P-4 合规）', async () => {
   const token = await login(uniquePhone(), '送卦用户');
   const before1 = await prisma.natalChart.count();
-  const r = await api('POST', '/api/cards/fate', {
-    token,
-    body: { friendName: '老王', friendBazi: { calendar: 'solar', year: 1988, month: 3, day: 15, hour: 10, gender: 'male' } },
-  });
+  const beforeHtml = await prisma.reportHtml.count();
+  const friendBazi = { calendar: 'solar' as const, year: 1988, month: 3, day: 15, hour: 10, gender: 'male' as const };
+
+  // 未勾选「已获对方同意」→ 400
+  const noConsent = await api('POST', '/api/cards/fate/preview', { token, body: { friendName: '老王', friendBazi } });
+  assert.equal(noConsent.status, 400);
+  assert.equal(noConsent.body.code, 'CONSENT_REQUIRED');
+
+  const r = await api('POST', '/api/cards/fate/preview', { token, body: { friendName: '老王', friendBazi, consent: true } });
   assert.equal(r.status, 200);
   assert.equal(await prisma.natalChart.count(), before1, '朋友命盘不落库');
+  assert.equal(await prisma.reportHtml.count(), beforeHtml, '预览不产出公开链接');
 
-  const chart = computeChart({ calendar: 'solar', year: 1988, month: 3, day: 15, hour: 10, gender: 'male' }, 2026);
-  const html = renderFateCard(chart, '老王');
-  assert.match(html, /赠与 老王/);
-  assert.match(html, /七杀格/);
-  assert.match(html, /找军师参谋部/);
-  assert.doesNotMatch(html, /米诺|Mino/i);
+  const chart = computeChart(friendBazi, 2026);
+  const expected = fateCardContent(chart, '老王');
+  assert.deepEqual(r.body, expected);
+  assert.match(r.body.subtitle, /赠与 老王/);
+  assert.match(r.body.sketch, /七杀格/);
+  assert.doesNotMatch(`${r.body.sketch}${r.body.trend}${r.body.advice}`, /米诺|Mino/i);
+
+  // 旧落库路径（POST /cards/fate + friendBazi）已封禁，指向新预览端点
+  const legacy = await api('POST', '/api/cards/fate', { token, body: { friendName: '老王', friendBazi } });
+  assert.equal(legacy.status, 400);
+  assert.equal(legacy.body.code, 'USE_FATE_PREVIEW');
 
   // 自己没命盘也没朋友生辰 → 400
-  const bare = await api('POST', '/api/cards/fate', { token, body: {} });
+  const bare = await api('POST', '/api/cards/fate/preview', { token, body: { consent: true } });
   assert.equal(bare.status, 400);
 });
 

@@ -6,6 +6,7 @@ import { prisma } from '../src/db.ts';
 import { detectIntent, detectInnerState, stageOf, resolveMode, encodeMode } from '../src/services/intent.ts';
 import { buildGenContext } from '../src/services/context.ts';
 import { buildSystemParts } from '../src/llm/schema.ts';
+import { bumpDiagRound } from '../src/services/strategicProfile.ts';
 
 before(async () => {
   await getApp();
@@ -87,15 +88,16 @@ describe('注入与端到端', () => {
     assert.match(parts.stable, /阶段适配=生存期/);
     assert.doesNotMatch(parts.stable, /表达风格参考 · 本命色/);
 
-    // 默认诊断：注入轮次（历史 2 条用户消息 → 第 3 轮）
+    // 默认诊断：注入轮次（F-5 用户级持久化 diagRound——换/删会话不清零，不再按当前会话 history 现算；
+    // 写侧在 routes/sessions.ts 一问一答开始时 bumpDiagRound，这里直接调用模拟已进行 3 轮）
+    await bumpDiagRound({ tenantId: user.tenantId, userId: user.id, sessionId: null });
+    await bumpDiagRound({ tenantId: user.tenantId, userId: user.id, sessionId: null });
+    await bumpDiagRound({ tenantId: user.tenantId, userId: user.id, sessionId: null });
     const { ctx: c2 } = await buildGenContext({
       userId: user.id, tenantId: user.tenantId, agentKey: 'general',
       userMessage: '帮我看增长',
-      history: [
-        { role: 'user', text: 'a' }, { role: 'assistant', text: 'b' }, { role: 'user', text: 'c' },
-      ],
     });
-    assert.match(buildSystemParts(c2.systemPrompt, c2, 'chat').dynamic, /本会话第 3 轮/);
+    assert.match(buildSystemParts(c2.systemPrompt, c2, 'chat').dynamic, /诊断进度：第 3 轮（六轮深度对话制/);
   });
 
   test('端到端：聊天说「这周复盘」→ 自动落 week 复盘账 + 会话模式粘住', async () => {
