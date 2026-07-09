@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
+import { api, type PrescriptionView } from '../../../services/api';
 import { MODULE_MARKET, SKILL_MARKET } from '../../../data/operatingSystem';
 import './index.scss';
 
@@ -16,6 +17,24 @@ export default function Market() {
   const accent = s.color().vars['--accent'];
   const [cat, setCat] = useState('全部');
   const modules = cat === '全部' ? MODULE_MARKET : MODULE_MARKET.filter((m) => m.category === cat);
+
+  // WO-12：处方落地——从军令处方条跳来（from=prescription&pid），展示开方上下文 + 记曝光/开通埋点。
+  const [rx, setRx] = useState<PrescriptionView | null>(null);
+  useEffect(() => {
+    const pid = Taro.getCurrentInstance().router?.params?.pid;
+    if (!pid) return;
+    api.prescriptions().then((r) => {
+      const found = r.items.find((i) => i.id === pid) ?? null;
+      setRx(found);
+      if (found) api.prescriptionAction(pid, 'seen').catch(() => {});
+    }).catch(() => {});
+  }, []);
+  const activateRx = () => {
+    if (!rx) return;
+    api.prescriptionAction(rx.id, 'activated').catch(() => {});
+    Taro.showToast({ title: '已记为开通', icon: 'success' });
+    setTimeout(() => Taro.navigateBack(), 600);
+  };
 
   const goChat = (agentKey: string, prompt: string) =>
     Taro.navigateTo({ url: `/pages/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
@@ -31,6 +50,15 @@ export default function Market() {
     <View className={`page market-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
       <SafeHeader title="模块市场" onBack={() => Taro.navigateBack()} />
       <View className="pad" style={{ paddingTop: '12px' }}>
+        {rx && (
+          <View className="card" style={{ padding: '16px', marginBottom: '12px', borderLeft: `3px solid ${accent}` }}>
+            <Text style={{ display: 'block', fontSize: '12px', color: '#9a8a52', marginBottom: '6px' }}>军师为「{rx.problem}」开出</Text>
+            <Text style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: '#1c2b22', marginBottom: '12px' }}>{rx.playbook}</Text>
+            <View style={{ height: '40px', borderRadius: '10px', background: accent, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={activateRx}>
+              <Text style={{ color: '#fff', fontSize: '14px' }}>开通完成 · 回执行</Text>
+            </View>
+          </View>
+        )}
         <View className="mm-hero card">
           <Text className="kicker">Junshi OS</Text>
           <Text className="h1">模块市场</Text>

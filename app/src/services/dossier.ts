@@ -2,7 +2,7 @@ import Taro from '@tarojs/taro';
 import { getToken } from './token';
 import { IS_MOCK } from './config';
 import { request } from './api';
-import type { Deliverable } from '../../../shared/contracts';
+import type { Deliverable, OrderActionType, OrderMetric, GoalLadder } from '../../../shared/contracts';
 
 // 战略案卷 · PR-EX 执行闭环落库：
 // 「认可方案 → 案卷 → 今日军令 → 打卡 → 数据回填 → 复盘」的数据源已切到服务端
@@ -18,6 +18,14 @@ export interface DossierOrder {
   date: string;        // YYYY-MM-DD（属于哪一天的军令）
   done: boolean;
   aligned?: boolean | null; // 是否对齐主要矛盾（服务端标注；本地/手动为 null）
+  // V7-05：军令结构化字段（缺省不渲染）
+  ownerName?: string | null;
+  dueAt?: string | null;
+  etaMinutes?: number | null;
+  sourceQuote?: string | null;
+  steps?: string[];
+  metrics?: OrderMetric[];
+  actionType?: OrderActionType;
 }
 
 export interface DailyBackfill {
@@ -35,6 +43,7 @@ export interface Dossier {
   updatedAt: string;
   judgment: string;     // 方案首段判断（真实成果内容）
   risks: string[];      // 「现在不能做」：从认可方案中提取的风险/禁区条目
+  goals?: GoalLadder | null; // V7-10：目标阶梯
   orders: DossierOrder[];
   backfill: Record<string, DailyBackfill>; // 按日期
 }
@@ -112,7 +121,8 @@ function firstJudgment(d: Deliverable): string {
   return withBody?.b || d.title || '';
 }
 
-function acceptLocal(deliverable: Deliverable, agentName: string): { dossier: Dossier; newOrders: number; skippedOrders: number } {
+function acceptLocal(deliverable: Deliverable, agentName: string, force?: string): { dossier: Dossier; newOrders: number; skippedOrders: number } {
+  void force; // mock 三势结论由 buildUnderstandingM 给确定性样例，此处不动态更新
   const now = new Date().toISOString();
   const existing = loadLocal();
   const date = today();
@@ -195,9 +205,10 @@ export async function refreshDossier(): Promise<Dossier | null> {
 export async function acceptDeliverable(
   deliverable: Deliverable,
   agentName: string,
+  force?: string, // L-6：市势/人势研判 → 服务端提炼攻/守/等/撤结论
 ): Promise<{ dossier: Dossier | null; newOrders: number; skippedOrders: number }> {
-  if (IS_MOCK) return acceptLocal(deliverable, agentName);
-  const r = await request<CasefileRes>('/casefile/accept', 'POST', { deliverable, agentName });
+  if (IS_MOCK) return acceptLocal(deliverable, agentName, force);
+  const r = await request<CasefileRes>('/casefile/accept', 'POST', { deliverable, agentName, force });
   return { dossier: r.casefile, newOrders: r.newOrders ?? 0, skippedOrders: r.skippedOrders ?? 0 };
 }
 
@@ -252,6 +263,19 @@ export async function saveBackfill(values: DailyBackfill): Promise<Dossier | nul
     return d;
   }
   const r = await request<CasefileRes>('/casefile/backfill', 'PUT', values);
+  return r.casefile;
+}
+
+// V7-10：目标阶梯局部更新（3-5年/年度/季度/本周）。
+export async function saveGoals(patch: Partial<GoalLadder>): Promise<Dossier | null> {
+  if (IS_MOCK) {
+    const d = loadLocal();
+    if (!d) return null;
+    d.goals = { ...(d.goals ?? {}), ...patch, updatedAt: new Date().toISOString() };
+    saveLocal(d);
+    return d;
+  }
+  const r = await request<CasefileRes>('/casefile/goals', 'PUT', patch);
   return r.casefile;
 }
 

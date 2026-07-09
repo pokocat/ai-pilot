@@ -9,17 +9,14 @@
 .battle-nav {
   position: relative;
   display: flex; align-items: center; justify-content: center;
-  min-height: 44px;
-  /* 兜底：系统状态栏高度（真机由 JS 用胶囊顶端实测值覆盖） */
-  padding-top: calc(env(safe-area-inset-top) + 6px);
 }
 .bn-title { font-size: 25px; font-weight: 600; color: var(--ink); line-height: 1.1; }
 .bn-side {
-  position: absolute; bottom: 9px;
+  position: absolute; bottom: 14px;
   font-size: 16px; font-weight: 600; color: var(--accent);
 }
 .bn-side.left { left: 2px; }
-.bn-side.right { right: 2px; font-family: var(--sans); font-size: 18px; font-weight: 600; }
+.bn-side.right { right: var(--cap-right, 2px); font-family: var(--sans); font-size: 18px; font-weight: 600; }
 .bn-side:active { opacity: .7; }
 
 /* —— 军师判断 hero（深绿） —— */
@@ -70,21 +67,50 @@
   font-size: 13px; font-weight: 600; letter-spacing: .18em;
 }
 
-/* —— 三势判断（force-grid） —— */
+/* —— 三势判断（force-panel · 真实渲染 battleForces） —— */
+.force-panel { margin-top: 0; }
+.force-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: 22px 0 12px;
+}
+.force-head:active { opacity: .8; }
+.force-head .battle-h2 { margin: 0; }
+.force-hint { color: var(--ink-3); font-size: 10.5px; font-weight: 600; letter-spacing: .01em; }
+.force-hint .fh-b { color: var(--green); font-weight: 700; }
+
 .force-grid { display: flex; justify-content: space-between; }
 .force {
-  width: 31.8%; box-sizing: border-box; min-height: 128px;
-  padding: 15px 10px 13px; border-radius: 15px;
-  text-align: center;
-  display: flex; flex-direction: column; align-items: center;
+  width: 31.8%; box-sizing: border-box; min-height: 150px;
+  padding: 13px 10px 12px; border-radius: 15px;
+  text-align: left;
+  display: flex; flex-direction: column;
 }
-.force:active { opacity: .8; }
-.force-tag { font-size: 18px; font-weight: 600; color: var(--ink); line-height: 1.25; }
-.force-desc {
-  display: block; margin-top: 6px; flex: 1;
-  color: var(--ink-3); font-size: 10.5px; line-height: 1.45;
+.force:active { opacity: .82; }
+.force-tag { font-size: 11.5px; font-weight: 700; color: var(--ink-2); letter-spacing: .01em; line-height: 1.2; }
+.force-concl { display: block; margin-top: 7px; font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.25; }
+.force-tactic { display: block; margin-top: 5px; font-size: 10.5px; font-weight: 700; line-height: 1.3; }
+.force-tactic.ok { color: var(--green); }
+.force-tactic.warn { color: var(--warn, #A8772E); }
+.force-tactic.danger { color: var(--danger, #9C4A38); }
+.force-note {
+  display: block; margin-top: 5px; flex: 1;
+  color: var(--ink-3); font-size: 10px; line-height: 1.4;
 }
-.force-go { display: block; margin-top: 6px; color: var(--green); font-size: 11px; font-weight: 600; }
+.force-bar {
+  height: 5px; margin-top: 10px; border-radius: 999px;
+  background: var(--surface-2); overflow: hidden;
+}
+.force-fill { display: block; height: 100%; border-radius: 999px; background: var(--green); }
+.force-fill.sky { background: var(--green); }
+.force-fill.market { background: var(--warn, #A8772E); }
+.force-fill.people { background: var(--danger, #9C4A38); }
+
+/* 三势空态（未建档/未登录 → 引导对话） */
+.force-empty { padding: 16px 16px; border-radius: 16px; }
+.force-empty:active { opacity: .9; }
+.fe-t { display: block; font-size: 16px; font-weight: 700; color: var(--ink); line-height: 1.3; }
+.fe-d { display: block; margin-top: 6px; color: var(--ink-2); font-size: 12px; line-height: 1.5; }
+.fe-go { display: block; margin-top: 10px; font-size: 12.5px; font-weight: 600; }
 
 /* —— 下一步动作 / 关联模块（battle-actions） —— */
 .battle-actions {
@@ -98,6 +124,13 @@
   font-size: 13px; font-weight: 600; letter-spacing: .18em; line-height: 1.35;
 }
 .section-label.danger { color: var(--danger); }
+
+/* —— 下一步卡（WO-02/07 占位） —— */
+.nextstep-card { margin-top: 16px; padding: 15px 16px; border-radius: 18px; }
+.nextstep-card:active { opacity: .9; }
+.ns-t { display: block; margin-top: 4px; color: var(--ink); font-size: 18px; font-weight: 600; line-height: 1.3; }
+.ns-d { display: block; margin-top: 6px; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }
+.ns-go { display: block; margin-top: 10px; font-size: 13px; font-weight: 600; }
 
 .battle-goal {
   display: flex; align-items: center; gap: 12px;
@@ -166,17 +199,28 @@
 .say-k { font-size: 11px; letter-spacing: .12em; font-weight: 600; }
 .say-line { display: block; font-size: 16px; line-height: 1.55; color: var(--ink); margin-top: 7px; }
 
-/* —— 主行动 CTA（battle-cta） —— */
+/* —— 认可判断 CTA（battle-cta 三态机）：固定底部，浮于悬浮底栏之上 —— */
+/* 底栏胶囊 = bottom:14 + 高 66 → 顶边约 80px；CTA 抬到其上（+12 呼吸）。 */
 .battle-cta {
+  position: fixed;
+  left: 18px; right: 18px;
+  bottom: calc(92px + constant(safe-area-inset-bottom));
+  bottom: calc(92px + env(safe-area-inset-bottom));
+  z-index: 90;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  min-height: 56px; margin-top: 16px; padding: 9px 16px;
+  min-height: 56px; padding: 9px 16px;
   box-sizing: border-box;
   border-radius: 18px;
   background: linear-gradient(135deg, var(--green), var(--green-deep));
   color: #fff;
-  box-shadow: 0 14px 28px var(--accent-glow);
+  box-shadow: 0 14px 30px var(--accent-glow), 0 6px 16px rgba(22, 25, 29, .16);
 }
 .battle-cta:active { opacity: .88; }
+/* 生成中：锁定观感（不缩放、略降透明） */
+.battle-cta.generating { opacity: .9; }
+.battle-cta.generating:active { opacity: .9; }
+/* 已生成：深绿渐变（设计 §4.5 / §0.2 line 1659） */
+.battle-cta.generated { background: linear-gradient(135deg, #286C54, #174F3D); }
 .bc-b { flex: 1; min-width: 0; }
 .bc-t { display: block; font-size: 15.5px; font-weight: 600; }
 .bc-s { display: block; margin-top: 4px; color: rgba(255, 255, 255, .72); font-size: 11px; font-weight: 600; }
@@ -187,11 +231,9 @@
   color: var(--green); background: rgba(255, 255, 255, .9);
   font-size: 18px; font-weight: 600;
 }
-
-/* —— 天势卡内的本月攻守强调色（天时条已并入三势卡，点开原生全年天时页） —— */
-.force-phase { font-weight: 600; color: var(--ink); }
-.force-phase.atk { color: var(--green); }
-.force-phase.def { color: var(--gold-deep); }
+.battle-cta.generated .bc-arrow { color: #174F3D; }
+/* 固定 CTA 让位（内容滚动不被浮层遮挡） */
+.battle-cta-spacer { height: 70px; }
 
 /* —— 经营数据（M4 PR-16 看板第一层 v1：近 7 天回填） —— */
 .kpi-card { margin-top: 14px; padding: 16px 16px 14px; border-radius: 18px; }
@@ -203,3 +245,58 @@
 .kpi-cell { width: 31.8%; text-align: center; padding: 10px 6px; border-radius: 13px; background: var(--surface-2); }
 .kpi-v { display: block; font-size: 20px; font-weight: 600; color: var(--green); }
 .kpi-l { display: block; margin-top: 4px; font-size: 11px; color: var(--ink-3); font-weight: 600; }
+
+/* —— 三势全解 sheet（设计 §4.6 forces）：mask + sheet recipe（z900） —— */
+.fs-mask {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(15, 17, 20, .55);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.fs-sheet {
+  width: 100%; max-width: 600px; max-height: 84vh;
+  background: var(--bg, #fff); border-radius: 22px 22px 0 0;
+  padding: 10px 20px calc(18px + env(safe-area-inset-bottom)) 20px;
+  display: flex; flex-direction: column; align-items: center;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
+}
+.fs-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 0 14px; }
+.fs-kicker { align-self: flex-start; color: var(--green); font-size: 12px; font-weight: 700; letter-spacing: .16em; }
+.fs-title { align-self: flex-start; margin-top: 8px; font-size: 20px; font-weight: 700; color: var(--ink); line-height: 1.35; }
+.fs-quote {
+  align-self: stretch; margin-top: 12px;
+  padding: 12px 13px; border-left: 3px solid var(--green); border-radius: 12px;
+  background: var(--accent-soft); color: var(--ink);
+  font-family: var(--home-title-font); font-size: 14.5px; font-weight: 600; line-height: 1.55;
+}
+.fs-body { width: 100%; flex: 1; margin-top: 14px; }
+
+.forces-breakdown { display: flex; flex-direction: column; gap: 12px; }
+.force-read {
+  padding: 13px 14px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-left: 3px solid var(--green);
+}
+.force-read.sky { border-left-color: var(--green); }
+.force-read.market { border-left-color: var(--warn, #A8772E); }
+.force-read.people { border-left-color: var(--danger, #9C4A38); }
+.fr-label { font-size: 11.5px; font-weight: 700; color: var(--ink-2); letter-spacing: .02em; }
+.fr-title { display: block; margin-top: 5px; font-size: 16px; font-weight: 700; color: var(--ink); line-height: 1.35; }
+.fr-body { display: block; margin-top: 7px; color: var(--ink-2); font-size: 12.5px; line-height: 1.6; }
+.fr-tactic { display: block; margin-top: 9px; font-size: 12px; font-weight: 700; }
+.fr-tactic.ok { color: var(--green); }
+.fr-tactic.warn { color: var(--warn, #A8772E); }
+.fr-tactic.danger { color: var(--danger, #9C4A38); }
+
+.force-synthesis {
+  margin-top: 14px; padding: 15px 15px;
+  border-radius: 15px; color: #fff;
+  background: linear-gradient(135deg, var(--green), var(--green-deep));
+}
+.fsy-title { display: block; font-size: 16.5px; font-weight: 700; line-height: 1.4; }
+.fsy-body { display: block; margin-top: 8px; color: rgba(255, 255, 255, .82); font-size: 12.5px; line-height: 1.65; }
+
+.fs-close {
+  margin-top: 14px; padding: 11px 0; width: 100%; text-align: center;
+  color: var(--ink-2); font-size: 14px; font-weight: 600;
+}
+.fs-close:active { opacity: .7; }

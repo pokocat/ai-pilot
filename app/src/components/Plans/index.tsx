@@ -106,7 +106,7 @@ export default function Plans({ open, onClose }: Props) {
             <Text style={{ color: accent, fontWeight: 700 }}> {balance < 0 ? '不限量' : `${balance} 点`}</Text>
           </View>
         </View>
-        <Text className="ps-sub">权益点用于深度报告与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>
+        <Text className="ps-sub">权益点用于深度方案与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>
         {me?.planStatus?.expired && (
           <Text className="ps-sub" style={{ color: '#c0392b' }}>当前套餐已到期：内容只读、AI 交互暂停，续费后立即恢复。</Text>
         )}

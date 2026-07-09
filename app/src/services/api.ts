@@ -11,6 +11,12 @@ import type {
   KnowledgeDocRow, KnowledgeDetail,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
   BindPhoneResult, WechatOrderResult, WechatSubscribeTemplatesResult, WechatSubscribeChoice, WechatSubscribeRecordResult,
+  FateCardContent, MemoryLibraryView, DossierView, DossierReport,
+  DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats,
+  QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
+  SkuView, SkuOrderResult, BattleForce, BattleCommitResult,
+  DataSourcesView, ModulesView, ModuleView, ReminderView, WorkbenchView, SearchResult,
+  KnowledgePipelineView, OrganizeResult, ConfirmResult, StagedUploadResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -20,7 +26,24 @@ export type {
 export type { SurveyQuestion as SurveyQ } from '../../../shared/contracts';
 export type { DeliverableSection as Section } from '../../../shared/contracts';
 export type { ChatReply as ChatReplyT } from '../../../shared/contracts';
-export type { MemoryCandidate } from '../../../shared/contracts';
+export type { MemoryCandidate, MemoryLibraryView, MemoryLibraryGroup, MemoryLibraryEntry, MemoryCategoryKey, MemoryFillLevel } from '../../../shared/contracts';
+export type { DossierView, DossierReport, DossierSection, DossierBlock } from '../../../shared/contracts';
+export type { DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats } from '../../../shared/contracts';
+export type { FateCardContent } from '../../../shared/contracts';
+export type { QuickScanRequest, QuickScanResult } from '../../../shared/contracts';
+export type { JourneyView, JourneyStage, JourneyNextStep } from '../../../shared/contracts';
+export type { PrescriptionView, PrescriptionListView, DeliverablePrescription } from '../../../shared/contracts';
+export type { BrandKitView, BrandKitPersona, BrandKitVoice, BrandKitTheme } from '../../../shared/contracts';
+export type { SkuView, SkuOrderResult, SkuKind, WechatPayParams } from '../../../shared/contracts';
+export type {
+  BattleForce, BattleCommitResult, ForceKind, ForceLevel, ForceTone,
+  DataSourceView, DataSourcesView, DataSourceStatus,
+  ModuleView, ModulesView, ModuleTier, ModuleGroup, ModuleDetail, ModulePrice,
+  ReminderView, ReminderItem, GoalLadder, OrderActionType, OrderMetric, OrderStructuredFields,
+  ServiceAssignmentView, WorkbenchView, WorkbenchSection, WorkbenchMissing,
+  SearchHit, SearchResult, KnowledgeStage, KnowledgePipelineView,
+  KnowledgePipelineFolder, KnowledgeBatch, OrganizeResult, ConfirmResult, StagedUploadResult,
+} from '../../../shared/contracts';
 // 新能力类型再导出（项目 / 报告 / 知识 / 引用）
 export type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
@@ -36,6 +59,12 @@ export type {
 
 // token 助手（兼容旧导出名）
 export { getToken as getUserId, setToken as setUserId, clearToken as clearUserId } from './token';
+
+// 登录态失效的全局回调：request()/上传 收到 401 时**无条件**触发（由 store 注册）。
+// 目的：即便调用方 .catch 吞掉了错误，也一定会走到「重新登录」流程——绝不让用户滞留在失效界面看旧缓存。
+// 见 AGENTS.md「登录态失效必须显式打断」铁律。
+let onAuthLost: (() => void) | null = null;
+export function setAuthLostHandler(fn: () => void) { onAuthLost = fn; }
 export { BASE_URL };
 
 // 八字采集入参 / 命盘摘要（服务端 ChartView 的宽松视图，前端只读展示）
@@ -153,7 +182,8 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
     throw Object.assign(new Error(info.message), { code: 'NETWORK_ERROR', reason: info.reason, errMsg, url, origin, technicalMessage: info.technicalMessage });
   }
   if (res.statusCode === 401) {
-    clearToken(); // token 失效：清掉，下次进首页回到登录
+    clearToken(); // token 失效：清掉
+    onAuthLost?.(); // 无条件打断到重新登录，哪怕调用方吞掉下面这个 error
     throw Object.assign(new Error((res.data as any)?.error || '未登录'), { code: 'UNAUTHORIZED', data: res.data });
   }
   if (res.statusCode >= 400) {
@@ -164,10 +194,14 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
 }
 
 // 文档上传：Taro.uploadFile 走 multipart（request() 只发 JSON，文件需单独上传）。仅 weapp 有文件可选。
-async function uploadKnowledgeFile(filePath: string, projectId?: string): Promise<{ id: string; status: string }> {
-  const url = `${BASE_URL}/knowledge/upload${projectId ? `?projectId=${projectId}` : ''}`;
+async function uploadKnowledgeFile(filePath: string, opts: { projectId?: string; staged?: boolean; batchId?: string } = {}): Promise<{ id: string; status: string; stage?: string; batchId?: string }> {
+  const qs: string[] = [];
+  if (opts.projectId) qs.push(`projectId=${opts.projectId}`);
+  if (opts.staged) qs.push('staged=true');
+  if (opts.batchId) qs.push(`batchId=${opts.batchId}`);
+  const url = `${BASE_URL}/knowledge/upload${qs.length ? `?${qs.join('&')}` : ''}`;
   const res = await Taro.uploadFile({ url, filePath, name: 'file', header: { 'x-user-id': getToken() } });
-  if (res.statusCode === 401) { clearToken(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`;
     try { msg = (JSON.parse(res.data) as { error?: string }).error || msg; } catch { /* 非 JSON 响应 */ }
@@ -179,7 +213,7 @@ async function uploadKnowledgeFile(filePath: string, projectId?: string): Promis
 // 头像上传：multipart 单文件 → 后端存 OSS → 落库 user.avatarUrl，返回公网链接。
 async function uploadAvatarFile(filePath: string): Promise<{ ok: boolean; avatarUrl: string }> {
   const res = await Taro.uploadFile({ url: `${BASE_URL}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': getToken() } });
-  if (res.statusCode === 401) { clearToken(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
     try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }
@@ -214,6 +248,10 @@ export const api = {
   // 微信支付下单（小程序 JSAPI）：返回 wx.requestPayment 调起参数 + 月→年折算明细。
   createOrder: (id: string, openid?: string) =>
     IS_MOCK ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', openid ? { openid } : {}),
+  // V7-12：单次付费商品（SKU）目录 + 下单。mock 走假支付成功流并本地发放权益。
+  skus: () => (IS_MOCK ? mock.skus() : request<SkuView[]>('/skus')),
+  createSkuOrder: (key: string, openid?: string) =>
+    IS_MOCK ? mock.createSkuOrder(key) : request<SkuOrderResult>(`/skus/${key}/order`, 'POST', openid ? { openid } : {}),
   wechatSubscribeTemplates: () =>
     IS_MOCK ? Promise.resolve({ scenes: [] } as WechatSubscribeTemplatesResult) : request<WechatSubscribeTemplatesResult>('/wechat/subscribe/templates'),
   recordWechatSubscription: (choices: WechatSubscribeChoice[]) =>
@@ -231,6 +269,18 @@ export const api = {
   purchaseAgent: (key: string) =>
     IS_MOCK ? mock.purchaseAgent(key) : request<AgentPurchaseResult>(`/agents/${key}/purchase`, 'POST', {}),
   survey: () => (IS_MOCK ? mock.survey() : request<SurveyQuestion[]>('/survey')),
+  quickScan: (req: QuickScanRequest) =>
+    IS_MOCK ? mock.quickScan(req) : request<QuickScanResult>('/quickscan', 'POST', req),
+  journey: () => (IS_MOCK ? mock.journey() : request<JourneyView>('/journey')),
+  // V7-04：三势刷新 + 认可判断一键生成军令与报告。
+  refreshForces: () => (IS_MOCK ? mock.refreshForces() : request<{ forces: BattleForce[] }>('/forces/refresh', 'POST', {})),
+  battleCommit: () => (IS_MOCK ? mock.battleCommit() : request<BattleCommitResult>('/battle/commit', 'POST', {})),
+  prescriptions: () => (IS_MOCK ? mock.prescriptions() : request<PrescriptionListView>('/prescriptions')),
+  prescriptionAction: (id: string, action: string) =>
+    IS_MOCK ? mock.prescriptionAction(id, action) : request<{ ok: boolean }>(`/prescriptions/${id}/${action}`, 'POST'),
+  brandKit: () => (IS_MOCK ? mock.brandKit() : request<BrandKitView | null>('/brand-kit')),
+  generateBrandKit: () => (IS_MOCK ? mock.generateBrandKit() : request<BrandKitView>('/brand-kit/generate', 'POST')),
+  approveBrandKit: () => (IS_MOCK ? mock.approveBrandKit() : request<{ ok: boolean }>('/brand-kit/approve', 'POST')),
   getProfile: () => (IS_MOCK ? mock.getProfile() : request<Profile | null>('/profile')),
   saveProfile: (p: Profile) => (IS_MOCK ? mock.saveProfile(p) : request<Profile>('/profile', 'PUT', p)),
   // 八字采集（M1 PR-2）：录入生辰 → 服务端排盘引擎落库；believe=false 表示不用命理视角
@@ -240,12 +290,24 @@ export const api = {
     IS_MOCK ? mock.myChart() : request<{ bazi: BaziBody | null; chart: ChartSummary | null }>('/profile/chart'),
   // 用户进度（段位/里程碑）与复盘账本（M4 PR-18 前端落位；mock 无账本返回空 → 界面隐藏对应区块）
   progress: () =>
-    IS_MOCK ? Promise.resolve({ progress: null as ProgressView | null }) : request<{ progress: ProgressView | null }>('/progress'),
+    IS_MOCK ? mock.progress() : request<{ progress: ProgressView | null }>('/progress'),
+  // 账本闭环（F-8/P-2）：决策账本 / 天机账本 + 用户点命中/未中验证
+  decisions: () =>
+    IS_MOCK ? mock.decisions() : request<DecisionLedger>('/decisions'),
+  verifyDecision: (id: string, outcome: 'correct' | 'revise', note?: string) =>
+    IS_MOCK ? mock.verifyDecision(id, outcome) : request<{ decision: DecisionView; stats: DecisionStats }>(`/decisions/${id}/verify`, 'POST', { outcome, note }),
+  prophecies: () =>
+    IS_MOCK ? mock.prophecies() : request<ProphecyLedger>('/prophecies'),
+  verifyProphecy: (id: string, outcome: 'hit' | 'miss', note?: string) =>
+    IS_MOCK ? mock.verifyProphecy(id, outcome) : request<{ prophecy: ProphecyView; stats: ProphecyStats }>(`/prophecies/${id}/verify`, 'POST', { outcome, note }),
   reviews: () =>
     IS_MOCK ? Promise.resolve({ items: [], streak: 0 }) : request<{ items: unknown[]; streak: number }>('/reviews'),
-  // B 级卡片（每日战报/天时日历/天命速写）：返回可分享网页链接；mock 无渲染管道返回 null
-  publishCard: (kind: 'daily' | 'calendar' | 'fate', body?: { friendName?: string; friendBazi?: BaziBody }) =>
+  // B 级卡片（每日战报/天时日历）：返回可分享网页链接；mock 无渲染管道返回 null
+  publishCard: (kind: 'daily' | 'calendar', body?: { friendName?: string; friendBazi?: BaziBody }) =>
     IS_MOCK ? Promise.resolve({ htmlUrl: null as string | null }) : request<{ htmlUrl: string | null }>(`/cards/${kind}`, 'POST', body ?? {}),
+  // 送你一卦「天命速写」预览（合规打磨·P-4）：现算即返、不落库、无公开链接；前端 canvas 画卡导出图片分享
+  fateCardPreview: (body: { friendName: string; friendBazi: BaziBody; consent: boolean }) =>
+    IS_MOCK ? mock.fateCardPreview(body) : request<FateCardContent>('/cards/fate/preview', 'POST', body),
   todaySaying: () => (IS_MOCK ? mock.todaySaying() : request<TodaySaying>('/sayings/today')),
   sessions: () => (IS_MOCK ? mock.sessions() : request<SessionItem[]>('/sessions')),
   session: (id: string) => (IS_MOCK ? mock.session(id) : request<SessionDetail>(`/sessions/${id}`)),
@@ -293,6 +355,14 @@ export const api = {
   memories: (agentKey?: string, q?: string) =>
     IS_MOCK ? mock.memories()
       : request<MemoryCandidate[]>(`/memories${agentKey || q ? `?${agentKey ? `agentKey=${agentKey}` : ''}${agentKey && q ? '&' : ''}${q ? `q=${encodeURIComponent(q)}` : ''}` : ''}`),
+  // 军师记忆库（P2）：主公档案页「军师记事」六类结构化
+  memoryLibrary: () =>
+    IS_MOCK ? mock.memoryLibrary() : request<MemoryLibraryView>('/me/memory-library'),
+  // 完整履历（P3）：读缓存 / 生成
+  dossier: () =>
+    IS_MOCK ? mock.dossier() : request<DossierView>('/me/dossier'),
+  generateDossier: () =>
+    IS_MOCK ? mock.generateDossier() : request<{ report: DossierReport; generatedAt: string }>('/me/dossier/generate', 'POST'),
   deleteMemory: (id: string) =>
     IS_MOCK ? mock.deleteMemory() : request<{ ok: boolean }>(`/memories/${id}`, 'DELETE'),
   updateMemory: (id: string, text: string) =>
@@ -304,8 +374,40 @@ export const api = {
     IS_MOCK ? Promise.reject(new Error('mock 模式无文档详情')) : request<KnowledgeDetail>(`/knowledge/${id}`),
   reembedKnowledge: (id: string) =>
     IS_MOCK ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
-  uploadKnowledge: (filePath: string, projectId?: string) =>
-    IS_MOCK ? Promise.resolve({ id: 'mock', status: 'ready' }) : uploadKnowledgeFile(filePath, projectId),
+  uploadKnowledge: (filePath: string, projectId?: string, staged?: boolean, batchId?: string) =>
+    IS_MOCK ? mock.uploadKnowledgeStaged(staged, batchId) : uploadKnowledgeFile(filePath, { projectId, staged, batchId }),
+
+  // —— V7-06 智库三段式资料整理管道 ——
+  knowledgePipeline: () => (IS_MOCK ? mock.knowledgePipeline() : request<KnowledgePipelineView>('/knowledge/pipeline')),
+  organizeBatch: (batchId: string) =>
+    IS_MOCK ? mock.organizeBatch(batchId) : request<OrganizeResult>('/knowledge/organize', 'POST', { batchId }),
+  confirmKnowledge: (body: { ids?: string[]; batchId?: string }) =>
+    IS_MOCK ? mock.confirmKnowledge(body) : request<ConfirmResult>('/knowledge/confirm', 'POST', body),
+  deepOrganize: (batchId: string) =>
+    IS_MOCK ? mock.deepOrganize(batchId) : request<OrganizeResult>('/knowledge/deep-organize', 'POST', { batchId }),
+
+  // —— V7-07 数据源状态持久化 ——
+  dataSources: () => (IS_MOCK ? mock.getDataSources() : request<DataSourcesView>('/data-sources')),
+  uploadDataSource: (key: string, knowledgeId?: string) =>
+    IS_MOCK ? mock.uploadDataSource(key) : request<DataSourcesView>(`/data-sources/${key}/upload`, 'POST', knowledgeId ? { knowledgeId } : {}),
+  requestDataSourceAuth: (key: string) =>
+    IS_MOCK ? mock.requestDataSourceAuth(key) : request<DataSourcesView>(`/data-sources/${key}/request-auth`, 'POST', {}),
+
+  // —— V7-08 能力/模块中心 ——
+  modules: () => (IS_MOCK ? mock.modules() : request<ModulesView>('/modules')),
+  enableModule: (key: string) =>
+    IS_MOCK ? mock.enableModule(key) : request<{ module: ModuleView }>(`/modules/${key}/enable`, 'POST', {}).then((r) => r.module),
+  patchModule: (key: string, body: { hidden?: boolean; sortOrder?: number }) =>
+    IS_MOCK ? mock.patchModule(key, body) : request<{ module: ModuleView }>(`/modules/${key}`, 'PATCH', body).then((r) => r.module),
+
+  // —— V7-11 提醒日历 ——
+  reminders: () => (IS_MOCK ? mock.reminders() : request<ReminderView>('/reminders')),
+
+  // —— V7-13 档案工作台 ——
+  workbench: () => (IS_MOCK ? mock.workbench() : request<WorkbenchView>('/me/workbench')),
+
+  // —— V7-14 跨域搜索 ——
+  search: (q: string) => (IS_MOCK ? mock.search(q) : request<SearchResult>(`/search?q=${encodeURIComponent(q)}`)),
 
   // —— 对话汇总（→ 版本化报告 + 知识库） ——
   summarize: (sessionId: string) =>

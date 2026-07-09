@@ -1,0 +1,38 @@
+.nsc {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  margin: 20rpx 32rpx;
+  padding: 28rpx 30rpx;
+  background: #16321f;
+  border-radius: 20rpx;
+  color: #f3ecd6;
+}
+.nsc-main {
+  flex: 1;
+  min-width: 0;
+}
+.nsc-kicker {
+  display: block;
+  font-size: 22rpx;
+  color: #c8b98a;
+  letter-spacing: 2rpx;
+  margin-bottom: 8rpx;
+}
+.nsc-title {
+  display: block;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #f7efd6;
+}
+.nsc-desc {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 25rpx;
+  line-height: 1.5;
+  color: #d9d3bf;
+}
+.nsc-arrow {
+  font-size: 40rpx;
+  color: #c8b98a;
+}

@@ -4,12 +4,11 @@
 .account-nav {
   position: relative;
   display: flex; align-items: center; justify-content: center;
-  min-height: 54px; margin-bottom: 6px;
-  padding-top: 10px;
+  margin-bottom: 6px;
 }
 .an-title { font-size: 23px; font-weight: 600; color: var(--ink); line-height: 1.1; }
 .an-side {
-  position: absolute; right: 2px; bottom: 6px;
+  position: absolute; right: var(--cap-right, 2px); bottom: 14px;
   color: var(--green);
   font-size: 16px; font-weight: 600;
 }
@@ -47,6 +46,74 @@
   font-size: 11px; font-weight: 600;
 }
 
+/* —— 账户服务卡（account-service-card §10.1）：在绿卡内竖排：顶部 / 资料 3 行 / 权益 3 格 / 服务动作 —— */
+.account-service-card { display: block; padding: 16px 16px 14px; }
+.account-service-card:active { opacity: 1; } /* 卡内各控件各自 :active，取消整卡按压变暗 */
+.service-card-top { display: flex; align-items: center; gap: 12px; }
+.sct-b { flex: 1; min-width: 0; }
+.sct-b:active { opacity: .85; }
+.account-profile-name { display: block; font-size: 18px; font-weight: 600; color: #fff; }
+.account-profile-role {
+  display: block; margin-top: 4px; color: rgba(255, 255, 255, .70);
+  font-size: 11px; line-height: 1.4; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 会员金牌（§0.2 member-pill） */
+.member-pill {
+  flex-shrink: 0; min-height: 32px; display: inline-flex; align-items: center;
+  padding: 0 11px; border-radius: 999px;
+  color: #F4D99E; background: rgba(255, 255, 255, .12); border: 1px solid rgba(244, 217, 158, .28);
+  font-size: 11px; font-weight: 700;
+}
+.member-pill:active { opacity: .8; }
+
+/* 资料 3 行：手机 / 所在社群 / 邀请码 */
+.account-profile-meta { margin-top: 14px; display: flex; flex-direction: column; gap: 7px; }
+.apm-row { display: flex; align-items: center; gap: 10px; }
+.apm-k { width: 56px; flex-shrink: 0; color: rgba(255, 255, 255, .58); font-size: 12px; font-weight: 600; }
+.apm-v {
+  flex: 1; min-width: 0; color: rgba(255, 255, 255, .92); font-size: 12.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.apm-code { color: #F4D99E; font-weight: 800; letter-spacing: .04em; }
+
+/* 权益 3 格（membership-strip） */
+.membership-strip { display: flex; gap: 8px; margin-top: 14px; }
+.ms-cell {
+  flex: 1; min-width: 0; box-sizing: border-box;
+  padding: 10px 8px; border-radius: 13px;
+  background: rgba(255, 255, 255, .10); border: 1px solid rgba(255, 255, 255, .14);
+  text-align: center;
+}
+.ms-cell:active { opacity: .8; }
+.ms-v { display: block; color: #fff; font-size: 17px; font-weight: 700; }
+.ms-l { display: block; margin-top: 3px; color: rgba(255, 255, 255, .66); font-size: 10.5px; font-weight: 600; }
+
+/* 服务动作 2 按钮（service-action-row）：服务老师微信 / 群二维码 */
+.service-action-row { display: flex; gap: 8px; margin-top: 10px; }
+.service-action {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px;
+  padding: 10px 11px; border-radius: 13px;
+  background: rgba(255, 255, 255, .10); border: 1px solid rgba(255, 255, 255, .14);
+}
+.service-action:active { opacity: .8; }
+.service-action.is-empty { opacity: .55; }
+.sa-i {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  color: #F4D99E; background: rgba(255, 255, 255, .14);
+  font-size: 14px; font-weight: 700;
+}
+.sa-b { flex: 1; min-width: 0; }
+.sa-t {
+  display: block; color: #fff; font-size: 13px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sa-s {
+  display: block; margin-top: 2px; color: rgba(255, 255, 255, .62); font-size: 10.5px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* —— 经营统计（account-statline） —— */
 .account-statline { display: flex; justify-content: space-between; margin-top: 10px; }
 .account-stat {
@@ -58,21 +125,6 @@
 .account-stat:active { opacity: .8; }
 .as-n { display: block; color: var(--green); font-size: 18px; font-weight: 600; }
 .as-l { display: block; margin-top: 2px; color: var(--ink-3); font-size: 10.5px; font-weight: 600; }
-
-/* —— 权益额度（account-quota） —— */
-.account-quota { display: flex; justify-content: space-between; margin-top: 10px; }
-.account-quota-item {
-  width: 31.8%; min-height: 50px; box-sizing: border-box;
-  padding: 9px 8px; border-radius: 16px;
-  background: rgba(255, 255, 255, .72);
-  text-align: center;
-}
-.account-quota-item:active { opacity: .8; }
-.aq-v {
-  display: block; color: var(--ink-2); font-size: 12.5px; font-weight: 600;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.aq-l { display: block; margin-top: 3px; color: var(--ink-3); font-size: 10.5px; font-weight: 600; }
 
 /* —— 菜单（design menu：左色块图标 + 右值 + ›） —— */
 .menu { margin-top: 12px; padding: 0; overflow: hidden; border-radius: 18px; background: rgba(255, 255, 255, .86); }
@@ -137,3 +189,104 @@
 .rk-t { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); }
 .rk-s { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.45; font-weight: 500; }
 .rk-next { display: block; margin-top: 5px; color: var(--gold-deep); font-size: 11px; line-height: 1.4; font-weight: 600; }
+
+/* —— 半屏详情 sheet（档案工作台 / 服务老师 / 群二维码，§3 recipe）—— */
+.pf-mask {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(15, 17, 20, .55);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.pf-sheet {
+  width: 100%; max-width: 600px; max-height: 84vh;
+  background: var(--bg); border-radius: 22px 22px 0 0;
+  padding: 10px 20px calc(18px + env(safe-area-inset-bottom)) 20px;
+  display: flex; flex-direction: column;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
+}
+.pf-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line); margin: 0 auto 14px; }
+.pf-head { margin-bottom: 12px; }
+.pf-kicker { display: block; color: var(--gold-deep); font-size: 11px; font-weight: 800; letter-spacing: .16em; }
+.pf-title { display: block; margin-top: 6px; color: var(--ink); font-size: 19px; font-weight: 700; }
+.pf-body { flex: 1; min-height: 0; }
+.pf-primary {
+  margin-top: 14px; flex-shrink: 0; height: 46px; border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: #fff; font-size: 15px; font-weight: 700;
+}
+.pf-primary:active { opacity: .9; }
+.pf-primary.is-disabled { background: var(--surface-2); color: var(--ink-3); }
+
+/* 通用字段行（微信号 / 入群任务） */
+.pf-fieldrow, .pf-taskbar {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 12px; padding: 12px 14px; border-radius: 13px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.pf-fk, .pf-tk { color: var(--ink-3); font-size: 12.5px; font-weight: 600; }
+.pf-fv { color: var(--ink); font-size: 14px; font-weight: 700; letter-spacing: .03em; }
+.pf-tv { color: var(--green); font-size: 15px; font-weight: 700; }
+
+/* 档案工作台（profile-file-workbench §10.4） */
+.profile-file-summary { padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); }
+.pfs-k { display: block; color: var(--ink-3); font-size: 12px; font-weight: 600; }
+.pfs-v { display: block; margin-top: 2px; color: var(--accent); font-size: 26px; font-weight: 700; }
+.pfs-d { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.5; font-weight: 500; }
+.profile-file-progress { margin-top: 10px; height: 7px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.pfp-i { display: block; height: 100%; border-radius: 999px; }
+
+.profile-file-sections { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.profile-file-section {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 13px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.pfsec-b { flex: 1; min-width: 0; }
+.pfsec-t { display: block; color: var(--ink); font-size: 14px; font-weight: 600; }
+.pfsec-h { display: block; margin-top: 3px; color: var(--ink-3); font-size: 11.5px; line-height: 1.45; font-weight: 500; }
+.pfsec-c { flex-shrink: 0; font-size: 12px; font-weight: 700; }
+.pfsec-c.ok { color: var(--green); }
+.pfsec-c.miss { color: var(--gold-deep); }
+
+.profile-missing-list { margin-top: 14px; }
+.pml-head { margin-bottom: 8px; }
+.pml-t { display: block; color: var(--ink); font-size: 14.5px; font-weight: 700; }
+.pml-s { display: block; margin-top: 3px; color: var(--ink-3); font-size: 11.5px; line-height: 1.45; font-weight: 500; }
+.profile-missing-row { display: flex; align-items: center; gap: 11px; padding: 11px 0; border-top: 1px solid var(--line); }
+.pmr-i {
+  width: 22px; height: 22px; flex-shrink: 0; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent-ink); font-size: 12px; font-weight: 700;
+}
+.pmr-b { flex: 1; min-width: 0; }
+.pmr-t { display: block; color: var(--ink); font-size: 13.5px; font-weight: 600; }
+.pmr-s { display: block; margin-top: 2px; color: var(--ink-3); font-size: 11.5px; line-height: 1.45; font-weight: 500; }
+.pmr-go { flex-shrink: 0; padding: 6px 12px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
+.pmr-go:active { opacity: .85; }
+
+/* 服务老师卡（profile-teacher-card §10.4） */
+.profile-teacher-card {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.ptc-av {
+  width: 44px; height: 44px; flex-shrink: 0; border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; background: var(--green-hero); font-size: 18px; font-weight: 700;
+}
+.ptc-b { flex: 1; min-width: 0; }
+.ptc-name { display: block; color: var(--ink); font-size: 15px; font-weight: 700; }
+.ptc-desc { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.5; font-weight: 500; }
+
+/* 群二维码卡（profile-qr-card §10.4） */
+.profile-qr-card {
+  padding: 16px; border-radius: 14px; text-align: center;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.pf-qr { width: 180px; height: 180px; margin: 0 auto; border-radius: 12px; }
+.pf-qr-ph {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2); border: 1px dashed var(--line);
+}
+.pf-qr-pht { color: var(--ink-3); font-size: 13px; font-weight: 600; }
+.pf-qr-tip { display: block; margin-top: 10px; color: var(--ink-3); font-size: 11.5px; line-height: 1.5; font-weight: 500; }

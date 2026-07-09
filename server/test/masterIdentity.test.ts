@@ -17,12 +17,13 @@ after(async () => {
   await closeApp();
 });
 
-test('总军师 general 承载 V6.0 全文；strat 为专业参谋短模板；无米诺品牌残留', () => {
+test('总军师 general 承载 V1.0 全文；strat 为专业参谋短模板；无米诺品牌残留', () => {
   const general = AGENTS.find((a) => a.key === 'general')!;
   const strat = AGENTS.find((a) => a.key === 'strat')!;
-  // V6.0 全文（约 1.6 万字）挂 general；文件缺失时回退模板（此断言同时守护文件存在性）
-  assert.ok(general.systemPrompt.length > 10000, `general 应为 V6.0 全文，实际 ${general.systemPrompt.length} 字`);
-  assert.match(general.systemPrompt, /^军师参谋部 · 天势终极版 V6\.0/);
+  // V1.0 全文（约 1.6 万字，b2321fb 由旧「天势终极版 V6.0」重置版本号而来）挂 general；
+  // 文件缺失时回退模板（此断言同时守护文件存在性）
+  assert.ok(general.systemPrompt.length > 10000, `general 应为 V1.0 全文，实际 ${general.systemPrompt.length} 字`);
+  assert.match(general.systemPrompt, /^军师参谋部 · 天势战略系统 V1\.0/);
   assert.match(general.systemPrompt, /三势/);
   // strat 回归专业参谋（短模板 + 回流主线口径）
   assert.ok(strat.systemPrompt.length < 2000, 'strat 应为专业参谋短模板');

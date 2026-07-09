@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { AGENTS } from '../src/data/agents.js';
-import { SAYINGS, SURVEY } from '../src/data/seedConfig.js';
+import { SAYINGS, SURVEY, SKUS } from '../src/data/seedConfig.js';
 
 const prisma = new PrismaClient();
 
@@ -99,11 +99,29 @@ async function syncSurvey() {
   return { updated, created };
 }
 
+// V7-12：单次付费商品目录。按 key upsert（更新展示/定价，保留运营的 enabled 启停）。
+async function syncSkus() {
+  let updated = 0;
+  let created = 0;
+  for (let i = 0; i < SKUS.length; i++) {
+    const s = SKUS[i];
+    const existed = await prisma.sku.findUnique({ where: { key: s.key }, select: { key: true } });
+    await prisma.sku.upsert({
+      where: { key: s.key },
+      update: { name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind, grantsModuleKey: s.grantsModuleKey ?? null, metaJson: s.metaBytes ? { bytes: s.metaBytes } : undefined, sort: i }, // 不动 enabled
+      create: { key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind, grantsModuleKey: s.grantsModuleKey ?? null, metaJson: s.metaBytes ? { bytes: s.metaBytes } : undefined, sort: i },
+    });
+    existed ? updated++ : created++;
+  }
+  return { updated, created };
+}
+
 async function main() {
   const agents = await syncAgents();
   const sayings = await syncSayings();
   const survey = await syncSurvey();
-  console.log(JSON.stringify({ ok: true, agents, sayings, survey }, null, 2));
+  const skus = await syncSkus();
+  console.log(JSON.stringify({ ok: true, agents, sayings, survey, skus }, null, 2));
 }
 
 main()

@@ -27,6 +27,34 @@ export interface PaipanInput {
   longitude?: number;     // 东经；提供则做真太阳时校正
 }
 
+export type PaipanValidation = { ok: true; input: PaipanInput } | { ok: false; error: string };
+
+// 生辰输入共享校验（M-打磨：/profile/bazi 与「送你一卦」fate 预览同一口径，
+// 防非法/恶意生辰直进引擎——修 AUDIT P2「friendBazi 服务端零校验」）。历法合法性仍由排盘库把关。
+export function validatePaipanInput(b: Partial<PaipanInput> | undefined, maxYear: number): PaipanValidation {
+  const raw = b ?? {};
+  const yearNum = Number(raw.year), monthNum = Number(raw.month), dayNum = Number(raw.day);
+  if (raw.calendar !== 'solar' && raw.calendar !== 'lunar') return { ok: false, error: '历法必须是 solar 或 lunar' };
+  if (raw.gender !== 'male' && raw.gender !== 'female') return { ok: false, error: '缺少性别' };
+  if (!Number.isInteger(yearNum) || yearNum < 1920 || yearNum > maxYear) return { ok: false, error: '出生年份不合法' };
+  if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 31) return { ok: false, error: '出生日期不合法' };
+  if (!Number.isInteger(monthNum) || Math.abs(monthNum) < 1 || Math.abs(monthNum) > 12 || (monthNum < 0 && raw.calendar !== 'lunar')) {
+    return { ok: false, error: '出生月份不合法' };
+  }
+  const hourKnown = raw.hour !== null && raw.hour !== undefined;
+  if (hourKnown && (!Number.isInteger(Number(raw.hour)) || Number(raw.hour) < 0 || Number(raw.hour) > 23)) {
+    return { ok: false, error: '时辰不合法（0-23，或不填表示不确定）' };
+  }
+  return {
+    ok: true,
+    input: {
+      calendar: raw.calendar, year: yearNum, month: monthNum, day: dayNum,
+      hour: hourKnown ? Number(raw.hour) : null, minute: raw.minute ?? 0,
+      gender: raw.gender, birthPlace: raw.birthPlace, longitude: raw.longitude,
+    },
+  };
+}
+
 export interface PillarView {
   ganZhi: string;
   shiShenGan: string;     // 天干十神（日柱为「日主」）

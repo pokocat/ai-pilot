@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
-import { View, Text } from '@tarojs/components';
+import { View, Text, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Login from '../../components/Login';
 import Picker from '../../components/Picker';
+import PaySheet from '../../components/PaySheet';
+import ExceptionSheet from '../../components/ExceptionSheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type ChartSummary } from '../../services/api';
-import { MODULE_MARKET, THREE_FORCES } from '../../data/operatingSystem';
+import { api, type JourneyView, type BattleForce, type ForceKind } from '../../services/api';
+import { MODULE_MARKET } from '../../data/operatingSystem';
+import { EMPTY_STATES } from '../../data/emptyStates';
 import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
 import './index.scss';
 
@@ -15,6 +18,13 @@ function todayLabel() {
   const d = new Date();
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
+
+// 本地「今天」key（按天幂等：认可判断一天一次，返回首页即回显已生成态）
+function dayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+}
+const COMMIT_KEY = 'junshi.battleCommitted';
 
 // 把 "<em>...</em>" 渲染为强调色片段（跨端，避免 dangerouslySetInnerHTML）
 function SayingLine({ html, accent }: { html: string; accent: string }) {
@@ -33,8 +43,46 @@ function SayingLine({ html, accent }: { html: string; accent: string }) {
   );
 }
 
-// 战局页 —— 对齐设计稿 page-battle：军师判断 hero → 信号指标 → 三势 → 下一步动作 → 关联模块 → 不能做 → 认可 CTA。
-// 判断内容一律来自真实军师档案（me.understanding）与案卷，资料不足时引导进入对话访谈，不预置结论。
+// V7-04 三势结构化渲染的静态映射（天势/市势/人势 · 强/中/弱）。
+const FORCE_KIND_LABEL: Record<ForceKind, string> = { sky: '天势', market: '市势', people: '人势' };
+const FORCE_LEVEL_LABEL: Record<BattleForce['level'], string> = { strong: '强', mid: '中', weak: '弱' };
+const DEFAULT_CONCLUSION: Record<ForceKind, string> = { sky: '行业上行', market: '对手抢位', people: '团队待整' };
+// 三势全解逐字文案（设计 §4.6，默认三势）；非默认势则按 BattleForce 字段兜底派生。
+const FORCE_READ: Record<ForceKind, { title: string; body: string; tactic: string }> = {
+  sky: { title: '行业上行，可以借势', body: '外部需求还在，老板对增长、IP 和私域转化仍有焦虑。这里适合借行业势能表达专业判断，但不能追泛热点。', tactic: '借势：沉淀判断框架' },
+  market: { title: '对手抢位，不能扩量', body: '同类内容供给变多，用户不是没内容看，而是缺可信判断。单纯加发布和投流，会提高消耗但未必提高咨询质量。', tactic: '破局：案例与证据差异化' },
+  people: { title: '团队待整，先轻资产验证', body: '当前团队承载偏弱，销售、内容和复盘链路还没稳定。现在更适合创始人亲自跑小闭环，不急着扩团队。', tactic: '承载：内容 + 私域小闭环' },
+};
+// 尚未生成结构化三势时的默认展示（对齐效果图默认三势）：进战局即见三张卡，不留空态。
+const DEFAULT_FORCES: BattleForce[] = [
+  { kind: 'sky', level: 'strong', conclusion: DEFAULT_CONCLUSION.sky, tactic: '可以借势', tacticTone: 'ok', note: '少追热点，多沉淀判断框架。', strength: 75 },
+  { kind: 'market', level: 'mid', conclusion: DEFAULT_CONCLUSION.market, tactic: '不能扩量', tacticTone: 'warn', note: '老板要少误判，不缺泛内容。', strength: 45 },
+  { kind: 'people', level: 'weak', conclusion: DEFAULT_CONCLUSION.people, tactic: '轻资产验证', tacticTone: 'danger', note: '先用内容和私域跑小闭环。', strength: 35 },
+];
+function forceRead(f: BattleForce): { label: string; title: string; body: string; tactic: string } {
+  const label = `${FORCE_KIND_LABEL[f.kind]} · ${FORCE_LEVEL_LABEL[f.level]}`;
+  if (f.conclusion === DEFAULT_CONCLUSION[f.kind]) return { label, ...FORCE_READ[f.kind] };
+  return { label, title: `${f.conclusion}，${f.tactic}`, body: f.note, tactic: `打法：${f.tactic}` };
+}
+function forceSynthesis(forces: BattleForce[]): { title: string; body: string } {
+  const allDefault = forces.length === 3 && forces.every((f) => f.conclusion === DEFAULT_CONCLUSION[f.kind]);
+  if (allDefault) {
+    return {
+      title: '合参结论：可借势，但不能扩量',
+      body: '本周打法不是全面进攻，而是“补证据、修案例、少量主题验证”。先把信任链路跑通，再把有效打法同步到执行页和报告。',
+    };
+  }
+  const strong = forces.find((f) => f.level === 'strong');
+  const weak = forces.find((f) => f.level === 'weak');
+  const head = [strong ? `${FORCE_KIND_LABEL[strong.kind]}可借` : '', weak ? `${FORCE_KIND_LABEL[weak.kind]}宜守` : ''].filter(Boolean).join('，');
+  return {
+    title: `合参结论：${head || '因势而动'}`,
+    body: `${forces.map((f) => `${FORCE_KIND_LABEL[f.kind]}${f.tactic}`).join('；')}。先把优势用足，别在弱项上硬扩。`,
+  };
+}
+
+// 战局页 —— 对齐设计稿 page-battle：军师判断 hero → 信号指标 → 下一步卡 → 三势（真渲染 + 全解） → 动作 → 模块 → 不能做 → 认可 CTA（三态机）。
+// 判断内容一律来自真实军师档案（me.understanding，含结构化 battleForces）与案卷；资料不足时引导进入对话访谈，不预置结论。
 export default function Home() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -42,19 +90,27 @@ export default function Home() {
   const [showPicker, setShowPicker] = useState(false);
   const [pickerFirst, setPickerFirst] = useState(false);
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
-  const [navTop, setNavTop] = useState<number>();
   const [dossier, setDossier] = useState<Dossier | null>(null);
-  const [chart, setChart] = useState<ChartSummary | null>(null);
+  const [journey, setJourney] = useState<JourneyView | null>(null); // WO-07：下一步卡数据源（初诊后 new→scanned，不再重复「开始初诊」）
+  // V7-04：认可判断 CTA 三态机 + 三势全解 / 付费 / 异常 弹层开关
+  const [cta, setCta] = useState<'idle' | 'generating' | 'done'>('idle');
+  const [forcesOpen, setForcesOpen] = useState(false);
+  const [payOpen, setPayOpen] = useState(false);
+  const [exceptionOpen, setExceptionOpen] = useState(false);
   const me = s.me();
   const und = me?.understanding;
+  // 有真实三势用真实，否则用默认三卡（进战局即见三势，不展示空状态）。刷新/认可后回读 /me 覆盖为真实结论。
+  const forces: BattleForce[] = und?.battleForces?.length ? und.battleForces : DEFAULT_FORCES;
 
   useDidShow(() => {
     s.setTab(1);
     Taro.getCurrentInstance().page?.getTabBar?.();
     refreshDossier().then(setDossier); // 案卷已服务端化（含一次性本地迁移）
+    // 今日是否已认可判断（本地按天幂等）→ 直接回显已生成态
+    try { if (Taro.getStorageSync(COMMIT_KEY) === dayKey()) setCta('done'); } catch { /* noop */ }
     if (s.isAuthed()) {
-      store.loadMe(); // 刷新军师档案（对话/资料变化后战局判断随之更新）
-      api.myChart().then((r) => setChart(r.chart)).catch(() => setChart(null)); // 命盘（天时窗口）
+      store.loadMe(); // 刷新军师档案（对话/资料变化后战局判断与三势随之更新）
+      api.journey().then(setJourney).catch(() => setJourney(null)); // WO-07：返回首页即刷新 journey，初诊后不再显示「开始初诊」
     }
   });
 
@@ -67,12 +123,13 @@ export default function Home() {
       setShowPicker(true);
     }
     api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
-    // 自定义导航：标题行与微信胶囊顶端对齐
-    try {
-      const r = Taro.getMenuButtonBoundingClientRect?.();
-      if (r && r.top) setNavTop(r.top);
-    } catch { /* H5 无胶囊，走 CSS 兜底 */ }
   }, []);
+
+  // 三势全解弹层：底栏协调（overlay key）+ 卸载清理（对齐 playbook §3 recipe）
+  useEffect(() => {
+    store.setOverlay(forcesOpen, 'forces-detail');
+    return () => store.setOverlay(false, 'forces-detail');
+  }, [forcesOpen]);
 
   const requireLogin = () => {
     if (s.isAuthed()) return true;
@@ -94,23 +151,70 @@ export default function Home() {
 
   const refresh = () => {
     refreshDossier().then(setDossier);
-    if (s.isAuthed()) store.loadMe();
+    if (s.isAuthed()) {
+      api.refreshForces().then(() => store.loadMe()).catch(s.handleApiError); // V7-04：刷新结构化三势后回读 /me
+    }
     Taro.showToast({ title: '军情已刷新', icon: 'none' });
   };
   const startInterview = () =>
     goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
-  const startForces = () =>
-    goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('用三势判断（天势、市势、人势）帮我看一遍当前局势，并给出该攻、该守还是该等的结论。')}`);
   const askRisks = () =>
     goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
-  // 天势不再引导对话：排盘引擎已算好 → 直接进原生「全年天时」页（无命盘则页内就地补生辰）
-  const openTianshi = () => Taro.navigateTo({ url: '/packages/work/calendar/index' });
+  // 速诊（WO-06）：初诊 CTA 进 3 问速诊分包页。
+  const goQuickScan = () => Taro.navigateTo({ url: '/packages/work/quickscan/index' });
+
+  // 三势全解：点整卡/小框 → 半屏 sheet（看全解）。无三势时不弹。
+  const openForces = () => { if (forces.length) setForcesOpen(true); };
+
+  // 认可判断 → 生成军令与报告（三态机）：idle→generating→done。
+  const handleBattleCta = () => {
+    if (cta === 'generating') return; // 生成中锁定
+    if (cta === 'done') { Taro.switchTab({ url: '/pages/studio/index' }); return; } // 已生成 → 去执行页看军令与报告
+    if (!requireLogin()) return;
+    setCta('generating');
+    api.battleCommit()
+      .then(() => {
+        try { Taro.setStorageSync(COMMIT_KEY, dayKey()); } catch { /* noop */ }
+        setCta('done');
+        store.loadMe();
+        refreshDossier().then(setDossier); // 认可即建案卷、拆军令 → 刷新下一步/不能做
+        Taro.showToast({ title: '军令与报告已生成', icon: 'none' });
+      })
+      .catch((e: unknown) => {
+        setCta('idle');
+        const code = String((e as { code?: string; data?: { code?: string } })?.code || (e as { data?: { code?: string } })?.data?.code || '');
+        if (code === 'PLAN_EXPIRED') { setPayOpen(true); return; } // 套餐过期 → 续费付费屏
+        if (code === 'INSUFFICIENT_QUOTA' || code === 'INSUFFICIENT_CREDITS' || code === 'SKU_REQUIRED') { setExceptionOpen(true); return; } // 额度/算力不足 → 异常屏
+        s.handleApiError(e);
+      });
+  };
+
+  // 下一步（WO-07 Journey 状态机占位）：先按本地案卷/档案派生，后续替换为服务端 /journey。
+  const nextStep = (() => {
+    if (!s.isAuthed()) return { title: '先登录，和军师开聊', desc: '登录后军师开始为你建档、诊断、排军令。', cta: '去登录', act: () => setShowLogin(true) };
+    if (dossier) {
+      return progress.total && progress.done < progress.total
+        ? { title: `今日执行 · 军令 ${progress.done}/${progress.total}`, desc: '完成今日军令并录入战果，晚间即可复盘。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) }
+        : { title: '录入今日战果 · 生成复盘', desc: '把线索 / 咨询 / 成交录进去，军师据此定明日军令。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) };
+    }
+    if (und?.summary) return { title: '认可一份方案，生成军令', desc: '和军师把打法聊定，认可后自动拆成今日军令。', cta: '去对话', act: () => goChat('agentKey=general&continue=1') };
+    if (journey?.nextStep && (journey.stage === 'scanned' || journey.stage === 'diagnosing')) {
+      return { title: journey.nextStep.title, desc: journey.nextStep.desc, cta: '进参谋室', act: () => goChat('agentKey=general&continue=1') };
+    }
+    return { title: EMPTY_STATES.battle.title, desc: EMPTY_STATES.battle.desc, cta: EMPTY_STATES.battle.cta, act: goQuickScan };
+  })();
+
+  const ctaText = cta === 'generating'
+    ? { t: '正在生成军令与报告…', s: '读取案卷、战局和执行建议', icon: '…' }
+    : cta === 'done'
+      ? { t: '已生成 → 查看军令与报告', s: '已同步到执行页、报告库和 20:30 复盘', icon: '✓' }
+      : { t: '认可判断 → 生成军令与报告', s: '同步到执行页、报告库和 20:30 复盘', icon: '›' };
 
   return (
-    <Screen className="home">
+    <Screen topInset className="home">
       <View className="pad">
         {/* 页头（对齐设计稿）：左「案卷」· 中「军情」· 右刷新 */}
-        <View className="battle-nav" style={navTop ? { paddingTop: `${navTop}px` } : undefined}>
+        <View className="battle-nav tab-page-head">
           <Text className="bn-side left serif" onClick={() => requireLogin() && Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
           <Text className="bn-title serif">军情</Text>
           <Text className="bn-side right" onClick={refresh}>↻</Text>
@@ -123,7 +227,7 @@ export default function Home() {
             {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
           </Text>
           <Text className="bh-title serif">
-            {und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
+            {und?.mainContradiction || und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
           </Text>
         </View>
 
@@ -143,34 +247,41 @@ export default function Home() {
           </View>
         </View>
 
-        {/* 三势判断（force-grid）：天势=排盘引擎已算好 → 点开原生全年天时页（不引导对话）；
-            市势/人势的结论产自真实对话 → 保留发起判断。 */}
-        <Text className="battle-h2">三 势 判 断</Text>
-        <View className="force-grid">
-          {THREE_FORCES.map((f) => {
-            if (f.key === '天势') {
-              const m = chart?.monthlyOutlook?.months?.find((x) => x.month === new Date().getMonth() + 1);
-              const turning = chart?.monthlyOutlook?.months?.filter((x) => x.turning).map((x) => `${x.month}月`).slice(0, 2).join('、');
-              return (
-                <View key={f.key} className="force card" onClick={openTianshi}>
-                  <Text className="force-tag serif">{f.key}</Text>
-                  {m ? (
-                    <Text className="force-desc">本月 <Text className={`force-phase ${m.phase === '进攻' ? 'atk' : m.phase === '防守' ? 'def' : ''}`}>{m.phase}</Text>{turning ? `，拐点在 ${turning}` : ''}。按你的命盘逐月推演。</Text>
-                  ) : (
-                    <Text className="force-desc">{f.desc}</Text>
-                  )}
-                  <Text className="force-go">{m ? '看全年天时 ›' : '解锁全年天时 ›'}</Text>
+        {/* 下一步卡（打磨·WO-07 Journey 占位）：按案卷/档案派生一条明确动作，冷启动走空态导流 */}
+        <View className="nextstep-card card" onClick={nextStep.act}>
+          <Text className="section-label">下 一 步</Text>
+          <Text className="ns-t serif">{nextStep.title}</Text>
+          <Text className="ns-d">{nextStep.desc}</Text>
+          <Text className="ns-go" style={{ color: accent }}>{nextStep.cta} ›</Text>
+        </View>
+
+        {/* 三势判断（force-panel）：从 me.understanding.battleForces 真实渲染。整卡/小框 → 三势全解 sheet。 */}
+        <View className="force-panel">
+          <View className="force-head" onClick={forces.length ? openForces : undefined}>
+            <Text className="battle-h2">三 势 判 断</Text>
+            {forces.length ? (
+              <Text className="force-hint"><Text className="fh-b">整卡</Text>看全解 · 小框看单势</Text>
+            ) : null}
+          </View>
+          {forces.length ? (
+            <View className="force-grid" onClick={openForces}>
+              {forces.map((f) => (
+                <View key={f.kind} className="force card">
+                  <Text className="force-tag">{FORCE_KIND_LABEL[f.kind]} · {FORCE_LEVEL_LABEL[f.level]}</Text>
+                  <Text className="force-concl serif">{f.conclusion}</Text>
+                  <Text className={`force-tactic ${f.tacticTone}`}>打法：{f.tactic}</Text>
+                  <Text className="force-note">{f.note}</Text>
+                  <View className="force-bar"><View className={`force-fill ${f.kind}`} style={{ width: `${f.strength}%` }} /></View>
                 </View>
-              );
-            }
-            return (
-              <View key={f.key} className="force card" onClick={startForces}>
-                <Text className="force-tag serif">{f.key}</Text>
-                <Text className="force-desc">{f.desc}</Text>
-                <Text className="force-go">发起判断 ›</Text>
-              </View>
-            );
-          })}
+              ))}
+            </View>
+          ) : (
+            <View className="force-empty card" onClick={() => goChat('agentKey=general&continue=1')}>
+              <Text className="fe-t serif">三势判断待生成</Text>
+              <Text className="fe-d">先和军师聊清目标、现状和卡点，天势 / 市势 / 人势会显示在这里。</Text>
+              <Text className="fe-go" style={{ color: accent }}>去对话 ›</Text>
+            </View>
+          )}
         </View>
 
         {/* 下一步动作（battle-actions）：军师档案里真实的待补问题 */}
@@ -252,18 +363,77 @@ export default function Home() {
           <SayingLine html={saying.text} accent={accent} />
         </View>
 
-        {/* 主行动 CTA（battle-cta）：认可判断 → 军令与报告 / 直达执行 */}
-        <View
-          className="battle-cta"
-          onClick={() => dossier ? Taro.switchTab({ url: '/pages/studio/index' }) : goChat('agentKey=general&continue=1')}
-        >
-          <View className="bc-b">
-            <Text className="bc-t">{dossier ? '今日执行 · 军令与打卡' : '认可判断，生成军令与报告'}</Text>
-            <Text className="bc-s">{dossier ? `今日军令 ${progress.done}/${progress.total || 0} · 录入进展，即可复盘` : '认可即排期执行、生成报告与复盘'}</Text>
-          </View>
-          <View className="bc-arrow"><Text>›</Text></View>
-        </View>
+        {/* 固定底部 CTA 让位（内容不被浮层遮挡） */}
+        <View className="battle-cta-spacer" />
       </View>
+
+      {/* 认可判断 CTA（battle-cta 三态机）：固定底部，浮于底栏之上（设计 §4.5） */}
+      <View
+        className={`battle-cta ${cta === 'generating' ? 'generating' : ''} ${cta === 'done' ? 'generated' : ''}`}
+        onClick={handleBattleCta}
+      >
+        <View className="bc-b">
+          <Text className="bc-t">{ctaText.t}</Text>
+          <Text className="bc-s">{ctaText.s}</Text>
+        </View>
+        <View className="bc-arrow"><Text>{ctaText.icon}</Text></View>
+      </View>
+
+      {/* 三势全解 sheet（设计 §4.6 forces）：3 条 force-read + 合参结论 */}
+      {forcesOpen ? (
+        <View className="fs-mask" onClick={() => setForcesOpen(false)} catchMove>
+          <View className="fs-sheet" onClick={(e) => e.stopPropagation()}>
+            <View className="fs-grip" />
+            <Text className="fs-kicker">三 势 合 参</Text>
+            <Text className="fs-title serif">三势全解：先拆三势，再做合参</Text>
+            <Text className="fs-quote">三势不是三个孤立指标。天势决定能不能借风，市势决定怎么差异化，人势决定能不能放大。</Text>
+            <ScrollView scrollY className="fs-body">
+              <View className="forces-breakdown">
+                {forces.map((f) => {
+                  const r = forceRead(f);
+                  return (
+                    <View key={f.kind} className={`force-read ${f.kind}`}>
+                      <Text className="fr-label">{r.label}</Text>
+                      <Text className="fr-title serif">{r.title}</Text>
+                      <Text className="fr-body">{r.body}</Text>
+                      <Text className={`fr-tactic ${f.tacticTone}`}>{r.tactic}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+              {(() => {
+                const syn = forceSynthesis(forces);
+                return (
+                  <View className="force-synthesis">
+                    <Text className="fsy-title serif">{syn.title}</Text>
+                    <Text className="fsy-body">{syn.body}</Text>
+                  </View>
+                );
+              })()}
+            </ScrollView>
+            <Text className="fs-close" onClick={() => setForcesOpen(false)}>收起</Text>
+          </View>
+        </View>
+      ) : null}
+
+      {/* 认可判断额度/套餐异常 → 付费 / 异常屏（V7-03 全局组件填充；此处按需挂载） */}
+      <PaySheet
+        open={payOpen}
+        mode="member"
+        title="续费会员，继续认可判断"
+        desc="套餐已到期，续费后可继续一键生成军令与报告。"
+        confirmText="去续费"
+        onConfirm={() => setPayOpen(false)}
+        onClose={() => setPayOpen(false)}
+      />
+      <ExceptionSheet
+        open={exceptionOpen}
+        kind="power"
+        title="算力不足"
+        desc="本月额度已用尽，补充算力或升级套餐后再生成军令与报告。"
+        onPrimary={() => setExceptionOpen(false)}
+        onClose={() => setExceptionOpen(false)}
+      />
 
       <Login
         open={showLogin}

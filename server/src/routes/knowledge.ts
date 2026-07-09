@@ -12,6 +12,7 @@ import {
   deleteKnowledge,
 } from '../services/knowledge.js';
 import { hybridSearch } from '../services/retrieval.js';
+import { ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
 import type { CreateKnowledgeRequest } from '../../../shared/contracts';
 
 export async function knowledgeRoutes(app: FastifyInstance) {
@@ -36,7 +37,10 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   });
 
   // 上传文档（multipart 单文件）→ 存原件 + 建 parsing item，立即返回 { id, status }，解析异步。
-  app.post<{ Querystring: { projectId?: string } }>('/knowledge/upload', async (req, reply) => {
+  // V7-06：staged=true 时走「待整理」通道——建 stage='staging' 条目 + docParse 存文本，**不切片不嵌入**
+  //（对检索天然不可见），并挂 batchId（可由 query 传入以聚合「同批上传」；否则逐请求生成）；受本月免费额度门禁。
+  // 非 staged（默认，如对话内上传）维持原行为：直入库 + 异步解析嵌入，既有动线不破坏。
+  app.post<{ Querystring: { projectId?: string; staged?: string; batchId?: string } }>('/knowledge/upload', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     let data;
     try {
@@ -53,6 +57,25 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     }
     if (data.file.truncated) return reply.code(413).send({ error: '文件过大（上限 20MB）' });
     if (!buf.length) return reply.code(400).send({ error: '空文件' });
+
+    const staged = req.query.staged === 'true' || req.query.staged === '1';
+    if (staged) {
+      try {
+        return await ingestStagedFile({
+          tenantId: user.tenantId,
+          userId: user.id,
+          projectId: req.query.projectId ?? null,
+          fileName: data.filename || '未命名文件',
+          mime: data.mimetype,
+          buf,
+          batchId: (req.query.batchId || '').trim() || newBatchId(),
+        });
+      } catch (e) {
+        const err = e as Error & { statusCode?: number; code?: string };
+        return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+      }
+    }
+
     return ingestUploadedFile({
       tenantId: user.tenantId,
       userId: user.id,

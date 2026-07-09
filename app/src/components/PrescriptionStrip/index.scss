@@ -1,0 +1,35 @@
+.rx-strip {
+  margin: 8rpx 32rpx 0;
+}
+.rx-item {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 22rpx 26rpx;
+  margin-bottom: 12rpx;
+  background: #fff;
+  border: 1rpx solid #e6d9a8;
+  border-radius: 18rpx;
+}
+.rx-main {
+  flex: 1;
+  min-width: 0;
+}
+.rx-for {
+  display: block;
+  font-size: 24rpx;
+  color: #9a8a52;
+  margin-bottom: 6rpx;
+}
+.rx-play {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1c2b22;
+}
+.rx-cta {
+  flex-shrink: 0;
+  font-size: 24rpx;
+  color: #16321f;
+  font-weight: 600;
+}

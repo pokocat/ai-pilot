@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
@@ -6,10 +6,14 @@ import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
+import OnboardSheet from '../../components/OnboardSheet';
+import Picker from '../../components/Picker';
 import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
-import { api, type Agent, type SessionItem } from '../../services/api';
+import { api, type Agent, type SessionItem, type SearchHit } from '../../services/api';
+import { getToken } from '../../services/token';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, MORE_SPECIALIST_KEYS } from '../../data/council';
+import NextStepCard from '../../components/NextStepCard';
 import './index.scss';
 
 function relTime(iso: string): string {
@@ -26,10 +30,18 @@ const QUICK_CARDS = [
   { t: '上传经营资料', d: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index' },
   { t: '绑定数据源', d: '店铺、账号、企微、财务表', url: '/packages/work/bindings/index' },
   { t: '军师锦囊 / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
-  { t: '生成报告', d: '把这次对话炼成一份报告', url: '/packages/work/library/index' },
+  { t: '生成方案', d: '把这次对话炼成一份方案', url: '/packages/work/library/index' },
   { t: '转成军令', d: '认可即拆解为今日军令', tab: '/pages/studio/index' },
   { t: '今日执行', d: '军令、任务、打卡、复盘', tab: '/pages/studio/index' },
 ] as { t: string; d: string; url?: string; tab?: string }[];
+
+// 跨域搜索结果分组（design §11：军师 / 会话 / 方案(report) / 资料(knowledge)）。
+const SEARCH_GROUPS: { kind: SearchHit['kind']; label: string }[] = [
+  { kind: 'agent', label: '军师' },
+  { kind: 'session', label: '会话' },
+  { kind: 'report', label: '方案' },
+  { kind: 'knowledge', label: '资料' },
+];
 
 // 军师消息（对话页，第一入口）：微信式列表——总军师置顶 + 专业军师线程，
 // 每位军师有拟人立绘与花名；最近消息一律取真实会话，无会话则显示职责。
@@ -41,6 +53,12 @@ export default function Sessions() {
   const [query, setQuery] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [searchedTerm, setSearchedTerm] = useState(''); // 已出结果对应的检索词（判定「检索中」vs「无结果」，避免空态闪一帧）
+  const [showOnboard, setShowOnboard] = useState(false);
+  // 首登建档：本命色 + 30 秒建档 Picker（launch 页 sessions 承接，进来即弹，不用切到战局才触发）。
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerFirst, setPickerFirst] = useState(false);
 
   useDidShow(() => {
     s.setTab(0);
@@ -58,6 +76,37 @@ export default function Sessions() {
     });
   });
 
+  // V7-03 首登引导：已登录 + 已建档 + 本账号未看过 → 只展示一次 4 步引导（storage 落 junshi.onboard.v7.<token>）。
+  const onboardKey = () => `junshi.onboard.v7.${getToken()}`;
+  const dismissOnboard = () => {
+    try { Taro.setStorageSync(onboardKey(), '1'); } catch { /* noop */ }
+    setShowOnboard(false);
+  };
+  const maybeShowOnboard = () => {
+    if (!s.isAuthed() || !s.isOnboarded()) return;
+    let seen = true;
+    try { seen = !!Taro.getStorageSync(onboardKey()); } catch { seen = true; }
+    if (!seen) setShowOnboard(true);
+  };
+  // 已登录但未建档 → 立即弹本命色/建档 Picker；已建档 → 视情况弹一次 4 步引导。
+  const gateOnboarding = () => {
+    if (s.isAuthed() && !s.isOnboarded()) { setPickerFirst(true); setShowPicker(true); return; }
+    maybeShowOnboard();
+  };
+  useEffect(() => { gateOnboarding(); }, []);
+
+  // V7-14 跨域搜索：输入 300ms 防抖 → api.search（mock 亦返回本地匹配，同一路径）；空 q 隐藏结果。
+  useEffect(() => {
+    const term = query.trim();
+    if (!term || !s.isAuthed()) { setSearchHits([]); setSearchedTerm(term); return; }
+    const timer = setTimeout(() => {
+      api.search(term)
+        .then((r) => { setSearchHits(r.hits); setSearchedTerm(term); })
+        .catch((e) => { s.handleApiError(e, { silent: true }); setSearchHits([]); setSearchedTerm(term); });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   const findAgent = (key: string) => s.agents().find((a) => a.key === key);
   const latestOf = (agentKey: string) => sessions.find((x) => x.agentKey === agentKey);
   const aliasOf = (key: string) => ADVISOR_ALIAS[key] || '';
@@ -70,6 +119,12 @@ export default function Sessions() {
   const continueWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` }); };
   const newWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&fresh=1` }); };
   const openSession = (id: string) => { if (requireLogin()) Taro.navigateTo({ url: `/pages/chat/index?sessionId=${id}` }); };
+  // 搜索结果跳转：智库为 tab 页用 switchTab，其余（/packages/... 与 /pages/chat）用 navigateTo。
+  const openHit = (h: SearchHit) => {
+    if (!requireLogin()) return;
+    if (h.route.startsWith('/pages/thinktank')) Taro.switchTab({ url: h.route.split('?')[0] });
+    else Taro.navigateTo({ url: h.route });
+  };
 
   // 线程入口：未启用的专项军师先走启用弹层，其余续接最近线程
   const tapAdvisor = (a: Agent) => {
@@ -98,6 +153,14 @@ export default function Sessions() {
   const moreAgents = MORE_SPECIALIST_KEYS.map(findAgent).filter(Boolean) as Agent[];
   const filteredSessions = sessions.filter(matchSession);
 
+  // V7-15 未读徽章：unreadCount>0 → 数字徽章（>99 记 99+）；缺省则回退旧版 hasUnread 红点。
+  const unreadBadge = (it?: SessionItem) => {
+    const n = it?.unreadCount ?? 0;
+    if (n > 0) return <View className="unread"><Text>{n > 99 ? '99+' : n}</Text></View>;
+    if (it?.hasUnread) return <View className="unread-dot" />;
+    return null;
+  };
+
   // 微信式军师线程行
   const advisorRow = (a: Agent, duty: string, syncDesc: string, online = false) => {
     const last = latestOf(a.key);
@@ -110,6 +173,7 @@ export default function Sessions() {
             <View className="wx-id">
               <Text className="wx-name">{a.name}</Text>
               {aliasOf(a.key) ? <Text className="wx-alias">{aliasOf(a.key)}</Text> : null}
+              {unreadBadge(last)}
             </View>
             <Text className="wx-time" style={locked ? { color: accent } : {}}>
               {locked ? diamondCost(a.price) : last ? relTime(last.updatedAt) : ''}
@@ -126,7 +190,7 @@ export default function Sessions() {
     <Screen topInset>
       <View className="pad council">
         {/* 顶栏（对齐设计稿 messages-head）：大标题「问策」+ 副题，右侧 历史 */}
-        <View className="messages-head">
+        <View className="messages-head tab-page-head">
           <View className="mh-titles">
             <Text className="mh-t">问策</Text>
             <Text className="mh-s">军师参谋室 · 分线督办，脉络可溯</Text>
@@ -137,6 +201,9 @@ export default function Sessions() {
             </View>
           </View>
         </View>
+
+        {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
+        <NextStepCard />
 
         {/* 搜索（设计稿 search-pill：白底大圆角） */}
         <View className="council-search">
@@ -150,7 +217,41 @@ export default function Sessions() {
           {query ? <Text className="cs-clear" onClick={() => setQuery('')}>✕</Text> : null}
         </View>
 
-        {!showHistory ? (
+        {q ? (
+          /* V7-14 跨域搜索结果：按 军师 / 会话 / 方案 / 资料 分组，点按走 hit.route */
+          <View className="search-results">
+            {searchHits.length ? (
+              SEARCH_GROUPS.map((g) => {
+                const rows = searchHits.filter((h) => h.kind === g.kind);
+                if (!rows.length) return null;
+                return (
+                  <View key={g.kind}>
+                    <View className="wx-section"><Text>{g.label}</Text></View>
+                    <View className="wx-list">
+                      {rows.map((h) => (
+                        <View key={`${h.kind}-${h.id}`} className="sr-item" onClick={() => openHit(h)}>
+                          <View className="sr-main">
+                            <Text className="sr-title">{h.title}</Text>
+                            {h.snippet ? <Text className="sr-snippet">{h.snippet}</Text> : null}
+                          </View>
+                          <Text className="sr-arrow">›</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                );
+              })
+            ) : searchedTerm === query.trim() ? (
+              <View className="sess-empty">
+                <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="target" size={22} color={accent} /></View>
+                <Text className="et">没有匹配的结果</Text>
+                <Text className="es">换个关键词，或用下方快捷入口补充军师、案卷、报告与资料。</Text>
+              </View>
+            ) : (
+              <View className="sr-hint"><Text>正在检索…</Text></View>
+            )}
+          </View>
+        ) : !showHistory ? (
           <>
             {/* 快捷补给（设计稿 quick-card-strip：6 卡横滑） */}
             <ScrollView scrollX className="quick-row" enhanced showScrollbar={false}>
@@ -176,6 +277,7 @@ export default function Sessions() {
                       <View className="wx-id">
                         <Text className="wx-name">总军师</Text>
                         <Text className="wx-alias">{aliasOf('general')}</Text>
+                        {unreadBadge(masterLast)}
                       </View>
                       <Text className="wx-time">{masterLast ? relTime(masterLast.updatedAt) : '在线'}</Text>
                     </View>
@@ -223,6 +325,7 @@ export default function Sessions() {
                         <View className="wx-id">
                           <Text className="wx-name">{it.agentName}</Text>
                           {aliasOf(it.agentKey) ? <Text className="wx-alias">{aliasOf(it.agentKey)}</Text> : null}
+                          {unreadBadge(it)}
                         </View>
                         <Text className="wx-time">{relTime(it.updatedAt)}</Text>
                       </View>
@@ -237,7 +340,15 @@ export default function Sessions() {
       </View>
 
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); continueWith(a.key); }} />
-      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); api.sessions().then(setSessions).catch(() => setSessions([])); }} />
+      <OnboardSheet open={showOnboard} onClose={dismissOnboard} onStart={() => { dismissOnboard(); Taro.switchTab({ url: '/pages/thinktank/index' }); }} />
+      <Login open={showLogin} onLoggedIn={(onboarded) => {
+        setShowLogin(false);
+        api.sessions().then(setSessions).catch(() => setSessions([]));
+        // 新用户（未建档）登录后立即弹本命色/建档；已建档则走 4 步引导。
+        if (!onboarded) { setPickerFirst(true); setShowPicker(true); }
+        else maybeShowOnboard();
+      }} />
+      <Picker open={showPicker} first={pickerFirst} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
     </Screen>
   );
 }

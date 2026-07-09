@@ -7,13 +7,18 @@ import { recallMemories } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
 import { loadChart, chartBriefing, TIANSHI_OPTOUT_LINE } from './paipan.js';
-import { loadStrategicProfile, strategicBlock } from './strategicProfile.js';
+import { loadStrategicProfile, strategicBlock, getDiagRound } from './strategicProfile.js';
+import { goalsInjectionLine } from './casefile.js';
+import { dataSourcesBlock } from './dataSources.js';
 import { decisionBriefing } from './decisionLog.js';
 import { reviewBriefing } from './reviewLog.js';
 import { prophecyBriefing } from './prophecyLog.js';
 import { progressBriefing } from './progress.js';
 import { resolveMode, modeDirective, detectInnerState, roleDirective, stageDirective } from './intent.js';
 import { now } from './clock.js';
+import { isFeatureEnabled } from './featureFlag.js';
+import { benchmarkBlock } from './benchmark.js';
+import { bizMetricBlock } from './bizMetric.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } from './agentVersions.js';
@@ -54,7 +59,7 @@ function unauthorized() {
   return Object.assign(new Error('未登录或登录已失效'), { statusCode: 401, code: 'UNAUTHORIZED' });
 }
 
-function isBriefInterviewRequest(text: string): boolean {
+export function isBriefInterviewRequest(text: string): boolean {
   return /(?:个人|军师)档案访谈模式|(?:补齐|完善|更新)(?:个人|军师)档案|让军师来问/.test(text);
 }
 
@@ -97,6 +102,9 @@ export async function buildGenContext(opts: {
 
   // 战略档案（M1 PR-3）：客户已确认的战略事实（认可方案/手动编辑回写），注入优先级高于自动推断。
   const strategicLine = strategicBlock(await loadStrategicProfile(opts.userId));
+  // V7-10 目标阶梯 + V7-07 已接入数据源清单（宁缺勿假，无则不注入）。
+  const goalsLine = await goalsInjectionLine(opts.userId).catch(() => null);
+  const dataSourceLine = await dataSourcesBlock(opts.userId).catch(() => null);
   // 决策账本（M2 PR-7）：近期决策 + 服务端准确率（AI 只引用，禁止自行推算）。
   const decisionLine = await decisionBriefing(opts.userId);
   // 复盘账本（M2 PR-8）：连续复盘天数 + 最近复盘事实快照（战友见证/钩子的真实素材）。
@@ -105,6 +113,10 @@ export async function buildGenContext(opts: {
   const prophecyLine = await prophecyBriefing(opts.userId);
   // 段位·里程碑（M2 PR-10）：真实门槛派生（战友见证/晋升话术素材）。
   const progressLine = await progressBriefing(opts.userId);
+  // 行业基准（WO-08）：DB 分位数块（宁缺勿假，无行业/无数据不注入）。
+  const benchmarkLine = await benchmarkBlock(profile?.industry);
+  // 经营序列（WO-10）：本周实报 + 与基准差（服务端算）。无填报不注入。
+  const bizMetricLine = await bizMetricBlock(opts.userId, profile?.industry);
 
   // 本轮导引（M3 PR-11/12/14）：模式 + 角色语气 + 诊断轮次，全部确定性识别，识别不出不注入。
   const { intent } = resolveMode(opts.userMessage, opts.sessionMode);
@@ -114,8 +126,10 @@ export async function buildGenContext(opts: {
   const rd = roleDirective(detectInnerState(opts.userMessage));
   if (rd) directives.push(rd);
   if (opts.agentKey === 'general' && intent.mode === 'strategy' && !isBriefInterviewRequest(opts.userMessage)) {
-    const round = (opts.history?.filter((h) => h.role === 'user').length ?? 0) + 1;
-    directives.push(`诊断进度：本会话第 ${round} 轮（六轮深度对话制；客户要求加速时切 3 轮快速通道并说明）。`);
+    // F-5：诊断轮次改读用户级持久化 diagRound（换/删会话不清零），不再按当前会话历史现算。
+    // 写侧在 routes/sessions.ts 一问一答开始时 bumpDiagRound。
+    const round = await getDiagRound(opts.userId);
+    directives.push(`诊断进度：第 ${round} 轮（六轮深度对话制；客户要求加速时切 3 轮快速通道并说明）。`);
   }
   const modeLine = directives.length ? `【本轮导引（系统识别；执行但不要向客户复述本块）】\n${directives.join('\n')}` : null;
   // 阶段适配（M3 PR-13）：按档案营收阶段切深浅（随用户稳定 → stable 段）。
@@ -123,7 +137,9 @@ export async function buildGenContext(opts: {
 
   // 天势档案（M1 PR-2）：命盘由排盘引擎算好存库，这里只组装简报注入；
   // 客户选择「不信命理」→ 注入降级指令（不带命盘）；无命盘 → 不注入。
-  const believe = ((profile?.extraJson as { bazi?: { believe?: boolean } } | null)?.bazi?.believe) !== false;
+  // WO-05：命理全局开关关闭 → 天势降级为禁令（不注入命盘，禁八字/命格/流月术语），复用「不信命理」opt-out 口径。
+  const fortuneOn = await isFeatureEnabled('fortune');
+  const believe = fortuneOn && (((profile?.extraJson as { bazi?: { believe?: boolean } } | null)?.bazi?.believe) !== false);
   let tianshiLine: string | null = null;
   if (!believe) {
     tianshiLine = TIANSHI_OPTOUT_LINE;
@@ -170,10 +186,14 @@ export async function buildGenContext(opts: {
     benchmark: resolveIndustryPack(profile?.industry).benchmark,
     tianshiLine,
     strategicLine,
+    goalsLine,
+    dataSourceLine,
     decisionLine,
     reviewLine,
     prophecyLine,
     progressLine,
+    benchmarkLine,
+    bizMetricLine,
     modeLine,
     stageLine,
     userMessage: opts.userMessage,

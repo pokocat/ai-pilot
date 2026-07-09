@@ -1,14 +1,15 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { resolveUser, buildGenContext } from '../services/context.js';
+import { resolveUser, buildGenContext, isBriefInterviewRequest } from '../services/context.js';
+import { bumpDiagRound } from '../services/strategicProfile.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
-import { generateDeliverable, chatComplete, chatCompleteStream } from '../llm/gateway.js';
+import { generateDeliverable, chatComplete, chatCompleteStream, hasLiveProvider } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
 import { reserveCredits, type CreditReservation } from '../services/credits.js';
-import { reserveQuota, assertPlanActive, ensureQuota, type QuotaReservation } from '../services/tokenQuota.js';
+import { reserveQuota, assertPlanActive, RESERVE_TOKENS, type QuotaReservation } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
@@ -43,24 +44,36 @@ export async function sessionRoutes(app: FastifyInstance) {
       orderBy: { updatedAt: 'desc' },
       include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 }, agent: true },
     });
-    return sessions.map((s) => {
-      const last = s.messages[0];
-      let snippet = '新对话';
-      if (last) {
-        const c = last.contentJson as { text?: string; title?: string };
-        snippet = c.text || (c.title ? `已产出《${c.title}》` : '已回复');
-      }
-      return {
-        id: s.id,
-        agentKey: s.agentKey,
-        agentName: s.agent.name,
-        agentIcon: s.agent.icon,
-        title: s.title,
-        snippet,
-        updatedAt: s.updatedAt,
-        projectId: s.projectId,
-      };
-    });
+    const EPOCH = new Date(0);
+    // V7-15 未读数强化：unreadCount = 自 lastReadAt 起的 assistant 消息计数（服务端算；user/report/system 不计）。
+    // 每会话一条 count（会话数远小于消息数，且计数下推到 SQL），均经 session 关系按 userId 收窄——严格 user 域内。
+    return Promise.all(
+      sessions.map(async (s) => {
+        const last = s.messages[0];
+        let snippet = '新对话';
+        if (last) {
+          const c = last.contentJson as { text?: string; title?: string };
+          snippet = c.text || (c.title ? `已产出《${c.title}》` : '已回复');
+        }
+        const unreadCount = await prisma.message.count({
+          where: { session: { id: s.id, userId: user.id }, role: 'assistant', createdAt: { gt: s.lastReadAt ?? EPOCH } },
+        });
+        return {
+          id: s.id,
+          agentKey: s.agentKey,
+          agentName: s.agent.name,
+          agentIcon: s.agent.icon,
+          title: s.title,
+          snippet,
+          updatedAt: s.updatedAt,
+          projectId: s.projectId,
+          unreadCount,
+          // 未读红点（保留兼容既有消费者）：有未读 assistant（=unreadCount>0），或尾条为未读 report
+          //（后台产出即置——列表红点提示，见 generate* 的 role='report' 落库）。
+          hasUnread: unreadCount > 0 || (!!last && last.role === 'report' && (!s.lastReadAt || last.createdAt > s.lastReadAt)),
+        };
+      }),
+    );
   });
 
   // 会话详情（还原全部历史消息）
@@ -71,6 +84,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       include: { messages: { orderBy: { createdAt: 'asc' } }, agent: true },
     });
     if (!s) return reply.code(404).send({ error: 'session not found' });
+    // 打开会话即标记已读（消除列表未读红点）；不阻塞返回。
+    void prisma.session.update({ where: { id: s.id }, data: { lastReadAt: new Date() } }).catch(() => {});
     // P1-A5：会话头的 greet/chips/memText/learnText 与 /agents 列表同口径——取已发布版本，旧版本相应列为 null 则回退 Agent 行。
     const pub = s.agent.publishedVersionId ? await prisma.agentVersion.findUnique({ where: { id: s.agent.publishedVersionId } }) : null;
     return {
@@ -188,6 +203,10 @@ export async function sessionRoutes(app: FastifyInstance) {
     if (intent.mode === 'review' && intent.reviewLayer) {
       void recordReview({ tenantId: user.tenantId, userId: user.id, layer: intent.reviewLayer }).catch(() => {});
     }
+    // F-5：总军师战略一问一答开始即推进诊断轮次（用户级持久化，换/删会话不清零）。await 保证本轮 buildGenContext 读到新值。
+    if (agentKey === 'general' && intent.mode === 'strategy' && !isBriefInterviewRequest(text)) {
+      await bumpDiagRound({ tenantId: user.tenantId, userId: user.id, sessionId: session.id });
+    }
     const sessionMode = modePersist !== undefined ? modePersist : session.mode;
 
     const history = await loadHistory(session.id, userMsg.id);
@@ -211,9 +230,8 @@ export async function sessionRoutes(app: FastifyInstance) {
 
     try {
       if (onDemand) {
-        const learn = async () => (agentKey === 'general'
-          ? false
-          : learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId }));
+        // A-3：总军师也写记忆（用户级共享事实池）。
+        const learn = async () => learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId });
         if (!wantsDeliverableRequest(text)) {
           const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object } });
@@ -248,13 +266,11 @@ export async function sessionRoutes(app: FastifyInstance) {
         });
         notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
-        let learned = false;
-        if (agentKey !== 'general') {
-          learned = await learnFromConversation({
-            tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId,
-            assistantText: `${deliverable.title}：${deliverable.sections.map((s) => s.h).filter(Boolean).join('、')}`,
-          });
-        }
+        // A-3：总军师也写记忆（含产出结论）。
+        const learned = await learnFromConversation({
+          tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId,
+          assistantText: `${deliverable.title}：${deliverable.sections.map((s) => s.h).filter(Boolean).join('、')}`,
+        });
         const creditBalance = creditReservation?.balance ?? 0;
         // P0-4：降级（真实模型没出结构化成果、回退模板）不向用户计费——settle(0) 全额退回预留；我们仍在 gateway 侧按真实 token 记账。
         const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
@@ -293,12 +309,24 @@ export async function sessionRoutes(app: FastifyInstance) {
   // 把整段会话汇总为「对话纪要」：版本化报告 + 沉淀进知识库
   app.post<{ Params: { id: string } }>('/sessions/:id/summarize', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    // 汇总同样会触发真实模型（summarizePoints），须与 /generate* 一样受月度额度门禁 + 实际扣减。
+    // summarizePoints 走 rawJson，不回传真实 token 用量，故不能只 ensureQuota(仅判断放行、从不扣减)——
+    // 那样只要余额一次性 >0 就能无限次触发真实模型调用，额度系统形同虚设。改用与 /generate* 一致的
+    // reserveQuota 预留 + 按 RESERVE_TOKENS 定额结算（成功=全额扣留，失败=退回）。
+    let quotaReservation: QuotaReservation | null = null;
     try {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：会话汇总是 AI 产出 → 到期拦 PLAN_EXPIRED(403)
-      // 汇总同样会触发真实模型（summarizePoints），须与 /generate* 一样受月度额度门禁，
-      // 否则配额耗尽后仍可无限次触发真实模型调用（额度系统被完全绕过）。
-      await ensureQuota(user.id);
+      quotaReservation = await reserveQuota(user.id, 1);
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+    }
+    try {
+      // mock/demo（未配置真实模型）下 summarizePoints 直接短路返回 null、无真实成本 → 全额退回预留，
+      // 与 /generate* 的 mock 路径（usage=ZERO_USAGE → settle(0) 全退）同一口径，避免误扣。
+      const live = await hasLiveProvider();
       const res = await summarizeSession({ tenantId: user.tenantId, userId: user.id, sessionId: req.params.id });
+      await quotaReservation.settle(live ? RESERVE_TOKENS : 0, 1);
       await recordAudit({
         tenantId: user.tenantId,
         userId: user.id,
@@ -307,6 +335,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       });
       return res;
     } catch (err) {
+      await quotaReservation.refund().catch(() => {});
       const e = err as Error & { statusCode?: number; code?: string };
       return reply.code(e.statusCode ?? 500).send({ error: e.message, code: e.code });
     }
@@ -347,7 +376,11 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
 
     setupSSE(reply);
-    const send = (event: string, data: unknown) => reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    // 客户端断开后不再往死 socket 写（防 write-after-end 抛错中断生成/落库；生成本就会跑完并落库）。
+    const send = (event: string, data: unknown) => {
+      if (reply.raw.writableEnded || reply.raw.destroyed) return;
+      try { reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* socket 已关，忽略 */ }
+    };
 
     try {
       if (!session) {
@@ -370,6 +403,10 @@ export async function sessionRoutes(app: FastifyInstance) {
     if (modePersist !== undefined) await prisma.session.update({ where: { id: session.id }, data: { mode: modePersist } });
     if (intent.mode === 'review' && intent.reviewLayer) {
       void recordReview({ tenantId: user.tenantId, userId: user.id, layer: intent.reviewLayer }).catch(() => {});
+    }
+    // F-5：总军师战略一问一答开始即推进诊断轮次（用户级持久化，换/删会话不清零）。await 保证本轮 buildGenContext 读到新值。
+    if (agentKey === 'general' && intent.mode === 'strategy' && !isBriefInterviewRequest(text)) {
+      await bumpDiagRound({ tenantId: user.tenantId, userId: user.id, sessionId: session.id });
     }
     const sessionMode = modePersist !== undefined ? modePersist : session.mode;
 
@@ -399,7 +436,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       });
 
       const learnSse = async () => {
-        if (agentKey === 'general') return;
+        // A-3：总军师也写记忆（用户级共享事实池）。
         const learned = await learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId });
         if (learned) send('memory', { learned: true, agentName: agent.name });
       };
@@ -454,8 +491,8 @@ export async function sessionRoutes(app: FastifyInstance) {
         notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
 
-        // 记忆学习（非通用智能体）
-        if (agentKey !== 'general') {
+        // A-3：记忆学习（含总军师；用户级共享事实池）。
+        {
           const learned = await learnFromConversation({
             tenantId: user.tenantId,
             userId: user.id,

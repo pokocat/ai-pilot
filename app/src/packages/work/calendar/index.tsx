@@ -1,11 +1,16 @@
 import { useState } from 'react';
-import { View, Text, Input } from '@tarojs/components';
+import { View, Text, Input, Canvas, Image } from '@tarojs/components';
 import Taro, { useDidShow, useShareAppMessage } from '@tarojs/taro';
 import Login from '../../../components/Login';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { api, type ChartSummary } from '../../../services/api';
+import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
 import './index.scss';
+
+// 天时日历卡逻辑尺寸（画布按 dpr 放大）
+const CW = 600;
+const CH = 940;
 
 // 全年天时（战局「天势」卡的落地页）：排盘引擎算好的 12 个月攻守直接原生展示——
 // 不引导对话、不跳网页；右上角微信转发可分享（朋友打开看自己的天时，没命盘就地补生辰）。
@@ -41,6 +46,7 @@ export default function TianshiCalendar() {
   const [gender, setGender] = useState<'male' | 'female'>('male');
   const [busy, setBusy] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [imgPath, setImgPath] = useState<string | null>(null);
 
   const authed = s.isAuthed();
   const loadChart = () => {
@@ -66,7 +72,10 @@ export default function TianshiCalendar() {
     path: '/packages/work/calendar/index',
   }));
 
-  const valid = +year >= 1930 && +year <= 2020 && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
+  // 例行 QA 2026-07-08：出生年上限曾写死 2020（早于当前年份的过时常量），与
+  // server/src/routes/profile.ts 的动态上限（now().getFullYear()）及主入口 Picker（无年份上限）不一致，
+  // 2021 年及以后出生年份会被前端静默拦下（按钮置灰无提示）。改为跟随当前年份。
+  const valid = +year >= 1930 && +year <= new Date().getFullYear() && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
   const saveBirth = async () => {
     if (!valid || busy) return;
     setBusy(true);
@@ -84,18 +93,25 @@ export default function TianshiCalendar() {
     setBusy(false);
   };
 
-  const printVersion = async () => {
-    Taro.showLoading({ title: '生成打印版…' });
+  // 出图：把天时日历卡画到 canvas 导出图片——发好友/存相册（存相册即可打印贴办公室），无公开链接
+  const makeImage = async () => {
+    if (!chart || busy) return;
+    setBusy(true);
+    setImgPath(null);
+    Taro.showLoading({ title: '生成天时日历图…' });
     try {
-      const r = await api.publishCard('calendar');
+      const path = await renderCardToImage('tcalCanvas', CW, CH, (ctx) => paintCalendarCard(ctx, chart));
       Taro.hideLoading();
-      if (r.htmlUrl) Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '打印版链接已复制', icon: 'none' }) });
-      else Taro.showToast({ title: '本地预览模式无打印版', icon: 'none' });
+      setImgPath(path);
+      Taro.showToast({ title: '图已生成 · 存相册或发给朋友', icon: 'none' });
     } catch {
       Taro.hideLoading();
       Taro.showToast({ title: '生成失败，请重试', icon: 'none' });
     }
+    setBusy(false);
   };
+  const shareImage = () => imgPath && shareCardImage(imgPath);
+  const saveImage = () => imgPath && saveCardImage(imgPath);
 
   const nowMonth = new Date().getMonth() + 1;
   const months = chart?.monthlyOutlook?.months ?? [];
@@ -148,9 +164,22 @@ export default function TianshiCalendar() {
             ) : null}
 
             <View className="tc-actions">
-              <Text className="tc-share-hint">点右上角「···」可转发给朋友，让他也看看自己的全年节奏</Text>
-              <Text className="tc-print" onClick={printVersion}>生成网页打印版（贴办公室）›</Text>
+              <Text className="tc-share-hint">点右上角「···」可把本页转发给朋友，让他也看看自己的全年节奏</Text>
+              <View className={`tc-imgbtn ${busy ? 'off' : ''}`} style={!busy ? { background: accent } : {}} onClick={makeImage}>
+                <Text>{busy ? '生成中…' : imgPath ? '重新生成图片' : '生成天时日历图片 · 存相册/发朋友'}</Text>
+              </View>
             </View>
+
+            {imgPath ? (
+              <View className="tc-result">
+                <Image className="tc-img" src={imgPath} mode="widthFix" showMenuByLongpress />
+                <View className="tc-img-acts">
+                  <View className="tc-img-act" style={{ background: accent }} onClick={shareImage}><Text>发给朋友</Text></View>
+                  <View className="tc-img-act ghost" style={{ borderColor: accent }} onClick={saveImage}><Text style={{ color: accent }}>保存到相册</Text></View>
+                </View>
+                <Text className="tc-img-tip">也可长按图片保存或转发。</Text>
+              </View>
+            ) : null}
           </>
         ) : loaded ? (
           <>
@@ -197,9 +226,109 @@ export default function TianshiCalendar() {
             </View>
           </>
         ) : null}
+        {/* 离屏画布：仅用于生成图片 */}
+        <Canvas type="2d" id="tcalCanvas" className="tc-canvas" style={{ width: `${CW}px`, height: `${CH}px` }} />
+
         <Text className="tc-foot">命理内容为文化视角的经营节奏参考，不构成决策依据；「人谋可以改命」。</Text>
       </View>
       <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadChart(); }} />
     </View>
   );
+}
+
+// —— canvas 画天时日历卡（12 月攻守网格，固定军师参谋部品牌配色，不随本命色）——
+function paintCalendarCard(ctx: CanvasRenderingContext2D, chart: ChartSummary) {
+  const W = CW;
+  const months = chart.monthlyOutlook.months;
+  const yr = chart.monthlyOutlook.year;
+
+  // 底：暖纸
+  ctx.fillStyle = '#FBFAF6';
+  ctx.fillRect(0, 0, W, CH);
+
+  // 封面（深绿渐变）
+  const headH = 188;
+  const g = ctx.createLinearGradient(0, 0, W, headH);
+  g.addColorStop(0, '#1E5A43');
+  g.addColorStop(1, '#123C2C');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, headH);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#D9C48A';
+  ctx.font = '22px sans-serif';
+  ctx.fillText('◆ 军师参谋部 · 天势研判 ◆', W / 2, 52);
+  ctx.fillStyle = '#FBFAF6';
+  ctx.font = 'bold 48px serif';
+  ctx.fillText(`${yr} 年天时日历`, W / 2, 112);
+  ctx.fillStyle = 'rgba(251,250,246,.72)';
+  ctx.font = '23px sans-serif';
+  ctx.fillText(`${chart.pattern.name} · 引擎按你的命盘逐月推演`, W / 2, 154);
+
+  // 12 月网格（3 列 × 4 行）
+  const padX = 40, gap = 14, cols = 3;
+  const cellW = (W - padX * 2 - gap * (cols - 1)) / cols;
+  const cellH = 92;
+  const gridTop = headH + 30;
+  const phaseStyle: Record<string, { bg: string; fg: string }> = {
+    进攻: { bg: 'rgba(30,90,67,.12)', fg: '#1E5A43' },
+    防守: { bg: 'rgba(180,140,30,.16)', fg: '#8A6D1F' },
+    平稳: { bg: '#F0EFEA', fg: '#565C63' },
+  };
+  months.forEach((m, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = padX + col * (cellW + gap);
+    const y = gridTop + row * (cellH + gap);
+    const st = phaseStyle[m.phase] || phaseStyle['平稳'];
+    ctx.fillStyle = st.bg;
+    roundRect(ctx, x, y, cellW, cellH, 14); ctx.fill();
+    if (m.turning) {
+      ctx.strokeStyle = '#6B4E9E'; ctx.lineWidth = 2;
+      roundRect(ctx, x + 1, y + 1, cellW - 2, cellH - 2, 13); ctx.stroke();
+    }
+    ctx.textAlign = 'center';
+    ctx.fillStyle = st.fg;
+    ctx.font = 'bold 30px serif';
+    ctx.fillText(`${m.month}月`, x + cellW / 2, y + 42);
+    ctx.font = '22px sans-serif';
+    ctx.fillText(`${m.phase}${m.turning ? ' ·拐点' : ''}`, x + cellW / 2, y + 74);
+  });
+
+  let y = gridTop + 4 * (cellH + gap) + 8;
+
+  // 图例
+  ctx.textAlign = 'left';
+  ctx.font = '21px sans-serif';
+  const legends: [string, string][] = [['进攻月', '#1E5A43'], ['防守月', '#8A6D1F'], ['平稳月', '#565C63'], ['◆拐点', '#6B4E9E']];
+  let lx = padX;
+  legends.forEach(([label, color]) => {
+    ctx.fillStyle = color;
+    ctx.fillText(`■ ${label}`, lx, y);
+    lx += ctx.measureText(`■ ${label}`).width + 22;
+  });
+  y += 40;
+
+  // 口径行
+  const turning = months.filter((m) => m.turning).map((m) => `${m.month}月`).join('、');
+  ctx.fillStyle = '#16191D';
+  ctx.font = '24px serif';
+  y = wrapText(ctx, `日主 ${chart.dayMaster.gan}${chart.dayMaster.element} · ${chart.dayMaster.strength}${turning ? ` · 拐点在 ${turning}` : ''}`, padX, y + 6, W - padX * 2, 38);
+  ctx.fillStyle = '#565C63';
+  ctx.font = '22px sans-serif';
+  y = wrapText(ctx, '进攻月宜主动布局，防守月宜收缩练功；重大动作尽量避开拐点月首尾。', padX, y + 6, W - padX * 2, 36);
+
+  // 裂变位
+  const boxY = CH - 176;
+  ctx.fillStyle = '#F1F7F3';
+  roundRect(ctx, padX, boxY, W - padX * 2, 96, 16); ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#969BA1';
+  ctx.font = '21px sans-serif';
+  ctx.fillText('想要完整的天势 × 战略诊断？', W / 2, boxY + 40);
+  ctx.fillStyle = '#1E5A43';
+  ctx.font = 'bold 28px serif';
+  ctx.fillText('找军师参谋部', W / 2, boxY + 74);
+
+  ctx.fillStyle = '#B4B8BE';
+  ctx.font = '19px sans-serif';
+  ctx.fillText('命理为文化视角的经营节奏参考，不构成决策依据', W / 2, CH - 38);
 }

@@ -2,7 +2,7 @@
 // 走标准 /v1/chat/completions，兼容 OpenAI / Agnes / DeepSeek / Moonshot(Kimi) / 通义千问兼容模式 等。
 // 结构化成果用 function calling（tools）强约束。baseUrl/model/key/温度 来自运行时配置（可后台切换）。
 
-import { DELIVERABLE_TOOL, injectVariables, normalizeDeliverableSections, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, injectVariables, normalizeDeliverableSections, normalizePrescriptions, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import { runToolLoop } from '../tools/loop.js';
@@ -26,7 +26,8 @@ interface OAStreamChunk {
   error?: { message?: string };
 }
 
-const DELIVERABLE_MAX_TOKENS = 2600;
+const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
+const CHAT_MAX_TOKENS = 4000; // 对话回复上限（放到日常永远碰不到，等于不截断）
 
 // 统一请求封装：注入 baseUrl/model/key/温度，带超时；错误抛出由 gateway 兜底降级 mock。
 async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>): Promise<OAResponse> {
@@ -205,7 +206,7 @@ export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
   const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   const data = await callChat(cfg, {
-    max_tokens: 800,
+    max_tokens: CHAT_MAX_TOKENS,
     messages: [
       { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。` },
       ...history,
@@ -224,7 +225,7 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   const body = {
-    max_tokens: 800,
+    max_tokens: CHAT_MAX_TOKENS,
     messages: [
       { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。` },
       ...history,
@@ -344,6 +345,7 @@ export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
+        prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
       },
       usage: r.usage,
       toolCalls: r.toolCalls,
@@ -401,6 +403,7 @@ export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
+        prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
       },
       usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
     };
@@ -423,7 +426,7 @@ export function openaiStep(cfg: ResolvedAiConfig): StepFn {
       toolDefs.push({ type: 'function', function: { name: opts.finalTool.name, description: opts.finalTool.description, parameters: opts.finalTool.schema } });
     }
 
-    const body: Record<string, unknown> = { max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : 800, messages: toOAMessages(messages) };
+    const body: Record<string, unknown> = { max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : CHAT_MAX_TOKENS, messages: toOAMessages(messages) };
     if (opts.forceFinal) {
       // 最后一轮收口。deliverable(强制)→强制 emit_deliverable；自适应(forceFinalTool=false)→只给 emit 但 auto(可 emit 可出文本)；chat→去掉工具出文本。
       if (opts.finalTool && opts.forceFinalTool !== false) {

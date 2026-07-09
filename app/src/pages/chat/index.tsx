@@ -64,7 +64,7 @@ function replyToText(reply: ChatReplyT): string {
 
 function reportDraft(agent?: Agent | null, partial: Partial<Deliverable> = {}): Deliverable {
   return {
-    title: partial.title || `${agent?.name || '军师'}正在出报告`,
+    title: partial.title || `${agent?.name || '军师'}正在出方案`,
     icon: partial.icon || agent?.icon || 'doc',
     meta: partial.meta || '正在梳理上下文与引用资料',
     sections: partial.sections || [],
@@ -92,14 +92,25 @@ type ChatStyle = CSSProperties & {
   '--keyboard-height'?: string;
 };
 
+type ChatScrollEvent = {
+  detail?: {
+    scrollTop?: number;
+    scrollHeight?: number;
+  };
+};
+
 // 模型选择：后端统一调度，前端暂固定展示一档（预留多模型切换入口）。
 const FIXED_MODEL = '军师 · 标准';
+const JUMP_LATEST_SHOW_DISTANCE = 420;
+const JUMP_LATEST_HIDE_DISTANCE = 140;
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
 
 export default function Chat() {
   const router = useRouter();
+  // 三势研判入口带来的势标签（市势/人势）：认可存库时写入报告 type，供战局卡可靠反查
+  const forceTag = decodeURIComponent((router.params as Record<string, string>).force || '');
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [agent, setAgent] = useState<Agent | null>(null);
@@ -111,20 +122,54 @@ export default function Chat() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
+  const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
   const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
   const [picker, setPicker] = useState(false);
   const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[]; memories: MemoryCandidate[] }>({ projects: [], reports: [], knowledge: [], memories: [] });
+  const logHeightRef = useRef(0);
   const logRef = useRef<Msg[]>([]);
   logRef.current = msgs;
 
   const findAgent = (key: string): Agent | undefined => s.agents().find((a) => a.key === key);
 
-  const scrollToEnd = () => setScrollTop((t) => t + 100000);
+  const measureChatLog = () => {
+    Taro.createSelectorQuery()
+      .select('.chat-log')
+      .boundingClientRect((rect) => {
+        const height = Number((rect as { height?: number } | null)?.height || 0);
+        if (height > 0) logHeightRef.current = height;
+      })
+      .exec();
+  };
+
+  const scrollToEnd = () => {
+    setShowJumpLatest(false);
+    setScrollTop((t) => t + 100000);
+  };
+
+  const handleLogScroll = (e: ChatScrollEvent) => {
+    const height = logHeightRef.current;
+    const top = Number(e.detail?.scrollTop || 0);
+    const scrollHeight = Number(e.detail?.scrollHeight || 0);
+    if (!height || !scrollHeight) {
+      measureChatLog();
+      return;
+    }
+    const distanceToBottom = scrollHeight - top - height;
+    setShowJumpLatest((visible) => {
+      if (visible) return distanceToBottom > JUMP_LATEST_HIDE_DISTANCE;
+      return distanceToBottom > JUMP_LATEST_SHOW_DISTANCE;
+    });
+  };
 
   useEffect(() => {
     if (busy) setTimeout(scrollToEnd, 40);
   }, [busy]);
+
+  useEffect(() => {
+    setTimeout(measureChatLog, 80);
+  }, [keyboardHeight, refs.length, msgs.length]);
 
   useEffect(() => () => store.setOverlay(false, 'ref-picker'), []);
 
@@ -135,7 +180,7 @@ export default function Chat() {
     if (isUnauthorized(e)) return '登录态已失效，请重新登录后再发送。';
     if ((e as any)?.data?.code === 'AGENT_LOCKED') return '该专项顾问尚未启用，请到「智库 / 工坊」查看可用方案。';
     if ((e as any)?.data?.code === 'INSUFFICIENT_QUOTA') return '本月 token 额度已用尽，请在「我的」升级套餐或下月再用。';
-    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '钻石不足，请在「我的」充值或解锁后再继续。';
+    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '算力不足，请在「我的」充值或解锁后再继续。';
     const msg = String((e as any)?.message || '');
     if (msg && msg !== 'undefined') return msg;
     return '抱歉，产出失败了，请稍后再试。';
@@ -486,7 +531,8 @@ export default function Chat() {
   const saveDeliverable = async (d: Deliverable) => {
     if (!agent) return;
     await api.saveToLibrary({
-      title: d.title, type: agent.deliverableKey || d.title, agentKey: agent.key,
+      // 三势研判入口进来的，type 打成「{势}研判」（如 市势研判），战局卡按 type 可靠反查
+      title: d.title, type: forceTag ? `${forceTag}研判` : (agent.deliverableKey || d.title), agentKey: agent.key,
       sessionId: sessionId || undefined, content: d as any, projectId: projectId || undefined,
     }).catch(() => {});
     Taro.showToast({ title: '已存入方案库', icon: 'none' });
@@ -494,7 +540,7 @@ export default function Chat() {
 
   // 认可方案：存入方案库（桥接一版报告）+ 服务端生成案卷军令 → 去执行页承接打卡与回填
   const acceptPlan = async (d: Deliverable) => {
-    const r = await acceptDeliverable(d, agent?.name || '军师').catch(() => null);
+    const r = await acceptDeliverable(d, agent?.name || '军师', forceTag || undefined).catch(() => null);
     if (!r) { Taro.showToast({ title: '案卷生成失败，请重试', icon: 'none' }); return; }
     if (!r.newOrders && r.skippedOrders) {
       Taro.showToast({ title: '这份方案已转成军令，不重复添加', icon: 'none' });
@@ -524,7 +570,7 @@ export default function Chat() {
 
   // 生成网页版报告（render_report → 自有域名 /api/r/:id，接口幂等）→ 直接打开：weapp 走内置 web-view 页，H5 开新窗口。
   const shareReport = async (messageId?: string) => {
-    if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出成果', icon: 'none' }); return; }
+    if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出方案', icon: 'none' }); return; }
     Taro.showLoading({ title: '生成网页版…' });
     try {
       await requestWechatSubscribe('report').catch(() => {});
@@ -572,7 +618,7 @@ export default function Chat() {
       return;
     }
     Taro.showActionSheet({
-      itemList: ['上传资料（PDF/Word/Excel…）', '引用已有项目 / 报告 / 知识'],
+      itemList: ['上传资料（PDF/Word/Excel…）', '引用已有案卷 / 方案 / 资料'],
       success: (r) => {
         if (r.tapIndex === 0) uploadMaterial();
         else if (r.tapIndex === 1) openPicker();
@@ -618,7 +664,7 @@ export default function Chat() {
     }
   };
 
-  // 打开 @引用选择器：拉取可引用的 项目/报告/知识
+  // 打开 @引用选择器：拉取可引用的 案卷/方案/资料
   const openPicker = async () => {
     setInputFocus(false);
     if (!store.isAuthed()) {
@@ -679,20 +725,20 @@ export default function Chat() {
         </View>
       </SafeHeader>
 
-      {/* 记忆条 */}
+      {/* 军师印象条（Agent Memory 用户可见包装） */}
       {agent && (
         <View className="mem-bar">
           <Icon name="layers" size={14} color={accent} />
-          <Text className="mt">专属理解：{stripTags(agent.memText)}</Text>
+          <Text className="mt">军师印象：{stripTags(agent.memText)}</Text>
           <View className="mlearn"><View className="dot" style={{ background: accent }} /><Text>{agent.learnText}</Text></View>
         </View>
       )}
 
-      {/* 项目作用域 + 生成纪要 */}
+      {/* 案卷作用域 + 生成纪要 */}
       <View className="chat-tools">
         {projectId ? (
           <View className="ct-proj" style={{ background: 'var(--accent-soft)' }} onClick={() => Taro.navigateTo({ url: `/packages/work/project/index?id=${projectId}` })}>
-            <Icon name="layers" size={12} color={accent} /><Text style={{ color: accent }}>项目内对话</Text>
+            <Icon name="layers" size={12} color={accent} /><Text style={{ color: accent }}>案卷内对话</Text>
           </View>
         ) : <View className="ct-spacer" />}
         <View className="ct-sum" onClick={onSummarize}><Icon name="doc" size={13} color="#565C63" /><Text>生成纪要</Text></View>
@@ -742,7 +788,7 @@ export default function Chat() {
       ) : null}
 
       {/* 对话流 */}
-      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false}>
+      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (
@@ -753,7 +799,7 @@ export default function Chat() {
                   <View className="memory-disclosure">
                     <View className="md-h">
                       <Icon name="layers" size={13} color={accent} />
-                      <Text style={{ color: accent }}>专属理解</Text>
+                      <Text style={{ color: accent }}>军师印象</Text>
                     </View>
                     <Text className="md-copy">我会参考你在本账号沉淀的企业档案、历史偏好和本次引用资料，让建议保持同一套业务口径。</Text>
                     <View className="md-tags">
@@ -811,9 +857,9 @@ export default function Chat() {
           }
           if (m.role === 'memory') {
             return (
-              <View key={i} className="mem-learned" onLongPress={() => copyText(`专属理解已更新：${m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。`)}>
+              <View key={i} className="mem-learned" onLongPress={() => copyText(`军师印象已更新：${m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。`)}>
                 <Icon name="spark" size={13} color={accent} />
-                <Text>专属理解已更新：{m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。</Text>
+                <Text>军师印象已更新：{m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。</Text>
               </View>
             );
           }
@@ -847,7 +893,7 @@ export default function Chat() {
                 <View className="accept-card">
                   <View className="accept-b">
                     <Text className="accept-t">认可这份方案？</Text>
-                    <Text className="accept-d">存入方案库沉淀为报告，执行页承接军令与复盘。</Text>
+                    <Text className="accept-d">存入方案库沉淀为一版方案，执行页承接军令与复盘。</Text>
                   </View>
                   <View className="accept-btn" style={{ background: accent }} onClick={() => acceptPlan(m.deliverable)}>
                     <Icon name="check" size={13} color="#fff" />
@@ -875,6 +921,17 @@ export default function Chat() {
         <View style={{ height: '20px' }} />
       </ScrollView>
 
+      {showJumpLatest ? (
+        <View
+          className={`jump-latest ${refs.length ? 'with-refs' : ''}`}
+          style={{ borderColor: accent }}
+          onClick={scrollToEnd}
+        >
+          <Text style={{ color: accent }}>回到最新</Text>
+          <Icon name="chevron" size={14} color={accent} />
+        </View>
+      ) : null}
+
       {/* 已选引用 */}
       {refs.length ? (
         <View className="ref-row">
@@ -894,7 +951,7 @@ export default function Chat() {
             value={input}
             focus={inputFocus}
             disabled={busy}
-            maxlength={500}
+            maxlength={2000}
             cursorSpacing={24}
             adjustPosition={false}
             autoHeight
@@ -942,12 +999,12 @@ export default function Chat() {
               <Text className="ref-done" style={{ color: accent }} onClick={closePicker}>完成{refs.length ? ` (${refs.length})` : ''}</Text>
             </View>
             <ScrollView scrollY className="ref-body" enhanced showScrollbar={false}>
-              {renderGroup('项目', pick.projects.map((p) => ({ kind: 'project' as const, id: p.id, label: p.name, sub: `${p.counts.reports} 报告 · ${p.counts.knowledge} 知识` })))}
-              {renderGroup('报告', pick.reports.map((r) => ({ kind: 'report' as const, id: r.id, label: `${r.title} v${r.currentVersion}`, version: r.currentVersion, sub: r.type })))}
-              {renderGroup('知识', pick.knowledge.map((k) => ({ kind: 'knowledge' as const, id: k.id, label: k.title || k.text.slice(0, 14), sub: k.text.slice(0, 24) })))}
-              {renderGroup('记忆', pick.memories.map((m) => ({ kind: 'memory' as const, id: m.id, label: m.text.slice(0, 18), sub: m.agentName || m.kind })))}
+              {renderGroup('案卷', pick.projects.map((p) => ({ kind: 'project' as const, id: p.id, label: p.name, sub: `${p.counts.reports} 方案 · ${p.counts.knowledge} 资料` })))}
+              {renderGroup('方案', pick.reports.map((r) => ({ kind: 'report' as const, id: r.id, label: `${r.title} v${r.currentVersion}`, version: r.currentVersion, sub: r.type })))}
+              {renderGroup('资料', pick.knowledge.map((k) => ({ kind: 'knowledge' as const, id: k.id, label: k.title || k.text.slice(0, 14), sub: k.text.slice(0, 24) })))}
+              {renderGroup('军师印象', pick.memories.map((m) => ({ kind: 'memory' as const, id: m.id, label: m.text.slice(0, 18), sub: m.agentName || m.kind })))}
               {(!pick.projects.length && !pick.reports.length && !pick.knowledge.length && !pick.memories.length) ? (
-                <Text className="ref-empty">还没有可引用的项目/报告/知识。先建项目、产出报告或记录知识，这里就能 @ 它们。</Text>
+                <Text className="ref-empty">还没有可引用的案卷/方案/资料。先建案卷、产出方案或记录资料，这里就能 @ 它们。</Text>
               ) : null}
               <View style={{ height: '12px' }} />
             </ScrollView>

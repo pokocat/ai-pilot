@@ -9,6 +9,8 @@ import {
   type AgentBilling,
   type SurveyQ,
   type Plan,
+  type AdminSku,
+  type ServiceAssignmentView,
   type AiConfig,
   type AiPreset,
   type AiProvider,
@@ -39,7 +41,7 @@ import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'account';
+type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'account';
 const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
@@ -57,6 +59,7 @@ const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'say', icon: 'spark', label: '献策' },
   { key: 'form', icon: 'doc', label: '问卷' },
   { key: 'plan', icon: 'layers', label: '套餐' },
+  { key: 'sku', icon: 'layers', label: '单次付费' },
 ];
 
 export default function App() {
@@ -120,6 +123,7 @@ export default function App() {
           {tab === 'model' && <ModelView toast={showToast} />}
           {tab === 'form' && <SurveyView />}
           {tab === 'plan' && <PlansView toast={showToast} />}
+          {tab === 'sku' && <SkusView toast={showToast} />}
         </div>
 
         <nav className="adm-tab">
@@ -348,6 +352,8 @@ function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: 
             {!data.agents.length && <div className="blk-d">暂无付费（解锁类）智能体</div>}
           </div>
         </div>
+
+        <ServiceBlock userId={userId} toast={toast} />
 
         {ctx && (
           <div className="blk">
@@ -1093,6 +1099,112 @@ function PlansView({ toast }: { toast: (m: string) => void }) {
         ))}
       </div>
     </>
+  );
+}
+
+// 单次付费 SKU：改价 / 启停 / 展示（key、kind、解锁模块走代码目录，只读）——镜像 PlansView 的行内编辑。
+const SKU_KIND_LABEL: Record<string, string> = { module: '模块解锁', service: '社群服务', storage: '存储扩容' };
+
+function SkusView({ toast }: { toast: (m: string) => void }) {
+  const [list, setList] = useState<AdminSku[]>([]);
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: '', desc: '', priceYuan: 0, enabled: true, sort: 0 });
+  const load = () => api.adminSkus().then(setList).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const startEdit = (s: AdminSku) => {
+    setEditKey(s.key);
+    setForm({ name: s.name, desc: s.desc, priceYuan: s.priceFen / 100, enabled: s.enabled, sort: s.sort });
+  };
+  const toggleEnabled = async (s: AdminSku) => {
+    try { await api.updateSku(s.key, { enabled: !s.enabled }); await load(); toast(s.enabled ? '已下架' : '已上架'); }
+    catch { toast('操作失败'); }
+  };
+  const save = async (key: string) => {
+    try {
+      await api.updateSku(key, {
+        name: form.name.trim(),
+        desc: form.desc.trim(),
+        priceFen: Math.max(0, Math.round(form.priceYuan * 100)),
+        enabled: form.enabled,
+        sort: form.sort,
+      });
+      setEditKey(null); await load(); toast('SKU 已更新');
+    } catch { toast('保存失败'); }
+  };
+  return (
+    <>
+      <div className="sec-h"><span className="t">单次付费 · SKU</span><span className="s">价格 · 启停 · 展示</span></div>
+      <div className="pad">
+        {list.length === 0 && <div className="empty">暂无 SKU。</div>}
+        {list.map((s) => editKey === s.key ? (
+          <div key={s.id} className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">标识 key · {SKU_KIND_LABEL[s.kind] ?? s.kind}（代码目录，不可改）</div><input className="ai-input" value={s.key} disabled /></div>
+            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">描述</div><textarea className="ta" rows={2} value={form.desc} onChange={(e) => setForm({ ...form, desc: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">价格（元）</div><NumInput className="ai-input" min={0} step={0.01} value={form.priceYuan} onChange={(priceYuan) => setForm({ ...form, priceYuan })} /></div>
+            <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => setForm({ ...form, sort })} /></div>
+            {s.grantsModuleKey && <div className="ai-field"><div className="ai-fl">解锁模块（代码目录，不可改）</div><input className="ai-input" value={s.grantsModuleKey} disabled /></div>}
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">上架启用</div><div className="cs">关闭后前台不展示、不可购买</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => setForm({ ...form, enabled: !form.enabled })}><i /></div></div></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => setEditKey(null)}>取消</button>
+              <button className="ai-btn primary" onClick={() => save(s.key)}><Icon name="check" size={14} /> 保存</button>
+            </div>
+          </div>
+        ) : (
+          <div key={s.id} className="crd" onClick={() => startEdit(s)}>
+            <div className="crd-row">
+              <span className="crd-ic"><Icon name="crown" size={18} /></span>
+              <div className="crd-b">
+                <div className="ct">{s.name} <span className="tag off">{SKU_KIND_LABEL[s.kind] ?? s.kind}</span>{!s.enabled && <span className="tag off">停用</span>}</div>
+                <div className="cs">{s.key}{s.grantsModuleKey ? ` · 解锁 ${s.grantsModuleKey}` : ''}{s.desc ? ` · ${s.desc}` : ''}</div>
+              </div>
+              <span className="user-balance">¥{(s.priceFen / 100).toLocaleString()}</span>
+              <div className={`sw ${s.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(s); }}><i /></div>
+              <span className="edit"><Icon name="pen" size={15} /></span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// 社群服务分配（用户详情内）：班主任 / 班级 / 群二维码 / 陪跑任务进度 / 备注。空 → 待分配。
+function ServiceBlock({ userId, toast }: { userId: string; toast: (m: string) => void }) {
+  const blank: ServiceAssignmentView = { teacherName: '', teacherWechat: '', className: '', groupQrUrl: '', taskDone: 0, taskTotal: 0, note: '' };
+  const [assigned, setAssigned] = useState<boolean | null>(null);
+  const [form, setForm] = useState<ServiceAssignmentView>(blank);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.userService(userId).then(({ service }) => { setAssigned(!!service); setForm(service ?? blank); }).catch(() => setAssigned(false));
+  useEffect(() => { load(); }, [userId]);
+  const set = (p: Partial<ServiceAssignmentView>) => setForm((f) => ({ ...f, ...p }));
+  const save = async () => {
+    setBusy(true);
+    try {
+      const { service } = await api.setUserService(userId, {
+        teacherName: form.teacherName.trim(), teacherWechat: form.teacherWechat.trim(),
+        className: form.className.trim(), groupQrUrl: form.groupQrUrl.trim(),
+        taskDone: form.taskDone, taskTotal: form.taskTotal, note: form.note.trim(),
+      });
+      setAssigned(!!service); setForm(service ?? blank); toast('社群服务已保存');
+    } catch { toast('保存失败'); }
+    setBusy(false);
+  };
+  return (
+    <div className="blk">
+      <div className="blk-h"><Icon name="chat" size={15} /><span className="t">社群服务</span><span className="badge">{assigned == null ? '…' : assigned ? '已分配' : '待分配'}</span></div>
+      <div className="blk-d">分配班主任 / 班级 / 群二维码与陪跑任务进度，前台「我的服务」据此展示。留空即视为未填。</div>
+      <div className="ai-field"><div className="ai-fl">班主任姓名</div><input className="ai-input" value={form.teacherName} onChange={(e) => set({ teacherName: e.target.value })} placeholder="如 张老师" /></div>
+      <div className="ai-field"><div className="ai-fl">班主任微信</div><input className="ai-input" value={form.teacherWechat} onChange={(e) => set({ teacherWechat: e.target.value })} placeholder="微信号" /></div>
+      <div className="ai-field"><div className="ai-fl">班级</div><input className="ai-input" value={form.className} onChange={(e) => set({ className: e.target.value })} placeholder="如 2026 春季 3 班" /></div>
+      <div className="ai-field"><div className="ai-fl">群二维码链接</div><input className="ai-input" value={form.groupQrUrl} onChange={(e) => set({ groupQrUrl: e.target.value })} placeholder="https://…（群二维码图片地址）" /></div>
+      <div className="ai-field"><div className="ai-fl">已完成任务</div><NumInput className="ai-input" min={0} value={form.taskDone} onChange={(taskDone) => set({ taskDone })} /></div>
+      <div className="ai-field"><div className="ai-fl">任务总数</div><NumInput className="ai-input" min={0} value={form.taskTotal} onChange={(taskTotal) => set({ taskTotal })} /></div>
+      <div className="ai-field"><div className="ai-fl">备注</div><textarea className="ta" rows={2} value={form.note} onChange={(e) => set({ note: e.target.value })} /></div>
+      <div className="ai-actions">
+        <button className="ai-btn primary" onClick={save} disabled={busy}><Icon name="check" size={14} /> {busy ? '保存中…' : '保存服务分配'}</button>
+      </div>
+    </div>
   );
 }
 

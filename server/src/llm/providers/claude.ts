@@ -2,14 +2,15 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { DELIVERABLE_TOOL, buildSystemParts, normalizeDeliverableSections, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, buildSystemParts, normalizeDeliverableSections, normalizePrescriptions, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
 import { runToolLoop } from '../tools/loop.js';
 import type { AdaptiveOut } from './openai.js';
 
-const DELIVERABLE_MAX_TOKENS = 2600;
+const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
+const CHAT_MAX_TOKENS = 4000; // 对话回复上限（放到日常永远碰不到，等于不截断）
 
 // system 拆成「稳定前缀(打缓存断点) + 每轮变化的参考资料」两块，命中缓存按 ~1/10 计费。
 // 提示词不足最低缓存阈值(Opus 4.8 约 4096 token、Sonnet 约 2048)时 cache_control 自动忽略，无副作用。
@@ -100,6 +101,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
           sections,
           trust: TRUST_NOTE,
           actions: ['save_to_library', 'export_pdf'],
+          prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
         },
         usage,
       };
@@ -134,7 +136,7 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
   }));
   const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
     model: cfg.model,
-    max_tokens: 800,
+    max_tokens: CHAT_MAX_TOKENS,
     temperature: cfg.temperature,
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
     messages: [...history, { role: 'user', content: ctx.userMessage }],
@@ -156,7 +158,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   }));
   const stream = getClient(cfg.apiKey, cfg.baseUrl).messages.stream({
     model: cfg.model,
-    max_tokens: 800,
+    max_tokens: CHAT_MAX_TOKENS,
     temperature: cfg.temperature,
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
     messages: [...history, { role: 'user', content: ctx.userMessage }],
@@ -217,7 +219,7 @@ export function claudeStep(cfg: ResolvedAiConfig): StepFn {
 
     const req: Anthropic.MessageCreateParamsNonStreaming = {
       model: cfg.model,
-      max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : 800,
+      max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : CHAT_MAX_TOKENS,
       temperature: cfg.temperature,
       system: systemBlocks(system, ''),
       messages: msgs,
@@ -304,6 +306,7 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
+        prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
       },
       usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
     };
@@ -355,6 +358,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
+        prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
       },
       usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
     };

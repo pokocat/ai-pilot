@@ -117,10 +117,27 @@ function parseBlocks(input: string): Block[] {
       const isOrdered = !!ordered;
       while (i < lines.length) {
         const current = lines[i].trim();
-        const m = isOrdered ? /^\d+[.)]\s+(.+)$/.exec(current) : /^[-*]\s+(.+)$/.exec(current);
+        if (!current) {
+          const nextIndex = findNextContentLine(lines, i + 1);
+          if (nextIndex >= 0 && matchListLine(lines[nextIndex].trim(), isOrdered)) {
+            i = nextIndex;
+            continue;
+          }
+          break;
+        }
+
+        const m = matchListLine(current, isOrdered);
         if (!m) break;
-        items.push(cleanInline(m[1]));
+
+        const itemLines = [m[1]];
         i += 1;
+        while (i < lines.length) {
+          const next = lines[i].trim();
+          if (!next || matchListLine(next, isOrdered) || isBlockStart(next)) break;
+          itemLines.push(next);
+          i += 1;
+        }
+        items.push(cleanInline(itemLines.join(' ')));
       }
       blocks.push({ type: 'list', ordered: isOrdered, items });
       continue;
@@ -136,6 +153,17 @@ function parseBlocks(input: string): Block[] {
   }
 
   return blocks;
+}
+
+function findNextContentLine(lines: string[], start: number): number {
+  for (let i = start; i < lines.length; i += 1) {
+    if (lines[i].trim()) return i;
+  }
+  return -1;
+}
+
+function matchListLine(line: string, ordered: boolean): RegExpExecArray | null {
+  return ordered ? /^\d+[.)]\s+(.+)$/.exec(line) : /^[-*]\s+(.+)$/.exec(line);
 }
 
 function isBlockStart(line: string): boolean {

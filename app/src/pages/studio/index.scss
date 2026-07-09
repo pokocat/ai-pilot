@@ -4,17 +4,16 @@
 .exec-nav {
   position: relative;
   display: flex; align-items: center; justify-content: center;
-  min-height: 54px; margin-bottom: 10px;
-  padding-top: 8px;
+  margin-bottom: 10px;
 }
 .en-title { font-size: 25px; font-weight: 600; color: var(--ink); line-height: 1.1; }
 .en-side {
-  position: absolute; bottom: 6px;
+  position: absolute; bottom: 14px;
   color: var(--green);
   font-size: 16px; font-weight: 600;
 }
 .en-side.left { left: 2px; }
-.en-side.right { right: 2px; }
+.en-side.right { right: var(--cap-right, 2px); }
 .en-side:active { opacity: .7; }
 
 /* —— 战役卡组（exec-deck 横滑） —— */
@@ -133,16 +132,24 @@
   font-size: 12px; font-weight: 600; white-space: nowrap;
 }
 
-/* —— 目标阶梯（goal-ladder 4 格） —— */
-.goal-ladder { display: flex; justify-content: space-between; gap: 9px; margin-top: 14px; }
-.goal-ladder:active { opacity: .8; }
+/* —— 目标阶梯（goal-ladder V7-10：标题行 + 4 格可编辑） —— */
+.goal-head { display: flex; align-items: baseline; justify-content: space-between; margin-top: 16px; }
+.goal-head-t { font-size: 15px; font-weight: 600; color: var(--ink); }
+.goal-head-more { color: var(--green); font-size: 12px; font-weight: 600; }
+.goal-head-more:active { opacity: .7; }
+.goal-ladder { display: flex; justify-content: space-between; gap: 9px; margin-top: 10px; }
 .gl-cell {
-  flex: 1; min-height: 70px; box-sizing: border-box;
+  flex: 1; min-height: 78px; box-sizing: border-box;
   padding: 13px 6px 10px; border-radius: 15px;
   text-align: center;
 }
+.gl-cell:active { opacity: .8; }
 .gl-k { display: block; color: var(--green); font-size: 14px; font-weight: 600; }
-.gl-v { display: block; margin-top: 6px; color: var(--ink-2); font-size: 10px; line-height: 1.35; font-weight: 600; }
+.gl-v {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  margin-top: 6px; color: var(--ink-2); font-size: 10px; line-height: 1.35; font-weight: 600;
+}
+.gl-v.empty { color: var(--ink-3); }
 
 /* —— 视图切换（exec-seg：软底 + 白块选中） —— */
 .exec-seg {
@@ -195,6 +202,8 @@
   font-size: 10.5px; font-weight: 600;
 }
 .task-pill.sub { color: var(--ink-3); background: var(--surface-2); font-weight: 600; }
+/* V7-05：结构化 meta 行（负责人 · 截止 · 预计耗时） */
+.task-meta-info { display: block; margin: 0 0 8px; color: var(--ink-3); font-size: 11px; font-weight: 600; line-height: 1.4; }
 .task-t { display: block; margin: 10px 0; font-size: 17px; font-weight: 600; color: var(--ink); line-height: 1.4; }
 .task.done .task-t { color: var(--ink-3); text-decoration: line-through; }
 .task-check {
@@ -367,3 +376,33 @@
   margin-top: 9px;
   color: var(--green); background: var(--green-soft);
 }
+
+/* —— 目标编辑浮层（V7-10：底部输入 sheet，对齐 Plans 遮罩配方） —— */
+.goal-sheet-mask {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(15, 17, 20, .55);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.goal-sheet {
+  width: 100%; max-width: 600px;
+  background: var(--bg, #fff); border-radius: 22px 22px 0 0;
+  padding: 10px 20px calc(20px + env(safe-area-inset-bottom)) 20px;
+  display: flex; flex-direction: column; align-items: stretch;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
+}
+.gs-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 auto 16px; }
+.gs-title { font-size: 18px; font-weight: 600; color: var(--ink); }
+.gs-hint { margin-top: 6px; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+.gs-input {
+  height: 46px; margin-top: 14px; padding: 0 14px;
+  border-radius: 13px; background: var(--surface); border: 1px solid var(--line);
+  font-size: 14px; color: var(--ink);
+}
+.gs-actions { display: flex; gap: 10px; margin-top: 16px; }
+.gs-btn {
+  flex: 1; height: 46px; border-radius: 13px;
+  display: flex; align-items: center; justify-content: center;
+  color: #FBFAF6; font-size: 14px; font-weight: 600;
+}
+.gs-btn:active { opacity: .85; }
+.gs-btn.ghost { color: var(--ink-2); background: var(--surface-2); }

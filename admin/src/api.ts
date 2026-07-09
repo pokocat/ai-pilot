@@ -88,6 +88,7 @@ export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsCon
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
+export type { AdminSku, AdminSkuUpdate, SkuKind, ServiceAssignmentView, ServiceAssignmentUpdate } from '../../shared/contracts';
 export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider, AiModel, AiModelUpsert, AiModelTest } from '../../shared/contracts';
 export type { AdminKnowledgeView, AdminKnowledgeItemRow, ReembedResult, AdminRetrievalDebug, RetrievalDebugCand } from '../../shared/contracts';
 export type { AdminUserContext, AdminUserMemory, KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow } from '../../shared/contracts';
@@ -108,6 +109,7 @@ import type {
   AgentVersionListView, AgentVersionDetail, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   SandboxRequest, SandboxResult, EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, StartEvalRunRequest, PricingTier,
+  AdminSku, AdminSkuUpdate, ServiceAssignmentView, ServiceAssignmentUpdate,
 } from '../../shared/contracts';
 
 export const api = {
@@ -178,6 +180,12 @@ export const api = {
   plans: () => req<Plan[]>('/admin/plans'),
   savePlan: (id: string, body: Partial<Pick<Plan, 'name' | 'price' | 'creditsPerMonth' | 'tokenQuotaPerMonth' | 'agentCount' | 'featuresJson' | 'highlighted'>>) =>
     req<Plan>(`/admin/plans/${id}`, 'PATCH', body),
+  // —— 单次付费 SKU：改价 / 启停 / 展示（key、kind、解锁模块走代码目录，不在此改）——
+  adminSkus: () => req<AdminSku[]>('/admin/skus'),
+  updateSku: (key: string, body: AdminSkuUpdate) => req<AdminSku>(`/admin/skus/${key}`, 'PATCH', body),
+  // —— 社群服务分配（按用户）——
+  userService: (id: string) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`),
+  setUserService: (id: string, body: ServiceAssignmentUpdate) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`, 'PUT', body),
   // —— 大模型配置（可随时切换） ——
   aiConfig: () => req<AiConfigView>('/admin/ai-config'),
   saveAiConfig: (body: AiConfigUpdate) => req<AiConfigView>('/admin/ai-config', 'PUT', body),

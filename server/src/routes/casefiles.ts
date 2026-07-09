@@ -4,11 +4,13 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
+import { now } from '../services/clock.js';
 import {
   acceptDeliverable, activeCasefile, casefileView, importLocalDossier, todayStr,
   type DeliverableInput,
 } from '../services/casefile.js';
-import { extractStrategicFacts, upsertStrategicProfile } from '../services/strategicProfile.js';
+import type { GoalLadder } from '../../../shared/contracts';
+import { extractStrategicFacts, upsertStrategicProfile, extractForceVerdict, upsertForce } from '../services/strategicProfile.js';
 import { recordDecisionFromAccept } from '../services/decisionLog.js';
 import { listReviews, recordReview, reviewStreak, type ReviewLayer } from '../services/reviewLog.js';
 import { syncProgress } from '../services/progress.js';
@@ -21,9 +23,9 @@ export async function casefileRoutes(app: FastifyInstance) {
   });
 
   // 认可方案 → 生成/更新案卷 + 拆今日军令
-  app.post<{ Body: { deliverable: DeliverableInput; agentName?: string } }>('/casefile/accept', async (req, reply) => {
+  app.post<{ Body: { deliverable: DeliverableInput; agentName?: string; force?: string } }>('/casefile/accept', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const { deliverable, agentName } = req.body ?? {};
+    const { deliverable, agentName, force } = req.body ?? {};
     if (!deliverable || typeof deliverable !== 'object') {
       return reply.code(400).send({ error: '缺少方案内容' });
     }
@@ -39,6 +41,12 @@ export async function casefileRoutes(app: FastifyInstance) {
       userId: user.id,
       patch: extractStrategicFacts(deliverable),
     }).catch(() => {});
+    // L-6 三势真数据化：认可的是「市势/人势研判」→ 提炼 攻/守/等/撤 结论回写，军情页三势卡回显真结论
+    if (force === '市势' || force === '人势') {
+      void extractForceVerdict(force, deliverable)
+        .then((v) => v && upsertForce({ tenantId: user.tenantId, userId: user.id, forceLabel: force, force: v }))
+        .catch(() => {});
+    }
     // 决策日志（M2 PR-7）：认可 = 一次战略决策，自动记账（30 天验证期，月复盘对账）
     await recordDecisionFromAccept({
       tenantId: user.tenantId,
@@ -46,6 +54,12 @@ export async function casefileRoutes(app: FastifyInstance) {
       deliverable,
       agentName: String(agentName || '军师').slice(0, 40),
     }).catch(() => {});
+    // WO-07：认可方案 = 拿到作战计划 → journey → executing（plan.accept）
+    await import('../services/journey.js').then((m) => m.applyJourneyEvent(user.id, user.tenantId, 'plan.accept')).catch(() => {});
+    // WO-12：认可 = 开方落库（白名单过滤 + 挂案卷；fire-safe，绝不阻断认可）
+    await import('../services/prescription.js')
+      .then((m) => m.persistPrescriptions({ tenantId: user.tenantId, userId: user.id, casefileId: r.casefileId, prescriptions: (deliverable as { prescriptions?: unknown }).prescriptions }))
+      .catch(() => {});
     await recordAudit({
       tenantId: user.tenantId, userId: user.id,
       action: 'user.casefile.accept',
@@ -121,6 +135,23 @@ export async function casefileRoutes(app: FastifyInstance) {
       return { casefile: await casefileView(user.id) };
     },
   );
+
+  // V7-10：目标阶梯局部更新（3-5年/年度/季度/本周，手动编辑）。
+  app.put<{ Body: Partial<GoalLadder> }>('/casefile/goals', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const cf = await activeCasefile(user.id);
+    if (!cf) return reply.code(409).send({ error: '还没有案卷，先认可一份军师方案', code: 'NO_CASEFILE' });
+    const body = req.body ?? {};
+    const existing = (cf.goalsJson as GoalLadder | null) ?? {};
+    const pick = (k: keyof GoalLadder): string | null =>
+      k in body ? (String((body as Record<string, unknown>)[k] ?? '').trim().slice(0, 60) || null) : ((existing[k] as string | null) ?? null);
+    const merged: GoalLadder = {
+      longTerm: pick('longTerm'), annual: pick('annual'), quarterly: pick('quarterly'), weekly: pick('weekly'),
+      updatedAt: now().toISOString(),
+    };
+    await prisma.casefile.update({ where: { id: cf.id }, data: { goalsJson: merged as object } });
+    return { casefile: await casefileView(user.id) };
+  });
 
   // 发起复盘（M2 PR-8）：前端在打开复盘对话时调用，落一条复盘账（day 层快照当日军令/回填事实）。
   // 同层同日 upsert（一天多次只算一次）；返回连续复盘天数供前端展示。

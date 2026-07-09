@@ -4,9 +4,12 @@ import { providerInfo } from '../llm/gateway.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { buildClientUnderstanding } from '../services/understanding.js';
+import { buildMemoryLibrary } from '../services/memoryLibrary.js';
+import { loadDossier, generateDossier } from '../services/dossier.js';
 import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
+import { ensureInviteCode, buildServiceView } from '../services/community.js';
 
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -25,6 +28,8 @@ export async function metaRoutes(app: FastifyInstance) {
     const understanding = await buildClientUnderstanding(user);
     const quota = await getQuotaState(user.id); // 本月 token 额度（客户端只看进度 %）
     const planStatus = await getPlanStatus(user.id); // 套餐状态：驱动前端只读模式 + 到期日/剩余天数/下次额度重置日
+    const inviteCode = await ensureInviteCode(user.id).catch(() => undefined); // V7-13：邀请码（惰性生成）
+    const service = await buildServiceView(user.id).catch(() => null); // V7-13：社群服务分配
     return {
       user: {
         id: user.id,
@@ -48,7 +53,27 @@ export async function metaRoutes(app: FastifyInstance) {
       onboarded,
       ai: await providerInfo(),
       understanding,
+      inviteCode,
+      service,
     };
+  });
+
+  // 军师记忆库（P2）：主公档案页「军师记事」六类结构化呈现
+  app.get('/me/memory-library', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    return buildMemoryLibrary(user.id);
+  });
+
+  // 完整履历（P3）：读缓存
+  app.get('/me/dossier', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    return loadDossier(user.id);
+  });
+  // 完整履历（P3）：生成并缓存（LLM 优先、确定性兜底）
+  app.post('/me/dossier/generate', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const report = await generateDossier(user.id, user.tenantId);
+    return { report, generatedAt: report.generatedAt };
   });
 
   // 钻石(点)消耗明细：解锁 / 图片按张 / 充值 / 赠送 流水（客户端「钻石管理」展示）

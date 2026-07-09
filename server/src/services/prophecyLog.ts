@@ -102,6 +102,12 @@ export async function verifyProphecy(args: {
   return toView(updated);
 }
 
+/** WO-11：用户对某预言提异议（不改状态，复盘时军师带出确认）。 */
+export async function disputeProphecy(userId: string, id: string, note: string): Promise<boolean> {
+  const r = await prisma.prophecyLog.updateMany({ where: { id, userId }, data: { disputeNote: note.trim().slice(0, 500), disputedAt: new Date() } });
+  return r.count > 0;
+}
+
 export async function listProphecies(userId: string, limit = 30): Promise<ProphecyView[]> {
   const rows = await prisma.prophecyLog.findMany({ where: { userId }, orderBy: { seq: 'desc' }, take: limit });
   return rows.map(toView);
@@ -116,7 +122,7 @@ export async function prophecyStats(userId: string): Promise<ProphecyStats> {
     pending: rows.length - hit - miss,
     hit,
     miss,
-    hitRate: hit + miss > 0 ? Math.round((hit / (hit + miss)) * 100) : null,
+    hitRate: hit + miss >= 5 ? Math.round((hit / (hit + miss)) * 100) : null, // P-2 最小样本：<5 条不出命中率
   };
 }
 
@@ -128,8 +134,15 @@ export async function prophecyBriefing(userId: string): Promise<string | null> {
     const st = p.status === 'hit' ? '✓命中' : p.status === 'miss' ? '✗未命中' : `待验证${p.dueDate ? `(${p.dueDate})` : ''}`;
     return `#${p.seq} ${p.prophecy.slice(0, 80)} → ${st}`;
   });
-  const rateLine = stats.hitRate === null
-    ? `已验证 0 条（共 ${stats.total} 条，尚无命中率——不要编造数字；未命中时按「人谋可以改命」口径表达）`
-    : `天机命中率 ${stats.hitRate}%（命中 ${stats.hit} / 未命中 ${stats.miss}，待验证 ${stats.pending}）`;
-  return `【天机账本（系统计数，引用时以此为准，禁止自行推算）】\n${lines.join('\n')}\n${rateLine}`;
+  const verified = stats.hit + stats.miss;
+  const rateLine = stats.hitRate !== null
+    ? `天机命中率 ${stats.hitRate}%（命中 ${stats.hit} / 未命中 ${stats.miss}，待验证 ${stats.pending}）`
+    : verified > 0
+      ? `已验证 ${verified} 条（先攒够 5 条才出命中率；未命中时按「人谋可以改命」口径表达）`
+      : `已验证 0 条（共 ${stats.total} 条，尚无命中率——不要编造数字；未命中时按「人谋可以改命」口径表达）`;
+  const disputed = await prisma.prophecyLog.findMany({ where: { userId, disputedAt: { not: null } }, select: { seq: true, disputeNote: true }, orderBy: { seq: 'desc' }, take: 5 });
+  const disputeLine = disputed.length
+    ? `\n用户有异议（复盘时先确认）：${disputed.map((p) => `#${p.seq}${p.disputeNote ? '：' + p.disputeNote : ''}`).join('；')}`
+    : '';
+  return `【天机账本（系统计数，引用时以此为准，禁止自行推算）】\n${lines.join('\n')}\n${rateLine}${disputeLine}`;
 }

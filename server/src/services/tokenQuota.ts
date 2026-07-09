@@ -12,7 +12,9 @@ import { periodKeyOf, isExpired, nextResetAt, daysRemaining } from './planTime.j
 // P0-2：单次产出的悲观额度预留（token 计）。真实成本只有产出后才知道，故产出前先按此预扣、
 // 产出后 settle 按真实 token 多退少补。作用是**并发下把透支限制为有界**（每个在途请求各占一份），
 // 取代旧的「ensureQuota 只判 balance>0 → 无锁事后扣」导致 N 个并发全部放行的无界透支。
-const RESERVE_TOKENS = 2000;
+// 导出供 rawJson 系（extractGraphTriples/summarizePoints 等不回传真实 token 用量）的调用方
+// 按同一基准定额结算：reserveQuota 预留后 settle(RESERVE_TOKENS, ratio) = 全额扣留、不退。
+export const RESERVE_TOKENS = 2000;
 
 export class InsufficientQuotaError extends Error {
   statusCode = 402;
@@ -146,14 +148,20 @@ export interface QuotaReservation {
 // （照常预留/结算，余额可为负=透支记账，进入后台消耗明细）。仅额度层面的保底；
 // 套餐到期的只读锁定仍由 assertPlanActive 把守，不受影响。
 export const REVIEW_GRACE_PER_DAY = 2;
+// 保底类别 → 每日次数上限。复盘(留存)每日 2 次；速诊(获客，WO-06)每日 1 次。各类别独立配额，互不挤占。
+export type GraceKind = 'review' | 'quickscan';
+const GRACE_PER_DAY: Record<GraceKind, number> = { review: REVIEW_GRACE_PER_DAY, quickscan: 1 };
 
-async function graceUsedToday(userId: string): Promise<number> {
+async function graceUsedToday(userId: string, kind: GraceKind): Promise<number> {
   const d = now();
   const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  return prisma.auditLog.count({ where: { userId, action: 'system.quota.grace', createdAt: { gte: dayStart } } });
+  // 按 payload.kind 过滤 → 各类别独立计当日已用次数（既有 review 记录 payload.kind='review'，向后兼容）。
+  return prisma.auditLog.count({
+    where: { userId, action: 'system.quota.grace', createdAt: { gte: dayStart }, payloadJson: { path: ['kind'], equals: kind } },
+  });
 }
 
-export async function reserveQuota(userId: string, ratio = 1, opts?: { grace?: 'review' }): Promise<QuotaReservation> {
+export async function reserveQuota(userId: string, ratio = 1, opts?: { grace?: GraceKind }): Promise<QuotaReservation> {
   const w = await loadWallet(userId); // 锁外先确保账户存在 + 惰性月度重置（upsert 不宜进事务）
   if (!w) throw new InsufficientQuotaError('当前套餐无月度 token 额度，请升级套餐');
   if (isUnlimited(w.quota)) {
@@ -161,7 +169,7 @@ export async function reserveQuota(userId: string, ratio = 1, opts?: { grace?: '
   }
   const reserved = Math.ceil(RESERVE_TOKENS * (ratio > 0 ? ratio : 1));
   // 保底资格在锁外预查（并发极端下最多多放行一次，可接受；额度本身仍有界透支）
-  const allowNegative = opts?.grace ? (await graceUsedToday(userId)) < REVIEW_GRACE_PER_DAY : false;
+  const allowNegative = opts?.grace ? (await graceUsedToday(userId, opts.grace)) < GRACE_PER_DAY[opts.grace] : false;
   let graceGranted = false;
   await prisma.$transaction(async (tx) => {
     await lockQuota(tx, userId);
