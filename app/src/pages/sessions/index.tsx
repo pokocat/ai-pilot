@@ -111,6 +111,7 @@ export default function Sessions() {
             <View className="wx-id">
               <Text className="wx-name">{a.name}</Text>
               {aliasOf(a.key) ? <Text className="wx-alias">{aliasOf(a.key)}</Text> : null}
+              {last?.hasUnread ? <View style={{ width: '14rpx', height: '14rpx', borderRadius: '50%', background: '#e5472d', marginLeft: '10rpx' }} /> : null}
             </View>
             <Text className="wx-time" style={locked ? { color: accent } : {}}>
               {locked ? diamondCost(a.price) : last ? relTime(last.updatedAt) : ''}
@@ -180,6 +181,7 @@ export default function Sessions() {
                       <View className="wx-id">
                         <Text className="wx-name">总军师</Text>
                         <Text className="wx-alias">{aliasOf('general')}</Text>
+                        {masterLast?.hasUnread ? <View style={{ width: '14rpx', height: '14rpx', borderRadius: '50%', background: '#e5472d', marginLeft: '10rpx' }} /> : null}
                       </View>
                       <Text className="wx-time">{masterLast ? relTime(masterLast.updatedAt) : '在线'}</Text>
                     </View>

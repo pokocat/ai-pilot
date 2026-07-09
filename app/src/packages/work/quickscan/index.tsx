@@ -17,8 +17,19 @@ export default function QuickScanPage() {
   const [pain, setPain] = useState('');
   const [result, setResult] = useState<QuickScanResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [prefilled, setPrefilled] = useState(false); // 行业/阶段已由注册建档收过 → 折叠，不重复问
+  const [editBasics, setEditBasics] = useState(false);
 
-  useEffect(() => { api.survey().then(setSurvey).catch(() => {}); }, []);
+  useEffect(() => {
+    api.survey().then(setSurvey).catch(() => {});
+    // 复用注册入场引导已收的档案：行业/阶段已答就预填并折叠，避免重复问，用户只补「最痛的一件事」。
+    api.getProfile().then((p) => {
+      if (!p) return;
+      if (p.industry) setIndustry(p.industry);
+      if (p.stage) setRevenueBand(p.stage);
+      if (p.industry && p.stage) setPrefilled(true);
+    }).catch(() => {});
+  }, []);
   const opt = (key: string) => survey.find((x) => x.key === key)?.options ?? [];
   const industryOpts = opt('industry');
   const bandOpts = opt('stage');
@@ -47,27 +58,40 @@ export default function QuickScanPage() {
         {!result ? (
           <View className="qs-form">
             <View className="qs-hero">
-              <Text className="qs-hero-t">3 个问题，拿到你的初诊</Text>
+              <Text className="qs-hero-t">{prefilled && !editBasics ? '补一句最痛的事，拿你的初诊' : '3 个问题，拿到你的初诊'}</Text>
               <Text className="qs-hero-d">主要矛盾 · 军师判断 · 今天就能做的一件事</Text>
             </View>
 
-            <View className="qs-q">
-              <Text className="qs-qt">① 你的行业</Text>
-              <View className="qs-chips">
-                {industryOpts.map((o) => (
-                  <View key={o} className={`qs-chip ${industry === o ? 'on' : ''}`} onClick={() => setIndustry(o)}><Text>{o}</Text></View>
-                ))}
+            {prefilled && !editBasics ? (
+              <View className="qs-q">
+                <View className="qs-basics">
+                  <View className="qs-basics-main">
+                    <Text className="qs-basics-t">行业：{industry} · 阶段：{revenueBand}</Text>
+                    <Text className="qs-basics-note">来自你的档案</Text>
+                  </View>
+                  <Text className="qs-basics-edit" onClick={() => setEditBasics(true)}>重新选</Text>
+                </View>
               </View>
-            </View>
-
-            <View className="qs-q">
-              <Text className="qs-qt">② 当前阶段 / 年营收段</Text>
-              <View className="qs-chips">
-                {bandOpts.map((o) => (
-                  <View key={o} className={`qs-chip ${revenueBand === o ? 'on' : ''}`} onClick={() => setRevenueBand(o)}><Text>{o}</Text></View>
-                ))}
-              </View>
-            </View>
+            ) : (
+              <>
+                <View className="qs-q">
+                  <Text className="qs-qt">① 你的行业</Text>
+                  <View className="qs-chips">
+                    {industryOpts.map((o) => (
+                      <View key={o} className={`qs-chip ${industry === o ? 'on' : ''}`} onClick={() => setIndustry(o)}><Text>{o}</Text></View>
+                    ))}
+                  </View>
+                </View>
+                <View className="qs-q">
+                  <Text className="qs-qt">② 当前阶段 / 年营收段</Text>
+                  <View className="qs-chips">
+                    {bandOpts.map((o) => (
+                      <View key={o} className={`qs-chip ${revenueBand === o ? 'on' : ''}`} onClick={() => setRevenueBand(o)}><Text>{o}</Text></View>
+                    ))}
+                  </View>
+                </View>
+              </>
+            )}
 
             <View className="qs-q">
               <Text className="qs-qt">③ 当前最痛的一件事</Text>

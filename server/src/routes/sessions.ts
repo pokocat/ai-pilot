@@ -60,6 +60,8 @@ export async function sessionRoutes(app: FastifyInstance) {
         snippet,
         updatedAt: s.updatedAt,
         projectId: s.projectId,
+        // 未读：最后一条是 AI 回复且晚于 lastReadAt（退出后台生成完即置——列表红点提示）。
+        hasUnread: !!last && (last.role === 'assistant' || last.role === 'report') && (!s.lastReadAt || last.createdAt > s.lastReadAt),
       };
     });
   });
@@ -72,6 +74,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       include: { messages: { orderBy: { createdAt: 'asc' } }, agent: true },
     });
     if (!s) return reply.code(404).send({ error: 'session not found' });
+    // 打开会话即标记已读（消除列表未读红点）；不阻塞返回。
+    void prisma.session.update({ where: { id: s.id }, data: { lastReadAt: new Date() } }).catch(() => {});
     // P1-A5：会话头的 greet/chips/memText/learnText 与 /agents 列表同口径——取已发布版本，旧版本相应列为 null 则回退 Agent 行。
     const pub = s.agent.publishedVersionId ? await prisma.agentVersion.findUnique({ where: { id: s.agent.publishedVersionId } }) : null;
     return {
@@ -349,7 +353,11 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
 
     setupSSE(reply);
-    const send = (event: string, data: unknown) => reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    // 客户端断开后不再往死 socket 写（防 write-after-end 抛错中断生成/落库；生成本就会跑完并落库）。
+    const send = (event: string, data: unknown) => {
+      if (reply.raw.writableEnded || reply.raw.destroyed) return;
+      try { reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* socket 已关，忽略 */ }
+    };
 
     try {
       if (!session) {

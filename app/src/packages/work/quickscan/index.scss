@@ -55,6 +55,34 @@
   color: #f3e9c8;
 }
 
+.qs-basics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  padding: 22rpx 26rpx;
+  background: #fff;
+  border: 1rpx solid #e3e0d6;
+  border-radius: 16rpx;
+}
+.qs-basics-t {
+  display: block;
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1c2b22;
+}
+.qs-basics-note {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #9a8f7a;
+}
+.qs-basics-edit {
+  flex-shrink: 0;
+  font-size: 25rpx;
+  color: #16321f;
+}
+
 .qs-pain {
   width: 100%;
   box-sizing: border-box;

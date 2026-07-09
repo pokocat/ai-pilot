@@ -405,6 +405,7 @@ export interface SessionItem {
   id: string; agentKey: string; agentName: string; agentIcon: string;
   title: string; snippet: string; updatedAt: string;
   projectId?: string | null; // 归属项目（无则散落）
+  hasUnread?: boolean; // 有未读 AI 回复（列表红点；退出后台生成完即置 true，打开会话即清）
 }
 export interface SessionMessage {
   id: string; role: string; content: any; at: string;

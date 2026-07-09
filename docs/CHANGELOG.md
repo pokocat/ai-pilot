@@ -8,6 +8,12 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-08** · **上线后 QA 三修：初诊后首页刷新 + 初诊复用档案不重复问 + 对话未读信号**（`refactor/structured-output` 分支）：
+  - **① 首页初诊卡重复**：home「下一步」卡接服务端 `/journey`（`useDidShow` 刷新）——初诊后 journey new→scanned，卡片变「进参谋室继续诊断」，不再重复「开始初诊」。
+  - **② 初诊与注册引导重复问行业/阶段**：注册入场 Picker 已收 `Profile.industry/stage`；速诊页进来 `api.getProfile()` 预填并折叠行业/阶段（「来自你的档案·重新选」），用户只补「最痛的一件事」。纯前端。
+  - **③ 对话返回即终止 → 后台异步 + 未读**：核实服务端**本就不因客户端断开中止生成、AI 回复完整落库**（缺的只是未读信号）。`Session +lastReadAt`（加法列）；`GET /sessions` 算 `hasUnread`（最后一条是 AI 回复且晚于 lastReadAt）；`GET /sessions/:id` 打开即置已读；`send()` 加 socket 已关守卫（防 write-after-end 中断落库）；契约 `SessionItem.hasUnread`；列表页军师行/总军师行加未读红点。
+  **验证**：`unread.test.ts`（回复后未读 → 打开清除）全绿；全量 376 例 0 回归；`app tsc` 零错 + `npm run build:weapp` 编译成功。影响面：server(schema +lastReadAt、sessions 路由) + shared/contracts + app(home/quickscan/sessions)。**未含**：回复在当前会话页 live 收到后离开会短暂显未读（重进即清，MVP 可接受）；历史会话行红点。
+
 - **2026-07-08** · **WO-15 生态统一账户与跨产品结算·设计文档（设计先行）**（`refactor/structured-output` 分支）：新增 `docs/ECOSYSTEM_ACCOUNT_DESIGN.md`——生态第二产品立项蓝图，回答身份（手机号+unionid 单库多产品共用 `User`）/钱包（`CreditLedger` 加 `product` 字段、单库事务跨产品扣费）/权益互通（套餐附赠、处方 activate 跨产品支付回调复用 `PaymentOrder` 幂等）/数据授权（service token + `user_grant` 表 + BrandKit export 签名 TTL 1h）/风险（单库 schema 耦合边界、unionid 同主体依赖、拆分触发线）+ 落地顺序。影响面：docs only。**至此 FABLE5 加法路线图 WO-01~15 全部工单落核心**（多个 admin/前端/注入子项按各条 CHANGELOG「未含」列为后续）。
 
 - **2026-07-08** · **WO-09 经营体检·财务解析引擎（`structured()` 消费者 + 纯派生）**（`refactor/structured-output` 分支，未部署）：知识库分析产品化的分析核。`services/finParse`：`FinancialsSchema`（Zod：periods/revenue/cogs/expenses/cash，缺失容错空数组）+ `parseFinancials`（走统一 `structured()` 从财务表文本抽取，无 provider → null）+ `deriveMetrics`（**纯代码算** 毛利率/费用率/现金净流，不交给 LLM）+ `finReportSections`（经营体检 5 段：收入结构｜成本与毛利｜费用异动｜现金流信号｜三个最该动手的地方，数字全部来自结构化数据、禁推算）。**验证**：`finParse.test.ts` 3 例（派生指标算对、5 段骨架 + 现金为负告警、schema 缺字段容错）全绿；`tsc` 0 错；全量 375 例、0 回归。影响面：server（services/finParse 新增，standalone 零改存量）。**未含**（wiring 后续）：`KnowledgeItem.analysisJson` 落库、`POST /knowledge/:id/analyze` 端点 + saveReport 成版、资料卡「生成经营体检」按钮、战局页体检引用。

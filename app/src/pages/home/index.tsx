@@ -6,7 +6,7 @@ import Login from '../../components/Login';
 import Picker from '../../components/Picker';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type ChartSummary, type ReportItem } from '../../services/api';
+import { api, type ChartSummary, type ReportItem, type JourneyView } from '../../services/api';
 import { MODULE_MARKET, THREE_FORCES, type ForceItem } from '../../data/operatingSystem';
 import { EMPTY_STATES } from '../../data/emptyStates';
 import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
@@ -51,6 +51,7 @@ export default function Home() {
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [chart, setChart] = useState<ChartSummary | null>(null);
   const [reports, setReports] = useState<ReportItem[]>([]);
+  const [journey, setJourney] = useState<JourneyView | null>(null); // WO-07：下一步卡数据源（初诊后 new→scanned，不再重复「开始初诊」）
   const me = s.me();
   const und = me?.understanding;
 
@@ -62,6 +63,7 @@ export default function Home() {
       store.loadMe(); // 刷新军师档案（对话/资料变化后战局判断随之更新）
       api.myChart().then((r) => setChart(r.chart)).catch(() => setChart(null)); // 命盘（天时窗口）
       api.reports().then(setReports).catch(() => setReports([])); // 方案库（用于三势卡反查已研判方案）
+      api.journey().then(setJourney).catch(() => setJourney(null)); // WO-07：返回首页即刷新 journey，初诊后不再显示「开始初诊」
     }
   });
 
@@ -127,6 +129,10 @@ export default function Home() {
         : { title: '录入今日战果 · 生成复盘', desc: '把线索 / 咨询 / 成交录进去，军师据此定明日军令。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) };
     }
     if (und?.summary) return { title: '认可一份方案，生成军令', desc: '和军师把打法聊定，认可后自动拆成今日军令。', cta: '去对话', act: () => goChat('agentKey=general&continue=1') };
+    // WO-07：已做过初诊（journey scanned/diagnosing）→ 引导进参谋室继续诊断，不再重复「开始初诊」。
+    if (journey?.nextStep && (journey.stage === 'scanned' || journey.stage === 'diagnosing')) {
+      return { title: journey.nextStep.title, desc: journey.nextStep.desc, cta: '进参谋室', act: () => goChat('agentKey=general&continue=1') };
+    }
     return { title: EMPTY_STATES.battle.title, desc: EMPTY_STATES.battle.desc, cta: EMPTY_STATES.battle.cta, act: goQuickScan };
   })();
 
