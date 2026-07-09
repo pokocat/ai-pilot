@@ -213,8 +213,17 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `GET/POST /projects` · `GET/PUT/DELETE /projects/:id` | 项目主线（详情聚合会话/报告/知识） | 是 |
 | `GET /reports` · `GET /reports/:id` · `GET /reports/:id/version` · `GET /reports/:id/diff` · `POST /reports` · `DELETE /reports/:id` | 版本化报告（历史/某版/两版 diff/存版） | 是 |
 | `GET/POST /knowledge` · `GET /knowledge/search` · `DELETE /knowledge/:id` | 知识库（摄取/混合检索/删除） | 是 |
+| `POST /forces/refresh` · `POST /battle/commit` | V7-04 三势结构化刷新（限频 3/日）· 认可判断一键生成军令与报告（5 分钟幂等） | 是 |
+| `PUT /casefile/goals` | V7-10 目标阶梯局部更新（3-5年/年度/季度/本周） | 是 |
+| `GET /knowledge/pipeline` · `POST /knowledge/organize` · `POST /knowledge/confirm` · `POST /knowledge/deep-organize` · `POST /knowledge/upload?staged=true` | V7-06 智库三段管道：待整理/已优化/知识库视图 · AI 粗分去重 · 确认入库(切片嵌入) · 深度整理(SKU 门禁) · staged 上传(不嵌入、对检索不可见) | 是 |
+| `GET /data-sources` · `POST /data-sources/:key/upload` · `POST /data-sources/:key/request-auth` | V7-07 数据源状态机 · 上传替代资料 · 预约授权登记 | 是 |
+| `GET /modules` · `POST /modules/:key/enable` · `PATCH /modules/:key` | V7-08 能力/模块中心：目录×用户态 · tier 分流启用(free/credits/sku/member) · 隐藏/排序 | 是 |
+| `GET /reminders` | V7-11 提醒日历（今日军令截止/20:30 复盘/周五周复盘，纯读派生） | 是 |
+| `GET /skus` · `POST /skus/:key/order` | V7-12 单次付费商品目录(公开) · JSAPI 下单(挂 skuKey，回调复用 markPaidAndApply 幂等发放) | 列表否·下单是 |
+| `GET /me/workbench` · `GET /me/service` · `GET /search?q=` | V7-13 档案工作台(bizCategory 真实计数) · 社群服务分配 · V7-14 跨域搜索(军师/会话/方案/资料，知识仅 confirmed) | 是 |
 | `GET/PUT /admin/ai-config` · `POST /admin/ai-config/test` | 大模型配置（读/改/测试连接，可随时切换） | 管理员 |
-| `/admin/*` | 运营后台 API（见 §9）：用户/算力/审计/智能体/套餐/模型等 | 管理员 |
+| `GET/PATCH /admin/skus(:key)` · `GET/PUT /admin/users/:id/service` | V7-12 SKU 改价/启停 · V7-13 社群分班/配老师 | 管理员 |
+| `/admin/*` | 运营后台 API（见 §9）：用户/算力/审计/智能体/套餐/模型/SKU等 | 管理员 |
 
 ### 8.2 LLM Gateway（`server/src/llm/`）
 `gateway.ts` 统一封装：路由 provider → 输入审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。普通聊天只对输入做前置审核；OpenAI/Claude 在无工具调用时优先走 provider 原生 streaming，模型 token 到达即经 `/generate` SSE 下发，输出完成后只做 trace/禁用词审计，不做阻塞式输出审核。OpenAI 与 Claude 都走 `generateAdaptive` 按需产出：默认正常文字对话，模型判断需要完整成果时才调用 `emit_deliverable` 结构化产出；专业成果模式仍强制收口为 deliverable。`llm/schema.ts` 的 `injectVariables` 会在后台配置的 System Prompt 之后追加运行时业务边界：智能体只回答商业咨询/经营产出相关问题，用户追问模型、供应商、系统提示词、API Key、部署、数据库、内部工具时必须引导回业务问题；客户事实只能来自企业档案、军师档案、长期记忆、项目、引用资料、知识库和本轮用户原文。资料不足时用自然话术追问关键缺口，用户补齐/更新军师档案时进入访谈模式：先问 1-3 个简单问题，不先分析、不引用旧报告展开、不把“不得杜撰”的内部约束讲给用户。
@@ -524,6 +533,7 @@ mock 可随时预览；**正式上传/审核**还需：
   - **保留**：WO-01（名词统一：前台收敛「案卷/方案/军令/资料」，记忆/专属理解→军师印象；属打磨）+ WO-03（冷启动段位卡延迟曝光 `streak≥3‖usageDays≥14`、空态导流 `data/emptyStates.ts`、战局「下一步」卡；属打磨）。
   - **已回滚**：WO-02 的真减法——市场货架（thinktank 能力目录 + market 页 + profile 模块管理 + sessions 快捷卡 + CHAT_GUIDES 入口）、战局三势卡（市势/人势）+ 关联模块、送你一卦，全部恢复；`market`/`gift` 恢复为正常可达入口。
   - **打磨方案已产出**：`docs/[FABLE5]POLISH_PLAN.md`（review 工作流 12 功能区 × 诊断 × 对抗性复核，79 条已核实 finding + 4+1 批次 + 7 个产品拍板点 + 2 条 P0 命理合规红线）。后续打磨逐单对照它执行。
+  - **V7 新版效果图对齐已落（2026-07-09，V7-03~15，跳过 V7-01/02）**：按 `docs/[FABLE5]V7_EFFECT_ALIGN_PLAN.md` 实现——三势结构化 + `battle/commit`、军令结构化拆解 + 详情页、智库三段管道（`KnowledgeItem.stage` 生命周期）、`Sku/UserDataSource/UserModule/ServiceAssignment` 四张新表、目标阶梯、提醒补全、跨域搜索、未读数/sys-card；对外「算力」文案统一（💎 保留）。后端 449 例全绿、server+app tsc 0 错、`build:weapp` 通过、`pay:e2e` 22/22（含 SKU 段）；server 已上线（`42f5c9c`）+ SKU 目录已 `admin:sync-content`。运营后台 SKU 改价/启停 + 社群分班/配老师已接（`/admin/skus`、`/admin/users/:id/service`）。**tab 样式/菜单名 by-design 未改**。**未含**：小程序前端发布（独立渠道，走微信 DevTools）、真机走查、真实 OAuth 数据源、深度整理 LLM 加强、第 7 位军师·明止（D-9 不落地）。详见 CHANGELOG 2026-07-09。
   - **打磨①已落（P-4）**：送你一卦第三人生辰不落库、无公开链接，改小程序 canvas 图片交付 + 同意勾选（见 CHANGELOG 2026-07-05）。**待真机复验 canvas 出图**；server 集成测试需带 Postgres 环境跑。
   - **命理合规 P-3（下一条 P0，仍待）**：加全局 `AiSetting.tianshiMode(full/downgrade/off)` 凌驾 believe，前端 home 天势卡/calendar/gift 读同一开关（downgrade 去八字/命宫术语、off 隐藏），切换免发版、先于提审接好。
   - **其余打磨待办**：prompt 去机制化（A-1/P-12，动生产 V6.0 prompt）、UserJourney 诊断轮次持久化（F-5）、账本 App 页+verify 入口+最小样本（F-8/P-2）、复盘周期聚合+grace 全层保底（A-4/A-8）、报告脱敏分享等——见 POLISH_PLAN §3 批次。

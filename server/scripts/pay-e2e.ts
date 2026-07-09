@@ -34,6 +34,7 @@ async function main() {
   const user = await prisma.user.create({ data: { tenantId: tenant.id, phone: '1' + String(9_000_000_000 + Math.floor(Math.random() * 1_000_000_00)).slice(0, 10), name: 'E2E', role: 'owner', wechatOpenId: `o_e2e_${Date.now()}` } });
   const cleanup = async () => {
     await prisma.paymentOrder.deleteMany({ where: { userId: user.id } });
+    await prisma.userModule.deleteMany({ where: { userId: user.id } }); // V7-12 SKU 段发放
     await prisma.tokenWallet.deleteMany({ where: { userId: user.id } });
     await prisma.creditLedger.deleteMany({ where: { userId: user.id } });
     await prisma.auditLog.deleteMany({ where: { userId: user.id } });
@@ -93,6 +94,43 @@ async function main() {
     await inj('POST', '/api/pay/sandbox/notify', { admin: true, body: { outTradeNo: reOrder.body.outTradeNo }, testNow: future });
     const meRe = await inj('GET', '/api/me', { user: user.id, testNow: future });
     check('续费后即时恢复有效 + 额度满', meRe.body.planStatus?.active === true && meRe.body.tokenQuota?.limit === 1_000_000, meRe.body.planStatus);
+
+    // —— V7-12：SKU 单次付费段（下单 → 仿真回调 → 权益发放 → 幂等）——
+    // 自带 SKU 目录（不依赖 admin:sync-content 先跑）。
+    const { SKUS } = await import('../src/data/seedConfig.js');
+    for (let i = 0; i < SKUS.length; i++) {
+      const sk = SKUS[i];
+      await prisma.sku.upsert({
+        where: { key: sk.key },
+        update: { name: sk.name, desc: sk.desc, priceFen: sk.priceFen, kind: sk.kind, grantsModuleKey: sk.grantsModuleKey ?? null, metaJson: sk.metaBytes ? { bytes: sk.metaBytes } : undefined, sort: i },
+        create: { key: sk.key, name: sk.name, desc: sk.desc, priceFen: sk.priceFen, kind: sk.kind, grantsModuleKey: sk.grantsModuleKey ?? null, metaJson: sk.metaBytes ? { bytes: sk.metaBytes } : undefined, sort: i },
+      });
+    }
+    const skusRes = await inj('GET', '/api/skus');
+    check('SKU 目录 ≥ 6 条', (skusRes.body as any[]).length >= 6, { count: (skusRes.body as any[]).length });
+
+    // 9) module SKU：下单 → 沙箱回调 → 发放 UserModule
+    const skuOrder = await inj('POST', '/api/skus/deep-contradiction/order', { user: user.id, body: { openid: user.wechatOpenId } });
+    check('SKU 沙箱下单成功（返回 orderId）', skuOrder.status === 200 && !!skuOrder.body.orderId, skuOrder.body);
+    const skuOut = skuOrder.body.orderId;
+    const skuDbOrder = await prisma.paymentOrder.findUnique({ where: { outTradeNo: skuOut } });
+    check('SKU 订单落库 skuKey=deep-contradiction/status=created', skuDbOrder?.skuKey === 'deep-contradiction' && skuDbOrder?.status === 'created', { skuKey: skuDbOrder?.skuKey });
+    const skuNotify = await inj('POST', '/api/pay/sandbox/notify', { admin: true, body: { outTradeNo: skuOut } });
+    check('SKU 回调入账 applied=true', skuNotify.body.applied === true, skuNotify.body);
+    const um = await prisma.userModule.findUnique({ where: { userId_moduleKey: { userId: user.id, moduleKey: 'deep-contradiction' } } });
+    check('SKU 发放：UserModule(deep-contradiction, purchase)', !!um && um.enabled && um.source === 'purchase', um);
+
+    // 10) SKU 回调幂等：重复投递不二次发放
+    const skuNotify2 = await inj('POST', '/api/pay/sandbox/notify', { admin: true, body: { outTradeNo: skuOut } });
+    check('SKU 重复回调 already_applied（幂等）', skuNotify2.body.applied === false && skuNotify2.body.reason === 'already_applied', skuNotify2.body);
+    const umCount = await prisma.userModule.count({ where: { userId: user.id, moduleKey: 'deep-contradiction' } });
+    check('SKU 模块启用行仅 1 条（幂等）', umCount === 1, { umCount });
+
+    // 11) service SKU（深度整理）：下单 → 回调 → 一次性服务凭据 sku:<key>
+    const svcOrder = await inj('POST', '/api/skus/deep-organize/order', { user: user.id, body: { openid: user.wechatOpenId } });
+    await inj('POST', '/api/pay/sandbox/notify', { admin: true, body: { outTradeNo: svcOrder.body.orderId } });
+    const cred = await prisma.userModule.findUnique({ where: { userId_moduleKey: { userId: user.id, moduleKey: 'sku:deep-organize' } } });
+    check('service SKU 发放：一次性凭据 sku:deep-organize', !!cred && cred.source === 'purchase', cred);
   } finally {
     await cleanup();
     await app.close();

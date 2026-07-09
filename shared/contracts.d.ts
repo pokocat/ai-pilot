@@ -688,6 +688,10 @@ export interface SkuView {
 }
 /** 下单结果（POST /skus/:key/order）。payParams 走 wx.requestPayment；demo=演示发放（未配支付时）。 */
 export interface SkuOrderResult { orderId: string; payParams?: WechatPayParams; demo?: boolean; }
+/** 运营端 SKU 行（GET /admin/skus） */
+export interface AdminSku { id: string; key: string; name: string; desc: string; priceFen: number; kind: SkuKind; grantsModuleKey: string | null; enabled: boolean; sort: number; }
+/** 运营端更新 SKU（PATCH /admin/skus/:key）：改价/启停/展示（key 与 kind/grantsModuleKey 走代码目录，不在此改） */
+export interface AdminSkuUpdate { name?: string; desc?: string; priceFen?: number; enabled?: boolean; sort?: number; }
 
 /** 微信支付下单结果（POST /plans/:id/order）：小程序据 pay 调起 wx.requestPayment */
 export interface WechatOrderResult {
