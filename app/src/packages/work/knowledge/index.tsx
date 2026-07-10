@@ -5,6 +5,7 @@ import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { api, type KnowledgeDocRow } from '../../../services/api';
+import { checkUpload } from '../../../services/uploadGuard';
 import './index.scss';
 
 const STATUS: Record<string, string> = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
@@ -55,6 +56,13 @@ export default function Knowledge() {
     const ext = (f.name?.split('.').pop() || '').toLowerCase();
     if (!SUPPORTED_EXT.includes(ext)) {
       Taro.showToast({ title: `不支持的格式 .${ext}（支持 PDF/Word/Excel/MD/TXT）`, icon: 'none' });
+      return;
+    }
+    // 上传前置校验体积上限（与 server multipart 20MB 限制对齐），避免放行后被服务端 413 拒绝、
+    // 只留一句无信息量的「上传失败」（thinktank 页已有此校验，本页此前遗漏，见 uploadGuard.ts）。
+    const chk = checkUpload({ name: f.name, size: f.size });
+    if (!chk.ok) {
+      Taro.showToast({ title: chk.desc || '文件不符合上传要求', icon: 'none' });
       return;
     }
     setBusy(true);

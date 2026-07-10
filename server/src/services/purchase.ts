@@ -100,6 +100,9 @@ export async function applySkuGrant(
       create: { tenantId: user.tenantId, userId: user.id, moduleKey: sku.grantsModuleKey, enabled: true, source: 'purchase' },
     });
   } else if (sku.kind === 'storage') {
+    // 与 credits.ts lockCreditAccount / tokenQuota.ts lockQuota 同一模式：按用户加事务级 advisory lock，
+    // 防止两笔并发到账（连续购买 / 支付回调重投递不同订单号）各自读到同一份旧 storageBonus 导致其中一次丢失。
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`storage:${user.id}`}))`;
     const bytes = Number((sku.metaJson as { bytes?: number } | null)?.bytes ?? 0);
     const profile = await tx.profile.findFirst({ where: { tenantId: user.tenantId }, orderBy: { updatedAt: 'desc' } });
     const extra = (profile?.extraJson as Record<string, unknown> | null) ?? {};

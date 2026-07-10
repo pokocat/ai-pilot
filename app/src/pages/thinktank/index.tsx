@@ -221,12 +221,19 @@ export default function ThinkTank() {
     }
   };
 
-  const openDeepPay = (batchId: string) => {
+  const openDeepPay = async (batchId: string) => {
+    // 价格从 admin 可实时改价的 SKU 表取（70db762），避免确认弹窗显示的金额与微信实际扣款不一致。
+    let yuan = 39;
+    try {
+      const skus = await api.skus();
+      const sku = skus.find((it) => it.key === 'deep-organize');
+      if (sku) yuan = sku.priceFen / 100;
+    } catch { /* 拉取失败时用兜底价，不阻塞支付弹窗 */ }
     setPay({
       open: true, mode: 'sku', skuKey: 'deep-organize',
       title: '深度资料整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成可直接调用的知识。',
-      costValue: '¥39', balanceValue: '微信支付', afterValue: '支付后立即整理',
-      confirmText: '确认支付 ¥39', result: '支付后开始深度整理，并写入待确认区。',
+      costValue: `¥${yuan}`, balanceValue: '微信支付', afterValue: '支付后立即整理',
+      confirmText: `确认支付 ¥${yuan}`, result: '支付后开始深度整理，并写入待确认区。',
       onConfirm: async () => {
         try {
           const order = await api.createSkuOrder('deep-organize');
