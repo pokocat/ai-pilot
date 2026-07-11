@@ -38,6 +38,8 @@ app/project.private.config.json
 .env
 server/.env
 admin/.env
+# 例外：server/.env.test 是测试库连接串（无真实密钥），纳入版本管理，保证 npm test 固定连 junshi_test。
+!server/.env.test
 *.local
 
 # 日志
