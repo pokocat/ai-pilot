@@ -3,16 +3,14 @@
 // 同层同日 upsert（一天多次复盘只算一次，快照取最新）。week/month 等层随 M3 触发词路由接入。
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
-import { now } from './clock.js';
+import { dateKey, dayStart, weekStart } from './clock.js';
 import { activeCasefile, todayStr } from './casefile.js';
 
-function isoDate(d: Date): string { return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`; }
 // 复盘覆盖区间：day=当天；week=本周一→今天；month=当月 1 号→今天（quarter/year/team 暂按当天，随后续聚合）。
+// 日历日/周一一律按 Asia/Shanghai 派生（P1-4），不依赖进程 TZ。
 function periodRange(layer: ReviewLayer, today: string): { date: string; from: string } {
   if (layer === 'week') {
-    const d = now();
-    const back = d.getDay() === 0 ? 6 : d.getDay() - 1;
-    const monday = isoDate(new Date(d.getFullYear(), d.getMonth(), d.getDate() - back));
+    const monday = dateKey(weekStart());
     return { date: monday, from: monday };
   }
   if (layer === 'month') { const m = `${today.slice(0, 7)}-01`; return { date: m, from: m }; }
@@ -91,13 +89,12 @@ export async function reviewStreak(userId: string): Promise<number> {
   });
   if (!rows.length) return 0;
   const dates = new Set(rows.map((r) => r.date));
-  const d = now();
-  const iso = (t: Date) => `${t.getFullYear()}-${`${t.getMonth() + 1}`.padStart(2, '0')}-${`${t.getDate()}`.padStart(2, '0')}`;
-  let cursor = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  // 游标从「上海今天 00:00」的 UTC 瞬时起，每次回退 24h（上海无夏令时，恒落到前一日同一墙钟）。
+  let cursor = dayStart();
   // 今天还没复盘不打断连续（今晚还可以补）；从昨天开始也算连续
-  if (!dates.has(iso(cursor))) cursor = new Date(cursor.getTime() - 86400_000);
+  if (!dates.has(dateKey(cursor))) cursor = new Date(cursor.getTime() - 86400_000);
   let streak = 0;
-  while (dates.has(iso(cursor))) {
+  while (dates.has(dateKey(cursor))) {
     streak += 1;
     cursor = new Date(cursor.getTime() - 86400_000);
   }

@@ -15,7 +15,7 @@ import { reviewBriefing } from './reviewLog.js';
 import { prophecyBriefing } from './prophecyLog.js';
 import { progressBriefing } from './progress.js';
 import { resolveMode, modeDirective, detectInnerState, roleDirective, stageDirective } from './intent.js';
-import { now } from './clock.js';
+import { yearOf } from './clock.js';
 import { isFeatureEnabled } from './featureFlag.js';
 import { benchmarkBlock } from './benchmark.js';
 import { bizMetricBlock } from './bizMetric.js';
@@ -93,83 +93,93 @@ export async function buildGenContext(opts: {
   // 草稿/历史版本由 opts.preview 指定（沙盒、评测、AB）。调用方可传 opts.effective 复用。
   const effective = opts.effective ?? (await resolveEffectiveAgent(opts.agentKey, opts.preview));
   if (!effective) throw new Error(`未知智能体：${opts.agentKey}`);
-  const profile = await prisma.profile.findFirst({ where: { tenantId: opts.tenantId }, orderBy: { updatedAt: 'desc' } });
-  const user = await prisma.user.findUnique({ where: { id: opts.userId } });
-  const tenant = await prisma.tenant.findUnique({ where: { id: opts.tenantId }, select: { name: true } });
-  const understanding = user
-    ? await buildClientUnderstanding({ id: user.id, tenantId: opts.tenantId, name: user.name })
-    : null;
+  const memoryConfig = effective.memoryConfig as unknown as MemoryConfig;
+  const briefInterview = isBriefInterviewRequest(opts.userMessage);
 
-  // 战略档案（M1 PR-3）：客户已确认的战略事实（认可方案/手动编辑回写），注入优先级高于自动推断。
-  const strategicLine = strategicBlock(await loadStrategicProfile(opts.userId));
-  // V7-10 目标阶梯 + V7-07 已接入数据源清单（宁缺勿假，无则不注入）。
-  const goalsLine = await goalsInjectionLine(opts.userId).catch(() => null);
-  const dataSourceLine = await dataSourcesBlock(opts.userId).catch(() => null);
-  // 决策账本（M2 PR-7）：近期决策 + 服务端准确率（AI 只引用，禁止自行推算）。
-  const decisionLine = await decisionBriefing(opts.userId);
-  // 复盘账本（M2 PR-8）：连续复盘天数 + 最近复盘事实快照（战友见证/钩子的真实素材）。
-  const reviewLine = await reviewBriefing(opts.userId);
-  // 天机账本（M2 PR-9）：待验证预言 + 命中率（月复盘对账素材）。
-  const prophecyLine = await prophecyBriefing(opts.userId);
-  // 段位·里程碑（M2 PR-10）：真实门槛派生（战友见证/晋升话术素材）。
-  const progressLine = await progressBriefing(opts.userId);
-  // 行业基准（WO-08）：DB 分位数块（宁缺勿假，无行业/无数据不注入）。
-  const benchmarkLine = await benchmarkBlock(profile?.industry);
-  // 经营序列（WO-10）：本周实报 + 与基准差（服务端算）。无填报不注入。
-  const bizMetricLine = await bizMetricBlock(opts.userId, profile?.industry);
-
-  // 本轮导引（M3 PR-11/12/14）：模式 + 角色语气 + 诊断轮次，全部确定性识别，识别不出不注入。
+  // 本轮导引意图（M3 PR-11/12/14）：全部确定性、纯 CPU；先算出来以决定是否需要拉诊断轮次。
   const { intent } = resolveMode(opts.userMessage, opts.sessionMode);
+  const innerState = detectInnerState(opts.userMessage);
+  // F-5：诊断轮次改读用户级持久化 diagRound（换/删会话不清零），写侧在 routes/sessions.ts bumpDiagRound。
+  const needDiagRound = opts.agentKey === 'general' && intent.mode === 'strategy' && !briefInterview;
+
+  // P1-6：context 注入链原先 20+ 次串行 DB round-trip → 每条消息 25-35 次。
+  // 改造：无依赖的取数一次性并发发起（下面两批），取回后再按固定顺序拼装——
+  // 只并发取数、顺序拼装，注入块的文本与顺序完全不变（防 prompt 回归）。
+  // 批次 1：只依赖 opts / effective 的取数（含各账本 briefing、记忆召回、引用、检索、项目、诊断轮次）。
+  const [
+    profile, user, tenant,
+    strategicRaw, goalsLine, dataSourceLine,
+    decisionLine, reviewLine, prophecyLine, progressLine,
+    fortuneOn, diagRound,
+    memories, projRow, refsResult, hits,
+  ] = await Promise.all([
+    prisma.profile.findFirst({ where: { tenantId: opts.tenantId }, orderBy: { updatedAt: 'desc' } }),
+    prisma.user.findUnique({ where: { id: opts.userId } }),
+    prisma.tenant.findUnique({ where: { id: opts.tenantId }, select: { name: true } }),
+    // 战略档案（M1 PR-3）：客户已确认的战略事实，注入优先级高于自动推断。
+    loadStrategicProfile(opts.userId),
+    // V7-10 目标阶梯 + V7-07 已接入数据源清单（宁缺勿假，无则不注入）。
+    goalsInjectionLine(opts.userId).catch(() => null),
+    dataSourcesBlock(opts.userId).catch(() => null),
+    // 决策/复盘/天机/段位账本（M2 PR-7~10）：服务端计数，AI 只引用禁止自算。
+    decisionBriefing(opts.userId),
+    reviewBriefing(opts.userId),
+    prophecyBriefing(opts.userId),
+    progressBriefing(opts.userId),
+    // WO-05 命理全局开关（合规直读 DB）。
+    isFeatureEnabled('fortune'),
+    needDiagRound ? getDiagRound(opts.userId) : Promise.resolve(null),
+    // 长期记忆：按当前问题语义召回；后台关闭 longTerm 或档案访谈模式不注入。
+    memoryConfig.longTerm && !briefInterview
+      ? recallMemories(opts.userId, opts.agentKey, 5, opts.userMessage)
+      : Promise.resolve<Awaited<ReturnType<typeof recallMemories>>>([]),
+    // 项目背景
+    opts.projectId && !briefInterview
+      ? prisma.project.findFirst({ where: { id: opts.projectId, tenantId: opts.tenantId } })
+      : Promise.resolve(null),
+    // 显式引用（可溯源）+ 知识库混合检索（自动召回，项目内优先）
+    briefInterview
+      ? Promise.resolve({ lines: [] as string[], labels: [] as string[] })
+      : resolveReferences(opts.tenantId, opts.userId, opts.refs),
+    briefInterview
+      ? Promise.resolve<Awaited<ReturnType<typeof hybridSearch>>>([])
+      : hybridSearch({ tenantId: opts.tenantId, userId: opts.userId, projectId: opts.projectId ?? undefined, query: opts.userMessage, topK: 4 }),
+  ]);
+
+  // 批次 2：依赖批次 1 的 profile / user / fortune 结果。
+  const believe = fortuneOn && (((profile?.extraJson as { bazi?: { believe?: boolean } } | null)?.bazi?.believe) !== false);
+  const [understanding, benchmarkLine, bizMetricLine, chart] = await Promise.all([
+    user ? buildClientUnderstanding({ id: user.id, tenantId: opts.tenantId, name: user.name }) : Promise.resolve(null),
+    // 行业基准（WO-08）：DB 分位数块（宁缺勿假）。
+    benchmarkBlock(profile?.industry),
+    // 经营序列（WO-10）：本周实报 + 与基准差（服务端算）。无填报不注入。
+    bizMetricBlock(opts.userId, profile?.industry),
+    // 天势档案（M1 PR-2）：命盘算好存库，这里只组装简报；不信命理/开关关闭 → 走 opt-out，无命盘 → 不注入。
+    believe ? loadChart(opts.userId) : Promise.resolve(null),
+  ]);
+
+  const strategicLine = strategicBlock(strategicRaw);
+
+  // 本轮导引拼装（顺序不变：模式 → 角色语气 → 诊断轮次；识别不出不注入）。
   const directives: string[] = [];
   const md = modeDirective(intent);
   if (md) directives.push(md);
-  const rd = roleDirective(detectInnerState(opts.userMessage));
+  const rd = roleDirective(innerState);
   if (rd) directives.push(rd);
-  if (opts.agentKey === 'general' && intent.mode === 'strategy' && !isBriefInterviewRequest(opts.userMessage)) {
-    // F-5：诊断轮次改读用户级持久化 diagRound（换/删会话不清零），不再按当前会话历史现算。
-    // 写侧在 routes/sessions.ts 一问一答开始时 bumpDiagRound。
-    const round = await getDiagRound(opts.userId);
-    directives.push(`诊断进度：第 ${round} 轮（六轮深度对话制；客户要求加速时切 3 轮快速通道并说明）。`);
+  if (needDiagRound && diagRound !== null) {
+    directives.push(`诊断进度：第 ${diagRound} 轮（六轮深度对话制；客户要求加速时切 3 轮快速通道并说明）。`);
   }
   const modeLine = directives.length ? `【本轮导引（系统识别；执行但不要向客户复述本块）】\n${directives.join('\n')}` : null;
-  // 阶段适配（M3 PR-13）：按档案营收阶段切深浅（随用户稳定 → stable 段）。
+  // 阶段适配（M3 PR-13）：按档案营收阶段切深浅。
   const stageLine = stageDirective(profile?.stage);
 
-  // 天势档案（M1 PR-2）：命盘由排盘引擎算好存库，这里只组装简报注入；
-  // 客户选择「不信命理」→ 注入降级指令（不带命盘）；无命盘 → 不注入。
-  // WO-05：命理全局开关关闭 → 天势降级为禁令（不注入命盘，禁八字/命格/流月术语），复用「不信命理」opt-out 口径。
-  const fortuneOn = await isFeatureEnabled('fortune');
-  const believe = fortuneOn && (((profile?.extraJson as { bazi?: { believe?: boolean } } | null)?.bazi?.believe) !== false);
-  let tianshiLine: string | null = null;
-  if (!believe) {
-    tianshiLine = TIANSHI_OPTOUT_LINE;
-  } else {
-    const chart = await loadChart(opts.userId);
-    if (chart) tianshiLine = chartBriefing(chart, now().getFullYear());
-  }
+  // WO-05：命理开关关闭或客户不信 → 天势降级为禁令（不带命盘，复用 opt-out 口径）。
+  const tianshiLine: string | null = !believe ? TIANSHI_OPTOUT_LINE : (chart ? chartBriefing(chart, yearOf()) : null);
 
-  const memoryConfig = effective.memoryConfig as unknown as MemoryConfig;
-  const briefInterview = isBriefInterviewRequest(opts.userMessage);
-  // 长期记忆：按当前问题做语义召回；后台关闭 longTerm 后不再注入既有记忆。
-  const memories = memoryConfig.longTerm && !briefInterview
-    ? await recallMemories(opts.userId, opts.agentKey, 5, opts.userMessage)
-    : [];
+  const projectName: string | null = projRow?.name ?? null;
+  const projectSummary: string | null = projRow?.summary ?? null;
 
-  // 项目背景
-  let projectName: string | null = null;
-  let projectSummary: string | null = null;
-  if (opts.projectId && !briefInterview) {
-    const proj = await prisma.project.findFirst({ where: { id: opts.projectId, tenantId: opts.tenantId } });
-    if (proj) { projectName = proj.name; projectSummary = proj.summary ?? null; }
-  }
-
-  // 显式引用（可溯源）+ 知识库混合检索（自动召回，项目内优先）
-  const { lines: refLines, labels: refLabels } = briefInterview
-    ? { lines: [], labels: [] }
-    : await resolveReferences(opts.tenantId, opts.userId, opts.refs);
-  const hits = briefInterview
-    ? []
-    : await hybridSearch({ tenantId: opts.tenantId, userId: opts.userId, projectId: opts.projectId ?? undefined, query: opts.userMessage, topK: 4 });
+  const { lines: refLines, labels: refLabels } = refsResult;
   const knowledge = hits.map((h) => `【知识：${h.item.title ?? h.item.kind}】${h.snippet}`);
   const knowledgeUsed = [...refLabels, ...hits.map((h) => h.item.title ?? h.snippet.slice(0, 20))];
 

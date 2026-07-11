@@ -6,7 +6,7 @@ import { recordAudit } from '../services/audit.js';
 import { publishCard, fateCardContent, type CardKind } from '../services/cardHtml.js';
 import { computeChart, validatePaipanInput, type PaipanInput } from '../services/paipan.js';
 import { fortuneDisabledGuard } from '../services/featureFlag.js';
-import { now } from '../services/clock.js';
+import { yearOf } from '../services/clock.js';
 
 const KINDS: CardKind[] = ['daily', 'calendar', 'fate'];
 // 命理卡（天时日历 / 送你一卦）受 fortune 开关约束；每日战报（daily）是战报非命理，不受约束。
@@ -23,11 +23,11 @@ export async function cardRoutes(app: FastifyInstance) {
       const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
       const body = req.body ?? {};
       if (body.consent !== true) return reply.code(400).send({ error: '请先确认已获对方同意使用其生辰', code: 'CONSENT_REQUIRED' });
-      const v = validatePaipanInput(body.friendBazi, now().getFullYear());
+      const v = validatePaipanInput(body.friendBazi, yearOf());
       if (!v.ok) return reply.code(400).send({ error: v.error });
       let chart;
       try {
-        chart = computeChart(v.input, now().getFullYear());
+        chart = computeChart(v.input, yearOf());
       } catch {
         return reply.code(400).send({ error: '生辰无法排盘，请检查日期是否存在（如农历大小月/闰月）' });
       }

@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { now, dayStart, dateKey, hhmm } from './clock.js';
 import { getAccessToken } from './wechat.js';
 import type {
   WechatSubscribeChoice,
@@ -88,10 +88,8 @@ export async function hasWechatSubscriptionQuota(userId: string, scene: WechatSu
 }
 
 export async function hasSentWechatNotificationToday(userId: string, scene: WechatSubscribeScene): Promise<boolean> {
-  const d = now();
-  const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const found = await prisma.wechatNotificationLog.findFirst({
-    where: { userId, scene, status: 'sent', createdAt: { gte: dayStart } },
+    where: { userId, scene, status: 'sent', createdAt: { gte: dayStart() } }, // 上海时区当日 00:00（P1-4）
     select: { id: true },
   });
   return !!found;
@@ -103,8 +101,7 @@ function clip(v: string, max: number): string {
 }
 
 function timeValue(d = now()): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${dateKey(d)} ${hhmm(d)}`; // 上海时区（P1-4）
 }
 
 function miniprogramState(): 'developer' | 'trial' | 'formal' {

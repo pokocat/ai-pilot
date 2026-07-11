@@ -2,7 +2,7 @@
 // 写入源（v1）：① 认可方案自动记一条（决策=采纳该方案主判断）；② 手动/前端接口；
 // ③ AI 工具位与 LLM 抽取管道随 PR-9 共建。序号 seq 按用户自增（决策 #N 的展示口径）。
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { now, dateKey } from './clock.js';
 import type { DeliverableInput } from './casefile.js';
 import { firstJudgment } from './casefile.js';
 
@@ -100,10 +100,8 @@ export async function recordDecisionFromAccept(args: {
   if (!judgment) return null;
   const scene = '战略规划';
   const decision = `采纳《${(args.deliverable.title || '军师方案').slice(0, 60)}》：${judgment.slice(0, 200)}`.slice(0, 500);
-  const d = now();
-  const verifyBy = new Date(d.getTime() + 30 * 86400_000); // 默认 30 天验证期（月复盘对账）
-  const pad = (n: number) => `${n}`.padStart(2, '0');
-  const verifyByDate = `${verifyBy.getFullYear()}-${pad(verifyBy.getMonth() + 1)}-${pad(verifyBy.getDate())}`;
+  const verifyBy = new Date(now().getTime() + 30 * 86400_000); // 默认 30 天验证期（月复盘对账）
+  const verifyByDate = dateKey(verifyBy); // 上海时区日历日（P1-4）
 
   // 快路径：无锁存在性检查（命中即返回旧记录，覆盖顺序重复 accept 这一主场景）。
   const dup = await prisma.decisionLog.findFirst({ where: { userId: args.userId, scene, decision } });

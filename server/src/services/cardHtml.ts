@@ -3,7 +3,7 @@
 // 品牌一律「军师参谋部」（AGENTS §0 #10 红线）；样式对齐小程序设计体系（暖纸底/深绿/金/宋体标题）。
 // 骨架语义源自 V6.0 §19（V6.0 原稿外置 CSS 未随文档保留，此处按品牌设计系统重制）。
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { yearOf, dayOfYear } from './clock.js';
 import { activeCasefile, todayStr } from './casefile.js';
 import { reviewStreak } from './reviewLog.js';
 import { syncProgress } from './progress.js';
@@ -73,9 +73,7 @@ function esc(s: string): string {
 }
 
 function quoteOfToday(): string {
-  const d = now();
-  const doy = Math.floor((d.getTime() - new Date(d.getFullYear(), 0, 0).getTime()) / 86400_000);
-  return QUOTES[doy % QUOTES.length];
+  return QUOTES[dayOfYear() % QUOTES.length]; // 上海时区一年中的第几天（P1-4）
 }
 
 /** ⑦ 每日战报：当日军令完成/对齐/回填 + 段位/连续天数（全部服务端账本）。 */
@@ -206,7 +204,7 @@ export async function publishCard(args: {
   }
   // fate：优先朋友生辰现算（送你一卦，不落库）；否则用自己的命盘
   const chart = args.friendBazi
-    ? computeChart(args.friendBazi, now().getFullYear())
+    ? computeChart(args.friendBazi, yearOf())
     : await loadChart(args.userId);
   if (!chart) throw Object.assign(new Error('缺少生辰：提供朋友生辰，或先补自己的命盘'), { statusCode: 400, code: 'NO_CHART' });
   return publishCardHtml(args.tenantId, '天命速写', renderFateCard(chart, args.friendName), 'fate');

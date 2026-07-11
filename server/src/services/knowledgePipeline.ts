@@ -12,7 +12,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { monthStartOf } from './clock.js';
 import { structured } from '../llm/gateway.js';
 import { chunkAndEmbed } from './knowledge.js';
 import { parseDocument, detectDocType } from './docParse.js';
@@ -31,10 +31,9 @@ function pipelineError(message: string, statusCode: number, code: string, extra?
   return Object.assign(new Error(message), { statusCode, code, ...extra });
 }
 
-// 本月起点（本地时区，与 casefile.todayStr / tokenQuota dayStart 同口径；服务进程固定时区）。
+// 本月起点（Asia/Shanghai 固定时区，P1-4；与 casefile.todayStr / tokenQuota dayStart 同口径）。
 function monthStart(): Date {
-  const d = now();
-  return new Date(d.getFullYear(), d.getMonth(), 1);
+  return monthStartOf();
 }
 
 // fileType（pdf/docx/xlsx/csv/md/txt/…）→ 展示用类型标签（批次 typeStats 用）。

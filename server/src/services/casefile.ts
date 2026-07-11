@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { now, dateKey } from './clock.js';
 import { structured } from '../llm/gateway.js';
 import type { OrderActionType, OrderMetric, GoalLadder } from '../../../shared/contracts';
 
@@ -41,10 +41,7 @@ export interface CasefileView {
 }
 
 export function todayStr(): string {
-  const d = now();
-  const m = `${d.getMonth() + 1}`.padStart(2, '0');
-  const day = `${d.getDate()}`.padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
+  return dateKey(); // 上海时区日历日（P1-4）
 }
 
 function normalizeOrderText(text: string): string {
@@ -196,8 +193,7 @@ export async function activeCasefile(userId: string) {
 export async function casefileView(userId: string, days = 14): Promise<CasefileView | null> {
   const cf = await activeCasefile(userId);
   if (!cf) return null;
-  const since = new Date(now().getTime() - days * 86400_000);
-  const sinceStr = `${since.getFullYear()}-${`${since.getMonth() + 1}`.padStart(2, '0')}-${`${since.getDate()}`.padStart(2, '0')}`;
+  const sinceStr = dateKey(new Date(now().getTime() - days * 86400_000)); // 上海时区（P1-4）
   const [ordersRaw, metrics] = await Promise.all([
     prisma.casefileOrder.findMany({
       where: { casefileId: cf.id, date: { gte: sinceStr } },

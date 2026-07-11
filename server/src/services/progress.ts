@@ -5,7 +5,7 @@
 //   里程碑（使用天数解锁）：7/30/90/180/365 天（解锁内容由对话层承接，这里只管真实解锁事实）
 // 准确率/命中率为 null（无已验证样本）时视为不达标——没有数据就没有段位，绝不放水。
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { now, dateKey } from './clock.js';
 import { reviewStreak } from './reviewLog.js';
 import { decisionStats } from './decisionLog.js';
 import { prophecyStats } from './prophecyLog.js';
@@ -73,8 +73,7 @@ export async function syncProgress(userId: string): Promise<ProgressView | null>
   // 里程碑：按使用天数解锁（记录首次解锁日期）
   const milestones: Record<string, string> = { ...((stored?.milestonesJson as Record<string, string>) ?? {}) };
   const newMilestones: number[] = [];
-  const d = now();
-  const todayIso = `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+  const todayIso = dateKey(); // 上海时区日历日（P1-4）
   for (const days of MILESTONE_DAYS) {
     if (usageDays >= days && !milestones[String(days)]) {
       milestones[String(days)] = todayIso;

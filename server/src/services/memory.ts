@@ -3,6 +3,7 @@
 // 生产环境把 embedding 迁到 pgvector 做近邻检索；本地用内存余弦兜底，零依赖可跑。
 
 import { prisma } from '../db.js';
+import { now } from './clock.js';
 import { embed, cosine } from './embedding.js';
 import { keywordScore } from './retrieval.js';
 import { extractInsights } from '../llm/gateway.js';
@@ -92,9 +93,8 @@ export async function recallMemories(
 
 function ttlFromConfig(cfg: MemoryConfig): Date | null {
   if (cfg.retentionDays < 0) return null; // 永久
-  const d = new Date();
-  d.setDate(d.getDate() + cfg.retentionDays);
-  return d;
+  // 过期时刻 = 现在 + retentionDays（纯毫秒运算，与时区无关；走可注入时钟 now()）。
+  return new Date(now().getTime() + cfg.retentionDays * 86400_000);
 }
 
 function weightFromIntensity(cfg: MemoryConfig): number {

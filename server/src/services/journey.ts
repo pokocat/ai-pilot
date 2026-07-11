@@ -2,7 +2,7 @@
 // 但只是一个约百行的领域模块，不引依赖）。事件确定性驱动、服务端唯一写入；前端只读派生的「下一步」。
 // 依赖方向单一：本模块只 import prisma/clock/casefile 服务；事件由各路由/服务反向 fire（避免环）。
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { now, dateKey, hourOf } from './clock.js';
 import { activeCasefile } from './casefile.js';
 import type { JourneyStage, JourneyNextStep, JourneyView } from '../../../shared/contracts';
 
@@ -68,8 +68,7 @@ export function deriveNextStep(input: {
 }
 
 function todayKey(): string {
-  const d = now();
-  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+  return dateKey(); // 上海时区日历日（P1-4）
 }
 
 /** GET /journey 数据源：装配 stage + diagRound + 当日案卷/复盘信号 → 派生下一步。 */
@@ -90,5 +89,5 @@ export async function getJourneyView(userId: string, tenantId: string): Promise<
       todayReviewed = !!(await prisma.reviewLog.findUnique({ where: { userId_layer_date: { userId, layer: 'day', date } } }));
     }
   } catch { /* 信号读失败不影响 stage 级下一步 */ }
-  return { stage, diagRound, nextStep: deriveNextStep({ stage, diagRound, todayOrdersTotal, todayOrdersDone, todayReviewed, hour: now().getHours() }) };
+  return { stage, diagRound, nextStep: deriveNextStep({ stage, diagRound, todayOrdersTotal, todayOrdersDone, todayReviewed, hour: hourOf() }) };
 }

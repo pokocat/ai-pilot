@@ -9,7 +9,7 @@ import { cacheGet, cacheSet } from '../services/cache.js';
 import { reserveQuota, assertPlanActive, type QuotaReservation } from '../services/tokenQuota.js';
 import { structuredBillTokens } from '../llm/gateway.js';
 import { runQuickScan } from '../services/quickscan.js';
-import { now } from '../services/clock.js';
+import { dateKey } from '../services/clock.js';
 import type { QuickScanRequest } from '../../../shared/contracts';
 
 const DAILY_LIMIT = 3; // 每用户每日速诊次数
@@ -18,8 +18,7 @@ const EST_TOKENS = 800; // 速诊调用的估算 token（structured() 暂不回�
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function dayKey(): string {
-  const d = now();
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  return dateKey(); // 上海时区日历日（P1-4），限流 key 稳定不随进程 TZ 漂移
 }
 
 // 速诊即建档：三字段「空则填、不覆盖已有值」。revenueBand → Profile.stage（营收阶段口径）。

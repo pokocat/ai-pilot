@@ -6,7 +6,7 @@ import { resolveUser } from '../services/context.js';
 import { cacheGet, cacheSet } from '../services/cache.js';
 import { reserveQuota, assertPlanActive, type QuotaReservation } from '../services/tokenQuota.js';
 import { structuredBillTokens } from '../llm/gateway.js';
-import { now } from '../services/clock.js';
+import { dateKey } from '../services/clock.js';
 import { generateBrandKit, getBrandKit, approveBrandKit } from '../services/brandKit.js';
 
 const DAILY_LIMIT = 3; // 每用户每日生成次数（真实模型调用，防资损）
@@ -15,8 +15,7 @@ const EST_TOKENS = 1200; // 生成调用估算 token（structured() 暂不回传
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function dayKey(): string {
-  const d = now();
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+  return dateKey(); // 上海时区日历日（P1-4）
 }
 
 export async function brandKitRoutes(app: FastifyInstance) {

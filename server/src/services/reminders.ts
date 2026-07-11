@@ -7,7 +7,7 @@ import type { ReminderItem, ReminderView } from '../../../shared/contracts';
 import { prisma } from '../db.js';
 import { recordAudit } from './audit.js';
 import { activeCasefile, todayStr } from './casefile.js';
-import { now } from './clock.js';
+import { dateKey, hourOf, weekdayOf, dayStart, weekStart } from './clock.js';
 import type { ScheduledJob } from './scheduler.js';
 import {
   hasWechatSubscriptionQuota,
@@ -20,30 +20,7 @@ const REVIEW_DESC = '20:30 生成今日复盘。';
 const ORDER_DESC = '18:00 前补充高意向咨询记录。';
 const WEEKLY_DESC = '本周五检查成交漏斗和内容表现。';
 
-const pad2 = (n: number): string => String(n).padStart(2, '0');
-
-/** 本地 YYYY-MM-DD（与 casefile.todayStr 同口径，用于按天分桶的字符串区间扫描）。 */
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-/** DateTime → HH:mm（军令 dueAt 展示用）。 */
-function hhmm(d: Date): string {
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-}
-
-/** 当天零点（审计按天幂等的下界）。 */
-function dayStartOf(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-/** 本周一零点（周提醒按周幂等 / 本周军令与周复盘的下界）。星期一为一周起点。 */
-function weekStartOf(d: Date): Date {
-  const dow = (d.getDay() + 6) % 7; // Mon=0 … Sun=6
-  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  start.setDate(start.getDate() - dow);
-  return start;
-}
+// 日历派生（YYYY-MM-DD / HH:mm / 当天零点 / 本周一零点）一律走 clock 的 Asia/Shanghai 工具（P1-4）。
 
 /**
  * 提醒日历派生视图（GET /reminders）：纯读派生，不建表。
@@ -90,10 +67,9 @@ export async function buildReminderView(args: { tenantId: string; userId: string
  */
 export async function morningOrderReminderScan(): Promise<number> {
   const hour = Number(process.env.ORDER_REMINDER_HOUR ?? 9);
-  const d = now();
-  if (d.getHours() < hour) return 0;
+  if (hourOf() < hour) return 0;
   const today = todayStr();
-  const dayStart = dayStartOf(d);
+  const todayStart = dayStart(); // 上海时区当日 00:00（P1-4）
 
   const actives = await prisma.casefile.findMany({
     where: { status: 'active' },
@@ -109,7 +85,7 @@ export async function morningOrderReminderScan(): Promise<number> {
     });
     if (!undone) continue;
     const already = await prisma.auditLog.findFirst({
-      where: { userId: cf.userId, action: 'system.order.reminder', createdAt: { gte: dayStart } },
+      where: { userId: cf.userId, action: 'system.order.reminder', createdAt: { gte: todayStart } },
       select: { id: true },
     });
     if (already) continue;
@@ -136,17 +112,16 @@ export async function morningOrderReminderScan(): Promise<number> {
 }
 
 /**
- * 任务：周五周复盘提醒。周五（getDay()===5）且本地时间 ≥ WEEK_REVIEW_REMINDER_HOUR（默认 17）后，
+ * 任务：周五周复盘提醒。上海时区周五（weekdayOf()===5）且 ≥ WEEK_REVIEW_REMINDER_HOUR（默认 17）后，
  * 有活跃案卷、本周有军令记录、本周尚无 week 层复盘、本周未提醒过（system.weekly.review.reminder 按周幂等）→ 发提醒。
  * 复用 review 模板；有订阅额度才推送，未配静默跳过。返回本轮登记提醒的用户数。
  */
 export async function weeklyReviewReminderScan(): Promise<number> {
   const hour = Number(process.env.WEEK_REVIEW_REMINDER_HOUR ?? 17);
-  const d = now();
-  if (d.getDay() !== 5) return 0;
-  if (d.getHours() < hour) return 0;
-  const weekStart = weekStartOf(d);
-  const weekStartStr = ymd(weekStart);
+  if (weekdayOf() !== 5) return 0; // 周五（上海时区）
+  if (hourOf() < hour) return 0;
+  const weekStartInstant = weekStart(); // 本周一 00:00（上海时区，P1-4）
+  const weekStartStr = dateKey(weekStartInstant);
 
   const actives = await prisma.casefile.findMany({
     where: { status: 'active' },
@@ -167,7 +142,7 @@ export async function weeklyReviewReminderScan(): Promise<number> {
     });
     if (weekReview) continue;
     const already = await prisma.auditLog.findFirst({
-      where: { userId: cf.userId, action: 'system.weekly.review.reminder', createdAt: { gte: weekStart } },
+      where: { userId: cf.userId, action: 'system.weekly.review.reminder', createdAt: { gte: weekStartInstant } },
       select: { id: true },
     });
     if (already) continue;

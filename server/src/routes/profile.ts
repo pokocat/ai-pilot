@@ -6,7 +6,7 @@ import { computeAndStoreChart, loadChart, validatePaipanInput } from '../service
 import { fortuneDisabledGuard } from '../services/featureFlag.js';
 import { loadStrategicProfile, upsertStrategicProfile } from '../services/strategicProfile.js';
 import { cityLongitude } from '../data/cityLongitude.js';
-import { now } from '../services/clock.js';
+import { yearOf } from '../services/clock.js';
 
 export async function profileRoutes(app: FastifyInstance) {
   // 建档问卷（运营可配，首登动态渲染）
@@ -79,7 +79,7 @@ export async function profileRoutes(app: FastifyInstance) {
     }
 
     // 校验（与「送你一卦」fate 预览同一口径，抽成 validatePaipanInput；日期合法性由历法库把关）
-    const v = validatePaipanInput(b, now().getFullYear());
+    const v = validatePaipanInput(b, yearOf());
     if (!v.ok) return reply.code(400).send({ error: v.error });
     try {
       const chart = await computeAndStoreChart({
@@ -87,7 +87,7 @@ export async function profileRoutes(app: FastifyInstance) {
         userId: user.id,
         // 经度：显式传入优先；否则按出生城市查映射表（未命中不做真太阳时校正）
         input: { ...v.input, longitude: v.input.longitude ?? cityLongitude(b.birthPlace) },
-        targetYear: now().getFullYear(),
+        targetYear: yearOf(),
       });
       await recordAudit({
         tenantId: user.tenantId, userId: user.id, action: 'user.bazi.chart',
