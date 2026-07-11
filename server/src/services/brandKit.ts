@@ -51,8 +51,12 @@ function toView(row: { personaJson: unknown; voiceJson: unknown; themeJson: unkn
   };
 }
 
-/** 生成（或重生成 version+1）品牌资产包。门槛：journey ∈ {executing, reviewing}，否则 403。 */
-export async function generateBrandKit(userId: string, tenantId: string): Promise<BrandKitView> {
+/**
+ * 生成（或重生成 version+1）品牌资产包。门槛：journey ∈ {executing, reviewing}，否则 403。
+ * 计费/限流在 routes/brandKit.ts；本函数回传 billable（真实 provider 出结果=true，走 mock 模板=false），
+ * 供路由据此结算 token 额度（对齐 quickscan 口径：mock 兜底不实扣）。
+ */
+export async function generateBrandKit(userId: string, tenantId: string): Promise<{ view: BrandKitView; billable: boolean }> {
   const stage = await stageOf(userId);
   if (stage !== 'executing' && stage !== 'reviewing') throw new BrandKitLockedError();
 
@@ -70,7 +74,7 @@ export async function generateBrandKit(userId: string, tenantId: string): Promis
     update: { personaJson: data.persona, voiceJson: data.voice, themeJson: data.theme, version, generatedAt: now(), approvedAt: null },
     create: { userId, tenantId, personaJson: data.persona, voiceJson: data.voice, themeJson: data.theme, version },
   });
-  return toView(row);
+  return { view: toView(row), billable: !!ai };
 }
 
 export async function getBrandKit(userId: string): Promise<BrandKitView | null> {
