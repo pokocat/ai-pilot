@@ -197,7 +197,7 @@ export default function ThinkTank() {
     setUploading(false);
   };
 
-  const runOrganize = async (batchId: string, deep: boolean) => {
+  const runOrganize = async (batchId: string, deep: boolean, afterPayment = false, attempt = 0) => {
     if (organizing) return;
     setOrganized(null);
     setOrganizing(true);
@@ -219,7 +219,16 @@ export default function ThinkTank() {
       clearInterval(timer);
       setOrganizing(false);
       const code = (e as { code?: string; data?: { code?: string; skuKey?: string } })?.code || (e as { data?: { code?: string } })?.data?.code;
-      if (code === 'SKU_REQUIRED') openDeepPay(batchId);
+      if (code === 'SKU_REQUIRED') {
+        // 微信支付回调发放权益是异步的：requestPayment 刚 resolve 时凭据未必已到账（webhook 竞态）。
+        // 刚支付完成时先短暂重试几次，避免把「还没到账」误判成「未购买」而弹出第二次支付（重复扣费）。
+        if (afterPayment && attempt < 2) {
+          await wait(1500);
+          await runOrganize(batchId, deep, true, attempt + 1);
+          return;
+        }
+        openDeepPay(batchId);
+      }
       else s.handleApiError(e);
     }
   };
@@ -247,7 +256,7 @@ export default function ThinkTank() {
             });
           }
           closePay();
-          await runOrganize(batchId, true);
+          await runOrganize(batchId, true, true);
         } catch (e) {
           closePay();
           if ((e as { errMsg?: string })?.errMsg && /cancel/i.test((e as { errMsg?: string }).errMsg!)) { Taro.showToast({ title: '已取消支付', icon: 'none' }); return; }
@@ -389,7 +398,13 @@ export default function ThinkTank() {
           });
         }
       }
-      await api.enableModule(m.key).catch(() => { /* 购买即授予，enable 幂等失败可忽略 */ });
+      // 微信支付回调发放权益是异步的：requestPayment 刚 resolve 时权益未必已到账。此前直接吞掉
+      // enableModule 失败并无条件展示"已开通"，webhook 真正延迟时会误导用户；改为短暂重试，
+      // 仍失败才如实报错（购买本身已成功，不会重复扣费，只是提示用户稍后重试启用）。
+      for (let i = 0; i < 3; i++) {
+        try { await api.enableModule(m.key); break; }
+        catch (e) { if (i === 2) throw e; await wait(1200); }
+      }
       closePay();
       await loadModules();
       Taro.showToast({ title: '已开通', icon: 'success' });
