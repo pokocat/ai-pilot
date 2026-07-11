@@ -8,6 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-11** · **生产部署核销 `a060f7b`**：备份 `/tmp/junshi-db-backup-20260711-205252.dump`(1.3M) → deploy-prod.sh（db push 纯加法过、未用 ACCEPT_DATA_LOSS）→ `retireAgents.ts` 下架 intel/fund/model/org（enabled 余 general+4 顾问+5 创作型）→ 线上验证 health/agents 4+1/admin/deploy-version 全过。批次一（P0 五刀）+ 批次二（P1 七项 + D-8/10/11 + WO-09 端到端）自此全部上线。**weapp 端改动仍需微信 DevTools 发版方达真机**。
 - **2026-07-11** · **全局复审批次二·第二波（P1-4/6 + D-8/10/11 + WO-09 前端；主模型规划 + Opus 子代理执行）**：
   - **① P1-4 时区计算集中化**：`clock.ts` 增 Asia/Shanghai 显式日历工具（Intl 固定 timeZone），全量替换 13 个服务 + 6 个路由的裸本地 getter——裸机部署时连续天数/推送时机/日限流不再随进程 TZ 漂移；例外仅 paipan.ts（lunar 库对象 API 与出生时刻构造，非「今天」派生）。
   - **② P1-6 上下文装配并发化**：`buildGenContext` 15+ 次串行 DB 改两批 `Promise.all`（并发取数、顺序拼装，注入块文本与顺序不变），新增 `$use` 查询计数防 N+1 回归测试（实测 ~38 次，上限 50）。
