@@ -377,8 +377,9 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
     positioning: null,
     // L-6 三势：mock 给确定性研判结论，军情页市势/人势卡走真数据态
     forces: d.profile?.pain ? { shishi: { verdict: '守', note: '先守住复购，别急着抢新客' }, renshi: { verdict: '等', note: '人手紧，先练兵不硬扩' } } : null,
-    // V7-04 结构化三势：mock 恒给默认三势，战局页三势卡走真实渲染（像原型）。
-    battleForces: d.battleForces ?? DEFAULT_BATTLE_FORCES,
+    // V7-04 结构化三势：无资料时为空（战局页走 force-empty 空态引导对话，不预置结论）；
+    // 有痛点/已刷新（refreshForces 写入 d.battleForces）时才给三势，两态均可走查（P0-3）。
+    battleForces: d.battleForces ?? (d.profile?.pain ? DEFAULT_BATTLE_FORCES : []),
     battleForcesAt: null,
     sections: [
       { key: 'identity', title: '经营身份', items: identity, emptyText: '还没记录你的称呼、公司、行业和阶段。' },

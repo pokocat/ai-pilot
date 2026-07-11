@@ -38,6 +38,8 @@ export async function battleRoutes(app: FastifyInstance) {
     try {
       const forces = await generateForces({ tenantId: user.tenantId, userId: user.id });
       await reservation.settle(0, 1); // 结构化研判轻量，按 0 结算（不重复扣 token 额度）
+      // P0-3：零档案/LLM 失败 → forces=null（未落库）。不计一次刷新（不消耗每日名额），前端走空态引导卡「先与军师聊清现状」。
+      if (!forces) return { forces: [] };
       await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.forces.refresh', payload: { count: forces.length } });
       return { forces };
     } catch (e) {

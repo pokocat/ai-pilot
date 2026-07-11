@@ -46,32 +46,12 @@ function SayingLine({ html, accent }: { html: string; accent: string }) {
 // V7-04 三势结构化渲染的静态映射（天势/市势/人势 · 强/中/弱）。
 const FORCE_KIND_LABEL: Record<ForceKind, string> = { sky: '天势', market: '市势', people: '人势' };
 const FORCE_LEVEL_LABEL: Record<BattleForce['level'], string> = { strong: '强', mid: '中', weak: '弱' };
-const DEFAULT_CONCLUSION: Record<ForceKind, string> = { sky: '行业上行', market: '对手抢位', people: '团队待整' };
-// 三势全解逐字文案（设计 §4.6，默认三势）；非默认势则按 BattleForce 字段兜底派生。
-const FORCE_READ: Record<ForceKind, { title: string; body: string; tactic: string }> = {
-  sky: { title: '行业上行，可以借势', body: '外部需求还在，老板对增长、IP 和私域转化仍有焦虑。这里适合借行业势能表达专业判断，但不能追泛热点。', tactic: '借势：沉淀判断框架' },
-  market: { title: '对手抢位，不能扩量', body: '同类内容供给变多，用户不是没内容看，而是缺可信判断。单纯加发布和投流，会提高消耗但未必提高咨询质量。', tactic: '破局：案例与证据差异化' },
-  people: { title: '团队待整，先轻资产验证', body: '当前团队承载偏弱，销售、内容和复盘链路还没稳定。现在更适合创始人亲自跑小闭环，不急着扩团队。', tactic: '承载：内容 + 私域小闭环' },
-};
-// 尚未生成结构化三势时的默认展示（对齐效果图默认三势）：进战局即见三张卡，不留空态。
-const DEFAULT_FORCES: BattleForce[] = [
-  { kind: 'sky', level: 'strong', conclusion: DEFAULT_CONCLUSION.sky, tactic: '可以借势', tacticTone: 'ok', note: '少追热点，多沉淀判断框架。', strength: 75 },
-  { kind: 'market', level: 'mid', conclusion: DEFAULT_CONCLUSION.market, tactic: '不能扩量', tacticTone: 'warn', note: '老板要少误判，不缺泛内容。', strength: 45 },
-  { kind: 'people', level: 'weak', conclusion: DEFAULT_CONCLUSION.people, tactic: '轻资产验证', tacticTone: 'danger', note: '先用内容和私域跑小闭环。', strength: 35 },
-];
+// 三势全解逐条：一律从真实 BattleForce 字段派生，不预置任何结论文案（P0-3：资料不足走空态引导对话）。
 function forceRead(f: BattleForce): { label: string; title: string; body: string; tactic: string } {
   const label = `${FORCE_KIND_LABEL[f.kind]} · ${FORCE_LEVEL_LABEL[f.level]}`;
-  if (f.conclusion === DEFAULT_CONCLUSION[f.kind]) return { label, ...FORCE_READ[f.kind] };
   return { label, title: `${f.conclusion}，${f.tactic}`, body: f.note, tactic: `打法：${f.tactic}` };
 }
 function forceSynthesis(forces: BattleForce[]): { title: string; body: string } {
-  const allDefault = forces.length === 3 && forces.every((f) => f.conclusion === DEFAULT_CONCLUSION[f.kind]);
-  if (allDefault) {
-    return {
-      title: '合参结论：可借势，但不能扩量',
-      body: '本周打法不是全面进攻，而是“补证据、修案例、少量主题验证”。先把信任链路跑通，再把有效打法同步到执行页和报告。',
-    };
-  }
   const strong = forces.find((f) => f.level === 'strong');
   const weak = forces.find((f) => f.level === 'weak');
   const head = [strong ? `${FORCE_KIND_LABEL[strong.kind]}可借` : '', weak ? `${FORCE_KIND_LABEL[weak.kind]}宜守` : ''].filter(Boolean).join('，');
@@ -99,8 +79,8 @@ export default function Home() {
   const [exceptionOpen, setExceptionOpen] = useState(false);
   const me = s.me();
   const und = me?.understanding;
-  // 有真实三势用真实，否则用默认三卡（进战局即见三势，不展示空状态）。刷新/认可后回读 /me 覆盖为真实结论。
-  const forces: BattleForce[] = und?.battleForces?.length ? und.battleForces : DEFAULT_FORCES;
+  // 三势一律来自真实军师档案（und.battleForces）；为空时走 force-empty 空态引导对话，绝不预置结论（P0-3）。
+  const forces: BattleForce[] = und?.battleForces ?? [];
 
   useDidShow(() => {
     s.setTab(1);

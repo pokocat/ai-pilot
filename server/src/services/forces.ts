@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { now } from './clock.js';
 import { structured } from '../llm/gateway.js';
+import { isAiTestMode } from '../env.js';
 import type { BattleForce, ForceLevel } from '../../../shared/contracts';
 
 // level → strength（纯代码映射，对齐效果图 75/45/35；可按行业基准/回填趋势 ±5 微调，仍不让模型自算）。
@@ -43,26 +44,41 @@ export async function loadBattleForces(userId: string): Promise<{ forces: Battle
   return { forces: raw.battle, at: raw.battleAt ?? null };
 }
 
+// LLM 只给出部分势时的诚实占位（不编造结论文本，如实标注「信息不足」）。
+const PLACEHOLDER_BY_KIND: Record<BattleForce['kind'], { conclusion: string; tactic: string; note: string }> = {
+  sky: { conclusion: '待研判', tactic: '先补档案', note: '外部大势信息不足，补充后再研判。' },
+  market: { conclusion: '待研判', tactic: '先补档案', note: '竞争/需求信息不足，补充后再研判。' },
+  people: { conclusion: '待研判', tactic: '先补档案', note: '团队/承载信息不足，补充后再研判。' },
+};
+
 function applyStrength(forces: { kind: BattleForce['kind']; level: ForceLevel; conclusion: string; tactic: string; tacticTone: BattleForce['tacticTone']; note: string }[]): BattleForce[] {
   const byKind = new Map(forces.map((f) => [f.kind, f]));
-  // 保证三势齐全、顺序稳定（sky→market→people），缺的用默认补。
+  // 保证三势齐全、顺序稳定（sky→market→people）；缺的用「诚实占位」补（不借 DEFAULT_FORCES 的捏造结论）。
   return (['sky', 'market', 'people'] as const).map((kind) => {
-    const f = byKind.get(kind) ?? DEFAULT_FORCES.find((d) => d.kind === kind)!;
+    const ph = PLACEHOLDER_BY_KIND[kind];
+    const f = byKind.get(kind);
+    if (!f) return { kind, level: 'mid' as ForceLevel, conclusion: ph.conclusion, tactic: ph.tactic, tacticTone: 'warn', note: ph.note, strength: STRENGTH_BY_LEVEL.mid };
     const level = (f.level ?? 'mid') as ForceLevel;
     return {
       kind,
       level,
-      conclusion: f.conclusion || DEFAULT_FORCES.find((d) => d.kind === kind)!.conclusion,
-      tactic: f.tactic || DEFAULT_FORCES.find((d) => d.kind === kind)!.tactic,
+      conclusion: f.conclusion || ph.conclusion,
+      tactic: f.tactic || ph.tactic,
       tacticTone: f.tacticTone ?? 'ok',
-      note: f.note || DEFAULT_FORCES.find((d) => d.kind === kind)!.note,
+      note: f.note || ph.note,
       strength: STRENGTH_BY_LEVEL[level] ?? 45,
     };
   });
 }
 
-/** 生成并落库结构化三势。输入=战略档案 + 最新案卷判断 + 行业；LLM 不可用时用确定性兜底。 */
-export async function generateForces(args: { tenantId: string; userId: string }): Promise<BattleForce[]> {
+/**
+ * 生成并落库结构化三势。输入=战略档案 + 最新案卷判断 + 行业。
+ * P0-3（服务端）：拒绝捏造——
+ *  - 零档案（ctxLines 为空）：不调 LLM、不落库，返回 null（前端走空态引导卡）。
+ *  - LLM 失败：生产环境返回 null 不落库（绝不把 DEFAULT_FORCES 捏造结论写进档案）；
+ *    仅 mock/test（isAiTestMode）走 DEFAULT_FORCES 确定性兜底，保证测试可复现。
+ */
+export async function generateForces(args: { tenantId: string; userId: string }): Promise<BattleForce[] | null> {
   const { tenantId, userId } = args;
   const [sp, cf, tenant] = await Promise.all([
     prisma.strategicProfile.findUnique({ where: { userId }, select: { mainContradiction: true, positioning: true, stage: true, track: true } }),
@@ -76,9 +92,14 @@ export async function generateForces(args: { tenantId: string; userId: string })
     sp?.stage ? `经营阶段：${sp.stage}` : '',
     cf?.judgment ? `当前案卷判断：${cf.judgment}` : '',
   ].filter(Boolean).join('\n');
+  // 零档案：没有任何可研判的现状 → 不臆造三势（不调 LLM、不落库）。
+  if (!ctxLines) return null;
 
-  const parsed = await structured(ForcesSchema, { system: FORCES_SYS, user: ctxLines || '暂无更多档案，按通用商业情形研判。', maxChars: 1500 }).catch(() => null);
-  const forces = parsed?.forces?.length ? applyStrength(parsed.forces) : DEFAULT_FORCES;
+  const parsed = await structured(ForcesSchema, { system: FORCES_SYS, user: ctxLines, maxChars: 1500 }).catch(() => null);
+  let forces: BattleForce[];
+  if (parsed?.forces?.length) forces = applyStrength(parsed.forces);
+  else if (isAiTestMode()) forces = DEFAULT_FORCES; // mock/test 确定性兜底
+  else return null; // 生产：LLM 失败不落库捏造默认
 
   const existing = await prisma.strategicProfile.findUnique({ where: { userId }, select: { forcesJson: true } });
   const merged = { ...((existing?.forcesJson as Record<string, unknown> | null) ?? {}), battle: forces, battleAt: now().toISOString() };
