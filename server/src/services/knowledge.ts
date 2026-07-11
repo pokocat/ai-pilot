@@ -252,7 +252,8 @@ export async function listKnowledgeDocs(tenantId: string, userId: string, filter
     kind: r.kind,
     title: r.title,
     sourceType: r.sourceType,
-    status: r.status,
+    status: r.status, // staged 解析失败的项 status 已如实为 failed（见 ingestStagedFile），此处原样透出
+    stage: r.stage,
     fileName: r.fileName,
     fileType: r.fileType,
     fileSize: r.fileSize,

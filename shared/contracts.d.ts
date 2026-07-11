@@ -559,7 +559,8 @@ export interface KnowledgeDocRow {
   kind: string;
   title: string | null;
   sourceType: string;        // conversation | upload | deliverable | manual
-  status: string;            // ready | parsing | embedding | failed
+  status: string;            // ready | parsing | embedding | failed（staged 解析失败如实为 failed）
+  stage: string;             // staging 待整理 | optimized 已优化 | confirmed 知识库（前端标注，不过滤）
   fileName: string | null;
   fileType: string | null;   // pdf | docx | xlsx | csv | md | txt
   fileSize: number | null;   // 字节
@@ -1184,19 +1185,32 @@ export interface OrderStructuredFields {
 export type KnowledgeStage = 'staging' | 'optimized' | 'confirmed';
 export interface KnowledgePipelineFolder { key: string; label: string; count: number; stage: KnowledgeStage; }
 export interface KnowledgeBatchTypeStat { label: string; count: number; }
+/** 批次内单份文件（前端「未整理批次」逐份清单）。 */
+export interface KnowledgeBatchFile { id: string; fileName: string; status: string; fileSize: number | null; }
 export interface KnowledgeBatch {
   id: string; count: number;
   status: 'uploaded' | 'organizing' | 'organized';
   typeStats: KnowledgeBatchTypeStat[];
+  files: KnowledgeBatchFile[]; // 逐份清单（id/文件名/解析状态/字节）
 }
+/** 整理后逐份归类结果（organize/深度整理回传，前端「已优化」区逐份渲染）。 */
+export interface OrganizeItem { id: string; fileName: string; category: string; summary: string; isDup: boolean; }
 export interface KnowledgePipelineView {
   counts: { staging: number; optimized: number; confirmed: number };
   quota: { usedDocs: number; freeDocs: number; usedBytes: number; freeBytes: number };
-  folders: KnowledgePipelineFolder[];
+  folders: KnowledgePipelineFolder[]; // 含 confirmed + optimized 两阶段（按 stage 区分）
   batches: KnowledgeBatch[];
+  optimizedItems: OrganizeItem[]; // 已优化区持久数据源（从库内 tagsJson 重建，刷新后仍在）
 }
 /** POST /knowledge/organize 结果（AI 粗分 + 去重）。 */
-export interface OrganizeResult { batchId: string; status: 'organized' | 'organizing'; total: number; dedup: number; folders: KnowledgePipelineFolder[]; deep?: boolean; }
+export interface OrganizeResult {
+  batchId: string; status: 'organized' | 'organizing'; total: number; dedup: number;
+  folders: KnowledgePipelineFolder[];
+  items: OrganizeItem[]; // 逐份归类（分类 + 摘要 + 去重标记）
+  deep?: boolean;
+  reportId?: string;      // 深度整理产出的《资料整理报告》id（前端跳方案详情）
+  reportVersion?: number; // 该报告版本号
+}
 /** POST /knowledge/confirm 结果（optimized/staging → confirmed 并嵌入）。 */
 export interface ConfirmResult { count: number; ingested: number; ids: string[]; }
 /** 智库上传（staged=true 走待整理区）返回。 */

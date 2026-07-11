@@ -6,6 +6,7 @@ import { prisma } from '../src/db.ts';
 import { reviewStreak, reviewBriefing } from '../src/services/reviewLog.ts';
 import { scanReviewGaps } from '../src/services/scheduler.ts';
 import { todayStr } from '../src/services/casefile.ts';
+import { dateKey, runWithNow } from '../src/services/clock.ts';
 
 before(async () => {
   await getApp();
@@ -17,9 +18,11 @@ after(async () => {
   await closeApp();
 });
 
-function isoDaysAgo(n: number): string {
-  const d = new Date(Date.now() - n * 86400_000);
-  return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+// 服务端一切日历语义按 Asia/Shanghai（P1-4），造数据也必须按上海日历日派生——
+// 此前用本地 getFullYear/getMonth/getDate，机器 TZ 落后上海时（如美西下午起）「昨天」会差一天，streak 断言随执行日期炸。
+// 上海无夏令时，回退 24h 恒落到前一上海日历日。
+function isoDaysAgo(n: number, from: Date = new Date()): string {
+  return dateKey(new Date(from.getTime() - n * 86400_000));
 }
 
 const PLAN = deliverable('破局方案', [
@@ -56,21 +59,25 @@ test('发起复盘：day 层快照当日军令/回填事实；同日重复发起
 });
 
 test('连续复盘天数：昨天+前天有复盘、今天未复盘 → 2；断一天归零重计', async () => {
+  // 固定时钟（runWithNow 注入，参照 planExpiry 手法）：T = 上海 2026-03-10 12:00，测试不依赖执行日期/机器 TZ。
+  const T = new Date('2026-03-10T04:00:00Z');
+  const dk = (n: number) => isoDaysAgo(n, T); // 相对 T 的上海日历日
+
   const token = await login(uniquePhone(), '连续用户');
   const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
   const mk = (date: string) => prisma.reviewLog.create({ data: { tenantId: user.tenantId, userId: user.id, layer: 'day', date } });
-  await mk(isoDaysAgo(1));
-  await mk(isoDaysAgo(2));
-  assert.equal(await reviewStreak(user.id), 2, '今天没复盘不打断（今晚可补）');
+  await mk(dk(1));
+  await mk(dk(2));
+  assert.equal(await runWithNow(T, () => reviewStreak(user.id)), 2, '今天没复盘不打断（今晚可补）');
 
-  await mk(isoDaysAgo(0));
-  assert.equal(await reviewStreak(user.id), 3);
+  await mk(dk(0));
+  assert.equal(await runWithNow(T, () => reviewStreak(user.id)), 3);
 
   // 断档用户：只有 3 天前 → streak 0
   const token2 = await login(uniquePhone(), '断档用户');
   const u2 = await prisma.user.findFirstOrThrow({ where: { id: token2 } });
-  await prisma.reviewLog.create({ data: { tenantId: u2.tenantId, userId: u2.id, layer: 'day', date: isoDaysAgo(3) } });
-  assert.equal(await reviewStreak(u2.id), 0);
+  await prisma.reviewLog.create({ data: { tenantId: u2.tenantId, userId: u2.id, layer: 'day', date: dk(3) } });
+  assert.equal(await runWithNow(T, () => reviewStreak(u2.id)), 0);
 });
 
 test('注入：复盘账本块带连续天数与事实快照；GET /reviews 返回列表+streak', async () => {

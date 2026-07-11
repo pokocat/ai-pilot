@@ -4,8 +4,14 @@ import type { FastifyInstance } from 'fastify';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { buildPipeline, organizeBatch, confirmItems, deepOrganize } from '../services/knowledgePipeline.js';
+import { reserveQuota, assertPlanActive, type QuotaReservation } from '../services/tokenQuota.js';
+import { structuredBillTokens } from '../llm/gateway.js';
 
 type DomainError = Error & { statusCode?: number; code?: string; skuKey?: string };
+
+// 深度整理精炼摘要的 token 轴计费口径（对齐 quickscan/经营体检付费路径：ratio 0.3 + 保守结算 + 失败退款）。
+const DEEP_RATIO = 0.3;
+const DEEP_EST_TOKENS = 600; // 每轮精炼摘要估算 token（structured 暂不回传真实用量，走保守估算）
 
 export async function knowledgePipelineRoutes(app: FastifyInstance) {
   // 管道总览：counts / quota / folders / batches（全部服务端计数）。
@@ -49,11 +55,18 @@ export async function knowledgePipelineRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const batchId = (req.body?.batchId || '').trim();
     if (!batchId) return reply.code(400).send({ error: '缺少 batchId' });
+    let reservation: QuotaReservation | undefined;
     try {
+      // ¥39 SKU 核销在 service 内（原子、幂等）；此处仅对精炼摘要的 LLM 调用接 token 额度。
+      await assertPlanActive(user.id); // 套餐过期 → PLAN_EXPIRED(403)
+      reservation = await reserveQuota(user.id, DEEP_RATIO);
       const r = await deepOrganize({ tenantId: user.tenantId, userId: user.id, batchId });
-      await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.knowledge.deepOrganize', payload: { batchId } });
+      // 保守结算：校验通过按定额、真实调用但失败按轮次、mock（attempts=0）不实扣。
+      await reservation.settle(structuredBillTokens({ ok: r.meterOk, attempts: r.meterAttempts, estTokens: DEEP_EST_TOKENS }), DEEP_RATIO);
+      await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.knowledge.deepOrganize', payload: { batchId, reportId: r.reportId } });
       return r;
     } catch (e) {
+      if (reservation) await reservation.refund().catch(() => {});
       const err = e as DomainError;
       return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code, skuKey: err.skuKey });
     }
