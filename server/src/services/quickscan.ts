@@ -2,7 +2,7 @@
 // LLM 走统一 structured() 原语（Zod schema 强约束三字段）；无真实 provider（测试/mock）→ 确定性模板兜底。
 // 计费/限流/回填在 routes/quickscan.ts；本模块只负责「三问 → 三字段」的确定性可测转换。
 import { z } from 'zod';
-import { structured } from '../llm/gateway.js';
+import { structuredMetered } from '../llm/gateway.js';
 import type { QuickScanRequest, QuickScanResult } from '../../../shared/contracts';
 
 // 专用小 prompt（≤2KB，不加载总军师 V6 全文）：只吃三条输入，只吐三字段，禁玄学/空话。
@@ -34,12 +34,15 @@ export function mockQuickScan(req: QuickScanRequest): QuickScanResult {
 }
 
 /**
- * 跑一次速诊：真实 provider 就绪 → structured() 出三字段（billable=true，路由据此计费）；
- * 否则 → 确定性模板（billable=false，不实扣）。cardUrl 由 PR-B2 的分享卡链路补，暂 null。
+ * 跑一次速诊：真实 provider 就绪 → structured() 出三字段；否则 → 确定性模板。cardUrl 由 PR-B2 的分享卡链路补，暂 null。
+ * P1-3 计费口径：回传 { ok, attempts }——ok=真实模型出了合规结果；attempts=已发生的真实调用轮次。
+ * 路由据此结算：成功按定额、校验失败按 attempts 保守扣（不再因 mock 兜底而全额退款掩盖已花的真实调用）。
  */
-export async function runQuickScan(req: QuickScanRequest): Promise<{ result: QuickScanResult; billable: boolean }> {
+export async function runQuickScan(
+  req: QuickScanRequest,
+): Promise<{ result: QuickScanResult; ok: boolean; attempts: number }> {
   const user = `行业：${req.industry}\n年营收段：${req.revenueBand}\n最痛的一件事：${req.pain.trim().slice(0, 300)}`;
-  const ai = await structured(QuickScanSchema, { system: QUICKSCAN_SYS, user, maxChars: 1000 });
-  if (!ai) return { result: mockQuickScan(req), billable: false };
-  return { result: { contradiction: ai.contradiction, judgement: ai.judgement, firstMove: ai.firstMove, cardUrl: null }, billable: true };
+  const { data: ai, attempts } = await structuredMetered(QuickScanSchema, { system: QUICKSCAN_SYS, user, maxChars: 1000 });
+  if (!ai) return { result: mockQuickScan(req), ok: false, attempts };
+  return { result: { contradiction: ai.contradiction, judgement: ai.judgement, firstMove: ai.firstMove, cardUrl: null }, ok: true, attempts };
 }

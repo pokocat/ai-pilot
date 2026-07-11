@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { prisma } from '../db.js';
 import { now } from './clock.js';
-import { structured } from '../llm/gateway.js';
+import { structuredMetered } from '../llm/gateway.js';
 import { loadStrategicProfile } from './strategicProfile.js';
 import type { BrandKitView } from '../../../shared/contracts';
 
@@ -53,10 +53,13 @@ function toView(row: { personaJson: unknown; voiceJson: unknown; themeJson: unkn
 
 /**
  * 生成（或重生成 version+1）品牌资产包。门槛：journey ∈ {executing, reviewing}，否则 403。
- * 计费/限流在 routes/brandKit.ts；本函数回传 billable（真实 provider 出结果=true，走 mock 模板=false），
- * 供路由据此结算 token 额度（对齐 quickscan 口径：mock 兜底不实扣）。
+ * 计费/限流在 routes/brandKit.ts；本函数回传 { ok, attempts }（P1-3 计费口径）：
+ * ok=真实模型出了合规结果；attempts=已发生的真实调用轮次。路由据此结算（成功定额，校验失败按轮次保守扣，mock 不实扣）。
  */
-export async function generateBrandKit(userId: string, tenantId: string): Promise<{ view: BrandKitView; billable: boolean }> {
+export async function generateBrandKit(
+  userId: string,
+  tenantId: string,
+): Promise<{ view: BrandKitView; ok: boolean; attempts: number }> {
   const stage = await stageOf(userId);
   if (stage !== 'executing' && stage !== 'reviewing') throw new BrandKitLockedError();
 
@@ -64,7 +67,7 @@ export async function generateBrandKit(userId: string, tenantId: string): Promis
   const profile = await prisma.profile.findFirst({ where: { tenantId }, orderBy: { updatedAt: 'desc' } });
   const industry = profile?.industry || '你的行业';
   const input = `行业：${industry}\n战略定位：${sp?.positioning ?? ''}\n主要矛盾：${sp?.mainContradiction ?? ''}\n主攻赛道：${sp?.track ?? ''}\n老板故事：${sp?.narrative ?? ''}`;
-  const ai = await structured(BrandKitSchema, { system: BRANDKIT_SYS, user: input, maxChars: 2000 });
+  const { data: ai, attempts } = await structuredMetered(BrandKitSchema, { system: BRANDKIT_SYS, user: input, maxChars: 2000 });
   const data = ai ?? mockBrandKit(industry, sp?.mainContradiction ?? '');
 
   const existing = await prisma.brandKit.findUnique({ where: { userId }, select: { version: true } });
@@ -74,7 +77,7 @@ export async function generateBrandKit(userId: string, tenantId: string): Promis
     update: { personaJson: data.persona, voiceJson: data.voice, themeJson: data.theme, version, generatedAt: now(), approvedAt: null },
     create: { userId, tenantId, personaJson: data.persona, voiceJson: data.voice, themeJson: data.theme, version },
   });
-  return { view: toView(row), billable: !!ai };
+  return { view: toView(row), ok: !!ai, attempts };
 }
 
 export async function getBrandKit(userId: string): Promise<BrandKitView | null> {

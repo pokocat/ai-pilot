@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { resolveUser } from '../services/context.js';
 import { cacheGet, cacheSet } from '../services/cache.js';
 import { reserveQuota, assertPlanActive, type QuotaReservation } from '../services/tokenQuota.js';
+import { structuredBillTokens } from '../llm/gateway.js';
 import { now } from '../services/clock.js';
 import { generateBrandKit, getBrandKit, approveBrandKit } from '../services/brandKit.js';
 
@@ -39,8 +40,9 @@ export async function brandKitRoutes(app: FastifyInstance) {
     let reservation: QuotaReservation | undefined;
     try {
       reservation = await reserveQuota(user.id, RATIO);
-      const { view, billable } = await generateBrandKit(user.id, user.tenantId); // 未到执行阶段 → BrandKitLockedError(403)
-      await reservation.settle(billable ? EST_TOKENS : 0, RATIO);
+      const { view, ok, attempts } = await generateBrandKit(user.id, user.tenantId); // 未到执行阶段 → BrandKitLockedError(403)
+      // P1-3：校验失败但已真实调用（attempts>0）时按轮次保守结算，不再因 mock 兜底而全额退。
+      await reservation.settle(structuredBillTokens({ ok, attempts, estTokens: EST_TOKENS }), RATIO);
       // 3) 计一次限流（仅成功后）
       await cacheSet(rlKey, used + 1, DAY_MS);
       return view;

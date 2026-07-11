@@ -7,6 +7,7 @@ import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { cacheGet, cacheSet } from '../services/cache.js';
 import { reserveQuota, assertPlanActive, type QuotaReservation } from '../services/tokenQuota.js';
+import { structuredBillTokens } from '../llm/gateway.js';
 import { runQuickScan } from '../services/quickscan.js';
 import { now } from '../services/clock.js';
 import type { QuickScanRequest } from '../../../shared/contracts';
@@ -56,8 +57,9 @@ export async function quickscanRoutes(app: FastifyInstance) {
     let reservation: QuotaReservation | undefined;
     try {
       reservation = await reserveQuota(user.id, RATIO, { grace: 'quickscan' });
-      const { result, billable } = await runQuickScan({ industry, revenueBand, pain });
-      await reservation.settle(billable ? EST_TOKENS : 0, RATIO);
+      const { result, ok, attempts } = await runQuickScan({ industry, revenueBand, pain });
+      // P1-3：校验失败但已真实调用（attempts>0）时按轮次保守结算，不再因 mock 兜底而全额退。
+      await reservation.settle(structuredBillTokens({ ok, attempts, estTokens: EST_TOKENS }), RATIO);
       // 3) 速诊即建档（空则回填）
       await backfillProfile(user.tenantId, { industry, stage: revenueBand, pain });
       // 4) 计一次限流（仅成功后）

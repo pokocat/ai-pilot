@@ -680,31 +680,67 @@ export function coerceJson<S extends z.ZodTypeAny>(schema: S, text: string): { o
 }
 
 /**
+ * P1-3 计费口径：结构化生成的「已发生调用信息」。
+ * - data：校验通过的结果（成功）；无 live provider / 两轮都没过校验 → null。
+ * - attempts：本次实际向真实 provider 发出的调用轮次（0 = 无 live provider，从未触达；1 = 首轮即过或首轮就抛；2 = 走了修复轮）。
+ * - live：本次是否触达了真实 provider（据此区分「mock 不计费」与「真实调用但校验失败仍需保守结算」）。
+ *
+ * 关键：校验失败时 attempts>0 —— 真实 provider 调用已经发生并产生成本，调用方必须按 attempts 保守结算，
+ * 不能因为 data=null 就全额退款（这正是 P1-3 要堵的资损口子：过去 structured() 只回 null，调用方 settle(0)）。
+ */
+export interface StructuredOutcome<T> { data: T | null; attempts: number; live: boolean }
+
+export async function structuredMetered<S extends z.ZodTypeAny>(
+  schema: S,
+  o: { system: string; user: string; maxChars?: number; temperature?: number; model?: string },
+): Promise<StructuredOutcome<z.output<S>>> {
+  let attempts = 0;
+  let live = false;
+  try {
+    const base = await getAiConfig();
+    const lp = liveProvider(base);
+    if (!lp) return { data: null, attempts: 0, live: false };
+    live = true;
+    const cfg: ResolvedAiConfig = (o.temperature != null || o.model)
+      ? { ...base, ...(o.temperature != null ? { temperature: o.temperature } : {}), ...(o.model ? { model: o.model } : {}) }
+      : base;
+    const user = o.user.slice(0, o.maxChars ?? 4000);
+    // 调用前自增：即使 rawText 抛错（超时/5xx），provider 侧可能已计费——保守计入本轮。
+    attempts++;
+    const first = coerceJson(schema, await rawText(cfg, lp, o.system, user));
+    if (first.ok) return { data: first.data, attempts, live };
+    // 一轮修复：把校验错误回喂，要求只输出合规 JSON。
+    const repairSys = `${o.system}\n\n【纠错】上次输出无法通过校验：${first.error}。请只输出严格符合要求的 JSON，不要任何解释或多余文字。`;
+    attempts++;
+    const second = coerceJson(schema, await rawText(cfg, lp, repairSys, user));
+    return { data: second.ok ? second.data : null, attempts, live };
+  } catch (err) {
+    console.error('[gateway] structured failed:', (err as Error).message);
+    return { data: null, attempts, live };
+  }
+}
+
+/**
+ * P1-3 保守结算口径（纯函数，供路由层把 structuredMetered 结果换算成要 settle 的 token 数；单测锁定）：
+ * - ok（校验通过）：按定额 estTokens 结算——「成功时不变」，与既有 quickscan/brandKit 口径一致。
+ * - 失败但已发生真实调用（attempts>0）：按 attempts × estTokens 保守扣，覆盖 1-2 轮已花的真实成本，不全额退。
+ * - attempts=0（无 live provider / mock 兜底）：0，不实扣。
+ */
+export function structuredBillTokens(o: { ok: boolean; attempts: number; estTokens: number }): number {
+  if (o.ok) return o.estTokens;
+  return Math.max(0, o.attempts) * o.estTokens;
+}
+
+/**
  * 结构化生成：文本 → schema 校验；失败则把校验错误回喂、只修复一轮；仍失败返回 null（调用方兜底）。
  * 无真实 provider（含测试/mock）或任何异常 → null，绝不伪造（沿用 extractInsights/completeJson 口径）。
+ * 非计费消费者（forces/casefile/knowledgePipeline 等）用这个薄封装即可；计费路径改用 structuredMetered 拿 attempts。
  */
 export async function structured<S extends z.ZodTypeAny>(
   schema: S,
   o: { system: string; user: string; maxChars?: number; temperature?: number; model?: string },
 ): Promise<z.output<S> | null> {
-  try {
-    const base = await getAiConfig();
-    const live = liveProvider(base);
-    if (!live) return null;
-    const cfg: ResolvedAiConfig = (o.temperature != null || o.model)
-      ? { ...base, ...(o.temperature != null ? { temperature: o.temperature } : {}), ...(o.model ? { model: o.model } : {}) }
-      : base;
-    const user = o.user.slice(0, o.maxChars ?? 4000);
-    const first = coerceJson(schema, await rawText(cfg, live, o.system, user));
-    if (first.ok) return first.data;
-    // 一轮修复：把校验错误回喂，要求只输出合规 JSON。
-    const repairSys = `${o.system}\n\n【纠错】上次输出无法通过校验：${first.error}。请只输出严格符合要求的 JSON，不要任何解释或多余文字。`;
-    const second = coerceJson(schema, await rawText(cfg, live, repairSys, user));
-    return second.ok ? second.data : null;
-  } catch (err) {
-    console.error('[gateway] structured failed:', (err as Error).message);
-    return null;
-  }
+  return (await structuredMetered(schema, o)).data;
 }
 
 /** 通用 JSON 补全（评测评委等内部用）：用就绪模型发一次并解析 JSON；未就绪（mock）/失败返回 null。 */

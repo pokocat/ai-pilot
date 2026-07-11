@@ -4,7 +4,7 @@
 //   cd server && node --import tsx --test test/structured.test.ts
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { coerceJson, ProphecyResult, extractProphecies } from '../src/llm/gateway.js';
+import { coerceJson, ProphecyResult, extractProphecies, structuredBillTokens } from '../src/llm/gateway.js';
 
 describe('coerceJson × ProphecyResult（纯逻辑）', () => {
   test('合法两条 → 归一化（trim/截断）+ 保留 dueDate；basis 缺省空串', () => {
@@ -81,6 +81,20 @@ describe('coerceJson × ProphecyResult（纯逻辑）', () => {
     const r = coerceJson(ProphecyResult, '军师这轮没有给出预言。');
     assert.equal(r.ok, false);
     if (!r.ok) assert.match(r.error, /JSON/);
+  });
+});
+
+describe('P1-3 structuredBillTokens 保守结算口径（纯函数）', () => {
+  test('成功 → 定额 estTokens（成功时不变）', () => {
+    assert.equal(structuredBillTokens({ ok: true, attempts: 1, estTokens: 800 }), 800);
+    assert.equal(structuredBillTokens({ ok: true, attempts: 2, estTokens: 800 }), 800); // 成功即定额，与轮次无关
+  });
+  test('失败但已真实调用 → attempts × estTokens（不全额退）', () => {
+    assert.equal(structuredBillTokens({ ok: false, attempts: 1, estTokens: 800 }), 800);
+    assert.equal(structuredBillTokens({ ok: false, attempts: 2, estTokens: 800 }), 1600);
+  });
+  test('无 live provider（attempts=0）→ 0，不实扣', () => {
+    assert.equal(structuredBillTokens({ ok: false, attempts: 0, estTokens: 800 }), 0);
   });
 });
 
