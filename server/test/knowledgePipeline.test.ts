@@ -139,6 +139,48 @@ test('deep-organize 未购 → 402 SKU_REQUIRED；已购 → 执行', async () =
   assert.ok(items.some((i) => Array.isArray(i.tagsJson) && (i.tagsJson as string[]).includes('深度整理')), '深度整理应打标');
 });
 
+// 5b) 深度整理是一次性服务：用过一次后，同一笔购买不能无限复用（回归：此前从不核销）。
+test('deep-organize 用过一次后核销，同一批凭据不能重复使用', async () => {
+  const batchId1 = 'batch-deep-2a';
+  const batchId2 = 'batch-deep-2b';
+  await ingestStagedFile({ tenantId: tenantA, userId: userA, fileName: '资料一.txt', mime: 'text/plain', buf: buf('第一批 素材'), batchId: batchId1 });
+  await ingestStagedFile({ tenantId: tenantA, userId: userA, fileName: '资料二.txt', mime: 'text/plain', buf: buf('第二批 素材'), batchId: batchId2 });
+  await prisma.userModule.create({ data: { tenantId: tenantA, userId: userA, moduleKey: 'sku:deep-organize', source: 'purchase' } });
+
+  const first = await deepOrganize({ tenantId: tenantA, userId: userA, batchId: batchId1 });
+  assert.equal(first.deep, true);
+
+  // 第二批复用同一笔已核销的凭据应被拒绝（402），而不是免费无限执行。
+  await assert.rejects(
+    () => deepOrganize({ tenantId: tenantA, userId: userA, batchId: batchId2 }),
+    (e: any) => e.statusCode === 402 && e.code === 'SKU_REQUIRED',
+  );
+
+  // 再次购买后凭据恢复可用。
+  await prisma.userModule.upsert({
+    where: { userId_moduleKey: { userId: userA, moduleKey: 'sku:deep-organize' } },
+    update: { enabled: true },
+    create: { tenantId: tenantA, userId: userA, moduleKey: 'sku:deep-organize', source: 'purchase' },
+  });
+  const second = await deepOrganize({ tenantId: tenantA, userId: userA, batchId: batchId2 });
+  assert.equal(second.deep, true);
+});
+
+// 5c) 执行失败不应白白核销凭据：批次不存在时应报错且凭据仍可用。
+test('deep-organize 执行失败时不核销凭据，允许重试', async () => {
+  await prisma.userModule.create({ data: { tenantId: tenantA, userId: userA, moduleKey: 'sku:deep-organize', source: 'purchase' } });
+
+  await assert.rejects(
+    () => deepOrganize({ tenantId: tenantA, userId: userA, batchId: 'batch-does-not-exist' }),
+    (e: any) => e.code === 'BATCH_NOT_FOUND',
+  );
+
+  const batchId = 'batch-deep-retry';
+  await ingestStagedFile({ tenantId: tenantA, userId: userA, fileName: '重试资料.txt', mime: 'text/plain', buf: buf('重试 素材'), batchId });
+  const res = await deepOrganize({ tenantId: tenantA, userId: userA, batchId });
+  assert.equal(res.deep, true, '凭据应仍然可用（失败的那次不应核销）');
+});
+
 // 6) TC-G 跨租户隔离：B 看不到 A 的 pipeline/staging，也不能整理/确认 A 的批次。
 test('跨租户隔离：B 看不到也动不了 A 的待整理', async () => {
   const batchId = 'batch-tcg-1';

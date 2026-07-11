@@ -344,30 +344,41 @@ export async function confirmItems(args: { tenantId: string; userId: string; ids
 export async function deepOrganize(args: { tenantId: string; userId: string; batchId: string }): Promise<OrganizeResult & { deep: true }> {
   const { tenantId, userId, batchId } = args;
 
-  const purchased = await prisma.userModule.findFirst({
-    where: { tenantId, userId, moduleKey: DEEP_ORGANIZE_MODULE_KEY },
-    select: { id: true },
+  // 原子核销一次性凭据：仅当仍处于「已购未核销」(enabled=true) 时才可核销，
+  // 防止同一笔 ¥39 购买被无限复用（此前只判存在、从不核销，见 TODO.md 2026-07-09）。
+  const consumed = await prisma.userModule.updateMany({
+    where: { tenantId, userId, moduleKey: DEEP_ORGANIZE_MODULE_KEY, enabled: true },
+    data: { enabled: false },
   });
-  if (!purchased) {
+  if (consumed.count === 0) {
     throw pipelineError('深度整理需先购买', 402, 'SKU_REQUIRED', { skuKey: 'deep-organize' });
   }
 
-  // 已购：先跑标准粗分，再对本批 optimized 条目补一层「深度」摘要/标签（mock 下确定性）。
-  const base = await organizeBatch({ tenantId, userId, batchId, deep: true });
+  try {
+    // 已购：先跑标准粗分，再对本批 optimized 条目补一层「深度」摘要/标签（mock 下确定性）。
+    const base = await organizeBatch({ tenantId, userId, batchId, deep: true });
 
-  const optimized = await prisma.knowledgeItem.findMany({
-    where: { tenantId, userId, batchId, stage: 'optimized' },
-  });
-  for (const it of optimized) {
-    const existing = Array.isArray(it.tagsJson) ? (it.tagsJson as string[]) : [];
-    if (!existing.includes('深度整理')) {
-      await prisma.knowledgeItem.update({
-        where: { id: it.id },
-        data: { tagsJson: [...existing, '深度整理'] },
-      });
+    const optimized = await prisma.knowledgeItem.findMany({
+      where: { tenantId, userId, batchId, stage: 'optimized' },
+    });
+    for (const it of optimized) {
+      const existing = Array.isArray(it.tagsJson) ? (it.tagsJson as string[]) : [];
+      if (!existing.includes('深度整理')) {
+        await prisma.knowledgeItem.update({
+          where: { id: it.id },
+          data: { tagsJson: [...existing, '深度整理'] },
+        });
+      }
     }
+    return { ...base, deep: true };
+  } catch (err) {
+    // 执行失败不应白白吃掉用户已付费的一次性凭据：尽力恢复，允许重试。
+    await prisma.userModule.updateMany({
+      where: { tenantId, userId, moduleKey: DEEP_ORGANIZE_MODULE_KEY, enabled: false },
+      data: { enabled: true },
+    }).catch(() => {});
+    throw err;
   }
-  return { ...base, deep: true };
 }
 
 /** 便捷：生成一个批次号（多文件同批上传时前端可共用，或后端逐请求生成）。 */
