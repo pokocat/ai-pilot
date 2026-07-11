@@ -84,7 +84,12 @@ export async function recordDecision(args: {
   }
 }
 
-/** 认可方案 → 自动记一条决策（决策=采纳主判断；验证标准=当日军令与回填数据）。 */
+/**
+ * 认可方案 → 自动记一条决策（决策=采纳主判断；验证标准=当日军令与回填数据）。
+ * P1-1 幂等：同一用户重复认可同一方案（方案指纹 = decision 文本，由 title + 主判断确定性拼出）不再重复插入，
+ * 否则每次重复 accept 都多记一条待验证决策，直接污染准确率统计的分母。
+ * 双检 + 按用户 advisory 锁串行 check→seq→insert，堵住并发双提交窗口（与 reports/purchase 同一并发范式）。
+ */
 export async function recordDecisionFromAccept(args: {
   tenantId: string;
   userId: string;
@@ -93,18 +98,39 @@ export async function recordDecisionFromAccept(args: {
 }): Promise<DecisionView | null> {
   const judgment = firstJudgment(args.deliverable);
   if (!judgment) return null;
+  const scene = '战略规划';
+  const decision = `采纳《${(args.deliverable.title || '军师方案').slice(0, 60)}》：${judgment.slice(0, 200)}`.slice(0, 500);
   const d = now();
   const verifyBy = new Date(d.getTime() + 30 * 86400_000); // 默认 30 天验证期（月复盘对账）
   const pad = (n: number) => `${n}`.padStart(2, '0');
-  return recordDecision({
-    tenantId: args.tenantId,
-    userId: args.userId,
-    scene: '战略规划',
-    decision: `采纳《${(args.deliverable.title || '军师方案').slice(0, 60)}》：${judgment.slice(0, 200)}`,
-    reasons: [`由${args.agentName}产出并经客户认可`],
-    verifyStandard: '按该方案拆出的军令完成情况与线索/咨询/成交回填数据验证',
-    verifyByDate: `${verifyBy.getFullYear()}-${pad(verifyBy.getMonth() + 1)}-${pad(verifyBy.getDate())}`,
-    fast: false,
+  const verifyByDate = `${verifyBy.getFullYear()}-${pad(verifyBy.getMonth() + 1)}-${pad(verifyBy.getDate())}`;
+
+  // 快路径：无锁存在性检查（命中即返回旧记录，覆盖顺序重复 accept 这一主场景）。
+  const dup = await prisma.decisionLog.findFirst({ where: { userId: args.userId, scene, decision } });
+  if (dup) return toView(dup);
+
+  // 慢路径：并发双提交时按「用户级」advisory 锁串行「再检查 → 取 seq → 落库」——
+  // 用户级（非方案级）粒度：同一用户并发认可「不同方案」的两条 insert 也串行，避免各自读到同一 MAX(seq) 撞唯一键。
+  const lockKey = `decision-accept:${args.userId}`;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    const again = await tx.decisionLog.findFirst({ where: { userId: args.userId, scene, decision } });
+    if (again) return toView(again);
+    const last = await tx.decisionLog.findFirst({ where: { userId: args.userId }, orderBy: { seq: 'desc' }, select: { seq: true } });
+    const row = await tx.decisionLog.create({
+      data: {
+        tenantId: args.tenantId,
+        userId: args.userId,
+        scene,
+        decision,
+        reasons: [`由${args.agentName}产出并经客户认可`],
+        verifyStandard: '按该方案拆出的军令完成情况与线索/咨询/成交回填数据验证',
+        verifyByDate,
+        fast: false,
+        seq: (last?.seq ?? 0) + 1,
+      },
+    });
+    return toView(row);
   });
 }
 
