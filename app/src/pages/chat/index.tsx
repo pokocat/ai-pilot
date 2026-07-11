@@ -13,6 +13,7 @@ import { api, type Agent, type Deliverable, type Section, type ChatReplyT, type 
 import { STREAM_CHAT } from '../../services/config';
 import { generateStream } from '../../services/streaming';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
+import { checkUpload } from '../../services/uploadGuard';
 import { agentForText } from '../../data/intents';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../data/council';
 import { CHAT_GUIDES } from '../../data/operatingSystem';
@@ -649,6 +650,13 @@ export default function Chat() {
     const ext = (f.name?.split('.').pop() || '').toLowerCase();
     if (!UPLOAD_EXT.includes(ext)) {
       Taro.showToast({ title: `不支持的格式 .${ext}（支持 PDF/Word/Excel/MD/TXT）`, icon: 'none' });
+      return;
+    }
+    // 上传前置校验体积上限（与 server multipart 20MB 限制对齐），避免放行后被服务端 413 拒绝、
+    // 只留一句无信息量的「HTTP 413」（thinktank / knowledge 两页已有此校验，本页此前遗漏）。
+    const chk = checkUpload({ name: f.name, size: f.size });
+    if (!chk.ok) {
+      Taro.showToast({ title: chk.desc || '文件不符合上传要求', icon: 'none' });
       return;
     }
     Taro.showLoading({ title: '上传中…' });
