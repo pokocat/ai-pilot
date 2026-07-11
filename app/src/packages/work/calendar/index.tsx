@@ -4,6 +4,7 @@ import Taro, { useDidShow, useShareAppMessage } from '@tarojs/taro';
 import Login from '../../../components/Login';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
+import { store } from '../../../services/store';
 import { api, type ChartSummary } from '../../../services/api';
 import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
 import './index.scss';
@@ -47,19 +48,26 @@ export default function TianshiCalendar() {
   const [busy, setBusy] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [imgPath, setImgPath] = useState<string | null>(null);
+  const [disabled, setDisabled] = useState(false); // P0-2：命理下线（/me 或端点 403 FEATURE_DISABLED）→ 友好降级
 
   const authed = s.isAuthed();
+  const errCode = (e: unknown) => String((e as { code?: string; data?: { code?: string } })?.code || (e as { data?: { code?: string } })?.data?.code || '');
   const loadChart = () => {
     api.myChart().then((r) => { setChart(r.chart); setLoaded(true); }).catch((e) => {
       setLoaded(true);
+      if (errCode(e) === 'FEATURE_DISABLED') { setDisabled(true); setChart(null); return; } // 命理下线：静默降级，不弹错
       // 转发冷启动可能带着过期 token：静默处理，留在本页走登录承接，绝不弹走
       if (s.handleApiError(e, { silent: true }) === 'unauthorized') setChart(null);
     });
   };
   useDidShow(() => {
     if (!s.isAuthed()) { setLoaded(true); return; }
+    store.loadMe().catch(() => {}); // 拉最新命理开关（合规态可能已变）
     loadChart();
   });
+
+  // 命理总开关关闭：全年天时属命理能力，直接降级（不渲染命盘/排盘表单）。
+  const fortuneOff = authed && (disabled || !s.fortuneOn());
 
   // 冷启动（被转发者直达本页）无页面栈：返回键兜底切回战局 tab
   const goBack = () => {
@@ -87,7 +95,8 @@ export default function TianshiCalendar() {
       else Taro.showToast({ title: '生成失败，请检查生辰', icon: 'none' });
     } catch (e) {
       Taro.hideLoading();
-      if (s.handleApiError(e, { silent: true }) === 'unauthorized') setShowLogin(true);
+      if (errCode(e) === 'FEATURE_DISABLED') { setDisabled(true); Taro.showToast({ title: '命理能力已下线', icon: 'none' }); }
+      else if (s.handleApiError(e, { silent: true }) === 'unauthorized') setShowLogin(true);
       else Taro.showToast({ title: '排盘失败，请重试', icon: 'none' });
     }
     setBusy(false);
@@ -122,7 +131,12 @@ export default function TianshiCalendar() {
     <View className={`page tcal ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
       <SafeHeader title="全年天时" onBack={goBack} />
       <View className="pad">
-        {!authed ? (
+        {fortuneOff ? (
+          <View className="tc-hero">
+            <Text className="tc-year serif">全年天时暂不可用</Text>
+            <Text className="tc-sub">军师已按当前策略暂停命理视角的经营节奏推演。你的战略判断、军令与复盘不受影响，可继续在参谋室与军师对话。</Text>
+          </View>
+        ) : !authed ? (
           <>
             <View className="tc-hero">
               <Text className="tc-year serif">看看你全年该攻还是守</Text>

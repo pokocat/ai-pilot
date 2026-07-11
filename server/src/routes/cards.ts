@@ -5,9 +5,12 @@ import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { publishCard, fateCardContent, type CardKind } from '../services/cardHtml.js';
 import { computeChart, validatePaipanInput, type PaipanInput } from '../services/paipan.js';
+import { fortuneDisabledGuard } from '../services/featureFlag.js';
 import { now } from '../services/clock.js';
 
 const KINDS: CardKind[] = ['daily', 'calendar', 'fate'];
+// 命理卡（天时日历 / 送你一卦）受 fortune 开关约束；每日战报（daily）是战报非命理，不受约束。
+const FORTUNE_KINDS = new Set<CardKind>(['calendar', 'fate']);
 
 export async function cardRoutes(app: FastifyInstance) {
   // 送你一卦「天命速写」预览（合规打磨·AUDIT P-4）：校验朋友生辰 → 现算命盘 → 返回卡文本。
@@ -16,6 +19,7 @@ export async function cardRoutes(app: FastifyInstance) {
   app.post<{ Body: { friendName?: string; friendBazi?: PaipanInput; consent?: boolean } | undefined }>(
     '/cards/fate/preview',
     async (req, reply) => {
+      if (await fortuneDisabledGuard(reply)) return reply; // P0-2：命理下线 → 403
       const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
       const body = req.body ?? {};
       if (body.consent !== true) return reply.code(400).send({ error: '请先确认已获对方同意使用其生辰', code: 'CONSENT_REQUIRED' });
@@ -40,6 +44,7 @@ export async function cardRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const kind = req.params.kind as CardKind;
     if (!KINDS.includes(kind)) return reply.code(400).send({ error: '未知卡片类型' });
+    if (FORTUNE_KINDS.has(kind) && (await fortuneDisabledGuard(reply))) return reply; // P0-2：命理卡下线 → 403
     // 封禁第三人生辰落库路径：fate + friendBazi 一律走 /cards/fate/preview（不落库）
     if (kind === 'fate' && req.body?.friendBazi) {
       return reply.code(400).send({ error: '送你一卦请使用 /cards/fate/preview（不落库）', code: 'USE_FATE_PREVIEW' });

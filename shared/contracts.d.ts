@@ -323,6 +323,12 @@ export interface Me {
   understanding?: ClientUnderstanding;
   inviteCode?: string;             // V7-13：邀请码（惰性生成）
   service?: ServiceAssignmentView | null; // V7-13：社群服务分配（无则 null）
+  features: FeatureFlags;          // P0-2：功能开关（前端条件渲染的真相源）——fortune 关则隐藏全部命理入口
+}
+
+/** 前端可见的功能开关集合（合规硬需求：审核事故时一键全产品降级）。默认全开。 */
+export interface FeatureFlags {
+  fortune: boolean; // 命理（八字/命盘/天时日历/送你一卦）总开关；false = 全产品下线命理 UI/端点
 }
 
 export interface LoginRequest { phone: string; name?: string; code?: string; }
@@ -998,6 +1004,17 @@ export interface CreateAdminAccountRequest { username: string; password: string;
 export interface UpdateAdminAccountRequest { disabled?: boolean; role?: string; password?: string; agentKeys?: string[] }
 /** 当前登录者（GET /admin/auth/me）：前端按角色显隐账户管理、按范围过滤 agent */
 export interface AdminMe { kind: 'master' | 'account' | 'legacyUser'; username: string | null; role: string; isSuper: boolean }
+
+/** 运营端功能开关行（GET /admin/flags）。compliance=合规开关（命理等），关闭即时全产品生效。 */
+export interface AdminFeatureFlag {
+  id: string;          // 开关 key（如 'fortune'）
+  label: string;       // 中文名（运营可读）
+  desc: string;        // 一句话说明关闭影响
+  enabled: boolean;    // 当前态（默认开）
+  compliance: boolean; // 合规开关标记（直读 DB、审核事故一键降级）
+}
+/** 改开关（PATCH /admin/flags/:id） */
+export interface AdminFeatureFlagUpdate { enabled: boolean }
 
 /* ────────────── 调教沙盒（用草稿/某版本即时试跑，返回产出 + 诊断 trace） ────────────── */
 export type SandboxTarget = 'draft' | 'published' | { versionId: string };

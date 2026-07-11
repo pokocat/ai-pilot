@@ -118,6 +118,8 @@ export const store = {
   isAuthed: () => !!getUserId(),
   // P2-18：移除死方法 setOnboarded（无调用方，与 completeOnboarding 重复）。
   me: () => state.me,
+  // P0-2：命理总开关（合规降级）。me 未加载时默认 true，不误伤首屏；后端 /me 下发后即真态。
+  fortuneOn: () => state.me?.features?.fortune !== false,
   agents: () => state.agents,
   tab: () => state.tab,
   setTab(i: number) { state.tab = i; emit(); },

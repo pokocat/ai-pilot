@@ -662,6 +662,7 @@ export const mock = {
       understanding: buildUnderstandingM(d),
       inviteCode: 'JS2026',
       service: { teacherName: '林老师', teacherWechat: 'lin_junshi_03', className: '上海 3 班', groupQrUrl: '', taskDone: 4, taskTotal: 6, note: '负责资料确认和入群任务' },
+      features: { fortune: true }, // P0-2：mock 默认开命理，本地/H5 可完整走查
     });
   },
 

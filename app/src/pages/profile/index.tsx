@@ -71,6 +71,7 @@ export default function Profile() {
       .catch(() => { Taro.hideLoading(); Taro.showToast({ title: '保存失败，可长按二维码保存', icon: 'none' }); });
   };
 
+  const fortuneOn = s.fortuneOn(); // P0-2：命理关 → 隐藏「送你一卦」入口
   const rows = [
     { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/pages/brief/index' }) },
     { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: () => Taro.navigateTo({ url: '/packages/work/dossier/index' }) },
@@ -81,7 +82,7 @@ export default function Profile() {
     { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/bindings/index' }) },
     { ic: 'grid', t: '模块管理 · 添加 / 隐藏', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/market/index' }) },
     { ic: 'doc', t: '订单支付 / 算力明细', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/credits/index' }) },
-    { ic: 'spark', t: '送你一卦 · 给朋友出速写卡', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/gift/index' }) },
+    ...(fortuneOn ? [{ ic: 'spark', t: '送你一卦 · 给朋友出速写卡', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/gift/index' }) }] : []),
     { ic: 'clock', t: '提醒与日历', s: reminderHint(me?.service), onClick: () => Taro.navigateTo({ url: '/packages/work/reminders/index' }) },
     { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
     { ic: 'shield', t: '私有化部署 · 企业版', s: '预约', onClick: () => Taro.showToast({ title: '已记录企业版意向', icon: 'none' }) },

@@ -110,7 +110,9 @@ import type {
   SandboxRequest, SandboxResult, EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, StartEvalRunRequest, PricingTier,
   AdminSku, AdminSkuUpdate, ServiceAssignmentView, ServiceAssignmentUpdate,
+  AdminFeatureFlag,
 } from '../../shared/contracts';
+export type { AdminFeatureFlag } from '../../shared/contracts';
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
@@ -177,6 +179,9 @@ export const api = {
   skillTools: () => req<SkillToolMeta[]>('/admin/skill-tools'),
   createAgent: (body: AdminAgentCreate) => req<{ ok: boolean; key: string }>('/admin/agents', 'POST', body),
   survey: () => req<SurveyAdmin[]>('/admin/survey'),
+  // —— 功能开关（P0-2）：命理等合规开关一键降级 ——
+  flags: () => req<AdminFeatureFlag[]>('/admin/flags'),
+  setFlag: (id: string, enabled: boolean) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { enabled }),
   plans: () => req<Plan[]>('/admin/plans'),
   savePlan: (id: string, body: Partial<Pick<Plan, 'name' | 'price' | 'creditsPerMonth' | 'tokenQuotaPerMonth' | 'agentCount' | 'featuresJson' | 'highlighted'>>) =>
     req<Plan>(`/admin/plans/${id}`, 'PATCH', body),

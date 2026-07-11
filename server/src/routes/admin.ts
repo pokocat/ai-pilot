@@ -23,6 +23,7 @@ import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
+import { setFeatureFlag, isComplianceFlag } from '../services/featureFlag.js';
 import { selectableMeta, listDefs, createTool, updateTool, deleteTool, dryRunTool } from '../services/skillTools.js';
 import { aggregateToolStats } from '../services/toolStats.js';
 import { knowledgeView, reembedAll } from '../services/knowledgeAdmin.js';
@@ -44,6 +45,11 @@ import type {
   AdminProjectItem, AdminReportItem,
 } from '../../../shared/contracts';
 import { Prisma } from '@prisma/client';
+
+// 功能开关目录（P0-2）：label/desc/compliance 写死在代码；DB 只存 enabled。新增开关在此登记。
+const FEATURE_FLAG_CATALOG: { id: string; label: string; desc: string; compliance: boolean }[] = [
+  { id: 'fortune', label: '命理能力', desc: '关闭即全产品下线八字/命盘/天时日历/送你一卦，对话不再引用命盘（合规一键降级）', compliance: isComplianceFlag('fortune') },
+];
 
 // 把 service 抛出的 {statusCode, code} 错误统一回成 HTTP 响应。
 function sendErr(reply: import('fastify').FastifyReply, e: unknown, fallback = 400) {
@@ -1071,6 +1077,22 @@ export async function adminRoutes(app: FastifyInstance) {
       return q;
     },
   );
+
+  // —— 功能开关（P0-2）：命理等合规开关一键降级。fortune 关 → 全产品命理端点 403 + 前端隐藏 ——
+  // 开关目录写死在代码（label/desc/compliance），DB 只存 enabled；未落库的开关按默认开呈现。
+  app.get('/admin/flags', async () => {
+    const rows = await prisma.featureFlag.findMany();
+    const byId = new Map(rows.map((r) => [r.id, r.enabled]));
+    return FEATURE_FLAG_CATALOG.map((f) => ({ ...f, enabled: byId.get(f.id) ?? true }));
+  });
+  app.patch<{ Params: { id: string }; Body: { enabled?: boolean } }>('/admin/flags/:id', async (req, reply) => {
+    const def = FEATURE_FLAG_CATALOG.find((f) => f.id === req.params.id);
+    if (!def) return reply.code(404).send({ error: '未知功能开关', code: 'FLAG_NOT_FOUND' });
+    if (typeof req.body?.enabled !== 'boolean') return reply.code(400).send({ error: 'enabled 必须是布尔' });
+    await setFeatureFlag(def.id, req.body.enabled); // 立即清缓存（合规开关本就直读 DB）
+    await recordAudit({ action: 'admin.flag.update', payload: { id: def.id, enabled: req.body.enabled } });
+    return { ...def, enabled: req.body.enabled };
+  });
 
   // —— 套餐 ——
   app.get('/admin/plans', async () => prisma.plan.findMany({ orderBy: { sort: 'asc' } }));

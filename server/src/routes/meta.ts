@@ -10,6 +10,7 @@ import { getQuotaState, getPlanStatus } from '../services/tokenQuota.js';
 import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
+import { isFeatureEnabled } from '../services/featureFlag.js';
 
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -30,6 +31,8 @@ export async function metaRoutes(app: FastifyInstance) {
     const planStatus = await getPlanStatus(user.id); // 套餐状态：驱动前端只读模式 + 到期日/剩余天数/下次额度重置日
     const inviteCode = await ensureInviteCode(user.id).catch(() => undefined); // V7-13：邀请码（惰性生成）
     const service = await buildServiceView(user.id).catch(() => null); // V7-13：社群服务分配
+    // P0-2：命理总开关下发前端（合规开关直读 DB，不吃 60s 缓存窗口）——前端据此隐藏全部命理入口
+    const fortune = await isFeatureEnabled('fortune');
     return {
       user: {
         id: user.id,
@@ -55,6 +58,7 @@ export async function metaRoutes(app: FastifyInstance) {
       understanding,
       inviteCode,
       service,
+      features: { fortune },
     };
   });
 

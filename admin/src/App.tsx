@@ -34,6 +34,7 @@ import {
   uploadUserKnowledge,
   type AdminAccountItem,
   type AdminMe,
+  type AdminFeatureFlag,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
@@ -41,7 +42,7 @@ import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'account';
+type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'account' | 'flags';
 const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
@@ -56,6 +57,7 @@ const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'audit', icon: 'clock', label: '审计' },
   { key: 'moderation', icon: 'shield', label: '审核' },
   { key: 'model', icon: 'insight', label: '模型' },
+  { key: 'flags', icon: 'shield', label: '功能开关' },
   { key: 'say', icon: 'spark', label: '献策' },
   { key: 'form', icon: 'doc', label: '问卷' },
   { key: 'plan', icon: 'layers', label: '套餐' },
@@ -121,6 +123,7 @@ export default function App() {
           {tab === 'audit' && <AuditView />}
           {tab === 'moderation' && <ModerationView />}
           {tab === 'model' && <ModelView toast={showToast} />}
+          {tab === 'flags' && <FlagsView toast={showToast} />}
           {tab === 'form' && <SurveyView />}
           {tab === 'plan' && <PlansView toast={showToast} />}
           {tab === 'sku' && <SkusView toast={showToast} />}
@@ -937,6 +940,46 @@ function SayingsView({ toast }: { toast: (m: string) => void }) {
             <Icon name="spark" size={15} /> 新增
           </button>
         </div>
+      </div>
+    </>
+  );
+}
+
+// 功能开关（P0-2）：命理等合规开关一键降级。关闭合规开关前二次确认，避免误触把全产品命理下线。
+function FlagsView({ toast }: { toast: (m: string) => void }) {
+  const [list, setList] = useState<AdminFeatureFlag[]>([]);
+  const [busy, setBusy] = useState('');
+  const load = () => api.flags().then(setList).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const toggle = async (f: AdminFeatureFlag) => {
+    const next = !f.enabled;
+    // 关闭合规开关是「全产品降级」动作，二次确认防误触。
+    if (!next && f.compliance && !window.confirm(`确认关闭「${f.label}」？关闭后全产品相关入口与端点立即下线。`)) return;
+    setBusy(f.id);
+    try {
+      await api.setFlag(f.id, next);
+      await load();
+      toast(next ? `已开启「${f.label}」` : `已关闭「${f.label}」`);
+    } catch (e) {
+      toast((e as Error)?.message || '操作失败');
+    }
+    setBusy('');
+  };
+  return (
+    <>
+      <div className="sec-h"><span className="t">功能开关</span><span className="s">合规一键降级 · 关闭即时全产品生效</span></div>
+      <div className="pad">
+        {list.map((f) => (
+          <div key={f.id} className={`say-row ${f.enabled ? '' : 'say-today'}`}>
+            <span className="grip"><Icon name="shield" size={15} /></span>
+            <div className="sb">
+              <div className="stx">{f.label}{f.compliance ? ' · 合规开关' : ''}</div>
+              <div className="smeta">{f.enabled ? '已开启' : '已关闭 · 全产品下线'} · {f.desc}</div>
+            </div>
+            <div className={`sw ${f.enabled ? 'on' : ''}`} onClick={() => busy !== f.id && toggle(f)}><i /></div>
+          </div>
+        ))}
+        {!list.length ? <div className="smeta">暂无可配置开关</div> : null}
       </div>
     </>
   );

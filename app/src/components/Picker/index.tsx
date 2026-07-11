@@ -33,6 +33,7 @@ const SHICHEN: { label: string; hour: number | null }[] = [
 // 入场仪式：选本命色 →（首登）30 秒建档 → 天势档案（选填）→ 入局。对齐原型 picker 流程。
 export default function Picker({ open, first, onClose, onConfirm }: Props) {
   const s = useStore();
+  const fortuneOn = s.fortuneOn(); // P0-2：命理关 → 跳过天势档案（八字采集）步骤
   const [sel, setSel] = useState(colorIndex(s.colorKey()));
   const [step, setStep] = useState<'color' | 'profile' | 'bazi'>('color');
   const [survey, setSurvey] = useState<SurveyQ[]>(DEFAULT_SURVEY);
@@ -85,7 +86,7 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
     if (company.trim()) await api.updateIdentity({ company: company.trim() }).catch(() => {});
     if (Object.keys(answers).length) await api.saveProfile(answers).catch(() => {});
     await store.loadMe();
-    if (first) setStep('bazi');
+    if (first && fortuneOn) setStep('bazi'); // 命理关则不进天势档案，直接入局
     else confirmColor();
   };
 
@@ -191,7 +192,7 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
             </View>
 
             <View className="pk-cta" style={{ background: c.vars['--accent'] }} onClick={finishProfile}>
-              <Text>{first ? '下一步 · 天势档案' : '完成 · 进入军师'}</Text>
+              <Text>{first && fortuneOn ? '下一步 · 天势档案' : '完成 · 进入军师'}</Text>
             </View>
             <Text className="pk-skip" onClick={confirmColor}>暂时跳过</Text>
           </>
