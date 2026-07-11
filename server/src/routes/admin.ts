@@ -23,7 +23,8 @@ import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
-import { setFeatureFlag, isComplianceFlag } from '../services/featureFlag.js';
+import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
+import { REVIEW_GRACE_PER_DAY } from '../services/tokenQuota.js';
 import { selectableMeta, listDefs, createTool, updateTool, deleteTool, dryRunTool } from '../services/skillTools.js';
 import { aggregateToolStats } from '../services/toolStats.js';
 import { knowledgeView, reembedAll } from '../services/knowledgeAdmin.js';
@@ -46,9 +47,16 @@ import type {
 } from '../../../shared/contracts';
 import { Prisma } from '@prisma/client';
 
-// 功能开关目录（P0-2）：label/desc/compliance 写死在代码；DB 只存 enabled。新增开关在此登记。
-const FEATURE_FLAG_CATALOG: { id: string; label: string; desc: string; compliance: boolean }[] = [
-  { id: 'fortune', label: '命理能力', desc: '关闭即全产品下线八字/命盘/天时日历/送你一卦，对话不再引用命盘（合规一键降级）', compliance: isComplianceFlag('fortune') },
+// 功能开关目录（P0-2 / D-10）：label/desc/compliance/kind 写死在代码；DB 存 enabled(toggle) 或 payload(number)。
+// number 类：payloadKey=payload 里的字段名；def=默认值；min/max=校验区间；unit=单位标签。
+type FlagDef = {
+  id: string; label: string; desc: string; compliance: boolean;
+  kind: 'toggle' | 'number'; payloadKey?: string; def?: number; min?: number; max?: number; unit?: string;
+};
+const FEATURE_FLAG_CATALOG: FlagDef[] = [
+  { id: 'fortune', label: '命理能力', desc: '关闭即全产品下线八字/命盘/天时日历/送你一卦，对话不再引用命盘（合规一键降级）', compliance: isComplianceFlag('fortune'), kind: 'toggle' },
+  // D-10 复盘保底额度：额度耗尽时复盘类调用每日仍放行的次数（覆盖「日复盘+军令生成+2-3 次追问」动线，默认 6）。
+  { id: 'review-grace', label: '复盘保底额度', desc: '月度 token 额度耗尽时，复盘类对话每日仍放行的次数（保住留存动线）', compliance: false, kind: 'number', payloadKey: 'perDay', def: REVIEW_GRACE_PER_DAY, min: 0, max: 50, unit: '次/日' },
 ];
 
 // 把 service 抛出的 {statusCode, code} 错误统一回成 HTTP 响应。
@@ -1080,18 +1088,44 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // —— 功能开关（P0-2）：命理等合规开关一键降级。fortune 关 → 全产品命理端点 403 + 前端隐藏 ——
   // 开关目录写死在代码（label/desc/compliance），DB 只存 enabled；未落库的开关按默认开呈现。
+  // 把 catalog 定义 + DB 行组装成对外的 AdminFeatureFlag（toggle 带 enabled；number 带 value/min/max/unit）。
+  const shapeFlag = (f: FlagDef, row?: { enabled: boolean; payload: unknown } | null) => {
+    const base = { id: f.id, label: f.label, desc: f.desc, compliance: f.compliance, kind: f.kind, enabled: row?.enabled ?? true };
+    if (f.kind === 'number') {
+      const payload = (row?.payload ?? null) as Record<string, unknown> | null;
+      const raw = payload && f.payloadKey ? payload[f.payloadKey] : undefined;
+      const value = typeof raw === 'number' ? raw : (f.def ?? 0);
+      return { ...base, value, min: f.min, max: f.max, unit: f.unit };
+    }
+    return base;
+  };
+
   app.get('/admin/flags', async () => {
     const rows = await prisma.featureFlag.findMany();
-    const byId = new Map(rows.map((r) => [r.id, r.enabled]));
-    return FEATURE_FLAG_CATALOG.map((f) => ({ ...f, enabled: byId.get(f.id) ?? true }));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return FEATURE_FLAG_CATALOG.map((f) => shapeFlag(f, byId.get(f.id)));
   });
-  app.patch<{ Params: { id: string }; Body: { enabled?: boolean } }>('/admin/flags/:id', async (req, reply) => {
+  app.patch<{ Params: { id: string }; Body: { enabled?: boolean; value?: number } }>('/admin/flags/:id', async (req, reply) => {
     const def = FEATURE_FLAG_CATALOG.find((f) => f.id === req.params.id);
     if (!def) return reply.code(404).send({ error: '未知功能开关', code: 'FLAG_NOT_FOUND' });
+    if (def.kind === 'number') {
+      // D-10：数值配置（复盘保底 perDay），改动即时生效（普通 flag payload 60s 缓存内收敛）。
+      const value = Number(req.body?.value);
+      const min = def.min ?? 0;
+      const max = def.max ?? Number.MAX_SAFE_INTEGER;
+      if (!Number.isFinite(value) || value < min || value > max) {
+        return reply.code(400).send({ error: `数值需在 ${min}-${max} 之间`, code: 'BAD_VALUE' });
+      }
+      const v = Math.floor(value);
+      await setFeatureFlagPayload(def.id, { [def.payloadKey!]: v });
+      await recordAudit({ action: 'admin.flag.update', payload: { id: def.id, value: v } });
+      const row = await prisma.featureFlag.findUnique({ where: { id: def.id } });
+      return shapeFlag(def, row);
+    }
     if (typeof req.body?.enabled !== 'boolean') return reply.code(400).send({ error: 'enabled 必须是布尔' });
     await setFeatureFlag(def.id, req.body.enabled); // 立即清缓存（合规开关本就直读 DB）
     await recordAudit({ action: 'admin.flag.update', payload: { id: def.id, enabled: req.body.enabled } });
-    return { ...def, enabled: req.body.enabled };
+    return shapeFlag(def, { enabled: req.body.enabled, payload: null });
   });
 
   // —— 套餐 ——

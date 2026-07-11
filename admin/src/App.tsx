@@ -949,7 +949,12 @@ function SayingsView({ toast }: { toast: (m: string) => void }) {
 function FlagsView({ toast }: { toast: (m: string) => void }) {
   const [list, setList] = useState<AdminFeatureFlag[]>([]);
   const [busy, setBusy] = useState('');
-  const load = () => api.flags().then(setList).catch(() => {});
+  const [draft, setDraft] = useState<Record<string, number>>({}); // number 类的编辑中数值
+  const load = () => api.flags().then((rows) => {
+    setList(rows);
+    // 初始化 number 类草稿为当前值
+    setDraft(Object.fromEntries(rows.filter((r) => r.kind === 'number').map((r) => [r.id, r.value ?? 0])));
+  }).catch(() => {});
   useEffect(() => { load(); }, []);
   const toggle = async (f: AdminFeatureFlag) => {
     const next = !f.enabled;
@@ -965,11 +970,33 @@ function FlagsView({ toast }: { toast: (m: string) => void }) {
     }
     setBusy('');
   };
+  const saveValue = async (f: AdminFeatureFlag) => {
+    const v = draft[f.id] ?? 0;
+    setBusy(f.id);
+    try {
+      await api.setFlagValue(f.id, v);
+      await load();
+      toast(`已保存「${f.label}」= ${v}${f.unit ?? ''}`);
+    } catch (e) {
+      toast((e as Error)?.message || '保存失败');
+    }
+    setBusy('');
+  };
   return (
     <>
-      <div className="sec-h"><span className="t">功能开关</span><span className="s">合规一键降级 · 关闭即时全产品生效</span></div>
+      <div className="sec-h"><span className="t">功能开关</span><span className="s">合规一键降级 · 数值配置即时生效</span></div>
       <div className="pad">
-        {list.map((f) => (
+        {list.map((f) => f.kind === 'number' ? (
+          <div key={f.id} className="say-row">
+            <span className="grip"><Icon name="shield" size={15} /></span>
+            <div className="sb">
+              <div className="stx">{f.label}</div>
+              <div className="smeta">当前 {f.value}{f.unit ?? ''} · {f.desc}（{f.min}-{f.max}）</div>
+            </div>
+            <NumInput className="ai-input flag-num" min={f.min} max={f.max} value={draft[f.id] ?? f.value ?? 0} onChange={(n) => setDraft((d) => ({ ...d, [f.id]: n }))} />
+            <button className="mini-btn primary" disabled={busy === f.id || (draft[f.id] ?? f.value) === f.value} onClick={() => saveValue(f)}>保存</button>
+          </div>
+        ) : (
           <div key={f.id} className={`say-row ${f.enabled ? '' : 'say-today'}`}>
             <span className="grip"><Icon name="shield" size={15} /></span>
             <div className="sb">

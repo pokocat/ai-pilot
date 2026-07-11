@@ -1015,9 +1015,14 @@ export interface AdminFeatureFlag {
   desc: string;        // 一句话说明关闭影响
   enabled: boolean;    // 当前态（默认开）
   compliance: boolean; // 合规开关标记（直读 DB、审核事故一键降级）
+  kind: 'toggle' | 'number'; // toggle=开关；number=数值配置（如复盘保底额度 D-10）
+  value?: number;      // number 类：当前数值
+  min?: number;        // number 类：允许下限
+  max?: number;        // number 类：允许上限
+  unit?: string;       // number 类：单位标签（如「次/日」）
 }
-/** 改开关（PATCH /admin/flags/:id） */
-export interface AdminFeatureFlagUpdate { enabled: boolean }
+/** 改开关（PATCH /admin/flags/:id）：toggle 传 enabled；number 传 value。 */
+export interface AdminFeatureFlagUpdate { enabled?: boolean; value?: number }
 
 /* ────────────── 调教沙盒（用草稿/某版本即时试跑，返回产出 + 诊断 trace） ────────────── */
 export type SandboxTarget = 'draft' | 'published' | { versionId: string };

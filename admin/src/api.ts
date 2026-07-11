@@ -182,6 +182,7 @@ export const api = {
   // —— 功能开关（P0-2）：命理等合规开关一键降级 ——
   flags: () => req<AdminFeatureFlag[]>('/admin/flags'),
   setFlag: (id: string, enabled: boolean) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { enabled }),
+  setFlagValue: (id: string, value: number) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { value }),
   plans: () => req<Plan[]>('/admin/plans'),
   savePlan: (id: string, body: Partial<Pick<Plan, 'name' | 'price' | 'creditsPerMonth' | 'tokenQuotaPerMonth' | 'agentCount' | 'featuresJson' | 'highlighted'>>) =>
     req<Plan>(`/admin/plans/${id}`, 'PATCH', body),

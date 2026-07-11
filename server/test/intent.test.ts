@@ -3,7 +3,7 @@ import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.ts';
 import { prisma } from '../src/db.ts';
-import { detectIntent, detectInnerState, stageOf, resolveMode, encodeMode } from '../src/services/intent.ts';
+import { detectIntent, detectInnerState, stageOf, resolveMode, encodeMode, modeDirective } from '../src/services/intent.ts';
 import { buildGenContext } from '../src/services/context.ts';
 import { buildSystemParts } from '../src/llm/schema.ts';
 import { bumpDiagRound } from '../src/services/strategicProfile.ts';
@@ -22,11 +22,25 @@ describe('意图识别矩阵（V6.0 §3 入口规则）', () => {
   test('复盘分层：②诊断过的「这周复盘」「帮我算一卦」不再错分', () => {
     assert.deepEqual(detectIntent('这周复盘一下'), { mode: 'review', reviewLayer: 'week' });
     assert.deepEqual(detectIntent('做个月度总结吧'), { mode: 'review', reviewLayer: 'month' });
-    assert.deepEqual(detectIntent('Q3 季度回顾'), { mode: 'review', reviewLayer: 'quarter' });
-    assert.deepEqual(detectIntent('年终复盘'), { mode: 'review', reviewLayer: 'year' });
-    assert.deepEqual(detectIntent('团队复盘一下人员状态'), { mode: 'review', reviewLayer: 'team' });
+    // D-11：季/年/团队降级到月度线，带 downgradedFrom（用于注入军师引导），不再进独立层。
+    assert.deepEqual(detectIntent('Q3 季度回顾'), { mode: 'review', reviewLayer: 'month', downgradedFrom: 'quarter' });
+    assert.deepEqual(detectIntent('年终复盘'), { mode: 'review', reviewLayer: 'month', downgradedFrom: 'year' });
+    assert.deepEqual(detectIntent('团队复盘一下人员状态'), { mode: 'review', reviewLayer: 'month', downgradedFrom: 'team' });
     assert.deepEqual(detectIntent('今天的 6 件事复盘'), { mode: 'review', reviewLayer: 'day' });
     assert.equal(detectIntent('帮我给朋友算一卦').mode, 'gift_bazi');
+  });
+
+  test('D-11 季/年/团队复盘：会话粘性编码落月度线 + 注入军师引导', () => {
+    const r = resolveMode('帮我做个季度复盘', null);
+    assert.equal(r.intent.mode, 'review');
+    assert.equal(r.intent.reviewLayer, 'month', '季度触发词落月度线');
+    assert.equal(r.persist, 'review:month', '会话粘性编码为月度，不产生 quarter 会话态');
+    const dir = modeDirective(r.intent);
+    assert.match(dir ?? '', /月度线|月度战报/, '注入月度引导话术');
+    // 团队复盘同样降级
+    const rt = resolveMode('团队复盘一下', null);
+    assert.equal(rt.intent.reviewLayer, 'month');
+    assert.match(modeDirective(rt.intent) ?? '', /团队/);
   });
 
   test('紧急/择时/团队匹配/情绪/默认', () => {
