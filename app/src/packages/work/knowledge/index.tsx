@@ -77,6 +77,10 @@ export default function Knowledge() {
     setBusy(false);
   };
 
+  const openDetail = (it: KnowledgeDocRow) => {
+    Taro.navigateTo({ url: `/packages/work/knowledge/detail/index?id=${it.id}` });
+  };
+
   const remove = (it: KnowledgeDocRow) => {
     Taro.showModal({
       title: '删除资料',
@@ -109,13 +113,13 @@ export default function Knowledge() {
         ) : (
           <View className="kb-list">
             {items.map((it) => (
-              <View key={it.id} className="kb-item card">
+              <View key={it.id} className="kb-item card" onClick={() => openDetail(it)}>
                 <View className="ki-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={18} color={accent} /></View>
                 <View className="ki-b">
                   <Text className="ki-t">{it.title || it.fileName || '未命名'}</Text>
                   <Text className="ki-m">{STATUS[it.status] || it.status} · {it.chunkCount} 切片{it.fileSize ? ' · ' + fmtSize(it.fileSize) : ''}{it.error ? ' · ' + it.error : ''}</Text>
                 </View>
-                <View className="ki-del" onClick={() => remove(it)}><Text>删除</Text></View>
+                <View className="ki-del" onClick={(e) => { e.stopPropagation(); remove(it); }}><Text>删除</Text></View>
               </View>
             ))}
           </View>

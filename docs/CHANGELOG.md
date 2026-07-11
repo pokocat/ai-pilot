@@ -8,6 +8,14 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-11** · **全局复审批次二·第二波（P1-4/6 + D-8/10/11 + WO-09 前端；主模型规划 + Opus 子代理执行）**：
+  - **① P1-4 时区计算集中化**：`clock.ts` 增 Asia/Shanghai 显式日历工具（Intl 固定 timeZone），全量替换 13 个服务 + 6 个路由的裸本地 getter——裸机部署时连续天数/推送时机/日限流不再随进程 TZ 漂移；例外仅 paipan.ts（lunar 库对象 API 与出生时刻构造，非「今天」派生）。
+  - **② P1-6 上下文装配并发化**：`buildGenContext` 15+ 次串行 DB 改两批 `Promise.all`（并发取数、顺序拼装，注入块文本与顺序不变），新增 `$use` 查询计数防 N+1 回归测试（实测 ~38 次，上限 50）。
+  - **③ D-10 复盘保底额度配置化**：`REVIEW_GRACE_PER_DAY` 2→默认 6，读 `FeatureFlag('review-grace').payload.perDay` 覆盖；admin 功能开关面支持数值配置（min/max 校验）；契约 `AdminFeatureFlag` 扩 kind/value/min/max/unit。
+  - **④ D-11 复盘层级收敛日/周/月**：季/年/团队触发词在 `detectIntent` 降级 month 并注入军师引导话术，只产 month 层 ReviewLog、粘性落 `review:month`；枚举保留向后兼容。遗留：`/casefile/review` 直连 API 仍接受全层（前端无入口，暂不 clamp）。
+  - **⑤ D-8 军师收编 4+1**：下架冗余顾问 intel/fund/model/org（`data/agents.ts` + 幂等 `scripts/retireAgents.ts`，prod 需 scp 后跑一次）；**创作型 agent 保留 enabled**——它们是处方 toolKey 白名单（=enabled agents）的供给方且属 D-1 保留货架 SKU，不在「顾问收编」范畴；已购用户对下架 agent 经 entitlements 天然豁免仍可对话。
+  - **⑥ WO-09 前端接线（app）**：资料列表→新增详情分包页，`canAnalyze` 显示「生成经营体检」（军师过账文案）→ 跳报告详情；逐码友好错误（SKU_REQUIRED→fin-checkup PaySheet / 日限 / 非财务表 / 额度沿用全局）；补 `analyzeKnowledge` API 与确定性 mock，修 F7（knowledgeDetail mock 由 reject 改可用样例）。
+  - 合并终审：服务端 485/485 全绿（+8 测试）、app tsc/build 绿、admin lint:ui+build 绿。
 - **2026-07-11** · **全局复审批次二·第一波（P1-1/2/3/5/7 + WO-09 接线；主模型规划 + Opus 子代理执行）**：
   - **① P1-1 认可方案幂等化**：`recordDecisionFromAccept` 按 userId+方案指纹（title+主判断确定性拼出）去重——快路径无锁双检 + 慢路径用户级 `pg_advisory_xact_lock` 串行 check→seq→insert（顺带消灭并发不同方案撞 `(userId,seq)` 唯一键的旧竞态），重复 accept 不再重复记账污染决策准确率分母。
   - **② P1-3 structured() 计费口径**：新增 `structuredMetered()` 回传 `{data, attempts, live}`（attempts 调用前自增，超时/5xx 保守计入），`structuredBillTokens` 统一「成功定额 / 失败按 attempts 保守扣 / mock 零扣」，quickscan/brandKit/经营体检三个计费调用方接入——堵「已发生真实调用却 settle(0) 全额退款」的资损口子；原 `structured()` 变薄封装，非计费消费者零改动。

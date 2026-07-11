@@ -16,6 +16,7 @@ import type {
   DataSourcesView, DataSourceView, DataSourceStatus, ModulesView, ModuleView,
   ReminderView, WorkbenchView, ServiceAssignmentView, SearchHit, SearchResult,
   KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, ConfirmResult, StagedUploadResult,
+  KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
 } from '../../../shared/contracts';
 import type { ChartSummary, ProgressView } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
@@ -865,6 +866,57 @@ export const mock = {
     (d.knowledge ??= []).unshift({ id, projectId: null, kind: 'document', title: `上传资料 ${d.knowledge.length + 1}`, text: '（mock 待整理资料）', sourceType: 'upload', sourceId: null, tags: [], at: now(), stage, batchId: staged ? bid : undefined, fileType: types[d.knowledge.length % types.length], fileSize: 120000 });
     save(token, d);
     return delay({ id, status: staged ? 'staging' : 'ready', stage, batchId: staged ? bid : undefined });
+  },
+  // —— WO-09 经营体检（资料库文档视图 + 详情 + 体检）——
+  // 走查用确定性样例：k-fin-demo=财务表(canAnalyze) / k-doc-demo=非财务(无体检入口)。
+  async knowledgeDocs(): Promise<KnowledgeDocRow[]> {
+    return delay([
+      { id: 'k-fin-demo', kind: 'document', title: '3 月经营流水表', sourceType: 'upload', status: 'ready', fileName: '流水表.xlsx', fileType: 'xlsx', fileSize: 128000, chunkCount: 4, projectId: null, error: null, createdAt: now(), updatedAt: now() },
+      { id: 'k-doc-demo', kind: 'document', title: '产品介绍', sourceType: 'upload', status: 'ready', fileName: '产品介绍.pdf', fileType: 'pdf', fileSize: 96000, chunkCount: 3, projectId: null, error: null, createdAt: now(), updatedAt: now() },
+    ]);
+  },
+  // F7：mock 从 reject 改为返回可用空壳；id 含 'fin' 视作财务/经营表 → canAnalyze=true。
+  async knowledgeDetail(id: string): Promise<KnowledgeDetail> {
+    const financial = /fin/i.test(id);
+    const preview = financial
+      ? '月份,收入,成本,毛利\n1月,128000,86000,42000\n2月,143500,92000,51500\n3月,161200,98400,62800'
+      : '（示例）本资料为产品介绍/说明类内容，非财务经营表，不参与经营体检。';
+    return delay({
+      id,
+      kind: 'document',
+      title: financial ? '3 月经营流水表' : '产品介绍',
+      sourceType: 'upload',
+      status: 'ready',
+      fileName: financial ? '流水表.xlsx' : '产品介绍.pdf',
+      fileType: financial ? 'xlsx' : 'pdf',
+      fileSize: financial ? 128000 : 96000,
+      projectId: null,
+      error: null,
+      createdAt: now(),
+      updatedAt: now(),
+      textPreview: preview,
+      chunks: preview.split('\n').map((t, i) => ({ id: `${id}-c${i}`, ord: i, text: t, dim: 1024 })),
+      canAnalyze: financial,
+    });
+  },
+  // 确定性体检：本地生成/归一一份「经营体检」报告，返回 reportId 供报告详情页解析（可反复调用不重复建版）。
+  async analyzeKnowledge(_id: string): Promise<AnalyzeResult> {
+    const { token, d } = current();
+    const content: Deliverable = {
+      title: '经营体检 · 3 月流水',
+      icon: 'chart',
+      meta: '军师财务复盘',
+      trust: '毛利率企稳在 38% 上下、现金流为正，但获客成本正在吃掉利润，一个月内要把复购拉起来。',
+      sections: [
+        { h: '账面判断', b: '3 个月收入稳步上行（12.8w → 16.1w），毛利率 33% → 39%，定价与成本控制在改善。' },
+        { h: '三个隐患', list: ['获客成本占收入 18%，偏高', '现金回款周期 45 天，压流动性', '单一大客户贡献四成收入，集中度风险'] },
+        { h: '军师给的三条军令', list: ['把回款周期压到 30 天内（预收/账期条款）', '开 2 个新获客渠道，摊薄获客成本', '给腰部客户做复购方案，降集中度'] },
+      ],
+      actions: ['同步为军令'],
+    };
+    const saved = saveReportVersionLocal(d, { title: content.title, type: '经营体检', agentKey: 'general', projectId: null, content, authorKind: 'agent' });
+    save(token, d);
+    return delay({ reportId: saved.reportId, version: saved.version });
   },
   async knowledgePipeline(): Promise<KnowledgePipelineView> {
     const { d } = current();

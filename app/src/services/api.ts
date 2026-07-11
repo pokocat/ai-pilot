@@ -8,7 +8,7 @@ import type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
-  KnowledgeDocRow, KnowledgeDetail,
+  KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
   BindPhoneResult, WechatOrderResult, WechatSubscribeTemplatesResult, WechatSubscribeChoice, WechatSubscribeRecordResult,
   FateCardContent, MemoryLibraryView, DossierView, DossierReport,
@@ -49,7 +49,7 @@ export type {
   ProjectItem, ProjectDetail, CreateProjectRequest, UpdateProjectRequest,
   ReportItem, ReportDetail, ReportVersionItem, ReportVersionContent, ReportDiff, SectionDiff,
   KnowledgeItemT, KnowledgeHit, SummarizeResult, MessageRef, RefKind,
-  KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow,
+  KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow, AnalyzeResult,
   Plan, PlanPurchaseResult, AgentPurchaseResult, AgentBilling,
   ClientUnderstanding, ClientUnderstandingSection, UnderstandingMaturity, AliasSuggestionResult,
   TokenQuotaView, MyCreditItem, MyCreditsView,
@@ -369,9 +369,12 @@ export const api = {
     IS_MOCK ? mock.deleteMemory() : request<{ ok: boolean }>(`/memories/${id}`, 'PATCH', { text }),
   // —— 我的资料库（文档视图 + 上传） ——
   knowledgeDocs: (projectId?: string) =>
-    IS_MOCK ? Promise.resolve([] as KnowledgeDocRow[]) : request<KnowledgeDocRow[]>(`/knowledge/docs${projectId ? `?projectId=${projectId}` : ''}`),
+    IS_MOCK ? mock.knowledgeDocs() : request<KnowledgeDocRow[]>(`/knowledge/docs${projectId ? `?projectId=${projectId}` : ''}`),
   knowledgeDetail: (id: string) =>
-    IS_MOCK ? Promise.reject(new Error('mock 模式无文档详情')) : request<KnowledgeDetail>(`/knowledge/${id}`),
+    IS_MOCK ? mock.knowledgeDetail(id) : request<KnowledgeDetail>(`/knowledge/${id}`),
+  // WO-09 经营体检：对已解析的财务/经营表发起体检，产出报告（reportId → 报告详情页）。
+  analyzeKnowledge: (id: string) =>
+    IS_MOCK ? mock.analyzeKnowledge(id) : request<AnalyzeResult>(`/knowledge/${id}/analyze`, 'POST', {}),
   reembedKnowledge: (id: string) =>
     IS_MOCK ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
   uploadKnowledge: (filePath: string, projectId?: string, staged?: boolean, batchId?: string) =>
