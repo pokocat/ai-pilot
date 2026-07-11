@@ -45,15 +45,36 @@ export async function persistPrescriptions(args: {
   return { saved, dropped: list.length - saved };
 }
 
-const STAMP = { seen: 'seenAt', clicked: 'clickedAt', activated: 'activatedAt' } as const;
+// P0-4 状态机单调化：转化状态是「等级序」，只能前进不能回退，杜绝重复上报的 seen 把已 verified 的处方打回。
+//   proposed(0) < seen(1) < clicked(2) < activated(3) < used(4) < verified(5)
+//   dismissed = 独立终态（用户主动作废），只能从 proposed/seen 进入；一旦作废不被任何埋点回退。
+const LEVEL: Record<string, number> = { proposed: 0, seen: 1, clicked: 2, activated: 3, used: 4, verified: 5 };
+const STAMP = { seen: 'seenAt', clicked: 'clickedAt', activated: 'activatedAt', dismissed: 'dismissedAt' } as const;
 export const RX_ACTIONS = Object.keys(STAMP);
 
-/** 转化埋点：seen/clicked/activated（只按 userId 授权；幂等）。返回是否命中一条。 */
+// 目标状态允许的前置状态集合：严格低于目标等级者（dismissed 及更高终态天然不在内 → 不可回退）。
+function belowStatuses(target: number): string[] {
+  return Object.keys(LEVEL).filter((s) => LEVEL[s] < target);
+}
+
+/**
+ * 转化埋点 / 作废：单调推进（只前进不回退；幂等）。
+ * - seen/clicked/activated：仅当「当前等级 < 目标等级」时写入（updateMany + status in 允许前置集合，单语句避免读改竞态）。
+ * - dismissed：独立终态，只能从 proposed/seen 进入（更靠后的状态不允许作废）。
+ * 返回 true=处方存在（已推进或已是同/更高级的幂等 no-op，均不回退）；false=处方不存在（路由 404）。
+ */
 export async function advancePrescription(userId: string, id: string, action: string): Promise<boolean> {
-  const stamp = (STAMP as Record<string, 'seenAt' | 'clickedAt' | 'activatedAt'>)[action];
+  const stamp = (STAMP as Record<string, 'seenAt' | 'clickedAt' | 'activatedAt' | 'dismissedAt'>)[action];
   if (!stamp) return false;
-  const r = await prisma.prescription.updateMany({ where: { id, userId }, data: { status: action, [stamp]: now() } });
-  return r.count > 0;
+  const allowed = action === 'dismissed' ? ['proposed', 'seen'] : belowStatuses(LEVEL[action]);
+  const r = await prisma.prescription.updateMany({
+    where: { id, userId, status: { in: allowed } },
+    data: { status: action, [stamp]: now() },
+  });
+  if (r.count > 0) return true;
+  // 未推进：可能是「已达/超过目标等级」的幂等 no-op（不回退、不 404），也可能是处方不存在（→ 404）。
+  const exists = await prisma.prescription.findFirst({ where: { id, userId }, select: { id: true } });
+  return !!exists;
 }
 
 export async function listPrescriptions(userId: string): Promise<PrescriptionView[]> {
@@ -83,7 +104,10 @@ export async function recordOutcome(userId: string, id: string, input: OutcomeIn
   };
   const all = [...prev, entry];
   const positivePeriods = all.filter((e) => hasPositive(e.metrics)).length;
-  const status = positivePeriods >= 2 ? 'verified' : 'used';
+  const computed = positivePeriods >= 2 ? 'verified' : 'used';
+  // P0-4 单调化：outcome 永远追加，但 status 不回退——只在计算值高于当前等级时前进
+  //（例：已 verified 的处方补一期无正指标的 outcome，不应被打回 used）。
+  const status = (LEVEL[computed] ?? 0) > (LEVEL[rx.status] ?? 0) ? computed : rx.status;
   await prisma.prescription.update({
     where: { id },
     data: { outcomeJson: all as unknown as Prisma.InputJsonValue, status, firstUsedAt: rx.firstUsedAt ?? now() },
