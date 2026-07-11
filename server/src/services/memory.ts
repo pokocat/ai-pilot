@@ -219,18 +219,27 @@ export async function deleteUserMemory(tenantId: string, userId: string, id: str
   await prisma.memory.deleteMany({ where: { id, tenantId, userId } });
 }
 
-/** P1-C4：按 agent 跨用户列出记忆（运营治理自动学习写入的脏记忆）。 */
-export async function listAgentMemories(agentKey: string, limit = 200): Promise<AdminAgentMemoryItem[]> {
-  const rows = await prisma.memory.findMany({ where: { agentKey }, orderBy: { createdAt: 'desc' }, take: Math.min(500, Math.max(1, limit)) });
+/**
+ * P1-C4：按 agent 跨用户列出记忆（运营治理自动学习写入的脏记忆）。
+ * tenantId 传入则限定作用域（避免跨租户全量拉取/误删）；不传 = 平台级全量（超管默认视图）。
+ */
+export async function listAgentMemories(agentKey: string, limit = 200, tenantId?: string): Promise<AdminAgentMemoryItem[]> {
+  const rows = await prisma.memory.findMany({
+    where: { agentKey, ...(tenantId ? { tenantId } : {}) },
+    orderBy: { createdAt: 'desc' }, take: Math.min(500, Math.max(1, limit)),
+  });
   return rows.map((m) => ({
-    id: m.id, userId: m.userId, kind: m.kind, text: m.text, weight: m.weight,
+    id: m.id, tenantId: m.tenantId, userId: m.userId, kind: m.kind, text: m.text, weight: m.weight,
     source: m.source, createdAt: m.createdAt.toISOString(), expiresAt: m.expiresAt ? m.expiresAt.toISOString() : null,
   }));
 }
 
-/** P1-C4：运营按 id+agentKey 删除一条记忆（纠正脏记忆）。返回是否命中。 */
-export async function deleteAgentMemory(agentKey: string, id: string): Promise<boolean> {
-  const r = await prisma.memory.deleteMany({ where: { id, agentKey } });
+/**
+ * P1-C4：运营按 id+agentKey 删除一条记忆（纠正脏记忆）。返回是否命中。
+ * tenantId 传入则叠加租户校验，防跨租户越权删除（超管不传 = 平台级）。
+ */
+export async function deleteAgentMemory(agentKey: string, id: string, tenantId?: string): Promise<boolean> {
+  const r = await prisma.memory.deleteMany({ where: { id, agentKey, ...(tenantId ? { tenantId } : {}) } });
   return r.count > 0;
 }
 

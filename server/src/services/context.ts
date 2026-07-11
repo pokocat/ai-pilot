@@ -19,6 +19,7 @@ import { resolveMode, modeDirective, detectInnerState, roleDirective, stageDirec
 import { yearOf } from './clock.js';
 import { isFeatureEnabled } from './featureFlag.js';
 import { benchmarkBlock } from './benchmark.js';
+import { healthBlock } from './health.js';
 import { bizMetricBlock } from './bizMetric.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
@@ -116,6 +117,7 @@ export async function buildGenContext(opts: {
     fortuneOn, diagRound,
     memories, projRow, refsResult, hits,
     prescriptionEffectLine, toolMenuLine, followupTools,
+    healthLine,
   ] = await Promise.all([
     prisma.profile.findFirst({ where: { tenantId: opts.tenantId }, orderBy: { updatedAt: 'desc' } }),
     prisma.user.findUnique({ where: { id: opts.userId } }),
@@ -152,6 +154,8 @@ export async function buildGenContext(opts: {
     prescriptionEffectBlock(opts.userId).catch(() => null),
     toolMenu().catch(() => null),
     needFollowupNudge ? pendingFollowupTools(opts.userId).catch(() => []) : Promise.resolve<string[]>([]),
+    // D-3-3 月战报【健康度·军师估测】块：只读落库估测（无则不注入；写侧在月复盘收尾 maybeEstimateMonthlyHealth）。
+    healthBlock(opts.userId).catch(() => null),
   ]);
 
   // 批次 2：依赖批次 1 的 profile / user / fortune 结果。
@@ -217,6 +221,7 @@ export async function buildGenContext(opts: {
     benchmarkLine,
     bizMetricLine,
     prescriptionEffectLine,
+    healthLine,
     toolMenuLine,
     modeLine,
     stageLine,

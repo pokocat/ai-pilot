@@ -714,6 +714,38 @@ export interface AdminEcoToolCreate { id: string; name: string; desc?: string; a
 /** 更新生态工具（PATCH /admin/eco-tools/:id）：id 不可改。 */
 export interface AdminEcoToolUpdate { name?: string; desc?: string; appId?: string; path?: string; enabled?: boolean; sort?: number; }
 
+/* ────────────── WO-08：行业基准库（运营 CRUD + CSV 批量导入） ────────────── */
+/** 基准行（GET /admin/benchmarks）。p50 为空 → 注入层不引用（宁缺勿假）。 */
+export interface AdminBenchmark {
+  id: string;
+  industry: string;
+  revenueBand: string;
+  metricKey: string;
+  metricName: string;
+  unit: string;
+  p25: number | null;
+  p50: number | null;
+  p75: number | null;
+  note: string | null;
+  source: string | null;
+  enabled: boolean;
+  updatedAt: string;
+}
+/** upsert 基准行（POST /admin/benchmarks）：(industry,revenueBand,metricKey) 唯一，命中即更新。CSV 逐行导入亦走此结构。 */
+export interface AdminBenchmarkUpsert {
+  industry: string;
+  revenueBand?: string;
+  metricKey: string;
+  metricName: string;
+  unit: string;
+  p25?: number | null;
+  p50?: number | null;
+  p75?: number | null;
+  note?: string | null;
+  source?: string | null;
+  enabled?: boolean;
+}
+
 /* ────────────── D-1 / WO-12：处方多来源漏斗报表（GET /admin/prescriptions/funnel） ────────────── */
 /** 处方六态时间戳聚合（按 toolKey 分组，proposed→…→verified 为累计到达数，dismissed 独立终态）。 */
 export interface AdminPrescriptionFunnelRow {
@@ -895,6 +927,7 @@ export interface AdminUserMemory {
 // P1-C4：按 agent 跨用户浏览记忆（治理自动学习写入的脏记忆）
 export interface AdminAgentMemoryItem {
   id: string;
+  tenantId: string;
   userId: string;
   kind: string;
   text: string;

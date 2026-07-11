@@ -33,4 +33,18 @@ describe('WO-10 结构化经营周报', () => {
     const token = await login(uniquePhone(), '周报用户2');
     assert.equal((await api('PUT', '/api/biz-metrics/notadate', { token, body: { metrics: {} } })).status, 400);
   });
+
+  test('填报校验：weekStart 非周一 → 400；指标 key 不在行业模板 → 400', async () => {
+    const token = await login(uniquePhone(), '周报校验用户');
+    const user = (await prisma.user.findUnique({ where: { id: token } }))!;
+    await prisma.profile.create({ data: { tenantId: user.tenantId, industry: '餐饮' } });
+    await prisma.industryBenchmark.create({ data: { industry: '餐饮', metricKey: 'table_turnover', metricName: '翻台率', unit: '次', p50: 3 } });
+
+    // 2026-07-07 是周二 → 非周一拒绝（即便格式合法）
+    assert.equal((await api('PUT', '/api/biz-metrics/2026-07-07', { token, body: { metrics: { table_turnover: 4 } } })).status, 400);
+    // 周一 + 表外 key（repurchase_rate 不在餐饮模板）→ 拒绝
+    assert.equal((await api('PUT', '/api/biz-metrics/2026-07-06', { token, body: { metrics: { repurchase_rate: 30 } } })).status, 400);
+    // 周一 + 表内 key → 通过
+    assert.equal((await api('PUT', '/api/biz-metrics/2026-07-06', { token, body: { metrics: { table_turnover: 4 } } })).status, 200);
+  });
 });

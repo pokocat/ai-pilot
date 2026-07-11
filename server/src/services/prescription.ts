@@ -117,7 +117,7 @@ interface OutcomeEntry { period: string; metrics: { posts: number; leads: number
 const nonNeg = (v: unknown): number => (typeof v === 'number' && v >= 0 && Number.isFinite(v) ? v : 0);
 const hasPositive = (m: OutcomeEntry['metrics']): boolean => m.posts > 0 || m.leads > 0 || m.gmv > 0;
 
-/** 回填一期效果：追加到 outcomeJson；首次 outcome → used；连续 ≥2 期有正指标 → verified。返回是否命中。 */
+/** 回填一期效果：追加到 outcomeJson；首次 outcome → used；累计 2 期有正指标 → verified（注：按累计计数，非严格连续）。返回是否命中。 */
 export async function recordOutcome(userId: string, id: string, input: OutcomeInput): Promise<boolean> {
   const rx = await prisma.prescription.findFirst({ where: { id, userId, status: { not: 'dismissed' } } });
   if (!rx) return false;

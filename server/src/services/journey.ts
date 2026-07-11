@@ -2,6 +2,7 @@
 // 但只是一个约百行的领域模块，不引依赖）。事件确定性驱动、服务端唯一写入；前端只读派生的「下一步」。
 // 依赖方向单一：本模块只 import prisma/clock/casefile 服务；事件由各路由/服务反向 fire（避免环）。
 import { prisma } from '../db.js';
+import type { Prisma } from '@prisma/client';
 import { now, dateKey, hourOf } from './clock.js';
 import { activeCasefile } from './casefile.js';
 import type { JourneyStage, JourneyNextStep, JourneyView } from '../../../shared/contracts';
@@ -28,12 +29,18 @@ async function loadOrCreate(userId: string, tenantId: string) {
 /** 触发一个 journey 事件（确定性迁移 + 首次落时间戳）。内部吞错——绝不打断宿主流程（fire-and-forget 安全）。 */
 export async function applyJourneyEvent(userId: string, tenantId: string, event: JourneyEvent): Promise<void> {
   try {
-    const j = await loadOrCreate(userId, tenantId);
-    const t = TRANSITIONS.find((x) => x.on === event && (x.from === '*' || x.from.includes(j.stage as JourneyStage)));
-    if (!t) return; // 事件在当前态无效
-    const data: { stage: string; quickScanAt?: Date; planAcceptedAt?: Date; firstReviewAt?: Date } = { stage: t.to };
-    if (t.stamp && !j[t.stamp]) data[t.stamp] = now();
-    await prisma.userJourney.update({ where: { userId }, data });
+    // 每个事件恰有一条迁移（TRANSITIONS 内 on 唯一），故按事件直接取 t，不再读当前态来选迁移。
+    const t = TRANSITIONS.find((x) => x.on === event);
+    if (!t) return;
+    await loadOrCreate(userId, tenantId); // 确保行存在（幂等 upsert，update:{}——不触碰既有态）
+    // 单语句条件迁移替代 read-then-update：把「起始态校验 + 首次落戳」下推进 updateMany 的 where，
+    // 由 DB 在写时原子重判，消除读改之间的竞态（并发事件不再互相覆盖 stage / 首次时间戳）。
+    // 有时间戳的迁移只匹配「该戳尚为 null」的行 → 天然只落一次首戳且幂等（重复触发不覆盖首值）。
+    const where: Prisma.UserJourneyWhereInput = { userId };
+    if (t.from !== '*') where.stage = { in: t.from };
+    const data: Prisma.UserJourneyUpdateManyMutationInput = { stage: t.to };
+    if (t.stamp) { where[t.stamp] = null; data[t.stamp] = now(); }
+    await prisma.userJourney.updateMany({ where, data });
   } catch (err) {
     console.error('[journey] applyEvent failed:', (err as Error).message);
   }

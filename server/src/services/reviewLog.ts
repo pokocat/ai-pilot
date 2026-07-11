@@ -72,6 +72,9 @@ export async function recordReview(args: {
   });
   // WO-07：首次日复盘 → journey executing→reviewing（review.first；仅 day 层，重复触发幂等）
   if (layer === 'day') await import('./journey.js').then((m) => m.applyJourneyEvent(args.userId, args.tenantId, 'review.first')).catch(() => {});
+  // D-3-3：月复盘落库成功 → 健康度估测挂钩（每月幂等一次；动态 import 断开与 health.ts 的静态环）。
+  // fire-and-forget：估测不阻塞月复盘返回，失败也不影响本次复盘落库。
+  if (layer === 'month') void import('./health.js').then((m) => m.maybeEstimateMonthlyHealth(args.userId, args.tenantId)).catch(() => {});
   return {
     id: row.id, layer: row.layer as ReviewLayer, date: row.date,
     ordersTotal: row.ordersTotal, ordersDone: row.ordersDone, alignedTotal: row.alignedTotal,

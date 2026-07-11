@@ -37,6 +37,7 @@ import {
   type AdminFeatureFlag,
   type AdminEcoTool,
   type AdminPrescriptionFunnel,
+  type AdminBenchmark,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
@@ -44,7 +45,7 @@ import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-type Tab = 'home' | 'users' | 'usage' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'account' | 'flags';
+type Tab = 'home' | 'users' | 'usage' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
 const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
@@ -66,6 +67,7 @@ const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'plan', icon: 'layers', label: '套餐' },
   { key: 'sku', icon: 'layers', label: '单次付费' },
   { key: 'eco', icon: 'spark', label: '生态工具' },
+  { key: 'benchmark', icon: 'trend', label: '行业基准' },
 ];
 
 export default function App() {
@@ -133,6 +135,7 @@ export default function App() {
           {tab === 'plan' && <PlansView toast={showToast} />}
           {tab === 'sku' && <SkusView toast={showToast} />}
           {tab === 'eco' && <EcoToolsView toast={showToast} />}
+          {tab === 'benchmark' && <BenchmarksView toast={showToast} />}
         </div>
 
         <nav className="adm-tab">
@@ -1372,6 +1375,157 @@ function EcoToolsView({ toast }: { toast: (m: string) => void }) {
                 <div className="cs">{t.id}{t.appId ? ` · ${t.appId}` : ' · 未填 appId'}{t.desc ? ` · ${t.desc}` : ''}</div>
               </div>
               <div className={`sw ${t.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(t); }}><i /></div>
+              <span className="edit"><Icon name="pen" size={15} /></span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// WO-08：行业基准库维护面——表格 + 行业筛选 + CSV 批量导入。
+// 宁缺勿假：p50 留空的行注入层不会引用（后端 services/benchmark.ts），面上以「未核实」标签提示运营回填。
+type BmForm = { industry: string; revenueBand: string; metricKey: string; metricName: string; unit: string; p25: string; p50: string; p75: string; note: string; source: string };
+const BM_BLANK: BmForm = { industry: '', revenueBand: '*', metricKey: '', metricName: '', unit: '', p25: '', p50: '', p75: '', note: '', source: '' };
+// CSV 行格式（与文档一致）：industry,revenueBand,metricKey,metricName,unit,p25,p50,p75,note,source
+const BM_CSV_COLS = ['industry', 'revenueBand', 'metricKey', 'metricName', 'unit', 'p25', 'p50', 'p75', 'note', 'source'] as const;
+const bmNumOrNull = (s: string): number | null => { const t = s.trim(); if (!t) return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
+const bmRowToForm = (b: AdminBenchmark): BmForm => ({
+  industry: b.industry, revenueBand: b.revenueBand, metricKey: b.metricKey, metricName: b.metricName, unit: b.unit,
+  p25: b.p25 == null ? '' : String(b.p25), p50: b.p50 == null ? '' : String(b.p50), p75: b.p75 == null ? '' : String(b.p75),
+  note: b.note ?? '', source: b.source ?? '',
+});
+
+function BenchmarksView({ toast }: { toast: (m: string) => void }) {
+  const [list, setList] = useState<AdminBenchmark[]>([]);
+  const [industry, setIndustry] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<BmForm>(BM_BLANK);
+  const [importing, setImporting] = useState(false);
+  const load = () => api.benchmarks().then(setList).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const set = (p: Partial<BmForm>) => setForm((f) => ({ ...f, ...p }));
+  const industries = [...new Set(list.map((b) => b.industry))].sort();
+  const shown = industry ? list.filter((b) => b.industry === industry) : list;
+
+  const upsert = async (): Promise<boolean> => {
+    if (!form.industry.trim()) { toast('请填写行业'); return false; }
+    if (!form.metricKey.trim()) { toast('请填写指标 key'); return false; }
+    if (!form.metricName.trim()) { toast('请填写指标名'); return false; }
+    if (!form.unit.trim()) { toast('请填写单位'); return false; }
+    await api.upsertBenchmark({
+      industry: form.industry.trim(), revenueBand: form.revenueBand.trim() || '*',
+      metricKey: form.metricKey.trim(), metricName: form.metricName.trim(), unit: form.unit.trim(),
+      p25: bmNumOrNull(form.p25), p50: bmNumOrNull(form.p50), p75: bmNumOrNull(form.p75),
+      note: form.note.trim() || null, source: form.source.trim() || null,
+    });
+    return true;
+  };
+  const create = async () => {
+    try { if (await upsert()) { setAdding(false); setForm(BM_BLANK); await load(); toast('已保存基准行'); } }
+    catch (e) { toast((e as Error)?.message || '保存失败'); }
+  };
+  const save = async () => {
+    try { if (await upsert()) { setEditId(null); await load(); toast('基准行已更新'); } }
+    catch (e) { toast((e as Error)?.message || '保存失败'); }
+  };
+  const remove = async (b: AdminBenchmark) => {
+    if (!window.confirm(`确认删除「${b.industry} · ${b.metricName}」这条基准？`)) return;
+    try { await api.deleteBenchmark(b.id); await load(); toast('已删除'); }
+    catch (e) { toast((e as Error)?.message || '删除失败'); }
+  };
+
+  // CSV 批量导入：前端逐行解析后调 upsert（幂等，(行业,营收段,key) 命中即更新）。
+  const onImport = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // 允许重复选同一文件
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      let ok = 0, skipped = 0;
+      for (const line of rows) {
+        const cells = line.split(',').map((c) => c.trim());
+        if (cells[0]?.toLowerCase() === BM_CSV_COLS[0]) continue; // 跳过表头行
+        const [ind, band, key, name, unit, p25, p50, p75, note, source] = cells;
+        if (!ind || !key || !name || !unit) { skipped++; continue; }
+        try {
+          await api.upsertBenchmark({
+            industry: ind, revenueBand: band || '*', metricKey: key, metricName: name, unit,
+            p25: bmNumOrNull(p25 ?? ''), p50: bmNumOrNull(p50 ?? ''), p75: bmNumOrNull(p75 ?? ''),
+            note: (note ?? '').trim() || null, source: (source ?? '').trim() || null,
+          });
+          ok++;
+        } catch { skipped++; }
+      }
+      await load();
+      toast(`导入完成：成功 ${ok} 行${skipped ? ` · 跳过 ${skipped} 行` : ''}`);
+    } catch { toast('CSV 解析失败'); }
+    setImporting(false);
+  };
+
+  return (
+    <>
+      <div className="sec-h"><span className="t">行业基准</span><span className="s">分位数据 · p50 空则不注入（宁缺勿假）</span></div>
+      <div className="pad">
+        <div className="crd-actions">
+          <button className={`mini-btn ${industry === '' ? 'primary' : ''}`} onClick={() => setIndustry('')}>全部</button>
+          {industries.map((ind) => (
+            <button key={ind} className={`mini-btn ${industry === ind ? 'primary' : ''}`} onClick={() => setIndustry(ind)}>{ind}</button>
+          ))}
+        </div>
+        <label className="add-btn full">
+          <Icon name="up" size={15} /> {importing ? '导入中…' : 'CSV 批量导入（industry,revenueBand,metricKey,metricName,unit,p25,p50,p75,note,source）'}
+          <input className="file-hidden" type="file" accept=".csv,text/csv" onChange={onImport} disabled={importing} />
+        </label>
+        {!adding ? (
+          <button className="add-btn full" onClick={() => { setEditId(null); setForm({ ...BM_BLANK, industry }); setAdding(true); }}><Icon name="spark" size={15} /> 新增基准行</button>
+        ) : (
+          <div className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">行业（与用户档案口径一致）</div><input className="ai-input" value={form.industry} onChange={(e) => set({ industry: e.target.value })} placeholder="如 美业/大健康" /></div>
+            <div className="ai-field"><div className="ai-fl">营收段（* = 不分段）</div><input className="ai-input" value={form.revenueBand} onChange={(e) => set({ revenueBand: e.target.value })} placeholder="* 或 100-500万" /></div>
+            <div className="ai-field"><div className="ai-fl">指标 key（与周报填报口径一致）</div><input className="ai-input" value={form.metricKey} onChange={(e) => set({ metricKey: e.target.value })} placeholder="如 repurchase_rate" /></div>
+            <div className="ai-field"><div className="ai-fl">指标名</div><input className="ai-input" value={form.metricName} onChange={(e) => set({ metricName: e.target.value })} placeholder="如 复购率" /></div>
+            <div className="ai-field"><div className="ai-fl">单位</div><input className="ai-input" value={form.unit} onChange={(e) => set({ unit: e.target.value })} placeholder="% / 元 / 天" /></div>
+            <div className="ai-field"><div className="ai-fl">P25（留空即不填）</div><input className="ai-input" value={form.p25} onChange={(e) => set({ p25: e.target.value })} placeholder="留空 = 未核实" /></div>
+            <div className="ai-field"><div className="ai-fl">P50 中位（空则该指标不注入）</div><input className="ai-input" value={form.p50} onChange={(e) => set({ p50: e.target.value })} placeholder="留空 = 未核实，不注入" /></div>
+            <div className="ai-field"><div className="ai-fl">P75（留空即不填）</div><input className="ai-input" value={form.p75} onChange={(e) => set({ p75: e.target.value })} placeholder="留空 = 未核实" /></div>
+            <div className="ai-field"><div className="ai-fl">口径说明 note</div><input className="ai-input" value={form.note} onChange={(e) => set({ note: e.target.value })} placeholder="如 待运营核实" /></div>
+            <div className="ai-field"><div className="ai-fl">数据来源 source</div><input className="ai-input" value={form.source} onChange={(e) => set({ source: e.target.value })} placeholder="来源出处（可选）" /></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => { setAdding(false); setForm(BM_BLANK); }}>取消</button>
+              <button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 保存</button>
+            </div>
+          </div>
+        )}
+        {shown.length === 0 && !adding && <div className="empty">暂无基准行。可手动新增或 CSV 导入。</div>}
+        {shown.map((b) => editId === b.id ? (
+          <div key={b.id} className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">行业 · 营收段 · key（唯一键，改动即新增另一条）</div><input className="ai-input" value={`${form.industry} · ${form.revenueBand} · ${form.metricKey}`} disabled /></div>
+            <div className="ai-field"><div className="ai-fl">指标名</div><input className="ai-input" value={form.metricName} onChange={(e) => set({ metricName: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">单位</div><input className="ai-input" value={form.unit} onChange={(e) => set({ unit: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">P25</div><input className="ai-input" value={form.p25} onChange={(e) => set({ p25: e.target.value })} placeholder="留空 = 未核实" /></div>
+            <div className="ai-field"><div className="ai-fl">P50 中位（空则不注入）</div><input className="ai-input" value={form.p50} onChange={(e) => set({ p50: e.target.value })} placeholder="留空 = 未核实，不注入" /></div>
+            <div className="ai-field"><div className="ai-fl">P75</div><input className="ai-input" value={form.p75} onChange={(e) => set({ p75: e.target.value })} placeholder="留空 = 未核实" /></div>
+            <div className="ai-field"><div className="ai-fl">口径说明 note</div><input className="ai-input" value={form.note} onChange={(e) => set({ note: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">数据来源 source</div><input className="ai-input" value={form.source} onChange={(e) => set({ source: e.target.value })} /></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button>
+              <button className="ai-btn ghost" onClick={() => remove(b)}><Icon name="alert" size={14} /> 删除</button>
+              <button className="ai-btn primary" onClick={save}><Icon name="check" size={14} /> 保存</button>
+            </div>
+          </div>
+        ) : (
+          <div key={b.id} className="crd" onClick={() => { setAdding(false); setEditId(b.id); setForm(bmRowToForm(b)); }}>
+            <div className="crd-row">
+              <span className="crd-ic"><Icon name="trend" size={18} /></span>
+              <div className="crd-b">
+                <div className="ct">{b.metricName} <span className="tag">{b.industry}</span>{b.p50 == null && <span className="tag warn">未核实</span>}{!b.enabled && <span className="tag off">停用</span>}</div>
+                <div className="cs">{b.metricKey}{b.revenueBand !== '*' ? ` · ${b.revenueBand}` : ''} · 中位 {b.p50 == null ? '—' : `${b.p50}${b.unit}`}{b.p25 != null && b.p75 != null ? `（P25 ${b.p25} / P75 ${b.p75}）` : ''}{b.note ? ` · ${b.note}` : ''}</div>
+              </div>
               <span className="edit"><Icon name="pen" size={15} /></span>
             </div>
           </div>

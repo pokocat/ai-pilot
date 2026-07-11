@@ -53,6 +53,8 @@ export interface GenContext {
   bizMetricLine?: string | null; // WO-10：本周经营序列 + 与基准差
   // WO-14 月战报【处方效果】块：有 outcome 的处方累计指标 + 对照 CasefileMetric 的占比（系统算），无 outcome 不注入。
   prescriptionEffectLine?: string | null;
+  // D-3-3 月战报【健康度·军师估测】块：只读 StrategicProfile.kpiJson.health 落库值（高/中/低水位，禁百分比），无估测不注入。
+  healthLine?: string | null;
   // WO-12【可开方工具表】：enabled agents+EcoTool 的 key/名称/desc + 开方指令；仅方案生成（kind=deliverable）轮采用。
   toolMenuLine?: string | null;
   // 段位·里程碑（M2 PR-10）：真实门槛派生块，新用户零记录不注入。
@@ -319,6 +321,7 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   if (ctx.benchmarkLine) blocks.push(ctx.benchmarkLine); // 行业基准：DB 分位数（WO-08；数字以此为准，禁自算）
   if (ctx.bizMetricLine) blocks.push(ctx.bizMetricLine); // 经营序列：本周实报 + 与基准差（WO-10；差由系统算）
   if (ctx.prescriptionEffectLine) blocks.push(ctx.prescriptionEffectLine); // 处方效果：见效处方累计指标 + 占比（WO-14；月战报引用，系统算）
+  if (ctx.healthLine) blocks.push(ctx.healthLine); // 健康度·军师估测：月度落库水位（D-3-3；只读引用，禁对话现算/换算百分比）
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.dataSourceLine) blocks.push(ctx.dataSourceLine); // V7-07：已接入数据源清单（军师可据此要证据）
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);

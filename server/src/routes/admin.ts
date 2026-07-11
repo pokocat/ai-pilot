@@ -47,6 +47,7 @@ import type {
   EvalRunItem, EvalRunDetail, EvalCaseResultItem, StartEvalRunRequest, PricingTier,
   AdminProjectItem, AdminReportItem,
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
+  AdminBenchmark, AdminBenchmarkUpsert,
 } from '../../../shared/contracts';
 import { Prisma } from '@prisma/client';
 
@@ -491,13 +492,16 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // —— P1-C4：按 agent 跨用户浏览/纠正记忆（治理 auto-learn 写入的脏记忆，此前后台只能按单用户查删）——
-  app.get<{ Params: { key: string }; Querystring: { limit?: string } }>('/admin/agents/:key/memories', async (req): Promise<AdminAgentMemoryView> => {
-    return { items: await listAgentMemories(req.params.key, Number(req.query.limit) || 200) };
+  app.get<{ Params: { key: string }; Querystring: { limit?: string; tenantId?: string } }>('/admin/agents/:key/memories', async (req): Promise<AdminAgentMemoryView> => {
+    // tenantId 可选：传入则限定单租户作用域（治理时聚焦某企业），不传 = 平台级全量。
+    const tenantId = req.query.tenantId?.trim() || undefined;
+    return { items: await listAgentMemories(req.params.key, Number(req.query.limit) || 200, tenantId) };
   });
-  app.delete<{ Params: { key: string; mid: string } }>('/admin/agents/:key/memories/:mid', async (req, reply) => {
-    const ok = await deleteAgentMemory(req.params.key, req.params.mid);
+  app.delete<{ Params: { key: string; mid: string }; Querystring: { tenantId?: string } }>('/admin/agents/:key/memories/:mid', async (req, reply) => {
+    const tenantId = req.query.tenantId?.trim() || undefined;
+    const ok = await deleteAgentMemory(req.params.key, req.params.mid, tenantId);
     if (!ok) return reply.code(404).send({ error: 'not found' });
-    await recordAudit({ action: 'admin.agent.memory.delete', payload: { agentKey: req.params.key, memoryId: req.params.mid } });
+    await recordAudit({ tenantId, action: 'admin.agent.memory.delete', payload: { agentKey: req.params.key, memoryId: req.params.mid, tenantScoped: !!tenantId } });
     return { ok: true };
   });
 
@@ -1227,6 +1231,61 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!existing) return reply.code(404).send({ error: '生态工具不存在', code: 'ECO_NOT_FOUND' });
     await prisma.ecoTool.delete({ where: { id: req.params.id } });
     await recordAudit({ action: 'admin.ecoTool.delete', payload: { id: req.params.id } });
+    return { ok: true };
+  });
+
+  // —— WO-08：行业基准库运营维护（列表带行业筛选 / upsert / 删除；CSV 由前端逐行拆成 upsert）——
+  const bmView = (b: {
+    id: string; industry: string; revenueBand: string; metricKey: string; metricName: string; unit: string;
+    p25: number | null; p50: number | null; p75: number | null; note: string | null; source: string | null; enabled: boolean; updatedAt: Date;
+  }): AdminBenchmark => ({
+    id: b.id, industry: b.industry, revenueBand: b.revenueBand, metricKey: b.metricKey, metricName: b.metricName, unit: b.unit,
+    p25: b.p25, p50: b.p50, p75: b.p75, note: b.note, source: b.source, enabled: b.enabled, updatedAt: isoSecond(b.updatedAt),
+  });
+  const numOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+  app.get<{ Querystring: { industry?: string } }>('/admin/benchmarks', async (req): Promise<AdminBenchmark[]> => {
+    const industry = req.query.industry?.trim();
+    const rows = await prisma.industryBenchmark.findMany({
+      where: industry ? { industry } : undefined,
+      orderBy: [{ industry: 'asc' }, { revenueBand: 'asc' }, { metricKey: 'asc' }],
+    });
+    return rows.map(bmView);
+  });
+
+  app.post<{ Body: AdminBenchmarkUpsert }>('/admin/benchmarks', async (req, reply): Promise<AdminBenchmark | void> => {
+    const b = req.body ?? ({} as AdminBenchmarkUpsert);
+    const industry = String(b.industry ?? '').trim();
+    const metricKey = String(b.metricKey ?? '').trim();
+    const metricName = String(b.metricName ?? '').trim();
+    const unit = String(b.unit ?? '').trim();
+    const revenueBand = String(b.revenueBand ?? '*').trim() || '*';
+    if (!industry) return reply.code(400).send({ error: '请填写行业', code: 'BM_INDUSTRY_REQUIRED' });
+    if (!metricKey) return reply.code(400).send({ error: '请填写指标 key', code: 'BM_KEY_REQUIRED' });
+    if (!metricName) return reply.code(400).send({ error: '请填写指标名', code: 'BM_NAME_REQUIRED' });
+    if (!unit) return reply.code(400).send({ error: '请填写单位', code: 'BM_UNIT_REQUIRED' });
+    const data = {
+      metricName: metricName.slice(0, 40), unit: unit.slice(0, 16),
+      p25: numOrNull(b.p25), p50: numOrNull(b.p50), p75: numOrNull(b.p75),
+      note: b.note != null ? String(b.note).trim().slice(0, 200) || null : null,
+      source: b.source != null ? String(b.source).trim().slice(0, 200) || null : null,
+      enabled: b.enabled !== false, // 缺省启用
+    };
+    // (industry,revenueBand,metricKey) 唯一 → upsert：命中即更新，未命中即建（CSV 重复导入幂等）。
+    const row = await prisma.industryBenchmark.upsert({
+      where: { industry_revenueBand_metricKey: { industry, revenueBand, metricKey } },
+      update: data,
+      create: { industry, revenueBand, metricKey, ...data },
+    });
+    await recordAudit({ action: 'admin.benchmark.upsert', payload: { id: row.id, industry, metricKey, hasP50: row.p50 != null } });
+    return bmView(row);
+  });
+
+  app.delete<{ Params: { id: string } }>('/admin/benchmarks/:id', async (req, reply): Promise<{ ok: boolean } | void> => {
+    const existing = await prisma.industryBenchmark.findUnique({ where: { id: req.params.id } });
+    if (!existing) return reply.code(404).send({ error: '基准行不存在', code: 'BM_NOT_FOUND' });
+    await prisma.industryBenchmark.delete({ where: { id: req.params.id } });
+    await recordAudit({ action: 'admin.benchmark.delete', payload: { id: req.params.id, industry: existing.industry, metricKey: existing.metricKey } });
     return { ok: true };
   });
 }

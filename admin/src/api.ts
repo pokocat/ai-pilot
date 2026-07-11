@@ -112,9 +112,11 @@ import type {
   AdminSku, AdminSkuUpdate, ServiceAssignmentView, ServiceAssignmentUpdate,
   AdminFeatureFlag,
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
+  AdminBenchmark, AdminBenchmarkUpsert,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
+export type { AdminBenchmark, AdminBenchmarkUpsert } from '../../shared/contracts';
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
@@ -198,6 +200,10 @@ export const api = {
   createEcoTool: (body: AdminEcoToolCreate) => req<AdminEcoTool>('/admin/eco-tools', 'POST', body),
   updateEcoTool: (id: string, body: AdminEcoToolUpdate) => req<AdminEcoTool>(`/admin/eco-tools/${id}`, 'PATCH', body),
   deleteEcoTool: (id: string) => req<{ ok: boolean }>(`/admin/eco-tools/${id}`, 'DELETE'),
+  // —— WO-08 行业基准库 CRUD（列表带行业筛选 / upsert / 删除；CSV 前端逐行 upsert）——
+  benchmarks: (industry?: string) => req<AdminBenchmark[]>(`/admin/benchmarks${industry ? `?industry=${encodeURIComponent(industry)}` : ''}`),
+  upsertBenchmark: (body: AdminBenchmarkUpsert) => req<AdminBenchmark>('/admin/benchmarks', 'POST', body),
+  deleteBenchmark: (id: string) => req<{ ok: boolean }>(`/admin/benchmarks/${id}`, 'DELETE'),
   // —— 社群服务分配（按用户）——
   userService: (id: string) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`),
   setUserService: (id: string, body: ServiceAssignmentUpdate) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`, 'PUT', body),
