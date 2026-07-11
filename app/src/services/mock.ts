@@ -15,7 +15,8 @@ import type {
   SkuView, SkuOrderResult, BattleForce, BattleCommitResult,
   DataSourcesView, DataSourceView, DataSourceStatus, ModulesView, ModuleView,
   ReminderView, WorkbenchView, ServiceAssignmentView, SearchHit, SearchResult,
-  KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, ConfirmResult, StagedUploadResult,
+  KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, OrganizeItem, StagedUploadResult, ConfirmResult,
+  KnowledgeBatch, KnowledgeBatchFile,
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
 } from '../../../shared/contracts';
 import type { ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek } from './api';
@@ -147,6 +148,14 @@ function classifyMock(text: string): string {
   if (/案例|证明|评价|结果/.test(t)) return 'proof';
   return 'unknown';
 }
+// V7-06：整理后一句摘要（mock 确定性，按类目生成）。
+const BIZ_SUMMARY: Record<string, string> = {
+  founder: '老板个人背景与定位要点', company: '企业组织与业务概况',
+  finance: '收入成本与现金流关键数字', content: '内容选题与脚本素材',
+  growth: '获客漏斗与转化线索', customer: '客户问答与常见反馈',
+  proof: '成交案例与结果佐证', unknown: '待进一步识别归类',
+};
+function mockSummary(cat: string): string { return BIZ_SUMMARY[cat] || BIZ_SUMMARY.unknown; }
 
 // ── 每账号(token)隔离、落 Taro storage 的内存库 ──
 interface SessionRec {
@@ -167,6 +176,7 @@ interface KnowledgeRec {
   id: string; projectId: string | null; kind: string; title: string | null; text: string;
   sourceType: string; sourceId: string | null; tags: string[]; at: string;
   stage?: KnowledgeStage; bizCategory?: string; batchId?: string; fileType?: string; fileSize?: number; dupOfId?: string; // V7-06
+  status?: string; summary?: string; // V7-06：单份解析状态（ready/parsing/failed）+ 整理后一句摘要
 }
 interface ProjectRec {
   id: string; name: string; slug: string; icon: string; summary: string | null;
@@ -185,6 +195,7 @@ interface UserData {
   battleCommittedDate?: string; // V7-04：今日已 commit 日期（幂等）
   dataSourceStatus?: Record<string, DataSourceStatus>; // V7-07
   moduleState?: Record<string, { hidden?: boolean; sortOrder?: number }>; // V7-08
+  knowledgeSeeded?: boolean; // V7-06：演示待整理批次已注入（仅注入一次）
 }
 
 const uid = (p = '') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -894,7 +905,7 @@ export const mock = {
     const id = uid('kn-'); const bid = batchId || uid('batch-');
     const stage: KnowledgeStage = staged ? 'staging' : 'confirmed';
     const types = ['表', 'PDF', '图', '文'];
-    (d.knowledge ??= []).unshift({ id, projectId: null, kind: 'document', title: `上传资料 ${d.knowledge.length + 1}`, text: '（mock 待整理资料）', sourceType: 'upload', sourceId: null, tags: [], at: now(), stage, batchId: staged ? bid : undefined, fileType: types[d.knowledge.length % types.length], fileSize: 120000 });
+    (d.knowledge ??= []).unshift({ id, projectId: null, kind: 'document', title: `上传资料 ${d.knowledge.length + 1}`, text: '（mock 待整理资料）', sourceType: 'upload', sourceId: null, tags: [], at: now(), stage, batchId: staged ? bid : undefined, fileType: types[d.knowledge.length % types.length], fileSize: 120000, status: staged ? 'ready' : 'ready' });
     save(token, d);
     return delay({ id, status: staged ? 'staging' : 'ready', stage, batchId: staged ? bid : undefined });
   },
@@ -902,8 +913,9 @@ export const mock = {
   // 走查用确定性样例：k-fin-demo=财务表(canAnalyze) / k-doc-demo=非财务(无体检入口)。
   async knowledgeDocs(): Promise<KnowledgeDocRow[]> {
     return delay([
-      { id: 'k-fin-demo', kind: 'document', title: '3 月经营流水表', sourceType: 'upload', status: 'ready', fileName: '流水表.xlsx', fileType: 'xlsx', fileSize: 128000, chunkCount: 4, projectId: null, error: null, createdAt: now(), updatedAt: now() },
-      { id: 'k-doc-demo', kind: 'document', title: '产品介绍', sourceType: 'upload', status: 'ready', fileName: '产品介绍.pdf', fileType: 'pdf', fileSize: 96000, chunkCount: 3, projectId: null, error: null, createdAt: now(), updatedAt: now() },
+      { id: 'k-fin-demo', kind: 'document', title: '3 月经营流水表', sourceType: 'upload', status: 'ready', stage: 'confirmed', fileName: '流水表.xlsx', fileType: 'xlsx', fileSize: 128000, chunkCount: 4, projectId: null, error: null, createdAt: now(), updatedAt: now() },
+      { id: 'k-doc-demo', kind: 'document', title: '产品介绍', sourceType: 'upload', status: 'ready', stage: 'confirmed', fileName: '产品介绍.pdf', fileType: 'pdf', fileSize: 96000, chunkCount: 3, projectId: null, error: null, createdAt: now(), updatedAt: now() },
+      { id: 'k-staging-demo', kind: 'document', title: '客户名单', sourceType: 'upload', status: 'parsing', stage: 'staging', fileName: '客户名单.csv', fileType: 'csv', fileSize: 24000, chunkCount: 0, projectId: null, error: null, createdAt: now(), updatedAt: now() },
     ]);
   },
   // F7：mock 从 reject 改为返回可用空壳；id 含 'fin' 视作财务/经营表 → canAnalyze=true。
@@ -950,40 +962,68 @@ export const mock = {
     return delay({ reportId: saved.reportId, version: saved.version });
   },
   async knowledgePipeline(): Promise<KnowledgePipelineView> {
-    const { d } = current();
+    const { token, d } = current();
+    // 演示：首次进入注入一个待整理批次（3 份，含 1 份 failed + 1 份重复），保证全动线可走查。
+    if (!d.knowledgeSeeded) {
+      d.knowledgeSeeded = true;
+      const bid = 'batch-demo';
+      const mk = (title: string, size: number, status: string, text: string): KnowledgeRec => ({
+        id: uid('kn-'), projectId: null, kind: 'document', title, text, sourceType: 'upload', sourceId: null,
+        tags: [], at: now(), stage: 'staging', batchId: bid, fileType: (title.split('.').pop() || '文'), fileSize: size, status,
+      });
+      (d.knowledge ??= []).unshift(
+        mk('月度经营流水.xlsx', 128000, 'ready', '财务 营收 成本 现金 流水'),
+        mk('月度经营流水.xlsx', 128000, 'ready', '财务 营收 成本 现金 流水'),
+        mk('损坏的扫描件.pdf', 90000, 'failed', '扫描件'),
+      );
+      save(token, d);
+    }
     const items = d.knowledge ?? [];
     const by = (st: KnowledgeStage) => items.filter((k) => (k.stage ?? 'confirmed') === st);
     const confirmed = by('confirmed');
-    const folders: KnowledgePipelineFolder[] = Object.keys(BIZ_LABEL)
+    const confirmedFolders: KnowledgePipelineFolder[] = Object.keys(BIZ_LABEL)
       .map((key) => ({ key, label: BIZ_LABEL[key], count: confirmed.filter((k) => k.bizCategory === key).length, stage: 'confirmed' as KnowledgeStage }))
       .filter((f) => f.count > 0);
+    const optimized = by('optimized');
+    const optimizedFolders: KnowledgePipelineFolder[] = [...new Set(optimized.map((k) => k.bizCategory || 'unknown'))]
+      .map((key) => ({ key, label: BIZ_LABEL[key] || key, count: optimized.filter((k) => (k.bizCategory || 'unknown') === key).length, stage: 'optimized' as KnowledgeStage }));
+    const optimizedItems: OrganizeItem[] = optimized.map((k) => ({
+      id: k.id, fileName: k.title || '未命名', category: BIZ_LABEL[k.bizCategory || 'unknown'] || '待识别',
+      summary: k.summary || mockSummary(k.bizCategory || 'unknown'), isDup: !!k.dupOfId,
+    }));
     const staging = by('staging');
     const batchMap = new Map<string, KnowledgeRec[]>();
     staging.forEach((k) => { const b = k.batchId || 'default'; batchMap.set(b, [...(batchMap.get(b) ?? []), k]); });
-    const batches = [...batchMap.entries()].map(([id, ks]) => {
+    const batches: KnowledgeBatch[] = [...batchMap.entries()].map(([id, ks]) => {
       const tm = new Map<string, number>(); ks.forEach((k) => tm.set(k.fileType || '文', (tm.get(k.fileType || '文') ?? 0) + 1));
-      return { id, count: ks.length, status: 'uploaded' as const, typeStats: [...tm.entries()].map(([label, count]) => ({ label, count })) };
+      const files: KnowledgeBatchFile[] = ks.map((k) => ({ id: k.id, fileName: k.title || '未命名', status: k.status || 'ready', fileSize: k.fileSize ?? null }));
+      return { id, count: ks.length, status: 'uploaded' as const, typeStats: [...tm.entries()].map(([label, count]) => ({ label, count })), files };
     });
     const usedBytes = items.reduce((sum, k) => sum + (k.fileSize ?? 0), 0);
     return delay({
-      counts: { staging: staging.length, optimized: by('optimized').length, confirmed: confirmed.length },
+      counts: { staging: staging.length, optimized: optimized.length, confirmed: confirmed.length },
       quota: { usedDocs: staging.length + confirmed.length, freeDocs: 30, usedBytes, freeBytes: 200 * 1024 * 1024 },
-      folders, batches,
+      folders: [...confirmedFolders, ...optimizedFolders], batches, optimizedItems,
     });
   },
   async organizeBatch(batchId: string): Promise<OrganizeResult> {
     const { token, d } = current();
-    const items = (d.knowledge ?? []).filter((k) => k.batchId === batchId && (k.stage ?? 'confirmed') === 'staging');
-    let dedup = 0; const seen = new Set<string>();
+    // 解析失败的文件不参与整理（留在待整理区，提示删除重传）。
+    const items = (d.knowledge ?? []).filter((k) => k.batchId === batchId && (k.stage ?? 'confirmed') === 'staging' && k.status !== 'failed');
+    let dedup = 0; const seen = new Map<string, string>();
     items.forEach((k) => {
       const key = `${k.title}|${k.fileSize}`;
-      if (seen.has(key)) { k.dupOfId = 'dup'; dedup++; } else seen.add(key);
-      k.bizCategory = classifyMock(k.title || k.text); k.stage = 'optimized';
+      if (seen.has(key)) { k.dupOfId = seen.get(key)!; dedup++; } else seen.set(key, k.title || k.id);
+      k.bizCategory = classifyMock(k.title || k.text); k.summary = mockSummary(k.bizCategory); k.stage = 'optimized';
     });
     save(token, d);
     const folders: KnowledgePipelineFolder[] = [...new Set(items.map((k) => k.bizCategory!))]
       .map((key) => ({ key, label: BIZ_LABEL[key] || key, count: items.filter((k) => k.bizCategory === key).length, stage: 'optimized' as KnowledgeStage }));
-    return delay({ batchId, status: 'organized', total: items.length, dedup, folders });
+    const orgItems: OrganizeItem[] = items.map((k) => ({
+      id: k.id, fileName: k.title || '未命名', category: BIZ_LABEL[k.bizCategory || 'unknown'] || '待识别',
+      summary: k.summary || mockSummary(k.bizCategory || 'unknown'), isDup: !!k.dupOfId,
+    }));
+    return delay({ batchId, status: 'organized', total: items.length, dedup, folders, items: orgItems });
   },
   async confirmKnowledge(body: { ids?: string[]; batchId?: string }): Promise<ConfirmResult> {
     const { token, d } = current();
@@ -996,7 +1036,21 @@ export const mock = {
     const { d } = current();
     if (!(d.skuServices ?? []).includes('deep-organize')) throw Object.assign(new Error('需购买深度整理'), { code: 'SKU_REQUIRED', data: { code: 'SKU_REQUIRED', skuKey: 'deep-organize' } });
     const r = await this.organizeBatch(batchId);
-    return { ...r, deep: true };
+    // 深度整理额外产出一份《资料整理报告》，回传 reportId 供前端跳方案详情。
+    const { token, d: d2 } = current();
+    const content: Deliverable = {
+      title: '资料整理报告', icon: 'doc', meta: '军师深度整理',
+      trust: `本批共 ${r.total} 份，去重 ${r.dedup} 份，已按经营口径归类并提炼要点。`,
+      sections: [
+        { h: '归类结果', list: r.items.map((it) => `${it.fileName} → ${it.category}${it.isDup ? '（重复已合并）' : ''}`) },
+        { h: '提炼要点', list: r.items.filter((it) => !it.isDup).map((it) => `${it.fileName}：${it.summary}`) },
+        { h: '下一步', b: '确认入库后，这批资料即可被战局、方案与后续对话直接调用。' },
+      ],
+      actions: ['确认入库'],
+    };
+    const saved = saveReportVersionLocal(d2, { title: content.title, type: '资料整理', agentKey: 'general', projectId: null, content, authorKind: 'agent' });
+    save(token, d2);
+    return { ...r, deep: true, reportId: saved.reportId, reportVersion: saved.version };
   },
 
   async setColor(color: string) {

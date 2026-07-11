@@ -8,6 +8,10 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-11** · **知识库可见性修复（用户反馈「看不到上传了啥/整理成了啥」→ 诊断 7 断点全修；主模型规划 + Opus 执行）**：
+  - **server**：批次逐份文件清单（`KnowledgeBatch.files`，原 select 层丢字段）+ 整理结果逐份分类/摘要回传（`OrganizeResult.items`，摘要本已写库未回传）+ 已优化区持久化数据源（`optimizedItems`，原为前端瞬态 state 切 tab 即失）+ 资料库透出 `stage`（staged 失败项如实 failed）；**深度整理 ¥39 差异化产出《资料整理报告》**（逐份 structuredMetered 精炼摘要·幂等跳过·失败不编造 + 5 节报告走 saveReportVersion 版本去重 + reserveQuota(0.3) 保守结算），原付费产出与免费仅差两字标题。
+  - **app**：待整理批次改可展开逐份清单（状态徽章「已备好/在读/排队/读不出」+失败标红删重传）；整理结果改逐份归档表（文件→类目·摘要、重复合并标注、深度整理「查看整理报告」跳方案详情）；已优化区改 pipeline 持久数据源（刷新不丢、计数一致）；资料库列表/详情 stage 标注 + 待整理副文案 +解析退避轮询（2s→4s→8s，30s 上限+下拉刷新）。
+  - **附带**：修 reviewLog 测试时区时间炸弹（根因=测试用本地 TZ 造数 vs 实现按上海日历，实现无 bug；注入时钟后 4 时区验证通过）。server 512/512、app tsc/h5 构建绿。
 - **2026-07-11** · **生产部署核销 `5457bd9`（批次三全量）**：备份 `/tmp/junshi-db-backup-20260711-222749.dump`(1.3M) → deploy-prod.sh（db push 5 处纯加法过、未用 ACCEPT_DATA_LOSS）→ `seedBenchmarks.ts` 插 17 行基准占位（p50 空待运营回填，回填前不注入）→ 验证 health/agents 4+1/admin/deploy-version/服务 active 全过。**待办：weapp 发版（分包结构有变建议先真机回归）；运营录入 EcoTool appId（须同主体关联）与基准 p50 回填。**
 - **2026-07-11** · **批次三·第二波（WO-08 admin 面 + D-3-3 健康度 + D-3-4 转图片 + D-3-7 前端 + 主包瘦身；主模型规划 + Opus 执行）**：
   - **① WO-08 行业基准库 admin 维护面**：CRUD + CSV 逐行导入 + 三行业占位种子（p50 留空「待运营核实」，空分位不注入、幂等 create-only 不覆盖运营真数）。

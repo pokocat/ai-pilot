@@ -10,7 +10,7 @@ import { store } from '../../services/store';
 import { checkUpload } from '../../services/uploadGuard';
 import {
   api,
-  type KnowledgePipelineView, type OrganizeResult,
+  type KnowledgePipelineView, type OrganizeResult, type OrganizeItem, type KnowledgeBatchFile,
   type DataSourcesView, type DataSourceView,
   type ModulesView, type ModuleView, type ModuleTier, type ModuleGroup,
   type ReportItem,
@@ -31,6 +31,14 @@ const isWeapp = process.env.TARO_ENV === 'weapp';
 
 // V7-06：资料整理 4 步动画（逐字，设计规格 §6.3）。
 const PROC_STEPS = ['识别资料来源和文件类型', '去重并标记敏感信息', '按案卷目标生成分类结构', '输出待确认资料和问题清单'];
+// V7-06：批次内单份文件解析状态 → 军师语汇徽章。
+const FILE_STATUS: Record<string, { label: string; cls: string }> = {
+  ready: { label: '已备好', cls: 'fs-ok' },
+  parsing: { label: '在读', cls: 'fs-run' },
+  embedding: { label: '在读', cls: 'fs-run' },
+  pending: { label: '排队', cls: 'fs-wait' },
+  failed: { label: '读不出', cls: 'fs-bad' },
+};
 // F15：已优化 / 知识库无真实数据时，改真空态引导，不再渲染假样例（原 OPTIMIZED_ROWS / FOLDER_FALLBACK 已移除）。
 
 // V7-08：能力 tier → 徽章（free绿 / sku金 / credits蓝 / member黑，设计规格 §0.2）。
@@ -89,6 +97,7 @@ export default function ThinkTank() {
   const [organizeStep, setOrganizeStep] = useState(0);
   const [organized, setOrganized] = useState<OrganizeResult | null>(null);
   const [activeBatch, setActiveBatch] = useState<string | null>(null);
+  const [openBatch, setOpenBatch] = useState<Record<string, boolean>>({}); // 批次逐份清单展开态（默认展开）
 
   // —— data（V7-07）——
   const [dsView, setDsView] = useState<DataSourcesView | null>(null);
@@ -133,7 +142,12 @@ export default function ThinkTank() {
   const counts = pipe?.counts ?? { staging: 0, optimized: 0, confirmed: 0 };
   const quota = pipe?.quota ?? { usedDocs: 0, freeDocs: 30, usedBytes: 0, freeBytes: 200 * 1024 * 1024 };
   const batches = pipe?.batches ?? [];
-  const folders = pipe?.folders ?? [];
+  const allFolders = pipe?.folders ?? [];
+  const confirmedFolders = allFolders.filter((f) => f.stage === 'confirmed'); // 知识库段只取 confirmed 阶段
+  // 已优化段以 pipeline 持久数据为准（刷新后不丢），本次整理的即时结果作乐观兜底。
+  const optimizedItems: OrganizeItem[] = (pipe?.optimizedItems && pipe.optimizedItems.length)
+    ? pipe.optimizedItems
+    : (organized?.items ?? []);
 
   const chooseUpload = async () => {
     if (uploading || organizing) return;
@@ -255,6 +269,18 @@ export default function ThinkTank() {
       await loadPipeline();
       setStage('confirmed');
     } catch (e) { s.handleApiError(e); }
+  };
+
+  // 待整理批次里删除某份（解析失败的删掉重传；走既有知识删除接口）。
+  const removeStagedFile = (f: KnowledgeBatchFile) => {
+    Taro.showModal({
+      title: '删除这份资料',
+      content: `删除「${f.fileName}」？删掉后可重新上传这一份。`,
+      success: (r) => {
+        if (!r.confirm) return;
+        api.deleteKnowledge(f.id).then(() => { Taro.showToast({ title: '已删除', icon: 'none' }); loadPipeline(); }).catch((e) => s.handleApiError(e));
+      },
+    });
   };
 
   const syncKnowledge = async () => {
@@ -478,37 +504,66 @@ export default function ThinkTank() {
                             <Text className="orgd-t serif">{organized.deep ? '这一批资料已深度整理' : '这一批资料已整理'}</Text>
                             <Text className="orgd-s">共 {organized.total} 份 · 去重 {organized.dedup} 份</Text>
                           </View>
-                          <Text className="orgd-tag">已粗分</Text>
+                          <Text className="orgd-tag">已归档</Text>
                         </View>
-                        {organized.folders.map((f) => (
-                          <View key={f.key} className="organized-row">
-                            <View className="or-i"><Text>{f.label.slice(0, 1)}</Text></View>
-                            <View className="or-b"><Text className="or-t">{f.label}</Text><Text className="or-s">已归类 · 待确认入库</Text></View>
-                            <Text className="or-em">{f.count}</Text>
+                        {organized.items.map((it) => (
+                          <View key={it.id} className={`organized-row ${it.isDup ? 'dup' : ''}`}>
+                            <View className="or-i"><Text>{it.category.slice(0, 1)}</Text></View>
+                            <View className="or-b">
+                              <Text className="or-t">{it.fileName}</Text>
+                              <Text className="or-s">{it.isDup ? '与同名资料重复，已合并' : `${it.category} · ${it.summary}`}</Text>
+                            </View>
+                            {it.isDup ? <Text className="or-dup">已合并</Text> : <Text className="or-tag">{it.category}</Text>}
                           </View>
                         ))}
+                        {organized.deep && organized.reportId ? (
+                          <View className="orgd-report" onClick={() => openReport(organized.reportId!)}><Text>查看整理报告 ›</Text></View>
+                        ) : null}
                         <Text className="orgd-hint">整理完成后，可进入「已优化」确认入库，也可以继续深度整理进一步提炼。</Text>
                         <View className="orgd-btn" style={{ background: accent }} onClick={() => setStage('optimized')}><Text>去确认入库 ›</Text></View>
                       </View>
                     ) : null}
 
-                    {batches.map((b) => (
-                      <View key={b.id} className="pile card">
-                        <View className="pile-head">
-                          <View className="pile-ic"><Text>收</Text></View>
-                          <View className="pile-b">
-                            <Text className="pile-t serif">已接收 {b.count} 份原始素材</Text>
-                            <Text className="pile-s">这一批资料还没整理，先集中放在待整理区</Text>
+                    {batches.map((b) => {
+                      const expanded = openBatch[b.id] !== false; // 默认展开逐份清单
+                      const failedN = b.files.filter((f) => f.status === 'failed').length;
+                      return (
+                        <View key={b.id} className="pile card">
+                          <View className="pile-head" onClick={() => setOpenBatch((m) => ({ ...m, [b.id]: !expanded }))}>
+                            <View className="pile-ic"><Text>收</Text></View>
+                            <View className="pile-b">
+                              <Text className="pile-t serif">已接收 {b.count} 份原始素材</Text>
+                              <Text className="pile-s">{failedN ? `其中 ${failedN} 份读不出，删掉重传即可` : '这一批资料还没整理，先集中放在待整理区'}</Text>
+                            </View>
+                            <Text className="pile-tag">{expanded ? '收起' : `展开 ${b.count} 份`}</Text>
                           </View>
-                          <Text className="pile-tag">待整理</Text>
+                          {expanded ? (
+                            <View className="file-list">
+                              {b.files.map((f) => {
+                                const st = FILE_STATUS[f.status] || FILE_STATUS.ready;
+                                const bad = f.status === 'failed';
+                                return (
+                                  <View key={f.id} className={`file-row ${bad ? 'bad' : ''}`}>
+                                    <View className="fr-b">
+                                      <Text className="fr-name">{f.fileName}</Text>
+                                      <Text className="fr-meta">{f.fileSize ? fmtBytes(f.fileSize) : '—'}{bad ? ' · 这份读不出来，删掉重传' : ''}</Text>
+                                    </View>
+                                    <Text className={`fr-badge ${st.cls}`}>{st.label}</Text>
+                                    {bad ? <Text className="fr-del" onClick={() => removeStagedFile(f)}>删除</Text> : null}
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          ) : (
+                            b.typeStats.length ? (
+                              <View className="pile-chips">
+                                {b.typeStats.map((t) => <Text key={t.label} className="pile-chip">{t.label} {t.count} 份</Text>)}
+                              </View>
+                            ) : null
+                          )}
                         </View>
-                        {b.typeStats.length ? (
-                          <View className="pile-chips">
-                            {b.typeStats.map((t) => <Text key={t.label} className="pile-chip">{t.label} {t.count} 份</Text>)}
-                          </View>
-                        ) : null}
-                      </View>
-                    ))}
+                      );
+                    })}
 
                     {batches.length ? (
                       <View className="pile-actions">
@@ -531,14 +586,17 @@ export default function ThinkTank() {
                   <Text className="ss-s">这里只放系统整理后的结果，用户确认后再写入知识库。</Text>
                   <Text className="ss-em">{counts.optimized} 份</Text>
                 </View>
-                {organized?.folders?.length ? (
+                {optimizedItems.length ? (
                   <>
                     <View className="asset-list card">
-                      {organized.folders.map((f, idx) => (
-                        <View key={idx} className="asset-list-row">
-                          <View className="al-i"><Text>{f.label.slice(0, 1)}</Text></View>
-                          <View className="al-b"><Text className="al-t serif">{f.label}</Text><Text className="al-s">已优化 · 待写入知识库</Text></View>
-                          <Text className="al-em">{f.count}</Text>
+                      {optimizedItems.map((it) => (
+                        <View key={it.id} className={`asset-list-row ${it.isDup ? 'dup' : ''}`}>
+                          <View className="al-i"><Text>{it.category.slice(0, 1)}</Text></View>
+                          <View className="al-b">
+                            <Text className="al-t serif">{it.fileName}</Text>
+                            <Text className="al-s">{it.isDup ? '与同名资料重复，已合并' : `${it.category} · ${it.summary}`}</Text>
+                          </View>
+                          {it.isDup ? <Text className="al-dup">已合并</Text> : <Text className="al-tag">{it.category}</Text>}
                         </View>
                       ))}
                     </View>
@@ -564,10 +622,10 @@ export default function ThinkTank() {
                   <Text className="ss-s">这里的资料已经可被战局、方案和对话直接调用。</Text>
                   <Text className="ss-em">{counts.confirmed} 份</Text>
                 </View>
-                {folders.length ? (
+                {confirmedFolders.length ? (
                   <>
                     <View className="folder-grid">
-                      {folders.map((f) => (
+                      {confirmedFolders.map((f) => (
                         <View key={f.key} className="folder-tile card">
                           <View className="ft-ic"><Text>{f.label.slice(0, 1)}</Text></View>
                           <Text className="ft-t serif">{f.label}</Text>

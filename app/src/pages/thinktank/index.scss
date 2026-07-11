@@ -149,6 +149,47 @@
 .pile-btn.primary { color: #fff; }
 .pile-btn:active { opacity: .88; }
 
+/* —— 批次逐份清单 —— */
+.file-list { margin-top: 10px; }
+.file-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 0; border-top: 1px solid var(--line);
+}
+.file-row:first-child { border-top: 0; }
+.fr-b { flex: 1; min-width: 0; }
+.fr-name {
+  display: block; font-size: 13.5px; font-weight: 600; color: var(--ink);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.fr-meta { display: block; margin-top: 2px; color: var(--ink-3); font-size: 11px; }
+.fr-badge {
+  flex-shrink: 0; font-size: 11px; font-weight: 700;
+  padding: 2px 8px; border-radius: 999px;
+}
+.fs-ok { color: var(--green); background: var(--green-soft); }
+.fs-run { color: var(--gold-deep); background: var(--gold-soft); }
+.fs-wait { color: var(--ink-3); background: var(--surface-2); }
+.fs-bad { color: #fff; background: var(--danger); }
+.fr-del { flex-shrink: 0; margin-left: 2px; font-size: 12px; color: var(--danger); padding: 2px 4px; }
+.file-row.bad .fr-name { color: var(--danger); }
+.file-row.bad .fr-meta { color: var(--danger); }
+
+/* —— 归档表：整理结果 / 已优化 右侧类目标签 + 重复标 —— */
+.or-tag, .al-tag {
+  flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--green);
+  padding: 2px 8px; border-radius: 999px; background: var(--green-soft);
+}
+.or-dup, .al-dup {
+  flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--ink-3);
+  padding: 2px 8px; border-radius: 999px; background: var(--surface-2);
+}
+.organized-row.dup .or-t, .asset-list-row.dup .al-t { color: var(--ink-3); }
+.orgd-report {
+  margin-top: 10px; padding: 10px 0; text-align: center;
+  color: var(--gold-deep); font-size: 13px; font-weight: 600;
+}
+.orgd-report:active { opacity: .7; }
+
 .stage-empty { text-align: center; padding: 28px 20px; }
 .se-t { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); }
 .se-s { display: block; margin-top: 6px; color: var(--ink-3); font-size: 12px; line-height: 1.55; }

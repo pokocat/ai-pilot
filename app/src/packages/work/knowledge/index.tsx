@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text } from '@tarojs/components';
-import Taro, { useDidShow } from '@tarojs/taro';
+import Taro, { useDidShow, useDidHide, usePullDownRefresh } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
@@ -9,8 +9,16 @@ import { checkUpload } from '../../../services/uploadGuard';
 import './index.scss';
 
 const STATUS: Record<string, string> = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
+// 阶段标注：staging 待整理（灰）/ optimized 已优化；confirmed 不标（已可调用）。
+const STAGE_BADGE: Record<string, { label: string; cls: string }> = {
+  staging: { label: '待整理', cls: 'kb-st-staging' },
+  optimized: { label: '已优化', cls: 'kb-st-optimized' },
+};
 const isWeapp = process.env.TARO_ENV === 'weapp';
 const SUPPORTED_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
+// 解析中项退避轮询节奏（2s → 4s → 8s → …），累计约 30s 后停止并提示下拉刷新。
+const POLL_DELAYS = [2000, 4000, 8000, 8000, 8000];
+const isSettled = (st: string) => st === 'ready' || st === 'failed';
 
 function fmtSize(b: number | null): string {
   if (!b) return '';
@@ -25,11 +33,31 @@ export default function Knowledge() {
   const accent = s.color().vars['--accent'];
   const [items, setItems] = useState<KnowledgeDocRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [pollHint, setPollHint] = useState(false); // 轮询到上限仍有未就绪项 → 提示下拉刷新
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollAttempt = useRef(0);
 
-  const load = useCallback(() => {
-    api.knowledgeDocs().then(setItems).catch((e) => { s.handleApiError(e); setItems([]); });
-  }, [s]);
-  useDidShow(() => { load(); });
+  const clearPoll = useCallback(() => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } }, []);
+
+  // 拉列表；poll=true 时对未就绪项按退避节奏（2s→4s→8s）再拉，累计约 30s 到上限停并提示下拉刷新。
+  const load = useCallback((poll = false) => {
+    api.knowledgeDocs().then((rows) => {
+      setItems(rows);
+      if (!poll) return;
+      clearPoll();
+      const pending = rows.some((r) => !isSettled(r.status));
+      if (!pending) { pollAttempt.current = 0; setPollHint(false); return; }
+      if (pollAttempt.current >= POLL_DELAYS.length) { setPollHint(true); return; }
+      const d = POLL_DELAYS[pollAttempt.current];
+      pollAttempt.current += 1;
+      pollTimer.current = setTimeout(() => { load(true); }, d);
+    }).catch((e) => { s.handleApiError(e); setItems([]); });
+  }, [s, clearPoll]);
+
+  useDidShow(() => { pollAttempt.current = 0; setPollHint(false); load(true); });
+  useDidHide(() => { clearPoll(); });
+  useEffect(() => () => clearPoll(), [clearPoll]);
+  usePullDownRefresh(() => { pollAttempt.current = 0; setPollHint(false); load(true); Taro.stopPullDownRefresh(); });
 
   const upload = async () => {
     if (busy) return;
@@ -67,10 +95,20 @@ export default function Knowledge() {
     }
     setBusy(true);
     try {
-      await api.uploadKnowledge(f.path);
+      const res = await api.uploadKnowledge(f.path);
       Taro.showToast({ title: '已上传，解析中…', icon: 'none' });
-      load();
-      setTimeout(load, 1500); // 解析+嵌入异步，稍后再刷一次拿到 ready
+      // 立即插入列表（乐观），不必等解析；随后轮询拿到就绪态。
+      const nowIso = new Date().toISOString();
+      const optimistic: KnowledgeDocRow = {
+        id: res.id, kind: 'document', title: f.name, sourceType: 'upload',
+        status: res.status || 'parsing', stage: (res.stage as string) || 'confirmed',
+        fileName: f.name, fileType: ext, fileSize: f.size, chunkCount: 0,
+        projectId: null, error: null, createdAt: nowIso, updatedAt: nowIso,
+      };
+      setItems((prev) => (prev.some((it) => it.id === res.id) ? prev : [optimistic, ...prev]));
+      pollAttempt.current = 0; setPollHint(false);
+      load(true);
+      setTimeout(() => load(true), 1500); // 兜底：解析+嵌入异步，稍后再刷一次
     } catch (e) {
       Taro.showToast({ title: (e as Error).message || '上传失败', icon: 'none' });
     }
@@ -112,16 +150,30 @@ export default function Knowledge() {
           </View>
         ) : (
           <View className="kb-list">
-            {items.map((it) => (
-              <View key={it.id} className="kb-item card" onClick={() => openDetail(it)}>
-                <View className="ki-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={18} color={accent} /></View>
-                <View className="ki-b">
-                  <Text className="ki-t">{it.title || it.fileName || '未命名'}</Text>
-                  <Text className="ki-m">{STATUS[it.status] || it.status} · {it.chunkCount} 切片{it.fileSize ? ' · ' + fmtSize(it.fileSize) : ''}{it.error ? ' · ' + it.error : ''}</Text>
+            {pollHint ? (
+              <View className="kb-poll-hint"><Text>有资料还在解析中，下拉可刷新查看最新状态</Text></View>
+            ) : null}
+            {items.map((it) => {
+              const badge = STAGE_BADGE[it.stage];
+              const staging = it.stage === 'staging';
+              return (
+                <View key={it.id} className="kb-item card" onClick={() => openDetail(it)}>
+                  <View className="ki-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={18} color={accent} /></View>
+                  <View className="ki-b">
+                    <View className="ki-tr">
+                      <Text className="ki-t">{it.title || it.fileName || '未命名'}</Text>
+                      {badge ? <Text className={`ki-stage ${badge.cls}`}>{badge.label}</Text> : null}
+                    </View>
+                    <Text className="ki-m">
+                      {staging
+                        ? '整理确认后才可被军师调用'
+                        : `${STATUS[it.status] || it.status} · ${it.chunkCount} 切片${it.fileSize ? ' · ' + fmtSize(it.fileSize) : ''}${it.error ? ' · ' + it.error : ''}`}
+                    </Text>
+                  </View>
+                  <View className="ki-del" onClick={(e) => { e.stopPropagation(); remove(it); }}><Text>删除</Text></View>
                 </View>
-                <View className="ki-del" onClick={(e) => { e.stopPropagation(); remove(it); }}><Text>删除</Text></View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
       </View>

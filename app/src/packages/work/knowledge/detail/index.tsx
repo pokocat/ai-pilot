@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { View, Text } from '@tarojs/components';
-import Taro, { useRouter } from '@tarojs/taro';
+import Taro, { useRouter, usePullDownRefresh } from '@tarojs/taro';
 import Icon from '../../../../components/Icon';
 import SafeHeader from '../../../../components/SafeHeader';
 import PaySheet from '../../../../components/PaySheet';
@@ -9,6 +9,9 @@ import { api, type KnowledgeDetail } from '../../../../services/api';
 import './index.scss';
 
 const STATUS: Record<string, string> = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
+// 解析中退避轮询（2s→4s→8s），累计约 30s 到上限停并提示下拉刷新。
+const POLL_DELAYS = [2000, 4000, 8000, 8000, 8000];
+const isSettled = (st: string) => st === 'ready' || st === 'failed';
 
 function fmtSize(b: number | null): string {
   if (!b) return '';
@@ -28,14 +31,34 @@ export default function KnowledgeDetailPage() {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [pollHint, setPollHint] = useState(false);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollAttempt = useRef(0);
+  const clearPoll = useCallback(() => { if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null; } }, []);
+
+  const load = useCallback(() => {
+    api.knowledgeDetail(id)
+      .then((d) => {
+        setDetail(d);
+        clearPoll();
+        if (isSettled(d.status)) { pollAttempt.current = 0; setPollHint(false); return; }
+        if (pollAttempt.current >= POLL_DELAYS.length) { setPollHint(true); return; }
+        const dl = POLL_DELAYS[pollAttempt.current];
+        pollAttempt.current += 1;
+        pollTimer.current = setTimeout(() => { load(); }, dl);
+      })
+      .catch((e) => { s.handleApiError(e); setDetail(null); setFailed(true); });
+  }, [id, s, clearPoll]);
 
   useEffect(() => {
     if (!id) { setFailed(true); return; }
     setFailed(false);
-    api.knowledgeDetail(id)
-      .then(setDetail)
-      .catch((e) => { s.handleApiError(e); setDetail(null); setFailed(true); });
-  }, [id]);
+    pollAttempt.current = 0; setPollHint(false);
+    load();
+    return () => clearPoll();
+  }, [id, load, clearPoll]);
+
+  usePullDownRefresh(() => { pollAttempt.current = 0; setPollHint(false); load(); Taro.stopPullDownRefresh(); });
 
   const analyze = () => {
     if (busy || !detail) return;
@@ -78,6 +101,10 @@ export default function KnowledgeDetailPage() {
             <Text className="kd-m">{STATUS[detail.status] || detail.status} · {detail.chunks.length} 切片{detail.fileType ? ' · ' + detail.fileType.toUpperCase() : ''}{detail.fileSize ? ' · ' + fmtSize(detail.fileSize) : ''}{detail.error ? ' · ' + detail.error : ''}</Text>
           </View>
         </View>
+
+        {pollHint ? (
+          <View className="kd-poll-hint"><Text>还在解析中，下拉可刷新查看最新状态</Text></View>
+        ) : null}
 
         {detail.canAnalyze ? (
           <View className={`kd-analyze card ${busy ? 'busy' : ''}`} onClick={analyze}>

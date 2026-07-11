@@ -42,7 +42,7 @@ export type {
   ReminderView, ReminderItem, GoalLadder, OrderActionType, OrderMetric, OrderStructuredFields,
   ServiceAssignmentView, WorkbenchView, WorkbenchSection, WorkbenchMissing,
   SearchHit, SearchResult, KnowledgeStage, KnowledgePipelineView,
-  KnowledgePipelineFolder, KnowledgeBatch, OrganizeResult, ConfirmResult, StagedUploadResult,
+  KnowledgePipelineFolder, KnowledgeBatch, KnowledgeBatchFile, OrganizeResult, OrganizeItem, ConfirmResult, StagedUploadResult,
 } from '../../../shared/contracts';
 // 新能力类型再导出（项目 / 报告 / 知识 / 引用）
 export type {
