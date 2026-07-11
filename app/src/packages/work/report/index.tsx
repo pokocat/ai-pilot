@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text } from '@tarojs/components';
+import { View, Text, Canvas } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import MarkdownText from '../../../components/MarkdownText';
@@ -8,7 +8,10 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { acceptDeliverable, refreshDossier, ordersOf, today, type DossierOrder } from '../../../services/dossier';
 import { api, type ReportDetail, type ReportVersionContent, type ReportDiff } from '../../../services/api';
+import { makeReportShareImage, presentReportShareImage } from '../../../services/reportShareCard';
 import './index.scss';
+
+const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 
 // 编号章节用中文序号（设计规格 §9.1：一 / 二 / 三 / 四）。
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
@@ -88,6 +91,23 @@ export default function Report() {
   };
   const goStudio = () => { setSyncOpen(false); Taro.switchTab({ url: '/pages/studio/index' }); };
 
+  // D-3-4：方案库详情对外分享 = 生成品牌分享图（标题+首节核心结论+落款，无全文/敏感数字）。
+  const shareImage = async () => {
+    if (!IS_WEAPP) { Taro.showToast({ title: '请在小程序内生成分享图', icon: 'none' }); return; }
+    let c = content;
+    if (!c) c = await api.reportVersion(id, sel || (detail?.currentVersion ?? 1)).catch(() => null);
+    if (!c) { Taro.showToast({ title: '方案内容加载失败，请重试', icon: 'none' }); return; }
+    Taro.showLoading({ title: '生成分享图…' });
+    try {
+      const path = await makeReportShareImage('rp-share-canvas', c.content);
+      Taro.hideLoading();
+      presentReportShareImage(path);
+    } catch {
+      Taro.hideLoading();
+      Taro.showToast({ title: '生成分享图失败，请重试', icon: 'none' });
+    }
+  };
+
   if (!detail) {
     return (
       <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -103,7 +123,12 @@ export default function Report() {
 
   return (
     <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-      <SafeHeader title={detail.title} onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
+      <SafeHeader
+        title={detail.title}
+        onBack={() => Taro.navigateBack()}
+        titleClassName="rp-title"
+        right={<Text className="rp-share-btn serif" onClick={shareImage}>分享图</Text>}
+      />
 
       <View className="pad">
         {/* 版本时间线 */}
@@ -193,6 +218,9 @@ export default function Report() {
           <View className="rp-sync-btn" style={{ background: accent }} onClick={sync}><Text>同步为军令</Text></View>
         )}
       </View>
+
+      {/* D-3-4 隐藏出图画布（屏外，仅点分享图时绘制导出） */}
+      <Canvas type="2d" id="rp-share-canvas" className="rp-share-canvas" style={{ width: '600px', height: '900px' }} />
 
       {/* 军令同步屏（半屏） */}
       {syncOpen ? (

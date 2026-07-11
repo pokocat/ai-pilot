@@ -1,4 +1,7 @@
 .rp-title { font-size: 16px; font-weight: 600; color: var(--ink); }
+.rp-share-btn { font-size: 14px; color: var(--accent); }
+// D-3-4：出图画布屏外承载（不占版面）。
+.rp-share-canvas { position: fixed; left: -9999px; top: 0; }
 .rp-loading { text-align: center; color: var(--ink-3); padding: 50px 0; font-size: 13px; }
 
 .report-page .pad { padding: 16px 16px 0; }

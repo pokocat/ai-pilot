@@ -13,7 +13,7 @@ export default function NextStepCard() {
   if (!ns) return null;
 
   const go = () => {
-    if (ns.route === 'chat') Taro.navigateTo({ url: '/pages/chat/index?agentKey=general&continue=1' });
+    if (ns.route === 'chat') Taro.navigateTo({ url: '/packages/main/chat/index?agentKey=general&continue=1' });
     else if (ns.route === 'studio') Taro.switchTab({ url: '/pages/studio/index' });
     else if (ns.route.startsWith('/')) Taro.navigateTo({ url: ns.route });
   };

@@ -113,8 +113,8 @@ export default function Studio() {
   const reviewReminder = reminders?.find((r) => r.kind === 'review') ?? null;
 
   const goChat = (agentKey: string, prompt: string) =>
-    Taro.navigateTo({ url: `/pages/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
-  const openAgent = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` });
+    Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
+  const openAgent = (key: string) => Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${key}&continue=1` });
   // V7-05：军令卡体点击 → 军令详情页（勾选框为独立命中区，见 task-check 的 stopPropagation）
   const openCommand = (id: string) => Taro.navigateTo({ url: `/packages/work/command/index?id=${id}` });
   const tapCreative = (a: Agent) => {
@@ -250,7 +250,7 @@ export default function Studio() {
         {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
         <NextStepCard />
 
-        {/* WO-12：处方条——军师为某问题配的工具（唯一销售位，出现在军令语境） */}
+        {/* WO-12：处方条——军师为某问题配的工具，出现在军令/执行语境（多入口销售之一） */}
         <PrescriptionStrip />
 
         {/* 战役卡组（exec-deck 横滑）：今日战役 / 军师献策 / 今日主令 / 提醒节奏 */}

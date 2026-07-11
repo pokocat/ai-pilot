@@ -3,7 +3,7 @@ import { View, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api } from '../../services/api';
+import { api, type ActivationSource } from '../../services/api';
 import './index.scss';
 
 export interface PaySheetProps {
@@ -18,6 +18,8 @@ export interface PaySheetProps {
   result?: string;      // 账本下方结果说明（.pay-result）
   confirmText?: string;
   skuKey?: string;
+  source?: ActivationSource; // D-1 开通来源归因（默认 SKU 下单路径带入；缺省 catalog）
+  refId?: string;            // source=prescription 时的处方 id
   onConfirm?: () => void;
   onClose?: () => void;
 }
@@ -35,7 +37,7 @@ const MODE_KICKER: Record<NonNullable<PaySheetProps['mode']>, string> = {
 // 传入 onConfirm 则调用方自持效果（含关闭），本组件仅负责防抖与弹层协调。
 export default function PaySheet({
   open, mode = 'credits', title, desc, costLabel, costValue, balanceValue, afterValue,
-  result, confirmText, skuKey, onConfirm, onClose,
+  result, confirmText, skuKey, source = 'catalog', refId, onConfirm, onClose,
 }: PaySheetProps) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -57,7 +59,7 @@ export default function PaySheet({
 
       // 默认：单次付费商品（SKU）下单 → 微信支付 → 重拉 /me（mock 返回 demo 已本地发放）。
       if (mode === 'sku' && skuKey) {
-        const order = await api.createSkuOrder(skuKey);
+        const order = await api.createSkuOrder(skuKey, undefined, { source, refId });
         if (order.payParams) {
           await Taro.requestPayment({
             timeStamp: order.payParams.timeStamp,

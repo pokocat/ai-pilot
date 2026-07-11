@@ -25,8 +25,8 @@ export default function Library() {
   const open = (it: LibItem) => {
     // 有版本化报告 → 进报告页看版本与变更；否则回到产出它的会话继续深化
     if (it.reportId) Taro.navigateTo({ url: `/packages/work/report/index?id=${it.reportId}` });
-    else if (it.sessionId) Taro.navigateTo({ url: `/pages/chat/index?sessionId=${it.sessionId}` });
-    else Taro.navigateTo({ url: `/pages/chat/index?agentKey=${it.agentKey}&continue=1` });
+    else if (it.sessionId) Taro.navigateTo({ url: `/packages/main/chat/index?sessionId=${it.sessionId}` });
+    else Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${it.agentKey}&continue=1` });
   };
 
   return (

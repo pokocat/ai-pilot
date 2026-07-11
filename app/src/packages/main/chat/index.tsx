@@ -1,22 +1,22 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { View, Text, Textarea, ScrollView } from '@tarojs/components';
 import Taro, { useRouter } from '@tarojs/taro';
-import Icon from '../../components/Icon';
-import Login from '../../components/Login';
-import MarkdownText from '../../components/MarkdownText';
-import ReportCard from '../../components/ReportCard';
-import SafeHeader from '../../components/SafeHeader';
-import AdvisorAvatar from '../../components/AdvisorAvatar';
-import { useStore } from '../../hooks/useStore';
-import { store } from '../../services/store';
-import { api, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../services/api';
-import { STREAM_CHAT } from '../../services/config';
-import { generateStream } from '../../services/streaming';
-import { requestWechatSubscribe } from '../../services/wechatSubscribe';
-import { agentForText } from '../../data/intents';
-import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../data/council';
-import { CHAT_GUIDES } from '../../data/operatingSystem';
-import { acceptDeliverable } from '../../services/dossier';
+import Icon from '../../../components/Icon';
+import Login from '../../../components/Login';
+import MarkdownText from '../../../components/MarkdownText';
+import ReportCard from '../../../components/ReportCard';
+import SafeHeader from '../../../components/SafeHeader';
+import AdvisorAvatar from '../../../components/AdvisorAvatar';
+import { useStore } from '../../../hooks/useStore';
+import { store } from '../../../services/store';
+import { api, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../../services/api';
+import { STREAM_CHAT } from '../../../services/config';
+import { generateStream } from '../../../services/streaming';
+import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
+import { agentForText } from '../../../data/intents';
+import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../../data/council';
+import { CHAT_GUIDES } from '../../../data/operatingSystem';
+import { acceptDeliverable } from '../../../services/dossier';
 import './index.scss';
 
 type Msg =
@@ -570,7 +570,7 @@ export default function Chat() {
 
   // 切换军师线程（派单 / 回总军师）：redirectTo 保持页面栈扁平，带 prompt 时直接开场
   const openThread = (agentKey: string, prompt?: string) => {
-    const url = `/pages/chat/index?agentKey=${agentKey}&fresh=1${prompt ? `&send=${encodeURIComponent(prompt)}` : ''}`;
+    const url = `/packages/main/chat/index?agentKey=${agentKey}&fresh=1${prompt ? `&send=${encodeURIComponent(prompt)}` : ''}`;
     Taro.redirectTo({ url });
   };
   const openGuide = (url: string) => Taro.navigateTo({ url });
@@ -584,6 +584,7 @@ export default function Chat() {
       const r = await api.renderReport(sessionId, messageId);
       Taro.hideLoading();
       if (!r.htmlUrl) { Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' }); return; }
+      // D-3-4：网页版仅本人自用（web-view 打开查看）；不再提供「复制链接」对外分享入口。
       if (IS_WEAPP) {
         Taro.navigateTo({
           url: `/packages/work/webview/index?url=${encodeURIComponent(r.htmlUrl)}`,
@@ -592,7 +593,7 @@ export default function Chat() {
       } else if (typeof window !== 'undefined' && window.open) {
         window.open(r.htmlUrl, '_blank');
       } else {
-        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '网页版链接已复制', icon: 'none' }) });
+        Taro.showToast({ title: '请在小程序内查看网页版', icon: 'none' });
       }
     } catch {
       Taro.hideLoading();

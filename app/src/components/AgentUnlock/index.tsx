@@ -4,7 +4,7 @@ import Taro from '@tarojs/taro';
 import Icon from '../Icon';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type Agent } from '../../services/api';
+import { api, type Agent, type ActivationSource } from '../../services/api';
 import { diamondCost } from '../../services/format';
 import './index.scss';
 
@@ -12,10 +12,12 @@ interface Props {
   agent: Agent | null;          // 待启用的专项智能体（billing=unlock）。null 则不展示
   onClose: () => void;
   onUnlocked: (agent: Agent) => void; // 启用成功（含已拥有）后回调，通常用于进入对话
+  source?: ActivationSource;    // D-1 开通来源归因（缺省 catalog）
+  refId?: string;               // source=prescription 时的处方 id
 }
 
 // 专项智能体启用弹层：用产出额度启用。free/metered 不会进入这里。
-export default function AgentUnlock({ agent, onClose, onUnlocked }: Props) {
+export default function AgentUnlock({ agent, onClose, onUnlocked, source = 'catalog', refId }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [busy, setBusy] = useState(false);
@@ -38,7 +40,7 @@ export default function AgentUnlock({ agent, onClose, onUnlocked }: Props) {
     }
     setBusy(true);
     try {
-      const r = await api.purchaseAgent(agent.key);
+      const r = await api.purchaseAgent(agent.key, { source, refId });
       await store.refreshAfterPurchase();
       Taro.showToast({ title: r.alreadyOwned ? '已启用' : '已加入工作台', icon: 'success' });
       const fresh = store.agents().find((a) => a.key === agent.key) ?? { ...agent, owned: true };

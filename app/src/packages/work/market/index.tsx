@@ -3,8 +3,9 @@ import { View, Text, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
+import AgentUnlock from '../../../components/AgentUnlock';
 import { useStore } from '../../../hooks/useStore';
-import { api, type PrescriptionView } from '../../../services/api';
+import { api, type PrescriptionView, type Agent } from '../../../services/api';
 import { MODULE_MARKET, SKILL_MARKET } from '../../../data/operatingSystem';
 import './index.scss';
 
@@ -19,25 +20,36 @@ export default function Market() {
   const modules = cat === '全部' ? MODULE_MARKET : MODULE_MARKET.filter((m) => m.category === cat);
 
   // WO-12：处方落地——从军令处方条跳来（from=prescription&pid），展示开方上下文 + 记曝光/开通埋点。
+  const pid = Taro.getCurrentInstance().router?.params?.pid || '';
   const [rx, setRx] = useState<PrescriptionView | null>(null);
+  const [buying, setBuying] = useState<Agent | null>(null);
   useEffect(() => {
-    const pid = Taro.getCurrentInstance().router?.params?.pid;
     if (!pid) return;
     api.prescriptions().then((r) => {
       const found = r.items.find((i) => i.id === pid) ?? null;
       setRx(found);
       if (found) api.prescriptionAction(pid, 'seen').catch(() => {});
     }).catch(() => {});
-  }, []);
-  const activateRx = () => {
+  }, [pid]);
+
+  // 记为开通（模块/已拥有/未识别 agent 的兜底确认）。
+  const ackRx = () => {
     if (!rx) return;
     api.prescriptionAction(rx.id, 'activated').catch(() => {});
     Taro.showToast({ title: '已记为开通', icon: 'success' });
     setTimeout(() => Taro.navigateBack(), 600);
   };
+  // D-1/D-3-7：处方开通——若开的是可解锁专项军师且未拥有，走真实解锁弹层（带 source:'prescription'+refId=处方 id，
+  // 用户在弹层内确认额度消耗）；否则按兜底记为开通。
+  const activateRx = () => {
+    if (!rx) return;
+    const agent = s.agents().find((a) => a.key === rx.toolKey);
+    if (agent && agent.billing === 'unlock' && !agent.owned) { setBuying(agent); return; }
+    ackRx();
+  };
 
   const goChat = (agentKey: string, prompt: string) =>
-    Taro.navigateTo({ url: `/pages/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
+    Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
 
   const tapModule = (m: typeof MODULE_MARKET[number]) => {
     if (m.id === 'knowledge-base') { Taro.navigateTo({ url: '/packages/work/knowledge/index' }); return; }
@@ -133,6 +145,20 @@ export default function Market() {
         </View>
         <View style={{ height: '32px' }} />
       </View>
+
+      {/* D-1：处方位/生态市场开通归因——处方落地传 prescription+refId；市场常规浏览传 market。 */}
+      <AgentUnlock
+        agent={buying}
+        source={pid ? 'prescription' : 'market'}
+        refId={pid || undefined}
+        onClose={() => setBuying(null)}
+        onUnlocked={() => {
+          if (rx) api.prescriptionAction(rx.id, 'activated').catch(() => {});
+          setBuying(null);
+          Taro.showToast({ title: '已启用，回执行', icon: 'success' });
+          setTimeout(() => Taro.navigateBack(), 600);
+        }}
+      />
     </View>
   );
 }

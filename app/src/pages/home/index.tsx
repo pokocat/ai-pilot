@@ -117,7 +117,7 @@ export default function Home() {
   };
   const goChat = (params: string) => {
     if (!requireLogin()) return false;
-    Taro.navigateTo({ url: `/pages/chat/index?${params}` });
+    Taro.navigateTo({ url: `/packages/main/chat/index?${params}` });
     return true;
   };
 
@@ -193,7 +193,7 @@ export default function Home() {
 
         {/* 战局信号（metric-grid）：案卷完整度 / 待补资料 / 风险锁 —— 全部真实状态 */}
         <View className="metric-grid">
-          <View className="metric card" onClick={() => requireLogin() && Taro.navigateTo({ url: '/pages/brief/index' })}>
+          <View className="metric card" onClick={() => requireLogin() && Taro.navigateTo({ url: '/packages/main/brief/index' })}>
             <Text className="metric-v serif">{maturityLabel}</Text>
             <Text className="metric-l">案卷完整度</Text>
           </View>

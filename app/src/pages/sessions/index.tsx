@@ -116,10 +116,10 @@ export default function Sessions() {
     setShowLogin(true);
     return false;
   };
-  const continueWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` }); };
-  const newWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&fresh=1` }); };
-  const openSession = (id: string) => { if (requireLogin()) Taro.navigateTo({ url: `/pages/chat/index?sessionId=${id}` }); };
-  // 搜索结果跳转：智库为 tab 页用 switchTab，其余（/packages/... 与 /pages/chat）用 navigateTo。
+  const continueWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${key}&continue=1` }); };
+  const newWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${key}&fresh=1` }); };
+  const openSession = (id: string) => { if (requireLogin()) Taro.navigateTo({ url: `/packages/main/chat/index?sessionId=${id}` }); };
+  // 搜索结果跳转：智库为 tab 页用 switchTab，其余（/packages/... 含 chat 分包页）用 navigateTo。
   const openHit = (h: SearchHit) => {
     if (!requireLogin()) return;
     if (h.route.startsWith('/pages/thinktank')) Taro.switchTab({ url: h.route.split('?')[0] });

@@ -51,11 +51,14 @@
 }
 .foot-t { font-size: 11px; line-height: 1.5; color: var(--ink-3); flex: 1; }
 
-.acts { display: flex; gap: 9px; margin-top: 13px; }
+.acts { display: flex; gap: 7px; margin-top: 13px; }
 .act {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 14px; border-radius: 12px; font-size: 13px; font-weight: 500;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 10px 12px; border-radius: 12px; font-size: 13px; font-weight: 500;
 }
-.act.primary { color: #fff; flex: 1; }
-.act.saved { background: var(--accent-soft); color: var(--accent-ink); flex: 1; }
-.act.ghost { background: var(--surface-2); color: var(--ink-2); }
+.act.primary { color: #fff; flex: 1; min-width: 0; }
+.act.saved { background: var(--accent-soft); color: var(--accent-ink); flex: 1; min-width: 0; }
+.act.ghost { background: var(--surface-2); color: var(--ink-2); padding: 10px 11px; flex-shrink: 0; }
+
+// D-3-4：出图画布屏外承载（不占版面），仅点「分享图」时绘制导出。
+.rc-share-canvas { position: fixed; left: -9999px; top: 0; }

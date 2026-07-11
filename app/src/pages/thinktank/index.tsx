@@ -127,7 +127,7 @@ export default function ThinkTank() {
   const openReport = (id: string) => Taro.navigateTo({ url: `/packages/work/report/index?id=${id}` });
   const goLibrary = () => Taro.navigateTo({ url: '/packages/work/library/index' });
   const goChat = (agentKey: string, prompt: string) =>
-    Taro.navigateTo({ url: `/pages/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
+    Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
 
   // ============ V7-06 案卷资产 ============
   const counts = pipe?.counts ?? { staging: 0, optimized: 0, confirmed: 0 };
@@ -225,7 +225,7 @@ export default function ThinkTank() {
       confirmText: `确认支付 ¥${yuan}`, result: '支付后开始深度整理，并写入待确认区。',
       onConfirm: async () => {
         try {
-          const order = await api.createSkuOrder('deep-organize');
+          const order = await api.createSkuOrder('deep-organize', undefined, { source: 'catalog' });
           if (order.payParams) {
             await Taro.requestPayment({
               timeStamp: order.payParams.timeStamp, nonceStr: order.payParams.nonceStr,
@@ -355,7 +355,7 @@ export default function ThinkTank() {
   const doEnableSku = async (m: ModuleView) => {
     try {
       if (m.price?.skuKey) {
-        const order = await api.createSkuOrder(m.price.skuKey);
+        const order = await api.createSkuOrder(m.price.skuKey, undefined, { source: 'catalog' });
         if (order.payParams) {
           await Taro.requestPayment({
             timeStamp: order.payParams.timeStamp, nonceStr: order.payParams.nonceStr,
@@ -730,7 +730,7 @@ export default function ThinkTank() {
         open={pay.open} mode={pay.mode} title={pay.title} desc={pay.desc}
         costValue={pay.costValue} balanceValue={pay.balanceValue} afterValue={pay.afterValue}
         result={pay.result} confirmText={pay.confirmText} skuKey={pay.skuKey}
-        onConfirm={pay.onConfirm} onClose={closePay}
+        source="catalog" onConfirm={pay.onConfirm} onClose={closePay}
       />
       <ExceptionSheet
         open={exc.open} kind={exc.kind} title={exc.title} desc={exc.desc}

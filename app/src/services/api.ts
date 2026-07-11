@@ -67,6 +67,11 @@ let onAuthLost: (() => void) | null = null;
 export function setAuthLostHandler(fn: () => void) { onAuthLost = fn; }
 export { BASE_URL };
 
+// D-1 开通来源归因：随解锁/下单请求带入的位子来源（与 UserAgent.source 正交）。
+// source=prescription 时 refId=处方 id；catalog=货架/锦囊直接购买；market=生态市场常规浏览。
+export type ActivationSource = 'prescription' | 'catalog' | 'market';
+export interface ActivationAttribution { source?: ActivationSource; refId?: string }
+
 // 八字采集入参 / 命盘摘要（服务端 ChartView 的宽松视图，前端只读展示）
 export interface BaziBody {
   calendar?: 'solar' | 'lunar';
@@ -254,8 +259,9 @@ export const api = {
     IS_MOCK ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', openid ? { openid } : {}),
   // V7-12：单次付费商品（SKU）目录 + 下单。mock 走假支付成功流并本地发放权益。
   skus: () => (IS_MOCK ? mock.skus() : request<SkuView[]>('/skus')),
-  createSkuOrder: (key: string, openid?: string) =>
-    IS_MOCK ? mock.createSkuOrder(key) : request<SkuOrderResult>(`/skus/${key}/order`, 'POST', openid ? { openid } : {}),
+  // D-1 开通来源归因：下单带可选 source（'prescription'|'catalog'|'market'）+ refId（source=prescription 时的处方 id）。
+  createSkuOrder: (key: string, openid?: string, attribution?: ActivationAttribution) =>
+    IS_MOCK ? mock.createSkuOrder(key) : request<SkuOrderResult>(`/skus/${key}/order`, 'POST', { ...(openid ? { openid } : {}), ...attribution }),
   wechatSubscribeTemplates: () =>
     IS_MOCK ? Promise.resolve({ scenes: [] } as WechatSubscribeTemplatesResult) : request<WechatSubscribeTemplatesResult>('/wechat/subscribe/templates'),
   recordWechatSubscription: (choices: WechatSubscribeChoice[]) =>
@@ -270,8 +276,9 @@ export const api = {
   deleteAccount: () =>
     IS_MOCK ? mock.deleteAccount() : request<{ ok: boolean }>('/me', 'DELETE'),
   agents: () => (IS_MOCK ? mock.agents() : request<Agent[]>('/agents')),
-  purchaseAgent: (key: string) =>
-    IS_MOCK ? mock.purchaseAgent(key) : request<AgentPurchaseResult>(`/agents/${key}/purchase`, 'POST', {}),
+  // D-1 开通来源归因：解锁 agent 带可选 source/refId（缺省服务端按 catalog 记）。
+  purchaseAgent: (key: string, attribution?: ActivationAttribution) =>
+    IS_MOCK ? mock.purchaseAgent(key) : request<AgentPurchaseResult>(`/agents/${key}/purchase`, 'POST', { ...attribution }),
   survey: () => (IS_MOCK ? mock.survey() : request<SurveyQuestion[]>('/survey')),
   quickScan: (req: QuickScanRequest) =>
     IS_MOCK ? mock.quickScan(req) : request<QuickScanResult>('/quickscan', 'POST', req),

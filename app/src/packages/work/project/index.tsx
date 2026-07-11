@@ -65,7 +65,7 @@ export default function Project() {
           <View className="pd-summary card"><Icon name="insight" size={15} color={accent} /><Text className="pd-sum-t">{detail.summary}</Text></View>
         ) : null}
 
-        <View className="pd-cta" style={{ background: accent }} onClick={() => Taro.navigateTo({ url: `/pages/chat/index?projectId=${id}&fresh=1` })}>
+        <View className="pd-cta" style={{ background: accent }} onClick={() => Taro.navigateTo({ url: `/packages/main/chat/index?projectId=${id}&fresh=1` })}>
           <Icon name="spark" size={16} color="#fff" /><Text>在本案卷里开新对话</Text>
         </View>
 
@@ -86,7 +86,7 @@ export default function Project() {
             </View>
             {detail.sessions.length === 0 ? <Text className="pd-empty">还没有归属本案卷的对话。</Text> :
               detail.sessions.map((it) => (
-                <View key={it.id} className="pd-item card" onClick={() => Taro.navigateTo({ url: `/pages/chat/index?sessionId=${it.id}` })}>
+                <View key={it.id} className="pd-item card" onClick={() => Taro.navigateTo({ url: `/packages/main/chat/index?sessionId=${it.id}` })}>
                   <View className="pd-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={it.agentIcon || 'chat'} size={16} color={accent} /></View>
                   <View className="pd-ib"><Text className="pd-it">{it.title}</Text><Text className="pd-im">{it.agentName} · {it.snippet}</Text></View>
                   <Text className="pd-go">›</Text>

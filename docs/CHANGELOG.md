@@ -8,6 +8,15 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-11** · **批次三·第二波（WO-08 admin 面 + D-3-3 健康度 + D-3-4 转图片 + D-3-7 前端 + 主包瘦身；主模型规划 + Opus 执行）**：
+  - **① WO-08 行业基准库 admin 维护面**：CRUD + CSV 逐行导入 + 三行业占位种子（p50 留空「待运营核实」，空分位不注入、幂等 create-only 不覆盖运营真数）。
+  - **② D-3-3 健康度估测框架**：月复盘落库挂钩、输入全服务端算好、空维强制 na 且不触达 LLM、同月幂等、落 `kpiJson.health`、月战报【健康度·军师估测】只读落库值（高/中/低水位、禁百分比、na→暂无法评估）。
+  - **③ D-3-4 报告分享转图片（app）**：报告卡/方案库分享改品牌分享图（标题+首节核心结论+落款，无全文与敏感数字），发好友/存相册；移除复制链接，webview 自用保留。
+  - **④ D-3-7 前端收口（app）**：处方 external 走 `navigateToMiniProgram`（缺 appId/非 weapp 降级）；开通归因 source/refId 三入口贯通（处方/锦囊 catalog/市场 market）。
+  - **⑤ 主包瘦身（app）**：chat/brief/settings 迁 `packages/main` 分包 + preloadRule，主包 1120KB→992KB；15 处路由路径全量修正。
+  - **⑥ WO-03 收尾**：`progressBriefing` streak<3 不注入准确率/命中率百分比。
+  - **⑦ 卫生项**：bizMetric 填报校验（周一+行业模板 key）、journey 条件 updateMany 消竞态、记忆治理接口补 tenantId、prescription 注释对齐。
+  - 合并终审：server 507/507、app tsc/weapp/h5 构建绿、admin lint:ui+build 绿。
 - **2026-07-11** · **批次三·第一波（D-1 归因 + D-3-7 生态注册 + WO-14/12/11/10 收尾 + 文案 sweep；主模型规划 + Opus 执行）**：
   - **① D-1 开通来源归因**：新增 `ActivationEvent`（agent 解锁与 SKU 购买双写入点，SKU 异步支付经 `PaymentOrder.attrSource/attrRefId` 穿透回调落账）；admin 新增「处方漏斗」页（处方六态 × 开通来源双块对比，7/30/90 天）。
   - **② D-3-7 生态工具注册表（server）**：新增 `EcoTool`（appId/path 运营录入，种子不预置）；处方白名单扩为 enabled agents ∪ EcoTool，`Prescription.toolType` 落库归属；admin「生态工具」CRUD（启用强校验 appId）。

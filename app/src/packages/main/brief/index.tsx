@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
-import Icon from '../../components/Icon';
-import SafeHeader from '../../components/SafeHeader';
-import { useStore } from '../../hooks/useStore';
-import { store } from '../../services/store';
-import { api, type ClientUnderstanding, type MemoryLibraryView, type MemoryCategoryKey, type MemoryFillLevel } from '../../services/api';
+import Icon from '../../../components/Icon';
+import SafeHeader from '../../../components/SafeHeader';
+import { useStore } from '../../../hooks/useStore';
+import { store } from '../../../services/store';
+import { api, type ClientUnderstanding, type MemoryLibraryView, type MemoryCategoryKey, type MemoryFillLevel } from '../../../services/api';
 import './index.scss';
 
 // 军师记忆库六类展示元数据（现代白话，面向下沉老板群体；保留军师品牌，去文言）。
@@ -167,5 +167,5 @@ function startInterview(focus?: string) {
   const text = focus
     ? `请进入个人档案访谈模式，围绕「${focus}」只问我一个简单具体的问题。不要先分析，不要引用旧报告，不要替我假设业务事实。`
     : '请进入个人档案访谈模式。不要先分析，不要引用旧报告，不要替我假设业务事实；请先用老板能听懂的话问我 3 个简单具体的问题，帮你补齐行业、阶段和当前难题。';
-  Taro.navigateTo({ url: `/pages/chat/index?send=${encodeURIComponent(text)}` });
+  Taro.navigateTo({ url: `/packages/main/chat/index?send=${encodeURIComponent(text)}` });
 }

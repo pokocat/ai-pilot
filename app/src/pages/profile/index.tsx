@@ -73,7 +73,7 @@ export default function Profile() {
 
   const fortuneOn = s.fortuneOn(); // P0-2：命理关 → 隐藏「送你一卦」入口
   const rows = [
-    { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/pages/brief/index' }) },
+    { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/packages/main/brief/index' }) },
     { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: () => Taro.navigateTo({ url: '/packages/work/dossier/index' }) },
     { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
     { ic: 'flag', t: '战略账本 · 决策与天机', s: '记账验证', onClick: () => Taro.navigateTo({ url: '/packages/work/ledger/index' }) },
@@ -102,7 +102,7 @@ export default function Profile() {
         {/* 页头：居中「我的军师系统」· 右「设置」 */}
         <View className="account-nav tab-page-head">
           <Text className="an-title serif">我的军师系统</Text>
-          <Text className="an-side serif" onClick={() => Taro.navigateTo({ url: '/pages/settings/index' })}>设置</Text>
+          <Text className="an-side serif" onClick={() => Taro.navigateTo({ url: '/packages/main/settings/index' })}>设置</Text>
         </View>
 
         {/* 账户服务卡（深绿 · §10.1）：头像 + 姓名 + 会员牌 / 手机·社群·邀请码 / 权益三格 / 服务动作 */}
@@ -115,7 +115,7 @@ export default function Profile() {
                 {me?.user.name ? me.user.name[0] : <Icon name="user" size={20} color="#fff" />}
               </View>
             )}
-            <View className="sct-b" onClick={() => Taro.navigateTo({ url: '/pages/settings/index' })}>
+            <View className="sct-b" onClick={() => Taro.navigateTo({ url: '/packages/main/settings/index' })}>
               <Text className="account-profile-name serif">{me?.user.name || '完善你的资料 ›'}</Text>
               {orgLine(me) ? <Text className="account-profile-role">{orgLine(me)}</Text> : null}
             </View>
