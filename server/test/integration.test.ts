@@ -822,11 +822,12 @@ describe('TC-V 智能体权益', () => {
     const t = await login(uniquePhone());
     const tenantId = await tenantOf(t);
     await prisma.creditLedger.create({ data: { tenantId, userId: t, delta: -999, reason: '测试置零', balance: 0 } });
-    const buy = await api('POST', '/api/agents/intel/purchase', { token: t, body: {} });
+    // 用保留科室里的 unlock 智能体 ops（D-8 后 intel 已下架、purchase 走 404 不再走 402 口径）。
+    const buy = await api('POST', '/api/agents/ops/purchase', { token: t, body: {} });
     assert.equal(buy.status, 402);
     assert.equal(buy.body.code, 'INSUFFICIENT_CREDITS');
-    const intel = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'intel');
-    assert.equal(intel.owned, false, '未成功扣费则不开通');
+    const ops = (await api('GET', '/api/agents', { token: t })).body.find((a: any) => a.key === 'ops');
+    assert.equal(ops.owned, false, '未成功扣费则不开通');
   });
 
   test('V6 free 类无需购买 → 返回 400 AGENT_NOT_PURCHASABLE', async () => {
@@ -848,22 +849,23 @@ describe('TC-V 智能体权益', () => {
 
   test('V8 后台为用户开通/取消 unlock 智能体', async () => {
     const t = await login(uniquePhone());
+    // 用保留科室里的 unlock 智能体 ops（D-8 后 intel 已下架、不在 /agents 默认列表里）。
     // 开通前：未拥有 + 产出被拦截
-    assert.equal((await api('POST', '/api/generate-sync', { token: t, body: { text: '竞品分析', agentKey: 'intel' } })).status, 403);
+    assert.equal((await api('POST', '/api/generate-sync', { token: t, body: { text: '经营分析', agentKey: 'ops' } })).status, 403);
 
-    const grant = await api('POST', `/api/admin/users/${t}/agents`, { body: { agentKey: 'intel' } });
+    const grant = await api('POST', `/api/admin/users/${t}/agents`, { body: { agentKey: 'ops' } });
     assert.equal(grant.status, 200);
     const detail = await api('GET', `/api/admin/users/${t}`);
-    const row = detail.body.agents.find((a: any) => a.key === 'intel');
+    const row = detail.body.agents.find((a: any) => a.key === 'ops');
     assert.equal(row.owned, true);
     assert.equal(row.source, 'admin_grant');
     // 开通后可产出
-    assert.equal((await api('POST', '/api/generate-sync', { token: t, body: { text: '竞品分析', agentKey: 'intel' } })).status, 200);
+    assert.equal((await api('POST', '/api/generate-sync', { token: t, body: { text: '经营分析', agentKey: 'ops' } })).status, 200);
 
     // 取消开通后重新被拦截
-    const revoke = await api('DELETE', `/api/admin/users/${t}/agents/intel`);
+    const revoke = await api('DELETE', `/api/admin/users/${t}/agents/ops`);
     assert.equal(revoke.status, 200);
-    assert.equal((await api('GET', `/api/agents`, { token: t })).body.find((a: any) => a.key === 'intel').owned, false);
+    assert.equal((await api('GET', `/api/agents`, { token: t })).body.find((a: any) => a.key === 'ops').owned, false);
   });
 
   test('V9 后台新增智能体 → 后台列表可见且默认下架', async () => {
