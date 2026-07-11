@@ -7,6 +7,7 @@ import { env } from '../env.js';
 import { embed } from './embedding.js';
 import { pgvectorEnabled, upsertChunkVector } from './vectorStore.js';
 import { parseDocument, detectDocType } from './docParse.js';
+import { looksFinancial } from './finParse.js';
 import { ossConfigured, ossPutBuffer, ossDelete, ossSignedUrl } from './ossUpload.js';
 import type { KnowledgeItemT, KnowledgeKind } from '../llm/schema.js';
 import type { KnowledgeDocRow, KnowledgeDetail } from '../../../shared/contracts';
@@ -226,6 +227,8 @@ export async function getKnowledgeDetail(tenantId: string, id: string): Promise<
       text: c.text,
       dim: Array.isArray(c.embedding) ? (c.embedding as number[]).length : 0,
     })),
+    // WO-09：解析完成（ready）且正文像财务/表格 → 可发起经营体检。
+    canAnalyze: item.status === 'ready' && looksFinancial(item.text),
   };
 }
 

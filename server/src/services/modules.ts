@@ -112,6 +112,17 @@ export async function listForUser(args: { tenantId: string; userId: string }): P
   return { recommended, modules };
 }
 
+/**
+ * 某能力对该用户是否已启用（门禁复用：如「经营体检」analyze 前先查 finance 模块是否已购）。
+ * 复用 computeEnabled 的口径：free 恒真；sku 看购买集合任一命中；credits/member 看自身行。未知 key → false。
+ */
+export async function isModuleEnabled(tenantId: string, userId: string, moduleKey: string): Promise<boolean> {
+  const m = getModule(moduleKey);
+  if (!m) return false;
+  const rows = await loadRows(tenantId, userId);
+  return computeEnabled(m, rows);
+}
+
 /** 领域错误：sku 未购买。携带 skuKey 供前端跳转对应 SKU 支付。 */
 function skuRequired(skuKey?: string): Error & { statusCode: number; code: string; skuKey?: string } {
   return Object.assign(new Error('该能力需购买后启用'), { statusCode: 402, code: 'SKU_REQUIRED', skuKey });

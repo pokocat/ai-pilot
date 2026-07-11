@@ -24,6 +24,60 @@ export async function parseFinancials(tableText: string): Promise<Financials | n
   return structured(FinancialsSchema, { system: FIN_SYS, user: tableText, maxChars: 6000 });
 }
 
+// —— 纯代码启发式解析（无 LLM，CSV/表格类财务数据）——
+// 首行=表头（periods，跳过第一格标签）；其后每行首格为科目标签，其余为各期数值。
+// 标签归类：收入/营收/销售额→revenue；成本/销货成本→cogs；现金/结余/余额→cash；其余→expenses。
+// 数字铁律的第一道闸：mock/测试下无 live provider，报告数字全靠此函数从上传表里读出——绝不臆造。
+
+const FIN_KEYWORDS = /(收入|营收|销售额|营业额|成本|销货|毛利|净利|利润|现金|费用|开支|支出|结余|余额|应收|应付|流水)/;
+
+/** 是否像一张「可体检」的财务/经营表：含财务科目关键词且数字足够多（≥6 个数值）。 */
+export function looksFinancial(text: string): boolean {
+  const t = (text || '').trim();
+  if (t.length < 8) return false;
+  if (!FIN_KEYWORDS.test(t)) return false;
+  const nums = t.match(/-?\d[\d,]*\.?\d*/g) ?? [];
+  return nums.length >= 6;
+}
+
+function toNum(cell: string): number {
+  const n = parseFloat((cell || '').replace(/[,，¥￥$\s元]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function splitRow(line: string): string[] {
+  // 逗号（中英）/制表符/竖线优先；退化到多空格分列。
+  const parts = /[,，\t|]/.test(line) ? line.split(/[,，\t|]/) : line.split(/\s{1,}/);
+  return parts.map((c) => c.trim());
+}
+
+/**
+ * 纯代码解析 CSV/表格类财务文本 → Financials。抽不出（无数值行/无表头）→ periods 为空，调用方据此回退 LLM 或如实报缺。
+ */
+export function parseFinancialsHeuristic(text: string): Financials {
+  const lines = (text || '').replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const empty: Financials = { periods: [], revenue: [], cogs: [], expenses: [], cash: [] };
+  if (lines.length < 2) return empty;
+
+  const header = splitRow(lines[0]);
+  const periods = header.slice(1).filter((c) => c.length > 0);
+  if (!periods.length) return empty;
+
+  const fin: Financials = { periods, revenue: [], cogs: [], expenses: [], cash: [] };
+  for (const line of lines.slice(1)) {
+    const cells = splitRow(line);
+    const label = cells[0] ?? '';
+    if (!label) continue;
+    const values = periods.map((_, i) => toNum(cells[i + 1] ?? ''));
+    if (/收入|营收|销售额|营业额/.test(label)) fin.revenue = values;
+    else if (/成本|销货/.test(label)) fin.cogs = values;
+    else if (/现金|结余|余额|流水/.test(label)) fin.cash = values;
+    else if (/毛利|净利|利润|毛利率|费用率/.test(label)) continue; // 派生指标，纯代码另算，不采信表内可能的口径差异
+    else fin.expenses.push({ name: label.slice(0, 20), values });
+  }
+  return fin;
+}
+
 export interface FinMetrics { grossMargin: (number | null)[]; expenseRatio: (number | null)[]; cashNet: number[] }
 
 /** 派生指标（纯代码）：毛利率、费用率、现金净流。数字全部由输入算出。 */

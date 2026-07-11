@@ -547,6 +547,9 @@ model KnowledgeItem {
   fileSize    Int? // 字节
   fileKey     String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
   error       String?  @db.Text // 解析/嵌入失败原因
+  // WO-09 经营体检：财务表结构化抽取 + 纯代码派生指标的落库快照（{ financials, metrics }）。
+  // 报告正文数字一律以此为准（数字铁律）；非财务/未分析条目为 null。db push 纯加法。
+  analysisJson Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @default(now()) @updatedAt
 

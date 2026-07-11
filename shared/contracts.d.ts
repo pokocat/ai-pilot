@@ -582,9 +582,12 @@ export interface KnowledgeDetail {
   updatedAt: string;
   textPreview: string;       // 正文前 2000 字
   chunks: KnowledgeChunkRow[];
+  canAnalyze: boolean;       // WO-09：是否可发起「经营体检」（解析完成 + 内容为财务/表格类）；前端据此显示体检入口
 }
 /** 上传响应：item id + 初始状态（parsing）。前端轮询 detail 看 ready/failed。 */
 export interface KnowledgeUploadResult { id: string; status: string; }
+/** WO-09 经营体检产出：命中的报告 id + 版本号（前端据此跳报告详情）。 */
+export interface AnalyzeResult { reportId: string; version: number; }
 
 /* ────────────── 对话汇总 ────────────── */
 export interface SummarizeResult {

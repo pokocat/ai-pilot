@@ -1,5 +1,6 @@
-// 知识库路由：列表 / 文档上传 / 摄取（手动笔记）/ 详情(切片) / 重嵌 / 原件预览 / 混合检索 / 删除。
+// 知识库路由：列表 / 文档上传 / 摄取（手动笔记）/ 详情(切片) / 重嵌 / 原件预览 / 混合检索 / 经营体检 / 删除。
 import type { FastifyInstance } from 'fastify';
+import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import {
   ingestKnowledge,
@@ -13,7 +14,24 @@ import {
 } from '../services/knowledge.js';
 import { hybridSearch } from '../services/retrieval.js';
 import { ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
-import type { CreateKnowledgeRequest } from '../../../shared/contracts';
+import { looksFinancial } from '../services/finParse.js';
+import { runFinCheckup } from '../services/finCheckup.js';
+import { isModuleEnabled } from '../services/modules.js';
+import { reserveQuota, assertPlanActive, type QuotaReservation } from '../services/tokenQuota.js';
+import { structuredBillTokens } from '../llm/gateway.js';
+import { cacheGet, cacheSet } from '../services/cache.js';
+import { now } from '../services/clock.js';
+import type { AnalyzeResult, CreateKnowledgeRequest } from '../../../shared/contracts';
+
+// WO-09 经营体检门禁/计费（吸取 P0-1 教训，对齐 quickscan/brandKit 口径）。
+const FIN_DAILY_LIMIT = 3;   // 每用户每日体检次数（真实模型调用 + 成版，防资损）
+const FIN_RATIO = 0.3;       // token 轴计费 ratio 低配（对齐 quickscan）
+const FIN_EST_TOKENS = 1500; // 体检调用估算 token（structured() 暂不回传真实用量，走保守估算）
+const DAY_MS = 24 * 60 * 60 * 1000;
+function finDayKey(): string {
+  const d = now();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
 
 export async function knowledgeRoutes(app: FastifyInstance) {
   // 列表（KnowledgeItemT，租户级，可按项目/类型过滤）——供 @引用候选等既有用途。
@@ -122,6 +140,58 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     const url = await knowledgePreviewUrl(user.tenantId, req.params.id);
     if (!url) return reply.code(404).send({ error: '无原件可预览' });
     return { url };
+  });
+
+  // 经营体检（WO-09）：财务/表格类知识条目 → 结构化派生指标 → 5 段体检报告成版。
+  // 门禁：finance 模块（fin-checkup SKU）已购（未购 402 SKU_REQUIRED）；套餐未过期（assertPlanActive）。
+  // 计费：reserveQuota(0.3) 预留 → 结构化调用按 P1-3 口径保守结算 → 失败 refund；每日 3 次限流。
+  app.post<{ Params: { id: string } }>('/knowledge/:id/analyze', async (req, reply): Promise<AnalyzeResult | void> => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+
+    const item = await prisma.knowledgeItem.findFirst({
+      where: { id: req.params.id, tenantId: user.tenantId },
+      select: { id: true, text: true, title: true, fileName: true, status: true, projectId: true },
+    });
+    if (!item) return reply.code(404).send({ error: '知识项不存在', code: 'NOT_FOUND' });
+    if (item.status !== 'ready' || !looksFinancial(item.text)) {
+      return reply.code(422).send({ error: '该资料不是可体检的财务/经营表', code: 'NOT_ANALYZABLE' });
+    }
+
+    // 门禁：fin-checkup 是「购买后解锁、可反复用」的 module 类 SKU（非一次性核销）——查 finance 模块是否已购。
+    if (!(await isModuleEnabled(user.tenantId, user.id, 'finance'))) {
+      return reply.code(402).send({ error: '经营体检需先购买', code: 'SKU_REQUIRED', skuKey: 'fin-checkup' });
+    }
+
+    // 限流 3/日（先于额度：超限的请求不应消耗额度/触发真实调用）。
+    const rlKey = `fincheckup:rl:${user.id}:${finDayKey()}`;
+    const used = (await cacheGet<number>(rlKey)) ?? 0;
+    if (used >= FIN_DAILY_LIMIT) {
+      return reply.code(429).send({ error: '今天的经营体检次数已用完，明天再来', code: 'RATE_LIMITED' });
+    }
+
+    await assertPlanActive(user.id); // 套餐过期 → PLAN_EXPIRED(403)
+    let reservation: QuotaReservation | undefined;
+    try {
+      reservation = await reserveQuota(user.id, FIN_RATIO);
+      const profile = await prisma.profile.findFirst({ where: { tenantId: user.tenantId }, orderBy: { updatedAt: 'desc' }, select: { industry: true } });
+      const { reportId, version, ok, attempts } = await runFinCheckup({
+        tenantId: user.tenantId,
+        userId: user.id,
+        itemId: item.id,
+        projectId: item.projectId,
+        title: `经营体检 · ${(item.title || item.fileName || '上传资料').slice(0, 40)}`,
+        text: item.text,
+        fileName: item.fileName,
+        industry: profile?.industry ?? null,
+      });
+      // P1-3：校验失败但已真实调用（attempts>0）时按轮次保守结算，不因 mock 兜底而全额退。
+      await reservation.settle(structuredBillTokens({ ok, attempts, estTokens: FIN_EST_TOKENS }), FIN_RATIO);
+      await cacheSet(rlKey, used + 1, DAY_MS); // 仅成功后计一次限流
+      return { reportId, version };
+    } catch (err) {
+      if (reservation) await reservation.refund().catch(() => {});
+      throw err;
+    }
   });
 
   app.delete<{ Params: { id: string } }>('/knowledge/:id', async (req) => {
