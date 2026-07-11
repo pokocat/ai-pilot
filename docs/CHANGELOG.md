@@ -8,6 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-11** · **生产部署核销 `5457bd9`（批次三全量）**：备份 `/tmp/junshi-db-backup-20260711-222749.dump`(1.3M) → deploy-prod.sh（db push 5 处纯加法过、未用 ACCEPT_DATA_LOSS）→ `seedBenchmarks.ts` 插 17 行基准占位（p50 空待运营回填，回填前不注入）→ 验证 health/agents 4+1/admin/deploy-version/服务 active 全过。**待办：weapp 发版（分包结构有变建议先真机回归）；运营录入 EcoTool appId（须同主体关联）与基准 p50 回填。**
 - **2026-07-11** · **批次三·第二波（WO-08 admin 面 + D-3-3 健康度 + D-3-4 转图片 + D-3-7 前端 + 主包瘦身；主模型规划 + Opus 执行）**：
   - **① WO-08 行业基准库 admin 维护面**：CRUD + CSV 逐行导入 + 三行业占位种子（p50 留空「待运营核实」，空分位不注入、幂等 create-only 不覆盖运营真数）。
   - **② D-3-3 健康度估测框架**：月复盘落库挂钩、输入全服务端算好、空维强制 na 且不触达 LLM、同月幂等、落 `kpiJson.health`、月战报【健康度·军师估测】只读落库值（高/中/低水位、禁百分比、na→暂无法评估）。
