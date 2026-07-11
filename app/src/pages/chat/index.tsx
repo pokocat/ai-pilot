@@ -429,6 +429,7 @@ export default function Chat() {
           setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
           setTimeout(scrollToEnd, 30);
         };
+        try {
         const streamOk = await generateStream(body, {
           onSession: (id) => { if (id && !sid) setSessionId(id); },
           onReportStart: startReport,
@@ -487,6 +488,12 @@ export default function Chat() {
         if (!streamOk && !reportStarted && !chatStarted) {
           const res = await api.generate(body);
           renderGenerateResult(res);
+        }
+        } finally {
+          // P0-5 双保险：报告流无论 promise 结果（含中途抛错），最终强制把报告卡 streaming 置 false，
+          // 避免流正常收尾却未触发 onDone/onError 时报告卡永久停在「产出中」。
+          // patchReport 仅改「末条且仍 streaming」的报告卡，onDone 已收尾时此处为幂等 no-op。
+          if (reportStarted) patchReport((d) => d, { streaming: false });
         }
         setTimeout(scrollToEnd, 80);
       } else {

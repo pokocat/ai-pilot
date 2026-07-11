@@ -37,7 +37,7 @@ async function responseErrorMessage(res: Response): Promise<string> {
   }
 }
 
-function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers, state: { rendered: boolean }): boolean {
+function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers, state: { rendered: boolean; finished: boolean }): boolean {
   let ok = true;
   for (const e of events) {
     const d = e.data as {
@@ -69,8 +69,8 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
       });
     }
     else if (e.event === 'memory') h.onMemory?.({ learned: d?.learned, agentName: d?.agentName });
-    else if (e.event === 'done') { if (state.rendered) h.onDone?.(d?.messageId); }
-    else if (e.event === 'error') { ok = false; h.onError?.(d?.message ?? '生成失败'); }
+    else if (e.event === 'done') { if (state.rendered) { h.onDone?.(d?.messageId); state.finished = true; } }
+    else if (e.event === 'error') { ok = false; state.finished = true; h.onError?.(d?.message ?? '生成失败'); }
   }
   return ok;
 }
@@ -94,7 +94,7 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
     let buf = '';
     let ok = true;
     let sawEvent = false;
-    const state = { rendered: false };
+    const state = { rendered: false, finished: false };
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -109,6 +109,9 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
       ok = dispatch(events, h, state) && ok;
     }
     if (!sawEvent) h.onError?.('网络请求失败');
+    // P0-5：流正常收尾但未收到 done/error 事件时补发一次 onDone，避免报告卡永久停在「产出中」。
+    // finished 幂等保护：已由 done/error 收尾的流不再补发。
+    if (state.rendered && !state.finished) { state.finished = true; h.onDone?.(); }
     return ok && state.rendered;
   }
 
@@ -117,7 +120,7 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
       let bytes = new Uint8Array(0);
       let ok = true;
       let sawEvent = false;
-      const state = { rendered: false };
+      const state = { rendered: false, finished: false };
 
       const consumeText = (text: string) => {
         const { events, rest } = parseSSE(text);
@@ -143,6 +146,9 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
         if (!sawEvent && typeof data === 'string' && data.trim()) {
           consumeText(data.endsWith('\n\n') ? data : `${data}\n\n`);
         }
+        // P0-5：流正常收尾但未收到 done/error 事件时补发一次 onDone，避免报告卡永久停在「产出中」。
+        // finished 幂等保护：已由 done/error 收尾的流不再补发。
+        if (state.rendered && !state.finished) { state.finished = true; h.onDone?.(); }
         resolve(ok && state.rendered);
       };
 
