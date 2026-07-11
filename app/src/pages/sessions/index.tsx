@@ -211,7 +211,7 @@ export default function Sessions() {
           <Input
             className="cs-input"
             value={query}
-            placeholder="搜索军师、案卷、报告或资料"
+            placeholder="搜索军师、案卷、方案或资料"
             onInput={(e) => setQuery(e.detail.value)}
           />
           {query ? <Text className="cs-clear" onClick={() => setQuery('')}>✕</Text> : null}
@@ -245,7 +245,7 @@ export default function Sessions() {
               <View className="sess-empty">
                 <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="target" size={22} color={accent} /></View>
                 <Text className="et">没有匹配的结果</Text>
-                <Text className="es">换个关键词，或用下方快捷入口补充军师、案卷、报告与资料。</Text>
+                <Text className="es">换个关键词，或用下方快捷入口补充军师、案卷、方案与资料。</Text>
               </View>
             ) : (
               <View className="sr-hint"><Text>正在检索…</Text></View>

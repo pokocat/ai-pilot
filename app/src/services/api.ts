@@ -86,6 +86,10 @@ export interface ProgressView {
   nextRank: { rank: string; requirement: string } | null;
 }
 
+// WO-10 经营周报：模板（按行业返回可报指标）/ 周序列（最近 N 周）。字段由行业决定，前端动态渲染。
+export interface BizMetricTemplateItem { metricKey: string; metricName: string; unit: string; }
+export interface BizMetricWeek { weekStart: string; metrics: Record<string, number>; }
+
 export interface ChartSummary {
   engineVersion: string;
   hourKnown: boolean;
@@ -302,6 +306,18 @@ export const api = {
     IS_MOCK ? mock.verifyProphecy(id, outcome) : request<{ prophecy: ProphecyView; stats: ProphecyStats }>(`/prophecies/${id}/verify`, 'POST', { outcome, note }),
   reviews: () =>
     IS_MOCK ? Promise.resolve({ items: [], streak: 0 }) : request<{ items: unknown[]; streak: number }>('/reviews'),
+  // 账本异议（WO-11）：对某条决策/预言提交「有出入」→ 复盘时军师与用户对账
+  disputeDecision: (id: string, dispute: string) =>
+    IS_MOCK ? mock.disputeDecision(id, dispute) : request<{ ok: boolean }>(`/decisions/${id}`, 'PATCH', { dispute }),
+  disputeProphecy: (id: string, dispute: string) =>
+    IS_MOCK ? mock.disputeProphecy(id, dispute) : request<{ ok: boolean }>(`/prophecies/${id}`, 'PATCH', { dispute }),
+  // WO-10 经营周报：模板（按行业）/ 最近 N 周序列 / 上报某周（weekStart=YYYY-MM-DD 周一，与服务端归一口径一致）
+  bizMetricTemplate: () =>
+    IS_MOCK ? mock.bizMetricTemplate() : request<{ items: BizMetricTemplateItem[] }>('/biz-metrics/template'),
+  bizMetricSeries: (weeks = 8) =>
+    IS_MOCK ? mock.bizMetricSeries(weeks) : request<{ items: BizMetricWeek[] }>(`/biz-metrics?weeks=${weeks}`),
+  saveBizMetrics: (weekStart: string, metrics: Record<string, number>) =>
+    IS_MOCK ? mock.saveBizMetrics(weekStart, metrics) : request<{ ok: boolean }>(`/biz-metrics/${weekStart}`, 'PUT', { metrics }),
   // B 级卡片（每日战报/天时日历）：返回可分享网页链接；mock 无渲染管道返回 null
   publishCard: (kind: 'daily' | 'calendar', body?: { friendName?: string; friendBazi?: BaziBody }) =>
     IS_MOCK ? Promise.resolve({ htmlUrl: null as string | null }) : request<{ htmlUrl: string | null }>(`/cards/${kind}`, 'POST', body ?? {}),

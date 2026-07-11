@@ -79,7 +79,7 @@ export default function Report() {
   const sync = async () => {
     let c = content;
     if (!c) c = await api.reportVersion(id, sel || (detail?.currentVersion ?? 1)).catch(() => null);
-    if (!c || !detail) { Taro.showToast({ title: '报告内容加载失败，请重试', icon: 'none' }); return; }
+    if (!c || !detail) { Taro.showToast({ title: '方案内容加载失败，请重试', icon: 'none' }); return; }
     const r = await acceptDeliverable(c.content, detail.agentName || '军师').catch(() => null);
     if (!r) { Taro.showToast({ title: '同步失败，请重试', icon: 'none' }); return; }
     setSynced(true);
@@ -91,9 +91,9 @@ export default function Report() {
   if (!detail) {
     return (
       <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
-        <SafeHeader title="报告" onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
+        <SafeHeader title="方案" onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
         <View className="rp-loading">
-          <Text>{failed ? '报告加载失败，请返回重试' : '加载中…'}</Text>
+          <Text>{failed ? '方案加载失败，请返回重试' : '加载中…'}</Text>
         </View>
       </View>
     );
@@ -201,11 +201,11 @@ export default function Report() {
             <View className="cs-grip" />
             <View className="cs-hero">
               <View className="cs-check" style={{ background: accent }}><Text>✓</Text></View>
-              <Text className="cs-t serif">报告已同步为今日军令</Text>
-              <Text className="cs-d">已把「{detail.title}」里的判断拆成执行动作，并同步到执行页、报告库和今晚 20:30 复盘。</Text>
+              <Text className="cs-t serif">方案已同步为今日军令</Text>
+              <Text className="cs-d">已把「{detail.title}」里的判断拆成执行动作，并同步到执行页、方案库和今晚 20:30 复盘。</Text>
             </View>
             <View className="cs-flow">
-              <Text className="cs-flow-i">报告</Text><Text className="cs-arr">→</Text>
+              <Text className="cs-flow-i">方案</Text><Text className="cs-arr">→</Text>
               <Text className="cs-flow-i on">军令</Text><Text className="cs-arr">→</Text>
               <Text className="cs-flow-i">复盘</Text>
             </View>

@@ -153,7 +153,7 @@ export default function Home() {
         setCta('done');
         store.loadMe();
         refreshDossier().then(setDossier); // 认可即建案卷、拆军令 → 刷新下一步/不能做
-        Taro.showToast({ title: '军令与报告已生成', icon: 'none' });
+        Taro.showToast({ title: '军令与方案已生成', icon: 'none' });
       })
       .catch((e: unknown) => {
         setCta('idle');
@@ -165,10 +165,10 @@ export default function Home() {
   };
 
   const ctaText = cta === 'generating'
-    ? { t: '正在生成军令与报告…', s: '读取案卷、战局和执行建议', icon: '…' }
+    ? { t: '正在生成军令与方案…', s: '读取案卷、战局和执行建议', icon: '…' }
     : cta === 'done'
-      ? { t: '已生成 → 查看军令与报告', s: '已同步到执行页、报告库和 20:30 复盘', icon: '✓' }
-      : { t: '认可判断 → 生成军令与报告', s: '同步到执行页、报告库和 20:30 复盘', icon: '›' };
+      ? { t: '已生成 → 查看军令与方案', s: '已同步到执行页、方案库和 20:30 复盘', icon: '✓' }
+      : { t: '认可判断 → 生成军令与方案', s: '同步到执行页、方案库和 20:30 复盘', icon: '›' };
 
   return (
     <Screen topInset className="home">
@@ -376,7 +376,7 @@ export default function Home() {
         open={payOpen}
         mode="member"
         title="续费会员，继续认可判断"
-        desc="套餐已到期，续费后可继续一键生成军令与报告。"
+        desc="套餐已到期，续费后可继续一键生成军令与方案。"
         confirmText="去续费"
         onConfirm={() => setPayOpen(false)}
         onClose={() => setPayOpen(false)}
@@ -385,7 +385,7 @@ export default function Home() {
         open={exceptionOpen}
         kind="power"
         title="算力不足"
-        desc="本月额度已用尽，补充算力或升级套餐后再生成军令与报告。"
+        desc="本月额度已用尽，补充算力或升级套餐后再生成军令与方案。"
         onPrimary={() => setExceptionOpen(false)}
         onClose={() => setExceptionOpen(false)}
       />

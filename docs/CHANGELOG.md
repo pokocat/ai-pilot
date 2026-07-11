@@ -8,6 +8,15 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-11** · **批次三·第一波（D-1 归因 + D-3-7 生态注册 + WO-14/12/11/10 收尾 + 文案 sweep；主模型规划 + Opus 执行）**：
+  - **① D-1 开通来源归因**：新增 `ActivationEvent`（agent 解锁与 SKU 购买双写入点，SKU 异步支付经 `PaymentOrder.attrSource/attrRefId` 穿透回调落账）；admin 新增「处方漏斗」页（处方六态 × 开通来源双块对比，7/30/90 天）。
+  - **② D-3-7 生态工具注册表（server）**：新增 `EcoTool`（appId/path 运营录入，种子不预置）；处方白名单扩为 enabled agents ∪ EcoTool，`Prescription.toolType` 落库归属；admin「生态工具」CRUD（启用强校验 appId）。
+  - **③ WO-14 处方追踪闭环**：scheduler `prescription-followup-scan`（activated≥7 天幂等打标）+ 周复盘要效果话术 + 月战报【处方效果】块（线索占比服务端算、禁算口径）。
+  - **④ WO-12 可开方工具表**：deliverable 生成路径注入工具菜单（最多开 3 条、表外不开），与落库白名单双保险；chat 路径不注入防带偏。
+  - **⑤ WO-11 异议闭环收口**：`disputeNote/disputedAt` 进契约与列表回显（app 已有「有出入？」入口与标记）。
+  - **⑥ WO-10 周报填报（app）**：执行页「本周经营数据」卡（行业模板动态字段、已填只读可改、周一归一）；未填报复盘旁轻提示。
+  - **⑦ 文案 sweep（app）**：智库→锦囊、报告→方案（含报告库→方案库）、履历空态项目→案卷、「AI 创作发布」→军师语汇；F15 删智库假样例改真空态；ledger 命理措辞随 fortune 开关降级。
+  - server 501/501（+16）；app tsc/build 绿；admin lint:ui+build 绿。**dev/prod 库需 db push 补 4 处纯加法（ActivationEvent/EcoTool/followupAt/attrSource）**。
 - **2026-07-11** · **生产部署核销 `a060f7b`**：备份 `/tmp/junshi-db-backup-20260711-205252.dump`(1.3M) → deploy-prod.sh（db push 纯加法过、未用 ACCEPT_DATA_LOSS）→ `retireAgents.ts` 下架 intel/fund/model/org（enabled 余 general+4 顾问+5 创作型）→ 线上验证 health/agents 4+1/admin/deploy-version 全过。批次一（P0 五刀）+ 批次二（P1 七项 + D-8/10/11 + WO-09 端到端）自此全部上线。**weapp 端改动仍需微信 DevTools 发版方达真机**。
 - **2026-07-11** · **全局复审批次二·第二波（P1-4/6 + D-8/10/11 + WO-09 前端；主模型规划 + Opus 子代理执行）**：
   - **① P1-4 时区计算集中化**：`clock.ts` 增 Asia/Shanghai 显式日历工具（Intl 固定 timeZone），全量替换 13 个服务 + 6 个路由的裸本地 getter——裸机部署时连续天数/推送时机/日限流不再随进程 TZ 漂移；例外仅 paipan.ts（lunar 库对象 API 与出生时刻构造，非「今天」派生）。

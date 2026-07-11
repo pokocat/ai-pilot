@@ -18,7 +18,7 @@ import type {
   KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, ConfirmResult, StagedUploadResult,
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
 } from '../../../shared/contracts';
-import type { ChartSummary, ProgressView } from './api';
+import type { ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
 import { agentForText } from '../data/intents';
@@ -123,14 +123,14 @@ type ModuleTierM = 'free' | 'sku' | 'credits' | 'member';
 const MOCK_MODULES: Omit<ModuleView, 'enabled' | 'hidden' | 'sortOrder'>[] = [
   { key: 'trend', label: '三势初判', desc: '天势 / 市势 / 人势，先给基础判断', iconChar: '势', group: 'free', tier: 'free', stateLabel: '默认启用', agentKey: 'general', detail: { scene: '案卷资料齐了先跑一遍三势', input: '案卷资料', output: '三势判断', cost: '免费', writeback: '战局页' } },
   { key: 'conflict', label: '矛盾初筛', desc: '识别当前最卡住增长的主线问题', iconChar: '矛', group: 'free', tier: 'free', stateLabel: '可直接调用', agentKey: 'general', detail: { scene: '拿不准最该解决什么时用', input: '对话 + 案卷', output: '主要矛盾', cost: '免费', writeback: '战局页' } },
-  { key: 'deep-contradiction', label: '深度矛盾分析', desc: '输出阶段打法、风险边界和不可做清单', iconChar: '深', group: 'deep', tier: 'sku', price: { skuKey: 'deep-contradiction', priceFen: 2900 }, stateLabel: '¥29 启用', detail: { scene: '主要矛盾已明确，要深挖打法', input: '完整案卷', output: '深度诊断', cost: '¥29', writeback: '报告库' } },
+  { key: 'deep-contradiction', label: '深度矛盾分析', desc: '输出阶段打法、风险边界和不可做清单', iconChar: '深', group: 'deep', tier: 'sku', price: { skuKey: 'deep-contradiction', priceFen: 2900 }, stateLabel: '¥29 启用', detail: { scene: '主要矛盾已明确，要深挖打法', input: '完整案卷', output: '深度诊断', cost: '¥29', writeback: '方案库' } },
   { key: 'growth', label: '增长漏斗诊断', desc: '结合店铺、私域和内容数据做深度推演', iconChar: '漏', group: 'deep', tier: 'credits', price: { credits: 80 }, stateLabel: '消耗 80 算力', agentKey: 'growth', detail: { scene: '有成交漏斗数据后重算损耗', input: '成交漏斗表', output: '转化断点', cost: '80 算力', writeback: '执行页' } },
   { key: 'ip-engine', label: 'IP 内容引擎', desc: '定位、选题、脚本、发布计划一体生成', iconChar: 'IP', group: 'deep', tier: 'member', price: { planRequired: true }, stateLabel: '会员可用', agentKey: 'ip', detail: { scene: '要批量产出可执行内容', input: 'IP 资料', output: '选题脚本', cost: '会员', writeback: '执行页' } },
-  { key: 'finance', label: '财务经营体检', desc: '现金流、成本结构、利润风险初步拆解', iconChar: '财', group: 'deep', tier: 'sku', price: { skuKey: 'fin-checkup', priceFen: 4900 }, stateLabel: '¥49 启用', detail: { scene: '担心现金和利润风险时', input: '财务表', output: '经营体检', cost: '¥49', writeback: '报告库' } },
+  { key: 'finance', label: '财务经营体检', desc: '现金流、成本结构、利润风险初步拆解', iconChar: '财', group: 'deep', tier: 'sku', price: { skuKey: 'fin-checkup', priceFen: 4900 }, stateLabel: '¥49 启用', detail: { scene: '担心现金和利润风险时', input: '财务表', output: '经营体检', cost: '¥49', writeback: '方案库' } },
   { key: 'daily-command', label: '每日军令', desc: '任务、提醒、复盘，承接认可后的方案', iconChar: '令', group: 'member', tier: 'free', stateLabel: '基础版免费', detail: { scene: '认可判断后自动承接执行', input: '认可判断', output: '每日军令', cost: '免费', writeback: '执行页' } },
   { key: 'topic-bank', label: 'IP 选题库高级版', desc: '按人设、产品和渠道生成长期选题池', iconChar: '题', group: 'member', tier: 'sku', price: { skuKey: 'ip-topics-pro', priceFen: 9900 }, stateLabel: '¥99 单独购买', detail: { scene: '需要长期内容选题储备', input: '人设产品', output: '长期选题', cost: '¥99', writeback: '知识库' } },
   { key: 'shop-board', label: '店铺数据看板', desc: '曝光、点击、转化、复购持续追踪', iconChar: '店', group: 'member', tier: 'sku', price: { skuKey: 'shop-dashboard', priceFen: 19900 }, stateLabel: '¥199 单独购买', detail: { scene: '要持续盯店铺经营指标', input: '店铺授权', output: '数据看板', cost: '¥199', writeback: '数据源' } },
-  { key: 'weekly-review', label: '周复盘增强', desc: '自动汇总执行、数据和下一周军令', iconChar: '复', group: 'member', tier: 'member', price: { planRequired: true }, stateLabel: '会员解锁', detail: { scene: '每周要系统复盘并排下周军令', input: '本周执行', output: '周复盘', cost: '会员', writeback: '报告库' } },
+  { key: 'weekly-review', label: '周复盘增强', desc: '自动汇总执行、数据和下一周军令', iconChar: '复', group: 'member', tier: 'member', price: { planRequired: true }, stateLabel: '会员解锁', detail: { scene: '每周要系统复盘并排下周军令', input: '本周执行', output: '周复盘', cost: '会员', writeback: '方案库' } },
 ];
 const MOCK_SKU_MODULE_KEY: Record<string, string> = { 'deep-contradiction': 'deep-contradiction', finance: 'fin-checkup', 'topic-bank': 'ip-topics-pro', 'shop-board': 'shop-dashboard' };
 
@@ -557,6 +557,37 @@ function proStatsM(items: ProphecyView[]): ProphecyStats {
   const hit = items.filter((i) => i.status === 'hit').length, miss = items.filter((i) => i.status === 'miss').length;
   return { total: items.length, pending: items.length - hit - miss, hit, miss, hitRate: hit + miss >= 5 ? Math.round((hit / (hit + miss)) * 100) : null };
 }
+
+// —— WO-10 经营周报 mock：美业样例模板 + 周序列（本地持久化，确定性种子） ——
+// 模板字段与服务端 IndustryBenchmark（美业启用项）口径对齐；离线兜底，需同步维护。
+const BIZ_TEMPLATE_BEAUTY: BizMetricTemplateItem[] = [
+  { metricKey: 'monthly_revenue', metricName: '月营收', unit: '万元' },
+  { metricKey: 'customer_price', metricName: '客单价', unit: '元' },
+  { metricKey: 'repurchase_rate', metricName: '复购率', unit: '%' },
+  { metricKey: 'store_conversion', metricName: '到店转化率', unit: '%' },
+  { metricKey: 'new_customers', metricName: '新客数', unit: '人' },
+];
+function pad2M(n: number): string { return String(n).padStart(2, '0'); }
+function ymdM(d: Date): string { return `${d.getFullYear()}-${pad2M(d.getMonth() + 1)}-${pad2M(d.getDate())}`; }
+// 本周一（与服务端归一口径一致）；offset 周为负数取过去的周一。
+function mondayOfM(offsetWeeks = 0): string {
+  const d = new Date();
+  const dow = (d.getDay() + 6) % 7; // 0=周一
+  d.setDate(d.getDate() - dow + offsetWeeks * 7);
+  return ymdM(d);
+}
+function seedBizSeriesM(): BizMetricWeek[] {
+  // 上上周 + 上周两条确定性历史，本周留空待用户上报。
+  return [
+    { weekStart: mondayOfM(-2), metrics: { monthly_revenue: 18, customer_price: 620, repurchase_rate: 34, store_conversion: 41, new_customers: 52 } },
+    { weekStart: mondayOfM(-1), metrics: { monthly_revenue: 21, customer_price: 660, repurchase_rate: 37, store_conversion: 44, new_customers: 58 } },
+  ];
+}
+function loadBizSeriesM(token: string): BizMetricWeek[] {
+  try { const raw = Taro.getStorageSync(`mock.bizmetrics.${token}`); if (raw) return (typeof raw === 'string' ? JSON.parse(raw) : raw) as BizMetricWeek[]; } catch { /* noop */ }
+  return seedBizSeriesM();
+}
+function saveBizSeriesM(token: string, s: BizMetricWeek[]) { try { Taro.setStorageSync(`mock.bizmetrics.${token}`, JSON.stringify(s)); } catch { /* noop */ } }
 
 // ── mock api（与后端同口径） ──
 export const mock = {
@@ -1342,6 +1373,37 @@ export const mock = {
     const it = l.prophecies.find((x) => x.id === id); if (it) it.status = outcome;
     saveLedgerM(token, l);
     return delay({ prophecy: it ?? l.prophecies[0], stats: proStatsM(l.prophecies) });
+  },
+  // WO-11 账本异议：把用户「有出入」的反馈落到条目（复盘时军师据此对账）。
+  async disputeDecision(id: string, dispute: string): Promise<{ ok: boolean }> {
+    const { token } = current(); const l = loadLedgerM(token);
+    const it = l.decisions.find((x) => x.id === id); if (it) (it as DecisionView & { disputeNote?: string }).disputeNote = dispute.trim().slice(0, 500);
+    saveLedgerM(token, l);
+    return delay({ ok: !!it });
+  },
+  async disputeProphecy(id: string, dispute: string): Promise<{ ok: boolean }> {
+    const { token } = current(); const l = loadLedgerM(token);
+    const it = l.prophecies.find((x) => x.id === id); if (it) (it as ProphecyView & { disputeNote?: string }).disputeNote = dispute.trim().slice(0, 500);
+    saveLedgerM(token, l);
+    return delay({ ok: !!it });
+  },
+  // WO-10 经营周报：模板 / 序列 / 上报某周。mock 固定美业模板，序列本地持久化。
+  async bizMetricTemplate(): Promise<{ items: BizMetricTemplateItem[] }> {
+    return delay({ items: BIZ_TEMPLATE_BEAUTY });
+  },
+  async bizMetricSeries(weeks = 8): Promise<{ items: BizMetricWeek[] }> {
+    const { token } = current();
+    const all = loadBizSeriesM(token).slice().sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+    return delay({ items: all.slice(-weeks) });
+  },
+  async saveBizMetrics(weekStart: string, metrics: Record<string, number>): Promise<{ ok: boolean }> {
+    const { token } = current();
+    const all = loadBizSeriesM(token);
+    const idx = all.findIndex((w) => w.weekStart === weekStart);
+    if (idx >= 0) all[idx] = { weekStart, metrics };
+    else all.push({ weekStart, metrics });
+    saveBizSeriesM(token, all);
+    return delay({ ok: true });
   },
   // 军师记忆库（P2）：从 mock 用户数据合成六类结构化记忆，让档案页「军师记事」本地可走查。
   async memoryLibrary(): Promise<MemoryLibraryView> {

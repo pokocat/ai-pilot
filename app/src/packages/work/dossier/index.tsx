@@ -40,7 +40,7 @@ export default function DossierPage() {
       {!report ? (
         <View className="ds-empty">
           <Text className="ds-empty-t serif">创始人战略档案</Text>
-          <Text className="ds-empty-d">军师把你的资料——档案、对话、项目、战略——蒸馏成一份完整履历。资料够了会自动为你立档，越全写得越透；也可以现在就手动生成。</Text>
+          <Text className="ds-empty-d">军师把你的资料——档案、对话、案卷、战略——蒸馏成一份完整履历。资料够了会自动为你立档，越全写得越透；也可以现在就手动生成。</Text>
           <View className={`ds-gen ${loading ? 'busy' : ''}`} onClick={generate}>
             <Text>{loading ? '军师执笔中…' : (ready ? '生成完整履历' : '加载中…')}</Text>
           </View>

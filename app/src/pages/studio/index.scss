@@ -320,8 +320,21 @@
 .wg-text { flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .wg-text.done { color: var(--ink-3); text-decoration: line-through; }
 
+/* —— WO-10 本周经营数据填报卡（复用 data-fill 观感 + 可换行网格 + 只读值） —— */
+.biz-fill { margin-top: 14px; }
+.biz-fill .bm-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.biz-fill .bm-cell {
+  flex: 1 1 44%; min-width: 44%; box-sizing: border-box;
+  padding: 10px 11px; border-radius: 13px;
+  background: rgba(255, 255, 255, .86); border: 1px solid var(--line);
+}
+.biz-fill .bm-val { display: block; margin-top: 4px; font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--ink); }
+.biz-fill .bm-unit { font-size: 11px; font-weight: 600; color: var(--ink-3); margin-left: 3px; font-family: inherit; }
+.biz-fill .bm-edit { font-size: 12px; font-weight: 600; }
+
 /* —— 复盘视图 —— */
 .review-card { margin-top: 14px; padding: 16px; border-radius: 17px; }
+.rc-hint { display: block; margin-top: 8px; font-size: 11.5px; font-weight: 600; color: var(--gold-deep); line-height: 1.5; }
 .rc-k { display: block; color: var(--green); font-size: 12px; font-weight: 600; letter-spacing: .06em; }
 .rc-t { display: block; margin-top: 8px; font-size: 13.5px; line-height: 1.6; color: var(--ink); }
 .rc-btn {

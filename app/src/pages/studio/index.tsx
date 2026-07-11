@@ -7,7 +7,7 @@ import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
 import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
-import { api, type Agent, type GoalLadder, type ReminderItem } from '../../services/api';
+import { api, type Agent, type GoalLadder, type ReminderItem, type BizMetricTemplateItem } from '../../services/api';
 import {
   addOrder, buildReviewPrompt, doneOrdersOf, ordersOf, pendingOrdersOf, recentOrders, refreshDossier,
   removeOrder, saveBackfill, saveGoals, startReview, today, todayProgress, toggleOrder, type Dossier, type DossierOrder,
@@ -31,6 +31,15 @@ function dateLabel(iso: string): string {
   if (iso === today()) return '今天';
   const [, m, d] = iso.split('-');
   return `${Number(m)}月${Number(d)}日`;
+}
+
+// WO-10：本周一（YYYY-MM-DD，与服务端经营周报归一口径一致）。
+function thisMonday(): string {
+  const d = new Date();
+  const dow = (d.getDay() + 6) % 7; // 0=周一
+  d.setDate(d.getDate() - dow);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
 function orderTagLabel(tag: string): string {
@@ -67,6 +76,8 @@ export default function Studio() {
   const [reminders, setReminders] = useState<ReminderItem[] | null>(null);
   const [goalEdit, setGoalEdit] = useState<{ field: GoalField; label: string } | null>(null);
   const [goalDraft, setGoalDraft] = useState('');
+  // WO-10：本周经营周报是否已填报（用于复盘按钮旁的轻提示；null=未知/无行业模板不提示）
+  const [bizFilled, setBizFilled] = useState<boolean | null>(null);
   const und = s.me()?.understanding;
 
   // 目标编辑浮层与底部导航栏协同（键控，卸载复位）。
@@ -502,10 +513,13 @@ export default function Studio() {
 
         {view === 'review' ? (
           <>
+            {/* WO-10：本周经营数据填报（周复盘上方，字段按行业动态渲染） */}
+            <WeeklyBizMetrics accent={accent} onFilledChange={setBizFilled} />
             <View className="review-card card">
               <Text className="rc-k">今晚复盘{streak ? ` · 已连续 ${streak} 天` : ''}</Text>
               <Text className="rc-t">军师依今日军令完成度与实绩数据，诊断症结，给出明日军令。</Text>
               <Text className="payoff">依据：今日军令 {progress.done}/{progress.total || 0} · 数据{backfillSaved ? '已录' : '未录'}</Text>
+              {bizFilled === false ? <Text className="rc-hint">本周经营数据还没填，填了复盘对账更准（不填也能复盘）。</Text> : null}
               <View className="rc-btn" onClick={genReview}>
                 <Icon name="doc" size={15} color="#fff" />
                 <Text>生成今日复盘</Text>
@@ -527,9 +541,9 @@ export default function Studio() {
           </>
         ) : null}
 
-        {/* AI 创作发布：创作型智能体（出活） */}
+        {/* 军师代笔 · 内容出品：创作型智能体（出活） */}
         <View className="sec-head">
-          <Text className="sec-title">AI 创作发布</Text>
+          <Text className="sec-title">军师代笔 · 内容出品</Text>
           <Text className="sec-more">把军令变成内容资产</Text>
         </View>
         <View className="agrid">
@@ -585,6 +599,99 @@ export default function Studio() {
 
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); openAgent(a.key); }} />
     </Screen>
+  );
+}
+
+// WO-10：本周经营数据填报卡。字段由服务端行业模板决定；已填→只读+「改」；未填/编辑→动态输入。
+// 无行业模板（template 为空）→ 整卡不渲染，不造假字段（诚实空态）。
+function WeeklyBizMetrics({ accent, onFilledChange }: { accent: string; onFilledChange?: (filled: boolean) => void }) {
+  const s = useStore();
+  const [tpl, setTpl] = useState<BizMetricTemplateItem[]>([]);
+  const [saved, setSaved] = useState<Record<string, number> | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const week = thisMonday();
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([api.bizMetricTemplate(), api.bizMetricSeries(8)])
+      .then(([t, ser]) => {
+        if (!alive) return;
+        setTpl(t.items);
+        const wk = ser.items.find((w) => w.weekStart === week);
+        const m = wk && Object.keys(wk.metrics).length ? wk.metrics : null;
+        setSaved(m);
+        onFilledChange?.(!!m);
+      })
+      .catch(() => { /* 静默：拉取失败不打断执行页 */ });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const startEdit = () => {
+    const d: Record<string, string> = {};
+    tpl.forEach((m) => { const v = saved?.[m.metricKey]; d[m.metricKey] = v != null ? String(v) : ''; });
+    setDraft(d);
+    setEditing(true);
+  };
+
+  const save = async () => {
+    const metrics: Record<string, number> = {};
+    tpl.forEach((m) => { const raw = (draft[m.metricKey] ?? '').trim(); const n = Number(raw); if (raw !== '' && Number.isFinite(n)) metrics[m.metricKey] = n; });
+    try {
+      await api.saveBizMetrics(week, metrics);
+      const has = Object.keys(metrics).length > 0;
+      setSaved(has ? metrics : null);
+      setEditing(false);
+      onFilledChange?.(has);
+      Taro.showToast({ title: has ? '本周经营数据已记录' : '已清空本周数据', icon: 'none' });
+    } catch (e) { s.handleApiError(e, { fallbackTitle: '保存失败，请重试' }); }
+  };
+
+  if (!tpl.length) return null;
+  const hasSaved = !!saved && !editing;
+
+  return (
+    <View className="data-fill biz-fill">
+      <View className="df-head">
+        <Text className="df-t serif">本周经营数据</Text>
+        {hasSaved
+          ? <Text className="bm-edit" style={{ color: accent }} onClick={startEdit}>改</Text>
+          : <Text className={`df-s ${saved ? 'ok' : ''}`}>{tpl.length} 项</Text>}
+      </View>
+      {hasSaved ? (
+        <View className="bm-row">
+          {tpl.map((m) => {
+            const v = saved?.[m.metricKey];
+            return (
+              <View key={m.metricKey} className="bm-cell ro">
+                <Text className="df-label">{m.metricName}</Text>
+                <Text className="bm-val">{v != null ? v : '—'}<Text className="bm-unit">{m.unit}</Text></Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : (
+        <>
+          <View className="bm-row">
+            {tpl.map((m) => (
+              <View key={m.metricKey} className="bm-cell">
+                <Text className="df-label">{m.metricName}（{m.unit}）</Text>
+                <Input
+                  className="df-input"
+                  type="digit"
+                  value={draft[m.metricKey] ?? ''}
+                  placeholder="__"
+                  onInput={(e) => setDraft((cur) => ({ ...cur, [m.metricKey]: e.detail.value }))}
+                />
+              </View>
+            ))}
+          </View>
+          <View className="df-save" style={{ background: accent }} onClick={save}><Text>保存本周数据</Text></View>
+        </>
+      )}
+      <Text className="payoff">军师复盘时与行业基准对照，差值由系统计算</Text>
+    </View>
   );
 }
 

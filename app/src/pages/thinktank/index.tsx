@@ -24,25 +24,14 @@ const TABS: { key: ThinkTab; label: string }[] = [
   { key: 'assets', label: '案卷资产' },
   { key: 'data', label: '数据源' },
   { key: 'modules', label: '能力' },
-  { key: 'reports', label: '报告' },
+  { key: 'reports', label: '方案' },
 ];
 
 const isWeapp = process.env.TARO_ENV === 'weapp';
 
 // V7-06：资料整理 4 步动画（逐字，设计规格 §6.3）。
 const PROC_STEPS = ['识别资料来源和文件类型', '去重并标记敏感信息', '按案卷目标生成分类结构', '输出待确认资料和问题清单'];
-// 已优化静态兜底（无本轮整理结果时；设计规格 §6.4）。
-const OPTIMIZED_ROWS = [
-  { i: '证', t: '信任证明缺口', s: '案例、评价、成交截图已整理为证据', em: '3' },
-  { i: '问', t: '增长断点问题清单', s: '线索到咨询、咨询到成交的关键问题', em: '6' },
-  { i: 'IP', t: 'IP 内容可用素材', s: '历史选题、同行参考、脚本角度已筛选', em: '12' },
-];
-// 知识库文件夹兜底（设计规格 §6.5）。
-const FOLDER_FALLBACK = [
-  { key: 'growth', label: '增长资料库', count: 18 },
-  { key: 'content', label: 'IP 内容库', count: 24 },
-  { key: 'founder', label: '老板与企业档案', count: 19 },
-];
+// F15：已优化 / 知识库无真实数据时，改真空态引导，不再渲染假样例（原 OPTIMIZED_ROWS / FOLDER_FALLBACK 已移除）。
 
 // V7-08：能力 tier → 徽章（free绿 / sku金 / credits蓝 / member黑，设计规格 §0.2）。
 const TIER_BADGE: Record<ModuleTier, { label: string; cls: string }> = {
@@ -409,7 +398,7 @@ export default function ThinkTank() {
       <View className="pad think">
         {/* 页头 */}
         <View className="think-nav tab-page-head">
-          <Text className="tn-title serif">智库</Text>
+          <Text className="tn-title serif">锦囊</Text>
         </View>
 
         {/* 分区切换 */}
@@ -542,22 +531,28 @@ export default function ThinkTank() {
                   <Text className="ss-s">这里只放系统整理后的结果，用户确认后再写入知识库。</Text>
                   <Text className="ss-em">{counts.optimized} 份</Text>
                 </View>
-                <View className="asset-list card">
-                  {(organized?.folders?.length
-                    ? organized.folders.map((f) => ({ i: f.label.slice(0, 1), t: f.label, s: '已优化 · 待写入知识库', em: String(f.count) }))
-                    : OPTIMIZED_ROWS
-                  ).map((r, idx) => (
-                    <View key={idx} className="asset-list-row">
-                      <View className="al-i"><Text>{r.i}</Text></View>
-                      <View className="al-b"><Text className="al-t serif">{r.t}</Text><Text className="al-s">{r.s}</Text></View>
-                      <Text className="al-em">{r.em}</Text>
+                {organized?.folders?.length ? (
+                  <>
+                    <View className="asset-list card">
+                      {organized.folders.map((f, idx) => (
+                        <View key={idx} className="asset-list-row">
+                          <View className="al-i"><Text>{f.label.slice(0, 1)}</Text></View>
+                          <View className="al-b"><Text className="al-t serif">{f.label}</Text><Text className="al-s">已优化 · 待写入知识库</Text></View>
+                          <Text className="al-em">{f.count}</Text>
+                        </View>
+                      ))}
                     </View>
-                  ))}
-                </View>
-                <View className="confirm-library card" onClick={confirmOptimized}>
-                  <Text className="cl-t serif">确认优化后的资料 → 写入知识库</Text>
-                  <Text className="cl-s">确认后将回写战局页、报告页和后续对话引用。</Text>
-                </View>
+                    <View className="confirm-library card" onClick={confirmOptimized}>
+                      <Text className="cl-t serif">确认优化后的资料 → 写入知识库</Text>
+                      <Text className="cl-s">确认后将回写战局页、方案页和后续对话引用。</Text>
+                    </View>
+                  </>
+                ) : (
+                  <View className="stage-empty">
+                    <Text className="se-t">还没有已优化的资料</Text>
+                    <Text className="se-s">先到「待整理」上传并整理资料，优化结果会在这里等你确认入库。</Text>
+                  </View>
+                )}
               </>
             ) : null}
 
@@ -566,22 +561,31 @@ export default function ThinkTank() {
               <>
                 <View className="stage-summary card">
                   <Text className="ss-t serif">已进入知识库</Text>
-                  <Text className="ss-s">这里的资料已经可被战局、报告和对话直接调用。</Text>
+                  <Text className="ss-s">这里的资料已经可被战局、方案和对话直接调用。</Text>
                   <Text className="ss-em">{counts.confirmed} 份</Text>
                 </View>
-                <View className="folder-grid">
-                  {(folders.length ? folders : FOLDER_FALLBACK).map((f) => (
-                    <View key={f.key} className="folder-tile card">
-                      <View className="ft-ic"><Text>{f.label.slice(0, 1)}</Text></View>
-                      <Text className="ft-t serif">{f.label}</Text>
-                      <Text className="ft-n">{f.count} 份</Text>
+                {folders.length ? (
+                  <>
+                    <View className="folder-grid">
+                      {folders.map((f) => (
+                        <View key={f.key} className="folder-tile card">
+                          <View className="ft-ic"><Text>{f.label.slice(0, 1)}</Text></View>
+                          <Text className="ft-t serif">{f.label}</Text>
+                          <Text className="ft-n">{f.count} 份</Text>
+                        </View>
+                      ))}
                     </View>
-                  ))}
-                </View>
-                <View className="confirm-library card" onClick={syncKnowledge}>
-                  <Text className="cl-t serif">同步知识库 → 刷新战局判断</Text>
-                  <Text className="cl-s">把知识库内容回写给战局页、报告页和后续对话。</Text>
-                </View>
+                    <View className="confirm-library card" onClick={syncKnowledge}>
+                      <Text className="cl-t serif">同步知识库 → 刷新战局判断</Text>
+                      <Text className="cl-s">把知识库内容回写给战局页、方案页和后续对话。</Text>
+                    </View>
+                  </>
+                ) : (
+                  <View className="stage-empty">
+                    <Text className="se-t">知识库还是空的</Text>
+                    <Text className="se-s">确认优化后的资料入库后，会在这里按目录沉淀，供战局、方案和对话调用。</Text>
+                  </View>
+                )}
               </>
             ) : null}
           </>
@@ -593,7 +597,7 @@ export default function ThinkTank() {
             <View className="ds-hero card">
               <Text className="dh-k">经营数据源</Text>
               <Text className="dh-t serif">让军师判断有真实证据</Text>
-              <Text className="dh-d">先支持上传表格、截图和聊天记录，再逐步做后台授权。数据会参与战局判断、执行复盘和报告更新。</Text>
+              <Text className="dh-d">先支持上传表格、截图和聊天记录，再逐步做后台授权。数据会参与战局判断、执行复盘和方案更新。</Text>
               <View className="dh-metrics">
                 <View className="dh-m"><Text className="dh-mv serif">{dsView?.bound ?? 0}</Text><Text className="dh-ml">已绑定</Text></View>
                 <View className="dh-m"><Text className="dh-mv serif">{dsView?.needed ?? 0}</Text><Text className="dh-ml">待补关键项</Text></View>
@@ -671,12 +675,12 @@ export default function ThinkTank() {
         {/* ===================== 报告（V7-09） ===================== */}
         {tab === 'reports' ? (
           <>
-            <Text className="think-h2">报告与历史方案</Text>
+            <Text className="think-h2">方案与历史版本</Text>
             {reports.length === 0 ? (
               <View className="think-empty">
                 <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={22} color={accent} /></View>
-                <Text className="et">还没有沉淀报告</Text>
-                <Text className="es">在战局页认可判断、或让军师产出方案后，报告会按版本沉淀在这里。</Text>
+                <Text className="et">还没有沉淀方案</Text>
+                <Text className="es">在战局页认可判断、或让军师产出方案后，方案会按版本沉淀在这里。</Text>
               </View>
             ) : (
               reports.map((r) => (
@@ -693,7 +697,7 @@ export default function ThinkTank() {
             <View className="report card" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
               <View className="report-ic"><Text className="serif">新</Text></View>
               <View className="report-b">
-                <Text className="report-t serif">从对话生成新报告</Text>
+                <Text className="report-t serif">从对话生成新方案</Text>
                 <Text className="report-s">认可判断后生成，并同步到执行模块</Text>
               </View>
               <Text className="report-state">生成</Text>
@@ -761,7 +765,7 @@ function DsSheet({ sel, onClose, onBind }: { sel: DataSourceView | null; onClose
         <View className="detail-mini-grid">
           <View className="dm-cell"><Text className="dm-k">授权范围</Text><Text className="dm-v">只读当前案卷需要的数据</Text></View>
           <View className="dm-cell"><Text className="dm-k">同步频率</Text><Text className="dm-v">每日复盘前刷新一次</Text></View>
-          <View className="dm-cell"><Text className="dm-k">回写位置</Text><Text className="dm-v">战局、执行、报告</Text></View>
+          <View className="dm-cell"><Text className="dm-k">回写位置</Text><Text className="dm-v">战局、执行、方案</Text></View>
           <View className="dm-cell"><Text className="dm-k">隐私控制</Text><Text className="dm-v">可随时断开或隐藏来源</Text></View>
         </View>
 
