@@ -6,12 +6,12 @@ import Login from '../../components/Login';
 import Picker from '../../components/Picker';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
+import NextStepCard from '../../components/NextStepCard';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type JourneyView, type BattleForce, type ForceKind } from '../../services/api';
+import { api, type BattleForce, type ForceKind } from '../../services/api';
 import { MODULE_MARKET } from '../../data/operatingSystem';
-import { EMPTY_STATES } from '../../data/emptyStates';
-import { refreshDossier, todayProgress, type Dossier } from '../../services/dossier';
+import { refreshDossier, type Dossier } from '../../services/dossier';
 import './index.scss';
 
 function todayLabel() {
@@ -71,7 +71,6 @@ export default function Home() {
   const [pickerFirst, setPickerFirst] = useState(false);
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
   const [dossier, setDossier] = useState<Dossier | null>(null);
-  const [journey, setJourney] = useState<JourneyView | null>(null); // WO-07：下一步卡数据源（初诊后 new→scanned，不再重复「开始初诊」）
   // V7-04：认可判断 CTA 三态机 + 三势全解 / 付费 / 异常 弹层开关
   const [cta, setCta] = useState<'idle' | 'generating' | 'done'>('idle');
   const [forcesOpen, setForcesOpen] = useState(false);
@@ -90,7 +89,6 @@ export default function Home() {
     try { if (Taro.getStorageSync(COMMIT_KEY) === dayKey()) setCta('done'); } catch { /* noop */ }
     if (s.isAuthed()) {
       store.loadMe(); // 刷新军师档案（对话/资料变化后战局判断与三势随之更新）
-      api.journey().then(setJourney).catch(() => setJourney(null)); // WO-07：返回首页即刷新 journey，初诊后不再显示「开始初诊」
     }
   });
 
@@ -125,7 +123,6 @@ export default function Home() {
 
   const gapCount = und?.nextQuestions.length ?? 0;
   const riskCount = dossier?.risks.length ?? 0;
-  const progress = todayProgress(dossier);
   // 案卷完整度：军师档案成熟度（真实状态，不编百分比）
   const maturityLabel = !s.isAuthed() || !und ? '—' : und.maturity === 'ready' ? '可用' : und.maturity === 'forming' ? '整理中' : '待建档';
 
@@ -140,8 +137,6 @@ export default function Home() {
     goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
   const askRisks = () =>
     goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
-  // 速诊（WO-06）：初诊 CTA 进 3 问速诊分包页。
-  const goQuickScan = () => Taro.navigateTo({ url: '/packages/work/quickscan/index' });
 
   // 三势全解：点整卡/小框 → 半屏 sheet（看全解）。无三势时不弹。
   const openForces = () => { if (forces.length) setForcesOpen(true); };
@@ -168,21 +163,6 @@ export default function Home() {
         s.handleApiError(e);
       });
   };
-
-  // 下一步（WO-07 Journey 状态机占位）：先按本地案卷/档案派生，后续替换为服务端 /journey。
-  const nextStep = (() => {
-    if (!s.isAuthed()) return { title: '先登录，和军师开聊', desc: '登录后军师开始为你建档、诊断、排军令。', cta: '去登录', act: () => setShowLogin(true) };
-    if (dossier) {
-      return progress.total && progress.done < progress.total
-        ? { title: `今日执行 · 军令 ${progress.done}/${progress.total}`, desc: '完成今日军令并录入战果，晚间即可复盘。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) }
-        : { title: '录入今日战果 · 生成复盘', desc: '把线索 / 咨询 / 成交录进去，军师据此定明日军令。', cta: '去执行', act: () => Taro.switchTab({ url: '/pages/studio/index' }) };
-    }
-    if (und?.summary) return { title: '认可一份方案，生成军令', desc: '和军师把打法聊定，认可后自动拆成今日军令。', cta: '去对话', act: () => goChat('agentKey=general&continue=1') };
-    if (journey?.nextStep && (journey.stage === 'scanned' || journey.stage === 'diagnosing')) {
-      return { title: journey.nextStep.title, desc: journey.nextStep.desc, cta: '进参谋室', act: () => goChat('agentKey=general&continue=1') };
-    }
-    return { title: EMPTY_STATES.battle.title, desc: EMPTY_STATES.battle.desc, cta: EMPTY_STATES.battle.cta, act: goQuickScan };
-  })();
 
   const ctaText = cta === 'generating'
     ? { t: '正在生成军令与报告…', s: '读取案卷、战局和执行建议', icon: '…' }
@@ -227,13 +207,8 @@ export default function Home() {
           </View>
         </View>
 
-        {/* 下一步卡（打磨·WO-07 Journey 占位）：按案卷/档案派生一条明确动作，冷启动走空态导流 */}
-        <View className="nextstep-card card" onClick={nextStep.act}>
-          <Text className="section-label">下 一 步</Text>
-          <Text className="ns-t serif">{nextStep.title}</Text>
-          <Text className="ns-d">{nextStep.desc}</Text>
-          <Text className="ns-go" style={{ color: accent }}>{nextStep.cta} ›</Text>
-        </View>
+        {/* 下一步卡（WO-07）：三 tab 统一挂共享 NextStepCard，读服务端 journey；冷启动 quickscan 由组件按 route 导流速诊 */}
+        <NextStepCard />
 
         {/* 三势判断（force-panel）：从 me.understanding.battleForces 真实渲染。整卡/小框 → 三势全解 sheet。 */}
         <View className="force-panel">

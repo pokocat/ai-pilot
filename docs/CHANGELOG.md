@@ -8,6 +8,14 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-11** · **全局复审批次二·第一波（P1-1/2/3/5/7 + WO-09 接线；主模型规划 + Opus 子代理执行）**：
+  - **① P1-1 认可方案幂等化**：`recordDecisionFromAccept` 按 userId+方案指纹（title+主判断确定性拼出）去重——快路径无锁双检 + 慢路径用户级 `pg_advisory_xact_lock` 串行 check→seq→insert（顺带消灭并发不同方案撞 `(userId,seq)` 唯一键的旧竞态），重复 accept 不再重复记账污染决策准确率分母。
+  - **② P1-3 structured() 计费口径**：新增 `structuredMetered()` 回传 `{data, attempts, live}`（attempts 调用前自增，超时/5xx 保守计入），`structuredBillTokens` 统一「成功定额 / 失败按 attempts 保守扣 / mock 零扣」，quickscan/brandKit/经营体检三个计费调用方接入——堵「已发生真实调用却 settle(0) 全额退款」的资损口子；原 `structured()` 变薄封装，非计费消费者零改动。
+  - **③ WO-09 经营体检端到端接线（决策 A）**：`KnowledgeItem.analysisJson`（db push 纯加法）+ `POST /knowledge/:id/analyze`（canAnalyze=解析完成且财务关键词+数值≥6 启发式；fin-checkup 为解锁型 module SKU 走 `isModuleEnabled` 门禁非核销，未购 402；assertPlanActive + reserveQuota(0.3) + 日限 3 次 + 失败退款）；解析→派生指标全纯代码，LLM 仅产出行动条目（禁算口径），5 节报告数字全部来自 analysisJson、缺数写「表内未见」；归属 ops 经营参谋成版、内容哈希去重。契约 `KnowledgeDetail.canAnalyze` / `AnalyzeResult`。
+  - **④ P1-7 测试库配置固化**：`server/.env.test` 入库（`node --env-file` 注入 junshi_test）+ pretest 自动 `prisma db push`，`.env` 指向 dev 库时 `npm test` 不再误碰 dev 数据；`.gitignore` 显式豁免。
+  - **⑤ P1-2 战略账本入口解耦（app）**：profile 菜单加常驻「战略账本」行，与段位卡 `streak≥3‖usageDays≥14` 展示门控解耦（原 rank-card 入口保留），中期用户可稳定进入账本。
+  - **⑥ P1-5 下一步卡数据源统一（app）**：战局页删本地手搓 nextStep 派生，改挂共享 `NextStepCard`（统一读 `/journey`），消除三 tab 指引互相矛盾；quickscan 空态导流保留。
+  - 服务端 477/477 全绿（+11 测试）；app tsc/build 绿。**注意：本地 dev 库需跑一次 `npm run db:push` 补 `analysisJson` 列（纯加法）。**
 - **2026-07-11** · **全局复审批次一（P0 五刀之四，见 `docs/[FABLE5]REVIEW_2026-07-11.md`；主模型规划 + Opus 子代理执行）**：
   - **① P0-3 三势研判拒绝捏造（前后端）**：前端删除战局页写死的默认三势卡（「行业上行/对手抢位/团队待整」75/45/35），`battleForces` 为空走 `force-empty` 空态卡引导对话（`app/src/pages/home/index.tsx`、mock 同步两态可走查）；服务端 `generateForces` 零档案不调 LLM/不落库返回 null，生产 LLM 失败不再把 `DEFAULT_FORCES` 写进 `forcesJson`（仅 `isAiTestMode` 保留确定性兜底），缺势用「待研判/先补档案」诚实占位（`server/src/services/forces.ts`、`routes/battle.ts` 空结果不烧每日刷新名额；battle 测试 +2）。
   - **② P0-5 报告卡「产出中」卡死残留**：`generateStream` H5/weapp 两条收尾路径在流正常结束但未收到 done/error 事件时补发一次 `onDone`（`finished` 标记防双发）；chat 页报告流加 `try/finally` 兜底强制解除 streaming（`app/src/services/streaming.ts`、`pages/chat/index.tsx`）。
