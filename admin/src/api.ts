@@ -111,8 +111,10 @@ import type {
   EvalRunItem, EvalRunDetail, StartEvalRunRequest, PricingTier,
   AdminSku, AdminSkuUpdate, ServiceAssignmentView, ServiceAssignmentUpdate,
   AdminFeatureFlag,
+  AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag } from '../../shared/contracts';
+export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
@@ -189,6 +191,13 @@ export const api = {
   // —— 单次付费 SKU：改价 / 启停 / 展示（key、kind、解锁模块走代码目录，不在此改）——
   adminSkus: () => req<AdminSku[]>('/admin/skus'),
   updateSku: (key: string, body: AdminSkuUpdate) => req<AdminSku>(`/admin/skus/${key}`, 'PATCH', body),
+  // —— D-1/WO-12 处方多来源漏斗（六态聚合 + 开通来源计数）——
+  prescriptionFunnel: (days = 30) => req<AdminPrescriptionFunnel>(`/admin/prescriptions/funnel?days=${days}`),
+  // —— D-3-7 生态工具注册表 CRUD（enabled 控制可开方）——
+  ecoTools: () => req<AdminEcoTool[]>('/admin/eco-tools'),
+  createEcoTool: (body: AdminEcoToolCreate) => req<AdminEcoTool>('/admin/eco-tools', 'POST', body),
+  updateEcoTool: (id: string, body: AdminEcoToolUpdate) => req<AdminEcoTool>(`/admin/eco-tools/${id}`, 'PATCH', body),
+  deleteEcoTool: (id: string) => req<{ ok: boolean }>(`/admin/eco-tools/${id}`, 'DELETE'),
   // —— 社群服务分配（按用户）——
   userService: (id: string) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`),
   setUserService: (id: string, body: ServiceAssignmentUpdate) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`, 'PUT', body),

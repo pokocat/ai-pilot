@@ -274,6 +274,7 @@ export interface DecisionView {
   id: string; seq: number; scene: string; decision: string; reasons: string[];
   tianshiRef: string; expected: string; verifyStandard: string; verifyByDate: string | null;
   status: 'pending' | 'correct' | 'revise'; verifyNote: string; fast: boolean | null; createdAt: string;
+  disputeNote?: string | null; disputedAt?: string | null; // WO-11：用户对判定的异议（复盘时军师带出确认）
 }
 export interface DecisionStats {
   total: number; pending: number; correct: number; revise: number;
@@ -283,6 +284,7 @@ export interface DecisionLedger { items: DecisionView[]; stats: DecisionStats; }
 export interface ProphecyView {
   id: string; seq: number; prophecy: string; basis: string; verifyStandard: string;
   dueDate: string | null; status: 'pending' | 'hit' | 'miss'; verifyNote: string; createdAt: string;
+  disputeNote?: string | null; disputedAt?: string | null; // WO-11：用户对判定的异议（复盘时军师带出确认）
 }
 export interface ProphecyStats { total: number; pending: number; hit: number; miss: number; hitRate: number | null; }
 export interface ProphecyLedger { items: ProphecyView[]; stats: ProphecyStats; }
@@ -394,6 +396,8 @@ export interface DeliverablePrescription { problem: string; playbook: string; to
 export interface PrescriptionView {
   id: string; problem: string; playbook: string; toolKey: string;
   toolType: string; externalUrl: string | null; status: string; proposedAt: string;
+  // D-3-7：toolType='external' 时的目标小程序跳转参数（实时取自 EcoTool；内部 agent 处方为 null）。
+  appId?: string | null; path?: string | null;
 }
 export interface PrescriptionListView { items: PrescriptionView[]; }
 
@@ -701,6 +705,29 @@ export interface SkuOrderResult { orderId: string; payParams?: WechatPayParams; 
 export interface AdminSku { id: string; key: string; name: string; desc: string; priceFen: number; kind: SkuKind; grantsModuleKey: string | null; enabled: boolean; sort: number; }
 /** 运营端更新 SKU（PATCH /admin/skus/:key）：改价/启停/展示（key 与 kind/grantsModuleKey 走代码目录，不在此改） */
 export interface AdminSkuUpdate { name?: string; desc?: string; priceFen?: number; enabled?: boolean; sort?: number; }
+
+/* ────────────── D-3-7：生态工具注册表（运营 CRUD） ────────────── */
+/** 生态工具行（GET /admin/eco-tools）。id=toolKey，enabled 控制是否可开方。 */
+export interface AdminEcoTool { id: string; name: string; desc: string; appId: string; path: string; enabled: boolean; sort: number; updatedAt: string; }
+/** 新增生态工具（POST /admin/eco-tools）：id 唯一、小写；appId 空则不可 enabled（无法跳转）。 */
+export interface AdminEcoToolCreate { id: string; name: string; desc?: string; appId?: string; path?: string; enabled?: boolean; sort?: number; }
+/** 更新生态工具（PATCH /admin/eco-tools/:id）：id 不可改。 */
+export interface AdminEcoToolUpdate { name?: string; desc?: string; appId?: string; path?: string; enabled?: boolean; sort?: number; }
+
+/* ────────────── D-1 / WO-12：处方多来源漏斗报表（GET /admin/prescriptions/funnel） ────────────── */
+/** 处方六态时间戳聚合（按 toolKey 分组，proposed→…→verified 为累计到达数，dismissed 独立终态）。 */
+export interface AdminPrescriptionFunnelRow {
+  toolKey: string; toolType: string;
+  proposed: number; seen: number; clicked: number; activated: number; used: number; verified: number; dismissed: number;
+}
+/** 开通侧：ActivationEvent 按来源分组计数（prescription | catalog | market）。 */
+export interface AdminActivationSourceRow { source: string; count: number; }
+/** 漏斗响应：处方侧六态聚合 + 开通侧来源计数，一次返回两块。 */
+export interface AdminPrescriptionFunnel {
+  days: number;
+  prescriptions: AdminPrescriptionFunnelRow[];
+  activations: AdminActivationSourceRow[];
+}
 
 /** 微信支付下单结果（POST /plans/:id/order）：小程序据 pay 调起 wx.requestPayment */
 export interface WechatOrderResult {

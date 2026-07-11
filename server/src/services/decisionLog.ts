@@ -20,6 +20,8 @@ export interface DecisionView {
   verifyNote: string;
   fast: boolean | null;
   createdAt: string;
+  disputeNote?: string | null; // WO-11：用户异议（列表回显，复盘时军师带出确认）
+  disputedAt?: string | null;
 }
 
 export interface DecisionStats {
@@ -35,7 +37,7 @@ export interface DecisionStats {
 function toView(r: {
   id: string; seq: number; scene: string; decision: string; reasons: unknown; tianshiRef: string;
   expected: string; verifyStandard: string; verifyByDate: string | null; status: string;
-  verifyNote: string; fast: boolean | null; createdAt: Date;
+  verifyNote: string; fast: boolean | null; createdAt: Date; disputeNote?: string | null; disputedAt?: Date | null;
 }): DecisionView {
   return {
     id: r.id, seq: r.seq, scene: r.scene, decision: r.decision,
@@ -43,6 +45,7 @@ function toView(r: {
     expected: r.expected, verifyStandard: r.verifyStandard, verifyByDate: r.verifyByDate,
     status: r.status as DecisionView['status'], verifyNote: r.verifyNote, fast: r.fast,
     createdAt: r.createdAt.toISOString(),
+    disputeNote: r.disputeNote ?? null, disputedAt: r.disputedAt ? r.disputedAt.toISOString() : null,
   };
 }
 

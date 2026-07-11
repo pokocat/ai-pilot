@@ -51,6 +51,10 @@ export interface GenContext {
   prophecyLine?: string | null;
   benchmarkLine?: string | null; // WO-08：DB 行业基准分位数块
   bizMetricLine?: string | null; // WO-10：本周经营序列 + 与基准差
+  // WO-14 月战报【处方效果】块：有 outcome 的处方累计指标 + 对照 CasefileMetric 的占比（系统算），无 outcome 不注入。
+  prescriptionEffectLine?: string | null;
+  // WO-12【可开方工具表】：enabled agents+EcoTool 的 key/名称/desc + 开方指令；仅方案生成（kind=deliverable）轮采用。
+  toolMenuLine?: string | null;
   // 段位·里程碑（M2 PR-10）：真实门槛派生块，新用户零记录不注入。
   progressLine?: string | null;
   // 本轮导引（M3 PR-11/12/14）：模式/角色语气/诊断轮次指令（每轮变化 → dynamic 首位）。
@@ -301,6 +305,9 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   const parts: string[] = [];
   if (ctx.modeLine) parts.push(ctx.modeLine); // 本轮导引（模式/角色/轮次）：每轮变化，dynamic 首位
   if (active) parts.push(fillPlaceholders(active, ctx)); // 本轮生效的按需模块（在参考资料之前）
+  // WO-12【可开方工具表】：只在方案生成轮注入（与 active 的 ===MODULE deliverable=== 同门槛），
+  // 让军师开方时只认表内 toolKey；对话轮不注入（省 token，也避免误导闲聊出方案）。
+  if (kind === 'deliverable' && ctx.toolMenuLine) parts.push(ctx.toolMenuLine);
 
   const blocks: string[] = [];
   if (ctx.strategicLine) blocks.push(ctx.strategicLine); // 战略档案：已确认事实，放在推断的客户档案之前
@@ -311,6 +318,7 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   if (ctx.progressLine) blocks.push(ctx.progressLine);   // 段位·里程碑：真实门槛派生（系统计数）
   if (ctx.benchmarkLine) blocks.push(ctx.benchmarkLine); // 行业基准：DB 分位数（WO-08；数字以此为准，禁自算）
   if (ctx.bizMetricLine) blocks.push(ctx.bizMetricLine); // 经营序列：本周实报 + 与基准差（WO-10；差由系统算）
+  if (ctx.prescriptionEffectLine) blocks.push(ctx.prescriptionEffectLine); // 处方效果：见效处方累计指标 + 占比（WO-14；月战报引用，系统算）
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.dataSourceLine) blocks.push(ctx.dataSourceLine); // V7-07：已接入数据源清单（军师可据此要证据）
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);

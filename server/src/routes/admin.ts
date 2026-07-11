@@ -23,6 +23,8 @@ import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
+import { prescriptionFunnel } from '../services/prescription.js';
+import { activationSourceCounts } from '../services/activation.js';
 import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
 import { REVIEW_GRACE_PER_DAY } from '../services/tokenQuota.js';
 import { selectableMeta, listDefs, createTool, updateTool, deleteTool, dryRunTool } from '../services/skillTools.js';
@@ -44,6 +46,7 @@ import type {
   EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalSetRequest, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, EvalCaseResultItem, StartEvalRunRequest, PricingTier,
   AdminProjectItem, AdminReportItem,
+  AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
 } from '../../../shared/contracts';
 import { Prisma } from '@prisma/client';
 
@@ -1158,6 +1161,74 @@ export async function adminRoutes(app: FastifyInstance) {
       return sku;
     },
   );
+
+  // ===== D-1 / WO-12：处方多来源漏斗报表（处方六态聚合 + 开通来源计数，一次两块） =====
+  app.get<{ Querystring: { days?: string } }>('/admin/prescriptions/funnel', async (req): Promise<AdminPrescriptionFunnel> => {
+    const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+    const [prescriptions, activations] = await Promise.all([
+      prescriptionFunnel(days),
+      activationSourceCounts(days),
+    ]);
+    return { days, prescriptions, activations };
+  });
+
+  // ===== D-3-7：生态工具注册表（CRUD；enabled 控制是否可开方，appId 空则拒绝启用） =====
+  const ecoView = (e: { id: string; name: string; desc: string; appId: string; path: string; enabled: boolean; sort: number; updatedAt: Date }): AdminEcoTool =>
+    ({ id: e.id, name: e.name, desc: e.desc, appId: e.appId, path: e.path, enabled: e.enabled, sort: e.sort, updatedAt: isoSecond(e.updatedAt) });
+
+  app.get('/admin/eco-tools', async (): Promise<AdminEcoTool[]> => {
+    const rows = await prisma.ecoTool.findMany({ orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }] });
+    return rows.map(ecoView);
+  });
+
+  app.post<{ Body: AdminEcoToolCreate }>('/admin/eco-tools', async (req, reply): Promise<AdminEcoTool | void> => {
+    const b = req.body ?? ({} as AdminEcoToolCreate);
+    const id = String(b.id ?? '').trim();
+    if (!/^[a-z][a-z0-9-]{1,40}$/.test(id)) return reply.code(400).send({ error: 'toolKey 需小写字母开头（可含数字与连字符）', code: 'ECO_KEY_INVALID' });
+    if (!String(b.name ?? '').trim()) return reply.code(400).send({ error: '请填写名称', code: 'ECO_NAME_REQUIRED' });
+    const exists = await prisma.ecoTool.findUnique({ where: { id } });
+    if (exists) return reply.code(409).send({ error: 'toolKey 已存在', code: 'ECO_KEY_EXISTS' });
+    const appId = String(b.appId ?? '').trim();
+    const enabled = b.enabled === true;
+    // 启用前必须有 appId（否则前端 navigateToMiniProgram 无目标）。
+    if (enabled && !appId) return reply.code(400).send({ error: '启用前需先填目标小程序 appId', code: 'ECO_APPID_REQUIRED' });
+    const row = await prisma.ecoTool.create({
+      data: {
+        id, name: String(b.name).trim().slice(0, 40), desc: String(b.desc ?? '').trim().slice(0, 300),
+        appId, path: String(b.path ?? '').trim().slice(0, 200), enabled, sort: Number(b.sort) || 0,
+      },
+    });
+    await recordAudit({ action: 'admin.ecoTool.create', payload: { id: row.id, enabled: row.enabled } });
+    return ecoView(row);
+  });
+
+  app.patch<{ Params: { id: string }; Body: AdminEcoToolUpdate }>('/admin/eco-tools/:id', async (req, reply): Promise<AdminEcoTool | void> => {
+    const existing = await prisma.ecoTool.findUnique({ where: { id: req.params.id } });
+    if (!existing) return reply.code(404).send({ error: '生态工具不存在', code: 'ECO_NOT_FOUND' });
+    const b = req.body ?? {};
+    const data: Record<string, unknown> = {};
+    if (typeof b.name === 'string') data.name = b.name.trim().slice(0, 40);
+    if (typeof b.desc === 'string') data.desc = b.desc.trim().slice(0, 300);
+    if (typeof b.appId === 'string') data.appId = b.appId.trim().slice(0, 64);
+    if (typeof b.path === 'string') data.path = b.path.trim().slice(0, 200);
+    if (typeof b.sort === 'number') data.sort = Math.round(b.sort);
+    if (typeof b.enabled === 'boolean') data.enabled = b.enabled;
+    // 启用（本次或维持）时必须有 appId：以「更新后的 appId」判定，防启用了却无跳转目标。
+    const nextAppId = (data.appId as string | undefined) ?? existing.appId;
+    const nextEnabled = (data.enabled as boolean | undefined) ?? existing.enabled;
+    if (nextEnabled && !nextAppId) return reply.code(400).send({ error: '启用前需先填目标小程序 appId', code: 'ECO_APPID_REQUIRED' });
+    const row = await prisma.ecoTool.update({ where: { id: req.params.id }, data });
+    await recordAudit({ action: 'admin.ecoTool.update', payload: { id: row.id, enabled: row.enabled } });
+    return ecoView(row);
+  });
+
+  app.delete<{ Params: { id: string } }>('/admin/eco-tools/:id', async (req, reply): Promise<{ ok: boolean } | void> => {
+    const existing = await prisma.ecoTool.findUnique({ where: { id: req.params.id } });
+    if (!existing) return reply.code(404).send({ error: '生态工具不存在', code: 'ECO_NOT_FOUND' });
+    await prisma.ecoTool.delete({ where: { id: req.params.id } });
+    await recordAudit({ action: 'admin.ecoTool.delete', payload: { id: req.params.id } });
+    return { ok: true };
+  });
 }
 
 async function buildAdminUsers(): Promise<AdminUserItem[]> {

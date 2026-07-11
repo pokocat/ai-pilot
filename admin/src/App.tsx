@@ -35,6 +35,8 @@ import {
   type AdminAccountItem,
   type AdminMe,
   type AdminFeatureFlag,
+  type AdminEcoTool,
+  type AdminPrescriptionFunnel,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
@@ -42,11 +44,12 @@ import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'account' | 'flags';
+type Tab = 'home' | 'users' | 'usage' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'account' | 'flags';
 const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
   { key: 'usage', icon: 'crown', label: '消耗' },
+  { key: 'funnel', icon: 'target', label: '处方漏斗' },
   { key: 'tokens', icon: 'trend', label: 'Token' },
   { key: 'trace', icon: 'insight', label: '诊断' },
   { key: 'agent', icon: 'agent', label: '顾问' },
@@ -62,6 +65,7 @@ const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'form', icon: 'doc', label: '问卷' },
   { key: 'plan', icon: 'layers', label: '套餐' },
   { key: 'sku', icon: 'layers', label: '单次付费' },
+  { key: 'eco', icon: 'spark', label: '生态工具' },
 ];
 
 export default function App() {
@@ -112,6 +116,7 @@ export default function App() {
           {tab === 'home' && <OverviewView />}
           {tab === 'users' && <UsersView onOpen={setDetailUser} />}
           {tab === 'usage' && <UsageView />}
+          {tab === 'funnel' && <FunnelView />}
           {tab === 'tokens' && <TokenUsageView />}
           {tab === 'trace' && <ObservabilityView />}
           {tab === 'say' && <SayingsView toast={showToast} />}
@@ -127,6 +132,7 @@ export default function App() {
           {tab === 'form' && <SurveyView />}
           {tab === 'plan' && <PlansView toast={showToast} />}
           {tab === 'sku' && <SkusView toast={showToast} />}
+          {tab === 'eco' && <EcoToolsView toast={showToast} />}
         </div>
 
         <nav className="adm-tab">
@@ -1230,6 +1236,142 @@ function SkusView({ toast }: { toast: (m: string) => void }) {
               </div>
               <span className="user-balance">¥{(s.priceFen / 100).toLocaleString()}</span>
               <div className={`sw ${s.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(s); }}><i /></div>
+              <span className="edit"><Icon name="pen" size={15} /></span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// D-1/WO-12：处方多来源漏斗——处方六态转化（按 toolKey）+ 开通来源计数（ActivationEvent）。
+const RX_SOURCE_LABEL: Record<string, string> = { prescription: '处方位', catalog: '货架', market: '生态市场' };
+
+function FunnelView() {
+  const [data, setData] = useState<AdminPrescriptionFunnel | null>(null);
+  const [days, setDays] = useState(30);
+  useEffect(() => { api.prescriptionFunnel(days).then(setData).catch(() => {}); }, [days]);
+  if (!data) return <Loading />;
+  const maxProposed = Math.max(1, ...data.prescriptions.map((r) => r.proposed));
+  return (
+    <>
+      <div className="sec-h"><span className="t">处方漏斗</span><span className="s">近 {data.days} 天 · 六态转化 + 开通来源</span></div>
+      <div className="pad">
+        <div className="crd-actions">
+          {[7, 30, 90].map((d) => (
+            <button key={d} className={`mini-btn ${days === d ? 'primary' : ''}`} onClick={() => setDays(d)}>{d} 天</button>
+          ))}
+        </div>
+        <div className="sec-h"><span className="t">开通来源</span><span className="s">ActivationEvent 计数</span></div>
+        <div className="usage-summary">
+          {data.activations.length === 0
+            ? <div><b>0</b><span>开通事件</span></div>
+            : data.activations.map((a) => <div key={a.source}><b>{a.count}</b><span>{RX_SOURCE_LABEL[a.source] ?? a.source}</span></div>)}
+        </div>
+        <div className="sec-h"><span className="t">处方六态转化</span><span className="s">按工具 · 各态到达数</span></div>
+        {data.prescriptions.length === 0 && <div className="empty">近 {data.days} 天暂无处方。</div>}
+        {data.prescriptions.map((r) => (
+          <div key={r.toolKey} className="usage-row">
+            <div className="usage-h">
+              <div className="usage-name">{r.toolKey}<span>{r.toolType === 'external' ? '生态工具' : '内部顾问'}</span></div>
+              <div className="usage-num">{r.proposed} 开方</div>
+            </div>
+            <div className="usage-meta">曝光 {r.seen} · 点击 {r.clicked} · 开通 {r.activated} · 使用 {r.used} · 验证 {r.verified}{r.dismissed ? ` · 作废 ${r.dismissed}` : ''}</div>
+            <div className="meter"><i style={{ width: `${Math.max(3, Math.round((r.proposed / maxProposed) * 100))}%` }} /></div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// D-3-7：生态工具注册表 CRUD（enabled 控制是否可开方；appId 空则不可启用——前端无跳转目标）。
+type EcoForm = { id: string; name: string; desc: string; appId: string; path: string; enabled: boolean; sort: number };
+const ECO_BLANK: EcoForm = { id: '', name: '', desc: '', appId: '', path: '', enabled: false, sort: 0 };
+
+function EcoToolsView({ toast }: { toast: (m: string) => void }) {
+  const [list, setList] = useState<AdminEcoTool[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<EcoForm>(ECO_BLANK);
+  const load = () => api.ecoTools().then(setList).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const set = (p: Partial<EcoForm>) => setForm((f) => ({ ...f, ...p }));
+  const create = async () => {
+    if (!/^[a-z][a-z0-9-]{1,40}$/.test(form.id)) return toast('toolKey 需小写字母开头（可含数字、连字符）');
+    if (!form.name.trim()) return toast('请填写名称');
+    if (form.enabled && !form.appId.trim()) return toast('启用前需先填目标小程序 appId');
+    try {
+      await api.createEcoTool({ id: form.id, name: form.name.trim(), desc: form.desc.trim(), appId: form.appId.trim(), path: form.path.trim(), enabled: form.enabled, sort: form.sort });
+      setAdding(false); setForm(ECO_BLANK); await load(); toast('已新增生态工具');
+    } catch (e) { toast((e as Error)?.message || '新增失败（toolKey 可能已存在）'); }
+  };
+  const startEdit = (t: AdminEcoTool) => { setAdding(false); setEditId(t.id); setForm({ id: t.id, name: t.name, desc: t.desc, appId: t.appId, path: t.path, enabled: t.enabled, sort: t.sort }); };
+  const save = async (id: string) => {
+    if (!form.name.trim()) return toast('请填写名称');
+    if (form.enabled && !form.appId.trim()) return toast('启用前需先填目标小程序 appId');
+    try {
+      await api.updateEcoTool(id, { name: form.name.trim(), desc: form.desc.trim(), appId: form.appId.trim(), path: form.path.trim(), enabled: form.enabled, sort: form.sort });
+      setEditId(null); await load(); toast('生态工具已更新');
+    } catch (e) { toast((e as Error)?.message || '保存失败'); }
+  };
+  const toggleEnabled = async (t: AdminEcoTool) => {
+    if (!t.enabled && !t.appId.trim()) return toast('启用前需先填 appId（点开编辑补上）');
+    try { await api.updateEcoTool(t.id, { enabled: !t.enabled }); await load(); toast(t.enabled ? '已停用（不再可开方）' : '已启用（可开方）'); }
+    catch (e) { toast((e as Error)?.message || '操作失败'); }
+  };
+  const remove = async (t: AdminEcoTool) => {
+    if (!window.confirm(`确认删除生态工具「${t.name}」？已开出的处方不受影响，但无法再开新方。`)) return;
+    try { await api.deleteEcoTool(t.id); await load(); toast('已删除'); }
+    catch (e) { toast((e as Error)?.message || '删除失败'); }
+  };
+  return (
+    <>
+      <div className="sec-h"><span className="t">生态工具</span><span className="s">数字人/短剧等外部跳转位 · 启用后方可开方</span></div>
+      <div className="pad">
+        {!adding ? (
+          <button className="add-btn full" onClick={() => { setEditId(null); setForm(ECO_BLANK); setAdding(true); }}><Icon name="spark" size={15} /> 新增生态工具</button>
+        ) : (
+          <div className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">toolKey（唯一，小写，开方时 LLM 引用）</div><input className="ai-input" value={form.id} onChange={(e) => set({ id: e.target.value })} placeholder="如 digital-human" /></div>
+            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="如 数字人代播" /></div>
+            <div className="ai-field"><div className="ai-fl">开方场景描述（供军师判断何时开方）</div><textarea className="ta" rows={2} value={form.desc} onChange={(e) => set({ desc: e.target.value })} placeholder="一句话说清这个工具帮客户解决什么" /></div>
+            <div className="ai-field"><div className="ai-fl">目标小程序 appId（启用必填）</div><input className="ai-input" value={form.appId} onChange={(e) => set({ appId: e.target.value })} placeholder="wx… · 须与本小程序同一开放平台主体关联" /></div>
+            <div className="ai-field"><div className="ai-fl">目标页面 path（可选）</div><input className="ai-input" value={form.path} onChange={(e) => set({ path: e.target.value })} placeholder="pages/index/index" /></div>
+            <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => set({ sort })} /></div>
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用（可开方）</div><div className="cs">关闭后军师不再向客户开这个方</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => set({ enabled: !form.enabled })}><i /></div></div></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => { setAdding(false); setForm(ECO_BLANK); }}>取消</button>
+              <button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 创建</button>
+            </div>
+          </div>
+        )}
+        {list.length === 0 && !adding && <div className="empty">暂无生态工具。数字人 appId 由运营录入后启用。</div>}
+        {list.map((t) => editId === t.id ? (
+          <div key={t.id} className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">toolKey（不可改）</div><input className="ai-input" value={t.id} disabled /></div>
+            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => set({ name: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">开方场景描述</div><textarea className="ta" rows={2} value={form.desc} onChange={(e) => set({ desc: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">目标小程序 appId（启用必填）</div><input className="ai-input" value={form.appId} onChange={(e) => set({ appId: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">目标页面 path（可选）</div><input className="ai-input" value={form.path} onChange={(e) => set({ path: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => set({ sort })} /></div>
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用（可开方）</div><div className="cs">关闭后军师不再向客户开这个方</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => set({ enabled: !form.enabled })}><i /></div></div></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button>
+              <button className="ai-btn ghost" onClick={() => remove(t)}><Icon name="alert" size={14} /> 删除</button>
+              <button className="ai-btn primary" onClick={() => save(t.id)}><Icon name="check" size={14} /> 保存</button>
+            </div>
+          </div>
+        ) : (
+          <div key={t.id} className="crd" onClick={() => startEdit(t)}>
+            <div className="crd-row">
+              <span className="crd-ic"><Icon name="spark" size={18} /></span>
+              <div className="crd-b">
+                <div className="ct">{t.name} <span className="tag off">生态</span>{!t.enabled && <span className="tag off">停用</span>}{t.enabled && !t.appId && <span className="tag warn">缺 appId</span>}</div>
+                <div className="cs">{t.id}{t.appId ? ` · ${t.appId}` : ' · 未填 appId'}{t.desc ? ` · ${t.desc}` : ''}</div>
+              </div>
+              <div className={`sw ${t.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(t); }}><i /></div>
               <span className="edit"><Icon name="pen" size={15} /></span>
             </div>
           </div>

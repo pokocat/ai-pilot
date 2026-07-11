@@ -13,6 +13,7 @@ import { dataSourcesBlock } from './dataSources.js';
 import { decisionBriefing } from './decisionLog.js';
 import { reviewBriefing } from './reviewLog.js';
 import { prophecyBriefing } from './prophecyLog.js';
+import { prescriptionEffectBlock, pendingFollowupTools, toolMenu } from './prescription.js';
 import { progressBriefing } from './progress.js';
 import { resolveMode, modeDirective, detectInnerState, roleDirective, stageDirective } from './intent.js';
 import { yearOf } from './clock.js';
@@ -101,6 +102,8 @@ export async function buildGenContext(opts: {
   const innerState = detectInnerState(opts.userMessage);
   // F-5：诊断轮次改读用户级持久化 diagRound（换/删会话不清零），写侧在 routes/sessions.ts bumpDiagRound。
   const needDiagRound = opts.agentKey === 'general' && intent.mode === 'strategy' && !briefInterview;
+  // WO-14：周复盘 modeLine 要效果话术——仅周复盘轮拉取「已打标待追踪」处方工具名。
+  const needFollowupNudge = intent.mode === 'review' && intent.reviewLayer === 'week';
 
   // P1-6：context 注入链原先 20+ 次串行 DB round-trip → 每条消息 25-35 次。
   // 改造：无依赖的取数一次性并发发起（下面两批），取回后再按固定顺序拼装——
@@ -112,6 +115,7 @@ export async function buildGenContext(opts: {
     decisionLine, reviewLine, prophecyLine, progressLine,
     fortuneOn, diagRound,
     memories, projRow, refsResult, hits,
+    prescriptionEffectLine, toolMenuLine, followupTools,
   ] = await Promise.all([
     prisma.profile.findFirst({ where: { tenantId: opts.tenantId }, orderBy: { updatedAt: 'desc' } }),
     prisma.user.findUnique({ where: { id: opts.userId } }),
@@ -144,6 +148,10 @@ export async function buildGenContext(opts: {
     briefInterview
       ? Promise.resolve<Awaited<ReturnType<typeof hybridSearch>>>([])
       : hybridSearch({ tenantId: opts.tenantId, userId: opts.userId, projectId: opts.projectId ?? undefined, query: opts.userMessage, topK: 4 }),
+    // WO-14 月战报【处方效果】块（有 outcome 才注入）；WO-12【可开方工具表】（仅方案生成轮由 buildSystemParts 采用）。
+    prescriptionEffectBlock(opts.userId).catch(() => null),
+    toolMenu().catch(() => null),
+    needFollowupNudge ? pendingFollowupTools(opts.userId).catch(() => []) : Promise.resolve<string[]>([]),
   ]);
 
   // 批次 2：依赖批次 1 的 profile / user / fortune 结果。
@@ -168,6 +176,10 @@ export async function buildGenContext(opts: {
   if (rd) directives.push(rd);
   if (needDiagRound && diagRound !== null) {
     directives.push(`诊断进度：第 ${diagRound} 轮（六轮深度对话制；客户要求加速时切 3 轮快速通道并说明）。`);
+  }
+  // WO-14：周复盘且有已开通满 7 天待追踪的处方 → 点名工具要一句效果（军师语汇，别问空泛的「感觉如何」）。
+  if (needFollowupNudge && followupTools.length) {
+    directives.push(`本周复盘顺带追一句效果：客户已开通「${followupTools.join('、')}」有些时日了，主动问这几件兵器落地后的实打实进展（发帖量／线索／成交），要具体数字别问感受。`);
   }
   const modeLine = directives.length ? `【本轮导引（系统识别；执行但不要向客户复述本块）】\n${directives.join('\n')}` : null;
   // 阶段适配（M3 PR-13）：按档案营收阶段切深浅。
@@ -204,6 +216,8 @@ export async function buildGenContext(opts: {
     progressLine,
     benchmarkLine,
     bizMetricLine,
+    prescriptionEffectLine,
+    toolMenuLine,
     modeLine,
     stageLine,
     userMessage: opts.userMessage,

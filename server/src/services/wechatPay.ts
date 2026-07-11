@@ -17,6 +17,7 @@ import { createSign, createVerify, createDecipheriv, randomBytes, randomUUID } f
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { applyPlanPurchase, applySkuGrant } from './purchase.js';
+import { parseAttribution, recordActivation } from './activation.js';
 import { sandboxEnabled } from './sandbox.js';
 
 const PAY_BASE = 'https://api.mch.weixin.qq.com';
@@ -85,11 +86,14 @@ export async function createJsapiOrder(args: {
   sku?: { key: string; name: string; priceFen: number }; // V7-12：单次付费商品订单（与 plan 二选一）
   openid: string;
   amount?: number;
+  attribution?: { source: string; refId: string | null }; // D-1 开通来源归因（回调发放时落 ActivationEvent）
 }): Promise<CreateOrderResult> {
   const itemName = args.plan?.name ?? args.sku?.name ?? '专项能力';
   const itemPrice = args.plan?.price ?? args.sku?.priceFen ?? 0;
   const planId = args.plan?.id ?? '';
   const skuKey = args.sku?.key ?? null;
+  const attrSource = args.attribution?.source ?? null;
+  const attrRefId = args.attribution?.refId ?? null;
   const total = args.amount ?? itemPrice;
   const outTradeNo = genOutTradeNo();
 
@@ -99,7 +103,7 @@ export async function createJsapiOrder(args: {
     await prisma.paymentOrder.create({
       data: {
         outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
-        amount: total, provider: 'mock', status: 'created',
+        amount: total, provider: 'mock', status: 'created', attrSource, attrRefId,
       },
     });
     return {
@@ -112,7 +116,7 @@ export async function createJsapiOrder(args: {
   await prisma.paymentOrder.create({
     data: {
       outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
-      amount: total, provider: 'wechat', status: 'created',
+      amount: total, provider: 'wechat', status: 'created', attrSource, attrRefId,
     },
   });
 
@@ -229,6 +233,9 @@ export async function markPaidAndApply(parsed: {
         { reason: `${sku.name} · ${payLabel}`, source },
         tx,
       );
+      // D-1 开通来源归因：SKU 发放成功 → 落 ActivationEvent（来源来自下单时随订单存的 attrSource；缺省 catalog）。
+      const { source: attrSource, refId: attrRefId } = parseAttribution(order.attrSource, order.attrRefId);
+      await recordActivation({ tenantId: order.tenantId, userId: order.userId, itemType: 'sku', itemKey: sku.key, source: attrSource, refId: attrRefId }, tx).catch(() => {});
     } else {
       const plan = await tx.plan.findUnique({ where: { id: order.planId } });
       if (!plan) return { applied: false, reason: 'plan_not_found' };

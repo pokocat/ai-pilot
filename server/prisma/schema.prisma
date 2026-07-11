@@ -50,6 +50,7 @@ model Prescription {
   firstUsedAt   DateTime?
   outcomeJson   Json?
   dismissedAt   DateTime?
+  followupAt    DateTime? // WO-14：activated 满 7 天由 scheduler 打标一次（周复盘要效果话术只点已打标处方）
   updatedAt     DateTime  @updatedAt
 
   @@index([userId, status])
@@ -641,6 +642,8 @@ model PaymentOrder {
   paidAt        DateTime?
   appliedAt     DateTime? // 权益发放完成时间 = 幂等终态锚点
   rawNotifyJson Json? // 回调解密后的原文（排查用）
+  attrSource    String? // D-1 开通来源归因（下单时从请求体带入，回调发放时落 ActivationEvent）：prescription | catalog | market
+  attrRefId     String? // attrSource=prescription 时的 prescriptionId
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -1329,4 +1332,37 @@ model ServiceAssignment {
 
   @@index([tenantId])
   @@map("service_assignment")
+}
+
+/// D-1：开通来源归因事件（轻量事件流，不复用/不污染 UserAgent.source 的 gift|purchase|admin_grant 语义）。
+/// 每次「解锁 agent / 购买 SKU 成功」落一条，source 由前端请求体传入（缺省 catalog）；漏斗报表按 source 分组计数。
+model ActivationEvent {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  itemType  String // 'agent' | 'sku'
+  itemKey   String // agentKey 或 skuKey
+  source    String // 'prescription' | 'catalog' | 'market'
+  refId     String? // source=prescription 时的 prescriptionId
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, itemType, itemKey])
+  @@index([source, createdAt])
+  @@map("activation_event")
+}
+
+/// D-3-7：生态工具注册表（数字人代播/短剧等外部小程序跳转位）。id = toolKey，可开方白名单 = enabled agents ∪ enabled EcoTool。
+/// 种子不预置任何行——由运营录入 appId 后 enabled 才可开方。目标小程序须与本小程序同一微信开放平台主体关联方可跳转（见 §13）。
+model EcoTool {
+  id        String   @id // toolKey，如 'digital-human'
+  name      String // 「数字人代播」
+  desc      String   @db.Text // 开方场景一句话（供【可开方工具表】注入）
+  appId     String   @default("") // 目标小程序 appId
+  path      String   @default("") // 目标页面路径（可带占位参数）
+  enabled   Boolean  @default(false)
+  sort      Int      @default(0)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@map("eco_tool")
 }

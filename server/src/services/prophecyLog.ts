@@ -14,6 +14,8 @@ export interface ProphecyView {
   status: 'pending' | 'hit' | 'miss';
   verifyNote: string;
   createdAt: string;
+  disputeNote?: string | null; // WO-11：用户异议（列表回显，复盘时军师带出确认）
+  disputedAt?: string | null;
 }
 
 export interface ProphecyStats {
@@ -26,12 +28,13 @@ export interface ProphecyStats {
 
 function toView(r: {
   id: string; seq: number; prophecy: string; basis: string; verifyStandard: string;
-  dueDate: string | null; status: string; verifyNote: string; createdAt: Date;
+  dueDate: string | null; status: string; verifyNote: string; createdAt: Date; disputeNote?: string | null; disputedAt?: Date | null;
 }): ProphecyView {
   return {
     id: r.id, seq: r.seq, prophecy: r.prophecy, basis: r.basis, verifyStandard: r.verifyStandard,
     dueDate: r.dueDate, status: r.status as ProphecyView['status'], verifyNote: r.verifyNote,
     createdAt: r.createdAt.toISOString(),
+    disputeNote: r.disputeNote ?? null, disputedAt: r.disputedAt ? r.disputedAt.toISOString() : null,
   };
 }
 
