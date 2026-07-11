@@ -8,6 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-12** · **生产部署核销 `a2c763c`（知识库可见性修复）**：备份 `/tmp/junshi-db-backup-20260712-022353.dump`(1.9M) → deploy-prod.sh（schema 无变更 already in sync）→ 验证 health/admin/deploy-version/服务 active/启动日志干净 全过。注意：远端 prisma generate 阶段的 `.env EACCES` 瞬时告警连续两次部署出现（不阻塞，疑似构建用户与 junshi 用户权限时序），下次部署若恶化需排查 deploy 脚本的 env 归属时序。**用户可见改动需 weapp 发版后生效。**
 - **2026-07-11** · **知识库可见性修复（用户反馈「看不到上传了啥/整理成了啥」→ 诊断 7 断点全修；主模型规划 + Opus 执行）**：
   - **server**：批次逐份文件清单（`KnowledgeBatch.files`，原 select 层丢字段）+ 整理结果逐份分类/摘要回传（`OrganizeResult.items`，摘要本已写库未回传）+ 已优化区持久化数据源（`optimizedItems`，原为前端瞬态 state 切 tab 即失）+ 资料库透出 `stage`（staged 失败项如实 failed）；**深度整理 ¥39 差异化产出《资料整理报告》**（逐份 structuredMetered 精炼摘要·幂等跳过·失败不编造 + 5 节报告走 saveReportVersion 版本去重 + reserveQuota(0.3) 保守结算），原付费产出与免费仅差两字标题。
   - **app**：待整理批次改可展开逐份清单（状态徽章「已备好/在读/排队/读不出」+失败标红删重传）；整理结果改逐份归档表（文件→类目·摘要、重复合并标注、深度整理「查看整理报告」跳方案详情）；已优化区改 pipeline 持久数据源（刷新不丢、计数一致）；资料库列表/详情 stage 标注 + 待整理副文案 +解析退避轮询（2s→4s→8s，30s 上限+下拉刷新）。
