@@ -8,6 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-12** · **生产部署核销 `4ee133c`（admin 运营能力改造）**：备份 `/tmp/junshi-db-backup-20260712-025139.dump`(1.9M) → deploy-prod.sh（无 schema 变更，db push already in sync）→ 验证 health/deploy-version/服务 active/启动日志干净/新端点 GET 冒烟（overview 带 deltaPct、payments 结构完整、users 含 tokenUsed30d）/admin 静态资源已更新 全过。纯 server+admin 网页变更，**无需 weapp 发版，部署即全量生效**。⚠️ `.env EACCES` 瞬时告警**第三次复现**（prisma generate 阶段，自愈未阻塞）——已从「观察」升级为「立案排查」：deploy 脚本远端构建的 .env 归属/权限时序。另记：远端 DATABASE_URL 带 `?schema=public` 会使 pg_dump CLI 解析报错，备份时需剥离该参数（脚本可固化此处理）。
 - **2026-07-12** · **Admin 运营能力改造（用户反馈「看不到用量/数据假/没运营动作」→ 评审+改造；主模型规划 + Opus 双代理执行，方案 `[FABLE5]ADMIN_OPS_PLAN.md`）**：
   - **① per-user 用量下钻**：`GET /admin/users/:id/usage`（月度额度 getQuotaState/套餐 getPlanStatus/30 天 token 全 SQL 聚合 byModel/byAgent/byDay 上海日历日/钻石流水 20/支付订单 10 尾 6 位脱敏/开通归因 10）；用户列表补 `tokenUsed30d`+`quotaRemaining`（批量 groupBy 无 N+1，-1 不限量/null 无钱包）。
   - **② 三个资金运营写端点（owner-only requireSuper + 审计 before/after）**：调整/按套餐重置月度 token 额度（复用 setQuota）、补发/扣减钻石（走 credits 服务、reason 必填存 `admin:` 前缀、扣减越界 400 拒绝）、延长套餐有效期（仅推 planExpiresAt=max(now,现值)+days，不动快照/锚点/钱包）。
