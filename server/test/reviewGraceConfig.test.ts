@@ -6,6 +6,11 @@ import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone 
 import { prisma } from '../src/db.ts';
 import { __clearFeatureCache } from '../src/services/featureFlag.ts';
 
+// admin 路由鉴权：设置共享 ADMIN_TOKEN（与 helpers.api 的 x-admin-token 自动附带一致）。
+// 缺这行时，node --test 的每文件独立子进程下 process.env.ADMIN_TOKEN 未定义，
+// 下面三个用例的 PATCH /api/admin/flags/review-grace 都会直接 401，测试恒定失败。
+process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
+
 const REVIEW_TEXT = '帮我做 2026-07-02 的执行复盘。\n今日军令完成情况：\n- [已完成] 私聊老客\n请判断今天的主要问题。';
 
 before(async () => {

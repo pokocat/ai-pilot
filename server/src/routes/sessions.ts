@@ -84,8 +84,11 @@ export async function sessionRoutes(app: FastifyInstance) {
       include: { messages: { orderBy: { createdAt: 'asc' } }, agent: true },
     });
     if (!s) return reply.code(404).send({ error: 'session not found' });
-    // 打开会话即标记已读（消除列表未读红点）；不阻塞返回。
-    void prisma.session.update({ where: { id: s.id }, data: { lastReadAt: new Date() } }).catch(() => {});
+    // 打开会话即标记已读（消除列表未读红点）。必须 await：此前 fire-and-forget（void + 不等待）
+    // 与紧随其后的 GET /sessions 之间存在竞态——客户端拿到本次响应后立刻刷新列表时，
+    // lastReadAt 的写入可能还没落库，导致未读红点没有如实清除（已由测试复现）。
+    // 这是一次按主键的单行 UPDATE，代价极小，不值得为省这点延迟牺牲「打开即已读」的确定性。
+    await prisma.session.update({ where: { id: s.id }, data: { lastReadAt: new Date() } }).catch(() => {});
     // P1-A5：会话头的 greet/chips/memText/learnText 与 /agents 列表同口径——取已发布版本，旧版本相应列为 null 则回退 Agent 行。
     const pub = s.agent.publishedVersionId ? await prisma.agentVersion.findUnique({ where: { id: s.agent.publishedVersionId } }) : null;
     return {
