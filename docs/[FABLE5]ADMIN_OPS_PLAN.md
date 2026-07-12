@@ -69,6 +69,43 @@
 
 单波双代理并行（server/ 与 admin/ 目录不相交；S 先定契约再开工 A，A 开工前读 shared/contracts.d.ts 最新版）。收尾：server 全量测试 + admin lint:ui/build，主模型 review diff 后提交。部署与上线单独向用户请授权。
 
+## 3.5 契约定稿（S 照抄实现进 shared/contracts.d.ts，A 照此编码；命名不得偏离）
+
+```ts
+export interface AdminUserQuota { limit: number; used: number; remaining: number; unlimited: boolean; periodKey: string | null }
+export interface AdminUserPlanStatus { planName: string | null; expiresAt: string | null; daysLeft: number | null; status: string }
+export interface AdminTokenAgg { key: string; totalTokens: number; costMicros: number; calls: number }
+export interface AdminUserUsage {
+  quota: AdminUserQuota | null            // null = 无钱包
+  plan: AdminUserPlanStatus
+  tokens: {
+    totalTokens: number; inputTokens: number; outputTokens: number
+    costMicros: number; calls: number
+    byModel: AdminTokenAgg[]; byAgent: AdminTokenAgg[]
+    byDay: { day: string; totalTokens: number }[]   // day = Asia/Shanghai dateKey
+  }
+  credits: { delta: number; reason: string; balance: number; at: string }[]      // 最近 20
+  payments: { orderNo: string; amount: number; status: string; paidAt: string | null; attrSource: string | null }[]  // 最近 10，orderNo 只回尾 6 位
+  activations: { itemType: string; itemKey: string; source: string; at: string }[] // 最近 10
+}
+// AdminUserItem 增量字段：
+//   tokenUsed30d: number            // 近 30 天 totalTokens
+//   quotaRemaining: number | null   // -1 = 不限量；null = 无钱包
+// Overview.stats[] 改形：{ t: string; v: string; deltaPct: number | null; sub: string }（trend/d 删除）
+export interface AdminPaymentItem { orderNo: string; userName: string; amount: number; status: string; attrSource: string | null; paidAt: string | null; createdAt: string }
+export interface AdminPaymentsView {
+  summary: { paidAmount: number; paidCount: number; byDay: { day: string; amount: number }[] }
+  items: AdminPaymentItem[]
+}
+```
+
+写端点请求体（S 实现，A 调用）：
+- `POST /admin/users/:id/token-quota` → `{ mode: 'reset_to_plan' | 'set'; quota?: number }`
+- `POST /admin/users/:id/credits` → `{ delta: number; reason: string }`
+- `POST /admin/users/:id/plan-extend` → `{ days: number }`
+- `GET /admin/users/:id/usage?days=30` → `AdminUserUsage`
+- `GET /admin/payments?status=&days=30` → `AdminPaymentsView`
+
 ## 4. 明确不做（backlog）
 
 封禁/停用用户（需 User.disabledAt + 双闸）；退款流程（需 PaymentOrder.refunded 态 + 微信退款 API）；admin 直改用户 planId（快照语义冲突，需专门设计）；per-user 会话/成果明细浏览端点（观测诉求再议）；留存/活跃分桶分析（等数据量）；操作二次验证（如敏感动作输入密码，v2 视运营团队规模）。
