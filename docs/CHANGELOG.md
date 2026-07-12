@@ -8,6 +8,13 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-12** · **Admin 运营能力改造（用户反馈「看不到用量/数据假/没运营动作」→ 评审+改造；主模型规划 + Opus 双代理执行，方案 `[FABLE5]ADMIN_OPS_PLAN.md`）**：
+  - **① per-user 用量下钻**：`GET /admin/users/:id/usage`（月度额度 getQuotaState/套餐 getPlanStatus/30 天 token 全 SQL 聚合 byModel/byAgent/byDay 上海日历日/钻石流水 20/支付订单 10 尾 6 位脱敏/开通归因 10）；用户列表补 `tokenUsed30d`+`quotaRemaining`（批量 groupBy 无 N+1，-1 不限量/null 无钱包）。
+  - **② 三个资金运营写端点（owner-only requireSuper + 审计 before/after）**：调整/按套餐重置月度 token 额度（复用 setQuota）、补发/扣减钻石（走 credits 服务、reason 必填存 `admin:` 前缀、扣减越界 400 拒绝）、延长套餐有效期（仅推 planExpiresAt=max(now,现值)+days，不动快照/锚点/钱包）。
+  - **③ 假数据修正**：`/admin/overview` 删硬编码 trend 箭头，改近 7 天 vs 前 7 天真实环比（无前期数据→null 显示「—」）；「累计消耗（点）」正名「钻石消耗」；新增第 5 卡「30 天 Token 成本(¥)」。契约 `Overview.stats` 改形 `{t,v,deltaPct,sub}`（仅 admin 消费，已核实 app 无引用）。
+  - **④ 支付订单可见**：`GET /admin/payments`（状态筛选/7-30-90 天/实收含 paid+applied/按日金额上海日历日）+ admin 新「订单」tab（纯只读，退款流程挂 backlog）。
+  - **⑤ admin 前端**：用户详情顶部「用量与额度」块（额度 meter/30 天四格/byAgent·byModel 前 3/byDay 迷你分布不引图表库/三折叠流水）+ 运营动作确认弹窗（仅超管渲染，后端双重闸）；用户列表「已消耗 X 点」正名「钻石消耗」+ 30 天 Token 列；Token 榜 Top 用户点击下钻用户详情。金额统一后端回分、前端转元。
+  - **明确不做（backlog）**：封禁（需 User 加列+双闸）、退款（需 refunded 态+微信退款 API）、admin 直改 planId（快照语义冲突）。server 532/532（+20）；admin lint:ui+build 绿。**纯代码+契约变更，无 schema 迁移**。
 - **2026-07-12** · **生产部署核销 `a2c763c`（知识库可见性修复）**：备份 `/tmp/junshi-db-backup-20260712-022353.dump`(1.9M) → deploy-prod.sh（schema 无变更 already in sync）→ 验证 health/admin/deploy-version/服务 active/启动日志干净 全过。注意：远端 prisma generate 阶段的 `.env EACCES` 瞬时告警连续两次部署出现（不阻塞，疑似构建用户与 junshi 用户权限时序），下次部署若恶化需排查 deploy 脚本的 env 归属时序。**用户可见改动需 weapp 发版后生效。**
 - **2026-07-11** · **知识库可见性修复（用户反馈「看不到上传了啥/整理成了啥」→ 诊断 7 断点全修；主模型规划 + Opus 执行）**：
   - **server**：批次逐份文件清单（`KnowledgeBatch.files`，原 select 层丢字段）+ 整理结果逐份分类/摘要回传（`OrganizeResult.items`，摘要本已写库未回传）+ 已优化区持久化数据源（`optimizedItems`，原为前端瞬态 state 切 tab 即失）+ 资料库透出 `stage`（staged 失败项如实 failed）；**深度整理 ¥39 差异化产出《资料整理报告》**（逐份 structuredMetered 精炼摘要·幂等跳过·失败不编造 + 5 节报告走 saveReportVersion 版本去重 + reserveQuota(0.3) 保守结算），原付费产出与免费仅差两字标题。

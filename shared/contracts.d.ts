@@ -674,7 +674,8 @@ export interface TodaySaying { text: string; date: string; }
 
 /* ────────────── 运营端看板 ────────────── */
 export interface Overview {
-  stats: { v: string; l: string; d: string; trend: string }[];
+  // t=标题 v=主数值(已格式化) deltaPct=近7天 vs 前7天真实环比(null=无前期数据) sub=副标签
+  stats: { t: string; v: string; deltaPct: number | null; sub: string }[];
   live: Record<string, number>;
   feed: { icon: string; t: string; m: string; v: string }[];
 }
@@ -824,6 +825,8 @@ export interface AdminUserItem {
   creditBalance: number;
   totalGranted: number;
   totalSpent: number;
+  tokenUsed30d: number;            // 近 30 天 TokenUsage.totalTokens 之和
+  quotaRemaining: number | null;   // 月度额度剩余（-1 = 不限量；null = 无钱包）
 }
 export interface AdminUsageSummary {
   registeredUsers: number;
@@ -838,6 +841,32 @@ export interface AdminUsageSummary {
 export interface AdminUsageView {
   summary: AdminUsageSummary;
   users: AdminUserItem[];
+}
+// —— per-user 用量下钻（GET /admin/users/:id/usage?days=30） ——
+export interface AdminUserQuota { limit: number; used: number; remaining: number; unlimited: boolean; periodKey: string | null }
+export interface AdminUserPlanStatus { planName: string | null; expiresAt: string | null; daysLeft: number | null; status: string }
+export interface AdminTokenAgg { key: string; totalTokens: number; costMicros: number; calls: number }
+export interface AdminUserUsage {
+  quota: AdminUserQuota | null            // null = 无钱包
+  plan: AdminUserPlanStatus
+  tokens: {
+    totalTokens: number; inputTokens: number; outputTokens: number
+    costMicros: number; calls: number
+    byModel: AdminTokenAgg[]; byAgent: AdminTokenAgg[]
+    byDay: { day: string; totalTokens: number }[]   // day = Asia/Shanghai dateKey
+  }
+  credits: { delta: number; reason: string; balance: number; at: string }[]      // 钻石口径，最近 20
+  payments: { orderNo: string; amount: number; status: string; paidAt: string | null; attrSource: string | null }[]  // 最近 10，orderNo 只回尾 6 位
+  activations: { itemType: string; itemKey: string; source: string; at: string }[] // 最近 10
+}
+// 写端点请求体：
+//   POST /admin/users/:id/token-quota → { mode: 'reset_to_plan' | 'set'; quota?: number }
+//   POST /admin/users/:id/credits     → { delta: number; reason: string }
+//   POST /admin/users/:id/plan-extend → { days: number }
+export interface AdminPaymentItem { orderNo: string; userName: string; amount: number; status: string; attrSource: string | null; paidAt: string | null; createdAt: string }
+export interface AdminPaymentsView {
+  summary: { paidAmount: number; paidCount: number; byDay: { day: string; amount: number }[] }
+  items: AdminPaymentItem[]
 }
 // —— Token 用量看板（计费 P1：旁路统计，不参与按次扣费）。成本 costMicros 单位 = 1e-6 元（微元）。 ——
 export interface TokenUsageTotals {

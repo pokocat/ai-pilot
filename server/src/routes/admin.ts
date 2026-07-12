@@ -26,7 +26,9 @@ import { isoSecond, recordAudit } from '../services/audit.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
 import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
-import { REVIEW_GRACE_PER_DAY } from '../services/tokenQuota.js';
+import { REVIEW_GRACE_PER_DAY, getQuotaState, getPlanStatus, setQuota } from '../services/tokenQuota.js';
+import { getBalance, grantCredits, chargeCredits } from '../services/credits.js';
+import { now, dayStart } from '../services/clock.js';
 import { selectableMeta, listDefs, createTool, updateTool, deleteTool, dryRunTool } from '../services/skillTools.js';
 import { aggregateToolStats } from '../services/toolStats.js';
 import { knowledgeView, reembedAll } from '../services/knowledgeAdmin.js';
@@ -48,6 +50,7 @@ import type {
   AdminProjectItem, AdminReportItem,
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
   AdminBenchmark, AdminBenchmarkUpsert,
+  AdminUserUsage, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem,
 } from '../../../shared/contracts';
 import { Prisma } from '@prisma/client';
 
@@ -363,25 +366,48 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // —— 概览看板 ——
   app.get('/admin/overview', async () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const [tenants, users, deliverables, sessions, agents, activeToday, ledgers, recentAudits] = await Promise.all([
+    const at = now();
+    const today = dayStart(at); // Asia/Shanghai 当日 00:00 对应的 UTC 瞬时
+    const d7 = new Date(at.getTime() - 7 * 864e5);
+    const d14 = new Date(at.getTime() - 14 * 864e5);
+    const d30 = new Date(at.getTime() - 30 * 864e5);
+    // 环比：近 7 天 vs 前 7 天真实计数；前期为 0 或无数据 → null（前端显示「—」，绝不硬编码箭头）。
+    const pct = (a: number, b: number): number | null => (b > 0 ? Math.round(((a - b) / b) * 100) : null);
+    const sumSpent = (r: { _sum: { delta: number | null } }) => Math.abs(r._sum.delta ?? 0); // delta<0 的绝对值和
+    const [
+      tenants, users, deliverables, sessions, agents, activeToday, recentAudits,
+      usersL7, usersP7, delivL7, delivP7, spentTotal, spentL7, spentP7,
+      activeL7, activeP7, cost30, costL7, costP7,
+    ] = await Promise.all([
       prisma.tenant.count(),
       prisma.user.count(),
       prisma.deliverable.count(),
       prisma.session.count(),
       prisma.agent.count({ where: { enabled: true } }),
       prisma.session.findMany({ where: { updatedAt: { gte: today } }, select: { userId: true }, distinct: ['userId'] }),
-      prisma.creditLedger.findMany({ select: { delta: true } }),
       prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 4 }),
+      prisma.user.count({ where: { createdAt: { gte: d7 } } }),
+      prisma.user.count({ where: { createdAt: { gte: d14, lt: d7 } } }),
+      prisma.deliverable.count({ where: { createdAt: { gte: d7 } } }),
+      prisma.deliverable.count({ where: { createdAt: { gte: d14, lt: d7 } } }),
+      prisma.creditLedger.aggregate({ where: { delta: { lt: 0 } }, _sum: { delta: true } }),
+      prisma.creditLedger.aggregate({ where: { delta: { lt: 0 }, createdAt: { gte: d7 } }, _sum: { delta: true } }),
+      prisma.creditLedger.aggregate({ where: { delta: { lt: 0 }, createdAt: { gte: d14, lt: d7 } }, _sum: { delta: true } }),
+      prisma.session.findMany({ where: { updatedAt: { gte: d7 } }, select: { userId: true }, distinct: ['userId'] }),
+      prisma.session.findMany({ where: { updatedAt: { gte: d14, lt: d7 } }, select: { userId: true }, distinct: ['userId'] }),
+      prisma.tokenUsage.aggregate({ where: { createdAt: { gte: d30 } }, _sum: { costMicros: true } }),
+      prisma.tokenUsage.aggregate({ where: { createdAt: { gte: d7 } }, _sum: { costMicros: true } }),
+      prisma.tokenUsage.aggregate({ where: { createdAt: { gte: d14, lt: d7 } }, _sum: { costMicros: true } }),
     ]);
-    const spent = ledgers.reduce((sum, l) => sum + (l.delta < 0 ? Math.abs(l.delta) : 0), 0);
+    const spent = sumSpent(spentTotal);
+    const cost30Micros = cost30._sum.costMicros ?? 0;
     return {
       stats: [
-        { v: String(users), l: '注册用户', d: `${tenants} 个租户`, trend: 'up' },
-        { v: String(activeToday.length), l: '今日活跃用户', d: `${sessions} 个会话`, trend: 'up' },
-        { v: String(deliverables), l: '累计产出成果', d: `${agents} 个功能上架`, trend: 'up' },
-        { v: String(spent), l: '累计消耗（点）', d: '按流水统计', trend: spent > 0 ? 'down' : 'up' },
+        { t: '注册用户', v: String(users), deltaPct: pct(usersL7, usersP7), sub: `${tenants} 个租户` },
+        { t: '今日活跃用户', v: String(activeToday.length), deltaPct: pct(activeL7.length, activeP7.length), sub: `${sessions} 个会话` },
+        { t: '累计产出成果', v: String(deliverables), deltaPct: pct(delivL7, delivP7), sub: `${agents} 个功能上架` },
+        { t: '钻石消耗', v: String(spent), deltaPct: pct(sumSpent(spentL7), sumSpent(spentP7)), sub: '按流水统计' },
+        { t: '30 天 Token 成本', v: (cost30Micros / 1e6).toFixed(2), deltaPct: pct(costL7._sum.costMicros ?? 0, costP7._sum.costMicros ?? 0), sub: '近 30 天 · 元' },
       ],
       live: { tenants, deliverables, sessions, agents },
       feed: recentAudits.length
@@ -473,6 +499,185 @@ export async function adminRoutes(app: FastifyInstance) {
       action: 'admin.user.agent.revoke', payload: { agentKey: req.params.key },
     });
     return { ok: true };
+  });
+
+  // —— S1：单用户用量下钻（额度 / 套餐 / token 聚合 / 钻石 / 支付 / 开通归因）纯读 ——
+  app.get<{ Params: { id: string }; Querystring: { days?: string } }>('/admin/users/:id/usage', async (req, reply): Promise<AdminUserUsage | void> => {
+    const userId = req.params.id;
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { plan: { select: { name: true } } } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    const days = Math.min(365, Math.max(1, Math.floor(Number(req.query.days ?? 30)) || 30));
+    const since = new Date(now().getTime() - days * 864e5);
+
+    // 额度：先判钱包是否存在（null=无钱包），存在才复用 getQuotaState（会做惰性月度重置）。
+    const wallet0 = await prisma.tokenWallet.findUnique({ where: { userId }, select: { periodKey: true } });
+    let quota: AdminUserUsage['quota'] = null;
+    if (wallet0) {
+      const st = await getQuotaState(userId);
+      const w1 = await prisma.tokenWallet.findUnique({ where: { userId }, select: { periodKey: true } });
+      quota = { limit: st.quota, used: st.used, remaining: st.balance, unlimited: st.unlimited, periodKey: w1?.periodKey ?? wallet0.periodKey };
+    }
+
+    const ps = await getPlanStatus(userId);
+    const plan: AdminUserUsage['plan'] = {
+      planName: user.plan?.name ?? null,
+      expiresAt: ps.expiresAt,
+      daysLeft: ps.daysRemaining,
+      status: !user.plan ? 'none' : ps.expired ? 'expired' : 'active',
+    };
+
+    const tokenWhere = { userId, createdAt: { gte: since } };
+    const [totalAgg, modelGroups, agentGroups, dayRows, credits, payments, activations] = await Promise.all([
+      prisma.tokenUsage.aggregate({ where: tokenWhere, _sum: { inputTokens: true, outputTokens: true, totalTokens: true, costMicros: true }, _count: { _all: true } }),
+      prisma.tokenUsage.groupBy({ by: ['model'], where: tokenWhere, _sum: { totalTokens: true, costMicros: true }, _count: { _all: true }, orderBy: { _sum: { totalTokens: 'desc' } }, take: 20 }),
+      prisma.tokenUsage.groupBy({ by: ['agentKey'], where: tokenWhere, _sum: { totalTokens: true, costMicros: true }, _count: { _all: true }, orderBy: { _sum: { totalTokens: 'desc' } }, take: 20 }),
+      // byDay：Asia/Shanghai 日历日键（列为 UTC naive → 先按 UTC 解释再转上海，与 clock.dateKey 一致）。
+      prisma.$queryRaw<{ day: string; total: bigint | number }[]>`
+        SELECT to_char((("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD') AS day,
+               COALESCE(SUM("totalTokens"), 0) AS total
+        FROM token_usage
+        WHERE "userId" = ${userId} AND "createdAt" >= ${since}
+        GROUP BY 1 ORDER BY 1`,
+      prisma.creditLedger.findMany({ where: { userId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 20 }),
+      prisma.paymentOrder.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 10, select: { outTradeNo: true, amount: true, status: true, paidAt: true, attrSource: true } }),
+      prisma.activationEvent.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 10, select: { itemType: true, itemKey: true, source: true, createdAt: true } }),
+    ]);
+    const toAgg = (key: string, g: { _sum: { totalTokens: number | null; costMicros: number | null }; _count: { _all: number } }): AdminTokenAgg =>
+      ({ key, totalTokens: g._sum.totalTokens ?? 0, costMicros: g._sum.costMicros ?? 0, calls: g._count._all });
+    return {
+      quota,
+      plan,
+      tokens: {
+        totalTokens: totalAgg._sum.totalTokens ?? 0,
+        inputTokens: totalAgg._sum.inputTokens ?? 0,
+        outputTokens: totalAgg._sum.outputTokens ?? 0,
+        costMicros: totalAgg._sum.costMicros ?? 0,
+        calls: totalAgg._count._all,
+        byModel: modelGroups.map((g) => toAgg(g.model, g)),
+        byAgent: agentGroups.map((g) => toAgg(g.agentKey ?? '未标注', g)),
+        byDay: dayRows.map((r) => ({ day: r.day, totalTokens: Number(r.total) })),
+      },
+      credits: credits.map((c) => ({ delta: c.delta, reason: c.reason, balance: c.balance, at: isoSecond(c.createdAt) })),
+      payments: payments.map((p) => ({ orderNo: tail6(p.outTradeNo), amount: p.amount, status: p.status, paidAt: p.paidAt ? isoSecond(p.paidAt) : null, attrSource: p.attrSource })),
+      activations: activations.map((a) => ({ itemType: a.itemType, itemKey: a.itemKey, source: a.source, at: isoSecond(a.createdAt) })),
+    };
+  });
+
+  // —— S2：三个资金/额度运营写端点（owner-only + 审计 before/after）——
+  // 调整/重置月度 token 额度。mode=reset_to_plan 取用户当前套餐额度；mode=set 直接设定（-1=不限量）。
+  app.post<{ Params: { id: string }; Body: { mode?: string; quota?: number } }>('/admin/users/:id/token-quota', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const userId = req.params.id;
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { tenantId: true, planActivatedAt: true, plan: { select: { tokenQuotaPerMonth: true } } } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    const mode = req.body?.mode;
+    let target: number;
+    if (mode === 'reset_to_plan') {
+      if (!user.plan) return reply.code(400).send({ error: '用户当前无套餐，无法按套餐重置额度', code: 'NO_PLAN' });
+      target = user.plan.tokenQuotaPerMonth;
+    } else if (mode === 'set') {
+      const q = req.body?.quota;
+      if (typeof q !== 'number' || !Number.isInteger(q) || (q < 0 && q !== -1)) {
+        return reply.code(400).send({ error: 'quota 需为 -1（不限量）或 ≥0 的整数', code: 'BAD_QUOTA' });
+      }
+      target = q;
+    } else {
+      return reply.code(400).send({ error: 'mode 需为 reset_to_plan 或 set', code: 'BAD_MODE' });
+    }
+    const before = await getQuotaState(userId);
+    await setQuota(user.tenantId, userId, target, user.planActivatedAt);
+    const after = await getQuotaState(userId);
+    const snap = (s: typeof before) => ({ quota: s.quota, balance: s.balance, used: s.used, unlimited: s.unlimited });
+    await recordAudit({ tenantId: user.tenantId, userId, action: 'admin.user.quota.set', payload: { by: actorName(actor), mode, quota: target, before: snap(before), after: snap(after) } });
+    return { ok: true, quota: after };
+  });
+
+  // 补发/扣减钻石（CreditLedger）。走 credits 服务的入账函数，reason 存成 admin:{reason}；负 delta 越界 400。
+  app.post<{ Params: { id: string }; Body: { delta?: number; reason?: string } }>('/admin/users/:id/credits', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const userId = req.params.id;
+    const delta = req.body?.delta;
+    const reason = (req.body?.reason ?? '').trim();
+    if (typeof delta !== 'number' || !Number.isInteger(delta) || delta === 0) {
+      return reply.code(400).send({ error: 'delta 需为非 0 整数', code: 'BAD_DELTA' });
+    }
+    if (!reason || reason.length > 50) {
+      return reply.code(400).send({ error: 'reason 必填且不超过 50 字', code: 'BAD_REASON' });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { tenantId: true } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    const before = await getBalance(userId);
+    // 越界拒绝（不 clamp）：有限余额下扣减不得使余额 < 0。
+    if (delta < 0 && before >= 0 && before + delta < 0) {
+      return reply.code(400).send({ error: '扣减后余额将为负，已拒绝', code: 'BALANCE_UNDERFLOW' });
+    }
+    const stored = `admin:${reason}`;
+    if (delta > 0) await grantCredits(user.tenantId, userId, delta, stored);
+    else await chargeCredits(user.tenantId, userId, -delta, stored);
+    const after = await getBalance(userId);
+    await recordAudit({ tenantId: user.tenantId, userId, action: 'admin.user.credits.adjust', payload: { by: actorName(actor), delta, reason: stored, before, after } });
+    return { ok: true, balance: after };
+  });
+
+  // 延长套餐有效期（仅推 planExpiresAt = max(now, 现值) + days，不触碰权益快照/锚点/钱包）。
+  app.post<{ Params: { id: string }; Body: { days?: number } }>('/admin/users/:id/plan-extend', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const userId = req.params.id;
+    const days = req.body?.days;
+    if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 366) {
+      return reply.code(400).send({ error: 'days 需为 1~366 的整数', code: 'BAD_DAYS' });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { tenantId: true, planId: true, planExpiresAt: true } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    if (!user.planId) return reply.code(400).send({ error: '用户当前无套餐，无法延长有效期', code: 'NO_PLAN' });
+    const at = now();
+    const baseMs = Math.max(at.getTime(), user.planExpiresAt ? user.planExpiresAt.getTime() : at.getTime());
+    const next = new Date(baseMs + days * 864e5);
+    await prisma.user.update({ where: { id: userId }, data: { planExpiresAt: next } });
+    await recordAudit({ tenantId: user.tenantId, userId, action: 'admin.user.plan.extend', payload: { by: actorName(actor), days, before: user.planExpiresAt ? isoSecond(user.planExpiresAt) : null, after: isoSecond(next) } });
+    return { ok: true, planExpiresAt: next.toISOString() };
+  });
+
+  // —— S4：支付订单只读列表 + 汇总（纯读）——
+  app.get<{ Querystring: { status?: string; days?: string } }>('/admin/payments', async (req): Promise<AdminPaymentsView> => {
+    const days = Math.min(365, Math.max(1, Math.floor(Number(req.query.days ?? 30)) || 30));
+    const since = new Date(now().getTime() - days * 864e5);
+    const status = (req.query.status ?? '').trim();
+    const PAID = ['paid', 'applied']; // 已支付口径：paid 及其后继终态 applied
+    const listWhere: Prisma.PaymentOrderWhereInput = { createdAt: { gte: since }, ...(status ? { status } : {}) };
+    const [orders, paidAgg, dayRows] = await Promise.all([
+      prisma.paymentOrder.findMany({ where: listWhere, orderBy: { createdAt: 'desc' }, take: 100 }),
+      prisma.paymentOrder.aggregate({ where: { paidAt: { gte: since }, status: { in: PAID } }, _sum: { amount: true }, _count: { _all: true } }),
+      prisma.$queryRaw<{ day: string; amount: bigint | number }[]>`
+        SELECT to_char((("paidAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD') AS day,
+               COALESCE(SUM("amount"), 0) AS amount
+        FROM payment_order
+        WHERE "paidAt" >= ${since} AND "status" IN ('paid', 'applied')
+        GROUP BY 1 ORDER BY 1`,
+    ]);
+    const userIds = [...new Set(orders.map((o) => o.userId))];
+    const users = userIds.length ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [];
+    const nameMap = new Map(users.map((u) => [u.id, u.name]));
+    const items: AdminPaymentItem[] = orders.map((o) => ({
+      orderNo: tail6(o.outTradeNo),
+      userName: nameMap.get(o.userId) ?? '—',
+      amount: o.amount,
+      status: o.status,
+      attrSource: o.attrSource,
+      paidAt: o.paidAt ? isoSecond(o.paidAt) : null,
+      createdAt: isoSecond(o.createdAt),
+    }));
+    return {
+      summary: {
+        paidAmount: paidAgg._sum.amount ?? 0,
+        paidCount: paidAgg._count._all,
+        byDay: dayRows.map((r) => ({ day: r.day, amount: Number(r.amount) })),
+      },
+      items,
+    };
   });
 
   // —— 用户上下文中心：个人档案 + 长期记忆（按顾问）+ 知识库文档（观测与纠偏） ——
@@ -1291,7 +1496,8 @@ export async function adminRoutes(app: FastifyInstance) {
 }
 
 async function buildAdminUsers(): Promise<AdminUserItem[]> {
-  const [users, sessions, deliverables, ledgers] = await Promise.all([
+  const since30 = new Date(now().getTime() - 30 * 864e5);
+  const [users, sessions, deliverables, ledgers, tokenAgg, wallets] = await Promise.all([
     prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
       take: 300,
@@ -1300,9 +1506,15 @@ async function buildAdminUsers(): Promise<AdminUserItem[]> {
     prisma.session.groupBy({ by: ['userId'], _count: { _all: true }, _max: { updatedAt: true } }),
     prisma.deliverable.groupBy({ by: ['userId'], _count: { _all: true } }),
     prisma.creditLedger.findMany({ orderBy: { createdAt: 'asc' } }),
+    // 近 30 天 token 用量：一次 groupBy（[userId,createdAt] 索引），避免 per-user N+1。
+    prisma.tokenUsage.groupBy({ by: ['userId'], where: { userId: { not: null }, createdAt: { gte: since30 } }, _sum: { totalTokens: true } }),
+    // 月度额度剩余：一次 findMany 取齐所有钱包（不触发 per-user 惰性重置，列表展示用原值）。
+    prisma.tokenWallet.findMany({ select: { userId: true, quota: true, balance: true } }),
   ]);
   const sessionMap = new Map(sessions.map((s) => [s.userId, { count: s._count._all, lastAt: s._max.updatedAt }]));
   const deliverableMap = new Map(deliverables.map((d) => [d.userId, d._count._all]));
+  const tokenMap = new Map(tokenAgg.map((t) => [t.userId as string, t._sum.totalTokens ?? 0]));
+  const walletMap = new Map(wallets.map((w) => [w.userId, w.quota < 0 ? -1 : w.balance])); // -1=不限量
   const creditMap = new Map<string, { balance: number; granted: number; spent: number }>();
   for (const l of ledgers) {
     const s = creditMap.get(l.userId) ?? { balance: 0, granted: 0, spent: 0 };
@@ -1331,6 +1543,8 @@ async function buildAdminUsers(): Promise<AdminUserItem[]> {
       creditBalance: credit.balance,
       totalGranted: credit.granted,
       totalSpent: credit.spent,
+      tokenUsed30d: tokenMap.get(u.id) ?? 0,
+      quotaRemaining: walletMap.has(u.id) ? (walletMap.get(u.id) as number) : null,
     };
   });
 }
@@ -1338,6 +1552,11 @@ async function buildAdminUsers(): Promise<AdminUserItem[]> {
 function displayPhone(phone: string): string {
   if (phone.startsWith('wx_')) return '微信账号';
   return phone;
+}
+
+// 订单号脱敏：只回尾 6 位（避免运营端泄露完整商户订单号）。
+function tail6(s: string): string {
+  return s.length <= 6 ? s : s.slice(-6);
 }
 
 function auditPayload(payload: Prisma.JsonValue | null): Record<string, unknown> {

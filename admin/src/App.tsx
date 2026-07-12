@@ -18,6 +18,9 @@ import {
   type AiModelUpsert,
   type AdminUserItem,
   type AdminUserDetail,
+  type AdminUserUsage,
+  type AdminUserPlanStatus,
+  type AdminPaymentsView,
   type AdminUsageView,
   type AdminTokenUsageView,
   type AdminAuditItem,
@@ -45,11 +48,12 @@ import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-type Tab = 'home' | 'users' | 'usage' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
+type Tab = 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
 const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
   { key: 'usage', icon: 'crown', label: '消耗' },
+  { key: 'payments', icon: 'doc', label: '订单' },
   { key: 'funnel', icon: 'target', label: '处方漏斗' },
   { key: 'tokens', icon: 'trend', label: 'Token' },
   { key: 'trace', icon: 'insight', label: '诊断' },
@@ -118,8 +122,9 @@ export default function App() {
           {tab === 'home' && <OverviewView />}
           {tab === 'users' && <UsersView onOpen={setDetailUser} />}
           {tab === 'usage' && <UsageView />}
+          {tab === 'payments' && <PaymentsView />}
           {tab === 'funnel' && <FunnelView />}
-          {tab === 'tokens' && <TokenUsageView />}
+          {tab === 'tokens' && <TokenUsageView onOpenUser={(id) => { setTab('users'); setDetailUser(id); }} />}
           {tab === 'trace' && <ObservabilityView />}
           {tab === 'say' && <SayingsView toast={showToast} />}
           {tab === 'agent' && <AgentsView key={agentsKey} onOpen={setDetailKey} toast={showToast} />}
@@ -158,6 +163,7 @@ export default function App() {
         {detailUser && (
           <UserDetailPanel
             userId={detailUser}
+            isOwner={!!me?.isSuper}
             onClose={() => setDetailUser(null)}
             toast={showToast}
           />
@@ -214,10 +220,10 @@ function OverviewView() {
       <div className="pad">
         <div className="stats">
           {data.stats.map((s) => (
-            <div key={s.l} className="stat">
+            <div key={s.t} className="stat">
               <div className="v">{s.v}</div>
-              <div className="l">{s.l}</div>
-              <div className={`d ${s.trend}`}><Icon name={s.trend === 'up' ? 'up' : 'trend'} size={12} />{s.d}</div>
+              <div className="l">{s.t}</div>
+              <StatDelta deltaPct={s.deltaPct} sub={s.sub} />
             </div>
           ))}
         </div>
@@ -238,6 +244,22 @@ function OverviewView() {
   );
 }
 
+// 概览卡环比：deltaPct 非 null 才渲染箭头（正=绿↑ / 负=红↓ / 0=中性），无前期数据显示「—」。
+function StatDelta({ deltaPct, sub }: { deltaPct: number | null; sub: string }) {
+  if (deltaPct === null) {
+    return <div className="d">—{sub ? <span className="sub"> · {sub}</span> : null}</div>;
+  }
+  const dir = deltaPct > 0 ? 'up' : deltaPct < 0 ? 'down' : '';
+  const pct = `${deltaPct > 0 ? '+' : ''}${deltaPct}%`;
+  return (
+    <div className={`d ${dir}`}>
+      {dir && <Icon name={dir === 'up' ? 'up' : 'trend'} size={12} />}
+      {pct}
+      {sub ? <span className="sub"> · {sub}</span> : null}
+    </div>
+  );
+}
+
 function UsersView({ onOpen }: { onOpen: (id: string) => void }) {
   const [list, setList] = useState<AdminUserItem[]>([]);
   useEffect(() => { api.users().then(setList).catch(() => {}); }, []);
@@ -255,7 +277,7 @@ function UsersView({ onOpen }: { onOpen: (id: string) => void }) {
             <div className="crd-row">
               <span className="crd-ic"><Icon name="user" size={18} /></span>
               <div className="crd-b">
-                <div className="ct">{u.name} {u.wechatLinked && <span className="tag">微信</span>}</div>
+                <div className="ct">{u.name} {u.wechatLinked && <span className="tag">微信</span>} {u.quotaRemaining === -1 && <span className="tag">不限量</span>}</div>
                 <div className="cs">{u.phone} · {u.tenantName} · {u.planName ?? '未分配套餐'}</div>
               </div>
               <span className="user-balance">{creditText(u.creditBalance)}</span>
@@ -265,7 +287,8 @@ function UsersView({ onOpen }: { onOpen: (id: string) => void }) {
               <KV k="注册时间" v={fmtTime(u.createdAt)} />
               <KV k="最后会话" v={u.lastSessionAt ? fmtTime(u.lastSessionAt) : '暂无'} />
               <KV k="会话/成果" v={`${u.sessionCount}/${u.deliverableCount}`} />
-              <KV k="已消耗" v={`${u.totalSpent} 点`} />
+              <KV k="钻石消耗" v={`${u.totalSpent}`} />
+              <KV k="30 天 Token" v={fmtTokens(u.tokenUsed30d)} />
             </div>
           </div>
         ))}
@@ -284,7 +307,7 @@ function fmtSize(b: number | null): string {
   return `${(b / 1024 / 1024).toFixed(1)}MB`;
 }
 
-function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: () => void; toast: (m: string) => void }) {
+function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: string; isOwner: boolean; onClose: () => void; toast: (m: string) => void }) {
   const [data, setData] = useState<AdminUserDetail | null>(null);
   const [ctx, setCtx] = useState<AdminUserContext | null>(null);
   const [busy, setBusy] = useState('');
@@ -345,6 +368,8 @@ function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: 
         <div className="dt"><div className="t">{u.name}</div><div className="s">{u.phone} · 余额 {creditText(u.creditBalance)}</div></div>
       </div>
       <div className="ad-db">
+        <UsageQuotaBlock userId={userId} isOwner={isOwner} toast={toast} />
+
         <div className="blk">
           <div className="blk-h"><Icon name="crown" size={15} /><span className="t">付费智能体开通</span><span className="badge">{data.agents.filter((a) => a.owned).length}/{data.agents.length}</span></div>
           <div className="blk-d">为该用户单独开通付费（解锁类）智能体，免其消耗权益点。免费 / 按次智能体所有用户均可直接使用，无需开通。</div>
@@ -438,6 +463,245 @@ function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: 
   );
 }
 
+// A1：用户「用量与额度」块——月度额度 meter + 30 天 token/成本 + byAgent/byModel/byDay + 折叠流水 + 运营动作。
+function planStatusText(p: AdminUserPlanStatus): string {
+  if (!p.planName) return '无套餐';
+  const parts: string[] = [];
+  const st = p.status === 'active' ? '生效中' : p.status === 'expired' ? '已过期' : p.status === 'none' ? '无套餐' : p.status;
+  if (st) parts.push(st);
+  if (p.daysLeft != null) parts.push(`剩 ${p.daysLeft} 天`);
+  return parts.join(' · ') || '—';
+}
+function fmtYuan(fen: number): string {
+  return (fen / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+type OpsKind = 'reset' | 'setQuota' | 'credits' | 'extend';
+
+function Fold({ icon, title, count, open, onToggle, children }: { icon: string; title: string; count: number; open: boolean; onToggle: () => void; children: ReactNode }) {
+  return (
+    <div className="blk">
+      <div className="blk-h" style={{ cursor: 'pointer' }} onClick={onToggle}>
+        <Icon name={icon} size={15} /><span className="t">{title}</span>
+        <span className="badge">{open ? '收起' : count}</span>
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
+function UsageQuotaBlock({ userId, isOwner, toast }: { userId: string; isOwner: boolean; toast: (m: string) => void }) {
+  const [data, setData] = useState<AdminUserUsage | null>(null);
+  const [modal, setModal] = useState<OpsKind | null>(null);
+  const [open, setOpen] = useState<'' | 'credits' | 'payments' | 'activations'>('');
+  const load = () => api.userUsage(userId, 30).then(setData).catch(() => {});
+  useEffect(() => { load(); }, [userId]);
+  if (!data) return null;
+  const { quota, plan, tokens } = data;
+  const byDayMax = Math.max(1, ...tokens.byDay.map((d) => d.totalTokens));
+  return (
+    <>
+      {/* 月度额度 */}
+      <div className="blk">
+        <div className="blk-h"><Icon name="crown" size={15} /><span className="t">月度产出额度</span>{quota?.periodKey && <span className="badge">本月 {quota.periodKey}</span>}</div>
+        {quota === null ? (
+          <div className="empty">未建额度账户</div>
+        ) : quota.unlimited ? (
+          <div className="usage-row">
+            <div className="usage-h">
+              <div className="usage-name">额度 <span className="tag">不限量</span></div>
+              <div className="usage-num ok">已用 {fmtTokens(quota.used)}</div>
+            </div>
+            <div className="usage-meta">套餐 {plan.planName ?? '—'} · {planStatusText(plan)}</div>
+          </div>
+        ) : (
+          <div className="usage-row">
+            <div className="usage-h">
+              <div className="usage-name">额度剩余</div>
+              <div className={`usage-num ${quota.remaining > 0 ? 'ok' : ''}`}>剩 {fmtTokens(quota.remaining)}</div>
+            </div>
+            <div className="usage-meta">已用 {fmtTokens(quota.used)} / {fmtTokens(quota.limit)} · 套餐 {plan.planName ?? '—'} · {planStatusText(plan)}</div>
+            <div className="meter"><i style={{ width: `${quota.limit > 0 ? Math.min(100, Math.max(2, Math.round((quota.used / quota.limit) * 100))) : 2}%` }} /></div>
+          </div>
+        )}
+      </div>
+
+      {/* 30 天 token / 成本 */}
+      <div className="blk">
+        <div className="blk-h"><Icon name="trend" size={15} /><span className="t">近 30 天用量</span><span className="badge">token / 成本</span></div>
+        <div className="usage-summary">
+          <div><b>{fmtTokens(tokens.totalTokens)}</b><span>总 Token</span></div>
+          <div><b>{fmtCny(tokens.costMicros)}</b><span>成本</span></div>
+          <div><b>{tokens.calls}</b><span>调用次数</span></div>
+          <div><b>{fmtTokens(tokens.outputTokens)}</b><span>输出 Token</span></div>
+        </div>
+        {tokens.byDay.length > 0 && (
+          <div className="spark">
+            {tokens.byDay.map((d) => <i key={d.day} title={`${d.day} · ${fmtTokens(d.totalTokens)}`} style={{ height: `${Math.max(6, Math.round((d.totalTokens / byDayMax) * 100))}%` }} />)}
+          </div>
+        )}
+        {tokens.byAgent.length > 0 && (
+          <>
+            <div className="usage-meta" style={{ marginTop: 12 }}>按顾问（前 3）</div>
+            {tokens.byAgent.slice(0, 3).map((a) => (
+              <div key={a.key} className="usage-row">
+                <div className="usage-h"><div className="usage-name">{a.key}</div><div className="usage-num ok">{fmtCny(a.costMicros)}</div></div>
+                <div className="usage-meta">{a.calls} 次 · {fmtTokens(a.totalTokens)} token</div>
+              </div>
+            ))}
+          </>
+        )}
+        {tokens.byModel.length > 0 && (
+          <>
+            <div className="usage-meta" style={{ marginTop: 12 }}>按模型（前 3）</div>
+            {tokens.byModel.slice(0, 3).map((m) => (
+              <div key={m.key} className="usage-row">
+                <div className="usage-h"><div className="usage-name">{m.key}</div><div className="usage-num ok">{fmtCny(m.costMicros)}</div></div>
+                <div className="usage-meta">{m.calls} 次 · {fmtTokens(m.totalTokens)} token</div>
+              </div>
+            ))}
+          </>
+        )}
+        {tokens.calls === 0 && <div className="usage-meta">近 30 天暂无 token 记录。</div>}
+      </div>
+
+      {/* 折叠：钻石流水 / 支付订单 / 开通归因 */}
+      <Fold icon="crown" title="钻石流水" count={data.credits.length} open={open === 'credits'} onToggle={() => setOpen(open === 'credits' ? '' : 'credits')}>
+        {data.credits.length === 0 ? <div className="empty">暂无钻石流水。</div> : (
+          <div className="mem-list">
+            {data.credits.map((c, i) => (
+              <div key={i} className="mem-card">
+                <span className="mi"><Icon name="crown" size={16} /></span>
+                <div className="mb"><div className="mt">{c.reason || '—'}</div><div className="mm">余额 {c.balance} · {fmtTime(c.at)}</div></div>
+                <div className={`usage-num ${c.delta >= 0 ? 'ok' : ''}`}>{c.delta >= 0 ? '+' : ''}{c.delta}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Fold>
+
+      <Fold icon="doc" title="支付订单" count={data.payments.length} open={open === 'payments'} onToggle={() => setOpen(open === 'payments' ? '' : 'payments')}>
+        {data.payments.length === 0 ? <div className="empty">暂无支付订单。</div> : (
+          <div className="mem-list">
+            {data.payments.map((p, i) => (
+              <div key={i} className="mem-card">
+                <span className="mi"><Icon name="doc" size={16} /></span>
+                <div className="mb"><div className="mt">¥{fmtYuan(p.amount)}<span className="tag off">{p.status}</span></div><div className="mm">尾号 {p.orderNo}{p.attrSource ? ` · ${p.attrSource}` : ''} · {p.paidAt ? fmtTime(p.paidAt) : '未支付'}</div></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Fold>
+
+      <Fold icon="target" title="开通归因" count={data.activations.length} open={open === 'activations'} onToggle={() => setOpen(open === 'activations' ? '' : 'activations')}>
+        {data.activations.length === 0 ? <div className="empty">暂无开通记录。</div> : (
+          <div className="mem-list">
+            {data.activations.map((a, i) => (
+              <div key={i} className="mem-card">
+                <span className="mi"><Icon name="spark" size={16} /></span>
+                <div className="mb"><div className="mt">{a.itemKey}<span className="tag off">{a.itemType}</span></div><div className="mm">来源 {a.source} · {fmtTime(a.at)}</div></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Fold>
+
+      {/* 运营动作（owner-only）*/}
+      {isOwner && (
+        <div className="blk">
+          <div className="blk-h"><Icon name="insight" size={15} /><span className="t">运营动作</span><span className="badge">仅超管</span></div>
+          <div className="blk-d">额度、钻石、套餐有效期为资金敏感动作，操作会留审计（before/after）。</div>
+          <div className="ops-actions">
+            <button type="button" className="mini-btn" onClick={() => setModal('reset')}>重置额度</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('setQuota')}>调整额度</button>
+            <button type="button" className="mini-btn primary" onClick={() => setModal('credits')}>补发钻石</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('extend')}>延长套餐</button>
+          </div>
+        </div>
+      )}
+
+      {modal && <OpsActionModal kind={modal} userId={userId} plan={plan} onClose={() => setModal(null)} onDone={() => { setModal(null); load(); }} toast={toast} />}
+    </>
+  );
+}
+
+// A1 运营动作确认弹窗：重置/调整额度、补发钻石（必填事由）、延长套餐。资金敏感 → 全部二次确认。
+function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
+  kind: OpsKind; userId: string; plan: AdminUserPlanStatus;
+  onClose: () => void; onDone: () => void; toast: (m: string) => void;
+}) {
+  const [quota, setQuota] = useState(0);
+  const [delta, setDelta] = useState(0);
+  const [reason, setReason] = useState('');
+  const [days, setDays] = useState(30);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const meta: Record<OpsKind, { title: string; desc: string }> = {
+    reset: { title: '重置月度额度', desc: `将该用户月度 token 额度重置为当前套餐（${plan.planName ?? '无套餐'}）的每月额度。` },
+    setQuota: { title: '调整月度额度', desc: '直接设定月度 token 额度：填 -1 表示不限量，0 及以上为具体额度。' },
+    credits: { title: '补发 / 扣减钻石', desc: '正数补发、负数扣减；扣减不得使余额为负。事由必填，写入流水（前缀 admin:）。' },
+    extend: { title: '延长套餐有效期', desc: '在当前到期日（或今日，取较晚者）基础上顺延天数（1-366）。仅推有效期，不动快照与钱包。' },
+  };
+  const cfg = meta[kind];
+
+  const submit = async () => {
+    setErr('');
+    try {
+      if (kind === 'reset') {
+        setBusy(true);
+        await api.setUserQuota(userId, { mode: 'reset_to_plan' });
+        toast('已按套餐重置额度');
+      } else if (kind === 'setQuota') {
+        if (!Number.isInteger(quota) || quota < -1) { setErr('额度需为 -1（不限量）或 ≥ 0 的整数'); return; }
+        setBusy(true);
+        await api.setUserQuota(userId, { mode: 'set', quota });
+        toast(quota === -1 ? '已设为不限量' : `额度已设为 ${quota}`);
+      } else if (kind === 'credits') {
+        if (!Number.isInteger(delta) || delta === 0) { setErr('增减数需为非 0 整数'); return; }
+        const r = reason.trim();
+        if (!r) { setErr('请填写事由'); return; }
+        if (r.length > 50) { setErr('事由不超过 50 字'); return; }
+        setBusy(true);
+        await api.adjustUserCredits(userId, { delta, reason: r });
+        toast(`已${delta > 0 ? '补发' : '扣减'} ${Math.abs(delta)} 钻石`);
+      } else {
+        if (!plan.planName) { setErr('该用户无套餐，无法延长'); return; }
+        if (!Number.isInteger(days) || days < 1 || days > 366) { setErr('天数需为 1-366 的整数'); return; }
+        setBusy(true);
+        await api.extendUserPlan(userId, { days });
+        toast(`套餐已延长 ${days} 天`);
+      }
+      onDone();
+    } catch (e) {
+      setBusy(false);
+      setErr((e as Error)?.message || '操作失败');
+    }
+  };
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="al-card" style={{ width: 300, margin: 0 }} onClick={(e) => e.stopPropagation()}>
+        <div className="al-label">{cfg.title}</div>
+        <div className="blk-d">{cfg.desc}</div>
+        {kind === 'setQuota' && <NumInput className="al-input" value={quota} onChange={setQuota} />}
+        {kind === 'extend' && <NumInput className="al-input" min={1} max={366} value={days} onChange={setDays} />}
+        {kind === 'credits' && (
+          <>
+            <NumInput className="al-input" value={delta} onChange={setDelta} placeholder="增减数（正补发 / 负扣减）" />
+            <div style={{ marginTop: 10 }}>
+              <input className="al-input" value={reason} maxLength={50} placeholder="事由（必填，≤50 字）" onChange={(e) => setReason(e.target.value)} />
+            </div>
+          </>
+        )}
+        {err && <div className="al-err"><Icon name="alert" size={13} /> {err}</div>}
+        <button type="button" className="al-btn" onClick={submit} disabled={busy}><Icon name="check" size={15} /> {busy ? '提交中…' : '确认'}</button>
+        <div className="al-note" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={onClose}>取消</div>
+      </div>
+    </div>
+  );
+}
+
 function UsageView() {
   const [data, setData] = useState<AdminUsageView | null>(null);
   useEffect(() => { api.usage().then(setData).catch(() => {}); }, []);
@@ -468,7 +732,53 @@ function UsageView() {
   );
 }
 
-function TokenUsageView() {
+// A3：支付订单只读列表——状态筛选 + 天数切换 + summary 四格 + 明细（金额分转元）。
+const PAY_STATUS: [string, string][] = [['', '全部'], ['paid', '已支付'], ['created', '待支付'], ['failed', '失败'], ['closed', '关闭']];
+function payStatusLabel(s: string): string {
+  const m: Record<string, string> = { paid: '已支付', created: '待支付', failed: '支付失败', closed: '已关闭', refunded: '已退款' };
+  return m[s] ?? s;
+}
+function PaymentsView() {
+  const [data, setData] = useState<AdminPaymentsView | null>(null);
+  const [status, setStatus] = useState('');
+  const [days, setDays] = useState(30);
+  useEffect(() => { api.payments({ status: status || undefined, days }).then(setData).catch(() => {}); }, [status, days]);
+  return (
+    <>
+      <div className="sec-h"><span className="t">支付订单</span><span className="s">近 {days} 天 · 真实收入（只读）</span></div>
+      <div className="pad">
+        <div className="crd-actions">
+          {[7, 30, 90].map((d) => <button key={d} type="button" className={`mini-btn ${days === d ? 'primary' : ''}`} onClick={() => setDays(d)}>{d} 天</button>)}
+        </div>
+        <div className="bill-seg" style={{ margin: '8px 0' }}>
+          {PAY_STATUS.map(([v, l]) => <div key={v} className={`bill-opt ${status === v ? 'on' : ''}`} onClick={() => setStatus(v)}><div className="bo-t">{l}</div></div>)}
+        </div>
+        {!data ? <div className="empty">加载中…</div> : (
+          <>
+            <div className="usage-summary">
+              <div><b>¥{fmtYuan(data.summary.paidAmount)}</b><span>期内实收</span></div>
+              <div><b>{data.summary.paidCount}</b><span>支付订单</span></div>
+              <div><b>{data.items.length}</b><span>列表条数</span></div>
+              <div><b>¥{data.summary.paidCount > 0 ? fmtYuan(Math.round(data.summary.paidAmount / data.summary.paidCount)) : '0.00'}</b><span>客单价</span></div>
+            </div>
+            {data.items.length === 0 && <div className="empty">近 {days} 天{status ? `「${PAY_STATUS.find(([v]) => v === status)?.[1]}」` : ''}暂无订单。</div>}
+            {data.items.map((p, i) => (
+              <div key={i} className="usage-row">
+                <div className="usage-h">
+                  <div className="usage-name">{p.userName || '（未命名）'}<span>尾号 {p.orderNo}{p.attrSource ? ` · ${p.attrSource}` : ''}</span></div>
+                  <div className={`usage-num ${p.status === 'paid' ? 'ok' : ''}`}>¥{fmtYuan(p.amount)}</div>
+                </div>
+                <div className="usage-meta">{payStatusLabel(p.status)} · {p.paidAt ? '支付 ' + fmtTime(p.paidAt) : '下单 ' + fmtTime(p.createdAt)}</div>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function TokenUsageView({ onOpenUser }: { onOpenUser: (id: string) => void }) {
   const [data, setData] = useState<AdminTokenUsageView | null>(null);
   useEffect(() => { api.tokenUsage(30).then(setData).catch(() => {}); }, []);
   if (!data) return <Loading />;
@@ -509,9 +819,9 @@ function TokenUsageView() {
         )}
         {topUsers.length > 0 && (
           <>
-            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">Top 用户</span><span className="s">按成本</span></div>
+            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">Top 用户</span><span className="s">按成本 · 点击看详情</span></div>
             {topUsers.map((u) => (
-              <div key={u.userId} className="usage-row">
+              <div key={u.userId} className="usage-row" style={{ cursor: 'pointer' }} onClick={() => onOpenUser(u.userId)}>
                 <div className="usage-h">
                   <div className="usage-name">{u.name ?? '（未命名）'}<span>{u.userId.slice(0, 8)}</span></div>
                   <div className="usage-num">{fmtCny(u.costMicros)}</div>

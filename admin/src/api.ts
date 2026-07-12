@@ -113,10 +113,13 @@ import type {
   AdminFeatureFlag,
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
   AdminBenchmark, AdminBenchmarkUpsert,
+  AdminUserUsage, AdminPaymentsView,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
 export type { AdminBenchmark, AdminBenchmarkUpsert } from '../../shared/contracts';
+// —— per-user 用量下钻 + 支付订单只读 ——
+export type { AdminUserUsage, AdminUserQuota, AdminUserPlanStatus, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem } from '../../shared/contracts';
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
@@ -207,6 +210,20 @@ export const api = {
   // —— 社群服务分配（按用户）——
   userService: (id: string) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`),
   setUserService: (id: string, body: ServiceAssignmentUpdate) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`, 'PUT', body),
+  // —— per-user 用量下钻（额度 / 30 天 token / 钻石流水 / 支付 / 开通归因）——
+  userUsage: (id: string, days = 30) => req<AdminUserUsage>(`/admin/users/${id}/usage?days=${days}`),
+  // —— 运营动作（owner-only；后端 requireSuper + 审计带 before/after）——
+  setUserQuota: (id: string, body: { mode: 'reset_to_plan' | 'set'; quota?: number }) => req<{ ok: boolean }>(`/admin/users/${id}/token-quota`, 'POST', body),
+  adjustUserCredits: (id: string, body: { delta: number; reason: string }) => req<{ ok: boolean }>(`/admin/users/${id}/credits`, 'POST', body),
+  extendUserPlan: (id: string, body: { days: number }) => req<{ ok: boolean }>(`/admin/users/${id}/plan-extend`, 'POST', body),
+  // —— 支付订单只读列表（状态筛选 + 天数）——
+  payments: (q: { status?: string; days?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.status) p.set('status', q.status);
+    if (q.days) p.set('days', String(q.days));
+    const qs = p.toString();
+    return req<AdminPaymentsView>(`/admin/payments${qs ? '?' + qs : ''}`);
+  },
   // —— 大模型配置（可随时切换） ——
   aiConfig: () => req<AiConfigView>('/admin/ai-config'),
   saveAiConfig: (body: AiConfigUpdate) => req<AiConfigView>('/admin/ai-config', 'PUT', body),
