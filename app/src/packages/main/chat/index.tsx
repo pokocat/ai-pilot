@@ -750,7 +750,8 @@ export default function Chat() {
     });
   const askAnswerOf = (qi: number): string =>
     askSel[qi] === ASK_OTHER ? (askOther[qi] ?? '').trim() : (askSel[qi] ?? '');
-  const askReady = activeAsks.length > 1 && activeAsks.every((_, qi) => !!askAnswerOf(qi));
+  const askAnsweredCount = activeAsks.filter((_, qi) => !!askAnswerOf(qi)).length;
+  const askReady = activeAsks.length > 1 && askAnsweredCount === activeAsks.length;
   const sendAskAnswers = () => {
     if (!askReady || busy) return;
     const lines = activeAsks.map((a, qi) => `${a.q} ${askAnswerOf(qi)}`);
@@ -1132,48 +1133,69 @@ export default function Chat() {
                     </View>
                   )}
                 </View>
-                {/* 军师反问选项卡：每个问题一组推荐答案 + 「其他」自填；单问题点选即发送，多问题答完一起发送。 */}
+                {/* 军师反问选项卡（问卷卡）：卡片容器 + 逐题点选 + 「其他」自填；单问题点选即发送，多问题答完一起发送。 */}
                 {i === activeAskIdx && activeAsks.length ? (
-                  <View className="ask-block">
-                    {activeAsks.map((a, qi) => (
-                      <View key={qi} className="ask-item">
-                        {activeAsks.length > 1 ? <Text className="ask-q">{a.q}</Text> : null}
-                        <View className="ask-opts">
-                          {a.options.map((op) => (
-                            <View
-                              key={op}
-                              className={`ask-chip ${askSel[qi] === op ? 'on' : ''}`}
-                              style={askSel[qi] === op ? { background: accent } : {}}
-                              onClick={() => pickAskOption(qi, op)}
-                            >
-                              <Text>{op}</Text>
-                            </View>
-                          ))}
-                          <View
-                            className={`ask-chip other ${askSel[qi] === ASK_OTHER ? 'on' : ''}`}
-                            style={askSel[qi] === ASK_OTHER ? { background: accent } : {}}
-                            onClick={() => pickAskOption(qi, ASK_OTHER)}
-                          >
-                            <Text>其他…</Text>
+                  <View className="ask-card">
+                    <View className="ask-head">
+                      <Icon name="pen" size={13} color={accent} />
+                      <Text className="ask-head-t">
+                        {activeAsks.length > 1 ? '逐题点选，答完一起发给军师' : '点一项直接回复，也可选「其他」自己填'}
+                      </Text>
+                      {activeAsks.length > 1 ? (
+                        <Text className="ask-head-c" style={askAnsweredCount ? { color: accent } : {}}>
+                          {askAnsweredCount}/{activeAsks.length}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <View className="ask-body">
+                      {activeAsks.map((a, qi) => (
+                        <View key={qi} className="ask-item">
+                          <View className="ask-q">
+                            {activeAsks.length > 1 ? (
+                              <Text className="ask-qn serif" style={{ color: accent }}>{qi + 1}</Text>
+                            ) : null}
+                            <Text className="ask-qt">{a.q}</Text>
                           </View>
+                          <View className="ask-opts">
+                            {a.options.map((op) => (
+                              <View
+                                key={op}
+                                className={`ask-chip ${askSel[qi] === op ? 'on' : ''}`}
+                                style={askSel[qi] === op ? { background: accent, borderColor: accent } : {}}
+                                onClick={() => pickAskOption(qi, op)}
+                              >
+                                <Text>{op}</Text>
+                              </View>
+                            ))}
+                            <View
+                              className={`ask-chip other ${askSel[qi] === ASK_OTHER ? 'on' : ''}`}
+                              style={askSel[qi] === ASK_OTHER ? { background: accent, borderColor: accent } : {}}
+                              onClick={() => pickAskOption(qi, ASK_OTHER)}
+                            >
+                              <Text>其他…</Text>
+                            </View>
+                          </View>
+                          {activeAsks.length > 1 && askSel[qi] === ASK_OTHER ? (
+                            <Input
+                              className="ask-other-input"
+                              value={askOther[qi] ?? ''}
+                              placeholder="输入你的答案…"
+                              onInput={(e) => setAskOtherText(qi, e.detail.value)}
+                            />
+                          ) : null}
                         </View>
-                        {activeAsks.length > 1 && askSel[qi] === ASK_OTHER ? (
-                          <Input
-                            className="ask-other-input"
-                            value={askOther[qi] ?? ''}
-                            placeholder="自己填一句…"
-                            onInput={(e) => setAskOtherText(qi, e.detail.value)}
-                          />
-                        ) : null}
-                      </View>
-                    ))}
+                      ))}
+                    </View>
                     {activeAsks.length > 1 ? (
-                      <View
-                        className={`ask-send ${askReady ? '' : 'off'}`}
-                        style={askReady ? { background: accent } : {}}
-                        onClick={sendAskAnswers}
-                      >
-                        <Text>发送回答</Text>
+                      <View className="ask-foot">
+                        <View
+                          className={`ask-send ${askReady ? '' : 'off'}`}
+                          style={askReady ? { background: accent } : {}}
+                          onClick={sendAskAnswers}
+                        >
+                          {askReady ? <Icon name="up" size={14} color="#fff" /> : null}
+                          <Text>{askReady ? '发送回答' : `还差 ${activeAsks.length - askAnsweredCount} 题`}</Text>
+                        </View>
                       </View>
                     ) : null}
                   </View>

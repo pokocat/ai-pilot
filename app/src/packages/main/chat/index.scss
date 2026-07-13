@@ -253,26 +253,50 @@
 .ref-ck { width: 20px; height: 20px; border-radius: 7px; border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .ref-empty { display: block; font-size: 12.5px; line-height: 1.7; color: var(--ink-3); padding: 20px 8px; text-align: center; }
 
-/* 军师反问选项卡（ChatReply.asks）：问题 + 推荐答案 chips + 「其他」自填 + 多问合并发送 */
-.ask-block { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; max-width: 86%; }
-.ask-q { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-3); margin-bottom: 6px; }
+/* 军师反问选项卡（ChatReply.asks）：问卷卡——卡片容器 + 题号/进度 + 实心选中 + 通栏发送。
+   全部走主题 token（surface/line/ink/accent 族），亮暗色与各本命色自适配。 */
+.ask-card {
+  margin-top: 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: var(--shadow-sm); overflow: hidden;
+}
+.ask-head {
+  display: flex; align-items: center; gap: 7px;
+  padding: 12px 14px 11px; border-bottom: 1px solid var(--line);
+}
+.ask-head-t { flex: 1; font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.ask-head-c { font-size: 12px; font-weight: 700; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ask-body { padding: 1px 14px 14px; }
+.ask-item { padding-top: 13px; }
+.ask-item + .ask-item { margin-top: 13px; border-top: 1px dashed var(--line); }
+.ask-q { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.ask-qn { flex-shrink: 0; font-size: 14px; font-weight: 700; line-height: 1.5; }
+.ask-qt { font-size: 13.5px; font-weight: 600; color: var(--ink); line-height: 1.55; }
 .ask-opts { display: flex; flex-wrap: wrap; gap: 8px; }
 .ask-chip {
-  padding: 7px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink);
-  font-size: 12px; font-weight: 500;
+  padding: 8px 14px; border-radius: 999px;
+  background: var(--surface); border: 1.5px solid var(--line);
+  font-size: 12.5px; font-weight: 500; color: var(--ink);
+  transition: transform .12s ease;
 }
-.ask-chip.on { color: #fff; }
+.ask-chip:active { transform: scale(.95); }
+.ask-chip.on { color: #fff; font-weight: 600; }
 .ask-chip.on Text { color: #fff; }
-.ask-chip.other { background: var(--surface-2); color: var(--ink-3); }
-.ask-chip.other.on { color: #fff; }
+.ask-chip.other { border-style: dashed; color: var(--ink-3); }
+.ask-chip.other.on { border-style: solid; color: #fff; }
 .ask-chip.other.on Text { color: #fff; }
 .ask-other-input {
-  margin-top: 8px; padding: 9px 12px; border-radius: 10px; background: var(--surface-2);
+  margin-top: 10px; padding: 10px 13px; box-sizing: border-box; width: 100%;
+  border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line);
   font-size: 13px; color: var(--ink);
 }
+.ask-foot { padding: 0 14px 14px; }
 .ask-send {
-  align-self: flex-start; padding: 8px 18px; border-radius: 999px;
-  color: #fff; font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  height: 42px; border-radius: 12px;
+  color: #fff; font-size: 13.5px; font-weight: 600;
+  transition: transform .12s ease;
 }
+.ask-send:active { transform: scale(.98); }
 .ask-send.off { background: var(--surface-2); color: var(--ink-3); }
 .ask-send.off Text { color: var(--ink-3); }
