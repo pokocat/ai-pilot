@@ -108,7 +108,7 @@ export default function Plans({ open, onClose }: Props) {
         </View>
         <Text className="ps-sub">权益点用于深度方案与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>
         {me?.planStatus?.expired && (
-          <Text className="ps-sub" style={{ color: '#c0392b' }}>当前套餐已到期：内容只读、AI 交互暂停，续费后立即恢复。</Text>
+          <Text className="ps-sub" style={{ color: 'var(--danger)' }}>当前套餐已到期：内容只读、AI 交互暂停，续费后立即恢复。</Text>
         )}
 
         <ScrollView scrollY className="ps-list">
@@ -129,7 +129,7 @@ export default function Plans({ open, onClose }: Props) {
                   ))}
                 </View>
                 <View
-                  className={`pp-btn ${busy === p.id ? 'busy' : ''}`}
+                  className={`btn pp-btn ${busy === p.id ? 'disabled' : ''}`}
                   style={{ background: p.price < 0 ? 'transparent' : accent, color: p.price < 0 ? accent : '#fff', borderColor: accent }}
                   onClick={() => buy(p)}
                 >

@@ -2,20 +2,34 @@
 // route 约定：'chat'→对话页、'studio'→执行 tab、以 '/' 开头→分包页 navigateTo。无 nextStep 则不渲染。
 import { useEffect, useState } from 'react';
 import { View, Text } from '@tarojs/components';
-import Taro from '@tarojs/taro';
 import { api, type JourneyView } from '../../services/api';
+import { navTo, switchTo } from '../../services/nav';
 import './index.scss';
 
 export default function NextStepCard() {
   const [j, setJ] = useState<JourneyView | null>(null);
-  useEffect(() => { api.journey().then(setJ).catch(() => {}); }, []);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { api.journey().then(setJ).catch(() => {}).finally(() => setLoaded(true)); }, []);
   const ns = j?.nextStep;
+
+  // 首帧未加载完成：渲染等高骨架占位，避免数据回来后卡片「后弹入」挤动下方布局。
+  if (!loaded) {
+    return (
+      <View className="nsc nsc-skeleton">
+        <View className="nsc-main">
+          <View className="nsc-sk nsc-sk-k" />
+          <View className="nsc-sk nsc-sk-t" />
+          <View className="nsc-sk nsc-sk-d" />
+        </View>
+      </View>
+    );
+  }
   if (!ns) return null;
 
   const go = () => {
-    if (ns.route === 'chat') Taro.navigateTo({ url: '/packages/main/chat/index?agentKey=general&continue=1' });
-    else if (ns.route === 'studio') Taro.switchTab({ url: '/pages/studio/index' });
-    else if (ns.route.startsWith('/')) Taro.navigateTo({ url: ns.route });
+    if (ns.route === 'chat') navTo('/packages/main/chat/index?agentKey=general&continue=1');
+    else if (ns.route === 'studio') switchTo('/pages/studio/index');
+    else if (ns.route.startsWith('/')) navTo(ns.route);
   };
 
   return (

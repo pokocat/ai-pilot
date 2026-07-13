@@ -1,16 +1,17 @@
 .agent-unlock-mask {
-  position: fixed; inset: 0; z-index: 900;
-  background: rgba(15, 17, 20, .55);
+  position: fixed; inset: 0; z-index: var(--z-sheet);
+  background: rgba(22, 25, 29, .55);
   display: flex; align-items: flex-end; justify-content: center;
 }
 
 .au-sheet {
   width: 100%; max-width: 600px;
   background: var(--bg, #fff);
-  border-radius: 22px 22px 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
   padding: 10px 22px calc(26px + env(safe-area-inset-bottom)) 22px;
   display: flex; flex-direction: column; align-items: center;
   box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
+  animation: sheet-rise .42s cubic-bezier(.2, .8, .2, 1) both;
 }
 
 .au-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 0 18px; }
@@ -34,14 +35,11 @@
 .au-divider { width: 1px; height: 30px; background: var(--line, #e4e4e7); }
 
 .au-note { font-size: 11.5px; color: var(--ink-3); margin-top: 14px; text-align: center; line-height: 1.5; }
-.au-low { display: flex; align-items: center; gap: 2px; margin-top: 10px; font-size: 11.5px; color: #c0392b; }
+.au-low { display: flex; align-items: center; gap: 2px; margin-top: 10px; font-size: 11.5px; color: var(--danger); }
 
+/* 按钮形与态走公共 .btn/.btn-ghost/.btn-primary，此处只定尺寸分配 */
 .au-btns { width: 100%; display: flex; gap: 12px; margin-top: 20px; }
-.au-btn {
-  flex: 1; height: 48px; border-radius: 14px;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  font-size: 14.5px; font-weight: 600;
-}
-.au-btn.ghost { background: var(--surface, #f1f1f2); color: var(--ink-2); flex: 0 0 96px; }
-.au-btn.primary { color: #fff; }
-.au-btn.primary.disabled { opacity: .5; }
+.au-btn { flex: 1; }
+.au-btn.ghost { flex: 0 0 96px; }
+/* 余额不足：视觉置灰但仍可点（点击给出「去调整方案」提示，非硬禁用） */
+.au-btn.insufficient { opacity: .5; }

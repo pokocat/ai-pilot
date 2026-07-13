@@ -70,8 +70,8 @@ export default function OnboardSheet({ open, onClose, onStart }: OnboardSheetPro
         </View>
 
         <View className="onboard-actions">
-          <View className="onboard-later" onClick={later}><Text>稍后再看</Text></View>
-          <View className="onboard-start" style={{ background: accent }} onClick={start}><Text>开始上传资料</Text></View>
+          <View className="btn btn-ghost onboard-later" onClick={later}><Text>稍后再看</Text></View>
+          <View className="btn btn-primary onboard-start" style={{ background: accent }} onClick={start}><Text>开始上传资料</Text></View>
         </View>
       </View>
     </View>

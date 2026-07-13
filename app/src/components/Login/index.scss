@@ -3,7 +3,7 @@
    该页固定使用绿色品牌色（登录先于本命色选择），不随主题切换。
    ============================================================ */
 .login {
-  position: fixed; inset: 0; z-index: 400; overflow: hidden;
+  position: fixed; inset: 0; z-index: var(--z-full); overflow: hidden;
   background: linear-gradient(162deg, #0A1F16 0%, #123A28 46%, #0C271C 100%);
 }
 

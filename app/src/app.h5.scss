@@ -15,7 +15,8 @@ body,
 
   --ink: #16191D;
   --ink-2: #565C63;
-  --ink-3: #969BA1;
+  /* 与 app.scss 同步：--ink-3 由 #969BA1 提到 #7E848B（对比度 ~3.5:1） */
+  --ink-3: #7E848B;
   --line: #E7E4DB;
   --line-2: #EFEDE5;
 
@@ -45,6 +46,28 @@ body,
   --r-md: 16px;
   --r-lg: 22px;
   --r-xl: 28px;
+
+  /* —— 与 app.scss 同步的标尺 token —— */
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-15: 15px;
+  --fs-17: 17px;
+  --fs-20: 20px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  --shadow-sm: 0 1px 2px rgba(22, 25, 29, .04), 0 2px 8px rgba(22, 25, 29, .05);
+
+  --z-nav: 100;
+  --z-sheet: 900;
+  --z-full: 950;
 }
 
 html,

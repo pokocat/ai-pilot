@@ -12,7 +12,8 @@ page {
 
   --ink: #16191D;
   --ink-2: #565C63;
-  --ink-3: #969BA1;
+  /* --ink-3：弱化层级；由 #969BA1(白底≈2.6:1) 提到 #7E848B(≈3.5:1)，保留弱化观感同时可读 */
+  --ink-3: #7E848B;
   --line: #E7E4DB;
   --line-2: #EFEDE5;
 
@@ -43,6 +44,32 @@ page {
   --r-md: 16px;
   --r-lg: 22px;
   --r-xl: 28px;
+
+  /* —— 字号标尺（本波立标，存量分批迁移；新代码走 token） —— */
+  --fs-11: 11px;   /* kicker / 说明底线（≥11px） */
+  --fs-12: 12px;   /* 辅助说明 */
+  --fs-13: 13px;   /* 次要正文 / 按钮小字 */
+  --fs-14: 14px;   /* 正文 */
+  --fs-15: 15px;   /* 强调正文 / 主按钮 */
+  --fs-17: 17px;   /* 小标题 */
+  --fs-20: 20px;   /* 弹层标题 */
+
+  /* —— 间距标尺 —— */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* —— 阴影 —— */
+  /* brief/settings 早已引用 --shadow-sm 却从未定义（死令牌），此处补上即修复 */
+  --shadow-sm: 0 1px 2px rgba(22, 25, 29, .04), 0 2px 8px rgba(22, 25, 29, .05);
+
+  /* —— 层级 —— */
+  --z-nav: 100;    /* 悬浮底栏 */
+  --z-sheet: 900;  /* 半屏弹层 */
+  --z-full: 950;   /* 全屏层（登录等） */
 
   background: var(--bg);
   font-family: var(--serif);
@@ -120,6 +147,31 @@ input, textarea { font-family: var(--sans); }
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 20px 0; font-size: 13px; font-weight: 600; color: var(--ink);
 }
+
+/* —— 按钮基类（A2）——
+   规范：高 48px、圆角 14px、:active 按压态、disabled(opacity+pointer-events:none)。
+   业务色由各处以内联 style={{ background: accent }} 覆写，基类只管形与态。 */
+.btn {
+  height: 48px; border-radius: 14px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: var(--fs-15); font-weight: 600; line-height: 1;
+  border: 1px solid transparent;
+  transition: transform .12s ease-out, filter .12s ease-out, opacity .12s ease-out;
+}
+.btn:active { transform: scale(.98); filter: brightness(.94); }
+.btn.disabled, .btn[disabled] { opacity: .5; pointer-events: none; }
+
+/* 主行动：默认本命色底、白字（可被内联 background 覆写为具体 accent） */
+.btn-primary { background: var(--accent); color: #fff; }
+/* 次行动：浅底、墨字 */
+.btn-ghost { background: var(--surface-2); color: var(--ink-2); }
+/* 危险行动 */
+.btn-danger { background: var(--danger); color: #fff; }
+
+/* —— 弹层公共入场动画（A3）——
+   由 Picker 的 pk-rise 提取为公共，五个 Sheet 统一接 .sheet-rise。 */
+@keyframes sheet-rise { from { transform: translateY(60px); opacity: .4; } to { transform: none; opacity: 1; } }
+.sheet-rise { animation: sheet-rise .42s cubic-bezier(.2, .8, .2, 1) both; }
 
 /* —— Toast —— */
 .toast {
