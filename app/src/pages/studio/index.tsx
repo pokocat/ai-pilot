@@ -3,8 +3,11 @@ import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
+import Login from '../../components/Login';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
+import { navTo, switchTo } from '../../services/nav';
+import { REVIEW_TIME } from '../../data/constants';
 import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
 import { api, type Agent, type GoalLadder, type ReminderItem, type BizMetricTemplateItem } from '../../services/api';
@@ -23,7 +26,7 @@ type ExecView = 'today' | 'week' | 'review';
 // 提醒节奏：微信订阅消息是一次性授权，用户每点一次订阅可触达一次。
 const REMINDERS = [
   { time: '每天 09:00', text: '生成今日军令' },
-  { time: '每天 21:30', text: '记录战果，生成当日复盘' },
+  { time: `每天 ${REVIEW_TIME}`, text: '记录战果，生成当日复盘' },
   { time: '每周五 18:00', text: '生成周复盘，调整下周打法' },
 ];
 
@@ -66,8 +69,10 @@ function orderMetaText(o: DossierOrder): string {
 export default function Studio() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
+  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
   const [buying, setBuying] = useState<Agent | null>(null);
   const [dossier, setDossier] = useState<Dossier | null>(null);
+  const [kbH, setKbH] = useState(0); // C6：键盘高度，用于把目标编辑 sheet 上顶避让
   const [view, setView] = useState<ExecView>('today');
   const [newOrder, setNewOrder] = useState('');
   const [bf, setBf] = useState({ leads: '', consults: '', deals: '' });
@@ -86,9 +91,16 @@ export default function Studio() {
     return () => s.setOverlay(false, 'goal-edit');
   }, [goalEdit]);
 
-  useDidShow(() => {
-    s.setTab(2);
-    Taro.getCurrentInstance().page?.getTabBar?.();
+  // C6：目标编辑 sheet 为 fixed 定位，键盘弹起会遮挡输入框。监听键盘高度把 sheet 上顶避让。
+  useEffect(() => {
+    if (!goalEdit) { setKbH(0); return; }
+    const handler = (res: { height: number }) => setKbH(res.height || 0);
+    Taro.onKeyboardHeightChange?.(handler);
+    return () => { Taro.offKeyboardHeightChange?.(handler); setKbH(0); };
+  }, [goalEdit]);
+
+  // C1：数据拉取（登录后才拉；未登录只挂登录引导，不请求）。
+  const loadStudio = () => {
     // 案卷已服务端化：拉取当前案卷（含一次性本地迁移），回填草稿用当日已存值初始化
     refreshDossier().then((d) => {
       setDossier(d);
@@ -99,6 +111,13 @@ export default function Studio() {
     api.reviews().then((r) => setStreak(r.streak)).catch(() => setStreak(null));
     // V7-11：提醒节奏（服务端提醒体系；失败静默，卡片降级到默认文案）
     api.reminders().then((r) => setReminders(r.items)).catch((e) => { s.handleApiError(e, { silent: true }); setReminders(null); });
+  };
+
+  useDidShow(() => {
+    s.setTab(2);
+    Taro.getCurrentInstance().page?.getTabBar?.();
+    if (!s.isAuthed()) { setShowLogin(true); return; }
+    loadStudio();
   });
 
   const todayDate = today();
@@ -113,10 +132,10 @@ export default function Studio() {
   const reviewReminder = reminders?.find((r) => r.kind === 'review') ?? null;
 
   const goChat = (agentKey: string, prompt: string) =>
-    Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
-  const openAgent = (key: string) => Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${key}&continue=1` });
+    navTo(`/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}`);
+  const openAgent = (key: string) => navTo(`/packages/main/chat/index?agentKey=${key}&continue=1`);
   // V7-05：军令卡体点击 → 军令详情页（勾选框为独立命中区，见 task-check 的 stopPropagation）
-  const openCommand = (id: string) => Taro.navigateTo({ url: `/packages/work/command/index?id=${id}` });
+  const openCommand = (id: string) => navTo(`/packages/work/command/index?id=${id}`);
   const tapCreative = (a: Agent) => {
     if (a.billing === 'unlock' && !a.owned) setBuying(a);
     else openAgent(a.key);
@@ -216,7 +235,7 @@ export default function Studio() {
       ? [
           `今日 ${doneTodayOrders.length} 条军令已完成，已归档`,
           '录入线索 / 咨询 / 成交三项数据',
-          '21:30 做今日复盘，生成明日军令',
+          `${REVIEW_TIME} 做今日复盘，生成明日军令`,
         ]
       : [
           '和军师聊透当前处境，产出一份方案',
@@ -242,9 +261,9 @@ export default function Studio() {
       <View className="pad exec">
         {/* 页头（exec-nav）：左「案卷」· 中「军令」· 右「提醒」 */}
         <View className="exec-nav tab-page-head">
-          <Text className="en-side left serif" onClick={() => Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
+          <Text className="en-side left serif" onClick={() => navTo('/packages/work/projects/index')}>案卷</Text>
           <Text className="en-title serif">军令</Text>
-          <Text className="en-side right serif" onClick={() => setView('review')}>提醒</Text>
+          <Text className="en-side right serif" onClick={() => setView('review')}>复盘</Text>
         </View>
 
         {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
@@ -263,10 +282,10 @@ export default function Studio() {
                 <Text className="deck-title serif">{dossier.title}</Text>
                 <Text className="deck-desc">源自认可方案 · 由{dossier.sourceAgent}生成 · 打卡记录，复盘定夺明日军令。</Text>
                 <View className="deck-progress"><View className="deck-fill" style={{ width: `${progress.percent}%` }} /></View>
-                <Text className="deck-foot">{progress.total ? `完成度 ${progress.percent}% · 21:30 复盘` : '待生成军令 · 21:30 复盘'}</Text>
+                <Text className="deck-foot">{progress.total ? `完成度 ${progress.percent}% · ${REVIEW_TIME} 复盘` : `待生成军令 · ${REVIEW_TIME} 复盘`}</Text>
               </View>
             ) : (
-              <View className="deck-card battle-card" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
+              <View className="deck-card battle-card" onClick={() => switchTo('/pages/sessions/index')}>
                 <Text className="deck-k">今日战役 · {dateStr}</Text>
                 <Text className="deck-title serif">{EMPTY_STATES.execution.title}</Text>
                 <Text className="deck-desc">{EMPTY_STATES.execution.desc}</Text>
@@ -299,9 +318,9 @@ export default function Studio() {
             </View>
 
             {/* 提醒节奏（V7-11：读 api.reminders 的复盘节奏，点开进提醒与日历页） */}
-            <View className="deck-card" onClick={() => Taro.navigateTo({ url: '/packages/work/reminders/index' })}>
+            <View className="deck-card" onClick={() => navTo('/packages/work/reminders/index')}>
               <Text className="deck-k green">提醒节奏</Text>
-              <Text className="deck-title serif">{reviewReminder ? `${reviewReminder.time} 复盘` : '20:30 复盘'}</Text>
+              <Text className="deck-title serif">{reviewReminder ? `${reviewReminder.time} 复盘` : `${REVIEW_TIME} 复盘`}</Text>
               <Text className="deck-desc">{reviewReminder?.desc ?? '回填线索、咨询、成交，必要时刷新明日军令。'}</Text>
               <Text className="deck-foot muted">{streak ? `连续复盘 ${streak} 天 · 别断` : '点开管理提醒 ›'}</Text>
             </View>
@@ -315,7 +334,7 @@ export default function Studio() {
             <Text className={`stat-n serif ${und?.nextQuestions.length ? 'warn' : ''}`}>{und ? und.nextQuestions.length : '—'}</Text>
             <Text className="stat-l">待补资料</Text>
           </View>
-          <View className="exec-stat card" onClick={() => setView('review')}><Text className="stat-n serif">21:30</Text><Text className="stat-l">复盘提醒</Text></View>
+          <View className="exec-stat card" onClick={() => setView('review')}><Text className="stat-n serif">{REVIEW_TIME}</Text><Text className="stat-l">复盘提醒</Text></View>
         </View>
 
         {/* 总军师督战（advisor-card 紧凑行） */}
@@ -480,7 +499,7 @@ export default function Studio() {
                 <Text className="rb-text">线索 / 咨询 / 成交三个数</Text>
               </View>
               <View className="rb-line" onClick={genReview}>
-                <Text className="rb-state">21:30</Text>
+                <Text className="rb-state">{REVIEW_TIME}</Text>
                 <Text className="rb-text">生成今日复盘，决定明日是否调整军令</Text>
               </View>
             </View>
@@ -568,16 +587,18 @@ export default function Studio() {
           })}
         </View>
 
-        <View className="exec-cta" onClick={todayOrders.length ? genReview : genOrders}>
-          <Icon name={todayOrders.length ? 'doc' : 'check'} size={16} color="#FBFAF6" />
-          <Text>{todayOrders.length ? '录入今日战果 · 生成复盘' : '让军师生成今日军令'}</Text>
+        {/* C7：主入口收敛到 deck「今日主令」卡（3 态更全、带上下文）。此底部条降级为次要样式，
+            对齐同一 mainOrderAction，作为翻到页尾时的便捷复触点，不再作第二个主 CTA 抢焦点。 */}
+        <View className="exec-cta secondary" onClick={mainOrderAction}>
+          <Icon name={todayOrders.length ? 'doc' : 'check'} size={16} color={accent} />
+          <Text>{mainOrderButton}</Text>
         </View>
       </View>
 
       {/* V7-10：目标阶梯内联编辑浮层（底部输入 sheet） */}
       {goalEdit ? (
         <View className="goal-sheet-mask" catchMove onClick={() => setGoalEdit(null)}>
-          <View className="goal-sheet" onClick={(e) => e.stopPropagation()}>
+          <View className="goal-sheet" style={kbH ? { transform: `translateY(-${kbH}px)` } : undefined} onClick={(e) => e.stopPropagation()}>
             <View className="gs-grip" />
             <Text className="gs-title serif">{goalEdit.label}目标</Text>
             <Text className="gs-hint">一句话目标 + 关键指标，军师复盘时对齐这条。</Text>
@@ -586,6 +607,7 @@ export default function Studio() {
               value={goalDraft}
               placeholder="如：营收 ×2，复购率 30%"
               focus
+              adjustPosition={false}
               onInput={(e) => setGoalDraft(e.detail.value)}
               onConfirm={saveGoal}
             />
@@ -598,6 +620,12 @@ export default function Studio() {
       ) : null}
 
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); openAgent(a.key); }} />
+
+      {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉执行页数据 */}
+      <Login
+        open={showLogin}
+        onLoggedIn={() => { setShowLogin(false); loadStudio(); }}
+      />
     </Screen>
   );
 }

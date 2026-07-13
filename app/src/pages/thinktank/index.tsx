@@ -3,8 +3,11 @@ import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
+import Login from '../../components/Login';
+import AsyncState from '../../components/AsyncState';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
+import { navTo, switchTo } from '../../services/nav';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { checkUpload } from '../../services/uploadGuard';
@@ -88,6 +91,9 @@ export default function ThinkTank() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [tab, setTab] = useState<ThinkTab>('assets');
+  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
+  // C2：四个 tab 各自的加载失败标记（失败给可重试错误态，不再静默空白）。
+  const [err, setErr] = useState({ assets: false, data: false, modules: false, reports: false });
 
   // —— assets（V7-06）——
   const [pipe, setPipe] = useState<KnowledgePipelineView | null>(null);
@@ -117,26 +123,24 @@ export default function ThinkTank() {
   const closePay = () => setPay((p) => ({ ...p, open: false }));
   const closeExc = () => setExc((e) => ({ ...e, open: false }));
 
-  const loadPipeline = () => api.knowledgePipeline().then(setPipe).catch((e) => { s.handleApiError(e, { silent: true }); });
-  const loadData = () => api.dataSources().then(setDsView).catch((e) => { s.handleApiError(e, { silent: true }); });
-  const loadModules = () => api.modules().then(setModView).catch((e) => { s.handleApiError(e, { silent: true }); });
-  const loadReports = () => api.reports().then(setReports).catch((e) => { s.handleApiError(e, { silent: true }); setReports([]); });
+  const loadPipeline = () => { setErr((e) => ({ ...e, assets: false })); api.knowledgePipeline().then(setPipe).catch((e) => { s.handleApiError(e, { silent: true }); setErr((p) => ({ ...p, assets: true })); }); };
+  const loadData = () => { setErr((e) => ({ ...e, data: false })); api.dataSources().then(setDsView).catch((e) => { s.handleApiError(e, { silent: true }); setErr((p) => ({ ...p, data: true })); }); };
+  const loadModules = () => { setErr((e) => ({ ...e, modules: false })); api.modules().then(setModView).catch((e) => { s.handleApiError(e, { silent: true }); setErr((p) => ({ ...p, modules: true })); }); };
+  const loadReports = () => { setErr((e) => ({ ...e, reports: false })); api.reports().then(setReports).catch((e) => { s.handleApiError(e, { silent: true }); setReports([]); setErr((p) => ({ ...p, reports: true })); }); };
+
+  const loadAll = () => { loadPipeline(); loadData(); loadModules(); loadReports(); };
 
   useDidShow(() => {
     s.setTab(3);
     Taro.getCurrentInstance().page?.getTabBar?.();
-    if (s.isAuthed()) {
-      loadPipeline();
-      loadData();
-      loadModules();
-      loadReports();
-    }
+    if (!s.isAuthed()) { setShowLogin(true); return; }
+    loadAll();
   });
 
-  const openReport = (id: string) => Taro.navigateTo({ url: `/packages/work/report/index?id=${id}` });
-  const goLibrary = () => Taro.navigateTo({ url: '/packages/work/library/index' });
+  const openReport = (id: string) => navTo(`/packages/work/report/index?id=${id}`);
+  const goLibrary = () => navTo('/packages/work/library/index');
   const goChat = (agentKey: string, prompt: string) =>
-    Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
+    navTo(`/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}`);
 
   // ============ V7-06 案卷资产 ============
   const counts = pipe?.counts ?? { staging: 0, optimized: 0, confirmed: 0 };
@@ -379,7 +383,7 @@ export default function ThinkTank() {
       closePay();
       const code = (e as { code?: string; data?: { code?: string } })?.code || (e as { data?: { code?: string } })?.data?.code;
       if (code === 'INSUFFICIENT_CREDITS') {
-        setExc({ open: true, kind: 'power', title: '算力不足', desc: '启用该能力所需算力不足，可购买算力或改用免费能力。', onPrimary: () => { closeExc(); Taro.navigateTo({ url: '/packages/work/credits/index' }); } });
+        setExc({ open: true, kind: 'power', title: '算力不足', desc: '启用该能力所需算力不足，可购买算力或改用免费能力。', onPrimary: () => { closeExc(); navTo('/packages/work/credits/index'); } });
       } else if (code === 'PLAN_EXPIRED') {
         Taro.showToast({ title: '会员已过期，续费后可继续使用', icon: 'none' });
       } else s.handleApiError(e, { fallbackTitle: '启用失败，请重试' });
@@ -453,6 +457,9 @@ export default function ThinkTank() {
 
         {/* ===================== 案卷资产（V7-06） ===================== */}
         {tab === 'assets' ? (
+          err.assets && !pipe ? (
+            <AsyncState error onRetry={loadPipeline} />
+          ) : (
           <>
             {/* 额度三卡 */}
             <View className="quota-grid">
@@ -662,10 +669,14 @@ export default function ThinkTank() {
               </>
             ) : null}
           </>
+          )
         ) : null}
 
         {/* ===================== 数据源（V7-07） ===================== */}
         {tab === 'data' ? (
+          err.data && !dsView ? (
+            <AsyncState error onRetry={loadData} />
+          ) : (
           <>
             <View className="ds-hero card">
               <Text className="dh-k">经营数据源</Text>
@@ -702,18 +713,22 @@ export default function ThinkTank() {
               </View>
             ))}
           </>
+          )
         ) : null}
 
         {/* ===================== 能力（V7-08） ===================== */}
         {tab === 'modules' ? (
+          err.modules && !modView ? (
+            <AsyncState error onRetry={loadModules} />
+          ) : (
           <>
             <View className="module-hero card">
-              <Text className="mh-k">SKILL CENTER</Text>
+              <Text className="mh-k">能力中心</Text>
               <Text className="mh-t serif">按当前案卷调用能力</Text>
               <Text className="mh-d">免费能力先判断，深度能力做推演，会员模块承接长期执行。</Text>
               <View className="mh-stats">
                 <View className="mh-s"><Text className="mh-sv serif">{modStats.free}</Text><Text className="mh-sl">免费可用</Text></View>
-                <View className="mh-s"><Text className="mh-sv serif">{modStats.deep}</Text><Text className="mh-sl">深度 Skill</Text></View>
+                <View className="mh-s"><Text className="mh-sv serif">{modStats.deep}</Text><Text className="mh-sl">深度能力</Text></View>
                 <View className="mh-s"><Text className="mh-sv serif">{modStats.member}</Text><Text className="mh-sl">会员模块</Text></View>
               </View>
             </View>
@@ -743,10 +758,14 @@ export default function ThinkTank() {
               modListFor(modTab).map(modCard)
             )}
           </>
+          )
         ) : null}
 
         {/* ===================== 报告（V7-09） ===================== */}
         {tab === 'reports' ? (
+          err.reports && !reports.length ? (
+            <AsyncState error onRetry={loadReports} />
+          ) : (
           <>
             <Text className="think-h2">方案与历史版本</Text>
             {reports.length === 0 ? (
@@ -767,7 +786,7 @@ export default function ThinkTank() {
                 </View>
               ))
             )}
-            <View className="report card" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
+            <View className="report card" onClick={() => switchTo('/pages/sessions/index')}>
               <View className="report-ic"><Text className="serif">新</Text></View>
               <View className="report-b">
                 <Text className="report-t serif">从对话生成新方案</Text>
@@ -784,13 +803,16 @@ export default function ThinkTank() {
               <Text className="report-state">查看</Text>
             </View>
           </>
+          )
         ) : null}
 
-        {/* 底部主行动 */}
-        <View className="think-cta" onClick={chooseUpload}>
-          <Icon name="upload" size={16} color="#FBFAF6" />
-          <Text>上传资料，让军师补全判断</Text>
-        </View>
+        {/* 底部主行动（C7：仅「案卷资产」tab 常驻，其它 tab 无「上传资料」语境不出现） */}
+        {tab === 'assets' ? (
+          <View className="think-cta" onClick={chooseUpload}>
+            <Icon name="upload" size={16} color="#FBFAF6" />
+            <Text>上传资料，让军师补全判断</Text>
+          </View>
+        ) : null}
       </View>
 
       {/* 数据源详情屏（授权范围 / 同步频率 / 回写位置 / 隐私控制） */}
@@ -809,6 +831,9 @@ export default function ThinkTank() {
         open={exc.open} kind={exc.kind} title={exc.title} desc={exc.desc}
         onPrimary={exc.onPrimary} onClose={closeExc}
       />
+
+      {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉智库四 tab 数据 */}
+      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadAll(); }} />
     </Screen>
   );
 }

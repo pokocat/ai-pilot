@@ -207,11 +207,14 @@
 .task-t { display: block; margin: 10px 0; font-size: 17px; font-weight: 600; color: var(--ink); line-height: 1.4; }
 .task.done .task-t { color: var(--ink-3); text-decoration: line-through; }
 .task-check {
+  position: relative;
   width: 27px; height: 27px; border-radius: 9px; flex-shrink: 0; margin-top: 2px;
   border: 2px solid var(--ink-3); background: var(--surface);
   display: flex; align-items: center; justify-content: center;
   opacity: .85;
 }
+/* C4：打卡框透明外扩命中区 → ≥44px（视觉 27px 不变；勾选是高频操作，扩大误触友好） */
+.task-check::after { content: ''; position: absolute; top: -9px; bottom: -9px; left: -9px; right: -9px; }
 .task.done .task-check { background: var(--green); border-color: var(--green); opacity: 1; }
 
 /* —— 已完成军令归档（默认收起，展开可取消完成） —— */
@@ -330,7 +333,9 @@
 }
 .biz-fill .bm-val { display: block; margin-top: 4px; font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--ink); }
 .biz-fill .bm-unit { font-size: 11px; font-weight: 600; color: var(--ink-3); margin-left: 3px; font-family: inherit; }
-.biz-fill .bm-edit { font-size: 12px; font-weight: 600; }
+.biz-fill .bm-edit { position: relative; font-size: 12px; font-weight: 600; }
+/* C4：「改」按钮细小，透明外扩命中区 → ≥44px */
+.biz-fill .bm-edit::after { content: ''; position: absolute; top: -14px; bottom: -14px; left: -16px; right: -12px; }
 
 /* —— 复盘视图 —— */
 .review-card { margin-top: 14px; padding: 16px; border-radius: 17px; }
@@ -383,6 +388,11 @@
   box-shadow: 0 12px 24px rgba(30, 90, 67, .2);
 }
 .exec-cta:active { opacity: .85; }
+/* C7：降级为次要样式（描边 · 非填充），把主 CTA 焦点让给 deck「今日主令」卡 */
+.exec-cta.secondary {
+  color: var(--green); background: transparent;
+  border: 1px solid var(--green-soft); box-shadow: none;
+}
 
 /* —— 战报卡分享按钮（M4 PR-15）：主按钮下的次级样式 —— */
 .rc-btn.ghost {
@@ -400,6 +410,7 @@
   width: 100%; max-width: 600px;
   background: var(--bg, #fff); border-radius: 22px 22px 0 0;
   padding: 10px 20px calc(20px + env(safe-area-inset-bottom)) 20px;
+  transition: transform .2s ease; /* C6：键盘弹起时上顶避让的过渡 */
   display: flex; flex-direction: column; align-items: stretch;
   box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
 }
