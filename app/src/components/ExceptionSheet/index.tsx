@@ -1,7 +1,6 @@
-import { useEffect } from 'react';
 import { View, Text } from '@tarojs/components';
+import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
-import { store } from '../../services/store';
 import './index.scss';
 
 export interface ExceptionSheetProps {
@@ -27,37 +26,32 @@ const KIND_META: Record<NonNullable<ExceptionSheetProps['kind']>, KindMeta> = {
 export default function ExceptionSheet({ open, kind = 'upload', title, desc, onPrimary, onClose }: ExceptionSheetProps) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
-
-  useEffect(() => {
-    store.setOverlay(open, 'exceptionsheet');
-    return () => store.setOverlay(false, 'exceptionsheet');
-  }, [open]);
-
-  if (!open) return null;
   const meta = KIND_META[kind] || KIND_META.upload;
 
   return (
-    <View className="exception-mask" onClick={onClose} catchMove>
-      <View className="exception-sheet" onClick={(e) => e.stopPropagation()}>
-        <View className="ex-grip" />
-        <View className="exception-hero">
-          <Text className="ex-kicker">{meta.kicker}</Text>
-          <Text className="ex-title serif">{title || '需要处理一下'}</Text>
-          {!!desc && <Text className="ex-desc">{desc}</Text>}
-        </View>
-
-        <View className="detail-mini-grid">
-          <View className="dm-cell"><Text className="dm-k">下一步</Text><Text className="dm-v">{meta.next}</Text></View>
-          <View className="dm-cell"><Text className="dm-k">保留状态</Text><Text className="dm-v">当前案卷不会丢失</Text></View>
-          <View className="dm-cell"><Text className="dm-k">服务老师</Text><Text className="dm-v">可协助确认</Text></View>
-          <View className="dm-cell"><Text className="dm-k">记录</Text><Text className="dm-v">不会直接扣费</Text></View>
-        </View>
-
+    <Sheet
+      visible={open}
+      onClose={onClose}
+      overlayKey="exceptionsheet"
+      footer={
         <View className="exception-actions">
           <View className="btn btn-ghost ex-secondary" onClick={onClose}><Text>返回</Text></View>
           <View className="btn btn-primary ex-primary" style={{ background: accent }} onClick={() => onPrimary?.()}><Text>{meta.primary}</Text></View>
         </View>
+      }
+    >
+      <View className="exception-hero">
+        <Text className="ex-kicker">{meta.kicker}</Text>
+        <Text className="ex-title serif">{title || '需要处理一下'}</Text>
+        {!!desc && <Text className="ex-desc">{desc}</Text>}
       </View>
-    </View>
+
+      <View className="detail-mini-grid">
+        <View className="dm-cell"><Text className="dm-k">下一步</Text><Text className="dm-v">{meta.next}</Text></View>
+        <View className="dm-cell"><Text className="dm-k">保留状态</Text><Text className="dm-v">当前案卷不会丢失</Text></View>
+        <View className="dm-cell"><Text className="dm-k">服务老师</Text><Text className="dm-v">可协助确认</Text></View>
+        <View className="dm-cell"><Text className="dm-k">记录</Text><Text className="dm-v">不会直接扣费</Text></View>
+      </View>
+    </Sheet>
   );
 }

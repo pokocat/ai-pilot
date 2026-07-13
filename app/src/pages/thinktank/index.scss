@@ -379,20 +379,9 @@
 }
 .think-cta:active { opacity: .85; }
 
-/* ===================== 详情屏（数据源 / 能力，共用 mask+sheet 配方） ===================== */
-.tk-mask {
-  position: fixed; inset: 0; z-index: 900;
-  background: rgba(15, 17, 20, .55);
-  display: flex; align-items: flex-end; justify-content: center;
-}
-.tk-sheet {
-  width: 100%; max-width: 600px; max-height: 84vh;
-  background: var(--bg, #fff); border-radius: 22px 22px 0 0;
-  padding: 10px 22px calc(20px + env(safe-area-inset-bottom)) 22px;
-  display: flex; flex-direction: column; align-items: stretch;
-  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
-}
-.tk-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 auto 16px; }
+/* ===================== 详情屏（数据源 / 能力）=====================
+   遮罩/面板/grip 迁入 Sheet 基座（五要素统一）；此处仅 padding 微调 + 内容。 */
+.sheet-panel.tk-pad { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
 .tk-k { font-size: 11px; font-weight: 900; letter-spacing: .14em; color: var(--green); }
 .tk-head { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .tk-head-ic {

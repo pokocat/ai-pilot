@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { View, Text, Image, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
@@ -7,10 +7,10 @@ import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import Picker from '../../components/Picker';
 import Plans from '../../components/Plans';
+import BaseSheet from '../../components/Sheet';
 import { navTo, switchTo } from '../../services/nav';
 import { REVIEW_TIME } from '../../data/constants';
 import { useStore } from '../../hooks/useStore';
-import { store } from '../../services/store';
 import { api, type ProgressView, type WorkbenchView } from '../../services/api';
 import './index.scss';
 
@@ -358,20 +358,12 @@ export default function Profile() {
   );
 }
 
-// 半屏详情外壳（§3 sheet recipe）：mask(z900) + sheet(圆角上拉) + grip；每屏唯一 overlay key，随开合驱动 tab 栏隐藏。
+// 半屏详情外壳：收敛至 Sheet 基座（五要素 + setOverlay 底栏协调统一）；此处仅保留 profile 专属 padding/grip 间距（pf-pad）。
 function Sheet({ open, onClose, sheetKey, children }: { open: boolean; onClose: () => void; sheetKey: string; children: ReactNode }) {
-  useEffect(() => {
-    store.setOverlay(open, sheetKey);
-    return () => store.setOverlay(false, sheetKey);
-  }, [open]);
-  if (!open) return null;
   return (
-    <View className="pf-mask" onClick={onClose} catchMove>
-      <View className="pf-sheet" onClick={(e) => e.stopPropagation()}>
-        <View className="pf-grip" />
-        {children}
-      </View>
-    </View>
+    <BaseSheet visible={open} onClose={onClose} overlayKey={sheetKey} panelClassName="pf-pad">
+      {children}
+    </BaseSheet>
   );
 }
 

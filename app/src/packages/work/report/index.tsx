@@ -4,6 +4,7 @@ import Taro, { useRouter } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import MarkdownText from '../../../components/MarkdownText';
 import SafeHeader from '../../../components/SafeHeader';
+import Sheet from '../../../components/Sheet';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { acceptDeliverable, refreshDossier, ordersOf, today, type DossierOrder } from '../../../services/dossier';
@@ -89,10 +90,7 @@ export default function Report() {
     }).catch(() => { /* noop */ });
   }, [detail?.id]);
 
-  useEffect(() => {
-    store.setOverlay(syncOpen, 'command-sync');
-    return () => store.setOverlay(false, 'command-sync');
-  }, [syncOpen]);
+  // 军令同步屏底栏协调（setOverlay）已收敛至 Sheet 基座。
 
   const sync = async () => {
     if (syncing) return; // D1：in-flight 防抖，双击不重复记账
@@ -258,36 +256,38 @@ export default function Report() {
       {/* D-3-4 隐藏出图画布（屏外，仅点分享图时绘制导出） */}
       <Canvas type="2d" id="rp-share-canvas" className="rp-share-canvas" style={{ width: '600px', height: '900px' }} />
 
-      {/* 军令同步屏（半屏） */}
-      {syncOpen ? (
-        <View className="cs-mask" onClick={() => setSyncOpen(false)} catchMove>
-          <View className="cs-sheet" onClick={(e) => e.stopPropagation()}>
-            <View className="cs-grip" />
-            <View className="cs-hero">
-              <View className="cs-check" style={{ background: accent }}><Text>✓</Text></View>
-              <Text className="cs-t serif">方案已同步为今日军令</Text>
-              <Text className="cs-d">已把「{detail.title}」里的判断拆成执行动作，并同步到执行页、方案库和今晚 {REVIEW_TIME} 复盘。</Text>
-            </View>
-            <View className="cs-flow">
-              <Text className="cs-flow-i">方案</Text><Text className="cs-arr">→</Text>
-              <Text className="cs-flow-i on">军令</Text><Text className="cs-arr">→</Text>
-              <Text className="cs-flow-i">复盘</Text>
-            </View>
-            <View className="cs-list">
-              {orders.map((o, i) => (
-                <View key={i} className="cs-cmd">
-                  <View className="cs-cmd-b"><Text className="cs-cmd-t">{o.text}</Text></View>
-                  <Text className="cs-cmd-due">{o.tag}</Text>
-                </View>
-              ))}
-            </View>
-            <View className="cs-actions">
-              <View className="cs-secondary" onClick={() => setSyncOpen(false)}><Text>留在这里</Text></View>
-              <View className="cs-primary" style={{ background: accent }} onClick={goStudio}><Text>去执行</Text></View>
-            </View>
+      {/* 军令同步屏（半屏）——迁入 Sheet 基座（五要素统一） */}
+      <Sheet
+        visible={syncOpen && !!detail}
+        onClose={() => setSyncOpen(false)}
+        overlayKey="command-sync"
+        panelClassName="cs-pad"
+        footer={
+          <View className="cs-actions">
+            <View className="cs-secondary" onClick={() => setSyncOpen(false)}><Text>留在这里</Text></View>
+            <View className="cs-primary" style={{ background: accent }} onClick={goStudio}><Text>去执行</Text></View>
           </View>
+        }
+      >
+        <View className="cs-hero">
+          <View className="cs-check" style={{ background: accent }}><Text>✓</Text></View>
+          <Text className="cs-t serif">方案已同步为今日军令</Text>
+          <Text className="cs-d">已把「{detail?.title}」里的判断拆成执行动作，并同步到执行页、方案库和今晚 {REVIEW_TIME} 复盘。</Text>
         </View>
-      ) : null}
+        <View className="cs-flow">
+          <Text className="cs-flow-i">方案</Text><Text className="cs-arr">→</Text>
+          <Text className="cs-flow-i on">军令</Text><Text className="cs-arr">→</Text>
+          <Text className="cs-flow-i">复盘</Text>
+        </View>
+        <View className="cs-list">
+          {orders.map((o, i) => (
+            <View key={i} className="cs-cmd">
+              <View className="cs-cmd-b"><Text className="cs-cmd-t">{o.text}</Text></View>
+              <Text className="cs-cmd-due">{o.tag}</Text>
+            </View>
+          ))}
+        </View>
+      </Sheet>
     </View>
   );
 }

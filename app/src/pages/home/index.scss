@@ -261,20 +261,10 @@
 .kpi-v { display: block; font-size: 20px; font-weight: 600; color: var(--green); }
 .kpi-l { display: block; margin-top: 4px; font-size: 11px; color: var(--ink-3); font-weight: 600; }
 
-/* —— 三势全解 sheet（设计 §4.6 forces）：mask + sheet recipe（z900） —— */
-.fs-mask {
-  position: fixed; inset: 0; z-index: 900;
-  background: rgba(15, 17, 20, .55);
-  display: flex; align-items: flex-end; justify-content: center;
-}
-.fs-sheet {
-  width: 100%; max-width: 600px; max-height: 84vh;
-  background: var(--bg, #fff); border-radius: 22px 22px 0 0;
-  padding: 10px 20px calc(18px + env(safe-area-inset-bottom)) 20px;
-  display: flex; flex-direction: column; align-items: center;
-  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
-}
-.fs-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 0 14px; }
+/* —— 三势全解 sheet（设计 §4.6 forces）——
+   遮罩/面板/grip 迁入 Sheet 基座（五要素统一，align=center 经 prop）；此处仅 padding 与 grip 间距微调。 */
+.sheet-panel.fs-pad { padding: 10px 20px calc(18px + env(safe-area-inset-bottom)) 20px; }
+.fs-pad .sheet-grip { margin-bottom: 14px; }
 .fs-kicker { align-self: flex-start; color: var(--green); font-size: 12px; font-weight: 700; letter-spacing: .16em; }
 .fs-title { align-self: flex-start; margin-top: 8px; font-size: 20px; font-weight: 700; color: var(--ink); line-height: 1.35; }
 .fs-quote {
