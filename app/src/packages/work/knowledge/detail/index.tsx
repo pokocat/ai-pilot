@@ -71,8 +71,8 @@ export default function KnowledgeDetailPage() {
         const code = String((e as { code?: string; data?: { code?: string } })?.code || (e as { data?: { code?: string } })?.data?.code || '');
         // SKU_REQUIRED → 引导开通（对齐现有 SKU 购买动线：PaySheet mode=sku）。
         if (code === 'SKU_REQUIRED') { setPayOpen(true); return; }
-        // 日限 3 次。
-        if (code === 'RATE_LIMITED') { Taro.showToast({ title: '今天的体检次数用完了，明天再来', icon: 'none' }); return; }
+        // 日限 3 次（服务端 knowledge.ts FIN_DAILY_LIMIT=3）。
+        if (code === 'RATE_LIMITED') { Taro.showToast({ title: '今天的体检次数用完了（每日 3 次），明天再来', icon: 'none' }); return; }
         // 非财务/经营表。
         if (code === 'NOT_ANALYZABLE') { Taro.showToast({ title: '这份资料看着不像财务表，换一份试试', icon: 'none' }); return; }
         // 额度/套餐等沿用全局既有处理（过期/额度不足/网络/登录失效）。

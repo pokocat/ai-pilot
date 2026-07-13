@@ -1,13 +1,15 @@
-.ledger-page { min-height: 100vh; }
+/* D3：flex 布局替代 calc(100vh - 魔法数)，头高由 SafeHeader/tabs 自然撑开，不再手扣。 */
+.ledger-page { height: 100vh; display: flex; flex-direction: column; }
 
-.lg-tabs { display: flex; gap: 26px; padding: 6px 20px 0; }
+.lg-tabs { display: flex; gap: 26px; padding: 6px 20px 0; flex-shrink: 0; }
 .lg-tab {
   font-size: 16px; font-weight: 600; color: var(--ink-3);
   padding: 6px 0; border-bottom: 2px solid transparent;
 }
 .lg-tab.on { color: var(--ink); border-bottom-color: var(--accent); }
 
-.lg-scroll { height: calc(100vh - 110px); padding: 0 16px; box-sizing: border-box; }
+.lg-scroll { flex: 1; min-height: 0; padding: 0 16px; box-sizing: border-box; }
+.lg-bottom-spacer { height: calc(40px + env(safe-area-inset-bottom)); }
 
 .lg-stat { margin: 12px 0 14px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
 .lg-stat-x { display: block; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; font-weight: 600; }
@@ -22,15 +24,23 @@
 .lg-text { display: block; font-size: 14px; line-height: 1.55; color: var(--ink); }
 
 .lg-acts { display: flex; gap: 10px; margin-top: 11px; }
+/* D6：验证按钮热区扩到 ≥44px 命中（flex 居中，min-height 撑足）。 */
 .lg-act {
-  flex: 1; text-align: center; font-size: 13px; font-weight: 600;
+  flex: 1; min-height: 44px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600;
   padding: 8px 0; border-radius: 10px; border: 1px solid var(--line); color: var(--ink-2);
 }
 .lg-act:active { opacity: .7; }
 .lg-due { display: block; margin-top: 8px; font-size: 11px; color: var(--ink-3); }
 
 /* —— WO-11 账本异议 —— */
-.lg-dispute-entry { display: inline-block; margin-top: 9px; font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
+/* D6：「有出入？」热区透明外扩到 ≥44px（padding 撑高，负 margin 抵消视觉位移）。 */
+.lg-dispute-entry {
+  display: inline-flex; align-items: center; min-height: 44px;
+  margin: -3px -8px 0; padding: 3px 8px;
+  font-size: 11.5px; font-weight: 600; color: var(--ink-3);
+}
 .lg-dispute-entry:active { opacity: .6; }
 .lg-disputed { display: block; margin-top: 9px; font-size: 11.5px; font-weight: 600; color: var(--gold-deep, var(--accent)); }
 .lg-dispute { margin-top: 10px; }

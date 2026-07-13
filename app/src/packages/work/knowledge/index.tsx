@@ -3,7 +3,9 @@ import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow, useDidHide, usePullDownRefresh } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
+import AsyncState from '../../../components/AsyncState';
 import { useStore } from '../../../hooks/useStore';
+import { navTo } from '../../../services/nav';
 import { api, type KnowledgeDocRow } from '../../../services/api';
 import { checkUpload } from '../../../services/uploadGuard';
 import './index.scss';
@@ -33,6 +35,7 @@ export default function Knowledge() {
   const accent = s.color().vars['--accent'];
   const [items, setItems] = useState<KnowledgeDocRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false); // D2：首屏加载与空态区分，避免拉取期间闪空态
   const [pollHint, setPollHint] = useState(false); // 轮询到上限仍有未就绪项 → 提示下拉刷新
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollAttempt = useRef(0);
@@ -43,6 +46,7 @@ export default function Knowledge() {
   const load = useCallback((poll = false) => {
     api.knowledgeDocs().then((rows) => {
       setItems(rows);
+      setLoaded(true);
       if (!poll) return;
       clearPoll();
       const pending = rows.some((r) => !isSettled(r.status));
@@ -51,7 +55,7 @@ export default function Knowledge() {
       const d = POLL_DELAYS[pollAttempt.current];
       pollAttempt.current += 1;
       pollTimer.current = setTimeout(() => { load(true); }, d);
-    }).catch((e) => { s.handleApiError(e); setItems([]); });
+    }).catch((e) => { s.handleApiError(e); setItems([]); setLoaded(true); });
   }, [s, clearPoll]);
 
   useDidShow(() => { pollAttempt.current = 0; setPollHint(false); load(true); });
@@ -116,7 +120,7 @@ export default function Knowledge() {
   };
 
   const openDetail = (it: KnowledgeDocRow) => {
-    Taro.navigateTo({ url: `/packages/work/knowledge/detail/index?id=${it.id}` });
+    navTo(`/packages/work/knowledge/detail/index?id=${it.id}`);
   };
 
   const remove = (it: KnowledgeDocRow) => {
@@ -142,7 +146,9 @@ export default function Knowledge() {
           </View>
         </View>
 
-        {items.length === 0 ? (
+        {!loaded && items.length === 0 ? (
+          <AsyncState loading skeletonRows={3} />
+        ) : items.length === 0 ? (
           <View className="kb-empty">
             <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={22} color={accent} /></View>
             <Text className="et">资料库还是空的</Text>

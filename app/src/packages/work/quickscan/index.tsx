@@ -2,10 +2,11 @@
 // 选项复用 /survey（industry + stage）；提交走 api.quickScan（服务端 structured()，mock 有确定性模板）。
 // 结果卡可 useShareAppMessage 分享；CTA 进参谋室走完整六轮诊断。替代「送你一卦」承担获客。
 import { useEffect, useState } from 'react';
-import { View, Text, Textarea, ScrollView } from '@tarojs/components';
+import { View, Text, Textarea, ScrollView, Button } from '@tarojs/components';
 import Taro, { useShareAppMessage } from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
+import { navTo } from '../../../services/nav';
 import { api, type SurveyQ, type QuickScanResult } from '../../../services/api';
 import './index.scss';
 
@@ -35,16 +36,21 @@ export default function QuickScanPage() {
   const bandOpts = opt('stage');
   const canSubmit = !!industry && !!revenueBand && pain.trim().length > 0 && !busy;
 
+  const errCode = (e: unknown) => String((e as { code?: string; data?: { code?: string } })?.code || (e as { data?: { code?: string } })?.data?.code || '');
   const submit = async () => {
     if (!canSubmit) return;
     setBusy(true);
     try { setResult(await api.quickScan({ industry, revenueBand, pain: pain.trim() })); }
-    catch (e) { s.handleApiError(e); }
+    catch (e) {
+      // D6：每日 3 次限流（服务端 quickscan.ts DAILY_LIMIT=3）→ 专属文案，不走通用报错。
+      if (errCode(e) === 'RATE_LIMITED') Taro.showToast({ title: '今天的速诊次数用完了（每日 3 次），明天再来', icon: 'none' });
+      else s.handleApiError(e);
+    }
     finally { setBusy(false); }
   };
 
   const enterWarRoom = () =>
-    Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=general&fresh=1&send=${encodeURIComponent('我做完速诊了，帮我把主要矛盾展开，进入完整诊断。')}` });
+    navTo(`/packages/main/chat/index?agentKey=general&fresh=1&send=${encodeURIComponent('我做完速诊了，帮我把主要矛盾展开，进入完整诊断。')}`);
 
   useShareAppMessage(() => ({
     title: result ? `军师速诊：${result.contradiction}` : '3 个问题，10 分钟拿到你的初诊 · 军师参谋部',
@@ -52,7 +58,7 @@ export default function QuickScanPage() {
   }));
 
   return (
-    <View className="qs-page">
+    <View className={`qs-page ${s.themeClass()}`}>
       <SafeHeader title="速诊" onBack={() => Taro.navigateBack()} />
       <ScrollView scrollY className="qs-scroll">
         {!result ? (
@@ -126,6 +132,8 @@ export default function QuickScanPage() {
               <View className="qs-brand"><Text>军师参谋部 · 初诊</Text></View>
             </View>
             <View className="qs-cta" onClick={enterWarRoom}><Text>想要完整作战方案？进参谋室聊 6 轮 →</Text></View>
+            {/* D6：显式「分享给同行」按钮（open-type=share 触发 useShareAppMessage） */}
+            <Button className="qs-share" openType="share" hoverClass="none"><Text>分享给同行</Text></Button>
             <View className="qs-again" onClick={() => setResult(null)}><Text>换个问题再诊一次</Text></View>
           </View>
         )}

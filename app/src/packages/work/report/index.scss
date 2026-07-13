@@ -3,6 +3,12 @@
 // D-3-4：出图画布屏外承载（不占版面）。
 .rp-share-canvas { position: fixed; left: -9999px; top: 0; }
 .rp-loading { text-align: center; color: var(--ink-3); padding: 50px 0; font-size: 13px; }
+.rp-retry {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin: 14px auto 0; height: 38px; padding: 0 22px; border-radius: var(--r-sm, 10px);
+  border: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink);
+}
+.rp-retry:active { opacity: .7; }
 
 .report-page .pad { padding: 16px 16px 0; }
 
@@ -47,7 +53,7 @@
 .rp-dh-t { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .rp-badge { font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 6px; }
 .rp-badge.added { background: rgba(34,160,90,.12); color: #1f9a55; }
-.rp-badge.removed { background: rgba(214,69,69,.12); color: #cc4a4a; }
+.rp-badge.removed { background: rgba(214,69,69,.12); color: var(--danger); }
 .rp-badge.changed { background: rgba(214,154,40,.14); color: #c08a1e; }
 .rp-badge.unchanged { background: var(--surface-2); color: var(--ink-3); }
 .rp-dtext { font-size: 12.5px; line-height: 1.65; color: var(--ink-2); }
@@ -60,7 +66,7 @@
 .rp-words { font-size: 12.5px; line-height: 1.7; }
 .rp-w.eq { color: var(--ink-2); }
 .rp-w.add { border-radius: 4px; padding: 0 2px; font-weight: 600; }
-.rp-w.del { color: #cc4a4a; text-decoration: line-through; opacity: .7; }
+.rp-w.del { color: var(--danger); text-decoration: line-through; opacity: .7; }
 
 /* ===================== V7-09：深绿封面 + 编号章节阅读器 ===================== */
 .report-cover {
@@ -90,6 +96,7 @@
 /* —— 底部：同步为军令 —— */
 .rp-syncbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  padding: 10px 16px calc(12px + constant(safe-area-inset-bottom));
   padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
   background: linear-gradient(180deg, rgba(244, 242, 236, 0), var(--bg) 34%);
 }
@@ -100,6 +107,7 @@
   box-shadow: 0 12px 26px rgba(30, 90, 67, .24);
 }
 .rp-sync-btn.done { color: var(--green); background: var(--green-soft); box-shadow: none; border: 1px solid rgba(31, 104, 77, .2); }
+.rp-sync-btn.busy { opacity: .6; pointer-events: none; }
 .rp-sync-btn:active { opacity: .9; }
 
 /* —— 军令同步屏 —— */

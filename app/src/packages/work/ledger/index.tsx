@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, ScrollView, Input } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
+import AsyncState from '../../../components/AsyncState';
 import { useStore } from '../../../hooks/useStore';
 import { api, type DecisionLedger, type ProphecyLedger, type DecisionView, type ProphecyView } from '../../../services/api';
 import './index.scss';
@@ -28,11 +29,18 @@ export default function LedgerPage() {
   // 已提交异议（含服务端 disputeNote 回填 + 本次提交），条目显示「已反馈」标记。
   const [disputed, setDisputed] = useState<Set<string>>(new Set());
   const markDisputed = (id: string) => setDisputed((cur) => new Set(cur).add(id));
+  // 首屏三态：吞错会永久停在「加载中…」，改为可重试错误态（D2）。
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(false);
 
-  useEffect(() => {
-    api.decisions().then((r) => { setDec(r); setDisputed((cur) => seedDisputed(cur, r.items)); }).catch(() => {});
-    api.prophecies().then((r) => { setPro(r); setDisputed((cur) => seedDisputed(cur, r.items)); }).catch(() => {});
-  }, []);
+  const load = () => {
+    setLoading(true); setErr(false);
+    Promise.all([
+      api.decisions().then((r) => { setDec(r); setDisputed((cur) => seedDisputed(cur, r.items)); }),
+      api.prophecies().then((r) => { setPro(r); setDisputed((cur) => seedDisputed(cur, r.items)); }),
+    ]).catch((e) => { s.handleApiError(e, { silent: true }); setErr(true); }).finally(() => setLoading(false));
+  };
+  useEffect(load, []);
 
   const verifyDec = async (id: string, outcome: 'correct' | 'revise') => {
     if (busy) return; setBusy(id);
@@ -68,6 +76,7 @@ export default function LedgerPage() {
         <Text className={`lg-tab ${tab === 'prophecy' ? 'on' : ''}`} onClick={() => setTab('prophecy')}>天机账本</Text>
       </View>
       <ScrollView scrollY className="lg-scroll">
+        <AsyncState loading={loading && !dec && !pro} error={err && !dec && !pro} onRetry={load} skeletonRows={3}>
         {tab === 'decision' ? (
           <>
             <View className="lg-stat card"><Text className="lg-stat-x">{decStatLine()}</Text></View>
@@ -88,7 +97,8 @@ export default function LedgerPage() {
         <View className="lg-note">
           <Text>验证是给自己算账：兑现了点「应验/正确」，没兑现点「没应验/需修正」。攒够 5 条，命中率和段位才开始算——不靠一两条撑门面。</Text>
         </View>
-        <View style={{ height: '40px' }} />
+        <View className="lg-bottom-spacer" />
+        </AsyncState>
       </ScrollView>
     </View>
   );

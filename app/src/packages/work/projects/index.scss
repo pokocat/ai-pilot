@@ -4,6 +4,7 @@
 .pj-new { display: flex; gap: 8px; padding: 12px 16px 0; }
 .pj-new-input { flex: 1; height: 40px; padding: 0 14px; border-radius: 12px; background: var(--surface-2); font-size: 13.5px; color: var(--ink); }
 .pj-new-btn { display: flex; align-items: center; padding: 0 18px; border-radius: 12px; color: #fff; font-size: 13px; font-weight: 600; }
+.pj-new-btn.busy { opacity: .55; pointer-events: none; }
 
 .pad { padding-left: 16px; padding-right: 16px; }
 

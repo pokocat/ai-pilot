@@ -1,12 +1,14 @@
+/* D4：套 themeClass 走 token，消灭硬编码 #f4f2ec/#16321f 等，随本命色一致。 */
 .qs-page {
   min-height: 100vh;
-  background: #f4f2ec;
+  background: var(--bg);
   display: flex;
   flex-direction: column;
 }
 .qs-scroll {
   flex: 1;
-  padding: 0 32rpx 60rpx;
+  /* D3：底部补安全区，避免末行贴到 home indicator。 */
+  padding: 0 32rpx calc(60rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
 }
 
@@ -17,13 +19,13 @@
   display: block;
   font-size: 40rpx;
   font-weight: 600;
-  color: #16321f;
+  color: var(--ink);
 }
 .qs-hero-d {
   display: block;
   margin-top: 10rpx;
   font-size: 26rpx;
-  color: #8a8f86;
+  color: var(--ink-3);
 }
 
 .qs-q {
@@ -33,7 +35,7 @@
   display: block;
   font-size: 30rpx;
   font-weight: 600;
-  color: #1c2b22;
+  color: var(--ink);
   margin-bottom: 20rpx;
 }
 .qs-chips {
@@ -44,15 +46,15 @@
 .qs-chip {
   padding: 14rpx 26rpx;
   border-radius: 999rpx;
-  background: #fff;
-  border: 1rpx solid #e3e0d6;
+  background: var(--surface);
+  border: 1rpx solid var(--line);
   font-size: 26rpx;
-  color: #4a4f48;
+  color: var(--ink-2);
 }
 .qs-chip.on {
-  background: #16321f;
-  border-color: #16321f;
-  color: #f3e9c8;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 .qs-basics {
@@ -61,26 +63,26 @@
   justify-content: space-between;
   gap: 16rpx;
   padding: 22rpx 26rpx;
-  background: #fff;
-  border: 1rpx solid #e3e0d6;
+  background: var(--surface);
+  border: 1rpx solid var(--line);
   border-radius: 16rpx;
 }
 .qs-basics-t {
   display: block;
   font-size: 28rpx;
   font-weight: 600;
-  color: #1c2b22;
+  color: var(--ink);
 }
 .qs-basics-note {
   display: block;
   margin-top: 6rpx;
   font-size: 22rpx;
-  color: #9a8f7a;
+  color: var(--ink-3);
 }
 .qs-basics-edit {
   flex-shrink: 0;
   font-size: 25rpx;
-  color: #16321f;
+  color: var(--accent);
 }
 
 .qs-pain {
@@ -89,19 +91,19 @@
   min-height: 160rpx;
   margin-top: 4rpx;
   padding: 20rpx 24rpx;
-  background: #fff;
-  border: 1rpx solid #e3e0d6;
+  background: var(--surface);
+  border: 1rpx solid var(--line);
   border-radius: 16rpx;
   font-size: 28rpx;
-  color: #1c2b22;
+  color: var(--ink);
 }
 
 .qs-submit {
   margin-top: 56rpx;
   height: 92rpx;
   border-radius: 16rpx;
-  background: #16321f;
-  color: #f3e9c8;
+  background: var(--accent);
+  color: #fff;
   font-size: 30rpx;
   font-weight: 600;
   display: flex;
@@ -109,18 +111,19 @@
   justify-content: center;
 }
 .qs-submit.off {
-  background: #c8ccc3;
-  color: #fff;
+  background: var(--surface-2);
+  color: var(--ink-3);
 }
 
 .qs-result {
   padding-top: 24rpx;
 }
+/* 初诊卡：深色本命色底 + 浅色正文（跨主题均为「深底浅字」，对比稳定）。 */
 .qs-card {
-  background: #16321f;
+  background: var(--accent);
   border-radius: 24rpx;
   padding: 36rpx 32rpx 28rpx;
-  color: #f3ecd6;
+  color: #fff;
 }
 .qs-block {
   margin-bottom: 30rpx;
@@ -128,7 +131,7 @@
 .qs-label {
   display: block;
   font-size: 24rpx;
-  color: #c8b98a;
+  color: rgba(255, 255, 255, .68);
   letter-spacing: 2rpx;
   margin-bottom: 10rpx;
 }
@@ -137,35 +140,49 @@
   font-size: 36rpx;
   font-weight: 600;
   line-height: 1.45;
-  color: #f7efd6;
+  color: #fff;
 }
 .qs-body {
   display: block;
   font-size: 28rpx;
   line-height: 1.6;
-  color: #e6e2d2;
+  color: rgba(255, 255, 255, .88);
 }
 .qs-brand {
   margin-top: 8rpx;
   text-align: right;
   font-size: 22rpx;
-  color: #a99f7e;
+  color: rgba(255, 255, 255, .55);
 }
 
 .qs-cta {
   margin-top: 32rpx;
   height: 88rpx;
   border-radius: 16rpx;
-  border: 1rpx solid #16321f;
-  color: #16321f;
+  border: 1rpx solid var(--accent);
+  color: var(--accent);
   font-size: 28rpx;
   display: flex;
   align-items: center;
   justify-content: center;
 }
+/* D6：分享给同行（open-type=share 的原生 Button，去掉默认边框/背景，与页面一致） */
+.qs-share {
+  margin-top: 20rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  border-radius: 16rpx;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: 28rpx;
+  font-weight: 600;
+  padding: 0;
+  border: none;
+}
+.qs-share::after { border: none; }
 .qs-again {
   margin-top: 20rpx;
   text-align: center;
   font-size: 26rpx;
-  color: #8a8f86;
+  color: var(--ink-3);
 }

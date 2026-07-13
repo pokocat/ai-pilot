@@ -1,9 +1,11 @@
+/* D3：flex 布局替代 calc(100vh - 88px) 魔法数扣头高。 */
 .dossier-page {
-  min-height: 100vh;
+  height: 100vh;
+  display: flex; flex-direction: column;
   background: #f4f1ea;
 }
 .ds-navtitle { color: #1a1a1a; }
-.ds-scroll { height: calc(100vh - 88px); }
+.ds-scroll { flex: 1; min-height: 0; }
 
 /* 空态 / 生成 */
 .ds-empty {
@@ -26,13 +28,13 @@
   display: flex; flex-direction: column; align-items: center; text-align: center;
 }
 .ds-cover-badge {
-  font-size: 10px; letter-spacing: 4px; color: #c5a55a;
+  font-size: 10px; letter-spacing: 4px; color: var(--accent-bright);
   border: 1px solid rgba(197,165,90,.35); padding: 5px 16px; margin-bottom: 22px;
 }
 .ds-cover-name { font-size: 30px; color: #fff; font-weight: 900; margin-bottom: 10px; }
 .ds-cover-head { font-size: 13px; color: rgba(232,213,160,.9); line-height: 1.8; max-width: 280px; }
 .ds-cover-verse {
-  font-size: 16px; color: #c5a55a; margin-top: 22px; padding: 12px 0;
+  font-size: 16px; color: var(--accent-bright); margin-top: 22px; padding: 12px 0;
   border-top: 1px solid rgba(197,165,90,.3); border-bottom: 1px solid rgba(197,165,90,.3);
   letter-spacing: 1px;
 }
@@ -53,11 +55,11 @@
 }
 
 /* 重点框 */
-.ds-hl { padding: 14px 16px; border-radius: 0 8px 8px 0; margin-bottom: 14px; border-left: 3px solid #c5a55a; background: rgba(197,165,90,.06); }
+.ds-hl { padding: 14px 16px; border-radius: 0 8px 8px 0; margin-bottom: 14px; border-left: 3px solid var(--gold); background: rgba(197,165,90,.06); }
 .ds-hl-t { display: block; font-size: 12px; font-weight: 700; color: #a08940; margin-bottom: 5px; }
 .ds-hl-x { display: block; font-size: 13.5px; color: #2a2a2a; line-height: 1.85; }
-.ds-hl-red { border-left-color: #c41e3a; background: rgba(196,30,58,.05); }
-.ds-hl-red .ds-hl-t { color: #c41e3a; }
+.ds-hl-red { border-left-color: var(--danger); background: rgba(196,30,58,.05); }
+.ds-hl-red .ds-hl-t { color: var(--danger); }
 .ds-hl-purple { border-left-color: #5b2c6f; background: rgba(91,44,111,.05); }
 .ds-hl-purple .ds-hl-t { color: #5b2c6f; }
 .ds-hl-blue { border-left-color: #1a5276; background: rgba(26,82,118,.05); }
@@ -75,12 +77,12 @@
 .ds-tl { position: relative; padding-left: 22px; margin: 4px 0 14px; }
 .ds-tl::before { content: ''; position: absolute; left: 5px; top: 4px; bottom: 4px; width: 2px; background: rgba(197,165,90,.4); }
 .ds-ti { position: relative; margin-bottom: 14px; }
-.ds-ti::before { content: ''; position: absolute; left: -20px; top: 4px; width: 9px; height: 9px; border-radius: 50%; background: #c5a55a; }
+.ds-ti::before { content: ''; position: absolute; left: -20px; top: 4px; width: 9px; height: 9px; border-radius: 50%; background: var(--gold); }
 .ds-ti-time { display: block; font-size: 11px; font-weight: 700; color: #a08940; }
 .ds-ti-title { display: block; font-size: 14px; font-weight: 700; color: #0a0a0a; margin: 1px 0 2px; }
 .ds-ti-desc { display: block; font-size: 12px; color: #6a6459; line-height: 1.7; }
 
 /* 页脚 */
-.ds-foot { text-align: center; padding: 36px 20px 60px; border-top: 1px solid rgba(197,165,90,.35); margin: 24px 24px 0; }
+.ds-foot { text-align: center; padding: 36px 20px calc(60px + env(safe-area-inset-bottom)); border-top: 1px solid rgba(197,165,90,.35); margin: 24px 24px 0; }
 .ds-foot-brand { display: block; font-size: 13px; color: #a08940; letter-spacing: 3px; font-weight: 700; margin-bottom: 16px; }
 .ds-regen { display: inline-block; font-size: 13px; color: #5b2c6f; padding: 8px 22px; border: 1px solid rgba(91,44,111,.3); border-radius: 20px; }

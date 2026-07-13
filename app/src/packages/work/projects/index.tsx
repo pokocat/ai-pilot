@@ -3,7 +3,9 @@ import { View, Text, Input } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
+import AsyncState from '../../../components/AsyncState';
 import { useStore } from '../../../hooks/useStore';
+import { navTo } from '../../../services/nav';
 import { api, type ProjectItem } from '../../../services/api';
 import './index.scss';
 
@@ -15,21 +17,26 @@ export default function Projects() {
   const [items, setItems] = useState<ProjectItem[]>([]);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false); // D5：创建 in-flight 防重
+  const [loading, setLoading] = useState(true); // D2：首屏加载与空态区分
 
-  const load = () => api.projects().then(setItems).catch((e) => { s.handleApiError(e); setItems([]); });
+  const load = () => api.projects().then(setItems).catch((e) => { s.handleApiError(e); setItems([]); }).finally(() => setLoading(false));
   useDidShow(load);
 
   const create = async () => {
     const v = name.trim();
-    if (!v) return;
-    setName('');
-    setCreating(false);
+    if (!v || busy) return;
+    setBusy(true);
     const r = await api.createProject({ name: v }).catch((e) => {
       s.handleApiError(e, { fallbackTitle: '创建案卷失败' });
       return null;
     });
+    setBusy(false);
+    if (!r) return; // D5：失败保留输入，不丢用户已敲的案卷名
+    setName('');
+    setCreating(false);
     await load();
-    if (r) Taro.navigateTo({ url: `/packages/work/project/index?id=${r.id}` });
+    navTo(`/packages/work/project/index?id=${r.id}`);
   };
 
   return (
@@ -44,12 +51,14 @@ export default function Projects() {
       {creating && (
         <View className="pj-new">
           <Input className="pj-new-input" value={name} placeholder="新建案卷名，如「2026 融资冲刺」" confirmType="done" onInput={(e) => setName(e.detail.value)} onConfirm={create} focus />
-          <View className="pj-new-btn" style={{ background: accent }} onClick={create}><Text>创建</Text></View>
+          <View className={`pj-new-btn ${busy ? 'busy' : ''}`} style={{ background: accent }} onClick={create}><Text>{busy ? '创建中…' : '创建'}</Text></View>
         </View>
       )}
 
       <View className="pad" style={{ paddingTop: '12px' }}>
-        {items.length === 0 ? (
+        {loading && items.length === 0 ? (
+          <AsyncState loading skeletonRows={3} />
+        ) : items.length === 0 ? (
           <View className="pj-empty">
             <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="layers" size={22} color={accent} /></View>
             <Text className="et">还没有案卷</Text>
@@ -59,7 +68,7 @@ export default function Projects() {
         ) : (
           <View className="pj-list">
             {items.map((p) => (
-              <View key={p.id} className="pj-item card" onClick={() => Taro.navigateTo({ url: `/packages/work/project/index?id=${p.id}` })}>
+              <View key={p.id} className="pj-item card" onClick={() => navTo(`/packages/work/project/index?id=${p.id}`)}>
                 <View className="pj-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={p.icon || 'layers'} size={20} color={accent} /></View>
                 <View className="pj-b">
                   <Text className="pj-n">{p.name}</Text>
