@@ -8,6 +8,11 @@ import { setFeatureFlag } from '../src/services/featureFlag.ts';
 import { buildGenContext } from '../src/services/context.ts';
 import { TIANSHI_OPTOUT_LINE } from '../src/services/paipan.ts';
 
+// admin 路由鉴权：设置共享 ADMIN_TOKEN（与 helpers.api 的 x-admin-token 自动附带一致）。
+// 缺这行时，node --test 的每文件独立子进程下 process.env.ADMIN_TOKEN 未定义，
+// 下面「admin PATCH /admin/flags/:id」用例会直接 401，测试恒定失败。
+process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
+
 // 一个合法排盘入参（阳历，含时辰）。
 const BAZI = { calendar: 'solar', year: 1990, month: 6, day: 15, hour: 12, gender: 'male' };
 

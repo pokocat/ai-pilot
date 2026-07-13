@@ -5,6 +5,11 @@ import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.ts';
 import { toolWhitelist } from '../src/services/prescription.ts';
 
+// admin 路由鉴权：设置共享 ADMIN_TOKEN（与 helpers.api 的 x-admin-token 自动附带一致）。
+// 缺这行时，node --test 的每文件独立子进程下 process.env.ADMIN_TOKEN 未定义，
+// 下面「已购下架 agent」用例里的 POST /api/admin/users/:id/agents 会直接 401，测试恒定失败。
+process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
+
 const KEEP_ADVISORY = ['general', 'strat', 'growth', 'ops', 'brand'];
 const RETIRED_ADVISORY = ['intel', 'fund', 'model', 'org'];
 
