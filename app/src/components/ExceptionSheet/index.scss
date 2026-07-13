@@ -1,5 +1,5 @@
 .exception-mask {
-  position: fixed; inset: 0; z-index: var(--z-sheet);
+  position: fixed; inset: 0; z-index: 900; /* = --z-sheet，weapp 真机 page 级 var 用于 z-index 不稳定，见 app.scss token 说明 */
   background: rgba(22, 25, 29, .55);
   display: flex; align-items: flex-end; justify-content: center;
 }
