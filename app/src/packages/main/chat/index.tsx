@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
-import { View, Text, Textarea, ScrollView } from '@tarojs/components';
+import { View, Text, Textarea, Input, ScrollView } from '@tarojs/components';
 import Taro, { useRouter, useDidHide } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import Login from '../../../components/Login';
@@ -64,6 +64,17 @@ function copyText(text: string, title = '已复制') {
 function replyToText(reply: ChatReplyT): string {
   return [reply.text, ...(reply.points ?? [])].filter(Boolean).join('\n\n');
 }
+
+// 军师反问选项：流式期间隐藏正文尾部的 ```ask 结构块（含尚未流完的半截围栏），
+// 完整回复（onChat）到达后由服务端剥离过的正文 + 结构化 asks 权威替换。
+function visibleStreamText(text: string): string {
+  const cut = text.indexOf('```ask');
+  const t = cut >= 0 ? text.slice(0, cut) : text;
+  return t.replace(/`{1,3}(?:a(?:s(?:k)?)?)?$/, '');
+}
+
+// 「其他」选项哨兵值（非用户可见文案，避免与真实选项撞车）。
+const ASK_OTHER = '__ask_other__';
 
 function reportDraft(agent?: Agent | null, partial: Partial<Deliverable> = {}): Deliverable {
   return {
@@ -700,6 +711,52 @@ export default function Chat() {
     controlRef.current?.abort();
   };
 
+  // —— 军师反问选项（ChatReply.asks）——
+  // 只在「最后一条实质消息」是带 asks 的军师回复时激活（其后一旦出现用户消息/报告即自然失效，无需记答题状态）。
+  let activeAskIdx = -1;
+  if (!busy) {
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const mm = msgs[i];
+      if (mm.role === 'memory' || mm.role === 'greet') continue;
+      if (mm.role === 'assistant' && !mm.streaming && mm.reply.asks?.length) activeAskIdx = i;
+      break;
+    }
+  }
+  const activeAsks = activeAskIdx >= 0 ? (msgs[activeAskIdx] as Extract<Msg, { role: 'assistant' }>).reply.asks! : [];
+  // 选择草稿按消息索引挂靠：换了一条新的提问消息即自动作废旧草稿。
+  const [askDraft, setAskDraft] = useState<{ idx: number; sel: Record<number, string>; other: Record<number, string> }>({ idx: -1, sel: {}, other: {} });
+  const askSel = askDraft.idx === activeAskIdx ? askDraft.sel : {};
+  const askOther = askDraft.idx === activeAskIdx ? askDraft.other : {};
+  const pickAskOption = (qi: number, val: string) => {
+    if (busy) return;
+    // 单问题：点选项即发送（对齐开场白 chips 的直觉）；点「其他」聚焦输入框自己打。
+    if (activeAsks.length === 1) {
+      if (val === ASK_OTHER) { setInputFocus(true); return; }
+      doSend(val, sessionId, agent?.key ?? '');
+      return;
+    }
+    // 函数式更新：快速连点多题时避免闭包旧值互相覆盖。
+    setAskDraft((d) => {
+      const sel = d.idx === activeAskIdx ? d.sel : {};
+      const other = d.idx === activeAskIdx ? d.other : {};
+      return { idx: activeAskIdx, sel: { ...sel, [qi]: sel[qi] === val ? '' : val }, other };
+    });
+  };
+  const setAskOtherText = (qi: number, text: string) =>
+    setAskDraft((d) => {
+      const sel = d.idx === activeAskIdx ? d.sel : {};
+      const other = d.idx === activeAskIdx ? d.other : {};
+      return { idx: activeAskIdx, sel, other: { ...other, [qi]: text } };
+    });
+  const askAnswerOf = (qi: number): string =>
+    askSel[qi] === ASK_OTHER ? (askOther[qi] ?? '').trim() : (askSel[qi] ?? '');
+  const askReady = activeAsks.length > 1 && activeAsks.every((_, qi) => !!askAnswerOf(qi));
+  const sendAskAnswers = () => {
+    if (!askReady || busy) return;
+    const lines = activeAsks.map((a, qi) => `${a.q} ${askAnswerOf(qi)}`);
+    doSend(lines.join('\n'), sessionId, agent?.key ?? '');
+  };
+
   const handleInput = (e: { detail: { value: string } }) => {
     if (busy) return input;
     const v = e.detail.value;
@@ -1067,7 +1124,7 @@ export default function Chat() {
                       <View className="think-dot d3" style={{ background: accent }} />
                     </View>
                   ) : (
-                    <MarkdownText text={m.reply.text} selectable />
+                    <MarkdownText text={m.streaming ? visibleStreamText(m.reply.text) : m.reply.text} selectable />
                   )}
                   {m.reply.points && (
                     <View className="points">
@@ -1075,6 +1132,52 @@ export default function Chat() {
                     </View>
                   )}
                 </View>
+                {/* 军师反问选项卡：每个问题一组推荐答案 + 「其他」自填；单问题点选即发送，多问题答完一起发送。 */}
+                {i === activeAskIdx && activeAsks.length ? (
+                  <View className="ask-block">
+                    {activeAsks.map((a, qi) => (
+                      <View key={qi} className="ask-item">
+                        {activeAsks.length > 1 ? <Text className="ask-q">{a.q}</Text> : null}
+                        <View className="ask-opts">
+                          {a.options.map((op) => (
+                            <View
+                              key={op}
+                              className={`ask-chip ${askSel[qi] === op ? 'on' : ''}`}
+                              style={askSel[qi] === op ? { background: accent } : {}}
+                              onClick={() => pickAskOption(qi, op)}
+                            >
+                              <Text>{op}</Text>
+                            </View>
+                          ))}
+                          <View
+                            className={`ask-chip other ${askSel[qi] === ASK_OTHER ? 'on' : ''}`}
+                            style={askSel[qi] === ASK_OTHER ? { background: accent } : {}}
+                            onClick={() => pickAskOption(qi, ASK_OTHER)}
+                          >
+                            <Text>其他…</Text>
+                          </View>
+                        </View>
+                        {activeAsks.length > 1 && askSel[qi] === ASK_OTHER ? (
+                          <Input
+                            className="ask-other-input"
+                            value={askOther[qi] ?? ''}
+                            placeholder="自己填一句…"
+                            onInput={(e) => setAskOtherText(qi, e.detail.value)}
+                          />
+                        ) : null}
+                      </View>
+                    ))}
+                    {activeAsks.length > 1 ? (
+                      <View
+                        className={`ask-send ${askReady ? '' : 'off'}`}
+                        style={askReady ? { background: accent } : {}}
+                        onClick={sendAskAnswers}
+                      >
+                        <Text>发送回答</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
                 {m.retryText ? (
                   <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => doSend(m.retryText!, sessionId, agent?.key ?? '', [], false)}>↻ 重试</Text>
                 ) : null}

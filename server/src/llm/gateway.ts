@@ -10,7 +10,7 @@ import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../services/aiConfig.js';
 import { mockChat, mockDeliverable, mockAdaptive } from './providers/mock.js';
-import { ZERO_USAGE, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
+import { ZERO_USAGE, extractAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
 import { recordTokenUsage, type UsageMeta } from '../services/usage.js';
 import { recordTrace } from '../services/trace.js';
 import { moderate } from '../services/moderation.js';
@@ -49,6 +49,13 @@ type Sourced<T> = { result: T; usage: Usage; provider: string; model: string; to
 
 function deliverableText(d: Deliverable): string {
   return d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
+}
+
+// 军师反问选项：把模型回复尾部的 ```ask 块解析成结构化 asks 并从正文剥离。
+// 未命中原样透传；mock 等已直接带 asks 的结果不受影响。所有 ChatReply 出口统一过这一层。
+function withAsks(reply: ChatReply): ChatReply {
+  const { text, asks } = extractAsks(reply.text);
+  return asks ? { ...reply, text, asks } : { ...reply, text };
 }
 
 const ENGINEERING_CONTEXT_LEAK =
@@ -297,9 +304,9 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
     } catch (err) {
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
-      return { result: mockChat(ctx), usage: ZERO_USAGE };
+      return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
-    return { result: s.result, usage: s.usage };
+    return { result: withAsks(s.result), usage: s.usage };
   }
 
   const cfg = await getAiConfig();
@@ -328,9 +335,9 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
     if (!env.aiFallbackMock) throw aiUnavailable(err);
   }
   if (chatResult) {
-    return { result: chatResult.result, usage: chatResult.usage };
+    return { result: withAsks(chatResult.result), usage: chatResult.usage };
   }
-  return { result: mockChat(ctx), usage: ZERO_USAGE };
+  return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
 }
 
 export type ChatStreamEvent =
@@ -387,7 +394,8 @@ async function* tracedChatProviderStream(
       text: done.result.text,
     });
     await maybeRecord({ result: done.result, usage: done.usage, provider, model }, 'chat', ctx, meta);
-    yield { type: 'done', result: done.result, usage: done.usage };
+    // 尾部 ```ask 块在完整结果处剥离并结构化（token 流里已原样流出，前端流式期间负责隐藏）。
+    yield { type: 'done', result: withAsks(done.result), usage: done.usage };
   } catch (err) {
     await recordTrace({
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
@@ -476,9 +484,9 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     } catch (err) {
       console.error('[gateway] runtime adaptive fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
-      return { kind: 'chat', reply: mockChat(ctx), usage: ZERO_USAGE };
+      return { kind: 'chat', reply: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
-    return { kind: 'chat', reply: s.result, usage: s.usage };
+    return { kind: 'chat', reply: withAsks(s.result), usage: s.usage };
   }
 
   const cfg = await getAiConfig();
@@ -532,7 +540,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
 
   return out.kind === 'report'
     ? { kind: 'report', deliverable: out.result, usage }
-    : { kind: 'chat', reply: out.result, usage };
+    : { kind: 'chat', reply: withAsks(out.result), usage };
 }
 
 /**

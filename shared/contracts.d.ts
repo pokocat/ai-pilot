@@ -411,7 +411,10 @@ export interface BrandKitView {
 }
 
 /* ────────────── 自由对话回复 ────────────── */
-export interface ChatReply { text: string; points?: string[]; acts?: [string, string][]; }
+// 军师反问的结构化提问：q 为问题原文，options 为 2-4 个推荐答案（前端渲染为可点选项 + 自动附「其他」）。
+// 由模型在回复末尾以 ```ask 代码块产出，网关解析剥离后挂到 asks（见 server/llm/schema.extractAsks）。
+export interface ChatAsk { q: string; options: string[]; }
+export interface ChatReply { text: string; points?: string[]; acts?: [string, string][]; asks?: ChatAsk[]; }
 export interface ReplyTemplate { t: string; points: string[]; acts: [string, string][]; }
 
 /* ────────────── 会话 ────────────── */

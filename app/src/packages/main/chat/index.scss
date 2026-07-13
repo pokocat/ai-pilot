@@ -46,7 +46,8 @@
 
 .msg { margin-bottom: 16px; }
 .msg.u { display: flex; justify-content: flex-end; }
-.ubub { max-width: 80%; color: #fff; padding: 10px 14px; border-radius: 16px 16px 4px 16px; font-size: 14px; line-height: 1.5; }
+/* pre-line：保留换行（多题选项合并回答按行展示；用户手输换行同样受益） */
+.ubub { max-width: 80%; color: #fff; padding: 10px 14px; border-radius: 16px 16px 4px 16px; font-size: 14px; line-height: 1.5; white-space: pre-line; }
 .msg.a .who { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
 .msg.a .who .advisor-avatar { box-shadow: 0 3px 8px rgba(29, 42, 34, .14); }
 .msg.a .who Text { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
@@ -251,3 +252,27 @@
 .ref-is { display: block; font-size: 11px; color: var(--ink-3); margin-top: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ref-ck { width: 20px; height: 20px; border-radius: 7px; border: 1.5px solid var(--line); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .ref-empty { display: block; font-size: 12.5px; line-height: 1.7; color: var(--ink-3); padding: 20px 8px; text-align: center; }
+
+/* 军师反问选项卡（ChatReply.asks）：问题 + 推荐答案 chips + 「其他」自填 + 多问合并发送 */
+.ask-block { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; max-width: 86%; }
+.ask-q { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-3); margin-bottom: 6px; }
+.ask-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.ask-chip {
+  padding: 7px 12px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink);
+  font-size: 12px; font-weight: 500;
+}
+.ask-chip.on { color: #fff; }
+.ask-chip.on Text { color: #fff; }
+.ask-chip.other { background: var(--surface-2); color: var(--ink-3); }
+.ask-chip.other.on { color: #fff; }
+.ask-chip.other.on Text { color: #fff; }
+.ask-other-input {
+  margin-top: 8px; padding: 9px 12px; border-radius: 10px; background: var(--surface-2);
+  font-size: 13px; color: var(--ink);
+}
+.ask-send {
+  align-self: flex-start; padding: 8px 18px; border-radius: 999px;
+  color: #fff; font-size: 13px; font-weight: 600;
+}
+.ask-send.off { background: var(--surface-2); color: var(--ink-3); }
+.ask-send.off Text { color: var(--ink-3); }
