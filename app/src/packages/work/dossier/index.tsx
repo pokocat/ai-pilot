@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
@@ -11,13 +11,44 @@ export default function DossierPage() {
   const [report, setReport] = useState<DossierReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const mountedRef = useRef(true);
+  const loadingRef = useRef(false);
 
-  const generate = async () => {
-    if (loading || !ready) return; // D5：ready 前禁用，避免空态误触生成
+  const generate = async (allowBeforeReady = false) => {
+    if (loadingRef.current || (!ready && !allowBeforeReady)) return;
+    loadingRef.current = true;
     setLoading(true);
-    try { const r = await api.generateDossier(); setReport(r.report); }
-    catch (e) { s.handleApiError(e); }
-    finally { setLoading(false); }
+    setLoadError(false);
+    try {
+      const r = await api.generateDossier();
+      if (mountedRef.current) setReport(r.report);
+    } catch (e) {
+      if (mountedRef.current) s.handleApiError(e);
+    } finally {
+      loadingRef.current = false;
+      if (mountedRef.current) setLoading(false);
+    }
+  };
+
+  const load = async () => {
+    setReady(false);
+    setLoadError(false);
+    try {
+      const r = await api.dossier();
+      if (!mountedRef.current) return;
+      setReady(true);
+      if (r.report) { setReport(r.report); return; }
+      setReport(null);
+      // 首次自动立档必须绕过本轮 render 的 ready=false，不能被手动按钮门禁拦截。
+      const maturity = s.me()?.understanding?.maturity;
+      if (maturity && maturity !== 'empty') void generate(true);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setReady(true);
+      setLoadError(true);
+      s.handleApiError(e);
+    }
   };
 
   // D5：刷新履历会重新消耗额度重写，加一道轻确认防误触。
@@ -33,16 +64,9 @@ export default function DossierPage() {
   };
 
   useEffect(() => {
-    let cancelled = false;
-    api.dossier().then((r) => {
-      if (cancelled) return;
-      setReady(true);
-      if (r.report) { setReport(r.report); return; }
-      // 无缓存 + 资料够（个人档案非空）→ 首次进详情自动立档，免手动点；资料不足则留手动兜底
-      const maturity = s.me()?.understanding?.maturity;
-      if (maturity && maturity !== 'empty') void generate();
-    }).catch(() => { if (!cancelled) setReady(true); });
-    return () => { cancelled = true; };
+    mountedRef.current = true;
+    void load();
+    return () => { mountedRef.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -52,9 +76,9 @@ export default function DossierPage() {
       {!report ? (
         <View className="ds-empty">
           <Text className="ds-empty-t serif">创始人战略档案</Text>
-          <Text className="ds-empty-d">军师把你的资料——档案、对话、案卷、战略——蒸馏成一份完整履历。资料够了会自动为你立档，越全写得越透；也可以现在就手动生成。</Text>
-          <View className={`ds-gen ${loading || !ready ? 'busy' : ''}`} onClick={generate}>
-            <Text>{loading ? '军师执笔中…' : (ready ? '生成完整履历' : '加载中…')}</Text>
+          <Text className="ds-empty-d">{loadError ? '完整履历暂时没有加载成功，请检查网络后重试。' : '军师把你的资料——档案、对话、案卷、战略——蒸馏成一份完整履历。资料够了会自动为你立档，越全写得越透；也可以现在就手动生成。'}</Text>
+          <View className={`ds-gen ${loading || !ready ? 'busy' : ''}`} onClick={loadError ? load : () => generate()}>
+            <Text>{loading ? '军师执笔中…' : (!ready ? '加载中…' : loadError ? '重新加载' : '生成完整履历')}</Text>
           </View>
         </View>
       ) : (

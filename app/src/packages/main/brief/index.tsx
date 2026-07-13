@@ -122,7 +122,7 @@ export default function BriefPage() {
           <View className="bf-sec"><Text className="bf-empty">军师记忆整理中…（和军师多聊几句，就会归档到这里）</Text></View>
         )}
 
-        <View className="bf-dossier" onClick={() => navTo('/packages/work/dossier/index')}>
+        <View className="bf-dossier" onClick={openDossier}>
           <View className="bf-dossier-ic"><Icon name="insight" size={18} color="#c5a55a" /></View>
           <View className="bf-dossier-l">
             <Text className="bf-dossier-t serif">完整履历 · 创始人战略档案</Text>
@@ -170,6 +170,13 @@ export default function BriefPage() {
       </View>
     </View>
   );
+}
+
+function openDossier() {
+  const started = navTo('/packages/work/dossier/index', {
+    fail: () => Taro.showToast({ title: '完整履历页面加载失败，请重试', icon: 'none' }),
+  });
+  if (!started) Taro.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
 }
 
 function maturityLabel(v: ClientUnderstanding['maturity']): string {

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { View, Text } from '@tarojs/components';
+import { useRef, useState } from 'react';
+import { ScrollView, View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
@@ -78,6 +78,13 @@ function fmtBytes(b: number): string {
   return `${Math.max(0, Math.round(b / 1024))}KB`;
 }
 
+function fmtRemainingQuota(usedBytes: number, totalBytes: number): string {
+  const mb = 1024 * 1024;
+  const totalMb = Math.floor(Math.max(0, totalBytes) / mb);
+  const remainingMb = Math.floor(Math.max(0, totalBytes - Math.max(0, usedBytes)) / mb);
+  return `${remainingMb}/${totalMb}MB`;
+}
+
 // 兼容历史客户端把微信临时路径写成文件名；新上传优先展示用户原始文件名。
 function displayFileName(name: string | null | undefined, fallback = '待识别资料'): string {
   return displaySourceName(name, fallback);
@@ -89,6 +96,11 @@ function dsClass(label: string): string {
   return 'ds-warn';
 }
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function previewBoxHeight(text: string): number {
+  const visualLines = String(text || '').split(/\r?\n/).reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 22)), 0);
+  return Math.min(300, Math.max(96, visualLines * 24 + 24));
+}
 
 interface PayState {
   open: boolean; mode: 'credits' | 'sku' | 'member' | 'quota';
@@ -112,6 +124,8 @@ export default function ThinkTank() {
   const [stage, setStage] = useState<Stage>('staging');
   const [uploading, setUploading] = useState(false);
   const [organizing, setOrganizing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const confirmingRef = useRef(false);
   const [organizeStep, setOrganizeStep] = useState(0);
   const [organized, setOrganized] = useState<OrganizeResult | null>(null);
   const [activeBatch, setActiveBatch] = useState<string | null>(null);
@@ -136,7 +150,17 @@ export default function ThinkTank() {
   const closePay = () => setPay((p) => ({ ...p, open: false }));
   const closeExc = () => setExc((e) => ({ ...e, open: false }));
 
-  const loadPipeline = () => { setErr((e) => ({ ...e, assets: false })); api.knowledgePipeline().then(setPipe).catch((e) => { s.handleApiError(e, { silent: true }); setErr((p) => ({ ...p, assets: true })); }); };
+  const loadPipeline = async (): Promise<boolean> => {
+    setErr((e) => ({ ...e, assets: false }));
+    try {
+      setPipe(await api.knowledgePipeline());
+      return true;
+    } catch (e) {
+      s.handleApiError(e, { silent: true });
+      setErr((p) => ({ ...p, assets: true }));
+      return false;
+    }
+  };
   const loadData = () => { setErr((e) => ({ ...e, data: false })); api.dataSources().then(setDsView).catch((e) => { s.handleApiError(e, { silent: true }); setErr((p) => ({ ...p, data: true })); }); };
   const loadModules = () => { setErr((e) => ({ ...e, modules: false })); api.modules().then(setModView).catch((e) => { s.handleApiError(e, { silent: true }); setErr((p) => ({ ...p, modules: true })); }); };
   const loadReports = () => { setErr((e) => ({ ...e, reports: false })); api.reports().then(setReports).catch((e) => { s.handleApiError(e, { silent: true }); setReports([]); setErr((p) => ({ ...p, reports: true })); }); };
@@ -167,7 +191,7 @@ export default function ThinkTank() {
     : (organized?.items ?? []);
 
   const chooseUpload = async () => {
-    if (uploading || organizing) return;
+    if (uploading || organizing || confirmingRef.current) return;
     if (!isWeapp) {
       setUploading(true);
       try {
@@ -287,6 +311,7 @@ export default function ThinkTank() {
   };
 
   const confirmOptimized = async () => {
+    if (confirmingRef.current) return;
     const ids = optimizedItems.map((item) => item.id);
     if (!ids.length) { Taro.showToast({ title: '暂无可确认资料，请先整理待整理区', icon: 'none' }); return; }
     const noPreview = optimizedItems.filter((item) => !item.preview?.trim()).length;
@@ -299,15 +324,22 @@ export default function ThinkTank() {
       cancelText: '再检查下',
     });
     if (!confirm.confirm) return;
+    confirmingRef.current = true;
+    setConfirming(true);
     try {
       const r = await api.confirmKnowledge({ ids });
       if (!r.count) { Taro.showToast({ title: '暂无可确认资料，请先整理待整理区', icon: 'none' }); return; }
-      Taro.showToast({ title: `已写入知识库 · ${r.count} 份`, icon: 'none' });
       setOrganized(null);
       setActiveBatch(null);
-      await loadPipeline();
+      const refreshed = await loadPipeline();
       setStage('confirmed');
-    } catch (e) { s.handleApiError(e); }
+      Taro.showToast({ title: refreshed ? `已写入知识库 · ${r.count} 份` : '已入库，页面刷新失败，请稍后重试', icon: 'none' });
+    } catch (e) {
+      s.handleApiError(e);
+    } finally {
+      confirmingRef.current = false;
+      setConfirming(false);
+    }
   };
 
   // 待整理批次里删除某份（解析失败的删掉重传；走既有知识删除接口）。
@@ -494,8 +526,8 @@ export default function ThinkTank() {
                 <Text className="qc-l">免费资料额度</Text>
               </View>
               <View className="quota-card card" onClick={() => Taro.showToast({ title: `知识库已用 ${fmtBytes(quota.usedBytes)}，剩余可继续上传`, icon: 'none' })}>
-                <Text className="qc-v serif">{fmtBytes(Math.max(0, quota.freeBytes - quota.usedBytes))}</Text>
-                <Text className="qc-l">剩余空间 · 可扩容</Text>
+                <Text className="qc-v serif">{fmtRemainingQuota(quota.usedBytes, quota.freeBytes)}</Text>
+                <Text className="qc-l">可用空间 · 可扩容</Text>
               </View>
               <View className="quota-card card" onClick={() => { if (batches.length) openDeepPay(batches[0].id); else Taro.showToast({ title: '先上传资料到待整理区，再做深度整理', icon: 'none' }); }}>
                 <Text className="qc-v serif">深度整理</Text>
@@ -506,7 +538,7 @@ export default function ThinkTank() {
             {/* 三段流水段 */}
             <View className="stage-seg">
               {([['staging', '待整理', counts.staging], ['optimized', '已优化', counts.optimized], ['confirmed', '知识库', counts.confirmed]] as [Stage, string, number][]).map(([k, label, n]) => (
-                <View key={k} className={`stage-tab ${stage === k ? 'on' : ''}`} onClick={() => setStage(k)}>
+                <View key={k} className={`stage-tab ${stage === k ? 'on' : ''} ${confirming ? 'locked' : ''}`} onClick={() => { if (!confirmingRef.current) setStage(k); }}>
                   <Text className="stage-t">{label}</Text>
                   <Text className="stage-n" style={stage === k ? { color: accent } : {}}>{n}</Text>
                 </View>
@@ -586,7 +618,11 @@ export default function ThinkTank() {
                                 <Text>{it.preview ? (previewing ? '收起正文预览' : '预览正文') : '未提取到可预览正文'}</Text>
                                 {it.preview ? <Text>{previewing ? '⌃' : '⌄'}</Text> : null}
                               </View>
-                              {previewing && it.preview ? <View className="item-preview"><MarkdownText text={it.preview} selectable /></View> : null}
+                              {previewing && it.preview ? (
+                                <ScrollView className="item-preview" scrollY style={{ height: `${previewBoxHeight(it.preview)}px` }}>
+                                  <MarkdownText text={it.preview} selectable />
+                                </ScrollView>
+                              ) : null}
                             </View>
                           );
                         })}
@@ -675,15 +711,22 @@ export default function ThinkTank() {
                               <Text>{it.preview ? (previewing ? '收起正文预览' : '预览正文') : '未提取到可预览正文'}</Text>
                               {it.preview ? <Text>{previewing ? '⌃' : '⌄'}</Text> : null}
                             </View>
-                            {previewing && it.preview ? <View className="item-preview"><MarkdownText text={it.preview} selectable /></View> : null}
+                            {previewing && it.preview ? (
+                              <ScrollView className="item-preview" scrollY style={{ height: `${previewBoxHeight(it.preview)}px` }}>
+                                <MarkdownText text={it.preview} selectable />
+                              </ScrollView>
+                            ) : null}
                           </View>
                         );
                       })}
                     </View>
-                    <View className="confirm-library card" onClick={confirmOptimized}>
-                      <Text className="cl-t serif">下一步：确认入库</Text>
-                      <Text className="cl-s">确认后将回写战局页、方案页和后续对话引用。</Text>
-                      <View className="cl-btn" style={{ background: accent }}><Text>确认 {optimizedItems.length} 份并写入知识库</Text></View>
+                    <View className={`confirm-library card ${confirming ? 'busy' : ''}`} onClick={confirmOptimized}>
+                      <Text className="cl-t serif">{confirming ? '正在写入知识库' : '下一步：确认入库'}</Text>
+                      <Text className="cl-s">{confirming ? '正在切片并建立检索索引，请稍候，不要重复操作。' : '确认后将回写战局页、方案页和后续对话引用。'}</Text>
+                      <View className="cl-btn" style={{ background: accent }}>
+                        {confirming ? <View className="cl-spinner" /> : null}
+                        <Text>{confirming ? `正在处理 ${optimizedItems.length} 份资料…` : `确认 ${optimizedItems.length} 份并写入知识库`}</Text>
+                      </View>
                     </View>
                   </>
                 ) : (

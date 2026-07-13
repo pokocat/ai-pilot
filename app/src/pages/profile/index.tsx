@@ -62,6 +62,12 @@ export default function Profile() {
 
   const openTeacher = () => { if (svc) setSheet('teacher'); else Taro.showToast({ title: '服务老师分配后开放', icon: 'none' }); };
   const openGroup = () => { if (svc) setSheet('group'); else Taro.showToast({ title: '社群分配后开放', icon: 'none' }); };
+  const openDossier = () => {
+    const started = navTo('/packages/work/dossier/index', {
+      fail: () => Taro.showToast({ title: '完整履历页面加载失败，请重试', icon: 'none' }),
+    });
+    if (!started) Taro.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
+  };
   const closeSheet = () => setSheet('');
   const goFill = () => { setSheet(''); switchTo('/pages/thinktank/index'); };
 
@@ -89,7 +95,7 @@ export default function Profile() {
       title: '档案',
       rows: [
         { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => navTo('/packages/main/brief/index') },
-        { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: () => navTo('/packages/work/dossier/index') },
+        { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: openDossier },
         { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => navTo('/packages/work/projects/index') },
         { ic: 'flag', t: '战略账本 · 决策与天机', s: '记账验证', onClick: () => navTo('/packages/work/ledger/index') },
       ],
