@@ -30,7 +30,9 @@
 .jump-latest {
   position: absolute;
   right: 18px;
-  bottom: calc(104px + var(--keyboard-height, 0px) + env(safe-area-inset-bottom));
+  /* B6：偏移与 composer-dock 实测高度联动（含多行增高 / 引用行 / 上传条 / 键盘 / 安全区）；
+     --jump-bottom 由页面 JS 测量注入，缺省回退到经验值 116px。 */
+  bottom: calc(var(--jump-bottom, 116px) + 12px);
   z-index: 9;
   display: flex; align-items: center; gap: 5px;
   height: 34px; padding: 0 12px 0 13px;
@@ -39,9 +41,6 @@
   background: rgba(255, 255, 255, .94);
   box-shadow: 0 8px 22px rgba(42, 35, 24, .12);
   font-size: 12px; font-weight: 700;
-}
-.jump-latest.with-refs {
-  bottom: calc(144px + var(--keyboard-height, 0px) + env(safe-area-inset-bottom));
 }
 .jump-latest:active { opacity: .82; transform: translateY(1px); }
 
@@ -141,8 +140,9 @@
 }
 .cinput .taro-textarea-placeholder,
 .cinput .placeholder { color: var(--ink-3); font-size: 15px; }
-.composer.busy .box { opacity: .58; }
+/* B2：busy 时只弱化输入区与左侧工具，右侧「停止」键保持醒目（父级 opacity 会连累子元素，故不整体降透明）。 */
 .composer.busy .cinput { color: var(--ink-3); }
+.composer.busy .cbar-l { opacity: .5; }
 
 /* 底排工具 */
 .cbar { display: flex; align-items: center; justify-content: space-between; }
@@ -163,6 +163,28 @@
   transition: opacity .15s ease;
 }
 .csend.off { background: var(--line); opacity: .9; }
+/* B2 停止键：实心白方块 */
+.csend.stop:active { opacity: .85; }
+.stop-sq { width: 13px; height: 13px; border-radius: 3px; background: #fff; }
+/* B6 单档模型胶囊：纯展示，无 chevron / 点击态 */
+.cmodel.static { padding: 0 11px; }
+/* B6 输入字数（临近上限才出现） */
+.cinput-count { display: block; align-self: flex-end; font-size: 11px; color: var(--ink-3); margin-top: -2px; }
+
+/* B5 非模态上传条（可取消） */
+.composer-dock { position: relative; }
+.upload-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px 0; background: var(--surface);
+}
+.upload-bar .ub-spin {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--line); border-top-color: var(--accent);
+  animation: rc-spin .7s linear infinite; flex-shrink: 0;
+}
+.upload-bar .ub-t { flex: 1; font-size: 12.5px; color: var(--ink-2); }
+.upload-bar .ub-cancel { font-size: 13px; font-weight: 600; padding: 4px 6px; }
+@keyframes rc-spin { to { transform: rotate(360deg); } }
 
 /* 工具栏：项目作用域 + 生成纪要 */
 .chat-tools { display: flex; align-items: center; justify-content: space-between; padding: 0 16px 8px; }

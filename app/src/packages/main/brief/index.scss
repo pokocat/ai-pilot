@@ -47,7 +47,18 @@
 .bf-memcat-fill { font-size: 11px; flex-shrink: 0; }
 .bf-memrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 3px 0 3px 37px; }
 .bf-memrow-t { flex: 1; color: var(--ink-2); font-size: 12.5px; line-height: 1.55; }
-.bf-memrow-del { flex-shrink: 0; font-size: 12px; }
+/* B7：视觉不变，透明外扩「删」命中区到 ≥44px（负 margin 抵消占位，不影响布局） */
+.bf-memrow-del { flex-shrink: 0; font-size: 12px; padding: 15px 4px 15px 14px; margin: -15px 0 -15px -14px; }
+
+/* B7：军师记忆加载骨架条 */
+.bf-sk-bar {
+  height: 10px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2), var(--line-2), var(--surface-2));
+  background-size: 200% 100%; animation: bf-shimmer 1.3s infinite;
+}
+.bf-sk-bar.w55 { width: 55%; }
+.bf-sk-bar.w85 { width: 85%; }
+@keyframes bf-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 .bf-memcat-empty { display: block; color: var(--ink-3); font-size: 12px; line-height: 1.5; padding-left: 37px; font-style: italic; }
 
 /* 完整履历入口卡（P3） */
