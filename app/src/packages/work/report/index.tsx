@@ -9,6 +9,8 @@ import { store } from '../../../services/store';
 import { acceptDeliverable, refreshDossier, ordersOf, today, type DossierOrder } from '../../../services/dossier';
 import { api, type ReportDetail, type ReportVersionContent, type ReportDiff } from '../../../services/api';
 import { makeReportShareImage, presentReportShareImage } from '../../../services/reportShareCard';
+import { switchTo } from '../../../services/nav';
+import { REVIEW_TIME } from '../../../data/constants';
 import './index.scss';
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
@@ -42,29 +44,42 @@ export default function Report() {
   const [content, setContent] = useState<ReportVersionContent | null>(null);
   const [diff, setDiff] = useState<ReportDiff | null>(null);
   const [failed, setFailed] = useState(false);
+  // 内容区/差异区三态：加载中 / 失败可重试。reloadTick 递增触发重取（就地重试）。
+  const [verLoading, setVerLoading] = useState(false);
+  const [verErr, setVerErr] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
 
-  // V7-09：同步为军令。
+  // V7-09：同步为军令。syncing 防双击重复记账（D1）。
   const [synced, setSynced] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncOrders, setSyncOrders] = useState<DossierOrder[]>([]);
 
-  useEffect(() => {
+  const loadDetail = () => {
     if (!id) { setFailed(true); return; }
     setFailed(false);
     api.report(id).then((d) => {
       setDetail(d);
       setSel(d.currentVersion);
     }).catch((e) => { s.handleApiError(e); setDetail(null); setFailed(true); });
-  }, [id]);
+  };
+  useEffect(loadDetail, [id]);
 
   useEffect(() => {
     if (!id || !sel) return;
+    setVerLoading(true); setVerErr(false);
     if (mode === 'content') {
-      api.reportVersion(id, sel).then(setContent).catch((e) => { s.handleApiError(e); setContent(null); });
+      api.reportVersion(id, sel)
+        .then((c) => { setContent(c); })
+        .catch((e) => { s.handleApiError(e); setContent(null); setVerErr(true); })
+        .finally(() => setVerLoading(false));
     } else {
-      api.reportDiff(id, Math.max(1, sel - 1), sel).then(setDiff).catch((e) => { s.handleApiError(e); setDiff(null); });
+      api.reportDiff(id, Math.max(1, sel - 1), sel)
+        .then((d) => { setDiff(d); })
+        .catch((e) => { s.handleApiError(e); setDiff(null); setVerErr(true); })
+        .finally(() => setVerLoading(false));
     }
-  }, [id, sel, mode]);
+  }, [id, sel, mode, reloadTick]);
 
   // 已同步检测：案卷标题与报告一致且今日已有军令 → 视为已同步。
   useEffect(() => {
@@ -80,16 +95,22 @@ export default function Report() {
   }, [syncOpen]);
 
   const sync = async () => {
-    let c = content;
-    if (!c) c = await api.reportVersion(id, sel || (detail?.currentVersion ?? 1)).catch(() => null);
-    if (!c || !detail) { Taro.showToast({ title: '方案内容加载失败，请重试', icon: 'none' }); return; }
-    const r = await acceptDeliverable(c.content, detail.agentName || '军师').catch(() => null);
-    if (!r) { Taro.showToast({ title: '同步失败，请重试', icon: 'none' }); return; }
-    setSynced(true);
-    setSyncOrders(ordersOf(r.dossier, today()));
-    setSyncOpen(true);
+    if (syncing) return; // D1：in-flight 防抖，双击不重复记账
+    setSyncing(true);
+    try {
+      let c = content;
+      if (!c) c = await api.reportVersion(id, sel || (detail?.currentVersion ?? 1)).catch(() => null);
+      if (!c || !detail) { Taro.showToast({ title: '方案内容加载失败，请重试', icon: 'none' }); return; }
+      const r = await acceptDeliverable(c.content, detail.agentName || '军师').catch(() => null);
+      if (!r) { Taro.showToast({ title: '同步失败，请重试', icon: 'none' }); return; }
+      setSynced(true);
+      setSyncOrders(ordersOf(r.dossier, today()));
+      setSyncOpen(true);
+    } finally {
+      setSyncing(false);
+    }
   };
-  const goStudio = () => { setSyncOpen(false); Taro.switchTab({ url: '/pages/studio/index' }); };
+  const goStudio = () => { setSyncOpen(false); switchTo('/pages/studio/index'); };
 
   // D-3-4：方案库详情对外分享 = 生成品牌分享图（标题+首节核心结论+落款，无全文/敏感数字）。
   const shareImage = async () => {
@@ -113,7 +134,8 @@ export default function Report() {
       <View className={`page report-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
         <SafeHeader title="方案" onBack={() => Taro.navigateBack()} titleClassName="rp-title" />
         <View className="rp-loading">
-          <Text>{failed ? '方案加载失败，请返回重试' : '加载中…'}</Text>
+          <Text>{failed ? '方案加载失败' : '加载中…'}</Text>
+          {failed ? <View className="rp-retry" onClick={loadDetail}><Text>重试</Text></View> : null}
         </View>
       </View>
     );
@@ -152,7 +174,15 @@ export default function Report() {
           <View className={`rp-mode ${mode === 'diff' ? 'on' : ''}`} style={mode === 'diff' ? { background: accent } : {}} onClick={() => setMode('diff')}><Text>对比上一版</Text></View>
         </View>
 
-        {mode === 'content' && content && (
+        {mode === 'content' && (
+          verLoading ? (
+            <View className="rp-loading"><Text>加载方案内容…</Text></View>
+          ) : verErr ? (
+            <View className="rp-card card">
+              <Text className="rp-nodiff">方案内容加载失败</Text>
+              <View className="rp-retry" onClick={() => setReloadTick((t) => t + 1)}><Text>重试</Text></View>
+            </View>
+          ) : content ? (
           <View className="rp-reader">
             {/* 深绿封面 */}
             <View className="report-cover">
@@ -173,12 +203,18 @@ export default function Report() {
               </View>
             ))}
           </View>
+          ) : null
         )}
 
         {mode === 'diff' && (
           sel <= 1 ? (
             <View className="rp-card card"><Text className="rp-nodiff">这是第一个版本，没有可对比的上一版。</Text></View>
-          ) : diff ? (
+          ) : verErr ? (
+            <View className="rp-card card">
+              <Text className="rp-nodiff">差异计算失败</Text>
+              <View className="rp-retry" onClick={() => setReloadTick((t) => t + 1)}><Text>重试</Text></View>
+            </View>
+          ) : diff && !verLoading ? (
             <View className="rp-card card">
               <Text className="rp-diff-sum" style={{ color: accent }}>v{diff.from} → v{diff.to}：{diff.summary}</Text>
               {diff.sections.map((sd, i) => (
@@ -215,7 +251,7 @@ export default function Report() {
         {synced ? (
           <View className="rp-sync-btn done" onClick={goStudio}><Text>已同步 → 查看军令</Text></View>
         ) : (
-          <View className="rp-sync-btn" style={{ background: accent }} onClick={sync}><Text>同步为军令</Text></View>
+          <View className={`rp-sync-btn ${syncing ? 'busy' : ''}`} style={{ background: accent }} onClick={sync}><Text>{syncing ? '同步中…' : '同步为军令'}</Text></View>
         )}
       </View>
 
@@ -230,7 +266,7 @@ export default function Report() {
             <View className="cs-hero">
               <View className="cs-check" style={{ background: accent }}><Text>✓</Text></View>
               <Text className="cs-t serif">方案已同步为今日军令</Text>
-              <Text className="cs-d">已把「{detail.title}」里的判断拆成执行动作，并同步到执行页、方案库和今晚 20:30 复盘。</Text>
+              <Text className="cs-d">已把「{detail.title}」里的判断拆成执行动作，并同步到执行页、方案库和今晚 {REVIEW_TIME} 复盘。</Text>
             </View>
             <View className="cs-flow">
               <Text className="cs-flow-i">方案</Text><Text className="cs-arr">→</Text>

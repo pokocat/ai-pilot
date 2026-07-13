@@ -6,6 +6,7 @@ import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type ClientUnderstanding, type MemoryLibraryView, type MemoryCategoryKey, type MemoryFillLevel } from '../../../services/api';
+import { navTo } from '../../../services/nav';
 import './index.scss';
 
 // 军师记忆库六类展示元数据（现代白话，面向下沉老板群体；保留军师品牌，去文言）。
@@ -25,14 +26,23 @@ export default function BriefPage() {
   const accent = color.vars['--accent'];
   const understanding = s.me()?.understanding;
   const [lib, setLib] = useState<MemoryLibraryView | null>(null); // 军师记忆库（P2）
+  const [libLoading, setLibLoading] = useState(true); // B7：加载中给六类骨架，防卡片突然撑开
 
   useEffect(() => {
     store.loadMe();
-    api.memoryLibrary().then(setLib).catch(() => {});
+    api.memoryLibrary().then((v) => { setLib(v); setLibLoading(false); }).catch(() => setLibLoading(false));
   }, []);
 
   const removeEntry = async (id: string) => {
     if (id.startsWith('sp-')) return; // 战略事实来自战略档案，此处不删
+    // B7：删除记忆二次确认——点明「删掉后军师不再据此判断」的后果。
+    const ok = await Taro.showModal({
+      title: '删掉这条记忆？',
+      content: '删掉后军师不再据此判断你的生意，之后的建议可能少一层依据。确定删除？',
+      confirmText: '删除',
+      confirmColor: '#9C4A38', // = var(--danger)，showModal 仅接受 hex
+    }).then((r) => r.confirm).catch(() => false);
+    if (!ok) return;
     try {
       await api.deleteMemory(id);
       setLib((cur) => (cur ? { ...cur, total: Math.max(0, cur.total - 1), groups: cur.groups.map((g) => ({ ...g, entries: g.entries.filter((e) => e.id !== id) })) } : cur));
@@ -92,11 +102,27 @@ export default function BriefPage() {
             })}
             <Text className="bf-empty" style={{ marginTop: '8px' }}>记错了点「删」；删掉后军师不再据此判断。</Text>
           </View>
+        ) : libLoading ? (
+          // B7：加载中六类骨架，占位与真实卡等高，避免数据到达时整页跳动。
+          <View className="bf-sec">
+            <View className="bf-memhead"><Text className="bf-sec-t">军师记忆</Text></View>
+            {MEM_CATS.map((c) => (
+              <View key={c.key} className="bf-memcat">
+                <View className="bf-memcat-h">
+                  <View className="bf-memcat-ic" style={{ background: c.tint }} />
+                  <View className="bf-memcat-tt">
+                    <View className="bf-sk-bar w55" />
+                    <View className="bf-sk-bar w85" style={{ marginTop: '6px' }} />
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
         ) : (
           <View className="bf-sec"><Text className="bf-empty">军师记忆整理中…（和军师多聊几句，就会归档到这里）</Text></View>
         )}
 
-        <View className="bf-dossier" onClick={() => Taro.navigateTo({ url: '/packages/work/dossier/index' })}>
+        <View className="bf-dossier" onClick={() => navTo('/packages/work/dossier/index')}>
           <View className="bf-dossier-ic"><Icon name="insight" size={18} color="#c5a55a" /></View>
           <View className="bf-dossier-l">
             <Text className="bf-dossier-t serif">完整履历 · 创始人战略档案</Text>
@@ -167,5 +193,5 @@ function startInterview(focus?: string) {
   const text = focus
     ? `请进入个人档案访谈模式，围绕「${focus}」只问我一个简单具体的问题。不要先分析，不要引用旧报告，不要替我假设业务事实。`
     : '请进入个人档案访谈模式。不要先分析，不要引用旧报告，不要替我假设业务事实；请先用老板能听懂的话问我 3 个简单具体的问题，帮你补齐行业、阶段和当前难题。';
-  Taro.navigateTo({ url: `/packages/main/chat/index?send=${encodeURIComponent(text)}` });
+  navTo(`/packages/main/chat/index?send=${encodeURIComponent(text)}`);
 }

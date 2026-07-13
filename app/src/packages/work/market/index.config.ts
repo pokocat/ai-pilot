@@ -1,4 +1,4 @@
 export default {
   navigationStyle: 'custom',
-  navigationBarTitleText: '模块市场',
+  navigationBarTitleText: '能力市场',
 };

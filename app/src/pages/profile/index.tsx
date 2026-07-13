@@ -4,8 +4,11 @@ import { View, Text, Image, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
+import Login from '../../components/Login';
 import Picker from '../../components/Picker';
 import Plans from '../../components/Plans';
+import { navTo, switchTo } from '../../services/nav';
+import { REVIEW_TIME } from '../../data/constants';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ProgressView, type WorkbenchView } from '../../services/api';
@@ -29,14 +32,21 @@ export default function Profile() {
   const [prog, setProg] = useState<ProgressView | null>(null);
   const [workbench, setWorkbench] = useState<WorkbenchView | null>(null);
   const [sheet, setSheet] = useState<SheetKey>('');
+  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
 
-  useDidShow(() => {
-    s.setTab(4);
+  // C1：登录后才拉数据（未登录不再空拉 api.library 等弹错误 toast）。
+  const loadProfile = () => {
     api.library().then((l) => setLibCount(l.length)).catch((e) => s.handleApiError(e));
     api.projects().then((p) => setProjCount(p.length)).catch((e) => s.handleApiError(e));
     api.reports().then((r) => setReportCount(r.length)).catch(() => {});
     api.progress().then((r) => setProg(r.progress)).catch(() => setProg(null));
     api.workbench().then(setWorkbench).catch((e) => { s.handleApiError(e, { silent: true }); setWorkbench(null); });
+  };
+
+  useDidShow(() => {
+    s.setTab(4);
+    if (!s.isAuthed()) { setShowLogin(true); return; }
+    loadProfile();
   });
 
   // 案卷完整度：优先 workbench.completeness，缺失时按理解成熟度兜底。
@@ -53,7 +63,7 @@ export default function Profile() {
   const openTeacher = () => { if (svc) setSheet('teacher'); else Taro.showToast({ title: '服务老师分配后开放', icon: 'none' }); };
   const openGroup = () => { if (svc) setSheet('group'); else Taro.showToast({ title: '社群分配后开放', icon: 'none' }); };
   const closeSheet = () => setSheet('');
-  const goFill = () => { setSheet(''); Taro.switchTab({ url: '/pages/thinktank/index' }); };
+  const goFill = () => { setSheet(''); switchTo('/pages/thinktank/index'); };
 
   const copyWechat = () => {
     if (!svc) return;
@@ -72,27 +82,49 @@ export default function Profile() {
   };
 
   const fortuneOn = s.fortuneOn(); // P0-2：命理关 → 隐藏「送你一卦」入口
-  const rows = [
-    { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/packages/main/brief/index' }) },
-    { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: () => Taro.navigateTo({ url: '/packages/work/dossier/index' }) },
-    { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
-    { ic: 'flag', t: '战略账本 · 决策与天机', s: '记账验证', onClick: () => Taro.navigateTo({ url: '/packages/work/ledger/index' }) },
-    { ic: 'layers', t: '方案库', s: `${libCount + reportCount}`, onClick: () => Taro.navigateTo({ url: '/packages/work/library/index' }) },
-    { ic: 'spark', t: '我的品牌资产', s: '数字人/短视频预填', onClick: () => Taro.navigateTo({ url: '/packages/work/brandkit/index' }) },
-    { ic: 'attach', t: '我的资料库', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/knowledge/index' }) },
-    { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/bindings/index' }) },
-    { ic: 'grid', t: '模块管理 · 添加 / 隐藏', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/market/index' }) },
-    { ic: 'doc', t: '订单支付 / 算力明细', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/credits/index' }) },
-    ...(fortuneOn ? [{ ic: 'spark', t: '送你一卦 · 给朋友出速写卡', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/gift/index' }) }] : []),
-    { ic: 'clock', t: '提醒与日历', s: reminderHint(me?.service), onClick: () => Taro.navigateTo({ url: '/packages/work/reminders/index' }) },
-    { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
-    { ic: 'shield', t: '私有化部署 · 企业版', s: '预约', onClick: () => Taro.showToast({ title: '已记录企业版意向', icon: 'none' }) },
+  // C7：15 项菜单按「档案 / 资产 / 账户 / 系统」分组，行样式不变，仅加小节标题，降低长列表扫描成本。
+  type MenuRow = { ic: string; t: string; s: string; sw?: boolean; onClick: () => void };
+  const menuGroups: { title: string; rows: MenuRow[] }[] = [
     {
-      ic: 'lock', t: '退出登录', s: '',
-      onClick: () =>
-        Taro.showModal({ title: '退出登录', content: '确定退出当前账号？' }).then((r) => {
-          if (r.confirm) { s.logout(); Taro.reLaunch({ url: '/pages/sessions/index' }); }
-        }),
+      title: '档案',
+      rows: [
+        { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => navTo('/packages/main/brief/index') },
+        { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: () => navTo('/packages/work/dossier/index') },
+        { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => navTo('/packages/work/projects/index') },
+        { ic: 'flag', t: '战略账本 · 决策与天机', s: '记账验证', onClick: () => navTo('/packages/work/ledger/index') },
+      ],
+    },
+    {
+      title: '资产',
+      rows: [
+        { ic: 'layers', t: '方案库', s: `${libCount + reportCount}`, onClick: () => navTo('/packages/work/library/index') },
+        { ic: 'spark', t: '我的品牌资产', s: '数字人/短视频预填', onClick: () => navTo('/packages/work/brandkit/index') },
+        { ic: 'attach', t: '我的资料库', s: '', onClick: () => navTo('/packages/work/knowledge/index') },
+        { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => navTo('/packages/work/bindings/index') },
+      ],
+    },
+    {
+      title: '账户',
+      rows: [
+        { ic: 'doc', t: '订单支付 / 算力明细', s: '', onClick: () => navTo('/packages/work/credits/index') },
+        ...(fortuneOn ? [{ ic: 'spark', t: '送你一卦 · 给朋友出速写卡', s: '', onClick: () => navTo('/packages/work/gift/index') }] : []),
+        { ic: 'clock', t: '提醒与日历', s: reminderHint(me?.service), onClick: () => navTo('/packages/work/reminders/index') },
+        { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
+      ],
+    },
+    {
+      title: '系统',
+      rows: [
+        { ic: 'grid', t: '模块管理 · 添加 / 隐藏', s: '', onClick: () => navTo('/packages/work/market/index') },
+        { ic: 'shield', t: '私有化部署 · 企业版', s: '预约', onClick: () => Taro.showToast({ title: '已记录企业版意向', icon: 'none' }) },
+        {
+          ic: 'lock', t: '退出登录', s: '',
+          onClick: () =>
+            Taro.showModal({ title: '退出登录', content: '确定退出当前账号？' }).then((r) => {
+              if (r.confirm) { s.logout(); Taro.reLaunch({ url: '/pages/sessions/index' }); }
+            }),
+        },
+      ],
     },
   ];
 
@@ -102,7 +134,7 @@ export default function Profile() {
         {/* 页头：居中「我的军师系统」· 右「设置」 */}
         <View className="account-nav tab-page-head">
           <Text className="an-title serif">我的军师系统</Text>
-          <Text className="an-side serif" onClick={() => Taro.navigateTo({ url: '/packages/main/settings/index' })}>设置</Text>
+          <Text className="an-side serif" onClick={() => navTo('/packages/main/settings/index')}>设置</Text>
         </View>
 
         {/* 账户服务卡（深绿 · §10.1）：头像 + 姓名 + 会员牌 / 手机·社群·邀请码 / 权益三格 / 服务动作 */}
@@ -115,7 +147,7 @@ export default function Profile() {
                 {me?.user.name ? me.user.name[0] : <Icon name="user" size={20} color="#fff" />}
               </View>
             )}
-            <View className="sct-b" onClick={() => Taro.navigateTo({ url: '/packages/main/settings/index' })}>
+            <View className="sct-b" onClick={() => navTo('/packages/main/settings/index')}>
               <Text className="account-profile-name serif">{me?.user.name || '完善你的资料 ›'}</Text>
               {orgLine(me) ? <Text className="account-profile-role">{orgLine(me)}</Text> : null}
             </View>
@@ -137,19 +169,20 @@ export default function Profile() {
             ))}
           </View>
 
+          {/* C7：未分配服务时置灰 + 说明（.is-empty 关掉 pointer-events），不再做可点的假按钮 */}
           <View className="service-action-row">
-            <View className={`service-action ${svc ? '' : 'is-empty'}`} onClick={openTeacher}>
+            <View className={`service-action ${svc ? '' : 'is-empty'}`} onClick={svc ? openTeacher : undefined}>
               <Text className="sa-i serif">微</Text>
               <View className="sa-b">
                 <Text className="sa-t">{svc ? `${svc.teacherName}微信` : '服务老师微信'}</Text>
-                <Text className="sa-s">{svc ? '服务老师 / 资料确认' : '待分配'}</Text>
+                <Text className="sa-s">{svc ? '服务老师 / 资料确认' : '分配服务老师后开放'}</Text>
               </View>
             </View>
-            <View className={`service-action ${svc ? '' : 'is-empty'}`} onClick={openGroup}>
+            <View className={`service-action ${svc ? '' : 'is-empty'}`} onClick={svc ? openGroup : undefined}>
               <Text className="sa-i serif">码</Text>
               <View className="sa-b">
                 <Text className="sa-t">群二维码</Text>
-                <Text className="sa-s">{svc ? '入群 / 二维码' : '待分配'}</Text>
+                <Text className="sa-s">{svc ? '入群 / 二维码' : '分配社群后开放'}</Text>
               </View>
             </View>
           </View>
@@ -157,15 +190,15 @@ export default function Profile() {
 
         {/* 经营统计（account-statline）：案卷 / 方案 / 资料（真实计数，四名词统一） */}
         <View className="account-statline">
-          <View className="account-stat card" onClick={() => Taro.navigateTo({ url: '/packages/work/projects/index' })}>
+          <View className="account-stat card" onClick={() => navTo('/packages/work/projects/index')}>
             <Text className="as-n serif">{projCount}</Text>
             <Text className="as-l">案卷</Text>
           </View>
-          <View className="account-stat card" onClick={() => Taro.navigateTo({ url: '/packages/work/library/index' })}>
+          <View className="account-stat card" onClick={() => navTo('/packages/work/library/index')}>
             <Text className="as-n serif">{libCount + reportCount}</Text>
             <Text className="as-l">方案</Text>
           </View>
-          <View className="account-stat card" onClick={() => Taro.navigateTo({ url: '/packages/work/knowledge/index' })}>
+          <View className="account-stat card" onClick={() => navTo('/packages/work/knowledge/index')}>
             <Text className="as-n serif">{me?.understanding?.evidenceCount.knowledge ?? 0}</Text>
             <Text className="as-l">资料</Text>
           </View>
@@ -174,7 +207,7 @@ export default function Profile() {
         {/* 战略段位（M4 PR-18）：全部真实计数。WO-03 冷启动延迟曝光——攒够连续复盘/使用天数才亮相，
             不把「新兵·连续 0 天·准确率 —%」的空账本怼给新用户。 */}
         {prog && (prog.streak >= 3 || prog.usageDays >= 14) ? (
-          <View className="rank-card card" onClick={() => Taro.navigateTo({ url: '/packages/work/ledger/index' })}>
+          <View className="rank-card card" onClick={() => navTo('/packages/work/ledger/index')}>
             <View className="rk-badge"><Text className="serif">{prog.rank}</Text></View>
             <View className="rk-b">
               <Text className="rk-t serif">战略段位 · {prog.rank}</Text>
@@ -187,21 +220,26 @@ export default function Profile() {
           </View>
         ) : null}
 
-        {/* 菜单（design menu：左侧色块图标 + 右值） */}
-        <View className="menu card">
-          {rows.map((r) => (
-            <View key={r.t} className="menu-row" onClick={r.onClick}>
-              <View className="menu-ic"><Icon name={r.ic} size={14} color={accent} /></View>
-              <Text className="menu-t">{r.t}</Text>
-              {r.sw ? <View className="menu-sw" style={{ background: accent }} /> : null}
-              <Text className="menu-s">{r.s}</Text>
-              <Text className="menu-go">›</Text>
+        {/* 菜单（design menu：左侧色块图标 + 右值）· C7 按 档案/资产/账户/系统 分组，行样式不变 */}
+        {menuGroups.map((g) => (
+          <View key={g.title} className="menu-group">
+            <Text className="menu-group-title">{g.title}</Text>
+            <View className="menu card">
+              {g.rows.map((r) => (
+                <View key={r.t} className="menu-row" onClick={r.onClick}>
+                  <View className="menu-ic"><Icon name={r.ic} size={14} color={accent} /></View>
+                  <Text className="menu-t">{r.t}</Text>
+                  {r.sw ? <View className="menu-sw" style={{ background: accent }} /> : null}
+                  <Text className="menu-s">{r.s}</Text>
+                  <Text className="menu-go">›</Text>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
+          </View>
+        ))}
 
         {/* 服务老师 / 军师社群（account-teacher 暖金卡） */}
-        <View className="account-teacher" onClick={() => Taro.navigateTo({ url: '/packages/work/community/index' })}>
+        <View className="account-teacher" onClick={() => navTo('/packages/work/community/index')}>
           <View className="at-b">
             <Text className="at-t">军师社群 · 服务老师</Text>
             <Text className="at-s">分班与入群任务 · 服务老师带你把军师用起来</Text>
@@ -313,6 +351,9 @@ export default function Profile() {
 
       <Picker open={showPicker} first={false} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
       <Plans open={showPlans} onClose={() => setShowPlans(false)} />
+
+      {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉我的页数据 */}
+      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadProfile(); }} />
     </Screen>
   );
 }
@@ -364,9 +405,9 @@ function maturityPct(m?: string): number {
   if (m === 'forming') return 55;
   return 20;
 }
-// 提醒菜单右值：有社群显示 20:30，否则留空。
+// 提醒菜单右值：有社群显示复盘时间，否则留空。
 function reminderHint(service?: { className: string } | null): string {
-  return service ? '20:30' : '';
+  return service ? REVIEW_TIME : '';
 }
 
 function briefLine(understanding?: { maturity: string; evidenceCount: { memories: number; projects: number; knowledge: number; sessions: number } }): string {

@@ -170,7 +170,9 @@
 .fs-run { color: var(--gold-deep); background: var(--gold-soft); }
 .fs-wait { color: var(--ink-3); background: var(--surface-2); }
 .fs-bad { color: #fff; background: var(--danger); }
-.fr-del { flex-shrink: 0; margin-left: 2px; font-size: 12px; color: var(--danger); padding: 2px 4px; }
+.fr-del { position: relative; flex-shrink: 0; margin-left: 2px; font-size: 12px; color: var(--danger); padding: 2px 4px; }
+/* C4：删除是破坏性操作，命中区更要放大 → 透明外扩到 ≥44px（视觉不变） */
+.fr-del::after { content: ''; position: absolute; top: -13px; bottom: -13px; left: -14px; right: -12px; }
 .file-row.bad .fr-name { color: var(--danger); }
 .file-row.bad .fr-meta { color: var(--danger); }
 

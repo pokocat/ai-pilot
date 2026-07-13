@@ -1,15 +1,16 @@
 .plans-mask {
-  position: fixed; inset: 0; z-index: 900;
-  background: rgba(15, 17, 20, .55);
+  position: fixed; inset: 0; z-index: var(--z-sheet);
+  background: rgba(22, 25, 29, .55);
   display: flex; align-items: flex-end; justify-content: center;
 }
 .plans-sheet {
   width: 100%; max-width: 600px; max-height: 84vh;
   background: var(--bg, #fff);
-  border-radius: 22px 22px 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
   padding: 10px 20px calc(18px + env(safe-area-inset-bottom)) 20px;
   display: flex; flex-direction: column; align-items: center;
   box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
+  animation: sheet-rise .42s cubic-bezier(.2, .8, .2, 1) both;
 }
 .ps-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 0 16px; }
 .ps-head { width: 100%; display: flex; align-items: baseline; justify-content: space-between; }
@@ -32,10 +33,6 @@
 .pp-credit { display: block; font-size: 11.5px; color: var(--ink-2); margin-top: 7px; }
 .pp-feats { margin-top: 9px; display: flex; flex-direction: column; gap: 4px; }
 .pp-feat { font-size: 11px; color: var(--ink-3); display: flex; align-items: center; }
-.pp-btn {
-  margin-top: 13px; height: 40px; border-radius: 11px; border: 1px solid;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 13.5px; font-weight: 600;
-}
-.pp-btn.busy { opacity: .6; }
+/* 形与态走公共 .btn（48px/14px/active/disabled）；配色由内联 style 控制（企业版 ghost 变体） */
+.pp-btn { margin-top: 13px; }
 .ps-close { width: 100%; text-align: center; padding: 12px 0 2px; color: var(--ink-3); font-size: 13px; }

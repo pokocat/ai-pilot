@@ -33,4 +33,4 @@
 .cd-rat { display: block; font-size: 11px; color: var(--ink-3); margin-top: 3px; }
 .cd-rd { font-size: 16px; font-weight: 600; }
 .cd-rd.pos { color: #3A8A55; }
-.cd-rd.neg { color: #9C4A38; }
+.cd-rd.neg { color: var(--danger, #9C4A38); }

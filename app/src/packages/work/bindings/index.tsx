@@ -4,6 +4,7 @@ import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { DATA_BINDINGS } from '../../../data/operatingSystem';
+import { navTo } from '../../../services/nav';
 import './index.scss';
 
 // 数据源绑定：让军师从真实经营事实出发。授权类数据源接入尚未上线（引导态），
@@ -14,7 +15,7 @@ export default function Bindings() {
 
   const tap = (id: string, status: string) => {
     if (id === 'finance' || status.includes('上传')) {
-      Taro.navigateTo({ url: '/packages/work/knowledge/index' });
+      navTo('/packages/work/knowledge/index');
       return;
     }
     Taro.showToast({ title: '数据源授权接入即将开放，可先上传相关资料', icon: 'none' });
@@ -58,7 +59,7 @@ export default function Bindings() {
         <View
           className="db-action"
           style={{ background: accent }}
-          onClick={() => Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=general&fresh=1&send=${encodeURIComponent('结合我的情况，判断我现在最应该先补充哪类数据或资料，按优先级排一下。')}` })}
+          onClick={() => navTo(`/packages/main/chat/index?agentKey=general&fresh=1&send=${encodeURIComponent('结合我的情况，判断我现在最应该先补充哪类数据或资料，按优先级排一下。')}`)}
         >
           <Icon name="spark" size={16} color="#FBFAF6" />
           <Text>让军师判断绑定优先级</Text>

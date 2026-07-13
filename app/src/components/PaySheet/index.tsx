@@ -103,8 +103,8 @@ export default function PaySheet({
         {!!result && <Text className="pay-result">{result}</Text>}
 
         <View className="pay-actions">
-          <View className="pay-secondary" onClick={onClose}><Text>先不启用</Text></View>
-          <View className={`pay-primary ${busy ? 'busy' : ''}`} style={{ background: accent }} onClick={confirm}>
+          <View className="btn btn-ghost pay-secondary" onClick={onClose}><Text>先不启用</Text></View>
+          <View className={`btn btn-primary pay-primary ${busy ? 'disabled' : ''}`} style={{ background: accent }} onClick={confirm}>
             <Text>{busy ? '处理中…' : (confirmText || '确认启用')}</Text>
           </View>
         </View>

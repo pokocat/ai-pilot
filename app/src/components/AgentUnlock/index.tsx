@@ -78,7 +78,7 @@ export default function AgentUnlock({ agent, onClose, onUnlocked, source = 'cata
           <View className="au-divider" />
           <View className="au-pl">
             <Text className="au-pk">我的余额</Text>
-            <Text className="au-bal" style={{ color: enough ? 'var(--ink-2)' : '#c0392b' }}>{unlimited ? '不限量' : `${balance} 点`}</Text>
+            <Text className="au-bal" style={{ color: enough ? 'var(--ink-2)' : 'var(--danger)' }}>{unlimited ? '不限量' : `${balance} 点`}</Text>
           </View>
         </View>
 
@@ -86,15 +86,16 @@ export default function AgentUnlock({ agent, onClose, onUnlocked, source = 'cata
 
         {!enough && (
           <View className="au-low">
-            <Icon name="alert" size={13} color="#c0392b" />
+            {/* Icon 烘焙场景需 hex：#9C4A38 = var(--danger) */}
+            <Icon name="alert" size={13} color="#9C4A38" />
             <Text> 权益点不足，请到「我的 · 方案与权益点」调整</Text>
           </View>
         )}
 
         <View className="au-btns">
-          <View className="au-btn ghost" onClick={onClose}><Text>暂不启用</Text></View>
+          <View className="btn btn-ghost au-btn ghost" onClick={onClose}><Text>暂不启用</Text></View>
           <View
-            className={`au-btn primary ${!enough || busy ? 'disabled' : ''}`}
+            className={`btn btn-primary au-btn primary ${busy ? 'disabled' : ''} ${!enough ? 'insufficient' : ''}`}
             style={{ background: accent }}
             onClick={confirm}
           >

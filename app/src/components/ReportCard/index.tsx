@@ -47,6 +47,8 @@ export default function ReportCard({ data, animate = false, streaming = false, s
   const shown = streaming ? data.sections.length : revealed;
   const isDone = !streaming && done;
 
+  // B9：逐段渐显仅用于「历史/一次性成果」（animate=true，非流式）。流式路径 animate=false、shown 直接取全部，
+  // 不会走这里。此处大幅缩短首延与逐段间隔（900/640ms → 200/160ms），保留轻微错落，避免长报告等待过久。
   useEffect(() => {
     if (!animate) return;
     let i = 0;
@@ -55,12 +57,12 @@ export default function ReportCard({ data, animate = false, streaming = false, s
       i += 1;
       setRevealed(i);
       if (i < data.sections.length) {
-        timers.push(setTimeout(tick, 640));
+        timers.push(setTimeout(tick, 160));
       } else {
-        timers.push(setTimeout(() => setDone(true), 360));
+        timers.push(setTimeout(() => setDone(true), 160));
       }
     };
-    timers.push(setTimeout(tick, 900));
+    timers.push(setTimeout(tick, 200));
     return () => timers.forEach(clearTimeout);
   }, [animate, data.sections.length]);
 
@@ -117,7 +119,8 @@ export default function ReportCard({ data, animate = false, streaming = false, s
       {isDone && (
         <>
           <View className="foot">
-            <Icon name="shield" size={13} color="#969BA1" />
+            {/* B9：Icon 颜色烘焙进 SVG，不能用 var()；此处取与 --ink-3(#7E848B) 等值的 hex。 */}
+            <Icon name="shield" size={13} color="#7E848B" />
             <Text className="foot-t">{data.trust}</Text>
           </View>
           <View className="acts">
@@ -133,6 +136,7 @@ export default function ReportCard({ data, animate = false, streaming = false, s
               <Icon name={isSaved ? 'check' : 'layers'} size={14} color={isSaved ? accent : '#fff'} />
               <Text>{isSaved ? '已存入方案库' : '存入方案库'}</Text>
             </View>
+            {/* B9：以下 ghost 操作 Icon 取与 --ink-2(#565C63) 等值的 hex。 */}
             <View className="act ghost" onClick={shareImage}>
               <Icon name="image" size={14} color="#565C63" />
               <Text>分享图</Text>

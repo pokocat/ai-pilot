@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
-import Taro, { useDidShow } from '@tarojs/taro';
+import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
+import AsyncState from '../../../components/AsyncState';
 import { useStore } from '../../../hooks/useStore';
 import { api, type MyCreditItem } from '../../../services/api';
 import './index.scss';
@@ -15,10 +16,14 @@ export default function Credits() {
   const accent = color.vars['--accent'];
   const me = s.me();
   const [items, setItems] = useState<MyCreditItem[]>([]);
+  const [loading, setLoading] = useState(true); // D2：首屏加载与空态区分
 
-  useDidShow(() => {
-    api.myCredits().then((r) => setItems(r.items)).catch((e) => s.handleApiError(e));
-  });
+  const load = (done?: () => void) => {
+    api.myCredits().then((r) => setItems(r.items)).catch((e) => s.handleApiError(e)).finally(() => { setLoading(false); done?.(); });
+  };
+  useDidShow(() => load());
+  // API 单次返回最近 50 条、无分页参数 → 只做下拉刷新（工单：不支持分页则仅下拉刷新）。
+  usePullDownRefresh(() => load(() => Taro.stopPullDownRefresh()));
 
   return (
     <View className={`page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -49,7 +54,9 @@ export default function Credits() {
         <Text className="cd-sech serif">算力消耗明细</Text>
         <Text className="cd-secs">解锁顾问 / 图片产出 / 充值赠送</Text>
 
-        {items.length === 0 ? (
+        {loading && items.length === 0 ? (
+          <AsyncState loading skeletonRows={3} />
+        ) : items.length === 0 ? (
           <Text className="cd-empty">暂无算力流水。解锁专项顾问或充值后会显示在这里。</Text>
         ) : (
           <View className="cd-list">

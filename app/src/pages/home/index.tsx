@@ -12,6 +12,8 @@ import { store } from '../../services/store';
 import { api, type BattleForce, type ForceKind } from '../../services/api';
 import { MODULE_MARKET } from '../../data/operatingSystem';
 import { refreshDossier, type Dossier } from '../../services/dossier';
+import { navTo, switchTo } from '../../services/nav';
+import { REVIEW_TIME } from '../../data/constants';
 import './index.scss';
 
 function todayLabel() {
@@ -71,6 +73,8 @@ export default function Home() {
   const [pickerFirst, setPickerFirst] = useState(false);
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
   const [dossier, setDossier] = useState<Dossier | null>(null);
+  // 首帧水合标记（C2）：未完成首轮拉取前，hero 与三势区渲染骨架，避免兜底文案闪一帧再跳变。
+  const [hydrated, setHydrated] = useState(() => !s.isAuthed());
   // V7-04：认可判断 CTA 三态机 + 三势全解 / 付费 / 异常 弹层开关
   const [cta, setCta] = useState<'idle' | 'generating' | 'done'>('idle');
   const [forcesOpen, setForcesOpen] = useState(false);
@@ -84,12 +88,12 @@ export default function Home() {
   useDidShow(() => {
     s.setTab(1);
     Taro.getCurrentInstance().page?.getTabBar?.();
-    refreshDossier().then(setDossier); // 案卷已服务端化（含一次性本地迁移）
     // 今日是否已认可判断（本地按天幂等）→ 直接回显已生成态
     try { if (Taro.getStorageSync(COMMIT_KEY) === dayKey()) setCta('done'); } catch { /* noop */ }
-    if (s.isAuthed()) {
-      store.loadMe(); // 刷新军师档案（对话/资料变化后战局判断与三势随之更新）
-    }
+    // 首轮拉取（案卷 + 军师档案）完成后再标记水合，hero/三势区据此收起骨架。
+    const jobs: Promise<unknown>[] = [refreshDossier().then(setDossier)];
+    if (s.isAuthed()) jobs.push(store.loadMe()); // 刷新军师档案（对话/资料变化后战局判断与三势随之更新）
+    Promise.all(jobs).catch(() => {}).then(() => setHydrated(true));
   });
 
   useEffect(() => {
@@ -117,7 +121,7 @@ export default function Home() {
   };
   const goChat = (params: string) => {
     if (!requireLogin()) return false;
-    Taro.navigateTo({ url: `/packages/main/chat/index?${params}` });
+    navTo(`/packages/main/chat/index?${params}`);
     return true;
   };
 
@@ -127,11 +131,12 @@ export default function Home() {
   const maturityLabel = !s.isAuthed() || !und ? '—' : und.maturity === 'ready' ? '可用' : und.maturity === 'forming' ? '整理中' : '待建档';
 
   const refresh = () => {
-    refreshDossier().then(setDossier);
+    // C5：toast 移到全部刷新完成后再提示，避免「已刷新」抢在数据回来之前弹出。
+    const jobs: Promise<unknown>[] = [refreshDossier().then(setDossier)];
     if (s.isAuthed()) {
-      api.refreshForces().then(() => store.loadMe()).catch(s.handleApiError); // V7-04：刷新结构化三势后回读 /me
+      jobs.push(api.refreshForces().then(() => store.loadMe()).catch(s.handleApiError)); // V7-04：刷新结构化三势后回读 /me
     }
-    Taro.showToast({ title: '军情已刷新', icon: 'none' });
+    Promise.all(jobs).then(() => Taro.showToast({ title: '军情已刷新', icon: 'none' }));
   };
   const startInterview = () =>
     goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
@@ -144,7 +149,7 @@ export default function Home() {
   // 认可判断 → 生成军令与报告（三态机）：idle→generating→done。
   const handleBattleCta = () => {
     if (cta === 'generating') return; // 生成中锁定
-    if (cta === 'done') { Taro.switchTab({ url: '/pages/studio/index' }); return; } // 已生成 → 去执行页看军令与报告
+    if (cta === 'done') { switchTo('/pages/studio/index'); return; } // 已生成 → 去执行页看军令与报告
     if (!requireLogin()) return;
     setCta('generating');
     api.battleCommit()
@@ -167,15 +172,15 @@ export default function Home() {
   const ctaText = cta === 'generating'
     ? { t: '正在生成军令与方案…', s: '读取案卷、战局和执行建议', icon: '…' }
     : cta === 'done'
-      ? { t: '已生成 → 查看军令与方案', s: '已同步到执行页、方案库和 20:30 复盘', icon: '✓' }
-      : { t: '认可判断 → 生成军令与方案', s: '同步到执行页、方案库和 20:30 复盘', icon: '›' };
+      ? { t: '已生成 → 查看军令与方案', s: `已同步到执行页、方案库和 ${REVIEW_TIME} 复盘`, icon: '✓' }
+      : { t: '认可判断 → 生成军令与方案', s: `同步到执行页、方案库和 ${REVIEW_TIME} 复盘`, icon: '›' };
 
   return (
     <Screen topInset className="home">
       <View className="pad">
         {/* 页头（对齐设计稿）：左「案卷」· 中「军情」· 右刷新 */}
         <View className="battle-nav tab-page-head">
-          <Text className="bn-side left serif" onClick={() => requireLogin() && Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
+          <Text className="bn-side left serif" onClick={() => requireLogin() && navTo('/packages/work/projects/index')}>案卷</Text>
           <Text className="bn-title serif">军情</Text>
           <Text className="bn-side right" onClick={refresh}>↻</Text>
         </View>
@@ -183,17 +188,28 @@ export default function Home() {
         {/* 军师判断 hero：主题色主要矛盾 + 案卷来源行 */}
         <View className="battle-hero" onClick={() => goChat('agentKey=general&continue=1')}>
           <Text className="bh-kicker">军师判断 · 主要矛盾</Text>
-          <Text className="bh-source">
-            {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
-          </Text>
-          <Text className="bh-title serif">
-            {und?.mainContradiction || und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
-          </Text>
+          {!hydrated ? (
+            /* C2：首帧骨架，等案卷/军师档案回来再落定，避免兜底文案闪跳 */
+            <View className="bh-sk">
+              <View className="bh-sk-bar short" />
+              <View className="bh-sk-bar wide" />
+              <View className="bh-sk-bar" />
+            </View>
+          ) : (
+            <>
+              <Text className="bh-source">
+                {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
+              </Text>
+              <Text className="bh-title serif">
+                {und?.mainContradiction || und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
+              </Text>
+            </>
+          )}
         </View>
 
         {/* 战局信号（metric-grid）：案卷完整度 / 待补资料 / 风险锁 —— 全部真实状态 */}
         <View className="metric-grid">
-          <View className="metric card" onClick={() => requireLogin() && Taro.navigateTo({ url: '/packages/main/brief/index' })}>
+          <View className="metric card" onClick={() => requireLogin() && navTo('/packages/main/brief/index')}>
             <Text className="metric-v serif">{maturityLabel}</Text>
             <Text className="metric-l">案卷完整度</Text>
           </View>
@@ -218,7 +234,18 @@ export default function Home() {
               <Text className="force-hint"><Text className="fh-b">整卡</Text>看全解 · 小框看单势</Text>
             ) : null}
           </View>
-          {forces.length ? (
+          {!hydrated ? (
+            /* C2：三势区首帧骨架，区分「加载中」与「真空态」，不把空态当加载中显示 */
+            <View className="force-grid">
+              {[0, 1, 2].map((i) => (
+                <View key={i} className="force card force-sk">
+                  <View className="fsk-bar short" />
+                  <View className="fsk-bar" />
+                  <View className="fsk-bar wide" />
+                </View>
+              ))}
+            </View>
+          ) : forces.length ? (
             <View className="force-grid" onClick={openForces}>
               {forces.map((f) => (
                 <View key={f.kind} className="force card">
@@ -268,7 +295,7 @@ export default function Home() {
           {MODULE_MARKET.slice(0, 3).map((m) => {
             const owner = m.agentKey ? s.agents().find((a) => a.key === m.agentKey)?.name : undefined;
             return (
-              <View key={m.id} className="linkmod" onClick={() => Taro.navigateTo({ url: '/packages/work/market/index' })}>
+              <View key={m.id} className="linkmod" onClick={() => navTo('/packages/work/market/index')}>
                 <Text className="linkmod-name serif">{m.title}</Text>
                 <Text className="linkmod-mini">{owner || m.category}</Text>
                 <Text className={`module-tier tier-${m.tier}`}>{m.price}</Text>
@@ -284,7 +311,7 @@ export default function Home() {
           const sum = (k: 'leads' | 'consults' | 'deals') => days.reduce((acc, d) => acc + (parseInt(dossier!.backfill[d][k] || '0', 10) || 0), 0);
           const rows: [string, number][] = [['线索', sum('leads')], ['咨询', sum('consults')], ['成交', sum('deals')]];
           return (
-            <View className="kpi-card card" onClick={() => Taro.switchTab({ url: '/pages/studio/index' })}>
+            <View className="kpi-card card" onClick={() => switchTo('/pages/studio/index')}>
               <View className="kpi-head">
                 <Text className="section-label">经 营 数 据</Text>
                 <Text className="kpi-sub">近 {days.length} 天记录</Text>

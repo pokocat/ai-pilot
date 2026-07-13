@@ -5,14 +5,30 @@ import { useEffect, useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { api, type PrescriptionView } from '../../services/api';
+import { navTo } from '../../services/nav';
 import './index.scss';
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 
 export default function PrescriptionStrip() {
   const [items, setItems] = useState<PrescriptionView[]>([]);
-  useEffect(() => { api.prescriptions().then((r) => setItems(r.items)).catch(() => {}); }, []);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { api.prescriptions().then((r) => setItems(r.items)).catch(() => {}).finally(() => setLoaded(true)); }, []);
   const active = items.filter((p) => p.status !== 'dismissed' && p.status !== 'activated');
+
+  // 首帧未加载完成：占位骨架，避免处方条「后弹入」挤动布局；加载完无处方则收起。
+  if (!loaded) {
+    return (
+      <View className="rx-strip">
+        <View className="rx-item rx-skeleton">
+          <View className="rx-main">
+            <View className="rx-sk rx-sk-for" />
+            <View className="rx-sk rx-sk-play" />
+          </View>
+        </View>
+      </View>
+    );
+  }
   if (!active.length) return null;
 
   const open = (p: PrescriptionView) => {
@@ -31,7 +47,7 @@ export default function PrescriptionStrip() {
       });
       return;
     }
-    Taro.navigateTo({ url: `/packages/work/market/index?from=prescription&pid=${p.id}` });
+    navTo(`/packages/work/market/index?from=prescription&pid=${p.id}`);
   };
 
   return (

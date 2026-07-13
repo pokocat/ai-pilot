@@ -36,7 +36,7 @@
   transform: scale(1.14);
 }
 .tab-label {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 10.5px; letter-spacing: .04em; color: var(--ink-3); line-height: 1; font-weight: 400;
 }
 .tab.on .tab-label { font-weight: 600; }

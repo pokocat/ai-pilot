@@ -137,7 +137,7 @@ export default function Command() {
           </View>
         </View>
       </View>
-      <View style={{ height: '24px' }} />
+      <View style={{ height: 'calc(24px + env(safe-area-inset-bottom))' }} />
     </View>
   );
 }

@@ -13,11 +13,23 @@ export default function DossierPage() {
   const [ready, setReady] = useState(false);
 
   const generate = async () => {
-    if (loading) return;
+    if (loading || !ready) return; // D5：ready 前禁用，避免空态误触生成
     setLoading(true);
     try { const r = await api.generateDossier(); setReport(r.report); }
     catch (e) { s.handleApiError(e); }
     finally { setLoading(false); }
+  };
+
+  // D5：刷新履历会重新消耗额度重写，加一道轻确认防误触。
+  const regenerate = () => {
+    if (loading) return;
+    Taro.showModal({
+      title: '刷新完整履历',
+      content: '将重新执笔生成一份履历（会消耗一次额度），覆盖当前这份。确定刷新？',
+      confirmText: '刷新',
+      cancelText: '再想想',
+      success: (r) => { if (r.confirm) void generate(); },
+    });
   };
 
   useEffect(() => {
@@ -35,13 +47,13 @@ export default function DossierPage() {
   }, []);
 
   return (
-    <View className="page dossier-page">
+    <View className={`page dossier-page ${s.themeClass()}`}>
       <SafeHeader title="完整履历" onBack={() => Taro.navigateBack()} titleClassName="ds-navtitle" />
       {!report ? (
         <View className="ds-empty">
           <Text className="ds-empty-t serif">创始人战略档案</Text>
           <Text className="ds-empty-d">军师把你的资料——档案、对话、案卷、战略——蒸馏成一份完整履历。资料够了会自动为你立档，越全写得越透；也可以现在就手动生成。</Text>
-          <View className={`ds-gen ${loading ? 'busy' : ''}`} onClick={generate}>
+          <View className={`ds-gen ${loading || !ready ? 'busy' : ''}`} onClick={generate}>
             <Text>{loading ? '军师执笔中…' : (ready ? '生成完整履历' : '加载中…')}</Text>
           </View>
         </View>
@@ -67,7 +79,7 @@ export default function DossierPage() {
           ))}
           <View className="ds-foot">
             <Text className="ds-foot-brand serif">军师参谋部</Text>
-            <Text className="ds-regen" onClick={generate}>{loading ? '刷新中…' : '刷新履历'}</Text>
+            <Text className="ds-regen" onClick={regenerate}>{loading ? '刷新中…' : '刷新履历'}</Text>
           </View>
         </ScrollView>
       )}

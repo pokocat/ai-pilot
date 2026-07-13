@@ -6,11 +6,14 @@ import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api } from '../../../services/api';
+import { checkUpload } from '../../../services/uploadGuard';
+import pkg from '../../../../package.json';
 import './index.scss';
 
 const isWeapp = process.env.TARO_ENV === 'weapp';
 
-const VERSION = 'v1.0.0';
+// B8：版本号从 app/package.json 构建期注入（resolveJsonModule），避免与真实发版号脱节。
+const VERSION = `v${pkg.version}`;
 
 const AGREEMENT = '军师为创始人/管理者提供 AI 商业参谋服务。AI 产出仅供参考，重大经营决策请结合专业意见与自身判断；你对账号下的内容与决策负责。我们按约定提供服务并保障可用性。';
 const PRIVACY = '我们仅收集为你提供服务所必需的信息（账号标识、你主动填写的企业档案与对话内容），用于生成与你相关的产出，不向第三方出售。你可随时在「设置」中修改资料，或联系我们删除账号与数据。';
@@ -29,6 +32,12 @@ export default function Settings() {
   const onChooseAvatar = async (e: { detail?: { avatarUrl?: string } }) => {
     const path = e?.detail?.avatarUrl;
     if (!path || avatarUploading) return;
+    // B8：复用 chat 上传前置校验（体积/格式），避免放行后被服务端 413 拒绝、只留一句无信息量报错。
+    try {
+      const info = await Taro.getFileInfo({ filePath: path }) as { size?: number };
+      const chk = checkUpload({ name: path, size: info?.size });
+      if (!chk.ok) { Taro.showToast({ title: chk.desc || '头像不符合上传要求', icon: 'none' }); return; }
+    } catch { /* 拿不到文件信息则跳过体积校验，继续上传 */ }
     setAvatarUploading(true);
     try {
       await api.uploadAvatar(path);
@@ -76,7 +85,7 @@ export default function Settings() {
       title: '注销账号',
       content: '注销将永久删除你的账号、对话、方案库与全部数据，且不可恢复。确定继续？',
       confirmText: '永久注销',
-      confirmColor: '#c0392b',
+      confirmColor: '#9C4A38', // = var(--danger)，showModal 仅接受 hex
     }).then(async (r) => {
       if (!r.confirm) return;
       try {
@@ -141,6 +150,7 @@ export default function Settings() {
         </View>
 
         <View className="set-logout" onClick={logout}>
+          {/* Icon 烘焙场景需 hex：#9C4A38 = var(--danger) */}
           <Icon name="lock" size={15} color="#9C4A38" /><Text> 退出登录</Text>
         </View>
         <Text className="set-danger" onClick={deleteAccount}>注销账号</Text>

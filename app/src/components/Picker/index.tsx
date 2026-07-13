@@ -110,7 +110,7 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
   };
 
   return (
-    <View className="picker">
+    <View className="picker" catchMove>
       <View className="pk-card" style={{ borderColor: c.vars['--accent-soft'] }}>
         {!first && (
           <View className="pk-close" onClick={onClose}>

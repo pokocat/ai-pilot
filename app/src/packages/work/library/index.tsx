@@ -3,7 +3,9 @@ import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
+import AsyncState from '../../../components/AsyncState';
 import { useStore } from '../../../hooks/useStore';
+import { navTo, switchTo } from '../../../services/nav';
 import { api, type LibItem } from '../../../services/api';
 import './index.scss';
 
@@ -17,16 +19,17 @@ export default function Library() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [items, setItems] = useState<LibItem[]>([]);
+  const [loading, setLoading] = useState(true); // D2：首屏加载与空态区分，避免拉取期间闪空态
 
   useDidShow(() => {
-    api.library().then(setItems).catch((e) => { s.handleApiError(e); setItems([]); });
+    api.library().then(setItems).catch((e) => { s.handleApiError(e); setItems([]); }).finally(() => setLoading(false));
   });
 
   const open = (it: LibItem) => {
     // 有版本化报告 → 进报告页看版本与变更；否则回到产出它的会话继续深化
-    if (it.reportId) Taro.navigateTo({ url: `/packages/work/report/index?id=${it.reportId}` });
-    else if (it.sessionId) Taro.navigateTo({ url: `/packages/main/chat/index?sessionId=${it.sessionId}` });
-    else Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${it.agentKey}&continue=1` });
+    if (it.reportId) navTo(`/packages/work/report/index?id=${it.reportId}`);
+    else if (it.sessionId) navTo(`/packages/main/chat/index?sessionId=${it.sessionId}`);
+    else navTo(`/packages/main/chat/index?agentKey=${it.agentKey}&continue=1`);
   };
 
   return (
@@ -34,12 +37,14 @@ export default function Library() {
       <SafeHeader title="我的方案库" onBack={() => Taro.navigateBack()} titleClassName="lib-title" />
 
       <View className="pad" style={{ paddingTop: '12px' }}>
-        {items.length === 0 ? (
+        {loading && items.length === 0 ? (
+          <AsyncState loading skeletonRows={3} />
+        ) : items.length === 0 ? (
           <View className="lib-empty">
             <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="layers" size={22} color={accent} /></View>
             <Text className="et">方案库还是空的</Text>
             <Text className="es">在对话里让军师产出方案后，点「存入方案库」即可在此查看与回溯。</Text>
-            <View className="es-btn" style={{ background: accent }} onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
+            <View className="es-btn" style={{ background: accent }} onClick={() => switchTo('/pages/sessions/index')}>
               <Text>去参谋室产出第一份方案</Text>
             </View>
           </View>

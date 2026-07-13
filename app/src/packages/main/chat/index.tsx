@@ -1,6 +1,6 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { View, Text, Textarea, ScrollView } from '@tarojs/components';
-import Taro, { useRouter } from '@tarojs/taro';
+import Taro, { useRouter, useDidHide } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import Login from '../../../components/Login';
 import MarkdownText from '../../../components/MarkdownText';
@@ -11,20 +11,21 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../../services/api';
 import { STREAM_CHAT } from '../../../services/config';
-import { generateStream } from '../../../services/streaming';
+import { generateStream, type StreamControl } from '../../../services/streaming';
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
 import { checkUpload } from '../../../services/uploadGuard';
 import { agentForText } from '../../../data/intents';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../../data/council';
 import { CHAT_GUIDES } from '../../../data/operatingSystem';
 import { acceptDeliverable } from '../../../services/dossier';
+import { navTo } from '../../../services/nav';
 import './index.scss';
 
 type Msg =
   | { role: 'greet'; agent: Agent }
   | { role: 'user'; text: string; refs?: MessageRef[] }
   | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; retryText?: string; streaming?: boolean }
-  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; streaming?: boolean }
+  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; streaming?: boolean; retryText?: string }
   | { role: 'memory'; agentName: string };
 
 // 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
@@ -91,6 +92,7 @@ function mergeReportSection(sections: Section[], section: Section & { index?: nu
 
 type ChatStyle = CSSProperties & {
   '--keyboard-height'?: string;
+  '--jump-bottom'?: string;
 };
 
 type ChatScrollEvent = {
@@ -104,9 +106,28 @@ type ChatScrollEvent = {
 const FIXED_MODEL = '军师 · 标准';
 const JUMP_LATEST_SHOW_DISTANCE = 420;
 const JUMP_LATEST_HIDE_DISTANCE = 140;
+// B1 贴底判定阈值：距底 ≤ 此值视为「贴底跟随」，用户上滑超过即暂停自动滚底。
+const STICK_BOTTOM_DISTANCE = 120;
+// B1 流式跟随节流间隔：onToken/onReportSection 高频触发，滚底最多每 ~300ms 一次。
+const FOLLOW_THROTTLE_MS = 300;
+// B6 输入计数：临近上限（>1800/2000）才显示字数，平时不打扰。
+const INPUT_MAX = 2000;
+const INPUT_COUNT_FROM = 1800;
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
+
+// B3 草稿持久化 / B4 已入库标记：本地 Storage 键。
+const draftKeyFor = (id?: string) => `chat-draft:${id || 'new'}`;
+const SAVED_REPORTS_KEY = 'saved-report-ids';
+const getSavedReportIds = (): string[] => {
+  try { const v = Taro.getStorageSync(SAVED_REPORTS_KEY); return Array.isArray(v) ? v : []; } catch { return []; }
+};
+const isReportSaved = (id?: string) => !!id && getSavedReportIds().includes(id);
+const markReportSaved = (id?: string) => {
+  if (!id) return;
+  try { const ids = getSavedReportIds(); if (!ids.includes(id)) Taro.setStorageSync(SAVED_REPORTS_KEY, [...ids, id]); } catch { /* noop */ }
+};
 
 export default function Chat() {
   const router = useRouter();
@@ -132,6 +153,25 @@ export default function Chat() {
   const logRef = useRef<Msg[]>([]);
   logRef.current = msgs;
 
+  // B1 贴底跟随：atBottom 记录用户是否停留在底部；上滑离开即暂停自动跟随。
+  const atBottomRef = useRef(true);
+  const lastFollowRef = useRef(0);
+  const followTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // B2 停止生成：当前流的中断句柄 + 是否被用户主动停止。
+  const controlRef = useRef<StreamControl | null>(null);
+  const abortedRef = useRef(false);
+  // B3 草稿：用 ref 取最新值，供 onBlur / useDidHide 闭包读取。
+  const inputRef = useRef('');
+  inputRef.current = input;
+  const sessionIdRef = useRef('');
+  sessionIdRef.current = sessionId;
+  // B5 上传：可取消的非模态进度（scope 限制未透出 uploadFile task，故 cancel 为「放弃等待/不挂引用」）。
+  const [uploading, setUploading] = useState(false);
+  const uploadCancelledRef = useRef(false);
+  // B6 jump-latest 与 composer 高度联动：测量输入区顶部到屏底的距离，驱动 --jump-bottom。
+  const [jumpBottom, setJumpBottom] = useState(0);
+  const winHeightRef = useRef(0);
+
   const findAgent = (key: string): Agent | undefined => s.agents().find((a) => a.key === key);
 
   const measureChatLog = () => {
@@ -144,9 +184,37 @@ export default function Chat() {
       .exec();
   };
 
+  // B1：用户主动/事件触发的「回到最新」——强制滚底并恢复跟随。
   const scrollToEnd = () => {
+    atBottomRef.current = true;
+    if (followTimerRef.current) { clearTimeout(followTimerRef.current); followTimerRef.current = null; }
+    lastFollowRef.current = Date.now();
     setShowJumpLatest(false);
     setScrollTop((t) => t + 100000);
+  };
+
+  // B1：流式期间的跟随——仅当用户仍贴底时滚底，且节流到 ~300ms 一次，尊重上滑。
+  const followBottom = (immediate = false) => {
+    if (!atBottomRef.current) return;
+    if (immediate) {
+      if (followTimerRef.current) { clearTimeout(followTimerRef.current); followTimerRef.current = null; }
+      lastFollowRef.current = Date.now();
+      setScrollTop((t) => t + 100000);
+      return;
+    }
+    const now = Date.now();
+    const since = now - lastFollowRef.current;
+    if (since >= FOLLOW_THROTTLE_MS) {
+      lastFollowRef.current = now;
+      setScrollTop((t) => t + 100000);
+    } else if (!followTimerRef.current) {
+      followTimerRef.current = setTimeout(() => {
+        followTimerRef.current = null;
+        if (!atBottomRef.current) return;
+        lastFollowRef.current = Date.now();
+        setScrollTop((t) => t + 100000);
+      }, FOLLOW_THROTTLE_MS - since);
+    }
   };
 
   const handleLogScroll = (e: ChatScrollEvent) => {
@@ -158,6 +226,8 @@ export default function Chat() {
       return;
     }
     const distanceToBottom = scrollHeight - top - height;
+    // B1：单一「贴底」判定，驱动流式跟随开关。
+    atBottomRef.current = distanceToBottom <= STICK_BOTTOM_DISTANCE;
     setShowJumpLatest((visible) => {
       if (visible) return distanceToBottom > JUMP_LATEST_HIDE_DISTANCE;
       return distanceToBottom > JUMP_LATEST_SHOW_DISTANCE;
@@ -168,11 +238,50 @@ export default function Chat() {
     if (busy) setTimeout(scrollToEnd, 40);
   }, [busy]);
 
+  // B6：测量输入区顶部到屏底距离（含多行增高 / 引用行 / 键盘 / 安全区），驱动 jump-latest 定位。
+  const measureDock = () => {
+    if (!winHeightRef.current) {
+      try {
+        const info = (Taro as unknown as { getWindowInfo?: () => { windowHeight?: number } }).getWindowInfo?.()
+          || Taro.getSystemInfoSync?.();
+        winHeightRef.current = Number((info as { windowHeight?: number })?.windowHeight || 0);
+      } catch { /* noop */ }
+    }
+    const winH = winHeightRef.current;
+    if (!winH) return;
+    Taro.createSelectorQuery()
+      .select('.composer-dock')
+      .boundingClientRect((rect) => {
+        const top = Number((rect as { top?: number } | null)?.top || 0);
+        if (top > 0) setJumpBottom(Math.max(0, winH - top));
+      })
+      .exec();
+  };
+
   useEffect(() => {
     setTimeout(measureChatLog, 80);
-  }, [keyboardHeight, refs.length, msgs.length]);
+    setTimeout(measureDock, 80);
+  }, [keyboardHeight, refs.length, msgs.length, input, uploading]);
 
   useEffect(() => () => store.setOverlay(false, 'ref-picker'), []);
+
+  // B3 草稿持久化：按 sessionId 维度存/取；发送成功后清除。
+  const loadDraft = (id?: string) => {
+    try { const d = Taro.getStorageSync(draftKeyFor(id)); if (d && typeof d === 'string') setInput(d); } catch { /* noop */ }
+  };
+  const saveDraft = () => {
+    try {
+      const k = draftKeyFor(sessionIdRef.current);
+      const v = inputRef.current.trim();
+      if (v) Taro.setStorageSync(k, inputRef.current);
+      else Taro.removeStorageSync(k);
+    } catch { /* noop */ }
+  };
+  const clearDraft = (id?: string) => {
+    try { Taro.removeStorageSync(draftKeyFor(id ?? sessionIdRef.current)); } catch { /* noop */ }
+  };
+  // 切后台/离开页面时落草稿，避免误触返回丢失长输入。
+  useDidHide(() => { saveDraft(); });
 
   const isUnauthorized = (e: unknown) =>
     (e as any)?.code === 'UNAUTHORIZED' || String((e as any)?.message || '').includes('未登录');
@@ -246,6 +355,7 @@ export default function Chat() {
         setSessionId(sid);
         if (detail.projectId) setProjectId(detail.projectId);
         restore(ag, detail.messages);
+        loadDraft(sid);
         return;
       }
 
@@ -263,12 +373,14 @@ export default function Chat() {
           setSessionId(latest.id);
           if (detail.projectId) setProjectId(detail.projectId);
           restore(fallbackAgent, detail.messages);
+          loadDraft(latest.id);
           if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key, [], true, detail.projectId || pid || ''), 300);
           return;
         }
       }
       // 全新会话：仅渲染问候（不落库），首条消息时后端创建
       setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+      loadDraft('');
       if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key, [], true, pid || ''), 350);
     } catch (e) {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
@@ -288,7 +400,11 @@ export default function Chat() {
     const out: Msg[] = [{ role: 'greet', agent: ag }];
     messages.forEach((m) => {
       if (m.role === 'user') out.push({ role: 'user', text: m.content.text, refs: m.refs });
-      else if (m.role === 'report') out.push({ role: 'report', deliverable: m.content, animate: false, saved: false, messageId: m.id });
+      // B4：已入库真值——优先取服务端字段（若有），否则回落到本地保存记录，避免已入库方案重复显示「存入方案库」。
+      else if (m.role === 'report') out.push({
+        role: 'report', deliverable: m.content, animate: false, messageId: m.id,
+        saved: !!((m as { saved?: boolean }).saved || (m.content as { saved?: boolean })?.saved || isReportSaved(m.id)),
+      });
       else out.push({ role: 'assistant', reply: m.content });
     });
     setMsgs(out);
@@ -309,6 +425,9 @@ export default function Chat() {
       return;
     }
     setBusy(true);
+    abortedRef.current = false;
+    // B3：发送即清掉本会话草稿（输入已上屏；失败可用气泡「重试」重发，无需草稿）。
+    clearDraft();
     // P2-15：重试（echo=false）不重复回显用户气泡（用户消息已在首次尝试时显示）。
     if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
@@ -374,21 +493,38 @@ export default function Chat() {
             return m;
         });
         setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
+        const control: StreamControl = { abort: () => {} };
+        controlRef.current = control;
         const streamOk = await generateStream(
           body,
           {
             onSession: (id) => { if (id && !sid) setSessionId(id); },
-            onToken: (t) => patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })),
+            onToken: (t) => { patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })); followBottom(); },
             onChat: (reply) => patch((msg) => ({ ...msg, reply })), // 完整回复权威兜底：token 渲染即便有偏差，最终内容仍正确
             onDone: () => patch((msg) => ({ ...msg, streaming: false })),
             onError: (em) => patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false })),
           },
+          control,
         );
-        if (!streamOk) {
+        // B2：被用户主动停止时，静默收尾（清掉「生成中」态、不再兜底重发一遍）；
+        // 若还没吐出任何字，直接移除空气泡，避免留下空壳。
+        if (abortedRef.current) {
+          setMsgs((m) => {
+            const i = m.length - 1;
+            if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+              const cur = m[i] as Extract<Msg, { role: 'assistant' }>;
+              const copy = m.slice();
+              if (!cur.reply.text) { copy.splice(i, 1); return copy; }
+              copy[i] = { ...cur, streaming: false };
+              return copy;
+            }
+            return m;
+          });
+        } else if (!streamOk) {
           const res = await api.generate(body);
           renderGenerateResult(res, true);
         }
-        setTimeout(scrollToEnd, 80);
+        followBottom(true);
       } else if (canStreamReport) {
         let reportStarted = false;
         let chatStarted = false;
@@ -430,6 +566,8 @@ export default function Chat() {
           setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
           setTimeout(scrollToEnd, 30);
         };
+        const control: StreamControl = { abort: () => {} };
+        controlRef.current = control;
         try {
         const streamOk = await generateStream(body, {
           onSession: (id) => { if (id && !sid) setSessionId(id); },
@@ -446,7 +584,7 @@ export default function Chat() {
           onReportSection: (section) => {
             startReport();
             patchReport((d) => ({ ...d, sections: mergeReportSection(d.sections, section) }));
-            setTimeout(scrollToEnd, 40);
+            followBottom(); // B1：仅当用户仍贴底才跟随，尊重上滑
           },
           onReportFooter: (data) => {
             startReport();
@@ -460,6 +598,7 @@ export default function Chat() {
             if (reportStarted) return;
             startChat();
             patchChat((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } }));
+            followBottom();
           },
           onChat: (reply) => {
             if (reportStarted) return;
@@ -476,27 +615,31 @@ export default function Chat() {
               patchChat((msg) => ({ ...msg, streaming: false }));
             }
             if (learnedAgentName) showMemoryLearned(learnedAgentName, 600);
-            setTimeout(scrollToEnd, 80);
+            followBottom(true);
           },
           onError: (em) => {
             if (reportStarted) {
-              patchReport((d) => ({ ...d, trust: em || '生成中断，请重试', degraded: true }), { streaming: false });
+              // B4：报告流失败挂上「重试」原文，卡片下方给 ↻ 入口（审核类错误不给重试）。
+              patchReport((d) => ({ ...d, trust: em || '生成中断，请重试', degraded: true }), { streaming: false, retryText: isModerationErr(em) ? undefined : text });
             } else if (chatStarted) {
               patchChat((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false }));
             }
           },
-        });
-        if (!streamOk && !reportStarted && !chatStarted) {
+        }, control);
+        // B2：主动停止时不兜底重发；仅确保 chat 分支的「生成中」态被收干净（report 分支在 finally 收尾）。
+        if (abortedRef.current) {
+          if (chatStarted) patchChat((msg) => ({ ...msg, streaming: false }));
+        } else if (!streamOk && !reportStarted && !chatStarted) {
           const res = await api.generate(body);
           renderGenerateResult(res);
         }
         } finally {
-          // P0-5 双保险：报告流无论 promise 结果（含中途抛错），最终强制把报告卡 streaming 置 false，
+          // P0-5 双保险：报告流无论 promise 结果（含中途抛错/主动停止），最终强制把报告卡 streaming 置 false，
           // 避免流正常收尾却未触发 onDone/onError 时报告卡永久停在「产出中」。
           // patchReport 仅改「末条且仍 streaming」的报告卡，onDone 已收尾时此处为幂等 no-op。
           if (reportStarted) patchReport((d) => d, { streaming: false });
         }
-        setTimeout(scrollToEnd, 80);
+        followBottom(true);
       } else {
         const res = await api.generate(body);
         renderGenerateResult(res);
@@ -509,8 +652,16 @@ export default function Chat() {
       setMsgs((m) => [...m, { role: 'assistant', reply: { text: reply }, retryText: isModerationErr(reply) ? undefined : text }]);
     } finally {
       setBusy(false);
+      controlRef.current = null;
     }
   }
+
+  // B2 停止生成：中断当前流；abortedRef 让 doSend 跳过兜底重发并收干净「生成中」态。
+  const stopGeneration = () => {
+    if (!busy) return;
+    abortedRef.current = true;
+    controlRef.current?.abort();
+  };
 
   const handleInput = (e: { detail: { value: string } }) => {
     if (busy) return input;
@@ -536,25 +687,27 @@ export default function Chat() {
     if (next > 0) setTimeout(scrollToEnd, 40);
   };
 
-  const saveDeliverable = async (d: Deliverable) => {
+  const saveDeliverable = async (d: Deliverable, messageId?: string) => {
     if (!agent) return;
     await api.saveToLibrary({
       // 三势研判入口进来的，type 打成「{势}研判」（如 市势研判），战局卡按 type 可靠反查
       title: d.title, type: forceTag ? `${forceTag}研判` : (agent.deliverableKey || d.title), agentKey: agent.key,
       sessionId: sessionId || undefined, content: d as any, projectId: projectId || undefined,
     }).catch(() => {});
+    // B4：本地记下已入库的报告 messageId，历史 restore 时回填 saved 真值，避免重复显示「存入方案库」。
+    markReportSaved(messageId);
     Taro.showToast({ title: '已存入方案库', icon: 'none' });
   };
 
   // 认可方案：存入方案库（桥接一版报告）+ 服务端生成案卷军令 → 去执行页承接打卡与回填
-  const acceptPlan = async (d: Deliverable) => {
+  const acceptPlan = async (d: Deliverable, messageId?: string) => {
     const r = await acceptDeliverable(d, agent?.name || '军师', forceTag || undefined).catch(() => null);
     if (!r) { Taro.showToast({ title: '案卷生成失败，请重试', icon: 'none' }); return; }
     if (!r.newOrders && r.skippedOrders) {
       Taro.showToast({ title: '这份方案已转成军令，不重复添加', icon: 'none' });
       return;
     }
-    await saveDeliverable(d);
+    await saveDeliverable(d, messageId);
     Taro.showToast({ title: r.newOrders ? `已生成案卷 · ${r.newOrders} 条军令待执行` : '已生成案卷', icon: 'none' });
     setTimeout(() => Taro.switchTab({ url: '/pages/studio/index' }), 620);
   };
@@ -566,7 +719,7 @@ export default function Chat() {
       Taro.showToast({ title: '先让军师产出一份方案，认可后即可转成军令', icon: 'none' });
       return;
     }
-    acceptPlan(lastReport.deliverable);
+    acceptPlan(lastReport.deliverable, lastReport.messageId);
   };
 
   // 切换军师线程（派单 / 回总军师）：redirectTo 保持页面栈扁平，带 prompt 时直接开场
@@ -574,7 +727,7 @@ export default function Chat() {
     const url = `/packages/main/chat/index?agentKey=${agentKey}&fresh=1${prompt ? `&send=${encodeURIComponent(prompt)}` : ''}`;
     Taro.redirectTo({ url });
   };
-  const openGuide = (url: string) => Taro.navigateTo({ url });
+  const openGuide = (url: string) => navTo(url);
 
   // 生成网页版报告（render_report → 自有域名 /api/r/:id，接口幂等）→ 直接打开：weapp 走内置 web-view 页，H5 开新窗口。
   const shareReport = async (messageId?: string) => {
@@ -587,8 +740,7 @@ export default function Chat() {
       if (!r.htmlUrl) { Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' }); return; }
       // D-3-4：网页版仅本人自用（web-view 打开查看）；不再提供「复制链接」对外分享入口。
       if (IS_WEAPP) {
-        Taro.navigateTo({
-          url: `/packages/work/webview/index?url=${encodeURIComponent(r.htmlUrl)}`,
+        navTo(`/packages/work/webview/index?url=${encodeURIComponent(r.htmlUrl)}`, {
           fail: () => Taro.showToast({ title: '网页打开失败，请稍后重试', icon: 'none' }),
         });
       } else if (typeof window !== 'undefined' && window.open) {
@@ -610,7 +762,7 @@ export default function Chat() {
       const r = await api.summarize(sessionId);
       Taro.hideLoading();
       Taro.showToast({ title: `已生成《${r.title}》v${r.version}`, icon: 'none' });
-      setTimeout(() => Taro.navigateTo({ url: `/packages/work/report/index?id=${r.reportId}` }), 700);
+      setTimeout(() => navTo(`/packages/work/report/index?id=${r.reportId}`), 700);
     } catch {
       Taro.hideLoading();
       Taro.showToast({ title: '生成纪要失败', icon: 'none' });
@@ -667,17 +819,28 @@ export default function Chat() {
       Taro.showToast({ title: chk.desc || '文件不符合上传要求', icon: 'none' });
       return;
     }
-    Taro.showLoading({ title: '上传中…' });
+    // B5：非模态可取消上传（替代阻塞式 showLoading）。scope 未透出 uploadFile task，
+    // 取消 = 放弃等待、不挂引用；后端仍会完成解析，无副作用。
+    uploadCancelledRef.current = false;
+    setUploading(true);
     try {
       const { id } = await api.uploadKnowledge(f.path, projectId || undefined);
-      Taro.hideLoading();
+      if (uploadCancelledRef.current) return; // 已取消：结果不挂引用
       const label = f.name || '上传资料';
       setRefs((cur) => cur.some((x) => x.kind === 'knowledge' && x.id === id) ? cur : [...cur, { kind: 'knowledge', id, label }]);
       Taro.showToast({ title: '已上传，解析中…可直接发送提问', icon: 'none' });
     } catch (e) {
-      Taro.hideLoading();
+      if (uploadCancelledRef.current) return; // 取消引发的失败静默
       Taro.showToast({ title: (e as Error).message || '上传失败', icon: 'none' });
+    } finally {
+      setUploading(false);
     }
+  };
+
+  const cancelUpload = () => {
+    uploadCancelledRef.current = true;
+    setUploading(false);
+    Taro.showToast({ title: '已取消上传', icon: 'none' });
   };
 
   // 打开 @引用选择器：拉取可引用的 案卷/方案/资料
@@ -722,7 +885,7 @@ export default function Chat() {
   };
 
   return (
-    <View className={`page chat ${s.themeClass()}`} style={{ '--keyboard-height': `${keyboardHeight}px` } as ChatStyle}>
+    <View className={`page chat ${s.themeClass()}`} style={{ '--keyboard-height': `${keyboardHeight}px`, '--jump-bottom': jumpBottom ? `${jumpBottom}px` : undefined } as ChatStyle}>
       {/* 顾问身份头 */}
       <SafeHeader
         className="chat-head"
@@ -753,7 +916,7 @@ export default function Chat() {
       {/* 案卷作用域 + 生成纪要 */}
       <View className="chat-tools">
         {projectId ? (
-          <View className="ct-proj" style={{ background: 'var(--accent-soft)' }} onClick={() => Taro.navigateTo({ url: `/packages/work/project/index?id=${projectId}` })}>
+          <View className="ct-proj" style={{ background: 'var(--accent-soft)' }} onClick={() => navTo(`/packages/work/project/index?id=${projectId}`)}>
             <Icon name="layers" size={12} color={accent} /><Text style={{ color: accent }}>案卷内对话</Text>
           </View>
         ) : <View className="ct-spacer" />}
@@ -889,11 +1052,16 @@ export default function Chat() {
                   data={m.deliverable}
                   animate={m.animate}
                   streaming={m.streaming}
-                  onSave={m.streaming ? undefined : () => saveDeliverable(m.deliverable)}
+                  saved={m.saved}
+                  onSave={m.streaming ? undefined : () => saveDeliverable(m.deliverable, m.messageId)}
                   onExport={m.streaming ? undefined : () => copyDeliverable(m.deliverable)}
                   onShare={m.streaming ? undefined : () => shareReport(m.messageId)}
                 />
               </View>
+              {/* B4：报告流失败重试入口（复用聊天气泡 ↻ 模式） */}
+              {!m.streaming && m.retryText ? (
+                <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => doSend(m.retryText!, sessionId, agent?.key ?? '', [], false)}>↻ 重试</Text>
+              ) : null}
               {!m.streaming && m.deliverable.degraded ? (
                 <View style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
                   <Text>这版是保底草案，已免扣额度。你可以补充要求后再生成一版。</Text>
@@ -939,7 +1107,7 @@ export default function Chat() {
 
       {showJumpLatest ? (
         <View
-          className={`jump-latest ${refs.length ? 'with-refs' : ''}`}
+          className="jump-latest"
           style={{ borderColor: accent }}
           onClick={scrollToEnd}
         >
@@ -948,57 +1116,86 @@ export default function Chat() {
         </View>
       ) : null}
 
-      {/* 已选引用 */}
-      {refs.length ? (
-        <View className="ref-row">
-          {refs.map((r, j) => (
-            <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
-              <Text style={{ color: accent }}>@{r.label}</Text><Text className="ref-x">✕</Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
+      {/* B6：引用行 + 上传条 + 输入区打包成 dock，统一测量高度驱动 jump-latest 定位 */}
+      <View className="composer-dock">
+        {/* B5：非模态上传进度（可取消） */}
+        {uploading ? (
+          <View className="upload-bar">
+            <View className="ub-spin" style={{ borderTopColor: accent }} />
+            <Text className="ub-t">资料上传中…</Text>
+            <Text className="ub-cancel" style={{ color: accent }} onClick={cancelUpload}>取消</Text>
+          </View>
+        ) : null}
 
-      {/* 输入区：高度自适应卡片，底排为 加号(资料) / 选模型 / 语音·发送 */}
-      <View className={`composer ${busy ? 'busy' : ''}`}>
-        <View className="box" onClick={() => { if (!busy) setInputFocus(true); }}>
-          <Textarea
-            className="cinput"
-            value={input}
-            focus={inputFocus}
-            disabled={busy}
-            maxlength={2000}
-            cursorSpacing={24}
-            adjustPosition={false}
-            autoHeight
-            showConfirmBar={false}
-            placeholder="向军师提问…"
-            confirmType="send"
-            onFocus={() => { if (!busy) setInputFocus(true); }}
-            onBlur={() => { setInputFocus(false); setKeyboardHeight(0); }}
-            onInput={handleInput}
-            onConfirm={(e) => onSend(e.detail.value)}
-            onKeyboardHeightChange={onKeyboardHeightChange}
-          />
-          <View className="cbar">
-            <View className="cbar-l">
-              <View className="cbtn plus" onClick={(e) => { e.stopPropagation?.(); onPlus(); }}>
-                <Icon name="plus" size={19} color={refs.length ? accent : '#565C63'} />
+        {/* 已选引用 */}
+        {refs.length ? (
+          <View className="ref-row">
+            {refs.map((r, j) => (
+              <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
+                <Text style={{ color: accent }}>@{r.label}</Text><Text className="ref-x">✕</Text>
               </View>
-              <View className="cmodel" onClick={(e) => { e.stopPropagation?.(); Taro.showToast({ title: '更多模型即将开放', icon: 'none' }); }}>
-                <Text className="cmodel-name">{FIXED_MODEL}</Text>
-                <Icon name="chevron" size={13} color="#969BA1" />
+            ))}
+          </View>
+        ) : null}
+
+        {/* 输入区：高度自适应卡片，底排为 加号(资料) / 选模型 / 语音·发送 */}
+        <View className={`composer ${busy ? 'busy' : ''}`}>
+          <View className="box" onClick={() => { if (!busy) setInputFocus(true); }}>
+            <Textarea
+              className="cinput"
+              value={input}
+              focus={inputFocus}
+              disabled={busy}
+              maxlength={INPUT_MAX}
+              cursorSpacing={24}
+              adjustPosition={false}
+              autoHeight
+              showConfirmBar={false}
+              placeholder="向军师提问…"
+              confirmType="send"
+              onFocus={() => { if (!busy) setInputFocus(true); }}
+              onBlur={() => { setInputFocus(false); setKeyboardHeight(0); saveDraft(); }}
+              onInput={handleInput}
+              onConfirm={(e) => onSend(e.detail.value)}
+              onKeyboardHeightChange={onKeyboardHeightChange}
+            />
+            {/* B6：临近上限才显示字数，平时不打扰 */}
+            {input.length > INPUT_COUNT_FROM ? (
+              <Text className="cinput-count">{input.length}/{INPUT_MAX}</Text>
+            ) : null}
+            <View className="cbar">
+              <View className="cbar-l">
+                <View className="cbtn plus" onClick={(e) => { e.stopPropagation?.(); onPlus(); }}>
+                  <Icon name="plus" size={19} color={refs.length ? accent : '#565C63'} />
+                </View>
+                {/* B6：模型单档——去掉 chevron 与死点击，纯展示标签 */}
+                <View className="cmodel static">
+                  <Text className="cmodel-name">{FIXED_MODEL}</Text>
+                </View>
               </View>
-            </View>
-            <View className="cbar-r">
-              <View
-                className={`csend ${busy || !input.trim() ? 'off' : ''}`}
-                role="button"
-                aria-label="发送"
-                style={{ background: input.trim() && !busy ? accent : undefined }}
-                onClick={(e) => { e.stopPropagation?.(); onSend(); }}
-              >
-                <Icon name="up" size={18} color="#fff" />
+              <View className="cbar-r">
+                {busy ? (
+                  // B2：生成中 → 停止键
+                  <View
+                    className="csend stop"
+                    role="button"
+                    aria-label="停止生成"
+                    style={{ background: accent }}
+                    onClick={(e) => { e.stopPropagation?.(); stopGeneration(); }}
+                  >
+                    <View className="stop-sq" />
+                  </View>
+                ) : (
+                  <View
+                    className={`csend ${!input.trim() ? 'off' : ''}`}
+                    role="button"
+                    aria-label="发送"
+                    style={{ background: input.trim() ? accent : undefined }}
+                    onClick={(e) => { e.stopPropagation?.(); onSend(); }}
+                  >
+                    <Icon name="up" size={18} color="#fff" />
+                  </View>
+                )}
               </View>
             </View>
           </View>

@@ -43,6 +43,15 @@
   display: block; margin-top: 6px;
   font-size: 22px; line-height: 1.5; font-weight: 600; color: #fff;
 }
+/* C2：hero 首帧骨架（深色卡上用半透明白条） */
+.bh-sk { margin-top: 12px; }
+.bh-sk-bar {
+  height: 15px; margin-top: 9px; border-radius: 7px;
+  background: rgba(255, 255, 255, .16);
+}
+.bh-sk-bar.short { width: 46%; height: 12px; }
+.bh-sk-bar.wide { width: 92%; height: 20px; }
+.bh-sk-bar:not(.short):not(.wide) { width: 74%; height: 20px; }
 
 /* —— 战局信号（metric-grid） —— */
 .metric-grid {
@@ -106,6 +115,12 @@
 .force-fill.people { background: var(--danger, #9C4A38); }
 
 /* 三势空态（未建档/未登录 → 引导对话） */
+/* C2：三势区首帧骨架（浅色卡上用墨色淡条） */
+.force-sk { display: flex; flex-direction: column; justify-content: flex-start; }
+.fsk-bar { height: 12px; margin-top: 10px; border-radius: 6px; background: rgba(42, 36, 20, .08); }
+.fsk-bar.short { width: 52%; margin-top: 4px; }
+.fsk-bar.wide { width: 88%; }
+
 .force-empty { padding: 16px 16px; border-radius: 16px; }
 .force-empty:active { opacity: .9; }
 .fe-t { display: block; font-size: 16px; font-weight: 700; color: var(--ink); line-height: 1.3; }

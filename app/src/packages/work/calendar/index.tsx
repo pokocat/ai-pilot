@@ -33,6 +33,16 @@ const PHASE_HINT: Record<string, string> = {
   防守: '收缩保现金流，不宜重大决策',
 };
 
+// D6：按月份/闰年校验非法日（阳历用格里历月长；农历大小月 29/30，无历表时按 30 保守放行）。
+function isLeap(y: number): boolean { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
+function monthDays(cal: 'solar' | 'lunar', y: number, m: number): number {
+  if (cal === 'lunar') return 30;
+  return [31, isLeap(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1] ?? 31;
+}
+function validBirth(cal: 'solar' | 'lunar', y: number, m: number, d: number): boolean {
+  return y >= 1930 && y <= new Date().getFullYear() && m >= 1 && m <= 12 && d >= 1 && d <= monthDays(cal, y, m);
+}
+
 export default function TianshiCalendar() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -83,7 +93,7 @@ export default function TianshiCalendar() {
   // 例行 QA 2026-07-08：出生年上限曾写死 2020（早于当前年份的过时常量），与
   // server/src/routes/profile.ts 的动态上限（now().getFullYear()）及主入口 Picker（无年份上限）不一致，
   // 2021 年及以后出生年份会被前端静默拦下（按钮置灰无提示）。改为跟随当前年份。
-  const valid = +year >= 1930 && +year <= new Date().getFullYear() && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
+  const valid = validBirth(calendar, +year, +month, +day);
   const saveBirth = async () => {
     if (!valid || busy) return;
     setBusy(true);

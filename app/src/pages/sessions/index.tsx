@@ -4,6 +4,8 @@ import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
+import AsyncState from '../../components/AsyncState';
+import { navTo, switchTo } from '../../services/nav';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
 import OnboardSheet from '../../components/OnboardSheet';
@@ -49,16 +51,29 @@ export default function Sessions() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [sessErr, setSessErr] = useState(false); // 会话列表加载失败（区分「出错可重试」与「真空态」，不再伪装成空）
   const [buying, setBuying] = useState<Agent | null>(null);
   const [query, setQuery] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
-  const [searchedTerm, setSearchedTerm] = useState(''); // 已出结果对应的检索词（判定「检索中」vs「无结果」，避免空态闪一帧）
+  const [searching, setSearching] = useState(false); // 检索进行中（防抖 + 请求期间给「检索中」占位，避免空态误判）
   const [showOnboard, setShowOnboard] = useState(false);
   // 首登建档：本命色 + 30 秒建档 Picker（launch 页 sessions 承接，进来即弹，不用切到战局才触发）。
   const [showPicker, setShowPicker] = useState(false);
   const [pickerFirst, setPickerFirst] = useState(false);
+
+  // 会话列表加载（C2）：失败区分未授权（弹登录）与网络错误（错误态可重试），不再一律伪装成空态。
+  const loadSessions = () => {
+    api.sessions()
+      .then((list) => { setSessions(list); setSessErr(false); })
+      .catch((e) => {
+        const kind = s.handleApiError(e, { silent: true });
+        setSessions([]);
+        if (kind === 'unauthorized') { setShowLogin(true); setSessErr(false); }
+        else setSessErr(true);
+      });
+  };
 
   useDidShow(() => {
     s.setTab(0);
@@ -67,13 +82,10 @@ export default function Sessions() {
     if (!s.isAuthed()) {
       setShowLogin(true);
       setSessions([]);
+      setSessErr(false);
       return;
     }
-    api.sessions().then(setSessions).catch((e) => {
-      const kind = s.handleApiError(e, { silent: true });
-      if (kind === 'unauthorized') setShowLogin(true);
-      setSessions([]);
-    });
+    loadSessions();
   });
 
   // V7-03 首登引导：已登录 + 已建档 + 本账号未看过 → 只展示一次 4 步引导（storage 落 junshi.onboard.v7.<token>）。
@@ -98,11 +110,13 @@ export default function Sessions() {
   // V7-14 跨域搜索：输入 300ms 防抖 → api.search（mock 亦返回本地匹配，同一路径）；空 q 隐藏结果。
   useEffect(() => {
     const term = query.trim();
-    if (!term || !s.isAuthed()) { setSearchHits([]); setSearchedTerm(term); return; }
+    if (!term || !s.isAuthed()) { setSearchHits([]); setSearching(false); return; }
+    // 防抖期间即置「检索中」，结果回来（成功/失败）再落定；保留上次结果做 stale-while-revalidate，避免闪空。
+    setSearching(true);
     const timer = setTimeout(() => {
       api.search(term)
-        .then((r) => { setSearchHits(r.hits); setSearchedTerm(term); })
-        .catch((e) => { s.handleApiError(e, { silent: true }); setSearchHits([]); setSearchedTerm(term); });
+        .then((r) => { setSearchHits(r.hits); setSearching(false); })
+        .catch((e) => { s.handleApiError(e, { silent: true }); setSearchHits([]); setSearching(false); });
     }, 300);
     return () => clearTimeout(timer);
   }, [query]);
@@ -116,14 +130,14 @@ export default function Sessions() {
     setShowLogin(true);
     return false;
   };
-  const continueWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${key}&continue=1` }); };
-  const newWith = (key: string) => { if (requireLogin()) Taro.navigateTo({ url: `/packages/main/chat/index?agentKey=${key}&fresh=1` }); };
-  const openSession = (id: string) => { if (requireLogin()) Taro.navigateTo({ url: `/packages/main/chat/index?sessionId=${id}` }); };
-  // 搜索结果跳转：智库为 tab 页用 switchTab，其余（/packages/... 含 chat 分包页）用 navigateTo。
+  const continueWith = (key: string) => { if (requireLogin()) navTo(`/packages/main/chat/index?agentKey=${key}&continue=1`); };
+  const newWith = (key: string) => { if (requireLogin()) navTo(`/packages/main/chat/index?agentKey=${key}&fresh=1`); };
+  const openSession = (id: string) => { if (requireLogin()) navTo(`/packages/main/chat/index?sessionId=${id}`); };
+  // 搜索结果跳转：智库为 tab 页用 switchTo，其余（/packages/... 含 chat 分包页）用 navTo。
   const openHit = (h: SearchHit) => {
     if (!requireLogin()) return;
-    if (h.route.startsWith('/pages/thinktank')) Taro.switchTab({ url: h.route.split('?')[0] });
-    else Taro.navigateTo({ url: h.route });
+    if (h.route.startsWith('/pages/thinktank')) switchTo(h.route.split('?')[0]);
+    else navTo(h.route);
   };
 
   // 线程入口：未启用的专项军师先走启用弹层，其余续接最近线程
@@ -134,7 +148,7 @@ export default function Sessions() {
 
   // 长按会话 → 删除（接口已支持，乐观更新）
   const confirmDelete = (it: SessionItem) =>
-    Taro.showModal({ title: '删除会话', content: `删除「${it.title}」后不可恢复，确定删除？`, confirmText: '删除', confirmColor: '#c0392b' })
+    Taro.showModal({ title: '删除会话', content: `删除「${it.title}」后不可恢复，确定删除？`, confirmText: '删除', confirmColor: '#9C4A38' /* = var(--danger)，showModal 仅接受 hex */ })
       .then(async (r) => {
         if (!r.confirm) return;
         setSessions((list) => list.filter((x) => x.id !== it.id));
@@ -241,14 +255,14 @@ export default function Sessions() {
                   </View>
                 );
               })
-            ) : searchedTerm === query.trim() ? (
+            ) : searching ? (
+              <View className="sr-hint"><Text>正在检索…</Text></View>
+            ) : (
               <View className="sess-empty">
                 <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="target" size={22} color={accent} /></View>
                 <Text className="et">没有匹配的结果</Text>
                 <Text className="es">换个关键词，或用下方快捷入口补充军师、案卷、方案与资料。</Text>
               </View>
-            ) : (
-              <View className="sr-hint"><Text>正在检索…</Text></View>
             )}
           </View>
         ) : !showHistory ? (
@@ -259,7 +273,7 @@ export default function Sessions() {
                 <View
                   key={c.t}
                   className="quick-card card"
-                  onClick={() => requireLogin() && (c.tab ? Taro.switchTab({ url: c.tab }) : Taro.navigateTo({ url: c.url! }))}
+                  onClick={() => requireLogin() && (c.tab ? switchTo(c.tab) : navTo(c.url!))}
                 >
                   <Text className="qt">{c.t}</Text>
                   <Text className="qd">{c.d}</Text>
@@ -308,7 +322,9 @@ export default function Sessions() {
           <>
             {/* 历史会话 */}
             <View className="wx-section"><Text>最近会话{filteredSessions.length ? ' · 长按可删除' : ''}</Text></View>
-            {filteredSessions.length === 0 ? (
+            {sessErr ? (
+              <AsyncState error onRetry={loadSessions} />
+            ) : filteredSessions.length === 0 ? (
               <View className="sess-empty">
                 <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="chat" size={22} color={accent} /></View>
                 <Text className="et">{q ? '没有匹配的会话' : '还没有会话'}</Text>
@@ -340,10 +356,10 @@ export default function Sessions() {
       </View>
 
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); continueWith(a.key); }} />
-      <OnboardSheet open={showOnboard} onClose={dismissOnboard} onStart={() => { dismissOnboard(); Taro.switchTab({ url: '/pages/thinktank/index' }); }} />
+      <OnboardSheet open={showOnboard} onClose={dismissOnboard} onStart={() => { dismissOnboard(); switchTo('/pages/thinktank/index'); }} />
       <Login open={showLogin} onLoggedIn={(onboarded) => {
         setShowLogin(false);
-        api.sessions().then(setSessions).catch(() => setSessions([]));
+        loadSessions();
         // 新用户（未建档）登录后立即弹本命色/建档；已建档则走 4 步引导。
         if (!onboarded) { setPickerFirst(true); setShowPicker(true); }
         else maybeShowOnboard();

@@ -97,7 +97,7 @@
   background: rgba(255, 255, 255, .10); border: 1px solid rgba(255, 255, 255, .14);
 }
 .service-action:active { opacity: .8; }
-.service-action.is-empty { opacity: .55; }
+.service-action.is-empty { opacity: .55; pointer-events: none; } /* C7：未分配置灰且不可点 */
 .sa-i {
   width: 30px; height: 30px; flex-shrink: 0; border-radius: 9px;
   display: flex; align-items: center; justify-content: center;
@@ -127,6 +127,13 @@
 .as-l { display: block; margin-top: 2px; color: var(--ink-3); font-size: 10.5px; font-weight: 600; }
 
 /* —— 菜单（design menu：左色块图标 + 右值 + ›） —— */
+/* C7：分组小节标题（档案/资产/账户/系统），行样式保持不变 */
+.menu-group { margin-top: 16px; }
+.menu-group-title {
+  display: block; margin: 0 4px 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--ink-3);
+}
+.menu-group .menu { margin-top: 0; }
 .menu { margin-top: 12px; padding: 0; overflow: hidden; border-radius: 18px; background: rgba(255, 255, 255, .86); }
 .menu-row {
   display: flex; align-items: center; gap: 12px;

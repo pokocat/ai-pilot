@@ -54,8 +54,8 @@ export default function ExceptionSheet({ open, kind = 'upload', title, desc, onP
         </View>
 
         <View className="exception-actions">
-          <View className="ex-secondary" onClick={onClose}><Text>返回</Text></View>
-          <View className="ex-primary" style={{ background: accent }} onClick={() => onPrimary?.()}><Text>{meta.primary}</Text></View>
+          <View className="btn btn-ghost ex-secondary" onClick={onClose}><Text>返回</Text></View>
+          <View className="btn btn-primary ex-primary" style={{ background: accent }} onClick={() => onPrimary?.()}><Text>{meta.primary}</Text></View>
         </View>
       </View>
     </View>

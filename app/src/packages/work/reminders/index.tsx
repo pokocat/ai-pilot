@@ -2,22 +2,27 @@ import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
+import AsyncState from '../../../components/AsyncState';
 import { useStore } from '../../../hooks/useStore';
 import { api, type ReminderItem, type ReminderView } from '../../../services/api';
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
 import './index.scss';
 
-// V7-11 提醒与日历页（design §13.2）：按执行节奏推送——20:30 今日复盘 / 18:00 补咨询记录 / 周五 周复盘。
+// V7-11 提醒与日历页（design §13.2）：按执行节奏推送——21:30 今日复盘 / 18:00 补咨询记录 / 周五 周复盘。
 // 每条一次性订阅（微信订阅消息需逐次授权），模板未配置时回落为「已配置」状态。
 export default function Reminders() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [view, setView] = useState<ReminderView | null>(null);
   const [busy, setBusy] = useState('');
+  const [loading, setLoading] = useState(true); // D2：首屏加载与空态区分
+  const [err, setErr] = useState(false); // D2：加载失败可重试（此前吞错静默 → 永远空态）
 
-  useDidShow(() => {
-    api.reminders().then(setView).catch((e) => { s.handleApiError(e, { silent: true }); setView(null); });
-  });
+  const load = () => {
+    setErr(false);
+    api.reminders().then((v) => { setView(v); }).catch((e) => { s.handleApiError(e, { silent: true }); setView(null); setErr(true); }).finally(() => setLoading(false));
+  };
+  useDidShow(load);
 
   const subscribe = async (it: ReminderItem) => {
     if (busy) return;
@@ -48,7 +53,11 @@ export default function Reminders() {
           <Text className="rm-desc">提醒不是个人中心里的杂项，而是当前执行闭环的一部分。军令、复盘与周计划按节奏推送。</Text>
         </View>
 
-        {items.length === 0 ? (
+        {loading && !view ? (
+          <AsyncState loading skeletonRows={3} />
+        ) : err ? (
+          <AsyncState error onRetry={load} />
+        ) : items.length === 0 ? (
           <Text className="rm-empty">暂无提醒。生成军令与复盘后，提醒节奏会显示在这里。</Text>
         ) : (
           <View className="rm-list">
@@ -64,7 +73,7 @@ export default function Reminders() {
                 ) : ready ? (
                   <Text className={`rm-sub ${busy === it.key ? 'busy' : ''}`} style={{ background: accent }} onClick={() => subscribe(it)}>{busy === it.key ? '…' : '订阅'}</Text>
                 ) : (
-                  <Text className="rm-state muted">已配置</Text>
+                  <Text className="rm-state muted">暂不可订阅</Text>
                 )}
               </View>
             ))}
