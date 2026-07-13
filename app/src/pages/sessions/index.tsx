@@ -148,7 +148,7 @@ export default function Sessions() {
 
   // 长按会话 → 删除（接口已支持，乐观更新）
   const confirmDelete = (it: SessionItem) =>
-    Taro.showModal({ title: '删除会话', content: `删除「${it.title}」后不可恢复，确定删除？`, confirmText: '删除', confirmColor: '#c0392b' })
+    Taro.showModal({ title: '删除会话', content: `删除「${it.title}」后不可恢复，确定删除？`, confirmText: '删除', confirmColor: '#9C4A38' /* = var(--danger)，showModal 仅接受 hex */ })
       .then(async (r) => {
         if (!r.confirm) return;
         setSessions((list) => list.filter((x) => x.id !== it.id));

@@ -85,7 +85,7 @@ export default function Settings() {
       title: '注销账号',
       content: '注销将永久删除你的账号、对话、方案库与全部数据，且不可恢复。确定继续？',
       confirmText: '永久注销',
-      confirmColor: '#c0392b',
+      confirmColor: '#9C4A38', // = var(--danger)，showModal 仅接受 hex
     }).then(async (r) => {
       if (!r.confirm) return;
       try {
@@ -150,6 +150,7 @@ export default function Settings() {
         </View>
 
         <View className="set-logout" onClick={logout}>
+          {/* Icon 烘焙场景需 hex：#9C4A38 = var(--danger) */}
           <Icon name="lock" size={15} color="#9C4A38" /><Text> 退出登录</Text>
         </View>
         <Text className="set-danger" onClick={deleteAccount}>注销账号</Text>

@@ -6,6 +6,7 @@ import SafeHeader from '../../../../components/SafeHeader';
 import PaySheet from '../../../../components/PaySheet';
 import { useStore } from '../../../../hooks/useStore';
 import { api, type KnowledgeDetail } from '../../../../services/api';
+import { navTo } from '../../../../services/nav';
 import './index.scss';
 
 const STATUS: Record<string, string> = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
@@ -65,7 +66,7 @@ export default function KnowledgeDetailPage() {
     setBusy(true);
     api.analyzeKnowledge(detail.id)
       .then((r) => {
-        Taro.navigateTo({ url: `/packages/work/report/index?id=${r.reportId}` });
+        navTo(`/packages/work/report/index?id=${r.reportId}`);
       })
       .catch((e: unknown) => {
         const code = String((e as { code?: string; data?: { code?: string } })?.code || (e as { data?: { code?: string } })?.data?.code || '');

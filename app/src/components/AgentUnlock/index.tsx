@@ -86,6 +86,7 @@ export default function AgentUnlock({ agent, onClose, onUnlocked, source = 'cata
 
         {!enough && (
           <View className="au-low">
+            {/* Icon 烘焙场景需 hex：#9C4A38 = var(--danger) */}
             <Icon name="alert" size={13} color="#9C4A38" />
             <Text> 权益点不足，请到「我的 · 方案与权益点」调整</Text>
           </View>

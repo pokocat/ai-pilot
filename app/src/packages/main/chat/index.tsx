@@ -18,6 +18,7 @@ import { agentForText } from '../../../data/intents';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../../data/council';
 import { CHAT_GUIDES } from '../../../data/operatingSystem';
 import { acceptDeliverable } from '../../../services/dossier';
+import { navTo } from '../../../services/nav';
 import './index.scss';
 
 type Msg =
@@ -726,7 +727,7 @@ export default function Chat() {
     const url = `/packages/main/chat/index?agentKey=${agentKey}&fresh=1${prompt ? `&send=${encodeURIComponent(prompt)}` : ''}`;
     Taro.redirectTo({ url });
   };
-  const openGuide = (url: string) => Taro.navigateTo({ url });
+  const openGuide = (url: string) => navTo(url);
 
   // 生成网页版报告（render_report → 自有域名 /api/r/:id，接口幂等）→ 直接打开：weapp 走内置 web-view 页，H5 开新窗口。
   const shareReport = async (messageId?: string) => {
@@ -739,8 +740,7 @@ export default function Chat() {
       if (!r.htmlUrl) { Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' }); return; }
       // D-3-4：网页版仅本人自用（web-view 打开查看）；不再提供「复制链接」对外分享入口。
       if (IS_WEAPP) {
-        Taro.navigateTo({
-          url: `/packages/work/webview/index?url=${encodeURIComponent(r.htmlUrl)}`,
+        navTo(`/packages/work/webview/index?url=${encodeURIComponent(r.htmlUrl)}`, {
           fail: () => Taro.showToast({ title: '网页打开失败，请稍后重试', icon: 'none' }),
         });
       } else if (typeof window !== 'undefined' && window.open) {
@@ -762,7 +762,7 @@ export default function Chat() {
       const r = await api.summarize(sessionId);
       Taro.hideLoading();
       Taro.showToast({ title: `已生成《${r.title}》v${r.version}`, icon: 'none' });
-      setTimeout(() => Taro.navigateTo({ url: `/packages/work/report/index?id=${r.reportId}` }), 700);
+      setTimeout(() => navTo(`/packages/work/report/index?id=${r.reportId}`), 700);
     } catch {
       Taro.hideLoading();
       Taro.showToast({ title: '生成纪要失败', icon: 'none' });
@@ -916,7 +916,7 @@ export default function Chat() {
       {/* 案卷作用域 + 生成纪要 */}
       <View className="chat-tools">
         {projectId ? (
-          <View className="ct-proj" style={{ background: 'var(--accent-soft)' }} onClick={() => Taro.navigateTo({ url: `/packages/work/project/index?id=${projectId}` })}>
+          <View className="ct-proj" style={{ background: 'var(--accent-soft)' }} onClick={() => navTo(`/packages/work/project/index?id=${projectId}`)}>
             <Icon name="layers" size={12} color={accent} /><Text style={{ color: accent }}>案卷内对话</Text>
           </View>
         ) : <View className="ct-spacer" />}

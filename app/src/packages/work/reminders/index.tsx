@@ -8,7 +8,7 @@ import { api, type ReminderItem, type ReminderView } from '../../../services/api
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
 import './index.scss';
 
-// V7-11 提醒与日历页（design §13.2）：按执行节奏推送——20:30 今日复盘 / 18:00 补咨询记录 / 周五 周复盘。
+// V7-11 提醒与日历页（design §13.2）：按执行节奏推送——21:30 今日复盘 / 18:00 补咨询记录 / 周五 周复盘。
 // 每条一次性订阅（微信订阅消息需逐次授权），模板未配置时回落为「已配置」状态。
 export default function Reminders() {
   const s = useStore();
