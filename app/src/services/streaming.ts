@@ -37,7 +37,7 @@ async function responseErrorMessage(res: Response): Promise<string> {
   }
 }
 
-function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers, state: { rendered: boolean }): boolean {
+function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers, state: { rendered: boolean; terminal: boolean }): boolean {
   let ok = true;
   for (const e of events) {
     const d = e.data as {
@@ -69,10 +69,22 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
       });
     }
     else if (e.event === 'memory') h.onMemory?.({ learned: d?.learned, agentName: d?.agentName });
-    else if (e.event === 'done') { if (state.rendered) h.onDone?.(d?.messageId); }
-    else if (e.event === 'error') { ok = false; h.onError?.(d?.message ?? '生成失败'); }
+    else if (e.event === 'done') { state.terminal = true; if (state.rendered) h.onDone?.(d?.messageId); }
+    else if (e.event === 'error') { ok = false; state.terminal = true; h.onError?.(d?.message ?? '生成失败'); }
   }
   return ok;
+}
+
+/**
+ * 连接被截断（网络断线/代理超时/后端提前关闭）时，流可能已产出内容却始终没等到显式
+ * done/error 终态事件——不补发会让报告卡/气泡的 streaming 标记永久为 true，UI 卡在「产出中」。
+ * 这里在读流结束后兜底合成一次 onDone，只在「确有产出但从未见过终态事件」时触发一次。
+ */
+function finalizeIfUnterminated(h: StreamHandlers, state: { rendered: boolean; terminal: boolean }): void {
+  if (state.rendered && !state.terminal) {
+    state.terminal = true;
+    h.onDone?.();
+  }
 }
 
 /**
@@ -94,7 +106,7 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
     let buf = '';
     let ok = true;
     let sawEvent = false;
-    const state = { rendered: false };
+    const state = { rendered: false, terminal: false };
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -109,6 +121,7 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
       ok = dispatch(events, h, state) && ok;
     }
     if (!sawEvent) h.onError?.('网络请求失败');
+    finalizeIfUnterminated(h, state);
     return ok && state.rendered;
   }
 
@@ -117,7 +130,7 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
       let bytes = new Uint8Array(0);
       let ok = true;
       let sawEvent = false;
-      const state = { rendered: false };
+      const state = { rendered: false, terminal: false };
 
       const consumeText = (text: string) => {
         const { events, rest } = parseSSE(text);
@@ -143,6 +156,7 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
         if (!sawEvent && typeof data === 'string' && data.trim()) {
           consumeText(data.endsWith('\n\n') ? data : `${data}\n\n`);
         }
+        finalizeIfUnterminated(h, state);
         resolve(ok && state.rendered);
       };
 
@@ -163,7 +177,11 @@ export async function generateStream(body: GenRequest, h: StreamHandlers): Promi
         header,
         enableChunked: true,
         success: (res: { data?: unknown }) => finish(res.data),
-        fail: () => resolve(false),
+        fail: () => {
+          // 已有产出但请求收尾失败（连接中断）：合成一次终态，避免报告卡/气泡永久卡在「产出中」。
+          if (state.rendered && !state.terminal) { state.terminal = true; h.onError?.('网络连接中断'); }
+          resolve(false);
+        },
       });
 
       const onChunk = task.onChunkReceived;

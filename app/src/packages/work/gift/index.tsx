@@ -33,7 +33,7 @@ export default function Gift() {
   const [busy, setBusy] = useState(false);
   const [url, setUrl] = useState<string | null>(null);
 
-  const valid = name.trim() && +year >= 1930 && +year <= 2020 && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
+  const valid = name.trim() && +year >= 1930 && +year <= new Date().getFullYear() && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
 
   const makeCard = async () => {
     if (!valid || busy) return;

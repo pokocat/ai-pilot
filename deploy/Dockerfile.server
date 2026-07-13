@@ -13,6 +13,7 @@ RUN npm ci && npx prisma generate && npm run build
 FROM node:20-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+ENV TZ=Asia/Shanghai
 COPY --from=build /repo/server/node_modules ./node_modules
 COPY --from=build /repo/server/dist ./dist
 COPY --from=build /repo/server/prisma ./prisma

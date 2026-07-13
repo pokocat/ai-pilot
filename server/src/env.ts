@@ -1,5 +1,11 @@
 import 'dotenv/config';
 
+// 进程时区兜底：整个后端「今日/几点」判断（军令归档、复盘连续天数、定时推送触发点等）
+// 都基于 `new Date()` 的本地时区取值。部署环境（Docker/systemd/云主机）默认时区通常是 UTC，
+// 不显式钉住会导致这些判断整体偏移 8 小时。这里在最早加载的模块里兜底设默认值，
+// 不覆盖运维已显式配置的 TZ（如需要其他时区可在 .env / systemd Environment= 里覆盖）。
+process.env.TZ = process.env.TZ ?? 'Asia/Shanghai';
+
 // 占位/假 key 识别：fake 一个 token 时，不浪费网络往返，直接走 mock 兜底。
 export function isRealKey(k: string): boolean {
   return !!k && !/fake|replace|your[-_]?key|xxxx|0{6,}|^sk-\.{3,}$/i.test(k.trim());

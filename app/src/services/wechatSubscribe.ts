@@ -17,7 +17,8 @@ export async function requestWechatSubscribe(scene: WechatSubscribeScene): Promi
     Taro.showToast({ title: '提醒模板尚未配置', icon: 'none' });
     return false;
   }
-  const res = await Taro.requestSubscribeMessage({ tmplIds: [tpl.templateId] });
+  // entityIds 是 Taro Option 类型的必填字段，仅支付宝小程序场景使用；微信侧无意义但类型要求必填，传空数组即可。
+  const res = await Taro.requestSubscribeMessage({ tmplIds: [tpl.templateId], entityIds: [] });
   const choice: WechatSubscribeChoice = {
     scene,
     templateId: tpl.templateId,

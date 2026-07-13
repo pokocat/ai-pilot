@@ -66,7 +66,7 @@ export default function TianshiCalendar() {
     path: '/packages/work/calendar/index',
   }));
 
-  const valid = +year >= 1930 && +year <= 2020 && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
+  const valid = +year >= 1930 && +year <= new Date().getFullYear() && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
   const saveBirth = async () => {
     if (!valid || busy) return;
     setBusy(true);

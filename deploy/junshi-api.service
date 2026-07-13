@@ -11,6 +11,7 @@ Wants=postgresql.service
 Type=simple
 User=junshi
 WorkingDirectory=/opt/junshi/server
+Environment=TZ=Asia/Shanghai
 # 环境变量从 WorkingDirectory 下的 .env 读取（应用内置 dotenv 自动加载）。
 # 如偏好 systemd 注入，可改用： EnvironmentFile=/opt/junshi/server/.env
 ExecStart=/usr/bin/node dist/index.js
