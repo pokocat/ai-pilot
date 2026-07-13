@@ -4,6 +4,7 @@ import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
+import MarkdownText from '../../components/MarkdownText';
 import AsyncState from '../../components/AsyncState';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
@@ -11,6 +12,7 @@ import Sheet from '../../components/Sheet';
 import { navTo, switchTo } from '../../services/nav';
 import { useStore } from '../../hooks/useStore';
 import { checkUpload } from '../../services/uploadGuard';
+import { displaySourceName, sourceUploadName } from '../../services/uploadName';
 import {
   api,
   type KnowledgePipelineView, type OrganizeResult, type OrganizeItem, type KnowledgeBatchFile,
@@ -57,6 +59,11 @@ const MODULE_SUBTABS: { key: ModuleGroup | 'recommend'; label: string }[] = [
   { key: 'deep', label: '深度' },
   { key: 'member', label: '模块' },
 ];
+const CATEGORY_LABEL: Record<string, string> = {
+  founder: '老板档案', company: '企业档案', finance: '财务经营', content: '内容IP',
+  growth: '增长资料', customer: '客户问答', proof: '案例证明', unknown: '待识别',
+};
+const categoryLabel = (category: string) => CATEGORY_LABEL[category] || category;
 
 function relTime(iso: string): string {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -69,6 +76,11 @@ function fmtBytes(b: number): string {
   if (b >= 1024 * 1024 * 1024) return `${(b / 1024 / 1024 / 1024).toFixed(1)}GB`;
   if (b >= 1024 * 1024) return `${Math.round(b / 1024 / 1024)}MB`;
   return `${Math.max(0, Math.round(b / 1024))}KB`;
+}
+
+// 兼容历史客户端把微信临时路径写成文件名；新上传优先展示用户原始文件名。
+function displayFileName(name: string | null | undefined, fallback = '待识别资料'): string {
+  return displaySourceName(name, fallback);
 }
 // 数据源状态 → 色板（已绑定绿 / 待上传红 / 其余金，设计规格 §7.1）。
 function dsClass(label: string): string {
@@ -104,6 +116,7 @@ export default function ThinkTank() {
   const [organized, setOrganized] = useState<OrganizeResult | null>(null);
   const [activeBatch, setActiveBatch] = useState<string | null>(null);
   const [openBatch, setOpenBatch] = useState<Record<string, boolean>>({}); // 批次逐份清单展开态（默认展开）
+  const [openPreview, setOpenPreview] = useState<Record<string, boolean>>({});
 
   // —— data（V7-07）——
   const [dsView, setDsView] = useState<DataSourcesView | null>(null);
@@ -192,7 +205,7 @@ export default function ThinkTank() {
       let bid = activeBatch || undefined;
       for (const f of files) {
         // 带上原始文件名 f.name 作展示名（tempFilePath 是 tmp 名，服务端否则会存乱码 tmp 名）。
-        const r = await api.uploadKnowledge(f.path, undefined, true, bid, f.name);
+        const r = await api.uploadKnowledge(f.path, undefined, true, bid, sourceUploadName(f.name));
         bid = r.batchId || bid;
       }
       setActiveBatch(bid || null);
@@ -274,8 +287,20 @@ export default function ThinkTank() {
   };
 
   const confirmOptimized = async () => {
+    const ids = optimizedItems.map((item) => item.id);
+    if (!ids.length) { Taro.showToast({ title: '暂无可确认资料，请先整理待整理区', icon: 'none' }); return; }
+    const noPreview = optimizedItems.filter((item) => !item.preview?.trim()).length;
+    const confirm = await Taro.showModal({
+      title: '确认写入知识库',
+      content: noPreview
+        ? `共 ${ids.length} 份，其中 ${noPreview} 份没有提取到可预览正文。建议先核对或重新上传，仍要继续吗？`
+        : `共 ${ids.length} 份。请先展开每份资料核对正文，确认后将供战局、方案和对话引用。`,
+      confirmText: noPreview ? '仍然入库' : '确认入库',
+      cancelText: '再检查下',
+    });
+    if (!confirm.confirm) return;
     try {
-      const r = await api.confirmKnowledge(activeBatch ? { batchId: activeBatch } : {});
+      const r = await api.confirmKnowledge({ ids });
       if (!r.count) { Taro.showToast({ title: '暂无可确认资料，请先整理待整理区', icon: 'none' }); return; }
       Taro.showToast({ title: `已写入知识库 · ${r.count} 份`, icon: 'none' });
       setOrganized(null);
@@ -289,7 +314,7 @@ export default function ThinkTank() {
   const removeStagedFile = (f: KnowledgeBatchFile) => {
     Taro.showModal({
       title: '删除这份资料',
-      content: `删除「${f.fileName}」？删掉后可重新上传这一份。`,
+      content: `删除「${displayFileName(f.fileName)}」？删掉后可重新上传这一份。`,
       success: (r) => {
         if (!r.confirm) return;
         api.deleteKnowledge(f.id).then(() => { Taro.showToast({ title: '已删除', icon: 'none' }); loadPipeline(); }).catch((e) => s.handleApiError(e));
@@ -495,10 +520,25 @@ export default function ThinkTank() {
                   <View className="uz-b">
                     <Text className="uz-k">第一步 · 接住乱资料</Text>
                     <Text className="uz-t serif">上传资料</Text>
-                    <Text className="uz-d">聊天记录、表格、文档、图片都先放进来，系统会统一进入待整理区。</Text>
+                    <Text className="uz-d">先上传并检查资料，再点击「开始资料整理」。确认后才会进入知识库，供战局和对话调用。</Text>
                   </View>
                   <View className="uz-btn"><Text>{uploading ? '上传中…' : '＋ 上传'}</Text></View>
                 </View>
+
+                {!organizing && !organized && batches.length ? (
+                  <View className="next-step">
+                    <View className="next-step-top">
+                      <Text className="next-step-k">下一步 · 资料整理</Text>
+                      <Text className="next-step-count">2 / 3</Text>
+                    </View>
+                    <Text className="next-step-t serif">资料已接收，先让军师整理</Text>
+                    <Text className="next-step-d">会先识别类型、去重、归类并提炼摘要。整理完成后，你再确认哪些资料进入知识库。</Text>
+                    <View className="next-step-actions">
+                      <View className="next-step-primary" style={{ background: accent }} onClick={() => runOrganize(batches[0].id, false)}><Text>开始资料整理</Text></View>
+                      <View className="next-step-secondary" onClick={() => runOrganize(batches[0].id, true)}><Text>深度整理</Text></View>
+                    </View>
+                  </View>
+                ) : null}
 
                 {organizing ? (
                   <View className="proc card">
@@ -527,22 +567,33 @@ export default function ThinkTank() {
                             <Text className="orgd-t serif">{organized.deep ? '这一批资料已深度整理' : '这一批资料已整理'}</Text>
                             <Text className="orgd-s">共 {organized.total} 份 · 去重 {organized.dedup} 份</Text>
                           </View>
-                          <Text className="orgd-tag">已归档</Text>
+                          <Text className="orgd-tag">待确认</Text>
                         </View>
-                        {organized.items.map((it) => (
-                          <View key={it.id} className={`organized-row ${it.isDup ? 'dup' : ''}`}>
-                            <View className="or-i"><Text>{it.category.slice(0, 1)}</Text></View>
-                            <View className="or-b">
-                              <Text className="or-t">{it.fileName}</Text>
-                              <Text className="or-s">{it.isDup ? '与同名资料重复，已合并' : `${it.category} · ${it.summary}`}</Text>
+                        {organized.items.map((it) => {
+                          const previewing = !!openPreview[it.id];
+                          return (
+                            <View key={it.id} className={`organized-item ${it.isDup ? 'dup' : ''}`}>
+                              <View className="organized-row">
+                                <View className="or-i"><Text>{categoryLabel(it.category).slice(0, 1)}</Text></View>
+                                <View className="or-b">
+                                  <Text className="or-t">{displayFileName(it.fileName, categoryLabel(it.category))}</Text>
+                                  <Text className="or-name-source">{it.nameSource === 'original' ? '源文件名' : it.nameSource === 'content' ? '按正文标题识别 · 原文件名未保留' : '原文件名未保留'}</Text>
+                                  <Text className="or-s">{it.isDup ? '与同名资料重复，已合并' : `${categoryLabel(it.category)} · ${it.summary}`}</Text>
+                                </View>
+                                {it.isDup ? <Text className="or-dup">已合并</Text> : <Text className="or-tag">{categoryLabel(it.category)}</Text>}
+                              </View>
+                              <View className={`preview-toggle ${it.preview ? '' : 'disabled'}`} onClick={() => it.preview && setOpenPreview((m) => ({ ...m, [it.id]: !previewing }))}>
+                                <Text>{it.preview ? (previewing ? '收起正文预览' : '预览正文') : '未提取到可预览正文'}</Text>
+                                {it.preview ? <Text>{previewing ? '⌃' : '⌄'}</Text> : null}
+                              </View>
+                              {previewing && it.preview ? <View className="item-preview"><MarkdownText text={it.preview} selectable /></View> : null}
                             </View>
-                            {it.isDup ? <Text className="or-dup">已合并</Text> : <Text className="or-tag">{it.category}</Text>}
-                          </View>
-                        ))}
+                          );
+                        })}
                         {organized.deep && organized.reportId ? (
                           <View className="orgd-report" onClick={() => openReport(organized.reportId!)}><Text>查看整理报告 ›</Text></View>
                         ) : null}
-                        <Text className="orgd-hint">整理完成后，可进入「已优化」确认入库，也可以继续深度整理进一步提炼。</Text>
+                        <Text className="orgd-hint">下一步：确认这些资料后，才会写入知识库并参与战局判断和后续对话。</Text>
                         <View className="orgd-btn" style={{ background: accent }} onClick={() => setStage('optimized')}><Text>去确认入库 ›</Text></View>
                       </View>
                     ) : null}
@@ -568,7 +619,7 @@ export default function ThinkTank() {
                                 return (
                                   <View key={f.id} className={`file-row ${bad ? 'bad' : ''}`}>
                                     <View className="fr-b">
-                                      <Text className="fr-name">{f.fileName}</Text>
+                                      <Text className="fr-name">{displayFileName(f.fileName)}</Text>
                                       <Text className="fr-meta">{f.fileSize ? fmtBytes(f.fileSize) : '—'}{bad ? ' · 这份读不出来，删掉重传' : ''}</Text>
                                     </View>
                                     <Text className={`fr-badge ${st.cls}`}>{st.label}</Text>
@@ -588,14 +639,9 @@ export default function ThinkTank() {
                       );
                     })}
 
-                    {batches.length ? (
-                      <View className="pile-actions">
-                        <View className="pile-btn primary" style={{ background: accent }} onClick={() => runOrganize(batches[0].id, false)}><Text>资料整理</Text></View>
-                        <View className="pile-btn" onClick={() => runOrganize(batches[0].id, true)}><Text>深度整理</Text></View>
-                      </View>
-                    ) : (!organized ? (
+                    {!batches.length && !organized ? (
                       <View className="stage-empty"><Text className="se-t">待整理区还是空的</Text><Text className="se-s">先把散落在微信、表格、文档、图片里的材料放进来。</Text></View>
-                    ) : null)}
+                    ) : null}
                   </>
                 )}
               </>
@@ -612,20 +658,32 @@ export default function ThinkTank() {
                 {optimizedItems.length ? (
                   <>
                     <View className="asset-list card">
-                      {optimizedItems.map((it) => (
-                        <View key={it.id} className={`asset-list-row ${it.isDup ? 'dup' : ''}`}>
-                          <View className="al-i"><Text>{it.category.slice(0, 1)}</Text></View>
-                          <View className="al-b">
-                            <Text className="al-t serif">{it.fileName}</Text>
-                            <Text className="al-s">{it.isDup ? '与同名资料重复，已合并' : `${it.category} · ${it.summary}`}</Text>
+                      {optimizedItems.map((it) => {
+                        const previewing = !!openPreview[it.id];
+                        return (
+                          <View key={it.id} className={`asset-list-item ${it.isDup ? 'dup' : ''}`}>
+                            <View className="asset-list-row">
+                              <View className="al-i"><Text>{categoryLabel(it.category).slice(0, 1)}</Text></View>
+                              <View className="al-b">
+                                <Text className="al-t serif">{displayFileName(it.fileName, categoryLabel(it.category))}</Text>
+                                <Text className="al-name-source">{it.nameSource === 'original' ? '源文件名' : it.nameSource === 'content' ? '按正文标题识别 · 原文件名未保留' : '原文件名未保留'}</Text>
+                                <Text className="al-s">{it.isDup ? '与同名资料重复，已合并' : `${categoryLabel(it.category)} · ${it.summary}`}</Text>
+                              </View>
+                              {it.isDup ? <Text className="al-dup">已合并</Text> : <Text className="al-tag">{categoryLabel(it.category)}</Text>}
+                            </View>
+                            <View className={`preview-toggle ${it.preview ? '' : 'disabled'}`} onClick={() => it.preview && setOpenPreview((m) => ({ ...m, [it.id]: !previewing }))}>
+                              <Text>{it.preview ? (previewing ? '收起正文预览' : '预览正文') : '未提取到可预览正文'}</Text>
+                              {it.preview ? <Text>{previewing ? '⌃' : '⌄'}</Text> : null}
+                            </View>
+                            {previewing && it.preview ? <View className="item-preview"><MarkdownText text={it.preview} selectable /></View> : null}
                           </View>
-                          {it.isDup ? <Text className="al-dup">已合并</Text> : <Text className="al-tag">{it.category}</Text>}
-                        </View>
-                      ))}
+                        );
+                      })}
                     </View>
                     <View className="confirm-library card" onClick={confirmOptimized}>
-                      <Text className="cl-t serif">确认优化后的资料 → 写入知识库</Text>
+                      <Text className="cl-t serif">下一步：确认入库</Text>
                       <Text className="cl-s">确认后将回写战局页、方案页和后续对话引用。</Text>
+                      <View className="cl-btn" style={{ background: accent }}><Text>确认 {optimizedItems.length} 份并写入知识库</Text></View>
                     </View>
                   </>
                 ) : (
@@ -658,8 +716,9 @@ export default function ThinkTank() {
                       ))}
                     </View>
                     <View className="confirm-library card" onClick={syncKnowledge}>
-                      <Text className="cl-t serif">同步知识库 → 刷新战局判断</Text>
+                      <Text className="cl-t serif">资料已入库，下一步去看判断</Text>
                       <Text className="cl-s">把知识库内容回写给战局页、方案页和后续对话。</Text>
+                      <View className="cl-btn" style={{ background: accent }}><Text>刷新战局判断</Text></View>
                     </View>
                   </>
                 ) : (

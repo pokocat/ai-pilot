@@ -14,7 +14,7 @@ import {
 } from '../services/knowledge.js';
 import { hybridSearch } from '../services/retrieval.js';
 import { ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
-import { sanitizeUploadName } from '../services/uploadName.js';
+import { bestUploadName } from '../services/uploadName.js';
 import { looksFinancial } from '../services/finParse.js';
 import { runFinCheckup } from '../services/finCheckup.js';
 import { isModuleEnabled } from '../services/modules.js';
@@ -77,11 +77,10 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     if (data.file.truncated) return reply.code(413).send({ error: '文件过大（上限 20MB）' });
     if (!buf.length) return reply.code(400).send({ error: '空文件' });
 
-    // 展示名以客户端随上传带来的原始文件名（multipart 字段 originalName）为准；
-    // 微信 chooseMessageFile 的 tempFilePath 是 tmp 名（wxfile://…），此前被 data.filename 当成展示名，
-    // 导致资料库显示乱码 tmp 名——本次改为优先取原名。老客户端不带该字段则回退 data.filename（兼容）。
+    // 新上传优先保存客户端传来的源文件名。微信临时路径不是源文件名，不能落库；
+    // 老客户端没有 originalName 时，只有 multipart 文件名可用，若它也是临时名则交给展示层兜底。
     const rawOriginal = (data.fields as Record<string, { value?: string } | undefined> | undefined)?.originalName?.value;
-    const fileName = sanitizeUploadName(rawOriginal) || sanitizeUploadName(data.filename) || '未命名文件';
+    const fileName = bestUploadName(rawOriginal, data.filename) || '待识别资料';
 
     const staged = req.query.staged === 'true' || req.query.staged === '1';
     if (staged) {

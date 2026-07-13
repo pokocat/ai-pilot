@@ -24,6 +24,7 @@ import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
 import { agentForText } from '../data/intents';
 import { getToken } from './token';
+import { sourceUploadName } from './uploadName';
 
 // ── mock 静态数据源（与后端 seed 对齐） ──
 // 行业选项真相源在服务端 industryPacks.ts 的 industryOptionLabels()；此处为离线 mock 兜底，需同步维护。
@@ -177,6 +178,25 @@ interface KnowledgeRec {
   sourceType: string; sourceId: string | null; tags: string[]; at: string;
   stage?: KnowledgeStage; bizCategory?: string; batchId?: string; fileType?: string; fileSize?: number; dupOfId?: string; // V7-06
   status?: string; summary?: string; // V7-06：单份解析状态（ready/parsing/failed）+ 整理后一句摘要
+}
+
+function mockOrganizeItem(k: KnowledgeRec): OrganizeItem {
+  const category = BIZ_LABEL[k.bizCategory || 'unknown'] || '待识别';
+  const originalName = sourceUploadName(k.title);
+  const heading = k.text.split(/\r?\n/).map((line) => line.trim()).find((line) => /^#{1,3}\s+/.test(line));
+  const contentName = originalName ? '' : String(heading || '').replace(/^#{1,3}\s+/, '').trim();
+  const ext = String(k.fileType || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const inferredName = contentName ? `${contentName}${ext ? `.${ext}` : ''}` : '';
+  return {
+    id: k.id,
+    fileName: originalName || inferredName || `${category}资料`,
+    fileType: k.fileType || null,
+    nameSource: originalName ? 'original' : inferredName ? 'content' : 'fallback',
+    category,
+    summary: k.summary || mockSummary(k.bizCategory || 'unknown'),
+    preview: k.text.trim().slice(0, 1200),
+    isDup: !!k.dupOfId,
+  };
 }
 interface ProjectRec {
   id: string; name: string; slug: string; icon: string; summary: string | null;
@@ -900,12 +920,13 @@ export const mock = {
   },
 
   // V7-06 智库三段式资料整理管道（mock，本地 storage）。
-  async uploadKnowledgeStaged(staged?: boolean, batchId?: string): Promise<StagedUploadResult> {
+  async uploadKnowledgeStaged(staged?: boolean, batchId?: string, originalName?: string): Promise<StagedUploadResult> {
     const { token, d } = current();
     const id = uid('kn-'); const bid = batchId || uid('batch-');
     const stage: KnowledgeStage = staged ? 'staging' : 'confirmed';
     const types = ['表', 'PDF', '图', '文'];
-    (d.knowledge ??= []).unshift({ id, projectId: null, kind: 'document', title: `上传资料 ${d.knowledge.length + 1}`, text: '（mock 待整理资料）', sourceType: 'upload', sourceId: null, tags: [], at: now(), stage, batchId: staged ? bid : undefined, fileType: types[d.knowledge.length % types.length], fileSize: 120000, status: staged ? 'ready' : 'ready' });
+    const title = originalName?.trim() || '待识别资料';
+    (d.knowledge ??= []).unshift({ id, projectId: null, kind: 'document', title, text: '（mock 待整理资料）', sourceType: 'upload', sourceId: null, tags: [], at: now(), stage, batchId: staged ? bid : undefined, fileType: types[d.knowledge.length % types.length], fileSize: 120000, status: staged ? 'ready' : 'ready' });
     save(token, d);
     return delay({ id, status: staged ? 'staging' : 'ready', stage, batchId: staged ? bid : undefined });
   },
@@ -987,10 +1008,7 @@ export const mock = {
     const optimized = by('optimized');
     const optimizedFolders: KnowledgePipelineFolder[] = [...new Set(optimized.map((k) => k.bizCategory || 'unknown'))]
       .map((key) => ({ key, label: BIZ_LABEL[key] || key, count: optimized.filter((k) => (k.bizCategory || 'unknown') === key).length, stage: 'optimized' as KnowledgeStage }));
-    const optimizedItems: OrganizeItem[] = optimized.map((k) => ({
-      id: k.id, fileName: k.title || '未命名', category: BIZ_LABEL[k.bizCategory || 'unknown'] || '待识别',
-      summary: k.summary || mockSummary(k.bizCategory || 'unknown'), isDup: !!k.dupOfId,
-    }));
+    const optimizedItems: OrganizeItem[] = optimized.map(mockOrganizeItem);
     const staging = by('staging');
     const batchMap = new Map<string, KnowledgeRec[]>();
     staging.forEach((k) => { const b = k.batchId || 'default'; batchMap.set(b, [...(batchMap.get(b) ?? []), k]); });
@@ -1019,10 +1037,7 @@ export const mock = {
     save(token, d);
     const folders: KnowledgePipelineFolder[] = [...new Set(items.map((k) => k.bizCategory!))]
       .map((key) => ({ key, label: BIZ_LABEL[key] || key, count: items.filter((k) => k.bizCategory === key).length, stage: 'optimized' as KnowledgeStage }));
-    const orgItems: OrganizeItem[] = items.map((k) => ({
-      id: k.id, fileName: k.title || '未命名', category: BIZ_LABEL[k.bizCategory || 'unknown'] || '待识别',
-      summary: k.summary || mockSummary(k.bizCategory || 'unknown'), isDup: !!k.dupOfId,
-    }));
+    const orgItems: OrganizeItem[] = items.map(mockOrganizeItem);
     return delay({ batchId, status: 'organized', total: items.length, dedup, folders, items: orgItems });
   },
   async confirmKnowledge(body: { ids?: string[]; batchId?: string }): Promise<ConfirmResult> {

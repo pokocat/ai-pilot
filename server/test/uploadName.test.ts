@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeUploadName } from '../src/services/uploadName.ts';
+import { bestUploadName, displayUploadName, inferUploadNameFromContent, isPlaceholderUploadName, isTemporaryUploadName, sanitizeUploadName } from '../src/services/uploadName.ts';
 
 test('原始名原样保留（中文 + 扩展名）', () => {
   assert.equal(sanitizeUploadName('3月经营流水表.xlsx'), '3月经营流水表.xlsx');
@@ -34,4 +34,20 @@ test('过长截断但保留扩展名', () => {
 test('无扩展名的超长串也截断', () => {
   const out = sanitizeUploadName('y'.repeat(300));
   assert.ok(out.length <= 120);
+});
+
+test('历史临时文件名改用可读展示名', () => {
+  assert.equal(displayUploadName('tmp_96dcc14c0eac14aaa9d1987640cd6112bbc06'), '待识别资料');
+  assert.equal(displayUploadName('tmp_96dcc14c0eac14aaa9d1987640cd6112bbc06', '内容IP资料'), '内容IP资料');
+  assert.equal(displayUploadName('3月经营流水表.xlsx'), '3月经营流水表.xlsx');
+  assert.equal(isTemporaryUploadName('wxfile://tmp/abc'), true);
+  assert.equal(isTemporaryUploadName('商业计划书.docx'), false);
+  assert.equal(isPlaceholderUploadName('上传资料'), true);
+  assert.equal(isPlaceholderUploadName('growth资料'), true);
+  assert.equal(bestUploadName('上传资料', '商业计划书.docx'), '商业计划书.docx');
+});
+
+test('源名丢失时可从 Markdown 首标题生成明确的识别名', () => {
+  assert.equal(inferUploadNameFromContent('# 主理人公社交互逻辑\n\n正文', 'md'), '主理人公社交互逻辑.md');
+  assert.equal(inferUploadNameFromContent('没有 Markdown 标题的正文', 'txt'), '');
 });

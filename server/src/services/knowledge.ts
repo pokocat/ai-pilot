@@ -9,6 +9,7 @@ import { pgvectorEnabled, upsertChunkVector } from './vectorStore.js';
 import { parseDocument, detectDocType } from './docParse.js';
 import { looksFinancial } from './finParse.js';
 import { ossConfigured, ossPutBuffer, ossDelete, ossSignedUrl } from './ossUpload.js';
+import { bestUploadName, displayUploadName } from './uploadName.js';
 import type { KnowledgeItemT, KnowledgeKind } from '../llm/schema.js';
 import type { KnowledgeDocRow, KnowledgeDetail } from '../../../shared/contracts';
 
@@ -86,7 +87,7 @@ export async function ingestKnowledge(opts: IngestOpts): Promise<KnowledgeItemT>
     id: item.id,
     projectId: item.projectId,
     kind: item.kind as KnowledgeKind,
-    title: item.title,
+    title: displayUploadName(bestUploadName(item.fileName, item.title)),
     text: item.text,
     sourceType: item.sourceType,
     sourceId: item.sourceId,
@@ -109,7 +110,7 @@ export async function listKnowledge(
     id: r.id,
     projectId: r.projectId,
     kind: r.kind as KnowledgeKind,
-    title: r.title,
+    title: displayUploadName(bestUploadName(r.fileName, r.title)),
     text: r.text,
     sourceType: r.sourceType,
     sourceId: r.sourceId,
@@ -210,10 +211,10 @@ export async function getKnowledgeDetail(tenantId: string, id: string): Promise<
   return {
     id: item.id,
     kind: item.kind,
-    title: item.title,
+    title: displayUploadName(bestUploadName(item.fileName, item.title)),
     sourceType: item.sourceType,
     status: item.status,
-    fileName: item.fileName,
+    fileName: displayUploadName(bestUploadName(item.fileName, item.title)),
     fileType: item.fileType,
     fileSize: item.fileSize,
     projectId: item.projectId,
@@ -250,11 +251,11 @@ export async function listKnowledgeDocs(tenantId: string, userId: string, filter
   return rows.map((r) => ({
     id: r.id,
     kind: r.kind,
-    title: r.title,
+    title: displayUploadName(bestUploadName(r.fileName, r.title)),
     sourceType: r.sourceType,
     status: r.status, // staged 解析失败的项 status 已如实为 failed（见 ingestStagedFile），此处原样透出
     stage: r.stage,
-    fileName: r.fileName,
+    fileName: displayUploadName(bestUploadName(r.fileName, r.title)),
     fileType: r.fileType,
     fileSize: r.fileSize,
     chunkCount: r._count.chunks,

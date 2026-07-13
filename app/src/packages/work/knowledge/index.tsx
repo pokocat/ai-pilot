@@ -8,6 +8,7 @@ import { useStore } from '../../../hooks/useStore';
 import { navTo } from '../../../services/nav';
 import { api, type KnowledgeDocRow } from '../../../services/api';
 import { checkUpload } from '../../../services/uploadGuard';
+import { displaySourceName, sourceUploadName } from '../../../services/uploadName';
 import './index.scss';
 
 const STATUS: Record<string, string> = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
@@ -118,7 +119,8 @@ export default function Knowledge() {
     uploadCancelled.current = false;
     try {
       // 原始文件名 f.name 随上传带给服务端作展示名（tempFilePath 是 tmp 名）；进度/取消接 UploadTask。
-      const res = await api.uploadKnowledge(f.path, undefined, undefined, undefined, f.name, {
+      const sourceName = sourceUploadName(f.name);
+      const res = await api.uploadKnowledge(f.path, undefined, undefined, undefined, sourceName, {
         onProgress: setPct,
         onTask: (t) => { uploadTask.current = t; },
       });
@@ -127,9 +129,9 @@ export default function Knowledge() {
       // 立即插入列表（乐观），不必等解析；随后轮询拿到就绪态。
       const nowIso = new Date().toISOString();
       const optimistic: KnowledgeDocRow = {
-        id: res.id, kind: 'document', title: f.name, sourceType: 'upload',
+        id: res.id, kind: 'document', title: sourceName || '待识别资料', sourceType: 'upload',
         status: res.status || 'parsing', stage: (res.stage as string) || 'confirmed',
-        fileName: f.name, fileType: ext, fileSize: f.size, chunkCount: 0, summary: '',
+        fileName: sourceName || '待识别资料', fileType: ext, fileSize: f.size, chunkCount: 0, summary: '',
         projectId: null, error: null, createdAt: nowIso, updatedAt: nowIso,
       };
       setItems((prev) => (prev.some((it) => it.id === res.id) ? prev : [optimistic, ...prev]));
@@ -162,7 +164,7 @@ export default function Knowledge() {
   const remove = (it: KnowledgeDocRow) => {
     Taro.showModal({
       title: '删除资料',
-      content: `删除「${it.title || it.fileName || '该资料'}」？军师将不再参考它。`,
+      content: `删除「${displaySourceName(it.fileName, it.title)}」？军师将不再参考它。`,
       success: (r) => {
         if (!r.confirm) return;
         api.deleteKnowledge(it.id).then(() => { Taro.showToast({ title: '已删除', icon: 'none' }); load(); }).catch((e) => s.handleApiError(e));
@@ -212,7 +214,7 @@ export default function Knowledge() {
                   <View className="ki-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={18} color={accent} /></View>
                   <View className="ki-b">
                     <View className="ki-tr">
-                      <Text className="ki-t">{it.title || it.fileName || '未命名'}</Text>
+                      <Text className="ki-t">{displaySourceName(it.fileName, it.title)}</Text>
                       {badge ? <Text className={`ki-stage ${badge.cls}`}>{badge.label}</Text> : null}
                       <Text className={`ki-status ${failed ? 'bad' : isSettled(it.status) ? 'ok' : 'wait'}`}>{STATUS[it.status] || it.status}</Text>
                     </View>

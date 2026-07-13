@@ -211,6 +211,9 @@ test('organize 逐份回传 items（分类/摘要/去重标记）', async () => 
   const csv = res.items.find((i) => i.fileName === '财务报表.csv')!;
   assert.equal(csv.category, 'finance');
   assert.ok(csv.summary, '应带摘要');
+  assert.equal(csv.nameSource, 'original');
+  assert.equal(csv.fileType, 'csv');
+  assert.ok(csv.preview.includes('营收,利润'), '确认前应带正文预览');
   assert.equal(csv.isDup, false);
   const dupCount = res.items.filter((i) => i.isDup).length;
   assert.equal(dupCount, 1, '一份应标记为重复');
@@ -226,6 +229,7 @@ test('pipeline 从库内重建已优化区（optimizedItems + optimized folders�
   assert.ok(view.optimizedItems.length >= 1, '已优化区应有持久数据');
   const it = view.optimizedItems[0];
   assert.ok(it.category && it.summary, '重建项应含分类与摘要');
+  assert.ok(it.nameSource && typeof it.preview === 'string', '重建项应含名称来源与正文预览');
   assert.ok(view.folders.some((f) => f.stage === 'optimized'), 'folders 应含 optimized 阶段');
 });
 

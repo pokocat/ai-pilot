@@ -14,6 +14,7 @@ import { STREAM_CHAT } from '../../../services/config';
 import { generateStream, type StreamControl } from '../../../services/streaming';
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
 import { checkUpload } from '../../../services/uploadGuard';
+import { sourceUploadName } from '../../../services/uploadName';
 import { agentForText } from '../../../data/intents';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../../data/council';
 import { CHAT_GUIDES } from '../../../data/operatingSystem';
@@ -861,12 +862,13 @@ export default function Chat() {
     setUploading(true);
     setUploadPct(0);
     try {
-      const { id } = await api.uploadKnowledge(f.path, projectId || undefined, undefined, undefined, f.name, {
+      const sourceName = sourceUploadName(f.name);
+      const { id } = await api.uploadKnowledge(f.path, projectId || undefined, undefined, undefined, sourceName, {
         onProgress: setUploadPct,
         onTask: (t) => { uploadTaskRef.current = t; },
       });
       if (uploadCancelledRef.current) return; // 已取消：结果不挂引用
-      const label = f.name || '上传资料';
+      const label = sourceName || '待识别资料';
       setRefs((cur) => cur.some((x) => x.kind === 'knowledge' && x.id === id) ? cur : [...cur, { kind: 'knowledge', id, label }]);
       Taro.showToast({ title: '已上传，解析中…可直接发送提问', icon: 'none' });
     } catch (e) {

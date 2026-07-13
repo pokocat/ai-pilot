@@ -19,6 +19,7 @@ import { saveReportVersion } from './reports.js';
 import { TRUST_NOTE } from '../data/deliverables.js';
 import { parseDocument, detectDocType } from './docParse.js';
 import { BIZ_CATEGORIES, BIZ_CATEGORY_KEYS, bizCategoryLabel, isBizCategory, type BizCategoryKey } from '../data/bizCategories.js';
+import { bestUploadName, displayUploadName, inferUploadNameFromContent } from './uploadName.js';
 import type { Deliverable } from '../llm/schema.js';
 import type { KnowledgePipelineView, KnowledgePipelineFolder, KnowledgeBatch, KnowledgeBatchTypeStat, KnowledgeBatchFile, OrganizeItem } from '../../../shared/contracts';
 
@@ -152,7 +153,7 @@ export async function buildPipeline(args: { tenantId: string; userId: string }):
     }),
     prisma.knowledgeItem.findMany({
       where: { tenantId, userId, stage: 'optimized' },
-      select: { id: true, fileName: true, title: true, bizCategory: true, tagsJson: true, dupOfId: true },
+      select: { id: true, fileName: true, title: true, fileType: true, text: true, bizCategory: true, tagsJson: true, dupOfId: true },
       orderBy: { createdAt: 'asc' },
     }),
   ]);
@@ -182,7 +183,7 @@ export async function buildPipeline(args: { tenantId: string; userId: string }):
     b.count += 1;
     const lbl = fileTypeLabel(r.fileType);
     b.types.set(lbl, (b.types.get(lbl) ?? 0) + 1);
-    b.files.push({ id: r.id, fileName: r.fileName ?? r.title ?? '未命名', status: r.status, fileSize: r.fileSize });
+    b.files.push({ id: r.id, fileName: displayUploadName(bestUploadName(r.fileName, r.title)), status: r.status, fileSize: r.fileSize });
     byBatch.set(r.batchId, b);
   }
   const batches: KnowledgeBatch[] = [...byBatch.entries()].map(([id, b]) => ({
@@ -237,19 +238,39 @@ function summaryFor(category: BizCategoryKey, fileName: string, text: string): s
 const DEEP_TAG = '深度整理';
 
 /** 从库内条目（含 tagsJson）重建逐份归类项：分类取 bizCategory 列，摘要取 tagsJson 里第一条非「类目标签/控制标」的文本。 */
-function itemMeta(r: { id: string; fileName: string | null; title?: string | null; bizCategory: string | null; tagsJson: unknown; dupOfId: string | null }): OrganizeItem {
+function itemMeta(r: {
+  id: string;
+  fileName: string | null;
+  title?: string | null;
+  fileType: string | null;
+  text: string;
+  bizCategory: string | null;
+  tagsJson: unknown;
+  dupOfId: string | null;
+}): OrganizeItem {
   const tags = Array.isArray(r.tagsJson) ? (r.tagsJson as string[]) : [];
   const category = r.bizCategory ?? 'unknown';
   const label = bizCategoryLabel(category);
   const summary = tags.find((t) => typeof t === 'string' && t !== label && t !== DEEP_TAG) ?? '';
-  return { id: r.id, fileName: r.fileName ?? r.title ?? '未命名', category, summary, isDup: r.dupOfId != null };
+  const originalName = bestUploadName(r.fileName, r.title);
+  const contentName = originalName ? '' : inferUploadNameFromContent(r.text, r.fileType);
+  return {
+    id: r.id,
+    fileName: originalName || contentName || `${label}资料`,
+    fileType: r.fileType,
+    nameSource: originalName ? 'original' : contentName ? 'content' : 'fallback',
+    category,
+    summary,
+    preview: r.text.trim().slice(0, 1200),
+    isDup: r.dupOfId != null,
+  };
 }
 
 /** 取某批全部条目、映射为逐份归类项（organize/深度整理回传的数据源）。 */
 async function buildBatchItems(tenantId: string, userId: string, batchId: string): Promise<OrganizeItem[]> {
   const rows = await prisma.knowledgeItem.findMany({
     where: { tenantId, userId, batchId },
-    select: { id: true, fileName: true, title: true, bizCategory: true, tagsJson: true, dupOfId: true },
+    select: { id: true, fileName: true, title: true, fileType: true, text: true, bizCategory: true, tagsJson: true, dupOfId: true },
     orderBy: { createdAt: 'asc' },
   });
   return rows.map(itemMeta);
@@ -525,7 +546,7 @@ export async function deepOrganize(args: { tenantId: string; userId: string; bat
     // 汇总《资料整理报告》：数字/清单全部来自库内事实；同批稳定标题 → 版本化去重（重试不重复成版）。
     const rows = await prisma.knowledgeItem.findMany({
       where: { tenantId, userId, batchId },
-      select: { id: true, fileName: true, title: true, bizCategory: true, tagsJson: true, dupOfId: true },
+      select: { id: true, fileName: true, title: true, fileType: true, text: true, bizCategory: true, tagsJson: true, dupOfId: true },
       orderBy: { createdAt: 'asc' },
     });
     const nameById = new Map(rows.map((r) => [r.id, r.fileName ?? r.title ?? '未命名']));
@@ -541,9 +562,7 @@ export async function deepOrganize(args: { tenantId: string; userId: string; bat
       agentKey: 'ops', content: deliverable as object, authorKind: 'agent',
     });
 
-    const items = reportRows.map((r, i): OrganizeItem => ({
-      id: rows[i].id, fileName: r.fileName, category: r.category, summary: r.summary, isDup: r.isDup,
-    }));
+    const items = rows.map(itemMeta);
 
     return { ...base, items, deep: true, reportId: saved.reportId, reportVersion: saved.version, meterAttempts, meterOk };
   } catch (err) {

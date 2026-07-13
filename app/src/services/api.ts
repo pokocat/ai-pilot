@@ -422,7 +422,7 @@ export const api = {
   reembedKnowledge: (id: string) =>
     IS_MOCK ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
   uploadKnowledge: (filePath: string, projectId?: string, staged?: boolean, batchId?: string, originalName?: string, hooks?: UploadHooks) =>
-    IS_MOCK ? mock.uploadKnowledgeStaged(staged, batchId) : uploadKnowledgeFile(filePath, { projectId, staged, batchId, originalName }, hooks),
+    IS_MOCK ? mock.uploadKnowledgeStaged(staged, batchId, originalName) : uploadKnowledgeFile(filePath, { projectId, staged, batchId, originalName }, hooks),
 
   // —— V7-06 智库三段式资料整理管道 ——
   knowledgePipeline: () => (IS_MOCK ? mock.knowledgePipeline() : request<KnowledgePipelineView>('/knowledge/pipeline')),

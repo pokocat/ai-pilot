@@ -1223,8 +1223,17 @@ export interface KnowledgeBatch {
   typeStats: KnowledgeBatchTypeStat[];
   files: KnowledgeBatchFile[]; // 逐份清单（id/文件名/解析状态/字节）
 }
-/** 整理后逐份归类结果（organize/深度整理回传，前端「已优化」区逐份渲染）。 */
-export interface OrganizeItem { id: string; fileName: string; category: string; summary: string; isDup: boolean; }
+/** 整理后逐份归类结果（含确认前正文预览；源名丢失时明确标注内容推断/兜底）。 */
+export interface OrganizeItem {
+  id: string;
+  fileName: string;
+  fileType: string | null;
+  nameSource: 'original' | 'content' | 'fallback';
+  category: string;
+  summary: string;
+  preview: string;
+  isDup: boolean;
+}
 export interface KnowledgePipelineView {
   counts: { staging: number; optimized: number; confirmed: number };
   quota: { usedDocs: number; freeDocs: number; usedBytes: number; freeBytes: number };

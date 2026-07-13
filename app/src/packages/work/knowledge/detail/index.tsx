@@ -8,6 +8,7 @@ import PaySheet from '../../../../components/PaySheet';
 import { useStore } from '../../../../hooks/useStore';
 import { api, type KnowledgeDetail } from '../../../../services/api';
 import { navTo } from '../../../../services/nav';
+import { displaySourceName } from '../../../../services/uploadName';
 import './index.scss';
 
 const STATUS: Record<string, string> = { ready: '就绪', parsing: '解析中', embedding: '嵌入中', failed: '失败', pending: '排队' };
@@ -111,7 +112,7 @@ export default function KnowledgeDetailPage() {
         <View className="kd-head card">
           <View className="kd-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={20} color={accent} /></View>
           <View className="kd-hb">
-            <Text className="kd-t">{detail.title || detail.fileName || '未命名'}</Text>
+            <Text className="kd-t">{displaySourceName(detail.fileName, detail.title)}</Text>
             <Text className="kd-m">{STATUS[detail.status] || detail.status} · {detail.chunks.length} 切片{detail.fileType ? ' · ' + detail.fileType.toUpperCase() : ''}{detail.fileSize ? ' · ' + fmtSize(detail.fileSize) : ''}{detail.error ? ' · ' + detail.error : ''}</Text>
           </View>
         </View>
