@@ -1,8 +1,7 @@
-import { useEffect } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
+import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
-import { store } from '../../services/store';
 import { getToken } from '../../services/token';
 import './index.scss';
 
@@ -39,41 +38,38 @@ export default function OnboardSheet({ open, onClose, onStart }: OnboardSheetPro
   const s = useStore();
   const accent = s.color().vars['--accent'];
 
-  useEffect(() => {
-    store.setOverlay(open, 'onboard');
-    return () => store.setOverlay(false, 'onboard');
-  }, [open]);
-
-  if (!open) return null;
-
+  // 遮罩点击 = 稍后再看（含「置已看」副作用），经 Sheet 的 onMaskClose 表达。
   const later = () => { markOnboardShown(); onClose?.(); };
   const start = () => { markOnboardShown(); onStart?.(); };
 
   return (
-    <View className="onboard-mask" onClick={later} catchMove>
-      <View className="onboard-panel" onClick={(e) => e.stopPropagation()}>
-        <View className="ob-grip" />
-        <Text className="onboard-k">FIRST RUN</Text>
-        <Text className="onboard-title serif">先把案卷跑通，再让军师开工</Text>
-        <Text className="onboard-desc">第一次用不用理解所有模块。按这 4 步走，系统会把资料、判断、军令和复盘串起来。</Text>
-
-        <View className="onboard-steps">
-          {STEPS.map((st, i) => (
-            <View key={st.t} className="onboard-step">
-              <Text className="ob-num">{i + 1}</Text>
-              <View className="ob-body">
-                <Text className="ob-t">{st.t}</Text>
-                <Text className="ob-d">{st.d}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
+    <Sheet
+      visible={open}
+      overlayKey="onboard"
+      onMaskClose={later}
+      maxHeight="88vh"
+      footer={
         <View className="onboard-actions">
           <View className="btn btn-ghost onboard-later" onClick={later}><Text>稍后再看</Text></View>
           <View className="btn btn-primary onboard-start" style={{ background: accent }} onClick={start}><Text>开始上传资料</Text></View>
         </View>
+      }
+    >
+      <Text className="onboard-k">FIRST RUN</Text>
+      <Text className="onboard-title serif">先把案卷跑通，再让军师开工</Text>
+      <Text className="onboard-desc">第一次用不用理解所有模块。按这 4 步走，系统会把资料、判断、军令和复盘串起来。</Text>
+
+      <View className="onboard-steps">
+        {STEPS.map((st, i) => (
+          <View key={st.t} className="onboard-step">
+            <Text className="ob-num">{i + 1}</Text>
+            <View className="ob-body">
+              <Text className="ob-t">{st.t}</Text>
+              <Text className="ob-d">{st.d}</Text>
+            </View>
+          </View>
+        ))}
       </View>
-    </View>
+    </Sheet>
   );
 }

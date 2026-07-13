@@ -400,15 +400,18 @@
   color: var(--green); background: var(--green-soft);
 }
 
-/* —— 目标编辑浮层（V7-10：底部输入 sheet，对齐 Plans 遮罩配方） —— */
+/* —— 目标编辑浮层（V7-10：底部输入 sheet）——
+   五要素对齐：z-index 900 字面量 / 遮罩 rgba(22,25,29,.55) / 圆角 var(--r-lg) / catchMove（见 tsx）。
+   注：本层用 transform 做键盘上顶避让（C6），与基座 sheet-rise（同样动画 transform）冲突，
+   故不迁基座、不加 sheet-rise——入场以 transform 过渡承载。 */
 .goal-sheet-mask {
-  position: fixed; inset: 0; z-index: 900;
-  background: rgba(15, 17, 20, .55);
+  position: fixed; inset: 0; z-index: 900; /* = --z-sheet，weapp 真机 page 级 var 用于 z-index 不稳定，见 app.scss token 说明 */
+  background: rgba(22, 25, 29, .55);
   display: flex; align-items: flex-end; justify-content: center;
 }
 .goal-sheet {
   width: 100%; max-width: 600px;
-  background: var(--bg, #fff); border-radius: 22px 22px 0 0;
+  background: var(--bg, #fff); border-radius: var(--r-lg) var(--r-lg) 0 0;
   padding: 10px 20px calc(20px + env(safe-area-inset-bottom)) 20px;
   transition: transform .2s ease; /* C6：键盘弹起时上顶避让的过渡 */
   display: flex; flex-direction: column; align-items: stretch;

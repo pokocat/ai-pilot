@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import Icon from '../Icon';
+import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Plan } from '../../services/api';
@@ -26,13 +27,11 @@ export default function Plans({ open, onClose }: Props) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [busy, setBusy] = useState('');
 
+  // 开合时拉取方案列表；底栏协调（setOverlay）已收敛至 Sheet 基座。
   useEffect(() => {
-    store.setOverlay(open, 'plans-sheet');
     if (open) api.plans().then(setPlans).catch((e) => s.handleApiError(e));
-    return () => store.setOverlay(false, 'plans-sheet');
   }, [open]);
 
-  if (!open) return null;
   const balance = me?.creditBalance ?? 0;
 
   // 演示发放（免费套餐 / 演示环境回退）：不经支付直接更新方案。
@@ -96,10 +95,8 @@ export default function Plans({ open, onClose }: Props) {
   };
 
   return (
-    <View className="plans-mask" onClick={onClose} catchMove>
-      <View className="plans-sheet" onClick={(e) => e.stopPropagation()}>
-        <View className="ps-grip" />
-        <View className="ps-head">
+    <Sheet visible={open} onClose={onClose} overlayKey="plans-sheet" align="center" panelClassName="plans-pad">
+      <View className="ps-head">
           <Text className="ps-title">方案与权益点</Text>
           <View className="ps-bal">
             <Icon name="diamond" size={13} color={accent} />
@@ -140,8 +137,7 @@ export default function Plans({ open, onClose }: Props) {
           })}
         </ScrollView>
 
-        <View className="ps-close" onClick={onClose}><Text>关闭</Text></View>
-      </View>
-    </View>
+      <View className="ps-close" onClick={onClose}><Text>关闭</Text></View>
+    </Sheet>
   );
 }

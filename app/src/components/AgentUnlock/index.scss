@@ -1,20 +1,6 @@
-.agent-unlock-mask {
-  position: fixed; inset: 0; z-index: var(--z-sheet);
-  background: rgba(22, 25, 29, .55);
-  display: flex; align-items: flex-end; justify-content: center;
-}
-
-.au-sheet {
-  width: 100%; max-width: 600px;
-  background: var(--bg, #fff);
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-  padding: 10px 22px calc(26px + env(safe-area-inset-bottom)) 22px;
-  display: flex; flex-direction: column; align-items: center;
-  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
-  animation: sheet-rise .42s cubic-bezier(.2, .8, .2, 1) both;
-}
-
-.au-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 0 18px; }
+/* 遮罩/面板/grip 由 Sheet 基座统一（五要素，align=center 经 prop）；此处仅面板 padding 与 grip 间距微调 + 内容。 */
+.sheet-panel.au-pad { padding-bottom: calc(26px + env(safe-area-inset-bottom)); }
+.au-pad .sheet-grip { margin-bottom: 18px; }
 
 .au-ic { width: 56px; height: 56px; border-radius: 17px; display: flex; align-items: center; justify-content: center; }
 .au-name { font-size: 18px; font-weight: 600; color: var(--ink); margin-top: 12px; }

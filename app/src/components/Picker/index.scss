@@ -1,5 +1,5 @@
 .picker {
-  position: fixed; inset: 0; z-index: var(--z-sheet);
+  position: fixed; inset: 0; z-index: 900; /* = --z-sheet，weapp 真机 page 级 var 用于 z-index 不稳定，见 app.scss token 说明 */
   /* 弹层五要素：遮罩统一 rgba(22,25,29,.55)，去 blur 对齐其余 Sheet */
   background: rgba(22, 25, 29, .55);
   display: flex; align-items: flex-end; justify-content: center;

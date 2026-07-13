@@ -6,6 +6,7 @@ import Login from '../../components/Login';
 import Picker from '../../components/Picker';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
+import Sheet from '../../components/Sheet';
 import NextStepCard from '../../components/NextStepCard';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
@@ -107,11 +108,7 @@ export default function Home() {
     api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
   }, []);
 
-  // 三势全解弹层：底栏协调（overlay key）+ 卸载清理（对齐 playbook §3 recipe）
-  useEffect(() => {
-    store.setOverlay(forcesOpen, 'forces-detail');
-    return () => store.setOverlay(false, 'forces-detail');
-  }, [forcesOpen]);
+  // 三势全解弹层底栏协调（setOverlay）已收敛至 Sheet 基座。
 
   const requireLogin = () => {
     if (s.isAuthed()) return true;
@@ -361,42 +358,43 @@ export default function Home() {
         <View className="bc-arrow"><Text>{ctaText.icon}</Text></View>
       </View>
 
-      {/* 三势全解 sheet（设计 §4.6 forces）：3 条 force-read + 合参结论 */}
-      {forcesOpen ? (
-        <View className="fs-mask" onClick={() => setForcesOpen(false)} catchMove>
-          <View className="fs-sheet" onClick={(e) => e.stopPropagation()}>
-            <View className="fs-grip" />
-            <Text className="fs-kicker">三 势 合 参</Text>
-            <Text className="fs-title serif">三势全解：先拆三势，再做合参</Text>
-            <Text className="fs-quote">三势不是三个孤立指标。天势决定能不能借风，市势决定怎么差异化，人势决定能不能放大。</Text>
-            <ScrollView scrollY className="fs-body">
-              <View className="forces-breakdown">
-                {forces.map((f) => {
-                  const r = forceRead(f);
-                  return (
-                    <View key={f.kind} className={`force-read ${f.kind}`}>
-                      <Text className="fr-label">{r.label}</Text>
-                      <Text className="fr-title serif">{r.title}</Text>
-                      <Text className="fr-body">{r.body}</Text>
-                      <Text className={`fr-tactic ${f.tacticTone}`}>{r.tactic}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-              {(() => {
-                const syn = forceSynthesis(forces);
-                return (
-                  <View className="force-synthesis">
-                    <Text className="fsy-title serif">{syn.title}</Text>
-                    <Text className="fsy-body">{syn.body}</Text>
-                  </View>
-                );
-              })()}
-            </ScrollView>
-            <Text className="fs-close" onClick={() => setForcesOpen(false)}>收起</Text>
+      {/* 三势全解 sheet（设计 §4.6 forces）：3 条 force-read + 合参结论——迁入 Sheet 基座 */}
+      <Sheet
+        visible={forcesOpen}
+        onClose={() => setForcesOpen(false)}
+        overlayKey="forces-detail"
+        align="center"
+        panelClassName="fs-pad"
+        footer={<Text className="fs-close" onClick={() => setForcesOpen(false)}>收起</Text>}
+      >
+        <Text className="fs-kicker">三 势 合 参</Text>
+        <Text className="fs-title serif">三势全解：先拆三势，再做合参</Text>
+        <Text className="fs-quote">三势不是三个孤立指标。天势决定能不能借风，市势决定怎么差异化，人势决定能不能放大。</Text>
+        <ScrollView scrollY className="fs-body">
+          <View className="forces-breakdown">
+            {forces.map((f) => {
+              const r = forceRead(f);
+              return (
+                <View key={f.kind} className={`force-read ${f.kind}`}>
+                  <Text className="fr-label">{r.label}</Text>
+                  <Text className="fr-title serif">{r.title}</Text>
+                  <Text className="fr-body">{r.body}</Text>
+                  <Text className={`fr-tactic ${f.tacticTone}`}>{r.tactic}</Text>
+                </View>
+              );
+            })}
           </View>
-        </View>
-      ) : null}
+          {(() => {
+            const syn = forceSynthesis(forces);
+            return (
+              <View className="force-synthesis">
+                <Text className="fsy-title serif">{syn.title}</Text>
+                <Text className="fsy-body">{syn.body}</Text>
+              </View>
+            );
+          })()}
+        </ScrollView>
+      </Sheet>
 
       {/* 认可判断额度/套餐异常 → 付费 / 异常屏（V7-03 全局组件填充；此处按需挂载） */}
       <PaySheet

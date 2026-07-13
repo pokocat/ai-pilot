@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
+import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ActivationSource } from '../../services/api';
@@ -43,12 +44,6 @@ export default function PaySheet({
   const accent = s.color().vars['--accent'];
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    store.setOverlay(open, 'paysheet');
-    return () => store.setOverlay(false, 'paysheet');
-  }, [open]);
-
-  if (!open) return null;
   const kicker = costLabel || MODE_KICKER[mode] || '确 认 启 用';
 
   const confirm = async () => {
@@ -87,28 +82,30 @@ export default function PaySheet({
   };
 
   return (
-    <View className="pay-mask" onClick={onClose} catchMove>
-      <View className="pay-panel" onClick={(e) => e.stopPropagation()}>
-        <View className="pay-grip" />
-        <Text className="pay-k">{kicker}</Text>
-        <Text className="pay-title serif">{title || '确认启用'}</Text>
-        {!!desc && <Text className="pay-desc">{desc}</Text>}
-
-        <View className="pay-ledger">
-          <View className="pay-row"><Text className="pay-rk">本次消耗</Text><Text className="pay-rv">{costValue || '—'}</Text></View>
-          <View className="pay-row warn"><Text className="pay-rk">当前余额</Text><Text className="pay-rv">{balanceValue || '—'}</Text></View>
-          <View className="pay-row"><Text className="pay-rk">扣后状态</Text><Text className="pay-rv">{afterValue || '—'}</Text></View>
-        </View>
-
-        {!!result && <Text className="pay-result">{result}</Text>}
-
+    <Sheet
+      visible={open}
+      onClose={onClose}
+      overlayKey="paysheet"
+      footer={
         <View className="pay-actions">
           <View className="btn btn-ghost pay-secondary" onClick={onClose}><Text>先不启用</Text></View>
           <View className={`btn btn-primary pay-primary ${busy ? 'disabled' : ''}`} style={{ background: accent }} onClick={confirm}>
             <Text>{busy ? '处理中…' : (confirmText || '确认启用')}</Text>
           </View>
         </View>
+      }
+    >
+      <Text className="pay-k">{kicker}</Text>
+      <Text className="pay-title serif">{title || '确认启用'}</Text>
+      {!!desc && <Text className="pay-desc">{desc}</Text>}
+
+      <View className="pay-ledger">
+        <View className="pay-row"><Text className="pay-rk">本次消耗</Text><Text className="pay-rv">{costValue || '—'}</Text></View>
+        <View className="pay-row warn"><Text className="pay-rk">当前余额</Text><Text className="pay-rv">{balanceValue || '—'}</Text></View>
+        <View className="pay-row"><Text className="pay-rk">扣后状态</Text><Text className="pay-rv">{afterValue || '—'}</Text></View>
       </View>
-    </View>
+
+      {!!result && <Text className="pay-result">{result}</Text>}
+    </Sheet>
   );
 }

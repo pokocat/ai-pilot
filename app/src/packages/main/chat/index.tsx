@@ -104,6 +104,8 @@ type ChatScrollEvent = {
 
 // 模型选择：后端统一调度，前端暂固定展示一档（预留多模型切换入口）。
 const FIXED_MODEL = '军师 · 标准';
+// 记债项10：报告流失败/降级统一话术——只此一句 + ↻ 重试入口，不再另出「保底草案」提示。
+const REPORT_INTERRUPTED_TRUST = '生成中断——已生成部分已保留，可点击重试补全';
 const JUMP_LATEST_SHOW_DISTANCE = 420;
 const JUMP_LATEST_HIDE_DISTANCE = 140;
 // B1 贴底判定阈值：距底 ≤ 此值视为「贴底跟随」，用户上滑超过即暂停自动滚底。
@@ -165,9 +167,11 @@ export default function Chat() {
   inputRef.current = input;
   const sessionIdRef = useRef('');
   sessionIdRef.current = sessionId;
-  // B5 上传：可取消的非模态进度（scope 限制未透出 uploadFile task，故 cancel 为「放弃等待/不挂引用」）。
+  // B5 上传：非模态进度条，接 UploadTask 透出真实百分比；取消调 task.abort() 真中止。
   const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
   const uploadCancelledRef = useRef(false);
+  const uploadTaskRef = useRef<Taro.UploadTask | null>(null);
   // B6 jump-latest 与 composer 高度联动：测量输入区顶部到屏底的距离，驱动 --jump-bottom。
   const [jumpBottom, setJumpBottom] = useState(0);
   const winHeightRef = useRef(0);
@@ -398,13 +402,22 @@ export default function Chat() {
 
   function restore(ag: Agent, messages: { id: string; role: string; content: any; refs?: MessageRef[] }[]) {
     const out: Msg[] = [{ role: 'greet', agent: ag }];
+    let lastUserText = '';
     messages.forEach((m) => {
-      if (m.role === 'user') out.push({ role: 'user', text: m.content.text, refs: m.refs });
+      if (m.role === 'user') { lastUserText = m.content?.text || ''; out.push({ role: 'user', text: m.content.text, refs: m.refs }); }
       // B4：已入库真值——优先取服务端字段（若有），否则回落到本地保存记录，避免已入库方案重复显示「存入方案库」。
-      else if (m.role === 'report') out.push({
-        role: 'report', deliverable: m.content, animate: false, messageId: m.id,
-        saved: !!((m as { saved?: boolean }).saved || (m.content as { saved?: boolean })?.saved || isReportSaved(m.id)),
-      });
+      else if (m.role === 'report') {
+        const deliverable = m.content as Deliverable;
+        // 记债项10：还原历史里的降级/中断报告——统一中断话术 + ↻ 重试入口（与实时失败一致）。
+        const degraded = !!deliverable?.degraded;
+        out.push({
+          role: 'report',
+          deliverable: degraded ? { ...deliverable, trust: REPORT_INTERRUPTED_TRUST } : deliverable,
+          animate: false, messageId: m.id,
+          saved: !!((m as { saved?: boolean }).saved || (deliverable as { saved?: boolean })?.saved || isReportSaved(m.id)),
+          retryText: degraded && lastUserText ? lastUserText : undefined,
+        });
+      }
       else out.push({ role: 'assistant', reply: m.content });
     });
     setMsgs(out);
@@ -449,12 +462,15 @@ export default function Chat() {
       const renderGenerateResult = (res: Awaited<ReturnType<typeof api.generate>>, replaceStreamingAssistant = false) => {
         if (res.sessionId && !sid) setSessionId(res.sessionId);
         if (res.kind === 'report' && res.deliverable) {
+          // 记债项10：降级（保底）草案与流式中断统一话术——挂 ↻ 重试、trust 行合一，不再另出「保底草案」提示。
+          const degraded = !!res.deliverable.degraded;
           const reportMsg: Extract<Msg, { role: 'report' }> = {
             role: 'report',
-            deliverable: res.deliverable,
+            deliverable: degraded ? { ...res.deliverable, trust: REPORT_INTERRUPTED_TRUST } : res.deliverable,
             animate: true,
             messageId: res.messageId,
             knowledgeUsed: res.knowledgeUsed,
+            retryText: degraded ? text : undefined,
           };
           setMsgs((m) => {
             if (replaceStreamingAssistant) {
@@ -619,8 +635,28 @@ export default function Chat() {
           },
           onError: (em) => {
             if (reportStarted) {
-              // B4：报告流失败挂上「重试」原文，卡片下方给 ↻ 入口（审核类错误不给重试）。
-              patchReport((d) => ({ ...d, trust: em || '生成中断，请重试', degraded: true }), { streaming: false, retryText: isModerationErr(em) ? undefined : text });
+              // 记债项10：报告流失败语义收敛为单一话术。审核类错误不给重试（重试必再被拦）。
+              const retry = isModerationErr(em) ? undefined : text;
+              setMsgs((m) => {
+                const i = m.length - 1;
+                if (!(i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming)) return m;
+                const cur = m[i] as Extract<Msg, { role: 'report' }>;
+                const copy = m.slice();
+                if (cur.deliverable.sections.length > 0) {
+                  // 有部分内容：保留已流出分段，trust 行统一为中断话术 + ↻ 重试；
+                  // degraded 仅留作状态位（供后端/埋点、免扣额度），UI 不再另出「保底草案」提示。
+                  copy[i] = {
+                    ...cur,
+                    streaming: false,
+                    retryText: retry,
+                    deliverable: { ...cur.deliverable, trust: REPORT_INTERRUPTED_TRUST, degraded: true },
+                  };
+                } else {
+                  // 完全无内容：不留半空报告卡，改普通错误气泡 + 重试（对齐聊天气泡）。
+                  copy[i] = { role: 'assistant', reply: { text: em || '生成失败' }, retryText: retry };
+                }
+                return copy;
+              });
             } else if (chatStarted) {
               patchChat((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false }));
             }
@@ -819,12 +855,16 @@ export default function Chat() {
       Taro.showToast({ title: chk.desc || '文件不符合上传要求', icon: 'none' });
       return;
     }
-    // B5：非模态可取消上传（替代阻塞式 showLoading）。scope 未透出 uploadFile task，
-    // 取消 = 放弃等待、不挂引用；后端仍会完成解析，无副作用。
+    // B5：非模态可取消上传（替代阻塞式 showLoading）。透出 UploadTask → 真进度 + 取消真中止。
+    // 原始文件名 f.name 随上传带给服务端作展示名（tempFilePath 是 tmp 名）。
     uploadCancelledRef.current = false;
     setUploading(true);
+    setUploadPct(0);
     try {
-      const { id } = await api.uploadKnowledge(f.path, projectId || undefined);
+      const { id } = await api.uploadKnowledge(f.path, projectId || undefined, undefined, undefined, f.name, {
+        onProgress: setUploadPct,
+        onTask: (t) => { uploadTaskRef.current = t; },
+      });
       if (uploadCancelledRef.current) return; // 已取消：结果不挂引用
       const label = f.name || '上传资料';
       setRefs((cur) => cur.some((x) => x.kind === 'knowledge' && x.id === id) ? cur : [...cur, { kind: 'knowledge', id, label }]);
@@ -833,13 +873,18 @@ export default function Chat() {
       if (uploadCancelledRef.current) return; // 取消引发的失败静默
       Taro.showToast({ title: (e as Error).message || '上传失败', icon: 'none' });
     } finally {
+      uploadTaskRef.current = null;
       setUploading(false);
+      setUploadPct(0);
     }
   };
 
   const cancelUpload = () => {
     uploadCancelledRef.current = true;
+    uploadTaskRef.current?.abort(); // 真中止传输，不再空等
+    uploadTaskRef.current = null;
     setUploading(false);
+    setUploadPct(0);
     Taro.showToast({ title: '已取消上传', icon: 'none' });
   };
 
@@ -1058,22 +1103,19 @@ export default function Chat() {
                   onShare={m.streaming ? undefined : () => shareReport(m.messageId)}
                 />
               </View>
-              {/* B4：报告流失败重试入口（复用聊天气泡 ↻ 模式） */}
+              {/* 记债项10：报告流失败/降级——单一话术（trust 行「生成中断——已生成部分已保留，可点击重试补全」）+ ↻ 重试入口。
+                  原「保底草案，已免扣额度」独立提示已并入 trust 行，degraded 仅留作状态位。 */}
               {!m.streaming && m.retryText ? (
                 <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => doSend(m.retryText!, sessionId, agent?.key ?? '', [], false)}>↻ 重试</Text>
-              ) : null}
-              {!m.streaming && m.deliverable.degraded ? (
-                <View style={{ marginTop: '8px', fontSize: '12px', opacity: 0.7 }}>
-                  <Text>这版是保底草案，已免扣额度。你可以补充要求后再生成一版。</Text>
-                </View>
               ) : null}
               {m.knowledgeUsed && m.knowledgeUsed.length ? (
                 <View style={{ marginTop: '6px', fontSize: '12px', opacity: 0.6 }}>
                   <Text>参考了 {m.knowledgeUsed.length} 份资料：{m.knowledgeUsed.join('、')}</Text>
                 </View>
               ) : null}
-              {/* 认可方案 → 沉淀报告并进入执行承接（对齐「认可后拆成军令/复盘」动线） */}
-              {!m.streaming && !m.deliverable.degraded ? (
+              {/* 认可方案 → 沉淀报告并进入执行承接（对齐「认可后拆成军令/复盘」动线）。
+                  中断/降级报告（retryText 或 degraded）不开放认可，先重试补全再认可。 */}
+              {!m.streaming && !m.deliverable.degraded && !m.retryText ? (
                 <View className="accept-card">
                   <View className="accept-b">
                     <Text className="accept-t">认可这份方案？</Text>
@@ -1122,7 +1164,7 @@ export default function Chat() {
         {uploading ? (
           <View className="upload-bar">
             <View className="ub-spin" style={{ borderTopColor: accent }} />
-            <Text className="ub-t">资料上传中…</Text>
+            <Text className="ub-t">资料上传中… {uploadPct}%</Text>
             <Text className="ub-cancel" style={{ color: accent }} onClick={cancelUpload}>取消</Text>
           </View>
         ) : null}
@@ -1132,7 +1174,7 @@ export default function Chat() {
           <View className="ref-row">
             {refs.map((r, j) => (
               <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
-                <Text style={{ color: accent }}>@{r.label}</Text><Text className="ref-x">✕</Text>
+                <Text className="ref-chip-l" style={{ color: accent }}>@{r.label}</Text><Text className="ref-x">✕</Text>
               </View>
             ))}
           </View>

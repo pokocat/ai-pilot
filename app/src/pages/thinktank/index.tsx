@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
@@ -7,9 +7,9 @@ import Login from '../../components/Login';
 import AsyncState from '../../components/AsyncState';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
+import Sheet from '../../components/Sheet';
 import { navTo, switchTo } from '../../services/nav';
 import { useStore } from '../../hooks/useStore';
-import { store } from '../../services/store';
 import { checkUpload } from '../../services/uploadGuard';
 import {
   api,
@@ -191,7 +191,8 @@ export default function ThinkTank() {
     try {
       let bid = activeBatch || undefined;
       for (const f of files) {
-        const r = await api.uploadKnowledge(f.path, undefined, true, bid);
+        // 带上原始文件名 f.name 作展示名（tempFilePath 是 tmp 名，服务端否则会存乱码 tmp 名）。
+        const r = await api.uploadKnowledge(f.path, undefined, true, bid, f.name);
         bid = r.batchId || bid;
       }
       setActiveBatch(bid || null);
@@ -648,10 +649,11 @@ export default function ThinkTank() {
                   <>
                     <View className="folder-grid">
                       {confirmedFolders.map((f) => (
-                        <View key={f.key} className="folder-tile card">
+                        // 点入资料库逐份清单（可查看每份原名/摘要/正文），不再只停在「N 份」计数。
+                        <View key={f.key} className="folder-tile card" onClick={() => navTo('/packages/work/knowledge/index')}>
                           <View className="ft-ic"><Text>{f.label.slice(0, 1)}</Text></View>
                           <Text className="ft-t serif">{f.label}</Text>
-                          <Text className="ft-n">{f.count} 份</Text>
+                          <Text className="ft-n">{f.count} 份 ›</Text>
                         </View>
                       ))}
                     </View>
@@ -842,37 +844,39 @@ export default function ThinkTank() {
 function DsSheet({ sel, onClose, onBind }: { sel: DataSourceView | null; onClose: () => void; onBind: () => void }) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
-  useDidShowOverlay(!!sel, 'ds-detail');
   if (!sel) return null;
   const advanced = sel.tier === 'advanced';
   return (
-    <View className="tk-mask" onClick={onClose} catchMove>
-      <View className="tk-sheet" onClick={(e) => e.stopPropagation()}>
-        <View className="tk-grip" />
-        <Text className="tk-k">数 据 授 权</Text>
-        <View className="tk-head">
-          <View className="tk-head-ic"><Text>{sel.icon}</Text></View>
-          <View className="tk-head-b"><Text className="tk-head-t serif">{sel.label}</Text><Text className="tk-head-s">{sel.desc}</Text></View>
-        </View>
-
-        <Text className="tk-sub-label">读取范围</Text>
-        <View className="tk-chips">
-          {sel.scope.map((c) => <Text key={c} className="tk-chip">{c}</Text>)}
-        </View>
-
-        <View className="detail-mini-grid">
-          <View className="dm-cell"><Text className="dm-k">授权范围</Text><Text className="dm-v">只读当前案卷需要的数据</Text></View>
-          <View className="dm-cell"><Text className="dm-k">同步频率</Text><Text className="dm-v">每日复盘前刷新一次</Text></View>
-          <View className="dm-cell"><Text className="dm-k">回写位置</Text><Text className="dm-v">战局、执行、方案</Text></View>
-          <View className="dm-cell"><Text className="dm-k">隐私控制</Text><Text className="dm-v">可随时断开或隐藏来源</Text></View>
-        </View>
-
+    <Sheet
+      visible={!!sel}
+      onClose={onClose}
+      overlayKey="ds-detail"
+      panelClassName="tk-pad"
+      footer={
         <View className="tk-actions">
           <View className="tk-secondary" onClick={onClose}><Text>返回</Text></View>
           <View className="tk-primary" style={{ background: accent }} onClick={onBind}><Text>{advanced ? '预约开通授权' : '上传替代资料'}</Text></View>
         </View>
+      }
+    >
+      <Text className="tk-k">数 据 授 权</Text>
+      <View className="tk-head">
+        <View className="tk-head-ic"><Text>{sel.icon}</Text></View>
+        <View className="tk-head-b"><Text className="tk-head-t serif">{sel.label}</Text><Text className="tk-head-s">{sel.desc}</Text></View>
       </View>
-    </View>
+
+      <Text className="tk-sub-label">读取范围</Text>
+      <View className="tk-chips">
+        {sel.scope.map((c) => <Text key={c} className="tk-chip">{c}</Text>)}
+      </View>
+
+      <View className="detail-mini-grid">
+        <View className="dm-cell"><Text className="dm-k">授权范围</Text><Text className="dm-v">只读当前案卷需要的数据</Text></View>
+        <View className="dm-cell"><Text className="dm-k">同步频率</Text><Text className="dm-v">每日复盘前刷新一次</Text></View>
+        <View className="dm-cell"><Text className="dm-k">回写位置</Text><Text className="dm-v">战局、执行、方案</Text></View>
+        <View className="dm-cell"><Text className="dm-k">隐私控制</Text><Text className="dm-v">可随时断开或隐藏来源</Text></View>
+      </View>
+    </Sheet>
   );
 }
 
@@ -880,45 +884,41 @@ function DsSheet({ sel, onClose, onBind }: { sel: DataSourceView | null; onClose
 function ModSheet({ sel, onClose, onPrimary }: { sel: ModuleView | null; onClose: () => void; onPrimary: () => void }) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
-  useDidShowOverlay(!!sel, 'mod-detail');
   if (!sel) return null;
   const callable = sel.enabled || sel.tier === 'free';
   return (
-    <View className="tk-mask" onClick={onClose} catchMove>
-      <View className="tk-sheet" onClick={(e) => e.stopPropagation()}>
-        <View className="tk-grip" />
-        <Text className="tk-k">能 力 详 情</Text>
-        <View className="tk-head">
-          <View className="tk-head-ic"><Text>{sel.iconChar}</Text></View>
-          <View className="tk-head-b"><Text className="tk-head-t serif">{sel.label}</Text><Text className="tk-head-s">{sel.stateLabel}</Text></View>
-        </View>
-
-        <Text className="tk-sub-label">使用场景</Text>
-        <Text className="tk-scene">{sel.detail.scene}</Text>
-
-        <View className="mod-flow">
-          <View className="mf-cell"><Text className="mf-k">输入</Text><Text className="mf-v">{sel.detail.input}</Text></View>
-          <View className="mf-cell"><Text className="mf-k">产出</Text><Text className="mf-v">{sel.detail.output}</Text></View>
-          <View className="mf-cell"><Text className="mf-k">消耗</Text><Text className="mf-v">{sel.detail.cost}</Text></View>
-        </View>
-
-        <View className="tk-outline">
-          <View className="to-row"><Text className="to-k">回写位置</Text><Text className="to-v">{sel.detail.writeback}</Text></View>
-        </View>
-
+    <Sheet
+      visible={!!sel}
+      onClose={onClose}
+      overlayKey="mod-detail"
+      panelClassName="tk-pad"
+      footer={
         <View className="tk-actions">
           <View className="tk-secondary" onClick={onClose}><Text>返回</Text></View>
           <View className="tk-primary" style={{ background: accent }} onClick={onPrimary}><Text>{callable ? '立即调用' : '查看启用方式'}</Text></View>
         </View>
+      }
+    >
+      <Text className="tk-k">能 力 详 情</Text>
+      <View className="tk-head">
+        <View className="tk-head-ic"><Text>{sel.iconChar}</Text></View>
+        <View className="tk-head-b"><Text className="tk-head-t serif">{sel.label}</Text><Text className="tk-head-s">{sel.stateLabel}</Text></View>
       </View>
-    </View>
+
+      <Text className="tk-sub-label">使用场景</Text>
+      <Text className="tk-scene">{sel.detail.scene}</Text>
+
+      <View className="mod-flow">
+        <View className="mf-cell"><Text className="mf-k">输入</Text><Text className="mf-v">{sel.detail.input}</Text></View>
+        <View className="mf-cell"><Text className="mf-k">产出</Text><Text className="mf-v">{sel.detail.output}</Text></View>
+        <View className="mf-cell"><Text className="mf-k">消耗</Text><Text className="mf-v">{sel.detail.cost}</Text></View>
+      </View>
+
+      <View className="tk-outline">
+        <View className="to-row"><Text className="to-k">回写位置</Text><Text className="to-v">{sel.detail.writeback}</Text></View>
+      </View>
+    </Sheet>
   );
 }
 
-// 弹层与 tab-bar 协调：跟随 open 驱动 store.setOverlay，并在卸载/关闭时清理。
-function useDidShowOverlay(open: boolean, key: string) {
-  useEffect(() => {
-    store.setOverlay(open, key);
-    return () => store.setOverlay(false, key);
-  }, [open]);
-}
+// 弹层与 tab-bar 协调（setOverlay）已收敛至 Sheet 基座（overlayKey）。

@@ -202,14 +202,35 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
   return res.data as T;
 }
 
+// 上传钩子：透出真实进度与 UploadTask（可取消）。既有调用点不传 hooks 即维持原行为。
+export interface UploadHooks {
+  onProgress?: (percent: number) => void;         // 0–100
+  onTask?: (task: Taro.UploadTask) => void;        // 拿到 task 后可 task.abort() 真中止
+}
+
 // 文档上传：Taro.uploadFile 走 multipart（request() 只发 JSON，文件需单独上传）。仅 weapp 有文件可选。
-async function uploadKnowledgeFile(filePath: string, opts: { projectId?: string; staged?: boolean; batchId?: string } = {}): Promise<{ id: string; status: string; stage?: string; batchId?: string }> {
+// originalName：随上传带上的「原始文件名」——微信 tempFilePath 是 tmp 名，服务端以此字段作展示名（缺省回退兼容）。
+async function uploadKnowledgeFile(
+  filePath: string,
+  opts: { projectId?: string; staged?: boolean; batchId?: string; originalName?: string } = {},
+  hooks?: UploadHooks,
+): Promise<{ id: string; status: string; stage?: string; batchId?: string }> {
   const qs: string[] = [];
   if (opts.projectId) qs.push(`projectId=${opts.projectId}`);
   if (opts.staged) qs.push('staged=true');
   if (opts.batchId) qs.push(`batchId=${opts.batchId}`);
   const url = `${BASE_URL}/knowledge/upload${qs.length ? `?${qs.join('&')}` : ''}`;
-  const res = await Taro.uploadFile({ url, filePath, name: 'file', header: { 'x-user-id': getToken() } });
+  // Taro.uploadFile 返回 UploadTaskPromise：既是 Promise 又带 abort/onProgressUpdate，先拿 task 再 await 结果。
+  const task = Taro.uploadFile({
+    url,
+    filePath,
+    name: 'file',
+    formData: opts.originalName ? { originalName: opts.originalName } : undefined,
+    header: { 'x-user-id': getToken() },
+  });
+  if (hooks?.onProgress) task.onProgressUpdate?.((e) => hooks.onProgress!(e.progress));
+  hooks?.onTask?.(task);
+  const res = await task;
   if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`;
@@ -400,8 +421,8 @@ export const api = {
     IS_MOCK ? mock.analyzeKnowledge(id) : request<AnalyzeResult>(`/knowledge/${id}/analyze`, 'POST', {}),
   reembedKnowledge: (id: string) =>
     IS_MOCK ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
-  uploadKnowledge: (filePath: string, projectId?: string, staged?: boolean, batchId?: string) =>
-    IS_MOCK ? mock.uploadKnowledgeStaged(staged, batchId) : uploadKnowledgeFile(filePath, { projectId, staged, batchId }),
+  uploadKnowledge: (filePath: string, projectId?: string, staged?: boolean, batchId?: string, originalName?: string, hooks?: UploadHooks) =>
+    IS_MOCK ? mock.uploadKnowledgeStaged(staged, batchId) : uploadKnowledgeFile(filePath, { projectId, staged, batchId, originalName }, hooks),
 
   // —— V7-06 智库三段式资料整理管道 ——
   knowledgePipeline: () => (IS_MOCK ? mock.knowledgePipeline() : request<KnowledgePipelineView>('/knowledge/pipeline')),

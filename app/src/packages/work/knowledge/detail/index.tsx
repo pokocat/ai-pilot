@@ -3,6 +3,7 @@ import { View, Text } from '@tarojs/components';
 import Taro, { useRouter, usePullDownRefresh } from '@tarojs/taro';
 import Icon from '../../../../components/Icon';
 import SafeHeader from '../../../../components/SafeHeader';
+import AsyncState from '../../../../components/AsyncState';
 import PaySheet from '../../../../components/PaySheet';
 import { useStore } from '../../../../hooks/useStore';
 import { api, type KnowledgeDetail } from '../../../../services/api';
@@ -32,6 +33,7 @@ export default function KnowledgeDetailPage() {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false); // 长正文默认折叠，「展开全文」看全
   const [pollHint, setPollHint] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollAttempt = useRef(0);
@@ -86,10 +88,21 @@ export default function KnowledgeDetailPage() {
     return (
       <View className={`page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
         <SafeHeader title="资料详情" onBack={() => Taro.navigateBack()} />
-        <View className="kd-loading"><Text>{failed ? '资料加载失败，请返回重试' : '加载中…'}</Text></View>
+        <View className="pad" style={{ paddingTop: '12px' }}>
+          {/* 三态：加载中骨架 / 失败可重试（遵循本轮 AsyncState 规范），不再只留一句静态文案 */}
+          <AsyncState
+            loading={!failed}
+            error={failed}
+            onRetry={() => { setFailed(false); pollAttempt.current = 0; setPollHint(false); load(); }}
+          />
+        </View>
       </View>
     );
   }
+
+  const preview = detail.textPreview || '';
+  const longPreview = preview.length > 600;
+  const shownPreview = longPreview && !expanded ? preview.slice(0, 600) : preview;
 
   return (
     <View className={`page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -118,12 +131,22 @@ export default function KnowledgeDetailPage() {
           </View>
         ) : null}
 
-        {detail.textPreview ? (
+        {preview ? (
           <>
-            <Text className="kd-sec-title">正文预览</Text>
+            <Text className="kd-sec-title">正文内容</Text>
             <View className="kd-preview card">
-              <Text className="kd-preview-t">{detail.textPreview}</Text>
+              <Text className="kd-preview-t">{shownPreview}{longPreview && !expanded ? '…' : ''}</Text>
+              {longPreview ? (
+                <Text className="kd-preview-more" style={{ color: accent }} onClick={() => setExpanded((v) => !v)}>
+                  {expanded ? '收起' : '展开全文'}
+                </Text>
+              ) : null}
             </View>
+          </>
+        ) : isSettled(detail.status) ? (
+          <>
+            <Text className="kd-sec-title">正文内容</Text>
+            <View className="kd-preview card"><Text className="kd-preview-empty">这份资料没有可显示的正文（可能是纯图片/扫描件，或解析未提取到文字）。</Text></View>
           </>
         ) : null}
       </View>
