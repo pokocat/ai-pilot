@@ -191,7 +191,8 @@ export default function ThinkTank() {
     try {
       let bid = activeBatch || undefined;
       for (const f of files) {
-        const r = await api.uploadKnowledge(f.path, undefined, true, bid);
+        // 带上原始文件名 f.name 作展示名（tempFilePath 是 tmp 名，服务端否则会存乱码 tmp 名）。
+        const r = await api.uploadKnowledge(f.path, undefined, true, bid, f.name);
         bid = r.batchId || bid;
       }
       setActiveBatch(bid || null);
@@ -648,10 +649,11 @@ export default function ThinkTank() {
                   <>
                     <View className="folder-grid">
                       {confirmedFolders.map((f) => (
-                        <View key={f.key} className="folder-tile card">
+                        // 点入资料库逐份清单（可查看每份原名/摘要/正文），不再只停在「N 份」计数。
+                        <View key={f.key} className="folder-tile card" onClick={() => navTo('/packages/work/knowledge/index')}>
                           <View className="ft-ic"><Text>{f.label.slice(0, 1)}</Text></View>
                           <Text className="ft-t serif">{f.label}</Text>
-                          <Text className="ft-n">{f.count} 份</Text>
+                          <Text className="ft-n">{f.count} 份 ›</Text>
                         </View>
                       ))}
                     </View>

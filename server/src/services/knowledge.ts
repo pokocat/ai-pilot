@@ -258,6 +258,8 @@ export async function listKnowledgeDocs(tenantId: string, userId: string, filter
     fileType: r.fileType,
     fileSize: r.fileSize,
     chunkCount: r._count.chunks,
+    // 一行摘要：正文首段折叠空白后截断，供列表信息密度（原名 + 摘要 + 状态 + 时间）用；空文本（解析中/失败）返回空串。
+    summary: (r.text || '').replace(/\s+/g, ' ').trim().slice(0, 48),
     projectId: r.projectId,
     error: r.error,
     createdAt: r.createdAt.toISOString(),

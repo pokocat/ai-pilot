@@ -913,9 +913,9 @@ export const mock = {
   // 走查用确定性样例：k-fin-demo=财务表(canAnalyze) / k-doc-demo=非财务(无体检入口)。
   async knowledgeDocs(): Promise<KnowledgeDocRow[]> {
     return delay([
-      { id: 'k-fin-demo', kind: 'document', title: '3 月经营流水表', sourceType: 'upload', status: 'ready', stage: 'confirmed', fileName: '流水表.xlsx', fileType: 'xlsx', fileSize: 128000, chunkCount: 4, projectId: null, error: null, createdAt: now(), updatedAt: now() },
-      { id: 'k-doc-demo', kind: 'document', title: '产品介绍', sourceType: 'upload', status: 'ready', stage: 'confirmed', fileName: '产品介绍.pdf', fileType: 'pdf', fileSize: 96000, chunkCount: 3, projectId: null, error: null, createdAt: now(), updatedAt: now() },
-      { id: 'k-staging-demo', kind: 'document', title: '客户名单', sourceType: 'upload', status: 'parsing', stage: 'staging', fileName: '客户名单.csv', fileType: 'csv', fileSize: 24000, chunkCount: 0, projectId: null, error: null, createdAt: now(), updatedAt: now() },
+      { id: 'k-fin-demo', kind: 'document', title: '3 月经营流水表', sourceType: 'upload', status: 'ready', stage: 'confirmed', fileName: '流水表.xlsx', fileType: 'xlsx', fileSize: 128000, chunkCount: 4, summary: '月份,收入,成本,毛利 1月,128000,86000,42000', projectId: null, error: null, createdAt: now(), updatedAt: now() },
+      { id: 'k-doc-demo', kind: 'document', title: '产品介绍', sourceType: 'upload', status: 'ready', stage: 'confirmed', fileName: '产品介绍.pdf', fileType: 'pdf', fileSize: 96000, chunkCount: 3, summary: '我们的产品面向中小商户，提供一体化经营管理…', projectId: null, error: null, createdAt: now(), updatedAt: now() },
+      { id: 'k-staging-demo', kind: 'document', title: '客户名单', sourceType: 'upload', status: 'parsing', stage: 'staging', fileName: '客户名单.csv', fileType: 'csv', fileSize: 24000, chunkCount: 0, summary: '', projectId: null, error: null, createdAt: now(), updatedAt: now() },
     ]);
   },
   // F7：mock 从 reject 改为返回可用空壳；id 含 'fin' 视作财务/经营表 → canAnalyze=true。

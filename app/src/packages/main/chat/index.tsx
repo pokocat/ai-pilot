@@ -165,9 +165,11 @@ export default function Chat() {
   inputRef.current = input;
   const sessionIdRef = useRef('');
   sessionIdRef.current = sessionId;
-  // B5 上传：可取消的非模态进度（scope 限制未透出 uploadFile task，故 cancel 为「放弃等待/不挂引用」）。
+  // B5 上传：非模态进度条，接 UploadTask 透出真实百分比；取消调 task.abort() 真中止。
   const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
   const uploadCancelledRef = useRef(false);
+  const uploadTaskRef = useRef<Taro.UploadTask | null>(null);
   // B6 jump-latest 与 composer 高度联动：测量输入区顶部到屏底的距离，驱动 --jump-bottom。
   const [jumpBottom, setJumpBottom] = useState(0);
   const winHeightRef = useRef(0);
@@ -819,12 +821,16 @@ export default function Chat() {
       Taro.showToast({ title: chk.desc || '文件不符合上传要求', icon: 'none' });
       return;
     }
-    // B5：非模态可取消上传（替代阻塞式 showLoading）。scope 未透出 uploadFile task，
-    // 取消 = 放弃等待、不挂引用；后端仍会完成解析，无副作用。
+    // B5：非模态可取消上传（替代阻塞式 showLoading）。透出 UploadTask → 真进度 + 取消真中止。
+    // 原始文件名 f.name 随上传带给服务端作展示名（tempFilePath 是 tmp 名）。
     uploadCancelledRef.current = false;
     setUploading(true);
+    setUploadPct(0);
     try {
-      const { id } = await api.uploadKnowledge(f.path, projectId || undefined);
+      const { id } = await api.uploadKnowledge(f.path, projectId || undefined, undefined, undefined, f.name, {
+        onProgress: setUploadPct,
+        onTask: (t) => { uploadTaskRef.current = t; },
+      });
       if (uploadCancelledRef.current) return; // 已取消：结果不挂引用
       const label = f.name || '上传资料';
       setRefs((cur) => cur.some((x) => x.kind === 'knowledge' && x.id === id) ? cur : [...cur, { kind: 'knowledge', id, label }]);
@@ -833,13 +839,18 @@ export default function Chat() {
       if (uploadCancelledRef.current) return; // 取消引发的失败静默
       Taro.showToast({ title: (e as Error).message || '上传失败', icon: 'none' });
     } finally {
+      uploadTaskRef.current = null;
       setUploading(false);
+      setUploadPct(0);
     }
   };
 
   const cancelUpload = () => {
     uploadCancelledRef.current = true;
+    uploadTaskRef.current?.abort(); // 真中止传输，不再空等
+    uploadTaskRef.current = null;
     setUploading(false);
+    setUploadPct(0);
     Taro.showToast({ title: '已取消上传', icon: 'none' });
   };
 
@@ -1122,7 +1133,7 @@ export default function Chat() {
         {uploading ? (
           <View className="upload-bar">
             <View className="ub-spin" style={{ borderTopColor: accent }} />
-            <Text className="ub-t">资料上传中…</Text>
+            <Text className="ub-t">资料上传中… {uploadPct}%</Text>
             <Text className="ub-cancel" style={{ color: accent }} onClick={cancelUpload}>取消</Text>
           </View>
         ) : null}
@@ -1132,7 +1143,7 @@ export default function Chat() {
           <View className="ref-row">
             {refs.map((r, j) => (
               <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
-                <Text style={{ color: accent }}>@{r.label}</Text><Text className="ref-x">✕</Text>
+                <Text className="ref-chip-l" style={{ color: accent }}>@{r.label}</Text><Text className="ref-x">✕</Text>
               </View>
             ))}
           </View>

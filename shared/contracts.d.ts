@@ -565,6 +565,7 @@ export interface KnowledgeDocRow {
   fileType: string | null;   // pdf | docx | xlsx | csv | md | txt
   fileSize: number | null;   // 字节
   chunkCount: number;
+  summary: string;           // 正文首段摘要（≤48 字，解析中/失败为空串）——列表信息密度用
   projectId: string | null;
   error: string | null;
   createdAt: string;

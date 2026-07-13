@@ -14,6 +14,7 @@ import {
 } from '../services/knowledge.js';
 import { hybridSearch } from '../services/retrieval.js';
 import { ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
+import { sanitizeUploadName } from '../services/uploadName.js';
 import { looksFinancial } from '../services/finParse.js';
 import { runFinCheckup } from '../services/finCheckup.js';
 import { isModuleEnabled } from '../services/modules.js';
@@ -31,6 +32,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 function finDayKey(): string {
   return dateKey(); // 上海时区日历日（P1-4）
 }
+
 
 export async function knowledgeRoutes(app: FastifyInstance) {
   // 列表（KnowledgeItemT，租户级，可按项目/类型过滤）——供 @引用候选等既有用途。
@@ -75,6 +77,12 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     if (data.file.truncated) return reply.code(413).send({ error: '文件过大（上限 20MB）' });
     if (!buf.length) return reply.code(400).send({ error: '空文件' });
 
+    // 展示名以客户端随上传带来的原始文件名（multipart 字段 originalName）为准；
+    // 微信 chooseMessageFile 的 tempFilePath 是 tmp 名（wxfile://…），此前被 data.filename 当成展示名，
+    // 导致资料库显示乱码 tmp 名——本次改为优先取原名。老客户端不带该字段则回退 data.filename（兼容）。
+    const rawOriginal = (data.fields as Record<string, { value?: string } | undefined> | undefined)?.originalName?.value;
+    const fileName = sanitizeUploadName(rawOriginal) || sanitizeUploadName(data.filename) || '未命名文件';
+
     const staged = req.query.staged === 'true' || req.query.staged === '1';
     if (staged) {
       try {
@@ -82,7 +90,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
           tenantId: user.tenantId,
           userId: user.id,
           projectId: req.query.projectId ?? null,
-          fileName: data.filename || '未命名文件',
+          fileName,
           mime: data.mimetype,
           buf,
           batchId: (req.query.batchId || '').trim() || newBatchId(),
@@ -97,7 +105,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
       tenantId: user.tenantId,
       userId: user.id,
       projectId: req.query.projectId ?? null,
-      fileName: data.filename || '未命名文件',
+      fileName,
       mime: data.mimetype,
       buf,
     });
