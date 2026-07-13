@@ -8,6 +8,7 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-13** · **修复小程序对话页首次打开白屏**：真机/DevTools 复现并定位为 `packages/main/chat` 首屏两个动态 `style` 字段向 Taro 传入 `undefined`，微信运行时在 `finalizeInitialChildren` 执行 `undefined.toString()` 导致整页挂载失败；CSS 变量改为明确 `0px` 默认值，发送键无动态背景时改传空样式对象。影响小程序对话页首屏挂载，不改接口与数据结构；`build:weapp` + DevTools 实际进入对话页验证。
 - **2026-07-13** · **前端交互精细化打磨（四路并行审查 → 五波执行；方案 `[FABLE5]UX_POLISH_2026-07-13.md`）**：以「可用性硬伤 + 专业感一致性」为主，重构类大动作记债不做。
   - **① Wave A 基建（app.scss/共享组件）**：token 补层（`--fs-*`/`--space-*`/`--shadow-sm`/`--z-nav|sheet|full`、`--r-*`）；`--ink-3` 由 `#969BA1`(≈2.6:1) 提到 `#7E848B`(≈3.5:1) 改善对比度；按钮三态基类 `.btn/.btn-primary/.btn-ghost/.btn-danger`（48px/圆角 14px/active 按压/disabled），六个 Sheet 主次按钮迁入（Plans 40px→48px）；弹层五要素统一（`z-index=var(--z-sheet)=900`、遮罩 `rgba(22,25,29,.55)`、入场 `.sheet-rise`、圆角、catchMove）；`navTo()` 防重入导航工具（800ms 时间锁 + in-flight 锁，fail 回调释放）；`AsyncState` 三态组件；NextStepCard/PrescriptionStrip 接 accent 族 token 去 theme-blind + `:active` + 占位高度防位移；MarkdownText 走 memo/按 text 缓存。
   - **② Wave C 五 tab 页 + custom-tab-bar**：studio/thinktank/profile 补齐登录门（对齐 sessions/home）；三态落地（sessions 失败态可重试不再伪装空态、home/thinktank 骨架与重试）；跳转全量换 `navTo()` 防重入；触控热区透明外扩至 ≥44px；文案统一走 `REVIEW_TIME` 常量、去英文口吻（SKILL CENTER/深度 Skill → 「能力」）。

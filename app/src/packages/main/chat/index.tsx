@@ -885,7 +885,7 @@ export default function Chat() {
   };
 
   return (
-    <View className={`page chat ${s.themeClass()}`} style={{ '--keyboard-height': `${keyboardHeight}px`, '--jump-bottom': jumpBottom ? `${jumpBottom}px` : undefined } as ChatStyle}>
+    <View className={`page chat ${s.themeClass()}`} style={{ '--keyboard-height': `${keyboardHeight}px`, '--jump-bottom': `${jumpBottom}px` } as ChatStyle}>
       {/* 顾问身份头 */}
       <SafeHeader
         className="chat-head"
@@ -1190,7 +1190,7 @@ export default function Chat() {
                     className={`csend ${!input.trim() ? 'off' : ''}`}
                     role="button"
                     aria-label="发送"
-                    style={{ background: input.trim() ? accent : undefined }}
+                    style={input.trim() ? { background: accent } : {}}
                     onClick={(e) => { e.stopPropagation?.(); onSend(); }}
                   >
                     <Icon name="up" size={18} color="#fff" />
