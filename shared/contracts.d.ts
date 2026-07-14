@@ -780,15 +780,25 @@ export interface WechatOrderResult {
  *  未发放且已配支付时服务端会先主动查单补账，消除回调竞态。 */
 export interface PayOrderStatus {
   outTradeNo: string;
-  status: 'created' | 'paid' | 'applied' | 'failed' | 'closed';
+  status: 'created' | 'paid' | 'applied' | 'failed' | 'closed' | 'refunded';
   amount: number; // 应付金额（分）
   planId?: string; // 套餐订单
   skuKey?: string; // SKU 订单
   paidAt?: string;
   appliedAt?: string; // 有值 = 权益已发放，前端可停止轮询
 }
+/** 我的支付订单列表（GET /pay/orders）：订单明细页展示 + 继续支付入口。 */
+export interface PayOrderListItem extends PayOrderStatus {
+  itemName: string; // 下单时快照的套餐/SKU 名（历史无快照单为兜底文案）
+  createdAt: string;
+  refundedAt?: string;
+  payable: boolean; // created 且未过支付时限 → 可调 POST /pay/orders/:outTradeNo/pay-params 继续支付
+}
+export interface PayOrderListResult { items: PayOrderListItem[] }
+/** 继续支付（POST /pay/orders/:outTradeNo/pay-params）：重签 wx.requestPayment 调起参数。 */
+export interface PayRepayResult { ok: true; outTradeNo: string; pay: WechatPayParams }
 
-export type WechatSubscribeScene = 'review' | 'report';
+export type WechatSubscribeScene = 'review' | 'report' | 'payment';
 export type WechatSubscribeStatus = 'accept' | 'reject' | 'ban' | 'filter';
 export interface WechatSubscribeTemplate {
   scene: WechatSubscribeScene;

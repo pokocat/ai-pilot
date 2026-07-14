@@ -5,9 +5,38 @@
 //             服务端定时对账 sweep 会兜底补账，绝不能向用户报「支付失败」；
 //   failed  = 订单终态失败/关闭（正常支付成功后不应出现，出现按 pending 同口径提示并交由对账处理）。
 // 所有支付触点（套餐 Plans / 通用 PaySheet / 智库深度整理 / 模块开通）统一走这里，不要各写一套重试。
-import { api } from './api';
+import Taro from '@tarojs/taro';
+import { api, type WechatPayParams } from './api';
+import { IS_MOCK } from './config';
 
 export type PayApplyState = 'applied' | 'pending' | 'failed';
+
+// —— H5 守卫（P1）：wx.requestPayment 仅小程序可用。mock 模式不拦（下单会走演示通道，调不到 requestPayment）；
+// server 模式跑在 H5 时，在「下单之前」拦下并给明确指引，避免创建一笔注定付不了的订单。
+export function payEnvSupported(): boolean {
+  return IS_MOCK || Taro.getEnv() === Taro.ENV_TYPE.WEAPP;
+}
+
+/** 支付入口统一前置检查：环境不支持时提示并返回 false（调用方直接 return）。 */
+export function ensurePayableEnv(): boolean {
+  if (payEnvSupported()) return true;
+  Taro.showToast({ title: '请在微信小程序内完成支付', icon: 'none' });
+  return false;
+}
+
+/** 统一调起微信支付：非小程序环境抛 H5_PAY_UNSUPPORTED（双保险，正常应先被 ensurePayableEnv 拦住）。 */
+export async function requestWechatPayment(pay: WechatPayParams): Promise<void> {
+  if (Taro.getEnv() !== Taro.ENV_TYPE.WEAPP) {
+    throw Object.assign(new Error('请在微信小程序内完成支付'), { code: 'H5_PAY_UNSUPPORTED' });
+  }
+  await Taro.requestPayment({
+    timeStamp: pay.timeStamp,
+    nonceStr: pay.nonceStr,
+    package: pay.package,
+    signType: pay.signType as 'RSA',
+    paySign: pay.paySign,
+  });
+}
 
 export async function awaitPaymentApplied(
   outTradeNo: string | undefined,

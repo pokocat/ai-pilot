@@ -636,7 +636,7 @@ model PaymentOrder {
   amount        Int // 应付金额（分）
   currency      String    @default("CNY")
   provider      String    @default("wechat") // wechat | mock（未配支付时的演示通道）
-  status        String    @default("created") // created | paid | applied | failed | closed
+  status        String    @default("created") // created | paid | applied | failed | closed | refunded
   prepayId      String? // 微信预支付交易会话标识
   transactionId String? // 微信支付订单号（回调返回）
   paidAt        DateTime?
@@ -644,6 +644,10 @@ model PaymentOrder {
   rawNotifyJson Json? // 回调解密后的原文（排查用）
   attrSource    String? // D-1 开通来源归因（下单时从请求体带入，回调发放时落 ActivationEvent）：prescription | catalog | market
   attrRefId     String? // attrSource=prescription 时的 prescriptionId
+  snapshotJson  Json? // 下单时的套餐/SKU 条款快照（P1：发放以此为准，防「下单后改价/删配置」漂移；无快照的历史单回退读当前配置）
+  refundId      String? // 微信退款单号（out_refund_no）
+  refundedAt    DateTime? // 退款完成时间 = 退款幂等终态锚点
+  refundReason  String? // 退款原因（运营填写，进审计）
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

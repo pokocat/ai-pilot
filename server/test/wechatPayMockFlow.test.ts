@@ -211,3 +211,132 @@ test('admin：卡单清单可见 + 手动查单补账（审计留痕）', async 
   const again = await http('POST', `/admin/payments/${stuckNo}/reconcile`, { admin: true });
   assert.equal(again.body.applied, false);
 });
+
+test('条款快照：下单后改价仍按下单时配置发放；新单自动关同类旧单', async () => {
+  const u = await prisma.user.create({ data: { tenantId, phone: '13900000080', name: '快照用户', role: 'owner', wechatOpenId: 'o_snap_1' } });
+  const plan = (await prisma.plan.findUnique({ where: { id: planId } }))!;
+
+  // 旧单 → 新单：旧 created 单被微信侧关单 + 本地 closed（消除陈旧单被后付窗口）
+  const r1 = await http('POST', `/plans/${planId}/order`, { user: u.id, body: { openid: 'o_snap_1' } });
+  const r2 = await http('POST', `/plans/${planId}/order`, { user: u.id, body: { openid: 'o_snap_1' } });
+  assert.equal(r2.status, 200, JSON.stringify(r2.body));
+  const old = await prisma.paymentOrder.findUnique({ where: { outTradeNo: r1.body.outTradeNo } });
+  assert.equal(old!.status, 'closed', '旧 created 单应被自动关闭');
+  assert.equal(mock.orders.get(r1.body.outTradeNo)!.tradeState, 'CLOSED', '微信侧同步关单');
+
+  // 支付前改价/改额度 → 发放仍按下单时快照
+  await prisma.plan.update({ where: { id: planId }, data: { creditsPerMonth: plan.creditsPerMonth + 777, price: plan.price + 100 } });
+  try {
+    const before = await prisma.creditLedger.count({ where: { userId: u.id } });
+    const paid = await mock.payOrder(r2.body.outTradeNo);
+    assert.equal(paid.notifyStatus, 200, paid.notifyBody);
+    const ledger = await prisma.creditLedger.findFirst({ where: { userId: u.id }, orderBy: { createdAt: 'desc' } });
+    assert.equal(await prisma.creditLedger.count({ where: { userId: u.id } }), before + 1);
+    assert.equal(ledger!.delta, plan.creditsPerMonth, '发放额 = 下单时快照的 creditsPerMonth，不吃改价后的新值');
+    // 套餐订单归因（P2）：入账落 ActivationEvent(itemType=plan)
+    const act = await prisma.activationEvent.findFirst({ where: { userId: u.id, itemType: 'plan', itemKey: planId } });
+    assert.ok(act, '套餐入账应落开通归因事件');
+  } finally {
+    await prisma.plan.update({ where: { id: planId }, data: { creditsPerMonth: plan.creditsPerMonth, price: plan.price } });
+  }
+});
+
+test('订单列表 + 继续支付：payable 单可重签调起参数；超时单 409', async () => {
+  const u = await prisma.user.create({ data: { tenantId, phone: '13900000081', name: '续付用户', role: 'owner', wechatOpenId: 'o_repay_1' } });
+  const r = await http('POST', `/plans/${planId}/order`, { user: u.id, body: { openid: 'o_repay_1' } });
+  const no = r.body.outTradeNo as string;
+
+  const list = await http('GET', '/pay/orders', { user: u.id });
+  assert.equal(list.status, 200, JSON.stringify(list.body));
+  const item = (list.body.items as { outTradeNo: string; payable: boolean; itemName: string; status: string }[]).find((x) => x.outTradeNo === no);
+  assert.ok(item, '列表应包含本人订单');
+  assert.equal(item!.payable, true, 'created 未超时 → 可继续支付');
+  assert.equal(item!.itemName, planName, 'itemName 来自下单快照');
+
+  const rp = await http('POST', `/pay/orders/${no}/pay-params`, { user: u.id });
+  assert.equal(rp.status, 200, JSON.stringify(rp.body));
+  assert.equal(rp.body.pay.package, `prepay_id=${mock.orders.get(no)!.prepayId}`, '重签参数复用原 prepay_id');
+
+  // 继续支付后正常入账
+  const paid = await mock.payOrder(no);
+  assert.equal(paid.notifyStatus, 200);
+  const list2 = await http('GET', '/pay/orders', { user: u.id });
+  const item2 = (list2.body.items as { outTradeNo: string; status: string; payable: boolean }[]).find((x) => x.outTradeNo === no);
+  assert.equal(item2!.status, 'applied');
+  assert.equal(item2!.payable, false);
+
+  // 超时单：回溯 115 分钟 → 继续支付 409
+  const r3 = await http('POST', `/plans/${planId}/order`, { user: u.id, body: { openid: 'o_repay_1' } });
+  await prisma.paymentOrder.update({ where: { outTradeNo: r3.body.outTradeNo }, data: { createdAt: new Date(Date.now() - 115 * 60_000) } });
+  const rpExpired = await http('POST', `/pay/orders/${r3.body.outTradeNo}/pay-params`, { user: u.id });
+  assert.equal(rpExpired.status, 409, JSON.stringify(rpExpired.body));
+  assert.equal(rpExpired.body.code, 'ORDER_EXPIRED');
+
+  // 他人订单：404
+  const cross = await http('POST', `/pay/orders/${no}/pay-params`, { user: userId });
+  assert.equal(cross.status, 404);
+});
+
+test('退款闭环：全额退款 + 套餐立即到期 + 追回算力 + 幂等', async () => {
+  const u = await prisma.user.create({ data: { tenantId, phone: '13900000082', name: '退款用户', role: 'owner', wechatOpenId: 'o_refund_1' } });
+  const r = await http('POST', `/plans/${planId}/order`, { user: u.id, body: { openid: 'o_refund_1' } });
+  const no = r.body.outTradeNo as string;
+  await mock.payOrder(no);
+  const applied = await prisma.paymentOrder.findUnique({ where: { outTradeNo: no } });
+  assert.equal(applied!.status, 'applied');
+  const balBefore = (await prisma.creditLedger.findFirst({ where: { userId: u.id }, orderBy: { createdAt: 'desc' } }))!.balance;
+  assert.ok(balBefore > 0, '入账后应有算力余额');
+
+  const refund = await http('POST', `/admin/payments/${no}/refund`, { admin: true, body: { reason: '用户申请退款' } });
+  assert.equal(refund.status, 200, JSON.stringify(refund.body));
+  assert.equal(refund.body.wechatStatus, 'SUCCESS');
+  const after = await prisma.paymentOrder.findUnique({ where: { outTradeNo: no } });
+  assert.equal(after!.status, 'refunded');
+  assert.ok(after!.refundedAt && after!.refundId, '退款单号/时间落库');
+
+  // 权益回收：套餐立即到期 + 本单发放算力被追回
+  const user = await prisma.user.findUnique({ where: { id: u.id }, select: { planExpiresAt: true } });
+  assert.ok(user!.planExpiresAt && user!.planExpiresAt.getTime() <= Date.now(), '套餐应立即到期');
+  const last = await prisma.creditLedger.findFirst({ where: { userId: u.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+  assert.ok(last!.delta < 0 && last!.reason.includes('退款追回'), `应有追回流水：${JSON.stringify(last)}`);
+  assert.equal(last!.balance, 0, '全额追回后余额归零');
+
+  // 幂等：重复退款 409
+  const again = await http('POST', `/admin/payments/${no}/refund`, { admin: true, body: {} });
+  assert.equal(again.status, 409, JSON.stringify(again.body));
+  assert.equal(again.body.code, 'ALREADY_REFUNDED');
+});
+
+test('下单频控：同一用户 10 分钟内第 11 单 429', async () => {
+  const u = await prisma.user.create({ data: { tenantId, phone: '13900000083', name: '频控用户', role: 'owner', wechatOpenId: 'o_rate_1' } });
+  for (let i = 0; i < 10; i++) {
+    const r = await http('POST', `/plans/${planId}/order`, { user: u.id, body: { openid: 'o_rate_1' } });
+    assert.equal(r.status, 200, `第 ${i + 1} 单应放行：${JSON.stringify(r.body)}`);
+  }
+  const blocked = await http('POST', `/plans/${planId}/order`, { user: u.id, body: { openid: 'o_rate_1' } });
+  assert.equal(blocked.status, 429, JSON.stringify(blocked.body));
+  assert.equal(blocked.body.code, 'ORDER_RATE_LIMITED');
+});
+
+test('admin 手动开通：无套餐用户直接开通套餐 + 发放/收回模块', async () => {
+  const u = await prisma.user.create({ data: { tenantId, phone: '13900000084', name: '手动开通用户', role: 'owner' } });
+
+  const grant = await http('POST', `/admin/users/${u.id}/plan`, { admin: true, body: { planId } });
+  assert.equal(grant.status, 200, JSON.stringify(grant.body));
+  assert.equal(grant.body.planName, planName);
+  assert.ok(grant.body.expiresAt, '付费套餐应带到期时间');
+  const user = await prisma.user.findUnique({ where: { id: u.id }, select: { planId: true } });
+  assert.equal(user!.planId, planId);
+  const ledger = await prisma.creditLedger.findFirst({ where: { userId: u.id } });
+  assert.ok(ledger && ledger.reason.includes('运营开通'), '发放流水标运营开通');
+
+  const mod = await http('POST', `/admin/users/${u.id}/modules`, { admin: true, body: { moduleKey: 'deep-contradiction' } });
+  assert.equal(mod.status, 200, JSON.stringify(mod.body));
+  const um = await prisma.userModule.findUnique({ where: { userId_moduleKey: { userId: u.id, moduleKey: 'deep-contradiction' } } });
+  assert.ok(um && um.enabled && um.source === 'admin');
+
+  const revoke = await http('DELETE', `/admin/users/${u.id}/modules/deep-contradiction`, { admin: true });
+  assert.equal(revoke.status, 200);
+  const um2 = await prisma.userModule.findUnique({ where: { userId_moduleKey: { userId: u.id, moduleKey: 'deep-contradiction' } } });
+  assert.equal(um2!.enabled, false);
+});

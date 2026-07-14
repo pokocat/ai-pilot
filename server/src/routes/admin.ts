@@ -52,7 +52,8 @@ import type {
   AdminBenchmark, AdminBenchmarkUpsert,
   AdminUserUsage, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult,
 } from '../../../shared/contracts';
-import { reconcileOrder } from '../services/wechatPay.js';
+import { reconcileOrder, refundWechatOrder } from '../services/wechatPay.js';
+import { applyPlanPurchase } from '../services/purchase.js';
 import { Prisma } from '@prisma/client';
 
 // 功能开关目录（P0-2 / D-10）：label/desc/compliance/kind 写死在代码；DB 存 enabled(toggle) 或 payload(number)。
@@ -733,6 +734,73 @@ export async function adminRoutes(app: FastifyInstance) {
       payload: { by: actorName(actor), outTradeNo, applied: r.applied, reason: r.reason ?? null, tradeState: r.tradeState ?? null, statusBefore: order.status, statusAfter: after?.status ?? order.status },
     });
     return { ok: true, applied: r.applied, reason: r.reason, tradeState: r.tradeState, status: after?.status ?? order.status };
+  });
+
+  // 退款（P1，仅 owner/master）：全额原路退回 + 幂等权益回收（模块停用/凭据收回/套餐立即到期+追回未消耗算力）。
+  // 服务层已写 user.pay.refund 审计；此处再落 admin.pay.refund 记操作人。UI 后续补，先提供端点。
+  app.post<{ Params: { outTradeNo: string }; Body: { reason?: string } }>('/admin/payments/:outTradeNo/refund', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const outTradeNo = req.params.outTradeNo.trim();
+    const reason = (req.body?.reason ?? '').trim();
+    const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
+    if (!order) return reply.code(404).send({ error: '订单不存在', code: 'ORDER_NOT_FOUND' });
+    try {
+      const r = await refundWechatOrder(outTradeNo, { reason, by: actorName(actor) });
+      await recordAudit({
+        tenantId: order.tenantId, userId: order.userId, action: 'admin.pay.refund',
+        payload: { by: actorName(actor), outTradeNo, amount: order.amount, reason: reason || null, refundId: r.refundId, wechatStatus: r.wechatStatus },
+      });
+      return { ok: true, refundId: r.refundId, wechatStatus: r.wechatStatus };
+    } catch (e) {
+      const err = e as { message?: string; statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 502).send({ error: err.message ?? '退款失败', code: err.code ?? 'WECHAT_PAY_REFUND_FAILED' });
+    }
+  });
+
+  // 手动开通套餐（P2，仅 owner/master）：给任意用户直接发放套餐权益（含无套餐用户，补齐 plan-extend 的 NO_PLAN 缺口）。
+  // 复用 applyPlanPurchase（与支付/演示同一发放口径），source='admin_grant'。
+  app.post<{ Params: { id: string }; Body: { planId?: string } }>('/admin/users/:id/plan', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, tenantId: true, planId: true, planExpiresAt: true } });
+    if (!user) return reply.code(404).send({ error: '用户不存在', code: 'USER_NOT_FOUND' });
+    const planId = (req.body?.planId ?? '').trim();
+    if (!planId) return reply.code(400).send({ error: '缺少 planId', code: 'PLAN_ID_REQUIRED' });
+    const plan = await prisma.plan.findUnique({ where: { id: planId } });
+    if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    const r = await applyPlanPurchase({ id: user.id, tenantId: user.tenantId }, plan, { reason: `${plan.name} · 运营开通`, source: 'admin_grant' });
+    await recordAudit({
+      tenantId: user.tenantId, userId: user.id, action: 'admin.user.plan.grant',
+      payload: { by: actorName(actor), planId: plan.id, planName: plan.name, beforePlanId: user.planId, beforeExpiresAt: user.planExpiresAt ? isoSecond(user.planExpiresAt) : null, expiresAt: r.expiresAt ? isoSecond(r.expiresAt) : null, grantedCredits: r.grantedCredits },
+    });
+    return { ok: true, planId: plan.id, planName: plan.name, expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, grantedCredits: r.grantedCredits };
+  });
+
+  // 手动发放/收回模块（P2，仅 owner/master）：UserModule source='admin'（与购买发放 source='purchase' 区分）。
+  app.post<{ Params: { id: string }; Body: { moduleKey?: string } }>('/admin/users/:id/modules', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, tenantId: true } });
+    if (!user) return reply.code(404).send({ error: '用户不存在', code: 'USER_NOT_FOUND' });
+    const moduleKey = (req.body?.moduleKey ?? '').trim();
+    if (!moduleKey) return reply.code(400).send({ error: '缺少 moduleKey', code: 'MODULE_KEY_REQUIRED' });
+    await prisma.userModule.upsert({
+      where: { userId_moduleKey: { userId: user.id, moduleKey } },
+      update: { enabled: true, hidden: false, source: 'admin' },
+      create: { tenantId: user.tenantId, userId: user.id, moduleKey, enabled: true, source: 'admin' },
+    });
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'admin.user.module.grant', payload: { by: actorName(actor), moduleKey } });
+    return { ok: true, moduleKey, enabled: true };
+  });
+  app.delete<{ Params: { id: string; key: string } }>('/admin/users/:id/modules/:key', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, tenantId: true } });
+    if (!user) return reply.code(404).send({ error: '用户不存在', code: 'USER_NOT_FOUND' });
+    const r = await prisma.userModule.updateMany({ where: { userId: user.id, moduleKey: req.params.key }, data: { enabled: false } });
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'admin.user.module.revoke', payload: { by: actorName(actor), moduleKey: req.params.key, found: r.count > 0 } });
+    return { ok: true, moduleKey: req.params.key, enabled: false };
   });
 
   // —— 用户上下文中心：个人档案 + 长期记忆（按顾问）+ 知识库文档（观测与纠偏） ——

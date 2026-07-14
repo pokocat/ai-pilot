@@ -12,7 +12,7 @@ import type {
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
   QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
-  SkuView, SkuOrderResult, PayOrderStatus, BattleForce, BattleCommitResult,
+  SkuView, SkuOrderResult, PayOrderStatus, PayOrderListResult, BattleForce, BattleCommitResult,
   DataSourcesView, DataSourceView, DataSourceStatus, ModulesView, ModuleView,
   ReminderView, WorkbenchView, ServiceAssignmentView, SearchHit, SearchResult,
   KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, OrganizeItem, StagedUploadResult, ConfirmResult,
@@ -793,6 +793,14 @@ export const mock = {
   // 支付订单状态：mock 无异步回调，权益在 createSkuOrder 已本地发放 → 恒返回 applied（与 server 同口径停止轮询）。
   async payOrderStatus(outTradeNo: string): Promise<PayOrderStatus> {
     return delay({ outTradeNo, status: 'applied' as const, amount: 0, appliedAt: now() });
+  },
+  // 支付订单列表/继续支付：mock 走演示通道（无真实 PaymentOrder），列表为空、继续支付不可用。
+  async myOrders(): Promise<PayOrderListResult> {
+    return delay({ items: [] });
+  },
+  async orderPayParams(_outTradeNo: string): Promise<never> {
+    await delay(null);
+    throw Object.assign(new Error('演示环境无待支付订单'), { code: 'ORDER_NOT_PAYABLE' });
   },
 
   // V7-04：三势刷新 + 认可判断一键生成（mock 确定性）。

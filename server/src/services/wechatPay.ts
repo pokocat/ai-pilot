@@ -19,6 +19,8 @@ import { prisma } from '../db.js';
 import { applyPlanPurchase, applySkuGrant } from './purchase.js';
 import { parseAttribution, recordActivation } from './activation.js';
 import { sandboxEnabled } from './sandbox.js';
+import { chargeCredits } from './credits.js';
+import { sendWechatSubscribeMessage } from './wechatSubscribe.js';
 
 // 微信支付 API 基址。默认真实商户网关；本地联调可用 WECHAT_PAY_BASE 指向
 // mock 微信支付服务器（scripts/wechat-pay-mock.ts），走完整签名/验签/AEAD 解密链路。
@@ -75,14 +77,84 @@ export interface CreateOrderResult {
   pay: { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string };
 }
 
+// 下单频控（P2）：同一用户 10 分钟内最多 10 笔新订单（覆盖套餐+SKU），超出 429。
+// 防恶意刷单打微信 API / 刷爆 PaymentOrder 表；正常用户远达不到该频率。
+const ORDER_RATE_WINDOW_MS = 10 * 60_000;
+const ORDER_RATE_MAX = 10;
+
+async function assertOrderRate(userId: string): Promise<void> {
+  const recent = await prisma.paymentOrder.count({
+    where: { userId, createdAt: { gt: new Date(Date.now() - ORDER_RATE_WINDOW_MS) } },
+  });
+  if (recent >= ORDER_RATE_MAX) {
+    throw Object.assign(new Error('下单过于频繁，请稍后再试'), { code: 'ORDER_RATE_LIMITED', statusCode: 429 });
+  }
+}
+
+// 下单时的条款快照（P1）：发放以下单时点的套餐/SKU 配置为准，防「下单后改价/改额度/删配置」漂移；
+// 也让 plan_not_found/sku_not_found 类卡单可以从快照恢复发放。
+async function buildOrderSnapshot(args: { planId?: string; skuKey?: string }): Promise<Prisma.InputJsonValue | undefined> {
+  if (args.planId) {
+    const p = await prisma.plan.findUnique({ where: { id: args.planId } });
+    if (!p) return undefined;
+    return { kind: 'plan', plan: { id: p.id, name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth } };
+  }
+  if (args.skuKey) {
+    const s = await prisma.sku.findUnique({ where: { key: args.skuKey } });
+    if (!s) return undefined;
+    return { kind: 'sku', sku: { key: s.key, name: s.name, kind: s.kind, priceFen: s.priceFen, grantsModuleKey: s.grantsModuleKey, metaJson: s.metaJson as object | null } };
+  }
+  return undefined;
+}
+
+// —— 微信关单（P1：消除「陈旧折算单被后付」的 2h 套利窗）——
+export async function closeWechatOrder(outTradeNo: string): Promise<void> {
+  const c = cfg();
+  const urlPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(outTradeNo)}/close`;
+  const body = JSON.stringify({ mchid: c.mchId });
+  const res = await fetch(payBase() + urlPath, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: buildAuthToken('POST', urlPath, body) },
+    body,
+  });
+  // 204 = 关单成功；404 = 微信侧无此交易（用户从未调起支付）——两者都可安全置本地 closed。
+  if (res.status === 204 || res.status === 404) return;
+  const errText = await res.text().catch(() => '');
+  // 其它失败（如已支付 ORDERPAID）：抛错让调用方跳过本地关单，等回调/对账按真实状态处理。
+  throw Object.assign(new Error(`微信关单失败：HTTP ${res.status} ${errText}`), { code: 'WECHAT_PAY_CLOSE_FAILED', statusCode: 502 });
+}
+
+/**
+ * 下新单前关掉同类旧未付单：套餐单关用户全部旧套餐 created 单（防「折算下单→续费→再付旧折算单」），
+ * SKU 单只关同 skuKey 的旧 created 单（不同 SKU 可合法并存待付）。
+ * 远端关单成功/查无此单才置本地 closed；已支付等失败一律跳过（交回调/对账兜底），绝不本地先斩。
+ */
+async function closeStalePendingOrders(userId: string, target: { planOrder?: boolean; skuKey?: string }): Promise<void> {
+  const where: Prisma.PaymentOrderWhereInput = target.planOrder
+    ? { userId, provider: 'wechat', status: 'created', appliedAt: null, planId: { not: '' } }
+    : { userId, provider: 'wechat', status: 'created', appliedAt: null, skuKey: target.skuKey };
+  const stale = await prisma.paymentOrder.findMany({ where, select: { outTradeNo: true }, take: 5, orderBy: { createdAt: 'asc' } });
+  for (const o of stale) {
+    try {
+      await closeWechatOrder(o.outTradeNo);
+      await prisma.paymentOrder.updateMany({
+        where: { outTradeNo: o.outTradeNo, status: 'created', appliedAt: null },
+        data: { status: 'closed' },
+      });
+    } catch (err) {
+      console.warn('[pay] close stale order skipped:', o.outTradeNo, (err as Error).message);
+    }
+  }
+}
+
 /**
  * 创建订单 + 调微信 JSAPI 下单，落 PaymentOrder(created) 并回传小程序调起参数。
  * openid 必填（小程序当前用户的 openid）。amount 可由调用方传入（如月→年折算后的实付）；默认= plan.price。
  *
- * 防陈旧订单被后付：真实单设 time_expire=now+2h，过期后微信侧不可再支付（避免「先下单再升级后又付旧单」类陈旧支付）。
- * 注：刻意不在本地把旧 created 单改 'closed'——那只改本地状态、微信侧仍可付，会造成「已付但本地非 created → 入账被跳过
- * → 收钱不发权益」的资损路径。markPaidAndApply 以 appliedAt 做「恰好一次」幂等；用户若真付了两单即两次合法叠加
- * （各自付费、续费/升级时长叠加），非资损。严格「同一时刻仅一个未付单」需调微信 close-order API，留后续硬化。
+ * 防陈旧订单被后付（双保险）：① 真实单设 time_expire=now+2h，过期后微信侧不可再支付；
+ * ② 下新单前先调微信 close-order 关掉同类旧 created 单（closeStalePendingOrders），远端关掉才置本地
+ * closed——绝不只改本地状态（那会造成「已付但本地非 created → 入账被跳过 → 收钱不发权益」的资损路径）。
+ * markPaidAndApply 以 appliedAt 做「恰好一次」幂等。
  */
 export async function createJsapiOrder(args: {
   user: { id: string; tenantId: string };
@@ -101,13 +173,16 @@ export async function createJsapiOrder(args: {
   const total = args.amount ?? itemPrice;
   const outTradeNo = genOutTradeNo();
 
+  await assertOrderRate(args.user.id);
+  const snapshotJson = await buildOrderSnapshot({ planId: args.plan?.id, skuKey: args.sku?.key });
+
   // 沙箱（可测性 D9）：跳过真实微信下单，落 provider='mock' 单 + 返回合成调起参数（不签名）。
   // 由 /pay/sandbox/notify 仿真回调驱动入账；真实 notify 端点严格不动。
   if (sandboxEnabled()) {
     await prisma.paymentOrder.create({
       data: {
         outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
-        amount: total, provider: 'mock', status: 'created', attrSource, attrRefId,
+        amount: total, provider: 'mock', status: 'created', attrSource, attrRefId, snapshotJson,
       },
     });
     return {
@@ -116,11 +191,14 @@ export async function createJsapiOrder(args: {
     };
   }
 
+  // 关同类旧未付单（P1）：微信侧关掉才置本地 closed，消除陈旧单被后付的窗口。
+  await closeStalePendingOrders(args.user.id, args.plan ? { planOrder: true } : { skuKey: args.sku?.key });
+
   const c = cfg();
   await prisma.paymentOrder.create({
     data: {
       outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
-      amount: total, provider: 'wechat', status: 'created', attrSource, attrRefId,
+      amount: total, provider: 'wechat', status: 'created', attrSource, attrRefId, snapshotJson,
     },
   });
 
@@ -163,6 +241,36 @@ export async function createJsapiOrder(args: {
   return { outTradeNo, pay: buildPayParams(data.prepay_id) };
 }
 
+// —— 继续支付（P1）：对 created 且 prepay 未过期的本人订单重签调起参数（prepay_id 有效期 2h）。 ——
+// 距过期 <10 分钟不再放行，避免用户拿到参数后支付时已被微信侧拒绝。（2h 与 time_expire/ORDER_EXPIRE_MS 一致）
+const REPAY_SAFE_WINDOW_MS = 2 * 60 * 60 * 1000 - 10 * 60_000;
+
+export async function repayParams(outTradeNo: string, userId: string): Promise<CreateOrderResult> {
+  const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
+  if (!order || order.userId !== userId) throw Object.assign(new Error('订单不存在'), { code: 'ORDER_NOT_FOUND', statusCode: 404 });
+  if (order.status !== 'created') throw Object.assign(new Error('订单已不可支付，请重新下单'), { code: 'ORDER_NOT_PAYABLE', statusCode: 409 });
+  if (Date.now() - order.createdAt.getTime() > REPAY_SAFE_WINDOW_MS) {
+    throw Object.assign(new Error('订单已过支付时限，请重新下单'), { code: 'ORDER_EXPIRED', statusCode: 409 });
+  }
+  if (order.provider === 'mock') {
+    // 沙箱单：与下单时同款合成参数。
+    return {
+      outTradeNo,
+      pay: { timeStamp: Math.floor(Date.now() / 1000).toString(), nonceStr: `sandbox${outTradeNo.slice(-8)}`, package: `prepay_id=mock_${outTradeNo}`, signType: 'RSA', paySign: 'SANDBOX_NO_SIGN' },
+    };
+  }
+  if (!order.prepayId) throw Object.assign(new Error('订单缺少支付会话，请重新下单'), { code: 'ORDER_NOT_PAYABLE', statusCode: 409 });
+  if (!payConfigured()) throw Object.assign(new Error('微信支付未配置'), { code: 'PAYMENT_NOT_CONFIGURED', statusCode: 501 });
+  return { outTradeNo, pay: buildPayParams(order.prepayId) };
+}
+
+/** 判断 created 单是否仍可继续支付（订单列表展示用，与 repayParams 同口径）。 */
+export function orderPayable(order: { status: string; createdAt: Date; provider: string; prepayId: string | null }): boolean {
+  if (order.status !== 'created') return false;
+  if (Date.now() - order.createdAt.getTime() > REPAY_SAFE_WINDOW_MS) return false;
+  return order.provider === 'mock' || !!order.prepayId;
+}
+
 // —— 回调验签（平台证书 RSA-SHA256；配了平台证书才校验）——
 export function verifyNotifySignature(headers: Record<string, string | undefined>, rawBody: string): boolean {
   const c = cfg();
@@ -198,11 +306,28 @@ export function decryptNotifyResource(resource: { ciphertext: string; nonce: str
  * 幂等核心：同一 outTradeNo 先拿 PostgreSQL 事务级 advisory lock，再做条件更新。
  * 重复回调 / 并发回调会按订单串行化，后到者看到 appliedAt 后直接跳过（防双发）。
  */
+// 下单时落库的条款快照形状（buildOrderSnapshot 产出）。
+interface OrderSnapshot {
+  kind: 'plan' | 'sku';
+  plan?: { id: string; name: string; price: number; period: string; creditsPerMonth: number; tokenQuotaPerMonth: number };
+  sku?: { key: string; name: string; kind: string; priceFen: number; grantsModuleKey: string | null; metaJson: unknown };
+}
+
 export async function markPaidAndApply(parsed: {
   outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
   /** 解密报文/查单结果中的订单金额（分）、appid、mchid：提供即校验，与本单不一致绝不入账（防串单/伪造）。 */
   amountTotal?: number; appId?: string; mchId?: string;
 }, source = 'wechat_pay'): Promise<{ applied: boolean; reason?: string }> {
+  const result = await markPaidAndApplyTx(parsed, source);
+  // 支付成功订阅消息（P2）：入账后事务外 fire-and-forget，失败绝不影响入账结果。
+  if (result.applied) void notifyPaymentApplied(parsed.outTradeNo).catch(() => {});
+  return result;
+}
+
+async function markPaidAndApplyTx(parsed: {
+  outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
+  amountTotal?: number; appId?: string; mchId?: string;
+}, source: string): Promise<{ applied: boolean; reason?: string }> {
   return prisma.$transaction(async (tx) => {
     // 对同一订单号串行化回调处理。hashtext(text) 返回 int4，适配 pg_advisory_xact_lock(int)。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${parsed.outTradeNo}))`;
@@ -246,9 +371,16 @@ export async function markPaidAndApply(parsed: {
     if (claim.count !== 1) return { applied: false, reason: 'already_applied' };
 
     const payLabel = source === 'wechat_pay_sandbox' ? '微信支付(沙箱)' : '微信支付';
+    // 条款快照优先（P1）：发放按下单时点的配置，防「下单后改价/改额度/删配置」漂移；
+    // 历史无快照订单回退读当前配置（行为与旧版一致）。
+    const snapshot = (order.snapshotJson ?? null) as OrderSnapshot | null;
+    const { source: attrSource, refId: attrRefId } = parseAttribution(order.attrSource, order.attrRefId);
     if (order.skuKey) {
       // V7-12：单次付费商品 → 发放对应权益（模块启用/一次性服务/空间加档）。
-      const sku = await tx.sku.findUnique({ where: { key: order.skuKey } });
+      const skuRow = snapshot?.kind === 'sku' && snapshot.sku ? null : await tx.sku.findUnique({ where: { key: order.skuKey } });
+      const sku = snapshot?.kind === 'sku' && snapshot.sku
+        ? { key: snapshot.sku.key, name: snapshot.sku.name, kind: snapshot.sku.kind, grantsModuleKey: snapshot.sku.grantsModuleKey, metaJson: snapshot.sku.metaJson }
+        : skuRow;
       if (!sku) return { applied: false, reason: 'sku_not_found' };
       await applySkuGrant(
         { id: order.userId, tenantId: order.tenantId },
@@ -257,10 +389,10 @@ export async function markPaidAndApply(parsed: {
         tx,
       );
       // D-1 开通来源归因：SKU 发放成功 → 落 ActivationEvent（来源来自下单时随订单存的 attrSource；缺省 catalog）。
-      const { source: attrSource, refId: attrRefId } = parseAttribution(order.attrSource, order.attrRefId);
       await recordActivation({ tenantId: order.tenantId, userId: order.userId, itemType: 'sku', itemKey: sku.key, source: attrSource, refId: attrRefId }, tx).catch(() => {});
     } else {
-      const plan = await tx.plan.findUnique({ where: { id: order.planId } });
+      const planRow = snapshot?.kind === 'plan' && snapshot.plan ? null : await tx.plan.findUnique({ where: { id: order.planId } });
+      const plan = snapshot?.kind === 'plan' && snapshot.plan ? snapshot.plan : planRow;
       if (!plan) return { applied: false, reason: 'plan_not_found' };
       await applyPlanPurchase(
         { id: order.userId, tenantId: order.tenantId },
@@ -268,6 +400,8 @@ export async function markPaidAndApply(parsed: {
         { reason: `${plan.name} · ${payLabel}`, source },
         tx,
       );
+      // 套餐订单归因（P2）：与 SKU 同口径落 ActivationEvent，供多来源漏斗报表。
+      await recordActivation({ tenantId: order.tenantId, userId: order.userId, itemType: 'plan', itemKey: plan.id, source: attrSource, refId: attrRefId }, tx).catch(() => {});
     }
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
@@ -396,4 +530,141 @@ export async function sweepPendingOrders(opts: { batch?: number } = {}): Promise
     }
   }
   return stats;
+}
+
+// —— 支付成功订阅消息（P2）：入账后事务外触发；模板未配置/无订阅额度时静默跳过，绝不影响入账。 ——
+function snapshotItemName(order: { snapshotJson: unknown; skuKey: string | null; planId: string }): string {
+  const snap = (order.snapshotJson ?? null) as OrderSnapshot | null;
+  return snap?.plan?.name ?? snap?.sku?.name ?? (order.skuKey ? '专项能力' : '方案套餐');
+}
+
+async function notifyPaymentApplied(outTradeNo: string): Promise<void> {
+  const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
+  if (!order) return;
+  await sendWechatSubscribeMessage({
+    tenantId: order.tenantId,
+    userId: order.userId,
+    scene: 'payment',
+    title: snapshotItemName(order),
+    note: `已到账 ¥${(order.amount / 100).toFixed(2)}，权益已生效`,
+  });
+}
+
+// —— 退款闭环（P1，后端）：全额退款 + 幂等权益回收。触发入口 = 运营端点（admin 路由，requireSuper）。 ——
+// 策略（保守、可审计）：
+//   SKU module  → 停用对应 UserModule（仅回收 source='purchase' 的发放，不动运营手动开通）
+//   SKU service → 停用一次性凭据 sku:<key>
+//   SKU storage → 追回快照记录的字节数（advisory lock，下限 0）
+//   套餐        → 用户仍在该套餐上则立即到期（只读/额度冻结由既有过期机制接管）+
+//                 追回本单发放的钻石（扣 min(当前余额, 发放额)，不打成负数；不限量余额不动）
+export interface RefundResult { ok: boolean; refundId: string; wechatStatus: string }
+
+async function revokeOrderGrant(
+  order: { outTradeNo: string; tenantId: string; userId: string; planId: string; skuKey: string | null; snapshotJson: unknown },
+  tx: Prisma.TransactionClient,
+): Promise<void> {
+  const snap = (order.snapshotJson ?? null) as OrderSnapshot | null;
+  if (order.skuKey) {
+    const skuRow = snap?.kind === 'sku' && snap.sku ? null : await tx.sku.findUnique({ where: { key: order.skuKey } });
+    const kind = snap?.sku?.kind ?? skuRow?.kind ?? 'module';
+    const grantsModuleKey = snap?.sku?.grantsModuleKey ?? skuRow?.grantsModuleKey ?? null;
+    if (kind === 'storage') {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`storage:${order.userId}`}))`;
+      const bytes = Number((snap?.sku?.metaJson as { bytes?: number } | null)?.bytes ?? (skuRow?.metaJson as { bytes?: number } | null)?.bytes ?? 0);
+      const profile = await tx.profile.findFirst({ where: { tenantId: order.tenantId }, orderBy: { updatedAt: 'desc' } });
+      if (profile && bytes > 0) {
+        const extra = (profile.extraJson as Record<string, unknown> | null) ?? {};
+        const bonus = Math.max(0, Number(extra.storageBonus ?? 0) - bytes);
+        await tx.profile.update({ where: { id: profile.id }, data: { extraJson: { ...extra, storageBonus: bonus } as Prisma.InputJsonValue } });
+      }
+    } else if (kind === 'module' && grantsModuleKey) {
+      await tx.userModule.updateMany({
+        where: { userId: order.userId, moduleKey: grantsModuleKey, source: 'purchase' },
+        data: { enabled: false },
+      });
+    } else {
+      await tx.userModule.updateMany({
+        where: { userId: order.userId, moduleKey: `sku:${order.skuKey}` },
+        data: { enabled: false },
+      });
+    }
+  } else {
+    const user = await tx.user.findUnique({ where: { id: order.userId }, select: { planId: true } });
+    if (user?.planId === order.planId) {
+      await tx.user.update({ where: { id: order.userId }, data: { planExpiresAt: new Date() } });
+    }
+    const planRow = snap?.kind === 'plan' && snap.plan ? null : await tx.plan.findUnique({ where: { id: order.planId } });
+    const granted = snap?.plan?.creditsPerMonth ?? planRow?.creditsPerMonth ?? 0;
+    if (granted > 0) {
+      const last = await tx.creditLedger.findFirst({ where: { userId: order.userId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+      const balance = last?.balance ?? 0;
+      // 不限量（-1）与零余额不追扣；只追回「本单发放且尚未消耗」的部分。
+      if (balance > 0) {
+        await chargeCredits(order.tenantId, order.userId, Math.min(balance, granted), `退款追回 · ${snapshotItemName(order)}`, tx);
+      }
+    }
+  }
+}
+
+export async function refundWechatOrder(outTradeNo: string, opts: { reason?: string; by?: string } = {}): Promise<RefundResult> {
+  const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
+  if (!order) throw Object.assign(new Error('订单不存在'), { code: 'ORDER_NOT_FOUND', statusCode: 404 });
+  if (order.provider !== 'wechat') throw Object.assign(new Error('非微信支付订单，无法原路退款'), { code: 'PROVIDER_NOT_WECHAT', statusCode: 409 });
+  if (order.refundedAt || order.status === 'refunded') throw Object.assign(new Error('订单已退款'), { code: 'ALREADY_REFUNDED', statusCode: 409 });
+  if (!['paid', 'applied'].includes(order.status)) throw Object.assign(new Error('订单未支付成功，无款可退'), { code: 'ORDER_NOT_PAID', statusCode: 409 });
+  if (!payConfigured()) throw Object.assign(new Error('微信支付未配置'), { code: 'PAYMENT_NOT_CONFIGURED', statusCode: 501 });
+
+  // 商户退款单号：js 前缀换 rf，长度不变（≤32），同单幂等复用同一退款单号。
+  const outRefundNo = `rf${outTradeNo.slice(2)}`.slice(0, 32);
+  const urlPath = '/v3/refund/domestic/refunds';
+  const body = JSON.stringify({
+    out_trade_no: outTradeNo,
+    out_refund_no: outRefundNo,
+    reason: (opts.reason ?? '').trim().slice(0, 80) || undefined,
+    amount: { refund: order.amount, total: order.amount, currency: 'CNY' },
+  });
+  let res: Response;
+  try {
+    res = await fetch(payBase() + urlPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: buildAuthToken('POST', urlPath, body) },
+      body,
+    });
+  } catch (err) {
+    throw Object.assign(new Error(`微信退款网络异常：${(err as Error).message}`), { code: 'WECHAT_PAY_REFUND_FAILED', statusCode: 502 });
+  }
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw Object.assign(new Error(`微信退款失败：HTTP ${res.status} ${errText}`), { code: 'WECHAT_PAY_REFUND_FAILED', statusCode: 502 });
+  }
+  const data = (await res.json()) as { refund_id?: string; status?: string };
+  const wechatStatus = data.status ?? 'PROCESSING';
+
+  // 微信已受理退款（SUCCESS/PROCESSING 均不可逆）→ 幂等落状态 + 回收权益（同订单 advisory lock 串行化）。
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outTradeNo}))`;
+    const cur = await tx.paymentOrder.findUnique({ where: { outTradeNo } });
+    if (!cur || cur.refundedAt) return;
+    if (cur.appliedAt) await revokeOrderGrant(cur, tx);
+    await tx.paymentOrder.update({
+      where: { outTradeNo },
+      data: { status: 'refunded', refundId: data.refund_id ?? outRefundNo, refundedAt: new Date(), refundReason: (opts.reason ?? '').trim().slice(0, 200) || null },
+    });
+    await tx.auditLog.create({
+      data: {
+        tenantId: order.tenantId, userId: order.userId, action: 'user.pay.refund',
+        payloadJson: { outTradeNo, outRefundNo, amount: order.amount, reason: opts.reason ?? null, by: opts.by ?? null, wechatStatus, item: snapshotItemName(order) },
+      },
+    }).catch(() => {});
+  });
+  return { ok: true, refundId: data.refund_id ?? outRefundNo, wechatStatus };
+}
+
+/** 退款结果通知（REFUND.SUCCESS 等）：退款状态在 refundWechatOrder 已同步落库，这里仅幂等补记原文与终态。 */
+export async function markRefundNotified(decoded: { out_trade_no?: string; refund_status?: string }): Promise<void> {
+  if (!decoded.out_trade_no) return;
+  await prisma.paymentOrder.updateMany({
+    where: { outTradeNo: decoded.out_trade_no, status: 'refunded' },
+    data: { rawNotifyJson: decoded as Prisma.InputJsonValue },
+  }).catch(() => {});
 }

@@ -7,6 +7,7 @@ import { sandboxEnabled, demoPurchaseEnabled } from '../services/sandbox.js';
 import { computeUpgradeProration } from '../services/proration.js';
 import { isExpired, daysRemaining } from '../services/planTime.js';
 import { now } from '../services/clock.js';
+import { parseAttribution } from '../services/activation.js';
 import { recordAudit } from '../services/audit.js';
 import type { Plan as PlanView, PlanPurchaseResult, WechatOrderResult } from '../../../shared/contracts';
 
@@ -59,7 +60,8 @@ export async function planRoutes(app: FastifyInstance) {
   });
 
   // 微信支付下单（小程序 JSAPI）：创建订单并返回小程序调起支付所需参数。需配齐支付凭据。
-  app.post<{ Params: { id: string }; Body: { openid?: string } }>('/plans/:id/order', async (req, reply): Promise<WechatOrderResult | void> => {
+  // P2：接受 source/refId 归因（与 SKU 下单同口径），回调发放时落 ActivationEvent（itemType='plan'）。
+  app.post<{ Params: { id: string }; Body: { openid?: string; source?: string; refId?: string } }>('/plans/:id/order', async (req, reply): Promise<WechatOrderResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
@@ -91,8 +93,9 @@ export async function planRoutes(app: FastifyInstance) {
     }
     // 月→年升级折算（D5）：实付 = max(0, 年付原价 − 老月付套餐剩余价值)；不触发时 = 原价。
     const proration = await computeUpgradeProration(user, { id: plan.id, price: plan.price, period: plan.period });
+    const attribution = parseAttribution(req.body?.source, req.body?.refId);
     try {
-      const r = await createJsapiOrder({ user, plan: { id: plan.id, name: plan.name, price: plan.price }, openid, amount: proration.chargeAmount });
+      const r = await createJsapiOrder({ user, plan: { id: plan.id, name: plan.name, price: plan.price }, openid, amount: proration.chargeAmount, attribution });
       if (proration.applies) {
         await recordAudit({
           tenantId: user.tenantId, userId: user.id, action: 'user.plan.proration',

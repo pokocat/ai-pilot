@@ -181,6 +181,38 @@ export function buildWechatPayMock(o: WechatPayMockOptions): WechatPayMock {
     return transactionJson(order);
   });
 
+  // ②b 商户关单：NOTPAY → CLOSED（204）；已支付 → 400 ORDERPAID；未知单 → 404。
+  app.post<{ Params: { outTradeNo: string } }>('/v3/pay/transactions/out-trade-no/:outTradeNo/close', async (req, reply) => {
+    const rawBody = (req as FastifyRequest & { rawBody?: string }).rawBody ?? '';
+    const v = verifyMerchantRequest(req, rawBody, o);
+    if (!v.ok) return reply.code(401).send({ code: 'SIGN_ERROR', message: v.message });
+    const order = orders.get(req.params.outTradeNo);
+    if (!order) return reply.code(404).send({ code: 'ORDER_NOT_EXIST', message: '订单不存在' });
+    if (order.tradeState === 'SUCCESS') return reply.code(400).send({ code: 'ORDERPAID', message: '订单已支付，不可关闭' });
+    order.tradeState = 'CLOSED';
+    return reply.code(204).send();
+  });
+
+  // ②c 商户退款（/v3/refund/domestic/refunds）：全额退款即时 SUCCESS；同 out_refund_no 幂等复用。
+  const refunds = new Map<string, { refundId: string; outTradeNo: string; amount: number }>();
+  app.post('/v3/refund/domestic/refunds', async (req, reply) => {
+    const rawBody = (req as FastifyRequest & { rawBody?: string }).rawBody ?? '';
+    const v = verifyMerchantRequest(req, rawBody, o);
+    if (!v.ok) return reply.code(401).send({ code: 'SIGN_ERROR', message: v.message });
+    const b = req.body as { out_trade_no?: string; out_refund_no?: string; amount?: { refund?: number; total?: number } };
+    if (!b.out_trade_no || !b.out_refund_no) return reply.code(400).send({ code: 'PARAM_ERROR', message: '缺少 out_trade_no/out_refund_no' });
+    const order = orders.get(b.out_trade_no);
+    if (!order) return reply.code(404).send({ code: 'RESOURCE_NOT_EXISTS', message: '订单不存在' });
+    if (order.tradeState !== 'SUCCESS') return reply.code(400).send({ code: 'TRADE_STATE_ERROR', message: '订单未支付，无款可退' });
+    if (b.amount?.refund !== order.amountTotal || b.amount?.total !== order.amountTotal) {
+      return reply.code(400).send({ code: 'PARAM_ERROR', message: '退款金额与订单金额不一致（mock 仅支持全额退款）' });
+    }
+    const existing = refunds.get(b.out_refund_no);
+    const refundId = existing?.refundId ?? `mockrefund_${randomBytes(12).toString('hex')}`;
+    if (!existing) refunds.set(b.out_refund_no, { refundId, outTradeNo: b.out_trade_no, amount: order.amountTotal });
+    return { refund_id: refundId, out_refund_no: b.out_refund_no, out_trade_no: b.out_trade_no, status: 'SUCCESS', amount: { refund: order.amountTotal, total: order.amountTotal, currency: 'CNY' } };
+  });
+
   // —— 回调构造 + 投递：APIv3 密钥 AES-256-GCM 加密 resource + 平台私钥签名 Wechatpay-* 头 ——
   async function deliverNotify(order: MockTradeOrder, tamperSignature = false): Promise<{ delivered: boolean; notifyStatus?: number; notifyBody?: string }> {
     const plaintext = JSON.stringify(transactionJson(order));

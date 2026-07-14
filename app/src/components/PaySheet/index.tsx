@@ -5,7 +5,7 @@ import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ActivationSource } from '../../services/api';
-import { awaitPaymentApplied, payAppliedToast } from '../../services/pay';
+import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, requestWechatPayment } from '../../services/pay';
 import './index.scss';
 
 export interface PaySheetProps {
@@ -55,15 +55,10 @@ export default function PaySheet({
 
       // 默认：单次付费商品（SKU）下单 → 微信支付 → 到账确认（mock 返回 demo 已本地发放）。
       if (mode === 'sku' && skuKey) {
+        if (!ensurePayableEnv()) return; // H5（server 模式）：下单前拦下
         const order = await api.createSkuOrder(skuKey, undefined, { source, refId });
         if (order.payParams) {
-          await Taro.requestPayment({
-            timeStamp: order.payParams.timeStamp,
-            nonceStr: order.payParams.nonceStr,
-            package: order.payParams.package,
-            signType: order.payParams.signType as 'RSA',
-            paySign: order.payParams.paySign,
-          });
+          await requestWechatPayment(order.payParams);
           // —— 支付已成功（钱已扣）：后续刷新/查询失败只影响提示，绝不能再报「支付失败」。 ——
           const applied = await awaitPaymentApplied(order.orderId);
           await store.loadMe().catch(() => {});
