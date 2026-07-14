@@ -743,7 +743,16 @@ export async function adminRoutes(app: FastifyInstance) {
     const userIds = [...new Set(orders.map((o) => o.userId))];
     const users = userIds.length ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } }) : [];
     const userMap = new Map(users.map((u) => [u.id, u]));
-    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    // 例行 QA 安全修复：CSV/公式注入防护。用户昵称（u?.name）是最长 20 字的自由文本
+    // （见 routes/meta.ts PUT /me），若以 = + - @ 开头，Excel/Numbers/Sheets 打开本 CSV
+    // 时会把该字段当公式执行（如恶意昵称 `=HYPERLINK("http://evil","x")`），造成运营
+    // 打开导出文件时被动执行任意公式（数据外泄等）。加一个前导单引号中和，Excel 按纯
+    // 文本渲染，不影响正常内容可读性。
+    const esc = (v: unknown) => {
+      let s = String(v ?? '');
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
     const itemName = (o: { snapshotJson: unknown; skuKey: string | null; planId: string }) => {
       const snap = (o.snapshotJson ?? null) as { plan?: { name?: string }; sku?: { name?: string } } | null;
       return snap?.plan?.name ?? snap?.sku?.name ?? (o.skuKey ?? o.planId);

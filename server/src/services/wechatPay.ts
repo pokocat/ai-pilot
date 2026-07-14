@@ -322,17 +322,23 @@ export function decryptNotifyResource(resource: { ciphertext: string; nonce: str
 // —— 平台证书自动下载/轮换（GET /v3/certificates）——
 // 微信平台证书约每 5 年轮换，且换发期间新旧并存；回调头 Wechatpay-Serial 标明用哪张签名。
 // 策略：按 serial 内存缓存（TTL 12h），遇到未知 serial 立即强刷一次（拿新证书）；
-// 拉取失败 5 分钟内不重试（防打爆），期间回退 env 静态证书（WECHAT_PAY_PLATFORM_CERT）。
+// 距上次尝试不足 5 分钟一律不重试（防打爆），期间回退 env 静态证书（WECHAT_PAY_PLATFORM_CERT）。
+// 例行 QA 安全修复：`force` 只应绕开「缓存仍新鲜」这一条短路，不能绕开「距上次尝试的最短间隔」——
+// 否则 /pay/wechat/notify 是 permitAll 的公开 webhook，攻击者每次带一个伪造/随机的
+// wechatpay-serial 头都会命中 certs.has(serial)===false → force=true，若 force 能绕开节流，
+// 等于可以无限触发对微信证书接口的真实出站请求（放大攻击 / 拖垮微信侧对本商户的调用配额）。
 const CERT_TTL_MS = 12 * 3600_000;
 const CERT_RETRY_MS = 5 * 60_000;
-const platformCertCache = { certs: new Map<string, string>(), fetchedAt: 0, failedAt: 0 };
+const platformCertCache = { certs: new Map<string, string>(), fetchedAt: 0, failedAt: 0, lastAttemptAt: 0 };
 
 export async function fetchPlatformCertificates(force = false): Promise<Map<string, string>> {
   if (!payConfigured()) return platformCertCache.certs;
   const at = Date.now();
   const fresh = platformCertCache.certs.size > 0 && at - platformCertCache.fetchedAt < CERT_TTL_MS;
-  const inBackoff = at - platformCertCache.failedAt < CERT_RETRY_MS;
-  if ((!force && fresh) || (inBackoff && !fresh && !force)) return platformCertCache.certs;
+  if (!force && fresh) return platformCertCache.certs;
+  const sinceLastAttempt = at - platformCertCache.lastAttemptAt;
+  if (platformCertCache.lastAttemptAt > 0 && sinceLastAttempt < CERT_RETRY_MS) return platformCertCache.certs;
+  platformCertCache.lastAttemptAt = at;
   try {
     const urlPath = '/v3/certificates';
     const res = await fetch(payBase() + urlPath, {
@@ -366,6 +372,7 @@ export function resetPlatformCertCache(): void {
   platformCertCache.certs = new Map();
   platformCertCache.fetchedAt = 0;
   platformCertCache.failedAt = 0;
+  platformCertCache.lastAttemptAt = 0;
 }
 
 /**
