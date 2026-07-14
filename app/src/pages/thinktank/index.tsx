@@ -20,6 +20,7 @@ import {
   type ModulesView, type ModuleView, type ModuleTier, type ModuleGroup,
   type ReportItem,
 } from '../../services/api';
+import { awaitPaymentApplied, ensurePayableEnv, requestWechatPayment } from '../../services/pay';
 import './index.scss';
 
 type ThinkTab = 'assets' | 'data' | 'modules' | 'reports';
@@ -290,12 +291,13 @@ export default function ThinkTank() {
       confirmText: `确认支付 ¥${yuan}`, result: '支付后开始深度整理，并写入待确认区。',
       onConfirm: async () => {
         try {
+          if (!ensurePayableEnv()) return; // H5（server 模式）：下单前拦下
           const order = await api.createSkuOrder('deep-organize', undefined, { source: 'catalog' });
           if (order.payParams) {
-            await Taro.requestPayment({
-              timeStamp: order.payParams.timeStamp, nonceStr: order.payParams.nonceStr,
-              package: order.payParams.package, signType: order.payParams.signType as 'RSA', paySign: order.payParams.paySign,
-            });
+            await requestWechatPayment(order.payParams);
+            // 到账确认（统一收口）：轮询订单状态直至凭据发放（服务端会主动查单补账），
+            // 再触发整理——SKU_REQUIRED 竞态重试仍保留作兜底。
+            await awaitPaymentApplied(order.orderId);
           }
           closePay();
           await runOrganize(batchId, true, true);
@@ -452,12 +454,12 @@ export default function ThinkTank() {
   const doEnableSku = async (m: ModuleView) => {
     try {
       if (m.price?.skuKey) {
+        if (!ensurePayableEnv()) return; // H5（server 模式）：下单前拦下
         const order = await api.createSkuOrder(m.price.skuKey, undefined, { source: 'catalog' });
         if (order.payParams) {
-          await Taro.requestPayment({
-            timeStamp: order.payParams.timeStamp, nonceStr: order.payParams.nonceStr,
-            package: order.payParams.package, signType: order.payParams.signType as 'RSA', paySign: order.payParams.paySign,
-          });
+          await requestWechatPayment(order.payParams);
+          // 到账确认（统一收口）：先等权益发放（服务端会主动查单补账），下方 enableModule 重试仅作兜底。
+          await awaitPaymentApplied(order.orderId);
         }
       }
       // 微信支付回调发放权益是异步的：requestPayment 刚 resolve 时权益未必已到账。此前直接吞掉

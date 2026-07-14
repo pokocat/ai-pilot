@@ -34,3 +34,9 @@
 .cd-rd { font-size: 16px; font-weight: 600; }
 .cd-rd.pos { color: #3A8A55; }
 .cd-rd.neg { color: var(--danger, #9C4A38); }
+
+/* 支付订单行：金额 + 继续支付按钮（P1） */
+.cd-ord-r { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.cd-repay {
+  padding: 5px 12px; border-radius: 14px; color: #fff; font-size: 12px; line-height: 1;
+}

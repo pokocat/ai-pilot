@@ -75,3 +75,21 @@ test('未知订单号：安全返回 not_found', async () => {
   assert.equal(r.applied, false);
   assert.equal(r.reason, 'order_not_found');
 });
+
+test('报文金额与订单不一致：拒绝入账且订单保持原状态（防串单/伪造）', async () => {
+  await makeOrder('ot_amt_1');
+  const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo: 'ot_amt_1' } });
+  const r = await markPaidAndApply({
+    outTradeNo: 'ot_amt_1', transactionId: 'wx_amt', tradeState: 'SUCCESS',
+    rawJson: { forged: true }, amountTotal: order!.amount + 1,
+  });
+  assert.equal(r.applied, false);
+  assert.equal(r.reason, 'field_mismatch_amount');
+  const after = await prisma.paymentOrder.findUnique({ where: { outTradeNo: 'ot_amt_1' } });
+  assert.equal(after!.status, 'created', '不一致时不得改变订单状态（不发放也不标 failed）');
+  assert.equal(await prisma.creditLedger.count({ where: { userId } }), 0, '不得发放权益');
+
+  // 金额正确的后续回调仍可正常入账（拒绝不留死锁）
+  const ok = await markPaidAndApply({ outTradeNo: 'ot_amt_1', transactionId: 'wx_amt', tradeState: 'SUCCESS', rawJson: {}, amountTotal: order!.amount });
+  assert.equal(ok.applied, true);
+});

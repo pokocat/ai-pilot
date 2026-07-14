@@ -2,6 +2,7 @@ import { useEffect, useState, type ChangeEvent, type MouseEvent, type ReactNode 
 import Icon from './Icon';
 import {
   api,
+  downloadPaymentsCsv,
   adminAuth,
   type Overview,
   type Saying,
@@ -122,7 +123,7 @@ export default function App() {
           {tab === 'home' && <OverviewView />}
           {tab === 'users' && <UsersView onOpen={setDetailUser} />}
           {tab === 'usage' && <UsageView />}
-          {tab === 'payments' && <PaymentsView />}
+          {tab === 'payments' && <PaymentsView toast={showToast} isSuper={!!me?.isSuper} />}
           {tab === 'funnel' && <FunnelView />}
           {tab === 'tokens' && <TokenUsageView onOpenUser={(id) => { setTab('users'); setDetailUser(id); }} />}
           {tab === 'trace' && <ObservabilityView />}
@@ -476,7 +477,7 @@ function fmtYuan(fen: number): string {
   return (fen / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-type OpsKind = 'reset' | 'setQuota' | 'credits' | 'extend';
+type OpsKind = 'reset' | 'setQuota' | 'credits' | 'extend' | 'grantPlan' | 'module';
 
 function Fold({ icon, title, count, open, onToggle, children }: { icon: string; title: string; count: number; open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
@@ -616,6 +617,8 @@ function UsageQuotaBlock({ userId, isOwner, toast }: { userId: string; isOwner: 
             <button type="button" className="mini-btn" onClick={() => setModal('setQuota')}>调整额度</button>
             <button type="button" className="mini-btn primary" onClick={() => setModal('credits')}>补发钻石</button>
             <button type="button" className="mini-btn" onClick={() => setModal('extend')}>延长套餐</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('grantPlan')}>开通套餐</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('module')}>模块管理</button>
           </div>
         </div>
       )}
@@ -636,12 +639,21 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
   const [days, setDays] = useState(30);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [planList, setPlanList] = useState<{ id: string; name: string; price: number }[]>([]);
+  const [grantPlanId, setGrantPlanId] = useState('');
+  const [moduleKey, setModuleKey] = useState('');
+
+  useEffect(() => {
+    if (kind === 'grantPlan') api.plans().then((ps) => setPlanList(ps.map((p: { id: string; name: string; price: number }) => ({ id: p.id, name: p.name, price: p.price })))).catch(() => {});
+  }, [kind]);
 
   const meta: Record<OpsKind, { title: string; desc: string }> = {
     reset: { title: '重置月度额度', desc: `将该用户月度 token 额度重置为当前套餐（${plan.planName ?? '无套餐'}）的每月额度。` },
     setQuota: { title: '调整月度额度', desc: '直接设定月度 token 额度：填 -1 表示不限量，0 及以上为具体额度。' },
     credits: { title: '补发 / 扣减钻石', desc: '正数补发、负数扣减；扣减不得使余额为负。事由必填，写入流水（前缀 admin:）。' },
     extend: { title: '延长套餐有效期', desc: '在当前到期日（或今日，取较晚者）基础上顺延天数（1-366）。仅推有效期，不动快照与钱包。' },
+    grantPlan: { title: '开通套餐（运营发放）', desc: `不经支付直接发放套餐权益（含无套餐用户）。当前：${plan.planName ?? '无套餐'}。发放走与支付同一口径（有效期/钻石/额度），审计记 admin_grant。` },
+    module: { title: '模块管理（发放 / 收回）', desc: '按 moduleKey 直接发放（source=admin，与购买区分）或收回模块权益。key 可在「能力模块」或 SKU 目录查看。' },
   };
   const cfg = meta[kind];
 
@@ -665,12 +677,23 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
         setBusy(true);
         await api.adjustUserCredits(userId, { delta, reason: r });
         toast(`已${delta > 0 ? '补发' : '扣减'} ${Math.abs(delta)} 钻石`);
-      } else {
-        if (!plan.planName) { setErr('该用户无套餐，无法延长'); return; }
+      } else if (kind === 'extend') {
+        if (!plan.planName) { setErr('该用户无套餐，无法延长；可用「开通套餐」直接发放'); return; }
         if (!Number.isInteger(days) || days < 1 || days > 366) { setErr('天数需为 1-366 的整数'); return; }
         setBusy(true);
         await api.extendUserPlan(userId, { days });
         toast(`套餐已延长 ${days} 天`);
+      } else if (kind === 'grantPlan') {
+        if (!grantPlanId) { setErr('请选择要开通的套餐'); return; }
+        setBusy(true);
+        const r = await api.grantUserPlan(userId, grantPlanId);
+        toast(`已开通「${r.planName}」${r.grantedCredits > 0 ? ` · 发放 ${r.grantedCredits} 钻石` : ''}`);
+      } else {
+        const key = moduleKey.trim();
+        if (!key) { setErr('请填写 moduleKey'); return; }
+        setBusy(true);
+        await api.grantUserModule(userId, key);
+        toast(`已发放模块 ${key}`);
       }
       onDone();
     } catch (e) {
@@ -686,6 +709,23 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
         <div className="blk-d">{cfg.desc}</div>
         {kind === 'setQuota' && <NumInput className="al-input" value={quota} onChange={setQuota} />}
         {kind === 'extend' && <NumInput className="al-input" min={1} max={366} value={days} onChange={setDays} />}
+        {kind === 'grantPlan' && (
+          <select className="al-input" value={grantPlanId} onChange={(e) => setGrantPlanId(e.target.value)}>
+            <option value="">选择套餐…</option>
+            {planList.map((p) => <option key={p.id} value={p.id}>{p.name}{p.price > 0 ? ` · ¥${fmtYuan(p.price)}` : p.price < 0 ? ' · 面议' : ' · 免费'}</option>)}
+          </select>
+        )}
+        {kind === 'module' && (
+          <>
+            <input className="al-input" value={moduleKey} placeholder="moduleKey（如 deep-contradiction）" onChange={(e) => setModuleKey(e.target.value)} />
+            <div className="al-note" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={async () => {
+              const key = moduleKey.trim();
+              if (!key) { setErr('请填写 moduleKey'); return; }
+              try { await api.revokeUserModule(userId, key); toast(`已收回模块 ${key}`); onDone(); }
+              catch (e) { setErr((e as Error).message || '收回失败'); }
+            }}>收回该模块（停用）</div>
+          </>
+        )}
         {kind === 'credits' && (
           <>
             <NumInput className="al-input" value={delta} onChange={setDelta} placeholder="增减数（正补发 / 负扣减）" />
@@ -732,26 +772,78 @@ function UsageView() {
   );
 }
 
-// A3：支付订单只读列表——状态筛选 + 天数切换 + summary 四格 + 明细（金额分转元）。
-const PAY_STATUS: [string, string][] = [['', '全部'], ['paid', '已支付'], ['created', '待支付'], ['failed', '失败'], ['closed', '关闭']];
+// A3：支付订单列表——状态筛选 + 天数切换 + summary 四格 + 卡单清单（查单补账）+ 明细（金额分转元）。
+const PAY_STATUS: [string, string][] = [['', '全部'], ['applied', '已开通'], ['paid', '已支付'], ['created', '待支付'], ['failed', '失败'], ['closed', '关闭']];
 function payStatusLabel(s: string): string {
-  const m: Record<string, string> = { paid: '已支付', created: '待支付', failed: '支付失败', closed: '已关闭', refunded: '已退款' };
+  const m: Record<string, string> = { applied: '已开通', paid: '已支付(未发放)', created: '待支付', failed: '支付失败', closed: '已关闭' };
   return m[s] ?? s;
 }
-function PaymentsView() {
+function PaymentsView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
   const [data, setData] = useState<AdminPaymentsView | null>(null);
   const [status, setStatus] = useState('');
   const [days, setDays] = useState(30);
-  useEffect(() => { api.payments({ status: status || undefined, days }).then(setData).catch(() => {}); }, [status, days]);
+  const [busyNo, setBusyNo] = useState('');
+  const [qInput, setQInput] = useState('');
+  const [q, setQ] = useState(''); // 已提交的搜索词（回车/点搜索才生效，避免逐键请求）
+  const [page, setPage] = useState(1);
+  const load = () => api.payments({ status: status || undefined, days, q: q || undefined, page }).then(setData).catch(() => {});
+  useEffect(() => { load(); }, [status, days, q, page]);
+  const copyNo = (no: string) => { navigator.clipboard?.writeText(no).then(() => toast('已复制单号')).catch(() => toast(no)); };
+  const search = () => { setPage(1); setQ(qInput.trim()); };
+  // 卡单处置：向微信查单并幂等入账（与回调共用同一底座，不会重复发放）。
+  const reconcile = async (no: string) => {
+    if (busyNo) return;
+    setBusyNo(no);
+    try {
+      const r = await api.reconcilePayment(no);
+      toast(r.applied ? '已补账，权益已发放' : `未入账：${r.tradeState ?? r.reason ?? '状态未变化'}`);
+      await load();
+    } catch (e) {
+      toast((e as Error).message || '查单失败');
+    } finally {
+      setBusyNo('');
+    }
+  };
+  // 全额退款（仅 owner/master 可见）：二次确认 + 原因入审计；服务端幂等回收权益。
+  const refund = async (no: string) => {
+    if (busyNo) return;
+    const reason = window.prompt(`对订单 …${no.slice(-6)} 全额退款并回收权益（不可撤销）。\n请输入退款原因（写入审计，可留空）：`);
+    if (reason === null) return;
+    setBusyNo(no);
+    try {
+      const r = await api.refundPayment(no, reason.trim());
+      toast(`已退款（${r.wechatStatus}），权益已回收`);
+      await load();
+    } catch (e) {
+      toast((e as Error).message || '退款失败');
+    } finally {
+      setBusyNo('');
+    }
+  };
+  const exportCsv = async () => {
+    try { await downloadPaymentsCsv({ status: status || undefined, days, q: q || undefined }); }
+    catch (e) { toast((e as Error).message || '导出失败'); }
+  };
+  const pages = data ? Math.max(1, Math.ceil(data.total / (data.pageSize || 20))) : 1;
   return (
     <>
-      <div className="sec-h"><span className="t">支付订单</span><span className="s">近 {days} 天 · 真实收入（只读）</span></div>
+      <div className="sec-h"><span className="t">支付订单</span><span className="s">近 {days} 天 · 真实收入</span></div>
       <div className="pad">
         <div className="crd-actions">
-          {[7, 30, 90].map((d) => <button key={d} type="button" className={`mini-btn ${days === d ? 'primary' : ''}`} onClick={() => setDays(d)}>{d} 天</button>)}
+          {[7, 30, 90].map((d) => <button key={d} type="button" className={`mini-btn ${days === d ? 'primary' : ''}`} onClick={() => { setDays(d); setPage(1); }}>{d} 天</button>)}
+          <input
+            className="al-input"
+            style={{ flex: 1, minWidth: 120 }}
+            value={qInput}
+            placeholder="搜单号 / 用户名 / 手机号"
+            onChange={(e) => setQInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') search(); }}
+          />
+          <button type="button" className="mini-btn" onClick={search}>搜索</button>
+          {isSuper && <button type="button" className="mini-btn" onClick={exportCsv}>导出 CSV</button>}
         </div>
         <div className="bill-seg" style={{ margin: '8px 0' }}>
-          {PAY_STATUS.map(([v, l]) => <div key={v} className={`bill-opt ${status === v ? 'on' : ''}`} onClick={() => setStatus(v)}><div className="bo-t">{l}</div></div>)}
+          {PAY_STATUS.map(([v, l]) => <div key={v} className={`bill-opt ${status === v ? 'on' : ''}`} onClick={() => { setStatus(v); setPage(1); }}><div className="bo-t">{l}</div></div>)}
         </div>
         {!data ? <div className="empty">加载中…</div> : (
           <>
@@ -761,16 +853,59 @@ function PaymentsView() {
               <div><b>{data.items.length}</b><span>列表条数</span></div>
               <div><b>¥{data.summary.paidCount > 0 ? fmtYuan(Math.round(data.summary.paidAmount / data.summary.paidCount)) : '0.00'}</b><span>客单价</span></div>
             </div>
-            {data.items.length === 0 && <div className="empty">近 {days} 天{status ? `「${PAY_STATUS.find(([v]) => v === status)?.[1]}」` : ''}暂无订单。</div>}
+            {data.stuck.length > 0 && (
+              <>
+                <div className="sec-h"><span className="t">需要处理（{data.stuck.length}）</span><span className="s">已支付未发放 = 资损单，优先查单补账；超时未支付由对账任务自动关单</span></div>
+                {data.stuck.map((o) => (
+                  <div key={o.outTradeNo} className="usage-row">
+                    <div className="usage-h">
+                      <div className="usage-name">
+                        {o.userName || '（未命名）'}
+                        <span>{o.kind === 'paid_unapplied' ? '已支付未发放' : '超时未支付'} · {o.skuKey || o.planId || '—'}</span>
+                      </div>
+                      <div className="usage-num">¥{fmtYuan(o.amount)}</div>
+                    </div>
+                    <div className="usage-meta">{o.outTradeNo} · {o.paidAt ? '支付 ' + fmtTime(o.paidAt) : '下单 ' + fmtTime(o.createdAt)}</div>
+                    <div className="crd-actions">
+                      <button type="button" className="mini-btn primary" disabled={busyNo === o.outTradeNo || o.provider !== 'wechat'} onClick={() => reconcile(o.outTradeNo)}>
+                        {busyNo === o.outTradeNo ? '查单中…' : o.provider === 'wechat' ? '查单补账' : '沙箱单'}
+                      </button>
+                      {isSuper && o.kind === 'paid_unapplied' && o.provider === 'wechat' && (
+                        <button type="button" className="mini-btn danger" disabled={busyNo === o.outTradeNo} onClick={() => refund(o.outTradeNo)}>退款</button>
+                      )}
+                      <button type="button" className="mini-btn" onClick={() => copyNo(o.outTradeNo)}>复制单号</button>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+            {data.items.length === 0 && <div className="empty">近 {days} 天{q ? `「${q}」` : ''}{status ? `「${PAY_STATUS.find(([v]) => v === status)?.[1]}」` : ''}暂无订单。</div>}
             {data.items.map((p, i) => (
-              <div key={i} className="usage-row">
+              <div key={i} className="usage-row" title={p.outTradeNo} onClick={() => copyNo(p.outTradeNo)}>
                 <div className="usage-h">
                   <div className="usage-name">{p.userName || '（未命名）'}<span>尾号 {p.orderNo}{p.attrSource ? ` · ${p.attrSource}` : ''}</span></div>
-                  <div className={`usage-num ${p.status === 'paid' ? 'ok' : ''}`}>¥{fmtYuan(p.amount)}</div>
+                  <div className={`usage-num ${p.status === 'applied' || p.status === 'paid' ? 'ok' : ''}`}>¥{fmtYuan(p.amount)}</div>
                 </div>
-                <div className="usage-meta">{payStatusLabel(p.status)} · {p.paidAt ? '支付 ' + fmtTime(p.paidAt) : '下单 ' + fmtTime(p.createdAt)}</div>
+                <div className="usage-meta">{payStatusLabel(p.status)} · {p.paidAt ? '支付 ' + fmtTime(p.paidAt) : '下单 ' + fmtTime(p.createdAt)}（点击复制完整单号）</div>
+                {isSuper && (p.status === 'applied' || p.status === 'paid') && (
+                  <div className="crd-actions">
+                    <button
+                      type="button"
+                      className="mini-btn danger"
+                      disabled={busyNo === p.outTradeNo}
+                      onClick={(e) => { e.stopPropagation(); refund(p.outTradeNo); }}
+                    >{busyNo === p.outTradeNo ? '退款中…' : '退款'}</button>
+                  </div>
+                )}
               </div>
             ))}
+            {pages > 1 && (
+              <div className="crd-actions" style={{ marginTop: 10 }}>
+                <button type="button" className="mini-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
+                <span className="badge">{page} / {pages} · 共 {data.total} 单</span>
+                <button type="button" className="mini-btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>下一页</button>
+              </div>
+            )}
           </>
         )}
       </div>

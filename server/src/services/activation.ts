@@ -33,7 +33,7 @@ export async function activationSourceCounts(days: number): Promise<{ source: st
 
 /** 落一条开通事件（fire-safe：绝不阻断购买主链路）。可传事务客户端与购买同事务。 */
 export async function recordActivation(
-  args: { tenantId: string; userId: string; itemType: 'agent' | 'sku'; itemKey: string; source: ActivationSource; refId?: string | null },
+  args: { tenantId: string; userId: string; itemType: 'agent' | 'sku' | 'plan'; itemKey: string; source: ActivationSource; refId?: string | null },
   db?: Prisma.TransactionClient,
 ): Promise<void> {
   const client = db ?? prisma;

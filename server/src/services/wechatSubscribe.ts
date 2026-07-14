@@ -20,6 +20,11 @@ const SCENE_META: Record<WechatSubscribeScene, { title: string; description: str
     description: '重要报告生成完成后提醒查看',
     env: ['WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID', 'WECHAT_REPORT_TEMPLATE_ID'],
   },
+  payment: {
+    title: '支付到账',
+    description: '支付成功、权益到账后提醒确认',
+    env: ['WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID', 'WECHAT_PAYMENT_TEMPLATE_ID'],
+  },
 };
 
 function envFirst(keys: string[]): string {
@@ -112,10 +117,19 @@ function miniprogramState(): 'developer' | 'trial' | 'formal' {
 function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | null } = {}): string {
   if (scene === 'report' && opts.reportId) return `packages/work/report/index?id=${encodeURIComponent(opts.reportId)}`;
   if (scene === 'report') return 'packages/work/library/index';
+  if (scene === 'payment') return 'packages/work/credits/index'; // 订单明细页（含支付订单段）
   return 'pages/studio/index';
 }
 
 function dataForScene(scene: WechatSubscribeScene, opts: { title: string; note?: string }) {
+  if (scene === 'payment') {
+    return {
+      thing1: { value: clip(opts.title, 20) },
+      phrase2: { value: '已到账' },
+      time3: { value: timeValue() },
+      thing4: { value: clip(opts.note || '权益已生效，点击查看订单', 20) },
+    };
+  }
   if (scene === 'report') {
     return {
       thing1: { value: clip(opts.title, 20) },

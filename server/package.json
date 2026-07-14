@@ -14,6 +14,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:sync-plans": "tsx scripts/syncPlans.ts",
     "pay:e2e": "tsx scripts/pay-e2e.ts",
+    "pay:mock": "tsx scripts/wechat-pay-mock.ts",
+    "pay:e2e:mock": "tsx scripts/pay-mock-e2e.ts",
     "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
     "db:pgvector": "psql \"$DATABASE_URL\" -f prisma/pgvector.sql",
     "admin:sync-content": "tsx scripts/syncAdminContent.ts",

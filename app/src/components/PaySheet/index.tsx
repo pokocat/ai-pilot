@@ -5,6 +5,7 @@ import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ActivationSource } from '../../services/api';
+import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, requestWechatPayment } from '../../services/pay';
 import './index.scss';
 
 export interface PaySheetProps {
@@ -52,23 +53,21 @@ export default function PaySheet({
     try {
       if (onConfirm) { await onConfirm(); return; } // 调用方自持效果
 
-      // 默认：单次付费商品（SKU）下单 → 微信支付 → 重拉 /me（mock 返回 demo 已本地发放）。
+      // 默认：单次付费商品（SKU）下单 → 微信支付 → 到账确认（mock 返回 demo 已本地发放）。
       if (mode === 'sku' && skuKey) {
+        if (!ensurePayableEnv()) return; // H5（server 模式）：下单前拦下
         const order = await api.createSkuOrder(skuKey, undefined, { source, refId });
         if (order.payParams) {
-          await Taro.requestPayment({
-            timeStamp: order.payParams.timeStamp,
-            nonceStr: order.payParams.nonceStr,
-            package: order.payParams.package,
-            signType: order.payParams.signType as 'RSA',
-            paySign: order.payParams.paySign,
-          });
+          await requestWechatPayment(order.payParams);
+          // —— 支付已成功（钱已扣）：后续刷新/查询失败只影响提示，绝不能再报「支付失败」。 ——
+          const applied = await awaitPaymentApplied(order.orderId);
+          await store.loadMe().catch(() => {});
+          Taro.showToast(payAppliedToast(applied, '已开通，权益已更新'));
+        } else {
+          // mock/演示通道：下单即已本地发放
+          await store.loadMe().catch(() => {});
+          Taro.showToast({ title: '已开通，权益已更新', icon: 'success' });
         }
-        // 支付成功 → 权益异步发放，轻量重试刷新 /me。
-        await store.loadMe();
-        await new Promise((r) => setTimeout(r, 1500));
-        await store.loadMe();
-        Taro.showToast({ title: '已开通，权益已更新', icon: 'success' });
       }
       onClose?.();
     } catch (e: any) {
