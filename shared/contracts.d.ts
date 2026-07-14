@@ -776,6 +776,18 @@ export interface WechatOrderResult {
   // 月→年升级折算明细（applies=true 时前端可展示「已抵扣 ¥X」）。
   proration?: { applies: boolean; fullPrice: number; remainingDays: number; remainingValue: number; chargeAmount: number };
 }
+/** 支付订单状态（GET /pay/orders/:outTradeNo）：requestPayment 成功后前端轮询用；
+ *  未发放且已配支付时服务端会先主动查单补账，消除回调竞态。 */
+export interface PayOrderStatus {
+  outTradeNo: string;
+  status: 'created' | 'paid' | 'applied' | 'failed' | 'closed';
+  amount: number; // 应付金额（分）
+  planId?: string; // 套餐订单
+  skuKey?: string; // SKU 订单
+  paidAt?: string;
+  appliedAt?: string; // 有值 = 权益已发放，前端可停止轮询
+}
+
 export type WechatSubscribeScene = 'review' | 'report';
 export type WechatSubscribeStatus = 'accept' | 'reject' | 'ban' | 'filter';
 export interface WechatSubscribeTemplate {

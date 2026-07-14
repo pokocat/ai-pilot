@@ -44,7 +44,7 @@
 - [x] 鉴权升级：JWT（`services/userToken.ts`，配 `APP_JWT_SECRET`，`APP_JWT_REQUIRED` 强制）；短信强制校验开关 `SMS_REQUIRE_CODE` 就绪。
 - [x] 内容审核 / 缓存：`services/moderation.ts`（keyword/http 可插拔）+ `services/cache.ts`（内存/Redis 可选依赖 ioredis）。
 - [x] **算力按次扣减 + 余额不足拦截**（`services/credits.ts`，TC-K 守护）。
-- [x] **微信支付 v3 脚手架 + 幂等入账**：`PaymentOrder` 状态机 + `services/wechatPay.ts`（下单/回调验签解密/`markPaidAndApply` 原子防并发双发）+ `routes/pay.ts`。配 `WECHAT_PAY_*` 启用。仍待：平台证书自动轮换、主动查单对账、退款；token 级用量归集仍为旁路统计。
+- [x] **微信支付 v3 脚手架 + 幂等入账**：`PaymentOrder` 状态机 + `services/wechatPay.ts`（下单/回调验签解密/`markPaidAndApply` 原子防并发双发）+ `routes/pay.ts`。配 `WECHAT_PAY_*` 启用。主动查单对账已落地（2026-07-14：`reconcileOrder` + `GET /pay/orders/:outTradeNo` 轮询补账 + `pay:mock` 本地 mock 微信网关全链路）。仍待：平台证书自动轮换、定时批量对账 job、退款；token 级用量归集仍为旁路统计。
 
 ### P3 · 收尾
 - [x] 扩充集成测试：SSE `/generate` 流式、内容审核拦截、**算力按次扣减+不足拦截**、并发冒烟（见 `docs/TESTING.md` TC-I/J/K/L）。

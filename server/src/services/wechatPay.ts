@@ -20,7 +20,11 @@ import { applyPlanPurchase, applySkuGrant } from './purchase.js';
 import { parseAttribution, recordActivation } from './activation.js';
 import { sandboxEnabled } from './sandbox.js';
 
-const PAY_BASE = 'https://api.mch.weixin.qq.com';
+// 微信支付 API 基址。默认真实商户网关；本地联调可用 WECHAT_PAY_BASE 指向
+// mock 微信支付服务器（scripts/wechat-pay-mock.ts），走完整签名/验签/AEAD 解密链路。
+function payBase(): string {
+  return (process.env.WECHAT_PAY_BASE ?? '').trim().replace(/\/+$/, '') || 'https://api.mch.weixin.qq.com';
+}
 
 function cfg() {
   return {
@@ -135,7 +139,7 @@ export async function createJsapiOrder(args: {
   const urlPath = '/v3/pay/transactions/jsapi';
   let res: Response;
   try {
-    res = await fetch(PAY_BASE + urlPath, {
+    res = await fetch(payBase() + urlPath, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -250,4 +254,63 @@ export async function markPaidAndApply(parsed: {
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
     return { applied: true };
   });
+}
+
+// —— 主动查单（GET /v3/pay/transactions/out-trade-no/{no}）——
+// 回调可能丢失/延迟（网络抖动、服务重启窗口），前端 requestPayment 成功后轮询订单状态时，
+// 用查单结果补账，消除「已付款但权益未到」的回调竞态。
+export interface WechatTransaction {
+  out_trade_no?: string;
+  transaction_id?: string;
+  trade_state?: string;
+  [key: string]: unknown;
+}
+
+export async function queryWechatOrder(outTradeNo: string): Promise<WechatTransaction> {
+  const c = cfg();
+  const urlPath = `/v3/pay/transactions/out-trade-no/${encodeURIComponent(outTradeNo)}?mchid=${encodeURIComponent(c.mchId)}`;
+  let res: Response;
+  try {
+    res = await fetch(payBase() + urlPath, {
+      method: 'GET',
+      headers: { Accept: 'application/json', Authorization: buildAuthToken('GET', urlPath, '') },
+    });
+  } catch (err) {
+    throw Object.assign(new Error(`微信查单网络异常：${(err as Error).message}`), { code: 'WECHAT_PAY_QUERY_FAILED', statusCode: 502 });
+  }
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw Object.assign(new Error(`微信查单失败：HTTP ${res.status} ${errText}`), { code: 'WECHAT_PAY_QUERY_FAILED', statusCode: 502 });
+  }
+  return (await res.json()) as WechatTransaction;
+}
+
+// 微信侧终态失败（不会再变成 SUCCESS）：本地订单可安全标 failed。
+// NOTPAY / USERPAYING / ACCEPT 是中间态，保持 created 等用户继续支付或下次对账。
+const TERMINAL_FAIL_STATES = new Set(['CLOSED', 'REVOKED', 'PAYERROR', 'REFUND']);
+
+/**
+ * 查单对账：对 provider=wechat 且尚未发放权益的订单，主动向微信查询交易状态并幂等补账。
+ * SUCCESS → markPaidAndApply（与回调同一套「恰好一次」底座，source 区分 wechat_pay_query）；
+ * 终态失败 → 标 failed；中间态 → 不动。已发放/非微信单/未配支付则直接短路，不触网。
+ */
+export async function reconcileOrder(outTradeNo: string): Promise<{ applied: boolean; reason?: string; tradeState?: string }> {
+  const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
+  if (!order) return { applied: false, reason: 'order_not_found' };
+  if (order.appliedAt || order.status === 'applied') return { applied: false, reason: 'already_applied' };
+  if (order.provider !== 'wechat') return { applied: false, reason: 'provider_not_wechat' };
+  if (!payConfigured()) return { applied: false, reason: 'pay_not_configured' };
+  if (!['created', 'paid'].includes(order.status)) return { applied: false, reason: `status_${order.status}` };
+
+  const tx = await queryWechatOrder(outTradeNo);
+  const tradeState = String(tx.trade_state ?? 'UNKNOWN');
+  if (tradeState !== 'SUCCESS' && !TERMINAL_FAIL_STATES.has(tradeState)) {
+    return { applied: false, reason: `trade_state_${tradeState}`, tradeState };
+  }
+  // SUCCESS 入账；终态失败由 markPaidAndApply 的非 SUCCESS 分支标 failed —— 两条路径共用同一幂等锁。
+  const r = await markPaidAndApply(
+    { outTradeNo, transactionId: tx.transaction_id ? String(tx.transaction_id) : undefined, tradeState, rawJson: tx as Record<string, unknown> },
+    'wechat_pay_query',
+  );
+  return { ...r, tradeState };
 }

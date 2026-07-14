@@ -1,15 +1,46 @@
 // 支付回调路由（微信支付 v3 通知）。独立封装插件：本插件内用「保留原文」的 JSON 解析器，
 // 以便对回调做签名校验（v3 验签需原始报文）。不挂任何鉴权 hook —— 回调靠验签 + AEAD 解密自证。
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { verifyNotifySignature, decryptNotifyResource, markPaidAndApply } from '../services/wechatPay.js';
+import { verifyNotifySignature, decryptNotifyResource, markPaidAndApply, payConfigured, reconcileOrder } from '../services/wechatPay.js';
 import { sandboxEnabled } from '../services/sandbox.js';
 import { requireAdmin } from '../services/adminAuth.js';
+import { resolveUser } from '../services/context.js';
+import { prisma } from '../db.js';
+import type { PayOrderStatus } from '../../../shared/contracts';
 
 interface NotifyBody {
   resource?: { ciphertext: string; nonce: string; associated_data?: string };
 }
 
 export async function payRoutes(app: FastifyInstance) {
+  // 订单状态查询（鉴权，仅本人订单）：requestPayment 成功后前端轮询到 appliedAt 有值即权益到账。
+  // 微信单尚未发放且已配支付时，先主动查单补账（reconcileOrder，与回调共用幂等底座）——
+  // 回调丢失/延迟也能在用户轮询时把「已付款未发权益」自愈；查单网络异常不阻塞状态返回。
+  app.get<{ Params: { outTradeNo: string } }>('/pay/orders/:outTradeNo', async (req, reply): Promise<PayOrderStatus | void> => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const outTradeNo = req.params.outTradeNo;
+    let order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
+    if (!order || order.userId !== user.id) return reply.code(404).send({ error: '订单不存在', code: 'ORDER_NOT_FOUND' });
+
+    if (order.provider === 'wechat' && !order.appliedAt && ['created', 'paid'].includes(order.status) && payConfigured()) {
+      try {
+        await reconcileOrder(outTradeNo);
+        order = (await prisma.paymentOrder.findUnique({ where: { outTradeNo } })) ?? order;
+      } catch (err) {
+        console.warn('[pay] reconcile on poll failed:', outTradeNo, (err as Error).message);
+      }
+    }
+    return {
+      outTradeNo: order.outTradeNo,
+      status: order.status as PayOrderStatus['status'],
+      amount: order.amount,
+      planId: order.planId || undefined,
+      skuKey: order.skuKey ?? undefined,
+      paidAt: order.paidAt?.toISOString(),
+      appliedAt: order.appliedAt?.toISOString(),
+    };
+  });
+
   // 仿真回调（可测性 D9，仅 sandboxEnabled + admin 鉴权）：给 outTradeNo 构造合成成功通知直调 markPaidAndApply，
   // 绕过验签/解密做离线端到端验证；真实 notify 端点（下方）严格不动。发放标 source='wechat_pay_sandbox'。
   if (sandboxEnabled()) {
