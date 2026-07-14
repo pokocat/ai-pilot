@@ -72,6 +72,7 @@ export async function payRoutes(app: FastifyInstance) {
     try {
       const decoded = decryptNotifyResource(body.resource) as {
         out_trade_no?: string; transaction_id?: string; trade_state?: string;
+        appid?: string; mchid?: string; amount?: { total?: number };
       };
       if (!decoded.out_trade_no) return reply.code(400).send({ code: 'FAIL', message: '解密结果缺少订单号' });
       const r = await markPaidAndApply({
@@ -79,6 +80,10 @@ export async function payRoutes(app: FastifyInstance) {
         transactionId: decoded.transaction_id,
         tradeState: decoded.trade_state ?? 'UNKNOWN',
         rawJson: decoded as Record<string, unknown>,
+        // 防串单/伪造：报文自带的金额/appid/mchid 与本单比对，不一致绝不入账（markPaidAndApply 内校验）。
+        amountTotal: typeof decoded.amount?.total === 'number' ? decoded.amount.total : undefined,
+        appId: decoded.appid,
+        mchId: decoded.mchid,
       });
       // 即便业务侧判为「已处理/非成功态」，也回 SUCCESS 让微信停止重试（订单状态已落库，可对账）。
       if (!r.applied && r.reason && !['already_applied', 'trade_state_SUCCESS'].includes(r.reason)) {

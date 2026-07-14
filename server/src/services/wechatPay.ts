@@ -200,6 +200,8 @@ export function decryptNotifyResource(resource: { ciphertext: string; nonce: str
  */
 export async function markPaidAndApply(parsed: {
   outTradeNo: string; transactionId?: string; tradeState: string; rawJson: Record<string, unknown>;
+  /** 解密报文/查单结果中的订单金额（分）、appid、mchid：提供即校验，与本单不一致绝不入账（防串单/伪造）。 */
+  amountTotal?: number; appId?: string; mchId?: string;
 }, source = 'wechat_pay'): Promise<{ applied: boolean; reason?: string }> {
   return prisma.$transaction(async (tx) => {
     // 对同一订单号串行化回调处理。hashtext(text) 返回 int4，适配 pg_advisory_xact_lock(int)。
@@ -208,6 +210,23 @@ export async function markPaidAndApply(parsed: {
     const order = await tx.paymentOrder.findUnique({ where: { outTradeNo: parsed.outTradeNo } });
     if (!order) return { applied: false, reason: 'order_not_found' };
     if (order.appliedAt || order.status === 'applied') return { applied: false, reason: 'already_applied' };
+
+    // 报文一致性校验（防串单/防伪造的标准防御）：字段存在才比对（沙箱/降级报文可能不带）。
+    // 不一致时保持订单原状态（绝不发放、也不标 failed——伪造报文不能影响真单），
+    // 原文落 rawNotifyJson 供 admin 卡单清单排查，交给对账/人工处置。
+    const c = cfg();
+    const mismatch =
+      (parsed.amountTotal !== undefined && parsed.amountTotal !== order.amount && 'amount') ||
+      (parsed.appId !== undefined && c.appId && parsed.appId !== c.appId && 'appid') ||
+      (parsed.mchId !== undefined && c.mchId && parsed.mchId !== c.mchId && 'mchid') || null;
+    if (mismatch) {
+      console.error(`[pay] 报文字段不一致，拒绝入账 outTradeNo=${parsed.outTradeNo} field=${mismatch} got=${JSON.stringify({ amount: parsed.amountTotal, appid: parsed.appId, mchid: parsed.mchId })} want=${JSON.stringify({ amount: order.amount, appid: c.appId, mchid: c.mchId })}`);
+      await tx.paymentOrder.update({
+        where: { outTradeNo: parsed.outTradeNo },
+        data: { rawNotifyJson: parsed.rawJson as Prisma.InputJsonValue },
+      }).catch(() => {});
+      return { applied: false, reason: `field_mismatch_${mismatch}` };
+    }
 
     if (parsed.tradeState !== 'SUCCESS') {
       if (order.status === 'created') {
@@ -280,6 +299,10 @@ export async function queryWechatOrder(outTradeNo: string): Promise<WechatTransa
   }
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
+    // 404 = 微信侧不存在该交易（用户从未调起支付 / 单太旧转历史）：调用方据此把超期 created 单安全关单。
+    if (res.status === 404) {
+      throw Object.assign(new Error(`微信订单不存在：${outTradeNo}`), { code: 'WECHAT_PAY_ORDER_NOT_EXIST', statusCode: 404 });
+    }
     throw Object.assign(new Error(`微信查单失败：HTTP ${res.status} ${errText}`), { code: 'WECHAT_PAY_QUERY_FAILED', statusCode: 502 });
   }
   return (await res.json()) as WechatTransaction;
@@ -308,9 +331,69 @@ export async function reconcileOrder(outTradeNo: string): Promise<{ applied: boo
     return { applied: false, reason: `trade_state_${tradeState}`, tradeState };
   }
   // SUCCESS 入账；终态失败由 markPaidAndApply 的非 SUCCESS 分支标 failed —— 两条路径共用同一幂等锁。
+  const amt = (tx.amount as { total?: number } | undefined)?.total;
   const r = await markPaidAndApply(
-    { outTradeNo, transactionId: tx.transaction_id ? String(tx.transaction_id) : undefined, tradeState, rawJson: tx as Record<string, unknown> },
+    {
+      outTradeNo, transactionId: tx.transaction_id ? String(tx.transaction_id) : undefined, tradeState,
+      rawJson: tx as Record<string, unknown>,
+      amountTotal: typeof amt === 'number' ? amt : undefined,
+      appId: typeof tx.appid === 'string' ? tx.appid : undefined,
+      mchId: typeof tx.mchid === 'string' ? tx.mchid : undefined,
+    },
     'wechat_pay_query',
   );
   return { ...r, tradeState };
+}
+
+// —— 定时对账 sweep（P0：回调丢失/卡单自愈，不依赖用户轮询）——
+// 扫两类未终结单（仅 provider=wechat 且已配支付）：
+//   paid 未 applied（收钱未发权益的卡单）→ 查单补账；
+//   created 超 15 分钟（回调可能丢了）→ 查单：SUCCESS 补账 / 终态失败标 failed /
+//     微信侧查无此单且已过 time_expire（2h）→ 本地安全关单（closed），终结陈旧单。
+// 由 scheduler 每 5 分钟跑一次（services/scheduler.ts 注册）；admin 手动补账走 reconcileOrder 单发。
+const ORDER_EXPIRE_MS = 2 * 60 * 60 * 1000; // 与 createJsapiOrder 的 time_expire 一致
+
+export async function sweepPendingOrders(opts: { batch?: number } = {}): Promise<{ scanned: number; applied: number; failed: number; closed: number }> {
+  const stats = { scanned: 0, applied: 0, failed: 0, closed: 0 };
+  if (!payConfigured()) return stats;
+  const batch = opts.batch ?? 50;
+  const staleCreatedBefore = new Date(Date.now() - 15 * 60_000);
+  const horizon = new Date(Date.now() - 7 * 86400_000); // 只扫近 7 天，历史遗留交人工
+  const candidates = await prisma.paymentOrder.findMany({
+    where: {
+      provider: 'wechat',
+      appliedAt: null,
+      createdAt: { gt: horizon },
+      OR: [
+        { status: 'paid' },
+        { status: 'created', createdAt: { lt: staleCreatedBefore } },
+      ],
+    },
+    orderBy: { createdAt: 'asc' },
+    take: batch,
+    select: { outTradeNo: true, status: true, createdAt: true },
+  });
+  for (const o of candidates) {
+    stats.scanned += 1;
+    try {
+      const r = await reconcileOrder(o.outTradeNo);
+      if (r.applied) stats.applied += 1;
+      else if (r.tradeState && TERMINAL_FAIL_STATES.has(r.tradeState)) stats.failed += 1;
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      const expired = Date.now() - o.createdAt.getTime() > ORDER_EXPIRE_MS + 5 * 60_000;
+      if (code === 'WECHAT_PAY_ORDER_NOT_EXIST' && o.status === 'created' && expired) {
+        // 用户从未调起支付且微信侧已过支付截止：本地关单（微信侧不可再付，安全）。
+        await prisma.paymentOrder.updateMany({
+          where: { outTradeNo: o.outTradeNo, status: 'created', appliedAt: null },
+          data: { status: 'closed' },
+        }).catch(() => {});
+        stats.closed += 1;
+      } else {
+        // 网络/网关异常：跳过，下轮再试（不打断整批）。
+        console.warn('[pay] sweep reconcile failed:', o.outTradeNo, (err as Error).message);
+      }
+    }
+  }
+  return stats;
 }

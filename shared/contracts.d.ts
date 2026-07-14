@@ -879,11 +879,25 @@ export interface AdminUserUsage {
 //   POST /admin/users/:id/token-quota → { mode: 'reset_to_plan' | 'set'; quota?: number }
 //   POST /admin/users/:id/credits     → { delta: number; reason: string }
 //   POST /admin/users/:id/plan-extend → { days: number }
-export interface AdminPaymentItem { orderNo: string; userName: string; amount: number; status: string; attrSource: string | null; paidAt: string | null; createdAt: string }
+export interface AdminPaymentItem {
+  orderNo: string; // 尾 6 位（列表紧凑展示）
+  outTradeNo: string; // 完整商户单号（微信商户平台查单/对账用）
+  userName: string; amount: number; status: string; attrSource: string | null; paidAt: string | null; createdAt: string;
+}
+/** 需要运营关注的异常单：paid_unapplied=收钱未发权益（资损，可一键查单补账）；created_stale=超时未支付（等 sweep 关单或人工核实）。 */
+export interface AdminPaymentStuckItem {
+  outTradeNo: string; userName: string; amount: number; status: string;
+  kind: 'paid_unapplied' | 'created_stale';
+  provider: string; planId: string; skuKey: string | null;
+  paidAt: string | null; createdAt: string;
+}
 export interface AdminPaymentsView {
   summary: { paidAmount: number; paidCount: number; byDay: { day: string; amount: number }[] }
   items: AdminPaymentItem[]
+  stuck: AdminPaymentStuckItem[]
 }
+/** POST /admin/payments/:outTradeNo/reconcile 手动查单补账结果 */
+export interface AdminPayReconcileResult { ok: boolean; applied: boolean; reason?: string; tradeState?: string; status: string }
 // —— Token 用量看板（计费 P1：旁路统计，不参与按次扣费）。成本 costMicros 单位 = 1e-6 元（微元）。 ——
 export interface TokenUsageTotals {
   calls: number;

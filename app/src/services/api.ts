@@ -14,7 +14,7 @@ import type {
   FateCardContent, MemoryLibraryView, DossierView, DossierReport,
   DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats,
   QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
-  SkuView, SkuOrderResult, BattleForce, BattleCommitResult,
+  SkuView, SkuOrderResult, PayOrderStatus, BattleForce, BattleCommitResult,
   DataSourcesView, ModulesView, ModuleView, ReminderView, WorkbenchView, SearchResult,
   KnowledgePipelineView, OrganizeResult, ConfirmResult, StagedUploadResult,
 } from '../../../shared/contracts';
@@ -34,7 +34,7 @@ export type { QuickScanRequest, QuickScanResult } from '../../../shared/contract
 export type { JourneyView, JourneyStage, JourneyNextStep } from '../../../shared/contracts';
 export type { PrescriptionView, PrescriptionListView, DeliverablePrescription } from '../../../shared/contracts';
 export type { BrandKitView, BrandKitPersona, BrandKitVoice, BrandKitTheme } from '../../../shared/contracts';
-export type { SkuView, SkuOrderResult, SkuKind, WechatPayParams } from '../../../shared/contracts';
+export type { SkuView, SkuOrderResult, SkuKind, WechatPayParams, PayOrderStatus } from '../../../shared/contracts';
 export type {
   BattleForce, BattleCommitResult, ForceKind, ForceLevel, ForceTone,
   DataSourceView, DataSourcesView, DataSourceStatus,
@@ -283,6 +283,10 @@ export const api = {
   // D-1 开通来源归因：下单带可选 source（'prescription'|'catalog'|'market'）+ refId（source=prescription 时的处方 id）。
   createSkuOrder: (key: string, openid?: string, attribution?: ActivationAttribution) =>
     IS_MOCK ? mock.createSkuOrder(key) : request<SkuOrderResult>(`/skus/${key}/order`, 'POST', { ...(openid ? { openid } : {}), ...attribution }),
+  // 支付订单状态（仅本人订单）：requestPayment 成功后轮询，appliedAt 有值 = 权益到账；
+  // 服务端在未发放时会先主动查单补账（回调丢失也能自愈）。统一走 services/pay.ts 的 awaitPaymentApplied。
+  payOrderStatus: (outTradeNo: string) =>
+    IS_MOCK ? mock.payOrderStatus(outTradeNo) : request<PayOrderStatus>(`/pay/orders/${outTradeNo}`),
   wechatSubscribeTemplates: () =>
     IS_MOCK ? Promise.resolve({ scenes: [] } as WechatSubscribeTemplatesResult) : request<WechatSubscribeTemplatesResult>('/wechat/subscribe/templates'),
   recordWechatSubscription: (choices: WechatSubscribeChoice[]) =>

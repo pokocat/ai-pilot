@@ -111,7 +111,7 @@ repo/
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
 - **微信密钥**：`WECHAT_MINI_SECRET` 与消息推送 `WECHAT_MESSAGE_TOKEN` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
-- **方案购买 / 支付**：前台可读 `GET /plans`；未配齐微信支付凭据时，登录后 `POST /plans/:id/purchase` 走演示购买并按方案写入 `CreditLedger`；配齐 `WECHAT_PAY_*` 且套餐需付款时，演示购买被禁用，改走 `POST /plans/:id/order` 创建小程序 JSAPI 支付订单，再由 `POST /pay/wechat/notify` 回调幂等入账；`requestPayment` 成功后前端可轮询 `GET /pay/orders/:outTradeNo`（仅本人订单），未发放时服务端先主动查单补账（`reconcileOrder`，与回调共用幂等底座），消除回调丢失/延迟竞态。本地联调可 `npm run pay:mock` 起 mock 微信支付网关（`WECHAT_PAY_BASE` 指向它），完整真实加解密链路离线走通（见 §11）。前台显示为「方案与产出额度」，企业版 `creditsPerMonth<0` 记为不限量（余额 `-1`，产出不扣减）。
+- **方案购买 / 支付**：前台可读 `GET /plans`；未配齐微信支付凭据时，登录后 `POST /plans/:id/purchase` 走演示购买并按方案写入 `CreditLedger`；配齐 `WECHAT_PAY_*` 且套餐需付款时，演示购买被禁用，改走 `POST /plans/:id/order` 创建小程序 JSAPI 支付订单，再由 `POST /pay/wechat/notify` 回调幂等入账（回调解密后校验金额/appid/mchid 与本单一致，不一致绝不入账）；`requestPayment` 成功后前端统一走 `services/pay.ts` 的 `awaitPaymentApplied` 轮询 `GET /pay/orders/:outTradeNo`（仅本人订单），未发放时服务端先主动查单补账（`reconcileOrder`，与回调共用幂等底座）；另有 `pay-reconcile-sweep` 定时任务（5 分钟）扫「paid 未 applied / created 超时」自动补账或关单，运营后台「订单」页有卡单清单 + 手动查单补账（`POST /admin/payments/:outTradeNo/reconcile`，审计留痕）。**降级守卫**：活跃付费套餐买不同套餐时仅放行「同套餐续费 / 月→年折算升级」，其余 409 `PLAN_SWITCH_BLOCKED`（防止切换重置锚点烧掉剩余时长）；企业版（price<0）套餐调整仅走运营。本地联调可 `npm run pay:mock` 起 mock 微信支付网关（`WECHAT_PAY_BASE` 指向它），完整真实加解密链路离线走通（见 §11）。前台显示为「方案与产出额度」，企业版 `creditsPerMonth<0` 记为不限量（余额 `-1`，产出不扣减）。
 - **智能体开通**：`free`/`metered` 智能体无需开通即可用；`unlock` 智能体需用户用算力购买（`POST /agents/:key/purchase`）或运营后台开通后才能对话/产出，未开通产出返回 `403 AGENT_LOCKED` 且不落会话。
 - **离线兜底**：server 模式下后端不可达时，登录回退为 `local-<手机号>` 本地会话，保证可体验（无服务端数据）。
 - **退出登录**：「我的」页底部。
@@ -473,7 +473,7 @@ cd admin && npm install && npm run dev   # 运营后台
 
 ### 微信支付本地验证（不触达微信，两条通道互补）
 - **沙箱通道** `npm run pay:e2e`（22 项）：`PAY_SANDBOX=true`，绕过加解密专注业务状态机——套餐/SKU 下单入账、月→年折算、过期降级/只读、续费恢复、幂等。
-- **真实代码路径通道** `npm run pay:e2e:mock`（19 项）：起本地 mock 微信支付网关（`src/services/wechatPayMock.ts`）+ 真实监听端口的 app，完整走 商户请求 RSA 签名 → 网关验签发 `prepay_id` → `paySign` 可验 → 官方格式加密回调（APIv3 AES-256-GCM + 平台私钥签名）→ `/pay/wechat/notify` 验签解密幂等入账 → 重复回调幂等 → 篡改签名 401 → 回调丢失时 `GET /pay/orders/:no` 主动查单补账 → 他人订单 404。同链路已入 `npm test`（`test/wechatPayMockFlow.test.ts`）。
+- **真实代码路径通道** `npm run pay:e2e:mock`（19 项）：起本地 mock 微信支付网关（`src/services/wechatPayMock.ts`）+ 真实监听端口的 app，完整走 商户请求 RSA 签名 → 网关验签发 `prepay_id` → `paySign` 可验 → 官方格式加密回调（APIv3 AES-256-GCM + 平台私钥签名）→ `/pay/wechat/notify` 验签解密幂等入账 → 重复回调幂等 → 篡改签名 401 → 回调丢失时 `GET /pay/orders/:no` 主动查单补账 → 他人订单 404。同链路已入 `npm test`（`test/wechatPayMockFlow.test.ts`，另覆盖：降级守卫 409、对账 sweep 自动补账/关单、admin 卡单清单与手动补账、回调金额不一致拒绝入账）。
 - **手动联调**：`npm run pay:mock` 独立起 mock 网关（默认 `:9860`，密钥持久化 `server/.paymock/` 已 gitignore），启动时打印整套可粘贴进 `server/.env` 的 `WECHAT_PAY_*`（含 `WECHAT_PAY_BASE` 指向 mock）；下单后 `curl -X POST http://127.0.0.1:9860/mock/pay/<outTradeNo>` 模拟用户付款触发真实格式回调。
 
 ### 端到端隔离验证（本地 Postgres + mock provider）
@@ -551,7 +551,7 @@ mock 可随时预览；**正式上传/审核**还需：
 - 自有登录态支持 JWT（`services/userToken.ts`，HS256）：配 `APP_JWT_SECRET` 后登录签发 JWT、`resolveUser`/审计/admin role/entitlement 统一 `verifyUserToken` 校验；未配则回退历史 `token=userId`，`APP_JWT_REQUIRED=true` 可强制只认 JWT。短信强制校验开关（`SMS_REQUIRE_CODE`）已就绪，生产置 true 即可。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 输入审核与缓存已抽象可插拔：审核 `services/moderation.ts`（keyword 默认 / `MODERATION_PROVIDER=http` 接合规服务，当前只用于用户输入前置拦截）；缓存 `services/cache.ts`（内存默认 / 配 `REDIS_URL`+ioredis 切 Redis）。计量台账仍为演示级，生产接真实计费台账。
-- 套餐购买已接微信支付 v3 脚手架（`services/wechatPay.ts` + `PaymentOrder` 状态机 + `routes/pay.ts` 回调）：配齐 `WECHAT_PAY_*` 后走 `/plans/:id/order` 下单 + `/pay/wechat/notify` 回调，`markPaidAndApply` 用同订单事务级 advisory lock + `appliedAt` 终态锚点做幂等入账，套餐权益发放复用同一 Prisma transaction client，防重复/并发回调双发；未配齐回退 `/plans/:id/purchase` 演示购买。主动查单对账已落地（`queryWechatOrder`/`reconcileOrder` + `GET /pay/orders/:outTradeNo` 轮询即自愈补账）；本地全链路联调走 `npm run pay:mock`（mock 微信网关，`WECHAT_PAY_BASE` 指向）+ `npm run pay:e2e:mock`（19 项断言）。仍待：平台证书自动下载/轮换、定时批量对账 job（当前对账由用户轮询触发）、退款。
+- 套餐购买已接微信支付 v3 脚手架（`services/wechatPay.ts` + `PaymentOrder` 状态机 + `routes/pay.ts` 回调）：配齐 `WECHAT_PAY_*` 后走 `/plans/:id/order` 下单 + `/pay/wechat/notify` 回调，`markPaidAndApply` 用同订单事务级 advisory lock + `appliedAt` 终态锚点做幂等入账，套餐权益发放复用同一 Prisma transaction client，防重复/并发回调双发；未配齐回退 `/plans/:id/purchase` 演示购买。主动查单对账已落地（`queryWechatOrder`/`reconcileOrder` + `GET /pay/orders/:outTradeNo` 轮询自愈 + `pay-reconcile-sweep` 定时任务批量补账/关单 + admin 手动补账）；回调校验金额/appid/mchid；套餐降级有守卫（`PLAN_SWITCH_BLOCKED`）；前端四个支付触点统一走 `app/src/services/pay.ts` 到账确认（不再盲报「支付成功」）。本地全链路联调走 `npm run pay:mock`（mock 微信网关，`WECHAT_PAY_BASE` 指向）+ `npm run pay:e2e:mock`。仍待（P1/P2，见 2026-07-14 支付 review）：退款闭环、用户侧支付订单历史/继续支付、proration 事前确认弹层、H5 requestPayment 守卫、微信 close-order 消除 2h 陈旧单窗口、订单套餐快照、admin 订单搜索/分页/导出、手动开通套餐/模块通道、平台证书自动轮换。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
 - **pgvector 路径已实现但未真库验证**：本地无扩展，默认 `PGVECTOR_ENABLED=false` 走内存余弦（已验证）；上真库执行 `npm run db:pgvector` 并置 true 后需端到端验一遍（升级路径 1）。
 - **模型密钥加密存库**：`services/secretBox.ts`（AES-256-GCM）对 模型/Dify/技能库 密钥写时加密、读时解密，配 `APP_ENCRYPTION_KEY` 后生效（未配=透传明文兼容演示），存量跑 `npm run secrets:encrypt` 回填。仍待：密钥接 KMS/密管 + 轮换策略（升级路径 8）。

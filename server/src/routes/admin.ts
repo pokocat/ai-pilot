@@ -50,8 +50,9 @@ import type {
   AdminProjectItem, AdminReportItem,
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
   AdminBenchmark, AdminBenchmarkUpsert,
-  AdminUserUsage, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem,
+  AdminUserUsage, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult,
 } from '../../../shared/contracts';
+import { reconcileOrder } from '../services/wechatPay.js';
 import { Prisma } from '@prisma/client';
 
 // 功能开关目录（P0-2 / D-10）：label/desc/compliance/kind 写死在代码；DB 存 enabled(toggle) 或 payload(number)。
@@ -658,15 +659,43 @@ export async function adminRoutes(app: FastifyInstance) {
         WHERE "paidAt" >= ${since} AND "status" IN ('paid', 'applied')
         GROUP BY 1 ORDER BY 1`,
     ]);
-    const userIds = [...new Set(orders.map((o) => o.userId))];
+    // 卡单清单（P0）：paid 未 applied = 收钱未发权益（资损，最高优先）；created 超 30 分钟 = 回调可能丢失/用户未支付。
+    // 近 30 天窗口、各取 50 条；带完整单号供微信商户平台查单与手动补账。
+    const stuckSince = new Date(now().getTime() - 30 * 864e5);
+    const stuckRows = await prisma.paymentOrder.findMany({
+      where: {
+        createdAt: { gte: stuckSince },
+        appliedAt: null,
+        OR: [
+          { status: 'paid' },
+          { status: 'created', createdAt: { lt: new Date(now().getTime() - 30 * 60_000) } },
+        ],
+      },
+      orderBy: [{ status: 'desc' }, { createdAt: 'desc' }], // paid 排前（资损优先）
+      take: 100,
+    });
+    const userIds = [...new Set([...orders, ...stuckRows].map((o) => o.userId))];
     const users = userIds.length ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } }) : [];
     const nameMap = new Map(users.map((u) => [u.id, u.name]));
     const items: AdminPaymentItem[] = orders.map((o) => ({
       orderNo: tail6(o.outTradeNo),
+      outTradeNo: o.outTradeNo,
       userName: nameMap.get(o.userId) ?? '—',
       amount: o.amount,
       status: o.status,
       attrSource: o.attrSource,
+      paidAt: o.paidAt ? isoSecond(o.paidAt) : null,
+      createdAt: isoSecond(o.createdAt),
+    }));
+    const stuck: AdminPaymentStuckItem[] = stuckRows.map((o) => ({
+      outTradeNo: o.outTradeNo,
+      userName: nameMap.get(o.userId) ?? '—',
+      amount: o.amount,
+      status: o.status,
+      kind: o.status === 'paid' ? 'paid_unapplied' : 'created_stale',
+      provider: o.provider,
+      planId: o.planId,
+      skuKey: o.skuKey,
       paidAt: o.paidAt ? isoSecond(o.paidAt) : null,
       createdAt: isoSecond(o.createdAt),
     }));
@@ -677,7 +706,33 @@ export async function adminRoutes(app: FastifyInstance) {
         byDay: dayRows.map((r) => ({ day: r.day, amount: Number(r.amount) })),
       },
       items,
+      stuck,
     };
+  });
+
+  // 手动查单补账（P0）：对单笔订单主动向微信查单并幂等入账（与回调/轮询共用 markPaidAndApply 底座，
+  // 不会重复发放）。供运营处置卡单：微信说已付 → 补发权益；终态失败 → 标 failed；未支付 → 保持不动。
+  app.post<{ Params: { outTradeNo: string } }>('/admin/payments/:outTradeNo/reconcile', async (req, reply): Promise<AdminPayReconcileResult | void> => {
+    const actor = actorOf(req);
+    const outTradeNo = req.params.outTradeNo.trim();
+    const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
+    if (!order) return reply.code(404).send({ error: '订单不存在', code: 'ORDER_NOT_FOUND' });
+    let r: { applied: boolean; reason?: string; tradeState?: string };
+    try {
+      r = await reconcileOrder(outTradeNo);
+    } catch (e) {
+      const err = e as { message?: string; statusCode?: number; code?: string };
+      return reply.code(err.statusCode === 404 ? 409 : 502).send({
+        error: err.code === 'WECHAT_PAY_ORDER_NOT_EXIST' ? '微信侧不存在该交易（用户未调起支付或单已转历史）' : (err.message ?? '查单失败'),
+        code: err.code ?? 'WECHAT_PAY_QUERY_FAILED',
+      });
+    }
+    const after = await prisma.paymentOrder.findUnique({ where: { outTradeNo }, select: { status: true } });
+    await recordAudit({
+      tenantId: order.tenantId, userId: order.userId, action: 'admin.pay.reconcile',
+      payload: { by: actorName(actor), outTradeNo, applied: r.applied, reason: r.reason ?? null, tradeState: r.tradeState ?? null, statusBefore: order.status, statusAfter: after?.status ?? order.status },
+    });
+    return { ok: true, applied: r.applied, reason: r.reason, tradeState: r.tradeState, status: after?.status ?? order.status };
   });
 
   // —— 用户上下文中心：个人档案 + 长期记忆（按顾问）+ 知识库文档（观测与纠偏） ——
@@ -1342,11 +1397,35 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // —— 套餐 ——
   app.get('/admin/plans', async () => prisma.plan.findMany({ orderBy: { sort: 'asc' } }));
+  // 改价直接影响营收：仅 owner/master（requireSuper，与资金三写同级）；字段白名单 + 数值校验
+  //（此前 data: req.body 直透 prisma 属 mass-assignment 隐患）；审计带操作人与改前/改后快照。
   app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean } }>(
     '/admin/plans/:id',
-    async (req) => {
-      const plan = await prisma.plan.update({ where: { id: req.params.id }, data: req.body });
-      await recordAudit({ action: 'admin.plan.update', payload: { id: plan.id, name: plan.name } });
+    async (req, reply) => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+      const before = await prisma.plan.findUnique({ where: { id: req.params.id } });
+      if (!before) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+      const b = req.body ?? {};
+      const data: Prisma.PlanUpdateInput = {};
+      if (typeof b.name === 'string' && b.name.trim()) data.name = b.name.trim().slice(0, 60);
+      // price：分；-1=面议（admin 前端约定），其余须 ≥0
+      if (typeof b.price === 'number' && Number.isFinite(b.price) && (b.price >= 0 || Math.round(b.price) === -1)) data.price = Math.round(b.price);
+      // creditsPerMonth：负数=企业版不限量语义，放行任意整数
+      if (typeof b.creditsPerMonth === 'number' && Number.isFinite(b.creditsPerMonth)) data.creditsPerMonth = Math.round(b.creditsPerMonth);
+      if (typeof b.tokenQuotaPerMonth === 'number' && Number.isFinite(b.tokenQuotaPerMonth) && b.tokenQuotaPerMonth >= 0) data.tokenQuotaPerMonth = Math.round(b.tokenQuotaPerMonth);
+      if (typeof b.agentCount === 'number' && Number.isFinite(b.agentCount) && b.agentCount >= 0) data.agentCount = Math.round(b.agentCount);
+      if (Array.isArray(b.featuresJson)) data.featuresJson = b.featuresJson.map(String).slice(0, 20);
+      if (typeof b.highlighted === 'boolean') data.highlighted = b.highlighted;
+      const plan = await prisma.plan.update({ where: { id: req.params.id }, data });
+      await recordAudit({
+        action: 'admin.plan.update',
+        payload: {
+          by: actorName(actor), id: plan.id, name: plan.name,
+          before: { price: before.price, creditsPerMonth: before.creditsPerMonth, tokenQuotaPerMonth: before.tokenQuotaPerMonth, agentCount: before.agentCount },
+          after: { price: plan.price, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount },
+        },
+      });
       return plan;
     },
   );
@@ -1356,6 +1435,9 @@ export async function adminRoutes(app: FastifyInstance) {
   app.patch<{ Params: { key: string }; Body: { name?: string; desc?: string; priceFen?: number; enabled?: boolean; sort?: number } }>(
     '/admin/skus/:key',
     async (req, reply) => {
+      // 改价/启停直接影响营收：仅 owner/master（与套餐改价、资金三写同级），审计带操作人与前后快照。
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
       const existing = await prisma.sku.findUnique({ where: { key: req.params.key } });
       if (!existing) return reply.code(404).send({ error: 'SKU 不存在', code: 'SKU_NOT_FOUND' });
       const b = req.body ?? {};
@@ -1366,7 +1448,14 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof b.enabled === 'boolean') data.enabled = b.enabled;
       if (typeof b.sort === 'number') data.sort = Math.round(b.sort);
       const sku = await prisma.sku.update({ where: { key: req.params.key }, data });
-      await recordAudit({ action: 'admin.sku.update', payload: { key: sku.key, priceFen: sku.priceFen, enabled: sku.enabled } });
+      await recordAudit({
+        action: 'admin.sku.update',
+        payload: {
+          by: actorName(actor), key: sku.key,
+          before: { priceFen: existing.priceFen, enabled: existing.enabled },
+          after: { priceFen: sku.priceFen, enabled: sku.enabled },
+        },
+      });
       return sku;
     },
   );

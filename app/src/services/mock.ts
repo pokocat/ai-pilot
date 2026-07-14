@@ -12,7 +12,7 @@ import type {
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
   QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
-  SkuView, SkuOrderResult, BattleForce, BattleCommitResult,
+  SkuView, SkuOrderResult, PayOrderStatus, BattleForce, BattleCommitResult,
   DataSourcesView, DataSourceView, DataSourceStatus, ModulesView, ModuleView,
   ReminderView, WorkbenchView, ServiceAssignmentView, SearchHit, SearchResult,
   KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, OrganizeItem, StagedUploadResult, ConfirmResult,
@@ -788,6 +788,11 @@ export const mock = {
     (d.creditLog ??= []).push({ at: now(), reason: `${sku.name} · 微信支付`, delta: 0, balance: d.creditBalance });
     save(token, d);
     return delay({ orderId: uid('sku-'), demo: true });
+  },
+
+  // 支付订单状态：mock 无异步回调，权益在 createSkuOrder 已本地发放 → 恒返回 applied（与 server 同口径停止轮询）。
+  async payOrderStatus(outTradeNo: string): Promise<PayOrderStatus> {
+    return delay({ outTradeNo, status: 'applied' as const, amount: 0, appliedAt: now() });
   },
 
   // V7-04：三势刷新 + 认可判断一键生成（mock 确定性）。

@@ -122,7 +122,7 @@ export default function App() {
           {tab === 'home' && <OverviewView />}
           {tab === 'users' && <UsersView onOpen={setDetailUser} />}
           {tab === 'usage' && <UsageView />}
-          {tab === 'payments' && <PaymentsView />}
+          {tab === 'payments' && <PaymentsView toast={showToast} />}
           {tab === 'funnel' && <FunnelView />}
           {tab === 'tokens' && <TokenUsageView onOpenUser={(id) => { setTab('users'); setDetailUser(id); }} />}
           {tab === 'trace' && <ObservabilityView />}
@@ -732,20 +732,37 @@ function UsageView() {
   );
 }
 
-// A3：支付订单只读列表——状态筛选 + 天数切换 + summary 四格 + 明细（金额分转元）。
-const PAY_STATUS: [string, string][] = [['', '全部'], ['paid', '已支付'], ['created', '待支付'], ['failed', '失败'], ['closed', '关闭']];
+// A3：支付订单列表——状态筛选 + 天数切换 + summary 四格 + 卡单清单（查单补账）+ 明细（金额分转元）。
+const PAY_STATUS: [string, string][] = [['', '全部'], ['applied', '已开通'], ['paid', '已支付'], ['created', '待支付'], ['failed', '失败'], ['closed', '关闭']];
 function payStatusLabel(s: string): string {
-  const m: Record<string, string> = { paid: '已支付', created: '待支付', failed: '支付失败', closed: '已关闭', refunded: '已退款' };
+  const m: Record<string, string> = { applied: '已开通', paid: '已支付(未发放)', created: '待支付', failed: '支付失败', closed: '已关闭' };
   return m[s] ?? s;
 }
-function PaymentsView() {
+function PaymentsView({ toast }: { toast: (m: string) => void }) {
   const [data, setData] = useState<AdminPaymentsView | null>(null);
   const [status, setStatus] = useState('');
   const [days, setDays] = useState(30);
-  useEffect(() => { api.payments({ status: status || undefined, days }).then(setData).catch(() => {}); }, [status, days]);
+  const [busyNo, setBusyNo] = useState('');
+  const load = () => api.payments({ status: status || undefined, days }).then(setData).catch(() => {});
+  useEffect(() => { load(); }, [status, days]);
+  const copyNo = (no: string) => { navigator.clipboard?.writeText(no).then(() => toast('已复制单号')).catch(() => toast(no)); };
+  // 卡单处置：向微信查单并幂等入账（与回调共用同一底座，不会重复发放）。
+  const reconcile = async (no: string) => {
+    if (busyNo) return;
+    setBusyNo(no);
+    try {
+      const r = await api.reconcilePayment(no);
+      toast(r.applied ? '已补账，权益已发放' : `未入账：${r.tradeState ?? r.reason ?? '状态未变化'}`);
+      await load();
+    } catch (e) {
+      toast((e as Error).message || '查单失败');
+    } finally {
+      setBusyNo('');
+    }
+  };
   return (
     <>
-      <div className="sec-h"><span className="t">支付订单</span><span className="s">近 {days} 天 · 真实收入（只读）</span></div>
+      <div className="sec-h"><span className="t">支付订单</span><span className="s">近 {days} 天 · 真实收入</span></div>
       <div className="pad">
         <div className="crd-actions">
           {[7, 30, 90].map((d) => <button key={d} type="button" className={`mini-btn ${days === d ? 'primary' : ''}`} onClick={() => setDays(d)}>{d} 天</button>)}
@@ -761,14 +778,37 @@ function PaymentsView() {
               <div><b>{data.items.length}</b><span>列表条数</span></div>
               <div><b>¥{data.summary.paidCount > 0 ? fmtYuan(Math.round(data.summary.paidAmount / data.summary.paidCount)) : '0.00'}</b><span>客单价</span></div>
             </div>
+            {data.stuck.length > 0 && (
+              <>
+                <div className="sec-h"><span className="t">需要处理（{data.stuck.length}）</span><span className="s">已支付未发放 = 资损单，优先查单补账；超时未支付由对账任务自动关单</span></div>
+                {data.stuck.map((o) => (
+                  <div key={o.outTradeNo} className="usage-row">
+                    <div className="usage-h">
+                      <div className="usage-name">
+                        {o.userName || '（未命名）'}
+                        <span>{o.kind === 'paid_unapplied' ? '已支付未发放' : '超时未支付'} · {o.skuKey || o.planId || '—'}</span>
+                      </div>
+                      <div className="usage-num">¥{fmtYuan(o.amount)}</div>
+                    </div>
+                    <div className="usage-meta">{o.outTradeNo} · {o.paidAt ? '支付 ' + fmtTime(o.paidAt) : '下单 ' + fmtTime(o.createdAt)}</div>
+                    <div className="crd-actions">
+                      <button type="button" className="mini-btn primary" disabled={busyNo === o.outTradeNo || o.provider !== 'wechat'} onClick={() => reconcile(o.outTradeNo)}>
+                        {busyNo === o.outTradeNo ? '查单中…' : o.provider === 'wechat' ? '查单补账' : '沙箱单'}
+                      </button>
+                      <button type="button" className="mini-btn" onClick={() => copyNo(o.outTradeNo)}>复制单号</button>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
             {data.items.length === 0 && <div className="empty">近 {days} 天{status ? `「${PAY_STATUS.find(([v]) => v === status)?.[1]}」` : ''}暂无订单。</div>}
             {data.items.map((p, i) => (
-              <div key={i} className="usage-row">
+              <div key={i} className="usage-row" title={p.outTradeNo} onClick={() => copyNo(p.outTradeNo)}>
                 <div className="usage-h">
                   <div className="usage-name">{p.userName || '（未命名）'}<span>尾号 {p.orderNo}{p.attrSource ? ` · ${p.attrSource}` : ''}</span></div>
-                  <div className={`usage-num ${p.status === 'paid' ? 'ok' : ''}`}>¥{fmtYuan(p.amount)}</div>
+                  <div className={`usage-num ${p.status === 'applied' || p.status === 'paid' ? 'ok' : ''}`}>¥{fmtYuan(p.amount)}</div>
                 </div>
-                <div className="usage-meta">{payStatusLabel(p.status)} · {p.paidAt ? '支付 ' + fmtTime(p.paidAt) : '下单 ' + fmtTime(p.createdAt)}</div>
+                <div className="usage-meta">{payStatusLabel(p.status)} · {p.paidAt ? '支付 ' + fmtTime(p.paidAt) : '下单 ' + fmtTime(p.createdAt)}（点击复制完整单号）</div>
               </div>
             ))}
           </>

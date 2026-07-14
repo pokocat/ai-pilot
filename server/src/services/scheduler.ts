@@ -9,6 +9,7 @@ import { recordAudit } from './audit.js';
 import { now, dateKey, hourOf, dayStart } from './clock.js';
 import { MORNING_ORDER_JOB, WEEKLY_REVIEW_JOB } from './reminders.js';
 import { scanPrescriptionFollowups } from './prescription.js';
+import { sweepPendingOrders } from './wechatPay.js';
 import {
   hasSentWechatNotificationToday,
   hasWechatSubscriptionQuota,
@@ -204,3 +205,9 @@ registerJob({ name: 'prescription-followup-scan', intervalMs: 6 * 3600_000, run:
 // V7-11：09:00 军令提醒 + 周五周复盘提醒（scan 函数在 services/reminders.ts，job 常量在此注册）。
 registerJob(MORNING_ORDER_JOB);
 registerJob(WEEKLY_REVIEW_JOB);
+// 支付对账 sweep（P0）：回调丢失/卡单自愈——paid 未 applied 查单补账、created 超时查单/关单。
+// 未配支付（payConfigured=false）时 sweep 内部直接短路，注册无副作用。
+registerJob({ name: 'pay-reconcile-sweep', intervalMs: 5 * 60_000, run: async () => {
+  const r = await sweepPendingOrders();
+  if (r.applied || r.failed || r.closed) console.log(`[scheduler] pay sweep: applied=${r.applied} failed=${r.failed} closed=${r.closed} (scanned ${r.scanned})`);
+} });

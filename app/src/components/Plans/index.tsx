@@ -6,6 +6,7 @@ import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Plan } from '../../services/api';
+import { awaitPaymentApplied, payAppliedToast } from '../../services/pay';
 import './index.scss';
 
 interface Props {
@@ -78,14 +79,15 @@ export default function Plans({ open, onClose }: Props) {
         signType: order.pay.signType as 'RSA',
         paySign: order.pay.paySign,
       });
-      if (order.proration?.applies) {
-        Taro.showToast({ title: `已抵扣 ¥${Math.round(order.proration.remainingValue / 100)}`, icon: 'none' });
+      // —— 到这里支付已成功（钱已扣）：后续任何查询/刷新失败都只影响提示文案，绝不能再报「支付失败」。 ——
+      // 到账确认：轮询订单状态（服务端未发放时会主动查单补账），appliedAt 有值才如实报成功。
+      const applied = await awaitPaymentApplied(order.outTradeNo);
+      await store.loadMe().catch(() => {}); // 刷新失败不改变支付结果，下次进页自然更新
+      if (order.proration?.applies && applied === 'applied') {
+        Taro.showToast({ title: `方案已更新，已抵扣 ¥${Math.round(order.proration.remainingValue / 100)}`, icon: 'none' });
+      } else {
+        Taro.showToast(payAppliedToast(applied, '支付成功，方案已更新'));
       }
-      // 支付成功 → 微信回调异步发放权益；轻量重试刷新 /me。
-      await store.loadMe();
-      await new Promise((r) => setTimeout(r, 1500));
-      await store.loadMe();
-      Taro.showToast({ title: '支付成功，方案已更新', icon: 'success' });
     } catch (e: any) {
       if (e?.errMsg && /cancel/i.test(e.errMsg)) Taro.showToast({ title: '已取消支付', icon: 'none' });
       else s.handleApiError(e, { fallbackTitle: '支付失败，请重试' });
