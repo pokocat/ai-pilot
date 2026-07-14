@@ -104,7 +104,7 @@ export async function payRoutes(app: FastifyInstance) {
     const rawBody = (req as FastifyRequest & { rawBody?: string }).rawBody ?? '';
     const headers = req.headers as Record<string, string | undefined>;
 
-    if (!verifyNotifySignature(headers, rawBody)) {
+    if (!(await verifyNotifySignature(headers, rawBody))) {
       return reply.code(401).send({ code: 'FAIL', message: '签名校验失败' });
     }
     const body = req.body as NotifyBody & { event_type?: string };

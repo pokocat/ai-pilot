@@ -181,6 +181,26 @@ export function buildWechatPayMock(o: WechatPayMockOptions): WechatPayMock {
     return transactionJson(order);
   });
 
+  // ②a′ 平台证书下载（GET /v3/certificates）：返回 APIv3 密钥 AEAD 加密的平台「证书」
+  //（mock 用平台公钥 PEM 充当证书，Node verify 接受公钥 PEM）；被测服务据此自动轮换验签证书。
+  app.get('/v3/certificates', async (req, reply) => {
+    const v = verifyMerchantRequest(req, '', o);
+    if (!v.ok) return reply.code(401).send({ code: 'SIGN_ERROR', message: v.message });
+    const nonce = randomBytes(6).toString('hex');
+    const associatedData = 'certificate';
+    const cipher = createCipheriv('aes-256-gcm', Buffer.from(o.apiV3Key, 'utf8'), Buffer.from(nonce, 'utf8'));
+    cipher.setAAD(Buffer.from(associatedData, 'utf8'));
+    const encrypted = Buffer.concat([cipher.update(o.keys.platformPublicKeyPem, 'utf8'), cipher.final(), cipher.getAuthTag()]);
+    return {
+      data: [{
+        serial_no: o.keys.platformSerial,
+        effective_time: new Date(Date.now() - 86400_000).toISOString(),
+        expire_time: new Date(Date.now() + 5 * 365 * 86400_000).toISOString(),
+        encrypt_certificate: { algorithm: 'AEAD_AES_256_GCM', nonce, associated_data: associatedData, ciphertext: encrypted.toString('base64') },
+      }],
+    };
+  });
+
   // ②b 商户关单：NOTPAY → CLOSED（204）；已支付 → 400 ORDERPAID；未知单 → 404。
   app.post<{ Params: { outTradeNo: string } }>('/v3/pay/transactions/out-trade-no/:outTradeNo/close', async (req, reply) => {
     const rawBody = (req as FastifyRequest & { rawBody?: string }).rawBody ?? '';

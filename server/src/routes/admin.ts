@@ -643,15 +643,31 @@ export async function adminRoutes(app: FastifyInstance) {
     return { ok: true, planExpiresAt: next.toISOString() };
   });
 
-  // —— S4：支付订单只读列表 + 汇总（纯读）——
-  app.get<{ Querystring: { status?: string; days?: string } }>('/admin/payments', async (req): Promise<AdminPaymentsView> => {
+  // 订单筛选条件（列表/导出共用）：时间窗 + 状态 + q 搜索（单号包含 / 用户名 / 手机号）。
+  async function paymentListWhere(args: { since: Date; status: string; q: string }): Promise<Prisma.PaymentOrderWhereInput> {
+    const base: Prisma.PaymentOrderWhereInput = { createdAt: { gte: args.since }, ...(args.status ? { status: args.status } : {}) };
+    if (!args.q) return base;
+    const users = await prisma.user.findMany({
+      where: { OR: [{ name: { contains: args.q } }, { phone: { contains: args.q } }] },
+      select: { id: true },
+      take: 200,
+    });
+    return { ...base, OR: [{ outTradeNo: { contains: args.q } }, { userId: { in: users.map((u) => u.id) } }] };
+  }
+
+  // —— S4：支付订单列表 + 汇总（读）+ 搜索/分页（P2）——
+  app.get<{ Querystring: { status?: string; days?: string; q?: string; page?: string; pageSize?: string } }>('/admin/payments', async (req): Promise<AdminPaymentsView> => {
     const days = Math.min(365, Math.max(1, Math.floor(Number(req.query.days ?? 30)) || 30));
     const since = new Date(now().getTime() - days * 864e5);
     const status = (req.query.status ?? '').trim();
+    const q = (req.query.q ?? '').trim().slice(0, 64);
+    const page = Math.max(1, Math.floor(Number(req.query.page ?? 1)) || 1);
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(req.query.pageSize ?? 20)) || 20));
     const PAID = ['paid', 'applied']; // 已支付口径：paid 及其后继终态 applied
-    const listWhere: Prisma.PaymentOrderWhereInput = { createdAt: { gte: since }, ...(status ? { status } : {}) };
-    const [orders, paidAgg, dayRows] = await Promise.all([
-      prisma.paymentOrder.findMany({ where: listWhere, orderBy: { createdAt: 'desc' }, take: 100 }),
+    const listWhere = await paymentListWhere({ since, status, q });
+    const [orders, total, paidAgg, dayRows] = await Promise.all([
+      prisma.paymentOrder.findMany({ where: listWhere, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+      prisma.paymentOrder.count({ where: listWhere }),
       prisma.paymentOrder.aggregate({ where: { paidAt: { gte: since }, status: { in: PAID } }, _sum: { amount: true }, _count: { _all: true } }),
       prisma.$queryRaw<{ day: string; amount: bigint | number }[]>`
         SELECT to_char((("paidAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD') AS day,
@@ -708,7 +724,45 @@ export async function adminRoutes(app: FastifyInstance) {
       },
       items,
       stuck,
+      total,
+      page,
+      pageSize,
     };
+  });
+
+  // 订单导出 CSV（P2，仅 owner/master——含手机号）：与列表同一套筛选（days/status/q），上限 5000 行，审计留痕。
+  app.get<{ Querystring: { status?: string; days?: string; q?: string } }>('/admin/payments/export', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const days = Math.min(365, Math.max(1, Math.floor(Number(req.query.days ?? 30)) || 30));
+    const since = new Date(now().getTime() - days * 864e5);
+    const status = (req.query.status ?? '').trim();
+    const q = (req.query.q ?? '').trim().slice(0, 64);
+    const listWhere = await paymentListWhere({ since, status, q });
+    const orders = await prisma.paymentOrder.findMany({ where: listWhere, orderBy: { createdAt: 'desc' }, take: 5000 });
+    const userIds = [...new Set(orders.map((o) => o.userId))];
+    const users = userIds.length ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } }) : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const itemName = (o: { snapshotJson: unknown; skuKey: string | null; planId: string }) => {
+      const snap = (o.snapshotJson ?? null) as { plan?: { name?: string }; sku?: { name?: string } } | null;
+      return snap?.plan?.name ?? snap?.sku?.name ?? (o.skuKey ?? o.planId);
+    };
+    const header = ['商户单号', '用户', '手机号', '商品', '金额(元)', '状态', '归因', '下单时间', '支付时间', '退款时间'];
+    const lines = orders.map((o) => {
+      const u = userMap.get(o.userId);
+      return [
+        o.outTradeNo, u?.name ?? '', u?.phone ?? '', itemName(o), (o.amount / 100).toFixed(2), o.status,
+        o.attrSource ?? '', isoSecond(o.createdAt), o.paidAt ? isoSecond(o.paidAt) : '', o.refundedAt ? isoSecond(o.refundedAt) : '',
+      ].map(esc).join(',');
+    });
+    await recordAudit({ action: 'admin.pay.export', payload: { by: actorName(actor), days, status: status || null, q: q || null, rows: orders.length } });
+    // BOM 前缀让 Excel 正确识别 UTF-8 中文。
+    const csv = '﻿' + [header.map(esc).join(','), ...lines].join('\r\n');
+    return reply
+      .header('content-type', 'text/csv; charset=utf-8')
+      .header('content-disposition', `attachment; filename="payments-${days}d.csv"`)
+      .send(csv);
   });
 
   // 手动查单补账（P0）：对单笔订单主动向微信查单并幂等入账（与回调/轮询共用 markPaidAndApply 底座，

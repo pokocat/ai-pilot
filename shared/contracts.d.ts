@@ -905,6 +905,9 @@ export interface AdminPaymentsView {
   summary: { paidAmount: number; paidCount: number; byDay: { day: string; amount: number }[] }
   items: AdminPaymentItem[]
   stuck: AdminPaymentStuckItem[]
+  total: number; // 当前筛选（days/status/q）下的订单总数（items 为其中一页）
+  page: number;
+  pageSize: number;
 }
 /** POST /admin/payments/:outTradeNo/reconcile 手动查单补账结果 */
 export interface AdminPayReconcileResult { ok: boolean; applied: boolean; reason?: string; tradeState?: string; status: string }

@@ -271,24 +271,39 @@ export function orderPayable(order: { status: string; createdAt: Date; provider:
   return order.provider === 'mock' || !!order.prepayId;
 }
 
-// —— 回调验签（平台证书 RSA-SHA256；配了平台证书才校验）——
-export function verifyNotifySignature(headers: Record<string, string | undefined>, rawBody: string): boolean {
+// —— 回调验签（平台证书 RSA-SHA256）——
+// 证书来源优先级：① 自动下载缓存中与回调头 Wechatpay-Serial 匹配的证书（轮换无感）；
+// ② env 静态证书 WECHAT_PAY_PLATFORM_CERT（兜底/离线）。两者皆无 → 跳过签名校验，
+// 仅靠 AEAD 解密判真伪（与历史行为一致，记日志提醒）。
+export async function verifyNotifySignature(headers: Record<string, string | undefined>, rawBody: string): Promise<boolean> {
   const c = cfg();
-  if (!c.platformCert) return true; // 未配平台证书：跳过签名校验，仅靠 AEAD 解密判真伪（记日志提醒补证书）
   const ts = headers['wechatpay-timestamp'];
   const nonce = headers['wechatpay-nonce'];
   const signature = headers['wechatpay-signature'];
+  const serial = headers['wechatpay-serial'];
+
+  let certPem = '';
+  if (serial && payConfigured()) {
+    let certs = await fetchPlatformCertificates();
+    if (!certs.has(serial)) certs = await fetchPlatformCertificates(true); // 未知 serial：多半在轮换，强刷一次
+    certPem = certs.get(serial) ?? '';
+  }
+  if (!certPem) certPem = c.platformCert;
+  if (!certPem) {
+    console.warn('[pay] 无可用平台证书（自动下载失败且未配 WECHAT_PAY_PLATFORM_CERT）：跳过回调签名校验，仅靠 AEAD 解密判真伪');
+    return true;
+  }
   if (!ts || !nonce || !signature) return false;
   const message = `${ts}\n${nonce}\n${rawBody}\n`;
   try {
-    return createVerify('RSA-SHA256').update(message).verify(c.platformCert, signature, 'base64');
+    return createVerify('RSA-SHA256').update(message).verify(certPem, signature, 'base64');
   } catch {
     return false;
   }
 }
 
-// —— 回调资源 AEAD 解密（APIv3 密钥，AES-256-GCM）——
-export function decryptNotifyResource(resource: { ciphertext: string; nonce: string; associated_data?: string }): Record<string, unknown> {
+// —— APIv3 密钥 AEAD 解密（AES-256-GCM）：回调 resource 是 JSON、平台证书下载的是 PEM 原文，分两层。 ——
+export function decryptAeadResource(resource: { ciphertext: string; nonce: string; associated_data?: string }): string {
   const c = cfg();
   const key = Buffer.from(c.apiV3Key, 'utf8');
   const data = Buffer.from(resource.ciphertext, 'base64');
@@ -297,8 +312,60 @@ export function decryptNotifyResource(resource: { ciphertext: string; nonce: str
   const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(resource.nonce, 'utf8'));
   decipher.setAuthTag(authTag);
   if (resource.associated_data) decipher.setAAD(Buffer.from(resource.associated_data, 'utf8'));
-  const plain = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
-  return JSON.parse(plain);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+}
+
+export function decryptNotifyResource(resource: { ciphertext: string; nonce: string; associated_data?: string }): Record<string, unknown> {
+  return JSON.parse(decryptAeadResource(resource));
+}
+
+// —— 平台证书自动下载/轮换（GET /v3/certificates）——
+// 微信平台证书约每 5 年轮换，且换发期间新旧并存；回调头 Wechatpay-Serial 标明用哪张签名。
+// 策略：按 serial 内存缓存（TTL 12h），遇到未知 serial 立即强刷一次（拿新证书）；
+// 拉取失败 5 分钟内不重试（防打爆），期间回退 env 静态证书（WECHAT_PAY_PLATFORM_CERT）。
+const CERT_TTL_MS = 12 * 3600_000;
+const CERT_RETRY_MS = 5 * 60_000;
+const platformCertCache = { certs: new Map<string, string>(), fetchedAt: 0, failedAt: 0 };
+
+export async function fetchPlatformCertificates(force = false): Promise<Map<string, string>> {
+  if (!payConfigured()) return platformCertCache.certs;
+  const at = Date.now();
+  const fresh = platformCertCache.certs.size > 0 && at - platformCertCache.fetchedAt < CERT_TTL_MS;
+  const inBackoff = at - platformCertCache.failedAt < CERT_RETRY_MS;
+  if ((!force && fresh) || (inBackoff && !fresh && !force)) return platformCertCache.certs;
+  try {
+    const urlPath = '/v3/certificates';
+    const res = await fetch(payBase() + urlPath, {
+      method: 'GET',
+      headers: { Accept: 'application/json', Authorization: buildAuthToken('GET', urlPath, '') },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { data?: { serial_no?: string; encrypt_certificate?: { ciphertext: string; nonce: string; associated_data?: string } }[] };
+    const next = new Map<string, string>();
+    for (const item of data.data ?? []) {
+      if (!item.serial_no || !item.encrypt_certificate) continue;
+      try {
+        next.set(item.serial_no, decryptAeadResource(item.encrypt_certificate).trim());
+      } catch (err) {
+        console.warn('[pay] 平台证书解密失败（跳过该张）:', item.serial_no, (err as Error).message);
+      }
+    }
+    if (next.size > 0) {
+      platformCertCache.certs = next;
+      platformCertCache.fetchedAt = at;
+    }
+  } catch (err) {
+    platformCertCache.failedAt = at;
+    console.warn('[pay] 平台证书下载失败（回退静态证书/下轮重试）:', (err as Error).message);
+  }
+  return platformCertCache.certs;
+}
+
+/** 测试用：清空平台证书缓存。 */
+export function resetPlatformCertCache(): void {
+  platformCertCache.certs = new Map();
+  platformCertCache.fetchedAt = 0;
+  platformCertCache.failedAt = 0;
 }
 
 /**
