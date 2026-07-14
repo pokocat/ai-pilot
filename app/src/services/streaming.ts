@@ -196,8 +196,14 @@ export async function generateStream(body: GenRequest, h: StreamHandlers, contro
         header,
         enableChunked: true,
         success: (res: { data?: unknown }) => finish(res.data),
-        // B2：主动中断时 fail 也会触发，此处静默 resolve(false)（aborted 标记让调用方跳过兜底重发）。
-        fail: () => resolve(false),
+        // B2：主动中断时 fail 也会触发，此时静默 resolve(false)（aborted 标记让调用方跳过兜底重发）。
+        // 非主动中断（真实网络失败）且已有产出但从未收到终态事件时，补发一次 onError，
+        // 否则聊天气泡的 streaming 标记会永久为 true，卡在「产出中」（report 卡由 chat/index.tsx
+        // 的 finally 兜底了，普通聊天气泡没有等价兜底，只能从这里堵住）。
+        fail: () => {
+          if (!aborted && state.rendered && !state.finished) { state.finished = true; h.onError?.('网络连接中断'); }
+          resolve(false);
+        },
       });
       // B2：挂上停止句柄。weapp 无 AbortController，直接调用 RequestTask.abort()。
       if (control) control.abort = () => { aborted = true; task.abort?.(); };
