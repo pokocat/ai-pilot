@@ -523,6 +523,12 @@ export default function Chat() {
         setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
         const control: StreamControl = { abort: () => {} };
         controlRef.current = control;
+        // onError 已经把错误话术 + 重试入口渲染进这条气泡；此时 streamOk=false 只代表「流未正常收尾」，
+        // 不代表「用户什么都没看到」——若在这里无条件兜底重发一遍 api.generate，会在已展示的错误气泡后面
+        // 再追加一条自动补发的回复（且真的对后端多打一次 LLM 请求）。与下方 canStreamReport 分支的
+        // `!reportStarted && !chatStarted` 护栏对齐：仅当 onError 从未触发（真正静默失败，如 weapp 请求
+        // 尚未吐出任何内容就失败）时才走兜底重发。
+        let chatErrored = false;
         const streamOk = await generateStream(
           body,
           {
@@ -530,7 +536,7 @@ export default function Chat() {
             onToken: (t) => { patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })); followBottom(); },
             onChat: (reply) => patch((msg) => ({ ...msg, reply })), // 完整回复权威兜底：token 渲染即便有偏差，最终内容仍正确
             onDone: () => patch((msg) => ({ ...msg, streaming: false })),
-            onError: (em) => patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false })),
+            onError: (em) => { chatErrored = true; patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false })); },
           },
           control,
         );
@@ -548,7 +554,7 @@ export default function Chat() {
             }
             return m;
           });
-        } else if (!streamOk) {
+        } else if (!streamOk && !chatErrored) {
           const res = await api.generate(body);
           renderGenerateResult(res, true);
         }
