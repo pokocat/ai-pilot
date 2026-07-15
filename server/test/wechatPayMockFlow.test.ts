@@ -10,7 +10,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../src/db.js';
 import { buildApp } from '../src/app.js';
 import { buildWechatPayMock, generateWechatPayMockKeys, type WechatPayMock } from '../src/services/wechatPayMock.js';
-import { sweepPendingOrders, resetPlatformCertCache } from '../src/services/wechatPay.js';
+import { sweepPendingOrders, resetPlatformCertCache, fetchPlatformCertificates } from '../src/services/wechatPay.js';
 import { seedBaseline, cleanBusiness } from './helpers.js';
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
@@ -392,4 +392,40 @@ test('admin 订单搜索/分页/导出：q 命中单号与手机号、分页 tot
   assert.match(res.headers.get('content-type') ?? '', /text\/csv/);
   const csv = await res.text();
   assert.ok(csv.includes(no2) && csv.includes('13711112222'), 'CSV 应含完整单号与手机号');
+});
+
+test('例行 QA 安全修复：admin 导出 CSV 对疑似公式的用户昵称做中和（防 CSV/公式注入）', async () => {
+  const u = await prisma.user.create({
+    data: { tenantId, phone: '13744445555', name: '=HYPERLINK("http://evil.example","x")', role: 'owner', wechatOpenId: 'o_csv_inj_1' },
+  });
+  const r = await http('POST', `/plans/${planId}/order`, { user: u.id, body: { openid: 'o_csv_inj_1' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+
+  const res = await fetch(`${api}/admin/payments/export?q=13744445555`, { headers: { 'x-admin-token': process.env.ADMIN_TOKEN! } });
+  assert.equal(res.status, 200);
+  const csv = await res.text();
+  assert.ok(csv.includes(r.body.outTradeNo), 'CSV 应含该订单');
+  // 恶意昵称必须被中和：CSV 字段不能以裸 = 开头（Excel/Sheets 会当公式执行），必须带前导单引号。
+  assert.ok(!csv.includes('"=HYPERLINK'), 'CSV 不应包含未中和、以 = 开头的字段');
+  assert.ok(csv.includes("'=HYPERLINK"), 'CSV 中该昵称应带前导单引号中和为纯文本');
+});
+
+test('例行 QA 安全修复：平台证书拉取节流不可被伪造 serial 的重复 force 刷新绕开', async () => {
+  resetPlatformCertCache();
+  const realFetch = globalThis.fetch;
+  let certFetchCount = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes('/v3/certificates')) certFetchCount++;
+    return realFetch(input as any, init);
+  }) as typeof fetch;
+  try {
+    // 模拟 verifyNotifySignature 连续收到三个「未知/伪造 serial」的回调，各自触发一次 force=true 刷新。
+    await fetchPlatformCertificates(true);
+    await fetchPlatformCertificates(true);
+    await fetchPlatformCertificates(true);
+    assert.equal(certFetchCount, 1, '5 分钟节流窗口内，重复 force 刷新只应真正出站请求一次');
+  } finally {
+    globalThis.fetch = realFetch;
+    resetPlatformCertCache();
+  }
 });
