@@ -82,8 +82,12 @@ export interface CreateOrderResult {
 const ORDER_RATE_WINDOW_MS = 10 * 60_000;
 const ORDER_RATE_MAX = 10;
 
-async function assertOrderRate(userId: string): Promise<void> {
-  const recent = await prisma.paymentOrder.count({
+// 以同用户 advisory lock 串行化「查最近下单数 → 判定 → 建单」：避免并发下单请求都读到同一份
+// 未提交的计数、一起放行超过 ORDER_RATE_MAX 的量（与已修复的证书拉取节流绕过是同一类 TOCTOU 漏洞）。
+// 必须在 tx 内对同一把锁调用，紧跟着落库，锁随事务提交/回滚释放。
+async function assertOrderRate(tx: Prisma.TransactionClient, userId: string): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`orderrate:${userId}`}))`;
+  const recent = await tx.paymentOrder.count({
     where: { userId, createdAt: { gt: new Date(Date.now() - ORDER_RATE_WINDOW_MS) } },
   });
   if (recent >= ORDER_RATE_MAX) {
@@ -173,17 +177,19 @@ export async function createJsapiOrder(args: {
   const total = args.amount ?? itemPrice;
   const outTradeNo = genOutTradeNo();
 
-  await assertOrderRate(args.user.id);
   const snapshotJson = await buildOrderSnapshot({ planId: args.plan?.id, skuKey: args.sku?.key });
 
   // 沙箱（可测性 D9）：跳过真实微信下单，落 provider='mock' 单 + 返回合成调起参数（不签名）。
   // 由 /pay/sandbox/notify 仿真回调驱动入账；真实 notify 端点严格不动。
   if (sandboxEnabled()) {
-    await prisma.paymentOrder.create({
-      data: {
-        outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
-        amount: total, provider: 'mock', status: 'created', attrSource, attrRefId, snapshotJson,
-      },
+    await prisma.$transaction(async (tx) => {
+      await assertOrderRate(tx, args.user.id);
+      await tx.paymentOrder.create({
+        data: {
+          outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
+          amount: total, provider: 'mock', status: 'created', attrSource, attrRefId, snapshotJson,
+        },
+      });
     });
     return {
       outTradeNo,
@@ -195,11 +201,14 @@ export async function createJsapiOrder(args: {
   await closeStalePendingOrders(args.user.id, args.plan ? { planOrder: true } : { skuKey: args.sku?.key });
 
   const c = cfg();
-  await prisma.paymentOrder.create({
-    data: {
-      outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
-      amount: total, provider: 'wechat', status: 'created', attrSource, attrRefId, snapshotJson,
-    },
+  await prisma.$transaction(async (tx) => {
+    await assertOrderRate(tx, args.user.id);
+    await tx.paymentOrder.create({
+      data: {
+        outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
+        amount: total, provider: 'wechat', status: 'created', attrSource, attrRefId, snapshotJson,
+      },
+    });
   });
 
   // 订单支付截止时刻（RFC3339，真实时钟）：2 小时后微信侧不可再支付，杜绝陈旧 prepay 被后付。
