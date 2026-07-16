@@ -25,8 +25,8 @@ import './index.scss';
 type Msg =
   | { role: 'greet'; agent: Agent }
   | { role: 'user'; text: string; refs?: MessageRef[] }
-  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; retryText?: string; streaming?: boolean }
-  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; streaming?: boolean; retryText?: string }
+  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; refNotices?: string[]; retryText?: string; streaming?: boolean }
+  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; refNotices?: string[]; streaming?: boolean; retryText?: string }
   | { role: 'memory'; agentName: string };
 
 // 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
@@ -130,6 +130,39 @@ const INPUT_COUNT_FROM = 1800;
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
+// 一次至多带几份：与 server retrieval.MAX_REFS(9) 对齐——选得进来就带得上，不在服务端悄悄丢。
+const UPLOAD_COUNT_MAX = 9;
+// 一批总量上限。单份 20MB 是 MAX_UPLOAD_BYTES（对齐服务端 multipart 上限），但 9 份 × 20MB = 180MB
+// 一批就能吃掉本月 200MB 免费额度的九成——真传上去也是逐份 402，不如在选完就说清楚。
+const MAX_BATCH_UPLOAD_BYTES = 60 * 1024 * 1024; // 60MB/批
+
+// 每份上传的账：真进度 + 真取消都按份记，批次只是这些份的集合。
+type UploadStatus = 'waiting' | 'uploading' | 'done' | 'failed' | 'cancelled';
+interface UploadEntry { id: string; name: string; size: number; path: string; pct: number; status: UploadStatus; }
+
+const UPLOAD_STATUS_TEXT: Record<UploadStatus, string> = {
+  waiting: '候着', uploading: '呈送中', done: '已呈上', failed: '未送达', cancelled: '已撤回',
+};
+
+/**
+ * 引用未尽之处（服务端 refNotices）：超过 9 份被丢下的、仍在拆读的、读不出的——都在气泡下明说。
+ * 静默丢弃是最钝的刀：客户以为军师读了那 12 份，其实只读了 9 份。
+ */
+function RefNotices({ notices }: { notices?: string[] }) {
+  if (!notices?.length) return null;
+  return (
+    <View className="ref-notices">
+      {notices.map((n, i) => <Text key={i} className="rn-line">※ {n}</Text>)}
+    </View>
+  );
+}
+
+function fmtBytes(b: number): string {
+  if (!b) return '—';
+  if (b < 1024) return `${b}B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)}KB`;
+  return `${(b / 1024 / 1024).toFixed(1)}MB`;
+}
 
 // B3 草稿持久化 / B4 已入库标记：本地 Storage 键。
 const draftKeyFor = (id?: string) => `chat-draft:${id || 'new'}`;
@@ -180,10 +213,15 @@ export default function Chat() {
   const sessionIdRef = useRef('');
   sessionIdRef.current = sessionId;
   // B5 上传：非模态进度条，接 UploadTask 透出真实百分比；取消调 task.abort() 真中止。
-  const [uploading, setUploading] = useState(false);
-  const [uploadPct, setUploadPct] = useState(0);
-  const uploadCancelledRef = useRef(false);
-  const uploadTaskRef = useRef<Taro.UploadTask | null>(null);
+  // 多份上传后按「份」记账（不退化成整批一个进度条）：每份各有真进度、各能单独取消/重试。
+  const [uploads, setUploads] = useState<Record<string, UploadEntry>>({});
+  const uploadCancelledRef = useRef<Record<string, boolean>>({});
+  const uploadTasksRef = useRef<Record<string, Taro.UploadTask | null>>({});
+  const uploadList = Object.values(uploads);
+  const uploading = uploadList.some((u) => u.status === 'waiting' || u.status === 'uploading');
+  // 刚传上来的资料还在后台拆读（解析异步），此刻发问军师未必读得到正文——引用签上标「拆读中」明示。
+  // 不轮询：签只从「挂上引用」活到「发出这一轮」；发出后由服务端 refNotices 据实回话（谁没读完、谁读不出）。
+  const [parsingRefIds, setParsingRefIds] = useState<string[]>([]);
   // B6 jump-latest 与 composer 高度联动：测量输入区顶部到屏底的距离，驱动 --jump-bottom。
   const [jumpBottom, setJumpBottom] = useState(0);
   const winHeightRef = useRef(0);
@@ -482,6 +520,7 @@ export default function Chat() {
             animate: true,
             messageId: res.messageId,
             knowledgeUsed: res.knowledgeUsed,
+            refNotices: res.refNotices,
             retryText: degraded ? text : undefined,
           };
           setMsgs((m) => {
@@ -502,11 +541,11 @@ export default function Chat() {
               const i = m.length - 1;
               if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
                 const copy = m.slice();
-                copy[i] = { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed };
+                copy[i] = { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices };
                 return copy;
               }
             }
-            return [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed }];
+            return [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices }];
           });
         }
       };
@@ -535,6 +574,7 @@ export default function Chat() {
             onSession: (id) => { if (id && !sid) setSessionId(id); },
             onToken: (t) => { patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })); followBottom(); },
             onChat: (reply) => patch((msg) => ({ ...msg, reply })), // 完整回复权威兜底：token 渲染即便有偏差，最终内容仍正确
+            onRefNotices: (ns) => patch((msg) => ({ ...msg, refNotices: ns })),
             onDone: () => patch((msg) => ({ ...msg, streaming: false })),
             onError: (em) => { chatErrored = true; patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false })); },
           },
@@ -563,6 +603,8 @@ export default function Chat() {
         let reportStarted = false;
         let chatStarted = false;
         let learnedAgentName = '';
+        // meta 先于 begin/token 到达，此刻气泡还没建；先攒着，收尾时一并挂到气泡上。
+        let pendingRefNotices: string[] = [];
         const patchReport = (
           fn: (d: Deliverable) => Deliverable,
           extra: Partial<Extract<Msg, { role: 'report' }>> = {},
@@ -639,14 +681,16 @@ export default function Chat() {
             startChat();
             patchChat((msg) => ({ ...msg, reply }));
           },
+          onRefNotices: (ns) => { pendingRefNotices = ns; },
           onMemory: (data) => {
             if (data.learned && data.agentName) learnedAgentName = data.agentName;
           },
           onDone: (messageId) => {
+            const refNotices = pendingRefNotices.length ? pendingRefNotices : undefined;
             if (reportStarted) {
-              patchReport((d) => d, { streaming: false, messageId });
+              patchReport((d) => d, { streaming: false, messageId, refNotices });
             } else if (chatStarted) {
-              patchChat((msg) => ({ ...msg, streaming: false }));
+              patchChat((msg) => ({ ...msg, streaming: false, refNotices }));
             }
             if (learnedAgentName) showMemoryLearned(learnedAgentName, 600);
             followBottom(true);
@@ -779,6 +823,7 @@ export default function Chat() {
     setInputFocus(false);
     const sending = refs;
     setRefs([]);
+    setParsingRefIds([]); // 引用签已随本轮发出；之后谁没读完由服务端 refNotices 据实说
     doSend(v, sessionId, agent.key, sending);
   };
 
@@ -889,69 +934,127 @@ export default function Chat() {
   };
 
   // 上传资料：微信只能选「聊天里的文件」→ 上传解析 → 自动挂为本轮引用
+  // 多份：先全量校验（任一不合规就整批不传，免得传到一半才发现），再串行逐份呈送，
+  // 每份传完立刻挂引用——客户看得见资料一份份进来，不必干等整批。
   const uploadMaterial = async () => {
     if (!IS_WEAPP) { Taro.showToast({ title: '请在微信小程序内上传文件', icon: 'none' }); return; }
     const guide = await Taro.showModal({
       title: '从微信聊天选择文件',
-      content: '微信只允许小程序选取「聊天里的文件」。请先把资料发给「文件传输助手」（电脑端微信也能发），下一步选它即可。这不是转发，是选文件。',
+      content: `微信只允许小程序选取「聊天里的文件」。请先把资料发给「文件传输助手」（电脑端微信也能发），下一步选它即可。这不是转发，是选文件。一次最多 ${UPLOAD_COUNT_MAX} 份。`,
       confirmText: '去选择',
       cancelText: '取消',
     });
     if (!guide.confirm) return;
     let chosen: Taro.chooseMessageFile.SuccessCallbackResult;
     try {
-      chosen = await Taro.chooseMessageFile({ count: 1, type: 'file', extension: UPLOAD_EXT });
+      chosen = await Taro.chooseMessageFile({ count: UPLOAD_COUNT_MAX, type: 'file', extension: UPLOAD_EXT });
     } catch (e) {
       const msg = String((e as { errMsg?: string })?.errMsg || '');
       if (!/cancel/i.test(msg)) Taro.showToast({ title: '没能打开文件选择，请重试', icon: 'none' });
       return; // 用户取消则静默
     }
-    const f = chosen.tempFiles?.[0];
-    if (!f) return;
-    const ext = (f.name?.split('.').pop() || '').toLowerCase();
-    if (!UPLOAD_EXT.includes(ext)) {
-      Taro.showToast({ title: `不支持的格式 .${ext}（支持 PDF/Word/Excel/MD/TXT）`, icon: 'none' });
+    const files = chosen.tempFiles || [];
+    if (!files.length) return;
+
+    // —— 全量前置校验：一份不合规即整批不发，并把选择器重开一次让客户改了再来 ——
+    const retry = (title: string, content: string) => {
+      Taro.showModal({ title, content, confirmText: '重选', cancelText: '算了' }).then((r) => { if (r.confirm) uploadMaterial(); });
+    };
+    for (const f of files) {
+      const ext = (f.name?.split('.').pop() || '').toLowerCase();
+      if (!UPLOAD_EXT.includes(ext)) {
+        retry('这份资料递不进来', `「${f.name}」是 .${ext}，军中只认 PDF／Word／Excel／MD／TXT。`);
+        return;
+      }
+      // 单份体积上限（与 server multipart 20MB 对齐），避免放行后被服务端 413 拒绝、
+      // 只留一句无信息量的「HTTP 413」。
+      const chk = checkUpload({ name: f.name, size: f.size });
+      if (!chk.ok) {
+        retry(chk.title || '这份资料递不进来', chk.desc || `「${f.name}」不合上传之规。`);
+        return;
+      }
+    }
+    const totalBytes = files.reduce((n, f) => n + (f.size || 0), 0);
+    if (totalBytes > MAX_BATCH_UPLOAD_BYTES) {
+      retry('这一批太重了', `${files.length} 份共 ${fmtBytes(totalBytes)}，一次至多 ${fmtBytes(MAX_BATCH_UPLOAD_BYTES)}。分几批递上来即可。`);
       return;
     }
-    // 上传前置校验体积上限（与 server multipart 20MB 限制对齐），避免放行后被服务端 413 拒绝、
-    // 只留一句无信息量的「HTTP 413」（thinktank / knowledge 两页已有此校验，本页此前遗漏）。
-    const chk = checkUpload({ name: f.name, size: f.size });
-    if (!chk.ok) {
-      Taro.showToast({ title: chk.desc || '文件不符合上传要求', icon: 'none' });
-      return;
-    }
-    // B5：非模态可取消上传（替代阻塞式 showLoading）。透出 UploadTask → 真进度 + 取消真中止。
-    // 原始文件名 f.name 随上传带给服务端作展示名（tempFilePath 是 tmp 名）。
-    uploadCancelledRef.current = false;
-    setUploading(true);
-    setUploadPct(0);
+
+    // —— 逐份建账 → 串行呈送 ——
+    const batch: UploadEntry[] = files.map((f, i) => ({
+      id: `up-${Date.now()}-${i}`,
+      name: sourceUploadName(f.name) || '待识别资料',
+      size: f.size || 0,
+      path: f.path,
+      pct: 0,
+      status: 'waiting' as UploadStatus,
+    }));
+    setUploads((cur) => ({ ...cur, ...Object.fromEntries(batch.map((u) => [u.id, u])) }));
+    for (const u of batch) await runUpload(u); // 串行：一份一份来，不抢带宽也不乱了进度
+    // 收摊：成功/撤回的行退场（成功的已化作引用签，不必再占地方），只留没送到的候客户重递或删掉。
+    setUploads((cur) => {
+      const next = { ...cur };
+      let ok = 0;
+      for (const u of batch) {
+        const st = next[u.id]?.status;
+        if (st === 'done') ok++;
+        if (st === 'done' || st === 'cancelled') delete next[u.id];
+      }
+      if (ok) Taro.showToast({ title: `${ok} 份已呈上，拆读中…可直接发问`, icon: 'none' });
+      return next;
+    });
+  };
+
+  // 单份呈送：真进度（onProgress）+ 真取消（UploadTask.abort）都按份记账。
+  const patchUpload = (id: string, patch: Partial<UploadEntry>) =>
+    setUploads((cur) => (cur[id] ? { ...cur, [id]: { ...cur[id], ...patch } } : cur));
+
+  const runUpload = async (u: UploadEntry) => {
+    uploadCancelledRef.current[u.id] = false;
+    patchUpload(u.id, { status: 'uploading', pct: 0 });
     try {
-      const sourceName = sourceUploadName(f.name);
-      const { id } = await api.uploadKnowledge(f.path, projectId || undefined, undefined, undefined, sourceName, {
-        onProgress: setUploadPct,
-        onTask: (t) => { uploadTaskRef.current = t; },
+      const { id } = await api.uploadKnowledge(u.path, projectId || undefined, undefined, undefined, u.name, {
+        onProgress: (p) => patchUpload(u.id, { pct: p }),
+        onTask: (t) => { uploadTasksRef.current[u.id] = t; },
       });
-      if (uploadCancelledRef.current) return; // 已取消：结果不挂引用
-      const label = sourceName || '待识别资料';
-      setRefs((cur) => cur.some((x) => x.kind === 'knowledge' && x.id === id) ? cur : [...cur, { kind: 'knowledge', id, label }]);
-      Taro.showToast({ title: '已上传，解析中…可直接发送提问', icon: 'none' });
+      if (uploadCancelledRef.current[u.id]) return; // 已撤回：结果不挂引用
+      patchUpload(u.id, { status: 'done', pct: 100 });
+      // 传完就挂——不等整批，客户能一份份看着资料进来。挂上时正文多半还在拆读，先给引用签标上。
+      setRefs((cur) => cur.some((x) => x.kind === 'knowledge' && x.id === id) ? cur : [...cur, { kind: 'knowledge', id, label: u.name }]);
+      setParsingRefIds((cur) => cur.includes(id) ? cur : [...cur, id]);
     } catch (e) {
-      if (uploadCancelledRef.current) return; // 取消引发的失败静默
-      Taro.showToast({ title: (e as Error).message || '上传失败', icon: 'none' });
+      if (uploadCancelledRef.current[u.id]) return; // 撤回引发的失败静默
+      patchUpload(u.id, { status: 'failed' });
+      Taro.showToast({ title: (e as Error).message || `「${u.name}」没能呈上`, icon: 'none' });
     } finally {
-      uploadTaskRef.current = null;
-      setUploading(false);
-      setUploadPct(0);
+      uploadTasksRef.current[u.id] = null;
     }
   };
 
-  const cancelUpload = () => {
-    uploadCancelledRef.current = true;
-    uploadTaskRef.current?.abort(); // 真中止传输，不再空等
-    uploadTaskRef.current = null;
-    setUploading(false);
-    setUploadPct(0);
-    Taro.showToast({ title: '已取消上传', icon: 'none' });
+  // 撤回单份：真中止传输，不空等；已挂上的引用一并摘掉。
+  const cancelUpload = (id: string) => {
+    uploadCancelledRef.current[id] = true;
+    uploadTasksRef.current[id]?.abort();
+    uploadTasksRef.current[id] = null;
+    patchUpload(id, { status: 'cancelled' });
+  };
+  const cancelAllUploads = () => {
+    for (const u of uploadList) if (u.status === 'waiting' || u.status === 'uploading') cancelUpload(u.id);
+    Taro.showToast({ title: '已全数撤回', icon: 'none' });
+  };
+  const dropUpload = (id: string) => setUploads((cur) => { const next = { ...cur }; delete next[id]; return next; });
+  // 单份重递：递到了就同批次一样退场（已化作引用签），没递到仍留在清单里候着。
+  const retryUpload = async (id: string) => {
+    const u = uploads[id];
+    if (!u) return;
+    await runUpload(u);
+    setUploads((cur) => {
+      if (cur[id]?.status !== 'done') return cur;
+      const next = { ...cur };
+      delete next[id];
+      Taro.showToast({ title: `「${u.name}」已呈上，拆读中`, icon: 'none' });
+      return next;
+    });
   };
 
   // 打开 @引用选择器：拉取可引用的 案卷/方案/资料
@@ -1139,6 +1242,7 @@ export default function Chat() {
                     </View>
                   )}
                 </View>
+                <RefNotices notices={m.refNotices} />
                 {/* 军师反问选项卡（问卷卡）：卡片容器 + 逐题点选 + 「其他」自填；单问题点选即发送，多问题答完一起发送。 */}
                 {i === activeAskIdx && activeAsks.length ? (
                   <View className="ask-card">
@@ -1246,6 +1350,7 @@ export default function Chat() {
                   <Text>参考了 {m.knowledgeUsed.length} 份资料：{m.knowledgeUsed.join('、')}</Text>
                 </View>
               ) : null}
+              <RefNotices notices={m.refNotices} />
               {/* 认可方案 → 沉淀报告并进入执行承接（对齐「认可后拆成军令/复盘」动线）。
                   中断/降级报告（retryText 或 degraded）不开放认可，先重试补全再认可。 */}
               {!m.streaming && !m.deliverable.degraded && !m.retryText ? (
@@ -1293,21 +1398,46 @@ export default function Chat() {
 
       {/* B6：引用行 + 上传条 + 输入区打包成 dock，统一测量高度驱动 jump-latest 定位 */}
       <View className="composer-dock">
-        {/* B5：非模态上传进度（可取消） */}
-        {uploading ? (
+        {/* B5：非模态上传清单（逐份真进度 / 逐份可撤回；失败可单独重递或删掉） */}
+        {uploadList.length ? (
           <View className="upload-bar">
-            <View className="ub-spin" style={{ borderTopColor: accent }} />
-            <Text className="ub-t">资料上传中… {uploadPct}%</Text>
-            <Text className="ub-cancel" style={{ color: accent }} onClick={cancelUpload}>取消</Text>
+            <View className="ub-head">
+              <Text className="ub-t">
+                {uploading
+                  ? `呈送资料 ${uploadList.filter((u) => u.status === 'done').length}/${uploadList.length}`
+                  : `${uploadList.filter((u) => u.status === 'failed').length} 份未送达`}
+              </Text>
+              {uploading ? <Text className="ub-cancel" style={{ color: accent }} onClick={cancelAllUploads}>全部撤回</Text> : null}
+            </View>
+            {uploadList.map((u) => (
+              <View key={u.id} className={`up-row ${u.status === 'failed' ? 'bad' : ''}`}>
+                <View className="up-b">
+                  <Text className="up-name">{u.name}</Text>
+                  <Text className="up-meta">{fmtBytes(u.size)}{u.status === 'uploading' ? ` · ${u.pct}%` : ''}</Text>
+                </View>
+                <Text className={`up-badge ${u.status}`}>{UPLOAD_STATUS_TEXT[u.status]}</Text>
+                {u.status === 'uploading' || u.status === 'waiting' ? (
+                  <Text className="up-act" style={{ color: accent }} onClick={() => cancelUpload(u.id)}>撤回</Text>
+                ) : null}
+                {u.status === 'failed' ? (
+                  <>
+                    <Text className="up-act" style={{ color: accent }} onClick={() => retryUpload(u.id)}>重递</Text>
+                    <Text className="up-act up-del" onClick={() => dropUpload(u.id)}>删</Text>
+                  </>
+                ) : null}
+              </View>
+            ))}
           </View>
         ) : null}
 
-        {/* 已选引用 */}
+        {/* 已选引用（刚传上来的标「拆读中」：正文还没拆完，此刻发问军师未必读得到） */}
         {refs.length ? (
           <View className="ref-row">
             {refs.map((r, j) => (
               <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
-                <Text className="ref-chip-l" style={{ color: accent }}>@{r.label}</Text><Text className="ref-x">✕</Text>
+                <Text className="ref-chip-l" style={{ color: accent }}>@{r.label}</Text>
+                {r.kind === 'knowledge' && parsingRefIds.includes(r.id) ? <Text className="ref-parsing">拆读中</Text> : null}
+                <Text className="ref-x">✕</Text>
               </View>
             ))}
           </View>

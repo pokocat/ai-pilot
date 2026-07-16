@@ -8,6 +8,8 @@ export interface StreamHandlers {
   onToken?: (text: string) => void;   // 增量 token（渐进渲染）
   onChat?: (reply: ChatReply) => void; // 完整回复兜底（含 points/acts）
   onReportStart?: () => void; // report meta 已到达：先渲染成果卡骨架，避免当前页长时间只有 thinking
+  // 引用未尽之处（超 9 份被丢下 / 仍在拆读 / 读不出）：随 meta 先到，气泡下明说，不静默丢弃。
+  onRefNotices?: (notices: string[]) => void;
   onReportBegin?: (data: Pick<Deliverable, 'title' | 'icon' | 'meta'>) => void;
   onReportSection?: (section: DeliverableSection & { index?: number }) => void;
   onReportFooter?: (data: Pick<Deliverable, 'trust' | 'actions'>) => void;
@@ -63,8 +65,9 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
     const d = e.data as {
       id?: string; text?: string; messageId?: string; message?: string; kind?: string;
       title?: string; icon?: string; meta?: string; index?: number; h?: string; b?: string; list?: string[];
-      trust?: string; actions?: string[]; learned?: boolean; agentName?: string;
+      trust?: string; actions?: string[]; learned?: boolean; agentName?: string; refNotices?: string[];
     } & ChatReply;
+    if (e.event === 'meta' && Array.isArray(d?.refNotices) && d.refNotices.length) h.onRefNotices?.(d.refNotices);
     if (e.event === 'session') h.onSession?.(d?.id ?? '');
     else if (e.event === 'token') { state.rendered = true; h.onToken?.(d?.text ?? ''); }
     else if (e.event === 'chat') { state.rendered = true; h.onChat?.(d); }

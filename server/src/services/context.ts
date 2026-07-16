@@ -90,7 +90,7 @@ export async function buildGenContext(opts: {
   preview?: PreviewTarget;         // 沙盒/评测：用草稿或指定版本（默认走已发布版本）
   effective?: EffectiveAgentConfig; // 调用方已解析好的有效配置（避免重复解析、保证与计费一致）
   sessionMode?: string | null;     // 会话粘性模式（M3 PR-11，路由传入 Session.mode）
-}): Promise<{ ctx: GenContext; memoryConfig: MemoryConfig; knowledgeUsed: string[]; effective: EffectiveAgentConfig }> {
+}): Promise<{ ctx: GenContext; memoryConfig: MemoryConfig; knowledgeUsed: string[]; refNotices: string[]; effective: EffectiveAgentConfig }> {
   // C 端默认读 Agent.publishedVersionId 指向的已发布快照（resolveEffectiveAgent）；
   // 草稿/历史版本由 opts.preview 指定（沙盒、评测、AB）。调用方可传 opts.effective 复用。
   const effective = opts.effective ?? (await resolveEffectiveAgent(opts.agentKey, opts.preview));
@@ -145,7 +145,7 @@ export async function buildGenContext(opts: {
       : Promise.resolve(null),
     // 显式引用（可溯源）+ 知识库混合检索（自动召回，项目内优先）
     briefInterview
-      ? Promise.resolve({ lines: [] as string[], labels: [] as string[] })
+      ? Promise.resolve({ lines: [] as string[], labels: [] as string[], notices: [] as string[] })
       : resolveReferences(opts.tenantId, opts.userId, opts.refs),
     briefInterview
       ? Promise.resolve<Awaited<ReturnType<typeof hybridSearch>>>([])
@@ -195,7 +195,7 @@ export async function buildGenContext(opts: {
   const projectName: string | null = projRow?.name ?? null;
   const projectSummary: string | null = projRow?.summary ?? null;
 
-  const { lines: refLines, labels: refLabels } = refsResult;
+  const { lines: refLines, labels: refLabels, notices: refNotices } = refsResult;
   const knowledge = hits.map((h) => `【知识：${h.item.title ?? h.item.kind}】${h.snippet}`);
   const knowledgeUsed = [...refLabels, ...hits.map((h) => h.item.title ?? h.snippet.slice(0, 20))];
 
@@ -242,7 +242,7 @@ export async function buildGenContext(opts: {
     skills: (effective.skillsConfig as GenContext['skills']) ?? null,
     runtime: resolveAgentRuntime(effective, { userId: opts.userId, sessionId: opts.sessionId, difyConversationId: opts.difyConversationId }),
   };
-  return { ctx, memoryConfig, knowledgeUsed, effective };
+  return { ctx, memoryConfig, knowledgeUsed, refNotices, effective };
 }
 
 /**

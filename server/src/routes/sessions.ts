@@ -224,7 +224,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     const isDeliverable = !!effective?.deliverableKey; // 是否产出 = 已发布版本的 deliverableKey
     // 按需产出：deliverableKey 已配 + skillsConfig.deliverableMode='on-demand' → 模型自行决定本轮出报告还是对话。
     const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
-    const { ctx, memoryConfig, knowledgeUsed } = await buildGenContext({
+    const { ctx, memoryConfig, knowledgeUsed, refNotices } = await buildGenContext({
       userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
       sessionId: session.id, difyConversationId: session.difyConversationId,
       effective: effective ?? undefined, history,
@@ -245,7 +245,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
           return {
             sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat,
-            memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
+            memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, refNotices, creditBalance, tokenQuota,
           };
         }
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
@@ -258,7 +258,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
         return {
           sessionId: session.id, created, agentKey, kind: 'report', messageId: msg.id, deliverable,
-          memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
+          memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, refNotices, creditBalance, tokenQuota,
         };
       }
       if (isDeliverable) {
@@ -281,7 +281,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           sessionId: session.id, created, agentKey, kind: 'report',
           messageId: msg.id, deliverable,
           memory: learned ? { learned: true, agentName: agent.name } : null,
-          knowledgeUsed, creditBalance, tokenQuota,
+          knowledgeUsed, refNotices, creditBalance, tokenQuota,
         };
       }
       const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
@@ -292,7 +292,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
       const creditBalance = creditReservation?.balance ?? 0;
       const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
-      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, creditBalance, tokenQuota };
+      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, refNotices, creditBalance, tokenQuota };
     } catch (err) {
       if (creditReservation?.charged) {
         await creditReservation.refund().catch((refundErr) => {
@@ -424,7 +424,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       const agent = session.agent;
       const isDeliverable = !!effective?.deliverableKey; // 顾问/创作智能体 → 结构化成果（按已发布版本）
       const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
-      const { ctx, memoryConfig } = await buildGenContext({
+      const { ctx, memoryConfig, refNotices } = await buildGenContext({
         userId: user.id,
         tenantId: user.tenantId,
         agentKey,
@@ -444,7 +444,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         if (learned) send('memory', { learned: true, agentName: agent.name });
       };
       if (onDemand && !wantsDeliverableRequest(text)) {
-        send('meta', { kind: 'chat' });
+        send('meta', { kind: 'chat', refNotices });
         let reply2: ChatReply | null = null;
         let usage = { inputTokens: 0, outputTokens: 0 };
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
@@ -461,7 +461,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       } else if (onDemand) {
-        send('meta', { kind: 'report' });
+        send('meta', { kind: 'report', refNotices });
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         send('begin', { title: deliverable.title, icon: deliverable.icon, meta: deliverable.meta });
         for (let i = 0; i < deliverable.sections.length; i++) { await sleep(520); send('section', { index: i, ...deliverable.sections[i] }); }
@@ -477,7 +477,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       } else if (isDeliverable) {
-        send('meta', { kind: 'report' });
+        send('meta', { kind: 'report', refNotices });
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         send('begin', { title: deliverable.title, icon: deliverable.icon, meta: deliverable.meta });
         // 渐进式呈现：按 section 逐段下发（保留原型骨架→渐显动效）
@@ -513,7 +513,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       } else {
-        send('meta', { kind: 'chat' });
+        send('meta', { kind: 'chat', refNotices });
         // 普通聊天优先走 provider 原生 token 流；只在输入侧先审核，输出完成后记账/trace。
         let reply2: ChatReply | null = null;
         let usage = { inputTokens: 0, outputTokens: 0 };

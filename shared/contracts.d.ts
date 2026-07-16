@@ -449,6 +449,7 @@ export interface GenResult {
   deliverable?: Deliverable; reply?: ChatReply;
   memory?: { learned: boolean; agentName: string } | null;
   knowledgeUsed?: string[]; // 本次自动召回/显式引用所用到的知识摘要（用于「参考了哪些资料」提示）
+  refNotices?: string[];    // 引用未能全带上的实情（超过 9 份被丢下 / 仍在拆读 / 读不出）——不静默丢弃，回传给用户
   creditBalance?: number;   // 扣费后的钻石余额（<0=不限量；图片类按张扣后回填）
   tokenQuota?: TokenQuotaView | null; // 文本产出后回填本月额度（即时刷新进度 %；图片类为 null）
 }

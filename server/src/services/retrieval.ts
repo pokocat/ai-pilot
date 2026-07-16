@@ -52,6 +52,53 @@ export interface HybridOpts {
 // 当前项目命中加权：让本项目资料略微优先，但不排除用户的其它资料（上下文按用户）。
 const PROJECT_BOOST = 0.05;
 
+// ——————————————————————————————————————————————————————————————————————————
+// 显式引用注入预算（resolveReferences）
+//
+// 对话可一次带多份资料上来，若把每份全文原样灌进 prompt，几份长报告就能把上下文窗口挤爆
+// （系统提示词 / 历史 / 自动召回 / 输出都会被挤掉，模型反而更蠢）。故立三条规矩：
+//  ① 单份上限 8000 字符——够覆盖一份合同、周报、财务表的主干，又不至于一份就吃光总预算；
+//  ② 全部引用合计 30000 字符——中文约 1 字 ≈ 1.5 token，折合 ~45k token，
+//     在主流 128k 窗口下留足余量给系统提示词、历史与产出；
+//  ③ 单轮至多 9 份——与前端 chooseMessageFile({ count: 9 }) 对齐：一次能选几份，就能带几份。
+// ——————————————————————————————————————————————————————————————————————————
+export const MAX_REF_CHARS_PER_DOC = 8000;
+export const MAX_REF_CHARS_TOTAL = 30000;
+export const MAX_REFS = 9;
+
+/**
+ * 总预算分配（最大最小公平 / 注水法）：先按份数等分，用不完的短件把余量回吐给长件，如此往复。
+ *
+ * 约束（这三条是本函数存在的理由，改动前请先想清楚）：
+ *  • 任一份不超过 perDoc；
+ *  • 合计不超过 total；
+ *  • **不是先到先得**——绝不允许排在前面的长文件吃光总预算，让后面几份一个字都进不去。
+ *
+ * 返回与 lengths 等长的「每份可注入字符数」。
+ */
+export function allocateRefBudget(
+  lengths: number[],
+  total = MAX_REF_CHARS_TOTAL,
+  perDoc = MAX_REF_CHARS_PER_DOC,
+): number[] {
+  const want = lengths.map((n) => Math.min(Math.max(n, 0), perDoc));
+  if (want.reduce((a, b) => a + b, 0) <= total) return want; // 装得下就都给足，不必分配
+  const alloc = new Array<number>(lengths.length).fill(0);
+  let remaining = total;
+  let open = want.map((_, i) => i).filter((i) => want[i] > 0);
+  while (open.length && remaining > 0) {
+    const share = Math.floor(remaining / open.length);
+    if (share <= 0) break; // 余量已不足人手一字，收工（误差 < 份数，可忽略）
+    for (const i of open) {
+      const give = Math.min(want[i] - alloc[i], share);
+      alloc[i] += give;
+      remaining -= give;
+    }
+    open = open.filter((i) => alloc[i] < want[i]);
+  }
+  return alloc;
+}
+
 // 候选项：融合分 + 展示 snippet + 供 rerank 的较长正文 + 原始 item 行。
 type KItemRow = Parameters<typeof toItemT>[0];
 interface Cand { score: number; snippet: string; text: string; item: KItemRow; }
@@ -131,26 +178,45 @@ export async function hybridSearch(opts: HybridOpts): Promise<KnowledgeHit[]> {
   return finalize(query, cands, topK);
 }
 
+/** 一条已取出的引用：head=出处标注（会被 【】 包住），body=正文（受预算裁剪），label=气泡展示名。 */
+interface RefEntry { head: string; body: string; label: string; }
+
+export interface ResolvedRefs {
+  lines: string[];    // 注入 prompt 的文本（含出处标注；截断处已显式声明为节选）
+  labels: string[];   // 「参考了哪些资料」展示用
+  notices: string[];  // 用户可见提示：没带上的、还在拆读的——一律明说，绝不静默
+}
+
 /**
  * 解析显式引用 → 带出处标注的上下文文本（仅取该用户/租户可见的资料，严格隔离）。
- * 返回 { lines: 注入文本[], labels: 展示用标签[] }。
+ *
+ * 三处「不许瞒着人」的约定：
+ *  • 超过 MAX_REFS 的引用会被丢掉，但必须点名回传（notices），不做静默截断；
+ *  • 正文超预算时按 allocateRefBudget 裁剪，且在标注里写明「节选 / 全文多少字 / 截了多少字」，
+ *    不让模型把节选当全文；
+ *  • 上传后仍在拆读（status=parsing）或解析失败的资料，正文本就是空的——直说其未就绪，
+ *    而不是塞一个空知识块让模型以为这份资料没内容。
  */
 export async function resolveReferences(
   tenantId: string,
   userId: string,
   refs: MessageRef[] | undefined,
-): Promise<{ lines: string[]; labels: string[] }> {
+): Promise<ResolvedRefs> {
   const lines: string[] = [];
   const labels: string[] = [];
-  if (!refs?.length) return { lines, labels };
+  const notices: string[] = [];
+  if (!refs?.length) return { lines, labels, notices };
 
-  for (const ref of refs.slice(0, 8)) {
+  const taken = refs.slice(0, MAX_REFS);
+  const dropped = refs.slice(MAX_REFS);
+
+  const entries: RefEntry[] = [];
+  for (const ref of taken) {
     try {
       if (ref.kind === 'project') {
         const p = await prisma.project.findFirst({ where: { id: ref.id, tenantId } });
         if (p) {
-          lines.push(`【项目：${p.name}】${p.summary ?? '（暂无项目摘要）'}`);
-          labels.push(`项目《${p.name}》`);
+          entries.push({ head: `项目：${p.name}`, body: p.summary ?? '（暂无项目摘要）', label: `项目《${p.name}》` });
         }
       } else if (ref.kind === 'report') {
         const doc = await prisma.reportDoc.findFirst({ where: { id: ref.id, tenantId } });
@@ -163,28 +229,60 @@ export async function resolveReferences(
             const body = (content.sections ?? [])
               .map((s) => `${s.h}：${s.b ?? ''}${(s.list ?? []).join('、')}`)
               .join('；');
-            lines.push(`【报告：${doc.title} v${ver.version}】${body}`);
-            labels.push(`报告《${doc.title}》v${ver.version}`);
+            entries.push({ head: `报告：${doc.title} v${ver.version}`, body, label: `报告《${doc.title}》v${ver.version}` });
           }
         }
       } else if (ref.kind === 'knowledge') {
         const k = await prisma.knowledgeItem.findFirst({ where: { id: ref.id, tenantId } });
         if (k) {
-          lines.push(`【知识：${k.title ?? k.kind}】${k.text}`);
-          labels.push(`知识「${k.title ?? k.text.slice(0, 12)}」`);
+          const title = k.title ?? k.kind;
+          // 上传即挂引用、解析却是异步的：客户手快时正文尚未落库。此时明说未就绪，不塞空块。
+          if (k.status === 'parsing' || k.status === 'embedding') {
+            entries.push({
+              head: `知识：${title}（尚在拆读，正文未到手）`,
+              body: '此件仍在拆读，正文尚未成形。不可臆测其内容；若需据此件断事，直言尚在拆读、请客户稍候再问。',
+              label: `知识「${title}」（拆读中）`,
+            });
+            notices.push(`「${title}」尚在拆读，这一轮未能引其正文——稍候再问一次便是。`);
+          } else if (k.status === 'failed' || !k.text.trim()) {
+            entries.push({
+              head: `知识：${title}（未能读出正文）`,
+              body: '此件未能读出正文。不可臆测其内容；若需据此件断事，直言此件读不出、请客户换个格式重传。',
+              label: `知识「${title}」（读不出）`,
+            });
+            notices.push(`「${title}」读不出正文，这一轮未能引用——换个格式重传即可。`);
+          } else {
+            entries.push({ head: `知识：${title}`, body: k.text, label: `知识「${k.title ?? k.text.slice(0, 12)}」` });
+          }
         }
       } else if (ref.kind === 'memory') {
         const m = await prisma.memory.findFirst({ where: { id: ref.id, tenantId, userId } });
         if (m) {
-          lines.push(`【记忆】${m.text}`);
-          labels.push('一段记忆');
+          entries.push({ head: '记忆', body: m.text, label: '一段记忆' });
         }
       }
     } catch {
       /* 单条引用解析失败不影响整体 */
     }
   }
-  return { lines, labels };
+
+  // 预算：单份 ≤ 8000 字，合计 ≤ 30000 字；按最大最小公平分，短件不因排在后面而挨饿。
+  const budgets = allocateRefBudget(entries.map((e) => e.body.length));
+  entries.forEach((e, i) => {
+    const budget = budgets[i];
+    if (e.body.length <= budget) {
+      lines.push(`【${e.head}】${e.body}`);
+    } else {
+      // 截断必须自报家门：否则模型会把节选当全文，据半篇文章下满篇结论。
+      lines.push(`【${e.head}（节选，全文 ${e.body.length} 字，此处截取前 ${budget} 字）】${e.body.slice(0, budget)}`);
+    }
+    labels.push(e.label);
+  });
+  if (dropped.length) {
+    const names = dropped.map((r) => r.label).filter(Boolean).join('、');
+    notices.push(`一轮至多带 ${MAX_REFS} 份资料，另有 ${dropped.length} 份未带上${names ? `（${names}）` : ''}——另起一轮再问便是。`);
+  }
+  return { lines, labels, notices };
 }
 
 /**

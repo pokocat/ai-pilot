@@ -174,17 +174,36 @@
 
 /* B5 非模态上传条（可取消） */
 .composer-dock { position: relative; }
-.upload-bar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 14px 0; background: var(--surface);
-}
-.upload-bar .ub-spin {
-  width: 14px; height: 14px; border-radius: 50%;
-  border: 2px solid var(--line); border-top-color: var(--accent);
-  animation: rc-spin .7s linear infinite; flex-shrink: 0;
-}
+/* 引用未尽之处：没带上／还在拆读／读不出——一律在气泡下明说，不静默 */
+.ref-notices { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+.ref-notices .rn-line { font-size: 11.5px; color: var(--warn); line-height: 1.5; }
+
+/* 上传清单：逐份一行（文件名 / 大小·进度 / 状态徽章 / 撤回·重递·删） */
+.upload-bar { padding: 8px 14px 0; background: var(--surface); }
+.upload-bar .ub-head { display: flex; align-items: center; gap: 8px; }
 .upload-bar .ub-t { flex: 1; font-size: 12.5px; color: var(--ink-2); }
 .upload-bar .ub-cancel { font-size: 13px; font-weight: 600; padding: 4px 6px; }
+.upload-bar .up-row {
+  display: flex; align-items: center; gap: 8px; padding: 5px 0;
+  border-top: 1px solid var(--line);
+}
+.upload-bar .up-row.bad .up-name { color: var(--ink-2); }
+.upload-bar .up-b { flex: 1; min-width: 0; }
+.upload-bar .up-name {
+  display: block; font-size: 12.5px; color: var(--ink);
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.upload-bar .up-meta { display: block; font-size: 11px; color: var(--ink-3); margin-top: 1px; }
+/* 状态徽章沿用智库 file-row 的色阶口径（等待/进行/成功/失败） */
+.upload-bar .up-badge {
+  flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  color: var(--ink-3); background: var(--surface-2);
+}
+.upload-bar .up-badge.uploading { color: var(--gold-deep); background: var(--gold-soft); }
+.upload-bar .up-badge.done { color: var(--green); background: var(--green-soft); }
+.upload-bar .up-badge.failed { color: #fff; background: var(--danger); }
+.upload-bar .up-act { flex-shrink: 0; font-size: 12px; font-weight: 600; padding: 4px 5px; }
+.upload-bar .up-act.up-del { color: var(--danger); }
 @keyframes rc-spin { to { transform: rotate(360deg); } }
 
 /* 工具栏：项目作用域 + 生成纪要 */
@@ -234,6 +253,11 @@
 /* 长文件名标签单行省略，单个 chip 不撑破引用行（#1 溢出） */
 .ref-chip-l { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ref-chip .ref-x { font-size: 10px; color: var(--ink-3); flex-shrink: 0; }
+/* 刚传上来、正文还在后台拆读的引用：明示状态，免得客户以为军师已读全文 */
+.ref-chip .ref-parsing {
+  flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  color: var(--gold-deep); background: var(--gold-soft);
+}
 
 /* @引用选择器底部弹层 */
 .ref-sheet { position: fixed; inset: 0; z-index: 50; }

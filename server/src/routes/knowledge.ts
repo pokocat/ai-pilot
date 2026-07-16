@@ -13,7 +13,7 @@ import {
   deleteKnowledge,
 } from '../services/knowledge.js';
 import { hybridSearch } from '../services/retrieval.js';
-import { ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
+import { checkQuota, ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
 import { bestUploadName } from '../services/uploadName.js';
 import { looksFinancial } from '../services/finParse.js';
 import { runFinCheckup } from '../services/finCheckup.js';
@@ -98,6 +98,15 @@ export async function knowledgeRoutes(app: FastifyInstance) {
         const err = e as Error & { statusCode?: number; code?: string };
         return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
       }
+    }
+
+    // 非 staged（对话内上传）此前从不查额度，等于绕开了 30 份 / 200MB 的免费口径——
+    // 从对话上传能无限往库里堆，智库上传却被拦。此处补上同一道门禁，两条动线一个口径。
+    try {
+      await checkQuota({ tenantId: user.tenantId, userId: user.id, addBytes: buf.length });
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
     }
 
     return ingestUploadedFile({
