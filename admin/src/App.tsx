@@ -1833,6 +1833,32 @@ function EcoToolsView({ toast }: { toast: (m: string) => void }) {
 // 宁缺勿假：p50 留空的行注入层不会引用（后端 services/benchmark.ts），面上以「未核实」标签提示运营回填。
 type BmForm = { industry: string; revenueBand: string; metricKey: string; metricName: string; unit: string; p25: string; p50: string; p75: string; note: string; source: string };
 const BM_BLANK: BmForm = { industry: '', revenueBand: '*', metricKey: '', metricName: '', unit: '', p25: '', p50: '', p75: '', note: '', source: '' };
+// 最小 RFC4180 CSV 行解析：支持 "..." 包裹的字段（内含逗号/换行）与 "" 转义引号。
+// 朴素 split(',') 会在 note/source 等自由文本字段包含逗号时把后续列全部错位（静默产出错误数据），
+// 这类字段来自 Excel 编辑后再导出，含逗号很常见。
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else { inQuotes = false; }
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      cells.push(cur); cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cells.push(cur);
+  return cells.map((c) => c.trim());
+}
+
 // CSV 行格式（与文档一致）：industry,revenueBand,metricKey,metricName,unit,p25,p50,p75,note,source
 const BM_CSV_COLS = ['industry', 'revenueBand', 'metricKey', 'metricName', 'unit', 'p25', 'p50', 'p75', 'note', 'source'] as const;
 const bmNumOrNull = (s: string): number | null => { const t = s.trim(); if (!t) return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
@@ -1893,7 +1919,7 @@ function BenchmarksView({ toast }: { toast: (m: string) => void }) {
       const rows = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       let ok = 0, skipped = 0;
       for (const line of rows) {
-        const cells = line.split(',').map((c) => c.trim());
+        const cells = parseCsvLine(line);
         if (cells[0]?.toLowerCase() === BM_CSV_COLS[0]) continue; // 跳过表头行
         const [ind, band, key, name, unit, p25, p50, p75, note, source] = cells;
         if (!ind || !key || !name || !unit) { skipped++; continue; }
