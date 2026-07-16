@@ -17,7 +17,6 @@ import {
 } from '../../services/dossier';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import { EMPTY_STATES } from '../../data/emptyStates';
-import NextStepCard from '../../components/NextStepCard';
 import PrescriptionStrip from '../../components/PrescriptionStrip';
 import './index.scss';
 
@@ -266,8 +265,8 @@ export default function Studio() {
           <Text className="en-side right serif" onClick={() => setView('review')}>复盘</Text>
         </View>
 
-        {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
-        <NextStepCard />
+        {/* 本页不挂 WO-07「下一步」卡：它与下方「今日战役」空态同为「去参谋室聊定打法」的导流，
+            连「认可后自动拆成军令」都是同一句。军令页以战役卡为主，下一步卡仍留在战局/问策两 tab。 */}
 
         {/* WO-12：处方条——军师为某问题配的工具，出现在军令/执行语境（多入口销售之一） */}
         <PrescriptionStrip />
