@@ -1,7 +1,8 @@
 /* ============================================================
    军师 · 全局设计系统 —— 对齐原型 styles/tokens.css
-   暖 off-white 底 + 墨色 + 本命色强调；正文与标题统一以 Noto Serif SC / 宋体为主，
+   暖 off-white 底 + 墨色 + 本命色强调；正文与标题统一走 --serif（宋体优先，Noto Serif SC 仅作兜底），
    克制字重（不超过 600），Noto Sans SC 仅作系统兜底与个别数字/输入场景使用
+   字体只在 --serif / --sans 两个 token 上改，勿在页面内另立字体变量
    ============================================================ */
 
 page {
@@ -37,7 +38,7 @@ page {
   --danger: #9C4A38;
   --warn: #A8772E;
 
-  --serif: "Noto Serif SC", "Songti SC", "STSong", serif;
+  --serif: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
   --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
 
   --r-sm: 10px;

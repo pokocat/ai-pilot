@@ -1,10 +1,5 @@
 /* 战局页 —— 对齐设计稿 page-battle：深绿 hero / 指标 / 三势 / 动作 / 模块 / 不能做 / CTA */
 
-.home {
-  --home-title-font: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
-}
-.home .serif { font-family: var(--home-title-font); }
-
 /* —— 页头：左「案卷」· 中「战局」· 右刷新 —— */
 .battle-nav {
   position: relative;
@@ -271,7 +266,7 @@
   align-self: stretch; margin-top: 12px;
   padding: 12px 13px; border-left: 3px solid var(--green); border-radius: 12px;
   background: var(--accent-soft); color: var(--ink);
-  font-family: var(--home-title-font); font-size: 14.5px; font-weight: 600; line-height: 1.55;
+  font-family: var(--serif); font-size: 14.5px; font-weight: 600; line-height: 1.55;
 }
 .fs-body { width: 100%; flex: 1; margin-top: 14px; }
 

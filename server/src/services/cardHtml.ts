@@ -19,18 +19,19 @@ const QUOTES = [
 ];
 
 const BASE_CSS = `
+  :root { --serif: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #F4F2EC; font-family: "Noto Sans SC", -apple-system, "PingFang SC", sans-serif; color: #16191D; padding: 24px 16px; }
   .card { max-width: 420px; margin: 0 auto; border-radius: 20px; overflow: hidden; background: #FBFAF6; box-shadow: 0 18px 44px rgba(22,25,29,.12); }
   .hd { padding: 22px 20px 18px; color: #fff; background: linear-gradient(150deg, #1E5A43, #163F30); }
   .badge { display: inline-block; padding: 4px 10px; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; font-size: 11px; letter-spacing: .18em; color: rgba(255,255,255,.85); }
-  h1 { font-family: "Noto Serif SC", "Songti SC", serif; font-size: 26px; margin-top: 12px; font-weight: 700; }
+  h1 { font-family: var(--serif); font-size: 26px; margin-top: 12px; font-weight: 700; }
   .date { margin-top: 6px; font-size: 12px; color: rgba(255,255,255,.6); font-weight: 600; }
   .rank { margin-top: 10px; display: inline-block; padding: 5px 11px; border-radius: 999px; background: rgba(255,255,255,.14); font-size: 12px; font-weight: 700; }
   .bd { padding: 18px 20px 6px; }
   .scores { display: flex; gap: 10px; }
   .score { flex: 1; text-align: center; padding: 13px 6px 11px; border-radius: 14px; background: #F3F1EA; }
-  .score b { display: block; font-family: "Noto Serif SC", serif; font-size: 22px; color: #1E5A43; }
+  .score b { display: block; font-family: var(--serif); font-size: 22px; color: #1E5A43; }
   .score.gold b { color: #6F5420; }
   .score span { display: block; margin-top: 4px; font-size: 11px; color: #969BA1; font-weight: 600; }
   .sec { margin-top: 16px; padding: 14px 15px; border-radius: 14px; background: #fff; border: 1px solid #E7E4DB; }
@@ -40,7 +41,7 @@ const BASE_CSS = `
   .li:last-child { border-bottom: 0; }
   .ok { color: #1E5A43; font-weight: 800; flex-shrink: 0; }
   .no { color: #9C4A38; font-weight: 800; flex-shrink: 0; }
-  .quote { margin: 16px 2px 0; padding: 13px 15px; border-left: 3px solid #9B7C3F; background: #FBF7EC; font-family: "Noto Serif SC", serif; font-size: 14px; line-height: 1.6; color: #43340F; }
+  .quote { margin: 16px 2px 0; padding: 13px 15px; border-left: 3px solid #9B7C3F; background: #FBF7EC; font-family: var(--serif); font-size: 14px; line-height: 1.6; color: #43340F; }
   .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 12px; }
   .mo { padding: 11px 4px 9px; border-radius: 11px; text-align: center; background: #F3F1EA; }
   .mo b { display: block; font-size: 13px; font-weight: 800; }
@@ -50,7 +51,7 @@ const BASE_CSS = `
   .mo.turn { outline: 2px solid rgba(91,58,107,.35); }
   .legend { margin-top: 10px; font-size: 11px; color: #969BA1; font-weight: 600; }
   .ft { margin-top: 16px; padding: 15px 20px 20px; text-align: center; border-top: 1px solid #E7E4DB; }
-  .brand { font-family: "Noto Serif SC", serif; font-size: 14px; font-weight: 700; color: #9B7C3F; letter-spacing: .12em; }
+  .brand { font-family: var(--serif); font-size: 14px; font-weight: 700; color: #9B7C3F; letter-spacing: .12em; }
   .edition { margin-top: 4px; font-size: 10px; color: #969BA1; letter-spacing: .14em; }
   .refer { margin-top: 8px; font-size: 11px; color: #565C63; }
   .mp-code { padding: 0 20px 22px; text-align: center; }
@@ -162,7 +163,7 @@ export function renderFateCard(chart: ChartView, friendName?: string): string {
 <div class="quote">「${esc(advice)}」</div>
 <div class="sec" style="text-align:center;background:#F4F8F5;border-color:rgba(30,90,67,.2)">
 <div style="font-size:12px;color:#969BA1">想要完整的天势 × 战略诊断？</div>
-<div style="margin-top:4px;font-family:'Noto Serif SC',serif;font-size:15px;font-weight:700;color:#1E5A43">找军师参谋部</div></div>
+<div style="margin-top:4px;font-family:var(--serif);font-size:15px;font-weight:700;color:#1E5A43">找军师参谋部</div></div>
 </div>${footer()}`;
   return page('天命速写', body);
 }

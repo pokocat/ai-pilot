@@ -4,7 +4,7 @@
   --ink: #16191D; --ink-2: #565C63; --ink-3: #969BA1; --line: #E7E4DB; --line-2: #EFEDE5;
   --accent: #A07D2C; --accent-deep: #6E5621; --accent-soft: #F2EAD6; --accent-ink: #43340F; --accent-bright: #D8B25A;
   --gold: #9B7C3F; --danger: #9C4A38; --success: #2D7A52;
-  --serif: "Noto Serif SC", "Songti SC", serif;
+  --serif: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
   --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Segoe UI", sans-serif;
   --mono: "SFMono-Regular", "JetBrains Mono", monospace;
   --shadow-sm: 0 1px 2px rgba(22,25,29,.04), 0 2px 8px rgba(22,25,29,.04);
