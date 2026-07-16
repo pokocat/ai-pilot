@@ -7,6 +7,12 @@
       "runtimeArgs": ["app/scripts/serve-h5.mjs"],
       "port": 5173,
       "autoPort": true
+    },
+    {
+      "name": "roadshow-slides",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8927", "--directory", "docs/roadshow"],
+      "port": 8927
     }
   ]
 }

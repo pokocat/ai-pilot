@@ -57,7 +57,7 @@ export const PLANS: {
     price: 0,
     period: 'month',
     creditsPerMonth: 10,
-    tokenQuotaPerMonth: 100000,
+    tokenQuotaPerMonth: 10000000,
     agentCount: 3,
     features: ['10 点 / 月', '基础顾问 3 位', '适合轻量试用'],
     highlighted: false,

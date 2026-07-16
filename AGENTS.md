@@ -343,6 +343,8 @@ npm run dev:weapp
 ```
 H5 单端走查：`cd app && npm run dev:h5`；H5 连真实后端：`cd app && npm run dev:h5:server`（默认 API `http://localhost:4000/api`）。
 
+体验版 token 月额度调整后，先运行 `cd server && npm run db:sync-plans` 同步套餐配置；已有体验版用户的钱包额度使用 `npm run db:bump-free-quota` 试运行核对，确认后追加 `--apply` 执行。脚本只更新已有体验版钱包，不为没有钱包的用户预建记录。
+
 Taro Webpack5 持久化缓存已开启（`app/config/index.ts` 的 `cache.enable=true`），用于提升二次 `dev:weapp`/`build:weapp`/H5 编译速度；如果遇到疑似缓存脏数据，先删本地 `app/node_modules/.cache` 后重编，不要提交缓存目录。
 
 **小程序真机实时预览**

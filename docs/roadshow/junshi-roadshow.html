@@ -1,0 +1,1395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>军师 · AI 商业参谋部 — 产品路演</title>
+
+<!-- 字体：思源宋体（正文/标题）+ 马善政毛笔楷（批语点缀）+ 思源黑体（小标签） -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@400;500;700&family=Ma+Shan+Zheng&display=swap">
+
+<style>
+/* ===========================================
+   主题变量 —— 改这里即可换整体配色
+   取自「军师」产品本身的品牌 token：
+   暖纸底 / 墨色字 / 墨绿主色 / 军令金 / 朱砂红
+   =========================================== */
+:root {
+    --bg:          #F4F2EC;   /* 暖纸底 */
+    --paper:       #FBFAF6;   /* 卡片纸面 */
+    --ink:         #16191D;   /* 墨色 */
+    --ink-soft:    #5A5F66;   /* 次级文字 */
+    --ink-faint:   #969BA1;   /* 弱文字 */
+    --accent:      #1E5A43;   /* 墨绿 · 主判断/行动 */
+    --accent-deep: #163F30;
+    --accent-soft: #E7EEE9;
+    --gold:        #A8772E;   /* 金 · 军令/权益 */
+    --gold-soft:   #F3EBDD;
+    --cinnabar:    #9C4A38;   /* 朱砂 · 风险/印章 */
+    --cinnabar-soft:#F2E6E2;
+    --line:        rgba(22, 25, 29, 0.14);
+    --line-strong: rgba(22, 25, 29, 0.32);
+
+    --serif: 'Noto Serif SC', 'Songti SC', serif;
+    --sans:  'Noto Sans SC', sans-serif;
+    --brush: 'Ma Shan Zheng', 'Noto Serif SC', cursive;
+
+    --stage-bg: #0E1210;      /* 舞台外的黑边 */
+    --slide-bg: var(--bg);
+
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --duration-normal: 0.7s;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ===========================================
+   固定 16:9 舞台（viewport-base.css 全文，勿删）
+   =========================================== */
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: var(--stage-bg, #000);
+}
+
+.deck-viewport {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    background: var(--stage-bg, #000);
+}
+
+.deck-stage {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    transform-origin: 0 0;
+    background: var(--slide-bg, #fff);
+}
+
+.slide {
+    position: absolute;
+    inset: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    display: block;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    background: var(--slide-bg, #fff);
+}
+
+.slide.active,
+.slide.visible {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 1;
+}
+
+img, video, canvas, svg {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+.deck-controls {
+    position: fixed;
+    left: 50%;
+    bottom: 22px;
+    transform: translateX(-50%);
+    z-index: 1000;
+}
+
+@media print {
+    html, body { width: 1920px; height: auto; overflow: visible; background: #fff; }
+    .deck-viewport { position: static; overflow: visible; background: #fff; }
+    .deck-stage { position: static; width: auto; height: auto; transform: none !important; background: none; }
+    .slide {
+        position: relative;
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        width: 1920px; height: 1080px;
+        break-after: page; page-break-after: always;
+    }
+    .slide:last-child { break-after: auto; page-break-after: auto; }
+    .deck-controls, .edit-toggle, .edit-hotzone, .page-indicator, .progress-track { display: none !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.2s !important;
+    }
+}
+
+/* ===========================================
+   页面基础质感：纸纹 + 淡格线 + 四角规矩线
+   =========================================== */
+.slide {
+    font-family: var(--serif);
+    color: var(--ink);
+    background:
+        radial-gradient(ellipse 1400px 900px at 24% 0%, rgba(255,255,255,0.65) 0%, transparent 60%),
+        linear-gradient(rgba(22,25,29,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(22,25,29,0.025) 1px, transparent 1px),
+        var(--bg);
+    background-size: auto, 96px 96px, 96px 96px, auto;
+}
+
+/* 每页统一的「卷宗」页眉：左侧朱点+出品方，右侧中文页码 */
+.chrome {
+    position: absolute;
+    top: 52px; left: 96px; right: 96px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: var(--sans);
+    font-size: 20px;
+    letter-spacing: 0.35em;
+    color: var(--ink-faint);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 18px;
+}
+.chrome .dot {
+    display: inline-block;
+    width: 12px; height: 12px;
+    background: var(--cinnabar);
+    border-radius: 2px;
+    margin-right: 14px;
+    vertical-align: baseline;
+}
+.chrome .folio { letter-spacing: 0.2em; font-family: var(--serif); }
+
+/* 每页右侧巨型水印字 */
+.watermark {
+    position: absolute;
+    right: -40px; bottom: -140px;
+    font-size: 620px;
+    font-weight: 900;
+    line-height: 1;
+    color: var(--accent);
+    opacity: 0.05;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* 内容区通用布局 */
+.slide-body {
+    position: absolute;
+    top: 140px; left: 96px; right: 96px; bottom: 96px;
+    display: flex;
+    flex-direction: column;
+}
+.kicker {
+    font-family: var(--sans);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: 0.5em;
+    color: var(--accent);
+    margin-bottom: 18px;
+}
+.kicker::before { content: '◆ '; font-size: 18px; }
+h2.slide-title {
+    font-size: 72px;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    margin-bottom: 14px;
+}
+.slide-sub {
+    font-size: 28px;
+    color: var(--ink-soft);
+    margin-bottom: 44px;
+    line-height: 1.6;
+}
+.slide-sub em, .quote em, .card p em {
+    font-style: normal;
+    color: var(--accent);
+    font-weight: 700;
+}
+
+/* 底部注脚线 */
+.footline {
+    margin-top: auto;
+    border-top: 1px solid var(--line);
+    padding-top: 22px;
+    font-size: 24px;
+    color: var(--ink-soft);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+.footline .fmark {
+    font-family: var(--brush);
+    color: var(--cinnabar);
+    font-size: 28px;
+    white-space: nowrap;
+}
+
+/* ===========================================
+   入场动画：.visible 触发，d1~d8 依次延迟
+   =========================================== */
+.reveal {
+    opacity: 0;
+    transform: translateY(34px);
+    transition: opacity var(--duration-normal) var(--ease-out-expo),
+                transform var(--duration-normal) var(--ease-out-expo);
+}
+.slide.visible .reveal { opacity: 1; transform: translateY(0); }
+.d1 { transition-delay: 0.08s; }
+.d2 { transition-delay: 0.18s; }
+.d3 { transition-delay: 0.28s; }
+.d4 { transition-delay: 0.38s; }
+.d5 { transition-delay: 0.48s; }
+.d6 { transition-delay: 0.58s; }
+.d7 { transition-delay: 0.68s; }
+.d8 { transition-delay: 0.78s; }
+
+/* ===========================================
+   封面（第 1 页）
+   =========================================== */
+.cover { text-align: left; }
+.cover .slide-body { top: 0; bottom: 0; justify-content: center; }
+.cover .brand-kicker {
+    font-family: var(--sans);
+    font-size: 26px;
+    letter-spacing: 0.6em;
+    color: var(--ink-soft);
+    margin-bottom: 36px;
+}
+.cover .title-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 56px;
+    margin-bottom: 40px;
+}
+.cover h1 {
+    font-size: 300px;
+    font-weight: 900;
+    line-height: 0.95;
+    letter-spacing: 0.02em;
+    color: var(--ink);
+}
+.cover h1 .accent { color: var(--accent); }
+/* 朱砂印章 */
+.seal {
+    width: 148px; height: 148px;
+    background: var(--cinnabar);
+    color: #FBF7F2;
+    border-radius: 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    place-items: center;
+    font-size: 52px;
+    font-weight: 900;
+    line-height: 1;
+    padding: 14px;
+    transform: rotate(-4deg);
+    box-shadow: 0 6px 24px rgba(156, 74, 56, 0.3);
+    flex: none;
+    margin-bottom: 26px;
+}
+.cover .tagline {
+    font-size: 44px;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    margin-bottom: 56px;
+}
+.cover .duo {
+    display: flex;
+    gap: 32px;
+    margin-bottom: 72px;
+}
+.cover .duo .duo-item {
+    border: 1px solid var(--line-strong);
+    background: var(--paper);
+    padding: 26px 40px;
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+}
+.cover .duo b {
+    font-size: 40px;
+    font-weight: 900;
+    color: var(--accent);
+    letter-spacing: 0.2em;
+}
+.cover .duo span { font-size: 26px; color: var(--ink-soft); }
+.cover .cover-foot {
+    font-family: var(--sans);
+    font-size: 22px;
+    letter-spacing: 0.3em;
+    color: var(--ink-faint);
+}
+/* 封面右侧竖排铭文 */
+.vertical-motto {
+    /* 不用 transform 居中：.reveal 动画会覆盖 transform */
+    position: absolute;
+    right: 110px; top: 130px;
+    writing-mode: vertical-rl;
+    font-family: var(--brush);
+    font-size: 46px;
+    color: var(--accent);
+    letter-spacing: 0.3em;
+    border-right: 1px solid var(--line-strong);
+    padding-right: 30px;
+    opacity: 0.9;
+    height: 820px;
+    text-align: center; /* vertical-rl 下沿竖向居中 */
+}
+
+/* ===========================================
+   卡片矩阵（痛点页 / 价值页通用）
+   =========================================== */
+.card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    flex: 1;
+    align-content: start;
+}
+.card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--accent);
+    padding: 34px 40px 30px;
+    position: relative;
+}
+.card.pain { border-top-color: var(--cinnabar); }
+.card .card-no {
+    position: absolute;
+    top: 30px; right: 36px;
+    font-size: 26px;
+    color: var(--ink-faint);
+    font-family: var(--serif);
+}
+.card h3 { font-size: 38px; font-weight: 700; margin-bottom: 10px; }
+.card .card-quote {
+    font-family: var(--brush);
+    font-size: 27px;
+    color: var(--cinnabar);
+    margin-bottom: 12px;
+}
+.card.value .card-quote { color: var(--accent); }
+.card p { font-size: 25px; line-height: 1.65; color: var(--ink-soft); }
+
+/* ===========================================
+   「是什么」页：左文右环
+   =========================================== */
+.what-layout { display: flex; gap: 72px; flex: 1; align-items: stretch; }
+.what-left { flex: 1.05; display: flex; flex-direction: column; }
+.what-left .lead {
+    font-size: 31px;
+    line-height: 1.9;
+    margin-bottom: 40px;
+}
+.what-left .lead b { color: var(--accent); font-weight: 700; }
+.duty-line {
+    display: flex;
+    align-items: baseline;
+    gap: 22px;
+    padding: 24px 0;
+    border-top: 1px solid var(--line);
+}
+.duty-line:last-of-type { border-bottom: 1px solid var(--line); }
+.duty-line b {
+    font-size: 36px;
+    font-weight: 900;
+    color: var(--accent);
+    letter-spacing: 0.25em;
+    flex: none;
+}
+.duty-line.gold b { color: var(--gold); }
+.duty-line span { font-size: 25px; line-height: 1.6; color: var(--ink-soft); }
+
+.loop-panel {
+    flex: 1;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    padding: 44px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 26px;
+    position: relative;
+}
+.loop-panel::after {
+    /* 中央「经营闭环」印记 */
+    content: '经\A营\A闭\A环';
+    white-space: pre;
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    font-family: var(--brush);
+    font-size: 30px;
+    line-height: 1.35;
+    color: var(--cinnabar);
+    background: var(--bg);
+    border: 1px solid var(--cinnabar);
+    border-radius: 50%;
+    width: 118px; height: 118px;
+    display: grid;
+    place-items: center;
+    text-align: center;
+    letter-spacing: 0;
+}
+.loop-step {
+    border: 1px solid var(--line);
+    background: var(--bg);
+    padding: 26px 28px;
+    position: relative;
+}
+.loop-step .step-tag {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    color: var(--paper);
+    background: var(--accent);
+    padding: 4px 12px;
+    margin-bottom: 14px;
+}
+.loop-step:nth-child(3) .step-tag,
+.loop-step:nth-child(4) .step-tag { background: var(--gold); }
+.loop-step h4 { font-size: 34px; font-weight: 900; margin-bottom: 8px; }
+.loop-step p { font-size: 22px; line-height: 1.55; color: var(--ink-soft); }
+
+/* ===========================================
+   五入口页
+   =========================================== */
+.tab-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 24px; flex: 1; align-content: start; }
+.tab-card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    padding: 36px 30px;
+    display: flex;
+    flex-direction: column;
+    min-height: 480px;
+}
+.tab-card .tab-name {
+    font-size: 58px;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    margin-bottom: 6px;
+}
+.tab-card .tab-verb {
+    font-family: var(--sans);
+    font-size: 23px;
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 22px;
+    padding-bottom: 20px;
+    border-bottom: 1px dashed var(--line-strong);
+}
+.tab-card p { font-size: 23px; line-height: 1.7; color: var(--ink-soft); }
+.tab-card .tab-seq {
+    margin-top: auto;
+    font-family: var(--serif);
+    font-size: 22px;
+    color: var(--ink-faint);
+}
+
+/* ===========================================
+   三势页
+   =========================================== */
+.shi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; margin-bottom: 40px; }
+.shi-card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    padding: 40px 42px;
+    display: flex;
+    gap: 30px;
+    align-items: flex-start;
+}
+.shi-card .shi-char {
+    writing-mode: vertical-rl;
+    font-size: 62px;
+    font-weight: 900;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    border-right: 3px solid var(--accent);
+    padding-right: 18px;
+    flex: none;
+    line-height: 1;
+}
+.shi-card h4 { font-size: 30px; font-weight: 700; margin-bottom: 10px; }
+.shi-card p { font-size: 23px; line-height: 1.65; color: var(--ink-soft); }
+.quote {
+    background: var(--accent-soft);
+    border-left: 6px solid var(--accent);
+    padding: 34px 44px;
+    font-size: 34px;
+    line-height: 1.6;
+}
+.quote .quote-src {
+    display: block;
+    margin-top: 12px;
+    font-size: 23px;
+    color: var(--ink-soft);
+}
+
+/* ===========================================
+   军师天团页
+   =========================================== */
+.team-layout { display: flex; gap: 44px; flex: 1; }
+.chief-card {
+    flex: none;
+    width: 430px;
+    background: var(--accent-deep);
+    color: #F2F1EA;
+    padding: 48px 44px;
+    display: flex;
+    flex-direction: column;
+}
+.chief-card .chief-tag {
+    font-family: var(--sans);
+    font-size: 20px;
+    letter-spacing: 0.4em;
+    color: rgba(242, 241, 234, 0.7);
+    margin-bottom: 20px;
+}
+.chief-card h3 { font-size: 66px; font-weight: 900; margin-bottom: 18px; }
+.chief-card .chief-motto {
+    font-family: var(--brush);
+    font-size: 30px;
+    color: #D8C49A;
+    margin-bottom: 24px;
+}
+.chief-card p { font-size: 24px; line-height: 1.75; color: rgba(242, 241, 234, 0.85); }
+.team-right { flex: 1; display: flex; flex-direction: column; gap: 30px; }
+.team-group .group-label {
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    margin-bottom: 16px;
+}
+.team-group .group-label b {
+    font-size: 32px;
+    font-weight: 900;
+    color: var(--accent);
+    letter-spacing: 0.2em;
+}
+.team-group.gold .group-label b { color: var(--gold); }
+.team-group .group-label span { font-size: 22px; color: var(--ink-soft); }
+.chips { display: flex; flex-wrap: wrap; gap: 14px; }
+.chip {
+    background: var(--paper);
+    border: 1px solid var(--line-strong);
+    padding: 16px 26px;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+}
+.team-group.gold .chip { border-color: rgba(168, 119, 46, 0.55); background: var(--gold-soft); }
+
+/* ===========================================
+   越用越懂你 · 三阶段时间线
+   =========================================== */
+.grow-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; flex: 1; align-content: start; position: relative; }
+.grow-step { padding: 10px 44px 0 0; position: relative; }
+.grow-step + .grow-step { padding-left: 44px; border-left: 1px solid var(--line-strong); }
+.grow-step .grow-when {
+    display: inline-block;
+    font-family: var(--sans);
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: var(--paper);
+    background: var(--accent);
+    padding: 8px 18px;
+    margin-bottom: 24px;
+}
+.grow-step h4 { font-size: 40px; font-weight: 900; margin-bottom: 16px; }
+.grow-step p { font-size: 25px; line-height: 1.75; color: var(--ink-soft); }
+.grow-step .vtag {
+    display: inline-block;
+    margin-top: 20px;
+    font-family: var(--sans);
+    font-size: 21px;
+    font-weight: 700;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 6px 14px;
+    letter-spacing: 0.08em;
+}
+
+/* ===========================================
+   军令闭环 · 四步横排
+   =========================================== */
+.cmd-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 56px; flex: 1; align-content: start; position: relative; }
+.cmd-step {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-top: 4px solid var(--gold);
+    padding: 34px 32px;
+    min-height: 380px;
+    position: relative;
+}
+.cmd-step:not(:last-child)::after {
+    content: '→';
+    position: absolute;
+    right: -46px; top: 50%;
+    transform: translateY(-50%);
+    font-size: 40px;
+    color: var(--gold);
+}
+.cmd-step .cmd-no {
+    font-family: var(--serif);
+    font-size: 24px;
+    color: var(--gold);
+    margin-bottom: 16px;
+}
+.cmd-step h4 { font-size: 36px; font-weight: 900; margin-bottom: 14px; }
+.cmd-step p { font-size: 23px; line-height: 1.7; color: var(--ink-soft); }
+
+/* ===========================================
+   彩蛋体验页
+   =========================================== */
+.fun-layout { display: flex; gap: 56px; flex: 1; }
+.fun-left { flex: 1; }
+.fun-left h3, .fun-right h3 {
+    font-size: 36px;
+    font-weight: 900;
+    margin-bottom: 10px;
+}
+.fun-left .fun-note, .fun-right .fun-note {
+    font-size: 23px;
+    color: var(--ink-soft);
+    margin-bottom: 30px;
+    line-height: 1.6;
+}
+.swatches { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.swatch {
+    border: 1px solid var(--line);
+    background: var(--paper);
+    padding: 20px 22px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+.swatch .sw-dot { width: 44px; height: 44px; border-radius: 8px; flex: none; }
+.swatch b { font-size: 25px; font-weight: 700; display: block; }
+.swatch span { font-size: 19px; color: var(--ink-soft); font-family: var(--brush); }
+.fun-right { flex: 1; display: flex; flex-direction: column; }
+.hook-list { display: flex; flex-direction: column; gap: 20px; }
+.hook {
+    border: 1px solid var(--line);
+    background: var(--paper);
+    padding: 24px 30px;
+    display: flex;
+    align-items: baseline;
+    gap: 24px;
+}
+.hook b { font-size: 29px; font-weight: 900; color: var(--cinnabar); flex: none; letter-spacing: 0.06em; }
+.hook span { font-size: 23px; line-height: 1.6; color: var(--ink-soft); }
+
+/* ===========================================
+   商业模式页
+   =========================================== */
+.plan-row { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 30px; align-items: stretch; margin-bottom: 34px; }
+.plan {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    padding: 40px 42px;
+    display: flex;
+    flex-direction: column;
+}
+.plan .plan-name { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+.plan .plan-price { font-size: 60px; font-weight: 900; margin-bottom: 4px; }
+.plan .plan-price small { font-size: 26px; font-weight: 600; color: var(--ink-soft); }
+.plan .plan-note { font-family: var(--sans); font-size: 20px; color: var(--ink-soft); margin-bottom: 24px; }
+.plan ul { list-style: none; }
+.plan li {
+    font-size: 24px;
+    line-height: 1.5;
+    padding: 12px 0 12px 34px;
+    border-top: 1px dashed var(--line);
+    position: relative;
+    color: var(--ink-soft);
+}
+.plan li::before { content: '◆'; position: absolute; left: 4px; font-size: 15px; color: var(--accent); top: 18px; }
+.plan.hot {
+    background: var(--accent-deep);
+    color: #F2F1EA;
+    border-color: var(--accent-deep);
+    box-shadow: 0 14px 44px rgba(22, 63, 48, 0.35);
+    position: relative;
+}
+.plan.hot .plan-note, .plan.hot li, .plan.hot .plan-price small { color: rgba(242, 241, 234, 0.78); }
+.plan.hot li { border-top-color: rgba(242, 241, 234, 0.2); }
+.plan.hot li::before { color: #D8C49A; }
+.plan.hot .hot-badge {
+    position: absolute;
+    top: -20px; right: 32px;
+    background: var(--gold);
+    color: #FFF;
+    font-family: var(--sans);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    padding: 8px 22px;
+}
+.sku-line {
+    border: 1px dashed var(--line-strong);
+    background: var(--paper);
+    padding: 22px 32px;
+    font-size: 24px;
+    color: var(--ink-soft);
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+.sku-line b { color: var(--gold); font-weight: 700; flex: none; }
+
+/* ===========================================
+   尾页
+   =========================================== */
+.closing { text-align: center; }
+.closing .slide-body { top: 0; bottom: 0; justify-content: center; align-items: center; }
+.closing .end-motto {
+    font-size: 96px;
+    font-weight: 900;
+    line-height: 1.5;
+    letter-spacing: 0.06em;
+    margin-bottom: 48px;
+}
+.closing .end-motto .accent { color: var(--accent); }
+.closing .end-sub {
+    font-size: 34px;
+    letter-spacing: 0.3em;
+    color: var(--ink-soft);
+    margin-bottom: 64px;
+}
+.closing .seal { margin: 0 auto 56px; transform: rotate(4deg); }
+.closing .end-foot {
+    font-family: var(--sans);
+    font-size: 24px;
+    letter-spacing: 0.25em;
+    color: var(--ink-faint);
+}
+
+/* ===========================================
+   放映辅助（舞台之外）：进度条 / 页码 / 编辑开关
+   =========================================== */
+.progress-track {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: 5px;
+    background: rgba(255, 255, 255, 0.12);
+    z-index: 1000;
+}
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background: #D8C49A;
+    transition: width 0.4s var(--ease-out-expo);
+}
+.page-indicator {
+    position: fixed;
+    right: 26px; bottom: 20px;
+    z-index: 1000;
+    font-family: var(--sans);
+    font-size: 14px;
+    letter-spacing: 0.15em;
+    color: rgba(255, 255, 255, 0.65);
+}
+.edit-hotzone {
+    position: fixed; top: 0; left: 0;
+    width: 80px; height: 80px;
+    z-index: 10000;
+    cursor: pointer;
+}
+.edit-toggle {
+    position: fixed; top: 18px; left: 18px;
+    z-index: 10001;
+    font-size: 20px;
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(20, 24, 22, 0.85);
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+.edit-toggle.show, .edit-toggle.active { opacity: 1; pointer-events: auto; }
+.edit-toggle.active { background: var(--cinnabar); border-color: var(--cinnabar); }
+body.editing [contenteditable="true"] { outline: 2px dashed rgba(156, 74, 56, 0.6); outline-offset: 3px; cursor: text; }
+</style>
+</head>
+<body>
+
+<div class="deck-viewport">
+<main class="deck-stage" id="deckStage">
+
+    <!-- ========== 第 1 页 · 封面 ========== -->
+    <section class="slide cover active">
+        <div class="vertical-motto reveal d5">运筹帷幄 · 决胜千里</div>
+        <div class="slide-body">
+            <div class="brand-kicker reveal d1">军 师 参 谋 部 · 产 品 路 演</div>
+            <div class="title-row">
+                <h1 class="reveal d2">军<span class="accent">师</span></h1>
+                <div class="seal reveal d3"><span>军</span><span>师</span><span>之</span><span>印</span></div>
+            </div>
+            <div class="tagline reveal d3">装进微信里的 AI 商业参谋部</div>
+            <div class="duo">
+                <div class="duo-item reveal d4"><b>出谋</b><span>帮你把生意想清楚</span></div>
+                <div class="duo-item reveal d5"><b>出活</b><span>帮你把东西做出来</span></div>
+            </div>
+            <div class="cover-foot reveal d6">面向创始人 · CEO · 主理人 · 小团队经营者</div>
+        </div>
+    </section>
+
+    <!-- ========== 第 2 页 · 痛点 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">贰</span></div>
+        <div class="watermark">困</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">为什么需要军师</div>
+            <h2 class="slide-title reveal d1">当老板的，每天都在打仗</h2>
+            <p class="slide-sub reveal d2">四个几乎每位创始人都会遇到的难题——</p>
+            <div class="card-grid">
+                <div class="card pain reveal d3">
+                    <span class="card-no">其一</span>
+                    <h3>资料乱成一团</h3>
+                    <div class="card-quote">「东西都在，就是找不着。」</div>
+                    <p>微信聊天记录、报表、截图、合同散落各处，想用的时候翻不出来，更别提让它们帮你做决策。</p>
+                </div>
+                <div class="card pain reveal d4">
+                    <span class="card-no">其二</span>
+                    <h3>建议听了做不了</h3>
+                    <div class="card-quote">「道理都懂，明天干嘛？」</div>
+                    <p>课听了很多、书看了不少，但落到「今天该做哪三件事」，没有人告诉你。</p>
+                </div>
+                <div class="card pain reveal d5">
+                    <span class="card-no">其三</span>
+                    <h3>通用 AI 泛泛而谈</h3>
+                    <div class="card-quote">「答案很对，但不是我的。」</div>
+                    <p>普通的 AI 不了解你的生意，讲的都是放之四海皆准的正确空话，用不到自己身上。</p>
+                </div>
+                <div class="card pain reveal d6">
+                    <span class="card-no">其四</span>
+                    <h3>请顾问太贵、不沉淀</h3>
+                    <div class="card-quote">「一份报告，从此落灰。」</div>
+                    <p>咨询公司动辄几十万，项目结束人就走了；经验带不走，报告放进抽屉再没打开过。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========== 第 3 页 · 军师是什么 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">叁</span></div>
+        <div class="watermark">谋</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">军师是什么</div>
+            <h2 class="slide-title reveal d1">一句话：装进微信的 AI 参谋部</h2>
+            <p class="slide-sub reveal d2">不是又一个聊天机器人，而是一套<em>先判断、再行动</em>的经营决策系统。</p>
+            <div class="what-layout">
+                <div class="what-left reveal d3">
+                    <p class="lead">你把生意的资料交给它（立<b>「案卷」</b>），它替你研判局势、给出判断（发<b>「军情」</b>），再把判断拆成今天就能做的任务（下<b>「军令」</b>）；做完回填数据、复盘修正，进入下一轮。</p>
+                    <div class="duty-line"><b>出谋</b><span>像资深顾问一样，产出结构化的经营判断与咨询方案。</span></div>
+                    <div class="duty-line gold"><b>出活</b><span>像创作团队一样，直接做出海报、文案、IP 方案、短视频脚本等成品。</span></div>
+                </div>
+                <div class="loop-panel reveal d4">
+                    <div class="loop-step"><span class="step-tag">第一步</span><h4>案卷</h4><p>把资料交给军师，摸清家底</p></div>
+                    <div class="loop-step"><span class="step-tag">第二步</span><h4>军情</h4><p>军师研判局势，给出判断</p></div>
+                    <div class="loop-step"><span class="step-tag">第四步</span><h4>复盘</h4><p>回填数据，修正下轮判断</p></div>
+                    <div class="loop-step"><span class="step-tag">第三步</span><h4>军令</h4><p>判断拆成今天能做的任务</p></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========== 第 4 页 · 五个入口 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">肆</span></div>
+        <div class="watermark">阵</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">打开小程序</div>
+            <h2 class="slide-title reveal d1">五个入口，像用微信一样简单</h2>
+            <p class="slide-sub reveal d2">底部五个按钮，就是军师的全部动线。</p>
+            <div class="tab-row">
+                <div class="tab-card reveal d3">
+                    <div class="tab-name">问策</div>
+                    <div class="tab-verb">找军师聊</div>
+                    <p>微信式消息列表：总军师置顶统筹，各专业军师分线出主意，结论汇回主线。</p>
+                    <div class="tab-seq">入口 · 一</div>
+                </div>
+                <div class="tab-card reveal d4">
+                    <div class="tab-name">军情</div>
+                    <div class="tab-verb">看判断</div>
+                    <p>今天生意的「主要矛盾」是什么、下一步做什么、现在不能做什么，一屏讲清。</p>
+                    <div class="tab-seq">入口 · 二</div>
+                </div>
+                <div class="tab-card reveal d5">
+                    <div class="tab-name">军令</div>
+                    <div class="tab-verb">做任务</div>
+                    <p>判断拆成任务卡：谁来做、几点前、要多久；做完打卡，数据回填。</p>
+                    <div class="tab-seq">入口 · 三</div>
+                </div>
+                <div class="tab-card reveal d6">
+                    <div class="tab-name">锦囊</div>
+                    <div class="tab-verb">存家底</div>
+                    <p>资料库、方法论、历次报告与方案都在这里，越攒越值钱。</p>
+                    <div class="tab-seq">入口 · 四</div>
+                </div>
+                <div class="tab-card reveal d7">
+                    <div class="tab-name">主公</div>
+                    <div class="tab-verb">你自己</div>
+                    <p>企业档案、会员权益、本月算力、提醒日历，一目了然。</p>
+                    <div class="tab-seq">入口 · 五</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========== 第 5 页 · 亮点一：三势判断 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">伍</span></div>
+        <div class="watermark">势</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">核心亮点 · 一</div>
+            <h2 class="slide-title reveal d1">先判断，再行动：三势研判</h2>
+            <p class="slide-sub reveal d2">军师不直接给建议，先把局势看成三股「势」，判断清楚了才出手。</p>
+            <div class="shi-row">
+                <div class="shi-card reveal d3">
+                    <div class="shi-char">天势</div>
+                    <div><h4>外面的风往哪吹</h4><p>政策、趋势、时机——判断现在能不能借力，什么时候该等。</p></div>
+                </div>
+                <div class="shi-card reveal d4">
+                    <div class="shi-char">市势</div>
+                    <div><h4>对手和市场什么样</h4><p>竞争格局、差异化空间——判断该往哪站位，别人打不过来的地方在哪。</p></div>
+                </div>
+                <div class="shi-card reveal d5">
+                    <div class="shi-char">人势</div>
+                    <div><h4>自己家里有多少兵</h4><p>团队、组织、现金流——判断这仗打不打得动，先补哪块短板。</p></div>
+                </div>
+            </div>
+            <div class="quote reveal d6">
+                「不是缺流量，是<em>『信任证明』断在转化前</em>。」
+                <span class="quote-src">—— 军师判断示例：结论具体到能直接行动，而不是一句正确的废话。</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========== 第 6 页 · 亮点二：军师天团 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">陆</span></div>
+        <div class="watermark">将</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">核心亮点 · 二</div>
+            <h2 class="slide-title reveal d1">一位总军师，十三位专业军师</h2>
+            <p class="slide-sub reveal d2">你只管提出问题，总军师决定叫谁上阵；各线独立留档，要害汇入主线。</p>
+            <div class="team-layout">
+                <div class="chief-card reveal d3">
+                    <div class="chief-tag">统 帅</div>
+                    <h3>总军师</h3>
+                    <div class="chief-motto">分线督办 · 脉络可溯</div>
+                    <p>像参谋长一样统筹全局：理解你的问题，调度专业军师分头研究，再把各线结论收拢成一份主判断。</p>
+                </div>
+                <div class="team-right">
+                    <div class="team-group reveal d4">
+                        <div class="group-label"><b>出谋 · 顾问型</b><span>八位，负责想清楚</span></div>
+                        <div class="chips">
+                            <span class="chip">战略诊断官</span><span class="chip">增长操盘手</span><span class="chip">竞争情报官</span><span class="chip">融资参谋</span><span class="chip">商业模式设计师</span><span class="chip">组织人效顾问</span><span class="chip">品牌营销官</span><span class="chip">经营参谋</span>
+                        </div>
+                    </div>
+                    <div class="team-group gold reveal d5">
+                        <div class="group-label"><b>出活 · 创作型</b><span>五位，负责做出来</span></div>
+                        <div class="chips">
+                            <span class="chip">企业 IP 打造官</span><span class="chip">宣传片导演</span><span class="chip">海报设计师</span><span class="chip">短视频策划</span><span class="chip">商业文案官</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="footline reveal d6"><span class="fmark">批：</span><span>问策如问将，各司其职，胜过一个什么都会一点的通用助手。</span></div>
+        </div>
+    </section>
+
+    <!-- ========== 第 7 页 · 亮点三：越用越懂你 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">柒</span></div>
+        <div class="watermark">识</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">核心亮点 · 三</div>
+            <h2 class="slide-title reveal d1">越用越懂你的军师</h2>
+            <p class="slide-sub reveal d2">通用 AI 每次都从零开始，军师把对你的理解一天天攒下来。</p>
+            <div class="grow-row">
+                <div class="grow-step reveal d3">
+                    <span class="grow-when">第一天</span>
+                    <h4>立案卷</h4>
+                    <p>上传报表、聊天记录、经营目标，军师先把你的家底摸清；乱七八糟的资料由 AI 自动分类整理入库。</p>
+                    <div class="vtag">资料 → 案卷</div>
+                </div>
+                <div class="grow-step reveal d4">
+                    <span class="grow-when">每一次对话</span>
+                    <h4>记住你</h4>
+                    <p>你的行业、你最头疼的事、你的偏好，被持续写进军师的「专属理解」；回答越来越贴身，不再千篇一律。</p>
+                    <div class="vtag">对话 → 理解</div>
+                </div>
+                <div class="grow-step reveal d5">
+                    <span class="grow-when">三个月后</span>
+                    <h4>有了自己的参谋部</h4>
+                    <p>方案报告从 v1 长到 v7，每一版改了什么都能对比；项目、判断、复盘全部留档，换任何通用 AI 都替代不了。</p>
+                    <div class="vtag">积累 → 资产</div>
+                </div>
+            </div>
+            <div class="footline reveal d6"><span class="fmark">批：</span><span>沉淀在案卷里的是你的资产，不是一堆聊天记录。</span></div>
+        </div>
+    </section>
+
+    <!-- ========== 第 8 页 · 亮点四：军令闭环 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">捌</span></div>
+        <div class="watermark">令</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">核心亮点 · 四</div>
+            <h2 class="slide-title reveal d1">判断不落地，等于没判断</h2>
+            <p class="slide-sub reveal d2">从「听了个建议」到「做完了一件事」，中间的路军师替你铺好。</p>
+            <div class="cmd-row">
+                <div class="cmd-step reveal d3">
+                    <div class="cmd-no">第一步</div>
+                    <h4>下军令</h4>
+                    <p>判断拆成任务卡：写清负责人、截止时间、预计耗时，今天就能开工。</p>
+                </div>
+                <div class="cmd-step reveal d4">
+                    <div class="cmd-no">第二步</div>
+                    <h4>干活打卡</h4>
+                    <p>做完勾选，像待办清单一样简单；今日战役一目了然。</p>
+                </div>
+                <div class="cmd-step reveal d5">
+                    <div class="cmd-no">第三步</div>
+                    <h4>数据回填</h4>
+                    <p>把实际结果的数字填回去——成交了几单、花了多少钱。</p>
+                </div>
+                <div class="cmd-step reveal d6">
+                    <div class="cmd-no">第四步</div>
+                    <h4>总军师督战</h4>
+                    <p>复盘前检查、目标阶梯对照，用真实数据修正下一轮判断。</p>
+                </div>
+            </div>
+            <div class="footline reveal d7"><span class="fmark">批：</span><span>令出必行，行必有果，果必回报——这才叫闭环。</span></div>
+        </div>
+    </section>
+
+    <!-- ========== 第 9 页 · 彩蛋体验 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">玖</span></div>
+        <div class="watermark">趣</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">特色体验</div>
+            <h2 class="slide-title reveal d1">好用，也好玩</h2>
+            <p class="slide-sub reveal d2">几处让用户愿意天天打开、愿意转发给朋友的小心思。</p>
+            <div class="fun-layout">
+                <div class="fun-left reveal d3">
+                    <h3>本命色</h3>
+                    <p class="fun-note">首次登录选一次颜色，整个界面随你的「本命色」变化，每种颜色配一句军师批语。</p>
+                    <div class="swatches">
+                        <div class="swatch"><span class="sw-dot" style="background:#1E5A43"></span><div><b>墨绿 · 谋</b><span>稳中求进，守正出奇</span></div></div>
+                        <div class="swatch"><span class="sw-dot" style="background:#A8772E"></span><div><b>财金 · 势</b><span>聚财为势，顺势而为</span></div></div>
+                        <div class="swatch"><span class="sw-dot" style="background:#9C4A38"></span><div><b>朱砂 · 决</b><span>当机立断，先发制人</span></div></div>
+                        <div class="swatch"><span class="sw-dot" style="background:#2F4A6B"></span><div><b>黛蓝 · 远</b><span>高瞻远瞩，谋定后动</span></div></div>
+                        <div class="swatch"><span class="sw-dot" style="background:#5B3A62"></span><div><b>绛紫 · 局</b><span>格局为先，纵横捭阖</span></div></div>
+                        <div class="swatch"><span class="sw-dot" style="background:#3A3E43"></span><div><b>玄铁 · 藏</b><span>大巧若拙，藏锋于鞘</span></div></div>
+                    </div>
+                </div>
+                <div class="fun-right reveal d4">
+                    <h3>三个传播钩子</h3>
+                    <p class="fun-note">让老用户主动把军师带给新用户。</p>
+                    <div class="hook-list">
+                        <div class="hook"><b>送你一卦</b><span>输入朋友的生辰，现算一张可分享的命盘卡片；即算即走、不留存，合规勾选后才生成。</span></div>
+                        <div class="hook"><b>天时日历</b><span>一张图看全年十二个月的攻守节奏与拐点，适合发到朋友圈。</span></div>
+                        <div class="hook"><b>天机记账</b><span>军师的前瞻判断记成「可验证的预言」，日后翻出来对账，准不准一目了然。</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="footline reveal d5"><span class="fmark">注：</span><span>命理类玩法设有合规总开关，可按渠道整体关闭。</span></div>
+        </div>
+    </section>
+
+    <!-- ========== 第 10 页 · 用户价值 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">拾</span></div>
+        <div class="watermark">值</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">用户价值</div>
+            <h2 class="slide-title reveal d1">用了军师，老板得到什么？</h2>
+            <p class="slide-sub reveal d2">四句话说完——</p>
+            <div class="card-grid">
+                <div class="card value reveal d3">
+                    <span class="card-no">其一</span>
+                    <h3>每天知道该干嘛</h3>
+                    <div class="card-quote">「打开就是今天的仗怎么打。」</div>
+                    <p>主要矛盾、下一步动作、现在不能做的事，一屏讲清，不再焦虑地刷手机找方向。</p>
+                </div>
+                <div class="card value reveal d4">
+                    <span class="card-no">其二</span>
+                    <h3>资料变成资产</h3>
+                    <div class="card-quote">「乱料入库，越攒越值钱。」</div>
+                    <p>散落的截图、报表、聊天记录，被整理成有条理的案卷与智库，随时可查、可用来做判断。</p>
+                </div>
+                <div class="card value reveal d5">
+                    <span class="card-no">其三</span>
+                    <h3>建议变成结果</h3>
+                    <div class="card-quote">「把话变成事。」</div>
+                    <p>军令、打卡、回填、复盘，一环扣一环；建议不再停在纸面上，而是变成做完的事和真实的数据。</p>
+                </div>
+                <div class="card value reveal d6">
+                    <span class="card-no">其四</span>
+                    <h3>顾问变成伙伴</h3>
+                    <div class="card-quote">「一直在，且越来越懂你。」</div>
+                    <p>一次性付费的顾问会走，军师全年无休地陪着你，对你的理解一天比一天深。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========== 第 11 页 · 商业模式 ========== -->
+    <section class="slide">
+        <div class="chrome"><span><span class="dot"></span>军师参谋部 · 路演</span><span class="folio">拾壹</span></div>
+        <div class="watermark">营</div>
+        <div class="slide-body">
+            <div class="kicker reveal d1">商业模式</div>
+            <h2 class="slide-title reveal d1">从免费用起，按需成长</h2>
+            <div class="plan-row" style="margin-top:16px">
+                <div class="plan reveal d2">
+                    <div class="plan-name">体验版</div>
+                    <div class="plan-price">免费</div>
+                    <div class="plan-note">先用起来，零门槛</div>
+                    <ul>
+                        <li>基础军师 3 位</li>
+                        <li>每月基础算力点数</li>
+                        <li>足量对话额度</li>
+                    </ul>
+                </div>
+                <div class="plan hot reveal d3">
+                    <div class="hot-badge">主推</div>
+                    <div class="plan-name">决策版 · 年付</div>
+                    <div class="plan-price">¥1980<small> / 年</small></div>
+                    <div class="plan-note">约合 ¥165/月，比月付（¥198/月）省两个月</div>
+                    <ul>
+                        <li>不限量对话</li>
+                        <li>专业军师 8 位</li>
+                        <li>每月 68 点算力</li>
+                        <li>方案库沉淀与导出</li>
+                    </ul>
+                </div>
+                <div class="plan reveal d4">
+                    <div class="plan-name">企业版</div>
+                    <div class="plan-price">面议</div>
+                    <div class="plan-note">私有化部署</div>
+                    <ul>
+                        <li>数据不出内网</li>
+                        <li>14 位军师全开</li>
+                        <li>对接内部系统</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="sku-line reveal d5">
+                <b>单次能力 · 按需购买</b>
+                <span>深度整理 ¥39 · 深度矛盾分析 ¥29 · 财务经营体检 ¥49 · IP 选题库高级版 ¥99 · 店铺数据看板 ¥199</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ========== 第 12 页 · 尾页 ========== -->
+    <section class="slide closing">
+        <div class="slide-body">
+            <div class="end-motto reveal d1">让每一位创始人，<br>都有<span class="accent">自己的参谋部</span>。</div>
+            <div class="end-sub reveal d2">军师 · 出谋，出活</div>
+            <div class="seal reveal d3"><span>军</span><span>师</span><span>之</span><span>印</span></div>
+            <div class="end-foot reveal d4">微信搜索「军师」小程序 · 恭候各位主公</div>
+        </div>
+    </section>
+
+</main>
+</div>
+
+<!-- 放映辅助（舞台之外的界面） -->
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="page-indicator" id="pageIndicator">1 / 12</div>
+<div class="edit-hotzone" id="editHotzone"></div>
+<button class="edit-toggle" id="editToggle" title="编辑模式（快捷键 E，Ctrl+S 保存）">✏️</button>
+
+<script>
+/* ===========================================
+   幻灯片控制器：缩放舞台 + 键盘/滚轮/触摸翻页
+   =========================================== */
+class SlidePresentation {
+    constructor() {
+        this.slides = document.querySelectorAll('.slide');
+        this.currentSlide = 0;
+        this.stage = document.getElementById('deckStage');
+        this.progressBar = document.getElementById('progressBar');
+        this.pageIndicator = document.getElementById('pageIndicator');
+        this.wheelLock = false;
+        this.setupStageScale();
+        this.setupKeyboardNav();
+        this.setupWheelNav();
+        this.setupTouchNav();
+        this.showSlide(0);
+    }
+
+    /* 把 1920×1080 的舞台整体等比缩放到窗口，居中留黑边 */
+    setupStageScale() {
+        const scale = () => {
+            const factor = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+            const x = (window.innerWidth - 1920 * factor) / 2;
+            const y = (window.innerHeight - 1080 * factor) / 2;
+            this.stage.style.transform = `translate(${x}px, ${y}px) scale(${factor})`;
+        };
+        scale();
+        window.addEventListener('resize', scale);
+    }
+
+    setupKeyboardNav() {
+        document.addEventListener('keydown', (e) => {
+            if (e.target.isContentEditable) return; // 编辑文字时不翻页
+            if (['ArrowRight', 'ArrowDown', ' ', 'PageDown'].includes(e.key)) {
+                e.preventDefault();
+                this.showSlide(this.currentSlide + 1);
+            } else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(e.key)) {
+                e.preventDefault();
+                this.showSlide(this.currentSlide - 1);
+            } else if (e.key === 'Home') {
+                this.showSlide(0);
+            } else if (e.key === 'End') {
+                this.showSlide(this.slides.length - 1);
+            }
+        });
+    }
+
+    setupWheelNav() {
+        window.addEventListener('wheel', (e) => {
+            if (document.body.classList.contains('editing')) return;
+            if (this.wheelLock || Math.abs(e.deltaY) < 24) return;
+            this.wheelLock = true;
+            this.showSlide(this.currentSlide + (e.deltaY > 0 ? 1 : -1));
+            setTimeout(() => { this.wheelLock = false; }, 650);
+        }, { passive: true });
+    }
+
+    setupTouchNav() {
+        let startX = 0, startY = 0;
+        window.addEventListener('touchstart', (e) => {
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+        }, { passive: true });
+        window.addEventListener('touchend', (e) => {
+            const dx = e.changedTouches[0].clientX - startX;
+            const dy = e.changedTouches[0].clientY - startY;
+            if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+                this.showSlide(this.currentSlide + (dx < 0 ? 1 : -1));
+            }
+        }, { passive: true });
+    }
+
+    showSlide(index) {
+        this.currentSlide = Math.max(0, Math.min(index, this.slides.length - 1));
+        this.slides.forEach((slide, i) => {
+            slide.classList.toggle('active', i === this.currentSlide);
+            slide.classList.toggle('visible', i === this.currentSlide);
+        });
+        this.progressBar.style.width = `${((this.currentSlide + 1) / this.slides.length) * 100}%`;
+        this.pageIndicator.textContent = `${this.currentSlide + 1} / ${this.slides.length}`;
+    }
+}
+
+const deck = new SlidePresentation();
+
+/* ===========================================
+   行内编辑：悬停左上角或按 E 进入，点击文字即可改
+   自动存 localStorage，Ctrl+S 下载修改后的文件
+   =========================================== */
+const EDIT_SELECTOR = [
+    '.slide h1', '.slide h2', '.slide h3', '.slide h4',
+    '.slide p', '.slide li', '.slide .chip', '.slide .tab-name',
+    '.slide .tab-verb', '.slide .duo b', '.slide .duo span',
+    '.slide .plan-price', '.slide .plan-name', '.slide .plan-note',
+    '.slide .card-quote', '.slide .quote', '.slide .footline span',
+    '.slide .kicker', '.slide .slide-sub', '.slide .end-motto',
+    '.slide .end-sub', '.slide .end-foot', '.slide .tagline',
+    '.slide .brand-kicker', '.slide .cover-foot', '.slide .sku-line span'
+].join(', ');
+const STORAGE_KEY = 'junshi-roadshow-edits';
+
+const editor = {
+    isActive: false,
+    toggleEditMode() {
+        this.isActive = !this.isActive;
+        document.body.classList.toggle('editing', this.isActive);
+        editToggle.classList.toggle('active', this.isActive);
+        document.querySelectorAll(EDIT_SELECTOR).forEach((el) => {
+            if (this.isActive) el.setAttribute('contenteditable', 'true');
+            else el.removeAttribute('contenteditable');
+        });
+        if (!this.isActive) this.persist();
+    },
+    persist() {
+        const edits = {};
+        document.querySelectorAll(EDIT_SELECTOR).forEach((el, i) => { edits[i] = el.innerHTML; });
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(edits)); } catch (_) {}
+    },
+    restore() {
+        try {
+            const edits = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+            if (!edits) return;
+            document.querySelectorAll(EDIT_SELECTOR).forEach((el, i) => {
+                if (edits[i] !== undefined) el.innerHTML = edits[i];
+            });
+        } catch (_) {}
+    },
+    download() {
+        this.persist();
+        const clone = document.documentElement.cloneNode(true);
+        clone.querySelectorAll('[contenteditable]').forEach((el) => el.removeAttribute('contenteditable'));
+        clone.querySelector('body').classList.remove('editing');
+        const blob = new Blob(['<!DOCTYPE html>\n' + clone.outerHTML], { type: 'text/html' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'junshi-roadshow.html';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+};
+
+const editToggle = document.getElementById('editToggle');
+const hotzone = document.getElementById('editHotzone');
+let hideTimeout = null;
+
+editToggle.addEventListener('click', () => editor.toggleEditMode());
+hotzone.addEventListener('click', () => editor.toggleEditMode());
+hotzone.addEventListener('mouseenter', () => { clearTimeout(hideTimeout); editToggle.classList.add('show'); });
+hotzone.addEventListener('mouseleave', () => {
+    hideTimeout = setTimeout(() => { if (!editor.isActive) editToggle.classList.remove('show'); }, 400);
+});
+editToggle.addEventListener('mouseenter', () => clearTimeout(hideTimeout));
+editToggle.addEventListener('mouseleave', () => {
+    hideTimeout = setTimeout(() => { if (!editor.isActive) editToggle.classList.remove('show'); }, 400);
+});
+document.addEventListener('keydown', (e) => {
+    if ((e.key === 'e' || e.key === 'E') && !e.target.isContentEditable) editor.toggleEditMode();
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); editor.download(); }
+});
+document.addEventListener('input', (e) => { if (editor.isActive) editor.persist(); });
+
+editor.restore();
+</script>
+</body>
+</html>
