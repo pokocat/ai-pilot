@@ -2,39 +2,41 @@ import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
-import Icon from '../../components/Icon';
-import AdvisorAvatar from '../../components/AdvisorAvatar';
+import { ProtoHeader, Watermark, ShiRadar } from '../../components/proto';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type ChartSummary, type ReportItem, type SessionItem } from '../../services/api';
-import { refreshDossier, pendingOrdersOf, doneOrdersOf, today, toggleOrder, type Dossier, type DossierOrder } from '../../services/dossier';
-import { ADVISOR_ALIAS } from '../../data/council';
-import { CAPABILITIES, capabilityFor } from '../../data/capabilities';
+import { api, type ChartSummary } from '../../services/api';
+import { refreshDossier, pendingOrdersOf, today, type Dossier } from '../../services/dossier';
+import { cjkOrd } from '../../components/proto/ordinals';
 import './index.scss';
 
-function markDate(): string {
-  const d = new Date();
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+// 军情（tab1）—— 直角案卷：看今日判断。
+// 结构对齐原型 isJunqing 段：今日主要矛盾 hero + 三势研判（雷达+meter）+ 下一步就做/现在别做 双栏 + 拆军令 CTA。
+// 数据全部来自真实产物：案卷 judgment/orders/risks（GET /casefile）+ 军师档案 forces/mainContradiction + 命盘天时。
+
+// 研判结论 → 0-100 势值（无真值时给确定性兜底 50 并标「待研判」）。
+function verdictScore(v?: string | null): number {
+  if (!v) return 50;
+  if (v.includes('攻')) return 80;
+  if (v.includes('守') || v.includes('防')) return 52;
+  if (v.includes('撤')) return 28;
+  if (v.includes('等') || v.includes('观')) return 42;
+  return 55;
+}
+function phaseScore(phase?: string | null): number {
+  if (!phase) return 50;
+  if (phase.includes('攻')) return 80;
+  if (phase.includes('平') || phase.includes('稳')) return 55;
+  if (phase.includes('守') || phase.includes('防')) return 48;
+  if (phase.includes('撤')) return 28;
+  return 55;
 }
 
-function relTime(iso: string): string {
-  const sec = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (sec < 3600) return '刚刚';
-  if (sec < 86400) return `${Math.floor(sec / 3600)} 小时前`;
-  const d = Math.floor(sec / 86400);
-  return d === 1 ? '昨天' : `${d} 天前`;
-}
-
-// 军情（tab1）—— 沙盘：把「聊出来的东西」和「该做的事」陈列出来。
-// 一屏五章（章法排版，非行动不设框）：①玄墨断语卡 ②三势 ③今日军令卡 ④各线督办 ⑤麾下。
-// 数据全部来自真实对话产物（案卷/档案/命盘/会话），不预置结论；首登承接在问策页，此处不再触发建档弹层。
 export default function Home() {
   const s = useStore();
-  const accent = s.color().vars['--accent'];
+  const col = s.color();
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [chart, setChart] = useState<ChartSummary | null>(null);
-  const [reports, setReports] = useState<ReportItem[]>([]);
-  const [sessions, setSessions] = useState<SessionItem[]>([]);
   const und = s.me()?.understanding;
 
   const load = () => {
@@ -42,10 +44,8 @@ export default function Home() {
     if (s.isAuthed()) {
       store.loadMe(); // 刷新军师档案（对话/资料变化后三势结论随之更新）
       api.myChart().then((r) => setChart(r.chart)).catch(() => setChart(null));
-      api.reports().then(setReports).catch(() => setReports([]));
-      api.sessions().then(setSessions).catch(() => setSessions([]));
     } else {
-      setChart(null); setReports([]); setSessions([]);
+      setChart(null);
     }
   };
 
@@ -56,201 +56,141 @@ export default function Home() {
   });
 
   const goCounsel = () => Taro.switchTab({ url: '/pages/counsel/index' });
-  const goStudio = () => Taro.navigateTo({ url: '/pages/studio/index' });
-  const goRoster = () => Taro.navigateTo({ url: '/pages/roster/index' });
-  const openReport = (id: string) => Taro.navigateTo({ url: `/packages/work/report/index?id=${id}` });
-  const openThread = (agentKey: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${agentKey}&continue=1` });
-  const openSession = (id: string) => Taro.navigateTo({ url: `/pages/chat/index?sessionId=${id}` });
+  const goJunling = () => Taro.switchTab({ url: '/pages/junling/index' });
+  const goCalendar = () => Taro.navigateTo({ url: '/packages/work/calendar/index' });
 
-  const refresh = () => {
-    load();
-    Taro.showToast({ title: '军情已更新', icon: 'none' });
-  };
+  // ① 今日主要矛盾：案卷主判断优先，兜底军师档案主要矛盾/摘要。
+  const mainConflict = dossier?.judgment || und?.mainContradiction || und?.summary || '';
 
-  // ① 断语：案卷主判断（真实成果内容）；无案卷时用档案主要矛盾兜底
-  const verdict = dossier?.judgment || und?.mainContradiction || und?.summary || '';
-
-  // ② 三势：天势=命盘当月；市/人=档案研判结论，报告反查。
-  // 三行永远渲染（非 map/spread 派生，避免 forces 数据 shape 变化时行数跟着变）：
-  // 每行独立取值——有真结论显真结论，没有则显预填文案 + 入帐引导。
-  const forceReport = (match: string): ReportItem | undefined =>
-    reports.find((r) => r.title.includes(match) || r.type.includes(match));
+  // ② 三势研判：天势=命盘当月；市/人=档案 forces 研判结论。无真值时确定性兜底 + 「待研判」。
   const month = chart?.monthlyOutlook?.months?.find((x) => x.month === new Date().getMonth() + 1);
   const shishi = und?.forces?.shishi ?? null;
   const renshi = und?.forces?.renshi ?? null;
-  const shishiRep = forceReport('市势');
-  const renshiRep = forceReport('人势');
-  const forces: { key: string; desc: string; act: () => void }[] = [
+  const forces: { key: string; label: string; sub: string; score: number; hasData: boolean; desc: string; act: () => void }[] = [
     {
-      key: '天势',
-      desc: month ? `本月宜${month.phase}，按命盘逐月推演` : '留个生辰，可多看一层天时',
-      act: () => Taro.navigateTo({ url: '/packages/work/calendar/index' }),
+      key: 'tian', label: '天势', sub: '外部趋势',
+      score: phaseScore(month?.phase), hasData: !!month,
+      desc: month ? `本月宜${month.phase}${month.turning ? ' · 转折之月' : ''}` : '留个生辰，可多看一层天时',
+      act: goCalendar,
     },
     {
-      key: '市势',
-      desc: shishi ? `${shishi.verdict}${shishi.note ? ` · ${shishi.note}` : ''}` : shishiRep ? `已研判 · ${shishiRep.title}` : '尚未研判，入帐一议',
-      act: shishiRep ? () => openReport(shishiRep.id) : goCounsel,
+      key: 'shi', label: '市势', sub: '竞争市场',
+      score: verdictScore(shishi?.verdict), hasData: !!shishi,
+      desc: shishi ? `${shishi.verdict}${shishi.note ? ` · ${shishi.note}` : ''}` : '尚未研判，入帐一议',
+      act: goCounsel,
     },
     {
-      key: '人势',
-      desc: renshi ? `${renshi.verdict}${renshi.note ? ` · ${renshi.note}` : ''}` : renshiRep ? `已研判 · ${renshiRep.title}` : '尚未研判，入帐一议',
-      act: renshiRep ? () => openReport(renshiRep.id) : goCounsel,
+      key: 'ren', label: '人势', sub: '自身家底',
+      score: verdictScore(renshi?.verdict), hasData: !!renshi,
+      desc: renshi ? `${renshi.verdict}${renshi.note ? ` · ${renshi.note}` : ''}` : '尚未研判，入帐一议',
+      act: goCounsel,
     },
   ];
+  const radarValues: [number, number, number] = [forces[0].score, forces[1].score, forces[2].score];
 
-  // ③ 今日军令：≤3 条行内打卡（乐观更新）；命中能力映射的行给「去办」按钮
-  const todayDate = today();
-  const pending = pendingOrdersOf(dossier, todayDate);
-  const done = doneOrdersOf(dossier, todayDate);
-  const shownOrders = [...pending, ...done].slice(0, 3);
-  const onToggle = (id: string) => {
-    setDossier((cur) => (cur ? { ...cur, orders: cur.orders.map((o) => (o.id === id ? { ...o, done: !o.done } : o)) } : cur));
-    toggleOrder(id).then(setDossier).catch(() => refreshDossier().then(setDossier));
-  };
-  const dispatchOrder = (o: DossierOrder) => {
-    const cap = capabilityFor(o.capabilityKey);
-    if (!cap) return;
-    // external 配置就绪后走 navigateToMiniProgram / webview 外跳（届时补 app.config 白名单）；本期一律站内军师线程承接。
-    Taro.navigateTo({ url: `/pages/chat/index?agentKey=${cap.agentKey}&fresh=1&send=${encodeURIComponent(`${cap.prompt}\n军令：「${o.text}」`)}` });
-  };
+  // ③ 下一步就做：今日未办军令摘要，兜底军师档案待答问题。
+  const pending = pendingOrdersOf(dossier, today());
+  const nextSteps = (pending.length
+    ? pending.map((o) => o.text)
+    : (und?.nextQuestions || [])
+  ).slice(0, 3);
 
-  // ④ 各线督办：专业军师线程（非总军师）按 agentKey 取最新一条会话
-  const lines = (() => {
-    const seen = new Set<string>();
-    const out: SessionItem[] = [];
-    for (const it of sessions) {
-      if (it.agentKey === 'general' || seen.has(it.agentKey)) continue;
-      seen.add(it.agentKey);
-      out.push(it);
-    }
-    return out.slice(0, 5);
-  })();
+  // ④ 现在别做：案卷风险/禁区（casefile risks）。
+  const avoidList = (dossier?.risks || []).slice(0, 3);
+
+  const kicker = (letter: string, wide = '.28em', color = 'var(--ac)') =>
+    ({ display: 'block' as const, fontFamily: 'var(--serif)', fontSize: '12px', letterSpacing: wide, color, marginBottom: '14px' });
 
   return (
-    <Screen topInset className="battle">
-      <View className="pad">
-        {/* 页头：左「案卷」· 题「军情」· 右刷新 */}
-        <View className="battle-nav tab-page-head">
-          <Text className="bn-side left serif" onClick={() => Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
-          <Text className="bn-title serif">军情</Text>
-          <Text className="bn-side right" onClick={refresh}>↻</Text>
-        </View>
+    <Screen tab topInset className="junqing">
+      <View className="pad" style={{ paddingTop: '12px' }}>
+        <ProtoHeader kicker="看今日判断" title="军情" watermark="势" />
 
-        {/* ① 玄墨断语卡（全站唯一深底） */}
-        <View className="verdict-card ink-in" onClick={goCounsel}>
-          <View className="vc-seal seal-dot" style={{ background: accent }} />
-          {verdict ? (
-            <>
-              <Text className="vc-text t-display">{verdict}</Text>
-              <Text className="vc-mark t-mark">军师 · {markDate()}</Text>
-            </>
-          ) : (
-            <>
-              <Text className="vc-text t-display empty">军师尚未为你立断。{'\n'}先入帐一叙。</Text>
-              <Text className="vc-mark t-mark">去问策 ›</Text>
-            </>
-          )}
-        </View>
-
-        {/* ② 三势（题眉 + 细线 + 三行，非卡片） */}
-        <View className="chapter">
-          <View className="chapter-head">
-            <Text className="t-kicker">三 势</Text>
-            <View className="rule" />
-          </View>
-          {forces.map((f, i) => (
-            <View key={f.key} className={`force-row ink-in ink-in-${i + 1}`} onClick={f.act}>
-              <View className="seal-char" style={{ background: accent }}><Text>{f.key.slice(0, 1)}</Text></View>
-              <Text className="fr-desc t-body">{f.desc}</Text>
-              <Text className="fr-go">›</Text>
+        {mainConflict ? (
+          <>
+            {/* ① 今日主要矛盾 hero（水印「势」+ 左 3px 边大字） */}
+            <View className="proto-card" style={{ marginTop: '22px', padding: '24px 22px', position: 'relative', overflow: 'hidden', borderColor: 'var(--hair-2)' }}>
+              <Watermark char="势" size={88} opacity={0.1} top={4} right={16} />
+              <Text style={kicker('势')}>今 日 主 要 矛 盾</Text>
+              <Text style={{ display: 'block', fontFamily: 'var(--serif)', fontSize: '26px', fontWeight: 600, lineHeight: 1.5, position: 'relative', borderLeft: `3px solid ${col.hex}`, paddingLeft: '16px' }}>
+                {mainConflict}
+              </Text>
             </View>
-          ))}
-        </View>
 
-        {/* ③ 今日军令卡（可操作故有卡） */}
-        <View className="chapter">
-          <View className="chapter-head">
-            <Text className="t-kicker">今 日 军 令</Text>
-            <View className="rule" />
-          </View>
-          {shownOrders.length ? (
-            <View className="orders-card card ink-in">
-              {shownOrders.map((o) => {
-                const cap = capabilityFor(o.capabilityKey);
-                return (
-                  <View key={o.id} className="order-row">
-                    <View className={`order-check ${o.done ? 'on' : ''}`} style={o.done ? { background: accent, borderColor: accent } : {}} onClick={() => onToggle(o.id)}>
-                      {o.done ? <Icon name="check" size={12} color="#fff" /> : null}
-                    </View>
-                    <Text className={`order-text t-body ${o.done ? 'done' : ''}`}>{o.text}</Text>
-                    {cap && !o.done ? (
-                      <View className="order-dispatch pill" onClick={(e) => { e.stopPropagation?.(); dispatchOrder(o); }}>
-                        <Text>去办 · {ADVISOR_ALIAS[cap.agentKey] || cap.label}</Text>
+            {/* ② 三势研判：雷达 + 三条 meter */}
+            <View className="proto-card" style={{ marginTop: '18px', padding: '20px 22px' }}>
+              <Text style={kicker('势', '.28em', 'var(--mut)')}>三 势 研 判</Text>
+              <View style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                <ShiRadar values={radarValues} />
+                <View style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                  {forces.map((f) => (
+                    <View key={f.key} onClick={f.act}>
+                      <View style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
+                        <Text style={{ fontSize: '13px', fontWeight: 600, color: 'var(--tx)' }}>
+                          {f.label}<Text style={{ fontSize: '11px', color: 'var(--faint)', marginLeft: '6px', fontWeight: 400 }}>{f.sub}</Text>
+                        </Text>
+                        {f.hasData
+                          ? <Text style={{ fontSize: '16px', fontWeight: 600, color: col.hex }}>{f.score}</Text>
+                          : <Text style={{ fontSize: '11px', color: 'var(--faint)' }}>待研判</Text>}
                       </View>
-                    ) : null}
-                  </View>
-                );
-              })}
-              <View className="orders-foot" onClick={goStudio}>
-                <Text className="of-t">回填 · 复盘 · 详</Text>
-                <Text className="of-go">›</Text>
-              </View>
-            </View>
-          ) : (
-            <View className="orders-empty ink-in" onClick={goCounsel}>
-              <Text className="oe-t t-body">军令未立。让军师为你拆一道。</Text>
-              <Text className="oe-go">›</Text>
-            </View>
-          )}
-        </View>
-
-        {/* ④ 各线督办（题眉 + 行式；无则整章隐藏） */}
-        {lines.length ? (
-          <View className="chapter">
-            <View className="chapter-head">
-              <Text className="t-kicker">各 线 督 办</Text>
-              <View className="rule" />
-            </View>
-            {lines.map((it, i) => (
-              <View key={it.id} className={`line-row ink-in ink-in-${Math.min(i + 1, 5)}`} onClick={() => openSession(it.id)}>
-                <AdvisorAvatar agentKey={it.agentKey} size={30} />
-                <View className="lr-b">
-                  <View className="lr-top">
-                    <Text className="lr-name serif">{ADVISOR_ALIAS[it.agentKey] || it.agentName}</Text>
-                    <Text className="lr-time t-mark">{relTime(it.updatedAt)}</Text>
-                  </View>
-                  <Text className="lr-snippet">{it.snippet || it.title}</Text>
+                      <View style={{ height: '5px', background: 'var(--surf-3)', overflow: 'hidden' }}>
+                        <View style={{ height: '100%', width: `${f.score}%`, background: f.hasData ? col.hex : 'var(--hair-2)' }} />
+                      </View>
+                    </View>
+                  ))}
                 </View>
               </View>
-            ))}
-          </View>
-        ) : null}
+            </View>
 
-        {/* ⑤ 麾下（题眉 + 行式：五位创作军师，生态位） */}
-        <View className="chapter">
-          <View className="chapter-head">
-            <Text className="t-kicker">麾 下</Text>
-            <View className="rule" />
-            <Text className="chapter-more" onClick={goRoster}>点将 ›</Text>
-          </View>
-          {CAPABILITIES.map((c, i) => {
-            const a = s.agents().find((x) => x.key === c.agentKey);
-            if (!a) return null;
-            return (
-              <View key={c.key} className={`line-row ink-in ink-in-${Math.min(i + 1, 5)}`} onClick={() => openThread(c.agentKey)}>
-                <AdvisorAvatar agentKey={c.agentKey} size={30} />
-                <View className="lr-b">
-                  <View className="lr-top">
-                    <Text className="lr-name serif">{ADVISOR_ALIAS[c.agentKey] || a.name}</Text>
-                    <Text className="pill em" style={{ background: accent, borderColor: accent }}>生态</Text>
-                  </View>
-                  <Text className="lr-snippet">{a.name} · {c.label}</Text>
+            {/* ③④ 下一步就做 / 现在别做 双栏 */}
+            <View style={{ display: 'flex', gap: '14px', marginTop: '16px' }}>
+              <View className="proto-card" style={{ flex: 1, padding: '18px' }}>
+                <Text style={kicker('做', '.16em')}>下 一 步 就 做</Text>
+                <View style={{ display: 'flex', flexDirection: 'column', gap: '13px' }}>
+                  {nextSteps.length ? nextSteps.map((t, i) => (
+                    <View key={i} style={{ display: 'flex', gap: '9px', fontSize: '13.5px', lineHeight: 1.55 }}>
+                      <Text style={{ color: col.hex, fontWeight: 600, flex: 'none' }}>{cjkOrd(i + 1)}</Text>
+                      <Text style={{ color: 'var(--tx)' }}>{t}</Text>
+                    </View>
+                  )) : (
+                    <Text style={{ fontSize: '13px', lineHeight: 1.6, color: 'var(--mut)' }} onClick={goCounsel}>尚无待办 · 入帐一议 ›</Text>
+                  )}
                 </View>
-                <Text className="lr-go">›</Text>
               </View>
-            );
-          })}
-        </View>
+              <View className="proto-card" style={{ flex: 'none', width: '130px', padding: '18px' }}>
+                <Text style={{ ...kicker('别', '.16em', '#BC4A31') }}>现 在 别 做</Text>
+                <View style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  {avoidList.length ? avoidList.map((t, i) => (
+                    <Text key={i} style={{ fontSize: '12.5px', lineHeight: 1.55, color: 'var(--mut)' }}>{t}</Text>
+                  )) : (
+                    <Text style={{ fontSize: '12.5px', lineHeight: 1.55, color: 'var(--faint)' }}>暂无禁区</Text>
+                  )}
+                </View>
+              </View>
+            </View>
+
+            {/* ⑤ 把判断拆成今天的军令 CTA */}
+            <View
+              onClick={goJunling}
+              style={{ marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${col.hex}`, padding: '16px 18px', background: col.acg }}
+            >
+              <Text style={{ fontSize: '14.5px', fontWeight: 600, color: 'var(--tx)' }}>把判断拆成今天的军令</Text>
+              <Text style={{ color: col.hex, fontSize: '20px' }}>→</Text>
+            </View>
+          </>
+        ) : (
+          // 空态（未建档）：引导入帐
+          <View className="proto-card proto-card--lead" style={{ marginTop: '22px', padding: '24px 22px', position: 'relative', overflow: 'hidden' }}>
+            <Watermark char="势" size={88} opacity={0.08} top={4} right={16} />
+            <Text style={kicker('势')}>军 情 未 立</Text>
+            <Text style={{ display: 'block', fontFamily: 'var(--serif)', fontSize: '18px', lineHeight: 1.8, color: 'var(--tx)', position: 'relative' }}>
+              主公，军师尚未为你立断。{'\n'}先入帐一叙，我为你研判三势、点出主要矛盾。
+            </Text>
+            <View className="proto-btn" style={{ background: col.hex, marginTop: '18px', width: '100%' }} onClick={goCounsel}>
+              <Text>去 问 策</Text>
+            </View>
+          </View>
+        )}
       </View>
     </Screen>
   );

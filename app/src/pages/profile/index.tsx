@@ -1,134 +1,164 @@
 import { useState } from 'react';
-import { View, Text, Image } from '@tarojs/components';
+import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
-import Picker from '../../components/Picker';
 import Plans from '../../components/Plans';
+import EggDrawer, { type EggKind } from '../../components/EggDrawer';
+import { ProtoHeader, PowerRing } from '../../components/proto';
 import { useStore } from '../../hooks/useStore';
+import { COLORS } from '../../data/colors';
 import { api, type ProgressView } from '../../services/api';
 import './index.scss';
 
-// 主公页（tab3）—— 瘦身：用户卡 → 钱粮卡（合并权益三格）→ 细线菜单（≤10 行）→ 社群卡。
-// 删除：经营统计三宫格、深度能力解锁卡、方案库/完整履历/模块管理行、「提醒与日历」「私有化部署」toast 假入口。
+// 主公 tab（原型 isZhugong）—— 你自己：
+//  档案卡（顶 3px 边）+ 算力环 & 三行统计 + 本命色换色排 + 彩蛋三行（卦/历/机 → 弹层）
+//  + 收纳的细行菜单 + 命理合规说明。
 export default function Profile() {
   const s = useStore();
   const color = s.color();
-  const accent = color.vars['--accent'];
+  const accent = color.hex;
   const me = s.me();
-  const [showPicker, setShowPicker] = useState(false);
-  const [showPlans, setShowPlans] = useState(false);
   const [prog, setProg] = useState<ProgressView | null>(null);
+  const [projCount, setProjCount] = useState(0);
+  const [showPlans, setShowPlans] = useState(false);
+  const [egg, setEgg] = useState<EggKind>(null);
 
   useDidShow(() => {
-    s.setTab(3);
+    s.setTab(4);
     Taro.getCurrentInstance().page?.getTabBar?.();
+    s.loadMe();
+    s.loadAgents();
+    if (!s.isAuthed()) { setProg(null); setProjCount(0); return; }
     api.progress().then((r) => setProg(r.progress)).catch(() => setProg(null));
+    api.projects().then((p) => setProjCount(p.length)).catch(() => setProjCount(0));
   });
 
-  // 战略账本：有数据才显示（连续复盘或使用天数攒起来之前不亮空账本）
-  const showLedger = !!prog && (prog.streak >= 3 || prog.usageDays >= 14);
+  // 本月算力用量 %（不限量按满环处理）
+  const q = me?.tokenQuota;
+  const powerPct = !q ? 0 : q.unlimited || q.limit < 0 ? 100 : q.limit <= 0 ? 0 : Math.min(100, Math.round((q.used / q.limit) * 100));
+  const agentCount = s.agents().filter((a) => a.type !== 'creative').length;
 
-  const rows = [
-    { ic: 'insight', t: '个人档案', s: briefLine(me?.understanding), onClick: () => Taro.navigateTo({ url: '/pages/brief/index' }) },
-    { ic: 'grid', t: '我的案卷', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/projects/index' }) },
-    { ic: 'attach', t: '资料库', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/knowledge/index' }) },
-    { ic: 'chart', t: '数据源', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/bindings/index' }) },
-    { ic: 'doc', t: '钱粮明细', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/credits/index' }) },
-    ...(showLedger ? [{ ic: 'layers', t: '战略账本', s: prog?.rank || '', onClick: () => Taro.navigateTo({ url: '/packages/work/ledger/index' }) }] : []),
-    { ic: 'spark', t: '送你一卦', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/gift/index' }) },
-    { ic: 'user', t: '军师社群', s: '', onClick: () => Taro.navigateTo({ url: '/packages/work/community/index' }) },
-    { ic: 'crown', t: '本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
-    { ic: 'shield', t: '设置', s: '', onClick: () => Taro.navigateTo({ url: '/pages/settings/index' }) },
+  const stats: { k: string; v: string; hot?: boolean }[] = [
+    { k: '企业档案', v: `案卷 ${projCount} 卷` },
+    { k: '在役军师', v: `${agentCount} 位`, hot: true },
+    { k: '连续经营', v: `${prog?.usageDays ?? 0} 天` },
   ];
 
+  const eggs: { mark: string; name: string; desc: string; kind: Exclude<EggKind, null> }[] = [
+    { mark: '卦', name: '送你一卦', desc: '算一张可分享的命盘卡片', kind: 'fortune' },
+    { mark: '历', name: '天时日历', desc: '全年攻守节奏一图看全', kind: 'calendar' },
+    { mark: '机', name: '天机记账', desc: '把军师的预言记下来对账', kind: 'ledger' },
+  ];
+
+  const nav = (url: string) => Taro.navigateTo({ url });
+  const menu: { ic: string; t: string; s: string; onClick: () => void }[] = [
+    { ic: 'insight', t: '个人档案', s: briefLine(me?.understanding), onClick: () => nav('/pages/brief/index') },
+    { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => nav('/packages/work/projects/index') },
+    { ic: 'attach', t: '资料库', s: '', onClick: () => nav('/packages/work/knowledge/index') },
+    { ic: 'chart', t: '数据源', s: '', onClick: () => nav('/packages/work/bindings/index') },
+    { ic: 'doc', t: '钱粮明细', s: '', onClick: () => nav('/packages/work/credits/index') },
+    { ic: 'layers', t: '战略账本', s: prog?.rank || '', onClick: () => nav('/packages/work/ledger/index') },
+    { ic: 'user', t: '军师社群', s: '', onClick: () => nav('/packages/work/community/index') },
+    { ic: 'shield', t: '设置', s: '', onClick: () => nav('/pages/settings/index') },
+  ];
+
+  const industry = me?.tenant.industry || me?.tenant.name || '待完善行业';
+
   return (
-    <Screen topInset>
-      <View className="pad account">
-        {/* 页头：居中「主公」· 右「设置」 */}
-        <View className="account-nav tab-page-head">
-          <Text className="an-title serif">主公</Text>
-          <Text className="an-side serif" onClick={() => Taro.navigateTo({ url: '/pages/settings/index' })}>设置</Text>
-        </View>
+    <Screen tab topInset className="profile">
+      <View className="pad" style={{ paddingTop: '12px' }}>
+        <ProtoHeader kicker="你自己" title="主公" watermark="公" />
 
-        {/* 用户卡 */}
-        <View className="account-user-card ink-in" onClick={() => Taro.navigateTo({ url: '/pages/settings/index' })}>
-          {me?.user.avatarUrl ? (
-            <Image className="au-av" src={me.user.avatarUrl} mode="aspectFill" />
-          ) : (
-            <View className="au-av au-av-ph serif">
-              {me?.user.name ? me.user.name[0] : <Icon name="user" size={20} color="#fff" />}
+        {/* 档案卡（顶 3px 本命色边） → 设置 */}
+        <View className="proto-card proto-card--top" style={{ marginTop: '22px', padding: '22px', display: 'flex', alignItems: 'center', gap: '16px' }} onClick={() => nav('/pages/settings/index')}>
+          <View style={{ width: '60px', height: '60px', borderRadius: '50%', background: accent, color: 'var(--onac)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '27px', fontWeight: 600, flex: 'none', fontFamily: 'var(--serif)' }}>
+            {me?.user.name ? me.user.name[0] : '主'}
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={{ display: 'block', fontSize: '20px', fontWeight: 600, color: 'var(--tx)', fontFamily: 'var(--serif)' }}>{me?.user.name || '完善你的资料'}</Text>
+            <Text style={{ display: 'block', fontSize: '13px', color: 'var(--mut)', marginTop: '2px' }}>{industry}</Text>
+            <View
+              style={{ display: 'inline-flex', marginTop: '9px', fontSize: '11px', letterSpacing: '.08em', color: accent, border: `1px solid ${accent}`, padding: '3px 11px' }}
+              onClick={(e) => { e.stopPropagation(); setShowPlans(true); }}
+            >
+              <Text>{me?.plan?.name || '免费版'}</Text>
             </View>
-          )}
-          <View className="au-b">
-            <Text className="au-name serif">{me?.user.name || '完善你的资料 ›'}</Text>
-            <Text className="au-sub">{orgLine(me) || '点此设置称呼与公司，让产出更贴合你'}</Text>
-          </View>
-          {me?.plan?.name ? <Text className="au-vip pill">{me.plan.name}</Text> : null}
-        </View>
-
-        {/* 钱粮卡（合并权益三格，行式 kv，点开方案弹层） */}
-        <View className="grain-card card ink-in ink-in-1" onClick={() => setShowPlans(true)}>
-          <View className="gc-row">
-            <Text className="gc-k t-body">钻石</Text>
-            <Text className="gc-v serif">{me ? (me.creditBalance < 0 ? '不限量' : `${me.creditBalance}`) : '—'}</Text>
-          </View>
-          <View className="gc-row">
-            <Text className="gc-k t-body">本月产出额度</Text>
-            <Text className="gc-v serif">{quotaShort(me)}</Text>
-          </View>
-          <View className="gc-row">
-            <Text className="gc-k t-body">套餐</Text>
-            <Text className="gc-v serif">{me?.plan?.name || '未开通'}</Text>
-          </View>
-          <View className="gc-foot">
-            <Text className="gc-more">方案与额度 ›</Text>
           </View>
         </View>
 
-        {/* 细线菜单（非卡片堆） */}
-        <View className="menu-lines ink-in ink-in-2">
-          {rows.map((r) => (
-            <View key={r.t} className="menu-line" onClick={r.onClick}>
-              <View className="ml-ic"><Icon name={r.ic} size={14} color={accent} /></View>
-              <Text className="ml-t t-body">{r.t}</Text>
-              {r.sw ? <View className="ml-sw" style={{ background: accent }} /> : null}
-              <Text className="ml-s t-mark">{r.s}</Text>
-              <Text className="ml-go">›</Text>
+        {/* 算力环 + 三行统计 */}
+        <View style={{ marginTop: '14px', display: 'flex', gap: '1px', background: 'var(--hair)', border: '1px solid var(--hair)' }}>
+          <View style={{ flex: 'none', width: '132px', background: 'var(--surf)', padding: '18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <PowerRing percent={powerPct} value={powerPct} max={100} label="本月算力" size={78} />
+          </View>
+          <View style={{ flex: 1, background: 'var(--surf)', padding: '6px 20px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            {stats.map((st, i) => (
+              <View key={st.k}>
+                <View style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: '13.5px', padding: '9px 0' }}>
+                  <Text style={{ color: 'var(--mut)' }}>{st.k}</Text>
+                  <Text style={{ color: st.hot ? accent : 'var(--tx)', fontWeight: 600, fontFamily: 'var(--serif)' }}>{st.v}</Text>
+                </View>
+                {i < stats.length - 1 ? <View style={{ height: '1px', background: 'var(--hair)' }} /> : null}
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {/* 本命色换色排（6 色圆环，即点即全局换 --ac） */}
+        <Text className="proto-kicker" style={{ display: 'block', color: 'var(--faint)', letterSpacing: '.24em', margin: '26px 2px 14px' }}>本 命 色 · 随 时 更 换</Text>
+        <View style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          {COLORS.map((c) => {
+            const on = c.key === color.key;
+            return (
+              <View
+                key={c.key}
+                onClick={() => s.setColor(c.key)}
+                style={{
+                  width: '44px', height: '44px', borderRadius: '50%', background: c.hex,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--onac)', fontSize: '14px',
+                  boxShadow: on ? `0 0 0 2px var(--bg), 0 0 0 4px ${c.hex}` : 'none',
+                }}
+              >
+                {on ? <Text>✓</Text> : null}
+              </View>
+            );
+          })}
+        </View>
+
+        {/* 彩蛋三行 → 弹层 */}
+        <Text className="proto-kicker" style={{ display: 'block', color: 'var(--faint)', letterSpacing: '.24em', margin: '26px 2px 14px' }}>彩 蛋 · 好 玩 的 小 心 思</Text>
+        <View style={{ borderTop: '1px solid var(--hair)' }}>
+          {eggs.map((e) => (
+            <View key={e.kind} style={{ display: 'flex', alignItems: 'center', gap: '15px', borderBottom: '1px solid var(--hair)', padding: '16px 2px' }} onClick={() => setEgg(e.kind)}>
+              <View style={{ width: '40px', height: '40px', border: '1px solid var(--hair-2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '19px', color: accent, fontWeight: 600, flex: 'none', fontFamily: 'var(--serif)' }}>{e.mark}</View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ display: 'block', fontSize: '15.5px', fontWeight: 600, color: 'var(--tx)' }}>{e.name}</Text>
+                <Text style={{ display: 'block', fontSize: '12px', color: 'var(--mut)' }}>{e.desc}</Text>
+              </View>
+              <Text style={{ color: 'var(--faint)', fontSize: '18px' }}>›</Text>
             </View>
           ))}
         </View>
+        <Text style={{ display: 'block', marginTop: '14px', fontSize: '11px', color: 'var(--faint)', textAlign: 'center', lineHeight: 1.9 }}>命理类玩法设有合规总开关 · 可按渠道整体关闭</Text>
 
-        {/* 军师社群 · 服务老师（主题卡） */}
-        <View className="account-teacher ink-in ink-in-3" onClick={() => Taro.navigateTo({ url: '/packages/work/community/index' })}>
-          <View className="at-b">
-            <Text className="at-t">军师社群 · 服务老师</Text>
-            <Text className="at-s">分班与入群任务 · 服务老师带你把军师用起来</Text>
-          </View>
-          <Text className="at-em">进入</Text>
+        {/* 收纳的细行菜单（别丢功能，减到清爽） */}
+        <View style={{ marginTop: '22px', borderTop: '1px solid var(--hair)' }}>
+          {menu.map((r) => (
+            <View key={r.t} style={{ display: 'flex', alignItems: 'center', gap: '13px', borderBottom: '1px solid var(--hair)', padding: '15px 2px' }} onClick={r.onClick}>
+              <View style={{ width: '26px', display: 'flex', justifyContent: 'center' }}><Icon name={r.ic} size={14} color={accent} /></View>
+              <Text style={{ flex: 1, fontSize: '14px', color: 'var(--tx)', fontFamily: 'var(--serif)' }}>{r.t}</Text>
+              {r.s ? <Text style={{ fontSize: '11px', color: 'var(--faint)', fontFamily: 'var(--serif)', marginRight: '6px' }}>{r.s}</Text> : null}
+              <Text style={{ color: 'var(--faint)', fontSize: '16px' }}>›</Text>
+            </View>
+          ))}
         </View>
       </View>
 
-      <Picker open={showPicker} first={false} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
       <Plans open={showPlans} onClose={() => setShowPlans(false)} />
+      <EggDrawer kind={egg} onClose={() => setEgg(null)} />
     </Screen>
   );
-}
-
-// 企业行：公司 · 行业，缺失项自动省略；都没有则返回空（由调用方走「完善资料」提示）。
-function orgLine(me: { tenant: { name?: string | null; industry?: string | null } } | null): string {
-  if (!me) return '';
-  return [me.tenant.name, me.tenant.industry].filter(Boolean).join(' · ');
-}
-
-// 本月产出额度（短版）：不限量 / 已用百分比 / 未开通
-function quotaShort(me: { tokenQuota?: { limit: number; used: number; unlimited: boolean } } | null): string {
-  const q = me?.tokenQuota;
-  if (!q) return '—';
-  if (q.unlimited || q.limit < 0) return '不限量';
-  if (!q.limit) return '未开通';
-  const pct = Math.min(100, Math.round((q.used / q.limit) * 100));
-  return `已用 ${pct}%`;
 }
 
 function briefLine(understanding?: { maturity: string; evidenceCount: { memories: number; projects: number; knowledge: number; sessions: number } }): string {

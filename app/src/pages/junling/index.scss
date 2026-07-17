@@ -1,0 +1,40 @@
+/* 军令 tab —— 直角案卷「今日战役」（WO-P2 重绘）。
+   卡体/按钮走 app.scss 的 .proto-* 类；此处只补页面局部件（小按钮/回填输入/次级入口）。 */
+.junling {
+  /* 卡内小操作按钮：数据回填 / 去办 */
+  .jl-mini-btn {
+    display: inline-flex; align-items: center;
+    font-family: var(--serif); font-size: 12px; font-weight: 500;
+    color: var(--mut);
+    border: 1px solid var(--hair-2); border-radius: 2px;
+    padding: 5px 12px;
+  }
+  .jl-mini-btn--ac { font-weight: 600; }
+
+  /* 回填内联输入 */
+  .jl-fill-input {
+    width: 100%; box-sizing: border-box;
+    background: var(--bg);
+    border: 1px solid var(--hair-2); border-radius: 2px;
+    padding: 9px 10px;
+    color: var(--tx); font-family: var(--serif); font-size: 13px;
+    text-align: center;
+  }
+  .jl-fill-commit {
+    flex: none;
+    display: grid; place-items: center;
+    min-width: 56px; height: 36px;
+    color: var(--onac); font-family: var(--serif); font-size: 13px; font-weight: 500;
+    border-radius: 2px;
+  }
+
+  /* 次级入口行：回填汇总 / 周计划 / 复盘 → studio */
+  .jl-more {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 14px; padding: 15px 18px;
+    border: 1px solid var(--hair); border-radius: 2px;
+    background: var(--surf);
+    .jl-more-t { font-family: var(--serif); font-size: 13.5px; color: var(--mut); }
+    .jl-more-go { color: var(--ac); font-size: 18px; }
+  }
+}

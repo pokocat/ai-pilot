@@ -1,49 +1,5 @@
-/* 锦囊页：产出书架，纵向单流，一种卡片语言。 */
-.satchel .satchel-head { margin-bottom: 12px; }
-.satchel .sh-title { font-size: 22px; font-weight: 600; color: var(--ink); }
-
-/* 顶部两枚常设卷宗（唯一横向并列） */
-.satchel .scroll-row { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
-.satchel .scroll-card {
-  width: 48.5%; box-sizing: border-box; padding: 14px;
-  border-radius: var(--r-lg);
+/* 锦囊 tab —— 直角案卷重绘（原型 isJinnang）。
+   四宫格库 + 方案版本时间线，视觉走 proto-card / proto-kicker + 内联，无需页面级私有类。 */
+.satchel {
+  .pad { padding-bottom: 40px; }
 }
-.satchel .sc-ic {
-  width: 30px; height: 30px; border-radius: var(--r-sm);
-  display: flex; align-items: center; justify-content: center; margin-bottom: 9px;
-}
-.satchel .sc-t { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); }
-.satchel .sc-d { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
-
-/* 过滤 chips：未选中中性、选中本命色柔底 */
-.satchel .satchel-filter { margin-bottom: 14px; }
-.satchel .chip {
-  background: var(--surface); color: var(--ink-2); border: 1px solid var(--line);
-  font-weight: 500;
-}
-.satchel .chip.on { background: var(--accent-soft); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
-
-/* 报告卡：印章字 + 标题 + 摘要 + 日期 + 版本数 */
-.satchel .satchel-card {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px; margin-bottom: 10px; border-radius: var(--r-lg);
-}
-.satchel .sk-stamp {
-  width: 40px; height: 40px; flex-shrink: 0; border-radius: var(--r-md);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px; font-weight: 600;
-}
-.satchel .sk-b { flex: 1; min-width: 0; }
-.satchel .sk-t { display: block; font-size: 15px; font-weight: 600; color: var(--ink); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.satchel .sk-sub { display: block; margin-top: 3px; font-size: 12px; color: var(--ink-3); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.satchel .sk-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
-.satchel .sk-date { font-size: 11px; color: var(--ink-3); }
-.satchel .sk-ver { font-size: 11px; color: var(--ink-3); background: var(--surface-2); padding: 1px 7px; border-radius: 999px; }
-.satchel .sk-go { color: var(--ink-3); font-size: 18px; flex-shrink: 0; }
-
-/* 空态 */
-.satchel .satchel-empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 60px 24px; }
-.satchel .satchel-empty .e-ic { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; }
-.satchel .et { font-size: 15px; font-weight: 600; color: var(--ink); }
-.satchel .es { margin-top: 6px; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); }
-.satchel .es-link { margin-top: 14px; font-size: 13px; font-weight: 600; }

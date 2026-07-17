@@ -86,15 +86,15 @@
 .pt .pt-t { font-family: var(--serif); font-size: 13px; line-height: 1.6; color: var(--ink-2); flex: 1; }
 .retry-link { display: inline-block; margin-top: 6px; font-size: 13px; }
 
-/* —— 选择笺（choices）：军师问句下横排纸笺——纸底细线描边宋体，按下墨色实底反白 —— */
+/* —— 选择笺 / 快捷追问 chips（choices）：直角案卷风——本命色描边 2px 角，按下实底反白 —— */
 .choice-laze { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; max-width: 88%; }
 .laze {
-  padding: 7px 13px; border: 1px solid var(--line); border-radius: var(--r-sm);
-  background: var(--paper);
+  padding: 7px 13px; border: 1px solid var(--ac); border-radius: 2px;
+  background: var(--surf);
 }
-.laze Text { font-family: var(--serif); font-size: 13px; color: var(--ink-2); line-height: 1.4; }
-.laze:active { background: var(--ink); border-color: var(--ink); }
-.laze:active Text { color: var(--paper); }
+.laze Text { font-family: var(--serif); font-size: 13px; color: var(--ac); line-height: 1.4; }
+.laze:active { background: var(--ac); border-color: var(--ac); }
+.laze:active Text { color: var(--onac); }
 
 /* —— 请缨帖（proposal）：居中窄卡——题眉「请缨」+ 帖文 + 两枚选择笺 + 收尾小印 —— */
 .proposal {

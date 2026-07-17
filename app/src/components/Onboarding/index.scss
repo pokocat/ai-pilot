@@ -1,0 +1,151 @@
+/* 入帐引导 · 直角案卷皮（原型 splash/color/industry/judge）。全屏铺满宿主 Screen。 */
+.onb {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  font-family: var(--serif);
+  color: var(--tx);
+}
+.nos::-webkit-scrollbar { width: 0; display: none; }
+.nos { scrollbar-width: none; }
+
+/* ===================== SPLASH ===================== */
+.onb-splash {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 0 46px;
+}
+.onb-vert {
+  position: absolute; top: 0; bottom: 0; right: 30px;
+  writing-mode: vertical-rl;
+  font-size: 18px; letter-spacing: .42em; opacity: .5;
+  display: flex; align-items: center;
+  animation: fadeIn 1.2s var(--ease) .5s both;
+}
+.onb-corner {
+  position: absolute; top: calc(96px + env(safe-area-inset-top)); left: 34px;
+  font-size: 14px; letter-spacing: .5em; color: var(--mut);
+  animation: fadeIn 1s var(--ease) .2s both;
+}
+.onb-logo-wrap { position: relative; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; }
+.onb-logo-ring {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 172px; height: 172px; border: 1px solid; border-radius: 50%; opacity: .28;
+}
+.onb-logo {
+  font-size: 108px; font-weight: 600; line-height: 1; letter-spacing: .06em; white-space: nowrap;
+  position: relative; animation: fadeUp .9s var(--ease) both;
+}
+.onb-rule { width: 52px; height: 2px; transform-origin: center; animation: drawRule .8s var(--ease) .4s both; margin-bottom: 26px; }
+.onb-slogan {
+  font-size: 22px; font-weight: 500; letter-spacing: .08em; margin-bottom: 16px;
+  text-align: center; line-height: 1.5; white-space: pre-line;
+  animation: fadeUp .9s var(--ease) .15s both;
+}
+.onb-tags {
+  display: flex; align-items: center; gap: 18px; font-size: 14px; color: var(--mut);
+  margin-bottom: 52px; animation: fadeUp .9s var(--ease) .3s both;
+}
+.onb-tag-sep { width: 1px; height: 15px; background: var(--hair-2); }
+.onb-seat {
+  width: 100%; padding: 16px 0; animation: fadeUp .9s var(--ease) .48s both;
+}
+.onb-foot {
+  margin-top: 22px; font-size: 12px; letter-spacing: .18em; color: var(--faint);
+  animation: fadeIn 1s var(--ease) .8s both;
+}
+
+/* ===================== 逐步问答 ===================== */
+.onb-step {
+  position: absolute; inset: 0;
+  padding: calc(58px + env(safe-area-inset-top)) 28px calc(34px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; overflow-y: auto;
+  animation: fadeIn .3s var(--ease) both;
+}
+.onb-step-kicker { margin-bottom: 14px; letter-spacing: .4em; }
+.onb-lead { display: block; font-size: 14px; color: var(--mut); line-height: 1.8; margin-bottom: 6px; }
+.onb-q { display: block; font-size: 27px; font-weight: 600; line-height: 1.35; margin: 8px 0 22px; color: var(--tx); }
+.onb-desc { display: block; font-size: 13.5px; color: var(--mut); line-height: 1.8; margin-bottom: 22px; }
+
+/* 列表（行业/阶段/痛点） */
+.onb-list { border-top: 1px solid var(--hair); }
+.onb-list-row {
+  display: flex; align-items: center; gap: 18px;
+  border-bottom: 1px solid var(--hair); padding: 18px 4px;
+}
+.onb-list-row:active { background: var(--surf); }
+.onb-idx { flex: none; width: 34px; font-size: 23px; font-weight: 400; color: var(--faint); }
+.onb-idx--free { font-size: 18px; }
+.onb-list-name { flex: 1; font-size: 18px; font-weight: 600; color: var(--tx); }
+.onb-arrow { font-size: 20px; }
+.onb-free { display: flex; gap: 8px; padding: 16px 4px; border-bottom: 1px solid var(--hair); }
+.onb-free-input {
+  flex: 1; background: var(--surf); border: 1px solid var(--hair-2); border-radius: 2px;
+  padding: 11px 13px; color: var(--tx); font-family: var(--serif); font-size: 14px;
+}
+.onb-free-send { padding: 0 16px; font-size: 13px; letter-spacing: .06em; }
+
+/* 本命色宫格 */
+.onb-color-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: var(--hair); border: 1px solid var(--hair);
+}
+.onb-color-cell { position: relative; background: var(--surf); padding: 20px 18px; }
+.onb-color-cell:active { opacity: .9; }
+.onb-color-tick { position: absolute; top: 14px; right: 15px; font-size: 13px; }
+.onb-color-disc { width: 34px; height: 34px; border-radius: 50%; margin-bottom: 13px; }
+.onb-color-name { display: block; font-size: 18px; font-weight: 600; margin-bottom: 4px; color: var(--tx); }
+.onb-color-motto { display: block; font-size: 12.5px; color: var(--mut); line-height: 1.5; }
+.onb-remark { margin-top: 22px; padding: 18px 20px; border-left: 2px solid; }
+.onb-remark-t { display: block; margin-top: 10px; font-size: 16.5px; line-height: 1.7; color: var(--tx); }
+.onb-next { margin-top: 18px; width: 100%; padding: 15px 0; }
+
+/* ===================== 生辰笺 ===================== */
+.onb-bazi {
+  margin-top: 4px; padding: 18px; border: 1px solid var(--hair); border-radius: 2px; background: var(--surf);
+  display: flex; flex-direction: column; gap: 16px;
+}
+.onb-bz-row { display: flex; align-items: center; gap: 14px; }
+.onb-bz-row.col { flex-direction: column; align-items: flex-start; gap: 10px; }
+.onb-bz-lb { flex: none; width: 62px; font-size: 13px; color: var(--mut); }
+.onb-bz-segs { display: flex; gap: 8px; }
+.onb-bz-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: 100%; }
+.onb-chip {
+  padding: 7px 12px; border: 1px solid var(--hair-2); border-radius: 2px; background: var(--bg);
+  font-family: var(--serif); font-size: 13px; color: var(--mut); text-align: center;
+}
+.onb-chip.on { color: var(--onac); }
+.onb-bz-date { flex: 1; border: 1px solid var(--hair-2); border-radius: 2px; padding: 10px 12px; background: var(--bg); }
+.onb-bz-date-v { font-size: 14px; color: var(--tx); }
+.onb-bz-date-ph { font-size: 14px; color: var(--faint); }
+.onb-bz-input {
+  flex: 1; border: 1px solid var(--hair-2); border-radius: 2px; padding: 10px 12px;
+  background: var(--bg); color: var(--tx); font-family: var(--serif); font-size: 14px;
+}
+.onb-bz-acts { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+.onb-bz-skip { font-size: 13px; color: var(--faint); text-decoration: underline; text-underline-offset: 3px; }
+.onb-bz-submit { padding: 10px 20px; font-size: 14px; letter-spacing: .06em; }
+
+/* ===================== 军师首判 ===================== */
+.onb-judge {
+  position: absolute; inset: 0;
+  padding: calc(54px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column;
+  animation: fadeIn .3s var(--ease) both;
+}
+.onb-judge-head { display: flex; align-items: center; gap: 13px; margin-bottom: 20px; padding-bottom: 18px; border-bottom: 1px solid var(--hair); }
+.onb-judge-avatar { flex: none; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.onb-judge-avatar Text { font-size: 22px; font-weight: 600; color: var(--onac); }
+.onb-judge-id { flex: 1; }
+.onb-judge-name { display: block; font-size: 17px; font-weight: 600; color: var(--tx); }
+.onb-judge-sub { display: block; font-size: 12px; color: var(--mut); margin-top: 2px; }
+.onb-judge-dots { display: flex; gap: 5px; }
+.onb-jd { width: 6px; height: 6px; border-radius: 50%; animation: blink 1.2s infinite; }
+.onb-jd.d2 { animation-delay: .2s; }
+.onb-jd.d3 { animation-delay: .4s; }
+.onb-judge-body { flex: 1; overflow-y: auto; }
+.onb-judge-typed { display: block; font-size: 18px; line-height: 2.1; min-height: 150px; margin-top: 16px; color: var(--tx); }
+.onb-caret { display: inline-block; width: 2px; height: 18px; vertical-align: -3px; animation: caret 1s step-end infinite; }
+.onb-judge-forged { margin-top: 24px; padding: 22px; border-top: 2px solid; }
+.onb-judge-forged-t { display: block; margin-top: 12px; font-size: 17px; font-weight: 600; line-height: 1.6; color: var(--tx); }
+.onb-enter { margin-top: 18px; width: 100%; padding: 16px 0; }
