@@ -17,7 +17,7 @@
 }
 
 .safe-hbtn {
-  border-radius: 10px;
+  border-radius: var(--r-sm);
   background: var(--surface-2);
   display: flex;
   align-items: center;

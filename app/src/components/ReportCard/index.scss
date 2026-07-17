@@ -8,7 +8,7 @@
 }
 .rh { display: flex; align-items: center; gap: 11px; }
 .rh .ic-wrap {
-  width: 38px; height: 38px; border-radius: 11px;
+  width: 38px; height: 38px; border-radius: var(--r-sm);
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .rh .tt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -25,7 +25,7 @@
 
 .rb { margin-top: 12px; }
 .skeleton { display: flex; flex-direction: column; gap: 9px; padding: 4px 0; }
-.skl { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--surface-2), var(--line-2), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.3s infinite; }
+.skl { height: 12px; border-radius: var(--r-sm); background: linear-gradient(90deg, var(--surface-2), var(--line-2), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.3s infinite; }
 .skl.h { height: 15px; width: 40%; }
 .skl.w90 { width: 90%; } .skl.w70 { width: 70%; } .skl.w50 { width: 50%; }
 @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
@@ -35,7 +35,7 @@
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .sh { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
 .sh .no {
-  width: 18px; height: 18px; border-radius: 6px; color: #fff;
+  width: 18px; height: 18px; border-radius: var(--r-sm); color: #fff;
   font-size: 11px; font-weight: 600; text-align: center; line-height: 18px; flex-shrink: 0;
 }
 .sh-t { font-family: var(--serif); font-size: 14.5px; font-weight: 600; color: var(--ink); }
@@ -54,7 +54,7 @@
 .acts { display: flex; gap: 9px; margin-top: 13px; }
 .act {
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 14px; border-radius: 12px; font-size: 13px; font-weight: 500;
+  padding: 10px 14px; border-radius: var(--r-sm); font-size: 13px; font-weight: 500;
 }
 .act.primary { color: #fff; flex: 1; }
 .act.saved { background: var(--accent-soft); color: var(--accent-ink); flex: 1; }

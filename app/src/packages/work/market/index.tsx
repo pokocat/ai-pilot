@@ -62,7 +62,7 @@ export default function Market() {
             <View className="module-b">
               <View className="module-top">
                 <Text className="module-cat" style={{ color: accent }}>{m.category}</Text>
-                <Text className={`module-tier tier-${m.tier}`}>{m.price}</Text>
+                <Text className="pill">{m.price}</Text>
               </View>
               <Text className="module-t">{m.title}</Text>
               <Text className="module-d">{m.desc}</Text>
@@ -86,7 +86,7 @@ export default function Market() {
             <View key={sk.id} className="skill-card card" onClick={() => goChat('general', sk.prompt)}>
               <View className="skill-head">
                 <View className="skill-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={sk.icon} size={16} color={accent} /></View>
-                <Text className={`module-tier tier-${sk.tier}`}>{sk.cost}</Text>
+                <Text className="pill">{sk.cost}</Text>
               </View>
               <Text className="skill-t">{sk.title}</Text>
               <Text className="skill-d">{sk.desc}</Text>

@@ -10,6 +10,8 @@ function App({ children }: PropsWithChildren) {
     // 智能体注册表是公共数据，随时可拉；用户信息仅在已登录时拉取（内部已判断）
     store.loadAgents();
     store.loadMe();
+    // 锦囊朱砂点：启动时比对最新报告时间与本地已看时间
+    store.refreshSatchelDot();
   });
 
   return (

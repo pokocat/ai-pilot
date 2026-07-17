@@ -7,7 +7,7 @@
 .au-sheet {
   width: 100%; max-width: 600px;
   background: var(--bg, #fff);
-  border-radius: 22px 22px 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
   padding: 10px 22px calc(26px + env(safe-area-inset-bottom)) 22px;
   display: flex; flex-direction: column; align-items: center;
   box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
@@ -15,7 +15,7 @@
 
 .au-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 0 18px; }
 
-.au-ic { width: 56px; height: 56px; border-radius: 17px; display: flex; align-items: center; justify-content: center; }
+.au-ic { width: 56px; height: 56px; border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; }
 .au-name { font-size: 18px; font-weight: 600; color: var(--ink); margin-top: 12px; }
 .au-role { font-size: 12.5px; color: var(--ink-3); margin-top: 4px; }
 .au-deliver { font-size: 12px; font-weight: 600; margin-top: 6px; }
@@ -23,7 +23,7 @@
 .au-price {
   width: 100%; margin-top: 18px; padding: 14px 16px;
   display: flex; align-items: center; justify-content: space-between;
-  border-radius: 14px; background: var(--surface, #f6f6f7);
+  border-radius: var(--r-md); background: var(--surface, #f6f6f7);
 }
 .au-pl { display: flex; flex-direction: column; gap: 5px; }
 .au-pk { font-size: 11px; color: var(--ink-3); }
@@ -38,7 +38,7 @@
 
 .au-btns { width: 100%; display: flex; gap: 12px; margin-top: 20px; }
 .au-btn {
-  flex: 1; height: 48px; border-radius: 14px;
+  flex: 1; height: 48px; border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center; gap: 6px;
   font-size: 14.5px; font-weight: 600;
 }

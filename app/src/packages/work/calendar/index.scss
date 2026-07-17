@@ -11,7 +11,7 @@
 .tc-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .tc-cell {
   width: calc((100% - 24px) / 4);
-  padding: 12px 4px 10px; border-radius: 13px; text-align: center;
+  padding: 12px 4px 10px; border-radius: var(--r-md); text-align: center;
   background: var(--surface); border: 1px solid var(--line);
   box-sizing: border-box;
 }
@@ -48,14 +48,14 @@
 }
 .tcal .pf-opt.on Text, .tcal .pf-opt.on text { color: #fff; }
 .tcal .pf-input {
-  height: 46px; padding: 0 14px; border: 1px solid var(--line, #e7e4db); border-radius: 12px;
+  height: 46px; padding: 0 14px; border: 1px solid var(--line, #e7e4db); border-radius: var(--r-sm);
   background: var(--surface-2, #f3f1ea); font-size: 14.5px; color: var(--ink);
 }
 .tc-date { display: flex; gap: 8px; margin-top: 12px; }
 .tc-date .tc-y { flex: 1.4; }
 .tc-date .tc-md { flex: 1; }
 .tc-btn {
-  margin-top: 22px; height: 50px; border-radius: 14px;
+  margin-top: 22px; height: 50px; border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
   background: var(--accent); box-shadow: 0 10px 24px var(--accent-glow);
 }
@@ -66,7 +66,7 @@
 
 /* 生成图片按钮 + 结果 */
 .tc-imgbtn {
-  margin-top: 12px; height: 48px; border-radius: 14px;
+  margin-top: 12px; height: 48px; border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 10px 24px var(--accent-glow);
 }
@@ -76,10 +76,10 @@
 .tc-imgbtn:active { opacity: .85; }
 
 .tc-result { margin-top: 20px; }
-.tc-img { width: 100%; border-radius: 16px; box-shadow: 0 12px 30px rgba(22, 25, 29, .18); }
+.tc-img { width: 100%; border-radius: var(--r-md); box-shadow: 0 12px 30px rgba(22, 25, 29, .18); }
 .tc-img-acts { display: flex; gap: 12px; margin-top: 16px; }
 .tc-img-act {
-  flex: 1; height: 46px; border-radius: 13px;
+  flex: 1; height: 46px; border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
 }
 .tc-img-act:active { opacity: .85; }

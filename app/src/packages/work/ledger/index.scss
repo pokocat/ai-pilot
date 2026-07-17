@@ -9,10 +9,10 @@
 
 .lg-scroll { height: calc(100vh - 110px); padding: 0 16px; box-sizing: border-box; }
 
-.lg-stat { margin: 12px 0 14px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
+.lg-stat { margin: 12px 0 14px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--surface-2); }
 .lg-stat-x { display: block; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; font-weight: 600; }
 
-.lg-item { margin-bottom: 10px; padding: 13px 14px; border-radius: 13px; background: var(--surface-2); }
+.lg-item { margin-bottom: 10px; padding: 13px 14px; border-radius: var(--r-md); background: var(--surface-2); }
 .lg-item-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .lg-seq { font-size: 13px; font-weight: 600; color: var(--accent); }
 .lg-badge { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; }
@@ -24,7 +24,7 @@
 .lg-acts { display: flex; gap: 10px; margin-top: 11px; }
 .lg-act {
   flex: 1; text-align: center; font-size: 13px; font-weight: 600;
-  padding: 8px 0; border-radius: 10px; border: 1px solid var(--line); color: var(--ink-2);
+  padding: 8px 0; border-radius: var(--r-sm); border: 1px solid var(--line); color: var(--ink-2);
 }
 .lg-act:active { opacity: .7; }
 .lg-due { display: block; margin-top: 8px; font-size: 11px; color: var(--ink-3); }

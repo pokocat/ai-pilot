@@ -103,7 +103,7 @@ export default function Plans({ open, onClose }: Props) {
           <Text className="ps-title">方案与权益点</Text>
           <View className="ps-bal">
             <Icon name="diamond" size={13} color={accent} />
-            <Text style={{ color: accent, fontWeight: 700 }}> {balance < 0 ? '不限量' : `${balance} 点`}</Text>
+            <Text style={{ color: accent, fontWeight: 600 }}> {balance < 0 ? '不限量' : `${balance} 点`}</Text>
           </View>
         </View>
         <Text className="ps-sub">权益点用于深度方案与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>

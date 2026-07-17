@@ -68,6 +68,19 @@ export interface ProgressView {
   nextRank: { rank: string; requirement: string } | null;
 }
 
+// —— 入帐对话（Chat-First · WO-A2）：服务端确定性状态机的前端契约（对齐 server/src/routes/onboarding.ts）——
+export type OnboardingStage = 'ASK_INDUSTRY' | 'ASK_STAGE' | 'ASK_PAIN' | 'ASK_BAZI' | 'ASK_COLOR' | 'FORGE' | 'DONE';
+export interface OnboardingMsg {
+  text: string;
+  choices?: { label: string; value: string }[];
+  widget?: 'bazi-form' | 'color-pick';
+}
+export interface OnboardingStateResult { stage: OnboardingStage; messages: OnboardingMsg[]; }
+export interface OnboardingAdvanceBody { answer?: string; bazi?: BaziBody; color?: string; skip?: boolean }
+export interface OnboardingAdvanceResult { messages: OnboardingMsg[]; stage: OnboardingStage; done: boolean }
+export interface OnboardingResultView { ready: boolean; reportMessageId?: string }
+export interface CounselOpening { text: string; chips: string[] }
+
 export interface ChartSummary {
   engineVersion: string;
   hourKnown: boolean;
@@ -346,6 +359,17 @@ export const api = {
   // —— 报告网页版（render_report → 自有域名 /api/r/:id）：产出后按需生成可分享链接 ——
   renderReport: (sessionId: string, messageId: string): Promise<{ htmlUrl?: string; cdnUrl?: string }> =>
     IS_MOCK ? Promise.resolve({}) : request<{ htmlUrl?: string; cdnUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
+
+  // —— 入帐对话（新用户引导 · WO-A2）——
+  onboardingState: () =>
+    IS_MOCK ? mock.onboardingState() : request<OnboardingStateResult>('/onboarding/state'),
+  onboardingAdvance: (body: OnboardingAdvanceBody) =>
+    IS_MOCK ? mock.onboardingAdvance(body) : request<OnboardingAdvanceResult>('/onboarding/advance', 'POST', body),
+  onboardingResult: () =>
+    IS_MOCK ? mock.onboardingResult() : request<OnboardingResultView>('/onboarding/result'),
+  // 回帐一句（老用户当日首开 counsel 的主动开场）
+  counselOpening: () =>
+    IS_MOCK ? mock.counselOpening() : request<CounselOpening>('/counsel/opening'),
 };
 
 export type { GenRequest, SaveLibRequest, MessageRef as Ref };

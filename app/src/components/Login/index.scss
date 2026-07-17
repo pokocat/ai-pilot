@@ -45,7 +45,7 @@
 /* —— 操作区 —— */
 .lg-actions { display: flex; flex-direction: column; align-items: center; }
 .lg-wechat {
-  width: 100%; height: 52px; border-radius: 16px; box-sizing: border-box;
+  width: 100%; height: 52px; border-radius: var(--r-md); box-sizing: border-box;
   display: flex; align-items: center; justify-content: center; gap: 9px;
   background: #F4F1E8; box-shadow: 0 8px 24px rgba(0,0,0,.20);
 }
@@ -63,17 +63,17 @@
 
 .lg-field {
   display: flex; align-items: center; gap: 10px; box-sizing: border-box;
-  height: 50px; padding: 0 16px; margin-bottom: 12px; border-radius: 14px;
+  height: 50px; padding: 0 16px; margin-bottom: 12px; border-radius: var(--r-md);
   background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.16);
 }
 .lg-pre { font-size: 15px; font-weight: 600; color: #E9C982; }
 .lg-input { flex: 1; height: 50px; font-size: 15px; color: #F3F0E6; }
 .lg-ph { color: rgba(243,240,230,.40); }
-.lg-code { font-size: 13px; font-weight: 600; white-space: nowrap; color: #5FB389; }
+.lg-code { font-size: 13px; font-weight: 600; white-space: nowrap; color: var(--accent-bright); }
 .lg-code.off { color: rgba(243,240,230,.40); }
 
 .lg-cta {
-  margin-top: 8px; height: 52px; border-radius: 14px;
+  margin-top: 8px; height: 52px; border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
   font-size: 16px; font-weight: 600; color: #2A1E06;
   background: linear-gradient(135deg, #E6C374, #A87F2C);
@@ -84,7 +84,7 @@
 /* —— 完善资料：一键填入 + 头像 + 昵称 + 可选绑定手机 —— */
 .lg-onetap-wx {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  height: 46px; margin: 18px 0 4px; border-radius: 14px;
+  height: 46px; margin: 18px 0 4px; border-radius: var(--r-md);
   background: rgba(255,255,255,.07); border: 1px solid rgba(95,179,137,.45);
 }
 .lg-onetap-wx-t { font-size: 14.5px; font-weight: 600; color: #EAF5EE; }

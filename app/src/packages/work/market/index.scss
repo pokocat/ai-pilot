@@ -19,7 +19,7 @@
 
 .market-page .module-card { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border-radius: var(--r-md); margin-bottom: 10px; }
 .market-page .module-card:active { opacity: .85; }
-.market-page .module-ic { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.market-page .module-ic { width: 40px; height: 40px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .market-page .module-b { flex: 1; min-width: 0; }
 .market-page .module-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .market-page .module-cat { font-size: 11px; font-weight: 600; }
@@ -40,25 +40,16 @@
 .market-page .skill-card { width: 48.5%; box-sizing: border-box; padding: 13px; border-radius: var(--r-md); min-height: 128px; margin-bottom: 10px; }
 .market-page .skill-card:active { opacity: .85; }
 .market-page .skill-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.market-page .skill-ic { width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+.market-page .skill-ic { width: 32px; height: 32px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; }
 .market-page .skill-t { display: block; margin-top: 9px; color: var(--ink); font-size: 13px; font-weight: 600; }
 .market-page .skill-d { display: block; margin-top: 5px; color: var(--ink-3); font-size: 10.5px; line-height: 1.5; }
 .market-page .skill-s { display: block; margin-top: 6px; font-size: 11px; font-weight: 600; }
 
-/* 费用小标签（全站同一套） */
-.market-page .module-tier {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-height: 20px; padding: 0 7px; border-radius: 999px;
-  font-size: 10px; font-weight: 600; flex-shrink: 0;
-}
-.market-page .tier-free { color: var(--accent-ink); background: var(--accent-soft); }
-.market-page .tier-power { color: var(--warn); background: rgba(168,119,46,.12); }
-.market-page .tier-plan { color: var(--ink); background: var(--surface-2); }
-.market-page .tier-single { color: var(--ink-2); background: var(--surface-2); }
+/* 费用小标签（全站同一套：细线描边纸底 pill，见 app.scss .pill） */
 
 .market-page .mm-action {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  height: 46px; margin-top: 16px; border-radius: 13px;
+  height: 46px; margin-top: 16px; border-radius: var(--r-md);
   color: #FBFAF6; font-size: 14px; font-weight: 600;
   box-shadow: 0 12px 24px var(--accent-glow);
 }

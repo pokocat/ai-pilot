@@ -79,7 +79,7 @@ export default function Project() {
 
         {tab === 'situation' && (
           <View className="pd-list">
-            <View className="pd-item card" onClick={() => Taro.switchTab({ url: '/pages/studio/index' })}>
+            <View className="pd-item card" onClick={() => Taro.navigateTo({ url: '/pages/studio/index' })}>
               <View className="pd-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="check" size={16} color={accent} /></View>
               <View className="pd-ib"><Text className="pd-it">在「执行」承接军令与复盘</Text><Text className="pd-im">认可方案后拆成军令，打卡、回填、复盘都在执行页</Text></View>
               <Text className="pd-go">›</Text>

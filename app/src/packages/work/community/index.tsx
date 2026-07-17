@@ -65,7 +65,7 @@ export default function Community() {
           </View>
         </View>
 
-        <View className="cm-submit" style={{ background: accent }} onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
+        <View className="cm-submit" style={{ background: accent }} onClick={() => Taro.switchTab({ url: '/pages/counsel/index' })}>
           <Text>先进军师参谋室</Text>
           <Icon name="send" size={16} color="#FBFAF6" />
         </View>

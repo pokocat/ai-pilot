@@ -6,7 +6,7 @@
 .plans-sheet {
   width: 100%; max-width: 600px; max-height: 84vh;
   background: var(--bg, #fff);
-  border-radius: 22px 22px 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
   padding: 10px 20px calc(18px + env(safe-area-inset-bottom)) 20px;
   display: flex; flex-direction: column; align-items: center;
   box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
@@ -19,7 +19,7 @@
 
 .ps-list { width: 100%; margin-top: 14px; flex: 1; }
 .ps-plan {
-  border: 1px solid var(--line, #ececec); border-radius: 14px; padding: 14px;
+  border: 1px solid var(--line, #ececec); border-radius: var(--r-md); padding: 14px;
   margin-bottom: 12px; background: var(--surface, #fafafa);
 }
 .ps-plan.feat { border-color: var(--accent); }
@@ -33,7 +33,7 @@
 .pp-feats { margin-top: 9px; display: flex; flex-direction: column; gap: 4px; }
 .pp-feat { font-size: 11px; color: var(--ink-3); display: flex; align-items: center; }
 .pp-btn {
-  margin-top: 13px; height: 40px; border-radius: 11px; border: 1px solid;
+  margin-top: 13px; height: 40px; border-radius: var(--r-sm); border: 1px solid;
   display: flex; align-items: center; justify-content: center;
   font-size: 13.5px; font-weight: 600;
 }

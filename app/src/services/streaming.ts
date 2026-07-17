@@ -12,6 +12,8 @@ export interface StreamHandlers {
   onReportSection?: (section: DeliverableSection & { index?: number }) => void;
   onReportFooter?: (data: Pick<Deliverable, 'trust' | 'actions'>) => void;
   onMemory?: (data: { learned?: boolean; agentName?: string }) => void;
+  // 出策请缨（§4.2）：SSE propose 事件 → 军师递「请缨帖」
+  onPropose?: (data: { title: string; prompt: string; declinePrompt: string; readiness: number }) => void;
   onDone?: (messageId?: string) => void;
   onError?: (message: string) => void;
 }
@@ -44,6 +46,7 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
       id?: string; text?: string; messageId?: string; message?: string; kind?: string;
       title?: string; icon?: string; meta?: string; index?: number; h?: string; b?: string; list?: string[];
       trust?: string; actions?: string[]; learned?: boolean; agentName?: string;
+      prompt?: string; declinePrompt?: string; readiness?: number;
     } & ChatReply;
     if (e.event === 'session') h.onSession?.(d?.id ?? '');
     else if (e.event === 'token') { state.rendered = true; h.onToken?.(d?.text ?? ''); }
@@ -69,6 +72,9 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
       });
     }
     else if (e.event === 'memory') h.onMemory?.({ learned: d?.learned, agentName: d?.agentName });
+    else if (e.event === 'propose' && h.onPropose) {
+      h.onPropose({ title: d?.title ?? '', prompt: d?.prompt ?? '', declinePrompt: d?.declinePrompt ?? '', readiness: typeof d?.readiness === 'number' ? d.readiness : 0 });
+    }
     else if (e.event === 'done') { if (state.rendered) h.onDone?.(d?.messageId); }
     else if (e.event === 'error') { ok = false; h.onError?.(d?.message ?? '生成失败'); }
   }

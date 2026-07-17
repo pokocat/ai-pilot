@@ -12,7 +12,10 @@ import type {
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
 } from '../../../shared/contracts';
-import type { ChartSummary, ProgressView } from './api';
+import type {
+  ChartSummary, ProgressView,
+  OnboardingStage, OnboardingMsg, OnboardingStateResult, OnboardingAdvanceBody, OnboardingAdvanceResult, OnboardingResultView, CounselOpening,
+} from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
 import { agentForText } from '../data/intents';
@@ -109,6 +112,8 @@ interface UserData {
   creditLog: MyCreditItem[];
   profile: Profile | null; sessions: SessionRec[]; library: LibItem[];
   projects: ProjectRec[]; reports: ReportDocRec[]; knowledge: KnowledgeRec[];
+  // 入帐对话进度（WO-A2 mock 状态机）
+  onbStage?: string; onbReady?: boolean; onbReportMsgId?: string; onbSessionId?: string;
 }
 
 const uid = (p = '') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -411,6 +416,70 @@ function saveReportVersionLocal(d: UserData, opts: { title: string; type: string
   if (opts.projectId) doc.projectId = opts.projectId;
   if (opts.agentKey) doc.agentKey = opts.agentKey;
   return { reportId: doc.id, version, created, changed: true };
+}
+
+// —— 入帐对话 mock 状态机（对齐 server/src/routes/onboarding.ts 的文案与流程）——
+const OB_STAGE_CHOICES = ['尚在筹备', '刚开张，未见利', '有进项，起伏不定', '站稳了，想再上一层'];
+const OB_PAIN = ['增长乏力', '现金流', '融资', '组织 / 团队', '定位 / 竞争'];
+const OB_COLOR_LABELS: Record<string, string> = { green: '墨绿', gold: '财金', red: '朱砂', blue: '黛蓝', purple: '绛紫', iron: '玄铁' };
+const OB_GREET_1 = (name: string) => `${name}，坐。既入此帐，往后你的局，我与你一同看。`;
+const OB_GREET_2 = '开局不必长谈——答我几问，我便知该如何辅佐你。';
+const OB_DONE_TEXT = '断语在此，收好。往后你每多告诉我一分，我便多看准一分。有事直说；无事，我也会寻你。';
+const OB_TXT: Record<Exclude<OnboardingStage, 'DONE'>, string> = {
+  ASK_INDUSTRY: '先说营生。你如今做的，是哪一路生意？',
+  ASK_STAGE: '知道了。这一路走到哪一步了？',
+  ASK_PAIN: '最要紧的一问：眼下最让你夜里睡不安稳的，是哪一桩？',
+  ASK_BAZI: '还有一问，答不答随你。留个生辰，我能多看一层天时——何时宜攻，何时宜守。不信这一套，也不碍事。',
+  ASK_COLOR: '最后一桩。择一色，作你的帅旗——往后帐中器物，皆随此色。',
+  FORGE: '够了。情报虽薄，已可落笔。容我片刻，为你写下第一道《初见断语》——你我初见，我眼中你的局。',
+};
+function obChoices(options: string[], freeLabel: string): { label: string; value: string }[] {
+  return [...options.map((o) => ({ label: o, value: o })), { label: freeLabel, value: '__free__' }];
+}
+function obMessagesFor(stage: OnboardingStage, name: string): OnboardingMsg[] {
+  switch (stage) {
+    case 'ASK_INDUSTRY':
+      return [
+        { text: OB_GREET_1(name) },
+        { text: OB_GREET_2 },
+        { text: OB_TXT.ASK_INDUSTRY, choices: obChoices(SURVEY[0].options, '其他，我自己说') },
+      ];
+    case 'ASK_STAGE':
+      return [{ text: OB_TXT.ASK_STAGE, choices: OB_STAGE_CHOICES.map((o) => ({ label: o, value: o })) }];
+    case 'ASK_PAIN':
+      return [{ text: OB_TXT.ASK_PAIN, choices: obChoices(OB_PAIN, '一言难尽，我自己说') }];
+    case 'ASK_BAZI':
+      return [{ text: OB_TXT.ASK_BAZI, widget: 'bazi-form', choices: [{ label: '不看这层', value: '__skip__' }] }];
+    case 'ASK_COLOR':
+      return [{ text: OB_TXT.ASK_COLOR, widget: 'color-pick' }];
+    case 'FORGE':
+      return [{ text: OB_TXT.FORGE }];
+    case 'DONE':
+      return [];
+  }
+}
+function obGeneralSession(d: UserData): SessionRec {
+  let s = d.sessions.find((x) => x.agentKey === 'general' && x.title === '入帐');
+  if (!s) {
+    s = { id: uid('s-'), agentKey: 'general', title: '入帐', projectId: null, createdAt: now(), updatedAt: now(), messages: [] };
+    d.sessions.push(s);
+  }
+  return s;
+}
+// FORGE：确定性拼一份《初见断语》落库 + 追一条 DONE 收束句，供 ready 后 restore 呈现。
+function obForge(d: UserData, sess: SessionRec): void {
+  const tpl = buildDeliverable('战略体检', d);
+  const deliverable: Deliverable = { ...tpl, title: '初见断语', icon: 'doc' };
+  const msgId = uid('m-');
+  sess.messages.push({ id: msgId, role: 'report', content: deliverable, at: now() });
+  sess.messages.push({ id: uid('m-'), role: 'assistant', content: { text: OB_DONE_TEXT, onbStage: 'DONE' }, at: now() } as SessionMessage);
+  sess.updatedAt = now();
+  saveReportVersionLocal(d, { title: deliverable.title, type: '初见断语', agentKey: 'general', content: deliverable, authorKind: 'agent', sessionId: sess.id });
+  d.onbReportMsgId = msgId;
+  d.onbSessionId = sess.id;
+  d.onbReady = true;
+  d.onbStage = 'DONE';
+  d.onboarded = true;
 }
 
 function ingestKnowledgeLocal(d: UserData, opts: { kind: string; title?: string | null; text: string; projectId?: string | null; sourceType: string; sourceId?: string | null; tags?: string[] }): KnowledgeRec {
@@ -723,6 +792,67 @@ export const mock = {
     const { token, d } = current();
     d.sessions = d.sessions.filter((s) => s.id !== id); save(token, d);
     return delay({ ok: true });
+  },
+
+  // —— 入帐对话（WO-A2）——
+  async onboardingState(): Promise<OnboardingStateResult> {
+    const { d } = current();
+    const stage: OnboardingStage = d.onboarded ? 'DONE' : ((d.onbStage as OnboardingStage) || 'ASK_INDUSTRY');
+    return delay({ stage, messages: obMessagesFor(stage, meaningfulM(d.name) || '主公') }, 200);
+  },
+  async onboardingAdvance(body: OnboardingAdvanceBody): Promise<OnboardingAdvanceResult> {
+    const { token, d } = current();
+    const name = meaningfulM(d.name) || '主公';
+    const cur: OnboardingStage = (d.onbStage as OnboardingStage) || 'ASK_INDUSTRY';
+    if (cur === 'FORGE' || cur === 'DONE') {
+      return delay({ messages: obMessagesFor(cur, name), stage: cur, done: cur === 'DONE' }, 200);
+    }
+    const sess = obGeneralSession(d);
+    const answer = (body.answer ?? '').trim();
+    let next: OnboardingStage;
+    switch (cur) {
+      case 'ASK_INDUSTRY':
+        sess.messages.push({ id: uid('m-'), role: 'user', content: { text: answer }, at: now() });
+        d.profile = { ...(d.profile ?? {}), industry: answer } as Profile;
+        next = 'ASK_STAGE'; break;
+      case 'ASK_STAGE':
+        sess.messages.push({ id: uid('m-'), role: 'user', content: { text: answer }, at: now() });
+        d.profile = { ...(d.profile ?? {}), stage: answer } as Profile;
+        next = 'ASK_PAIN'; break;
+      case 'ASK_PAIN':
+        sess.messages.push({ id: uid('m-'), role: 'user', content: { text: answer }, at: now() });
+        d.profile = { ...(d.profile ?? {}), pain: answer } as Profile;
+        next = 'ASK_BAZI'; break;
+      case 'ASK_BAZI':
+        sess.messages.push({ id: uid('m-'), role: 'user', content: { text: body.skip || !body.bazi ? '（这层先不看）' : '（已留生辰）' }, at: now() });
+        next = 'ASK_COLOR'; break;
+      case 'ASK_COLOR': {
+        const color = (body.color ?? '').trim();
+        if (color) d.benmingColor = color;
+        sess.messages.push({ id: uid('m-'), role: 'user', content: { text: `帅旗定为${OB_COLOR_LABELS[color] ?? color}` }, at: now() });
+        next = 'FORGE'; break;
+      }
+      default:
+        next = 'DONE';
+    }
+    d.onbStage = next;
+    if (next === 'FORGE') {
+      obForge(d, sess); // mock 同步产出《初见断语》，result 立即 ready
+      save(token, d);
+      return delay({ messages: obMessagesFor('FORGE', name), stage: 'FORGE', done: false }, 300);
+    }
+    save(token, d);
+    return delay({ messages: obMessagesFor(next, name), stage: next, done: false }, 300);
+  },
+  async onboardingResult(): Promise<OnboardingResultView> {
+    const { d } = current();
+    return delay(d.onbReportMsgId ? { ready: true, reportMessageId: d.onbReportMsgId } : { ready: false }, 200);
+  },
+  async counselOpening(): Promise<CounselOpening> {
+    const { d } = current();
+    const topic = d.sessions.filter((s) => s.title && !['新对话', '入帐'].includes(s.title)).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))[0]?.title;
+    if (topic) return delay({ text: `上回议到${topic}。今日想从何处接着说？`, chips: ['接着上回说', '近来有新状况', '做个战略体检'] }, 200);
+    return delay({ text: '回来了。今日想从何处入手？', chips: ['做个战略体检', '说说最近的难题'] }, 200);
   },
 
   async generate(body: GenRequest): Promise<GenResult> {

@@ -30,7 +30,7 @@
 .pk-sub { display: block; font-size: 13px; color: var(--ink-2); margin: -10px 0 18px; }
 
 .pk-hero {
-  border-radius: 20px; padding: 26px 20px; position: relative; overflow: hidden;
+  border-radius: var(--r-lg); padding: 26px 20px; position: relative; overflow: hidden;
   display: flex; flex-direction: column; align-items: center; min-height: 150px; justify-content: center;
 }
 .pk-wm {
@@ -38,7 +38,7 @@
   color: rgba(255, 255, 255, .12); line-height: 1;
 }
 .pk-seal {
-  width: 46px; height: 46px; border: 1.5px solid; border-radius: 8px;
+  width: 46px; height: 46px; border: 1.5px solid; border-radius: var(--r-sm);
   display: flex; align-items: center; justify-content: center; margin-bottom: 12px;
 }
 .pk-seal Text { color: #fff; font-size: 22px; font-weight: 600; }
@@ -63,7 +63,7 @@
 .pk-swatch Text.on { color: var(--ink); font-weight: 600; }
 
 .pk-cta {
-  height: 50px; border-radius: 14px; color: #fff;
+  height: 50px; border-radius: var(--r-md); color: #fff;
   display: flex; align-items: center; justify-content: center;
   font-size: 15px; font-weight: 600;
 }
@@ -71,13 +71,13 @@
 
 .pf-id { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
 .pf-input {
-  height: 46px; padding: 0 14px; border: 1px solid var(--line, #e7e4db); border-radius: 12px;
+  height: 46px; padding: 0 14px; border: 1px solid var(--line, #e7e4db); border-radius: var(--r-sm);
   background: var(--surface-2, #f3f1ea); font-size: 14.5px; color: var(--ink);
 }
 .pf-name { display: flex; align-items: center; gap: 10px; }
 .pf-name .pf-input { flex: 1; }
 .pf-alias {
-  flex: 0 0 auto; height: 46px; padding: 0 12px; border-radius: 12px;
+  flex: 0 0 auto; height: 46px; padding: 0 12px; border-radius: var(--r-sm);
   display: flex; align-items: center; gap: 5px;
 }
 .pf-alias Text { font-size: 13px; font-weight: 600; color: var(--ink-2); }

@@ -20,8 +20,8 @@
 .cd-qhead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
 .cd-ql { font-size: 13px; color: rgba(255, 255, 255, .6); }
 .cd-qv { font-size: 15px; color: var(--accent-bright); }
-.cd-track { height: 7px; border-radius: 4px; background: rgba(255, 255, 255, .12); overflow: hidden; }
-.cd-fill { height: 100%; border-radius: 4px; }
+.cd-track { height: 7px; border-radius: var(--r-sm); background: rgba(255, 255, 255, .12); overflow: hidden; }
+.cd-fill { height: 100%; border-radius: var(--r-sm); }
 
 .cd-sech { display: block; font-size: 15px; font-weight: 600; color: var(--ink); margin: 24px 0 2px; }
 .cd-secs { display: block; font-size: 12px; color: var(--ink-3); margin-bottom: 6px; }
