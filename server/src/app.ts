@@ -7,6 +7,7 @@ import { authRoutes } from './routes/auth.js';
 import { metaRoutes } from './routes/meta.js';
 import { agentRoutes } from './routes/agents.js';
 import { profileRoutes } from './routes/profile.js';
+import { onboardingRoutes } from './routes/onboarding.js';
 import { sayingRoutes } from './routes/sayings.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { libraryRoutes } from './routes/library.js';
@@ -71,6 +72,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(metaRoutes, { prefix: '/api' });
   await app.register(agentRoutes, { prefix: '/api' });
   await app.register(profileRoutes, { prefix: '/api' });
+  await app.register(onboardingRoutes, { prefix: '/api' }); // 主动军师入帐状态机（Chat-First 重构）
   await app.register(sayingRoutes, { prefix: '/api' });
   await app.register(sessionRoutes, { prefix: '/api' });
   await app.register(libraryRoutes, { prefix: '/api' });

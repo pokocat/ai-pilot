@@ -13,6 +13,7 @@ import { reserveQuota, assertPlanActive, ensureQuota, type QuotaReservation } fr
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
+import { DELIVERABLES } from '../data/deliverables.js';
 import type { MessageRef, Deliverable, ChatReply } from '../llm/schema.js';
 import { extractAndRecordProphecies } from '../services/prophecyLog.js';
 import { resolveMode } from '../services/intent.js';
@@ -220,14 +221,16 @@ export async function sessionRoutes(app: FastifyInstance) {
         const learn = async () => learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId });
         if (!wantsDeliverableRequest(text)) {
           const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
-          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object } });
+          // 出策请缨（§4.2 火候）：/generate-sync 同构分支——返回体带 proposal，并持久化进消息。
+          const proposal = await evaluateProposal({ sessionId: session.id, agentKey, onDemand, deliverableKey: effective?.deliverableKey, maturity: ctx.understandingMaturity });
+          const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: (proposal ? { ...replyChat, proposal } : replyChat) as object } });
           harvestProphecies(user, agentKey, replyChat.text);
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
           const creditBalance = creditReservation?.balance ?? 0;
           const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
           return {
-            sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat,
+            sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, proposal,
             memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
           };
         }
@@ -418,13 +421,16 @@ export async function sessionRoutes(app: FastifyInstance) {
           else { reply2 = ev.result; usage = ev.usage; }
         }
         send('chat', reply2);
-        const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object } });
+        // 出策请缨（§4.2 火候）：满足条件则追 propose 事件，并把 proposal 持久化进本条 assistant 消息。
+        const proposal = await evaluateProposal({ sessionId: session.id, agentKey, onDemand, deliverableKey: effective?.deliverableKey, maturity: ctx.understandingMaturity });
+        const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: (proposal ? { ...reply2, proposal } : reply2) as object } });
         harvestProphecies(user, agentKey, reply2?.text);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
         const creditBalance = creditReservation?.balance ?? 0;
         const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
         send('credit', { balance: creditBalance, tokenQuota });
+        if (proposal) send('propose', proposal);
         send('done', { messageId: msg.id });
       } else if (onDemand) {
         send('meta', { kind: 'report' });
@@ -564,4 +570,39 @@ function setupSSE(reply: FastifyReply) {
 
 function wantsDeliverableRequest(text: string): boolean {
   return /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|(?:重新)?出.{0,4}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|战略体检|转成军令|生成纪要/.test(text);
+}
+
+// —— 出策契约（Chat-First 重构 · WO-S §4.2）：火候规则（确定性）——
+// propose 当且仅当：on-demand 成果型（今天只有 general）∧ understanding 非 empty
+//   ∧ 本会话自上次报告以来 ≥ 5 轮用户发言 ∧ 距上次 propose ≥ 3 轮（被拒后冷却）。
+export interface Proposal { title: string; prompt: string; declinePrompt: string; readiness: number }
+async function evaluateProposal(opts: {
+  sessionId: string; agentKey: string; onDemand: boolean;
+  deliverableKey: string | null | undefined;
+  maturity?: 'empty' | 'forming' | 'ready';
+}): Promise<Proposal | null> {
+  if (!opts.onDemand || opts.agentKey !== 'general' || !opts.deliverableKey) return null;
+  if (!opts.maturity || opts.maturity === 'empty') return null;
+  const userTurnsSince = (after?: Date) =>
+    prisma.message.count({ where: { sessionId: opts.sessionId, role: 'user', ...(after ? { createdAt: { gt: after } } : {}) } });
+  const lastReport = await prisma.message.findFirst({
+    where: { sessionId: opts.sessionId, role: 'report' }, orderBy: { createdAt: 'desc' }, select: { createdAt: true },
+  });
+  const turnsSinceReport = await userTurnsSince(lastReport?.createdAt);
+  if (turnsSinceReport < 5) return null;
+  const lastPropose = await prisma.message.findFirst({
+    where: { sessionId: opts.sessionId, role: 'assistant', contentJson: { path: ['proposal'], not: Prisma.AnyNull } },
+    orderBy: { createdAt: 'desc' }, select: { createdAt: true },
+  });
+  if (lastPropose) {
+    const turnsSincePropose = await userTurnsSince(lastPropose.createdAt);
+    if (turnsSincePropose < 3) return null;
+  }
+  const title = (opts.deliverableKey && DELIVERABLES[opts.deliverableKey]?.title) || '破局方案';
+  return {
+    title,
+    prompt: `出一份《${title}》`, // 天然命中 wantsDeliverableRequest（出一份 + …… + 方案），零新后端路径
+    declinePrompt: '先别出，再问我两个最关键的问题',
+    readiness: Math.min(1, turnsSinceReport / 7),
+  };
 }

@@ -51,7 +51,7 @@ export function mockDeliverable(ctx: GenContext): Deliverable {
   const sections = tpl.sections.map((s) => ({
     h: s.h,
     b: s.b ? s.b.replaceAll('{PAIN}', pain) : undefined,
-    list: s.list,
+    list: s.list ? s.list.map((item) => item.replaceAll('{PAIN}', pain)) : undefined,
   }));
   const refs = referenceNote(ctx);
   if (refs.length) sections.push({ h: '参考依据', b: undefined, list: refs });

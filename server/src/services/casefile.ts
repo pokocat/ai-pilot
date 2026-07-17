@@ -3,6 +3,7 @@
 // 不预置任何业务结论；对齐率/连续天数等计数一律由服务端从这些事件行算出（禁止 AI 现编）。
 import { prisma } from '../db.js';
 import { now } from './clock.js';
+import { matchCapability } from '../data/capabilities.js';
 
 export interface DeliverableSectionInput {
   h: string;
@@ -24,7 +25,7 @@ export interface CasefileView {
   updatedAt: string;
   judgment: string;
   risks: string[];
-  orders: { id: string; text: string; from: string; tag: string; date: string; done: boolean; aligned: boolean | null }[];
+  orders: { id: string; text: string; from: string; tag: string; date: string; done: boolean; aligned: boolean | null; capabilityKey: string | null }[];
   backfill: Record<string, { leads: string; consults: string; deals: string; savedAt?: string }>;
 }
 
@@ -46,7 +47,7 @@ function orderDedupeKey(date: string, text: string): string {
 // 从认可的成果中提取「可执行动作」：优先取标题含 行动/动作/下一步/清单/计划/建议 的分节列表，
 // 兜底取任意列表分节；最多 3 条作为今日军令。
 export function extractOrders(d: DeliverableInput): string[] {
-  const actionHint = /行动|动作|下一步|清单|计划|建议|怎么做|7 ?天|30 ?天/;
+  const actionHint = /行动|动作|军令|下一步|清单|计划|建议|怎么做|7 ?天|30 ?天/;
   const sections = d.sections ?? [];
   const listSections = sections.filter((s) => s.list && s.list.length);
   const preferred = listSections.filter((s) => actionHint.test(s.h));
@@ -118,7 +119,7 @@ export async function casefileView(userId: string, days = 14): Promise<CasefileV
     updatedAt: cf.updatedAt.toISOString(),
     judgment: cf.judgment,
     risks: (cf.risksJson as string[]) ?? [],
-    orders: orders.map((o) => ({ id: o.id, text: o.text, from: o.fromAgent, tag: o.tag, date: o.date, done: o.done, aligned: o.aligned })),
+    orders: orders.map((o) => ({ id: o.id, text: o.text, from: o.fromAgent, tag: o.tag, date: o.date, done: o.done, aligned: o.aligned, capabilityKey: o.capabilityKey })),
     backfill,
   };
 }
@@ -184,6 +185,9 @@ export async function acceptDeliverable(args: {
         // 来自「认可的方案」的军令视为对齐当前判断（方案本身即围绕主要矛盾产出）。
         // 更细的逐条 AI 标注（部分对齐/偏离）在 M2 复盘阶段接入。
         aligned: true,
+        // 能力直达打标（v1.3 §五）：军令文本命中创作能力关键词 → 打上对应 agent key；
+        // 手动自定军令（fromAgent='我'，走 routes/casefiles.ts）不打标，保持 null。
+        capabilityKey: matchCapability(text),
       })),
     });
   }

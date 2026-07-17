@@ -53,6 +53,30 @@ export async function metaRoutes(app: FastifyInstance) {
     };
   });
 
+  // 回帐开场（Chat-First 重构 · WO-S §3.6）：老用户当日首开 counsel 的一句主动开场。
+  // 确定性拼装（不走 LLM）：取最近会话主题 + understanding 的 nextQuestions；无数据兜底一句。
+  app.get('/counsel/opening', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const [understanding, lastSession] = await Promise.all([
+      buildClientUnderstanding(user),
+      prisma.session.findFirst({
+        where: { userId: user.id, title: { notIn: ['新对话', '入帐'] } },
+        orderBy: { updatedAt: 'desc' },
+        select: { title: true },
+      }),
+    ]);
+    const nextQ = understanding.nextQuestions ?? [];
+    const topic = lastSession?.title?.trim();
+    if (topic || understanding.maturity !== 'empty') {
+      const text = topic
+        ? `上回议到${topic}。${nextQ[0] ?? '今日想从何处接着说？'}`
+        : (nextQ[0] ?? '回来了。今日想从何处入手？');
+      const chips = ['接着上回说', '近来有新状况', ...nextQ.slice(0, 2)];
+      return { text, chips };
+    }
+    return { text: '回来了。今日想从何处入手？', chips: ['做个战略体检', '说说最近的难题'] };
+  });
+
   // 军师记忆库（P2）：主公档案页「军师记事」六类结构化呈现
   app.get('/me/memory-library', async (req) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);

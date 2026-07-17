@@ -956,6 +956,7 @@ model CasefileOrder {
   fromAgent  String    @default("我") // 来源：军师名 / 我
   tag        String    @default("军令 · 自定") // 类别徽标
   aligned    Boolean? // 是否对齐主要矛盾（null=未标注）
+  capabilityKey String? // 能力直达打标（v1.3 §五）：军令文本命中创作能力关键词 → 对应 agentKey；手动军令为 null
   done       Boolean   @default(false)
   doneAt     DateTime?
   createdAt  DateTime  @default(now())
