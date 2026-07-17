@@ -8,6 +8,21 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-16** · **WO-A2 Chat-First 对话交互层（手书体重排 + 选择笺/请缨帖/生辰择色笺 + 入帐流 + 回帐一句 + 朱砂点接数据）**（规格 v1.3 §二/§三/§四；未提交，待整合）：
+  - **手书体重排**（`components/ChatView`）：军师消息去气泡直排纸面 .t-advisor（宽 ≤88%，段首 22px 小像+「军师」签）；用户消息右对齐 --surface-2 浅面小气泡 13.5px；输入条纸面细线化 + 删「更多模型」假入口；「军师执笔…」三点墨晕缓动替代通用 typing；消息入场统一 .ink-in 墨染；军师印象条降噪为一行细字。
+  - **选择笺**：choices 渲染为纸底细线描边宋体 chips，按下墨色实底反白；点选笺文成用户消息（'__free__' 聚焦输入框）；输入框永远可用。
+  - **请缨帖**：`services/streaming.ts` 新增 propose 事件（{title,prompt,declinePrompt,readiness}）；SSE 实时 + 历史消息 contentJson.proposal 均渲染居中窄卡（题眉「请缨」+帖文+「即刻出策/再答两问」两笺+seal-dot 收尾）；点后已答态。
+  - **widget**：bazi-form 生辰笺行内表单卡（历法切换/日期 Picker/十二时辰笺阵/性别/出生城市/不看这层）→ advance({bazi}|{skip})；color-pick 择色笺六色圆印，点即 store.setColor 全局换主题并 advance({color})。
+  - **入帐流**：`api.ts` 新增 onboardingState/onboardingAdvance/onboardingResult/counselOpening；counsel 传 `onboarding` 开关：未建档 → /onboarding 状态机（军师消息 400ms 逐条墨染、全程点选、入帐期打字走 advance 不走 /generate、断点续答），FORGE 后 2s×90s 轮询 result，ready 刷新会话呈现《初见断语》+DONE 收束并亮锦囊朱砂点；mock.ts 补同构 onboarding 状态机（H5 零后端可走全流程）。
+  - **回帐一句**：已建档当日首开 counsel 调 GET /counsel/opening，text 作本地军师消息 + chips 选择笺（本地 storage 记日）。
+  - **朱砂点**：store 新增 lastSeenReportAt（本地持久化）+ refreshSatchelDot（启动/回前台比对 api.reports 最新时间）+ markReportsSeen（satchel useDidShow 推已看时间并清点）；报告流式 done 与同步产出即 setSatchelDot(true)。
+  - 验证：build:h5 + build:weapp 全绿；H5 mock 全流程走查（入帐点选到断语、择色换主题、请缨帖两笺、朱砂点亮/清）。
+- **2026-07-16** · **WO-A1 Chat-First 重构（app IA · 4 tab「问策/军情/锦囊/主公」+ ChatView 抽取 + 纸墨帅帐设计体系）**（规格 `docs/[FABLE5]CHAT_FIRST_REDESIGN.md` v1.3；未提交，待整合）：
+  - **设计体系**：`app.scss`/`app.h5.scss` 新增字阶类（.t-display/.t-title/.t-kicker/.t-advisor/.t-body/.t-mark）、章法类（.chapter/.rule/.chapter-head）、印章类（.seal-char/.seal-dot/统一 .pill）、墨染动效（@keyframes ink-in + 错峰类）、`--ink-deep-bg`（全站唯一深底）；.pad 18→24px。
+  - **IA**：tabBar 5→4（counsel问策=落地页 / home军情 / satchel锦囊(朱砂点能力) / profile主公）；`pages/counsel`（纯对话，内嵌 ChatView，唯一首登承接点，WO-A2 入帐流钩子 startOnboarding）、`pages/satchel`（产出书架：两卷宗+过滤笺+报告折子流+空态）新建；`pages/home` 原地重建为一屏五章（玄墨断语卡/三势/今日军令卡(行内打卡+capabilityKey「去办」按钮)/各线督办/麾下）；`pages/roster` 点将堂（navigateTo 次级页：统帅卡+出谋八将+出活五将生态印+market 页脚）新建；profile 瘦身（钱粮卡合并权益三格+细线菜单≤10 行）；sessions 降级为「往来」历史页；studio 摘 tab 保留为军令详情页；thinktank 删除；「深度整理/更多模型/提醒与日历/私有化部署」toast 假入口清除。
+  - **ChatView 抽取**：`components/ChatView`（消息流/SSE 流式/报告卡/引用选择器/上传/参谋室导轨/军师印象条，行为与原 chat 页一比一），chat 页变薄壳；Msg 预留 choices/widget/proposal（WO-A2 渲染）。
+  - **能力直达地基**：`data/capabilities.ts`（ip/promo/poster/shortvideo/copy 五能力：agentKey+keywords+承接 prompt+external 外跳配置位=null）；`DossierOrder.capabilityKey?` 前端类型透传。
+  - `store`：satchelDot 字段（进锦囊清，WO-A2 接数据）；401 reLaunch 入口 sessions→counsel。构建 weapp+H5 全绿；H5 mock 走查 counsel/军情/锦囊/主公/点将堂 已截图核验。
 - **2026-07-07** · **批次C 账本闭环 + 完整履历自动生成 + 放宽长度上限**：
   - **批次C 账本闭环（F-8/P-2）**（server 待部署无 schema / 账本页待发版）：服务端账本(决策/天机/段位)全建好但 App 够不到→条目永 pending→比率 null→段位不可达。新增 `packages/work/ledger` 页(决策账本/天机账本 双 tab + 待验证条目点验证，调既有 verify 路由)；`decisionStats/prophecyStats` 加 **n≥5 才出比率**(原 >0 即出，1 条 100% 直接喂晋升)+ briefing「先攒够 5 条」口径；Decision/Prophecy View/Stats/Ledger 进 contracts；api+mock 同口径；profile 段位卡可点进账本。H5 实测：4 条验证显「先打满5条」、第5条切「准确率80%」。
   - **完整履历自动生成**（`f8ee2cc`，前端待发版）：进详情无缓存+资料够(maturity≠empty)→自动立档，免手动点。
