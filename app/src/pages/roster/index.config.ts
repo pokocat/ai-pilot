@@ -1,4 +1,4 @@
 export default {
   navigationStyle: 'custom',
-  navigationBarTitleText: '智库',
+  navigationBarTitleText: '点将堂',
 };

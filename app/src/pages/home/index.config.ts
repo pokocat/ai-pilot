@@ -1,4 +1,4 @@
 export default {
   navigationStyle: 'custom',
-  navigationBarTitleText: '军师',
+  navigationBarTitleText: '军情',
 };

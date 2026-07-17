@@ -1,4 +1,4 @@
 export default {
   navigationStyle: 'custom',
-  navigationBarTitleText: '对话',
+  navigationBarTitleText: '往来',
 };

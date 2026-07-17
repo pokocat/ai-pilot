@@ -23,7 +23,7 @@
   width: 296px; min-height: 188px; box-sizing: border-box;
   flex: 0 0 auto; display: flex; flex-direction: column;
   padding: 18px 16px;
-  border-radius: 18px;
+  border-radius: var(--r-md);
   background: rgba(255, 255, 255, .92);
   border: 1px solid var(--line);
   white-space: normal;
@@ -43,7 +43,7 @@
 .deck-foot { display: block; margin-top: 10px; color: var(--ink-3); font-size: 12px; font-weight: 600; }
 .deck-foot.muted { opacity: .8; }
 .deck-btn {
-  height: 34px; margin-top: 14px; border-radius: 12px;
+  height: 34px; margin-top: 14px; border-radius: var(--r-sm);
   display: flex; align-items: center; justify-content: center;
   color: var(--green); background: var(--green-soft);
   font-size: 12.5px; font-weight: 600;
@@ -62,7 +62,7 @@
   flex: 0 0 auto; display: flex; flex-direction: column; overflow: hidden;
   padding: 17px 16px 14px;
   border: 1.5px solid var(--green);
-  border-radius: 18px;
+  border-radius: var(--r-md);
   background: linear-gradient(180deg, rgba(239, 248, 243, .86), rgba(255, 255, 255, .96));
   box-shadow: 0 10px 22px rgba(30, 90, 67, .08);
   white-space: normal;
@@ -88,7 +88,7 @@
 
 /* —— 执行信号（exec-stats，左对齐） —— */
 .exec-stats { display: flex; justify-content: space-between; margin-top: 12px; }
-.exec-stat { width: 31.8%; box-sizing: border-box; padding: 14px 12px 12px; border-radius: 15px; text-align: left; }
+.exec-stat { width: 31.8%; box-sizing: border-box; padding: 14px 12px 12px; border-radius: var(--r-md); text-align: left; }
 .stat-n { display: block; font-size: 20px; font-weight: 600; line-height: 1.2; color: var(--green); }
 .stat-n.warn { color: var(--gold-deep); }
 .stat-l { display: block; margin-top: 6px; color: var(--ink-3); font-size: 11px; font-weight: 600; }
@@ -97,7 +97,7 @@
 .advisor-card {
   display: flex; align-items: center; gap: 12px;
   margin-top: 12px; padding: 15px 16px;
-  border-radius: 18px;
+  border-radius: var(--r-md);
 }
 .advisor-card:active { opacity: .8; }
 .ac-b { flex: 1; min-width: 0; }
@@ -113,10 +113,10 @@
 .today-focus {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 13px 14px; margin-top: 14px;
-  border-radius: 18px;
-  color: #fff;
-  background: linear-gradient(135deg, #21382F, var(--green));
-  box-shadow: 0 14px 26px rgba(30, 90, 67, .16);
+  border-radius: var(--r-md);
+  color: var(--paper);
+  background: var(--ink);
+  box-shadow: 0 14px 26px rgba(22, 25, 29, .16);
 }
 .today-focus:active { opacity: .88; }
 .tf-b { flex: 1; min-width: 0; }
@@ -137,7 +137,7 @@
 .goal-ladder:active { opacity: .8; }
 .gl-cell {
   flex: 1; min-height: 70px; box-sizing: border-box;
-  padding: 13px 6px 10px; border-radius: 15px;
+  padding: 13px 6px 10px; border-radius: var(--r-md);
   text-align: center;
 }
 .gl-k { display: block; color: var(--green); font-size: 14px; font-weight: 600; }
@@ -146,10 +146,10 @@
 /* —— 视图切换（exec-seg：软底 + 白块选中） —— */
 .exec-seg {
   display: flex; gap: 6px; padding: 5px; margin-top: 18px;
-  border-radius: 18px; background: #EFEEE8;
+  border-radius: var(--r-md); background: var(--surface-2);
 }
 .seg-item {
-  flex: 1; height: 40px; border-radius: 15px;
+  flex: 1; height: 40px; border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
   color: var(--ink-3); font-size: 14px; font-weight: 600;
 }
@@ -164,16 +164,11 @@
   display: block;
   margin-top: 18px; padding: 18px 16px 16px;
   border-left: 4px solid var(--gold);
-  border-radius: 17px;
+  border-radius: var(--r-md);
   background: rgba(255, 252, 246, .94);
   box-shadow: 0 16px 34px rgba(42, 36, 20, .08);
 }
 .command-card:active { opacity: .8; }
-.command-badge {
-  display: inline-flex; padding: 4px 9px; border-radius: 999px;
-  color: var(--gold-deep); background: var(--gold-soft);
-  font-size: 10.5px; font-weight: 600;
-}
 .command-title { display: block; margin-top: 12px; color: var(--ink); font-size: 18px; font-weight: 600; line-height: 1.4; }
 .command-desc { display: block; margin-top: 6px; color: var(--ink-3); font-size: 13px; line-height: 1.5; }
 .payoff { display: block; margin-top: 8px; color: var(--green); font-size: 10.5px; line-height: 1.45; font-weight: 600; }
@@ -183,21 +178,15 @@
   display: flex; align-items: flex-start; gap: 12px;
   margin-top: 14px; padding: 17px 14px 15px 16px;
   border-left: 4px solid var(--green);
-  border-radius: 17px;
+  border-radius: var(--r-md);
   background: rgba(255, 255, 255, .95);
 }
 .task-b { flex: 1; min-width: 0; }
 .task-meta-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.task-pill {
-  display: inline-flex; padding: 4px 8px; border-radius: 999px;
-  color: var(--green); background: var(--green-soft);
-  font-size: 10.5px; font-weight: 600;
-}
-.task-pill.sub { color: var(--ink-3); background: var(--surface-2); font-weight: 600; }
 .task-t { display: block; margin: 10px 0; font-size: 17px; font-weight: 600; color: var(--ink); line-height: 1.4; }
 .task.done .task-t { color: var(--ink-3); text-decoration: line-through; }
 .task-check {
-  width: 27px; height: 27px; border-radius: 9px; flex-shrink: 0; margin-top: 2px;
+  width: 27px; height: 27px; border-radius: var(--r-sm); flex-shrink: 0; margin-top: 2px;
   border: 2px solid var(--ink-3); background: var(--surface);
   display: flex; align-items: center; justify-content: center;
   opacity: .85;
@@ -207,7 +196,7 @@
 /* —— 已完成军令归档（默认收起，展开可取消完成） —— */
 .done-archive {
   margin-top: 14px; padding: 14px 14px 12px;
-  border-radius: 17px;
+  border-radius: var(--r-md);
   background: rgba(255, 255, 255, .88);
 }
 .da-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -242,7 +231,7 @@
   text-decoration: line-through;
 }
 .archive-check {
-  width: 25px; height: 25px; border-radius: 8px; flex-shrink: 0; margin-top: 2px;
+  width: 25px; height: 25px; border-radius: var(--r-sm); flex-shrink: 0; margin-top: 2px;
   background: var(--green); border: 2px solid var(--green);
   display: flex; align-items: center; justify-content: center;
 }
@@ -251,24 +240,24 @@
 .order-add { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .oa-input {
   flex: 1; min-width: 0; height: 40px; padding: 0 13px;
-  border-radius: 13px; background: rgba(255, 255, 255, .94); border: 1px solid var(--line);
+  border-radius: var(--r-md); background: rgba(255, 255, 255, .94); border: 1px solid var(--line);
   font-size: 13px; color: var(--ink);
 }
 .oa-btn {
-  flex-shrink: 0; height: 40px; padding: 0 16px; border-radius: 13px;
+  flex-shrink: 0; height: 40px; padding: 0 16px; border-radius: var(--r-md);
   display: flex; align-items: center; color: #FBFAF6; font-size: 13px; font-weight: 600;
 }
 .oa-btn:active { opacity: .85; }
 
 /* —— 军令空态 —— */
-.orders-empty { margin-top: 14px; padding: 20px 16px; border-radius: 17px; text-align: center; }
+.orders-empty { margin-top: 14px; padding: 20px 16px; border-radius: var(--r-md); text-align: center; }
 .orders-empty:active { opacity: .8; }
 .oe-t { display: block; font-size: 16px; font-weight: 600; color: var(--ink); }
 .oe-d { display: block; margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
 .oe-go { display: block; margin-top: 9px; font-size: 12.5px; font-weight: 600; color: var(--green); }
 
 /* —— 数据回填（data-fill：软底 + 白格） —— */
-.data-fill { margin-top: 16px; padding: 17px 15px 14px; border-radius: 18px; background: #F0EFE9; }
+.data-fill { margin-top: 16px; padding: 17px 15px 14px; border-radius: var(--r-md); background: var(--surface-2); }
 .df-head { display: flex; align-items: center; justify-content: space-between; }
 .df-t { font-size: 17px; font-weight: 600; color: var(--ink); }
 .df-s { font-size: 12px; font-weight: 600; color: var(--green); }
@@ -276,13 +265,13 @@
 .df-row { display: flex; gap: 10px; margin-top: 14px; }
 .df-cell {
   flex: 1; min-height: 60px; box-sizing: border-box;
-  padding: 10px 11px; border-radius: 13px;
+  padding: 10px 11px; border-radius: var(--r-md);
   background: rgba(255, 255, 255, .86); border: 1px solid var(--line);
 }
 .df-label { display: block; font-size: 10.5px; font-weight: 600; color: var(--ink-3); }
 .df-input { margin-top: 4px; height: 26px; font-family: var(--serif); font-size: 18px; font-weight: 600; color: var(--ink); }
 .df-save {
-  height: 40px; margin-top: 12px; border-radius: 13px;
+  height: 40px; margin-top: 12px; border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
   color: #fff; background: var(--green);
   font-size: 13px; font-weight: 600;
@@ -291,7 +280,7 @@
 .data-fill .payoff { color: var(--ink-3); font-weight: 600; }
 
 /* —— 复盘前检查（review-before） —— */
-.review-before { margin-top: 16px; padding: 16px; border-radius: 18px; }
+.review-before { margin-top: 16px; padding: 16px; border-radius: var(--r-md); }
 .rb-k { display: block; color: var(--green); font-size: 12px; font-weight: 600; letter-spacing: .12em; margin-bottom: 2px; }
 .rb-line { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
 .rb-line:last-child { border-bottom: 0; }
@@ -300,7 +289,7 @@
 .rb-text { flex: 1; min-width: 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 
 /* —— 周计划记录 —— */
-.week-list { margin-top: 14px; padding: 6px 16px; border-radius: 17px; }
+.week-list { margin-top: 14px; padding: 6px 16px; border-radius: var(--r-md); }
 .week-group { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .week-group:last-child { border-bottom: 0; }
 .wg-date { display: block; font-size: 14px; font-weight: 600; color: var(--green); }
@@ -311,18 +300,18 @@
 .wg-text.done { color: var(--ink-3); text-decoration: line-through; }
 
 /* —— 复盘视图 —— */
-.review-card { margin-top: 14px; padding: 16px; border-radius: 17px; }
+.review-card { margin-top: 14px; padding: 16px; border-radius: var(--r-md); }
 .rc-k { display: block; color: var(--green); font-size: 12px; font-weight: 600; letter-spacing: .06em; }
 .rc-t { display: block; margin-top: 8px; font-size: 13.5px; line-height: 1.6; color: var(--ink); }
 .rc-btn {
   display: flex; align-items: center; justify-content: center; gap: 7px;
-  height: 42px; margin-top: 12px; border-radius: 13px;
+  height: 42px; margin-top: 12px; border-radius: var(--r-md);
   color: #fff; background: var(--green);
   font-size: 13.5px; font-weight: 600;
 }
 .rc-btn:active { opacity: .85; }
 
-.remind { margin-top: 12px; padding: 4px 16px 6px; border-radius: 17px; }
+.remind { margin-top: 12px; padding: 4px 16px 6px; border-radius: var(--r-md); }
 .remind-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 0 2px; }
 .remind-k { font-size: 15px; font-weight: 600; color: var(--ink); }
 .remind-soon { font-size: 10.5px; color: var(--ink-3); }
@@ -346,7 +335,7 @@
 .acard.locked { opacity: .96; }
 .acard.locked .ah { color: var(--ink-2); }
 .acard .ameta.lock { font-weight: 600; }
-.acard .ai { width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+.acard .ai { width: 38px; height: 38px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
 .acard .ah { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); }
 .acard .ap { display: block; font-size: 11px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; min-height: 30px; }
 .acard .ameta { display: block; font-size: 11px; font-weight: 500; margin-top: 4px; }
@@ -354,10 +343,10 @@
 /* —— 底部主行动 —— */
 .exec-cta {
   display: flex; align-items: center; justify-content: center; gap: 8px;
-  height: 48px; margin-top: 8px; border-radius: 15px;
-  color: #FBFAF6; font-size: 14px; font-weight: 600;
-  background: linear-gradient(135deg, var(--green), var(--green-deep));
-  box-shadow: 0 12px 24px rgba(30, 90, 67, .2);
+  height: 48px; margin-top: 8px; border-radius: var(--r-md);
+  color: var(--paper); font-size: 14px; font-weight: 600;
+  background: var(--ink);
+  box-shadow: 0 12px 24px rgba(22, 25, 29, .2);
 }
 .exec-cta:active { opacity: .85; }
 

@@ -6,13 +6,12 @@ import { useStore } from '../hooks/useStore';
 import { hideNativeTabBarOnly, onTabBarHiddenChange, readTabBarHidden, syncTabBarHidden } from '../services/tabbar';
 import './index.scss';
 
-// 悬浮胶囊式底栏 —— 五个平铺 tab，「问策」（参谋室，第一入口）居首，选中态为本命色柔底。
-// 取名与图标对齐军师帐下议事的氛围：问策（对话）· 军情（战局）· 军令（执行）· 锦囊（智库）· 主公（我的）。
+// 悬浮胶囊式底栏 —— 四个平铺 tab：问策（对话本体，第一入口）· 军情（沙盘）· 锦囊（产出书架）· 主公（我的）。
+// 锦囊可显示未读朱砂点（store.satchelDot 驱动，WO-A2 接数据）。
 const TABS = [
-  { path: '/pages/sessions/index', icon: 'hat', text: '问策' },
+  { path: '/pages/counsel/index', icon: 'hat', text: '问策' },
   { path: '/pages/home/index', icon: 'flag', text: '军情' },
-  { path: '/pages/studio/index', icon: 'token', text: '军令' },
-  { path: '/pages/thinktank/index', icon: 'pouch', text: '锦囊' },
+  { path: '/pages/satchel/index', icon: 'pouch', text: '锦囊' },
   { path: '/pages/profile/index', icon: 'crown', text: '主公' },
 ];
 
@@ -21,6 +20,7 @@ export default function CustomTabBar() {
   const selected = s.tab();
   const color = s.color();
   const accent = color.vars['--accent'];
+  const satchelDot = s.satchelDot();
   const [nativeHidden, setNativeHidden] = useState(() => readTabBarHidden());
 
   const syncNativeState = () => {
@@ -62,10 +62,12 @@ export default function CustomTabBar() {
         <View className="tabbar-inner">
           {TABS.map((t, i) => {
             const active = i === selected;
+            const showDot = t.path === '/pages/satchel/index' && satchelDot;
             return (
               <View key={t.path} className={`tab ${active ? 'on' : ''}`} role="tab" aria-label={t.text} aria-selected={active} onClick={() => switchTo(i)}>
                 <View className="tab-ic">
                   <Icon name={t.icon} size={22} color={active ? accent : '#969BA1'} />
+                  {showDot ? <View className="tab-dot" /> : null}
                 </View>
                 <Text className="tab-label" style={active ? { color: accent } : {}}>
                   {t.text}

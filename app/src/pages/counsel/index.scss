@@ -1,0 +1,9 @@
+/* 问策页：满屏纵向弹性列 —— 页头 + 内嵌对话（ChatView 占满剩余高度）。 */
+.counsel {
+  display: flex; flex-direction: column; height: 100vh;
+  box-sizing: border-box; overflow: hidden;
+  background: var(--paper);
+}
+.counsel-head { gap: 12px; }
+.counsel-side { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink-2); }
+.counsel-title { font-size: 17px; }

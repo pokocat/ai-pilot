@@ -18,6 +18,7 @@ export interface DossierOrder {
   date: string;        // YYYY-MM-DD（属于哪一天的军令）
   done: boolean;
   aligned?: boolean | null; // 是否对齐主要矛盾（服务端标注；本地/手动为 null）
+  capabilityKey?: string | null; // 能力直达标（服务端按 keywords 打标；命中则军令行显示「去办 · {花名}」）
 }
 
 export interface DailyBackfill {

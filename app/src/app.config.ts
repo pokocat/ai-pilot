@@ -1,11 +1,13 @@
 export default defineAppConfig({
   pages: [
-    'pages/sessions/index',
+    'pages/counsel/index',
     'pages/home/index',
-    'pages/studio/index',
-    'pages/thinktank/index',
+    'pages/satchel/index',
     'pages/profile/index',
     'pages/chat/index',
+    'pages/sessions/index',
+    'pages/studio/index',
+    'pages/roster/index',
     'pages/brief/index',
     'pages/settings/index',
   ],
@@ -35,8 +37,12 @@ export default defineAppConfig({
       network: 'all',
       packages: ['packages/work'],
     },
-    'pages/thinktank/index': {
+    'pages/satchel/index': {
       network: 'all',
+      packages: ['packages/work'],
+    },
+    'pages/home/index': {
+      network: 'wifi',
       packages: ['packages/work'],
     },
     'pages/chat/index': {
@@ -57,10 +63,9 @@ export default defineAppConfig({
     selectedColor: '#16191D',
     backgroundColor: '#FBFAF6',
     list: [
-      { pagePath: 'pages/sessions/index', text: '问策' },
+      { pagePath: 'pages/counsel/index', text: '问策' },
       { pagePath: 'pages/home/index', text: '军情' },
-      { pagePath: 'pages/studio/index', text: '军令' },
-      { pagePath: 'pages/thinktank/index', text: '锦囊' },
+      { pagePath: 'pages/satchel/index', text: '锦囊' },
       { pagePath: 'pages/profile/index', text: '主公' },
     ],
   },

@@ -7,7 +7,7 @@
   bottom: calc(14px + env(safe-area-inset-bottom));
   background: rgba(255, 255, 255, .86);
   border: 1px solid rgba(255, 255, 255, .7);
-  border-radius: 26px;
+  border-radius: var(--r-lg);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, .9) inset,
     0 10px 30px rgba(22, 25, 29, .12),
@@ -28,9 +28,16 @@
   min-width: 0;
 }
 .tab-ic {
+  position: relative;
   width: 33px; height: 33px;
   display: flex; align-items: center; justify-content: center;
   transition: transform .2s ease-out;
+}
+/* 朱砂点：tab 右上未读提示（--danger 固定语义色，6px 圆点） */
+.tab-dot {
+  position: absolute; top: 3px; right: 3px;
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--danger);
 }
 .tab.on .tab-ic {
   transform: scale(1.14);

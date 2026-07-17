@@ -50,8 +50,7 @@ export default function Studio() {
   const und = s.me()?.understanding;
 
   useDidShow(() => {
-    s.setTab(2);
-    Taro.getCurrentInstance().page?.getTabBar?.();
+    // studio 已摘出 tabBar，保留为军令详情页（回填/周计划/复盘）；入口在军情·今日军令卡与报告卡「认可→去执行」。
     // 案卷已服务端化：拉取当前案卷（含一次性本地迁移），回填草稿用当日已存值初始化
     refreshDossier().then((d) => {
       setDossier(d);
@@ -181,11 +180,11 @@ export default function Studio() {
   const mainOrderButton = firstUndone ? '生成脚本' : todayOrders.length ? '生成复盘' : '生成今日军令';
 
   return (
-    <Screen topInset>
+    <Screen tab={false} topInset>
       <View className="pad exec">
-        {/* 页头（exec-nav）：左「案卷」· 中「军令」· 右「提醒」 */}
+        {/* 页头（exec-nav）：左「返回」· 中「军令」· 右「提醒」（已摘出 tabBar，navigateTo 进入） */}
         <View className="exec-nav tab-page-head">
-          <Text className="en-side left serif" onClick={() => Taro.navigateTo({ url: '/packages/work/projects/index' })}>案卷</Text>
+          <Text className="en-side left serif" onClick={() => (Taro.getCurrentPages().length > 1 ? Taro.navigateBack() : Taro.switchTab({ url: '/pages/home/index' }))}>‹ 返回</Text>
           <Text className="en-title serif">军令</Text>
           <Text className="en-side right serif" onClick={() => setView('review')}>提醒</Text>
         </View>
@@ -203,7 +202,7 @@ export default function Studio() {
                 <Text className="deck-foot">{progress.total ? `完成度 ${progress.percent}% · 21:30 复盘` : '待生成军令 · 21:30 复盘'}</Text>
               </View>
             ) : (
-              <View className="deck-card battle-card" onClick={() => Taro.switchTab({ url: '/pages/sessions/index' })}>
+              <View className="deck-card battle-card" onClick={() => Taro.switchTab({ url: '/pages/counsel/index' })}>
                 <Text className="deck-k">今日战役 · {dateStr}</Text>
                 <Text className="deck-title serif">{EMPTY_STATES.execution.title}</Text>
                 <Text className="deck-desc">{EMPTY_STATES.execution.desc}</Text>
@@ -300,7 +299,7 @@ export default function Studio() {
             {/* 第 0 号军令（command-card 金边）：补资料（军师档案真实待补问题） */}
             {und?.nextQuestions.length ? (
               <View className="command-card card" onClick={() => goChat('general', '帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}>
-                <Text className="command-badge">第 0 号军令 · 补资料</Text>
+                <Text className="pill em">第 0 号军令 · 补资料</Text>
                 <Text className="command-title serif">{und.nextQuestions[0]}</Text>
                 <Text className="command-desc">补齐后，军师会重算判断和任务优先级 · 还有 {und.nextQuestions.length} 条待补</Text>
                 <Text className="payoff">补齐后，战局判断与军师档案同步更新</Text>
@@ -318,9 +317,9 @@ export default function Studio() {
               pendingTodayOrders.map((o) => (
                 <View key={o.id} className={`task card ${o.done ? 'done' : ''}`} onLongPress={() => onRemove(o.id)}>
                   <View className="task-b">
-                    <View className="task-meta-row"><Text className="task-pill">{orderTagLabel(o.tag)}</Text></View>
+                    <View className="task-meta-row"><Text className="pill">{orderTagLabel(o.tag)}</Text></View>
                     <Text className="task-t serif">{o.text}</Text>
-                    <View className="task-meta-row"><Text className="task-pill sub">来自 {o.from}</Text><Text className="task-pill sub">长按删除</Text></View>
+                    <View className="task-meta-row"><Text className="pill">来自 {o.from}</Text><Text className="pill">长按删除</Text></View>
                   </View>
                   <View className="task-check" onClick={() => onToggle(o.id)}>
                     {o.done ? <Icon name="check" size={14} color="#fff" /> : null}
@@ -344,7 +343,7 @@ export default function Studio() {
                     {doneTodayOrders.map((o) => (
                       <View key={o.id} className="archived-task" onLongPress={() => onRemove(o.id)}>
                         <View className="task-b">
-                          <View className="task-meta-row"><Text className="task-pill sub">来自 {o.from}</Text><Text className="task-pill sub">长按删除</Text></View>
+                          <View className="task-meta-row"><Text className="pill">来自 {o.from}</Text><Text className="pill">长按删除</Text></View>
                           <Text className="archive-task-text serif">{o.text}</Text>
                         </View>
                         <View className="archive-check" onClick={() => onToggle(o.id)}>

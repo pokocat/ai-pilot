@@ -9,14 +9,17 @@ import { syncTabBarHidden } from './tabbar';
 
 const LS_COLOR = 'junshi.color';
 const LS_ONBOARDED = 'junshi.onboarded';
+const LS_LAST_SEEN_REPORT = 'junshi.lastSeenReportAt';
 
 interface AppState {
   colorKey: string;
   onboarded: boolean;
   me: Me | null;
   agents: Agent[];
-  tab: number; // 当前底栏选中项（0..4）
+  tab: number; // 当前底栏选中项（0..2）
   overlay: boolean; // 是否有全屏弹层打开——打开时隐藏原生/自定义底栏
+  satchelDot: boolean; // 锦囊 tab 未读朱砂点（WO-A2：报告新出即亮，进锦囊即清）
+  lastSeenReportAt: string; // 本地记：上次在锦囊看过的最新报告时间（ISO）——与最新报告对比决定朱砂点
 }
 
 const state: AppState = {
@@ -26,6 +29,8 @@ const state: AppState = {
   agents: DEFAULT_AGENTS, // 离线兜底；后端可达时由 loadAgents 覆盖
   tab: 0,
   overlay: false,
+  satchelDot: false,
+  lastSeenReportAt: safeGet(LS_LAST_SEEN_REPORT) || '',
 };
 const overlayKeys = new Set<string>();
 let lastUnauthorizedPromptAt = 0;
@@ -58,8 +63,8 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
         lastUnauthorizedPromptAt = now;
         Taro.showToast({ title: '登录态已失效，请重新登录', icon: 'none' });
       }
-      if (currentRoute() !== 'pages/sessions/index') {
-        setTimeout(() => Taro.reLaunch({ url: '/pages/sessions/index' }), 250);
+      if (currentRoute() !== 'pages/counsel/index') {
+        setTimeout(() => Taro.reLaunch({ url: '/pages/counsel/index' }), 250);
       }
     }
     return 'unauthorized';
@@ -121,6 +126,27 @@ export const store = {
   agents: () => state.agents,
   tab: () => state.tab,
   setTab(i: number) { state.tab = i; emit(); },
+  satchelDot: () => state.satchelDot,
+  setSatchelDot(v: boolean) { if (state.satchelDot !== v) { state.satchelDot = v; emit(); } },
+  lastSeenReportAt: () => state.lastSeenReportAt,
+  // 进锦囊：把已看时间推到最新报告时间并清点（satchel 页 useDidShow 调用）
+  markReportsSeen(latestAt?: string) {
+    const next = latestAt || new Date().toISOString();
+    if (next > state.lastSeenReportAt) {
+      state.lastSeenReportAt = next;
+      safeSet(LS_LAST_SEEN_REPORT, next);
+    }
+    this.setSatchelDot(false);
+  },
+  // 启动/回前台：拉最新一条报告时间，比已看时间新 → 亮朱砂点
+  async refreshSatchelDot() {
+    if (!getUserId()) return;
+    try {
+      const list = await api.reports();
+      const latest = list[0]?.updatedAt || '';
+      if (latest && latest > state.lastSeenReportAt) this.setSatchelDot(true);
+    } catch { /* 静默：拉取失败不影响导航 */ }
+  },
   overlay: () => state.overlay,
   handleApiError: reportApiError,
   setOverlay(v: boolean, key = 'global') {
