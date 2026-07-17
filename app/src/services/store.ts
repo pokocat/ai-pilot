@@ -16,7 +16,7 @@ interface AppState {
   onboarded: boolean;
   me: Me | null;
   agents: Agent[];
-  tab: number; // 当前底栏选中项（0..2）
+  tab: number; // 当前底栏选中项（0..4：问策/军情/军令/锦囊/主公）
   overlay: boolean; // 是否有全屏弹层打开——打开时隐藏原生/自定义底栏
   satchelDot: boolean; // 锦囊 tab 未读朱砂点（WO-A2：报告新出即亮，进锦囊即清）
   lastSeenReportAt: string; // 本地记：上次在锦囊看过的最新报告时间（ISO）——与最新报告对比决定朱砂点

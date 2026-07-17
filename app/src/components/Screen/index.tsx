@@ -2,6 +2,7 @@ import { CSSProperties, PropsWithChildren, useEffect, useState } from 'react';
 import { View, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { useStore } from '../../hooks/useStore';
+import { benmingVars } from '../../data/colors';
 import './index.scss';
 
 interface ScreenProps {
@@ -30,7 +31,9 @@ export default function Screen({ children, tab = true, scroll = true, topInset =
   }, [topInset]);
 
   const inset = topInset ? <View className="nav-inset" /> : null;
-  const rootStyle = topInset ? vars : undefined;
+  // 本命色 hex 三件套（+旧别名）内联注入为主通道；.theme-* 类做兜底。topInset 变量并入同一 style。
+  const accentVars = benmingVars(s.colorKey()) as CSSProperties;
+  const rootStyle: CSSProperties = topInset ? { ...accentVars, ...vars } : accentVars;
 
   if (!scroll) {
     return <View className={`page ${s.themeClass()} ${className}`} style={rootStyle}>{inset}{children}</View>;

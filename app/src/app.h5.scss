@@ -1,4 +1,5 @@
-/* H5 兼容层：小程序有真实 page 节点，H5 没有；把设计 token 补到浏览器根节点。 */
+/* H5 兼容层：小程序有真实 page 节点，H5 没有；把直角案卷 token 补到浏览器根节点。
+   （关键帧与 .theme-* / .proto-* 类在 app.scss 中全局声明，H5 自动生效，此处只补 token 基座。） */
 :root,
 html,
 body,
@@ -8,44 +9,86 @@ body,
 .taro-tabbar__panel,
 .taro_page,
 .page {
-  --bg: #F4F2EC;
-  --paper: #FBFAF6;
-  --surface: #FFFFFF;
-  --surface-2: #F3F1EA;
+  /* —— 中性令牌（原型浅色 N.light） —— */
+  --bg: #F0EBE0;
+  --surf: #FAF7EF;
+  --surf-2: #EFE9DB;
+  --surf-3: #E3DBC9;
+  --hair: rgba(34, 32, 27, .13);
+  --hair-2: rgba(34, 32, 27, .24);
+  --tx: #211F1A;
+  --mut: #6B6456;
+  --faint: #A79E8C;
+  --onac: #FAF7EF;
+  --ink-deep-bg: #1C1A16;
 
-  --ink: #16191D;
-  --ink-2: #565C63;
-  --ink-3: #969BA1;
-  --ink-deep-bg: #1B1E23; /* 全站唯一深底：军情·玄墨断语卡专用（与 app.scss 同步） */
-  --line: #E7E4DB;
-  --line-2: #EFEDE5;
+  /* —— 默认本命色 = 松（墨绿，key=green） —— */
+  --ac: #2F5D50;
+  --acd: #1E3E35;
+  --acg: rgba(47, 93, 80, .12);
 
-  --accent: #1E5A43;
-  --accent-deep: #163F30;
-  --accent-soft: #E7EEE9;
-  --accent-ink: #0F2B20;
-  --accent-bright: #5FB389;
-  --accent-glow: rgba(99, 160, 130, .32);
+  /* —— 旧令牌别名映射 —— */
+  --ink: var(--tx);
+  --ink-2: var(--mut);
+  --ink-3: var(--faint);
+  --paper: var(--surf);
+  --surface: var(--surf);
+  --surface-2: var(--surf-2);
+  --line: var(--hair);
+  --line-2: var(--hair);
 
-  /* 业务主色跟随本命色（与 app.scss 保持同步） */
-  --green: var(--accent);
-  --green-deep: var(--accent-deep);
-  --green-hero: var(--accent);
-  --green-soft: var(--accent-soft);
-  --gold: var(--accent);
-  --gold-deep: var(--accent-deep);
-  --gold-soft: var(--accent-soft);
-  --blue: #245F88;
-  --danger: #9C4A38;
-  --warn: #A8772E;
+  --accent: var(--ac);
+  --accent-deep: var(--acd);
+  --accent-soft: var(--acg);
+  --accent-ink: var(--acd);
+  --accent-bright: var(--ac);
+  --accent-glow: var(--acg);
+
+  --green: var(--ac);
+  --green-deep: var(--acd);
+  --green-hero: var(--ac);
+  --green-soft: var(--acg);
+  --gold: var(--ac);
+  --gold-deep: var(--acd);
+  --gold-soft: var(--acg);
+  --blue: #38516E;
+  --danger: #BC4A31;
+  --warn: #B0782A;
 
   --serif: "Noto Serif SC", "Songti SC", "STSong", serif;
   --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  --se: var(--serif);
+  --ease: cubic-bezier(.16, 1, .3, 1);
 
-  --r-sm: 10px;
-  --r-md: 16px;
-  --r-lg: 22px;
-  --r-xl: 28px;
+  --r-sm: 2px;
+  --r-md: 2px;
+  --r-lg: 2px;
+  --r-xl: 2px;
+}
+
+/* 深色（原型 N.dark，跟随系统） */
+@media (prefers-color-scheme: dark) {
+  :root,
+  html,
+  body,
+  #app,
+  .taro_router,
+  .taro-tabbar__container,
+  .taro-tabbar__panel,
+  .taro_page,
+  .page {
+    --bg: #1C1A16;
+    --surf: #252219;
+    --surf-2: #2E2A20;
+    --surf-3: #3A352A;
+    --hair: rgba(240, 235, 223, .11);
+    --hair-2: rgba(240, 235, 223, .2);
+    --tx: #F0EBDF;
+    --mut: #A59C8B;
+    --faint: #6E6656;
+    --onac: #FAF7EF;
+    --ink-deep-bg: #141210;
+  }
 }
 
 html,
@@ -53,7 +96,7 @@ body {
   margin: 0;
   min-height: 100%;
   background: var(--bg);
-  color: var(--ink);
+  color: var(--tx);
   font-family: var(--serif);
 }
 
@@ -63,10 +106,10 @@ body {
 .taro-tabbar__panel,
 .taro_page {
   min-height: 100%;
-  background: var(--paper);
+  background: var(--bg);
 }
 
-/* Taro H5 会生成默认 weui tabbar；H5 使用同小程序一致的胶囊自定义底栏。 */
+/* Taro H5 会生成默认 weui tabbar；H5 使用同小程序一致的自定义底栏。 */
 .taro-tabbar__tabbar {
   display: none !important;
 }
