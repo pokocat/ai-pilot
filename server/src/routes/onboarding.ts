@@ -1,6 +1,7 @@
 // 主动军师 · 入帐对话（Chat-First 重构 · WO-S，取代 Picker 弹层建档）。
 // 服务端确定性状态机（不走 LLM——快、稳、文案可雕琢），文案逐字取规格 §3.3（军师语声，禁 AI 腔）。
-// 状态机：GREET → ASK_INDUSTRY → ASK_STAGE → ASK_PAIN → ASK_BAZI → ASK_COLOR → FORGE → DONE。
+// 状态机：GREET → ASK_COLOR → ASK_INDUSTRY → ASK_STAGE → ASK_PAIN → ASK_BAZI → FORGE → DONE。
+// （本命色第一问——一进帐先立帅旗、满帐随色而变；《初见断语》FORGE 仍最后。）
 // 答案实时落库（upsertProfileFields / saveUserBazi / User.benmingColor）；全部往来消息落库为 general
 // 会话真实 Message，后续 LLM 把入帐问答当正史读。收官异步生成《初见断语》，GET /result 轮询。
 
@@ -52,7 +53,7 @@ const TXT: Record<Exclude<Stage, 'DONE'>, string> = {
   ASK_STAGE: '知道了。这一路走到哪一步了？',
   ASK_PAIN: '最要紧的一问：眼下最让你夜里睡不安稳的，是哪一桩？',
   ASK_BAZI: '还有一问，答不答随你。留个生辰，我能多看一层天时——何时宜攻，何时宜守。不信这一套，也不碍事。',
-  ASK_COLOR: '最后一桩。择一色，作你的帅旗——往后帐中器物，皆随此色。',
+  ASK_COLOR: '头一桩，先立帅旗。择一色，作你的帅旗——往后帐中器物，皆随此色。',
   FORGE: '够了。情报虽薄，已可落笔。容我片刻，为你写下第一道《初见断语》——你我初见，我眼中你的局。',
 };
 const DONE_TEXT = '断语在此，收好。往后你每多告诉我一分，我便多看准一分。有事直说；无事，我也会寻你。';
@@ -61,16 +62,18 @@ function choicesOf(options: string[], freeLabel: string): { label: string; value
   return [...options.map((o) => ({ label: o, value: o })), { label: freeLabel, value: '__free__' }];
 }
 
-// 给定 stage 生成待显示的军师消息（ASK_INDUSTRY 前置 GREET 两条）。
+// 给定 stage 生成待显示的军师消息（ASK_COLOR 为第一问，前置 GREET 两条）。
 async function messagesFor(stage: Stage, name: string): Promise<OnboardingMsg[]> {
   switch (stage) {
-    case 'ASK_INDUSTRY': {
-      const opts = await surveyOptions('industry', DEFAULT_INDUSTRY);
+    case 'ASK_COLOR':
       return [
         { text: GREET_1(name) },
         { text: GREET_2 },
-        { text: TXT.ASK_INDUSTRY, choices: choicesOf(opts, '其他，我自己说') },
+        { text: TXT.ASK_COLOR, widget: 'color-pick' },
       ];
+    case 'ASK_INDUSTRY': {
+      const opts = await surveyOptions('industry', DEFAULT_INDUSTRY);
+      return [{ text: TXT.ASK_INDUSTRY, choices: choicesOf(opts, '其他，我自己说') }];
     }
     case 'ASK_STAGE':
       return [{ text: TXT.ASK_STAGE, choices: STAGE_CHOICES.map((o) => ({ label: o, value: o })) }];
@@ -80,8 +83,6 @@ async function messagesFor(stage: Stage, name: string): Promise<OnboardingMsg[]>
     }
     case 'ASK_BAZI':
       return [{ text: TXT.ASK_BAZI, widget: 'bazi-form', choices: [{ label: '不看这层', value: '__skip__' }] }];
-    case 'ASK_COLOR':
-      return [{ text: TXT.ASK_COLOR, widget: 'color-pick' }];
     case 'FORGE':
       return [{ text: TXT.FORGE }];
     case 'DONE':
@@ -107,13 +108,28 @@ async function writeMarker(tenantId: string, patch: OnboardingMarker): Promise<v
 }
 
 // 断点续答：由 Profile 行 + 标记推断当前待答 stage。
-async function resolveStage(tenantId: string): Promise<Stage> {
-  const p = await prisma.profile.findFirst({ where: { tenantId } });
-  if (!p) return 'ASK_INDUSTRY';                 // 全新用户
-  const m = readMarker(p.extraJson);
-  if (!m) return 'DONE';                          // 老用户走过旧 Picker（有 Profile 无入帐标记）→ 不再入帐
-  if (m.done) return 'DONE';
-  return m.stage;
+// 本命色第一问：色落在 User.benmingColor（非 Profile），且 benmingColor 有默认值（green），
+// 无法据其判断「是否已择色」。故色→营生这段无 Profile 的窗口，改由 general 入帐会话已下发到哪一问推断：
+// 会话里出现过「营生」问句 = 色已择 → ASK_INDUSTRY；否则（仅色问或空会话）→ ASK_COLOR。
+// 一旦答了营生便建 Profile 行并写标记，此后标记为准。
+async function resolveStage(user: { id: string; tenantId: string }): Promise<Stage> {
+  const p = await prisma.profile.findFirst({ where: { tenantId: user.tenantId } });
+  if (p) {
+    const m = readMarker(p.extraJson);
+    if (!m) return 'DONE';                        // 老用户走过旧 Picker（有 Profile 无入帐标记）→ 不再入帐
+    return m.done ? 'DONE' : m.stage;
+  }
+  // 尚无 Profile（未答「营生」）：全新用户从「择帅旗」起；已择色未答营生 → 由入帐会话进度推断。
+  const sess = await prisma.session.findFirst({
+    where: { userId: user.id, agentKey: 'general' },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  if (!sess) return 'ASK_COLOR';                  // 全新用户，尚未起过入帐会话
+  const industryAsked = await prisma.message.count({
+    where: { sessionId: sess.id, role: 'assistant', contentJson: { path: ['onbStage'], equals: 'ASK_INDUSTRY' } },
+  });
+  return industryAsked > 0 ? 'ASK_INDUSTRY' : 'ASK_COLOR';
 }
 
 // —— general 会话（入帐问答落库处）——
@@ -206,7 +222,7 @@ export async function onboardingRoutes(app: FastifyInstance) {
   // 断点续答：返回当前 stage 应显示的军师消息（纯读，不落库）。
   app.get('/onboarding/state', async (req) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const stage = await resolveStage(user.tenantId);
+    const stage = await resolveStage(user);
     const name = user.name?.trim() || '主公';
     return { stage, messages: await messagesFor(stage, name) };
   });
@@ -216,7 +232,7 @@ export async function onboardingRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const name = user.name?.trim() || '主公';
     const body = req.body ?? {};
-    const current = await resolveStage(user.tenantId);
+    const current = await resolveStage(user);
     if (current === 'FORGE' || current === 'DONE') {
       return { messages: await messagesFor(current, name), stage: current, done: current === 'DONE' };
     }
@@ -228,6 +244,14 @@ export async function onboardingRoutes(app: FastifyInstance) {
     let next: Stage;
     const answer = (body.answer ?? '').trim();
     switch (current) {
+      case 'ASK_COLOR': {
+        const color = (body.color ?? '').trim();
+        if (!color) return reply.code(400).send({ error: '请择一色作你的帅旗' });
+        await recordUserAnswer(session.id, `帅旗定为${COLOR_LABELS[color] ?? color}`);
+        await prisma.user.update({ where: { id: user.id }, data: { benmingColor: color } });
+        next = 'ASK_INDUSTRY';
+        break;
+      }
       case 'ASK_INDUSTRY':
         if (!answer) return reply.code(400).send({ error: '请先说说你做的是哪一路生意' });
         await recordUserAnswer(session.id, answer);
@@ -254,16 +278,8 @@ export async function onboardingRoutes(app: FastifyInstance) {
           if (!res.ok) return reply.code(400).send({ error: res.error });
           await recordUserAnswer(session.id, '（已留生辰）');
         }
-        next = 'ASK_COLOR';
-        break;
-      case 'ASK_COLOR': {
-        const color = (body.color ?? '').trim();
-        if (!color) return reply.code(400).send({ error: '请择一色作你的帅旗' });
-        await recordUserAnswer(session.id, `帅旗定为${COLOR_LABELS[color] ?? color}`);
-        await prisma.user.update({ where: { id: user.id }, data: { benmingColor: color } });
         next = 'FORGE';
         break;
-      }
       default:
         next = 'DONE';
     }

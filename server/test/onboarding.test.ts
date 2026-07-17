@@ -22,17 +22,29 @@ after(async () => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-test('GET /onboarding/state 新用户 → ASK_INDUSTRY + GREET 军师开场', async () => {
+test('GET /onboarding/state 新用户 → ASK_COLOR + GREET 军师开场（帅旗第一问）', async () => {
   const r = await api('GET', '/api/onboarding/state', { token });
   assert.equal(r.status, 200);
-  assert.equal(r.body.stage, 'ASK_INDUSTRY');
-  assert.ok(r.body.messages.length >= 3, '应下发 GREET 两条 + 行业问句');
+  assert.equal(r.body.stage, 'ASK_COLOR');
+  assert.ok(r.body.messages.length >= 3, '应下发 GREET 两条 + 择帅旗');
   assert.match(r.body.messages[0].text, /坐。既入此帐/);
-  assert.match(r.body.messages[2].text, /哪一路生意/);
-  assert.ok(Array.isArray(r.body.messages[2].choices) && r.body.messages[2].choices.length > 1);
+  assert.match(r.body.messages[2].text, /帅旗/);
+  assert.equal(r.body.messages[2].widget, 'color-pick');
 });
 
-test('advance 逐步推进：industry → stage → pain，断点续答正确', async () => {
+test('advance 逐步推进：色 → 营生 → 阶段 → 痛点 → 生辰，断点续答正确', async () => {
+  // 择帅旗（第一问）→ 落 benmingColor → ASK_INDUSTRY
+  const rColor = await api('POST', '/api/onboarding/advance', { token, body: { color: 'red' } });
+  assert.equal(rColor.status, 200);
+  assert.equal(rColor.body.stage, 'ASK_INDUSTRY');
+  assert.equal(rColor.body.done, false);
+  const user0 = await prisma.user.findUnique({ where: { id: token } });
+  assert.equal(user0?.benmingColor, 'red');
+
+  // 断点续答：色已择、营生未答（尚无 Profile）→ 由入帐会话进度推断 ASK_INDUSTRY
+  const resume0 = await api('GET', '/api/onboarding/state', { token });
+  assert.equal(resume0.body.stage, 'ASK_INDUSTRY');
+
   const r1 = await api('POST', '/api/onboarding/advance', { token, body: { answer: 'SaaS / 软件' } });
   assert.equal(r1.status, 200);
   assert.equal(r1.body.stage, 'ASK_STAGE');
@@ -57,17 +69,13 @@ test('advance 逐步推进：industry → stage → pain，断点续答正确', 
   assert.equal(me.body.onboarded, true);
 });
 
-test('advance：跳过生辰 → 择色落 benmingColor → FORGE，异步产出《初见断语》', async () => {
+test('advance：跳过生辰（末问）→ FORGE，异步产出《初见断语》', async () => {
   const rb = await api('POST', '/api/onboarding/advance', { token, body: { skip: true } });
-  assert.equal(rb.body.stage, 'ASK_COLOR');
-  assert.equal(rb.body.messages[0].widget, 'color-pick');
+  assert.equal(rb.body.stage, 'FORGE');
+  assert.equal(rb.body.done, false);
+  assert.match(rb.body.messages[0].text, /初见断语/);
 
-  const rc = await api('POST', '/api/onboarding/advance', { token, body: { color: 'red' } });
-  assert.equal(rc.body.stage, 'FORGE');
-  assert.equal(rc.body.done, false);
-  assert.match(rc.body.messages[0].text, /初见断语/);
-
-  // 本命色已落库
+  // 本命色已落库（帅旗第一步即落定）
   const user = await prisma.user.findUnique({ where: { id: token } });
   assert.equal(user?.benmingColor, 'red');
 

@@ -9,8 +9,8 @@ import { cjkOrd, useTypewriter } from '../proto';
 import './index.scss';
 
 // 入帐引导（原型 splash/color/industry/judge/… 皮）—— 全程走真实 /onboarding 三接口（state/advance/result）。
-// 注意：UI 顺序以后端 stage 为准（后端序：营生→阶段→痛点→生辰→帅旗→FORGE），本命色因此排在最后一步，
-// 与原型「色在首」不同——视觉套原型皮，顺序听后端。
+// 顺序以后端 stage 为准（后端序：帅旗→营生→阶段→痛点→生辰→FORGE）——本命色第一问，贴原型「色在首」：
+// 一进帐先择帅旗、满帐随色而变。视觉套原型皮，顺序听后端。
 
 // 十二时辰（含「不确定」）——与 components/ChatView 的 SHICHEN 同源，供后端排盘。
 const SHICHEN: { label: string; hour: number | null }[] = [
@@ -21,13 +21,13 @@ const SHICHEN: { label: string; hour: number | null }[] = [
   { label: '酉 17-19', hour: 18 }, { label: '戌 19-21', hour: 20 }, { label: '亥 21-23', hour: 22 },
 ];
 
-// 每个 stage 的题眉序数 + 短名（按后端实际顺序 1→5）。
+// 每个 stage 的题眉序数 + 短名（按后端实际顺序 1→5：帅旗→营生→阶段→痛点→生辰）。
 const STAGE_META: Partial<Record<OnboardingStage, { ord: number; kicker: string }>> = {
-  ASK_INDUSTRY: { ord: 1, kicker: '立案卷' },
-  ASK_STAGE: { ord: 2, kicker: '量阶段' },
-  ASK_PAIN: { ord: 3, kicker: '究痛点' },
-  ASK_BAZI: { ord: 4, kicker: '留生辰' },
-  ASK_COLOR: { ord: 5, kicker: '定帅旗' },
+  ASK_COLOR: { ord: 1, kicker: '定帅旗' },
+  ASK_INDUSTRY: { ord: 2, kicker: '立案卷' },
+  ASK_STAGE: { ord: 3, kicker: '量阶段' },
+  ASK_PAIN: { ord: 4, kicker: '究痛点' },
+  ASK_BAZI: { ord: 5, kicker: '留生辰' },
 };
 
 type Phase = 'splash' | 'stage' | 'judge';
@@ -42,7 +42,7 @@ export default function Onboarding({ authed, onNeedLogin, onDone }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [phase, setPhase] = useState<Phase>('splash');
-  const [stage, setStage] = useState<OnboardingStage>('ASK_INDUSTRY');
+  const [stage, setStage] = useState<OnboardingStage>('ASK_COLOR');
   const [messages, setMessages] = useState<OnboardingMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [seatIntent, setSeatIntent] = useState(false);
@@ -82,7 +82,7 @@ export default function Onboarding({ authed, onNeedLogin, onDone }: Props) {
       setStage(st.stage);
       setMessages(st.messages);
       if (st.stage === 'FORGE') { setPhase('judge'); poll(); }
-      else if (st.stage === 'ASK_INDUSTRY') setPhase(fromSeat ? 'stage' : 'splash');
+      else if (st.stage === 'ASK_COLOR') setPhase(fromSeat ? 'stage' : 'splash');
       else setPhase('stage'); // 断点续答直接落到对应问句
     } catch { /* 拉取失败：停在 splash，用户可再点 */ }
   }
@@ -304,8 +304,8 @@ export default function Onboarding({ authed, onNeedLogin, onDone }: Props) {
             ) : null}
           </View>
           {judgeReady ? (
-            <View className="onb-enter proto-btn proto-btn--lg ink-in" style={{ background: accent }} onClick={finish}>
-              <Text>进 入 参 谋 部</Text>
+            <View className="onb-enter proto-btn proto-btn--lg" style={{ background: accent }} onClick={finish}>
+              <Text className="onb-enter-t">进 入 参 谋 部</Text>
             </View>
           ) : null}
         </View>

@@ -430,7 +430,7 @@ const OB_TXT: Record<Exclude<OnboardingStage, 'DONE'>, string> = {
   ASK_STAGE: '知道了。这一路走到哪一步了？',
   ASK_PAIN: '最要紧的一问：眼下最让你夜里睡不安稳的，是哪一桩？',
   ASK_BAZI: '还有一问，答不答随你。留个生辰，我能多看一层天时——何时宜攻，何时宜守。不信这一套，也不碍事。',
-  ASK_COLOR: '最后一桩。择一色，作你的帅旗——往后帐中器物，皆随此色。',
+  ASK_COLOR: '头一桩，先立帅旗。择一色，作你的帅旗——往后帐中器物，皆随此色。',
   FORGE: '够了。情报虽薄，已可落笔。容我片刻，为你写下第一道《初见断语》——你我初见，我眼中你的局。',
 };
 function obChoices(options: string[], freeLabel: string): { label: string; value: string }[] {
@@ -438,20 +438,20 @@ function obChoices(options: string[], freeLabel: string): { label: string; value
 }
 function obMessagesFor(stage: OnboardingStage, name: string): OnboardingMsg[] {
   switch (stage) {
-    case 'ASK_INDUSTRY':
+    case 'ASK_COLOR':
       return [
         { text: OB_GREET_1(name) },
         { text: OB_GREET_2 },
-        { text: OB_TXT.ASK_INDUSTRY, choices: obChoices(SURVEY[0].options, '其他，我自己说') },
+        { text: OB_TXT.ASK_COLOR, widget: 'color-pick' },
       ];
+    case 'ASK_INDUSTRY':
+      return [{ text: OB_TXT.ASK_INDUSTRY, choices: obChoices(SURVEY[0].options, '其他，我自己说') }];
     case 'ASK_STAGE':
       return [{ text: OB_TXT.ASK_STAGE, choices: OB_STAGE_CHOICES.map((o) => ({ label: o, value: o })) }];
     case 'ASK_PAIN':
       return [{ text: OB_TXT.ASK_PAIN, choices: obChoices(OB_PAIN, '一言难尽，我自己说') }];
     case 'ASK_BAZI':
       return [{ text: OB_TXT.ASK_BAZI, widget: 'bazi-form', choices: [{ label: '不看这层', value: '__skip__' }] }];
-    case 'ASK_COLOR':
-      return [{ text: OB_TXT.ASK_COLOR, widget: 'color-pick' }];
     case 'FORGE':
       return [{ text: OB_TXT.FORGE }];
     case 'DONE':
@@ -797,13 +797,13 @@ export const mock = {
   // —— 入帐对话（WO-A2）——
   async onboardingState(): Promise<OnboardingStateResult> {
     const { d } = current();
-    const stage: OnboardingStage = d.onboarded ? 'DONE' : ((d.onbStage as OnboardingStage) || 'ASK_INDUSTRY');
+    const stage: OnboardingStage = d.onboarded ? 'DONE' : ((d.onbStage as OnboardingStage) || 'ASK_COLOR');
     return delay({ stage, messages: obMessagesFor(stage, meaningfulM(d.name) || '主公') }, 200);
   },
   async onboardingAdvance(body: OnboardingAdvanceBody): Promise<OnboardingAdvanceResult> {
     const { token, d } = current();
     const name = meaningfulM(d.name) || '主公';
-    const cur: OnboardingStage = (d.onbStage as OnboardingStage) || 'ASK_INDUSTRY';
+    const cur: OnboardingStage = (d.onbStage as OnboardingStage) || 'ASK_COLOR';
     if (cur === 'FORGE' || cur === 'DONE') {
       return delay({ messages: obMessagesFor(cur, name), stage: cur, done: cur === 'DONE' }, 200);
     }
@@ -811,6 +811,12 @@ export const mock = {
     const answer = (body.answer ?? '').trim();
     let next: OnboardingStage;
     switch (cur) {
+      case 'ASK_COLOR': {
+        const color = (body.color ?? '').trim();
+        if (color) d.benmingColor = color;
+        sess.messages.push({ id: uid('m-'), role: 'user', content: { text: `帅旗定为${OB_COLOR_LABELS[color] ?? color}` }, at: now() });
+        next = 'ASK_INDUSTRY'; break;
+      }
       case 'ASK_INDUSTRY':
         sess.messages.push({ id: uid('m-'), role: 'user', content: { text: answer }, at: now() });
         d.profile = { ...(d.profile ?? {}), industry: answer } as Profile;
@@ -825,13 +831,7 @@ export const mock = {
         next = 'ASK_BAZI'; break;
       case 'ASK_BAZI':
         sess.messages.push({ id: uid('m-'), role: 'user', content: { text: body.skip || !body.bazi ? '（这层先不看）' : '（已留生辰）' }, at: now() });
-        next = 'ASK_COLOR'; break;
-      case 'ASK_COLOR': {
-        const color = (body.color ?? '').trim();
-        if (color) d.benmingColor = color;
-        sess.messages.push({ id: uid('m-'), role: 'user', content: { text: `帅旗定为${OB_COLOR_LABELS[color] ?? color}` }, at: now() });
         next = 'FORGE'; break;
-      }
       default:
         next = 'DONE';
     }

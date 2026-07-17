@@ -148,4 +148,14 @@
 .onb-caret { display: inline-block; width: 2px; height: 18px; vertical-align: -3px; animation: caret 1s step-end infinite; }
 .onb-judge-forged { margin-top: 24px; padding: 22px; border-top: 2px solid; }
 .onb-judge-forged-t { display: block; margin-top: 12px; font-size: 17px; font-weight: 600; line-height: 1.6; color: var(--tx); }
-.onb-enter { margin-top: 18px; width: 100%; padding: 16px 0; }
+/* 「进入参谋部」CTA：晚挂载（首判打字毕才现）。
+   原用 .ink-in（opacity + translateY，fill-mode:both）—— 结束态遗留 transform 合成层，
+   iOS/微信 WebView 把按钮提为独立绘制层后只补绘 --ac 实底、漏绘内联 taro-text-core 字形，
+   于是 DOM 里字色 --onac 正确、实际却不可见（与同套类但无 ink-in 的 .onb-seat 对照即知）。
+   改为纯 opacity 淡入（不带 transform → 无遗留合成层），并把字压在实底之上稳绘。 */
+.onb-enter {
+  margin-top: 18px; width: 100%; padding: 16px 0;
+  position: relative;
+  animation: fadeIn .24s ease-out both;
+}
+.onb-enter-t { position: relative; z-index: 1; color: var(--onac); }
