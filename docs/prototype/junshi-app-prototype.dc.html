@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;500;600;700;900&display=swap">
+<style>
+:root{
+  --ac:#2F5D50; --acd:#1E3E35; --acg:rgba(47,93,80,.12);
+  --bg:#F0EBE0; --surf:#FAF7EF; --surf2:#EFE9DB; --surf3:#E3DBC9;
+  --hair:rgba(34,32,27,.13); --hair2:rgba(34,32,27,.24);
+  --tx:#211F1A; --mut:#6B6456; --faint:#A79E8C; --onac:#FAF7EF;
+  --se:'Noto Serif SC','Songti SC',serif;
+  --ease:cubic-bezier(.16,1,.3,1);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:#141210;font-family:var(--se);color:var(--tx)}
+@keyframes fadeUp{0%{opacity:0;transform:translateY(18px)}100%{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{0%{opacity:0}100%{opacity:1}}
+@keyframes popIn{0%{opacity:0;transform:scale(.92)}100%{opacity:1;transform:scale(1)}}
+@keyframes drawRule{0%{transform:scaleX(0)}100%{transform:scaleX(1)}}
+@keyframes blink{0%,100%{opacity:.2}50%{opacity:1}}
+@keyframes caret{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes slideUp{0%{opacity:0;transform:translateY(40px)}100%{opacity:1;transform:translateY(0)}}
+.nos::-webkit-scrollbar{width:0;display:none}
+.nos{scrollbar-width:none}
+</style>
+</helmet>
+
+<div style="--stage:{{stage}};--bg:{{nbg}};--surf:{{nsurf}};--surf2:{{nsurf2}};--surf3:{{nsurf3}};--hair:{{nhair}};--hair2:{{nhair2}};--tx:{{ntx}};--mut:{{nmut}};--faint:{{nfaint}};min-height:100vh;width:100%;display:flex;flex-direction:column;align-items:center;gap:18px;padding:34px 20px;background:var(--stage,#141210);font-family:var(--se)">
+  <div style="font-size:12px;letter-spacing:.34em;color:var(--mut);opacity:.7">军 师 · AI 商 业 参 谋 部 · 可 交 互 原 型</div>
+
+  <!-- ===================== PHONE ===================== -->
+  <div style="--ac:{{ac}};--acd:{{acd}};--acg:{{acg}};position:relative;width:402px;height:872px;border-radius:42px;overflow:hidden;background:var(--bg);box-shadow:0 50px 100px -30px rgba(40,30,15,.55);font-family:var(--se);color:var(--tx)">
+
+    <!-- status bar -->
+    <div style="position:absolute;top:0;left:0;right:0;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 26px;z-index:80;font-size:14px;font-weight:600;color:var(--tx)">
+      <span>9:41</span>
+      <div style="display:flex;align-items:center;gap:7px">
+        <div style="display:flex;gap:2px;align-items:flex-end;height:11px">
+          <span style="width:3px;height:5px;background:var(--tx);border-radius:1px"></span>
+          <span style="width:3px;height:7px;background:var(--tx);border-radius:1px"></span>
+          <span style="width:3px;height:9px;background:var(--tx);border-radius:1px"></span>
+          <span style="width:3px;height:11px;background:var(--tx);border-radius:1px;opacity:.35"></span>
+        </div>
+        <div style="width:25px;height:12px;border:1.5px solid var(--tx);border-radius:3px;padding:1.5px;opacity:.85"><span style="display:block;width:72%;height:100%;background:var(--tx);border-radius:1px"></span></div>
+      </div>
+    </div>
+
+    <!-- ===================== SPLASH ===================== -->
+    <sc-if value="{{showSplash}}" hint-placeholder-val="{{true}}">
+    <div style="position:absolute;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 46px;background:var(--bg)">
+      <div style="position:absolute;top:0;bottom:0;right:46px;writing-mode:vertical-rl;font-size:19px;letter-spacing:.42em;color:var(--ac);opacity:.55;display:flex;align-items:center;animation:fadeIn 1.2s var(--ease) .5s both">运筹帷幄 · 决胜千里</div>
+      <div style="position:absolute;top:118px;left:46px;font-size:15px;letter-spacing:.5em;color:var(--mut);animation:fadeIn 1s var(--ease) .2s both">壹 · 参 谋 部</div>
+      <div style="position:relative;margin-bottom:20px">
+        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:184px;height:184px;border:1px solid var(--ac);border-radius:50%;opacity:.28"></div>
+        <div style="font-size:118px;font-weight:600;line-height:1;letter-spacing:.06em;white-space:nowrap;position:relative;animation:fadeUp .9s var(--ease) both">军<span style="color:var(--ac)">师</span></div>
+      </div>
+      <div style="width:52px;height:2px;background:var(--ac);transform-origin:center;animation:drawRule .8s var(--ease) .4s both;margin-bottom:26px"></div>
+      <div style="font-size:23px;font-weight:500;letter-spacing:.08em;margin-bottom:16px;text-align:center;line-height:1.5;animation:fadeUp .9s var(--ease) .15s both">装进微信里的<br>AI 商业参谋部</div>
+      <div style="display:flex;align-items:center;gap:20px;font-size:15px;color:var(--mut);margin-bottom:56px;animation:fadeUp .9s var(--ease) .3s both">
+        <span>出谋 · 想清楚</span><span style="width:1px;height:16px;background:var(--hair2)"></span><span>出活 · 做出来</span>
+      </div>
+      <button onClick="{{begin}}" style="animation:fadeUp .9s var(--ease) .48s both;border:none;background:var(--ac);color:var(--onac);font-family:var(--se);font-size:17px;font-weight:500;letter-spacing:.24em;padding:16px 0;width:100%;border-radius:2px;cursor:pointer" style-hover="filter:brightness(1.1)">请 主 公 落 座</button>
+      <div style="margin-top:22px;font-size:12px;letter-spacing:.18em;color:var(--faint);animation:fadeIn 1s var(--ease) .8s both">面向创始人 · 主理人 · 小团队经营者</div>
+    </div>
+    </sc-if>
+
+    <!-- ===================== 本命色 ===================== -->
+    <sc-if value="{{showColor}}" hint-placeholder-val="{{false}}">
+    <div class="nos" style="position:absolute;inset:0;z-index:60;padding:60px 28px 28px;display:flex;flex-direction:column;overflow-y:auto;background:var(--bg)">
+      <div style="font-size:13px;letter-spacing:.4em;color:var(--ac);margin-bottom:14px">壹 · 入部</div>
+      <div style="font-size:36px;font-weight:600;line-height:1.2;margin-bottom:10px">择一枚<span style="color:var(--ac)">本命色</span></div>
+      <div style="font-size:14px;color:var(--mut);line-height:1.8;margin-bottom:26px">界面随色而变，军师赠你一句批语。日后可在「主公」处更换。</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--hair);border:1px solid var(--hair)">
+        <sc-for list="{{colorList}}" as="c" hint-placeholder-count="6">
+          <div onClick="{{c.pick}}" style="background:{{c.cardBg}};padding:20px 18px;cursor:pointer;transition:background .2s var(--ease);position:relative">
+            <div style="position:absolute;top:16px;right:16px;font-size:13px;color:{{c.tickC}}">{{c.tick}}</div>
+            <span style="display:block;width:34px;height:34px;border-radius:50%;background:{{c.hex}};margin-bottom:14px"></span>
+            <b style="font-size:19px;font-weight:600;display:block;margin-bottom:4px">{{c.name}}</b>
+            <div style="font-size:12.5px;color:var(--mut);line-height:1.5">{{c.motto}}</div>
+          </div>
+        </sc-for>
+      </div>
+      <sc-if value="{{colorChosen}}" hint-placeholder-val="{{false}}">
+        <div style="margin-top:24px;padding:18px 20px;border-left:2px solid var(--ac);background:var(--acg);animation:fadeUp .5s var(--ease) both">
+          <div style="font-size:12px;letter-spacing:.28em;color:var(--ac);margin-bottom:10px">军 师 批 曰</div>
+          <div style="font-size:17px;line-height:1.7;font-weight:400">{{colorRemark}}</div>
+        </div>
+        <button onClick="{{toIndustry}}" style="margin-top:18px;border:none;background:var(--ac);color:var(--onac);font-family:var(--se);font-size:16px;font-weight:500;letter-spacing:.2em;padding:15px;border-radius:2px;cursor:pointer">落 定 · 下 一 步</button>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- ===================== 行业 ===================== -->
+    <sc-if value="{{showIndustry}}" hint-placeholder-val="{{false}}">
+    <div class="nos" style="position:absolute;inset:0;z-index:60;padding:60px 28px 28px;display:flex;flex-direction:column;overflow-y:auto;background:var(--bg)">
+      <div style="font-size:13px;letter-spacing:.4em;color:var(--ac);margin-bottom:14px">贰 · 立案卷</div>
+      <div style="font-size:36px;font-weight:600;line-height:1.2;margin-bottom:10px">你经营<span style="color:var(--ac)">哪一行</span>？</div>
+      <div style="font-size:14px;color:var(--mut);line-height:1.8;margin-bottom:22px">先立一份样板案卷，军师据此给你第一条判断。</div>
+      <div style="border-top:1px solid var(--hair)">
+        <sc-for list="{{industryList}}" as="n" hint-placeholder-count="6">
+          <div onClick="{{n.pick}}" style="display:flex;align-items:center;gap:18px;border-bottom:1px solid var(--hair);padding:18px 4px;cursor:pointer;transition:padding-left .2s var(--ease)" style-hover="padding-left:12px">
+            <span style="flex:none;font-size:24px;font-weight:400;color:var(--faint);width:34px">{{n.idx}}</span>
+            <div style="flex:1">
+              <b style="font-size:19px;font-weight:600;display:block">{{n.name}}</b>
+              <span style="font-size:12.5px;color:var(--mut)">{{n.desc}}</span>
+            </div>
+            <span style="color:var(--ac);font-size:20px">→</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ===================== 军师首判 ===================== -->
+    <sc-if value="{{showJudge}}" hint-placeholder-val="{{false}}">
+    <div style="position:absolute;inset:0;z-index:60;padding:56px 24px 24px;display:flex;flex-direction:column;background:var(--bg)">
+      <div style="display:flex;align-items:center;gap:13px;margin-bottom:20px;padding-bottom:18px;border-bottom:1px solid var(--hair)">
+        <span style="width:46px;height:46px;border-radius:50%;background:var(--ac);color:var(--onac);display:grid;place-items:center;font-size:22px;font-weight:600;flex:none">师</span>
+        <div style="flex:1"><b style="font-size:17px;display:block;font-weight:600">总军师</b><span style="font-size:12px;color:var(--mut)">正在研判 · {{industryName}}</span></div>
+        <span style="display:flex;gap:5px"><span style="width:6px;height:6px;border-radius:50%;background:var(--ac);animation:blink 1.2s infinite"></span><span style="width:6px;height:6px;border-radius:50%;background:var(--ac);animation:blink 1.2s infinite .2s"></span><span style="width:6px;height:6px;border-radius:50%;background:var(--ac);animation:blink 1.2s infinite .4s"></span></span>
+      </div>
+      <div class="nos" style="flex:1;overflow-y:auto">
+        <div style="font-size:12px;letter-spacing:.28em;color:var(--ac);margin-bottom:16px">初 步 军 情</div>
+        <div style="font-size:18px;line-height:2.1;min-height:150px">{{judgeTyped}}<span style="display:inline-block;width:2px;height:18px;background:var(--ac);vertical-align:-3px;animation:caret 1s step-end infinite">{{caret}}</span></div>
+        <sc-if value="{{judgeDone}}" hint-placeholder-val="{{false}}">
+          <div style="margin-top:24px;padding:22px;background:var(--acg);border-top:2px solid var(--ac);animation:fadeUp .5s var(--ease) both">
+            <div style="font-size:12px;letter-spacing:.28em;color:var(--ac);margin-bottom:12px">主 要 矛 盾</div>
+            <div style="font-size:22px;font-weight:600;line-height:1.5">「{{mainConflict}}」</div>
+          </div>
+        </sc-if>
+      </div>
+      <sc-if value="{{judgeDone}}" hint-placeholder-val="{{false}}">
+        <button onClick="{{enterApp}}" style="margin-top:18px;border:none;background:var(--ac);color:var(--onac);font-family:var(--se);font-size:17px;font-weight:500;letter-spacing:.22em;padding:16px;border-radius:2px;cursor:pointer;animation:fadeUp .5s var(--ease) both">进 入 参 谋 部</button>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- ===================== APP ===================== -->
+    <sc-if value="{{showApp}}" hint-placeholder-val="{{false}}">
+    <div style="position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;background:var(--bg)">
+
+      <!-- header -->
+      <div style="flex:none;padding:52px 24px 0;background:var(--bg);position:relative;z-index:6">
+        <div style="position:absolute;right:14px;top:34px;font-size:130px;font-weight:900;color:var(--ac);opacity:.06;line-height:1;pointer-events:none;user-select:none">{{tabWatermark}}</div>
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;position:relative">
+          <div>
+            <div style="font-size:12px;letter-spacing:.3em;color:var(--ac);margin-bottom:5px">{{tabKicker}}</div>
+            <b style="font-size:30px;font-weight:600;letter-spacing:.03em">{{tabTitle}}</b>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);border:1px solid var(--hair2);padding:6px 12px;border-radius:2px">
+            <span style="width:6px;height:6px;border-radius:50%;background:var(--ac)"></span>{{industryTag}}
+          </div>
+        </div>
+        <div style="height:1px;background:var(--hair);margin-top:16px"></div>
+      </div>
+
+      <!-- scroll body -->
+      <div class="nos" style="flex:1;overflow-y:auto;padding:20px 24px 110px">
+
+        <!-- ===== 问策 ===== -->
+        <sc-if value="{{isZhance}}" hint-placeholder-val="{{false}}">
+          <sc-if value="{{noThread}}" hint-placeholder-val="{{true}}">
+            <div onClick="{{openZong}}" style="background:var(--surf);border:1px solid var(--hair2);border-top:3px solid var(--ac);padding:20px;cursor:pointer;position:relative">
+              <div style="display:flex;align-items:center;gap:13px">
+                <span style="width:46px;height:46px;border-radius:50%;background:var(--ac);color:var(--onac);display:grid;place-items:center;font-size:22px;font-weight:600;flex:none">师</span>
+                <div style="flex:1">
+                  <div style="display:flex;align-items:center;gap:9px"><b style="font-size:18px;font-weight:600">总军师</b><span style="font-size:11px;letter-spacing:.1em;color:var(--ac);border:1px solid var(--ac);padding:1px 8px">统筹</span></div>
+                  <span style="font-size:12px;color:var(--mut)">调度全体 · 收拢主判断</span>
+                </div>
+                <span style="width:22px;height:22px;border-radius:50%;background:var(--ac);color:var(--onac);display:grid;place-items:center;font-size:12px;font-weight:600">2</span>
+              </div>
+              <div style="margin-top:15px;padding-top:15px;border-top:1px dashed var(--hair);font-size:14.5px;line-height:1.7;color:var(--tx)">{{conflictPreview}}</div>
+            </div>
+            <div style="font-size:12px;letter-spacing:.24em;color:var(--faint);margin:26px 2px 14px">专 业 军 师 · 分 线 出 策</div>
+            <div style="border-top:1px solid var(--hair)">
+              <sc-for list="{{convos}}" as="c" hint-placeholder-count="4">
+                <div onClick="{{c.open}}" style="display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--hair);padding:15px 2px;cursor:pointer">
+                  <span style="width:44px;height:44px;border-radius:50%;background:{{c.tint}};color:{{c.dot}};display:grid;place-items:center;font-size:17px;font-weight:600;flex:none">{{c.ini}}</span>
+                  <div style="flex:1;min-width:0">
+                    <div style="display:flex;align-items:baseline;gap:9px"><b style="font-size:15.5px;font-weight:600">{{c.name}}</b><span style="font-size:11px;color:{{c.dot}}">{{c.role}}</span></div>
+                    <span style="font-size:12.5px;color:var(--mut);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{c.preview}}</span>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{hasThread}}" hint-placeholder-val="{{false}}">
+            <div style="animation:fadeIn .25s var(--ease) both">
+              <div onClick="{{closeThread}}" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--mut);cursor:pointer;margin-bottom:16px">← 返回问策</div>
+              <div style="display:flex;flex-direction:column;gap:14px">
+                <sc-for list="{{threadMsgs}}" as="m" hint-placeholder-count="2">
+                  <div style="display:flex;justify-content:{{m.justify}}">
+                    <div style="max-width:82%;background:{{m.bg}};color:{{m.color}};border:{{m.border}};border-radius:{{m.radius}};padding:13px 16px;font-size:14.5px;line-height:1.75;white-space:pre-wrap">{{m.text}}</div>
+                  </div>
+                </sc-for>
+                <sc-if value="{{threadTyping}}" hint-placeholder-val="{{false}}">
+                  <div style="display:flex;justify-content:flex-start"><div style="background:var(--surf);border:1px solid var(--hair);border-radius:2px 14px 14px 14px;padding:15px 18px;display:flex;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:var(--mut);animation:blink 1.2s infinite"></span><span style="width:7px;height:7px;border-radius:50%;background:var(--mut);animation:blink 1.2s infinite .2s"></span><span style="width:7px;height:7px;border-radius:50%;background:var(--mut);animation:blink 1.2s infinite .4s"></span></div></div>
+                </sc-if>
+              </div>
+              <div style="display:flex;gap:9px;flex-wrap:wrap;margin-top:20px">
+                <sc-for list="{{quickAsks}}" as="q" hint-placeholder-count="2">
+                  <div onClick="{{q.send}}" style="font-size:13px;color:var(--ac);border:1px solid var(--ac);padding:9px 15px;cursor:pointer">{{q.text}}</div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+        </sc-if>
+
+        <!-- ===== 军情 ===== -->
+        <sc-if value="{{isJunqing}}" hint-placeholder-val="{{false}}">
+          <div style="background:var(--surf);border:1px solid var(--hair2);padding:24px 22px;position:relative;overflow:hidden">
+            <div style="position:absolute;right:16px;top:4px;font-size:88px;font-weight:900;color:var(--ac);opacity:.1;line-height:1">势</div>
+            <div style="font-size:12px;letter-spacing:.28em;color:var(--ac);margin-bottom:14px;position:relative">今 日 主 要 矛 盾</div>
+            <div style="font-size:26px;font-weight:600;line-height:1.5;position:relative;border-left:3px solid var(--ac);padding-left:16px">{{mainConflict}}</div>
+          </div>
+
+          <div style="margin-top:18px;background:var(--surf);border:1px solid var(--hair);padding:20px 22px">
+            <div style="font-size:12px;letter-spacing:.28em;color:var(--mut);margin-bottom:18px">三 势 研 判</div>
+            <div style="display:flex;gap:16px;align-items:center">
+              <svg viewBox="0 0 180 168" style="width:150px;height:140px;flex:none">
+                <polygon points="90,14 158,130 22,130" fill="none" stroke="var(--hair2)" stroke-width="1"></polygon>
+                <polygon points="90,52 124,110 56,110" fill="none" stroke="var(--hair)" stroke-width="1"></polygon>
+                <line x1="90" y1="72" x2="90" y2="14" stroke="var(--hair)"></line>
+                <line x1="90" y1="72" x2="158" y2="130" stroke="var(--hair)"></line>
+                <line x1="90" y1="72" x2="22" y2="130" stroke="var(--hair)"></line>
+                <polygon points="{{radarPoints}}" fill="var(--acg)" stroke="var(--ac)" stroke-width="2"></polygon>
+                <text x="90" y="8" fill="var(--tx)" font-size="12" text-anchor="middle" font-family="var(--se)" font-weight="600">天势</text>
+                <text x="168" y="141" fill="var(--tx)" font-size="12" text-anchor="middle" font-family="var(--se)" font-weight="600">市势</text>
+                <text x="12" y="141" fill="var(--tx)" font-size="12" text-anchor="middle" font-family="var(--se)" font-weight="600">人势</text>
+              </svg>
+              <div style="flex:1;display:flex;flex-direction:column;gap:15px">
+                <sc-for list="{{shiMeters}}" as="s" hint-placeholder-count="3">
+                  <div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px"><span style="font-size:13px;font-weight:600">{{s.label}}<span style="font-size:11px;color:var(--faint);margin-left:6px;font-weight:400">{{s.sub}}</span></span><span style="font-size:16px;font-weight:600;color:var(--ac)">{{s.val}}</span></div>
+                    <div style="height:5px;background:var(--surf3);overflow:hidden"><div style="height:100%;width:{{s.w}};background:var(--ac)"></div></div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:14px;margin-top:16px">
+            <div style="flex:1;background:var(--surf);border:1px solid var(--hair);padding:18px">
+              <div style="font-size:12px;letter-spacing:.16em;color:var(--ac);margin-bottom:14px">下 一 步 就 做</div>
+              <div style="display:flex;flex-direction:column;gap:13px">
+                <sc-for list="{{nextSteps}}" as="t" hint-placeholder-count="3">
+                  <div style="display:flex;gap:9px;font-size:13.5px;line-height:1.55"><span style="color:var(--ac);font-weight:600;flex:none">{{t.i}}</span><span>{{t.t}}</span></div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="flex:none;width:130px;background:var(--surf);border:1px solid var(--hair);padding:18px">
+              <div style="font-size:12px;letter-spacing:.16em;color:#BC4A31;margin-bottom:14px">现 在 别 做</div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <sc-for list="{{avoidList}}" as="a" hint-placeholder-count="2">
+                  <div style="font-size:12.5px;line-height:1.55;color:var(--mut)">{{a.t}}</div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+          <div onClick="{{goJunling}}" style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;border:1px solid var(--ac);padding:16px 18px;cursor:pointer;background:var(--acg)">
+            <span style="font-size:14.5px;font-weight:600">把判断拆成今天的军令</span><span style="color:var(--ac);font-size:20px">→</span>
+          </div>
+        </sc-if>
+
+        <!-- ===== 军令 ===== -->
+        <sc-if value="{{isJunling}}" hint-placeholder-val="{{false}}">
+          <div style="display:flex;border:1px solid var(--hair2)">
+            <div style="flex:1;padding:18px 20px;border-right:1px solid var(--hair2)"><div style="font-size:34px;font-weight:600;color:var(--ac);line-height:1">{{doneCount}}<span style="font-size:17px;color:var(--faint)"> / {{taskTotal}}</span></div><div style="font-size:12px;color:var(--mut);letter-spacing:.1em;margin-top:4px">今日已办</div></div>
+            <div style="flex:1;padding:18px 20px"><div style="font-size:34px;font-weight:600;line-height:1">{{doneRate}}<span style="font-size:17px;color:var(--faint)">%</span></div><div style="font-size:12px;color:var(--mut);letter-spacing:.1em;margin-top:4px">战役进度</div></div>
+          </div>
+          <div style="font-size:12px;letter-spacing:.24em;color:var(--faint);margin:24px 2px 14px">今 日 战 役</div>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <sc-for list="{{taskView}}" as="t" hint-placeholder-count="3">
+              <div style="background:var(--surf);border:1px solid {{t.brd}};border-left:3px solid {{t.lead}};padding:16px 18px">
+                <div style="display:flex;gap:13px;align-items:flex-start">
+                  <div onClick="{{t.toggle}}" style="flex:none;width:24px;height:24px;border-radius:50%;border:1.5px solid {{t.checkBrd}};background:{{t.checkBg}};display:grid;place-items:center;cursor:pointer;margin-top:2px;color:var(--onac);font-size:12px;font-weight:600">{{t.check}}</div>
+                  <div style="flex:1">
+                    <div style="font-size:15.5px;font-weight:600;line-height:1.55;{{t.strike}}">{{t.t}}</div>
+                    <div style="display:flex;gap:16px;margin-top:9px;font-size:12px;color:var(--mut)"><span>{{t.due}}</span><span>{{t.who}}</span><span>约 {{t.est}}</span></div>
+                  </div>
+                  <span style="flex:none;font-size:12px;color:var(--ac);border:1px solid var(--ac);padding:2px 8px;opacity:{{t.stamp}}">已办</span>
+                </div>
+                <sc-if value="{{t.showFill}}" hint-placeholder-val="{{false}}">
+                  <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--hair2);animation:fadeUp .3s var(--ease) both">
+                    <div style="font-size:12px;letter-spacing:.14em;color:var(--ac);margin-bottom:10px">数 据 回 填 · 做完了多少？</div>
+                    <div style="display:flex;gap:8px">
+                      <input value="{{t.fill}}" onInput="{{t.onFill}}" placeholder="{{t.ph}}" style="flex:1;background:var(--bg);border:1px solid var(--hair2);padding:10px 12px;color:var(--tx);font-family:var(--se);font-size:13px;outline:none"></input>
+                      <button onClick="{{t.commit}}" style="border:none;background:var(--ac);color:var(--onac);font-family:var(--se);font-size:13px;font-weight:500;padding:0 18px;cursor:pointer">回填</button>
+                    </div>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:18px;display:flex;align-items:flex-start;gap:13px;border:1px solid var(--hair);padding:16px 18px">
+            <span style="width:36px;height:36px;border-radius:50%;background:var(--acg);color:var(--ac);display:grid;place-items:center;font-size:17px;font-weight:600;flex:none">师</span>
+            <div style="font-size:13px;line-height:1.7;color:var(--mut)"><b style="color:var(--tx);font-weight:600">总军师督战 · </b>{{marshalNote}}</div>
+          </div>
+        </sc-if>
+
+        <!-- ===== 锦囊 ===== -->
+        <sc-if value="{{isJinnang}}" hint-placeholder-val="{{false}}">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--hair);border:1px solid var(--hair)">
+            <sc-for list="{{vaults}}" as="v" hint-placeholder-count="4">
+              <div style="background:var(--surf);padding:20px 18px;cursor:pointer">
+                <div style="width:40px;height:40px;border:1px solid var(--ac);border-radius:50%;display:grid;place-items:center;font-size:17px;font-weight:600;color:var(--ac);margin-bottom:14px">{{v.ini}}</div>
+                <b style="font-size:16px;display:block;margin-bottom:4px;font-weight:600">{{v.name}}</b>
+                <span style="font-size:12px;color:var(--mut)">{{v.count}}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size:12px;letter-spacing:.24em;color:var(--faint);margin:26px 2px 14px">方 案 版 本 · 从 v1 长 到 v7</div>
+          <div style="background:var(--surf);border:1px solid var(--hair);padding:22px">
+            <b style="font-size:16px;font-weight:600">复购增长方案</b>
+            <div style="margin-top:18px;position:relative;padding-left:22px">
+              <div style="position:absolute;left:4px;top:6px;bottom:6px;width:1px;background:var(--hair2)"></div>
+              <sc-for list="{{versions}}" as="v" hint-placeholder-count="4">
+                <div style="position:relative;padding-bottom:18px">
+                  <span style="position:absolute;left:-22px;top:4px;width:9px;height:9px;border-radius:50%;background:{{v.dot}};border:2px solid var(--surf)"></span>
+                  <div style="display:flex;align-items:baseline;gap:10px"><b style="font-size:13px;color:{{v.vc}};font-weight:600">{{v.v}}</b><span style="font-size:13.5px;color:var(--tx)">{{v.t}}</span></div>
+                  <span style="font-size:11px;color:var(--faint)">{{v.d}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ===== 主公 ===== -->
+        <sc-if value="{{isZhugong}}" hint-placeholder-val="{{false}}">
+          <div style="background:var(--surf);border:1px solid var(--hair2);border-top:3px solid var(--ac);padding:22px;display:flex;align-items:center;gap:16px">
+            <div style="width:60px;height:60px;border-radius:50%;background:var(--ac);color:var(--onac);display:grid;place-items:center;font-size:27px;font-weight:600;flex:none">主</div>
+            <div style="flex:1">
+              <b style="font-size:20px;font-weight:600">李主公</b>
+              <div style="font-size:13px;color:var(--mut);margin-top:2px">{{industryName}}</div>
+              <div style="display:inline-block;margin-top:9px;font-size:11px;letter-spacing:.08em;color:var(--ac);border:1px solid var(--ac);padding:3px 11px">决策版 · 年付会员</div>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;display:flex;gap:1px;background:var(--hair);border:1px solid var(--hair)">
+            <div style="flex:none;width:132px;background:var(--surf);padding:18px;display:flex;flex-direction:column;align-items:center">
+              <svg viewBox="0 0 100 100" style="width:78px;height:78px">
+                <circle cx="50" cy="50" r="42" fill="none" stroke="var(--surf3)" stroke-width="7"></circle>
+                <circle cx="50" cy="50" r="42" fill="none" stroke="var(--ac)" stroke-width="7" stroke-linecap="round" stroke-dasharray="{{powerDash}}" transform="rotate(-90 50 50)"></circle>
+                <text x="50" y="47" fill="var(--tx)" font-size="24" text-anchor="middle" font-family="var(--se)" font-weight="600">68</text>
+                <text x="50" y="65" fill="var(--mut)" font-size="10" text-anchor="middle" font-family="var(--se)">/ 100</text>
+              </svg>
+              <div style="font-size:12px;color:var(--mut);letter-spacing:.1em;margin-top:8px">本月算力</div>
+            </div>
+            <div style="flex:1;background:var(--surf);padding:20px;display:flex;flex-direction:column;justify-content:center;gap:0">
+              <div style="display:flex;justify-content:space-between;font-size:13.5px;padding:9px 0"><span style="color:var(--mut)">企业档案</span><b style="font-weight:600">案卷 3 卷</b></div>
+              <div style="height:1px;background:var(--hair)"></div>
+              <div style="display:flex;justify-content:space-between;font-size:13.5px;padding:9px 0"><span style="color:var(--mut)">在役军师</span><b style="color:var(--ac);font-weight:600">8 位</b></div>
+              <div style="height:1px;background:var(--hair)"></div>
+              <div style="display:flex;justify-content:space-between;font-size:13.5px;padding:9px 0"><span style="color:var(--mut)">连续经营</span><b style="font-weight:600">27 天</b></div>
+            </div>
+          </div>
+
+          <div style="font-size:12px;letter-spacing:.24em;color:var(--faint);margin:26px 2px 14px">本 命 色 · 随 时 更 换</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <sc-for list="{{colorList}}" as="c" hint-placeholder-count="6">
+              <div onClick="{{c.pickApp}}" style="width:44px;height:44px;border-radius:50%;background:{{c.hex}};cursor:pointer;display:grid;place-items:center;box-shadow:0 0 0 {{c.ringW}} var(--bg),0 0 0 {{c.ringW2}} {{c.hex}};color:var(--onac);font-size:14px">{{c.tick}}</div>
+            </sc-for>
+          </div>
+
+          <div style="font-size:12px;letter-spacing:.24em;color:var(--faint);margin:26px 2px 14px">彩 蛋 · 好 玩 的 小 心 思</div>
+          <div style="border-top:1px solid var(--hair)">
+            <sc-for list="{{eggs}}" as="e" hint-placeholder-count="3">
+              <div onClick="{{e.open}}" style="display:flex;align-items:center;gap:15px;border-bottom:1px solid var(--hair);padding:16px 2px;cursor:pointer">
+                <span style="width:40px;height:40px;border:1px solid var(--hair2);border-radius:50%;display:grid;place-items:center;font-size:19px;color:var(--ac);font-weight:600;flex:none">{{e.mark}}</span>
+                <div style="flex:1"><b style="font-size:15.5px;display:block;font-weight:600">{{e.name}}</b><span style="font-size:12px;color:var(--mut)">{{e.desc}}</span></div>
+                <span style="color:var(--faint);font-size:18px">→</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:18px;font-size:11px;color:var(--faint);text-align:center;line-height:1.9">命理类玩法设有合规总开关 · 可按渠道整体关闭</div>
+        </sc-if>
+
+      </div>
+
+      <!-- bottom nav -->
+      <div style="flex:none;position:absolute;left:0;right:0;bottom:0;height:80px;background:var(--surf);border-top:1px solid var(--hair2);display:flex;padding:0 4px 18px;z-index:8">
+        <sc-for list="{{navItems}}" as="t" hint-placeholder-count="5">
+          <div onClick="{{t.go}}" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;cursor:pointer;padding-top:14px">
+            <span style="width:16px;height:2px;background:{{t.bar}}"></span>
+            <b style="font-size:16px;font-weight:{{t.weight}};color:{{t.color}};letter-spacing:.08em">{{t.label}}</b>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- coach marks -->
+      <sc-if value="{{coachActive}}" hint-placeholder-val="{{false}}">
+        <div style="position:absolute;inset:0;z-index:40;background:rgba(28,22,12,.62);display:flex;flex-direction:column;justify-content:flex-end;padding:0 20px 108px;animation:fadeIn .3s var(--ease) both">
+          <div style="background:var(--surf);border-top:3px solid var(--ac);padding:22px;box-shadow:0 24px 50px -14px rgba(20,15,5,.5);animation:slideUp .4s var(--ease) both">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+              <div style="display:flex;align-items:center;gap:11px"><span style="width:30px;height:30px;border-radius:50%;background:var(--ac);color:var(--onac);display:grid;place-items:center;font-size:14px;font-weight:600">师</span><span style="font-size:12px;color:var(--ac);letter-spacing:.14em">功能点亮 · {{coachIdx}} / 五</span></div>
+              <span onClick="{{skipCoach}}" style="font-size:12px;color:var(--mut);cursor:pointer">跳过</span>
+            </div>
+            <b style="font-size:20px;display:block;margin-bottom:10px;font-weight:600">{{coachTitle}}</b>
+            <div style="font-size:14px;line-height:1.8;color:var(--mut);margin-bottom:20px">{{coachText}}</div>
+            <button onClick="{{nextCoach}}" style="width:100%;border:none;background:var(--ac);color:var(--onac);font-family:var(--se);font-size:15px;font-weight:500;letter-spacing:.1em;padding:14px;cursor:pointer">{{coachBtn}}</button>
+          </div>
+          <div style="text-align:center;margin-top:12px;color:var(--ac);font-size:20px;animation:blink 1.4s infinite">▾</div>
+        </div>
+      </sc-if>
+
+      <!-- ===== MODAL ===== -->
+      <sc-if value="{{modalOpen}}" hint-placeholder-val="{{false}}">
+        <div onClick="{{closeModal}}" style="position:absolute;inset:0;z-index:50;background:rgba(28,22,12,.6);display:flex;align-items:flex-end;animation:fadeIn .25s var(--ease) both">
+          <div onClick="{{stop}}" class="nos" style="width:100%;max-height:86%;overflow-y:auto;background:var(--bg);border-top:3px solid var(--ac);padding:24px 24px 34px;animation:slideUp .35s var(--ease) both">
+            <div style="width:38px;height:3px;background:var(--hair2);margin:0 auto 22px"></div>
+
+            <sc-if value="{{isFortune}}" hint-placeholder-val="{{false}}">
+              <div style="font-size:12px;letter-spacing:.24em;color:var(--ac);margin-bottom:10px">彩 蛋 · 传 播 钩 子</div>
+              <b style="font-size:26px;display:block;margin-bottom:8px;font-weight:600">送你一卦</b>
+              <div style="font-size:13.5px;color:var(--mut);line-height:1.8;margin-bottom:22px">输入朋友的生辰，现算一张可分享的命盘卡片。即算即走、不留存。</div>
+              <sc-if value="{{fortuneUnCast}}" hint-placeholder-val="{{true}}">
+                <input value="{{fortuneDate}}" onInput="{{onFortuneDate}}" placeholder="例：1994 年 · 处女座" style="width:100%;background:var(--surf);border:1px solid var(--hair2);padding:15px 16px;color:var(--tx);font-family:var(--se);font-size:15px;outline:none;margin-bottom:16px"></input>
+                <div onClick="{{toggleConsent}}" style="display:flex;align-items:center;gap:11px;cursor:pointer;margin-bottom:22px">
+                  <span style="width:22px;height:22px;border:1.5px solid {{consentBrd}};background:{{consentBg}};display:grid;place-items:center;color:var(--onac);font-size:12px;font-weight:600;flex:none">{{consentTick}}</span>
+                  <span style="font-size:12.5px;color:var(--mut);line-height:1.5">我已知悉此为趣味娱乐，且已获得对方同意</span>
+                </div>
+                <button onClick="{{castFortune}}" style="width:100%;border:none;background:{{castBg}};color:var(--onac);font-family:var(--se);font-size:16px;font-weight:500;letter-spacing:.1em;padding:16px;cursor:{{castCursor}}">起 卦</button>
+              </sc-if>
+              <sc-if value="{{fortuneCast}}" hint-placeholder-val="{{false}}">
+                <div style="background:var(--acd);color:var(--onac);padding:30px 26px;text-align:center;animation:popIn .4s var(--ease) both">
+                  <div style="font-size:11px;letter-spacing:.3em;opacity:.75">军 师 · 命 盘 卡 片</div>
+                  <div style="font-size:56px;font-weight:400;margin:16px 0 8px">{{fortuneGua}}</div>
+                  <div style="font-size:16px;font-weight:600;letter-spacing:.08em;margin-bottom:18px">{{fortuneName}}</div>
+                  <div style="font-size:15px;line-height:2;opacity:.92">{{fortuneText}}</div>
+                  <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(255,255,255,.18);font-size:10px;letter-spacing:.14em;opacity:.6">军师 · 即算即走 · 不留存</div>
+                </div>
+                <button onClick="{{resetFortune}}" style="width:100%;margin-top:16px;border:1px solid var(--ac);background:transparent;color:var(--ac);font-family:var(--se);font-size:15px;font-weight:500;padding:14px;cursor:pointer">分享给朋友 · 再算一张</button>
+              </sc-if>
+            </sc-if>
+
+            <sc-if value="{{isCalendar}}" hint-placeholder-val="{{false}}">
+              <div style="font-size:12px;letter-spacing:.24em;color:var(--ac);margin-bottom:10px">彩 蛋 · 全 年 一 图</div>
+              <b style="font-size:26px;display:block;margin-bottom:8px;font-weight:600">天时日历</b>
+              <div style="font-size:13.5px;color:var(--mut);line-height:1.8;margin-bottom:22px">一张图看全年的攻守节奏与拐点，适合发到朋友圈。</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--hair);border:1px solid var(--hair)">
+                <sc-for list="{{months}}" as="m" hint-placeholder-count="12">
+                  <div style="background:{{m.bg}};padding:14px 13px">
+                    <div style="font-size:19px;font-weight:600;color:var(--tx)">{{m.m}}</div>
+                    <div style="font-size:16px;font-weight:600;color:{{m.tc}};margin:3px 0">{{m.act}}</div>
+                    <div style="font-size:10.5px;color:var(--mut);line-height:1.4">{{m.note}}</div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="margin-top:18px;display:flex;gap:18px;justify-content:center;font-size:12px;color:var(--mut)"><span><span style="color:var(--ac)">■</span> 攻</span><span><span style="color:#BC4A31">■</span> 守</span><span><span style="color:var(--faint)">■</span> 等</span></div>
+            </sc-if>
+
+            <sc-if value="{{isLedger}}" hint-placeholder-val="{{false}}">
+              <div style="font-size:12px;letter-spacing:.24em;color:var(--ac);margin-bottom:10px">彩 蛋 · 可 验 证 的 预 言</div>
+              <b style="font-size:26px;display:block;margin-bottom:8px;font-weight:600">天机记账</b>
+              <div style="font-size:13.5px;color:var(--mut);line-height:1.8;margin-bottom:22px">军师的前瞻判断记成「预言」，日后翻出来对账，准不准一目了然。</div>
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <sc-for list="{{prophecies}}" as="p" hint-placeholder-count="3">
+                  <div style="background:var(--surf);border:1px solid var(--hair);border-left:3px solid {{p.c}};padding:16px 18px">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px"><span style="font-size:11px;color:var(--faint)">{{p.date}}</span><span style="font-size:11px;font-weight:600;color:{{p.c}};border:1px solid {{p.c}};padding:2px 9px">{{p.status}}</span></div>
+                    <div style="font-size:14px;line-height:1.7">{{p.text}}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <button onClick="{{closeModal}}" style="width:100%;margin-top:22px;border:1px solid var(--hair2);background:transparent;color:var(--mut);font-family:var(--se);font-size:14px;padding:14px;cursor:pointer">收 起</button>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+    </sc-if>
+
+  </div>
+
+  <div style="font-size:11px;letter-spacing:.16em;color:var(--mut);opacity:.7;text-align:center;max-width:420px;line-height:1.8">点「请主公落座」走完 择本命色 → 立案卷 → 军师首判 的开场，再体验五个入口 · 全程可交互</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1180,&quot;height&quot;:940},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;外观&quot;}}">
+class Component extends DCLogic {
+  state = {
+    screen: 'splash',
+    colorKey: 'song', colorChosen: false,
+    industryKey: null,
+    judgeTyped: '', judgeDone: false,
+    tab: 'zhance', thread: null, threadMsgs: {}, threadTyping: false,
+    coachStep: 0, coachDone: false,
+    modal: null, fillOpen: {},
+    fortuneDate: '', fortuneConsent: false, fortuneCast: false, fortuneResult: null,
+    tasks: null,
+  };
+
+  COLORS = {
+    song:  {name:'松 · 谋',hex:'#2F5D50',acd:'#1E3E35',acg:'rgba(47,93,80,.12)',motto:'稳中求进，守正出奇'},
+    hu:    {name:'琥 · 势',hex:'#B0782A',acd:'#7A5216',acg:'rgba(176,120,42,.14)',motto:'聚财为势，顺势而为'},
+    dan:   {name:'丹 · 决',hex:'#BC4A31',acd:'#83301F',acg:'rgba(188,74,49,.12)',motto:'当机立断，先发制人'},
+    dian:  {name:'靛 · 远',hex:'#38516E',acd:'#26374C',acg:'rgba(56,81,110,.12)',motto:'高瞻远瞩，谋定后动'},
+    yao:   {name:'曜 · 局',hex:'#6E4A66',acd:'#4B3145',acg:'rgba(110,74,102,.12)',motto:'格局为先，纵横捭阖'},
+    shuang:{name:'霜 · 藏',hex:'#3F6B67',acd:'#294845',acg:'rgba(63,107,103,.12)',motto:'大巧若拙，藏锋于鞘'},
+  };
+
+  IND = {
+    coffee:{name:'手作咖啡馆',tag:'咖啡',desc:'精品/手冲 · 单店',conflict:'不是缺客流，是复购断在第二杯',
+      judge:'看过你的家底：进店的人其实不少，但七日复购只有一成出头。问题不在拉新，在于喝完第一杯之后，没有「再来一次」的理由。先别急着投流——把复购的钩子搭起来，比什么都值。',
+      shi:[70,58,62], next:['设计「第二杯」回访：到店 3 天内推一条专属邀约','把出品最稳的 2 款做成招牌，砍掉长尾 SKU','老客社群试运营，先攒够 100 人'],
+      avoid:['这个月不要上新品线','不要盲目投同城信息流广告']},
+    apparel:{name:'女装买手店',tag:'服饰',desc:'买手/女装 · 店+线上',conflict:'不是款不好，是信任证明断在下单前',
+      judge:'货其实能打，但线上转化卡在「看得见、信不过」。顾客缺的是别人也买了、上身真好看的证据。把信任链条补上，转化自然能起来，比继续上新款有用得多。',
+      shi:[55,64,58], next:['每款配 3 张真人上身图 + 尺码实测','把好评做成一面可复用的「信任墙」','建老客预告群，先卖给信任你的人'],
+      avoid:['不要再扩款，先跑通爆款','这一季不要压新档口的货']},
+    beauty:{name:'轻医美工作室',tag:'医美',desc:'轻医美/皮肤管理',conflict:'不是拉新难，是客户价值没做深',
+      judge:'获客成本不低，但客户往往只做一次就沉默了。你真正的机会不在拉更多新客，而在把已有客户的全周期价值做深——一个客户，本该值现在的三倍。',
+      shi:[58,52,66], next:['为高价值客户设计年度疗程方案','首次到店即绑定第二次预约','建客户档案：肤质 / 进度 / 偏好'],
+      avoid:['不要打价格战拉低客单','不要盲目开新项目分散精力']},
+    dining:{name:'社区小馆',tag:'餐饮',desc:'社区餐饮 · 堂食为主',conflict:'不是位置差，是晚市空桌拖垮坪效',
+      judge:'午市其实排队，晚市却坐不满——同样的租金和人力，一半时间在空转。破局点不在多引流，在于把晚市和淡时段的坪效补起来。',
+      shi:[60,56,62], next:['推晚市限定套餐，错峰引流','打通外卖填补堂食空档','会员储值锁定复购频次'],
+      avoid:['不要盲目延长营业时间加人力','不要在午市高峰再加位']},
+    edu:{name:'私教 / 知识付费',tag:'知识',desc:'个人 IP · 知识付费',conflict:'不是内容弱，是转化断在免费到付费',
+      judge:'免费内容的流量和口碑都不错，但真正掏钱的比例很低。断点在「免费到付费」那一步——用户不知道为什么现在要买、买了能到哪。把这条路铺清楚。',
+      shi:[64,50,58], next:['设计一个 9.9 元的入门钩子产品','把成果做成可信的「前后对比」','限时 + 名额，给出「现在买」的理由'],
+      avoid:['不要再免费加更消耗自己','不要一上来就卖高价年课']},
+    pet:{name:'宠物服务店',tag:'宠物',desc:'宠物洗护/服务 · 单店',conflict:'不是没爱宠，是低频消费撑不起门店',
+      judge:'客户对宠物很舍得花钱，但洗护本身是低频生意，单靠它撑不起门店。要把低频的洗护，变成高频的关系——让客户每周都想来。',
+      shi:[56,54,64], next:['推月卡/次卡锁定到店频次','增加寄养、零食等高频连带','建宠物成长档案，增强粘性'],
+      avoid:['不要盲目扩大门店面积','不要压太多易过期的库存']},
+  };
+
+  COACH = [
+    {tab:'zhance',title:'问策 · 有事问军师',text:'总军师置顶统筹，专业军师分线出主意，结论汇回主线。像用微信一样，直接说你的问题。'},
+    {tab:'junqing',title:'军情 · 每天的判断',text:'今天的主要矛盾、下一步该做什么、现在不能做什么，一屏讲清——先判断，再行动。'},
+    {tab:'junling',title:'军令 · 把话变成事',text:'判断拆成任务卡：谁做、几点前、多久。做完打卡、回填数据，形成闭环。'},
+    {tab:'jinnang',title:'锦囊 · 越攒越值钱',text:'资料、方法、历次方案都在这。方案从 v1 长到 v7，全部留档，是你的资产。'},
+    {tab:'zhugong',title:'主公 · 你自己',text:'档案、算力、本命色都在这——还藏着送你一卦、天时日历、天机记账几个彩蛋。'},
+  ];
+
+  begin = () => this.setState({screen:'color'});
+  pickColor = (k) => this.setState({colorKey:k, colorChosen:true});
+  pickColorApp = (k) => this.setState({colorKey:k});
+  toIndustry = () => this.setState({screen:'industry'});
+
+  pickIndustry = (k) => {
+    this.setState({industryKey:k, screen:'judge', judgeTyped:'', judgeDone:false});
+    const full = this.IND[k].judge; let i = 0;
+    clearInterval(this._typer);
+    this._typer = setInterval(() => {
+      i += 2;
+      if (i >= full.length) { clearInterval(this._typer); this.setState({judgeTyped:full, judgeDone:true}); }
+      else this.setState({judgeTyped: full.slice(0,i)});
+    }, 38);
+  };
+
+  enterApp = () => {
+    const k = this.state.industryKey; const c = this.IND[k].conflict;
+    this.setState({
+      screen:'app', tab:'zhance', coachStep:0, coachDone:false,
+      threadMsgs:{ zong:[
+        {from:'ai', text:'主公，我是总军师。案卷已入库，初步军情如下：'},
+        {from:'ai', text:'「'+c+'」\n这就是眼下的主要矛盾。需要我叫哪位军师上阵？直接说你的问题就行。'},
+      ]},
+      tasks: this.IND[k].next.map((t,i)=>({ id:i, t,
+        who:['你','运营','你'][i], due:['今天 18:00','明天','本周内'][i], est:['40 分钟','2 小时','1 小时'][i],
+        done:false, fill:'' })),
+    });
+  };
+
+  nextCoach = () => {
+    const s = this.state.coachStep;
+    if (s >= this.COACH.length - 1) { this.setState({coachDone:true}); return; }
+    const ns = s + 1; this.setState({coachStep:ns, tab:this.COACH[ns].tab});
+  };
+  skipCoach = () => this.setState({coachDone:true});
+  go = (t) => this.setState({tab:t, thread:null});
+
+  openThread = (id) => {
+    if (!this.state.threadMsgs[id]) {
+      const seeds = {
+        zhen:'三势已研判，主要矛盾请看军情。要我出一份完整诊断吗？',
+        zeng:'复购的三个抓手已列好，先从「第二杯」邀约做起。',
+        hai:'招牌产品主视觉 v2 已出，配色跟着你的本命色走。',
+        wen:'「第二杯」邀约文案我给你写了三版，长短各一。',
+      };
+      const m = {...this.state.threadMsgs}; m[id] = [{from:'ai', text:seeds[id]||'在的，说说你的问题。'}];
+      this.setState({thread:id, threadMsgs:m});
+    } else this.setState({thread:id});
+  };
+  closeThread = () => this.setState({thread:null});
+
+  send = (text) => {
+    const id = this.state.thread; if (!id) return;
+    const m = {...this.state.threadMsgs}; m[id] = [...(m[id]||[]), {from:'me', text}];
+    this.setState({threadMsgs:m, threadTyping:true});
+    const c = this.IND[this.state.industryKey].conflict;
+    clearTimeout(this._reply);
+    this._reply = setTimeout(() => {
+      const m2 = {...this.state.threadMsgs};
+      m2[id] = [...(m2[id]||[]), {from:'ai', text:'收到。我沿着「'+c+'」这条主线拆一下——已经给你排了三条可落地的动作，同步到「军令」里了，今天就能开工。'}];
+      this.setState({threadMsgs:m2, threadTyping:false});
+    }, 1100);
+  };
+
+  toggleTask = (id) => {
+    const tasks = this.state.tasks.map(t => t.id===id ? {...t, done:!t.done} : t);
+    const fo = {...this.state.fillOpen}; fo[id] = tasks.find(t=>t.id===id).done;
+    this.setState({tasks, fillOpen:fo});
+  };
+  onFill = (id, v) => { this.setState({tasks: this.state.tasks.map(t=>t.id===id?{...t,fill:v}:t)}); };
+  commitFill = (id) => { const fo = {...this.state.fillOpen}; fo[id] = false; this.setState({fillOpen:fo}); };
+
+  openModal = (m) => this.setState({modal:m, fortuneCast:false, fortuneResult:null});
+  closeModal = () => this.setState({modal:null});
+  toggleConsent = () => this.setState({fortuneConsent:!this.state.fortuneConsent});
+  onFortuneDate = (v) => this.setState({fortuneDate:v});
+  castFortune = () => {
+    if (!this.state.fortuneConsent) return;
+    const pool = [
+      {gua:'☰', name:'乾 · 天行健 · 大有卦', text:'今岁宜主动出击，贵人在东南。三月、九月为拐点，宜攻不宜守。'},
+      {gua:'☵', name:'坎 · 习坎 · 蓄势卦', text:'上半年宜潜龙勿用，先修内功；下半年水到渠成，忌急躁冒进。'},
+      {gua:'☶', name:'艮 · 艮为山 · 守正卦', text:'守住主业则稳，贪多则乱。今岁财在守不在攻，静待其时。'},
+      {gua:'☲', name:'离 · 离为火 · 明察卦', text:'名声渐起，宜借势传播。谨防口舌，合作重在识人。'},
+    ];
+    this.setState({fortuneCast:true, fortuneResult: pool[Math.floor(Math.random()*pool.length)]});
+  };
+  resetFortune = () => this.setState({fortuneCast:false, fortuneResult:null, fortuneDate:'', fortuneConsent:false});
+
+  renderVals() {
+    const s = this.state;
+    const c = this.COLORS[s.colorKey];
+    const ind = s.industryKey ? this.IND[s.industryKey] : this.IND.coffee;
+    const inApp = s.screen === 'app';
+
+    const light = (this.props.theme ?? 'light') === 'light';
+    const N = light
+      ? {bg:'#F0EBE0',surf:'#FAF7EF',surf2:'#EFE9DB',surf3:'#E3DBC9',hair:'rgba(34,32,27,.13)',hair2:'rgba(34,32,27,.24)',tx:'#211F1A',mut:'#6B6456',faint:'#A79E8C',stage:'radial-gradient(ellipse 1000px 760px at 50% -8%,#F7F2E7 0%,#E8E1D2 62%)'}
+      : {bg:'#1C1A16',surf:'#252219',surf2:'#2E2A20',surf3:'#3A352A',hair:'rgba(240,235,223,.11)',hair2:'rgba(240,235,223,.2)',tx:'#F0EBDF',mut:'#A59C8B',faint:'#6E6656',stage:'radial-gradient(ellipse 1000px 760px at 50% -8%,#232019 0%,#141210 62%)'};
+
+    const colorList = Object.keys(this.COLORS).map(k => {
+      const cc = this.COLORS[k]; const sel = k === s.colorKey;
+      return { hex:cc.hex, name:cc.name, motto:cc.motto,
+        cardBg: sel ? cc.acg : 'var(--surf)', tick: sel ? '✓' : '', tickC: sel ? cc.hex : 'transparent',
+        ringW: sel ? '2px' : '0px', ringW2: sel ? '3.5px' : '0px',
+        pick: () => this.pickColor(k), pickApp: () => this.pickColorApp(k) };
+    });
+
+    const idxCn = ['壹','贰','叁','肆','伍','陆'];
+    const industryList = Object.keys(this.IND).map((k,i) => {
+      const n = this.IND[k];
+      return { name:n.name, desc:n.desc, idx:idxCn[i], pick: () => this.pickIndustry(k) };
+    });
+
+    const convos = [
+      {id:'zhen', name:'战略诊断官', role:'出谋 · 顾问', ini:'战', dot:'#2F5D50', tint:'rgba(47,93,80,.12)', preview:'三势已研判，主要矛盾请看军情。'},
+      {id:'zeng', name:'增长操盘手', role:'出谋 · 顾问', ini:'增', dot:'#38516E', tint:'rgba(56,81,110,.12)', preview:'复购的三个抓手已列好。'},
+      {id:'hai', name:'海报设计师', role:'出活 · 创作', ini:'海', dot:'#B0782A', tint:'rgba(176,120,42,.14)', preview:'招牌产品主视觉 v2 已出。'},
+      {id:'wen', name:'商业文案官', role:'出活 · 创作', ini:'文', dot:'#6E4A66', tint:'rgba(110,74,102,.12)', preview:'「第二杯」邀约文案给你三版。'},
+    ].map(x => ({...x, open: () => this.openThread(x.id)}));
+
+    const tmsgs = (s.threadMsgs[s.thread] || []).map(m => m.from==='me'
+      ? {text:m.text, justify:'flex-end', bg:'var(--ac)', color:'var(--onac)', border:'none', radius:'14px 14px 2px 14px'}
+      : {text:m.text, justify:'flex-start', bg:'var(--surf)', color:'var(--tx)', border:'1px solid var(--hair)', radius:'2px 14px 14px 14px'});
+    const quickAsks = [
+      {text:'那我今天先做什么？', send: () => this.send('那我今天先做什么？')},
+      {text:'帮我下军令', send: () => this.send('帮我下军令')},
+    ];
+
+    const shiLabels = ['天势','市势','人势']; const shiSub = ['外部趋势','竞争市场','自身家底'];
+    const shiMeters = ind.shi.map((v,i)=>({label:shiLabels[i], sub:shiSub[i], val:v, w:v+'%'}));
+    const cx=90, cy=72;
+    const p0=[cx, cy + (14-cy)*ind.shi[0]/100];
+    const p1=[cx + (158-cx)*ind.shi[1]/100, cy + (130-cy)*ind.shi[1]/100];
+    const p2=[cx + (22-cx)*ind.shi[2]/100, cy + (130-cy)*ind.shi[2]/100];
+    const radarPoints = `${p0[0].toFixed(0)},${p0[1].toFixed(0)} ${p1[0].toFixed(0)},${p1[1].toFixed(0)} ${p2[0].toFixed(0)},${p2[1].toFixed(0)}`;
+
+    const nextSteps = ind.next.map((t,i)=>({i:'0'+(i+1), t}));
+    const avoidList = ind.avoid.map(t=>({t}));
+
+    const tasks = s.tasks || [];
+    const doneCount = tasks.filter(t=>t.done).length;
+    const taskTotal = tasks.length || 3;
+    const taskView = tasks.map(t => ({
+      t:t.t, who:t.who, due:t.due, est:t.est, fill:t.fill, ph:'如：邀约发出 30 条 / 到店 12 人',
+      brd: t.done ? 'var(--hair2)' : 'var(--hair)', lead: t.done ? 'var(--ac)' : 'var(--hair2)',
+      checkBrd: t.done ? 'var(--ac)' : 'var(--hair2)', checkBg: t.done ? 'var(--ac)' : 'transparent',
+      check: t.done ? '✓' : '', strike: t.done ? 'color:var(--mut);text-decoration:line-through' : '',
+      stamp: t.done ? '1' : '0', showFill: !!s.fillOpen[t.id],
+      toggle: () => this.toggleTask(t.id), onFill: (e) => this.onFill(t.id, e.target.value), commit: () => this.commitFill(t.id),
+    }));
+
+    const vaults = [
+      {ini:'料', name:'资料库', count:'27 份文件'},
+      {ini:'法', name:'方法论', count:'9 套框架'},
+      {ini:'报', name:'历次报告', count:'6 份'},
+      {ini:'创', name:'创作成品', count:'14 件'},
+    ];
+    const versions = [
+      {v:'v7', t:'加入晚市错峰方案', d:'今天 · 总军师', dot:'var(--ac)', vc:'var(--ac)'},
+      {v:'v5', t:'复购钩子细化到话术', d:'3 天前', dot:'var(--hair2)', vc:'var(--mut)'},
+      {v:'v3', t:'补充竞品对比', d:'上周', dot:'var(--hair2)', vc:'var(--mut)'},
+      {v:'v1', t:'初版增长诊断', d:'本月初', dot:'var(--hair2)', vc:'var(--mut)'},
+    ];
+
+    const eggs = [
+      {mark:'卦', name:'送你一卦', desc:'算一张可分享的命盘卡片', open:()=>this.openModal('fortune')},
+      {mark:'历', name:'天时日历', desc:'全年攻守节奏一图看全', open:()=>this.openModal('calendar')},
+      {mark:'机', name:'天机记账', desc:'把军师的预言记下来对账', open:()=>this.openModal('ledger')},
+    ];
+
+    const months = [
+      ['一月','守','稳住现金流'],['二月','等','观望蓄力'],['三月','攻','旺季主动出击'],
+      ['四月','攻','乘胜追击'],['五月','守','复盘调整'],['六月','等','半年小结'],
+      ['七月','守','淡季修内功'],['八月','等','筹备秋季'],['九月','攻','旺季再冲'],
+      ['十月','攻','黄金窗口'],['十一月','守','稳中收官'],['十二月','等','规划来年'],
+    ].map(([m,act,note])=>{
+      const map={攻:{tc:'var(--ac)',bg:'var(--acg)'},守:{tc:'#BC4A31',bg:'rgba(188,74,49,.08)'},等:{tc:'var(--faint)',bg:'var(--surf)'}};
+      const x=map[act]; return {m, act, note, tc:x.tc, bg:x.bg};
+    });
+
+    const prophecies = [
+      {date:'2026 · 一季度', text:'若不补复购机制，二季度获客成本将吃掉全部毛利。', status:'已应验', c:'var(--ac)'},
+      {date:'2026 · 三月', text:'招牌单品聚焦后，客单价将回升 15% 以上。', status:'待验证', c:'var(--faint)'},
+      {date:'2026 · 四月', text:'老客社群满 100 人时，自然复购将超过投流转化。', status:'待验证', c:'var(--faint)'},
+    ];
+
+    const fortune = s.fortuneResult || {};
+
+    const navDef = [
+      {k:'zhance', label:'问策'}, {k:'junqing', label:'军情'}, {k:'junling', label:'军令'},
+      {k:'jinnang', label:'锦囊'}, {k:'zhugong', label:'主公'},
+    ];
+    const navItems = navDef.map(n => {
+      const on = s.tab === n.k;
+      return {label:n.label, color: on ? 'var(--ac)' : 'var(--mut)', weight: on ? '600' : '400',
+        bar: on ? 'var(--ac)' : 'transparent', go: () => this.go(n.k)};
+    });
+
+    const titles = {zhance:['问策','有事问军师','谋'], junqing:['军情','看今日判断','势'], junling:['军令','做今天的事','令'], jinnang:['锦囊','存你的家底','囊'], zhugong:['主公','你自己','公']};
+    const tt = titles[s.tab] || titles.zhance;
+    const coach = this.COACH[s.coachStep] || this.COACH[0];
+    const coachCn = ['一','二','三','四','五'];
+
+    return {
+      ac:c.hex, acd:c.acd, acg:c.acg,
+      nbg:N.bg, nsurf:N.surf, nsurf2:N.surf2, nsurf3:N.surf3, nhair:N.hair, nhair2:N.hair2, ntx:N.tx, nmut:N.mut, nfaint:N.faint, stage:N.stage,
+      begin: this.begin, toIndustry: this.toIndustry, enterApp: this.enterApp,
+      showSplash: s.screen==='splash', showColor: s.screen==='color', showIndustry: s.screen==='industry',
+      showJudge: s.screen==='judge', showApp: inApp,
+      colorList, colorChosen: s.colorChosen, colorRemark: c.motto+'。愿主公'+c.name.split(' · ')[1]+'字当头，运筹帷幄。',
+      industryList, industryName: ind.name, industryTag: ind.tag,
+      judgeTyped: s.judgeTyped, judgeDone: s.judgeDone, caret:'', mainConflict: ind.conflict,
+      conflictPreview:'主公，眼下的主要矛盾是「'+ind.conflict+'」——点开我细说。',
+
+      tab: s.tab, tabTitle: tt[0], tabKicker: tt[1], tabWatermark: tt[2],
+      isZhance: s.tab==='zhance', isJunqing: s.tab==='junqing', isJunling: s.tab==='junling', isJinnang: s.tab==='jinnang', isZhugong: s.tab==='zhugong',
+      navItems,
+      noThread: !s.thread, hasThread: !!s.thread, openZong: () => this.openThread('zong'),
+      convos, threadMsgs: tmsgs, threadTyping: s.threadTyping, closeThread: this.closeThread, quickAsks,
+      shiMeters, radarPoints, nextSteps, avoidList, goJunling: () => this.go('junling'),
+      taskView, doneCount, taskTotal, doneRate: Math.round(doneCount/taskTotal*100),
+      marshalNote:'做完记得回填数据，我据此修正下一轮判断——令出必行，行必有果。',
+      vaults, versions, eggs,
+      powerDash: (2*Math.PI*42*0.68).toFixed(1)+' '+(2*Math.PI*42).toFixed(1),
+      coachActive: inApp && !s.coachDone, coachIdx: coachCn[s.coachStep], coachTitle: coach.title, coachText: coach.text,
+      coachBtn: s.coachStep >= this.COACH.length-1 ? '开始使用' : '下一步', nextCoach: this.nextCoach, skipCoach: this.skipCoach,
+      modalOpen: !!s.modal, closeModal: this.closeModal, stop: (e)=>{ if(e&&e.stopPropagation) e.stopPropagation(); },
+      isFortune: s.modal==='fortune', isCalendar: s.modal==='calendar', isLedger: s.modal==='ledger',
+      months, prophecies,
+      fortuneUnCast: !s.fortuneCast, fortuneCast: s.fortuneCast,
+      fortuneDate: s.fortuneDate, onFortuneDate:(e)=>this.onFortuneDate(e.target.value),
+      toggleConsent: this.toggleConsent, consentTick: s.fortuneConsent?'✓':'', consentBrd: s.fortuneConsent?'var(--ac)':'var(--hair2)', consentBg: s.fortuneConsent?'var(--ac)':'transparent',
+      castFortune: this.castFortune, castBg: s.fortuneConsent?'var(--ac)':'var(--surf3)', castCursor: s.fortuneConsent?'pointer':'not-allowed',
+      fortuneGua: fortune.gua, fortuneName: fortune.name, fortuneText: fortune.text, resetFortune: this.resetFortune,
+    };
+  }
+}
+</script>
+</body>
+</html>
