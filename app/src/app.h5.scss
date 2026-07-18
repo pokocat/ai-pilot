@@ -10,8 +10,9 @@ body,
 .taro_page,
 .page {
   /* —— 中性令牌（原型浅色 N.light） —— */
-  --bg: #F0EBE0;
-  --surf: #FAF7EF;
+  /* 与 app.scss 同步（FABLE5 §1）：--bg 暖纸底压深、--surf 提到近象牙白，拉开亮度差托起卡面。 */
+  --bg: #EBE4D5;
+  --surf: #FCFAF4;
   --surf-2: #EFE9DB;
   --surf-3: #E3DBC9;
   --hair: rgba(34, 32, 27, .13);

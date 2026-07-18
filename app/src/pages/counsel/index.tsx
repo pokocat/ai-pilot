@@ -9,6 +9,7 @@ import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import ProtoHeader from '../../components/proto/ProtoHeader';
+import SealKicker from '../../components/proto/SealKicker';
 import AgentUnlock from '../../components/AgentUnlock';
 import Onboarding from '../../components/Onboarding';
 import CoachMarks from '../../components/CoachMarks';
@@ -141,7 +142,7 @@ export default function Counsel() {
         </View>
 
         {/* 专业军师名录 */}
-        <Text className="roster-kicker">专 业 军 师 · 分 线 出 策</Text>
+        <SealKicker text="专 业 军 师 · 分 线 出 策" style={{ margin: '26px 2px 6px' }} />
         <View className="roster-list">
           {specialists.map((a) => {
             const last = latestOf(a.key);

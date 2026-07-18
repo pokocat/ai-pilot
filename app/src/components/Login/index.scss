@@ -3,12 +3,12 @@
    该页固定使用绿色品牌色（登录先于本命色选择），不随主题切换。
    ============================================================ */
 .login {
-  position: fixed; inset: 0; z-index: 400; overflow: hidden;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 400; overflow: hidden;
   background: linear-gradient(162deg, #0A1F16 0%, #123A28 46%, #0C271C 100%);
 }
 
 /* —— 流动背景：三团模糊的绿/金光斑缓慢漂移 + 巨大「謀」字水印 —— */
-.lg-bg { position: absolute; inset: 0; overflow: hidden; }
+.lg-bg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; overflow: hidden; }
 .lg-blob { position: absolute; border-radius: 50%; filter: blur(38px); }
 .lg-b1 { width: 280px; height: 280px; left: -72px; top: 6%;
   background: radial-gradient(circle, rgba(95,179,137,.50), rgba(95,179,137,0) 68%);

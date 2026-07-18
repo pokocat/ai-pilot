@@ -8,7 +8,7 @@ import { View, Text } from '@tarojs/components';
 interface WatermarkProps {
   char: string;
   size?: number;      // 字号 px，默认 130（页头）；卡片内常用 88
-  opacity?: number;   // 默认 .06（页头）；卡片内常用 .1
+  opacity?: number;   // 默认 .1（页头）——.06 在 weapp 真机几乎不可见；卡片内常用 .1
   top?: number | string;
   right?: number | string;
   left?: number | string;
@@ -18,7 +18,7 @@ interface WatermarkProps {
 }
 
 export default function Watermark({
-  char, size = 130, opacity = 0.06, top, right, left, bottom, color = 'var(--ac)', style,
+  char, size = 130, opacity = 0.1, top, right, left, bottom, color = 'var(--ac)', style,
 }: WatermarkProps) {
   const pos = (v?: number | string) => (typeof v === 'number' ? `${v}px` : v);
   return (

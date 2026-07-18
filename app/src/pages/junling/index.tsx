@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, Text, Input } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
-import { ProtoHeader } from '../../components/proto';
+import { ProtoHeader, SealKicker, CardSeal } from '../../components/proto';
 import { useStore } from '../../hooks/useStore';
 import {
   refreshDossier, ordersOf, todayProgress, today, toggleOrder, saveBackfill,
@@ -108,9 +108,7 @@ export default function Junling() {
             </View>
 
             {/* 今日战役任务卡列表 */}
-            <Text className="proto-kicker" style={{ color: 'var(--faint)', letterSpacing: '.24em', margin: '24px 2px 14px', display: 'block' }}>
-              今 日 战 役
-            </Text>
+            <SealKicker text="今 日 战 役" style={{ margin: '24px 2px 14px' }} />
             <View style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {orders.map((o) => {
                 const cap = capabilityFor(o.capabilityKey);
@@ -201,12 +199,13 @@ export default function Junling() {
 
             {/* 总军师督战卡 */}
             <View className="proto-card" style={{ marginTop: '18px', display: 'flex', alignItems: 'flex-start', gap: '13px', padding: '16px 18px' }}>
-              <View style={{ width: '36px', height: '36px', borderRadius: '50%', background: col.acg, color: col.hex, display: 'grid', placeItems: 'center', fontFamily: 'var(--serif)', fontSize: '17px', fontWeight: 600, flex: 'none' }}>
+              <View className="seal-circle" style={{ width: '36px', height: '36px', fontSize: '18px', flex: 'none' }}>
                 <Text>师</Text>
               </View>
               <Text style={{ fontSize: '13px', lineHeight: 1.7, color: 'var(--mut)' }}>
                 <Text style={{ color: 'var(--tx)', fontWeight: 600 }}>总军师督战 · </Text>{marshalNote}
               </Text>
+              <CardSeal char="令" size={20} right={12} bottom={12} />
             </View>
 
             {/* 次级入口：回填汇总 · 周计划 · 复盘 → studio */}

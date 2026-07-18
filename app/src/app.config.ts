@@ -59,7 +59,7 @@ export default defineAppConfig({
     navigationBarBackgroundColor: '#FAF7EF',
     navigationBarTitleText: 'AI 军师',
     navigationBarTextStyle: 'black',
-    backgroundColor: '#F0EBE0',
+    backgroundColor: '#EBE4D5',
   },
   tabBar: {
     custom: true,

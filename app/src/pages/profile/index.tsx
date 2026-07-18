@@ -5,7 +5,7 @@ import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
 import Plans from '../../components/Plans';
 import EggDrawer, { type EggKind } from '../../components/EggDrawer';
-import { ProtoHeader, PowerRing } from '../../components/proto';
+import { ProtoHeader, PowerRing, CardSeal, CardCorners, SealKicker, Divider } from '../../components/proto';
 import { useStore } from '../../hooks/useStore';
 import { COLORS } from '../../data/colors';
 import { api, type ProgressView } from '../../services/api';
@@ -70,25 +70,27 @@ export default function Profile() {
       <View className="pad" style={{ paddingTop: '12px' }}>
         <ProtoHeader kicker="你自己" title="主公" watermark="公" />
 
-        {/* 档案卡（顶 3px 本命色边） → 设置 */}
+        {/* 档案卡（顶 3px 本命色边 + 装订角 + 主印） → 设置 */}
         <View className="proto-card proto-card--top" style={{ marginTop: '22px', padding: '22px', display: 'flex', alignItems: 'center', gap: '16px' }} onClick={() => nav('/pages/settings/index')}>
-          <View style={{ width: '60px', height: '60px', borderRadius: '50%', background: accent, color: 'var(--onac)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '27px', fontWeight: 600, flex: 'none', fontFamily: 'var(--serif)' }}>
+          <CardCorners />
+          <View className="seal-circle" style={{ width: '60px', height: '60px', fontSize: '27px', flex: 'none' }}>
             {me?.user.name ? me.user.name[0] : '主'}
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={{ display: 'block', fontSize: '20px', fontWeight: 600, color: 'var(--tx)', fontFamily: 'var(--serif)' }}>{me?.user.name || '完善你的资料'}</Text>
             <Text style={{ display: 'block', fontSize: '13px', color: 'var(--mut)', marginTop: '2px' }}>{industry}</Text>
             <View
-              style={{ display: 'inline-flex', marginTop: '9px', fontSize: '11px', letterSpacing: '.08em', color: accent, border: `1px solid ${accent}`, padding: '3px 11px' }}
+              style={{ display: 'inline-flex', marginTop: '9px', fontSize: '11px', letterSpacing: '.08em', color: accent, background: color.acg, border: `1px solid ${accent}`, padding: '3px 11px' }}
               onClick={(e) => { e.stopPropagation(); setShowPlans(true); }}
             >
               <Text>{me?.plan?.name || '免费版'}</Text>
             </View>
           </View>
+          <CardSeal char="主" size={22} />
         </View>
 
-        {/* 算力环 + 三行统计 */}
-        <View style={{ marginTop: '14px', display: 'flex', gap: '1px', background: 'var(--hair)', border: '1px solid var(--hair)' }}>
+        {/* 算力环 + 三行统计（整块浮起，§1） */}
+        <View className="proto-grid" style={{ marginTop: '14px', display: 'flex', gap: '1px', background: 'var(--hair)' }}>
           <View style={{ flex: 'none', width: '132px', background: 'var(--surf)', padding: '18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <PowerRing percent={powerPct} value={powerPct} max={100} label="本月算力" size={78} />
           </View>
@@ -106,7 +108,7 @@ export default function Profile() {
         </View>
 
         {/* 本命色换色排（6 色圆环，即点即全局换 --ac） */}
-        <Text className="proto-kicker" style={{ display: 'block', color: 'var(--faint)', letterSpacing: '.24em', margin: '26px 2px 14px' }}>本 命 色 · 随 时 更 换</Text>
+        <SealKicker text="本 命 色 · 随 时 更 换" style={{ margin: '26px 2px 14px' }} />
         <View style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           {COLORS.map((c) => {
             const on = c.key === color.key;
@@ -126,12 +128,13 @@ export default function Profile() {
           })}
         </View>
 
-        {/* 彩蛋三行 → 弹层 */}
-        <Text className="proto-kicker" style={{ display: 'block', color: 'var(--faint)', letterSpacing: '.24em', margin: '26px 2px 14px' }}>彩 蛋 · 好 玩 的 小 心 思</Text>
+        {/* 彩蛋三行 → 弹层（大分区：居中小菱分隔） */}
+        <Divider gap={26} />
+        <SealKicker text="彩 蛋 · 好 玩 的 小 心 思" style={{ margin: '0 2px 14px' }} />
         <View style={{ borderTop: '1px solid var(--hair)' }}>
           {eggs.map((e) => (
             <View key={e.kind} style={{ display: 'flex', alignItems: 'center', gap: '15px', borderBottom: '1px solid var(--hair)', padding: '16px 2px' }} onClick={() => setEgg(e.kind)}>
-              <View style={{ width: '40px', height: '40px', border: '1px solid var(--hair-2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '19px', color: accent, fontWeight: 600, flex: 'none', fontFamily: 'var(--serif)' }}>{e.mark}</View>
+              <View className="seal-circle" style={{ width: '40px', height: '40px', fontSize: '19px', flex: 'none' }}>{e.mark}</View>
               <View style={{ flex: 1 }}>
                 <Text style={{ display: 'block', fontSize: '15.5px', fontWeight: 600, color: 'var(--tx)' }}>{e.name}</Text>
                 <Text style={{ display: 'block', fontSize: '12px', color: 'var(--mut)' }}>{e.desc}</Text>

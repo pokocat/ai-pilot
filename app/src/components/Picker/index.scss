@@ -1,6 +1,8 @@
 .picker {
-  position: fixed; inset: 0; z-index: 300;
-  background: rgba(22, 25, 29, .42);
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 300;
+  /* weapp 不支持 backdrop-filter（静默降级为无模糊）——把遮罩调深，无模糊也够压暗；
+     H5 仍走模糊。 */
+  background: rgba(22, 25, 29, .55);
   backdrop-filter: blur(6px);
   display: flex; align-items: flex-end; justify-content: center;
 }

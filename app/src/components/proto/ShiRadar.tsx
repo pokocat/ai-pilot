@@ -1,9 +1,10 @@
 import { View, Text } from '@tarojs/components';
 import { useStore } from '../../hooks/useStore';
+import { svgToDataUri } from './svg';
 
 // 三势雷达 —— 对齐原型 junqing 段 SVG + radarPoints 算法。
-// 跨端方案：三角栅格 + 数值三角形画成 SVG data-URI 背景（weapp/h5 都稳），
-// 三个中文标签用绝对定位 <Text> 叠加（SVG data-URI 内嵌中文字体在小程序不可靠，故外置）。
+// 跨端方案：三角栅格 + 数值三角形画成 SVG（base64 data-URI，weapp 真机稳渲染，见 ./svg）背景，
+// 三个中文标签用绝对定位 <Text> 叠加（SVG 内嵌中文字体在小程序不可靠，故外置）。
 //
 // 用法：<ShiRadar values={[70, 58, 62]} />        // 天势/市势/人势 0-100
 //       <ShiRadar values={[a,b,c]} labels={['天势','市势','人势']} size={{ w: 150, h: 140 }} />
@@ -35,8 +36,9 @@ function radarPoints([v0, v1, v2]: [number, number, number]): string {
 }
 
 function svgUri(pts: string, accent: string, fill: string, grid: string, gridSoft: string): string {
+  // width/height 显式给出（除 viewBox 外）——weapp 对无固有尺寸的 SVG 背景栅格化不稳。
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB_W} ${VB_H}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${VB_W}" height="${VB_H}" viewBox="0 0 ${VB_W} ${VB_H}">` +
     `<polygon points="90,14 158,130 22,130" fill="none" stroke="${grid}" stroke-width="1"/>` +
     `<polygon points="90,52 124,110 56,110" fill="none" stroke="${gridSoft}" stroke-width="1"/>` +
     `<line x1="90" y1="72" x2="90" y2="14" stroke="${gridSoft}"/>` +
@@ -44,7 +46,7 @@ function svgUri(pts: string, accent: string, fill: string, grid: string, gridSof
     `<line x1="90" y1="72" x2="22" y2="130" stroke="${gridSoft}"/>` +
     `<polygon points="${pts}" fill="${fill}" stroke="${accent}" stroke-width="2"/>` +
     `</svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  return svgToDataUri(svg);
 }
 
 export default function ShiRadar({

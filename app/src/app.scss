@@ -5,6 +5,17 @@
    全部保留为别名映射，避免全站改引用。
    ============================================================ */
 
+/* —— 纸纹（FABLE5 §6）——
+   极轻「纤维 tooth + 不均」，纯 gradient 叠加：weapp/H5 真机稳、零位图零请求，
+   既不会呈现平铺块、也不会整块不渲染留白（这是真机为准下比 base64 平铺更稳的选择）。
+   两向极淡斜纹作纤维；浅/深色各一套（深色改用暖白纤维），由色底把它压到近乎无形、只留质感。 */
+$fiber-light:
+  repeating-linear-gradient(45deg, rgba(60, 45, 20, .020), rgba(60, 45, 20, .020) 1px, transparent 1px, transparent 5px),
+  repeating-linear-gradient(135deg, rgba(60, 45, 20, .013), rgba(60, 45, 20, .013) 1px, transparent 1px, transparent 6px);
+$fiber-dark:
+  repeating-linear-gradient(45deg, rgba(240, 235, 223, .024), rgba(240, 235, 223, .024) 1px, transparent 1px, transparent 5px),
+  repeating-linear-gradient(135deg, rgba(240, 235, 223, .016), rgba(240, 235, 223, .016) 1px, transparent 1px, transparent 6px);
+
 /* —— 关键帧（全量移植原型 keyframes） —— */
 @keyframes fadeUp { 0% { opacity: 0; transform: translateY(18px); } 100% { opacity: 1; transform: translateY(0); } }
 @keyframes fadeIn { 0% { opacity: 0; } 100% { opacity: 1; } }
@@ -18,8 +29,11 @@
 
 page {
   /* —— 中性令牌（原型浅色 N.light） —— */
-  --bg: #F0EBE0;
-  --surf: #FAF7EF;
+  /* 加重·质感升级（FABLE5 §1）：--bg 暖纸底（衬底）压深、--surf 提到近象牙白，明确拉开亮度差——
+     weapp 上原 --surf/--bg 差仅 ~2% 卡片消失只剩线框；配合 .proto-card 顶部高光 + 落影，
+     每张卡读成「有厚度的案卷纸」。登录浮层例外见下方 .login 锁定原 --surf。 */
+  --bg: #EBE4D5;
+  --surf: #FCFAF4;
   --surf-2: #EFE9DB;
   --surf-3: #E3DBC9;
   --hair: rgba(34, 32, 27, .13);
@@ -75,7 +89,8 @@ page {
   --r-lg: 2px;
   --r-xl: 2px;
 
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: $fiber-light; /* 纸纹（§6）叠在暖纸底上 */
   font-family: var(--serif);
   color: var(--tx);
 }
@@ -94,8 +109,12 @@ page {
     --faint: #6E6656;
     --onac: #FAF7EF;
     --ink-deep-bg: #141210;
+    background-image: $fiber-dark;
   }
 }
+
+/* —— 登录浮层锁定原 --surf（用户明确保留登录原设计；--surf 全局提亮不波及登录卡面/输入面） —— */
+.login { --surf: #FAF7EF; }
 
 /* —— 6 套本命色主题（class 挂在每页根 View；Screen 已内联注入 hex 三件套，本类做兜底/组件外场景） ——
    后端 key → 原型色：green=松 gold=琥 red=丹 blue=靛 purple=曜 iron=霜。
@@ -117,8 +136,12 @@ page {
 /* —— 页面骨架 —— */
 .page {
   min-height: 100vh;
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image: $fiber-light; /* 纸纹（§6）：Screen 根，H5/weapp 同源 */
   box-sizing: border-box;
+}
+@media (prefers-color-scheme: dark) {
+  .page { background-image: $fiber-dark; }
 }
 .scroll {
   height: 100vh;
@@ -143,7 +166,7 @@ input, textarea { font-family: var(--sans); }
 .t-title { display: block; font-family: var(--serif); font-size: 20px; font-weight: 600; color: var(--tx); }
 .t-kicker { display: block; font-family: var(--serif); font-size: 11px; letter-spacing: .18em; color: var(--faint); }
 .t-advisor { display: block; font-family: var(--serif); font-size: 15.5px; line-height: 1.95; color: var(--tx); }
-.t-body { display: block; font-family: var(--serif); font-size: 14px; line-height: 1.8; color: var(--tx); }
+.t-body { display: block; font-family: var(--serif); font-size: 14px; line-height: 1.75; color: var(--tx); }
 .t-mark { display: block; font-family: var(--serif); font-size: 11px; color: var(--faint); }
 
 /* —— 章法 —— */
@@ -189,12 +212,20 @@ input, textarea { font-family: var(--sans); }
 .h1 { display: block; font-family: var(--serif); font-size: 26px; font-weight: 600; color: var(--tx); line-height: 1.3; }
 .muted { color: var(--faint); }
 
-/* —— 通用卡片：案卷面（surf + 1px hair + 2px 角，无阴影） —— */
+/* —— 通用卡片：案卷面（surf + hair-2 边 + 2px 角 + 顶部高光 + 落影 + 纸纹） ——
+   FABLE5 §1：顶部 1px inset 高光 = 纸的厚度；分层落影把卡从纸底托起（克制，不悬浮拟物）；
+   纤维纸纹叠在 surf 上。weapp 支持 box-shadow inset / gradient。 */
 .card {
-  background: var(--surf);
-  border: 1px solid var(--hair);
+  position: relative;
+  background-color: var(--surf);
+  background-image: $fiber-light;
+  border: 1px solid var(--hair-2);
   border-radius: 2px;
-  box-shadow: none;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, .55) inset,
+    0 1px 2px rgba(46, 36, 20, .05),
+    0 4px 8px -4px rgba(46, 36, 20, .10),
+    0 18px 32px -20px rgba(46, 36, 20, .20);
 }
 
 /* —— 段头 —— */
@@ -231,16 +262,56 @@ input, textarea { font-family: var(--sans); }
    直角案卷 · 可复用样式件（Phase 2 各页照用；配套组件见 components/proto/）
    ============================================================ */
 
-/* 案卷卡基类：surf 面 + 1px hair 边 + 2px 角，无阴影 */
+/* 案卷卡基类（FABLE5 §1）：surf 面 + hair-2 边 + 2px 角 + 顶部高光 + 分层落影 + 纸纹。
+   position:relative 让 CardSeal（钤印）/ CardCorners（装订角）能绝对定位到卡内。 */
 .proto-card {
-  background: var(--surf);
-  border: 1px solid var(--hair);
+  position: relative;
+  background-color: var(--surf);
+  background-image: $fiber-light;
+  border: 1px solid var(--hair-2);
   border-radius: 2px;
-  box-shadow: none;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, .55) inset,
+    0 1px 2px rgba(46, 36, 20, .05),
+    0 4px 8px -4px rgba(46, 36, 20, .10),
+    0 18px 32px -20px rgba(46, 36, 20, .20);
 }
 .proto-card--lead { border-left: 3px solid var(--ac); }   /* 左强调边：主要矛盾 / 军令 / 预言 */
 .proto-card--top { border-top: 3px solid var(--ac); }      /* 顶强调边：置顶入口 / 弹层 / 督战 */
 .proto-card--strong { border-color: var(--hair-2); }       /* 加重描边 */
+
+/* 深色：去掉顶部纸白高光（深底会发灰），落影加深；纸纹改暖白纤维 */
+@media (prefers-color-scheme: dark) {
+  .card, .proto-card {
+    background-image: $fiber-dark;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, .30),
+      0 4px 8px -4px rgba(0, 0, 0, .38),
+      0 18px 32px -20px rgba(0, 0, 0, .55);
+  }
+}
+
+/* 无缝 hairline 网格 → 一枚浮起案卷（FABLE5 §1）。
+   锦囊「置顶卷宗 / 四宫格库」、主公「算力环+统计」、军令「今日双格」、彩蛋「天机三格」原本平贴纸底、
+   无影＝真机毛坯主因之一。内部 1px 分隔（gap + 容器 --hair 底）保留；外框升 --hair-2 + 分层落影，
+   整块离纸底托起。容器不铺纸纹（被不透明 surf 格盖住无意义），只承载边与影。position:relative 供
+   CardCorners/CardSeal 绝对定位落到网格四角/角内。 */
+.proto-grid {
+  position: relative;
+  border: 1px solid var(--hair-2);
+  box-shadow:
+    0 1px 2px rgba(46, 36, 20, .05),
+    0 4px 8px -4px rgba(46, 36, 20, .10),
+    0 18px 32px -20px rgba(46, 36, 20, .20);
+}
+@media (prefers-color-scheme: dark) {
+  .proto-grid {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, .30),
+      0 4px 8px -4px rgba(0, 0, 0, .38),
+      0 18px 32px -20px rgba(0, 0, 0, .55);
+  }
+}
 
 /* 字距主按钮：实底 --ac、2px 角、字间距、--onac 字 */
 .proto-btn {
@@ -251,13 +322,49 @@ input, textarea { font-family: var(--sans); }
   padding: 15px 22px; cursor: pointer;
 }
 .proto-btn--lg { font-size: 17px; letter-spacing: .24em; padding: 16px 24px; }
-/* 描边变体 */
+/* 次级/柔底变体（FABLE5 §3：不再是透明空心框——本命色软底 + 本命色描边 + 本命色字，有分量、明确次级）。
+   全站沿用 --ghost 名的次级 CTA 因此一并升级为「软底实体」，不再像占位空框。 */
 .proto-btn--ghost {
-  background: transparent; color: var(--ac);
+  background: var(--acg); color: var(--ac);
   border: 1px solid var(--ac);
+}
+/* 墨实底次级：需要更重的次级动作时用（--tx 实底 + 纸白字） */
+.proto-btn--ink {
+  background: var(--tx); color: var(--onac);
+  border: none;
 }
 /* 禁用态 */
 .proto-btn--disabled { background: var(--surf-3); color: var(--onac); cursor: not-allowed; }
+
+/* ── 本命色印记件（FABLE5 §2 / §5） ────────────────────────────────
+   实心圆首字标 / 软底圆 / 钤印方印 / 题眉小方印。用宽高由调用处内联给定。 */
+
+/* 实心本命色圆首字标（履/时/料/法/报/创 等）：--ac 实底 + --onac 纸白字 + 600（视觉最重） */
+.seal-circle {
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--ac); color: var(--onac);
+  font-family: var(--serif); font-weight: 600;
+  box-shadow: 0 2px 6px -1px rgba(46, 36, 20, .28);
+}
+/* 软底变体：--acg 软底 + --ac 粗字 + 1px --ac 描边（次重，仍是实体不空心） */
+.seal-circle--soft {
+  background: var(--acg); color: var(--ac);
+  border: 1px solid var(--ac);
+  box-shadow: none;
+}
+
+/* 钤印方印（CardSeal）：关键产出卡右下角，轻转 -4deg 落章 */
+.card-seal {
+  position: absolute;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 2px; transform: rotate(-4deg);
+  box-shadow: 0 2px 6px -1px rgba(46, 36, 20, .30);
+  pointer-events: none; z-index: 1;
+}
+
+/* 题眉小方印（SealKicker）容器：仅承载 flex 对齐，方印/字内联 */
+.seal-kicker { }
 
 /* 题眉 kicker：12px、大字距、本命色 */
 .proto-kicker {
@@ -271,7 +378,7 @@ input, textarea { font-family: var(--sans); }
 .proto-watermark {
   position: absolute;
   font-family: var(--serif); font-weight: 900; line-height: 1;
-  color: var(--ac); opacity: .06;
+  color: var(--ac); opacity: .1; /* .06 在 weapp 真机几乎不可见，提到 .1 让水印可感 */
   pointer-events: none; user-select: none;
 }
 

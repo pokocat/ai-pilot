@@ -1,6 +1,6 @@
 /* 入帐引导 · 直角案卷皮（原型 splash/color/industry/judge）。全屏铺满宿主 Screen。 */
 .onb {
-  position: absolute; inset: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   display: flex; flex-direction: column;
   background: var(--bg);
   font-family: var(--serif);
@@ -11,7 +11,7 @@
 
 /* ===================== SPLASH ===================== */
 .onb-splash {
-  position: absolute; inset: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 0 46px;
 }
@@ -21,16 +21,19 @@
   font-size: 18px; letter-spacing: .42em; opacity: .5;
   display: flex; align-items: center;
   animation: fadeIn 1.2s var(--ease) .5s both;
+  pointer-events: none; /* 装饰件不可吞按钮 tap（weapp 层叠命中差异防御） */
 }
 .onb-corner {
   position: absolute; top: calc(96px + env(safe-area-inset-top)); left: 34px;
   font-size: 14px; letter-spacing: .5em; color: var(--mut);
   animation: fadeIn 1s var(--ease) .2s both;
+  pointer-events: none;
 }
 .onb-logo-wrap { position: relative; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; }
 .onb-logo-ring {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 172px; height: 172px; border: 1px solid; border-radius: 50%; opacity: .28;
+  pointer-events: none;
 }
 .onb-logo {
   font-size: 108px; font-weight: 600; line-height: 1; letter-spacing: .06em; white-space: nowrap;
@@ -48,7 +51,10 @@
 }
 .onb-tag-sep { width: 1px; height: 15px; background: var(--hair-2); }
 .onb-seat {
-  width: 100%; padding: 16px 0; animation: fadeUp .9s var(--ease) .48s both;
+  /* 关键 CTA。原 fadeUp（opacity+translateY，fill-mode:both）在微信 WebView 会遗留
+     transform 合成层——与同页 .onb-enter 记录的渲染缺陷同源，且可能令 tap 命中区错位。
+     改为纯 opacity 淡入（无 transform → 无遗留合成层），保证可见且可点。 */
+  width: 100%; padding: 16px 0; animation: fadeIn .5s var(--ease) .3s both;
 }
 .onb-foot {
   margin-top: 22px; font-size: 12px; letter-spacing: .18em; color: var(--faint);
@@ -57,7 +63,7 @@
 
 /* ===================== 逐步问答 ===================== */
 .onb-step {
-  position: absolute; inset: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   padding: calc(58px + env(safe-area-inset-top)) 28px calc(34px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column; overflow-y: auto;
   animation: fadeIn .3s var(--ease) both;
@@ -128,7 +134,7 @@
 
 /* ===================== 军师首判 ===================== */
 .onb-judge {
-  position: absolute; inset: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   padding: calc(54px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
   display: flex; flex-direction: column;
   animation: fadeIn .3s var(--ease) both;

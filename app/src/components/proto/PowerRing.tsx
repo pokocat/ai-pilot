@@ -1,8 +1,10 @@
 import { View, Text } from '@tarojs/components';
 import { useStore } from '../../hooks/useStore';
+import { svgToDataUri } from './svg';
 
 // 算力环 —— 对齐原型 zhugong 段 SVG circle stroke-dasharray + powerDash 算法。
-// 跨端方案：底环 + 进度环画成 SVG data-URI 背景；中心数字/分母/标签用 <Text> 叠加。
+// 跨端方案：底环 + 进度环画成 SVG（base64 data-URI，weapp 真机稳渲染，见 ./svg）背景；
+// 中心数字/分母/标签用 <Text> 叠加。
 //
 // 用法：<PowerRing percent={68} />
 //       <PowerRing percent={68} value={68} max={100} label="本月算力" size={78} />
@@ -27,12 +29,13 @@ function powerDash(pct: number): string {
 }
 
 function svgUri(pct: number, accent: string, track: string): string {
+  // width/height 显式给出——weapp 对无固有尺寸的 SVG 背景栅格化不稳。
   const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">` +
     `<circle cx="50" cy="50" r="${R}" fill="none" stroke="${track}" stroke-width="7"/>` +
     `<circle cx="50" cy="50" r="${R}" fill="none" stroke="${accent}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${powerDash(pct)}" transform="rotate(-90 50 50)"/>` +
     `</svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  return svgToDataUri(svg);
 }
 
 export default function PowerRing({
@@ -53,7 +56,7 @@ export default function PowerRing({
     <View className={`power-ring ${className}`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       <View style={{ position: 'relative', width: `${size}px`, height: `${size}px` }}>
         <View style={{ width: '100%', height: '100%', backgroundImage: `url("${uri}")`, backgroundRepeat: 'no-repeat', backgroundSize: '100% 100%' }} />
-        <View style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <View style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ fontFamily: 'var(--serif)', fontSize: `${size * 0.31}px`, fontWeight: 600, lineHeight: 1, color: 'var(--tx)' }}>{num}</Text>
           <Text style={{ fontFamily: 'var(--serif)', fontSize: `${size * 0.13}px`, color: 'var(--mut)', marginTop: '2px' }}>/ {max}</Text>
         </View>

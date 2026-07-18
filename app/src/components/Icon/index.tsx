@@ -1,9 +1,10 @@
 import { View } from '@tarojs/components';
+import { svgToDataUri } from '../proto/svg';
 import './index.scss';
 
 // 线性图标 —— 路径数据对齐原型 scripts/icons.js。
-// 跨端方案：生成 SVG data-URI 作为 background-image（H5 + 微信小程序均支持），
-// 颜色在生成时注入（替代 H5 的 currentColor 继承）。
+// 跨端方案：生成 SVG data-URI 作为 background-image；颜色在生成时注入（替代 H5 的 currentColor 继承）。
+// 编码用 base64（见 ../proto/svg）——URL 编码的 SVG 背景在微信小程序真机常整块不渲染（图标空白）。
 
 const PATHS: Record<string, string> = {
   home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v10h12V10"/>',
@@ -57,12 +58,13 @@ const FILLED: Record<string, { viewBox: string; markup: string }> = {
 function dataUri(name: string, color: string): string {
   const filled = FILLED[name];
   if (filled) {
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${filled.viewBox}">${filled.markup.replaceAll('CCC', color)}</svg>`;
-    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    const [, , vw, vh] = filled.viewBox.split(/\s+/);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${vw}" height="${vh}" viewBox="${filled.viewBox}">${filled.markup.replaceAll('CCC', color)}</svg>`;
+    return svgToDataUri(svg);
   }
   const inner = (PATHS[name] || '').replaceAll('CCC', color);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
-  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+  return svgToDataUri(svg);
 }
 
 interface IconProps {

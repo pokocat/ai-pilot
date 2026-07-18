@@ -15,7 +15,7 @@ interface ProtoHeaderProps {
 export default function ProtoHeader({ kicker, title, watermark, tag, className = '' }: ProtoHeaderProps) {
   return (
     <View className={`proto-header ${className}`} style={{ position: 'relative' }}>
-      <Watermark char={watermark} size={130} opacity={0.06} top={-6} right={-4} />
+      <Watermark char={watermark} size={130} opacity={0.1} top={-6} right={-4} />
       <View style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', position: 'relative' }}>
         <View>
           <Text className="proto-kicker" style={{ marginBottom: '5px' }}>{kicker}</Text>

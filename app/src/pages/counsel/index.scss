@@ -26,6 +26,7 @@
 .zong-name { font-size: 18px; font-weight: 600; color: var(--tx); }
 .zong-pill {
   font-size: 11px; letter-spacing: .1em; color: var(--ac);
+  background: var(--acg); /* 软底实体（FABLE5 §3）：不再是空心描边标签 */
   border: 1px solid var(--ac); border-radius: 2px; padding: 1px 8px;
 }
 .zong-sub { display: block; font-size: 12px; color: var(--mut); margin-top: 3px; }

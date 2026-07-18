@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
-import { ProtoHeader } from '../../components/proto';
+import { ProtoHeader, CardSeal, CardCorners, SealKicker } from '../../components/proto';
 import { useStore } from '../../hooks/useStore';
 import { api, type ReportItem, type ReportVersionItem } from '../../services/api';
 import './index.scss';
@@ -78,41 +78,44 @@ export default function Satchel() {
       <View className="pad" style={{ paddingTop: '12px' }}>
         <ProtoHeader kicker="存你的家底" title="锦囊" watermark="囊" />
 
-        {/* 两枚置顶常设卷宗（完整履历 / 全年天时） */}
-        <View style={{ marginTop: '22px', display: 'flex', gap: '1px', background: 'var(--hair)', border: '1px solid var(--hair)' }}>
-          <View style={{ flex: 1, background: 'var(--surf)', padding: '18px 16px' }} onClick={() => nav('/packages/work/dossier/index')}>
+        {/* 两枚置顶常设卷宗（完整履历 / 全年天时）——整块作一枚浮起卷宗（§1）+ 四角装订线（§4，履历卷宗） */}
+        <View className="proto-grid" style={{ marginTop: '22px', display: 'flex', gap: '1px', background: 'var(--hair)' }}>
+          <View style={{ flex: 1, background: 'var(--surf)', padding: '18px 16px', position: 'relative' }} onClick={() => nav('/packages/work/dossier/index')}>
             <View style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <View style={{ width: '34px', height: '34px', border: '1px solid var(--ac)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600, color: accent, fontFamily: 'var(--serif)' }}>履</View>
+              <View className="seal-circle" style={{ width: '34px', height: '34px', fontSize: '15px' }}>履</View>
             </View>
             <Text style={{ display: 'block', fontSize: '15.5px', fontWeight: 600, color: 'var(--tx)', fontFamily: 'var(--serif)', marginBottom: '3px' }}>完整履历</Text>
             <Text style={{ display: 'block', fontSize: '11.5px', color: 'var(--mut)', lineHeight: 1.5 }}>军师执笔的创始人战略档案</Text>
+            <CardSeal char="档" size={20} right={12} bottom={12} />
           </View>
           <View style={{ flex: 1, background: 'var(--surf)', padding: '18px 16px' }} onClick={() => nav('/packages/work/calendar/index')}>
             <View style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <View style={{ width: '34px', height: '34px', border: '1px solid var(--ac)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 600, color: accent, fontFamily: 'var(--serif)' }}>时</View>
+              <View className="seal-circle" style={{ width: '34px', height: '34px', fontSize: '15px' }}>时</View>
             </View>
             <Text style={{ display: 'block', fontSize: '15.5px', fontWeight: 600, color: 'var(--tx)', fontFamily: 'var(--serif)', marginBottom: '3px' }}>全年天时</Text>
             <Text style={{ display: 'block', fontSize: '11.5px', color: 'var(--mut)', lineHeight: 1.5 }}>按命盘逐月推演，何时宜攻宜守</Text>
           </View>
+          <CardCorners />
         </View>
 
-        {/* 四宫格库（2x2 无缝 hairline 网格） */}
-        <View style={{ marginTop: '14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', background: 'var(--hair)', border: '1px solid var(--hair)' }}>
-          {vaults.map((v) => (
-            <View key={v.name} style={{ background: 'var(--surf)', padding: '20px 18px' }} onClick={v.onClick}>
-              <View style={{ width: '40px', height: '40px', border: '1px solid var(--ac)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '17px', fontWeight: 600, color: accent, marginBottom: '14px', fontFamily: 'var(--serif)' }}>{v.ini}</View>
-              <Text style={{ display: 'block', fontSize: '16px', fontWeight: 600, color: 'var(--tx)', fontFamily: 'var(--serif)', marginBottom: '4px' }}>{v.name}</Text>
-              <Text style={{ display: 'block', fontSize: '12px', color: 'var(--mut)' }}>{v.count}</Text>
-            </View>
-          ))}
+        {/* 四宫格库（2x2 无缝 hairline 网格）——整块浮起（§1） */}
+        <View className="proto-grid" style={{ marginTop: '14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1px', background: 'var(--hair)' }}>
+          {vaults.map((v) => {
+            const waiting = v.count.startsWith('待'); // 空态：把「待X」从死灰色升为本命色，读成可点召唤
+            return (
+              <View key={v.name} style={{ background: 'var(--surf)', padding: '20px 18px' }} onClick={v.onClick}>
+                <View className="seal-circle" style={{ width: '40px', height: '40px', fontSize: '18px', marginBottom: '14px' }}>{v.ini}</View>
+                <Text style={{ display: 'block', fontSize: '16px', fontWeight: 600, color: 'var(--tx)', fontFamily: 'var(--serif)', marginBottom: '4px' }}>{v.name}</Text>
+                <Text style={{ display: 'block', fontSize: '12px', color: waiting ? accent : 'var(--mut)', fontWeight: waiting ? 600 : 400 }}>{v.count}{waiting ? ' ›' : ''}</Text>
+              </View>
+            );
+          })}
         </View>
 
         {/* 方案版本时间线（v1 → vN，真实版本链） */}
         {verReport && versions.length ? (
           <View>
-            <Text className="proto-kicker" style={{ display: 'block', color: 'var(--faint)', letterSpacing: '.24em', margin: '26px 2px 14px' }}>
-              方 案 版 本 · 从 v1 长 到 v{verReport.currentVersion}
-            </Text>
+            <SealKicker text={`方 案 版 本 · 从 v1 长 到 v${verReport.currentVersion}`} style={{ margin: '26px 2px 14px' }} />
             <View className="proto-card" style={{ padding: '22px' }}>
               <Text style={{ display: 'block', fontSize: '16px', fontWeight: 600, color: 'var(--tx)', fontFamily: 'var(--serif)' }}>{verReport.title}</Text>
               <View style={{ marginTop: '18px', position: 'relative', paddingLeft: '22px' }}>
@@ -128,16 +131,17 @@ export default function Satchel() {
                   </View>
                 ))}
               </View>
+              <CardSeal char="策" />
             </View>
           </View>
         ) : (
-          <View className="proto-card" style={{ marginTop: '26px', padding: '22px' }}>
-            <Text className="proto-kicker" style={{ display: 'block', marginBottom: '8px' }}>方 案 版 本</Text>
+          <View className="proto-card proto-card--lead" style={{ marginTop: '26px', padding: '22px' }}>
+            <SealKicker text="方 案 版 本" tone="var(--ac)" style={{ marginBottom: '8px' }} />
             <Text style={{ display: 'block', fontSize: '13.5px', color: 'var(--mut)', lineHeight: 1.8 }}>
               与军师聊过、认可了方案，锦囊里就会长出可追溯的 v1→vN 版本链。
             </Text>
-            <View className="proto-btn proto-btn--ghost" style={{ marginTop: '16px' }} onClick={() => Taro.switchTab({ url: '/pages/counsel/index' })}>
-              <Text>去问策</Text>
+            <View className="proto-btn" style={{ marginTop: '18px', background: accent }} onClick={() => Taro.switchTab({ url: '/pages/counsel/index' })}>
+              <Text>去 问 策</Text>
             </View>
           </View>
         )}

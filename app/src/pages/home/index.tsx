@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
-import { ProtoHeader, Watermark, ShiRadar } from '../../components/proto';
+import { ProtoHeader, Watermark, ShiRadar, CardSeal, CardCorners, SealKicker } from '../../components/proto';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ChartSummary } from '../../services/api';
@@ -108,18 +108,20 @@ export default function Home() {
 
         {mainConflict ? (
           <>
-            {/* ① 今日主要矛盾 hero（水印「势」+ 左 3px 边大字） */}
+            {/* ① 今日主要矛盾 hero（水印「势」+ 左 3px 边大字 + 装订角 + 断印）——全站最重的一张卡 */}
             <View className="proto-card" style={{ marginTop: '22px', padding: '24px 22px', position: 'relative', overflow: 'hidden', borderColor: 'var(--hair-2)' }}>
               <Watermark char="势" size={88} opacity={0.1} top={4} right={16} />
-              <Text style={kicker('势')}>今 日 主 要 矛 盾</Text>
+              <CardCorners />
+              <SealKicker text="今 日 主 要 矛 盾" tone="var(--ac)" spacing=".28em" style={{ marginBottom: '14px', position: 'relative' }} />
               <Text style={{ display: 'block', fontFamily: 'var(--serif)', fontSize: '26px', fontWeight: 600, lineHeight: 1.5, position: 'relative', borderLeft: `3px solid ${col.hex}`, paddingLeft: '16px' }}>
                 {mainConflict}
               </Text>
+              <CardSeal char="断" />
             </View>
 
             {/* ② 三势研判：雷达 + 三条 meter */}
             <View className="proto-card" style={{ marginTop: '18px', padding: '20px 22px' }}>
-              <Text style={kicker('势', '.28em', 'var(--mut)')}>三 势 研 判</Text>
+              <SealKicker text="三 势 研 判" tone="var(--mut)" spacing=".28em" style={{ marginBottom: '14px' }} />
               <View style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
                 <ShiRadar values={radarValues} />
                 <View style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '15px' }}>
