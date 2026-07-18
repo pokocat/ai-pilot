@@ -538,7 +538,6 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
-- **测试库纪律缺口（2026-07-11）**：仓库无 `.env.test`，`npm test` 直接读 `.env` 的 `DATABASE_URL`（可能指向 schema 落后的 dev 库 `junshi`，`seedBaseline` 崩溃会被误判为"断言陈旧"）。跑测试前请确认指向已 `prisma db push` 的 `junshi_test`。待办：加 `.env.test` 或在 test 脚本内固定测试库 + push 前置。
 - **产品决策记录（2026-07-11）**：`docs/[FABLE5]DECISIONS_2026-07-11.md` 已拍板 D-1 多入口+来源归因 / D-2 军师收编 4+1 / D-3 七参数（记忆用户级共享、复盘日周月、健康度 LLM 估测水位约束框架、报告分享转图片、保底额度可配置默认 6、生态纯跳转）。与旧规格冲突以决策文档为准；全局复审待办清单见 `docs/[FABLE5]REVIEW_2026-07-11.md`（**批次一 P0 五项 + 批次二 P1 七项 + D-8/D-10/D-11 + WO-09 端到端接线均已完成**；**批次三亦已完成**（D-1 归因/D-3-3 健康度/D-3-4 转图片/D-3-7 生态跳转/WO-08~14 全部管道/文案 sweep/主包瘦身，计划见 `docs/[FABLE5]BATCH3_PLAN.md`），仅剩该计划「明确不做」清单挂 backlog）。遗留注意：① `/casefile/review` 直连 API 仍接受 quarter/year/team 层（前端无入口暂不 clamp）；② **D-3-7 运维前提：EcoTool 目标小程序（数字人等）须与本小程序同一微信开放平台主体关联，`navigateToMiniProgram` 才可用**，appId 由运营在 admin「生态工具」录入；③ 批次三 schema 新增 ActivationEvent/EcoTool/Prescription.followupAt/PaymentOrder.attrSource（纯加法），prod 部署时 db push 带上并可跑 `prisma/seedBenchmarks.ts` 种子；④ 报告分享图/周报卡等 canvas 出图需真机抽查；⑤ estimateHealth 的 product/brand 维暂无服务端信号源常态 na。注意存量已排盘用户的 `NatalChart` 数据在命理关闭后仅停止读取展示、未物理清除，如合规要求下架历史命盘数据需另开任务。
 - **小程序方向调整（2026-07-05）：从「减法」改为「精细打磨现有功能」**。原 `docs/[FABLE5]*` 三份文档是「先减法后加法」方案；产品侧判断"功能都是客户想要的"，**不再做减法**，改为按文档把各功能逻辑捋顺、补全、打磨。已执行的处置：
   - **保留**：WO-01（名词统一：前台收敛「案卷/方案/军令/资料」，记忆/专属理解→军师印象；属打磨）+ WO-03（冷启动段位卡延迟曝光 `streak≥3‖usageDays≥14`、空态导流 `data/emptyStates.ts`、战局「下一步」卡；属打磨）。
