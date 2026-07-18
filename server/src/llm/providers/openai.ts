@@ -28,28 +28,83 @@ interface OAStreamChunk {
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
 const CHAT_MAX_TOKENS = 4000; // 对话回复上限（放到日常永远碰不到，等于不截断）
+// 结构化成果通常比普通问答更慢，尤其是强制 tool calling 的兼容网关。
+// 保留 OPENAI_TIMEOUT_MS 作为全局下限；成果请求至少允许两分钟完成。
+const DELIVERABLE_TIMEOUT_MS = 120_000;
+
+type RequestPhase = 'chat_completion' | 'deliverable' | 'chat_stream';
+
+function requestTimeoutMs(cfg: ResolvedAiConfig, body: Record<string, unknown>): number {
+  return body.max_tokens === DELIVERABLE_MAX_TOKENS
+    ? Math.max(cfg.timeoutMs, DELIVERABLE_TIMEOUT_MS)
+    : cfg.timeoutMs;
+}
+
+function gatewayHost(base: string): string {
+  try { return new URL(base).host; }
+  catch { return 'invalid-base-url'; }
+}
+
+function deadline(timeoutMs: number) {
+  const ctrl = new AbortController();
+  const startedAt = Date.now();
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const arm = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timedOut = true;
+      ctrl.abort();
+    }, timeoutMs);
+  };
+  arm();
+  return {
+    signal: ctrl.signal,
+    refresh: arm,
+    clear: () => { if (timer) clearTimeout(timer); timer = null; },
+    timedOut: () => timedOut,
+    elapsedMs: () => Date.now() - startedAt,
+  };
+}
+
+function providerFailure(err: unknown, cfg: ResolvedAiConfig, base: string, phase: RequestPhase, timeoutMs: number, watch: ReturnType<typeof deadline>): Error {
+  const original = err as Error;
+  const failure = watch.timedOut()
+    ? Object.assign(new Error(`OpenAI 兼容网关${phase === 'deliverable' ? '成果' : phase === 'chat_stream' ? '流式' : '对话'}响应超时（${timeoutMs}ms）`), { name: 'AbortError', code: 'AI_TIMEOUT' })
+    : original;
+  // 不记录 prompt 或密钥；保留网关、模型、阶段和耗时，才能区分排队慢、首包慢和流中断。
+  console.warn('[llm:openai] request failed', {
+    host: gatewayHost(base), model: cfg.model, phase, timeoutMs,
+    elapsedMs: watch.elapsedMs(), timeout: watch.timedOut(),
+    errorName: failure.name, error: failure.message,
+  });
+  return failure;
+}
 
 // 统一请求封装：注入 baseUrl/model/key/温度，带超时；错误抛出由 gateway 兜底降级 mock。
 async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>): Promise<OAResponse> {
   const base = cfg.baseUrl.replace(/\/+$/, '');
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
+  const timeoutMs = requestTimeoutMs(cfg, body);
+  const phase: RequestPhase = body.max_tokens === DELIVERABLE_MAX_TOKENS ? 'deliverable' : 'chat_completion';
+  const watch = deadline(timeoutMs);
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({ model: cfg.model, temperature: cfg.temperature, ...body }),
-      signal: ctrl.signal,
+      signal: watch.signal,
     });
     const data = (await res.json().catch(() => ({}))) as OAResponse;
     if (!res.ok) throw new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`);
     return data;
+  } catch (err) {
+    throw providerFailure(err, cfg, base, phase, timeoutMs, watch);
   } finally {
-    clearTimeout(timer);
+    watch.clear();
   }
 }
 
-async function* readOpenAIStream(res: Response): AsyncGenerator<OAStreamChunk> {
+async function* readOpenAIStream(res: Response, onChunk: () => void): AsyncGenerator<OAStreamChunk> {
   if (!res.body) throw new Error('OpenAI 兼容接口未返回流式响应体');
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -57,6 +112,8 @@ async function* readOpenAIStream(res: Response): AsyncGenerator<OAStreamChunk> {
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
+    // timeout 是「首个字节 / 相邻字节」的空闲上限，不再把正常持续输出的长回复在总时长处截断。
+    if (value?.byteLength) onChunk();
     buf += decoder.decode(value, { stream: true });
     buf = buf.replace(/\r\n/g, '\n');
     const blocks = buf.split('\n\n');
@@ -91,8 +148,7 @@ async function* readOpenAIStream(res: Response): AsyncGenerator<OAStreamChunk> {
 
 async function callChatStream(cfg: ResolvedAiConfig, body: Record<string, unknown>, includeUsage = true): Promise<AsyncGenerator<OAStreamChunk>> {
   const base = cfg.baseUrl.replace(/\/+$/, '');
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), cfg.timeoutMs);
+  const watch = deadline(cfg.timeoutMs);
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -104,7 +160,7 @@ async function callChatStream(cfg: ResolvedAiConfig, body: Record<string, unknow
         stream: true,
         ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
       }),
-      signal: ctrl.signal,
+      signal: watch.signal,
     });
     if (!res.ok) {
       const data = (await res.clone().json().catch(async () => {
@@ -114,12 +170,12 @@ async function callChatStream(cfg: ResolvedAiConfig, body: Record<string, unknow
       throw new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`);
     }
     return (async function* () {
-      try { yield* readOpenAIStream(res); }
-      finally { clearTimeout(timer); }
+      try { yield* readOpenAIStream(res, watch.refresh); }
+      catch (err) { throw providerFailure(err, cfg, base, 'chat_stream', cfg.timeoutMs, watch); }
+      finally { watch.clear(); }
     })();
   } catch (err) {
-    clearTimeout(timer);
-    throw err;
+    throw providerFailure(err, cfg, base, 'chat_stream', cfg.timeoutMs, watch);
   }
 }
 
