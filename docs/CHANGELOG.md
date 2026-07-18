@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-18** · **小程序流式对话延长客户端总超时**：线上确认 server 已在 73.6 秒正常完成 `/generate`，但微信 `wx.request` 未设 `timeout`，默认约 60 秒先触发 `fail`，前台遂显示「网络连接中断」。`app/src/services/streaming.ts` 为 `enableChunked` 请求显式设为 180 秒；用户主动停止仍走 `RequestTask.abort()`，真实中断仍保留重试入口。影响面：小程序流式对话客户端；需重新编译/上传小程序包后生效，不改 API 或服务端。
+
 - **2026-07-18** · **模型网关超时从累计时长改为空闲时长**：排查线上 `qnaigc / dj-claude-4.6-opus` 两次 `This operation was aborted` 后，确认均由服务端 60 秒 `AbortController` 触发，而非小程序取消或 Nginx 超时。OpenAI 兼容流式调用现在把 `OPENAI_TIMEOUT_MS` 作为首包及相邻字节空闲上限：每收到一个上游字节即续期，持续输出的长回复不再在累计 60 秒被截断；强制结构化成果（含工具循环终结轮）自动取至少 120 秒预算。超时归一为 `AI_TIMEOUT`，诊断日志记录网关 host、模型、阶段、配置上限、实际耗时，不记录 prompt 或密钥。影响面：server OpenAI provider / gateway 错误映射 / 环境变量说明 / 工程运行口径；不改接口和数据结构。
 
 - **2026-07-16** · **体验版额度与产品路演交付**：体验版月 token 配额由 100,000 提升至 10,000,000；新增 `server/scripts/bumpFreeQuota.ts` 与 `npm run db:bump-free-quota`，支持先试运行、再按需把已有体验版用户的钱包 quota/balance 刷到新额度；新增 `docs/roadshow/junshi-roadshow.html` 路演页及 `.claude/launch.json` 本地静态服务启动项。影响面：套餐同步与存量体验版钱包迁移、产品演示资料；不改数据库结构。

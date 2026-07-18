@@ -34,6 +34,9 @@ function friendlyStatus(status: number): string {
 }
 
 const NETWORK_HINT = '网络不太稳，请再试一次。';
+// wx.request 默认总超时约 60 秒；真实模型的长回复即使持续下发 token，也会被客户端先断开。
+// 服务端流式已按上游空闲时间续期，这里给同一轮用户请求留出足够的总预算。
+const WEAPP_STREAM_TIMEOUT_MS = 180_000;
 
 function messageFromData(data: unknown, status: number): string {
   if (data && typeof data === 'object') {
@@ -198,6 +201,7 @@ export async function generateStream(body: GenRequest, h: StreamHandlers, contro
         data: body,
         header,
         enableChunked: true,
+        timeout: WEAPP_STREAM_TIMEOUT_MS,
         success: (res: { data?: unknown }) => finish(res.data),
         // B2：主动中断时 fail 也会触发，此时静默 resolve(false)（aborted 标记让调用方跳过兜底重发）。
         // 非主动中断（真实网络失败）且已有产出但从未收到终态事件时，补发一次 onError，
