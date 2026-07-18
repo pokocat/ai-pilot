@@ -13,13 +13,17 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:sync-plans": "tsx scripts/syncPlans.ts",
+    "db:bump-free-quota": "tsx scripts/bumpFreeQuota.ts",
     "pay:e2e": "tsx scripts/pay-e2e.ts",
+    "pay:mock": "tsx scripts/wechat-pay-mock.ts",
+    "pay:e2e:mock": "tsx scripts/pay-mock-e2e.ts",
     "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
     "db:pgvector": "psql \"$DATABASE_URL\" -f prisma/pgvector.sql",
     "admin:sync-content": "tsx scripts/syncAdminContent.ts",
     "db:reembed": "tsx scripts/reembed.ts",
     "secrets:encrypt": "tsx scripts/encryptSecrets.ts",
-    "test": "NODE_ENV=test node --import tsx --test --test-concurrency=1 test/*.test.ts"
+    "pretest": "node --env-file=.env.test node_modules/prisma/build/index.js db push --skip-generate",
+    "test": "node --env-file=.env.test --import tsx --test --test-concurrency=1 test/*.test.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

@@ -7,6 +7,7 @@
 # 用法：
 #   bash scripts/deploy-prod.sh
 #   DEPLOY_H5=1 bash scripts/deploy-prod.sh
+#   ACCEPT_DATA_LOSS=1 bash scripts/deploy-prod.sh   # schema 含新唯一约束/破坏性列变更时，让 db push 接受 prisma 的 data-loss 门；默认关（保护线上数据）
 #   DEPLOY_HOST=ecs-user@1.2.3.4 SSH_KEY=/path/key REMOTE_ROOT=/opt/junshi bash scripts/deploy-prod.sh
 set -euo pipefail
 
@@ -20,6 +21,7 @@ PUBLIC_BASE="${PUBLIC_BASE:-http://8.136.36.175}"
 PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-https://wxapi.aibuzz.cn}"
 DEPLOY_H5="${DEPLOY_H5:-0}"
 TARO_APP_API="${TARO_APP_API:-https://wxapi.aibuzz.cn/api}"
+ACCEPT_DATA_LOSS="${ACCEPT_DATA_LOSS:-0}"   # 1=schema push 追加 --accept-data-loss（按需，默认关）
 
 SHA="$(cd "$ROOT" && git rev-parse --short HEAD)"
 ARCHIVE="/tmp/junshi-${SHA}.tar.gz"
@@ -43,7 +45,7 @@ scp "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:/tmp/"
 
 log "远端构建并发布 server + admin"
 ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" \
-  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' TARO_APP_API='$TARO_APP_API' bash -se" <<'REMOTE'
+  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' TARO_APP_API='$TARO_APP_API' ACCEPT_DATA_LOSS='$ACCEPT_DATA_LOSS' bash -se" <<'REMOTE'
 set -euo pipefail
 
 APP_ROOT="$REMOTE_ROOT"
@@ -87,8 +89,12 @@ npx prisma generate
 
 # server/.env is owned by runtime user junshi (0600). Run schema push as that
 # user and skip generate, because generate already ran as deploy user above.
-sudo -u "$REMOTE_RUNTIME_USER" env HOME="/home/$REMOTE_RUNTIME_USER" APP_ROOT="$APP_ROOT" bash -c \
-  'cd "$APP_ROOT/server" && ./node_modules/.bin/prisma db push --skip-generate'
+# ACCEPT_DATA_LOSS=1 时追加 --accept-data-loss：仅在明知本次为加法迁移（新可空列/新表/新可空唯一索引）
+# 时按需启用，让 prisma 越过 data-loss 门；默认关，避免误吞真正的破坏性变更。
+DB_PUSH_EXTRA=""
+[ "${ACCEPT_DATA_LOSS:-0}" = "1" ] && DB_PUSH_EXTRA="--accept-data-loss"
+sudo -u "$REMOTE_RUNTIME_USER" env HOME="/home/$REMOTE_RUNTIME_USER" APP_ROOT="$APP_ROOT" DB_PUSH_EXTRA="$DB_PUSH_EXTRA" bash -c \
+  'cd "$APP_ROOT/server" && ./node_modules/.bin/prisma db push --skip-generate $DB_PUSH_EXTRA'
 
 echo "== server build and restart =="
 sudo rm -rf dist

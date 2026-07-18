@@ -5,7 +5,7 @@
 //   里程碑（使用天数解锁）：7/30/90/180/365 天（解锁内容由对话层承接，这里只管真实解锁事实）
 // 准确率/命中率为 null（无已验证样本）时视为不达标——没有数据就没有段位，绝不放水。
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { now, dateKey } from './clock.js';
 import { reviewStreak } from './reviewLog.js';
 import { decisionStats } from './decisionLog.js';
 import { prophecyStats } from './prophecyLog.js';
@@ -73,8 +73,7 @@ export async function syncProgress(userId: string): Promise<ProgressView | null>
   // 里程碑：按使用天数解锁（记录首次解锁日期）
   const milestones: Record<string, string> = { ...((stored?.milestonesJson as Record<string, string>) ?? {}) };
   const newMilestones: number[] = [];
-  const d = now();
-  const todayIso = `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+  const todayIso = dateKey(); // 上海时区日历日（P1-4）
   for (const days of MILESTONE_DAYS) {
     if (usageDays >= days && !milestones[String(days)]) {
       milestones[String(days)] = todayIso;
@@ -121,11 +120,14 @@ export async function progressBriefing(userId: string): Promise<string | null> {
   // 全新用户（新兵、无里程碑、无复盘）不注入，避免每轮多一块噪音
   if (p.rank === '新兵' && p.streak === 0 && !Object.keys(p.milestones).length) return null;
   const unlocked = Object.keys(p.milestones).sort((a, b) => Number(a) - Number(b)).map((dStr) => `${dStr}天`).join('、');
+  // WO-03 冷启动去百分比：连续复盘 <3 天（样本太薄）不注入准确率/命中率——新用户只有寥寥几条已验证记录时，
+  // 一个百分比会被当成「战绩」误读且极不稳定（一条对错就大幅跳变）。此阶段只留天数，稳定后（≥3 天）再带比率。
+  const showRates = p.streak >= 3;
   const lines = [
     '【段位·里程碑（系统计数，引用时以此为准，禁止自行推算）】',
     `战略段位：${p.rank}｜使用第 ${p.usageDays} 天｜连续复盘 ${p.streak} 天` +
-      `${p.decisionAccuracy !== null ? `｜决策准确率 ${p.decisionAccuracy}%` : ''}` +
-      `${p.prophecyHitRate !== null ? `｜天机命中率 ${p.prophecyHitRate}%` : ''}`,
+      `${showRates && p.decisionAccuracy !== null ? `｜决策准确率 ${p.decisionAccuracy}%` : ''}` +
+      `${showRates && p.prophecyHitRate !== null ? `｜天机命中率 ${p.prophecyHitRate}%` : ''}`,
   ];
   if (unlocked) lines.push(`已解锁里程碑：${unlocked}`);
   if (p.nextRank) lines.push(`下一段位：${p.nextRank.rank}（${p.nextRank.requirement}）`);

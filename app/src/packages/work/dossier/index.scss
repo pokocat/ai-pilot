@@ -1,11 +1,13 @@
 /* 完整履历 —— 收编自旧黑金神秘学配色，改「运筹帷幄 · 纸墨帅帐」章法：
-   纸底墨字宋体 + 本命色朱批，非行动不设框，字重铁律 ≤600。 */
+   纸底墨字宋体 + 本命色朱批，非行动不设框，字重铁律 ≤600。
+   D3：flex 布局替代 calc(100vh-88px) 魔法数扣头高（保留纸墨令牌配色）。 */
 .dossier-page {
-  min-height: 100vh;
+  height: 100vh;
+  display: flex; flex-direction: column;
   background: var(--paper);
 }
 .ds-navtitle { color: var(--ink); }
-.ds-scroll { height: calc(100vh - 88px); }
+.ds-scroll { flex: 1; min-height: 0; }
 
 /* 空态 / 生成 */
 .ds-empty {
@@ -84,7 +86,7 @@
 .ds-ti-title { display: block; font-size: 14px; font-weight: 600; color: var(--ink); margin: 1px 0 2px; }
 .ds-ti-desc { display: block; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
 
-/* 页脚 */
-.ds-foot { text-align: center; padding: 8px 20px 60px; margin: 24px 24px 0; }
+/* 页脚（纸墨帅帐；底 padding 并入安全区，防刘海机底部裁切） */
+.ds-foot { text-align: center; padding: 8px 20px calc(60px + env(safe-area-inset-bottom)); margin: 24px 24px 0; }
 .ds-foot-brand { display: inline-block; margin: 20px 0 16px; letter-spacing: .22em; }
 .ds-regen { display: block; width: fit-content; margin: 0 auto; }

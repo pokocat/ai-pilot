@@ -1,0 +1,70 @@
+.page.brief-page { background: var(--bg, #f4f2ec); }
+
+.brief-title { font-size: 16px; }
+
+.bf-hero {
+  margin-top: 14px; padding: 18px; border-radius: var(--r-lg);
+  border: none; color: #fff;
+}
+.bf-hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.bf-hero-ic { width: 40px; height: 40px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; }
+.bf-k { display: block; font-size: 11px; color: rgba(255,255,255,.55); }
+.bf-t { display: block; color: #fff; font-size: 22px; font-weight: 600; margin-top: 4px; }
+.bf-summary { display: block; color: rgba(255,255,255,.68); font-size: 12.5px; line-height: 1.65; margin-top: 10px; }
+.bf-counts { display: block; color: var(--accent-bright); font-size: 11.5px; margin-top: 12px; }
+.bf-badge { flex: 0 0 auto; padding: 4px 9px; border-radius: 999px; font-size: 10.5px; font-weight: 600; background: rgba(255,255,255,.1); color: var(--accent-bright); }
+.bf-badge.empty { color: rgba(255,255,255,.55); }
+.bf-badge.ready { color: #d6f6df; background: rgba(62,151,91,.22); }
+
+.bf-sec {
+  margin-top: 12px; padding: 16px;
+  border-radius: var(--r-lg);
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,.04));
+}
+.bf-sec-t { display: block; color: var(--ink); font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.bf-item { display: block; color: var(--ink-2); font-size: 12.5px; line-height: 1.6; margin-top: 5px; }
+.bf-empty { display: block; color: var(--ink-3); font-size: 12.5px; line-height: 1.6; }
+.bf-chip-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.bf-chip { max-width: 100%; padding: 7px 10px; border-radius: 999px; font-size: 11.5px; line-height: 1.35; }
+
+.bf-cta {
+  height: 48px; border-radius: var(--r-md); margin: 16px 0 8px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  color: #fff; font-size: 14.5px; font-weight: 600;
+}
+
+/* 军师记事（记忆库六类，P2） */
+.bf-memhead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+.bf-memcount { color: var(--ink-3); font-size: 12px; }
+.bf-memcat { padding: 10px 0; border-top: 1px solid rgba(0,0,0,.06); }
+.bf-memcat:first-of-type { border-top: none; }
+.bf-memcat-h { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
+.bf-memcat-ic { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.bf-memcat-tt { flex: 1; min-width: 0; }
+.bf-memcat-t { display: block; color: var(--ink); font-size: 13.5px; font-weight: 600; }
+.bf-memcat-s { display: block; color: var(--ink-3); font-size: 11px; margin-top: 1px; }
+.bf-memcat-fill { font-size: 11px; flex-shrink: 0; }
+.bf-memrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 3px 0 3px 37px; }
+.bf-memrow-t { flex: 1; color: var(--ink-2); font-size: 12.5px; line-height: 1.55; }
+/* B7：视觉不变，透明外扩「删」命中区到 ≥44px（负 margin 抵消占位，不影响布局） */
+.bf-memrow-del { flex-shrink: 0; font-size: 12px; padding: 15px 4px 15px 14px; margin: -15px 0 -15px -14px; }
+
+/* B7：军师记忆加载骨架条 */
+.bf-sk-bar {
+  height: 10px; border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2), var(--line-2), var(--surface-2));
+  background-size: 200% 100%; animation: bf-shimmer 1.3s infinite;
+}
+.bf-sk-bar.w55 { width: 55%; }
+.bf-sk-bar.w85 { width: 85%; }
+@keyframes bf-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.bf-memcat-empty { display: block; color: var(--ink-3); font-size: 12px; line-height: 1.5; padding-left: 37px; font-style: italic; }
+
+/* 完整履历入口卡（P3）：墨色实底纸白字，收编自旧黑金配色 */
+.bf-dossier { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding: 14px 16px; border-radius: var(--r-sm); background: var(--ink); }
+.bf-dossier-ic { width: 34px; height: 34px; border-radius: 50%; background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.bf-dossier-l { flex: 1; min-width: 0; }
+.bf-dossier-t { display: block; font-size: 14px; font-weight: 600; color: var(--paper); }
+.bf-dossier-s { display: block; font-size: 11.5px; color: rgba(255,255,255,.62); margin-top: 2px; }
+.bf-dossier-arrow { font-size: 22px; color: var(--paper); flex-shrink: 0; }

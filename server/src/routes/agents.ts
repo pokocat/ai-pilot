@@ -5,6 +5,7 @@ import { verifyUserToken } from '../services/userToken.js';
 import { chargeCredits, getBalance } from '../services/credits.js';
 import { ownedAgentKeys, publicOwned } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
+import { parseAttribution, recordActivation } from '../services/activation.js';
 import type { Agent as AgentView, AgentPurchaseResult } from '../../../shared/contracts';
 
 export async function agentRoutes(app: FastifyInstance) {
@@ -33,7 +34,7 @@ export async function agentRoutes(app: FastifyInstance) {
   });
 
   // 解锁/购买智能体：仅 unlock 类可购买，消耗算力（按次次数）。free/metered 无需购买。
-  app.post<{ Params: { key: string } }>('/agents/:key/purchase', async (req, reply): Promise<AgentPurchaseResult | void> => {
+  app.post<{ Params: { key: string }; Body: { source?: string; refId?: string } }>('/agents/:key/purchase', async (req, reply): Promise<AgentPurchaseResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const agent = await prisma.agent.findUnique({ where: { key: req.params.key } });
     if (!agent || !agent.enabled) return reply.code(404).send({ error: '智能体不存在或已下架', code: 'AGENT_NOT_FOUND' });
@@ -63,6 +64,9 @@ export async function agentRoutes(app: FastifyInstance) {
           action: 'user.agent.purchase',
           payload: { agentKey: agent.key, agentName: agent.name, price: agent.price, creditBalance: purchased.creditBalance },
         });
+        // D-1 开通来源归因：仅首次解锁记事件（幂等重复不重复计）。source 从请求体读、缺省 catalog、表外回落。
+        const { source, refId } = parseAttribution(req.body?.source, req.body?.refId);
+        await recordActivation({ tenantId: user.tenantId, userId: user.id, itemType: 'agent', itemKey: agent.key, source, refId }).catch(() => {});
       }
       return {
         ok: true,

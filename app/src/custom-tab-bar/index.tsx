@@ -48,11 +48,13 @@ export default function CustomTabBar() {
 
   const switchTo = (i: number) => {
     if (i === selected) return;
+    const prev = selected;
     s.setTab(i);
     hideNativeTabBarOnly();
     Taro.switchTab({
       url: TABS[i].path,
       success: () => hideNativeTabBarOnly(),
+      fail: () => s.setTab(prev), // 跳转失败回滚高亮，避免底栏停在未生效的 tab
     });
   };
 

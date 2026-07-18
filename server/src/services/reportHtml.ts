@@ -51,6 +51,7 @@ export function renderReportHtml(d: Deliverable): string {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(d.title)} · 军师参谋部</title>
 <style>
+:root{--serif:"Songti SC","STSong","SimSun","Noto Serif SC",serif}
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
 body{background:#ECE7DA;color:#16191D;font-family:"Noto Sans SC",-apple-system,"PingFang SC",sans-serif;line-height:1.8;padding:24px 14px 60px}
@@ -58,15 +59,15 @@ body{background:#ECE7DA;color:#16191D;font-family:"Noto Sans SC",-apple-system,"
 /* 封面（深绿） */
 .cover{padding:36px 30px 30px;color:#fff;background:linear-gradient(150deg,#1E5A43,#163F30);text-align:center}
 .badge{display:inline-block;padding:5px 13px;border:1px solid rgba(255,255,255,.34);border-radius:999px;font-size:11px;letter-spacing:.2em;color:rgba(255,255,255,.86)}
-.title{font-family:"Noto Serif SC","Songti SC","STSong",serif;font-size:28px;font-weight:700;letter-spacing:2px;line-height:1.4;margin:16px auto 0;max-width:92%}
+.title{font-family:var(--serif);font-size:28px;font-weight:700;letter-spacing:2px;line-height:1.4;margin:16px auto 0;max-width:92%}
 .motto{font-size:12.5px;color:rgba(255,255,255,.72);letter-spacing:.5px;margin-top:14px}
 .meta{font-size:12px;color:rgba(255,255,255,.58);margin-top:12px;letter-spacing:.4px}
 /* 正文章节（白卡） */
 .body{padding:24px 22px 8px}
 .sec{padding:16px 18px;margin:0 0 16px;background:#fff;border:1px solid #E7E4DB;border-radius:14px}
 .sec-h{display:flex;align-items:center;gap:11px;margin-bottom:11px}
-.sec-h .idx{flex:0 0 auto;font-family:"Noto Serif SC",serif;font-size:14px;font-weight:700;color:#fff;background:#1E5A43;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;line-height:1}
-.sec-h h2{font-family:"Noto Serif SC","Songti SC",serif;font-size:17px;color:#1E5A43;font-weight:700;letter-spacing:.5px;line-height:1.4}
+.sec-h .idx{flex:0 0 auto;font-family:var(--serif);font-size:14px;font-weight:700;color:#fff;background:#1E5A43;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;line-height:1}
+.sec-h h2{font-family:var(--serif);font-size:17px;color:#1E5A43;font-weight:700;letter-spacing:.5px;line-height:1.4}
 .sec .b{font-size:15px;color:#2b2f34;margin:0 0 9px;line-height:1.85}
 .sec .b:last-child{margin-bottom:0}
 .sec .b.muted{color:#a4a29a}
@@ -76,11 +77,11 @@ body{background:#ECE7DA;color:#16191D;font-family:"Noto Sans SC",-apple-system,"
 /* 落款（金印） */
 .foot{padding:22px 30px 30px;text-align:center;border-top:1px solid #E7E4DB;background:#FBF7EC}
 .seal{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;width:60px;height:60px;border:2px solid #1E5A43;border-radius:12px;color:#1E5A43;transform:rotate(-4deg);margin-bottom:13px;font-weight:700;line-height:1.1}
-.seal .s1{font-family:"Noto Serif SC",serif;font-size:19px;letter-spacing:2px}
+.seal .s1{font-family:var(--serif);font-size:19px;letter-spacing:2px}
 .seal .s2{font-size:8px;letter-spacing:1px;margin-top:2px}
-.seal-motto{font-family:"Noto Serif SC",serif;font-size:13px;color:#43340F;letter-spacing:.5px;margin-bottom:13px}
+.seal-motto{font-family:var(--serif);font-size:13px;color:#43340F;letter-spacing:.5px;margin-bottom:13px}
 .trust{font-size:11.5px;color:#8b8f95;line-height:1.7;max-width:520px;margin:0 auto 14px}
-.brand{font-family:"Noto Serif SC",serif;font-size:14px;font-weight:700;color:#9B7C3F;letter-spacing:.12em}
+.brand{font-family:var(--serif);font-size:14px;font-weight:700;color:#9B7C3F;letter-spacing:.12em}
 .edition{margin-top:5px;font-size:10px;color:#a4a29a;letter-spacing:.16em}
 @media print{body{background:#fff;padding:0}.page{box-shadow:none}}
 </style></head>

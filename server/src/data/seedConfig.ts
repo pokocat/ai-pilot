@@ -57,7 +57,7 @@ export const PLANS: {
     price: 0,
     period: 'month',
     creditsPerMonth: 10,
-    tokenQuotaPerMonth: 100000,
+    tokenQuotaPerMonth: 10000000,
     agentCount: 3,
     features: ['10 点 / 月', '基础顾问 3 位', '适合轻量试用'],
     highlighted: false,
@@ -98,3 +98,18 @@ export const PLANS: {
 ];
 
 // 注：行业基准已迁入 data/industryPacks.ts（按行业取，不再是单一写死串）。SaaS 基准 = saas 包的 benchmark。
+
+// V7-12：单次付费商品目录（SKU）。定价对齐效果图/方案 D-5；代码即真相源，admin:sync-content 幂等 upsert。
+// kind=module → 支付后 upsert UserModule(grantsModuleKey) 启用能力；service → 一次性服务凭据；storage → 空间加档(metaBytes)。
+// grantsModuleKey 必须与 data/modules.ts 的 moduleKey 对齐。
+export const SKUS: {
+  key: string; name: string; desc: string; priceFen: number;
+  kind: 'module' | 'service' | 'storage'; grantsModuleKey?: string; metaBytes?: number;
+}[] = [
+  { key: 'deep-organize', name: '深度整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成可直接调用的知识。', priceFen: 3900, kind: 'service' },
+  { key: 'storage-2g', name: '资料空间包', desc: '为资料库扩容约 2GB，容纳更多经营材料。', priceFen: 1900, kind: 'storage', metaBytes: 2 * 1024 * 1024 * 1024 },
+  { key: 'deep-contradiction', name: '深度矛盾分析', desc: '围绕主要矛盾做一次深度拆解，给出结构化打法与验证标准。', priceFen: 2900, kind: 'module', grantsModuleKey: 'deep-contradiction' },
+  { key: 'fin-checkup', name: '财务经营体检', desc: '对经营与财务数据做一次系统体检，定位现金与利润风险。', priceFen: 4900, kind: 'module', grantsModuleKey: 'fin-checkup' },
+  { key: 'ip-topics-pro', name: 'IP 选题库 · 高级版', desc: '按你的定位批量产出可执行的内容选题库。', priceFen: 9900, kind: 'module', grantsModuleKey: 'ip-topics-pro' },
+  { key: 'shop-dashboard', name: '店铺数据看板', desc: '搭建店铺经营数据看板，按周复盘核心经营指标。', priceFen: 19900, kind: 'module', grantsModuleKey: 'shop-dashboard' },
+];

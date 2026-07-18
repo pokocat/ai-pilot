@@ -6,7 +6,10 @@
 // 定时任务只负责「找出该提醒谁」并登记候选，发送走后续订阅消息通道。
 import { prisma } from '../db.js';
 import { recordAudit } from './audit.js';
-import { now } from './clock.js';
+import { now, dateKey, hourOf, dayStart } from './clock.js';
+import { MORNING_ORDER_JOB, WEEKLY_REVIEW_JOB } from './reminders.js';
+import { scanPrescriptionFollowups } from './prescription.js';
+import { sweepPendingOrders } from './wechatPay.js';
 import {
   hasSentWechatNotificationToday,
   hasWechatSubscriptionQuota,
@@ -66,7 +69,7 @@ export const RECALL_IDLE_HOURS = 48;
 
 export async function scanIdleCasefiles(): Promise<number> {
   const cutoff = new Date(now().getTime() - RECALL_IDLE_HOURS * 3600_000);
-  const dayStart = new Date(now().getFullYear(), now().getMonth(), now().getDate());
+  const todayStart = dayStart(); // 上海时区当日 00:00（P1-4）
   const stale = await prisma.casefile.findMany({
     where: { status: 'active', updatedAt: { lt: cutoff } },
     select: { id: true, tenantId: true, userId: true, title: true, updatedAt: true },
@@ -75,7 +78,7 @@ export async function scanIdleCasefiles(): Promise<number> {
   let flagged = 0;
   for (const cf of stale) {
     const already = await prisma.auditLog.findFirst({
-      where: { userId: cf.userId, action: 'system.recall.candidate', createdAt: { gte: dayStart } },
+      where: { userId: cf.userId, action: 'system.recall.candidate', createdAt: { gte: todayStart } },
       select: { id: true },
     });
     if (already) continue;
@@ -97,9 +100,8 @@ export async function scanIdleCasefiles(): Promise<number> {
 export const REVIEW_GAP_DAYS = 2;
 
 export async function scanReviewGaps(): Promise<number> {
-  const dayStart = new Date(now().getFullYear(), now().getMonth(), now().getDate());
+  const todayStart = dayStart(); // 上海时区当日 00:00（P1-4）
   const cutoff = new Date(now().getTime() - REVIEW_GAP_DAYS * 86400_000);
-  const iso = (t: Date) => `${t.getFullYear()}-${`${t.getMonth() + 1}`.padStart(2, '0')}-${`${t.getDate()}`.padStart(2, '0')}`;
   // 有活跃案卷的用户里，找「复盘过但最近断档」的（按用户聚合最近一次 day 复盘日期）
   const actives = await prisma.casefile.findMany({ where: { status: 'active' }, select: { tenantId: true, userId: true }, take: 500 });
   let flagged = 0;
@@ -109,9 +111,9 @@ export async function scanReviewGaps(): Promise<number> {
       orderBy: { date: 'desc' },
       select: { date: true },
     });
-    if (!last || last.date >= iso(cutoff)) continue; // 从没复盘过（由召回任务管）或还没断档
+    if (!last || last.date >= dateKey(cutoff)) continue; // 从没复盘过（由召回任务管）或还没断档
     const already = await prisma.auditLog.findFirst({
-      where: { userId: cf.userId, action: 'system.review.reminder.candidate', createdAt: { gte: dayStart } },
+      where: { userId: cf.userId, action: 'system.review.reminder.candidate', createdAt: { gte: todayStart } },
       select: { id: true },
     });
     if (already) continue;
@@ -136,9 +138,8 @@ export async function scanReviewGaps(): Promise<number> {
 export const REVIEW_REMINDER_HOUR = Number(process.env.REVIEW_REMINDER_HOUR ?? 21);
 
 export async function scanDailyReviewReminders(): Promise<number> {
-  const d = now();
-  if (d.getHours() < REVIEW_REMINDER_HOUR) return 0;
-  const today = `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+  if (hourOf() < REVIEW_REMINDER_HOUR) return 0;
+  const today = dateKey();
   const actives = await prisma.casefile.findMany({
     where: { status: 'active' },
     select: { tenantId: true, userId: true },
@@ -170,8 +171,7 @@ export async function scanDailyReviewReminders(): Promise<number> {
 // pending 且 dueDate ≤ 今天 且未提醒过 → 登记「天机对账」候选（行级 dueNotifiedAt 幂等），
 // 下次日/月复盘时由军师带出来逐条对账（发送提醒走订阅消息通道）。
 export async function scanDueProphecies(): Promise<number> {
-  const d = now();
-  const today = `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
+  const today = dateKey();
   const due = await prisma.prophecyLog.findMany({
     where: { status: 'pending', dueNotifiedAt: null, dueDate: { not: null, lte: today } },
     take: 200,
@@ -189,8 +189,25 @@ export async function scanDueProphecies(): Promise<number> {
   return due.length;
 }
 
+// WO-14 处方追踪闭环：activated 满 7 天的处方行级打 followupAt（每处方一次，followupAt=null 幂等，多扫无副作用）。
+export async function scanPrescriptionFollowup(): Promise<number> {
+  const flagged = await scanPrescriptionFollowups();
+  if (flagged) console.log(`[scheduler] prescription followups flagged: ${flagged}`);
+  return flagged;
+}
+
 // 注册内置任务（周期：每 6 小时扫一轮；召回/提醒按天幂等，多扫无副作用）
 registerJob({ name: 'casefile-idle-recall', intervalMs: 6 * 3600_000, run: async () => { await scanIdleCasefiles(); } });
 registerJob({ name: 'review-gap-reminder', intervalMs: 6 * 3600_000, run: async () => { await scanReviewGaps(); } });
 registerJob({ name: 'daily-review-reminder', intervalMs: 30 * 60_000, run: async () => { await scanDailyReviewReminders(); } });
 registerJob({ name: 'prophecy-due-scan', intervalMs: 6 * 3600_000, run: async () => { await scanDueProphecies(); } });
+registerJob({ name: 'prescription-followup-scan', intervalMs: 6 * 3600_000, run: async () => { await scanPrescriptionFollowup(); } });
+// V7-11：09:00 军令提醒 + 周五周复盘提醒（scan 函数在 services/reminders.ts，job 常量在此注册）。
+registerJob(MORNING_ORDER_JOB);
+registerJob(WEEKLY_REVIEW_JOB);
+// 支付对账 sweep（P0）：回调丢失/卡单自愈——paid 未 applied 查单补账、created 超时查单/关单。
+// 未配支付（payConfigured=false）时 sweep 内部直接短路，注册无副作用。
+registerJob({ name: 'pay-reconcile-sweep', intervalMs: 5 * 60_000, run: async () => {
+  const r = await sweepPendingOrders();
+  if (r.applied || r.failed || r.closed) console.log(`[scheduler] pay sweep: applied=${r.applied} failed=${r.failed} closed=${r.closed} (scanned ${r.scanned})`);
+} });

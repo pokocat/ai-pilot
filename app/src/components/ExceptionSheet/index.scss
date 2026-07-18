@@ -1,0 +1,26 @@
+/* 遮罩/面板/grip 由 Sheet 基座统一（五要素）；此处仅内容与动作区。 */
+.exception-hero {
+  padding: 18px; border-radius: 21px;
+  background: rgba(156, 74, 56, .07);
+  border: 1px solid rgba(156, 74, 56, .16);
+}
+.ex-kicker { font-size: 11px; font-weight: 900; letter-spacing: .14em; color: var(--danger); }
+.ex-title { display: block; font-size: 22px; font-weight: 700; color: var(--ink); margin-top: 8px; line-height: 1.3; }
+.ex-desc { display: block; font-size: 12.5px; font-weight: 650; color: var(--ink-2); line-height: 1.55; margin-top: 8px; }
+
+.detail-mini-grid {
+  margin-top: 14px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.dm-cell {
+  padding: 12px 13px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.dm-k { font-size: 11px; color: var(--ink-3); }
+.dm-v { font-size: 12.5px; font-weight: 700; color: var(--ink); line-height: 1.45; }
+
+/* 按钮形与态走公共 .btn/.btn-ghost/.btn-primary，此处只定尺寸分配 */
+.exception-actions { display: flex; gap: 12px; margin-top: 18px; }
+.ex-secondary { flex: 0 0 96px; }
+.ex-primary { flex: 1; }

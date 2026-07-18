@@ -17,6 +17,9 @@ export type SessionMode =
 export interface IntentResult {
   mode: SessionMode;
   reviewLayer?: ReviewLayer;
+  // D-11：复盘只保留 日/周/月三层。季/年/团队触发词降级到月度线时，记下原始层用于注入一句军师引导
+  //（仅本轮 modeLine 用，不落库、不参与会话粘性编码）。
+  downgradedFrom?: ReviewLayer;
 }
 
 // V6.0 §10 复盘触发词 → 层级（顺序：先长周期再短周期，避免「本季度的月度总结」误判）
@@ -39,7 +42,14 @@ export function detectIntent(text: string): IntentResult {
   if (/^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(t)) return { mode: 'review', reviewLayer: 'day' };
   if (REVIEW_HINT.test(t)) {
     const hit = REVIEW_LAYERS.find((l) => l.re.test(t));
-    if (hit) return { mode: 'review', reviewLayer: hit.layer };
+    if (hit) {
+      // D-11：季/年/团队不再进独立模式，降级到月度线（会话落 month、只产 month 层 ReviewLog），
+      //        并带一句军师引导（见 modeDirective）。ReviewLayer 枚举保留不删（向后兼容既有数据）。
+      if (hit.layer === 'quarter' || hit.layer === 'year' || hit.layer === 'team') {
+        return { mode: 'review', reviewLayer: 'month', downgradedFrom: hit.layer };
+      }
+      return { mode: 'review', reviewLayer: hit.layer };
+    }
   }
 
   // 送你一卦（裂变）：给别人算
@@ -75,10 +85,16 @@ const LAYER_CN: Record<ReviewLayer, string> = { day: '日', week: '周', month: 
 /** 模式 → 注入指令（strategy 返回 null 不注入）。 */
 export function modeDirective(intent: IntentResult): string | null {
   if (intent.mode === 'review' && intent.reviewLayer) {
-    const extra = intent.reviewLayer === 'month' || intent.reviewLayer === 'quarter'
+    const extra = intent.reviewLayer === 'month'
       ? '本层复盘必须包含【天机验证】（逐条对照天机账本里的待验证预言）和【决策回顾】（对照决策账本）。'
       : '';
-    return `进入${LAYER_CN[intent.reviewLayer]}复盘模式：按六层复盘中该层的流程执行，数据一律以系统注入的账本块为准。${extra}`;
+    // D-11：季/年/团队降级到月度线时，注入一句军师口吻的引导（不单独出对应报告）。
+    const downgrade = intent.downgradedFrom
+      ? intent.downgradedFrom === 'team'
+        ? '\n客户想做团队复盘：目前只做日/周/月三层，按月度经营复盘走，用军师口吻带一句「团队这摊事，我放进月度复盘里一起给你捋，不单独开一场」，不要另出团队报告。'
+        : `\n客户想做${LAYER_CN[intent.downgradedFrom]}度复盘：目前只做日/周/月三层，按月度线走，用军师口吻带一句「季度和年度的账，我在每月的月度战报里滚动帮你对，不必单独拉一份」，不要另出${LAYER_CN[intent.downgradedFrom]}度报告。`
+      : '';
+    return `进入${LAYER_CN[intent.reviewLayer]}复盘模式：按日/周/月复盘中该层的流程执行，数据一律以系统注入的账本块为准。${extra}${downgrade}`;
   }
   return MODE_DIRECTIVES[intent.mode];
 }

@@ -1,5 +1,11 @@
 .pd-title { font-size: 16px; font-weight: 600; color: var(--ink); }
 .pd-loading { text-align: center; color: var(--ink-3); padding: 60px 0; font-size: 13px; }
+.pd-retry {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin: 14px auto 0; height: 40px; padding: 0 24px; border-radius: var(--r-sm, 10px);
+  border: 1px solid var(--line); font-size: 13px; font-weight: 600; color: var(--ink);
+}
+.pd-retry:active { opacity: .7; }
 
 .project .pad { padding: 14px 16px 0; }
 
@@ -26,6 +32,7 @@
 .pd-kadd { display: flex; gap: 8px; margin-bottom: 4px; }
 .pd-kinput { flex: 1; height: 40px; padding: 0 14px; border-radius: var(--r-sm); background: var(--surface-2); font-size: 13px; color: var(--ink); }
 .pd-kbtn { width: 44px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.pd-kbtn.busy { opacity: .5; pointer-events: none; }
 .pd-kitem { display: flex; gap: 10px; padding: 13px; border-radius: var(--r-md); }
 .pd-ktag { flex-shrink: 0; height: 22px; padding: 0 9px; border-radius: var(--r-sm); display: flex; align-items: center; font-size: 11px; font-weight: 600; }
 .pd-kb { flex: 1; min-width: 0; }

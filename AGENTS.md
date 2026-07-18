@@ -98,7 +98,7 @@ repo/
   - 运营端 `admin/src/api.ts`（`Overview / AdminAgent / AgentDetail / Plan / AdminSaying→Saying / SurveyAdmin→SurveyQ`）
 - **改数据模型只改这一处**，三端类型同步。
 - **智能体权益契约**：`AgentBilling`（`free|unlock|metered`）、`Agent.billing/price/owned`、`AgentPurchaseResult`、`AdminAgentCreate/AdminAgentUpdate`、`AdminUserDetail/AdminUserAgentRow`，驱动前台解锁、后台定价与指定用户开通。
-- **新增能力的契约**（项目/报告/知识/引用）：`ProjectItem/ProjectDetail`、`ReportItem/ReportDetail/ReportVersionItem/ReportVersionContent/ReportDiff/SectionDiff`、`KnowledgeItemT/KnowledgeHit`、`MessageRef`、`SummarizeResult`，以及 `GenRequest.projectId/refs`、`GenResult.knowledgeUsed`、`SessionItem/SessionDetail.projectId`、`SessionMessage.refs`、`LibItem.reportId/version/projectId`。
+- **新增能力的契约**（项目/报告/知识/引用）：`ProjectItem/ProjectDetail`、`ReportItem/ReportDetail/ReportVersionItem/ReportVersionContent/ReportDiff/SectionDiff`、`KnowledgeItemT/KnowledgeHit`、`MessageRef`、`SummarizeResult`，以及 `GenRequest.projectId/refs`、`GenResult.knowledgeUsed`、`SessionItem/SessionDetail.projectId`、`SessionMessage.refs`、`LibItem.reportId/version/projectId`。智库整理的 `OrganizeItem` 同时返回 `fileName/fileType/nameSource/preview`，供用户在确认入库前核对源名来源和解析正文。
 - **军师档案契约**：`ClientUnderstanding` / `ClientUnderstandingSection` / `UnderstandingMaturity` 挂在 `/me.understanding`，只整理真实档案、长期记忆、项目、知识、报告与会话线索；`AliasSuggestionResult` 驱动注册花名接口。
 
 > 约定：任何新增/修改的接口字段，先改 `shared/contracts.d.ts`，再改实现。
@@ -111,7 +111,7 @@ repo/
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
 - **微信密钥**：`WECHAT_MINI_SECRET` 与消息推送 `WECHAT_MESSAGE_TOKEN` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
-- **方案购买 / 支付**：前台可读 `GET /plans`；未配齐微信支付凭据时，登录后 `POST /plans/:id/purchase` 走演示购买并按方案写入 `CreditLedger`；配齐 `WECHAT_PAY_*` 且套餐需付款时，演示购买被禁用，改走 `POST /plans/:id/order` 创建小程序 JSAPI 支付订单，再由 `POST /pay/wechat/notify` 回调幂等入账。前台显示为「方案与产出额度」，企业版 `creditsPerMonth<0` 记为不限量（余额 `-1`，产出不扣减）。
+- **方案购买 / 支付**：前台可读 `GET /plans`；未配齐微信支付凭据时，登录后 `POST /plans/:id/purchase` 走演示购买并按方案写入 `CreditLedger`；配齐 `WECHAT_PAY_*` 且套餐需付款时，演示购买被禁用，改走 `POST /plans/:id/order` 创建小程序 JSAPI 支付订单（支持 `source/refId` 归因，与 SKU 同口径落 `ActivationEvent(itemType='plan')`；下单落**条款快照** `snapshotJson`，发放按下单时点配置防改价漂移；同用户 10 分钟 10 单**频控** `ORDER_RATE_LIMITED`；下新单自动调微信 close-order 关同类旧 created 单，远端关掉才置本地 closed），再由 `POST /pay/wechat/notify` 回调幂等入账（解密后校验金额/appid/mchid 一致，不一致绝不入账；退款事件 `REFUND.*` 单独幂等补记）；入账成功自动发「支付到账」订阅消息（`WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID`，未配则静默跳过）。`requestPayment` 成功后前端统一走 `services/pay.ts`（`awaitPaymentApplied` 轮询 + `ensurePayableEnv` H5 守卫 + `requestWechatPayment` 统一调起）；订单明细页（credits）展示支付订单列表并支持**继续支付**（`GET /pay/orders` + `POST /pay/orders/:no/pay-params`）。服务端 `pay-reconcile-sweep` 定时任务（5 分钟）扫「paid 未 applied / created 超时」自动补账或关单；运营侧（后台「订单」页 + 用户详情均已接 UI）：卡单清单 + 手动补账（`/admin/payments/:no/reconcile`）、**全额退款** `POST /admin/payments/:no/refund`（owner/master；幂等回收权益：模块停用/凭据收回/套餐立即到期+追回未消耗算力）、订单搜索（单号/用户名/手机号）/分页/CSV 导出（`GET /admin/payments/export`，owner/master，审计留痕）、手动开通套餐/模块（`POST /admin/users/:id/plan`、`POST/DELETE /admin/users/:id/modules[...]`，source='admin'）。回调验签的平台证书支持**自动下载/轮换**（`GET /v3/certificates` AEAD 解密后按 serial 缓存 12h，未知 serial 强刷；`WECHAT_PAY_PLATFORM_CERT` 静态证书为兜底）。**降级守卫**：活跃付费套餐买不同套餐仅放行「同套餐续费 / 月→年折算升级」（折算单付款前有实付/抵扣确认弹窗），其余 409 `PLAN_SWITCH_BLOCKED`；企业版（price<0）调整仅走运营。本地联调 `npm run pay:mock` 起 mock 微信网关（含下单/查单/关单/退款端点，`WECHAT_PAY_BASE` 指向），完整真实加解密链路离线走通（见 §11）。前台显示为「方案与产出额度」，企业版 `creditsPerMonth<0` 记为不限量（余额 `-1`，产出不扣减）。
 - **智能体开通**：`free`/`metered` 智能体无需开通即可用；`unlock` 智能体需用户用算力购买（`POST /agents/:key/purchase`）或运营后台开通后才能对话/产出，未开通产出返回 `403 AGENT_LOCKED` 且不落会话。
 - **离线兜底**：server 模式下后端不可达时，登录回退为 `local-<手机号>` 本地会话，保证可体验（无服务端数据）。
 - **退出登录**：「我的」页底部。
@@ -124,18 +124,19 @@ repo/
 ### 7.1 页面与导航
 Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-tab-bar`）：
 
-底栏顺序对齐 `docs/[FABLE5]CHAT_FIRST_REDESIGN.md` v1.3：**问策 · 军情 · 锦囊 · 主公**（四个平铺 tab，无中间凸起按钮；`store.tab` 索引 0..3 按此顺序）。落地页为 `pages/counsel`（进小程序默认落到首位「问策」tab，总军师对话本体，含入帐引导流；登录门/建档弹层由本页承接）。
+底栏顺序对齐直角案卷交互原型：**问策 · 军情 · 军令 · 锦囊 · 主公**（五个平铺 tab，无中间凸起按钮；`store.tab` 索引 0..4 按此顺序）。落地页为 `pages/counsel`（进小程序默认落到首位「问策」tab，总军师对话本体，含入帐引导流；登录门/建档弹层由本页承接）。
 
 | Tab | 页面 | 说明 |
 |---|---|---|
-| 问策 | `pages/counsel` | 总军师对话本体（落地页）：军师消息无气泡直排纸面（`.t-advisor`）、用户消息右对齐浅面小气泡、选择笺 choices、请缨帖 proposal、报告卡；含入帐对话式引导（状态机 GREET→…→DONE）；头部「往来」进 `pages/sessions` 历史列表 |
+| 问策 | `pages/counsel` | 总军师对话本体（落地页）：军师消息无气泡直排纸面（`.t-advisor`）、用户消息右对齐浅面小气泡、选择笺 choices、请缨帖 proposal、报告卡；含入帐对话式引导（状态机 GREET→…→DONE）；头部「往来」进 `pages/sessions` 历史列表。（main 侧「问策」的专业参谋分组/搜索/OnboardSheet/NextStepCard 等入口收编于此 tab） |
 | 军情 | `pages/home` | 一屏五章（章法排版，非卡片堆叠）：玄墨断语卡（全站唯一深底）→ 三势 → 今日军令卡（→ `pages/studio` 详情）→ 各线督办 → 麾下（五位创作军师，「点将 ›」→ `pages/roster`） |
+| 军令 | `pages/junling` | 直角案卷「今日战役」：把判断拆成今天能打的仗，逐条打卡 / 数据回填 / 总军师督战（done/total 双格 + 今日战役任务卡）；军令详情入 `pages/studio`（回填/周计划/复盘） |
 | 锦囊 | `pages/satchel` | 报告书架：完整履历 `packages/work/dossier` / 全年天时 `packages/work/calendar` 两卷宗并列 + 过滤笺 + 报告折子流（朱砂点未读态） |
 | 主公 | `pages/profile` | 用户卡 + 钱粮卡 + 细线菜单（个人档案/我的案卷/资料库/数据源/钱粮明细/战略账本/送你一卦/军师社群/本命色/设置）+ 社群卡 |
 
-非 Tab 次级页：`pages/roster`（点将堂，`navigateTo`，统帅卡 + 出谋八将 + 出活五将）、`pages/sessions`（往来历史页，仅历史 + 搜索）、`pages/studio`（军令详情页：回填/周计划/复盘，摘出 tab）。`pages/thinktank` 已删（智库并入军情/锦囊）。
+非 Tab 次级页：`pages/roster`（点将堂，`navigateTo`，统帅卡 + 出谋八将 + 出活五将）、`pages/sessions`（往来历史页，仅历史 + 搜索）、`pages/studio`（军令详情页：回填/周计划/复盘，摘出 tab）。`pages/thinktank` 已删（智库并入军情/锦囊）。chat/brief/settings 已迁入 `packages/main` 分包（主包瘦身，路径 `/packages/main/{chat,brief,settings}/index`）。
 
-非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡 + 参谋室协同导轨「派单/回总军师/转成军令/补上下文」+ 成果卡下「认可方案→存方案库+生成本地案卷军令→去执行」）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；我的案卷（列表/详情，前台名词=案卷，工程模型仍是 Project）、方案库、方案详情、资料库、数据源绑定、模块市场、送你一卦、军师社群已拆到 `packages/work/*` 分包（`projects`、`project`、`library`、`report`、`knowledge`、`credits`、`bindings`、`market`、`gift`、`community`），由 `pages/profile`、`pages/thinktank` 与 `pages/chat` 预加载。
+非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡 + 参谋室协同导轨「派单/回总军师/转成军令/补上下文」+ 成果卡下「认可方案→存方案库+生成本地案卷军令→去执行」）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；我的案卷（列表/详情，前台名词=案卷，工程模型仍是 Project）、方案库、方案详情、资料库、数据源绑定、模块市场、送你一卦、军师社群已拆到 `packages/work/*` 分包（`projects`、`project`、`library`、`report`、`knowledge`、`credits`、`bindings`、`market`、`gift`、`community`），由 `pages/profile`、`pages/thinktank` 与 `pages/chat` 预加载。完整履历 `packages/work/dossier` 的个人档案/我的页入口必须反馈分包跳转失败和导航锁等待状态；页面读取失败展示可重试状态并走 `handleApiError`，首次无缓存但已有档案线索时直接自动生成，不得被手动按钮的 `ready` 门禁拦截。
 
 静态目录数据：`src/data/operatingSystem.ts`（模块市场/Skill 市场/知识分类框架/数据源目录/对话引导，均为能力目录与引导态文案，费用口径 `💎xN`）、`src/data/council.ts`（参谋室常驻军师/派单建议/快速起手式/`ADVISOR_ALIAS` 军师花名：玄衡/观澜/青衍/鸣璋/照微/云枢…）。**这两个文件不得写入用户业务结论**——用户数据一律走 api（会话/报告/知识/项目/`me.understanding`）。
 
@@ -151,9 +152,9 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
   - **overlay 同步不用轮询**：底栏状态同步依赖 `eventCenter` + 页面 `useDidShow` + `hideNativeTabBarOnly()` 短延时兜底；不要恢复 250ms/1500ms 常驻 interval。
   - **顶部安全区统一组件化**：Tab 页用 `Screen topInset`，非 Tab 自定义头用 `SafeHeader`；五个 tab 的标题区统一加 `tab-page-head`，安全区让位只由 `Screen` 的 `.nav-inset` 负责，页面内不要再单独测胶囊或写 `env(safe-area-inset-top)`；不要加伪状态栏 `9:41`。
   - **组件样式导入顺序统一**：同一页面同时用 `Icon` 与 `SafeHeader` 时，保持 `Icon` import 在前、`SafeHeader` import 在后，避免 Taro/mini-css-extract-plugin 在 common chunk 报 CSS order warning。
-  - **对话键盘按真机口径写**：`pages/chat` 保持页面 `disableScroll: true`、输入 `adjustPosition={false}`、`alwaysEmbed`、整条 `.box` 触发 focus、`onInput` 返回 `e.detail.value`、`onConfirm` 使用事件值发送，并由 `onKeyboardHeightChange` 写 `--keyboard-height` 让 `.chat` 自己压缩底部空间；等待回复 `busy` 时输入框必须真正锁定（不 focus、不更新草稿、不发送、不清空当前内容）；用户消息、AI 回复、记忆提示与成果卡必须支持长按复制（小程序自定义气泡不能依赖系统文本选择）；AI 普通文本回复用无卡片正文样式并开启文字选择复制，用户输入保留右侧气泡卡片。
+  - **对话键盘按真机口径写**：`packages/main/chat` 保持页面 `disableScroll: true`、输入 `adjustPosition={false}`、`alwaysEmbed`、整条 `.box` 触发 focus、`onInput` 返回 `e.detail.value`、`onConfirm` 使用事件值发送，并由 `onKeyboardHeightChange` 写 `--keyboard-height` 让 `.chat` 自己压缩底部空间；Taro/微信首次渲染的 `style` 对象不得传 `undefined` 值（动态 CSS 变量给明确默认值，条件样式用空对象），否则运行时会在 `finalizeInitialChildren` 对 `undefined.toString()` 并整页白屏；等待回复 `busy` 时输入框必须真正锁定（不 focus、不更新草稿、不发送、不清空当前内容）；用户上滑查看较早历史、离底部较远时显示「回到最新」浮层按钮，一键回到对话底部，且避让输入区/引用行/键盘；用户消息、AI 回复、记忆提示与成果卡必须支持长按复制（小程序自定义气泡不能依赖系统文本选择）；AI 普通文本回复用无卡片正文样式并开启文字选择复制，用户输入保留右侧气泡卡片。
   - **登录/401/网络错误有统一入口**：用户动作前先检查登录态；401 必须清用户态并弹登录/回首页，不能吞成空态或“产出失败”；默认首页 `pages/sessions` 自己承接 `Login`，在本页 401 时只打开登录弹层，不再反复 `reLaunch` 自己，且未登录/退出态仍要加载公开军师注册表并保留 `DEFAULT_AGENTS` 兜底，避免真机旧 token 失效后对话页清空；`Taro.request` reject 要按真实原因区分 `timeout/offline/domain/ssl/dns/unreachable/cancelled/network` 并映射成用户可读提示，合法域名/API 域名等排查细节只放 `reason/technicalMessage`/日志，不直接展示给用户；HTTP 408/504、429、5xx 也要给用户友好但真实的原因；需要登录的数据页 catch 后先调 `handleApiError`；普通聊天默认走 `/generate` 真流式，小程序用 `enableChunked/onChunkReceived`，H5 用 `fetch` ReadableStream；服务端只对用户输入做前置内容审核，违规输入直接 `MODERATION_BLOCK` 拦截，模型输出不再走阻塞式审核，完成后仅做 trace/禁用词审计；OpenAI/Claude 普通聊天在无工具调用时优先走 provider 原生 streaming，Dify、工具循环、mock 或不支持 stream 的兼容网关回退为完整结果分块；总军师 on-demand 普通问答也走 token 流，`/generate-sync` fallback 同样按意图分流，只有明确“生成方案/报告/成果卡/纪要/军令/出报告/战略体检”等成果请求才走强制结构化成果路径（`generateDeliverable`），不得再进入 adaptive 可选工具路径；OpenAI/Claude provider 返回空文本时必须按 AI 服务异常处理，不得伪装成固定追问；结构化工具返回的 `sections` 必须经 `normalizeDeliverableSections` 归一化，非数组/字符串/对象都不能让报告请求变成 503；模型未调用工具但返回普通长文时要转成报告分段，避免直接降级模板；报告成果不得把运行环境、Git 仓库、代码库、IDE、文件系统或 Codex 工作区当成客户资料，gateway 命中“当前工作区/Git 仓库/代码仓库/上传到工作区”等工程语境时必须替换为业务兜底成果并标 `degraded`；前台 degraded 提示不得暴露“结构化产出/降级模板”等技术术语；明确成果请求（如出报告/重新出报告/战略体检/生成方案）与带 `deliverableKey` 的成果型顾问必须按本次 `agentKey` 配置判定并走 `/generate` report SSE：收到 `meta` 先渲染 ReportCard 骨架，`begin/section/footer/done` 增量更新当前卡片，当前页不得只停在全局 thinking；只有 report 流无可渲染事件/传输失败时才回退 `/generate-sync`；普通聊天流成功仍必须收到可渲染 `token/chat` 事件，误收到 report SSE 时不要留下空回复；报告卡「网页版」在小程序内必须跳转 `packages/work/webview` 直接打开自有域名 `/api/r/:id`，web-view/navigate 失败只提示重试，不得自动复制链接。
-  - **H5 兼容不污染小程序路径**：H5 自定义底栏只放 `app.h5.tsx/app.h5.scss`；小程序继续走真实 `page` 节点 + `src/custom-tab-bar`，不要把 H5/weui 兼容样式混进小程序原生 tabbar 路径。
+  - **H5 兼容不污染小程序路径**：H5 自定义底栏只放 `app.h5.tsx/app.h5.scss`；小程序继续走真实 `page` 节点 + `src/custom-tab-bar`，不要把 H5/weui 兼容样式混进小程序原生 tabbar 路径。H5 底栏通过 portal 挂到 `document.body`，避免成为 `.taro_router` 最后一个直接子节点后被 Taro 路由隐藏规则误判，后续不要把固定底栏直接放回 `#app` 路由容器。
   - **主包持续控重**：项目工作台、项目详情、方案库、报告等非首屏工作流留在 `packages/work` 分包；新增重页面优先分包并在入口页配置预加载，除非确实属于首屏主路径。
   - **真机排版防回退**：标题类 `<Text>` 保持块级化；两列网格用 `space-between + 48.5%`；Markdown 内容用 `MarkdownText`；等待模型返回要显示对话流思考气泡；全屏弹层、色盘、商业文案按下方约定处理。
 - **小程序历史坑只维护一份**：顶部安全区、原生 tabbar、overlay、键盘、登录、H5 样式隔离、网络错误和分包控重以本清单为准；不要在页面里另写一套平行实现。
@@ -161,7 +162,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **首页标题宋体化**：`pages/home` 通过 `Screen className="home"` 局部定义标题字体栈，品牌名、问候语、今日献策正文、对话卡提问、分区标题与卡片标题使用宋体优先；不要为此改全局 `--serif`，避免影响其它页面。
 - **战局页首屏层级**：`pages/home`（战局）的军师判断卡是**纯展示深色卡**（点按整卡进入总军师对话），不要往里塞输入框/chips——对话入口在底栏首位「对话」tab；避免把战局页做成权益/推荐墙。底栏保持浅纸底与明确选中态，避免回退成强玻璃装饰。
 - **前台商业文案克制**：面向用户的主路径不要写成“赠送 / 付费解锁 / 充值 / 最受欢迎 / 灵活付费”这类促销口吻；统一用「可用」「已启用」「专项能力」「产出额度」「方案与额度」「常用配置」表达，让用户感到是在调用工作台能力，而不是被推销。智能体费用展示用 `💎xN` / `💎xN/次`，不要写「启用需 N 点」「每次产出 N 点」；后台/代码契约仍可保留 `free/unlock/metered/credits` 等技术术语。
-- **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；AI 普通回复传 `selectable` 以支持用户选择文字复制；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
+- **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；有序列表要兼容模型常见的松散写法（条目间空行且都写 `1.`），连续渲染为 1/2/3…；AI 普通回复传 `selectable` 以支持用户选择文字复制；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
 - **前台记忆披露**：对话页用「军师印象」包装 Agent Memory（WO-01 名词统一，原「专属理解」；记忆条/记忆披露/@引用分组一致）；我的页只放「军师档案」菜单入口，详情页展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题），不要在我的页首页直接平铺大段内容。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事或展示 `用户123/企业123` 这类占位名；资料不足时让用户进入对话访谈，由军师先问 1-3 个简单问题，不要先分析旧报告或展开诊断。后端真实记忆开关见 §9。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **本命色联动**：`--green/--green-hero/--gold/--gold-soft` 等业务主色 token 必须派生自 `--accent`，战局 hero、智库上传、我的用户卡、执行行动色和底栏选中态都要跟随设置里的本命色；`--danger`、正文墨色、纸张底色等语义/中性色保持固定。默认本命色=墨绿（`data/colors.ts` 首位 + `store` 默认 + 服务端 `benmingColor` 默认 `green`）。
@@ -204,6 +205,8 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `POST /cards/:kind`（daily/calendar/fate） | B 级卡片发布 → 可分享 htmlUrl：每日战报（真实账本） · 天时日历（命盘逐月+谶语） · 天命速写（送卦：朋友生辰现算不落库） | 是 |
 | `GET /sayings/today` | 每日献策 | 否 |
 | `GET /plans` · `POST /plans/:id/purchase` · `POST /plans/:id/order` · `POST /pay/wechat/notify` | 套餐列表 · 演示购买/切换套餐并入账算力 · 微信 JSAPI 下单 · 微信支付回调幂等入账 | 列表否 · 购买/下单是 · 回调否 |
+| `GET /pay/orders/:outTradeNo` | 支付订单状态轮询（`PayOrderStatus`，仅本人订单）：未发放且配齐支付时先主动查单补账（`reconcileOrder`），`appliedAt` 有值即权益到账 | 是 |
+| `GET /pay/orders` · `POST /pay/orders/:outTradeNo/pay-params` | 我的支付订单列表（`PayOrderListResult`，订单明细页）· 继续支付：对未过支付时限（2h−10min）的 created 单重签 `wx.requestPayment` 参数（`PayRepayResult`） | 是 |
 | `GET /sessions` · `GET/DELETE /sessions/:id` | 会话列表/详情/删除 | 是 |
 | `POST /generate-sync` | 同步产出兜底（weapp+H5 通用）·接 `projectId`/`refs` | 是 |
 | `POST /generate` | SSE 流式产出（H5 + weapp chunk 真流式）·接 `projectId`/`refs` | 是 |
@@ -214,8 +217,17 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `GET/POST /projects` · `GET/PUT/DELETE /projects/:id` | 项目主线（详情聚合会话/报告/知识） | 是 |
 | `GET /reports` · `GET /reports/:id` · `GET /reports/:id/version` · `GET /reports/:id/diff` · `POST /reports` · `DELETE /reports/:id` | 版本化报告（历史/某版/两版 diff/存版） | 是 |
 | `GET/POST /knowledge` · `GET /knowledge/search` · `DELETE /knowledge/:id` | 知识库（摄取/混合检索/删除） | 是 |
+| `POST /forces/refresh` · `POST /battle/commit` | V7-04 三势结构化刷新（限频 3/日）· 认可判断一键生成军令与报告（5 分钟幂等） | 是 |
+| `PUT /casefile/goals` | V7-10 目标阶梯局部更新（3-5年/年度/季度/本周） | 是 |
+| `GET /knowledge/pipeline` · `POST /knowledge/organize` · `POST /knowledge/confirm` · `POST /knowledge/deep-organize` · `POST /knowledge/upload?staged=true` | V7-06 智库三段管道：待整理/已优化/知识库视图 · AI 粗分去重 · 确认入库(切片嵌入) · 深度整理(SKU 门禁) · staged 上传(不嵌入、对检索不可见)；历史临时文件名在展示响应中归一为可读名称 | 是 |
+| `GET /data-sources` · `POST /data-sources/:key/upload` · `POST /data-sources/:key/request-auth` | V7-07 数据源状态机 · 上传替代资料 · 预约授权登记 | 是 |
+| `GET /modules` · `POST /modules/:key/enable` · `PATCH /modules/:key` | V7-08 能力/模块中心：目录×用户态 · tier 分流启用(free/credits/sku/member) · 隐藏/排序 | 是 |
+| `GET /reminders` | V7-11 提醒日历（今日军令截止/20:30 复盘/周五周复盘，纯读派生） | 是 |
+| `GET /skus` · `POST /skus/:key/order` | V7-12 单次付费商品目录(公开) · JSAPI 下单(挂 skuKey，回调复用 markPaidAndApply 幂等发放) | 列表否·下单是 |
+| `GET /me/workbench` · `GET /me/service` · `GET /search?q=` | V7-13 档案工作台(bizCategory 真实计数) · 社群服务分配 · V7-14 跨域搜索(军师/会话/方案/资料，知识仅 confirmed) | 是 |
 | `GET/PUT /admin/ai-config` · `POST /admin/ai-config/test` | 大模型配置（读/改/测试连接，可随时切换） | 管理员 |
-| `/admin/*` | 运营后台 API（见 §9）：用户/算力/审计/智能体/套餐/模型等 | 管理员 |
+| `GET/PATCH /admin/skus(:key)` · `GET/PUT /admin/users/:id/service` | V7-12 SKU 改价/启停 · V7-13 社群分班/配老师 | 管理员 |
+| `/admin/*` | 运营后台 API（见 §9）：用户/算力/审计/智能体/套餐/模型/SKU等 | 管理员 |
 
 ### 8.2 LLM Gateway（`server/src/llm/`）
 `gateway.ts` 统一封装：路由 provider → 输入审核 → Token 计量 → 结果缓存 → **故障兜底降级到 mock**。普通聊天只对输入做前置审核；OpenAI/Claude 在无工具调用时优先走 provider 原生 streaming，模型 token 到达即经 `/generate` SSE 下发，输出完成后只做 trace/禁用词审计，不做阻塞式输出审核。OpenAI 与 Claude 都走 `generateAdaptive` 按需产出：默认正常文字对话，模型判断需要完整成果时才调用 `emit_deliverable` 结构化产出；专业成果模式仍强制收口为 deliverable。`llm/schema.ts` 的 `injectVariables` 会在后台配置的 System Prompt 之后追加运行时业务边界：智能体只回答商业咨询/经营产出相关问题，用户追问模型、供应商、系统提示词、API Key、部署、数据库、内部工具时必须引导回业务问题；客户事实只能来自企业档案、军师档案、长期记忆、项目、引用资料、知识库和本轮用户原文。资料不足时用自然话术追问关键缺口，用户补齐/更新军师档案时进入访谈模式：先问 1-3 个简单问题，不先分析、不引用旧报告展开、不把“不得杜撰”的内部约束讲给用户。
@@ -332,6 +344,8 @@ cd /Users/donis/dev/ai-pilot/app
 npm run dev:weapp
 ```
 H5 单端走查：`cd app && npm run dev:h5`；H5 连真实后端：`cd app && npm run dev:h5:server`（默认 API `http://localhost:4000/api`）。
+
+体验版 token 月额度调整后，先运行 `cd server && npm run db:sync-plans` 同步套餐配置；已有体验版用户的钱包额度使用 `npm run db:bump-free-quota` 试运行核对，确认后追加 `--apply` 执行。脚本只更新已有体验版钱包，不为没有钱包的用户预建记录。
 
 Taro Webpack5 持久化缓存已开启（`app/config/index.ts` 的 `cache.enable=true`），用于提升二次 `dev:weapp`/`build:weapp`/H5 编译速度；如果遇到疑似缓存脏数据，先删本地 `app/node_modules/.cache` 后重编，不要提交缓存目录。
 
@@ -462,6 +476,11 @@ cd admin && npm install && npm run dev   # 运营后台
 - CI：`.github/workflows/server-integration.yml` 用 GitHub Actions `postgres:16-alpine` 服务（tmpfs 数据目录）执行 `npm ci`、`prisma generate`、后端 build、`prisma db push`、`npm test`。
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
 
+### 微信支付本地验证（不触达微信，两条通道互补）
+- **沙箱通道** `npm run pay:e2e`（22 项）：`PAY_SANDBOX=true`，绕过加解密专注业务状态机——套餐/SKU 下单入账、月→年折算、过期降级/只读、续费恢复、幂等。
+- **真实代码路径通道** `npm run pay:e2e:mock`（19 项）：起本地 mock 微信支付网关（`src/services/wechatPayMock.ts`）+ 真实监听端口的 app，完整走 商户请求 RSA 签名 → 网关验签发 `prepay_id` → `paySign` 可验 → 官方格式加密回调（APIv3 AES-256-GCM + 平台私钥签名）→ `/pay/wechat/notify` 验签解密幂等入账 → 重复回调幂等 → 篡改签名 401 → 回调丢失时 `GET /pay/orders/:no` 主动查单补账 → 他人订单 404。同链路已入 `npm test`（`test/wechatPayMockFlow.test.ts` 14 用例，另覆盖：降级守卫 409、对账 sweep 自动补账/关单、admin 卡单清单与手动补账、回调金额不一致拒绝入账、条款快照发放、close-on-supersede、订单列表/继续支付/超时 409、全额退款+权益回收+幂等、下单频控 429、admin 手动开通套餐/模块、平台证书自动下载轮换验签、admin 搜索/分页/CSV 导出）。mock 网关模拟 下单/查单/关单/退款/平台证书下载 五个 v3 端点。
+- **手动联调**：`npm run pay:mock` 独立起 mock 网关（默认 `:9860`，密钥持久化 `server/.paymock/` 已 gitignore），启动时打印整套可粘贴进 `server/.env` 的 `WECHAT_PAY_*`（含 `WECHAT_PAY_BASE` 指向 mock）；下单后 `curl -X POST http://127.0.0.1:9860/mock/pay/<outTradeNo>` 模拟用户付款触发真实格式回调。
+
 ### 端到端隔离验证（本地 Postgres + mock provider）
 已用 curl 跑通 **19/19**：无 token→401、新号建号、A/B token+租户不同、A 建档/产出/存库后 A 有数据而 **B 全空（隔离）**、A 复登 token 不变且 onboarded 持久化、demo 号可登录、非法 token→401、非法手机号→400。
 
@@ -521,10 +540,13 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
+- **测试库纪律缺口（2026-07-11）**：仓库无 `.env.test`，`npm test` 直接读 `.env` 的 `DATABASE_URL`（可能指向 schema 落后的 dev 库 `junshi`，`seedBaseline` 崩溃会被误判为"断言陈旧"）。跑测试前请确认指向已 `prisma db push` 的 `junshi_test`。待办：加 `.env.test` 或在 test 脚本内固定测试库 + push 前置。
+- **产品决策记录（2026-07-11）**：`docs/[FABLE5]DECISIONS_2026-07-11.md` 已拍板 D-1 多入口+来源归因 / D-2 军师收编 4+1 / D-3 七参数（记忆用户级共享、复盘日周月、健康度 LLM 估测水位约束框架、报告分享转图片、保底额度可配置默认 6、生态纯跳转）。与旧规格冲突以决策文档为准；全局复审待办清单见 `docs/[FABLE5]REVIEW_2026-07-11.md`（**批次一 P0 五项 + 批次二 P1 七项 + D-8/D-10/D-11 + WO-09 端到端接线均已完成**；**批次三亦已完成**（D-1 归因/D-3-3 健康度/D-3-4 转图片/D-3-7 生态跳转/WO-08~14 全部管道/文案 sweep/主包瘦身，计划见 `docs/[FABLE5]BATCH3_PLAN.md`），仅剩该计划「明确不做」清单挂 backlog）。遗留注意：① `/casefile/review` 直连 API 仍接受 quarter/year/team 层（前端无入口暂不 clamp）；② **D-3-7 运维前提：EcoTool 目标小程序（数字人等）须与本小程序同一微信开放平台主体关联，`navigateToMiniProgram` 才可用**，appId 由运营在 admin「生态工具」录入；③ 批次三 schema 新增 ActivationEvent/EcoTool/Prescription.followupAt/PaymentOrder.attrSource（纯加法），prod 部署时 db push 带上并可跑 `prisma/seedBenchmarks.ts` 种子；④ 报告分享图/周报卡等 canvas 出图需真机抽查；⑤ estimateHealth 的 product/brand 维暂无服务端信号源常态 na。注意存量已排盘用户的 `NatalChart` 数据在命理关闭后仅停止读取展示、未物理清除，如合规要求下架历史命盘数据需另开任务。
 - **小程序方向调整（2026-07-05）：从「减法」改为「精细打磨现有功能」**。原 `docs/[FABLE5]*` 三份文档是「先减法后加法」方案；产品侧判断"功能都是客户想要的"，**不再做减法**，改为按文档把各功能逻辑捋顺、补全、打磨。已执行的处置：
   - **保留**：WO-01（名词统一：前台收敛「案卷/方案/军令/资料」，记忆/专属理解→军师印象；属打磨）+ WO-03（冷启动段位卡延迟曝光 `streak≥3‖usageDays≥14`、空态导流 `data/emptyStates.ts`、战局「下一步」卡；属打磨）。
   - **已回滚**：WO-02 的真减法——市场货架（thinktank 能力目录 + market 页 + profile 模块管理 + sessions 快捷卡 + CHAT_GUIDES 入口）、战局三势卡（市势/人势）+ 关联模块、送你一卦，全部恢复；`market`/`gift` 恢复为正常可达入口。
   - **打磨方案已产出**：`docs/[FABLE5]POLISH_PLAN.md`（review 工作流 12 功能区 × 诊断 × 对抗性复核，79 条已核实 finding + 4+1 批次 + 7 个产品拍板点 + 2 条 P0 命理合规红线）。后续打磨逐单对照它执行。
+  - **V7 新版效果图对齐已落（2026-07-09，V7-03~15，跳过 V7-01/02）**：按 `docs/[FABLE5]V7_EFFECT_ALIGN_PLAN.md` 实现——三势结构化 + `battle/commit`、军令结构化拆解 + 详情页、智库三段管道（`KnowledgeItem.stage` 生命周期）、`Sku/UserDataSource/UserModule/ServiceAssignment` 四张新表、目标阶梯、提醒补全、跨域搜索、未读数/sys-card；对外「算力」文案统一（💎 保留）。后端 449 例全绿、server+app tsc 0 错、`build:weapp` 通过、`pay:e2e` 22/22（含 SKU 段）；server 已上线（`42f5c9c`）+ SKU 目录已 `admin:sync-content`。运营后台 SKU 改价/启停 + 社群分班/配老师已接（`/admin/skus`、`/admin/users/:id/service`）。**tab 样式/菜单名 by-design 未改**。**未含**：小程序前端发布（独立渠道，走微信 DevTools）、真机走查、真实 OAuth 数据源、深度整理 LLM 加强、第 7 位军师·明止（D-9 不落地）。详见 CHANGELOG 2026-07-09。
   - **打磨①已落（P-4）**：送你一卦第三人生辰不落库、无公开链接，改小程序 canvas 图片交付 + 同意勾选（见 CHANGELOG 2026-07-05）。**待真机复验 canvas 出图**；server 集成测试需带 Postgres 环境跑。
   - **命理合规 P-3（下一条 P0，仍待）**：加全局 `AiSetting.tianshiMode(full/downgrade/off)` 凌驾 believe，前端 home 天势卡/calendar/gift 读同一开关（downgrade 去八字/命宫术语、off 隐藏），切换免发版、先于提审接好。
   - **其余打磨待办**：prompt 去机制化（A-1/P-12，动生产 V6.0 prompt）、UserJourney 诊断轮次持久化（F-5）、账本 App 页+verify 入口+最小样本（F-8/P-2）、复盘周期聚合+grace 全层保底（A-4/A-8）、报告脱敏分享等——见 POLISH_PLAN §3 批次。
@@ -534,7 +556,7 @@ mock 可随时预览；**正式上传/审核**还需：
 - 自有登录态支持 JWT（`services/userToken.ts`，HS256）：配 `APP_JWT_SECRET` 后登录签发 JWT、`resolveUser`/审计/admin role/entitlement 统一 `verifyUserToken` 校验；未配则回退历史 `token=userId`，`APP_JWT_REQUIRED=true` 可强制只认 JWT。短信强制校验开关（`SMS_REQUIRE_CODE`）已就绪，生产置 true 即可。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 输入审核与缓存已抽象可插拔：审核 `services/moderation.ts`（keyword 默认 / `MODERATION_PROVIDER=http` 接合规服务，当前只用于用户输入前置拦截）；缓存 `services/cache.ts`（内存默认 / 配 `REDIS_URL`+ioredis 切 Redis）。计量台账仍为演示级，生产接真实计费台账。
-- 套餐购买已接微信支付 v3 脚手架（`services/wechatPay.ts` + `PaymentOrder` 状态机 + `routes/pay.ts` 回调）：配齐 `WECHAT_PAY_*` 后走 `/plans/:id/order` 下单 + `/pay/wechat/notify` 回调，`markPaidAndApply` 用同订单事务级 advisory lock + `appliedAt` 终态锚点做幂等入账，套餐权益发放复用同一 Prisma transaction client，防重复/并发回调双发；未配齐回退 `/plans/:id/purchase` 演示购买。仍待：平台证书自动下载/轮换、对账兜底（主动查单）、退款。
+- 套餐购买已接微信支付 v3 脚手架（`services/wechatPay.ts` + `PaymentOrder` 状态机 + `routes/pay.ts` 回调）：配齐 `WECHAT_PAY_*` 后走 `/plans/:id/order` 下单 + `/pay/wechat/notify` 回调，`markPaidAndApply` 用同订单事务级 advisory lock + `appliedAt` 终态锚点做幂等入账，套餐权益发放复用同一 Prisma transaction client，防重复/并发回调双发；未配齐回退 `/plans/:id/purchase` 演示购买。P0~P2 已落地（2026-07-14，详见 §6 支付段与 CHANGELOG）：主动查单对账（轮询自愈 + `pay-reconcile-sweep` 定时批扫 + admin 手动补账）、回调金额/appid/mchid 校验、降级守卫、前端统一到账确认、条款快照、微信 close-order 关陈旧单、全额退款+权益回收（后端）、订单列表/继续支付、proration 事前确认、H5 守卫、下单频控、套餐归因、支付到账订阅消息、admin 手动开通套餐/模块（后端）。admin 前端 UI（退款按钮/开通套餐/模块管理/订单搜索/分页/CSV 导出）与平台证书自动下载/轮换（`GET /v3/certificates` 按 `Wechatpay-Serial` 缓存选证书，env 静态证书为兜底）已于同日补齐。仍待：部分退款（当前仅全额）、发票。注意：PaymentOrder 新增 `snapshotJson/refundId/refundedAt/refundReason` 列（纯加法），prod 部署带 `db push`；支付到账订阅消息需在微信后台申请模板并配 `WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID`。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
 - **pgvector 路径已实现但未真库验证**：本地无扩展，默认 `PGVECTOR_ENABLED=false` 走内存余弦（已验证）；上真库执行 `npm run db:pgvector` 并置 true 后需端到端验一遍（升级路径 1）。
 - **模型密钥加密存库**：`services/secretBox.ts`（AES-256-GCM）对 模型/Dify/技能库 密钥写时加密、读时解密，配 `APP_ENCRYPTION_KEY` 后生效（未配=透传明文兼容演示），存量跑 `npm run secrets:encrypt` 回填。仍待：密钥接 KMS/密管 + 轮换策略（升级路径 8）。
@@ -545,7 +567,7 @@ mock 可随时预览；**正式上传/审核**还需：
   1. **拆军令 LLM 结构化升级**：执行闭环已服务端化（`Casefile/CasefileOrder/CasefileMetric` + `/casefile*`，M0 PR-EX 完成）；「认可方案→拆军令」目前仍是分节启发式提取 + 整体 aligned=true 标注，待升级为 LLM 结构化拆解与逐条对齐性标注（M2 复盘阶段接入，配合对齐率计算）。
   2. **主军师身份 prod 迁移已完成（2026-07-03）**：prod `agent` 表已迁移——general=V6.0 全文（用户 07-03 晨手动灌入+发布快照）+ 新主线 greet（草稿与 `agent_version` 快照同步）；strat 卸下 V6.0 回归「战略诊断官」专业模板并重新上架（`skillsConfig.deliverableMode='on-demand'` 与 deliverableKey 保留未动）。后端代码已通过 `scripts/deploy-prod.sh` 发布 `4902b0b` 到线上，`prisma db push` 纯加法完成（9 张新表 + `Session.mode`），`survey_question` 已定向 UPDATE 为年营收四档与美业/大健康拆分后的行业列表，未重跑 seed。备份：`/tmp/junshi-db-backup-20260703-172937.dump`（全库，已拉回本地）。
   3. **总军师派单引擎（consult_specialist）未建**：调度白名单目前语义=「unlock 已解锁 → 可进专属线程深聊」（`assertAgentAccess` 既有行为）；总军师自动派单/结论回流（多 agent 编排 + 未解锁 specialist 标记 skipped）待建 orchestrate 层时实现。~~同期把 on-demand 成果产出移交 general~~ **已完成（2026-07-03 P0-3）**：general 配 `deliverableKey='战略方案'` + `skillsConfig.deliverableMode='on-demand'`（注册表 `data/agents.ts` + `prisma/seed.ts` + 测试基线 `test/helpers.ts` 三处同步；模板在 `data/deliverables.ts`，段名对齐案卷提取启发式——「30 天行动军令」拆军令、「现在不能做」提风险锁）——六轮主线聊成熟后总军师直接产出可采纳成果卡。当前分流：general 普通问答仍逐 token 流式；明确成果请求走 report SSE 卡片流，必要时回退 `/generate-sync`。**生产迁移注意**：`agent` 行与已发布 `agent_version` 快照两处都要 UPDATE 这两个字段。
-  4. **B 级卡片剩余 9 张 + A 级报告模板待做（M4 PR-15 第二批）**：已上线 每日战报/天时日历/天命速写 三张（`services/cardHtml.ts`）；剩余 周/月/季战报、年度里程碑图、紧急决策推演卡、晋升卡、性格操作手册卡、定位一页纸、十二问诊断卡 + A 级七章报告模板——其中战报类依赖对话内容沉淀（复盘产出结构化），晋升卡/性格手册数据已就绪可先做；卡片骨架语义参考 Notion 原稿（须按 §0 #10 去米诺）。另：智库整理管道（PR-20：待整理区→AI 粗分→深度整理付费→确认入库）未开工。
+  4. **B 级卡片剩余 9 张 + A 级报告模板待做（M4 PR-15 第二批）**：已上线 每日战报/天时日历/天命速写 三张（`services/cardHtml.ts`）；剩余 周/月/季战报、年度里程碑图、紧急决策推演卡、晋升卡、性格操作手册卡、定位一页纸、十二问诊断卡 + A 级七章报告模板——其中战报类依赖对话内容沉淀（复盘产出结构化），晋升卡/性格手册数据已就绪可先做；卡片骨架语义参考 Notion 原稿（须按 §0 #10 去米诺）。
   5. **排盘引擎 v1 已知边界**（`services/paipan.ts` 头注同步）：称骨暂缓（60 干支年表需可靠来源核对后再上，防带错表）；格局仅月令取格（不处理从格/化格）；身强弱/喜用为 v1 计分启发式；真太阳时只做经度平太阳时（未含均时差；城市→经度映射 `data/cityLongitude.ts` 覆盖 ~48 城，未命中不校正）；阴历闰月后端支持（负 month）但前端采集 UI 暂未提供闰月选项。战略档案 v1 回写触发点=认可方案+手动校准，逐轮 LLM 抽取待 M2 与决策日志共建抽取管道。引擎升级须提 `PAIPAN_ENGINE_VERSION` 并按版本复算，不得悄改历史命盘。
   2. **提醒与日历剩余项**：21:30 复盘提醒已接微信订阅消息（执行页授权 + scheduler 发送）；09:00 军令提醒、周五周复盘提醒、日历视图仍待建模与模板配置。
   3. **数据源授权绑定**：店铺（淘宝/抖店/小红书）、内容账号、企业工商（企查查类）、企微 CRM 均无真实接入，`packages/work/bindings` 为目录引导（仅财务表走资料库上传）。每类需独立 OAuth/采买与同步管道，且按 PRD 属可单独收费能力。

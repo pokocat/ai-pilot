@@ -8,10 +8,21 @@ import { metaRoutes } from './routes/meta.js';
 import { agentRoutes } from './routes/agents.js';
 import { profileRoutes } from './routes/profile.js';
 import { onboardingRoutes } from './routes/onboarding.js';
+import { quickscanRoutes } from './routes/quickscan.js';
+import { journeyRoutes } from './routes/journey.js';
+import { prescriptionRoutes } from './routes/prescriptions.js';
+import { brandKitRoutes } from './routes/brandKit.js';
+import { bizMetricRoutes } from './routes/bizMetrics.js';
 import { sayingRoutes } from './routes/sayings.js';
 import { sessionRoutes } from './routes/sessions.js';
 import { libraryRoutes } from './routes/library.js';
 import { casefileRoutes } from './routes/casefiles.js';
+import { battleRoutes } from './routes/battle.js';
+import { dataSourceRoutes } from './routes/dataSources.js';
+import { moduleRoutes } from './routes/modules.js';
+import { searchRoutes } from './routes/search.js';
+import { reminderRoutes } from './routes/reminders.js';
+import { communityRoutes } from './routes/community.js';
 import { decisionRoutes } from './routes/decisions.js';
 import { prophecyRoutes } from './routes/prophecies.js';
 import { cardRoutes } from './routes/cards.js';
@@ -19,9 +30,11 @@ import { projectRoutes } from './routes/projects.js';
 import { reportRoutes } from './routes/reports.js';
 import { reportShareRoutes } from './routes/reportShare.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
+import { knowledgePipelineRoutes } from './routes/knowledgePipeline.js';
 import { memoryRoutes } from './routes/memories.js';
 import { graphRoutes } from './routes/graph.js';
 import { planRoutes } from './routes/plans.js';
+import { skuRoutes } from './routes/sku.js';
 import { payRoutes } from './routes/pay.js';
 import { wechatRoutes } from './routes/wechat.js';
 import { adminRoutes } from './routes/admin.js';
@@ -73,10 +86,16 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(agentRoutes, { prefix: '/api' });
   await app.register(profileRoutes, { prefix: '/api' });
   await app.register(onboardingRoutes, { prefix: '/api' }); // 主动军师入帐状态机（Chat-First 重构）
+  await app.register(quickscanRoutes, { prefix: '/api' }); // 3 问速诊（WO-06：获客入口 → 初诊卡）
+  await app.register(journeyRoutes, { prefix: '/api' }); // 用户 journey 状态机（WO-07：全 tab「下一步」卡）
+  await app.register(prescriptionRoutes, { prefix: '/api' }); // 处方引擎（WO-12：诊断结论 → 生态工具的结构化桥）
+  await app.register(brandKitRoutes, { prefix: '/api' }); // 品牌资产包（WO-13：档案 → 数字人/短剧预填输入）
+  await app.register(bizMetricRoutes, { prefix: '/api' }); // 结构化经营周报（WO-10：报什么就能对比什么）
   await app.register(sayingRoutes, { prefix: '/api' });
   await app.register(sessionRoutes, { prefix: '/api' });
   await app.register(libraryRoutes, { prefix: '/api' });
   await app.register(casefileRoutes, { prefix: '/api' }); // 战略案卷（执行闭环：军令/回填）
+  await app.register(battleRoutes, { prefix: '/api' }); // V7-04：三势刷新 + 认可判断一键生成军令与报告
   await app.register(decisionRoutes, { prefix: '/api' }); // 决策日志（M2：记账/验证/准确率）
   await app.register(prophecyRoutes, { prefix: '/api' }); // 预言账本（M2：天机验证/命中率）
   await app.register(cardRoutes, { prefix: '/api' }); // B 级卡片（M4：每日战报/天时日历/天命速写）
@@ -84,9 +103,16 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(reportRoutes, { prefix: '/api' });
   await app.register(reportShareRoutes, { prefix: '/api' }); // 公开报告页(无鉴权,凭 id 分享)
   await app.register(knowledgeRoutes, { prefix: '/api' });
+  await app.register(knowledgePipelineRoutes, { prefix: '/api' }); // V7-06：智库三段式资料整理管道
+  await app.register(dataSourceRoutes, { prefix: '/api' }); // V7-07：数据源状态持久化 + 授权流程
+  await app.register(moduleRoutes, { prefix: '/api' }); // V7-08：能力/模块中心（目录×用户态 + tier 分流启用）
+  await app.register(searchRoutes, { prefix: '/api' }); // V7-14：跨域搜索
+  await app.register(reminderRoutes, { prefix: '/api' }); // V7-11：提醒日历（纯读派生）
+  await app.register(communityRoutes, { prefix: '/api' }); // V7-13：邀请码 / 社群服务 / 档案工作台
   await app.register(memoryRoutes, { prefix: '/api' });
   await app.register(graphRoutes, { prefix: '/api' });
   await app.register(planRoutes, { prefix: '/api' });
+  await app.register(skuRoutes, { prefix: '/api' }); // V7-12：单次付费商品（SKU 下单，回调复用 pay 幂等底座）
   await app.register(payRoutes, { prefix: '/api' }); // 支付回调（封装插件含原文 JSON 解析器，验签用）
   await app.register(wechatRoutes, { prefix: '/api' }); // 微信消息推送 URL 验签 / 可信接收
   await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin

@@ -2,7 +2,7 @@
 // 写入源（v1）：① 认可方案自动记一条（决策=采纳该方案主判断）；② 手动/前端接口；
 // ③ AI 工具位与 LLM 抽取管道随 PR-9 共建。序号 seq 按用户自增（决策 #N 的展示口径）。
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { now, dateKey } from './clock.js';
 import type { DeliverableInput } from './casefile.js';
 import { firstJudgment } from './casefile.js';
 
@@ -20,6 +20,8 @@ export interface DecisionView {
   verifyNote: string;
   fast: boolean | null;
   createdAt: string;
+  disputeNote?: string | null; // WO-11：用户异议（列表回显，复盘时军师带出确认）
+  disputedAt?: string | null;
 }
 
 export interface DecisionStats {
@@ -35,7 +37,7 @@ export interface DecisionStats {
 function toView(r: {
   id: string; seq: number; scene: string; decision: string; reasons: unknown; tianshiRef: string;
   expected: string; verifyStandard: string; verifyByDate: string | null; status: string;
-  verifyNote: string; fast: boolean | null; createdAt: Date;
+  verifyNote: string; fast: boolean | null; createdAt: Date; disputeNote?: string | null; disputedAt?: Date | null;
 }): DecisionView {
   return {
     id: r.id, seq: r.seq, scene: r.scene, decision: r.decision,
@@ -43,6 +45,7 @@ function toView(r: {
     expected: r.expected, verifyStandard: r.verifyStandard, verifyByDate: r.verifyByDate,
     status: r.status as DecisionView['status'], verifyNote: r.verifyNote, fast: r.fast,
     createdAt: r.createdAt.toISOString(),
+    disputeNote: r.disputeNote ?? null, disputedAt: r.disputedAt ? r.disputedAt.toISOString() : null,
   };
 }
 
@@ -84,7 +87,12 @@ export async function recordDecision(args: {
   }
 }
 
-/** 认可方案 → 自动记一条决策（决策=采纳主判断；验证标准=当日军令与回填数据）。 */
+/**
+ * 认可方案 → 自动记一条决策（决策=采纳主判断；验证标准=当日军令与回填数据）。
+ * P1-1 幂等：同一用户重复认可同一方案（方案指纹 = decision 文本，由 title + 主判断确定性拼出）不再重复插入，
+ * 否则每次重复 accept 都多记一条待验证决策，直接污染准确率统计的分母。
+ * 双检 + 按用户 advisory 锁串行 check→seq→insert，堵住并发双提交窗口（与 reports/purchase 同一并发范式）。
+ */
 export async function recordDecisionFromAccept(args: {
   tenantId: string;
   userId: string;
@@ -93,18 +101,37 @@ export async function recordDecisionFromAccept(args: {
 }): Promise<DecisionView | null> {
   const judgment = firstJudgment(args.deliverable);
   if (!judgment) return null;
-  const d = now();
-  const verifyBy = new Date(d.getTime() + 30 * 86400_000); // 默认 30 天验证期（月复盘对账）
-  const pad = (n: number) => `${n}`.padStart(2, '0');
-  return recordDecision({
-    tenantId: args.tenantId,
-    userId: args.userId,
-    scene: '战略规划',
-    decision: `采纳《${(args.deliverable.title || '军师方案').slice(0, 60)}》：${judgment.slice(0, 200)}`,
-    reasons: [`由${args.agentName}产出并经客户认可`],
-    verifyStandard: '按该方案拆出的军令完成情况与线索/咨询/成交回填数据验证',
-    verifyByDate: `${verifyBy.getFullYear()}-${pad(verifyBy.getMonth() + 1)}-${pad(verifyBy.getDate())}`,
-    fast: false,
+  const scene = '战略规划';
+  const decision = `采纳《${(args.deliverable.title || '军师方案').slice(0, 60)}》：${judgment.slice(0, 200)}`.slice(0, 500);
+  const verifyBy = new Date(now().getTime() + 30 * 86400_000); // 默认 30 天验证期（月复盘对账）
+  const verifyByDate = dateKey(verifyBy); // 上海时区日历日（P1-4）
+
+  // 快路径：无锁存在性检查（命中即返回旧记录，覆盖顺序重复 accept 这一主场景）。
+  const dup = await prisma.decisionLog.findFirst({ where: { userId: args.userId, scene, decision } });
+  if (dup) return toView(dup);
+
+  // 慢路径：并发双提交时按「用户级」advisory 锁串行「再检查 → 取 seq → 落库」——
+  // 用户级（非方案级）粒度：同一用户并发认可「不同方案」的两条 insert 也串行，避免各自读到同一 MAX(seq) 撞唯一键。
+  const lockKey = `decision-accept:${args.userId}`;
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    const again = await tx.decisionLog.findFirst({ where: { userId: args.userId, scene, decision } });
+    if (again) return toView(again);
+    const last = await tx.decisionLog.findFirst({ where: { userId: args.userId }, orderBy: { seq: 'desc' }, select: { seq: true } });
+    const row = await tx.decisionLog.create({
+      data: {
+        tenantId: args.tenantId,
+        userId: args.userId,
+        scene,
+        decision,
+        reasons: [`由${args.agentName}产出并经客户认可`],
+        verifyStandard: '按该方案拆出的军令完成情况与线索/咨询/成交回填数据验证',
+        verifyByDate,
+        fast: false,
+        seq: (last?.seq ?? 0) + 1,
+      },
+    });
+    return toView(row);
   });
 }
 
@@ -122,6 +149,12 @@ export async function verifyDecision(args: {
     data: { status: args.outcome, verifiedAt: new Date(), verifyNote: (args.note ?? '').trim().slice(0, 500) },
   });
   return toView(updated);
+}
+
+/** WO-11：用户对某决策提异议（不改状态，复盘时军师带出确认后再走既有验证更新）。 */
+export async function disputeDecision(userId: string, id: string, note: string): Promise<boolean> {
+  const r = await prisma.decisionLog.updateMany({ where: { id, userId }, data: { disputeNote: note.trim().slice(0, 500), disputedAt: new Date() } });
+  return r.count > 0;
 }
 
 export async function listDecisions(userId: string, limit = 20): Promise<DecisionView[]> {
@@ -163,5 +196,9 @@ export async function decisionBriefing(userId: string): Promise<string | null> {
     : verified > 0
       ? `已验证 ${verified} 条（先攒够 5 条才出准确率，不要编造数字）`
       : `已验证 0 条（共 ${stats.total} 条，尚无准确率——不要编造数字）`;
-  return `【决策账本（系统计数，引用时以此为准，禁止自行推算）】\n${lines.join('\n')}\n${accLine}`;
+  const disputed = await prisma.decisionLog.findMany({ where: { userId, disputedAt: { not: null } }, select: { seq: true, disputeNote: true }, orderBy: { seq: 'desc' }, take: 5 });
+  const disputeLine = disputed.length
+    ? `\n用户有异议（复盘时先确认再更新，勿视作已定论）：${disputed.map((d) => `#${d.seq}${d.disputeNote ? '：' + d.disputeNote : ''}`).join('；')}`
+    : '';
+  return `【决策账本（系统计数，引用时以此为准，禁止自行推算）】\n${lines.join('\n')}\n${accLine}${disputeLine}`;
 }

@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react';
 import { View, Text, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import Icon from '../Icon';
+import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Plan } from '../../services/api';
+import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, requestWechatPayment } from '../../services/pay';
 import './index.scss';
 
 interface Props {
@@ -26,13 +28,11 @@ export default function Plans({ open, onClose }: Props) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [busy, setBusy] = useState('');
 
+  // 开合时拉取方案列表；底栏协调（setOverlay）已收敛至 Sheet 基座。
   useEffect(() => {
-    store.setOverlay(open, 'plans-sheet');
     if (open) api.plans().then(setPlans).catch((e) => s.handleApiError(e));
-    return () => store.setOverlay(false, 'plans-sheet');
   }, [open]);
 
-  if (!open) return null;
   const balance = me?.creditBalance ?? 0;
 
   // 演示发放（免费套餐 / 演示环境回退）：不经支付直接更新方案。
@@ -60,6 +60,7 @@ export default function Plans({ open, onClose }: Props) {
     setBusy(p.id);
     try {
       if (p.price === 0) { await demoGrant(p); return; } // 免费层无需支付
+      if (!ensurePayableEnv()) return; // H5（server 模式）：requestPayment 不可用，下单前拦下
 
       // 付费套餐：先向后端下单（月→年自动折算实付）
       let order;
@@ -68,25 +69,33 @@ export default function Plans({ open, onClose }: Props) {
       } catch (e: any) {
         const code = e?.code || e?.data?.code;
         if (code === 'PAYMENT_NOT_CONFIGURED' || code === 'PLAN_FREE') { await demoGrant(p); return; } // 演示环境回退
+        if (code === 'PAYMENT_COMING_SOON') { Taro.showToast({ title: '支付即将开通，敬请期待', icon: 'none' }); return; }
         throw e;
       }
 
-      // 调起微信支付（小程序 JSAPI）
-      await Taro.requestPayment({
-        timeStamp: order.pay.timeStamp,
-        nonceStr: order.pay.nonceStr,
-        package: order.pay.package,
-        signType: order.pay.signType as 'RSA',
-        paySign: order.pay.paySign,
-      });
+      // 月→年折算：付款前明确披露实付与抵扣（此前只在支付成功后 toast，实扣 ≠ 列表价却无事前确认）。
       if (order.proration?.applies) {
-        Taro.showToast({ title: `已抵扣 ¥${Math.round(order.proration.remainingValue / 100)}`, icon: 'none' });
+        const pr = order.proration;
+        const modal = await Taro.showModal({
+          title: '升级折算确认',
+          content: `年付原价 ¥${(pr.fullPrice / 100).toFixed(2)}，抵扣当前月付剩余价值 ¥${(pr.remainingValue / 100).toFixed(2)}（剩 ${pr.remainingDays} 天），本次实付 ¥${(order.amount / 100).toFixed(2)}。`,
+          confirmText: '确认支付',
+          cancelText: '再想想',
+        });
+        if (!modal.confirm) { Taro.showToast({ title: '已取消支付', icon: 'none' }); return; } // 未付订单由服务端对账任务自动关闭
       }
-      // 支付成功 → 微信回调异步发放权益；轻量重试刷新 /me。
-      await store.loadMe();
-      await new Promise((r) => setTimeout(r, 1500));
-      await store.loadMe();
-      Taro.showToast({ title: '支付成功，方案已更新', icon: 'success' });
+
+      // 调起微信支付（小程序 JSAPI）
+      await requestWechatPayment(order.pay);
+      // —— 到这里支付已成功（钱已扣）：后续任何查询/刷新失败都只影响提示文案，绝不能再报「支付失败」。 ——
+      // 到账确认：轮询订单状态（服务端未发放时会主动查单补账），appliedAt 有值才如实报成功。
+      const applied = await awaitPaymentApplied(order.outTradeNo);
+      await store.loadMe().catch(() => {}); // 刷新失败不改变支付结果，下次进页自然更新
+      if (order.proration?.applies && applied === 'applied') {
+        Taro.showToast({ title: `方案已更新，已抵扣 ¥${Math.round(order.proration.remainingValue / 100)}`, icon: 'none' });
+      } else {
+        Taro.showToast(payAppliedToast(applied, '支付成功，方案已更新'));
+      }
     } catch (e: any) {
       if (e?.errMsg && /cancel/i.test(e.errMsg)) Taro.showToast({ title: '已取消支付', icon: 'none' });
       else s.handleApiError(e, { fallbackTitle: '支付失败，请重试' });
@@ -96,10 +105,8 @@ export default function Plans({ open, onClose }: Props) {
   };
 
   return (
-    <View className="plans-mask" onClick={onClose} catchMove>
-      <View className="plans-sheet" onClick={(e) => e.stopPropagation()}>
-        <View className="ps-grip" />
-        <View className="ps-head">
+    <Sheet visible={open} onClose={onClose} overlayKey="plans-sheet" align="center" panelClassName="plans-pad">
+      <View className="ps-head">
           <Text className="ps-title">方案与权益点</Text>
           <View className="ps-bal">
             <Icon name="diamond" size={13} color={accent} />
@@ -108,7 +115,7 @@ export default function Plans({ open, onClose }: Props) {
         </View>
         <Text className="ps-sub">权益点用于深度方案与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>
         {me?.planStatus?.expired && (
-          <Text className="ps-sub" style={{ color: '#c0392b' }}>当前套餐已到期：内容只读、AI 交互暂停，续费后立即恢复。</Text>
+          <Text className="ps-sub" style={{ color: 'var(--danger)' }}>当前套餐已到期：内容只读、AI 交互暂停，续费后立即恢复。</Text>
         )}
 
         <ScrollView scrollY className="ps-list">
@@ -129,7 +136,7 @@ export default function Plans({ open, onClose }: Props) {
                   ))}
                 </View>
                 <View
-                  className={`pp-btn ${busy === p.id ? 'busy' : ''}`}
+                  className={`btn pp-btn ${busy === p.id ? 'disabled' : ''}`}
                   style={{ background: p.price < 0 ? 'transparent' : accent, color: p.price < 0 ? accent : '#fff', borderColor: accent }}
                   onClick={() => buy(p)}
                 >
@@ -140,8 +147,7 @@ export default function Plans({ open, onClose }: Props) {
           })}
         </ScrollView>
 
-        <View className="ps-close" onClick={onClose}><Text>关闭</Text></View>
-      </View>
-    </View>
+      <View className="ps-close" onClick={onClose}><Text>关闭</Text></View>
+    </Sheet>
   );
 }

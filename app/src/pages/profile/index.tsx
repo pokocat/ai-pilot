@@ -53,14 +53,14 @@ export default function Profile() {
 
   const nav = (url: string) => Taro.navigateTo({ url });
   const menu: { ic: string; t: string; s: string; onClick: () => void }[] = [
-    { ic: 'insight', t: '个人档案', s: briefLine(me?.understanding), onClick: () => nav('/pages/brief/index') },
+    { ic: 'insight', t: '个人档案', s: briefLine(me?.understanding), onClick: () => nav('/packages/main/brief/index') },
     { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => nav('/packages/work/projects/index') },
     { ic: 'attach', t: '资料库', s: '', onClick: () => nav('/packages/work/knowledge/index') },
     { ic: 'chart', t: '数据源', s: '', onClick: () => nav('/packages/work/bindings/index') },
     { ic: 'doc', t: '钱粮明细', s: '', onClick: () => nav('/packages/work/credits/index') },
     { ic: 'layers', t: '战略账本', s: prog?.rank || '', onClick: () => nav('/packages/work/ledger/index') },
     { ic: 'user', t: '军师社群', s: '', onClick: () => nav('/packages/work/community/index') },
-    { ic: 'shield', t: '设置', s: '', onClick: () => nav('/pages/settings/index') },
+    { ic: 'shield', t: '设置', s: '', onClick: () => nav('/packages/main/settings/index') },
   ];
 
   const industry = me?.tenant.industry || me?.tenant.name || '待完善行业';
@@ -71,7 +71,7 @@ export default function Profile() {
         <ProtoHeader kicker="你自己" title="主公" watermark="公" />
 
         {/* 档案卡（顶 3px 本命色边 + 装订角 + 主印） → 设置 */}
-        <View className="proto-card proto-card--top" style={{ marginTop: '22px', padding: '22px', display: 'flex', alignItems: 'center', gap: '16px' }} onClick={() => nav('/pages/settings/index')}>
+        <View className="proto-card proto-card--top" style={{ marginTop: '22px', padding: '22px', display: 'flex', alignItems: 'center', gap: '16px' }} onClick={() => nav('/packages/main/settings/index')}>
           <CardCorners />
           <View className="seal-circle" style={{ width: '60px', height: '60px', fontSize: '27px', flex: 'none' }}>
             {me?.user.name ? me.user.name[0] : '主'}

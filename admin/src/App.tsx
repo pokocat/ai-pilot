@@ -2,6 +2,7 @@ import { useEffect, useState, type ChangeEvent, type MouseEvent, type ReactNode 
 import Icon from './Icon';
 import {
   api,
+  downloadPaymentsCsv,
   adminAuth,
   type Overview,
   type Saying,
@@ -9,6 +10,8 @@ import {
   type AgentBilling,
   type SurveyQ,
   type Plan,
+  type AdminSku,
+  type ServiceAssignmentView,
   type AiConfig,
   type AiPreset,
   type AiProvider,
@@ -16,6 +19,9 @@ import {
   type AiModelUpsert,
   type AdminUserItem,
   type AdminUserDetail,
+  type AdminUserUsage,
+  type AdminUserPlanStatus,
+  type AdminPaymentsView,
   type AdminUsageView,
   type AdminTokenUsageView,
   type AdminAuditItem,
@@ -32,6 +38,10 @@ import {
   uploadUserKnowledge,
   type AdminAccountItem,
   type AdminMe,
+  type AdminFeatureFlag,
+  type AdminEcoTool,
+  type AdminPrescriptionFunnel,
+  type AdminBenchmark,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
@@ -39,11 +49,13 @@ import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-type Tab = 'home' | 'users' | 'usage' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'account';
+type Tab = 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
 const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
   { key: 'users', icon: 'user', label: '用户' },
   { key: 'usage', icon: 'crown', label: '消耗' },
+  { key: 'payments', icon: 'doc', label: '订单' },
+  { key: 'funnel', icon: 'target', label: '处方漏斗' },
   { key: 'tokens', icon: 'trend', label: 'Token' },
   { key: 'trace', icon: 'insight', label: '诊断' },
   { key: 'agent', icon: 'agent', label: '顾问' },
@@ -54,9 +66,13 @@ const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'audit', icon: 'clock', label: '审计' },
   { key: 'moderation', icon: 'shield', label: '审核' },
   { key: 'model', icon: 'insight', label: '模型' },
+  { key: 'flags', icon: 'shield', label: '功能开关' },
   { key: 'say', icon: 'spark', label: '献策' },
   { key: 'form', icon: 'doc', label: '问卷' },
   { key: 'plan', icon: 'layers', label: '套餐' },
+  { key: 'sku', icon: 'layers', label: '单次付费' },
+  { key: 'eco', icon: 'spark', label: '生态工具' },
+  { key: 'benchmark', icon: 'trend', label: '行业基准' },
 ];
 
 export default function App() {
@@ -107,7 +123,9 @@ export default function App() {
           {tab === 'home' && <OverviewView />}
           {tab === 'users' && <UsersView onOpen={setDetailUser} />}
           {tab === 'usage' && <UsageView />}
-          {tab === 'tokens' && <TokenUsageView />}
+          {tab === 'payments' && <PaymentsView toast={showToast} isSuper={!!me?.isSuper} />}
+          {tab === 'funnel' && <FunnelView />}
+          {tab === 'tokens' && <TokenUsageView onOpenUser={(id) => { setTab('users'); setDetailUser(id); }} />}
           {tab === 'trace' && <ObservabilityView />}
           {tab === 'say' && <SayingsView toast={showToast} />}
           {tab === 'agent' && <AgentsView key={agentsKey} onOpen={setDetailKey} toast={showToast} />}
@@ -118,8 +136,12 @@ export default function App() {
           {tab === 'audit' && <AuditView />}
           {tab === 'moderation' && <ModerationView />}
           {tab === 'model' && <ModelView toast={showToast} />}
+          {tab === 'flags' && <FlagsView toast={showToast} />}
           {tab === 'form' && <SurveyView />}
           {tab === 'plan' && <PlansView toast={showToast} />}
+          {tab === 'sku' && <SkusView toast={showToast} />}
+          {tab === 'eco' && <EcoToolsView toast={showToast} />}
+          {tab === 'benchmark' && <BenchmarksView toast={showToast} />}
         </div>
 
         <nav className="adm-tab">
@@ -142,6 +164,7 @@ export default function App() {
         {detailUser && (
           <UserDetailPanel
             userId={detailUser}
+            isOwner={!!me?.isSuper}
             onClose={() => setDetailUser(null)}
             toast={showToast}
           />
@@ -198,10 +221,10 @@ function OverviewView() {
       <div className="pad">
         <div className="stats">
           {data.stats.map((s) => (
-            <div key={s.l} className="stat">
+            <div key={s.t} className="stat">
               <div className="v">{s.v}</div>
-              <div className="l">{s.l}</div>
-              <div className={`d ${s.trend}`}><Icon name={s.trend === 'up' ? 'up' : 'trend'} size={12} />{s.d}</div>
+              <div className="l">{s.t}</div>
+              <StatDelta deltaPct={s.deltaPct} sub={s.sub} />
             </div>
           ))}
         </div>
@@ -222,6 +245,22 @@ function OverviewView() {
   );
 }
 
+// 概览卡环比：deltaPct 非 null 才渲染箭头（正=绿↑ / 负=红↓ / 0=中性），无前期数据显示「—」。
+function StatDelta({ deltaPct, sub }: { deltaPct: number | null; sub: string }) {
+  if (deltaPct === null) {
+    return <div className="d">—{sub ? <span className="sub"> · {sub}</span> : null}</div>;
+  }
+  const dir = deltaPct > 0 ? 'up' : deltaPct < 0 ? 'down' : '';
+  const pct = `${deltaPct > 0 ? '+' : ''}${deltaPct}%`;
+  return (
+    <div className={`d ${dir}`}>
+      {dir && <Icon name={dir === 'up' ? 'up' : 'trend'} size={12} />}
+      {pct}
+      {sub ? <span className="sub"> · {sub}</span> : null}
+    </div>
+  );
+}
+
 function UsersView({ onOpen }: { onOpen: (id: string) => void }) {
   const [list, setList] = useState<AdminUserItem[]>([]);
   useEffect(() => { api.users().then(setList).catch(() => {}); }, []);
@@ -239,7 +278,7 @@ function UsersView({ onOpen }: { onOpen: (id: string) => void }) {
             <div className="crd-row">
               <span className="crd-ic"><Icon name="user" size={18} /></span>
               <div className="crd-b">
-                <div className="ct">{u.name} {u.wechatLinked && <span className="tag">微信</span>}</div>
+                <div className="ct">{u.name} {u.wechatLinked && <span className="tag">微信</span>} {u.quotaRemaining === -1 && <span className="tag">不限量</span>}</div>
                 <div className="cs">{u.phone} · {u.tenantName} · {u.planName ?? '未分配套餐'}</div>
               </div>
               <span className="user-balance">{creditText(u.creditBalance)}</span>
@@ -249,7 +288,8 @@ function UsersView({ onOpen }: { onOpen: (id: string) => void }) {
               <KV k="注册时间" v={fmtTime(u.createdAt)} />
               <KV k="最后会话" v={u.lastSessionAt ? fmtTime(u.lastSessionAt) : '暂无'} />
               <KV k="会话/成果" v={`${u.sessionCount}/${u.deliverableCount}`} />
-              <KV k="已消耗" v={`${u.totalSpent} 点`} />
+              <KV k="钻石消耗" v={`${u.totalSpent}`} />
+              <KV k="30 天 Token" v={fmtTokens(u.tokenUsed30d)} />
             </div>
           </div>
         ))}
@@ -268,7 +308,7 @@ function fmtSize(b: number | null): string {
   return `${(b / 1024 / 1024).toFixed(1)}MB`;
 }
 
-function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: () => void; toast: (m: string) => void }) {
+function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: string; isOwner: boolean; onClose: () => void; toast: (m: string) => void }) {
   const [data, setData] = useState<AdminUserDetail | null>(null);
   const [ctx, setCtx] = useState<AdminUserContext | null>(null);
   const [busy, setBusy] = useState('');
@@ -329,6 +369,8 @@ function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: 
         <div className="dt"><div className="t">{u.name}</div><div className="s">{u.phone} · 余额 {creditText(u.creditBalance)}</div></div>
       </div>
       <div className="ad-db">
+        <UsageQuotaBlock userId={userId} isOwner={isOwner} toast={toast} />
+
         <div className="blk">
           <div className="blk-h"><Icon name="crown" size={15} /><span className="t">付费智能体开通</span><span className="badge">{data.agents.filter((a) => a.owned).length}/{data.agents.length}</span></div>
           <div className="blk-d">为该用户单独开通付费（解锁类）智能体，免其消耗权益点。免费 / 按次智能体所有用户均可直接使用，无需开通。</div>
@@ -348,6 +390,8 @@ function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: 
             {!data.agents.length && <div className="blk-d">暂无付费（解锁类）智能体</div>}
           </div>
         </div>
+
+        <ServiceBlock userId={userId} toast={toast} />
 
         {ctx && (
           <div className="blk">
@@ -420,6 +464,284 @@ function UserDetailPanel({ userId, onClose, toast }: { userId: string; onClose: 
   );
 }
 
+// A1：用户「用量与额度」块——月度额度 meter + 30 天 token/成本 + byAgent/byModel/byDay + 折叠流水 + 运营动作。
+function planStatusText(p: AdminUserPlanStatus): string {
+  if (!p.planName) return '无套餐';
+  const parts: string[] = [];
+  const st = p.status === 'active' ? '生效中' : p.status === 'expired' ? '已过期' : p.status === 'none' ? '无套餐' : p.status;
+  if (st) parts.push(st);
+  if (p.daysLeft != null) parts.push(`剩 ${p.daysLeft} 天`);
+  return parts.join(' · ') || '—';
+}
+function fmtYuan(fen: number): string {
+  return (fen / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+type OpsKind = 'reset' | 'setQuota' | 'credits' | 'extend' | 'grantPlan' | 'module';
+
+function Fold({ icon, title, count, open, onToggle, children }: { icon: string; title: string; count: number; open: boolean; onToggle: () => void; children: ReactNode }) {
+  return (
+    <div className="blk">
+      <div className="blk-h" style={{ cursor: 'pointer' }} onClick={onToggle}>
+        <Icon name={icon} size={15} /><span className="t">{title}</span>
+        <span className="badge">{open ? '收起' : count}</span>
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
+function UsageQuotaBlock({ userId, isOwner, toast }: { userId: string; isOwner: boolean; toast: (m: string) => void }) {
+  const [data, setData] = useState<AdminUserUsage | null>(null);
+  const [modal, setModal] = useState<OpsKind | null>(null);
+  const [open, setOpen] = useState<'' | 'credits' | 'payments' | 'activations'>('');
+  const load = () => api.userUsage(userId, 30).then(setData).catch(() => {});
+  useEffect(() => { load(); }, [userId]);
+  if (!data) return null;
+  const { quota, plan, tokens } = data;
+  const byDayMax = Math.max(1, ...tokens.byDay.map((d) => d.totalTokens));
+  return (
+    <>
+      {/* 月度额度 */}
+      <div className="blk">
+        <div className="blk-h"><Icon name="crown" size={15} /><span className="t">月度产出额度</span>{quota?.periodKey && <span className="badge">本月 {quota.periodKey}</span>}</div>
+        {quota === null ? (
+          <div className="empty">未建额度账户</div>
+        ) : quota.unlimited ? (
+          <div className="usage-row">
+            <div className="usage-h">
+              <div className="usage-name">额度 <span className="tag">不限量</span></div>
+              <div className="usage-num ok">已用 {fmtTokens(quota.used)}</div>
+            </div>
+            <div className="usage-meta">套餐 {plan.planName ?? '—'} · {planStatusText(plan)}</div>
+          </div>
+        ) : (
+          <div className="usage-row">
+            <div className="usage-h">
+              <div className="usage-name">额度剩余</div>
+              <div className={`usage-num ${quota.remaining > 0 ? 'ok' : ''}`}>剩 {fmtTokens(quota.remaining)}</div>
+            </div>
+            <div className="usage-meta">已用 {fmtTokens(quota.used)} / {fmtTokens(quota.limit)} · 套餐 {plan.planName ?? '—'} · {planStatusText(plan)}</div>
+            <div className="meter"><i style={{ width: `${quota.limit > 0 ? Math.min(100, Math.max(2, Math.round((quota.used / quota.limit) * 100))) : 2}%` }} /></div>
+          </div>
+        )}
+      </div>
+
+      {/* 30 天 token / 成本 */}
+      <div className="blk">
+        <div className="blk-h"><Icon name="trend" size={15} /><span className="t">近 30 天用量</span><span className="badge">token / 成本</span></div>
+        <div className="usage-summary">
+          <div><b>{fmtTokens(tokens.totalTokens)}</b><span>总 Token</span></div>
+          <div><b>{fmtCny(tokens.costMicros)}</b><span>成本</span></div>
+          <div><b>{tokens.calls}</b><span>调用次数</span></div>
+          <div><b>{fmtTokens(tokens.outputTokens)}</b><span>输出 Token</span></div>
+        </div>
+        {tokens.byDay.length > 0 && (
+          <div className="spark">
+            {tokens.byDay.map((d) => <i key={d.day} title={`${d.day} · ${fmtTokens(d.totalTokens)}`} style={{ height: `${Math.max(6, Math.round((d.totalTokens / byDayMax) * 100))}%` }} />)}
+          </div>
+        )}
+        {tokens.byAgent.length > 0 && (
+          <>
+            <div className="usage-meta" style={{ marginTop: 12 }}>按顾问（前 3）</div>
+            {tokens.byAgent.slice(0, 3).map((a) => (
+              <div key={a.key} className="usage-row">
+                <div className="usage-h"><div className="usage-name">{a.key}</div><div className="usage-num ok">{fmtCny(a.costMicros)}</div></div>
+                <div className="usage-meta">{a.calls} 次 · {fmtTokens(a.totalTokens)} token</div>
+              </div>
+            ))}
+          </>
+        )}
+        {tokens.byModel.length > 0 && (
+          <>
+            <div className="usage-meta" style={{ marginTop: 12 }}>按模型（前 3）</div>
+            {tokens.byModel.slice(0, 3).map((m) => (
+              <div key={m.key} className="usage-row">
+                <div className="usage-h"><div className="usage-name">{m.key}</div><div className="usage-num ok">{fmtCny(m.costMicros)}</div></div>
+                <div className="usage-meta">{m.calls} 次 · {fmtTokens(m.totalTokens)} token</div>
+              </div>
+            ))}
+          </>
+        )}
+        {tokens.calls === 0 && <div className="usage-meta">近 30 天暂无 token 记录。</div>}
+      </div>
+
+      {/* 折叠：钻石流水 / 支付订单 / 开通归因 */}
+      <Fold icon="crown" title="钻石流水" count={data.credits.length} open={open === 'credits'} onToggle={() => setOpen(open === 'credits' ? '' : 'credits')}>
+        {data.credits.length === 0 ? <div className="empty">暂无钻石流水。</div> : (
+          <div className="mem-list">
+            {data.credits.map((c, i) => (
+              <div key={i} className="mem-card">
+                <span className="mi"><Icon name="crown" size={16} /></span>
+                <div className="mb"><div className="mt">{c.reason || '—'}</div><div className="mm">余额 {c.balance} · {fmtTime(c.at)}</div></div>
+                <div className={`usage-num ${c.delta >= 0 ? 'ok' : ''}`}>{c.delta >= 0 ? '+' : ''}{c.delta}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Fold>
+
+      <Fold icon="doc" title="支付订单" count={data.payments.length} open={open === 'payments'} onToggle={() => setOpen(open === 'payments' ? '' : 'payments')}>
+        {data.payments.length === 0 ? <div className="empty">暂无支付订单。</div> : (
+          <div className="mem-list">
+            {data.payments.map((p, i) => (
+              <div key={i} className="mem-card">
+                <span className="mi"><Icon name="doc" size={16} /></span>
+                <div className="mb"><div className="mt">¥{fmtYuan(p.amount)}<span className="tag off">{p.status}</span></div><div className="mm">尾号 {p.orderNo}{p.attrSource ? ` · ${p.attrSource}` : ''} · {p.paidAt ? fmtTime(p.paidAt) : '未支付'}</div></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Fold>
+
+      <Fold icon="target" title="开通归因" count={data.activations.length} open={open === 'activations'} onToggle={() => setOpen(open === 'activations' ? '' : 'activations')}>
+        {data.activations.length === 0 ? <div className="empty">暂无开通记录。</div> : (
+          <div className="mem-list">
+            {data.activations.map((a, i) => (
+              <div key={i} className="mem-card">
+                <span className="mi"><Icon name="spark" size={16} /></span>
+                <div className="mb"><div className="mt">{a.itemKey}<span className="tag off">{a.itemType}</span></div><div className="mm">来源 {a.source} · {fmtTime(a.at)}</div></div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Fold>
+
+      {/* 运营动作（owner-only）*/}
+      {isOwner && (
+        <div className="blk">
+          <div className="blk-h"><Icon name="insight" size={15} /><span className="t">运营动作</span><span className="badge">仅超管</span></div>
+          <div className="blk-d">额度、钻石、套餐有效期为资金敏感动作，操作会留审计（before/after）。</div>
+          <div className="ops-actions">
+            <button type="button" className="mini-btn" onClick={() => setModal('reset')}>重置额度</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('setQuota')}>调整额度</button>
+            <button type="button" className="mini-btn primary" onClick={() => setModal('credits')}>补发钻石</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('extend')}>延长套餐</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('grantPlan')}>开通套餐</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('module')}>模块管理</button>
+          </div>
+        </div>
+      )}
+
+      {modal && <OpsActionModal kind={modal} userId={userId} plan={plan} onClose={() => setModal(null)} onDone={() => { setModal(null); load(); }} toast={toast} />}
+    </>
+  );
+}
+
+// A1 运营动作确认弹窗：重置/调整额度、补发钻石（必填事由）、延长套餐。资金敏感 → 全部二次确认。
+function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
+  kind: OpsKind; userId: string; plan: AdminUserPlanStatus;
+  onClose: () => void; onDone: () => void; toast: (m: string) => void;
+}) {
+  const [quota, setQuota] = useState(0);
+  const [delta, setDelta] = useState(0);
+  const [reason, setReason] = useState('');
+  const [days, setDays] = useState(30);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [planList, setPlanList] = useState<{ id: string; name: string; price: number }[]>([]);
+  const [grantPlanId, setGrantPlanId] = useState('');
+  const [moduleKey, setModuleKey] = useState('');
+
+  useEffect(() => {
+    if (kind === 'grantPlan') api.plans().then((ps) => setPlanList(ps.map((p: { id: string; name: string; price: number }) => ({ id: p.id, name: p.name, price: p.price })))).catch(() => {});
+  }, [kind]);
+
+  const meta: Record<OpsKind, { title: string; desc: string }> = {
+    reset: { title: '重置月度额度', desc: `将该用户月度 token 额度重置为当前套餐（${plan.planName ?? '无套餐'}）的每月额度。` },
+    setQuota: { title: '调整月度额度', desc: '直接设定月度 token 额度：填 -1 表示不限量，0 及以上为具体额度。' },
+    credits: { title: '补发 / 扣减钻石', desc: '正数补发、负数扣减；扣减不得使余额为负。事由必填，写入流水（前缀 admin:）。' },
+    extend: { title: '延长套餐有效期', desc: '在当前到期日（或今日，取较晚者）基础上顺延天数（1-366）。仅推有效期，不动快照与钱包。' },
+    grantPlan: { title: '开通套餐（运营发放）', desc: `不经支付直接发放套餐权益（含无套餐用户）。当前：${plan.planName ?? '无套餐'}。发放走与支付同一口径（有效期/钻石/额度），审计记 admin_grant。` },
+    module: { title: '模块管理（发放 / 收回）', desc: '按 moduleKey 直接发放（source=admin，与购买区分）或收回模块权益。key 可在「能力模块」或 SKU 目录查看。' },
+  };
+  const cfg = meta[kind];
+
+  const submit = async () => {
+    setErr('');
+    try {
+      if (kind === 'reset') {
+        setBusy(true);
+        await api.setUserQuota(userId, { mode: 'reset_to_plan' });
+        toast('已按套餐重置额度');
+      } else if (kind === 'setQuota') {
+        if (!Number.isInteger(quota) || quota < -1) { setErr('额度需为 -1（不限量）或 ≥ 0 的整数'); return; }
+        setBusy(true);
+        await api.setUserQuota(userId, { mode: 'set', quota });
+        toast(quota === -1 ? '已设为不限量' : `额度已设为 ${quota}`);
+      } else if (kind === 'credits') {
+        if (!Number.isInteger(delta) || delta === 0) { setErr('增减数需为非 0 整数'); return; }
+        const r = reason.trim();
+        if (!r) { setErr('请填写事由'); return; }
+        if (r.length > 50) { setErr('事由不超过 50 字'); return; }
+        setBusy(true);
+        await api.adjustUserCredits(userId, { delta, reason: r });
+        toast(`已${delta > 0 ? '补发' : '扣减'} ${Math.abs(delta)} 钻石`);
+      } else if (kind === 'extend') {
+        if (!plan.planName) { setErr('该用户无套餐，无法延长；可用「开通套餐」直接发放'); return; }
+        if (!Number.isInteger(days) || days < 1 || days > 366) { setErr('天数需为 1-366 的整数'); return; }
+        setBusy(true);
+        await api.extendUserPlan(userId, { days });
+        toast(`套餐已延长 ${days} 天`);
+      } else if (kind === 'grantPlan') {
+        if (!grantPlanId) { setErr('请选择要开通的套餐'); return; }
+        setBusy(true);
+        const r = await api.grantUserPlan(userId, grantPlanId);
+        toast(`已开通「${r.planName}」${r.grantedCredits > 0 ? ` · 发放 ${r.grantedCredits} 钻石` : ''}`);
+      } else {
+        const key = moduleKey.trim();
+        if (!key) { setErr('请填写 moduleKey'); return; }
+        setBusy(true);
+        await api.grantUserModule(userId, key);
+        toast(`已发放模块 ${key}`);
+      }
+      onDone();
+    } catch (e) {
+      setBusy(false);
+      setErr((e as Error)?.message || '操作失败');
+    }
+  };
+
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="al-card" style={{ width: 300, margin: 0 }} onClick={(e) => e.stopPropagation()}>
+        <div className="al-label">{cfg.title}</div>
+        <div className="blk-d">{cfg.desc}</div>
+        {kind === 'setQuota' && <NumInput className="al-input" value={quota} onChange={setQuota} />}
+        {kind === 'extend' && <NumInput className="al-input" min={1} max={366} value={days} onChange={setDays} />}
+        {kind === 'grantPlan' && (
+          <select className="al-input" value={grantPlanId} onChange={(e) => setGrantPlanId(e.target.value)}>
+            <option value="">选择套餐…</option>
+            {planList.map((p) => <option key={p.id} value={p.id}>{p.name}{p.price > 0 ? ` · ¥${fmtYuan(p.price)}` : p.price < 0 ? ' · 面议' : ' · 免费'}</option>)}
+          </select>
+        )}
+        {kind === 'module' && (
+          <>
+            <input className="al-input" value={moduleKey} placeholder="moduleKey（如 deep-contradiction）" onChange={(e) => setModuleKey(e.target.value)} />
+            <div className="al-note" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={async () => {
+              const key = moduleKey.trim();
+              if (!key) { setErr('请填写 moduleKey'); return; }
+              try { await api.revokeUserModule(userId, key); toast(`已收回模块 ${key}`); onDone(); }
+              catch (e) { setErr((e as Error).message || '收回失败'); }
+            }}>收回该模块（停用）</div>
+          </>
+        )}
+        {kind === 'credits' && (
+          <>
+            <NumInput className="al-input" value={delta} onChange={setDelta} placeholder="增减数（正补发 / 负扣减）" />
+            <div style={{ marginTop: 10 }}>
+              <input className="al-input" value={reason} maxLength={50} placeholder="事由（必填，≤50 字）" onChange={(e) => setReason(e.target.value)} />
+            </div>
+          </>
+        )}
+        {err && <div className="al-err"><Icon name="alert" size={13} /> {err}</div>}
+        <button type="button" className="al-btn" onClick={submit} disabled={busy}><Icon name="check" size={15} /> {busy ? '提交中…' : '确认'}</button>
+        <div className="al-note" style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={onClose}>取消</div>
+      </div>
+    </div>
+  );
+}
+
 function UsageView() {
   const [data, setData] = useState<AdminUsageView | null>(null);
   useEffect(() => { api.usage().then(setData).catch(() => {}); }, []);
@@ -450,7 +772,148 @@ function UsageView() {
   );
 }
 
-function TokenUsageView() {
+// A3：支付订单列表——状态筛选 + 天数切换 + summary 四格 + 卡单清单（查单补账）+ 明细（金额分转元）。
+const PAY_STATUS: [string, string][] = [['', '全部'], ['applied', '已开通'], ['paid', '已支付'], ['created', '待支付'], ['failed', '失败'], ['closed', '关闭']];
+function payStatusLabel(s: string): string {
+  const m: Record<string, string> = { applied: '已开通', paid: '已支付(未发放)', created: '待支付', failed: '支付失败', closed: '已关闭' };
+  return m[s] ?? s;
+}
+function PaymentsView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
+  const [data, setData] = useState<AdminPaymentsView | null>(null);
+  const [status, setStatus] = useState('');
+  const [days, setDays] = useState(30);
+  const [busyNo, setBusyNo] = useState('');
+  const [qInput, setQInput] = useState('');
+  const [q, setQ] = useState(''); // 已提交的搜索词（回车/点搜索才生效，避免逐键请求）
+  const [page, setPage] = useState(1);
+  const load = () => api.payments({ status: status || undefined, days, q: q || undefined, page }).then(setData).catch(() => {});
+  useEffect(() => { load(); }, [status, days, q, page]);
+  const copyNo = (no: string) => { navigator.clipboard?.writeText(no).then(() => toast('已复制单号')).catch(() => toast(no)); };
+  const search = () => { setPage(1); setQ(qInput.trim()); };
+  // 卡单处置：向微信查单并幂等入账（与回调共用同一底座，不会重复发放）。
+  const reconcile = async (no: string) => {
+    if (busyNo) return;
+    setBusyNo(no);
+    try {
+      const r = await api.reconcilePayment(no);
+      toast(r.applied ? '已补账，权益已发放' : `未入账：${r.tradeState ?? r.reason ?? '状态未变化'}`);
+      await load();
+    } catch (e) {
+      toast((e as Error).message || '查单失败');
+    } finally {
+      setBusyNo('');
+    }
+  };
+  // 全额退款（仅 owner/master 可见）：二次确认 + 原因入审计；服务端幂等回收权益。
+  const refund = async (no: string) => {
+    if (busyNo) return;
+    const reason = window.prompt(`对订单 …${no.slice(-6)} 全额退款并回收权益（不可撤销）。\n请输入退款原因（写入审计，可留空）：`);
+    if (reason === null) return;
+    setBusyNo(no);
+    try {
+      const r = await api.refundPayment(no, reason.trim());
+      toast(`已退款（${r.wechatStatus}），权益已回收`);
+      await load();
+    } catch (e) {
+      toast((e as Error).message || '退款失败');
+    } finally {
+      setBusyNo('');
+    }
+  };
+  const exportCsv = async () => {
+    try { await downloadPaymentsCsv({ status: status || undefined, days, q: q || undefined }); }
+    catch (e) { toast((e as Error).message || '导出失败'); }
+  };
+  const pages = data ? Math.max(1, Math.ceil(data.total / (data.pageSize || 20))) : 1;
+  return (
+    <>
+      <div className="sec-h"><span className="t">支付订单</span><span className="s">近 {days} 天 · 真实收入</span></div>
+      <div className="pad">
+        <div className="crd-actions">
+          {[7, 30, 90].map((d) => <button key={d} type="button" className={`mini-btn ${days === d ? 'primary' : ''}`} onClick={() => { setDays(d); setPage(1); }}>{d} 天</button>)}
+          <input
+            className="al-input"
+            style={{ flex: 1, minWidth: 120 }}
+            value={qInput}
+            placeholder="搜单号 / 用户名 / 手机号"
+            onChange={(e) => setQInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') search(); }}
+          />
+          <button type="button" className="mini-btn" onClick={search}>搜索</button>
+          {isSuper && <button type="button" className="mini-btn" onClick={exportCsv}>导出 CSV</button>}
+        </div>
+        <div className="bill-seg" style={{ margin: '8px 0' }}>
+          {PAY_STATUS.map(([v, l]) => <div key={v} className={`bill-opt ${status === v ? 'on' : ''}`} onClick={() => { setStatus(v); setPage(1); }}><div className="bo-t">{l}</div></div>)}
+        </div>
+        {!data ? <div className="empty">加载中…</div> : (
+          <>
+            <div className="usage-summary">
+              <div><b>¥{fmtYuan(data.summary.paidAmount)}</b><span>期内实收</span></div>
+              <div><b>{data.summary.paidCount}</b><span>支付订单</span></div>
+              <div><b>{data.items.length}</b><span>列表条数</span></div>
+              <div><b>¥{data.summary.paidCount > 0 ? fmtYuan(Math.round(data.summary.paidAmount / data.summary.paidCount)) : '0.00'}</b><span>客单价</span></div>
+            </div>
+            {data.stuck.length > 0 && (
+              <>
+                <div className="sec-h"><span className="t">需要处理（{data.stuck.length}）</span><span className="s">已支付未发放 = 资损单，优先查单补账；超时未支付由对账任务自动关单</span></div>
+                {data.stuck.map((o) => (
+                  <div key={o.outTradeNo} className="usage-row">
+                    <div className="usage-h">
+                      <div className="usage-name">
+                        {o.userName || '（未命名）'}
+                        <span>{o.kind === 'paid_unapplied' ? '已支付未发放' : '超时未支付'} · {o.skuKey || o.planId || '—'}</span>
+                      </div>
+                      <div className="usage-num">¥{fmtYuan(o.amount)}</div>
+                    </div>
+                    <div className="usage-meta">{o.outTradeNo} · {o.paidAt ? '支付 ' + fmtTime(o.paidAt) : '下单 ' + fmtTime(o.createdAt)}</div>
+                    <div className="crd-actions">
+                      <button type="button" className="mini-btn primary" disabled={busyNo === o.outTradeNo || o.provider !== 'wechat'} onClick={() => reconcile(o.outTradeNo)}>
+                        {busyNo === o.outTradeNo ? '查单中…' : o.provider === 'wechat' ? '查单补账' : '沙箱单'}
+                      </button>
+                      {isSuper && o.kind === 'paid_unapplied' && o.provider === 'wechat' && (
+                        <button type="button" className="mini-btn danger" disabled={busyNo === o.outTradeNo} onClick={() => refund(o.outTradeNo)}>退款</button>
+                      )}
+                      <button type="button" className="mini-btn" onClick={() => copyNo(o.outTradeNo)}>复制单号</button>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+            {data.items.length === 0 && <div className="empty">近 {days} 天{q ? `「${q}」` : ''}{status ? `「${PAY_STATUS.find(([v]) => v === status)?.[1]}」` : ''}暂无订单。</div>}
+            {data.items.map((p, i) => (
+              <div key={i} className="usage-row" title={p.outTradeNo} onClick={() => copyNo(p.outTradeNo)}>
+                <div className="usage-h">
+                  <div className="usage-name">{p.userName || '（未命名）'}<span>尾号 {p.orderNo}{p.attrSource ? ` · ${p.attrSource}` : ''}</span></div>
+                  <div className={`usage-num ${p.status === 'applied' || p.status === 'paid' ? 'ok' : ''}`}>¥{fmtYuan(p.amount)}</div>
+                </div>
+                <div className="usage-meta">{payStatusLabel(p.status)} · {p.paidAt ? '支付 ' + fmtTime(p.paidAt) : '下单 ' + fmtTime(p.createdAt)}（点击复制完整单号）</div>
+                {isSuper && (p.status === 'applied' || p.status === 'paid') && (
+                  <div className="crd-actions">
+                    <button
+                      type="button"
+                      className="mini-btn danger"
+                      disabled={busyNo === p.outTradeNo}
+                      onClick={(e) => { e.stopPropagation(); refund(p.outTradeNo); }}
+                    >{busyNo === p.outTradeNo ? '退款中…' : '退款'}</button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {pages > 1 && (
+              <div className="crd-actions" style={{ marginTop: 10 }}>
+                <button type="button" className="mini-btn" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
+                <span className="badge">{page} / {pages} · 共 {data.total} 单</span>
+                <button type="button" className="mini-btn" disabled={page >= pages} onClick={() => setPage(page + 1)}>下一页</button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function TokenUsageView({ onOpenUser }: { onOpenUser: (id: string) => void }) {
   const [data, setData] = useState<AdminTokenUsageView | null>(null);
   useEffect(() => { api.tokenUsage(30).then(setData).catch(() => {}); }, []);
   if (!data) return <Loading />;
@@ -491,9 +954,9 @@ function TokenUsageView() {
         )}
         {topUsers.length > 0 && (
           <>
-            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">Top 用户</span><span className="s">按成本</span></div>
+            <div className="sec-h" style={{ marginTop: 6 }}><span className="t">Top 用户</span><span className="s">按成本 · 点击看详情</span></div>
             {topUsers.map((u) => (
-              <div key={u.userId} className="usage-row">
+              <div key={u.userId} className="usage-row" style={{ cursor: 'pointer' }} onClick={() => onOpenUser(u.userId)}>
                 <div className="usage-h">
                   <div className="usage-name">{u.name ?? '（未命名）'}<span>{u.userId.slice(0, 8)}</span></div>
                   <div className="usage-num">{fmtCny(u.costMicros)}</div>
@@ -936,6 +1399,73 @@ function SayingsView({ toast }: { toast: (m: string) => void }) {
   );
 }
 
+// 功能开关（P0-2）：命理等合规开关一键降级。关闭合规开关前二次确认，避免误触把全产品命理下线。
+function FlagsView({ toast }: { toast: (m: string) => void }) {
+  const [list, setList] = useState<AdminFeatureFlag[]>([]);
+  const [busy, setBusy] = useState('');
+  const [draft, setDraft] = useState<Record<string, number>>({}); // number 类的编辑中数值
+  const load = () => api.flags().then((rows) => {
+    setList(rows);
+    // 初始化 number 类草稿为当前值
+    setDraft(Object.fromEntries(rows.filter((r) => r.kind === 'number').map((r) => [r.id, r.value ?? 0])));
+  }).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const toggle = async (f: AdminFeatureFlag) => {
+    const next = !f.enabled;
+    // 关闭合规开关是「全产品降级」动作，二次确认防误触。
+    if (!next && f.compliance && !window.confirm(`确认关闭「${f.label}」？关闭后全产品相关入口与端点立即下线。`)) return;
+    setBusy(f.id);
+    try {
+      await api.setFlag(f.id, next);
+      await load();
+      toast(next ? `已开启「${f.label}」` : `已关闭「${f.label}」`);
+    } catch (e) {
+      toast((e as Error)?.message || '操作失败');
+    }
+    setBusy('');
+  };
+  const saveValue = async (f: AdminFeatureFlag) => {
+    const v = draft[f.id] ?? 0;
+    setBusy(f.id);
+    try {
+      await api.setFlagValue(f.id, v);
+      await load();
+      toast(`已保存「${f.label}」= ${v}${f.unit ?? ''}`);
+    } catch (e) {
+      toast((e as Error)?.message || '保存失败');
+    }
+    setBusy('');
+  };
+  return (
+    <>
+      <div className="sec-h"><span className="t">功能开关</span><span className="s">合规一键降级 · 数值配置即时生效</span></div>
+      <div className="pad">
+        {list.map((f) => f.kind === 'number' ? (
+          <div key={f.id} className="say-row">
+            <span className="grip"><Icon name="shield" size={15} /></span>
+            <div className="sb">
+              <div className="stx">{f.label}</div>
+              <div className="smeta">当前 {f.value}{f.unit ?? ''} · {f.desc}（{f.min}-{f.max}）</div>
+            </div>
+            <NumInput className="ai-input flag-num" min={f.min} max={f.max} value={draft[f.id] ?? f.value ?? 0} onChange={(n) => setDraft((d) => ({ ...d, [f.id]: n }))} />
+            <button className="mini-btn primary" disabled={busy === f.id || (draft[f.id] ?? f.value) === f.value} onClick={() => saveValue(f)}>保存</button>
+          </div>
+        ) : (
+          <div key={f.id} className={`say-row ${f.enabled ? '' : 'say-today'}`}>
+            <span className="grip"><Icon name="shield" size={15} /></span>
+            <div className="sb">
+              <div className="stx">{f.label}{f.compliance ? ' · 合规开关' : ''}</div>
+              <div className="smeta">{f.enabled ? '已开启' : '已关闭 · 全产品下线'} · {f.desc}</div>
+            </div>
+            <div className={`sw ${f.enabled ? 'on' : ''}`} onClick={() => busy !== f.id && toggle(f)}><i /></div>
+          </div>
+        ))}
+        {!list.length ? <div className="smeta">暂无可配置开关</div> : null}
+      </div>
+    </>
+  );
+}
+
 function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m: string) => void }) {
   const [list, setList] = useState<AdminAgent[]>([]);
   const [adding, setAdding] = useState(false);
@@ -1093,6 +1623,425 @@ function PlansView({ toast }: { toast: (m: string) => void }) {
         ))}
       </div>
     </>
+  );
+}
+
+// 单次付费 SKU：改价 / 启停 / 展示（key、kind、解锁模块走代码目录，只读）——镜像 PlansView 的行内编辑。
+const SKU_KIND_LABEL: Record<string, string> = { module: '模块解锁', service: '社群服务', storage: '存储扩容' };
+
+function SkusView({ toast }: { toast: (m: string) => void }) {
+  const [list, setList] = useState<AdminSku[]>([]);
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: '', desc: '', priceYuan: 0, enabled: true, sort: 0 });
+  const load = () => api.adminSkus().then(setList).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const startEdit = (s: AdminSku) => {
+    setEditKey(s.key);
+    setForm({ name: s.name, desc: s.desc, priceYuan: s.priceFen / 100, enabled: s.enabled, sort: s.sort });
+  };
+  const toggleEnabled = async (s: AdminSku) => {
+    try { await api.updateSku(s.key, { enabled: !s.enabled }); await load(); toast(s.enabled ? '已下架' : '已上架'); }
+    catch { toast('操作失败'); }
+  };
+  const save = async (key: string) => {
+    try {
+      await api.updateSku(key, {
+        name: form.name.trim(),
+        desc: form.desc.trim(),
+        priceFen: Math.max(0, Math.round(form.priceYuan * 100)),
+        enabled: form.enabled,
+        sort: form.sort,
+      });
+      setEditKey(null); await load(); toast('SKU 已更新');
+    } catch { toast('保存失败'); }
+  };
+  return (
+    <>
+      <div className="sec-h"><span className="t">单次付费 · SKU</span><span className="s">价格 · 启停 · 展示</span></div>
+      <div className="pad">
+        {list.length === 0 && <div className="empty">暂无 SKU。</div>}
+        {list.map((s) => editKey === s.key ? (
+          <div key={s.id} className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">标识 key · {SKU_KIND_LABEL[s.kind] ?? s.kind}（代码目录，不可改）</div><input className="ai-input" value={s.key} disabled /></div>
+            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">描述</div><textarea className="ta" rows={2} value={form.desc} onChange={(e) => setForm({ ...form, desc: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">价格（元）</div><NumInput className="ai-input" min={0} step={0.01} value={form.priceYuan} onChange={(priceYuan) => setForm({ ...form, priceYuan })} /></div>
+            <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => setForm({ ...form, sort })} /></div>
+            {s.grantsModuleKey && <div className="ai-field"><div className="ai-fl">解锁模块（代码目录，不可改）</div><input className="ai-input" value={s.grantsModuleKey} disabled /></div>}
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">上架启用</div><div className="cs">关闭后前台不展示、不可购买</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => setForm({ ...form, enabled: !form.enabled })}><i /></div></div></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => setEditKey(null)}>取消</button>
+              <button className="ai-btn primary" onClick={() => save(s.key)}><Icon name="check" size={14} /> 保存</button>
+            </div>
+          </div>
+        ) : (
+          <div key={s.id} className="crd" onClick={() => startEdit(s)}>
+            <div className="crd-row">
+              <span className="crd-ic"><Icon name="crown" size={18} /></span>
+              <div className="crd-b">
+                <div className="ct">{s.name} <span className="tag off">{SKU_KIND_LABEL[s.kind] ?? s.kind}</span>{!s.enabled && <span className="tag off">停用</span>}</div>
+                <div className="cs">{s.key}{s.grantsModuleKey ? ` · 解锁 ${s.grantsModuleKey}` : ''}{s.desc ? ` · ${s.desc}` : ''}</div>
+              </div>
+              <span className="user-balance">¥{(s.priceFen / 100).toLocaleString()}</span>
+              <div className={`sw ${s.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(s); }}><i /></div>
+              <span className="edit"><Icon name="pen" size={15} /></span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// D-1/WO-12：处方多来源漏斗——处方六态转化（按 toolKey）+ 开通来源计数（ActivationEvent）。
+const RX_SOURCE_LABEL: Record<string, string> = { prescription: '处方位', catalog: '货架', market: '生态市场' };
+
+function FunnelView() {
+  const [data, setData] = useState<AdminPrescriptionFunnel | null>(null);
+  const [days, setDays] = useState(30);
+  useEffect(() => { api.prescriptionFunnel(days).then(setData).catch(() => {}); }, [days]);
+  if (!data) return <Loading />;
+  const maxProposed = Math.max(1, ...data.prescriptions.map((r) => r.proposed));
+  return (
+    <>
+      <div className="sec-h"><span className="t">处方漏斗</span><span className="s">近 {data.days} 天 · 六态转化 + 开通来源</span></div>
+      <div className="pad">
+        <div className="crd-actions">
+          {[7, 30, 90].map((d) => (
+            <button key={d} className={`mini-btn ${days === d ? 'primary' : ''}`} onClick={() => setDays(d)}>{d} 天</button>
+          ))}
+        </div>
+        <div className="sec-h"><span className="t">开通来源</span><span className="s">ActivationEvent 计数</span></div>
+        <div className="usage-summary">
+          {data.activations.length === 0
+            ? <div><b>0</b><span>开通事件</span></div>
+            : data.activations.map((a) => <div key={a.source}><b>{a.count}</b><span>{RX_SOURCE_LABEL[a.source] ?? a.source}</span></div>)}
+        </div>
+        <div className="sec-h"><span className="t">处方六态转化</span><span className="s">按工具 · 各态到达数</span></div>
+        {data.prescriptions.length === 0 && <div className="empty">近 {data.days} 天暂无处方。</div>}
+        {data.prescriptions.map((r) => (
+          <div key={r.toolKey} className="usage-row">
+            <div className="usage-h">
+              <div className="usage-name">{r.toolKey}<span>{r.toolType === 'external' ? '生态工具' : '内部顾问'}</span></div>
+              <div className="usage-num">{r.proposed} 开方</div>
+            </div>
+            <div className="usage-meta">曝光 {r.seen} · 点击 {r.clicked} · 开通 {r.activated} · 使用 {r.used} · 验证 {r.verified}{r.dismissed ? ` · 作废 ${r.dismissed}` : ''}</div>
+            <div className="meter"><i style={{ width: `${Math.max(3, Math.round((r.proposed / maxProposed) * 100))}%` }} /></div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// D-3-7：生态工具注册表 CRUD（enabled 控制是否可开方；appId 空则不可启用——前端无跳转目标）。
+type EcoForm = { id: string; name: string; desc: string; appId: string; path: string; enabled: boolean; sort: number };
+const ECO_BLANK: EcoForm = { id: '', name: '', desc: '', appId: '', path: '', enabled: false, sort: 0 };
+
+function EcoToolsView({ toast }: { toast: (m: string) => void }) {
+  const [list, setList] = useState<AdminEcoTool[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<EcoForm>(ECO_BLANK);
+  const load = () => api.ecoTools().then(setList).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const set = (p: Partial<EcoForm>) => setForm((f) => ({ ...f, ...p }));
+  const create = async () => {
+    if (!/^[a-z][a-z0-9-]{1,40}$/.test(form.id)) return toast('toolKey 需小写字母开头（可含数字、连字符）');
+    if (!form.name.trim()) return toast('请填写名称');
+    if (form.enabled && !form.appId.trim()) return toast('启用前需先填目标小程序 appId');
+    try {
+      await api.createEcoTool({ id: form.id, name: form.name.trim(), desc: form.desc.trim(), appId: form.appId.trim(), path: form.path.trim(), enabled: form.enabled, sort: form.sort });
+      setAdding(false); setForm(ECO_BLANK); await load(); toast('已新增生态工具');
+    } catch (e) { toast((e as Error)?.message || '新增失败（toolKey 可能已存在）'); }
+  };
+  const startEdit = (t: AdminEcoTool) => { setAdding(false); setEditId(t.id); setForm({ id: t.id, name: t.name, desc: t.desc, appId: t.appId, path: t.path, enabled: t.enabled, sort: t.sort }); };
+  const save = async (id: string) => {
+    if (!form.name.trim()) return toast('请填写名称');
+    if (form.enabled && !form.appId.trim()) return toast('启用前需先填目标小程序 appId');
+    try {
+      await api.updateEcoTool(id, { name: form.name.trim(), desc: form.desc.trim(), appId: form.appId.trim(), path: form.path.trim(), enabled: form.enabled, sort: form.sort });
+      setEditId(null); await load(); toast('生态工具已更新');
+    } catch (e) { toast((e as Error)?.message || '保存失败'); }
+  };
+  const toggleEnabled = async (t: AdminEcoTool) => {
+    if (!t.enabled && !t.appId.trim()) return toast('启用前需先填 appId（点开编辑补上）');
+    try { await api.updateEcoTool(t.id, { enabled: !t.enabled }); await load(); toast(t.enabled ? '已停用（不再可开方）' : '已启用（可开方）'); }
+    catch (e) { toast((e as Error)?.message || '操作失败'); }
+  };
+  const remove = async (t: AdminEcoTool) => {
+    if (!window.confirm(`确认删除生态工具「${t.name}」？已开出的处方不受影响，但无法再开新方。`)) return;
+    try { await api.deleteEcoTool(t.id); await load(); toast('已删除'); }
+    catch (e) { toast((e as Error)?.message || '删除失败'); }
+  };
+  return (
+    <>
+      <div className="sec-h"><span className="t">生态工具</span><span className="s">数字人/短剧等外部跳转位 · 启用后方可开方</span></div>
+      <div className="pad">
+        {!adding ? (
+          <button className="add-btn full" onClick={() => { setEditId(null); setForm(ECO_BLANK); setAdding(true); }}><Icon name="spark" size={15} /> 新增生态工具</button>
+        ) : (
+          <div className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">toolKey（唯一，小写，开方时 LLM 引用）</div><input className="ai-input" value={form.id} onChange={(e) => set({ id: e.target.value })} placeholder="如 digital-human" /></div>
+            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="如 数字人代播" /></div>
+            <div className="ai-field"><div className="ai-fl">开方场景描述（供军师判断何时开方）</div><textarea className="ta" rows={2} value={form.desc} onChange={(e) => set({ desc: e.target.value })} placeholder="一句话说清这个工具帮客户解决什么" /></div>
+            <div className="ai-field"><div className="ai-fl">目标小程序 appId（启用必填）</div><input className="ai-input" value={form.appId} onChange={(e) => set({ appId: e.target.value })} placeholder="wx… · 须与本小程序同一开放平台主体关联" /></div>
+            <div className="ai-field"><div className="ai-fl">目标页面 path（可选）</div><input className="ai-input" value={form.path} onChange={(e) => set({ path: e.target.value })} placeholder="pages/index/index" /></div>
+            <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => set({ sort })} /></div>
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用（可开方）</div><div className="cs">关闭后军师不再向客户开这个方</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => set({ enabled: !form.enabled })}><i /></div></div></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => { setAdding(false); setForm(ECO_BLANK); }}>取消</button>
+              <button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 创建</button>
+            </div>
+          </div>
+        )}
+        {list.length === 0 && !adding && <div className="empty">暂无生态工具。数字人 appId 由运营录入后启用。</div>}
+        {list.map((t) => editId === t.id ? (
+          <div key={t.id} className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">toolKey（不可改）</div><input className="ai-input" value={t.id} disabled /></div>
+            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => set({ name: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">开方场景描述</div><textarea className="ta" rows={2} value={form.desc} onChange={(e) => set({ desc: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">目标小程序 appId（启用必填）</div><input className="ai-input" value={form.appId} onChange={(e) => set({ appId: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">目标页面 path（可选）</div><input className="ai-input" value={form.path} onChange={(e) => set({ path: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => set({ sort })} /></div>
+            <div className="cfg"><div className="cfg-row"><div className="cb"><div className="ct">启用（可开方）</div><div className="cs">关闭后军师不再向客户开这个方</div></div><div className={`sw ${form.enabled ? 'on' : ''}`} onClick={() => set({ enabled: !form.enabled })}><i /></div></div></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button>
+              <button className="ai-btn ghost" onClick={() => remove(t)}><Icon name="alert" size={14} /> 删除</button>
+              <button className="ai-btn primary" onClick={() => save(t.id)}><Icon name="check" size={14} /> 保存</button>
+            </div>
+          </div>
+        ) : (
+          <div key={t.id} className="crd" onClick={() => startEdit(t)}>
+            <div className="crd-row">
+              <span className="crd-ic"><Icon name="spark" size={18} /></span>
+              <div className="crd-b">
+                <div className="ct">{t.name} <span className="tag off">生态</span>{!t.enabled && <span className="tag off">停用</span>}{t.enabled && !t.appId && <span className="tag warn">缺 appId</span>}</div>
+                <div className="cs">{t.id}{t.appId ? ` · ${t.appId}` : ' · 未填 appId'}{t.desc ? ` · ${t.desc}` : ''}</div>
+              </div>
+              <div className={`sw ${t.enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleEnabled(t); }}><i /></div>
+              <span className="edit"><Icon name="pen" size={15} /></span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// WO-08：行业基准库维护面——表格 + 行业筛选 + CSV 批量导入。
+// 宁缺勿假：p50 留空的行注入层不会引用（后端 services/benchmark.ts），面上以「未核实」标签提示运营回填。
+type BmForm = { industry: string; revenueBand: string; metricKey: string; metricName: string; unit: string; p25: string; p50: string; p75: string; note: string; source: string };
+const BM_BLANK: BmForm = { industry: '', revenueBand: '*', metricKey: '', metricName: '', unit: '', p25: '', p50: '', p75: '', note: '', source: '' };
+// 最小 RFC4180 CSV 行解析：支持 "..." 包裹的字段（内含逗号/换行）与 "" 转义引号。
+// 朴素 split(',') 会在 note/source 等自由文本字段包含逗号时把后续列全部错位（静默产出错误数据），
+// 这类字段来自 Excel 编辑后再导出，含逗号很常见。
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else { inQuotes = false; }
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      cells.push(cur); cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cells.push(cur);
+  return cells.map((c) => c.trim());
+}
+
+// CSV 行格式（与文档一致）：industry,revenueBand,metricKey,metricName,unit,p25,p50,p75,note,source
+const BM_CSV_COLS = ['industry', 'revenueBand', 'metricKey', 'metricName', 'unit', 'p25', 'p50', 'p75', 'note', 'source'] as const;
+const bmNumOrNull = (s: string): number | null => { const t = s.trim(); if (!t) return null; const n = Number(t); return Number.isFinite(n) ? n : null; };
+const bmRowToForm = (b: AdminBenchmark): BmForm => ({
+  industry: b.industry, revenueBand: b.revenueBand, metricKey: b.metricKey, metricName: b.metricName, unit: b.unit,
+  p25: b.p25 == null ? '' : String(b.p25), p50: b.p50 == null ? '' : String(b.p50), p75: b.p75 == null ? '' : String(b.p75),
+  note: b.note ?? '', source: b.source ?? '',
+});
+
+function BenchmarksView({ toast }: { toast: (m: string) => void }) {
+  const [list, setList] = useState<AdminBenchmark[]>([]);
+  const [industry, setIndustry] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<BmForm>(BM_BLANK);
+  const [importing, setImporting] = useState(false);
+  const load = () => api.benchmarks().then(setList).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const set = (p: Partial<BmForm>) => setForm((f) => ({ ...f, ...p }));
+  const industries = [...new Set(list.map((b) => b.industry))].sort();
+  const shown = industry ? list.filter((b) => b.industry === industry) : list;
+
+  const upsert = async (): Promise<boolean> => {
+    if (!form.industry.trim()) { toast('请填写行业'); return false; }
+    if (!form.metricKey.trim()) { toast('请填写指标 key'); return false; }
+    if (!form.metricName.trim()) { toast('请填写指标名'); return false; }
+    if (!form.unit.trim()) { toast('请填写单位'); return false; }
+    await api.upsertBenchmark({
+      industry: form.industry.trim(), revenueBand: form.revenueBand.trim() || '*',
+      metricKey: form.metricKey.trim(), metricName: form.metricName.trim(), unit: form.unit.trim(),
+      p25: bmNumOrNull(form.p25), p50: bmNumOrNull(form.p50), p75: bmNumOrNull(form.p75),
+      note: form.note.trim() || null, source: form.source.trim() || null,
+    });
+    return true;
+  };
+  const create = async () => {
+    try { if (await upsert()) { setAdding(false); setForm(BM_BLANK); await load(); toast('已保存基准行'); } }
+    catch (e) { toast((e as Error)?.message || '保存失败'); }
+  };
+  const save = async () => {
+    try { if (await upsert()) { setEditId(null); await load(); toast('基准行已更新'); } }
+    catch (e) { toast((e as Error)?.message || '保存失败'); }
+  };
+  const remove = async (b: AdminBenchmark) => {
+    if (!window.confirm(`确认删除「${b.industry} · ${b.metricName}」这条基准？`)) return;
+    try { await api.deleteBenchmark(b.id); await load(); toast('已删除'); }
+    catch (e) { toast((e as Error)?.message || '删除失败'); }
+  };
+
+  // CSV 批量导入：前端逐行解析后调 upsert（幂等，(行业,营收段,key) 命中即更新）。
+  const onImport = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // 允许重复选同一文件
+    if (!file) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      let ok = 0, skipped = 0;
+      for (const line of rows) {
+        const cells = parseCsvLine(line);
+        if (cells[0]?.toLowerCase() === BM_CSV_COLS[0]) continue; // 跳过表头行
+        const [ind, band, key, name, unit, p25, p50, p75, note, source] = cells;
+        if (!ind || !key || !name || !unit) { skipped++; continue; }
+        try {
+          await api.upsertBenchmark({
+            industry: ind, revenueBand: band || '*', metricKey: key, metricName: name, unit,
+            p25: bmNumOrNull(p25 ?? ''), p50: bmNumOrNull(p50 ?? ''), p75: bmNumOrNull(p75 ?? ''),
+            note: (note ?? '').trim() || null, source: (source ?? '').trim() || null,
+          });
+          ok++;
+        } catch { skipped++; }
+      }
+      await load();
+      toast(`导入完成：成功 ${ok} 行${skipped ? ` · 跳过 ${skipped} 行` : ''}`);
+    } catch { toast('CSV 解析失败'); }
+    setImporting(false);
+  };
+
+  return (
+    <>
+      <div className="sec-h"><span className="t">行业基准</span><span className="s">分位数据 · p50 空则不注入（宁缺勿假）</span></div>
+      <div className="pad">
+        <div className="crd-actions">
+          <button className={`mini-btn ${industry === '' ? 'primary' : ''}`} onClick={() => setIndustry('')}>全部</button>
+          {industries.map((ind) => (
+            <button key={ind} className={`mini-btn ${industry === ind ? 'primary' : ''}`} onClick={() => setIndustry(ind)}>{ind}</button>
+          ))}
+        </div>
+        <label className="add-btn full">
+          <Icon name="up" size={15} /> {importing ? '导入中…' : 'CSV 批量导入（industry,revenueBand,metricKey,metricName,unit,p25,p50,p75,note,source）'}
+          <input className="file-hidden" type="file" accept=".csv,text/csv" onChange={onImport} disabled={importing} />
+        </label>
+        {!adding ? (
+          <button className="add-btn full" onClick={() => { setEditId(null); setForm({ ...BM_BLANK, industry }); setAdding(true); }}><Icon name="spark" size={15} /> 新增基准行</button>
+        ) : (
+          <div className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">行业（与用户档案口径一致）</div><input className="ai-input" value={form.industry} onChange={(e) => set({ industry: e.target.value })} placeholder="如 美业/大健康" /></div>
+            <div className="ai-field"><div className="ai-fl">营收段（* = 不分段）</div><input className="ai-input" value={form.revenueBand} onChange={(e) => set({ revenueBand: e.target.value })} placeholder="* 或 100-500万" /></div>
+            <div className="ai-field"><div className="ai-fl">指标 key（与周报填报口径一致）</div><input className="ai-input" value={form.metricKey} onChange={(e) => set({ metricKey: e.target.value })} placeholder="如 repurchase_rate" /></div>
+            <div className="ai-field"><div className="ai-fl">指标名</div><input className="ai-input" value={form.metricName} onChange={(e) => set({ metricName: e.target.value })} placeholder="如 复购率" /></div>
+            <div className="ai-field"><div className="ai-fl">单位</div><input className="ai-input" value={form.unit} onChange={(e) => set({ unit: e.target.value })} placeholder="% / 元 / 天" /></div>
+            <div className="ai-field"><div className="ai-fl">P25（留空即不填）</div><input className="ai-input" value={form.p25} onChange={(e) => set({ p25: e.target.value })} placeholder="留空 = 未核实" /></div>
+            <div className="ai-field"><div className="ai-fl">P50 中位（空则该指标不注入）</div><input className="ai-input" value={form.p50} onChange={(e) => set({ p50: e.target.value })} placeholder="留空 = 未核实，不注入" /></div>
+            <div className="ai-field"><div className="ai-fl">P75（留空即不填）</div><input className="ai-input" value={form.p75} onChange={(e) => set({ p75: e.target.value })} placeholder="留空 = 未核实" /></div>
+            <div className="ai-field"><div className="ai-fl">口径说明 note</div><input className="ai-input" value={form.note} onChange={(e) => set({ note: e.target.value })} placeholder="如 待运营核实" /></div>
+            <div className="ai-field"><div className="ai-fl">数据来源 source</div><input className="ai-input" value={form.source} onChange={(e) => set({ source: e.target.value })} placeholder="来源出处（可选）" /></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => { setAdding(false); setForm(BM_BLANK); }}>取消</button>
+              <button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 保存</button>
+            </div>
+          </div>
+        )}
+        {shown.length === 0 && !adding && <div className="empty">暂无基准行。可手动新增或 CSV 导入。</div>}
+        {shown.map((b) => editId === b.id ? (
+          <div key={b.id} className="crd new-agent">
+            <div className="ai-field"><div className="ai-fl">行业 · 营收段 · key（唯一键，改动即新增另一条）</div><input className="ai-input" value={`${form.industry} · ${form.revenueBand} · ${form.metricKey}`} disabled /></div>
+            <div className="ai-field"><div className="ai-fl">指标名</div><input className="ai-input" value={form.metricName} onChange={(e) => set({ metricName: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">单位</div><input className="ai-input" value={form.unit} onChange={(e) => set({ unit: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">P25</div><input className="ai-input" value={form.p25} onChange={(e) => set({ p25: e.target.value })} placeholder="留空 = 未核实" /></div>
+            <div className="ai-field"><div className="ai-fl">P50 中位（空则不注入）</div><input className="ai-input" value={form.p50} onChange={(e) => set({ p50: e.target.value })} placeholder="留空 = 未核实，不注入" /></div>
+            <div className="ai-field"><div className="ai-fl">P75</div><input className="ai-input" value={form.p75} onChange={(e) => set({ p75: e.target.value })} placeholder="留空 = 未核实" /></div>
+            <div className="ai-field"><div className="ai-fl">口径说明 note</div><input className="ai-input" value={form.note} onChange={(e) => set({ note: e.target.value })} /></div>
+            <div className="ai-field"><div className="ai-fl">数据来源 source</div><input className="ai-input" value={form.source} onChange={(e) => set({ source: e.target.value })} /></div>
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button>
+              <button className="ai-btn ghost" onClick={() => remove(b)}><Icon name="alert" size={14} /> 删除</button>
+              <button className="ai-btn primary" onClick={save}><Icon name="check" size={14} /> 保存</button>
+            </div>
+          </div>
+        ) : (
+          <div key={b.id} className="crd" onClick={() => { setAdding(false); setEditId(b.id); setForm(bmRowToForm(b)); }}>
+            <div className="crd-row">
+              <span className="crd-ic"><Icon name="trend" size={18} /></span>
+              <div className="crd-b">
+                <div className="ct">{b.metricName} <span className="tag">{b.industry}</span>{b.p50 == null && <span className="tag warn">未核实</span>}{!b.enabled && <span className="tag off">停用</span>}</div>
+                <div className="cs">{b.metricKey}{b.revenueBand !== '*' ? ` · ${b.revenueBand}` : ''} · 中位 {b.p50 == null ? '—' : `${b.p50}${b.unit}`}{b.p25 != null && b.p75 != null ? `（P25 ${b.p25} / P75 ${b.p75}）` : ''}{b.note ? ` · ${b.note}` : ''}</div>
+              </div>
+              <span className="edit"><Icon name="pen" size={15} /></span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// 社群服务分配（用户详情内）：班主任 / 班级 / 群二维码 / 陪跑任务进度 / 备注。空 → 待分配。
+function ServiceBlock({ userId, toast }: { userId: string; toast: (m: string) => void }) {
+  const blank: ServiceAssignmentView = { teacherName: '', teacherWechat: '', className: '', groupQrUrl: '', taskDone: 0, taskTotal: 0, note: '' };
+  const [assigned, setAssigned] = useState<boolean | null>(null);
+  const [form, setForm] = useState<ServiceAssignmentView>(blank);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.userService(userId).then(({ service }) => { setAssigned(!!service); setForm(service ?? blank); }).catch(() => setAssigned(false));
+  useEffect(() => { load(); }, [userId]);
+  const set = (p: Partial<ServiceAssignmentView>) => setForm((f) => ({ ...f, ...p }));
+  const save = async () => {
+    setBusy(true);
+    try {
+      const { service } = await api.setUserService(userId, {
+        teacherName: form.teacherName.trim(), teacherWechat: form.teacherWechat.trim(),
+        className: form.className.trim(), groupQrUrl: form.groupQrUrl.trim(),
+        taskDone: form.taskDone, taskTotal: form.taskTotal, note: form.note.trim(),
+      });
+      setAssigned(!!service); setForm(service ?? blank); toast('社群服务已保存');
+    } catch { toast('保存失败'); }
+    setBusy(false);
+  };
+  return (
+    <div className="blk">
+      <div className="blk-h"><Icon name="chat" size={15} /><span className="t">社群服务</span><span className="badge">{assigned == null ? '…' : assigned ? '已分配' : '待分配'}</span></div>
+      <div className="blk-d">分配班主任 / 班级 / 群二维码与陪跑任务进度，前台「我的服务」据此展示。留空即视为未填。</div>
+      <div className="ai-field"><div className="ai-fl">班主任姓名</div><input className="ai-input" value={form.teacherName} onChange={(e) => set({ teacherName: e.target.value })} placeholder="如 张老师" /></div>
+      <div className="ai-field"><div className="ai-fl">班主任微信</div><input className="ai-input" value={form.teacherWechat} onChange={(e) => set({ teacherWechat: e.target.value })} placeholder="微信号" /></div>
+      <div className="ai-field"><div className="ai-fl">班级</div><input className="ai-input" value={form.className} onChange={(e) => set({ className: e.target.value })} placeholder="如 2026 春季 3 班" /></div>
+      <div className="ai-field"><div className="ai-fl">群二维码链接</div><input className="ai-input" value={form.groupQrUrl} onChange={(e) => set({ groupQrUrl: e.target.value })} placeholder="https://…（群二维码图片地址）" /></div>
+      <div className="ai-field"><div className="ai-fl">已完成任务</div><NumInput className="ai-input" min={0} value={form.taskDone} onChange={(taskDone) => set({ taskDone })} /></div>
+      <div className="ai-field"><div className="ai-fl">任务总数</div><NumInput className="ai-input" min={0} value={form.taskTotal} onChange={(taskTotal) => set({ taskTotal })} /></div>
+      <div className="ai-field"><div className="ai-fl">备注</div><textarea className="ta" rows={2} value={form.note} onChange={(e) => set({ note: e.target.value })} /></div>
+      <div className="ai-actions">
+        <button className="ai-btn primary" onClick={save} disabled={busy}><Icon name="check" size={14} /> {busy ? '保存中…' : '保存服务分配'}</button>
+      </div>
+    </div>
   );
 }
 

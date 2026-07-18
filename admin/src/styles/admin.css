@@ -4,7 +4,7 @@
   --ink: #16191D; --ink-2: #565C63; --ink-3: #969BA1; --line: #E7E4DB; --line-2: #EFEDE5;
   --accent: #A07D2C; --accent-deep: #6E5621; --accent-soft: #F2EAD6; --accent-ink: #43340F; --accent-bright: #D8B25A;
   --gold: #9B7C3F; --danger: #9C4A38; --success: #2D7A52;
-  --serif: "Noto Serif SC", "Songti SC", serif;
+  --serif: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
   --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Segoe UI", sans-serif;
   --mono: "SFMono-Regular", "JetBrains Mono", monospace;
   --shadow-sm: 0 1px 2px rgba(22,25,29,.04), 0 2px 8px rgba(22,25,29,.04);
@@ -62,6 +62,7 @@ body {
 .stat .l { font-size: 11.5px; color: var(--ink-3); margin-top: 7px; }
 .stat .d { font-size: 11px; margin-top: 8px; display: flex; align-items: center; gap: 4px; }
 .stat .d.up { color: var(--success); } .stat .d.down { color: var(--danger); }
+.stat .d .sub { color: var(--ink-3); font-weight: 400; }
 .feed { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow-sm); }
 .fr { display: flex; align-items: center; gap: 11px; padding: 13px 15px; }
 .fr + .fr { border-top: 1px solid var(--line-2); }
@@ -109,6 +110,11 @@ body {
 .modal-scrim { position: fixed; inset: 0; background: rgba(22,25,29,.4); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .meter { height: 6px; margin-top: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .meter i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-bright)); }
+/* byDay 迷你分布：竖条柱，高度随数据（不引图表库）——沿用 meter 的金色填充词汇 */
+.spark { display: flex; align-items: flex-end; gap: 2px; height: 34px; margin-top: 10px; }
+.spark i { flex: 1 1 0; min-width: 2px; min-height: 2px; border-radius: 2px 2px 0 0; background: linear-gradient(180deg, var(--accent-bright), var(--accent)); }
+/* 运营动作按钮排（换行紧凑行）*/
+.ops-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 
 .audit-pad { padding-top: 8px; }
 .audit-table-wrap { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); }
@@ -183,6 +189,7 @@ body {
 .say-row .sb { flex: 1; min-width: 0; }
 .say-row .stx { font: 500 13.5px/1.45 var(--serif); color: var(--ink); }
 .say-row .smeta { font-size: 10.5px; color: var(--ink-3); margin-top: 6px; }
+.flag-num { width: 84px; flex: 0 0 auto; text-align: center; }
 .say-today { background: linear-gradient(180deg, var(--accent-soft), var(--surface)); border-color: var(--accent); }
 .add-row { display: flex; gap: 8px; margin-top: 4px; min-width: 0; }
 .add-input { flex: 1; height: 46px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); padding: 0 14px; font: 400 13px/1 var(--sans); color: var(--ink); }

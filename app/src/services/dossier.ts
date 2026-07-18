@@ -2,7 +2,7 @@ import Taro from '@tarojs/taro';
 import { getToken } from './token';
 import { IS_MOCK } from './config';
 import { request } from './api';
-import type { Deliverable } from '../../../shared/contracts';
+import type { Deliverable, OrderActionType, OrderMetric, GoalLadder } from '../../../shared/contracts';
 
 // 战略案卷 · PR-EX 执行闭环落库：
 // 「认可方案 → 案卷 → 今日军令 → 打卡 → 数据回填 → 复盘」的数据源已切到服务端
@@ -19,6 +19,14 @@ export interface DossierOrder {
   done: boolean;
   aligned?: boolean | null; // 是否对齐主要矛盾（服务端标注；本地/手动为 null）
   capabilityKey?: string | null; // 能力直达标（服务端按 keywords 打标；命中则军令行显示「去办 · {花名}」）
+  // V7-05：军令结构化字段（缺省不渲染）
+  ownerName?: string | null;
+  dueAt?: string | null;
+  etaMinutes?: number | null;
+  sourceQuote?: string | null;
+  steps?: string[];
+  metrics?: OrderMetric[];
+  actionType?: OrderActionType;
 }
 
 export interface DailyBackfill {
@@ -36,6 +44,7 @@ export interface Dossier {
   updatedAt: string;
   judgment: string;     // 方案首段判断（真实成果内容）
   risks: string[];      // 「现在不能做」：从认可方案中提取的风险/禁区条目
+  goals?: GoalLadder | null; // V7-10：目标阶梯
   orders: DossierOrder[];
   backfill: Record<string, DailyBackfill>; // 按日期
 }
@@ -255,6 +264,19 @@ export async function saveBackfill(values: DailyBackfill): Promise<Dossier | nul
     return d;
   }
   const r = await request<CasefileRes>('/casefile/backfill', 'PUT', values);
+  return r.casefile;
+}
+
+// V7-10：目标阶梯局部更新（3-5年/年度/季度/本周）。
+export async function saveGoals(patch: Partial<GoalLadder>): Promise<Dossier | null> {
+  if (IS_MOCK) {
+    const d = loadLocal();
+    if (!d) return null;
+    d.goals = { ...(d.goals ?? {}), ...patch, updatedAt: new Date().toISOString() };
+    saveLocal(d);
+    return d;
+  }
+  const r = await request<CasefileRes>('/casefile/goals', 'PUT', patch);
   return r.casefile;
 }
 

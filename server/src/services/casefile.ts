@@ -1,9 +1,13 @@
 // 战略案卷服务（PR-EX 执行闭环落库）：认可方案 → 案卷（判断/风险锁）→ 军令 → 回填。
 // 军令/风险从用户认可的真实成果分节提取（与原前端本地版同一套启发式，保证迁移前后口径一致），
 // 不预置任何业务结论；对齐率/连续天数等计数一律由服务端从这些事件行算出（禁止 AI 现编）。
+import { z } from 'zod';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { now, dateKey } from './clock.js';
 import { matchCapability } from '../data/capabilities.js';
+import { structured } from '../llm/gateway.js';
+import type { OrderActionType, OrderMetric, GoalLadder } from '../../../shared/contracts';
 
 export interface DeliverableSectionInput {
   h: string;
@@ -16,6 +20,14 @@ export interface DeliverableInput {
   sections?: DeliverableSectionInput[];
 }
 
+/** 案卷军令视图（V7-05：含结构化字段，缺省 null/空，前端缺省不渲染）。 */
+export interface CasefileOrderView {
+  id: string; text: string; from: string; tag: string; date: string; done: boolean; aligned: boolean | null;
+  ownerName: string | null; dueAt: string | null; etaMinutes: number | null;
+  sourceQuote: string | null; steps: string[]; metrics: OrderMetric[]; actionType: OrderActionType;
+  capabilityKey: string | null; // 能力直达打标（v1.3 §五）：军令文本命中创作能力关键词 → 对应 agentKey；手动军令为 null
+}
+
 /** 案卷对外形状 —— 与小程序端 services/dossier.ts 的 Dossier 契约一致（页面口径不变）。 */
 export interface CasefileView {
   id: string;
@@ -25,15 +37,13 @@ export interface CasefileView {
   updatedAt: string;
   judgment: string;
   risks: string[];
-  orders: { id: string; text: string; from: string; tag: string; date: string; done: boolean; aligned: boolean | null; capabilityKey: string | null }[];
+  goals: GoalLadder | null; // V7-10：目标阶梯
+  orders: CasefileOrderView[];
   backfill: Record<string, { leads: string; consults: string; deals: string; savedAt?: string }>;
 }
 
 export function todayStr(): string {
-  const d = now();
-  const m = `${d.getMonth() + 1}`.padStart(2, '0');
-  const day = `${d.getDate()}`.padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
+  return dateKey(); // 上海时区日历日（P1-4）
 }
 
 function normalizeOrderText(text: string): string {
@@ -82,6 +92,100 @@ export function firstJudgment(d: DeliverableInput): string {
   return (withBody?.b || d.title || '').trim();
 }
 
+// V7-05：actionType 关键词映射（LLM 不可用时的确定性缺省）。
+const ACTION_BY_KEYWORD: [RegExp, OrderActionType][] = [
+  [/补资料|上传|资料|表格|截图|漏斗表|证据|案例/, 'upload'],
+  [/回填|录入|数据|三数|线索|咨询数|成交数/, 'backfill'],
+  [/复盘|反馈|记录.*(反馈|关键词)|私聊/, 'review'],
+  [/选题|内容|主题|脚本|发布|短视频/, 'topics'],
+];
+function actionTypeFor(text: string, tag: string): OrderActionType {
+  const hay = `${text} ${tag}`;
+  for (const [re, t] of ACTION_BY_KEYWORD) if (re.test(hay)) return t;
+  return 'none';
+}
+
+export interface StructuredOrder {
+  text: string; owner: string | null; due: string | null; eta: number | null;
+  actionType: OrderActionType; steps: string[]; metrics: OrderMetric[]; sourceQuote: string | null; aligned: boolean;
+}
+
+const OrderZ = z.object({
+  text: z.string(),
+  owner: z.string().nullish(),
+  due: z.string().nullish(),
+  eta: z.number().nullish(),
+  actionType: z.enum(['upload', 'backfill', 'review', 'topics', 'none']).catch('none'),
+  steps: z.array(z.string()).nullish(),
+  metrics: z.array(z.object({ label: z.string(), value: z.string() })).nullish(),
+  sourceQuote: z.string().nullish(),
+  aligned: z.boolean().nullish(),
+}).transform((o): StructuredOrder => ({
+  text: o.text.trim().slice(0, 200),
+  owner: o.owner?.trim().slice(0, 20) || null,
+  due: o.due?.trim().slice(0, 40) || null,
+  eta: typeof o.eta === 'number' && o.eta > 0 ? Math.min(Math.round(o.eta), 600) : null,
+  actionType: o.actionType ?? 'none',
+  steps: (o.steps ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 3),
+  metrics: (o.metrics ?? []).slice(0, 3).map((m) => ({ label: String(m.label).slice(0, 12), value: String(m.value).slice(0, 24) })),
+  sourceQuote: o.sourceQuote?.trim().slice(0, 300) || null,
+  aligned: o.aligned ?? true,
+})).refine((o) => o.text.length > 0).nullable().catch(null);
+
+const OrdersResultZ = z.object({
+  orders: z.preprocess((v) => (Array.isArray(v) ? v : []), z.array(OrderZ)).transform((a) => a.filter((x): x is StructuredOrder => x !== null).slice(0, 3)),
+});
+
+const ORDERS_SYS = `你是「军师参谋部」的执行拆解官。把已认可的方案拆成不超过 3 条今日/本周可执行军令。
+每条给：text(动作，≤20字)、owner(负责人称呼，可空)、due(截止标签，如"18:00"/"今日"/"本周")、eta(预计耗时分钟数，整数)、
+actionType(upload=补资料/backfill=回填数据/review=复盘反馈/topics=内容选题/none)、steps(准备/处理/回写三步，各≤30字)、
+metrics(≤3组{label,value}指标对)、sourceQuote(来源引用，方案里的依据一句)、aligned(是否对齐主要矛盾 true/false)。
+只输出 JSON：{"orders":[{"text":"…","owner":"…","due":"…","eta":30,"actionType":"upload","steps":["…"],"metrics":[{"label":"…","value":"…"}],"sourceQuote":"…","aligned":true}]}。无则空数组，禁止编造。`;
+
+function deliverableText(d: DeliverableInput): string {
+  return [d.title, ...(d.sections ?? []).map((s) => `${s.h}\n${s.b ?? ''}\n${(s.list ?? []).join('\n')}`)].filter(Boolean).join('\n\n').slice(0, 3000);
+}
+
+/** 结构化拆军令：LLM 可用则走 structured()，否则退回启发式 extractOrders + 确定性缺省。 */
+export async function structureOrders(d: DeliverableInput, opts: { userName: string; agentName: string }): Promise<StructuredOrder[]> {
+  const parsed = await structured(OrdersResultZ, { system: ORDERS_SYS, user: deliverableText(d), maxChars: 3000 }).catch(() => null);
+  if (parsed?.orders?.length) return parsed.orders.map((o) => ({ ...o, owner: o.owner ?? opts.userName }));
+  return extractOrders(d).map((text) => ({
+    text, owner: opts.userName, due: null, eta: null,
+    actionType: actionTypeFor(text, `军令 · ${opts.agentName}`), steps: [], metrics: [], sourceQuote: null, aligned: true,
+  }));
+}
+
+// V7-10：目标阶梯抽取（只在方案明确提到时给，抽不出留空，禁止编造）。
+const GoalZ = z.object({
+  longTerm: z.string().nullish(), annual: z.string().nullish(), quarterly: z.string().nullish(), weekly: z.string().nullish(),
+});
+const GOALS_SYS = `从方案中抽取目标阶梯：longTerm(3-5年)/annual(年度)/quarterly(季度)/weekly(本周)。只在方案明确提到时给对应值，抽不出留空，禁止编造。只输出 JSON：{"longTerm":"…","annual":"…","quarterly":"…","weekly":"…"}`;
+export async function extractGoals(d: DeliverableInput): Promise<GoalLadder | null> {
+  const parsed = await structured(GoalZ, { system: GOALS_SYS, user: deliverableText(d), maxChars: 2000 }).catch(() => null);
+  if (!parsed) return null;
+  const g: GoalLadder = {
+    longTerm: parsed.longTerm?.trim().slice(0, 60) || null,
+    annual: parsed.annual?.trim().slice(0, 60) || null,
+    quarterly: parsed.quarterly?.trim().slice(0, 60) || null,
+    weekly: parsed.weekly?.trim().slice(0, 60) || null,
+  };
+  if (!g.longTerm && !g.annual && !g.quarterly && !g.weekly) return null;
+  return { ...g, updatedAt: now().toISOString() };
+}
+
+/** V7-10：目标阶梯注入行（活跃案卷的目标，客户确认、跨期沿用；无则不注入）。 */
+export async function goalsInjectionLine(userId: string): Promise<string | null> {
+  const cf = await activeCasefile(userId);
+  const g = (cf?.goalsJson as GoalLadder | null) ?? null;
+  if (!g) return null;
+  const parts = [
+    g.longTerm && `3-5年：${g.longTerm}`, g.annual && `年度：${g.annual}`,
+    g.quarterly && `季度：${g.quarterly}`, g.weekly && `本周：${g.weekly}`,
+  ].filter(Boolean);
+  return parts.length ? parts.join('；') : null;
+}
+
 /** 当前活跃案卷（每用户最多一个）。 */
 export async function activeCasefile(userId: string) {
   return prisma.casefile.findFirst({ where: { userId, status: 'active' }, orderBy: { updatedAt: 'desc' } });
@@ -91,8 +195,7 @@ export async function activeCasefile(userId: string) {
 export async function casefileView(userId: string, days = 14): Promise<CasefileView | null> {
   const cf = await activeCasefile(userId);
   if (!cf) return null;
-  const since = new Date(now().getTime() - days * 86400_000);
-  const sinceStr = `${since.getFullYear()}-${`${since.getMonth() + 1}`.padStart(2, '0')}-${`${since.getDate()}`.padStart(2, '0')}`;
+  const sinceStr = dateKey(new Date(now().getTime() - days * 86400_000)); // 上海时区（P1-4）
   const [ordersRaw, metrics] = await Promise.all([
     prisma.casefileOrder.findMany({
       where: { casefileId: cf.id, date: { gte: sinceStr } },
@@ -119,7 +222,14 @@ export async function casefileView(userId: string, days = 14): Promise<CasefileV
     updatedAt: cf.updatedAt.toISOString(),
     judgment: cf.judgment,
     risks: (cf.risksJson as string[]) ?? [],
-    orders: orders.map((o) => ({ id: o.id, text: o.text, from: o.fromAgent, tag: o.tag, date: o.date, done: o.done, aligned: o.aligned, capabilityKey: o.capabilityKey })),
+    goals: (cf.goalsJson as GoalLadder | null) ?? null,
+    orders: orders.map((o) => ({
+      id: o.id, text: o.text, from: o.fromAgent, tag: o.tag, date: o.date, done: o.done, aligned: o.aligned,
+      ownerName: o.ownerName ?? null, dueAt: o.dueAt ?? null, etaMinutes: o.etaMinutes ?? null,
+      sourceQuote: o.sourceQuote ?? null, steps: (o.stepsJson as string[] | null) ?? [],
+      metrics: (o.metricsJson as OrderMetric[] | null) ?? [], actionType: (o.actionType as OrderActionType | null) ?? 'none',
+      capabilityKey: o.capabilityKey ?? null,
+    })),
     backfill,
   };
 }
@@ -132,7 +242,13 @@ export async function acceptDeliverable(args: {
   agentName: string;
 }): Promise<{ casefileId: string; newOrders: number; skippedOrders: number }> {
   const { tenantId, userId, deliverable, agentName } = args;
-  const orderTexts = extractOrders(deliverable);
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+  const userName = (u?.name || '我').slice(0, 20);
+  // V7-05：结构化拆军令（LLM 可用则富字段，否则启发式缺省）；V7-10：抽取目标阶梯（抽不出留空）。
+  const [structured, goals] = await Promise.all([
+    structureOrders(deliverable, { userName, agentName }),
+    extractGoals(deliverable),
+  ]);
   const judgment = firstJudgment(deliverable);
   const risks = extractRisks(deliverable);
   const existing = await activeCasefile(userId);
@@ -145,6 +261,7 @@ export async function acceptDeliverable(args: {
           sourceAgent: agentName,
           judgment: judgment || existing.judgment,
           risksJson: risks.length ? risks : ((existing.risksJson as string[]) ?? []),
+          ...(goals ? { goalsJson: goals as object } : {}),
         },
       })
     : await prisma.casefile.create({
@@ -155,6 +272,7 @@ export async function acceptDeliverable(args: {
           sourceAgent: agentName,
           judgment,
           risksJson: risks,
+          ...(goals ? { goalsJson: goals as object } : {}),
         },
       });
 
@@ -165,33 +283,38 @@ export async function acceptDeliverable(args: {
       select: { text: true },
     })).map((o) => orderDedupeKey(date, o.text)),
   );
-  const newOrderTexts = orderTexts.filter((text) => {
-    const key = orderDedupeKey(date, text);
+  const newOrders = structured.filter((o) => {
+    const key = orderDedupeKey(date, o.text);
     if (existingOrderKeys.has(key)) return false;
     existingOrderKeys.add(key);
     return true;
   });
 
-  if (newOrderTexts.length) {
+  if (newOrders.length) {
     await prisma.casefileOrder.createMany({
-      data: newOrderTexts.map((text) => ({
+      data: newOrders.map((o) => ({
         tenantId,
         userId,
         casefileId: cf.id,
         date,
-        text,
+        text: o.text,
         fromAgent: agentName,
         tag: `军令 · ${agentName}`,
-        // 来自「认可的方案」的军令视为对齐当前判断（方案本身即围绕主要矛盾产出）。
-        // 更细的逐条 AI 标注（部分对齐/偏离）在 M2 复盘阶段接入。
-        aligned: true,
+        aligned: o.aligned, // V7-05：逐条对齐标注（LLM 拆解或缺省 true；认可方案军令缺省视为对齐）
+        ownerName: o.owner,
+        dueAt: o.due,
+        etaMinutes: o.eta,
+        sourceQuote: o.sourceQuote,
+        stepsJson: o.steps as Prisma.InputJsonValue,
+        metricsJson: o.metrics as unknown as Prisma.InputJsonValue,
+        actionType: o.actionType,
         // 能力直达打标（v1.3 §五）：军令文本命中创作能力关键词 → 打上对应 agent key；
         // 手动自定军令（fromAgent='我'，走 routes/casefiles.ts）不打标，保持 null。
-        capabilityKey: matchCapability(text),
+        capabilityKey: matchCapability(o.text),
       })),
     });
   }
-  return { casefileId: cf.id, newOrders: newOrderTexts.length, skippedOrders: orderTexts.length - newOrderTexts.length };
+  return { casefileId: cf.id, newOrders: newOrders.length, skippedOrders: structured.length - newOrders.length };
 }
 
 /** 本地案卷一次性导入（前端 storage → 服务端；服务端已有活跃案卷则跳过，保证幂等）。 */

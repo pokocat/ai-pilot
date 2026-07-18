@@ -21,14 +21,24 @@ const PLAN = deliverable('增长破局方案', [
   { h: '现状判断', b: '不是缺流量，是信任证明断在转化前。' },
   { h: '行动清单', list: ['重做案例证明'] },
 ]);
+const PLAN2 = deliverable('现金流保卫方案', [
+  { h: '现状判断', b: '现金比利润更早要命，先把回款抓起来。' },
+  { h: '行动清单', list: ['压账期'] },
+]);
 
-test('认可方案 → 自动记一条决策（30 天验证期，seq 自增）', async () => {
+test('认可方案 → 自动记一条；P1-1 重复认可同一方案幂等（不重复记账）；换方案 seq 自增', async () => {
   const token = await login(uniquePhone(), '决策用户');
   await api('POST', '/api/casefile/accept', { token, body: { deliverable: PLAN, agentName: '军师' } });
+  // P1-1：同一方案 accept 两次 → DecisionLog 只有一条（否则重复记账污染准确率统计的分母）。
   await api('POST', '/api/casefile/accept', { token, body: { deliverable: PLAN, agentName: '军师' } });
 
-  const r = await api('GET', '/api/decisions', { token });
+  let r = await api('GET', '/api/decisions', { token });
   assert.equal(r.status, 200);
+  assert.equal(r.body.items.length, 1, '同一方案 accept 两次 → 只记一条');
+
+  // 认可另一份方案 → 第 2 条决策，seq 自增。
+  await api('POST', '/api/casefile/accept', { token, body: { deliverable: PLAN2, agentName: '军师' } });
+  r = await api('GET', '/api/decisions', { token });
   assert.equal(r.body.items.length, 2);
   assert.deepEqual(r.body.items.map((d: { seq: number }) => d.seq), [2, 1], '按序号倒序');
   const d = r.body.items[1];

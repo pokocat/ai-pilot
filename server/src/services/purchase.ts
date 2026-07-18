@@ -75,3 +75,54 @@ export async function applyPlanPurchase(
   };
   return db ? apply(db) : prisma.$transaction((tx) => apply(tx));
 }
+
+export interface SkuLike {
+  key: string; name: string; kind: string; grantsModuleKey: string | null; metaJson: unknown;
+}
+
+/**
+ * V7-12：发放单次付费商品（SKU）权益。由 markPaidAndApply 在幂等事务内调用（appliedAt 锚点保证恰好一次）。
+ *   - module   → upsert UserModule(grantsModuleKey, source='purchase') 启用能力。
+ *   - service  → 记一次性服务凭据 UserModule(moduleKey='sku:'+key)（如深度整理，后续核销）。
+ *   - storage  → Profile.extraJson.storageBonus 累加 metaJson.bytes（免加列）。
+ * 另写一条 delta=0 的 CreditLedger 备注行，让订单流水页零改造即可见（方案 V7-12 §前端2）。
+ */
+export async function applySkuGrant(
+  user: { id: string; tenantId: string },
+  sku: SkuLike,
+  opts: { reason: string; source: string },
+  tx: Prisma.TransactionClient,
+): Promise<void> {
+  if (sku.kind === 'module' && sku.grantsModuleKey) {
+    await tx.userModule.upsert({
+      where: { userId_moduleKey: { userId: user.id, moduleKey: sku.grantsModuleKey } },
+      update: { enabled: true, hidden: false, source: 'purchase' },
+      create: { tenantId: user.tenantId, userId: user.id, moduleKey: sku.grantsModuleKey, enabled: true, source: 'purchase' },
+    });
+  } else if (sku.kind === 'storage') {
+    // 与 credits.ts lockCreditAccount / tokenQuota.ts lockQuota 同一模式：按用户加事务级 advisory lock，
+    // 防止两笔并发到账（连续购买 / 支付回调重投递不同订单号）各自读到同一份旧 storageBonus 导致其中一次丢失。
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`storage:${user.id}`}))`;
+    const bytes = Number((sku.metaJson as { bytes?: number } | null)?.bytes ?? 0);
+    const profile = await tx.profile.findFirst({ where: { tenantId: user.tenantId }, orderBy: { updatedAt: 'desc' } });
+    const extra = (profile?.extraJson as Record<string, unknown> | null) ?? {};
+    const bonus = Number(extra.storageBonus ?? 0) + bytes;
+    if (profile) await tx.profile.update({ where: { id: profile.id }, data: { extraJson: { ...extra, storageBonus: bonus } as Prisma.InputJsonValue } });
+    else await tx.profile.create({ data: { tenantId: user.tenantId, extraJson: { storageBonus: bonus } as Prisma.InputJsonValue } });
+  } else {
+    // service（一次性服务，如深度整理）：记已购凭据，后续 organize 核销。
+    await tx.userModule.upsert({
+      where: { userId_moduleKey: { userId: user.id, moduleKey: `sku:${sku.key}` } },
+      update: { enabled: true, source: 'purchase' },
+      create: { tenantId: user.tenantId, userId: user.id, moduleKey: `sku:${sku.key}`, enabled: true, source: 'purchase' },
+    });
+  }
+  // 备注型 0 额流水（订单流水页复用 CreditLedger，不加新端点）。
+  const last = await tx.creditLedger.findFirst({ where: { userId: user.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+  await tx.creditLedger.create({
+    data: { tenantId: user.tenantId, userId: user.id, delta: 0, reason: opts.reason, balance: last?.balance ?? 0 },
+  }).catch(() => {});
+  await tx.auditLog.create({
+    data: { tenantId: user.tenantId, userId: user.id, action: 'user.sku.purchase', payloadJson: { skuKey: sku.key, kind: sku.kind, grantsModuleKey: sku.grantsModuleKey, source: opts.source } },
+  }).catch(() => {});
+}

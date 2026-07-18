@@ -1,7 +1,7 @@
 .picker {
-  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 300;
-  /* weapp 不支持 backdrop-filter（静默降级为无模糊）——把遮罩调深，无模糊也够压暗；
-     H5 仍走模糊。 */
+  /* z-index 提到 900（= --z-sheet 层级）对齐合并后的统一弹层栈；weapp 真机保留显式定位、z-index 写字面量。
+     weapp 不支持 backdrop-filter（静默降级为无模糊）——把遮罩调深，无模糊也够压暗；H5 仍走模糊。 */
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 900;
   background: rgba(22, 25, 29, .55);
   backdrop-filter: blur(6px);
   display: flex; align-items: flex-end; justify-content: center;
@@ -9,18 +9,17 @@
 .pk-card {
   width: 100%;
   background: var(--paper);
-  border-top-left-radius: 28px; border-top-right-radius: 28px;
+  border-top-left-radius: var(--r-lg); border-top-right-radius: var(--r-lg);
   border: 1px solid var(--line);
   padding: 26px 22px calc(28px + env(safe-area-inset-bottom));
   position: relative;
-  animation: pk-rise .42s cubic-bezier(.2, .8, .2, 1) both;
+  animation: sheet-rise .42s cubic-bezier(.2, .8, .2, 1) both;
   /* 内容（尤其建档步骤的 3 个问题 + 按钮）过高时整卡可滚动，避免被裁切 */
   max-height: 92vh;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   box-sizing: border-box;
 }
-@keyframes pk-rise { from { transform: translateY(60px); opacity: .4; } to { transform: none; opacity: 1; } }
 .pk-close {
   position: absolute; top: 18px; right: 20px;
   width: 30px; height: 30px; border-radius: 50%;

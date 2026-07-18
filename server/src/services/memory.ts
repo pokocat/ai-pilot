@@ -3,6 +3,7 @@
 // 生产环境把 embedding 迁到 pgvector 做近邻检索；本地用内存余弦兜底，零依赖可跑。
 
 import { prisma } from '../db.js';
+import { now } from './clock.js';
 import { embed, cosine } from './embedding.js';
 import { keywordScore } from './retrieval.js';
 import { extractInsights } from '../llm/gateway.js';
@@ -92,9 +93,8 @@ export async function recallMemories(
 
 function ttlFromConfig(cfg: MemoryConfig): Date | null {
   if (cfg.retentionDays < 0) return null; // 永久
-  const d = new Date();
-  d.setDate(d.getDate() + cfg.retentionDays);
-  return d;
+  // 过期时刻 = 现在 + retentionDays（纯毫秒运算，与时区无关；走可注入时钟 now()）。
+  return new Date(now().getTime() + cfg.retentionDays * 86400_000);
 }
 
 function weightFromIntensity(cfg: MemoryConfig): number {
@@ -219,18 +219,27 @@ export async function deleteUserMemory(tenantId: string, userId: string, id: str
   await prisma.memory.deleteMany({ where: { id, tenantId, userId } });
 }
 
-/** P1-C4：按 agent 跨用户列出记忆（运营治理自动学习写入的脏记忆）。 */
-export async function listAgentMemories(agentKey: string, limit = 200): Promise<AdminAgentMemoryItem[]> {
-  const rows = await prisma.memory.findMany({ where: { agentKey }, orderBy: { createdAt: 'desc' }, take: Math.min(500, Math.max(1, limit)) });
+/**
+ * P1-C4：按 agent 跨用户列出记忆（运营治理自动学习写入的脏记忆）。
+ * tenantId 传入则限定作用域（避免跨租户全量拉取/误删）；不传 = 平台级全量（超管默认视图）。
+ */
+export async function listAgentMemories(agentKey: string, limit = 200, tenantId?: string): Promise<AdminAgentMemoryItem[]> {
+  const rows = await prisma.memory.findMany({
+    where: { agentKey, ...(tenantId ? { tenantId } : {}) },
+    orderBy: { createdAt: 'desc' }, take: Math.min(500, Math.max(1, limit)),
+  });
   return rows.map((m) => ({
-    id: m.id, userId: m.userId, kind: m.kind, text: m.text, weight: m.weight,
+    id: m.id, tenantId: m.tenantId, userId: m.userId, kind: m.kind, text: m.text, weight: m.weight,
     source: m.source, createdAt: m.createdAt.toISOString(), expiresAt: m.expiresAt ? m.expiresAt.toISOString() : null,
   }));
 }
 
-/** P1-C4：运营按 id+agentKey 删除一条记忆（纠正脏记忆）。返回是否命中。 */
-export async function deleteAgentMemory(agentKey: string, id: string): Promise<boolean> {
-  const r = await prisma.memory.deleteMany({ where: { id, agentKey } });
+/**
+ * P1-C4：运营按 id+agentKey 删除一条记忆（纠正脏记忆）。返回是否命中。
+ * tenantId 传入则叠加租户校验，防跨租户越权删除（超管不传 = 平台级）。
+ */
+export async function deleteAgentMemory(agentKey: string, id: string, tenantId?: string): Promise<boolean> {
+  const r = await prisma.memory.deleteMany({ where: { id, agentKey, ...(tenantId ? { tenantId } : {}) } });
   return r.count > 0;
 }
 

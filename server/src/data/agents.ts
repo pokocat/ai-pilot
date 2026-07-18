@@ -91,6 +91,12 @@ function creativePrompt(agentName: string, mission: string, output: string): str
   return `${BUSINESS_BOUNDARY}\n\n你是「${agentName}」。${mission}\n\n输出要求：${output}\n\n所有创作都必须服务于客户的商业目标、目标客群和品牌定位；不要解释模型能力、生成原理或内部流程。`;
 }
 
+// D-8 军师收编 4+1（顾问科室）：保留 general（总军师）+ strat/growth/ops/brand；
+//   下架冗余顾问 intel/fund/model/org（enabled=false）。创作型工坊 agent（type='creative'：
+//   ip/promo/poster/shortvideo/copy）保持 enabled——它们是处方 toolKey 白名单供给方
+//   （prescription.toolWhitelist = enabled agents）+ market 货架商品，下架会清空处方白名单并使其无法售卖。
+//   已购用户对下架 agent 的访问由 entitlements.assertAgentAccess 豁免（owned 忽略 enabled）。
+//   注册表 enabled 供新环境 seed / 测试对齐；prod 不重跑 seed，走 scripts/retireAgents.ts 幂等下架。
 export const AGENTS: AgentSeed[] = [
   {
     key: 'general',
@@ -176,7 +182,7 @@ export const AGENTS: AgentSeed[] = [
     gift: false,
     billing: 'unlock',
     price: 12,
-    enabled: true,
+    enabled: false, // D-8 军师收编 4+1：冗余顾问科室下架（保留 general+strat/growth/ops/brand）。已购用户仍可对话（assertAgentAccess 豁免）。prod 用 scripts/retireAgents.ts 幂等下架，不重跑 seed。
     greet: '我是竞争情报官。说说你盯的对手或赛道，我帮你看清局势。',
     chips: [['chart', '竞品洞察']],
     memText: '持续追踪你关注的<b>对手与赛道</b>',
@@ -199,7 +205,7 @@ export const AGENTS: AgentSeed[] = [
     gift: true,
     billing: 'free',
     price: 0,
-    enabled: true,
+    enabled: false, // D-8 军师收编 4+1：冗余顾问科室下架。已购/存量会话仍可对话；prod 走 scripts/retireAgents.ts。
     greet: '我是融资参谋。把你的融资节奏讲给我，我帮你把故事和数据对齐。',
     chips: [['doc', '融资准备']],
     memText: '会记住你的<b>轮次与资本结构</b>',
@@ -222,7 +228,7 @@ export const AGENTS: AgentSeed[] = [
     gift: false,
     billing: 'unlock',
     price: 12,
-    enabled: true,
+    enabled: false, // D-8 军师收编 4+1：冗余顾问科室下架。已购用户仍可对话；prod 走 scripts/retireAgents.ts。
     greet: '我是商业模式设计师。讲讲你怎么赚钱，我帮你把模式与定价结构理清。',
     chips: [['layers', '商业模式画布']],
     memText: '会沉淀你的<b>收入与成本结构</b>',
@@ -245,7 +251,7 @@ export const AGENTS: AgentSeed[] = [
     gift: false,
     billing: 'unlock',
     price: 10,
-    enabled: true,
+    enabled: false, // D-8 军师收编 4+1：冗余顾问科室下架。已购用户仍可对话；prod 走 scripts/retireAgents.ts。
     greet: '我是组织人效顾问。说说你的团队现状，我给出组织与激励的优化建议。',
     chips: [['user', '组织优化建议']],
     memText: '会记住你的<b>团队结构与关键岗</b>',

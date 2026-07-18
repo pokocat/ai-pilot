@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { prisma } from '../src/db.js';
 import { AGENTS } from '../src/data/agents.js';
-import { SAYINGS, SURVEY, PLANS } from '../src/data/seedConfig.js';
+import { SAYINGS, SURVEY, PLANS, SKUS } from '../src/data/seedConfig.js';
 
 // 安全兜底：标记测试运行，短信等外部服务一律走 mock，绝不真实触达（即使直接 node --test 跑本文件）。
 // SMS 发送在请求时才读 NODE_ENV（isSmsTestMode），此处赋值早于任何发送，足以拦截。
@@ -52,6 +52,11 @@ export async function seedBaseline(): Promise<void> {
     await prisma.plan.create({ data: { name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount, featuresJson: p.features, highlighted: p.highlighted, sort: i } });
   }
   await seedAgents();
+  await prisma.sku.deleteMany();
+  for (let i = 0; i < SKUS.length; i++) {
+    const s = SKUS[i];
+    await prisma.sku.create({ data: { key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind, grantsModuleKey: s.grantsModuleKey ?? null, metaJson: s.metaBytes ? { bytes: s.metaBytes } : undefined, sort: i } });
+  }
   await prisma.saying.deleteMany();
   for (let i = 0; i < SAYINGS.length; i++) await prisma.saying.create({ data: { text: SAYINGS[i].text, enabled: SAYINGS[i].enabled, sort: i } });
   await prisma.surveyQuestion.deleteMany();
@@ -60,6 +65,10 @@ export async function seedBaseline(): Promise<void> {
 
 /** 清空业务数据（按外键顺序）；保留 agent 注册表。 */
 export async function cleanBusiness(): Promise<void> {
+  await prisma.userModule.deleteMany();
+  await prisma.userDataSource.deleteMany();
+  await prisma.serviceAssignment.deleteMany();
+  await prisma.paymentOrder.deleteMany();
   await prisma.casefileMetric.deleteMany();
   await prisma.casefileOrder.deleteMany();
   await prisma.casefile.deleteMany();
@@ -89,6 +98,13 @@ export async function cleanBusiness(): Promise<void> {
   await prisma.profile.deleteMany();
   await prisma.user.deleteMany();
   await prisma.tenant.deleteMany();
+  await prisma.userJourney.deleteMany();
+  await prisma.prescription.deleteMany();
+  await prisma.activationEvent.deleteMany();
+  await prisma.ecoTool.deleteMany();
+  await prisma.brandKit.deleteMany();
+  await prisma.featureFlag.deleteMany();
+  await prisma.industryBenchmark.deleteMany();
   await prisma.moderationLog.deleteMany();
   await prisma.aiSetting.deleteMany();
 }

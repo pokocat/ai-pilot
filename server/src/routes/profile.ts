@@ -3,6 +3,7 @@ import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { loadChart } from '../services/paipan.js';
+import { fortuneDisabledGuard } from '../services/featureFlag.js';
 import { loadStrategicProfile, upsertStrategicProfile } from '../services/strategicProfile.js';
 import { upsertProfileFields, saveUserBazi } from '../services/profileWrites.js';
 
@@ -52,6 +53,7 @@ export async function profileRoutes(app: FastifyInstance) {
     birthPlace?: string; longitude?: number;
     believe?: boolean;
   } }>('/profile/bazi', async (req, reply) => {
+    if (await fortuneDisabledGuard(reply)) return reply; // P0-2：命理下线 → 排盘/采集 403
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const res = await saveUserBazi(user, req.body ?? {});
     if (!res.ok) return reply.code(400).send({ error: res.error });
@@ -67,7 +69,8 @@ export async function profileRoutes(app: FastifyInstance) {
   });
 
   // 我的命盘（前端命盘页/建档回显）
-  app.get('/profile/chart', async (req) => {
+  app.get('/profile/chart', async (req, reply) => {
+    if (await fortuneDisabledGuard(reply)) return reply; // P0-2：命理下线 → 命盘 403
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const p = await prisma.profile.findFirst({ where: { tenantId: user.tenantId }, orderBy: { updatedAt: 'desc' } });
     const bazi = (p?.extraJson as { bazi?: object } | null)?.bazi ?? null;

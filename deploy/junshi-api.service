@@ -13,6 +13,9 @@ User=junshi
 WorkingDirectory=/opt/junshi/server
 # 环境变量从 WorkingDirectory 下的 .env 读取（应用内置 dotenv 自动加载）。
 # 如偏好 systemd 注入，可改用： EnvironmentFile=/opt/junshi/server/.env
+# 例行 QA 2026-07-08：今日军令/复盘归档/段位晋升/夜间复盘推送等「今天几点」判断都基于
+# 进程本地时区，固定为 Asia/Shanghai 防止裸机宿主时区非北京时间时判断整体错开。
+Environment=TZ=Asia/Shanghai
 ExecStart=/usr/bin/node dist/index.js
 Restart=always
 RestartSec=3

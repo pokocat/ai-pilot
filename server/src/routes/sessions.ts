@@ -4,12 +4,12 @@ import { prisma } from '../db.js';
 import { resolveUser, buildGenContext, isBriefInterviewRequest } from '../services/context.js';
 import { bumpDiagRound } from '../services/strategicProfile.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
-import { generateDeliverable, chatComplete, chatCompleteStream } from '../llm/gateway.js';
+import { generateDeliverable, chatComplete, chatCompleteStream, hasLiveProvider } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
 import { reserveCredits, type CreditReservation } from '../services/credits.js';
-import { reserveQuota, assertPlanActive, ensureQuota, type QuotaReservation } from '../services/tokenQuota.js';
+import { reserveQuota, assertPlanActive, RESERVE_TOKENS, type QuotaReservation } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
@@ -45,24 +45,36 @@ export async function sessionRoutes(app: FastifyInstance) {
       orderBy: { updatedAt: 'desc' },
       include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 }, agent: true },
     });
-    return sessions.map((s) => {
-      const last = s.messages[0];
-      let snippet = '新对话';
-      if (last) {
-        const c = last.contentJson as { text?: string; title?: string };
-        snippet = c.text || (c.title ? `已产出《${c.title}》` : '已回复');
-      }
-      return {
-        id: s.id,
-        agentKey: s.agentKey,
-        agentName: s.agent.name,
-        agentIcon: s.agent.icon,
-        title: s.title,
-        snippet,
-        updatedAt: s.updatedAt,
-        projectId: s.projectId,
-      };
-    });
+    const EPOCH = new Date(0);
+    // V7-15 未读数强化：unreadCount = 自 lastReadAt 起的 assistant 消息计数（服务端算；user/report/system 不计）。
+    // 每会话一条 count（会话数远小于消息数，且计数下推到 SQL），均经 session 关系按 userId 收窄——严格 user 域内。
+    return Promise.all(
+      sessions.map(async (s) => {
+        const last = s.messages[0];
+        let snippet = '新对话';
+        if (last) {
+          const c = last.contentJson as { text?: string; title?: string };
+          snippet = c.text || (c.title ? `已产出《${c.title}》` : '已回复');
+        }
+        const unreadCount = await prisma.message.count({
+          where: { session: { id: s.id, userId: user.id }, role: 'assistant', createdAt: { gt: s.lastReadAt ?? EPOCH } },
+        });
+        return {
+          id: s.id,
+          agentKey: s.agentKey,
+          agentName: s.agent.name,
+          agentIcon: s.agent.icon,
+          title: s.title,
+          snippet,
+          updatedAt: s.updatedAt,
+          projectId: s.projectId,
+          unreadCount,
+          // 未读红点（保留兼容既有消费者）：有未读 assistant（=unreadCount>0），或尾条为未读 report
+          //（后台产出即置——列表红点提示，见 generate* 的 role='report' 落库）。
+          hasUnread: unreadCount > 0 || (!!last && last.role === 'report' && (!s.lastReadAt || last.createdAt > s.lastReadAt)),
+        };
+      }),
+    );
   });
 
   // 会话详情（还原全部历史消息）
@@ -73,6 +85,11 @@ export async function sessionRoutes(app: FastifyInstance) {
       include: { messages: { orderBy: { createdAt: 'asc' } }, agent: true },
     });
     if (!s) return reply.code(404).send({ error: 'session not found' });
+    // 打开会话即标记已读（消除列表未读红点）。必须 await：此前 fire-and-forget（void + 不等待）
+    // 与紧随其后的 GET /sessions 之间存在竞态——客户端拿到本次响应后立刻刷新列表时，
+    // lastReadAt 的写入可能还没落库，导致未读红点没有如实清除（已由测试复现）。
+    // 这是一次按主键的单行 UPDATE，代价极小，不值得为省这点延迟牺牲「打开即已读」的确定性。
+    await prisma.session.update({ where: { id: s.id }, data: { lastReadAt: new Date() } }).catch(() => {});
     // P1-A5：会话头的 greet/chips/memText/learnText 与 /agents 列表同口径——取已发布版本，旧版本相应列为 null 则回退 Agent 行。
     const pub = s.agent.publishedVersionId ? await prisma.agentVersion.findUnique({ where: { id: s.agent.publishedVersionId } }) : null;
     return {
@@ -208,7 +225,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     const isDeliverable = !!effective?.deliverableKey; // 是否产出 = 已发布版本的 deliverableKey
     // 按需产出：deliverableKey 已配 + skillsConfig.deliverableMode='on-demand' → 模型自行决定本轮出报告还是对话。
     const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
-    const { ctx, memoryConfig, knowledgeUsed } = await buildGenContext({
+    const { ctx, memoryConfig, knowledgeUsed, refNotices } = await buildGenContext({
       userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
       sessionId: session.id, difyConversationId: session.difyConversationId,
       effective: effective ?? undefined, history,
@@ -231,7 +248,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
           return {
             sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, proposal,
-            memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
+            memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, refNotices, creditBalance, tokenQuota,
           };
         }
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
@@ -244,7 +261,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
         return {
           sessionId: session.id, created, agentKey, kind: 'report', messageId: msg.id, deliverable,
-          memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, creditBalance, tokenQuota,
+          memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, refNotices, creditBalance, tokenQuota,
         };
       }
       if (isDeliverable) {
@@ -267,7 +284,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           sessionId: session.id, created, agentKey, kind: 'report',
           messageId: msg.id, deliverable,
           memory: learned ? { learned: true, agentName: agent.name } : null,
-          knowledgeUsed, creditBalance, tokenQuota,
+          knowledgeUsed, refNotices, creditBalance, tokenQuota,
         };
       }
       const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
@@ -278,7 +295,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
       const creditBalance = creditReservation?.balance ?? 0;
       const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
-      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, creditBalance, tokenQuota };
+      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, refNotices, creditBalance, tokenQuota };
     } catch (err) {
       if (creditReservation?.charged) {
         await creditReservation.refund().catch((refundErr) => {
@@ -298,12 +315,24 @@ export async function sessionRoutes(app: FastifyInstance) {
   // 把整段会话汇总为「对话纪要」：版本化报告 + 沉淀进知识库
   app.post<{ Params: { id: string } }>('/sessions/:id/summarize', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    // 汇总同样会触发真实模型（summarizePoints），须与 /generate* 一样受月度额度门禁 + 实际扣减。
+    // summarizePoints 走 rawJson，不回传真实 token 用量，故不能只 ensureQuota(仅判断放行、从不扣减)——
+    // 那样只要余额一次性 >0 就能无限次触发真实模型调用，额度系统形同虚设。改用与 /generate* 一致的
+    // reserveQuota 预留 + 按 RESERVE_TOKENS 定额结算（成功=全额扣留，失败=退回）。
+    let quotaReservation: QuotaReservation | null = null;
     try {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：会话汇总是 AI 产出 → 到期拦 PLAN_EXPIRED(403)
-      // 汇总同样会触发真实模型（summarizePoints），须与 /generate* 一样受月度额度门禁，
-      // 否则配额耗尽后仍可无限次触发真实模型调用（额度系统被完全绕过）。
-      await ensureQuota(user.id);
+      quotaReservation = await reserveQuota(user.id, 1);
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+    }
+    try {
+      // mock/demo（未配置真实模型）下 summarizePoints 直接短路返回 null、无真实成本 → 全额退回预留，
+      // 与 /generate* 的 mock 路径（usage=ZERO_USAGE → settle(0) 全退）同一口径，避免误扣。
+      const live = await hasLiveProvider();
       const res = await summarizeSession({ tenantId: user.tenantId, userId: user.id, sessionId: req.params.id });
+      await quotaReservation.settle(live ? RESERVE_TOKENS : 0, 1);
       await recordAudit({
         tenantId: user.tenantId,
         userId: user.id,
@@ -312,6 +341,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       });
       return res;
     } catch (err) {
+      await quotaReservation.refund().catch(() => {});
       const e = err as Error & { statusCode?: number; code?: string };
       return reply.code(e.statusCode ?? 500).send({ error: e.message, code: e.code });
     }
@@ -352,7 +382,11 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
 
     setupSSE(reply);
-    const send = (event: string, data: unknown) => reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    // 客户端断开后不再往死 socket 写（防 write-after-end 抛错中断生成/落库；生成本就会跑完并落库）。
+    const send = (event: string, data: unknown) => {
+      if (reply.raw.writableEnded || reply.raw.destroyed) return;
+      try { reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* socket 已关，忽略 */ }
+    };
 
     try {
       if (!session) {
@@ -393,7 +427,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       const agent = session.agent;
       const isDeliverable = !!effective?.deliverableKey; // 顾问/创作智能体 → 结构化成果（按已发布版本）
       const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
-      const { ctx, memoryConfig } = await buildGenContext({
+      const { ctx, memoryConfig, refNotices } = await buildGenContext({
         userId: user.id,
         tenantId: user.tenantId,
         agentKey,
@@ -413,7 +447,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         if (learned) send('memory', { learned: true, agentName: agent.name });
       };
       if (onDemand && !wantsDeliverableRequest(text)) {
-        send('meta', { kind: 'chat' });
+        send('meta', { kind: 'chat', refNotices });
         let reply2: ChatReply | null = null;
         let usage = { inputTokens: 0, outputTokens: 0 };
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
@@ -433,7 +467,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         if (proposal) send('propose', proposal);
         send('done', { messageId: msg.id });
       } else if (onDemand) {
-        send('meta', { kind: 'report' });
+        send('meta', { kind: 'report', refNotices });
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         send('begin', { title: deliverable.title, icon: deliverable.icon, meta: deliverable.meta });
         for (let i = 0; i < deliverable.sections.length; i++) { await sleep(520); send('section', { index: i, ...deliverable.sections[i] }); }
@@ -449,7 +483,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       } else if (isDeliverable) {
-        send('meta', { kind: 'report' });
+        send('meta', { kind: 'report', refNotices });
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         send('begin', { title: deliverable.title, icon: deliverable.icon, meta: deliverable.meta });
         // 渐进式呈现：按 section 逐段下发（保留原型骨架→渐显动效）
@@ -485,7 +519,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       } else {
-        send('meta', { kind: 'chat' });
+        send('meta', { kind: 'chat', refNotices });
         // 普通聊天优先走 provider 原生 token 流；只在输入侧先审核，输出完成后记账/trace。
         let reply2: ChatReply | null = null;
         let usage = { inputTokens: 0, outputTokens: 0 };

@@ -2,7 +2,7 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { DELIVERABLE_TOOL, buildSystemParts, normalizeDeliverableSections, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, buildSystemParts, normalizeDeliverableSections, normalizePrescriptions, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
@@ -101,6 +101,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
           sections,
           trust: TRUST_NOTE,
           actions: ['save_to_library', 'export_pdf'],
+          prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
         },
         usage,
       };
@@ -305,6 +306,7 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
+        prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
       },
       usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
     };
@@ -356,6 +358,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
+        prescriptions: normalizePrescriptions((input as { prescriptions?: unknown } | null)?.prescriptions),
       },
       usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
     };

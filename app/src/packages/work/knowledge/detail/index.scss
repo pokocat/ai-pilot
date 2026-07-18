@@ -1,0 +1,27 @@
+.kd-loading { padding: 60px 24px; text-align: center; font-size: 13px; color: var(--ink-3); }
+
+.kd-head { display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: var(--r-md); margin-bottom: 12px; }
+.kd-ic { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.kd-hb { flex: 1; min-width: 0; }
+/* 长文件名两行内收敛 + 断词兜底，不横向撑破卡片（#1 溢出） */
+.kd-t { display: block; font-size: 16px; font-weight: 600; color: var(--ink); word-break: break-all; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.kd-m { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 4px; word-break: break-all; overflow-wrap: anywhere; }
+.kd-poll-hint { text-align: center; padding: 8px 12px; margin-bottom: 10px; color: var(--ink-3); font-size: 11.5px; }
+
+.kd-sec-title { display: block; font-size: 12px; font-weight: 600; color: var(--ink-2); margin: 4px 2px 8px; }
+.kd-preview { padding: 14px; border-radius: var(--r-md); margin-bottom: 12px; }
+/* 正文可能含长 URL / 无空格串 → break-word 兜底，避免横向溢出 */
+.kd-preview-t { display: block; font-size: 12.5px; line-height: 1.7; color: var(--ink-2); white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+.kd-preview-more { display: inline-block; margin-top: 10px; font-size: 12.5px; font-weight: 600; }
+.kd-preview-more:active { opacity: .6; }
+.kd-preview-empty { display: block; font-size: 12.5px; line-height: 1.7; color: var(--ink-3); }
+
+/* 经营体检入口卡 */
+.kd-analyze { display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: var(--r-md); margin-bottom: 12px; }
+.kd-analyze.busy { opacity: 0.75; }
+.kd-an-ic { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.kd-an-b { flex: 1; min-width: 0; }
+.kd-an-t { display: block; font-size: 15px; font-weight: 600; color: var(--ink); }
+.kd-an-s { display: block; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); margin-top: 3px; }
+.kd-an-go { font-size: 18px; color: #fff; width: 30px; height: 30px; border-radius: 999px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }

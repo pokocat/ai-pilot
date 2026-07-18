@@ -1,3 +1,3 @@
 export default {
-  navigationBarTitleText: '网页版报告',
+  navigationBarTitleText: '网页版方案',
 };

@@ -5,6 +5,9 @@ import { applyPlanPurchase } from '../services/purchase.js';
 import { payConfigured, createJsapiOrder } from '../services/wechatPay.js';
 import { sandboxEnabled, demoPurchaseEnabled } from '../services/sandbox.js';
 import { computeUpgradeProration } from '../services/proration.js';
+import { isExpired, daysRemaining } from '../services/planTime.js';
+import { now } from '../services/clock.js';
+import { parseAttribution } from '../services/activation.js';
 import { recordAudit } from '../services/audit.js';
 import type { Plan as PlanView, PlanPurchaseResult, WechatOrderResult } from '../../../shared/contracts';
 
@@ -57,7 +60,8 @@ export async function planRoutes(app: FastifyInstance) {
   });
 
   // 微信支付下单（小程序 JSAPI）：创建订单并返回小程序调起支付所需参数。需配齐支付凭据。
-  app.post<{ Params: { id: string }; Body: { openid?: string } }>('/plans/:id/order', async (req, reply): Promise<WechatOrderResult | void> => {
+  // P2：接受 source/refId 归因（与 SKU 下单同口径），回调发放时落 ActivationEvent（itemType='plan'）。
+  app.post<{ Params: { id: string }; Body: { openid?: string; source?: string; refId?: string } }>('/plans/:id/order', async (req, reply): Promise<WechatOrderResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
@@ -65,10 +69,33 @@ export async function planRoutes(app: FastifyInstance) {
     if (plan.price <= 0) return reply.code(400).send({ error: '免费套餐无需支付', code: 'PLAN_FREE' });
     const openid = (req.body?.openid || (user as { wechatOpenId?: string | null }).wechatOpenId || '').trim();
     if (!openid) return reply.code(400).send({ error: '缺少支付用户 openid', code: 'OPENID_REQUIRED' });
+    // 降级守卫（P0）：applyPlanPurchase 对「不同套餐」一律重置有效期锚点——年付降月付/平级横切
+    // 会直接烧掉当前套餐剩余时长且无折算。仅放行：同套餐续费、月→年折算升级、当前套餐已过期/免费。
+    const cur = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { planExpiresAt: true, plan: { select: { id: true, name: true, price: true, period: true } } },
+    });
+    const curPlan = cur?.plan;
+    if (curPlan && curPlan.id !== plan.id) {
+      if (curPlan.price < 0) {
+        return reply.code(409).send({ error: '企业版套餐由运营管理，如需调整请联系客服', code: 'PLAN_SWITCH_BLOCKED' });
+      }
+      if (curPlan.price > 0 && !isExpired(cur?.planExpiresAt, now())) {
+        const isProratedUpgrade = curPlan.period === 'month' && plan.period === 'year';
+        if (!isProratedUpgrade) {
+          const days = daysRemaining(cur?.planExpiresAt, now()) ?? 0;
+          return reply.code(409).send({
+            error: `当前套餐「${curPlan.name}」还有 ${days} 天有效期，现在切换将丢失剩余时长；请到期后再购买`,
+            code: 'PLAN_SWITCH_BLOCKED',
+          });
+        }
+      }
+    }
     // 月→年升级折算（D5）：实付 = max(0, 年付原价 − 老月付套餐剩余价值)；不触发时 = 原价。
     const proration = await computeUpgradeProration(user, { id: plan.id, price: plan.price, period: plan.period });
+    const attribution = parseAttribution(req.body?.source, req.body?.refId);
     try {
-      const r = await createJsapiOrder({ user, plan: { id: plan.id, name: plan.name, price: plan.price }, openid, amount: proration.chargeAmount });
+      const r = await createJsapiOrder({ user, plan: { id: plan.id, name: plan.name, price: plan.price }, openid, amount: proration.chargeAmount, attribution });
       if (proration.applies) {
         await recordAudit({
           tenantId: user.tenantId, userId: user.id, action: 'user.plan.proration',

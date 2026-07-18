@@ -11,15 +11,23 @@ import type {
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
+  QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
+  SkuView, SkuOrderResult, PayOrderStatus, PayOrderListResult, BattleForce, BattleCommitResult,
+  DataSourcesView, DataSourceView, DataSourceStatus, ModulesView, ModuleView,
+  ReminderView, WorkbenchView, ServiceAssignmentView, SearchHit, SearchResult,
+  KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, OrganizeItem, StagedUploadResult, ConfirmResult,
+  KnowledgeBatch, KnowledgeBatchFile,
+  KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
 } from '../../../shared/contracts';
 import type {
-  ChartSummary, ProgressView,
+  ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek,
   OnboardingStage, OnboardingMsg, OnboardingStateResult, OnboardingAdvanceBody, OnboardingAdvanceResult, OnboardingResultView, CounselOpening,
 } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
 import { agentForText } from '../data/intents';
 import { getToken } from './token';
+import { sourceUploadName } from './uploadName';
 
 // ── mock 静态数据源（与后端 seed 对齐） ──
 // 行业选项真相源在服务端 industryPacks.ts 的 industryOptionLabels()；此处为离线 mock 兜底，需同步维护。
@@ -82,6 +90,77 @@ const PLANS: Plan[] = [
   },
 ];
 
+// V7-12：单次付费商品目录（前端离线兜底，与服务端 seedConfig.SKUS 同口径）。
+const SKUS: { key: string; name: string; desc: string; priceFen: number; kind: 'module' | 'service' | 'storage'; grantsModuleKey?: string }[] = [
+  { key: 'deep-organize', name: '深度整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成可直接调用的知识。', priceFen: 3900, kind: 'service' },
+  { key: 'storage-2g', name: '资料空间包', desc: '为资料库扩容约 2GB，容纳更多经营材料。', priceFen: 1900, kind: 'storage' },
+  { key: 'deep-contradiction', name: '深度矛盾分析', desc: '围绕主要矛盾做一次深度拆解，给出结构化打法与验证标准。', priceFen: 2900, kind: 'module', grantsModuleKey: 'deep-contradiction' },
+  { key: 'fin-checkup', name: '财务经营体检', desc: '对经营与财务数据做一次系统体检，定位现金与利润风险。', priceFen: 4900, kind: 'module', grantsModuleKey: 'fin-checkup' },
+  { key: 'ip-topics-pro', name: 'IP 选题库 · 高级版', desc: '按你的定位批量产出可执行的内容选题库。', priceFen: 9900, kind: 'module', grantsModuleKey: 'ip-topics-pro' },
+  { key: 'shop-dashboard', name: '店铺数据看板', desc: '搭建店铺经营数据看板，按周复盘核心经营指标。', priceFen: 19900, kind: 'module', grantsModuleKey: 'shop-dashboard' },
+];
+
+// V7-04：结构化三势确定性兜底（对齐效果图默认三势）。
+const DEFAULT_BATTLE_FORCES: BattleForce[] = [
+  { kind: 'sky', level: 'strong', conclusion: '行业上行', tactic: '可以借势', tacticTone: 'ok', note: '少追热点，多沉淀判断框架。', strength: 75 },
+  { kind: 'market', level: 'mid', conclusion: '对手抢位', tactic: '不能扩量', tacticTone: 'warn', note: '老板要少误判，不缺泛内容。', strength: 45 },
+  { kind: 'people', level: 'weak', conclusion: '团队待整', tactic: '轻资产验证', tacticTone: 'danger', note: '先用内容和私域跑小闭环。', strength: 35 },
+];
+
+// V7-07 数据源目录（前端离线兜底，对齐 server data/dataSources.ts）。
+const MOCK_DATA_SOURCES: { key: string; label: string; desc: string; icon: string; scope: string[]; tier: 'basic' | 'advanced' }[] = [
+  { key: 'content-account', label: '内容账号数据', desc: '小红书 / 抖音 / 视频号 / 公众号：阅读、互动、私信', icon: '内', scope: ['阅读·播放', '互动·评论', '私信关键词', '内容选题表现'], tier: 'basic' },
+  { key: 'private', label: '客户与私域数据', desc: '企微、微信群、私聊记录、客户标签、咨询记录', icon: '客', scope: ['客户标签', '跟进状态', '咨询关键词', '成交回写'], tier: 'basic' },
+  { key: 'shop', label: '店铺经营数据', desc: '曝光、点击、成交、复购、退款、客单价', icon: '店', scope: ['曝光·点击', '成交·退款', '复购·客单价', '投放花费'], tier: 'basic' },
+  { key: 'funnel', label: '成交漏斗数据', desc: '线索、咨询、报价、成交、流失原因、复购', icon: '漏', scope: ['线索数', '咨询数', '报价数', '成交·流失原因'], tier: 'basic' },
+  { key: 'finance', label: '财务经营数据', desc: '营收、成本、利润、预算、投放花费、现金流', icon: '财', scope: ['营收', '成本', '利润', '预算·现金流'], tier: 'basic' },
+  { key: 'service', label: '服务交付数据', desc: '服务进度、客户反馈、好评截图、售后问题、案例结果', icon: '服', scope: ['服务进度', '客户反馈', '案例结果', '售后问题'], tier: 'basic' },
+  { key: 'crm', label: '企业微信 / CRM 授权', desc: '长期追踪客户标签、跟进状态和成交回写。', icon: '企', scope: ['客户标签', '跟进状态', '咨询关键词', '成交回写'], tier: 'advanced' },
+  { key: 'ads', label: '广告与店铺后台授权', desc: '持续读取投放、店铺和订单变化，自动刷新复盘。', icon: '广', scope: ['曝光·点击', '成交·退款', '复购·客单价', '投放花费'], tier: 'advanced' },
+];
+function dsLabel(status: DataSourceStatus, tier: 'basic' | 'advanced'): string {
+  return status === 'bound' ? '已绑定' : status === 'uploaded' ? '待上传' : status === 'auth_requested' ? '待授权' : tier === 'advanced' ? '高级' : '上传即可';
+}
+
+// V7-08 能力目录（前端离线兜底，对齐 server data/modules.ts；detail 简版）。
+type ModuleGroupM = 'free' | 'deep' | 'member';
+type ModuleTierM = 'free' | 'sku' | 'credits' | 'member';
+const MOCK_MODULES: Omit<ModuleView, 'enabled' | 'hidden' | 'sortOrder'>[] = [
+  { key: 'trend', label: '三势初判', desc: '天势 / 市势 / 人势，先给基础判断', iconChar: '势', group: 'free', tier: 'free', stateLabel: '默认启用', agentKey: 'general', detail: { scene: '案卷资料齐了先跑一遍三势', input: '案卷资料', output: '三势判断', cost: '免费', writeback: '战局页' } },
+  { key: 'conflict', label: '矛盾初筛', desc: '识别当前最卡住增长的主线问题', iconChar: '矛', group: 'free', tier: 'free', stateLabel: '可直接调用', agentKey: 'general', detail: { scene: '拿不准最该解决什么时用', input: '对话 + 案卷', output: '主要矛盾', cost: '免费', writeback: '战局页' } },
+  { key: 'deep-contradiction', label: '深度矛盾分析', desc: '输出阶段打法、风险边界和不可做清单', iconChar: '深', group: 'deep', tier: 'sku', price: { skuKey: 'deep-contradiction', priceFen: 2900 }, stateLabel: '¥29 启用', detail: { scene: '主要矛盾已明确，要深挖打法', input: '完整案卷', output: '深度诊断', cost: '¥29', writeback: '方案库' } },
+  { key: 'growth', label: '增长漏斗诊断', desc: '结合店铺、私域和内容数据做深度推演', iconChar: '漏', group: 'deep', tier: 'credits', price: { credits: 80 }, stateLabel: '消耗 80 算力', agentKey: 'growth', detail: { scene: '有成交漏斗数据后重算损耗', input: '成交漏斗表', output: '转化断点', cost: '80 算力', writeback: '执行页' } },
+  { key: 'ip-engine', label: 'IP 内容引擎', desc: '定位、选题、脚本、发布计划一体生成', iconChar: 'IP', group: 'deep', tier: 'member', price: { planRequired: true }, stateLabel: '会员可用', agentKey: 'ip', detail: { scene: '要批量产出可执行内容', input: 'IP 资料', output: '选题脚本', cost: '会员', writeback: '执行页' } },
+  { key: 'finance', label: '财务经营体检', desc: '现金流、成本结构、利润风险初步拆解', iconChar: '财', group: 'deep', tier: 'sku', price: { skuKey: 'fin-checkup', priceFen: 4900 }, stateLabel: '¥49 启用', detail: { scene: '担心现金和利润风险时', input: '财务表', output: '经营体检', cost: '¥49', writeback: '方案库' } },
+  { key: 'daily-command', label: '每日军令', desc: '任务、提醒、复盘，承接认可后的方案', iconChar: '令', group: 'member', tier: 'free', stateLabel: '基础版免费', detail: { scene: '认可判断后自动承接执行', input: '认可判断', output: '每日军令', cost: '免费', writeback: '执行页' } },
+  { key: 'topic-bank', label: 'IP 选题库高级版', desc: '按人设、产品和渠道生成长期选题池', iconChar: '题', group: 'member', tier: 'sku', price: { skuKey: 'ip-topics-pro', priceFen: 9900 }, stateLabel: '¥99 单独购买', detail: { scene: '需要长期内容选题储备', input: '人设产品', output: '长期选题', cost: '¥99', writeback: '知识库' } },
+  { key: 'shop-board', label: '店铺数据看板', desc: '曝光、点击、转化、复购持续追踪', iconChar: '店', group: 'member', tier: 'sku', price: { skuKey: 'shop-dashboard', priceFen: 19900 }, stateLabel: '¥199 单独购买', detail: { scene: '要持续盯店铺经营指标', input: '店铺授权', output: '数据看板', cost: '¥199', writeback: '数据源' } },
+  { key: 'weekly-review', label: '周复盘增强', desc: '自动汇总执行、数据和下一周军令', iconChar: '复', group: 'member', tier: 'member', price: { planRequired: true }, stateLabel: '会员解锁', detail: { scene: '每周要系统复盘并排下周军令', input: '本周执行', output: '周复盘', cost: '会员', writeback: '方案库' } },
+];
+const MOCK_SKU_MODULE_KEY: Record<string, string> = { 'deep-contradiction': 'deep-contradiction', finance: 'fin-checkup', 'topic-bank': 'ip-topics-pro', 'shop-board': 'shop-dashboard' };
+
+// V7-06 业务类目（前端离线兜底，对齐 server data/bizCategories.ts）。
+const BIZ_LABEL: Record<string, string> = { founder: '老板档案', company: '企业档案', finance: '财务经营', content: '内容IP', growth: '增长资料', customer: '客户问答', proof: '案例证明', unknown: '待识别' };
+function classifyMock(text: string): string {
+  const t = text || '';
+  if (/老板|创始|个人|IP档案/.test(t)) return 'founder';
+  if (/企业|公司|组织|团队/.test(t)) return 'company';
+  if (/财务|营收|成本|利润|现金/.test(t)) return 'finance';
+  if (/内容|选题|脚本|视频/.test(t)) return 'content';
+  if (/增长|漏斗|转化|线索/.test(t)) return 'growth';
+  if (/客户|问答|咨询|反馈/.test(t)) return 'customer';
+  if (/案例|证明|评价|结果/.test(t)) return 'proof';
+  return 'unknown';
+}
+// V7-06：整理后一句摘要（mock 确定性，按类目生成）。
+const BIZ_SUMMARY: Record<string, string> = {
+  founder: '老板个人背景与定位要点', company: '企业组织与业务概况',
+  finance: '收入成本与现金流关键数字', content: '内容选题与脚本素材',
+  growth: '获客漏斗与转化线索', customer: '客户问答与常见反馈',
+  proof: '成交案例与结果佐证', unknown: '待进一步识别归类',
+};
+function mockSummary(cat: string): string { return BIZ_SUMMARY[cat] || BIZ_SUMMARY.unknown; }
+
 // ── 每账号(token)隔离、落 Taro storage 的内存库 ──
 interface SessionRec {
   id: string; agentKey: string; title: string;
@@ -100,6 +179,27 @@ interface ReportDocRec {
 interface KnowledgeRec {
   id: string; projectId: string | null; kind: string; title: string | null; text: string;
   sourceType: string; sourceId: string | null; tags: string[]; at: string;
+  stage?: KnowledgeStage; bizCategory?: string; batchId?: string; fileType?: string; fileSize?: number; dupOfId?: string; // V7-06
+  status?: string; summary?: string; // V7-06：单份解析状态（ready/parsing/failed）+ 整理后一句摘要
+}
+
+function mockOrganizeItem(k: KnowledgeRec): OrganizeItem {
+  const category = BIZ_LABEL[k.bizCategory || 'unknown'] || '待识别';
+  const originalName = sourceUploadName(k.title);
+  const heading = k.text.split(/\r?\n/).map((line) => line.trim()).find((line) => /^#{1,3}\s+/.test(line));
+  const contentName = originalName ? '' : String(heading || '').replace(/^#{1,3}\s+/, '').trim();
+  const ext = String(k.fileType || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const inferredName = contentName ? `${contentName}${ext ? `.${ext}` : ''}` : '';
+  return {
+    id: k.id,
+    fileName: originalName || inferredName || `${category}资料`,
+    fileType: k.fileType || null,
+    nameSource: originalName ? 'original' : inferredName ? 'content' : 'fallback',
+    category,
+    summary: k.summary || mockSummary(k.bizCategory || 'unknown'),
+    preview: k.text.trim().slice(0, 1200),
+    isDup: !!k.dupOfId,
+  };
 }
 interface ProjectRec {
   id: string; name: string; slug: string; icon: string; summary: string | null;
@@ -114,6 +214,13 @@ interface UserData {
   projects: ProjectRec[]; reports: ReportDocRec[]; knowledge: KnowledgeRec[];
   // 入帐对话进度（WO-A2 mock 状态机）
   onbStage?: string; onbReady?: boolean; onbReportMsgId?: string; onbSessionId?: string;
+  ownedModules?: string[]; // V7-08/V7-12：已启用能力 key（免费直启 / credits / sku 购买）
+  skuServices?: string[]; // V7-12：已购一次性服务 key（如 deep-organize）
+  battleForces?: BattleForce[]; // V7-04：结构化三势（刷新后覆盖默认）
+  battleCommittedDate?: string; // V7-04：今日已 commit 日期（幂等）
+  dataSourceStatus?: Record<string, DataSourceStatus>; // V7-07
+  moduleState?: Record<string, { hidden?: boolean; sortOrder?: number }>; // V7-08
+  knowledgeSeeded?: boolean; // V7-06：演示待整理批次已注入（仅注入一次）
 }
 
 const uid = (p = '') => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -134,6 +241,10 @@ function load(token: string): UserData {
       d.tokenUsed ??= 0;
       d.creditLog ??= [];
       d.ownedAgents ??= ['intel', 'brand']; // 演示：默认已启用两个专项智能体
+      d.ownedModules ??= [];
+      d.skuServices ??= [];
+      d.dataSourceStatus ??= { 'content-account': 'bound', private: 'bound' };
+      d.moduleState ??= {};
       d.company ??= '';
       d.name ??= '';
       return d;
@@ -303,6 +414,10 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
     positioning: null,
     // L-6 三势：mock 给确定性研判结论，军情页市势/人势卡走真数据态
     forces: d.profile?.pain ? { shishi: { verdict: '守', note: '先守住复购，别急着抢新客' }, renshi: { verdict: '等', note: '人手紧，先练兵不硬扩' } } : null,
+    // V7-04 结构化三势：无资料时为空（战局页走 force-empty 空态引导对话，不预置结论）；
+    // 有痛点/已刷新（refreshForces 写入 d.battleForces）时才给三势，两态均可走查（P0-3）。
+    battleForces: d.battleForces ?? (d.profile?.pain ? DEFAULT_BATTLE_FORCES : []),
+    battleForcesAt: null,
     sections: [
       { key: 'identity', title: '经营身份', items: identity, emptyText: '还没记录你的称呼、公司、行业和阶段。' },
       { key: 'journey', title: '创业路径', items: journey, emptyText: '还没形成创业路径。可以告诉军师：你怎么开始、做过哪些转折、现在走到哪一步。' },
@@ -543,6 +658,37 @@ function proStatsM(items: ProphecyView[]): ProphecyStats {
   return { total: items.length, pending: items.length - hit - miss, hit, miss, hitRate: hit + miss >= 5 ? Math.round((hit / (hit + miss)) * 100) : null };
 }
 
+// —— WO-10 经营周报 mock：美业样例模板 + 周序列（本地持久化，确定性种子） ——
+// 模板字段与服务端 IndustryBenchmark（美业启用项）口径对齐；离线兜底，需同步维护。
+const BIZ_TEMPLATE_BEAUTY: BizMetricTemplateItem[] = [
+  { metricKey: 'monthly_revenue', metricName: '月营收', unit: '万元' },
+  { metricKey: 'customer_price', metricName: '客单价', unit: '元' },
+  { metricKey: 'repurchase_rate', metricName: '复购率', unit: '%' },
+  { metricKey: 'store_conversion', metricName: '到店转化率', unit: '%' },
+  { metricKey: 'new_customers', metricName: '新客数', unit: '人' },
+];
+function pad2M(n: number): string { return String(n).padStart(2, '0'); }
+function ymdM(d: Date): string { return `${d.getFullYear()}-${pad2M(d.getMonth() + 1)}-${pad2M(d.getDate())}`; }
+// 本周一（与服务端归一口径一致）；offset 周为负数取过去的周一。
+function mondayOfM(offsetWeeks = 0): string {
+  const d = new Date();
+  const dow = (d.getDay() + 6) % 7; // 0=周一
+  d.setDate(d.getDate() - dow + offsetWeeks * 7);
+  return ymdM(d);
+}
+function seedBizSeriesM(): BizMetricWeek[] {
+  // 上上周 + 上周两条确定性历史，本周留空待用户上报。
+  return [
+    { weekStart: mondayOfM(-2), metrics: { monthly_revenue: 18, customer_price: 620, repurchase_rate: 34, store_conversion: 41, new_customers: 52 } },
+    { weekStart: mondayOfM(-1), metrics: { monthly_revenue: 21, customer_price: 660, repurchase_rate: 37, store_conversion: 44, new_customers: 58 } },
+  ];
+}
+function loadBizSeriesM(token: string): BizMetricWeek[] {
+  try { const raw = Taro.getStorageSync(`mock.bizmetrics.${token}`); if (raw) return (typeof raw === 'string' ? JSON.parse(raw) : raw) as BizMetricWeek[]; } catch { /* noop */ }
+  return seedBizSeriesM();
+}
+function saveBizSeriesM(token: string, s: BizMetricWeek[]) { try { Taro.setStorageSync(`mock.bizmetrics.${token}`, JSON.stringify(s)); } catch { /* noop */ } }
+
 // ── mock api（与后端同口径） ──
 export const mock = {
   async suggestAlias(): Promise<AliasSuggestionResult> {
@@ -646,6 +792,9 @@ export const mock = {
       onboarded: d.onboarded,
       ai: { provider: 'mock', model: 'template', ready: false, claudeReady: false },
       understanding: buildUnderstandingM(d),
+      inviteCode: 'JS2026',
+      service: { teacherName: '林老师', teacherWechat: 'lin_junshi_03', className: '上海 3 班', groupQrUrl: '', taskDone: 4, taskTotal: 6, note: '负责资料确认和入群任务' },
+      features: { fortune: true }, // P0-2：mock 默认开命理，本地/H5 可完整走查
     });
   },
 
@@ -690,6 +839,317 @@ export const mock = {
     return delay({ ok: true, plan, creditBalance: d.creditBalance, grantedCredits, grantedTokens: plan.tokenQuotaPerMonth });
   },
 
+  // V7-12：单次付费商品目录 + 假支付成功流（mock 直接发放权益并记备注流水）。
+  async skus(): Promise<SkuView[]> {
+    return delay(SKUS.map((s) => ({ key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind, grantsModuleKey: s.grantsModuleKey ?? null })));
+  },
+  async createSkuOrder(key: string): Promise<SkuOrderResult> {
+    const { token, d } = current();
+    const sku = SKUS.find((s) => s.key === key);
+    if (!sku) throw Object.assign(new Error('商品不存在'), { code: 'SKU_NOT_FOUND' });
+    if (sku.kind === 'module' && sku.grantsModuleKey) {
+      d.ownedModules ??= [];
+      if (!d.ownedModules.includes(sku.grantsModuleKey)) d.ownedModules.push(sku.grantsModuleKey);
+    } else if (sku.kind === 'service') {
+      d.skuServices ??= [];
+      if (!d.skuServices.includes(sku.key)) d.skuServices.push(sku.key);
+    }
+    (d.creditLog ??= []).push({ at: now(), reason: `${sku.name} · 微信支付`, delta: 0, balance: d.creditBalance });
+    save(token, d);
+    return delay({ orderId: uid('sku-'), demo: true });
+  },
+
+  // 支付订单状态：mock 无异步回调，权益在 createSkuOrder 已本地发放 → 恒返回 applied（与 server 同口径停止轮询）。
+  async payOrderStatus(outTradeNo: string): Promise<PayOrderStatus> {
+    return delay({ outTradeNo, status: 'applied' as const, amount: 0, appliedAt: now() });
+  },
+  // 支付订单列表/继续支付：mock 走演示通道（无真实 PaymentOrder），列表为空、继续支付不可用。
+  async myOrders(): Promise<PayOrderListResult> {
+    return delay({ items: [] });
+  },
+  async orderPayParams(_outTradeNo: string): Promise<never> {
+    await delay(null);
+    throw Object.assign(new Error('演示环境无待支付订单'), { code: 'ORDER_NOT_PAYABLE' });
+  },
+
+  // V7-04：三势刷新 + 认可判断一键生成（mock 确定性）。
+  async refreshForces(): Promise<{ forces: BattleForce[] }> {
+    const { token, d } = current();
+    d.battleForces = DEFAULT_BATTLE_FORCES;
+    save(token, d);
+    return delay({ forces: DEFAULT_BATTLE_FORCES });
+  },
+  async battleCommit(): Promise<BattleCommitResult> {
+    const { token, d } = current();
+    const today = now().slice(0, 10);
+    const already = d.battleCommittedDate === today;
+    d.battleCommittedDate = today;
+    save(token, d);
+    return delay({ reportId: 'mock-battle-report', reportSlug: 'battle', version: 1, libraryId: null, newOrders: already ? 0 : 3, alreadyDone: already });
+  },
+
+  // V7-07 数据源
+  async getDataSources(): Promise<DataSourcesView> {
+    const { d } = current();
+    const st = d.dataSourceStatus ?? {};
+    const sources: DataSourceView[] = MOCK_DATA_SOURCES.map((s) => {
+      const status = (st[s.key] ?? 'unbound') as DataSourceStatus;
+      return { key: s.key, label: s.label, desc: s.desc, icon: s.icon, scope: s.scope, tier: s.tier, status, statusLabel: dsLabel(status, s.tier) };
+    });
+    const bound = sources.filter((s) => s.status === 'bound').length;
+    const needed = sources.filter((s) => s.status === 'unbound' && s.tier === 'basic').length;
+    return delay({ bound, needed, total: MOCK_DATA_SOURCES.length, sources });
+  },
+  async uploadDataSource(key: string): Promise<DataSourcesView> {
+    const { token, d } = current();
+    (d.dataSourceStatus ??= {})[key] = 'uploaded'; save(token, d);
+    return this.getDataSources();
+  },
+  async requestDataSourceAuth(key: string): Promise<DataSourcesView> {
+    const { token, d } = current();
+    (d.dataSourceStatus ??= {})[key] = 'auth_requested'; save(token, d);
+    return this.getDataSources();
+  },
+
+  // V7-08 模块
+  async modules(): Promise<ModulesView> {
+    const { d } = current();
+    const owned = new Set(d.ownedModules ?? []);
+    const state = d.moduleState ?? {};
+    const build = (m: Omit<ModuleView, 'enabled' | 'hidden' | 'sortOrder'>, i: number): ModuleView => ({
+      ...m, enabled: m.tier === 'free' || owned.has(m.key), hidden: !!state[m.key]?.hidden,
+      sortOrder: state[m.key]?.sortOrder ?? i,
+      stateLabel: (m.tier === 'free' || owned.has(m.key)) ? '已启用' : m.stateLabel,
+    });
+    const modules = MOCK_MODULES.map(build).sort((a, b) => a.sortOrder - b.sortOrder);
+    const rec = MOCK_MODULES.find((m) => m.key === 'growth');
+    return delay({ recommended: rec ? build(rec, 3) : null, modules });
+  },
+  async enableModule(key: string): Promise<ModuleView> {
+    const { token, d } = current();
+    const m = MOCK_MODULES.find((x) => x.key === key);
+    if (!m) throw Object.assign(new Error('能力不存在'), { code: 'MODULE_NOT_FOUND' });
+    d.ownedModules ??= [];
+    if (m.tier === 'credits') {
+      const cost = m.price?.credits ?? 0;
+      if (d.creditBalance >= 0 && d.creditBalance < cost) throw Object.assign(new Error('算力不足'), { code: 'INSUFFICIENT_CREDITS', data: { code: 'INSUFFICIENT_CREDITS' } });
+      if (d.creditBalance >= 0) d.creditBalance -= cost;
+    } else if (m.tier === 'sku') {
+      const skuKey = MOCK_SKU_MODULE_KEY[key] ?? key;
+      // 已购判定接受：模块自身 key / grantsModuleKey（createSkuOrder 发放的即 grantsModuleKey）/ 一次性服务凭据。
+      const purchased = d.ownedModules.includes(key) || d.ownedModules.includes(skuKey) || (d.skuServices ?? []).includes(skuKey);
+      if (!purchased) throw Object.assign(new Error('需先购买'), { code: 'SKU_REQUIRED', data: { code: 'SKU_REQUIRED', skuKey } });
+    }
+    if (!d.ownedModules.includes(key)) d.ownedModules.push(key);
+    save(token, d);
+    const list = await this.modules();
+    return list.modules.find((x) => x.key === key)!;
+  },
+  async patchModule(key: string, body: { hidden?: boolean; sortOrder?: number }): Promise<ModuleView> {
+    const { token, d } = current();
+    (d.moduleState ??= {})[key] = { ...(d.moduleState[key] ?? {}), ...body }; save(token, d);
+    const list = await this.modules();
+    return list.modules.find((x) => x.key === key)!;
+  },
+
+  // V7-11 提醒
+  reminders(): Promise<ReminderView> {
+    return Promise.resolve({
+      items: [
+        { key: 'order', time: '18:00', title: '今日军令截止', desc: '18:00 前补充高意向咨询记录。', kind: 'order', subscribed: false },
+        { key: 'review', time: '21:30', title: '今日复盘', desc: '21:30 生成今日复盘。', kind: 'review', subscribed: false },
+        { key: 'weekly', time: '周五', title: '周复盘', desc: '本周五检查成交漏斗和内容表现。', kind: 'weekly', subscribed: false },
+      ],
+      subscribeReady: false,
+    });
+  },
+
+  // V7-13 档案工作台
+  async workbench(): Promise<WorkbenchView> {
+    const und = buildUnderstandingM(current().d);
+    const done = und.maturity === 'ready' ? 85 : und.maturity === 'forming' ? 55 : 20;
+    return delay({
+      completeness: done,
+      sections: [
+        { key: 'founder', label: '老板档案', hint: '目标、优势、表达风格', count: 7, ready: true },
+        { key: 'company', label: '企业档案', hint: '组织结构、发展历程、核心产品', count: 8, ready: true },
+        { key: 'product', label: '产品服务', hint: '价格体系、交付流程、客户画像', count: 0, ready: false },
+        { key: 'finance', label: '财务经营', hint: '预算表、现金流、利润估算', count: 0, ready: false },
+      ],
+      missing: (und.nextQuestions.length ? und.nextQuestions.slice(0, 3).map((q, i) => ({ key: `q${i}`, title: q, desc: '补齐后会刷新战局判断。' })) : [
+        { key: 'pricing', title: '产品价格体系', desc: '影响方案报价、成交判断和复购建议。' },
+        { key: 'funnel', title: '近 30 天成交漏斗表', desc: '战局页会用它判断卡点和优先级。' },
+        { key: 'proof', title: '案例结果与客户反馈', desc: '用于生成信任证明和内容选题。' },
+      ]),
+    });
+  },
+
+  // V7-14 跨域搜索
+  async search(q: string): Promise<SearchResult> {
+    const query = q.trim(); if (!query) return delay({ q: '', hits: [] });
+    const ql = query.toLowerCase();
+    const { d } = current();
+    const hits: SearchHit[] = [];
+    DEFAULT_AGENTS.filter((a) => a.name.toLowerCase().includes(ql) || a.role.toLowerCase().includes(ql)).slice(0, 5)
+      .forEach((a) => hits.push({ kind: 'agent', id: a.key, title: a.name, snippet: a.role, route: `/packages/main/chat/index?agentKey=${a.key}&fresh=1` }));
+    d.sessions.filter((s) => s.title.toLowerCase().includes(ql)).slice(0, 5)
+      .forEach((s) => hits.push({ kind: 'session', id: s.id, title: s.title, snippet: s.title, route: `/packages/main/chat/index?sessionId=${s.id}` }));
+    d.reports.filter((r) => r.title.toLowerCase().includes(ql)).slice(0, 5)
+      .forEach((r) => hits.push({ kind: 'report', id: r.id, title: r.title, snippet: r.type, route: `/packages/work/report/index?id=${r.id}` }));
+    d.knowledge.filter((k) => (k.stage ?? 'confirmed') === 'confirmed' && (k.title ?? k.text ?? '').toLowerCase().includes(ql)).slice(0, 5)
+      .forEach((k) => hits.push({ kind: 'knowledge', id: k.id, title: k.title || k.kind, snippet: (k.text || '').slice(0, 120), route: '/packages/work/knowledge/index' }));
+    return delay({ q: query, hits });
+  },
+
+  // V7-06 智库三段式资料整理管道（mock，本地 storage）。
+  async uploadKnowledgeStaged(staged?: boolean, batchId?: string, originalName?: string): Promise<StagedUploadResult> {
+    const { token, d } = current();
+    const id = uid('kn-'); const bid = batchId || uid('batch-');
+    const stage: KnowledgeStage = staged ? 'staging' : 'confirmed';
+    const types = ['表', 'PDF', '图', '文'];
+    const title = originalName?.trim() || '待识别资料';
+    (d.knowledge ??= []).unshift({ id, projectId: null, kind: 'document', title, text: '（mock 待整理资料）', sourceType: 'upload', sourceId: null, tags: [], at: now(), stage, batchId: staged ? bid : undefined, fileType: types[d.knowledge.length % types.length], fileSize: 120000, status: staged ? 'ready' : 'ready' });
+    save(token, d);
+    return delay({ id, status: staged ? 'staging' : 'ready', stage, batchId: staged ? bid : undefined });
+  },
+  // —— WO-09 经营体检（资料库文档视图 + 详情 + 体检）——
+  // 走查用确定性样例：k-fin-demo=财务表(canAnalyze) / k-doc-demo=非财务(无体检入口)。
+  async knowledgeDocs(): Promise<KnowledgeDocRow[]> {
+    return delay([
+      { id: 'k-fin-demo', kind: 'document', title: '3 月经营流水表', sourceType: 'upload', status: 'ready', stage: 'confirmed', fileName: '流水表.xlsx', fileType: 'xlsx', fileSize: 128000, chunkCount: 4, summary: '月份,收入,成本,毛利 1月,128000,86000,42000', projectId: null, error: null, createdAt: now(), updatedAt: now() },
+      { id: 'k-doc-demo', kind: 'document', title: '产品介绍', sourceType: 'upload', status: 'ready', stage: 'confirmed', fileName: '产品介绍.pdf', fileType: 'pdf', fileSize: 96000, chunkCount: 3, summary: '我们的产品面向中小商户，提供一体化经营管理…', projectId: null, error: null, createdAt: now(), updatedAt: now() },
+      { id: 'k-staging-demo', kind: 'document', title: '客户名单', sourceType: 'upload', status: 'parsing', stage: 'staging', fileName: '客户名单.csv', fileType: 'csv', fileSize: 24000, chunkCount: 0, summary: '', projectId: null, error: null, createdAt: now(), updatedAt: now() },
+    ]);
+  },
+  // F7：mock 从 reject 改为返回可用空壳；id 含 'fin' 视作财务/经营表 → canAnalyze=true。
+  async knowledgeDetail(id: string): Promise<KnowledgeDetail> {
+    const financial = /fin/i.test(id);
+    const preview = financial
+      ? '月份,收入,成本,毛利\n1月,128000,86000,42000\n2月,143500,92000,51500\n3月,161200,98400,62800'
+      : '（示例）本资料为产品介绍/说明类内容，非财务经营表，不参与经营体检。';
+    return delay({
+      id,
+      kind: 'document',
+      title: financial ? '3 月经营流水表' : '产品介绍',
+      sourceType: 'upload',
+      status: 'ready',
+      fileName: financial ? '流水表.xlsx' : '产品介绍.pdf',
+      fileType: financial ? 'xlsx' : 'pdf',
+      fileSize: financial ? 128000 : 96000,
+      projectId: null,
+      error: null,
+      createdAt: now(),
+      updatedAt: now(),
+      textPreview: preview,
+      chunks: preview.split('\n').map((t, i) => ({ id: `${id}-c${i}`, ord: i, text: t, dim: 1024 })),
+      canAnalyze: financial,
+    });
+  },
+  // 确定性体检：本地生成/归一一份「经营体检」报告，返回 reportId 供报告详情页解析（可反复调用不重复建版）。
+  async analyzeKnowledge(_id: string): Promise<AnalyzeResult> {
+    const { token, d } = current();
+    const content: Deliverable = {
+      title: '经营体检 · 3 月流水',
+      icon: 'chart',
+      meta: '军师财务复盘',
+      trust: '毛利率企稳在 38% 上下、现金流为正，但获客成本正在吃掉利润，一个月内要把复购拉起来。',
+      sections: [
+        { h: '账面判断', b: '3 个月收入稳步上行（12.8w → 16.1w），毛利率 33% → 39%，定价与成本控制在改善。' },
+        { h: '三个隐患', list: ['获客成本占收入 18%，偏高', '现金回款周期 45 天，压流动性', '单一大客户贡献四成收入，集中度风险'] },
+        { h: '军师给的三条军令', list: ['把回款周期压到 30 天内（预收/账期条款）', '开 2 个新获客渠道，摊薄获客成本', '给腰部客户做复购方案，降集中度'] },
+      ],
+      actions: ['同步为军令'],
+    };
+    const saved = saveReportVersionLocal(d, { title: content.title, type: '经营体检', agentKey: 'general', projectId: null, content, authorKind: 'agent' });
+    save(token, d);
+    return delay({ reportId: saved.reportId, version: saved.version });
+  },
+  async knowledgePipeline(): Promise<KnowledgePipelineView> {
+    const { token, d } = current();
+    // 演示：首次进入注入一个待整理批次（3 份，含 1 份 failed + 1 份重复），保证全动线可走查。
+    if (!d.knowledgeSeeded) {
+      d.knowledgeSeeded = true;
+      const bid = 'batch-demo';
+      const mk = (title: string, size: number, status: string, text: string): KnowledgeRec => ({
+        id: uid('kn-'), projectId: null, kind: 'document', title, text, sourceType: 'upload', sourceId: null,
+        tags: [], at: now(), stage: 'staging', batchId: bid, fileType: (title.split('.').pop() || '文'), fileSize: size, status,
+      });
+      (d.knowledge ??= []).unshift(
+        mk('月度经营流水.xlsx', 128000, 'ready', '财务 营收 成本 现金 流水'),
+        mk('月度经营流水.xlsx', 128000, 'ready', '财务 营收 成本 现金 流水'),
+        mk('损坏的扫描件.pdf', 90000, 'failed', '扫描件'),
+      );
+      save(token, d);
+    }
+    const items = d.knowledge ?? [];
+    const by = (st: KnowledgeStage) => items.filter((k) => (k.stage ?? 'confirmed') === st);
+    const confirmed = by('confirmed');
+    const confirmedFolders: KnowledgePipelineFolder[] = Object.keys(BIZ_LABEL)
+      .map((key) => ({ key, label: BIZ_LABEL[key], count: confirmed.filter((k) => k.bizCategory === key).length, stage: 'confirmed' as KnowledgeStage }))
+      .filter((f) => f.count > 0);
+    const optimized = by('optimized');
+    const optimizedFolders: KnowledgePipelineFolder[] = [...new Set(optimized.map((k) => k.bizCategory || 'unknown'))]
+      .map((key) => ({ key, label: BIZ_LABEL[key] || key, count: optimized.filter((k) => (k.bizCategory || 'unknown') === key).length, stage: 'optimized' as KnowledgeStage }));
+    const optimizedItems: OrganizeItem[] = optimized.map(mockOrganizeItem);
+    const staging = by('staging');
+    const batchMap = new Map<string, KnowledgeRec[]>();
+    staging.forEach((k) => { const b = k.batchId || 'default'; batchMap.set(b, [...(batchMap.get(b) ?? []), k]); });
+    const batches: KnowledgeBatch[] = [...batchMap.entries()].map(([id, ks]) => {
+      const tm = new Map<string, number>(); ks.forEach((k) => tm.set(k.fileType || '文', (tm.get(k.fileType || '文') ?? 0) + 1));
+      const files: KnowledgeBatchFile[] = ks.map((k) => ({ id: k.id, fileName: k.title || '未命名', status: k.status || 'ready', fileSize: k.fileSize ?? null }));
+      return { id, count: ks.length, status: 'uploaded' as const, typeStats: [...tm.entries()].map(([label, count]) => ({ label, count })), files };
+    });
+    const usedBytes = items.reduce((sum, k) => sum + (k.fileSize ?? 0), 0);
+    return delay({
+      counts: { staging: staging.length, optimized: optimized.length, confirmed: confirmed.length },
+      quota: { usedDocs: staging.length + confirmed.length, freeDocs: 30, usedBytes, freeBytes: 200 * 1024 * 1024 },
+      folders: [...confirmedFolders, ...optimizedFolders], batches, optimizedItems,
+    });
+  },
+  async organizeBatch(batchId: string): Promise<OrganizeResult> {
+    const { token, d } = current();
+    // 解析失败的文件不参与整理（留在待整理区，提示删除重传）。
+    const items = (d.knowledge ?? []).filter((k) => k.batchId === batchId && (k.stage ?? 'confirmed') === 'staging' && k.status !== 'failed');
+    let dedup = 0; const seen = new Map<string, string>();
+    items.forEach((k) => {
+      const key = `${k.title}|${k.fileSize}`;
+      if (seen.has(key)) { k.dupOfId = seen.get(key)!; dedup++; } else seen.set(key, k.title || k.id);
+      k.bizCategory = classifyMock(k.title || k.text); k.summary = mockSummary(k.bizCategory); k.stage = 'optimized';
+    });
+    save(token, d);
+    const folders: KnowledgePipelineFolder[] = [...new Set(items.map((k) => k.bizCategory!))]
+      .map((key) => ({ key, label: BIZ_LABEL[key] || key, count: items.filter((k) => k.bizCategory === key).length, stage: 'optimized' as KnowledgeStage }));
+    const orgItems: OrganizeItem[] = items.map(mockOrganizeItem);
+    return delay({ batchId, status: 'organized', total: items.length, dedup, folders, items: orgItems });
+  },
+  async confirmKnowledge(body: { ids?: string[]; batchId?: string }): Promise<ConfirmResult> {
+    const { token, d } = current();
+    const items = (d.knowledge ?? []).filter((k) => (body.ids ? body.ids.includes(k.id) : k.batchId === body.batchId) && (k.stage === 'staging' || k.stage === 'optimized'));
+    items.forEach((k) => { k.stage = 'confirmed'; });
+    save(token, d);
+    return delay({ count: items.length, ingested: items.length, ids: items.map((k) => k.id) });
+  },
+  async deepOrganize(batchId: string): Promise<OrganizeResult> {
+    const { d } = current();
+    if (!(d.skuServices ?? []).includes('deep-organize')) throw Object.assign(new Error('需购买深度整理'), { code: 'SKU_REQUIRED', data: { code: 'SKU_REQUIRED', skuKey: 'deep-organize' } });
+    const r = await this.organizeBatch(batchId);
+    // 深度整理额外产出一份《资料整理报告》，回传 reportId 供前端跳方案详情。
+    const { token, d: d2 } = current();
+    const content: Deliverable = {
+      title: '资料整理报告', icon: 'doc', meta: '军师深度整理',
+      trust: `本批共 ${r.total} 份，去重 ${r.dedup} 份，已按经营口径归类并提炼要点。`,
+      sections: [
+        { h: '归类结果', list: r.items.map((it) => `${it.fileName} → ${it.category}${it.isDup ? '（重复已合并）' : ''}`) },
+        { h: '提炼要点', list: r.items.filter((it) => !it.isDup).map((it) => `${it.fileName}：${it.summary}`) },
+        { h: '下一步', b: '确认入库后，这批资料即可被战局、方案与后续对话直接调用。' },
+      ],
+      actions: ['确认入库'],
+    };
+    const saved = saveReportVersionLocal(d2, { title: content.title, type: '资料整理', agentKey: 'general', projectId: null, content, authorKind: 'agent' });
+    save(token, d2);
+    return { ...r, deep: true, reportId: saved.reportId, reportVersion: saved.version };
+  },
+
   async setColor(color: string) {
     const { token, d } = current();
     d.benmingColor = color; save(token, d);
@@ -723,6 +1183,52 @@ export const mock = {
     return delay({ ok: true, agentKey: key, pricePaid: unlimited ? 0 : agent.price, creditBalance: d.creditBalance, alreadyOwned: false });
   },
   async survey(): Promise<SurveyQuestion[]> { return delay(SURVEY); },
+
+  // WO-07：journey 视图（mock 按档案是否建档给出 new / diagnosing 的确定性下一步）。
+  async journey(): Promise<JourneyView> {
+    const { d } = current();
+    if (!d.profile?.industry) {
+      return delay({ stage: 'new', diagRound: 0, nextStep: { key: 'quickscan', title: '先做个 3 问速诊', desc: '10 分钟拿到主要矛盾与今天能做的一件事。', route: '/packages/work/quickscan/index' } });
+    }
+    return delay({ stage: 'diagnosing', diagRound: 2, nextStep: { key: 'continue_diagnosis', title: '继续第 3 轮诊断', desc: '把打法聊定，认可后自动拆成军令。', route: 'chat' } });
+  },
+
+  // WO-12：处方样例（军令页展示「军师配了工具」）。
+  async prescriptions(): Promise<PrescriptionListView> {
+    return delay({ items: [{ id: 'rx1', problem: '获客越来越贵', playbook: '做影响力短视频获客', toolKey: 'brand', toolType: 'agent', externalUrl: null, status: 'proposed', proposedAt: '2026-07-08 10:00' }] });
+  },
+  async prescriptionAction(_id: string, _action: string): Promise<{ ok: boolean }> { return delay({ ok: true }); },
+
+  // WO-13：品牌资产包（mock 确定性样例；generate 返回一份，approve 置已确认）。
+  async brandKit(): Promise<BrandKitView | null> { return delay(null); },
+  async generateBrandKit(): Promise<BrandKitView> {
+    return delay({
+      persona: { name: '老张', tagline: '美业里最懂一线的操盘手', tone: '实在、有分寸、不画饼', story: '从一线做起，靠口碑把生意做扎实。', doNots: ['不吹牛', '不承诺做不到的效果'] },
+      voice: { hooks: ['同行不会告诉你的一件事', '我踩过的那个坑'], openers: ['先说结论', '今天只讲一件事'], ctas: ['想聊聊就扣 1', '私信「诊断」'], taboos: ['低俗', '攻击同行'] },
+      theme: { keywords: ['务实', '专业', '接地气'], colorHint: '深绿 + 暖金', styleRefs: ['纪实口播', '干货白板'] },
+      version: 1, approved: false, generatedAt: '2026-07-08 10:00',
+    });
+  },
+  async approveBrandKit(): Promise<{ ok: boolean }> { return delay({ ok: true }); },
+
+  // 速诊（WO-06）：确定性初诊卡 + 速诊即建档（空则回填 industry/stage/pain，同服务端口径）。
+  async quickScan(req: QuickScanRequest): Promise<QuickScanResult> {
+    const { token, d } = current();
+    d.profile = {
+      ...d.profile,
+      industry: d.profile?.industry || req.industry,
+      stage: d.profile?.stage || req.revenueBand,
+      pain: d.profile?.pain || req.pain,
+    };
+    d.onboarded = true; save(token, d);
+    const pain = (req.pain || '').trim().slice(0, 40) || '增长乏力';
+    return delay({
+      contradiction: `你把力气压在「${pain}」的表象上，真正卡住的是获客与复购的结构没打通。`,
+      judgement: `${req.industry}·${req.revenueBand}这个体量，"${pain}"多半是结果不是原因。先把「谁来、为什么复购、一单挣多少」三笔账摊开，矛盾会自己浮出来。`,
+      firstMove: '今天挑近 30 天成交的 10 位客户，逐个打电话问「为什么选你、还会不会再来」，记成一页纸。',
+      cardUrl: null,
+    });
+  },
 
   async getProfile(): Promise<Profile | null> { return delay(current().d.profile); },
   async saveProfile(p: Profile): Promise<Profile> {
@@ -771,7 +1277,8 @@ export const mock = {
         let snippet = '新对话';
         if (last) { const c = last.content as any; snippet = c.text || (c.title ? `已产出《${c.title}》` : '已回复'); }
         const ag = agentOf(s.agentKey);
-        return { id: s.id, agentKey: s.agentKey, agentName: ag.name, agentIcon: ag.icon, title: s.title, snippet, updatedAt: s.updatedAt, projectId: s.projectId };
+        const unreadCount = s.messages.filter((m) => m.role === 'assistant').length; // V7-15：mock 无读态，按 assistant 消息数派生
+        return { id: s.id, agentKey: s.agentKey, agentName: ag.name, agentIcon: ag.icon, title: s.title, snippet, updatedAt: s.updatedAt, projectId: s.projectId, unreadCount, hasUnread: unreadCount > 0 };
       }),
     );
   },
@@ -1078,6 +1585,37 @@ export const mock = {
     const it = l.prophecies.find((x) => x.id === id); if (it) it.status = outcome;
     saveLedgerM(token, l);
     return delay({ prophecy: it ?? l.prophecies[0], stats: proStatsM(l.prophecies) });
+  },
+  // WO-11 账本异议：把用户「有出入」的反馈落到条目（复盘时军师据此对账）。
+  async disputeDecision(id: string, dispute: string): Promise<{ ok: boolean }> {
+    const { token } = current(); const l = loadLedgerM(token);
+    const it = l.decisions.find((x) => x.id === id); if (it) (it as DecisionView & { disputeNote?: string }).disputeNote = dispute.trim().slice(0, 500);
+    saveLedgerM(token, l);
+    return delay({ ok: !!it });
+  },
+  async disputeProphecy(id: string, dispute: string): Promise<{ ok: boolean }> {
+    const { token } = current(); const l = loadLedgerM(token);
+    const it = l.prophecies.find((x) => x.id === id); if (it) (it as ProphecyView & { disputeNote?: string }).disputeNote = dispute.trim().slice(0, 500);
+    saveLedgerM(token, l);
+    return delay({ ok: !!it });
+  },
+  // WO-10 经营周报：模板 / 序列 / 上报某周。mock 固定美业模板，序列本地持久化。
+  async bizMetricTemplate(): Promise<{ items: BizMetricTemplateItem[] }> {
+    return delay({ items: BIZ_TEMPLATE_BEAUTY });
+  },
+  async bizMetricSeries(weeks = 8): Promise<{ items: BizMetricWeek[] }> {
+    const { token } = current();
+    const all = loadBizSeriesM(token).slice().sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+    return delay({ items: all.slice(-weeks) });
+  },
+  async saveBizMetrics(weekStart: string, metrics: Record<string, number>): Promise<{ ok: boolean }> {
+    const { token } = current();
+    const all = loadBizSeriesM(token);
+    const idx = all.findIndex((w) => w.weekStart === weekStart);
+    if (idx >= 0) all[idx] = { weekStart, metrics };
+    else all.push({ weekStart, metrics });
+    saveBizSeriesM(token, all);
+    return delay({ ok: true });
   },
   // 军师记忆库（P2）：从 mock 用户数据合成六类结构化记忆，让档案页「军师记事」本地可走查。
   async memoryLibrary(): Promise<MemoryLibraryView> {

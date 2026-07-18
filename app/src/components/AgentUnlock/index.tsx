@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import Icon from '../Icon';
+import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type Agent } from '../../services/api';
+import { api, type Agent, type ActivationSource } from '../../services/api';
 import { diamondCost } from '../../services/format';
 import './index.scss';
 
@@ -12,18 +13,15 @@ interface Props {
   agent: Agent | null;          // 待启用的专项智能体（billing=unlock）。null 则不展示
   onClose: () => void;
   onUnlocked: (agent: Agent) => void; // 启用成功（含已拥有）后回调，通常用于进入对话
+  source?: ActivationSource;    // D-1 开通来源归因（缺省 catalog）
+  refId?: string;               // source=prescription 时的处方 id
 }
 
 // 专项智能体启用弹层：用产出额度启用。free/metered 不会进入这里。
-export default function AgentUnlock({ agent, onClose, onUnlocked }: Props) {
+export default function AgentUnlock({ agent, onClose, onUnlocked, source = 'catalog', refId }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    store.setOverlay(!!agent, 'agent-unlock');
-    return () => store.setOverlay(false, 'agent-unlock');
-  }, [agent]);
 
   if (!agent) return null;
   const balance = s.me()?.creditBalance ?? 0;
@@ -38,7 +36,7 @@ export default function AgentUnlock({ agent, onClose, onUnlocked }: Props) {
     }
     setBusy(true);
     try {
-      const r = await api.purchaseAgent(agent.key);
+      const r = await api.purchaseAgent(agent.key, { source, refId });
       await store.refreshAfterPurchase();
       Taro.showToast({ title: r.alreadyOwned ? '已启用' : '已加入工作台', icon: 'success' });
       const fresh = store.agents().find((a) => a.key === agent.key) ?? { ...agent, owned: true };
@@ -56,50 +54,55 @@ export default function AgentUnlock({ agent, onClose, onUnlocked }: Props) {
   };
 
   return (
-    <View className="agent-unlock-mask" onClick={onClose} catchMove>
-      <View className="au-sheet" onClick={(e) => e.stopPropagation()}>
-        <View className="au-grip" />
-        <View className="au-ic" style={{ background: 'var(--accent-soft)' }}>
-          <Icon name={agent.icon} size={26} color={accent} />
-        </View>
-        <Text className="au-name">{agent.name}</Text>
-        <Text className="au-role">{agent.role}</Text>
-        {agent.deliverableKey && <Text className="au-deliver" style={{ color: accent }}>擅长 · {agent.deliverableKey}</Text>}
-
-        <View className="au-price card">
-          <View className="au-pl">
-            <Text className="au-pk">启用所需</Text>
-            <View className="au-pv-row">
-              <Text className="au-pv" style={{ color: accent }}>{diamondCost(agent.price)}</Text>
-            </View>
-          </View>
-          <View className="au-divider" />
-          <View className="au-pl">
-            <Text className="au-pk">我的余额</Text>
-            <Text className="au-bal" style={{ color: enough ? 'var(--ink-2)' : '#c0392b' }}>{unlimited ? '不限量' : `${balance} 点`}</Text>
-          </View>
-        </View>
-
-        <Text className="au-note">启用后会加入你的工作台，永久可用；后续深度产出按当前方案消耗权益点。</Text>
-
-        {!enough && (
-          <View className="au-low">
-            <Icon name="alert" size={13} color="#c0392b" />
-            <Text> 权益点不足，请到「我的 · 方案与权益点」调整</Text>
-          </View>
-        )}
-
+    <Sheet
+      visible={!!agent}
+      onClose={onClose}
+      overlayKey="agent-unlock"
+      align="center"
+      panelClassName="au-pad"
+      footer={
         <View className="au-btns">
-          <View className="au-btn ghost" onClick={onClose}><Text>暂不启用</Text></View>
+          <View className="btn btn-ghost au-btn ghost" onClick={onClose}><Text>暂不启用</Text></View>
           <View
-            className={`au-btn primary ${!enough || busy ? 'disabled' : ''}`}
+            className={`btn btn-primary au-btn primary ${busy ? 'disabled' : ''} ${!enough ? 'insufficient' : ''}`}
             style={{ background: accent }}
             onClick={confirm}
           >
             <Text>{busy ? '启用中…' : `${diamondCost(agent.price)} 启用`}</Text>
           </View>
         </View>
+      }
+    >
+      <View className="au-ic" style={{ background: 'var(--accent-soft)' }}>
+        <Icon name={agent.icon} size={26} color={accent} />
       </View>
-    </View>
+      <Text className="au-name">{agent.name}</Text>
+      <Text className="au-role">{agent.role}</Text>
+      {agent.deliverableKey && <Text className="au-deliver" style={{ color: accent }}>擅长 · {agent.deliverableKey}</Text>}
+
+      <View className="au-price card">
+        <View className="au-pl">
+          <Text className="au-pk">启用所需</Text>
+          <View className="au-pv-row">
+            <Text className="au-pv" style={{ color: accent }}>{diamondCost(agent.price)}</Text>
+          </View>
+        </View>
+        <View className="au-divider" />
+        <View className="au-pl">
+          <Text className="au-pk">我的余额</Text>
+          <Text className="au-bal" style={{ color: enough ? 'var(--ink-2)' : 'var(--danger)' }}>{unlimited ? '不限量' : `${balance} 点`}</Text>
+        </View>
+      </View>
+
+      <Text className="au-note">启用后会加入你的工作台，永久可用；后续深度产出按当前方案消耗权益点。</Text>
+
+      {!enough && (
+        <View className="au-low">
+          {/* Icon 烘焙场景需 hex：#9C4A38 = var(--danger) */}
+          <Icon name="alert" size={13} color="#9C4A38" />
+          <Text> 权益点不足，请到「我的 · 方案与权益点」调整</Text>
+        </View>
+      )}
+    </Sheet>
   );
 }

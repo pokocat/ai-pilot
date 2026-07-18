@@ -212,7 +212,9 @@ export interface ClientUnderstanding {
   summary: string;
   mainContradiction?: string | null; // 战略档案里的主要矛盾（战局 hero 优先展示真结论，而非通用摘要）
   positioning?: string | null;       // 战略定位（可选展示）
-  forces?: ForcesView | null;        // L-6：市势/人势研判结论（军情页三势卡回显）
+  forces?: ForcesView | null;        // L-6：市势/人势研判结论（军情页三势卡回显，保留兼容）
+  battleForces?: BattleForce[] | null; // V7-04：结构化三势（天势/市势/人势，战局页三势卡真实渲染）
+  battleForcesAt?: string | null;    // V7-04：三势最近生成时间
   sections: ClientUnderstandingSection[];
   nextQuestions: string[];
   evidenceCount: { profile: number; memories: number; projects: number; knowledge: number; sessions: number };
@@ -272,6 +274,7 @@ export interface DecisionView {
   id: string; seq: number; scene: string; decision: string; reasons: string[];
   tianshiRef: string; expected: string; verifyStandard: string; verifyByDate: string | null;
   status: 'pending' | 'correct' | 'revise'; verifyNote: string; fast: boolean | null; createdAt: string;
+  disputeNote?: string | null; disputedAt?: string | null; // WO-11：用户对判定的异议（复盘时军师带出确认）
 }
 export interface DecisionStats {
   total: number; pending: number; correct: number; revise: number;
@@ -281,6 +284,7 @@ export interface DecisionLedger { items: DecisionView[]; stats: DecisionStats; }
 export interface ProphecyView {
   id: string; seq: number; prophecy: string; basis: string; verifyStandard: string;
   dueDate: string | null; status: 'pending' | 'hit' | 'miss'; verifyNote: string; createdAt: string;
+  disputeNote?: string | null; disputedAt?: string | null; // WO-11：用户对判定的异议（复盘时军师带出确认）
 }
 export interface ProphecyStats { total: number; pending: number; hit: number; miss: number; hitRate: number | null; }
 export interface ProphecyLedger { items: ProphecyView[]; stats: ProphecyStats; }
@@ -319,6 +323,14 @@ export interface Me {
   onboarded?: boolean;
   ai: AiInfo;
   understanding?: ClientUnderstanding;
+  inviteCode?: string;             // V7-13：邀请码（惰性生成）
+  service?: ServiceAssignmentView | null; // V7-13：社群服务分配（无则 null）
+  features: FeatureFlags;          // P0-2：功能开关（前端条件渲染的真相源）——fortune 关则隐藏全部命理入口
+}
+
+/** 前端可见的功能开关集合（合规硬需求：审核事故时一键全产品降级）。默认全开。 */
+export interface FeatureFlags {
+  fortune: boolean; // 命理（八字/命盘/天时日历/送你一卦）总开关；false = 全产品下线命理 UI/端点
 }
 
 export interface LoginRequest { phone: string; name?: string; code?: string; }
@@ -348,6 +360,24 @@ export interface SurveyQuestion { key: string; title: string; options: string[];
 export interface SurveyAdmin { id: string; key: string; title: string; optionsJson: string[]; enabled: boolean; }
 export interface Profile { industry?: string | null; stage?: string | null; pain?: string | null; extra?: unknown; }
 
+/* ────────────── 3 问速诊（WO-06：行业 + 年营收段 + 最痛的一件事 → 初诊卡） ────────────── */
+export interface QuickScanRequest { industry: string; revenueBand: string; pain: string; }
+export interface QuickScanResult {
+  contradiction: string;  // 主要矛盾假设（1 句）
+  judgement: string;      // 军师判断（2-3 句）
+  firstMove: string;      // 今天就能做的一件事（1 条）
+  cardUrl: string | null; // 分享卡 HTML 链接（PR-B2 生成，暂 null）
+}
+
+/* ────────────── 用户 journey 状态机（WO-07：全 tab「下一步」卡数据源） ────────────── */
+export type JourneyStage = 'new' | 'scanned' | 'diagnosing' | 'plan_ready' | 'executing' | 'reviewing';
+export interface JourneyNextStep { key: string; title: string; desc: string; route: string; }
+export interface JourneyView {
+  stage: JourneyStage;
+  diagRound: number;
+  nextStep: JourneyNextStep | null; // 服务端派生，前端只渲染
+}
+
 /* ────────────── 结构化成果 ────────────── */
 export interface DeliverableSection { h: string; b?: string; list?: string[]; }
 export interface Deliverable {
@@ -356,12 +386,35 @@ export interface Deliverable {
   htmlUrl?: string; // 服务端渲染的可分享网页版报告链接（自有域名 /api/r/:id，便于小程序 web-view 打开）
   cdnUrl?: string; // 可选 OSS/CDN 镜像；不作为小程序内打开入口
   degraded?: boolean; // P0-4：真实模型未产出结构化成果、回退本地模板时为 true（前端提示可重试；用户不计费）
+  prescriptions?: DeliverablePrescription[]; // WO-12：方案开出的处方（问题→打法→生态工具 key，最多 3 条）
 }
 /** 成果模板（mock 提供方 / few-shot 结构约束消费） */
 export interface DeliverableTemplate { icon: string; title: string; sections: DeliverableSection[]; }
 
+/* ────────────── 处方引擎（WO-12：诊断结论 → 生态工具的结构化桥） ────────────── */
+export interface DeliverablePrescription { problem: string; playbook: string; toolKey: string; }
+export interface PrescriptionView {
+  id: string; problem: string; playbook: string; toolKey: string;
+  toolType: string; externalUrl: string | null; status: string; proposedAt: string;
+  // D-3-7：toolType='external' 时的目标小程序跳转参数（实时取自 EcoTool；内部 agent 处方为 null）。
+  appId?: string | null; path?: string | null;
+}
+export interface PrescriptionListView { items: PrescriptionView[]; }
+
+/* ────────────── 品牌资产包（WO-13：档案 → 数字人/短剧的预填输入） ────────────── */
+export interface BrandKitPersona { name: string; tagline: string; tone: string; story: string; doNots: string[]; }
+export interface BrandKitVoice { hooks: string[]; openers: string[]; ctas: string[]; taboos: string[]; }
+export interface BrandKitTheme { keywords: string[]; colorHint: string; styleRefs: string[]; }
+export interface BrandKitView {
+  persona: BrandKitPersona; voice: BrandKitVoice; theme: BrandKitTheme;
+  version: number; approved: boolean; generatedAt: string;
+}
+
 /* ────────────── 自由对话回复 ────────────── */
-export interface ChatReply { text: string; points?: string[]; acts?: [string, string][]; }
+// 军师反问的结构化提问：q 为问题原文，options 为 2-4 个推荐答案（前端渲染为可点选项 + 自动附「其他」）。
+// 由模型在回复末尾以 ```ask 代码块产出，网关解析剥离后挂到 asks（见 server/llm/schema.extractAsks）。
+export interface ChatAsk { q: string; options: string[]; }
+export interface ChatReply { text: string; points?: string[]; acts?: [string, string][]; asks?: ChatAsk[]; }
 export interface ReplyTemplate { t: string; points: string[]; acts: [string, string][]; }
 
 /* ────────────── 会话 ────────────── */
@@ -369,6 +422,8 @@ export interface SessionItem {
   id: string; agentKey: string; agentName: string; agentIcon: string;
   title: string; snippet: string; updatedAt: string;
   projectId?: string | null; // 归属项目（无则散落）
+  hasUnread?: boolean; // 有未读 AI 回复（列表红点；退出后台生成完即置 true，打开会话即清）
+  unreadCount?: number; // V7-15：未读 assistant 消息数（自 lastReadAt 起，服务端算；hasUnread 保留兼容）
 }
 export interface SessionMessage {
   id: string; role: string; content: any; at: string;
@@ -394,6 +449,7 @@ export interface GenResult {
   deliverable?: Deliverable; reply?: ChatReply;
   memory?: { learned: boolean; agentName: string } | null;
   knowledgeUsed?: string[]; // 本次自动召回/显式引用所用到的知识摘要（用于「参考了哪些资料」提示）
+  refNotices?: string[];    // 引用未能全带上的实情（超过 9 份被丢下 / 仍在拆读 / 读不出）——不静默丢弃，回传给用户
   creditBalance?: number;   // 扣费后的钻石余额（<0=不限量；图片类按张扣后回填）
   tokenQuota?: TokenQuotaView | null; // 文本产出后回填本月额度（即时刷新进度 %；图片类为 null）
 }
@@ -507,11 +563,13 @@ export interface KnowledgeDocRow {
   kind: string;
   title: string | null;
   sourceType: string;        // conversation | upload | deliverable | manual
-  status: string;            // ready | parsing | embedding | failed
+  status: string;            // ready | parsing | embedding | failed（staged 解析失败如实为 failed）
+  stage: string;             // staging 待整理 | optimized 已优化 | confirmed 知识库（前端标注，不过滤）
   fileName: string | null;
   fileType: string | null;   // pdf | docx | xlsx | csv | md | txt
   fileSize: number | null;   // 字节
   chunkCount: number;
+  summary: string;           // 正文首段摘要（≤48 字，解析中/失败为空串）——列表信息密度用
   projectId: string | null;
   error: string | null;
   createdAt: string;
@@ -534,9 +592,12 @@ export interface KnowledgeDetail {
   updatedAt: string;
   textPreview: string;       // 正文前 2000 字
   chunks: KnowledgeChunkRow[];
+  canAnalyze: boolean;       // WO-09：是否可发起「经营体检」（解析完成 + 内容为财务/表格类）；前端据此显示体检入口
 }
 /** 上传响应：item id + 初始状态（parsing）。前端轮询 detail 看 ready/failed。 */
 export interface KnowledgeUploadResult { id: string; status: string; }
+/** WO-09 经营体检产出：命中的报告 id + 版本号（前端据此跳报告详情）。 */
+export interface AnalyzeResult { reportId: string; version: number; }
 
 /* ────────────── 对话汇总 ────────────── */
 export interface SummarizeResult {
@@ -618,7 +679,8 @@ export interface TodaySaying { text: string; date: string; }
 
 /* ────────────── 运营端看板 ────────────── */
 export interface Overview {
-  stats: { v: string; l: string; d: string; trend: string }[];
+  // t=标题 v=主数值(已格式化) deltaPct=近7天 vs 前7天真实环比(null=无前期数据) sub=副标签
+  stats: { t: string; v: string; deltaPct: number | null; sub: string }[];
   live: Record<string, number>;
   feed: { icon: string; t: string; m: string; v: string }[];
 }
@@ -634,6 +696,78 @@ export interface PlanPurchaseResult {
   grantedCredits: number;
   grantedTokens?: number; // 本次授予/重置的月度 token 额度
 }
+/** 小程序调起 wx.requestPayment 的参数（server 侧 RSA 签名产出）。 */
+export interface WechatPayParams { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string; }
+
+/* ────────────── V7-12：单次付费商品（SKU） ────────────── */
+export type SkuKind = 'module' | 'service' | 'storage';
+/** 单次付费商品（GET /skus，公开）。kind=module 启用能力 | service 一次性服务 | storage 空间包。 */
+export interface SkuView {
+  key: string; name: string; desc: string; priceFen: number;
+  kind: SkuKind; grantsModuleKey?: string | null;
+}
+/** 下单结果（POST /skus/:key/order）。payParams 走 wx.requestPayment；demo=演示发放（未配支付时）。 */
+export interface SkuOrderResult { orderId: string; payParams?: WechatPayParams; demo?: boolean; }
+/** 运营端 SKU 行（GET /admin/skus） */
+export interface AdminSku { id: string; key: string; name: string; desc: string; priceFen: number; kind: SkuKind; grantsModuleKey: string | null; enabled: boolean; sort: number; }
+/** 运营端更新 SKU（PATCH /admin/skus/:key）：改价/启停/展示（key 与 kind/grantsModuleKey 走代码目录，不在此改） */
+export interface AdminSkuUpdate { name?: string; desc?: string; priceFen?: number; enabled?: boolean; sort?: number; }
+
+/* ────────────── D-3-7：生态工具注册表（运营 CRUD） ────────────── */
+/** 生态工具行（GET /admin/eco-tools）。id=toolKey，enabled 控制是否可开方。 */
+export interface AdminEcoTool { id: string; name: string; desc: string; appId: string; path: string; enabled: boolean; sort: number; updatedAt: string; }
+/** 新增生态工具（POST /admin/eco-tools）：id 唯一、小写；appId 空则不可 enabled（无法跳转）。 */
+export interface AdminEcoToolCreate { id: string; name: string; desc?: string; appId?: string; path?: string; enabled?: boolean; sort?: number; }
+/** 更新生态工具（PATCH /admin/eco-tools/:id）：id 不可改。 */
+export interface AdminEcoToolUpdate { name?: string; desc?: string; appId?: string; path?: string; enabled?: boolean; sort?: number; }
+
+/* ────────────── WO-08：行业基准库（运营 CRUD + CSV 批量导入） ────────────── */
+/** 基准行（GET /admin/benchmarks）。p50 为空 → 注入层不引用（宁缺勿假）。 */
+export interface AdminBenchmark {
+  id: string;
+  industry: string;
+  revenueBand: string;
+  metricKey: string;
+  metricName: string;
+  unit: string;
+  p25: number | null;
+  p50: number | null;
+  p75: number | null;
+  note: string | null;
+  source: string | null;
+  enabled: boolean;
+  updatedAt: string;
+}
+/** upsert 基准行（POST /admin/benchmarks）：(industry,revenueBand,metricKey) 唯一，命中即更新。CSV 逐行导入亦走此结构。 */
+export interface AdminBenchmarkUpsert {
+  industry: string;
+  revenueBand?: string;
+  metricKey: string;
+  metricName: string;
+  unit: string;
+  p25?: number | null;
+  p50?: number | null;
+  p75?: number | null;
+  note?: string | null;
+  source?: string | null;
+  enabled?: boolean;
+}
+
+/* ────────────── D-1 / WO-12：处方多来源漏斗报表（GET /admin/prescriptions/funnel） ────────────── */
+/** 处方六态时间戳聚合（按 toolKey 分组，proposed→…→verified 为累计到达数，dismissed 独立终态）。 */
+export interface AdminPrescriptionFunnelRow {
+  toolKey: string; toolType: string;
+  proposed: number; seen: number; clicked: number; activated: number; used: number; verified: number; dismissed: number;
+}
+/** 开通侧：ActivationEvent 按来源分组计数（prescription | catalog | market）。 */
+export interface AdminActivationSourceRow { source: string; count: number; }
+/** 漏斗响应：处方侧六态聚合 + 开通侧来源计数，一次返回两块。 */
+export interface AdminPrescriptionFunnel {
+  days: number;
+  prescriptions: AdminPrescriptionFunnelRow[];
+  activations: AdminActivationSourceRow[];
+}
+
 /** 微信支付下单结果（POST /plans/:id/order）：小程序据 pay 调起 wx.requestPayment */
 export interface WechatOrderResult {
   ok: true;
@@ -643,7 +777,29 @@ export interface WechatOrderResult {
   // 月→年升级折算明细（applies=true 时前端可展示「已抵扣 ¥X」）。
   proration?: { applies: boolean; fullPrice: number; remainingDays: number; remainingValue: number; chargeAmount: number };
 }
-export type WechatSubscribeScene = 'review' | 'report';
+/** 支付订单状态（GET /pay/orders/:outTradeNo）：requestPayment 成功后前端轮询用；
+ *  未发放且已配支付时服务端会先主动查单补账，消除回调竞态。 */
+export interface PayOrderStatus {
+  outTradeNo: string;
+  status: 'created' | 'paid' | 'applied' | 'failed' | 'closed' | 'refunded';
+  amount: number; // 应付金额（分）
+  planId?: string; // 套餐订单
+  skuKey?: string; // SKU 订单
+  paidAt?: string;
+  appliedAt?: string; // 有值 = 权益已发放，前端可停止轮询
+}
+/** 我的支付订单列表（GET /pay/orders）：订单明细页展示 + 继续支付入口。 */
+export interface PayOrderListItem extends PayOrderStatus {
+  itemName: string; // 下单时快照的套餐/SKU 名（历史无快照单为兜底文案）
+  createdAt: string;
+  refundedAt?: string;
+  payable: boolean; // created 且未过支付时限 → 可调 POST /pay/orders/:outTradeNo/pay-params 继续支付
+}
+export interface PayOrderListResult { items: PayOrderListItem[] }
+/** 继续支付（POST /pay/orders/:outTradeNo/pay-params）：重签 wx.requestPayment 调起参数。 */
+export interface PayRepayResult { ok: true; outTradeNo: string; pay: WechatPayParams }
+
+export type WechatSubscribeScene = 'review' | 'report' | 'payment';
 export type WechatSubscribeStatus = 'accept' | 'reject' | 'ban' | 'filter';
 export interface WechatSubscribeTemplate {
   scene: WechatSubscribeScene;
@@ -696,6 +852,8 @@ export interface AdminUserItem {
   creditBalance: number;
   totalGranted: number;
   totalSpent: number;
+  tokenUsed30d: number;            // 近 30 天 TokenUsage.totalTokens 之和
+  quotaRemaining: number | null;   // 月度额度剩余（-1 = 不限量；null = 无钱包）
 }
 export interface AdminUsageSummary {
   registeredUsers: number;
@@ -711,6 +869,49 @@ export interface AdminUsageView {
   summary: AdminUsageSummary;
   users: AdminUserItem[];
 }
+// —— per-user 用量下钻（GET /admin/users/:id/usage?days=30） ——
+export interface AdminUserQuota { limit: number; used: number; remaining: number; unlimited: boolean; periodKey: string | null }
+export interface AdminUserPlanStatus { planName: string | null; expiresAt: string | null; daysLeft: number | null; status: string }
+export interface AdminTokenAgg { key: string; totalTokens: number; costMicros: number; calls: number }
+export interface AdminUserUsage {
+  quota: AdminUserQuota | null            // null = 无钱包
+  plan: AdminUserPlanStatus
+  tokens: {
+    totalTokens: number; inputTokens: number; outputTokens: number
+    costMicros: number; calls: number
+    byModel: AdminTokenAgg[]; byAgent: AdminTokenAgg[]
+    byDay: { day: string; totalTokens: number }[]   // day = Asia/Shanghai dateKey
+  }
+  credits: { delta: number; reason: string; balance: number; at: string }[]      // 钻石口径，最近 20
+  payments: { orderNo: string; amount: number; status: string; paidAt: string | null; attrSource: string | null }[]  // 最近 10，orderNo 只回尾 6 位
+  activations: { itemType: string; itemKey: string; source: string; at: string }[] // 最近 10
+}
+// 写端点请求体：
+//   POST /admin/users/:id/token-quota → { mode: 'reset_to_plan' | 'set'; quota?: number }
+//   POST /admin/users/:id/credits     → { delta: number; reason: string }
+//   POST /admin/users/:id/plan-extend → { days: number }
+export interface AdminPaymentItem {
+  orderNo: string; // 尾 6 位（列表紧凑展示）
+  outTradeNo: string; // 完整商户单号（微信商户平台查单/对账用）
+  userName: string; amount: number; status: string; attrSource: string | null; paidAt: string | null; createdAt: string;
+}
+/** 需要运营关注的异常单：paid_unapplied=收钱未发权益（资损，可一键查单补账）；created_stale=超时未支付（等 sweep 关单或人工核实）。 */
+export interface AdminPaymentStuckItem {
+  outTradeNo: string; userName: string; amount: number; status: string;
+  kind: 'paid_unapplied' | 'created_stale';
+  provider: string; planId: string; skuKey: string | null;
+  paidAt: string | null; createdAt: string;
+}
+export interface AdminPaymentsView {
+  summary: { paidAmount: number; paidCount: number; byDay: { day: string; amount: number }[] }
+  items: AdminPaymentItem[]
+  stuck: AdminPaymentStuckItem[]
+  total: number; // 当前筛选（days/status/q）下的订单总数（items 为其中一页）
+  page: number;
+  pageSize: number;
+}
+/** POST /admin/payments/:outTradeNo/reconcile 手动查单补账结果 */
+export interface AdminPayReconcileResult { ok: boolean; applied: boolean; reason?: string; tradeState?: string; status: string }
 // —— Token 用量看板（计费 P1：旁路统计，不参与按次扣费）。成本 costMicros 单位 = 1e-6 元（微元）。 ——
 export interface TokenUsageTotals {
   calls: number;
@@ -800,6 +1001,7 @@ export interface AdminUserMemory {
 // P1-C4：按 agent 跨用户浏览记忆（治理自动学习写入的脏记忆）
 export interface AdminAgentMemoryItem {
   id: string;
+  tenantId: string;
   userId: string;
   kind: string;
   text: string;
@@ -940,6 +1142,22 @@ export interface UpdateAdminAccountRequest { disabled?: boolean; role?: string; 
 /** 当前登录者（GET /admin/auth/me）：前端按角色显隐账户管理、按范围过滤 agent */
 export interface AdminMe { kind: 'master' | 'account' | 'legacyUser'; username: string | null; role: string; isSuper: boolean }
 
+/** 运营端功能开关行（GET /admin/flags）。compliance=合规开关（命理等），关闭即时全产品生效。 */
+export interface AdminFeatureFlag {
+  id: string;          // 开关 key（如 'fortune'）
+  label: string;       // 中文名（运营可读）
+  desc: string;        // 一句话说明关闭影响
+  enabled: boolean;    // 当前态（默认开）
+  compliance: boolean; // 合规开关标记（直读 DB、审核事故一键降级）
+  kind: 'toggle' | 'number'; // toggle=开关；number=数值配置（如复盘保底额度 D-10）
+  value?: number;      // number 类：当前数值
+  min?: number;        // number 类：允许下限
+  max?: number;        // number 类：允许上限
+  unit?: string;       // number 类：单位标签（如「次/日」）
+}
+/** 改开关（PATCH /admin/flags/:id）：toggle 传 enabled；number 传 value。 */
+export interface AdminFeatureFlagUpdate { enabled?: boolean; value?: number }
+
 /* ────────────── 调教沙盒（用草稿/某版本即时试跑，返回产出 + 诊断 trace） ────────────── */
 export type SandboxTarget = 'draft' | 'published' | { versionId: string };
 export interface SandboxProfile { companyName?: string; industry?: string; stage?: string; pain?: string }
@@ -996,3 +1214,159 @@ export interface FateCardContent {
   trend: string;    // 今年大势
   advice: string;   // 一条核心建议
 }
+
+/* ════════════════════════════════════════════════════════════
+ *  V7 · 新版效果图对齐（战局三势 / 军令结构化 / 智库管道 / 数据源 / 模块 / 目标 / 提醒 / 社群 / 搜索）
+ * ════════════════════════════════════════════════════════════ */
+
+/* ── V7-04：三势结构化 + 战局「认可判断」一键生成 ── */
+export type ForceKind = 'sky' | 'market' | 'people';       // 天势 / 市势 / 人势
+export type ForceLevel = 'strong' | 'mid' | 'weak';
+export type ForceTone = 'ok' | 'warn' | 'danger';
+/** 单条势（战局三势卡）。strength 由服务端按 level+基准映射，前端只渲染进度条（禁止 AI 自算百分比）。 */
+export interface BattleForce {
+  kind: ForceKind;
+  level: ForceLevel;
+  conclusion: string;   // 一句结论，如「行业上行」
+  tactic: string;       // 打法，如「可以借势」
+  tacticTone: ForceTone;
+  note: string;         // 一句说明
+  strength: number;     // 0-100
+}
+/** 战局「认可判断 → 生成军令与报告」一键结果。 */
+export interface BattleCommitResult {
+  reportId: string; reportSlug: string; version: number;
+  libraryId: string | null;
+  newOrders: number;
+  alreadyDone: boolean; // 今日已 commit → 幂等返回上次
+}
+
+/* ── V7-05：军令结构化字段（挂 DossierOrder / 服务端军令视图，全部可选，缺省不渲染） ── */
+export type OrderActionType = 'upload' | 'backfill' | 'review' | 'topics' | 'none';
+export interface OrderMetric { label: string; value: string; }
+export interface OrderStructuredFields {
+  ownerName?: string | null;
+  dueAt?: string | null;
+  etaMinutes?: number | null;
+  sourceQuote?: string | null;
+  steps?: string[];
+  metrics?: OrderMetric[];
+  actionType?: OrderActionType;
+}
+
+/* ── V7-06：智库三段式资料整理管道 ── */
+export type KnowledgeStage = 'staging' | 'optimized' | 'confirmed';
+export interface KnowledgePipelineFolder { key: string; label: string; count: number; stage: KnowledgeStage; }
+export interface KnowledgeBatchTypeStat { label: string; count: number; }
+/** 批次内单份文件（前端「未整理批次」逐份清单）。 */
+export interface KnowledgeBatchFile { id: string; fileName: string; status: string; fileSize: number | null; }
+export interface KnowledgeBatch {
+  id: string; count: number;
+  status: 'uploaded' | 'organizing' | 'organized';
+  typeStats: KnowledgeBatchTypeStat[];
+  files: KnowledgeBatchFile[]; // 逐份清单（id/文件名/解析状态/字节）
+}
+/** 整理后逐份归类结果（含确认前正文预览；源名丢失时明确标注内容推断/兜底）。 */
+export interface OrganizeItem {
+  id: string;
+  fileName: string;
+  fileType: string | null;
+  nameSource: 'original' | 'content' | 'fallback';
+  category: string;
+  summary: string;
+  preview: string;
+  isDup: boolean;
+}
+export interface KnowledgePipelineView {
+  counts: { staging: number; optimized: number; confirmed: number };
+  quota: { usedDocs: number; freeDocs: number; usedBytes: number; freeBytes: number };
+  folders: KnowledgePipelineFolder[]; // 含 confirmed + optimized 两阶段（按 stage 区分）
+  batches: KnowledgeBatch[];
+  optimizedItems: OrganizeItem[]; // 已优化区持久数据源（从库内 tagsJson 重建，刷新后仍在）
+}
+/** POST /knowledge/organize 结果（AI 粗分 + 去重）。 */
+export interface OrganizeResult {
+  batchId: string; status: 'organized' | 'organizing'; total: number; dedup: number;
+  folders: KnowledgePipelineFolder[];
+  items: OrganizeItem[]; // 逐份归类（分类 + 摘要 + 去重标记）
+  deep?: boolean;
+  reportId?: string;      // 深度整理产出的《资料整理报告》id（前端跳方案详情）
+  reportVersion?: number; // 该报告版本号
+}
+/** POST /knowledge/confirm 结果（optimized/staging → confirmed 并嵌入）。 */
+export interface ConfirmResult { count: number; ingested: number; ids: string[]; }
+/** 智库上传（staged=true 走待整理区）返回。 */
+export interface StagedUploadResult { id: string; status: string; stage?: KnowledgeStage; batchId?: string; }
+
+/* ── V7-07：数据源状态持久化 ── */
+export type DataSourceStatus = 'unbound' | 'auth_requested' | 'uploaded' | 'bound';
+export interface DataSourceView {
+  key: string; label: string; desc: string; icon: string;
+  scope: string[];                   // 读取范围 chips
+  tier: 'basic' | 'advanced';
+  status: DataSourceStatus; statusLabel: string; updatedAt?: string;
+}
+export interface DataSourcesView {
+  bound: number; needed: number; total: number; // hero 三指标（服务端算）
+  sources: DataSourceView[];
+}
+
+/* ── V7-08：能力/模块中心 ── */
+export type ModuleTier = 'free' | 'sku' | 'credits' | 'member';
+export type ModuleGroup = 'free' | 'deep' | 'member';
+export interface ModuleDetail { scene: string; input: string; output: string; cost: string; writeback: string; }
+export interface ModulePrice { skuKey?: string; priceFen?: number; credits?: number; planRequired?: boolean; }
+export interface ModuleView {
+  key: string; label: string; desc: string; iconChar: string;
+  group: ModuleGroup;
+  tier: ModuleTier;
+  price?: ModulePrice;
+  stateLabel: string;                // 「默认启用 / ¥29 启用 / 消耗 80 算力 / 会员可用 / 已启用」
+  enabled: boolean; hidden: boolean; sortOrder: number;
+  detail: ModuleDetail;
+  agentKey?: string | null;          // 免费能力「立即调用」承接军师
+}
+export interface ModulesView { recommended: ModuleView | null; modules: ModuleView[]; }
+
+/* ── V7-10：目标阶梯 ── */
+export interface GoalLadder {
+  longTerm?: string | null;   // 3-5 年
+  annual?: string | null;     // 年度
+  quarterly?: string | null;  // 季度
+  weekly?: string | null;     // 本周
+  updatedAt?: string | null;
+}
+
+/* ── V7-11：提醒体系 ── */
+export type ReminderKind = 'order' | 'review' | 'weekly' | 'custom';
+export interface ReminderItem {
+  key: string; time: string; title: string; desc: string;
+  kind: ReminderKind; subscribed: boolean;
+}
+export interface ReminderView {
+  items: ReminderItem[];
+  subscribeReady: boolean; // 是否已配置订阅模板
+}
+
+/* ── V7-13：社群服务分配 + 档案工作台 ── */
+export interface ServiceAssignmentView {
+  teacherName: string; teacherWechat: string; className: string;
+  groupQrUrl: string; taskDone: number; taskTotal: number; note: string;
+}
+export interface WorkbenchSection { key: string; label: string; hint: string; count: number; ready: boolean; }
+export interface WorkbenchMissing { key: string; title: string; desc: string; }
+export interface WorkbenchView {
+  completeness: number;              // 案卷完整度 %
+  sections: WorkbenchSection[];      // 4 分区（份数=bizCategory 真实计数）
+  missing: WorkbenchMissing[];       // 当前最该补（understanding.nextQuestions 派生）
+}
+/** 运营端设置社群服务（PUT /admin/users/:id/service） */
+export interface ServiceAssignmentUpdate {
+  teacherName?: string; teacherWechat?: string; className?: string;
+  groupQrUrl?: string; taskDone?: number; taskTotal?: number; note?: string;
+}
+
+/* ── V7-14：跨域搜索 ── */
+export type SearchHitKind = 'agent' | 'session' | 'report' | 'knowledge';
+export interface SearchHit { kind: SearchHitKind; id: string; title: string; snippet: string; route: string; }
+export interface SearchResult { q: string; hits: SearchHit[]; }

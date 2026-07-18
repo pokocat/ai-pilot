@@ -15,8 +15,33 @@ async function req<T>(path: string, method = 'GET', body?: object): Promise<T> {
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('admin:unauth'));
     throw Object.assign(new Error('未授权访问运营后台'), { code: 'ADMIN_UNAUTHORIZED', status: res.status });
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    // 带回服务端错误文案（如「订单已退款」），比裸 HTTP 状态码可读。
+    const e = (await res.json().catch(() => ({}))) as { error?: string };
+    throw Object.assign(new Error(e.error || `HTTP ${res.status}`), { status: res.status });
+  }
   return res.json();
+}
+
+// 订单导出 CSV（仅 owner/master）：req() 只处理 JSON，CSV 走 blob 下载。
+export async function downloadPaymentsCsv(q: { status?: string; days?: number; q?: string } = {}): Promise<void> {
+  const p = new URLSearchParams();
+  if (q.status) p.set('status', q.status);
+  if (q.days) p.set('days', String(q.days));
+  if (q.q) p.set('q', q.q);
+  const qs = p.toString();
+  const res = await fetch(`${BASE}/admin/payments/export${qs ? '?' + qs : ''}`, { headers: { 'x-admin-token': getAdminToken() } });
+  if (!res.ok) {
+    const e = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(e.error || `导出失败 HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `payments-${q.days ?? 30}d.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // 后台代用户上传知识库文档（multipart）：req() 走 JSON，文件上传需单独用 FormData（浏览器自动带 boundary）。
@@ -88,6 +113,7 @@ export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsCon
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
+export type { AdminSku, AdminSkuUpdate, SkuKind, ServiceAssignmentView, ServiceAssignmentUpdate } from '../../shared/contracts';
 export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider, AiModel, AiModelUpsert, AiModelTest } from '../../shared/contracts';
 export type { AdminKnowledgeView, AdminKnowledgeItemRow, ReembedResult, AdminRetrievalDebug, RetrievalDebugCand } from '../../shared/contracts';
 export type { AdminUserContext, AdminUserMemory, KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow } from '../../shared/contracts';
@@ -108,7 +134,17 @@ import type {
   AgentVersionListView, AgentVersionDetail, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   SandboxRequest, SandboxResult, EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, StartEvalRunRequest, PricingTier,
+  AdminSku, AdminSkuUpdate, ServiceAssignmentView, ServiceAssignmentUpdate,
+  AdminFeatureFlag,
+  AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
+  AdminBenchmark, AdminBenchmarkUpsert,
+  AdminUserUsage, AdminPaymentsView, AdminPayReconcileResult,
 } from '../../shared/contracts';
+export type { AdminFeatureFlag } from '../../shared/contracts';
+export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
+export type { AdminBenchmark, AdminBenchmarkUpsert } from '../../shared/contracts';
+// —— per-user 用量下钻 + 支付订单只读 ——
+export type { AdminUserUsage, AdminUserQuota, AdminUserPlanStatus, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult } from '../../shared/contracts';
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
@@ -175,9 +211,55 @@ export const api = {
   skillTools: () => req<SkillToolMeta[]>('/admin/skill-tools'),
   createAgent: (body: AdminAgentCreate) => req<{ ok: boolean; key: string }>('/admin/agents', 'POST', body),
   survey: () => req<SurveyAdmin[]>('/admin/survey'),
+  // —— 功能开关（P0-2）：命理等合规开关一键降级 ——
+  flags: () => req<AdminFeatureFlag[]>('/admin/flags'),
+  setFlag: (id: string, enabled: boolean) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { enabled }),
+  setFlagValue: (id: string, value: number) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { value }),
   plans: () => req<Plan[]>('/admin/plans'),
   savePlan: (id: string, body: Partial<Pick<Plan, 'name' | 'price' | 'creditsPerMonth' | 'tokenQuotaPerMonth' | 'agentCount' | 'featuresJson' | 'highlighted'>>) =>
     req<Plan>(`/admin/plans/${id}`, 'PATCH', body),
+  // —— 单次付费 SKU：改价 / 启停 / 展示（key、kind、解锁模块走代码目录，不在此改）——
+  adminSkus: () => req<AdminSku[]>('/admin/skus'),
+  updateSku: (key: string, body: AdminSkuUpdate) => req<AdminSku>(`/admin/skus/${key}`, 'PATCH', body),
+  // —— D-1/WO-12 处方多来源漏斗（六态聚合 + 开通来源计数）——
+  prescriptionFunnel: (days = 30) => req<AdminPrescriptionFunnel>(`/admin/prescriptions/funnel?days=${days}`),
+  // —— D-3-7 生态工具注册表 CRUD（enabled 控制可开方）——
+  ecoTools: () => req<AdminEcoTool[]>('/admin/eco-tools'),
+  createEcoTool: (body: AdminEcoToolCreate) => req<AdminEcoTool>('/admin/eco-tools', 'POST', body),
+  updateEcoTool: (id: string, body: AdminEcoToolUpdate) => req<AdminEcoTool>(`/admin/eco-tools/${id}`, 'PATCH', body),
+  deleteEcoTool: (id: string) => req<{ ok: boolean }>(`/admin/eco-tools/${id}`, 'DELETE'),
+  // —— WO-08 行业基准库 CRUD（列表带行业筛选 / upsert / 删除；CSV 前端逐行 upsert）——
+  benchmarks: (industry?: string) => req<AdminBenchmark[]>(`/admin/benchmarks${industry ? `?industry=${encodeURIComponent(industry)}` : ''}`),
+  upsertBenchmark: (body: AdminBenchmarkUpsert) => req<AdminBenchmark>('/admin/benchmarks', 'POST', body),
+  deleteBenchmark: (id: string) => req<{ ok: boolean }>(`/admin/benchmarks/${id}`, 'DELETE'),
+  // —— 社群服务分配（按用户）——
+  userService: (id: string) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`),
+  setUserService: (id: string, body: ServiceAssignmentUpdate) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`, 'PUT', body),
+  // —— per-user 用量下钻（额度 / 30 天 token / 钻石流水 / 支付 / 开通归因）——
+  userUsage: (id: string, days = 30) => req<AdminUserUsage>(`/admin/users/${id}/usage?days=${days}`),
+  // —— 运营动作（owner-only；后端 requireSuper + 审计带 before/after）——
+  setUserQuota: (id: string, body: { mode: 'reset_to_plan' | 'set'; quota?: number }) => req<{ ok: boolean }>(`/admin/users/${id}/token-quota`, 'POST', body),
+  adjustUserCredits: (id: string, body: { delta: number; reason: string }) => req<{ ok: boolean }>(`/admin/users/${id}/credits`, 'POST', body),
+  extendUserPlan: (id: string, body: { days: number }) => req<{ ok: boolean }>(`/admin/users/${id}/plan-extend`, 'POST', body),
+  // —— 支付订单列表（状态筛选 + 天数 + 搜索 + 分页 + 卡单清单）——
+  payments: (q: { status?: string; days?: number; q?: string; page?: number; pageSize?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.status) p.set('status', q.status);
+    if (q.days) p.set('days', String(q.days));
+    if (q.q) p.set('q', q.q);
+    if (q.page) p.set('page', String(q.page));
+    if (q.pageSize) p.set('pageSize', String(q.pageSize));
+    const qs = p.toString();
+    return req<AdminPaymentsView>(`/admin/payments${qs ? '?' + qs : ''}`);
+  },
+  // 手动查单补账（卡单处置）：向微信查单并幂等入账，不会重复发放。
+  reconcilePayment: (outTradeNo: string) => req<AdminPayReconcileResult>(`/admin/payments/${encodeURIComponent(outTradeNo)}/reconcile`, 'POST', {}),
+  // 全额退款（仅 owner/master）：原路退回 + 幂等权益回收。
+  refundPayment: (outTradeNo: string, reason: string) => req<{ ok: boolean; refundId: string; wechatStatus: string }>(`/admin/payments/${encodeURIComponent(outTradeNo)}/refund`, 'POST', { reason }),
+  // 手动开通套餐 / 发放·收回模块（仅 owner/master）。
+  grantUserPlan: (userId: string, planId: string) => req<{ ok: boolean; planName: string; expiresAt: string | null; grantedCredits: number }>(`/admin/users/${userId}/plan`, 'POST', { planId }),
+  grantUserModule: (userId: string, moduleKey: string) => req<{ ok: boolean }>(`/admin/users/${userId}/modules`, 'POST', { moduleKey }),
+  revokeUserModule: (userId: string, moduleKey: string) => req<{ ok: boolean }>(`/admin/users/${userId}/modules/${encodeURIComponent(moduleKey)}`, 'DELETE'),
   // —— 大模型配置（可随时切换） ——
   aiConfig: () => req<AiConfigView>('/admin/ai-config'),
   saveAiConfig: (body: AiConfigUpdate) => req<AiConfigView>('/admin/ai-config', 'PUT', body),

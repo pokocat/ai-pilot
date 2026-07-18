@@ -1,0 +1,49 @@
+/* 处方条：接 accent 族 token（去 theme-blind 硬编码金/绿），单位转 px 对齐全站。 */
+.rx-strip {
+  margin: 4px 16px 0;
+}
+.rx-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 13px;
+  margin-bottom: 6px;
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  transition: filter .12s ease-out, transform .12s ease-out;
+}
+.rx-item:active { filter: brightness(.97); transform: scale(.99); }
+.rx-main {
+  flex: 1;
+  min-width: 0;
+}
+.rx-for {
+  display: block;
+  font-size: 12px;
+  color: var(--accent);
+  margin-bottom: 3px;
+}
+.rx-play {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+.rx-cta {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* —— 加载骨架：与处方条同底同形 —— */
+.rx-skeleton { pointer-events: none; }
+.rx-sk {
+  background: var(--accent-glow);
+  border-radius: 4px;
+  animation: rx-pulse 1.2s ease-in-out infinite;
+}
+.rx-sk-for { width: 40%; height: 11px; margin-bottom: 6px; }
+.rx-sk-play { width: 66%; height: 13px; }
+@keyframes rx-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }

@@ -31,6 +31,14 @@ function nextQuestions(ctx: GenContext): string[] {
   return qs.slice(0, 3);
 }
 
+// 给追问配推荐答案（ChatReply.asks，前端渲染成可点选项）：按问题语义给一组常见选项，兜底给通用选项。
+function askOptionsFor(q: string): string[] {
+  if (/行业|品类|做什么/.test(q)) return ['餐饮', '电商零售', '本地服务', '制造/贸易'];
+  if (/阶段/.test(q)) return ['刚起步', '稳定增长', '遇到瓶颈'];
+  if (/卡|问题|困难|痛/.test(q)) return ['获客难', '利润薄', '现金流紧', '团队跟不上'];
+  return ['是', '不是', '不确定'];
+}
+
 export function mockDeliverable(ctx: GenContext): Deliverable {
   if (wantsBriefInterview(ctx) || needsCustomerInput(ctx)) {
     return {
@@ -62,6 +70,8 @@ export function mockDeliverable(ctx: GenContext): Deliverable {
     sections,
     trust: TRUST_NOTE,
     actions: ['save_to_library', 'export_pdf'],
+    // WO-12：mock 报告携带一条白名单内处方，让「生成→认可→落处方」在 mock/H5 全链路可走通。
+    prescriptions: [{ problem: pain, playbook: '用影响力短视频承接获客与复购', toolKey: 'growth' }],
   };
 }
 
@@ -74,10 +84,12 @@ export function mockAdaptive(ctx: GenContext): { kind: 'report'; deliverable: De
 
 export function mockChat(ctx: GenContext): ChatReply {
   if (wantsBriefInterview(ctx) || needsCustomerInput(ctx)) {
+    const qs = nextQuestions(ctx);
     return {
       text: '好，我先问清楚，再给判断。你不用写长文，按下面几个问题简单答就行。',
-      points: nextQuestions(ctx),
+      points: qs,
       acts: [['spark', '开始补档案']],
+      asks: qs.map((q) => ({ q, options: askOptionsFor(q) })),
     };
   }
   const r = REPLIES['默认'];

@@ -5,11 +5,12 @@
 // env 仅作兜底；未配置真实 key 时一律降级 mock，保证可用。
 
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../services/aiConfig.js';
 import { mockChat, mockDeliverable, mockAdaptive } from './providers/mock.js';
-import { ZERO_USAGE, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
+import { ZERO_USAGE, extractAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
 import { recordTokenUsage, type UsageMeta } from '../services/usage.js';
 import { recordTrace } from '../services/trace.js';
 import { moderate } from '../services/moderation.js';
@@ -21,6 +22,16 @@ function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
   if (isAiTestMode()) return null; // 测试一律 mock，不触达真实 provider
   const eff = effectiveProvider(cfg);
   return eff === 'mock' ? null : eff;
+}
+
+/**
+ * 供 rawJson 系调用方（extractGraphTriples/summarizePoints 等不回传真实 token 用量）判断：
+ * 本次是否会真正触达真实模型。未就绪（mock/测试）时这些函数直接短路返回空，不产生真实成本，
+ * 调用方应据此把预留的额度全额退回，而非按估算定额扣费（避免 mock/demo 环境误扣真实用户额度）。
+ */
+export async function hasLiveProvider(): Promise<boolean> {
+  const cfg = await getAiConfig();
+  return liveProvider(cfg) !== null;
 }
 
 // 真实 provider 调用失败：生产（AI_FALLBACK_MOCK=false）不静默兜底 mock，抛错让前端提示重试，避免答非所问。
@@ -38,6 +49,13 @@ type Sourced<T> = { result: T; usage: Usage; provider: string; model: string; to
 
 function deliverableText(d: Deliverable): string {
   return d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
+}
+
+// 军师反问选项：把模型回复尾部的 ```ask 块解析成结构化 asks 并从正文剥离。
+// 未命中原样透传；mock 等已直接带 asks 的结果不受影响。所有 ChatReply 出口统一过这一层。
+function withAsks(reply: ChatReply): ChatReply {
+  const { text, asks } = extractAsks(reply.text);
+  return asks ? { ...reply, text, asks } : { ...reply, text };
 }
 
 const ENGINEERING_CONTEXT_LEAK =
@@ -286,9 +304,9 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
     } catch (err) {
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
-      return { result: mockChat(ctx), usage: ZERO_USAGE };
+      return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
-    return { result: s.result, usage: s.usage };
+    return { result: withAsks(s.result), usage: s.usage };
   }
 
   const cfg = await getAiConfig();
@@ -317,9 +335,9 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
     if (!env.aiFallbackMock) throw aiUnavailable(err);
   }
   if (chatResult) {
-    return { result: chatResult.result, usage: chatResult.usage };
+    return { result: withAsks(chatResult.result), usage: chatResult.usage };
   }
-  return { result: mockChat(ctx), usage: ZERO_USAGE };
+  return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
 }
 
 export type ChatStreamEvent =
@@ -376,7 +394,8 @@ async function* tracedChatProviderStream(
       text: done.result.text,
     });
     await maybeRecord({ result: done.result, usage: done.usage, provider, model }, 'chat', ctx, meta);
-    yield { type: 'done', result: done.result, usage: done.usage };
+    // 尾部 ```ask 块在完整结果处剥离并结构化（token 流里已原样流出，前端流式期间负责隐藏）。
+    yield { type: 'done', result: withAsks(done.result), usage: done.usage };
   } catch (err) {
     await recordTrace({
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
@@ -465,9 +484,9 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     } catch (err) {
       console.error('[gateway] runtime adaptive fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
-      return { kind: 'chat', reply: mockChat(ctx), usage: ZERO_USAGE };
+      return { kind: 'chat', reply: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
-    return { kind: 'chat', reply: s.result, usage: s.usage };
+    return { kind: 'chat', reply: withAsks(s.result), usage: s.usage };
   }
 
   const cfg = await getAiConfig();
@@ -521,7 +540,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
 
   return out.kind === 'report'
     ? { kind: 'report', deliverable: out.result, usage }
-    : { kind: 'chat', reply: out.result, usage };
+    : { kind: 'chat', reply: withAsks(out.result), usage };
 }
 
 /**
@@ -630,21 +649,106 @@ export async function providerInfo() {
   };
 }
 
-// —— 内部：以「就绪的 provider」发一次返回 JSON 的轻量补全（用于洞察抽取/汇总） ——
+// —— 内部：以「就绪的 provider」发一次返回原始文本的轻量补全 ——
+async function rawText(
+  cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
+): Promise<string> {
+  if (live === 'openai') {
+    const { openaiRaw } = await import('./providers/openai.js');
+    return openaiRaw(cfg, system, user);
+  }
+  const { claudeRaw } = await import('./providers/claude.js');
+  return claudeRaw(cfg, system, user);
+}
+
+// —— 内部：文本 → JSON 对象（正则抠 {…} + JSON.parse）。既有洞察抽取/汇总沿用此松散口径。 ——
 async function rawJson(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
 ): Promise<Record<string, unknown> | null> {
-  let content = '';
-  if (live === 'openai') {
-    const { openaiRaw } = await import('./providers/openai.js');
-    content = await openaiRaw(cfg, system, user);
-  } else {
-    const { claudeRaw } = await import('./providers/claude.js');
-    content = await claudeRaw(cfg, system, user);
-  }
+  const content = await rawText(cfg, live, system, user);
   const m = content.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
+}
+
+/**
+ * 结构化输出统一原语（借鉴 Vercel AI SDK generateObject / Spring AI StructuredOutputConverter）。
+ * 一处收口，取代散落各处的「自拼 system + rawJson + 手写 filter/map/校验」六份脆弱副本：
+ * 传入 Zod schema，它同时充当「运行时校验 + TS 返回类型 + 归一化(transform)」的单一真源。
+ * 纯逻辑（抠 JSON + 校验）拆到 coerceJson，可零 I/O 单测；provider I/O 与「修复一轮」编排在 structured。
+ */
+export function coerceJson<S extends z.ZodTypeAny>(schema: S, text: string): { ok: true; data: z.output<S> } | { ok: false; error: string } {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return { ok: false, error: '未找到 JSON 对象' };
+  let raw: unknown;
+  try { raw = JSON.parse(m[0]); } catch { return { ok: false, error: 'JSON 解析失败' }; }
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) return { ok: true, data: parsed.data };
+  return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ').slice(0, 300) };
+}
+
+/**
+ * P1-3 计费口径：结构化生成的「已发生调用信息」。
+ * - data：校验通过的结果（成功）；无 live provider / 两轮都没过校验 → null。
+ * - attempts：本次实际向真实 provider 发出的调用轮次（0 = 无 live provider，从未触达；1 = 首轮即过或首轮就抛；2 = 走了修复轮）。
+ * - live：本次是否触达了真实 provider（据此区分「mock 不计费」与「真实调用但校验失败仍需保守结算」）。
+ *
+ * 关键：校验失败时 attempts>0 —— 真实 provider 调用已经发生并产生成本，调用方必须按 attempts 保守结算，
+ * 不能因为 data=null 就全额退款（这正是 P1-3 要堵的资损口子：过去 structured() 只回 null，调用方 settle(0)）。
+ */
+export interface StructuredOutcome<T> { data: T | null; attempts: number; live: boolean }
+
+export async function structuredMetered<S extends z.ZodTypeAny>(
+  schema: S,
+  o: { system: string; user: string; maxChars?: number; temperature?: number; model?: string },
+): Promise<StructuredOutcome<z.output<S>>> {
+  let attempts = 0;
+  let live = false;
+  try {
+    const base = await getAiConfig();
+    const lp = liveProvider(base);
+    if (!lp) return { data: null, attempts: 0, live: false };
+    live = true;
+    const cfg: ResolvedAiConfig = (o.temperature != null || o.model)
+      ? { ...base, ...(o.temperature != null ? { temperature: o.temperature } : {}), ...(o.model ? { model: o.model } : {}) }
+      : base;
+    const user = o.user.slice(0, o.maxChars ?? 4000);
+    // 调用前自增：即使 rawText 抛错（超时/5xx），provider 侧可能已计费——保守计入本轮。
+    attempts++;
+    const first = coerceJson(schema, await rawText(cfg, lp, o.system, user));
+    if (first.ok) return { data: first.data, attempts, live };
+    // 一轮修复：把校验错误回喂，要求只输出合规 JSON。
+    const repairSys = `${o.system}\n\n【纠错】上次输出无法通过校验：${first.error}。请只输出严格符合要求的 JSON，不要任何解释或多余文字。`;
+    attempts++;
+    const second = coerceJson(schema, await rawText(cfg, lp, repairSys, user));
+    return { data: second.ok ? second.data : null, attempts, live };
+  } catch (err) {
+    console.error('[gateway] structured failed:', (err as Error).message);
+    return { data: null, attempts, live };
+  }
+}
+
+/**
+ * P1-3 保守结算口径（纯函数，供路由层把 structuredMetered 结果换算成要 settle 的 token 数；单测锁定）：
+ * - ok（校验通过）：按定额 estTokens 结算——「成功时不变」，与既有 quickscan/brandKit 口径一致。
+ * - 失败但已发生真实调用（attempts>0）：按 attempts × estTokens 保守扣，覆盖 1-2 轮已花的真实成本，不全额退。
+ * - attempts=0（无 live provider / mock 兜底）：0，不实扣。
+ */
+export function structuredBillTokens(o: { ok: boolean; attempts: number; estTokens: number }): number {
+  if (o.ok) return o.estTokens;
+  return Math.max(0, o.attempts) * o.estTokens;
+}
+
+/**
+ * 结构化生成：文本 → schema 校验；失败则把校验错误回喂、只修复一轮；仍失败返回 null（调用方兜底）。
+ * 无真实 provider（含测试/mock）或任何异常 → null，绝不伪造（沿用 extractInsights/completeJson 口径）。
+ * 非计费消费者（forces/casefile/knowledgePipeline 等）用这个薄封装即可；计费路径改用 structuredMetered 拿 attempts。
+ */
+export async function structured<S extends z.ZodTypeAny>(
+  schema: S,
+  o: { system: string; user: string; maxChars?: number; temperature?: number; model?: string },
+): Promise<z.output<S> | null> {
+  return (await structuredMetered(schema, o)).data;
 }
 
 /** 通用 JSON 补全（评测评委等内部用）：用就绪模型发一次并解析 JSON；未就绪（mock）/失败返回 null。 */
@@ -721,32 +825,41 @@ export async function summarizePoints(transcript: string): Promise<{ points: str
 }
 
 /** 预言抽取（M2 PR-9）：从总军师输出里抽「具体、可验证、有期限」的天势判断。
- *  只在真实 provider 就绪时运行（测试/mock 返回空 → 绝不产生伪预言）；解析失败即放弃。 */
-export async function extractProphecies(text: string): Promise<{ prophecy: string; basis: string; verifyStandard: string; dueDate: string | null }[]> {
-  const cfg = await getAiConfig();
-  const live = liveProvider(cfg);
-  if (!live) return [];
-  try {
-    const sys = '你是记录员。从下面军师的话里抽取「预言式判断」——必须同时满足：具体（说了会发生什么）、可验证（能对照事实判定）、有大致时限（某月/某周/某节点）。'
-      + '只输出 JSON：{"prophecies":[{"prophecy":"…","basis":"依据(可空)","verifyStandard":"什么情况算命中","dueDate":"YYYY-MM-DD 或 null"}]}。'
-      + '宽泛建议、方法论、无时限的话都不算预言；没有就输出空数组。最多 2 条。';
-    const json = await rawJson(cfg, live, sys, text.slice(0, 3000));
-    if (!json) return [];
-    return (((json.prophecies as unknown[]) ?? [])
-      .filter((p): p is { prophecy: string } => !!p && typeof (p as { prophecy?: unknown }).prophecy === 'string' && !!(p as { prophecy: string }).prophecy.trim())
-      .map((p) => {
-        const o = p as { prophecy: string; basis?: string; verifyStandard?: string; dueDate?: string | null };
-        const due = typeof o.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate) ? o.dueDate : null;
-        return {
-          prophecy: o.prophecy.trim().slice(0, 300),
-          basis: (o.basis ?? '').trim().slice(0, 200),
-          verifyStandard: (o.verifyStandard ?? '').trim().slice(0, 300),
-          dueDate: due,
-        };
-      })
-      .slice(0, 2));
-  } catch (err) {
-    console.error('[gateway] extractProphecies fallback:', (err as Error).message);
-    return [];
-  }
+ *  只在真实 provider 就绪时运行（测试/mock 返回空 → 绝不产生伪预言）；解析失败即放弃。
+ *  重构：走统一 structured() 原语——Zod schema 取代手写正则 + filter/map/slice。 */
+export interface Prophecy { prophecy: string; basis: string; verifyStandard: string; dueDate: string | null }
+
+const PROPHECY_SYS =
+  '你是记录员。从下面军师的话里抽取「预言式判断」——必须同时满足：具体（说了会发生什么）、可验证（能对照事实判定）、有大致时限（某月/某周/某节点）。'
+  + '只输出 JSON：{"prophecies":[{"prophecy":"…","basis":"依据(可空)","verifyStandard":"什么情况算命中","dueDate":"YYYY-MM-DD 或 null"}]}。'
+  + '宽泛建议、方法论、无时限的话都不算预言；没有就输出空数组。最多 2 条。';
+
+// 单条容错到底：缺失/空白/错型不拖垮整批——无效条目归一为 null，由上层过滤（沿用原「filter 掉空 prophecy」口径）。
+const ProphecyItem = z
+  .object({
+    prophecy: z.string(),
+    basis: z.string().nullish(),
+    verifyStandard: z.string().nullish(),
+    dueDate: z.string().nullish(),
+  })
+  .transform((o): Prophecy => ({
+    prophecy: o.prophecy.trim().slice(0, 300),
+    basis: (o.basis ?? '').trim().slice(0, 200),
+    verifyStandard: (o.verifyStandard ?? '').trim().slice(0, 300),
+    dueDate: o.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(o.dueDate) ? o.dueDate : null,
+  }))
+  .refine((p) => p.prophecy.length > 0)
+  .nullable()
+  .catch(null);
+
+/** 预言抽取结果 schema（导出供单测）：整批容错，过滤无效条目，最多 2 条。 */
+export const ProphecyResult = z.object({
+  prophecies: z
+    .preprocess((v) => (Array.isArray(v) ? v : []), z.array(ProphecyItem))
+    .transform((a) => a.filter((x): x is Prophecy => x !== null).slice(0, 2)),
+});
+
+export async function extractProphecies(text: string): Promise<Prophecy[]> {
+  const r = await structured(ProphecyResult, { system: PROPHECY_SYS, user: text, maxChars: 3000 });
+  return r?.prophecies ?? [];
 }

@@ -1,0 +1,182 @@
+// V7-11 提醒体系补全（后端）：提醒日历派生视图 + 两个定时提醒任务（09:00 军令 / 周五周复盘）。
+// 纯读派生，不新建表；三条提醒节奏（军令截止 / 20:30 复盘 / 周五周复盘）对齐设计 §13.2 文案逐字。
+// 触达一律复用 services/wechatSubscribe.ts 的 sendWechatSubscribeMessage（先预留后结算 + 日志幂等），
+// 未配模板则静默跳过（照 daily-review-reminder 口径）。提醒暂借 scene 'review' 模板（不新增 scene，
+// 仅换 order-flavored 标题）——见 SEAM 说明：理想应由后续在 wechatSubscribe.ts 增设独立 'order' 模板。
+import type { ReminderItem, ReminderView } from '../../../shared/contracts';
+import { prisma } from '../db.js';
+import { recordAudit } from './audit.js';
+import { activeCasefile, todayStr } from './casefile.js';
+import { dateKey, hourOf, weekdayOf, dayStart, weekStart } from './clock.js';
+import type { ScheduledJob } from './scheduler.js';
+import {
+  hasWechatSubscriptionQuota,
+  sendWechatSubscribeMessage,
+  templateIdForScene,
+} from './wechatSubscribe.js';
+
+// 设计 §13.2 逐字文案（禁改）：三提醒节奏 20:30 今日复盘 / 18:00 补咨询记录 / 周五 周复盘。
+const REVIEW_DESC = '20:30 生成今日复盘。';
+const ORDER_DESC = '18:00 前补充高意向咨询记录。';
+const WEEKLY_DESC = '本周五检查成交漏斗和内容表现。';
+
+// 日历派生（YYYY-MM-DD / HH:mm / 当天零点 / 本周一零点）一律走 clock 的 Asia/Shanghai 工具（P1-4）。
+
+/**
+ * 提醒日历派生视图（GET /reminders）：纯读派生，不建表。
+ * order 项时间取活跃案卷内最近一条未完成军令的 dueAt（无则默认 18:00）；
+ * subscribed 取 WechatSubscription（scene 'review'，status accept）是否存在；
+ * subscribeReady 取 review 订阅模板是否已配置（未配则前端不引导授权）。
+ */
+export async function buildReminderView(args: { tenantId: string; userId: string }): Promise<ReminderView> {
+  const { userId } = args;
+  const cf = await activeCasefile(userId);
+
+  let orderTime = '18:00';
+  if (cf) {
+    const nextOrder = await prisma.casefileOrder.findFirst({
+      where: { casefileId: cf.id, done: false, dueAt: { not: null } },
+      orderBy: { dueAt: 'asc' },
+      select: { dueAt: true },
+    });
+    // V7-05 起 dueAt 为标签串（18:00 / 今日 / 本周 / 待补）；是 HH:MM 才当提醒时刻，否则沿用默认。
+    if (nextOrder?.dueAt) orderTime = /^\d{1,2}:\d{2}$/.test(nextOrder.dueAt) ? nextOrder.dueAt : orderTime;
+  }
+
+  const sub = await prisma.wechatSubscription.findFirst({
+    where: { userId, scene: 'review', status: 'accept' },
+    select: { id: true },
+  });
+  const subscribed = !!sub;
+
+  const items: ReminderItem[] = [
+    { key: 'order', time: orderTime, title: '今日军令截止', desc: ORDER_DESC, kind: 'order', subscribed },
+    { key: 'review', time: '20:30', title: '今日复盘', desc: REVIEW_DESC, kind: 'review', subscribed },
+    { key: 'weekly', time: '周五', title: '周复盘', desc: WEEKLY_DESC, kind: 'weekly', subscribed },
+  ];
+
+  return { items, subscribeReady: templateIdForScene('review') !== '' };
+}
+
+/**
+ * 任务：09:00 军令提醒。服务端本地时间 ≥ ORDER_REMINDER_HOUR（默认 9）后，
+ * 有活跃案卷、今日有未完成军令、当天未提醒过（system.order.reminder 审计行按天幂等）→ 发订阅消息。
+ * 复用 scene 'review' 模板（不新增 scene），标题换成军令口径；有订阅额度才真正推送，未配模板静默跳过。
+ * 幂等锚点用独立审计行（非 wechatNotificationLog scene），避免与 daily-review-reminder 的 review 触达互相抑制。
+ * 返回本轮登记提醒的用户数（按天恰好一次）。
+ */
+export async function morningOrderReminderScan(): Promise<number> {
+  const hour = Number(process.env.ORDER_REMINDER_HOUR ?? 9);
+  if (hourOf() < hour) return 0;
+  const today = todayStr();
+  const todayStart = dayStart(); // 上海时区当日 00:00（P1-4）
+
+  const actives = await prisma.casefile.findMany({
+    where: { status: 'active' },
+    select: { id: true, tenantId: true, userId: true },
+    take: 500,
+  });
+
+  let reminded = 0;
+  for (const cf of actives) {
+    const undone = await prisma.casefileOrder.findFirst({
+      where: { casefileId: cf.id, date: today, done: false },
+      select: { id: true },
+    });
+    if (!undone) continue;
+    const already = await prisma.auditLog.findFirst({
+      where: { userId: cf.userId, action: 'system.order.reminder', createdAt: { gte: todayStart } },
+      select: { id: true },
+    });
+    if (already) continue;
+
+    await recordAudit({
+      tenantId: cf.tenantId,
+      userId: cf.userId,
+      action: 'system.order.reminder',
+      payload: { casefileId: cf.id, date: today, reason: '今日有未完成军令' },
+    });
+    if (await hasWechatSubscriptionQuota(cf.userId, 'review')) {
+      await sendWechatSubscribeMessage({
+        tenantId: cf.tenantId,
+        userId: cf.userId,
+        scene: 'review',
+        title: '今日军令待完成',
+        note: '18:00 前补充高意向咨询记录',
+      }).catch(() => ({ sent: false }));
+    }
+    reminded += 1;
+  }
+  if (reminded) console.log(`[scheduler] morning order reminders: ${reminded}`);
+  return reminded;
+}
+
+/**
+ * 任务：周五周复盘提醒。上海时区周五（weekdayOf()===5）且 ≥ WEEK_REVIEW_REMINDER_HOUR（默认 17）后，
+ * 有活跃案卷、本周有军令记录、本周尚无 week 层复盘、本周未提醒过（system.weekly.review.reminder 按周幂等）→ 发提醒。
+ * 复用 review 模板；有订阅额度才推送，未配静默跳过。返回本轮登记提醒的用户数。
+ */
+export async function weeklyReviewReminderScan(): Promise<number> {
+  const hour = Number(process.env.WEEK_REVIEW_REMINDER_HOUR ?? 17);
+  if (weekdayOf() !== 5) return 0; // 周五（上海时区）
+  if (hourOf() < hour) return 0;
+  const weekStartInstant = weekStart(); // 本周一 00:00（上海时区，P1-4）
+  const weekStartStr = dateKey(weekStartInstant);
+
+  const actives = await prisma.casefile.findMany({
+    where: { status: 'active' },
+    select: { id: true, tenantId: true, userId: true },
+    take: 500,
+  });
+
+  let reminded = 0;
+  for (const cf of actives) {
+    const hasWeekOrders = await prisma.casefileOrder.findFirst({
+      where: { casefileId: cf.id, date: { gte: weekStartStr } },
+      select: { id: true },
+    });
+    if (!hasWeekOrders) continue;
+    const weekReview = await prisma.reviewLog.findFirst({
+      where: { userId: cf.userId, layer: 'week', date: { gte: weekStartStr } },
+      select: { id: true },
+    });
+    if (weekReview) continue;
+    const already = await prisma.auditLog.findFirst({
+      where: { userId: cf.userId, action: 'system.weekly.review.reminder', createdAt: { gte: weekStartInstant } },
+      select: { id: true },
+    });
+    if (already) continue;
+
+    await recordAudit({
+      tenantId: cf.tenantId,
+      userId: cf.userId,
+      action: 'system.weekly.review.reminder',
+      payload: { casefileId: cf.id, weekStart: weekStartStr, reason: '本周尚未做周复盘' },
+    });
+    if (await hasWechatSubscriptionQuota(cf.userId, 'review')) {
+      await sendWechatSubscribeMessage({
+        tenantId: cf.tenantId,
+        userId: cf.userId,
+        scene: 'review',
+        title: '周复盘提醒',
+        note: '本周五检查成交漏斗和内容表现',
+      }).catch(() => ({ sent: false }));
+    }
+    reminded += 1;
+  }
+  if (reminded) console.log(`[scheduler] weekly review reminders: ${reminded}`);
+  return reminded;
+}
+
+// 两个任务配置：由 scheduler.ts（父任务）import 后 registerJob 挂载；每 30 分钟扫一轮，按天/按周幂等，多扫无副作用。
+export const MORNING_ORDER_JOB: ScheduledJob = {
+  name: 'morning-order-reminder',
+  intervalMs: 30 * 60_000,
+  run: async () => { await morningOrderReminderScan(); },
+};
+
+export const WEEKLY_REVIEW_JOB: ScheduledJob = {
+  name: 'weekly-review-reminder',
+  intervalMs: 30 * 60_000,
+  run: async () => { await weeklyReviewReminderScan(); },
+};

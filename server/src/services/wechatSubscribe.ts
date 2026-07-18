@@ -1,6 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { now } from './clock.js';
+import { now, dayStart, dateKey, hhmm } from './clock.js';
 import { getAccessToken } from './wechat.js';
 import type {
   WechatSubscribeChoice,
@@ -19,6 +19,11 @@ const SCENE_META: Record<WechatSubscribeScene, { title: string; description: str
     title: '报告生成',
     description: '重要报告生成完成后提醒查看',
     env: ['WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID', 'WECHAT_REPORT_TEMPLATE_ID'],
+  },
+  payment: {
+    title: '支付到账',
+    description: '支付成功、权益到账后提醒确认',
+    env: ['WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID', 'WECHAT_PAYMENT_TEMPLATE_ID'],
   },
 };
 
@@ -88,10 +93,8 @@ export async function hasWechatSubscriptionQuota(userId: string, scene: WechatSu
 }
 
 export async function hasSentWechatNotificationToday(userId: string, scene: WechatSubscribeScene): Promise<boolean> {
-  const d = now();
-  const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const found = await prisma.wechatNotificationLog.findFirst({
-    where: { userId, scene, status: 'sent', createdAt: { gte: dayStart } },
+    where: { userId, scene, status: 'sent', createdAt: { gte: dayStart() } }, // 上海时区当日 00:00（P1-4）
     select: { id: true },
   });
   return !!found;
@@ -103,8 +106,7 @@ function clip(v: string, max: number): string {
 }
 
 function timeValue(d = now()): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${dateKey(d)} ${hhmm(d)}`; // 上海时区（P1-4）
 }
 
 function miniprogramState(): 'developer' | 'trial' | 'formal' {
@@ -115,10 +117,19 @@ function miniprogramState(): 'developer' | 'trial' | 'formal' {
 function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | null } = {}): string {
   if (scene === 'report' && opts.reportId) return `packages/work/report/index?id=${encodeURIComponent(opts.reportId)}`;
   if (scene === 'report') return 'packages/work/library/index';
+  if (scene === 'payment') return 'packages/work/credits/index'; // 订单明细页（含支付订单段）
   return 'pages/studio/index';
 }
 
 function dataForScene(scene: WechatSubscribeScene, opts: { title: string; note?: string }) {
+  if (scene === 'payment') {
+    return {
+      thing1: { value: clip(opts.title, 20) },
+      phrase2: { value: '已到账' },
+      time3: { value: timeValue() },
+      thing4: { value: clip(opts.note || '权益已生效，点击查看订单', 20) },
+    };
+  }
   if (scene === 'report') {
     return {
       thing1: { value: clip(opts.title, 20) },
@@ -204,6 +215,23 @@ export async function sendWechatSubscribeMessage(args: {
     return { sent: false, reason: 'no subscription quota' };
   }
 
+  // 先原子「认领」一份额度，再调用微信推送——不能反过来（旧实现：先发送、发送成功后才扣减）。
+  // 微信推送是不可逆的外部副作用；若像旧实现一样在发送之后才扣减，两个并发请求（如同一用户
+  // 短时间内两次触发报告生成）会都通过上面的 findFirst 校验、都真的把消息推给微信（超出用户
+  // 实际授权的额度重复打扰），事后扣减时才发现只有一份额度可扣——输掉竞态的一方明明已经调用了
+  // 发送接口，却在扣减判定处直接 return（从不调用 logNotification），产生完全不可追溯的「幽灵
+  // 推送」。改为发送前先原子扣减（updateMany + where remaining>0）：认领失败＝额度已被并发请求
+  // 抢走，直接拒绝、不再调用发送接口；认领成功后发送失败/被拒再退回额度——与全仓
+  // reserveCredits/reserveQuota「先预留后结算」惯例一致。
+  const claimed = await prisma.wechatSubscription.updateMany({
+    where: { id: sub.id, remaining: { gt: 0 } },
+    data: { remaining: { decrement: 1 } },
+  });
+  if (claimed.count === 0) {
+    if (args.logSkipped) await logNotification({ ...args, templateId, status: 'skipped', reason: 'no subscription quota' });
+    return { sent: false, reason: 'no subscription quota' };
+  }
+
   const payload = {
     touser: user.wechatOpenId,
     template_id: templateId,
@@ -217,24 +245,25 @@ export async function sendWechatSubscribeMessage(args: {
   try {
     data = await postWechatSubscribe(payload);
   } catch (err) {
+    await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { remaining: { increment: 1 } } }).catch(() => {});
     await logNotification({ ...args, templateId, status: 'failed', reason: (err as Error).message, payload: payload as Prisma.InputJsonValue });
     return { sent: false, reason: (err as Error).message };
   }
 
   if (data.errcode && data.errcode !== 0) {
     if (data.errcode === 43101) {
+      // 用户单侧永久拒绝：不退回（这份额度本就该清零），直接标记禁用。
       await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { remaining: 0, status: 'reject' } }).catch(() => {});
+    } else {
+      // 其它失败（限流/参数错误等）：退回已认领的额度，允许下次重试。
+      await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { remaining: { increment: 1 } } }).catch(() => {});
     }
     const reason = data.errmsg || `wechat errcode ${data.errcode}`;
     await logNotification({ ...args, templateId, status: 'failed', reason, payload: payload as Prisma.InputJsonValue });
     return { sent: false, reason };
   }
 
-  const consumed = await prisma.wechatSubscription.updateMany({
-    where: { id: sub.id, remaining: { gt: 0 } },
-    data: { remaining: { decrement: 1 }, lastSentAt: now() },
-  });
-  if (consumed.count === 0) return { sent: false, reason: 'subscription quota consumed' };
+  await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { lastSentAt: now() } }).catch(() => {});
   await logNotification({ ...args, templateId, status: 'sent', payload: payload as Prisma.InputJsonValue });
   return { sent: true };
 }

@@ -1,0 +1,21 @@
+/* 遮罩/面板/grip 由 Sheet 基座统一（五要素，max-height 88vh 经 maxHeight prop）；此处仅内容与动作区。 */
+.onboard-k { font-size: 11px; font-weight: 900; letter-spacing: .16em; color: var(--accent); }
+.onboard-title { font-size: 21px; font-weight: 700; color: var(--ink); margin-top: 8px; line-height: 1.3; }
+.onboard-desc { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; margin-top: 8px; }
+
+.onboard-steps { margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+.onboard-step { display: flex; align-items: flex-start; gap: 12px; }
+.ob-num {
+  flex: 0 0 26px; width: 26px; height: 26px; border-radius: 999px;
+  background: var(--accent-soft); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 900;
+}
+.ob-body { display: flex; flex-direction: column; gap: 3px; }
+.ob-t { font-size: 14.5px; font-weight: 700; color: var(--ink); }
+.ob-d { font-size: 12px; color: var(--ink-3); line-height: 1.5; }
+
+/* 按钮形与态走公共 .btn/.btn-ghost/.btn-primary，此处只定尺寸分配 */
+.onboard-actions { display: flex; gap: 12px; margin-top: 20px; }
+.onboard-later { flex: 0 0 96px; }
+.onboard-start { flex: 1; }

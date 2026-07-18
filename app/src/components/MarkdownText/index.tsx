@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react';
 import { View, Text } from '@tarojs/components';
 import './index.scss';
 
@@ -6,6 +7,7 @@ type Block =
   | { type: 'paragraph'; text: string }
   | { type: 'quote'; text: string }
   | { type: 'code'; text: string }
+  | { type: 'table'; rows: string[][] }
   | { type: 'list'; ordered: boolean; items: string[] };
 
 interface Props {
@@ -15,19 +17,23 @@ interface Props {
   selectable?: boolean;
 }
 
-export default function MarkdownText({ text, className = '', inline = false, selectable = false }: Props) {
+// 流式渲染高频重绘：memo + 按 text 缓存 parseBlocks，避免每个 token 重复全量解析/重建块。
+function MarkdownText({ text, className = '', inline = false, selectable = false }: Props) {
+  const blocks = useMemo(() => (inline ? [] : parseBlocks(text)), [text, inline]);
+
   if (inline) {
     const body = selectable ? cleanSelectableInline(text) : renderInline(cleanInline(text));
     return <Text className={`md-inline ${className}`} {...selectProps(selectable)}>{body}</Text>;
   }
 
-  const blocks = parseBlocks(text);
   return (
     <View className={`md ${className}`}>
       {blocks.map((block, i) => renderBlock(block, i, selectable))}
     </View>
   );
 }
+
+export default memo(MarkdownText);
 
 function renderBlock(block: Block, key: number, selectable: boolean) {
   if (block.type === 'heading') {
@@ -38,6 +44,21 @@ function renderBlock(block: Block, key: number, selectable: boolean) {
   }
   if (block.type === 'code') {
     return <Text key={key} className="md-codeblock" {...selectProps(selectable)}>{block.text}</Text>;
+  }
+  if (block.type === 'table') {
+    return (
+      <View key={key} className="md-table">
+        {block.rows.map((row, ri) => (
+          <View key={ri} className={`md-tr ${ri === 0 ? 'head' : ''}`}>
+            {row.map((cell, ci) => (
+              <Text key={ci} className="md-td" {...selectProps(selectable)}>
+                {selectable ? cleanSelectableInline(cell) : renderInline(cell)}
+              </Text>
+            ))}
+          </View>
+        ))}
+      </View>
+    );
   }
   if (block.type === 'list') {
     return (
@@ -55,7 +76,8 @@ function renderBlock(block: Block, key: number, selectable: boolean) {
 }
 
 function selectProps(selectable: boolean) {
-  return selectable ? { selectable: true, userSelect: true } : {};
+  // Taro Text 合法长按选择属性是 selectable；userSelect 并非其合法属性，去掉。
+  return selectable ? { selectable: true } : {};
 }
 
 function parseBlocks(input: string): Block[] {
@@ -90,13 +112,17 @@ function parseBlocks(input: string): Block[] {
     }
 
     if (/^\|.*\|$/.test(line)) {
-      const table: string[] = [];
+      // 表格：逐行按 | 拆列，首行当表头（加粗）；分隔行（---）跳过。不追求完美表格，简单行列呈现。
+      const rows: string[][] = [];
       while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) {
         const row = lines[i].trim();
-        if (!/^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(row)) table.push(row);
+        if (!/^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?$/.test(row)) {
+          const cells = row.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => cleanInline(c.trim()));
+          rows.push(cells);
+        }
         i += 1;
       }
-      blocks.push({ type: 'code', text: table.join('\n') });
+      if (rows.length) blocks.push({ type: 'table', rows });
       continue;
     }
 
@@ -117,10 +143,27 @@ function parseBlocks(input: string): Block[] {
       const isOrdered = !!ordered;
       while (i < lines.length) {
         const current = lines[i].trim();
-        const m = isOrdered ? /^\d+[.)]\s+(.+)$/.exec(current) : /^[-*]\s+(.+)$/.exec(current);
+        if (!current) {
+          const nextIndex = findNextContentLine(lines, i + 1);
+          if (nextIndex >= 0 && matchListLine(lines[nextIndex].trim(), isOrdered)) {
+            i = nextIndex;
+            continue;
+          }
+          break;
+        }
+
+        const m = matchListLine(current, isOrdered);
         if (!m) break;
-        items.push(cleanInline(m[1]));
+
+        const itemLines = [m[1]];
         i += 1;
+        while (i < lines.length) {
+          const next = lines[i].trim();
+          if (!next || matchListLine(next, isOrdered) || isBlockStart(next)) break;
+          itemLines.push(next);
+          i += 1;
+        }
+        items.push(cleanInline(itemLines.join(' ')));
       }
       blocks.push({ type: 'list', ordered: isOrdered, items });
       continue;
@@ -136,6 +179,17 @@ function parseBlocks(input: string): Block[] {
   }
 
   return blocks;
+}
+
+function findNextContentLine(lines: string[], start: number): number {
+  for (let i = start; i < lines.length; i += 1) {
+    if (lines[i].trim()) return i;
+  }
+  return -1;
+}
+
+function matchListLine(line: string, ordered: boolean): RegExpExecArray | null {
+  return ordered ? /^\d+[.)]\s+(.+)$/.exec(line) : /^[-*]\s+(.+)$/.exec(line);
 }
 
 function isBlockStart(line: string): boolean {

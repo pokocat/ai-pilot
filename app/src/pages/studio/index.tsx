@@ -1,19 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Icon from '../../components/Icon';
+import Login from '../../components/Login';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
+import { navTo, switchTo } from '../../services/nav';
+import { REVIEW_TIME } from '../../data/constants';
 import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
-import { api, type Agent } from '../../services/api';
+import { api, type Agent, type GoalLadder, type ReminderItem, type BizMetricTemplateItem } from '../../services/api';
 import {
   addOrder, buildReviewPrompt, doneOrdersOf, ordersOf, pendingOrdersOf, recentOrders, refreshDossier,
-  removeOrder, saveBackfill, startReview, today, todayProgress, toggleOrder, type Dossier,
+  removeOrder, saveBackfill, saveGoals, startReview, today, todayProgress, toggleOrder, type Dossier, type DossierOrder,
 } from '../../services/dossier';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import { EMPTY_STATES } from '../../data/emptyStates';
+import PrescriptionStrip from '../../components/PrescriptionStrip';
 import './index.scss';
 
 type ExecView = 'today' | 'week' | 'review';
@@ -21,7 +25,7 @@ type ExecView = 'today' | 'week' | 'review';
 // 提醒节奏：微信订阅消息是一次性授权，用户每点一次订阅可触达一次。
 const REMINDERS = [
   { time: '每天 09:00', text: '生成今日军令' },
-  { time: '每天 21:30', text: '记录战果，生成当日复盘' },
+  { time: `每天 ${REVIEW_TIME}`, text: '记录战果，生成当日复盘' },
   { time: '每周五 18:00', text: '生成周复盘，调整下周打法' },
 ];
 
@@ -31,8 +35,32 @@ function dateLabel(iso: string): string {
   return `${Number(m)}月${Number(d)}日`;
 }
 
+// WO-10：本周一（YYYY-MM-DD，与服务端经营周报归一口径一致）。
+function thisMonday(): string {
+  const d = new Date();
+  const dow = (d.getDay() + 6) % 7; // 0=周一
+  d.setDate(d.getDate() - dow);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function orderTagLabel(tag: string): string {
   return tag.startsWith('军令') ? tag : `军令 · ${tag}`;
+}
+
+// V7-10：目标阶梯字段（3-5年/年度/季度/本周）。
+type GoalField = 'longTerm' | 'annual' | 'quarterly' | 'weekly';
+const GOAL_FIELDS: [GoalField, string][] = [
+  ['longTerm', '3-5年'], ['annual', '年度'], ['quarterly', '季度'], ['weekly', '本周'],
+];
+
+// V7-05：军令结构化 meta（负责人 / 截止 / 预计耗时；缺省字段省略）。
+function orderMetaText(o: DossierOrder): string {
+  return [
+    o.ownerName ? `负责人 ${o.ownerName}` : '',
+    o.dueAt ? `截止 ${o.dueAt}` : '',
+    o.etaMinutes != null ? `预计 ${o.etaMinutes} 分钟` : '',
+  ].filter(Boolean).join(' · ');
 }
 
 // 执行页（军令台）—— 对齐设计稿 page-execution：exec-nav / 横滑战役卡组 / 督战行 / 目标阶梯 / 军令 / 回填 / 复盘。
@@ -40,17 +68,38 @@ function orderTagLabel(tag: string): string {
 export default function Studio() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
+  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
   const [buying, setBuying] = useState<Agent | null>(null);
   const [dossier, setDossier] = useState<Dossier | null>(null);
+  const [kbH, setKbH] = useState(0); // C6：键盘高度，用于把目标编辑 sheet 上顶避让
   const [view, setView] = useState<ExecView>('today');
   const [newOrder, setNewOrder] = useState('');
   const [bf, setBf] = useState({ leads: '', consults: '', deals: '' });
   const [streak, setStreak] = useState<number | null>(null);
   const [showDoneArchive, setShowDoneArchive] = useState(false);
+  const [reminders, setReminders] = useState<ReminderItem[] | null>(null);
+  const [goalEdit, setGoalEdit] = useState<{ field: GoalField; label: string } | null>(null);
+  const [goalDraft, setGoalDraft] = useState('');
+  // WO-10：本周经营周报是否已填报（用于复盘按钮旁的轻提示；null=未知/无行业模板不提示）
+  const [bizFilled, setBizFilled] = useState<boolean | null>(null);
   const und = s.me()?.understanding;
 
-  useDidShow(() => {
-    // studio 已摘出 tabBar，保留为军令详情页（回填/周计划/复盘）；入口在军情·今日军令卡与报告卡「认可→去执行」。
+  // 目标编辑浮层与底部导航栏协同（键控，卸载复位）。
+  useEffect(() => {
+    s.setOverlay(!!goalEdit, 'goal-edit');
+    return () => s.setOverlay(false, 'goal-edit');
+  }, [goalEdit]);
+
+  // C6：目标编辑 sheet 为 fixed 定位，键盘弹起会遮挡输入框。监听键盘高度把 sheet 上顶避让。
+  useEffect(() => {
+    if (!goalEdit) { setKbH(0); return; }
+    const handler = (res: { height: number }) => setKbH(res.height || 0);
+    Taro.onKeyboardHeightChange?.(handler);
+    return () => { Taro.offKeyboardHeightChange?.(handler); setKbH(0); };
+  }, [goalEdit]);
+
+  // C1：数据拉取（登录后才拉；未登录只挂登录引导，不请求）。studio 已摘出 tabBar，作军令详情页，入口在军情今日军令卡与报告卡「认可→去执行」。
+  const loadStudio = () => {
     // 案卷已服务端化：拉取当前案卷（含一次性本地迁移），回填草稿用当日已存值初始化
     refreshDossier().then((d) => {
       setDossier(d);
@@ -59,6 +108,15 @@ export default function Studio() {
     });
     // 连续复盘天数（服务端计数，M4 PR-18）
     api.reviews().then((r) => setStreak(r.streak)).catch(() => setStreak(null));
+    // V7-11：提醒节奏（服务端提醒体系；失败静默，卡片降级到默认文案）
+    api.reminders().then((r) => setReminders(r.items)).catch((e) => { s.handleApiError(e, { silent: true }); setReminders(null); });
+  };
+
+  useDidShow(() => {
+    s.setTab(2);
+    Taro.getCurrentInstance().page?.getTabBar?.();
+    if (!s.isAuthed()) { setShowLogin(true); return; }
+    loadStudio();
   });
 
   const todayDate = today();
@@ -70,10 +128,13 @@ export default function Studio() {
   const backfillSaved = !!dossier?.backfill[todayDate]?.savedAt;
   const creative = s.agents().filter((a) => a.type === 'creative');
   const firstUndone = pendingTodayOrders[0];
+  const reviewReminder = reminders?.find((r) => r.kind === 'review') ?? null;
 
   const goChat = (agentKey: string, prompt: string) =>
-    Taro.navigateTo({ url: `/pages/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}` });
-  const openAgent = (key: string) => Taro.navigateTo({ url: `/pages/chat/index?agentKey=${key}&continue=1` });
+    navTo(`/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}`);
+  const openAgent = (key: string) => navTo(`/packages/main/chat/index?agentKey=${key}&continue=1`);
+  // V7-05：军令卡体点击 → 军令详情页（勾选框为独立命中区，见 task-check 的 stopPropagation）
+  const openCommand = (id: string) => navTo(`/packages/work/command/index?id=${id}`);
   const tapCreative = (a: Agent) => {
     if (a.billing === 'unlock' && !a.owned) setBuying(a);
     else openAgent(a.key);
@@ -106,6 +167,21 @@ export default function Studio() {
     } catch {
       Taro.showToast({ title: '保存失败，请重试', icon: 'none' });
     }
+  };
+  // V7-10：目标阶梯 —— 打开某一格的内联编辑浮层
+  const openGoalEdit = (field: GoalField, label: string, current: string) => {
+    if (!dossier) { Taro.showToast({ title: '先认可一份军师方案生成案卷', icon: 'none' }); return; }
+    setGoalDraft(current);
+    setGoalEdit({ field, label });
+  };
+  // 保存单个目标 → PUT 局部目标阶梯 → 用返回的案卷刷新
+  const saveGoal = () => {
+    if (!goalEdit) return;
+    const { field } = goalEdit;
+    setGoalEdit(null);
+    saveGoals({ [field]: goalDraft.trim() } as Partial<GoalLadder>)
+      .then((d) => { if (d) setDossier(d); })
+      .catch((e) => s.handleApiError(e));
   };
   const genOrders = () =>
     goChat('general', '基于我们最近认可的方案，把今天最重要的 1-3 件事拆成今日军令，并给出每件事的完成标准。');
@@ -158,7 +234,7 @@ export default function Studio() {
       ? [
           `今日 ${doneTodayOrders.length} 条军令已完成，已归档`,
           '录入线索 / 咨询 / 成交三项数据',
-          '21:30 做今日复盘，生成明日军令',
+          `${REVIEW_TIME} 做今日复盘，生成明日军令`,
         ]
       : [
           '和军师聊透当前处境，产出一份方案',
@@ -184,10 +260,17 @@ export default function Studio() {
       <View className="pad exec">
         {/* 页头（exec-nav）：左「返回」· 中「军令」· 右「提醒」（已摘出 tabBar，navigateTo 进入） */}
         <View className="exec-nav tab-page-head">
+          {/* studio 在本分支是「军令详情」非 tab 页（navTo 入栈）→ 左槽用返回；无上层时兜底回军情 tab。 */}
           <Text className="en-side left serif" onClick={() => (Taro.getCurrentPages().length > 1 ? Taro.navigateBack() : Taro.switchTab({ url: '/pages/home/index' }))}>‹ 返回</Text>
           <Text className="en-title serif">军令</Text>
-          <Text className="en-side right serif" onClick={() => setView('review')}>提醒</Text>
+          <Text className="en-side right serif" onClick={() => setView('review')}>复盘</Text>
         </View>
+
+        {/* 本页不挂 WO-07「下一步」卡：它与下方「今日战役」空态同为「去参谋室聊定打法」的导流，
+            连「认可后自动拆成军令」都是同一句。军令页以战役卡为主，下一步卡仍留在战局/问策两 tab。 */}
+
+        {/* WO-12：处方条——军师为某问题配的工具，出现在军令/执行语境（多入口销售之一） */}
+        <PrescriptionStrip />
 
         {/* 战役卡组（exec-deck 横滑）：今日战役 / 军师献策 / 今日主令 / 提醒节奏 */}
         <ScrollView scrollX className="exec-deck" enhanced showScrollbar={false}>
@@ -199,10 +282,10 @@ export default function Studio() {
                 <Text className="deck-title serif">{dossier.title}</Text>
                 <Text className="deck-desc">源自认可方案 · 由{dossier.sourceAgent}生成 · 打卡记录，复盘定夺明日军令。</Text>
                 <View className="deck-progress"><View className="deck-fill" style={{ width: `${progress.percent}%` }} /></View>
-                <Text className="deck-foot">{progress.total ? `完成度 ${progress.percent}% · 21:30 复盘` : '待生成军令 · 21:30 复盘'}</Text>
+                <Text className="deck-foot">{progress.total ? `完成度 ${progress.percent}% · ${REVIEW_TIME} 复盘` : `待生成军令 · ${REVIEW_TIME} 复盘`}</Text>
               </View>
             ) : (
-              <View className="deck-card battle-card" onClick={() => Taro.switchTab({ url: '/pages/counsel/index' })}>
+              <View className="deck-card battle-card" onClick={() => switchTo('/pages/counsel/index')}>
                 <Text className="deck-k">今日战役 · {dateStr}</Text>
                 <Text className="deck-title serif">{EMPTY_STATES.execution.title}</Text>
                 <Text className="deck-desc">{EMPTY_STATES.execution.desc}</Text>
@@ -234,12 +317,12 @@ export default function Studio() {
               </View>
             </View>
 
-            {/* 提醒节奏（连续复盘天数=服务端真实计数） */}
-            <View className="deck-card" onClick={() => setView('review')}>
+            {/* 提醒节奏（V7-11：读 api.reminders 的复盘节奏，点开进提醒与日历页） */}
+            <View className="deck-card" onClick={() => navTo('/packages/work/reminders/index')}>
               <Text className="deck-k green">提醒节奏</Text>
-              <Text className="deck-title serif">21:30 复盘</Text>
-              <Text className="deck-desc">录入今日线索、咨询、成交，据此校准明日军令。</Text>
-              <Text className="deck-foot muted">{streak ? `连续复盘 ${streak} 天 · 别断` : '可订阅复盘提醒'}</Text>
+              <Text className="deck-title serif">{reviewReminder ? `${reviewReminder.time} 复盘` : `${REVIEW_TIME} 复盘`}</Text>
+              <Text className="deck-desc">{reviewReminder?.desc ?? '回填线索、咨询、成交，必要时刷新明日军令。'}</Text>
+              <Text className="deck-foot muted">{streak ? `连续复盘 ${streak} 天 · 别断` : '点开管理提醒 ›'}</Text>
             </View>
           </View>
         </ScrollView>
@@ -251,7 +334,7 @@ export default function Studio() {
             <Text className={`stat-n serif ${und?.nextQuestions.length ? 'warn' : ''}`}>{und ? und.nextQuestions.length : '—'}</Text>
             <Text className="stat-l">待补资料</Text>
           </View>
-          <View className="exec-stat card" onClick={() => setView('review')}><Text className="stat-n serif">21:30</Text><Text className="stat-l">复盘提醒</Text></View>
+          <View className="exec-stat card" onClick={() => setView('review')}><Text className="stat-n serif">{REVIEW_TIME}</Text><Text className="stat-l">复盘提醒</Text></View>
         </View>
 
         {/* 总军师督战（advisor-card 紧凑行） */}
@@ -275,14 +358,21 @@ export default function Studio() {
           </View>
         ) : null}
 
-        {/* 目标阶梯（goal-ladder）：结构化目标体系待后端建模，先由军师拆解 */}
-        <View className="goal-ladder" onClick={() => goChat('strat', '帮我把目标拆成阶梯：3-5 年、年度、季度、本周各一句话 + 关键指标。')}>
-          {['3-5年', '年度', '季度', '本周'].map((k) => (
-            <View key={k} className="gl-cell card">
-              <Text className="gl-k">{k}</Text>
-              <Text className="gl-v">待拆解</Text>
-            </View>
-          ))}
+        {/* 目标阶梯（goal-ladder V7-10）：真实目标 → 空格「＋ 补目标」内联编辑；顶部保留拆解对话入口 */}
+        <View className="goal-head">
+          <Text className="goal-head-t serif">目标阶梯</Text>
+          <Text className="goal-head-more" onClick={() => goChat('strat', '帮我把目标拆成阶梯：3-5 年、年度、季度、本周各一句话 + 关键指标。')}>拆解对话 ›</Text>
+        </View>
+        <View className="goal-ladder">
+          {GOAL_FIELDS.map(([field, label]) => {
+            const val = dossier?.goals?.[field] || '';
+            return (
+              <View key={field} className="gl-cell card" onClick={() => openGoalEdit(field, label, val)}>
+                <Text className="gl-k">{label}</Text>
+                <Text className={`gl-v ${val ? '' : 'empty'}`}>{val || '＋ 补目标'}</Text>
+              </View>
+            );
+          })}
         </View>
 
         {/* 视图切换（exec-seg）：今日军令 / 周计划 / 复盘 */}
@@ -314,18 +404,23 @@ export default function Studio() {
                 <Text className="oe-go">{dossier ? '生成今日军令 ›' : '去对话 ›'}</Text>
               </View>
             ) : (
-              pendingTodayOrders.map((o) => (
-                <View key={o.id} className={`task card ${o.done ? 'done' : ''}`} onLongPress={() => onRemove(o.id)}>
-                  <View className="task-b">
-                    <View className="task-meta-row"><Text className="pill">{orderTagLabel(o.tag)}</Text></View>
-                    <Text className="task-t serif">{o.text}</Text>
-                    <View className="task-meta-row"><Text className="pill">来自 {o.from}</Text><Text className="pill">长按删除</Text></View>
+              pendingTodayOrders.map((o) => {
+                const meta = orderMetaText(o);
+                return (
+                  <View key={o.id} className={`task card ${o.done ? 'done' : ''}`} onClick={() => openCommand(o.id)} onLongPress={() => onRemove(o.id)}>
+                    <View className="task-b">
+                      <View className="task-meta-row"><Text className="task-pill">{orderTagLabel(o.tag)}</Text></View>
+                      <Text className="task-t serif">{o.text}</Text>
+                      {/* V7-05：结构化 meta 行（负责人 · 截止 · 预计耗时；缺省省略） */}
+                      {meta ? <Text className="task-meta-info">{meta}</Text> : null}
+                      <View className="task-meta-row"><Text className="task-pill sub">来自 {o.from}</Text><Text className="task-pill sub">长按删除</Text></View>
+                    </View>
+                    <View className="task-check" onClick={(e) => { e.stopPropagation(); onToggle(o.id); }}>
+                      {o.done ? <Icon name="check" size={14} color="#fff" /> : null}
+                    </View>
                   </View>
-                  <View className="task-check" onClick={() => onToggle(o.id)}>
-                    {o.done ? <Icon name="check" size={14} color="#fff" /> : null}
-                  </View>
-                </View>
-              ))
+                );
+              })
             )}
 
             {doneTodayOrders.length ? (
@@ -341,12 +436,12 @@ export default function Studio() {
                 {showDoneArchive ? (
                   <View className="da-list">
                     {doneTodayOrders.map((o) => (
-                      <View key={o.id} className="archived-task" onLongPress={() => onRemove(o.id)}>
+                      <View key={o.id} className="archived-task" onClick={() => openCommand(o.id)} onLongPress={() => onRemove(o.id)}>
                         <View className="task-b">
                           <View className="task-meta-row"><Text className="pill">来自 {o.from}</Text><Text className="pill">长按删除</Text></View>
                           <Text className="archive-task-text serif">{o.text}</Text>
                         </View>
-                        <View className="archive-check" onClick={() => onToggle(o.id)}>
+                        <View className="archive-check" onClick={(e) => { e.stopPropagation(); onToggle(o.id); }}>
                           <Icon name="check" size={13} color="#fff" />
                         </View>
                       </View>
@@ -404,7 +499,7 @@ export default function Studio() {
                 <Text className="rb-text">线索 / 咨询 / 成交三个数</Text>
               </View>
               <View className="rb-line" onClick={genReview}>
-                <Text className="rb-state">21:30</Text>
+                <Text className="rb-state">{REVIEW_TIME}</Text>
                 <Text className="rb-text">生成今日复盘，决定明日是否调整军令</Text>
               </View>
             </View>
@@ -437,10 +532,13 @@ export default function Studio() {
 
         {view === 'review' ? (
           <>
+            {/* WO-10：本周经营数据填报（周复盘上方，字段按行业动态渲染） */}
+            <WeeklyBizMetrics accent={accent} onFilledChange={setBizFilled} />
             <View className="review-card card">
               <Text className="rc-k">今晚复盘{streak ? ` · 已连续 ${streak} 天` : ''}</Text>
               <Text className="rc-t">军师依今日军令完成度与实绩数据，诊断症结，给出明日军令。</Text>
               <Text className="payoff">依据：今日军令 {progress.done}/{progress.total || 0} · 数据{backfillSaved ? '已录' : '未录'}</Text>
+              {bizFilled === false ? <Text className="rc-hint">本周经营数据还没填，填了复盘对账更准（不填也能复盘）。</Text> : null}
               <View className="rc-btn" onClick={genReview}>
                 <Icon name="doc" size={15} color="#fff" />
                 <Text>生成今日复盘</Text>
@@ -462,9 +560,9 @@ export default function Studio() {
           </>
         ) : null}
 
-        {/* AI 创作发布：创作型智能体（出活） */}
+        {/* 军师代笔 · 内容出品：创作型智能体（出活） */}
         <View className="sec-head">
-          <Text className="sec-title">AI 创作发布</Text>
+          <Text className="sec-title">军师代笔 · 内容出品</Text>
           <Text className="sec-more">把军令变成内容资产</Text>
         </View>
         <View className="agrid">
@@ -489,14 +587,139 @@ export default function Studio() {
           })}
         </View>
 
-        <View className="exec-cta" onClick={todayOrders.length ? genReview : genOrders}>
-          <Icon name={todayOrders.length ? 'doc' : 'check'} size={16} color="#FBFAF6" />
-          <Text>{todayOrders.length ? '录入今日战果 · 生成复盘' : '让军师生成今日军令'}</Text>
+        {/* C7：主入口收敛到 deck「今日主令」卡（3 态更全、带上下文）。此底部条降级为次要样式，
+            对齐同一 mainOrderAction，作为翻到页尾时的便捷复触点，不再作第二个主 CTA 抢焦点。 */}
+        <View className="exec-cta secondary" onClick={mainOrderAction}>
+          <Icon name={todayOrders.length ? 'doc' : 'check'} size={16} color={accent} />
+          <Text>{mainOrderButton}</Text>
         </View>
       </View>
 
+      {/* V7-10：目标阶梯内联编辑浮层（底部输入 sheet） */}
+      {goalEdit ? (
+        <View className="goal-sheet-mask" catchMove onClick={() => setGoalEdit(null)}>
+          <View className="goal-sheet" style={kbH ? { transform: `translateY(-${kbH}px)` } : undefined} onClick={(e) => e.stopPropagation()}>
+            <View className="gs-grip" />
+            <Text className="gs-title serif">{goalEdit.label}目标</Text>
+            <Text className="gs-hint">一句话目标 + 关键指标，军师复盘时对齐这条。</Text>
+            <Input
+              className="gs-input"
+              value={goalDraft}
+              placeholder="如：营收 ×2，复购率 30%"
+              focus
+              adjustPosition={false}
+              onInput={(e) => setGoalDraft(e.detail.value)}
+              onConfirm={saveGoal}
+            />
+            <View className="gs-actions">
+              <View className="gs-btn ghost" onClick={() => setGoalEdit(null)}><Text>取消</Text></View>
+              <View className="gs-btn" style={{ background: accent }} onClick={saveGoal}><Text>保存</Text></View>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); openAgent(a.key); }} />
+
+      {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉执行页数据 */}
+      <Login
+        open={showLogin}
+        onLoggedIn={() => { setShowLogin(false); loadStudio(); }}
+      />
     </Screen>
+  );
+}
+
+// WO-10：本周经营数据填报卡。字段由服务端行业模板决定；已填→只读+「改」；未填/编辑→动态输入。
+// 无行业模板（template 为空）→ 整卡不渲染，不造假字段（诚实空态）。
+function WeeklyBizMetrics({ accent, onFilledChange }: { accent: string; onFilledChange?: (filled: boolean) => void }) {
+  const s = useStore();
+  const [tpl, setTpl] = useState<BizMetricTemplateItem[]>([]);
+  const [saved, setSaved] = useState<Record<string, number> | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const week = thisMonday();
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([api.bizMetricTemplate(), api.bizMetricSeries(8)])
+      .then(([t, ser]) => {
+        if (!alive) return;
+        setTpl(t.items);
+        const wk = ser.items.find((w) => w.weekStart === week);
+        const m = wk && Object.keys(wk.metrics).length ? wk.metrics : null;
+        setSaved(m);
+        onFilledChange?.(!!m);
+      })
+      .catch(() => { /* 静默：拉取失败不打断执行页 */ });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const startEdit = () => {
+    const d: Record<string, string> = {};
+    tpl.forEach((m) => { const v = saved?.[m.metricKey]; d[m.metricKey] = v != null ? String(v) : ''; });
+    setDraft(d);
+    setEditing(true);
+  };
+
+  const save = async () => {
+    const metrics: Record<string, number> = {};
+    tpl.forEach((m) => { const raw = (draft[m.metricKey] ?? '').trim(); const n = Number(raw); if (raw !== '' && Number.isFinite(n)) metrics[m.metricKey] = n; });
+    try {
+      await api.saveBizMetrics(week, metrics);
+      const has = Object.keys(metrics).length > 0;
+      setSaved(has ? metrics : null);
+      setEditing(false);
+      onFilledChange?.(has);
+      Taro.showToast({ title: has ? '本周经营数据已记录' : '已清空本周数据', icon: 'none' });
+    } catch (e) { s.handleApiError(e, { fallbackTitle: '保存失败，请重试' }); }
+  };
+
+  if (!tpl.length) return null;
+  const hasSaved = !!saved && !editing;
+
+  return (
+    <View className="data-fill biz-fill">
+      <View className="df-head">
+        <Text className="df-t serif">本周经营数据</Text>
+        {hasSaved
+          ? <Text className="bm-edit" style={{ color: accent }} onClick={startEdit}>改</Text>
+          : <Text className={`df-s ${saved ? 'ok' : ''}`}>{tpl.length} 项</Text>}
+      </View>
+      {hasSaved ? (
+        <View className="bm-row">
+          {tpl.map((m) => {
+            const v = saved?.[m.metricKey];
+            return (
+              <View key={m.metricKey} className="bm-cell ro">
+                <Text className="df-label">{m.metricName}</Text>
+                <Text className="bm-val">{v != null ? v : '—'}<Text className="bm-unit">{m.unit}</Text></Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : (
+        <>
+          <View className="bm-row">
+            {tpl.map((m) => (
+              <View key={m.metricKey} className="bm-cell">
+                <Text className="df-label">{m.metricName}（{m.unit}）</Text>
+                <Input
+                  className="df-input"
+                  type="digit"
+                  value={draft[m.metricKey] ?? ''}
+                  placeholder="__"
+                  onInput={(e) => setDraft((cur) => ({ ...cur, [m.metricKey]: e.detail.value }))}
+                />
+              </View>
+            ))}
+          </View>
+          <View className="df-save" style={{ background: accent }} onClick={save}><Text>保存本周数据</Text></View>
+        </>
+      )}
+      <Text className="payoff">军师复盘时与行业基准对照，差值由系统计算</Text>
+    </View>
   );
 }
 

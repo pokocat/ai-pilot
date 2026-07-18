@@ -1,4 +1,5 @@
 export default {
   navigationStyle: 'custom',
-  navigationBarTitleText: '钻石明细',
+  navigationBarTitleText: '算力明细',
+  enablePullDownRefresh: true,
 };

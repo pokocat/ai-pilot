@@ -38,6 +38,10 @@ app/project.private.config.json
 .env
 server/.env
 admin/.env
+# 例外：server/.env.test 是测试库连接串（无真实密钥），纳入版本管理，保证 npm test 固定连 junshi_test。
+!server/.env.test
+# 本地 mock 微信支付服务器持久化的密钥（npm run pay:mock 生成，仅本机联调用）
+server/.paymock/
 *.local
 
 # 日志

@@ -1,22 +1,30 @@
 export default defineAppConfig({
+  lazyCodeLoading: 'requiredComponents',
   pages: [
     'pages/counsel/index',
     'pages/home/index',
     'pages/junling/index',
     'pages/satchel/index',
     'pages/profile/index',
-    'pages/chat/index',
     'pages/sessions/index',
     'pages/studio/index',
-    'pages/brief/index',
-    'pages/settings/index',
   ],
   subpackages: [
+    {
+      // 主包瘦身：chat（最大单页）/brief/settings 三个非 tabBar 高频页迁入分包，主包只保留 5 个 tabBar 页。
+      root: 'packages/main',
+      pages: [
+        'chat/index',
+        'brief/index',
+        'settings/index',
+      ],
+    },
     {
       root: 'packages/work',
       pages: [
         'library/index',
         'knowledge/index',
+        'knowledge/detail/index',
         'projects/index',
         'project/index',
         'report/index',
@@ -28,30 +36,39 @@ export default defineAppConfig({
         'calendar/index',
         'dossier/index',
         'ledger/index',
+        'quickscan/index',
+        'brandkit/index',
         'webview/index',
+        'command/index',
+        'reminders/index',
       ],
     },
   ],
   preloadRule: {
-    'pages/profile/index': {
-      network: 'all',
+    // chat 已迁入 packages/main：从入口 tab 预下载 main 分包，保证「问策/军情/往来」进对话不卡首屏。
+    'pages/counsel/index': {
+      network: 'wifi',
+      packages: ['packages/main'],
+    },
+    'pages/sessions/index': {
+      network: 'wifi',
+      packages: ['packages/main'],
+    },
+    'pages/home/index': {
+      network: 'wifi',
+      packages: ['packages/main', 'packages/work'],
+    },
+    'pages/junling/index': {
+      network: 'wifi',
       packages: ['packages/work'],
     },
     'pages/satchel/index': {
       network: 'all',
       packages: ['packages/work'],
     },
-    'pages/home/index': {
-      network: 'wifi',
-      packages: ['packages/work'],
-    },
-    'pages/junling/index': {
-      network: 'wifi',
-      packages: ['packages/work'],
-    },
-    'pages/chat/index': {
-      network: 'wifi',
-      packages: ['packages/work'],
+    'pages/profile/index': {
+      network: 'all',
+      packages: ['packages/work', 'packages/main'],
     },
   },
   window: {

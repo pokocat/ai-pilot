@@ -1,5 +1,6 @@
-// 知识库路由：列表 / 文档上传 / 摄取（手动笔记）/ 详情(切片) / 重嵌 / 原件预览 / 混合检索 / 删除。
+// 知识库路由：列表 / 文档上传 / 摄取（手动笔记）/ 详情(切片) / 重嵌 / 原件预览 / 混合检索 / 经营体检 / 删除。
 import type { FastifyInstance } from 'fastify';
+import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import {
   ingestKnowledge,
@@ -12,7 +13,26 @@ import {
   deleteKnowledge,
 } from '../services/knowledge.js';
 import { hybridSearch } from '../services/retrieval.js';
-import type { CreateKnowledgeRequest } from '../../../shared/contracts';
+import { checkQuota, ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
+import { bestUploadName } from '../services/uploadName.js';
+import { looksFinancial } from '../services/finParse.js';
+import { runFinCheckup } from '../services/finCheckup.js';
+import { isModuleEnabled } from '../services/modules.js';
+import { reserveQuota, assertPlanActive, type QuotaReservation } from '../services/tokenQuota.js';
+import { structuredBillTokens } from '../llm/gateway.js';
+import { cacheGet, cacheSet } from '../services/cache.js';
+import { dateKey } from '../services/clock.js';
+import type { AnalyzeResult, CreateKnowledgeRequest } from '../../../shared/contracts';
+
+// WO-09 经营体检门禁/计费（吸取 P0-1 教训，对齐 quickscan/brandKit 口径）。
+const FIN_DAILY_LIMIT = 3;   // 每用户每日体检次数（真实模型调用 + 成版，防资损）
+const FIN_RATIO = 0.3;       // token 轴计费 ratio 低配（对齐 quickscan）
+const FIN_EST_TOKENS = 1500; // 体检调用估算 token（structured() 暂不回传真实用量，走保守估算）
+const DAY_MS = 24 * 60 * 60 * 1000;
+function finDayKey(): string {
+  return dateKey(); // 上海时区日历日（P1-4）
+}
+
 
 export async function knowledgeRoutes(app: FastifyInstance) {
   // 列表（KnowledgeItemT，租户级，可按项目/类型过滤）——供 @引用候选等既有用途。
@@ -36,7 +56,10 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   });
 
   // 上传文档（multipart 单文件）→ 存原件 + 建 parsing item，立即返回 { id, status }，解析异步。
-  app.post<{ Querystring: { projectId?: string } }>('/knowledge/upload', async (req, reply) => {
+  // V7-06：staged=true 时走「待整理」通道——建 stage='staging' 条目 + docParse 存文本，**不切片不嵌入**
+  //（对检索天然不可见），并挂 batchId（可由 query 传入以聚合「同批上传」；否则逐请求生成）；受本月免费额度门禁。
+  // 非 staged（默认，如对话内上传）维持原行为：直入库 + 异步解析嵌入，既有动线不破坏。
+  app.post<{ Querystring: { projectId?: string; staged?: string; batchId?: string } }>('/knowledge/upload', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     let data;
     try {
@@ -53,11 +76,44 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     }
     if (data.file.truncated) return reply.code(413).send({ error: '文件过大（上限 20MB）' });
     if (!buf.length) return reply.code(400).send({ error: '空文件' });
+
+    // 新上传优先保存客户端传来的源文件名。微信临时路径不是源文件名，不能落库；
+    // 老客户端没有 originalName 时，只有 multipart 文件名可用，若它也是临时名则交给展示层兜底。
+    const rawOriginal = (data.fields as Record<string, { value?: string } | undefined> | undefined)?.originalName?.value;
+    const fileName = bestUploadName(rawOriginal, data.filename) || '待识别资料';
+
+    const staged = req.query.staged === 'true' || req.query.staged === '1';
+    if (staged) {
+      try {
+        return await ingestStagedFile({
+          tenantId: user.tenantId,
+          userId: user.id,
+          projectId: req.query.projectId ?? null,
+          fileName,
+          mime: data.mimetype,
+          buf,
+          batchId: (req.query.batchId || '').trim() || newBatchId(),
+        });
+      } catch (e) {
+        const err = e as Error & { statusCode?: number; code?: string };
+        return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+      }
+    }
+
+    // 非 staged（对话内上传）此前从不查额度，等于绕开了 30 份 / 200MB 的免费口径——
+    // 从对话上传能无限往库里堆，智库上传却被拦。此处补上同一道门禁，两条动线一个口径。
+    try {
+      await checkQuota({ tenantId: user.tenantId, userId: user.id, addBytes: buf.length });
+    } catch (e) {
+      const err = e as Error & { statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 402).send({ error: err.message, code: err.code });
+    }
+
     return ingestUploadedFile({
       tenantId: user.tenantId,
       userId: user.id,
       projectId: req.query.projectId ?? null,
-      fileName: data.filename || '未命名文件',
+      fileName,
       mime: data.mimetype,
       buf,
     });
@@ -99,6 +155,58 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     const url = await knowledgePreviewUrl(user.tenantId, req.params.id);
     if (!url) return reply.code(404).send({ error: '无原件可预览' });
     return { url };
+  });
+
+  // 经营体检（WO-09）：财务/表格类知识条目 → 结构化派生指标 → 5 段体检报告成版。
+  // 门禁：finance 模块（fin-checkup SKU）已购（未购 402 SKU_REQUIRED）；套餐未过期（assertPlanActive）。
+  // 计费：reserveQuota(0.3) 预留 → 结构化调用按 P1-3 口径保守结算 → 失败 refund；每日 3 次限流。
+  app.post<{ Params: { id: string } }>('/knowledge/:id/analyze', async (req, reply): Promise<AnalyzeResult | void> => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+
+    const item = await prisma.knowledgeItem.findFirst({
+      where: { id: req.params.id, tenantId: user.tenantId },
+      select: { id: true, text: true, title: true, fileName: true, status: true, projectId: true },
+    });
+    if (!item) return reply.code(404).send({ error: '知识项不存在', code: 'NOT_FOUND' });
+    if (item.status !== 'ready' || !looksFinancial(item.text)) {
+      return reply.code(422).send({ error: '该资料不是可体检的财务/经营表', code: 'NOT_ANALYZABLE' });
+    }
+
+    // 门禁：fin-checkup 是「购买后解锁、可反复用」的 module 类 SKU（非一次性核销）——查 finance 模块是否已购。
+    if (!(await isModuleEnabled(user.tenantId, user.id, 'finance'))) {
+      return reply.code(402).send({ error: '经营体检需先购买', code: 'SKU_REQUIRED', skuKey: 'fin-checkup' });
+    }
+
+    // 限流 3/日（先于额度：超限的请求不应消耗额度/触发真实调用）。
+    const rlKey = `fincheckup:rl:${user.id}:${finDayKey()}`;
+    const used = (await cacheGet<number>(rlKey)) ?? 0;
+    if (used >= FIN_DAILY_LIMIT) {
+      return reply.code(429).send({ error: '今天的经营体检次数已用完，明天再来', code: 'RATE_LIMITED' });
+    }
+
+    await assertPlanActive(user.id); // 套餐过期 → PLAN_EXPIRED(403)
+    let reservation: QuotaReservation | undefined;
+    try {
+      reservation = await reserveQuota(user.id, FIN_RATIO);
+      const profile = await prisma.profile.findFirst({ where: { tenantId: user.tenantId }, orderBy: { updatedAt: 'desc' }, select: { industry: true } });
+      const { reportId, version, ok, attempts } = await runFinCheckup({
+        tenantId: user.tenantId,
+        userId: user.id,
+        itemId: item.id,
+        projectId: item.projectId,
+        title: `经营体检 · ${(item.title || item.fileName || '上传资料').slice(0, 40)}`,
+        text: item.text,
+        fileName: item.fileName,
+        industry: profile?.industry ?? null,
+      });
+      // P1-3：校验失败但已真实调用（attempts>0）时按轮次保守结算，不因 mock 兜底而全额退。
+      await reservation.settle(structuredBillTokens({ ok, attempts, estTokens: FIN_EST_TOKENS }), FIN_RATIO);
+      await cacheSet(rlKey, used + 1, DAY_MS); // 仅成功后计一次限流
+      return { reportId, version };
+    } catch (err) {
+      if (reservation) await reservation.refund().catch(() => {});
+      throw err;
+    }
   });
 
   app.delete<{ Params: { id: string } }>('/knowledge/:id', async (req) => {

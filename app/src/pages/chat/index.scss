@@ -1,6 +1,0 @@
-/* 对话页外壳：满屏纵向弹性列，键盘让位由内嵌 ChatView 处理。 */
-.chat {
-  display: flex; flex-direction: column; height: 100vh;
-  box-sizing: border-box; overflow: hidden;
-  background: var(--paper);
-}

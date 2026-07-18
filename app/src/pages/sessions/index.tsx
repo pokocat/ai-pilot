@@ -43,8 +43,9 @@ export default function Sessions() {
   });
 
   const aliasOf = (key: string) => ADVISOR_ALIAS[key] || '';
-  const openSession = (id: string) => Taro.navigateTo({ url: `/pages/chat/index?sessionId=${id}` });
-  const newWithGeneral = () => Taro.navigateTo({ url: '/pages/chat/index?agentKey=general&fresh=1' });
+  // chat 已迁入 packages/main 分包（主包瘦身），路径随之更新。
+  const openSession = (id: string) => Taro.navigateTo({ url: `/packages/main/chat/index?sessionId=${id}` });
+  const newWithGeneral = () => Taro.navigateTo({ url: '/packages/main/chat/index?agentKey=general&fresh=1' });
 
   // 长按会话 → 删除（接口已支持，乐观更新）
   const confirmDelete = (it: SessionItem) =>

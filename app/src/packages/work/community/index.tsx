@@ -4,6 +4,7 @@ import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { COMMUNITY_STEPS } from '../../../data/operatingSystem';
+import { navTo } from '../../../services/nav';
 import './index.scss';
 
 // 军师社群：注册后按身份、城市、方向分班，配服务老师陪跑。
@@ -32,7 +33,7 @@ export default function Community() {
             <Text className="class-st" style={{ color: accent }}>分班准备中</Text>
           </View>
           <Text className="class-d">档案越完整，分班越精准。先完善企业档案与经营方向，运营确认后即分配班级与服务老师。</Text>
-          <View className="class-btn" style={{ borderColor: accent }} onClick={() => Taro.navigateTo({ url: '/pages/brief/index' })}>
+          <View className="class-btn" style={{ borderColor: accent }} onClick={() => navTo('/packages/main/brief/index')}>
             <Text style={{ color: accent }}>完善我的档案 ›</Text>
           </View>
         </View>

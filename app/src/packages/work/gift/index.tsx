@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Input, Canvas, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
+import { store } from '../../../services/store';
 import { api, type FateCardContent } from '../../../services/api';
 import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
 import './index.scss';
@@ -23,6 +24,16 @@ const SHICHEN: { label: string; hour: number | null }[] = [
 const CW = 600;
 const CH = 880;
 
+// D6：按月份/闰年校验非法日（阳历用格里历月长；农历大小月 29/30，无历表时按 30 保守放行）。
+function isLeap(y: number): boolean { return (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0; }
+function monthDays(cal: 'solar' | 'lunar', y: number, m: number): number {
+  if (cal === 'lunar') return 30;
+  return [31, isLeap(y) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1] ?? 31;
+}
+function validBirth(cal: 'solar' | 'lunar', y: number, m: number, d: number): boolean {
+  return y >= 1930 && y <= new Date().getFullYear() && m >= 1 && m <= 12 && d >= 1 && d <= monthDays(cal, y, m);
+}
+
 export default function Gift() {
   const s = useStore();
   const c = s.color();
@@ -37,8 +48,16 @@ export default function Gift() {
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [imgPath, setImgPath] = useState<string | null>(null);
+  const [disabled, setDisabled] = useState(false); // P0-2：命理下线 → 友好降级
+  const errCode = (e: unknown) => String((e as { code?: string; data?: { code?: string } })?.code || (e as { data?: { code?: string } })?.data?.code || '');
+  // 拉最新命理开关（深链直达也能拿到真态）
+  useEffect(() => { if (s.isAuthed()) store.loadMe().catch(() => {}); }, []);
+  const fortuneOff = disabled || !s.fortuneOn();
 
-  const dateOk = +year >= 1930 && +year <= 2020 && +month >= 1 && +month <= 12 && +day >= 1 && +day <= 31;
+  // 例行 QA 2026-07-08：出生年上限曾写死 2020（早于当前年份的过时常量），与
+  // server/src/routes/profile.ts 的动态上限（now().getFullYear()）及主入口 Picker（无年份上限）不一致，
+  // 2021 年及以后出生年份会被前端静默拦下（按钮置灰无提示）。改为跟随当前年份。
+  const dateOk = validBirth(calendar, +year, +month, +day);
   const valid = !!name.trim() && dateOk && consent;
 
   const makeCard = async () => {
@@ -58,7 +77,8 @@ export default function Gift() {
       Taro.showToast({ title: '卡已生成 · 保存或发给朋友', icon: 'none' });
     } catch (e) {
       Taro.hideLoading();
-      if (s.handleApiError(e) !== 'unauthorized') Taro.showToast({ title: '生成失败，请检查生辰后重试', icon: 'none' });
+      if (errCode(e) === 'FEATURE_DISABLED') { setDisabled(true); Taro.showToast({ title: '命理能力已下线', icon: 'none' }); }
+      else if (s.handleApiError(e) !== 'unauthorized') Taro.showToast({ title: '生成失败，请检查生辰后重试', icon: 'none' });
     }
     setBusy(false);
   };
@@ -69,6 +89,14 @@ export default function Gift() {
   return (
     <View className={`page gift ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
       <SafeHeader title="送你一卦" onBack={() => Taro.navigateBack()} />
+      {fortuneOff ? (
+        <View className="pad">
+          <View className="gf-hero">
+            <Text className="gf-ht serif">天命速写卡暂不可用</Text>
+            <Text className="gf-hd">军师已按当前策略暂停命理速写。你与军师的战略对话、方案与复盘不受影响。</Text>
+          </View>
+        </View>
+      ) : (
       <View className="pad">
         <View className="gf-hero">
           <Text className="gf-ht serif">给朋友出一张「天命速写卡」</Text>
@@ -152,6 +180,7 @@ export default function Gift() {
 
         <Text className="gf-note">朋友的生辰只用于本次排盘，服务器不留档、不生成公开链接。命理内容为文化视角的经营参考，不构成决策依据。</Text>
       </View>
+      )}
     </View>
   );
 }

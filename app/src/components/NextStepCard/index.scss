@@ -1,0 +1,55 @@
+/* 深色本命色卡：接 accent 族 token（去 theme-blind 硬编码深绿），单位转 px 对齐全站。 */
+.nsc {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 16px;
+  padding: 14px 15px;
+  background: var(--accent-deep);
+  border-radius: var(--r-sm);
+  color: rgba(255, 255, 255, .9);
+  min-height: 80px;
+  box-sizing: border-box;
+  transition: filter .12s ease-out, transform .12s ease-out;
+}
+.nsc:active { filter: brightness(1.08); transform: scale(.99); }
+.nsc-main {
+  flex: 1;
+  min-width: 0;
+}
+.nsc-kicker {
+  display: block;
+  font-size: 11px;
+  color: var(--accent-bright);
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.nsc-title {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+}
+.nsc-desc {
+  display: block;
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, .72);
+}
+.nsc-arrow {
+  font-size: 20px;
+  color: var(--accent-bright);
+}
+
+/* —— 加载骨架：与卡片同色同形，数据回来后无缝替换 —— */
+.nsc-skeleton { pointer-events: none; }
+.nsc-sk {
+  background: rgba(255, 255, 255, .16);
+  border-radius: 4px;
+  animation: nsc-pulse 1.2s ease-in-out infinite;
+}
+.nsc-sk-k { width: 44px; height: 10px; margin-bottom: 8px; }
+.nsc-sk-t { width: 60%; height: 15px; margin-bottom: 8px; }
+.nsc-sk-d { width: 82%; height: 11px; }
+@keyframes nsc-pulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }

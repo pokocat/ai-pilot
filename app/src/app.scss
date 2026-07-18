@@ -3,6 +3,7 @@
    暖 off-white 底 + 墨色 + 本命色强调；近直角（2px）；无阴影卡；宋体优先，字重 ≤600
    （唯一例外：水印巨字 900，仅装饰）。旧令牌名（--ink/--line/--paper/--surface/--accent…）
    全部保留为别名映射，避免全站改引用。
+   字体只在 --serif / --sans 两个 token 上改，勿在页面内另立字体变量。
    ============================================================ */
 
 /* —— 纸纹（FABLE5 §6）——
@@ -78,7 +79,7 @@ page {
   --danger: #BC4A31;
   --warn: #B0782A;
 
-  --serif: "Noto Serif SC", "Songti SC", "STSong", serif;
+  --serif: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif;
   --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
   --se: var(--serif); /* 原型同名别名 */
   --ease: cubic-bezier(.16, 1, .3, 1);
@@ -88,6 +89,31 @@ page {
   --r-md: 2px;
   --r-lg: 2px;
   --r-xl: 2px;
+
+  /* —— 字号标尺（main 立标；新组件如 AsyncState 走 token，存量分批迁移） —— */
+  --fs-11: 11px;   /* kicker / 说明底线（≥11px） */
+  --fs-12: 12px;   /* 辅助说明 */
+  --fs-13: 13px;   /* 次要正文 / 按钮小字 */
+  --fs-14: 14px;   /* 正文 */
+  --fs-15: 15px;   /* 强调正文 / 主按钮 */
+  --fs-17: 17px;   /* 小标题 */
+  --fs-20: 20px;   /* 弹层标题 */
+
+  /* —— 间距标尺 —— */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* —— 阴影（chat/brief/settings 引用 --shadow-sm，补定义修死令牌） —— */
+  --shadow-sm: 0 1px 2px rgba(22, 25, 29, .04), 0 2px 8px rgba(22, 25, 29, .05);
+
+  /* —— 层级（weapp 端 z-index 请直接写字面量 100/900/950，此处作文档标尺） —— */
+  --z-nav: 100;    /* 悬浮底栏 */
+  --z-sheet: 900;  /* 半屏弹层 */
+  --z-full: 950;   /* 全屏层（登录等） */
 
   background-color: var(--bg);
   background-image: $fiber-light; /* 纸纹（§6）叠在暖纸底上 */
@@ -250,6 +276,34 @@ input, textarea { font-family: var(--sans); }
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 20px 0; font-size: 13px; font-weight: 600; color: var(--tx);
 }
+
+/* —— 按钮基类（A2，main 新增；直角案卷统一压到 2px 角）——
+   规范：高 48px、2px 角、:active 按压态、disabled(opacity+pointer-events:none)。
+   业务色由各处以内联 style={{ background: accent }} 覆写，基类只管形与态。
+   PaySheet / OnboardSheet / ExceptionSheet 等主 CTA 依赖此全局基类。 */
+.btn {
+  height: 48px; border-radius: 2px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: var(--fs-15); font-weight: 600; line-height: 1;
+  border: 1px solid transparent;
+  transition: transform .12s ease-out, filter .12s ease-out, opacity .12s ease-out;
+}
+.btn:active { transform: scale(.98); filter: brightness(.94); }
+.btn.disabled, .btn[disabled] { opacity: .5; pointer-events: none; }
+
+/* 主行动：默认本命色底、白字（可被内联 background 覆写为具体 accent） */
+.btn-primary { background: var(--accent); color: #fff; }
+/* 次行动：浅底、墨字 */
+.btn-ghost { background: var(--surface-2); color: var(--ink-2); }
+/* 危险行动 */
+.btn-danger { background: var(--danger); color: #fff; }
+
+/* —— 弹层公共入场动画（A3）——
+   由 Picker 的 pk-rise 提取为公共，Sheet 基座统一接 .sheet-rise。 */
+@keyframes sheet-rise { from { transform: translateY(60px); opacity: .4; } to { transform: none; opacity: 1; } }
+.sheet-rise { animation: sheet-rise .42s cubic-bezier(.2, .8, .2, 1) both; }
+
+/* —— Toast —— */
 .toast {
   position: fixed; left: 50%; bottom: 130px; transform: translateX(-50%) translateY(8px);
   background: rgba(28, 22, 12, .92); color: #fff; padding: 10px 16px; border-radius: 2px;
