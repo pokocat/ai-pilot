@@ -191,6 +191,9 @@ export default function Chat() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
+  // 问卷卡「其他」自填框聚焦时，把它滚进可视区的目标 id（空串=交还给 scrollTop）。
+  const [askScrollInto, setAskScrollInto] = useState('');
+  const askFocusRef = useRef(-1);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
   const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
@@ -833,6 +836,29 @@ export default function Chat() {
     if (next > 0) setTimeout(scrollToEnd, 40);
   };
 
+  // 问卷卡「其他」自填框的键盘处理：不像正文 composer 那样滚到对话底部
+  // （那会让用户看不到自己打的字），而是把当前作答的输入框滚进可视区。
+  const bringAskInputIntoView = (qi: number) => {
+    // 置空再设值，确保对同一输入框再次聚焦时 scrollIntoView 仍会重新触发。
+    setAskScrollInto('');
+    setTimeout(() => setAskScrollInto(`ask-in-${qi}`), 30);
+  };
+  const onAskInputFocus = (qi: number) => {
+    askFocusRef.current = qi;
+    bringAskInputIntoView(qi);
+  };
+  // 复用 --keyboard-height 机制收缩 .chat、把内容整体抬到键盘之上；键盘高度就位后再定位一次。
+  const onAskKeyboardHeightChange = (e: { detail?: { height?: number } }) => {
+    const next = Math.max(0, Number(e.detail?.height || 0));
+    setKeyboardHeight(next);
+    if (next > 0 && askFocusRef.current >= 0) bringAskInputIntoView(askFocusRef.current);
+  };
+  const onAskInputBlur = (qi: number) => {
+    if (askFocusRef.current === qi) askFocusRef.current = -1;
+    setKeyboardHeight(0);
+    setAskScrollInto('');
+  };
+
   const saveDeliverable = async (d: Deliverable, messageId?: string) => {
     if (!agent) return;
     await api.saveToLibrary({
@@ -1181,7 +1207,7 @@ export default function Chat() {
       ) : null}
 
       {/* 对话流 */}
-      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
+      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollIntoView={askScrollInto} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (
@@ -1259,7 +1285,7 @@ export default function Chat() {
                     </View>
                     <View className="ask-body">
                       {activeAsks.map((a, qi) => (
-                        <View key={qi} className="ask-item">
+                        <View key={qi} id={`ask-in-${qi}`} className="ask-item">
                           <View className="ask-q">
                             {activeAsks.length > 1 ? (
                               <Text className="ask-qn serif" style={{ color: accent }}>{qi + 1}</Text>
@@ -1290,6 +1316,11 @@ export default function Chat() {
                               className="ask-other-input"
                               value={askOther[qi] ?? ''}
                               placeholder="输入你的答案…"
+                              cursorSpacing={24}
+                              adjustPosition={false}
+                              onFocus={() => onAskInputFocus(qi)}
+                              onBlur={() => onAskInputBlur(qi)}
+                              onKeyboardHeightChange={onAskKeyboardHeightChange}
                               onInput={(e) => setAskOtherText(qi, e.detail.value)}
                             />
                           ) : null}
@@ -1382,7 +1413,8 @@ export default function Chat() {
             </View>
           </View>
         ) : null}
-        <View style={{ height: '20px' }} />
+        {/* 作答问卷卡时留出额外滚动余量，让当前输入框能被滚到键盘之上（而非贴着键盘顶）。 */}
+        <View style={{ height: askScrollInto ? '45vh' : '20px' }} />
       </ScrollView>
 
       {showJumpLatest ? (
