@@ -139,7 +139,8 @@ echo "== 依赖 + prisma =="
 cd "$PREPROD_ROOT/server"
 npm ci
 npx prisma generate
-sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$PREPROD_ROOT/server' && ./node_modules/.bin/prisma db push --skip-generate"
+# preprod 为测试库：容忍新增唯一约束/列的 data-loss 提示（如 app_user.inviteCode 唯一约束；新列多为 NULL，PG 允许多 NULL）
+sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$PREPROD_ROOT/server' && ./node_modules/.bin/prisma db push --skip-generate --accept-data-loss"
 sudo -u postgres psql -d "$PREPROD_DB" -f "$PREPROD_ROOT/server/prisma/pgvector.sql" >/dev/null 2>&1 || echo "  (pgvector.sql 已处理或不需要)"
 
 echo "== 种子数据（幂等）=="
