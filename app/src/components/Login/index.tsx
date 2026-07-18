@@ -3,6 +3,7 @@ import { View, Text, Input, Button, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { api } from '../../services/api';
 import Icon from '../Icon';
+import logo from '../../assets/logo.png';
 import { store } from '../../services/store';
 import './index.scss';
 
@@ -327,17 +328,24 @@ export default function Login({ open, onLoggedIn }: Props) {
 
   return (
     <View className="login">
-      {/* 纸底淡墨水印 */}
-      <Text className="lg-wm">謀</Text>
+      {/* 主体绿 · 流动背景 */}
+      <View className="lg-bg">
+        <View className="lg-blob lg-b1" />
+        <View className="lg-blob lg-b2" />
+        <View className="lg-blob lg-b3" />
+        <Text className="lg-wm serif">謀</Text>
+      </View>
 
       {stage === 'wechat' && (
         <View className="lg-content">
           <View className="lg-hero">
-            <View className="lg-seal">
-              <Text className="lg-seal-t">军<Text className="on">师</Text></Text>
+            <Image className="lg-mk" src={logo} mode="aspectFit" />
+            <View className="lg-name">
+              <Text className="lg-name-ai">AI</Text>
+              <Text className="lg-name-cn serif"> 军师</Text>
             </View>
             <View className="lg-rule" />
-            <Text className="lg-slogan">谋定而后动，决胜千里之外</Text>
+            <Text className="lg-slogan serif">谋定而后动，决胜千里之外</Text>
             <Text className="lg-tag">你的随身 AI 商业军师</Text>
           </View>
 
@@ -348,7 +356,7 @@ export default function Login({ open, onLoggedIn }: Props) {
             </View>
             <View className="lg-switch" onClick={() => !busy && setStage('phone')}>
               <Text>手机号登录</Text>
-              <Icon name="arrow" size={13} color="#8C8474" />
+              <Icon name="arrow" size={13} color="rgba(243,240,230,.82)" />
             </View>
             <Text className="lg-agree">登录即同意《用户协议》与《隐私政策》</Text>
           </View>
@@ -382,14 +390,14 @@ export default function Login({ open, onLoggedIn }: Props) {
                 {sent > 0 ? `${sent}s` : codeSending ? '发送中…' : '获取验证码'}
               </Text>
             </View>
-            <View className={`lg-cta proto-btn ${loading ? 'off' : ''}`} onClick={submitPhone}>
+            <View className={`lg-cta ${loading ? 'off' : ''}`} onClick={submitPhone}>
               <Text>{loading ? '登录中…' : '登录 / 注册'}</Text>
             </View>
           </View>
 
           <View className="lg-actions">
             <View className="lg-switch" onClick={() => !busy && setStage('wechat')}>
-              <Icon name="wechat" size={15} color="#07C160" />
+              <Icon name="wechat" size={15} color="rgba(243,240,230,.82)" />
               <Text> 返回微信登录</Text>
             </View>
             <Text className="lg-agree">登录即同意《用户协议》与《隐私政策》</Text>
@@ -424,7 +432,7 @@ export default function Login({ open, onLoggedIn }: Props) {
                 {bindSent > 0 ? `${bindSent}s` : bindSending ? '发送中…' : '获取验证码'}
               </Text>
             </View>
-            <View className={`lg-cta proto-btn ${bindLoading ? 'off' : ''}`} onClick={submitBind}>
+            <View className={`lg-cta ${bindLoading ? 'off' : ''}`} onClick={submitBind}>
               <Text>{bindLoading ? '绑定中…' : '完成绑定'}</Text>
             </View>
           </View>
@@ -453,13 +461,13 @@ export default function Login({ open, onLoggedIn }: Props) {
                 <Button className="lg-av-btn" openType="chooseAvatar" onChooseAvatar={onChooseAvatar}>
                   {avatarShown
                     ? <Image className="lg-av" src={avatarShown} mode="aspectFill" />
-                    : <View className="lg-av lg-av-ph"><Icon name="user" size={26} color="#8C8474" /></View>}
-                  <View className="lg-av-cam"><Icon name="image" size={13} color="#FAF7EF" /></View>
+                    : <View className="lg-av lg-av-ph"><Icon name="user" size={26} color="rgba(243,240,230,.7)" /></View>}
+                  <View className="lg-av-cam"><Icon name="image" size={13} color="#0E2A1E" /></View>
                 </Button>
               ) : (
                 avatarShown
                   ? <Image className="lg-av" src={avatarShown} mode="aspectFill" />
-                  : <View className="lg-av lg-av-ph"><Icon name="user" size={26} color="#8C8474" /></View>
+                  : <View className="lg-av lg-av-ph"><Icon name="user" size={26} color="rgba(243,240,230,.7)" /></View>
               )}
               <Text className="lg-av-tip">点头像 · 使用微信头像（可选）</Text>
             </View>
@@ -468,7 +476,7 @@ export default function Login({ open, onLoggedIn }: Props) {
               <Input className="lg-input" type="nickname" maxlength={20} value={nick} focus={nickFocus} placeholder="填写称呼（必填，点此可用微信昵称）" placeholderClass="lg-ph" onInput={(e) => setNick(e.detail.value)} onBlur={(e) => { setNick(e.detail.value); setNickFocus(false); }} />
             </View>
 
-            <View className={`lg-cta proto-btn ${saving ? 'off' : ''}`} onClick={finishComplete}>
+            <View className={`lg-cta ${saving ? 'off' : ''}`} onClick={finishComplete}>
               <Text>{saving ? '保存中…' : '完成并进入'}</Text>
             </View>
             <Text className="lg-skip lg-skip-weak" onClick={() => !saving && logoutEscape()}>退出登录</Text>
