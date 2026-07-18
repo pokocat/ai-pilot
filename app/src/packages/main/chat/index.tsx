@@ -194,6 +194,7 @@ export default function Chat() {
   // 问卷卡「其他」自填框聚焦态：驱动底部滚动余量，配合测量把输入框滚到键盘之上。
   const [askFocused, setAskFocused] = useState(false);
   const askFocusRef = useRef(-1);
+  const curScrollRef = useRef(0); // onScroll 实时记录的真实 scrollTop（用于聚焦时钉住位置）。
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
   const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
@@ -277,6 +278,7 @@ export default function Chat() {
   const handleLogScroll = (e: ChatScrollEvent) => {
     const height = logHeightRef.current;
     const top = Number(e.detail?.scrollTop || 0);
+    curScrollRef.current = top; // 记录真实滚动位置：聚焦问卷输入框时先钉住它，避免占位撑高把视图甩到底。
     const scrollHeight = Number(e.detail?.scrollHeight || 0);
     if (!height || !scrollHeight) {
       measureChatLog();
@@ -859,6 +861,9 @@ export default function Chat() {
   };
   const onAskInputFocus = (qi: number) => {
     askFocusRef.current = qi;
+    // 先把 scrollTop 钉在当前真实位置（打断「+100000 贴底」哨兵值），
+    // 这样随后展开的 45vh 占位不会把视图重新甩到底——只留一次向上滚动。
+    setScrollTop(curScrollRef.current);
     setAskFocused(true);
     scrollAskIntoView(qi);
   };
