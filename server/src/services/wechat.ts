@@ -101,8 +101,9 @@ export function wechatAccountKey(openid: string): string {
   return `wx_${openid.slice(0, 120)}`;
 }
 
-// ───────────────────────── 本机号一键登录（getPhoneNumber）─────────────────────────
-// 小程序 <button open-type="getPhoneNumber"> 返回一次性 code，后端用 access_token 兑换手机号。
+// ───────────────────── 本机号一键登录（getRealtimePhoneNumber）─────────────────────
+// 小程序 <button open-type="getRealtimePhoneNumber"> 返回一次性 code，后端用 access_token 兑换手机号。
+// 实时验证与旧版 getPhoneNumber 走的是同一个换号接口（getuserphonenumber），后端无需区分。
 // access_token 走「稳定版」接口（stable_token），避免与其他业务争抢导致互相失效。
 
 async function postJson<T>(url: string, body: object, timeoutMs = 8000): Promise<T> {
@@ -155,7 +156,7 @@ interface PhoneInfoResp {
   phone_info?: { phoneNumber?: string; purePhoneNumber?: string; countryCode?: string };
 }
 
-/** 用 getPhoneNumber 返回的 code 兑换手机号；返回不含国家码的纯号码（国内即 11 位）。 */
+/** 用 getRealtimePhoneNumber / getPhoneNumber 返回的 code 兑换手机号；返回不含国家码的纯号码（国内即 11 位）。 */
 export async function getPhoneNumberByCode(code: string): Promise<string> {
   const token = await getAccessToken();
   const data = await postJson<PhoneInfoResp>(

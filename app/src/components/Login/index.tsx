@@ -18,9 +18,11 @@ type Stage = 'wechat' | 'phone' | 'bindphone' | 'complete';
 const phoneRe = /^1\d{10}$/;
 const codeRe = /^\d{4,8}$/;
 
-// 微信「手机号快速验证」(getPhoneNumber) 仅对非个人主体且已开通该能力的小程序可用，
+// 微信「手机号实时验证」(getRealtimePhoneNumber) 仅对非个人主体且已开通该能力的小程序可用，
 // 个人主体真机会报 `jsapi has no permission`。已开通 → 置 true 启用一键获取手机号；
 // 短信验证码始终保留为兜底，故即使个别机型一键失败也能正常绑定。
+// 实时验证与旧版「快速验证」返回同样的一次性 code，后端换号接口(getuserphonenumber)完全一致，
+// 区别仅在于每次都向运营商实时核验号码，规避「换号后仍返回旧号」。
 const WX_PHONE_ONETAP = true;
 
 // 登录：常见风格「微信登录为主，手机号验证码可切换」。
@@ -108,7 +110,7 @@ export default function Login({ open, onLoggedIn }: Props) {
     else onLoggedIn(store.isOnboarded());
   };
 
-  // 微信一键绑定手机号：getPhoneNumber 返回一次性 code，后端换号并绑定到当前账号。
+  // 微信一键绑定手机号：getRealtimePhoneNumber 返回一次性 code，后端换号并绑定到当前账号。
   const onGetBindPhone = async (e: { detail?: { code?: string; errMsg?: string } }) => {
     const detail = e?.detail || {};
     if (!detail.code) {
@@ -176,7 +178,7 @@ export default function Login({ open, onLoggedIn }: Props) {
     }
   };
 
-  // 手机号登录页的「微信一键登录」：getPhoneNumber 拿手机号 code + wx.login 拿 loginCode（关联 openid）→ 一键登录/注册。
+  // 手机号登录页的「微信一键登录」：getRealtimePhoneNumber 拿手机号 code + wx.login 拿 loginCode（关联 openid）→ 一键登录/注册。
   // 与绑定不同：此处用户尚未登录，走 /auth/wechat-phone 直接换号建/取账号。
   const onGetLoginPhone = async (e: { detail?: { code?: string; errMsg?: string } }) => {
     const detail = e?.detail || {};
@@ -372,7 +374,7 @@ export default function Login({ open, onLoggedIn }: Props) {
 
             {isWeapp && WX_PHONE_ONETAP && (
               <>
-                <Button className={`lg-wechat lg-bind-onetap ${loading ? 'off' : ''}`} openType="getPhoneNumber" onGetPhoneNumber={onGetLoginPhone}>
+                <Button className={`lg-wechat lg-bind-onetap ${loading ? 'off' : ''}`} openType="getRealtimePhoneNumber" onGetRealTimePhoneNumber={onGetLoginPhone}>
                   <Icon name="wechat" size={20} color="#07C160" />
                   <Text className="lg-wechat-t">{loading ? '登录中…' : '微信一键登录'}</Text>
                 </Button>
@@ -414,7 +416,7 @@ export default function Login({ open, onLoggedIn }: Props) {
 
             {isWeapp && WX_PHONE_ONETAP && (
               <>
-                <Button className={`lg-wechat lg-bind-onetap ${bindLoading ? 'off' : ''}`} openType="getPhoneNumber" onGetPhoneNumber={onGetBindPhone}>
+                <Button className={`lg-wechat lg-bind-onetap ${bindLoading ? 'off' : ''}`} openType="getRealtimePhoneNumber" onGetRealTimePhoneNumber={onGetBindPhone}>
                   <Icon name="wechat" size={20} color="#07C160" />
                   <Text className="lg-wechat-t">{bindLoading ? '绑定中…' : '微信一键绑定手机号'}</Text>
                 </Button>
