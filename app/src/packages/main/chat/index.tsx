@@ -194,9 +194,12 @@ export default function Chat() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
-  const [askScrollTarget, setAskScrollTarget] = useState('');
-  const askFocusTargetRef = useRef('');
-  const askScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 问卷卡「其他」自填框聚焦态：驱动底部滚动余量，配合测量把输入框滚到键盘之上。
+  // 用测量 + 既有 scrollTop 通道驱动，不用 scroll-into-view——后者与本文件受控
+  // scrollTop 同挂一个 ScrollView 时会相互覆盖，真机上容易不生效（历史踩坑）。
+  const [askFocused, setAskFocused] = useState(false);
+  const askFocusRef = useRef(-1);
+  const curScrollRef = useRef(0); // onScroll 实时记录的真实 scrollTop（用于聚焦时钉住位置，避免抖动）。
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
   const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
@@ -280,6 +283,7 @@ export default function Chat() {
   const handleLogScroll = (e: ChatScrollEvent) => {
     const height = logHeightRef.current;
     const top = Number(e.detail?.scrollTop || 0);
+    curScrollRef.current = top; // 记录真实滚动位置：聚焦问卷输入框时先钉住它，避免占位撑高把视图甩到底。
     const scrollHeight = Number(e.detail?.scrollHeight || 0);
     if (!height || !scrollHeight) {
       measureChatLog();
@@ -323,10 +327,7 @@ export default function Chat() {
     setTimeout(measureDock, 80);
   }, [keyboardHeight, refs.length, msgs.length, input, uploading]);
 
-  useEffect(() => () => {
-    if (askScrollTimerRef.current) clearTimeout(askScrollTimerRef.current);
-    store.setOverlay(false, 'ref-picker');
-  }, []);
+  useEffect(() => () => store.setOverlay(false, 'ref-picker'), []);
 
   // B3 草稿持久化：按 sessionId 维度存/取；发送成功后清除。
   const loadDraft = (id?: string) => {
@@ -811,36 +812,49 @@ export default function Chat() {
     askSel[qi] === ASK_OTHER ? (askOther[qi] ?? '').trim() : (askSel[qi] ?? '');
   const askAnsweredCount = activeAsks.filter((_, qi) => !!askAnswerOf(qi)).length;
   const askReady = activeAsks.length > 1 && askAnsweredCount === activeAsks.length;
-  const scrollAskInputIntoView = (qi: number, delay = 40) => {
-    const target = askInputAnchor(activeAskIdx, qi);
-    // scroll-into-view 对相同目标不会重复触发。先清空，等键盘改变可视高度后再定位一次。
-    if (askScrollTimerRef.current) clearTimeout(askScrollTimerRef.current);
-    setAskScrollTarget('');
-    askScrollTimerRef.current = setTimeout(() => {
-      askScrollTimerRef.current = null;
-      if (askFocusTargetRef.current === target) setAskScrollTarget(target);
+  // 问卷卡「其他」自填框的键盘处理：不像正文 composer 那样滚到对话底部
+  // （那会让用户看不到自己打的字），而是把当前作答的问题块滚到滚动视口上沿附近，
+  // 稳稳落在键盘之上。用测量 + 既有 scrollTop 通道驱动（不走 scroll-into-view，
+  // 避免与受控 scrollTop 相互覆盖，真机上容易不生效）。
+  const scrollAskIntoView = (qi: number, delay = 80) => {
+    const anchor = askInputAnchor(activeAskIdx, qi);
+    // 延时到键盘/布局就位后再测量，量出问题块相对滚动视口顶的偏移，换算成 scrollTop。
+    setTimeout(() => {
+      if (askFocusRef.current !== qi) return;
+      Taro.createSelectorQuery()
+        .select('.chat-log').scrollOffset()
+        .select(`#${anchor}`).boundingClientRect()
+        .select('.chat-log').boundingClientRect()
+        .exec((res: unknown[]) => {
+          const off = res?.[0] as { scrollTop?: number } | null;
+          const item = res?.[1] as { top?: number } | null;
+          const sv = res?.[2] as { top?: number } | null;
+          if (!off || !item || !sv) return;
+          const target = Number(off.scrollTop || 0) + Number(item.top || 0) - Number(sv.top || 0) - 12;
+          setScrollTop(Math.max(0, target));
+        });
     }, delay);
   };
   const onAskInputFocus = (qi: number) => {
     setInputFocus(false);
     atBottomRef.current = false;
-    askFocusTargetRef.current = askInputAnchor(activeAskIdx, qi);
-    scrollAskInputIntoView(qi);
+    askFocusRef.current = qi;
+    // 先把 scrollTop 钉在当前真实位置（打断「+100000 贴底」哨兵值），
+    // 这样随后展开的 45vh 占位不会把视图重新甩到底——只留一次向上滚动。
+    setScrollTop(curScrollRef.current);
+    setAskFocused(true);
+    scrollAskIntoView(qi, 40);
   };
+  // 复用 --keyboard-height 机制收缩 .chat、把内容整体抬到键盘之上；键盘高度就位后再定位一次。
   const onAskKeyboardHeightChange = (qi: number, e: { detail?: { height?: number } }) => {
     const next = Math.max(0, Number(e.detail?.height || 0));
     setKeyboardHeight(next);
-    if (next > 0) scrollAskInputIntoView(qi, 80);
-    else setAskScrollTarget('');
+    if (next > 0 && askFocusRef.current === qi) scrollAskIntoView(qi, 80);
   };
-  const onAskInputBlur = () => {
-    askFocusTargetRef.current = '';
-    if (askScrollTimerRef.current) {
-      clearTimeout(askScrollTimerRef.current);
-      askScrollTimerRef.current = null;
-    }
-    setAskScrollTarget('');
+  const onAskInputBlur = (qi: number) => {
+    if (askFocusRef.current === qi) askFocusRef.current = -1;
     setKeyboardHeight(0);
+    setAskFocused(false);
   };
   const sendAskAnswers = () => {
     if (!askReady || busy) return;
@@ -1221,7 +1235,7 @@ export default function Chat() {
       ) : null}
 
       {/* 对话流 */}
-      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollIntoView={askScrollTarget} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
+      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (
@@ -1333,7 +1347,7 @@ export default function Chat() {
                               adjustPosition={false}
                               cursorSpacing={24}
                               onFocus={() => onAskInputFocus(qi)}
-                              onBlur={onAskInputBlur}
+                              onBlur={() => onAskInputBlur(qi)}
                               onInput={(e) => setAskOtherText(qi, e.detail.value)}
                               onKeyboardHeightChange={(e) => onAskKeyboardHeightChange(qi, e)}
                             />
@@ -1427,7 +1441,8 @@ export default function Chat() {
             </View>
           </View>
         ) : null}
-        <View style={{ height: '20px' }} />
+        {/* 作答问卷卡时留出额外滚动余量，让当前输入框能被滚到键盘之上（而非贴着键盘顶）。 */}
+        <View style={{ height: askFocused ? '45vh' : '20px' }} />
       </ScrollView>
 
       {showJumpLatest ? (
