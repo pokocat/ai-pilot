@@ -738,6 +738,7 @@ model LlmTrace {
   totalTokens  Int      @default(0)
   promptText   String?  @db.Text
   responseText String?  @db.Text
+  contextJson  Json? // 本轮历史窗口与记忆召回 id/分数/来源；不存记忆正文，便于排查“有记忆但没带入”
   createdAt    DateTime @default(now())
 
   @@index([tenantId, createdAt])

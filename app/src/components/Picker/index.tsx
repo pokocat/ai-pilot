@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Input } from '@tarojs/components';
+import { View, Text, Input, ScrollView } from '@tarojs/components';
 import { COLORS, colorIndex } from '../../data/colors';
 import { api, type SurveyQ } from '../../services/api';
 import { store } from '../../services/store';
@@ -111,7 +111,13 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
 
   return (
     <View className="picker" catchMove>
-      <View className="pk-card" style={{ borderColor: c.vars['--accent-soft'] }}>
+      <ScrollView
+        scrollY
+        enhanced
+        showScrollbar={false}
+        className="pk-card"
+        style={{ borderColor: c.vars['--accent-soft'] }}
+      >
         {!first && (
           <View className="pk-close" onClick={onClose}>
             <Text>✕</Text>
@@ -271,7 +277,7 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
             <Text className="pk-skip" onClick={confirmColor}>暂时跳过</Text>
           </>
         )}
-      </View>
+      </ScrollView>
     </View>
   );
 }

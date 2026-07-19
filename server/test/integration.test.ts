@@ -15,7 +15,7 @@ import type { MemoryConfig } from '../src/data/agents.js';
 import { recordTokenUsage, tokenUsageSummary } from '../src/services/usage.js';
 import { addModel } from '../src/services/aiConfig.js';
 import { setQuota, getQuotaState, chargeQuota, ensureQuota, reserveQuota } from '../src/services/tokenQuota.js';
-import { loadHistory } from '../src/routes/sessions.js';
+import { loadConversationHistory, loadHistory } from '../src/routes/sessions.js';
 import { moderate, listModerationLogs } from '../src/services/moderation.js';
 import { chatCompleteStream } from '../src/llm/gateway.js';
 import { dryRunTool } from '../src/services/skillTools.js';
@@ -1381,6 +1381,45 @@ describe('TC-H 对话历史注入', () => {
     assert.equal(hist[0].role, 'user');
     assert.ok(hist[0].text.includes('SaaS'), '首轮应为用户原话');
     for (let i = 1; i < hist.length; i++) assert.notEqual(hist[i].role, hist[i - 1].role, '相邻轮次角色应交替（已合并连续同角色）');
+  });
+
+  test('H2 回忆意图会从较早消息中带回相关原文，同时保留最近窗口预算', async () => {
+    const userId = await login(uniquePhone(), '长会话甲');
+    const tenantId = await tenantOf(userId);
+    const session = await prisma.session.create({
+      data: { tenantId, userId, agentKey: 'general', title: '长会话回忆测试' },
+    });
+    const base = Date.now() - 60_000;
+    for (let i = 0; i < 30; i++) {
+      const text = i === 2
+        ? '我准备从公域引流，卖99元或几百元的付费社群服务'
+        : i === 3
+          ? '社群服务包含AI实操陪跑、每日答疑和资料模板'
+          : `第${i}轮只是在讨论团队排班和日常执行节奏`;
+      await prisma.message.create({
+        data: {
+          sessionId: session.id,
+          role: i % 2 === 0 ? 'user' : 'assistant',
+          contentJson: { text },
+          createdAt: new Date(base + i * 1_000),
+        },
+      });
+    }
+
+    const recalled = await loadConversationHistory(
+      session.id,
+      '__none__',
+      '我之前说过要卖社群，从公域引流，定价99或几百元，你忘了吗？',
+    );
+    assert.equal(recalled.trace.recallIntent, true);
+    assert.equal(recalled.trace.recentMessages, 16);
+    assert.ok(recalled.trace.carryoverMessages >= 1, '应从最近窗口之外找回相关消息');
+    assert.match(recalled.history[0]?.text ?? '', /同一会话较早内容回顾/);
+    assert.match(recalled.history[0]?.text ?? '', /公域引流|付费社群/);
+
+    const normal = await loadConversationHistory(session.id, '__none__', '团队明天怎么排班？');
+    assert.equal(normal.trace.recallIntent, false);
+    assert.equal(normal.trace.carryoverMessages, 0, '普通问题不额外扫描旧消息');
   });
 });
 

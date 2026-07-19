@@ -1073,12 +1073,27 @@ export interface AdminTraceListView {
   totals: { calls: number; errors: number; avgLatencyMs: number };
   items: AdminTraceItem[];
 }
+export interface LlmContextTrace {
+  recallIntent: boolean;
+  history: {
+    recentMessages: number;
+    carryoverMessages: number;
+    totalChars: number;
+  };
+  memories: Array<{
+    id: string;
+    source: string;
+    score: number;
+    createdAt: string;
+  }>;
+}
 export interface AdminTraceDetail extends AdminTraceItem {
   iterations: number;
   inputTokens: number;
   outputTokens: number;
   promptText: string | null;
   responseText: string | null;
+  context: LlmContextTrace | null;
 }
 // P1-B5：审核日志（运营可查，此前 write-only）
 export interface AdminModerationLogItem {

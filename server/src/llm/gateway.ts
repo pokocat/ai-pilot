@@ -92,7 +92,7 @@ async function traced<T>(
     await recordTrace({
       meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind, provider: s.provider, model: s.model,
       status: 'ok', latencyMs: Date.now() - t0, toolCalls: s.toolCalls, iterations: s.iterations, usage: s.usage,
-      promptText: args.ctx.userMessage, responseText: args.respText(s.result),
+      promptText: args.ctx.userMessage, responseText: args.respText(s.result), context: args.ctx.contextTrace,
     });
     // PR-0a 禁用词检查：只记录不拦截（fire-and-forget，绝不影响产出）。
     void auditBannedWords({
@@ -108,6 +108,7 @@ async function traced<T>(
     await recordTrace({
       meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind, provider: args.provider, model: '',
       status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: args.ctx.userMessage,
+      context: args.ctx.contextTrace,
     });
     throw err;
   }
@@ -384,7 +385,7 @@ async function* tracedChatProviderStream(
     await recordTrace({
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
       status: 'ok', latencyMs: Date.now() - t0, usage: done.usage,
-      promptText: ctx.userMessage, responseText: done.result.text,
+      promptText: ctx.userMessage, responseText: done.result.text, context: ctx.contextTrace,
     });
     void auditBannedWords({
       tenantId: meta?.tenantId ?? ctx.tenantId ?? null,
@@ -401,7 +402,7 @@ async function* tracedChatProviderStream(
     await recordTrace({
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
       status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
-      responseText: text,
+      responseText: text, context: ctx.contextTrace,
     });
     throw err;
   }
@@ -521,6 +522,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     await recordTrace({
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider: live ?? 'mock', model: '',
       status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
+      context: ctx.contextTrace,
     });
     console.error('[gateway] adaptive fallback to mock:', (err as Error).message);
     if (!env.aiFallbackMock) throw aiUnavailable(err);
@@ -533,9 +535,9 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
   if (out.kind === 'report') out.result = sanitizeDeliverable(ctx, out.result);
   const respText = out.kind === 'report' ? deliverableText(out.result) : out.result.text;
   await recordTrace({
-    meta, agentKey: ctx.agentKey, kind: recKind, provider, model,
+    meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: recKind, provider, model,
     status: 'ok', latencyMs: Date.now() - t0, toolCalls, iterations, usage,
-    promptText: ctx.userMessage, responseText: respText,
+    promptText: ctx.userMessage, responseText: respText, context: ctx.contextTrace,
   });
   await maybeRecord({ result: out.result, usage, provider, model, toolCalls, iterations }, recKind, ctx, meta);
 

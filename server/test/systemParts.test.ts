@@ -41,3 +41,12 @@ describe('buildSystemParts · 本命色回归纯品牌色（M3 PR-14）', () => 
     assert.match(withPlaceholder, /red/);
   });
 });
+
+describe('buildSystemParts · 回忆口径守卫', () => {
+  test('禁止把内部上下文机制推给客户，并要求先复述已知事实', () => {
+    const stable = buildSystemParts('你是军师。', ctx({ userMessage: '你还记得我之前说的吗？' }), 'chat').stable;
+    assert.match(stable, /先综合【同一会话较早内容回顾】/);
+    assert.match(stable, /先说出已经记得的部分/);
+    assert.match(stable, /不得声称“每次对话的上下文不会自动带过来”/);
+  });
+});

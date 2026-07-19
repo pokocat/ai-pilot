@@ -3,7 +3,7 @@ import { isAiTestMode } from '../env.js';
 import { decryptSecretSafe } from './secretBox.js';
 import { verifyUserToken } from './userToken.js';
 import { resolveIndustryPack } from '../data/industryPacks.js';
-import { recallMemories } from './memory.js';
+import { recallMemoryDetails } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
 import { loadChart, chartBriefing, TIANSHI_OPTOUT_LINE } from './paipan.js';
@@ -24,6 +24,7 @@ import { bizMetricBlock } from './bizMetric.js';
 import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } from './agentVersions.js';
+import { isRecallIntent } from './recallIntent.js';
 
 // 把 Agent 的「接入方式」解析成运行时覆盖。inherit / 未配置完整 → null（走全局模型）。
 function resolveAgentRuntime(
@@ -83,6 +84,7 @@ export async function buildGenContext(opts: {
   agentKey: string;
   userMessage: string;
   history?: { role: string; text: string }[];
+  historyTrace?: { recallIntent: boolean; recentMessages: number; carryoverMessages: number; totalChars: number };
   projectId?: string | null;       // 归属项目 → 注入项目背景 + 项目内知识召回
   refs?: MessageRef[];             // 显式 @ 引用 → 高优先注入、可溯源
   sessionId?: string | null;       // Dify 多轮回写所需
@@ -97,6 +99,8 @@ export async function buildGenContext(opts: {
   if (!effective) throw new Error(`未知智能体：${opts.agentKey}`);
   const memoryConfig = effective.memoryConfig as unknown as MemoryConfig;
   const briefInterview = isBriefInterviewRequest(opts.userMessage);
+  const recallIntent = isRecallIntent(opts.userMessage);
+  const memoryRecallLimit = recallIntent ? 12 : 5;
 
   // 本轮导引意图（M3 PR-11/12/14）：全部确定性、纯 CPU；先算出来以决定是否需要拉诊断轮次。
   const { intent } = resolveMode(opts.userMessage, opts.sessionMode);
@@ -115,7 +119,7 @@ export async function buildGenContext(opts: {
     strategicRaw, goalsLine, dataSourceLine,
     decisionLine, reviewLine, prophecyLine, progressLine,
     fortuneOn, diagRound,
-    memories, projRow, refsResult, hits,
+    memoryHits, projRow, refsResult, hits,
     prescriptionEffectLine, toolMenuLine, followupTools,
     healthLine,
   ] = await Promise.all([
@@ -137,8 +141,8 @@ export async function buildGenContext(opts: {
     needDiagRound ? getDiagRound(opts.userId) : Promise.resolve(null),
     // 长期记忆：按当前问题语义召回；后台关闭 longTerm 或档案访谈模式不注入。
     memoryConfig.longTerm && !briefInterview
-      ? recallMemories(opts.userId, opts.agentKey, 5, opts.userMessage)
-      : Promise.resolve<Awaited<ReturnType<typeof recallMemories>>>([]),
+      ? recallMemoryDetails(opts.userId, opts.agentKey, memoryRecallLimit, opts.userMessage)
+      : Promise.resolve<Awaited<ReturnType<typeof recallMemoryDetails>>>([]),
     // 项目背景
     opts.projectId && !briefInterview
       ? prisma.project.findFirst({ where: { id: opts.projectId, tenantId: opts.tenantId } })
@@ -171,6 +175,7 @@ export async function buildGenContext(opts: {
   ]);
 
   const strategicLine = strategicBlock(strategicRaw);
+  const memories = memoryHits.map((m) => m.text);
 
   // 本轮导引拼装（顺序不变：模式 → 角色语气 → 诊断轮次；识别不出不注入）。
   const directives: string[] = [];
@@ -227,6 +232,20 @@ export async function buildGenContext(opts: {
     stageLine,
     userMessage: opts.userMessage,
     history: opts.history,
+    contextTrace: {
+      recallIntent,
+      history: {
+        recentMessages: opts.historyTrace?.recentMessages ?? opts.history?.length ?? 0,
+        carryoverMessages: opts.historyTrace?.carryoverMessages ?? 0,
+        totalChars: opts.historyTrace?.totalChars ?? (opts.history ?? []).reduce((sum, item) => sum + item.text.length, 0),
+      },
+      memories: memoryHits.map((m) => ({
+        id: m.id,
+        source: m.source,
+        score: m.score,
+        createdAt: m.createdAt.toISOString(),
+      })),
+    },
     references: refLines,
     knowledge,
     projectName,

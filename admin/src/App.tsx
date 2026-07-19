@@ -1034,6 +1034,10 @@ function ObservabilityView() {
               <div><b>{detail.cachedInput}</b><span>缓存命中</span></div>
             </div>
             {detail.errorMessage && <div className="ai-test err" style={{ marginTop: 8 }}><Icon name="spark" size={14} /> {detail.errorMessage}</div>}
+            <div className="sec-h" style={{ marginTop: 8 }}><span className="t">上下文召回</span></div>
+            <pre className="trace-text">{detail.context
+              ? JSON.stringify(detail.context, null, 2)
+              : '（旧记录或本次未采集召回元数据）'}</pre>
             <div className="sec-h" style={{ marginTop: 8 }}><span className="t">输入</span></div>
             <pre className="trace-text">{detail.promptText ?? '（未捕获原文，设 LLM_TRACE_CAPTURE_TEXT=true 开启）'}</pre>
             <div className="sec-h"><span className="t">输出</span></div>

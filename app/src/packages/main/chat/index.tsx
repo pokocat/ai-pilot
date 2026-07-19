@@ -128,6 +128,9 @@ const FOLLOW_THROTTLE_MS = 300;
 const INPUT_MAX = 2000;
 const INPUT_COUNT_FROM = 1800;
 
+const askInputAnchor = (messageIndex: number, questionIndex: number) =>
+  `ask-answer-${messageIndex}-${questionIndex}`;
+
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
 // 一次至多带几份：与 server retrieval.MAX_REFS(9) 对齐——选得进来就带得上，不在服务端悄悄丢。
@@ -191,6 +194,9 @@ export default function Chat() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
+  const [askScrollTarget, setAskScrollTarget] = useState('');
+  const askFocusTargetRef = useRef('');
+  const askScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
   const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
@@ -317,7 +323,10 @@ export default function Chat() {
     setTimeout(measureDock, 80);
   }, [keyboardHeight, refs.length, msgs.length, input, uploading]);
 
-  useEffect(() => () => store.setOverlay(false, 'ref-picker'), []);
+  useEffect(() => () => {
+    if (askScrollTimerRef.current) clearTimeout(askScrollTimerRef.current);
+    store.setOverlay(false, 'ref-picker');
+  }, []);
 
   // B3 草稿持久化：按 sessionId 维度存/取；发送成功后清除。
   const loadDraft = (id?: string) => {
@@ -802,6 +811,37 @@ export default function Chat() {
     askSel[qi] === ASK_OTHER ? (askOther[qi] ?? '').trim() : (askSel[qi] ?? '');
   const askAnsweredCount = activeAsks.filter((_, qi) => !!askAnswerOf(qi)).length;
   const askReady = activeAsks.length > 1 && askAnsweredCount === activeAsks.length;
+  const scrollAskInputIntoView = (qi: number, delay = 40) => {
+    const target = askInputAnchor(activeAskIdx, qi);
+    // scroll-into-view 对相同目标不会重复触发。先清空，等键盘改变可视高度后再定位一次。
+    if (askScrollTimerRef.current) clearTimeout(askScrollTimerRef.current);
+    setAskScrollTarget('');
+    askScrollTimerRef.current = setTimeout(() => {
+      askScrollTimerRef.current = null;
+      if (askFocusTargetRef.current === target) setAskScrollTarget(target);
+    }, delay);
+  };
+  const onAskInputFocus = (qi: number) => {
+    setInputFocus(false);
+    atBottomRef.current = false;
+    askFocusTargetRef.current = askInputAnchor(activeAskIdx, qi);
+    scrollAskInputIntoView(qi);
+  };
+  const onAskKeyboardHeightChange = (qi: number, e: { detail?: { height?: number } }) => {
+    const next = Math.max(0, Number(e.detail?.height || 0));
+    setKeyboardHeight(next);
+    if (next > 0) scrollAskInputIntoView(qi, 80);
+    else setAskScrollTarget('');
+  };
+  const onAskInputBlur = () => {
+    askFocusTargetRef.current = '';
+    if (askScrollTimerRef.current) {
+      clearTimeout(askScrollTimerRef.current);
+      askScrollTimerRef.current = null;
+    }
+    setAskScrollTarget('');
+    setKeyboardHeight(0);
+  };
   const sendAskAnswers = () => {
     if (!askReady || busy) return;
     const lines = activeAsks.map((a, qi) => `${a.q} ${askAnswerOf(qi)}`);
@@ -1181,7 +1221,7 @@ export default function Chat() {
       ) : null}
 
       {/* 对话流 */}
-      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
+      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollIntoView={askScrollTarget} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (
@@ -1259,7 +1299,7 @@ export default function Chat() {
                     </View>
                     <View className="ask-body">
                       {activeAsks.map((a, qi) => (
-                        <View key={qi} className="ask-item">
+                        <View key={qi} id={askInputAnchor(activeAskIdx, qi)} className="ask-item">
                           <View className="ask-q">
                             {activeAsks.length > 1 ? (
                               <Text className="ask-qn serif" style={{ color: accent }}>{qi + 1}</Text>
@@ -1291,7 +1331,11 @@ export default function Chat() {
                               value={askOther[qi] ?? ''}
                               placeholder="输入你的答案…"
                               adjustPosition={false}
+                              cursorSpacing={24}
+                              onFocus={() => onAskInputFocus(qi)}
+                              onBlur={onAskInputBlur}
                               onInput={(e) => setAskOtherText(qi, e.detail.value)}
+                              onKeyboardHeightChange={(e) => onAskKeyboardHeightChange(qi, e)}
                             />
                           ) : null}
                         </View>

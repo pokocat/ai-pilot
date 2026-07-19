@@ -1,10 +1,11 @@
 // LLM 调用诊断 trace（可观测）。每次模型调用（含 mock / 0 token / 错误）记一行，
 // 与 token_usage 分表（后者只记真实计费）。原文捕获由 env.llmTraceCaptureText 控制并截断。
 import { prisma } from '../db.js';
+import { Prisma } from '@prisma/client';
 import { env } from '../env.js';
 import type { Usage } from '../llm/schema.js';
 import type { UsageMeta } from './usage.js';
-import type { AdminTraceDetail, AdminTraceItem, AdminTraceListView } from '../../../shared/contracts';
+import type { AdminTraceDetail, AdminTraceItem, AdminTraceListView, LlmContextTrace } from '../../../shared/contracts';
 
 const TEXT_MAX = 4000;
 function clip(s?: string | null): string | null {
@@ -27,6 +28,7 @@ export interface TraceInput {
   usage?: Usage;
   promptText?: string | null;
   responseText?: string | null;
+  context?: LlmContextTrace | null;
 }
 
 /** 记一条 trace。内部 catch，绝不影响主流程。 */
@@ -54,6 +56,7 @@ export async function recordTrace(t: TraceInput): Promise<void> {
         totalTokens: Math.max(0, (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0)),
         promptText: env.llmTraceCaptureText ? clip(t.promptText) : null,
         responseText: env.llmTraceCaptureText ? clip(t.responseText) : null,
+        contextJson: t.context ? (t.context as unknown as Prisma.InputJsonValue) : undefined,
       },
     });
   } catch (err) {
@@ -102,5 +105,6 @@ export async function getTrace(id: string): Promise<AdminTraceDetail | null> {
     outputTokens: r.outputTokens,
     promptText: r.promptText,
     responseText: r.responseText,
+    context: (r.contextJson as unknown as LlmContextTrace | null) ?? null,
   };
 }

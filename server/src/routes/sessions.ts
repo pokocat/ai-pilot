@@ -19,6 +19,7 @@ import { resolveMode } from '../services/intent.js';
 import { recordReview } from '../services/reviewLog.js';
 import { webviewSafeReportUrl } from '../services/reportHtml.js';
 import { notifyReportReady } from '../services/wechatSubscribe.js';
+import { isRecallIntent, sessionRecallScore } from '../services/recallIntent.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -212,7 +213,8 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
     const sessionMode = modePersist !== undefined ? modePersist : session.mode;
 
-    const history = await loadHistory(session.id, userMsg.id);
+    const conversation = await loadConversationHistory(session.id, userMsg.id, text);
+    const history = conversation.history;
     await recordAudit({
       tenantId: user.tenantId,
       userId: user.id,
@@ -228,6 +230,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
       sessionId: session.id, difyConversationId: session.difyConversationId,
       effective: effective ?? undefined, history,
+      historyTrace: conversation.trace,
       sessionMode,
       });
 
@@ -413,7 +416,8 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
     const sessionMode = modePersist !== undefined ? modePersist : session.mode;
 
-      const history = await loadHistory(session.id, userMsg.id);
+      const conversation = await loadConversationHistory(session.id, userMsg.id, text);
+      const history = conversation.history;
       await recordAudit({
         tenantId: user.tenantId,
         userId: user.id,
@@ -435,6 +439,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         difyConversationId: session.difyConversationId,
         effective: effective ?? undefined,
         history,
+        historyTrace: conversation.trace,
         sessionMode,
       });
 
@@ -551,30 +556,125 @@ export async function sessionRoutes(app: FastifyInstance) {
   });
 }
 
-// P0-3：取该会话最近 N 轮（排除刚落库的当前用户消息）作为对话历史注入模型——此前完全未注入，
-// 模型每轮无状态，追问「第二点展开/那定价呢」全失忆。report 折叠成一句摘要；合并连续同角色避免非交替报错。
-const HISTORY_TURNS = 8;
-export async function loadHistory(sessionId: string, excludeId: string): Promise<{ role: string; text: string }[]> {
-  const rows = await prisma.message.findMany({
-    where: { sessionId, id: { not: excludeId }, role: { in: ['user', 'assistant', 'report'] } },
-    orderBy: { createdAt: 'desc' },
-    take: HISTORY_TURNS,
-  });
-  const mapped = rows.reverse().map((m) => {
-    const c = m.contentJson as { text?: string; title?: string; sections?: { h?: string }[] };
-    if (m.role === 'report') {
-      const heads = (c.sections ?? []).map((s) => s.h).filter(Boolean).join('、');
-      return { role: 'assistant', text: `（已为你产出《${c.title ?? '成果'}》${heads ? '：' + heads : ''}）` };
-    }
-    return { role: m.role === 'user' ? 'user' : 'assistant', text: (c.text ?? '').trim() };
-  }).filter((m) => m.text);
+// 长会话上下文：常规轮带最近 16 条；用户明确问“之前说过/你忘了吗”时，再从较早 160 条中
+// 按业务词重合度挑 6 条原始摘录，作为“较早内容回顾”前置。两段都有字符预算，避免为了记得更多挤爆模型窗口。
+const RECENT_HISTORY_MESSAGES = 16;
+const RECALL_HISTORY_SCAN = 160;
+const RECALL_HISTORY_MATCHES = 6;
+const RECENT_HISTORY_CHAR_BUDGET = 12_000;
+const CARRYOVER_CHAR_BUDGET = 4_500;
+
+export interface ConversationHistoryTrace {
+  recallIntent: boolean;
+  recentMessages: number;
+  carryoverMessages: number;
+  totalChars: number;
+}
+
+type HistoryRow = Awaited<ReturnType<typeof prisma.message.findMany>>[number];
+
+function historyMessage(row: HistoryRow): { role: string; text: string } | null {
+  const c = row.contentJson as { text?: string; title?: string; sections?: { h?: string }[] };
+  if (row.role === 'report') {
+    const heads = (c.sections ?? []).map((s) => s.h).filter(Boolean).join('、');
+    return { role: 'assistant', text: `（已为你产出《${c.title ?? '成果'}》${heads ? '：' + heads : ''}）` };
+  }
+  const text = (c.text ?? '').trim();
+  return text ? { role: row.role === 'user' ? 'user' : 'assistant', text } : null;
+}
+
+function clipText(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function fitRecentBudget(messages: { role: string; text: string }[]): { role: string; text: string }[] {
+  const kept: { role: string; text: string }[] = [];
+  let used = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const item = { ...messages[i], text: clipText(messages[i].text, 2_000) };
+    if (kept.length && used + item.text.length > RECENT_HISTORY_CHAR_BUDGET) break;
+    used += item.text.length;
+    kept.push(item);
+  }
+  return kept.reverse();
+}
+
+function mergeHistory(messages: { role: string; text: string }[]): { role: string; text: string }[] {
   const merged: { role: string; text: string }[] = [];
-  for (const m of mapped) {
+  for (const m of messages) {
     const prev = merged[merged.length - 1];
     if (prev && prev.role === m.role) prev.text += '\n' + m.text;
     else merged.push({ ...m });
   }
   return merged;
+}
+
+export async function loadConversationHistory(
+  sessionId: string,
+  excludeId: string,
+  currentText = '',
+): Promise<{ history: { role: string; text: string }[]; trace: ConversationHistoryTrace }> {
+  const recallIntent = isRecallIntent(currentText);
+  const recentRows = await prisma.message.findMany({
+    where: { sessionId, id: { not: excludeId }, role: { in: ['user', 'assistant', 'report'] } },
+    orderBy: { createdAt: 'desc' },
+    take: RECENT_HISTORY_MESSAGES,
+  });
+  const recent = fitRecentBudget(recentRows.reverse().map(historyMessage).filter((m): m is { role: string; text: string } => !!m));
+
+  let carryoverMessages = 0;
+  let carryover: { role: string; text: string }[] = [];
+  if (recallIntent && recentRows.length) {
+    const older = await prisma.message.findMany({
+      where: {
+        sessionId,
+        id: { notIn: [excludeId, ...recentRows.map((r) => r.id)] },
+        role: { in: ['user', 'assistant', 'report'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: RECALL_HISTORY_SCAN,
+    });
+    const selected = older
+      .map((row) => ({ row, message: historyMessage(row) }))
+      .filter((x): x is { row: HistoryRow; message: { role: string; text: string } } => !!x.message)
+      .map((x) => ({ ...x, score: sessionRecallScore(currentText, x.message.text) }))
+      .filter((x) => x.score >= 0.035)
+      .sort((a, b) => b.score - a.score || b.row.createdAt.getTime() - a.row.createdAt.getTime())
+      .slice(0, RECALL_HISTORY_MATCHES)
+      .sort((a, b) => a.row.createdAt.getTime() - b.row.createdAt.getTime());
+    carryoverMessages = selected.length;
+    if (selected.length) {
+      let used = 0;
+      const lines: string[] = [];
+      for (const x of selected) {
+        const line = `${x.message.role === 'user' ? '客户' : '军师'}：${clipText(x.message.text, 900)}`;
+        if (lines.length && used + line.length > CARRYOVER_CHAR_BUDGET) break;
+        lines.push(line);
+        used += line.length;
+      }
+      carryoverMessages = lines.length;
+      carryover = [{
+        role: 'assistant',
+        text: `【同一会话较早内容回顾（原始对话摘录，不是新结论）】\n${lines.join('\n')}`,
+      }];
+    }
+  }
+
+  const history = mergeHistory([...carryover, ...recent]);
+  return {
+    history,
+    trace: {
+      recallIntent,
+      recentMessages: recent.length,
+      carryoverMessages,
+      totalChars: history.reduce((sum, item) => sum + item.text.length, 0),
+    },
+  };
+}
+
+// 保留原导出给既有测试/内部调用；新生成链路使用 loadConversationHistory 以带上查询与可观测元数据。
+export async function loadHistory(sessionId: string, excludeId: string): Promise<{ role: string; text: string }[]> {
+  return (await loadConversationHistory(sessionId, excludeId)).history;
 }
 
 // 解析本次对话归属项目：已有会话归属优先；否则校验入参项目属于该租户。

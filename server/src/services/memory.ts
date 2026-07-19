@@ -25,14 +25,22 @@ export function recencyDecay(ageDays: number): number {
 function ageDaysOf(d: Date, now: Date): number {
   return (now.getTime() - d.getTime()) / 86_400_000;
 }
-/** MMR 重排：在相关性与多样性间平衡，返回去重后的 TopN 文本（score 按池内最大值归一化）。 */
-export function mmrSelect(
-  cands: { text: string; emb: number[] | null; score: number }[], limit: number, lambda = MMR_LAMBDA,
-): string[] {
+export interface MemoryRecallDetail {
+  id: string;
+  text: string;
+  source: string;
+  score: number;
+  createdAt: Date;
+}
+
+type MmrCandidate = MemoryRecallDetail & { emb: number[] | null };
+
+/** MMR 重排：在相关性与多样性间平衡，保留命中 id/来源/得分供 trace 诊断。 */
+function mmrSelectDetails(cands: MmrCandidate[], limit: number, lambda = MMR_LAMBDA): MmrCandidate[] {
   if (!cands.length) return [];
   const maxS = Math.max(...cands.map((c) => c.score)) || 1;
-  const pool = cands.map((c) => ({ text: c.text, emb: c.emb, rel: c.score / maxS }));
-  const picked: { text: string; emb: number[] | null }[] = [];
+  const pool = cands.map((c) => ({ ...c, rel: c.score / maxS }));
+  const picked: MmrCandidate[] = [];
   while (picked.length < limit && pool.length) {
     let bi = 0, bv = -Infinity;
     for (let i = 0; i < pool.length; i++) {
@@ -41,9 +49,20 @@ export function mmrSelect(
       if (val > bv) { bv = val; bi = i; }
     }
     const [c] = pool.splice(bi, 1);
-    picked.push({ text: c.text, emb: c.emb });
+    picked.push(c);
   }
-  return picked.map((p) => p.text);
+  return picked;
+}
+
+/** 兼容既有测试/调用：只返回文本。 */
+export function mmrSelect(
+  cands: { text: string; emb: number[] | null; score: number }[], limit: number, lambda = MMR_LAMBDA,
+): string[] {
+  return mmrSelectDetails(
+    cands.map((c, i) => ({ ...c, id: String(i), source: 'unknown', createdAt: new Date(0) })),
+    limit,
+    lambda,
+  ).map((p) => p.text);
 }
 
 /**
@@ -51,9 +70,9 @@ export function mmrSelect(
  * - 传 query：先按语义相似度（余弦）排序，再用 weight 微调，取 TopN。
  * - 不传 query：退回 weight + 时间倒序（与历史行为一致）。
  */
-export async function recallMemories(
+export async function recallMemoryDetails(
   userId: string, agentKey: string, limit = 5, query?: string,
-): Promise<string[]> {
+): Promise<MemoryRecallDetail[]> {
   void agentKey; // A-3：用户级共享事实池——跨所有军师召回该用户记忆，不再按 agentKey 隔离（general 学到的，专业军师也记得）。
   const now = new Date();
   const where = {
@@ -65,7 +84,7 @@ export async function recallMemories(
     const rows = await prisma.memory.findMany({
       where, orderBy: [{ weight: 'desc' }, { createdAt: 'desc' }], take: limit,
     });
-    return rows.map((r) => r.text);
+    return rows.map((r) => ({ id: r.id, text: r.text, source: r.source, score: r.weight, createdAt: r.createdAt }));
   }
 
   // pgvector 路径（开启时）：ANN 下推（agentKey=null → 用户级共享池）
@@ -75,7 +94,20 @@ export async function recallMemories(
       console.error('[memory] pgvector fallback to in-memory:', (e as Error).message);
       return null;
     });
-    if (hits) return hits.map((h) => h.text);
+    if (hits) {
+      const rows = await prisma.memory.findMany({
+        where: { id: { in: hits.map((h) => h.id) } },
+        select: { id: true, source: true, createdAt: true },
+      });
+      const meta = new Map(rows.map((r) => [r.id, r]));
+      return hits.map((h) => ({
+        id: h.id,
+        text: h.text,
+        source: meta.get(h.id)?.source ?? 'unknown',
+        score: Number((1 / (1 + Math.max(0, h.dist))).toFixed(4)),
+        createdAt: meta.get(h.id)?.createdAt ?? new Date(0),
+      }));
+    }
   }
 
   // E2：混合(向量+关键词) + 时间衰减 + MMR 多样性（取代纯余弦 sem*0.8+weight*0.2）。
@@ -86,9 +118,16 @@ export async function recallMemories(
     const emb = (r.embedding as number[] | null) ?? null;
     const rel = MEM_ALPHA * cosine(qv, emb) + (1 - MEM_ALPHA) * keywordScore(query, r.text);
     const score = Math.max(0, rel) * recencyDecay(ageDaysOf(r.createdAt, now)) * (r.weight ?? 1);
-    return { text: r.text, emb, score };
+    return { id: r.id, text: r.text, source: r.source, createdAt: r.createdAt, emb, score };
   });
-  return mmrSelect(cands, limit);
+  return mmrSelectDetails(cands, limit).map(({ emb: _emb, ...detail }) => ({ ...detail, score: Number(detail.score.toFixed(4)) }));
+}
+
+/** 兼容现有业务调用：只消费记忆文本；诊断链路使用 recallMemoryDetails。 */
+export async function recallMemories(
+  userId: string, agentKey: string, limit = 5, query?: string,
+): Promise<string[]> {
+  return (await recallMemoryDetails(userId, agentKey, limit, query)).map((m) => m.text);
 }
 
 function ttlFromConfig(cfg: MemoryConfig): Date | null {
