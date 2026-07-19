@@ -24,7 +24,8 @@ describe('renderReportHtml', () => {
     assert.match(html, /现金流紧张。<br>复购不足。/); // 换行转 <br>
     assert.match(html, /<li>聚焦头部客户<\/li>/);
     assert.match(html, /本成果供决策参考。/);
-    assert.match(html, /军师 · JUNSHI/);
+    assert.match(html, /军师参谋部/);
+    assert.match(html, /参[\s\S]*谋[\s\S]*之[\s\S]*印/); // 田字格「参谋之印」
   });
 
   test('转义 HTML 特殊字符,防注入', () => {

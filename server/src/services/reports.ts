@@ -87,13 +87,13 @@ export function diffContents(before: object, after: object): { sections: Section
   // 以「新版顺序」为主轴，标 新增/修改/未变
   for (const s of as) {
     const prev = bMap.get(s.h);
-    if (!prev) { out.push({ change: 'added', h: s.h, after: s }); added++; }
-    else if (!sameSection(prev, s)) { out.push({ change: 'changed', h: s.h, before: prev, after: s, words: wordDiff(sectionText(prev), sectionText(s)) }); changed++; }
-    else out.push({ change: 'unchanged', h: s.h, before: prev, after: s });
+    if (!prev) { out.push({ change: 'added', h: s.h ?? '', after: s }); added++; }
+    else if (!sameSection(prev, s)) { out.push({ change: 'changed', h: s.h ?? '', before: prev, after: s, words: wordDiff(sectionText(prev), sectionText(s)) }); changed++; }
+    else out.push({ change: 'unchanged', h: s.h ?? '', before: prev, after: s });
   }
   // 旧版有、新版没有 = 删除
   for (const s of bs) {
-    if (!aMap.has(s.h)) { out.push({ change: 'removed', h: s.h, before: s }); removed++; }
+    if (!aMap.has(s.h)) { out.push({ change: 'removed', h: s.h ?? '', before: s }); removed++; }
   }
 
   const titleBefore = (before as { title?: string }).title ?? '';

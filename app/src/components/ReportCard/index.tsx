@@ -4,9 +4,28 @@ import Taro from '@tarojs/taro';
 import Icon from '../Icon';
 import MarkdownText from '../MarkdownText';
 import { useStore } from '../../hooks/useStore';
-import type { Deliverable } from '../../services/api';
+import type { Deliverable, Section } from '../../services/api';
 import { makeReportShareImage, presentReportShareImage } from '../../services/reportShareCard';
 import './index.scss';
+
+// 报告 V2 最小防线：把 9 种类型 section 降级成卡片可渲染的 {h,b?,list?}，保证不破版/不 crash。
+// 用 any 读取以容忍存量脏数据/未来类型（未知 type 走 default 白卡）。
+function cardSection(sec: Section): { h: string; b?: string; list?: string[] } {
+  const s = sec as any;
+  const cell = (c: string | { text: string; trend?: 'up' | 'dn' }) => (typeof c === 'string' ? c : c?.text ?? '');
+  switch (s.type) {
+    case 'hero': return { h: s.h, b: (s.paras ?? []).join('\n\n') };
+    case 'callout': return { h: `【${s.tone}】${s.h}`, b: s.b };
+    case 'stats': return { h: s.h || '关键数据', list: (s.items ?? []).map((it: any) => `${it.num}${it.unit ?? ''} · ${it.label}`) };
+    case 'roster': return { h: s.h || '人物', b: s.intro, list: (s.people ?? []).map((p: any) => `${p.name}${p.role ? `（${p.role}）` : ''}：${p.desc}`) };
+    case 'table': return { h: s.h || '对比', list: [(s.headers ?? []).join(' / '), ...(s.rows ?? []).map((r: any[]) => r.map(cell).join(' / '))] };
+    case 'phases': return { h: s.h || '分步打法', list: (s.items ?? []).flatMap((it: any) => [`〔${it.tab}〕${it.h}${it.when ? ` · ${it.when}` : ''}`, ...(it.actions ?? []).map((a: string) => `· ${a}`), ...(it.kpi ? [`军令状：${it.kpi}`] : [])]) };
+    case 'timeline': return { h: s.h || '时间节奏', list: (s.items ?? []).map((it: any) => `${it.when}　${it.h}${it.d ? `：${it.d}` : ''}`) };
+    case 'quote': return { h: '金句', b: `「${s.text}」` };
+    case 'letter': return { h: '军师手书', b: [s.salute, ...(s.paras ?? []), s.close, s.sign].filter(Boolean).join('\n\n') };
+    default: return { h: s.h || '', b: s.b, list: Array.isArray(s.list) ? s.list : undefined };
+  }
+}
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 let shareSeq = 0;
@@ -95,25 +114,28 @@ export default function ReportCard({ data, animate = false, streaming = false, s
             <View className="skl w50" />
           </View>
         )}
-        {data.sections.slice(0, shown).map((sec, i) => (
-          <View key={i} className="rsec reveal">
-            <View className="sh">
-              <Text className="no" style={{ background: accent }}>{i + 1}</Text>
-              <Text className="sh-t">{sec.h}</Text>
-            </View>
-            {sec.b && <MarkdownText text={sec.b} className="sb" />}
-            {sec.list && (
-              <View className="slist">
-                {sec.list.map((x, j) => (
-                  <View key={j} className="sli">
-                    <View className="dot" style={{ background: accent }} />
-                    <MarkdownText text={x} className="sli-t" />
-                  </View>
-                ))}
+        {data.sections.slice(0, shown).map((sec, i) => {
+          const v = cardSection(sec);
+          return (
+            <View key={i} className="rsec reveal">
+              <View className="sh">
+                <Text className="no" style={{ background: accent }}>{i + 1}</Text>
+                <Text className="sh-t">{v.h}</Text>
               </View>
-            )}
-          </View>
-        ))}
+              {v.b && <MarkdownText text={v.b} className="sb" />}
+              {v.list && (
+                <View className="slist">
+                  {v.list.map((x, j) => (
+                    <View key={j} className="sli">
+                      <View className="dot" style={{ background: accent }} />
+                      <MarkdownText text={x} className="sli-t" />
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          );
+        })}
       </View>
 
       {isDone && (

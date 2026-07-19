@@ -379,9 +379,56 @@ export interface JourneyView {
 }
 
 /* ────────────── 结构化成果 ────────────── */
-export interface DeliverableSection { h: string; b?: string; list?: string[]; }
+// 报告 V2：类型化交付物。section 增加 `type` 判别字段；无 type = 旧版白卡（{h,b,list}），存量报告原样渲染。
+// 兼容性设计：旧字段 h/b/list/sub 以「可选」形式挂在所有变体的公共基上——既保留判别联合语义（按 type 分发渲染），
+// 又让存量读取 sec.h/sec.b/sec.list 的代码零改动通过类型检查。
+
+/** 报告语义标签五色（callout tone）：机会(金)/风险(赭赤)/行动(朱)/布局(黛青)/时机(苍绿)。 */
+export type DeliverableTone = '机会' | '风险' | '行动' | '布局' | '时机';
+/** 对比表单元格：纯文本，或带涨跌语义标记（up=利好苍绿 / dn=风险赭赤）。 */
+export type DeliverableTableCell = string | { text: string; trend?: 'up' | 'dn' };
+
+/** 所有 section 变体共享的可选字段（向后兼容 + 章节标题）。 */
+export interface DeliverableSectionCommon { h?: string; sub?: string; b?: string; list?: string[]; }
+
+/** 旧版白卡段落（无 type）：向后兼容，存量报告原样渲染。 */
+export interface DeliverableSectionBasic extends DeliverableSectionCommon { type?: undefined; }
+/** hero 定调宣言（深绿满宽） */
+export interface DeliverableSectionHero extends DeliverableSectionCommon { type: 'hero'; h: string; paras: string[]; }
+/** callout 语义提示块 */
+export interface DeliverableSectionCallout extends DeliverableSectionCommon { type: 'callout'; tone: DeliverableTone; h: string; b: string; }
+/** stats 数据大字格 */
+export interface DeliverableSectionStats extends DeliverableSectionCommon { type: 'stats'; items: { num: string; unit?: string; label: string }[]; }
+/** roster 人物卡（intro=卡片前的引导语，可选） */
+export interface DeliverableSectionRoster extends DeliverableSectionCommon { type: 'roster'; intro?: string; people: { name: string; role: string; desc: string }[]; }
+/** table 对比表（rows 单元格支持 up/dn 语义标记） */
+export interface DeliverableSectionTable extends DeliverableSectionCommon { type: 'table'; headers: string[]; rows: DeliverableTableCell[][]; }
+/** phases 作战阶段卡（kpi 渲染为「军令状」线） */
+export interface DeliverableSectionPhases extends DeliverableSectionCommon { type: 'phases'; items: { tab: string; when?: string; h: string; actions: string[]; kpi?: string }[]; }
+/** timeline 时间轴（highlight=金色关键节点） */
+export interface DeliverableSectionTimeline extends DeliverableSectionCommon { type: 'timeline'; items: { when: string; h: string; d: string; highlight?: boolean }[]; }
+/** quote 居中金句（满宽，不套章节卡） */
+export interface DeliverableSectionQuote extends DeliverableSectionCommon { type: 'quote'; text: string; cite?: string; }
+/** letter 军师手书（满宽收尾，不套章节卡） */
+export interface DeliverableSectionLetter extends DeliverableSectionCommon { type: 'letter'; salute?: string; paras: string[]; close: string; sign?: string; }
+
+export type DeliverableSection =
+  | DeliverableSectionBasic
+  | DeliverableSectionHero
+  | DeliverableSectionCallout
+  | DeliverableSectionStats
+  | DeliverableSectionRoster
+  | DeliverableSectionTable
+  | DeliverableSectionPhases
+  | DeliverableSectionTimeline
+  | DeliverableSectionQuote
+  | DeliverableSectionLetter;
+
+/** 报告封面文案（AI 生成；badge/印章/meta 落款由模板固定）。无则用 Deliverable.title 兜底。 */
+export interface DeliverableCover { title: string; subtitle?: string; motto?: string; }
 export interface Deliverable {
   title: string; icon: string; meta: string;
+  cover?: DeliverableCover; // 报告 V2：封面文案
   sections: DeliverableSection[]; trust: string; actions: string[];
   htmlUrl?: string; // 服务端渲染的可分享网页版报告链接（自有域名 /api/r/:id，便于小程序 web-view 打开）
   cdnUrl?: string; // 可选 OSS/CDN 镜像；不作为小程序内打开入口

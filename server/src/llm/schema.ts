@@ -7,7 +7,7 @@ import { resolveIndustryPack, GENERIC_INDUSTRY } from '../data/industryPacks.js'
 export type { PromptKind };
 
 import type {
-  Deliverable, DeliverableSection, ChatReply, ChatAsk,
+  Deliverable, DeliverableSection, DeliverableCover, DeliverableTone, DeliverableTableCell, ChatReply, ChatAsk,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
   AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
@@ -15,7 +15,7 @@ import type {
   SkillsConfig, LlmContextTrace,
 } from '../../../shared/contracts';
 export type {
-  Deliverable, DeliverableSection, ChatReply, ChatAsk,
+  Deliverable, DeliverableSection, DeliverableCover, DeliverableTone, DeliverableTableCell, ChatReply, ChatAsk,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
   AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
@@ -127,6 +127,7 @@ function listOf(value: unknown): string[] | undefined {
   return text ? [text] : undefined;
 }
 
+// 旧版白卡（无 type）：{h,b,list}。未知 type 也走这里优雅降级为白卡（尽量保留 h/b/list 内容，丢弃 type）。
 function sectionOf(value: unknown, index: number): DeliverableSection | null {
   const fallbackTitle = index === 0 ? '正文' : `第 ${index + 1} 部分`;
   if (typeof value === 'string') {
@@ -142,10 +143,163 @@ function sectionOf(value: unknown, index: number): DeliverableSection | null {
   return { h, ...(b ? { b } : {}), ...(list?.length ? { list } : {}) };
 }
 
+// —— 报告 V2：类型化 section 归一化。绝不抛异常；不合法 section 丢弃或降级为白卡。 ——
+const TONE_SET = new Set<DeliverableTone>(['机会', '风险', '行动', '布局', '时机']);
+
+/** 字符串数组：数组逐项裁剪去空；单字符串按空行分段。 */
+function strArr(value: unknown, max = 12): string[] {
+  if (Array.isArray(value)) return value.map(textOf).filter(Boolean).slice(0, max);
+  const t = textOf(value);
+  return t ? [t] : [];
+}
+/** 段落数组：数组逐项；单字符串按空行拆成多段。 */
+function parasOf(value: unknown, max = 10): string[] {
+  if (Array.isArray(value)) return value.map(textOf).filter(Boolean).slice(0, max);
+  const t = textOf(value);
+  if (!t) return [];
+  return t.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean).slice(0, max);
+}
+/** 章节头（h/sub）：仅 stats/roster/table/phases/timeline 用作汉字序号章节标题。 */
+function headOf(o: Record<string, unknown>): { h?: string; sub?: string } {
+  const h = textOf(o.h ?? o.title ?? o.heading);
+  const sub = textOf(o.sub ?? o.subtitle);
+  return { ...(h ? { h } : {}), ...(sub ? { sub } : {}) };
+}
+function toRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object') : [];
+}
+function cellOf(c: unknown): DeliverableTableCell {
+  if (typeof c === 'string') return c;
+  if (typeof c === 'number' || typeof c === 'boolean') return String(c);
+  if (c && typeof c === 'object') {
+    const o = c as Record<string, unknown>;
+    const text = textOf(o.text ?? o.t ?? o.v ?? o.value);
+    const tr = textOf(o.trend ?? o.mark);
+    const trend = tr === 'up' || tr === 'dn' ? (tr as 'up' | 'dn') : undefined;
+    return trend ? { text, trend } : text;
+  }
+  return '';
+}
+
+function typedSectionOf(o: Record<string, unknown>, type: string): DeliverableSection | null {
+  switch (type) {
+    case 'hero': {
+      const h = textOf(o.h ?? o.title ?? o.heading);
+      const paras = parasOf(o.paras ?? o.body ?? o.b ?? o.text);
+      if (!h && !paras.length) return null;
+      return { type: 'hero', h: h || '定调', paras };
+    }
+    case 'callout': {
+      const h = textOf(o.h ?? o.title);
+      const b = textOf(o.b ?? o.body ?? o.text);
+      if (!h && !b) return null;
+      const toneRaw = textOf(o.tone);
+      const tone = TONE_SET.has(toneRaw as DeliverableTone) ? (toneRaw as DeliverableTone) : '布局';
+      return { type: 'callout', tone, h: h || b.slice(0, 20), b };
+    }
+    case 'stats': {
+      const items = toRecords(o.items).map((it) => {
+        const num = textOf(it.num ?? it.value ?? it.v);
+        const label = textOf(it.label ?? it.lbl ?? it.name);
+        if (!num || !label) return null;
+        const unit = textOf(it.unit ?? it.small);
+        return unit ? { num, unit, label } : { num, label };
+      }).filter((x): x is { num: string; unit?: string; label: string } => !!x).slice(0, 8);
+      if (!items.length) return null;
+      return { type: 'stats', ...headOf(o), items };
+    }
+    case 'roster': {
+      const people = toRecords(o.people ?? o.items).map((p) => {
+        const name = textOf(p.name ?? p.pn);
+        if (!name) return null;
+        return { name, role: textOf(p.role ?? p.pr), desc: textOf(p.desc ?? p.d ?? p.pd) };
+      }).filter((x): x is { name: string; role: string; desc: string } => !!x).slice(0, 8);
+      if (!people.length) return null;
+      const intro = textOf(o.intro ?? o.lead);
+      return { type: 'roster', ...headOf(o), ...(intro ? { intro } : {}), people };
+    }
+    case 'table': {
+      const headers = strArr(o.headers, 8);
+      const rows = (Array.isArray(o.rows) ? o.rows : [])
+        .filter((r): r is unknown[] => Array.isArray(r))
+        .map((r) => r.map(cellOf).slice(0, 8))
+        .filter((r) => r.length)
+        .slice(0, 24);
+      if (!headers.length || !rows.length) return null;
+      return { type: 'table', ...headOf(o), headers, rows };
+    }
+    case 'phases': {
+      const items = toRecords(o.items).map((it, i) => {
+        const h = textOf(it.h ?? it.title);
+        if (!h) return null;
+        const when = textOf(it.when);
+        const kpi = textOf(it.kpi);
+        return {
+          tab: textOf(it.tab) || `第${['一', '二', '三', '四', '五', '六', '七', '八'][i] ?? i + 1}阶段`,
+          ...(when ? { when } : {}),
+          h,
+          actions: strArr(it.actions ?? it.list ?? it.b, 8),
+          ...(kpi ? { kpi } : {}),
+        };
+      }).filter((x): x is { tab: string; when?: string; h: string; actions: string[]; kpi?: string } => !!x).slice(0, 8);
+      if (!items.length) return null;
+      return { type: 'phases', ...headOf(o), items };
+    }
+    case 'timeline': {
+      const items = toRecords(o.items).map((it) => {
+        const when = textOf(it.when);
+        const h = textOf(it.h ?? it.title);
+        const d = textOf(it.d ?? it.desc ?? it.b);
+        if (!when && !h && !d) return null;
+        return { when, h, d, ...(it.highlight ? { highlight: true } : {}) };
+      }).filter((x): x is { when: string; h: string; d: string; highlight?: boolean } => !!x).slice(0, 12);
+      if (!items.length) return null;
+      return { type: 'timeline', ...headOf(o), items };
+    }
+    case 'quote': {
+      const text = textOf(o.text ?? o.b ?? o.quote);
+      if (!text) return null;
+      const cite = textOf(o.cite);
+      return { type: 'quote', text, ...(cite ? { cite } : {}) };
+    }
+    case 'letter': {
+      const paras = parasOf(o.paras ?? o.body ?? o.b);
+      const close = textOf(o.close);
+      if (!paras.length && !close) return null;
+      const salute = textOf(o.salute);
+      const sign = textOf(o.sign);
+      return { type: 'letter', ...(salute ? { salute } : {}), paras, close, ...(sign ? { sign } : {}) };
+    }
+    default:
+      return null; // 未知 type：交回 sectionOf 走白卡降级
+  }
+}
+
+/** 归一化单个 section：无 type/未知 type → 白卡；已知 type → 类型化清洗。 */
+function normalizeSection(value: unknown, index: number): DeliverableSection | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return sectionOf(value, index);
+  const o = value as Record<string, unknown>;
+  const type = textOf(o.type);
+  if (!type) return sectionOf(value, index);
+  const typed = typedSectionOf(o, type);
+  return typed ?? sectionOf(value, index); // 已知 type 但内容不合法 → 尝试白卡兜底；仍无内容则丢弃
+}
+
 export function normalizeDeliverableSections(input: unknown): DeliverableSection[] {
-  if (Array.isArray(input)) return input.map(sectionOf).filter((s): s is DeliverableSection => !!s).slice(0, 8);
-  const direct = sectionOf(input, 0);
+  if (Array.isArray(input)) return input.map(normalizeSection).filter((s): s is DeliverableSection => !!s).slice(0, 12);
+  const direct = normalizeSection(input, 0);
   return direct ? [direct] : [];
+}
+
+/** 归一化封面文案（title 必填，否则返回 undefined 由渲染端用 Deliverable.title 兜底）。 */
+export function normalizeCover(input: unknown): DeliverableCover | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const o = input as Record<string, unknown>;
+  const title = textOf(o.title ?? o.h);
+  if (!title) return undefined;
+  const subtitle = textOf(o.subtitle ?? o.sub);
+  const motto = textOf(o.motto);
+  return { title, ...(subtitle ? { subtitle } : {}), ...(motto ? { motto } : {}) };
 }
 
 /** WO-12：从 emit_deliverable 的 prescriptions 参数归一化处方（问题/打法/工具 key，最多 3 条）。白名单过滤在落库时做。 */
@@ -160,26 +314,70 @@ export function normalizePrescriptions(input: unknown): { problem: string; playb
   return out.length ? out : undefined;
 }
 
-// Anthropic tool 定义：强制模型以结构化成果输出
+// Anthropic tool 定义：强制模型以结构化成果输出。
+// 报告 V2：section 支持 type 判别（9 种富组件）；不写 type = 旧版白卡（h + b/list）。
+// 服务端 normalizeDeliverableSections 负责清洗/校验/丢弃脏数据，模型无需担心格式细节。
 export const DELIVERABLE_TOOL = {
   name: 'emit_deliverable',
   description:
-    '以固定结构产出一份咨询成果。必须分段输出，每段含标题 h，正文 b 或要点列表 list 二选一或并存。',
+    '以结构化数据产出一份咨询报告（版式由服务端渲染，你只产数据、不写 HTML/markdown，正文一律纯文本）。' +
+    'sections 是有序的报告段落，可混用多种 type 组成富报告。情绪弧线建议：hero 开场定调 → 中段干货（callout/stats/roster/table/phases/timeline）→ quote 金句 → letter 收尾。' +
+    '不写 type 即旧版白卡（h + b/list）。称呼用户一律「老板」。',
   input_schema: {
     type: 'object' as const,
     properties: {
-      title: { type: 'string', description: '成果标题，如「战略诊断报告」' },
+      title: { type: 'string', description: '成果标题，如「三城布局方略」' },
+      cover: {
+        type: 'object',
+        description: '（可选）封面文案。badge/印章/落款由模板固定，你只给这三项。',
+        properties: {
+          title: { type: 'string', description: '封面主标题（可与 title 不同、更凝练）' },
+          subtitle: { type: 'string', description: '副标题，如「拾叶山房 · 创始人 沈青梧」（可选）' },
+          motto: { type: 'string', description: '一句古典格言/定场诗，仅此处可用古典味（可选）' },
+        },
+        required: ['title'],
+      },
       sections: {
         type: 'array',
-        description: '3–4 段结构化内容',
+        description:
+          '有序报告段落，4–10 段为宜（控 token）。每段选一种 type：' +
+          'hero{h,paras[]}=深绿定调宣言；' +
+          'callout{tone,h,b}=语义提示块，tone∈[机会,风险,行动,布局,时机]；' +
+          'stats{h?,items:[{num,unit?,label}]}=数据大字格；' +
+          'roster{h?,intro?,people:[{name,role,desc}]}=人物卡；' +
+          'table{h?,headers[],rows:[[单元格]]}=对比表，单元格为字符串或{text,trend}（trend∈[up,dn] 标涨跌）；' +
+          'phases{h?,items:[{tab,when?,h,actions[],kpi?}]}=作战阶段卡，kpi 会渲染成「军令状」；' +
+          'timeline{h?,items:[{when,h,d,highlight?}]}=时间轴，highlight=true 为金色关键节点；' +
+          'quote{text}=居中金句；letter{salute?,paras[],close,sign?}=军师手书收尾；' +
+          '不写 type = 白卡{h,b?,list?}。stats/roster/table/phases/timeline 的 h 是该章节标题（会配汉字序号）。',
         items: {
           type: 'object',
           properties: {
-            h: { type: 'string', description: '小标题' },
-            b: { type: 'string', description: '段落正文（可选）' },
-            list: { type: 'array', items: { type: 'string' }, description: '要点列表（可选）' },
+            type: { type: 'string', description: '段落类型（省略=白卡）：hero/callout/stats/roster/table/phases/timeline/quote/letter' },
+            h: { type: 'string', description: '标题/小标题（hero、callout 必填；chapter 型作章节标题；quote/letter 不用）' },
+            sub: { type: 'string', description: '章节副标题（可选）' },
+            b: { type: 'string', description: '白卡/callout 正文（纯文本，段间用空行）' },
+            list: { type: 'array', items: { type: 'string' }, description: '白卡要点列表' },
+            tone: { type: 'string', description: 'callout 语义色：机会/风险/行动/布局/时机' },
+            paras: { type: 'array', items: { type: 'string' }, description: 'hero/letter 的段落数组' },
+            text: { type: 'string', description: 'quote 金句正文' },
+            close: { type: 'string', description: 'letter 收束语（如「谋定而后动，老板可安心落子。」）' },
+            salute: { type: 'string', description: 'letter 抬头（如「老板台鉴」）' },
+            sign: { type: 'string', description: 'letter 落款（如「军师 顿首」）' },
+            intro: { type: 'string', description: 'roster 人物卡前的引导语' },
+            items: {
+              type: 'array',
+              description: 'stats/phases/timeline 的条目数组（字段随 type 而定，见上）',
+              items: { type: 'object' },
+            },
+            people: {
+              type: 'array',
+              description: 'roster 人物：{name,role,desc}',
+              items: { type: 'object', properties: { name: { type: 'string' }, role: { type: 'string' }, desc: { type: 'string' } } },
+            },
+            headers: { type: 'array', items: { type: 'string' }, description: 'table 表头' },
+            rows: { type: 'array', description: 'table 数据行：二维数组，单元格为字符串或{text,trend}', items: { type: 'array' } },
           },
-          required: ['h'],
         },
       },
       prescriptions: {

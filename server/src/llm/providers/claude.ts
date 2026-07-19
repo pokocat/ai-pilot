@@ -2,7 +2,7 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { DELIVERABLE_TOOL, buildSystemParts, normalizeDeliverableSections, normalizePrescriptions, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { DELIVERABLE_TOOL, buildSystemParts, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
@@ -90,7 +90,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
 
   const toolUse = res.content.find((c) => c.type === 'tool_use');
   if (toolUse && toolUse.type === 'tool_use') {
-    const input = toolUse.input as { title?: string; sections?: unknown };
+    const input = toolUse.input as { title?: string; sections?: unknown; cover?: unknown };
     const sections = normalizeDeliverableSections(input.sections);
     if (sections.length) {
       return {
@@ -98,6 +98,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
           title: input.title || tpl?.title || '咨询成果',
           icon: tpl?.icon ?? 'spark',
           meta: metaOf(ctx),
+          cover: normalizeCover(input.cover),
           sections,
           trust: TRUST_NOTE,
           actions: ['save_to_library', 'export_pdf'],
@@ -295,7 +296,7 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
     toolCtx: toolCtxOf(ctx),
     finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
   });
-  const input = (r.toolInput ?? {}) as { title?: string; sections?: unknown };
+  const input = (r.toolInput ?? {}) as { title?: string; sections?: unknown; cover?: unknown };
   const sections = normalizeDeliverableSections(input.sections);
   if (sections.length) {
     return {
@@ -303,6 +304,7 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
         title: input.title || tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
+        cover: normalizeCover(input.cover),
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],
@@ -345,7 +347,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
     finalTool: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, schema: DELIVERABLE_TOOL.input_schema },
     forceFinalTool: false, // emit_deliverable 可选，不强制
   });
-  const input = (r.toolInput ?? null) as { title?: string; sections?: unknown } | null;
+  const input = (r.toolInput ?? null) as { title?: string; sections?: unknown; cover?: unknown } | null;
   const sections = normalizeDeliverableSections(input?.sections);
   if (sections.length) {
     const tpl = ctx.deliverableKey ? DELIVERABLES[ctx.deliverableKey] : undefined;
@@ -355,6 +357,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
         title: input?.title || tpl?.title || '咨询成果',
         icon: tpl?.icon ?? 'spark',
         meta: metaOf(ctx),
+        cover: normalizeCover(input?.cover),
         sections,
         trust: TRUST_NOTE,
         actions: ['save_to_library', 'export_pdf'],

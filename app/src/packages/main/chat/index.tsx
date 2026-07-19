@@ -29,15 +29,70 @@ type Msg =
   | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; refNotices?: string[]; streaming?: boolean; retryText?: string }
   | { role: 'memory'; agentName: string };
 
+// 报告 V2：把一个 section（含 9 种类型）降级成纯文本行。用 any 读取以容忍存量脏数据/未来类型。
+function sectionToLines(sec: Section): string[] {
+  const s = sec as any;
+  const cell = (c: string | { text: string; trend?: 'up' | 'dn' }) => (typeof c === 'string' ? c : c?.text ?? '');
+  const out: string[] = [];
+  switch (s.type) {
+    case 'hero':
+      out.push(`【${s.h}】`);
+      (s.paras ?? []).forEach((p: string) => out.push(p));
+      break;
+    case 'callout':
+      out.push(`【${s.tone}】${s.h}`);
+      if (s.b) out.push(s.b);
+      break;
+    case 'stats':
+      if (s.h) out.push(`【${s.h}】`);
+      (s.items ?? []).forEach((it: any) => out.push(`${it.num}${it.unit ?? ''} ${it.label}`));
+      break;
+    case 'roster':
+      if (s.h) out.push(`【${s.h}】`);
+      if (s.intro) out.push(s.intro);
+      (s.people ?? []).forEach((p: any) => out.push(`· ${p.name}${p.role ? `（${p.role}）` : ''}：${p.desc}`));
+      break;
+    case 'table':
+      if (s.h) out.push(`【${s.h}】`);
+      out.push((s.headers ?? []).join(' | '));
+      (s.rows ?? []).forEach((r: any[]) => out.push(r.map(cell).join(' | ')));
+      break;
+    case 'phases':
+      if (s.h) out.push(`【${s.h}】`);
+      (s.items ?? []).forEach((it: any) => {
+        out.push(`〔${it.tab}〕${it.h}${it.when ? ` · ${it.when}` : ''}`);
+        (it.actions ?? []).forEach((a: string) => out.push(`· ${a}`));
+        if (it.kpi) out.push(`军令状：${it.kpi}`);
+      });
+      break;
+    case 'timeline':
+      if (s.h) out.push(`【${s.h}】`);
+      (s.items ?? []).forEach((it: any) => out.push(`${it.when}　${it.h}${it.d ? `：${it.d}` : ''}`));
+      break;
+    case 'quote':
+      out.push(`「${s.text}」`);
+      break;
+    case 'letter':
+      if (s.salute) out.push(s.salute);
+      (s.paras ?? []).forEach((p: string) => out.push(p));
+      if (s.close) out.push(s.close);
+      if (s.sign) out.push(s.sign);
+      break;
+    default:
+      if (s.h) out.push(`【${s.h}】`);
+      if (s.b) out.push(s.b);
+      if (Array.isArray(s.list)) s.list.forEach((x: string) => out.push(`· ${x}`));
+  }
+  return out;
+}
+
 // 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
 function deliverableToText(d: Deliverable): string {
   const lines: string[] = [d.title];
   if (d.meta) lines.push(d.meta);
   lines.push('');
   for (const sec of d.sections) {
-    lines.push(`【${sec.h}】`);
-    if (sec.b) lines.push(sec.b);
-    if (sec.list) sec.list.forEach((x) => lines.push(`· ${x}`));
+    for (const l of sectionToLines(sec)) lines.push(l);
     lines.push('');
   }
   if (d.trust) lines.push(d.trust);

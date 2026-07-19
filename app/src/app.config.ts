@@ -78,7 +78,7 @@ export default defineAppConfig({
       { pagePath: 'pages/home/index', text: '军情' },
       { pagePath: 'pages/studio/index', text: '军令' },
       { pagePath: 'pages/thinktank/index', text: '锦囊' },
-      { pagePath: 'pages/profile/index', text: '主公' },
+      { pagePath: 'pages/profile/index', text: '老板' },
     ],
   },
 });

@@ -14,17 +14,23 @@ const BULLET_GAP = 22; // 条间距
 const FOOT_H = 132;
 
 // 首节摘要 → 最多 3 条核心结论（去空白、逐条截断，规避全文与长数字明细）。
+// 报告 V2：优先从 hero 段落 / callout 标题取要点，不足再回退旧的首节 list/正文分句逻辑。
 export function shareBullets(d: Deliverable): string[] {
-  const first = d.sections?.[0];
-  if (!first) return [];
-  const raw = first.list && first.list.length
-    ? first.list
-    : (first.b ? first.b.split(/[。；;\n]+/) : []);
-  return raw
+  const clean = (arr: string[]) => arr
     .map((x) => x.replace(/[*#>`_~]/g, '').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .slice(0, 3)
     .map((x) => ([...x].length > 46 ? `${[...x].slice(0, 46).join('')}…` : x));
+
+  const secs = d.sections ?? [];
+  const hero = secs.find((s) => s.type === 'hero');
+  if (hero && hero.type === 'hero' && hero.paras.length) return clean(hero.paras);
+  const calloutHs = secs.filter((s) => s.type === 'callout').map((s) => (s.type === 'callout' ? s.h : '')).filter(Boolean);
+  if (calloutHs.length) return clean(calloutHs);
+  const first = secs.find((s) => !s.type && (s.b || (s.list?.length ?? 0) > 0)) ?? secs[0];
+  if (!first) return [];
+  const raw = first.list && first.list.length ? first.list : (first.b ? first.b.split(/[。；;\n]+/) : []);
+  return clean(raw);
 }
 
 // 估算卡片高度（Chinese 按码点计行数；宽松留白，宁可略空不截断）。
