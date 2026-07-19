@@ -105,6 +105,12 @@ export interface ChartSummary {
   monthlyOutlook: { year: number; months: { month: number; phase: string; turning: boolean }[] };
 }
 
+// 微信 wx.request 默认总超时约 60 秒；成果/报告生成服务端允许至少 120 秒完成
+// （见 server DELIVERABLE_TIMEOUT_MS），且与 services/streaming.ts 的 WEAPP_STREAM_TIMEOUT_MS、
+// deploy/nginx.conf.example 的 proxy_read_timeout 保持一致口径，避免慢模型仍在正常出片时被
+// 客户端提前判定为超时。仅用于 /generate-sync 这类可能耗时较久的成果生成请求。
+const SYNC_GENERATE_TIMEOUT_MS = 180_000;
+
 type NetworkReason = 'timeout' | 'offline' | 'domain' | 'ssl' | 'dns' | 'unreachable' | 'cancelled' | 'network';
 
 function networkErrorInfo(errMsg: string, origin: string): { reason: NetworkReason; message: string; technicalMessage: string } {
@@ -174,7 +180,7 @@ function httpErrorInfo(statusCode: number, data: unknown): { message: string; co
 }
 
 // 导出给领域服务复用（如 services/dossier 案卷闭环）；页面代码仍应走 api.* 方法。
-export async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
+export async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object, opts?: { timeoutMs?: number }): Promise<T> {
   const url = `${BASE_URL}${path}`;
   let res: Taro.request.SuccessCallbackResult;
   try {
@@ -183,6 +189,7 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
       method: method as any,
       data,
       header: { 'Content-Type': 'application/json', 'x-user-id': getToken() },
+      ...(opts?.timeoutMs ? { timeout: opts.timeoutMs } : {}),
     });
   } catch (e) {
     const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
@@ -366,7 +373,7 @@ export const api = {
   deleteSession: (id: string) =>
     IS_MOCK ? mock.deleteSession(id) : request(`/sessions/${id}`, 'DELETE'),
   generate: (body: GenRequest) =>
-    IS_MOCK ? mock.generate(body) : request<GenResult>('/generate-sync', 'POST', body),
+    IS_MOCK ? mock.generate(body) : request<GenResult>('/generate-sync', 'POST', body, { timeoutMs: SYNC_GENERATE_TIMEOUT_MS }),
   library: () => (IS_MOCK ? mock.library() : request<LibItem[]>('/library')),
   saveToLibrary: (body: SaveLibRequest) =>
     IS_MOCK ? mock.saveToLibrary(body) : request<{ id: string; at: string; reportId?: string; version?: number }>('/library', 'POST', body),
