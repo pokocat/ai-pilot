@@ -19,7 +19,7 @@ const QUOTES = [
 ];
 
 const BASE_CSS = `
-  :root { --serif: "Songti SC", "STSong", "SimSun", "Noto Serif SC", serif; }
+  :root { --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", "SimSun", serif; }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #F4F2EC; font-family: "Noto Sans SC", -apple-system, "PingFang SC", sans-serif; color: #16191D; padding: 24px 16px; }
   .card { max-width: 420px; margin: 0 auto; border-radius: 20px; overflow: hidden; background: #FBFAF6; box-shadow: 0 18px 44px rgba(22,25,29,.12); }

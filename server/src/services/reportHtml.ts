@@ -154,7 +154,7 @@ export function renderReportHtml(d: Deliverable): string {
   --gold:#9B7C3F;--ink:#2A2E2A;--ink2:#6B6F66;
   --win:#9B7C3F;--risk:#8C3B2E;--order:#A63D2F;--def:#2F4C5C;--adv:#3F6B4F;
   --line:rgba(42,46,42,.14);
-  --serif:"Songti SC","STSong","SimSun","Noto Serif SC",serif;
+  --serif:"Songti SC","Noto Serif CJK SC","Source Han Serif SC","STSong","SimSun",serif;
   --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -278,7 +278,18 @@ footer{background:var(--paper);text-align:center;padding:40px 24px 52px;border-t
 footer .fmark{margin:0 auto 16px;display:inline-block}
 footer .forg{font-family:var(--serif);font-size:15px;color:var(--green);letter-spacing:3px}
 footer .fsmall{font-size:10.5px;color:var(--ink2);line-height:2;margin-top:12px;letter-spacing:.5px}
-@media print{html,body{background:#fff}.cover{min-height:auto}}
+/* PDF/打印适配：卡片不跨页断裂；封面/深绿块背景保留（配合 puppeteer printBackground） */
+@media print{
+  html,body{background:#fff}
+  .wrap{max-width:none}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .cover{min-height:auto;padding-top:72px;padding-bottom:72px;page-break-after:always}
+  section{padding:28px 22px}
+  .sec-head{page-break-after:avoid}
+  .callout,.stat,.person,.phase,.quote,.tl,.hero,.letter{page-break-inside:avoid}
+  .stats,.roster,.tbl-wrap,table,tr,.timeline{page-break-inside:avoid}
+  footer{page-break-inside:avoid}
+}
 </style></head>
 <body>
 <div class="wrap">

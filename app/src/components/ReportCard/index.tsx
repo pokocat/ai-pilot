@@ -38,10 +38,11 @@ interface Props {
   onSave?: () => void;
   onExport?: () => void;
   onShare?: () => void; // 「网页版」：生成自有域名网页版并打开 web-view（本人自用查看）
+  onPdf?: () => void; // 「PDF」：生成/下载 A4 PDF（weapp downloadFile+openDocument；H5 开新窗）
 }
 
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
-export default function ReportCard({ data, animate = false, streaming = false, saved = false, onSave, onExport, onShare }: Props) {
+export default function ReportCard({ data, animate = false, streaming = false, saved = false, onSave, onExport, onShare, onPdf }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   // D-3-4：每张卡一块隐藏 canvas，用于「分享图」出图（唯一 id 防列表内串扰）。
@@ -167,6 +168,12 @@ export default function ReportCard({ data, animate = false, streaming = false, s
               <View className="act ghost" onClick={() => onShare()}>
                 <Icon name="up" size={14} color="#565C63" />
                 <Text>网页版</Text>
+              </View>
+            )}
+            {onPdf && (
+              <View className="act ghost" onClick={() => onPdf()}>
+                <Icon name="doc" size={14} color="#565C63" />
+                <Text>PDF</Text>
               </View>
             )}
             <View className="act ghost" onClick={() => onExport?.()}>

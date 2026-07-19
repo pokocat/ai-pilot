@@ -75,3 +75,18 @@ export async function ossDelete(key: string): Promise<void> {
   if (!ossConfigured()) return;
   await oss().delete(key);
 }
+
+/** 读取 OSS 对象为 Buffer；对象不存在(NoSuchKey/404)返回 null，其余错误抛出。用于 PDF 缓存命中判断。 */
+export async function ossGetBuffer(key: string): Promise<Buffer | null> {
+  try {
+    const r = await oss().get(key);
+    const content = (r as { content?: unknown }).content;
+    if (Buffer.isBuffer(content)) return content;
+    if (content) return Buffer.from(content as ArrayBuffer);
+    return null;
+  } catch (err) {
+    const e = err as { code?: string; status?: number; name?: string };
+    if (e?.code === 'NoSuchKey' || e?.status === 404 || e?.name === 'NoSuchKeyError') return null;
+    throw err;
+  }
+}

@@ -9,7 +9,7 @@ import SafeHeader from '../../../components/SafeHeader';
 import AdvisorAvatar from '../../../components/AdvisorAvatar';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
-import { api, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../../services/api';
+import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../../services/api';
 import { STREAM_CHAT } from '../../../services/config';
 import { generateStream, type StreamControl } from '../../../services/streaming';
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
@@ -995,6 +995,35 @@ export default function Chat() {
     }
   };
 
+  // 生成并下载报告 PDF：先确保网页版已生成（拿到 /api/r/:id）→ 推导 PDF 链接 →
+  // weapp：downloadFile 落沙盒 → openDocument（可再转发/存本地）；H5：开新窗直接下载。
+  const downloadReportPdf = async (messageId?: string, title?: string) => {
+    if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出方案', icon: 'none' }); return; }
+    Taro.showLoading({ title: '军师装订中…' });
+    try {
+      const r = await api.renderReport(sessionId, messageId);
+      const pdfUrl = reportPdfUrl(r.htmlUrl);
+      if (!pdfUrl) { Taro.hideLoading(); Taro.showToast({ title: '本地预览模式无 PDF', icon: 'none' }); return; }
+      if (IS_WEAPP) {
+        const safe = (title || '战略报告').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || '战略报告';
+        const filePath = `${Taro.env.USER_DATA_PATH}/${safe}·军师参谋部.pdf`;
+        const dl = await Taro.downloadFile({ url: pdfUrl, filePath });
+        Taro.hideLoading();
+        if (dl.statusCode !== 200) { Taro.showToast({ title: '生成失败，请重试', icon: 'none' }); return; }
+        await Taro.openDocument({ filePath: dl.filePath || filePath, fileType: 'pdf', showMenu: true });
+      } else if (typeof window !== 'undefined' && window.open) {
+        Taro.hideLoading();
+        window.open(pdfUrl, '_blank');
+      } else {
+        Taro.hideLoading();
+        Taro.showToast({ title: '请在小程序内下载 PDF', icon: 'none' });
+      }
+    } catch {
+      Taro.hideLoading();
+      Taro.showToast({ title: '生成失败，请重试', icon: 'none' });
+    }
+  };
+
   // 生成对话纪要 → 版本化报告 + 沉淀知识库
   const onSummarize = async () => {
     if (!sessionId) { Taro.showToast({ title: '先开始对话再生成纪要', icon: 'none' }); return; }
@@ -1438,6 +1467,7 @@ export default function Chat() {
                   onSave={m.streaming ? undefined : () => saveDeliverable(m.deliverable, m.messageId)}
                   onExport={m.streaming ? undefined : () => copyDeliverable(m.deliverable)}
                   onShare={m.streaming ? undefined : () => shareReport(m.messageId)}
+                  onPdf={m.streaming ? undefined : () => downloadReportPdf(m.messageId, m.deliverable?.title)}
                 />
               </View>
               {/* 记债项10：报告流失败/降级——单一话术（trust 行「生成中断——已生成部分已保留，可点击重试补全」）+ ↻ 重试入口。

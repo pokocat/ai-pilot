@@ -473,4 +473,12 @@ export const api = {
     IS_MOCK ? Promise.resolve({}) : request<{ htmlUrl?: string; cdnUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
 };
 
+/** 由网页版链接（/api/r/:id）推导同一报告的 PDF 下载地址（/api/r/:id/pdf）。取不到则返回 null。 */
+export function reportPdfUrl(htmlUrl?: string | null): string | null {
+  if (!htmlUrl) return null;
+  const m = htmlUrl.match(/\/api\/r\/([A-Za-z0-9_-]+)(?=$|[?#])/);
+  if (!m) return null;
+  return htmlUrl.replace(/(\/api\/r\/[A-Za-z0-9_-]+)(?=$|[?#])/, '$1/pdf');
+}
+
 export type { GenRequest, SaveLibRequest, MessageRef as Ref };

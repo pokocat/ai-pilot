@@ -116,6 +116,12 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin
   await app.register(adminRoutes, { prefix: '/api' });
 
+  // 关闭时释放无头 Chromium（若曾懒启动过；test/未生成过则 no-op）。
+  app.addHook('onClose', async () => {
+    const { closePdfBrowser } = await import('./services/reportPdf.js');
+    await closePdfBrowser();
+  });
+
   await app.ready();
   return app;
 }
