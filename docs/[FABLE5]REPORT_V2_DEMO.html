@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>沈青梧 · 三城布局方略 — 军师参谋部</title>
+<style>
+  :root{
+    --paper:#ECE7DA;        /* 米纸 页面底 */
+    --card:#FBFAF6;         /* 纸白 卡片底 */
+    --green:#1E5A43;        /* 深绿 主色 */
+    --green-cover:linear-gradient(150deg,#1E5A43,#163F30);
+    --gold:#9B7C3F;         /* 金 */
+    --ink:#2A2E2A;          /* 墨色正文 */
+    --ink2:#6B6F66;         /* 次要 */
+    --win:#9B7C3F;          /* 胜机/洞察 = 金 */
+    --risk:#8C3B2E;         /* 风险/警讯 = 赭赤 */
+    --order:#A63D2F;        /* 军令 = 朱 */
+    --def:#2F4C5C;          /* 布防/结构 = 黛青 */
+    --adv:#3F6B4F;          /* 进军/利好 = 苍绿 */
+    --line:rgba(42,46,42,.14);
+    --serif:"Songti SC","STSong","SimSun","Noto Serif SC",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--paper)}
+  body{
+    font-family:var(--sans);
+    color:var(--ink);
+    line-height:1.9;
+    font-size:14px;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  .wrap{max-width:720px;margin:0 auto;background:var(--paper)}
+  .serif{font-family:var(--serif)}
+
+  /* ============ 通用章节 ============ */
+  section{padding:38px 22px}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:24px;
+    border-bottom:1px solid var(--line);padding-bottom:14px}
+  .sec-num{font-family:var(--serif);font-size:40px;line-height:1;color:rgba(155,124,63,.55);flex:0 0 auto}
+  .sec-title{font-family:var(--serif);font-size:21px;color:var(--ink);letter-spacing:1px}
+  .sec-sub{font-size:12px;color:var(--ink2);margin-top:3px;letter-spacing:.5px}
+
+  /* ============ 封面 ============ */
+  .cover{
+    background:var(--green-cover);
+    color:#EFEAD9;
+    min-height:100vh;
+    padding:56px 30px 40px;
+    display:flex;flex-direction:column;
+    position:relative;
+    overflow:hidden;
+  }
+  .cover::before{content:"";position:absolute;inset:14px;border:1px solid rgba(155,124,63,.45);pointer-events:none}
+  .cover::after{content:"";position:absolute;inset:19px;border:1px solid rgba(155,124,63,.20);pointer-events:none}
+  .cover-badge{
+    font-family:var(--serif);font-size:13px;letter-spacing:3px;
+    color:#C9A85E;align-self:center;margin-top:8px;
+  }
+  .cover-mid{flex:1;display:flex;flex-direction:column;justify-content:center;text-align:center}
+  .cover-mark{align-self:center;margin-bottom:30px}
+  .cover-title{font-family:var(--serif);font-size:40px;line-height:1.25;letter-spacing:3px;color:#F4EFDE}
+  .cover-rule{width:44px;height:1px;background:rgba(201,168,94,.7);margin:22px auto}
+  .cover-subtitle{font-family:var(--serif);font-size:16px;color:#C9BFA2;letter-spacing:2px}
+  .cover-motto{font-family:var(--serif);font-size:15px;color:#B7C4B0;margin-top:34px;line-height:2.1;font-style:normal}
+  .cover-meta{text-align:center;font-size:11px;color:rgba(201,168,94,.85);letter-spacing:2px;margin-top:8px}
+  .cover-meta span{white-space:nowrap}
+
+  /* 金印（方形田字格） */
+  .seal{
+    width:76px;height:76px;border:2px solid var(--gold);
+    display:inline-grid;grid-template-columns:1fr 1fr;
+    font-family:var(--serif);color:var(--gold);
+    position:relative;background:transparent;
+  }
+  .seal span{display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1}
+  .seal::before,.seal::after{content:"";position:absolute;background:rgba(155,124,63,.5)}
+  .seal::before{left:0;right:0;top:50%;height:1px}
+  .seal::after{top:0;bottom:0;left:50%;width:1px}
+  .seal.red{border-color:#A63D2F;color:#A63D2F}
+  .seal.red::before,.seal.red::after{background:rgba(166,61,47,.5)}
+
+  /* ============ 身份定位 hero ============ */
+  .hero{
+    background:var(--green-cover);color:#EFEAD9;
+    padding:40px 26px;position:relative;
+  }
+  .hero::before{content:"";position:absolute;inset:10px;border:1px solid rgba(155,124,63,.35);pointer-events:none}
+  .hero-kicker{font-family:var(--serif);font-size:12px;letter-spacing:4px;color:#C9A85E;margin-bottom:16px}
+  .hero-h{font-family:var(--serif);font-size:27px;line-height:1.5;letter-spacing:1px;color:#F4EFDE;margin-bottom:20px}
+  .hero-p{font-size:13.5px;color:#CFC7B0;line-height:2;margin-bottom:14px}
+  .hero-p:last-child{margin-bottom:0}
+  .hero-p b{color:#E4D9B8;font-weight:600}
+
+  /* ============ callout 语义块 ============ */
+  .callout{
+    background:var(--card);border:1px solid var(--line);
+    border-left:4px solid var(--gold);
+    padding:16px 18px 16px 16px;margin:16px 0;position:relative;
+  }
+  .callout .tag{
+    display:inline-block;font-family:var(--serif);font-size:12px;
+    letter-spacing:2px;padding:1px 9px;color:#fff;background:var(--gold);
+    margin-bottom:9px;
+  }
+  .callout .ct{font-family:var(--serif);font-size:16px;margin-bottom:6px;color:var(--ink)}
+  .callout .cp{font-size:13px;color:var(--ink);line-height:1.95}
+  .callout.win{border-left-color:var(--win)}   .callout.win .tag{background:var(--win)}
+  .callout.risk{border-left-color:var(--risk)} .callout.risk .tag{background:var(--risk)}
+  .callout.order{border-left-color:var(--order)}.callout.order .tag{background:var(--order)}
+  .callout.def{border-left-color:var(--def)}   .callout.def .tag{background:var(--def)}
+  .callout.adv{border-left-color:var(--adv)}   .callout.adv .tag{background:var(--adv)}
+
+  /* ============ stats 数据大字格 ============ */
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);border:1px solid var(--line);
+    border-bottom:none;border-right:none;background:var(--card)}
+  .stat{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:18px 14px;text-align:center}
+  .stat .num{font-family:var(--serif);font-size:32px;line-height:1;color:var(--green);letter-spacing:1px}
+  .stat .num small{font-size:15px;color:var(--gold);margin-left:2px}
+  .stat .lbl{font-size:11.5px;color:var(--ink2);margin-top:8px;letter-spacing:1px}
+  @media(min-width:520px){.stats{grid-template-columns:repeat(3,1fr)}}
+
+  /* ============ roster 人物卡 ============ */
+  .roster{display:grid;gap:14px;margin-top:16px}
+  .person{background:var(--card);border:1px solid var(--line);padding:16px 18px;position:relative}
+  .person::after{content:"┐";position:absolute;top:4px;right:7px;color:rgba(155,124,63,.5);font-size:16px;line-height:1}
+  .person .pn{font-family:var(--serif);font-size:18px;color:var(--ink);display:flex;align-items:baseline;gap:10px}
+  .person .pr{font-size:11.5px;color:var(--gold);font-family:var(--serif);letter-spacing:1.5px}
+  .person .pd{font-size:12.5px;color:var(--ink2);margin-top:8px;line-height:1.9}
+
+  /* ============ table 对比表 ============ */
+  .tbl-wrap{overflow-x:auto;border:1px solid var(--line);margin-top:4px}
+  table{border-collapse:collapse;width:100%;min-width:340px;font-size:12.5px}
+  thead th{background:var(--green);color:#D9C48C;font-family:var(--serif);
+    font-weight:400;letter-spacing:1px;padding:11px 12px;text-align:left;white-space:nowrap}
+  tbody td{padding:11px 12px;border-top:1px solid var(--line);color:var(--ink);vertical-align:top}
+  tbody th{padding:11px 12px;border-top:1px solid var(--line);text-align:left;
+    font-family:var(--serif);font-weight:400;color:var(--green);white-space:nowrap}
+  tbody tr:nth-child(even){background:rgba(30,90,67,.035)}
+  td .up{color:var(--adv)} td .dn{color:var(--risk)}
+
+  /* ============ phases 作战阶段 ============ */
+  .phase{background:var(--card);border:1px solid var(--line);padding:22px 18px 16px;margin-top:22px;position:relative}
+  .phase-tab{position:absolute;top:-13px;left:16px;background:var(--green);color:#D9C48C;
+    font-family:var(--serif);font-size:12px;letter-spacing:2px;padding:3px 12px;border:1px solid rgba(155,124,63,.4)}
+  .phase-when{font-size:11.5px;color:var(--gold);font-family:var(--serif);letter-spacing:1px;margin-bottom:4px}
+  .phase-h{font-family:var(--serif);font-size:17px;color:var(--ink);margin-bottom:12px}
+  .phase ul{list-style:none;margin:0 0 14px}
+  .phase li{font-size:12.5px;color:var(--ink);padding:5px 0 5px 20px;position:relative;line-height:1.8;border-bottom:1px dotted var(--line)}
+  .phase li:last-child{border-bottom:none}
+  .phase li::before{content:"◇";position:absolute;left:2px;top:5px;color:var(--gold);font-size:11px}
+  .phase-kpi{border-top:2px solid var(--green);padding-top:10px;margin-top:4px;
+    display:flex;align-items:baseline;gap:8px;font-size:12px}
+  .phase-kpi .k{font-family:var(--serif);color:var(--order);letter-spacing:1px;flex:0 0 auto}
+  .phase-kpi .v{color:var(--ink);line-height:1.7}
+
+  /* ============ timeline 时间轴 ============ */
+  .timeline{position:relative;margin:8px 0 0 8px;padding-left:26px}
+  .timeline::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:1px;background:var(--line)}
+  .tl{position:relative;padding-bottom:22px}
+  .tl:last-child{padding-bottom:0}
+  .tl::before{content:"";position:absolute;left:-30px;top:4px;width:9px;height:9px;
+    background:var(--card);border:2px solid var(--ink2)}
+  .tl.gold::before{border-color:var(--gold);background:var(--gold)}
+  .tl-when{font-family:var(--serif);font-size:13px;color:var(--green);letter-spacing:1px}
+  .tl.gold .tl-when{color:var(--gold)}
+  .tl-t{font-size:14px;color:var(--ink);margin:2px 0 3px;font-weight:600}
+  .tl-d{font-size:12.5px;color:var(--ink2);line-height:1.85}
+
+  /* ============ quote 金句 ============ */
+  .quote{text-align:center;padding:46px 26px;background:var(--paper)}
+  .quote .qr{width:38px;height:1px;background:var(--gold);margin:0 auto 24px}
+  .quote .qt{font-family:var(--serif);font-size:23px;line-height:1.9;color:var(--green);letter-spacing:2px}
+  .quote .qb{width:38px;height:1px;background:var(--gold);margin:24px auto 0}
+  .quote .qcite{font-size:11.5px;color:var(--ink2);margin-top:16px;letter-spacing:2px}
+
+  /* ============ letter 书信 ============ */
+  .letter{background:var(--green-cover);color:#EFEAD9;padding:44px 28px;position:relative}
+  .letter::before{content:"";position:absolute;inset:12px;border:1px solid rgba(155,124,63,.3);pointer-events:none}
+  .letter h3{font-family:var(--serif);font-size:22px;letter-spacing:4px;color:#E4D9B8;text-align:center;margin-bottom:26px}
+  .letter p{font-family:var(--serif);font-size:14px;line-height:2.15;color:#CFC7B0;margin-bottom:16px;text-indent:2em}
+  .letter .close{text-align:center;font-family:var(--serif);font-size:19px;color:#F4EFDE;
+    letter-spacing:3px;margin-top:30px;text-indent:0}
+  .letter .sign{text-align:right;font-family:var(--serif);font-size:13px;color:#C9A85E;margin-top:20px;text-indent:0}
+
+  /* ============ footer 金印落款 ============ */
+  footer{background:var(--paper);text-align:center;padding:40px 24px 52px;border-top:1px solid var(--line)}
+  footer .fmark{margin:0 auto 16px;display:inline-block}
+  footer .forg{font-family:var(--serif);font-size:15px;color:var(--green);letter-spacing:3px}
+  footer .fsmall{font-size:10.5px;color:var(--ink2);line-height:2;margin-top:12px;letter-spacing:.5px}
+
+  /* 竖排小字装饰 */
+  .vlabel{writing-mode:vertical-rl;font-family:var(--serif);font-size:11px;
+    letter-spacing:3px;color:rgba(155,124,63,.7);position:absolute}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ============ 封面 ============ -->
+  <section class="cover">
+    <div class="cover-badge">◆ 军师参谋部 ◆</div>
+    <div class="cover-mid">
+      <div class="cover-mark">
+        <div class="seal"><span>军</span><span>师</span><span>之</span><span>印</span></div>
+      </div>
+      <h1 class="cover-title">三城布局方略</h1>
+      <div class="cover-rule"></div>
+      <div class="cover-subtitle">拾叶山房 · 创始人 沈青梧</div>
+      <p class="cover-motto">「谋定而后动，<br>先胜而后求战。」</p>
+    </div>
+    <div class="cover-meta"><span>呈 老板 亲启　·　密　·　2026 年七月</span></div>
+  </section>
+
+  <!-- ============ 身份定位 hero ============ -->
+  <div class="hero">
+    <div class="hero-kicker">定 调</div>
+    <h2 class="hero-h">你已经有 12 家店，<br>过了活下来这关，<br>但还没到能称霸的时候。</h2>
+    <p class="hero-p">拾叶山房在本城开了 7 年，12 家店铺环城分布，月流水 240 万，这个底子不小。你现在纠结的不是生死问题，而是方向问题——<b>是把一座城做深做透，还是同时铺到三座城去抢声量。</b></p>
+    <p class="hero-p">我把你的每家店的账、街坊口碑、对手动向都翻了一遍，才写下这份判断。这里说的<b>每条都能拿数据核对，每步都留了退路。</b>你可以拿它当参考，但别把它当死规矩。</p>
+    <p class="hero-p">做生意先看清自己，再看对手。所以这份报告先讲你手里有什么牌，再讲三座城的虚实，最后给你一套能进能退的打法。</p>
+  </div>
+
+  <!-- ============ 壹 · 局势 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-num serif">壹</div>
+      <div>
+        <div class="sec-title">局势判断</div>
+        <div class="sec-sub">眼下的机会，和眼下的隐患</div>
+      </div>
+    </div>
+
+    <div class="callout win">
+      <span class="tag">机会</span>
+      <div class="ct">本城品牌已经立住，这个名气能带着你出城</div>
+      <div class="cp">在本城进店的顾客里，有四成能准确说出"拾叶"这个牌子，说明你已经有名气了。名气是最省钱的开路资源。你要去新城开店，不用从零建立信任，本城的口碑会先帮你铺一层底。而且现在对手还没打出名气，正是你抢先一步的时候。</div>
+    </div>
+
+    <div class="callout risk">
+      <span class="tag">风险</span>
+      <div class="ct">12 家店看着热闹，其实有 4 家在悄悄亏钱</div>
+      <div class="cp">把账翻细了看：城东 2 家、城南 2 家，月月都要贴钱，全靠城里 4 家旺店的利润在补。如果这时候急着出城，等于把旺店赚的钱抽走去填新城的坑——老问题没解决，又添新窟窿。出城之前，这 4 家店必须先处理掉。</div>
+    </div>
+
+    <div class="callout def">
+      <span class="tag">布局</span>
+      <div class="ct">先稳后扩：出城之前，先把 4 家亏损店止住</div>
+      <div class="cp">扩张和守本盘不是二选一，而是有先后顺序。建议用两个月，把这 4 家店该改的改、该关的关，先把血止住，让本城成为你能靠得住的大后方。后方稳了，出去才没有后顾之忧；后方乱着，出去很容易两头空。</div>
+    </div>
+  </section>
+
+  <!-- ============ 贰 · 底牌 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-num serif">贰</div>
+      <div>
+        <div class="sec-title">你的家底</div>
+        <div class="sec-sub">你手上能调动的钱和人</div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="num">240<small>万</small></div><div class="lbl">月流水 · 全城合计</div></div>
+      <div class="stat"><div class="num">12<small>家</small></div><div class="lbl">现有门店</div></div>
+      <div class="stat"><div class="num">38<small>%</small></div><div class="lbl">老客回头率</div></div>
+      <div class="stat"><div class="num">1.9<small>万</small></div><div class="lbl">旺店每月坪效</div></div>
+      <div class="stat"><div class="num">620<small>万</small></div><div class="lbl">可动用现金</div></div>
+      <div class="stat"><div class="num">7<small>年</small></div><div class="lbl">开店年数</div></div>
+    </div>
+
+    <p style="font-size:12.5px;color:var(--ink2);margin:18px 0 4px;line-height:1.9">你的家底不只是钱，更在于身边这三个能托付的人。看准了人再派活，这是做成事的根本。</p>
+
+    <div class="roster">
+      <div class="person">
+        <div class="pn serif">周慎<span class="pr">管账 · 后方主心骨</span></div>
+        <div class="pd">跟了你 7 年，账没出过一次乱子。他的长处是稳、是守，适合坐镇本城看好大后方，不适合派去新城拓荒——他是守家的人，不是打硬仗的人。</div>
+      </div>
+      <div class="person">
+        <div class="pn serif">林砚<span class="pr">开店先锋 · 选址操盘</span></div>
+        <div class="pd">去年一个人搞定城西两家店，都是三个月回本，眼光准、出手快。你要真决定出城，让他打头阵，给他临场拍板的权力，别拿老规矩绑住他。</div>
+      </div>
+      <div class="person">
+        <div class="pn serif">苏晚<span class="pr">口碑主理 · 造势先行</span></div>
+        <div class="pd">本城四成顾客记得"拾叶"这个牌子，主要是她的功劳。去新城开店，先有名气再开门更省力，适合让她先进城探路、把声势造起来，人未到、名先到。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 叁 · 棋盘 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-num serif">叁</div>
+      <div>
+        <div class="sec-title">三城对比</div>
+        <div class="sec-sub">哪座城该先打，哪座城该缓一缓</div>
+      </div>
+    </div>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>维度</th><th>青州</th><th>沧澜</th><th>临汀</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>离本城距离</th><td>80 里</td><td>200 里</td><td>320 里</td></tr>
+          <tr><th>茶饮消费力</th><td><span class="up">高</span></td><td>中</td><td><span class="up">高</span></td></tr>
+          <tr><th>同类对手</th><td>2 家 · 都弱</td><td>5 家 · 1 家强</td><td><span class="dn">7 家 · 2 家强</span></td></tr>
+          <tr><th>租金水平</th><td>低</td><td>中</td><td><span class="dn">高</span></td></tr>
+          <tr><th>本城口碑能否覆盖</th><td><span class="up">能覆盖</span></td><td>覆盖一半</td><td><span class="dn">覆盖不到</span></td></tr>
+          <tr><th>军师判断</th><td><span class="up">首取</span></td><td>次图</td><td><span class="dn">暂缓</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout def">
+      <span class="tag">布局</span>
+      <div class="ct">近水楼台：青州只有 80 里，口碑和货都够得着</div>
+      <div class="cp">青州离本城只有 80 里，本城的口碑能直接覆盖过去，进货、调人当天就能到，对手又都不强。这座城不先打，还等哪座。临汀虽然市场大，但 7 家在抢、2 家还很强、你的口碑又覆盖不到，这时候硬进就是拿鸡蛋碰石头，先放一放、看看它怎么变再说。</div>
+    </div>
+  </section>
+
+  <!-- ============ 肆 · 方略 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-num serif">肆</div>
+      <div>
+        <div class="sec-title">分步打法</div>
+        <div class="sec-sub">三步走 · 先稳本盘，再打青州，最后看情况扩</div>
+      </div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-tab">第一阶段</div>
+      <div class="phase-when">时间 · 两个月内</div>
+      <div class="phase-h">止血固本 — 把 4 家亏损店处理掉</div>
+      <ul>
+        <li>城东、城南这 4 家亏损店，一家一家定去留：能救的救，救不了的关</li>
+        <li>让周慎重新理账，划出出城能用的现金，别动旺店的本钱</li>
+        <li>让苏晚先去青州跑一圈，走访街坊，摸清你的口碑能覆盖到多深</li>
+      </ul>
+      <div class="phase-kpi"><span class="k">军令状</span><span class="v">两个月结束时，这 4 家店不能再吃掉利润；出城的现金要留够 600 万。</span></div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-tab">第二阶段</div>
+      <div class="phase-when">时间 · 第 3 到第 6 个月</div>
+      <div class="phase-h">先打青州 — 开两家店试试手感</div>
+      <div class="phase-when" style="color:var(--ink2);margin-bottom:10px">不贪多，只求稳。一座城站稳，胜过三座城都晃悠。</div>
+      <ul>
+        <li>让林砚打头阵，在青州挑两个旺地方开店，宁可慢，别乱开</li>
+        <li>第一家店别照搬本城的老一套，按青州本地口味重新调茶单和装修</li>
+        <li>苏晚同步造势，让"拾叶"这个牌子先在青州人耳朵里过一遍</li>
+      </ul>
+      <div class="phase-kpi"><span class="k">军令状</span><span class="v">青州这两家店，开业 4 个月内各自要回本；没回本的立刻复盘止损。</span></div>
+    </div>
+
+    <div class="phase">
+      <div class="phase-tab">第三阶段</div>
+      <div class="phase-when">时间 · 第 6 个月之后 · 看结果再定</div>
+      <div class="phase-h">看结果再定 — 青州成了才碰沧澜</div>
+      <ul>
+        <li>青州要是成了，就顺着势头照同样打法进沧澜；不成就收手守好本盘，不硬来</li>
+        <li>临汀 7 家在抢，今年不是你的战场，等口碑和资金都够了再议</li>
+        <li>每个季度复盘一次，进退都有数据支撑，别凭一时冲动下决定</li>
+      </ul>
+      <div class="phase-kpi"><span class="k">军令状</span><span class="v">进沧澜的前提：青州两家店连续两个月盈利，否则一步都不动。</span></div>
+    </div>
+
+    <div class="callout order">
+      <span class="tag">行动</span>
+      <div class="ct">这三条，请你亲自盯，别全交给别人</div>
+      <div class="cp">第一，两个月内处理完 4 家亏损店，不处理完就不出城；第二，出城先打青州，别被临汀的大市场诱惑；第三，青州没盈利，就一家都别往沧澜开。这三条守住了，虽然慢，但每步都稳；守不住，看着快，其实很险。</div>
+    </div>
+  </section>
+
+  <!-- ============ 伍 · 天时 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-num serif">伍</div>
+      <div>
+        <div class="sec-title">时间节奏</div>
+        <div class="sec-sub">半年时间 · 什么时候进，什么时候守</div>
+      </div>
+    </div>
+
+    <div class="timeline">
+      <div class="tl">
+        <div class="tl-when">7 月 — 8 月</div>
+        <div class="tl-t">止血期</div>
+        <div class="tl-d">定下 4 家亏损店的去留，周慎理账划钱，苏晚去青州摸底。这两个月只守不攻，先把家里安顿好再谈出去。</div>
+      </div>
+      <div class="tl gold">
+        <div class="tl-when">9 月 — 10 月　◆ 关键节点</div>
+        <div class="tl-t">出城期 — 第一家店落地青州</div>
+        <div class="tl-d">林砚带队进青州，选好地方开第一家店。这是全局最关键的一步，这家店的成败决定后半年怎么走，建议你亲自去看一眼。</div>
+      </div>
+      <div class="tl">
+        <div class="tl-when">11 月 — 12 月</div>
+        <div class="tl-t">试水期</div>
+        <div class="tl-d">青州两家店都开起来，盯住回本快不快、回头客多不多。数据一清楚，第三阶段该进该守自然就有答案。</div>
+      </div>
+      <div class="tl">
+        <div class="tl-when">次年 1 月 — 看情况</div>
+        <div class="tl-t">进沧澜，还是收手</div>
+        <div class="tl-d">青州站稳了，就顺势进沧澜；没站稳，就收回来守好本盘、攒力气等下次。赢了就进，卡住就守，都不会没退路。</div>
+      </div>
+    </div>
+
+    <div class="callout adv">
+      <span class="tag">时机</span>
+      <div class="ct">9 月到 10 月，正是出城的好时候</div>
+      <div class="cp">这段时间新茶上市、客流转旺，青州那两家弱对手根基又还没扎稳，正是进城的窗口。错过这个窗口拖到明年，对手多长了一岁，你口碑领先的优势也会跟着缩水。这种时机不常有，别错过。</div>
+    </div>
+  </section>
+
+  <!-- ============ 金句 ============ -->
+  <div class="quote">
+    <div class="qr"></div>
+    <p class="qt serif">「贪三城之名者失一城，<br>固一城之实者得三城。」</p>
+    <div class="qb"></div>
+    <div class="qcite">— 军师谨识</div>
+  </div>
+
+  <!-- ============ 陆 · 致主公书 ============ -->
+  <div class="letter">
+    <h3>军 师 手 书</h3>
+    <p>老板台鉴：这份三城的方案，我前后翻了很多遍才敢下笔。拾叶现在的问题不是弱，而是盛里藏着隐患——12 家店的热闹，盖住了 4 家店的亏损；本城的名气，其实可以帮你带动三座城。</p>
+    <p>做生意的老理是：先让自己立于不败，再等对手露出破绽。所以我的建议是，先把本城的亏损止住，再拿下最近的青州，最后看结果决定要不要碰沧澜、暂时放掉临汀那块诱人却难啃的市场。这不是胆小，而是舍不得你 7 年攒下的家底，不想让它毁在一时的急。</p>
+    <p>你要是采纳这三条，半年之内可能看不到多惊人的动静，但每一步都稳，进退都留着余地。事在人为，成不成还得看天，我能做的，就是让你每一步都走在明处、每一步都有退路。</p>
+    <p class="close">谋定而后动，<br>老板可安心落子。</p>
+    <div class="sign">军师　顿首　二〇二六年七月</div>
+  </div>
+
+  <!-- ============ footer 金印落款 ============ -->
+  <footer>
+    <div class="fmark">
+      <div class="seal red" style="width:64px;height:64px">
+        <span style="font-size:17px">参</span><span style="font-size:17px">谋</span>
+        <span style="font-size:17px">之</span><span style="font-size:17px">印</span>
+      </div>
+    </div>
+    <div class="forg">军师参谋部</div>
+    <div class="fsmall">
+      本方略为虚拟演示样张 · 案主与数据均属虚构<br>
+      文中所陈非投资建议 · 决策请以实况为准<br>
+      军师 · 网页版报告 v0.1 · 密件 · 仅呈老板亲启
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>
