@@ -5,7 +5,7 @@ import Icon from '../Icon';
 import MarkdownText from '../MarkdownText';
 import { useStore } from '../../hooks/useStore';
 import type { Deliverable, Section } from '../../services/api';
-import { makeReportShareImage, presentReportShareImage } from '../../services/reportShareCard';
+import { makeReportShareImage, shareReportImageToFriend, saveReportImageToAlbum } from '../../services/reportShareCard';
 import './index.scss';
 
 // 报告 V2 最小防线：把 9 种类型 section 降级成卡片可渲染的 {h,b?,list?}，保证不破版/不 crash。
@@ -36,29 +36,51 @@ interface Props {
   streaming?: boolean; // 服务端 SSE 仍在产出中：展示当前已到达分段，暂不开放操作
   saved?: boolean;
   onSave?: () => void;
-  onExport?: () => void;
-  onShare?: () => void; // 「网页版」：生成自有域名网页版并打开 web-view（本人自用查看）
-  onPdf?: () => void; // 「PDF」：生成/下载 A4 PDF（weapp downloadFile+openDocument；H5 开新窗）
+  // 「分享」选单里由父级承接的三项：PDF 发好友 / 查看保存 PDF / 复制全文（图片两项在组件内自持出图）。
+  onShareMenu?: (kind: 'pdfFriend' | 'pdfView' | 'copy') => void;
 }
 
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
-export default function ReportCard({ data, animate = false, streaming = false, saved = false, onSave, onExport, onShare, onPdf }: Props) {
+export default function ReportCard({ data, animate = false, streaming = false, saved = false, onSave, onShareMenu }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
-  // D-3-4：每张卡一块隐藏 canvas，用于「分享图」出图（唯一 id 防列表内串扰）。
+  // D-3-4：每张卡一块隐藏 canvas，用于分享图出图（唯一 id 防列表内串扰）。
   const shareCanvasId = useRef(`rcshare-${(shareSeq += 1)}`).current;
 
-  // D-3-4：对外分享 = 生成品牌分享图（标题+核心结论+落款，无全文/敏感数字）→ 发好友/存相册。
-  const shareImage = async () => {
-    if (!IS_WEAPP) { Taro.showToast({ title: '请在小程序内生成分享图', icon: 'none' }); return; }
+  // 分享图 = 品牌分享图（标题+核心结论+落款，无全文/敏感数字）。出图后按已选动作直接发好友 / 存相册。
+  const makeShareImage = async (): Promise<string | null> => {
     Taro.showLoading({ title: '生成分享图…' });
     try {
       const path = await makeReportShareImage(shareCanvasId, data);
       Taro.hideLoading();
-      presentReportShareImage(path);
+      return path;
     } catch {
       Taro.hideLoading();
       Taro.showToast({ title: '生成分享图失败，请重试', icon: 'none' });
+      return null;
+    }
+  };
+
+  // 「分享」→ 动作选单。weapp：图片(发好友/存相册) + PDF(发好友/查看保存) + 复制全文；
+  // H5：图片/发文件不可用，选单收敛为「下载 PDF（开新窗）」+「复制全文」。
+  const openShareMenu = async () => {
+    if (IS_WEAPP) {
+      try {
+        const { tapIndex } = await Taro.showActionSheet({
+          itemList: ['发送图片给好友', '保存图片到相册', 'PDF 发给好友', '查看 / 保存 PDF', '复制全文'],
+        });
+        if (tapIndex === 0) { const p = await makeShareImage(); if (p) shareReportImageToFriend(p); return; }
+        if (tapIndex === 1) { const p = await makeShareImage(); if (p) saveReportImageToAlbum(p); return; }
+        if (tapIndex === 2) { onShareMenu?.('pdfFriend'); return; }
+        if (tapIndex === 3) { onShareMenu?.('pdfView'); return; }
+        if (tapIndex === 4) { onShareMenu?.('copy'); return; }
+      } catch { /* 用户取消 */ }
+    } else {
+      try {
+        const { tapIndex } = await Taro.showActionSheet({ itemList: ['下载 PDF', '复制全文'] });
+        if (tapIndex === 0) { onShareMenu?.('pdfView'); return; }
+        if (tapIndex === 1) { onShareMenu?.('copy'); return; }
+      } catch { /* 用户取消 */ }
     }
   };
   const [revealed, setRevealed] = useState(animate ? 0 : data.sections.length);
@@ -159,26 +181,10 @@ export default function ReportCard({ data, animate = false, streaming = false, s
               <Icon name={isSaved ? 'check' : 'layers'} size={14} color={isSaved ? accent : '#fff'} />
               <Text>{isSaved ? '已存入方案库' : '存入方案库'}</Text>
             </View>
-            {/* B9：以下 ghost 操作 Icon 取与 --ink-2(#565C63) 等值的 hex。 */}
-            <View className="act ghost" onClick={shareImage}>
-              <Icon name="image" size={14} color="#565C63" />
-              <Text>分享图</Text>
-            </View>
-            {onShare && (
-              <View className="act ghost" onClick={() => onShare()}>
-                <Icon name="up" size={14} color="#565C63" />
-                <Text>网页版</Text>
-              </View>
-            )}
-            {onPdf && (
-              <View className="act ghost" onClick={() => onPdf()}>
-                <Icon name="doc" size={14} color="#565C63" />
-                <Text>PDF</Text>
-              </View>
-            )}
-            <View className="act ghost" onClick={() => onExport?.()}>
-              <Icon name="doc" size={14} color="#565C63" />
-              <Text>复制全文</Text>
+            {/* 分享 = 图片/PDF/复制全文选单；ghost Icon 取与 --ink-2(#565C63) 等值的 hex。 */}
+            <View className="act ghost" onClick={openShareMenu}>
+              <Icon name="up" size={14} color="#565C63" />
+              <Text>分享</Text>
             </View>
           </View>
           {/* D-3-4 隐藏出图画布（屏外，仅点分享图时绘制导出） */}

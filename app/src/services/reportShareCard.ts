@@ -123,7 +123,19 @@ export async function makeReportShareImage(canvasId: string, d: Deliverable): Pr
   return renderCardToImage(canvasId, CW, H, (ctx) => paintReportCard(ctx, d.title || '军师方案', bullets, H));
 }
 
-// 出图后让用户选择发好友 / 存相册（复用共享出图管道的分享动作）。
+// 分享选单已在成果卡内先行选定动作时，直接执行——发好友 / 存相册（供 ReportCard 复用）。
+export function shareReportImageToFriend(path: string) {
+  Taro.showShareImageMenu({ path }).catch(() =>
+    Taro.showToast({ title: '可长按图片保存后转发', icon: 'none' }),
+  );
+}
+export function saveReportImageToAlbum(path: string) {
+  Taro.saveImageToPhotosAlbum({ filePath: path })
+    .then(() => Taro.showToast({ title: '已存到相册', icon: 'none' }))
+    .catch(() => Taro.showToast({ title: '未获相册权限，可长按图片保存', icon: 'none' }));
+}
+
+// 出图后让用户选择发好友 / 存相册（复用共享出图管道的分享动作）。方案库详情页仍用此自带选单入口。
 export function presentReportShareImage(path: string) {
   Taro.showActionSheet({ itemList: ['发给好友 / 群', '存到相册'] })
     .then((r) => {

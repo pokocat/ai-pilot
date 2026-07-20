@@ -1002,33 +1002,70 @@ export default function Chat() {
     }
   };
 
-  // 生成并下载报告 PDF：先确保网页版已生成（拿到 /api/r/:id）→ 推导 PDF 链接 →
-  // weapp：downloadFile 落沙盒 → openDocument（可再转发/存本地）；H5：开新窗直接下载。
+  // 公共段：确保网页版已生成（拿到 /api/r/:id）→ 推导 PDF 链接 → weapp downloadFile 落沙盒。
+  // 返回 { filePath, fileName } 供「查看/保存」与「发给好友」两个 PDF 项复用；失败返回 null（已 toast + hideLoading）。
+  const downloadReportPdfLocal = async (messageId?: string, title?: string): Promise<{ filePath: string; fileName: string } | null> => {
+    if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出方案', icon: 'none' }); return null; }
+    Taro.showLoading({ title: '军师装订中…' });
+    try {
+      const r = await api.renderReport(sessionId, messageId);
+      const pdfUrl = reportPdfUrl(r.htmlUrl);
+      if (!pdfUrl) { Taro.hideLoading(); Taro.showToast({ title: '本地预览模式无 PDF', icon: 'none' }); return null; }
+      const safe = (title || '战略报告').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || '战略报告';
+      const fileName = `${safe}·军师参谋部.pdf`;
+      const filePath = `${Taro.env.USER_DATA_PATH}/${fileName}`;
+      const dl = await Taro.downloadFile({ url: pdfUrl, filePath });
+      Taro.hideLoading();
+      if (dl.statusCode !== 200) { Taro.showToast({ title: '生成失败，请重试', icon: 'none' }); return null; }
+      return { filePath: dl.filePath || filePath, fileName };
+    } catch {
+      Taro.hideLoading();
+      Taro.showToast({ title: '生成失败，请重试', icon: 'none' });
+      return null;
+    }
+  };
+
+  // 查看 / 保存 PDF：weapp 下沙盒 → openDocument（可再转发/存本地）；H5：开新窗直接下载。
   const downloadReportPdf = async (messageId?: string, title?: string) => {
+    if (IS_WEAPP) {
+      const f = await downloadReportPdfLocal(messageId, title);
+      if (!f) return;
+      await Taro.openDocument({ filePath: f.filePath, fileType: 'pdf', showMenu: true });
+      return;
+    }
+    // H5：无沙盒/openDocument，直接开新窗下载。
     if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出方案', icon: 'none' }); return; }
     Taro.showLoading({ title: '军师装订中…' });
     try {
       const r = await api.renderReport(sessionId, messageId);
       const pdfUrl = reportPdfUrl(r.htmlUrl);
-      if (!pdfUrl) { Taro.hideLoading(); Taro.showToast({ title: '本地预览模式无 PDF', icon: 'none' }); return; }
-      if (IS_WEAPP) {
-        const safe = (title || '战略报告').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || '战略报告';
-        const filePath = `${Taro.env.USER_DATA_PATH}/${safe}·军师参谋部.pdf`;
-        const dl = await Taro.downloadFile({ url: pdfUrl, filePath });
-        Taro.hideLoading();
-        if (dl.statusCode !== 200) { Taro.showToast({ title: '生成失败，请重试', icon: 'none' }); return; }
-        await Taro.openDocument({ filePath: dl.filePath || filePath, fileType: 'pdf', showMenu: true });
-      } else if (typeof window !== 'undefined' && window.open) {
-        Taro.hideLoading();
-        window.open(pdfUrl, '_blank');
-      } else {
-        Taro.hideLoading();
-        Taro.showToast({ title: '请在小程序内下载 PDF', icon: 'none' });
-      }
+      Taro.hideLoading();
+      if (!pdfUrl) { Taro.showToast({ title: '本地预览模式无 PDF', icon: 'none' }); return; }
+      if (typeof window !== 'undefined' && window.open) window.open(pdfUrl, '_blank');
+      else Taro.showToast({ title: '请在小程序内下载 PDF', icon: 'none' });
     } catch {
       Taro.hideLoading();
       Taro.showToast({ title: '生成失败，请重试', icon: 'none' });
     }
+  };
+
+  // PDF 发给好友：下沙盒 → shareFileMessage（基础库 2.16.1+）；失败降级 openDocument + 提示从右上角转发。
+  const sharePdfToFriend = async (messageId?: string, title?: string) => {
+    const f = await downloadReportPdfLocal(messageId, title);
+    if (!f) return;
+    try {
+      await Taro.shareFileMessage({ filePath: f.filePath, fileName: f.fileName });
+    } catch {
+      Taro.showToast({ title: '点右上角「···」即可转发这份文件', icon: 'none' });
+      Taro.openDocument({ filePath: f.filePath, fileType: 'pdf', showMenu: true }).catch(() => {});
+    }
+  };
+
+  // 成果卡「分享」选单里由父级承接的三项（图片两项在 ReportCard 内自持出图）。
+  const onReportShareMenu = (kind: 'pdfFriend' | 'pdfView' | 'copy', d: Deliverable, messageId?: string) => {
+    if (kind === 'copy') { copyDeliverable(d); return; }
+    if (kind === 'pdfFriend') { sharePdfToFriend(messageId, d?.title); return; }
+    downloadReportPdf(messageId, d?.title); // pdfView
   };
 
   // 生成对话纪要 → 版本化报告 + 沉淀知识库
@@ -1472,9 +1509,7 @@ export default function Chat() {
                   streaming={m.streaming}
                   saved={m.saved}
                   onSave={m.streaming ? undefined : () => saveDeliverable(m.deliverable, m.messageId)}
-                  onExport={m.streaming ? undefined : () => copyDeliverable(m.deliverable)}
-                  onShare={m.streaming ? undefined : () => shareReport(m.messageId)}
-                  onPdf={m.streaming ? undefined : () => downloadReportPdf(m.messageId, m.deliverable?.title)}
+                  onShareMenu={m.streaming ? undefined : (kind) => onReportShareMenu(kind, m.deliverable, m.messageId)}
                 />
               </View>
               {/* 记债项10：报告流失败/降级——单一话术（trust 行「生成中断——已生成部分已保留，可点击重试补全」）+ ↻ 重试入口。
