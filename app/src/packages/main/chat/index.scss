@@ -25,7 +25,8 @@
 .mem-bar .mlearn { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--accent-ink); }
 .mem-bar .mlearn .dot { width: 6px; height: 6px; border-radius: 50%; }
 
-.chat-log { flex: 1; min-height: 0; padding: 16px; box-sizing: border-box; overflow: hidden; }
+.chat-log { flex: 1; min-height: 0; overflow: hidden; }
+.chat-log-inner { min-height: 100%; padding: 16px; box-sizing: border-box; }
 
 .jump-latest {
   position: absolute;
@@ -214,7 +215,8 @@
 
 /* 参谋室协同导轨：派单 / 回总军师 / 补充上下文，单行横滑不占对话高度 */
 .council-rail { padding: 0 0 8px; }
-.council-scroll { white-space: nowrap; width: 100%; padding-left: 16px; box-sizing: border-box; }
+.council-scroll { white-space: nowrap; width: 100%; }
+.council-scroll-inner { min-width: 100%; padding-left: 16px; box-sizing: border-box; }
 .council-chip {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 11px 5px 5px; margin-right: 8px;

@@ -73,7 +73,7 @@ export default function Login({ open, onLoggedIn }: Props) {
   const isWeapp = process.env.TARO_ENV === 'weapp';
   // getUserProfile 仅在 PC/Mac 端微信返回真实头像昵称；手机端/模拟器一律匿名，故「一键填入」只在 PC/Mac 显示，
   // 手机端直接用下方 chooseAvatar（使用微信头像）+ 昵称填充，避免点了却提示「不支持」。
-  const wxPlatform = (() => { try { return Taro.getSystemInfoSync().platform; } catch { return ''; } })();
+  const wxPlatform = isWeapp ? (() => { try { return Taro.getDeviceInfo().platform; } catch { return ''; } })() : '';
   const canOneTapWx = isWeapp && (wxPlatform === 'windows' || wxPlatform === 'mac');
   const phoneOk = phoneRe.test(phone);
   const codeOk = codeRe.test(code);

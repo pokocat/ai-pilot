@@ -1,6 +1,6 @@
 // 3 问速诊（WO-06）：行业 + 阶段/营收段 + 最痛的一件事 → 初诊卡（主要矛盾 / 军师判断 / 今天做的一件事）。
 // 选项复用 /survey（industry + stage）；提交走 api.quickScan（服务端 structured()，mock 有确定性模板）。
-// 结果卡可 useShareAppMessage 分享；CTA 进参谋室走完整六轮诊断。替代「送你一卦」承担获客。
+// 结果卡可 useShareAppMessage 分享；CTA 用结果导向文案进入参谋室继续完善判断，不向用户暴露固定轮次。替代「送你一卦」承担获客。
 import { useEffect, useState } from 'react';
 import { View, Text, Textarea, ScrollView, Button } from '@tarojs/components';
 import Taro, { useShareAppMessage } from '@tarojs/taro';
@@ -131,7 +131,7 @@ export default function QuickScanPage() {
               </View>
               <View className="qs-brand"><Text>军师参谋部 · 初诊</Text></View>
             </View>
-            <View className="qs-cta" onClick={enterWarRoom}><Text>想要完整作战方案？进参谋室聊 6 轮 →</Text></View>
+            <View className="qs-cta" onClick={enterWarRoom}><Text>继续问策，完善这份判断 →</Text></View>
             {/* D6：显式「分享给同行」按钮（open-type=share 触发 useShareAppMessage） */}
             <Button className="qs-share" openType="share" hoverClass="none"><Text>分享给同行</Text></Button>
             <View className="qs-again" onClick={() => setResult(null)}><Text>换个问题再诊一次</Text></View>

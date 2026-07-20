@@ -356,9 +356,7 @@ export default function Chat() {
   const measureDock = () => {
     if (!winHeightRef.current) {
       try {
-        const info = (Taro as unknown as { getWindowInfo?: () => { windowHeight?: number } }).getWindowInfo?.()
-          || Taro.getSystemInfoSync?.();
-        winHeightRef.current = Number((info as { windowHeight?: number })?.windowHeight || 0);
+        winHeightRef.current = Number(Taro.getWindowInfo().windowHeight || 0);
       } catch { /* noop */ }
     }
     const winH = winHeightRef.current;
@@ -1285,47 +1283,50 @@ export default function Chat() {
       {agent ? (
         <View className="council-rail">
           <ScrollView scrollX enhanced showScrollbar={false} className="council-scroll">
-            {agent.key === 'general' ? (
-              DISPATCH_SUGGESTIONS.map((it) => (
-                <View key={it.agentKey} className="council-chip" onClick={() => openThread(it.agentKey, it.prompt)}>
-                  <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={it.icon} size={13} color={accent} /></View>
-                  <Text>{it.name}</Text>
-                </View>
-              ))
-            ) : (
-              <>
-                <View className="council-chip master" onClick={() => openThread('general', `我在${agent.name}线程里聊到的关键结论，请你汇总进主线判断，并告诉我下一步。`)}>
-                  <View className="council-ic" style={{ background: accent }}><Icon name="spark" size={13} color="#fff" /></View>
-                  <Text>回到总军师</Text>
-                </View>
-                {CORE_SPECIALISTS.filter((t) => t.agentKey !== agent.key).map((t) => {
-                  const a = findAgent(t.agentKey);
-                  if (!a) return null;
-                  return (
-                    <View key={t.agentKey} className="council-chip" onClick={() => openThread(t.agentKey)}>
-                      <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={a.icon} size={13} color={accent} /></View>
-                      <Text>{a.name}</Text>
-                    </View>
-                  );
-                })}
-              </>
-            )}
-            <View className="council-chip guide" onClick={turnIntoOrders}>
-              <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="check" size={13} color={accent} /></View>
-              <Text>转成军令</Text>
-            </View>
-            {CHAT_GUIDES.map((g) => (
-              <View key={g.label} className="council-chip guide" onClick={() => openGuide(g.url)}>
-                <View className="council-ic" style={{ background: 'var(--surface-2)' }}><Icon name={g.icon} size={13} color="#565C63" /></View>
-                <Text>{g.label}</Text>
+            <View className="council-scroll-inner">
+              {agent.key === 'general' ? (
+                DISPATCH_SUGGESTIONS.map((it) => (
+                  <View key={it.agentKey} className="council-chip" onClick={() => openThread(it.agentKey, it.prompt)}>
+                    <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={it.icon} size={13} color={accent} /></View>
+                    <Text>{it.name}</Text>
+                  </View>
+                ))
+              ) : (
+                <>
+                  <View className="council-chip master" onClick={() => openThread('general', `我在${agent.name}线程里聊到的关键结论，请你汇总进主线判断，并告诉我下一步。`)}>
+                    <View className="council-ic" style={{ background: accent }}><Icon name="spark" size={13} color="#fff" /></View>
+                    <Text>回到总军师</Text>
+                  </View>
+                  {CORE_SPECIALISTS.filter((t) => t.agentKey !== agent.key).map((t) => {
+                    const a = findAgent(t.agentKey);
+                    if (!a) return null;
+                    return (
+                      <View key={t.agentKey} className="council-chip" onClick={() => openThread(t.agentKey)}>
+                        <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name={a.icon} size={13} color={accent} /></View>
+                        <Text>{a.name}</Text>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+              <View className="council-chip guide" onClick={turnIntoOrders}>
+                <View className="council-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="check" size={13} color={accent} /></View>
+                <Text>转成军令</Text>
               </View>
-            ))}
+              {CHAT_GUIDES.map((g) => (
+                <View key={g.label} className="council-chip guide" onClick={() => openGuide(g.url)}>
+                  <View className="council-ic" style={{ background: 'var(--surface-2)' }}><Icon name={g.icon} size={13} color="#565C63" /></View>
+                  <Text>{g.label}</Text>
+                </View>
+              ))}
+            </View>
           </ScrollView>
         </View>
       ) : null}
 
       {/* 对话流 */}
       <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollIntoView={askScrollTarget} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
+        <View className="chat-log-inner">
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (
@@ -1531,6 +1532,7 @@ export default function Chat() {
           </View>
         ) : null}
         <View style={{ height: '20px' }} />
+        </View>
       </ScrollView>
 
       {showJumpLatest ? (

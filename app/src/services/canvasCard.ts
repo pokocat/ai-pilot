@@ -15,7 +15,7 @@ export function renderCardToImage(
     q.select(`#${canvasId}`).fields({ node: true, size: true }).exec((res) => {
       const node = res?.[0]?.node;
       if (!node) { reject(new Error('canvas 未就绪')); return; }
-      const dpr = Taro.getSystemInfoSync().pixelRatio || 2;
+      const dpr = Taro.getWindowInfo().pixelRatio || 2;
       node.width = w * dpr;
       node.height = h * dpr;
       const ctx = node.getContext('2d');
