@@ -416,9 +416,6 @@ export default function Chat() {
   // 审核类错误（输入/输出未通过内容审核）：重试同样内容必再次被拦，故不提供「重试」，也避免叠出重复气泡。
   const isModerationErr = (s?: string) => !!s && /审核/.test(s);
 
-  const wantsDeliverableRequest = (s: string) =>
-    /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|(?:重新)?出.{0,4}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|战略体检|转成军令|生成纪要/.test(s);
-
   const promptLogin = (title = '请先登录后再开始对话') => {
     setShowLogin(true);
     Taro.showToast({ title, icon: 'none' });
@@ -558,13 +555,15 @@ export default function Chat() {
     if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
     try {
-      // P1-B3：普通聊天默认真流式；总军师 on-demand 仅在明确要成果/报告时回同步成果路径。
+      // 报告 / 聊天分流完全由后端 SSE meta 事件决定，前端不再检查消息文本。
+      // 后端 send('meta',{kind}) 必先于 begin/token 到达，且后端本就按自己的判定（含 on-demand 侧的
+      // 服务端正则）决定本轮 kind——前端再用正则猜只会与之错配。故删除 wantsDeliverableRequest：
+      // 是否走流式仅取决于配置（STREAM_CHAT 开关 + 有 agent），骨架形态由 meta 回调决定
+      // （kind=report → onReportStart 建报告骨架；kind=chat → onChatStart 建聊天气泡）。
       // 路由带 send= 自动发送时，React state 里的 agent 可能还没刷新；必须按本次 agentKey 重新取配置。
       const sendingAgent = findAgent(agentKey) || agent;
-      const deliverableRequested = wantsDeliverableRequest(text);
       const body = { text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined };
-      const canStreamChat = STREAM_CHAT && !!sendingAgent && (!sendingAgent.deliverableKey || (sendingAgent.key === 'general' && !deliverableRequested));
-      const canStreamReport = STREAM_CHAT && !!sendingAgent && (!!sendingAgent.deliverableKey || deliverableRequested) && (sendingAgent.key !== 'general' || deliverableRequested);
+      const canStream = STREAM_CHAT && !!sendingAgent;
 
       const showMemoryLearned = (agentName: string, delay: number) => {
         setTimeout(() => {
@@ -613,58 +612,13 @@ export default function Chat() {
         }
       };
 
-      if (canStreamChat) {
-        const patch = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
-          setMsgs((m) => {
-            const i = m.length - 1;
-            if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
-              const copy = m.slice(); copy[i] = fn(copy[i] as Extract<Msg, { role: 'assistant' }>); return copy;
-            }
-            return m;
-        });
-        setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
-        const control: StreamControl = { abort: () => {} };
-        controlRef.current = control;
-        // onError 已经把错误话术 + 重试入口渲染进这条气泡；此时 streamOk=false 只代表「流未正常收尾」，
-        // 不代表「用户什么都没看到」——若在这里无条件兜底重发一遍 api.generate，会在已展示的错误气泡后面
-        // 再追加一条自动补发的回复（且真的对后端多打一次 LLM 请求）。与下方 canStreamReport 分支的
-        // `!reportStarted && !chatStarted` 护栏对齐：仅当 onError 从未触发（真正静默失败，如 weapp 请求
-        // 尚未吐出任何内容就失败）时才走兜底重发。
-        let chatErrored = false;
-        const streamOk = await generateStream(
-          body,
-          {
-            onSession: (id) => { if (id && !sid) setSessionId(id); },
-            onToken: (t) => { patch((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } })); followBottom(); },
-            onChat: (reply) => patch((msg) => ({ ...msg, reply })), // 完整回复权威兜底：token 渲染即便有偏差，最终内容仍正确
-            onRefNotices: (ns) => patch((msg) => ({ ...msg, refNotices: ns })),
-            onDone: () => patch((msg) => ({ ...msg, streaming: false })),
-            onError: (em) => { chatErrored = true; patch((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false })); },
-          },
-          control,
-        );
-        // B2：被用户主动停止时，静默收尾（清掉「生成中」态、不再兜底重发一遍）；
-        // 若还没吐出任何字，直接移除空气泡，避免留下空壳。
-        if (abortedRef.current) {
-          setMsgs((m) => {
-            const i = m.length - 1;
-            if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
-              const cur = m[i] as Extract<Msg, { role: 'assistant' }>;
-              const copy = m.slice();
-              if (!cur.reply.text) { copy.splice(i, 1); return copy; }
-              copy[i] = { ...cur, streaming: false };
-              return copy;
-            }
-            return m;
-          });
-        } else if (!streamOk && !chatErrored) {
-          const res = await api.generate(body);
-          renderGenerateResult(res, true);
-        }
-        followBottom(true);
-      } else if (canStreamReport) {
+      if (canStream) {
+        // 统一流式入口：一条流同时挂 report 与 chat 两套回调，走哪种骨架由后端 meta 事件决定
+        // （meta kind=report → onReportStart 建报告骨架；kind=chat → onChatStart 建聊天气泡）。
+        // 二者仅是 UI 形态差异、共用同一 /generate SSE 接口，故合并为一条路径，不再按消息内容前置分流。
         let reportStarted = false;
         let chatStarted = false;
+        let streamErrored = false; // onError 是否已就地渲染过错误——避免静默失败兜底时二次补发
         let learnedAgentName = '';
         // meta 先于 begin/token 到达，此刻气泡还没建；先攒着，收尾时一并挂到气泡上。
         let pendingRefNotices: string[] = [];
@@ -695,8 +649,7 @@ export default function Chat() {
           patchReport((d) => d);
           setTimeout(scrollToEnd, 30);
         };
-        // 兜底：部分请求（如问局势判断而非明确要报告）后端会按普通聊天回，
-        // 而非 report 分段事件；此时不能沿用报告卡骨架（会永久卡在「产出中」），改走普通气泡渲染。
+        // kind=chat 路径：后端本轮判为普通聊天（meta kind=chat 或直接来 token/chat），走聊天气泡而非报告卡。
         const patchChat = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
           setMsgs((m) => {
             const i = m.length - 1;
@@ -717,6 +670,8 @@ export default function Chat() {
         const streamOk = await generateStream(body, {
           onSession: (id) => { if (id && !sid) setSessionId(id); },
           onReportStart: startReport,
+          // meta kind=chat：先建聊天气泡（think-dots），避免 LLM 首字延迟期只剩全局 busy 无反馈。
+          onChatStart: startChat,
           onReportBegin: (data) => {
             startReport();
             patchReport((d) => ({
@@ -765,9 +720,10 @@ export default function Chat() {
             followBottom(true);
           },
           onError: (em) => {
+            streamErrored = true;
+            const retry = isModerationErr(em) ? undefined : text;
             if (reportStarted) {
               // 记债项10：报告流失败语义收敛为单一话术。审核类错误不给重试（重试必再被拦）。
-              const retry = isModerationErr(em) ? undefined : text;
               setMsgs((m) => {
                 const i = m.length - 1;
                 if (!(i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming)) return m;
@@ -789,16 +745,36 @@ export default function Chat() {
                 return copy;
               });
             } else if (chatStarted) {
-              patchChat((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: isModerationErr(em) ? undefined : text, streaming: false }));
+              patchChat((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: retry, streaming: false }));
+            } else {
+              // 错误早于任何 meta（如 HTTP 层直接失败）：既无报告卡也无聊天气泡可就地更新，补一条错误气泡 + 重试。
+              setMsgs((m) => [...m, { role: 'assistant', reply: { text: em || '生成失败' }, retryText: retry }]);
             }
           },
         }, control);
-        // B2：主动停止时不兜底重发；仅确保 chat 分支的「生成中」态被收干净（report 分支在 finally 收尾）。
+        // B2：主动停止时不兜底重发。report 卡由 finally 收尾；chat 气泡就地收干净——
+        // 还没吐出任何字的空占位（onChatStart 已抢先建好）直接移除，避免留下空壳。
         if (abortedRef.current) {
-          if (chatStarted) patchChat((msg) => ({ ...msg, streaming: false }));
-        } else if (!streamOk && !reportStarted && !chatStarted) {
+          if (chatStarted) {
+            setMsgs((m) => {
+              const i = m.length - 1;
+              if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+                const cur = m[i] as Extract<Msg, { role: 'assistant' }>;
+                const copy = m.slice();
+                if (!cur.reply.text) { copy.splice(i, 1); return copy; }
+                copy[i] = { ...cur, streaming: false };
+                return copy;
+              }
+              return m;
+            });
+          }
+        } else if (!streamOk && !reportStarted && !streamErrored) {
+          // 静默失败（流未正常收尾、onError 从未触发、且未进 report 分支）：同步补发一次。
+          // replaceStreamingAssistant=true——若 onChatStart 已建了空聊天占位，用真实结果替换它而非再追加一条；
+          // 若连占位都没建（error 早于 meta 那条已由 onError 落气泡、不会走到这里），则自然追加。
+          // report 分支的静默失败由下方 finally 收尾（把报告卡 streaming 置 false），不在此重发。
           const res = await api.generate(body);
-          renderGenerateResult(res);
+          renderGenerateResult(res, true);
         }
         } finally {
           // P0-5 双保险：报告流无论 promise 结果（含中途抛错/主动停止），最终强制把报告卡 streaming 置 false，

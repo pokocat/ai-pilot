@@ -28,6 +28,9 @@ function cardSection(sec: Section): { h: string; b?: string; list?: string[] } {
 }
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
+// 首次成果引导条一次性标记：展示过即写，此后任何成果卡都不再出现。
+const GUIDE_KEY = 'report_guide_shown';
+const GUIDE_TEXT = '军师首次呈上方案：存入方案库可长期留存、随时对比版本；点「分享」可发图或装订成 PDF 带走。';
 let shareSeq = 0;
 
 interface Props {
@@ -88,6 +91,20 @@ export default function ReportCard({ data, animate = false, streaming = false, s
   const [isSaved, setIsSaved] = useState(saved);
   const shown = streaming ? data.sections.length : revealed;
   const isDone = !streaming && done;
+
+  // 首次成果引导条（一次性）：挂载时读标记，未展示过才亮；展示或手动 × 关掉都写标记，此后不再出现。
+  const [showGuide, setShowGuide] = useState(false);
+  useEffect(() => {
+    try { if (!Taro.getStorageSync(GUIDE_KEY)) setShowGuide(true); } catch { /* noop */ }
+  }, []);
+  useEffect(() => {
+    // 真正呈现（完成态且未关）时落标记——不在 render 里写副作用。
+    if (isDone && showGuide) { try { Taro.setStorageSync(GUIDE_KEY, 1); } catch { /* noop */ } }
+  }, [isDone, showGuide]);
+  const dismissGuide = () => {
+    setShowGuide(false);
+    try { Taro.setStorageSync(GUIDE_KEY, 1); } catch { /* noop */ }
+  };
 
   // B9：逐段渐显仅用于「历史/一次性成果」（animate=true，非流式）。流式路径 animate=false、shown 直接取全部，
   // 不会走这里。此处大幅缩短首延与逐段间隔（900/640ms → 200/160ms），保留轻微错落，避免长报告等待过久。
@@ -163,6 +180,12 @@ export default function ReportCard({ data, animate = false, streaming = false, s
 
       {isDone && (
         <>
+          {showGuide && (
+            <View className="rc-guide">
+              <Text className="rc-guide-t">{GUIDE_TEXT}</Text>
+              <Text className="rc-guide-x" onClick={dismissGuide}>×</Text>
+            </View>
+          )}
           <View className="foot">
             {/* B9：Icon 颜色烘焙进 SVG，不能用 var()；此处取与 --ink-3(#7E848B) 等值的 hex。 */}
             <Icon name="shield" size={13} color="#7E848B" />

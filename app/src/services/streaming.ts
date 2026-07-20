@@ -8,6 +8,7 @@ export interface StreamHandlers {
   onToken?: (text: string) => void;   // 增量 token（渐进渲染）
   onChat?: (reply: ChatReply) => void; // 完整回复兜底（含 points/acts）
   onReportStart?: () => void; // report meta 已到达：先渲染成果卡骨架，避免当前页长时间只有 thinking
+  onChatStart?: () => void; // chat meta 已到达：先建聊天气泡（think-dots），避免 LLM 首字延迟期无反馈
   // 引用未尽之处（超 9 份被丢下 / 仍在拆读 / 读不出）：随 meta 先到，气泡下明说，不静默丢弃。
   onRefNotices?: (notices: string[]) => void;
   onReportBegin?: (data: Pick<Deliverable, 'title' | 'icon' | 'meta'>) => void;
@@ -75,6 +76,9 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
     else if (e.event === 'token') { state.rendered = true; h.onToken?.(d?.text ?? ''); }
     else if (e.event === 'chat') { state.rendered = true; h.onChat?.(d); }
     else if (e.event === 'meta' && d?.kind === 'report' && h.onReportStart) { state.rendered = true; h.onReportStart(); }
+    // meta kind=chat：仅建气泡占位，不置 state.rendered——占位≠已产出内容。若随后静默失败（无 token/chat），
+    // rendered 保持 false，调用方据此走「同步补发替换空占位」兜底；report 骨架则相反（rendered=true，由 P0-5/finally 收尾）。
+    else if (e.event === 'meta' && d?.kind === 'chat' && h.onChatStart) { h.onChatStart(); }
     else if (e.event === 'begin' && h.onReportBegin) {
       state.rendered = true;
       h.onReportBegin({ title: d?.title ?? '', icon: d?.icon ?? 'doc', meta: d?.meta ?? '' });
