@@ -147,12 +147,11 @@ function reportDraft(agent?: Agent | null, partial: Partial<Deliverable> = {}): 
 
 function mergeReportSection(sections: Section[], section: Section & { index?: number }): Section[] {
   const next = sections.slice();
-  const clean: Section = {
-    h: section.h || `第 ${next.length + 1} 段`,
-    b: section.b,
-    list: Array.isArray(section.list) ? section.list : undefined,
-  };
-  if (typeof section.index === 'number' && section.index >= 0) next[section.index] = clean;
+  // 报告 V2：整段替换/追加完整 section 对象（保留 typed 判别字段），只剥掉传输用的 index。
+  // 不再压成 {h,b,list} 子集——cardSection 已能渲染全部 9 种类型，流式期与定格后正文都完整。
+  const { index, ...rest } = section;
+  const clean = { ...rest, h: rest.h || `第 ${next.length + 1} 段` } as Section;
+  if (typeof index === 'number' && index >= 0) next[index] = clean;
   else next.push(clean);
   return next.filter(Boolean);
 }
@@ -672,7 +671,12 @@ export default function Chat() {
         const patchReport = (
           fn: (d: Deliverable) => Deliverable,
           extra: Partial<Extract<Msg, { role: 'report' }>> = {},
+          // 收尾语义开关：appendIfMissing=false 时，仅当存在「末条且仍 streaming 的报告卡」才原地更新，
+          // 否则 no-op——绝不追加新卡。用于 onDone/finally 这类「置 streaming:false」的收尾调用，
+          // 避免收尾时守卫不命中而落到 append 分支、追加一张不落库的幽灵骨架卡。
+          opts: { appendIfMissing?: boolean } = {},
         ) => {
+          const { appendIfMissing = true } = opts;
           setMsgs((m) => {
             const i = m.length - 1;
             if (i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming) {
@@ -681,6 +685,7 @@ export default function Chat() {
               copy[i] = { ...cur, ...extra, deliverable: fn(cur.deliverable) };
               return copy;
             }
+            if (!appendIfMissing) return m;
             return [...m, { role: 'report', deliverable: fn(reportDraft(sendingAgent)), animate: false, streaming: true, ...extra }];
           });
         };
@@ -752,7 +757,7 @@ export default function Chat() {
           onDone: (messageId) => {
             const refNotices = pendingRefNotices.length ? pendingRefNotices : undefined;
             if (reportStarted) {
-              patchReport((d) => d, { streaming: false, messageId, refNotices });
+              patchReport((d) => d, { streaming: false, messageId, refNotices }, { appendIfMissing: false });
             } else if (chatStarted) {
               patchChat((msg) => ({ ...msg, streaming: false, refNotices }));
             }
@@ -799,7 +804,9 @@ export default function Chat() {
           // P0-5 双保险：报告流无论 promise 结果（含中途抛错/主动停止），最终强制把报告卡 streaming 置 false，
           // 避免流正常收尾却未触发 onDone/onError 时报告卡永久停在「产出中」。
           // patchReport 仅改「末条且仍 streaming」的报告卡，onDone 已收尾时此处为幂等 no-op。
-          if (reportStarted) patchReport((d) => d, { streaming: false });
+          // appendIfMissing:false——onDone 已把报告卡置 streaming:false 后守卫不再命中，
+          // 此处若仍走 append 会追加一张不落库的幽灵骨架卡（老 bug：先后两张卡 + 重进少一张）。
+          if (reportStarted) patchReport((d) => d, { streaming: false }, { appendIfMissing: false });
         }
         followBottom(true);
       } else {

@@ -81,12 +81,11 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
     }
     else if (e.event === 'section' && h.onReportSection) {
       state.rendered = true;
-      h.onReportSection({
-        index: typeof d?.index === 'number' ? d.index : undefined,
-        h: d?.h || '未命名段落',
-        b: d?.b,
-        list: Array.isArray(d?.list) ? d.list : undefined,
-      });
+      // 报告 V2：原样透传完整 typed section（含 paras/items/people/rows/text/salute… 及 type 判别字段），
+      // 不再只抽 {h,b,list} 子集——否则 9 种类型 section 在流式期间正文被剥空、只剩标题。
+      // 向后兼容：旧后端只发 {h,b,list} 时，此处照样整体透传，无多余字段也无害。
+      const raw = (e.data && typeof e.data === 'object' ? e.data : {}) as DeliverableSection & { index?: number; h?: string };
+      h.onReportSection({ ...raw, h: raw.h || '未命名段落' } as DeliverableSection & { index?: number });
     }
     else if (e.event === 'footer' && h.onReportFooter) {
       h.onReportFooter({
