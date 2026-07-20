@@ -77,23 +77,43 @@ function sameSection(a: DeliverableSection, b: DeliverableSection): boolean {
 export function diffContents(before: object, after: object): { sections: SectionDiff[]; summary: string; titleBefore: string; titleAfter: string } {
   const bs = sectionsOf(before);
   const as = sectionsOf(after);
-  const byH = (arr: DeliverableSection[]) => new Map(arr.map((s) => [s.h, s]));
-  const bMap = byH(bs);
-  const aMap = byH(as);
+  // 报告 V2 的 quote/letter 等 section 按设计没有 h（不用标题），s.h 恒为 undefined；
+  // 若直接用 s.h 当 key，同一版里出现多个无 h 的 section（如两段 quote）会全部折叠进
+  // 同一个 undefined key，互相覆盖、错配 diff。无 h 时按「同 type 内第几个出现」兜底出
+  // 一个稳定 key，保证前后版按位置配对，不与其它 section 冲突。每次调用 makeKeyer() 起一套
+  // 独立计数器，分别应用到 before/after 两个数组，互不干扰。
+  const makeKeyer = () => {
+    const seenTypeIdx = new Map<string, number>();
+    return (s: DeliverableSection): string => {
+      if (s.h) return s.h;
+      const type = (s as { type?: string }).type ?? '';
+      const idx = seenTypeIdx.get(type) ?? 0;
+      seenTypeIdx.set(type, idx + 1);
+      return `__untitled_${type}_${idx}`;
+    };
+  };
+  const toMap = (arr: DeliverableSection[]) => {
+    const keyer = makeKeyer();
+    return new Map(arr.map((s) => [keyer(s), s]));
+  };
+  const bMap = toMap(bs);
+  const aMap = toMap(as);
 
   const out: SectionDiff[] = [];
   let added = 0, removed = 0, changed = 0;
 
   // 以「新版顺序」为主轴，标 新增/修改/未变
+  const keyOfAfter = makeKeyer();
   for (const s of as) {
-    const prev = bMap.get(s.h);
+    const prev = bMap.get(keyOfAfter(s));
     if (!prev) { out.push({ change: 'added', h: s.h ?? '', after: s }); added++; }
     else if (!sameSection(prev, s)) { out.push({ change: 'changed', h: s.h ?? '', before: prev, after: s, words: wordDiff(sectionText(prev), sectionText(s)) }); changed++; }
     else out.push({ change: 'unchanged', h: s.h ?? '', before: prev, after: s });
   }
   // 旧版有、新版没有 = 删除
+  const keyOfBefore = makeKeyer();
   for (const s of bs) {
-    if (!aMap.has(s.h)) { out.push({ change: 'removed', h: s.h ?? '', before: s }); removed++; }
+    if (!aMap.has(keyOfBefore(s))) { out.push({ change: 'removed', h: s.h ?? '', before: s }); removed++; }
   }
 
   const titleBefore = (before as { title?: string }).title ?? '';

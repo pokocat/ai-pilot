@@ -92,15 +92,22 @@ export default function ReportCard({ data, animate = false, streaming = false, s
   const shown = streaming ? data.sections.length : revealed;
   const isDone = !streaming && done;
 
-  // 首次成果引导条（一次性）：挂载时读标记，未展示过才亮；展示或手动 × 关掉都写标记，此后不再出现。
+  // 首次成果引导条（一次性）：完成态时「读+写」必须在同一个 effect 里原子完成，不能拆成
+  // 「挂载时读」+「isDone 时另写」两步——历史会话恢复时多张 ReportCard 会在同一次 commit
+  // 里同步挂载（animate=false → isDone 从初始渲染起就是 true），若读和写分属两个 effect，
+  // 全部卡片的「读」都会先于任何一张卡片的「写」执行，导致每张卡片都判定"未展示过"而同时
+  // 亮出引导条。合并成一个 effect 后，同一 commit 内多个组件的 effect 按树序同步执行，
+  // 第一张卡片读到 false 后立即写回 true，后续卡片的读会看到已写入的值，从而只有一张显示。
   const [showGuide, setShowGuide] = useState(false);
   useEffect(() => {
-    try { if (!Taro.getStorageSync(GUIDE_KEY)) setShowGuide(true); } catch { /* noop */ }
-  }, []);
-  useEffect(() => {
-    // 真正呈现（完成态且未关）时落标记——不在 render 里写副作用。
-    if (isDone && showGuide) { try { Taro.setStorageSync(GUIDE_KEY, 1); } catch { /* noop */ } }
-  }, [isDone, showGuide]);
+    if (!isDone) return;
+    try {
+      if (!Taro.getStorageSync(GUIDE_KEY)) {
+        Taro.setStorageSync(GUIDE_KEY, 1);
+        setShowGuide(true);
+      }
+    } catch { /* noop */ }
+  }, [isDone]);
   const dismissGuide = () => {
     setShowGuide(false);
     try { Taro.setStorageSync(GUIDE_KEY, 1); } catch { /* noop */ }
