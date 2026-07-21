@@ -7,7 +7,6 @@ import Login from '../../components/Login';
 import AsyncState from '../../components/AsyncState';
 import { navTo, switchTo } from '../../services/nav';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
-import Picker from '../../components/Picker';
 import AgentUnlock from '../../components/AgentUnlock';
 import OnboardSheet from '../../components/OnboardSheet';
 import { useStore } from '../../hooks/useStore';
@@ -59,9 +58,6 @@ export default function Sessions() {
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false); // 检索进行中（防抖 + 请求期间给「检索中」占位，避免空态误判）
   const [showOnboard, setShowOnboard] = useState(false);
-  // 首登建档：本命色 + 30 秒建档 Picker（launch 页 sessions 承接，进来即弹，不用切到战局才触发）。
-  const [showPicker, setShowPicker] = useState(false);
-  const [pickerFirst, setPickerFirst] = useState(false);
 
   // 会话列表加载（C2）：失败区分未授权（弹登录）与网络错误（错误态可重试），不再一律伪装成空态。
   const loadSessions = () => {
@@ -100,9 +96,15 @@ export default function Sessions() {
     try { seen = !!Taro.getStorageSync(onboardKey()); } catch { seen = true; }
     if (!seen) setShowOnboard(true);
   };
-  // 已登录但未建档 → 立即弹本命色/建档 Picker；已建档 → 视情况弹一次 4 步引导。
+  // 首登入局仪式（择色 → 立案卷 → 首判）。防重复：页栈已有 onboarding 就不再跳（navTo 另有 800ms 防连点锁）。
+  const goOnboarding = () => {
+    const pages = (Taro.getCurrentPages?.() || []) as { route?: string }[];
+    if (pages.some((p) => (p.route || '').includes('packages/main/onboarding'))) return;
+    navTo('/packages/main/onboarding/index');
+  };
+  // 已登录但未建档 → 进入全屏入局仪式；已建档 → 视情况弹一次 4 步引导。
   const gateOnboarding = () => {
-    if (s.isAuthed() && !s.isOnboarded()) { setPickerFirst(true); setShowPicker(true); return; }
+    if (s.isAuthed() && !s.isOnboarded()) { goOnboarding(); return; }
     maybeShowOnboard();
   };
   useEffect(() => { gateOnboarding(); }, []);
@@ -360,11 +362,10 @@ export default function Sessions() {
       <Login open={showLogin} onLoggedIn={(onboarded) => {
         setShowLogin(false);
         loadSessions();
-        // 新用户（未建档）登录后立即弹本命色/建档；已建档则走 4 步引导。
-        if (!onboarded) { setPickerFirst(true); setShowPicker(true); }
+        // 新用户（未建档）登录后进入全屏入局仪式；已建档则走 4 步引导。
+        if (!onboarded) goOnboarding();
         else maybeShowOnboard();
       }} />
-      <Picker open={showPicker} first={pickerFirst} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
     </Screen>
   );
 }
