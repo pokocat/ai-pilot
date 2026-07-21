@@ -4,28 +4,13 @@ import Taro from '@tarojs/taro';
 import Icon from '../Icon';
 import MarkdownText from '../MarkdownText';
 import { useStore } from '../../hooks/useStore';
-import type { Deliverable, Section } from '../../services/api';
+import type { Deliverable } from '../../services/api';
 import { makeReportShareImage, shareReportImageToFriend, saveReportImageToAlbum } from '../../services/reportShareCard';
-import './index.scss';
-
 // 报告 V2 最小防线：把 9 种类型 section 降级成卡片可渲染的 {h,b?,list?}，保证不破版/不 crash。
-// 用 any 读取以容忍存量脏数据/未来类型（未知 type 走 default 白卡）。
-function cardSection(sec: Section): { h: string; b?: string; list?: string[] } {
-  const s = sec as any;
-  const cell = (c: string | { text: string; trend?: 'up' | 'dn' }) => (typeof c === 'string' ? c : c?.text ?? '');
-  switch (s.type) {
-    case 'hero': return { h: s.h, b: (s.paras ?? []).join('\n\n') };
-    case 'callout': return { h: `【${s.tone}】${s.h}`, b: s.b };
-    case 'stats': return { h: s.h || '关键数据', list: (s.items ?? []).map((it: any) => `${it.num}${it.unit ?? ''} · ${it.label}`) };
-    case 'roster': return { h: s.h || '人物', b: s.intro, list: (s.people ?? []).map((p: any) => `${p.name}${p.role ? `（${p.role}）` : ''}：${p.desc}`) };
-    case 'table': return { h: s.h || '对比', list: [(s.headers ?? []).join(' / '), ...(s.rows ?? []).map((r: any[]) => r.map(cell).join(' / '))] };
-    case 'phases': return { h: s.h || '分步打法', list: (s.items ?? []).flatMap((it: any) => [`〔${it.tab}〕${it.h}${it.when ? ` · ${it.when}` : ''}`, ...(it.actions ?? []).map((a: string) => `· ${a}`), ...(it.kpi ? [`军令状：${it.kpi}`] : [])]) };
-    case 'timeline': return { h: s.h || '时间节奏', list: (s.items ?? []).map((it: any) => `${it.when}　${it.h}${it.d ? `：${it.d}` : ''}`) };
-    case 'quote': return { h: '金句', b: `「${s.text}」` };
-    case 'letter': return { h: '军师手书', b: [s.salute, ...(s.paras ?? []), s.close, s.sign].filter(Boolean).join('\n\n') };
-    default: return { h: s.h || '', b: s.b, list: Array.isArray(s.list) ? s.list : undefined };
-  }
-}
+// 2026-07-21 例行 QA：提取到 services/deliverableSection.ts 供「方案库详情」页复用同一套映射，
+// 避免两处各自维护、后续新增 section 类型时只改一处漏改另一处（发现 report/index.tsx 就漏过）。
+import { cardSection } from '../../services/deliverableSection';
+import './index.scss';
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 // 首次成果引导条一次性标记：展示过即写，此后任何成果卡都不再出现。

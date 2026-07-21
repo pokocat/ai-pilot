@@ -470,6 +470,18 @@ cd admin && npm install && npm run dev   # 运营后台
 - `app`：`npm run build:weapp` → Compiled successfully
 - `admin`：`npx tsc -b && npx vite build` → 0 + built
 
+**app / admin 纯函数单测（2026-07-21 起，`node --import tsx --test`，与 server 同一套工具链，无需额外起服务）**：
+两端此前完全没有测试基座；例行 QA 发现「方案库详情」页 / 运营「调教沙盒」都对报告 V2 类型化 section
+直接读 `sec.h/sec.b/sec.list` 而静默剥空内容后，才各自补上最小基座——只覆盖**不依赖 JSX/DOM 渲染的纯函数**
+（如 `app/src/services/deliverableSection.ts`、`admin/src/ui.tsx` 的 `sandboxSection`），不是完整的组件/端到端测试。
+```bash
+cd app   && npm test   # node --import tsx --test src/**/*.test.ts
+cd admin && npm test   # 同上
+```
+两端 `tsconfig.json` 都 `exclude: ["src/**/*.test.ts"]`——测试文件不参与 `tsc -b`/`build:weapp` 的生产编译门
+（两端都没有 `@types/node`，`node:test`/`node:assert` 类型解析不进生产类型检查范围）；新增纯函数时尽量一并补测试，
+但不要为了凑测试覆盖率把需要真实 DOM/Taro 运行时的组件也塞进这套基座。
+
 ### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。

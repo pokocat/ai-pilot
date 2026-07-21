@@ -10,6 +10,10 @@ import { store } from '../../../services/store';
 import { acceptDeliverable, refreshDossier, ordersOf, today, type DossierOrder } from '../../../services/dossier';
 import { api, type ReportDetail, type ReportVersionContent, type ReportDiff } from '../../../services/api';
 import { makeReportShareImage, presentReportShareImage } from '../../../services/reportShareCard';
+// 报告 V2 最小防线：直接读 sec.h/sec.b/sec.list 对 stats/roster/table/phases/timeline/quote/letter
+// 这 7 种类型化 section 会剥空大半内容（quote/letter 甚至没有 h）——与 ReportCard 共用同一套映射，
+// 避免「方案库详情」页在报告 V2 落地后仍停留在旧白卡假设（2026-07-21 例行 QA 发现）。
+import { cardSection, cardSectionText } from '../../../services/deliverableSection';
 import { switchTo } from '../../../services/nav';
 import { REVIEW_TIME } from '../../../data/constants';
 import './index.scss';
@@ -192,14 +196,17 @@ export default function Report() {
             {/* 报告主判断引用 */}
             {content.content.trust ? <Text className="report-quote serif">{content.content.trust}</Text> : null}
 
-            {/* 编号章节 一 / 二 / 三 / 四 */}
-            {content.content.sections.map((sec, i) => (
-              <View key={i} className="report-section card">
-                <Text className="rs-h serif"><Text className="rs-no" style={{ color: accent }}>{CN[i] || `${i + 1}`}</Text>{sec.h}</Text>
-                {sec.b ? <MarkdownText text={sec.b} className="rs-b" /> : null}
-                {sec.list ? sec.list.map((x, j) => <View key={j} className="rs-li"><View className="rs-dot" style={{ background: accent }} /><MarkdownText text={x} className="rs-li-t" /></View>) : null}
-              </View>
-            ))}
+            {/* 编号章节 一 / 二 / 三 / 四（cardSection 归一：typed section 的 items/paras/rows… 都要能看到） */}
+            {content.content.sections.map((sec, i) => {
+              const v = cardSection(sec);
+              return (
+                <View key={i} className="report-section card">
+                  <Text className="rs-h serif"><Text className="rs-no" style={{ color: accent }}>{CN[i] || `${i + 1}`}</Text>{v.h}</Text>
+                  {v.b ? <MarkdownText text={v.b} className="rs-b" /> : null}
+                  {v.list ? v.list.map((x, j) => <View key={j} className="rs-li"><View className="rs-dot" style={{ background: accent }} /><MarkdownText text={x} className="rs-li-t" /></View>) : null}
+                </View>
+              );
+            })}
           </View>
           ) : null
         )}
@@ -215,9 +222,15 @@ export default function Report() {
           ) : diff && !verLoading ? (
             <View className="rp-card card">
               <Text className="rp-diff-sum" style={{ color: accent }}>v{diff.from} → v{diff.to}：{diff.summary}</Text>
-              {diff.sections.map((sd, i) => (
+              {diff.sections.map((sd, i) => {
+                // sd.h 是服务端原始 h 字段：quote/letter 等 typed section 根本没有 h（恒为空串），
+                // stats/roster/table/phases/timeline 的 h 也可能是省略章节标题——都要用 cardSection
+                // 从 after/before 派生一个可读标题兜底，不能让 diff 标题栏直接留白。
+                const titleSec = sd.after ?? sd.before;
+                const dTitle = sd.h || (titleSec ? cardSection(titleSec).h : '');
+                return (
                 <View key={i} className={`rp-dsec ${sd.change}`}>
-                  <View className="rp-dh"><Text className={`rp-badge ${sd.change}`}>{badge(sd.change)}</Text><Text className="rp-dh-t">{sd.h}</Text></View>
+                  <View className="rp-dh"><Text className={`rp-badge ${sd.change}`}>{badge(sd.change)}</Text><Text className="rp-dh-t">{dTitle}</Text></View>
                   {sd.change === 'changed' ? (
                     sd.words && sd.words.length ? (
                       <View className="rp-words">
@@ -227,17 +240,18 @@ export default function Report() {
                       </View>
                     ) : (
                       <View className="rp-dchg">
-                        <View className="rp-dbefore"><Text className="rp-dlabel">改前</Text><Text className="rp-dtext">{secText(sd.before)}</Text></View>
-                        <View className="rp-dafter"><Text className="rp-dlabel" style={{ color: accent }}>改后</Text><Text className="rp-dtext">{secText(sd.after)}</Text></View>
+                        <View className="rp-dbefore"><Text className="rp-dlabel">改前</Text><Text className="rp-dtext">{cardSectionText(sd.before)}</Text></View>
+                        <View className="rp-dafter"><Text className="rp-dlabel" style={{ color: accent }}>改后</Text><Text className="rp-dtext">{cardSectionText(sd.after)}</Text></View>
                       </View>
                     )
                   ) : sd.change === 'unchanged' ? (
-                    <Text className="rp-dtext dim">{secText(sd.after)}</Text>
+                    <Text className="rp-dtext dim">{cardSectionText(sd.after)}</Text>
                   ) : (
-                    <Text className="rp-dtext">{secText(sd.after || sd.before)}</Text>
+                    <Text className="rp-dtext">{cardSectionText(sd.after || sd.before)}</Text>
                   )}
                 </View>
-              ))}
+                );
+              })}
             </View>
           ) : <View className="rp-loading"><Text>计算差异中…</Text></View>
         )}
@@ -294,8 +308,4 @@ export default function Report() {
 
 function badge(change: string): string {
   return ({ added: '＋ 新增', removed: '－ 删除', changed: '~ 修改', unchanged: '未变' } as Record<string, string>)[change] || '';
-}
-function secText(sec?: { b?: string; list?: string[] }): string {
-  if (!sec) return '';
-  return [sec.b, ...(sec.list ?? [])].filter(Boolean).join('；');
 }
