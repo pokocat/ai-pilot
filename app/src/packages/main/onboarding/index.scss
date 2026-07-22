@@ -139,63 +139,9 @@
   font-weight: 600;
 }
 
-/* —— 立案卷：行业双列编号卡（与择色网格同语言，AGENTS.md §7.2 两列口径） —— */
-.ob-ind-grid {
-  margin-top: 24px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-}
-
-.ob-ind {
-  width: 48.5%;
-  margin-bottom: 10px;
-  box-sizing: border-box;
-  padding: 12px 14px 13px;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  transition: border-color .18s ease, background .18s ease;
-}
-
-.ob-ind.on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.oi-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.oi-idx {
-  font-size: 11px;
-  color: var(--ink-3);
-  letter-spacing: 1px;
-}
-
-.ob-ind.on .oi-idx {
-  color: var(--accent);
-}
-
-.oi-check {
-  font-size: 12px;
-  color: var(--accent);
-  font-weight: 700;
-}
-
-.oi-name {
-  display: block;
-  margin-top: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ink);
-  line-height: 1.4;
-}
-
-/* —— 立案卷：其余问题（chips）+ 公司输入 —— */
+/* —— 立案卷：所有问题统一 chip 云（含行业），紧凑收屏 —— */
 .ob-field {
-  margin-top: 26px;
+  margin-top: 20px;
 }
 
 .of-label {
@@ -203,17 +149,17 @@
   font-size: 13px;
   color: var(--ink-2);
   letter-spacing: 1px;
-  margin-bottom: 14px;
+  margin-bottom: 11px;
 }
 
 .of-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .of-chip {
-  padding: 9px 16px;
+  padding: 8px 14px;
   border: 1px solid var(--line);
   background: var(--paper);
   font-size: 13px;
@@ -225,6 +171,11 @@
   border-color: var(--accent);
   background: var(--accent);
   color: var(--paper);
+}
+
+/* 选「其他」就地展开的自填框 */
+.of-other {
+  margin-top: 10px;
 }
 
 .of-input {

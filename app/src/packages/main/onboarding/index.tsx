@@ -37,6 +37,7 @@ export default function Onboarding() {
 
   const [survey, setSurvey] = useState<SurveyQ[]>(DEFAULT_SURVEY);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [custom, setCustom] = useState<Record<string, string>>({}); // 选「其他」时的自填内容，按题存
   const [company, setCompany] = useState('');
   const submittingRef = useRef(false);
 
@@ -58,7 +59,22 @@ export default function Onboarding() {
     store.setColor(COLORS[i].key, true);
   };
 
-  const surveyDone = survey.length > 0 && survey.every((q) => !!answers[q.key]);
+  const isOtherOpt = (v?: string) => v === '其他' || v === '其它';
+  // 有效答案：选「其他」时以自填内容替换标签落库（自填为空则视为未答）。
+  const effectiveAnswers = () => {
+    const out: Record<string, string> = {};
+    for (const q of survey) {
+      const a = answers[q.key];
+      if (!a) continue;
+      out[q.key] = isOtherOpt(a) ? (custom[q.key] || '').trim() : a;
+    }
+    return out;
+  };
+  const surveyDone = survey.length > 0 && survey.every((q) => {
+    const a = answers[q.key];
+    if (!a) return false;
+    return isOtherOpt(a) ? !!(custom[q.key] || '').trim() : true; // 选「其他」必须补自填
+  });
 
   // 打字机：进入 judge 后持续朝 targetRef 逐字推进。
   useEffect(() => {
@@ -106,15 +122,16 @@ export default function Onboarding() {
   const submitCasefile = async () => {
     if (submittingRef.current || !surveyDone) return;
     submittingRef.current = true;
+    const eff = effectiveAnswers();
     try {
       if (company.trim()) await api.updateIdentity({ company: company.trim() }).catch(() => {});
-      if (Object.keys(answers).length) await api.saveProfile(answers).catch(() => {});
+      if (Object.keys(eff).length) await api.saveProfile(eff).catch(() => {});
       await store.loadMe();
       store.completeOnboarding(); // 建档即视为已入局（本地标记 + 后端 Profile 已落）
     } finally {
       // 无论后端是否成功，都进入首判（首判只读展示，不再写档）。
       setStep('judge');
-      runJudge(answers);
+      runJudge(eff);
     }
   };
 
@@ -123,8 +140,6 @@ export default function Onboarding() {
     switchTo('/pages/home/index');
   };
 
-  const industryQ = survey.find((q) => q.key === 'industry') || survey[0];
-  const restQs = survey.filter((q) => q !== industryQ);
   const judgeDone = settled && typed.length >= targetRef.current.length && targetRef.current.length > 0;
 
   return (
@@ -170,27 +185,11 @@ export default function Onboarding() {
         {step === 'casefile' && (
           <View className="ob-step" key="casefile">
             <Text className="ob-kicker">贰 · 立 案 卷</Text>
-            <Text className="ob-title serif">你经营哪一行？</Text>
-            <Text className="ob-lead">先立案卷。军师据此量身研判，答得越实，判得越准。</Text>
+            <Text className="ob-title serif">先给军师交个底</Text>
+            <Text className="ob-lead">三两下说清你的营生，答得越实，军师判得越准。</Text>
 
-            {/* 行业双列编号卡：14 项列表太长，收成两列（与择色网格同语言，48.5% 口径） */}
-            <View className="ob-ind-grid">
-              {industryQ?.options.map((opt, oi) => (
-                <View
-                  key={opt}
-                  className={`ob-ind ${answers[industryQ.key] === opt ? 'on' : ''}`}
-                  onClick={() => setAnswers((a) => ({ ...a, [industryQ.key]: opt }))}
-                >
-                  <View className="oi-head">
-                    <Text className="oi-idx serif">{String(oi + 1).padStart(2, '0')}</Text>
-                    {answers[industryQ.key] === opt && <Text className="oi-check">✓</Text>}
-                  </View>
-                  <Text className="oi-name">{opt}</Text>
-                </View>
-              ))}
-            </View>
-
-            {restQs.map((q) => (
+            {/* 全部问题统一为紧凑 chip 云（含行业），去掉编号、尽量收进一屏；选「其他」就地展开自填框 */}
+            {survey.map((q) => (
               <View key={q.key} className="ob-field">
                 <Text className="of-label">{q.title}</Text>
                 <View className="of-chips">
@@ -204,6 +203,15 @@ export default function Onboarding() {
                     </View>
                   ))}
                 </View>
+                {isOtherOpt(answers[q.key]) && (
+                  <Input
+                    className="of-input of-other"
+                    value={custom[q.key] || ''}
+                    maxlength={20}
+                    placeholder={`请补一句你的${q.title.replace(/[？?]/g, '')}`}
+                    onInput={(e) => setCustom((m) => ({ ...m, [q.key]: e.detail.value }))}
+                  />
+                )}
               </View>
             ))}
 
@@ -222,7 +230,7 @@ export default function Onboarding() {
               className={`ob-cta serif ${surveyDone ? '' : 'disabled'}`}
               onClick={submitCasefile}
             >
-              <Text>{surveyDone ? '立 案 · 请 军 师 首 判' : '先答完上面三题'}</Text>
+              <Text>{surveyDone ? '请 军 师 首 判' : '先答完上面几题'}</Text>
             </View>
           </View>
         )}
