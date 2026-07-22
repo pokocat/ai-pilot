@@ -246,13 +246,24 @@
 }
 .accept-btn:active { opacity: .85; }
 
-/* 用户消息上的引用标签 */
-.msg.u .uref { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; margin-top: 5px; }
-.uref-chip { font-size: 10.5px; color: var(--ink-3); background: var(--surface-2); padding: 2px 8px; border-radius: 999px; }
+/* 用户消息上的引用 → 直角文件/附卷卡：气泡下方、右对齐、多份自动换行 */
+.msg.u .uref { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+.uref-card {
+  display: flex; align-items: center; gap: 8px; max-width: 82%; min-width: 0;
+  padding: 6px 9px 6px 6px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 3px;
+}
+.uref-ic {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center; background: var(--accent-soft);
+}
+.uref-tx { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.uref-t { font-size: 12.5px; font-weight: 600; color: var(--ink); line-height: 1.25; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.uref-m { font-size: 10.5px; color: var(--ink-3); line-height: 1.25; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
-/* 已选引用行（输入区上方） */
+/* 已选引用行（输入区上方）：与文件卡同走直角，去掉 @ 前缀 */
 .ref-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 0; background: var(--surface); }
-.ref-chip { display: flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid; border-radius: 999px; font-size: 11.5px; font-weight: 600; max-width: 100%; min-width: 0; }
+.ref-chip { display: flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid; border-radius: 3px; font-size: 11.5px; font-weight: 600; max-width: 100%; min-width: 0; }
 /* 长文件名标签单行省略，单个 chip 不撑破引用行（#1 溢出） */
 .ref-chip-l { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ref-chip .ref-x { font-size: 10px; color: var(--ink-3); flex-shrink: 0; }

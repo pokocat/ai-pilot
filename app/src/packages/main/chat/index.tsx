@@ -222,6 +222,22 @@ const UPLOAD_STATUS_TEXT: Record<UploadStatus, string> = {
   waiting: '候着', uploading: '呈送中', done: '已呈上', failed: '未送达', cancelled: '已撤回',
 };
 
+// 引用签的类型称谓（军师文风）：与 @引用选择器分组标题保持一致，附卷=归卷后的知识。
+const REF_KIND_LABEL: Record<MessageRef['kind'], string> = {
+  project: '案卷', report: '方案', knowledge: '附卷', memory: '军师印象',
+};
+const REF_KIND_ICON: Record<MessageRef['kind'], string> = {
+  project: 'layers', report: 'doc', knowledge: 'doc', memory: 'spark',
+};
+// 把引用签拆成文件卡：标题行 + 元信息行。label 里「·」分隔的字数等信息拆到元信息行，末尾缀类型名。
+function refCardParts(r: MessageRef): { icon: string; title: string; meta: string } {
+  const kindName = REF_KIND_LABEL[r.kind] ?? '资料';
+  const segs = String(r.label ?? '').split('·').map((s) => s.trim()).filter(Boolean);
+  const title = segs[0] || r.label || kindName;
+  const extra = segs.slice(1).join(' · ');
+  return { icon: REF_KIND_ICON[r.kind] ?? 'doc', title, meta: extra ? `${extra} · ${kindName}` : kindName };
+}
+
 /**
  * 引用未尽之处（服务端 refNotices）：超过 9 份被丢下的、仍在拆读的、读不出的——都在气泡下明说。
  * 静默丢弃是最钝的刀：客户以为军师读了那 12 份，其实只读了 9 份。
@@ -1490,7 +1506,20 @@ export default function Chat() {
               <View key={i} className="msg u">
                 <View className="ubub" style={{ background: accent }} onLongPress={() => copyText(m.text)}><Text>{m.text}</Text></View>
                 {m.refs?.length ? (
-                  <View className="uref">{m.refs.map((r, j) => <Text key={j} className="uref-chip">@{r.label}</Text>)}</View>
+                  <View className="uref">
+                    {m.refs.map((r, j) => {
+                      const c = refCardParts(r);
+                      return (
+                        <View key={j} className="uref-card">
+                          <View className="uref-ic"><Icon name={c.icon} size={15} color={accent} /></View>
+                          <View className="uref-tx">
+                            <Text className="uref-t">{c.title}</Text>
+                            <Text className="uref-m">{c.meta}</Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
                 ) : null}
               </View>
             );
@@ -1714,7 +1743,8 @@ export default function Chat() {
           <View className="ref-row">
             {refs.map((r, j) => (
               <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
-                <Text className="ref-chip-l" style={{ color: accent }}>@{r.label}</Text>
+                <Icon name={refCardParts(r).icon} size={12} color={accent} />
+                <Text className="ref-chip-l" style={{ color: accent }}>{refCardParts(r).title}</Text>
                 {r.kind === 'knowledge' && parsingRefIds.includes(r.id) ? <Text className="ref-parsing">拆读中</Text> : null}
                 <Text className="ref-x">✕</Text>
               </View>
