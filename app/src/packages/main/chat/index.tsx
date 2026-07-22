@@ -285,7 +285,6 @@ export default function Chat() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
-  const [askScrollTarget, setAskScrollTarget] = useState('');
   const askFocusTargetRef = useRef('');
   const askScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
@@ -905,27 +904,45 @@ export default function Chat() {
     askSel[qi] === ASK_OTHER ? (askOther[qi] ?? '').trim() : (askSel[qi] ?? '');
   const askAnsweredCount = activeAsks.filter((_, qi) => !!askAnswerOf(qi)).length;
   const askReady = activeAsks.length > 1 && askAnsweredCount === activeAsks.length;
-  const scrollAskInputIntoView = (qi: number, delay = 40) => {
+  // 问答卡输入可见性：按需「最小滚动」，不对齐顶部（对齐顶部会把卡片滚过头钻到悬浮 chips 条下叠字）。
+  // 键盘弹起后根 padding-bottom=keyboardHeight 已把 .chat-log 压缩，其 rect.bottom 即键盘/composer 之上的可视底边；
+  // 仅当输入项底边越过「可视底边 - 留白」时，才把 scrollTop 增加「刚好露出 + 留白」的量；本就可见则完全不滚。
+  const ensureAskInputVisible = (qi: number, delay = 40) => {
     const target = askInputAnchor(activeAskIdx, qi);
-    // scroll-into-view 对相同目标不会重复触发。先清空，等键盘改变可视高度后再定位一次。
     if (askScrollTimerRef.current) clearTimeout(askScrollTimerRef.current);
-    setAskScrollTarget('');
     askScrollTimerRef.current = setTimeout(() => {
       askScrollTimerRef.current = null;
-      if (askFocusTargetRef.current === target) setAskScrollTarget(target);
+      if (askFocusTargetRef.current !== target) return;
+      Taro.createSelectorQuery()
+        .select(`#${target}`).boundingClientRect()
+        .select('.chat-log').boundingClientRect()
+        .select('.chat-log').scrollOffset()
+        .exec((res) => {
+          const item = (res?.[0] as { bottom?: number } | null) || null;
+          const log = (res?.[1] as { bottom?: number } | null) || null;
+          const off = (res?.[2] as { scrollTop?: number } | null) || null;
+          if (!item || !log || !off) return;
+          const GAP = 12; // 露出输入框后再留一点呼吸位
+          const visibleBottom = Number(log.bottom || 0) - GAP;
+          const overflow = Number(item.bottom || 0) - visibleBottom;
+          if (overflow <= 0) return; // 本就可见，不滚（也就绝不会向上过头钻到顶部 chips 条下）
+          const nextTop = Number(off.scrollTop || 0) + overflow;
+          // Taro 受控 scrollTop 同值不触发：与当前 state 相等时加 0.5px 扰动强制生效。
+          setScrollTop((prev) => (nextTop === prev ? nextTop + 0.5 : nextTop));
+        });
     }, delay);
   };
   const onAskInputFocus = (qi: number) => {
     setInputFocus(false);
     atBottomRef.current = false;
     askFocusTargetRef.current = askInputAnchor(activeAskIdx, qi);
-    scrollAskInputIntoView(qi);
+    ensureAskInputVisible(qi);
   };
   const onAskKeyboardHeightChange = (qi: number, e: { detail?: { height?: number } }) => {
     const next = Math.max(0, Number(e.detail?.height || 0));
     setKeyboardHeight(next);
-    if (next > 0) scrollAskInputIntoView(qi, 80);
-    else setAskScrollTarget('');
+    // 键盘高度变化后可视区改变，用同一「按需」逻辑重算（80ms 让 padding 压缩后的布局先落定）；收键盘不滚。
+    if (next > 0) ensureAskInputVisible(qi, 80);
   };
   const onAskInputBlur = () => {
     askFocusTargetRef.current = '';
@@ -933,7 +950,6 @@ export default function Chat() {
       clearTimeout(askScrollTimerRef.current);
       askScrollTimerRef.current = null;
     }
-    setAskScrollTarget('');
     setKeyboardHeight(0);
   };
   const sendAskAnswers = () => {
@@ -1469,7 +1485,7 @@ export default function Chat() {
       ) : null}
 
       {/* 对话流 */}
-      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollIntoView={askScrollTarget} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
+      <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
         <View className="chat-log-inner">
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
