@@ -511,6 +511,7 @@ export interface LibItem {
 export interface SaveLibRequest {
   title: string; type: string; agentKey: string; sessionId?: string; content: object;
   projectId?: string; // 归属项目
+  auto?: boolean; // 报告收尾后的自动存入（非用户主动采纳）：后端跳过 adopt 反馈信号
 }
 
 /* ════════════════════════════════════════════════════════════

@@ -1311,6 +1311,10 @@ export const mock = {
       title: body.title, type: body.type, agentKey: body.agentKey, projectId,
       content: body.content as Deliverable, authorKind: 'user', sessionId: body.sessionId ?? null,
     });
+    // 幂等去重：同 reportId + 同内容已在库 → 直接返回（对齐后端；auto 自动存入后手动再存不重复入库）。
+    const contentKey = JSON.stringify(body.content);
+    const dup = d.library.find((x) => x.reportId === saved.reportId && JSON.stringify(x.content) === contentKey);
+    if (dup) return delay({ id: dup.id, at: dup.at, reportId: saved.reportId, version: saved.version });
     const item: LibItem = {
       id: uid('d-'), title: body.title, type: body.type, agentKey: body.agentKey, agentName: ag.name,
       sessionId: body.sessionId ?? null, content: body.content as Deliverable, at: now(),

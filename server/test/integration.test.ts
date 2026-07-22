@@ -528,6 +528,45 @@ describe('TC-E 版本化报告 + diff', () => {
   });
 });
 
+// ───────────────────────── TC-EE 存入方案库：自动存入幂等 + auto 跳过采纳 ─────────────────────────
+describe('TC-EE 方案库自动存入（幂等 + auto 跳过 adopt）', () => {
+  test('EE1 同报告同内容重复存入幂等：不重复入库、返回同一条目', async () => {
+    const t = await login(uniquePhone());
+    const content = deliverable('幂等报告', [{ h: '核心', b: '同一份内容' }]);
+    const save = (auto: boolean) =>
+      api('POST', '/api/library', { token: t, body: { title: '幂等报告', type: '战略体检', agentKey: 'strat', content, ...(auto ? { auto: true } : {}) } });
+    const a = await save(true); // 报告收尾自动存入
+    const b = await save(false); // 用户随后手动「存入」，同内容
+    assert.equal(a.status, 200);
+    assert.equal(a.body.id, b.body.id, '同 reportId + 同内容应命中幂等，返回同一条目');
+    const lib = await api('GET', '/api/library', { token: t });
+    assert.equal(
+      lib.body.filter((x: any) => x.reportId === a.body.reportId).length,
+      1,
+      '方案库不应因重复存入而出现两条',
+    );
+  });
+
+  test('EE2 auto=true 自动存入跳过 adopt 采纳信号；手动存入照写', async () => {
+    const t = await login(uniquePhone());
+    const orig = await prisma.agent.findUnique({ where: { key: 'strat' }, select: { memoryConfig: true } });
+    // 临时开启 deliverable_feedback，使手动存入会沉淀采纳记忆（用完还原，避免污染后续用例）
+    const cfg: MemoryConfig = { longTerm: true, autoLearn: true, intensity: 'balanced', retentionDays: 180, sources: ['deliverable_feedback'] };
+    await prisma.agent.update({ where: { key: 'strat' }, data: { memoryConfig: cfg as object } });
+    try {
+      await api('POST', '/api/library', { token: t, body: { title: '自动采纳报告', type: '战略体检', agentKey: 'strat', content: deliverable('自动采纳报告', [{ h: 'A', b: 'x' }]), auto: true } });
+      const skipped = await recallMemories(t, 'strat', 10, '采纳 自动采纳报告');
+      assert.ok(!skipped.some((m) => m.includes('采纳了《自动采纳报告》')), 'auto 自动存入不应写入采纳记忆');
+
+      await api('POST', '/api/library', { token: t, body: { title: '手动采纳报告', type: '战略体检', agentKey: 'strat', content: deliverable('手动采纳报告', [{ h: 'B', b: 'y' }]) } });
+      const wrote = await recallMemories(t, 'strat', 10, '采纳 手动采纳报告');
+      assert.ok(wrote.some((m) => m.includes('采纳了《手动采纳报告》')), '手动存入应写入采纳记忆（佐证 adopt 通路有效）');
+    } finally {
+      await prisma.agent.update({ where: { key: 'strat' }, data: { memoryConfig: orig!.memoryConfig as object } });
+    }
+  });
+});
+
 // ───────────────────────── TC-G ★ 跨用户隔离（防信息泄露） ─────────────────────────
 describe('TC-G ★ 跨用户知识库/数据隔离（防泄露）', () => {
   test('A 的项目/报告/知识/记忆，B 一律不可见、不可召回、不可引用', async () => {

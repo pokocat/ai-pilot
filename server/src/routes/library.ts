@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { recordFeedback } from '../services/memory.js';
-import { saveReportVersion } from '../services/reports.js';
+import { saveReportVersion, hashContent } from '../services/reports.js';
 import { recordAudit } from '../services/audit.js';
 import type { MemoryConfig } from '../data/agents.js';
 
@@ -37,10 +37,12 @@ export async function libraryRoutes(app: FastifyInstance) {
   });
 
   // 存入方案库（同时桥接成「版本化报告」的新一版）
-  app.post<{ Body: { title: string; type: string; agentKey: string; sessionId?: string; content: object; projectId?: string } }>(
+  // auto=true：报告收尾后的自动存入（非用户主动采纳）——跳过 adopt 反馈信号。
+  app.post<{ Body: { title: string; type: string; agentKey: string; sessionId?: string; content: object; projectId?: string; auto?: boolean } }>(
     '/library',
     async (req) => {
       const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+      const auto = req.body.auto === true;
       // 项目归属：优先入参，否则跟随会话
       let projectId = req.body.projectId ?? null;
       if (!projectId && req.body.sessionId) {
@@ -53,6 +55,22 @@ export async function libraryRoutes(app: FastifyInstance) {
         title: req.body.title, type: req.body.type, agentKey: req.body.agentKey,
         content: req.body.content, authorKind: 'user', sessionId: req.body.sessionId ?? null,
       });
+      // 幂等去重：同一用户 + 同一 reportId + 同一内容（deliverable 表无 version/messageId 字段，按 contentJson 哈希比对——
+      // 自动存入与随后手动「存入」内容一致即命中）。命中则直接返回已有条目，不重复 create / 不重复 recordFeedback / 不重复审计。
+      const contentHash = hashContent(req.body.content);
+      const existingSame = (await prisma.deliverable.findMany({
+        where: { userId: user.id, reportId: saved.reportId },
+        select: { id: true, createdAt: true, contentJson: true },
+      })).find((row) => hashContent(row.contentJson as object) === contentHash);
+      if (existingSame) {
+        await recordAudit({
+          tenantId: user.tenantId,
+          userId: user.id,
+          action: 'user.library.dedupe',
+          payload: { deliverableId: existingSame.id, reportId: saved.reportId, version: saved.version, agentKey: req.body.agentKey, projectId, auto },
+        });
+        return { id: existingSame.id, at: existingSame.createdAt, reportId: saved.reportId, version: saved.version };
+      }
       // 2) 方案库条目（保留原有平铺体验，并记录桥接的 reportId）
       const d = await prisma.deliverable.create({
         data: {
@@ -68,23 +86,25 @@ export async function libraryRoutes(app: FastifyInstance) {
           status: 'ready',
         },
       });
-      // 反馈回流：存入 = 采纳信号
-      const agent = await prisma.agent.findUnique({ where: { key: req.body.agentKey } });
-      if (agent) {
-        await recordFeedback({
-          tenantId: user.tenantId,
-          userId: user.id,
-          agentKey: req.body.agentKey,
-          cfg: agent.memoryConfig as unknown as MemoryConfig,
-          signal: 'adopt',
-          title: req.body.title,
-        });
+      // 反馈回流：手动存入 = 采纳信号；自动存入不算用户采纳，跳过 adopt。
+      if (!auto) {
+        const agent = await prisma.agent.findUnique({ where: { key: req.body.agentKey } });
+        if (agent) {
+          await recordFeedback({
+            tenantId: user.tenantId,
+            userId: user.id,
+            agentKey: req.body.agentKey,
+            cfg: agent.memoryConfig as unknown as MemoryConfig,
+            signal: 'adopt',
+            title: req.body.title,
+          });
+        }
       }
       await recordAudit({
         tenantId: user.tenantId,
         userId: user.id,
         action: 'user.library.create',
-        payload: { deliverableId: d.id, reportId: saved.reportId, version: saved.version, agentKey: req.body.agentKey, projectId },
+        payload: { deliverableId: d.id, reportId: saved.reportId, version: saved.version, agentKey: req.body.agentKey, projectId, auto },
       });
       return { id: d.id, at: d.createdAt, reportId: saved.reportId, version: saved.version };
     },

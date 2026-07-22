@@ -30,7 +30,7 @@ function cardSection(sec: Section): { h: string; b?: string; list?: string[] } {
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 // 首次成果引导条一次性标记：展示过即写，此后任何成果卡都不再出现。
 const GUIDE_KEY = 'report_guide_shown';
-const GUIDE_TEXT = '军师首次呈上方案：存入方案库可长期留存、随时对比版本；点「分享」可发图或装订成 PDF 带走。';
+const GUIDE_TEXT = '军师首呈方略，已自动收入方案库存档。欲览全篇，点「查看报告」；欲外传，点「分享」发图或装订成 PDF 带走。';
 let shareSeq = 0;
 
 interface Props {
@@ -39,12 +39,14 @@ interface Props {
   streaming?: boolean; // 服务端 SSE 仍在产出中：展示当前已到达分段，暂不开放操作
   saved?: boolean;
   onSave?: () => void;
+  // 主操作：查看网页版报告全文（复活死代码 shareReport → 生成网页版并打开）。
+  onView?: () => void;
   // 「分享」选单里由父级承接的三项：PDF 发好友 / 查看保存 PDF / 复制全文（图片两项在组件内自持出图）。
   onShareMenu?: (kind: 'pdfFriend' | 'pdfView' | 'copy') => void;
 }
 
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
-export default function ReportCard({ data, animate = false, streaming = false, saved = false, onSave, onShareMenu }: Props) {
+export default function ReportCard({ data, animate = false, streaming = false, saved = false, onSave, onView, onShareMenu }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   // D-3-4：每张卡一块隐藏 canvas，用于分享图出图（唯一 id 防列表内串扰）。
@@ -89,6 +91,8 @@ export default function ReportCard({ data, animate = false, streaming = false, s
   const [revealed, setRevealed] = useState(animate ? 0 : data.sections.length);
   const [done, setDone] = useState(!animate);
   const [isSaved, setIsSaved] = useState(saved);
+  // 自动存入成功后父级会把消息 saved 置真 → 卡片 saved 态随之点亮（本地 setIsSaved 只 flip 不回退）。
+  useEffect(() => { if (saved) setIsSaved(true); }, [saved]);
   const shown = streaming ? data.sections.length : revealed;
   const isDone = !streaming && done;
 
@@ -192,23 +196,28 @@ export default function ReportCard({ data, animate = false, streaming = false, s
             <Text className="foot-t">{data.trust}</Text>
           </View>
           <View className="acts">
-            <View
-              className={`act ${isSaved ? 'saved' : 'primary'}`}
-              style={isSaved ? {} : { background: accent }}
-              onClick={() => {
-                if (isSaved) return;
-                setIsSaved(true);
-                onSave?.();
-              }}
-            >
-              <Icon name={isSaved ? 'check' : 'layers'} size={14} color={isSaved ? accent : '#fff'} />
-              <Text>{isSaved ? '已存入方案库' : '存入方案库'}</Text>
+            {/* 主操作：查看网页版报告全文；primary Icon 烘焙进 SVG，用白色。 */}
+            <View className="act primary" style={{ background: accent }} onClick={() => onView?.()}>
+              <Icon name="doc" size={14} color="#fff" />
+              <Text>查看报告</Text>
             </View>
             {/* 分享 = 图片/PDF/复制全文选单；ghost Icon 取与 --ink-2(#565C63) 等值的 hex。 */}
             <View className="act ghost" onClick={openShareMenu}>
               <Icon name="up" size={14} color="#565C63" />
               <Text>分享</Text>
             </View>
+            {/* 存入方案库已弱化为兜底：已存入 → 轻量状态签（非按钮）；未存入（自动存入失败/历史旧卡）→ 小号 ghost 按钮。 */}
+            {isSaved ? (
+              <View className="act-saved">
+                <Icon name="check" size={12} color={accent} />
+                <Text>已入库</Text>
+              </View>
+            ) : (
+              <View className="act ghost sm" onClick={() => { setIsSaved(true); onSave?.(); }}>
+                <Icon name="layers" size={13} color="#565C63" />
+                <Text>存入</Text>
+              </View>
+            )}
           </View>
           {/* D-3-4 隐藏出图画布（屏外，仅点分享图时绘制导出） */}
           <Canvas type="2d" id={shareCanvasId} className="rc-share-canvas" style={{ width: '600px', height: '900px' }} />

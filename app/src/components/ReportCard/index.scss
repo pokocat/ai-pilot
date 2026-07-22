@@ -64,16 +64,23 @@
 }
 .foot-t { font-size: 11px; line-height: 1.5; color: var(--ink-3); flex: 1; }
 
-// 报告 V2：操作收敛为单行两枚——主操作（存入方案库）占满剩余宽，「分享」ghost 定宽收口选单。
-.acts { display: flex; flex-wrap: nowrap; gap: 8px; margin-top: 13px; }
+// 报告 V2：主操作「查看报告」占满剩余宽；「分享」ghost 定宽收口选单；「存入」退化为兜底小件（saved→状态签 / 未存→小 ghost）。
+.acts { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; margin-top: 13px; }
 .act {
   display: flex; align-items: center; justify-content: center; gap: 4px;
   padding: 10px 8px; border-radius: 12px; font-size: 13px; font-weight: 500;
 }
 .act Text, .act text { white-space: nowrap; }
 .act.primary { color: #fff; flex: 1; }
-.act.saved { background: var(--accent-soft); color: var(--accent-ink); flex: 1; }
 .act.ghost { background: var(--surface-2); color: var(--ink-2); flex: 0 0 auto; padding: 10px 16px; }
+// 兜底「存入」小按钮：视觉弱、不抢主操作，仅在未入库（自动存入失败/历史旧卡）时出现。
+.act.ghost.sm { padding: 8px 11px; font-size: 12px; font-weight: 400; border-radius: 10px; }
+// 已入库状态签：轻量文字 + √，非按钮、不可点。
+.act-saved {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 3px;
+  padding: 0 4px; font-size: 11.5px; color: var(--ink-3);
+}
+.act-saved Text, .act-saved text { white-space: nowrap; }
 
 // D-3-4：出图画布屏外承载（不占版面），仅点「分享图」时绘制导出。
 .rc-share-canvas { position: fixed; left: -9999px; top: 0; }

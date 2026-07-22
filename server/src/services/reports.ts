@@ -61,7 +61,7 @@ function canonical(obj: unknown): string {
   const keys = Object.keys(obj as Record<string, unknown>).sort();
   return `{${keys.map((k) => `${JSON.stringify(k)}:${canonical((obj as Record<string, unknown>)[k])}`).join(',')}}`;
 }
-function hashContent(content: object): string {
+export function hashContent(content: object): string {
   return createHash('sha256').update(canonical(content)).digest('hex');
 }
 

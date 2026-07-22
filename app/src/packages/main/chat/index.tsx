@@ -728,7 +728,17 @@ export default function Chat() {
           onDone: (messageId) => {
             const refNotices = pendingRefNotices.length ? pendingRefNotices : undefined;
             if (reportStarted) {
-              patchReport((d) => d, { streaming: false, messageId, refNotices }, { appendIfMissing: false });
+              // 收尾时从更新器内抓完整 deliverable 引用（避免陈旧闭包/state），随后微任务里静默自动存入。
+              let doneDeliverable: Deliverable | undefined;
+              patchReport((d) => { doneDeliverable = d; return d; }, { streaming: false, messageId, refNotices }, { appendIfMissing: false });
+              // 自动存入仅对本次新生成完成的报告触发（历史加载走 restore、不经 onDone）；成功静默点亮 saved，失败留「存入」兜底。
+              if (messageId) {
+                Promise.resolve().then(() => {
+                  const dl = doneDeliverable
+                    ?? ([...logRef.current].reverse().find((x) => x.role === 'report') as Extract<Msg, { role: 'report' }> | undefined)?.deliverable;
+                  if (dl) saveDeliverable(dl, messageId, { auto: true });
+                });
+              }
             } else if (chatStarted) {
               patchChat((msg) => ({ ...msg, streaming: false, refNotices }));
             }
@@ -968,15 +978,33 @@ export default function Chat() {
     if (next > 0) setTimeout(scrollToEnd, 40);
   };
 
-  const saveDeliverable = async (d: Deliverable, messageId?: string) => {
+  // 卡片 saved 态点亮：把该 messageId 的报告消息标记 saved（供 ReportCard saved prop 同步、历史 restore 一致）。
+  const markMsgSaved = (messageId?: string) => {
+    if (!messageId) return;
+    setMsgs((m) => m.map((x) => (x.role === 'report' && x.messageId === messageId ? { ...x, saved: true } : x)));
+  };
+
+  // 存入方案库。opts.auto=true：报告收尾后静默自动入库——失败不弹错、留「存入」兜底；成功也不弹 toast（用户没点按钮）。
+  const saveDeliverable = async (d: Deliverable, messageId?: string, opts: { auto?: boolean } = {}) => {
     if (!agent) return;
-    await api.saveToLibrary({
+    const body = {
       // 三势研判入口进来的，type 打成「{势}研判」（如 市势研判），战局卡按 type 可靠反查
       title: d.title, type: forceTag ? `${forceTag}研判` : (agent.deliverableKey || d.title), agentKey: agent.key,
       sessionId: sessionId || undefined, content: d as any, projectId: projectId || undefined,
-    }).catch(() => {});
+      ...(opts.auto ? { auto: true } : {}),
+    };
+    if (opts.auto) {
+      const ok = await api.saveToLibrary(body).then(() => true).catch(() => false);
+      if (!ok) return; // 静默失败：不打扰，卡片保留「存入」兜底
+      markReportSaved(messageId);
+      markMsgSaved(messageId);
+      return;
+    }
+    // 手动路径：保留原有乐观行为 + toast
+    await api.saveToLibrary(body).catch(() => {});
     // B4：本地记下已入库的报告 messageId，历史 restore 时回填 saved 真值，避免重复显示「存入方案库」。
     markReportSaved(messageId);
+    markMsgSaved(messageId);
     Taro.showToast({ title: '已存入方案库', icon: 'none' });
   };
 
@@ -1544,6 +1572,7 @@ export default function Chat() {
                   animate={m.animate}
                   streaming={m.streaming}
                   saved={m.saved}
+                  onView={m.streaming ? undefined : () => shareReport(m.messageId)}
                   onSave={m.streaming ? undefined : () => saveDeliverable(m.deliverable, m.messageId)}
                   onShareMenu={m.streaming ? undefined : (kind) => onReportShareMenu(kind, m.deliverable, m.messageId)}
                 />
