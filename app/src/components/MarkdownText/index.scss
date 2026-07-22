@@ -21,6 +21,10 @@
 }
 .md-quote Text { color: var(--accent-ink); font-size: 12.5px; line-height: 1.55; }
 .md-strong { font-weight: 600; color: var(--ink); }
+/* 报告行内标记（与服务端 reportHtml 同一套）：==金底高亮== !!朱红警示!! ##大字强调## */
+.md-hl { background: var(--accent-soft); color: var(--ink); padding: 0 3px; }
+.md-risk { color: var(--danger); font-weight: 600; }
+.md-big { font-family: var(--serif); font-size: 1.2em; font-weight: 600; color: var(--accent-ink); }
 .md-code {
   color: var(--accent-ink);
   background: var(--accent-soft);

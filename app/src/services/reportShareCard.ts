@@ -17,7 +17,7 @@ const FOOT_H = 132;
 // 报告 V2：优先从 hero 段落 / callout 标题取要点，不足再回退旧的首节 list/正文分句逻辑。
 export function shareBullets(d: Deliverable): string[] {
   const clean = (arr: string[]) => arr
-    .map((x) => x.replace(/[*#>`_~]/g, '').replace(/\s+/g, ' ').trim())
+    .map((x) => x.replace(/[*#>`_~=!]/g, '').replace(/\s+/g, ' ').trim())
     .filter(Boolean)
     .slice(0, 3)
     .map((x) => ([...x].length > 46 ? `${[...x].slice(0, 46).join('')}…` : x));

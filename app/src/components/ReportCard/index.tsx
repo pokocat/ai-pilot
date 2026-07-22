@@ -8,6 +8,11 @@ import type { Deliverable, Section } from '../../services/api';
 import { makeReportShareImage, shareReportImageToFriend, saveReportImageToAlbum } from '../../services/reportShareCard';
 import './index.scss';
 
+// 标题里的行内标记剥掉（正文/列表走 MarkdownText 原生渲染，标题是普通 Text 会露原始符号）。
+function stripInlineMarks(s: string): string {
+  return String(s ?? '').replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/==([^=\n]+)==/g, '$1').replace(/!!([^!\n]+)!!/g, '$1').replace(/##([^#\n]+)##/g, '$1');
+}
+
 // 报告 V2 最小防线：把 9 种类型 section 降级成卡片可渲染的 {h,b?,list?}，保证不破版/不 crash。
 // 用 any 读取以容忍存量脏数据/未来类型（未知 type 走 default 白卡）。
 function cardSection(sec: Section): { h: string; b?: string; list?: string[] } {
@@ -167,7 +172,7 @@ export default function ReportCard({ data, animate = false, streaming = false, s
             <View key={i} className="rsec reveal">
               <View className="sh">
                 <Text className="no" style={{ background: accent }}>{i + 1}</Text>
-                <Text className="sh-t">{v.h}</Text>
+                <Text className="sh-t">{stripInlineMarks(v.h)}</Text>
               </View>
               {v.b && <MarkdownText text={v.b} className="sb" />}
               {v.list && (

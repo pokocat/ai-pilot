@@ -203,7 +203,8 @@ function isBlockStart(line: string): boolean {
 
 function cleanInline(text: string): string {
   return text
-    .replace(/^#+\s*/, '')
+    // 仅剥「# 标题」式前缀（#后必须有空白）——「##大字强调##」是行内标记，不能误吞。
+    .replace(/^#+\s+/, '')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .trim();
 }
@@ -211,12 +212,16 @@ function cleanInline(text: string): string {
 function cleanSelectableInline(text: string): string {
   return cleanInline(text)
     .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/`([^`]+)`/g, '$1');
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/==([^=\n]+)==/g, '$1')
+    .replace(/!!([^!\n]+)!!/g, '$1')
+    .replace(/##([^#\n]+)##/g, '$1');
 }
 
+// 行内标记（与服务端 reportHtml 同一套子集）：**加粗** `代码` ==金底高亮== !!朱红警示!! ##大字强调##
 function renderInline(text: string) {
   const nodes: JSX.Element[] = [];
-  const re = /(\*\*[^*]+\*\*|`[^`]+`)/g;
+  const re = /(\*\*[^*\n]+\*\*|`[^`]+`|==[^=\n]+==|!![^!\n]+!!|##[^#\n]+##)/g;
   let last = 0;
   let match: RegExpExecArray | null;
   let key = 0;
@@ -226,8 +231,14 @@ function renderInline(text: string) {
     const token = match[0];
     if (token.startsWith('**')) {
       nodes.push(<Text key={key++} className="md-strong">{token.slice(2, -2)}</Text>);
-    } else {
+    } else if (token.startsWith('`')) {
       nodes.push(<Text key={key++} className="md-code">{token.slice(1, -1)}</Text>);
+    } else if (token.startsWith('==')) {
+      nodes.push(<Text key={key++} className="md-hl">{token.slice(2, -2)}</Text>);
+    } else if (token.startsWith('!!')) {
+      nodes.push(<Text key={key++} className="md-risk">{token.slice(2, -2)}</Text>);
+    } else {
+      nodes.push(<Text key={key++} className="md-big">{token.slice(2, -2)}</Text>);
     }
     last = match.index + token.length;
   }

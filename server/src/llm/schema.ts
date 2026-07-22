@@ -414,8 +414,12 @@ export const DELIVERABLE_TOOL = {
           'gauge{h?,score:0-100,verdict?,items?:[{label,score:0-100,note?}]}=评分盘（半环弧盘+分项横条），用于体检/诊断打分章，score 为总分、items 为分项得分；' +
           'matrix{h?,xLabels?:[左,右],yLabels?:[上,下],quads:[{title,tone?,items[]}]}=四象限（2×2 直角格），用于 SWOT/优先级/风险格，quads 恰 4 个、顺序为左上→右上→左下→右下，tone 同 callout 五色；' +
           'gantt{h?,unit?:周/旬/月,total?,rows:[{label,from,to,tone?,note?}]}=甘特泳道条，用于作战地图/排期，from/to 为起止刻度（含）、total 缺省取最大 to、tone 同五色默认深绿；' +
-          'quote{text}=居中金句；letter{salute?,paras[],close,sign?}=军师手书收尾；' +
-          '不写 type = 白卡{h,b?,list?}。stats/roster/table/phases/timeline/gauge/matrix/gantt 的 h 是该章节标题（会配汉字序号）。',
+          'quote{text,cite?}=居中金句（cite 署名言出处，如「毛泽东选集」「孙子·谋攻」），用于名人名言/兵法引用与情绪转折；' +
+          'letter{salute?,paras[],close,sign?}=军师手书收尾；' +
+          '不写 type = 白卡{h,b?,list?}。stats/roster/table/phases/timeline/gauge/matrix/gantt 的 h 是该章节标题（会配汉字序号）。' +
+          '正文类字符串（b/paras/list/actions/kpi/d/note/verdict/intro/desc/items 文本）支持 4 种行内强调标记，请适度使用让排版有层次：' +
+          '**加粗**=关键动作与结论；==金底高亮===本章最重要的一句话（每章至多 2 处）；!!朱红警示!!=风险红线（全篇至多 3 处）；##大字强调##=点睛短语（全篇至多 2 处）。' +
+          '标记不跨行、不嵌套、不用于标题字段；除这 4 种外不要输出任何 Markdown。',
         items: {
           type: 'object',
           properties: {

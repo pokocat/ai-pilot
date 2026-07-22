@@ -338,3 +338,47 @@ describe('renderReportHtml · 类型化渲染', () => {
     assert.doesNotMatch(html.split('</style>')[1] ?? html, /<b>x<\/b>/);
   });
 });
+
+describe('renderReportHtml · 行内强调标记', () => {
+  test('**加粗** / ==金底高亮== / !!朱红警示!! / ##大字强调## 渲染为对应标签', () => {
+    const html = renderReportHtml(base([{ h: '打法', b: '先**止血**，==把现金流稳住==，切忌 !!盲目扩张!!，记住 ##现金为王##。' }]));
+    assert.match(html, /<strong>止血<\/strong>/);
+    assert.match(html, /<span class="mark-hl">把现金流稳住<\/span>/);
+    assert.match(html, /<span class="mark-risk">盲目扩张<\/span>/);
+    assert.match(html, /<span class="mark-big serif">现金为王<\/span>/);
+  });
+
+  test('列表/callout/letter/quote 正文同样支持标记', () => {
+    const html = renderReportHtml(base([
+      { h: '要点', list: ['**关店**两家', '==保住老店=='] },
+      { type: 'callout', tone: '风险', h: '警讯', b: '!!资金链!!承压' },
+      { type: 'quote', text: '==谋定而后动==', cite: '孙子' },
+      { type: 'letter', paras: ['老板**放心**'], close: '盼复' },
+    ]));
+    assert.match(html, /<li><strong>关店<\/strong>两家<\/li>/);
+    assert.match(html, /<span class="mark-hl">保住老店<\/span>/);
+    assert.match(html, /<span class="mark-risk">资金链<\/span>承压/);
+    assert.match(html, /<span class="mark-hl">谋定而后动<\/span>/);
+    assert.match(html, /<strong>放心<\/strong>/);
+  });
+
+  test('标题字段剥标记：不渲染也不露原始符号', () => {
+    const html = renderReportHtml(base([{ h: '**主要矛盾**', sub: '==副题==', b: '正文' }]));
+    assert.match(html, /class="sec-title">主要矛盾</);
+    assert.match(html, /class="sec-sub">副题</);
+    assert.doesNotMatch(html, /class="sec-title">\*\*/);
+  });
+
+  test('标记内内容仍走转义（防注入），未闭合标记原样保留', () => {
+    const html = renderReportHtml(base([{ h: 'x', b: '==<script>alert(1)</script>== 与 **未闭合' }]));
+    assert.match(html, /<span class="mark-hl">&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/span>/);
+    assert.match(html, /\*\*未闭合/);
+    assert.doesNotMatch(html, /<script>alert/);
+  });
+
+  test('数字强调与行内标记共存', () => {
+    const html = renderReportHtml(base([{ h: 'x', b: '**第 3 周**动手，==回款 600 万==' }]));
+    assert.match(html, /<strong><span class="num-emph">第 3 周<\/span><\/strong>/);
+    assert.match(html, /<span class="mark-hl">回款 <span class="num-emph">600 万<\/span><\/span>/);
+  });
+});

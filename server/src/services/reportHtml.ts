@@ -31,9 +31,27 @@ function emphNums(html: string): string {
     .replace(/(第\s*\d+\s*(?:周|旬|天|月|季度?|阶段|步|年|轮))/g, '<span class="num-emph">$1</span>')
     .replace(/(\d+(?:\.\d+)?\s*(?:万|亿|%|％|倍|天|家|人|个|元|块|分|单))/g, '<span class="num-emph">$1</span>');
 }
-// 正文：空行分段为 <p class="b">，段内单换行转 <br>，数字片段加强调。
+// 行内强调标记（模型可控的极小子集，先转义后替换，防注入）：
+//   **加粗**（关键动作/结论）  ==金底高亮==（最重要的一句话）  !!朱红警示!!（风险/红线）  ##大字强调##（点睛短语）
+// 均不跨行、不嵌套解析；未闭合的记号原样保留（宁保守勿误吞）。
+function inlineMarks(html: string): string {
+  return html
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/==([^=\n]+)==/g, '<span class="mark-hl">$1</span>')
+    .replace(/!!([^!\n]+)!!/g, '<span class="mark-risk">$1</span>')
+    .replace(/##([^#\n]+)##/g, '<span class="mark-big serif">$1</span>');
+}
+// 标题/标签类字段：剥掉行内标记（不渲染也不显示原始符号，防模型在标题里滥用）。
+function stripMarks(s: string | undefined): string {
+  return String(s ?? '').replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/==([^=\n]+)==/g, '$1').replace(/!!([^!\n]+)!!/g, '$1').replace(/##([^#\n]+)##/g, '$1');
+}
+// 富行内文本：转义 → 行内标记 → 换行 → 数字强调。正文/要点/注记类字段统一走这里。
+function richInline(s: string | undefined): string {
+  return emphNums(inlineMarks(esc(s ?? '')).replace(/\n/g, '<br>'));
+}
+// 正文：空行分段为 <p class="b">，段内单换行转 <br>，行内标记 + 数字片段强调。
 function bodyHtml(b: string): string {
-  const paras = esc(b).split(/\n{2,}/).map((p) => p.replace(/\n/g, '<br>')).filter(Boolean);
+  const paras = esc(b).split(/\n{2,}/).map((p) => inlineMarks(p).replace(/\n/g, '<br>')).filter(Boolean);
   return paras.map((p) => `<p class="b">${emphNums(p)}</p>`).join('');
 }
 
@@ -46,25 +64,25 @@ function secDivider(no: string): string {
 }
 // 章节标题（标题 + 可选副标题；序号已提到隔断带，这里不再重复）。
 function secTitle(h: string, sub?: string): string {
-  return `<div class="sec-head"><div><div class="sec-title">${esc(h)}</div>${sub ? `<div class="sec-sub">${esc(sub)}</div>` : ''}</div></div>`;
+  return `<div class="sec-head"><div><div class="sec-title">${esc(stripMarks(h))}</div>${sub ? `<div class="sec-sub">${esc(stripMarks(sub))}</div>` : ''}</div></div>`;
 }
 
 /* ───────── per-type 渲染 ───────── */
 function heroHtml(s: Extract<DeliverableSection, { type: 'hero' }>): string {
-  const paras = (s.paras ?? []).map((p) => `<p class="hero-p">${inlineHtml(p)}</p>`).join('');
-  return `<div class="hero"><div class="hero-kicker">定 调</div><h2 class="hero-h">${inlineHtml(s.h)}</h2>${paras}</div>`;
+  const paras = (s.paras ?? []).map((p) => `<p class="hero-p">${richInline(p)}</p>`).join('');
+  return `<div class="hero"><div class="hero-kicker">定 调</div><h2 class="hero-h">${esc(stripMarks(s.h)).replace(/\n/g, '<br>')}</h2>${paras}</div>`;
 }
 function calloutHtml(s: Extract<DeliverableSection, { type: 'callout' }>): string {
   const cls = TONE_CLASS[s.tone] ?? 'def';
-  return `<section><div class="callout ${cls}"><span class="tag">${esc(s.tone)}</span><div class="ct">${esc(s.h)}</div><div class="cp">${inlineHtml(s.b)}</div></div></section>`;
+  return `<section><div class="callout ${cls}"><span class="tag">${esc(s.tone)}</span><div class="ct">${esc(stripMarks(s.h))}</div><div class="cp">${richInline(s.b)}</div></div></section>`;
 }
 function statsHtml(s: Extract<DeliverableSection, { type: 'stats' }>): string {
   const cells = s.items.map((it) => `<div class="stat"><div class="num">${esc(it.num)}${it.unit ? `<small>${esc(it.unit)}</small>` : ''}</div><div class="lbl">${esc(it.label)}</div></div>`).join('');
   return `<div class="stats">${cells}</div>`;
 }
 function rosterHtml(s: Extract<DeliverableSection, { type: 'roster' }>): string {
-  const intro = s.intro ? `<p class="roster-intro">${inlineHtml(s.intro)}</p>` : '';
-  const cards = s.people.map((p) => `<div class="person"><div class="pn serif">${esc(p.name)}${p.role ? `<span class="pr">${esc(p.role)}</span>` : ''}</div>${p.desc ? `<div class="pd">${inlineHtml(p.desc)}</div>` : ''}</div>`).join('');
+  const intro = s.intro ? `<p class="roster-intro">${richInline(s.intro)}</p>` : '';
+  const cards = s.people.map((p) => `<div class="person"><div class="pn serif">${esc(p.name)}${p.role ? `<span class="pr">${esc(p.role)}</span>` : ''}</div>${p.desc ? `<div class="pd">${richInline(p.desc)}</div>` : ''}</div>`).join('');
   return `${intro}<div class="roster">${cards}</div>`;
 }
 function cellHtml(c: DeliverableTableCell, isHeader: boolean): string {
@@ -80,13 +98,13 @@ function tableHtml(s: Extract<DeliverableSection, { type: 'table' }>): string {
 }
 function phasesHtml(s: Extract<DeliverableSection, { type: 'phases' }>): string {
   return s.items.map((it) => {
-    const actions = it.actions?.length ? `<ul>${it.actions.map((a) => `<li>${inlineHtml(a)}</li>`).join('')}</ul>` : '';
-    const kpi = it.kpi ? `<div class="phase-kpi"><span class="k">军令状</span><span class="v">${inlineHtml(it.kpi)}</span></div>` : '';
+    const actions = it.actions?.length ? `<ul>${it.actions.map((a) => `<li>${richInline(a)}</li>`).join('')}</ul>` : '';
+    const kpi = it.kpi ? `<div class="phase-kpi"><span class="k">军令状</span><span class="v">${richInline(it.kpi)}</span></div>` : '';
     return `<div class="phase"><div class="phase-tab">${esc(it.tab)}</div>${it.when ? `<div class="phase-when">${esc(it.when)}</div>` : ''}<div class="phase-h">${esc(it.h)}</div>${actions}${kpi}</div>`;
   }).join('');
 }
 function timelineHtml(s: Extract<DeliverableSection, { type: 'timeline' }>): string {
-  const rows = s.items.map((it) => `<div class="tl${it.highlight ? ' gold' : ''}">${it.when ? `<div class="tl-when">${esc(it.when)}</div>` : ''}${it.h ? `<div class="tl-t">${esc(it.h)}</div>` : ''}${it.d ? `<div class="tl-d">${inlineHtml(it.d)}</div>` : ''}</div>`).join('');
+  const rows = s.items.map((it) => `<div class="tl${it.highlight ? ' gold' : ''}">${it.when ? `<div class="tl-when">${esc(it.when)}</div>` : ''}${it.h ? `<div class="tl-t">${esc(it.h)}</div>` : ''}${it.d ? `<div class="tl-d">${richInline(it.d)}</div>` : ''}</div>`).join('');
   return `<div class="timeline">${rows}</div>`;
 }
 // 评分 → 语义色 CSS 变量（≥80 金 / 60-79 苍绿 / 40-59 黛青 / <40 赭赤）。
@@ -111,11 +129,11 @@ function gaugeHtml(s: Extract<DeliverableSection, { type: 'gauge' }>): string {
 <text x="${cx}" y="98" text-anchor="middle" class="gauge-num" fill="${col}">${score}</text>
 <text x="${cx}" y="120" text-anchor="middle" class="gauge-cap">分</text>
 </svg>`;
-  const verdict = s.verdict ? `<div class="gauge-verdict serif">${esc(s.verdict)}</div>` : '';
+  const verdict = s.verdict ? `<div class="gauge-verdict serif">${richInline(s.verdict)}</div>` : '';
   const bars = (s.items ?? []).map((it) => {
     const v = Math.max(0, Math.min(100, Math.round(it.score ?? 0)));
     const c = scoreVar(v);
-    const note = it.note ? `<span class="gi-note">${esc(it.note)}</span>` : '';
+    const note = it.note ? `<span class="gi-note">${richInline(it.note)}</span>` : '';
     return `<div class="gauge-item"><div class="gi-top"><span class="gi-label">${esc(it.label)}${note}</span><span class="gi-score" style="color:${c}">${v}</span></div><div class="gi-track"><div class="gi-fill" style="width:${v}%;background:${c}"></div></div></div>`;
   }).join('');
   const right = bars ? `<div class="gauge-items">${bars}</div>` : '';
@@ -129,7 +147,7 @@ function matrixHtml(s: Extract<DeliverableSection, { type: 'matrix' }>): string 
     const cls = q.tone ? TONE_CLASS[q.tone] ?? 'def' : '';
     const dot = q.title ? `<span class="mx-dot ${cls}"></span>` : '';
     const title = q.title ? `<div class="mx-title">${dot}${esc(q.title)}</div>` : '';
-    const items = q.items?.length ? `<ul class="mx-list">${q.items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : '';
+    const items = q.items?.length ? `<ul class="mx-list">${q.items.map((i) => `<li>${richInline(i)}</li>`).join('')}</ul>` : '';
     return `<div class="mx-quad">${title}${items}</div>`;
   };
   const grid = `<div class="mx-grid">${quads.map(cell).join('')}</div>`;
@@ -153,18 +171,18 @@ function ganttHtml(s: Extract<DeliverableSection, { type: 'gantt' }>): string {
     const left = ((from - 1) / total * 100).toFixed(3);
     const width = ((to - from + 1) / total * 100).toFixed(3);
     const cls = r.tone ? TONE_CLASS[r.tone] ?? '' : '';
-    const note = r.note ? `<span class="gb-note">${esc(r.note)}</span>` : '';
+    const note = r.note ? `<span class="gb-note">${esc(stripMarks(r.note))}</span>` : '';
     return `<div class="gantt-row"><span class="g-label">${esc(r.label)}</span><div class="g-track" style="${grid}"><div class="g-bar ${cls}" style="left:${left}%;width:${width}%">${note}</div></div></div>`;
   }).join('');
   return `<div class="gantt">${scale}${rowsHtml}</div>`;
 }
 function quoteHtml(s: Extract<DeliverableSection, { type: 'quote' }>): string {
-  return `<div class="quote"><div class="qr"></div><p class="qt serif">${inlineHtml(s.text)}</p><div class="qb"></div><div class="qcite">— ${esc(s.cite || '军师谨识')}</div></div>`;
+  return `<div class="quote"><div class="qr"></div><p class="qt serif">${richInline(s.text)}</p><div class="qb"></div><div class="qcite">— ${esc(s.cite || '军师谨识')}</div></div>`;
 }
 function letterHtml(s: Extract<DeliverableSection, { type: 'letter' }>): string {
-  const salute = s.salute ? `<p>${inlineHtml(s.salute)}</p>` : '';
-  const paras = (s.paras ?? []).map((p) => `<p>${inlineHtml(p)}</p>`).join('');
-  const close = s.close ? `<p class="close">${inlineHtml(s.close)}</p>` : '';
+  const salute = s.salute ? `<p>${richInline(s.salute)}</p>` : '';
+  const paras = (s.paras ?? []).map((p) => `<p>${richInline(p)}</p>`).join('');
+  const close = s.close ? `<p class="close">${richInline(s.close)}</p>` : '';
   const sign = s.sign ? `<div class="sign">${esc(s.sign)}</div>` : '';
   return `<div class="letter"><h3>军 师 手 书</h3>${salute}${paras}${close}${sign}</div>`;
 }
@@ -182,7 +200,7 @@ function chapterWrap(s: DeliverableSection, ctx: ChapterCtx, inner: string): str
 // 旧版白卡（无 type）+ 未知 type 降级：纸白章节卡（正文/列表走数字强调）。
 function basicHtml(s: DeliverableSection, ctx: ChapterCtx): string {
   const body = s.b ? bodyHtml(s.b) : '';
-  const list = s.list?.length ? `<ul>${s.list.map((li) => `<li>${emphNums(esc(li))}</li>`).join('')}</ul>` : '';
+  const list = s.list?.length ? `<ul>${s.list.map((li) => `<li>${richInline(li)}</li>`).join('')}</ul>` : '';
   const inner = `<div class="pcard">${body + list || '<p class="b muted">（本节待补充）</p>'}</div>`;
   return chapterWrap(s, ctx, inner);
 }
@@ -260,10 +278,20 @@ section.chapter{padding:18px 22px 34px;background:var(--card)}
 section.chapter.alt{background:var(--card2)}
 .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:24px;border-bottom:1px solid var(--line);padding-bottom:14px}
 .sec-num{font-family:var(--serif);font-size:40px;line-height:1;color:rgba(155,124,63,.55);flex:0 0 auto}
-.sec-title{font-family:var(--serif);font-size:21px;color:var(--ink);letter-spacing:1px}
-.sec-sub{font-size:12px;color:var(--ink2);margin-top:3px;letter-spacing:.5px}
+.sec-title{font-family:var(--serif);font-size:23px;font-weight:700;color:var(--ink);letter-spacing:2px}
+.sec-sub{font-family:var(--serif);font-size:12.5px;color:var(--gold);margin-top:4px;letter-spacing:1.5px}
 /* 正文数字强调 */
 .num-emph{color:var(--gold);font-size:1.12em;letter-spacing:.3px}
+/* 行内强调标记：**加粗** ==金底高亮== !!朱红警示!! ##大字强调## */
+strong{font-weight:700;color:var(--ink)}
+.mark-hl{background:rgba(155,124,63,.16);color:var(--ink);padding:0 4px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.mark-risk{color:var(--risk);font-weight:700}
+.mark-big{font-family:var(--serif);font-size:1.22em;font-weight:700;color:var(--green);letter-spacing:.5px}
+/* 深色块（hero/letter 深绿底）里的标记配色覆盖：墨色/深绿在深底上不可读 */
+.hero strong,.letter strong{color:inherit}
+.hero .mark-hl,.letter .mark-hl{background:rgba(228,217,184,.2);color:#F4EFDE}
+.hero .mark-risk,.letter .mark-risk{color:#E8A18F}
+.hero .mark-big,.letter .mark-big{color:#E4D9B8}
 /* 白卡（旧版兼容） */
 .pcard .b{font-size:14px;color:var(--ink);margin:0 0 12px;line-height:1.95}
 .pcard .b:last-child{margin-bottom:0}
