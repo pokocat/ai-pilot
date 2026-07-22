@@ -181,6 +181,22 @@ const FOLLOW_THROTTLE_MS = 300;
 // B6 输入计数：临近上限（>1800/2000）才显示字数，平时不打扰。
 const INPUT_MAX = 2000;
 const INPUT_COUNT_FROM = 1800;
+// 粘贴转附卷：单次输入暴增 ≥ 此值且越过 INPUT_MAX，判为「长文粘贴」→ 自动归卷。
+const PASTE_DELTA_MIN = 500;
+
+// 单次插入下，用公共前缀 + 公共后缀 diff 出这回粘进来的文本段。
+// prefix：prev 与 v 的公共前缀长；suffix：剩余部分的公共后缀长（上限 = prev.length - prefix，防前后缀重叠）。
+function diffPasted(prev: string, v: string): { pasted: string; kept: string } {
+  const n = prev.length;
+  let prefix = 0;
+  while (prefix < n && prev[prefix] === v[prefix]) prefix++;
+  let suffix = 0;
+  const maxSuffix = n - prefix;
+  while (suffix < maxSuffix && prev[n - 1 - suffix] === v[v.length - 1 - suffix]) suffix++;
+  const pasted = v.slice(prefix, v.length - suffix);
+  const kept = v.slice(0, prefix) + v.slice(v.length - suffix);
+  return { pasted, kept };
+}
 
 const askInputAnchor = (messageIndex: number, questionIndex: number) =>
   `ask-answer-${messageIndex}-${questionIndex}`;
@@ -270,6 +286,8 @@ export default function Chat() {
   // B3 草稿：用 ref 取最新值，供 onBlur / useDidHide 闭包读取。
   const inputRef = useRef('');
   inputRef.current = input;
+  // 粘贴转附卷：在途份数（await createKnowledge 期间计数），与 refs 合并判九份上限、防并发超挂。
+  const pasteInflightRef = useRef(0);
   const sessionIdRef = useRef('');
   sessionIdRef.current = sessionId;
   // B5 上传：非模态进度条，接 UploadTask 透出真实百分比；取消调 task.abort() 真中止。
@@ -884,9 +902,45 @@ export default function Chat() {
     doSend(lines.join('\n'), sessionId, agent?.key ?? '');
   };
 
+  // 长文粘贴 → 归为附卷：异步建知识，成功挂引用签；期间不卡输入。fullValue = 粘贴后完整文本，供满卷/失败时回填。
+  const absorbPasteToFile = async (pasted: string, fullValue: string) => {
+    // 满卷判断已上提至 handleInput 粘贴分支；此处仅做成功 setter 里的二次核验防并发越挂。
+    const title = `粘贴长文·${pasted.length}字`;
+    pasteInflightRef.current += 1;
+    Taro.showToast({ title: '长文归卷中…', icon: 'none' });
+    try {
+      const { id } = await api.createKnowledge({ kind: 'document', title, text: pasted, sourceType: 'paste' });
+      // ready 状态，无需标「拆读中」；再核一次上限，防并发越挂。
+      setRefs((cur) => (cur.length >= UPLOAD_COUNT_MAX || cur.some((x) => x.kind === 'knowledge' && x.id === id))
+        ? cur : [...cur, { kind: 'knowledge', id, label: title }]);
+    } catch {
+      setInput(fullValue); // 归卷未成：长文塞回输入框，不丢字
+      Taro.showToast({ title: '长文归卷未成，稍后再试', icon: 'none' });
+    } finally {
+      pasteInflightRef.current -= 1;
+    }
+  };
+
   const handleInput = (e: { detail: { value: string } }) => {
     if (busy) return input;
     const v = e.detail.value;
+    const prev = input;
+    // 超长粘贴：单次暴增 ≥ 阈值且越过两千 → 归为附卷，输入框只留粘贴前敲的字。
+    if (v.length - prev.length >= PASTE_DELTA_MIN && v.length > INPUT_MAX) {
+      const { pasted, kept } = diffPasted(prev, v);
+      if (pasted) {
+        // 附卷已满九份：不转，输入框留完整粘贴内容，容主公自行取舍。
+        // 注：闭包里 refs 为当前渲染值，可接受。
+        if (refs.length + pasteInflightRef.current >= UPLOAD_COUNT_MAX) {
+          Taro.showToast({ title: `附卷已满${UPLOAD_COUNT_MAX}份，容后再呈`, icon: 'none' });
+          setInput(v);
+          return v; // 保留完整粘贴内容，不转换
+        }
+        void absorbPasteToFile(pasted, v);
+        setInput(kept);
+        return kept; // 返回值即时更正原生 textarea 内容
+      }
+    }
     setInput(v);
     return v;
   };
@@ -895,6 +949,11 @@ export default function Chat() {
     if (busy) return;
     const v = (typeof raw === 'string' ? raw : input).trim();
     if (!v || !agent) return;
+    // 软限制守卫：手动堆出的超长（非粘贴）在此拦下——粘贴早已转附卷，不会走到这。
+    if (v.length > INPUT_MAX) {
+      Taro.showToast({ title: '言过两千，可精简或粘贴成附卷', icon: 'none' });
+      return;
+    }
     setInput('');
     setInputFocus(false);
     const sending = refs;
@@ -1601,7 +1660,7 @@ export default function Chat() {
               value={input}
               focus={inputFocus}
               disabled={busy}
-              maxlength={INPUT_MAX}
+              maxlength={-1}
               cursorSpacing={24}
               adjustPosition={false}
               autoHeight
@@ -1616,7 +1675,7 @@ export default function Chat() {
             />
             {/* B6：临近上限才显示字数，平时不打扰 */}
             {input.length > INPUT_COUNT_FROM ? (
-              <Text className="cinput-count">{input.length}/{INPUT_MAX}</Text>
+              <Text className={`cinput-count ${input.length > INPUT_MAX ? 'over' : ''}`}>{input.length}/{INPUT_MAX}</Text>
             ) : null}
             <View className="cbar">
               <View className="cbar-l">

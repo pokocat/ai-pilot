@@ -172,6 +172,7 @@
 .cmodel.static { padding: 0 11px; }
 /* B6 输入字数（临近上限才出现） */
 .cinput-count { display: block; align-self: flex-end; font-size: 11px; color: var(--ink-3); margin-top: -2px; }
+.cinput-count.over { color: var(--danger); }
 
 /* B5 非模态上传条（可取消） */
 .composer-dock { position: relative; }
