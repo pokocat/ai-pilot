@@ -169,6 +169,53 @@
   .tl-t{font-size:14px;color:var(--ink);margin:2px 0 3px;font-weight:600}
   .tl-d{font-size:12.5px;color:var(--ink2);line-height:1.85}
 
+  /* ============ gauge 评分盘 ============ */
+  .gauge{display:flex;flex-wrap:wrap;gap:22px 26px;align-items:flex-start;
+    background:var(--card);border:1px solid var(--line);padding:22px 20px;margin-top:4px}
+  .gauge-dial{flex:0 0 auto;text-align:center;width:190px;max-width:100%;margin:0 auto}
+  .gauge-svg{width:100%;height:auto;display:block}
+  .gauge-num{font-family:var(--serif);font-size:46px}
+  .gauge-cap{font-family:var(--serif);font-size:13px;fill:var(--ink2)}
+  .gauge-verdict{font-size:13px;color:var(--ink);letter-spacing:1px;margin-top:2px}
+  .gauge-items{flex:1 1 240px;min-width:220px;display:flex;flex-direction:column;gap:13px}
+  .gauge-item .gi-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px}
+  .gauge-item .gi-label{font-size:13px;color:var(--ink)}
+  .gauge-item .gi-note{font-size:11px;color:var(--ink2);margin-left:6px}
+  .gauge-item .gi-score{font-family:var(--serif);font-size:16px;flex:0 0 auto}
+  .gauge-item .gi-track{height:6px;background:rgba(42,46,42,.09)}
+  .gauge-item .gi-fill{height:100%}
+
+  /* ============ matrix 四象限 ============ */
+  .matrix{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto 1fr auto;
+    gap:6px 8px;align-items:center;margin-top:6px}
+  .matrix .mx-axis{font-family:var(--serif);font-size:12px;color:var(--gold);letter-spacing:1px;text-align:center}
+  .matrix .mx-xleft,.matrix .mx-xright{writing-mode:vertical-rl;justify-self:center}
+  .mx-grid{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);
+    border-left:none;border-top:none;background:var(--card)}
+  .mx-quad{border-left:1px solid var(--line);border-top:1px solid var(--line);padding:13px 14px;min-height:96px}
+  .mx-title{font-family:var(--serif);font-size:14px;color:var(--ink);margin-bottom:8px;
+    display:flex;align-items:center;gap:7px}
+  .mx-dot{width:10px;height:10px;flex:0 0 auto;background:var(--gold)}
+  .mx-dot.win{background:var(--win)}.mx-dot.risk{background:var(--risk)}.mx-dot.order{background:var(--order)}
+  .mx-dot.def{background:var(--def)}.mx-dot.adv{background:var(--adv)}
+  .mx-list{list-style:none;margin:0;padding:0}
+  .mx-list li{font-size:12px;color:var(--ink2);line-height:1.75;padding-left:12px;position:relative}
+  .mx-list li::before{content:"·";position:absolute;left:2px;top:-1px;color:var(--gold);font-size:14px}
+
+  /* ============ gantt 泳道条 ============ */
+  .gantt{background:var(--card);border:1px solid var(--line);padding:16px 16px 18px;margin-top:6px}
+  .gantt-scale{display:flex;align-items:flex-end;margin-bottom:10px}
+  .gantt-scale .gt-cap{width:88px;flex:0 0 auto;font-family:var(--serif);font-size:11.5px;color:var(--gold);letter-spacing:1px}
+  .gantt-scale .gt-ticks{flex:1;display:flex}
+  .gantt-scale .gt-tick{flex:1;text-align:center;font-size:10.5px;color:var(--ink2);font-family:var(--serif)}
+  .gantt-row{display:flex;align-items:center;margin-top:9px}
+  .gantt-row .g-label{width:88px;flex:0 0 auto;font-size:12px;color:var(--ink);padding-right:8px;line-height:1.4}
+  .gantt-row .g-track{flex:1;position:relative;height:22px;background-repeat:repeat}
+  .gantt-row .g-bar{position:absolute;top:3px;bottom:3px;background:var(--green);display:flex;align-items:center;overflow:hidden}
+  .gantt-row .g-bar.win{background:var(--win)}.gantt-row .g-bar.risk{background:var(--risk)}
+  .gantt-row .g-bar.order{background:var(--order)}.gantt-row .g-bar.def{background:var(--def)}.gantt-row .g-bar.adv{background:var(--adv)}
+  .gantt-row .gb-note{font-size:10.5px;color:#F1ECDD;padding:0 7px;white-space:nowrap;letter-spacing:.5px}
+
   /* ============ quote 金句 ============ */
   .quote{text-align:center;padding:46px 26px;background:var(--paper)}
   .quote .qr{width:38px;height:1px;background:var(--gold);margin:0 auto 24px}
@@ -413,6 +460,142 @@
       <span class="tag">时机</span>
       <div class="ct">9 月到 10 月，正是出城的好时候</div>
       <div class="cp">这段时间新茶上市、客流转旺，青州那两家弱对手根基又还没扎稳，正是进城的窗口。错过这个窗口拖到明年，对手多长了一岁，你口碑领先的优势也会跟着缩水。这种时机不常有，别错过。</div>
+    </div>
+  </section>
+
+  <!-- ============ 陆 · 体检评分 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-num serif">陆</div>
+      <div>
+        <div class="sec-title">经营体检</div>
+        <div class="sec-sub">五脏六腑挨个把脉，看哪块虚、哪块实</div>
+      </div>
+    </div>
+
+    <div class="gauge">
+      <div class="gauge-dial">
+        <svg class="gauge-svg" viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="综合评分 72">
+          <path d="M 18 105 A 82 82 0 0 1 182 105" fill="none" stroke="var(--green)" stroke-width="12" stroke-linecap="butt" opacity="0.85"/>
+          <path d="M 18 105 A 82 82 0 0 1 182 105" fill="none" stroke="var(--adv)" stroke-width="12" stroke-linecap="round" stroke-dasharray="185.48 257.61"/>
+          <text x="100" y="98" text-anchor="middle" class="gauge-num" fill="var(--adv)">72</text>
+          <text x="100" y="120" text-anchor="middle" class="gauge-cap">分</text>
+        </svg>
+        <div class="gauge-verdict serif">底子稳，藏隐忧</div>
+      </div>
+      <div class="gauge-items">
+        <div class="gauge-item">
+          <div class="gi-top"><span class="gi-label">品牌口碑<span class="gi-note">四成顾客记得住</span></span><span class="gi-score" style="color:var(--gold)">85</span></div>
+          <div class="gi-track"><div class="gi-fill" style="width:85%;background:var(--gold)"></div></div>
+        </div>
+        <div class="gauge-item">
+          <div class="gi-top"><span class="gi-label">复购率</span><span class="gi-score" style="color:var(--adv)">78</span></div>
+          <div class="gi-track"><div class="gi-fill" style="width:78%;background:var(--adv)"></div></div>
+        </div>
+        <div class="gauge-item">
+          <div class="gi-top"><span class="gi-label">团队梯队</span><span class="gi-score" style="color:var(--adv)">62</span></div>
+          <div class="gi-track"><div class="gi-fill" style="width:62%;background:var(--adv)"></div></div>
+        </div>
+        <div class="gauge-item">
+          <div class="gi-top"><span class="gi-label">现金流<span class="gi-note">四家店在贴钱</span></span><span class="gi-score" style="color:var(--def)">46</span></div>
+          <div class="gi-track"><div class="gi-fill" style="width:46%;background:var(--def)"></div></div>
+        </div>
+        <div class="gauge-item">
+          <div class="gi-top"><span class="gi-label">供应链</span><span class="gi-score" style="color:var(--risk)">38</span></div>
+          <div class="gi-track"><div class="gi-fill" style="width:38%;background:var(--risk)"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 柒 · 四象限 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-num serif">柒</div>
+      <div>
+        <div class="sec-title">攻守全局</div>
+        <div class="sec-sub">你的长短、外面的虚实，摆在一张图里看</div>
+      </div>
+    </div>
+
+    <div class="matrix">
+      <div></div>
+      <div class="mx-axis mx-ytop">有 利</div>
+      <div></div>
+      <div class="mx-axis mx-xleft">对 内</div>
+      <div class="mx-grid">
+        <div class="mx-quad">
+          <div class="mx-title"><span class="mx-dot win"></span>优势</div>
+          <ul class="mx-list"><li>本城品牌立住，四成顾客认牌</li><li>老客回头率 38%</li><li>可动用现金 620 万</li></ul>
+        </div>
+        <div class="mx-quad">
+          <div class="mx-title"><span class="mx-dot adv"></span>机会</div>
+          <ul class="mx-list"><li>青州对手都弱，无强敌</li><li>新茶旺季 9-10 月客流转旺</li></ul>
+        </div>
+        <div class="mx-quad">
+          <div class="mx-title"><span class="mx-dot risk"></span>劣势</div>
+          <ul class="mx-list"><li>4 家门店月月贴钱</li><li>旺店利润被亏损店抽走</li></ul>
+        </div>
+        <div class="mx-quad">
+          <div class="mx-title"><span class="mx-dot def"></span>威胁</div>
+          <ul class="mx-list"><li>临汀 7 家在抢，2 家很强</li><li>热门地段租金上行</li></ul>
+        </div>
+      </div>
+      <div class="mx-axis mx-xright">对 外</div>
+      <div></div>
+      <div class="mx-axis mx-ybot">不 利</div>
+      <div></div>
+    </div>
+  </section>
+
+  <!-- ============ 捌 · 作战排期 ============ -->
+  <section>
+    <div class="sec-head">
+      <div class="sec-num serif">捌</div>
+      <div>
+        <div class="sec-title">作战排期</div>
+        <div class="sec-sub">半年八周，什么时候动哪一步，一目了然</div>
+      </div>
+    </div>
+
+    <div class="gantt">
+      <div class="gantt-scale">
+        <span class="gt-cap">周</span>
+        <div class="gt-ticks">
+          <span class="gt-tick">1</span><span class="gt-tick">2</span><span class="gt-tick">3</span><span class="gt-tick">4</span>
+          <span class="gt-tick">5</span><span class="gt-tick">6</span><span class="gt-tick">7</span><span class="gt-tick">8</span>
+        </div>
+      </div>
+      <div class="gantt-row">
+        <span class="g-label">止血固本</span>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
+          <div class="g-bar risk" style="left:0%;width:25%"><span class="gb-note">关亏损店</span></div>
+        </div>
+      </div>
+      <div class="gantt-row">
+        <span class="g-label">现金归拢</span>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
+          <div class="g-bar" style="left:12.5%;width:25%"></div>
+        </div>
+      </div>
+      <div class="gantt-row">
+        <span class="g-label">青州探路</span>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
+          <div class="g-bar adv" style="left:12.5%;width:37.5%"><span class="gb-note">苏晚先行</span></div>
+        </div>
+      </div>
+      <div class="gantt-row">
+        <span class="g-label">首店落地</span>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
+          <div class="g-bar order" style="left:37.5%;width:37.5%"><span class="gb-note">林砚带队</span></div>
+        </div>
+      </div>
+      <div class="gantt-row">
+        <span class="g-label">复盘定夺</span>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
+          <div class="g-bar def" style="left:75%;width:25%"><span class="gb-note">进沧澜？</span></div>
+        </div>
+      </div>
     </div>
   </section>
 

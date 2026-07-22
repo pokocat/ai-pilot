@@ -168,6 +168,21 @@ function headOf(o: Record<string, unknown>): { h?: string; sub?: string } {
 function toRecords(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object') : [];
 }
+/** 数字强制转换：非数字/NaN 归 0。 */
+function numOf(value: unknown): number {
+  const n = typeof value === 'number' ? value : parseFloat(textOf(value));
+  return Number.isFinite(n) ? n : 0;
+}
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+/** 轴标签对（xLabels/yLabels）：取前两项，全空则 undefined。 */
+function pairOf(value: unknown): [string, string] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const a = textOf(value[0]);
+  const b = textOf(value[1]);
+  return a || b ? [a, b] : undefined;
+}
 function cellOf(c: unknown): DeliverableTableCell {
   if (typeof c === 'string') return c;
   if (typeof c === 'number' || typeof c === 'boolean') return String(c);
@@ -270,6 +285,54 @@ function typedSectionOf(o: Record<string, unknown>, type: string): DeliverableSe
       const sign = textOf(o.sign);
       return { type: 'letter', ...(salute ? { salute } : {}), paras, close, ...(sign ? { sign } : {}) };
     }
+    case 'gauge': {
+      const hasScore = o.score != null && Number.isFinite(Number(o.score));
+      const score = clamp(numOf(o.score), 0, 100);
+      const items = toRecords(o.items ?? o.parts).map((it) => {
+        const label = textOf(it.label ?? it.name ?? it.h);
+        if (!label) return null;
+        const s = clamp(numOf(it.score ?? it.value ?? it.v), 0, 100);
+        const note = textOf(it.note ?? it.desc);
+        return { label, score: s, ...(note ? { note } : {}) };
+      }).filter((x): x is { label: string; score: number; note?: string } => !!x).slice(0, 10);
+      if (!hasScore && !items.length) return null;
+      const verdict = textOf(o.verdict);
+      return { type: 'gauge', ...headOf(o), score, ...(verdict ? { verdict } : {}), ...(items.length ? { items } : {}) };
+    }
+    case 'matrix': {
+      let quads = toRecords(o.quads ?? o.items).map((q) => {
+        const title = textOf(q.title ?? q.h ?? q.name);
+        const toneRaw = textOf(q.tone);
+        const tone = TONE_SET.has(toneRaw as DeliverableTone) ? (toneRaw as DeliverableTone) : undefined;
+        const items = strArr(q.items ?? q.list ?? q.b, 8);
+        return { title, ...(tone ? { tone } : {}), items };
+      }).filter((q) => q.title || q.items.length);
+      if (!quads.length) return null;
+      quads = quads.slice(0, 4); // 截断到 4
+      while (quads.length < 4) quads.push({ title: '', items: [] }); // 补齐到 4
+      const xLabels = pairOf(o.xLabels ?? o.x);
+      const yLabels = pairOf(o.yLabels ?? o.y);
+      return { type: 'matrix', ...headOf(o), ...(xLabels ? { xLabels } : {}), ...(yLabels ? { yLabels } : {}), quads };
+    }
+    case 'gantt': {
+      const rows = toRecords(o.rows ?? o.items).map((r) => {
+        const label = textOf(r.label ?? r.h ?? r.name);
+        if (!label) return null;
+        let from = Math.max(1, Math.round(numOf(r.from ?? r.start) || 1));
+        let to = Math.max(1, Math.round(numOf(r.to ?? r.end) || from));
+        if (to < from) { const t = from; from = to; to = t; } // 保证 from <= to
+        const toneRaw = textOf(r.tone);
+        const tone = TONE_SET.has(toneRaw as DeliverableTone) ? (toneRaw as DeliverableTone) : undefined;
+        const note = textOf(r.note);
+        return { label, from, to, ...(tone ? { tone } : {}), ...(note ? { note } : {}) };
+      }).filter((x): x is { label: string; from: number; to: number; tone?: DeliverableTone; note?: string } => !!x).slice(0, 16);
+      if (!rows.length) return null;
+      const unitRaw = textOf(o.unit);
+      const unit = unitRaw === '周' || unitRaw === '旬' || unitRaw === '月' ? unitRaw : undefined;
+      const maxTo = rows.reduce((m, r) => Math.max(m, r.to), 1);
+      const total = Math.max(maxTo, Math.round(numOf(o.total))); // total 缺省/过小取最大 to
+      return { type: 'gantt', ...headOf(o), ...(unit ? { unit } : {}), total, rows };
+    }
     default:
       return null; // 未知 type：交回 sectionOf 走白卡降级
   }
@@ -348,8 +411,11 @@ export const DELIVERABLE_TOOL = {
           'table{h?,headers[],rows:[[单元格]]}=对比表，单元格为字符串或{text,trend}（trend∈[up,dn] 标涨跌）；' +
           'phases{h?,items:[{tab,when?,h,actions[],kpi?}]}=作战阶段卡，kpi 会渲染成「军令状」；' +
           'timeline{h?,items:[{when,h,d,highlight?}]}=时间轴，highlight=true 为金色关键节点；' +
+          'gauge{h?,score:0-100,verdict?,items?:[{label,score:0-100,note?}]}=评分盘（半环弧盘+分项横条），用于体检/诊断打分章，score 为总分、items 为分项得分；' +
+          'matrix{h?,xLabels?:[左,右],yLabels?:[上,下],quads:[{title,tone?,items[]}]}=四象限（2×2 直角格），用于 SWOT/优先级/风险格，quads 恰 4 个、顺序为左上→右上→左下→右下，tone 同 callout 五色；' +
+          'gantt{h?,unit?:周/旬/月,total?,rows:[{label,from,to,tone?,note?}]}=甘特泳道条，用于作战地图/排期，from/to 为起止刻度（含）、total 缺省取最大 to、tone 同五色默认深绿；' +
           'quote{text}=居中金句；letter{salute?,paras[],close,sign?}=军师手书收尾；' +
-          '不写 type = 白卡{h,b?,list?}。stats/roster/table/phases/timeline 的 h 是该章节标题（会配汉字序号）。',
+          '不写 type = 白卡{h,b?,list?}。stats/roster/table/phases/timeline/gauge/matrix/gantt 的 h 是该章节标题（会配汉字序号）。',
         items: {
           type: 'object',
           properties: {
@@ -376,7 +442,18 @@ export const DELIVERABLE_TOOL = {
               items: { type: 'object', properties: { name: { type: 'string' }, role: { type: 'string' }, desc: { type: 'string' } } },
             },
             headers: { type: 'array', items: { type: 'string' }, description: 'table 表头' },
-            rows: { type: 'array', description: 'table 数据行：二维数组，单元格为字符串或{text,trend}', items: { type: 'array' } },
+            rows: { type: 'array', description: 'table 数据行（二维数组，单元格为字符串或{text,trend}）；或 gantt 泳道行[{label,from,to,tone?,note?}]', items: {} },
+            score: { type: 'number', description: 'gauge 总评分（0-100）' },
+            verdict: { type: 'string', description: 'gauge 评语（如「稳健，有隐忧」，可选）' },
+            quads: {
+              type: 'array',
+              description: 'matrix 四象限：恰 4 个，顺序左上→右上→左下→右下，[{title,tone?,items[]}]',
+              items: { type: 'object', properties: { title: { type: 'string' }, tone: { type: 'string' }, items: { type: 'array', items: { type: 'string' } } } },
+            },
+            xLabels: { type: 'array', items: { type: 'string' }, description: 'matrix 横轴两端标签 [左,右]（可选）' },
+            yLabels: { type: 'array', items: { type: 'string' }, description: 'matrix 纵轴两端标签 [上,下]（可选）' },
+            unit: { type: 'string', description: 'gantt 刻度单位：周/旬/月（可选，默认周）' },
+            total: { type: 'number', description: 'gantt 总刻度数（可选，缺省取最大 to）' },
           },
         },
       },

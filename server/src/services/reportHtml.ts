@@ -24,18 +24,29 @@ function esc(s: string): string {
 function inlineHtml(s: string | undefined): string {
   return esc(s ?? '').replace(/\n/g, '<br>');
 }
-// 正文：空行分段为 <p class="b">，段内单换行转 <br>。
+// 正文数字强调：把「第N周/天/月…」与「N万/N%/N倍…」等数字片段轻度放大加金色（保守匹配，不碰年份/电话）。
+// 入参必须是已转义/含标签的 HTML；只在数字后紧跟单位时命中，裸数字串（年份 2026、电话号）不匹配。
+function emphNums(html: string): string {
+  return html
+    .replace(/(第\s*\d+\s*(?:周|旬|天|月|季度?|阶段|步|年|轮))/g, '<span class="num-emph">$1</span>')
+    .replace(/(\d+(?:\.\d+)?\s*(?:万|亿|%|％|倍|天|家|人|个|元|块|分|单))/g, '<span class="num-emph">$1</span>');
+}
+// 正文：空行分段为 <p class="b">，段内单换行转 <br>，数字片段加强调。
 function bodyHtml(b: string): string {
   const paras = esc(b).split(/\n{2,}/).map((p) => p.replace(/\n/g, '<br>')).filter(Boolean);
-  return paras.map((p) => `<p class="b">${p}</p>`).join('');
+  return paras.map((p) => `<p class="b">${emphNums(p)}</p>`).join('');
 }
 
 // callout tone(中文) → 语义色 class。
 const TONE_CLASS: Record<string, string> = { '机会': 'win', '风险': 'risk', '行动': 'order', '布局': 'def', '时机': 'adv' };
 
-// 章节头（汉字序号 + 标题 + 可选副标题）。
-function secHead(no: string, h: string, sub?: string): string {
-  return `<div class="sec-head"><div class="sec-num serif">${esc(no)}</div><div><div class="sec-title">${esc(h)}</div>${sub ? `<div class="sec-sub">${esc(sub)}</div>` : ''}</div></div>`;
+// 章节隔断带（汉字序号大字 + 细金线）：独立于章节卡之上，形成「隔断带 → 章节卡」的呼吸节奏。
+function secDivider(no: string): string {
+  return `<div class="sec-divider"><span class="sec-num serif">${esc(no)}</span><span class="sd-rule"></span></div>`;
+}
+// 章节标题（标题 + 可选副标题；序号已提到隔断带，这里不再重复）。
+function secTitle(h: string, sub?: string): string {
+  return `<div class="sec-head"><div><div class="sec-title">${esc(h)}</div>${sub ? `<div class="sec-sub">${esc(sub)}</div>` : ''}</div></div>`;
 }
 
 /* ───────── per-type 渲染 ───────── */
@@ -78,6 +89,75 @@ function timelineHtml(s: Extract<DeliverableSection, { type: 'timeline' }>): str
   const rows = s.items.map((it) => `<div class="tl${it.highlight ? ' gold' : ''}">${it.when ? `<div class="tl-when">${esc(it.when)}</div>` : ''}${it.h ? `<div class="tl-t">${esc(it.h)}</div>` : ''}${it.d ? `<div class="tl-d">${inlineHtml(it.d)}</div>` : ''}</div>`).join('');
   return `<div class="timeline">${rows}</div>`;
 }
+// 评分 → 语义色 CSS 变量（≥80 金 / 60-79 苍绿 / 40-59 黛青 / <40 赭赤）。
+function scoreVar(score: number): string {
+  if (score >= 80) return 'var(--gold)';
+  if (score >= 60) return 'var(--adv)';
+  if (score >= 40) return 'var(--def)';
+  return 'var(--risk)';
+}
+// gauge 评分盘：左侧半环弧盘（深绿轨 + 哑金/语义色进度弧 + 中央大数字 + verdict），右侧分项横条。
+// 弧盘用内联 SVG：同一条上半圆 path，进度弧靠 stroke-dasharray 截取，无 JS，单页长 PDF 完美兼容。
+function gaugeHtml(s: Extract<DeliverableSection, { type: 'gauge' }>): string {
+  const score = Math.max(0, Math.min(100, Math.round(s.score ?? 0)));
+  const r = 82, cx = 100, cy = 105;
+  const len = Math.PI * r; // 上半圆弧长
+  const dash = ((score / 100) * len).toFixed(2);
+  const arc = `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`; // sweep=1 → 上半圆
+  const col = scoreVar(score);
+  const dial = `<svg class="gauge-svg" viewBox="0 0 200 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="评分 ${score}">
+<path d="${arc}" fill="none" stroke="var(--green)" stroke-width="12" stroke-linecap="butt" opacity="0.85"/>
+<path d="${arc}" fill="none" stroke="${col}" stroke-width="12" stroke-linecap="round" stroke-dasharray="${dash} ${len.toFixed(2)}"/>
+<text x="${cx}" y="98" text-anchor="middle" class="gauge-num" fill="${col}">${score}</text>
+<text x="${cx}" y="120" text-anchor="middle" class="gauge-cap">分</text>
+</svg>`;
+  const verdict = s.verdict ? `<div class="gauge-verdict serif">${esc(s.verdict)}</div>` : '';
+  const bars = (s.items ?? []).map((it) => {
+    const v = Math.max(0, Math.min(100, Math.round(it.score ?? 0)));
+    const c = scoreVar(v);
+    const note = it.note ? `<span class="gi-note">${esc(it.note)}</span>` : '';
+    return `<div class="gauge-item"><div class="gi-top"><span class="gi-label">${esc(it.label)}${note}</span><span class="gi-score" style="color:${c}">${v}</span></div><div class="gi-track"><div class="gi-fill" style="width:${v}%;background:${c}"></div></div></div>`;
+  }).join('');
+  const right = bars ? `<div class="gauge-items">${bars}</div>` : '';
+  return `<div class="gauge"><div class="gauge-dial">${dial}${verdict}</div>${right}</div>`;
+}
+// matrix 四象限：2×2 直角格 + 轴标签在格外侧居中。quads 顺序 = 左上→右上→左下→右下。
+function matrixHtml(s: Extract<DeliverableSection, { type: 'matrix' }>): string {
+  const quads = (s.quads ?? []).slice(0, 4);
+  while (quads.length < 4) quads.push({ title: '', items: [] });
+  const cell = (q: { title: string; tone?: string; items: string[] }) => {
+    const cls = q.tone ? TONE_CLASS[q.tone] ?? 'def' : '';
+    const dot = q.title ? `<span class="mx-dot ${cls}"></span>` : '';
+    const title = q.title ? `<div class="mx-title">${dot}${esc(q.title)}</div>` : '';
+    const items = q.items?.length ? `<ul class="mx-list">${q.items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>` : '';
+    return `<div class="mx-quad">${title}${items}</div>`;
+  };
+  const grid = `<div class="mx-grid">${quads.map(cell).join('')}</div>`;
+  const yTop = s.yLabels?.[0] ? `<div class="mx-axis mx-ytop">${esc(s.yLabels[0])}</div>` : '<div></div>';
+  const yBot = s.yLabels?.[1] ? `<div class="mx-axis mx-ybot">${esc(s.yLabels[1])}</div>` : '<div></div>';
+  const xLeft = s.xLabels?.[0] ? `<div class="mx-axis mx-xleft">${esc(s.xLabels[0])}</div>` : '<div></div>';
+  const xRight = s.xLabels?.[1] ? `<div class="mx-axis mx-xright">${esc(s.xLabels[1])}</div>` : '<div></div>';
+  return `<div class="matrix"><div></div>${yTop}<div></div>${xLeft}${grid}${xRight}<div></div>${yBot}<div></div></div>`;
+}
+// gantt 泳道条：顶部刻度行（1…total）+ 每行 label + 按 from/to 百分比定位的色条。纯百分比布局，PDF 静态可靠。
+function ganttHtml(s: Extract<DeliverableSection, { type: 'gantt' }>): string {
+  const rows = s.rows ?? [];
+  const unit = s.unit ?? '周';
+  const total = Math.max(1, s.total ?? rows.reduce((m, r) => Math.max(m, r.to), 1));
+  const grid = `background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/${total}) 100%`;
+  const scaleCells = Array.from({ length: total }, (_, i) => `<span class="gt-tick">${i + 1}</span>`).join('');
+  const scale = `<div class="gantt-scale"><span class="gt-cap">${esc(unit)}</span><div class="gt-ticks">${scaleCells}</div></div>`;
+  const rowsHtml = rows.map((r) => {
+    const from = Math.max(1, Math.min(total, r.from));
+    const to = Math.max(from, Math.min(total, r.to));
+    const left = ((from - 1) / total * 100).toFixed(3);
+    const width = ((to - from + 1) / total * 100).toFixed(3);
+    const cls = r.tone ? TONE_CLASS[r.tone] ?? '' : '';
+    const note = r.note ? `<span class="gb-note">${esc(r.note)}</span>` : '';
+    return `<div class="gantt-row"><span class="g-label">${esc(r.label)}</span><div class="g-track" style="${grid}"><div class="g-bar ${cls}" style="left:${left}%;width:${width}%">${note}</div></div></div>`;
+  }).join('');
+  return `<div class="gantt">${scale}${rowsHtml}</div>`;
+}
 function quoteHtml(s: Extract<DeliverableSection, { type: 'quote' }>): string {
   return `<div class="quote"><div class="qr"></div><p class="qt serif">${inlineHtml(s.text)}</p><div class="qb"></div><div class="qcite">— ${esc(s.cite || '军师谨识')}</div></div>`;
 }
@@ -88,33 +168,40 @@ function letterHtml(s: Extract<DeliverableSection, { type: 'letter' }>): string 
   const sign = s.sign ? `<div class="sign">${esc(s.sign)}</div>` : '';
   return `<div class="letter"><h3>军 师 手 书</h3>${salute}${paras}${close}${sign}</div>`;
 }
-// 旧版白卡（无 type）+ 未知 type 降级：纸白章节卡。
-function basicHtml(s: DeliverableSection, no: string): string {
-  const head = s.h ? secHead(no, s.h, s.sub) : '';
+// 章节计数上下文：next() 返回下一章节的阿拉伯序号（用于汉字序号 + 交替底色奇偶判定）。
+interface ChapterCtx { next: () => number; }
+
+// 章节卡包装：有 h → 隔断带（汉字序号大字 + 金线）+ 交替底色章节卡；无 h → 裸章节卡（不占序号、不加隔断）。
+function chapterWrap(s: DeliverableSection, ctx: ChapterCtx, inner: string): string {
+  if (!s.h) return `<section class="chapter">${inner}</section>`;
+  const n = ctx.next();
+  const alt = n % 2 === 0 ? ' alt' : ''; // 奇偶交替：壹=纸白，贰=米白略深
+  return `${secDivider(cnIndex(n))}<section class="chapter${alt}">${secTitle(s.h, s.sub)}${inner}</section>`;
+}
+
+// 旧版白卡（无 type）+ 未知 type 降级：纸白章节卡（正文/列表走数字强调）。
+function basicHtml(s: DeliverableSection, ctx: ChapterCtx): string {
   const body = s.b ? bodyHtml(s.b) : '';
-  const list = s.list?.length ? `<ul>${s.list.map((li) => `<li>${esc(li)}</li>`).join('')}</ul>` : '';
-  const inner = body + list || '<p class="b muted">（本节待补充）</p>';
-  return `<section>${head}<div class="pcard">${inner}</div></section>`;
+  const list = s.list?.length ? `<ul>${s.list.map((li) => `<li>${emphNums(esc(li))}</li>`).join('')}</ul>` : '';
+  const inner = `<div class="pcard">${body + list || '<p class="b muted">（本节待补充）</p>'}</div>`;
+  return chapterWrap(s, ctx, inner);
 }
 
-// 章节型（stats/roster/table/phases/timeline）：有 h 则配汉字序号章节头。
-function chapter(s: DeliverableSection, no: () => string, inner: string): string {
-  const head = s.h ? secHead(no(), s.h, s.sub) : '';
-  return `<section>${head}${inner}</section>`;
-}
-
-function renderSection(s: DeliverableSection, nextNo: () => string): string {
+function renderSection(s: DeliverableSection, ctx: ChapterCtx): string {
   switch (s.type) {
     case 'hero': return heroHtml(s);
     case 'callout': return calloutHtml(s);
     case 'quote': return quoteHtml(s);
     case 'letter': return letterHtml(s);
-    case 'stats': return chapter(s, nextNo, statsHtml(s));
-    case 'roster': return chapter(s, nextNo, rosterHtml(s));
-    case 'table': return chapter(s, nextNo, tableHtml(s));
-    case 'phases': return chapter(s, nextNo, phasesHtml(s));
-    case 'timeline': return chapter(s, nextNo, timelineHtml(s));
-    default: return basicHtml(s, s.h ? nextNo() : ''); // 白卡 + 未知 type 降级
+    case 'stats': return chapterWrap(s, ctx, statsHtml(s));
+    case 'roster': return chapterWrap(s, ctx, rosterHtml(s));
+    case 'table': return chapterWrap(s, ctx, tableHtml(s));
+    case 'phases': return chapterWrap(s, ctx, phasesHtml(s));
+    case 'timeline': return chapterWrap(s, ctx, timelineHtml(s));
+    case 'gauge': return chapterWrap(s, ctx, gaugeHtml(s));
+    case 'matrix': return chapterWrap(s, ctx, matrixHtml(s));
+    case 'gantt': return chapterWrap(s, ctx, ganttHtml(s));
+    default: return basicHtml(s, ctx); // 白卡 + 未知 type 降级
   }
 }
 
@@ -140,8 +227,8 @@ ${motto ? `<p class="cover-motto">「${inlineHtml(motto)}」</p>` : ''}
 /** Deliverable → 自包含战略报告 HTML（报告 V2 案卷视觉：米纸/深绿/哑金/直角/宋体/田字格印章）。 */
 export function renderReportHtml(d: Deliverable): string {
   let chapterNo = 0;
-  const nextNo = () => cnIndex((chapterNo += 1));
-  const sections = (d.sections ?? []).map((s) => renderSection(s, nextNo)).join('\n');
+  const ctx: ChapterCtx = { next: () => (chapterNo += 1) };
+  const sections = (d.sections ?? []).map((s) => renderSection(s, ctx)).join('\n');
   const body = sections || '<section><div class="pcard"><p class="b muted">（暂无内容）</p></div></section>';
   const trust = (d.trust && d.trust.trim()) || DEFAULT_TRUST;
   return `<!DOCTYPE html>
@@ -150,7 +237,7 @@ export function renderReportHtml(d: Deliverable): string {
 <title>${esc(d.title)} · 军师参谋部</title>
 <style>
 :root{
-  --paper:#ECE7DA;--card:#FBFAF6;--green:#1E5A43;--green-cover:linear-gradient(150deg,#1E5A43,#163F30);
+  --paper:#ECE7DA;--card:#FBFAF6;--card2:#F6F3EA;--green:#1E5A43;--green-cover:linear-gradient(150deg,#1E5A43,#163F30);
   --gold:#9B7C3F;--ink:#2A2E2A;--ink2:#6B6F66;
   --win:#9B7C3F;--risk:#8C3B2E;--order:#A63D2F;--def:#2F4C5C;--adv:#3F6B4F;
   --line:rgba(42,46,42,.14);
@@ -164,10 +251,19 @@ body{font-family:var(--sans);color:var(--ink);line-height:1.9;font-size:14px;-we
 .wrap{max-width:720px;margin:0 auto;background:var(--paper)}
 .serif{font-family:var(--serif)}
 section{padding:38px 22px}
+/* 章节隔断带（汉字序号 + 细金线）→ 章节卡：呼吸节奏 */
+.sec-divider{display:flex;align-items:center;gap:16px;padding:40px 22px 0}
+.sec-divider .sec-num{font-family:var(--serif);font-size:46px;line-height:.9;color:rgba(155,124,63,.5);flex:0 0 auto}
+.sec-divider .sd-rule{flex:1;height:1px;background:linear-gradient(to right,rgba(155,124,63,.5),rgba(155,124,63,.05))}
+/* 章节卡（交替底色：奇=纸白，偶=米白略深，长文滚动明暗呼吸） */
+section.chapter{padding:18px 22px 34px;background:var(--card)}
+section.chapter.alt{background:var(--card2)}
 .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:24px;border-bottom:1px solid var(--line);padding-bottom:14px}
 .sec-num{font-family:var(--serif);font-size:40px;line-height:1;color:rgba(155,124,63,.55);flex:0 0 auto}
 .sec-title{font-family:var(--serif);font-size:21px;color:var(--ink);letter-spacing:1px}
 .sec-sub{font-size:12px;color:var(--ink2);margin-top:3px;letter-spacing:.5px}
+/* 正文数字强调 */
+.num-emph{color:var(--gold);font-size:1.12em;letter-spacing:.3px}
 /* 白卡（旧版兼容） */
 .pcard .b{font-size:14px;color:var(--ink);margin:0 0 12px;line-height:1.95}
 .pcard .b:last-child{margin-bottom:0}
@@ -260,6 +356,44 @@ td .up,th .up{color:var(--adv)}td .dn,th .dn{color:var(--risk)}
 .tl.gold .tl-when{color:var(--gold)}
 .tl-t{font-size:14px;color:var(--ink);margin:2px 0 3px;font-weight:600}
 .tl-d{font-size:12.5px;color:var(--ink2);line-height:1.85}
+/* gauge 评分盘 */
+.gauge{display:flex;flex-wrap:wrap;gap:22px 26px;align-items:flex-start;background:var(--card);border:1px solid var(--line);padding:22px 20px}
+.gauge-dial{flex:0 0 auto;text-align:center;width:190px;max-width:100%;margin:0 auto}
+.gauge-svg{width:100%;height:auto;display:block}
+.gauge-num{font-family:var(--serif);font-size:46px}
+.gauge-cap{font-family:var(--serif);font-size:13px;fill:var(--ink2)}
+.gauge-verdict{font-size:13px;color:var(--ink);letter-spacing:1px;margin-top:2px}
+.gauge-items{flex:1 1 240px;min-width:220px;display:flex;flex-direction:column;gap:13px}
+.gauge-item .gi-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:5px}
+.gauge-item .gi-label{font-size:13px;color:var(--ink)}
+.gauge-item .gi-note{font-size:11px;color:var(--ink2);margin-left:6px}
+.gauge-item .gi-score{font-family:var(--serif);font-size:16px;flex:0 0 auto}
+.gauge-item .gi-track{height:6px;background:rgba(42,46,42,.09)}
+.gauge-item .gi-fill{height:100%}
+/* matrix 四象限 */
+.matrix{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto 1fr auto;gap:6px 8px;align-items:center}
+.matrix .mx-axis{font-family:var(--serif);font-size:12px;color:var(--gold);letter-spacing:1px;text-align:center}
+.matrix .mx-xleft,.matrix .mx-xright{writing-mode:vertical-rl;justify-self:center}
+.mx-grid{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-left:none;border-top:none;background:var(--card)}
+.mx-quad{border-left:1px solid var(--line);border-top:1px solid var(--line);padding:13px 14px;min-height:96px}
+.mx-title{font-family:var(--serif);font-size:14px;color:var(--ink);margin-bottom:8px;display:flex;align-items:center;gap:7px}
+.mx-dot{width:10px;height:10px;flex:0 0 auto;background:var(--gold)}
+.mx-dot.win{background:var(--win)}.mx-dot.risk{background:var(--risk)}.mx-dot.order{background:var(--order)}.mx-dot.def{background:var(--def)}.mx-dot.adv{background:var(--adv)}
+.mx-list{list-style:none;margin:0;padding:0}
+.mx-list li{font-size:12px;color:var(--ink2);line-height:1.75;padding-left:12px;position:relative}
+.mx-list li::before{content:"·";position:absolute;left:2px;top:-1px;color:var(--gold);font-size:14px}
+/* gantt 泳道条 */
+.gantt{background:var(--card);border:1px solid var(--line);padding:16px 16px 18px}
+.gantt-scale{display:flex;align-items:flex-end;margin-bottom:10px}
+.gantt-scale .gt-cap{width:88px;flex:0 0 auto;font-family:var(--serif);font-size:11.5px;color:var(--gold);letter-spacing:1px}
+.gantt-scale .gt-ticks{flex:1;display:flex}
+.gantt-scale .gt-tick{flex:1;text-align:center;font-size:10.5px;color:var(--ink2);font-family:var(--serif)}
+.gantt-row{display:flex;align-items:center;margin-top:9px}
+.gantt-row .g-label{width:88px;flex:0 0 auto;font-size:12px;color:var(--ink);padding-right:8px;line-height:1.4}
+.gantt-row .g-track{flex:1;position:relative;height:22px;background-repeat:repeat}
+.gantt-row .g-bar{position:absolute;top:3px;bottom:3px;background:var(--green);display:flex;align-items:center;overflow:hidden}
+.gantt-row .g-bar.win{background:var(--win)}.gantt-row .g-bar.risk{background:var(--risk)}.gantt-row .g-bar.order{background:var(--order)}.gantt-row .g-bar.def{background:var(--def)}.gantt-row .g-bar.adv{background:var(--adv)}
+.gantt-row .gb-note{font-size:10.5px;color:#F1ECDD;padding:0 7px;white-space:nowrap;letter-spacing:.5px}
 /* quote */
 .quote{text-align:center;padding:46px 26px;background:var(--paper)}
 .quote .qr{width:38px;height:1px;background:var(--gold);margin:0 auto 24px}
@@ -285,9 +419,12 @@ footer .fsmall{font-size:10.5px;color:var(--ink2);line-height:2;margin-top:12px;
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .cover{min-height:auto;padding-top:72px;padding-bottom:72px;page-break-after:always}
   section{padding:28px 22px}
+  section.chapter{padding:14px 22px 26px}
+  .sec-divider{padding-top:26px;page-break-after:avoid}
   .sec-head{page-break-after:avoid}
   .callout,.stat,.person,.phase,.quote,.tl,.hero,.letter{page-break-inside:avoid}
   .stats,.roster,.tbl-wrap,table,tr,.timeline{page-break-inside:avoid}
+  .gauge,.matrix,.mx-quad,.gantt,.gantt-row{page-break-inside:avoid}
   footer{page-break-inside:avoid}
 }
 </style></head>

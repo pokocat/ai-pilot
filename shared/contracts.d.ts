@@ -411,6 +411,12 @@ export interface DeliverableSectionTimeline extends DeliverableSectionCommon { t
 export interface DeliverableSectionQuote extends DeliverableSectionCommon { type: 'quote'; text: string; cite?: string; }
 /** letter 军师手书（满宽收尾，不套章节卡） */
 export interface DeliverableSectionLetter extends DeliverableSectionCommon { type: 'letter'; salute?: string; paras: string[]; close: string; sign?: string; }
+/** gauge 评分盘（体检/诊断章）：score 主盘（半环弧盘）+ items 分项横条 */
+export interface DeliverableSectionGauge extends DeliverableSectionCommon { type: 'gauge'; score: number; verdict?: string; items?: { label: string; score: number; note?: string }[]; }
+/** matrix 四象限（SWOT/优先级/风险格）：quads 恰 4 个，顺序左上→右上→左下→右下 */
+export interface DeliverableSectionMatrix extends DeliverableSectionCommon { type: 'matrix'; xLabels?: [string, string]; yLabels?: [string, string]; quads: { title: string; tone?: DeliverableTone; items: string[] }[]; }
+/** gantt 泳道条（作战地图/排期）：rows 按 from/to 定位色条（tone 走语义五色，默认深绿） */
+export interface DeliverableSectionGantt extends DeliverableSectionCommon { type: 'gantt'; unit?: '周' | '旬' | '月'; total?: number; rows: { label: string; from: number; to: number; tone?: DeliverableTone; note?: string }[]; }
 
 export type DeliverableSection =
   | DeliverableSectionBasic
@@ -422,7 +428,10 @@ export type DeliverableSection =
   | DeliverableSectionPhases
   | DeliverableSectionTimeline
   | DeliverableSectionQuote
-  | DeliverableSectionLetter;
+  | DeliverableSectionLetter
+  | DeliverableSectionGauge
+  | DeliverableSectionMatrix
+  | DeliverableSectionGantt;
 
 /** 报告封面文案（AI 生成；badge/印章/meta 落款由模板固定）。无则用 Deliverable.title 兜底。 */
 export interface DeliverableCover { title: string; subtitle?: string; motto?: string; }

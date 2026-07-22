@@ -23,6 +23,9 @@ function cardSection(sec: Section): { h: string; b?: string; list?: string[] } {
     case 'timeline': return { h: s.h || '时间节奏', list: (s.items ?? []).map((it: any) => `${it.when}　${it.h}${it.d ? `：${it.d}` : ''}`) };
     case 'quote': return { h: '金句', b: `「${s.text}」` };
     case 'letter': return { h: '军师手书', b: [s.salute, ...(s.paras ?? []), s.close, s.sign].filter(Boolean).join('\n\n') };
+    case 'gauge': return { h: `评分 ${s.score ?? 0}/100${s.verdict ? ` ${s.verdict}` : ''}`, list: (s.items ?? []).map((it: any) => `${it.label} ${it.score}分${it.note ? ` ${it.note}` : ''}`) };
+    case 'matrix': return { h: s.h || '四象限', list: (s.quads ?? []).filter((q: any) => q && (q.title || (q.items && q.items.length))).map((q: any) => `${q.title || ''}${q.tone ? `（${q.tone}）` : ''}：${(q.items ?? []).join('、')}`) };
+    case 'gantt': return { h: s.h || '排期', list: (s.rows ?? []).map((r: any) => `${r.label}　第${r.from}-${r.to}${s.unit ?? '周'}${r.note ? ` · ${r.note}` : ''}`) };
     default: return { h: s.h || '', b: s.b, list: Array.isArray(s.list) ? s.list : undefined };
   }
 }

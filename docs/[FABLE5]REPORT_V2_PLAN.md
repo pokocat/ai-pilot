@@ -28,6 +28,9 @@ section 增加 `type` 判别字段，新增类型（字段最小化）：
 | `timeline` | items[{when, h, d, highlight?}] | 时间轴（highlight=金色关键节点） |
 | `quote` | text | 居中金句 |
 | `letter` | salute?, paras[], close, sign? | 军师手书（收尾） |
+| `gauge` | score(0-100), verdict?, items[{label, score, note?}] | 评分盘（半环弧盘 + 分项横条，体检/诊断章；SVG 内联直出） |
+| `matrix` | xLabels?, yLabels?, quads[{title, tone?, items[]}]（恰 4 个） | 四象限（2×2 直角格，SWOT/优先级/风险格） |
+| `gantt` | unit?, total?, rows[{label, from, to, tone?, note?}] | 甘特泳道条（作战地图/排期，百分比布局静态可靠） |
 
 顶层 Deliverable 增加 `cover?: {title, subtitle?, motto?}`（封面文案 AI 生成；badge/印章/meta 由模板固定）。**向后兼容**：无 `type` 的旧 `{h,b,list}` section 按现行白卡渲染，存量消息不受影响。
 

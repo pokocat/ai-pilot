@@ -95,6 +95,68 @@ describe('normalizeDeliverableSections · 类型化', () => {
     assert.equal(normalizeDeliverableSections([{ type: 'quote', text: '' }]).length, 0);
   });
 
+  test('gauge：score clamp 0-100，items 分数 clamp，脏 item 丢弃', () => {
+    const [s] = normalizeDeliverableSections([{ type: 'gauge', h: '体检', score: 172, verdict: '底子稳', items: [
+      { label: '现金流', score: -20, note: '紧' },
+      { label: '复购', score: 78 },
+      { score: 60 }, // 缺 label → 丢
+    ] }]);
+    assert.equal(s.type, 'gauge');
+    assert.equal((s as any).score, 100); // 172 clamp 到 100
+    assert.equal((s as any).verdict, '底子稳');
+    assert.equal((s as any).items.length, 2);
+    assert.equal((s as any).items[0].score, 0); // -20 clamp 到 0
+    assert.equal((s as any).items[0].note, '紧');
+  });
+
+  test('gauge：字符串数字 coerce；无 score 无 items → 丢弃', () => {
+    const [s] = normalizeDeliverableSections([{ type: 'gauge', score: '66' }]);
+    assert.equal((s as any).score, 66);
+    assert.equal(normalizeDeliverableSections([{ type: 'gauge', verdict: '只有评语' }]).length, 0);
+  });
+
+  test('matrix：quads 补齐到 4；非法 tone 剔除；轴标签成对', () => {
+    const [s] = normalizeDeliverableSections([{ type: 'matrix', xLabels: ['对内', '对外'], yLabels: ['有利', '不利'], quads: [
+      { title: '优势', tone: '机会', items: ['品牌立住'] },
+      { title: '劣势', tone: '瞎写', items: ['亏损店'] },
+    ] }]);
+    assert.equal(s.type, 'matrix');
+    assert.equal((s as any).quads.length, 4); // 补齐到 4
+    assert.equal((s as any).quads[0].tone, '机会');
+    assert.equal((s as any).quads[1].tone, undefined); // 非法 tone 剔除
+    assert.deepEqual((s as any).xLabels, ['对内', '对外']);
+    assert.equal((s as any).quads[2].title, ''); // 补齐的空象限
+  });
+
+  test('matrix：quads 截断到 4；全空 → 丢弃', () => {
+    const [s] = normalizeDeliverableSections([{ type: 'matrix', quads: [
+      { title: 'A', items: [] }, { title: 'B', items: [] }, { title: 'C', items: [] }, { title: 'D', items: [] }, { title: 'E', items: [] },
+    ] }]);
+    assert.equal((s as any).quads.length, 4);
+    assert.equal(normalizeDeliverableSections([{ type: 'matrix', quads: [{}, {}] }]).length, 0);
+  });
+
+  test('gantt：from>to 交换；total 缺省取最大 to；unit 校验；数字 coerce', () => {
+    const [s] = normalizeDeliverableSections([{ type: 'gantt', unit: '旬', rows: [
+      { label: '止血', from: 3, to: 1, tone: '风险', note: '关店' }, // from>to → 交换
+      { label: '探路', from: '2', to: '5' }, // 字符串 coerce
+    ] }]);
+    assert.equal(s.type, 'gantt');
+    assert.equal((s as any).unit, '旬');
+    assert.equal((s as any).rows[0].from, 1);
+    assert.equal((s as any).rows[0].to, 3);
+    assert.equal((s as any).rows[0].tone, '风险');
+    assert.equal((s as any).rows[1].to, 5);
+    assert.equal((s as any).total, 5); // 缺省取最大 to
+  });
+
+  test('gantt：非法 unit 归 undefined；total 过小抬到最大 to；无行 → 丢弃', () => {
+    const [s] = normalizeDeliverableSections([{ type: 'gantt', unit: '年', total: 2, rows: [{ label: 'x', from: 1, to: 6 }] }]);
+    assert.equal((s as any).unit, undefined);
+    assert.equal((s as any).total, 6);
+    assert.equal(normalizeDeliverableSections([{ type: 'gantt', rows: [{ from: 1, to: 2 }] }]).length, 0); // 无 label
+  });
+
   test('未知 type → 若有 h/b 降级为白卡，否则丢弃', () => {
     const [s] = normalizeDeliverableSections([{ type: 'wat', h: '标题', b: '正文' }]);
     assert.equal(s.type, undefined);
@@ -177,6 +239,74 @@ describe('renderReportHtml · 类型化渲染', () => {
     ]));
     assert.match(html, /class="sec-num serif">壹</);
     assert.match(html, /class="sec-num serif">贰</);
+  });
+
+  test('gauge 渲染 SVG 弧盘 + 中央大数字 + 分项横条', () => {
+    const html = renderReportHtml(base([{ type: 'gauge', h: '经营体检', score: 72, verdict: '底子稳', items: [{ label: '现金流', score: 46, note: '偏紧' }] }]));
+    assert.match(html, /class="gauge"/);
+    assert.match(html, /<svg class="gauge-svg"/);
+    assert.match(html, /class="gauge-num"[^>]*>72</);
+    assert.match(html, /底子稳/);
+    assert.match(html, /class="gi-fill" style="width:46%/);
+    assert.match(html, /偏紧/);
+  });
+
+  test('gauge 分数分档配色（≥80金 / <40赭赤）', () => {
+    const hi = renderReportHtml(base([{ type: 'gauge', score: 90, items: [] }]));
+    assert.match(hi, /class="gauge-num" fill="var\(--gold\)"/);
+    const lo = renderReportHtml(base([{ type: 'gauge', score: 20, items: [] }]));
+    assert.match(lo, /class="gauge-num" fill="var\(--risk\)"/);
+  });
+
+  test('matrix 渲染 2×2 直角格 + tone 色块 + 轴标签', () => {
+    const html = renderReportHtml(base([{ type: 'matrix', xLabels: ['对内', '对外'], yLabels: ['有利', '不利'], quads: [
+      { title: '优势', tone: '机会', items: ['品牌立住'] },
+      { title: '机会', tone: '时机', items: ['旺季'] },
+      { title: '劣势', items: ['亏损店'] },
+      { title: '威胁', tone: '布局', items: ['强敌'] },
+    ] }]));
+    assert.match(html, /class="mx-grid"/);
+    assert.match(html, /class="mx-dot win"/); // 机会 → win 金
+    assert.match(html, /class="mx-axis mx-ytop">有利</);
+    assert.match(html, /class="mx-axis mx-xleft">对内</);
+    assert.match(html, /品牌立住/);
+  });
+
+  test('gantt 渲染刻度行 + 按 from/to 定位色条', () => {
+    const html = renderReportHtml(base([{ type: 'gantt', unit: '周', total: 8, rows: [
+      { label: '止血', from: 1, to: 2, tone: '风险', note: '关店' },
+      { label: '首店', from: 4, to: 6, tone: '行动' },
+    ] }]));
+    assert.match(html, /class="gantt"/);
+    assert.match(html, /class="gt-tick">8</); // 刻度到 8
+    assert.match(html, /class="g-bar risk" style="left:0.000%;width:25.000%/);
+    assert.match(html, /class="g-bar order" style="left:37.500%;width:37.500%/);
+    assert.match(html, /class="gb-note">关店</);
+  });
+
+  test('三新型脏数据不 crash', () => {
+    assert.doesNotThrow(() => renderReportHtml(base([
+      { type: 'gauge' } as any, { type: 'matrix' } as any, { type: 'gantt' } as any,
+    ])));
+  });
+
+  test('节奏：章节隔断带（汉字序号）+ 交替底色（偶数章 alt）', () => {
+    const html = renderReportHtml(base([
+      { type: 'stats', h: '家底', items: [{ num: '12', label: '门店' }] },
+      { type: 'table', h: '三城对比', headers: ['a'], rows: [['b']] },
+    ]));
+    assert.match(html, /class="sec-divider"><span class="sec-num serif">壹</); // 隔断带
+    assert.match(html, /class="chapter">/); // 壹（奇）不带 alt
+    assert.match(html, /class="chapter alt">/); // 贰（偶）带 alt
+  });
+
+  test('节奏：白卡正文数字强调（第N周 / N万 / N%），年份/长串不动', () => {
+    const html = renderReportHtml(base([{ h: '节奏', b: '第 3 周月流水 240 万，增长 12%，2026 年立项，电话 13800001111。' }]));
+    assert.match(html, /<span class="num-emph">第 3 周<\/span>/);
+    assert.match(html, /<span class="num-emph">240 万<\/span>/);
+    assert.match(html, /<span class="num-emph">12%<\/span>/);
+    assert.doesNotMatch(html, /class="num-emph">2026/); // 年份不强调
+    assert.doesNotMatch(html, /class="num-emph">13800001111/); // 电话不强调
   });
 
   test('封面用 cover 文案；无 cover 用 title 兜底', () => {
