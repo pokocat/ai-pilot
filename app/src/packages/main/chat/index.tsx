@@ -1082,16 +1082,26 @@ export default function Chat() {
   };
 
   // 认可方案：存入方案库（桥接一版报告）+ 服务端生成案卷军令 → 去执行页承接打卡与回填
+  // 点击即出 loading + 防连点（2026-07-22 事故教训：接口一慢用户连点 8 次还以为按钮坏了）
+  const acceptingRef = useRef(false);
   const acceptPlan = async (d: Deliverable, messageId?: string) => {
-    const r = await acceptDeliverable(d, agent?.name || '军师', forceTag || undefined).catch(() => null);
-    if (!r) { Taro.showToast({ title: '案卷生成失败，请重试', icon: 'none' }); return; }
-    if (!r.newOrders && r.skippedOrders) {
-      Taro.showToast({ title: '这份方案已转成军令，不重复添加', icon: 'none' });
-      return;
+    if (acceptingRef.current) return;
+    acceptingRef.current = true;
+    Taro.showLoading({ title: '军令拟定中…', mask: true });
+    try {
+      const r = await acceptDeliverable(d, agent?.name || '军师', forceTag || undefined).catch(() => null);
+      Taro.hideLoading();
+      if (!r) { Taro.showToast({ title: '案卷生成未成，稍后再试', icon: 'none' }); return; }
+      if (!r.newOrders && r.skippedOrders) {
+        Taro.showToast({ title: '这份方案已转成军令，不重复添加', icon: 'none' });
+        return;
+      }
+      await saveDeliverable(d, messageId);
+      Taro.showToast({ title: r.newOrders ? `已生成案卷 · ${r.newOrders} 条军令待执行` : '已生成案卷', icon: 'none' });
+      setTimeout(() => Taro.switchTab({ url: '/pages/studio/index' }), 620);
+    } finally {
+      acceptingRef.current = false;
     }
-    await saveDeliverable(d, messageId);
-    Taro.showToast({ title: r.newOrders ? `已生成案卷 · ${r.newOrders} 条军令待执行` : '已生成案卷', icon: 'none' });
-    setTimeout(() => Taro.switchTab({ url: '/pages/studio/index' }), 620);
   };
 
   // 转成军令：把本轮最新的结构化成果转为今日军令（无成果则引导先产出）
