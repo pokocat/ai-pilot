@@ -1,5 +1,5 @@
 // 公开报告页:GET /api/r/:id → 返回服务端渲染的 HTML(凭不可猜 id 访问,不鉴权,供分享/发朋友圈)。
-// GET /api/r/:id/pdf → 同一份报告的 A4 PDF 下载（凭同一 id，公开；OSS 确定性 key 缓存，不动 DB schema）。
+// GET /api/r/:id/pdf → 同一份报告的单页长 PDF 下载（与网页等长、不分页；凭同一 id，公开；OSS 确定性 key 缓存，不动 DB schema）。
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { ossConfigured, ossGetBuffer, ossPutBuffer } from '../services/ossUpload.js';

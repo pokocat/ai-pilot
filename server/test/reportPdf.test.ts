@@ -18,9 +18,9 @@ describe('reportPdf 服务（纯函数）', () => {
     assert.ok(buf.toString('latin1').startsWith('%PDF-1.4'));
   });
 
-  test('缓存 key 确定性推导：{prefix?}pdf/{id}.pdf', () => {
-    // 测试环境未配 OSS 前缀 → 无前缀。
-    assert.equal(reportPdfKey('abc123'), 'pdf/abc123.pdf');
+  test('缓存 key 确定性推导：{prefix?}pdf/{id}-long.pdf（单页长 PDF 版本位，与旧分页缓存分离）', () => {
+    // 测试环境未配 OSS 前缀 → 无前缀。-long 后缀确保旧分页版 pdf/{id}.pdf 不会被命中。
+    assert.equal(reportPdfKey('abc123'), 'pdf/abc123-long.pdf');
   });
 
   test('Content-Disposition：UTF-8 文件名 + 纯 ASCII 兜底', () => {
