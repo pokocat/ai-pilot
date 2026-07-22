@@ -1,89 +1,160 @@
-// 报告 V2 · 生产提示词写回脚本（配套 docs/[FABLE5]REPORT_V2_PROMPT_PATCH.md）
+// 报告 V2 · 生产提示词写回脚本 —— 第二轮：组件使用密度铁律 + 三新组件（gauge/matrix/gantt）
+// 配套文档：docs/[FABLE5]REPORT_V2_PROMPT_PATCH.md（V6.1 追加修订 · 2026-07-22）
 //
-// 做什么：给指定 agent 的 systemPrompt 追加「报告产出规范 V2」段（9 型 section、情绪弧线、
-// 文风、称谓「老板」、禁 Markdown、封面），并声明覆盖旧的产出规范；若该 agent 有已发布
+// 说明：本脚本取代上一轮「9 型 V2 追加脚本」（git a809916，如仍需补 9 型可从历史取回）。
+// 上一轮把 9 型/情绪弧线/文风/称谓/封面 追加进 systemPrompt；本轮在其基础上「按锚点插入」
+// 一段《报告组件使用密度铁律》+《三新组件使用时机与字段》，根治「整份报告全是白卡文字墙」。
+//
+// 做什么：给 strat agent 的 systemPrompt 在锚点处「插入」本轮修订段；若该 agent 有已发布
 // 版本快照（publishedVersionId），同步更新快照（C 端实际读快照，两处都改才生效——见 memory 教训）。
 //
-// 安全设计：改前把两处原文备份到 /tmp/prompt-<key>-<时间戳>.bak.txt；幂等（检测到 V2 标记则拒绝重复追加）。
+// 安全设计：
+//   - 改前把待改文本原样备份到 /tmp/strat-prompt.backup.<时间戳>.txt（Agent 行）
+//     与 /tmp/strat-prompt.backup.<时间戳>.pubver.txt（快照，若有）。
+//   - 幂等：检测到本轮标志串（MARKER）则拒绝重复插入。
+//   - 锚点缺失兜底：任一 ANCHORS 都找不到时，append 到 prompt 末尾并 console.warn（不静默）。
+//   - --dry-run：只打印 diff 摘要（锚点命中情况 / 插入位置 / 新旧长度 / 上下文预览），不写库。
 //
-// 用法（在生产服务器上）：
+// 用法（在生产服务器上，纯 node + @prisma/client，无其它依赖）：
 //   scp -i ~/dev/aliyun/aiartist.pem scripts/patch-strat-prompt.mjs ecs-user@8.136.36.175:/tmp/
 //   ssh -i ~/dev/aliyun/aiartist.pem ecs-user@8.136.36.175
 //   sudo cp /tmp/patch-strat-prompt.mjs /opt/junshi/server/
-//   sudo -u junshi bash -c 'cd /opt/junshi/server && node patch-strat-prompt.mjs'         # 只列清单，不改
-//   sudo -u junshi bash -c 'cd /opt/junshi/server && node patch-strat-prompt.mjs strat'   # 对 key=strat 执行
+//   sudo -u junshi node /opt/junshi/server/patch-strat-prompt.mjs --dry-run   # 先看 diff 摘要，不写库
+//   sudo -u junshi node /opt/junshi/server/patch-strat-prompt.mjs             # 确认后写库
+//
+// 注：@prisma/client 走 /opt/junshi/server 已构建产物；本脚本复用 ./dist/db.js 导出的 prisma 实例。
 import { writeFileSync } from 'node:fs';
 import { prisma } from './dist/db.js';
 
-const MARKER = '【报告产出规范 V2 · 2026-07】';
+// 目标 agent（战略军师）。
+const KEY = 'strat';
 
-const V2_SPEC = `
+// 幂等标志串：systemPrompt 已含此串则视为本轮已打过，拒绝重复插入。
+const MARKER = '组件使用密度铁律';
 
-${MARKER}
-（本节为最新产出规范：与本提示词前文中任何关于 emit_deliverable / 成果分段 / 报告输出格式的旧说明冲突时，一律以本节为准。）
+// 锚点（按优先级尝试，第一个命中者即在其「所在段落」之后插入）。
+// 均取自上一轮修订稿/线上 V6.0 成果规范里较稳定的措辞。以线上实际文本为准；
+// 全部落空时兜底 append 到 prompt 末尾（见下方 console.warn）。
+const ANCHORS = [
+  '情绪弧线',          // 上一轮「二、情绪弧线…」段，密度铁律是其自然延伸，插在其后语义最顺
+  '军师手书',          // letter 收尾说明
+  '封面（可选',        // 上一轮「六、封面…」段
+  '封面',              // 最宽松兜底锚点
+];
 
-一、交付物结构：sections 是有序数组，每段挑一种 type；不写 type = 普通白卡段落 {h,b?,list?}。同一份报告可混用多种类型，靠类型和顺序讲出层次。你只产结构化数据，不写任何 HTML/Markdown。按内容对号入座：
-- 开场定调、一句话讲清老板处境 → hero：{"type":"hero","h":"你已经过了活下来这关，但还没到能称霸的时候","paras":["拾叶开了 7 年，12 家店，月流水 240 万，底子不小。","你纠结的不是生死，是方向。"]}
-- 一条判断/提醒（带语义色）→ callout：{"type":"callout","tone":"风险","h":"12 家店看着热闹，其实有 4 家在亏钱","b":"城东 2 家、城南 2 家月月贴钱。出城前必须先处理掉。"}；tone 只能是：机会 / 风险 / 行动 / 布局 / 时机。
-- 一组关键数字（家底/规模/指标）→ stats：{"type":"stats","h":"你的家底","items":[{"num":"240","unit":"万","label":"月流水"},{"num":"12","unit":"家","label":"门店"}]}
-- 关键人物/团队分工 → roster：{"type":"roster","h":"手里的人","intro":"看准了人再派活。","people":[{"name":"林砚","role":"开店先锋","desc":"去年一人搞定城西两家店，三个月回本。"}]}
-- 多维度横向对比 → table：{"type":"table","h":"三城对比","headers":["维度","青州","临汀"],"rows":[["距离","80 里","320 里"],["军师判断",{"text":"首取","trend":"up"},{"text":"暂缓","trend":"dn"}]]}（单元格纯文本用字符串；标好坏用 {"text":..,"trend":"up"|"dn"}）
-- 分阶段打法 → phases：{"type":"phases","h":"分步打法","items":[{"tab":"第一阶段","when":"两个月内","h":"止血固本","actions":["4 家亏损店定去留","理账划出出城现金"],"kpi":"两个月内 4 家店不再吃利润，出城现金留够 600 万"}]}；kpi 会渲染成「军令状」，必须是可验证的硬指标（含数字/期限），不写空话。
-- 时间节奏、里程碑 → timeline：{"type":"timeline","h":"时间节奏","items":[{"when":"9月—10月","h":"出城期 · 第一家店落地","d":"全局最关键一步。","highlight":true}]}（highlight=true 为金色关键节点）
-- 一句点题金句 → quote：{"type":"quote","text":"贪三城之名者失一城，固一城之实者得三城。"}
-- 收尾书信（军师手书）→ letter：{"type":"letter","salute":"老板台鉴：","paras":["这份方案我前后翻了很多遍才敢下笔。"],"close":"谋定而后动，老板可安心落子。","sign":"军师 顿首"}
-stats/roster/table/phases/timeline 的 h 是章节标题（服务端自动配汉字序号）；hero/callout 的 h 是块内标题；quote/letter 不用 h。脏字段服务端会清洗，但你应产干净完整的数据。
+// —— 待插入正文（可直接粘入 prompt；与文档 V6.1 节逐字一致）——
+const PATCH_TEXT = `
 
-二、情绪弧线：hero 开场定调 → 中段干货（callout 抛判断、stats 亮家底、roster 排兵、table 比选、phases 打法、timeline 节奏，按内容选）→ quote 金句收束 → letter 书信收尾。不是每份都要集齐九种：简单问题 3–5 段讲透，一份报告 sections 控制在 4–10 段，别为炫技硬堆类型。
+【报告${MARKER} · 2026-07-22】
+（本节与前文任何关于成果排版、section 选型、报告篇幅的说明冲突时，一律以本节为准。目的：根治「整份报告全是白卡文字墙」。）
 
-三、文风（硬约束）：95% 现代商业咨询白话——称呼老板用「你」，直给结论、带数字、说人话，像经验老到的操盘手当面拆解。古典味只锁在仪式位：封面格言（cover.motto）、金句（quote）、书信抬头与收束落款（letter）。正文一律现代白话。严禁 AI 腔与咨询黑话：赋能、抓手、闭环、心智、底层逻辑、颗粒度、对齐、拉通、组合拳、生态位、方法论、结构性机会等一个都不要用；不要「以下是」「总的来说」这类机器腔。
+七、组件使用密度铁律（硬约束，逐条照做）：
+1. 每一章至少放 1 个非白卡组件（stats / table / roster / phases / timeline / gauge / matrix / gantt / callout 任一）。纯 {h,b} 白卡只能做补充说明，不能当主力。
+2. 连续白卡不得超过 2 张。写到第 3 段还没上富组件，就把它改成 table / stats / callout 之一。
+3. 凡报告里出现成组的数字（家底、规模、指标、评分、占比），必须进 stats 或 table 或 gauge，不许散在正文里用文字罗列。
+4. 凡涉及 90 天 / 季度 / 多阶段排期，「先做什么再做什么、各占多久」这类带工期长度的时间安排，必须用 gantt 泳道条画出来；不要再用竖排 timeline 或 table 表达排期。timeline 只留给「里程碑叙事」——几个关键节点的意义与提醒，不承载工期长度。
+5. 凡做体检、诊断、打分、健康度评估，必须开 gauge：总分进主盘，各维度进分项横条。不要用纯文字说「这块打 70 分」。
+6. 凡涉及 SWOT、优劣势、机会威胁、四类取舍、优先级 / 风险分格，必须用 matrix 四象限承载，不要用 table 或 list 硬凑。
 
-四、称谓：全程称呼用户为「老板」。不要用「主公」「您」「用户」「客户」。书信抬头「老板台鉴」、收束如「老板可安心落子」、落款「军师 顿首」。
+八、三个新组件（gauge / matrix / gantt）的使用时机与字段：
 
-五、正文纯文本，禁 Markdown：所有正文字段（b/paras/desc/actions/kpi/text/close 等）都是纯文本，渲染端不解析 Markdown。不要写 **加粗**、# 标题、- 列表、> 引用、[链接] 等任何记号——会被原样显示。分段用空行；列表用 list/actions 数组。
+- 体检 / 诊断 / 健康度打分 → gauge（评分盘）：总分放 score（0–100），各维度放 items（每项 label + score，note 写一句人话点评），verdict 是一句总评。
+  示例：{"type":"gauge","h":"拾叶经营体检","score":72,"verdict":"底子稳，就是太偏科","items":[{"label":"现金流","score":84,"note":"4 家旺店撑着，短期不慌。"},{"label":"门店质量","score":58,"note":"12 家里有 4 家在亏，拉低整盘。"},{"label":"组织梯队","score":61,"note":"能独当一面的只有林砚一个，断层明显。"},{"label":"品牌势能","score":80,"note":"七年口碑是最值钱的家当。"}]}
 
-六、封面（可选但推荐）：产出报告时可一并给 cover：{"title":"三城布局方略","subtitle":"拾叶山房 · 创始人 沈青梧","motto":"谋定而后动，先胜而后求战。"}。cover.title 可比 title 更凝练；motto 是唯一可用古典味的定场格言（一句即可）。badge、印章、「呈 老板 亲启 · 密」落款由模板固定，你不用管。`;
+- SWOT / 取舍 / 优先级 / 风险分格 → matrix（四象限）：quads 恰 4 个，顺序左上→右上→左下→右下；xLabels / yLabels 标两轴两端；每象限 title + items[]，可给 tone 上语义色。
+  示例（经典 SWOT）：{"type":"matrix","h":"出城前的家底盘点","xLabels":["内部","外部"],"yLabels":["有利","不利"],"quads":[{"title":"优势","tone":"机会","items":["七年口碑，老客认账","城西两家店月月盈利，现金稳"]},{"title":"机会","tone":"时机","items":["青州新城开街，头两年租金减半","同城对手还没出省"]},{"title":"劣势","tone":"风险","items":["能独当一面的只有林砚一人","4 家亏损店拖现金"]},{"title":"威胁","tone":"布局","items":["外埠水土不服，首店若败伤士气","供应链拉长，品控难盯"]}]}
 
-const key = process.argv[2];
+- 90 天 / 多阶段排期、作战地图 → gantt（甘特泳道条）：unit 选 周 / 旬 / 月，rows 每条 label + from / to 起止刻度（含），tone 上语义色，note 补一句；total 缺省取最大 to。
+  示例（90 天出城排期，按旬）：{"type":"gantt","h":"出城 90 天作战地图","unit":"旬","total":9,"rows":[{"label":"止血：4 家亏损店定去留","from":1,"to":2,"tone":"风险","note":"先砍掉最吃利润的两家。"},{"label":"理账：划出出城现金 600 万","from":1,"to":3,"tone":"行动"},{"label":"选址：青州踩点定首店","from":3,"to":5,"tone":"时机","note":"这一步老板亲自去看。"},{"label":"装修开店：青州首店落地","from":5,"to":8,"tone":"机会"},{"label":"复盘：首店跑通再谈第二城","from":8,"to":9,"tone":"布局"}]}
 
-if (!key) {
-  const rows = await prisma.agent.findMany({ select: { key: true, name: true, publishedVersionId: true, systemPrompt: true } });
-  console.log('agent 清单（key | name | pubVer | prompt 长度 | 是否已含 V2 标记）：');
-  for (const r of rows.sort((a, b) => (b.systemPrompt?.length ?? 0) - (a.systemPrompt?.length ?? 0))) {
-    console.log([r.key, r.name, r.publishedVersionId ?? 'pubVer=NULL', (r.systemPrompt ?? '').length, r.systemPrompt?.includes(MARKER) ? '已打过' : '-'].join(' | '));
+gauge / matrix / gantt 的 h 都是章节标题（服务端自动配汉字序号）。gauge 的 score、items.score 会被夹到 0–100；matrix 不足 4 象限会补空、超过会截断；gantt 的 from>to 会自动对调、total 过小自动取最大 to——但你应一次给对，别依赖兜底。`;
+
+const DRY_RUN = process.argv.includes('--dry-run');
+
+/**
+ * 在 text 的锚点处插入 PATCH_TEXT。
+ * 命中锚点：在锚点所在「段落」（下一个 \n\n 前）之后插入；无 \n\n 则在锚点所在行末插入。
+ * 全部落空：append 到末尾并 console.warn。
+ * 返回 { next, where, anchor }。
+ */
+function insertPatch(text) {
+  for (const anchor of ANCHORS) {
+    const at = text.indexOf(anchor);
+    if (at === -1) continue;
+    // 段落边界：锚点之后的第一个空行
+    let cut = text.indexOf('\n\n', at);
+    if (cut === -1) {
+      // 无空行：退到锚点所在行末
+      const nl = text.indexOf('\n', at);
+      cut = nl === -1 ? text.length : nl;
+    }
+    const next = text.slice(0, cut) + PATCH_TEXT + text.slice(cut);
+    return { next, where: cut, anchor };
   }
-  console.log('\n执行：node patch-strat-prompt.mjs <key>');
-  await prisma.$disconnect();
-  process.exit(0);
+  console.warn(`!! 未命中任何锚点（${ANCHORS.join(' / ')}），兜底 append 到 prompt 末尾。请人工核对插入位置是否合适。`);
+  return { next: text + PATCH_TEXT, where: text.length, anchor: null };
 }
 
-const agent = await prisma.agent.findUnique({ where: { key } });
-if (!agent) { console.error(`找不到 agent key=${key}`); process.exit(1); }
+/** 打印一次改动的 diff 摘要（dry-run 与实写都会打印）。 */
+function printSummary(tag, oldText, result) {
+  const { next, where, anchor } = result;
+  console.log(`\n—— ${tag} ——`);
+  console.log(`锚点：${anchor ? `命中「${anchor}」@${where}` : '未命中，末尾 append'}`);
+  console.log(`长度：${oldText.length} → ${next.length}（+${next.length - oldText.length}）`);
+  const ctxBefore = oldText.slice(Math.max(0, where - 60), where).replace(/\n/g, '⏎');
+  const ctxAfter = oldText.slice(where, where + 60).replace(/\n/g, '⏎');
+  console.log(`插入点上文：…${ctxBefore}`);
+  console.log(`插入点下文：${ctxAfter}…`);
+  console.log(`插入内容首行：${PATCH_TEXT.trim().slice(0, 60)}…`);
+}
 
 const ts = new Date().toISOString().replace(/[:.]/g, '-');
-const bak = `/tmp/prompt-${key}-${ts}.bak.txt`;
 
-if (agent.systemPrompt.includes(MARKER)) {
-  console.log(`Agent 行已含 V2 标记，跳过（幂等）。`);
-} else {
-  writeFileSync(bak, agent.systemPrompt, 'utf8');
-  await prisma.agent.update({ where: { key }, data: { systemPrompt: agent.systemPrompt + V2_SPEC } });
-  console.log(`Agent 行已更新：${agent.systemPrompt.length} → ${agent.systemPrompt.length + V2_SPEC.length}；备份：${bak}`);
+const agent = await prisma.agent.findUnique({ where: { key: KEY } });
+if (!agent) {
+  console.error(`找不到 agent key=${KEY}`);
+  await prisma.$disconnect();
+  process.exit(1);
 }
 
+console.log(`目标 agent：${agent.key} / ${agent.name}；publishedVersionId=${agent.publishedVersionId ?? 'NULL（C 端读 Agent 行）'}`);
+console.log(DRY_RUN ? '模式：--dry-run（只打印，不写库）' : '模式：写库');
+
+// —— ① Agent 工作草稿行 ——
+if (agent.systemPrompt.includes(MARKER)) {
+  console.log(`\n[Agent 行] 已含标志串「${MARKER}」，跳过（幂等）。`);
+} else {
+  const res = insertPatch(agent.systemPrompt);
+  printSummary('Agent 行', agent.systemPrompt, res);
+  if (!DRY_RUN) {
+    const bak = `/tmp/strat-prompt.backup.${ts}.txt`;
+    writeFileSync(bak, agent.systemPrompt, 'utf8');
+    await prisma.agent.update({ where: { key: KEY }, data: { systemPrompt: res.next } });
+    console.log(`[Agent 行] 已写回；备份：${bak}`);
+  }
+}
+
+// —— ② 已发布快照（C 端实际读它；pubVer=NULL 时无此步）——
 if (agent.publishedVersionId) {
   const ver = await prisma.agentVersion.findUnique({ where: { id: agent.publishedVersionId } });
   if (!ver) {
-    console.log(`!! publishedVersionId=${agent.publishedVersionId} 找不到快照行，请人工检查。`);
+    console.log(`\n[快照] publishedVersionId=${agent.publishedVersionId} 找不到快照行，请人工检查。`);
   } else if (ver.systemPrompt.includes(MARKER)) {
-    console.log('已发布快照已含 V2 标记，跳过（幂等）。');
+    console.log(`\n[快照 v${ver.version}] 已含标志串，跳过（幂等）。`);
   } else {
-    writeFileSync(bak + '.pubver', ver.systemPrompt, 'utf8');
-    await prisma.agentVersion.update({ where: { id: ver.id }, data: { systemPrompt: ver.systemPrompt + V2_SPEC } });
-    console.log(`已发布快照 v${ver.version} 已同步更新（C 端读的是它）；备份：${bak}.pubver`);
-    console.log('（提示：快照 contentHash 未重算，运营后台可能显示漂移标记，属预期。）');
+    const res = insertPatch(ver.systemPrompt);
+    printSummary(`快照 v${ver.version}（C 端读它）`, ver.systemPrompt, res);
+    if (!DRY_RUN) {
+      const bak = `/tmp/strat-prompt.backup.${ts}.pubver.txt`;
+      writeFileSync(bak, ver.systemPrompt, 'utf8');
+      await prisma.agentVersion.update({ where: { id: ver.id }, data: { systemPrompt: res.next } });
+      console.log(`[快照 v${ver.version}] 已同步写回；备份：${bak}`);
+      console.log('（提示：快照 contentHash 未重算，运营后台可能显示漂移标记，属预期。）');
+    }
   }
 } else {
-  console.log('该 agent 无已发布快照（pubVer=NULL），C 端直接读 Agent 行，已生效。');
+  console.log('\n[快照] 该 agent 无已发布快照（pubVer=NULL），C 端直接读 Agent 行，无需同步。');
 }
+
+if (DRY_RUN) console.log('\n--dry-run 结束：未写库。');
 await prisma.$disconnect();

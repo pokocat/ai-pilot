@@ -91,3 +91,71 @@
 
 - 新会话产出的报告含 **≥4 种新类型**且渲染正确（对照 `docs/[FABLE5]REPORT_V2_DEMO.html`）。
 - **旧消息**报告渲染不变（`normalizeDeliverableSections` / `renderReportHtml` 对无 type 白卡完全向后兼容，已覆盖单测 `server/test/reportV2.test.ts`）。
+
+---
+---
+
+# V6.1 追加修订（2026-07-22）：组件使用密度铁律 + 三新组件（gauge / matrix / gantt）
+
+> ⚠️ 承接上文 V6.0 修订稿，仍是**文本稿**；生产提示词只在 prod DB。本轮**不新增 §1–§6 的替换**，而是在 §1–§6（成果产出规范）之后**插入两小节**：`七、组件使用密度铁律` + `八、三新组件`。
+>
+> 起因：上线后报告普遍「整份都是白卡文字墙」，九型/三新型形同虚设。本轮用**铁律**逼出组件密度，并补齐上一轮遗漏的三个新组件（`gauge` / `matrix` / `gantt`，本地已 commit `20c0951`，字段以代码为准：`shared/contracts.d.ts` L414-419、`server/src/llm/schema.ts` `DELIVERABLE_TOOL` description）。
+>
+> **提示词只管产结构化数据，绝不写 HTML/CSS**——版式全部由 `reportHtml.ts` 决定。
+
+## 插入位置
+
+在 V6.0 提示词的成果产出规范里，**上一轮 §2「情绪弧线」那段之后**插入下面《插入文本》整段（`七、` + `八、`）。
+
+- **首选锚点**：字符串 `情绪弧线`（上一轮「二、情绪弧线…」段）——密度铁律是情绪弧线的自然延伸，紧随其后语义最顺。
+- **兜底锚点（按序尝试）**：`军师手书` → `封面（可选` → `封面`。
+- **锚点全落空时**：`append` 到提示词**末尾**并告警（`console.warn`），由人工核对插入位置是否合适。
+- **以线上实际文本为准**：上表锚点均取自上一轮修订稿/线上 V6.0 的稳定措辞；若线上表述已变，改脚本里的 `ANCHORS` 常量，不要动《插入文本》本身。
+
+> 幂等标志串：`组件使用密度铁律`。提示词已含此串则视为本轮已打过，脚本拒绝重复插入。
+
+## 插入文本（可直接粘入 prompt，与 `scripts/patch-strat-prompt.mjs` 的 `PATCH_TEXT` 常量逐字一致）
+
+```text
+【报告组件使用密度铁律 · 2026-07-22】
+（本节与前文任何关于成果排版、section 选型、报告篇幅的说明冲突时，一律以本节为准。目的：根治「整份报告全是白卡文字墙」。）
+
+七、组件使用密度铁律（硬约束，逐条照做）：
+1. 每一章至少放 1 个非白卡组件（stats / table / roster / phases / timeline / gauge / matrix / gantt / callout 任一）。纯 {h,b} 白卡只能做补充说明，不能当主力。
+2. 连续白卡不得超过 2 张。写到第 3 段还没上富组件，就把它改成 table / stats / callout 之一。
+3. 凡报告里出现成组的数字（家底、规模、指标、评分、占比），必须进 stats 或 table 或 gauge，不许散在正文里用文字罗列。
+4. 凡涉及 90 天 / 季度 / 多阶段排期，「先做什么再做什么、各占多久」这类带工期长度的时间安排，必须用 gantt 泳道条画出来；不要再用竖排 timeline 或 table 表达排期。timeline 只留给「里程碑叙事」——几个关键节点的意义与提醒，不承载工期长度。
+5. 凡做体检、诊断、打分、健康度评估，必须开 gauge：总分进主盘，各维度进分项横条。不要用纯文字说「这块打 70 分」。
+6. 凡涉及 SWOT、优劣势、机会威胁、四类取舍、优先级 / 风险分格，必须用 matrix 四象限承载，不要用 table 或 list 硬凑。
+
+八、三个新组件（gauge / matrix / gantt）的使用时机与字段：
+
+- 体检 / 诊断 / 健康度打分 → gauge（评分盘）：总分放 score（0–100），各维度放 items（每项 label + score，note 写一句人话点评），verdict 是一句总评。
+  示例：{"type":"gauge","h":"拾叶经营体检","score":72,"verdict":"底子稳，就是太偏科","items":[{"label":"现金流","score":84,"note":"4 家旺店撑着，短期不慌。"},{"label":"门店质量","score":58,"note":"12 家里有 4 家在亏，拉低整盘。"},{"label":"组织梯队","score":61,"note":"能独当一面的只有林砚一个，断层明显。"},{"label":"品牌势能","score":80,"note":"七年口碑是最值钱的家当。"}]}
+
+- SWOT / 取舍 / 优先级 / 风险分格 → matrix（四象限）：quads 恰 4 个，顺序左上→右上→左下→右下；xLabels / yLabels 标两轴两端；每象限 title + items[]，可给 tone 上语义色。
+  示例（经典 SWOT）：{"type":"matrix","h":"出城前的家底盘点","xLabels":["内部","外部"],"yLabels":["有利","不利"],"quads":[{"title":"优势","tone":"机会","items":["七年口碑，老客认账","城西两家店月月盈利，现金稳"]},{"title":"机会","tone":"时机","items":["青州新城开街，头两年租金减半","同城对手还没出省"]},{"title":"劣势","tone":"风险","items":["能独当一面的只有林砚一人","4 家亏损店拖现金"]},{"title":"威胁","tone":"布局","items":["外埠水土不服，首店若败伤士气","供应链拉长，品控难盯"]}]}
+
+- 90 天 / 多阶段排期、作战地图 → gantt（甘特泳道条）：unit 选 周 / 旬 / 月，rows 每条 label + from / to 起止刻度（含），tone 上语义色，note 补一句；total 缺省取最大 to。
+  示例（90 天出城排期，按旬）：{"type":"gantt","h":"出城 90 天作战地图","unit":"旬","total":9,"rows":[{"label":"止血：4 家亏损店定去留","from":1,"to":2,"tone":"风险","note":"先砍掉最吃利润的两家。"},{"label":"理账：划出出城现金 600 万","from":1,"to":3,"tone":"行动"},{"label":"选址：青州踩点定首店","from":3,"to":5,"tone":"时机","note":"这一步老板亲自去看。"},{"label":"装修开店：青州首店落地","from":5,"to":8,"tone":"机会"},{"label":"复盘：首店跑通再谈第二城","from":8,"to":9,"tone":"布局"}]}
+
+gauge / matrix / gantt 的 h 都是章节标题（服务端自动配汉字序号）。gauge 的 score、items.score 会被夹到 0–100；matrix 不足 4 象限会补空、超过会截断；gantt 的 from>to 会自动对调、total 过小自动取最大 to——但你应一次给对，别依赖兜底。
+```
+
+> 字段口径以代码为准（`schema.ts` 的 `typedSectionOf`）：`gauge.items` 最多 10 项、`matrix.quads` 恰 4 个（多截少补）、`gantt.rows` 最多 16 行、`gantt.unit` 只认「周/旬/月」（其余丢弃回落默认）、`gantt.total` 缺省取最大 `to`。
+
+## 写回步骤（人工执行，本次不跑；用脚本 `scripts/patch-strat-prompt.mjs`）
+
+> 本轮改用脚本半自动写回，替代上一轮的纯手工步骤。脚本逻辑与本节《插入位置》《插入文本》完全对应。
+
+1. **预演**：`scp` 脚本到生产 `/opt/junshi/server/`，先跑 `sudo -u junshi node patch-strat-prompt.mjs --dry-run` —— 打印锚点命中情况、插入位置上下文、新旧长度，**不写库**。核对锚点是否命中预期位置（`情绪弧线` 段之后）。
+2. **写回**：确认无误后去掉 `--dry-run` 重跑。脚本会：① 读 `strat` 的 `systemPrompt`；② 备份原文到 `/tmp/strat-prompt.backup.<时间戳>.txt`（若有已发布快照，另备 `.pubver.txt`）；③ 在锚点处插入《插入文本》；④ 幂等——已含 `组件使用密度铁律` 则跳过；⑤ 打印新旧长度。
+3. **快照同步**：`strat` 若 `publishedVersionId != NULL`，脚本会**同步更新已发布快照**（C 端实际读快照，两处都改才生效——见 memory `strat-v6-embedding`）；`pubVer=NULL` 时 C 端直接读 Agent 行，无此步。
+4. **验证**：后台预览产出一份「战略体检」类报告，人工核对：每章至少 1 个非白卡组件、无连续 3 张白卡、数字入 stats/table/gauge、排期用 gantt、体检开 gauge、SWOT 用 matrix；对照 `docs/[FABLE5]REPORT_V2_DEMO.html`。
+5. **观测**：富组件使 token 变长——关注双轴计费消耗；若单报告 section 数普遍偏多，回 §2 收紧「4–10 段」上限。
+
+## 验收对齐（M1.1）
+
+- 新会话产出的「战略体检 / 90 天方略」类报告：**每章 ≥1 个非白卡组件、无连续 3 张白卡**；出现数字必进 `stats/table/gauge`；排期用 `gantt`；体检用 `gauge`；SWOT/取舍用 `matrix`。
+- 三新组件（`gauge` / `matrix` / `gantt`）在真实产出中至少各出现一次并渲染正确。
+- **旧消息**报告渲染不变（向后兼容，`server/test/reportV2.test.ts` 覆盖）。
