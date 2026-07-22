@@ -7,7 +7,6 @@ import Picker from '../../components/Picker';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
 import Sheet from '../../components/Sheet';
-import NextStepCard from '../../components/NextStepCard';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type BattleForce, type ForceKind } from '../../services/api';
@@ -220,9 +219,6 @@ export default function Home() {
           </View>
         </View>
 
-        {/* 下一步卡（WO-07）：三 tab 统一挂共享 NextStepCard，读服务端 journey；冷启动 quickscan 由组件按 route 导流速诊 */}
-        <NextStepCard />
-
         {/* 三势判断（force-panel）：从 me.understanding.battleForces 真实渲染。整卡/小框 → 三势全解 sheet。 */}
         <View className="force-panel">
           <View className="force-head" onClick={forces.length ? openForces : undefined}>
@@ -261,29 +257,6 @@ export default function Home() {
               <Text className="fe-go" style={{ color: accent }}>去对话 ›</Text>
             </View>
           )}
-        </View>
-
-        {/* 下一步动作（battle-actions）：军师档案里真实的待补问题 */}
-        <View className="battle-actions card">
-          <Text className="section-label">下 一 步 动 作</Text>
-          {(und?.nextQuestions.length ? und.nextQuestions.slice(0, 3) : []).map((qText) => (
-            <View key={qText} className="battle-goal" onClick={startInterview}>
-              <Text className="battle-tag">补线索</Text>
-              <View className="bg-b">
-                <Text className="bg-t serif">{qText}</Text>
-                <Text className="bg-m">答完后军师会更新当前判断</Text>
-              </View>
-            </View>
-          ))}
-          {!und?.nextQuestions.length ? (
-            <View className="battle-goal" onClick={() => goChat('agentKey=general&continue=1')}>
-              <Text className="battle-tag">先对话</Text>
-              <View className="bg-b">
-                <Text className="bg-t serif">和军师聊聊当前处境</Text>
-                <Text className="bg-m">对话之后，下一步动作自动排定</Text>
-              </View>
-            </View>
-          ) : null}
         </View>
 
         {/* 关联模块（module-card）：军师方案的功能化承接 */}
