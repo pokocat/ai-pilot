@@ -54,7 +54,7 @@ test('allocateRefBudget：单份不得超过每份上限', () => {
 });
 
 test('allocateRefBudget：合计不得超过总预算', () => {
-  // 9 份各 8000 = 72000，远超 30000 总预算。
+  // 9 份各顶满每份上限，远超总预算，必被压到合计上限内。
   const got = allocateRefBudget(new Array(9).fill(MAX_REF_CHARS_PER_DOC));
   const sum = got.reduce((a, b) => a + b, 0);
   assert.ok(sum <= MAX_REF_CHARS_TOTAL, `合计 ${sum} 不应超过 ${MAX_REF_CHARS_TOTAL}`);
@@ -62,7 +62,7 @@ test('allocateRefBudget：合计不得超过总预算', () => {
 });
 
 test('allocateRefBudget：不是先到先得——长文件不得饿死后面的短文件', () => {
-  // 一份 8000 长文 + 8 份 500 短文。若先到先得，长文吃光预算后短文颗粒无收。
+  // 一份顶满上限的长文 + 8 份 500 短文：短文要得少，绝不因排在长文后面而挨饿。
   const got = allocateRefBudget([MAX_REF_CHARS_PER_DOC, ...new Array(8).fill(500)]);
   assert.ok(got.slice(1).every((n) => n === 500), '短文件应全额拿到（它们要得少）');
   assert.ok(got[0] > 0, '长文件也应分到预算');
@@ -99,7 +99,9 @@ test('resolveReferences：正文没超预算时不加节选标注（不谎报截
 
 test('resolveReferences：多份合计不得超过总预算，且每份都分到字数', async () => {
   const refs: MessageRef[] = [];
-  for (let i = 0; i < 6; i++) refs.push(await mkKnowledge(`卷${i}`, 20000)); // 6 × 20000 = 120000 远超预算
+  // 每份都长到确保被裁（> 总预算/6），6 份合计远超总预算——检验公平分 + 逐份节选标注。
+  const bigLen = Math.floor(MAX_REF_CHARS_TOTAL / 6) + 5000;
+  for (let i = 0; i < 6; i++) refs.push(await mkKnowledge(`卷${i}`, bigLen));
   const { lines } = await resolveReferences(tenantA, userA, refs);
   assert.equal(lines.length, 6, '6 份都应在场（只是各自节选）');
   const bodies = lines.map((l) => l.slice(l.indexOf('】') + 1));

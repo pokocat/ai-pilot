@@ -57,13 +57,14 @@ const PROJECT_BOOST = 0.05;
 //
 // 对话可一次带多份资料上来，若把每份全文原样灌进 prompt，几份长报告就能把上下文窗口挤爆
 // （系统提示词 / 历史 / 自动召回 / 输出都会被挤掉，模型反而更蠢）。故立三条规矩：
-//  ① 单份上限 8000 字符——够覆盖一份合同、周报、财务表的主干，又不至于一份就吃光总预算；
-//  ② 全部引用合计 30000 字符——中文约 1 字 ≈ 1.5 token，折合 ~45k token，
-//     在主流 128k 窗口下留足余量给系统提示词、历史与产出；
+//  ① 单份上限 60000 字符——与 docParse.ts 的 MAX_TEXT 对齐，让「长文转附卷」能完整进入 LLM，
+//     不在这一层悄悄腰斩；只在越过上下文安全线时才截，且截了必自报家门。
+//  ② 全部引用合计 120000 字符——防上下文爆掉的安全护栏（非产品级字数限制）：
+//     中文约 1 字 ≈ 1.5 token，折合 ~180k token，主流长窗口（200k+）下仍留余量给系统提示词、历史与产出；
 //  ③ 单轮至多 9 份——与前端 chooseMessageFile({ count: 9 }) 对齐：一次能选几份，就能带几份。
 // ——————————————————————————————————————————————————————————————————————————
-export const MAX_REF_CHARS_PER_DOC = 8000;
-export const MAX_REF_CHARS_TOTAL = 30000;
+export const MAX_REF_CHARS_PER_DOC = 60_000;
+export const MAX_REF_CHARS_TOTAL = 120_000;
 export const MAX_REFS = 9;
 
 /**
@@ -266,7 +267,7 @@ export async function resolveReferences(
     }
   }
 
-  // 预算：单份 ≤ 8000 字，合计 ≤ 30000 字；按最大最小公平分，短件不因排在后面而挨饿。
+  // 预算：单份 ≤ 60000 字，合计 ≤ 120000 字（防上下文爆掉的安全护栏）；按最大最小公平分，短件不因排在后面而挨饿。
   const budgets = allocateRefBudget(entries.map((e) => e.body.length));
   entries.forEach((e, i) => {
     const budget = budgets[i];

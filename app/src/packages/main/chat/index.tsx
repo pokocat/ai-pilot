@@ -183,6 +183,11 @@ const INPUT_MAX = 2000;
 const INPUT_COUNT_FROM = 1800;
 // 粘贴转附卷：单次输入暴增 ≥ 此值且越过 INPUT_MAX，判为「长文粘贴」→ 自动归卷。
 const PASTE_DELTA_MIN = 500;
+// 粘贴防抖合并窗口：微信 textarea 一次粘贴会连发多个 onInput（devtools 按行拆发），
+// 用一个 ~250ms 定时器把这串事件合并成「一次结算」，避免各建一份 knowledge 撞满九份。
+const PASTE_SETTLE_MS = 250;
+// absorbPasteToFile 去重窗口：10s 内完全相同的 pasted 文本（长度 + 首尾片段指纹）直接跳过，不建第二份。
+const PASTE_DEDUP_MS = 10_000;
 
 // 单次插入下，用公共前缀 + 公共后缀 diff 出这回粘进来的文本段。
 // prefix：prev 与 v 的公共前缀长；suffix：剩余部分的公共后缀长（上限 = prev.length - prefix，防前后缀重叠）。
@@ -286,6 +291,14 @@ export default function Chat() {
   // B3 草稿：用 ref 取最新值，供 onBlur / useDidHide 闭包读取。
   const inputRef = useRef('');
   inputRef.current = input;
+  // 粘贴合并：同步追踪输入框最新值（React state 在同步事件串里是陈旧的，不能当 prev 用）。
+  // 所有给 setInput 赋值处都要同步维护此 ref，否则粘贴增量判定会错。
+  const lastValueRef = useRef('');
+  // 粘贴 burst：命中一次长文暴增即记 baseline（暴增前的输入），burst 期间每个 onInput 都重置结算定时器。
+  const pasteBurstRef = useRef<{ baseline: string } | null>(null);
+  const pasteSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 粘贴去重：记上次已归卷 pasted 的指纹（长度 + 首尾片段）与时间戳，窗口内完全相同的直接跳过。
+  const recentPasteRef = useRef<{ sig: string; at: number } | null>(null);
   // 粘贴转附卷：在途份数（await createKnowledge 期间计数），与 refs 合并判九份上限、防并发超挂。
   const pasteInflightRef = useRef(0);
   const sessionIdRef = useRef('');
@@ -395,12 +408,13 @@ export default function Chat() {
 
   useEffect(() => () => {
     if (askScrollTimerRef.current) clearTimeout(askScrollTimerRef.current);
+    if (pasteSettleTimerRef.current) clearTimeout(pasteSettleTimerRef.current);
     store.setOverlay(false, 'ref-picker');
   }, []);
 
   // B3 草稿持久化：按 sessionId 维度存/取；发送成功后清除。
   const loadDraft = (id?: string) => {
-    try { const d = Taro.getStorageSync(draftKeyFor(id)); if (d && typeof d === 'string') setInput(d); } catch { /* noop */ }
+    try { const d = Taro.getStorageSync(draftKeyFor(id)); if (d && typeof d === 'string') { setInput(d); lastValueRef.current = d; } } catch { /* noop */ }
   };
   const saveDraft = () => {
     try {
@@ -912,9 +926,17 @@ export default function Chat() {
     doSend(lines.join('\n'), sessionId, agent?.key ?? '');
   };
 
+  // pasted 指纹：长度 + 首尾片段，够区分「同一段粘贴」而无需存整段。
+  const pasteSig = (pasted: string) => `${pasted.length}:${pasted.slice(0, 32)}:${pasted.slice(-32)}`;
+
   // 长文粘贴 → 归为附卷：异步建知识，成功挂引用签；期间不卡输入。fullValue = 粘贴后完整文本，供满卷/失败时回填。
   const absorbPasteToFile = async (pasted: string, fullValue: string) => {
-    // 满卷判断已上提至 handleInput 粘贴分支；此处仅做成功 setter 里的二次核验防并发越挂。
+    // 保险丝：10s 内完全相同的 pasted 直接跳过，绝不建第二份（防同一次粘贴被结算两次）。
+    const sig = pasteSig(pasted);
+    const now = Date.now();
+    if (recentPasteRef.current && recentPasteRef.current.sig === sig && now - recentPasteRef.current.at < PASTE_DEDUP_MS) return;
+    recentPasteRef.current = { sig, at: now };
+    // 满卷判断已上提至结算处；此处仅做成功 setter 里的二次核验防并发越挂。
     const title = `粘贴长文·${pasted.length}字`;
     pasteInflightRef.current += 1;
     Taro.showToast({ title: '长文归卷中…', icon: 'none' });
@@ -924,34 +946,49 @@ export default function Chat() {
       setRefs((cur) => (cur.length >= UPLOAD_COUNT_MAX || cur.some((x) => x.kind === 'knowledge' && x.id === id))
         ? cur : [...cur, { kind: 'knowledge', id, label: title }]);
     } catch {
-      setInput(fullValue); // 归卷未成：长文塞回输入框，不丢字
+      setInput(fullValue); lastValueRef.current = fullValue; // 归卷未成：长文塞回输入框，不丢字
       Taro.showToast({ title: '长文归卷未成，稍后再试', icon: 'none' });
     } finally {
       pasteInflightRef.current -= 1;
     }
   };
 
+  // 粘贴 burst 结算：定时器到点后统一算一次账。以 lastValueRef 为准（同步、非陈旧），
+  // 与 baseline 对比确认确为长文暴增，才 diff 出 pasted、只调一次 absorbPasteToFile。
+  const settlePaste = () => {
+    pasteSettleTimerRef.current = null;
+    const burst = pasteBurstRef.current;
+    pasteBurstRef.current = null;
+    if (!burst) return;
+    const baseline = burst.baseline;
+    const final = lastValueRef.current;
+    if (!(final.length > INPUT_MAX && final.length - baseline.length >= PASTE_DELTA_MIN)) return;
+    const { pasted, kept } = diffPasted(baseline, final);
+    if (!pasted) return;
+    // 附卷已满九份：不转，完整粘贴内容留在输入框，容主公自行取舍。
+    if (refs.length + pasteInflightRef.current >= UPLOAD_COUNT_MAX) {
+      Taro.showToast({ title: `附卷已满${UPLOAD_COUNT_MAX}份，容后再呈`, icon: 'none' });
+      return;
+    }
+    void absorbPasteToFile(pasted, final);
+    setInput(kept); lastValueRef.current = kept;
+  };
+
   const handleInput = (e: { detail: { value: string } }) => {
     if (busy) return input;
     const v = e.detail.value;
-    const prev = input;
-    // 超长粘贴：单次暴增 ≥ 阈值且越过两千 → 归为附卷，输入框只留粘贴前敲的字。
-    if (v.length - prev.length >= PASTE_DELTA_MIN && v.length > INPUT_MAX) {
-      const { pasted, kept } = diffPasted(prev, v);
-      if (pasted) {
-        // 附卷已满九份：不转，输入框留完整粘贴内容，容主公自行取舍。
-        // 注：闭包里 refs 为当前渲染值，可接受。
-        if (refs.length + pasteInflightRef.current >= UPLOAD_COUNT_MAX) {
-          Taro.showToast({ title: `附卷已满${UPLOAD_COUNT_MAX}份，容后再呈`, icon: 'none' });
-          setInput(v);
-          return v; // 保留完整粘贴内容，不转换
-        }
-        void absorbPasteToFile(pasted, v);
-        setInput(kept);
-        return kept; // 返回值即时更正原生 textarea 内容
-      }
-    }
+    const prevSync = lastValueRef.current;
+    lastValueRef.current = v;
+    // burst 期间照常上屏（允许输入框暂时显示超长文本），归卷与否交由结算定时器统一裁决——
+    // 单次粘贴在微信里会连发多个 onInput，用同步 ref 当 prev + 防抖合并，避免各自判定各建一份。
     setInput(v);
+    if (v.length - prevSync.length >= PASTE_DELTA_MIN && !pasteBurstRef.current) {
+      pasteBurstRef.current = { baseline: prevSync };
+    }
+    if (pasteBurstRef.current) {
+      if (pasteSettleTimerRef.current) clearTimeout(pasteSettleTimerRef.current);
+      pasteSettleTimerRef.current = setTimeout(settlePaste, PASTE_SETTLE_MS);
+    }
     return v;
   };
 
@@ -965,6 +1002,10 @@ export default function Chat() {
       return;
     }
     setInput('');
+    lastValueRef.current = '';
+    // 发送即作废在途的粘贴结算，免得定时器到点后把已清空/新输入误判成粘贴。
+    if (pasteSettleTimerRef.current) { clearTimeout(pasteSettleTimerRef.current); pasteSettleTimerRef.current = null; }
+    pasteBurstRef.current = null;
     setInputFocus(false);
     const sending = refs;
     setRefs([]);
