@@ -1,7 +1,8 @@
-import { CSSProperties, PropsWithChildren, useEffect, useState } from 'react';
+import { CSSProperties, PropsWithChildren, useEffect, useRef, useState } from 'react';
 import { View, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { useStore } from '../../hooks/useStore';
+import { ScreenKbCtx } from './keyboard';
 import './index.scss';
 
 interface ScreenProps {
@@ -13,10 +14,16 @@ interface ScreenProps {
   className?: string;
 }
 
-/** 页面外壳：注入本命色主题类 + 暖底 + 可滚动区。 */
+/** 页面外壳：注入本命色主题类 + 暖底 + 可滚动区（键盘避让：收缩滚动区 + 聚焦输入滚入可视）。 */
 export default function Screen({ children, tab = true, scroll = true, topInset = false, className = '' }: PropsWithChildren<ScreenProps>) {
   const s = useStore();
   const [vars, setVars] = useState<CSSProperties>();
+  // 键盘避让：kbH=键盘高度，kbAnchor=当前聚焦输入的锚点 id（scrollIntoView 目标）。
+  // kbActive=当前聚焦的是 KbInput（才收缩滚动区）——固定浮层里的原生 Input 自管避让，不触发收缩，避免双重补偿。
+  const [kbH, setKbH] = useState(0);
+  const [kbAnchor, setKbAnchor] = useState('');
+  const [kbActive, setKbActive] = useState(false);
+  const anchorRef = useRef('');
 
   useEffect(() => {
     if (!topInset) return;
@@ -29,19 +36,56 @@ export default function Screen({ children, tab = true, scroll = true, topInset =
     } catch { /* H5 无胶囊，走 CSS 兜底 */ }
   }, [topInset]);
 
+  // 键盘高度变化：收缩滚动区；若已有聚焦锚点，键盘落定后再滚一次（此时才知道真正可视高度）。
+  useEffect(() => {
+    if (!scroll) return;
+    const on = (r: { height: number }) => {
+      setKbH(r.height);
+      if (r.height > 0 && anchorRef.current) reScroll(anchorRef.current);
+      else if (r.height === 0) { anchorRef.current = ''; setKbAnchor(''); setKbActive(false); }
+    };
+    Taro.onKeyboardHeightChange(on);
+    return () => Taro.offKeyboardHeightChange(on);
+  }, [scroll]);
+
+  // scrollIntoView 对相同目标不重复触发：先清空再于下一拍设值，强制生效。
+  const reScroll = (id: string) => {
+    setKbAnchor('');
+    setTimeout(() => setKbAnchor(id), 30);
+  };
+  const ensureVisible = (anchorId: string) => {
+    anchorRef.current = anchorId;
+    setKbActive(true);
+    reScroll(anchorId);
+  };
+
   const inset = topInset ? <View className="nav-inset" /> : null;
   const rootStyle = topInset ? vars : undefined;
 
   if (!scroll) {
-    return <View className={`page ${s.themeClass()} ${className}`} style={rootStyle}>{inset}{children}</View>;
+    return (
+      <ScreenKbCtx.Provider value={ensureVisible}>
+        <View className={`page ${s.themeClass()} ${className}`} style={rootStyle}>{inset}{children}</View>
+      </ScreenKbCtx.Provider>
+    );
   }
   return (
-    <View className={`page ${s.themeClass()} ${className}`} style={rootStyle}>
-      <ScrollView scrollY className="screen-scroll" enhanced showScrollbar={false}>
-        {inset}
-        {children}
-        {tab && <View className="tabbar-space" />}
-      </ScrollView>
-    </View>
+    <ScreenKbCtx.Provider value={ensureVisible}>
+      <View className={`page ${s.themeClass()} ${className}`} style={rootStyle}>
+        <ScrollView
+          scrollY
+          className="screen-scroll"
+          enhanced
+          showScrollbar={false}
+          scrollIntoView={kbAnchor || undefined}
+          scrollWithAnimation
+          style={kbActive && kbH ? { height: `calc(100vh - ${kbH}px)` } : undefined}
+        >
+          {inset}
+          {children}
+          {tab && <View className="tabbar-space" />}
+        </ScrollView>
+      </View>
+    </ScreenKbCtx.Provider>
   );
 }

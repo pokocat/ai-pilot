@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
+import KbInput from '../../components/KbInput';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
@@ -441,7 +442,8 @@ export default function Studio() {
                         <View className="task-fill" catchMove onClick={(e) => e.stopPropagation()}>
                           <Text className="tf-k">数 据 回 填 · 做完了多少？</Text>
                           <View className="tf-row">
-                            <Input
+                            <KbInput
+                              anchorId={`kbfill-${o.id}`}
                               className="tf-input"
                               value={filling[o.id] ?? ''}
                               placeholder="如：发 8 条 / 见 3 个客户 / 回款 2 万"
@@ -492,7 +494,8 @@ export default function Studio() {
 
             {/* 手动补一条军令 */}
             <View className="order-add">
-              <Input
+              <KbInput
+                anchorId="kbadd"
                 className="oa-input"
                 value={newOrder}
                 placeholder="自己补一条今日军令…"
@@ -512,7 +515,8 @@ export default function Studio() {
                 {([['leads', '线索'], ['consults', '咨询'], ['deals', '成交']] as const).map(([key, label]) => (
                   <View key={key} className="df-cell">
                     <Text className="df-label">{label}</Text>
-                    <Input
+                    <KbInput
+                      anchorId={`kbdf-${key}`}
                       className="df-input"
                       type="number"
                       value={bf[key]}
@@ -745,7 +749,8 @@ function WeeklyBizMetrics({ accent, onFilledChange }: { accent: string; onFilled
             {tpl.map((m) => (
               <View key={m.metricKey} className="bm-cell">
                 <Text className="df-label">{m.metricName}（{m.unit}）</Text>
-                <Input
+                <KbInput
+                  anchorId={`kbbm-${m.metricKey}`}
                   className="df-input"
                   type="digit"
                   value={draft[m.metricKey] ?? ''}
