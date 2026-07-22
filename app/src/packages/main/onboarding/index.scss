@@ -3,13 +3,17 @@
    一切颜色走 token（--accent / --ink / --line / --paper …），不引入原型硬编码色值。 */
 
 .onboarding {
-  min-height: 100vh;
+  /* 必须硬钳高度：min-height 下 ScrollView 会随内容长高、内部滚动失效，
+     叠加页面 disableScroll 就整页拖不动（真机 Android 实测）。 */
+  height: 100vh;
+  overflow: hidden;
   background: var(--bg);
   display: flex;
   flex-direction: column;
 }
 
 .ob-top {
+  /* CSS 兜底（H5）；weapp 由 JS 实测胶囊底部后内联覆盖 */
   height: calc(env(safe-area-inset-top, 0px) + 20px);
   flex: none;
 }
@@ -50,16 +54,19 @@
   color: var(--ink-2);
 }
 
-/* —— 择色 —— */
+/* —— 择色 ——
+   双列不用 gap+calc(50% - 6px)：两列合计恰为 100%，rpx 取整溢出即塌成单列（Android 真机实测）。
+   改 space-between + 48.4% 宽，留出取整余量。 */
 .ob-grid {
   margin-top: 26px;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  justify-content: space-between;
 }
 
 .ob-color {
-  width: calc(50% - 6px);
+  width: 48.4%;
+  margin-bottom: 12px;
   box-sizing: border-box;
   padding: 16px 16px 18px;
   background: var(--paper);

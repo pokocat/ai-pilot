@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
+import Taro from '@tarojs/taro';
 import { COLORS, colorIndex } from '../../../data/colors';
 import { api, type SurveyQ } from '../../../services/api';
 import { store } from '../../../services/store';
@@ -33,7 +34,16 @@ export default function Onboarding() {
 
   const [step, setStep] = useState<Step>('color');
   const [sel, setSel] = useState(() => colorIndex(store.colorKey()));
-  const [picked, setPicked] = useState(false); // 是否已在本页择过色（控制「军师批曰」出现）
+  // 顶部让位：状态栏 + 微信胶囊（Android 上 env(safe-area-inset-top) 常为 0，必须 JS 实测；H5 走 CSS 兜底）。
+  const [topInset, setTopInset] = useState(0);
+  useEffect(() => {
+    try {
+      const rect = Taro.getMenuButtonBoundingClientRect?.();
+      const sys = Taro.getWindowInfo?.();
+      const top = Math.max((rect?.bottom || 0) + 10, (sys?.statusBarHeight || 0) + 48);
+      if (top > 58) setTopInset(top);
+    } catch { /* H5 / 旧基础库：CSS safe-area 兜底 */ }
+  }, []);
 
   const [survey, setSurvey] = useState<SurveyQ[]>(DEFAULT_SURVEY);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -55,7 +65,6 @@ export default function Onboarding() {
   // 择色：整页立即换主题（store 状态驱动 themeClass）+ 持久化（store.setColor→api.setColor）。
   const pick = (i: number) => {
     setSel(i);
-    setPicked(true);
     store.setColor(COLORS[i].key, true);
   };
 
@@ -130,7 +139,7 @@ export default function Onboarding() {
 
   return (
     <View className={`page onboarding ${s.themeClass()}`}>
-      <View className="ob-top" />
+      <View className="ob-top" style={topInset ? { height: `${topInset}px` } : undefined} />
       <ScrollView scrollY className="ob-scroll" enhanced showScrollbar={false}>
         {step === 'color' && (
           <View className="ob-step" key="color">
@@ -155,12 +164,11 @@ export default function Onboarding() {
               ))}
             </View>
 
-            {picked && (
-              <View className="ob-quote" key={c.key}>
-                <Text className="oq-label">军 师 批 曰</Text>
-                <Text className="oq-body serif">「{c.verdict}」</Text>
-              </View>
-            )}
+            {/* 默认选中项也要出批语：批曰块常驻，内容随当前选色而变 */}
+            <View className="ob-quote" key={c.key}>
+              <Text className="oq-label">军 师 批 曰</Text>
+              <Text className="oq-body serif">「{c.verdict}」</Text>
+            </View>
 
             <View className="ob-cta serif" onClick={() => setStep('casefile')}>
               <Text>落 定 · 下 一 步</Text>
