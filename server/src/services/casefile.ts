@@ -12,6 +12,12 @@ export interface DeliverableSectionInput {
   h: string;
   b?: string;
   list?: string[];
+  // 报告 V2 类型化组件字段（松散读取；phases.actions / gantt.rows 也是军令来源）
+  type?: string;
+  paras?: string[];
+  items?: Array<{ tab?: string; when?: string; h?: string; d?: string; kpi?: string; label?: string; note?: string; actions?: string[] }>;
+  rows?: Array<{ label?: string; note?: string } | Array<string | { text?: string }>>;
+  quads?: Array<{ title?: string; items?: string[] }>;
 }
 
 export interface DeliverableInput {
@@ -45,7 +51,11 @@ export function todayStr(): string {
 }
 
 function normalizeOrderText(text: string): string {
-  return text.trim().replace(/\s+/g, ' ');
+  // 行内强调标记（**==!!##）不进军令文本——报告正文富排版是渲染层的事，军令要的是干净动作句
+  return text
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/==([^=\n]+)==/g, '$1')
+    .replace(/!!([^!\n]+)!!/g, '$1').replace(/##([^#\n]+)##/g, '$1')
+    .trim().replace(/\s+/g, ' ');
 }
 
 function orderDedupeKey(date: string, text: string): string {
@@ -53,13 +63,21 @@ function orderDedupeKey(date: string, text: string): string {
 }
 
 // 从认可的成果中提取「可执行动作」：优先取标题含 行动/动作/下一步/清单/计划/建议 的分节列表，
-// 兜底取任意列表分节；最多 3 条作为今日军令。
+// 兜底取任意列表分节；报告 V2 类型化成果（白卡 list 缺位）再兜底 phases.actions → gantt 行；最多 3 条作为今日军令。
 export function extractOrders(d: DeliverableInput): string[] {
   const actionHint = /行动|动作|下一步|清单|计划|建议|怎么做|7 ?天|30 ?天/;
   const sections = d.sections ?? [];
   const listSections = sections.filter((s) => s.list && s.list.length);
-  const preferred = listSections.filter((s) => actionHint.test(s.h));
-  const source = (preferred.length ? preferred : listSections).flatMap((s) => s.list || []);
+  const preferred = listSections.filter((s) => actionHint.test(s.h ?? ''));
+  let source = (preferred.length ? preferred : listSections).flatMap((s) => s.list || []);
+  if (!source.length) {
+    source = sections.filter((s) => s.type === 'phases')
+      .flatMap((s) => (s.items ?? []).flatMap((it) => it.actions ?? []));
+  }
+  if (!source.length) {
+    source = sections.filter((s) => s.type === 'gantt')
+      .flatMap((s) => (s.rows ?? []).map((r) => (Array.isArray(r) ? '' : r.label ?? '')).filter(Boolean));
+  }
   const seen = new Set<string>();
   return source
     .map(normalizeOrderText)
@@ -72,16 +90,17 @@ export function extractOrders(d: DeliverableInput): string[] {
     .slice(0, 3);
 }
 
-// 「现在不能做」：取标题含 风险/不能/不要/避免/禁 的分节内容。
+// 「现在不能做」：取标题含 风险/不能/不要/避免/禁 的分节内容（含 tone=风险 的 callout）。
 export function extractRisks(d: DeliverableInput): string[] {
   const riskHint = /风险|不能|不要|避免|禁|红线/;
   const out: string[] = [];
   (d.sections ?? []).forEach((s) => {
-    if (!riskHint.test(s.h)) return;
+    const tone = (s as { tone?: string }).tone;
+    if (!riskHint.test(s.h ?? '') && tone !== '风险') return;
     if (s.list?.length) out.push(...s.list);
     else if (s.b) out.push(s.b);
   });
-  return out.slice(0, 3).map((t) => t.trim()).filter(Boolean);
+  return out.slice(0, 3).map((t) => normalizeOrderText(t)).filter(Boolean);
 }
 
 // 方案首段正文作为案卷主判断。
@@ -140,13 +159,28 @@ actionType(upload=补资料/backfill=回填数据/review=复盘反馈/topics=内
 metrics(≤3组{label,value}指标对)、sourceQuote(来源引用，方案里的依据一句)、aligned(是否对齐主要矛盾 true/false)。
 只输出 JSON：{"orders":[{"text":"…","owner":"…","due":"…","eta":30,"actionType":"upload","steps":["…"],"metrics":[{"label":"…","value":"…"}],"sourceQuote":"…","aligned":true}]}。无则空数组，禁止编造。`;
 
+// 喂给 LLM 的成果全文：拍平所有类型化组件字段（phases.actions/gantt 行/quads 等），不然类型化报告在这里只剩标题。
 function deliverableText(d: DeliverableInput): string {
-  return [d.title, ...(d.sections ?? []).map((s) => `${s.h}\n${s.b ?? ''}\n${(s.list ?? []).join('\n')}`)].filter(Boolean).join('\n\n').slice(0, 3000);
+  const sectionText = (s: DeliverableSectionInput): string => {
+    const parts: (string | undefined)[] = [s.h, s.b, ...(s.list ?? []), ...(s.paras ?? [])];
+    for (const it of s.items ?? []) parts.push([it.tab, it.when, it.h, it.label, it.d, it.kpi, it.note, ...(it.actions ?? [])].filter(Boolean).join(' '));
+    for (const r of s.rows ?? []) parts.push(Array.isArray(r) ? r.map((c) => (typeof c === 'string' ? c : c?.text ?? '')).join(' ') : [r.label, r.note].filter(Boolean).join(' '));
+    for (const q of s.quads ?? []) parts.push([q.title, ...(q.items ?? [])].filter(Boolean).join(' '));
+    return parts.filter(Boolean).join('\n');
+  };
+  return [d.title, ...(d.sections ?? []).map(sectionText)].filter(Boolean).join('\n\n').slice(0, 3000);
 }
 
-/** 结构化拆军令：LLM 可用则走 structured()，否则退回启发式 extractOrders + 确定性缺省。 */
+// 认可路径 LLM 限时预算：拆军令/抽目标是「锦上添花」，预算内没回来就走启发式/留空，
+// 绝不让「认可 · 去执行」按钮同步吊在慢网关上（2026-07-22 事故：claudeRaw 无超时把 /casefile/accept 挂死）。
+const ACCEPT_LLM_BUDGET_MS = 10_000;
+function withBudget<T>(p: Promise<T | null>, ms = ACCEPT_LLM_BUDGET_MS): Promise<T | null> {
+  return Promise.race([p, new Promise<T | null>((res) => { setTimeout(() => res(null), ms).unref?.(); })]);
+}
+
+/** 结构化拆军令：LLM 可用则走 structured()（限时预算），否则退回启发式 extractOrders + 确定性缺省。 */
 export async function structureOrders(d: DeliverableInput, opts: { userName: string; agentName: string }): Promise<StructuredOrder[]> {
-  const parsed = await structured(OrdersResultZ, { system: ORDERS_SYS, user: deliverableText(d), maxChars: 3000 }).catch(() => null);
+  const parsed = await withBudget(structured(OrdersResultZ, { system: ORDERS_SYS, user: deliverableText(d), maxChars: 3000 }).catch(() => null));
   if (parsed?.orders?.length) return parsed.orders.map((o) => ({ ...o, owner: o.owner ?? opts.userName }));
   return extractOrders(d).map((text) => ({
     text, owner: opts.userName, due: null, eta: null,
@@ -160,7 +194,7 @@ const GoalZ = z.object({
 });
 const GOALS_SYS = `从方案中抽取目标阶梯：longTerm(3-5年)/annual(年度)/quarterly(季度)/weekly(本周)。只在方案明确提到时给对应值，抽不出留空，禁止编造。只输出 JSON：{"longTerm":"…","annual":"…","quarterly":"…","weekly":"…"}`;
 export async function extractGoals(d: DeliverableInput): Promise<GoalLadder | null> {
-  const parsed = await structured(GoalZ, { system: GOALS_SYS, user: deliverableText(d), maxChars: 2000 }).catch(() => null);
+  const parsed = await withBudget(structured(GoalZ, { system: GOALS_SYS, user: deliverableText(d), maxChars: 2000 }).catch(() => null));
   if (!parsed) return null;
   const g: GoalLadder = {
     longTerm: parsed.longTerm?.trim().slice(0, 60) || null,

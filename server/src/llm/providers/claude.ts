@@ -85,7 +85,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     tools: [DELIVERABLE_TOOL],
     tool_choice: { type: 'tool', name: 'emit_deliverable' },
     messages: [...dlvHistory, { role: 'user', content: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。` }],
-  });
+  }, { timeout: Math.max(cfg.timeoutMs, 120_000) });
   const usage = usageOf(res);
 
   const toolUse = res.content.find((c) => c.type === 'tool_use');
@@ -141,7 +141,7 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     temperature: cfg.temperature,
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
     messages: [...history, { role: 'user', content: ctx.userMessage }],
-  });
+  }, { timeout: cfg.timeoutMs });
   const text = res.content
     .filter((c) => c.type === 'text')
     .map((c) => (c.type === 'text' ? c.text : ''))
@@ -182,12 +182,13 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
 export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
+  // 轻量补全必须设超时：SDK 默认 600s + 自动重试，网关一挂会把同步等它的路由（如 /casefile/accept）吊死。
   const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
     model: cfg.model,
     max_tokens: 700,
     system,
     messages: [{ role: 'user', content: user }],
-  });
+  }, { timeout: cfg.timeoutMs, maxRetries: 1 });
   return res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
 }
 
@@ -238,7 +239,7 @@ export function claudeStep(cfg: ResolvedAiConfig): StepFn {
       req.tool_choice = { type: 'auto' };
     }
 
-    const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create(req);
+    const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create(req, { timeout: Math.max(cfg.timeoutMs, 120_000) });
     const usage = usageOf(res);
     const toolUses = res.content.filter((c): c is Anthropic.ToolUseBlock => c.type === 'tool_use');
 
