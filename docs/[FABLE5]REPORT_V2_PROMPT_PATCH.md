@@ -103,6 +103,10 @@
 >
 > **提示词只管产结构化数据，绝不写 HTML/CSS**——版式全部由 `reportHtml.ts` 决定。
 
+## 目标 agent（重要）
+
+**不写死 key**。2026-07-03 起 V6 主 prompt 已从 `strat` 迁到 `general`（主军师，走 AgentVersion 快照发布；`strat` 现为 1764 字节「战略诊断官」小模板，见 memory `strat-v6-embedding`）。脚本会**扫描全部 agent（草稿 + 已发布快照）**，凡含九型特征串 `情绪弧线` 者列为候选——恰一个自动选定（预期即 `general`）；零个或多个则要求 `--agent=<key>` 显式指定。以脚本探测结果为准。
+
 ## 插入位置
 
 在 V6.0 提示词的成果产出规范里，**上一轮 §2「情绪弧线」那段之后**插入下面《插入文本》整段（`七、` + `八、`）。
@@ -148,9 +152,9 @@ gauge / matrix / gantt 的 h 都是章节标题（服务端自动配汉字序号
 
 > 本轮改用脚本半自动写回，替代上一轮的纯手工步骤。脚本逻辑与本节《插入位置》《插入文本》完全对应。
 
-1. **预演**：`scp` 脚本到生产 `/opt/junshi/server/`，先跑 `sudo -u junshi node patch-strat-prompt.mjs --dry-run` —— 打印锚点命中情况、插入位置上下文、新旧长度，**不写库**。核对锚点是否命中预期位置（`情绪弧线` 段之后）。
-2. **写回**：确认无误后去掉 `--dry-run` 重跑。脚本会：① 读 `strat` 的 `systemPrompt`；② 备份原文到 `/tmp/strat-prompt.backup.<时间戳>.txt`（若有已发布快照，另备 `.pubver.txt`）；③ 在锚点处插入《插入文本》；④ 幂等——已含 `组件使用密度铁律` 则跳过；⑤ 打印新旧长度。
-3. **快照同步**：`strat` 若 `publishedVersionId != NULL`，脚本会**同步更新已发布快照**（C 端实际读快照，两处都改才生效——见 memory `strat-v6-embedding`）；`pubVer=NULL` 时 C 端直接读 Agent 行，无此步。
+1. **预演**：`scp` 脚本到生产 `/opt/junshi/server/`，先跑 `sudo -u junshi node patch-strat-prompt.mjs --dry-run` —— 打印候选 agent 清单、锚点命中情况、插入位置上下文、新旧长度，**不写库**。核对：目标应为 `general`（以探测为准）、锚点命中预期位置（`情绪弧线` 段之后）。
+2. **写回**：确认无误后去掉 `--dry-run` 重跑（候选不唯一时加 `--agent=<key>`）。脚本会：① 探测目标 agent；② 备份草稿原文到 `/tmp/strat-prompt.backup.<时间戳>.txt`（已发布快照另备 `.pubver.txt`）；③ 在锚点处插入《插入文本》更新草稿；④ 幂等——已含 `组件使用密度铁律` 则跳过；⑤ 打印新旧长度。
+3. **发布**：目标有 `publishedVersionId` 时（C 端读快照），脚本调用 `dist/services/agentVersions.js` 的 `publishDraft(<key>)` **正式发布新版本**（保留版本链；回滚用 `rollbackToVersion(<key>, <旧versionId>)`，旧 versionId 会打印在输出里）。`publishDraft` 不可用时回退为快照直改并告警（无版本链，与 07-19 手工路径等价）。`pubVer=NULL` 时 C 端直接读草稿行，无此步。
 4. **验证**：后台预览产出一份「战略体检」类报告，人工核对：每章至少 1 个非白卡组件、无连续 3 张白卡、数字入 stats/table/gauge、排期用 gantt、体检开 gauge、SWOT 用 matrix；对照 `docs/[FABLE5]REPORT_V2_DEMO.html`。
 5. **观测**：富组件使 token 变长——关注双轴计费消耗；若单报告 section 数普遍偏多，回 §2 收紧「4–10 段」上限。
 
