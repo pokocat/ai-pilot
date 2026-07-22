@@ -35,8 +35,10 @@
   font-size: 12.5px; line-height: 1.45; font-weight: 600;
 }
 .bh-title {
-  display: block; margin-top: 6px;
-  font-size: 22px; line-height: 1.5; font-weight: 600; color: #fff;
+  display: -webkit-box; margin-top: 8px;
+  font-size: 18px; line-height: 1.5; font-weight: 600; color: #fff;
+  /* 文字多时最多 3 行省略——点卡片进对话看全文，避免主要矛盾撑爆首屏 */
+  -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
 /* C2：hero 首帧骨架（深色卡上用半透明白条） */
 .bh-sk { margin-top: 12px; }
