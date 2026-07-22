@@ -173,16 +173,19 @@ export default function Onboarding() {
             <Text className="ob-title serif">你经营哪一行？</Text>
             <Text className="ob-lead">先立案卷。军师据此量身研判，答得越实，判得越准。</Text>
 
-            <View className="ob-rows">
+            {/* 行业双列编号卡：14 项列表太长，收成两列（与择色网格同语言，48.5% 口径） */}
+            <View className="ob-ind-grid">
               {industryQ?.options.map((opt, oi) => (
                 <View
                   key={opt}
-                  className={`ob-row ${answers[industryQ.key] === opt ? 'on' : ''}`}
+                  className={`ob-ind ${answers[industryQ.key] === opt ? 'on' : ''}`}
                   onClick={() => setAnswers((a) => ({ ...a, [industryQ.key]: opt }))}
                 >
-                  <Text className="or-idx serif">{String(oi + 1).padStart(2, '0')}</Text>
-                  <Text className="or-name">{opt}</Text>
-                  <Text className="or-arrow">{answers[industryQ.key] === opt ? '✓' : '›'}</Text>
+                  <View className="oi-head">
+                    <Text className="oi-idx serif">{String(oi + 1).padStart(2, '0')}</Text>
+                    {answers[industryQ.key] === opt && <Text className="oi-check">✓</Text>}
+                  </View>
+                  <Text className="oi-name">{opt}</Text>
                 </View>
               ))}
             </View>

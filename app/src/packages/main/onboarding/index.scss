@@ -139,51 +139,58 @@
   font-weight: 600;
 }
 
-/* —— 立案卷：行业带序号发丝行 —— */
-.ob-rows {
+/* —— 立案卷：行业双列编号卡（与择色网格同语言，AGENTS.md §7.2 两列口径） —— */
+.ob-ind-grid {
   margin-top: 24px;
-  border-top: 1px solid var(--line);
-}
-
-.ob-row {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 16px 2px;
-  border-bottom: 1px solid var(--line);
-  transition: background .18s ease;
+  flex-wrap: wrap;
+  justify-content: space-between;
 }
 
-.ob-row.on {
+.ob-ind {
+  width: 48.5%;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+  padding: 12px 14px 13px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  transition: border-color .18s ease, background .18s ease;
+}
+
+.ob-ind.on {
+  border-color: var(--accent);
   background: var(--accent-soft);
 }
 
-.or-idx {
-  font-size: 13px;
+.oi-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.oi-idx {
+  font-size: 11px;
   color: var(--ink-3);
   letter-spacing: 1px;
-  width: 24px;
-  flex: none;
 }
 
-.ob-row.on .or-idx {
+.ob-ind.on .oi-idx {
   color: var(--accent);
 }
 
-.or-name {
-  flex: 1;
-  font-size: 15px;
-  color: var(--ink);
-}
-
-.or-arrow {
-  font-size: 16px;
-  color: var(--ink-3);
-}
-
-.ob-row.on .or-arrow {
+.oi-check {
+  font-size: 12px;
   color: var(--accent);
   font-weight: 700;
+}
+
+.oi-name {
+  display: block;
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.4;
 }
 
 /* —— 立案卷：其余问题（chips）+ 公司输入 —— */
