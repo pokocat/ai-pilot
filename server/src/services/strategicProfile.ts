@@ -5,8 +5,15 @@
 // 逐轮 LLM 结构化抽取与 M2 决策日志共用同一抽取管道（AGENTS §13 TODO），不在 v1 造第二套。
 import { prisma } from '../db.js';
 import type { DeliverableInput } from './casefile.js';
+import { cardSection } from './deliverableSection.js';
 import { llmJson } from '../llm/gateway.js';
 import type { ForcesView, ForceVerdict, ForceView } from '../../../shared/contracts';
+import type { DeliverableSection } from '../llm/schema.js';
+
+/** 与 casefile.ts 同一份修复：d.sections 实际是报告 V2 类型化 section，读前先归一化。 */
+function normalizedSections(d: DeliverableInput) {
+  return ((d.sections ?? []) as unknown as DeliverableSection[]).map(cardSection);
+}
 
 export interface StrategicView {
   mainContradiction: string;
@@ -22,7 +29,7 @@ export interface StrategicView {
 export function extractStrategicFacts(d: DeliverableInput): Partial<Omit<StrategicView, 'updatedAt'>> {
   const out: Partial<Omit<StrategicView, 'updatedAt'>> = {};
   const firstLine = (s?: string) => (s || '').split('\n')[0].trim().slice(0, 300);
-  for (const sec of d.sections ?? []) {
+  for (const sec of normalizedSections(d)) {
     const h = sec.h || '';
     const body = sec.b || (sec.list?.length ? sec.list[0] : '');
     if (!body) continue;
@@ -106,7 +113,8 @@ export async function loadForces(userId: string): Promise<ForcesView | null> {
 
 /** 从「市势/人势研判」成果提炼结论（LLM 优先、关键词兜底）。forceLabel = 市势 | 人势。 */
 export async function extractForceVerdict(forceLabel: string, d: DeliverableInput): Promise<ForceView | null> {
-  const text = (d.sections ?? []).map((s) => `${s.h || ''}\n${s.b || (s.list?.join('；') ?? '')}`).join('\n').slice(0, 3000);
+  const sections = normalizedSections(d);
+  const text = sections.map((s) => `${s.h || ''}\n${s.b || (s.list?.join('；') ?? '')}`).join('\n').slice(0, 3000);
   if (!text.trim()) return null;
   const raw = await llmJson(
     `你在读一份「${forceLabel}研判」。给出老板在${forceLabel === '市势' ? '市场端' : '资源/组织端'}该「攻/守/等/撤」的**一个**结论，` +
@@ -117,7 +125,7 @@ export async function extractForceVerdict(forceLabel: string, d: DeliverableInpu
   let note = raw && typeof raw.note === 'string' ? raw.note.slice(0, 40) : '';
   if (!verdict) {
     const hit = VERDICTS.find((v) => text.includes(`该${v}`) || text.includes(`宜${v}`) || text.includes(`${v}。`));
-    if (hit) { verdict = hit; note = note || ((d.sections?.[0]?.b || '').split('\n')[0].slice(0, 40)); }
+    if (hit) { verdict = hit; note = note || ((sections[0]?.b || '').split('\n')[0].slice(0, 40)); }
   }
   return verdict ? { verdict, note } : null;
 }
