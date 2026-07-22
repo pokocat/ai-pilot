@@ -48,10 +48,10 @@ function orderTagLabel(tag: string): string {
   return tag.startsWith('军令') ? tag : `军令 · ${tag}`;
 }
 
-// V7-10：目标阶梯字段（3-5年/年度/季度/本周）。
+// V7-10：目标阶梯字段，由近及远（本周/季度/年度/3-5年）——执行台先看眼前，再抬头看远方。
 type GoalField = 'longTerm' | 'annual' | 'quarterly' | 'weekly';
 const GOAL_FIELDS: [GoalField, string][] = [
-  ['longTerm', '3-5年'], ['annual', '年度'], ['quarterly', '季度'], ['weekly', '本周'],
+  ['weekly', '本周'], ['quarterly', '季度'], ['annual', '年度'], ['longTerm', '3-5年'],
 ];
 
 // V7-05：军令结构化 meta（负责人 / 截止 / 预计耗时；缺省字段省略）。
@@ -360,7 +360,7 @@ export default function Studio() {
         {/* 目标阶梯（goal-ladder V7-10）：真实目标 → 空格「＋ 补目标」内联编辑；顶部保留拆解对话入口 */}
         <View className="goal-head">
           <Text className="goal-head-t serif">目标阶梯</Text>
-          <Text className="goal-head-more" onClick={() => goChat('strat', '帮我把目标拆成阶梯：3-5 年、年度、季度、本周各一句话 + 关键指标。')}>拆解对话 ›</Text>
+          <Text className="goal-head-more" onClick={() => goChat('strat', '帮我把目标拆成阶梯：本周、季度、年度、3-5 年各一句话 + 关键指标。')}>拆解对话 ›</Text>
         </View>
         <View className="goal-ladder">
           {GOAL_FIELDS.map(([field, label]) => {

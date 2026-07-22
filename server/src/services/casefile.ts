@@ -212,8 +212,8 @@ export async function goalsInjectionLine(userId: string): Promise<string | null>
   const g = (cf?.goalsJson as GoalLadder | null) ?? null;
   if (!g) return null;
   const parts = [
-    g.longTerm && `3-5年：${g.longTerm}`, g.annual && `年度：${g.annual}`,
-    g.quarterly && `季度：${g.quarterly}`, g.weekly && `本周：${g.weekly}`,
+    g.weekly && `本周：${g.weekly}`, g.quarterly && `季度：${g.quarterly}`,
+    g.annual && `年度：${g.annual}`, g.longTerm && `3-5年：${g.longTerm}`,
   ].filter(Boolean);
   return parts.length ? parts.join('；') : null;
 }
