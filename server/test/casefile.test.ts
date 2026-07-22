@@ -105,6 +105,14 @@ test('军令：手动添加 / 打卡往返 / 删除', async () => {
   const done = await api('PATCH', `/api/casefile/orders/${manual.id}`, { token, body: {} });
   assert.equal(done.status, 200);
   assert.equal(done.body.casefile.orders.find((o: { id: string }) => o.id === manual.id).done, true);
+
+  // 完成后就地回填「做完了多少」：带 resultNote 的 PATCH 只落战果、不翻转完成态
+  const filled = await api('PATCH', `/api/casefile/orders/${manual.id}`, { token, body: { resultNote: '发了 8 条，见 3 个客户' } });
+  assert.equal(filled.status, 200);
+  const filledOrder = filled.body.casefile.orders.find((o: { id: string }) => o.id === manual.id);
+  assert.equal(filledOrder.resultNote, '发了 8 条，见 3 个客户');
+  assert.equal(filledOrder.done, true, '回填不应把已完成军令翻回未完成');
+
   const undone = await api('PATCH', `/api/casefile/orders/${manual.id}`, { token, body: { done: false } });
   assert.equal(undone.body.casefile.orders.find((o: { id: string }) => o.id === manual.id).done, false);
 

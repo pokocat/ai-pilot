@@ -94,15 +94,20 @@ export async function casefileRoutes(app: FastifyInstance) {
   });
 
   // 打卡 / 取消打卡
-  app.patch<{ Params: { id: string }; Body: { done?: boolean } }>('/casefile/orders/:id', async (req, reply) => {
+  app.patch<{ Params: { id: string }; Body: { done?: boolean; resultNote?: string } }>('/casefile/orders/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const order = await prisma.casefileOrder.findFirst({ where: { id: req.params.id, userId: user.id } });
     if (!order) return reply.code(404).send({ error: '军令不存在' });
-    const done = typeof req.body?.done === 'boolean' ? req.body.done : !order.done;
-    await prisma.casefileOrder.update({
-      where: { id: order.id },
-      data: { done, doneAt: done ? new Date() : null },
-    });
+    const body = req.body ?? {};
+    const data: { done?: boolean; doneAt?: Date | null; resultNote?: string | null } = {};
+    if (typeof body.done === 'boolean') {
+      data.done = body.done; data.doneAt = body.done ? new Date() : null;
+    } else if (typeof body.resultNote !== 'string') {
+      // 空 body = 纯打卡切换（沿用原行为）；带 resultNote 的请求不顺带翻转完成态
+      data.done = !order.done; data.doneAt = !order.done ? new Date() : null;
+    }
+    if (typeof body.resultNote === 'string') data.resultNote = body.resultNote.trim().slice(0, 200) || null;
+    await prisma.casefileOrder.update({ where: { id: order.id }, data });
     return { casefile: await casefileView(user.id) };
   });
 

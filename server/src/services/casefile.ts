@@ -30,6 +30,7 @@ export interface CasefileOrderView {
   id: string; text: string; from: string; tag: string; date: string; done: boolean; aligned: boolean | null;
   ownerName: string | null; dueAt: string | null; etaMinutes: number | null;
   sourceQuote: string | null; steps: string[]; metrics: OrderMetric[]; actionType: OrderActionType;
+  resultNote: string | null; // 完成后就地回填的一句话战果
 }
 
 /** 案卷对外形状 —— 与小程序端 services/dossier.ts 的 Dossier 契约一致（页面口径不变）。 */
@@ -260,6 +261,7 @@ export async function casefileView(userId: string, days = 14): Promise<CasefileV
       ownerName: o.ownerName ?? null, dueAt: o.dueAt ?? null, etaMinutes: o.etaMinutes ?? null,
       sourceQuote: o.sourceQuote ?? null, steps: (o.stepsJson as string[] | null) ?? [],
       metrics: (o.metricsJson as OrderMetric[] | null) ?? [], actionType: (o.actionType as OrderActionType | null) ?? 'none',
+      resultNote: o.resultNote ?? null,
     })),
     backfill,
   };

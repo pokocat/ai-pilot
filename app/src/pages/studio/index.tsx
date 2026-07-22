@@ -13,7 +13,7 @@ import { diamondCost } from '../../services/format';
 import { api, type Agent, type GoalLadder, type ReminderItem, type BizMetricTemplateItem } from '../../services/api';
 import {
   addOrder, buildReviewPrompt, doneOrdersOf, ordersOf, pendingOrdersOf, recentOrders, refreshDossier,
-  removeOrder, saveBackfill, saveGoals, startReview, today, todayProgress, toggleOrder, type Dossier, type DossierOrder,
+  removeOrder, saveBackfill, saveGoals, setOrderResult, startReview, today, todayProgress, toggleOrder, type Dossier, type DossierOrder,
 } from '../../services/dossier';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import { EMPTY_STATES } from '../../data/emptyStates';
@@ -77,6 +77,8 @@ export default function Studio() {
   const [bf, setBf] = useState({ leads: '', consults: '', deals: '' });
   const [streak, setStreak] = useState<number | null>(null);
   const [showDoneArchive, setShowDoneArchive] = useState(false);
+  // 完成即就地回填「做完了多少」：filling[id] = 草稿；有键=该军令正展开回填、暂不归档
+  const [filling, setFilling] = useState<Record<string, string>>({});
   const [reminders, setReminders] = useState<ReminderItem[] | null>(null);
   const [goalEdit, setGoalEdit] = useState<{ field: GoalField; label: string } | null>(null);
   const [goalDraft, setGoalDraft] = useState('');
@@ -128,6 +130,10 @@ export default function Studio() {
   const backfillSaved = !!dossier?.backfill[todayDate]?.savedAt;
   const creative = s.agents().filter((a) => a.type === 'creative');
   const firstUndone = pendingTodayOrders[0];
+  // 完成后就地回填：正回填中的军令留在列表（不进归档），回填提交后才归档
+  const awaiting = (id: string) => Object.prototype.hasOwnProperty.call(filling, id);
+  const listOrders = todayOrders.filter((o) => !o.done || awaiting(o.id));
+  const archivedDone = doneTodayOrders.filter((o) => !awaiting(o.id));
   const reviewReminder = reminders?.find((r) => r.kind === 'review') ?? null;
 
   const goChat = (agentKey: string, prompt: string) =>
@@ -141,9 +147,26 @@ export default function Studio() {
   };
 
   // 打卡走乐观更新（即点即勾），服务端结果回来后校准；失败重新拉取兜底。
+  // 待办→完成：就地展开「数据回填」；取消完成：收起回填。
   const onToggle = (id: string) => {
+    const wasDone = dossier?.orders.find((o) => o.id === id)?.done ?? false;
     setDossier((cur) => (cur ? { ...cur, orders: cur.orders.map((o) => (o.id === id ? { ...o, done: !o.done } : o)) } : cur));
+    setFilling((cur) => {
+      const next = { ...cur };
+      if (!wasDone) { if (!(id in next)) next[id] = ''; } else delete next[id];
+      return next;
+    });
     toggleOrder(id).then(setDossier).catch(() => refreshDossier().then(setDossier));
+  };
+  // 提交回填 → 落库战果 → 收起归档
+  const onFill = async (id: string) => {
+    const note = (filling[id] ?? '').trim();
+    if (!note) { Taro.showToast({ title: '先填一句做完的量', icon: 'none' }); return; }
+    const updated = await setOrderResult(id, note).catch(() => null);
+    if (!updated) { Taro.showToast({ title: '回填未成，稍后再试', icon: 'none' }); return; }
+    setDossier(updated);
+    setFilling((cur) => { const n = { ...cur }; delete n[id]; return n; });
+    Taro.showToast({ title: '已回填 · 复盘时军师据此校准', icon: 'none' });
   };
   const onRemove = (id: string) =>
     Taro.showModal({ title: '删除军令', content: '删除这条军令？', confirmText: '删除' }).then(async (r) => {
@@ -395,7 +418,7 @@ export default function Studio() {
               </View>
             ) : null}
 
-            {/* 今日军令打卡（task 卡） */}
+            {/* 今日军令打卡（task 卡）——完成即就地展开「数据回填」，回填后收起归档 */}
             {pendingTodayOrders.length === 0 && doneTodayOrders.length === 0 ? (
               <View className="orders-empty card" onClick={genOrders}>
                 <Text className="oe-t serif">今天还没有军令</Text>
@@ -403,16 +426,33 @@ export default function Studio() {
                 <Text className="oe-go">{dossier ? '生成今日军令 ›' : '去对话 ›'}</Text>
               </View>
             ) : (
-              pendingTodayOrders.map((o) => {
+              listOrders.map((o) => {
                 const meta = orderMetaText(o);
                 return (
                   <View key={o.id} className={`task card ${o.done ? 'done' : ''}`} onClick={() => openCommand(o.id)} onLongPress={() => onRemove(o.id)}>
                     <View className="task-b">
-                      <View className="task-meta-row"><Text className="task-pill">{orderTagLabel(o.tag)}</Text></View>
-                      <Text className="task-t serif">{o.text}</Text>
+                      <View className="task-meta-row"><Text className="task-pill">{orderTagLabel(o.tag)}</Text>{o.done ? <Text className="task-stamp">已办</Text> : null}</View>
+                      <Text className={`task-t serif ${o.done ? 'struck' : ''}`}>{o.text}</Text>
                       {/* V7-05：结构化 meta 行（负责人 · 截止 · 预计耗时；缺省省略） */}
                       {meta ? <Text className="task-meta-info">{meta}</Text> : null}
                       <View className="task-meta-row"><Text className="task-pill sub">来自 {o.from}</Text><Text className="task-pill sub">长按删除</Text></View>
+                      {/* 完成后就地回填「做完了多少」（fadeUp 渐入）；提交后归档 */}
+                      {awaiting(o.id) ? (
+                        <View className="task-fill" catchMove onClick={(e) => e.stopPropagation()}>
+                          <Text className="tf-k">数 据 回 填 · 做完了多少？</Text>
+                          <View className="tf-row">
+                            <Input
+                              className="tf-input"
+                              value={filling[o.id] ?? ''}
+                              placeholder="如：发 8 条 / 见 3 个客户 / 回款 2 万"
+                              confirmType="done"
+                              onInput={(e) => setFilling((c) => ({ ...c, [o.id]: e.detail.value }))}
+                              onConfirm={() => onFill(o.id)}
+                            />
+                            <View className="tf-btn" style={{ background: accent }} onClick={() => onFill(o.id)}><Text>回填</Text></View>
+                          </View>
+                        </View>
+                      ) : null}
                     </View>
                     <View className="task-check" onClick={(e) => { e.stopPropagation(); onToggle(o.id); }}>
                       {o.done ? <Icon name="check" size={14} color="#fff" /> : null}
@@ -422,22 +462,22 @@ export default function Studio() {
               })
             )}
 
-            {doneTodayOrders.length ? (
+            {archivedDone.length ? (
               <View className="done-archive card">
                 <View className="da-head" onClick={() => setShowDoneArchive((v) => !v)}>
                   <View className="da-b">
                     <Text className="da-k">已归档</Text>
-                    <Text className="da-t serif">{doneTodayOrders.length} 条完成项已收起</Text>
+                    <Text className="da-t serif">{archivedDone.length} 条完成项已收起</Text>
                     <Text className="da-d">复盘、周计划与战报皆据此追溯。</Text>
                   </View>
                   <Text className="da-action">{showDoneArchive ? '收起' : '查看'}</Text>
                 </View>
                 {showDoneArchive ? (
                   <View className="da-list">
-                    {doneTodayOrders.map((o) => (
+                    {archivedDone.map((o) => (
                       <View key={o.id} className="archived-task" onClick={() => openCommand(o.id)} onLongPress={() => onRemove(o.id)}>
                         <View className="task-b">
-                          <View className="task-meta-row"><Text className="task-pill sub">来自 {o.from}</Text><Text className="task-pill sub">长按删除</Text></View>
+                          <View className="task-meta-row"><Text className="task-pill sub">来自 {o.from}</Text>{o.resultNote ? <Text className="task-pill sub">回填 {o.resultNote}</Text> : <Text className="task-pill sub">长按删除</Text>}</View>
                           <Text className="archive-task-text serif">{o.text}</Text>
                         </View>
                         <View className="archive-check" onClick={(e) => { e.stopPropagation(); onToggle(o.id); }}>
@@ -597,7 +637,8 @@ export default function Studio() {
       {/* V7-10：目标阶梯内联编辑浮层（底部输入 sheet） */}
       {goalEdit ? (
         <View className="goal-sheet-mask" catchMove onClick={() => setGoalEdit(null)}>
-          <View className="goal-sheet" style={kbH ? { transform: `translateY(-${kbH}px)` } : undefined} onClick={(e) => e.stopPropagation()}>
+          {/* 键盘避让用 margin-bottom 抬升，不用 transform——weapp 里 transform 会让 Input 的原生输入层错位（文字与框对不上） */}
+          <View className="goal-sheet" style={kbH ? { marginBottom: `${kbH}px` } : undefined} onClick={(e) => e.stopPropagation()}>
             <View className="gs-grip" />
             <Text className="gs-title serif">{goalEdit.label}目标</Text>
             <Text className="gs-hint">一句话目标 + 关键指标，军师复盘时对齐这条。</Text>

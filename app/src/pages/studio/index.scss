@@ -217,6 +217,35 @@
 .task-check::after { content: ''; position: absolute; top: -9px; bottom: -9px; left: -9px; right: -9px; }
 .task.done .task-check { background: var(--green); border-color: var(--green); opacity: 1; }
 
+/* 完成戳 + 就地数据回填（完成即 fadeUp 渐入；用 max-height 而非 transform，免 weapp 原生输入层错位） */
+.task-stamp {
+  display: inline-flex; padding: 4px 8px; border-radius: 999px;
+  color: var(--green); border: 1px solid var(--green);
+  font-size: 10.5px; font-weight: 600; letter-spacing: .05em;
+}
+.task-fill {
+  margin-top: 12px; padding-top: 12px;
+  border-top: 1px dashed var(--line);
+  overflow: hidden; animation: taskFillUp .3s ease both;
+}
+.tf-k { display: block; font-size: 11.5px; font-weight: 600; letter-spacing: .1em; color: var(--green); margin-bottom: 9px; }
+.tf-row { display: flex; gap: 8px; }
+.tf-input {
+  flex: 1; min-width: 0; height: 40px; padding: 0 12px;
+  border-radius: 11px; background: var(--surface); border: 1px solid var(--line);
+  font-size: 13px; color: var(--ink);
+}
+.tf-btn {
+  flex-shrink: 0; height: 40px; padding: 0 18px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  color: #FBFAF6; font-size: 13px; font-weight: 600;
+}
+.tf-btn:active { opacity: .85; }
+@keyframes taskFillUp {
+  from { opacity: 0; max-height: 0; }
+  to { opacity: 1; max-height: 220px; }
+}
+
 /* —— 已完成军令归档（默认收起，展开可取消完成） —— */
 .done-archive {
   margin-top: 14px; padding: 14px 14px 12px;
@@ -413,7 +442,7 @@
   width: 100%; max-width: 600px;
   background: var(--bg, #fff); border-radius: var(--r-lg) var(--r-lg) 0 0;
   padding: 10px 20px calc(20px + env(safe-area-inset-bottom)) 20px;
-  transition: transform .2s ease; /* C6：键盘弹起时上顶避让的过渡 */
+  transition: margin-bottom .2s ease; /* C6：键盘弹起时上顶避让的过渡（用 margin 而非 transform，避免 weapp 原生输入层错位） */
   display: flex; flex-direction: column; align-items: stretch;
   box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
 }

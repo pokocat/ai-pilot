@@ -80,6 +80,8 @@ export default function Home() {
   const [forcesOpen, setForcesOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [exceptionOpen, setExceptionOpen] = useState(false);
+  // 主要矛盾卡：点击就地展开/收起全文（有判断时），而非跳对话
+  const [heroExpanded, setHeroExpanded] = useState(false);
   const me = s.me();
   const und = me?.understanding;
   // 三势一律来自真实军师档案（und.battleForces）；为空时走 force-empty 空态引导对话，绝不预置结论（P0-3）。
@@ -181,27 +183,42 @@ export default function Home() {
           <Text className="bn-side right" onClick={refresh}>↻</Text>
         </View>
 
-        {/* 军师判断 hero：主题色主要矛盾 + 案卷来源行 */}
-        <View className="battle-hero" onClick={() => goChat('agentKey=general&continue=1')}>
-          <Text className="bh-kicker">军师判断 · 主要矛盾</Text>
-          {!hydrated ? (
-            /* C2：首帧骨架，等案卷/军师档案回来再落定，避免兜底文案闪跳 */
-            <View className="bh-sk">
-              <View className="bh-sk-bar short" />
-              <View className="bh-sk-bar wide" />
-              <View className="bh-sk-bar" />
+        {/* 军师判断 hero：主要矛盾 —— 有判断时点击就地展开/收起全文；尚无判断时点击去对话 */}
+        {(() => {
+          const judgment = und?.mainContradiction || und?.summary || dossier?.judgment || '';
+          const hasJudgment = !!judgment;
+          return (
+            <View
+              className="battle-hero"
+              onClick={() => (hasJudgment ? setHeroExpanded((v) => !v) : goChat('agentKey=general&continue=1'))}
+            >
+              <Text className="bh-kicker">军师判断 · 主要矛盾</Text>
+              {!hydrated ? (
+                /* C2：首帧骨架，等案卷/军师档案回来再落定，避免兜底文案闪跳 */
+                <View className="bh-sk">
+                  <View className="bh-sk-bar short" />
+                  <View className="bh-sk-bar wide" />
+                  <View className="bh-sk-bar" />
+                </View>
+              ) : (
+                <>
+                  <Text className="bh-source">
+                    {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
+                  </Text>
+                  <Text className={`bh-title serif ${heroExpanded ? 'expanded' : ''}`}>
+                    {judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
+                  </Text>
+                  {hasJudgment ? (
+                    <View className="bh-foot">
+                      <Text className="bh-toggle">{heroExpanded ? '收起 ▲' : '展开全文 ▼'}</Text>
+                      <Text className="bh-ask" onClick={(e) => { e.stopPropagation(); goChat('agentKey=general&continue=1'); }}>问军师 ›</Text>
+                    </View>
+                  ) : null}
+                </>
+              )}
             </View>
-          ) : (
-            <>
-              <Text className="bh-source">
-                {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
-              </Text>
-              <Text className="bh-title serif">
-                {und?.mainContradiction || und?.summary || dossier?.judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
-              </Text>
-            </>
-          )}
-        </View>
+          );
+        })()}
 
         {/* 战局信号（metric-grid）：案卷完整度 / 待补资料 / 风险锁 —— 全部真实状态 */}
         <View className="metric-grid">

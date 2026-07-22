@@ -1092,6 +1092,7 @@ model CasefileOrder {
   actionType  String? // upload | backfill | review | topics | none：下一步动作类型
   done        Boolean   @default(false)
   doneAt      DateTime?
+  resultNote  String?   @db.Text // 完成后就地回填「做完了多少」——一句话战果，复盘据此校准
   createdAt   DateTime  @default(now())
 
   casefile Casefile @relation(fields: [casefileId], references: [id], onDelete: Cascade)

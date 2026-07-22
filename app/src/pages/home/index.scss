@@ -36,10 +36,20 @@
 }
 .bh-title {
   display: -webkit-box; margin-top: 8px;
-  font-size: 18px; line-height: 1.5; font-weight: 600; color: #fff;
-  /* 文字多时最多 3 行省略——点卡片进对话看全文，避免主要矛盾撑爆首屏 */
+  font-size: 18px; line-height: 1.6; font-weight: 600; color: #fff;
+  /* 收起：最多 3 行省略，避免主要矛盾撑爆首屏；点卡片就地展开看全文 */
   -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  max-height: calc(18px * 1.6 * 3); transition: max-height .32s ease;
 }
+.bh-title.expanded {
+  -webkit-line-clamp: 999; max-height: 1600px;
+}
+.bh-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 12px;
+}
+.bh-toggle { font-size: 12.5px; font-weight: 600; letter-spacing: .04em; color: rgba(255, 255, 255, .72); }
+.bh-ask { font-size: 12.5px; font-weight: 600; color: #fff; }
 /* C2：hero 首帧骨架（深色卡上用半透明白条） */
 .bh-sk { margin-top: 12px; }
 .bh-sk-bar {
