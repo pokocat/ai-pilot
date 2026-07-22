@@ -7,6 +7,7 @@ import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
 import Sheet from '../../components/Sheet';
 import NextStepCard from '../../components/NextStepCard';
+import CoachMarks from '../../components/CoachMarks';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type BattleForce, type ForceKind } from '../../services/api';
@@ -424,6 +425,7 @@ export default function Home() {
           if (!onboarded) goOnboarding();
         }}
       />
+      <CoachMarks />
     </Screen>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import SafeHeader from '../../../components/SafeHeader';
+import { coachPending } from '../../../components/CoachMarks';
 import { COLORS, colorIndex } from '../../../data/colors';
 import { api, type SurveyQ } from '../../../services/api';
 import { store } from '../../../services/store';
@@ -137,7 +138,9 @@ export default function Onboarding() {
 
   const enterHQ = () => {
     store.completeOnboarding();
-    switchTo('/pages/home/index');
+    // 功能点亮（五步 coach）未看完 → 落问策页（coach 第一步即问策，避免落军情又被拉走的闪跳）；
+    // 已看完（理论上不会发生）→ 直接进军情。
+    switchTo(coachPending() ? '/pages/sessions/index' : '/pages/home/index');
   };
 
   const judgeDone = settled && typed.length >= targetRef.current.length && targetRef.current.length > 0;

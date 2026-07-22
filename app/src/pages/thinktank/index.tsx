@@ -9,6 +9,7 @@ import AsyncState from '../../components/AsyncState';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
 import Sheet from '../../components/Sheet';
+import CoachMarks from '../../components/CoachMarks';
 import { navTo, switchTo } from '../../services/nav';
 import { useStore } from '../../hooks/useStore';
 import { checkUpload } from '../../services/uploadGuard';
@@ -940,6 +941,7 @@ export default function ThinkTank() {
 
       {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉智库四 tab 数据 */}
       <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadAll(); }} />
+      <CoachMarks />
     </Screen>
   );
 }

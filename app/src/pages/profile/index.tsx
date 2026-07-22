@@ -8,6 +8,7 @@ import Login from '../../components/Login';
 import Picker from '../../components/Picker';
 import Plans from '../../components/Plans';
 import BaseSheet from '../../components/Sheet';
+import CoachMarks from '../../components/CoachMarks';
 import { navTo, switchTo } from '../../services/nav';
 import { REVIEW_TIME } from '../../data/constants';
 import { useStore } from '../../hooks/useStore';
@@ -360,6 +361,7 @@ export default function Profile() {
 
       {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉我的页数据 */}
       <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadProfile(); }} />
+      <CoachMarks />
     </Screen>
   );
 }

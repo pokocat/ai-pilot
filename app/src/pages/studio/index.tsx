@@ -18,6 +18,7 @@ import {
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import { EMPTY_STATES } from '../../data/emptyStates';
 import PrescriptionStrip from '../../components/PrescriptionStrip';
+import CoachMarks from '../../components/CoachMarks';
 import './index.scss';
 
 type ExecView = 'today' | 'week' | 'review';
@@ -676,6 +677,7 @@ export default function Studio() {
         open={showLogin}
         onLoggedIn={() => { setShowLogin(false); loadStudio(); }}
       />
+      <CoachMarks />
     </Screen>
   );
 }

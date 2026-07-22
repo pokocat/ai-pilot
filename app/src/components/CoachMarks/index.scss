@@ -1,0 +1,114 @@
+/* 功能点亮 · 五步 coach marks：遮罩压页面（z-90）、悬浮胶囊底栏（z-100）保持可见，
+   面板落底、▾ 指向底栏。颜色一律走 token，随本命色换肤。 */
+.coach {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 90;
+  background: rgba(22, 25, 29, .55); /* 遮罩中性色，非品牌色 */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  /* 底部让位：悬浮底栏 bottom 14 + 高 66 + 间距 16 */
+  padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 96px);
+  animation: coachFadeIn .3s ease both;
+}
+
+.coach-panel {
+  background: var(--paper);
+  border-top: 3px solid var(--accent);
+  padding: 20px 20px 22px;
+  box-shadow: 0 24px 50px -14px rgba(22, 25, 29, .5);
+  animation: coachSlideUp .4s cubic-bezier(.22, .61, .36, 1) both;
+}
+
+.cp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.cp-lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cp-seal {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.cp-kicker {
+  font-size: 12px;
+  color: var(--accent);
+  letter-spacing: 2px;
+  font-weight: 600;
+}
+
+.cp-skip {
+  font-size: 12px;
+  color: var(--ink-3);
+  padding: 4px 2px; /* 扩大命中区 */
+}
+
+.cp-title {
+  display: block;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 10px;
+}
+
+.cp-text {
+  display: block;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--ink-2);
+  margin-bottom: 18px;
+}
+
+.cp-btn {
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 2px;
+}
+
+.cp-btn:active { opacity: .88; }
+
+.coach-arrow {
+  text-align: center;
+  margin-top: 10px;
+  color: var(--accent);
+  font-size: 20px;
+  animation: coachBlink 1.4s infinite;
+}
+
+@keyframes coachFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes coachSlideUp {
+  from { opacity: 0; transform: translateY(40px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes coachBlink {
+  0%, 100% { opacity: .25; }
+  50% { opacity: 1; }
+}
