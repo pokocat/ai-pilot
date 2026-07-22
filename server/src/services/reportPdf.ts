@@ -8,10 +8,11 @@ import { env } from '../env.js';
 
 const PDF_TIMEOUT_MS = Number(process.env.REPORT_PDF_TIMEOUT_MS ?? 30_000);
 
-// 渲染视口宽（沿用 puppeteer 历史默认 800px；.wrap 内容列 max-width:720px 在此宽度下居中，与网页版观感一致）。
-const RENDER_VIEWPORT_WIDTH = 800;
-// 渲染视口高：量高与 vh 覆盖都以它为基准。100vh 在此视口=1000px。
-const RENDER_VIEWPORT_HEIGHT = 1000;
+// 渲染视口宽：按手机浏览器宽渲染（2026-07-22 改，原 800px 桌面宽）——PDF 在手机上会整页缩放，
+// 桌面宽转出来字太小；手机宽转出的 PDF 与手机直接看报告 H5 观感一致。420 ≈ 主流手机逻辑宽。
+const RENDER_VIEWPORT_WIDTH = 420;
+// 渲染视口高：量高与 vh 覆盖都以它为基准（≈手机视口高）。100vh 在此视口=900px。
+const RENDER_VIEWPORT_HEIGHT = 900;
 // PDF 专用覆盖样式：reportHtml 的封面用了 min-height:100vh——出 PDF 时 page 高被设成内容全高，
 // PDF 排版会把 vh 按「页高」重解析，封面膨胀到整页把正文挤出去（再被 pageRanges:'1' 裁掉）。
 // 故把所有依赖 vh 的元素钉成按渲染视口高换算的固定 px。⚠️ 模板（reportHtml.ts）新增/改动 vh 用法时，
@@ -161,12 +162,12 @@ export async function closePdfBrowser(): Promise<void> {
 }
 
 /**
- * PDF 缓存对象 key（确定性，不动 DB schema）：`{prefix/}pdf/{id}-long.pdf`。
- * `-long` 后缀是版本位：单页长 PDF 版本，与旧分页版 `pdf/{id}.pdf` 缓存天然分离——
+ * PDF 缓存对象 key（确定性，不动 DB schema）：`{prefix/}pdf/{id}-long-m.pdf`。
+ * `-long-m` 后缀是版本位：手机宽单页长 PDF，与旧分页版 `pdf/{id}.pdf`、桌面宽长版 `-long.pdf` 缓存天然分离——
  * 旧对象不会被新逻辑命中（也不必清理），换算法只需改此后缀。
  */
 export function reportPdfKey(id: string): string {
-  return `${env.ossKeyPrefix ? env.ossKeyPrefix + '/' : ''}pdf/${id}-long.pdf`;
+  return `${env.ossKeyPrefix ? env.ossKeyPrefix + '/' : ''}pdf/${id}-long-m.pdf`;
 }
 
 /**
