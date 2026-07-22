@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>军师 · 系统架构 Review</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --ground:#F4F1E8; --panel:#FBFAF5; --panel-2:#EDE8DA; --ink:#1B241E; --muted:#5B655F;
+    --border:#DDD7C6; --accent:#20553C; --accent-2:#2E6B4C; --gold:#94762C;
+    --p0:#A82C21; --p0-bg:#F5E1DC; --p0-line:#E4B7AF;
+    --p1:#8F6410; --p1-bg:#F3E8CF; --p1-line:#E0CC97;
+    --p2:#3C6076; --p2-bg:#E2EAEF; --p2-line:#BBCEDA;
+    --ok:#2C6A48;
+    --shadow:0 1px 2px rgba(20,30,24,.05), 0 6px 22px rgba(20,30,24,.06);
+    --maxw:960px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --ground:#12160F; --panel:#191E16; --panel-2:#212820; --ink:#E9E7DB; --muted:#9BA39A;
+      --border:#2C3327; --accent:#78C6A2; --accent-2:#8AD3B0; --gold:#D6B75F;
+      --p0:#E87A6C; --p0-bg:#2C1A16; --p0-line:#4A2820;
+      --p1:#E1AC57; --p1-bg:#2A2112; --p1-line:#463618;
+      --p2:#84AFC5; --p2-bg:#16222A; --p2-line:#243743;
+      --ok:#6FC29A;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 26px rgba(0,0,0,.32);
+    }
+  }
+  :root[data-theme="light"]{
+    --ground:#F4F1E8; --panel:#FBFAF5; --panel-2:#EDE8DA; --ink:#1B241E; --muted:#5B655F;
+    --border:#DDD7C6; --accent:#20553C; --accent-2:#2E6B4C; --gold:#94762C;
+    --p0:#A82C21; --p0-bg:#F5E1DC; --p0-line:#E4B7AF;
+    --p1:#8F6410; --p1-bg:#F3E8CF; --p1-line:#E0CC97;
+    --p2:#3C6076; --p2-bg:#E2EAEF; --p2-line:#BBCEDA; --ok:#2C6A48;
+    --shadow:0 1px 2px rgba(20,30,24,.05), 0 6px 22px rgba(20,30,24,.06);
+  }
+  :root[data-theme="dark"]{
+    --ground:#12160F; --panel:#191E16; --panel-2:#212820; --ink:#E9E7DB; --muted:#9BA39A;
+    --border:#2C3327; --accent:#78C6A2; --accent-2:#8AD3B0; --gold:#D6B75F;
+    --p0:#E87A6C; --p0-bg:#2C1A16; --p0-line:#4A2820;
+    --p1:#E1AC57; --p1-bg:#2A2112; --p1-line:#463618;
+    --p2:#84AFC5; --p2-bg:#16222A; --p2-line:#243743; --ok:#6FC29A;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 26px rgba(0,0,0,.32);
+  }
+
+  *{box-sizing:border-box}
+  html{ -webkit-text-size-adjust:100% }
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:"PingFang SC","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    line-height:1.62; font-size:16px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .serif{ font-family:"Songti SC","Noto Serif SC","Source Han Serif SC",STSong,"SimSun",Georgia,"Times New Roman",serif; }
+  .mono{ font-family:"SF Mono","JetBrains Mono","Fira Code",ui-monospace,Menlo,Consolas,monospace; }
+  .wrap{ max-width:var(--maxw); margin:0 auto; padding:0 22px; }
+
+  /* ---- masthead ---- */
+  header.top{ padding:52px 0 26px; border-bottom:1px solid var(--border); }
+  .eyebrow{ font-size:.74rem; letter-spacing:.22em; text-transform:uppercase; color:var(--gold); font-weight:600; }
+  h1.title{ font-size:clamp(2.05rem,5.2vw,3rem); line-height:1.08; margin:.32em 0 .28em; font-weight:600; text-wrap:balance; letter-spacing:.01em; }
+  .subtitle{ color:var(--muted); font-size:1.02rem; max-width:64ch; }
+  .metaline{ display:flex; flex-wrap:wrap; gap:8px 20px; margin-top:20px; font-size:.82rem; color:var(--muted); }
+  .metaline b{ color:var(--ink); font-weight:600; }
+
+  .banner{
+    margin:22px 0 4px; padding:14px 16px; border-radius:10px;
+    background:var(--p1-bg); border:1px solid var(--p1-line); color:var(--ink);
+    font-size:.9rem; display:flex; gap:11px; align-items:flex-start;
+  }
+  .banner .dot{ color:var(--p1); font-weight:700; }
+
+  section{ padding:38px 0; border-bottom:1px solid var(--border); }
+  h2.sec{ font-size:1.5rem; font-weight:600; margin:0 0 6px; letter-spacing:.01em; }
+  h2.sec .idx{ color:var(--gold); font-family:var(--mono, monospace); font-size:.95rem; margin-right:12px; vertical-align:2px; }
+  .sec-note{ color:var(--muted); font-size:.94rem; margin:0 0 22px; max-width:70ch; }
+
+  /* ---- verdict / thesis ---- */
+  .thesis{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:8px; }
+  .tcard{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px 18px 20px; box-shadow:var(--shadow); }
+  .tcard .k{ font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; color:var(--gold); font-weight:600; }
+  .tcard h3{ font-size:1.08rem; margin:.5em 0 .35em; font-weight:600; line-height:1.28; }
+  .tcard p{ margin:0; font-size:.9rem; color:var(--muted); }
+
+  /* ---- posture stats ---- */
+  .stats{ display:flex; flex-wrap:wrap; gap:14px; margin:22px 0 4px; }
+  .stat{ flex:1 1 130px; background:var(--panel); border:1px solid var(--border); border-radius:11px; padding:15px 16px; box-shadow:var(--shadow); }
+  .stat .n{ font-size:2rem; font-weight:600; font-variant-numeric:tabular-nums; line-height:1; }
+  .stat .l{ font-size:.78rem; color:var(--muted); margin-top:7px; letter-spacing:.02em; }
+  .stat.p0 .n{ color:var(--p0) } .stat.p1 .n{ color:var(--p1) } .stat.p2 .n{ color:var(--p2) } .stat.ok .n{ color:var(--ok) }
+
+  /* ---- checklist ---- */
+  .check{ background:var(--panel); border:1px solid var(--border); border-left:4px solid var(--p0); border-radius:12px; padding:6px 20px 8px; box-shadow:var(--shadow); }
+  .check li{ padding:14px 0; border-bottom:1px dashed var(--border); }
+  .check li:last-child{ border-bottom:none }
+  .check .cmd{ display:block; margin-top:7px; font-size:.8rem; color:var(--muted); }
+  .check code, .cmd code{ background:var(--panel-2); padding:1px 6px; border-radius:5px; font-size:.82em; }
+  ul.plain{ list-style:none; margin:0; padding:0 }
+
+  /* ---- filter ---- */
+  .filters{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:2px 0 20px; }
+  .filters .lab{ font-size:.78rem; color:var(--muted); margin-right:4px; }
+  .fbtn{ font:inherit; font-size:.8rem; cursor:pointer; border:1px solid var(--border); background:var(--panel); color:var(--ink);
+    padding:5px 12px; border-radius:20px; transition:background .15s,border-color .15s; }
+  .fbtn[aria-pressed="true"]{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  :root[data-theme="dark"] .fbtn[aria-pressed="true"], @media (prefers-color-scheme:dark){}
+  .fbtn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* ---- finding ---- */
+  .find{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:0; margin-bottom:14px; box-shadow:var(--shadow); overflow:hidden; }
+  .find .bar{ display:flex; gap:12px; align-items:baseline; padding:15px 18px 8px; }
+  .sev{ flex:none; font-size:.7rem; font-weight:700; letter-spacing:.06em; padding:3px 9px; border-radius:6px; font-family:var(--mono,monospace); }
+  .sev.P0{ background:var(--p0-bg); color:var(--p0); border:1px solid var(--p0-line); }
+  .sev.P1{ background:var(--p1-bg); color:var(--p1); border:1px solid var(--p1-line); }
+  .sev.P2{ background:var(--p2-bg); color:var(--p2); border:1px solid var(--p2-line); }
+  .find h4{ margin:0; font-size:1.04rem; font-weight:600; line-height:1.32; flex:1; }
+  .find .body{ padding:2px 18px 17px; }
+  .find p{ margin:8px 0 0; font-size:.92rem; }
+  .find .scen{ color:var(--ink); }
+  .find .scen b{ color:var(--p0); font-weight:600; }
+  .find.P1 .scen b{ color:var(--p1) } .find.P2 .scen b{ color:var(--p2) }
+  .tags{ display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
+  .tag{ font-size:.72rem; padding:3px 9px; border-radius:6px; border:1px solid var(--border); color:var(--muted); background:var(--panel-2); }
+  .tag.file{ font-family:var(--mono,monospace); color:var(--accent); background:transparent; border-color:var(--border); }
+  .tag.conf{ color:var(--ok); border-color:transparent; background:color-mix(in srgb, var(--ok) 14%, transparent); }
+  .tag.verify{ color:var(--p1); border-color:transparent; background:var(--p1-bg); }
+  .hidden{ display:none !important; }
+
+  /* ---- timeline ---- */
+  .tl{ list-style:none; margin:0; padding:0; }
+  .tl li{ display:grid; grid-template-columns:96px 1fr; gap:16px; padding:13px 0; border-bottom:1px solid var(--border); }
+  .tl li:last-child{ border-bottom:none }
+  .tl .d{ font-size:.8rem; color:var(--gold); font-family:var(--mono,monospace); padding-top:2px; }
+  .tl .t{ font-size:.92rem; }
+  .tl .t b{ font-weight:600; }
+
+  /* ---- sequence ---- */
+  ol.seq{ counter-reset:s; list-style:none; margin:0; padding:0; }
+  ol.seq li{ position:relative; padding:12px 0 12px 46px; border-bottom:1px solid var(--border); font-size:.95rem; }
+  ol.seq li:last-child{ border-bottom:none }
+  ol.seq li::before{ counter-increment:s; content:counter(s); position:absolute; left:0; top:11px;
+    width:30px; height:30px; border-radius:50%; background:var(--accent); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:.85rem; font-weight:600; font-family:var(--mono,monospace); }
+  ol.seq b{ font-weight:600 }
+  ol.seq .h{ color:var(--muted); font-size:.84rem; }
+
+  /* ---- good list ---- */
+  .good{ display:grid; grid-template-columns:1fr 1fr; gap:11px 22px; }
+  .good div{ padding-left:20px; position:relative; font-size:.92rem; }
+  .good div::before{ content:"✓"; position:absolute; left:0; color:var(--ok); font-weight:700; }
+
+  footer{ padding:34px 0 60px; color:var(--muted); font-size:.84rem; }
+  a{ color:var(--accent-2); }
+  strong.hl{ color:var(--ink); }
+
+  @media (max-width:720px){
+    .thesis{ grid-template-columns:1fr; }
+    .good{ grid-template-columns:1fr; }
+    .tl li{ grid-template-columns:74px 1fr; gap:10px; }
+    h1.title{ font-size:2rem }
+  }
+  @media (prefers-reduced-motion:reduce){ *{ transition:none !important } }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">系统架构 Review · 2026-07-22</div>
+    <h1 class="title serif">军师 · AI 商业军师<br>生产架构体检</h1>
+    <p class="subtitle">结合代码架构、数据模型、部署脚本与已记录的线上排查（CHANGELOG），对后端 · 支付 · 知识库 · LLM 网关 · 运维五条主线做整体审查。产品做得扎实、功能完整；问题集中在“默认不安全 + 静默降级 + 单点无兜底”三条结构性断层。</p>
+    <div class="metaline">
+      <span><b>栈</b> Fastify 5 · Prisma · PostgreSQL · Taro 小程序 · 多 LLM 网关</span>
+      <span><b>部署</b> 单机 ECS · systemd · Nginx · <span class="mono">prisma db push</span></span>
+      <span><b>方法</b> 代码/schema 静态审查 + 4 路并行深挖 + 线上事故回溯</span>
+    </div>
+    <div class="banner">
+      <span class="dot">⚠</span>
+      <span><b>关于“线上数据库 / 日志”：</b>本环境无法 SSH 到生产机（<span class="mono">8.136.36.175</span> 的 22 端口不通、密钥在你本机），只能访问公网 <span class="mono">/api/health</span>。因此下述结论基于<strong class="hl">代码 + schema + 部署脚本 + CHANGELOG 里你们自己记录的线上排查</strong>。凡依赖生产 <span class="mono">.env</span> 或运行时数据才能定性的项，都标注了 <span class="tag verify" style="display:inline">待核实 prod</span>。若你能给我一份脱敏 DB dump 或一段 <span class="mono">journalctl</span>，可进一步落实。</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <h2 class="sec serif">整体判断</h2>
+    <p class="sec-note">先说结论：这不是一个粗糙的原型。SSOT 契约、79 个后端集成测试 + CI、支付幂等的精心设计、账本 advisory-lock、后台 RBAC —— 工程素养在线。真正的风险来自它仍是一套“演示优先”的架构，如今却承载了真实用户和真实付费。三条断层：</p>
+    <div class="thesis">
+      <div class="tcard">
+        <div class="k">断层 1 · 默认不安全</div>
+        <h3 class="serif">整套租户隔离，只差一个环境变量就全线敞开</h3>
+        <p>鉴权 = <span class="mono">token=userId</span>、短信免验、后台默认密钥，安全性完全押在 3 个生产环境变量上，而它们的默认值全部不安全。</p>
+      </div>
+      <div class="tcard">
+        <div class="k">断层 2 · 静默降级</div>
+        <h3 class="serif">出错不报错，付费用户拿到降级结果而无人知晓</h3>
+        <p>检索、嵌入、审核、模型回退、断连计费全都“悄悄失败”——返回更少 / 错误 / 模板化的结果，却无任何错误信号。对一个 AI 军师，这是最糟的失败形态。</p>
+      </div>
+      <div class="tcard">
+        <div class="k">断层 3 · 单点无兜底</div>
+        <h3 class="serif">一块磁盘或一次 schema 改动就能造成不可逆损失</h3>
+        <p>单机 Postgres、无自动备份、<span class="mono">db push</span> 上线、无优雅退出、进程内定时器、无限膨胀的日志表。缺一张安全网。</p>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat p0"><div class="n">8</div><div class="l">P0 · 立即处理</div></div>
+      <div class="stat p1"><div class="n">14</div><div class="l">P1 · 上量前修</div></div>
+      <div class="stat p2"><div class="n">13</div><div class="l">P2 · 排期修</div></div>
+      <div class="stat ok"><div class="n">9</div><div class="l">做得好 · 保持</div></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="sec serif"><span class="idx">00</span>10 分钟内先做这件事</h2>
+    <p class="sec-note">最高杠杆、零代码的动作：登录生产机核对 <span class="mono">/opt/junshi/server/.env</span>。下面三项若有任何一个是默认值，你的线上现在就是敞开的。这也是我唯一无法从代码判定、必须你亲自确认的部分。</p>
+    <ul class="plain check">
+      <li>
+        <b>① 登录态是否强制 JWT？</b> 确认 <span class="mono">APP_JWT_SECRET</span> 已设为高强度随机串、且 <span class="mono">APP_JWT_REQUIRED=true</span>。
+        <span class="cmd">否则 <span class="mono">token</span> 就是明文 <span class="mono">userId</span>（cuid，会经 @引用/分享/日志外泄）。任何人把 <code>x-user-id</code> 改成他人 id 即可冒充、越权读写全部案卷/知识/报告/花其算力。</span>
+      </li>
+      <li>
+        <b>② 短信登录是否强制验证码？</b> 确认 <span class="mono">SMS_REQUIRE_CODE=true</span>。
+        <span class="cmd">否则 <code>POST /api/auth/login</code> 只凭手机号即可登录/注册他人账号（绕过 App UI 直打端点）——纯粹的账号接管。</span>
+      </li>
+      <li>
+        <b>③ 后台主密钥是否已更换？</b> 确认 <span class="mono">ADMIN_TOKEN</span> 不再是 <span class="mono">junshi-admin-dev</span>（<span class="mono">.env.example</span> 默认值）。
+        <span class="cmd">否则任何人可进后台：退款、给自己开通付费模块、查看全部用户。</span>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="sec serif"><span class="idx">—</span>按严重度筛选</h2>
+    <div class="filters" role="group" aria-label="按严重度筛选发现">
+      <span class="lab">显示：</span>
+      <button class="fbtn" data-f="all" aria-pressed="true">全部</button>
+      <button class="fbtn" data-f="P0" aria-pressed="false">仅 P0</button>
+      <button class="fbtn" data-f="P1" aria-pressed="false">P0 + P1</button>
+      <button class="fbtn" data-f="P2" aria-pressed="false">仅 P2</button>
+    </div>
+
+    <!-- ============ 鉴权 ============ -->
+    <h2 class="sec serif" style="font-size:1.18rem;margin-top:6px"><span class="idx">A</span>鉴权与多租户隔离</h2>
+    <div class="findlist">
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>token = userId：凭标识即凭证，拿到他人 cuid 即可全量冒充</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>未开 JWT（默认 <span class="mono">APP_JWT_REQUIRED=false</span>）时，<span class="mono">verifyUserToken</span> 原样返回 <span class="mono">x-user-id</span> 头作为用户身份。cuid 非机密，会经 @引用、分享链接、审计日志外泄。攻击者拿到任意他人 id 即冒充其身份，跨租户读写案卷 / 知识 / 报告、消耗其算力。</p>
+          <div class="tags"><span class="tag file">services/context.ts:73</span><span class="tag file">services/userToken.ts:62</span><span class="tag verify">待核实 prod .env</span></div>
+        </div>
+      </article>
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>/auth/login 短信验证码可被绕过 → 手机号即账号接管</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>请求不带 <span class="mono">code</span> 且 <span class="mono">SMS_REQUIRE_CODE≠true</span>（默认）时，服务端不校验验证码，直接按手机号登录/注册。直接打端点即可，无需经过 App。</p>
+          <div class="tags"><span class="tag file">routes/auth.ts:237</span><span class="tag file">env.ts:69</span><span class="tag verify">待核实 prod .env</span></div>
+        </div>
+      </article>
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>后台默认主密钥 junshi-admin-dev 若未更换 = 后台接管</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">.env.example</span> 的 <span class="mono">ADMIN_TOKEN=junshi-admin-dev</span> 若带入生产，任何人可越权调用全部 <span class="mono">/api/admin/*</span>：退款、开通付费模块、导出全部用户。</p>
+          <div class="tags"><span class="tag file">services/adminAuth.ts:48</span><span class="tag verify">待核实 prod .env</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>鉴权靠“每个路由手动调用 resolveUser”，非全局强制</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>没有全局 <span class="mono">preHandler</span> 鉴权钩子；每个 handler 首行自行 <span class="mono">resolveUser</span>。新增路由一旦忘记这一步，就是<b>静默公开</b>。约定而非强制，随代码增长必然踩空。</p>
+          <div class="tags"><span class="tag file">app.ts:83-117</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P2" data-sev="P2">
+        <div class="bar"><span class="sev P2">P2</span><h4>CORS 反射任意来源 + 无安全响应头；公开报告页凭 cuid 无鉴权/无过期</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">cors {origin:true}</span> 反射任意站点；无 helmet。<span class="mono">/api/r/:id</span> 公开报告页凭“不可猜 id”访问、无鉴权无过期，含敏感经营策略。你们已因合规把“送你一卦”从该模式撤下，说明模式本身已知有隐患。</p>
+          <div class="tags"><span class="tag file">app.ts:63</span><span class="tag file">routes/reportShare.ts:20</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+    </div>
+
+    <!-- ============ 持久化/运维 ============ -->
+    <h2 class="sec serif" style="font-size:1.18rem"><span class="idx">B</span>数据持久化与运维安全网</h2>
+    <div class="findlist">
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>单机 Postgres，无自动备份、无副本、无 PITR</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>用户、支付订单、算力账本、案卷全在一台 ECS 的一块盘上。仓库里只有“每次部署前手动 <span class="mono">pg_dump</span> 到 /tmp”，无定时备份、无 WAL 归档、无异地。<b>磁盘或机器故障 = 全量不可逆丢失</b>。对一个已收真钱的系统，这是头号运维风险。</p>
+          <div class="tags"><span class="tag file">deploy/docker-compose.yml</span><span class="tag file">db.ts:3</span><span class="tag conf">仓库确认</span><span class="tag verify">待核实是否有 ECS 快照</span></div>
+        </div>
+      </article>
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>prisma db push 作为上线机制：无迁移史、无回滚、静默丢数据</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">db push</span> 会为对齐 schema 而删列/删表，无迁移账本可审查或回滚（且存在 <span class="mono">db:reset = --force-reset</span> 清库脚本）。schema 注释把缓解措施写成了人肉纪律（“db push 纯加法”）。下一次改名/改类型/删字段经 <span class="mono">db push</span> 打到生产 = 无审计的静默丢数据。</p>
+          <div class="tags"><span class="tag file">server/package.json</span><span class="tag file">scripts/deploy-prod.sh</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>无优雅退出：每次部署重启都掐断在途流、泄漏 Chromium 与算力预留</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">src/</span> 内零 <span class="mono">SIGTERM</span> 处理。<span class="mono">systemctl restart</span> 直接杀进程：① 在途 SSE 生成（可达 180s）被切断；② <span class="mono">onClose</span> 的 Chromium 清理不跑 → 每次部署泄漏无头浏览器进程；③ <b>算力泄漏</b>——<span class="mono">reserveQuota</span> 已提交扣减但 <span class="mono">settle/refund</span> 未跑，用户被扣的预留额度不退。日间部署每次都会命中。</p>
+          <div class="tags"><span class="tag file">index.ts</span><span class="tag file">deploy/junshi-api.service</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>audit_log：每请求写一行 + 额外一次查用户，却无任何索引、无保留策略，还被热路径读取</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">registerHttpAudit</span> 对每个 <span class="mono">/api/*</span> 响应写一行审计 + 多做一次 <span class="mono">findUnique(user)</span>。<span class="mono">AuditLog</span> 模型无 <span class="mono">@@index</span>。而定时器幂等判定、以及<b>每次复盘类生成</b>的 grace 额度检查，都按 <span class="mono">userId+action+createdAt</span> 读它。表随请求量最快膨胀，读写全变全表扫描 → 拖慢整站与生成路径。</p>
+          <div class="tags"><span class="tag file">services/audit.ts:99</span><span class="tag file">schema.prisma:908</span><span class="tag file">tokenQuota.ts:171</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>进程内定时器：无主节点选举、check-then-act 幂等，横向扩展即重复推送</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>定时任务跑在 web 进程内，仅靠模块级 <span class="mono">started</span> 标记；发微信订阅消息的幂等是“先查审计→无则发”。一旦上第二个实例（或蓝绿部署重叠），两实例都查不到审计行、都发 → <b>重复推送 + 一次性订阅额度双花</b>。另：6 小时级任务用 <span class="mono">setInterval</span>，启动不立即跑、无“上次运行”补偿，频繁部署会让它<b>基本不触发</b>。</p>
+          <div class="tags"><span class="tag file">services/scheduler.ts:47</span><span class="tag file">services/reminders.ts:87</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>credit_ledger 无索引：每次余额读取（即每次产出）都是全表扫描 + 排序</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>余额 = “<span class="mono">where userId order by createdAt desc</span> 取最新一行的 balance”，但 <span class="mono">CreditLedger</span> 无任何索引。每次产出前都读余额，随流水增长线性退化。并发本身用 advisory lock 处理得当，纯粹是缺索引的性能坑。</p>
+          <div class="tags"><span class="tag file">services/credits.ts:24</span><span class="tag file">schema.prisma:660</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P2" data-sev="P2">
+        <div class="bar"><span class="sev P2">P2</span><h4>可观测性表无限膨胀、无 TTL/分区；/api/health 不探 DB；Prisma 连接池未配置</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">llm_trace / token_usage / moderation_log / tool_call_log</span> 全部只写主库、无保留清理（trace 开 CAPTURE_TEXT 时还存 prompt/response 全文），长期拖慢主库与备份。<span class="mono">/api/health</span> 只返 <span class="mono">{ok:true}</span> 不碰 DB → Postgres 挂了探针仍绿。<span class="mono">new PrismaClient()</span> 无连接池上限配置。</p>
+          <div class="tags"><span class="tag file">meta.ts:18</span><span class="tag file">db.ts:3</span><span class="tag file">services/usage.ts</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P2" data-sev="P2">
+        <div class="bar"><span class="sev P2">P2</span><h4>提醒扫描每 30 分钟全表扫 casefile（索引首列缺失用不上）；单 Node 进程单核</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>扫描按 <span class="mono">status</span> 单列过滤，而索引是 <span class="mono">(tenantId,userId,status)</span>，首列缺失 → 索引失效、全表扫，随总用户数增长。单 Node 进程无 cluster，重活阻塞事件循环；无头 Chromium 与 Postgres 同机争内存，有 OOM 隐患。</p>
+          <div class="tags"><span class="tag file">services/reminders.ts:74</span><span class="tag file">schema.prisma:1069</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+    </div>
+
+    <!-- ============ 支付 ============ -->
+    <h2 class="sec serif" style="font-size:1.18rem"><span class="idx">C</span>支付与计费</h2>
+    <p class="sec-note">单订单回调幂等做得很好（<span class="mono">appliedAt</span> 终态锚点 + per-order advisory lock + 条件 updateMany 抢占 + 金额/appid/mchid 校验），没找到单订单双入账。问题都在“周边缝隙”：并发、对账、fail-open。</p>
+    <div class="findlist">
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>WeChat 商户后台发起的退款完全无处理 → 钱退了，权益还在</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">markRefundNotified</span> 只更新已是 <span class="mono">status='refunded'</span> 的订单。而客服在微信商户后台退款时，订单还是 <span class="mono">applied</span>，<span class="mono">REFUND.*</span> 通知到达时 <span class="mono">updateMany</span> 匹配 0 行：不撤权益、不改状态、不追回。<b>用户钱拿回 + 套餐/模块/算力全保留</b>，且无对账兜底。这是大多数客服退款的默认路径。</p>
+          <div class="tags"><span class="tag file">services/wechatPay.ts:747</span><span class="tag file">routes/pay.ts:116</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>SKU 赠送写入“未加锁”的账本行，冲掉并发的算力扣减</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>SKU 发放追加一条 <span class="mono">delta:0</span> 收据行时读上一余额<b>不持算力锁</b>。序列：余额 1000 →(SKU)读到 1000 →(并发生成)扣 −200 写 balance=800 →(SKU)以更新的时间戳写 balance=1000。<span class="mono">balanceIn</span> 返回 1000，<b>200 的扣减被抹掉</b>，账本 <span class="mono">Σdelta==balance</span> 不变式破坏。</p>
+          <div class="tags"><span class="tag file">services/purchase.ts:121</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>并发已支付订单双发放：月→年折算被重复计算，用户得 2 年 + 双倍算力</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>幂等是 per-<span class="mono">outTradeNo</span>，无 <span class="mono">(userId,planId,created)</span> 唯一约束；<span class="mono">closeStale</span> 跳过已在微信支付的单。用户为年套餐下单 A、支付但回调延迟，又下单 B（折算再次按“月”计）；两个回调都入账：A 建年套餐，B 判定为“续费”叠加 +12 月并再发一整年算力。<b>单份月套餐余值被两单折算，用户得 2 年 + 双倍算力/额度</b>。</p>
+          <div class="tags"><span class="tag file">services/wechatPay.ts:136</span><span class="tag file">services/purchase.ts:39</span><span class="tag verify">需并发时序复现</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>管理员退款：微信已退成功但本地回收抛错 → 卡在“已退款却仍生效”</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>微信退款 HTTP 调用在本地事务<b>之前</b>提交。若 <span class="mono">revokeOrderGrant</span> 抛错（如用户此间已花掉算力、回收额超余额 → <span class="mono">InsufficientCreditsError</span>），事务回滚但钱已退。订单永远停在 <span class="mono">applied/refundedAt=null</span>，<span class="mono">markRefundNotified</span> 也修不了。</p>
+          <div class="tags"><span class="tag file">services/wechatPay.ts:692</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>回调验签 fail-open，且不校验时间戳新鲜度</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>平台证书不可用（自动下载被节流/失败且未配静态证书）时，验签函数打印警告后 <span class="mono">return true</span>——静默跳过验签，仅剩 AEAD 解密一层。默认 fail-open，微信证书端点抖动就把公开 webhook 降到单层认证且只有 <span class="mono">console.warn</span>。且全程不校验 <span class="mono">wechatpay-timestamp</span> 新鲜度（应拒绝 ~5 分钟外的陈旧请求）。</p>
+          <div class="tags"><span class="tag file">services/wechatPay.ts:287</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P2" data-sev="P2">
+        <div class="bar"><span class="sev P2">P2</span><h4>崩溃遗留的预留无对账；降级产出仍扣钻石；流式已交付却在末段失败时全额退款</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>算力/额度在 LLM 前分两笔事务预留，进程中途被杀（部署/OOM）后无 orphan-reservation 清扫器 → 用户被<b>多扣且不自动纠正</b>。降级路径注释称“不计费”，但只退了额度、<b>钻石照扣</b>。SSE 先流式交付、末段 DB 写失败时 catch 把钻石+额度<b>全额退还</b>——用户白拿产出。</p>
+          <div class="tags"><span class="tag file">routes/sessions.ts:281</span><span class="tag file">routes/sessions.ts:540</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+    </div>
+
+    <!-- ============ RAG ============ -->
+    <h2 class="sec serif" style="font-size:1.18rem"><span class="idx">D</span>知识库 / RAG</h2>
+    <p class="sec-note">关键事实：<span class="mono">PGVECTOR_ENABLED</span> 默认关。所以默认生产路径是<b>内存暴力扫描</b>，而 pgvector 开启后又有另一套坑——两条路径语义还不一致。</p>
+    <div class="findlist">
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>默认检索是内存暴力扫描，且静默截断在 2000 条无序切片</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>pgvector 关闭（默认）时，<span class="mono">hybridSearch</span> 取 <span class="mono">take:2000</span> 且<b>无 orderBy</b>，在 JS 里对每行算余弦。单份大文档约 428 切片，<b>约 5 份大文档就撑爆 2000</b>；超过后只“看得见”任意 2000 条，其余静默忽略、召回崩塌且不报错。同时每次查询/工具调用都把 2000 条文本+向量载入 Node 扫一遍。</p>
+          <div class="tags"><span class="tag file">services/retrieval.ts:156</span><span class="tag file">env.ts:63</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>嵌入在请求内同步跑、无队列、部分入库不可回滚</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">confirmItems</span> 在 HTTP 请求内逐条 <span class="mono">await chunkAndEmbed</span>，而后者逐切片串行调嵌入 API。确认一批大文档 = 一个请求内几百上千次串行嵌入 → 必超时。循环<b>无 per-item try/catch、无事务</b>：第 3 条失败则 1-2 已入库、3 半入、4-10 未动，整请求 500，DB 留在混合态无回滚。</p>
+          <div class="tags"><span class="tag file">services/knowledgePipeline.ts:400</span><span class="tag file">services/knowledge.ts:43</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>search_knowledge 工具漏传 userId → 多人租户内互相泄漏文档</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>该 LLM 工具调 <span class="mono">hybridSearch</span> 只传 <span class="mono">tenantId</span> 漏了 <span class="mono">ctx.userId</span>（同文件的 recall_memory 就传了）。今天每个注册独占一个租户，被掩盖；但 <span class="mono">Tenant.users</span> 是一对多、<span class="mono">User.role</span> 已建 owner/member——企业/多人租户一旦上线，AI 的知识检索会把<b>每个同事的文档返回给每个同事</b>，直接违反你们自己写的“tenantId+userId 双维隔离”铁律。</p>
+          <div class="tags"><span class="tag file">llm/tools/builtin.ts:26</span><span class="tag conf">代码确认（潜伏）</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>pgvector 空结果不回退 + 维度硬编码 256 + 双列漂移 = 一开就静默全灭</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>ANN 返回空时直接 <span class="mono">return []</span>，不回退内存路径（只有“抛错”才回退）。<span class="mono">pgvector.sql</span> 把维度写死 <span class="mono">vector(256)</span>；若运营开 pgvector 又配了真实嵌入模型（如 1536 维），<span class="mono">upsertChunkVector</span> 每行抛错且被 <span class="mono">.catch(()=&gt;{})</span> 吞掉 → <span class="mono">embedding_vec</span> 全 NULL → 检索静默<b>彻底为空</b>。同一 bug 也存在于长期记忆召回。</p>
+          <div class="tags"><span class="tag file">services/retrieval.ts:133</span><span class="tag file">prisma/pgvector.sql:14</span><span class="tag file">services/memory.ts:98</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>嵌入失败静默回退本地 256 维，混入不同向量空间；异步入库是“悬空 Promise”无兜底</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>远端嵌入失败时 <span class="mono">embed()</span> 悄悄返回本地 256 维哈希向量。与 1536 维语料维度不匹配时余弦恒为 0 → 该切片/该次查询<b>永远匹配不上、静默隐形</b>。上传走 <span class="mono">void processDocument</span> 悬空 Promise，进程崩溃则条目永久卡在 <span class="mono">parsing/embedding</span>，状态与实际切片永久漂移、无对账。</p>
+          <div class="tags"><span class="tag file">services/embedding.ts:110</span><span class="tag file">services/knowledge.ts:176</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>默认“语义”嵌入其实是词法哈希；stage 隔离只靠“恰好没有切片”兜着</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>未配 <span class="mono">EMBEDDING_MODEL</span> 时，<span class="mono">embedLocal</span> 是 FNV-1a 词袋哈希（256 桶），并非学习到的嵌入——“语义召回”实为模糊关键词匹配，而 UI 暗示是语义。另：检索<b>不按 stage 过滤</b>，“待整理/已优化不进检索”这条产品保证仅靠“非确认项恰好没切片”维系，一旦部分入库失败留下切片即泄漏。</p>
+          <div class="tags"><span class="tag file">services/embedding.ts:46</span><span class="tag file">services/retrieval.ts:157</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P2" data-sev="P2">
+        <div class="bar"><span class="sev P2">P2</span><h4>切片无重叠、表格被压平、超 12 万字静默截断；去重弱、易被绕过</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>固定 ~280 字无重叠切片 → 跨界事实检索不到；xlsx/csv 压平成 CSV 文本再按字切 → 行语义破坏（直接喂经营体检）；超 12 万字静默丢尾且不告知用户。去重键是“同批内 文件名::大小”精确匹配，改名或换批即重复嵌入。</p>
+          <div class="tags"><span class="tag file">services/knowledge.ts:18</span><span class="tag file">services/docParse.ts:24</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+    </div>
+
+    <!-- ============ LLM 网关 ============ -->
+    <h2 class="sec serif" style="font-size:1.18rem"><span class="idx">E</span>LLM 网关与流式</h2>
+    <div class="findlist">
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>客户端断连从不被感知 → 生成照跑、token 照烧、用户为看不到的输出付费</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>SSE 路径没有任何 <span class="mono">reply.raw.on('close')</span>，也没把 AbortSignal 传进 provider 流。用户发起报告后 2 秒切后台/断网，服务端仍生成 60-120s，<b>烧掉全部真实 token、扣掉额度、落库一份用户永远没看到的报告</b>。移动端断连是常态，这是当下持续的真金白银泄漏。</p>
+          <div class="tags"><span class="tag file">routes/sessions.ts:386</span><span class="tag file">llm/gateway.ts:415</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P0" data-sev="P0">
+        <div class="bar"><span class="sev P0">P0</span><h4>Claude provider 未接超时/中止：网关卡住可拖住请求约 10 分钟 × SDK 重试</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">new Anthropic()</span> 未传 <span class="mono">timeout/maxRetries</span>；<span class="mono">cfg.timeoutMs</span> 只在 OpenAI 路径生效，Claude 路径完全忽略。当 <span class="mono">provider=claude</span>（或任何 Anthropic 兼容网关）慢/挂时，单请求可阻塞至 SDK 默认 10 分钟并静默重试 3 次，同时占住 HTTP 连接 → provider 抖动时全站排队恶化。后台的“超时”配置对 Claude 形同虚设。</p>
+          <div class="tags"><span class="tag file">llm/providers/claude.ts:32</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>APP_ENCRYPTION_KEY 错配 → 全站静默降级为 mock 模板，无报错无计费异常</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>DB 存的是密文而进程密钥缺失/轮换错（如未同步到某实例），<span class="mono">decryptSecretSafe</span> 吞掉 GCM 校验失败返回空串 → provider 被判“未就绪”→ 走 <b>mock</b> 分支（非错误分支）。无 503、trace 无错、<span class="mono">usage=0</span> 也无计费异常。付费用户拿到<b>套模板的“战略”</b>而无人察觉。近乎 P0，因为毫无信号。</p>
+          <div class="tags"><span class="tag file">services/aiConfig.ts:129</span><span class="tag file">llm/gateway.ts:21</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>无单请求成本上限；辅助 LLM 调用（记忆/预言/图谱/摘要）不进 trace 也不计费</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>额度预留固定 2000 token，而带工具的一轮最坏可跑 4 迭代 × 每步 8000 输出 + 不断增长的工具结果输入 = 数万 token，<b>无任何绝对上限</b>。且 <span class="mono">extractInsights/Prophecies/Graph/summarize</span> 走未 traced 路径，每个 general 轮次多发 1-3 次真实调用，落在<b>零 trace、零 token_usage、（多数）零计费</b>——真实成本被系统性低估。</p>
+          <div class="tags"><span class="tag file">services/tokenQuota.ts:18</span><span class="tag file">llm/gateway.ts:656</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P2" data-sev="P2">
+        <div class="bar"><span class="sev P2">P2</span><h4>结构化成果“假流式”：整段 await 后再 sleep 分段下发，全程无心跳 → 代理空闲超时掐断</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>报告是一次性 <span class="mono">await generateDeliverable</span>（工具循环可 30-120s），完成后才用 <span class="mono">sleep(520)</span> 逐段“流式”下发。生成期间 SSE 无字节、无 comment 心跳，也没设 <span class="mono">X-Accel-Buffering:no</span>。中间代理 30-60s 空闲即断连——而按上面的断连 bug，服务端根本不知道，照样烧完。这正是你们线上 60s/73.6s 超时事故的根因链。</p>
+          <div class="tags"><span class="tag file">routes/sessions.ts:486</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P2" data-sev="P2">
+        <div class="bar"><span class="sev P2">P2</span><h4>httpTool 的 SSRF 防护可被重定向 / DNS rebinding 绕过；Dify 硬 60s 上限且全缓冲</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b>先解析 DNS 校验再 <span class="mono">fetch</span>，但用默认 <span class="mono">redirect:'follow'</span> 且重新解析 DNS → 一个 302 跳到 <span class="mono">169.254.169.254</span> 即可打到云元数据端点（触发需运营配置恶意/开放重定向端点，故 P2）。Dify 路径硬编码 60s 总超时且累积整段答案再假流式，长报告被 60s 掐断。</p>
+          <div class="tags"><span class="tag file">llm/tools/httpTool.ts:38</span><span class="tag file">llm/providers/dify.ts:12</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+      <article class="find P2" data-sev="P2">
+        <div class="bar"><span class="sev P2">P2</span><h4>内容清洗误杀：SaaS/软件类正当报告被判“工程泄漏”换成模板</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">sanitizeDeliverable</span> 的正则命中 <span class="mono">代码库|仓库|repository|工作区|README|package.json</span> 等词即把整份成果换成 <span class="mono">mockDeliverable</span> 并标 degraded。任何面向软件/SaaS 客户（你们预设还主打 SaaS）的正当报告只要提到“代码库/仓库”，就被静默换成通用模板。过宽过滤伤一整类客户。</p>
+          <div class="tags"><span class="tag file">llm/gateway.ts:62</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+    </div>
+
+    <!-- ============ 合规 ============ -->
+    <h2 class="sec serif" style="font-size:1.18rem"><span class="idx">F</span>内容合规</h2>
+    <div class="findlist">
+      <article class="find P1" data-sev="P1">
+        <div class="bar"><span class="sev P1">P1</span><h4>模型输出从不审核 + 输入审核 fail-open + 默认仅 4 个关键词</h4></div>
+        <div class="body">
+          <p class="scen"><b>失败场景：</b><span class="mono">moderate('output',…)</span> 从未被调用，token 边生成边直推客户端，无任何输出侧检查。输入审核默认 <span class="mono">FAIL_OPEN=true</span>（外部审核服务抖动即放行）、默认词表仅 <span class="mono">['暴力','违法集资','赌博','毒品']</span>。对强监管的微信小程序，“弱默认过滤 + 服务抖动就放行 + 输出零审核”是<b>下架级</b>合规敞口。</p>
+          <div class="tags"><span class="tag file">services/moderation.ts:27</span><span class="tag file">llm/gateway.ts:236</span><span class="tag conf">代码确认</span></div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="sec serif"><span class="idx">G</span>线上事故回溯 · 你们已记录的信号</h2>
+    <p class="sec-note">这些来自 <span class="mono">docs/CHANGELOG.md</span> 里你们自己的生产排查——正是要“结合线上日志”看的部分。它们印证了两个主题：<b>多层超时错配</b>与<b>并发竞态被一个个手工发现</b>。这说明架构缺少系统性的并发控制与统一的超时/流式约定，只能靠 QA 打地鼠。</p>
+    <ul class="tl">
+      <li><span class="d">07-18</span><span class="t"><b>长对话“有记忆但没带入”</b>：同一会话超 100 条时服务端只注入最近 8 条。已改 16 条。根因未除——固定滑窗记忆、无摘要/压缩，对“长期军师”定位天然脆弱。</span></li>
+      <li><span class="d">07-18</span><span class="t"><b>流式超时 ×2</b>：<span class="mono">wx.request</span> 默认 60s &lt; 服务端 73.6s 完成；服务端 <span class="mono">AbortController</span> 60s 掐断长流（<span class="mono">This operation was aborted</span>）。客户端/网关/Nginx 三层超时耦合且逐个踩。</span></li>
+      <li><span class="d">07-15</span><span class="t"><b>下单频控 TOCTOU 竞态</b> + 聊天流式失败兜底误判导致重复追答（双计费风险）。</span></li>
+      <li><span class="d">07-14</span><span class="t"><b>支付回调证书拉取节流可被绕开（放大攻击）</b> + 后台 CSV 导出公式注入。公开 webhook 与后台导出都出过真实漏洞。</span></li>
+      <li><span class="d">07-11</span><span class="t"><b>认可方案幂等竞态</b>（<span class="mono">(userId,seq)</span> 唯一键撞车）+ 处方状态机读-改竞态。多处状态迁移当初非幂等/非原子。</span></li>
+      <li><span class="d">07-04+</span><span class="t"><b>输出长度上限反复上调</b>（回复 800→4000、报告 1500→2600→8000）：截断反复打到用户，属产品化输出约束缺位。</span></li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="sec serif"><span class="idx">H</span>建议处理顺序</h2>
+    <p class="sec-note">按“止血 → 保命 → 修复 → 加固”排。前两步几乎零代码，今天就能做。</p>
+    <ol class="seq">
+      <li><b>核对生产 <span class="mono">.env</span> 的三把锁</b>（JWT / 短信验证码 / ADMIN_TOKEN）。<span class="h">零代码，10 分钟，堵住整套隔离的敞口。</span></li>
+      <li><b>给 Postgres 上自动备份 + 异地/快照</b>，并确认能恢复。<span class="h">磁盘一挂全没，其它都不重要。</span></li>
+      <li><b>补 WeChat 商户后台退款处理 + SKU 账本加锁</b>。<span class="h">这两条在完全正常的运营下就在悄悄错钱。</span></li>
+      <li><b>SSE 接客户端断连的 AbortSignal，断连即停生成/停结算</b>；同时给 Claude client 传 timeout/maxRetries。<span class="h">止住持续的 token 与算力泄漏。</span></li>
+      <li><b>知识库改异步入库（队列 + 状态机 + 事务）</b>，并给默认检索加 orderBy/上限治理与语义嵌入。<span class="h">让“知识库”这个核心功能在用户资料变多后不静默崩。</span></li>
+      <li><b>把 <span class="mono">db push</span> 换成 <span class="mono">prisma migrate</span></b>；<span class="mono">audit_log</span> 加索引 + 保留策略、去掉每请求的额外查询；日志表加 TTL/分区。<span class="h">拿回上线安全与可观测性的可持续性。</span></li>
+      <li><b>输出侧内容审核 + 合规默认 fail-closed</b>；定时器抽成单实例 worker + advisory-lock 主节点守卫 + 唯一约束幂等。<span class="h">合规保命 + 为横向扩展扫雷。</span></li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="sec serif"><span class="idx">✓</span>做得好，别回退</h2>
+    <p class="sec-note">审查不是只挑毛病。这些是明显高于同类原型水准、值得保持的地方：</p>
+    <div class="good">
+      <div>SSOT <span class="mono">shared/contracts.d.ts</span> 三端类型统一，且 AGENTS.md 强制同步纪律</div>
+      <div>79 个后端集成测试 + GitHub Actions（真 Postgres service）</div>
+      <div>支付单订单幂等：<span class="mono">appliedAt</span> 终态锚点 + 金额/appid/mchid 校验 + 退款幂等 + 对账 sweep</div>
+      <div>算力账本并发用 <span class="mono">pg_advisory_xact_lock</span> + 锁内复核，无双花</div>
+      <div>“401 必须显式打断”全局铁律，杜绝失效态滞留</div>
+      <div>审计脱敏：手机号掩码、密钥/验证码 redact</div>
+      <div>后台 RBAC：master 常量时间比对 / 账户会话 / per-agent 协作授权</div>
+      <div>折算防套利数学：<span class="mono">min(全价, 原价, 日费×天数)</span> 双封顶</div>
+      <div>时区经 <span class="mono">clock.ts</span> 用 Intl 固定 Asia/Shanghai，不靠宿主机 TZ</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    军师 · 系统架构 Review · 生成于 2026-07-22 · 基于代码/schema/部署脚本静态审查与 CHANGELOG 线上事故回溯。
+    标注“待核实 prod”的项需你在生产环境确认；提供脱敏 DB dump 或日志片段可进一步落实并补充运行时视角的发现。
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var btns = Array.prototype.slice.call(document.querySelectorAll('.fbtn'));
+    var finds = Array.prototype.slice.call(document.querySelectorAll('.find'));
+    function apply(f){
+      finds.forEach(function(el){
+        var s = el.getAttribute('data-sev');
+        var show = f==='all' || (f==='P0'&&s==='P0') || (f==='P1'&&(s==='P0'||s==='P1')) || (f==='P2'&&s==='P2');
+        el.classList.toggle('hidden', !show);
+      });
+      btns.forEach(function(b){ b.setAttribute('aria-pressed', String(b.getAttribute('data-f')===f)); });
+    }
+    btns.forEach(function(b){ b.addEventListener('click', function(){ apply(b.getAttribute('data-f')); }); });
+  })();
+</script>
+</html>
