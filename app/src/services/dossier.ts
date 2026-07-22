@@ -26,6 +26,7 @@ export interface DossierOrder {
   steps?: string[];
   metrics?: OrderMetric[];
   actionType?: OrderActionType;
+  resultNote?: string | null; // 完成回填：打卡后录入的完成情况（复盘/建议分析用）
 }
 
 export interface DailyBackfill {
@@ -224,6 +225,22 @@ export async function toggleOrder(orderId: string): Promise<Dossier | null> {
   return r.casefile;
 }
 
+/** 完成回填：把单条军令的完成情况落库（不动 done；空串=清除）。 */
+export async function saveOrderResult(orderId: string, note: string): Promise<Dossier | null> {
+  const trimmed = note.trim().slice(0, 200);
+  if (IS_MOCK) {
+    const d = loadLocal();
+    if (!d) return null;
+    d.orders = d.orders.map((o) => (o.id === orderId ? { ...o, resultNote: trimmed || null } : o));
+    saveLocal(d);
+    return d;
+  }
+  // 显式带 done:true：回填只发生在已完成军令上；旧版服务端（无 resultNote 逻辑）收到后
+  // 也只会幂等保持 done，不会把军令误翻回未完成（向后兼容保险）。
+  const r = await request<CasefileRes>(`/casefile/orders/${orderId}`, 'PATCH', { resultNote: trimmed, done: true });
+  return r.casefile;
+}
+
 /** 用户手动补一条今日军令（自己的安排也是真实数据）。 */
 export async function addOrder(text: string): Promise<Dossier | null> {
   const normalized = normalizeOrderText(text);
@@ -334,7 +351,7 @@ export function buildReviewPrompt(d: Dossier | null): string {
   if (d) lines.push(`当前案卷：《${d.title}》。`);
   if (orders.length) {
     lines.push('今日军令完成情况：');
-    orders.forEach((o) => lines.push(`- [${o.done ? '已完成' : '未完成'}] ${o.text}`));
+    orders.forEach((o) => lines.push(`- [${o.done ? '已完成' : '未完成'}] ${o.text}${o.resultNote ? `（回填：${o.resultNote}）` : ''}`));
   } else {
     lines.push('今天没有生成军令。');
   }

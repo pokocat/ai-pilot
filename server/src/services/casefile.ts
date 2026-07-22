@@ -226,6 +226,7 @@ export async function casefileView(userId: string, days = 14): Promise<CasefileV
       ownerName: o.ownerName ?? null, dueAt: o.dueAt ?? null, etaMinutes: o.etaMinutes ?? null,
       sourceQuote: o.sourceQuote ?? null, steps: (o.stepsJson as string[] | null) ?? [],
       metrics: (o.metricsJson as OrderMetric[] | null) ?? [], actionType: (o.actionType as OrderActionType | null) ?? 'none',
+      resultNote: o.resultNote ?? null,
     })),
     backfill,
   };

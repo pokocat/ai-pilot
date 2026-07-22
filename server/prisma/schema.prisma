@@ -1090,6 +1090,8 @@ model CasefileOrder {
   stepsJson   Json? // string[]：三步骤（准备/处理/回写）
   metricsJson Json? // { label, value }[]：指标对
   actionType  String? // upload | backfill | review | topics | none：下一步动作类型
+  resultNote  String?   @db.Text // 完成回填：打卡后用户录入的完成情况（复盘/建议分析用）
+  resultAt    DateTime? // 回填时间
   done        Boolean   @default(false)
   doneAt      DateTime?
   createdAt   DateTime  @default(now())

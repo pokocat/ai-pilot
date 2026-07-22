@@ -94,15 +94,25 @@ export async function casefileRoutes(app: FastifyInstance) {
   });
 
   // 打卡 / 取消打卡
-  app.patch<{ Params: { id: string }; Body: { done?: boolean } }>('/casefile/orders/:id', async (req, reply) => {
+  app.patch<{ Params: { id: string }; Body: { done?: boolean; resultNote?: string } }>('/casefile/orders/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const order = await prisma.casefileOrder.findFirst({ where: { id: req.params.id, userId: user.id } });
     if (!order) return reply.code(404).send({ error: '军令不存在' });
-    const done = typeof req.body?.done === 'boolean' ? req.body.done : !order.done;
-    await prisma.casefileOrder.update({
-      where: { id: order.id },
-      data: { done, doneAt: done ? new Date() : null },
-    });
+    // 两种用法：body 带 resultNote = 只写完成回填（不动 done，除非显式给 done）；
+    // 不带 resultNote = 维持原打卡语义（缺省切换 done）。
+    const hasNote = typeof req.body?.resultNote === 'string';
+    const data: { done?: boolean; doneAt?: Date | null; resultNote?: string | null; resultAt?: Date | null } = {};
+    if (hasNote) {
+      const note = String(req.body!.resultNote).trim().slice(0, 200);
+      data.resultNote = note || null;
+      data.resultAt = note ? new Date() : null;
+      if (typeof req.body?.done === 'boolean') { data.done = req.body.done; data.doneAt = req.body.done ? new Date() : null; }
+    } else {
+      const done = typeof req.body?.done === 'boolean' ? req.body.done : !order.done;
+      data.done = done;
+      data.doneAt = done ? new Date() : null;
+    }
+    await prisma.casefileOrder.update({ where: { id: order.id }, data });
     return { casefile: await casefileView(user.id) };
   });
 

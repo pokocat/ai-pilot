@@ -13,7 +13,7 @@ import { diamondCost } from '../../services/format';
 import { api, type Agent, type GoalLadder, type ReminderItem, type BizMetricTemplateItem } from '../../services/api';
 import {
   addOrder, buildReviewPrompt, doneOrdersOf, ordersOf, pendingOrdersOf, recentOrders, refreshDossier,
-  removeOrder, saveBackfill, saveGoals, startReview, today, todayProgress, toggleOrder, type Dossier, type DossierOrder,
+  removeOrder, saveBackfill, saveGoals, saveOrderResult, startReview, today, todayProgress, toggleOrder, type Dossier, type DossierOrder,
 } from '../../services/dossier';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import { EMPTY_STATES } from '../../data/emptyStates';
@@ -77,6 +77,8 @@ export default function Studio() {
   const [bf, setBf] = useState({ leads: '', consults: '', deals: '' });
   const [streak, setStreak] = useState<number | null>(null);
   const [showDoneArchive, setShowDoneArchive] = useState(false);
+  const [fillFor, setFillFor] = useState<{ id: string; text: string } | null>(null); // 打卡后就地回填的目标军令
+  const [fillText, setFillText] = useState('');
   const [reminders, setReminders] = useState<ReminderItem[] | null>(null);
   const [goalEdit, setGoalEdit] = useState<{ field: GoalField; label: string } | null>(null);
   const [goalDraft, setGoalDraft] = useState('');
@@ -141,9 +143,30 @@ export default function Studio() {
   };
 
   // 打卡走乐观更新（即点即勾），服务端结果回来后校准；失败重新拉取兜底。
+  // 勾成「已完成」时就地弹回填输入（原型交互）：完成情况落库供复盘与后续建议分析。
   const onToggle = (id: string) => {
+    const target = dossier?.orders.find((o) => o.id === id);
+    if (target && !target.done) {
+      setFillFor({ id, text: target.text });
+      setFillText(target.resultNote || '');
+    } else if (fillFor?.id === id) {
+      setFillFor(null); // 取消打卡则收起回填
+    }
     setDossier((cur) => (cur ? { ...cur, orders: cur.orders.map((o) => (o.id === id ? { ...o, done: !o.done } : o)) } : cur));
     toggleOrder(id).then(setDossier).catch(() => refreshDossier().then(setDossier));
+  };
+  // 回填提交：空内容等同跳过（不落库）。
+  const commitFill = async () => {
+    if (!fillFor) return;
+    const note = fillText.trim();
+    setFillFor(null);
+    if (!note) return;
+    try {
+      setDossier(await saveOrderResult(fillFor.id, note));
+      Taro.showToast({ title: '已回填 · 复盘时军师据此分析', icon: 'none' });
+    } catch {
+      Taro.showToast({ title: '回填失败，请重试', icon: 'none' });
+    }
   };
   const onRemove = (id: string) =>
     Taro.showModal({ title: '删除军令', content: '删除这条军令？', confirmText: '删除' }).then(async (r) => {
@@ -422,6 +445,26 @@ export default function Studio() {
               })
             )}
 
+            {/* 打卡即回填（原型交互）：勾完成后就地展开，录完成情况供复盘与后续建议分析 */}
+            {fillFor ? (
+              <View className="task-fill card">
+                <Text className="tf-label">数 据 回 填 · 做完了多少？</Text>
+                <Text className="tf-order serif">{fillFor.text}</Text>
+                <View className="tf-row">
+                  <Input
+                    className="tf-input"
+                    value={fillText}
+                    maxlength={200}
+                    placeholder="如：邀约发出 30 条 / 到店 12 人"
+                    onInput={(e) => setFillText(e.detail.value)}
+                    onConfirm={commitFill}
+                  />
+                  <View className="tf-btn" onClick={commitFill}><Text>回填</Text></View>
+                </View>
+                <Text className="tf-skip" onClick={() => setFillFor(null)}>先跳过，稍后在归档里补</Text>
+              </View>
+            ) : null}
+
             {doneTodayOrders.length ? (
               <View className="done-archive card">
                 <View className="da-head" onClick={() => setShowDoneArchive((v) => !v)}>
@@ -439,6 +482,14 @@ export default function Studio() {
                         <View className="task-b">
                           <View className="task-meta-row"><Text className="task-pill sub">来自 {o.from}</Text><Text className="task-pill sub">长按删除</Text></View>
                           <Text className="archive-task-text serif">{o.text}</Text>
+                          {o.resultNote ? (
+                            <Text className="archive-fill-note">回填 · {o.resultNote}</Text>
+                          ) : (
+                            <Text
+                              className="archive-fill-add"
+                              onClick={(e) => { e.stopPropagation(); setFillFor({ id: o.id, text: o.text }); setFillText(''); }}
+                            >补回填 ›</Text>
+                          )}
                         </View>
                         <View className="archive-check" onClick={(e) => { e.stopPropagation(); onToggle(o.id); }}>
                           <Icon name="check" size={13} color="#fff" />

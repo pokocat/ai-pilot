@@ -105,6 +105,20 @@ test('军令：手动添加 / 打卡往返 / 删除', async () => {
   const done = await api('PATCH', `/api/casefile/orders/${manual.id}`, { token, body: {} });
   assert.equal(done.status, 200);
   assert.equal(done.body.casefile.orders.find((o: { id: string }) => o.id === manual.id).done, true);
+
+  // 完成回填：带 resultNote 只写回填不动 done；带 done:true 幂等保持完成态；空串清除回填。
+  const filled = await api('PATCH', `/api/casefile/orders/${manual.id}`, { token, body: { resultNote: '邀约发出 30 条 / 到店 12 人', done: true } });
+  assert.equal(filled.status, 200);
+  const filledOrder = filled.body.casefile.orders.find((o: { id: string }) => o.id === manual.id);
+  assert.equal(filledOrder.done, true, '回填不应把军令翻回未完成');
+  assert.equal(filledOrder.resultNote, '邀约发出 30 条 / 到店 12 人');
+  const noteOnly = await api('PATCH', `/api/casefile/orders/${manual.id}`, { token, body: { resultNote: '补一句' } });
+  const noteOnlyOrder = noteOnly.body.casefile.orders.find((o: { id: string }) => o.id === manual.id);
+  assert.equal(noteOnlyOrder.done, true, '只带 resultNote 不切换 done');
+  assert.equal(noteOnlyOrder.resultNote, '补一句');
+  const cleared = await api('PATCH', `/api/casefile/orders/${manual.id}`, { token, body: { resultNote: '  ' } });
+  assert.equal(cleared.body.casefile.orders.find((o: { id: string }) => o.id === manual.id).resultNote, null, '空白回填应清除');
+
   const undone = await api('PATCH', `/api/casefile/orders/${manual.id}`, { token, body: { done: false } });
   assert.equal(undone.body.casefile.orders.find((o: { id: string }) => o.id === manual.id).done, false);
 
