@@ -12,9 +12,10 @@
   flex-direction: column;
 }
 
-.ob-top {
-  /* CSS 兜底（H5）；weapp 由 JS 实测胶囊底部后内联覆盖 */
-  height: calc(env(safe-area-inset-top, 0px) + 20px);
+/* SafeHeader 在仪式页只做安全区让位：去掉头部条的底色与发丝线，融进米纸底 */
+.onboarding .ob-head {
+  background: transparent;
+  border-bottom: none;
   flex: none;
 }
 
@@ -56,7 +57,7 @@
 
 /* —— 择色 ——
    双列不用 gap+calc(50% - 6px)：两列合计恰为 100%，rpx 取整溢出即塌成单列（Android 真机实测）。
-   改 space-between + 48.4% 宽，留出取整余量。 */
+   改 space-between + 48.5% 宽（AGENTS.md §7.2 口径），留出取整余量。 */
 .ob-grid {
   margin-top: 26px;
   display: flex;
@@ -65,7 +66,7 @@
 }
 
 .ob-color {
-  width: 48.4%;
+  width: 48.5%; /* AGENTS.md §7.2 两列网格口径 */
   margin-bottom: 12px;
   box-sizing: border-box;
   padding: 16px 16px 18px;
@@ -222,7 +223,12 @@
 .of-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 13px 14px;
+  /* weapp Input 铁律：显式 height/min-height/line-height 三等值 + 仅水平 padding，
+     否则宋体高字形上下裁切（见 AGENTS.md 小程序 UI 约束）。 */
+  height: 46px;
+  min-height: 46px;
+  line-height: 46px;
+  padding: 0 14px;
   border: 1px solid var(--line);
   background: var(--paper);
   font-size: 14px;

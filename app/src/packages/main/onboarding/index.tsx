@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
-import Taro from '@tarojs/taro';
+import SafeHeader from '../../../components/SafeHeader';
 import { COLORS, colorIndex } from '../../../data/colors';
 import { api, type SurveyQ } from '../../../services/api';
 import { store } from '../../../services/store';
@@ -34,16 +34,6 @@ export default function Onboarding() {
 
   const [step, setStep] = useState<Step>('color');
   const [sel, setSel] = useState(() => colorIndex(store.colorKey()));
-  // 顶部让位：状态栏 + 微信胶囊（Android 上 env(safe-area-inset-top) 常为 0，必须 JS 实测；H5 走 CSS 兜底）。
-  const [topInset, setTopInset] = useState(0);
-  useEffect(() => {
-    try {
-      const rect = Taro.getMenuButtonBoundingClientRect?.();
-      const sys = Taro.getWindowInfo?.();
-      const top = Math.max((rect?.bottom || 0) + 10, (sys?.statusBarHeight || 0) + 48);
-      if (top > 58) setTopInset(top);
-    } catch { /* H5 / 旧基础库：CSS safe-area 兜底 */ }
-  }, []);
 
   const [survey, setSurvey] = useState<SurveyQ[]>(DEFAULT_SURVEY);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -139,7 +129,8 @@ export default function Onboarding() {
 
   return (
     <View className={`page onboarding ${s.themeClass()}`}>
-      <View className="ob-top" style={topInset ? { height: `${topInset}px` } : undefined} />
+      {/* 顶部安全区统一走 SafeHeader（AGENTS.md §7.2：页面内不得自测胶囊）；仪式页无返回键、无标题，纯让位。 */}
+      <SafeHeader className="ob-head" left={<View />} rightReserve={false} />
       <ScrollView scrollY className="ob-scroll" enhanced showScrollbar={false}>
         {step === 'color' && (
           <View className="ob-step" key="color">
