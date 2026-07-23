@@ -430,7 +430,15 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
 
     setupSSE(reply);
-    // 客户端断开后不再往死 socket 写（防 write-after-end 抛错中断生成/落库；生成本就会跑完并落库）。
+    // 客户端断开感知：移动端切后台/断网是常态。断连后 break 掉流式循环 → 触发异步生成器 .return()，
+    // 把取消透传到 provider 流、停止继续烧 token；对话路径并退还预留（不为没人看的输出计费，见售卖前体检 P0-8）。
+    let clientGone = false;
+    reply.raw.on('close', () => { clientGone = true; });
+    const refundReservations = async () => {
+      if (creditReservation?.charged) await creditReservation.refund('客户端断开 · 退回').catch(() => {});
+      if (quotaReservation) await quotaReservation.refund().catch(() => {});
+    };
+    // 客户端断开后不再往死 socket 写（防 write-after-end 抛错中断生成/落库）。
     const send = (event: string, data: unknown) => {
       if (reply.raw.writableEnded || reply.raw.destroyed) return;
       try { reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* socket 已关，忽略 */ }
@@ -503,7 +511,9 @@ export async function sessionRoutes(app: FastifyInstance) {
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
           if (ev.type === 'delta') send('token', { text: ev.text });
           else { reply2 = ev.result; usage = ev.usage; }
+          if (clientGone) break; // 断连：停消费(取消 provider 流)，退预留、不持久化残缺回复
         }
+        if (clientGone) { await refundReservations(); return; }
         send('chat', reply2);
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object } });
         harvestProphecies(user, agentKey, reply2?.text);
@@ -517,7 +527,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('meta', { kind: 'report', refNotices });
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         send('begin', { title: deliverable.title, icon: deliverable.icon, meta: deliverable.meta });
-        for (let i = 0; i < deliverable.sections.length; i++) { await sleep(520); send('section', { index: i, ...deliverable.sections[i] }); }
+        for (let i = 0; i < deliverable.sections.length; i++) { if (clientGone) break; await sleep(520); send('section', { index: i, ...deliverable.sections[i] }); }
         await sleep(300);
         send('footer', { trust: deliverable.trust, actions: deliverable.actions });
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: deliverable as object } });
@@ -533,8 +543,9 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('meta', { kind: 'report', refNotices });
         const { result: deliverable, usage } = await generateDeliverable(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
         send('begin', { title: deliverable.title, icon: deliverable.icon, meta: deliverable.meta });
-        // 渐进式呈现：按 section 逐段下发（保留原型骨架→渐显动效）
+        // 渐进式呈现：按 section 逐段下发（保留原型骨架→渐显动效）；断连即停送（报告已生成、落库可回看）。
         for (let i = 0; i < deliverable.sections.length; i++) {
+          if (clientGone) break;
           await sleep(520);
           send('section', { index: i, ...deliverable.sections[i] });
         }
@@ -573,7 +584,9 @@ export async function sessionRoutes(app: FastifyInstance) {
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
           if (ev.type === 'delta') send('token', { text: ev.text });
           else { reply2 = ev.result; usage = ev.usage; }
+          if (clientGone) break; // 断连：停消费(取消 provider 流)，退预留、不持久化残缺回复
         }
+        if (clientGone) { await refundReservations(); return; }
         send('chat', reply2); // 完整回复（含 points/acts）兜底，兼容不消费 token 流的客户端
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
