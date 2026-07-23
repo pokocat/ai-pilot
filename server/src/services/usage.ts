@@ -61,6 +61,20 @@ export function recordInfraUsage(kind: 'embedding' | 'rerank', model: string, to
   void recordTokenUsage({ kind, provider, model, usage: { inputTokens: tokens, outputTokens: 0, cachedInput: 0 } });
 }
 
+/**
+ * 记录「主模型辅助调用」（洞察抽取 / 预言 / 势研判 / 履历 / 汇总 / 图谱等 rawText 系）的 token 消耗。
+ * 这些调用此前完全不入 token_usage → 真实成本被系统性低估（见售卖前体检 P1；每轮 extractInsights、
+ * 每次总军师输出后的 extractProphecies 都是未记账的真实调用，直接影响单位经济/定价口径）。
+ * 无 user 归属（辅助调用常无会话上下文），按 kind='aux' 归入基建用量；provider 无 usage 返回时按文本长度粗估
+ * （CJK 为主 ≈ 2 字符/token）——仅供成本可见性，不参与按次扣费。fire-and-forget，绝不抛。
+ */
+export function recordAuxUsage(model: string, provider: string, inputText: string, outputText: string): void {
+  const inputTokens = Math.ceil((inputText?.length ?? 0) / 2);
+  const outputTokens = Math.ceil((outputText?.length ?? 0) / 2);
+  if (inputTokens + outputTokens <= 0) return;
+  void recordTokenUsage({ kind: 'aux', provider, model, usage: { inputTokens, outputTokens, cachedInput: 0 } });
+}
+
 const dayKey = (d: Date): string => d.toISOString().slice(0, 10); // YYYY-MM-DD（UTC）
 
 /**

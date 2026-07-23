@@ -3,6 +3,8 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
+import { isAiTestMode } from './env.js';
 import { authRoutes } from './routes/auth.js';
 import { metaRoutes } from './routes/meta.js';
 import { agentRoutes } from './routes/agents.js';
@@ -63,6 +65,19 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(cors, { origin: true });
   // 知识库文档上传：单文件、≤20MB（解析器在 docParse 按需动态加载）。
   await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 5 } });
+
+  // 全站限流（此前完全无 limit_req，SMS/AI 生成/下单等成本型接口零防刷，机器常态被扫描器扫——见售卖前体检 P1）。
+  // 全局宽松兜底（正常用户远不会触及），成本/鉴权型路由用 route-level config.rateLimit 收紧（见 auth.ts 等）。
+  // 内存 store：单实例有效；多实例需换 Redis store（见分布式架构方案 Phase 1）。测试(NODE_ENV=test)不启用，
+  // 避免 app.inject 同源请求把套件打成 429。
+  if (!isAiTestMode()) {
+    await app.register(rateLimit, {
+      global: true,
+      max: 300,
+      timeWindow: '1 minute',
+      allowList: (req) => req.url === '/api/health',
+    });
+  }
 
   // 可测性（沙箱专属）：用 x-test-now 头把本次请求的「现在」固定为指定时刻，快进到期/锚点重置做离线验证。
   // 仅 sandboxEnabled() 为真时注册，生产环境此 hook 完全不存在 → 时间不可被外部篡改。

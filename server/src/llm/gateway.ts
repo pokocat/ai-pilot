@@ -11,7 +11,7 @@ import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../services/aiConfig.js';
 import { mockChat, mockDeliverable, mockAdaptive } from './providers/mock.js';
 import { ZERO_USAGE, extractAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
-import { recordTokenUsage, type UsageMeta } from '../services/usage.js';
+import { recordTokenUsage, recordAuxUsage, type UsageMeta } from '../services/usage.js';
 import { recordTrace } from '../services/trace.js';
 import { moderate } from '../services/moderation.js';
 import { auditBannedWords } from '../services/bannedWords.js';
@@ -676,12 +676,17 @@ export async function providerInfo() {
 async function rawText(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
 ): Promise<string> {
+  let out: string;
   if (live === 'openai') {
     const { openaiRaw } = await import('./providers/openai.js');
-    return openaiRaw(cfg, system, user);
+    out = await openaiRaw(cfg, system, user);
+  } else {
+    const { claudeRaw } = await import('./providers/claude.js');
+    out = await claudeRaw(cfg, system, user);
   }
-  const { claudeRaw } = await import('./providers/claude.js');
-  return claudeRaw(cfg, system, user);
+  // 辅助调用（洞察/预言/势研判/履历/汇总/图谱等）此前不入 token_usage → 成本低估。按 kind='aux' 记入基建用量。
+  recordAuxUsage(cfg.model, live, `${system}\n${user}`, out);
+  return out;
 }
 
 // —— 内部：文本 → JSON 对象（正则抠 {…} + JSON.parse）。既有洞察抽取/汇总沿用此松散口径。 ——

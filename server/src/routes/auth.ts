@@ -181,7 +181,9 @@ export async function authRoutes(app: FastifyInstance) {
   }));
 
   // 发送短信验证码：限频 + 落库（哈希）+ 发送。console 演示口径会把验证码随响应回传（devCode）。
-  app.post('/auth/sms/send', async (req, reply) => {
+  // 按 IP 收紧：SMS 发送是成本+轰炸型接口。既有 sms.ts 已按手机号限频（60s 冷却 + 5 条/小时），
+  // 这里再叠一层按 IP 的频控，挡「换号池、同 IP 批量轰炸」。（rate-limit 未注册的测试环境此 config 被忽略。）
+  app.post('/auth/sms/send', { config: { rateLimit: { max: 10, timeWindow: '5 minutes' } } }, async (req, reply) => {
     const parsed = smsSendSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.sms.send_attempt', {
@@ -218,7 +220,9 @@ export async function authRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/auth/login', async (req, reply) => {
+  // 免费注册防薅：登录/注册按 IP 频控（唯一门槛此前只有「一手机号一账号」，无 IP/设备频控 → 号池可批量薅
+  // 免费钻石+额度，见售卖前体检 P1）。20 次/10 分钟对 NAT 后正常多用户仍宽松，但挡住脚本化批量建号。
+  app.post('/auth/login', { config: { rateLimit: { max: 20, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
       await recordAuthAttempt(req, 'auth.login.attempt', {
