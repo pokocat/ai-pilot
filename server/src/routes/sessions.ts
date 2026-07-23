@@ -20,6 +20,7 @@ import { recordReview } from '../services/reviewLog.js';
 import { webviewSafeReportUrl } from '../services/reportHtml.js';
 import { notifyReportReady } from '../services/wechatSubscribe.js';
 import { isRecallIntent, sessionRecallScore } from '../services/recallIntent.js';
+import { isSessionGenerating, trackSessionGeneration } from '../services/sessionGeneration.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -95,6 +96,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     return Promise.all(
       sessions.map(async (s) => {
         const last = s.messages[0];
+        const generating = isSessionGenerating(s.id);
         let snippet = '新对话';
         if (last) {
           const c = last.contentJson as { text?: string; title?: string };
@@ -109,9 +111,10 @@ export async function sessionRoutes(app: FastifyInstance) {
           agentName: s.agent.name,
           agentIcon: s.agent.icon,
           title: s.title,
-          snippet,
+          snippet: generating ? '军师正在思考…' : snippet,
           updatedAt: s.updatedAt,
           projectId: s.projectId,
+          generating,
           unreadCount,
           // 未读红点（保留兼容既有消费者）：有未读 assistant（=unreadCount>0），或尾条为未读 report
           //（后台产出即置——列表红点提示，见 generate* 的 role='report' 落库）。
@@ -142,6 +145,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       agent: { key: s.agent.key, name: s.agent.name, role: s.agent.role, icon: s.agent.icon, greet: pub?.greet ?? s.agent.greet, chips: (pub?.chipsJson ?? s.agent.chipsJson), memText: pub?.memText ?? s.agent.memText, learnText: pub?.learnText ?? s.agent.learnText },
       title: s.title,
       projectId: s.projectId,
+      generating: isSessionGenerating(s.id),
       messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: m.contentJson, at: m.createdAt, refs: (m.refsJson as MessageRef[] | null) ?? undefined })),
     };
   });
@@ -244,6 +248,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       if (!session.projectId && projectId) patch.projectId = projectId;
       if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
     }
+    const finishGeneration = trackSessionGeneration(session.id);
+    try {
     const userMsg = await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
     // M3 PR-11：意图路由——本轮检测优先、检测不出沿用会话粘性模式；复盘意图自动落对应层复盘账
     const { intent, persist: modePersist } = resolveMode(text, session.mode);
@@ -358,6 +364,9 @@ export async function sessionRoutes(app: FastifyInstance) {
         .code(e.statusCode ?? (e.code === 'MODERATION_BLOCK' ? 422 : 500))
         .send({ error: publicError.message, code: publicError.code });
     }
+    } finally {
+      finishGeneration();
+    }
   });
 
   // 把整段会话汇总为「对话纪要」：版本化报告 + 沉淀进知识库
@@ -444,6 +453,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       try { reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* socket 已关，忽略 */ }
     };
 
+    let finishGeneration: (() => void) | null = null;
     try {
       if (!session) {
         session = await prisma.session.create({
@@ -458,6 +468,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
       }
 
+      finishGeneration = trackSessionGeneration(session.id);
       // 持久化用户消息（含引用）
       const userMsg = await prisma.message.create({ data: { sessionId: session.id, role: 'user', contentJson: { text }, refsJson: refs ? (refs as unknown as Prisma.InputJsonValue) : undefined } });
     // M3 PR-11：意图路由——本轮检测优先、检测不出沿用会话粘性模式；复盘意图自动落对应层复盘账
@@ -613,6 +624,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       logGenerationError('stream', e, { userId: user.id, sessionId: session?.id, agentKey });
       send('error', publicGenerationError(e));
     } finally {
+      finishGeneration?.();
       reply.raw.end();
     }
   });

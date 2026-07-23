@@ -6,6 +6,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.ts';
 import { writeSystemMessage, SYNC_DISCLOSURE_PREFIX } from '../src/services/collab.ts';
+import { trackSessionGeneration } from '../src/services/sessionGeneration.ts';
 
 describe('V7-15 会话协同披露 + 未读数', () => {
   let token = '';
@@ -79,5 +80,24 @@ describe('V7-15 会话协同披露 + 未读数', () => {
     assert.ok(!theirs.body.some((x: { id: string }) => x.id === sid), '他人列表不含本人会话');
     const detail = await api('GET', `/api/sessions/${sid}`, { token: other });
     assert.equal(detail.status, 404, '他人按 id 取详情 → 404');
+  });
+
+  test('生成中真值：列表与详情均披露 generating，结束后即时清除', async () => {
+    const sid = await newSessionWithAssistant(token);
+    const finish = trackSessionGeneration(sid);
+    try {
+      const list = await api('GET', '/api/sessions', { token });
+      const item = list.body.find((x: { id: string }) => x.id === sid);
+      assert.equal(item.generating, true);
+      assert.equal(item.snippet, '军师正在思考…');
+
+      const detail = await api('GET', `/api/sessions/${sid}`, { token });
+      assert.equal(detail.body.generating, true);
+    } finally {
+      finish();
+    }
+
+    const settled = await api('GET', `/api/sessions/${sid}`, { token });
+    assert.equal(settled.body.generating, false);
   });
 });

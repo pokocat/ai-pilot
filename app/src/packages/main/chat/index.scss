@@ -147,6 +147,20 @@
 /* B2：busy 时只弱化输入区与左侧工具，右侧「停止」键保持醒目（父级 opacity 会连累子元素，故不整体降透明）。 */
 .composer.busy .cinput { color: var(--ink-3); }
 .composer.busy .cbar-l { opacity: .5; }
+.csend.waiting {
+  background: transparent;
+  border: 1px solid;
+}
+.waiting-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: waiting-pulse 1.2s ease-in-out infinite;
+}
+@keyframes waiting-pulse {
+  0%, 100% { opacity: .35; transform: scale(.75); }
+  50% { opacity: 1; transform: scale(1); }
+}
 
 /* 底排工具 */
 .cbar { display: flex; align-items: center; justify-content: space-between; }

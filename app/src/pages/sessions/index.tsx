@@ -6,6 +6,7 @@ import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import AsyncState from '../../components/AsyncState';
 import { navTo, switchTo } from '../../services/nav';
+import { isChatPending } from '../../services/chatPending';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
 import { useStore } from '../../hooks/useStore';
@@ -58,10 +59,19 @@ export default function Sessions() {
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false); // 检索进行中（防抖 + 请求期间给「检索中」占位，避免空态误判）
 
+  const presentSessions = (list: SessionItem[]) => list.map((it) => (
+    it.generating || !isChatPending(it.id)
+      ? it
+      : { ...it, generating: true, snippet: '军师正在思考…' }
+  ));
+
   // 会话列表加载（C2）：失败区分未授权（弹登录）与网络错误（错误态可重试），不再一律伪装成空态。
   const loadSessions = () => {
     api.sessions()
-      .then((list) => { setSessions(list); setSessErr(false); })
+      .then((list) => {
+        setSessions(presentSessions(list));
+        setSessErr(false);
+      })
       .catch((e) => {
         const kind = s.handleApiError(e, { silent: true });
         setSessions([]);
@@ -69,6 +79,17 @@ export default function Sessions() {
         else setSessErr(true);
       });
   };
+
+  // 留在列表等待时也要自动从“正在思考”切到最终摘要/未读，不要求用户再切一次页面。
+  useEffect(() => {
+    if (!s.isAuthed() || !sessions.some((it) => it.generating)) return;
+    const timer = setTimeout(() => {
+      api.sessions()
+        .then((list) => { setSessions(presentSessions(list)); setSessErr(false); })
+        .catch((e) => { s.handleApiError(e, { silent: true }); });
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [sessions]);
 
   useDidShow(() => {
     s.setTab(0);

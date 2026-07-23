@@ -20,6 +20,7 @@ import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../../
 import { CHAT_GUIDES } from '../../../data/operatingSystem';
 import { acceptDeliverable } from '../../../services/dossier';
 import { navTo } from '../../../services/nav';
+import { chatPendingAge, clearChatPending, isChatPending, markChatPending } from '../../../services/chatPending';
 import './index.scss';
 
 type Msg =
@@ -178,6 +179,14 @@ const JUMP_LATEST_HIDE_DISTANCE = 140;
 const STICK_BOTTOM_DISTANCE = 120;
 // B1 流式跟随节流间隔：onToken/onReportSection 高频触发，滚底最多每 ~300ms 一次。
 const FOLLOW_THROTTLE_MS = 300;
+// 离开聊天页后，服务端生成仍会继续。重进同一会话时按服务端 generating 真值刷新，
+// 前 30 秒密一点让回复尽快落屏，长思考则降频，避免一直高频请求。
+const REATTACH_POLL_FAST_MS = 1200;
+const REATTACH_POLL_SLOW_MS = 3000;
+const REATTACH_POLL_FAST_WINDOW_MS = 30_000;
+const REATTACH_POLL_MAX_MS = 10 * 60_000;
+// 服务端收到生成请求并登记 generating 前的网络交接宽限；超过后若服务端已不在生成且仍无回复，按中断处理。
+const LOCAL_PENDING_HANDOFF_MS = 5000;
 // B6 输入计数：临近上限（>1800/2000）才显示字数，平时不打扰。
 const INPUT_MAX = 2000;
 const INPUT_COUNT_FROM = 1800;
@@ -281,6 +290,8 @@ export default function Chat() {
   const [inputFocus, setInputFocus] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
+  // true 表示 busy 来自“重进后恢复”，当前页面没有原请求的 abort 句柄，输入区应展示被动等待而非假停止键。
+  const [reattachedBusy, setReattachedBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
@@ -295,6 +306,8 @@ export default function Chat() {
   const atBottomRef = useRef(true);
   const lastFollowRef = useRef(0);
   const followTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reattachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aliveRef = useRef(true);
   // B2 停止生成：当前流的中断句柄 + 是否被用户主动停止。
   const controlRef = useRef<StreamControl | null>(null);
   const abortedRef = useRef(false);
@@ -313,6 +326,7 @@ export default function Chat() {
   const pasteInflightRef = useRef(0);
   const sessionIdRef = useRef('');
   sessionIdRef.current = sessionId;
+  const pendingSessionIdRef = useRef('');
   // B5 上传：非模态进度条，接 UploadTask 透出真实百分比；取消调 task.abort() 真中止。
   // 多份上传后按「份」记账（不退化成整批一个进度条）：每份各有真进度、各能单独取消/重试。
   const [uploads, setUploads] = useState<Record<string, UploadEntry>>({});
@@ -417,6 +431,8 @@ export default function Chat() {
   }, [keyboardHeight, refs.length, msgs.length, input, uploading]);
 
   useEffect(() => () => {
+    aliveRef.current = false;
+    if (reattachTimerRef.current) clearTimeout(reattachTimerRef.current);
     if (pasteSettleTimerRef.current) clearTimeout(pasteSettleTimerRef.current);
     store.setOverlay(false, 'ref-picker');
   }, []);
@@ -509,6 +525,7 @@ export default function Chat() {
         if (detail.projectId) setProjectId(detail.projectId);
         restore(ag, detail.messages);
         loadDraft(sid);
+        if (detail.generating || isChatPending(sid)) resumeGeneration(sid, ag);
         return;
       }
 
@@ -527,7 +544,11 @@ export default function Chat() {
           if (detail.projectId) setProjectId(detail.projectId);
           restore(fallbackAgent, detail.messages);
           loadDraft(latest.id);
-          if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key, [], true, detail.projectId || pid || ''), 300);
+          if (detail.generating || isChatPending(latest.id)) {
+            resumeGeneration(latest.id, fallbackAgent);
+          } else if (send) {
+            setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key, [], true, detail.projectId || pid || ''), 300);
+          }
           return;
         }
       }
@@ -573,6 +594,69 @@ export default function Chat() {
     setTimeout(scrollToEnd, 60);
   }
 
+  // 页面退出不会中断原生成请求，但旧页面实例的 busy 状态已经销毁。重新进入后：
+  // 1) 立即恢复“正在思考”；2) 轮询同一会话详情；3) 服务端落库并清 generating 后，用完整历史替换页面。
+  // 若请求异常结束且没有军师回复，则明确给出可重试气泡，不让用户面对一条悬空的提问。
+  function resumeGeneration(sid: string, ag: Agent) {
+    if (reattachTimerRef.current) clearTimeout(reattachTimerRef.current);
+    const startedAt = Date.now();
+    setBusy(true);
+    setReattachedBusy(true);
+
+    const finish = () => {
+      setBusy(false);
+      setReattachedBusy(false);
+      reattachTimerRef.current = null;
+    };
+    const poll = async () => {
+      if (!aliveRef.current) return;
+      try {
+        const detail = await api.session(sid);
+        if (!aliveRef.current) return;
+        const last = detail.messages[detail.messages.length - 1];
+        const localAge = chatPendingAge(sid);
+        const locallyHandingOff = localAge !== null && localAge < LOCAL_PENDING_HANDOFF_MS;
+        // 回复已落库时不用等旧页面 finally 清本地标记；否则服务端不再生成后，最多给网络交接 5 秒宽限。
+        const replyStored = !!last && last.role !== 'user';
+        if (replyStored || (!detail.generating && !locallyHandingOff)) {
+          clearChatPending(sid);
+          restore(ag, detail.messages);
+          if (last?.role === 'user') {
+            const retryText = String(last.content?.text || '').trim();
+            setMsgs((m) => [...m, {
+              role: 'assistant',
+              reply: { text: '刚才的思考中断了，你可以重新发送这条问题。' },
+              retryText: retryText || undefined,
+            }]);
+          }
+          finish();
+          return;
+        }
+      } catch (e) {
+        if (isUnauthorized(e)) {
+          finish();
+          promptLogin('登录态已失效，请重新登录');
+          return;
+        }
+        // 短暂网络波动不撤掉思考态；统一请求层已经记录了技术原因，下一轮继续确认服务端真值。
+      }
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= REATTACH_POLL_MAX_MS) {
+        clearChatPending(sid);
+        finish();
+        setMsgs((m) => [...m, {
+          role: 'assistant',
+          reply: { text: '这次思考时间有点久，结果完成后仍会保存在本会话，请稍后回来查看。' },
+        }]);
+        return;
+      }
+      const delay = elapsed < REATTACH_POLL_FAST_WINDOW_MS ? REATTACH_POLL_FAST_MS : REATTACH_POLL_SLOW_MS;
+      reattachTimerRef.current = setTimeout(poll, delay);
+    };
+
+    reattachTimerRef.current = setTimeout(poll, REATTACH_POLL_FAST_MS);
+  }
+
   async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true, activeProjectId = projectId) {
     if (busy) return;
     if (!store.isAuthed()) {
@@ -587,7 +671,12 @@ export default function Chat() {
       return;
     }
     setBusy(true);
+    setReattachedBusy(false);
     abortedRef.current = false;
+    if (sid) {
+      pendingSessionIdRef.current = sid;
+      markChatPending(sid);
+    }
     // B3：发送即清掉本会话草稿（输入已上屏；失败可用气泡「重试」重发，无需草稿）。
     clearDraft();
     // P2-15：重试（echo=false）不重复回显用户气泡（用户消息已在首次尝试时显示）。
@@ -707,7 +796,13 @@ export default function Chat() {
         controlRef.current = control;
         try {
         const streamOk = await generateStream(body, {
-          onSession: (id) => { if (id && !sid) setSessionId(id); },
+          onSession: (id) => {
+            if (id && !sid) setSessionId(id);
+            if (id) {
+              pendingSessionIdRef.current = id;
+              markChatPending(id);
+            }
+          },
           onReportStart: startReport,
           // meta kind=chat：先建聊天气泡（think-dots），避免 LLM 首字延迟期只剩全局 busy 无反馈。
           onChatStart: startChat,
@@ -845,6 +940,8 @@ export default function Chat() {
       // P2-15：保留原文供重试；但审核类错误不给重试（重试必再被拦）。
       setMsgs((m) => [...m, { role: 'assistant', reply: { text: reply }, retryText: isModerationErr(reply) ? undefined : text }]);
     } finally {
+      if (pendingSessionIdRef.current) clearChatPending(pendingSessionIdRef.current);
+      pendingSessionIdRef.current = '';
       setBusy(false);
       controlRef.current = null;
     }
@@ -1786,16 +1883,23 @@ export default function Chat() {
               </View>
               <View className="cbar-r">
                 {busy ? (
-                  // B2：生成中 → 停止键
-                  <View
-                    className="csend stop"
-                    role="button"
-                    aria-label="停止生成"
-                    style={{ background: accent }}
-                    onClick={(e) => { e.stopPropagation?.(); stopGeneration(); }}
-                  >
-                    <View className="stop-sq" />
-                  </View>
+                  reattachedBusy ? (
+                    // 重进后已恢复思考态，但原请求属于上一页面实例，不能展示一个实际无效的“停止”按钮。
+                    <View className="csend waiting" aria-label="军师正在思考" style={{ borderColor: accent }}>
+                      <View className="waiting-dot" style={{ background: accent }} />
+                    </View>
+                  ) : (
+                    // B2：当前页面发起的生成中 → 停止键
+                    <View
+                      className="csend stop"
+                      role="button"
+                      aria-label="停止生成"
+                      style={{ background: accent }}
+                      onClick={(e) => { e.stopPropagation?.(); stopGeneration(); }}
+                    >
+                      <View className="stop-sq" />
+                    </View>
+                  )
                 ) : (
                   <View
                     className={`csend ${!input.trim() ? 'off' : ''}`}
