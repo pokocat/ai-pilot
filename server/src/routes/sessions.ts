@@ -23,6 +23,20 @@ import { isRecallIntent, sessionRecallScore } from '../services/recallIntent.js'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// 降级结算（真实模型没出结构化成果、回退 mock 模板 = deliverable.degraded）：token 额度侧已 settle(0) 退回，
+// 钻石预留也必须一并退回——否则图片类 agent 拿到废模板还照扣钻石（两轴计费不对齐的资损，见售卖前体检 P1）。
+// 非降级或未实扣（文本 agent diamondCost=0）时按原余额返回，不动。
+async function settleCreditForDeliverable(res: CreditReservation | null, degraded: boolean | undefined): Promise<number> {
+  const bal = res?.balance ?? 0;
+  if (!degraded || !res?.charged) return bal;
+  try {
+    return await res.refund('降级未出结构化成果 · 退回钻石');
+  } catch (e) {
+    console.error('[sessions] degraded credit refund failed:', (e as Error).message);
+    return bal;
+  }
+}
+
 // 预言收割（M2 PR-9）：总军师输出后异步抽取「具体、可验证、有期限」的天势判断落账。
 // 真实模型不可用时抽取器返回空（不产生伪预言）；失败静默，绝不影响回复主流程。
 function harvestProphecies(user: { tenantId: string; id: string }, agentKey: string, text: string | null | undefined): void {
@@ -48,6 +62,11 @@ function publicGenerationError(err: GenerationError): { message: string; code: s
   }
   if (err.statusCode === 429) {
     return { message: '军师现在有点忙，请过一会儿再试。', code };
+  }
+  if (code === 'AI_UNAVAILABLE') {
+    // aiUnavailable() 已生成用户安全文案（区分「响应超时」与「暂时不可用」）；直接透传，
+    // 让用户知道这次是超时还是服务不可用，而不是笼统的「没能完成」（此前一律吞成通用文案）。
+    return { message: err.message || 'AI 服务暂时不可用，请稍后重试', code };
   }
   return { message: '军师暂时没能完成这次回答，请稍后重试。', code };
 }
@@ -282,7 +301,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const learned = await learn();
-        const creditBalance = creditReservation?.balance ?? 0;
+        const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
         const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
         return {
           sessionId: session.id, created, agentKey, kind: 'report', messageId: msg.id, deliverable,
@@ -302,8 +321,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId,
           assistantText: `${deliverable.title}：${deliverable.sections.map((s) => s.h).filter(Boolean).join('、')}`,
         });
-        const creditBalance = creditReservation?.balance ?? 0;
-        // P0-4：降级（真实模型没出结构化成果、回退模板）不向用户计费——settle(0) 全额退回预留；我们仍在 gateway 侧按真实 token 记账。
+        // P0-4：降级（真实模型没出结构化成果、回退模板）不向用户计费——token settle(0) 退回、钻石也退回；真实 token 仍在 gateway 侧记账。
+        const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
         const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
         return {
           sessionId: session.id, created, agentKey, kind: 'report',
@@ -506,7 +525,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         notifySessionReport(user, deliverable);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
-        const creditBalance = creditReservation?.balance ?? 0;
+        const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
         const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
@@ -541,8 +560,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           });
           if (learned) send('memory', { learned: true, agentName: agent.name });
         }
-        const creditBalance = creditReservation?.balance ?? 0;
-        // P0-4：降级不向用户计费（settle(0) 退回预留）；真实 token 仍在 gateway 侧记账。
+        // P0-4：降级不向用户计费——token settle(0) 退回、钻石也退回；真实 token 仍在 gateway 侧记账。
+        const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
         const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });

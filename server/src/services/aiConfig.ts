@@ -8,7 +8,7 @@
 import { prisma } from '../db.js';
 import { env, isRealKey } from '../env.js';
 import type { ModelRate } from '../data/modelPrices.js';
-import { encryptSecret, decryptSecretSafe } from './secretBox.js';
+import { encryptSecret, decryptSecretSafe, decryptFailed } from './secretBox.js';
 import type { AiProvider, AiConfig, AiPreset, AiModel, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 
 export interface ResolvedAiConfig {
@@ -29,6 +29,9 @@ export interface ResolvedAiConfig {
   rerankModel: string;
   rerankBaseUrl: string;
   rerankApiKey: string;
+  // 库内 apiKey 是密文但解不开（主密钥轮换错/未配）→ 这是**配置故障**，不是「未配置」。
+  // 生产（AI_FALLBACK_MOCK=false）下不得据此静默降级 mock，须让 gateway 抛 AI_UNAVAILABLE。
+  keyDecryptFailed?: boolean;
 }
 
 // 内置接入商目录：「添加模型」向导选其一即可一键填好 baseUrl/model（仍可改）。
@@ -137,7 +140,13 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
         rerankModel: row.rerankModel || '',
         rerankBaseUrl: row.rerankBaseUrl || '',
         rerankApiKey: decryptSecretSafe(row.rerankApiKey),
+        keyDecryptFailed: decryptFailed(row.apiKey),
       };
+      // 破「零报错、零 trace」的静默：对话 key 密文解不开时明确记 error 级日志，供告警。
+      if (cfg.keyDecryptFailed) {
+        console.error('[aiConfig] 对话模型 apiKey 解密失败（APP_ENCRYPTION_KEY 轮换错误或未配但库内为密文）——'
+          + '生产将抛 AI_UNAVAILABLE 而非静默降级 mock。请核对主密钥。');
+      }
     }
   } catch {
     /* DB 不可达：用 env 兜底 */

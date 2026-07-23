@@ -669,6 +669,8 @@ model CreditLedger {
   tenant Tenant @relation(fields: [tenantId], references: [id])
   user   User   @relation(fields: [userId], references: [id])
 
+  // 余额读(getBalance)按 userId + createdAt desc 取最近一行，是每次产出/扣费的热路径；无索引则随流水线性扫。
+  @@index([userId, createdAt])
   @@map("credit_ledger")
 }
 
@@ -915,6 +917,10 @@ model AuditLog {
 
   tenant Tenant? @relation(fields: [tenantId], references: [id])
 
+  // 热点表：每请求写一行 + scheduler 每轮 per-user findFirst 查(userId+action+createdAt) + admin 审计视图按时间扫。
+  // 无索引时上量后全表扫拖垮整站，故加两条覆盖索引（纯加法，db push 安全）。
+  @@index([userId, action, createdAt])
+  @@index([createdAt])
   @@map("audit_log")
 }
 

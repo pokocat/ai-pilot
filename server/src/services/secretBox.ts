@@ -79,3 +79,18 @@ export function decryptSecretSafe(value: string | null | undefined): string {
     return '';
   }
 }
+
+/**
+ * 「看着是密文、但解不开」判定。用于把「密钥轮换错误 / 主密钥未配但库里是密文」这类**配置故障**
+ * 与「本就没配 key（明文空）」区分开——前者不该被静默当成「未配置 → 降级 mock」，否则全站悄悄
+ * 返回 mock 模板且零报错（见售卖前体检 P1）。仅对带 enc: 前缀的值有意义。
+ */
+export function decryptFailed(value: string | null | undefined): boolean {
+  if (!isEncrypted(value)) return false;
+  try {
+    decryptSecret(value);
+    return false;
+  } catch {
+    return true;
+  }
+}

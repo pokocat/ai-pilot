@@ -15,7 +15,20 @@ import { isFeatureEnabled } from '../services/featureFlag.js';
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
 export async function metaRoutes(app: FastifyInstance) {
-  app.get('/health', async () => ({ ok: true }));
+  // 健康检查须真正探 DB：否则 DB 挂了进程还活着时仍返回 ok，部署门禁/探活会误判为健康。
+  // 2s 超时保护，避免 DB 慢时把健康检查自己拖死；DB 不可达 → 503。
+  app.get('/health', async (_req, reply) => {
+    try {
+      await Promise.race([
+        prisma.$queryRaw`SELECT 1`,
+        new Promise((_, rej) => setTimeout(() => rej(new Error('db ping timeout')), 2000)),
+      ]);
+      return { ok: true, db: 'up' };
+    } catch (err) {
+      console.error('[health] db ping failed:', (err as Error).message);
+      return reply.code(503).send({ ok: false, db: 'down' });
+    }
+  });
 
   // 当前用户 + AI 提供方信息（前端启动时拉取）
   app.get('/me', async (req) => {

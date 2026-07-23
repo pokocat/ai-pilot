@@ -35,10 +35,12 @@ function getClient(apiKey: string, baseUrl?: string): Anthropic {
   if (!cached || cached.key !== cacheKey) {
     cached = {
       key: cacheKey,
+      // maxRetries 显式设 2（SDK 默认值，但写明以防未来默认变动）——配合各调用点的 timeout，
+      // 把「网关慢/挂时单请求最坏 10 分钟 × 自动重试」这类阻塞收敛为有界（见售卖前体检 P1）。
       client: new Anthropic(
         base
-          ? { apiKey, baseURL: base, defaultHeaders: { Authorization: `Bearer ${apiKey}` } }
-          : { apiKey },
+          ? { apiKey, baseURL: base, defaultHeaders: { Authorization: `Bearer ${apiKey}` }, maxRetries: 2 }
+          : { apiKey, maxRetries: 2 },
       ),
     };
   }
@@ -157,13 +159,14 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
     role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
     content: m.text,
   }));
+  // 流式调用也须设超时兜底：SDK 默认 600s，网关卡住会把这条流吊到 10 分钟。给足流式时长同时有界。
   const stream = getClient(cfg.apiKey, cfg.baseUrl).messages.stream({
     model: cfg.model,
     max_tokens: CHAT_MAX_TOKENS,
     temperature: cfg.temperature,
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
     messages: [...history, { role: 'user', content: ctx.userMessage }],
-  });
+  }, { timeout: Math.max(cfg.timeoutMs, 120_000) });
   let text = '';
   let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
   for await (const event of stream) {

@@ -743,11 +743,60 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
   return { ok: true, refundId: data.refund_id ?? outRefundNo, wechatStatus };
 }
 
-/** 退款结果通知（REFUND.SUCCESS 等）：退款状态在 refundWechatOrder 已同步落库，这里仅幂等补记原文与终态。 */
-export async function markRefundNotified(decoded: { out_trade_no?: string; refund_status?: string }): Promise<void> {
+/**
+ * 退款结果通知（REFUND.SUCCESS 等）。两条来源，均需在此收口：
+ *  1) 本地 refundWechatOrder 主动退款 → 状态已同步落库，这里幂等补记原文即可。
+ *  2) 商户在微信商户后台/客服直接退款 → 本地订单仍是 paid/applied，从未走过 revokeOrderGrant。
+ *     必须在这里补齐权益回收 + 置 refunded，否则「钱退了、权益还在」（开卖即资损口）。
+ * 幂等：outTradeNo advisory lock（与 refundWechatOrder 同锁串行化）+ refundedAt 短路；
+ * 仅对 refund_status==='SUCCESS' 且全额退款回收权益，部分退款/金额不符不自动撤权益、留人工。
+ */
+export async function markRefundNotified(decoded: {
+  out_trade_no?: string; refund_status?: string; refund_id?: string; out_refund_no?: string;
+  amount?: { refund?: number; total?: number; payer_refund?: number };
+}): Promise<void> {
   if (!decoded.out_trade_no) return;
-  await prisma.paymentOrder.updateMany({
-    where: { outTradeNo: decoded.out_trade_no, status: 'refunded' },
-    data: { rawNotifyJson: decoded as Prisma.InputJsonValue },
-  }).catch(() => {});
+  const outTradeNo = decoded.out_trade_no;
+  const success = (decoded.refund_status ?? '').toUpperCase() === 'SUCCESS';
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outTradeNo}))`;
+    const cur = await tx.paymentOrder.findUnique({ where: { outTradeNo } });
+    if (!cur) return;
+    // 已是退款终态（本地主动退款已处理，或此前回调已回收）：仅幂等补记原文。
+    if (cur.refundedAt || cur.status === 'refunded') {
+      await tx.paymentOrder.update({ where: { outTradeNo }, data: { rawNotifyJson: decoded as Prisma.InputJsonValue } });
+      return;
+    }
+    // 非成功态（CLOSED/ABNORMAL 等）：不动权益，只记原文。
+    if (!success) {
+      await tx.paymentOrder.update({ where: { outTradeNo }, data: { rawNotifyJson: decoded as Prisma.InputJsonValue } });
+      return;
+    }
+    // 金额校验：仅全额退款自动回收；部分退款或金额不符 → 记原文 + 审计告警，交人工，绝不误撤。
+    const refundAmt = decoded.amount?.refund;
+    if (typeof refundAmt === 'number' && refundAmt !== cur.amount) {
+      await tx.paymentOrder.update({ where: { outTradeNo }, data: { rawNotifyJson: decoded as Prisma.InputJsonValue } });
+      await tx.auditLog.create({
+        data: { tenantId: cur.tenantId, userId: cur.userId, action: 'user.pay.refund.partial_unhandled',
+          payloadJson: { outTradeNo, refundAmt, orderAmount: cur.amount, item: snapshotItemName(cur) } },
+      }).catch(() => {});
+      return;
+    }
+    // 商户后台退款成功、本地尚未回收：撤权益（仅 appliedAt 已发放的单）+ 置 refunded。
+    if (cur.appliedAt) await revokeOrderGrant(cur, tx);
+    await tx.paymentOrder.update({
+      where: { outTradeNo },
+      data: {
+        status: 'refunded',
+        refundId: decoded.refund_id ?? decoded.out_refund_no ?? null,
+        refundedAt: new Date(),
+        refundReason: '商户后台退款（回调触发）',
+        rawNotifyJson: decoded as Prisma.InputJsonValue,
+      },
+    });
+    await tx.auditLog.create({
+      data: { tenantId: cur.tenantId, userId: cur.userId, action: 'user.pay.refund.notify_revoked',
+        payloadJson: { outTradeNo, refundId: decoded.refund_id ?? null, amount: cur.amount, item: snapshotItemName(cur), source: 'merchant_backend' } },
+    }).catch(() => {});
+  });
 }

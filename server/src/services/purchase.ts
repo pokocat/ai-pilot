@@ -118,6 +118,12 @@ export async function applySkuGrant(
     });
   }
   // 备注型 0 额流水（订单流水页复用 CreditLedger，不加新端点）。
+  // 必须持 credit advisory lock（与 credits.ts appendCreditDelta / lockCreditAccount 同锁同命名空间 `credit:`）：
+  // 这条流水 read last.balance + create 若不加锁，会与并发 chargeCredits 竞态——扣费先读到 balance=B 尚未提交、
+  // 本处也读到陈旧 B 后写 balance=B/delta=0，等扣费提交后最新行仍是 B，冲掉扣减、破坏 Σdelta==balance 不变式。
+  // 上面 storage 分支拿的是 `storage:` 锁（不同命名空间，保护不了 credit 写），故此处单独补 `credit:` 锁；
+  // 与外层 markPaidAndApply 的 outTradeNo 锁彼此独立，同一事务内叠加安全。
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`credit:${user.id}`}))`;
   const last = await tx.creditLedger.findFirst({ where: { userId: user.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
   await tx.creditLedger.create({
     data: { tenantId: user.tenantId, userId: user.id, delta: 0, reason: opts.reason, balance: last?.balance ?? 0 },

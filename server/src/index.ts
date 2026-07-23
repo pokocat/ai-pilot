@@ -1,8 +1,40 @@
 import { env } from './env.js';
+import { prisma } from './db.js';
 import { buildApp } from './app.js';
-import { startScheduler } from './services/scheduler.js';
+import { startScheduler, stopScheduler } from './services/scheduler.js';
 
 const app = await buildApp({ logger: true });
+
+// 全局错误兜底：未捕获的 rejection/exception 至少落 error 级日志（供告警），不静默吞掉、也不轻易退出
+// （避免单个偶发异常误杀整个进程；真正致命的 uncaughtException 由 Node 决定，这里只保证有记录）。
+process.on('unhandledRejection', (reason) => {
+  app.log.error({ err: reason }, '[fatal] unhandledRejection（未处理的 Promise 拒绝）');
+});
+process.on('uncaughtException', (err) => {
+  app.log.error({ err }, '[fatal] uncaughtException（未捕获异常）');
+});
+
+// 优雅停机：systemd/部署重启发 SIGTERM 时，先停定时器 → app.close()（触发既有 onClose 关 Chromium、
+// 排空在途请求）→ 断开 DB，再退出。避免硬杀掐断在途 SSE、漏 Chromium 清理、漏结算预留。
+let shuttingDown = false;
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  app.log.info(`[shutdown] 收到 ${signal}，开始优雅停机…`);
+  try {
+    stopScheduler();
+    await app.close(); // 停止接新请求 + 排空在途 + 触发 onClose（关 Chromium 等）
+    await prisma.$disconnect();
+    app.log.info('[shutdown] 完成，退出。');
+    process.exit(0);
+  } catch (err) {
+    app.log.error({ err }, '[shutdown] 优雅停机出错，强制退出。');
+    process.exit(1);
+  }
+}
+for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(sig, () => { void gracefulShutdown(sig); });
+}
 
 try {
   await app.listen({ port: env.port, host: '0.0.0.0' });

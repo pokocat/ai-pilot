@@ -44,6 +44,18 @@ function aiUnavailable(err: unknown): Error {
   );
 }
 
+// 密钥解密失败（APP_ENCRYPTION_KEY 轮换错/未配但库内密文）是**配置故障**，不是「未配置」。
+// 生产（AI_FALLBACK_MOCK=false）下必须抛 AI_UNAVAILABLE，而不是让下游 isRealKey('')=false 静默降级 mock
+// ——否则全站悄悄返回 mock 模板、零报错、trace 无记录，且 AI_FALLBACK_MOCK=false 也挡不住（走的是
+// 「无 live provider」正常分支不经 catch）。见售卖前体检 P1。测试/显式允许 mock 的环境不拦。
+async function assertKeyHealthy(): Promise<void> {
+  if (env.aiFallbackMock || isAiTestMode()) return;
+  const cfg = await getAiConfig();
+  if (cfg.keyDecryptFailed) {
+    throw aiUnavailable(Object.assign(new Error('模型密钥解密失败'), { code: 'AI_KEY_DECRYPT_FAILED' }));
+  }
+}
+
 // 把「产出 + 真实 token + 来源」打包，便于在输出审核/缓存前统一记账。
 // toolCalls/iterations：启用技能的工具调用循环才有，供可观测 trace 记录。
 type Sourced<T> = { result: T; usage: Usage; provider: string; model: string; toolCalls?: number; iterations?: number };
@@ -59,8 +71,12 @@ function withAsks(reply: ChatReply): ChatReply {
   return asks ? { ...reply, text, asks } : { ...reply, text };
 }
 
+// 只匹配「模型把自己当代码助手、自述找不到项目/工作区上下文」的串味输出。
+// 注意：不得含 README/package.json/IDE/workspace/repository/代码库 等宽泛技术名词——
+// 面向 SaaS / 开发者工具类客户的正当战略报告会自然出现这些词，早期版本因此把真报告误判串味、
+// 静默换成 mock 废模板（见售卖前体检 P1）。这里只保留模型自述缺失项目上下文的明确短语 + Codex 自称。
 const ENGINEERING_CONTEXT_LEAK =
-  /(当前工作区|工作区中未发现|Git\s*仓库|代码仓库|代码项目|代码库|本地仓库|缺少[^。；\n]*(项目文档|业务数据|战略输入材料)|未发现[^。；\n]*(项目文档|业务文档|业务数据|战略规划材料)|上传[^。；\n]*工作区|README|package\.json|Codex|IDE|文件系统|workspace|repository|codebase)/i;
+  /(当前工作区|工作区中未发现|缺少[^。；\n]*(项目文档|业务数据|战略输入材料)|未发现[^。；\n]*(项目文档|业务文档|业务数据|战略规划材料)|上传[^。；\n]*工作区|Codex)/i;
 
 function hasEngineeringContextLeak(d: Deliverable): boolean {
   const text = [d.title, d.meta, deliverableText(d)].filter(Boolean).join('\n');
@@ -233,6 +249,7 @@ function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string 
 }
 
 export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Promise<{ result: Deliverable; usage: Usage }> {
+  await assertKeyHealthy();
   if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
@@ -293,6 +310,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
 }
 
 export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { inputModerated?: boolean }): Promise<{ result: ChatReply; usage: Usage }> {
+  await assertKeyHealthy();
   if (!opts?.inputModerated && !(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
@@ -413,6 +431,7 @@ async function* tracedChatProviderStream(
  * 若当前路径暂不支持原生流（Dify、工具调用循环、mock、兼容网关不支持 stream），退回完整结果后分块，保证可用。
  */
 export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): AsyncGenerator<ChatStreamEvent> {
+  await assertKeyHealthy();
   if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
@@ -473,6 +492,7 @@ export type AdaptiveResult =
  * 仅全局 openai 与 mock 支持「自适应」；claude / per-agent runtime 暂回退为对话（避免误出空报告）。
  */
 export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promise<AdaptiveResult> {
+  await assertKeyHealthy();
   if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
   }
