@@ -18,7 +18,11 @@ function blockWords(): string[] {
 
 export type ModerationVerdict = { pass: boolean; provider: string; detail?: Record<string, unknown> };
 /** P1-B5：审核上下文——沙盒/评测跳过，并把租户/用户/会话写入日志便于追溯。 */
-export interface ModerateOpts { sandbox?: boolean; tenantId?: string | null; userId?: string | null; sessionId?: string | null; }
+export interface ModerateOpts { sandbox?: boolean; tenantId?: string | null; userId?: string | null; sessionId?: string | null;
+  // 强制 fail-closed：审核服务不可达时拦截而非放行（不看 MODERATION_FAIL_OPEN）。
+  // 输出侧审核默认 fail-closed（合规：AI 产出宁可拦错也不放过）；输入侧沿用 MODERATION_FAIL_OPEN。
+  failClosed?: boolean;
+}
 
 function moderationProvider(): 'keyword' | 'http' {
   return (process.env.MODERATION_PROVIDER ?? 'keyword') === 'http' ? 'http' : 'keyword';
@@ -42,7 +46,7 @@ function keywordCheck(text: string): ModerationVerdict {
 
 // 外部合规审核服务（脚手架）：POST { text } → 期望 { pass: boolean, label?, score? }。
 // 不同服务商字段不一，这里给出通用约定，接入时按需改 body/响应解析。
-async function httpCheck(text: string): Promise<ModerationVerdict> {
+async function httpCheck(text: string, failClosed = false): Promise<ModerationVerdict> {
   const url = (process.env.MODERATION_API_URL ?? '').trim();
   const key = (process.env.MODERATION_API_KEY ?? '').trim();
   if (!url) return keywordCheck(text); // 未配地址 → 退回关键词
@@ -63,8 +67,9 @@ async function httpCheck(text: string): Promise<ModerationVerdict> {
     return { pass, provider: 'http', detail: { label: data.label, score: data.score } };
   } catch (err) {
     console.error('[moderation] http provider 失败：', (err as Error).message);
-    // 审核服务抖动：按 fail-open 策略决定，并记下来源便于排查。
-    return { pass: failOpen(), provider: 'http', detail: { error: (err as Error).message, failOpen: failOpen() } };
+    // 审核服务抖动：failClosed 强制拦截（输出侧合规）；否则按全局 fail-open 策略。记下来源便于排查。
+    const pass = failClosed ? false : failOpen();
+    return { pass, provider: 'http', detail: { error: (err as Error).message, failClosed, failOpen: failOpen() } };
   } finally {
     clearTimeout(timer);
   }
@@ -78,7 +83,9 @@ export async function moderate(refType: 'input' | 'output', text: string, opts?:
   if (!env.moderationEnabled) return true;
   // P1-B5：沙盒/评测不审核、不写日志——避免调教中途被拦，且不污染合规记录。
   if (opts?.sandbox) return true;
-  const verdict = moderationProvider() === 'http' ? await httpCheck(text) : keywordCheck(text);
+  // 输出侧默认 fail-closed（合规硬门槛：AI 产出宁拦错不放过）；输入侧沿用全局 MODERATION_FAIL_OPEN。
+  const failClosed = opts?.failClosed ?? (refType === 'output');
+  const verdict = moderationProvider() === 'http' ? await httpCheck(text, failClosed) : keywordCheck(text);
   await prisma.moderationLog
     .create({
       data: {

@@ -92,6 +92,15 @@ function sanitizeDeliverable(ctx: GenContext, d: Deliverable): Deliverable {
   return { ...mockDeliverable(ctx), degraded: true };
 }
 
+// 输出侧内容审核（合规硬门槛）：AI 产出在返回/持久化前审一遍，命中即抛 MODERATION_BLOCK。
+// 输出侧默认 fail-closed（moderation.moderate 对 refType='output' 的约定）——审核服务抖动时宁拦不放。
+// 输入侧审核在 7/4 流式化提交中被移除后，输出侧一直缺位；这里重新接回（见售卖前体检 P0/合规）。
+async function moderateOutputOrThrow(text: string, ctx: GenContext, meta?: UsageMeta): Promise<void> {
+  if (!(await moderate('output', text, modOpts(ctx, meta)))) {
+    throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
+  }
+}
+
 // P1-B5：审核上下文——沙盒/评测跳过审核，并把租户/用户/会话写入 moderation_log 便于追溯。
 function modOpts(ctx: GenContext, meta?: UsageMeta) {
   return { sandbox: meta?.sandbox, tenantId: meta?.tenantId ?? ctx.tenantId ?? null, userId: meta?.userId ?? ctx.userId ?? null, sessionId: meta?.sessionId ?? null };
@@ -265,6 +274,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
       sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: '' };
     }
     sourced.result = sanitizeDeliverable(ctx, sourced.result);
+    await moderateOutputOrThrow(deliverableText(sourced.result), ctx, meta);
     await maybeRecord(sourced, 'deliverable', ctx, meta);
     return { result: sourced.result, usage: sourced.usage };
   }
@@ -304,6 +314,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   }
 
   sourced.result = sanitizeDeliverable(ctx, sourced.result);
+  await moderateOutputOrThrow(deliverableText(sourced.result), ctx, meta);
   await maybeRecord(sourced, 'deliverable', ctx, meta);
   if (!tools.length) await cacheSet(ck, sourced.result, CACHE_TTL);
   return { result: sourced.result, usage: sourced.usage };
@@ -326,6 +337,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
+    await moderateOutputOrThrow(s.result.text, ctx, meta);
     return { result: withAsks(s.result), usage: s.usage };
   }
 
@@ -355,6 +367,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
     if (!env.aiFallbackMock) throw aiUnavailable(err);
   }
   if (chatResult) {
+    await moderateOutputOrThrow(chatResult.result.text, ctx, meta);
     return { result: withAsks(chatResult.result), usage: chatResult.usage };
   }
   return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
@@ -427,8 +440,14 @@ async function* tracedChatProviderStream(
 }
 
 /**
- * 聊天流式：只在输入侧做审核；合规后优先走 provider 原生 streaming，模型 token/chunk 到达即下发。
- * 若当前路径暂不支持原生流（Dify、工具调用循环、mock、兼容网关不支持 stream），退回完整结果后分块，保证可用。
+ * 聊天流式：输入侧审核 + 密钥健康检查后，优先走 provider 原生 streaming，模型 token/chunk 到达即下发。
+ * 若当前路径暂不支持原生流（Dify、工具调用循环、mock、兼容网关不支持 stream），退回 chatComplete 完整结果后分块。
+ *
+ * 【输出审核的合规边界】原生流式是 token 逐个已下发、无法事后撤回，故不在此做「拦截式」输出审核（否则要缓冲
+ * 整段、丧失流式意义）。合规覆盖如下：① 报告/结构化产出（可分享、可持久化的高风险物）在 generateDeliverable
+ * 内 fail-closed 输出审核，命中即不下发；② 非流式对话与流式握手失败的兜底路径走 chatComplete，同样做输出审核；
+ * ③ 输入侧对所有路径审核。若监管要求对「流式对话正文」也做拦截式输出审核，把对话关掉原生流式（走下方 fallback
+ * 的 chatComplete 分块下发）即可让其纳入输出审核——这是一次配置取舍，非代码缺口。
  */
 export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): AsyncGenerator<ChatStreamEvent> {
   await assertKeyHealthy();
