@@ -20,6 +20,7 @@ import { recordReview } from '../services/reviewLog.js';
 import { webviewSafeReportUrl } from '../services/reportHtml.js';
 import { notifyReportReady } from '../services/wechatSubscribe.js';
 import { isRecallIntent, sessionRecallScore } from '../services/recallIntent.js';
+import { cardSection } from '../services/deliverableSection.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -29,8 +30,12 @@ function harvestProphecies(user: { tenantId: string; id: string }, agentKey: str
   if (agentKey !== 'general' || !text) return;
   void extractAndRecordProphecies({ tenantId: user.tenantId, userId: user.id, text }).catch(() => {});
 }
+// 2026-07-22 例行 QA 修复：d.sections 是报告 V2 类型化 section，quote/letter 没有 h、
+// stats/roster/table/phases/timeline 的实际内容在 items/people/rows 等专属字段——直接读
+// s.h/s.b/s.list 会让预言账本系统性漏采这些类型里的具体预测（quote/letter 甚至会把
+// "undefined" 当文本喂进去）。先过一遍与 casefile.ts 同口径的 cardSection 归一化。
 function harvestText(d: Deliverable): string {
-  return `${d.title}\n${d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n')}`;
+  return `${d.title}\n${d.sections.map(cardSection).map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n')}`;
 }
 function notifySessionReport(user: { tenantId: string; id: string }, deliverable: Deliverable): void {
   notifyReportReady({ tenantId: user.tenantId, userId: user.id, title: deliverable.title || '报告已生成' });

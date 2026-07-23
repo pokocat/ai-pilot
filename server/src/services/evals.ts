@@ -9,6 +9,7 @@ import { prisma } from '../db.js';
 import { buildSandboxContext } from './context.js';
 import { generateDeliverable, chatComplete, completeJson } from '../llm/gateway.js';
 import { getAiConfig } from './aiConfig.js';
+import { cardSection } from './deliverableSection.js';
 import type { PreviewTarget } from './agentVersions.js';
 import type { Deliverable, PricingTier, SuggestedTier } from '../../../shared/contracts';
 
@@ -35,9 +36,12 @@ async function reapStaleRuns(agentKey: string): Promise<void> {
     .catch(() => {});
 }
 
+// 2026-07-22 例行 QA 修复：d.sections 是报告 V2 类型化 section，直接读 s.h/s.b/s.list 会让
+// LLM 评委只看到标题（甚至 quote/letter 连标题都没有，评委实际读到的正文是空字符串），score→
+// 定价档位建议因此系统性失真。先过一遍与 casefile.ts 同口径的 cardSection 归一化。
 function deliverableToText(d: Deliverable): string {
   const head = `${d.title}\n`;
-  const body = d.sections.map((s) => `${s.h}\n${s.b ?? ''}${(s.list ?? []).map((x) => `\n- ${x}`).join('')}`).join('\n\n');
+  const body = d.sections.map(cardSection).map((s) => `${s.h}\n${s.b ?? ''}${(s.list ?? []).map((x) => `\n- ${x}`).join('')}`).join('\n\n');
   return `${head}${body}`;
 }
 

@@ -16,6 +16,18 @@ after(async () => {
   await closeApp();
 });
 
+// 用裸 Date#getFullYear/getMonth/getDate（进程本地时区，CI runner 为 UTC）生成日期串，
+// 而 reviewStreak()（services/reviewLog.ts）内部按 Asia/Shanghai 的 dateKey() 匹配——看着和
+// reminders.test.ts 修过的那个 bug（裸本地时区 vs weekdayOf() 上海时区口径不一致）同根同源，
+// 曾作为「强怀疑但未实测证实」记入例行 QA 排查（2026-07-16，PR #42）。
+// 例行 QA（2026-07-18）逐行复核 + 隔离仿真结论：**不是同类 bug，无需改**——
+// reviewStreak() 特意容忍「今天（上海）还没打卡」（游标先探 dateKey(dayStart())，
+// 探不到就退一天再起算，见 reviewLog.ts:98），而 UTC 与 Asia/Shanghai（UTC+8、无夏令时）
+// 之间的日历偏移恒为 0 或 +1 天（上海日历只会等于或领先 UTC 一天，绝不落后），
+// 二者叠加后无论测试落在哪个 UTC 时刻，isoDaysAgo() 生成的连续 N 天序列与 reviewStreak()
+// 实际探到的连续 N 天序列必然完全对齐（已用 clock.ts 直接仿真验证覆盖 UTC 16:00-23:59
+// 整个风险窗口 + 边界时刻，streak 结果稳定为 N，无一例外）。仅在「进程本地时区领先
+// Asia/Shanghai」的部署环境下才可能失配，但 CI/生产固定 UTC，不会发生。
 function isoDaysAgo(n: number): string {
   const d = new Date(Date.now() - n * 86400_000);
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;

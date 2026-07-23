@@ -315,11 +315,17 @@ function typedSectionOf(o: Record<string, unknown>, type: string): DeliverableSe
       return { type: 'matrix', ...headOf(o), ...(xLabels ? { xLabels } : {}), ...(yLabels ? { yLabels } : {}), quads };
     }
     case 'gantt': {
+      // 刻度上限：total 会被 reportHtml.ganttHtml 直接当 Array.from({length:total}) 的数组长度
+      // 用来铺刻度行——LLM 若吐出异常大的 from/to/total（数值本身合法，只是不合理地大），
+      // 会在 Puppeteer 单并发 PDF 渲染队列里产出巨型 HTML 卡住/耗尽内存，拖住排在后面的所有用户
+      // （2026-07-23 例行 QA 发现，schema 层未对刻度设上限，脏数据校验只保证了 from<=to）。
+      // 120 刻度足够覆盖常见「周/旬/月」排期场景（如 120 周≈2.3 年），同 gauge.score 的 clamp 同规格兜底。
+      const MAX_TICK = 120;
       const rows = toRecords(o.rows ?? o.items).map((r) => {
         const label = textOf(r.label ?? r.h ?? r.name);
         if (!label) return null;
-        let from = Math.max(1, Math.round(numOf(r.from ?? r.start) || 1));
-        let to = Math.max(1, Math.round(numOf(r.to ?? r.end) || from));
+        let from = clamp(Math.round(numOf(r.from ?? r.start) || 1), 1, MAX_TICK);
+        let to = clamp(Math.round(numOf(r.to ?? r.end) || from), 1, MAX_TICK);
         if (to < from) { const t = from; from = to; to = t; } // 保证 from <= to
         const toneRaw = textOf(r.tone);
         const tone = TONE_SET.has(toneRaw as DeliverableTone) ? (toneRaw as DeliverableTone) : undefined;
@@ -330,7 +336,7 @@ function typedSectionOf(o: Record<string, unknown>, type: string): DeliverableSe
       const unitRaw = textOf(o.unit);
       const unit = unitRaw === '周' || unitRaw === '旬' || unitRaw === '月' ? unitRaw : undefined;
       const maxTo = rows.reduce((m, r) => Math.max(m, r.to), 1);
-      const total = Math.max(maxTo, Math.round(numOf(o.total))); // total 缺省/过小取最大 to
+      const total = clamp(Math.max(maxTo, Math.round(numOf(o.total))), maxTo, MAX_TICK); // total 缺省/过小取最大 to，过大截顶
       return { type: 'gantt', ...headOf(o), ...(unit ? { unit } : {}), total, rows };
     }
     default:
