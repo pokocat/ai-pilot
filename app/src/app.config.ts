@@ -16,6 +16,7 @@ export default defineAppConfig({
         'brief/index',
         'settings/index',
         'onboarding/index',
+        'legal/index',
       ],
     },
     {

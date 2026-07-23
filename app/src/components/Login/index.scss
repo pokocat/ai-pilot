@@ -52,7 +52,17 @@
 .lg-wechat.off { opacity: .6; }
 .lg-wechat-t { font-size: 16px; font-weight: 600; color: #143726; }
 .lg-switch { display: flex; align-items: center; gap: 4px; margin-top: 20px; font-size: 14px; color: rgba(243,240,230,.82); }
-.lg-agree { margin-top: 18px; font-size: 11px; text-align: center; color: rgba(243,240,230,.42); }
+.lg-agree { font-size: 11px; text-align: left; color: rgba(243,240,230,.58); line-height: 1.5; }
+/* —— 合规：主动勾选同意（替代「登录即同意」被动式） —— */
+.lg-consent { display: flex; align-items: flex-start; gap: 7px; margin-top: 18px; padding: 0 8px; }
+.lg-cbox {
+  flex: 0 0 auto; width: 16px; height: 16px; margin-top: 1px; border-radius: 4px;
+  border: 1px solid rgba(243,240,230,.5); box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+}
+.lg-cbox.on { background: #F4F1E8; border-color: #F4F1E8; }
+.lg-cbox-tick { font-size: 12px; line-height: 1; color: #143726; font-weight: 700; }
+.lg-link { color: rgba(243,240,230,.92); text-decoration: underline; }
 
 /* —— 表单（手机号登录 / 完善资料） —— */
 .lg-form { flex: 1; display: flex; flex-direction: column; justify-content: center; }

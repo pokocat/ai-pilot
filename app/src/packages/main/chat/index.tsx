@@ -1469,6 +1469,8 @@ export default function Chat() {
       {/* 对话流 */}
       <ScrollView scrollY className="chat-log" scrollTop={scrollTop} scrollWithAnimation enhanced showScrollbar={false} onScroll={handleLogScroll}>
         <View className="chat-log-inner">
+        {/* 合规：AI 生成内容显式标识（《标识办法》2025-09-01 强制） */}
+        <View className="chat-ai-note"><Text>内容由 AI 生成，仅供参考</Text></View>
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (

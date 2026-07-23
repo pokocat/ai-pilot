@@ -1,0 +1,9 @@
+.legal {
+  .pad { padding: 16px; }
+  .lgl-updated { display: block; font-size: 12px; color: var(--muted, #8a8578); margin-bottom: 12px; }
+  .lgl-intro { display: block; font-size: 14px; line-height: 1.7; color: var(--ink, #2a2620); margin-bottom: 16px; }
+  .lgl-sec { margin-bottom: 16px; }
+  .lgl-h { display: block; font-size: 15px; font-weight: 600; color: var(--ink, #2a2620); margin-bottom: 6px; }
+  .lgl-p { display: block; font-size: 13px; line-height: 1.75; color: var(--ink-2, #4a453c); margin-bottom: 4px; }
+  .lgl-foot { display: block; font-size: 12px; color: var(--muted, #8a8578); margin: 20px 0 40px; }
+}

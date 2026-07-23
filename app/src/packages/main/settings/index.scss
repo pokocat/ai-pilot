@@ -30,6 +30,12 @@
 .set-rt { flex: 1; font-size: 14.5px; color: var(--ink); }
 .set-rv { font-size: 13px; color: var(--ink-3); font-family: var(--mono, monospace); }
 .set-go { color: var(--ink-3); font-size: 17px; }
+/* 客服入口用 <Button openType="contact">，重置微信 Button 默认样式使其与 set-row 一致 */
+.set-contact-btn {
+  width: 100%; margin: 0; padding: 14px 15px; background: transparent; border: none;
+  line-height: normal; text-align: left; display: flex; align-items: center; border-radius: 0;
+  &::after { border: none; }
+}
 
 .set-logout {
   margin-top: 26px; height: 48px; border-radius: 12px;

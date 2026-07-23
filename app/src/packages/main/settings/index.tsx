@@ -15,8 +15,6 @@ const isWeapp = process.env.TARO_ENV === 'weapp';
 // B8：版本号从 app/package.json 构建期注入（resolveJsonModule），避免与真实发版号脱节。
 const VERSION = `v${pkg.version}`;
 
-const AGREEMENT = '军师为创始人/管理者提供 AI 商业参谋服务。AI 产出仅供参考，重大经营决策请结合专业意见与自身判断；你对账号下的内容与决策负责。我们按约定提供服务并保障可用性。';
-const PRIVACY = '我们仅收集为你提供服务所必需的信息（账号标识、你主动填写的企业档案与对话内容），用于生成与你相关的产出，不向第三方出售。你可随时在「设置」中修改资料，或联系我们删除账号与数据。';
 
 // 设置：个人资料编辑（称呼/公司）+ 关于 + 退出登录。
 export default function Settings() {
@@ -72,8 +70,12 @@ export default function Settings() {
     }
   };
 
-  const showDoc = (title: string, content: string) =>
-    Taro.showModal({ title, content, showCancel: false, confirmText: '我知道了' });
+  const openDoc = (doc: 'agreement' | 'privacy' | 'refund') =>
+    Taro.navigateTo({ url: `/packages/main/legal/index?doc=${doc}` });
+
+  // 非 weapp 环境（H5）无微信客服组件，退回展示联系方式占位。
+  const contactFallback = () =>
+    Taro.showModal({ title: '联系客服', content: '【待补充客服渠道：微信客服 / 客服电话 / 邮箱】', showCancel: false, confirmText: '我知道了' });
 
   const logout = () =>
     Taro.showModal({ title: '退出登录', content: '确定退出当前账号？' }).then((r) => {
@@ -139,14 +141,33 @@ export default function Settings() {
             <Text className="set-rt">当前版本</Text>
             <Text className="set-rv">{VERSION}</Text>
           </View>
-          <View className="set-row" onClick={() => showDoc('用户协议', AGREEMENT)}>
+          <View className="set-row" onClick={() => openDoc('agreement')}>
             <Text className="set-rt">用户协议</Text>
             <Text className="set-go">›</Text>
           </View>
-          <View className="set-row" onClick={() => showDoc('隐私政策', PRIVACY)}>
+          <View className="set-row" onClick={() => openDoc('privacy')}>
             <Text className="set-rt">隐私政策</Text>
             <Text className="set-go">›</Text>
           </View>
+          <View className="set-row" onClick={() => openDoc('refund')}>
+            <Text className="set-rt">退款政策</Text>
+            <Text className="set-go">›</Text>
+          </View>
+        </View>
+
+        <Text className="set-sec">帮助与客服</Text>
+        <View className="set-card">
+          {isWeapp ? (
+            <Button className="set-row set-contact-btn" openType="contact">
+              <Text className="set-rt">联系客服</Text>
+              <Text className="set-go">›</Text>
+            </Button>
+          ) : (
+            <View className="set-row" onClick={contactFallback}>
+              <Text className="set-rt">联系客服</Text>
+              <Text className="set-go">›</Text>
+            </View>
+          )}
         </View>
 
         <View className="set-logout" onClick={logout}>

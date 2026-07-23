@@ -6,6 +6,8 @@ import { env } from '../env.js';
 import { ossConfigured, ossPutHtml } from './ossUpload.js';
 import type { Deliverable, DeliverableSection, DeliverableTableCell } from '../llm/schema.js';
 
+// DEFAULT_TRUST 是免责语；页脚另加了显式「本内容由人工智能生成」标识（《标识办法》2025-09-01 强制显式标识）。
+// TODO(合规-隐式标识)：导出 PDF 时在文件元数据写入服务者名称/编码 + 内容编号（隐式水印），当前仅有显式标识。
 const DEFAULT_TRUST = '本报告为战略参考,重大决策请结合专业意见与一手数据。';
 
 const CN = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖', '拾'];
@@ -463,7 +465,7 @@ ${body}
 <footer>
 <div class="fmark"><div class="seal red" style="width:64px;height:64px"><span style="font-size:17px">参</span><span style="font-size:17px">谋</span><span style="font-size:17px">之</span><span style="font-size:17px">印</span></div></div>
 <div class="forg">军师参谋部</div>
-<div class="fsmall">${esc(trust)}<br>军师 · 网页版报告 · 密件 · 仅呈老板亲启</div>
+<div class="fsmall"><strong>本内容由人工智能生成</strong><br>${esc(trust)}<br>军师 · 网页版报告 · 密件 · 仅呈老板亲启</div>
 </footer>
 </div>
 </body></html>`;

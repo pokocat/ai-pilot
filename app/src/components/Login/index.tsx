@@ -35,6 +35,7 @@ export default function Login({ open, onLoggedIn }: Props) {
   const [codeSending, setCodeSending] = useState(false);
   const [loading, setLoading] = useState(false);
   const [wechatLoading, setWechatLoading] = useState(false);
+  const [agreed, setAgreed] = useState(false); // 合规：登录前必须主动勾选同意协议/隐私
 
   // 完善资料（微信登录后）
   const [avatarLocal, setAvatarLocal] = useState('');
@@ -78,6 +79,15 @@ export default function Login({ open, onLoggedIn }: Props) {
   const phoneOk = phoneRe.test(phone);
   const codeOk = codeRe.test(code);
   const busy = loading || wechatLoading || saving;
+
+  const openDoc = (doc: 'agreement' | 'privacy') =>
+    Taro.navigateTo({ url: `/packages/main/legal/index?doc=${doc}` });
+  // 合规门槛：登录/注册前必须已勾选同意。未勾选则提示并阻断（把「登录即同意」的被动式改为主动勾选）。
+  const ensureAgreed = (): boolean => {
+    if (agreed) return true;
+    Taro.showToast({ title: '请先阅读并勾选同意《用户协议》与《隐私政策》', icon: 'none' });
+    return false;
+  };
 
   const getWechatCode = () => new Promise<string>((resolve, reject) => {
     Taro.login({
@@ -161,6 +171,7 @@ export default function Login({ open, onLoggedIn }: Props) {
 
   const submitWechat = async () => {
     if (busy) return;
+    if (!ensureAgreed()) return;
     setWechatLoading(true);
     try {
       const wxCode = await getWechatCode();
@@ -191,6 +202,7 @@ export default function Login({ open, onLoggedIn }: Props) {
       return;
     }
     if (busy) return;
+    if (!ensureAgreed()) return;
     setLoading(true);
     try {
       const loginCode = await getWechatCode().catch(() => undefined); // 关联 openid，拿不到也不阻断登录
@@ -227,6 +239,7 @@ export default function Login({ open, onLoggedIn }: Props) {
     if (!phoneOk) { Taro.showToast({ title: '请输入正确手机号', icon: 'none' }); return; }
     if (!codeOk) { Taro.showToast({ title: '请输入短信验证码', icon: 'none' }); return; }
     if (busy) return;
+    if (!ensureAgreed()) return;
     setLoading(true);
     try {
       const r = await api.login(phone, undefined, code);
@@ -360,7 +373,17 @@ export default function Login({ open, onLoggedIn }: Props) {
               <Text>手机号登录</Text>
               <Icon name="arrow" size={13} color="rgba(243,240,230,.82)" />
             </View>
-            <Text className="lg-agree">登录即同意《用户协议》与《隐私政策》</Text>
+            <View className="lg-consent">
+              <View className={`lg-cbox ${agreed ? 'on' : ''}`} onClick={() => setAgreed((v) => !v)}>
+                {agreed ? <Text className="lg-cbox-tick">✓</Text> : null}
+              </View>
+              <Text className="lg-agree">
+                我已阅读并同意
+                <Text className="lg-link" onClick={() => openDoc('agreement')}>《用户协议》</Text>
+                与
+                <Text className="lg-link" onClick={() => openDoc('privacy')}>《隐私政策》</Text>
+              </Text>
+            </View>
           </View>
         </View>
       )}
@@ -402,7 +425,17 @@ export default function Login({ open, onLoggedIn }: Props) {
               <Icon name="wechat" size={15} color="rgba(243,240,230,.82)" />
               <Text> 返回微信登录</Text>
             </View>
-            <Text className="lg-agree">登录即同意《用户协议》与《隐私政策》</Text>
+            <View className="lg-consent">
+              <View className={`lg-cbox ${agreed ? 'on' : ''}`} onClick={() => setAgreed((v) => !v)}>
+                {agreed ? <Text className="lg-cbox-tick">✓</Text> : null}
+              </View>
+              <Text className="lg-agree">
+                我已阅读并同意
+                <Text className="lg-link" onClick={() => openDoc('agreement')}>《用户协议》</Text>
+                与
+                <Text className="lg-link" onClick={() => openDoc('privacy')}>《隐私政策》</Text>
+              </Text>
+            </View>
           </View>
         </View>
       )}

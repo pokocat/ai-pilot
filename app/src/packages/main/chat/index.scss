@@ -27,6 +27,8 @@
 
 .chat-log { flex: 1; min-height: 0; overflow: hidden; }
 .chat-log-inner { min-height: 100%; padding: 16px; box-sizing: border-box; }
+.chat-ai-note { text-align: center; margin: 2px 0 12px; }
+.chat-ai-note Text, .chat-ai-note text { font-size: 10.5px; color: var(--ink-3, #9a958a); letter-spacing: .3px; }
 
 .jump-latest {
   position: absolute;
