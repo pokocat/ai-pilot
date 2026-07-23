@@ -9,7 +9,8 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { acceptDeliverable, refreshDossier, ordersOf, today, type DossierOrder } from '../../../services/dossier';
 import { api, type ReportDetail, type ReportVersionContent, type ReportDiff } from '../../../services/api';
-import { makeReportShareImage, presentReportShareImage } from '../../../services/reportShareCard';
+import { makeReportShareImage } from '../../../services/reportShareCard';
+import SharePreview from '../../../components/SharePreview';
 import { switchTo } from '../../../services/nav';
 import { REVIEW_TIME } from '../../../data/constants';
 import './index.scss';
@@ -55,6 +56,8 @@ export default function Report() {
   const [syncing, setSyncing] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
   const [syncOrders, setSyncOrders] = useState<DossierOrder[]>([]);
+  // D-3-4：分享图预览层（出图后先给主公过目，再决定发好友 / 存相册）。
+  const [sharePath, setSharePath] = useState('');
 
   const loadDetail = () => {
     if (!id) { setFailed(true); return; }
@@ -120,7 +123,7 @@ export default function Report() {
     try {
       const path = await makeReportShareImage('rp-share-canvas', c.content);
       Taro.hideLoading();
-      presentReportShareImage(path);
+      setSharePath(path);
     } catch {
       Taro.hideLoading();
       Taro.showToast({ title: '生成分享图失败，请重试', icon: 'none' });
@@ -255,6 +258,9 @@ export default function Report() {
 
       {/* D-3-4 隐藏出图画布（屏外，仅点分享图时绘制导出） */}
       <Canvas type="2d" id="rp-share-canvas" className="rp-share-canvas" style={{ width: '600px', height: '900px' }} />
+
+      {/* D-3-4 分享图预览层 */}
+      {sharePath ? <SharePreview path={sharePath} onClose={() => setSharePath('')} /> : null}
 
       {/* 军令同步屏（半屏）——迁入 Sheet 基座（五要素统一） */}
       <Sheet

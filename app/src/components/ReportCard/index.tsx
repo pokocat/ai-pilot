@@ -5,7 +5,8 @@ import Icon from '../Icon';
 import MarkdownText from '../MarkdownText';
 import { useStore } from '../../hooks/useStore';
 import type { Deliverable, Section } from '../../services/api';
-import { makeReportShareImage, shareReportImageToFriend, saveReportImageToAlbum } from '../../services/reportShareCard';
+import { makeReportShareImage } from '../../services/reportShareCard';
+import SharePreview from '../SharePreview';
 import './index.scss';
 
 // 标题里的行内标记剥掉（正文/列表走 MarkdownText 原生渲染，标题是普通 Text 会露原始符号）。
@@ -59,8 +60,10 @@ export default function ReportCard({ data, animate = false, streaming = false, s
   const accent = s.color().vars['--accent'];
   // D-3-4：每张卡一块隐藏 canvas，用于分享图出图（唯一 id 防列表内串扰）。
   const shareCanvasId = useRef(`rcshare-${(shareSeq += 1)}`).current;
+  // D-3-4：出图后先给主公过目（预览层），再决定发好友 / 存相册。
+  const [sharePath, setSharePath] = useState('');
 
-  // 分享图 = 品牌分享图（标题+核心结论+落款，无全文/敏感数字）。出图后按已选动作直接发好友 / 存相册。
+  // 分享图 = 品牌分享图（封面+亮点概要+金句+脱敏结论+落款，无全文/敏感数字）。出图后开预览层，由主公过目再定去向。
   const makeShareImage = async (): Promise<string | null> => {
     Taro.showLoading({ title: '生成分享图…' });
     try {
@@ -74,19 +77,18 @@ export default function ReportCard({ data, animate = false, streaming = false, s
     }
   };
 
-  // 「分享」→ 动作选单。weapp：图片(发好友/存相册) + PDF(发好友/查看保存) + 复制全文；
+  // 「分享」→ 动作选单。weapp：分享图片(出图→预览层，内自持发好友/存相册) + PDF(发好友/查看保存) + 复制全文；
   // H5：图片/发文件不可用，选单收敛为「下载 PDF（开新窗）」+「复制全文」。
   const openShareMenu = async () => {
     if (IS_WEAPP) {
       try {
         const { tapIndex } = await Taro.showActionSheet({
-          itemList: ['发送图片给好友', '保存图片到相册', 'PDF 发给好友', '查看 / 保存 PDF', '复制全文'],
+          itemList: ['分享图片', 'PDF 发给好友', '查看 / 保存 PDF', '复制全文'],
         });
-        if (tapIndex === 0) { const p = await makeShareImage(); if (p) shareReportImageToFriend(p); return; }
-        if (tapIndex === 1) { const p = await makeShareImage(); if (p) saveReportImageToAlbum(p); return; }
-        if (tapIndex === 2) { onShareMenu?.('pdfFriend'); return; }
-        if (tapIndex === 3) { onShareMenu?.('pdfView'); return; }
-        if (tapIndex === 4) { onShareMenu?.('copy'); return; }
+        if (tapIndex === 0) { const p = await makeShareImage(); if (p) setSharePath(p); return; }
+        if (tapIndex === 1) { onShareMenu?.('pdfFriend'); return; }
+        if (tapIndex === 2) { onShareMenu?.('pdfView'); return; }
+        if (tapIndex === 3) { onShareMenu?.('copy'); return; }
       } catch { /* 用户取消 */ }
     } else {
       try {
@@ -231,6 +233,8 @@ export default function ReportCard({ data, animate = false, streaming = false, s
           <Canvas type="2d" id={shareCanvasId} className="rc-share-canvas" style={{ width: '600px', height: '900px' }} />
         </>
       )}
+      {/* D-3-4 分享图预览层 */}
+      {sharePath ? <SharePreview path={sharePath} onClose={() => setSharePath('')} /> : null}
     </View>
   );
 }
