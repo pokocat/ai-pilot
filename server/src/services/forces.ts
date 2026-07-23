@@ -5,6 +5,8 @@ import { prisma } from '../db.js';
 import { now } from './clock.js';
 import { structured } from '../llm/gateway.js';
 import { isAiTestMode } from '../env.js';
+import { loadChart } from './paipan.js';
+import type { ChartView } from './paipan.js';
 import type { BattleForce, ForceLevel } from '../../../shared/contracts';
 
 // level → strength（纯代码映射，对齐效果图 75/45/35；可按行业基准/回填趋势 ±5 微调，仍不让模型自算）。
@@ -32,7 +34,7 @@ const ForcesSchema = z.object({
 });
 
 const FORCES_SYS = `你是「军师参谋部」的战略研判官。基于客户档案与案卷判断，对三势各给一句研判：
-- 天势(sky)：行业与外部大势；市势(market)：竞争与需求；人势(people)：团队与承载。
+- 天势(sky)：行业与外部大势（若给了命盘天时可参，但以行业实势为主，不得堆砌命理术语）；市势(market)：竞争与需求；人势(people)：团队与承载。
 每势给：level(strong/mid/weak)、conclusion(≤8字结论)、tactic(≤8字打法)、tacticTone(ok/warn/danger)、note(≤20字说明)。
 只输出 JSON：{"forces":[{"kind":"sky","level":"strong","conclusion":"…","tactic":"…","tacticTone":"ok","note":"…"}, …3条]}。禁止输出百分比或多余文字。`;
 
@@ -72,7 +74,49 @@ function applyStrength(forces: { kind: BattleForce['kind']; level: ForceLevel; c
 }
 
 /**
- * 生成并落库结构化三势。输入=战略档案 + 最新案卷判断 + 行业。
+ * 命盘 → 天势研判上下文（压缩两行，供 LLM 参考；strength 仍由代码映射，禁 AI 自算）。
+ * 只取格局 + 日主强弱 + 当年逐月攻守概览（拐点月 / 进攻月），不整段贴 chartBriefing。
+ */
+function chartContextLines(chart: ChartView): string[] {
+  const dm = chart.dayMaster;
+  const byPhase = (k: '进攻' | '防守') =>
+    chart.monthlyOutlook.months.filter((m) => m.phase === k).map((m) => `${m.month}`).join('、') || '无';
+  const turning = chart.monthlyOutlook.months.filter((m) => m.turning).map((m) => `${m.month}`).join('、') || '无';
+  return [
+    `命盘：${chart.pattern.name}·${dm.strength}（日主${dm.gan}${dm.element}）`,
+    `${chart.monthlyOutlook.year}年逐月攻守：拐点月 ${turning}；进攻月 ${byPhase('进攻')}；防守月 ${byPhase('防守')}`,
+  ];
+}
+
+/**
+ * 组装三势研判上下文（战略档案 + 案卷判断 + 行业 + 命盘天时）。
+ * 命理开关：believe=false（用户不用命理视角）→ 不查不注入命盘。抽出便于单测。
+ */
+export async function buildForcesContext(args: { tenantId: string; userId: string }): Promise<string> {
+  const { tenantId, userId } = args;
+  const [sp, cf, tenant, profile] = await Promise.all([
+    prisma.strategicProfile.findUnique({ where: { userId }, select: { mainContradiction: true, positioning: true, stage: true, track: true } }),
+    prisma.casefile.findFirst({ where: { userId, status: 'active' }, orderBy: { updatedAt: 'desc' }, select: { judgment: true, title: true } }),
+    prisma.tenant.findUnique({ where: { id: tenantId }, select: { industry: true } }),
+    prisma.profile.findFirst({ where: { tenantId }, orderBy: { updatedAt: 'desc' }, select: { extraJson: true } }),
+  ]);
+  // 业务现状（决定是否有可研判素材）：命盘只作天势补充，不能独自救活零档案（P0-3 零档案不臆造）。
+  const baseLines = [
+    tenant?.industry ? `行业：${tenant.industry}` : '',
+    sp?.mainContradiction ? `主要矛盾：${sp.mainContradiction}` : '',
+    sp?.positioning ? `战略定位：${sp.positioning}` : '',
+    sp?.stage ? `经营阶段：${sp.stage}` : '',
+    cf?.judgment ? `当前案卷判断：${cf.judgment}` : '',
+  ].filter(Boolean);
+  if (!baseLines.length) return '';
+  // 命理开关与 dossier gather 同口径：extraJson.bazi.believe 未显式 false 即视为使用命理视角。
+  const believe = ((profile?.extraJson as { bazi?: { believe?: boolean } } | null)?.bazi?.believe) !== false;
+  const chart = believe ? await loadChart(userId).catch(() => null) : null;
+  return [...baseLines, ...(chart ? chartContextLines(chart) : [])].join('\n');
+}
+
+/**
+ * 生成并落库结构化三势。输入=战略档案 + 最新案卷判断 + 行业 + 命盘天时。
  * P0-3（服务端）：拒绝捏造——
  *  - 零档案（ctxLines 为空）：不调 LLM、不落库，返回 null（前端走空态引导卡）。
  *  - LLM 失败：生产环境返回 null 不落库（绝不把 DEFAULT_FORCES 捏造结论写进档案）；
@@ -80,18 +124,7 @@ function applyStrength(forces: { kind: BattleForce['kind']; level: ForceLevel; c
  */
 export async function generateForces(args: { tenantId: string; userId: string }): Promise<BattleForce[] | null> {
   const { tenantId, userId } = args;
-  const [sp, cf, tenant] = await Promise.all([
-    prisma.strategicProfile.findUnique({ where: { userId }, select: { mainContradiction: true, positioning: true, stage: true, track: true } }),
-    prisma.casefile.findFirst({ where: { userId, status: 'active' }, orderBy: { updatedAt: 'desc' }, select: { judgment: true, title: true } }),
-    prisma.tenant.findUnique({ where: { id: tenantId }, select: { industry: true } }),
-  ]);
-  const ctxLines = [
-    tenant?.industry ? `行业：${tenant.industry}` : '',
-    sp?.mainContradiction ? `主要矛盾：${sp.mainContradiction}` : '',
-    sp?.positioning ? `战略定位：${sp.positioning}` : '',
-    sp?.stage ? `经营阶段：${sp.stage}` : '',
-    cf?.judgment ? `当前案卷判断：${cf.judgment}` : '',
-  ].filter(Boolean).join('\n');
+  const ctxLines = await buildForcesContext(args);
   // 零档案：没有任何可研判的现状 → 不臆造三势（不调 LLM、不落库）。
   if (!ctxLines) return null;
 

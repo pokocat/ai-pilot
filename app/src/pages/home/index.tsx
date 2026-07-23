@@ -9,7 +9,7 @@ import Sheet from '../../components/Sheet';
 import CoachMarks from '../../components/CoachMarks';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type BattleForce, type ForceKind } from '../../services/api';
+import { api, type BattleForce, type ForceKind, type ChartSummary } from '../../services/api';
 import { MODULE_MARKET } from '../../data/operatingSystem';
 import { refreshDossier, type Dossier } from '../../services/dossier';
 import { navTo, switchTo } from '../../services/nav';
@@ -53,6 +53,32 @@ function forceRead(f: BattleForce): { label: string; title: string; body: string
   const label = `${FORCE_KIND_LABEL[f.kind]} · ${FORCE_LEVEL_LABEL[f.level]}`;
   return { label, title: `${f.conclusion}，${f.tactic}`, body: f.note, tactic: `打法：${f.tactic}` };
 }
+// 天势接命盘（三势·天势）：攻守词表 —— phase 短古风词，克制不抢戏。
+const PHASE_WORD: Record<string, string> = { 进攻: '攻', 防守: '守', 平稳: '稳中蓄力' };
+// 当前公历月的攻守（monthlyOutlook 按 month 匹配；跨年也只认月号）。
+function currentMonthOutlook(chart: ChartSummary): ChartSummary['monthlyOutlook']['months'][number] | null {
+  const m = new Date().getMonth() + 1;
+  return chart.monthlyOutlook.months.find((x) => x.month === m) ?? null;
+}
+// 天势卡尾行：格局 · 本月宜攻/守/稳中蓄力（· 拐点月）。
+function chartCardLine(chart: ChartSummary): string {
+  const mo = currentMonthOutlook(chart);
+  const word = mo ? PHASE_WORD[mo.phase] ?? mo.phase : '';
+  return `${chart.pattern.name}${word ? ` · 本月宜${word}` : ''}${mo?.turning ? ' · 拐点月' : ''}`;
+}
+// 四柱一行（缺时辰只显示三柱）。
+function chartFourPillars(chart: ChartSummary): string {
+  const p = chart.pillars;
+  const arr = [p.year.ganZhi, p.month.ganZhi, p.day.ganZhi];
+  if (chart.hourKnown && p.time) arr.push(p.time.ganZhi);
+  return arr.join(' ');
+}
+// 全年拐点月列表（无则「无」）。
+function chartTurningMonths(chart: ChartSummary): string {
+  const t = chart.monthlyOutlook.months.filter((m) => m.turning).map((m) => `${m.month}`);
+  return t.length ? `${t.join('/')}月` : '无';
+}
+
 function forceSynthesis(forces: BattleForce[]): { title: string; body: string } {
   const strong = forces.find((f) => f.level === 'strong');
   const weak = forces.find((f) => f.level === 'weak');
@@ -80,6 +106,8 @@ export default function Home() {
   const [exceptionOpen, setExceptionOpen] = useState(false);
   // 主要矛盾卡：点击就地展开/收起全文（有判断时），而非跳对话
   const [heroExpanded, setHeroExpanded] = useState(false);
+  // 天势接命盘：实时拉命盘摘要（不落库）。无命盘/命理关/404 → null，静默不打扰。
+  const [chart, setChart] = useState<ChartSummary | null>(null);
   const me = s.me();
   const und = me?.understanding;
   // 三势一律来自真实军师档案（und.battleForces）；为空时走 force-empty 空态引导对话，绝不预置结论（P0-3）。
@@ -92,7 +120,11 @@ export default function Home() {
     try { if (Taro.getStorageSync(COMMIT_KEY) === dayKey()) setCta('done'); } catch { /* noop */ }
     // 首轮拉取（案卷 + 军师档案）完成后再标记水合，hero/三势区据此收起骨架。
     const jobs: Promise<unknown>[] = [refreshDossier().then(setDossier)];
-    if (s.isAuthed()) jobs.push(store.loadMe()); // 刷新军师档案（对话/资料变化后战局判断与三势随之更新）
+    if (s.isAuthed()) {
+      jobs.push(store.loadMe()); // 刷新军师档案（对话/资料变化后战局判断与三势随之更新）
+      // 天势接命盘：并行拉命盘摘要（失败/无盘/命理关静默兜底 null）。
+      jobs.push(api.myChart().then((r) => setChart(r.chart)).catch(() => setChart(null)));
+    }
     Promise.all(jobs).catch(() => {}).then(() => setHydrated(true));
   });
 
@@ -146,6 +178,8 @@ export default function Home() {
 
   // 三势全解：点整卡/小框 → 半屏 sheet（看全解）。无三势时不弹。
   const openForces = () => { if (forces.length) setForcesOpen(true); };
+  // 天势 → 天时日历（逐月攻守落地页，自带补生辰表单）。先收全解再跳。
+  const goCalendar = () => { setForcesOpen(false); navTo('/packages/work/calendar/index'); };
 
   // 认可判断 → 生成军令与报告（三态机）：idle→generating→done。
   const handleBattleCta = () => {
@@ -266,6 +300,7 @@ export default function Home() {
                   <Text className="force-concl serif">{f.conclusion}</Text>
                   <Text className={`force-tactic ${f.tacticTone}`}>打法：{f.tactic}</Text>
                   <Text className="force-note">{f.note}</Text>
+                  {f.kind === 'sky' && chart ? <Text className="force-note chart">{chartCardLine(chart)}</Text> : null}
                   <View className="force-bar"><View className={`force-fill ${f.kind}`} style={{ width: `${f.strength}%` }} /></View>
                 </View>
               ))}
@@ -373,6 +408,17 @@ export default function Home() {
                   <Text className="fr-title serif">{r.title}</Text>
                   <Text className="fr-body">{r.body}</Text>
                   <Text className={`fr-tactic ${f.tacticTone}`}>{r.tactic}</Text>
+                  {/* 天势小节接命盘：有盘展开四柱/日主/格局/攻守 + 跳天时日历；无盘一行引导补生辰 */}
+                  {f.kind === 'sky' ? (chart ? (
+                    <View className="fr-chart">
+                      <Text className="frc-line">四柱：{chartFourPillars(chart)}</Text>
+                      <Text className="frc-line">日主{chart.dayMaster.gan}{chart.dayMaster.element}·{chart.dayMaster.strength} · {chart.pattern.name}</Text>
+                      <Text className="frc-line">{chartCardLine(chart)} · 全年拐点月 {chartTurningMonths(chart)}</Text>
+                      <Text className="frc-go" onClick={goCalendar}>天时日历 · 逐月攻守 ›</Text>
+                    </View>
+                  ) : (
+                    <Text className="frc-empty" onClick={goCalendar}>生辰未录 · 录入后天势可参命盘 ›</Text>
+                  )) : null}
                 </View>
               );
             })}

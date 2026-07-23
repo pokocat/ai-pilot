@@ -3,6 +3,7 @@ import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import { setQuota } from '../src/services/tokenQuota.js';
+import { buildForcesContext } from '../src/services/forces.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.js';
 
 let token = '', userId = '', tenantId = '';
@@ -98,6 +99,22 @@ test('P0-3 生产 LLM 失败 → 不落库捏造默认（仅 test/mock 才兜底
     if (prev === undefined) delete process.env.AI_ALLOW_REAL_PROVIDER;
     else process.env.AI_ALLOW_REAL_PROVIDER = prev;
   }
+});
+
+test('天势接命盘：录入生辰后三势研判上下文含命盘天时行', async () => {
+  // 录入生辰（believe 默认 true）→ 排盘落库。
+  const r = await api('PUT', '/api/profile/bazi', { token, body: { calendar: 'solar', year: 1988, month: 3, day: 15, hour: 10, gender: 'male' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  const ctx = await buildForcesContext({ tenantId, userId });
+  assert.ok(ctx.includes('命盘：'), '有命盘时上下文含命盘行');
+  assert.ok(ctx.includes('逐月攻守'), '有命盘时上下文含逐月攻守概览');
+});
+
+test('命理关（believe=false）：三势研判上下文不注入命盘', async () => {
+  await api('PUT', '/api/profile/bazi', { token, body: { believe: false } });
+  const ctx = await buildForcesContext({ tenantId, userId });
+  assert.ok(ctx.length > 0, '仍有行业等业务现状可研判');
+  assert.ok(!ctx.includes('命盘'), '命理关时不注入命盘');
 });
 
 test('未登录 → 401', async () => {

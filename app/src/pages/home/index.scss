@@ -112,6 +112,11 @@
   display: block; margin-top: 5px; flex: 1;
   color: var(--ink-3); font-size: 10px; line-height: 1.4;
 }
+/* 天势卡尾行接命盘（金/accent 微弱强调，字号同 force-note，不抢戏） */
+.force-note.chart {
+  flex: none; margin-top: 6px;
+  color: var(--accent); font-weight: 600; opacity: .92;
+}
 .force-bar {
   height: 5px; margin-top: 10px; border-radius: 999px;
   background: var(--surface-2); overflow: hidden;
@@ -272,6 +277,25 @@
 .fr-tactic.ok { color: var(--green); }
 .fr-tactic.warn { color: var(--warn, #A8772E); }
 .fr-tactic.danger { color: var(--danger, #9C4A38); }
+
+/* 天势小节接命盘（全解 sheet）：四柱/日主/攻守 + 天时日历跳转 */
+.fr-chart {
+  margin-top: 10px; padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+.frc-line { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12px; line-height: 1.55; }
+.frc-line:first-child { margin-top: 0; }
+.frc-go {
+  display: inline-block; margin-top: 9px;
+  color: var(--accent); font-size: 12.5px; font-weight: 700;
+}
+.frc-go:active { opacity: .7; }
+.frc-empty {
+  display: block; margin-top: 10px; padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  color: var(--accent); font-size: 12px; font-weight: 600; line-height: 1.5;
+}
+.frc-empty:active { opacity: .7; }
 
 .force-synthesis {
   margin-top: 14px; padding: 15px 15px;
