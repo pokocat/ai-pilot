@@ -7,15 +7,14 @@ import Login from '../../components/Login';
 import AsyncState from '../../components/AsyncState';
 import { navTo, switchTo } from '../../services/nav';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
-import Picker from '../../components/Picker';
 import AgentUnlock from '../../components/AgentUnlock';
-import OnboardSheet from '../../components/OnboardSheet';
 import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
 import { api, type Agent, type SessionItem, type SearchHit } from '../../services/api';
 import { getToken } from '../../services/token';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, MORE_SPECIALIST_KEYS } from '../../data/council';
 import NextStepCard from '../../components/NextStepCard';
+import CoachMarks from '../../components/CoachMarks'; // 保持 CoachMarks 全站最后（避免 common chunk CSS 顺序告警，AGENTS.md §7.2）
 import './index.scss';
 
 function relTime(iso: string): string {
@@ -58,10 +57,6 @@ export default function Sessions() {
   const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false); // 检索进行中（防抖 + 请求期间给「检索中」占位，避免空态误判）
-  const [showOnboard, setShowOnboard] = useState(false);
-  // 首登建档：本命色 + 30 秒建档 Picker（launch 页 sessions 承接，进来即弹，不用切到战局才触发）。
-  const [showPicker, setShowPicker] = useState(false);
-  const [pickerFirst, setPickerFirst] = useState(false);
 
   // 会话列表加载（C2）：失败区分未授权（弹登录）与网络错误（错误态可重试），不再一律伪装成空态。
   const loadSessions = () => {
@@ -88,22 +83,16 @@ export default function Sessions() {
     loadSessions();
   });
 
-  // V7-03 首登引导：已登录 + 已建档 + 本账号未看过 → 只展示一次 4 步引导（storage 落 junshi.onboard.v7.<token>）。
-  const onboardKey = () => `junshi.onboard.v7.${getToken()}`;
-  const dismissOnboard = () => {
-    try { Taro.setStorageSync(onboardKey(), '1'); } catch { /* noop */ }
-    setShowOnboard(false);
+  // 首登入局仪式（择色 → 立案卷 → 首判）。防重复：页栈已有 onboarding 就不再跳（navTo 另有 800ms 防连点锁）。
+  // 建档后的功能引导由 <CoachMarks>（功能点亮 · 五步）自持 storage 触发，取代旧 4 步 OnboardSheet。
+  const goOnboarding = () => {
+    const pages = (Taro.getCurrentPages?.() || []) as { route?: string }[];
+    if (pages.some((p) => (p.route || '').includes('packages/main/onboarding'))) return;
+    navTo('/packages/main/onboarding/index');
   };
-  const maybeShowOnboard = () => {
-    if (!s.isAuthed() || !s.isOnboarded()) return;
-    let seen = true;
-    try { seen = !!Taro.getStorageSync(onboardKey()); } catch { seen = true; }
-    if (!seen) setShowOnboard(true);
-  };
-  // 已登录但未建档 → 立即弹本命色/建档 Picker；已建档 → 视情况弹一次 4 步引导。
+  // 已登录但未建档 → 进入全屏入局仪式。
   const gateOnboarding = () => {
-    if (s.isAuthed() && !s.isOnboarded()) { setPickerFirst(true); setShowPicker(true); return; }
-    maybeShowOnboard();
+    if (s.isAuthed() && !s.isOnboarded()) goOnboarding();
   };
   useEffect(() => { gateOnboarding(); }, []);
 
@@ -356,15 +345,13 @@ export default function Sessions() {
       </View>
 
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); continueWith(a.key); }} />
-      <OnboardSheet open={showOnboard} onClose={dismissOnboard} onStart={() => { dismissOnboard(); switchTo('/pages/thinktank/index'); }} />
+      <CoachMarks />
       <Login open={showLogin} onLoggedIn={(onboarded) => {
         setShowLogin(false);
         loadSessions();
-        // 新用户（未建档）登录后立即弹本命色/建档；已建档则走 4 步引导。
-        if (!onboarded) { setPickerFirst(true); setShowPicker(true); }
-        else maybeShowOnboard();
+        // 新用户（未建档）登录后进入全屏入局仪式；已建档的功能点亮由 CoachMarks 自触发。
+        if (!onboarded) goOnboarding();
       }} />
-      <Picker open={showPicker} first={pickerFirst} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
     </Screen>
   );
 }

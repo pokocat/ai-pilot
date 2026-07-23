@@ -15,6 +15,7 @@ export default defineAppConfig({
         'chat/index',
         'brief/index',
         'settings/index',
+        'onboarding/index',
       ],
     },
     {

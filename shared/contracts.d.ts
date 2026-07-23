@@ -1324,6 +1324,8 @@ export interface OrderStructuredFields {
   steps?: string[];
   metrics?: OrderMetric[];
   actionType?: OrderActionType;
+  /** 完成回填：用户打卡后录入的完成情况（如「邀约发出 30 条 / 到店 12 人」），复盘与后续建议据此分析。 */
+  resultNote?: string | null;
 }
 
 /* ── V7-06：智库三段式资料整理管道 ── */

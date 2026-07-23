@@ -3,10 +3,10 @@ import { View, Text, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import Login from '../../components/Login';
-import Picker from '../../components/Picker';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
 import Sheet from '../../components/Sheet';
+import CoachMarks from '../../components/CoachMarks';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type BattleForce, type ForceKind } from '../../services/api';
@@ -69,8 +69,6 @@ export default function Home() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
-  const [showPicker, setShowPicker] = useState(false);
-  const [pickerFirst, setPickerFirst] = useState(false);
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
   const [dossier, setDossier] = useState<Dossier | null>(null);
   // 首帧水合标记（C2）：未完成首轮拉取前，hero 与三势区渲染骨架，避免兜底文案闪一帧再跳变。
@@ -103,8 +101,7 @@ export default function Home() {
     if (!s.isAuthed()) {
       setShowLogin(true);
     } else if (!s.isOnboarded()) {
-      setPickerFirst(true);
-      setShowPicker(true);
+      goOnboarding();
     }
     api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
   }, []);
@@ -121,6 +118,12 @@ export default function Home() {
     if (!requireLogin()) return false;
     navTo(`/packages/main/chat/index?${params}`);
     return true;
+  };
+  // 首登入局仪式（择色 → 立案卷 → 首判）。防重复：页栈已有 onboarding 就不再跳（navTo 另有 800ms 防连点锁）。
+  const goOnboarding = () => {
+    const pages = (Taro.getCurrentPages?.() || []) as { route?: string }[];
+    if (pages.some((p) => (p.route || '').includes('packages/main/onboarding'))) return;
+    navTo('/packages/main/onboarding/index');
   };
 
   const gapCount = und?.nextQuestions.length ?? 0;
@@ -409,19 +412,10 @@ export default function Home() {
         open={showLogin}
         onLoggedIn={(onboarded) => {
           setShowLogin(false);
-          if (!onboarded) {
-            setPickerFirst(true);
-            setShowPicker(true);
-          }
+          if (!onboarded) goOnboarding();
         }}
       />
-
-      <Picker
-        open={showPicker}
-        first={pickerFirst}
-        onClose={() => setShowPicker(false)}
-        onConfirm={() => setShowPicker(false)}
-      />
+      <CoachMarks />
     </Screen>
   );
 }
