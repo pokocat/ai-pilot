@@ -3,17 +3,28 @@
 // 引擎带版本号（升级后可按版本批量复算）；启发式规则（身强弱/喜用/攻守）在 basis 字段写明依据，
 // 属 v1 简化口径，后续版本细化时以版本号区分，不悄悄改变历史命盘。
 //
-// 已知边界（v1）：
-// - 真太阳时：仅做经度平太阳时校正（(经度-120)×4 分钟），未含均时差（±15 分钟内，影响极少数踩点时辰）。
-// - 格局：月令取格（月支藏干本气的十神定格），不处理从格/化格等特殊格局。
-// - 身强弱/喜用：得令(40)+得地(各10)+得助(各10) 计分法，≥50% 为身强；身强喜财官食伤、身弱喜印比。
+// 引擎边界（v2）：
+// - 真太阳时：经度平太阳时（(经度-120)×4 分钟）+ 均时差（Spencer 级数，见 equationOfTimeMinutes），
+//   合成后误差降到分钟级；仅在有经度时叠加（无经度不校正）。
+// - 晚子时流派：EightChar.setSect(2)——晚子（23:00-23:59）日柱算「当天」（大陆主流排盘软件口径），
+//   时柱按次日日干起子时。前端时辰表已拆早子(hour 0)/晚子(hour 23)，令 23 点出生者不再被当次日 0 点排。
+// - 旺衰/格局/调候：移植子平法加权算法（services/baziEnrich.ts，MIT 出处见该文件头），
+//   月令权重最高、透根分层；格局按月令藏干透干取格；新增调候用神。仍不处理从格/化格等特殊格局
+//   （极旺/极弱会在结论标「可能从强/从弱」提示，但正格照常论）。
 // - 称骨：暂缓（称骨年表 60 干支权值需可靠来源核对后再上，避免引擎带错表）。
 import { Lunar, Solar } from 'lunar-typescript';
 import { astro } from 'iztro';
 import { prisma } from '../db.js';
 import { PATTERN_PLAYBOOK, type PatternPlay } from '../data/baziPlaybook.js';
+import {
+  judgeWangShuai, judgeGeJu, getTiaoHou, tiaoHouElements, toBinaryStrength,
+  type SiZhu, type Tiangan, type Dizhi, type WangShuaiVerdict,
+} from './baziEnrich.js';
 
-export const PAIPAN_ENGINE_VERSION = 'paipan-v1';
+// v2：真太阳时补均时差 + 晚子时 setSect(2) + 旺衰/格局/调候加权（baziEnrich）。
+// 版本号 bump 使新排盘走 v2；存量命盘 chartJson 仍是 v1 快照，loadChart 不重算——
+// 用户下次编辑生辰（PUT /profile/bazi）时才覆盖为 v2（懒重算，无迁移脚本）。
+export const PAIPAN_ENGINE_VERSION = 'paipan-v2';
 
 export interface PaipanInput {
   calendar: 'solar' | 'lunar';
@@ -79,9 +90,18 @@ export interface ChartView {
   trueSolarApplied: boolean;
   gender: '男' | '女';
   pillars: { year: PillarView; month: PillarView; day: PillarView; time: PillarView | null };
-  dayMaster: { gan: string; element: string; strength: '身强' | '身弱'; strengthScore: number; basis: string };
+  dayMaster: {
+    gan: string;
+    element: string;
+    strength: '身强' | '身弱';        // 二分口径（前端进度条/文案沿用）
+    strengthLevel: WangShuaiVerdict;   // v2 五档：极旺/偏旺/中和/偏弱/极弱
+    strengthScore: number;             // v2 加权分（约 -15..+15，正为旺）
+    confidence: '高' | '中' | '低';
+    basis: string;
+  };
   favorableElements: string[];
-  pattern: { name: string; monthShiShen: string } & PatternPlay;
+  tiaoHou: { gods: string[]; elements: string[] };  // 调候用神（穷通宝鉴），gods 为天干、elements 为其五行
+  pattern: { name: string; monthShiShen: string; basis: string; confidence: '高' | '中' | '低' } & PatternPlay;
   ziwei: { soulMajorStars: string[]; bodyMajorStars: string[] } | null; // 缺时辰 → null（紫微必须有时辰）
   daYun: {
     direction: '顺行' | '逆行';
@@ -118,6 +138,23 @@ function hourToTimeIndex(hour: number): number {
 
 function pad2(n: number): string { return `${n}`.padStart(2, '0'); }
 
+/**
+ * 均时差（equation of time），单位分钟：真太阳时 = 平太阳时 + EoT。
+ * 采用 Spencer(1971) 级数近似（年内日序驱动），全年误差 <0.5 分钟，远小于时辰颗粒度。
+ * 符号约定：视太阳超前于平太阳为正——11 月初 ≈ +16 分钟，2 月中 ≈ -14 分钟。
+ * 纯函数、无副作用，便于单测锚定。
+ */
+export function equationOfTimeMinutes(year: number, month: number, day: number): number {
+  // 年内日序 N（1 = 元旦），用 UTC 差避免时区/夏令时污染。
+  const n = Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(year, 0, 1)) / 86400000) + 1;
+  const b = (2 * Math.PI * (n - 1)) / 365;
+  return 229.18 * (
+    0.000075
+    + 0.001868 * Math.cos(b) - 0.032077 * Math.sin(b)
+    - 0.014615 * Math.cos(2 * b) - 0.040849 * Math.sin(2 * b)
+  );
+}
+
 /** 解析输入 → 排盘用公历时刻（含农历转换与真太阳时校正）。 */
 function resolveSolar(input: PaipanInput): { solar: Solar; trueSolarApplied: boolean; hourKnown: boolean } {
   const hourKnown = input.hour !== null && input.hour !== undefined;
@@ -129,10 +166,12 @@ function resolveSolar(input: PaipanInput): { solar: Solar; trueSolarApplied: boo
   } else {
     solar = Solar.fromYmdHms(input.year, input.month, input.day, hour, minute, 0);
   }
-  // 真太阳时（v1 平太阳时）：中国标准时按东经 120° 定，每偏 1° 校正 4 分钟。
+  // 真太阳时（v2）：中国标准时按东经 120° 定，经度平太阳时（每偏 1° 校正 4 分钟）+ 均时差（EoT）。
+  // 只在有经度时叠加（无经度不校正，与既有口径一致）。EoT 按校正前的公历日取（同日内差异可忽略）。
   let trueSolarApplied = false;
   if (hourKnown && typeof input.longitude === 'number' && input.longitude > 70 && input.longitude < 140) {
-    const offsetMin = Math.round((input.longitude - 120) * 4);
+    const eot = equationOfTimeMinutes(solar.getYear(), solar.getMonth(), solar.getDay());
+    const offsetMin = Math.round((input.longitude - 120) * 4 + eot);
     if (offsetMin !== 0) {
       const d = new Date(solar.getYear(), solar.getMonth() - 1, solar.getDay(), solar.getHour(), solar.getMinute() + offsetMin, 0);
       solar = Solar.fromDate(d);
@@ -147,6 +186,9 @@ export function computeChart(input: PaipanInput, targetYear: number): ChartView 
   const { solar, trueSolarApplied, hourKnown } = resolveSolar(input);
   const lunar = solar.getLunar();
   const ec = lunar.getEightChar();
+  // 晚子时流派：显式 setSect(2)——晚子（23:00-23:59）日柱算「当天」、时柱按次日日干起子时
+  // （大陆主流排盘软件口径）。lunar-typescript@1.8.6 默认已是 2，此处显式声明以固化流派、防库升级默认漂移。
+  ec.setSect(2);
 
   const pillar = (ganZhi: string, shiShenGan: string, hideGan: string[], shiShenZhi: string[], naYin: string): PillarView =>
     ({ ganZhi, shiShenGan, hideGan, shiShenZhi, naYin });
@@ -160,28 +202,33 @@ export function computeChart(input: PaipanInput, targetYear: number): ChartView 
       : null,
   };
 
-  // —— 日主强弱（v1 计分）：得令 40 + 得地各 10 + 得助各 10，按可得总分归一 ——
+  // —— 四柱（干支）喂 baziEnrich 加权算法（缺时辰不传时柱，走三柱评分/取格） ——
   const dayGan = ec.getDayGan();
   const dayElement = GAN_ELEMENT[dayGan];
-  let score = 0;
-  let possible = 0;
-  const monthZhi = ec.getMonthZhi();
-  possible += 40;
-  if (supports(dayElement, ZHI_ELEMENT[monthZhi])) score += 40; // 得令
-  const otherZhi = [ec.getYearZhi(), ec.getDayZhi(), ...(hourKnown ? [ec.getTimeZhi()] : [])];
-  for (const z of otherZhi) { possible += 10; if (supports(dayElement, ZHI_ELEMENT[z])) score += 10; } // 得地
-  const otherGan = [ec.getYearGan(), ec.getMonthGan(), ...(hourKnown ? [ec.getTimeGan()] : [])];
-  for (const g of otherGan) { possible += 10; if (supports(dayElement, GAN_ELEMENT[g])) score += 10; } // 得助
-  const strengthScore = Math.round((score / possible) * 100);
-  const strength: '身强' | '身弱' = strengthScore >= 50 ? '身强' : '身弱';
-  // 喜用（v1）：身强喜泄耗（我生/我克/克我），身弱喜生扶（生我/同我）
+  const siZhu: SiZhu = {
+    年: { gan: ec.getYearGan() as Tiangan, zhi: ec.getYearZhi() as Dizhi },
+    月: { gan: ec.getMonthGan() as Tiangan, zhi: ec.getMonthZhi() as Dizhi },
+    日: { gan: dayGan as Tiangan, zhi: ec.getDayZhi() as Dizhi },
+    时: hourKnown ? { gan: ec.getTimeGan() as Tiangan, zhi: ec.getTimeZhi() as Dizhi } : null,
+  };
+
+  // —— 日主旺衰（v2 加权：月令 + 长生 + 得地 + 得势） ——
+  const ws = judgeWangShuai(siZhu);
+  const strength = toBinaryStrength(ws);
+  const strengthScore = ws.score;
+  // 喜用五行（口径不变）：身强喜泄耗（我生/我克/克我），身弱喜生扶（生我/同我）。
   const favorableElements = strength === '身强'
     ? [GEN[dayElement], KE[dayElement], keMe(dayElement)]
     : [genOf(dayElement), dayElement];
 
-  // —— 格局（月令取格）：月支藏干本气的十神定格 ——
+  // —— 调候用神（穷通宝鉴 日干×月支） ——
+  const tiaoHouGods = getTiaoHou(dayGan as Tiangan, ec.getMonthZhi() as Dizhi);
+  const tiaoHou = { gods: tiaoHouGods, elements: tiaoHouElements(tiaoHouGods) };
+
+  // —— 格局（月令藏干透干取格；纯气月支直接立格） ——
+  const geju = judgeGeJu(siZhu);
+  const patternName = geju.primary;
   const monthShiShen = ec.getMonthShiShenZhi()[0] ?? ec.getMonthShiShenGan();
-  const patternName = `${monthShiShen}格`;
   const play = PATTERN_PLAYBOOK[patternName] ?? { traits: '', suits: [], avoid: [] };
 
   // —— 紫微命宫/身宫主星（需时辰） ——
@@ -244,11 +291,14 @@ export function computeChart(input: PaipanInput, targetYear: number): ChartView 
       gan: dayGan,
       element: dayElement,
       strength,
+      strengthLevel: ws.verdict,
       strengthScore,
-      basis: `v1 计分：得令40/得地各10/得助各10，得分 ${score}/${possible}${hourKnown ? '' : '（缺时辰，按三柱计）'}`,
+      confidence: ws.confidence,
+      basis: `v2 加权：得令${ws.breakdown.得令}/长生${ws.breakdown.长生}/得地${ws.breakdown.得地}/得势${ws.breakdown.得势}，合 ${ws.score}（${ws.verdict}·置信${ws.confidence}）${hourKnown ? '' : '·缺时辰按三柱'}`,
     },
     favorableElements,
-    pattern: { name: patternName, monthShiShen, ...play },
+    tiaoHou,
+    pattern: { name: patternName, monthShiShen, basis: geju.basis, confidence: geju.confidence, ...play },
     ziwei,
     daYun,
     monthlyOutlook: { year: targetYear, months },
@@ -300,7 +350,8 @@ export function chartBriefing(chart: ChartView, nowYear: number): string {
   const turning = chart.monthlyOutlook.months.filter((m) => m.turning).map((m) => `${m.month}月`).join('、') || '无';
   const lines = [
     `【天势档案（系统排盘引擎 ${chart.engineVersion} 计算）】`,
-    `四柱：${four}｜日主 ${chart.dayMaster.gan}${chart.dayMaster.element} · ${chart.dayMaster.strength}｜喜用五行：${chart.favorableElements.join('、')}`,
+    `四柱：${four}｜日主 ${chart.dayMaster.gan}${chart.dayMaster.element} · ${chart.dayMaster.strength}（${chart.dayMaster.strengthLevel}）｜喜用五行：${chart.favorableElements.join('、')}`,
+    `调候（寒暖燥湿之需）：用神 ${chart.tiaoHou.gods.join('、') || '无'}（五行 ${chart.tiaoHou.elements.join('、') || '无'}）——命局逢此则通，可作喜用之参`,
     `格局：${chart.pattern.name}（${chart.pattern.traits}）→ 适合打法：${chart.pattern.suits.join('、')}；要避开：${chart.pattern.avoid.join('、')}`,
     chart.ziwei
       ? `紫微：命宫 ${chart.ziwei.soulMajorStars.join('、') || '空宫'}${chart.ziwei.bodyMajorStars.length ? `；身宫 ${chart.ziwei.bodyMajorStars.join('、')}` : ''}`

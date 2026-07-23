@@ -282,7 +282,7 @@ function sampleChartM(): ChartSummary {
   const PHASES = ['进攻', '平稳', '防守', '进攻', '平稳', '进攻', '防守', '平稳', '进攻', '平稳', '防守', '平稳'];
   const TURN = new Set([3, 7, 11]);
   return {
-    engineVersion: 'paipan-v1',
+    engineVersion: 'paipan-v2',
     hourKnown: true,
     pillars: { year: { ganZhi: '庚午' }, month: { ganZhi: '壬午' }, day: { ganZhi: '戊子' }, time: { ganZhi: '甲寅' } },
     dayMaster: { gan: '戊', element: '土', strength: '身强' },

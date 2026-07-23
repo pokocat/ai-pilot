@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, login, uniquePhone } from './helpers.ts';
 import { prisma } from '../src/db.ts';
-import { computeChart, computeAndStoreChart, loadChart, PAIPAN_ENGINE_VERSION, type PaipanInput } from '../src/services/paipan.ts';
+import { computeChart, computeAndStoreChart, loadChart, equationOfTimeMinutes, PAIPAN_ENGINE_VERSION, type PaipanInput } from '../src/services/paipan.ts';
 
 before(async () => {
   await getApp();
@@ -32,16 +32,25 @@ test('已知八字回归：四柱/格局/日主/大运/紫微主星逐项一致'
   assert.equal(c.pillars.year.shiShenGan, '劫财');
   assert.equal(c.pillars.month.shiShenGan, '七杀');
   assert.equal(c.pillars.day.shiShenGan, '日主');
-  // 格局：月支卯藏干乙 → 七杀 → 七杀格（打法映射自 V6.0 表）
+  // 格局：月支卯为四正纯气月支，本气乙(七杀) → 七杀格（打法映射自 V6.0 表）
   assert.equal(c.pattern.name, '七杀格');
+  assert.equal(c.pattern.confidence, '高');
+  assert.match(c.pattern.basis, /纯气月支/);
   assert.ok(c.pattern.suits.includes('闪电战'));
   assert.ok(c.pattern.avoid.length > 0);
-  // 日主：己土；v1 计分 50/100 → 身强（得地×3 + 得助×2）
+  // 日主：己土；v2 加权旺衰（月令-4/长生-1/得地5/得势0.5 = 0.5，中和偏上按二分作身强）
+  // 注：较 v1「得令40/得地各10/得助各10 = 50 分身强」升级为子平加权法，二分结论仍为身强、喜用五行不变；
+  // strengthScore 语义由 0-100 归一分改为加权原始分（约 -15..+15，正为旺）。
   assert.equal(c.dayMaster.gan, '己');
   assert.equal(c.dayMaster.element, '土');
-  assert.equal(c.dayMaster.strengthScore, 50);
+  assert.equal(c.dayMaster.strengthScore, 0.5);
+  assert.equal(c.dayMaster.strengthLevel, '中和');
+  assert.equal(c.dayMaster.confidence, '高');
   assert.equal(c.dayMaster.strength, '身强');
   assert.deepEqual(c.favorableElements, ['金', '水', '木']);
+  // 调候用神（穷通宝鉴 己土生卯月）：甲癸丙 → 木水火
+  assert.deepEqual(c.tiaoHou.gods, ['甲', '癸', '丙']);
+  assert.deepEqual(c.tiaoHou.elements, ['木', '水', '火']);
   // 大运：阳年男顺行，首步丙辰 8 岁
   assert.equal(c.daYun.direction, '顺行');
   assert.equal(c.daYun.approximate, false);
@@ -91,6 +100,52 @@ test('真太阳时：乌鲁木齐(东经87.6°)正午出生 → 校正约-130分
   assert.equal(urumqi.pillars.time?.ganZhi, '己巳');
   // 时柱之外（年月日柱）不受影响
   assert.equal(urumqi.pillars.day.ganZhi, noon.pillars.day.ganZhi);
+});
+
+test('晚子时流派(sect 2)：23:30 与次日 0:30 同属一日 → 日柱同、时柱不同', () => {
+  // 早子 0:30 与晚子 23:30 同为 1988-03-15 出生（前端时辰表拆早子 hour0 / 晚子 hour23）。
+  const early = computeChart({ ...KNOWN, hour: 0, minute: 30 }, 2026);
+  const late = computeChart({ ...KNOWN, hour: 23, minute: 30 }, 2026);
+  // sect 2：晚子日柱算当天 → 两者日柱相同
+  assert.equal(early.pillars.day.ganZhi, '己巳');
+  assert.equal(late.pillars.day.ganZhi, '己巳');
+  assert.equal(late.pillars.day.ganZhi, early.pillars.day.ganZhi);
+  // 时柱不同：早子取当日日干起子时(甲子)，晚子取次日日干起子时(丙子)
+  assert.equal(early.pillars.time?.ganZhi, '甲子');
+  assert.equal(late.pillars.time?.ganZhi, '丙子');
+  assert.notEqual(late.pillars.time?.ganZhi, early.pillars.time?.ganZhi);
+});
+
+test('立春换年：2000 立春(约 2/4 傍晚)前后各一天，10 时出生年柱切换 己卯→庚辰', () => {
+  const before = computeChart({ calendar: 'solar', year: 2000, month: 2, day: 4, hour: 10, gender: 'male' }, 2026);
+  const after = computeChart({ calendar: 'solar', year: 2000, month: 2, day: 5, hour: 10, gender: 'male' }, 2026);
+  assert.equal(before.pillars.year.ganZhi, '己卯'); // 立春前仍属己卯年
+  assert.equal(after.pillars.year.ganZhi, '庚辰');  // 立春后进庚辰年
+});
+
+test('节气交接：2000 惊蛰(约 3/5)前后，10 时出生月柱由寅月转卯月 戊寅→己卯', () => {
+  const before = computeChart({ calendar: 'solar', year: 2000, month: 3, day: 5, hour: 10, gender: 'male' }, 2026);
+  const after = computeChart({ calendar: 'solar', year: 2000, month: 3, day: 6, hour: 10, gender: 'male' }, 2026);
+  assert.equal(before.pillars.month.ganZhi, '戊寅'); // 惊蛰前寅月
+  assert.equal(after.pillars.month.ganZhi, '己卯');  // 惊蛰后卯月
+});
+
+test('均时差纯函数：2 月中≈-14 分、11 月初≈+16 分（容差 ±1 分）', () => {
+  const feb = equationOfTimeMinutes(2025, 2, 14);
+  const nov = equationOfTimeMinutes(2025, 11, 3);
+  assert.ok(Math.abs(feb - (-14)) <= 1, `2/14 EoT=${feb} 应≈-14`);
+  assert.ok(Math.abs(nov - 16) <= 1, `11/3 EoT=${nov} 应≈+16`);
+  // 符号方向：11 月初视太阳超前(正)、2 月中滞后(负)
+  assert.ok(nov > 0 && feb < 0);
+});
+
+test('真太阳时叠加均时差：有经度才校正，trueSolarApplied 标注', () => {
+  const noLng = computeChart({ ...KNOWN, hour: 12 }, 2026);
+  const withLng = computeChart({ ...KNOWN, hour: 12, longitude: 87.6 }, 2026);
+  assert.equal(noLng.trueSolarApplied, false);   // 无经度不校正
+  assert.equal(withLng.trueSolarApplied, true);   // 有经度（含 EoT）校正
+  // 年月日柱不受时刻微调影响
+  assert.equal(withLng.pillars.day.ganZhi, noLng.pillars.day.ganZhi);
 });
 
 test('落库：每用户一张命盘（重排覆盖），loadChart 取回一致', async () => {

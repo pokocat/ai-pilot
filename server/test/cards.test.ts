@@ -68,7 +68,7 @@ test('天时日历卡：无命盘 400；有命盘含 12 个月攻守与拐点标
   const html = renderCalendarCard(chart, '测试主理人', '守得寒冬三尺雪');
   for (let m = 1; m <= 12; m++) assert.match(html, new RegExp(`${m}月`));
   assert.match(html, /守得寒冬三尺雪/);
-  assert.match(html, /paipan-v1/);
+  assert.match(html, /paipan-v2/);
   assert.doesNotMatch(html, /米诺|Mino/i);
 });
 

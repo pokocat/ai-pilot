@@ -99,8 +99,11 @@ export interface ChartSummary {
   engineVersion: string;
   hourKnown: boolean;
   pillars: { year: { ganZhi: string }; month: { ganZhi: string }; day: { ganZhi: string }; time: { ganZhi: string } | null };
-  dayMaster: { gan: string; element: string; strength: string };
-  pattern: { name: string; traits: string; suits: string[]; avoid: string[] };
+  // strength = 二分（身强/身弱，前端沿用）；strengthLevel = v2 五档；confidence = 置信度（v2 新增，旧命盘可能缺）
+  dayMaster: { gan: string; element: string; strength: string; strengthLevel?: string; confidence?: string };
+  favorableElements?: string[];                                  // 喜用五行（v2 起随命盘返回）
+  tiaoHou?: { gods: string[]; elements: string[] };              // 调候用神（v2 新增）
+  pattern: { name: string; traits: string; suits: string[]; avoid: string[]; basis?: string; confidence?: string };
   ziwei: { soulMajorStars: string[]; bodyMajorStars: string[] } | null;
   monthlyOutlook: { year: number; months: { month: number; phase: string; turning: boolean }[] };
 }

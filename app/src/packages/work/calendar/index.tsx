@@ -6,6 +6,7 @@ import SafeHeader from '../../../components/SafeHeader';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type ChartSummary } from '../../../services/api';
+import { SHICHEN } from '../../../data/shichen';
 import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
 import './index.scss';
 
@@ -19,13 +20,7 @@ const CH = 940;
 // 转发落地约束：被转发者是冷启动直达本页——未登录不外弹（本页自己承接 Login），
 // 401 一律 silent 处理不跳走；返回键无页面栈时兜底切回战局 tab。
 
-const SHICHEN: { label: string; hour: number | null }[] = [
-  { label: '不确定', hour: null },
-  { label: '子 23-1', hour: 0 }, { label: '丑 1-3', hour: 2 }, { label: '寅 3-5', hour: 4 },
-  { label: '卯 5-7', hour: 6 }, { label: '辰 7-9', hour: 8 }, { label: '巳 9-11', hour: 10 },
-  { label: '午 11-13', hour: 12 }, { label: '未 13-15', hour: 14 }, { label: '申 15-17', hour: 16 },
-  { label: '酉 17-19', hour: 18 }, { label: '戌 19-21', hour: 20 }, { label: '亥 21-23', hour: 22 },
-];
+// 十二时辰选项见共享常量 ../../../data/shichen（子时分早/晚）。
 
 const PHASE_HINT: Record<string, string> = {
   进攻: '签约、扩张、上新动作放这几个月',

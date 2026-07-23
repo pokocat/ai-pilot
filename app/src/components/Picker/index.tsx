@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import { COLORS, colorIndex } from '../../data/colors';
+import { SHICHEN } from '../../data/shichen';
 import { api, type SurveyQ } from '../../services/api';
 import { store } from '../../services/store';
 import { useStore } from '../../hooks/useStore';
@@ -21,14 +22,7 @@ const DEFAULT_SURVEY: SurveyQ[] = [
   { key: 'pain', title: '最头疼的事？', options: ['增长乏力', '现金流', '融资', '组织 / 团队', '定位 / 竞争'] },
 ];
 
-// 十二时辰（含「不确定」）：值为代表小时，用于服务端排盘；子时按早子 0 点计。
-const SHICHEN: { label: string; hour: number | null }[] = [
-  { label: '不确定', hour: null },
-  { label: '子 23-1', hour: 0 }, { label: '丑 1-3', hour: 2 }, { label: '寅 3-5', hour: 4 },
-  { label: '卯 5-7', hour: 6 }, { label: '辰 7-9', hour: 8 }, { label: '巳 9-11', hour: 10 },
-  { label: '午 11-13', hour: 12 }, { label: '未 13-15', hour: 14 }, { label: '申 15-17', hour: 16 },
-  { label: '酉 17-19', hour: 18 }, { label: '戌 19-21', hour: 20 }, { label: '亥 21-23', hour: 22 },
-];
+// 十二时辰选项抽到共享常量 app/src/data/shichen.ts（三处录入同一份，子时分早/晚）。
 
 // 入场仪式：选本命色 →（首登）30 秒建档 → 天势档案（选填）→ 入局。对齐原型 picker 流程。
 export default function Picker({ open, first, onClose, onConfirm }: Props) {
