@@ -12,6 +12,7 @@ import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
 import { api, type Agent, type SessionItem, type SearchHit } from '../../services/api';
 import { getToken } from '../../services/token';
+import { subscribeLiveGen, liveGenActiveSessionIds, liveGenActiveAgentKeys } from '../../services/liveGen';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, MORE_SPECIALIST_KEYS } from '../../data/council';
 import NextStepCard from '../../components/NextStepCard';
 import CoachMarks from '../../components/CoachMarks'; // 保持 CoachMarks 全站最后（避免 common chunk CSS 顺序告警，AGENTS.md §7.2）
@@ -57,6 +58,12 @@ export default function Sessions() {
   const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false); // 检索进行中（防抖 + 请求期间给「检索中」占位，避免空态误判）
+  // 后台推演标记：liveGen 里仍在生成的会话/军师，退出对话页后仍留档；订阅其生灭以实时增删「军师推演中」。
+  const [, forceLive] = useState(0);
+  useEffect(() => subscribeLiveGen(() => forceLive((n) => n + 1)), []);
+  const liveSessions = liveGenActiveSessionIds();
+  const liveAgents = liveGenActiveAgentKeys();
+  const isLive = (agentKey: string, sessionId?: string) => liveAgents.has(agentKey) || (!!sessionId && liveSessions.has(sessionId));
 
   // 会话列表加载（C2）：失败区分未授权（弹登录）与网络错误（错误态可重试），不再一律伪装成空态。
   const loadSessions = () => {
@@ -168,6 +175,7 @@ export default function Sessions() {
   const advisorRow = (a: Agent, duty: string, syncDesc: string, online = false) => {
     const last = latestOf(a.key);
     const locked = a.billing === 'unlock' && !a.owned;
+    const live = isLive(a.key, last?.id);
     return (
       <View key={a.key} className="wx-item" onClick={() => tapAdvisor(a)}>
         <AdvisorAvatar agentKey={a.key} size={50} online={online} />
@@ -182,7 +190,7 @@ export default function Sessions() {
               {locked ? diamondCost(a.price) : last ? relTime(last.updatedAt) : ''}
             </Text>
           </View>
-          <Text className="wx-preview">{last?.snippet || `${duty} · ${syncDesc}`}</Text>
+          <Text className="wx-preview" style={live ? { color: accent } : {}}>{live ? '军师推演中…' : (last?.snippet || `${duty} · ${syncDesc}`)}</Text>
         </View>
         {locked ? <Icon name="lock" size={13} color="#969BA1" /> : null}
       </View>
@@ -284,8 +292,8 @@ export default function Sessions() {
                       </View>
                       <Text className="wx-time">{masterLast ? relTime(masterLast.updatedAt) : '在线'}</Text>
                     </View>
-                    <Text className="wx-preview">
-                      {masterLast?.snippet || master.greet || '说说你的处境，我先判断主要矛盾，再调度专业军师。'}
+                    <Text className="wx-preview" style={isLive('general', masterLast?.id) ? { color: accent } : {}}>
+                      {isLive('general', masterLast?.id) ? '军师推演中…' : (masterLast?.snippet || master.greet || '说说你的处境，我先判断主要矛盾，再调度专业军师。')}
                     </Text>
                   </View>
                 </View>
@@ -334,7 +342,7 @@ export default function Sessions() {
                         </View>
                         <Text className="wx-time">{relTime(it.updatedAt)}</Text>
                       </View>
-                      <Text className="wx-preview">{it.title} · {it.snippet}</Text>
+                      <Text className="wx-preview" style={isLive(it.agentKey, it.id) ? { color: accent } : {}}>{isLive(it.agentKey, it.id) ? '军师推演中…' : `${it.title} · ${it.snippet}`}</Text>
                     </View>
                   </View>
                 ))}

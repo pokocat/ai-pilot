@@ -11,7 +11,10 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../../services/api';
 import { STREAM_CHAT } from '../../../services/config';
-import { generateStream, type StreamControl } from '../../../services/streaming';
+import {
+  startLiveGen, attachLiveGenView, detachLiveGenView, peekLiveGen, stopLiveGen, dropLiveGen,
+  type LiveGenView,
+} from '../../../services/liveGen';
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
 import { checkUpload } from '../../../services/uploadGuard';
 import { sourceUploadName } from '../../../services/uploadName';
@@ -295,9 +298,10 @@ export default function Chat() {
   const atBottomRef = useRef(true);
   const lastFollowRef = useRef(0);
   const followTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // B2 停止生成：当前流的中断句柄 + 是否被用户主动停止。
-  const controlRef = useRef<StreamControl | null>(null);
-  const abortedRef = useRef(false);
+  // liveGen 托管：当前挂着的 view 实例 + 用于 stop/detach 的 entry key。
+  // 停止生成、卸载解绑、重进对账都经这两个 ref 定位到模块级单例里的这一轮生成。
+  const liveViewRef = useRef<LiveGenView | null>(null);
+  const liveKeyRef = useRef<string>('');
   // B3 草稿：用 ref 取最新值，供 onBlur / useDidHide 闭包读取。
   const inputRef = useRef('');
   inputRef.current = input;
@@ -419,6 +423,9 @@ export default function Chat() {
   useEffect(() => () => {
     if (pasteSettleTimerRef.current) clearTimeout(pasteSettleTimerRef.current);
     store.setOverlay(false, 'ref-picker');
+    // 页面真卸载（返回列表 / redirect）时解绑 view：停止对已死组件的 UI 副作用，但不终止流——
+    // liveGen 快照照常累计，重进本会话即 attach 重放，thinking/逐字流无缝续上。
+    if (liveKeyRef.current && liveViewRef.current) detachLiveGenView(liveKeyRef.current, liveViewRef.current);
   }, []);
 
   // B3 草稿持久化：按 sessionId 维度存/取；发送成功后清除。
@@ -508,6 +515,7 @@ export default function Chat() {
         setSessionId(sid);
         if (detail.projectId) setProjectId(detail.projectId);
         restore(ag, detail.messages);
+        reattachLive(ag, sid, detail.messages);
         loadDraft(sid);
         return;
       }
@@ -526,6 +534,7 @@ export default function Chat() {
           setSessionId(latest.id);
           if (detail.projectId) setProjectId(detail.projectId);
           restore(fallbackAgent, detail.messages);
+          reattachLive(fallbackAgent, latest.id, detail.messages);
           loadDraft(latest.id);
           if (send) setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key, [], true, detail.projectId || pid || ''), 300);
           return;
@@ -573,6 +582,178 @@ export default function Chat() {
     setTimeout(scrollToEnd, 60);
   }
 
+  const showMemoryLearned = (agentName: string, delay: number) => {
+    setTimeout(() => {
+      setMsgs((m) => [...m, { role: 'memory', agentName }]);
+      scrollToEnd();
+    }, delay);
+  };
+
+  // 同步兜底（非流式 / 静默失败补发）产出的落地：与流式收尾同一套 setMsgs 语义。
+  // degradedRetryText = 本轮用户原文，仅在报告降级时挂到 ↻ 重试（非流式路径由 doSend 传入，兜底路径由 liveGen 透传 userText）。
+  const renderGenerateResult = (res: Awaited<ReturnType<typeof api.generate>>, replaceStreamingAssistant = false, degradedRetryText?: string) => {
+    if (res.sessionId && !sessionIdRef.current) setSessionId(res.sessionId);
+    if (res.kind === 'report' && res.deliverable) {
+      // 记债项10：降级（保底）草案与流式中断统一话术——挂 ↻ 重试、trust 行合一，不再另出「保底草案」提示。
+      const degraded = !!res.deliverable.degraded;
+      const reportMsg: Extract<Msg, { role: 'report' }> = {
+        role: 'report',
+        deliverable: degraded ? { ...res.deliverable, trust: REPORT_INTERRUPTED_TRUST } : res.deliverable,
+        animate: true,
+        messageId: res.messageId,
+        knowledgeUsed: res.knowledgeUsed,
+        refNotices: res.refNotices,
+        retryText: degraded ? degradedRetryText : undefined,
+      };
+      setMsgs((m) => {
+        if (replaceStreamingAssistant) {
+          const i = m.length - 1;
+          if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+            const copy = m.slice();
+            copy[i] = reportMsg;
+            return copy;
+          }
+        }
+        return [...m, reportMsg];
+      });
+      if (res.memory?.learned) showMemoryLearned(res.memory.agentName, data_delay(res.deliverable));
+    } else if (res.reply) {
+      setMsgs((m) => {
+        if (replaceStreamingAssistant) {
+          const i = m.length - 1;
+          if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+            const copy = m.slice();
+            copy[i] = { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices };
+            return copy;
+          }
+        }
+        return [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices }];
+      });
+    }
+  };
+
+  // 构造一个可插拔的 liveGen 观察者：把「流事件 → UI 副作用」抽成方法集，令一轮生成的 UI
+  // 既能实时更新当前页，又能在重进时由 liveGen 重放快照重建。这些方法即旧内联 handlers 的搬迁，
+  // report/chat 分流、首启守卫、静默失败兜底等控制流已上收到 liveGen，本处只管 setMsgs/滚动/busy。
+  const buildLiveView = (viewAgent: Agent | null): LiveGenView => {
+    const patchReport = (
+      fn: (d: Deliverable) => Deliverable,
+      extra: Partial<Extract<Msg, { role: 'report' }>> = {},
+      opts: { appendIfMissing?: boolean } = {},
+    ) => {
+      const { appendIfMissing = true } = opts;
+      setMsgs((m) => {
+        const i = m.length - 1;
+        if (i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming) {
+          const copy = m.slice();
+          const cur = copy[i] as Extract<Msg, { role: 'report' }>;
+          copy[i] = { ...cur, ...extra, deliverable: fn(cur.deliverable) };
+          return copy;
+        }
+        if (!appendIfMissing) return m;
+        return [...m, { role: 'report', deliverable: fn(reportDraft(viewAgent)), animate: false, streaming: true, ...extra }];
+      });
+    };
+    const patchChat = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
+      setMsgs((m) => {
+        const i = m.length - 1;
+        if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+          const copy = m.slice(); copy[i] = fn(copy[i] as Extract<Msg, { role: 'assistant' }>); return copy;
+        }
+        return m;
+      });
+    return {
+      onSession: (id) => { if (id && !sessionIdRef.current) setSessionId(id); },
+      startReport: () => { patchReport((d) => d); setTimeout(scrollToEnd, 30); },
+      // meta kind=chat：先建聊天气泡（think-dots），避免 LLM 首字延迟期只剩全局 busy 无反馈。
+      startChat: () => { setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]); setTimeout(scrollToEnd, 30); },
+      reportBegin: (data) => patchReport((d) => ({ ...d, title: data.title || d.title, icon: data.icon || d.icon, meta: data.meta || d.meta })),
+      reportSection: (section) => {
+        patchReport((d) => ({ ...d, sections: mergeReportSection(d.sections, section) }));
+        followBottom(); // B1：仅当用户仍贴底才跟随，尊重上滑
+      },
+      reportFooter: (data) => patchReport((d) => ({ ...d, trust: data.trust || d.trust, actions: data.actions?.length ? data.actions : d.actions })),
+      appendToken: (t) => {
+        patchChat((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } }));
+        followBottom();
+      },
+      setChat: (reply) => patchChat((msg) => ({ ...msg, reply })),
+      finishReport: (messageId, refNotices) => {
+        // 自动存入由 liveGen 侧统一触发（保证退页面后台完成也入库），此处只收 streaming 态。
+        patchReport((d) => d, { streaming: false, messageId, refNotices }, { appendIfMissing: false });
+        followBottom(true);
+      },
+      finishChat: (messageId, refNotices) => {
+        patchChat((msg) => ({ ...msg, streaming: false, refNotices }));
+        followBottom(true);
+      },
+      error: (kind, message, retry) => {
+        if (kind === 'report') {
+          // 记债项10：报告流失败语义收敛为单一话术。审核类错误不给重试（retry 由 liveGen 判定后传入）。
+          setMsgs((m) => {
+            const i = m.length - 1;
+            if (!(i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming)) return m;
+            const cur = m[i] as Extract<Msg, { role: 'report' }>;
+            const copy = m.slice();
+            if (cur.deliverable.sections.length > 0) {
+              // 有部分内容：保留已流出分段，trust 行统一为中断话术 + ↻ 重试；degraded 仅留作状态位。
+              copy[i] = {
+                ...cur,
+                streaming: false,
+                retryText: retry,
+                deliverable: { ...cur.deliverable, trust: REPORT_INTERRUPTED_TRUST, degraded: true },
+              };
+            } else {
+              // 完全无内容：不留半空报告卡，改普通错误气泡 + 重试（对齐聊天气泡）。
+              copy[i] = { role: 'assistant', reply: { text: message || '生成失败' }, retryText: retry };
+            }
+            return copy;
+          });
+        } else if (kind === 'chat') {
+          patchChat((msg) => ({ ...msg, reply: { text: message || '生成失败' }, retryText: retry, streaming: false }));
+        } else {
+          // 错误早于任何 meta（如 HTTP 层直接失败）：既无报告卡也无聊天气泡可就地更新，补一条错误气泡 + 重试。
+          setMsgs((m) => [...m, { role: 'assistant', reply: { text: message || '生成失败' }, retryText: retry }]);
+        }
+      },
+      fallbackDone: (res, retryText) => { renderGenerateResult(res, true, retryText); setTimeout(scrollToEnd, 80); },
+      memoryLearned: (agentName) => showMemoryLearned(agentName, 600),
+      abortedChat: () => {
+        // 主动停止：还没吐出任何字的空占位直接移除，避免留下空壳；已有字则收干净为非流式。
+        setMsgs((m) => {
+          const i = m.length - 1;
+          if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+            const cur = m[i] as Extract<Msg, { role: 'assistant' }>;
+            const copy = m.slice();
+            if (!cur.reply.text) { copy.splice(i, 1); return copy; }
+            copy[i] = { ...cur, streaming: false };
+            return copy;
+          }
+          return m;
+        });
+      },
+      clearBusy: () => setBusy(false),
+    };
+  };
+
+  // 重进对话页：若该会话仍在推演（liveGen 有进行中条目），挂上新 view 续流并置 busy；
+  // 否则（已收尾 / 本轮 assistant 已落库）交由 restore 的落库消息，丢弃条目防重复气泡。
+  const reattachLive = (ag: Agent, sid: string, messages: { role: string }[]) => {
+    const peek = peekLiveGen(sid);
+    if (!peek) return;
+    const lastRole = messages.length ? messages[messages.length - 1].role : '';
+    // 仍在推演 且 末条仍是用户消息（本轮 assistant 尚未落库）→ 续流；否则一律以落库为准。
+    if (peek.active && lastRole === 'user') {
+      setBusy(true);
+      const view = buildLiveView(ag);
+      liveViewRef.current = view;
+      liveKeyRef.current = sid;
+      attachLiveGenView(sid, view); // 重放当前累计快照：重建气泡，后续 token 实时续入本页
+    } else {
+      dropLiveGen(sid);
+    }
+  };
+
   async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true, activeProjectId = projectId) {
     if (busy) return;
     if (!store.isAuthed()) {
@@ -587,258 +768,49 @@ export default function Chat() {
       return;
     }
     setBusy(true);
-    abortedRef.current = false;
     // B3：发送即清掉本会话草稿（输入已上屏；失败可用气泡「重试」重发，无需草稿）。
     clearDraft();
     // P2-15：重试（echo=false）不重复回显用户气泡（用户消息已在首次尝试时显示）。
     if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
     setTimeout(scrollToEnd, 30);
+
+    // 报告 / 聊天分流完全由后端 SSE meta 事件决定，前端不再检查消息文本。
+    // 路由带 send= 自动发送时，React state 里的 agent 可能还没刷新；必须按本次 agentKey 重新取配置。
+    const sendingAgent = findAgent(agentKey) || agent;
+    const body = { text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined };
+    const canStream = STREAM_CHAT && !!sendingAgent;
+
+    if (canStream) {
+      // 统一流式入口 → 交给 liveGen 单例托管：事件先落 liveGen 累计快照、再转发给当前挂着的 view。
+      // 页面卸载/重进时流照常存活，thinking 与逐字流无缝续在新页面。report/chat 分流、静默失败兜底、
+      // 报告收尾自动入库、P0-5 双保险等业务语义全部内聚在 liveGen，与旧内联实现等价。
+      const view = buildLiveView(sendingAgent || agent);
+      liveViewRef.current = view;
+      liveKeyRef.current = startLiveGen({
+        // 新会话（尚无 sessionId）先用临时 key；收到服务端 session 事件后 liveGen 追加真实 sessionId 别名。
+        key: sid || `new:${agentKey}:${Date.now()}`,
+        sessionId: sid,
+        agentKey,
+        userText: text,
+        body,
+        view,
+        // 报告收尾自动入库要用的完整 deliverable：从累计快照重装（reportDraft 兜底默认 + 分段 + footer）。
+        buildDeliverable: (begin, sections, footer) => {
+          let d = reportDraft(sendingAgent || agent, begin ? { title: begin.title, icon: begin.icon, meta: begin.meta } : {});
+          d = { ...d, sections };
+          if (footer) d = { ...d, trust: footer.trust || d.trust, actions: footer.actions?.length ? footer.actions : d.actions };
+          return d;
+        },
+        autoSave: saveDeliverable,
+      });
+      return; // 生命周期与 busy 收尾由 liveGen（经 view.clearBusy）负责，不走下方同步收尾
+    }
+
+    // 非流式兜底（STREAM_CHAT 关或无 agent）：同步一次产出。此路径不跨页面存活（非默认路径）。
     try {
-      // 报告 / 聊天分流完全由后端 SSE meta 事件决定，前端不再检查消息文本。
-      // 后端 send('meta',{kind}) 必先于 begin/token 到达，且后端本就按自己的判定（含 on-demand 侧的
-      // 服务端正则）决定本轮 kind——前端再用正则猜只会与之错配。故删除 wantsDeliverableRequest：
-      // 是否走流式仅取决于配置（STREAM_CHAT 开关 + 有 agent），骨架形态由 meta 回调决定
-      // （kind=report → onReportStart 建报告骨架；kind=chat → onChatStart 建聊天气泡）。
-      // 路由带 send= 自动发送时，React state 里的 agent 可能还没刷新；必须按本次 agentKey 重新取配置。
-      const sendingAgent = findAgent(agentKey) || agent;
-      const body = { text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined };
-      const canStream = STREAM_CHAT && !!sendingAgent;
-
-      const showMemoryLearned = (agentName: string, delay: number) => {
-        setTimeout(() => {
-          setMsgs((m) => [...m, { role: 'memory', agentName }]);
-          scrollToEnd();
-        }, delay);
-      };
-      const renderGenerateResult = (res: Awaited<ReturnType<typeof api.generate>>, replaceStreamingAssistant = false) => {
-        if (res.sessionId && !sid) setSessionId(res.sessionId);
-        if (res.kind === 'report' && res.deliverable) {
-          // 记债项10：降级（保底）草案与流式中断统一话术——挂 ↻ 重试、trust 行合一，不再另出「保底草案」提示。
-          const degraded = !!res.deliverable.degraded;
-          const reportMsg: Extract<Msg, { role: 'report' }> = {
-            role: 'report',
-            deliverable: degraded ? { ...res.deliverable, trust: REPORT_INTERRUPTED_TRUST } : res.deliverable,
-            animate: true,
-            messageId: res.messageId,
-            knowledgeUsed: res.knowledgeUsed,
-            refNotices: res.refNotices,
-            retryText: degraded ? text : undefined,
-          };
-          setMsgs((m) => {
-            if (replaceStreamingAssistant) {
-              const i = m.length - 1;
-              if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
-                const copy = m.slice();
-                copy[i] = reportMsg;
-                return copy;
-              }
-            }
-            return [...m, reportMsg];
-          });
-          if (res.memory?.learned) showMemoryLearned(res.memory.agentName, data_delay(res.deliverable));
-        } else if (res.reply) {
-          setMsgs((m) => {
-            if (replaceStreamingAssistant) {
-              const i = m.length - 1;
-              if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
-                const copy = m.slice();
-                copy[i] = { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices };
-                return copy;
-              }
-            }
-            return [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices }];
-          });
-        }
-      };
-
-      if (canStream) {
-        // 统一流式入口：一条流同时挂 report 与 chat 两套回调，走哪种骨架由后端 meta 事件决定
-        // （meta kind=report → onReportStart 建报告骨架；kind=chat → onChatStart 建聊天气泡）。
-        // 二者仅是 UI 形态差异、共用同一 /generate SSE 接口，故合并为一条路径，不再按消息内容前置分流。
-        let reportStarted = false;
-        let chatStarted = false;
-        let streamErrored = false; // onError 是否已就地渲染过错误——避免静默失败兜底时二次补发
-        let learnedAgentName = '';
-        // meta 先于 begin/token 到达，此刻气泡还没建；先攒着，收尾时一并挂到气泡上。
-        let pendingRefNotices: string[] = [];
-        const patchReport = (
-          fn: (d: Deliverable) => Deliverable,
-          extra: Partial<Extract<Msg, { role: 'report' }>> = {},
-          // 收尾语义开关：appendIfMissing=false 时，仅当存在「末条且仍 streaming 的报告卡」才原地更新，
-          // 否则 no-op——绝不追加新卡。用于 onDone/finally 这类「置 streaming:false」的收尾调用，
-          // 避免收尾时守卫不命中而落到 append 分支、追加一张不落库的幽灵骨架卡。
-          opts: { appendIfMissing?: boolean } = {},
-        ) => {
-          const { appendIfMissing = true } = opts;
-          setMsgs((m) => {
-            const i = m.length - 1;
-            if (i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming) {
-              const copy = m.slice();
-              const cur = copy[i] as Extract<Msg, { role: 'report' }>;
-              copy[i] = { ...cur, ...extra, deliverable: fn(cur.deliverable) };
-              return copy;
-            }
-            if (!appendIfMissing) return m;
-            return [...m, { role: 'report', deliverable: fn(reportDraft(sendingAgent)), animate: false, streaming: true, ...extra }];
-          });
-        };
-        const startReport = () => {
-          if (reportStarted) return;
-          reportStarted = true;
-          patchReport((d) => d);
-          setTimeout(scrollToEnd, 30);
-        };
-        // kind=chat 路径：后端本轮判为普通聊天（meta kind=chat 或直接来 token/chat），走聊天气泡而非报告卡。
-        const patchChat = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
-          setMsgs((m) => {
-            const i = m.length - 1;
-            if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
-              const copy = m.slice(); copy[i] = fn(copy[i] as Extract<Msg, { role: 'assistant' }>); return copy;
-            }
-            return m;
-          });
-        const startChat = () => {
-          if (reportStarted || chatStarted) return;
-          chatStarted = true;
-          setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]);
-          setTimeout(scrollToEnd, 30);
-        };
-        const control: StreamControl = { abort: () => {} };
-        controlRef.current = control;
-        try {
-        const streamOk = await generateStream(body, {
-          onSession: (id) => { if (id && !sid) setSessionId(id); },
-          onReportStart: startReport,
-          // meta kind=chat：先建聊天气泡（think-dots），避免 LLM 首字延迟期只剩全局 busy 无反馈。
-          onChatStart: startChat,
-          onReportBegin: (data) => {
-            startReport();
-            patchReport((d) => ({
-              ...d,
-              title: data.title || d.title,
-              icon: data.icon || d.icon,
-              meta: data.meta || d.meta,
-            }));
-          },
-          onReportSection: (section) => {
-            startReport();
-            patchReport((d) => ({ ...d, sections: mergeReportSection(d.sections, section) }));
-            followBottom(); // B1：仅当用户仍贴底才跟随，尊重上滑
-          },
-          onReportFooter: (data) => {
-            startReport();
-            patchReport((d) => ({
-              ...d,
-              trust: data.trust || d.trust,
-              actions: data.actions?.length ? data.actions : d.actions,
-            }));
-          },
-          onToken: (t) => {
-            if (reportStarted) return;
-            startChat();
-            patchChat((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } }));
-            followBottom();
-          },
-          onChat: (reply) => {
-            if (reportStarted) return;
-            startChat();
-            patchChat((msg) => ({ ...msg, reply }));
-          },
-          onRefNotices: (ns) => { pendingRefNotices = ns; },
-          onMemory: (data) => {
-            if (data.learned && data.agentName) learnedAgentName = data.agentName;
-          },
-          onDone: (messageId) => {
-            const refNotices = pendingRefNotices.length ? pendingRefNotices : undefined;
-            if (reportStarted) {
-              // 收尾时从更新器内抓完整 deliverable 引用（避免陈旧闭包/state），随后微任务里静默自动存入。
-              let doneDeliverable: Deliverable | undefined;
-              patchReport((d) => { doneDeliverable = d; return d; }, { streaming: false, messageId, refNotices }, { appendIfMissing: false });
-              // 自动存入仅对本次新生成完成的报告触发（历史加载走 restore、不经 onDone）；成功静默点亮 saved，失败留「存入」兜底。
-              if (messageId) {
-                Promise.resolve().then(() => {
-                  const dl = doneDeliverable
-                    ?? ([...logRef.current].reverse().find((x) => x.role === 'report') as Extract<Msg, { role: 'report' }> | undefined)?.deliverable;
-                  if (dl) saveDeliverable(dl, messageId, { auto: true });
-                });
-              }
-            } else if (chatStarted) {
-              patchChat((msg) => ({ ...msg, streaming: false, refNotices }));
-            }
-            if (learnedAgentName) showMemoryLearned(learnedAgentName, 600);
-            followBottom(true);
-          },
-          onError: (em) => {
-            streamErrored = true;
-            const retry = isModerationErr(em) ? undefined : text;
-            if (reportStarted) {
-              // 记债项10：报告流失败语义收敛为单一话术。审核类错误不给重试（重试必再被拦）。
-              setMsgs((m) => {
-                const i = m.length - 1;
-                if (!(i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming)) return m;
-                const cur = m[i] as Extract<Msg, { role: 'report' }>;
-                const copy = m.slice();
-                if (cur.deliverable.sections.length > 0) {
-                  // 有部分内容：保留已流出分段，trust 行统一为中断话术 + ↻ 重试；
-                  // degraded 仅留作状态位（供后端/埋点、免扣额度），UI 不再另出「保底草案」提示。
-                  copy[i] = {
-                    ...cur,
-                    streaming: false,
-                    retryText: retry,
-                    deliverable: { ...cur.deliverable, trust: REPORT_INTERRUPTED_TRUST, degraded: true },
-                  };
-                } else {
-                  // 完全无内容：不留半空报告卡，改普通错误气泡 + 重试（对齐聊天气泡）。
-                  copy[i] = { role: 'assistant', reply: { text: em || '生成失败' }, retryText: retry };
-                }
-                return copy;
-              });
-            } else if (chatStarted) {
-              patchChat((msg) => ({ ...msg, reply: { text: em || '生成失败' }, retryText: retry, streaming: false }));
-            } else {
-              // 错误早于任何 meta（如 HTTP 层直接失败）：既无报告卡也无聊天气泡可就地更新，补一条错误气泡 + 重试。
-              setMsgs((m) => [...m, { role: 'assistant', reply: { text: em || '生成失败' }, retryText: retry }]);
-            }
-          },
-        }, control);
-        // B2：主动停止时不兜底重发。report 卡由 finally 收尾；chat 气泡就地收干净——
-        // 还没吐出任何字的空占位（onChatStart 已抢先建好）直接移除，避免留下空壳。
-        if (abortedRef.current) {
-          if (chatStarted) {
-            setMsgs((m) => {
-              const i = m.length - 1;
-              if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
-                const cur = m[i] as Extract<Msg, { role: 'assistant' }>;
-                const copy = m.slice();
-                if (!cur.reply.text) { copy.splice(i, 1); return copy; }
-                copy[i] = { ...cur, streaming: false };
-                return copy;
-              }
-              return m;
-            });
-          }
-        } else if (!streamOk && !reportStarted && !streamErrored) {
-          // 静默失败（流未正常收尾、onError 从未触发、且未进 report 分支）：同步补发一次。
-          // replaceStreamingAssistant=true——若 onChatStart 已建了空聊天占位，用真实结果替换它而非再追加一条；
-          // 若连占位都没建（error 早于 meta 那条已由 onError 落气泡、不会走到这里），则自然追加。
-          // report 分支的静默失败由下方 finally 收尾（把报告卡 streaming 置 false），不在此重发。
-          const res = await api.generate(body);
-          renderGenerateResult(res, true);
-        }
-        } finally {
-          // P0-5 双保险：报告流无论 promise 结果（含中途抛错/主动停止），最终强制把报告卡 streaming 置 false，
-          // 避免流正常收尾却未触发 onDone/onError 时报告卡永久停在「产出中」。
-          // patchReport 仅改「末条且仍 streaming」的报告卡，onDone 已收尾时此处为幂等 no-op。
-          // appendIfMissing:false——onDone 已把报告卡置 streaming:false 后守卫不再命中，
-          // 此处若仍走 append 会追加一张不落库的幽灵骨架卡（老 bug：先后两张卡 + 重进少一张）。
-          if (reportStarted) patchReport((d) => d, { streaming: false }, { appendIfMissing: false });
-        }
-        followBottom(true);
-      } else {
-        const res = await api.generate(body);
-        renderGenerateResult(res);
-        setTimeout(scrollToEnd, 80);
-      }
+      const res = await api.generate(body);
+      renderGenerateResult(res, false, text);
+      setTimeout(scrollToEnd, 80);
     } catch (e) {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
       const reply = errorReply(e);
@@ -846,15 +818,13 @@ export default function Chat() {
       setMsgs((m) => [...m, { role: 'assistant', reply: { text: reply }, retryText: isModerationErr(reply) ? undefined : text }]);
     } finally {
       setBusy(false);
-      controlRef.current = null;
     }
   }
 
-  // B2 停止生成：中断当前流；abortedRef 让 doSend 跳过兜底重发并收干净「生成中」态。
+  // B2 停止生成：经 liveGen 中断当前流；收尾（清空占位 / busy）由 liveGen 走 aborted 分支处理。
   const stopGeneration = () => {
     if (!busy) return;
-    abortedRef.current = true;
-    controlRef.current?.abort();
+    if (liveKeyRef.current) stopLiveGen(liveKeyRef.current);
   };
 
   // —— 军师反问选项（ChatReply.asks）——
