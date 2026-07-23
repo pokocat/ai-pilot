@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
-import { View, Text, Textarea, Input, ScrollView } from '@tarojs/components';
+import { View, Text, Textarea, ScrollView } from '@tarojs/components';
 import Taro, { useRouter, useDidHide } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import Login from '../../../components/Login';
@@ -203,9 +203,6 @@ function diffPasted(prev: string, v: string): { pasted: string; kept: string } {
   return { pasted, kept };
 }
 
-const askInputAnchor = (messageIndex: number, questionIndex: number) =>
-  `ask-answer-${messageIndex}-${questionIndex}`;
-
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 const UPLOAD_EXT = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'md', 'markdown', 'txt'];
 // 一次至多带几份：与 server retrieval.MAX_REFS(9) 对齐——选得进来就带得上，不在服务端悄悄丢。
@@ -285,8 +282,6 @@ export default function Chat() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
-  const askFocusTargetRef = useRef('');
-  const askScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
   const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
@@ -422,7 +417,6 @@ export default function Chat() {
   }, [keyboardHeight, refs.length, msgs.length, input, uploading]);
 
   useEffect(() => () => {
-    if (askScrollTimerRef.current) clearTimeout(askScrollTimerRef.current);
     if (pasteSettleTimerRef.current) clearTimeout(pasteSettleTimerRef.current);
     store.setOverlay(false, 'ref-picker');
   }, []);
@@ -877,13 +871,33 @@ export default function Chat() {
   const activeAsks = activeAskIdx >= 0 ? (msgs[activeAskIdx] as Extract<Msg, { role: 'assistant' }>).reply.asks! : [];
   // 选择草稿按消息索引挂靠：换了一条新的提问消息即自动作废旧草稿。
   const [askDraft, setAskDraft] = useState<{ idx: number; sel: Record<number, string>; other: Record<number, string> }>({ idx: -1, sel: {}, other: {} });
+  const [askComposerTarget, setAskComposerTarget] = useState<{ idx: number; qi: number } | null>(null);
   const askSel = askDraft.idx === activeAskIdx ? askDraft.sel : {};
   const askOther = askDraft.idx === activeAskIdx ? askDraft.other : {};
+  const activeAskComposer = askComposerTarget?.idx === activeAskIdx ? askComposerTarget : null;
+  const clearAskComposer = () => {
+    setAskComposerTarget(null);
+    setKeyboardHeight(0);
+  };
+  const openAskComposer = (qi: number) => {
+    setAskDraft((d) => {
+      const sel = d.idx === activeAskIdx ? d.sel : {};
+      const other = d.idx === activeAskIdx ? d.other : {};
+      return { idx: activeAskIdx, sel: { ...sel, [qi]: ASK_OTHER }, other };
+    });
+    setInputFocus(false);
+    setAskComposerTarget({ idx: activeAskIdx, qi });
+    setTimeout(scrollToEnd, 40);
+  };
   const pickAskOption = (qi: number, val: string) => {
     if (busy) return;
-    // 单问题：点选项即发送（对齐开场白 chips 的直觉）；点「其他」聚焦输入框自己打。
+    if (val === ASK_OTHER) {
+      openAskComposer(qi);
+      return;
+    }
+    if (activeAskComposer?.qi === qi) clearAskComposer();
+    // 单问题：点普通选项即发送（对齐开场白 chips 的直觉）。
     if (activeAsks.length === 1) {
-      if (val === ASK_OTHER) { setInputFocus(true); return; }
       doSend(val, sessionId, agent?.key ?? '');
       return;
     }
@@ -898,62 +912,20 @@ export default function Chat() {
     setAskDraft((d) => {
       const sel = d.idx === activeAskIdx ? d.sel : {};
       const other = d.idx === activeAskIdx ? d.other : {};
-      return { idx: activeAskIdx, sel, other: { ...other, [qi]: text } };
+      return { idx: activeAskIdx, sel: { ...sel, [qi]: ASK_OTHER }, other: { ...other, [qi]: text } };
     });
+  const finishAskOther = (qi: number, raw: string) => {
+    const value = raw.trim();
+    clearAskComposer();
+    if (activeAsks.length === 1 && value && agent) doSend(value, sessionId, agent.key);
+  };
   const askAnswerOf = (qi: number): string =>
     askSel[qi] === ASK_OTHER ? (askOther[qi] ?? '').trim() : (askSel[qi] ?? '');
   const askAnsweredCount = activeAsks.filter((_, qi) => !!askAnswerOf(qi)).length;
   const askReady = activeAsks.length > 1 && askAnsweredCount === activeAsks.length;
-  // 问答卡输入可见性：按需「最小滚动」，不对齐顶部（对齐顶部会把卡片滚过头钻到悬浮 chips 条下叠字）。
-  // 键盘弹起后根 padding-bottom=keyboardHeight 已把 .chat-log 压缩，其 rect.bottom 即键盘/composer 之上的可视底边；
-  // 仅当输入项底边越过「可视底边 - 留白」时，才把 scrollTop 增加「刚好露出 + 留白」的量；本就可见则完全不滚。
-  const ensureAskInputVisible = (qi: number, delay = 40) => {
-    const target = askInputAnchor(activeAskIdx, qi);
-    if (askScrollTimerRef.current) clearTimeout(askScrollTimerRef.current);
-    askScrollTimerRef.current = setTimeout(() => {
-      askScrollTimerRef.current = null;
-      if (askFocusTargetRef.current !== target) return;
-      Taro.createSelectorQuery()
-        .select(`#${target}`).boundingClientRect()
-        .select('.chat-log').boundingClientRect()
-        .select('.chat-log').scrollOffset()
-        .exec((res) => {
-          const item = (res?.[0] as { bottom?: number } | null) || null;
-          const log = (res?.[1] as { bottom?: number } | null) || null;
-          const off = (res?.[2] as { scrollTop?: number } | null) || null;
-          if (!item || !log || !off) return;
-          const GAP = 12; // 露出输入框后再留一点呼吸位
-          const visibleBottom = Number(log.bottom || 0) - GAP;
-          const overflow = Number(item.bottom || 0) - visibleBottom;
-          if (overflow <= 0) return; // 本就可见，不滚（也就绝不会向上过头钻到顶部 chips 条下）
-          const nextTop = Number(off.scrollTop || 0) + overflow;
-          // Taro 受控 scrollTop 同值不触发：与当前 state 相等时加 0.5px 扰动强制生效。
-          setScrollTop((prev) => (nextTop === prev ? nextTop + 0.5 : nextTop));
-        });
-    }, delay);
-  };
-  const onAskInputFocus = (qi: number) => {
-    setInputFocus(false);
-    atBottomRef.current = false;
-    askFocusTargetRef.current = askInputAnchor(activeAskIdx, qi);
-    ensureAskInputVisible(qi);
-  };
-  const onAskKeyboardHeightChange = (qi: number, e: { detail?: { height?: number } }) => {
-    const next = Math.max(0, Number(e.detail?.height || 0));
-    setKeyboardHeight(next);
-    // 键盘高度变化后可视区改变，用同一「按需」逻辑重算（80ms 让 padding 压缩后的布局先落定）；收键盘不滚。
-    if (next > 0) ensureAskInputVisible(qi, 80);
-  };
-  const onAskInputBlur = () => {
-    askFocusTargetRef.current = '';
-    if (askScrollTimerRef.current) {
-      clearTimeout(askScrollTimerRef.current);
-      askScrollTimerRef.current = null;
-    }
-    setKeyboardHeight(0);
-  };
   const sendAskAnswers = () => {
     if (!askReady || busy) return;
+    setAskComposerTarget(null);
     const lines = activeAsks.map((a, qi) => `${a.q} ${askAnswerOf(qi)}`);
     doSend(lines.join('\n'), sessionId, agent?.key ?? '');
   };
@@ -1571,7 +1543,7 @@ export default function Chat() {
                   )}
                 </View>
                 <RefNotices notices={m.refNotices} />
-                {/* 军师反问选项卡（问卷卡）：卡片容器 + 逐题点选 + 「其他」自填；单问题点选即发送，多问题答完一起发送。 */}
+                {/* 军师反问选项卡：保留卡片内填写；可见文字用 View 渲染，键盘由 ScrollView 外的 Textarea 承接。 */}
                 {i === activeAskIdx && activeAsks.length ? (
                   <View className="ask-card">
                     <View className="ask-head">
@@ -1587,7 +1559,7 @@ export default function Chat() {
                     </View>
                     <View className="ask-body">
                       {activeAsks.map((a, qi) => (
-                        <View key={qi} id={askInputAnchor(activeAskIdx, qi)} className="ask-item">
+                        <View key={qi} className="ask-item">
                           <View className="ask-q">
                             {activeAsks.length > 1 ? (
                               <Text className="ask-qn serif" style={{ color: accent }}>{qi + 1}</Text>
@@ -1613,18 +1585,15 @@ export default function Chat() {
                               <Text>其他…</Text>
                             </View>
                           </View>
-                          {activeAsks.length > 1 && askSel[qi] === ASK_OTHER ? (
-                            <Input
-                              className="ask-other-input"
-                              value={askOther[qi] ?? ''}
-                              placeholder="输入你的答案…"
-                              adjustPosition={false}
-                              cursorSpacing={24}
-                              onFocus={() => onAskInputFocus(qi)}
-                              onBlur={onAskInputBlur}
-                              onInput={(e) => setAskOtherText(qi, e.detail.value)}
-                              onKeyboardHeightChange={(e) => onAskKeyboardHeightChange(qi, e)}
-                            />
+                          {askSel[qi] === ASK_OTHER ? (
+                            <View
+                              className={`ask-other-input ${activeAskComposer?.qi === qi ? 'focus' : ''}`}
+                              onClick={() => openAskComposer(qi)}
+                            >
+                              <Text className={askOther[qi] ? 'ask-other-value' : 'ask-other-placeholder'}>
+                                {askOther[qi] || '输入你的答案…'}
+                              </Text>
+                            </View>
                           ) : null}
                         </View>
                       ))}
@@ -1841,6 +1810,31 @@ export default function Chat() {
           </View>
         </View>
       </View>
+
+      {/* 反问卡「其他」的键盘捕获器放在聊天 ScrollView 外；卡片内只渲染 WebView 文本，避免 Android 原生文字层漂移。 */}
+      {activeAskComposer ? (
+        <Textarea
+          className="ask-keyboard-capture"
+          value={askOther[activeAskComposer.qi] ?? ''}
+          focus
+          adjustPosition={false}
+          cursorSpacing={24}
+          maxlength={-1}
+          showConfirmBar={false}
+          confirmType="done"
+          onInput={(e) => {
+            setAskOtherText(activeAskComposer.qi, e.detail.value);
+            return e.detail.value;
+          }}
+          onConfirm={(e) => finishAskOther(activeAskComposer.qi, e.detail.value)}
+          onBlur={clearAskComposer}
+          onKeyboardHeightChange={(e) => {
+            const next = Math.max(0, Number(e.detail?.height || 0));
+            setKeyboardHeight(next);
+            if (next > 0) setTimeout(scrollToEnd, 40);
+          }}
+        />
+      ) : null}
 
       {/* @引用选择器 */}
       {picker && (

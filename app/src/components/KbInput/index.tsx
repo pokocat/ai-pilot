@@ -1,9 +1,7 @@
 import { Input } from '@tarojs/components';
-import { useScreenKb } from '../Screen/keyboard';
 
-// 键盘安全输入框：置于 Screen 滚动区内的 <Input> 用它替代原生 Input，
-// 关掉 weapp 默认的整页上推（adjustPosition=false，全屏 ScrollView 下会失效导致输入框被键盘遮住），
-// 改由 Screen 收缩滚动区 + scrollIntoView(锚点) 把输入框滚到键盘上方。anchorId 需页面内唯一。
+// 键盘安全输入框：聚焦期间不手动移动父级 ScrollView，交给微信原生上推处理。
+// Android 的 Input 文字是独立原生层，聚焦后再改 scrollTop/父容器位置会让文字与输入框失去同步。
 interface KbInputProps {
   anchorId: string;
   className?: string;
@@ -17,14 +15,13 @@ interface KbInputProps {
 }
 
 export default function KbInput({ anchorId, onConfirm, ...rest }: KbInputProps) {
-  const ensureVisible = useScreenKb();
   return (
     <Input
       {...rest}
       id={anchorId}
-      adjustPosition={false}
+      alwaysEmbed
+      adjustPosition
       cursorSpacing={20}
-      onFocus={() => ensureVisible(anchorId)}
       onConfirm={onConfirm}
     />
   );

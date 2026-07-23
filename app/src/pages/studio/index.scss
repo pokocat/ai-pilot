@@ -429,36 +429,28 @@
   color: var(--green); background: var(--green-soft);
 }
 
-/* —— 目标编辑浮层（V7-10：底部输入 sheet）——
-   五要素对齐：z-index 900 字面量 / 遮罩 rgba(22,25,29,.55) / 圆角 var(--r-lg) / catchMove（见 tsx）。
-   注：本层用 transform 做键盘上顶避让（C6），与基座 sheet-rise（同样动画 transform）冲突，
-   故不迁基座、不加 sheet-rise——入场以 transform 过渡承载。 */
-.goal-sheet-mask {
-  position: fixed; inset: 0; z-index: 900; /* = --z-sheet，weapp 真机 page 级 var 用于 z-index 不稳定，见 app.scss token 说明 */
-  background: rgba(22, 25, 29, .55);
-  display: flex; align-items: flex-end; justify-content: center;
+/* —— 目标就地编辑器 ——
+   必须留在原生页面流里，不放进 fixed 弹层或纵向 ScrollView，避免 Android Input 原生文字层错位。 */
+.goal-editor {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-sizing: border-box;
+  margin-top: 12px;
+  padding: 18px;
 }
-.goal-sheet {
-  width: 100%; max-width: 600px;
-  background: var(--bg, #fff); border-radius: var(--r-lg) var(--r-lg) 0 0;
-  padding: 10px 20px calc(20px + env(safe-area-inset-bottom)) 20px;
-  transition: margin-bottom .2s ease; /* C6：键盘弹起时上顶避让的过渡（用 margin 而非 transform，避免 weapp 原生输入层错位） */
-  display: flex; flex-direction: column; align-items: stretch;
-  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
-}
-.gs-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 auto 16px; }
+.ge-head { display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; }
+.ge-copy { flex: 1; min-width: 0; }
+.ge-close { color: var(--ink-3); flex-shrink: 0; font-size: 13px; padding: 3px 0 10px 12px; }
 .gs-title { font-size: 18px; font-weight: 600; color: var(--ink); }
-.gs-hint { margin-top: 6px; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+.gs-hint { display: block; margin-top: 6px; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
 .gs-input {
   height: 46px; margin-top: 14px; padding: 0 14px;
   border-radius: 13px; background: var(--surface); border: 1px solid var(--line);
   font-size: 14px; color: var(--ink);
 }
-.gs-actions { display: flex; gap: 10px; margin-top: 16px; }
-.gs-btn {
-  flex: 1; height: 46px; border-radius: 13px;
-  display: flex; align-items: center; justify-content: center;
-  color: #FBFAF6; font-size: 14px; font-weight: 600;
+.ge-save {
+  align-items: center; border-radius: 13px; color: #FBFAF6; display: flex;
+  font-size: 14px; font-weight: 600; height: 46px; justify-content: center; margin-top: 14px;
 }
-.gs-btn:active { opacity: .85; }
-.gs-btn.ghost { color: var(--ink-2); background: var(--surface-2); }
+.ge-save:active { opacity: .85; }

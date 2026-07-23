@@ -72,7 +72,6 @@ export default function Studio() {
   const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
   const [buying, setBuying] = useState<Agent | null>(null);
   const [dossier, setDossier] = useState<Dossier | null>(null);
-  const [kbH, setKbH] = useState(0); // C6：键盘高度，用于把目标编辑 sheet 上顶避让
   const [view, setView] = useState<ExecView>('today');
   const [newOrder, setNewOrder] = useState('');
   const [bf, setBf] = useState({ leads: '', consults: '', deals: '' });
@@ -86,20 +85,6 @@ export default function Studio() {
   // WO-10：本周经营周报是否已填报（用于复盘按钮旁的轻提示；null=未知/无行业模板不提示）
   const [bizFilled, setBizFilled] = useState<boolean | null>(null);
   const und = s.me()?.understanding;
-
-  // 目标编辑浮层与底部导航栏协同（键控，卸载复位）。
-  useEffect(() => {
-    s.setOverlay(!!goalEdit, 'goal-edit');
-    return () => s.setOverlay(false, 'goal-edit');
-  }, [goalEdit]);
-
-  // C6：目标编辑 sheet 为 fixed 定位，键盘弹起会遮挡输入框。监听键盘高度把 sheet 上顶避让。
-  useEffect(() => {
-    if (!goalEdit) { setKbH(0); return; }
-    const handler = (res: { height: number }) => setKbH(res.height || 0);
-    Taro.onKeyboardHeightChange?.(handler);
-    return () => { Taro.offKeyboardHeightChange?.(handler); setKbH(0); };
-  }, [goalEdit]);
 
   // C1：数据拉取（登录后才拉；未登录只挂登录引导，不请求）。
   const loadStudio = () => {
@@ -280,7 +265,7 @@ export default function Studio() {
   const mainOrderButton = firstUndone ? '生成脚本' : todayOrders.length ? '生成复盘' : '生成今日军令';
 
   return (
-    <Screen topInset>
+    <Screen topInset scroll={false}>
       <View className="pad exec">
         {/* 页头（exec-nav）：左「案卷」· 中「军令」· 右「提醒」 */}
         <View className="exec-nav tab-page-head">
@@ -397,6 +382,31 @@ export default function Studio() {
             );
           })}
         </View>
+
+        {/* Android 微信原生 Input 在 fixed/ScrollView 内会与文字层错位，目标改为原生页面流内就地编辑。 */}
+        {goalEdit ? (
+          <View className="goal-editor">
+            <View className="ge-head">
+              <View className="ge-copy">
+                <Text className="gs-title serif">{goalEdit.label}目标</Text>
+                <Text className="gs-hint">一句话目标 + 关键指标，军师复盘时对齐这条。</Text>
+              </View>
+              <Text className="ge-close" onClick={() => setGoalEdit(null)}>取消</Text>
+            </View>
+            <Input
+              className="gs-input"
+              value={goalDraft}
+              placeholder="如：营收 ×2，复购率 30%"
+              focus
+              alwaysEmbed
+              adjustPosition
+              cursorSpacing={20}
+              onInput={(e) => setGoalDraft(e.detail.value)}
+              onConfirm={saveGoal}
+            />
+            <View className="ge-save" style={{ background: accent }} onClick={saveGoal}><Text>保存目标</Text></View>
+          </View>
+        ) : null}
 
         {/* 视图切换（exec-seg）：今日军令 / 周计划 / 复盘 */}
         <View className="exec-seg">
@@ -637,31 +647,6 @@ export default function Studio() {
           <Text>{mainOrderButton}</Text>
         </View>
       </View>
-
-      {/* V7-10：目标阶梯内联编辑浮层（底部输入 sheet） */}
-      {goalEdit ? (
-        <View className="goal-sheet-mask" catchMove onClick={() => setGoalEdit(null)}>
-          {/* 键盘避让用 margin-bottom 抬升，不用 transform——weapp 里 transform 会让 Input 的原生输入层错位（文字与框对不上） */}
-          <View className="goal-sheet" style={kbH ? { marginBottom: `${kbH}px` } : undefined} onClick={(e) => e.stopPropagation()}>
-            <View className="gs-grip" />
-            <Text className="gs-title serif">{goalEdit.label}目标</Text>
-            <Text className="gs-hint">一句话目标 + 关键指标，军师复盘时对齐这条。</Text>
-            <Input
-              className="gs-input"
-              value={goalDraft}
-              placeholder="如：营收 ×2，复购率 30%"
-              focus
-              adjustPosition={false}
-              onInput={(e) => setGoalDraft(e.detail.value)}
-              onConfirm={saveGoal}
-            />
-            <View className="gs-actions">
-              <View className="gs-btn ghost" onClick={() => setGoalEdit(null)}><Text>取消</Text></View>
-              <View className="gs-btn" style={{ background: accent }} onClick={saveGoal}><Text>保存</Text></View>
-            </View>
-          </View>
-        </View>
-      ) : null}
 
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); openAgent(a.key); }} />
 

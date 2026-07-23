@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-22** · **修复 Android 真机输入文字不可见/漂到页面顶部，并恢复反问卡原交互**：确认根因是微信原生输入层与纵向 `ScrollView`、fixed 弹层的坐标体系冲突；执行页切换为原生页面滚动，目标编辑改为目标阶梯下方就地展开；对话反问卡「其他」恢复卡片内输入外观，卡片用 View/Text 实时显示草稿，真正接收键盘字符的透明 Textarea 移到聊天 ScrollView 外，避免原生文字层随聊天滚动错位；未采用微信端不存在的 `enableNative=false`。影响面：app Screen/KbInput、执行页目标与任务回填、对话反问卡键盘捕获 + AGENTS/CHANGELOG。
+
 - **2026-07-20** · **初诊完成 CTA 去固定轮次化**：速诊结果页按钮由「想要完整作战方案？进参谋室聊 6 轮」改为「继续问策，完善这份判断」，继续进入总军师完整诊断，但不再把内部轮次机制当作用户任务。影响面：小程序速诊结果页可见文案；不改诊断流程、路由或服务端逻辑。
 
 - **2026-07-20** · **小程序 WebView 滚动区与系统信息 API 告警清理**：对话流和参谋室横滑栏不再把 `padding` 直接写在 `ScrollView` 上，统一迁到内层容器，避免微信 WebView 模式忽略留白导致内容贴边；登录平台、安全头、分享卡 DPR 与对话窗口高度改用 `getDeviceInfo/getWindowInfo`，移除 4 处已废弃的 `getSystemInfoSync`；工程约束补充上传/提审前必须恢复合法域名、web-view、TLS 与 HTTPS 证书检查，本机 `urlCheck:false` 仅限局域网临时预览。验证：`npx tsc --noEmit` 0 错；清理旧 `dist`/Taro 缓存后 `npm run build:weapp` 成功，业务分包产物不再含 `getSystemInfoSync`，ScrollView 本体不再输出 padding。影响面：app 登录、安全头、Canvas 分享卡、对话页滚动布局与小程序发版检查；不改接口、数据结构或正式基础库版本。
