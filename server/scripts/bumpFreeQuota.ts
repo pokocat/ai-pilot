@@ -3,7 +3,7 @@
 //   所以后台调大套餐额度「只影响新用户」，已有用户须本脚本手动刷新。
 //   npm run db:bump-free-quota            → 试运行（DRY，只统计不写库）
 //   npm run db:bump-free-quota -- --apply → 实际写库
-// 只动「体验版」在册用户的既有钱包：quota=balance=套餐新额度（当前 10,000,000）；无钱包的用户不建
+// 只动「体验版」在册用户的既有钱包：quota=balance=套餐新额度（取自 seedConfig，现 200,000）；无钱包的用户不建
 //   （其首次用额度时 loadWallet 会自动按新套餐建号，无需预建）。付费套餐用户不受影响。
 import { PrismaClient } from '@prisma/client';
 import { PLANS } from '../src/data/seedConfig.js';
@@ -11,7 +11,7 @@ import { PLANS } from '../src/data/seedConfig.js';
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes('--apply');
 const FREE_PLAN_NAME = PLANS[0].name; // 体验版（sort=0，注册默认套餐）
-const TARGET = PLANS[0].tokenQuotaPerMonth; // 目标额度（10,000,000）
+const TARGET = PLANS[0].tokenQuotaPerMonth; // 目标额度（取自 seedConfig，现 200,000）
 
 async function main() {
   console.log(`${APPLY ? '🚀 APPLY' : '🔍 DRY-RUN'} 刷新「${FREE_PLAN_NAME}」用户钱包 → quota=balance=${TARGET.toLocaleString()}`);
