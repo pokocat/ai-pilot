@@ -42,7 +42,11 @@ const WEAPP_STREAM_TIMEOUT_MS = 180_000;
 function messageFromData(data: unknown, status: number): string {
   if (data && typeof data === 'object') {
     const d = data as { error?: string; message?: string };
-    // 后端下发的 error/message 已是中文可读话术，优先透传；否则按状态段兜底为友好话术。
+    if (status >= 500) {
+      console.warn('[stream] server error', status, d.error || d.message);
+      return friendlyStatus(status);
+    }
+    // 4xx 后端下发的是可执行的业务提示，优先透传；5xx 技术异常在上方统一收口。
     if (d.error || d.message) return (d.error || d.message)!;
     console.warn('[stream] http error', status, data);
     return friendlyStatus(status);
@@ -53,6 +57,16 @@ function messageFromData(data: unknown, status: number): string {
     catch { console.warn('[stream] http error raw', status, s.slice(0, 200)); return friendlyStatus(status); }
   }
   return friendlyStatus(status);
+}
+
+function friendlyStreamError(message: string | undefined, code: string | undefined): string {
+  const raw = String(message || '').trim();
+  if (code === 'MODERATION_BLOCK') return raw || '这条内容暂时无法处理，请换一种说法。';
+  if (code === 'INTERNAL' || /Cannot read|TypeError|ReferenceError|undefined|stack| at \S+/.test(raw)) {
+    console.warn('[stream] internal generation error', code, raw);
+    return '军师暂时没能完成这次回答，请稍后重试。';
+  }
+  return raw || '军师暂时没能完成这次回答，请稍后重试。';
 }
 
 async function responseErrorMessage(res: Response): Promise<string> {
@@ -67,7 +81,7 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
   let ok = true;
   for (const e of events) {
     const d = e.data as {
-      id?: string; text?: string; messageId?: string; message?: string; kind?: string;
+      id?: string; text?: string; messageId?: string; message?: string; code?: string; kind?: string;
       title?: string; icon?: string; meta?: string; index?: number; h?: string; b?: string; list?: string[];
       trust?: string; actions?: string[]; learned?: boolean; agentName?: string; refNotices?: string[];
     } & ChatReply;
@@ -99,7 +113,11 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
     }
     else if (e.event === 'memory') h.onMemory?.({ learned: d?.learned, agentName: d?.agentName });
     else if (e.event === 'done') { if (state.rendered) { h.onDone?.(d?.messageId); state.finished = true; } }
-    else if (e.event === 'error') { ok = false; state.finished = true; h.onError?.(d?.message ?? '生成失败'); }
+    else if (e.event === 'error') {
+      ok = false;
+      state.finished = true;
+      h.onError?.(friendlyStreamError(d?.message, d?.code));
+    }
   }
   return ok;
 }

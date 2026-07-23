@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, login, uniquePhone } from './helpers.ts';
 import { prisma } from '../src/db.ts';
-import { computeChart, computeAndStoreChart, loadChart, equationOfTimeMinutes, PAIPAN_ENGINE_VERSION, type PaipanInput } from '../src/services/paipan.ts';
+import { chartBriefing, computeChart, computeAndStoreChart, loadChart, equationOfTimeMinutes, PAIPAN_ENGINE_VERSION, type PaipanInput } from '../src/services/paipan.ts';
 
 before(async () => {
   await getApp();
@@ -70,6 +70,17 @@ test('确定性：同一输入两次排盘结果逐字节一致', () => {
   const a = computeChart(KNOWN, 2026);
   const b = computeChart(KNOWN, 2026);
   assert.equal(JSON.stringify(a), JSON.stringify(b));
+});
+
+test('存量 paipan-v1 命盘缺少调候字段时仍可生成对话简报', () => {
+  const legacy = JSON.parse(JSON.stringify(computeChart(KNOWN, 2026))) as ReturnType<typeof computeChart> & {
+    tiaoHou?: ReturnType<typeof computeChart>['tiaoHou'];
+  };
+  legacy.engineVersion = 'paipan-v1';
+  delete legacy.tiaoHou;
+  const briefing = chartBriefing(legacy as ReturnType<typeof computeChart>, 2026);
+  assert.match(briefing, /系统排盘引擎 paipan-v1/);
+  assert.doesNotMatch(briefing, /调候（寒暖燥湿之需）/);
 });
 
 test('农历输入等价：1988 正月廿八 = 公历 1988-03-15，命盘一致', () => {

@@ -345,13 +345,18 @@ export function chartBriefing(chart: ChartView, nowYear: number): string {
   const p = chart.pillars;
   const four = [p.year.ganZhi, p.month.ganZhi, p.day.ganZhi, p.time?.ganZhi ?? '??（时辰不确定）'].join(' ');
   const cur = chart.daYun.list.filter((d) => d.startYear <= nowYear).pop();
+  // paipan-v1 存量快照没有 tiaoHou；命盘快照不强制迁移，简报侧需向后兼容。
+  const tiaoHouGods = Array.isArray(chart.tiaoHou?.gods) ? chart.tiaoHou.gods : [];
+  const tiaoHouElements = Array.isArray(chart.tiaoHou?.elements) ? chart.tiaoHou.elements : [];
   const byPhase = (k: MonthOutlook['phase']) =>
     chart.monthlyOutlook.months.filter((m) => m.phase === k).map((m) => `${m.month}月`).join('、') || '无';
   const turning = chart.monthlyOutlook.months.filter((m) => m.turning).map((m) => `${m.month}月`).join('、') || '无';
   const lines = [
     `【天势档案（系统排盘引擎 ${chart.engineVersion} 计算）】`,
     `四柱：${four}｜日主 ${chart.dayMaster.gan}${chart.dayMaster.element} · ${chart.dayMaster.strength}（${chart.dayMaster.strengthLevel}）｜喜用五行：${chart.favorableElements.join('、')}`,
-    `调候（寒暖燥湿之需）：用神 ${chart.tiaoHou.gods.join('、') || '无'}（五行 ${chart.tiaoHou.elements.join('、') || '无'}）——命局逢此则通，可作喜用之参`,
+    ...(tiaoHouGods.length || tiaoHouElements.length
+      ? [`调候（寒暖燥湿之需）：用神 ${tiaoHouGods.join('、') || '无'}（五行 ${tiaoHouElements.join('、') || '无'}）——命局逢此则通，可作喜用之参`]
+      : []),
     `格局：${chart.pattern.name}（${chart.pattern.traits}）→ 适合打法：${chart.pattern.suits.join('、')}；要避开：${chart.pattern.avoid.join('、')}`,
     chart.ziwei
       ? `紫微：命宫 ${chart.ziwei.soulMajorStars.join('、') || '空宫'}${chart.ziwei.bodyMajorStars.length ? `；身宫 ${chart.ziwei.bodyMajorStars.join('、')}` : ''}`

@@ -415,3 +415,4 @@
 - **2026-06-02** · 后端新增 OpenAI 通用协议 provider（兼容 DeepSeek/Moonshot/Qwen），`isRealKey` 占位 key 自动降级 mock。
 - **2026-06-02** · UI 修复：本命色弹层用 `overlay` 标志隐藏原生底栏；对话入口卡本命色渐变+柔光；首页紧凑化、今日献策分隔线、建档问卷本地兜底。
 - **（更早）** · 「军师」全栈实现落地（Taro 小程序+H5 / 运营后台 / Fastify+Prisma 后端 / LLM Gateway / Agent Memory）。
+- **2026-07-22** · **修复旧命盘导致对话崩溃并收口技术异常展示**：`chartBriefing` 兼容 `paipan-v1` 快照缺少 v2 `tiaoHou` 字段，跳过不存在的调候段而非读取 `undefined.gods`；服务端同步/流式生成失败先记录用户、会话、智能体与原始堆栈，再下发友好提示；普通 HTTP 5xx 与流式 SSE `INTERNAL`/JavaScript 异常在前端继续兜底，原始错误仅保留在日志或 `technicalMessage`；新增旧命盘回归测试。影响面：server 排盘上下文/会话错误观测、app API/流式错误提示 + AGENTS/CHANGELOG。

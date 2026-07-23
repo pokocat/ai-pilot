@@ -168,11 +168,17 @@ function networkErrorInfo(errMsg: string, origin: string): { reason: NetworkReas
   };
 }
 
-function httpErrorInfo(statusCode: number, data: unknown): { message: string; code?: string } {
+function httpErrorInfo(statusCode: number, data: unknown): { message: string; code?: string; technicalMessage?: string } {
   const body = (data || {}) as { error?: string; code?: string };
   if (statusCode === 408 || statusCode === 504) return { message: '军师响应超时了，请稍后重试。', code: body.code };
   if (statusCode === 429) return { message: '请求有点频繁，请稍后再试。', code: body.code };
-  if (statusCode >= 500) return { message: body.error || '军师服务暂时不可用，请稍后重试。', code: body.code };
+  if (statusCode >= 500) {
+    return {
+      message: '军师服务暂时不可用，请稍后重试。',
+      code: body.code,
+      technicalMessage: body.error || `HTTP ${statusCode}`,
+    };
+  }
   return { message: body.error || `HTTP ${statusCode}`, code: body.code };
 }
 
@@ -200,7 +206,12 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
   }
   if (res.statusCode >= 400) {
     const info = httpErrorInfo(res.statusCode, res.data);
-    throw Object.assign(new Error(info.message), { code: info.code, statusCode: res.statusCode, data: res.data });
+    throw Object.assign(new Error(info.message), {
+      code: info.code,
+      statusCode: res.statusCode,
+      data: res.data,
+      technicalMessage: info.technicalMessage,
+    });
   }
   return res.data as T;
 }

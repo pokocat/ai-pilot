@@ -36,6 +36,31 @@ function notifySessionReport(user: { tenantId: string; id: string }, deliverable
   notifyReportReady({ tenantId: user.tenantId, userId: user.id, title: deliverable.title || '报告已生成' });
 }
 
+type GenerationError = Error & { code?: string; statusCode?: number };
+
+function publicGenerationError(err: GenerationError): { message: string; code: string } {
+  const code = err.code ?? 'INTERNAL';
+  if (code === 'MODERATION_BLOCK') {
+    return { message: err.message || '这条内容暂时无法处理，请换一种说法。', code };
+  }
+  if (err.statusCode === 408 || err.statusCode === 504) {
+    return { message: '军师这次思考时间有点久，请稍后重试。', code };
+  }
+  if (err.statusCode === 429) {
+    return { message: '军师现在有点忙，请过一会儿再试。', code };
+  }
+  return { message: '军师暂时没能完成这次回答，请稍后重试。', code };
+}
+
+function logGenerationError(scope: 'sync' | 'stream', err: GenerationError, meta: { userId: string; sessionId?: string; agentKey: string }): void {
+  console.error(`[sessions] ${scope} generation failed`, {
+    ...meta,
+    code: err.code ?? 'INTERNAL',
+    statusCode: err.statusCode,
+    error: err.stack || err.message,
+  });
+}
+
 export async function sessionRoutes(app: FastifyInstance) {
   // 会话列表（按更新时间倒序，带最后一条摘要）
   app.get('/sessions', async (req) => {
@@ -307,8 +332,12 @@ export async function sessionRoutes(app: FastifyInstance) {
           console.error('[sessions] quota refund failed:', (refundErr as Error).message);
         });
       }
-      const e = err as Error & { code?: string; statusCode?: number };
-      return reply.code(e.statusCode ?? (e.code === 'MODERATION_BLOCK' ? 422 : 500)).send({ error: e.message, code: e.code });
+      const e = err as GenerationError;
+      logGenerationError('sync', e, { userId: user.id, sessionId: session.id, agentKey });
+      const publicError = publicGenerationError(e);
+      return reply
+        .code(e.statusCode ?? (e.code === 'MODERATION_BLOCK' ? 422 : 500))
+        .send({ error: publicError.message, code: publicError.code });
     }
   });
 
@@ -548,8 +577,9 @@ export async function sessionRoutes(app: FastifyInstance) {
           console.error('[sessions] quota refund failed:', (refundErr as Error).message);
         });
       }
-      const e = err as Error & { code?: string };
-      send('error', { message: e.message, code: e.code ?? 'INTERNAL' });
+      const e = err as GenerationError;
+      logGenerationError('stream', e, { userId: user.id, sessionId: session?.id, agentKey });
+      send('error', publicGenerationError(e));
     } finally {
       reply.raw.end();
     }
