@@ -39,7 +39,10 @@ export interface DeliverableInput {
  * 前端 ReportCard 同口径的 `cardSection` 归一化，之后再套用既有的关键词匹配逻辑。
  */
 function normalizedSections(d: DeliverableInput): DeliverableSectionInput[] {
-  return ((d.sections ?? []) as unknown as DeliverableSection[]).map(cardSection);
+  // 保留原始 type/items/rows/quads 等专属字段（与归一化后的 h/b/list 一起返回）——extractOrders
+  // 的 phases/gantt 兜底分支需要按 type 过滤并读原始 items/rows，仅归一化 h/b/list 会把 type 一并
+  // 丢掉，导致这两条兜底分支永远匹配不到任何 section（2026-07-23 例行 QA 回归测试发现）。
+  return ((d.sections ?? []) as unknown as DeliverableSection[]).map((s) => ({ ...(s as unknown as DeliverableSectionInput), ...cardSection(s) }));
 }
 
 /** 案卷军令视图（V7-05：含结构化字段，缺省 null/空，前端缺省不渲染）。 */
@@ -87,7 +90,11 @@ export function extractOrders(d: DeliverableInput): string[] {
   const sections = normalizedSections(d);
   const listSections = sections.filter((s) => s.list && s.list.length);
   const preferred = listSections.filter((s) => actionHint.test(s.h ?? ''));
-  let source = (preferred.length ? preferred : listSections).flatMap((s) => s.list || []);
+  // 标题明确命中「行动/计划」等关键词时，直接用该分节的归一化 list（哪怕是 phases/gantt 合成的
+  // 带序号/项目符号文本）——不匹配时才依次尝试 phases.actions / gantt 行 label 的干净兜底，最后才
+  // 退到「随便挑一个有 list 的分节」（避免 phases/gantt 未命中关键词时被合成 list 抢先，2026-07-23
+  // 例行 QA：旧版兜底顺序会让合成 list 覆盖掉本该走 phases.actions 兜底的干净文本）。
+  let source = preferred.flatMap((s) => s.list || []);
   if (!source.length) {
     source = sections.filter((s) => s.type === 'phases')
       .flatMap((s) => (s.items ?? []).flatMap((it) => it.actions ?? []));
@@ -95,6 +102,9 @@ export function extractOrders(d: DeliverableInput): string[] {
   if (!source.length) {
     source = sections.filter((s) => s.type === 'gantt')
       .flatMap((s) => (s.rows ?? []).map((r) => (Array.isArray(r) ? '' : r.label ?? '')).filter(Boolean));
+  }
+  if (!source.length) {
+    source = listSections.flatMap((s) => s.list || []);
   }
   const seen = new Set<string>();
   return source
