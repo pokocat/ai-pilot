@@ -16,6 +16,7 @@
     "build:h5:server": "TARO_APP_MODE=server taro build --type h5",
     "dev:h5:server": "TARO_APP_MODE=server taro build --type h5 --watch",
     "build:weapp:server": "TARO_APP_MODE=server TARO_APP_API=https://wxapi.aibuzz.cn/api taro build --type weapp",
+    "build:weapp:preprod": "TARO_APP_MODE=server TARO_APP_API=https://wxapi.aibuzz.cn/api_preprod taro build --type weapp",
     "upload:weapp": "node scripts/weapp-upload.mjs",
     "serve:h5": "node scripts/serve-h5.mjs"
   },
