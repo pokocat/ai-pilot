@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useState } from 'react';
 import { View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import { switchTo } from '../../services/nav';
@@ -6,9 +6,14 @@ import { store } from '../../services/store';
 import { getToken } from '../../services/token';
 import './index.scss';
 
-// 功能点亮 · 五步 coach marks（原型交互）：入局后首次进入依次点亮五个 tab，
-// 每步覆盖层落底、▾ 指向底栏，「下一步」切到对应 tab 实景演示。
+// 功能点亮 · 五步 coach marks（原型交互）：入局后依次点亮五个 tab，
+// 覆盖层落底、▾ 指向当前 tab，「下一步」切到对应 tab 实景演示。
 // 取代旧 4 步 OnboardSheet（V7-03）；进度落 storage，中途退出下次续走。
+//
+// 状态用「模块级单一状态源 + 订阅」而非各页各自 useState：五个 tab 页各挂一个实例，
+// 若各自持有 active，则某页点「完成」只关掉本页，切到别的 tab 会先用旧 active=true
+// 抢渲染一帧再被 useDidShow 关掉 → 表现为「完成后切 tab 又闪一下引导卡」。改为共享状态后，
+// 任一实例置完成 → 广播 → 所有实例同步渲染为空，杜绝闪现。
 const KEY_PREFIX = 'junshi.coach.v1.';
 const doneKey = () => `${KEY_PREFIX}${getToken() || 'anon'}`;
 const stepKey = () => `${KEY_PREFIX}step.${getToken() || 'anon'}`;
@@ -36,41 +41,50 @@ function loadStep(): number {
     return Number.isFinite(v) && v >= 0 && v < STEPS.length ? v : 0;
   } catch { return 0; }
 }
+function saveStep(n: number): void {
+  try { Taro.setStorageSync(stepKey(), String(n)); } catch { /* noop */ }
+}
+
+// —— 模块级共享状态 + 订阅 —— //
+const shared = { active: false, step: 0 };
+const listeners = new Set<() => void>();
+const notify = () => listeners.forEach((l) => l());
+
+// 依据登录/建档态与 storage 重新裁定是否展示（各实例 mount 与 onShow 时调用）。
+function evaluate(): void {
+  const active = store.isAuthed() && store.isOnboarded() && coachPending();
+  shared.active = active;
+  if (active) shared.step = loadStep();
+  notify();
+}
+function advance(): void {
+  if (shared.step >= STEPS.length - 1) { markCoachDone(); shared.active = false; notify(); return; }
+  const ns = shared.step + 1;
+  saveStep(ns);
+  shared.step = ns;
+  // 先切到目标 tab（其 onShow→evaluate 会以新 step 实景渲染）；本页随即被隐藏，不广播避免旧页闪现新步文案。
+  switchTo(STEPS[ns].route);
+}
+function finish(): void { markCoachDone(); shared.active = false; notify(); }
 
 export default function CoachMarks() {
-  const [active, setActive] = useState(false);
-  const [step, setStep] = useState(0);
-  const syncedRef = useRef(false); // 激活时只纠一次偏（当前页 ≠ 当前步的 tab）
+  const [, force] = useReducer((c: number) => c + 1, 0);
+  const [winW, setWinW] = useState(375);
 
-  const refresh = () => {
-    if (!store.isAuthed() || !store.isOnboarded() || !coachPending()) { setActive(false); return; }
-    setStep(loadStep());
-    setActive(true);
-  };
-  useEffect(refresh, []);
-  useDidShow(refresh);
-
-  // 激活即校准 tab：coach 的每一步都应演示对应 tab 的实景（原型行为）。
   useEffect(() => {
-    if (!active || syncedRef.current) return;
-    syncedRef.current = true;
-    const pages = (Taro.getCurrentPages?.() || []) as { route?: string }[];
-    const cur = pages[pages.length - 1]?.route || '';
-    const want = STEPS[step].route;
-    if (cur && !want.includes(cur)) switchTo(want);
-  }, [active, step]);
+    listeners.add(force);
+    try { setWinW(Taro.getWindowInfo().windowWidth || 375); } catch { /* H5 兜底 375 */ }
+    evaluate();
+    return () => { listeners.delete(force); };
+  }, []);
+  useDidShow(() => { evaluate(); });
 
-  if (!active) return null;
-
+  if (!shared.active) return null;
+  const step = shared.step;
   const last = step >= STEPS.length - 1;
-  const next = () => {
-    if (last) { markCoachDone(); setActive(false); return; }
-    const ns = step + 1;
-    try { Taro.setStorageSync(stepKey(), String(ns)); } catch { /* noop */ }
-    setStep(ns);
-    switchTo(STEPS[ns].route);
-  };
-  const skip = () => { markCoachDone(); setActive(false); };
+
+  // 箭头对准当前 tab 中心：悬浮底栏 margin 14 + 内边距 12，内容区 5 等分（见 custom-tab-bar/index.scss）。
+  const arrowLeft = 26 + ((winW - 52) / 5) * (step + 0.5);
 
   return (
     <View className="coach" catchMove>
@@ -80,15 +94,15 @@ export default function CoachMarks() {
             <View className="cp-seal"><Text className="serif">师</Text></View>
             <Text className="cp-kicker">功能点亮 · {CN[step]} / 五</Text>
           </View>
-          <Text className="cp-skip" onClick={skip}>跳过</Text>
+          <Text className="cp-skip" onClick={finish}>跳过</Text>
         </View>
         <Text className="cp-title serif">{STEPS[step].title}</Text>
         <Text className="cp-text">{STEPS[step].text}</Text>
-        <View className="cp-btn serif" onClick={next}>
+        <View className="cp-btn serif" onClick={advance}>
           <Text>{last ? '开 始 使 用' : '下 一 步'}</Text>
         </View>
       </View>
-      <Text className="coach-arrow">▾</Text>
+      <View className="coach-arrow" style={{ left: `${arrowLeft}px` }} />
     </View>
   );
 }

@@ -9,8 +9,8 @@
   flex-direction: column;
   justify-content: flex-end;
   align-items: stretch;
-  /* 底部让位：悬浮底栏 bottom 14 + 高 66 + 间距 16 */
-  padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 96px);
+  /* 底部让位：卡片落在箭头之上（箭头 bottom≈92、高 18；悬浮底栏 bottom14+高66≈80） */
+  padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 122px);
   animation: coachFadeIn .3s ease both;
 }
 
@@ -90,12 +90,17 @@
 
 .cp-btn:active { opacity: .88; }
 
+/* 指向当前 tab 的实心大三角（left 由 JS 按 tab 序号内联；上下轻微跳动引导视线） */
 .coach-arrow {
-  text-align: center;
-  margin-top: 10px;
-  color: var(--accent);
-  font-size: 20px;
-  animation: coachBlink 1.4s infinite;
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 92px);
+  width: 0; height: 0;
+  border-left: 14px solid transparent;
+  border-right: 14px solid transparent;
+  border-top: 18px solid var(--accent);
+  filter: drop-shadow(0 3px 5px rgba(22, 25, 29, .35));
+  transform: translateX(-50%); /* 基态居中，动画帧沿用 */
+  animation: coachBob 1.15s ease-in-out infinite;
 }
 
 @keyframes coachFadeIn {
@@ -108,7 +113,7 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes coachBlink {
-  0%, 100% { opacity: .25; }
-  50% { opacity: 1; }
+@keyframes coachBob {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(6px); }
 }
