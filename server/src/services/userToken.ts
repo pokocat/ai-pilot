@@ -44,12 +44,17 @@ function looksLikeJwt(token: string): boolean {
   return token.split('.').length === 3;
 }
 
-/** 签发登录态 token。未配密钥 → 返回 userId（历史口径）。 */
-export function signUserToken(userId: string): string {
+/**
+ * 签发登录态 token。未配密钥 → 返回 userId（历史口径）。
+ * opts.ttlSec：覆盖默认有效期（如附身登录用短时 token）；opts.extra：附加 claim（如 imp 附身标记）。
+ * sub/iat/exp 始终由本函数写定，放在 extra 之后，extra 无法覆盖它们。
+ */
+export function signUserToken(userId: string, opts?: { ttlSec?: number; extra?: Record<string, unknown> }): string {
   if (!jwtEnabled()) return userId;
   const now = Math.floor(Date.now() / 1000);
   const header = { alg: 'HS256', typ: 'JWT' };
-  const payload = { sub: userId, iat: now, exp: now + ttlSec() };
+  const life = opts?.ttlSec && opts.ttlSec > 0 ? Math.floor(opts.ttlSec) : ttlSec();
+  const payload = { ...(opts?.extra ?? {}), sub: userId, iat: now, exp: now + life };
   const body = `${b64urlJson(header)}.${b64urlJson(payload)}`;
   return `${body}.${sign(body)}`;
 }

@@ -42,12 +42,17 @@ import {
   type AdminEcoTool,
   type AdminPrescriptionFunnel,
   type AdminBenchmark,
+  type AdminImpersonateResult,
 } from './api';
 import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
 import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
+
+// 附身登录 H5 站点根：H5 静态产物（app/dist）由 nginx 作为站点根提供（见 deploy/nginx.conf.example
+// 的 root /var/www/junshi/h5 + scripts/deploy-prod.sh），故默认取生产域名根。换环境用 VITE_H5_BASE 覆盖。
+const H5_BASE = (import.meta.env.VITE_H5_BASE as string | undefined) ?? 'https://wxapi.aibuzz.cn/';
 
 type Tab = 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
 const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
@@ -308,6 +313,47 @@ function fmtSize(b: number | null): string {
   return `${(b / 1024 / 1024).toFixed(1)}MB`;
 }
 
+// 附身登录（仅超管）：签发目标用户的短时 token，拼成 H5 链接以其身份登入排查。链接与 token 均可复制；
+// 展示失效时间，未配 APP_JWT_SECRET 时展示后端 warning（token 为明文且不过期）。
+function ImpersonateBlock({ userId, userName, toast }: { userId: string; userName: string; toast: (m: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<AdminImpersonateResult | null>(null);
+  const [err, setErr] = useState('');
+  const link = result ? `${H5_BASE}${H5_BASE.includes('?') ? '&' : '?'}imp_token=${encodeURIComponent(result.token)}` : '';
+  const sign = async () => {
+    setErr(''); setBusy(true);
+    try { setResult(await api.impersonate(userId)); }
+    catch (e) { setResult(null); setErr((e as Error).message || '签发失败'); }
+    setBusy(false);
+  };
+  const copy = (text: string, label: string) => {
+    navigator.clipboard?.writeText(text).then(() => toast(`已复制${label}`)).catch(() => toast(text));
+  };
+  return (
+    <div className="blk">
+      <div className="blk-h"><Icon name="user" size={15} /><span className="t">附身登录</span><span className="badge">仅超管</span></div>
+      <div className="blk-d">为「{userName}」签发一枚短时令牌，凭 H5 链接以其身份登入排查线上问题。链接切勿转发，用后即弃，签发会留审计。</div>
+      <button type="button" className="mini-btn primary" disabled={busy} onClick={sign}>{busy ? '签发中…' : '签发附身链接'}</button>
+      {err && <div className="blk-d err"><Icon name="alert" size={13} /> {err}</div>}
+      {result && (
+        <div className="mem-list">
+          <div className="mem-card">
+            <span className="mi"><Icon name="arrow" size={16} /></span>
+            <div className="mb">
+              <div className="mt">附身链接</div>
+              <div className="mm">{link}</div>
+              <div className="mm">{result.expiresAt ? `令牌 ${fmtTime(result.expiresAt)} 失效` : '令牌不过期（未启用签名，明文令牌）'}</div>
+            </div>
+            <button type="button" className="mini-btn" onClick={() => copy(link, '链接')}>复制链接</button>
+            <button type="button" className="mini-btn" onClick={() => copy(result.token, '令牌')}>复制令牌</button>
+          </div>
+          {result.warning && <div className="blk-d err"><Icon name="alert" size={13} /> {result.warning}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: string; isOwner: boolean; onClose: () => void; toast: (m: string) => void }) {
   const [data, setData] = useState<AdminUserDetail | null>(null);
   const [ctx, setCtx] = useState<AdminUserContext | null>(null);
@@ -370,6 +416,8 @@ function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: string; 
       </div>
       <div className="ad-db">
         <UsageQuotaBlock userId={userId} isOwner={isOwner} toast={toast} />
+
+        {isOwner && <ImpersonateBlock userId={userId} userName={u.name} toast={toast} />}
 
         <div className="blk">
           <div className="blk-h"><Icon name="crown" size={15} /><span className="t">付费智能体开通</span><span className="badge">{data.agents.filter((a) => a.owned).length}/{data.agents.length}</span></div>
