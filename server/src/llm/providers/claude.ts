@@ -155,7 +155,7 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     model: cfg.model,
     max_tokens: CHAT_MAX_TOKENS,
     temperature: cfg.temperature,
-    system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
+    system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
     messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
   }, { timeout: cfg.timeoutMs });
   assertChatOutputComplete('Claude', res.stop_reason, res.usage.output_tokens);
@@ -179,7 +179,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
     model: cfg.model,
     max_tokens: CHAT_MAX_TOKENS,
     temperature: cfg.temperature,
-    system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
+    system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
     messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
   }, { timeout: Math.max(cfg.timeoutMs, 120_000) });
   let text = '';
@@ -294,7 +294,7 @@ export async function claudeChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
   const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
   const r = await runToolLoop({
     step: claudeStep(cfg, ctx.images),
-    system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`,
+    system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`,
     history: ctx.history,
     userMessage: ctx.userMessage,
     tools,

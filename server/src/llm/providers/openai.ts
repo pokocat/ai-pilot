@@ -278,7 +278,7 @@ export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
   const data = await callChat(cfg, {
     max_tokens: CHAT_MAX_TOKENS,
     messages: [
-      { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。` },
+      { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。` },
       ...history,
       { role: 'user', content: openaiUserContent(ctx.userMessage, ctx.images) },
     ] as OAMessage[],
@@ -298,7 +298,7 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   const body = {
     max_tokens: CHAT_MAX_TOKENS,
     messages: [
-      { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。` },
+      { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。` },
       ...history,
       { role: 'user', content: openaiUserContent(ctx.userMessage, ctx.images) },
     ] as OAMessage[],
@@ -383,7 +383,7 @@ export async function openaiChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
   const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const r = await runToolLoop({
     step: openaiStep(cfg, ctx.images),
-    system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`,
+    system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`,
     history: ctx.history,
     userMessage: ctx.userMessage,
     tools,

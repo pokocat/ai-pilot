@@ -14,6 +14,7 @@ import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
 import type { MessageRef, Deliverable, ChatReply } from '../llm/schema.js';
+import { scrubSectionJson } from '../llm/schema.js';
 import { extractAndRecordProphecies } from '../services/prophecyLog.js';
 import { resolveMode } from '../services/intent.js';
 import { recordReview } from '../services/reviewLog.js';
@@ -154,7 +155,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       title: s.title,
       projectId: s.projectId,
       generating: isSessionGenerating(s.id),
-      messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: m.contentJson, at: m.createdAt, refs: (m.refsJson as MessageRef[] | null) ?? undefined })),
+      messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: scrubAssistantContent(m.role, m.contentJson), at: m.createdAt, refs: (m.refsJson as MessageRef[] | null) ?? undefined })),
     };
   });
 
@@ -661,8 +662,23 @@ function historyMessage(row: HistoryRow): { role: string; text: string } | null 
     const heads = (c.sections ?? []).map((s) => s.h).filter(Boolean).join('、');
     return { role: 'assistant', text: `（已为你产出《${c.title ?? '成果'}》${heads ? '：' + heads : ''}）` };
   }
-  const text = (c.text ?? '').trim();
-  return text ? { role: row.role === 'user' ? 'user' : 'assistant', text } : null;
+  const raw = (c.text ?? '').trim();
+  if (!raw) return null;
+  const role = row.role === 'user' ? 'user' : 'assistant';
+  // 历史脱敏：assistant 旧回复若泄漏过类型化 section JSON（完整/残缺），擦成占位句再进历史，
+  // 否则脏输出会作为「示例」反哺模型、自我强化。user 原文不动。
+  const text = role === 'assistant' ? scrubSectionJson(raw) : raw;
+  return { role, text };
+}
+
+// 读取端展示清洗（存量自愈，不改库）：对 role=assistant 的 contentJson.text 擦除泄漏的 section JSON。
+// 解析不出可读结构时统一用占位句；DB 数据保持原样，仅读时清洗。
+function scrubAssistantContent(role: string, content: unknown): unknown {
+  if (role !== 'assistant' || !content || typeof content !== 'object') return content;
+  const c = content as { text?: unknown };
+  if (typeof c.text !== 'string' || !c.text) return content;
+  const cleaned = scrubSectionJson(c.text);
+  return cleaned === c.text ? content : { ...c, text: cleaned };
 }
 
 function clipText(text: string, max: number): string {

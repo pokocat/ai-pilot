@@ -446,6 +446,98 @@ export function healDeliverableSections<T>(content: T): T {
   return { ...c, sections: normalizeDeliverableSections(c.sections) } as T;
 }
 
+// —— 聊天回复泄漏防护：把混进「对话正文」的类型化 section JSON 片段擦成占位句。 ——
+// 背景：聊天与成果共用 V6 系统提示词（含类型化 section 格式规范），经 qnaigc 网关的模型
+// 偶尔会在纯文本回复里吐出 section JSON（完整 [{"type":...}]、残缺 ["type":...、裸对象序列
+// {"type":...},{"type":...}），且带字符级毛病（缺开头 {、":" 被写成 ">"）。用户端满屏源码，
+// 且这些脏回复原样进历史会反哺模型自我强化。此函数供①历史脱敏 ②读取端展示清洗共用。
+
+// 权威 section 类型集合（与 typedSectionOf 的 switch 分支一一对应）。type 白名单是误伤防护的核心：
+// 只有 "type" 值落在此集合、且处于结构化位置（前接 [ { ,）的片段才被判为 section JSON，
+// 用户聊到的普通 JSON（"type":"object"/"user"/... 或散文里内联提到 "type"）不受影响。
+const KNOWN_SECTION_TYPES = ['hero', 'callout', 'stats', 'roster', 'table', 'phases', 'timeline', 'quote', 'letter', 'gauge', 'matrix', 'gantt'];
+const SECTION_TYPE_ANCHOR = new RegExp(`"type"\\s*[:>]\\s*"(?:${KNOWN_SECTION_TYPES.join('|')})"`, 'g');
+const SECTION_SCRUB_PLACEHOLDER = '（此处曾呈结构化图表，内容略）';
+
+/**
+ * 从 start（必为 [ 或 {）起做括号配平前向扫描，返回该 section 片段的结束下标（不含）。
+ * - 配平成功（depth 归零）→ 完整形态，边界即闭合处；支持 {..},{..} / [{..},{..}] 顶层序列续吞。
+ * - 配平失败（残缺，缺闭合括号）→ 保守收口：吞到「下一个空行 / 下一行是 Markdown 标题 / 文本结尾」，
+ *   宁可少吞（残留一截 JSON 尾）也不多吞正常散文。字符串内的括号/换行/井号一律不计（inStr 屏蔽）。
+ */
+function scanSectionBlob(text: string, start: number): number {
+  const n = text.length;
+  let depth = 0;
+  let inStr = false;
+  let started = false;
+  for (let i = start; i < n; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (ch === '\\') { i++; continue; } // 跳过转义符及其后一字符
+      if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '[' || ch === '{') { depth++; started = true; continue; }
+    if (ch === ']' || ch === '}') {
+      depth--;
+      if (depth <= 0) {
+        // 一组/一序列闭合。若紧跟 ,{ 或 ,[（顶层对象/数组序列）→ 继续吞下一段。
+        let j = i + 1;
+        while (j < n && /\s/.test(text[j])) j++;
+        if (text[j] === ',') {
+          let k = j + 1;
+          while (k < n && /\s/.test(text[k])) k++;
+          if (text[k] === '{' || text[k] === '[') { depth = 0; continue; }
+        }
+        return i + 1;
+      }
+      continue;
+    }
+    // 残缺兜底：仍在片段内（depth>0）遇到「空行」或「下一行以 Markdown 标题起头」即收口，避免吞掉后续散文。
+    if (started && depth > 0 && ch === '\n' && /^\n[ \t]*(?:\n|#{1,6}[ \t])/.test(text.slice(i))) {
+      return i;
+    }
+  }
+  return n; // 扫到结尾仍未配平：残缺吞到文本末（片段延伸至消息结尾的常见形态）。
+}
+
+/**
+ * 擦除文本中混入的类型化 section JSON 片段（完整/残缺/裸对象序列），替换为简短占位句。
+ * 纯函数，绝不抛异常；对不含 section JSON 的普通文本（含用户聊到的普通 JSON、中文散文）幂等返回。
+ * 误伤防护：①type 值必须属 KNOWN_SECTION_TYPES；②片段起点必须结构化（"type" 前紧邻 [ { ,）——
+ * 散文里内联提到的 "type":"table" 不满足②被放行。
+ */
+export function scrubSectionJson(text: string): string {
+  if (!text || !text.includes('"type"')) return text; // 快路径：连 "type" 都没有直接返回
+  let out = '';
+  let cursor = 0;
+  while (cursor < text.length) {
+    SECTION_TYPE_ANCHOR.lastIndex = cursor;
+    const m = SECTION_TYPE_ANCHOR.exec(text);
+    if (!m) { out += text.slice(cursor); break; }
+    const anchor = m.index; // "type" 的起始引号下标
+    // 结构化校验：向左跳过空白，要求紧邻字符是 [ { , 之一；否则判为散文内联提及，放行。
+    let s = anchor - 1;
+    while (s >= 0 && /\s/.test(text[s])) s--;
+    if (s < 0 || (text[s] !== '[' && text[s] !== '{' && text[s] !== ',')) {
+      out += text.slice(cursor, anchor + 1);
+      cursor = anchor + 1; // 前移一格避免死循环重匹配
+      continue;
+    }
+    // 片段起点：向左并吞连续的 [ { 与空白（覆盖 [{、[、{ 前缀），但不跨过逗号/散文。
+    let k = s;
+    while (k >= 0 && (text[k] === '[' || text[k] === '{' || /\s/.test(text[k]))) k--;
+    let fragStart = k + 1;
+    while (fragStart < anchor && /\s/.test(text[fragStart])) fragStart++; // 修剪起点前的空白，勿吞散文尾部换行
+    const end = scanSectionBlob(text, fragStart);
+    out += text.slice(cursor, fragStart) + SECTION_SCRUB_PLACEHOLDER;
+    // TODO(read-side v2)：完整可解析的 section 数组可转成可读 Markdown（matrix→小表、stats→要点行），当前统一占位。
+    cursor = Math.max(end, anchor + 1); // 保证前进（残缺 end 理论上 > fragStart，双保险）
+  }
+  return out;
+}
+
 /** 归一化封面文案（title 必填，否则返回 undefined 由渲染端用 Deliverable.title 兜底）。 */
 export function normalizeCover(input: unknown): DeliverableCover | undefined {
   if (!input || typeof input !== 'object') return undefined;
