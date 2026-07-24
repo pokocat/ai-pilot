@@ -74,6 +74,9 @@ function publicGenerationError(err: GenerationError): { message: string; code: s
     // 让用户知道这次是超时还是服务不可用，而不是笼统的「没能完成」（此前一律吞成通用文案）。
     return { message: err.message || 'AI 服务暂时不可用，请稍后重试', code };
   }
+  if (code === 'AI_OUTPUT_TRUNCATED') {
+    return { message: '这次内容比较长，军师还没完整写完。请重试，或让军师分段继续。', code };
+  }
   return { message: '军师暂时没能完成这次回答，请稍后重试。', code };
 }
 

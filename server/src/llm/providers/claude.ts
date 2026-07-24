@@ -8,9 +8,9 @@ import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
 import { runToolLoop } from '../tools/loop.js';
 import type { AdaptiveOut } from './openai.js';
+import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js';
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
-const CHAT_MAX_TOKENS = 4000; // 对话回复上限（放到日常永远碰不到，等于不截断）
 
 // system 拆成「稳定前缀(打缓存断点) + 每轮变化的参考资料」两块，命中缓存按 ~1/10 计费。
 // 提示词不足最低缓存阈值(Opus 4.8 约 4096 token、Sonnet 约 2048)时 cache_control 自动忽略，无副作用。
@@ -158,6 +158,7 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
     messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
   }, { timeout: cfg.timeoutMs });
+  assertChatOutputComplete('Claude', res.stop_reason, res.usage.output_tokens);
   const text = res.content
     .filter((c) => c.type === 'text')
     .map((c) => (c.type === 'text' ? c.text : ''))
@@ -193,6 +194,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   }
   const final = await stream.finalMessage().catch(() => null);
   if (final) usage = usageOf(final);
+  assertChatOutputComplete('Claude', final?.stop_reason, usage.outputTokens);
   const out = requireText(text || final?.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n'), usage, 'chat_stream');
   yield { type: 'done', result: { text: out }, usage };
 }
@@ -261,6 +263,7 @@ export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[]): StepFn
 
     const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create(req, { timeout: Math.max(cfg.timeoutMs, 120_000) });
     const usage = usageOf(res);
+    assertChatOutputComplete('Claude', res.stop_reason, usage.outputTokens);
     const toolUses = res.content.filter((c): c is Anthropic.ToolUseBlock => c.type === 'tool_use');
 
     if (finalName) {

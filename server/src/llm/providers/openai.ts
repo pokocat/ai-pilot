@@ -7,6 +7,7 @@ import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import { runToolLoop } from '../tools/loop.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext, TurnOutput } from '../tools/types.js';
+import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js';
 
 interface OAToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
 // 多模态内容片段（OpenAI vision 协议）：文本或 data URL 图片。
@@ -30,7 +31,7 @@ export function openaiUserContent(userMessage: string, images?: ImageInput[]): s
   return parts;
 }
 interface OAResponse {
-  choices?: { message?: { content?: string | null; tool_calls?: OAToolCall[] } }[];
+  choices?: { message?: { content?: string | null; tool_calls?: OAToolCall[] }; finish_reason?: string | null }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
   error?: { message?: string };
 }
@@ -41,15 +42,14 @@ interface OAStreamChunk {
 }
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
-const CHAT_MAX_TOKENS = 4000; // 对话回复上限（放到日常永远碰不到，等于不截断）
 // 结构化成果通常比普通问答更慢，尤其是强制 tool calling 的兼容网关。
 // 保留 OPENAI_TIMEOUT_MS 作为全局下限；成果请求至少允许两分钟完成。
 const DELIVERABLE_TIMEOUT_MS = 120_000;
 
 type RequestPhase = 'chat_completion' | 'deliverable' | 'chat_stream';
 
-function requestTimeoutMs(cfg: ResolvedAiConfig, body: Record<string, unknown>): number {
-  return body.max_tokens === DELIVERABLE_MAX_TOKENS
+function requestTimeoutMs(cfg: ResolvedAiConfig, phase: RequestPhase): number {
+  return phase === 'deliverable'
     ? Math.max(cfg.timeoutMs, DELIVERABLE_TIMEOUT_MS)
     : cfg.timeoutMs;
 }
@@ -96,10 +96,9 @@ function providerFailure(err: unknown, cfg: ResolvedAiConfig, base: string, phas
 }
 
 // 统一请求封装：注入 baseUrl/model/key/温度，带超时；错误抛出由 gateway 兜底降级 mock。
-async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>): Promise<OAResponse> {
+async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>, phase: RequestPhase = 'chat_completion'): Promise<OAResponse> {
   const base = cfg.baseUrl.replace(/\/+$/, '');
-  const timeoutMs = requestTimeoutMs(cfg, body);
-  const phase: RequestPhase = body.max_tokens === DELIVERABLE_MAX_TOKENS ? 'deliverable' : 'chat_completion';
+  const timeoutMs = requestTimeoutMs(cfg, phase);
   const watch = deadline(timeoutMs);
   try {
     const res = await fetch(`${base}/chat/completions`, {
@@ -232,7 +231,7 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     ] as OAMessage[],
     tools: [{ type: 'function', function: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, parameters: DELIVERABLE_TOOL.input_schema } }],
     tool_choice: { type: 'function', function: { name: DELIVERABLE_TOOL.name } },
-  });
+  }, 'deliverable');
 
   const usage = usageOf(data);
   const args = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
@@ -285,6 +284,7 @@ export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     ] as OAMessage[],
   });
   const usage = usageOf(data);
+  assertChatOutputComplete('OpenAI', data.choices?.[0]?.finish_reason, usage.outputTokens);
   const text = requireText(data.choices?.[0]?.message?.content, usage, 'chat');
   return {
     result: { text },
@@ -312,14 +312,18 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   }
   let text = '';
   let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
+  let finishReason: string | null = null;
   for await (const chunk of chunks) {
     if (chunk.usage) usage = usageOf({ usage: chunk.usage });
+    const reason = chunk.choices?.find((choice) => choice.finish_reason)?.finish_reason;
+    if (reason) finishReason = reason;
     const delta = chunk.choices?.map((c) => c.delta?.content ?? '').join('') ?? '';
     if (delta) {
       text += delta;
       yield { type: 'delta', text: delta };
     }
   }
+  assertChatOutputComplete('OpenAI', finishReason, usage.outputTokens);
   const out = requireText(text, usage, 'chat_stream');
   yield { type: 'done', result: { text: out }, usage };
 }
@@ -518,8 +522,9 @@ export function openaiStep(cfg: ResolvedAiConfig, images?: ImageInput[]): StepFn
       body.tool_choice = 'auto';
     }
 
-    const data = await callChat(cfg, body);
+    const data = await callChat(cfg, body, opts.finalTool ? 'deliverable' : 'chat_completion');
     const usage = usageOf(data);
+    assertChatOutputComplete('OpenAI', data.choices?.[0]?.finish_reason, usage.outputTokens);
     const msg = data.choices?.[0]?.message;
     const calls = msg?.tool_calls ?? [];
 

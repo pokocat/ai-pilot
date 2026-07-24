@@ -37,6 +37,7 @@ export async function hasLiveProvider(): Promise<boolean> {
 // 真实 provider 调用失败：生产（AI_FALLBACK_MOCK=false）不静默兜底 mock，抛错让前端提示重试，避免答非所问。
 function aiUnavailable(err: unknown): Error {
   const e = err as Error & { code?: string };
+  if (e.code === 'AI_OUTPUT_TRUNCATED') return e;
   const aborted = e.code === 'AI_TIMEOUT' || e.name === 'AbortError' || /abort|超时|timeout/i.test(e.message || '');
   return Object.assign(
     new Error(aborted ? 'AI 响应超时，请稍后重试' : 'AI 服务暂时不可用，请稍后重试'),
@@ -366,6 +367,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
     }
   } catch (err) {
     console.error('[gateway] chat fallback to mock:', (err as Error).message);
+    if ((err as Error & { code?: string }).code === 'AI_OUTPUT_TRUNCATED') throw err;
     if (!env.aiFallbackMock) throw aiUnavailable(err);
   }
   if (chatResult) {

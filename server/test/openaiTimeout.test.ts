@@ -76,3 +76,34 @@ test('流式收到字节会续期，累计超出初始上限仍可正常完成',
   }
   assert.deepEqual(events, ['第一段']);
 });
+
+test('流式达到输出上限时不把半截回复当作成功', async () => {
+  let requestedMaxTokens = 0;
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    requestedMaxTokens = Number((JSON.parse(String(init?.body ?? '{}')) as { max_tokens?: number }).max_tokens ?? 0);
+    const enc = new TextEncoder();
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"尚未写完的正文"}}]}\n\n'));
+        controller.enqueue(enc.encode('data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'));
+        controller.enqueue(enc.encode('data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":8000}}\n\ndata: [DONE]\n\n'));
+        controller.close();
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  }) as typeof fetch;
+
+  const events: string[] = [];
+  await assert.rejects(
+    async () => {
+      for await (const event of openaiChatStream(CTX, CFG(1_000))) {
+        if (event.type === 'delta') events.push(event.text);
+      }
+    },
+    (err: Error & { code?: string }) => {
+      assert.equal(err.code, 'AI_OUTPUT_TRUNCATED');
+      return true;
+    },
+  );
+  assert.equal(requestedMaxTokens, 8000);
+  assert.deepEqual(events, ['尚未写完的正文']);
+});

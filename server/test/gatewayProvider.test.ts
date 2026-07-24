@@ -126,6 +126,29 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(outputLogs, 0, '输出不再进入阻塞式 moderation_log');
   });
 
+  test('/generate 流式撞输出上限 → 提示未完成且不落残缺 assistant 消息', async () => {
+    stubStream([
+      'data: {"choices":[{"delta":{"content":"这是一段还没写完的长回复"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":8000}}\n\n',
+      'data: [DONE]\n\n',
+    ]);
+    const t = await login(uniquePhone());
+    const r = await api('POST', '/api/generate', { token: t, body: { text: '给我完整长方案', agentKey: 'general' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const sse = String(r.body);
+    assert.match(sse, /event: token/, '已收到的 provider token 可以正常流出');
+    assert.match(sse, /event: error/);
+    assert.match(sse, /AI_OUTPUT_TRUNCATED/);
+    assert.match(sse, /还没完整写完/);
+    assert.doesNotMatch(sse, /event: done/);
+    assert.doesNotMatch(sse, /event: memory/);
+    const assistantMessages = await prisma.message.count({
+      where: { role: 'assistant', session: { userId: t } },
+    });
+    assert.equal(assistantMessages, 0, '残缺正文不得作为成功 assistant 消息落库');
+  });
+
   test('429 + AI_FALLBACK_MOCK=false → 503 AI_UNAVAILABLE', async () => {
     env.aiFallbackMock = false;
     stubFetch(() => ({ ok: false, status: 429, body: { error: { message: 'rate limited' } } }));
@@ -144,7 +167,7 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(r.body.code, 'AI_UNAVAILABLE');
   });
 
-  test('OpenAI 兼容返回空 content → 503，不落固定追问兜底', async () => {
+  test('OpenAI 兼容返回 length → 503 截断提示，不落固定追问兜底', async () => {
     env.aiFallbackMock = false;
     stubFetch(() => ({
       ok: true, status: 200,
@@ -156,7 +179,8 @@ describe('Gateway × Provider 错误路径', () => {
     const t = await login(uniquePhone());
     const r = await gen(t, '我已经给了背景，继续判断');
     assert.equal(r.status, 503);
-    assert.equal(r.body.code, 'AI_UNAVAILABLE');
+    assert.equal(r.body.code, 'AI_OUTPUT_TRUNCATED');
+    assert.match(String(r.body.error), /还没完整写完/);
     assert.doesNotMatch(String(r.body.error), /我需要更多信息/);
   });
 
