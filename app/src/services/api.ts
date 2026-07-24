@@ -216,6 +216,33 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
   return res.data as T;
 }
 
+// 附身令牌校验专用：用「传入的 token」（而非 storage 里的当前登录态）发只读请求。
+// 与 request() 的关键区别：401 只抛错，**绝不** clearToken / 触发 onAuthLost。
+// 原因：校验阶段还没落地新身份，若走 request() 的全局登出会误清当前登录态并把用户 reLaunch 回登录页。
+// 校验通过后再由调用方 store.afterLogin(token) 正式落地。
+async function requestWithToken<T>(path: string, token: string): Promise<T> {
+  const url = `${BASE_URL}${path}`;
+  let res: Taro.request.SuccessCallbackResult;
+  try {
+    res = await Taro.request({
+      url,
+      method: 'GET',
+      header: { 'Content-Type': 'application/json', 'x-user-id': token },
+    });
+  } catch (e) {
+    const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
+    const origin = BASE_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
+    const info = networkErrorInfo(errMsg, origin);
+    throw Object.assign(new Error(info.message), { code: 'NETWORK_ERROR', reason: info.reason });
+  }
+  if (res.statusCode === 401) throw Object.assign(new Error('令牌无效或已失效'), { code: 'UNAUTHORIZED' });
+  if (res.statusCode >= 400) {
+    const info = httpErrorInfo(res.statusCode, res.data);
+    throw Object.assign(new Error(info.message), { code: info.code, statusCode: res.statusCode });
+  }
+  return res.data as T;
+}
+
 // 上传钩子：透出真实进度与 UploadTask（可取消）。既有调用点不传 hooks 即维持原行为。
 export interface UploadHooks {
   onProgress?: (percent: number) => void;         // 0–100
@@ -312,6 +339,10 @@ export const api = {
   wechatPhoneLogin: (phoneCode: string, loginCode?: string, name?: string) =>
     IS_MOCK ? mock.wechatPhoneLogin(phoneCode, name) : request<LoginResult>('/auth/wechat-phone', 'POST', { phoneCode, loginCode, name }),
   me: () => (IS_MOCK ? mock.me() : request<Me>('/me')),
+  // 附身令牌校验（运营排查）：用传入 token 直连 /me 验证有效性；有效返回目标用户 Me，无效抛错。
+  // 全程不落 storage、不触发全局登出——由调用方在校验通过后再 store.afterLogin(token) 正式落地。
+  verifyImpersonation: (token: string) =>
+    IS_MOCK ? mock.me() : requestWithToken<Me>('/me', token),
   myCredits: () => (IS_MOCK ? mock.myCredits() : request<MyCreditsView>('/me/credits')),
   plans: () => (IS_MOCK ? mock.plans() : request<Plan[]>('/plans')),
   purchasePlan: (id: string) =>

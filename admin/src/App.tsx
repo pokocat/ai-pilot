@@ -333,6 +333,7 @@ function ImpersonateBlock({ userId, userName, toast }: { userId: string; userNam
     <div className="blk">
       <div className="blk-h"><Icon name="user" size={15} /><span className="t">附身登录</span><span className="badge">仅超管</span></div>
       <div className="blk-d">为「{userName}」签发一枚短时令牌，凭 H5 链接以其身份登入排查线上问题。链接切勿转发，用后即弃，签发会留审计。</div>
+      <div className="blk-d">小程序端：复制令牌后，在登录页长按印记（logo），或「我的」→「设置」长按「当前版本」，粘贴令牌即可附身。</div>
       <button type="button" className="mini-btn primary" disabled={busy} onClick={sign}>{busy ? '签发中…' : '签发附身链接'}</button>
       {err && <div className="blk-d err"><Icon name="alert" size={13} /> {err}</div>}
       {result && (

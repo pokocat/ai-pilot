@@ -3,6 +3,7 @@ import { View, Text, Input, Button, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { api } from '../../services/api';
 import Icon from '../Icon';
+import ImpersonateSheet from '../ImpersonateSheet';
 import logo from '../../assets/logo.png';
 import { store } from '../../services/store';
 import './index.scss';
@@ -38,6 +39,7 @@ export default function Login({ open, onLoggedIn }: Props) {
   const [agreed, setAgreed] = useState(false); // 合规：登录前必须主动勾选同意协议/隐私
 
   // 完善资料（微信登录后）
+  const [showImp, setShowImp] = useState(false); // 附身注入弹层（长按印记呼出，运营排查）
   const [avatarLocal, setAvatarLocal] = useState('');
   const [nick, setNick] = useState('');
   const [nickFocus, setNickFocus] = useState(false); // 选完头像后自动聚焦昵称，引出微信键盘「使用微信昵称」
@@ -354,7 +356,8 @@ export default function Login({ open, onLoggedIn }: Props) {
       {stage === 'wechat' && (
         <View className="lg-content">
           <View className="lg-hero">
-            <Image className="lg-mk" src={logo} mode="aspectFit" />
+            {/* 长按印记（logo）：呼出附身注入弹层——运营凭主公签发的令牌以其身份登入排查。 */}
+            <Image className="lg-mk" src={logo} mode="aspectFit" onLongPress={() => setShowImp(true)} />
             <View className="lg-name">
               <Text className="lg-name-ai">AI</Text>
               <Text className="lg-name-cn serif"> 军师</Text>
@@ -518,6 +521,13 @@ export default function Login({ open, onLoggedIn }: Props) {
           </View>
         </View>
       )}
+
+      {/* 附身注入弹层：校验通过后与正常登录同路——交回宿主 onLoggedIn 按 onboarded 分支。 */}
+      <ImpersonateSheet
+        open={showImp}
+        onClose={() => setShowImp(false)}
+        onDone={(onboarded) => { setShowImp(false); onLoggedIn(onboarded); }}
+      />
     </View>
   );
 }
