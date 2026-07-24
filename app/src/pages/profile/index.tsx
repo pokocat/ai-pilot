@@ -97,6 +97,9 @@ export default function Profile() {
       rows: [
         { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => navTo('/packages/main/brief/index') },
         { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: openDossier },
+        ...(fortuneOn ? [
+          { ic: 'trend', t: '命盘报告 · 八字紫微印证', s: '', onClick: () => navTo('/packages/work/mingpan/index') },
+        ] : []),
         { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => navTo('/packages/work/projects/index') },
         { ic: 'flag', t: '战略账本 · 决策与天机', s: '记账验证', onClick: () => navTo('/packages/work/ledger/index') },
       ],
@@ -116,7 +119,6 @@ export default function Profile() {
         { ic: 'doc', t: '订单支付 / 算力明细', s: '', onClick: () => navTo('/packages/work/credits/index') },
         ...(fortuneOn ? [
           { ic: 'spark', t: '送你一卦 · 给朋友出速写卡', s: '', onClick: () => navTo('/packages/work/gift/index') },
-          { ic: 'trend', t: '命盘报告 · 八字紫微印证', s: '', onClick: () => navTo('/packages/work/mingpan/index') },
         ] : []),
         { ic: 'clock', t: '提醒与日历', s: reminderHint(me?.service), onClick: () => navTo('/packages/work/reminders/index') },
         { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
