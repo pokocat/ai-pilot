@@ -102,7 +102,8 @@ export async function listKnowledge(
   filter?: { projectId?: string; kind?: string },
 ): Promise<KnowledgeItemT[]> {
   const rows = await prisma.knowledgeItem.findMany({
-    where: { tenantId, ...(filter?.projectId ? { projectId: filter.projectId } : {}), ...(filter?.kind ? { kind: filter.kind } : {}) },
+    // 图片（sourceType='image'）是聊天多模态上下文，不是可 @ 引用的资料，从候选列表排除。
+    where: { tenantId, sourceType: { not: 'image' }, ...(filter?.projectId ? { projectId: filter.projectId } : {}), ...(filter?.kind ? { kind: filter.kind } : {}) },
     orderBy: { createdAt: 'desc' },
     take: 200,
   });
@@ -243,7 +244,8 @@ export async function knowledgePreviewUrl(tenantId: string, id: string): Promise
 /** 列出某用户的知识库（文档视图：状态 + 文件元信息 + 切片数）。 */
 export async function listKnowledgeDocs(tenantId: string, userId: string, filter?: { projectId?: string }): Promise<KnowledgeDocRow[]> {
   const rows = await prisma.knowledgeItem.findMany({
-    where: { tenantId, userId, ...(filter?.projectId ? { projectId: filter.projectId } : {}) },
+    // 图片不在「我的资料库」文档视图中呈现（属聊天多模态上下文，非上传文档）。
+    where: { tenantId, userId, sourceType: { not: 'image' }, ...(filter?.projectId ? { projectId: filter.projectId } : {}) },
     orderBy: { updatedAt: 'desc' },
     take: 200,
     include: { _count: { select: { chunks: true } } },

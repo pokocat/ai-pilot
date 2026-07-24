@@ -13,7 +13,8 @@ import {
   deleteKnowledge,
 } from '../services/knowledge.js';
 import { hybridSearch } from '../services/retrieval.js';
-import { checkQuota, ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
+import { checkQuota, getQuota, ingestStagedFile, newBatchId } from '../services/knowledgePipeline.js';
+import { ingestChatImage, imageExtFromMime, chatImageStorageReady, MAX_IMAGE_BYTES } from '../services/chatImage.js';
 import { bestUploadName } from '../services/uploadName.js';
 import { looksFinancial } from '../services/finParse.js';
 import { runFinCheckup } from '../services/finCheckup.js';
@@ -116,6 +117,52 @@ export async function knowledgeRoutes(app: FastifyInstance) {
       fileName,
       mime: data.mimetype,
       buf,
+    });
+  });
+
+  // 聊天上传图片（multipart 单文件）→ 存原件（OSS 私有）+ 建 sourceType='image' 条目，立即返回 { id }。
+  // 图片不解析/不切片/不嵌入、不进资料库列表与检索；发问时按 image ref 读回转 base64 交给多模态军师阅图。
+  // 门禁：仅字节配额（图片不占「文档份数」，故不查份数上限）；生产 OSS 未配 → 503；测试落内存暂存照常返回。
+  app.post<{ Querystring: { projectId?: string } }>('/chat/image-upload', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    if (!chatImageStorageReady() && process.env.NODE_ENV !== 'test') {
+      return reply.code(503).send({ error: '图片存储未配置', code: 'OSS_NOT_CONFIGURED' });
+    }
+    let data;
+    try {
+      data = await req.file();
+    } catch {
+      return reply.code(413).send({ error: '图片过大（单张上限 10MB）' });
+    }
+    if (!data) return reply.code(400).send({ error: '未收到图片' });
+    if (!imageExtFromMime(data.mimetype)) {
+      return reply.code(400).send({ error: '仅支持 JPG / PNG / GIF / WebP 图片', code: 'IMAGE_BAD_TYPE' });
+    }
+    let buf: Buffer;
+    try {
+      buf = await data.toBuffer();
+    } catch {
+      return reply.code(413).send({ error: '图片过大（单张上限 10MB）' });
+    }
+    if (data.file.truncated || buf.length > MAX_IMAGE_BYTES) {
+      return reply.code(413).send({ error: '图片过大（单张上限 10MB）' });
+    }
+    if (!buf.length) return reply.code(400).send({ error: '空图片' });
+
+    // 字节配额门禁（图片计入本月字节额度，但不计入文档份数——故不查 30 份上限）。
+    const q = await getQuota({ tenantId: user.tenantId, userId: user.id });
+    if (q.usedBytes + buf.length > q.freeBytes) {
+      return reply.code(402).send({ error: '本月免费存储空间已用完（200MB）', code: 'KNOWLEDGE_QUOTA' });
+    }
+
+    const rawOriginal = (data.fields as Record<string, { value?: string } | undefined> | undefined)?.originalName?.value;
+    return ingestChatImage({
+      tenantId: user.tenantId,
+      userId: user.id,
+      projectId: req.query.projectId ?? null,
+      mime: data.mimetype,
+      buf,
+      fileName: rawOriginal || data.filename || null,
     });
   });
 

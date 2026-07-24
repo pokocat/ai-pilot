@@ -254,6 +254,33 @@ async function uploadKnowledgeFile(
   try { return JSON.parse(res.data) as { id: string; status: string }; } catch { return { id: '', status: 'parsing' }; }
 }
 
+// 聊天图片上传：Taro.uploadFile 走 multipart → 后端存 OSS 私有 + 建 image 条目，返回 { id }。
+// 带真进度与可取消（复用 UploadHooks，与文档上传同款进度条 UI）。仅 weapp 有图可选。
+async function uploadChatImageFile(
+  filePath: string,
+  opts: { projectId?: string; originalName?: string } = {},
+  hooks?: UploadHooks,
+): Promise<{ id: string }> {
+  const qs = opts.projectId ? `?projectId=${opts.projectId}` : '';
+  const task = Taro.uploadFile({
+    url: `${BASE_URL}/chat/image-upload${qs}`,
+    filePath,
+    name: 'file',
+    formData: opts.originalName ? { originalName: opts.originalName } : undefined,
+    header: { 'x-user-id': getToken() },
+  });
+  if (hooks?.onProgress) task.onProgressUpdate?.((e) => hooks.onProgress!(e.progress));
+  hooks?.onTask?.(task);
+  const res = await task;
+  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode >= 400) {
+    let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
+    try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }
+    throw Object.assign(new Error(msg), { code });
+  }
+  try { return JSON.parse(res.data) as { id: string }; } catch { return { id: '' }; }
+}
+
 // 头像上传：multipart 单文件 → 后端存 OSS → 落库 user.avatarUrl，返回公网链接。
 async function uploadAvatarFile(filePath: string): Promise<{ ok: boolean; avatarUrl: string }> {
   const res = await Taro.uploadFile({ url: `${BASE_URL}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': getToken() } });
@@ -445,6 +472,12 @@ export const api = {
     IS_MOCK ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
   uploadKnowledge: (filePath: string, projectId?: string, staged?: boolean, batchId?: string, originalName?: string, hooks?: UploadHooks) =>
     IS_MOCK ? mock.uploadKnowledgeStaged(staged, batchId, originalName) : uploadKnowledgeFile(filePath, { projectId, staged, batchId, originalName }, hooks),
+  // 聊天图片上传（多模态阅图）：存 OSS 私有 + 建 image 条目，返回 { id }。
+  uploadChatImage: (filePath: string, projectId?: string, originalName?: string, hooks?: UploadHooks) =>
+    IS_MOCK ? Promise.resolve({ id: `mock-img-${Date.now()}` }) : uploadChatImageFile(filePath, { projectId, originalName }, hooks),
+  // 图片有时限签名预览 URL（复用 knowledge 原件预览端点）：渲染缩略图 / 点开大图用。
+  chatImageUrl: (id: string) =>
+    IS_MOCK ? Promise.resolve({ url: '' }) : request<{ url: string }>(`/knowledge/${id}/preview`),
 
   // —— V7-06 智库三段式资料整理管道 ——
   knowledgePipeline: () => (IS_MOCK ? mock.knowledgePipeline() : request<KnowledgePipelineView>('/knowledge/pipeline')),

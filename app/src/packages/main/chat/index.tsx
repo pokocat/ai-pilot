@@ -1,5 +1,5 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
-import { View, Text, Textarea, ScrollView } from '@tarojs/components';
+import { View, Text, Textarea, ScrollView, Image } from '@tarojs/components';
 import Taro, { useRouter, useDidHide } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import Login from '../../../components/Login';
@@ -16,7 +16,7 @@ import {
   type LiveGenView,
 } from '../../../services/liveGen';
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
-import { checkUpload } from '../../../services/uploadGuard';
+import { checkUpload, checkImageUpload } from '../../../services/uploadGuard';
 import { sourceUploadName } from '../../../services/uploadName';
 import { agentForText } from '../../../data/intents';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../../data/council';
@@ -233,10 +233,10 @@ const UPLOAD_STATUS_TEXT: Record<UploadStatus, string> = {
 
 // 引用签的类型称谓（军师文风）：与 @引用选择器分组标题保持一致，附卷=归卷后的知识。
 const REF_KIND_LABEL: Record<MessageRef['kind'], string> = {
-  project: '案卷', report: '方案', knowledge: '附卷', memory: '军师印象',
+  project: '案卷', report: '方案', knowledge: '附卷', memory: '军师印象', image: '图片',
 };
 const REF_KIND_ICON: Record<MessageRef['kind'], string> = {
-  project: 'layers', report: 'doc', knowledge: 'doc', memory: 'spark',
+  project: 'layers', report: 'doc', knowledge: 'doc', memory: 'spark', image: 'image',
 };
 // 把引用签拆成文件卡：标题行 + 元信息行。label 里「·」分隔的字数等信息拆到元信息行，末尾缀类型名。
 function refCardParts(r: MessageRef): { icon: string; title: string; meta: string } {
@@ -342,6 +342,9 @@ export default function Chat() {
   // 刚传上来的资料还在后台拆读（解析异步），此刻发问军师未必读得到正文——引用签上标「拆读中」明示。
   // 不轮询：签只从「挂上引用」活到「发出这一轮」；发出后由服务端 refNotices 据实回话（谁没读完、谁读不出）。
   const [parsingRefIds, setParsingRefIds] = useState<string[]>([]);
+  // 图片引用的签名预览 URL 缓存（按需取、进程内缓存）：签名 URL 有时效，重进/失效时按需重取。
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
+  const imageUrlFetching = useRef<Record<string, boolean>>({});
   // B6 jump-latest 与 composer 高度联动：测量输入区顶部到屏底的距离，驱动 --jump-bottom。
   const [jumpBottom, setJumpBottom] = useState(0);
   const winHeightRef = useRef(0);
@@ -434,6 +437,28 @@ export default function Chat() {
     setTimeout(measureChatLog, 80);
     setTimeout(measureDock, 80);
   }, [keyboardHeight, refs.length, msgs.length, input, uploading]);
+
+  // 图片引用签名预览 URL：按需取（历史消息里的图 + 当前引用），进程内缓存；签名有时效，缺了就补取。
+  const ensureImageUrl = (id: string) => {
+    if (!id || imageUrls[id] || imageUrlFetching.current[id]) return;
+    imageUrlFetching.current[id] = true;
+    api.chatImageUrl(id)
+      .then((r) => { if (r?.url) setImageUrls((cur) => ({ ...cur, [id]: r.url })); })
+      .catch(() => { /* 取不到就留占位图标 */ })
+      .finally(() => { imageUrlFetching.current[id] = false; });
+  };
+  useEffect(() => {
+    const ids = new Set<string>();
+    for (const m of msgs) if (m.role === 'user' && m.refs) for (const r of m.refs) if (r.kind === 'image') ids.add(r.id);
+    for (const r of refs) if (r.kind === 'image') ids.add(r.id);
+    ids.forEach(ensureImageUrl);
+  }, [msgs, refs]);
+  // 点缩略图看大图。
+  const previewImageRef = (id: string) => {
+    const url = imageUrls[id];
+    if (url) Taro.previewImage({ current: url, urls: [url] });
+    else ensureImageUrl(id);
+  };
 
   useEffect(() => () => {
     aliveRef.current = false;
@@ -1278,10 +1303,11 @@ export default function Chat() {
       return;
     }
     Taro.showActionSheet({
-      itemList: ['上传资料（PDF/Word/Excel…）', '引用已有案卷 / 方案 / 资料'],
+      itemList: ['上传资料（PDF/Word/Excel…）', '上传图片', '引用已有案卷 / 方案 / 资料'],
       success: (r) => {
         if (r.tapIndex === 0) uploadMaterial();
-        else if (r.tapIndex === 1) openPicker();
+        else if (r.tapIndex === 1) uploadImage();
+        else if (r.tapIndex === 2) openPicker();
       },
     });
   };
@@ -1406,6 +1432,71 @@ export default function Chat() {
       const next = { ...cur };
       delete next[id];
       Taro.showToast({ title: `「${u.name}」已呈上，拆读中`, icon: 'none' });
+      return next;
+    });
+  };
+
+  // 单张图片呈送：真进度 + 成功挂 image 引用（军师即可阅图）。
+  const runImageUpload = async (u: UploadEntry) => {
+    uploadCancelledRef.current[u.id] = false;
+    patchUpload(u.id, { status: 'uploading', pct: 0 });
+    try {
+      const { id } = await api.uploadChatImage(u.path, projectId || undefined, u.name, {
+        onProgress: (p) => patchUpload(u.id, { pct: p }),
+        onTask: (t) => { uploadTasksRef.current[u.id] = t; },
+      });
+      if (uploadCancelledRef.current[u.id]) return; // 已撤回：不挂引用
+      patchUpload(u.id, { status: 'done', pct: 100 });
+      // 图片直接 ready，无「拆读」态；挂上 image 引用签，签名预览 URL 由 effect 按需补取。
+      setRefs((cur) => cur.some((x) => x.kind === 'image' && x.id === id) ? cur : [...cur, { kind: 'image', id, label: '图片' }]);
+    } catch (e) {
+      if (uploadCancelledRef.current[u.id]) return;
+      patchUpload(u.id, { status: 'failed' });
+      Taro.showToast({ title: (e as Error).message || '图片没能呈上', icon: 'none' });
+    } finally {
+      uploadTasksRef.current[u.id] = null;
+    }
+  };
+
+  // 上传图片：微信选图（相册/拍照）→ 逐张呈送 → 挂为本轮 image 引用。单条至多 4 张（与服务端阅图上限对齐）。
+  const uploadImage = async () => {
+    if (!IS_WEAPP) { Taro.showToast({ title: '请在微信小程序内上传图片', icon: 'none' }); return; }
+    const remain = Math.min(4, UPLOAD_COUNT_MAX - refs.length);
+    if (remain <= 0) { Taro.showToast({ title: `一次至多带 ${UPLOAD_COUNT_MAX} 份，容后再呈`, icon: 'none' }); return; }
+    let chosen: Taro.chooseImage.SuccessCallbackResult;
+    try {
+      chosen = await Taro.chooseImage({ count: remain, sizeType: ['compressed'], sourceType: ['album', 'camera'] });
+    } catch (e) {
+      const msg = String((e as { errMsg?: string })?.errMsg || '');
+      if (!/cancel/i.test(msg)) Taro.showToast({ title: '没能打开相册，请重试', icon: 'none' });
+      return; // 用户取消则静默
+    }
+    const files = (chosen.tempFiles || []).slice(0, remain);
+    if (!files.length) return;
+    // 单张体积上限（与 server 10MB 对齐）：一张超限即整批不发，提示压缩后再来。
+    for (const f of files) {
+      const chk = checkImageUpload({ size: f.size });
+      if (!chk.ok) { Taro.showToast({ title: chk.desc || '图片太大', icon: 'none' }); return; }
+    }
+    const batch: UploadEntry[] = files.map((f, i) => ({
+      id: `img-${Date.now()}-${i}`,
+      name: '图片',
+      size: f.size || 0,
+      path: f.path,
+      pct: 0,
+      status: 'waiting' as UploadStatus,
+    }));
+    setUploads((cur) => ({ ...cur, ...Object.fromEntries(batch.map((u) => [u.id, u])) }));
+    for (const u of batch) await runImageUpload(u); // 串行逐张呈送
+    setUploads((cur) => {
+      const next = { ...cur };
+      let ok = 0;
+      for (const u of batch) {
+        const st = next[u.id]?.status;
+        if (st === 'done') ok++;
+        if (st === 'done' || st === 'cancelled') delete next[u.id];
+      }
+      if (ok) Taro.showToast({ title: `${ok} 张已呈上，军师即刻阅图`, icon: 'none' });
       return next;
     });
   };
@@ -1577,6 +1668,16 @@ export default function Chat() {
                 {m.refs?.length ? (
                   <View className="uref">
                     {m.refs.map((r, j) => {
+                      if (r.kind === 'image') {
+                        const url = imageUrls[r.id];
+                        return (
+                          <View key={j} className="uref-img" onClick={() => previewImageRef(r.id)}>
+                            {url
+                              ? <Image className="uref-img-el" src={url} mode="aspectFill" />
+                              : <View className="uref-img-ph"><Icon name="image" size={18} color={accent} /></View>}
+                          </View>
+                        );
+                      }
                       const c = refCardParts(r);
                       return (
                         <View key={j} className="uref-card">
@@ -1809,7 +1910,9 @@ export default function Chat() {
           <View className="ref-row">
             {refs.map((r, j) => (
               <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
-                <Icon name={refCardParts(r).icon} size={12} color={accent} />
+                {r.kind === 'image' && imageUrls[r.id]
+                  ? <Image className="ref-chip-thumb" src={imageUrls[r.id]} mode="aspectFill" />
+                  : <Icon name={refCardParts(r).icon} size={12} color={accent} />}
                 <Text className="ref-chip-l" style={{ color: accent }}>{refCardParts(r).title}</Text>
                 {r.kind === 'knowledge' && parsingRefIds.includes(r.id) ? <Text className="ref-parsing">拆读中</Text> : null}
                 <Text className="ref-x">✕</Text>

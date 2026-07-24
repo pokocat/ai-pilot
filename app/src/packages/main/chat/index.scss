@@ -276,12 +276,21 @@
 .uref-tx { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .uref-t { font-size: 12.5px; font-weight: 600; color: var(--ink); line-height: 1.25; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .uref-m { font-size: 10.5px; color: var(--ink-3); line-height: 1.25; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* 图片引用缩略图（用户气泡下）：直角小图，点开看大图 */
+.uref-img {
+  width: 96px; height: 96px; border-radius: 3px; overflow: hidden;
+  border: 1px solid var(--line); background: var(--surface); flex-shrink: 0;
+}
+.uref-img-el { width: 100%; height: 100%; display: block; }
+.uref-img-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--accent-soft); }
 
 /* 已选引用行（输入区上方）：与文件卡同走直角，去掉 @ 前缀 */
 .ref-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 14px 0; background: var(--surface); }
 .ref-chip { display: flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid; border-radius: 3px; font-size: 11.5px; font-weight: 600; max-width: 100%; min-width: 0; }
 /* 长文件名标签单行省略，单个 chip 不撑破引用行（#1 溢出） */
 .ref-chip-l { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* 图片引用签的小缩略图 */
+.ref-chip-thumb { width: 16px; height: 16px; border-radius: 2px; flex-shrink: 0; display: block; }
 .ref-chip .ref-x { font-size: 10px; color: var(--ink-3); flex-shrink: 0; }
 /* 刚传上来、正文还在后台拆读的引用：明示状态，免得客户以为军师已读全文 */
 .ref-chip .ref-parsing {

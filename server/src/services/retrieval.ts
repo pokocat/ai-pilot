@@ -214,6 +214,8 @@ export async function resolveReferences(
   const entries: RefEntry[] = [];
   for (const ref of taken) {
     try {
+      // 图片引用不文本化（由 buildGenContext 解析成多模态入参 ctx.images，见 chatImage.resolveImageRefs）。
+      if (ref.kind === 'image') continue;
       if (ref.kind === 'project') {
         const p = await prisma.project.findFirst({ where: { id: ref.id, tenantId } });
         if (p) {

@@ -241,6 +241,8 @@ function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string 
     ...(ctx.knowledge ?? []),
     ...(ctx.memories ?? []),
     ...(ctx.understanding ?? []),
+    // 图片入键：仅凭文本 + 引用条数相同不足以区分「带不同图」的两轮，否则会串用错缓存的成果。
+    ...(ctx.images ?? []).map((im) => `${im.mediaType}:${im.base64}`),
   ]);
   const profileSig = [
     ctx.companyName ?? '',

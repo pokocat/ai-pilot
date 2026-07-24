@@ -47,6 +47,20 @@ function getClient(apiKey: string, baseUrl?: string): Anthropic {
   return cached.client;
 }
 
+// 多模态当轮 user content：有图片时组成 [image..., text] 块数组；无图片维持纯字符串（不动既有形态，
+// 保住提示词缓存前缀）。导出供单测组装逻辑。
+type ImageInput = { mediaType: string; base64: string };
+type UserBlock = Anthropic.TextBlockParam | Anthropic.ImageBlockParam;
+export function claudeUserContent(userMessage: string, images?: ImageInput[]): string | UserBlock[] {
+  if (!images?.length) return userMessage;
+  const blocks: UserBlock[] = images.map((im) => ({
+    type: 'image',
+    source: { type: 'base64', media_type: im.mediaType as Anthropic.ImageBlockParam.Source['media_type'], data: im.base64 },
+  }));
+  blocks.push({ type: 'text', text: userMessage || '（见图，请据图作答）' });
+  return blocks;
+}
+
 function metaOf(ctx: GenContext): string {
   const parts = [ctx.companyName, ctx.profile?.industry, ctx.profile?.stage].filter(Boolean) as string[];
   return parts.length ? parts.join(' · ') : '经营快照';
@@ -86,7 +100,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     system: systemBlocks(`${stable}\n\n${structureHint}\n务必调用 emit_deliverable 工具输出结构化成果，不要输出自由长文。`, dynamic),
     tools: [DELIVERABLE_TOOL],
     tool_choice: { type: 'tool', name: 'emit_deliverable' },
-    messages: [...dlvHistory, { role: 'user', content: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。` }],
+    messages: [...dlvHistory, { role: 'user', content: claudeUserContent(ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。`, ctx.images) }],
   }, { timeout: Math.max(cfg.timeoutMs, 120_000) });
   const usage = usageOf(res);
 
@@ -142,7 +156,7 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     max_tokens: CHAT_MAX_TOKENS,
     temperature: cfg.temperature,
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
-    messages: [...history, { role: 'user', content: ctx.userMessage }],
+    messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
   }, { timeout: cfg.timeoutMs });
   const text = res.content
     .filter((c) => c.type === 'text')
@@ -165,7 +179,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
     max_tokens: CHAT_MAX_TOKENS,
     temperature: cfg.temperature,
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`, dynamic),
-    messages: [...history, { role: 'user', content: ctx.userMessage }],
+    messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
   }, { timeout: Math.max(cfg.timeoutMs, 120_000) });
   let text = '';
   let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
@@ -198,27 +212,30 @@ export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: str
 // —— 工具调用循环的 provider step（Anthropic tool_use / tool_result 形态）——
 
 // LoopMessage[] → Anthropic system（顶层）+ messages（含 tool_use / tool_result 块）。
-function toClaudeMessages(messages: LoopMessage[]): { system: string; msgs: Anthropic.MessageParam[] } {
+// images：本轮图片挂到「最后一条 user 文本消息」（即当轮用户原文；历史 user 不挂，图片不重发）。
+function toClaudeMessages(messages: LoopMessage[], images?: ImageInput[]): { system: string; msgs: Anthropic.MessageParam[] } {
   let system = '';
   const msgs: Anthropic.MessageParam[] = [];
-  for (const m of messages) {
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === 'user') { lastUserIdx = i; break; }
+  messages.forEach((m, i) => {
     if (m.role === 'system') system = m.text;
-    else if (m.role === 'user') msgs.push({ role: 'user', content: m.text });
+    else if (m.role === 'user') msgs.push({ role: 'user', content: i === lastUserIdx ? claudeUserContent(m.text, images) : m.text });
     else if (m.role === 'assistant') msgs.push({ role: 'assistant', content: m.text });
     else if (m.role === 'assistant_tools') {
       msgs.push({ role: 'assistant', content: m.calls.map((c) => ({ type: 'tool_use', id: c.id, name: c.name, input: c.args ?? {} })) });
     } else if (m.role === 'tool_results') {
       msgs.push({ role: 'user', content: m.results.map((r) => ({ type: 'tool_result', tool_use_id: r.id, content: r.content, is_error: r.isError })) });
     }
-  }
+  });
   return { system, msgs };
 }
 
-/** 绑定 cfg，返回 provider 无关循环所需的 step 函数。 */
-export function claudeStep(cfg: ResolvedAiConfig): StepFn {
+/** 绑定 cfg（+ 本轮图片），返回 provider 无关循环所需的 step 函数。 */
+export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[]): StepFn {
   return async (messages, tools, opts) => {
     const finalName = opts.finalTool?.name;
-    const { system, msgs } = toClaudeMessages(messages);
+    const { system, msgs } = toClaudeMessages(messages, images);
     const toolDefs: Anthropic.Tool[] = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Tool['input_schema'] }));
     if (opts.finalTool) toolDefs.push({ name: opts.finalTool.name, description: opts.finalTool.description, input_schema: opts.finalTool.schema as Anthropic.Tool['input_schema'] });
 
@@ -273,7 +290,7 @@ export async function claudeChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
   const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
   const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
   const r = await runToolLoop({
-    step: claudeStep(cfg),
+    step: claudeStep(cfg, ctx.images),
     system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`,
     history: ctx.history,
     userMessage: ctx.userMessage,
@@ -292,7 +309,7 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
     ? `参考产出结构（小标题）：${tpl.sections.map((s) => s.h).join(' / ')}。标题用「${tpl.title}」。`
     : '产出 3–4 段结构化内容。';
   const r = await runToolLoop({
-    step: claudeStep(cfg),
+    step: claudeStep(cfg, ctx.images),
     system: `${system}\n\n${structureHint}\n可先调用工具检索知识/召回记忆，掌握依据后务必调用 emit_deliverable 输出结构化成果，不要输出自由长文。`,
     history: ctx.history,
     userMessage: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。`,
@@ -342,7 +359,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
   const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
   const hint = '默认用文字正常对话回答用户。只有当你判断此刻需要交付一份完整的报告或卡片成果时，才调用 emit_deliverable 以结构化分段输出（含标题与各段小标题/正文/要点）；其余所有情况都直接用文字回复，不要调用 emit_deliverable。';
   const r = await runToolLoop({
-    step: claudeStep(cfg),
+    step: claudeStep(cfg, ctx.images),
     system: `${system}\n\n${hint}`,
     history: ctx.history,
     userMessage: ctx.userMessage,

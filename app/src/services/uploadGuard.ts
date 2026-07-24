@@ -15,6 +15,17 @@ export interface UploadCheckResult {
   desc?: string;
 }
 
+// 聊天图片单张体积上限（字节）。必须与 server chatImage.MAX_IMAGE_BYTES（10MB）保持一致。
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+
+// 校验单张待上传图片；失败返回可直接提示的 {ok,title,desc}。
+export function checkImageUpload(file: { size?: number }): UploadCheckResult {
+  if ((file?.size || 0) > MAX_IMAGE_BYTES) {
+    return { ok: false, title: '图片太大了', desc: '单张图片不超过 10MB，压缩后再呈上。' };
+  }
+  return { ok: true };
+}
+
 // 校验单个待上传文件；失败返回可直接喂给 ExceptionSheet 的 {kind,title,desc}。
 export function checkUpload(file: { name?: string; size?: number }): UploadCheckResult {
   const name = file?.name || '';

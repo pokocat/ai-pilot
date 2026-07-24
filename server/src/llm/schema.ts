@@ -64,6 +64,9 @@ export interface GenContext {
   // 阶段适配（M3 PR-13）：营收阶段指令（随用户稳定 → stable 段）。
   stageLine?: string | null;
   userMessage: string;
+  // 本轮消息附带的图片（多模态）：provider 有值时把当轮 user content 组成 image+text 块；无则维持纯文本。
+  // 由 buildGenContext 从 image 引用解析（读 OSS 原件转 base64，至多 4 张）；历史图片不重发。
+  images?: { mediaType: string; base64: string }[];
   history?: { role: string; text: string }[];
   contextTrace?: LlmContextTrace; // 历史窗口 + 记忆命中元数据（不含记忆正文），落 LLM trace 供排障
   // —— 上下文工程扩展 ——

@@ -9,11 +9,25 @@ import { runToolLoop } from '../tools/loop.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext, TurnOutput } from '../tools/types.js';
 
 interface OAToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
+// 多模态内容片段（OpenAI vision 协议）：文本或 data URL 图片。
+type OAContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
 interface OAMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
+  content: string | OAContentPart[] | null;
   tool_calls?: OAToolCall[];
   tool_call_id?: string;
+}
+
+type ImageInput = { mediaType: string; base64: string };
+// 多模态当轮 user content：有图片时组成 [image_url..., text] 数组（data URL 内联 base64）；无图片维持纯字符串。
+// 不判断模型是否支持 vision——由上游模型配置负责（见方案说明）。导出供单测组装逻辑。
+export function openaiUserContent(userMessage: string, images?: ImageInput[]): string | OAContentPart[] {
+  if (!images?.length) return userMessage;
+  const parts: OAContentPart[] = images.map((im) => ({ type: 'image_url', image_url: { url: `data:${im.mediaType};base64,${im.base64}` } }));
+  parts.push({ type: 'text', text: userMessage || '（见图，请据图作答）' });
+  return parts;
 }
 interface OAResponse {
   choices?: { message?: { content?: string | null; tool_calls?: OAToolCall[] } }[];
@@ -214,7 +228,7 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     messages: [
       { role: 'system', content: `${system}\n\n${structureHint}\n务必调用 emit_deliverable 函数输出结构化成果，不要输出自由长文。` },
       ...history,
-      { role: 'user', content: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。` },
+      { role: 'user', content: openaiUserContent(ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。`, ctx.images) },
     ] as OAMessage[],
     tools: [{ type: 'function', function: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, parameters: DELIVERABLE_TOOL.input_schema } }],
     tool_choice: { type: 'function', function: { name: DELIVERABLE_TOOL.name } },
@@ -267,7 +281,7 @@ export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     messages: [
       { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。` },
       ...history,
-      { role: 'user', content: ctx.userMessage },
+      { role: 'user', content: openaiUserContent(ctx.userMessage, ctx.images) },
     ] as OAMessage[],
   });
   const usage = usageOf(data);
@@ -286,7 +300,7 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
     messages: [
       { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。` },
       ...history,
-      { role: 'user', content: ctx.userMessage },
+      { role: 'user', content: openaiUserContent(ctx.userMessage, ctx.images) },
     ] as OAMessage[],
   };
   let chunks: AsyncGenerator<OAStreamChunk>;
@@ -322,9 +336,12 @@ export async function openaiRaw(cfg: ResolvedAiConfig, system: string, user: str
 // —— 工具调用循环的 provider step（多轮 search_knowledge / recall_memory → 最终答案）——
 
 // LoopMessage[] → OpenAI chat messages（含 tool_calls 助手块与 role:'tool' 结果块）。
-function toOAMessages(messages: LoopMessage[]): OAMessage[] {
+// images：本轮图片挂到「最后一条 user 文本消息」（当轮用户原文；历史 user 不挂，图片不重发）。
+function toOAMessages(messages: LoopMessage[], images?: ImageInput[]): OAMessage[] {
   const out: OAMessage[] = [];
-  for (const m of messages) {
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === 'user') { lastUserIdx = i; break; }
+  messages.forEach((m, i) => {
     if (m.role === 'assistant_tools') {
       out.push({
         role: 'assistant',
@@ -333,10 +350,12 @@ function toOAMessages(messages: LoopMessage[]): OAMessage[] {
       });
     } else if (m.role === 'tool_results') {
       for (const r of m.results) out.push({ role: 'tool', tool_call_id: r.id, content: r.content });
+    } else if (m.role === 'user') {
+      out.push({ role: 'user', content: i === lastUserIdx ? openaiUserContent(m.text, images) : m.text });
     } else {
       out.push({ role: m.role, content: m.text });
     }
-  }
+  });
   return out;
 }
 
@@ -359,7 +378,7 @@ export type LoopMetered<T> = Metered<T> & { toolCalls: number; iterations: numbe
 export async function openaiChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig, tools: Tool[]): Promise<LoopMetered<ChatReply>> {
   const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const r = await runToolLoop({
-    step: openaiStep(cfg),
+    step: openaiStep(cfg, ctx.images),
     system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。`,
     history: ctx.history,
     userMessage: ctx.userMessage,
@@ -383,7 +402,7 @@ export async function openaiDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
     ? `参考产出结构（小标题）：${tpl.sections.map((s) => s.h).join(' / ')}。标题用「${tpl.title}」。`
     : '产出 3–4 段结构化内容。';
   const r = await runToolLoop({
-    step: openaiStep(cfg),
+    step: openaiStep(cfg, ctx.images),
     system: `${system}\n\n${structureHint}\n可先调用工具检索知识/召回记忆，掌握依据后务必调用 emit_deliverable 输出结构化成果，不要输出自由长文。`,
     history: ctx.history,
     userMessage: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。`,
@@ -439,7 +458,7 @@ export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
   const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const hint = '默认用文字正常对话回答用户。只有当你判断此刻需要交付一份完整的报告或卡片成果时，才调用 emit_deliverable 以结构化分段输出（含标题与各段小标题/正文/要点）；其余所有情况都直接用文字回复，不要调用 emit_deliverable。';
   const r = await runToolLoop({
-    step: openaiStep(cfg),
+    step: openaiStep(cfg, ctx.images),
     system: `${system}\n\n${hint}`,
     history: ctx.history,
     userMessage: ctx.userMessage,
@@ -475,8 +494,8 @@ export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
   };
 }
 
-/** 绑定 cfg，返回 provider 无关循环所需的 step 函数。 */
-export function openaiStep(cfg: ResolvedAiConfig): StepFn {
+/** 绑定 cfg（+ 本轮图片），返回 provider 无关循环所需的 step 函数。 */
+export function openaiStep(cfg: ResolvedAiConfig, images?: ImageInput[]): StepFn {
   return async (messages, tools, opts) => {
     const finalName = opts.finalTool?.name;
     // 工具集：常规工具 +（deliverable 路径）终结工具 emit_deliverable。
@@ -485,7 +504,7 @@ export function openaiStep(cfg: ResolvedAiConfig): StepFn {
       toolDefs.push({ type: 'function', function: { name: opts.finalTool.name, description: opts.finalTool.description, parameters: opts.finalTool.schema } });
     }
 
-    const body: Record<string, unknown> = { max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : CHAT_MAX_TOKENS, messages: toOAMessages(messages) };
+    const body: Record<string, unknown> = { max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : CHAT_MAX_TOKENS, messages: toOAMessages(messages, images) };
     if (opts.forceFinal) {
       // 最后一轮收口。deliverable(强制)→强制 emit_deliverable；自适应(forceFinalTool=false)→只给 emit 但 auto(可 emit 可出文本)；chat→去掉工具出文本。
       if (opts.finalTool && opts.forceFinalTool !== false) {

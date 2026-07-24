@@ -5,6 +5,7 @@ import { verifyUserToken } from './userToken.js';
 import { resolveIndustryPack } from '../data/industryPacks.js';
 import { recallMemoryDetails } from './memory.js';
 import { hybridSearch, resolveReferences } from './retrieval.js';
+import { resolveImageRefs } from './chatImage.js';
 import { buildClientUnderstanding, meaningfulCustomerLabel, understandingContextLines } from './understanding.js';
 import { loadChart, chartBriefing, TIANSHI_OPTOUT_LINE } from './paipan.js';
 import { loadStrategicProfile, strategicBlock, getDiagRound } from './strategicProfile.js';
@@ -147,10 +148,11 @@ export async function buildGenContext(opts: {
     opts.projectId && !briefInterview
       ? prisma.project.findFirst({ where: { id: opts.projectId, tenantId: opts.tenantId } })
       : Promise.resolve(null),
-    // 显式引用（可溯源）+ 知识库混合检索（自动召回，项目内优先）
+    // 显式引用（可溯源）+ 知识库混合检索（自动召回，项目内优先）。
+    // 图片引用不走文本化通道（下方 resolveImageRefs 单独解析成多模态入参），此处只传非图片引用。
     briefInterview
       ? Promise.resolve({ lines: [] as string[], labels: [] as string[], notices: [] as string[] })
-      : resolveReferences(opts.tenantId, opts.userId, opts.refs),
+      : resolveReferences(opts.tenantId, opts.userId, opts.refs?.filter((r) => r.kind !== 'image')),
     briefInterview
       ? Promise.resolve<Awaited<ReturnType<typeof hybridSearch>>>([])
       : hybridSearch({ tenantId: opts.tenantId, userId: opts.userId, projectId: opts.projectId ?? undefined, query: opts.userMessage, topK: 4 }),
@@ -164,7 +166,7 @@ export async function buildGenContext(opts: {
 
   // 批次 2：依赖批次 1 的 profile / user / fortune 结果。
   const believe = fortuneOn && (((profile?.extraJson as { bazi?: { believe?: boolean } } | null)?.bazi?.believe) !== false);
-  const [understanding, benchmarkLine, bizMetricLine, chart] = await Promise.all([
+  const [understanding, benchmarkLine, bizMetricLine, chart, images] = await Promise.all([
     user ? buildClientUnderstanding({ id: user.id, tenantId: opts.tenantId, name: user.name }) : Promise.resolve(null),
     // 行业基准（WO-08）：DB 分位数块（宁缺勿假）。
     benchmarkBlock(profile?.industry),
@@ -172,6 +174,8 @@ export async function buildGenContext(opts: {
     bizMetricBlock(opts.userId, profile?.industry),
     // 天势档案（M1 PR-2）：命盘算好存库，这里只组装简报；不信命理/开关关闭 → 走 opt-out，无命盘 → 不注入。
     believe ? loadChart(opts.userId) : Promise.resolve(null),
+    // 本轮消息里的图片引用 → 多模态入参（读 OSS 原件转 base64，至多 4 张）；档案访谈轮不带图。
+    briefInterview ? Promise.resolve<{ mediaType: string; base64: string }[]>([]) : resolveImageRefs(opts.tenantId, opts.refs),
   ]);
 
   const strategicLine = strategicBlock(strategicRaw);
@@ -231,6 +235,7 @@ export async function buildGenContext(opts: {
     modeLine,
     stageLine,
     userMessage: opts.userMessage,
+    images: images.length ? images : undefined,
     history: opts.history,
     contextTrace: {
       recallIntent,

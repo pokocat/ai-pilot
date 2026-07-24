@@ -62,7 +62,8 @@ export async function getQuota(args: { tenantId: string; userId: string }): Prom
   const { tenantId, userId } = args;
   const where = { tenantId, userId, stage: { in: ['staging', 'confirmed'] }, createdAt: { gte: monthStart() } };
   const [usedDocs, agg] = await Promise.all([
-    prisma.knowledgeItem.count({ where }),
+    // 份数只算真文档：聊天图片（sourceType='image'）计入字节配额（下面 agg 含之），但不占「文档份数」。
+    prisma.knowledgeItem.count({ where: { ...where, sourceType: { not: 'image' } } }),
     prisma.knowledgeItem.aggregate({ _sum: { fileSize: true }, where }),
   ]);
   return { usedDocs, freeDocs: FREE_DOCS, usedBytes: agg._sum?.fileSize ?? 0, freeBytes: FREE_BYTES };
@@ -136,9 +137,10 @@ export async function buildPipeline(args: { tenantId: string; userId: string }):
   const { tenantId, userId } = args;
 
   const [staging, optimized, confirmed, quota, grouped, stagingRows, optimizedRows] = await Promise.all([
-    prisma.knowledgeItem.count({ where: { tenantId, userId, stage: 'staging' } }),
-    prisma.knowledgeItem.count({ where: { tenantId, userId, stage: 'optimized' } }),
-    prisma.knowledgeItem.count({ where: { tenantId, userId, stage: 'confirmed' } }),
+    prisma.knowledgeItem.count({ where: { tenantId, userId, stage: 'staging', sourceType: { not: 'image' } } }),
+    prisma.knowledgeItem.count({ where: { tenantId, userId, stage: 'optimized', sourceType: { not: 'image' } } }),
+    // 聊天图片默认 stage='confirmed'，须从「已入库」计数排除（它不是资料库文档）。
+    prisma.knowledgeItem.count({ where: { tenantId, userId, stage: 'confirmed', sourceType: { not: 'image' } } }),
     getQuota({ tenantId, userId }),
     prisma.knowledgeItem.groupBy({
       by: ['bizCategory'],

@@ -530,7 +530,7 @@ export interface SaveLibRequest {
  * ════════════════════════════════════════════════════════════ */
 
 /* ────────────── 引用（@ 项目/报告/知识/记忆） ────────────── */
-export type RefKind = 'project' | 'report' | 'knowledge' | 'memory';
+export type RefKind = 'project' | 'report' | 'knowledge' | 'memory' | 'image';
 /** @引用选择器「记忆」分组候选（GET /memories） */
 export interface MemoryCandidate {
   id: string;
