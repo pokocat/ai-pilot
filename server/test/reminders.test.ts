@@ -1,7 +1,7 @@
 // V7-11 提醒体系测试：直接调服务（不走 HTTP / 不依赖 x-test-now 时间旅行），聚焦
 //   1) buildReminderView 派生（活跃案卷 + 军令 → 三条提醒节奏、逐字文案、订阅态）
 //   2) morningOrderReminderScan 按天幂等（审计行恰好一条）+ 未完成军令/小时门前置条件
-//   3) weeklyReviewReminderScan 周五门控 + 幂等（工作日无关：非周五仅断言「不发」）
+//   3) weeklyReviewReminderScan 周五门控 + 幂等（runWithNow 钉死上海时区周五/周四，不依赖运行日）
 // 测试环境未配订阅模板 → sendWechatSubscribeMessage 静默跳过、不触网；幂等锚点用独立审计行。
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,7 +9,7 @@ import { prisma } from '../src/db.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness } from './helpers.js';
 import { buildReminderView, morningOrderReminderScan, weeklyReviewReminderScan } from '../src/services/reminders.js';
 import { todayStr } from '../src/services/casefile.js';
-import { now } from '../src/services/clock.js';
+import { now, runWithNow } from '../src/services/clock.js';
 
 let tenantId = '', userId = '';
 
