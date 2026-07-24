@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
 import { notifyReportReady } from './wechatSubscribe.js';
+import { healDeliverableSections, normalizeDeliverableSections } from '../llm/schema.js';
 import type {
   Deliverable, DeliverableSection, ReportDiff, SectionDiff, WordOp, SaveReportResult,
 } from '../llm/schema.js';
@@ -67,7 +68,8 @@ export function hashContent(content: object): string {
 
 function sectionsOf(content: unknown): DeliverableSection[] {
   const c = content as { sections?: DeliverableSection[] } | null;
-  return c?.sections ?? [];
+  // 自愈：diff 两侧对称归一化，避免历史「字符串化 section 数组」坏数据把 diff 也糊成整段 JSON。
+  return normalizeDeliverableSections(c?.sections);
 }
 function sameSection(a: DeliverableSection, b: DeliverableSection): boolean {
   return canonical(a) === canonical(b);
@@ -234,5 +236,6 @@ export async function getReportDiff(
 }
 
 export function deliverableFrom(content: unknown): Deliverable {
-  return content as Deliverable;
+  // 读取端自愈：展开历史「字符串化 section 数组」坏数据（版本化报告详情/版本内容读取路径）。
+  return healDeliverableSections(content) as Deliverable;
 }

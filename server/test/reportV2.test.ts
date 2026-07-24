@@ -2,7 +2,7 @@
 //   cd server && node --import tsx --test test/reportV2.test.ts
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeDeliverableSections, normalizeCover } from '../src/llm/schema.js';
+import { normalizeDeliverableSections, normalizeCover, healDeliverableSections } from '../src/llm/schema.js';
 import { renderReportHtml } from '../src/services/reportHtml.js';
 import type { Deliverable } from '../src/llm/schema.js';
 
@@ -380,5 +380,103 @@ describe('renderReportHtml · 行内强调标记', () => {
     const html = renderReportHtml(base([{ h: 'x', b: '**第 3 周**动手，==回款 600 万==' }]));
     assert.match(html, /<strong><span class="num-emph">第 3 周<\/span><\/strong>/);
     assert.match(html, /<span class="mark-hl">回款 <span class="num-emph">600 万<\/span><\/span>/);
+  });
+});
+
+// —— 坏形态自愈：模型把整个「类型化 section 数组」序列化成字符串，塞进 sections 字段或单个白卡的 b。
+//    生产 deliverable cmryglnln00s7f5vcyzh4up99 即此形态，此前满屏显示转义 JSON。 ——
+describe('normalizeDeliverableSections · 字符串化 section 数组自愈', () => {
+  // 与生产坏数据同形态：完整类型化数组（hero/gantt/stats/callout + 转义中文）被序列化成一个字符串。
+  const typedArray = [
+    { type: 'hero', h: '定调：创始人 IP', paras: ['从定位到启动，三十天见效。', '先立人设，再谈流量。'] },
+    { type: 'gantt', h: '三十天启动日历', unit: '周', total: 4, rows: [
+      { label: '定位打磨', from: 1, to: 1, tone: '布局' },
+      { label: '内容起量', from: 2, to: 4, tone: '行动', note: '日更三条' },
+    ] },
+    { type: 'stats', h: '关键指标', items: [{ num: '30', unit: '天', label: '启动周期' }, { num: '3', label: '每日更新' }] },
+    { type: 'callout', tone: '风险', h: '避坑', b: '切忌一上来就投流，先跑通自然流量口碑。' },
+  ];
+
+  test('形态 A：sections 字段本身是字符串化数组 → 展开成多个类型化 section', () => {
+    const out = normalizeDeliverableSections(JSON.stringify(typedArray));
+    assert.equal(out.length, 4);
+    assert.deepEqual(out.map((s) => s.type), ['hero', 'gantt', 'stats', 'callout']);
+    assert.equal((out[1] as any).rows.length, 2);
+    assert.equal((out[3] as any).tone, '风险');
+    // 断言没有任何一段把整串 JSON 当正文塞进 b
+    for (const s of out) assert.ok(!(s.b ?? '').includes('"type"'), 'b 不应残留原始 JSON');
+  });
+
+  test('形态 B（生产同形态）：sections=[{b: "<字符串化数组>"}] → 展开成多个类型化 section', () => {
+    const bad = [{ b: JSON.stringify(typedArray) }];
+    const out = normalizeDeliverableSections(bad);
+    assert.equal(out.length, 4);
+    assert.deepEqual(out.map((s) => s.type), ['hero', 'gantt', 'stats', 'callout']);
+    assert.equal((out[0] as any).paras[0], '从定位到启动，三十天见效。');
+    assert.equal((out[2] as any).items[0].label, '启动周期');
+  });
+
+  test('形态 B 变体：白卡带 h，b 是字符串化数组 → 仍展开（h 被丢弃换成真实 section）', () => {
+    const bad = [{ h: '正文', b: JSON.stringify(typedArray) }];
+    const out = normalizeDeliverableSections(bad);
+    assert.equal(out.length, 4);
+    assert.equal(out[0].type, 'hero');
+  });
+
+  test('宽松修复：尾随逗号可容忍', () => {
+    const withTrailingComma = '[{"type":"callout","tone":"机会","h":"a","b":"b",},]';
+    const out = normalizeDeliverableSections(withTrailingComma);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].type, 'callout');
+    assert.equal((out[0] as any).tone, '机会');
+  });
+
+  test('损坏到无法解析 → 按普通文本兜底为白卡，绝不抛异常', () => {
+    const broken = '[{"type":"stats","rows">[坏掉的键值分隔符导致无法解析';
+    const out = normalizeDeliverableSections(broken);
+    // 解析失败：整串作为白卡正文保留，不丢内容、不抛错
+    assert.equal(out.length, 1);
+    assert.ok((out[0].b ?? '').startsWith('[{'));
+  });
+
+  test('正常 sections 幂等：不误伤合法类型化数组', () => {
+    const once = normalizeDeliverableSections(typedArray);
+    const twice = normalizeDeliverableSections(once);
+    assert.deepEqual(twice, once);
+    assert.equal(twice.length, 4);
+  });
+
+  test('普通白卡正文以 [ 开头但非类型化数组 → 不误判', () => {
+    const out = normalizeDeliverableSections([{ h: '清单', b: '[国内, 海外] 两条线并行推进' }]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].b, '[国内, 海外] 两条线并行推进');
+  });
+});
+
+describe('healDeliverableSections · 读取端自愈', () => {
+  const typedArray = [
+    { type: 'hero', h: '定调', paras: ['一段。'] },
+    { type: 'gantt', h: '排期', unit: '周', total: 3, rows: [{ label: '起步', from: 1, to: 3 }] },
+  ];
+
+  test('展开 contentJson 里字符串化的 sections，保留其余顶层字段', () => {
+    const stored = {
+      icon: 'spark', meta: 'x', title: '创始人IP打造方案',
+      sections: [{ b: JSON.stringify(typedArray) }],
+      trust: '参考', cdnUrl: 'https://x', htmlUrl: 'https://y', actions: ['save_to_library'],
+    };
+    const healed = healDeliverableSections(stored);
+    assert.equal(healed.sections.length, 2);
+    assert.deepEqual(healed.sections.map((s: any) => s.type), ['hero', 'gantt']);
+    // 其余顶层字段原样保留
+    assert.equal(healed.title, '创始人IP打造方案');
+    assert.equal(healed.cdnUrl, 'https://x');
+    assert.equal(healed.actions[0], 'save_to_library');
+  });
+
+  test('非对象/无 sections 字段 → 原样返回，不抛异常', () => {
+    assert.equal(healDeliverableSections(null), null);
+    assert.equal(healDeliverableSections('x' as any), 'x');
+    assert.deepEqual(healDeliverableSections({ title: 'a' } as any), { title: 'a' });
   });
 });

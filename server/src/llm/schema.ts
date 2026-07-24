@@ -357,10 +357,84 @@ function normalizeSection(value: unknown, index: number): DeliverableSection | n
   return typed ?? sectionOf(value, index); // 已知 type 但内容不合法 → 尝试白卡兜底；仍无内容则丢弃
 }
 
+// —— 坏形态自愈：模型（尤其 claude 直通端点强制 tool_choice 下）偶尔把整个「类型化 section 数组」
+//    序列化成一个 JSON 字符串，塞进 sections 字段本身、或塞进单个白卡 section 的 b 字段——
+//    此前会被 sectionOf 当纯正文原样保留，渲染端满屏显示 {"type":"gantt"...} 转义 JSON。 ——
+
+/** 宽松 JSON 解析：先严格解析；失败则做一次保守修复（去尾逗号）再试；仍失败返回 undefined。绝不抛异常。 */
+function looseJsonParse(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    /* 继续尝试保守修复 */
+  }
+  try {
+    // 仅容忍最常见的轻微损坏：对象/数组尾随逗号。更激进的替换有污染合法内容的风险，宁可按普通文本兜底。
+    return JSON.parse(text.replace(/,\s*([}\]])/g, '$1'));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 探测「类型化 section 数组被整体字符串化」的坏形态：
+ * trim 后以 `[{` 开头，且能解析出「至少一个元素带非空 type 字段的对象数组」→ 返回该对象数组；否则 null。
+ * 「至少一个元素带 type」这道闸把普通正文（哪怕碰巧以 [ 开头）挡在外面，避免误伤。
+ */
+function parseStringifiedSections(value: unknown): Record<string, unknown>[] | null {
+  if (typeof value !== 'string') return null;
+  const t = value.trim();
+  if (!/^\[\s*\{/.test(t)) return null; // 必须是「对象数组」字面量
+  const parsed = looseJsonParse(t);
+  if (!Array.isArray(parsed)) return null;
+  const objs = parsed.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x));
+  if (!objs.length) return null;
+  if (!objs.some((o) => typeof o.type === 'string' && o.type.trim())) return null;
+  return objs;
+}
+
+/** 若某数组元素是「白卡包裹」——无自身 type，其 b/body/text/content 是字符串化的类型化数组——则解出内层数组，否则 null。 */
+function unwrapWrappedSections(el: unknown): Record<string, unknown>[] | null {
+  if (typeof el === 'string') return parseStringifiedSections(el);
+  if (!el || typeof el !== 'object' || Array.isArray(el)) return null;
+  const o = el as Record<string, unknown>;
+  if (typeof o.type === 'string' && o.type.trim()) return null; // 本身就是类型化 section，不动
+  return parseStringifiedSections(o.b ?? o.body ?? o.text ?? o.content);
+}
+
+/** 把 sections 入参归成「原始 section 值数组」，就地展开上述两种字符串化坏形态；正常数据原样透传。 */
+function coerceSectionList(input: unknown): unknown[] {
+  // 形态 A：sections 字段本身就是「类型化数组的字符串」
+  const whole = parseStringifiedSections(input);
+  if (whole) return whole;
+  const list = Array.isArray(input) ? input : input == null ? [] : [input];
+  // 形态 B：数组里的白卡元素包裹着字符串化的类型化数组 → 就地展开
+  const out: unknown[] = [];
+  for (const el of list) {
+    const unwrapped = unwrapWrappedSections(el);
+    if (unwrapped) out.push(...unwrapped);
+    else out.push(el);
+  }
+  return out;
+}
+
 export function normalizeDeliverableSections(input: unknown): DeliverableSection[] {
-  if (Array.isArray(input)) return input.map(normalizeSection).filter((s): s is DeliverableSection => !!s).slice(0, 12);
-  const direct = normalizeSection(input, 0);
-  return direct ? [direct] : [];
+  return coerceSectionList(input)
+    .map(normalizeSection)
+    .filter((s): s is DeliverableSection => !!s)
+    .slice(0, 12);
+}
+
+/**
+ * 读取端自愈：把一份已落库的 deliverable contentJson 的 sections 重新归一化，
+ * 展开历史坏数据里「类型化 section 数组被整体字符串化」的形态。对正常数据幂等。绝不抛异常。
+ * 用于方案库详情 / 版本化报告等读取路径，使存量坏数据重进页面即恢复，无需刷库。
+ */
+export function healDeliverableSections<T>(content: T): T {
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return content;
+  const c = content as Record<string, unknown>;
+  if (!('sections' in c)) return content;
+  return { ...c, sections: normalizeDeliverableSections(c.sections) } as T;
 }
 
 /** 归一化封面文案（title 必填，否则返回 undefined 由渲染端用 Deliverable.title 兜底）。 */

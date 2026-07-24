@@ -4,6 +4,7 @@ import { resolveUser } from '../services/context.js';
 import { recordFeedback } from '../services/memory.js';
 import { saveReportVersion, hashContent } from '../services/reports.js';
 import { recordAudit } from '../services/audit.js';
+import { healDeliverableSections } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 
 export async function libraryRoutes(app: FastifyInstance) {
@@ -28,7 +29,7 @@ export async function libraryRoutes(app: FastifyInstance) {
       agentKey: d.agentKey,
       agentName: d.agent.name,
       sessionId: d.sessionId,
-      content: d.contentJson,
+      content: healDeliverableSections(d.contentJson),
       at: d.createdAt,
       reportId: d.reportId,
       version: d.reportId ? verOf.get(d.reportId) : undefined,
