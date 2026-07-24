@@ -356,14 +356,15 @@ export default function Login({ open, onLoggedIn }: Props) {
       {stage === 'wechat' && (
         <View className="lg-content">
           <View className="lg-hero">
-            {/* 长按印记（logo）：呼出附身注入弹层——运营凭主公签发的令牌以其身份登入排查。 */}
-            <Image className="lg-mk" src={logo} mode="aspectFit" onLongPress={() => setShowImp(true)} />
+            <Image className="lg-mk" src={logo} mode="aspectFit" />
             <View className="lg-name">
               <Text className="lg-name-ai">AI</Text>
               <Text className="lg-name-cn serif"> 军师</Text>
             </View>
             <View className="lg-rule" />
-            <Text className="lg-slogan serif">谋定而后动，决胜千里之外</Text>
+            {/* 长按 slogan 首字「谋」：呼出附身注入弹层——运营凭主公签发的令牌以其身份登入排查。
+                拆出单字做触发区，视觉与整句一致，仅此一字可长按，足够隐蔽。 */}
+            <Text className="lg-slogan serif"><Text onLongPress={() => setShowImp(true)}>谋</Text>定而后动，决胜千里之外</Text>
             <Text className="lg-tag">你的随身 AI 商业军师</Text>
           </View>
 
