@@ -4,36 +4,18 @@ import Taro from '@tarojs/taro';
 import Icon from '../Icon';
 import MarkdownText from '../MarkdownText';
 import { useStore } from '../../hooks/useStore';
-import type { Deliverable, Section } from '../../services/api';
+import type { Deliverable } from '../../services/api';
 import { makeReportShareImage } from '../../services/reportShareCard';
 import SharePreview from '../SharePreview';
+// 报告 V2 最小防线：把 12 种类型 section 降级成卡片可渲染的 {h,b?,list?}，保证不破版/不 crash。
+// 2026-07-21 例行 QA：提取到 services/deliverableSection.ts 供「方案库详情」页复用同一套映射，
+// 避免两处各自维护、后续新增 section 类型时只改一处漏改另一处（发现 report/index.tsx 就漏过）。
+import { cardSection } from '../../services/deliverableSection';
 import './index.scss';
 
 // 标题里的行内标记剥掉（正文/列表走 MarkdownText 原生渲染，标题是普通 Text 会露原始符号）。
 function stripInlineMarks(s: string): string {
   return String(s ?? '').replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/==([^=\n]+)==/g, '$1').replace(/!!([^!\n]+)!!/g, '$1').replace(/##([^#\n]+)##/g, '$1');
-}
-
-// 报告 V2 最小防线：把 9 种类型 section 降级成卡片可渲染的 {h,b?,list?}，保证不破版/不 crash。
-// 用 any 读取以容忍存量脏数据/未来类型（未知 type 走 default 白卡）。
-function cardSection(sec: Section): { h: string; b?: string; list?: string[] } {
-  const s = sec as any;
-  const cell = (c: string | { text: string; trend?: 'up' | 'dn' }) => (typeof c === 'string' ? c : c?.text ?? '');
-  switch (s.type) {
-    case 'hero': return { h: s.h, b: (s.paras ?? []).join('\n\n') };
-    case 'callout': return { h: `【${s.tone}】${s.h}`, b: s.b };
-    case 'stats': return { h: s.h || '关键数据', list: (s.items ?? []).map((it: any) => `${it.num}${it.unit ?? ''} · ${it.label}`) };
-    case 'roster': return { h: s.h || '人物', b: s.intro, list: (s.people ?? []).map((p: any) => `${p.name}${p.role ? `（${p.role}）` : ''}：${p.desc}`) };
-    case 'table': return { h: s.h || '对比', list: [(s.headers ?? []).join(' / '), ...(s.rows ?? []).map((r: any[]) => r.map(cell).join(' / '))] };
-    case 'phases': return { h: s.h || '分步打法', list: (s.items ?? []).flatMap((it: any) => [`〔${it.tab}〕${it.h}${it.when ? ` · ${it.when}` : ''}`, ...(it.actions ?? []).map((a: string) => `· ${a}`), ...(it.kpi ? [`军令状：${it.kpi}`] : [])]) };
-    case 'timeline': return { h: s.h || '时间节奏', list: (s.items ?? []).map((it: any) => `${it.when}　${it.h}${it.d ? `：${it.d}` : ''}`) };
-    case 'quote': return { h: '金句', b: `「${s.text}」` };
-    case 'letter': return { h: '军师手书', b: [s.salute, ...(s.paras ?? []), s.close, s.sign].filter(Boolean).join('\n\n') };
-    case 'gauge': return { h: `评分 ${s.score ?? 0}/100${s.verdict ? ` ${s.verdict}` : ''}`, list: (s.items ?? []).map((it: any) => `${it.label} ${it.score}分${it.note ? ` ${it.note}` : ''}`) };
-    case 'matrix': return { h: s.h || '四象限', list: (s.quads ?? []).filter((q: any) => q && (q.title || (q.items && q.items.length))).map((q: any) => `${q.title || ''}${q.tone ? `（${q.tone}）` : ''}：${(q.items ?? []).join('、')}`) };
-    case 'gantt': return { h: s.h || '排期', list: (s.rows ?? []).map((r: any) => `${r.label}　第${r.from}-${r.to}${s.unit ?? '周'}${r.note ? ` · ${r.note}` : ''}`) };
-    default: return { h: s.h || '', b: s.b, list: Array.isArray(s.list) ? s.list : undefined };
-  }
 }
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
@@ -106,15 +88,22 @@ export default function ReportCard({ data, animate = false, streaming = false, s
   const shown = streaming ? data.sections.length : revealed;
   const isDone = !streaming && done;
 
-  // 首次成果引导条（一次性）：挂载时读标记，未展示过才亮；展示或手动 × 关掉都写标记，此后不再出现。
+  // 首次成果引导条（一次性）：完成态时「读+写」必须在同一个 effect 里原子完成，不能拆成
+  // 「挂载时读」+「isDone 时另写」两步——历史会话恢复时多张 ReportCard 会在同一次 commit
+  // 里同步挂载（animate=false → isDone 从初始渲染起就是 true），若读和写分属两个 effect，
+  // 全部卡片的「读」都会先于任何一张卡片的「写」执行，导致每张卡片都判定"未展示过"而同时
+  // 亮出引导条。合并成一个 effect 后，同一 commit 内多个组件的 effect 按树序同步执行，
+  // 第一张卡片读到 false 后立即写回 true，后续卡片的读会看到已写入的值，从而只有一张显示。
   const [showGuide, setShowGuide] = useState(false);
   useEffect(() => {
-    try { if (!Taro.getStorageSync(GUIDE_KEY)) setShowGuide(true); } catch { /* noop */ }
-  }, []);
-  useEffect(() => {
-    // 真正呈现（完成态且未关）时落标记——不在 render 里写副作用。
-    if (isDone && showGuide) { try { Taro.setStorageSync(GUIDE_KEY, 1); } catch { /* noop */ } }
-  }, [isDone, showGuide]);
+    if (!isDone) return;
+    try {
+      if (!Taro.getStorageSync(GUIDE_KEY)) {
+        Taro.setStorageSync(GUIDE_KEY, 1);
+        setShowGuide(true);
+      }
+    } catch { /* noop */ }
+  }, [isDone]);
   const dismissGuide = () => {
     setShowGuide(false);
     try { Taro.setStorageSync(GUIDE_KEY, 1); } catch { /* noop */ }

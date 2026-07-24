@@ -45,6 +45,21 @@ function saveStep(n: number): void {
   try { Taro.setStorageSync(stepKey(), String(n)); } catch { /* noop */ }
 }
 
+// 当前小程序页面路由（同 services/store.ts 的 currentRoute 口径，本文件独立小份复用不值得跨模块导出）。
+function currentRoute(): string {
+  try {
+    const getPages = (globalThis as typeof globalThis & { getCurrentPages?: () => { route?: string }[] }).getCurrentPages;
+    const pages = getPages?.() ?? [];
+    return pages[pages.length - 1]?.route || '';
+  } catch { return ''; }
+}
+// 当前页面对应的引导步骤（找不到 → -1，如非五个 tab 页之一）。
+function stepForRoute(route: string): number {
+  if (!route) return -1;
+  const normalized = route.startsWith('/') ? route : `/${route}`;
+  return STEPS.findIndex((s) => s.route === normalized);
+}
+
 // —— 模块级共享状态 + 订阅 —— //
 const shared = { active: false, step: 0 };
 const listeners = new Set<() => void>();
@@ -54,7 +69,16 @@ const notify = () => listeners.forEach((l) => l());
 function evaluate(): void {
   const active = store.isAuthed() && store.isOnboarded() && coachPending();
   shared.active = active;
-  if (active) shared.step = loadStep();
+  if (active) {
+    const persisted = loadStep();
+    const onScreen = stepForRoute(currentRoute());
+    // 用户可能不点「下一步」而是直接点底栏切到某个 tab（CustomTabBar.switchTo 对引导态没有拦截，
+    // 属有意保留——底栏必须可点透才能让箭头指向真实底栏）；此时以「当前实际停留的 tab」为准重新
+    // 裁定要展示的步骤并回写存储，避免引导卡文案/箭头指向与用户实际所在页错位（2026-07-23 例行 QA）。
+    const step = onScreen >= 0 ? onScreen : persisted;
+    if (step !== persisted) saveStep(step);
+    shared.step = step;
+  }
   notify();
 }
 function advance(): void {

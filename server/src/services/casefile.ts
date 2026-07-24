@@ -6,7 +6,9 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { now, dateKey } from './clock.js';
 import { structured } from '../llm/gateway.js';
+import { cardSection } from './deliverableSection.js';
 import type { OrderActionType, OrderMetric, GoalLadder } from '../../../shared/contracts';
+import type { DeliverableSection } from '../llm/schema.js';
 
 export interface DeliverableSectionInput {
   h: string;
@@ -23,6 +25,24 @@ export interface DeliverableSectionInput {
 export interface DeliverableInput {
   title?: string;
   sections?: DeliverableSectionInput[];
+}
+
+/**
+ * 2026-07-22 例行 QA 修复：调用方（casefile.ts 自身 + strategicProfile.ts）实际收到的
+ * `sections` 是路由从客户端原样透传的报告 V2 `Deliverable.sections`（`hero`/`callout`/
+ * `stats`/`roster`/`table`/`phases`/`timeline`/`quote`/`letter` 等类型化 section），而不是
+ * 本文件声明的窄类型 `DeliverableSectionInput`（仅 `{h,b?,list?}`）——`DeliverableInput` 从
+ * 落地起就只是「类型层面能编译过」的伪装，真实内容在 `items`/`people`/`rows` 等专属字段，
+ * quote/letter 干脆没有 `h`。之前所有 extractOrders/extractRisks/firstJudgment/
+ * deliverableText 直接读 `s.h`/`s.b`/`s.list` 会对这 7 种类型静默剥空大半内容，导致「认可
+ * 方案 → 案卷/军令/风险锁/战略档案」这条核心执行闭环几乎失效。这里在读取前统一过一遍与
+ * 前端 ReportCard 同口径的 `cardSection` 归一化，之后再套用既有的关键词匹配逻辑。
+ */
+function normalizedSections(d: DeliverableInput): DeliverableSectionInput[] {
+  // 保留原始 type/items/rows/quads 等专属字段（与归一化后的 h/b/list 一起返回）——extractOrders
+  // 的 phases/gantt 兜底分支需要按 type 过滤并读原始 items/rows，仅归一化 h/b/list 会把 type 一并
+  // 丢掉，导致这两条兜底分支永远匹配不到任何 section（2026-07-23 例行 QA 回归测试发现）。
+  return ((d.sections ?? []) as unknown as DeliverableSection[]).map((s) => ({ ...(s as unknown as DeliverableSectionInput), ...cardSection(s) }));
 }
 
 /** 案卷军令视图（V7-05：含结构化字段，缺省 null/空，前端缺省不渲染）。 */
@@ -67,10 +87,14 @@ function orderDedupeKey(date: string, text: string): string {
 // 兜底取任意列表分节；报告 V2 类型化成果（白卡 list 缺位）再兜底 phases.actions → gantt 行；最多 3 条作为今日军令。
 export function extractOrders(d: DeliverableInput): string[] {
   const actionHint = /行动|动作|下一步|清单|计划|建议|怎么做|7 ?天|30 ?天/;
-  const sections = d.sections ?? [];
+  const sections = normalizedSections(d);
   const listSections = sections.filter((s) => s.list && s.list.length);
   const preferred = listSections.filter((s) => actionHint.test(s.h ?? ''));
-  let source = (preferred.length ? preferred : listSections).flatMap((s) => s.list || []);
+  // 标题明确命中「行动/计划」等关键词时，直接用该分节的归一化 list（哪怕是 phases/gantt 合成的
+  // 带序号/项目符号文本）——不匹配时才依次尝试 phases.actions / gantt 行 label 的干净兜底，最后才
+  // 退到「随便挑一个有 list 的分节」（避免 phases/gantt 未命中关键词时被合成 list 抢先，2026-07-23
+  // 例行 QA：旧版兜底顺序会让合成 list 覆盖掉本该走 phases.actions 兜底的干净文本）。
+  let source = preferred.flatMap((s) => s.list || []);
   if (!source.length) {
     source = sections.filter((s) => s.type === 'phases')
       .flatMap((s) => (s.items ?? []).flatMap((it) => it.actions ?? []));
@@ -78,6 +102,9 @@ export function extractOrders(d: DeliverableInput): string[] {
   if (!source.length) {
     source = sections.filter((s) => s.type === 'gantt')
       .flatMap((s) => (s.rows ?? []).map((r) => (Array.isArray(r) ? '' : r.label ?? '')).filter(Boolean));
+  }
+  if (!source.length) {
+    source = listSections.flatMap((s) => s.list || []);
   }
   const seen = new Set<string>();
   return source
@@ -95,9 +122,8 @@ export function extractOrders(d: DeliverableInput): string[] {
 export function extractRisks(d: DeliverableInput): string[] {
   const riskHint = /风险|不能|不要|避免|禁|红线/;
   const out: string[] = [];
-  (d.sections ?? []).forEach((s) => {
-    const tone = (s as { tone?: string }).tone;
-    if (!riskHint.test(s.h ?? '') && tone !== '风险') return;
+  normalizedSections(d).forEach((s) => {
+    if (!riskHint.test(s.h)) return;
     if (s.list?.length) out.push(...s.list);
     else if (s.b) out.push(s.b);
   });
@@ -106,7 +132,7 @@ export function extractRisks(d: DeliverableInput): string[] {
 
 // 方案首段正文作为案卷主判断。
 export function firstJudgment(d: DeliverableInput): string {
-  const withBody = (d.sections ?? []).find((s) => s.b);
+  const withBody = normalizedSections(d).find((s) => s.b);
   return (withBody?.b || d.title || '').trim();
 }
 
@@ -162,14 +188,7 @@ metrics(≤3组{label,value}指标对)、sourceQuote(来源引用，方案里的
 
 // 喂给 LLM 的成果全文：拍平所有类型化组件字段（phases.actions/gantt 行/quads 等），不然类型化报告在这里只剩标题。
 function deliverableText(d: DeliverableInput): string {
-  const sectionText = (s: DeliverableSectionInput): string => {
-    const parts: (string | undefined)[] = [s.h, s.b, ...(s.list ?? []), ...(s.paras ?? [])];
-    for (const it of s.items ?? []) parts.push([it.tab, it.when, it.h, it.label, it.d, it.kpi, it.note, ...(it.actions ?? [])].filter(Boolean).join(' '));
-    for (const r of s.rows ?? []) parts.push(Array.isArray(r) ? r.map((c) => (typeof c === 'string' ? c : c?.text ?? '')).join(' ') : [r.label, r.note].filter(Boolean).join(' '));
-    for (const q of s.quads ?? []) parts.push([q.title, ...(q.items ?? [])].filter(Boolean).join(' '));
-    return parts.filter(Boolean).join('\n');
-  };
-  return [d.title, ...(d.sections ?? []).map(sectionText)].filter(Boolean).join('\n\n').slice(0, 3000);
+  return [d.title, ...normalizedSections(d).map((s) => `${s.h}\n${s.b ?? ''}\n${(s.list ?? []).join('\n')}`)].filter(Boolean).join('\n\n').slice(0, 3000);
 }
 
 // 认可路径 LLM 限时预算：拆军令/抽目标是「锦上添花」，预算内没回来就走启发式/留空，

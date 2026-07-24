@@ -15,7 +15,12 @@ export function renderCardToImage(
     q.select(`#${canvasId}`).fields({ node: true, size: true }).exec((res) => {
       const node = res?.[0]?.node;
       if (!node) { reject(new Error('canvas 未就绪')); return; }
-      const dpr = Taro.getWindowInfo().pixelRatio || 2;
+      // getWindowInfo() 在极少数环境下可能抛出；这里处在 selectorQuery 回调内，不会被外层
+      // Promise executor 的隐式 try 捕获（Promise 构造器本身没有包 try/catch），一旦抛出会
+      // 整个 renderCardToImage() 永远不 resolve/reject（调用方的 showLoading/按钮态会卡死）。
+      // 兜底与同一次提交里其它三处 getWindowInfo/getDeviceInfo 替换点保持一致。
+      let dpr = 2;
+      try { dpr = Taro.getWindowInfo().pixelRatio || 2; } catch { /* noop，用默认值 2 */ }
       node.width = w * dpr;
       node.height = h * dpr;
       const ctx = node.getContext('2d');
