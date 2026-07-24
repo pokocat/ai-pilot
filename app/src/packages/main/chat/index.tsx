@@ -302,11 +302,6 @@ export default function Chat() {
   const [projectId, setProjectId] = useState<string>('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
-  // 输入框「解除受控」的种子：Textarea 只把 value 绑到 inputSeed.text、key 绑到 epoch。
-  // 用户逐字打字时 seed 不动（value prop 恒定 → Taro 不 setData 该属性 → 原生框内容与光标不被重渲染打扰），
-  // 仅程序性写入（草稿恢复 / 粘贴归卷 / 发送清空）时 bump epoch 重挂节点，把原生内容强制同步为新文本。
-  // 这是修「语音大段上屏内容自我重复」「中间删字光标跳末尾」两个受控 textarea 缺陷的核心。
-  const [inputSeed, setInputSeed] = useState<{ epoch: number; text: string }>({ epoch: 0, text: '' });
   const [inputFocus, setInputFocus] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -345,14 +340,6 @@ export default function Chat() {
   // 粘贴合并：同步追踪输入框最新值（React state 在同步事件串里是陈旧的，不能当 prev 用）。
   // 所有给 setInput 赋值处都要同步维护此 ref，否则粘贴增量判定会错。
   const lastValueRef = useRef('');
-  // 程序性写入输入框的统一入口（草稿恢复 / 粘贴归卷回填 / 发送清空 等「要反映到输入框」的写入）。
-  // 三连：setInput（供字数、草稿、粘贴增量判定读取）+ lastValueRef（粘贴基准）+ setInputSeed（bump epoch 强制原生同步）。
-  // 注意：用户逐字打字只走 handleInput 的 setInput，绝不经此函数——那条路径不能 bump epoch，否则每键都会重挂节点、光标又跳末尾。
-  const writeInput = (text: string) => {
-    setInput(text);
-    lastValueRef.current = text;
-    setInputSeed((s) => ({ epoch: s.epoch + 1, text }));
-  };
   // 粘贴 burst：命中一次长文暴增即记 baseline（暴增前的输入），burst 期间每个 onInput 都重置结算定时器。
   const pasteBurstRef = useRef<{ baseline: string } | null>(null);
   const pasteSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -530,7 +517,7 @@ export default function Chat() {
 
   // B3 草稿持久化：按 sessionId 维度存/取；发送成功后清除。
   const loadDraft = (id?: string) => {
-    try { const d = Taro.getStorageSync(draftKeyFor(id)); if (d && typeof d === 'string') { writeInput(d); } } catch { /* noop */ }
+    try { const d = Taro.getStorageSync(draftKeyFor(id)); if (d && typeof d === 'string') { setInput(d); lastValueRef.current = d; } } catch { /* noop */ }
   };
   const saveDraft = () => {
     try {
@@ -1133,7 +1120,7 @@ export default function Chat() {
       setRefs((cur) => (cur.length >= UPLOAD_COUNT_MAX || cur.some((x) => x.kind === 'knowledge' && x.id === id))
         ? cur : [...cur, { kind: 'knowledge', id, label: title }]);
     } catch {
-      writeInput(fullValue); // 归卷未成：长文塞回输入框，不丢字（bump epoch 强制原生同步回填内容）
+      setInput(fullValue); lastValueRef.current = fullValue; // 归卷未成：长文塞回输入框，不丢字
       Taro.showToast({ title: '长文归卷未成，稍后再试', icon: 'none' });
     } finally {
       pasteInflightRef.current -= 1;
@@ -1158,7 +1145,7 @@ export default function Chat() {
       return;
     }
     void absorbPasteToFile(pasted, final);
-    writeInput(kept); // 归卷后把留在框里的粘贴长文抹掉、只留 kept：须 bump epoch 强制原生同步（否则原生框仍显示长文）
+    setInput(kept); lastValueRef.current = kept;
   };
 
   const handleInput = (e: { detail: { value: string } }) => {
@@ -1188,7 +1175,8 @@ export default function Chat() {
       Taro.showToast({ title: '言过两千，可精简或粘贴成附卷', icon: 'none' });
       return;
     }
-    writeInput(''); // 发送清空：bump epoch 强制原生框清空（下一行 setInputFocus(false) 会收键盘，重挂后 focus=false 不再弹）
+    setInput('');
+    lastValueRef.current = '';
     // 发送即作废在途的粘贴结算，免得定时器到点后把已清空/新输入误判成粘贴。
     if (pasteSettleTimerRef.current) { clearTimeout(pasteSettleTimerRef.current); pasteSettleTimerRef.current = null; }
     pasteBurstRef.current = null;
@@ -2019,11 +2007,8 @@ export default function Chat() {
         <View className={`composer ${busy ? 'busy' : ''}`}>
           <View className="box" onClick={() => { if (!busy) setInputFocus(true); }}>
             <Textarea
-              // key=epoch：解除受控。用户打字期间 epoch 不变 → 节点不重挂、value prop 恒定 → 原生内容/光标不被重渲染打扰；
-              // 仅程序性写入（writeInput）bump epoch → 重挂并把原生内容强制同步为 inputSeed.text。
-              key={inputSeed.epoch}
               className="cinput"
-              value={inputSeed.text}
+              value={input}
               focus={inputFocus}
               disabled={busy}
               maxlength={-1}
