@@ -890,6 +890,12 @@ export interface AdminUserDetail {
   user: AdminUserItem;
   agents: AdminUserAgentRow[]; // 全部需开通(unlock)的智能体 + 开通状态
 }
+/** 附身登录（impersonation）签发结果（POST /admin/users/:id/impersonate；仅 owner/master）。 */
+export interface AdminImpersonateResult {
+  token: string;            // 目标用户的登录态 token（配 APP_JWT_SECRET → 2h JWT；否则 = 明文 userId）
+  expiresAt: string | null; // ISO 失效时间；未配 APP_JWT_SECRET 时为 null（明文 token 不过期）
+  warning?: string;         // 未配 APP_JWT_SECRET 时的安全提示
+}
 /** 只读看板：项目（GET /admin/projects） */
 export interface AdminProjectItem { id: string; name: string; tenantName: string; status: string; sessions: number; reports: number; knowledge: number; updatedAt: string; }
 /** 只读看板：报告（GET /admin/reports） */

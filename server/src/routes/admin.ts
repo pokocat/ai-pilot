@@ -39,7 +39,7 @@ import { getKnowledgeDetail, deleteKnowledge, reembedItem, ingestUploadedFile } 
 import type { AiConfigUpdate, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
-  AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AgentBilling,
+  AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AdminImpersonateResult, AgentBilling,
   AgentProviderMode, AgentRuntimeUpdate, AgentRuntimeView, AiTestResult, SkillsConfig, SkillToolMeta,
   AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult, ToolStatsView,
   AdminAccountItem, CreateAdminAccountRequest, UpdateAdminAccountRequest,
@@ -54,6 +54,7 @@ import type {
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
+import { signUserToken, jwtEnabled } from '../services/userToken.js';
 import { Prisma } from '@prisma/client';
 
 // 功能开关目录（P0-2 / D-10）：label/desc/compliance/kind 写死在代码；DB 存 enabled(toggle) 或 payload(number)。
@@ -501,6 +502,26 @@ export async function adminRoutes(app: FastifyInstance) {
       action: 'admin.user.agent.revoke', payload: { agentKey: req.params.key },
     });
     return { ok: true };
+  });
+
+  // 附身登录（impersonation，owner-only）：为目标用户签发短时（2h）登录态 token，
+  // 运营凭 H5 链接（?imp_token=…）以其身份登入排查线上问题。配 APP_JWT_SECRET → 2h JWT（带 imp 标记，
+  // 便于事后从 token 辨认是谁附身）；未配 → 返回明文 userId（与现状安全水位一致，不额外劣化）。全程留审计。
+  app.post<{ Params: { id: string } }>('/admin/users/:id/impersonate', async (req, reply): Promise<AdminImpersonateResult | void> => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, tenantId: true } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    const by = actorName(actor);
+    const IMP_TTL_SEC = 2 * 60 * 60; // 附身 token 有效期 2 小时（够排查，又短到降低泄漏风险）
+    const enabled = jwtEnabled();
+    const ttlSec = enabled ? IMP_TTL_SEC : null; // 明文口径下 token 不过期，如实记 null
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'admin.user.impersonate', payload: { actor: by, ttlSec } });
+    if (enabled) {
+      const token = signUserToken(user.id, { ttlSec: IMP_TTL_SEC, extra: { imp: by } });
+      return { token, expiresAt: new Date(Date.now() + IMP_TTL_SEC * 1000).toISOString() };
+    }
+    return { token: user.id, expiresAt: null, warning: '未配置 APP_JWT_SECRET，token 为明文 userId 且不会过期' };
   });
 
   // —— S1：单用户用量下钻（额度 / 套餐 / token 聚合 / 钻石 / 支付 / 开通归因）纯读 ——

@@ -3,11 +3,43 @@ import { createPortal } from 'react-dom';
 import { useLaunch } from '@tarojs/taro';
 import CustomTabBar from './custom-tab-bar';
 import { store } from './services/store';
+import { setToken } from './services/token';
 import './app.scss';
 import './app.h5.scss';
 
+// 附身登录（运营排查）：H5 链接可带 ?imp_token=<token>，以目标用户身份登入。
+// Taro H5 用 hash 路由，参数可能落在 search（?imp_token=…）或 hash 内（#/pages/…?imp_token=…），两处都兜。
+// 命中后落 token 到 storage，并用 replaceState 把 imp_token 从地址栏抹掉（避免链接被复制转发 / 残留在浏览历史）。
+function consumeImpersonationToken(): boolean {
+  if (typeof window === 'undefined') return false;
+  const { search, hash, pathname } = window.location;
+  const pick = (qs: string): string => {
+    const i = qs.indexOf('?');
+    if (i < 0) return '';
+    return new URLSearchParams(qs.slice(i + 1)).get('imp_token') || '';
+  };
+  const token = pick(search) || pick(hash);
+  if (!token) return false;
+  setToken(token);
+  try {
+    const strip = (qs: string): string => {
+      const i = qs.indexOf('?');
+      if (i < 0) return qs;
+      const head = qs.slice(0, i);
+      const params = new URLSearchParams(qs.slice(i + 1));
+      params.delete('imp_token');
+      const rest = params.toString();
+      return rest ? `${head}?${rest}` : head;
+    };
+    window.history.replaceState(null, '', `${pathname}${strip(search)}${strip(hash)}`);
+  } catch { /* 地址栏清理失败不阻断登入 */ }
+  return true;
+}
+
 function App({ children }: PropsWithChildren) {
   useLaunch(() => {
+    // 附身 token 注入需早于 loadMe（loadMe 依赖已落地的 token）
+    consumeImpersonationToken();
     // 智能体注册表是公共数据，随时可拉；用户信息仅在已登录时拉取（内部已判断）
     store.loadAgents();
     store.loadMe();

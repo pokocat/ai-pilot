@@ -1,0 +1,39 @@
+/* 附身注入弹层：贴底浮层，随键盘高度抬升（margin-bottom）。
+   z-index=960：必须高于登录浮层的 950（Login/index.scss），否则被登录页盖住不可见。 */
+.imp-mask {
+  position: fixed; inset: 0; z-index: 960;
+  background: rgba(22, 25, 29, .55);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.imp-card {
+  width: 100%; max-width: 600px;
+  background: var(--bg, #fff);
+  border-radius: var(--r-lg, 18px) var(--r-lg, 18px) 0 0;
+  padding: 10px 22px calc(22px + env(safe-area-inset-bottom)) 22px;
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, .18);
+  animation: sheet-rise .42s cubic-bezier(.2, .8, .2, 1) both; /* 公共 keyframes 见 app.scss */
+  transition: margin-bottom .2s ease;
+}
+.imp-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line, #e4e4e7); margin: 0 auto 16px; }
+.imp-title { font-size: 20px; font-weight: 700; color: var(--ink, #16191d); line-height: 1.3; }
+.imp-desc { display: block; margin-top: 8px; font-size: 13px; line-height: 1.6; color: var(--muted, #8a8f98); }
+.imp-input {
+  margin-top: 16px; width: 100%; box-sizing: border-box;
+  min-height: 96px; padding: 12px 14px;
+  background: var(--bg-weak, #f4f5f7); border: 1px solid var(--line, #e4e4e7);
+  border-radius: var(--r-md, 12px);
+  font-size: 14px; line-height: 1.5; color: var(--ink, #16191d);
+  word-break: break-all;
+}
+.imp-ph { color: var(--muted, #a3a7ad); }
+.imp-cta {
+  margin-top: 18px; height: 48px; border-radius: 999px;
+  background: var(--accent, #123f2e); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 600; letter-spacing: 2px;
+}
+.imp-cta.off { opacity: .6; }
+.imp-cancel {
+  display: block; text-align: center; margin-top: 14px;
+  font-size: 14px; color: var(--muted, #8a8f98);
+}

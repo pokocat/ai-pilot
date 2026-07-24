@@ -145,6 +145,9 @@ export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescri
 export type { AdminBenchmark, AdminBenchmarkUpsert } from '../../shared/contracts';
 // —— per-user 用量下钻 + 支付订单只读 ——
 export type { AdminUserUsage, AdminUserQuota, AdminUserPlanStatus, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult } from '../../shared/contracts';
+// —— 附身登录（impersonation，owner-only）——
+export type { AdminImpersonateResult } from '../../shared/contracts';
+import type { AdminImpersonateResult } from '../../shared/contracts';
 
 export const api = {
   overview: () => req<Overview>('/admin/overview'),
@@ -152,6 +155,8 @@ export const api = {
   userDetail: (id: string) => req<AdminUserDetail>(`/admin/users/${id}`),
   grantAgent: (id: string, agentKey: string) => req<{ ok: boolean }>(`/admin/users/${id}/agents`, 'POST', { agentKey }),
   revokeAgent: (id: string, agentKey: string) => req<{ ok: boolean }>(`/admin/users/${id}/agents/${agentKey}`, 'DELETE'),
+  // 附身登录：为目标用户签发短时 token（owner-only；后端 requireSuper + 审计）。
+  impersonate: (id: string) => req<AdminImpersonateResult>(`/admin/users/${id}/impersonate`, 'POST'),
   // —— 用户上下文中心：个人档案 + 长期记忆 + 知识库 ——
   userContext: (id: string) => req<AdminUserContext>(`/admin/users/${id}/context`),
   delUserMemory: (id: string, mid: string) => req<{ ok: boolean }>(`/admin/users/${id}/memories/${mid}`, 'DELETE'),

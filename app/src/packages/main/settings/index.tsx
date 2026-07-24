@@ -3,6 +3,7 @@ import { View, Text, Input, Button, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
+import ImpersonateSheet from '../../../components/ImpersonateSheet';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api } from '../../../services/api';
@@ -25,6 +26,7 @@ export default function Settings() {
   const [company, setCompany] = useState('');
   const [saving, setSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [showImp, setShowImp] = useState(false); // 换身注入弹层（长按版本号呼出，运营排查）
   const avatarUrl = me?.user.avatarUrl || '';
 
   const onChooseAvatar = async (e: { detail?: { avatarUrl?: string } }) => {
@@ -137,7 +139,8 @@ export default function Settings() {
 
         <Text className="set-sec">关于</Text>
         <View className="set-card">
-          <View className="set-row static">
+          {/* 长按版本号：呼出换身注入弹层——运营凭主公令牌直接切到目标身份排查（无需先退出）。 */}
+          <View className="set-row static" onLongPress={() => setShowImp(true)}>
             <Text className="set-rt">当前版本</Text>
             <Text className="set-rv">{VERSION}</Text>
           </View>
@@ -176,6 +179,13 @@ export default function Settings() {
         </View>
         <Text className="set-danger" onClick={deleteAccount}>注销账号</Text>
       </View>
+
+      {/* 换身注入弹层：校验通过后已覆盖 token 为新身份，reLaunch 回首页 tab 让各页按新身份重拉。 */}
+      <ImpersonateSheet
+        open={showImp}
+        onClose={() => setShowImp(false)}
+        onDone={() => { setShowImp(false); Taro.reLaunch({ url: '/pages/sessions/index' }); }}
+      />
     </View>
   );
 }
