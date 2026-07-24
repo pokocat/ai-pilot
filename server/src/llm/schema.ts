@@ -361,16 +361,25 @@ function normalizeSection(value: unknown, index: number): DeliverableSection | n
 //    序列化成一个 JSON 字符串，塞进 sections 字段本身、或塞进单个白卡 section 的 b 字段——
 //    此前会被 sectionOf 当纯正文原样保留，渲染端满屏显示 {"type":"gantt"...} 转义 JSON。 ——
 
-/** 宽松 JSON 解析：先严格解析；失败则做一次保守修复（去尾逗号）再试；仍失败返回 undefined。绝不抛异常。 */
+/** 宽松 JSON 解析：先严格解析；失败逐层做保守修复再试；仍失败返回 undefined。绝不抛异常。 */
 function looseJsonParse(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
     /* 继续尝试保守修复 */
   }
+  // 第二次尝试：仅去对象/数组尾随逗号（最常见的轻微损坏）。
+  const noTrailingComma = text.replace(/,\s*([}\]])/g, '$1');
   try {
-    // 仅容忍最常见的轻微损坏：对象/数组尾随逗号。更激进的替换有污染合法内容的风险，宁可按普通文本兜底。
-    return JSON.parse(text.replace(/,\s*([}\]])/g, '$1'));
+    return JSON.parse(noTrailingComma);
+  } catch {
+    /* 继续第三层修复 */
+  }
+  try {
+    // 第三次尝试：修「键值分隔符损坏」——生产实证 cmryglnln... 的 gantt 出现 "rows">[ 而非 "rows":[，
+    // 即闭引号后的 : 被写成 >。lookahead 限定 > 后紧跟 JSON 值起始符（[ { " 数字 true/false/null 负号），
+    // 避免误伤正文里合法的 "..."> 转义内容（如 HTML 片段）。
+    return JSON.parse(noTrailingComma.replace(/">(?=\s*[[{"0-9tfn-])/g, '":'));
   } catch {
     return undefined;
   }

@@ -431,6 +431,21 @@ describe('normalizeDeliverableSections · 字符串化 section 数组自愈', ()
     assert.equal((out[0] as any).tone, '机会');
   });
 
+  test('宽松修复：生产实证「键值分隔符损坏」——两个 gantt 其一 "rows">[ 其一正常', () => {
+    // 与生产 cmryglnln00s7f5vcyzh4up99 一致的损坏形态：一条 section 数组字符串内含两个 gantt，
+    // 第二个的分隔符是 "rows">[ 而非 "rows":[，整体又包在 [{b:"..."}] 白卡里。
+    const good = '{"type":"gantt","h":"排期一","unit":"周","total":4,"rows":[{"label":"起步","from":1,"to":2}]}';
+    const broken = '{"type":"gantt","h":"排期二","unit":"周","total":6,"rows">[{"label":"扩张","from":3,"to":6}]}';
+    const bad = [{ b: `[${good},${broken}]` }];
+    const out = normalizeDeliverableSections(bad);
+    assert.equal(out.length, 2);
+    assert.deepEqual(out.map((s) => s.type), ['gantt', 'gantt']);
+    assert.equal((out[0] as any).rows.length, 1);
+    assert.equal((out[1] as any).rows.length, 1);
+    assert.equal((out[1] as any).rows[0].label, '扩张');
+    assert.equal((out[1] as any).rows[0].to, 6);
+  });
+
   test('损坏到无法解析 → 按普通文本兜底为白卡，绝不抛异常', () => {
     const broken = '[{"type":"stats","rows">[坏掉的键值分隔符导致无法解析';
     const out = normalizeDeliverableSections(broken);
