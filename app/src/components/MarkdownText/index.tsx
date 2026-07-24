@@ -15,11 +15,26 @@ interface Props {
   className?: string;
   inline?: boolean;
   selectable?: boolean;
+  // 流式模式：只把「已定稿的段落前缀」交给 parseBlocks（按前缀 useMemo 缓存，前缀不变即不重解析），
+  // 尚在增长的尾巴用纯 Text 直出、不解析。收尾（streaming 转 false）后整串走完整解析一次转正。
+  streaming?: boolean;
 }
 
 // 流式渲染高频重绘：memo + 按 text 缓存 parseBlocks，避免每个 token 重复全量解析/重建块。
-function MarkdownText({ text, className = '', inline = false, selectable = false }: Props) {
-  const blocks = useMemo(() => (inline ? [] : parseBlocks(text)), [text, inline]);
+// 流式期间进一步拆成「stable 前缀（解析并缓存）+ growing 尾巴（纯文本）」：
+// 把「对增长整串重跑 parseBlocks」的 O(n²) 降到「每段解析一次」的 O(n) 累计成本。
+function MarkdownText({ text, className = '', inline = false, selectable = false, streaming = false }: Props) {
+  const streamSplit = streaming && !inline;
+  // 以最后一个空行（\n\n）为界：其前皆为完整块（stable），其后为半截尾巴（growing）。
+  const splitAt = streamSplit ? text.lastIndexOf('\n\n') : -1;
+  const stableText = splitAt >= 0 ? text.slice(0, splitAt) : '';
+  const tailText = splitAt >= 0 ? text.slice(splitAt + 2) : (streamSplit ? text : '');
+  // 非流式解析整串；流式只解析 stable 前缀。parseTarget 不变时 useMemo 命中，跳过解析与建节点。
+  const parseTarget = streamSplit ? stableText : text;
+  const rendered = useMemo(
+    () => (inline ? null : parseBlocks(parseTarget).map((b, i) => renderBlock(b, i, selectable))),
+    [inline, parseTarget, selectable],
+  );
 
   if (inline) {
     const body = selectable ? cleanSelectableInline(text) : renderInline(cleanInline(text));
@@ -28,7 +43,10 @@ function MarkdownText({ text, className = '', inline = false, selectable = false
 
   return (
     <View className={`md ${className}`}>
-      {blocks.map((block, i) => renderBlock(block, i, selectable))}
+      {rendered}
+      {streamSplit && tailText
+        ? <Text key="__md_tail__" className="md-p" {...selectProps(selectable)}>{tailText}</Text>
+        : null}
     </View>
   );
 }

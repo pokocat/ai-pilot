@@ -26,12 +26,18 @@ import { navTo } from '../../../services/nav';
 import { chatPendingAge, clearChatPending, isChatPending, markChatPending } from '../../../services/chatPending';
 import './index.scss';
 
+// uid：每条消息的稳定 key（服务端消息用其 id，本地临时消息造递增 uid），供列表渲染 key 用。
+// 历史窗口化会向列表顶部插入更早的消息，索引 key 会令整列重挂——稳定 uid 是其正确性前置。
 type Msg =
-  | { role: 'greet'; agent: Agent }
-  | { role: 'user'; text: string; refs?: MessageRef[] }
-  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; refNotices?: string[]; retryText?: string; streaming?: boolean }
-  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; refNotices?: string[]; streaming?: boolean; retryText?: string }
-  | { role: 'memory'; agentName: string };
+  | { role: 'greet'; agent: Agent; uid?: string }
+  | { role: 'user'; text: string; refs?: MessageRef[]; uid?: string }
+  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; refNotices?: string[]; retryText?: string; streaming?: boolean; uid?: string }
+  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; refNotices?: string[]; streaming?: boolean; retryText?: string; uid?: string }
+  | { role: 'memory'; agentName: string; uid?: string };
+
+// 本地临时消息的稳定 uid：模块级单调计数，跨渲染/实例不重复。仅在事件处理/副作用里调用（非渲染期）。
+let msgUidSeq = 0;
+const nextMsgUid = () => `m${++msgUidSeq}`;
 
 // 报告 V2：把一个 section（含 9 种类型）降级成纯文本行。用 any 读取以容忍存量脏数据/未来类型。
 function sectionToLines(sec: Section): string[] {
@@ -182,6 +188,12 @@ const JUMP_LATEST_HIDE_DISTANCE = 140;
 const STICK_BOTTOM_DISTANCE = 120;
 // B1 流式跟随节流间隔：onToken/onReportSection 高频触发，滚底最多每 ~300ms 一次。
 const FOLLOW_THROTTLE_MS = 300;
+// 流式 token 合批：SSE 每 token 直接 setState 会在长回复里雪崩式重渲染 + 重解析（O(n²)）。
+// 先积到缓冲，满 64 字或每 ~120ms flush 一次；流收尾/切页/卸载立即 flush 残余，一字不丢。
+const TOKEN_FLUSH_MS = 120;
+const TOKEN_FLUSH_CHARS = 64;
+// 历史窗口化：restore 全量存 ref，初始只渲染最近 30 条，顶部「阅早前问对」每次向前补 30 条。
+const HISTORY_WINDOW = 30;
 // 离开聊天页后，服务端生成仍会继续。重进同一会话时按服务端 generating 真值刷新，
 // 前 30 秒密一点让回复尽快落屏，长思考则降频，避免一直高频请求。
 const REATTACH_POLL_FAST_MS = 1200;
@@ -304,6 +316,12 @@ export default function Chat() {
   const logHeightRef = useRef(0);
   const logRef = useRef<Msg[]>([]);
   logRef.current = msgs;
+  // 流式 token 合批缓冲：onToken 先积到 ref，定时/满量 flush 一次到 setState，降流式期重渲染频率。
+  const tokenBufRef = useRef('');
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 历史窗口化：完整消息列表存 ref（restore 全量落此），msgs 只保留当前窗口；histShown 记已展开条数。
+  const fullMsgsRef = useRef<Msg[]>([]);
+  const [histShown, setHistShown] = useState(0);
 
   // B1 贴底跟随：atBottom 记录用户是否停留在底部；上滑离开即暂停自动跟随。
   const atBottomRef = useRef(true);
@@ -394,6 +412,31 @@ export default function Chat() {
     }
   };
 
+  // 流式 token 合批：把缓冲一次性追加到最后一条流式聊天气泡（保持 patchChat 语义：只改 reply.text）。
+  // 幂等：无缓冲即 no-op；无流式气泡（已收尾/被替换）时按现有 patchChat 一样安全丢弃。
+  const flushTokenBuf = () => {
+    if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null; }
+    const chunk = tokenBufRef.current;
+    if (!chunk) return;
+    tokenBufRef.current = '';
+    setMsgs((m) => {
+      const i = m.length - 1;
+      if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
+        const copy = m.slice();
+        const cur = copy[i] as Extract<Msg, { role: 'assistant' }>;
+        copy[i] = { ...cur, reply: { ...cur.reply, text: (cur.reply.text || '') + chunk } };
+        return copy;
+      }
+      return m;
+    });
+    followBottom();
+  };
+  // 丢弃缓冲（不落屏）：新一轮气泡起手 / 权威回复整体替换前用，避免残余 token 追加到错误目标。
+  const resetTokenBuf = () => {
+    if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null; }
+    tokenBufRef.current = '';
+  };
+
   const handleLogScroll = (e: ChatScrollEvent) => {
     const height = logHeightRef.current;
     const top = Number(e.detail?.scrollTop || 0);
@@ -464,6 +507,8 @@ export default function Chat() {
     aliveRef.current = false;
     if (reattachTimerRef.current) clearTimeout(reattachTimerRef.current);
     if (pasteSettleTimerRef.current) clearTimeout(pasteSettleTimerRef.current);
+    // 卸载前把 token 缓冲同步 flush 掉、清定时器：不丢字（累计文本仍在 liveGen 快照里，重进会重放），也不留悬空定时器。
+    flushTokenBuf();
     store.setOverlay(false, 'ref-picker');
     // 页面真卸载（返回列表 / redirect）时解绑 view：停止对已死组件的 UI 副作用，但不终止流——
     // liveGen 快照照常累计，重进本会话即 attach 重放，thinking/逐字流无缝续上。
@@ -485,8 +530,8 @@ export default function Chat() {
   const clearDraft = (id?: string) => {
     try { Taro.removeStorageSync(draftKeyFor(id ?? sessionIdRef.current)); } catch { /* noop */ }
   };
-  // 切后台/离开页面时落草稿，避免误触返回丢失长输入。
-  useDidHide(() => { saveDraft(); });
+  // 切后台/离开页面时落草稿，避免误触返回丢失长输入；同时把 token 缓冲 flush 掉，切页也不丢字。
+  useDidHide(() => { flushTokenBuf(); saveDraft(); });
 
   const isUnauthorized = (e: unknown) =>
     (e as any)?.code === 'UNAUTHORIZED' || String((e as any)?.message || '').includes('未登录');
@@ -521,7 +566,7 @@ export default function Chat() {
     const fallbackAgent = agents.find((a) => a.key === key) || agents.find((a) => a.key === 'general') || agents[0];
     if (fallbackAgent) {
       setAgent(fallbackAgent);
-      setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+      setMsgs([{ role: 'greet', agent: fallbackAgent, uid: 'greet' }]);
     }
     return fallbackAgent;
   }
@@ -541,7 +586,7 @@ export default function Chat() {
     if (!store.isAuthed()) {
       if (fallbackAgent) {
         setAgent(fallbackAgent);
-        setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+        setMsgs([{ role: 'greet', agent: fallbackAgent, uid: 'greet' }]);
       } else {
         await primeGuestThread();
       }
@@ -592,7 +637,7 @@ export default function Chat() {
         }
       }
       // 全新会话：仅渲染问候（不落库），首条消息时后端创建
-      setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+      setMsgs([{ role: 'greet', agent: fallbackAgent, uid: 'greet' }]);
       loadDraft('');
       if (send) setTimeout(() => doSend(decodeURIComponent(send), '', fallbackAgent.key, [], true, pid || ''), 350);
     } catch (e) {
@@ -600,7 +645,7 @@ export default function Chat() {
       // 任何拉取失败都不让对话页空白：至少给出问候
       if (fallbackAgent) {
         setAgent(fallbackAgent);
-        setMsgs([{ role: 'greet', agent: fallbackAgent }]);
+        setMsgs([{ role: 'greet', agent: fallbackAgent, uid: 'greet' }]);
       }
     }
   }
@@ -610,10 +655,11 @@ export default function Chat() {
   }, []);
 
   function restore(ag: Agent, messages: { id: string; role: string; content: any; refs?: MessageRef[] }[]) {
-    const out: Msg[] = [{ role: 'greet', agent: ag }];
+    const out: Msg[] = [{ role: 'greet', agent: ag, uid: 'greet' }];
     let lastUserText = '';
     messages.forEach((m) => {
-      if (m.role === 'user') { lastUserText = m.content?.text || ''; out.push({ role: 'user', text: m.content.text, refs: m.refs }); }
+      // 稳定 key：服务端消息一律用其 id 作 uid（重复 restore/轮询不换 key，避免整列重挂）。
+      if (m.role === 'user') { lastUserText = m.content?.text || ''; out.push({ role: 'user', text: m.content.text, refs: m.refs, uid: m.id }); }
       // B4：已入库真值——优先取服务端字段（若有），否则回落到本地保存记录，避免已入库方案重复显示「存入方案库」。
       else if (m.role === 'report') {
         const deliverable = m.content as Deliverable;
@@ -622,16 +668,32 @@ export default function Chat() {
         out.push({
           role: 'report',
           deliverable: degraded ? { ...deliverable, trust: REPORT_INTERRUPTED_TRUST } : deliverable,
-          animate: false, messageId: m.id,
+          animate: false, messageId: m.id, uid: m.id,
           saved: !!((m as { saved?: boolean }).saved || (deliverable as { saved?: boolean })?.saved || isReportSaved(m.id)),
           retryText: degraded && lastUserText ? lastUserText : undefined,
         });
       }
-      else out.push({ role: 'assistant', reply: m.content });
+      else out.push({ role: 'assistant', reply: m.content, uid: m.id });
     });
-    setMsgs(out);
+    // 历史窗口化：完整列表存 ref，初始只渲染最近 HISTORY_WINDOW 条；顶部「阅早前问对」按需向前补。
+    fullMsgsRef.current = out;
+    const shown = Math.min(out.length, HISTORY_WINDOW);
+    setHistShown(shown);
+    setMsgs(out.slice(out.length - shown));
     setTimeout(scrollToEnd, 60);
   }
+
+  // 阅早前问对：向列表顶部补一窗更早的历史（稳定 uid 令已在屏的消息不重挂）。
+  // 补入后不强制滚动——微信 ScrollView 顶部插入的轻微跳动可接受，不做额外锚定工程。
+  const expandEarlier = () => {
+    const full = fullMsgsRef.current;
+    const cur = histShown;
+    const next = Math.min(full.length, cur + HISTORY_WINDOW);
+    if (next <= cur) return;
+    const add = full.slice(full.length - next, full.length - cur);
+    setHistShown(next);
+    setMsgs((m) => [...add, ...m]);
+  };
 
   // 页面退出不会中断原生成请求，但旧页面实例的 busy 状态已经销毁。重新进入后：
   // 1) 立即恢复“正在思考”；2) 轮询同一会话详情；3) 服务端落库并清 generating 后，用完整历史替换页面。
@@ -666,6 +728,7 @@ export default function Chat() {
               role: 'assistant',
               reply: { text: '刚才的思考中断了，你可以重新发送这条问题。' },
               retryText: retryText || undefined,
+              uid: nextMsgUid(),
             }]);
           }
           finish();
@@ -686,6 +749,7 @@ export default function Chat() {
         setMsgs((m) => [...m, {
           role: 'assistant',
           reply: { text: '这次思考时间有点久，结果完成后仍会保存在本会话，请稍后回来查看。' },
+          uid: nextMsgUid(),
         }]);
         return;
       }
@@ -698,7 +762,7 @@ export default function Chat() {
 
   const showMemoryLearned = (agentName: string, delay: number) => {
     setTimeout(() => {
-      setMsgs((m) => [...m, { role: 'memory', agentName }]);
+      setMsgs((m) => [...m, { role: 'memory', agentName, uid: nextMsgUid() }]);
       scrollToEnd();
     }, delay);
   };
@@ -710,6 +774,7 @@ export default function Chat() {
     if (res.kind === 'report' && res.deliverable) {
       // 记债项10：降级（保底）草案与流式中断统一话术——挂 ↻ 重试、trust 行合一，不再另出「保底草案」提示。
       const degraded = !!res.deliverable.degraded;
+      const reportUid = nextMsgUid();
       const reportMsg: Extract<Msg, { role: 'report' }> = {
         role: 'report',
         deliverable: degraded ? { ...res.deliverable, trust: REPORT_INTERRUPTED_TRUST } : res.deliverable,
@@ -718,13 +783,15 @@ export default function Chat() {
         knowledgeUsed: res.knowledgeUsed,
         refNotices: res.refNotices,
         retryText: degraded ? degradedRetryText : undefined,
+        uid: reportUid,
       };
       setMsgs((m) => {
         if (replaceStreamingAssistant) {
           const i = m.length - 1;
           if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
             const copy = m.slice();
-            copy[i] = reportMsg;
+            // 就地替换流式占位：沿用其 uid，key 稳定不重挂（渐显动画状态不错位）。
+            copy[i] = { ...reportMsg, uid: (m[i] as { uid?: string }).uid ?? reportUid };
             return copy;
           }
         }
@@ -732,16 +799,18 @@ export default function Chat() {
       });
       if (res.memory?.learned) showMemoryLearned(res.memory.agentName, data_delay(res.deliverable));
     } else if (res.reply) {
+      const replyUid = nextMsgUid();
       setMsgs((m) => {
         if (replaceStreamingAssistant) {
           const i = m.length - 1;
           if (i >= 0 && m[i].role === 'assistant' && (m[i] as { streaming?: boolean }).streaming) {
             const copy = m.slice();
-            copy[i] = { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices };
+            // 就地替换流式占位：沿用其 uid，key 稳定。
+            copy[i] = { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices, uid: (m[i] as { uid?: string }).uid ?? replyUid };
             return copy;
           }
         }
-        return [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices }];
+        return [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices, uid: replyUid }];
       });
     }
   };
@@ -765,7 +834,7 @@ export default function Chat() {
           return copy;
         }
         if (!appendIfMissing) return m;
-        return [...m, { role: 'report', deliverable: fn(reportDraft(viewAgent)), animate: false, streaming: true, ...extra }];
+        return [...m, { role: 'report', deliverable: fn(reportDraft(viewAgent)), animate: false, streaming: true, uid: nextMsgUid(), ...extra }];
       });
     };
     const patchChat = (fn: (msg: Extract<Msg, { role: 'assistant' }>) => Extract<Msg, { role: 'assistant' }>) =>
@@ -780,7 +849,7 @@ export default function Chat() {
       onSession: (id) => { if (id && !sessionIdRef.current) setSessionId(id); },
       startReport: () => { patchReport((d) => d); setTimeout(scrollToEnd, 30); },
       // meta kind=chat：先建聊天气泡（think-dots），避免 LLM 首字延迟期只剩全局 busy 无反馈。
-      startChat: () => { setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true }]); setTimeout(scrollToEnd, 30); },
+      startChat: () => { resetTokenBuf(); setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true, uid: nextMsgUid() }]); setTimeout(scrollToEnd, 30); },
       reportBegin: (data) => patchReport((d) => ({ ...d, title: data.title || d.title, icon: data.icon || d.icon, meta: data.meta || d.meta })),
       reportSection: (section) => {
         patchReport((d) => ({ ...d, sections: mergeReportSection(d.sections, section) }));
@@ -788,20 +857,26 @@ export default function Chat() {
       },
       reportFooter: (data) => patchReport((d) => ({ ...d, trust: data.trust || d.trust, actions: data.actions?.length ? data.actions : d.actions })),
       appendToken: (t) => {
-        patchChat((msg) => ({ ...msg, reply: { ...msg.reply, text: (msg.reply.text || '') + t } }));
-        followBottom();
+        // 合批：token 先积到缓冲，满量立即 flush，否则起一个 ~120ms 定时器；不再每 token 一次 setState。
+        // 重进续流的整串重放（replay 传入全量累计文本）走同一路径：多半 ≥64 字，立即落屏。
+        tokenBufRef.current += t;
+        if (tokenBufRef.current.length >= TOKEN_FLUSH_CHARS) { flushTokenBuf(); return; }
+        if (!flushTimerRef.current) flushTimerRef.current = setTimeout(flushTokenBuf, TOKEN_FLUSH_MS);
       },
-      setChat: (reply) => patchChat((msg) => ({ ...msg, reply })),
+      // 权威完整回复整体替换 reply：先把缓冲清掉（其内容已被 reply 覆盖），避免残余 token 事后重复追加。
+      setChat: (reply) => { resetTokenBuf(); patchChat((msg) => ({ ...msg, reply })); },
       finishReport: (messageId, refNotices) => {
         // 自动存入由 liveGen 侧统一触发（保证退页面后台完成也入库），此处只收 streaming 态。
         patchReport((d) => d, { streaming: false, messageId, refNotices }, { appendIfMissing: false });
         followBottom(true);
       },
       finishChat: (messageId, refNotices) => {
+        flushTokenBuf(); // 收尾先把残余 token 落屏，再置 streaming=false（否则末尾几十字会随定时器丢失）
         patchChat((msg) => ({ ...msg, streaming: false, refNotices }));
         followBottom(true);
       },
       error: (kind, message, retry) => {
+        flushTokenBuf(); // 报错前先把已流出的 token 落屏，保留部分内容
         if (kind === 'report') {
           // 记债项10：报告流失败语义收敛为单一话术。审核类错误不给重试（retry 由 liveGen 判定后传入）。
           setMsgs((m) => {
@@ -818,8 +893,8 @@ export default function Chat() {
                 deliverable: { ...cur.deliverable, trust: REPORT_INTERRUPTED_TRUST, degraded: true },
               };
             } else {
-              // 完全无内容：不留半空报告卡，改普通错误气泡 + 重试（对齐聊天气泡）。
-              copy[i] = { role: 'assistant', reply: { text: message || '生成失败' }, retryText: retry };
+              // 完全无内容：不留半空报告卡，改普通错误气泡 + 重试（对齐聊天气泡）。保留原 uid，key 稳定。
+              copy[i] = { role: 'assistant', reply: { text: message || '生成失败' }, retryText: retry, uid: cur.uid };
             }
             return copy;
           });
@@ -827,12 +902,13 @@ export default function Chat() {
           patchChat((msg) => ({ ...msg, reply: { text: message || '生成失败' }, retryText: retry, streaming: false }));
         } else {
           // 错误早于任何 meta（如 HTTP 层直接失败）：既无报告卡也无聊天气泡可就地更新，补一条错误气泡 + 重试。
-          setMsgs((m) => [...m, { role: 'assistant', reply: { text: message || '生成失败' }, retryText: retry }]);
+          setMsgs((m) => [...m, { role: 'assistant', reply: { text: message || '生成失败' }, retryText: retry, uid: nextMsgUid() }]);
         }
       },
       fallbackDone: (res, retryText) => { renderGenerateResult(res, true, retryText); setTimeout(scrollToEnd, 80); },
       memoryLearned: (agentName) => showMemoryLearned(agentName, 600),
       abortedChat: () => {
+        flushTokenBuf(); // 主动停止前先落屏残余 token，据「是否有字」正确决定移除空壳还是收干净
         // 主动停止：还没吐出任何字的空占位直接移除，避免留下空壳；已有字则收干净为非流式。
         setMsgs((m) => {
           const i = m.length - 1;
@@ -876,7 +952,7 @@ export default function Chat() {
     if (busy) return;
     if (!store.isAuthed()) {
       promptLogin();
-      setMsgs((m) => [...m, { role: 'assistant', reply: { text: '请先登录后再继续对话。' } }]);
+      setMsgs((m) => [...m, { role: 'assistant', reply: { text: '请先登录后再继续对话。' }, uid: nextMsgUid() }]);
       setTimeout(scrollToEnd, 30);
       return;
     }
@@ -891,7 +967,7 @@ export default function Chat() {
     // B3：发送即清掉本会话草稿（输入已上屏；失败可用气泡「重试」重发，无需草稿）。
     clearDraft();
     // P2-15：重试（echo=false）不重复回显用户气泡（用户消息已在首次尝试时显示）。
-    if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined }]);
+    if (echo) setMsgs((m) => [...m, { role: 'user', text, refs: sendRefs.length ? sendRefs : undefined, uid: nextMsgUid() }]);
     setTimeout(scrollToEnd, 30);
 
     // 报告 / 聊天分流完全由后端 SSE meta 事件决定，前端不再检查消息文本。
@@ -937,7 +1013,7 @@ export default function Chat() {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
       const reply = errorReply(e);
       // P2-15：保留原文供重试；但审核类错误不给重试（重试必再被拦）。
-      setMsgs((m) => [...m, { role: 'assistant', reply: { text: reply }, retryText: isModerationErr(reply) ? undefined : text }]);
+      setMsgs((m) => [...m, { role: 'assistant', reply: { text: reply }, retryText: isModerationErr(reply) ? undefined : text, uid: nextMsgUid() }]);
     } finally {
       if (pendingSessionIdRef.current) clearChatPending(pendingSessionIdRef.current);
       pendingSessionIdRef.current = '';
@@ -1631,10 +1707,16 @@ export default function Chat() {
         <View className="chat-log-inner">
         {/* 合规：AI 生成内容显式标识（《标识办法》2025-09-01 强制） */}
         <View className="chat-ai-note"><Text>内容由 AI 生成，仅供参考</Text></View>
+        {/* 历史窗口化：仅当仍有更早历史未展开时露出——点一次向前补一窗（军师文风）。 */}
+        {histShown < fullMsgsRef.current.length ? (
+          <View className="hist-more" onClick={expandEarlier}>
+            <Text className="hist-more-t" style={{ color: accent }}>阅早前问对</Text>
+          </View>
+        ) : null}
         {msgs.map((m, i) => {
           if (m.role === 'greet') {
             return (
-              <View key={i} className="msg a">
+              <View key={m.uid} className="msg a">
                 <View className="who"><AdvisorAvatar agentKey={m.agent.key} size={24} /><Text>{m.agent.name}</Text></View>
                 <View className="bubble" onLongPress={() => copyText(m.agent.greet)}>
                   <Text>{m.agent.greet}</Text>
@@ -1663,7 +1745,7 @@ export default function Chat() {
           }
           if (m.role === 'user') {
             return (
-              <View key={i} className="msg u">
+              <View key={m.uid} className="msg u">
                 <View className="ubub" style={{ background: accent }} onLongPress={() => copyText(m.text)}><Text>{m.text}</Text></View>
                 {m.refs?.length ? (
                   <View className="uref">
@@ -1696,7 +1778,7 @@ export default function Chat() {
           }
           if (m.role === 'assistant') {
             return (
-              <View key={i} className="msg a">
+              <View key={m.uid} className="msg a">
                 <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
                 <View className="ai-text" onLongPress={() => copyText(replyToText(m.reply))}>
                   {m.streaming && !m.reply.text ? (
@@ -1706,7 +1788,7 @@ export default function Chat() {
                       <View className="think-dot d3" style={{ background: accent }} />
                     </View>
                   ) : (
-                    <MarkdownText text={m.streaming ? visibleStreamText(m.reply.text) : m.reply.text} selectable />
+                    <MarkdownText text={m.streaming ? visibleStreamText(m.reply.text) : m.reply.text} streaming={m.streaming} selectable />
                   )}
                   {m.reply.points && (
                     <View className="points">
@@ -1792,7 +1874,7 @@ export default function Chat() {
           }
           if (m.role === 'memory') {
             return (
-              <View key={i} className="mem-learned" onLongPress={() => copyText(`军师印象已更新：${m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。`)}>
+              <View key={m.uid} className="mem-learned" onLongPress={() => copyText(`军师印象已更新：${m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。`)}>
                 <Icon name="spark" size={13} color={accent} />
                 <Text>军师印象已更新：{m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。</Text>
               </View>
@@ -1800,8 +1882,8 @@ export default function Chat() {
           }
           // report
           return (
-            // P2-14：报告气泡用 messageId 作稳定 key，避免「延迟插入记忆」导致索引位移、ReportCard 渐显动画状态错位。
-            <View key={m.messageId ?? `r-${i}`} className="msg a">
+            // P2-14：报告气泡用稳定 uid 作 key（创建即有，先于 messageId），避免「延迟插入记忆 / 顶部插历史」导致索引位移、ReportCard 渐显动画状态错位。
+            <View key={m.uid ?? m.messageId ?? `r-${i}`} className="msg a">
               <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
               <View onLongPress={() => copyDeliverable(m.deliverable)}>
                 <ReportCard

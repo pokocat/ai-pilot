@@ -30,6 +30,15 @@
 .chat-ai-note { text-align: center; margin: 2px 0 12px; }
 .chat-ai-note Text, .chat-ai-note text { font-size: 10.5px; color: var(--ink-3, #9a958a); letter-spacing: .3px; }
 
+/* 历史窗口化：顶部「阅早前问对」——居中的轻药丸，点一次向前补一窗更早历史 */
+.hist-more { display: flex; justify-content: center; margin: 2px 0 14px; }
+.hist-more-t {
+  font-size: 12.5px; font-weight: 600; letter-spacing: .3px;
+  padding: 6px 16px; border-radius: 999px;
+  background: var(--accent-soft);
+}
+.hist-more:active { opacity: .82; }
+
 .jump-latest {
   position: absolute;
   right: 18px;
