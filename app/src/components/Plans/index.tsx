@@ -105,49 +105,60 @@ export default function Plans({ open, onClose }: Props) {
   };
 
   return (
-    <Sheet visible={open} onClose={onClose} overlayKey="plans-sheet" align="center" panelClassName="plans-pad">
+    <Sheet
+      visible={open}
+      onClose={onClose}
+      overlayKey="plans-sheet"
+      align="center"
+      maxHeight="92vh"
+      panelClassName="plans-pad"
+    >
       <View className="ps-head">
-          <Text className="ps-title">方案与权益点</Text>
+        <Text className="ps-title">方案与权益点</Text>
+        <View className="ps-head-actions">
           <View className="ps-bal">
             <Icon name="diamond" size={13} color={accent} />
             <Text style={{ color: accent, fontWeight: 700 }}> {balance < 0 ? '不限量' : `${balance} 点`}</Text>
           </View>
+          <View className="ps-dismiss" onClick={onClose}>
+            <Text>✕</Text>
+          </View>
         </View>
-        <Text className="ps-sub">权益点用于深度方案与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>
-        {me?.planStatus?.expired && (
-          <Text className="ps-sub" style={{ color: 'var(--danger)' }}>当前套餐已到期：内容只读、AI 交互暂停，续费后立即恢复。</Text>
-        )}
+      </View>
+      <Text className="ps-sub">权益点用于深度方案与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>
+      {me?.planStatus?.expired && (
+        <Text className="ps-sub" style={{ color: 'var(--danger)' }}>当前套餐已到期：内容只读、AI 交互暂停，续费后立即恢复。</Text>
+      )}
 
-        <ScrollView scrollY className="ps-list">
-          {plans.map((p) => {
-            const current = me?.plan?.name === p.name;
-            return (
-              <View key={p.id} className={`ps-plan ${p.highlighted ? 'feat' : ''}`}>
-                <View className="pp-head">
-                  <Text className="pp-name">{p.name}</Text>
-                  {p.highlighted && <View className="pp-tag" style={{ background: 'var(--accent-soft)' }}><Text style={{ color: 'var(--accent-ink)' }}>常用配置</Text></View>}
-                  {current && <View className="pp-tag cur"><Text>当前</Text></View>}
-                  <Text className="pp-price serif" style={{ color: accent }}>{priceLabel(p)}</Text>
-                </View>
-                <Text className="pp-credit">{p.creditsPerMonth < 0 ? '不限量权益点' : `${p.creditsPerMonth} 点 / 月`} · 含 {p.agentCount} 个助手</Text>
-                <View className="pp-feats">
-                  {p.featuresJson.map((f) => (
-                    <View key={f} className="pp-feat"><Icon name="check" size={11} color={accent} /><Text> {f}</Text></View>
-                  ))}
-                </View>
-                <View
-                  className={`btn pp-btn ${busy === p.id ? 'disabled' : ''}`}
-                  style={{ background: p.price < 0 ? 'transparent' : accent, color: p.price < 0 ? accent : '#fff', borderColor: accent }}
-                  onClick={() => buy(p)}
-                >
-                  <Text>{p.price < 0 ? '联系顾问' : busy === p.id ? '处理中…' : current ? '延续此方案' : '选择此方案'}</Text>
-                </View>
+      <ScrollView scrollY enhanced showScrollbar={false} className="ps-list">
+        {plans.map((p) => {
+          const current = me?.plan?.name === p.name;
+          return (
+            <View key={p.id} className={`ps-plan ${p.highlighted ? 'feat' : ''}`}>
+              <View className="pp-head">
+                <Text className="pp-name">{p.name}</Text>
+                {p.highlighted && <View className="pp-tag" style={{ background: 'var(--accent-soft)' }}><Text style={{ color: 'var(--accent-ink)' }}>常用配置</Text></View>}
+                {current && <View className="pp-tag cur"><Text>当前</Text></View>}
+                <Text className="pp-price serif" style={{ color: accent }}>{priceLabel(p)}</Text>
               </View>
-            );
-          })}
-        </ScrollView>
-
-      <View className="ps-close" onClick={onClose}><Text>关闭</Text></View>
+              <Text className="pp-credit">{p.creditsPerMonth < 0 ? '不限量权益点' : `${p.creditsPerMonth} 点 / 月`} · 含 {p.agentCount} 个助手</Text>
+              <View className="pp-feats">
+                {p.featuresJson.map((f) => (
+                  <View key={f} className="pp-feat"><Icon name="check" size={11} color={accent} /><Text> {f}</Text></View>
+                ))}
+              </View>
+              <View
+                className={`btn pp-btn ${busy === p.id ? 'disabled' : ''}`}
+                style={{ background: p.price < 0 ? 'transparent' : accent, color: p.price < 0 ? accent : '#fff', borderColor: accent }}
+                onClick={() => buy(p)}
+              >
+                <Text>{p.price < 0 ? '联系顾问' : busy === p.id ? '处理中…' : current ? '延续此方案' : '选择此方案'}</Text>
+              </View>
+            </View>
+          );
+        })}
+        <View className="ps-list-end" />
+      </ScrollView>
     </Sheet>
   );
 }

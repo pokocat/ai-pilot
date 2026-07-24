@@ -1,11 +1,26 @@
-/* 遮罩/面板/grip 由 Sheet 基座统一（五要素，align=center 经 prop）；此处仅面板 padding 微调 + 内容。 */
-.sheet-panel.plans-pad { padding: 10px 20px calc(18px + env(safe-area-inset-bottom)) 20px; }
-.ps-head { width: 100%; display: flex; align-items: baseline; justify-content: space-between; }
+/* 长列表弹层必须给微信 ScrollView 明确高度；标题/关闭固定，只有列表滚动。 */
+.sheet-panel.plans-pad {
+  height: 92vh; max-height: 92vh; box-sizing: border-box; overflow: hidden;
+  padding: 10px 20px calc(12px + env(safe-area-inset-bottom)) 20px;
+  align-items: stretch;
+}
+.plans-pad .sheet-grip { flex-shrink: 0; margin-bottom: 14px; }
+.ps-head { width: 100%; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
 .ps-title { font-size: 17px; font-weight: 600; color: var(--ink); }
+.ps-head-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .ps-bal { font-size: 12.5px; color: var(--ink-3); display: inline-flex; align-items: center; }
-.ps-sub { width: 100%; font-size: 11.5px; color: var(--ink-3); margin-top: 6px; line-height: 1.5; }
+.ps-dismiss {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2); color: var(--ink-2); font-size: 14px;
+}
+.ps-dismiss:active { opacity: .7; }
+.ps-sub { width: 100%; font-size: 11.5px; color: var(--ink-3); margin-top: 6px; line-height: 1.5; flex-shrink: 0; }
 
-.ps-list { width: 100%; margin-top: 14px; flex: 1; }
+.ps-list {
+  width: 100%; height: 0; min-height: 0; margin-top: 14px; flex: 1;
+  box-sizing: border-box;
+}
 .ps-plan {
   border: 1px solid var(--line, #ececec); border-radius: 14px; padding: 14px;
   margin-bottom: 12px; background: var(--surface, #fafafa);
@@ -22,4 +37,4 @@
 .pp-feat { font-size: 11px; color: var(--ink-3); display: flex; align-items: center; }
 /* 形与态走公共 .btn（48px/14px/active/disabled）；配色由内联 style 控制（企业版 ghost 变体） */
 .pp-btn { margin-top: 13px; }
-.ps-close { width: 100%; text-align: center; padding: 12px 0 2px; color: var(--ink-3); font-size: 13px; }
+.ps-list-end { height: 6px; }
