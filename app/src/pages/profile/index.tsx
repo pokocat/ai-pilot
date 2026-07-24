@@ -116,7 +116,7 @@ export default function Profile() {
         { ic: 'doc', t: '订单支付 / 算力明细', s: '', onClick: () => navTo('/packages/work/credits/index') },
         ...(fortuneOn ? [
           { ic: 'spark', t: '送你一卦 · 给朋友出速写卡', s: '', onClick: () => navTo('/packages/work/gift/index') },
-          { ic: 'trend', t: '天时日历 · 逐月攻守', s: '', onClick: () => navTo('/packages/work/calendar/index') },
+          { ic: 'trend', t: '命盘报告 · 八字紫微印证', s: '', onClick: () => navTo('/packages/work/mingpan/index') },
         ] : []),
         { ic: 'clock', t: '提醒与日历', s: reminderHint(me?.service), onClick: () => navTo('/packages/work/reminders/index') },
         { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },

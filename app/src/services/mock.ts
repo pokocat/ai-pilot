@@ -19,7 +19,7 @@ import type {
   KnowledgeBatch, KnowledgeBatchFile,
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
 } from '../../../shared/contracts';
-import type { ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek } from './api';
+import type { ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek, MingpanReport } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
 import { agentForText } from '../data/intents';
@@ -289,6 +289,85 @@ function sampleChartM(): ChartSummary {
     pattern: { name: '正财格', traits: '务实稳健、重信守诺，善守成不喜冒进', suits: ['稳扎稳打、深耕存量'], avoid: ['盲目扩张'] },
     ziwei: { soulMajorStars: ['紫微', '天府'], bodyMajorStars: ['武曲'] },
     monthlyOutlook: { year: yr, months: PHASES.map((phase, i) => ({ month: i + 1, phase, turning: TURN.has(i + 1) })) },
+  };
+}
+
+// 确定性样例命盘报告（mock 专用 UI 预览假数据，结构对齐 MingpanReport；非真排盘）——
+// 让「命盘报告」页在本地 mock/H5 下可完整走查六大区块（含 12 宫 / 四化 / 时间轴）。
+function sampleReportM(): MingpanReport {
+  const yr = new Date().getFullYear();
+  const P = (ganZhi: string, sg: string, hide: string[], sz: string[], ny: string) =>
+    ({ ganZhi, shiShenGan: sg, hideGan: hide, shiShenZhi: sz, naYin: ny });
+  const M = (name: string, brightness: string, mutagen: string | null) => ({ name, brightness, mutagen });
+  // 十二宫（自巳宫顺时针一圈；样例盘含命/身与四化落点，用于经典 4×4 图走查）
+  const palaces: NonNullable<MingpanReport['ziwei']>['palaces'] = [
+    { name: '命宫', stem: '丁', branch: '巳', isSoul: true, isBody: false, majorStars: [M('紫微', '旺', null), M('天府', '得', null)], minorStars: ['左辅', '文昌'], adjectiveStars: ['台辅', '天巫'], decadal: { start: 6, end: 15 } },
+    { name: '父母', stem: '戊', branch: '午', isSoul: false, isBody: false, majorStars: [M('太阴', '陷', '禄')], minorStars: ['文曲'], adjectiveStars: ['天厨'], decadal: { start: 16, end: 25 } },
+    { name: '福德', stem: '己', branch: '未', isSoul: false, isBody: false, majorStars: [M('贪狼', '庙', '权')], minorStars: ['火星'], adjectiveStars: ['天福'], decadal: { start: 26, end: 35 } },
+    { name: '田宅', stem: '庚', branch: '申', isSoul: false, isBody: false, majorStars: [M('巨门', '得', null)], minorStars: ['右弼'], adjectiveStars: ['天官'], decadal: { start: 36, end: 45 } },
+    { name: '官禄', stem: '辛', branch: '酉', isSoul: false, isBody: true, majorStars: [M('天相', '旺', null)], minorStars: ['文昌', '禄存'], adjectiveStars: ['三台', '八座'], decadal: { start: 46, end: 55 } },
+    { name: '仆役', stem: '壬', branch: '戌', isSoul: false, isBody: false, majorStars: [M('天梁', '庙', '科')], minorStars: ['铃星'], adjectiveStars: ['天寿'], decadal: { start: 56, end: 65 } },
+    { name: '迁移', stem: '癸', branch: '亥', isSoul: false, isBody: false, majorStars: [M('七杀', '旺', null)], minorStars: ['天马'], adjectiveStars: ['孤辰'], decadal: { start: 66, end: 75 } },
+    { name: '疾厄', stem: '甲', branch: '子', isSoul: false, isBody: false, majorStars: [], minorStars: ['地空'], adjectiveStars: ['天哭'], decadal: { start: 76, end: 85 } },
+    { name: '财帛', stem: '乙', branch: '丑', isSoul: false, isBody: false, majorStars: [M('廉贞', '平', '忌'), M('天府', '庙', null)], minorStars: ['擎羊'], adjectiveStars: ['龙池'], decadal: { start: 86, end: 95 } },
+    { name: '子女', stem: '丙', branch: '寅', isSoul: false, isBody: false, majorStars: [M('太阳', '旺', null)], minorStars: ['陀罗'], adjectiveStars: ['凤阁'], decadal: { start: 96, end: 105 } },
+    { name: '夫妻', stem: '丁', branch: '卯', isSoul: false, isBody: false, majorStars: [M('武曲', '庙', null), M('天相', '得', null)], minorStars: ['地劫'], adjectiveStars: ['红鸾'], decadal: { start: 106, end: 115 } },
+    { name: '兄弟', stem: '戊', branch: '辰', isSoul: false, isBody: false, majorStars: [M('天同', '平', null), M('天梁', '得', null)], minorStars: ['天钺'], adjectiveStars: ['天喜'], decadal: { start: 116, end: 125 } },
+  ];
+  return {
+    engineVersion: 'paipan-v2',
+    base: { solarDate: '1990-06-18', lunarDate: '庚午年五月廿六', gender: '男', hourKnown: true, hourLabel: '巳时', trueSolarApplied: true, birthPlace: '浙江杭州' },
+    bazi: {
+      pillars: {
+        year: P('庚午', '偏财', ['丁', '己'], ['正印', '劫财'], '路旁土'),
+        month: P('壬午', '偏财', ['丁', '己'], ['正印', '劫财'], '杨柳木'),
+        day: P('戊子', '日主', ['癸'], ['正财'], '霹雳火'),
+        time: P('甲寅', '七杀', ['甲', '丙', '戊'], ['七杀', '偏印', '比肩'], '大溪水'),
+      },
+      dayMaster: { gan: '戊', element: '土', strength: '身强', strengthLevel: '偏旺', strengthScore: 6, confidence: '高', basis: '月令午火生身，年时通根，日主偏旺。' },
+      favorableElements: ['金', '水', '木'],
+      tiaoHou: { gods: ['甲', '丙', '癸'], elements: ['木', '火', '水'] },
+      pattern: { name: '偏财格', monthShiShen: '偏财', traits: '务实进取、善用资源、交游广阔', suits: ['整合外部资源、以势取利'], avoid: ['贪多铺摊、押上全部本金'], basis: '月令透偏财且得地，以偏财立格。', confidence: '高' },
+      daYun: {
+        direction: '顺行', startAge: '3 岁 4 个月起', approximate: false,
+        list: [
+          { ganZhi: '癸未', startAge: 3, startYear: 1993 },
+          { ganZhi: '甲申', startAge: 13, startYear: 2003 },
+          { ganZhi: '乙酉', startAge: 23, startYear: 2013 },
+          { ganZhi: '丙戌', startAge: 33, startYear: 2023 },
+          { ganZhi: '丁亥', startAge: 43, startYear: 2033 },
+          { ganZhi: '戊子', startAge: 53, startYear: 2043 },
+          { ganZhi: '己丑', startAge: 63, startYear: 2053 },
+          { ganZhi: '庚寅', startAge: 73, startYear: 2063 },
+        ],
+      },
+      wuxingCount: { counts: { 木: 1, 火: 3, 土: 2, 金: 1, 水: 1 }, basis: '天干 4 位 + 地支本气 4 位，共 8 位计数。' },
+    },
+    ziwei: {
+      fiveElementsClass: '火六局', soulStar: '贪狼', bodyStar: '天相', yinYang: '阳男',
+      soulBranch: '巳', bodyBranch: '酉', palaces,
+    },
+    yinzheng: {
+      baziAxis: { text: '以「偏财格」立局，日主戊土偏旺，宜借金水木起势；调候取甲丙癸。', basis: '格局 + 旺衰 + 喜用 + 调候拼装。' },
+      ziweiAxis: { text: '命宫巳，紫微、天府坐守；身宫落官禄，火六局。生年化禄落父母宫。', basis: '命宫主星 + 身宫宫名 + 五行局 + 化禄落宫。' },
+      elementCheck: { favorable: ['金', '水', '木'], ju: '火六局', juElement: '火', aligned: false, note: '局五行与喜用异路，以八字体用为主。' },
+      timeline: [
+        { years: '2013–2022', daYun: { ganZhi: '乙酉', startAge: '23 岁', startYear: 2013 }, daXian: { palace: '福德', start: 26, end: 35 }, isCurrent: false },
+        { years: '2023–2032', daYun: { ganZhi: '丙戌', startAge: '33 岁', startYear: 2023 }, daXian: { palace: '田宅', start: 36, end: 45 }, isCurrent: true },
+        { years: '2033–2042', daYun: { ganZhi: '丁亥', startAge: '43 岁', startYear: 2033 }, daXian: { palace: '官禄', start: 46, end: 55 }, isCurrent: false },
+      ],
+      keyYears: [
+        { year: 2023, age: 34, reason: '换运换限重合', overlap: true },
+        { year: 2033, age: 44, reason: '换运', overlap: false },
+      ],
+      sihua: [
+        { star: '太阴', hua: '禄', palace: '父母' },
+        { star: '贪狼', hua: '权', palace: '福德' },
+        { star: '天梁', hua: '科', palace: '仆役' },
+        { star: '廉贞', hua: '忌', palace: '财帛' },
+      ],
+    },
+    disclaimer: `命理内容为文化视角的研究与参考，不构成投资、经营或人生决策依据；「人谋可以改命」。引擎 paipan-v2 · 数据由算法层确定性推算，${yr} 年为准。`,
   };
 }
 
@@ -1180,6 +1259,12 @@ export const mock = {
     const bazi = (current().d as { bazi?: { believe?: boolean } }).bazi ?? null;
     const chart = bazi && bazi.believe !== false ? sampleChartM() : null;
     return delay({ bazi, chart });
+  },
+  // 命盘报告（mock）：无生辰 → needBazi；有生辰 → 确定性样例 MingpanReport（含 12 宫/四化/时间轴，供本地走查）
+  async myChartReport(): Promise<MingpanReport | { needBazi: true }> {
+    const bazi = (current().d as { bazi?: { believe?: boolean } }).bazi ?? null;
+    if (!bazi) return delay({ needBazi: true } as { needBazi: true });
+    return delay(sampleReportM());
   },
   // 送你一卦预览（mock：给确定性样例卡文本，不排盘不落库——让画卡/分享链路可本地走查）
   async fateCardPreview(body: { friendName?: string; consent?: boolean }): Promise<{ friendName: string; subtitle: string; sketch: string; trend: string; advice: string }> {

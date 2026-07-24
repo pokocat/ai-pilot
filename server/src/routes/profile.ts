@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
-import { computeAndStoreChart, loadChart, validatePaipanInput } from '../services/paipan.js';
+import { computeAndStoreChart, loadChart, validatePaipanInput, type PaipanInput } from '../services/paipan.js';
+import { buildMingpanReport } from '../services/mingpan.js';
 import { fortuneDisabledGuard } from '../services/featureFlag.js';
 import { loadStrategicProfile, upsertStrategicProfile } from '../services/strategicProfile.js';
 import { cityLongitude } from '../data/cityLongitude.js';
@@ -106,6 +107,26 @@ export async function profileRoutes(app: FastifyInstance) {
     const p = await prisma.profile.findFirst({ where: { tenantId: user.tenantId }, orderBy: { updatedAt: 'desc' } });
     const bazi = (p?.extraJson as { bazi?: object } | null)?.bazi ?? null;
     return { bazi, chart: await loadChart(user.id) };
+  });
+
+  // 命盘报告（八字 × 紫微综合印证）：从 NatalChart 读原始生辰，按需现算（不落库、无 schema 变更）。
+  // 无生辰 → { needBazi: true }；有生辰 → MingpanReport（八字盘 + 紫微十二宫全盘 + 确定性印证）。
+  app.get('/profile/chart/report', async (req, reply) => {
+    if (await fortuneDisabledGuard(reply)) return reply; // 命理下线 → 403 FEATURE_DISABLED
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const row = await prisma.natalChart.findUnique({ where: { userId: user.id } });
+    if (!row) return { needBazi: true };
+    // 从落库的原始生辰字段重建排盘入参（longitude 落库时已按城市解析，直接沿用；不再二次查表）。
+    const [y, m, d] = row.birthDate.split('-').map((s) => Number(s));
+    const input: PaipanInput = {
+      calendar: row.calendar === 'lunar' ? 'lunar' : 'solar',
+      year: y, month: m, day: d,
+      hour: row.birthHour, minute: row.birthMinute ?? 0,
+      gender: row.gender === 'female' ? 'female' : 'male',
+      birthPlace: row.birthPlace ?? undefined,
+      longitude: row.longitude ?? undefined,
+    };
+    return buildMingpanReport(input, yearOf());
   });
 
   // —— 战略档案（M1 PR-3）：读取 + 手动校准（镜子要能被老板改） ——

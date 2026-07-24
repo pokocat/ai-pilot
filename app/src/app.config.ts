@@ -34,6 +34,7 @@ export default defineAppConfig({
         'community/index',
         'gift/index',
         'calendar/index',
+        'mingpan/index',
         'dossier/index',
         'ledger/index',
         'quickscan/index',

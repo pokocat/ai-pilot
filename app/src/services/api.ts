@@ -108,6 +108,76 @@ export interface ChartSummary {
   monthlyOutlook: { year: number; months: { month: number; phase: string; turning: boolean }[] };
 }
 
+// —— 命盘报告（八字 × 紫微综合印证）——
+// 服务端算法层确定性计算（lunar-typescript + iztro + baziEnrich），零 LLM 参与。
+// 本类型与 server 侧 MingpanReport 契约同构（见 docs/[FABLE5]MINGPAN_REPORT_SPEC.md §1.4）；
+// 后端未就绪时前端按此契约容错渲染（needBazi / ziwei=null / yinzheng=null 三分支各有 UI）。
+export type WuxingKey = '木' | '火' | '土' | '金' | '水';
+export type HuaKey = '禄' | '权' | '科' | '忌';
+export interface MpPillar {
+  ganZhi: string;
+  shiShenGan: string;    // 天干十神（日柱为「日主」）
+  hideGan: string[];     // 地支藏干
+  shiShenZhi: string[];  // 藏干十神
+  naYin: string;
+}
+export interface MpMajorStar { name: string; brightness: string; mutagen: string | null }
+export interface MpPalace {
+  name: string; stem: string; branch: string;
+  isSoul: boolean; isBody: boolean;
+  majorStars: MpMajorStar[];
+  minorStars: string[];
+  adjectiveStars: string[];
+  decadal: { start: number; end: number } | null;   // 大限虚岁区间
+}
+export interface MingpanReport {
+  engineVersion: string;               // 'paipan-v2'
+  base: {
+    solarDate: string; lunarDate: string; gender: '男' | '女';
+    hourKnown: boolean; hourLabel: string | null;  // 时辰名（如「巳时」「早子时」「晚子时」）；缺时辰为 null
+    trueSolarApplied: boolean; birthPlace?: string | null;
+  };
+  bazi: {
+    pillars: { year: MpPillar; month: MpPillar; day: MpPillar; time: MpPillar | null };
+    dayMaster: {
+      gan: string; element: string; strength: string;
+      strengthLevel?: string; strengthScore?: number; confidence?: string; basis?: string;
+    };
+    favorableElements: string[];
+    tiaoHou: { gods: string[]; elements: string[] };
+    pattern: {
+      name: string; monthShiShen?: string;
+      traits: string; suits: string[]; avoid: string[];
+      basis?: string; confidence?: string;
+    };
+    daYun: {
+      direction: string; startAge: string; approximate: boolean;
+      list: { ganZhi: string; startAge: number; startYear: number }[];
+    };
+    wuxingCount: { counts: Record<WuxingKey, number>; basis: string };
+  };
+  ziwei: null | {
+    fiveElementsClass: string; soulStar: string; bodyStar: string;
+    yinYang: string; soulBranch: string; bodyBranch: string;
+    palaces: MpPalace[];
+  };
+  yinzheng: null | {
+    baziAxis: { text: string; basis: string };
+    ziweiAxis: { text: string; basis: string };
+    elementCheck: { favorable: string[]; ju: string; juElement: string; aligned: boolean; note: string };
+    timeline: Array<{
+      years: string;             // '2008–2017'
+      daYun: { ganZhi: string; startAge: string; startYear: number } | null;
+      daXian: { palace: string; start: number; end: number } | null;
+      isCurrent: boolean;
+    }>;
+    keyYears: Array<{ year: number; age: number; reason: string; overlap: boolean }>;
+    sihua: Array<{ star: string; hua: HuaKey; palace: string }>;
+  };
+  disclaimer: string;            // 固定文案：仅供文化研究与参考…
+}
+export type MingpanReportResp = MingpanReport | { needBazi: true };
+
 type NetworkReason = 'timeout' | 'offline' | 'domain' | 'ssl' | 'dns' | 'unreachable' | 'cancelled' | 'network';
 
 function networkErrorInfo(errMsg: string, origin: string): { reason: NetworkReason; message: string; technicalMessage: string } {
@@ -400,6 +470,9 @@ export const api = {
     IS_MOCK ? mock.saveBazi(body) : request<{ believe: boolean; chart: ChartSummary | null }>('/profile/bazi', 'PUT', body),
   myChart: () =>
     IS_MOCK ? mock.myChart() : request<{ bazi: BaziBody | null; chart: ChartSummary | null }>('/profile/chart'),
+  // 命盘报告（八字 × 紫微综合印证）：无生辰 → { needBazi:true }；有生辰 → 按需现算 MingpanReport（不落库）
+  myChartReport: () =>
+    IS_MOCK ? mock.myChartReport() : request<MingpanReportResp>('/profile/chart/report'),
   // 用户进度（段位/里程碑）与复盘账本（M4 PR-18 前端落位；mock 无账本返回空 → 界面隐藏对应区块）
   progress: () =>
     IS_MOCK ? mock.progress() : request<{ progress: ProgressView | null }>('/progress'),

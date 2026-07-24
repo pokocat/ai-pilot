@@ -181,6 +181,25 @@ function resolveSolar(input: PaipanInput): { solar: Solar; trueSolarApplied: boo
   return { solar, trueSolarApplied, hourKnown };
 }
 
+/**
+ * 紫微全盘（十二宫展开）：与 computeChart 内命宫/身宫主星同一调用口径——
+ * 同样的真太阳时校正后本地时间、同样的 hourToTimeIndex（含晚子时映射）、fixLeap=true、zh-CN。
+ * 缺时辰返回 null（紫微必须有时辰立盘）。命盘报告层（mingpan.ts）复用此函数展开全盘，
+ * 保证与对话简报里的命宫/身宫主星逐字一致，不产生第二套排盘口径。
+ * 返回类型由 iztro 推断（FunctionalAstrolabe），下游用 ReturnType 取用，避免深路径类型导入。
+ */
+export function buildZiweiAstrolabe(input: PaipanInput) {
+  const { solar, hourKnown } = resolveSolar(input);
+  if (!hourKnown) return null;
+  return astro.bySolar(
+    `${solar.getYear()}-${solar.getMonth()}-${solar.getDay()}`,
+    hourToTimeIndex(solar.getHour()),
+    input.gender === 'male' ? '男' : '女',
+    true,
+    'zh-CN',
+  );
+}
+
 /** 排盘主入口：同输入必同输出（monthlyOutlook 按 targetYear 计算，由调用方传入）。 */
 export function computeChart(input: PaipanInput, targetYear: number): ChartView {
   const { solar, trueSolarApplied, hourKnown } = resolveSolar(input);
@@ -231,21 +250,14 @@ export function computeChart(input: PaipanInput, targetYear: number): ChartView 
   const monthShiShen = ec.getMonthShiShenZhi()[0] ?? ec.getMonthShiShenGan();
   const play = PATTERN_PLAYBOOK[patternName] ?? { traits: '', suits: [], avoid: [] };
 
-  // —— 紫微命宫/身宫主星（需时辰） ——
-  let ziwei: ChartView['ziwei'] = null;
-  if (hourKnown) {
-    const chart = astro.bySolar(
-      `${solar.getYear()}-${solar.getMonth()}-${solar.getDay()}`,
-      hourToTimeIndex(solar.getHour()),
-      input.gender === 'male' ? '男' : '女',
-      true,
-      'zh-CN',
-    );
-    ziwei = {
-      soulMajorStars: chart.palace('命宫')?.majorStars.map((s) => s.name) ?? [],
-      bodyMajorStars: chart.palace('身宫')?.majorStars.map((s) => s.name) ?? [],
-    };
-  }
+  // —— 紫微命宫/身宫主星（需时辰）：与命盘报告全盘同走 buildZiweiAstrolabe，单一口径 ——
+  const astrolabe = buildZiweiAstrolabe(input);
+  const ziwei: ChartView['ziwei'] = astrolabe
+    ? {
+        soulMajorStars: astrolabe.palace('命宫')?.majorStars.map((s) => s.name) ?? [],
+        bodyMajorStars: astrolabe.palace('身宫')?.majorStars.map((s) => s.name) ?? [],
+      }
+    : null;
 
   // —— 大运（缺时辰按 12:00 近似，approximate 标注） ——
   const yun = ec.getYun(input.gender === 'male' ? 1 : 0);
