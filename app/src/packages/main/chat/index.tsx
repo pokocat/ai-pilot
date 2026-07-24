@@ -1048,6 +1048,9 @@ export default function Chat() {
   const askSel = askDraft.idx === activeAskIdx ? askDraft.sel : {};
   const askOther = askDraft.idx === activeAskIdx ? askDraft.other : {};
   const activeAskComposer = askComposerTarget?.idx === activeAskIdx ? askComposerTarget : null;
+  // composer-dock 随问卷答题态显隐切换后（display:none 时测不到 rect，jumpBottom 保留旧值），
+  // 重新出现时补测 --jump-bottom。此处才是 activeAskComposer 声明后的作用域（measureDock 的 effect 在其上方，引用会命中 TDZ）。
+  useEffect(() => { setTimeout(measureDock, 80); }, [activeAskComposer]);
   const clearAskComposer = () => {
     setAskComposerTarget(null);
     setKeyboardHeight(0);
@@ -1968,7 +1971,8 @@ export default function Chat() {
       ) : null}
 
       {/* B6：引用行 + 上传条 + 输入区打包成 dock，统一测量高度驱动 jump-latest 定位 */}
-      <View className="composer-dock">
+      {/* 问卷答题激活时视觉隐藏（display:none），让 chat-log 吃掉这块空间、少被键盘遮挡；不卸载以保住 taRef 与测量稳定 */}
+      <View className={`composer-dock ${activeAskComposer ? 'ask-hidden' : ''}`}>
         {/* B5：非模态上传清单（逐份真进度 / 逐份可撤回；失败可单独重递或删掉） */}
         {uploadList.length ? (
           <View className="upload-bar">
