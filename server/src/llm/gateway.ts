@@ -875,6 +875,32 @@ export async function summarizePoints(transcript: string): Promise<{ points: str
   }
 }
 
+/** 会话首轮标题提炼：用一次轻量模型调用把用户开场输入概括成不超过 12 字的中文短标题，替代硬截断。
+ *  只在真实 provider 就绪时运行（测试/mock 返回 null → 调用方保留硬截断占位）；解析失败即放弃。 */
+export async function summarizeSessionTitle(text: string): Promise<string | null> {
+  const raw = (text ?? '').trim();
+  if (!raw) return null;
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  if (!live) return null;
+  try {
+    const sys = '你是会话取名助手。把用户的开场输入概括成一个不超过 12 个字的中文短标题，只保留业务主题。'
+      + '不要引号、书名号、句末标点，不要“关于/请教/如何/怎么”之类的虚词开头，不要任何解释或前后缀。'
+      + '标题给用户看，语气平实，像给一次谈话拟的小标题。只输出 JSON：{"title":"…"}。';
+    const json = await rawJson(cfg, live, sys, raw.slice(0, 400));
+    let title = json && typeof json.title === 'string' ? json.title.trim() : '';
+    if (!title) return null;
+    // 防御：去首尾引号/书名号/空白 → 去句末标点 → 超 20 字截断 → 空串归 null。
+    title = title.replace(/^[\s"'“”‘’「」『』《》【】]+|[\s"'“”‘’「」『』《》【】]+$/g, '').trim();
+    title = title.replace(/[。！？!?.,，、；;：:]+$/, '').trim();
+    if (title.length > 20) title = title.slice(0, 20);
+    return title || null;
+  } catch (err) {
+    console.error('[gateway] summarizeSessionTitle fallback:', (err as Error).message);
+    return null;
+  }
+}
+
 /** 预言抽取（M2 PR-9）：从总军师输出里抽「具体、可验证、有期限」的天势判断。
  *  只在真实 provider 就绪时运行（测试/mock 返回空 → 绝不产生伪预言）；解析失败即放弃。
  *  重构：走统一 structured() 原语——Zod schema 取代手写正则 + filter/map/slice。 */

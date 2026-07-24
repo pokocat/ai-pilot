@@ -8,6 +8,7 @@ import { generateDeliverable, chatComplete, chatCompleteStream, hasLiveProvider 
 import { learnFromConversation } from '../services/memory.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
+import { refineSessionTitle } from '../services/sessionTitle.js';
 import { reserveCredits, type CreditReservation } from '../services/credits.js';
 import { reserveQuota, assertPlanActive, RESERVE_TOKENS, type QuotaReservation } from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
@@ -251,11 +252,14 @@ export async function sessionRoutes(app: FastifyInstance) {
         include: { agent: true },
       });
       created = true;
+      // 会话标题自动总结：首轮硬截断占位后，异步用轻量模型提炼短标题覆盖（即发即忘，不影响主流程）。
+      void refineSessionTitle(session.id, text, session.title).catch(() => {});
     } else {
       const patch: { title?: string; projectId?: string } = {};
       if (session.title === '新对话') patch.title = text.slice(0, 18);
       if (!session.projectId && projectId) patch.projectId = projectId;
       if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
+      if (patch.title) void refineSessionTitle(session.id, text, patch.title).catch(() => {});
     }
     const finishGeneration = trackSessionGeneration(session.id);
     try {
@@ -470,11 +474,14 @@ export async function sessionRoutes(app: FastifyInstance) {
           include: { agent: true },
         });
         send('session', { id: session.id, agentKey, title: session.title, projectId });
+        // 会话标题自动总结：首轮硬截断占位后，异步用轻量模型提炼短标题覆盖（即发即忘，不影响主流程）。
+        void refineSessionTitle(session.id, text, session.title).catch(() => {});
       } else {
         const patch: { title?: string; projectId?: string } = {};
         if (session.title === '新对话') patch.title = text.slice(0, 18);
         if (!session.projectId && projectId) patch.projectId = projectId;
         if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
+        if (patch.title) void refineSessionTitle(session.id, text, patch.title).catch(() => {});
       }
 
       finishGeneration = trackSessionGeneration(session.id);
