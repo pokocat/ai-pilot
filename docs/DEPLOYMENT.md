@@ -45,6 +45,7 @@
 | 微信小程序 | `app/` | `TARO_APP_MODE=server TARO_APP_API=https://域名/api npm run build:weapp` | `app/dist/`（weapp 包） | 微信开发者工具上传（见 §8） |
 
 > 小程序与 H5 是同一套码；上线小程序额外需要备案与合法域名（§8）。
+> 测试期若需让新注册用户默认开通高级套餐，可在服务端 `.env` 设置 `TEST_DEFAULT_PLAN_NAME=决策版` 并重启；存量用户先运行 `npm run db:grant-test-plan -- --plan=决策版` 试算，确认后追加 `--apply`。脚本不会降级企业私有化或重复发放有效同档套餐。
 
 ## 3. 前置
 

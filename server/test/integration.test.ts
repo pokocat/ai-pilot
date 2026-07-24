@@ -734,6 +734,29 @@ describe('TC-K 算力账户', () => {
     assert.ok(me.body.plan, '应绑定套餐');
   });
 
+  test('K1b 测试期配置后，新注册用户默认开通决策版完整权益', async () => {
+    process.env.TEST_DEFAULT_PLAN_NAME = '决策版';
+    try {
+      const t = await login(uniquePhone());
+      const user = await prisma.user.findUnique({
+        where: { id: t },
+        include: { plan: true, tokenWallet: true },
+      });
+      const ledger = await prisma.creditLedger.findFirst({
+        where: { userId: t },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      });
+      assert.equal(user?.plan?.name, '决策版');
+      assert.ok(user?.planExpiresAt && user.planExpiresAt.getTime() > Date.now(), '年付决策版应有未来到期日');
+      assert.equal(user?.tokenWallet?.quota, 1_000_000);
+      assert.equal(user?.tokenWallet?.balance, 1_000_000);
+      assert.equal(ledger?.balance, 68);
+      assert.equal(ledger?.reason, '决策版 · 测试期开通');
+    } finally {
+      delete process.env.TEST_DEFAULT_PLAN_NAME;
+    }
+  });
+
   test('K2 报告类产出按次扣减、自由对话免费，/me 同步', async () => {
     const t = await login(uniquePhone());
     const before = (await api('GET', '/api/me', { token: t })).body.creditBalance as number;

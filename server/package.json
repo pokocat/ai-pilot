@@ -14,6 +14,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:sync-plans": "tsx scripts/syncPlans.ts",
     "db:bump-free-quota": "tsx scripts/bumpFreeQuota.ts",
+    "db:grant-test-plan": "tsx scripts/grantTestPlan.ts",
     "pay:e2e": "tsx scripts/pay-e2e.ts",
     "pay:mock": "tsx scripts/wechat-pay-mock.ts",
     "pay:e2e:mock": "tsx scripts/pay-mock-e2e.ts",

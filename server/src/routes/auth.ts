@@ -6,13 +6,14 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { env } from '../env.js';
+import { env, registrationDefaultPlanName } from '../env.js';
 import { code2Session, wechatAccountKey, getPhoneNumberByCode } from '../services/wechat.js';
 import { issueSmsCode, verifySmsCode } from '../services/sms.js';
 import { signUserToken } from '../services/userToken.js';
 import { resolveUser } from '../services/context.js';
 import { maskAuditPhone, recordAudit, requestMeta, summarizeForAudit } from '../services/audit.js';
 import { suggestAliasName } from '../data/aliasNames.js';
+import { applyPlanPurchase } from '../services/purchase.js';
 
 const phoneRule = z.string().regex(/^1\d{10}$/, '请输入有效的手机号');
 const loginSchema = z.object({
@@ -92,37 +93,58 @@ async function createUserWithTenant(opts: {
   wechatOpenId?: string;
   wechatUnionId?: string;
 }): Promise<AuthUser> {
-  const plan = await prisma.plan.findFirst({ orderBy: { sort: 'asc' } });
-  const tenant = await prisma.tenant.create({ data: { name: '' } });
-  const user = await prisma.user.create({
-    data: {
-      tenantId: tenant.id,
-      phone: opts.phone,
-      name: opts.name,
-      avatarUrl: opts.avatarUrl,
-      role: 'owner',
-      benmingColor: 'green',
-      planId: plan?.id ?? null,
-      wechatOpenId: opts.wechatOpenId,
-      wechatUnionId: opts.wechatUnionId,
-      wechatLinkedAt: opts.wechatOpenId ? new Date() : undefined,
-    },
-  });
-  if (plan) {
-    await prisma.creditLedger.create({
-      data: {
-        tenantId: tenant.id,
-        userId: user.id,
-        delta: plan.creditsPerMonth,
-        reason: `${plan.name} · 开通赠送`,
-        balance: plan.creditsPerMonth,
-      },
+  const configuredPlanName = registrationDefaultPlanName();
+  const plan = configuredPlanName
+    ? await prisma.plan.findFirst({ where: { name: configuredPlanName } })
+    : await prisma.plan.findFirst({ orderBy: { sort: 'asc' } });
+  if (configuredPlanName && !plan) {
+    throw Object.assign(new Error(`测试期默认套餐「${configuredPlanName}」不存在`), {
+      statusCode: 503,
+      code: 'DEFAULT_PLAN_NOT_FOUND',
     });
   }
-  await prisma.auditLog
-    .create({ data: { tenantId: tenant.id, userId: user.id, action: opts.auditAction, payloadJson: opts.auditPayload } })
-    .catch(() => {});
-  return user;
+
+  return prisma.$transaction(async (tx) => {
+    const tenant = await tx.tenant.create({ data: { name: '' } });
+    const user = await tx.user.create({
+      data: {
+        tenantId: tenant.id,
+        phone: opts.phone,
+        name: opts.name,
+        avatarUrl: opts.avatarUrl,
+        role: 'owner',
+        benmingColor: 'green',
+        wechatOpenId: opts.wechatOpenId,
+        wechatUnionId: opts.wechatUnionId,
+        wechatLinkedAt: opts.wechatOpenId ? new Date() : undefined,
+      },
+    });
+    if (plan) {
+      const testingGrant = !!configuredPlanName;
+      if (testingGrant) {
+        await applyPlanPurchase(user, plan, {
+          reason: `${plan.name} · 测试期开通`,
+          source: 'test_default_grant',
+        }, tx);
+      } else {
+        // 未启用测试期配置时保持历史体验版注册口径：不写付费激活锚点，月度钱包仍按自然月惰性首建。
+        await tx.user.update({ where: { id: user.id }, data: { planId: plan.id } });
+        await tx.creditLedger.create({
+          data: {
+            tenantId: tenant.id,
+            userId: user.id,
+            delta: plan.creditsPerMonth,
+            reason: `${plan.name} · 开通赠送`,
+            balance: plan.creditsPerMonth,
+          },
+        });
+      }
+    }
+    await tx.auditLog.create({
+      data: { tenantId: tenant.id, userId: user.id, action: opts.auditAction, payloadJson: opts.auditPayload },
+    }).catch(() => {});
+    return user;
+  });
 }
 
 async function onboardedOf(user: AuthUser): Promise<boolean> {

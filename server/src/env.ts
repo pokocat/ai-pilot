@@ -15,6 +15,11 @@ export function isAiTestMode(): boolean {
   return process.env.NODE_ENV === 'test';
 }
 
+/** 测试期可指定新注册用户默认套餐；运行时读取，便于测试隔离与关闭后即时恢复默认体验版。 */
+export function registrationDefaultPlanName(): string {
+  return (process.env.TEST_DEFAULT_PLAN_NAME ?? '').trim();
+}
+
 export const env = {
   port: Number(process.env.PORT ?? 4000),
   aiProvider: (process.env.AI_PROVIDER ?? 'mock') as 'mock' | 'claude' | 'openai',
