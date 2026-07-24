@@ -306,7 +306,9 @@ export async function sessionRoutes(app: FastifyInstance) {
           const creditBalance = creditReservation?.balance ?? 0;
           const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
           return {
-            sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat,
+            // 当轮回复直出给客户端：与 historyMessage()/GET /sessions/:id 同口径脱敏，避免泄漏的
+            // section JSON 只在「刷新后重读」时被清洗、而当轮实时展示仍是满屏源码（DB 落库仍存原样）。
+            sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: scrubAssistantContent('assistant', replyChat) as ChatReply,
             memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, refNotices, creditBalance, tokenQuota,
           };
         }
@@ -354,7 +356,8 @@ export async function sessionRoutes(app: FastifyInstance) {
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
       const creditBalance = creditReservation?.balance ?? 0;
       const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
-      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, refNotices, creditBalance, tokenQuota };
+      // 同上：当轮直出回复走同一脱敏口径，DB 落库（msg.contentJson）保持原样不改。
+      return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: scrubAssistantContent('assistant', replyChat) as ChatReply, knowledgeUsed, refNotices, creditBalance, tokenQuota };
     } catch (err) {
       if (creditReservation?.charged) {
         await creditReservation.refund().catch((refundErr) => {
@@ -534,7 +537,11 @@ export async function sessionRoutes(app: FastifyInstance) {
           if (clientGone) break; // 断连：停消费(取消 provider 流)，退预留、不持久化残缺回复
         }
         if (clientGone) { await refundReservations(); return; }
-        send('chat', reply2);
+        // 当轮直出给客户端的完整回复兜底：同 historyMessage()/GET /sessions/:id 口径脱敏，
+        // 避免模型偶发泄漏的 section JSON 只有「刷新重进」才被清洗、当轮实时展示仍满屏源码。
+        // 增量 token 流（send('token', …)）本身不逐块脱敏——脏内容多为完整 JSON 片段，随最终
+        // 完整回复到达即被本次 send('chat', …) 覆盖渲染；DB 落库（msg.contentJson）保持原样不改。
+        send('chat', reply2 ? (scrubAssistantContent('assistant', reply2) as ChatReply) : reply2);
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object } });
         harvestProphecies(user, agentKey, reply2?.text);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
@@ -607,7 +614,9 @@ export async function sessionRoutes(app: FastifyInstance) {
           if (clientGone) break; // 断连：停消费(取消 provider 流)，退预留、不持久化残缺回复
         }
         if (clientGone) { await refundReservations(); return; }
-        send('chat', reply2); // 完整回复（含 points/acts）兜底，兼容不消费 token 流的客户端
+        // 完整回复（含 points/acts）兜底，兼容不消费 token 流的客户端；脱敏口径同 historyMessage()/
+        // GET /sessions/:id，避免当轮实时展示泄漏 section JSON、要等刷新重进才干净。DB 落库不改。
+        send('chat', reply2 ? (scrubAssistantContent('assistant', reply2) as ChatReply) : reply2);
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
         });

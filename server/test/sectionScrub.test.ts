@@ -149,4 +149,84 @@ describe('接线 · 历史脱敏 + 读取端清洗（连库）', () => {
     const raw = await prisma.message.findUnique({ where: { id: leaked.id } });
     assert.ok((raw!.contentJson as { text: string }).text.includes('quads'), '落库数据应保持原样未被改写');
   });
+
+  // —— 回归：当轮直出（/generate-sync、/generate SSE）此前遗漏脱敏 ——
+  // 三层修复原文档只提到「历史脱敏」+「GET /sessions/:id 读取端清洗」，两者都只在「后续轮 / 刷新重进」
+  // 才生效；当轮生成完毕直接下发给客户端的完整回复（sync 的 body.reply、SSE 的 event: chat）此前是
+  // 模型原始输出，未经脱敏——用户在生成的当下就已经看到满屏 JSON 源码，而非要等下次打开会话才看见。
+  // 用 per-agent runtime openai 覆盖 + fetch 打桩模拟模型泄漏，验证两条直出路径都已接上同一 scrub。
+  {
+    const realFetch = globalThis.fetch;
+    const makeGeneralOpenai = () => prisma.agent.update({
+      where: { key: 'general' },
+      data: { providerMode: 'openai', apiBaseUrl: 'http://mock.test/v1', apiModel: 'mock-model', apiKey: 'sk-test-real-123' },
+    });
+    const resetGeneral = () => prisma.agent.update({
+      where: { key: 'general' },
+      data: { providerMode: 'inherit', apiBaseUrl: null, apiModel: null, apiKey: null },
+    });
+
+    test('/generate-sync：当轮直出的 reply.text 已脱敏，不用等刷新重进才干净', async () => {
+      process.env.AI_ALLOW_REAL_PROVIDER = '1'; // 放行 per-agent 真实 openai 代码路径（fetch 仍打桩）
+      await makeGeneralOpenai();
+      globalThis.fetch = (async (url: unknown) => {
+        if (!String(url).includes('/chat/completions')) throw new Error(`unexpected fetch: ${url}`);
+        return {
+          ok: true, status: 200,
+          json: async () => ({ choices: [{ message: { content: PROD_LEAK } }], usage: { prompt_tokens: 12, completion_tokens: 40 } }),
+        } as unknown as Response;
+      }) as unknown as typeof fetch;
+      try {
+        const userId = await login(uniquePhone(), '当轮直出甲');
+        const r = await api('POST', '/api/generate-sync', { token: userId, body: { text: '牌面对比给我看看', agentKey: 'general' } });
+        assert.equal(r.status, 200, JSON.stringify(r.body));
+        assert.equal(r.body.kind, 'chat');
+        assert.ok(r.body.reply.text.includes(PLACEHOLDER), `当轮直出应已脱敏：${r.body.reply.text}`);
+        assert.ok(!r.body.reply.text.includes('"type"'), `当轮直出不应含 section JSON：${r.body.reply.text}`);
+        assert.ok(r.body.reply.text.includes('## 牌面对比'), '正常散文/标题应保留');
+
+        // DB 落库仍是模型原始输出（不改库，口径与历史脱敏/读取端清洗一致）。
+        const raw = await prisma.message.findFirst({ where: { sessionId: r.body.sessionId, role: 'assistant' }, orderBy: { createdAt: 'desc' } });
+        assert.ok((raw!.contentJson as { text: string }).text.includes('quads'), '落库数据应保持模型原始输出未被改写');
+      } finally {
+        globalThis.fetch = realFetch;
+        await resetGeneral();
+        delete process.env.AI_ALLOW_REAL_PROVIDER;
+      }
+    });
+
+    test('/generate（SSE）：当轮 event: chat 完整回复兜底也已脱敏', async () => {
+      process.env.AI_ALLOW_REAL_PROVIDER = '1';
+      await makeGeneralOpenai();
+      const encLeak = PROD_LEAK.replace(/\n/g, '\\n').replace(/"/g, '\\"');
+      const chunks = [
+        `data: {"choices":[{"delta":{"content":"${encLeak}"}}]}\n\n`,
+        'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":40}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+      globalThis.fetch = (async (url: unknown) => {
+        if (!String(url).includes('/chat/completions')) throw new Error(`unexpected fetch: ${url}`);
+        const enc = new TextEncoder();
+        return new Response(new ReadableStream({
+          start(controller) { for (const c of chunks) controller.enqueue(enc.encode(c)); controller.close(); },
+        }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+      }) as unknown as typeof fetch;
+      try {
+        const userId = await login(uniquePhone(), '当轮直出乙');
+        const r = await api('POST', '/api/generate', { token: userId, body: { text: '牌面对比给我看看', agentKey: 'general' } });
+        assert.equal(r.status, 200, JSON.stringify(r.body));
+        const sse = String(r.body);
+        const m = sse.match(/event: chat\ndata: (\{.*\})\n\n/);
+        assert.ok(m, `应含 event: chat：${sse}`);
+        const chatPayload = JSON.parse(m![1]) as { text: string };
+        assert.ok(chatPayload.text.includes(PLACEHOLDER), `event: chat 应已脱敏：${chatPayload.text}`);
+        assert.ok(!chatPayload.text.includes('"type"'), `event: chat 不应含 section JSON：${chatPayload.text}`);
+        assert.ok(chatPayload.text.includes('## 牌面对比'), '正常散文/标题应保留');
+      } finally {
+        globalThis.fetch = realFetch;
+        await resetGeneral();
+        delete process.env.AI_ALLOW_REAL_PROVIDER;
+      }
+    });
+  }
 });
