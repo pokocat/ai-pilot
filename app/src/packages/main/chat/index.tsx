@@ -340,6 +340,9 @@ export default function Chat() {
   // 粘贴合并：同步追踪输入框最新值（React state 在同步事件串里是陈旧的，不能当 prev 用）。
   // 所有给 setInput 赋值处都要同步维护此 ref，否则粘贴增量判定会错。
   const lastValueRef = useRef('');
+  // 输入框非受控：Textarea 不绑 value（避免 React 重渲染把陈旧值断言回原生 → 语音重复上屏、中间删字光标跳末尾）。
+  // 程序性写入统一走 writeInput，经此 ref 直写 FormElement.value（weapp）/ Stencil value（h5）驱动原生同步。
+  const taRef = useRef<any>(null);
   // 粘贴 burst：命中一次长文暴增即记 baseline（暴增前的输入），burst 期间每个 onInput 都重置结算定时器。
   const pasteBurstRef = useRef<{ baseline: string } | null>(null);
   const pasteSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -517,7 +520,7 @@ export default function Chat() {
 
   // B3 草稿持久化：按 sessionId 维度存/取；发送成功后清除。
   const loadDraft = (id?: string) => {
-    try { const d = Taro.getStorageSync(draftKeyFor(id)); if (d && typeof d === 'string') { setInput(d); lastValueRef.current = d; } } catch { /* noop */ }
+    try { const d = Taro.getStorageSync(draftKeyFor(id)); if (d && typeof d === 'string') { writeInput(d); } } catch { /* noop */ }
   };
   const saveDraft = () => {
     try {
@@ -1120,7 +1123,7 @@ export default function Chat() {
       setRefs((cur) => (cur.length >= UPLOAD_COUNT_MAX || cur.some((x) => x.kind === 'knowledge' && x.id === id))
         ? cur : [...cur, { kind: 'knowledge', id, label: title }]);
     } catch {
-      setInput(fullValue); lastValueRef.current = fullValue; // 归卷未成：长文塞回输入框，不丢字
+      writeInput(fullValue); // 归卷未成：长文塞回输入框，不丢字
       Taro.showToast({ title: '长文归卷未成，稍后再试', icon: 'none' });
     } finally {
       pasteInflightRef.current -= 1;
@@ -1145,7 +1148,19 @@ export default function Chat() {
       return;
     }
     void absorbPasteToFile(pasted, final);
-    setInput(kept); lastValueRef.current = kept;
+    writeInput(kept);
+  };
+
+  // 程序性写入输入框（草稿恢复 / 粘贴归卷回填 / 粘贴结算 / 发送清空）。
+  // Textarea 已解除受控（不绑 value），故必须经 ref 直写原生框：
+  //  - weapp：taRef.current 是 Taro FormElement，其 value setter → setAttribute(VALUE) → setData，更新原生 textarea；
+  //  - h5：taRef.current 是 Stencil <taro-textarea-core>，value 属性 @Watch 会回写内层 <textarea>。
+  // setInput 仍要调（字数/发送键/草稿判定读 input state），但不再驱动 Textarea 显示；lastValueRef 供粘贴增量判定。
+  const writeInput = (text: string) => {
+    setInput(text);
+    lastValueRef.current = text;
+    const el = taRef.current;
+    if (el) { try { el.value = text; } catch { /* noop */ } }
   };
 
   const handleInput = (e: { detail: { value: string } }) => {
@@ -1175,8 +1190,7 @@ export default function Chat() {
       Taro.showToast({ title: '言过两千，可精简或粘贴成附卷', icon: 'none' });
       return;
     }
-    setInput('');
-    lastValueRef.current = '';
+    writeInput('');
     // 发送即作废在途的粘贴结算，免得定时器到点后把已清空/新输入误判成粘贴。
     if (pasteSettleTimerRef.current) { clearTimeout(pasteSettleTimerRef.current); pasteSettleTimerRef.current = null; }
     pasteBurstRef.current = null;
@@ -2007,8 +2021,8 @@ export default function Chat() {
         <View className={`composer ${busy ? 'busy' : ''}`}>
           <View className="box" onClick={() => { if (!busy) setInputFocus(true); }}>
             <Textarea
+              ref={taRef}
               className="cinput"
-              value={input}
               focus={inputFocus}
               disabled={busy}
               maxlength={-1}
