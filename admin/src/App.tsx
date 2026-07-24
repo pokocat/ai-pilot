@@ -50,10 +50,6 @@ import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
 import logo from './assets/logo.png';
 
-// 附身登录 H5 站点根：H5 静态产物（app/dist）由 nginx 作为站点根提供（见 deploy/nginx.conf.example
-// 的 root /var/www/junshi/h5 + scripts/deploy-prod.sh），故默认取生产域名根。换环境用 VITE_H5_BASE 覆盖。
-const H5_BASE = (import.meta.env.VITE_H5_BASE as string | undefined) ?? 'https://wxapi.aibuzz.cn/';
-
 type Tab = 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
 const TABS: { key: Tab; icon: string; label: string; ownerOnly?: boolean }[] = [
   { key: 'home', icon: 'chart', label: '概览' },
@@ -313,13 +309,13 @@ function fmtSize(b: number | null): string {
   return `${(b / 1024 / 1024).toFixed(1)}MB`;
 }
 
-// 附身登录（仅超管）：签发目标用户的短时 token，拼成 H5 链接以其身份登入排查。链接与 token 均可复制；
+// 附身登录（仅超管）：签发目标用户的短时 token，运营复制令牌后在小程序内以其身份登入排查。
 // 展示失效时间，未配 APP_JWT_SECRET 时展示后端 warning（token 为明文且不过期）。
+// 注：H5 链路暂缓（wxapi 根为占位页、H5 仅在 aibuzz.cn 托管且公网可达性存疑），故只给令牌走小程序。
 function ImpersonateBlock({ userId, userName, toast }: { userId: string; userName: string; toast: (m: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AdminImpersonateResult | null>(null);
   const [err, setErr] = useState('');
-  const link = result ? `${H5_BASE}${H5_BASE.includes('?') ? '&' : '?'}imp_token=${encodeURIComponent(result.token)}` : '';
   const sign = async () => {
     setErr(''); setBusy(true);
     try { setResult(await api.impersonate(userId)); }
@@ -332,20 +328,19 @@ function ImpersonateBlock({ userId, userName, toast }: { userId: string; userNam
   return (
     <div className="blk">
       <div className="blk-h"><Icon name="user" size={15} /><span className="t">附身登录</span><span className="badge">仅超管</span></div>
-      <div className="blk-d">为「{userName}」签发一枚短时令牌，凭 H5 链接以其身份登入排查线上问题。链接切勿转发，用后即弃，签发会留审计。</div>
-      <div className="blk-d">小程序端：复制令牌后，在登录页长按印记（logo），或「我的」→「设置」长按「当前版本」，粘贴令牌即可附身。</div>
-      <button type="button" className="mini-btn primary" disabled={busy} onClick={sign}>{busy ? '签发中…' : '签发附身链接'}</button>
+      <div className="blk-d">为「{userName}」签发一枚短时令牌，复制后在小程序里以其身份登入排查线上问题。令牌切勿转发，用后即弃，签发会留审计。</div>
+      <div className="blk-d">用法：复制令牌 → 小程序登录页长按 slogan 首字「谋」（谋定而后动），或「我的」→「设置」长按「当前版本」→ 粘贴令牌即以其身份登入。</div>
+      <button type="button" className="mini-btn primary" disabled={busy} onClick={sign}>{busy ? '签发中…' : '签发附身令牌'}</button>
       {err && <div className="blk-d err"><Icon name="alert" size={13} /> {err}</div>}
       {result && (
         <div className="mem-list">
           <div className="mem-card">
             <span className="mi"><Icon name="arrow" size={16} /></span>
             <div className="mb">
-              <div className="mt">附身链接</div>
-              <div className="mm">{link}</div>
+              <div className="mt">附身令牌</div>
+              <div className="mm">{result.token}</div>
               <div className="mm">{result.expiresAt ? `令牌 ${fmtTime(result.expiresAt)} 失效` : '令牌不过期（未启用签名，明文令牌）'}</div>
             </div>
-            <button type="button" className="mini-btn" onClick={() => copy(link, '链接')}>复制链接</button>
             <button type="button" className="mini-btn" onClick={() => copy(result.token, '令牌')}>复制令牌</button>
           </div>
           {result.warning && <div className="blk-d err"><Icon name="alert" size={13} /> {result.warning}</div>}
