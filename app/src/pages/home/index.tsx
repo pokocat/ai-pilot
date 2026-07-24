@@ -172,9 +172,9 @@ export default function Home() {
     Promise.all(jobs).then(() => Taro.showToast({ title: '军情已刷新', icon: 'none' }));
   };
   const startInterview = () =>
-    goChat(`agentKey=general&fresh=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
+    goChat(`agentKey=general&continue=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
   const askRisks = () =>
-    goChat(`agentKey=strat&fresh=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
+    goChat(`agentKey=strat&continue=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
 
   // 三势全解：点整卡/小框 → 半屏 sheet（看全解）。无三势时不弹。
   const openForces = () => { if (forces.length) setForcesOpen(true); };

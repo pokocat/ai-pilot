@@ -124,7 +124,7 @@ export default function Studio() {
   const reviewReminder = reminders?.find((r) => r.kind === 'review') ?? null;
 
   const goChat = (agentKey: string, prompt: string) =>
-    navTo(`/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}`);
+    navTo(`/packages/main/chat/index?agentKey=${agentKey}&continue=1&send=${encodeURIComponent(prompt)}`);
   const openAgent = (key: string) => navTo(`/packages/main/chat/index?agentKey=${key}&continue=1`);
   // V7-05：军令卡体点击 → 军令详情页（勾选框为独立命中区，见 task-check 的 stopPropagation）
   const openCommand = (id: string) => navTo(`/packages/work/command/index?id=${id}`);

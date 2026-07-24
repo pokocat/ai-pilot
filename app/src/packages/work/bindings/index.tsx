@@ -59,7 +59,7 @@ export default function Bindings() {
         <View
           className="db-action"
           style={{ background: accent }}
-          onClick={() => navTo(`/packages/main/chat/index?agentKey=general&fresh=1&send=${encodeURIComponent('结合我的情况，判断我现在最应该先补充哪类数据或资料，按优先级排一下。')}`)}
+          onClick={() => navTo(`/packages/main/chat/index?agentKey=general&continue=1&send=${encodeURIComponent('结合我的情况，判断我现在最应该先补充哪类数据或资料，按优先级排一下。')}`)}
         >
           <Icon name="spark" size={16} color="#FBFAF6" />
           <Text>让军师判断绑定优先级</Text>

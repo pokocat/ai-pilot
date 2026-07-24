@@ -50,7 +50,7 @@ export default function Market() {
   };
 
   const goChat = (agentKey: string, prompt: string) =>
-    navTo(`/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}`);
+    navTo(`/packages/main/chat/index?agentKey=${agentKey}&continue=1&send=${encodeURIComponent(prompt)}`);
 
   const tapModule = (m: typeof MODULE_MARKET[number]) => {
     if (m.id === 'knowledge-base') { navTo('/packages/work/knowledge/index'); return; }

@@ -50,7 +50,7 @@ export default function QuickScanPage() {
   };
 
   const enterWarRoom = () =>
-    navTo(`/packages/main/chat/index?agentKey=general&fresh=1&send=${encodeURIComponent('我做完速诊了，帮我把主要矛盾展开，进入完整诊断。')}`);
+    navTo(`/packages/main/chat/index?agentKey=general&continue=1&send=${encodeURIComponent('我做完速诊了，帮我把主要矛盾展开，进入完整诊断。')}`);
 
   useShareAppMessage(() => ({
     title: result ? `军师速诊：${result.contradiction}` : '3 个问题，10 分钟拿到你的初诊 · 军师参谋部',

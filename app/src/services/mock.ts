@@ -922,7 +922,7 @@ export const mock = {
     const { d } = current();
     const hits: SearchHit[] = [];
     DEFAULT_AGENTS.filter((a) => a.name.toLowerCase().includes(ql) || a.role.toLowerCase().includes(ql)).slice(0, 5)
-      .forEach((a) => hits.push({ kind: 'agent', id: a.key, title: a.name, snippet: a.role, route: `/packages/main/chat/index?agentKey=${a.key}&fresh=1` }));
+      .forEach((a) => hits.push({ kind: 'agent', id: a.key, title: a.name, snippet: a.role, route: `/packages/main/chat/index?agentKey=${a.key}&continue=1` }));
     d.sessions.filter((s) => s.title.toLowerCase().includes(ql)).slice(0, 5)
       .forEach((s) => hits.push({ kind: 'session', id: s.id, title: s.title, snippet: s.title, route: `/packages/main/chat/index?sessionId=${s.id}` }));
     d.reports.filter((r) => r.title.toLowerCase().includes(ql)).slice(0, 5)

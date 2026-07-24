@@ -179,7 +179,7 @@ export default function ThinkTank() {
   const openReport = (id: string) => navTo(`/packages/work/report/index?id=${id}`);
   const goLibrary = () => navTo('/packages/work/library/index');
   const goChat = (agentKey: string, prompt: string) =>
-    navTo(`/packages/main/chat/index?agentKey=${agentKey}&fresh=1&send=${encodeURIComponent(prompt)}`);
+    navTo(`/packages/main/chat/index?agentKey=${agentKey}&continue=1&send=${encodeURIComponent(prompt)}`);
 
   // ============ V7-06 案卷资产 ============
   const counts = pipe?.counts ?? { staging: 0, optimized: 0, confirmed: 0 };
