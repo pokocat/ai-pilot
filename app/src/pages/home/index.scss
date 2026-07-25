@@ -1,22 +1,7 @@
 /* 战局页 —— 对齐设计稿 page-battle：深绿 hero / 指标 / 三势 / 动作 / 模块 / 不能做 / CTA */
 
-/* —— 页头：左「案卷」· 中「战局」· 右刷新 —— */
-.battle-nav {
-  position: relative;
-  display: flex; align-items: center; justify-content: center;
-}
-.bn-title { font-size: 25px; font-weight: 600; color: var(--ink); line-height: 1.1; }
-.bn-side {
-  position: absolute; bottom: 14px;
-  font-size: 16px; font-weight: 600; color: var(--accent);
-}
-.bn-side.left { left: 2px; }
-.bn-side.right { right: var(--cap-right, 2px); font-family: var(--sans); font-size: 18px; font-weight: 600; }
-.bn-side:active { opacity: .7; }
-
 /* —— 军师判断 hero（深绿） —— */
 .battle-hero {
-  margin-top: 12px;
   padding: 20px 18px 22px;
   border-radius: 17px;
   background: var(--green-hero);

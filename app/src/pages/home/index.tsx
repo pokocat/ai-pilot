@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
+import TabHeader from '../../components/TabHeader';
 import Login from '../../components/Login';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
@@ -213,12 +214,18 @@ export default function Home() {
   return (
     <Screen topInset className="home">
       <View className="pad">
-        {/* 页头（对齐设计稿）：左「案卷」· 中「军情」· 右刷新 */}
-        <View className="battle-nav tab-page-head">
-          <Text className="bn-side left serif" onClick={() => requireLogin() && navTo('/packages/work/projects/index')}>案卷</Text>
-          <Text className="bn-title serif">军情</Text>
-          <Text className="bn-side right" onClick={refresh}>↻</Text>
-        </View>
+        {/* 页头（TabHeader）：小字用途 + 大字「军情」+ 背景「势」，右侧留案卷/刷新 */}
+        <TabHeader
+          title="军情"
+          kicker="看今日判断"
+          glyph="势"
+          right={
+            <>
+              <Text className="th-act" onClick={() => requireLogin() && navTo('/packages/work/projects/index')}>案卷</Text>
+              <Text className="th-act sym" onClick={refresh}>↻</Text>
+            </>
+          }
+        />
 
         {/* 军师判断 hero：主要矛盾 —— 有判断时点击就地展开/收起全文；尚无判断时点击去对话 */}
         {(() => {

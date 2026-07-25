@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
+import TabHeader from '../../components/TabHeader';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import AsyncState from '../../components/AsyncState';
@@ -213,18 +214,17 @@ export default function Sessions() {
   return (
     <Screen topInset>
       <View className="pad council">
-        {/* 顶栏（对齐设计稿 messages-head）：大标题「问策」+ 副题，右侧 历史 */}
-        <View className="messages-head tab-page-head">
-          <View className="mh-titles">
-            <Text className="mh-t">问策</Text>
-            <Text className="mh-s">军师参谋室 · 分线督办，脉络可溯</Text>
-          </View>
-          <View className="mh-tools">
-            <View className={`mh-btn ${showHistory ? 'on' : ''}`} onClick={() => setShowHistory((v) => !v)}>
-              <Text style={showHistory ? { color: accent } : {}}>{showHistory ? '返回' : '历史'}</Text>
-            </View>
-          </View>
-        </View>
+        {/* 页头（TabHeader）：小字用途 + 大字「问策」+ 背景「谋」，右侧留历史 */}
+        <TabHeader
+          title="问策"
+          kicker="有事问军师"
+          glyph="谋"
+          right={
+            <Text className={`th-act ${showHistory ? 'on' : ''}`} onClick={() => setShowHistory((v) => !v)}>
+              {showHistory ? '返回' : '历史'}
+            </Text>
+          }
+        />
 
         {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
         <NextStepCard />

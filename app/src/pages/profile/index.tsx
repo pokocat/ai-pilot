@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { View, Text, Image, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
+import TabHeader from '../../components/TabHeader';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import Picker from '../../components/Picker';
@@ -144,10 +145,13 @@ export default function Profile() {
     <Screen topInset>
       <View className="pad account">
         {/* 页头：居中「我的军师系统」· 右「设置」 */}
-        <View className="account-nav tab-page-head">
-          <Text className="an-title serif">我的军师系统</Text>
-          <Text className="an-side serif" onClick={() => navTo('/packages/main/settings/index')}>设置</Text>
-        </View>
+        {/* 页头（TabHeader）：小字用途 + 大字「老板」+ 背景「板」，右侧留设置 */}
+        <TabHeader
+          title="老板"
+          kicker="你自己"
+          glyph="板"
+          right={<Text className="th-act" onClick={() => navTo('/packages/main/settings/index')}>设置</Text>}
+        />
 
         {/* 账户服务卡（深绿 · §10.1）：头像 + 姓名 + 会员牌 / 手机·社群·邀请码 / 权益三格 / 服务动作 */}
         <View className="account-user-card account-service-card">

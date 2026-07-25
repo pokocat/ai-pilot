@@ -1,0 +1,79 @@
+/* 五个 tab 页共用标题区（TabHeader）—— 对齐设计稿 header：
+   左「一行小字用途 + 大字 tab 名」，右侧本页真入口（设计稿的行业 tag 已去掉），
+   背景压一枚大字作印章，底部一条细线收口。 */
+
+/* 背景大字：贴右微出血、上对齐，字脚被下方细线切齐（.tab-page-head 已 overflow:hidden），
+   色随本命色、极淡，只作印章底纹。 */
+.th-glyph {
+  display: block;
+  position: absolute;
+  right: -6px;
+  top: -6px;
+  font-size: 104px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--accent);
+  opacity: .09;
+  pointer-events: none;
+}
+
+.th-row {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.th-titles { min-width: 0; }
+
+.th-kicker {
+  display: block;
+  font-size: var(--fs-12);
+  line-height: 1.2;
+  letter-spacing: .3em;
+  color: var(--accent);
+}
+
+.th-title {
+  display: block;
+  margin-top: 6px;
+  font-size: 29px;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: .03em;
+  color: var(--ink);
+}
+
+.th-acts {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* 右侧文字入口：克制，无边框无胶囊。
+   Text 必须块级化 padding 才计入高度；上重下轻的 padding 让文字落在大标题基线附近，同时撑出 ≈43px 命中区
+   （标题区 overflow:hidden，不能像别处那样用伪元素往外扩）。 */
+.th-act {
+  display: block;
+  padding: 20px 8px 6px;
+  font-family: var(--serif);
+  font-size: var(--fs-14);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ink-3);
+}
+.th-act:last-child { padding-right: 0; }
+.th-act.on { color: var(--accent); }
+.th-act:active { opacity: .55; }
+/* 符号型入口（↻ 等）走黑体，宋体下符号偏细 */
+.th-act.sym { font-family: var(--sans); font-size: 17px; }
+
+.th-rule {
+  height: 1px;
+  margin-top: 14px;
+  background: var(--line);
+}
+
+/* 标题区与下方内容的统一呼吸（各页不要再自加头部间距） */
+.tab-head { margin-bottom: 12px; }

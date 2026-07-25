@@ -8,9 +8,11 @@
   height: var(--nav-inset-h, calc(env(safe-area-inset-top) + 46px));
 }
 
-/* 五个 tab 页共用的标题区高度（56，略收紧于原 64）；头部在胶囊下方，右侧按钮贴边不需避让。 */
+/* 五个 tab 页共用的标题区外壳（内容由 TabHeader 渲染：小字用途 + 大字 tab 名 + 背景大字 + 细线）。
+   高度不再固定，由内容自然撑开；overflow 裁掉背景大字的出血，别让它压到下方卡片。
+   头部在胶囊下方，右侧入口贴边不需避让。 */
 .tab-page-head {
-  height: 56px;
-  min-height: 56px;
+  position: relative;
+  overflow: hidden;
   box-sizing: border-box;
 }

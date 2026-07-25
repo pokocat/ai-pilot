@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { ScrollView, View, Text } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
+import TabHeader from '../../components/TabHeader';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import MarkdownText from '../../components/MarkdownText';
@@ -502,10 +503,8 @@ export default function ThinkTank() {
   return (
     <Screen topInset>
       <View className="pad think">
-        {/* 页头 */}
-        <View className="think-nav tab-page-head">
-          <Text className="tn-title serif">锦囊</Text>
-        </View>
+        {/* 页头（TabHeader）：小字用途 + 大字「锦囊」+ 背景「囊」 */}
+        <TabHeader title="锦囊" kicker="存你的家底" glyph="囊" />
 
         {/* 分区切换 */}
         <View className="think-tabs">
