@@ -360,6 +360,32 @@ export interface SurveyQuestion { key: string; title: string; options: string[];
 export interface SurveyAdmin { id: string; key: string; title: string; optionsJson: string[]; enabled: boolean; }
 export interface Profile { industry?: string | null; stage?: string | null; pain?: string | null; extra?: unknown; }
 
+/** 已确认的战略档案（GET /profile/strategic）：谶语按 verseYear 盖章，一年一句。 */
+export interface StrategicProfile {
+  mainContradiction: string;
+  positioning: string;
+  track: string;
+  stage: string;
+  narrative: string;
+  verse: string;
+  verseYear: number | null;
+  updatedAt: string | null;
+}
+export type StrategicProfilePatch = Partial<Omit<StrategicProfile, 'updatedAt' | 'verseYear'>>;
+
+/** 复盘账本（GET /reviews）：日期统一为上海时区 YYYY-MM-DD。 */
+export interface ReviewLogItem {
+  id?: string;
+  layer?: string;
+  date: string;
+  ordersTotal?: number;
+  ordersDone?: number;
+  alignRate?: number | null;
+  hasBackfill?: boolean;
+  createdAt?: string;
+}
+export interface ReviewsResult { items: ReviewLogItem[]; streak: number }
+
 /* ────────────── 3 问速诊（WO-06：行业 + 年营收段 + 最痛的一件事 → 初诊卡） ────────────── */
 export interface QuickScanRequest { industry: string; revenueBand: string; pain: string; }
 export interface QuickScanResult {

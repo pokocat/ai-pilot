@@ -107,6 +107,7 @@ export default function Studio() {
     Taro.getCurrentInstance().page?.getTabBar?.();
     if (!s.isAuthed()) { setShowLogin(true); return; }
     loadStudio();
+    void s.loadBadges(); // 底栏角标搭车刷新（内部 15 秒节流）
   });
 
   const todayDate = today();
@@ -199,7 +200,7 @@ export default function Studio() {
   // 发起复盘：先落复盘账（服务端记连续天数，不阻塞跳转），再带真实数据进复盘对话。
   // 复盘走总军师（M2 PR-6：复盘是留存生命线，订阅内免费，不设解锁墙；经营参谋 ops 保留为可解锁深聊）。
   const genReview = () => {
-    void startReview('day');
+    void startReview('day').then(() => s.loadBadges({ force: true })); // 复盘账已落 → 立刻重算军令红点（今日已复盘即熄）
     goChat('general', buildReviewPrompt(dossier));
   };
   const subscribeReview = async () => {

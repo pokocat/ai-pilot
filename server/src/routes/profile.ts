@@ -151,6 +151,7 @@ export async function profileRoutes(app: FastifyInstance) {
           narrative: pick(req.body?.narrative)?.slice(0, 500),
           verse: pick(req.body?.verse)?.slice(0, 40),
         },
+        forceVerse: true, // 手动改谶是老板的显式动作，不受「一年一句」守卫拦（抽取管线才受）
       });
       await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.strategic.update', payload: {} });
       return { strategic: await loadStrategicProfile(user.id) };

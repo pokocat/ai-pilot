@@ -7,7 +7,8 @@ import { prisma } from '../db.js';
 import type { DeliverableInput } from './casefile.js';
 import { cardSection } from './deliverableSection.js';
 import { llmJson } from '../llm/gateway.js';
-import type { ForcesView, ForceVerdict, ForceView } from '../../../shared/contracts';
+import { yearOf } from './clock.js';
+import type { ForcesView, ForceVerdict, ForceView, StrategicProfile, StrategicProfilePatch } from '../../../shared/contracts';
 import type { DeliverableSection } from '../llm/schema.js';
 
 /** 与 casefile.ts 同一份修复：d.sections 实际是报告 V2 类型化 section，读前先归一化。 */
@@ -15,19 +16,14 @@ function normalizedSections(d: DeliverableInput) {
   return ((d.sections ?? []) as unknown as DeliverableSection[]).map(cardSection);
 }
 
-export interface StrategicView {
-  mainContradiction: string;
-  positioning: string;
-  track: string;
-  stage: string;
-  narrative: string;  // 命运叙事线摘要（M4 PR-17：存档后跨月可复述，存 extraJson）
-  verse: string;      // 年度谶语（七言/五言一句，存 extraJson；天时日历卡带出）
-  updatedAt: string | null;
-}
+export type StrategicView = StrategicProfile;
+
+/** 可写字段：updatedAt 由库维护，verseYear 由服务端随谶语盖章，都不接受外部传入。 */
+export type StrategicPatch = StrategicProfilePatch;
 
 /** 从「认可的成果」分节提取战略事实（确定性规则；只取标题语义明确的分节，不猜）。 */
-export function extractStrategicFacts(d: DeliverableInput): Partial<Omit<StrategicView, 'updatedAt'>> {
-  const out: Partial<Omit<StrategicView, 'updatedAt'>> = {};
+export function extractStrategicFacts(d: DeliverableInput): StrategicPatch {
+  const out: StrategicPatch = {};
   const firstLine = (s?: string) => (s || '').split('\n')[0].trim().slice(0, 300);
   for (const sec of normalizedSections(d)) {
     const h = sec.h || '';
@@ -41,19 +37,30 @@ export function extractStrategicFacts(d: DeliverableInput): Partial<Omit<Strateg
   return out;
 }
 
-/** 合并写入（只覆盖本次提取到的字段；空提取不动库）。narrative/verse 存 extraJson。 */
+/**
+ * 合并写入（只覆盖本次提取到的字段；空提取不动库）。narrative/verse/verseYear 存 extraJson。
+ *
+ * 一年一句（#16）：谶语的分量全在「不改不换」。抽取管线每次认可方案都可能抽出新谶，
+ * 当年已有谶时一律不采（其余字段照常合并）；跨年或从未有谶才接受，并盖上当年年份。
+ * forceVerse = 显式改谶（老板手动 PUT，罕见仪式），绕过守卫并重新盖章。
+ */
 export async function upsertStrategicProfile(args: {
   tenantId: string;
   userId: string;
-  patch: Partial<Omit<StrategicView, 'updatedAt'>>;
+  patch: StrategicPatch;
+  forceVerse?: boolean;
 }): Promise<void> {
   const clean = Object.fromEntries(Object.entries(args.patch).filter(([, v]) => typeof v === 'string' && v.trim()));
   if (!Object.keys(clean).length) return;
   const { narrative, verse, ...columns } = clean as { narrative?: string; verse?: string } & Record<string, string>;
   const existing = await prisma.strategicProfile.findUnique({ where: { userId: args.userId } });
-  const extra = { ...((existing?.extraJson as object) ?? {}) } as { narrative?: string; verse?: string };
+  const extra = { ...((existing?.extraJson as object) ?? {}) } as { narrative?: string; verse?: string; verseYear?: number };
   if (narrative) extra.narrative = narrative.slice(0, 500);
-  if (verse) extra.verse = verse.slice(0, 40);
+  const thisYear = yearOf(); // 走可注入时钟：沙箱/测试要能把时间快进到次年验证换谶
+  if (verse && (args.forceVerse || !extra.verse || extra.verseYear !== thisYear)) {
+    extra.verse = verse.slice(0, 40);
+    extra.verseYear = thisYear;
+  }
   await prisma.strategicProfile.upsert({
     where: { userId: args.userId },
     update: { ...columns, extraJson: extra },
@@ -87,7 +94,7 @@ export async function bumpDiagRound(args: { tenantId: string; userId: string; se
 export async function loadStrategicProfile(userId: string): Promise<StrategicView | null> {
   const row = await prisma.strategicProfile.findUnique({ where: { userId } });
   if (!row) return null;
-  const extra = (row.extraJson as { narrative?: string; verse?: string } | null) ?? {};
+  const extra = (row.extraJson as { narrative?: string; verse?: string; verseYear?: number } | null) ?? {};
   return {
     mainContradiction: row.mainContradiction,
     positioning: row.positioning,
@@ -95,6 +102,7 @@ export async function loadStrategicProfile(userId: string): Promise<StrategicVie
     stage: row.stage,
     narrative: extra.narrative ?? '',
     verse: extra.verse ?? '',
+    verseYear: typeof extra.verseYear === 'number' ? extra.verseYear : null,
     updatedAt: row.updatedAt.toISOString(),
   };
 }

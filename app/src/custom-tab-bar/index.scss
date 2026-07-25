@@ -28,9 +28,31 @@
   min-width: 0;
 }
 .tab-ic {
+  position: relative; /* 角标定位基准 */
   width: 33px; height: 33px;
   display: flex; align-items: center; justify-content: center;
   transition: transform .2s ease-out;
+}
+/* 角标（问策未读数 / 军令红点）：绝对定位挂在图标右上，脱离文档流，不撑变形胶囊底栏。
+   白描边压在半透明底栏上，数字走 --sans（宋体小字号数字发虚）。 */
+.tab-badge {
+  position: absolute; top: -1px; left: 50%; margin-left: 3px;
+  min-width: 15px; height: 15px; box-sizing: border-box; padding: 0 4px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  background: var(--danger, #9C4A38);
+  border: 1px solid rgba(255, 255, 255, .92);
+}
+.tab-badge-n {
+  font-family: var(--sans);
+  color: #fff; font-size: 9px; font-weight: 700; line-height: 1;
+}
+.tab-dot {
+  position: absolute; top: 2px; left: 50%; margin-left: 6px;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--danger, #9C4A38);
+  border: 1px solid rgba(255, 255, 255, .92);
+  box-sizing: border-box;
 }
 .tab.on .tab-ic {
   transform: scale(1.14);

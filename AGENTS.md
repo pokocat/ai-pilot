@@ -183,10 +183,10 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **H5 token 双写**：新增/修改 `app.scss` 里 `page {}` 的设计 token 时，必须同步 `app.h5.scss` 的 `:root` 兼容层（H5 没有 `page` 节点），否则 H5 上新 token 全部失效（深绿 hero 曾因此透明）。
 
 ### 7.3 启动流程
-`app.tsx` 启动拉 `loadAgents()` + `loadMe()`（未登录跳过）。首页：未登录→登录弹层；已登录未建档→本命色/30 秒建档 picker。
+`app.tsx` 启动拉 `loadAgents()` + `loadMe()` + `loadBadges()`（未登录跳过）。首页：未登录→登录弹层；已登录未建档→本命色/30 秒建档 picker。
 
 ### 7.4 状态与主题
-- `services/store.ts`：轻量全局 store（订阅式）。本命色 / 用户 / 智能体缓存 / tab / overlay / 登录态。
+- `services/store.ts`：轻量全局 store（订阅式）。本命色 / 用户 / 智能体缓存 / tab / overlay / 登录态 / 底栏角标；`loadBadges()` 以 15 秒节流单飞聚合会话未读与复盘账本，问策显示未读数，21:00 后当日尚未复盘时军令显示红点，复盘落账后强制回刷熄灭。
 - `loadAgents()` 必须保留 `DEFAULT_AGENTS` 的 `billing/price/owned` 兜底字段；线上旧 `/agents` 若缺权益字段，不能覆盖掉前台解锁门禁，否则 `💎xN` 专项能力会被误判为可直接进入。
 - `data/colors.ts`：6 套本命色主题变量（`--accent` 系列）。
 
@@ -278,9 +278,9 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/cardHtml.ts`（M4 PR-15 第一批）：B 级卡片渲染——每日战报（军令/对齐率/回填/段位/连续天数）、天时日历（命盘 12 月攻守+拐点+谶语）、天命速写（送你一卦：命格/大势/建议由命盘确定性生成；朋友生辰 `computeChart` 现算**不落库**）。铁律：卡上每个数字都来自服务端账本，读不到整块不显示；品牌一律军师参谋部（V6.0 原稿外置 CSS 未保留，样式按小程序设计体系重制）；卡片发布走自有域名 `{PUBLIC_BASE_URL}/api/r/:id`。`services/reportHtml.ts` 的普通报告模板已改为 V6.0 天势卡片风（暖纸底、深绿封面、白色章节卡、金印落款、军师参谋部品牌）；报告 `htmlUrl` 也固定返回自有域名 `/api/r/:id` 供小程序 web-view 打开，OSS 仅作为可选 `cdnUrl` 镜像，旧 OSS `htmlUrl` 会在再次请求时迁回自有域名；不要回退旧米色卷轴页脚或 OSS 直开入口。叙事线/谶语存 `StrategicProfile.extraJson`（PUT /profile/strategic 接受 narrative/verse，注入块带「跨月复述一致/全年沿用」口径）。剩余 9 卡 + A 级模板见 §13。
 - `data/industryPacks.ts` 深度字段（M4 PR-19）：`decisionChain/ticketRange/benchmarkCases/mingLink` 可选，配了才拼进「行业视角」注入行；美业与大健康已拆分为两个包（新增行业包=建档选项自动 +1，app Picker 兜底问卷需手动同步）。
 - `services/intent.ts`（M3 编排与适配，全部确定性规则）：`detectIntent`（V6.0 §3 入口识别：复盘六层触发词/紧急/择时/团队匹配/送你一卦/情绪→师父）→ `modeDirective` 模式指令；`Session.mode` 粘性存储（`resolveMode` 本轮检测优先、检测不出沿用；复盘意图在 sessions 路由自动落对应层 ReviewLog）；`detectInnerState`→`roleDirective` 五角色语气（教官/参谋长/大哥/战略家/师父）；`stageOf/stageDirective` 营收阶段自适应（问卷已改营收区间，旧标签兼容）；诊断轮次由历史用户消息数计算注入。注入位：模式/角色/轮次=【本轮导引】dynamic 首位，阶段=stable。**本命色语气注入已移除（PR-14，本命色回归纯 UI 品牌色）**，`{本命色}` 占位符路径保留。
-- `services/wechatSubscribe.ts`：微信小程序订阅消息通道。`GET /wechat/subscribe/templates` 只返回已配置模板；前端 `wx.requestSubscribeMessage` 后 `POST /wechat/subscribe` 回写结果，`accept` 才给 `WechatSubscription.remaining +1`；发送成功后扣减一次额度并写 `WechatNotificationLog`。当前场景：`review`（复盘提醒，模板字段 `thing1/time2/thing3`）与 `report`（报告生成完成，模板字段 `thing1/phrase2/time3/thing4`）。未配模板、无 openid、无额度、微信接口失败都不阻断主流程。
+- `services/wechatSubscribe.ts`：微信小程序订阅消息通道。`GET /wechat/subscribe/templates` 只返回已配置模板；前端 `wx.requestSubscribeMessage` 后 `POST /wechat/subscribe` 回写结果，`accept` 才给 `WechatSubscription.remaining +1`；发送成功后扣减一次额度并写 `WechatNotificationLog`。当前场景：`review`（复盘提醒，模板字段 `thing1/time2/thing3`）、`report`（报告生成完成，模板字段 `thing1/phrase2/time3/thing4`）和 `payment`（付款后到账提醒；支付确认点击手势内优先索权，拒绝/失败不阻断支付）。未配模板、无 openid、无额度、微信接口失败都不阻断主流程。
 - `services/scheduler.ts`（M1 定时任务框架）：任务注册制 + 进程内周期扫描（生产单实例；`NODE_ENV=test` 不自启，测试直接 `runJob/scan*` 驱动）；任务彼此隔离（单任务崩不影响其它）。已挂：`casefile-idle-recall`（案卷 ≥48h 未推进 → 登记 `system.recall.candidate` 审计，按用户按天幂等）、`daily-review-reminder`（服务端本地时间 `REVIEW_REMINDER_HOUR` 后，活跃案卷且当天未复盘、当天未发过 review、仍有订阅额度 → 发微信复盘提醒）、`review-gap-reminder`（久不复盘登记候选并尝试发送）、`prophecy-due-scan`（预言到期登记候选）。
-- `services/strategicProfile.ts`（M1 统一状态层）：战略档案提取（`extractStrategicFacts` 按分节标题确定性规则，只取语义明确分节、不猜）/合并写入（只覆盖出现的字段）/注入块（`strategicBlock`）。逐轮 LLM 结构化抽取与 M2 决策日志共用抽取管道（§13 TODO）。
+- `services/strategicProfile.ts`（M1 统一状态层）：战略档案提取（`extractStrategicFacts` 按分节标题确定性规则，只取语义明确分节、不猜）/合并写入（只覆盖出现的字段）/注入块（`strategicBlock`）。叙事线与年度谶语存 `extraJson`，谶语同时盖 `verseYear`：自动抽取同年不换、跨年才换，老板手动校准可强制改谶；报告封面没有箴言时仅读当年谶语补位，不回写成果。逐轮 LLM 结构化抽取与 M2 决策日志共用抽取管道（§13 TODO）。
 - `services/paipan.ts`（★ M1 排盘引擎 v1）：确定性命理/历法计算——干支历/八字/大运用 `lunar-typescript`，紫微命宫/身宫主星用 `iztro`；产出 四柱十神/月令取格（打法映射 `data/baziPlaybook.ts`，源自 V6.0 表）/日主强弱与喜用（v1 计分法，basis 写明依据）/大运时间线/年度逐月攻守；真太阳时 v1 平太阳时校正（经度）。**铁律：算→存（`NatalChart`，带 engineVersion）→拼指令（`chartBriefing` 注入【天势档案】+ 禁止 AI 自算），AI 只做比喻翻译**；「不信命理」注入 `TIANSHI_OPTOUT_LINE` 降级指令。回归口径：同输入同输出（`test/paipan.test.ts` 已知八字校验）。
 - `services/understanding.ts`（★）：生成前台「军师档案」与模型上下文线索，按真实 `Profile/Memory/Project/Knowledge/Report/Session` 汇总经营身份、创业路径、当前难题、已沉淀资料和待补问题；禁止写入固定 mock 客户画像。
 - `services/memory.ts`：Agent Memory 写入（**带向量**）/召回（**语义相关性排序**）/留存 TTL/反馈回流。

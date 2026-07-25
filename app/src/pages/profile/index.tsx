@@ -13,7 +13,7 @@ import CoachMarks from '../../components/CoachMarks';
 import { navTo, switchTo } from '../../services/nav';
 import { REVIEW_TIME } from '../../data/constants';
 import { useStore } from '../../hooks/useStore';
-import { api, type ProgressView, type WorkbenchView } from '../../services/api';
+import { api, type ProgressView, type StrategicProfileView, type WorkbenchView } from '../../services/api';
 import './index.scss';
 
 type SheetKey = '' | 'workbench' | 'teacher' | 'group';
@@ -32,6 +32,7 @@ export default function Profile() {
   const [showPicker, setShowPicker] = useState(false);
   const [showPlans, setShowPlans] = useState(false);
   const [prog, setProg] = useState<ProgressView | null>(null);
+  const [strategic, setStrategic] = useState<StrategicProfileView | null>(null);
   const [workbench, setWorkbench] = useState<WorkbenchView | null>(null);
   const [sheet, setSheet] = useState<SheetKey>('');
   const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
@@ -42,6 +43,8 @@ export default function Profile() {
     api.projects().then((p) => setProjCount(p.length)).catch((e) => s.handleApiError(e));
     api.reports().then((r) => setReportCount(r.length)).catch(() => {});
     api.progress().then((r) => setProg(r.progress)).catch(() => setProg(null));
+    // 年度谶语（战略档案）：失败/无档案静默落到求谶引导态，不弹错
+    api.strategicProfile().then((r) => setStrategic(r.strategic)).catch(() => setStrategic(null));
     api.workbench().then(setWorkbench).catch((e) => { s.handleApiError(e, { silent: true }); setWorkbench(null); });
   };
 
@@ -49,6 +52,7 @@ export default function Profile() {
     s.setTab(4);
     if (!s.isAuthed()) { setShowLogin(true); return; }
     loadProfile();
+    void s.loadBadges(); // 底栏角标搭车刷新（内部 15 秒节流）
   });
 
   // 案卷完整度：优先 workbench.completeness，缺失时按理解成熟度兜底。
@@ -90,6 +94,37 @@ export default function Profile() {
   };
 
   const fortuneOn = s.fortuneOn(); // P0-2：命理关 → 隐藏「送你一卦」入口
+
+  // 年度谶语卡（留存机制 #16 M1，档案组顶部、命盘报告入口之上）：
+  // 有谶 → 竖排七言 + 干支落款（verseYear 缺失只落「军师赠」）；无谶 → 求谶引导（点进命盘报告）。
+  // 命理开关关闭时整卡不渲染（与命盘报告入口同一 gating）。
+  const verse = (strategic?.verse || '').trim();
+  const verseGanZhi = ganZhiYear(strategic?.verseYear);
+  const verseCard = !fortuneOn ? null : verse ? (
+    <View className="verse-card card">
+      <Text className="vc-kicker">年 度 谶 语</Text>
+      <View className="vc-cols">
+        {verseColumns(verse).map((col, ci) => (
+          <View key={`vc-${ci}`} className="vc-col">
+            {col.map((ch, i) => <Text key={`vc-${ci}-${i}`} className="vc-ch serif">{ch}</Text>)}
+          </View>
+        ))}
+      </View>
+      <View className="vc-foot">
+        <Text className="vc-sign serif">{verseGanZhi ? `${verseGanZhi}年 · 军师赠` : '军师赠'}</Text>
+        <Text className="vc-note">岁末对账</Text>
+      </View>
+    </View>
+  ) : (
+    <View className="verse-card verse-empty card" onClick={() => navTo('/packages/work/mingpan/index')}>
+      <View className="vc-eb">
+        <Text className="vc-et serif">你还没有今年的谶</Text>
+        <Text className="vc-es">做完命盘，我赠你一句。</Text>
+      </View>
+      <Text className="vc-ego">去命盘 ›</Text>
+    </View>
+  );
+
   // C7：15 项菜单按「档案 / 资产 / 账户 / 系统」分组，行样式不变，仅加小节标题，降低长列表扫描成本。
   type MenuRow = { ic: string; t: string; s: string; sw?: boolean; onClick: () => void };
   const menuGroups: { title: string; rows: MenuRow[] }[] = [
@@ -237,6 +272,7 @@ export default function Profile() {
         {menuGroups.map((g) => (
           <View key={g.title} className="menu-group">
             <Text className="menu-group-title">{g.title}</Text>
+            {g.title === '档案' ? verseCard : null}
             <View className="menu card">
               {g.rows.map((r) => (
                 <View key={r.t} className="menu-row" onClick={r.onClick}>
@@ -411,6 +447,32 @@ function maturityPct(m?: string): number {
   if (m === 'forming') return 55;
   return 20;
 }
+// —— 年度谶语卡 —— //
+const TIAN_GAN = ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'];
+const DI_ZHI = ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'];
+// 干支纪年（天干 (y-4)%10 / 地支 (y-4)%12，如 2026 → 丙午）；年份缺失返回空串 → 落款只写「军师赠」。
+function ganZhiYear(y?: number | null): string {
+  if (typeof y !== 'number' || !Number.isFinite(y)) return '';
+  const g = (((y - 4) % 10) + 10) % 10;
+  const z = (((y - 4) % 12) + 12) % 12;
+  return `${TIAN_GAN[g]}${DI_ZHI[z]}`;
+}
+// 竖排断句：按标点切句，一句一列（渲染时自右向左），标点不入列；最多 4 列。
+// 无标点连写的长句（如两句七言写成一串）按 7 字再断，免得单列过长把卡片顶穿。
+function verseColumns(verse: string): string[][] {
+  const cols: string[][] = [];
+  for (const line of verse.split(/[，,。.；;、！!？?｜|/\s]+/)) {
+    const chars = Array.from(line.trim());
+    if (!chars.length) continue;
+    if (chars.length > 8) {
+      for (let i = 0; i < chars.length; i += 7) cols.push(chars.slice(i, i + 7));
+    } else {
+      cols.push(chars);
+    }
+  }
+  return cols.slice(0, 4);
+}
+
 // 提醒菜单右值：有社群显示复盘时间，否则留空。
 function reminderHint(service?: { className: string } | null): string {
   return service ? REVIEW_TIME : '';

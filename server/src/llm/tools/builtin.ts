@@ -5,6 +5,7 @@
 import { hybridSearch } from '../../services/retrieval.js';
 import { recallMemories } from '../../services/memory.js';
 import type { Tool, OutputSkill } from './types.js';
+import type { Deliverable } from '../schema.js';
 
 const KNOWLEDGE_MAX = 1500; // 截断工具输出，防多轮 prompt 膨胀
 
@@ -50,6 +51,19 @@ export const recallMemory: Tool = {
   },
 };
 
+// 报告封面谶语兜底（#16 M1 封面插槽）：模型没写封面箴言时，用老板当年的谶语补位——
+// 一年一句在报告封面上反复照面，才有「惦记一整年」的分量。
+// 只补渲染入参、不回填成果：存库的成果永远不带这句，重渲染/分享都从档案重新取，
+// 也不会把模板加的「」写进 motto 再套一层。
+async function withVerseCover(d: Deliverable, userId: string | null): Promise<Deliverable> {
+  if (!userId || d.cover?.motto?.trim()) return d;
+  const { loadStrategicProfile } = await import('../../services/strategicProfile.js');
+  const verse = (await loadStrategicProfile(userId).catch(() => null))?.verse ?? '';
+  const motto = verse.replace(/^[「『"'“”]+|[」』"'“”]+$/g, '').trim(); // 谶语自带引号时剥掉，括号由封面模板出
+  if (!motto) return d;
+  return { ...d, cover: { ...(d.cover ?? { title: d.title }), motto } };
+}
+
 // 产出处理技能：把结构化成果渲染成可分享的网页版报告，回填 htmlUrl。
 // 这是「HTML 生成」作为技能库一员的落地——不再是写死的后处理，而是注册进 registry 的 output 技能。
 export const renderReport: OutputSkill = {
@@ -58,6 +72,6 @@ export const renderReport: OutputSkill = {
   description: '把产出成果渲染成自包含、可分享的网页版报告，回填分享链接（htmlUrl）。',
   async run(deliverable, ctx) {
     const { publishReport } = await import('../../services/reportHtml.js');
-    return publishReport(ctx.tenantId, deliverable);
+    return publishReport(ctx.tenantId, await withVerseCover(deliverable, ctx.userId));
   },
 };

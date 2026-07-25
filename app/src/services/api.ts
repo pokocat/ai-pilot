@@ -17,6 +17,7 @@ import type {
   SkuView, SkuOrderResult, PayOrderStatus, PayOrderListResult, PayRepayResult, BattleForce, BattleCommitResult,
   DataSourcesView, ModulesView, ModuleView, ReminderView, WorkbenchView, SearchResult,
   KnowledgePipelineView, OrganizeResult, ConfirmResult, StagedUploadResult,
+  StrategicProfile, ReviewLogItem, ReviewsResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -81,6 +82,10 @@ export interface BaziBody {
   birthPlace?: string; longitude?: number;
   believe?: boolean;
 }
+// 服务端已返回完整 StrategicProfile；前端仍宽松消费，兼容旧数据/旧包时不空屏。
+export type StrategicProfileView = Partial<StrategicProfile>;
+export type { ReviewLogItem, ReviewsResult };
+
 export interface ProgressView {
   rank: string;
   usageDays: number;
@@ -473,6 +478,10 @@ export const api = {
   // 命盘报告（八字 × 紫微综合印证）：无生辰 → { needBazi:true }；有生辰 → 按需现算 MingpanReport（不落库）
   myChartReport: () =>
     IS_MOCK ? mock.myChartReport() : request<MingpanReportResp>('/profile/chart/report'),
+  // 战略档案（年度谶语卡）：mock 无战略档案数据源 → null（前端落到求谶引导态，不编造谶语）
+  strategicProfile: () =>
+    IS_MOCK ? Promise.resolve({ strategic: null as StrategicProfileView | null })
+      : request<{ strategic: StrategicProfileView | null }>('/profile/strategic'),
   // 用户进度（段位/里程碑）与复盘账本（M4 PR-18 前端落位；mock 无账本返回空 → 界面隐藏对应区块）
   progress: () =>
     IS_MOCK ? mock.progress() : request<{ progress: ProgressView | null }>('/progress'),
@@ -486,7 +495,7 @@ export const api = {
   verifyProphecy: (id: string, outcome: 'hit' | 'miss', note?: string) =>
     IS_MOCK ? mock.verifyProphecy(id, outcome) : request<{ prophecy: ProphecyView; stats: ProphecyStats }>(`/prophecies/${id}/verify`, 'POST', { outcome, note }),
   reviews: () =>
-    IS_MOCK ? Promise.resolve({ items: [], streak: 0 }) : request<{ items: unknown[]; streak: number }>('/reviews'),
+    IS_MOCK ? Promise.resolve({ items: [], streak: 0 } as ReviewsResult) : request<ReviewsResult>('/reviews'),
   // 账本异议（WO-11）：对某条决策/预言提交「有出入」→ 复盘时军师与用户对账
   disputeDecision: (id: string, dispute: string) =>
     IS_MOCK ? mock.disputeDecision(id, dispute) : request<{ ok: boolean }>(`/decisions/${id}`, 'PATCH', { dispute }),

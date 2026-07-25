@@ -138,6 +138,40 @@
 .menu-s { flex-shrink: 0; font-size: 12.5px; color: var(--ink-3); }
 .menu-go { flex-shrink: 0; font-size: 16px; color: var(--ink-3); }
 
+/* —— 年度谶语卡（留存机制 #16 M1，档案组顶部）——
+   卡片语言沿用本页 .rank-card / .menu：白面 + 18px 圆角 + .card 描边与轻投影；
+   谶语走宋体竖排，烫金用 --warn（现有 token，不新造颜色），落款/说明用 --gold-deep / --ink-3。 */
+.verse-card {
+  margin: 0 0 12px;
+  padding: 16px;
+  border-radius: 18px;
+}
+.vc-kicker {
+  display: block;
+  color: var(--gold-deep); font-size: var(--fs-11); font-weight: 800; letter-spacing: .16em;
+}
+/* 竖排：一句一列，row-reverse 使首句居右（自右向左读） */
+.vc-cols {
+  display: flex; flex-direction: row-reverse; justify-content: center;
+  gap: 16px; margin: 14px 0 12px;
+}
+.vc-col { display: flex; flex-direction: column; align-items: center; }
+.vc-ch {
+  display: block;
+  color: var(--warn); font-size: 19px; font-weight: 600; line-height: 1.44; letter-spacing: .04em;
+}
+.vc-foot { display: flex; align-items: baseline; justify-content: center; gap: 8px; }
+.vc-sign { color: var(--gold-deep); font-size: 12.5px; font-weight: 600; letter-spacing: .06em; }
+.vc-note { color: var(--ink-3); font-size: var(--fs-11); font-weight: 500; }
+
+/* 无谶态：求谶引导（点进命盘报告） */
+.verse-empty { display: flex; align-items: center; gap: 12px; }
+.verse-empty:active { opacity: .85; }
+.vc-eb { flex: 1; min-width: 0; }
+.vc-et { display: block; color: var(--ink); font-size: 15px; font-weight: 600; }
+.vc-es { display: block; margin-top: 5px; color: var(--ink-2); font-size: var(--fs-12); line-height: 1.5; font-weight: 500; }
+.vc-ego { flex-shrink: 0; color: var(--gold-deep); font-size: 13px; font-weight: 600; white-space: nowrap; }
+
 /* —— 服务老师 / 深度能力（account-teacher / account-depth） —— */
 .account-teacher,
 .account-depth {

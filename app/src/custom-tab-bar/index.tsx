@@ -21,6 +21,10 @@ export default function CustomTabBar() {
   const selected = s.tab();
   const color = s.color();
   const accent = color.vars['--accent'];
+  // 角标（store.loadBadges 供数，无参 useStore 订阅任意 emit 即刷新）：
+  // 问策 = 未读消息数（>99 记 99+）；军令 = 今日复盘未做且已过 21:00 的红点。
+  const unread = s.badgeUnread();
+  const reviewDue = s.reviewDue();
   const [nativeHidden, setNativeHidden] = useState(() => readTabBarHidden());
 
   const syncNativeState = () => {
@@ -68,6 +72,10 @@ export default function CustomTabBar() {
               <View key={t.path} className={`tab ${active ? 'on' : ''}`} role="tab" aria-label={t.text} aria-selected={active} onClick={() => switchTo(i)}>
                 <View className="tab-ic">
                   <Icon name={t.icon} size={22} color={active ? accent : '#969BA1'} />
+                  {i === 0 && unread > 0 ? (
+                    <View className="tab-badge"><Text className="tab-badge-n">{unread > 99 ? '99+' : unread}</Text></View>
+                  ) : null}
+                  {i === 2 && reviewDue ? <View className="tab-dot" /> : null}
                 </View>
                 <Text className="tab-label" style={active ? { color: accent } : {}}>
                   {t.text}

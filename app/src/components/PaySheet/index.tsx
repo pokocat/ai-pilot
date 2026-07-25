@@ -6,6 +6,7 @@ import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ActivationSource } from '../../services/api';
 import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, requestWechatPayment } from '../../services/pay';
+import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import './index.scss';
 
 export interface PaySheetProps {
@@ -49,8 +50,15 @@ export default function PaySheet({
 
   const confirm = async () => {
     if (busy) return;
+    // 到账提醒索权（scene=payment）：微信要求订阅弹窗由点击手势直接唤起，故必须在本函数首个 await 之前发出
+    // （模板配置已在登录后预热，缓存命中时同步唤起）。先等它落定再走支付，避免两个弹窗抢焦点；
+    // 拒绝/失败一律不阻断支付。
+    const subscribing = process.env.TARO_ENV === 'weapp'
+      ? requestWechatSubscribe('payment').catch((e) => { console.warn('[subscribe] payment 授权失败', e); return false; })
+      : Promise.resolve(false);
     setBusy(true);
     try {
+      await subscribing;
       if (onConfirm) { await onConfirm(); return; } // 调用方自持效果
 
       // 默认：单次付费商品（SKU）下单 → 微信支付 → 到账确认（mock 返回 demo 已本地发放）。

@@ -71,6 +71,7 @@ export default function Sessions() {
     api.sessions()
       .then((list) => {
         setSessions(presentSessions(list));
+        s.syncUnreadFromSessions(list); // 列表已在手：就地同步底栏未读角标，免得同屏两处数字不一致
         setSessErr(false);
       })
       .catch((e) => {
@@ -103,6 +104,7 @@ export default function Sessions() {
       return;
     }
     loadSessions();
+    void s.loadBadges({ skipSessions: true }); // 军令红点搭车刷新；未读由上面的 loadSessions 就地同步，不重复拉 /sessions
   });
 
   // 首登入局仪式（择色 → 立案卷 → 首判）。防重复：页栈已有 onboarding 就不再跳（navTo 另有 800ms 防连点锁）。

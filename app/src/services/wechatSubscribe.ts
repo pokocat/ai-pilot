@@ -11,6 +11,13 @@ function normalizeStatus(v: unknown): WechatSubscribeStatus {
 // 故配置预热进缓存，命中时 requestSubscribeMessage 在首个 await 之前同步发出，手势上下文得以保留。
 let tplCache: { scene: WechatSubscribeScene; templateId: string }[] | null = null;
 
+// 授权成功回执：三场景各自口径（payment=下单付款后的一次到账回执）。
+const ACCEPT_TOAST: Record<WechatSubscribeScene, string> = {
+  review: '已订阅一次复盘提醒',
+  report: '已订阅一次报告提醒',
+  payment: '已订阅一次到账提醒',
+};
+
 /** 预热模板配置（登录后调用；失败静默——授权时会退回即时拉取）。 */
 export async function prefetchWechatSubscribeTemplates(): Promise<void> {
   if (process.env.TARO_ENV !== 'weapp' || !getUserId() || tplCache) return;
@@ -45,7 +52,7 @@ export async function requestWechatSubscribe(scene: WechatSubscribeScene): Promi
   };
   await api.recordWechatSubscription([choice]);
   if (choice.status === 'accept') {
-    Taro.showToast({ title: scene === 'review' ? '已订阅一次复盘提醒' : '已订阅一次报告提醒', icon: 'none' });
+    Taro.showToast({ title: ACCEPT_TOAST[scene] ?? '已订阅一次提醒', icon: 'none' });
     return true;
   }
   Taro.showToast({ title: choice.status === 'ban' ? '请先在微信设置里允许订阅消息' : '未订阅提醒', icon: 'none' });

@@ -175,6 +175,7 @@ export default function ThinkTank() {
     Taro.getCurrentInstance().page?.getTabBar?.();
     if (!s.isAuthed()) { setShowLogin(true); return; }
     loadAll();
+    void s.loadBadges(); // 底栏角标搭车刷新（内部 15 秒节流）
   });
 
   const openReport = (id: string) => navTo(`/packages/work/report/index?id=${id}`);

@@ -119,6 +119,7 @@ export default function Home() {
     Taro.getCurrentInstance().page?.getTabBar?.();
     // 今日是否已认可判断（本地按天幂等）→ 直接回显已生成态
     try { if (Taro.getStorageSync(COMMIT_KEY) === dayKey()) setCta('done'); } catch { /* noop */ }
+    void s.loadBadges(); // 底栏角标（问策未读 / 军令待复盘）搭车刷新：内部 15 秒节流 + 未登录直返
     // 首轮拉取（案卷 + 军师档案）完成后再标记水合，hero/三势区据此收起骨架。
     const jobs: Promise<unknown>[] = [refreshDossier().then(setDossier)];
     if (s.isAuthed()) {

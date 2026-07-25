@@ -17,6 +17,14 @@ interface AppState {
   agents: Agent[];
   tab: number; // 当前底栏选中项（0..4）
   overlay: boolean; // 是否有全屏弹层打开——打开时隐藏原生/自定义底栏
+  badges: BadgeState; // 底栏角标（问策未读数 / 军令待复盘）
+}
+
+// 底栏角标数据（服务端为准，不做本地乐观清零：进会话已读由 lastReadAt 记账，下轮 loadBadges 自然归零）。
+interface BadgeState {
+  unread: number;         // 问策未读总数 = /sessions 各项 unreadCount 之和
+  reviewedDate: string;   // 最近一次复盘日期（YYYY-MM-DD）；空 = 账本里没有复盘记录
+  reviewLoaded: boolean;  // 复盘账本取到过一次才敢亮红点，避免冷启动/断网误报
 }
 
 const state: AppState = {
@@ -26,9 +34,22 @@ const state: AppState = {
   agents: DEFAULT_AGENTS, // 离线兜底；后端可达时由 loadAgents 覆盖
   tab: 0,
   overlay: false,
+  badges: { unread: 0, reviewedDate: '', reviewLoaded: false },
 };
 const overlayKeys = new Set<string>();
 let lastUnauthorizedPromptAt = 0;
+
+// —— 底栏角标：拉取节流与「今日复盘」判定 ——
+const BADGE_THROTTLE_MS = 15_000;     // 同一批数据 15 秒内不重复拉（tab 间来回切换不打服务端）
+const REVIEW_DUE_HOUR = 21;           // 过了 21:00 今日还没复盘 → 军令 tab 亮红点
+let badgesFetchedAt = 0;
+let badgesInFlight: Promise<void> | null = null;
+
+/** 本机今日日期键（YYYY-MM-DD），与服务端复盘账本 date 同格式（用户与服务同在东八区）。 */
+function todayKey(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 type ApiErrorKind = 'unauthorized' | 'network' | 'other';
 
@@ -125,6 +146,56 @@ export const store = {
   setTab(i: number) { state.tab = i; emit(); },
   overlay: () => state.overlay,
   handleApiError: reportApiError,
+
+  // —— 底栏角标（问策未读数 / 军令待复盘红点） ——
+  badgeUnread: () => state.badges.unread,
+  // 军令红点：账本已取到 + 今日无复盘记录 + 已过 21:00。时点即时判定，不缓存布尔值。
+  reviewDue: () =>
+    state.badges.reviewLoaded
+    && state.badges.reviewedDate !== todayKey()
+    && new Date().getHours() >= REVIEW_DUE_HOUR,
+  /** 会话列表已在手（问策页刚拉过）时就地同步未读：省一次请求，也免得同屏列表与角标对不上。 */
+  syncUnreadFromSessions(list: { unreadCount?: number }[]) {
+    const unread = list.reduce((sum, it) => sum + (it.unreadCount ?? 0), 0);
+    if (state.badges.unread === unread) return;
+    state.badges.unread = unread;
+    emit();
+  },
+  /**
+   * 拉底栏角标数据（未登录直接返回；15 秒节流；单飞去重）。
+   * 失败一律静默——角标不该为自己弹错误 toast，也不做本地乐观清零：
+   * 进会话已读由服务端 lastReadAt 记账，下一轮拉取自然归零。
+   * skipSessions：调用页自己在拉 /sessions（问策页）时传，避免同一次进页发两遍同样的请求。
+   */
+  async loadBadges(opts: { force?: boolean; skipSessions?: boolean } = {}) {
+    const { force = false, skipSessions = false } = opts;
+    if (!getUserId()) return;
+    if (badgesInFlight) { await badgesInFlight; return; }
+    if (!force && Date.now() - badgesFetchedAt < BADGE_THROTTLE_MS) return;
+    const job = (async () => {
+      try {
+        const [sessions, reviews] = await Promise.all([
+          skipSessions ? Promise.resolve(null) : api.sessions().catch(() => null),
+          api.reviews().catch(() => null),
+        ]);
+        let changed = false;
+        if (sessions) {
+          const unread = (sessions ?? []).reduce((sum, it) => sum + (it?.unreadCount ?? 0), 0);
+          if (unread !== state.badges.unread) { state.badges.unread = unread; changed = true; }
+        }
+        if (reviews) {
+          // 「今日已复盘」信号：复盘账本里最新一条的 date（day/week/month 任一层级都算今日做过复盘）
+          const latest = (reviews.items ?? []).reduce((max, it) => (it?.date && it.date > max ? it.date : max), '');
+          if (latest !== state.badges.reviewedDate) { state.badges.reviewedDate = latest; changed = true; }
+          if (!state.badges.reviewLoaded) { state.badges.reviewLoaded = true; changed = true; }
+        }
+        if (sessions || reviews) badgesFetchedAt = Date.now(); // 全失败则不记时点，下次调用立即重试
+        if (changed) emit();
+      } catch { /* 角标是附属信息：任何异常都不外溢、不弹错，等下一轮刷新 */ }
+    })();
+    badgesInFlight = job.finally(() => { badgesInFlight = null; });
+    await badgesInFlight;
+  },
   setOverlay(v: boolean, key = 'global') {
     if (v) overlayKeys.add(key);
     else overlayKeys.delete(key);
@@ -170,12 +241,15 @@ export const store = {
     emit();
     await this.loadMe();
     await this.loadAgents();
+    void this.loadBadges({ force: true }); // 换账号即重算角标，不沿用上一个账号的未读/复盘态
   },
   logout() {
     clearUserId();
     state.me = null;
     state.onboarded = false;
     state.agents = DEFAULT_AGENTS;
+    state.badges = { unread: 0, reviewedDate: '', reviewLoaded: false };
+    badgesFetchedAt = 0;
     overlayKeys.clear();
     state.overlay = false;
     syncTabBarHidden(false);
