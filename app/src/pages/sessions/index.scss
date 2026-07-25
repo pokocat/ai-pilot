@@ -1,9 +1,24 @@
 /* 对话页 —— 对齐设计稿 page-chat：页头(TabHeader) / 白底搜索 pill / 快捷卡 / 微信式线程列表 */
 
+/* —— 搜索行：pill 占满 + 右侧「历史」（承接原页头右侧入口，页头一律不放按钮） —— */
+.council-searchrow {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 13px;
+}
+.council-hist {
+  flex-shrink: 0;
+  height: 46px; padding: 0 6px 0 8px;
+  display: flex; align-items: center;
+  font-family: var(--serif); font-size: var(--fs-14); font-weight: 600; color: var(--ink-3);
+}
+.council-hist.on { color: var(--accent); }
+.council-hist:active { opacity: .55; }
+
 /* —— 搜索（search-pill）：白底大圆角 —— */
 .council-search {
+  flex: 1; min-width: 0;
   display: flex; align-items: center; gap: 9px;
-  height: 46px; margin-top: 13px; padding: 0 15px;
+  height: 46px; padding: 0 15px;
   border-radius: 17px;
   background: rgba(255, 255, 255, .94);
   border: 1px solid var(--line);

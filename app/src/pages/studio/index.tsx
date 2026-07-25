@@ -269,18 +269,10 @@ export default function Studio() {
   return (
     <Screen topInset scroll={false}>
       <View className="pad exec">
-        {/* 页头（TabHeader）：小字用途 + 大字「军令」+ 背景「令」，右侧留本页真入口 */}
-        <TabHeader
-          title="军令"
-          kicker="做今天的事"
-          glyph="令"
-          right={
-            <>
-              <Text className="th-act" onClick={() => navTo('/packages/work/projects/index')}>案卷</Text>
-              <Text className="th-act" onClick={() => setView('review')}>复盘</Text>
-            </>
-          }
-        />
+        {/* 页头（TabHeader）：小字用途 + 大字「军令」+ 背景「令」，不挂按钮。
+            原页头右侧的「复盘」与下方 exec-seg 的「复盘」及「21:30 复盘提醒」卡完全重复，已去掉；
+            「案卷」回归老板 tab（我的案卷菜单 + 案卷统计卡）。 */}
+        <TabHeader title="军令" kicker="做今天的事" glyph="令" />
 
         {/* 本页不挂 WO-07「下一步」卡：它与下方「今日战役」空态同为「去参谋室聊定打法」的导流，
             连「认可后自动拆成军令」都是同一句。军令页以战役卡为主，下一步卡仍留在战局/问策两 tab。 */}

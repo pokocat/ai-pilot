@@ -214,18 +214,10 @@ export default function Home() {
   return (
     <Screen topInset className="home">
       <View className="pad">
-        {/* 页头（TabHeader）：小字用途 + 大字「军情」+ 背景「势」，右侧留案卷/刷新 */}
-        <TabHeader
-          title="军情"
-          kicker="看今日判断"
-          glyph="势"
-          right={
-            <>
-              <Text className="th-act" onClick={() => requireLogin() && navTo('/packages/work/projects/index')}>案卷</Text>
-              <Text className="th-act sym" onClick={refresh}>↻</Text>
-            </>
-          }
-        />
+        {/* 页头（TabHeader）：小字用途 + 大字「军情」+ 背景「势」，不挂按钮。
+            原页头右侧的「案卷」回归老板 tab；刷新不是简单重拉（它调 refreshForces 重算三势），
+            所以下移到「三势判断」段头，动作与它的作用对上。 */}
+        <TabHeader title="军情" kicker="看今日判断" glyph="势" />
 
         {/* 军师判断 hero：主要矛盾 —— 有判断时点击就地展开/收起全文；尚无判断时点击去对话 */}
         {(() => {
@@ -282,11 +274,16 @@ export default function Home() {
 
         {/* 三势判断（force-panel）：从 me.understanding.battleForces 真实渲染。整卡/小框 → 三势全解 sheet。 */}
         <View className="force-panel">
-          <View className="force-head" onClick={forces.length ? openForces : undefined}>
-            <Text className="battle-h2">三 势 判 断</Text>
-            {forces.length ? (
-              <Text className="force-hint"><Text className="fh-b">整卡</Text>看全解 · 小框看单势</Text>
-            ) : null}
+          {/* 段头：标题与提示点开三势全解；「重算」承接原页头的刷新（refreshForces 重算三势 + 回读档案），
+              两个动作分别挂在自己的 Text 上，不再整行同一个 onClick，避免误触。 */}
+          <View className="force-head">
+            <Text className="battle-h2" onClick={forces.length ? openForces : undefined}>三 势 判 断</Text>
+            <View className="force-tools">
+              {forces.length ? (
+                <Text className="force-hint" onClick={openForces}><Text className="fh-b">整卡</Text>看全解 · 小框看单势</Text>
+              ) : null}
+              <Text className="force-redo" onClick={refresh}>重算<Text className="fr-ic">↻</Text></Text>
+            </View>
           </View>
           {!hydrated ? (
             /* C2：三势区首帧骨架，区分「加载中」与「真空态」，不把空态当加载中显示 */
