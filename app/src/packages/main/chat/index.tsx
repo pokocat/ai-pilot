@@ -1283,9 +1283,10 @@ export default function Chat() {
   // 生成网页版报告（render_report → 自有域名 /api/r/:id，接口幂等）→ 直接打开：weapp 走内置 web-view 页，H5 开新窗口。
   const shareReport = async (messageId?: string) => {
     if (!sessionId || !messageId) { Taro.showToast({ title: '请先产出方案', icon: 'none' }); return; }
+    // 订阅授权必须在点击手势内、且早于 loading 遮罩唤起：晚了微信不弹窗（授权失败不阻断生成）
+    await requestWechatSubscribe('report').catch((e) => { console.warn('[subscribe] report 授权失败', e); });
     Taro.showLoading({ title: '生成网页版…' });
     try {
-      await requestWechatSubscribe('report').catch(() => {});
       const r = await api.renderReport(sessionId, messageId);
       Taro.hideLoading();
       if (!r.htmlUrl) { Taro.showToast({ title: '本地预览模式无网页版', icon: 'none' }); return; }
