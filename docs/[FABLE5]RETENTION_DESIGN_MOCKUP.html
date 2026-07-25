@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>军师 · 上瘾机制视觉设计稿（今日攻守签 / 预言揭封 / 章回连载 / 懂你指数）</title>
+<style>
+/* ============================================================
+   军师 · 上瘾机制视觉设计稿 · 2026-07-25
+   风格：直角案卷（米纸底 / 墨色 / 宋体 / 本命色墨绿）
+   token 取自 app/src/app.scss，禁圆角（唯一例外：火漆印，实体印章）
+   单文件、零外部依赖、系统宋体栈
+   ============================================================ */
+:root{
+  --bg:#F4F2EC; --paper:#FBFAF6; --surface:#FFFFFF; --surface-2:#F3F1EA;
+  --ink:#16191D; --ink-2:#565C63; --ink-3:#7E848B;
+  --line:#E7E4DB; --line-2:#EFEDE5;
+  --accent:#1E5A43; --accent-deep:#163F30; --accent-soft:#E7EEE9;
+  --accent-ink:#0F2B20; --accent-bright:#5FB389;
+  --danger:#9C4A38; --warn:#A8772E; --blue:#245F88;
+  --gold-leaf:#A07D2C;
+  --serif:"Songti SC","Noto Serif CJK SC","Source Han Serif SC","STSong","SimSun",serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;border-radius:0}
+html,body{background:var(--bg)}
+body{
+  font-family:var(--serif); color:var(--ink); font-size:14px; line-height:1.8;
+  -webkit-font-smoothing:antialiased;
+}
+em{font-style:normal}
+
+/* ───────── 画廊外壳 ───────── */
+.gal{max-width:1620px;margin:0 auto;padding:44px 30px 90px}
+
+.hd{border:1px solid var(--line);border-top:2px solid var(--accent);background:var(--paper);padding:30px 32px 26px;position:relative}
+.hd .cnr i{position:absolute;width:12px;height:12px;border:0 solid rgba(30,90,67,.5)}
+.hd .cnr i:nth-child(1){left:9px;top:9px;border-left-width:1px;border-top-width:1px}
+.hd .cnr i:nth-child(2){right:9px;top:9px;border-right-width:1px;border-top-width:1px}
+.hd .cnr i:nth-child(3){left:9px;bottom:9px;border-left-width:1px;border-bottom-width:1px}
+.hd .cnr i:nth-child(4){right:9px;bottom:9px;border-right-width:1px;border-bottom-width:1px}
+.hd-kicker{font-size:11px;letter-spacing:.34em;color:var(--accent);font-weight:600}
+.hd-title{font-size:30px;letter-spacing:4px;margin-top:12px;font-weight:600}
+.hd-sub{font-size:13px;color:var(--ink-2);letter-spacing:1.5px;margin-top:8px}
+.hd-meta{font-size:11px;color:var(--ink-3);letter-spacing:.16em;margin-top:16px;border-top:1px solid var(--line);padding-top:14px}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+.chip{border:1px solid var(--line);background:var(--surface);padding:7px 13px;font-size:12px;letter-spacing:1px;color:var(--ink-2)}
+.chip b{color:var(--accent);font-weight:600}
+.chip em{color:var(--ink-3);font-size:11px;margin-left:6px}
+.swatches{display:flex;flex-wrap:wrap;gap:14px;margin-top:18px;border-top:1px solid var(--line);padding-top:16px}
+.sw{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--ink-3);letter-spacing:.5px}
+.sw i{width:15px;height:15px;border:1px solid rgba(22,25,29,.16);display:block}
+
+/* ───────── 单元（手机框 + 标注列） ───────── */
+.units{display:flex;flex-wrap:wrap;gap:52px 46px;margin-top:44px}
+.unit{display:flex;gap:26px;width:748px}
+.col-frame{flex:0 0 auto;width:412px}
+.cap{display:flex;align-items:baseline;gap:11px;margin-bottom:13px;border-bottom:1px solid var(--line);padding-bottom:9px}
+.cap-n{font-size:26px;line-height:1;color:rgba(30,90,67,.42);letter-spacing:1px}
+.cap-t{font-size:16px;letter-spacing:2px;font-weight:600}
+.cap-s{font-size:11px;color:var(--ink-3);letter-spacing:.14em;margin-left:auto}
+
+.device{padding:10px;background:#FFFFFF;border:1px solid var(--line);box-shadow:0 1px 2px rgba(22,25,29,.05)}
+.phone{width:390px;height:844px;background:var(--paper);border:1px solid #CFC9BA;display:flex;flex-direction:column;overflow:hidden;position:relative}
+
+.sb{height:44px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 20px;font-size:12px;letter-spacing:.5px;color:var(--ink)}
+.sb .r{display:flex;gap:6px;align-items:center;font-size:10px;color:var(--ink-2);letter-spacing:1px}
+.sb .r b{display:inline-block;width:16px;height:9px;border:1px solid var(--ink-2);position:relative}
+.sb .r b::after{content:"";position:absolute;left:1px;top:1px;bottom:1px;width:10px;background:var(--ink-2)}
+.nav{height:44px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;padding:0 18px;border-bottom:1px solid var(--line);background:var(--paper)}
+.nav .t{font-size:17px;letter-spacing:3px;font-weight:600}
+.nav .s{font-size:12px;color:var(--ink-2);letter-spacing:1px;min-width:34px}
+.nav .s.right{text-align:right}
+.scr{flex:1;overflow:hidden;padding:14px 18px;background:var(--paper)}
+.safebar{flex:0 0 auto;height:22px;display:flex;align-items:center;justify-content:center;background:var(--paper)}
+.safebar i{width:130px;height:4px;background:#CBC5B7;display:block}
+
+.tabbar{flex:0 0 auto;height:64px;border-top:1px solid var(--line);background:var(--surface);display:flex}
+.tb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:11px;letter-spacing:1px;color:var(--ink-3);position:relative}
+.tb i{width:15px;height:15px;border:1px solid currentColor;display:block}
+.tb.on{color:var(--accent)}
+.tb.on i{background:var(--accent-soft)}
+.tb .dot{position:absolute;top:11px;right:26px;width:6px;height:6px;background:var(--danger);border:0}
+
+/* ───────── 屏内通用组件 ───────── */
+.card{background:var(--surface);border:1px solid var(--line);padding:13px 14px;position:relative}
+.card.paper{background:var(--paper)}
+.card.soft{background:var(--accent-soft);border-color:rgba(30,90,67,.28)}
+.card.dbl::after{content:"";position:absolute;inset:3px;border:1px solid var(--line-2);pointer-events:none}
+.card.dbl.acc::after{border-color:rgba(30,90,67,.20)}
+.cnr i{position:absolute;width:9px;height:9px;border:0 solid rgba(30,90,67,.55)}
+.cnr i:nth-child(1){left:5px;top:5px;border-left-width:1px;border-top-width:1px}
+.cnr i:nth-child(2){right:5px;top:5px;border-right-width:1px;border-top-width:1px}
+.cnr i:nth-child(3){left:5px;bottom:5px;border-left-width:1px;border-bottom-width:1px}
+.cnr i:nth-child(4){right:5px;bottom:5px;border-right-width:1px;border-bottom-width:1px}
+
+.kicker{display:block;font-size:11px;letter-spacing:.24em;color:var(--accent);font-weight:600}
+.kicker.mute{color:var(--ink-3);font-weight:400}
+.kicker.gold{color:var(--gold-leaf)}
+.h2{font-size:16px;letter-spacing:1.5px;font-weight:600}
+.p{font-size:13px;line-height:1.95;color:var(--ink-2)}
+.p.ink{color:var(--ink)}
+.tiny{font-size:11px;color:var(--ink-3);letter-spacing:.5px;line-height:1.7}
+.rule{height:1px;background:var(--line);margin:12px 0}
+.rule.soft{background:var(--line-2)}
+.g4{height:4px}.g6{height:6px}.g8{height:8px}.g10{height:10px}.g12{height:12px}.g14{height:14px}.g18{height:18px}
+
+.btn{display:block;text-align:center;padding:11px 0;background:var(--accent);color:#F6F3EA;font-size:15px;letter-spacing:.42em;text-indent:.42em;border:1px solid var(--accent-deep)}
+.btn.ghost{background:transparent;color:var(--accent);border-color:var(--accent)}
+.btn.sm{padding:8px 0;font-size:13px;letter-spacing:.26em;text-indent:.26em}
+.btn.gray{background:var(--surface-2);color:var(--ink-3);border-color:var(--line)}
+
+.entry{border:1px dashed #C7C0AC;background:rgba(255,255,255,.55);padding:8px 9px 9px}
+.entry-cap{font-size:10px;letter-spacing:.2em;color:var(--ink-3);margin-bottom:6px;line-height:1.5}
+.enter-arrow{text-align:center;font-size:10px;letter-spacing:.36em;color:var(--ink-3);margin:6px 0 7px;line-height:1.4}
+
+.sk{background:#E9E5DA;height:9px;display:block}
+.dim{opacity:.42}
+.dim-cap{font-size:10px;letter-spacing:.2em;color:var(--ink-3);margin-bottom:9px}
+
+.tag{display:inline-block;font-size:10px;letter-spacing:.16em;padding:3px 7px;border:1px solid var(--line);color:var(--ink-3);background:var(--surface-2)}
+.tag.acc{border-color:rgba(30,90,67,.35);color:var(--accent);background:var(--accent-soft)}
+.tag.dan{border-color:rgba(156,74,56,.35);color:var(--danger);background:#F6EAE6}
+.reddot{display:inline-block;width:6px;height:6px;background:var(--danger)}
+
+/* 签筒 */
+.tube{position:relative;width:86px;height:106px;flex:0 0 auto}
+.stk{position:absolute;bottom:36px;width:7px;background:#E6DBC1;border:1px solid #B7A67C;display:block}
+.stk::after{content:"";position:absolute;left:-1px;right:-1px;top:0;height:7px;background:var(--accent-deep)}
+.s1{left:13px;height:44px;transform:rotate(-12deg);transform-origin:bottom center}
+.s2{left:26px;height:57px;transform:rotate(-6deg);transform-origin:bottom center}
+.s3{left:39px;height:66px}
+.s4{left:52px;height:53px;transform:rotate(7deg);transform-origin:bottom center}
+.s5{left:64px;height:42px;transform:rotate(13deg);transform-origin:bottom center}
+.barrel{position:absolute;left:10px;right:10px;bottom:0;height:56px;background:var(--accent-soft);border:1.5px solid var(--accent-deep)}
+.barrel::before{content:"";position:absolute;left:-5px;right:-5px;top:7px;height:9px;background:var(--accent-deep)}
+.barrel span{position:absolute;left:0;right:0;bottom:8px;text-align:center;font-size:15px;letter-spacing:2px;color:var(--accent-deep)}
+
+/* 签面大字 */
+.verdict{width:118px;height:118px;margin:0 auto;border:1px solid rgba(30,90,67,.45);display:flex;align-items:center;justify-content:center;position:relative;background:var(--accent-soft)}
+.verdict::after{content:"";position:absolute;inset:5px;border:1px solid rgba(30,90,67,.28)}
+.verdict b{font-size:72px;line-height:1;color:var(--accent);font-weight:600}
+.yiji{display:flex;border:1px solid var(--line)}
+.yiji > div{flex:1;padding:11px 12px}
+.yiji > div + div{border-left:1px solid var(--line)}
+.yiji .h{font-size:12px;letter-spacing:.3em;margin-bottom:6px}
+.yiji .yi .h{color:var(--accent)}
+.yiji .ji .h{color:var(--danger)}
+.yiji .v{font-size:14px;color:var(--ink);line-height:1.9}
+.streak{display:flex;align-items:center;gap:9px}
+.streak .dots{display:flex;gap:4px}
+.streak .dots i{width:9px;height:9px;border:1px solid var(--accent);background:var(--accent);display:block}
+.streak .dots i.off{background:transparent;border-color:var(--line);}
+
+/* 信封 + 火漆 */
+.env{position:relative;width:250px;height:158px;background:var(--paper);border:1px solid #D9D3C3;margin:0 auto;overflow:hidden}
+.fold{position:absolute;bottom:0;width:1px;height:148px;background:#E3DDCD;transform-origin:bottom center}
+.fold.l{left:0;transform:rotate(57.5deg)}
+.fold.r{right:0;transform:rotate(-57.5deg)}
+.flap{position:absolute;left:-1px;top:-1px;width:0;height:0;border-left:126px solid transparent;border-right:126px solid transparent;border-top:86px solid #F2EFE5;filter:drop-shadow(0 1px 0 #DCD6C6)}
+.wax{position:absolute;left:50%;top:66px;margin-left:-31px;width:62px;height:62px;border-radius:50%;
+  background:radial-gradient(circle at 34% 28%, var(--accent-bright), var(--accent) 44%, var(--accent-deep) 100%);
+  color:#EFE9DA;display:flex;align-items:center;justify-content:center;font-size:24px;letter-spacing:0;
+  box-shadow:0 1px 3px rgba(15,43,32,.30)}
+.wax::after{content:"";position:absolute;inset:6px;border:1px solid rgba(239,233,218,.45);border-radius:50%}
+.wax.mini{position:static;margin:0;width:22px;height:22px;font-size:10px;box-shadow:none}
+.wax.mini::after{inset:3px}
+.seal-strip{border:1px solid var(--line);background:var(--surface-2);padding:8px 10px;text-align:center;font-size:11px;letter-spacing:.2em;color:var(--ink-2)}
+
+/* 命中卡缩略 */
+.hitcard{width:108px;height:136px;flex:0 0 auto;background:var(--accent-deep);color:#E9E3D4;padding:9px 9px 8px;position:relative;display:flex;flex-direction:column}
+.hitcard .hk{font-size:8px;letter-spacing:.2em;color:rgba(233,227,212,.62)}
+.hitcard .ht{font-size:9px;line-height:1.7;margin-top:6px;color:#EFEADC}
+.hitcard .hm{margin-top:auto;font-size:7.5px;color:rgba(233,227,212,.55);letter-spacing:.02em;white-space:nowrap}
+.hitcard .sq{position:absolute;right:8px;bottom:30px;width:36px;height:36px;border:2px solid #C8705C;color:#D98E7C;
+  display:grid;grid-template-columns:1fr 1fr;transform:rotate(-6deg)}
+.hitcard .sq span{display:flex;align-items:center;justify-content:center;font-size:10px;line-height:1}
+
+/* 章回条 */
+.chap{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--line);background:var(--surface);padding:7px 12px 8px;position:relative}
+.chap .no{flex:0 0 auto;width:47px;text-align:center;font-size:10.5px;letter-spacing:.5px;white-space:nowrap;color:var(--accent);border-right:1px solid var(--line-2);padding-right:9px;line-height:1.5}
+.chap .tt{font-size:13.5px;line-height:1.55;color:var(--ink)}
+.chap .mm{font-size:10px;color:var(--ink-3);letter-spacing:.12em;margin-top:1px;line-height:1.5}
+.chap.void{border-style:dashed;background:transparent}
+.chap.void .tt{color:var(--ink-3)}
+.chap .nd{position:absolute;right:10px;top:12px;width:6px;height:6px;background:var(--danger)}
+.teaser{position:relative;border:1px solid #E1D6B9;background:linear-gradient(180deg,#FCFAF2,#F6F1E2);padding:11px 13px 15px;overflow:hidden}
+.teaser .tx{font-size:14.5px;line-height:1.9;color:#8A6A22}
+.teaser::after{content:"";position:absolute;left:0;right:0;bottom:0;height:56%;
+  background:linear-gradient(180deg,rgba(246,241,226,0) 0%,rgba(246,241,226,.86) 58%,#F6F1E2 100%)}
+.sign-off{text-align:right;font-size:11px;color:var(--ink-3);letter-spacing:.14em;margin-top:9px}
+
+/* 懂你指数 */
+.pbar{height:8px;background:var(--surface-2);border:1px solid var(--line);position:relative;display:block}
+.pbar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--accent-deep),var(--accent));display:block}
+.pbar.thin{height:3px}
+.brow{padding:4px 0 5px;border-bottom:1px solid var(--line-2)}
+.brow .top{display:flex;align-items:baseline;justify-content:space-between;line-height:1.5}
+.brow .nm{font-size:12.5px;color:var(--ink)}
+.brow .vv{font-size:12.5px;color:var(--accent);letter-spacing:.5px}
+.brow .vv em{color:var(--ink-3);font-size:11px}
+.brow .hint{font-size:10.5px;color:var(--ink-3);margin:1px 0 4px;letter-spacing:.04em;line-height:1.5}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mi{border:1px solid var(--line);background:var(--surface);padding:7px 9px 8px;min-height:66px;display:flex;flex-direction:column;position:relative}
+.mi .lv{font-size:10px;letter-spacing:.2em;color:var(--ink-3);line-height:1.4}
+.mi .nm{font-size:12.5px;line-height:1.45;margin-top:3px;color:var(--ink)}
+.mi .st{margin-top:auto;font-size:10px;letter-spacing:.1em;line-height:1.5;padding-top:4px}
+.mi.locked{background:var(--surface-2);border-color:#E4E0D3}
+.mi.locked .nm{color:var(--ink-3)}
+.mi.locked .st{color:var(--ink-3)}
+.mi.locked .lock{position:absolute;right:9px;top:9px;width:20px;height:20px;border:1px solid #CFCABA;color:#A9A497;font-size:10px;display:flex;align-items:center;justify-content:center}
+.mi.ready{background:var(--accent-soft);border-color:rgba(30,90,67,.4)}
+.mi.ready .st{color:var(--accent)}
+.mi.ready .waxpos{position:absolute;right:8px;top:8px}
+.mi.open .st{color:var(--ink-2)}
+.mi.open .tick{position:absolute;right:9px;top:9px;width:20px;height:20px;border:1px solid var(--line);color:var(--accent);font-size:11px;display:flex;align-items:center;justify-content:center;background:var(--surface-2)}
+
+/* 军情骨架（置灰示意） */
+.skcard{border:1px solid var(--line);background:var(--surface);padding:12px}
+.skrow{display:flex;gap:8px}
+.skmetric{flex:1;border:1px solid var(--line);background:var(--surface);padding:10px 8px;text-align:center}
+
+/* ───────── 标注列 ───────── */
+.notes{flex:1;min-width:280px;padding-top:34px}
+.notes-h{font-size:11px;letter-spacing:.3em;color:var(--accent);font-weight:600;border-bottom:1px solid var(--line);padding-bottom:7px;margin-bottom:12px}
+.notes ol{list-style:none}
+.notes li{position:relative;padding-left:24px;margin-bottom:11px;font-size:12px;line-height:1.85;color:var(--ink-3);letter-spacing:.02em}
+.notes li b{color:var(--ink-2);font-weight:600}
+.notes li .n{position:absolute;left:0;top:0;width:16px;height:16px;border:1px solid var(--line);color:var(--accent);
+  font-size:10px;display:flex;align-items:center;justify-content:center;background:var(--surface);margin-top:3px}
+.notes li.flag{color:var(--danger)}
+.notes li.flag .n{border-color:rgba(156,74,56,.4);color:var(--danger);background:#F6EAE6}
+
+.ft{margin-top:60px;border-top:1px solid var(--line);padding-top:20px;font-size:11px;color:var(--ink-3);letter-spacing:.06em;line-height:2}
+.ft b{color:var(--ink-2)}
+</style>
+</head>
+<body>
+<div class="gal">
+
+  <!-- ════════ 页首 ════════ -->
+  <header class="hd">
+    <span class="cnr"><i></i><i></i><i></i><i></i></span>
+    <div class="hd-kicker">军 师 · 内 部 设 计 稿</div>
+    <h1 class="hd-title">上瘾机制 · 视觉设计稿</h1>
+    <div class="hd-sub">今日攻守签 · 预言揭封 · 命运叙事线章回连载 · 军师懂你指数</div>
+    <div class="chips">
+      <span class="chip"><b>#5 今日攻守签</b><em>每日回访锚点 · 军情 tab</em></span>
+      <span class="chip"><b>#1 预言揭封</b><em>应验事件 · 揭封页</em></span>
+      <span class="chip"><b>#3 命运叙事线</b><em>章回连载 · 老板 tab</em></span>
+      <span class="chip"><b>#10 懂你指数</b><em>投入可视化 · 老板 tab</em></span>
+    </div>
+    <div class="swatches">
+      <span class="sw"><i style="background:#F4F2EC"></i>--bg 米纸 #F4F2EC</span>
+      <span class="sw"><i style="background:#FBFAF6"></i>--paper #FBFAF6</span>
+      <span class="sw"><i style="background:#F3F1EA"></i>--surface-2 #F3F1EA</span>
+      <span class="sw"><i style="background:#16191D"></i>--ink #16191D</span>
+      <span class="sw"><i style="background:#7E848B"></i>--ink-3 #7E848B</span>
+      <span class="sw"><i style="background:#E7E4DB"></i>--line #E7E4DB</span>
+      <span class="sw"><i style="background:#1E5A43"></i>--accent 本命色 #1E5A43</span>
+      <span class="sw"><i style="background:#E7EEE9"></i>--accent-soft #E7EEE9</span>
+      <span class="sw"><i style="background:#9C4A38"></i>--danger #9C4A38</span>
+      <span class="sw"><i style="background:#A8772E"></i>--warn #A8772E</span>
+      <span class="sw"><i style="background:#245F88"></i>--blue #245F88</span>
+    </div>
+    <div class="hd-meta">
+      2026-07-25 · 配套规格 [FABLE5]RETENTION_DESIGN_SPECS.md ·
+      风格：直角案卷（一切卡片/按钮/容器 border-radius:0，唯一圆形为火漆印——它是实体印章）·
+      字体：宋体优先 Songti SC / Noto Serif CJK SC / STSong / SimSun · 字重不过 600 · 视口 390×844
+    </div>
+  </header>
+
+  <div class="units">
+
+    <!-- ════════════════ 屏 一 ════════════════ -->
+    <section class="unit">
+      <div class="col-frame">
+        <div class="cap"><span class="cap-n">一</span><span class="cap-t">今日攻守签 · 签筒卡</span><span class="cap-s">军情 tab 顶部</span></div>
+        <div class="device"><div class="phone">
+          <div class="sb"><span>9:41</span><span class="r">5G<b></b></span></div>
+          <div class="nav"><span class="s">案卷</span><span class="t">军情</span><span class="s right">↻</span></div>
+          <div class="scr">
+
+            <!-- 签筒卡 · 未领态 -->
+            <div class="card paper dbl acc" style="padding:16px 15px">
+              <span class="cnr"><i></i><i></i><i></i><i></i></span>
+              <div style="display:flex;gap:16px;align-items:center">
+                <div class="tube">
+                  <i class="stk s1"></i><i class="stk s2"></i><i class="stk s3"></i><i class="stk s4"></i><i class="stk s5"></i>
+                  <div class="barrel"><span>签</span></div>
+                </div>
+                <div style="flex:1;min-width:0">
+                  <span class="kicker">今 日 攻 守 签</span>
+                  <div class="h2" style="margin-top:8px">今日一签，未启</div>
+                  <div class="tiny" style="margin-top:6px">丙午年 六月初一 · 甲子日<br>依你命盘流日推演</div>
+                </div>
+              </div>
+              <div class="g14"></div>
+              <a class="btn">领 签</a>
+            </div>
+
+            <div class="g14"></div>
+
+            <!-- 已领态示意 -->
+            <div class="dim-cap">已 领 态 · 同 位 置 压 缩 为 一 行 横 条</div>
+            <div class="card" style="padding:0;display:flex;align-items:stretch">
+              <div style="width:44px;flex:0 0 auto;background:var(--accent);color:#F6F3EA;display:flex;align-items:center;justify-content:center;font-size:20px">攻</div>
+              <div style="flex:1;min-width:0;padding:9px 12px;display:flex;align-items:center;justify-content:space-between">
+                <div>
+                  <div style="font-size:13.5px;color:var(--ink)">宜签约 · 忌大额支出</div>
+                  <div class="tiny" style="margin-top:2px">巳时吉 · 上午九至十一点 · 连领 6 日</div>
+                </div>
+                <span style="color:var(--ink-3);font-size:13px">›</span>
+              </div>
+            </div>
+
+            <div class="g14"></div>
+            <div class="rule"></div>
+
+            <!-- 军情页既有结构（置灰示意） -->
+            <div class="dim-cap">以 下 为 军 情 页 既 有 结 构 · 示 意 置 灰</div>
+            <div class="dim">
+              <div class="skcard">
+                <span class="sk" style="width:44%;height:8px"></span>
+                <div class="g10"></div>
+                <span class="sk" style="width:100%"></span>
+                <div class="g6"></div>
+                <span class="sk" style="width:62%"></span>
+              </div>
+              <div class="g8"></div>
+              <div class="skrow">
+                <div class="skmetric"><span class="sk" style="width:52%;margin:0 auto;height:12px"></span><div class="g6"></div><span class="sk" style="width:74%;margin:0 auto;height:7px"></span></div>
+                <div class="skmetric"><span class="sk" style="width:38%;margin:0 auto;height:12px"></span><div class="g6"></div><span class="sk" style="width:66%;margin:0 auto;height:7px"></span></div>
+                <div class="skmetric"><span class="sk" style="width:38%;margin:0 auto;height:12px"></span><div class="g6"></div><span class="sk" style="width:58%;margin:0 auto;height:7px"></span></div>
+              </div>
+              <div class="g12"></div>
+              <div style="font-size:13px;letter-spacing:.34em;color:var(--ink-2)">三 势 判 断</div>
+              <div class="g8"></div>
+              <div class="skcard" style="padding:9px"><span class="sk" style="width:30%;height:7px"></span><div class="g6"></div><span class="sk" style="width:92%"></span></div>
+              <div class="g6"></div>
+              <div class="skcard" style="padding:9px"><span class="sk" style="width:30%;height:7px"></span><div class="g6"></div><span class="sk" style="width:84%"></span></div>
+            </div>
+
+          </div>
+          <div class="tabbar">
+            <div class="tb"><i></i>问策</div>
+            <div class="tb on"><i></i>军情</div>
+            <div class="tb"><i></i>军令</div>
+            <div class="tb"><i></i>锦囊</div>
+            <div class="tb"><i></i>老板</div>
+          </div>
+          <div class="safebar" style="background:var(--surface)"><i></i></div>
+        </div></div>
+      </div>
+      <aside class="notes">
+        <div class="notes-h">设 计 标 注</div>
+        <ol>
+          <li><span class="n">1</span>签筒卡置于<b>三势卡之上</b>，是军情页第一屏第一眼；不另设签到入口，<b>领签本身即回访动作</b>。</li>
+          <li><span class="n">2</span>签筒为纯 CSS 图形（竹签 + 筒身 + 束带），无位图资源；竹签轻微旋转错落，签头压墨绿。</li>
+          <li><span class="n">3</span>卡片走<b>双线框 + 四角角标</b>的案卷规格，与页面其余卡片拉开层级但不用阴影。</li>
+          <li><span class="n">4</span>领签后整卡<b>原位压缩</b>为 44px 横条：左侧色块承载「攻/守/平」一字，右侧一行摘要 + ›，不占第一屏高度。</li>
+          <li><span class="n">5</span>三态色：攻 = --accent，守 = --danger，平 = --ink-2；色块内文字用纸白，不用纯白。</li>
+          <li><span class="n">6</span>命理开关关闭时<b>整卡不渲染</b>；无生辰时替换为引导卡「补生辰，启今日签」。</li>
+          <li><span class="n">7</span>下方置灰区仅示意既有结构（军师判断 hero / 三指标 / 三势判断），本次不动。</li>
+        </ol>
+      </aside>
+    </section>
+
+    <!-- ════════════════ 屏 二 ════════════════ -->
+    <section class="unit">
+      <div class="col-frame">
+        <div class="cap"><span class="cap-n">二</span><span class="cap-t">今日攻守签 · 签详情页</span><span class="cap-s">packages/work/sign</span></div>
+        <div class="device"><div class="phone">
+          <div class="sb"><span>9:41</span><span class="r">5G<b></b></span></div>
+          <div class="nav"><span class="s">‹</span><span class="t">今日攻守签</span><span class="s right">⋯</span></div>
+          <div class="scr">
+
+            <div class="card paper dbl acc" style="padding:20px 16px 18px">
+              <span class="cnr"><i></i><i></i><i></i><i></i></span>
+              <div style="text-align:center">
+                <span class="kicker">丙 午 年 六 月 初 一 · 甲 子 日</span>
+              </div>
+              <div class="g14"></div>
+              <div class="verdict"><b>攻</b></div>
+              <div class="g14"></div>
+              <div style="text-align:center;font-size:16px;line-height:2.05;letter-spacing:.5px;padding:0 4px">
+                今日锋芒在外。<br>宜主动出击，谈那件你拖着的事。
+              </div>
+              <div class="g14"></div>
+              <div class="rule soft"></div>
+              <div class="g10"></div>
+
+              <div class="yiji">
+                <div class="yi"><div class="h">宜</div><div class="v">签约<br>谈判</div></div>
+                <div class="ji"><div class="h">忌</div><div class="v">大额支出<br>动土</div></div>
+              </div>
+
+              <div class="g12"></div>
+              <div style="border:1px solid var(--line);background:var(--surface-2);padding:10px 12px;display:flex;align-items:center;justify-content:space-between">
+                <span class="kicker" style="letter-spacing:.3em">吉 时</span>
+                <span style="font-size:14px;letter-spacing:.5px">巳时 · 上午九至十一点</span>
+              </div>
+
+              <div class="g12"></div>
+              <div class="tiny" style="text-align:center">依你命盘流日推演 · 仅作节奏参考</div>
+            </div>
+
+            <div class="g14"></div>
+
+            <div class="card" style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px">
+              <div class="streak">
+                <span style="font-size:13.5px">连领 <em style="color:var(--accent);font-size:17px">6</em> 日</span>
+                <span class="dots"><i></i><i></i><i></i><i></i><i></i><i></i><i class="off"></i></span>
+              </div>
+              <span class="tiny">复盘另计</span>
+            </div>
+
+            <div class="g12"></div>
+            <a class="btn ghost sm">出 图 · 赠 与 同 道</a>
+
+            <div class="g12"></div>
+            <div class="tiny" style="text-align:center;color:var(--ink-3)">
+              时辰未补者，此签只看到七分。补全生辰，我看得更透。
+            </div>
+
+          </div>
+          <div class="safebar"><i></i></div>
+        </div></div>
+      </div>
+      <aside class="notes">
+        <div class="notes-h">设 计 标 注</div>
+        <ol>
+          <li><span class="n">1</span>入场动效：竹签自签筒抽出，<b>300ms 位移 + 渐显</b>；不做摇一摇、不做抽奖式转场。</li>
+          <li><span class="n">2</span>「攻」字 72px 置于<b>直角双线方框</b>内（方框非印章，故不圆）；守日换 --danger，平日换 --ink-2。</li>
+          <li><span class="n">3</span>签语居中排版、行高 2.05，宋体承重；一句话说完，不铺陈。</li>
+          <li><span class="n">4</span>宜/忌两列共用一个直角框、中间 1px 竖线分隔，宜 = 本命色、忌 = 风险红，只染标题不染正文。</li>
+          <li><span class="n">5</span>底部小字「依你命盘流日推演 · 仅作节奏参考」为<b>合规固定项</b>，不可省略、不可折叠。</li>
+          <li><span class="n">6</span>连领天数与复盘 streak <b>口径分开</b>，此处补一行「复盘另计」防混读。</li>
+          <li><span class="n">7</span>出图分享走 cards 管线（POST /cards/sign，含小程序码回流位），故按钮取次级弱化样式。</li>
+        </ol>
+      </aside>
+    </section>
+
+    <!-- ════════════════ 屏 三 ════════════════ -->
+    <section class="unit">
+      <div class="col-frame">
+        <div class="cap"><span class="cap-n">三</span><span class="cap-t">预言揭封 · 信封态</span><span class="cap-s">天机卡入口 + 揭封页</span></div>
+        <div class="device"><div class="phone">
+          <div class="sb"><span>9:41</span><span class="r">5G<b></b></span></div>
+          <div class="nav"><span class="s">‹</span><span class="t">预言揭封</span><span class="s right">1/2</span></div>
+          <div class="scr">
+
+            <!-- 入口示意 -->
+            <div class="entry">
+              <div class="entry-cap">入 口 示 意 · 军 情 tab「天 机」卡（非本页元素）</div>
+              <div class="card" style="display:flex;align-items:center;gap:12px;padding:11px 12px">
+                <div style="position:relative;width:44px;height:30px;background:var(--paper);border:1px solid #D9D3C3;flex:0 0 auto">
+                  <i style="position:absolute;left:-1px;top:-1px;width:0;height:0;border-left:23px solid transparent;border-right:23px solid transparent;border-top:17px solid #F2EFE5;display:block"></i>
+                  <span style="position:absolute;left:50%;top:11px;margin-left:-8px;width:16px;height:16px;border-radius:50%;background:radial-gradient(circle at 34% 28%,var(--accent-bright),var(--accent) 44%,var(--accent-deep));display:block"></span>
+                </div>
+                <div style="flex:1;min-width:0">
+                  <span class="kicker" style="letter-spacing:.3em">天 机</span>
+                  <div style="font-size:13.5px;margin-top:4px">待揭封 · 2 道 <span class="reddot" style="margin-left:4px;vertical-align:1px"></span></div>
+                </div>
+                <span style="color:var(--ink-3);font-size:13px">›</span>
+              </div>
+            </div>
+            <div class="enter-arrow">↓ 点 击 进 入 揭 封 页</div>
+
+            <!-- 揭封页主体 -->
+            <div class="card paper dbl acc" style="padding:22px 16px 18px">
+              <span class="cnr"><i></i><i></i><i></i><i></i></span>
+              <div style="text-align:center"><span class="kicker">应 验 之 日</span></div>
+              <div class="g18"></div>
+              <div class="env">
+                <i class="fold l"></i><i class="fold r"></i>
+                <i class="flap"></i>
+                <div class="wax">機</div>
+              </div>
+              <div class="g14"></div>
+              <div class="seal-strip">登记于 2026 年 4 月 · 应 验 之 期 已 至</div>
+              <div class="g12"></div>
+              <div class="tiny" style="text-align:center;line-height:1.95">
+                这道判断出自四月十七日那场对话。<br>是中是不中，今日见分晓。
+              </div>
+            </div>
+
+            <div class="g18"></div>
+            <a class="btn">揭 封</a>
+            <div class="g10"></div>
+            <div class="tiny" style="text-align:center">揭封后回填实际结果，军师据实入账 · 不挂任何奖赏</div>
+
+            <div class="g18"></div>
+            <div class="rule"></div>
+            <div class="g10"></div>
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span class="tiny">另有 1 道待揭封</span>
+              <span class="tag">六月登记 · 九月应验</span>
+            </div>
+
+          </div>
+          <div class="safebar"><i></i></div>
+        </div></div>
+      </div>
+      <aside class="notes">
+        <div class="notes-h">设 计 标 注</div>
+        <ol>
+          <li><span class="n">1</span>虚线块为<b>入口示意</b>：军情 tab「天机」卡（火漆信封小图 + 待揭封 N 道 + 朱点），非揭封页自身元素。</li>
+          <li><span class="n">2</span>问策 tab 会话列表总军师置顶行<b>同步小红点</b>，复用现有 unread 机制，不新增红点体系。</li>
+          <li><span class="n">3</span>信封为米纸底 + 1px 折线（两条对角 1px 线交于中心），信封盖用三角滤镜描边，全 CSS。</li>
+          <li><span class="n">4</span><b>火漆印是全稿唯一圆形</b>——它是实体印章，非 UI 容器；本命色径向渐变 + 内圈细线，篆字「機」。</li>
+          <li><span class="n">5</span>封条横条写「登记于 X 月 · 应验之期已至」，字距 .2em，走 --surface-2 底，像贴上去的纸条。</li>
+          <li><span class="n">6</span>「揭封」为唯一主按钮；点击后封蜡裂开动效再展开原文（见屏四）。</li>
+          <li><span class="n">7</span>「不挂任何奖赏」的说明留在按钮下方——揭封只兑现叙事，乱填无利可图，这行字是防呆也是气质。</li>
+          <li><span class="n">8</span>信封<b>不过期、不消失</b>；30 天未揭封仍由复盘时军师带出。</li>
+        </ol>
+      </aside>
+    </section>
+
+    <!-- ════════════════ 屏 四 ════════════════ -->
+    <section class="unit">
+      <div class="col-frame">
+        <div class="cap"><span class="cap-n">四</span><span class="cap-t">预言揭封 · 揭封后（命中）</span><span class="cap-s">回填 + 判词 + 命中卡</span></div>
+        <div class="device"><div class="phone">
+          <div class="sb"><span>9:41</span><span class="r">5G<b></b></span></div>
+          <div class="nav"><span class="s">‹</span><span class="t">预言揭封</span><span class="s right">⋯</span></div>
+          <div class="scr">
+
+            <div style="display:flex;align-items:center;justify-content:space-between">
+              <span class="tag acc">已 揭 封</span>
+              <span class="tiny">登记 2026-04-17 · 应验 2026-07-25</span>
+            </div>
+            <div class="g10"></div>
+
+            <!-- 预言原文 -->
+            <div class="card soft" style="border-left:3px solid var(--accent);padding:12px 13px">
+              <span class="kicker" style="letter-spacing:.3em">预 言 原 文</span>
+              <div style="font-size:15px;line-height:2.0;margin-top:7px;color:var(--accent-ink)">
+                五月之后，你那条老渠道的量会掉三成，新渠道将成主力。
+              </div>
+            </div>
+            <div class="g10"></div>
+
+            <!-- 当时依据 -->
+            <div class="card" style="padding:10px 13px">
+              <span class="kicker mute" style="letter-spacing:.3em">当 时 依 据</span>
+              <div class="p" style="margin-top:5px;line-height:1.85">
+                一、渠道甲环比连降两月，占比自六成退至四成七。<br>
+                二、新渠道试投三周，获客成本低约三成。<br>
+                三、判定口径：老渠道月量跌幅达三成即算应验。
+              </div>
+            </div>
+            <div class="g12"></div>
+
+            <!-- 回填三选一 -->
+            <span class="kicker" style="letter-spacing:.3em">实 情 如 何</span>
+            <div class="g6"></div>
+            <div style="display:flex;gap:8px">
+              <a class="btn sm" style="flex:1;letter-spacing:.12em;text-indent:.12em">应验了</a>
+              <a class="btn sm gray" style="flex:1;letter-spacing:.12em;text-indent:.12em">未应验</a>
+              <a class="btn sm gray" style="flex:1;letter-spacing:.12em;text-indent:.12em">说不清</a>
+            </div>
+            <div class="g8"></div>
+            <div style="border:1px solid var(--line);background:var(--surface);padding:9px 11px;font-size:12px;color:var(--ink-3)">
+              一句话记下实际情况（选填）
+            </div>
+            <div class="g10"></div>
+
+            <!-- 军师判词 -->
+            <div class="card dbl acc" style="padding:13px 14px">
+              <span class="kicker" style="letter-spacing:.3em">军 师 判 词</span>
+              <div style="font-size:14px;line-height:2.0;margin-top:7px;color:var(--ink)">
+                此局天时应验。四月你依我所言提前铺新渠道，老渠道塌下来时，你已不在那条船上。
+              </div>
+              <div class="tiny" style="margin-top:8px">已验预言 4 道、中 3 道 —— 样本尚浅，先记账，不论高低。</div>
+            </div>
+            <div class="g12"></div>
+
+            <!-- 命中卡 -->
+            <div style="display:flex;gap:12px;align-items:stretch">
+              <div class="hitcard">
+                <div class="hk">军 师 预 言</div>
+                <div class="ht">五月之后，你那条老渠道的量会掉三成，新渠道将成主力。</div>
+                <div class="sq"><span>料</span><span>事</span><span>如</span><span>神</span></div>
+                <div class="hm">登记 04-17 · 应验 07-25</div>
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column">
+                <div class="tiny" style="line-height:1.85">
+                  命中即出「料事如神」章。<br>卡面含预言原文、登记日、应验日与小程序码回流位。
+                </div>
+                <div style="flex:1"></div>
+                <a class="btn sm" style="letter-spacing:.2em;text-indent:.2em">生 成 命 中 卡</a>
+              </div>
+            </div>
+
+          </div>
+          <div class="safebar"><i></i></div>
+        </div></div>
+      </div>
+      <aside class="notes">
+        <div class="notes-h">设 计 标 注</div>
+        <ol>
+          <li><span class="n">1</span>原文卡用 --accent-soft + 左侧 3px 本命色实边，是全屏唯一着色块——<b>预言原文是主角</b>。</li>
+          <li><span class="n">2</span>「当时依据」逐条列出登记时的三要素（含判定口径），杜绝事后解释权争议。</li>
+          <li><span class="n">3</span>回填三选一为<b>等宽三按钮</b>，选中态实心本命色、未选态灰底；一句话实情为选填单行。</li>
+          <li><span class="n">4</span>判词走规则模板不走 LLM：未应验「天时是概率不是定数……你的人谋胜了天时」，说不清「留着。有些账要再走一程才看得清」。</li>
+          <li><span class="n">5</span>判词末行严守<b>数字铁律</b>：只引账本、样本 &lt; 5 不报百分比，故写「4 道中 3 道」而非比率。</li>
+          <li><span class="n">6</span>命中卡缩略为纵版深墨绿，右下压方形「料事如神」朱印（方章，非圆）；首中触发同名战功。</li>
+          <li><span class="n">7</span>命中率回写天机账本，下次复盘时军师引用真实数字，形成闭环。</li>
+        </ol>
+      </aside>
+    </section>
+
+    <!-- ════════════════ 屏 五 ════════════════ -->
+    <section class="unit">
+      <div class="col-frame">
+        <div class="cap"><span class="cap-n">五</span><span class="cap-t">命运叙事线 · 章回连载</span><span class="cap-s">老板 tab 入口 + 连载页</span></div>
+        <div class="device"><div class="phone">
+          <div class="sb"><span>9:41</span><span class="r">5G<b></b></span></div>
+          <div class="nav"><span class="s">‹</span><span class="t">命运叙事线</span><span class="s right">⋯</span></div>
+          <div class="scr">
+
+            <!-- 入口示意 -->
+            <div class="entry">
+              <div class="entry-cap">入 口 示 意 · 老 板 tab「档 案」组（列于命盘报告旁）</div>
+              <div class="card" style="display:flex;align-items:center;gap:11px;padding:10px 12px">
+                <span style="width:22px;height:22px;background:var(--accent-soft);border:1px solid rgba(30,90,67,.35);flex:0 0 auto"></span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13.5px">命运叙事线 · 连载中 <span class="reddot" style="margin-left:3px;vertical-align:1px"></span></div>
+                  <div class="tiny" style="margin-top:2px">第四回 · 断腕求生砍产线，秋风未起先备粮</div>
+                </div>
+                <span style="color:var(--ink-3);font-size:13px">›</span>
+              </div>
+            </div>
+            <div class="enter-arrow">↓ 点 击 进 入 连 载 页</div>
+
+            <!-- 卷轴列表 -->
+            <div style="display:flex;align-items:baseline;justify-content:space-between">
+              <span class="kicker" style="letter-spacing:.3em">卷 一 · 起 于 危 墙</span>
+              <span class="tiny">共 四 回 · 每月一更</span>
+            </div>
+            <div class="g8"></div>
+
+            <div class="chap">
+              <div class="no">楔子</div>
+              <div><div class="tt">起于危墙立寸志，未见风来先系舟</div><div class="mm">2026 年 2 月 · 迁自战略档案</div></div>
+            </div>
+            <div class="g6"></div>
+            <div class="chap">
+              <div class="no">第一回</div>
+              <div><div class="tt">三顾码头寻旧部，一纸军令定西南</div><div class="mm">2026 年 3 月</div></div>
+            </div>
+            <div class="g6"></div>
+            <div class="chap">
+              <div class="no">第二回</div>
+              <div><div class="tt">渠道生变风先至，账上留粮心不慌</div><div class="mm">2026 年 4 月</div></div>
+            </div>
+            <div class="g6"></div>
+            <div class="chap">
+              <div class="no">第三回</div>
+              <div><div class="tt">新客初来试锋芒，旧疾复发夜难眠</div><div class="mm">2026 年 5 月</div></div>
+            </div>
+            <div class="g6"></div>
+            <div class="chap void">
+              <div class="no" style="color:var(--ink-3)">—</div>
+              <div><div class="tt">此月无战事记载</div><div class="mm">2026 年 6 月 · 未做月复盘</div></div>
+            </div>
+            <div class="g6"></div>
+            <div class="chap">
+              <span class="nd"></span>
+              <div class="no">第四回</div>
+              <div><div class="tt">断腕求生砍产线，秋风未起先备粮</div><div class="mm">2026 年 7 月 · 新回未读</div></div>
+            </div>
+
+            <div class="g12"></div>
+
+            <!-- 下回预告 · 烫金半掩 -->
+            <span class="kicker gold" style="letter-spacing:.3em">下 回 预 告</span>
+            <div class="g6"></div>
+            <div class="teaser">
+              <div class="tx">
+                第五回 · 秋深粮足待何时——<br>
+                四月那道预言八月见分晓，渠道之争当有定论……
+              </div>
+            </div>
+            <div class="sign-off">军师 · 记于 2026 年 7 月</div>
+
+          </div>
+          <div class="safebar"><i></i></div>
+        </div></div>
+      </div>
+      <aside class="notes">
+        <div class="notes-h">设 计 标 注</div>
+        <ol>
+          <li><span class="n">1</span>入口条列于老板 tab「档案」组、命盘报告旁；副题<b>始终显示最新回目</b>，有新回未读缀朱点。</li>
+          <li><span class="n">2</span>每回一张<b>直角案卷条</b>：左侧回次（1px 竖线分隔）+ 右侧对仗回目 + 月份，竖排成卷轴感。</li>
+          <li><span class="n">3</span>回目走章回体对仗双句，由月复盘 structured output 产出；<b>正文只引账本真实事件</b>。</li>
+          <li><span class="n">4</span>缺月走虚线占位条「此月无战事记载」——轻损失厌恶，<b>不惩罚、不弹窗、不催</b>。</li>
+          <li><span class="n">5</span>下回预告用<b>烫金半掩</b>：金色文字 + 由透明渐至纸色的下半遮罩，露一半、藏一半。</li>
+          <li><span class="n">6</span>本命色为「金」时，烫金与主色同源；其余五套主题下预告固定取金 #A07D2C，保留「烫金」这一物质隐喻。</li>
+          <li><span class="n">7</span>teaser 必须指向系统能兑现之事（有 dueDate 的预言、下月复盘），<b>不开空头支票</b>。</li>
+          <li><span class="n">8</span>回详情落款「军师 · 记于 YYYY 年 X 月」右对齐，是每回的收笔印。</li>
+        </ol>
+      </aside>
+    </section>
+
+    <!-- ════════════════ 屏 六 ════════════════ -->
+    <section class="unit">
+      <div class="col-frame">
+        <div class="cap"><span class="cap-n">六</span><span class="cap-t">军师懂你指数 · 懂你卡 + 详情</span><span class="cap-s">老板 tab 入口 + 详情页</span></div>
+        <div class="device"><div class="phone">
+          <div class="sb"><span>9:41</span><span class="r">5G<b></b></span></div>
+          <div class="nav"><span class="s">‹</span><span class="t">军师懂你指数</span><span class="s right">⋯</span></div>
+          <div class="scr">
+
+            <!-- 入口示意：懂你卡 -->
+            <div class="entry">
+              <div class="entry-cap">入 口 示 意 · 老 板 tab 懂 你 卡（列于段位卡旁）</div>
+              <div class="card" style="padding:11px 12px">
+                <div style="display:flex;align-items:baseline;justify-content:space-between;line-height:1.5">
+                  <span class="kicker" style="letter-spacing:.3em">军 师 懂 你 指 数</span>
+                  <span class="tiny">只升不降</span>
+                </div>
+                <div class="g6"></div>
+                <div style="font-size:15px;line-height:1.6">军师对你的了解 · <em style="color:var(--accent);font-size:19px;letter-spacing:1px">三成</em></div>
+                <div class="g6"></div>
+                <span class="pbar"><i style="width:52%"></i></span>
+                <div class="g6"></div>
+                <div class="tiny">再复盘 3 次 → 启「冲动决策模式」密报</div>
+              </div>
+            </div>
+            <div class="enter-arrow">↓ 点 击 进 入 详 情 页</div>
+
+            <!-- 详情页 · 构成明细 -->
+            <div style="display:flex;align-items:baseline;justify-content:space-between;line-height:1.5">
+              <span class="kicker" style="letter-spacing:.3em">构 成 明 细</span>
+              <span class="tiny">口径公开 · 全部来自你的账本</span>
+            </div>
+            <div class="g4"></div>
+
+            <div class="brow">
+              <div class="top"><span class="nm">档案完整度</span><span class="vv">20<em> / 25</em></span></div>
+              <div class="hint">八字含时辰 · 行业阶段 · KPI 基线 —— 补全时辰再 +5</div>
+              <span class="pbar thin"><i style="width:80%"></i></span>
+            </div>
+            <div class="brow">
+              <div class="top"><span class="nm">复盘积累</span><span class="vv">13<em> / 25</em></span></div>
+              <div class="hint">已复盘 9 次 · 每复盘一次都往上走，四十次封顶</div>
+              <span class="pbar thin"><i style="width:52%"></i></span>
+            </div>
+            <div class="brow">
+              <div class="top"><span class="nm">数据回填</span><span class="vv">6<em> / 15</em></span></div>
+              <div class="hint">经营数据回填点数 —— 每月填一轮，涨得最快</div>
+              <span class="pbar thin"><i style="width:40%"></i></span>
+            </div>
+            <div class="brow">
+              <div class="top"><span class="nm">决策日志</span><span class="vv">7<em> / 15</em></span></div>
+              <div class="hint">已登记决策 11 条 · 已验证的按一倍半计</div>
+              <span class="pbar thin"><i style="width:47%"></i></span>
+            </div>
+            <div class="brow">
+              <div class="top"><span class="nm">预言验证</span><span class="vv">3<em> / 10</em></span></div>
+              <div class="hint">已揭封 4 道 —— 信封不揭，这一栏不动</div>
+              <span class="pbar thin"><i style="width:30%"></i></span>
+            </div>
+            <div class="brow" style="border-bottom:0">
+              <div class="top"><span class="nm">相处时日</span><span class="vv">3<em> / 10</em></span></div>
+              <div class="hint">相识 58 日 · 这一栏只随日子慢慢长</div>
+              <span class="pbar thin"><i style="width:30%"></i></span>
+            </div>
+
+            <div class="g10"></div>
+            <div style="display:flex;align-items:baseline;justify-content:space-between;line-height:1.5">
+              <span class="kicker" style="letter-spacing:.3em">密 报 架</span>
+              <span class="tiny">档位到了先封存 · 点开才生成</span>
+            </div>
+            <div class="g6"></div>
+
+            <div class="grid2">
+              <div class="mi open">
+                <span class="tick">✓</span>
+                <div class="lv">三 十</div>
+                <div class="nm">决策风格初判</div>
+                <div class="st">已启 · 可重读</div>
+              </div>
+              <div class="mi ready">
+                <span class="waxpos"><span class="wax mini">啟</span></span>
+                <div class="lv">五 十</div>
+                <div class="nm">冲动决策模式</div>
+                <div class="st">火漆待启 · 点此拆封</div>
+              </div>
+              <div class="mi locked">
+                <span class="lock">封</span>
+                <div class="lv">七 十</div>
+                <div class="nm">你的能量节奏图</div>
+                <div class="st">尚差 18 分</div>
+              </div>
+              <div class="mi locked">
+                <span class="lock">封</span>
+                <div class="lv">九 十</div>
+                <div class="nm">决策盲区全谱</div>
+                <div class="st">尚差 38 分</div>
+              </div>
+            </div>
+
+
+          </div>
+          <div class="safebar"><i></i></div>
+        </div></div>
+      </div>
+      <aside class="notes">
+        <div class="notes-h">设 计 标 注</div>
+        <ol>
+          <li><span class="n">1</span>懂你卡<b>无冷启动门槛</b>——这是给新用户的第一根进度条，段位卡还没资格出现时它就在。</li>
+          <li><span class="n">2</span>进度条为直角细条：--surface-2 底 + 1px 线，填充走 accent-deep → accent 渐变，不做发光。</li>
+          <li><span class="n">3</span>对外一律<b>中文成数</b>，禁 percent 表述；分值仅在构成明细里以「已得/上限」出现。</li>
+          <li class="flag"><span class="n">!</span><b>口径待定稿：</b>规格 §4.2 档位表把 40-59 记作「五成」，需求文案写「三成」。视觉稿按需求文案示意，落地前请敲定成数映射。</li>
+          <li><span class="n">4</span>本屏两段刻意取<b>相邻两刻</b>：懂你卡示意 50 档解锁前（差 3 次复盘），密报架示意刚跨过 50 档、火漆未启，以便一屏看全三种卡态。</li>
+          <li><span class="n">5</span>密报架三态：<b>封印灰卡</b>（灰底 + 方形「封」+ 差值）、<b>火漆待启卡</b>（accent-soft 底 + 火漆小印）、<b>已启卡</b>（白底 + 方形勾 + 可重读）。</li>
+          <li><span class="n">6</span>解锁<b>不自动弹出</b>，保留「拆封」仪式；样本不足时如实说「这份还差些火候，再攒 N 次复盘」。</li>
+          <li><span class="n">7</span>只升不降（取历史峰值），六行明细各带「一句怎么涨」，把目标梯度写在明面上。</li>
+          <li><span class="n">8</span>复盘/回填/揭封完成后 toast 追加一行小字「军师对你的了解 +2」，与本页数字同源。</li>
+        </ol>
+      </aside>
+    </section>
+
+  </div>
+
+  <footer class="ft">
+    <b>视觉规范自检</b> —— 全稿卡片 / 按钮 / 容器 border-radius 一律 0（唯一圆形为火漆印，实体印章）；
+    字体全走宋体栈，字重不过 600；色值全部取自 app/src/app.scss token，未引入新色（金 #A07D2C 取自 theme-gold 的 --accent）；
+    单文件、无外部字体 / 图片 / 脚本，图形（签筒、信封、火漆、印章、进度条）皆由 CSS 绘成。<br>
+    <b>文案口径</b> —— 军师语感，禁「打卡 / 签到 / 开奖 / get」；数字铁律：只引真实账本，样本不足如实说、不报百分比。<br>
+    <b>建设顺序</b> —— #5 今日攻守签 → #1 预言揭封 → #10 懂你指数 → #3 章回连载（先立日活锚点，再立应验事件，再资产化，最后长线剧情）。
+  </footer>
+
+</div>
+</body>
+</html>
