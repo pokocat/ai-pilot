@@ -503,8 +503,8 @@ export default function ThinkTank() {
   return (
     <Screen topInset>
       <View className="pad think">
-        {/* 页头（TabHeader）：小字用途 + 大字「锦囊」+ 背景「囊」 */}
-        <TabHeader title="锦囊" kicker="存你的家底" glyph="囊" />
+        {/* 页头（TabHeader）：小字用途 + 大字「锦囊」+ 背景「库」 */}
+        <TabHeader title="锦囊" kicker="存你的家底" glyph="库" />
 
         {/* 分区切换 */}
         <View className="think-tabs">

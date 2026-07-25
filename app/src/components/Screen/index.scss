@@ -9,10 +9,10 @@
 }
 
 /* 五个 tab 页共用的标题区外壳（内容由 TabHeader 渲染：小字用途 + 大字 tab 名 + 背景大字 + 细线）。
-   高度不再固定，由内容自然撑开；overflow 裁掉背景大字的出血，别让它压到下方卡片。
-   头部在胶囊下方，右侧入口贴边不需避让。 */
+   高度由内容自然撑开；**不要加 overflow:hidden**——背景大字要完整露出来，靠 TabHeader 的
+   字号与下方留白让它落在细线之下的空白里，而不是被裁掉半个字。
+   头部在胶囊下方，右侧不放入口、不需避让。 */
 .tab-page-head {
   position: relative;
-  overflow: hidden;
   box-sizing: border-box;
 }

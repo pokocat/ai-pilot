@@ -2,18 +2,19 @@
    一行小字用途 + 大字 tab 名 + 背景一枚大字作印章 + 底部一条细线收口。
    页头不放按钮（设计稿右侧的行业 tag 是装饰，已按定稿去掉），功能入口回归各自内容区。 */
 
-/* 背景大字：贴右微出血、上对齐，字脚被下方细线切齐（.tab-page-head 已 overflow:hidden），
-   色随本命色、极淡，只作印章底纹。 */
+/* 背景大字：贴右微出血、上对齐，整字完整露出——不裁字脚。
+   字号与下方 margin 是配套的：字身（≈.93em）要落在细线之后的留白里，改一个就得核另一个，
+   否则字脚会被下方第一块内容压住。色随本命色、极淡，只作印章底纹。 */
 .th-glyph {
   display: block;
   position: absolute;
   right: -6px;
-  top: -6px;
-  font-size: 104px;
+  top: -10px;
+  font-size: 100px;
   line-height: 1;
   font-weight: 600;
   color: var(--accent);
-  opacity: .09;
+  opacity: .1;
   pointer-events: none;
 }
 
@@ -43,5 +44,6 @@
   background: var(--line);
 }
 
-/* 标题区与下方内容的统一呼吸（各页不要再自加头部间距） */
-.tab-head { margin-bottom: 12px; }
+/* 标题区与下方内容的统一呼吸（各页不要再自加头部间距）。
+   这段留白同时是背景大字的落脚处——见 .th-glyph 注释，两者配套调。 */
+.tab-head { margin-bottom: 18px; }
