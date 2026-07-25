@@ -3,6 +3,11 @@ import { getToken } from './token';
 import { parseSSE, decodeUtf8, sliceCompleteBlocks } from './sse';
 import type { GenRequest, ChatReply, Deliverable, DeliverableSection } from '../../../shared/contracts';
 
+// 错误分两类，收尾语义不同：'disconnect' 是链路被掐断（小程序切后台被杀请求 / 网络抖动），
+// 服务端不受影响，报告类多半照常生成并落库，调用方应先对账再判生死；
+// 'fatal' 是服务端明确回错或 HTTP 层拒绝，本轮确已死，可直接落终态。
+export type StreamErrorKind = 'disconnect' | 'fatal';
+
 export interface StreamHandlers {
   onSession?: (id: string) => void;
   onToken?: (text: string) => void;   // 增量 token（渐进渲染）
@@ -16,7 +21,7 @@ export interface StreamHandlers {
   onReportFooter?: (data: Pick<Deliverable, 'trust' | 'actions'>) => void;
   onMemory?: (data: { learned?: boolean; agentName?: string }) => void;
   onDone?: (messageId?: string) => void;
-  onError?: (message: string) => void;
+  onError?: (message: string, kind: StreamErrorKind) => void;
 }
 
 // B2 停止生成：调用方传入一个 control 对象，generateStream 在启动时把 abort 句柄挂上去；
@@ -116,7 +121,7 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
     else if (e.event === 'error') {
       ok = false;
       state.finished = true;
-      h.onError?.(friendlyStreamError(d?.message, d?.code));
+      h.onError?.(friendlyStreamError(d?.message, d?.code), 'fatal');
     }
   }
   return ok;
@@ -138,8 +143,8 @@ export async function generateStream(body: GenRequest, h: StreamHandlers, contro
     if (control) control.abort = () => { aborted = true; ac?.abort(); };
     let res: Response;
     try { res = await fetch(url, { method: 'POST', headers: header, body: JSON.stringify(body), signal: ac?.signal }); }
-    catch { if (aborted) return false; h.onError?.(NETWORK_HINT); return false; }
-    if (!res.ok || !res.body) { h.onError?.(await responseErrorMessage(res)); return false; }
+    catch { if (aborted) return false; h.onError?.(NETWORK_HINT, 'disconnect'); return false; }
+    if (!res.ok || !res.body) { h.onError?.(await responseErrorMessage(res), 'fatal'); return false; }
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -162,7 +167,8 @@ export async function generateStream(body: GenRequest, h: StreamHandlers, contro
       if (events.length) sawEvent = true;
       ok = dispatch(events, h, state) && ok;
     }
-    if (!sawEvent) h.onError?.(NETWORK_HINT);
+    // 一个事件都没收到：链路层异常（连接被掐 / 代理吞流），服务端可能照常在生成，按断流交调用方对账。
+    if (!sawEvent) h.onError?.(NETWORK_HINT, 'disconnect');
     // P0-5：流正常收尾但未收到 done/error 事件时补发一次 onDone，避免报告卡永久停在「产出中」。
     // finished 幂等保护：已由 done/error 收尾的流不再补发。
     if (state.rendered && !state.finished) { state.finished = true; h.onDone?.(); }
@@ -229,7 +235,7 @@ export async function generateStream(body: GenRequest, h: StreamHandlers, contro
         // 否则聊天气泡的 streaming 标记会永久为 true，卡在「产出中」（report 卡由 chat/index.tsx
         // 的 finally 兜底了，普通聊天气泡没有等价兜底，只能从这里堵住）。
         fail: () => {
-          if (!aborted && state.rendered && !state.finished) { state.finished = true; h.onError?.('网络连接中断'); }
+          if (!aborted && state.rendered && !state.finished) { state.finished = true; h.onError?.('网络连接中断', 'disconnect'); }
           resolve(false);
         },
       });

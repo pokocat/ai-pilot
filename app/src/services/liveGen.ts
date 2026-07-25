@@ -1,7 +1,9 @@
-import { generateStream, type StreamControl, type StreamHandlers } from './streaming';
+import { generateStream, type StreamControl, type StreamHandlers, type StreamErrorKind } from './streaming';
 import { api } from './api';
 import { markChatPending, clearChatPending } from './chatPending';
-import type { GenRequest, GenResult, ChatReply, Deliverable, DeliverableSection } from '../../../shared/contracts';
+import type {
+  GenRequest, GenResult, ChatReply, Deliverable, DeliverableSection, SessionDetail, SessionMessage,
+} from '../../../shared/contracts';
 
 /**
  * liveGen —— 跨页面存活的「军师推演」单例。
@@ -36,6 +38,28 @@ function mergeSnapshotSection(
 
 const isModerationErr = (s?: string) => !!s && /审核/.test(s);
 
+// 断流对账：客户端断链 ≠ 生成失败。小程序切后台会杀掉在途请求，而服务端照常算完并落库（报告尤其如此：
+// 正文一次性生成，逐段下发只是呈现节奏）。故断流后先向服务端核实再判生死，最多 RECONCILE_TRIES 次、
+// 每次间隔 RECONCILE_GAP_MS；次数用尽仍无定论才落回失败态——有限重试，绝不无限循环。
+const RECONCILE_TRIES = 3;
+const RECONCILE_GAP_MS = 1200;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * 本轮回复是否已落库：末条不是用户消息，且其前最近的那条用户消息正是本轮原文。
+ * 后半个条件不可省——请求根本没送达服务端时，末条会是上一轮的回复，只看角色会把它误判成「本轮已完成」。
+ */
+export function storedReplyFor(messages: SessionMessage[], userText: string): SessionMessage | null {
+  const last = messages.length ? messages[messages.length - 1] : null;
+  if (!last || last.role === 'user') return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'user') continue;
+    return String((messages[i].content as { text?: string } | null)?.text ?? '') === userText ? last : null;
+  }
+  return null;
+}
+
 // 页面提供的 UI 观察者：liveGen 在「实时事件」与「重进重放」两条路径上调用同一组方法，
 // 页面据此做 setMsgs / 滚动 / busy 等副作用。所有方法都应对「当前无对应气泡」保持幂等/安全。
 export interface LiveGenView {
@@ -49,8 +73,13 @@ export interface LiveGenView {
   reportFooter(data: { trust: string; actions: string[] }): void;
   finishChat(messageId: string | undefined, refNotices: string[] | undefined): void;
   finishReport(messageId: string | undefined, refNotices: string[] | undefined): void;
-  error(kind: LiveKind, message: string, retry: string | undefined): void;
+  // broken=true：断流对账后仍判定失败（链路断的，非服务端明确回错）。页面据此记账，回前台时再兜一次底。
+  error(kind: LiveKind, message: string, retry: string | undefined, broken?: boolean): void;
   fallbackDone(res: GenResult, retryText: string): void;
+  // 断流对账「已落库」：以服务端消息为准整体重绘本页（走与加载路径同一套 restore），不留半截中断卡。
+  restoreServerTruth(detail: SessionDetail): void;
+  // 断流对账「仍在生成」：交回页面的 generating 轮询兜底。liveGen 就此退出本轮，保持两条恢复路径互斥。
+  resumeServerPolling(sessionId: string): void;
   memoryLearned(agentName: string): void;
   // 主动停止：清掉尚无一字的空聊天占位（有字则收干净为非流式）。
   abortedChat(): void;
@@ -104,6 +133,8 @@ interface LiveGenEntry {
   control: StreamControl;
   aborted: boolean;
   streamErrored: boolean;
+  // 收到断流类 onError，收尾推迟到 drive 里对账后再定（见 reconcileDisconnect）。
+  disconnected: boolean;
   dropTimer?: ReturnType<typeof setTimeout>;
 }
 
@@ -164,11 +195,62 @@ function handleDone(entry: LiveGenEntry, messageId?: string) {
   if (entry.learnedAgentName) entry.view?.memoryLearned(entry.learnedAgentName);
 }
 
-function handleError(entry: LiveGenEntry, message: string) {
+function surfaceError(entry: LiveGenEntry, message: string, broken = false) {
+  const retry = isModerationErr(message) ? undefined : entry.userText;
+  entry.view?.error(entry.kind, message, retry, broken);
+}
+
+function handleError(entry: LiveGenEntry, message: string, kind: StreamErrorKind) {
+  // streamErrored 立刻置位：对账推迟的只是「怎么收尾」，不能让 drive 的静默失败兜底趁这个空档重发一轮。
   entry.streamErrored = true;
   entry.errorMessage = message;
-  const retry = isModerationErr(message) ? undefined : entry.userText;
-  entry.view?.error(entry.kind, message, retry);
+  if (kind === 'disconnect' && !entry.aborted) {
+    entry.disconnected = true; // 断线不当死讯：收尾交给 drive 的对账
+    return;
+  }
+  surfaceError(entry, message);
+}
+
+type ReconcileResult = 'stored' | 'handoff' | 'dead';
+
+// 对账认定本轮已完成：撤掉断流留下的失败态，改按正常收尾语义走。
+function applyStoredReply(entry: LiveGenEntry, detail: SessionDetail, stored: SessionMessage) {
+  entry.streamErrored = false;
+  entry.errorMessage = undefined;
+  entry.kind = stored.role === 'report' ? 'report' : 'chat';
+  entry.messageId = stored.id;
+  entry.view?.restoreServerTruth(detail);
+  // 报告自动入库：与 handleDone 同一副作用，页面不在场也要执行（网络/存储副作用有效）。
+  // 内容取服务端落库的完整成果，不用本地被掐断的残缺快照。
+  if (entry.kind === 'report' && stored.content) {
+    const d = stored.content as Deliverable;
+    Promise.resolve().then(() => entry.autoSave(d, stored.id, { auto: true }));
+  }
+  if (entry.learnedAgentName) entry.view?.memoryLearned(entry.learnedAgentName);
+}
+
+async function reconcileDisconnect(entry: LiveGenEntry): Promise<ReconcileResult> {
+  if (!entry.sessionId) return 'dead'; // 新会话连 sessionId 都没拿到，无从对账
+  for (let i = 0; i < RECONCILE_TRIES; i++) {
+    if (i) await sleep(RECONCILE_GAP_MS);
+    // 对账期间用户按了停止：返回值不再重要，drive 的 aborted 分支优先收尾。
+    if (entry.aborted) return 'dead';
+    let detail: SessionDetail | null = null;
+    try { detail = await api.session(entry.sessionId); } catch { detail = null; }
+    if (entry.aborted) return 'dead';
+    if (!detail) continue; // 对账请求本身也可能被后台掐断，用完剩余次数再判
+    const stored = storedReplyFor(detail.messages, entry.userText);
+    if (stored) { applyStoredReply(entry, detail, stored); return 'stored'; }
+    // 服务端仍在生成：页面在场就交回它的 generating 轮询；页面不在场无人可交，继续用完剩余次数
+    // ——报告落库通常比 generating 落幕早一步，多等一轮就能等到，进而完成自动入库。
+    if (detail.generating && entry.view) {
+      entry.streamErrored = false;
+      entry.errorMessage = undefined;
+      entry.view.resumeServerPolling(entry.sessionId);
+      return 'handoff';
+    }
+  }
+  return 'dead';
 }
 
 function makeHandlers(entry: LiveGenEntry): StreamHandlers {
@@ -206,7 +288,7 @@ function makeHandlers(entry: LiveGenEntry): StreamHandlers {
     onRefNotices: (ns) => { entry.pendingRefNotices = ns; },
     onMemory: (data) => { if (data.learned && data.agentName) entry.learnedAgentName = data.agentName; },
     onDone: (messageId) => handleDone(entry, messageId),
-    onError: (em) => handleError(entry, em),
+    onError: (em, kind) => handleError(entry, em, kind),
   };
 }
 
@@ -220,10 +302,17 @@ async function drive(entry: LiveGenEntry) {
     streamOk = false;
   }
 
+  // 断流（非主动停止）：先向服务端对账，别拿一次断链当死讯。对账结论决定下面怎么收尾。
+  const reconciled: ReconcileResult | null =
+    !entry.aborted && entry.disconnected ? await reconcileDisconnect(entry) : null;
+
   if (entry.aborted) {
     // 主动停止：聊天空占位清掉，report 卡由下方双保险收尾。
     if (entry.kind === 'chat') entry.view?.abortedChat();
-  } else if (!streamOk && entry.kind !== 'report' && !entry.streamErrored) {
+  } else if (reconciled === 'dead') {
+    // 对账无果（服务端确实没落库、也不在生成，或对账请求本身也断了）：这才是真失败。
+    surfaceError(entry, entry.errorMessage || '网络连接中断', true);
+  } else if (!reconciled && !streamOk && entry.kind !== 'report' && !entry.streamErrored) {
     // 静默失败（流未正常收尾、onError 从未触发、且未进 report 分支）：同步补发一次。
     // 这一步是真正的兜底生成（api.generate 会落库），即便页面已卸载也必须执行，否则用户什么都拿不到。
     try {
@@ -244,7 +333,8 @@ async function drive(entry: LiveGenEntry) {
   // 避免流未触发 onDone/onError 时报告卡永久停在「产出中」。幂等：onDone 已收尾时守卫不命中即 no-op。
   if (entry.kind === 'report') entry.view?.finishReport(entry.messageId, entry.refNotices);
 
-  entry.view?.clearBusy();
+  // 已把思考态交给页面轮询时不能清 busy——否则页面刚接手就被抹掉，重新卡成「什么都没有」。
+  if (reconciled !== 'handoff') entry.view?.clearBusy();
   entry.stage = entry.errorMessage ? 'error' : 'done';
   // 收尾汇合处（done / error / abort / 兜底补发所有路径都经此）：清 chatPending。此后本轮以落库消息为准，
   // 列表页与重进不再据 chatPending 误显「正在思考」。新会话若从未绑定 sessionId 则为 no-op。
@@ -272,6 +362,7 @@ export function startLiveGen(p: LiveGenStartParams): string {
     control: { abort: () => {} },
     aborted: false,
     streamErrored: false,
+    disconnected: false,
   };
   register(entry, p.key);
   // 已有 sessionId（追问既有会话）：发问即登记 chatPending。新会话的登记推迟到 bindSession 拿到真实 id。

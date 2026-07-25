@@ -1,6 +1,6 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import { View, Text, Textarea, ScrollView, Image } from '@tarojs/components';
-import Taro, { useRouter, useDidHide } from '@tarojs/taro';
+import Taro, { useRouter, useDidHide, useDidShow } from '@tarojs/taro';
 import Icon from '../../../components/Icon';
 import Login from '../../../components/Login';
 import MarkdownText from '../../../components/MarkdownText';
@@ -9,10 +9,10 @@ import SafeHeader from '../../../components/SafeHeader';
 import AdvisorAvatar from '../../../components/AdvisorAvatar';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
-import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate } from '../../../services/api';
+import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate, type SessionDetail } from '../../../services/api';
 import { STREAM_CHAT } from '../../../services/config';
 import {
-  startLiveGen, attachLiveGenView, detachLiveGenView, peekLiveGen, stopLiveGen, dropLiveGen,
+  startLiveGen, attachLiveGenView, detachLiveGenView, peekLiveGen, stopLiveGen, dropLiveGen, storedReplyFor,
   type LiveGenView,
 } from '../../../services/liveGen';
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
@@ -330,6 +330,9 @@ export default function Chat() {
   // A 侧重进轮询兜底：aliveRef 标记页面存活、reattachTimerRef 持轮询定时器。
   const reattachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aliveRef = useRef(true);
+  // 轮询代号：每次 resumeGeneration 自增，poll 闭包只认自己那一代。回前台对账重启轮询时，
+  // 上一代那个正 await 在半路的 poll 醒来即自行退场，不会与新一代各排一串定时器（互斥铁律）。
+  const pollSeqRef = useRef(0);
   // liveGen 托管：当前挂着的 view 实例 + 用于 stop/detach 的 entry key。
   // 停止生成、卸载解绑、重进对账都经这两个 ref 定位到模块级单例里的这一轮生成。
   const liveViewRef = useRef<LiveGenView | null>(null);
@@ -353,6 +356,17 @@ export default function Chat() {
   const sessionIdRef = useRef('');
   sessionIdRef.current = sessionId;
   const pendingSessionIdRef = useRef('');
+  // 回前台对账要读的最新值（useDidShow 回调里取闭包会拿到陈旧渲染的值，一律走 ref）。
+  const busyRef = useRef(false);
+  busyRef.current = busy;
+  const agentRef = useRef<Agent | null>(null);
+  agentRef.current = agent;
+  // 本轮提问原文：本页发出的，或从落库历史里恢复出的末条待答用户消息。对账时据此确认服务端落的是不是本轮。
+  const lastSentTextRef = useRef('');
+  // 断流失败态记账：liveGen 对账后仍判失败（链路断的）才置位，回前台时据此再兜一次底；对上账即清。
+  const streamBrokenRef = useRef(false);
+  // 首次 onShow 归加载路径（initChat）管，此处只标记「已进过一次」。
+  const shownRef = useRef(false);
   // B5 上传：非模态进度条，接 UploadTask 透出真实百分比；取消调 task.abort() 真中止。
   // 多份上传后按「份」记账（不退化成整批一个进度条）：每份各有真进度、各能单独取消/重试。
   const [uploads, setUploads] = useState<Record<string, UploadEntry>>({});
@@ -606,10 +620,7 @@ export default function Chat() {
         if (detail.projectId) setProjectId(detail.projectId);
         restore(ag, detail.messages);
         loadDraft(sid);
-        // 重进两条路径互斥：先试 liveGen 实时续流；未接管且服务端仍 generating / 本地 pending → 轮询兜底。
-        if (!reattachLive(ag, sid, detail.messages) && (detail.generating || isChatPending(sid))) {
-          resumeGeneration(sid, ag);
-        }
+        takeOverGeneration(ag, sid, detail);
         return;
       }
 
@@ -628,12 +639,8 @@ export default function Chat() {
           if (detail.projectId) setProjectId(detail.projectId);
           restore(fallbackAgent, detail.messages);
           loadDraft(latest.id);
-          // 同上：liveGen 续流优先；未接管才落到轮询兜底或自动发送（三者互斥）。
-          if (reattachLive(fallbackAgent, latest.id, detail.messages)) {
-            // liveGen 已接管实时续流
-          } else if (detail.generating || isChatPending(latest.id)) {
-            resumeGeneration(latest.id, fallbackAgent);
-          } else if (send) {
+          // 同上：liveGen 续流 / 轮询兜底 / 自动发送三者互斥，无人接管本轮才轮到自动发送。
+          if (!takeOverGeneration(fallbackAgent, latest.id, detail) && send) {
             setTimeout(() => doSend(decodeURIComponent(send), latest.id, fallbackAgent.key, [], true, detail.projectId || pid || ''), 300);
           }
           return;
@@ -678,6 +685,9 @@ export default function Chat() {
       }
       else out.push({ role: 'assistant', reply: m.content, uid: m.id });
     });
+    // 末条仍是用户消息 = 有一轮问对尚未落回复：记下原文，回前台对账据此认领本轮。
+    const tail = messages[messages.length - 1];
+    if (tail?.role === 'user') lastSentTextRef.current = String(tail.content?.text || '');
     // 历史窗口化：完整列表存 ref，初始只渲染最近 HISTORY_WINDOW 条；顶部「阅早前问对」按需向前补。
     fullMsgsRef.current = out;
     const shown = Math.min(out.length, HISTORY_WINDOW);
@@ -704,6 +714,7 @@ export default function Chat() {
   function resumeGeneration(sid: string, ag: Agent) {
     if (reattachTimerRef.current) clearTimeout(reattachTimerRef.current);
     const startedAt = Date.now();
+    const seq = ++pollSeqRef.current; // 本代轮询的代号，见 pollSeqRef
     setBusy(true);
     setReattachedBusy(true);
 
@@ -713,10 +724,10 @@ export default function Chat() {
       reattachTimerRef.current = null;
     };
     const poll = async () => {
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || seq !== pollSeqRef.current) return;
       try {
         const detail = await api.session(sid);
-        if (!aliveRef.current) return;
+        if (!aliveRef.current || seq !== pollSeqRef.current) return;
         const last = detail.messages[detail.messages.length - 1];
         const localAge = chatPendingAge(sid);
         const locallyHandingOff = localAge !== null && localAge < LOCAL_PENDING_HANDOFF_MS;
@@ -878,8 +889,27 @@ export default function Chat() {
         patchChat((msg) => ({ ...msg, streaming: false, refNotices }));
         followBottom(true);
       },
-      error: (kind, message, retry) => {
+      // 断流对账「已落库」：本轮结果以服务端为准整体重绘，与加载路径同一套 restore，不留半截中断卡。
+      restoreServerTruth: (detail) => {
+        const ag = viewAgent || agentRef.current;
+        if (!ag) return;
+        resetTokenBuf(); // 残余 token 已被落库正文覆盖，不能再追加到重绘后的列表上
+        if (reattachTimerRef.current) { clearTimeout(reattachTimerRef.current); reattachTimerRef.current = null; }
+        pollSeqRef.current += 1; // 作废在途轮询：本轮已有定论，两条恢复路径不并存
+        streamBrokenRef.current = false;
+        restore(ag, detail.messages);
+      },
+      // 断流对账「服务端仍在生成」：交回本页的 generating 轮询。liveGen 已退出本轮，仍是单方接管。
+      resumeServerPolling: (sid) => {
+        const ag = viewAgent || agentRef.current;
+        if (!ag || !sid) return;
+        streamBrokenRef.current = false;
+        resumeGeneration(sid, ag);
+      },
+      error: (kind, message, retry, broken) => {
         flushTokenBuf(); // 报错前先把已流出的 token 落屏，保留部分内容
+        // 断链判死（对账也没能问出结果）：多半是切后台被杀请求。记一笔，回前台时再兜一次底。
+        if (broken) streamBrokenRef.current = true;
         if (kind === 'report') {
           // 记债项10：报告流失败语义收敛为单一话术。审核类错误不给重试（retry 由 liveGen 判定后传入）。
           setMsgs((m) => {
@@ -951,6 +981,45 @@ export default function Chat() {
     return false;
   };
 
+  // 恢复接管的唯一入口（页面加载 / 回前台共用）：liveGen 实时续流优先，未接管且服务端仍 generating
+  // （或本地刚发出、服务端尚未登记）才启轮询兜底。返回是否已有一方接管——两条路径永远互斥，
+  // 调用方据此决定后续（加载路径的自动发送、回前台路径的收干净 busy）。
+  const takeOverGeneration = (ag: Agent, sid: string, detail: SessionDetail): boolean => {
+    if (reattachLive(ag, sid, detail.messages)) return true;
+    if (detail.generating || isChatPending(sid)) { resumeGeneration(sid, ag); return true; }
+    return false;
+  };
+
+  // 回前台对账。小程序整体退后台会杀掉在途请求，liveGen 侧的对账请求本身也可能一起被杀（那时页面就
+  // 停在「网络连接中断」的失败态，而服务端早已算完落库）——回到前台才是唯一确定的补救时机。
+  // 只在「仍显思考态」或「刚判过断链」时才动手，正常浏览不被重绘打断。
+  const reconcileOnShow = async (sid: string) => {
+    const ag = agentRef.current;
+    if (!ag) return;
+    const detail = await api.session(sid).catch(() => null);
+    if (!detail || !aliveRef.current || sessionIdRef.current !== sid) return;
+    // 拉详情这段空档里若已开出新一轮（回前台即点选项发问），让位给 liveGen，别把新气泡重绘掉。
+    if (peekLiveGen(sid)?.active) return;
+    // 接过话事权：作废在途轮询（含正 await 在半路、醒来还想续排的那一代），下面由统一入口重新裁决接管方。
+    if (reattachTimerRef.current) { clearTimeout(reattachTimerRef.current); reattachTimerRef.current = null; }
+    pollSeqRef.current += 1;
+    // 本轮已落库 → 以服务端为准重绘；否则不动页面现状（失败气泡与用户提问都留着，可点重试）。
+    if (storedReplyFor(detail.messages, lastSentTextRef.current)) restore(ag, detail.messages);
+    streamBrokenRef.current = false;
+    if (!takeOverGeneration(ag, sid, detail)) { setBusy(false); setReattachedBusy(false); }
+  };
+
+  useDidShow(() => {
+    // 首次 onShow 与 initChat 是同一条加载路径，交给它即可，此处只管此后每次回前台/回到本页。
+    if (!shownRef.current) { shownRef.current = true; return; }
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    if (!busyRef.current && !streamBrokenRef.current) return;
+    if (pendingSessionIdRef.current) return; // 非流式兜底路径正在途，收尾归它，别插手
+    if (peekLiveGen(sid)?.active) return;    // liveGen 仍在实时推演：它才是接管方
+    void reconcileOnShow(sid);
+  });
+
   async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true, activeProjectId = projectId) {
     if (busy) return;
     if (!store.isAuthed()) {
@@ -967,6 +1036,9 @@ export default function Chat() {
     setBusy(true);
     // 本页主动发起 → 非「重进被动等待」，停止键有效。
     setReattachedBusy(false);
+    // 本轮原文：断流对账认领本轮全靠它（重试 echo=false 也要更新，那同样是新一轮）。
+    lastSentTextRef.current = text;
+    streamBrokenRef.current = false;
     // B3：发送即清掉本会话草稿（输入已上屏；失败可用气泡「重试」重发，无需草稿）。
     clearDraft();
     // P2-15：重试（echo=false）不重复回显用户气泡（用户消息已在首次尝试时显示）。
