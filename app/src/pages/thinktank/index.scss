@@ -1,17 +1,9 @@
 /* 智库页 —— 案卷资产（V7-06）/ 数据源（V7-07）/ 能力（V7-08）/ 报告（V7-09） */
 
-/* —— 页头 —— */
-.think-nav {
-  position: relative;
-  display: flex; align-items: center; justify-content: center;
-  margin-bottom: 4px;
-}
-.tn-title { font-size: 25px; font-weight: 600; color: var(--ink); line-height: 1.1; }
-
 /* —— 分区切换（seg：软底 + 白块选中） —— */
 .think-tabs {
   display: flex; gap: 5px;
-  padding: 5px; margin-top: 10px;
+  padding: 5px;
   border-radius: 18px;
   background: #EFEEE8;
 }

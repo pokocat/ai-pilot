@@ -1,20 +1,4 @@
-/* 执行页 —— 对齐设计稿 page-execution：exec-nav / 横滑卡组 / 督战 / 目标阶梯 / 军令(金) / 回填 / 复盘 */
-
-/* —— 页头（exec-nav）：左「案卷」· 中「执行」· 右「提醒」 —— */
-.exec-nav {
-  position: relative;
-  display: flex; align-items: center; justify-content: center;
-  margin-bottom: 10px;
-}
-.en-title { font-size: 25px; font-weight: 600; color: var(--ink); line-height: 1.1; }
-.en-side {
-  position: absolute; bottom: 14px;
-  color: var(--green);
-  font-size: 16px; font-weight: 600;
-}
-.en-side.left { left: 2px; }
-.en-side.right { right: var(--cap-right, 2px); }
-.en-side:active { opacity: .7; }
+/* 执行页 —— 对齐设计稿 page-execution：页头(TabHeader) / 横滑卡组 / 督战 / 目标阶梯 / 军令(金) / 回填 / 复盘 */
 
 /* —— 战役卡组（exec-deck 横滑） —— */
 .exec-deck { width: 100%; margin-top: 2px; white-space: nowrap; }

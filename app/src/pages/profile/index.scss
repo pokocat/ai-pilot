@@ -1,23 +1,9 @@
-/* 我的页 —— 对齐设计稿 page-profile：居中标题 / 深绿用户卡 / 统计与额度 / 菜单 / 老师卡 / 深度能力卡 */
-
-/* —— 页头：居中标题 + 右「设置」 —— */
-.account-nav {
-  position: relative;
-  display: flex; align-items: center; justify-content: center;
-  margin-bottom: 6px;
-}
-.an-title { font-size: 23px; font-weight: 600; color: var(--ink); line-height: 1.1; }
-.an-side {
-  position: absolute; right: var(--cap-right, 2px); bottom: 14px;
-  color: var(--green);
-  font-size: 16px; font-weight: 600;
-}
-.an-side:active { opacity: .7; }
+/* 我的页 —— 对齐设计稿 page-profile：页头(TabHeader) / 深绿用户卡 / 统计与额度 / 菜单 / 老师卡 / 深度能力卡 */
 
 /* —— 用户卡（深绿） —— */
 .account-user-card {
   display: flex; align-items: center; gap: 12px;
-  margin-top: 4px; padding: 14px 16px;
+  padding: 14px 16px;
   border-radius: 18px;
   background: var(--green-hero);
   color: #fff;

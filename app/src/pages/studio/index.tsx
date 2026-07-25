@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
+import TabHeader from '../../components/TabHeader';
 import KbInput from '../../components/KbInput';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
@@ -268,12 +269,10 @@ export default function Studio() {
   return (
     <Screen topInset scroll={false}>
       <View className="pad exec">
-        {/* 页头（exec-nav）：左「案卷」· 中「军令」· 右「提醒」 */}
-        <View className="exec-nav tab-page-head">
-          <Text className="en-side left serif" onClick={() => navTo('/packages/work/projects/index')}>案卷</Text>
-          <Text className="en-title serif">军令</Text>
-          <Text className="en-side right serif" onClick={() => setView('review')}>复盘</Text>
-        </View>
+        {/* 页头（TabHeader）：小字用途 + 大字「军令」+ 背景「令」，不挂按钮。
+            原页头右侧的「复盘」与下方 exec-seg 的「复盘」及「21:30 复盘提醒」卡完全重复，已去掉；
+            「案卷」回归老板 tab（我的案卷菜单 + 案卷统计卡）。 */}
+        <TabHeader title="军令" kicker="做今天的事" glyph="令" />
 
         {/* 本页不挂 WO-07「下一步」卡：它与下方「今日战役」空态同为「去参谋室聊定打法」的导流，
             连「认可后自动拆成军令」都是同一句。军令页以战役卡为主，下一步卡仍留在战局/问策两 tab。 */}

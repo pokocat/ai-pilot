@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { View, Text, Image, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
+import TabHeader from '../../components/TabHeader';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import Picker from '../../components/Picker';
@@ -127,6 +128,8 @@ export default function Profile() {
     {
       title: '系统',
       rows: [
+        // 承接原页头右侧的「设置」（页头一律不放按钮）；用户卡姓名那块仍可点进同一页，但标签是「完善你的资料」，看不出是设置。
+        { ic: 'user', t: '设置 · 资料与关于', s: '', onClick: () => navTo('/packages/main/settings/index') },
         { ic: 'grid', t: '模块管理 · 添加 / 隐藏', s: '', onClick: () => navTo('/packages/work/market/index') },
         { ic: 'shield', t: '私有化部署 · 企业版', s: '预约', onClick: () => Taro.showToast({ title: '已记录企业版意向', icon: 'none' }) },
         {
@@ -143,11 +146,9 @@ export default function Profile() {
   return (
     <Screen topInset>
       <View className="pad account">
-        {/* 页头：居中「我的军师系统」· 右「设置」 */}
-        <View className="account-nav tab-page-head">
-          <Text className="an-title serif">我的军师系统</Text>
-          <Text className="an-side serif" onClick={() => navTo('/packages/main/settings/index')}>设置</Text>
-        </View>
+        {/* 页头（TabHeader）：小字用途 + 大字「老板」+ 背景「我」，不挂按钮。
+            「设置」下移到下方「系统」菜单组首行。 */}
+        <TabHeader title="老板" kicker="你自己" glyph="我" />
 
         {/* 账户服务卡（深绿 · §10.1）：头像 + 姓名 + 会员牌 / 手机·社群·邀请码 / 权益三格 / 服务动作 */}
         <View className="account-user-card account-service-card">
