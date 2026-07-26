@@ -1,4 +1,4 @@
-import { BASE_URL } from './config';
+import { getApiBaseUrl } from './runtimeMode';
 import { getToken } from './token';
 import { parseSSE, decodeUtf8, sliceCompleteBlocks } from './sse';
 import type { GenRequest, ChatReply, Deliverable, DeliverableSection } from '../../../shared/contracts';
@@ -133,7 +133,7 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
  * weapp 走 wx.request enableChunked + onChunkReceived；失败返回 false，由聊天页回退 /generate-sync。
  */
 export async function generateStream(body: GenRequest, h: StreamHandlers, control?: StreamControl): Promise<boolean> {
-  const url = `${BASE_URL}/generate`;
+  const url = `${getApiBaseUrl()}/generate`;
   const header = { 'Content-Type': 'application/json', 'x-user-id': getToken() };
   // B2：aborted 标记贯穿两端；被主动中断时静默收尾，不走 onError（避免留下「网络失败」气泡）。
   let aborted = false;

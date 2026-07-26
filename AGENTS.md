@@ -79,7 +79,8 @@ repo/
 实现要点：
 - `app/config/index.ts`：通过 `defineConstants` 显式注入 `process.env.TARO_APP_MODE` / `process.env.TARO_APP_API`，确保 H5/weapp 构建产物在浏览器/小程序运行时拿到构建期模式与 API 地址。
 - `app/src/services/config.ts`：`APP_MODE`（读已注入的 `process.env.TARO_APP_MODE`，默认 `mock`）、`IS_MOCK`、`BASE_URL`（读已注入的 `TARO_APP_API`）。不要在浏览器运行时再用 `typeof process` 包裹，否则 H5 bundle 会退回 mock/default。
-- `app/src/services/api.ts`：每个方法按 `IS_MOCK` 分流 mock 或真实请求，**两种模式同口径**（同样的入参/返回类型）。
+- `app/src/services/api.ts`：每个方法按 `useMockApi()` 分流 mock 或真实请求（通常等价于构建期 `IS_MOCK`，附身会按下条运行时切换），**两种模式同口径**（同样的入参/返回类型）。
+- **附身登录是唯一运行时数据源例外**：`api.verifyImpersonation` 无论 `APP_MODE` 为 `mock` 还是 `server` 都必须直连真实 `/me`，绝不能回退 `mock.me()`；server 包复用当前 `BASE_URL`（生产/预发不串环境），mock 包优先使用显式 `TARO_APP_API`，未传时固定验生产 `https://wxapi.aibuzz.cn/api`。验令通过并把三段 JWT 落入 storage 后，`services/runtimeMode.ts` 会让整个会话（普通 API、文件上传、流式对话、案卷与支付环境判断）跟随该真实身份走同一服务端；退出/换回 `mock-*` token 后自动恢复本地 mock。附身 token 只由真实后端签发；仅修验令而不切后续数据源会出现“登录成功但看到 mock 账号”的假附身。
 - `app/src/services/mock.ts`：前端 mock 后端，实现 login/me/agents/survey/profile/sayings/sessions/generate/library 全量接口；mock 数据来自 `app/src/data/agents.ts`、`app/src/data/deliverables.ts`（**由后端 seed 自动生成，勿手改**）。
 - mock 模式下登录/数据按 `mock-<手机号>` token 隔离并持久化，可切换账号验证隔离。
 - weapp + server 模式下登录弹层优先提供「微信账号登录」：前端 `Taro.login` 取 code，后端 `/auth/wechat-login` 调微信 `jscode2session` 换 openid/unionid 并签发自有 token；H5/mock 不显示该入口。

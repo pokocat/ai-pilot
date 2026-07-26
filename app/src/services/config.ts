@@ -12,6 +12,24 @@ export const IS_MOCK = APP_MODE === 'mock';
 export const BASE_URL =
   process.env.TARO_APP_API || 'http://localhost:4000/api';
 
+// 附身令牌始终由真实后端签发，不能跟随 APP_MODE 走 mock。
+// 本地 mock 包也允许运营排查线上账号：若构建时显式传 TARO_APP_API 则验该环境，
+// 否则回到生产 API。server 包仍严格复用自身 BASE_URL（含预发环境）。
+export function resolveImpersonationBaseUrl(
+  mode: AppMode,
+  baseUrl: string,
+  configuredApi = ''
+): string {
+  if (mode === 'server') return baseUrl;
+  return configuredApi.trim() || 'https://wxapi.aibuzz.cn/api';
+}
+
+export const IMPERSONATION_BASE_URL = resolveImpersonationBaseUrl(
+  APP_MODE,
+  BASE_URL,
+  process.env.TARO_APP_API || ''
+);
+
 // P1-B3：聊天流式渲染开关（默认开）。H5 走 fetch ReadableStream；
 // 微信小程序走 wx.request enableChunked + RequestTask.onChunkReceived。
 // 如需临时回退非流式，构建时置 TARO_APP_STREAM=0。

@@ -1,7 +1,7 @@
 import Taro from '@tarojs/taro';
 import { getToken } from './token';
-import { IS_MOCK } from './config';
 import { request } from './api';
+import { useMockApi } from './runtimeMode';
 import type { Deliverable, OrderActionType, OrderMetric, GoalLadder } from '../../../shared/contracts';
 
 // 战略案卷 · PR-EX 执行闭环落库：
@@ -191,7 +191,7 @@ async function migrateLocalIfNeeded(): Promise<Dossier | null> {
 
 /** 拉取当前案卷（server 模式含一次性本地迁移；未登录/失败返回 null）。 */
 export async function refreshDossier(): Promise<Dossier | null> {
-  if (IS_MOCK) return loadLocal();
+  if (useMockApi()) return loadLocal();
   if (!getToken()) return null;
   try {
     const r = await request<CasefileRes>('/casefile');
@@ -208,13 +208,13 @@ export async function acceptDeliverable(
   agentName: string,
   force?: string, // L-6：市势/人势研判 → 服务端提炼攻/守/等/撤结论
 ): Promise<{ dossier: Dossier | null; newOrders: number; skippedOrders: number }> {
-  if (IS_MOCK) return acceptLocal(deliverable, agentName, force);
+  if (useMockApi()) return acceptLocal(deliverable, agentName, force);
   const r = await request<CasefileRes>('/casefile/accept', 'POST', { deliverable, agentName, force });
   return { dossier: r.casefile, newOrders: r.newOrders ?? 0, skippedOrders: r.skippedOrders ?? 0 };
 }
 
 export async function toggleOrder(orderId: string): Promise<Dossier | null> {
-  if (IS_MOCK) {
+  if (useMockApi()) {
     const d = loadLocal();
     if (!d) return null;
     d.orders = d.orders.map((o) => (o.id === orderId ? { ...o, done: !o.done } : o));
@@ -228,7 +228,7 @@ export async function toggleOrder(orderId: string): Promise<Dossier | null> {
 /** 完成后就地回填「做完了多少」——一句话战果，不改动完成态。 */
 export async function setOrderResult(orderId: string, resultNote: string): Promise<Dossier | null> {
   const trimmed = resultNote.trim().slice(0, 200);
-  if (IS_MOCK) {
+  if (useMockApi()) {
     const d = loadLocal();
     if (!d) return null;
     d.orders = d.orders.map((o) => (o.id === orderId ? { ...o, resultNote: trimmed || null } : o));
@@ -243,7 +243,7 @@ export async function setOrderResult(orderId: string, resultNote: string): Promi
 export async function addOrder(text: string): Promise<Dossier | null> {
   const normalized = normalizeOrderText(text);
   if (!normalized) return refreshDossier();
-  if (IS_MOCK) {
+  if (useMockApi()) {
     const d = loadLocal();
     if (!d) return d;
     const date = today();
@@ -258,7 +258,7 @@ export async function addOrder(text: string): Promise<Dossier | null> {
 }
 
 export async function removeOrder(orderId: string): Promise<Dossier | null> {
-  if (IS_MOCK) {
+  if (useMockApi()) {
     const d = loadLocal();
     if (!d) return null;
     d.orders = d.orders.filter((o) => o.id !== orderId);
@@ -270,7 +270,7 @@ export async function removeOrder(orderId: string): Promise<Dossier | null> {
 }
 
 export async function saveBackfill(values: DailyBackfill): Promise<Dossier | null> {
-  if (IS_MOCK) {
+  if (useMockApi()) {
     const d = loadLocal();
     if (!d) return null;
     d.backfill[today()] = { ...values, savedAt: new Date().toISOString() };
@@ -283,7 +283,7 @@ export async function saveBackfill(values: DailyBackfill): Promise<Dossier | nul
 
 // V7-10：目标阶梯局部更新（3-5年/年度/季度/本周）。
 export async function saveGoals(patch: Partial<GoalLadder>): Promise<Dossier | null> {
-  if (IS_MOCK) {
+  if (useMockApi()) {
     const d = loadLocal();
     if (!d) return null;
     d.goals = { ...(d.goals ?? {}), ...patch, updatedAt: new Date().toISOString() };
@@ -297,7 +297,7 @@ export async function saveGoals(patch: Partial<GoalLadder>): Promise<Dossier | n
 /** 发起复盘（M2 PR-8）：落一条复盘账（服务端快照当日军令/回填事实），返回连续复盘天数。
  *  mock 模式无复盘账本，返回 null；失败静默（不阻塞进入复盘对话）。 */
 export async function startReview(layer: 'day' | 'week' | 'month' = 'day'): Promise<number | null> {
-  if (IS_MOCK || !getToken()) return null;
+  if (useMockApi() || !getToken()) return null;
   try {
     const r = await request<{ streak: number }>('/casefile/review', 'POST', { layer });
     return r.streak;

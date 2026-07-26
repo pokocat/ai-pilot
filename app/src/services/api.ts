@@ -1,6 +1,7 @@
 import Taro from '@tarojs/taro';
-import { IS_MOCK, BASE_URL } from './config';
+import { BASE_URL, IMPERSONATION_BASE_URL } from './config';
 import { getToken, setToken, clearToken } from './token';
+import { getApiBaseUrl, useMockApi } from './runtimeMode';
 import { mock } from './mock';
 import type {
   Me, Agent, SurveyQuestion, SessionItem, SessionDetail,
@@ -259,7 +260,8 @@ function httpErrorInfo(statusCode: number, data: unknown): { message: string; co
 
 // 导出给领域服务复用（如 services/dossier 案卷闭环）；页面代码仍应走 api.* 方法。
 export async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
-  const url = `${BASE_URL}${path}`;
+  const apiBaseUrl = getApiBaseUrl();
+  const url = `${apiBaseUrl}${path}`;
   let res: Taro.request.SuccessCallbackResult;
   try {
     res = await Taro.request({
@@ -270,7 +272,7 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
     });
   } catch (e) {
     const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
-    const origin = BASE_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
+    const origin = apiBaseUrl.replace(/\/api\/?$/, '').replace(/\/$/, '');
     const info = networkErrorInfo(errMsg, origin);
     throw Object.assign(new Error(info.message), { code: 'NETWORK_ERROR', reason: info.reason, errMsg, url, origin, technicalMessage: info.technicalMessage });
   }
@@ -296,7 +298,9 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
 // 原因：校验阶段还没落地新身份，若走 request() 的全局登出会误清当前登录态并把用户 reLaunch 回登录页。
 // 校验通过后再由调用方 store.afterLogin(token) 正式落地。
 async function requestWithToken<T>(path: string, token: string): Promise<T> {
-  const url = `${BASE_URL}${path}`;
+  // 附身 token 是真实后端签发的运维凭证。这里不能跟随普通业务的 mock 数据源，
+  // 否则 mock 包会用当前本地账号调用 mock.me()，未登录时必然误报「令牌无效」。
+  const url = `${IMPERSONATION_BASE_URL}${path}`;
   let res: Taro.request.SuccessCallbackResult;
   try {
     res = await Taro.request({
@@ -306,7 +310,7 @@ async function requestWithToken<T>(path: string, token: string): Promise<T> {
     });
   } catch (e) {
     const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
-    const origin = BASE_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
+    const origin = IMPERSONATION_BASE_URL.replace(/\/api\/?$/, '').replace(/\/$/, '');
     const info = networkErrorInfo(errMsg, origin);
     throw Object.assign(new Error(info.message), { code: 'NETWORK_ERROR', reason: info.reason });
   }
@@ -335,7 +339,7 @@ async function uploadKnowledgeFile(
   if (opts.projectId) qs.push(`projectId=${opts.projectId}`);
   if (opts.staged) qs.push('staged=true');
   if (opts.batchId) qs.push(`batchId=${opts.batchId}`);
-  const url = `${BASE_URL}/knowledge/upload${qs.length ? `?${qs.join('&')}` : ''}`;
+  const url = `${getApiBaseUrl()}/knowledge/upload${qs.length ? `?${qs.join('&')}` : ''}`;
   // Taro.uploadFile 返回 UploadTaskPromise：既是 Promise 又带 abort/onProgressUpdate，先拿 task 再 await 结果。
   const task = Taro.uploadFile({
     url,
@@ -365,7 +369,7 @@ async function uploadChatImageFile(
 ): Promise<{ id: string }> {
   const qs = opts.projectId ? `?projectId=${opts.projectId}` : '';
   const task = Taro.uploadFile({
-    url: `${BASE_URL}/chat/image-upload${qs}`,
+    url: `${getApiBaseUrl()}/chat/image-upload${qs}`,
     filePath,
     name: 'file',
     formData: opts.originalName ? { originalName: opts.originalName } : undefined,
@@ -385,7 +389,7 @@ async function uploadChatImageFile(
 
 // 头像上传：multipart 单文件 → 后端存 OSS → 落库 user.avatarUrl，返回公网链接。
 async function uploadAvatarFile(filePath: string): Promise<{ ok: boolean; avatarUrl: string }> {
-  const res = await Taro.uploadFile({ url: `${BASE_URL}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': getToken() } });
+  const res = await Taro.uploadFile({ url: `${getApiBaseUrl()}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': getToken() } });
   if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
@@ -398,239 +402,239 @@ async function uploadAvatarFile(filePath: string): Promise<{ ok: boolean; avatar
 // —— API：mock 模式走本地数据源，server 模式连真实后端，口径完全一致 ——
 export const api = {
   suggestAlias: () =>
-    IS_MOCK ? mock.suggestAlias() : request<AliasSuggestionResult>('/auth/suggest-name'),
+    useMockApi() ? mock.suggestAlias() : request<AliasSuggestionResult>('/auth/suggest-name'),
   sendSmsCode: (phone: string, scene?: 'login' | 'bind') =>
-    IS_MOCK ? mock.sendSmsCode(phone, scene) : request<SmsSendResult>('/auth/sms/send', 'POST', { phone, scene }),
+    useMockApi() ? mock.sendSmsCode(phone, scene) : request<SmsSendResult>('/auth/sms/send', 'POST', { phone, scene }),
   login: (phone: string, name?: string, code?: string) =>
-    IS_MOCK ? mock.login(phone, name, code) : request<LoginResult>('/auth/login', 'POST', { phone, name, code }),
+    useMockApi() ? mock.login(phone, name, code) : request<LoginResult>('/auth/login', 'POST', { phone, name, code }),
   wechatLogin: (code: string, nickname?: string, avatarUrl?: string) =>
-    IS_MOCK ? mock.wechatLogin(code, nickname, avatarUrl) : request<LoginResult>('/auth/wechat-login', 'POST', { code, nickname, avatarUrl }),
+    useMockApi() ? mock.wechatLogin(code, nickname, avatarUrl) : request<LoginResult>('/auth/wechat-login', 'POST', { code, nickname, avatarUrl }),
   // 绑定手机号（微信登录后强制）：需登录态。①微信一键 phoneCode；②短信 phone+code 兜底。
   bindPhone: (phone: string, code: string) =>
-    IS_MOCK ? mock.bindPhone(phone, code) : request<BindPhoneResult>('/auth/bind-phone', 'POST', { phone, code }),
+    useMockApi() ? mock.bindPhone(phone, code) : request<BindPhoneResult>('/auth/bind-phone', 'POST', { phone, code }),
   bindPhoneByWechat: (phoneCode: string) =>
-    IS_MOCK ? mock.bindPhone(undefined, undefined, phoneCode) : request<BindPhoneResult>('/auth/bind-phone', 'POST', { phoneCode }),
+    useMockApi() ? mock.bindPhone(undefined, undefined, phoneCode) : request<BindPhoneResult>('/auth/bind-phone', 'POST', { phoneCode }),
   // 本机号一键登录：phoneCode=getPhoneNumber 的 code，loginCode=wx.login 的 code（用于关联 openid）。
   wechatPhoneLogin: (phoneCode: string, loginCode?: string, name?: string) =>
-    IS_MOCK ? mock.wechatPhoneLogin(phoneCode, name) : request<LoginResult>('/auth/wechat-phone', 'POST', { phoneCode, loginCode, name }),
-  me: () => (IS_MOCK ? mock.me() : request<Me>('/me')),
+    useMockApi() ? mock.wechatPhoneLogin(phoneCode, name) : request<LoginResult>('/auth/wechat-phone', 'POST', { phoneCode, loginCode, name }),
+  me: () => (useMockApi() ? mock.me() : request<Me>('/me')),
   // 附身令牌校验（运营排查）：用传入 token 直连 /me 验证有效性；有效返回目标用户 Me，无效抛错。
   // 全程不落 storage、不触发全局登出——由调用方在校验通过后再 store.afterLogin(token) 正式落地。
   verifyImpersonation: (token: string) =>
-    IS_MOCK ? mock.me() : requestWithToken<Me>('/me', token),
-  myCredits: () => (IS_MOCK ? mock.myCredits() : request<MyCreditsView>('/me/credits')),
-  plans: () => (IS_MOCK ? mock.plans() : request<Plan[]>('/plans')),
+    requestWithToken<Me>('/me', token),
+  myCredits: () => (useMockApi() ? mock.myCredits() : request<MyCreditsView>('/me/credits')),
+  plans: () => (useMockApi() ? mock.plans() : request<Plan[]>('/plans')),
   purchasePlan: (id: string) =>
-    IS_MOCK ? mock.purchasePlan(id) : request<PlanPurchaseResult>(`/plans/${id}/purchase`, 'POST', {}),
+    useMockApi() ? mock.purchasePlan(id) : request<PlanPurchaseResult>(`/plans/${id}/purchase`, 'POST', {}),
   // 微信支付下单（小程序 JSAPI）：返回 wx.requestPayment 调起参数 + 月→年折算明细。
   createOrder: (id: string, openid?: string) =>
-    IS_MOCK ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', openid ? { openid } : {}),
+    useMockApi() ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', openid ? { openid } : {}),
   // V7-12：单次付费商品（SKU）目录 + 下单。mock 走假支付成功流并本地发放权益。
-  skus: () => (IS_MOCK ? mock.skus() : request<SkuView[]>('/skus')),
+  skus: () => (useMockApi() ? mock.skus() : request<SkuView[]>('/skus')),
   // D-1 开通来源归因：下单带可选 source（'prescription'|'catalog'|'market'）+ refId（source=prescription 时的处方 id）。
   createSkuOrder: (key: string, openid?: string, attribution?: ActivationAttribution) =>
-    IS_MOCK ? mock.createSkuOrder(key) : request<SkuOrderResult>(`/skus/${key}/order`, 'POST', { ...(openid ? { openid } : {}), ...attribution }),
+    useMockApi() ? mock.createSkuOrder(key) : request<SkuOrderResult>(`/skus/${key}/order`, 'POST', { ...(openid ? { openid } : {}), ...attribution }),
   // 支付订单状态（仅本人订单）：requestPayment 成功后轮询，appliedAt 有值 = 权益到账；
   // 服务端在未发放时会先主动查单补账（回调丢失也能自愈）。统一走 services/pay.ts 的 awaitPaymentApplied。
   payOrderStatus: (outTradeNo: string) =>
-    IS_MOCK ? mock.payOrderStatus(outTradeNo) : request<PayOrderStatus>(`/pay/orders/${outTradeNo}`),
+    useMockApi() ? mock.payOrderStatus(outTradeNo) : request<PayOrderStatus>(`/pay/orders/${outTradeNo}`),
   // 我的支付订单列表（订单明细页）+ 继续支付（对未过时限的待支付单重签调起参数）。
-  myOrders: () => (IS_MOCK ? mock.myOrders() : request<PayOrderListResult>('/pay/orders')),
+  myOrders: () => (useMockApi() ? mock.myOrders() : request<PayOrderListResult>('/pay/orders')),
   orderPayParams: (outTradeNo: string) =>
-    IS_MOCK ? mock.orderPayParams(outTradeNo) : request<PayRepayResult>(`/pay/orders/${outTradeNo}/pay-params`, 'POST', {}),
+    useMockApi() ? mock.orderPayParams(outTradeNo) : request<PayRepayResult>(`/pay/orders/${outTradeNo}/pay-params`, 'POST', {}),
   wechatSubscribeTemplates: () =>
-    IS_MOCK ? Promise.resolve({ scenes: [] } as WechatSubscribeTemplatesResult) : request<WechatSubscribeTemplatesResult>('/wechat/subscribe/templates'),
+    useMockApi() ? Promise.resolve({ scenes: [] } as WechatSubscribeTemplatesResult) : request<WechatSubscribeTemplatesResult>('/wechat/subscribe/templates'),
   recordWechatSubscription: (choices: WechatSubscribeChoice[]) =>
-    IS_MOCK ? Promise.resolve({ ok: true, accepted: choices.filter((c) => c.status === 'accept').length } as WechatSubscribeRecordResult)
+    useMockApi() ? Promise.resolve({ ok: true, accepted: choices.filter((c) => c.status === 'accept').length } as WechatSubscribeRecordResult)
       : request<WechatSubscribeRecordResult>('/wechat/subscribe', 'POST', { choices }),
   setColor: (color: string) =>
-    IS_MOCK ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),
+    useMockApi() ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),
   updateIdentity: (body: { name?: string; company?: string; avatarUrl?: string }) =>
-    IS_MOCK ? mock.updateIdentity(body) : request<{ ok: boolean; name?: string; company?: string; avatarUrl?: string }>('/me', 'PUT', body),
+    useMockApi() ? mock.updateIdentity(body) : request<{ ok: boolean; name?: string; company?: string; avatarUrl?: string }>('/me', 'PUT', body),
   uploadAvatar: (filePath: string) =>
-    IS_MOCK ? mock.uploadAvatar(filePath) : uploadAvatarFile(filePath),
+    useMockApi() ? mock.uploadAvatar(filePath) : uploadAvatarFile(filePath),
   deleteAccount: () =>
-    IS_MOCK ? mock.deleteAccount() : request<{ ok: boolean }>('/me', 'DELETE'),
-  agents: () => (IS_MOCK ? mock.agents() : request<Agent[]>('/agents')),
+    useMockApi() ? mock.deleteAccount() : request<{ ok: boolean }>('/me', 'DELETE'),
+  agents: () => (useMockApi() ? mock.agents() : request<Agent[]>('/agents')),
   // D-1 开通来源归因：解锁 agent 带可选 source/refId（缺省服务端按 catalog 记）。
   purchaseAgent: (key: string, attribution?: ActivationAttribution) =>
-    IS_MOCK ? mock.purchaseAgent(key) : request<AgentPurchaseResult>(`/agents/${key}/purchase`, 'POST', { ...attribution }),
-  survey: () => (IS_MOCK ? mock.survey() : request<SurveyQuestion[]>('/survey')),
+    useMockApi() ? mock.purchaseAgent(key) : request<AgentPurchaseResult>(`/agents/${key}/purchase`, 'POST', { ...attribution }),
+  survey: () => (useMockApi() ? mock.survey() : request<SurveyQuestion[]>('/survey')),
   quickScan: (req: QuickScanRequest) =>
-    IS_MOCK ? mock.quickScan(req) : request<QuickScanResult>('/quickscan', 'POST', req),
-  journey: () => (IS_MOCK ? mock.journey() : request<JourneyView>('/journey')),
+    useMockApi() ? mock.quickScan(req) : request<QuickScanResult>('/quickscan', 'POST', req),
+  journey: () => (useMockApi() ? mock.journey() : request<JourneyView>('/journey')),
   // V7-04：三势刷新 + 认可判断一键生成军令与报告。
-  refreshForces: () => (IS_MOCK ? mock.refreshForces() : request<{ forces: BattleForce[] }>('/forces/refresh', 'POST', {})),
-  battleCommit: () => (IS_MOCK ? mock.battleCommit() : request<BattleCommitResult>('/battle/commit', 'POST', {})),
-  prescriptions: () => (IS_MOCK ? mock.prescriptions() : request<PrescriptionListView>('/prescriptions')),
+  refreshForces: () => (useMockApi() ? mock.refreshForces() : request<{ forces: BattleForce[] }>('/forces/refresh', 'POST', {})),
+  battleCommit: () => (useMockApi() ? mock.battleCommit() : request<BattleCommitResult>('/battle/commit', 'POST', {})),
+  prescriptions: () => (useMockApi() ? mock.prescriptions() : request<PrescriptionListView>('/prescriptions')),
   prescriptionAction: (id: string, action: string) =>
-    IS_MOCK ? mock.prescriptionAction(id, action) : request<{ ok: boolean }>(`/prescriptions/${id}/${action}`, 'POST'),
-  brandKit: () => (IS_MOCK ? mock.brandKit() : request<BrandKitView | null>('/brand-kit')),
-  generateBrandKit: () => (IS_MOCK ? mock.generateBrandKit() : request<BrandKitView>('/brand-kit/generate', 'POST')),
-  approveBrandKit: () => (IS_MOCK ? mock.approveBrandKit() : request<{ ok: boolean }>('/brand-kit/approve', 'POST')),
-  getProfile: () => (IS_MOCK ? mock.getProfile() : request<Profile | null>('/profile')),
-  saveProfile: (p: Profile) => (IS_MOCK ? mock.saveProfile(p) : request<Profile>('/profile', 'PUT', p)),
+    useMockApi() ? mock.prescriptionAction(id, action) : request<{ ok: boolean }>(`/prescriptions/${id}/${action}`, 'POST'),
+  brandKit: () => (useMockApi() ? mock.brandKit() : request<BrandKitView | null>('/brand-kit')),
+  generateBrandKit: () => (useMockApi() ? mock.generateBrandKit() : request<BrandKitView>('/brand-kit/generate', 'POST')),
+  approveBrandKit: () => (useMockApi() ? mock.approveBrandKit() : request<{ ok: boolean }>('/brand-kit/approve', 'POST')),
+  getProfile: () => (useMockApi() ? mock.getProfile() : request<Profile | null>('/profile')),
+  saveProfile: (p: Profile) => (useMockApi() ? mock.saveProfile(p) : request<Profile>('/profile', 'PUT', p)),
   // 八字采集（M1 PR-2）：录入生辰 → 服务端排盘引擎落库；believe=false 表示不用命理视角
   saveBazi: (body: BaziBody) =>
-    IS_MOCK ? mock.saveBazi(body) : request<{ believe: boolean; chart: ChartSummary | null }>('/profile/bazi', 'PUT', body),
+    useMockApi() ? mock.saveBazi(body) : request<{ believe: boolean; chart: ChartSummary | null }>('/profile/bazi', 'PUT', body),
   myChart: () =>
-    IS_MOCK ? mock.myChart() : request<{ bazi: BaziBody | null; chart: ChartSummary | null }>('/profile/chart'),
+    useMockApi() ? mock.myChart() : request<{ bazi: BaziBody | null; chart: ChartSummary | null }>('/profile/chart'),
   // 命盘报告（八字 × 紫微综合印证）：无生辰 → { needBazi:true }；有生辰 → 按需现算 MingpanReport（不落库）
   myChartReport: () =>
-    IS_MOCK ? mock.myChartReport() : request<MingpanReportResp>('/profile/chart/report'),
+    useMockApi() ? mock.myChartReport() : request<MingpanReportResp>('/profile/chart/report'),
   // 战略档案（年度谶语卡）：mock 无战略档案数据源 → null（前端落到求谶引导态，不编造谶语）
   strategicProfile: () =>
-    IS_MOCK ? Promise.resolve({ strategic: null as StrategicProfileView | null })
+    useMockApi() ? Promise.resolve({ strategic: null as StrategicProfileView | null })
       : request<{ strategic: StrategicProfileView | null }>('/profile/strategic'),
   // 用户进度（段位/里程碑）与复盘账本（M4 PR-18 前端落位；mock 无账本返回空 → 界面隐藏对应区块）
   progress: () =>
-    IS_MOCK ? mock.progress() : request<{ progress: ProgressView | null }>('/progress'),
+    useMockApi() ? mock.progress() : request<{ progress: ProgressView | null }>('/progress'),
   // 账本闭环（F-8/P-2）：决策账本 / 天机账本 + 用户点命中/未中验证
   decisions: () =>
-    IS_MOCK ? mock.decisions() : request<DecisionLedger>('/decisions'),
+    useMockApi() ? mock.decisions() : request<DecisionLedger>('/decisions'),
   verifyDecision: (id: string, outcome: 'correct' | 'revise', note?: string) =>
-    IS_MOCK ? mock.verifyDecision(id, outcome) : request<{ decision: DecisionView; stats: DecisionStats }>(`/decisions/${id}/verify`, 'POST', { outcome, note }),
+    useMockApi() ? mock.verifyDecision(id, outcome) : request<{ decision: DecisionView; stats: DecisionStats }>(`/decisions/${id}/verify`, 'POST', { outcome, note }),
   prophecies: () =>
-    IS_MOCK ? mock.prophecies() : request<ProphecyLedger>('/prophecies'),
+    useMockApi() ? mock.prophecies() : request<ProphecyLedger>('/prophecies'),
   verifyProphecy: (id: string, outcome: 'hit' | 'miss', note?: string) =>
-    IS_MOCK ? mock.verifyProphecy(id, outcome) : request<{ prophecy: ProphecyView; stats: ProphecyStats }>(`/prophecies/${id}/verify`, 'POST', { outcome, note }),
+    useMockApi() ? mock.verifyProphecy(id, outcome) : request<{ prophecy: ProphecyView; stats: ProphecyStats }>(`/prophecies/${id}/verify`, 'POST', { outcome, note }),
   reviews: () =>
-    IS_MOCK ? Promise.resolve({ items: [], streak: 0 } as ReviewsResult) : request<ReviewsResult>('/reviews'),
+    useMockApi() ? Promise.resolve({ items: [], streak: 0 } as ReviewsResult) : request<ReviewsResult>('/reviews'),
   // 账本异议（WO-11）：对某条决策/预言提交「有出入」→ 复盘时军师与用户对账
   disputeDecision: (id: string, dispute: string) =>
-    IS_MOCK ? mock.disputeDecision(id, dispute) : request<{ ok: boolean }>(`/decisions/${id}`, 'PATCH', { dispute }),
+    useMockApi() ? mock.disputeDecision(id, dispute) : request<{ ok: boolean }>(`/decisions/${id}`, 'PATCH', { dispute }),
   disputeProphecy: (id: string, dispute: string) =>
-    IS_MOCK ? mock.disputeProphecy(id, dispute) : request<{ ok: boolean }>(`/prophecies/${id}`, 'PATCH', { dispute }),
+    useMockApi() ? mock.disputeProphecy(id, dispute) : request<{ ok: boolean }>(`/prophecies/${id}`, 'PATCH', { dispute }),
   // WO-10 经营周报：模板（按行业）/ 最近 N 周序列 / 上报某周（weekStart=YYYY-MM-DD 周一，与服务端归一口径一致）
   bizMetricTemplate: () =>
-    IS_MOCK ? mock.bizMetricTemplate() : request<{ items: BizMetricTemplateItem[] }>('/biz-metrics/template'),
+    useMockApi() ? mock.bizMetricTemplate() : request<{ items: BizMetricTemplateItem[] }>('/biz-metrics/template'),
   bizMetricSeries: (weeks = 8) =>
-    IS_MOCK ? mock.bizMetricSeries(weeks) : request<{ items: BizMetricWeek[] }>(`/biz-metrics?weeks=${weeks}`),
+    useMockApi() ? mock.bizMetricSeries(weeks) : request<{ items: BizMetricWeek[] }>(`/biz-metrics?weeks=${weeks}`),
   saveBizMetrics: (weekStart: string, metrics: Record<string, number>) =>
-    IS_MOCK ? mock.saveBizMetrics(weekStart, metrics) : request<{ ok: boolean }>(`/biz-metrics/${weekStart}`, 'PUT', { metrics }),
+    useMockApi() ? mock.saveBizMetrics(weekStart, metrics) : request<{ ok: boolean }>(`/biz-metrics/${weekStart}`, 'PUT', { metrics }),
   // B 级卡片（每日战报/天时日历）：返回可分享网页链接；mock 无渲染管道返回 null
   publishCard: (kind: 'daily' | 'calendar', body?: { friendName?: string; friendBazi?: BaziBody }) =>
-    IS_MOCK ? Promise.resolve({ htmlUrl: null as string | null }) : request<{ htmlUrl: string | null }>(`/cards/${kind}`, 'POST', body ?? {}),
+    useMockApi() ? Promise.resolve({ htmlUrl: null as string | null }) : request<{ htmlUrl: string | null }>(`/cards/${kind}`, 'POST', body ?? {}),
   // 送你一卦「天命速写」预览（合规打磨·P-4）：现算即返、不落库、无公开链接；前端 canvas 画卡导出图片分享
   fateCardPreview: (body: { friendName: string; friendBazi: BaziBody; consent: boolean }) =>
-    IS_MOCK ? mock.fateCardPreview(body) : request<FateCardContent>('/cards/fate/preview', 'POST', body),
-  todaySaying: () => (IS_MOCK ? mock.todaySaying() : request<TodaySaying>('/sayings/today')),
-  sessions: () => (IS_MOCK ? mock.sessions() : request<SessionItem[]>('/sessions')),
-  session: (id: string) => (IS_MOCK ? mock.session(id) : request<SessionDetail>(`/sessions/${id}`)),
+    useMockApi() ? mock.fateCardPreview(body) : request<FateCardContent>('/cards/fate/preview', 'POST', body),
+  todaySaying: () => (useMockApi() ? mock.todaySaying() : request<TodaySaying>('/sayings/today')),
+  sessions: () => (useMockApi() ? mock.sessions() : request<SessionItem[]>('/sessions')),
+  session: (id: string) => (useMockApi() ? mock.session(id) : request<SessionDetail>(`/sessions/${id}`)),
   deleteSession: (id: string) =>
-    IS_MOCK ? mock.deleteSession(id) : request(`/sessions/${id}`, 'DELETE'),
+    useMockApi() ? mock.deleteSession(id) : request(`/sessions/${id}`, 'DELETE'),
   generate: (body: GenRequest) =>
-    IS_MOCK ? mock.generate(body) : request<GenResult>('/generate-sync', 'POST', body),
-  library: () => (IS_MOCK ? mock.library() : request<LibItem[]>('/library')),
+    useMockApi() ? mock.generate(body) : request<GenResult>('/generate-sync', 'POST', body),
+  library: () => (useMockApi() ? mock.library() : request<LibItem[]>('/library')),
   saveToLibrary: (body: SaveLibRequest) =>
-    IS_MOCK ? mock.saveToLibrary(body) : request<{ id: string; at: string; reportId?: string; version?: number }>('/library', 'POST', body),
+    useMockApi() ? mock.saveToLibrary(body) : request<{ id: string; at: string; reportId?: string; version?: number }>('/library', 'POST', body),
 
   // —— 项目（企业事务主线） ——
-  projects: () => (IS_MOCK ? mock.projects() : request<ProjectItem[]>('/projects')),
-  project: (id: string) => (IS_MOCK ? mock.project(id) : request<ProjectDetail>(`/projects/${id}`)),
+  projects: () => (useMockApi() ? mock.projects() : request<ProjectItem[]>('/projects')),
+  project: (id: string) => (useMockApi() ? mock.project(id) : request<ProjectDetail>(`/projects/${id}`)),
   createProject: (body: CreateProjectRequest) =>
-    IS_MOCK ? mock.createProject(body) : request<{ id: string; name: string; slug: string }>('/projects', 'POST', body),
+    useMockApi() ? mock.createProject(body) : request<{ id: string; name: string; slug: string }>('/projects', 'POST', body),
   updateProject: (id: string, body: UpdateProjectRequest) =>
-    IS_MOCK ? mock.updateProject(id, body) : request<{ ok: boolean }>(`/projects/${id}`, 'PUT', body),
+    useMockApi() ? mock.updateProject(id, body) : request<{ ok: boolean }>(`/projects/${id}`, 'PUT', body),
   deleteProject: (id: string) =>
-    IS_MOCK ? mock.deleteProject(id) : request<{ ok: boolean }>(`/projects/${id}`, 'DELETE'),
+    useMockApi() ? mock.deleteProject(id) : request<{ ok: boolean }>(`/projects/${id}`, 'DELETE'),
 
   // —— 版本化报告 ——
   reports: (projectId?: string) =>
-    IS_MOCK ? mock.reports(projectId) : request<ReportItem[]>(`/reports${projectId ? `?projectId=${projectId}` : ''}`),
-  report: (id: string) => (IS_MOCK ? mock.report(id) : request<ReportDetail>(`/reports/${id}`)),
+    useMockApi() ? mock.reports(projectId) : request<ReportItem[]>(`/reports${projectId ? `?projectId=${projectId}` : ''}`),
+  report: (id: string) => (useMockApi() ? mock.report(id) : request<ReportDetail>(`/reports/${id}`)),
   reportVersion: (id: string, v?: number) =>
-    IS_MOCK ? mock.reportVersion(id, v) : request<ReportVersionContent>(`/reports/${id}/version${v ? `?v=${v}` : ''}`),
+    useMockApi() ? mock.reportVersion(id, v) : request<ReportVersionContent>(`/reports/${id}/version${v ? `?v=${v}` : ''}`),
   reportDiff: (id: string, from: number, to: number) =>
-    IS_MOCK ? mock.reportDiff(id, from, to) : request<ReportDiff>(`/reports/${id}/diff?from=${from}&to=${to}`),
+    useMockApi() ? mock.reportDiff(id, from, to) : request<ReportDiff>(`/reports/${id}/diff?from=${from}&to=${to}`),
   saveReport: (body: SaveReportRequest) =>
-    IS_MOCK ? mock.saveReport(body) : request<SaveReportResult>('/reports', 'POST', body),
+    useMockApi() ? mock.saveReport(body) : request<SaveReportResult>('/reports', 'POST', body),
 
   // —— 知识库 ——
   knowledge: (projectId?: string, kind?: string) =>
-    IS_MOCK ? mock.knowledge(projectId, kind)
+    useMockApi() ? mock.knowledge(projectId, kind)
       : request<KnowledgeItemT[]>(`/knowledge${projectId || kind ? `?${projectId ? `projectId=${projectId}` : ''}${projectId && kind ? '&' : ''}${kind ? `kind=${kind}` : ''}` : ''}`),
   knowledgeSearch: (q: string, projectId?: string) =>
-    IS_MOCK ? mock.knowledgeSearch(q, projectId)
+    useMockApi() ? mock.knowledgeSearch(q, projectId)
       : request<KnowledgeHit[]>(`/knowledge/search?q=${encodeURIComponent(q)}${projectId ? `&projectId=${projectId}` : ''}`),
   createKnowledge: (body: CreateKnowledgeRequest) =>
-    IS_MOCK ? mock.createKnowledge(body) : request<KnowledgeItemT>('/knowledge', 'POST', body),
+    useMockApi() ? mock.createKnowledge(body) : request<KnowledgeItemT>('/knowledge', 'POST', body),
   deleteKnowledge: (id: string) =>
-    IS_MOCK ? mock.deleteKnowledge(id) : request<{ ok: boolean }>(`/knowledge/${id}`, 'DELETE'),
+    useMockApi() ? mock.deleteKnowledge(id) : request<{ ok: boolean }>(`/knowledge/${id}`, 'DELETE'),
   // —— 长期记忆（@引用候选 P1-C3 + 记忆中心 P1-C2）——
   memories: (agentKey?: string, q?: string) =>
-    IS_MOCK ? mock.memories()
+    useMockApi() ? mock.memories()
       : request<MemoryCandidate[]>(`/memories${agentKey || q ? `?${agentKey ? `agentKey=${agentKey}` : ''}${agentKey && q ? '&' : ''}${q ? `q=${encodeURIComponent(q)}` : ''}` : ''}`),
   // 军师记忆库（P2）：主公档案页「军师记事」六类结构化
   memoryLibrary: () =>
-    IS_MOCK ? mock.memoryLibrary() : request<MemoryLibraryView>('/me/memory-library'),
+    useMockApi() ? mock.memoryLibrary() : request<MemoryLibraryView>('/me/memory-library'),
   // 完整履历（P3）：读缓存 / 生成
   dossier: () =>
-    IS_MOCK ? mock.dossier() : request<DossierView>('/me/dossier'),
+    useMockApi() ? mock.dossier() : request<DossierView>('/me/dossier'),
   generateDossier: () =>
-    IS_MOCK ? mock.generateDossier() : request<{ report: DossierReport; generatedAt: string }>('/me/dossier/generate', 'POST'),
+    useMockApi() ? mock.generateDossier() : request<{ report: DossierReport; generatedAt: string }>('/me/dossier/generate', 'POST'),
   deleteMemory: (id: string) =>
-    IS_MOCK ? mock.deleteMemory() : request<{ ok: boolean }>(`/memories/${id}`, 'DELETE'),
+    useMockApi() ? mock.deleteMemory() : request<{ ok: boolean }>(`/memories/${id}`, 'DELETE'),
   updateMemory: (id: string, text: string) =>
-    IS_MOCK ? mock.deleteMemory() : request<{ ok: boolean }>(`/memories/${id}`, 'PATCH', { text }),
+    useMockApi() ? mock.deleteMemory() : request<{ ok: boolean }>(`/memories/${id}`, 'PATCH', { text }),
   // —— 我的资料库（文档视图 + 上传） ——
   knowledgeDocs: (projectId?: string) =>
-    IS_MOCK ? mock.knowledgeDocs() : request<KnowledgeDocRow[]>(`/knowledge/docs${projectId ? `?projectId=${projectId}` : ''}`),
+    useMockApi() ? mock.knowledgeDocs() : request<KnowledgeDocRow[]>(`/knowledge/docs${projectId ? `?projectId=${projectId}` : ''}`),
   knowledgeDetail: (id: string) =>
-    IS_MOCK ? mock.knowledgeDetail(id) : request<KnowledgeDetail>(`/knowledge/${id}`),
+    useMockApi() ? mock.knowledgeDetail(id) : request<KnowledgeDetail>(`/knowledge/${id}`),
   // WO-09 经营体检：对已解析的财务/经营表发起体检，产出报告（reportId → 报告详情页）。
   analyzeKnowledge: (id: string) =>
-    IS_MOCK ? mock.analyzeKnowledge(id) : request<AnalyzeResult>(`/knowledge/${id}/analyze`, 'POST', {}),
+    useMockApi() ? mock.analyzeKnowledge(id) : request<AnalyzeResult>(`/knowledge/${id}/analyze`, 'POST', {}),
   reembedKnowledge: (id: string) =>
-    IS_MOCK ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
+    useMockApi() ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
   uploadKnowledge: (filePath: string, projectId?: string, staged?: boolean, batchId?: string, originalName?: string, hooks?: UploadHooks) =>
-    IS_MOCK ? mock.uploadKnowledgeStaged(staged, batchId, originalName) : uploadKnowledgeFile(filePath, { projectId, staged, batchId, originalName }, hooks),
+    useMockApi() ? mock.uploadKnowledgeStaged(staged, batchId, originalName) : uploadKnowledgeFile(filePath, { projectId, staged, batchId, originalName }, hooks),
   // 聊天图片上传（多模态阅图）：存 OSS 私有 + 建 image 条目，返回 { id }。
   uploadChatImage: (filePath: string, projectId?: string, originalName?: string, hooks?: UploadHooks) =>
-    IS_MOCK ? Promise.resolve({ id: `mock-img-${Date.now()}` }) : uploadChatImageFile(filePath, { projectId, originalName }, hooks),
+    useMockApi() ? Promise.resolve({ id: `mock-img-${Date.now()}` }) : uploadChatImageFile(filePath, { projectId, originalName }, hooks),
   // 图片有时限签名预览 URL（复用 knowledge 原件预览端点）：渲染缩略图 / 点开大图用。
   chatImageUrl: (id: string) =>
-    IS_MOCK ? Promise.resolve({ url: '' }) : request<{ url: string }>(`/knowledge/${id}/preview`),
+    useMockApi() ? Promise.resolve({ url: '' }) : request<{ url: string }>(`/knowledge/${id}/preview`),
 
   // —— V7-06 智库三段式资料整理管道 ——
-  knowledgePipeline: () => (IS_MOCK ? mock.knowledgePipeline() : request<KnowledgePipelineView>('/knowledge/pipeline')),
+  knowledgePipeline: () => (useMockApi() ? mock.knowledgePipeline() : request<KnowledgePipelineView>('/knowledge/pipeline')),
   organizeBatch: (batchId: string) =>
-    IS_MOCK ? mock.organizeBatch(batchId) : request<OrganizeResult>('/knowledge/organize', 'POST', { batchId }),
+    useMockApi() ? mock.organizeBatch(batchId) : request<OrganizeResult>('/knowledge/organize', 'POST', { batchId }),
   confirmKnowledge: (body: { ids?: string[]; batchId?: string }) =>
-    IS_MOCK ? mock.confirmKnowledge(body) : request<ConfirmResult>('/knowledge/confirm', 'POST', body),
+    useMockApi() ? mock.confirmKnowledge(body) : request<ConfirmResult>('/knowledge/confirm', 'POST', body),
   deepOrganize: (batchId: string) =>
-    IS_MOCK ? mock.deepOrganize(batchId) : request<OrganizeResult>('/knowledge/deep-organize', 'POST', { batchId }),
+    useMockApi() ? mock.deepOrganize(batchId) : request<OrganizeResult>('/knowledge/deep-organize', 'POST', { batchId }),
 
   // —— V7-07 数据源状态持久化 ——
-  dataSources: () => (IS_MOCK ? mock.getDataSources() : request<DataSourcesView>('/data-sources')),
+  dataSources: () => (useMockApi() ? mock.getDataSources() : request<DataSourcesView>('/data-sources')),
   uploadDataSource: (key: string, knowledgeId?: string) =>
-    IS_MOCK ? mock.uploadDataSource(key) : request<DataSourcesView>(`/data-sources/${key}/upload`, 'POST', knowledgeId ? { knowledgeId } : {}),
+    useMockApi() ? mock.uploadDataSource(key) : request<DataSourcesView>(`/data-sources/${key}/upload`, 'POST', knowledgeId ? { knowledgeId } : {}),
   requestDataSourceAuth: (key: string) =>
-    IS_MOCK ? mock.requestDataSourceAuth(key) : request<DataSourcesView>(`/data-sources/${key}/request-auth`, 'POST', {}),
+    useMockApi() ? mock.requestDataSourceAuth(key) : request<DataSourcesView>(`/data-sources/${key}/request-auth`, 'POST', {}),
 
   // —— V7-08 能力/模块中心 ——
-  modules: () => (IS_MOCK ? mock.modules() : request<ModulesView>('/modules')),
+  modules: () => (useMockApi() ? mock.modules() : request<ModulesView>('/modules')),
   enableModule: (key: string) =>
-    IS_MOCK ? mock.enableModule(key) : request<{ module: ModuleView }>(`/modules/${key}/enable`, 'POST', {}).then((r) => r.module),
+    useMockApi() ? mock.enableModule(key) : request<{ module: ModuleView }>(`/modules/${key}/enable`, 'POST', {}).then((r) => r.module),
   patchModule: (key: string, body: { hidden?: boolean; sortOrder?: number }) =>
-    IS_MOCK ? mock.patchModule(key, body) : request<{ module: ModuleView }>(`/modules/${key}`, 'PATCH', body).then((r) => r.module),
+    useMockApi() ? mock.patchModule(key, body) : request<{ module: ModuleView }>(`/modules/${key}`, 'PATCH', body).then((r) => r.module),
 
   // —— V7-11 提醒日历 ——
-  reminders: () => (IS_MOCK ? mock.reminders() : request<ReminderView>('/reminders')),
+  reminders: () => (useMockApi() ? mock.reminders() : request<ReminderView>('/reminders')),
 
   // —— V7-13 档案工作台 ——
-  workbench: () => (IS_MOCK ? mock.workbench() : request<WorkbenchView>('/me/workbench')),
+  workbench: () => (useMockApi() ? mock.workbench() : request<WorkbenchView>('/me/workbench')),
 
   // —— V7-14 跨域搜索 ——
-  search: (q: string) => (IS_MOCK ? mock.search(q) : request<SearchResult>(`/search?q=${encodeURIComponent(q)}`)),
+  search: (q: string) => (useMockApi() ? mock.search(q) : request<SearchResult>(`/search?q=${encodeURIComponent(q)}`)),
 
   // —— 对话汇总（→ 版本化报告 + 知识库） ——
   summarize: (sessionId: string) =>
-    IS_MOCK ? mock.summarize(sessionId) : request<SummarizeResult>(`/sessions/${sessionId}/summarize`, 'POST', {}),
+    useMockApi() ? mock.summarize(sessionId) : request<SummarizeResult>(`/sessions/${sessionId}/summarize`, 'POST', {}),
 
   // —— 报告网页版（render_report → 自有域名 /api/r/:id）：产出后按需生成可分享链接 ——
   renderReport: (sessionId: string, messageId: string): Promise<{ htmlUrl?: string; cdnUrl?: string }> =>
-    IS_MOCK ? Promise.resolve({}) : request<{ htmlUrl?: string; cdnUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
+    useMockApi() ? Promise.resolve({}) : request<{ htmlUrl?: string; cdnUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
 };
 
 /** 由网页版链接（/api/r/:id）推导同一报告的 PDF 下载地址（/api/r/:id/pdf）。取不到则返回 null。 */
