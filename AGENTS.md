@@ -185,10 +185,11 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **H5 token 双写**：新增/修改 `app.scss` 里 `page {}` 的设计 token 时，必须同步 `app.h5.scss` 的 `:root` 兼容层（H5 没有 `page` 节点），否则 H5 上新 token 全部失效（深绿 hero 曾因此透明）。
 
 ### 7.3 启动流程
-`app.tsx` 启动拉 `loadAgents()` + `loadMe()` + `loadBadges()`（未登录跳过）。首页：未登录→登录弹层；已登录未建档→本命色/30 秒建档 picker。
+`app.tsx` 启动拉 `loadAgents()` + `loadMe()` + `loadBadges()`（未登录跳过）。首页：未登录→登录弹层；已登录账号必须等 `/me.onboarded` 权威结果完成水合后再裁定是否进入全屏入局，不能把“本地无 `junshi.onboarded` / `/me` 尚未返回”当成未建档。服务端 `services/onboarding.ts` 统一判定：有 Profile、2026-07-21 入局仪式上线前创建的存量账号、或已有企业身份/会话/项目/成果/资料/案卷任一真实使用痕迹，均视为已入局；登录响应与 `/me` 必须复用该口径。只有服务端明确未完成的新账号才走「择本命色 → 填行业/阶段/痛点 → 首判」；Profile 保存失败必须停留原页显式重试，不得只写本地完成态。
 
 ### 7.4 状态与主题
 - `services/store.ts`：轻量全局 store（订阅式）。本命色 / 用户 / 智能体缓存 / tab / overlay / 登录态 / 底栏角标；`loadBadges()` 以 15 秒节流单飞聚合会话未读与复盘账本，问策显示未读数，21:00 后当日尚未复盘时军令显示红点，复盘落账后强制回刷熄灭。
+- `components/CoachMarks` 的五 Tab「功能点亮」不是“所有没看过 storage 的账号都补弹”：它只在真正完成首次入局的出口写入当前 token 的 `armed` 标记后展示，完成/跳过即清除；历史账号、换机或清 storage 后登录都不得因缺 `done` key 被重新引导。
 - `loadAgents()` 必须保留 `DEFAULT_AGENTS` 的 `billing/price/owned` 兜底字段；线上旧 `/agents` 若缺权益字段，不能覆盖掉前台解锁门禁，否则 `💎xN` 专项能力会被误判为可直接进入。
 - `data/colors.ts`：6 套本命色主题变量（`--accent` 系列）。
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
 import SafeHeader from '../../../components/SafeHeader';
-import { coachPending } from '../../../components/CoachMarks';
+import { armCoach, coachPending } from '../../../components/CoachMarks';
 import { COLORS, colorIndex } from '../../../data/colors';
 import { api, type SurveyQ } from '../../../services/api';
 import { store } from '../../../services/store';
@@ -32,6 +32,9 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 export default function Onboarding() {
   const s = useStore();
   const c = s.color();
+  const authed = s.isAuthed();
+  const onboardingKnown = s.isOnboardingKnown();
+  const onboarded = s.isOnboarded();
 
   const [step, setStep] = useState<Step>('color');
   const [sel, setSel] = useState(() => colorIndex(store.colorKey()));
@@ -53,6 +56,14 @@ export default function Onboarding() {
     // 后端有问卷就用后端的，否则保留本地兜底（内容不变，与 Picker 一致）
     api.survey().then((qs) => { if (qs?.length) setSurvey(qs); }).catch(() => {});
   }, []);
+
+  // 冷启动先前曾把「/me 尚未返回」当成未建档并抢跑到这里；权威状态回来后若确认是老用户，
+  // 在用户尚未开始仪式（仍停在 color）时立即退出，避免重复择色/填行业。
+  useEffect(() => {
+    if (step === 'color' && authed && onboardingKnown && onboarded) {
+      switchTo('/pages/home/index');
+    }
+  }, [step, authed, onboardingKnown, onboarded]);
 
   // 择色：整页立即换主题（store 状态驱动 themeClass）+ 持久化（store.setColor→api.setColor）。
   const pick = (i: number) => {
@@ -126,18 +137,22 @@ export default function Onboarding() {
     const eff = effectiveAnswers();
     try {
       if (company.trim()) await api.updateIdentity({ company: company.trim() }).catch(() => {});
-      if (Object.keys(eff).length) await api.saveProfile(eff).catch(() => {});
+      // Profile 是服务端首次入局的完成锚点，失败时必须留在本页显式重试，不能只写本地完成态。
+      await api.saveProfile(eff);
       await store.loadMe();
       store.completeOnboarding(); // 建档即视为已入局（本地标记 + 后端 Profile 已落）
-    } finally {
-      // 无论后端是否成功，都进入首判（首判只读展示，不再写档）。
       setStep('judge');
-      runJudge(eff);
+      void runJudge(eff);
+    } catch (e) {
+      s.handleApiError(e, { fallbackTitle: '建档未保存，请检查网络后重试' });
+    } finally {
+      submittingRef.current = false;
     }
   };
 
   const enterHQ = () => {
     store.completeOnboarding();
+    armCoach();
     // 功能点亮（五步 coach）未看完 → 落问策页（coach 第一步即问策，避免落军情又被拉走的闪跳）；
     // 已看完（理论上不会发生）→ 直接进军情。
     switchTo(coachPending() ? '/pages/sessions/index' : '/pages/home/index');

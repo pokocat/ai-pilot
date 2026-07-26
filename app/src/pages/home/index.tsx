@@ -15,6 +15,7 @@ import { MODULE_MARKET } from '../../data/operatingSystem';
 import { refreshDossier, type Dossier } from '../../services/dossier';
 import { navTo, switchTo } from '../../services/nav';
 import { REVIEW_TIME } from '../../data/constants';
+import { shouldOpenOnboarding } from '../../services/onboardingStateCore';
 import './index.scss';
 
 function todayLabel() {
@@ -94,6 +95,9 @@ function forceSynthesis(forces: BattleForce[]): { title: string; body: string } 
 // 判断内容一律来自真实军师档案（me.understanding，含结构化 battleForces）与案卷；资料不足时引导进入对话访谈，不预置结论。
 export default function Home() {
   const s = useStore();
+  const authed = s.isAuthed();
+  const onboardingKnown = s.isOnboardingKnown();
+  const onboarded = s.isOnboarded();
   const accent = s.color().vars['--accent'];
   const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
@@ -132,11 +136,13 @@ export default function Home() {
 
   useEffect(() => {
     // 登录门：未登录先登录；已登录但未建档再走本命色/建档
-    if (!s.isAuthed()) {
+    if (!authed) {
       setShowLogin(true);
-    } else if (!s.isOnboarded()) {
+    } else if (shouldOpenOnboarding({ authed, onboardingKnown, onboarded })) {
       goOnboarding();
     }
+  }, [authed, onboardingKnown, onboarded]);
+  useEffect(() => {
     api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
   }, []);
 

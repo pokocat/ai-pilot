@@ -13,6 +13,7 @@ const LS_ONBOARDED = 'junshi.onboarded';
 interface AppState {
   colorKey: string;
   onboarded: boolean;
+  onboardingKnown: boolean;
   me: Me | null;
   agents: Agent[];
   tab: number; // 当前底栏选中项（0..4）
@@ -30,6 +31,8 @@ interface BadgeState {
 const state: AppState = {
   colorKey: safeGet(LS_COLOR) || 'green', // 默认墨绿 = 设计稿主色
   onboarded: safeGet(LS_ONBOARDED) === '1',
+  // 有 token 但没有本地完成标记时，必须先等 /me 给权威结果；不能把「尚未加载」误当「未建档」。
+  onboardingKnown: !getUserId() || safeGet(LS_ONBOARDED) === '1',
   me: null,
   agents: DEFAULT_AGENTS, // 离线兜底；后端可达时由 loadAgents 覆盖
   tab: 0,
@@ -65,6 +68,7 @@ function resetAuthState() {
   clearUserId();
   state.me = null;
   state.onboarded = false;
+  state.onboardingKnown = true;
   safeSet(LS_ONBOARDED, '');
 }
 
@@ -136,6 +140,7 @@ export const store = {
   color: () => colorByKey(state.colorKey),
   themeClass: () => `theme-${state.colorKey}`,
   isOnboarded: () => state.onboarded,
+  isOnboardingKnown: () => state.onboardingKnown,
   isAuthed: () => !!getUserId(),
   // P2-18：移除死方法 setOnboarded（无调用方，与 completeOnboarding 重复）。
   me: () => state.me,
@@ -217,6 +222,7 @@ export const store = {
   },
   completeOnboarding() {
     state.onboarded = true;
+    state.onboardingKnown = true;
     safeSet(LS_ONBOARDED, '1');
     emit();
   },
@@ -228,7 +234,11 @@ export const store = {
       if (me.user.benmingColor && !safeGet(LS_COLOR)) {
         state.colorKey = me.user.benmingColor;
       }
-      if (typeof me.onboarded === 'boolean') state.onboarded = me.onboarded;
+      if (typeof me.onboarded === 'boolean') {
+        state.onboarded = me.onboarded;
+        state.onboardingKnown = true;
+        safeSet(LS_ONBOARDED, me.onboarded ? '1' : '');
+      }
       emit();
     } catch (e) { reportApiError(e, { silent: true }); }
   },
@@ -236,6 +246,7 @@ export const store = {
   async afterLogin(token: string, onboarded: boolean, benmingColor?: string) {
     setUserId(token);
     state.onboarded = onboarded;
+    state.onboardingKnown = true;
     safeSet(LS_ONBOARDED, onboarded ? '1' : '');
     if (benmingColor) { state.colorKey = benmingColor; safeSet(LS_COLOR, benmingColor); }
     emit();
@@ -247,6 +258,7 @@ export const store = {
     clearUserId();
     state.me = null;
     state.onboarded = false;
+    state.onboardingKnown = true;
     state.agents = DEFAULT_AGENTS;
     state.badges = { unread: 0, reviewedDate: '', reviewLoaded: false };
     badgesFetchedAt = 0;
