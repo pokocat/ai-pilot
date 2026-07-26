@@ -8,13 +8,11 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api } from '../../../services/api';
 import { checkUpload } from '../../../services/uploadGuard';
-import pkg from '../../../../package.json';
+import { APP_BUILD_SHA, APP_MODE, APP_VERSION } from '../../../services/config';
 import './index.scss';
 
 const isWeapp = process.env.TARO_ENV === 'weapp';
-
-// B8：版本号从 app/package.json 构建期注入（resolveJsonModule），避免与真实发版号脱节。
-const VERSION = `v${pkg.version}`;
+const VERSION = `v${APP_VERSION} · ${APP_MODE === 'mock' ? 'MOCK' : '正式'} · ${APP_BUILD_SHA}`;
 
 
 // 设置：个人资料编辑（称呼/公司）+ 关于 + 退出登录。
@@ -142,7 +140,7 @@ export default function Settings() {
           {/* 长按版本号：呼出换身注入弹层——运营凭主公令牌直接切到目标身份排查（无需先退出）。 */}
           <View className="set-row static" onLongPress={() => setShowImp(true)}>
             <Text className="set-rt">当前版本</Text>
-            <Text className="set-rv">{VERSION}</Text>
+            <Text className={`set-rv ${APP_MODE === 'mock' ? 'is-mock' : ''}`}>{VERSION}</Text>
           </View>
           <View className="set-row" onClick={() => openDoc('agreement')}>
             <Text className="set-rt">用户协议</Text>

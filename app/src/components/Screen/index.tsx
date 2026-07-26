@@ -1,7 +1,8 @@
 import { CSSProperties, PropsWithChildren, useEffect, useState } from 'react';
-import { View, ScrollView } from '@tarojs/components';
+import { View, ScrollView, Text } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import { useStore } from '../../hooks/useStore';
+import { IS_MOCK } from '../../services/config';
 import './index.scss';
 
 interface ScreenProps {
@@ -31,10 +32,14 @@ export default function Screen({ children, tab = true, scroll = true, topInset =
 
   const inset = topInset ? <View className="nav-inset" /> : null;
   const rootStyle = topInset ? vars : undefined;
+  const modeBadge = IS_MOCK
+    ? <View className="build-mode-badge"><Text>MOCK · 本地数据</Text></View>
+    : null;
 
   if (!scroll) {
     return (
       <View className={`page ${s.themeClass()} ${className}`} style={rootStyle}>
+        {modeBadge}
         {inset}
         {children}
         {tab && <View className="tabbar-space" />}
@@ -43,6 +48,7 @@ export default function Screen({ children, tab = true, scroll = true, topInset =
   }
   return (
     <View className={`page ${s.themeClass()} ${className}`} style={rootStyle}>
+      {modeBadge}
       <ScrollView scrollY className="screen-scroll" enhanced showScrollbar={false}>
         {inset}
         {children}

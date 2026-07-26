@@ -78,6 +78,7 @@ repo/
 
 实现要点：
 - `app/config/index.ts`：通过 `defineConstants` 显式注入 `process.env.TARO_APP_MODE` / `process.env.TARO_APP_API`，确保 H5/weapp 构建产物在浏览器/小程序运行时拿到构建期模式与 API 地址。
+- **构建身份与防误传**：`app/config/index.ts` 同时注入 `TARO_APP_VERSION/TARO_APP_BUILD_SHA`，并给 weapp 产物生成 `dist/junshi-build-meta.json`（mode/api/version/gitSha）。mock 包五个主 Tab 左上常驻红色「MOCK · 本地数据」，设置页「当前版本」显示 `版本 · MOCK/正式 · commit`；正式发布统一走 `npm run release:weapp -- --version x.y.z --desc "说明"`，该命令会强制重建 server 包，再对 mode/API/版本做硬校验，任一不符直接拒绝上传。`upload:weapp` 及旧 CI 脚本也执行同口径元数据校验；不得用裸 DevTools CLI 或 GUI 绕过。
 - `app/src/services/config.ts`：`APP_MODE`（读已注入的 `process.env.TARO_APP_MODE`，默认 `mock`）、`IS_MOCK`、`BASE_URL`（读已注入的 `TARO_APP_API`）。不要在浏览器运行时再用 `typeof process` 包裹，否则 H5 bundle 会退回 mock/default。
 - `app/src/services/api.ts`：每个方法按 `useMockApi()` 分流 mock 或真实请求（通常等价于构建期 `IS_MOCK`，附身会按下条运行时切换），**两种模式同口径**（同样的入参/返回类型）。
 - **附身登录是唯一运行时数据源例外**：`api.verifyImpersonation` 无论 `APP_MODE` 为 `mock` 还是 `server` 都必须直连真实 `/me`，绝不能回退 `mock.me()`；server 包复用当前 `BASE_URL`（生产/预发不串环境），mock 包优先使用显式 `TARO_APP_API`，未传时固定验生产 `https://wxapi.aibuzz.cn/api`。验令通过并把三段 JWT 落入 storage 后，`services/runtimeMode.ts` 会让整个会话（普通 API、文件上传、流式对话、案卷与支付环境判断）跟随该真实身份走同一服务端；退出/换回 `mock-*` token 后自动恢复本地 mock。附身 token 只由真实后端签发；仅修验令而不切后续数据源会出现“登录成功但看到 mock 账号”的假附身。
@@ -416,19 +417,19 @@ TARO_APP_MODE=server TARO_APP_API="http://$LAN_IP:4000/api" npm run dev:weapp
 
 **小程序发布上线（开发版 → 体验版 → 发布）**
 
-小程序是独立于服务端的发布渠道，**不在 `deploy-prod.sh` 内**；后端用 `deploy-prod.sh` 单独上线，且必须向后兼容线上旧版小程序（新增字段/可选参数/新端点，不改既有响应契约）。发布前务必 **server 模式构建**，否则连的是 mock 而非线上 API：
+小程序是独立于服务端的发布渠道，**不在 `deploy-prod.sh` 内**；后端用 `deploy-prod.sh` 单独上线，且必须向后兼容线上旧版小程序（新增字段/可选参数/新端点，不改既有响应契约）。发布前统一走**一体化正式发布命令**，它会强制 server 模式重建并校验构建身份，避免复用旧 dist 或误传 mock：
 ```bash
 cd /Users/donis/dev/ai-pilot/app
-npm run build:weapp:server   # = TARO_APP_MODE=server TARO_APP_API=https://wxapi.aibuzz.cn/api npm run build:weapp
+npm run release:weapp -- --version <版本号> --desc "<本次变更说明>"
 ```
-产物在 `app/dist/`（`miniprogramRoot=dist/`）。**上传这一步由 agent 自己执行，不要甩给用户**——历史反复踩坑：曾误以为上传只能让用户在 GUI 里点，其实开发者工具自带 CLI 可直接上传（用已登录会话、无需密钥）。默认用①：
-1. **微信开发者工具 CLI（首选，agent 直接跑，无需上传密钥）**：复用已登录的 DevTools 会话。前置：DevTools 已打开且开启「设置 → 安全 → 服务端口」。`--project` 指向 `app/`（含 `project.config.json`，**不是** `dist/`）：
+该命令依次执行 `build:weapp:server` → 校验 `dist/junshi-build-meta.json` 的 `mode=server`、生产 API 与上传版本完全一致 → 检查 DevTools 登录态 → CLI 上传；加 `--dry-run` 可只构建校验、不触达微信。产物在 `app/dist/`（`miniprogramRoot=dist/`）。**上传这一步由 agent 自己执行，不要甩给用户**。DevTools 需已打开且开启「设置 → 安全 → 服务端口」。底层等效命令如下，仅用于排障，正常发布不得直接调用：
+1. **微信开发者工具 CLI（底层首选，无需上传密钥）**：复用已登录的 DevTools 会话，`--project` 指向 `app/`（含 `project.config.json`，**不是** `dist/`）：
    ```bash
    /Applications/wechatwebdevtools.app/Contents/MacOS/cli upload \
      --project /Users/donis/dev/ai-pilot/app \
      -v <版本号> -d "<本次变更说明>"
    ```
-   退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。**版本号每次递增，最近一次上传 `0.2.8`**（2026-06-21）；上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 等效（仅当 CLI 不可用时回退）：DevTools 只导入 `app/` → 右上角「上传」→ 填版本号 + 备注。
+   退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。**版本号每次递增，最近一次上传 `0.2.21`**（2026-07-25）；上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 仅作为 CLI 不可用时的最后回退：上传前必须人工打开 `dist/junshi-build-meta.json` 核对 `mode=server`、API 与版本，且预览中不得出现红色 MOCK 标识。
 2. **miniprogram-ci（CI/headless 备选）**：需在 mp 后台 *开发管理 → 开发设置 → 小程序代码上传* 下载上传密钥 `private.<appid>.key` 并把**本机公网 IP**加进白名单。该密钥本地通常没有，**除非用户给出密钥路径，否则一律用①**：
    ```bash
    cd app && WEAPP_UPLOAD_KEY=/绝对路径/private.<appid>.key \
@@ -514,16 +515,12 @@ cd admin && npm test   # 同上
 
 ### 本机上传到小程序平台（miniprogram-ci）
 > 云端沙箱网络白名单未放行 `servicewechat.com`，需在**本机**执行。
-> 每次上传前后必须同步 `docs/WEAPP_RELEASES.md`，上传命令里的版本号/描述要与该文件记录一致；不要把每次上传明细塞进 AGENTS.md。
+> 每次上传前后必须同步 `docs/WEAPP_RELEASES.md`，上传命令里的版本号/描述要与该文件记录一致；不要把每次上传明细塞进 AGENTS.md。正式上传只走 `release:weapp`，不要裸调 DevTools CLI/GUI。
 ```bash
-cd app && npm run build:weapp:server   # 产物在 app/dist（server 版，连 https://wxapi.aibuzz.cn/api）
-npx miniprogram-ci upload \
-  --pp ./ \                              # 项目路径=app（其 project.config.json 的 miniprogramRoot=dist/）
-  --pkp /path/to/private.<appid>.key \
-  --appid wx810ebe6dfef8e75f \
-  --uv 0.1.0 -r 1 --ud "junshi server build"
+cd app
+npm run release:weapp -- --version 0.2.22 --desc "本次变更说明"
 ```
-注意：上传脚本会拒绝未注入 `https://wxapi.aibuzz.cn/api` 或仍包含 `localhost:4000/api` 的产物；上传密钥若在小程序后台开启了 **IP 白名单**，须把本机出口 IP 加入；连真实后端版本另需把 API 域名加入 request 合法域名（见 §12）。
+注意：发布脚本会强制重建并校验 `junshi-build-meta.json`，拒绝 mock、非生产 API、旧产物及构建/上传版本号不一致；备用 `upload:weapp` 使用上传密钥时仍受 **IP 白名单**约束。连真实后端版本另需把 API 域名加入 request 合法域名（见 §12）。
 
 ### 微信账号登录联调
 ```bash

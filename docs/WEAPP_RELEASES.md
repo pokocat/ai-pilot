@@ -2,6 +2,7 @@
 
 > 本文件记录每次上传到微信小程序后台的版本号、描述、提交和结果。
 > 执行 DevTools CLI `upload` 或 `miniprogram-ci upload` 前，先确认本文件即将新增的记录与上传命令一致；上传成功后补齐包体与状态。
+> 正式上传统一使用 `cd app && npm run release:weapp -- --version x.y.z --desc "说明"`；它会强制重建 server 产物并校验模式、API、版本，禁止裸调 CLI/GUI 绕过。
 
 ## 记录规则
 

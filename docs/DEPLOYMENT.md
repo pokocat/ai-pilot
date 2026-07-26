@@ -176,7 +176,7 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 2. 后端公网 **HTTPS + ICP 备案域名**，并加入小程序后台 **request 合法域名**。
 3. 如启用微信后台消息推送，服务端配置 `WECHAT_MESSAGE_TOKEN`；后台 URL 填 `https://你的域名/api/wechat/message`，Token 填同一个值。订阅消息另在小程序后台配置模板，并把模板 ID 写入 `WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID` / `WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID`。
 4. **生成式 AI 备案 / 算法备案 + 内容安全**（AI 类小程序审核硬性门槛；国内合规建议用已备案的国产模型，走 OpenAI 兼容协议即可）。
-5. 在 `docs/WEAPP_RELEASES.md` 记录本次版本号/上传描述/提交；`TARO_APP_MODE=server TARO_APP_API=https://域名/api npm run build:weapp` → 微信开发者工具上传审核，上传命令的版本号/描述必须与记录一致。
+5. 在 `docs/WEAPP_RELEASES.md` 记录本次版本号/上传描述/提交；执行 `cd app && npm run release:weapp -- --version x.y.z --desc "说明"`，由脚本强制重建 server 包并核对构建模式、生产 API、版本号后上传开发版。上传命令的版本号/描述必须与记录一致；不要裸调 DevTools CLI/GUI 绕过校验。
 
 ## 9. 上线前安全/生产硬约束（务必过一遍 · 详见 ROADMAP P2）
 - [ ] **鉴权**：短信验证码与小程序本机号登录已接入；当前小程序登录态仍是 `token=userId`（演示）→ 换 JWT；运营后台已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权，生产仍需细粒度 RBAC、管理员账号体系与密钥轮换策略。

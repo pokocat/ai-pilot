@@ -15,6 +15,7 @@ import ci from 'miniprogram-ci';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { assertReleaseBuild } from './weapp-build-meta.mjs';
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -40,6 +41,11 @@ function readBuiltJs(dir) {
   return out;
 }
 function assertServerBuild() {
+  try {
+    assertReleaseBuild(PROJ, { expectedApi: EXPECTED_API, expectedVersion: VERSION });
+  } catch (e) {
+    die(e instanceof Error ? e.message : String(e));
+  }
   const bundle = readBuiltJs(PROJ);
   if (!bundle.includes(EXPECTED_API)) {
     die(`dist 未注入线上 API：${EXPECTED_API}。请先运行 npm run build:weapp:server，避免上传 mock 小程序包。`);

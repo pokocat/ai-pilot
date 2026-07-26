@@ -7,6 +7,8 @@ export type AppMode = 'mock' | 'server';
 export const APP_MODE: AppMode = (process.env.TARO_APP_MODE as AppMode) || 'mock';
 
 export const IS_MOCK = APP_MODE === 'mock';
+export const APP_VERSION = process.env.TARO_APP_VERSION || 'dev';
+export const APP_BUILD_SHA = process.env.TARO_APP_BUILD_SHA || 'unknown';
 
 // server 模式后端基址（微信小程序需在后台配置合法域名后替换为线上 https 域名）。
 export const BASE_URL =

@@ -15,6 +15,10 @@ declare namespace NodeJS {
   interface ProcessEnv {
     TARO_ENV: 'weapp' | 'h5' | string;
     TARO_APP_API?: string;
+    TARO_APP_MODE?: 'mock' | 'server';
+    TARO_APP_STREAM?: string;
+    TARO_APP_VERSION?: string;
+    TARO_APP_BUILD_SHA?: string;
     NODE_ENV: 'development' | 'production';
   }
 }
