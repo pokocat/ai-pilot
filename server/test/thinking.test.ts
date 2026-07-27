@@ -20,7 +20,7 @@ describe('Thinking request controls', () => {
   test('关闭时显式传 disabled，并保留温度', () => {
     assert.deepEqual(thinkingRequestTuning(claude), {
       temperature: 0.7,
-      thinking: { type: 'disabled', budget_tokens: 0 },
+      thinking: { type: 'disabled' },
     });
   });
 
@@ -39,7 +39,7 @@ describe('Thinking request controls', () => {
     });
     assert.deepEqual(thinkingRequestTuning({ ...claude, thinkingMode: 'adaptive' }, { allowThinking: false }), {
       temperature: 0.7,
-      thinking: { type: 'disabled', budget_tokens: 0 },
+      thinking: { type: 'disabled' },
     });
   });
 
@@ -54,7 +54,7 @@ describe('Thinking request controls', () => {
     assert.deepEqual(thinkingRequestTuning(official), { temperature: 0.7 });
     assert.deepEqual(thinkingRequestTuning({ ...official, baseUrl: 'https://api.qnaigc.com/bypass/anthropic' }), {
       temperature: 0.7,
-      thinking: { type: 'disabled', budget_tokens: 0 },
+      thinking: { type: 'disabled' },
     });
   });
 

@@ -44,7 +44,7 @@ describe('Claude custom gateway baseUrl', () => {
 
     assert.equal(claudeRawRequest(cfg, 'system', 'ping').temperature, 0.7);
     assert.equal(claudeRawRequest({ ...cfg, temperature: 1 }, 'system', 'ping').temperature, 1);
-    assert.deepEqual(claudeRawRequest(cfg, 'system', 'ping').thinking, { type: 'disabled', budget_tokens: 0 });
+    assert.deepEqual(claudeRawRequest(cfg, 'system', 'ping').thinking, { type: 'disabled' });
   });
 
   test('探活携带 Thinking 配置并自动锁定 temperature/max_tokens', () => {

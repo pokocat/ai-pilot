@@ -14,7 +14,7 @@ export interface ThinkingConfigLike {
 }
 
 export type ThinkingParam =
-  | { type: 'disabled'; budget_tokens: 0 }
+  | { type: 'disabled' }
   | { type: 'enabled'; budget_tokens: number }
   | { type: 'adaptive' };
 
@@ -61,7 +61,8 @@ export function thinkingRequestTuning(
   if (mode === 'adaptive') return { temperature: 1, thinking: { type: 'adaptive' } };
   // Anthropic 官方关闭 Thinking 的标准方式是省略 thinking；七牛等第三方网关则支持显式 disabled。
   if (cfg.provider === 'claude' && !cfg.baseUrl?.trim()) return { temperature: cfg.temperature };
-  return { temperature: cfg.temperature, thinking: { type: 'disabled', budget_tokens: 0 } };
+  // 七牛 Anthropic 兼容协议只允许 enabled 携带 budget_tokens；disabled 带 0 也会被判为多余字段。
+  return { temperature: cfg.temperature, thinking: { type: 'disabled' } };
 }
 
 /** 手动思考预算必须小于 max_tokens；轻量补全自动给回答预留 512 token。 */
