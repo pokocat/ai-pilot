@@ -257,22 +257,35 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
-export function claudeRawRequest(cfg: ResolvedAiConfig, system: string, user: string): ClaudeRawRequest {
+type ClaudeRawOptions = { allowThinking?: boolean; affinityKey?: string };
+
+export function claudeRawRequest(
+  cfg: ResolvedAiConfig,
+  system: string,
+  user: string,
+  opts: ClaudeRawOptions = {},
+): ClaudeRawRequest {
+  const allowThinking = opts.allowThinking ?? true;
   return {
     model: cfg.model,
-    max_tokens: maxTokensForThinking(700, cfg),
-    ...thinkingRequestTuning(cfg),
+    max_tokens: maxTokensForThinking(700, cfg, allowThinking),
+    ...thinkingRequestTuning(cfg, { allowThinking }),
     system,
     messages: [{ role: 'user', content: user }],
   };
 }
 
-export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
+export async function claudeRaw(
+  cfg: ResolvedAiConfig,
+  system: string,
+  user: string,
+  opts: ClaudeRawOptions = {},
+): Promise<string> {
   // 轻量补全必须设超时：SDK 默认 600s + 自动重试，网关一挂会把同步等它的路由（如 /casefile/accept）吊死。
   const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create(
-    claudeRawRequest(ep, system, user),
+    claudeRawRequest(ep, system, user, opts),
     { timeout: ep.timeoutMs, maxRetries: 1 },
-  ), { laneClass: cfg.lane === 'aux' ? 'aux' : 'main' });
+  ), { affinityKey: opts.affinityKey, laneClass: cfg.lane === 'aux' ? 'aux' : 'main' });
   return res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
 }
 

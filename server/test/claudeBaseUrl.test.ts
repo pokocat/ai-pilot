@@ -72,5 +72,10 @@ describe('Claude custom gateway baseUrl', () => {
     assert.equal(req.temperature, 1);
     assert.equal(req.max_tokens, 2560);
     assert.deepEqual(req.thinking, { type: 'enabled', budget_tokens: 2048 });
+
+    const auxReq = claudeRawRequest(cfg, 'system', 'extract', { allowThinking: false });
+    assert.equal(auxReq.temperature, 0.3, '后台抽取关闭思考后必须恢复运营配置温度');
+    assert.equal(auxReq.max_tokens, 700, '后台抽取不能被思考预算抬高输出上限');
+    assert.deepEqual(auxReq.thinking, { type: 'disabled' });
   });
 });

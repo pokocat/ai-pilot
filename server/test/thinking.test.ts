@@ -17,10 +17,9 @@ const claude = {
 };
 
 describe('Thinking request controls', () => {
-  test('关闭时显式传 disabled，并保留温度', () => {
+  test('OpenAI 兼容协议默认关闭时不注入非标准 thinking 字段', () => {
     assert.deepEqual(thinkingRequestTuning(claude), {
       temperature: 0.7,
-      thinking: { type: 'disabled' },
     });
   });
 
@@ -41,6 +40,11 @@ describe('Thinking request controls', () => {
       temperature: 0.7,
       thinking: { type: 'disabled' },
     });
+    assert.deepEqual(
+      thinkingRequestTuning({ ...claude, thinkingMode: 'enabled', temperature: 0.3 }, { allowThinking: false }),
+      { temperature: 0.3, thinking: { type: 'disabled' } },
+      '关闭思考的成果/工具请求必须使用保存的运营温度，而不是沿用思考请求的 1',
+    );
   });
 
   test('非 Claude 模型不下发 thinking 字段', () => {
@@ -54,6 +58,18 @@ describe('Thinking request controls', () => {
     assert.deepEqual(thinkingRequestTuning(official), { temperature: 0.7 });
     assert.deepEqual(thinkingRequestTuning({ ...official, baseUrl: 'https://api.qnaigc.com/bypass/anthropic' }), {
       temperature: 0.7,
+      thinking: { type: 'disabled' },
+    });
+  });
+
+  test('OpenAI Claude 扩展只有显式开启后才发送 thinking，强制关闭时保留原温度', () => {
+    const enabled = { ...claude, thinkingMode: 'enabled' as const, temperature: 0.3 };
+    assert.deepEqual(thinkingRequestTuning(enabled), {
+      temperature: 1,
+      thinking: { type: 'enabled', budget_tokens: 1024 },
+    });
+    assert.deepEqual(thinkingRequestTuning(enabled, { allowThinking: false }), {
+      temperature: 0.3,
       thinking: { type: 'disabled' },
     });
   });

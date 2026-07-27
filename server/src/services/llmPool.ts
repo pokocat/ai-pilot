@@ -36,7 +36,7 @@ import { isRealKey } from '../env.js';
 import { endpointLane, setLaneMaxConcurrency, withLlmSlot, is429, retryAfterSecOf, type LlmLaneClass } from './llmGate.js';
 import type { ResolvedAiConfig } from './aiConfig.js';
 import type { AiProvider, AiThinkingMode } from '../llm/schema.js';
-import { effectiveThinkingTemperature, normalizeThinkingBudget, normalizeThinkingMode } from '../llm/thinking.js';
+import { normalizeThinkingBudget, normalizeThinkingMode } from '../llm/thinking.js';
 
 const CONFIG_TTL_MS = 5_000;   // 端点列表缓存（后台改配置后最多 5s 生效）
 const HEALTH_TTL_MS = 1_000;   // 冷却状态本地缓存，避免热路径每次打 Redis
@@ -89,10 +89,8 @@ export async function loadPool(force = false): Promise<{ endpoints: PoolEndpoint
           baseUrl: String(m.baseUrl ?? ''),
           apiKey: decryptSecretSafe(String(m.apiKey ?? '')),
           model: String(m.model ?? ''),
-          temperature: effectiveThinkingTemperature(
-            typeof m.temperature === 'number' ? m.temperature : 0.7,
-            normalizeThinkingMode(m.thinkingMode),
-          ),
+          // 保留端点的运营配置温度；只有实际启用 Thinking 的请求才在 provider 层临时锁为 1。
+          temperature: typeof m.temperature === 'number' ? m.temperature : 0.7,
           thinkingMode: normalizeThinkingMode(m.thinkingMode),
           thinkingBudget: normalizeThinkingBudget(m.thinkingBudget),
           weight: Math.max(1, Number(m.weight ?? 1) || 1),

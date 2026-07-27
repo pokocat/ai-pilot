@@ -2210,10 +2210,7 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
     const showKey = form.provider !== 'mock';
     const showThinking = modelSupportsThinking(form.provider, form.model);
     const thinkingOn = form.thinkingMode !== 'disabled';
-    const setThinkingMode = (thinkingMode: AiThinkingMode) => set({
-      thinkingMode,
-      ...(thinkingMode === 'disabled' ? {} : { temperature: 1 }),
-    });
+    const setThinkingMode = (thinkingMode: AiThinkingMode) => set({ thinkingMode });
 
     const testModel = async () => {
       setBusy(true); setTest(null);
@@ -2294,7 +2291,7 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
           {form.provider !== 'mock' && (
             <div className="ai-note" style={{ marginTop: 0, marginBottom: 12 }}>嵌入 / 重排模型不在这里配——它们是「检索增强」的全局配置(下方),独立于对话模型、不随切换变动。</div>
           )}
-          <Field label={`温度 temperature · ${form.temperature}`}>
+          <Field label={`配置温度 temperature · ${form.temperature}${thinkingOn ? '（思考请求实际为 1）' : ''}`}>
             <input className="ai-range" type="range" min={0} max={1} step={0.1} value={form.temperature} disabled={thinkingOn} onChange={(e) => set({ temperature: Number(e.target.value) })} />
           </Field>
           {showThinking && (
@@ -2326,7 +2323,7 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
                 </Field>
               )}
               <div className="ai-note">
-                开启思考后 temperature 自动固定为 1；测试连接会携带当前 Thinking 配置。结构化成果和多轮工具调用按 Anthropic 限制自动关闭思考，避免工具链报错。
+                开启思考后，仅实际思考请求临时使用 temperature=1；这里会保留原配置值，关闭思考后自动恢复。测试连接会携带当前 Thinking 配置。结构化成果和多轮工具调用按 Anthropic 限制自动关闭思考，并使用保留的配置温度。
               </div>
             </>
           )}

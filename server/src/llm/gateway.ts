@@ -715,14 +715,16 @@ async function rawText(
   const useLive: 'claude' | 'openai' = useCfg === cfg
     ? live
     : (useCfg.provider === 'claude' ? 'claude' : 'openai');
+  // 辅助任务没有 sessionId；用输入摘要做稳定亲和键，既能跨双端点分流，又让同一抽取复用同端点缓存。
+  const affinityKey = `aux:${createHash('sha1').update(system).update('\0').update(user).digest('hex').slice(0, 16)}`;
 
   let out: string;
   if (useLive === 'openai') {
     const { openaiRaw } = await import('./providers/openai.js');
-    out = await openaiRaw(useCfg, system, user);
+    out = await openaiRaw(useCfg, system, user, { allowThinking: false, affinityKey });
   } else {
     const { claudeRaw } = await import('./providers/claude.js');
-    out = await claudeRaw(useCfg, system, user);
+    out = await claudeRaw(useCfg, system, user, { allowThinking: false, affinityKey });
   }
   // 辅助调用（洞察/预言/势研判/履历/汇总/图谱等）此前不入 token_usage → 成本低估。按 kind='aux' 记入基建用量。
   recordAuxUsage(useCfg.model, useLive, `${system}\n${user}`, out);

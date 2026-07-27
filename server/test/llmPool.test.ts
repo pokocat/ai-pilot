@@ -229,7 +229,7 @@ describe('故障转移', () => {
   });
 
   test('成功路径下 cfg 带的是选中端点的 baseUrl/key/model，不是 base 的', async () => {
-    usePool([ep('thinking', { thinkingMode: 'enabled', thinkingBudget: 4096, temperature: 1 })]);
+    usePool([ep('thinking', { thinkingMode: 'enabled', thinkingBudget: 4096, temperature: 0.3 })]);
     const seen = await withEndpoint(base, async (cfg) => cfg, { affinityKey: 'k' });
     assert.ok(seen.endpointId);
     assert.equal(seen.baseUrl, `https://${seen.endpointId}/v1`);
@@ -237,6 +237,7 @@ describe('故障转移', () => {
     assert.equal(seen.model, `m-${seen.endpointId}`);
     assert.equal(seen.thinkingMode, 'enabled');
     assert.equal(seen.thinkingBudget, 4096);
+    assert.equal(seen.temperature, 0.3, '端点池必须保留配置温度；请求层再按 Thinking 临时锁为 1');
     assert.notEqual(seen.baseUrl, base.baseUrl);
   });
 

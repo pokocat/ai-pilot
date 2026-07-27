@@ -51,7 +51,13 @@ export function thinkingRequestTuning(
   opts: { allowThinking?: boolean } = {},
 ): { temperature: number; thinking?: ThinkingParam } {
   if (!supportsThinkingConfig(cfg)) return { temperature: cfg.temperature };
-  const mode = opts.allowThinking === false ? 'disabled' : normalizeThinkingMode(cfg.thinkingMode);
+  const configuredMode = normalizeThinkingMode(cfg.thinkingMode);
+  // OpenAI chat/completions 并没有标准 thinking 字段：默认关闭时必须完全省略。
+  // 只有运营显式开启过的 Claude 兼容扩展，才在工具/成果请求里发送 disabled 来强制关思考。
+  if (cfg.provider === 'openai' && configuredMode === 'disabled') {
+    return { temperature: cfg.temperature };
+  }
+  const mode = opts.allowThinking === false ? 'disabled' : configuredMode;
   if (mode === 'enabled') {
     return {
       temperature: 1,

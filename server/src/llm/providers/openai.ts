@@ -101,7 +101,13 @@ function providerFailure(err: unknown, cfg: ResolvedAiConfig, base: string, phas
 }
 
 // 统一请求封装：注入 baseUrl/model/key/温度，带超时；错误抛出由 gateway 兜底降级 mock。
-async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>, phase: RequestPhase = 'chat_completion', affinity?: string): Promise<OAResponse> {
+async function callChat(
+  cfg: ResolvedAiConfig,
+  body: Record<string, unknown>,
+  phase: RequestPhase = 'chat_completion',
+  affinity?: string,
+  allowThinking?: boolean,
+): Promise<OAResponse> {
   const base = cfg.baseUrl.replace(/\/+$/, '');
   const timeoutMs = requestTimeoutMs(cfg, phase);
   const watch = deadline(timeoutMs);
@@ -116,7 +122,9 @@ async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>, ph
         body: JSON.stringify({
           model: ep.model,
           ...body,
-          ...thinkingRequestTuning(ep, { allowThinking: !body.tools && !body.tool_choice }),
+          ...thinkingRequestTuning(ep, {
+            allowThinking: allowThinking ?? (!body.tools && !body.tool_choice),
+          }),
         }),
         signal: watch.signal,
       });
@@ -363,11 +371,17 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回 content 文本。 */
-export async function openaiRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
+export async function openaiRaw(
+  cfg: ResolvedAiConfig,
+  system: string,
+  user: string,
+  opts: { allowThinking?: boolean; affinityKey?: string } = {},
+): Promise<string> {
+  const allowThinking = opts.allowThinking ?? true;
   const data = await callChat(cfg, {
-    max_tokens: maxTokensForThinking(700, cfg),
+    max_tokens: maxTokensForThinking(700, cfg, allowThinking),
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }] as OAMessage[],
-  });
+  }, 'chat_completion', opts.affinityKey, allowThinking);
   return (data.choices?.[0]?.message?.content ?? '').trim();
 }
 

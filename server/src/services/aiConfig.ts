@@ -12,7 +12,6 @@ import { encryptSecret, decryptSecretSafe, decryptFailed } from './secretBox.js'
 import type { AiProvider, AiThinkingMode, AiConfig, AiPreset, AiModel, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 import {
   DEFAULT_THINKING_MODE,
-  effectiveThinkingTemperature,
   normalizeThinkingBudget,
   normalizeThinkingMode,
 } from '../llm/thinking.js';
@@ -151,10 +150,8 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
         embeddingModel: row.embeddingModel || '',
         thinkingMode: normalizeThinkingMode(row.thinkingMode),
         thinkingBudget: normalizeThinkingBudget(row.thinkingBudget),
-        temperature: effectiveThinkingTemperature(
-          typeof row.temperature === 'number' ? row.temperature : 0.7,
-          normalizeThinkingMode(row.thinkingMode),
-        ),
+        // 永远保留运营配置原值；Thinking 对 temperature=1 的约束只在最终请求组装时临时生效。
+        temperature: typeof row.temperature === 'number' ? row.temperature : 0.7,
         timeoutMs: env.openaiTimeoutMs,
         embeddingEnabled: row.embeddingEnabled ?? false,
         embeddingBaseUrl: row.embeddingBaseUrl || '',
@@ -257,7 +254,6 @@ export async function setAiConfig(patch: {
   if (patch.temperature !== undefined) data.temperature = patch.temperature;
   if (patch.thinkingMode !== undefined) data.thinkingMode = normalizeThinkingMode(patch.thinkingMode);
   if (patch.thinkingBudget !== undefined) data.thinkingBudget = normalizeThinkingBudget(patch.thinkingBudget);
-  if (patch.thinkingMode !== undefined && patch.thinkingMode !== 'disabled') data.temperature = 1;
   if (patch.embeddingEnabled !== undefined) data.embeddingEnabled = patch.embeddingEnabled;
   if (patch.embeddingBaseUrl !== undefined) data.embeddingBaseUrl = patch.embeddingBaseUrl;
   if (patch.embeddingApiKey !== undefined) data.embeddingApiKey = encryptSecret(patch.embeddingApiKey);
@@ -279,7 +275,7 @@ export async function setAiConfig(patch: {
       embeddingModel: patch.embeddingModel ?? '',
       thinkingMode: normalizeThinkingMode(patch.thinkingMode),
       thinkingBudget: normalizeThinkingBudget(patch.thinkingBudget),
-      temperature: effectiveThinkingTemperature(patch.temperature ?? 0.7, normalizeThinkingMode(patch.thinkingMode)),
+      temperature: patch.temperature ?? 0.7,
       embeddingEnabled: patch.embeddingEnabled ?? false,
       embeddingBaseUrl: patch.embeddingBaseUrl ?? '',
       embeddingApiKey: encryptSecret(patch.embeddingApiKey ?? ''),
@@ -317,7 +313,7 @@ export function publicModel(m: ModelRow, activeId: string | null): AiModel {
     embeddingModel: m.embeddingModel,
     thinkingMode: normalizeThinkingMode(m.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(m.thinkingBudget),
-    temperature: effectiveThinkingTemperature(m.temperature, normalizeThinkingMode(m.thinkingMode)),
+    temperature: m.temperature,
     hasKey: isRealKey(decryptSecretSafe(m.apiKey)),
     preset: m.preset ?? null,
     active: !!activeId && m.id === activeId,
@@ -342,7 +338,7 @@ async function syncActiveSetting(m: ModelRow): Promise<void> {
     apiKey: encryptSecret(m.apiKey),
     thinkingMode: normalizeThinkingMode(m.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(m.thinkingBudget),
-    temperature: effectiveThinkingTemperature(m.temperature, normalizeThinkingMode(m.thinkingMode)),
+    temperature: m.temperature,
     activeModelId: m.id,
   };
   await prisma.aiSetting.upsert({
@@ -396,10 +392,7 @@ export async function addModel(input: AiModelUpsert): Promise<AiModel> {
       embeddingModel: input.embeddingModel?.trim() ?? '',
       thinkingMode: normalizeThinkingMode(input.thinkingMode),
       thinkingBudget: normalizeThinkingBudget(input.thinkingBudget),
-      temperature: effectiveThinkingTemperature(
-        typeof input.temperature === 'number' ? input.temperature : 0.7,
-        normalizeThinkingMode(input.thinkingMode),
-      ),
+      temperature: typeof input.temperature === 'number' ? input.temperature : 0.7,
       preset: input.preset ?? null,
       priceInput: Math.max(0, input.priceInput ?? 0),
       priceOutput: Math.max(0, input.priceOutput ?? 0),
@@ -425,7 +418,6 @@ export async function updateModel(id: string, patch: AiModelUpsert): Promise<AiM
   if (patch.temperature !== undefined) data.temperature = patch.temperature;
   if (patch.thinkingMode !== undefined) {
     data.thinkingMode = normalizeThinkingMode(patch.thinkingMode);
-    if (patch.thinkingMode !== 'disabled') data.temperature = 1;
   }
   if (patch.thinkingBudget !== undefined) data.thinkingBudget = normalizeThinkingBudget(patch.thinkingBudget);
   if (patch.preset !== undefined) data.preset = patch.preset;
@@ -485,10 +477,7 @@ export async function mergedTestConfig(b: AiModelTest): Promise<ResolvedAiConfig
     embeddingModel: b.embeddingModel ?? base.embeddingModel,
     thinkingMode: normalizeThinkingMode(b.thinkingMode ?? base.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(b.thinkingBudget ?? base.thinkingBudget),
-    temperature: effectiveThinkingTemperature(
-      typeof b.temperature === 'number' ? b.temperature : base.temperature,
-      normalizeThinkingMode(b.thinkingMode ?? base.thinkingMode),
-    ),
+    temperature: typeof b.temperature === 'number' ? b.temperature : base.temperature,
   };
 }
 
