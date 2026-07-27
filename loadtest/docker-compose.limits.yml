@@ -1,0 +1,24 @@
+# T0 对照组：复刻上一轮那组**带 CPU 配额**的拓扑，用来校验 V2 环境与旧结果可比。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.limits.yml up -d
+#
+# 为什么单独成文件：上一轮把 `cpus: 2.25` 写死在主 compose 里，于是观测到的
+# 「API CPU 峰值 229.65%」其实是**容器 cgroup 配额跑满**，而报告据此推出了
+# 「Node 单进程在约 2.25 核处到顶」——这个因果链没有数据支撑（压测方案 V2 §0 盲区 2）。
+# 三个容器 2.25 + 1.5 + 0.25 = 恰好 4.0 核，是人为切分，不是自然瓶颈。
+#
+# 所以默认拓扑**不设配额**（回答「单进程真实上限」），要对照旧数字时才叠加本文件。
+# 数值必须与上一轮完全一致，否则失去对照意义。
+
+services:
+  db:
+    cpus: 1.5
+    mem_limit: 2g
+
+  api:
+    cpus: ${LT_API_CPUS:-2.25}
+    mem_limit: ${LT_API_MEM:-3.5g}
+
+  gateway:
+    cpus: 0.25
+    mem_limit: 256m

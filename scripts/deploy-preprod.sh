@@ -147,11 +147,50 @@ echo "== 种子数据（幂等）=="
 sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$PREPROD_ROOT/server' && npm run db:seed" || echo "  seed 有非致命告警，继续"
 
 echo "== 从生产库复制 AI 配置（真 AI 密钥；只读生产）=="
-if sudo -u postgres bash -c "
-  set -e
-  psql -d '$PREPROD_DB' -c 'DELETE FROM ai_setting;' -c 'DELETE FROM ai_model;' >/dev/null 2>&1 || true
-  pg_dump --data-only --column-inserts --table=ai_model --table=ai_setting junshi | psql -d '$PREPROD_DB' >/dev/null 2>&1
-"; then echo "  ai_setting/ai_model 已从生产复制"; else echo "  !! AI 配置复制失败——preprod 可能回退 mock，稍后单独修"; fi
+# 这一步曾经**静默失败并谎报成功**（2026-07-27）。旧实现是
+#   pg_dump --column-inserts ... | psql >/dev/null 2>&1
+# 三个问题叠加：① 管道退出码取最后一个命令(psql)；② psql 不带 ON_ERROR_STOP 时，
+# 即使每条语句都报错也退 0；③ stderr 被丢掉。于是当生产库比 preprod 多出列时
+# （当时是手工加的 thinkingMode/thinkingBudget），每行 INSERT 全失败，脚本照样打印
+# 「已从生产复制」，preprod 静默回退 mock，AI 相关测试全部无效且无人知晓。
+#
+# 现在：只复制**两库共有列**（生产多出的列跳过；preprod 多出的新列由默认值补齐——
+# 这正是纯加法迁移期望的行为），任何失败都必须响，并在复制后验证真实结果。
+PROD_DB="${PROD_DB:-junshi}"
+cols_of() { # $1=库 $2=表 → 列名每行一个（已排序，供 comm 求交集）
+  sudo -u postgres psql -Atq -d "$1" \
+    -c "SELECT column_name FROM information_schema.columns
+        WHERE table_schema='public' AND table_name='$2' ORDER BY 1"
+}
+copy_ai_table() {
+  local t="$1" cols
+  # Prisma 列名是 camelCase，**必须逐个加双引号**——不加会被 PG 折成小写，
+  # "apiKey" 变 apikey 直接 column does not exist，整表复制全失败。
+  cols="$(comm -12 <(cols_of "$PROD_DB" "$t") <(cols_of "$PREPROD_DB" "$t") | sed 's/.*/"&"/' | paste -sd, -)"
+  [ -n "$cols" ] || { echo "  !! 表 $t 在 $PROD_DB 与 $PREPROD_DB 之间没有共有列" >&2; return 1; }
+  sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$PREPROD_DB" -c "TRUNCATE $t" || return 1
+  # 显式判管道成败并 return，不依赖调用处的 set -e：本函数一旦被放进 if/&& 条件上下文，
+  # set -e 就不生效，末尾 echo 的 0 会把 COPY 失败盖掉（这个坑已被回归测试抓过一次）。
+  if ! sudo -u postgres psql -v ON_ERROR_STOP=1 -Atq -d "$PROD_DB" -c "COPY (SELECT $cols FROM $t) TO STDOUT" \
+       | sudo -u postgres psql -v ON_ERROR_STOP=1 -q -d "$PREPROD_DB" -c "COPY $t($cols) FROM STDIN"; then
+    echo "  !! 表 $t 复制失败（真实报错见上方 psql 输出）" >&2
+    return 1
+  fi
+  echo "  $t 已复制（共有列 $(($(echo -n "$cols" | tr -cd , | wc -c) + 1)) 个）"
+}
+copy_ai_table ai_setting
+copy_ai_table ai_model
+
+# 验证：只有「ai_setting 恰好 1 行 + 至少一个带 key 的 ai_model」才算真的没回退 mock。
+# 不通过就中止——此时新代码还没构建/重启，旧服务照常在跑，这是安全的失败姿态。
+AI_SET_N="$(sudo -u postgres psql -Atq -d "$PREPROD_DB" -c 'SELECT count(*) FROM ai_setting')"
+AI_KEY_N="$(sudo -u postgres psql -Atq -d "$PREPROD_DB" -c "SELECT count(*) FROM ai_model WHERE coalesce(\"apiKey\",'') <> ''")"
+echo "  校验：ai_setting=${AI_SET_N} 行 · 带 key 的 ai_model=${AI_KEY_N} 个"
+if [ "$AI_SET_N" != "1" ] || [ "$AI_KEY_N" -lt 1 ]; then
+  echo "!! AI 配置复制结果不符合预期——preprod 会回退 mock，AI 相关测试全部无效。" >&2
+  echo "   先核对生产库 ai_setting/ai_model 是否有数据、两库列是否严重漂移，再重跑本脚本。" >&2
+  exit 1
+fi
 
 echo "== 构建 + 重启 =="
 sudo rm -rf dist

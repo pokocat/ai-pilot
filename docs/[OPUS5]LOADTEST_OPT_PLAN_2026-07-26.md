@@ -21,7 +21,7 @@ A/B 级（不依赖复测的）已落地，见 `docs/CHANGELOG.md` 同日条目�
 | P0-4 同机多进程 | ⛔ 待实测 | 收益被压测的 `cpus: 2.25` 配额掩盖，等 V2 的 T1/T2 对照 |
 | P0-4 PG 迁 RDS | ⛔ 需运维 | 需云资源前置 |
 | P1-1 Puppeteer 出进程 | ⛔ 未做 | 报告功能放量前必须完成 |
-| P1-2 `/metrics` | ⛔ 未做 | `llmGateStatsAll()` 已备好 LLM 侧数据 |
+| P1-2 `/metrics` | ✅ 已落 | `GET /api/metrics`（`routes/metrics.ts` + `services/metrics.ts`）：32 业务指标 + 18 个 `prisma_*`（含连接池 busy/idle/open）。需 `METRICS_TOKEN`，未配则 404 |
 | §2.5 · 辅助抽取切小模型 + 双车道 | ✅ 已落 | `services/aiConfig.resolveAuxConfig()`、`services/llmGate.ts`（main/aux 车道）；`AI_AUX_MODEL` 留空则零变化 |
 | §2.5 · 砍对话 input（提示词模块化） | ⛔ 待产品确认 | 机制 `llm/promptAssembly.ts` 已就绪但提示词无标记；**产品侧要求对话效果不受影响**，需先定切分方案 + 评测基线 |
 

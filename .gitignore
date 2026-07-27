@@ -19,6 +19,9 @@ weapp-preview*.png
 weapp-auto-preview*.json
 weapp-auto-preview*.png
 loadtest/results/
+# 压测专用密钥与由它签发的 JWT（prepare.sh 生成，0600，用后即弃）。绝不入库。
+loadtest/.env
+loadtest/tokens.json
 
 # IDE 云连接 / 技能下载 / 对话草稿
 .cc-connect/

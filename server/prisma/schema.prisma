@@ -5,7 +5,9 @@
 // 本地/演示环境无 pgvector 扩展，这里以 Json（float[]）存储，检索退化为内存余弦相似度。
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // metrics：暴露 Prisma 连接池 in-use/idle 与查询计数，供 /metrics 使用（压测方案要求的 DB 池口径）。
+  previewFeatures = ["metrics"]
 }
 
 datasource db {

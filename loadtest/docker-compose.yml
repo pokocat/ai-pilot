@@ -1,5 +1,19 @@
 name: junshi-loadtest
 
+# 压测栈 V2 —— 与生产**同构**，只隔离外部依赖。
+#
+# 上一轮的教训（压测方案 V2 §0）：用 NODE_ENV=test 一把梭地关掉了一切，代价是连限流这种
+# 生产必经路径也被关掉了，于是「生产入口层其实只有约 5 RPS」这个缺陷在结构上不可能被发现。
+# 本文件因此改为**逐项显式隔离**：短信/微信/支付/OSS/嵌入 的凭据继续置空，
+# 但 NODE_ENV / 限流 / JWT 验签 / 过载闸 一律按生产跑。
+#
+# 资源配额默认**不设**（回答「单进程真实上限是多少」）。要复刻上一轮那组带配额的数字，
+# 叠加 docker-compose.limits.yml：
+#   T1 生产同构单进程（不设配额）：docker compose up -d
+#   T0 对照组（复刻上一轮 2.25 核）：docker compose -f docker-compose.yml -f docker-compose.limits.yml up -d
+#
+# 变量统一在 loadtest/.env 里（由 prepare.sh 生成，已 gitignore，含压测专用随机 JWT 密钥）。
+
 services:
   db:
     image: postgres:16
@@ -17,8 +31,20 @@ services:
       interval: 3s
       timeout: 2s
       retries: 30
-    cpus: 1.5
-    mem_limit: 2g
+
+  # 限流 store、结果缓存、LLM 端点池的跨实例冷却态都要它。
+  # 上一轮 REDIS_URL 置空 → 限流退化为单实例内存计数，多实例语义完全没被测到。
+  redis:
+    image: redis:7-alpine
+    restart: "no"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
 
   api:
     build:
@@ -28,11 +54,31 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
-      NODE_ENV: test
+      # —— 与生产同构的部分 ——
+      NODE_ENV: production
       TZ: Asia/Shanghai
       PORT: "4000"
-      DATABASE_URL: postgresql://junshi_lt:junshi_lt_local_only@db:5432/junshi_lt?schema=public&connection_limit=80&pool_timeout=10
+      # connection_limit 参数化：多进程拓扑要按「每进程配额」算，总量对齐后才可比（L4）。
+      DATABASE_URL: postgresql://junshi_lt:junshi_lt_local_only@db:5432/junshi_lt?schema=public&connection_limit=${LT_DB_POOL:-80}&pool_timeout=10
+      REDIS_URL: redis://redis:6379
+      # 真实 HS256 验签必须跑到：上一轮 APP_JWT_REQUIRED=false + 裸 x-user-id，验签一次都没执行。
+      # 密钥由 prepare.sh 生成，只存在于 loadtest/.env，禁止写入仓库/报告/日志。
+      APP_JWT_SECRET: ${LT_JWT_SECRET:?请先执行 bash loadtest/prepare.sh 生成压测专用密钥}
+      APP_JWT_REQUIRED: "true"
+      RATE_LIMIT_MAX: ${LT_RATE_LIMIT_MAX:-600}
+      RATE_LIMIT_WINDOW: ${LT_RATE_LIMIT_WINDOW:-1 minute}
+      MAX_IN_FLIGHT: ${LT_MAX_IN_FLIGHT:-200}
+      TRUST_PROXY: ${LT_TRUST_PROXY:-}
+      # 指标端点（monitor.sh 直连 127.0.0.1:${LT_API_PORT} 抓取，不经 nginx）。
+      METRICS_TOKEN: ${LT_METRICS_TOKEN:?请先执行 bash loadtest/prepare.sh}
+      # 定时任务关掉：本栈跑 production，scheduler 会真的周期性全量扫库并尝试推送，
+      # 给容量测量掺进与被测路径无关的背景负载。
+      SCHEDULER_ENABLED: "false"
+
+      # —— 外部依赖：逐项隔离（凭据一律置空，绝不出网）——
       AI_PROVIDER: mock
       AI_FALLBACK_MOCK: "false"
       ANTHROPIC_API_KEY: ""
@@ -46,6 +92,8 @@ services:
       MODERATION_PROVIDER: keyword
       MODERATION_API_URL: ""
       SMS_PROVIDER: console
+      # 生产该置 true；这里保持 false 是有意的——压测不走真实验证码流程。
+      # 代价是启动会打一条安全告警，属预期（其余两条告警不该出现，出现即配置没生效）。
       SMS_REQUIRE_CODE: "false"
       SMS_RETURN_CODE: "false"
       ALIYUN_SMS_ACCESS_KEY_ID: ""
@@ -60,31 +108,44 @@ services:
       AEP_CDN_OSS_ACCESS_KEY_ID: ""
       AEP_CDN_OSS_ACCESS_KEY_SECRET: ""
       AEP_CDN_OSS_BUCKET: ""
-      REDIS_URL: ""
       PGVECTOR_ENABLED: "false"
+      # 必须保持 false：assertSandboxSafe() 在 production 下会拒绝启动，这是有意的护栏。
       PAY_SANDBOX: "false"
       ALLOW_DEMO_PURCHASE: "false"
-      REPORT_PDF_DISABLED: "true"
-      APP_JWT_REQUIRED: "false"
-      APP_JWT_SECRET: ""
-      PUBLIC_BASE_URL: http://127.0.0.1:14080
+      PUBLIC_BASE_URL: http://127.0.0.1:${LT_PORT:-14080}
       LLM_TRACE_CAPTURE_TEXT: "false"
       SKILL_TOOL_ALLOW_PRIVATE_NET: "false"
+
+      # —— 报告渲染（S4）：默认关，跑报告场景时置 false 并换带 Chromium 的镜像变体 ——
+      REPORT_PDF_DISABLED: ${LT_REPORT_PDF_DISABLED:-true}
+
+      # —— LLM 闸门与 mock 上游模拟（S5）——
+      # mock 默认立即返回**且不过并发闸**，所以队列深度/排队等待恒为 0，S5 什么都测不到。
+      # 置 AI_MOCK_LATENCY_MS>0 后 mock 会占一个真实槽位并模拟耗时，闸门/队列/429 冷却才可复现。
+      LLM_GATE_ENABLED: ${LT_LLM_GATE_ENABLED:-true}
+      LLM_MAX_CONCURRENCY: ${LT_LLM_MAX_CONCURRENCY:-8}
+      LLM_BURST_CONCURRENCY: ${LT_LLM_BURST_CONCURRENCY:-12}
+      LLM_QUEUE_TIMEOUT_MS: ${LT_LLM_QUEUE_TIMEOUT_MS:-15000}
+      AI_MOCK_LATENCY_MS: ${LT_MOCK_LATENCY_MS:-0}
+      AI_MOCK_LATENCY_JITTER_MS: ${LT_MOCK_LATENCY_JITTER_MS:-0}
+      AI_MOCK_429_RATE: ${LT_MOCK_429_RATE:-0}
+    ports:
+      # 只绑 loopback：给 monitor.sh 抓 /api/metrics 用（走 nginx 会把观测流量算进被测容量）。
+      - "127.0.0.1:${LT_API_PORT:-14000}:4000"
     networks:
       - backend
+      - edge
     healthcheck:
       test:
         [
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:4000/api/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 5s
       timeout: 3s
       retries: 30
-    cpus: 2.25
-    mem_limit: 3.5g
 
   gateway:
     image: nginx:1.27-alpine
@@ -99,8 +160,6 @@ services:
     networks:
       - backend
       - edge
-    cpus: 0.25
-    mem_limit: 256m
 
 networks:
   backend:

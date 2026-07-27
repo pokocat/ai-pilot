@@ -9,7 +9,11 @@ import { z } from 'zod';
 import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, resolveAuxConfig, type ResolvedAiConfig } from '../services/aiConfig.js';
-import { mockChat, mockDeliverable, mockAdaptive } from './providers/mock.js';
+// mockUpstream：仅当配了 AI_MOCK_LATENCY_MS 时，让 mock 占一个真实闸门槽位并模拟上游耗时，
+// 好让压测能压到 llmGate/端点池（见 providers/mock.ts 顶部注释）。默认 0 = 同步直出，行为不变。
+// **只用在「mock 就是配置的 provider」的分支**；真 provider 失败后的降级兜底一律不套——
+// 故障路径本就该尽快返回，再叠一层模拟延迟只会把故障放大。
+import { mockChat, mockDeliverable, mockAdaptive, mockUpstream } from './providers/mock.js';
 import { ZERO_USAGE, extractAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
 import { recordTokenUsage, recordAuxUsage, type UsageMeta } from '../services/usage.js';
 import { recordTrace } from '../services/trace.js';
@@ -187,7 +191,7 @@ async function runtimeChat(ctx: GenContext): Promise<Sourced<ChatReply>> {
     return { result: reply, usage, provider: 'dify', model: 'dify' };
   }
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
-  if (!isRealKey(cfg.apiKey)) return { result: mockChat(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+  if (!isRealKey(cfg.apiKey)) return { result: await mockUpstream(() => mockChat(ctx)), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   const oa = await import('./providers/openai.js');
   const tools = await skillToolsFor(ctx);
   if (tools.length) {
@@ -217,7 +221,7 @@ async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>
     return { result: deliverable, usage, provider: 'dify', model: 'dify' };
   }
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
-  if (!isRealKey(cfg.apiKey)) return { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+  if (!isRealKey(cfg.apiKey)) return { result: await mockUpstream(() => mockDeliverable(ctx)), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   const oa = await import('./providers/openai.js');
   const tools = await skillToolsFor(ctx);
   if (tools.length) {
@@ -235,8 +239,11 @@ async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>
 // —— 结果缓存：见 services/cache.ts（默认内存，配 REDIS_URL+ioredis 切 Redis） ——
 const CACHE_TTL = 5 * 60 * 1000;
 // 把一组上下文片段折叠成稳定短哈希：用于缓存键，避免「条数相同但内容不同」误命中（P0-1）。
+// 分隔符用 NUL（正常文本不会出现，故拼接结果不可能被内容伪造）。**必须写成转义形式**：
+// 这里曾是一个字面 NUL 字节，于是 file(1) 把本文件判成 data、grep/ripgrep 按二进制整文件跳过，
+// 整个 LLM 网关对所有代码搜索（含安全扫描）隐形。转义后运行时值与字面字节完全等价。
 function contentSig(parts: (string | null | undefined)[]): string {
-  return createHash('sha1').update(parts.map((p) => p ?? '').join(' ')).digest('hex').slice(0, 16);
+  return createHash('sha1').update(parts.map((p) => p ?? '').join('\u0000')).digest('hex').slice(0, 16);
 }
 function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string {
   // P0-1：引用/知识/记忆/理解按**内容哈希**入键，而非仅条数——否则同租户不同用户、条数偶合即串数据。
@@ -311,7 +318,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
         const mt = m as { toolCalls?: number; iterations?: number };
         return { result: m.result, usage: m.usage, provider: 'openai', model: cfg.model, toolCalls: mt.toolCalls, iterations: mt.iterations };
       }
-      return { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+      return { result: await mockUpstream(() => mockDeliverable(ctx)), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
     }, { kind: 'deliverable', ctx, meta, provider: live ?? 'mock', respText: deliverableText });
   } catch (err) {
     console.error('[gateway] deliverable fallback to mock:', (err as Error).message);
@@ -348,9 +355,11 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
   }
 
   const cfg = await getAiConfig();
+  // live 提到 try 外面：下面的 mock 兜底需要区分「mock 本来就是配置的 provider」和
+  // 「真 provider 失败后降级」——前者可注入压测用的模拟耗时，后者必须立刻返回。
+  const live = liveProvider(cfg);
   let chatResult: Sourced<ChatReply> | null = null;
   try {
-    const live = liveProvider(cfg);
     if (live) {
       const tools = (live === 'openai' || live === 'claude') ? await skillToolsFor(ctx) : []; // P1-D1：openai/claude 均支持工具
       const s = await traced(async () => {
@@ -377,7 +386,9 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
     await moderateOutputOrThrow(chatResult.result.text, ctx, meta);
     return { result: withAsks(chatResult.result), usage: chatResult.usage };
   }
-  return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
+  // live 为空 = mock 就是配置的 provider；live 有值却走到这里 = 真 provider 失败后的降级兜底（不注入延迟）。
+  const reply = live ? mockChat(ctx) : await mockUpstream(() => mockChat(ctx));
+  return { result: withAsks(reply), usage: ZERO_USAGE };
 }
 
 export type ChatStreamEvent =
@@ -561,7 +572,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
       provider = 'claude'; usage = m.usage; toolCalls = m.toolCalls; iterations = m.iterations;
       out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
     } else {
-      const m = mockAdaptive(ctx);
+      const m = await mockUpstream(() => mockAdaptive(ctx));
       out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
     }
   } catch (err) {

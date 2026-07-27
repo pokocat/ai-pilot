@@ -3,6 +3,55 @@
 
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { Deliverable, ChatReply, GenContext } from '../schema.js';
+import { withLlmSlot, type LlmLane } from '../../services/llmGate.js';
+
+/* ─────────── 压测可测性：让 mock 表现得像一个真实上游 ───────────
+ *
+ * 默认 mock **立即返回**，而且在 gateway 里是被直接调用的、**完全不经过 services/llmGate 的
+ * 并发闸**（真 provider 才过闸）。两件事叠加的后果：压测里 LLM 队列深度、排队等待、闸门占用
+ * 恒为 0 —— 也就是说 S5「LLM 闸门与队列」这个场景其实什么都测不到，而闸门和端点池正是本轮
+ * 新建的核心。压测方案 §3.2 只写了「加 AI_MOCK_LATENCY_MS」，但**只注入延迟仍然不过闸**，
+ * 队列照样是 0；必须同时占一个真实槽位才测得出来。
+ *
+ * 配了 AI_MOCK_LATENCY_MS(>0) 之后，mock 改为「占一个真实闸门槽位 + 模拟上游耗时」，
+ * 于是并发上限、排队、排队超时降级、429 整窗冷却全部可复现，且**零 Token 成本**。
+ *   AI_MOCK_LATENCY_MS        模拟上游耗时（0=不启用，行为与原来逐字节一致）
+ *   AI_MOCK_LATENCY_JITTER_MS 在上面基础上叠加 [0, jitter) 的随机抖动，避免整齐的同步波形
+ *   AI_MOCK_429_RATE          按该概率(0..1)抛 429，用来验证整窗冷却与恢复爬坡
+ * 生产不会配这些变量，故这条路径在生产恒为「直接返回」。
+ */
+function envNum(name: string, dflt: number): number {
+  // 注意 Number('') === 0（不是 NaN）：未设置 / 空串必须先判掉，否则默认值会被 0 顶掉。
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return dflt;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : dflt;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** 是否已开启「mock 模拟真实上游」（仅压测用）。 */
+export function mockUpstreamEnabled(): boolean {
+  return envNum('AI_MOCK_LATENCY_MS', 0) > 0;
+}
+
+/**
+ * 未开启时：同步直出，零额外开销（`produce()` 原样返回）。
+ * 开启后：占用一个 llmGate 槽位、睡够模拟耗时、按配置概率抛 429，再产出 mock 结果。
+ */
+export async function mockUpstream<T>(produce: () => T, lane: LlmLane = 'main'): Promise<T> {
+  if (!mockUpstreamEnabled()) return produce();
+  return withLlmSlot(async () => {
+    const jitter = envNum('AI_MOCK_LATENCY_JITTER_MS', 0);
+    await sleep(envNum('AI_MOCK_LATENCY_MS', 0) + (jitter > 0 ? Math.floor(Math.random() * jitter) : 0));
+    const rate = envNum('AI_MOCK_429_RATE', 0);
+    if (rate > 0 && Math.random() < rate) {
+      // 带 statusCode 让闸门确定性识别为限流（而不是靠文案匹配），从而进入整窗冷却。
+      throw Object.assign(new Error('mock 上游注入 429: too many requests'), { statusCode: 429 });
+    }
+    return produce();
+  }, lane);
+}
 
 function metaOf(ctx: GenContext): string {
   const parts = [ctx.companyName, ctx.profile?.industry, ctx.profile?.stage].filter(Boolean) as string[];

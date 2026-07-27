@@ -7,6 +7,7 @@ import rateLimit from '@fastify/rate-limit';
 import { isAiTestMode } from './env.js';
 import { authRoutes } from './routes/auth.js';
 import { metaRoutes } from './routes/meta.js';
+import { metricsRoutes } from './routes/metrics.js';
 import { agentRoutes } from './routes/agents.js';
 import { profileRoutes } from './routes/profile.js';
 import { quickscanRoutes } from './routes/quickscan.js';
@@ -45,6 +46,10 @@ import { sandboxEnabled, assertSandboxSafe } from './services/sandbox.js';
 import { enterNow } from './services/clock.js';
 import { getRedis } from './services/redis.js';
 import { verifyUserToken } from './services/userToken.js';
+import {
+  startEventLoopMonitor, noteRequestStart, noteRequestEnd, noteRequestAborted,
+  gateEnter, gateLeave, gateInFlightNow, noteOverloadRejected,
+} from './services/metrics.js';
 
 /**
  * 反代信任配置（压测 P0-0）。
@@ -135,21 +140,44 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   //      这类请求的并发由 services/llmGate.ts 按上游配额单独管，本闸不重复管。
   const maxInFlight = Number(process.env.MAX_IN_FLIGHT ?? 200);
   if (maxInFlight > 0 && !isAiTestMode()) {
-    let inFlight = 0;
     const isLongRunning = (url: string) => url.includes('/generate') || url.includes('/stream');
     app.addHook('onRequest', async (req, reply) => {
-      if (isLongRunning(req.url) || req.url.startsWith('/api/health')) return;
-      if (inFlight >= maxInFlight) {
+      if (isLongRunning(req.url) || req.url.startsWith('/api/health') || req.url.startsWith('/api/metrics')) return;
+      if (gateInFlightNow() >= maxInFlight) {
+        noteOverloadRejected();
         reply.header('Retry-After', '1');
         return reply.code(503).send({ error: '服务繁忙，请稍后重试', code: 'SERVER_BUSY' });
       }
-      inFlight++;
+      gateEnter();
       (req as typeof req & { __counted?: boolean }).__counted = true;
     });
-    const done = (req: { __counted?: boolean }) => { if (req.__counted) { req.__counted = false; inFlight--; } };
+    const done = (req: { __counted?: boolean }) => { if (req.__counted) { req.__counted = false; gateLeave(); } };
     app.addHook('onResponse', async (req) => done(req as typeof req & { __counted?: boolean }));
     app.addHook('onError', async (req) => done(req as typeof req & { __counted?: boolean }));
   }
+
+  // 指标采集（压测方案 S-b / 优化计划 P1-2）：与过载闸分开计数——闸门那份刻意不含长耗时 LLM 路径
+  // 与探活（否则一个 200 的在途预算会被几分钟的生成请求瞬间占满），而容量观测要的是**全量**在途。
+  // 指标端点自身不计入，免得观测行为污染被观测的数字。
+  startEventLoopMonitor();
+  app.addHook('onRequest', async (req) => {
+    if (req.url.startsWith('/api/metrics')) return;
+    (req as typeof req & { __metered?: boolean }).__metered = true;
+    noteRequestStart();
+  });
+  app.addHook('onResponse', async (req, reply) => {
+    const r = req as typeof req & { __metered?: boolean };
+    if (!r.__metered) return;
+    r.__metered = false;
+    noteRequestEnd(reply.statusCode);
+  });
+  // 客户端提前断开（小程序切后台、SSE 被掐）不会走 onResponse，须单独归还在途计数。
+  app.addHook('onRequestAbort', async (req) => {
+    const r = req as typeof req & { __metered?: boolean };
+    if (!r.__metered) return;
+    r.__metered = false;
+    noteRequestAborted();
+  });
 
   // 可测性（沙箱专属）：用 x-test-now 头把本次请求的「现在」固定为指定时刻，快进到期/锚点重置做离线验证。
   // 仅 sandboxEnabled() 为真时注册，生产环境此 hook 完全不存在 → 时间不可被外部篡改。
@@ -169,6 +197,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
 
   await app.register(authRoutes, { prefix: '/api' });
   await app.register(metaRoutes, { prefix: '/api' });
+  await app.register(metricsRoutes, { prefix: '/api' }); // Prometheus 指标（需 METRICS_TOKEN，未配则 404）
   await app.register(agentRoutes, { prefix: '/api' });
   await app.register(profileRoutes, { prefix: '/api' });
   await app.register(quickscanRoutes, { prefix: '/api' }); // 3 问速诊（WO-06：获客入口 → 初诊卡）

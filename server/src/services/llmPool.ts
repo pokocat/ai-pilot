@@ -174,7 +174,7 @@ function unitHash(s: string): number {
  */
 function hrwSort(endpoints: PoolEndpoint[], key: string): PoolEndpoint[] {
   return [...endpoints]
-    .map((e) => ({ e, score: e.weight / -Math.log(unitHash(`${key} ${e.id}`)) }))
+    .map((e) => ({ e, score: e.weight / -Math.log(unitHash(`${key}\u0000${e.id}`)) }))
     .sort((a, b) => (b.score - a.score) || a.e.id.localeCompare(b.e.id))
     .map((x) => x.e);
 }

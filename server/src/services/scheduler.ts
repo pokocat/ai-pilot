@@ -46,6 +46,17 @@ export async function runJob(name: string): Promise<void> {
 
 export function startScheduler(): void {
   if (started || process.env.NODE_ENV === 'test') return;
+  // 显式停机开关。两个用途：
+  //   ① 压测——本函数只在 NODE_ENV!=test 时启动，而压测栈按 P0-0 已切到 production，
+  //      定时任务会真的开始周期性全量扫库并尝试推送，给容量测量掺进无关的背景负载；
+  //   ② 运维——AGENTS §13 记着「scheduler 每进程各跑一份，选主没做完不许加第二个进程」。
+  //      在拆出独立 cron worker 之前，这个开关让「多个 API 进程 + 一个专职跑定时任务的进程」
+  //      成为可行的过渡形态：API 侧全部置 false，只留一个进程为 true。
+  // 默认 true = 行为不变。
+  if ((process.env.SCHEDULER_ENABLED ?? 'true').trim() === 'false') {
+    console.log('[scheduler] SCHEDULER_ENABLED=false，本进程不启动定时任务');
+    return;
+  }
   started = true;
   for (const job of jobs) {
     const t = setInterval(() => { void runJob(job.name); }, job.intervalMs);
