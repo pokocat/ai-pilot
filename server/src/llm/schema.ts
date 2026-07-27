@@ -11,7 +11,7 @@ import type {
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
   AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
-  AiModel, AiModelUpsert, AiModelTest,
+  AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus,
   SkillsConfig, LlmContextTrace,
 } from '../../../shared/contracts';
 export type {
@@ -19,7 +19,7 @@ export type {
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
   AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
-  AiModel, AiModelUpsert, AiModelTest,
+  AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus,
   SkillsConfig,
 };
 

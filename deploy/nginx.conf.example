@@ -1,6 +1,63 @@
-# 军师 · Nginx 站点示例（单域名反代：H5 + 运营后台 + API + SSE）
-# 用法：拷到 /etc/nginx/sites-available/junshi.conf → 改 server_name / root 路径 → ln -s 到 sites-enabled → nginx -t && systemctl reload nginx
+# 军师 · Nginx 配置示例（单域名反代：H5 + 运营后台 + API + SSE）
+#
+# 本文件分两部分，**两部分都要改**——只改站点配置拿不到连接数与 keepalive 的收益，
+# 因为 worker_connections / limit_req_zone 属于 nginx 主配置的 events{} 和 http{} 上下文。
+#
+#   A. /etc/nginx/nginx.conf        —— 连接上限、limit_req 共享内存区
+#   B. sites-available/junshi.conf  —— upstream + server（本文件下半部分）
+#
+# 用法：按 A 改主配置 → 把 B 拷到 /etc/nginx/sites-available/junshi.conf → 改 server_name / root 路径
+#       → ln -s 到 sites-enabled → nginx -t && systemctl reload nginx
 # HTTPS：装好后跑  certbot --nginx -d yourdomain.com  自动签证书并改 443。
+#
+# ── 为什么是这些值（2026-07 隔离压测实测）────────────────────────────────────────
+# 800 RPS 同一档做单变量对照：Alpine 默认 worker_connections=1024 时失败率 46.03%，网关连接先耗尽；
+# 调到 8192 + upstream keepalive 后失败率降到 10.09%，瓶颈才转移回 API。
+# 注意结论的准确口径：**调优不提高吞吐，它只是把瓶颈还给应用**——两档的成功吞吐都是约 366 RPS
+# （676.74×53.97% vs 409.61×89.91%）。不调的话，你测到的是 Nginx 的连接上限，不是应用容量。
+# 详见 docs/[OPUS5]LOADTEST_OPT_PLAN_2026-07-26.md。
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# A. /etc/nginx/nginx.conf —— 主配置需要的三处
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# worker_processes      auto;
+# worker_rlimit_nofile  65535;          # 每 worker 的 fd 上限，要 ≥ worker_connections
+#
+# events {
+#     worker_connections  8192;          # 默认 512/1024，800 RPS 时首先耗尽的就是它
+#     multi_accept        on;
+# }
+#
+# http {
+#     ...既有配置...
+#
+#     # 过载保护（压测 P0-5）：越过容量时让少数请求快速 503，而不是所有人一起排队到超时。
+#     # 压测实测 800 RPS 打进来只能交付约 366 RPS —— 过载会让有效吞吐不升反降，主动拒绝反而更快。
+#     # 10m 共享内存约可跟踪 16 万个 IP；rate 是「每 IP」的稳态速率，burst 是瞬时容忍量。
+#     limit_req_zone  $binary_remote_addr  zone=junshi_api:10m  rate=30r/s;
+#     limit_req_status 503;
+# }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# B. sites-available/junshi.conf —— 站点配置
+# ═══════════════════════════════════════════════════════════════════════════
+
+# upstream 而不是直接 proxy_pass 到 127.0.0.1:4000：只有 upstream 块才能配 keepalive。
+# 没有 keepalive 时每个请求都要新建一条到 Node 的 TCP —— 450 RPS 就是每秒 450 次连接建立/拆除
+# 加 TIME_WAIT 堆积，这些开销全落在 Node 进程上。
+upstream junshi_api {
+    server 127.0.0.1:4000 max_fails=3 fail_timeout=10s;
+
+    # 多进程 / 多实例时在这里加 server 行（配合应用侧的 scheduler 选主，见架构方案）：
+    # server 127.0.0.1:4001 max_fails=3 fail_timeout=10s;
+
+    keepalive 64;                # 每 worker 保持的空闲上游连接数
+    keepalive_timeout 60s;
+    keepalive_requests 1000;
+}
 
 server {
     listen 80;
@@ -14,16 +71,41 @@ server {
 
     # —— 后端 API（反代到本机 Node :4000）——
     location /api/ {
-        proxy_pass http://127.0.0.1:4000;
+        # 过载保护：稳态 30r/s per IP，突发容忍 60，超出立即 503（nodelay，不排队）。
+        # 应用侧还有一层「在途请求数上限」（MAX_IN_FLIGHT）与全站限流兜底。
+        limit_req zone=junshi_api burst=60 nodelay;
+
+        proxy_pass http://junshi_api;
         proxy_http_version 1.1;
+
+        # keepalive 生效的必要条件：必须把逐跳的 Connection 头清空，
+        # 否则 nginx 会把客户端的 Connection: close 透传给上游，连接池永远命中不了。
+        proxy_set_header Connection         "";
+
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # ⚠️ 应用侧必须同时设 TRUST_PROXY（默认 'loopback' 已覆盖本机反代这种形态），
+        #    否则 Fastify 不采信上面这两个头，req.ip 会全部变成 127.0.0.1，
+        #    全站限流因此共用一个桶 ≈ 5 RPS。见 server/src/app.ts trustProxyOption()。
+
         proxy_read_timeout 180s;          # LLM 产出可能较慢
-        # SSE 流式（/api/generate）：关闭缓冲，事件才会实时下发
+        # SSE 流式（/api/generate、会话流式）：关闭缓冲，事件才会实时下发。
+        # 应用侧同时回了 X-Accel-Buffering: no，换 ALB / 多层反代时靠那个头兜底。
         proxy_buffering off;
         proxy_cache off;
+    }
+
+    # —— 健康检查（不限流、不记日志）——
+    # /health/live  只看进程存活，不碰 DB（liveness）
+    # /health/ready 含 DB 探测，决定是否给这个实例发流量（readiness / 滚动发布）
+    location /api/health {
+        access_log off;
+        proxy_pass http://junshi_api;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
     }
 
     # —— 运营后台（admin/dist，子路径；需以 base=/admin/ 构建）——
@@ -52,8 +134,10 @@ server {
 #     client_max_body_size 10m;
 #
 #     location /api/ {
-#         proxy_pass http://127.0.0.1:4000;
+#         limit_req zone=junshi_api burst=60 nodelay;
+#         proxy_pass http://junshi_api;
 #         proxy_http_version 1.1;
+#         proxy_set_header Connection         "";
 #         proxy_set_header Host              $host;
 #         proxy_set_header X-Real-IP         $remote_addr;
 #         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;

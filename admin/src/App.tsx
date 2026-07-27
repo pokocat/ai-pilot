@@ -16,6 +16,8 @@ import {
   type AiPreset,
   type AiProvider,
   type AiModel,
+  type AiRouting,
+  type AiRoutingStatus,
   type AiModelUpsert,
   type AdminUserItem,
   type AdminUserDetail,
@@ -2122,6 +2124,8 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
   // 检索增强（向量嵌入 / 重排）——全局配置，不随对话模型切换变动；可独立配凭证，留空回退当前生效模型。
   const [aux, setAux] = useState({ embeddingEnabled: false, embeddingModel: '', embeddingBaseUrl: '', embeddingApiKey: '', rerankEnabled: false, rerankModel: '', rerankBaseUrl: '', rerankApiKey: '' });
   const [auxTest, setAuxTest] = useState<{ ok: boolean; msg: string } | null>(null);
+  // 端点池：多路分流 + 故障转移。单端点被上游限流时把流量转到同 tier 的其它端点。
+  const [routing, setRouting] = useState<AiRoutingStatus | null>(null);
 
   const load = () => api.aiConfig().then((v) => {
     setCfg(v.config); setPresets(v.presets); setModels(v.models);
@@ -2130,7 +2134,8 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
       rerankEnabled: v.config.rerankEnabled, rerankModel: v.config.rerankModel, rerankBaseUrl: v.config.rerankBaseUrl, rerankApiKey: '',
     });
   }).catch(() => {});
-  useEffect(() => { load(); }, []);
+  const loadRouting = () => api.aiRouting().then(setRouting).catch(() => {});
+  useEffect(() => { load(); loadRouting(); }, []);
   if (!cfg) return <Loading />;
 
   const set = (p: Partial<ModelForm>) => setForm((f) => (f ? { ...f, ...p } : f));
@@ -2147,6 +2152,26 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
   const del = (m: AiModel) => {
     if (!confirm(`删除模型「${m.label}」？`)) return;
     api.delAiModel(m.id).then(() => { toast('已删除'); load(); }).catch((e) => toast(e?.message || '删除失败'));
+  };
+  // 入池/出池：只改 poolEnabled，不动其它字段（PATCH 是 patch 语义，未传的不改）。
+  const togglePool = (m: AiModel) => {
+    if (busy) return;
+    setBusy(true);
+    api.updateAiModel(m.id, { provider: m.provider, label: m.label, model: m.model, poolEnabled: !m.poolEnabled })
+      .then(() => { toast(m.poolEnabled ? `「${m.label}」已移出分流池` : `「${m.label}」已加入分流池`); load(); loadRouting(); })
+      .catch((e) => toast(e?.message || '操作失败'))
+      .finally(() => setBusy(false));
+  };
+  // 单个端点的池参数（权重 / 备份层 / 每实例并发上限）。
+  const setPoolField = (m: AiModel, patch: { weight?: number; tier?: number; maxConcurrency?: number }) => {
+    api.updateAiModel(m.id, { provider: m.provider, label: m.label, model: m.model, ...patch })
+      .then(() => { load(); loadRouting(); })
+      .catch((e) => toast(e?.message || '保存失败'));
+  };
+  const saveRouting = (patch: Partial<AiRouting>) => {
+    api.saveAiRouting(patch)
+      .then((r) => { setRouting(r); toast('已保存路由设置'); })
+      .catch((e) => toast(e?.message || '保存失败'));
   };
   const edit = (m: AiModel) => {
     setTest(null);
@@ -2342,12 +2367,74 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
             <span className="mi"><Icon name="insight" size={16} /></span>
             <div className="mb" style={{ cursor: 'pointer' }} onClick={() => edit(m)}>
               <div className="mt">{m.label}{m.active && <span className="tag" style={{ marginLeft: 6 }}>生效中</span>}{!m.hasKey && m.provider !== 'mock' && <span className="tag" style={{ marginLeft: 6 }}>未配 Key</span>}</div>
-              <div className="mm">{m.provider} · {m.model || '—'}{m.preset ? ` · 内置:${m.preset}` : ''}{(m.priceInput > 0 || m.priceOutput > 0) ? ` · 单价 入¥${m.priceInput}/出¥${m.priceOutput} 每1M` : ' · 单价待配'}</div>
+              <div className="mm">{m.provider} · {m.model || '—'}{m.preset ? ` · 内置:${m.preset}` : ''}{(m.priceInput > 0 || m.priceOutput > 0) ? ` · 单价 入¥${m.priceInput}/出¥${m.priceOutput} 每1M` : ' · 单价待配'}{m.poolEnabled ? ` · 池内 权重${m.weight}${m.tier > 0 ? ` 备份T${m.tier}` : ''}${m.maxConcurrency > 0 ? ` 并发${m.maxConcurrency}` : ''}` : ''}</div>
             </div>
             {!m.active && <button className="mini-btn" onClick={() => activate(m)} disabled={busy}>切换</button>}
+            <button className={`mini-btn ${m.poolEnabled ? 'primary' : ''}`} disabled={busy} title={m.poolEnabled ? '已在分流池内，点击移出' : '加入分流池，参与多路分流与故障转移'} onClick={() => togglePool(m)}>
+              {m.poolEnabled ? '在池中' : '入池'}
+            </button>
             <button className="mini-btn danger" onClick={() => del(m)}>删除</button>
           </div>
         ))}
+        {/* —— 端点池：多路分流 + 故障转移 —— */}
+        <div className="ai-label" style={{ marginTop: 18 }}>端点池（多路分流 · 故障转移）</div>
+        <div className={`ai-test ${routing?.mode === 'pool' ? 'ok' : ''}`} style={{ margin: '0 0 12px' }}>
+          <Icon name={routing?.mode === 'pool' ? 'check' : 'alert'} size={13} />
+          <span>
+            {routing?.mode === 'pool'
+              ? `分流中：池内 ${routing.endpoints.length} 个端点。某个端点被上游限流时，流量自动转到同层的其它端点；${routing.sticky ? '同一会话固定落同一端点（保住上游提示词缓存）' : '会话粘性已关闭，缓存命中率会下降'}。`
+              : '当前只用「生效中」那一个端点——它被上游限流时全站 AI 会一起停摆。把多个端点「入池」后即可开启分流。'}
+          </span>
+        </div>
+        <div className="ai-sub">
+          <div className="ai-sub-h">
+            <div className="b"><div className="t">启用端点池</div><div className="s">关＝只用生效中的那一个；开＝按权重分流到池内端点，撞 429/5xx 自动转移并冷却该端点</div></div>
+            <div className={`sw ${routing?.mode === 'pool' ? 'on' : ''}`} onClick={() => saveRouting({ mode: routing?.mode === 'pool' ? 'single' : 'pool' })}><i /></div>
+          </div>
+          {routing?.mode === 'pool' && (
+            <div className="ai-sub-h">
+              <div className="b"><div className="t">会话粘性</div><div className="s">同一会话固定落同一端点。上游提示词缓存按账号隔离，关掉会把缓存打散、成本上升——除非确有均散需求，否则保持开启</div></div>
+              <div className={`sw ${routing.sticky ? 'on' : ''}`} onClick={() => saveRouting({ sticky: !routing.sticky })}><i /></div>
+            </div>
+          )}
+          {routing?.mode === 'pool' && routing.endpoints.length === 0 && (
+            <div className="usage-meta" style={{ padding: '10px 0' }}>池里还没有端点。在上面的模型列表里点「入池」。</div>
+          )}
+          {routing?.mode === 'pool' && models.filter((m) => m.poolEnabled).map((m) => {
+            const st = routing.endpoints.find((x: AiRoutingStatus['endpoints'][number]) => x.id === m.id);
+            return (
+              <div key={m.id} className="usage-row">
+                <div className="usage-name">
+                  {m.label}
+                  {st?.cooling && <span className="tag off" style={{ marginLeft: 6 }}>冷却中</span>}
+                  <div className="usage-meta">
+                    {m.model || '—'}
+                    {st?.cooling && st.coolingUntil ? ` · ${st.coolingReason === 'rate_limited' ? '被限流' : '连续报错'}，${new Date(st.coolingUntil).toLocaleTimeString()} 后恢复` : ''}
+                  </div>
+                </div>
+                <Field label="权重">
+                  <input className="ai-input" type="number" min={1} defaultValue={m.weight}
+                    onBlur={(e) => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== m.weight) setPoolField(m, { weight: v }); }} />
+                </Field>
+                <Field label="备份层">
+                  <input className="ai-input" type="number" min={0} defaultValue={m.tier}
+                    onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.tier) setPoolField(m, { tier: v }); }} />
+                </Field>
+                <Field label="并发/实例">
+                  <input className="ai-input" type="number" min={0} defaultValue={m.maxConcurrency}
+                    onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.maxConcurrency) setPoolField(m, { maxConcurrency: v }); }} />
+                </Field>
+              </div>
+            );
+          })}
+          {routing?.mode === 'pool' && (
+            <div className="ai-note">
+              权重＝分流占比（按权重摊，不是均分）。备份层 0＝正常分流；填 1 以上＝降级备份，只有第 0 层全部冷却时才启用——
+              放不同模型会改变回答质量，按需使用。并发是<b>每个实例</b>的上限，多实例部署请按实例数分摊；0＝用全局默认。
+            </div>
+          )}
+        </div>
+
         {/* —— 检索增强：向量嵌入 / 重排（全局开关，不随对话模型切换）—— */}
         <div className="ai-label" style={{ marginTop: 18 }}>检索增强（知识库 / 记忆）</div>
         <div className={`ai-test ${embReady || rerankReady ? 'ok' : 'err'}`} style={{ margin: '0 0 12px' }}>

@@ -45,10 +45,11 @@ repo/
 ├── shared/
 │   └── contracts.d.ts  # ★ SSOT：全栈数据契约（纯类型，运行时擦除）
 ├── docs/               # CHANGELOG.md（历史变更）· ROADMAP.md（进展/TODO）· TESTING.md（集成测试）· DEPLOYMENT.md（部署架构/上线）
-├── deploy/             # 部署模板：nginx.conf.example · junshi-api.service · Dockerfile.server · docker-compose.yml
+├── deploy/             # 部署模板：nginx.conf.example（★分 A 主配置 + B 站点两段，两段都要改）· junshi-api.service · Dockerfile.server · docker-compose.yml
 ├── app/                # Taro 移动端（微信小程序 weapp + H5），React + TS
 ├── server/             # 后端 API：Fastify + Prisma + PostgreSQL + LLM Gateway（含 src/app.ts 工厂 + test/ 集成测试）
 ├── admin/              # 运营后台：Vite + React + TS
+├── loadtest/           # 隔离压测：Docker Compose + 内网网关 + k6 只读场景（默认零外部资源；真实 LLM 仅受控最小探针）
 └── project/            # 原始高保真原型（设计事实来源，勿改）
 ```
 
@@ -204,7 +205,9 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `POST /auth/wechat-phone` | 小程序本机号一键登录：getPhoneNumber code 换手机号后注册/登录 | 否 |
 | `GET/POST /wechat/message` | 微信后台消息推送 URL 验签：GET 校验 `signature/timestamp/nonce` 后原样返回 `echostr`；POST 验签后返回 `success`（后续事件处理入口） | 否 |
 | `GET /wechat/subscribe/templates` · `POST /wechat/subscribe` | 已登录用户读取订阅消息模板 · 回写 `wx.requestSubscribeMessage` 结果，`accept` 累计一次性发送额度 | 是 |
-| `GET /health` | 健康检查 | 否 |
+| `GET /health` | 健康检查（含 DB 探测；结果 1s 短缓存，避免高频探活每次都打一条 SQL） | 否 |
+| `GET /health/live` | 存活探针：只看进程，不碰 DB（ALB/k8s liveness——DB 抖动不该把好进程判死重启） | 否 |
+| `GET /health/ready` | 就绪探针：含 DB，决定是否给该实例发流量（readiness / 滚动发布连接排空） | 否 |
 | `GET /me` · `PUT /me/color` | 当前用户(+onboarded+ai信息+军师档案) · 改本命色 | 是 |
 | `GET /agents` · `GET /agents/:key` | 智能体注册表；带 token 时回填 `owned` | 否 |
 | `POST /agents/:key/purchase` | 用算力一次性解锁 `unlock` 智能体（幂等，已开通不重复扣费） | 是 |
@@ -274,6 +277,10 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 **兼容网关超时口径**：`OPENAI_TIMEOUT_MS` 控制普通对话，以及流式的首包/相邻数据块空闲上限；收到任意上游字节即续期，不能再因累计总时长截断正常流。强制结构化成果（含工具循环终结轮）取 `max(OPENAI_TIMEOUT_MS, 120000)`，避免较长报告在 60 秒整被本服务取消。失败日志只记录网关 host、模型、阶段、超时配置与耗时，不记录 prompt 或密钥；超时以 `AI_TIMEOUT` 归一为用户可读的重试提示。
 
 ### 8.3 其它服务
+- `services/llmGate.ts`（2026-07-26 压测 P0-2）：**上游模型的全局并发闸**。挂在 `llm/providers/{claude,openai,dify}.ts` 的真实外呼处（不挂 gateway 的业务分支——那里有 17 个动态 import 调用点，逐个包既漏又难维护；挂 provider 层则新增调用路径自动被覆盖）。车道键已泛化为任意字符串（`main` / `aux` / `main#<endpointId>`），接入端点池后**每个端点各占一条独立车道**，并发预算与 429 冷却都按端点算，一个端点被限流不连累其它端点。默认 8 并发 / 12 突发（`LLM_MAX_CONCURRENCY` / `LLM_BURST_CONCURRENCY`），排队超 15s 降级为 `AI_BUSY(503)`。**429 走整窗冷却**：压测实测 20 并发触发 429 后，紧接着的 12 并发复测 48/48 全挂，说明上游是滚动时间窗限额，所以收到 429 就整窗停发（优先采信 `Retry-After`，否则指数退避），冷却结束从低水位逐步爬回常态——而不是让每条请求各自重试去放大打击。显式速率窗口 `LLM_RATE_MAX_PER_MIN` 默认 0（关闭），等线上跑出真实 429 率再校准，不去猜上游配额。流式路径手动 `acquireLlmSlot`/`release`，槽位持有到整条流消费完（只包"建流"那一下等于没限）。mock provider 不过闸，测试与演示环境不受影响。`llmGateStats()` 供后续 `/metrics`。
+- **辅助档（aux tier，2026-07-26）**：`services/aiConfig.resolveAuxConfig()` + `llmGate` 的 main/aux **双车道**。核对发现一条用户消息实际触发 3–4 次模型调用——主生成 + `extractInsights`（记忆学习）+ `extractProphecies`（预言抽取）+ 首条消息的 `summarizeSessionTitle`——原来全走同一个 `getAiConfig()`，**上游 8 个槽位里 2–3 个被后台任务占着**。配 `AI_AUX_MODEL` 即把抽取切小模型；再配 `AI_AUX_BASE_URL` / `AI_AUX_API_KEY`（独立账号）则切到独立并发车道（默认 4 并发、5s 排队超时），主配额全留给用户可见生成。只换模型名不换账号时车道仍是 main——同账号配额本就共享，分两个计数器等于把限额悄悄放大一倍。**收口点是 `gateway.ts` 的 `rawText()`**：所有抽取（`extractInsights`/`extractProphecies`/`summarizeSessionTitle`/`extractGraphTriples`/`summarizePoints`/`llmJson`/`completeJson`/`structured*`）都经它落地，新增抽取路径自动继承；调用方显式指定 `model` 时（评测评委要独立模型避免自评）不被覆盖。**对话与成果生成永远走主配置，提示词不受影响**；`AI_AUX_MODEL` 留空则行为与改动前完全一致。
+- `services/llmPool.ts`（2026-07-27）：**上游端点池——多路分流 + 故障转移，分布式安全**。此前后台只能让一个 `AiModel` 生效（`AiSetting.activeModelId`），该端点一被上游限流全站 AI 就停摆。现在 `AiSetting.routingMode='pool'` 时，所有 `poolEnabled=true` 的 `AiModel` 组成池。**路由用加权 Rendezvous 哈希（HRW）+ 会话粘性，不是轮询**——理由是生产实测提示词缓存已只剩 12% 命中而系统提示词占单次输入约 95%，轮询会把同一会话打散到不同端点、把缓存彻底归零（上游缓存按账号/端点隔离）。HRW 的四个性质正好对上：① 无状态无需协调，各实例用同样输入独立算出同样结果 → 多实例天然一致；② key 取 sessionId → 同一会话恒定同端点，缓存保得住；③ 成员变化只重映射 1/N（端点冷却下线只迁走它承载的那部分）；④ 支持权重。**分布式健康态**：429 冷却写 Redis（`llm:pool:cool:<id>`，TTL=冷却时长）跨实例可见——否则实例 A 撞 429 标冷却、实例 B 毫不知情继续打，上游滚动窗口惩罚会被持续续期；无 Redis 时退化进程内（单实例正确，多实例恢复慢但不崩）。**tier**：0=同质对等正常分流，1+=降级备份仅当低 tier 全冷却才启用（跨模型降级会改变回答质量，故默认全 tier 0，需显式配）。**转移判定**：429/5xx/超时转移并冷却；4xx、`AI_BUSY`、审核拦截、输出截断不转移（换端点也一样）。上限 `LLM_POOL_MAX_ATTEMPTS`（默认 3）。**明确不做**：跨实例精确并发计数——`maxConcurrency` 是**每实例**上限，全局精确信号量要 Redis INCR/DECR + 泄漏回收，复杂度和失败模式都高，而端点真实约束是上游配额、本来就只能撞了才知道，已由 429 整窗冷却兜住；多实例按实例数分摊配置即可。`routingMode` 默认 `single`，**不配就完全是旧行为**。**覆盖面**：openai 兼容协议的非流式 + claude 协议的全部 5 处调用点（含流式）已接入转移；claude 流式只在**尚未吐出任何 delta 前**才允许转移（已 yield 过内容再换端点会让前后文对不上）；openai 兼容的流式转移尚未做。注意 `claude.ts` 的 `getClient` 已从单槽缓存改为 Map——接池后相邻请求在不同 `(apiKey, baseUrl)` 间交替，单槽会每次重建 client 丢掉连接池。运营后台配置在「模型」页的「端点池」分区（入池开关、权重/备份层/每实例并发、实时冷却态）。
+- `services/redis.ts`：共享 Redis 客户端（可选依赖，懒加载）。从 `cache.ts` 抽出独立成模块，因为缓存、全站限流的跨实例 store、后续的 LLM 队列/调度选主需要**同一个连接**。未配 `REDIS_URL` 或 ioredis 不可用 → 返回 null，各调用方回退进程内实现，绝不因此让进程起不来。
 - `services/context.ts`：`resolveUser`（严格鉴权）、`buildGenContext`（注入 档案/基准/记忆/本命色 + **军师档案 + 项目背景 + 显式引用 + 知识库混合召回 + 天势档案**）。
 - `services/cardHtml.ts`（M4 PR-15 第一批）：B 级卡片渲染——每日战报（军令/对齐率/回填/段位/连续天数）、天时日历（命盘 12 月攻守+拐点+谶语）、天命速写（送你一卦：命格/大势/建议由命盘确定性生成；朋友生辰 `computeChart` 现算**不落库**）。铁律：卡上每个数字都来自服务端账本，读不到整块不显示；品牌一律军师参谋部（V6.0 原稿外置 CSS 未保留，样式按小程序设计体系重制）；卡片发布走自有域名 `{PUBLIC_BASE_URL}/api/r/:id`。`services/reportHtml.ts` 的普通报告模板已改为 V6.0 天势卡片风（暖纸底、深绿封面、白色章节卡、金印落款、军师参谋部品牌）；报告 `htmlUrl` 也固定返回自有域名 `/api/r/:id` 供小程序 web-view 打开，OSS 仅作为可选 `cdnUrl` 镜像，旧 OSS `htmlUrl` 会在再次请求时迁回自有域名；不要回退旧米色卷轴页脚或 OSS 直开入口。叙事线/谶语存 `StrategicProfile.extraJson`（PUT /profile/strategic 接受 narrative/verse，注入块带「跨月复述一致/全年沿用」口径）。剩余 9 卡 + A 级模板见 §13。
 - `data/industryPacks.ts` 深度字段（M4 PR-19）：`decisionChain/ticketRange/benchmarkCases/mingLink` 可选，配了才拼进「行业视角」注入行；美业与大健康已拆分为两个包（新增行业包=建档选项自动 +1，app Picker 兜底问卷需手动同步）。
@@ -498,7 +505,16 @@ cd admin && npm test   # 同上
 ### 后端集成测试（★ 大变更必跑 · 详见 `docs/TESTING.md`）
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
-- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 215 用例 / 50 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益、军师档案访谈与用户主路径。最近一次本地 PostgreSQL 测试库实跑为 2026-06-22，215/215 全过。
+- **隔离服务器压测**：使用 `loadtest/docker-compose.yml` 部署独立 API/PostgreSQL/网关，网关仅绑定
+  `127.0.0.1:14080`，通过 SSH 隧道从外部运行 `loadtest/k6-readonly.js`。运行态固定
+  `NODE_ENV=test`、`AI_PROVIDER=mock`，API 仅接无公网出口的 Docker internal network；
+  短信、微信、支付、OSS、embedding/rerank 与生产数据库均不接入。数据由
+  `server/prisma/loadtestSeed.ts` 生成确定性假数据，禁止复制线上用户数据。操作与清理命令见
+  `loadtest/README.md`。真实 LLM 仅允许使用独立的 `loadtest/k6-llm.js` 最小消耗探针：
+  一个字符输入、`max_tokens=1`、固定请求数、逐档核算总 Token；密钥只进临时 `0600`
+  env 文件且测试后删除，不得接入业务生成接口或写入仓库。
+- 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 724 用例 / 114 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益、军师档案访谈与用户主路径。最近一次本地 PostgreSQL 测试库实跑为 2026-07-27，724/724 全过（有 / 无 `server/.env` 两种条件下各跑一次，结果一致）。
+- **★ 测试环境自足（hermetic env，2026-07-27 起）**：`npm test` 只吃 `.env.test` + 真实 shell 环境 + 用例内显式设置，**绝不吃开发机的 `server/.env`**——否则用例红绿取决于谁的机器（CI 没有 `.env` 故长期为绿）。三层机制：① `src/env.ts` 在 `NODE_ENV=test` 时整体跳过 dotenv；② `@prisma/client` 会在 import 与每次 `new PrismaClient()` 时**无条件**读 `server/.env`（路径烤进生成产物、与 cwd 无关，Prisma 5.22 无 opt-out），故 `test/hermeticEnv.mjs`（由 test 脚本 `--import` 预载）记下进程启动时的键集合并抹除后来被注入的键，`src/db.ts` 在构造语句下一行调该钩子；③ 守卫用例 `test/envHermetic.test.ts` 读 `.env` 的键做通用断言（不 pin 变量名），所以往 `.env` 里加新键不会再弄红测试。**推论**：用例要用的变量写进 `.env.test` 或在用例里显式 set/delete，别指望 `.env`。
 - 覆盖：鉴权隔离、微信 openid 登录/复登、注册花名、军师档案、运营后台鉴权、多智能体对话、智能体 `free/unlock/metered` 权益、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发回归（智能体购买、套餐发放、短信发放/消费、报告版本、智能体发布）、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
 - CI：`.github/workflows/server-integration.yml` 用 GitHub Actions `postgres:16-alpine` 服务（tmpfs 数据目录）执行 `npm ci`、`prisma generate`、后端 build、`prisma db push`、`npm test`。
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
@@ -582,7 +598,19 @@ mock 可随时预览；**正式上传/审核**还需：
 - **miniprogram-ci 上传**：云端执行环境的网络白名单未放行 `servicewechat.com`（报 `Host not in allowlist`），无法在本沙箱内直传。需从**本机**执行上传，或放开环境网络策略后重试；另注意上传密钥若开了 IP 白名单，需把执行机出口 IP 加入小程序后台。本机命令见 §11。
 - 自有登录态支持 JWT（`services/userToken.ts`，HS256）：配 `APP_JWT_SECRET` 后登录签发 JWT、`resolveUser`/审计/admin role/entitlement 统一 `verifyUserToken` 校验；未配则回退历史 `token=userId`，`APP_JWT_REQUIRED=true` 可强制只认 JWT。短信强制校验开关（`SMS_REQUIRE_CODE`）已就绪，生产置 true 即可。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
-- 输入审核与缓存已抽象可插拔：审核 `services/moderation.ts`（keyword 默认 / `MODERATION_PROVIDER=http` 接合规服务，当前只用于用户输入前置拦截）；缓存 `services/cache.ts`（内存默认 / 配 `REDIS_URL`+ioredis 切 Redis）。计量台账仍为演示级，生产接真实计费台账。
+- 输入审核与缓存已抽象可插拔：审核 `services/moderation.ts`（keyword 默认 / `MODERATION_PROVIDER=http` 接合规服务，当前只用于用户输入前置拦截）；缓存 `services/cache.ts`（内存默认 / 配 `REDIS_URL`+ioredis 切 Redis，客户端在 `services/redis.ts` 与限流共用）。计量台账仍为演示级，生产接真实计费台账。
+- **压测后续待办（2026-07-26，A/B 级已落，以下是等复测或需运维前置的）**——完整计划见 `docs/[OPUS5]LOADTEST_OPT_PLAN_2026-07-26.md`，复测方案见 `docs/[OPUS5]LOADTEST_PLAN_V2_2026-07-26.md`：
+  - **同机多进程（收益待实测）**：上一轮压测的 API 容器写死了 `cpus: 2.25`（`loadtest/docker-compose.yml:86`），观测到的 229.65% CPU 是**容器配额跑满**，不是 Node 单进程的架构上限。报告据此推出的"单进程到顶、应横向扩"缺少数据支撑，多进程收益要等 V2 的 T1/T2 对照实验。当前仍是单进程（`deploy/junshi-api.service` 的 `node dist/index.js`）。
+  - **scheduler 选主（多进程/多实例的硬前置）**：`services/scheduler.ts` 仍是每进程 `setInterval` 跑全量 job，直接加进程会重复推送微信订阅消息、重复发一次性额度。需 Redis 选主或拆独立 cron worker + `(userId,scene,date)` 幂等唯一约束。**这条不做完，不许加第二个进程。**
+  - **Puppeteer 出 API 进程**：`services/reportPdf.ts` 仍是进程内单浏览器单例。本轮只读压测完全没碰它，所以 450 RPS 这个数字不含报告渲染；生产上并发出报告会和只读流量抢同一个进程的资源。**报告功能对外放量前必须完成。**
+  - **`/metrics`**：目前无任何指标端点、无 request-id 贯穿。压测报告要求"压测与线上告警使用同一套指标口径"，故应先定指标再接 SLS/ARMS。`llmGateStats()` 已备好 LLM 侧数据。
+  - **PG 迁 RDS**：需运维前置。同时能拿到备份/PITR（当前零备份）并把约 0.5 核还给 API。
+  - **mock provider 注入延迟（`AI_MOCK_LATENCY_MS`）**：mock 立即返回，导致 LLM 队列深度与排队等待恒为 0，V2 的 S5 场景测不出东西。属压测可测性改造，随 V2 一起做。
+  - ⚠️ **`npm run admin:sync-content` 目前会毁掉生产提示词（先别跑）**：2026-07-27 登生产库核对——`general`（总军师）的 `Agent.systemPrompt` 是 **49,094 字符**，而仓库 `prompts/strat.v6.md` 只有 **17,230 字符**，已严重漂移（版本演进 v1 41,710 → v2 45,342 → v3 44,957 → **v4 49,094**，三周 +18%）。`scripts/syncAdminContent.ts` 的 upsert **update 分支会用文件覆盖 `systemPrompt`**，无 diff 无确认。运行时读的是已发布快照 `AgentVersion` v4，所以同步**不会立刻生效**，但后台草稿会被换成旧版，之后任何一次「发布」就把三个版本的调教推平。**要跑同步前，先把线上版本回灌进仓库文件对齐。** 另注意 `general` 之外的 agent 提示词在生产是 1,650–1,764 字符，仓库/本地是 620–670，同样漂移。
+  - **提示词缓存 88% 未命中（最大的一笔可省成本，且不需要动提示词）**：生产 30 天 580 次 chat 里 509 次 `cachedInput=0`。**不是 TTL**（71.6% 的相邻对话在 5 分钟内；只看窗口内的 415 次，命中率仍只有 15.2%），**也不是我们代码**（`stable` 段无随时间变的值）。指向 `api.qnaigc.com/bypass/anthropic` 中转在多上游账号间轮询、而 Anthropic 缓存按账号隔离。按官方价（Opus 4.6 input $5/1M、缓存读 $0.5/1M）修好约省 **$46/月 = 总账单的 49%**，单次对话 $0.164 → $0.084。**前提**：需确认七牛是否透传缓存定价；若它按统一单价结算则省不到钱，只改善延迟。详见 `docs/[OPUS5]LOADTEST_OPT_PLAN_2026-07-26.md` §2.5。
+  - **`data/modelPrices.ts` 单价需按官方价校准**：生产 `costMicros` 近 30 天记 18.36，按 Anthropic 官方列表价重算是 **≈$95.28**，**低估 5.2 倍**。运营后台「算力消耗」和成本告警目前都不可信。
+  - **提示词模块化标记（省 input，待产品确认 + 评测基线）**：`llm/promptAssembly.ts` 的 `===MODULE deliverable===` / `===MODULE keyword:...===` 机制已实现并上线，但生产提示词**一个标记都没有**，49,094 字符底座每轮全发（占单次输入约 95%）。给哪几章加标记 = 决定哪些人格/方法论在闲聊轮次里对模型不可见，**产品侧已明确要求对话效果不能受影响**，故必须先定切分方案再用评测验证。**注意顺序**：要改必须在线上那份 49,094 字符版本上改，不能在仓库那份 17,230 字符的旧文件上改。另：`general` 现在 `publishedVersionId` 指向 v4，但 `Agent.systemPrompt` 草稿态无版本保护，改前建议先建版本快照。
+  - **用户引用资料的 input 尾部风险**：`MAX_REF_CHARS_TOTAL = 120_000` 字符（`services/retrieval.ts:67`），用户一次 @ 满 9 份文档就是约 9 万 token 的单请求——若上游按 TPM 限，一次就能打满窗口。未改（会影响「长文转附卷」这一既有能力），但要在 V2 的 S8 里量出后果。
 - 套餐购买已接微信支付 v3 脚手架（`services/wechatPay.ts` + `PaymentOrder` 状态机 + `routes/pay.ts` 回调）：配齐 `WECHAT_PAY_*` 后走 `/plans/:id/order` 下单 + `/pay/wechat/notify` 回调，`markPaidAndApply` 用同订单事务级 advisory lock + `appliedAt` 终态锚点做幂等入账，套餐权益发放复用同一 Prisma transaction client，防重复/并发回调双发；未配齐回退 `/plans/:id/purchase` 演示购买。P0~P2 已落地（2026-07-14，详见 §6 支付段与 CHANGELOG）：主动查单对账（轮询自愈 + `pay-reconcile-sweep` 定时批扫 + admin 手动补账）、回调金额/appid/mchid 校验、降级守卫、前端统一到账确认、条款快照、微信 close-order 关陈旧单、全额退款+权益回收（后端）、订单列表/继续支付、proration 事前确认、H5 守卫、下单频控、套餐归因、支付到账订阅消息、admin 手动开通套餐/模块（后端）。admin 前端 UI（退款按钮/开通套餐/模块管理/订单搜索/分页/CSV 导出）与平台证书自动下载/轮换（`GET /v3/certificates` 按 `Wechatpay-Serial` 缓存选证书，env 静态证书为兜底）已于同日补齐。仍待：部分退款（当前仅全额）、发票。注意：PaymentOrder 新增 `snapshotJson/refundId/refundedAt/refundReason` 列（纯加法），prod 部署带 `db push`；支付到账订阅消息需在微信后台申请模板并配 `WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID`。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
 - **pgvector 路径已实现但未真库验证**：本地无扩展，默认 `PGVECTOR_ENABLED=false` 走内存余弦（已验证）；上真库执行 `npm run db:pgvector` 并置 true 后需端到端验一遍（升级路径 1）。

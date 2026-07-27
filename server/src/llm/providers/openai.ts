@@ -8,6 +8,10 @@ import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import { runToolLoop } from '../tools/loop.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext, TurnOutput } from '../tools/types.js';
 import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js';
+// 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。见 services/llmGate.ts 顶部说明。
+import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited } from '../../services/llmGate.js';
+// 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
+import { withEndpoint } from '../../services/llmPool.js';
 
 interface OAToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
 // 多模态内容片段（OpenAI vision 协议）：文本或 data URL 图片。
@@ -96,20 +100,28 @@ function providerFailure(err: unknown, cfg: ResolvedAiConfig, base: string, phas
 }
 
 // 统一请求封装：注入 baseUrl/model/key/温度，带超时；错误抛出由 gateway 兜底降级 mock。
-async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>, phase: RequestPhase = 'chat_completion'): Promise<OAResponse> {
+async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>, phase: RequestPhase = 'chat_completion', affinity?: string): Promise<OAResponse> {
   const base = cfg.baseUrl.replace(/\/+$/, '');
   const timeoutMs = requestTimeoutMs(cfg, phase);
   const watch = deadline(timeoutMs);
   try {
-    const res = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({ model: cfg.model, temperature: cfg.temperature, ...body }),
-      signal: watch.signal,
-    });
-    const data = (await res.json().catch(() => ({}))) as OAResponse;
-    if (!res.ok) throw new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`);
-    return data;
+    // 过端点池 + 并发闸：ep 是本次实际选中的端点（未启用池时就是传入的 cfg）。
+    // 请求体在闭包里按 ep 组装，故 429/5xx 转移到下一个端点时能原样重发。
+    return await withEndpoint(cfg, async (ep) => {
+      const epBase = ep.baseUrl.replace(/\/+$/, '') || base;
+      const res = await fetch(`${epBase}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
+        body: JSON.stringify({ model: ep.model, temperature: ep.temperature, ...body }),
+        signal: watch.signal,
+      });
+      const data = (await res.json().catch(() => ({}))) as OAResponse;
+      if (!res.ok) {
+        // 带上 statusCode，让闸门/池能确定性识别 429 而不是靠文案匹配（429 → 整窗冷却 + 转移）。
+        throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), { statusCode: res.status });
+      }
+      return data;
+    }, { affinityKey: affinity });
   } catch (err) {
     throw providerFailure(err, cfg, base, phase, timeoutMs, watch);
   } finally {
@@ -162,6 +174,10 @@ async function* readOpenAIStream(res: Response, onChunk: () => void): AsyncGener
 async function callChatStream(cfg: ResolvedAiConfig, body: Record<string, unknown>, includeUsage = true): Promise<AsyncGenerator<OAStreamChunk>> {
   const base = cfg.baseUrl.replace(/\/+$/, '');
   const watch = deadline(cfg.timeoutMs);
+  // 流式的槽位要持有到整条流消费完（一条流在上游眼里全程占一个并发），所以手动 acquire，
+  // 并把释放责任移交给下面返回的 generator；建流阶段就失败时由本函数的 finally 兜底释放。
+  const slot = await acquireLlmSlot(cfg.lane);
+  let handedOff = false;
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -180,16 +196,29 @@ async function callChatStream(cfg: ResolvedAiConfig, body: Record<string, unknow
         const text = await res.text().catch(() => '');
         return text ? { error: { message: text } } : {};
       })) as OAResponse;
-      throw new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`);
+      if (res.status === 429) noteUpstreamRateLimited(undefined, cfg.lane);
+      throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), { statusCode: res.status });
     }
+    handedOff = true;
     return (async function* () {
       try { yield* readOpenAIStream(res, watch.refresh); }
-      catch (err) { throw providerFailure(err, cfg, base, 'chat_stream', cfg.timeoutMs, watch); }
-      finally { watch.clear(); }
+      catch (err) { slot.noteError(err); throw providerFailure(err, cfg, base, 'chat_stream', cfg.timeoutMs, watch); }
+      finally { watch.clear(); slot.release(); }
     })();
   } catch (err) {
+    slot.noteError(err);
     throw providerFailure(err, cfg, base, 'chat_stream', cfg.timeoutMs, watch);
+  } finally {
+    if (!handedOff) slot.release();
   }
+}
+
+/**
+ * 端点亲和键：同一会话固定落同一端点，保住上游的提示词缓存（缓存按账号/端点隔离）。
+ * 没有 sessionId 时退到 agentKey——比每次随机好，至少同一智能体的连续调用能复用缓存。
+ */
+function affinityOf(ctx: GenContext): string {
+  return ctx.runtime?.sessionId || ctx.agentKey || 'anon';
 }
 
 function metaOf(ctx: GenContext): string {
@@ -231,7 +260,7 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     ] as OAMessage[],
     tools: [{ type: 'function', function: { name: DELIVERABLE_TOOL.name, description: DELIVERABLE_TOOL.description, parameters: DELIVERABLE_TOOL.input_schema } }],
     tool_choice: { type: 'function', function: { name: DELIVERABLE_TOOL.name } },
-  }, 'deliverable');
+  }, 'deliverable', affinityOf(ctx));
 
   const usage = usageOf(data);
   const args = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;

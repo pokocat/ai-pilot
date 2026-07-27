@@ -965,6 +965,11 @@ model AiSetting {
   rerankBaseUrl String  @default("")
   rerankApiKey  String  @default("") @db.Text
 
+  // 端点池路由：single=只用 activeModelId（默认，旧行为）| pool=按池分流 + 故障转移。
+  // stickyRouting：同一会话固定落同一端点，保住上游提示词缓存（关掉会显著拉低命中率）。
+  routingMode   String  @default("single")
+  stickyRouting Boolean @default(true)
+
   updatedAt DateTime @updatedAt
 
   @@map("ai_setting")
@@ -986,6 +991,14 @@ model AiModel {
   priceInput       Float    @default(0)
   priceOutput      Float    @default(0)
   priceCachedInput Float    @default(0) // 命中缓存输入价；0=按 priceInput 计
+
+  // —— 端点池（多路分流 + 故障转移，见 services/llmPool.ts）——
+  // 默认 poolEnabled=false → 不入池，行为与旧版完全一致（仍可被 activateModel 单选生效）。
+  poolEnabled    Boolean @default(false)
+  weight         Int     @default(1) // 相对权重，分流按权重摊
+  tier           Int     @default(0) // 0=同质对等；1+=降级备份（低 tier 全冷却才启用）
+  maxConcurrency Int     @default(0) // 该端点**每实例**并发上限；0=用全局默认
+
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 

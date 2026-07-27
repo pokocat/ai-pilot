@@ -2,7 +2,7 @@
 
 > 目的：**大的变更后跑一遍**，守住核心契约——尤其 **跨用户/跨租户数据隔离（防信息泄露）**。
 > 全程 **mock 模型**（不调用真实 LLM）：产出走确定性模板、嵌入走本地确定性向量，结果可复现。
-> 现状：**57 用例 / 23 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益、军师档案访谈与用户主路径。最近一次 Docker 临时 PostgreSQL 测试库实跑为 2026-06-13，57/57 全过；CI 用临时 PostgreSQL 服务跑后端 build + 全量集成测试。
+> 现状：**724 用例 / 114 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益、军师档案访谈与用户主路径。最近一次本地 PostgreSQL 测试库实跑为 2026-07-27，724/724 全过（有 / 无 `server/.env` 两种条件下各跑一次，结果一致）；CI 用临时 PostgreSQL 服务跑后端 build + 全量集成测试。
 
 ## 一、怎么跑
 
@@ -24,6 +24,31 @@ AI_PROVIDER=mock npm test
 - 不需要 pgvector：默认 `PGVECTOR_ENABLED=false`，检索走内存余弦。
 - 测试 `before` 会清空业务表并灌入智能体注册表；每个用例用唯一手机号建独立账号，互不干扰。
 - ⚠️ 未设 `DATABASE_URL` 会因连不上库而整体失败——这是预期，请先准备测试库。
+  `npm test` 已自带 `--env-file=.env.test`（内含本机测试库连接串 + `NODE_ENV=test`），直接跑即可，不必手动 export。
+
+### ★ 测试环境自足（hermetic env，2026-07-27 起）
+
+**`npm test` 只吃 `.env.test` + 真实 shell 环境 + 用例内显式设置的变量，绝不吃开发机的 `server/.env`。**
+否则同一份用例在「有 `.env` 的开发机」红、在「没有 `.env` 的 CI」绿——红绿取决于谁的机器。
+（真实事故：`.env` 里的 `WECHAT_SUBSCRIBE_{REPORT,PAYMENT}_TEMPLATE_ID` 渗进测试，
+`wechatMessage`「订阅消息 accept 后累计一次额度」与 `reminders`「三条提醒节奏」两例长期本地失败。）
+
+坑在于 **dotenv 系「不覆盖已存在的 process.env」并不等于隔离**：`.env.test` 已声明的键（`DATABASE_URL`）
+确实安全，但 `.env` 里**没被 `.env.test` 声明**的键照样会注入进来。且注入源有两个：
+
+| 注入源 | 时机 | 对策 |
+|---|---|---|
+| `src/env.ts` 的 `dotenv.config()` | 该模块首次求值 | `NODE_ENV=test` 时整体跳过（导出 `dotenvLoaded` 供守卫核对） |
+| `@prisma/client` | import 时 **+ 每次 `new PrismaClient()`** | 抹除：`test/hermeticEnv.mjs` 预载记下进程启动时的键集合，注入后删掉新增键；`src/db.ts` 在构造语句下一行调 `globalThis.__hermeticEnv.scrub()` |
+
+> `@prisma/client` 的 `.env` 路径烤进了生成产物（`relativeEnvPaths.schemaEnvPath`，绝对路径、与 cwd 无关），
+> Prisma 5.22 的 runtime 没有任何 opt-out 开关，所以只能「让它注入完再抹掉」。
+
+守卫用例 `test/envHermetic.test.ts`（2 例）读 `server/.env` 的键做**通用**断言（不 pin 变量名），
+因此以后往 `.env` 里加任何新键都不会再弄红测试。三层机制各自都是承重的——逐层拆掉验证过会失败。
+
+**给后续 agent 的推论**：用例要用的变量，写进 `.env.test` 或在用例里显式 `set`/`delete`（记得在 `after` 里清），
+**不要**指望开发机的 `.env`；改 `package.json` 的 `test` 脚本时别丢掉 `--import ./test/hermeticEnv.mjs`。
 
 ### CI 跑法
 

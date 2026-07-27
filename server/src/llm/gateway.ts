@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
-import { getAiConfig, effectiveProvider, type ResolvedAiConfig } from '../services/aiConfig.js';
+import { getAiConfig, effectiveProvider, resolveAuxConfig, type ResolvedAiConfig } from '../services/aiConfig.js';
 import { mockChat, mockDeliverable, mockAdaptive } from './providers/mock.js';
 import { ZERO_USAGE, extractAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
 import { recordTokenUsage, recordAuxUsage, type UsageMeta } from '../services/usage.js';
@@ -38,6 +38,9 @@ export async function hasLiveProvider(): Promise<boolean> {
 function aiUnavailable(err: unknown): Error {
   const e = err as Error & { code?: string };
   if (e.code === 'AI_OUTPUT_TRUNCATED') return e;
+  // AI_BUSY 来自全局并发闸（services/llmGate）：这是**我方主动降级**，不是上游故障。
+  // 原样透出，让前端能提示「排队较多，稍后重试」，而不是笼统的「AI 服务暂时不可用」。
+  if (e.code === 'AI_BUSY') return e;
   const aborted = e.code === 'AI_TIMEOUT' || e.name === 'AbortError' || /abort|超时|timeout/i.test(e.message || '');
   return Object.assign(
     new Error(aborted ? 'AI 响应超时，请稍后重试' : 'AI 服务暂时不可用，请稍后重试'),
@@ -696,27 +699,42 @@ export async function providerInfo() {
 }
 
 // —— 内部：以「就绪的 provider」发一次返回原始文本的轻量补全 ——
+//
+// 这里是**全部辅助抽取的唯一收口**：extractInsights / extractProphecies / summarizeSessionTitle /
+// extractGraphTriples / summarizePoints / llmJson / completeJson / structured* 都经由 rawText 或
+// rawJson 落到这里。因此「辅助档切小模型」只需在这一处翻译，新增抽取路径自动继承。
+//
+// allowAux=false 用于调用方**显式指定了 model** 的场景（如评测评委要用独立模型避免自评），
+// 那种指定是有意的，不能被辅助档覆盖。
 async function rawText(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
+  opts?: { allowAux?: boolean },
 ): Promise<string> {
+  // 未配 AI_AUX_MODEL 时 resolveAuxConfig 原样返回，下面两行等于无操作（默认行为零变化）。
+  const useCfg = opts?.allowAux === false ? cfg : resolveAuxConfig(cfg);
+  const useLive: 'claude' | 'openai' = useCfg === cfg
+    ? live
+    : (useCfg.provider === 'claude' ? 'claude' : 'openai');
+
   let out: string;
-  if (live === 'openai') {
+  if (useLive === 'openai') {
     const { openaiRaw } = await import('./providers/openai.js');
-    out = await openaiRaw(cfg, system, user);
+    out = await openaiRaw(useCfg, system, user);
   } else {
     const { claudeRaw } = await import('./providers/claude.js');
-    out = await claudeRaw(cfg, system, user);
+    out = await claudeRaw(useCfg, system, user);
   }
   // 辅助调用（洞察/预言/势研判/履历/汇总/图谱等）此前不入 token_usage → 成本低估。按 kind='aux' 记入基建用量。
-  recordAuxUsage(cfg.model, live, `${system}\n${user}`, out);
+  recordAuxUsage(useCfg.model, useLive, `${system}\n${user}`, out);
   return out;
 }
 
 // —— 内部：文本 → JSON 对象（正则抠 {…} + JSON.parse）。既有洞察抽取/汇总沿用此松散口径。 ——
 async function rawJson(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
+  opts?: { allowAux?: boolean },
 ): Promise<Record<string, unknown> | null> {
-  const content = await rawText(cfg, live, system, user);
+  const content = await rawText(cfg, live, system, user, opts);
   const m = content.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
@@ -766,12 +784,12 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
     const user = o.user.slice(0, o.maxChars ?? 4000);
     // 调用前自增：即使 rawText 抛错（超时/5xx），provider 侧可能已计费——保守计入本轮。
     attempts++;
-    const first = coerceJson(schema, await rawText(cfg, lp, o.system, user));
+    const first = coerceJson(schema, await rawText(cfg, lp, o.system, user, { allowAux: !o.model }));
     if (first.ok) return { data: first.data, attempts, live };
     // 一轮修复：把校验错误回喂，要求只输出合规 JSON。
     const repairSys = `${o.system}\n\n【纠错】上次输出无法通过校验：${first.error}。请只输出严格符合要求的 JSON，不要任何解释或多余文字。`;
     attempts++;
-    const second = coerceJson(schema, await rawText(cfg, lp, repairSys, user));
+    const second = coerceJson(schema, await rawText(cfg, lp, repairSys, user, { allowAux: !o.model }));
     return { data: second.ok ? second.data : null, attempts, live };
   } catch (err) {
     console.error('[gateway] structured failed:', (err as Error).message);
@@ -812,7 +830,8 @@ export async function completeJson(system: string, user: string, opts?: { temper
     ? { ...base, ...(opts.temperature != null ? { temperature: opts.temperature } : {}), ...(opts.model ? { model: opts.model } : {}) }
     : base;
   try {
-    return await rawJson(cfg, live, system, user);
+    // 调用方显式指定 model（评测评委要独立模型避免自评）时不许辅助档覆盖。
+    return await rawJson(cfg, live, system, user, { allowAux: !opts?.model });
   } catch (err) {
     console.error('[gateway] completeJson failed:', (err as Error).message);
     return null;

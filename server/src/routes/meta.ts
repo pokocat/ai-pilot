@@ -17,17 +17,42 @@ const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 
 export async function metaRoutes(app: FastifyInstance) {
   // 健康检查须真正探 DB：否则 DB 挂了进程还活着时仍返回 ok，部署门禁/探活会误判为健康。
   // 2s 超时保护，避免 DB 慢时把健康检查自己拖死；DB 不可达 → 503。
-  app.get('/health', async (_req, reply) => {
+  //
+  // 压测后补充（P0-4）：结果做 1 秒短缓存。ALB / k8s 探活频率高（常见 1–5s，且多副本各探各的），
+  // 原实现是**每次探活都打一条真实 SQL**；压测里 /api/health 就占了 5% 的流量，这部分开销会直接
+  // 计进容量。1s 窗口既不影响故障发现速度（探活本身还要连续失败若干次才判死），又能把 DB 压降下来。
+  let dbProbe: { at: number; up: boolean } | null = null;
+  async function dbUp(): Promise<boolean> {
+    const now = Date.now();
+    if (dbProbe && now - dbProbe.at < 1000) return dbProbe.up;
+    let up = true;
     try {
       await Promise.race([
         prisma.$queryRaw`SELECT 1`,
         new Promise((_, rej) => setTimeout(() => rej(new Error('db ping timeout')), 2000)),
       ]);
-      return { ok: true, db: 'up' };
     } catch (err) {
       console.error('[health] db ping failed:', (err as Error).message);
-      return reply.code(503).send({ ok: false, db: 'down' });
+      up = false;
     }
+    dbProbe = { at: now, up };
+    return up;
+  }
+
+  // 存量路径：含 DB 探测，语义不变（既有 docker healthcheck / 监控都打这个）。
+  app.get('/health', async (_req, reply) => {
+    if (await dbUp()) return { ok: true, db: 'up' };
+    return reply.code(503).send({ ok: false, db: 'down' });
+  });
+
+  // 存活探针：只回答「进程还在不在」，不碰 DB。给 ALB/k8s 的 liveness 用——
+  // DB 抖动时不该把好好的进程判死重启（那只会让恢复更慢）。
+  app.get('/health/live', async () => ({ ok: true }));
+
+  // 就绪探针：含 DB，决定「要不要往这个实例发流量」。给 ALB/k8s 的 readiness 与滚动发布用。
+  app.get('/health/ready', async (_req, reply) => {
+    if (await dbUp()) return { ok: true, db: 'up' };
+    return reply.code(503).send({ ok: false, db: 'down' });
   });
 
   // 当前用户 + AI 提供方信息（前端启动时拉取）

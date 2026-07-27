@@ -4,6 +4,10 @@
 // 生产：`npm i ioredis` + 设 REDIS_URL=redis://... 即接真实 Redis（多实例共享缓存、可横向扩展）。
 //
 // 接口面向 LLM 结果缓存等「可丢失、有 TTL」的场景；值统一 JSON 序列化。
+//
+// 客户端本身已抽到 services/redis.ts（限流 store、后续的 LLM 队列/选主要复用同一个连接）。
+
+import { getRedis } from './redis.js';
 
 type Entry = { v: string; exp: number };
 
@@ -22,42 +26,6 @@ function memSet(key: string, val: string, ttlMs: number): void {
     const now = Date.now();
     for (const [k, e] of mem) if (e.exp <= now) mem.delete(k);
   }
-}
-
-// —— Redis 后端（可选依赖，懒加载）——
-type RedisLike = {
-  get(key: string): Promise<string | null>;
-  set(key: string, val: string, mode: string, ttl: number): Promise<unknown>;
-  del(key: string): Promise<unknown>;
-};
-let redisPromise: Promise<RedisLike | null> | null = null;
-
-async function getRedis(): Promise<RedisLike | null> {
-  const url = (process.env.REDIS_URL ?? '').trim();
-  if (!url) return null;
-  if (!redisPromise) {
-    redisPromise = (async () => {
-      try {
-        // 动态 import：用变量 specifier 规避 tsc 静态解析（ioredis 为可选依赖，未装时落 catch 回退内存）。
-        const spec = 'ioredis';
-        const mod: any = await import(spec).catch(() => null);
-        if (!mod) {
-          console.warn('[cache] 已配 REDIS_URL 但未安装 ioredis，回退内存缓存（生产请 `npm i ioredis`）');
-          return null;
-        }
-        const Redis = mod.default ?? mod;
-        const client: RedisLike = new Redis(url, { lazyConnect: false, maxRetriesPerRequest: 2 });
-        (client as unknown as { on?: (e: string, cb: (err: unknown) => void) => void }).on?.('error', (err) => {
-          console.error('[cache] redis error:', (err as Error)?.message);
-        });
-        return client;
-      } catch (err) {
-        console.error('[cache] redis 初始化失败，回退内存：', (err as Error).message);
-        return null;
-      }
-    })();
-  }
-  return redisPromise;
 }
 
 /** 读缓存，反序列化为 T；未命中/出错返回 null。 */

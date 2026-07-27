@@ -798,6 +798,10 @@ function setupSSE(reply: FastifyReply) {
     'Cache-Control': 'no-cache',
     Connection: 'keep-alive',
     'Access-Control-Allow-Origin': '*',
+    // 让反代不要缓冲这条流。当前生产 Nginx 站点配了 proxy_buffering off 所以看不出问题，
+    // 但一旦换 ALB、或中间再加一层网关（压测报告建议的双实例 + ALB 就是这个形态），
+    // 缺这个头会让事件被憋在缓冲区里，表现为「问完很久没反应然后一次性刷出来」。
+    'X-Accel-Buffering': 'no',
   });
 }
 

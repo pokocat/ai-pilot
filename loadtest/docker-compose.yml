@@ -1,0 +1,112 @@
+name: junshi-loadtest
+
+services:
+  db:
+    image: postgres:16
+    restart: "no"
+    environment:
+      POSTGRES_USER: junshi_lt
+      POSTGRES_PASSWORD: junshi_lt_local_only
+      POSTGRES_DB: junshi_lt
+    volumes:
+      - junshi_lt_pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U junshi_lt -d junshi_lt"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+    cpus: 1.5
+    mem_limit: 2g
+
+  api:
+    build:
+      context: ..
+      dockerfile: loadtest/Dockerfile
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: test
+      TZ: Asia/Shanghai
+      PORT: "4000"
+      DATABASE_URL: postgresql://junshi_lt:junshi_lt_local_only@db:5432/junshi_lt?schema=public&connection_limit=80&pool_timeout=10
+      AI_PROVIDER: mock
+      AI_FALLBACK_MOCK: "false"
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+      OPENAI_BASE_URL: ""
+      EMBEDDING_ENABLED: "false"
+      EMBEDDING_API_KEY: ""
+      RERANK_ENABLED: "false"
+      RERANK_API_KEY: ""
+      MODERATION_ENABLED: "true"
+      MODERATION_PROVIDER: keyword
+      MODERATION_API_URL: ""
+      SMS_PROVIDER: console
+      SMS_REQUIRE_CODE: "false"
+      SMS_RETURN_CODE: "false"
+      ALIYUN_SMS_ACCESS_KEY_ID: ""
+      ALIYUN_SMS_ACCESS_KEY_SECRET: ""
+      WECHAT_APPID: ""
+      WECHAT_APPSECRET: ""
+      WECHAT_MINI_APPID: ""
+      WECHAT_PAY_MCHID: ""
+      WECHAT_PAY_PRIVATE_KEY: ""
+      WECHAT_PAY_APIV3_KEY: ""
+      WECHAT_PAY_PLATFORM_CERT: ""
+      AEP_CDN_OSS_ACCESS_KEY_ID: ""
+      AEP_CDN_OSS_ACCESS_KEY_SECRET: ""
+      AEP_CDN_OSS_BUCKET: ""
+      REDIS_URL: ""
+      PGVECTOR_ENABLED: "false"
+      PAY_SANDBOX: "false"
+      ALLOW_DEMO_PURCHASE: "false"
+      REPORT_PDF_DISABLED: "true"
+      APP_JWT_REQUIRED: "false"
+      APP_JWT_SECRET: ""
+      PUBLIC_BASE_URL: http://127.0.0.1:14080
+      LLM_TRACE_CAPTURE_TEXT: "false"
+      SKILL_TOOL_ALLOW_PRIVATE_NET: "false"
+    networks:
+      - backend
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    cpus: 2.25
+    mem_limit: 3.5g
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: "no"
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "127.0.0.1:${LT_PORT:-14080}:8080"
+    networks:
+      - backend
+      - edge
+    cpus: 0.25
+    mem_limit: 256m
+
+networks:
+  backend:
+    internal: true
+  edge: {}
+
+volumes:
+  junshi_lt_pgdata:
+    name: junshi_lt_pgdata

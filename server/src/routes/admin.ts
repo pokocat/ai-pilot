@@ -6,6 +6,7 @@ import {
   getAiConfig, setAiConfig, publicConfig, AI_PRESETS, effectiveProvider, type ResolvedAiConfig,
   listModels, addModel, updateModel, deleteModel, activateModel, mergedTestConfig,
 } from '../services/aiConfig.js';
+import { poolStatus, __resetLlmPool } from '../services/llmPool.js';
 import { testEmbedding } from '../services/embedding.js';
 import { testRerank } from '../services/rerank.js';
 import { pingModel, pingAgentRuntime, generateDeliverable, chatComplete } from '../llm/gateway.js';
@@ -36,7 +37,7 @@ import { retrievalDebug } from '../services/retrievalDebug.js';
 import { userContextView } from '../services/adminUserContext.js';
 import { deleteUserMemory, listAgentMemories, deleteAgentMemory } from '../services/memory.js';
 import { getKnowledgeDetail, deleteKnowledge, reembedItem, ingestUploadedFile } from '../services/knowledge.js';
-import type { AiConfigUpdate, AiModelUpsert, AiModelTest } from '../llm/schema.js';
+import type { AiConfigUpdate, AiModelUpsert, AiModelTest, AiRouting } from '../llm/schema.js';
 import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AdminImpersonateResult, AgentBilling,
@@ -292,6 +293,31 @@ export async function adminRoutes(app: FastifyInstance) {
       return reply.code(404).send({ error: (err as Error).message });
     }
   });
+  // —— 端点池：路由模式 + 实时健康态 ——
+  // 单端点被上游限流时，池会按加权 Rendezvous 哈希把流量转到同 tier 的其它端点；
+  // 会话粘性保证同一会话固定落同一端点，不打散上游的提示词缓存。见 services/llmPool.ts。
+  app.get('/admin/ai-routing', async () => poolStatus());
+  app.put<{ Body: Partial<AiRouting> }>('/admin/ai-routing', async (req, reply) => {
+    const b = req.body ?? {};
+    const data: Record<string, unknown> = {};
+    if (b.mode !== undefined) {
+      if (b.mode !== 'single' && b.mode !== 'pool') return reply.code(400).send({ error: 'mode 只能是 single 或 pool' });
+      data.routingMode = b.mode;
+    }
+    if (b.sticky !== undefined) data.stickyRouting = !!b.sticky;
+    if (!Object.keys(data).length) return reply.code(400).send({ error: '无可更新字段' });
+
+    // 切到 pool 前先确认池里真有可用端点，否则等于把 AI 关了。
+    if (data.routingMode === 'pool') {
+      const n = await prisma.aiModel.count({ where: { poolEnabled: true } });
+      if (n === 0) return reply.code(409).send({ error: '池内没有已启用的端点，请先在模型列表勾选「加入分流池」' });
+    }
+    await prisma.aiSetting.update({ where: { id: 'default' }, data });
+    __resetLlmPool();
+    await recordAudit({ action: 'admin.ai.routing.update', payload: { ...data } as Record<string, string | boolean> });
+    return poolStatus();
+  });
+
   // 探活：用「添加/编辑表单」字段直测（modelId 传入且 key 空则取该模型已存 key）。
   app.post<{ Body: AiModelTest }>('/admin/ai-models/test', async (req) => {
     return pingModel(await mergedTestConfig(req.body ?? ({} as AiModelTest)));

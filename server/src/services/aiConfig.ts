@@ -32,6 +32,12 @@ export interface ResolvedAiConfig {
   // 库内 apiKey 是密文但解不开（主密钥轮换错/未配）→ 这是**配置故障**，不是「未配置」。
   // 生产（AI_FALLBACK_MOCK=false）下不得据此静默降级 mock，须让 gateway 抛 AI_UNAVAILABLE。
   keyDecryptFailed?: boolean;
+  // 并发闸车道（services/llmGate）。仅当本配置是「独立账号的辅助档」时才为 'aux'，
+  // 表示它有自己的上游配额、不该和主对话抢槽位。未配辅助档时恒为 undefined（= main）。
+  lane?: 'main' | 'aux';
+  // 端点池选中的 AiModel.id（services/llmPool）。未启用池时为 undefined。
+  // 有值时闸门按「每端点」独立计并发与冷却，一个端点被限流不连累其它端点。
+  endpointId?: string;
 }
 
 // 内置接入商目录：「添加模型」向导选其一即可一键填好 baseUrl/model（仍可改）。
@@ -155,6 +161,57 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
   return cfg;
 }
 
+/**
+ * 辅助档（aux tier）：后台抽取类调用用的小模型配置。
+ *
+ * 背景（2026-07 压测后核对）：一条用户消息实际触发 3–4 次模型调用——主生成 + `extractInsights`
+ * （记忆学习）+ `extractProphecies`（预言抽取）+ 首条消息的 `summarizeSessionTitle`。这些辅助抽取
+ * 原来和主对话共用同一个 `getAiConfig()`：同账号、同模型、同一批并发槽位。也就是说**上游 8 个槽位
+ * 里有 2–3 个被后台任务占着**，而它们既不需要主模型的质量，也不面向用户延迟。
+ *
+ * 配了 `AI_AUX_MODEL` 就把这些调用切到小模型；再配 `AI_AUX_BASE_URL` / `AI_AUX_API_KEY` 指向
+ * **独立账号**时，还会切到独立的并发车道（lane='aux'），主配额从此完全留给用户可见的生成。
+ *
+ * **未配 `AI_AUX_MODEL` → 原样返回主配置，行为与改动前完全一致**（不改默认口径）。
+ * 只影响抽取类任务，不影响对话与成果生成——那两条路径永远走主配置。
+ */
+export function resolveAuxConfig(main: ResolvedAiConfig): ResolvedAiConfig {
+  const model = (process.env.AI_AUX_MODEL ?? '').trim();
+  if (!model) return main;
+
+  const baseUrl = (process.env.AI_AUX_BASE_URL ?? '').trim();
+  const apiKey = (process.env.AI_AUX_API_KEY ?? '').trim();
+  // 只有 baseUrl 或 key 之一被显式指定，才说明是独立接入点/独立账号 → 独立车道。
+  // 仅换模型名（同账号）时保持 lane=main：配额本来就是共享的，分两个计数器等于把限额悄悄放大一倍。
+  const separateAccount = !!baseUrl || !!apiKey;
+  const provider = (process.env.AI_AUX_PROVIDER ?? '').trim() || (baseUrl ? 'openai' : main.provider);
+
+  return {
+    ...main,
+    provider: provider as AiProvider,
+    label: `${main.label} · aux(${model})`,
+    model,
+    baseUrl: baseUrl || main.baseUrl,
+    apiKey: apiKey || main.apiKey,
+    // 抽取类任务应当快失败：拖长了既占车道又没人等它的结果。
+    timeoutMs: Number(process.env.AI_AUX_TIMEOUT_MS ?? '') > 0
+      ? Number(process.env.AI_AUX_TIMEOUT_MS)
+      : Math.min(main.timeoutMs, 20_000),
+    // 抽取要的是稳定可解析的结构，不是文采。
+    temperature: Number.isFinite(Number(process.env.AI_AUX_TEMPERATURE))
+      ? Number(process.env.AI_AUX_TEMPERATURE)
+      : 0,
+    lane: separateAccount ? 'aux' : 'main',
+    // key 换过就不能沿用主档的解密失败标记（否则主 key 坏了会连累辅助档全线短路）。
+    keyDecryptFailed: apiKey ? false : main.keyDecryptFailed,
+  };
+}
+
+/** 辅助档是否已独立配置（诊断 / 运维可见性用）。 */
+export function auxConfigured(): boolean {
+  return !!(process.env.AI_AUX_MODEL ?? '').trim();
+}
+
 export function isReady(cfg: ResolvedAiConfig): boolean {
   if (cfg.provider === 'mock') return false;
   return isRealKey(cfg.apiKey);
@@ -221,6 +278,7 @@ type ModelRow = {
   id: string; provider: string; label: string; baseUrl: string; model: string;
   apiKey: string; embeddingModel: string; temperature: number; preset: string | null;
   priceInput: number; priceOutput: number; priceCachedInput: number; updatedAt: Date;
+  poolEnabled?: boolean; weight?: number; tier?: number; maxConcurrency?: number;
 };
 
 /** 脱敏对外视图（不回明文 key；active 由 AiSetting.activeModelId 决定）。 */
@@ -239,6 +297,10 @@ export function publicModel(m: ModelRow, activeId: string | null): AiModel {
     priceInput: m.priceInput ?? 0,
     priceOutput: m.priceOutput ?? 0,
     priceCachedInput: m.priceCachedInput ?? 0,
+    poolEnabled: m.poolEnabled ?? false,
+    weight: m.weight ?? 1,
+    tier: m.tier ?? 0,
+    maxConcurrency: m.maxConcurrency ?? 0,
     updatedAt: m.updatedAt?.toISOString?.(),
   };
 }
@@ -328,8 +390,14 @@ export async function updateModel(id: string, patch: AiModelUpsert): Promise<AiM
   if (patch.priceInput !== undefined) data.priceInput = Math.max(0, patch.priceInput);
   if (patch.priceOutput !== undefined) data.priceOutput = Math.max(0, patch.priceOutput);
   if (patch.priceCachedInput !== undefined) data.priceCachedInput = Math.max(0, patch.priceCachedInput);
+  if (patch.poolEnabled !== undefined) data.poolEnabled = !!patch.poolEnabled;
+  if (patch.weight !== undefined) data.weight = Math.max(1, Math.floor(patch.weight));
+  if (patch.tier !== undefined) data.tier = Math.max(0, Math.floor(patch.tier));
+  if (patch.maxConcurrency !== undefined) data.maxConcurrency = Math.max(0, Math.floor(patch.maxConcurrency));
   const updated = await prisma.aiModel.update({ where: { id }, data });
   rateCache = null;
+  // 端点池配置变了 → 让 llmPool 的 5s 缓存立刻失效（本进程；其它实例最多 5s 陈旧）。
+  void import('./llmPool.js').then((m) => m.__resetLlmPool()).catch(() => {});
   const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
   if (setting?.activeModelId === id) await syncActiveSetting(updated as ModelRow);
   return publicModel(updated as ModelRow, setting?.activeModelId ?? null);

@@ -1,4 +1,23 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+
+// —— 环境变量装载（业务侧唯一入口；注意进程里还有 @prisma/client 会自行读 .env，见下）——
+// 测试运行（NODE_ENV=test，由 `npm test` 的 `node --env-file=.env.test` 在进程启动时注入）
+// 一律**不**加载 `server/.env`：dotenv 虽然不覆盖已存在的 process.env，但 `.env` 里那些
+// 「`.env.test` 没声明」的键仍会被注入，于是开发机的真实配置（微信订阅模板 ID、OSS、短信…）
+// 渗进测试环境——同一份用例在「有 .env 的开发机」红、在「没有 .env 的 CI」绿，测试结果取决于
+// 谁的机器。历史坑（2026-07-27 修）：`wechatMessage`「订阅消息 accept 后累计一次额度」与
+// `reminders`「三条提醒节奏」两例因 `.env` 里的 WECHAT_SUBSCRIBE_*_TEMPLATE_ID 长期本地失败。
+// 故测试环境必须自足：需要什么变量就写进 `.env.test`，或在用例里显式 set/delete，
+// 绝不隐式依赖开发机配置——这样以后往 `.env` 里加任何新键都不会再弄红测试。
+//
+// ⚠️ 只关掉这里**不够**：`@prisma/client` 也会在 import 与每次 `new PrismaClient()` 时无条件读
+// `server/.env`（无 opt-out 开关），那条路径由 `test/hermeticEnv.mjs` + `src/db.ts` 的抹除钩子兜住。
+// 三层机制与守卫用例见 `test/hermeticEnv.mjs` 顶部注释与 `test/envHermetic.test.ts`。
+const loadDotenv = process.env.NODE_ENV !== 'test';
+if (loadDotenv) dotenv.config();
+
+/** 本进程是否加载过 `server/.env`。测试环境恒为 false（见上方注释：测试环境必须自足）。 */
+export const dotenvLoaded = loadDotenv;
 
 // 占位/假 key 识别：fake 一个 token 时，不浪费网络往返，直接走 mock 兜底。
 export function isRealKey(k: string): boolean {

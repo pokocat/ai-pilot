@@ -712,6 +712,8 @@ export interface AiConfig {
   rerankModel: string;
   rerankBaseUrl: string;
   hasRerankKey: boolean;    // 是否已配置独立 rerank key
+  /** 端点池路由（多路分流 + 故障转移）。缺省视为 { mode:'single', sticky:true } */
+  routing?: AiRouting;
   updatedAt?: string;
 }
 /** 更新入参（各 apiKey 仅在传入非空时更新；留空表示不改） */
@@ -741,6 +743,15 @@ export interface AiModel {
   priceInput: number;       // 内部成本核算：元 / 1M 输入 token（0=未配置，回退内置价表）
   priceOutput: number;      // 元 / 1M 输出 token
   priceCachedInput: number; // 元 / 1M 命中缓存输入 token（0=按 priceInput 计）
+  // —— 端点池（多路分流 + 故障转移；routingMode=pool 时生效）——
+  poolEnabled: boolean;    // 是否加入分流池。false=只作为「可切换的备选」，行为同旧版
+  weight: number;          // 相对权重（≥1）。分流按权重摊，不是均分
+  tier: number;            // 0=同质对等（互为平替，正常分流）；1+=降级备份，仅当低 tier 全不可用才启用
+  maxConcurrency: number;  // 该端点并发上限；0=用全局默认。注意这是**每实例**上限，见 llmPool 说明
+  /** 运行时健康态（只读，不入库）：冷却中说明近期撞过 429/5xx，暂时不参与分流 */
+  cooling?: boolean;
+  coolingUntil?: string | null;
+  coolingReason?: string | null;
   updatedAt?: string;
 }
 /** 添加/编辑模型入参（apiKey 仅在传入非空时更新；留空表示不改） */
@@ -748,6 +759,22 @@ export interface AiModelUpsert {
   provider: AiProvider; label: string; baseUrl?: string; model: string;
   apiKey?: string; embeddingModel?: string; temperature?: number; preset?: string | null;
   priceInput?: number; priceOutput?: number; priceCachedInput?: number;
+  poolEnabled?: boolean; weight?: number; tier?: number; maxConcurrency?: number;
+}
+/** 端点池实时状态（含每个端点的冷却态，供后台展示「谁在被限流」） */
+export interface AiRoutingStatus extends AiRouting {
+  endpoints: {
+    id: string; label: string; model: string;
+    weight: number; tier: number; maxConcurrency: number;
+    cooling: boolean; coolingUntil: string | null; coolingReason: string | null;
+  }[];
+}
+/** 端点池路由设置 */
+export interface AiRouting {
+  /** single=只用 activeModelId 指向的那一个（旧行为，默认）；pool=按池分流 + 故障转移 */
+  mode: 'single' | 'pool';
+  /** 会话粘性：同一会话固定落同一端点，保住上游提示词缓存。关掉会显著降低缓存命中率 */
+  sticky: boolean;
 }
 /** 测试某个模型入参（连接探活；modelId 传入时，apiKey 留空则取该模型已存 key） */
 export interface AiModelTest extends AiModelUpsert { modelId?: string; }

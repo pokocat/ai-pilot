@@ -33,11 +33,25 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://junshi:change-me@db:5432/junshi?schema=public
+      # connection_limit 必须显式写死（压测 P0-3）。Prisma 不设时用「容器看到的 CPU 数 × 2 + 1」推导，
+      # 同一镜像放到 4C 机器是 9、8C 是 17、ACK 2C Pod 是 5 —— 扩容时连接总量完全不可预算。
+      # 取值按「每实例上限 × 最大实例数 ≤ 数据库 max_connections × 65%」反推；15 是双实例起步的稳妥值。
+      # 压测佐证：450 RPS 稳态下总连接峰值 86、active 峰值只有 4，池子实际用不到 5%。
+      DATABASE_URL: postgresql://junshi:change-me@db:5432/junshi?schema=public&connection_limit=15&pool_timeout=10
       AI_PROVIDER: mock                    # 真实模型建议在运营后台「模型」页配置
       PORT: "4000"
       MODERATION_ENABLED: "true"
       PGVECTOR_ENABLED: "false"
+      # 反代信任（压测 P0-0）：不设则默认 'loopback'，只信任本机 Nginx 传来的 X-Forwarded-For。
+      # 上 ALB / 多层反代后改成回源网段或跳数，否则全站限流会共用一个桶（≈5 RPS 天花板）。
+      # TRUST_PROXY: "loopback"
+      # 全局并发闸（压测 P0-2）：默认 8 并发 / 12 突发，与实测的上游 429 阈值对齐。
+      # LLM_MAX_CONCURRENCY: "8"
+      # LLM_BURST_CONCURRENCY: "12"
+      # 过载保护（压测 P0-5）：在途非流式请求上限，设 0 关闭。
+      # MAX_IN_FLIGHT: "200"
+      # 多实例必配：限流计数与缓存共享（未配则各实例各算各的）。
+      # REDIS_URL: redis://redis:6379/0
     ports:
       - "4000:4000"
 

@@ -1,0 +1,48 @@
+name: Frontend Unit
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - feat/**
+      - codex/**
+
+jobs:
+  unit:
+    name: ${{ matrix.workspace }} 纯函数单测
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: [admin, app]
+    defaults:
+      run:
+        working-directory: ${{ matrix.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # 必须 >= 22：test 脚本里的 src/**/*.test.ts 不是被 shell 展开的（npm 用 /bin/sh，
+          # 不支持 globstar，原样透传），而是由 node --test 自己 glob——该能力 Node 22 才有。
+          # 照抄 server-integration.yml 的 node 20 会让这两个 job 直接找不到用例。
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ${{ matrix.workspace }}/package-lock.json
+      # 用 npm ci 而非 npm install：严格按 lockfile 重建，避免本地那种
+      # 「package.json 声明了 tsx、node_modules 里却没有」的半装状态混进 CI。
+      - run: npm ci
+      - name: npm test（并守卫「0 用例」静默绿）
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee /tmp/${{ matrix.workspace }}-test.log
+          # node --test 匹配不到任何文件时只打印 tests 0 然后退出 0，测试基座整体失踪
+          # 也会是一片绿。这里显式断言真的跑过用例，避免测试再次无声腐烂。
+          pass=$(grep -Eo 'pass [0-9]+' /tmp/${{ matrix.workspace }}-test.log | grep -Eo '[0-9]+' | tail -1)
+          : "${pass:=0}"
+          echo "reported pass count: $pass"
+          if [ "$pass" -eq 0 ]; then
+            echo "::error::${{ matrix.workspace }} 的 node --test 匹配到 0 个用例（这种情况退出码仍是 0）。检查 src/**/*.test.ts glob 与测试文件位置。"
+            exit 1
+          fi

@@ -9,6 +9,11 @@ import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/
 import { runToolLoop } from '../tools/loop.js';
 import type { AdaptiveOut } from './openai.js';
 import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js';
+// 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。挂在 provider 层而不是 gateway 的业务分支，
+// 是因为 gateway 有 17 个动态 import 调用点，逐个包既漏又难维护。
+import { withLlmSlot, acquireLlmSlot, endpointLane } from '../../services/llmGate.js';
+// 端点池：多路分流 + 故障转移。未启用池时只有一个候选，行为与直接过闸完全一致。
+import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable } from '../../services/llmPool.js';
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
 
@@ -28,23 +33,34 @@ function systemBlocks(stableText: string, dynamic: string): Anthropic.TextBlockP
 // ① 透传 baseURL —— SDK 会自动补 /v1/messages，故把用户可能粘贴的 /v1/messages 后缀去掉，避免重复成 404；
 // ② 这类网关多用 Authorization: Bearer 鉴权，而官方 SDK 默认只发 x-api-key，故额外补一个 Bearer 头
 //    （两头并存，官方端会忽略多余的 Authorization）。baseUrl 留空＝官方 Anthropic，保持 x-api-key 原状不变。
-let cached: { key: string; client: Anthropic } | null = null;
+// 按 (apiKey, baseUrl) 缓存多个 client。**必须是 Map 不能是单槽**：接了端点池之后，
+// 相邻请求会在不同 (key, baseUrl) 之间交替，单槽缓存等于每次都重建 client、丢掉底层连接池。
+// 上限 16，超了清空重来（端点数量级远小于此，纯属防御）。
+const clients = new Map<string, Anthropic>();
 function getClient(apiKey: string, baseUrl?: string): Anthropic {
   const base = baseUrl?.trim().replace(/\/+$/, '').replace(/\/v1\/messages$/, '') || '';
   const cacheKey = `${apiKey}|${base}`;
-  if (!cached || cached.key !== cacheKey) {
-    cached = {
-      key: cacheKey,
-      // maxRetries 显式设 2（SDK 默认值，但写明以防未来默认变动）——配合各调用点的 timeout，
-      // 把「网关慢/挂时单请求最坏 10 分钟 × 自动重试」这类阻塞收敛为有界（见售卖前体检 P1）。
-      client: new Anthropic(
-        base
-          ? { apiKey, baseURL: base, defaultHeaders: { Authorization: `Bearer ${apiKey}` }, maxRetries: 2 }
-          : { apiKey, maxRetries: 2 },
-      ),
-    };
+  let c = clients.get(cacheKey);
+  if (!c) {
+    if (clients.size >= 16) clients.clear();
+    // maxRetries 显式设 2（SDK 默认值，但写明以防未来默认变动）——配合各调用点的 timeout，
+    // 把「网关慢/挂时单请求最坏 10 分钟 × 自动重试」这类阻塞收敛为有界（见售卖前体检 P1）。
+    c = new Anthropic(
+      base
+        ? { apiKey, baseURL: base, defaultHeaders: { Authorization: `Bearer ${apiKey}` }, maxRetries: 2 }
+        : { apiKey, maxRetries: 2 },
+    );
+    clients.set(cacheKey, c);
   }
-  return cached.client;
+  return c;
+}
+
+/**
+ * 端点亲和键：同一会话固定落同一端点，保住上游的提示词缓存（缓存按账号/端点隔离）。
+ * 没有 sessionId 时退到 agentKey——比每次随机好，至少同一智能体的连续调用能复用缓存。
+ */
+function affinityOf(ctx: GenContext): string {
+  return ctx.runtime?.sessionId || ctx.agentKey || 'anon';
 }
 
 // 多模态当轮 user content：有图片时组成 [image..., text] 块数组；无图片维持纯字符串（不动既有形态，
@@ -93,15 +109,15 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     : '产出 3–4 段结构化内容。';
   const dlvHistory = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? ('user' as const) : ('assistant' as const), content: m.text }));
 
-  const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
-    model: cfg.model,
+  const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create({
+    model: ep.model,
     max_tokens: DELIVERABLE_MAX_TOKENS,
-    temperature: cfg.temperature,
+    temperature: ep.temperature,
     system: systemBlocks(`${stable}\n\n${structureHint}\n务必调用 emit_deliverable 工具输出结构化成果，不要输出自由长文。`, dynamic),
     tools: [DELIVERABLE_TOOL],
     tool_choice: { type: 'tool', name: 'emit_deliverable' },
     messages: [...dlvHistory, { role: 'user', content: claudeUserContent(ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。`, ctx.images) }],
-  }, { timeout: Math.max(cfg.timeoutMs, 120_000) });
+  }, { timeout: Math.max(ep.timeoutMs, 120_000) }), { affinityKey: affinityOf(ctx) });
   const usage = usageOf(res);
 
   const toolUse = res.content.find((c) => c.type === 'tool_use');
@@ -151,13 +167,13 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
     content: m.text,
   }));
-  const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
-    model: cfg.model,
+  const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create({
+    model: ep.model,
     max_tokens: CHAT_MAX_TOKENS,
-    temperature: cfg.temperature,
+    temperature: ep.temperature,
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
     messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
-  }, { timeout: cfg.timeoutMs });
+  }, { timeout: ep.timeoutMs }), { affinityKey: affinityOf(ctx) });
   assertChatOutputComplete('Claude', res.stop_reason, res.usage.output_tokens);
   const text = res.content
     .filter((c) => c.type === 'text')
@@ -174,40 +190,73 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
     role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
     content: m.text,
   }));
-  // 流式调用也须设超时兜底：SDK 默认 600s，网关卡住会把这条流吊到 10 分钟。给足流式时长同时有界。
-  const stream = getClient(cfg.apiKey, cfg.baseUrl).messages.stream({
-    model: cfg.model,
-    max_tokens: CHAT_MAX_TOKENS,
-    temperature: cfg.temperature,
-    system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
-    messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
-  }, { timeout: Math.max(cfg.timeoutMs, 120_000) });
-  let text = '';
-  let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
-  for await (const event of stream) {
-    if (event.type === 'message_start') usage = usageOf(event.message);
-    else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
-    else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-      text += event.delta.text;
-      yield { type: 'delta', text: event.delta.text };
+  // 流式的槽位必须持有到整条流消费完，不能只包住「建流」那一下——一条流在上游眼里全程占用一个并发，
+  // 只包建流会让闸门形同虚设（8 个槽位瞬间放完 8 条流，紧接着又放 8 条）。故手动 acquire/release。
+  //
+  // 端点故障转移在流式下有个硬边界：**一旦已经向客户端 yield 过 delta，就不能再转移**——
+  // 换端点意味着重新生成，前面已经吐给用户的半句话会和新内容对不上。所以只在「还没吐出任何内容」
+  // 时才允许转移；建流阶段和首个 delta 之前的 429/5xx 都能救回来，之后只能如实报错。
+  const candidates = await resolveCandidates(cfg, { affinityKey: affinityOf(ctx) });
+  const maxAttempts = Math.max(1, Math.min(candidates.length, Number(process.env.LLM_POOL_MAX_ATTEMPTS ?? 3) || 3));
+  const cls = cfg.lane === 'aux' ? 'aux' : 'main';
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const ep = candidates[attempt];
+    const lane = ep.endpointId ? endpointLane(cls, ep.endpointId) : cls;
+    const slot = await acquireLlmSlot(lane);
+    let yieldedAny = false;
+    try {
+      // 流式调用也须设超时兜底：SDK 默认 600s，网关卡住会把这条流吊到 10 分钟。给足流式时长同时有界。
+      const stream = getClient(ep.apiKey, ep.baseUrl).messages.stream({
+        model: ep.model,
+        max_tokens: CHAT_MAX_TOKENS,
+        temperature: ep.temperature,
+        system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
+        messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
+      }, { timeout: Math.max(ep.timeoutMs, 120_000) });
+      let text = '';
+      let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
+      for await (const event of stream) {
+        if (event.type === 'message_start') usage = usageOf(event.message);
+        else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
+        else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          text += event.delta.text;
+          yieldedAny = true; // 过了这一行就不能再转移端点了
+          yield { type: 'delta', text: event.delta.text };
+        }
+      }
+      const final = await stream.finalMessage().catch(() => null);
+      if (final) usage = usageOf(final);
+      assertChatOutputComplete('Claude', final?.stop_reason, usage.outputTokens);
+      const out = requireText(text || final?.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n'), usage, 'chat_stream');
+      yield { type: 'done', result: { text: out }, usage };
+      return;
+    } catch (err) {
+      lastErr = err;
+      slot.noteError(err);
+      const last = attempt === maxAttempts - 1;
+      // 已经吐过内容 / 不可转移的错 / 没有下一个候选 → 如实抛出，不做无意义的重试。
+      if (yieldedAny || !ep.endpointId || !isTransferable(err) || last) throw err;
+      await coolEndpoint(ep.endpointId, 30_000, 'stream_error', lane);
+      console.warn(`[claude] 流式端点 ${ep.label || ep.endpointId} 建流失败，转移到下一个：${(err as Error).message}`);
+    } finally {
+      // 客户端中断（generator 提前 return）也会走到这里，槽位不会泄漏。
+      slot.release();
     }
   }
-  const final = await stream.finalMessage().catch(() => null);
-  if (final) usage = usageOf(final);
-  assertChatOutputComplete('Claude', final?.stop_reason, usage.outputTokens);
-  const out = requireText(text || final?.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n'), usage, 'chat_stream');
-  yield { type: 'done', result: { text: out }, usage };
+  throw lastErr;
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
 export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
   // 轻量补全必须设超时：SDK 默认 600s + 自动重试，网关一挂会把同步等它的路由（如 /casefile/accept）吊死。
-  const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
-    model: cfg.model,
+  const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create({
+    model: ep.model,
     max_tokens: 700,
     system,
     messages: [{ role: 'user', content: user }],
-  }, { timeout: cfg.timeoutMs, maxRetries: 1 });
+  }, { timeout: ep.timeoutMs, maxRetries: 1 }), { laneClass: cfg.lane === 'aux' ? 'aux' : 'main' });
   return res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
 }
 
@@ -234,7 +283,7 @@ function toClaudeMessages(messages: LoopMessage[], images?: ImageInput[]): { sys
 }
 
 /** 绑定 cfg（+ 本轮图片），返回 provider 无关循环所需的 step 函数。 */
-export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[]): StepFn {
+export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[], affinityKey?: string): StepFn {
   return async (messages, tools, opts) => {
     const finalName = opts.finalTool?.name;
     const { system, msgs } = toClaudeMessages(messages, images);
@@ -261,7 +310,9 @@ export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[]): StepFn
       req.tool_choice = { type: 'auto' };
     }
 
-    const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create(req, { timeout: Math.max(cfg.timeoutMs, 120_000) });
+    const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create(
+      { ...req, model: ep.model }, { timeout: Math.max(ep.timeoutMs, 120_000) },
+    ), { affinityKey });
     const usage = usageOf(res);
     assertChatOutputComplete('Claude', res.stop_reason, usage.outputTokens);
     const toolUses = res.content.filter((c): c is Anthropic.ToolUseBlock => c.type === 'tool_use');
@@ -293,7 +344,7 @@ export async function claudeChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
   const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
   const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
   const r = await runToolLoop({
-    step: claudeStep(cfg, ctx.images),
+    step: claudeStep(cfg, ctx.images, affinityOf(ctx)),
     system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`,
     history: ctx.history,
     userMessage: ctx.userMessage,
@@ -312,7 +363,7 @@ export async function claudeDeliverableWithTools(ctx: GenContext, cfg: ResolvedA
     ? `参考产出结构（小标题）：${tpl.sections.map((s) => s.h).join(' / ')}。标题用「${tpl.title}」。`
     : '产出 3–4 段结构化内容。';
   const r = await runToolLoop({
-    step: claudeStep(cfg, ctx.images),
+    step: claudeStep(cfg, ctx.images, affinityOf(ctx)),
     system: `${system}\n\n${structureHint}\n可先调用工具检索知识/召回记忆，掌握依据后务必调用 emit_deliverable 输出结构化成果，不要输出自由长文。`,
     history: ctx.history,
     userMessage: ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。`,
@@ -362,7 +413,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
   const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
   const hint = '默认用文字正常对话回答用户。只有当你判断此刻需要交付一份完整的报告或卡片成果时，才调用 emit_deliverable 以结构化分段输出（含标题与各段小标题/正文/要点）；其余所有情况都直接用文字回复，不要调用 emit_deliverable。';
   const r = await runToolLoop({
-    step: claudeStep(cfg, ctx.images),
+    step: claudeStep(cfg, ctx.images, affinityOf(ctx)),
     system: `${system}\n\n${hint}`,
     history: ctx.history,
     userMessage: ctx.userMessage,

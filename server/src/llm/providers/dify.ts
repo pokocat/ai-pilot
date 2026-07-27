@@ -8,6 +8,9 @@
 
 import { ZERO_USAGE, fillPlaceholders, type ChatReply, type Deliverable, type GenContext, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
+// 全局并发闸：只挂在真实业务流量路径 callDify 上。difyPing 是运营后台的「测试连接」诊断，
+// 故意不过闸——上游正被限流时，管理员恰恰需要这个按钮能立刻返回真实错误，而不是排队 15 秒。
+import { withLlmSlot } from '../../services/llmGate.js';
 
 const DIFY_TIMEOUT = 60_000;
 
@@ -83,23 +86,27 @@ async function callDify(ctx: GenContext, query: string): Promise<{ answer: strin
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), DIFY_TIMEOUT);
   try {
-    const res = await fetch(`${base}/chat-messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rt.difyApiKey}` },
-      body: JSON.stringify({
-        inputs: buildInputs(ctx),
-        query,
-        response_mode: 'streaming',
-        conversation_id: rt.conversationId ?? '',
-        user: rt.user || rt.sessionId || ctx.agentKey,
-      }),
-      signal: ctrl.signal,
-    });
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as DifyStreamEvent;
-      throw new Error(`Dify ${res.status}: ${data.message ?? data.code ?? '请求失败'}`);
-    }
-    return await readDifyStream(res);
+    // 过全局并发闸（压测 P0-2）。这里 readDifyStream 是把整条流读完才返回，
+    // 所以整段包住即可，槽位天然覆盖真实占用时长。
+    return await withLlmSlot(async () => {
+      const res = await fetch(`${base}/chat-messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${rt.difyApiKey}` },
+        body: JSON.stringify({
+          inputs: buildInputs(ctx),
+          query,
+          response_mode: 'streaming',
+          conversation_id: rt.conversationId ?? '',
+          user: rt.user || rt.sessionId || ctx.agentKey,
+        }),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as DifyStreamEvent;
+        throw Object.assign(new Error(`Dify ${res.status}: ${data.message ?? data.code ?? '请求失败'}`), { statusCode: res.status });
+      }
+      return await readDifyStream(res);
+    });  // dify 是 per-agent 独立接入，不走 aux 辅助档 → 恒用 main 车道
   } finally {
     clearTimeout(timer);
   }

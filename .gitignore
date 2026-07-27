@@ -18,6 +18,7 @@ weapp-preview*.json
 weapp-preview*.png
 weapp-auto-preview*.json
 weapp-auto-preview*.png
+loadtest/results/
 
 # IDE 云连接 / 技能下载 / 对话草稿
 .cc-connect/

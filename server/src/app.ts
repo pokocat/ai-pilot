@@ -43,12 +43,36 @@ import { adminAccountRoutes } from './routes/adminAccount.js';
 import { registerHttpAudit } from './services/audit.js';
 import { sandboxEnabled, assertSandboxSafe } from './services/sandbox.js';
 import { enterNow } from './services/clock.js';
+import { getRedis } from './services/redis.js';
+import { verifyUserToken } from './services/userToken.js';
+
+/**
+ * 反代信任配置（压测 P0-0）。
+ *
+ * 原来 `Fastify({...})` 没设 trustProxy，`req.ip` 取 socket 对端地址；而生产 Nginx 是从 127.0.0.1 反代过来的
+ * （见 deploy/nginx.conf.example），于是**所有用户的 req.ip 都是 127.0.0.1**。@fastify/rate-limit 默认按
+ * req.ip 分桶，结果全站共用一个 300/min 的桶 ≈ 5 RPS，超出即 429——这是一条隐藏的吞吐天花板，
+ * 而且 2026-07 那轮压测因为跑在 NODE_ENV=test（限流插件根本没注册）而结构性地测不到它。
+ *
+ * 默认 'loopback'：只信任本机反代传来的 X-Forwarded-For。这是对当前部署形态最安全的默认值——
+ * 若进程被直接暴露到公网，来自外部的 XFF 一律不采信，避免客户端自报 IP 绕过限流。
+ * 上 ALB / 多层反代后用 TRUST_PROXY 覆盖：填回源网段（逗号分隔 CIDR）或跳数（如 "2"）。
+ * 显式 TRUST_PROXY=false 可关掉（仅用于直接暴露且不经任何反代的场景）。
+ */
+function trustProxyOption(): boolean | string | number {
+  const raw = (process.env.TRUST_PROXY ?? '').trim();
+  if (!raw) return 'loopback';
+  if (raw === 'false') return false;
+  if (raw === 'true') return true; // 无条件信任：仅在入口层已保证 XFF 可信时使用
+  if (/^\d+$/.test(raw)) return Number(raw); // 跳数
+  return raw; // CIDR / 网段列表，交给 proxy-addr 解析
+}
 
 export async function buildApp(opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
   // 启动期硬护栏：生产环境误开 PAY_SANDBOX → 拒绝启动（可测 seam 绝不漏到线上）。
   assertSandboxSafe();
 
-  const app = Fastify({ logger: opts.logger ? { level: 'info' } : false });
+  const app = Fastify({ logger: opts.logger ? { level: 'info' } : false, trustProxy: trustProxyOption() });
 
   // 兼容「Content-Type: application/json 但 body 为空」的 POST（如无 body 的 activate / 报告渲染等接口）。
   // fastify 5.x 默认对空 JSON body 抛 FST_ERR_CTP_EMPTY_JSON_BODY(400)；而前端/小程序的请求封装会无条件带
@@ -68,15 +92,63 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
 
   // 全站限流（此前完全无 limit_req，SMS/AI 生成/下单等成本型接口零防刷，机器常态被扫描器扫——见售卖前体检 P1）。
   // 全局宽松兜底（正常用户远不会触及），成本/鉴权型路由用 route-level config.rateLimit 收紧（见 auth.ts 等）。
-  // 内存 store：单实例有效；多实例需换 Redis store（见分布式架构方案 Phase 1）。测试(NODE_ENV=test)不启用，
-  // 避免 app.inject 同源请求把套件打成 429。
+  // 测试(NODE_ENV=test)不启用，避免 app.inject 同源请求把套件打成 429。
+  //
+  // 压测 P0-0 修正：
+  //   ① keyGenerator 改为「已登录按用户、未登录按 IP」。原来用插件默认的 req.ip，配合缺失的 trustProxy，
+  //      全站会共用一个桶（见 trustProxyOption 注释）。按用户分桶后，成本闸才真正落到「每个人」头上，
+  //      也不会被同一运营商 NAT 出口的大量小程序用户互相挤掉。
+  //   ② 阈值提到 600/min 并可用 RATE_LIMIT_MAX 覆盖：分桶修对之后，原来的 300 是「每人 5 RPS」，
+  //      对正常使用足够，但匿名 IP 桶要容纳 NAT 后的多个真人，故给一档余量。
+  //   ③ 配了 REDIS_URL 时用 Redis store，多实例共享计数；否则内存 store（单实例有效）。
   if (!isAiTestMode()) {
+    const redis = await getRedis();
     await app.register(rateLimit, {
       global: true,
-      max: 300,
-      timeWindow: '1 minute',
-      allowList: (req) => req.url === '/api/health',
+      max: Number(process.env.RATE_LIMIT_MAX ?? 600),
+      timeWindow: process.env.RATE_LIMIT_WINDOW ?? '1 minute',
+      ...(redis ? { redis } : {}),
+      keyGenerator: (req) => {
+        // verifyUserToken 是纯 HMAC 校验、不查库，放在限流键上开销可忽略；验不过就退回 IP。
+        const raw = req.headers['x-user-id'];
+        const uid = verifyUserToken(Array.isArray(raw) ? raw[0] : raw);
+        return uid ? `u:${uid}` : `ip:${req.ip}`;
+      },
+      // 探活不能被限流吃掉（ALB / systemd / docker healthcheck 都打这几个路径）。
+      // 用 startsWith 而非全等：req.url 带 query 时全等会失配。
+      allowList: (req) => req.url.startsWith('/api/health'),
     });
+  }
+
+  // 过载主动降级（压测 P0-5）。压测实测：450 RPS 交付 450，800 RPS 只交付约 366——**过载时有效吞吐
+  // 不升反降**（典型拥塞崩溃），且失败形态是「排队 + 10s 超时」而非进程崩溃。与其让所有人一起劣化到
+  // P95 6.23s，不如让超出容量的少数请求快速 503。
+  //
+  // 阈值口径：450 RPS 稳态下 P95 ≈ 40ms → 在途约 18 个；越过悬崖后 P95 6.23s → 在途约 3000 个。
+  // 默认 200 落在两者之间（对正常态有 10 倍余量，又能在排队刚形成时就介入）。设 0 关闭。
+  //
+  // 不计入的两类：
+  //   ① 探活——被限流挡住或被过载计数误伤，会让健康实例被摘掉，正好帮倒忙。
+  //   ② 长耗时 LLM 路径（SSE 的 /api/generate、同步的 /api/generate-sync、
+  //      /api/brand-kit/generate、/api/me/dossier/generate）——它们一挂就是几十秒到几分钟，
+  //      算进一个 200 的在途预算会瞬间占满，让这道闸对真正要防的「快接口排队」失去意义。
+  //      这类请求的并发由 services/llmGate.ts 按上游配额单独管，本闸不重复管。
+  const maxInFlight = Number(process.env.MAX_IN_FLIGHT ?? 200);
+  if (maxInFlight > 0 && !isAiTestMode()) {
+    let inFlight = 0;
+    const isLongRunning = (url: string) => url.includes('/generate') || url.includes('/stream');
+    app.addHook('onRequest', async (req, reply) => {
+      if (isLongRunning(req.url) || req.url.startsWith('/api/health')) return;
+      if (inFlight >= maxInFlight) {
+        reply.header('Retry-After', '1');
+        return reply.code(503).send({ error: '服务繁忙，请稍后重试', code: 'SERVER_BUSY' });
+      }
+      inFlight++;
+      (req as typeof req & { __counted?: boolean }).__counted = true;
+    });
+    const done = (req: { __counted?: boolean }) => { if (req.__counted) { req.__counted = false; inFlight--; } };
+    app.addHook('onResponse', async (req) => done(req as typeof req & { __counted?: boolean }));
+    app.addHook('onError', async (req) => done(req as typeof req & { __counted?: boolean }));
   }
 
   // 可测性（沙箱专属）：用 x-test-now 头把本次请求的「现在」固定为指定时刻，快进到期/锚点重置做离线验证。
