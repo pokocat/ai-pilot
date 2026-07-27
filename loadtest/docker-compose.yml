@@ -29,6 +29,11 @@ services:
       - "pg_stat_statements.max=10000"
       - "-c"
       - "pg_stat_statements.track=all"
+    # Docker 默认 /dev/shm 只有 64MB。PG 的并行 worker 走共享内存交换中间结果，
+    # 在 300 万行上跑 VACUUM (ANALYZE) 或并行扫描时会直接报
+    # "could not resize shared memory segment ... No space left on device"。
+    # 生产/RDS 上没这个限制，所以这纯属容器化压测的坑，不是被测系统的问题。
+    shm_size: 1gb
     environment:
       POSTGRES_USER: junshi_lt
       POSTGRES_PASSWORD: junshi_lt_local_only

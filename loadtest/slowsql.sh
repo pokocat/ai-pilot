@@ -15,7 +15,8 @@ RUN="${1:?用法: bash loadtest/slowsql.sh <run_id>}"
 OUT="results/${RUN}-slowsql.txt"
 mkdir -p results
 
-PSQL=(docker compose exec -T db psql -U junshi_lt -d junshi_lt -v ON_ERROR_STOP=1)
+if docker ps >/dev/null 2>&1; then DC=(docker compose); else DC=(sudo docker compose); fi
+PSQL=("${DC[@]}" exec -T db psql -U junshi_lt -d junshi_lt -v ON_ERROR_STOP=1)
 
 {
   echo "# 慢 SQL Top-N — run=${RUN}"

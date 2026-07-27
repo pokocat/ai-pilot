@@ -21,7 +21,9 @@ set -euo pipefail
 LT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$LT"
 
-DC=(docker compose)
+# 压测机上普通用户通常不在 docker 组（monitor.sh 里也是直接写死 sudo 的）。
+# 这里自动探测：能裸跑就裸跑，不能就加 sudo，省得两台机器两套命令。
+if docker ps >/dev/null 2>&1; then DC=(docker compose); else DC=(sudo docker compose); fi
 PSQL=("${DC[@]}" exec -T db psql -U junshi_lt -d junshi_lt -v ON_ERROR_STOP=1)
 
 echo "== 1/5 启用 pg_stat_statements =="
