@@ -205,14 +205,22 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
-export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
-  // 轻量补全必须设超时：SDK 默认 600s + 自动重试，网关一挂会把同步等它的路由（如 /casefile/accept）吊死。
-  const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
+export function claudeRawRequest(cfg: ResolvedAiConfig, system: string, user: string): Anthropic.MessageCreateParamsNonStreaming {
+  return {
     model: cfg.model,
     max_tokens: 700,
+    temperature: cfg.temperature,
     system,
     messages: [{ role: 'user', content: user }],
-  }, { timeout: cfg.timeoutMs, maxRetries: 1 });
+  };
+}
+
+export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
+  // 轻量补全必须设超时：SDK 默认 600s + 自动重试，网关一挂会把同步等它的路由（如 /casefile/accept）吊死。
+  const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create(
+    claudeRawRequest(cfg, system, user),
+    { timeout: cfg.timeoutMs, maxRetries: 1 },
+  );
   return res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
 }
 

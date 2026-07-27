@@ -259,6 +259,7 @@ Provider（`provider` 字段，由 `effectiveProvider` 决定实际生效）：
 - **mock**：模板产出，零成本可离线（`providers/mock.ts`）。
 - **claude**：Anthropic 原生 `/v1/messages` 协议，tool use 强约束（`providers/claude.ts`）；官方直连 `baseUrl` 留空，第三方网关填 Anthropic 根路径（如 qnaigc `/bypass/anthropic`）。后台必须允许该模式填写 `baseUrl`；服务端会裁掉误粘贴的尾部 `/v1` 或 `/v1/messages`，再由 SDK 统一补 `/v1/messages`，避免重复路径 404。
 - **openai**：OpenAI 通用协议，兼容 **Agnes / DeepSeek / Moonshot(Kimi) / 通义千问** 等（`providers/openai.ts`，function calling 强约束）。
+- `temperature` 保留为模型级运营参数；后台“测试连接”必须与真实调用使用同一值。qnaigc 的 `dj-claude-*` 若走 OpenAI thinking/adaptive 兼容链路，temperature 小于 1 会返回 400，须设为 `1`；不得用省略 temperature 的轻量请求把错误配置测成“连通”。
 - `isRealKey()` 识别占位/假 key——**未配置真实 key 一律降级 mock**，不发网络请求；后台填入真实 key 即时切真实模型（无需重启/改 env）。
 - baseUrl/model/key/温度/嵌入模型 全部来自运行时配置，providers 接 `ResolvedAiConfig` 入参。
 
