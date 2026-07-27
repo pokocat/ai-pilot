@@ -6,9 +6,11 @@ import { Counter, Rate } from 'k6/metrics';
 const concurrency = Number(__ENV.CONCURRENCY || 1);
 const iterationsPerVu = Number(__ENV.ITERATIONS_PER_VU || 4);
 const provider = (__ENV.LLM_PROVIDER || 'claude').toLowerCase();
-const baseUrl = (__ENV.LLM_BASE_URL || '').replace(/\/+$/, '').replace(/\/v1\/messages$/, '');
-const model = __ENV.LLM_MODEL || '';
-const apiKey = __ENV.LLM_API_KEY || '';
+// 显式 LLM_* 优先；本机受控探针可只通过 `--env-file server/.env` 注入现有 OpenAI 配置，
+// 避免把 key 展开到 docker 命令行或日志中。
+const baseUrl = (__ENV.LLM_BASE_URL || __ENV.OPENAI_BASE_URL || '').replace(/\/+$/, '').replace(/\/v1\/messages$/, '');
+const model = __ENV.LLM_MODEL || __ENV.OPENAI_MODEL || '';
+const apiKey = __ENV.LLM_API_KEY || __ENV.OPENAI_API_KEY || '';
 const runId = __ENV.RUN_ID || `llm-c${concurrency}`;
 const perResponseTokenGuard = Number(__ENV.PER_RESPONSE_TOKEN_GUARD || 200);
 
@@ -91,6 +93,10 @@ export default function () {
   if (res.status === 429) status429.add(1);
   else if (res.status >= 500) status5xx.add(1);
   else if (res.status < 200 || res.status >= 300) statusOtherError.add(1);
+  if (res.status < 200 || res.status >= 300) {
+    // 只输出状态码，不输出响应体（它可能含供应商错误详情或请求关联信息）。
+    console.warn(`LLM probe non-2xx status=${res.status}`);
+  }
 
   const ok = check(res, {
     'provider returned 2xx': (r) => r.status >= 200 && r.status < 300,

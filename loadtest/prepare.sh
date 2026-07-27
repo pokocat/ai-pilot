@@ -33,7 +33,20 @@ fi
 set -a; . "$LT/.env"; set +a
 
 echo "== 签发 $USERS 个 JWT → loadtest/tokens.json =="
-( cd "$ROOT/server" && LT_JWT_SECRET="$LT_JWT_SECRET" npx tsx scripts/mintLoadtestTokens.ts "$USERS" )
+if [ -x "$ROOT/server/node_modules/.bin/tsx" ]; then
+  ( cd "$ROOT/server" && LT_JWT_SECRET="$LT_JWT_SECRET" npx tsx scripts/mintLoadtestTokens.ts "$USERS" )
+elif command -v docker >/dev/null 2>&1 && docker image inspect junshi-loadtest-api >/dev/null 2>&1; then
+  # 干净的压测服务器通常没有宿主机 node_modules。复用刚构建的隔离 API 镜像签发，
+  # 不安装依赖、不碰生产运行时；以当前用户写入，保持 tokens.json 可读但仍为 0600。
+  docker run --rm --user "$(id -u):$(id -g)" --env-file "$LT/.env" \
+    -v "$ROOT/server/scripts:/app/scripts:ro" \
+    -v "$LT:/loadtest" \
+    junshi-loadtest-api npx tsx scripts/mintLoadtestTokens.ts "$USERS"
+else
+  echo "缺少 server/node_modules/.bin/tsx；请先执行 cd loadtest && docker compose build api，再重跑本脚本。" >&2
+  exit 1
+fi
+chmod 600 "$LT/tokens.json"
 
 echo
 echo "就绪。接下来："

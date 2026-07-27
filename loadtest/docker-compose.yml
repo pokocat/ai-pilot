@@ -18,6 +18,17 @@ services:
   db:
     image: postgres:16
     restart: "no"
+    # pg_stat_statements 必须 shared_preload_libraries 预加载（改后要重启才生效），
+    # 光 CREATE EXTENSION 是不够的。上一轮没开它，于是 10x 数据集下容量掉了三成却
+    # 拿不到单条 SQL 的耗时排名，只能猜是缓存、统计信息还是 autovacuum——这轮必须能答。
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_stat_statements"
+      - "-c"
+      - "pg_stat_statements.max=10000"
+      - "-c"
+      - "pg_stat_statements.track=all"
     environment:
       POSTGRES_USER: junshi_lt
       POSTGRES_PASSWORD: junshi_lt_local_only
@@ -128,6 +139,7 @@ services:
       LLM_QUEUE_TIMEOUT_MS: ${LT_LLM_QUEUE_TIMEOUT_MS:-15000}
       AI_MOCK_LATENCY_MS: ${LT_MOCK_LATENCY_MS:-0}
       AI_MOCK_LATENCY_JITTER_MS: ${LT_MOCK_LATENCY_JITTER_MS:-0}
+      AI_MOCK_429_FIRST_N: ${LT_MOCK_429_FIRST_N:-0}
       AI_MOCK_429_RATE: ${LT_MOCK_429_RATE:-0}
     ports:
       # 只绑 loopback：给 monitor.sh 抓 /api/metrics 用（走 nginx 会把观测流量算进被测容量）。

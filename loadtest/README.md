@@ -60,15 +60,22 @@ docker compose -f docker-compose.yml -f docker-compose.limits.yml up -d
 
 全部在 `loadtest/.env` 里覆盖（`LT_` 前缀）：`LT_DB_POOL`、`LT_MAX_IN_FLIGHT`、
 `LT_RATE_LIMIT_MAX`、`LT_LLM_MAX_CONCURRENCY`、`LT_MOCK_LATENCY_MS`、
-`LT_MOCK_429_RATE`、`LT_REPORT_PDF_DISABLED`、`LT_API_CPUS` 等。
+`LT_MOCK_429_RATE`、`LT_REPORT_PDF_DISABLED`、`LT_API_CPUS`、`LT_TRUST_PROXY` 等。
 
 跑 S5（LLM 闸门与队列）时至少要设：
 
 ```bash
 LT_MOCK_LATENCY_MS=3000        # 模拟上游耗时，mock 会占一个真实闸门槽位
 LT_MOCK_LATENCY_JITTER_MS=500  # 抖动，避免整齐同步的假锯齿
-LT_MOCK_429_RATE=0.1           # 想验整窗冷却与恢复爬坡时才开
+LT_MOCK_429_FIRST_N=1           # 确定性注入第 1 个 429；验证冷却后恢复时优先用它
+LT_MOCK_429_RATE=0.1            # 概率注入，仅用于长时间扰动，不作通过/失败判定
 ```
+
+零 token 的 LLM 闸门/队列测试用 `k6-llm-queue.js` 打隔离 `/generate-sync`。它只会向
+压测库写入测试会话和消息；当 `AI_MOCK_LATENCY_MS>0` 时，mock 会占用真实 `llmGate` 槽位。
+依次运行 8 / 12 / 20 / 40 并发，并读取 `llm.csv` 与 `/metrics` 的 `junshi_llm_*` 指标；
+要验证 429 冷却时单独设置 `LT_MOCK_429_FIRST_N=1`，先跑一条允许注入失败的请求，再立刻跑一条正常请求，
+在 `llm.csv` 确认 `upstream_429_total=1`、`cooldowns_total=1` 与恢复请求的等待时间；不与正常容量档混跑。
 
 ### 指标
 
@@ -91,9 +98,11 @@ ssh -N -L 14080:127.0.0.1:14080 <server>
 
 ## 运行
 
+从**另一台压测机**经 SSH 隧道运行时，继续使用隧道地址：
+
 ```bash
 mkdir -p loadtest/results
-docker run --rm \
+docker run --rm --user 0:0 \
   -e BASE_URL=http://host.docker.internal:14080 \
   -e RATE=100 \
   -e DURATION=5m \
@@ -104,10 +113,50 @@ docker run --rm \
   grafana/k6 run /scripts/k6-readonly.js
 ```
 
+在**隔离服务器本机**运行时，网关端口只绑定在宿主机 loopback，容器不能访问
+`host.docker.internal:14080`。应加入 Compose 的 edge 网络并直接访问服务名：
+
+```bash
+mkdir -p loadtest/results
+docker run --rm --user 0:0 --network junshi-loadtest_edge \
+  -e BASE_URL=http://gateway:8080 \
+  -e RATE=100 -e DURATION=5m -e RUN_ID=rate-100 \
+  -v "$PWD/loadtest/k6-readonly.js:/scripts/k6-readonly.js:ro" \
+  -v "$PWD/loadtest/tokens.json:/scripts/tokens.json:ro" \
+  -v "$PWD/loadtest/results:/results" \
+  grafana/k6 run /scripts/k6-readonly.js
+```
+
+`--user 0:0` 只用于读取权限为 0600 的压测专用 token 文件；它不改变被测 API 的权限或网络边界。
+
 `tokens.json` 必须挂进去（脚本在 init 阶段 `open()` 它）。缺了会在启动时直接报错，
 而不是静默退回裸 `x-user-id` —— 免得又跑出一轮「没验签」的数据。
 每个 VU 还会带一个稳定的合成 `X-Forwarded-For`（`203.0.113.x`，RFC 5737 文档保留段），
 因为限流按「已登录按用户、未登录按 IP」分桶，匿名请求全挤一个 IP 会把限流层测成「一撞就 429」。
+
+### S2：限流与真实客户端 IP
+
+S2 仅在隔离环境临时把 `LT_RATE_LIMIT_MAX=5`、`LT_TRUST_PROXY=<edge 网络 CIDR>` 写入
+`loadtest/.env`，重建 API 后执行。后者必须是网关回源网段，不能用 `true`；本机 Docker
+网络可通过 `docker network inspect junshi-loadtest_edge` 获取。每一子项前清空隔离 Redis 的
+计数，再恢复默认限额与信任配置。
+
+```bash
+docker run --rm --user 0:0 --network junshi-loadtest_edge \
+  -e BASE_URL=http://gateway:8080 -e MODE=single -e LIMIT=5 -e REQUESTS=8 \
+  -e RUN_ID=s2-single-ip \
+  -v "$PWD/loadtest/k6-rate-limit.js:/scripts/k6-rate-limit.js:ro" \
+  -v "$PWD/loadtest/results:/results" \
+  grafana/k6 run /scripts/k6-rate-limit.js
+
+# 清空隔离 Redis 后再跑；20 个不同的 XFF 都应为 200。
+docker run --rm --user 0:0 --network junshi-loadtest_edge \
+  -e BASE_URL=http://gateway:8080 -e MODE=multi -e LIMIT=5 -e REQUESTS=20 \
+  -e RUN_ID=s2-multi-ip \
+  -v "$PWD/loadtest/k6-rate-limit.js:/scripts/k6-rate-limit.js:ro" \
+  -v "$PWD/loadtest/results:/results" \
+  grafana/k6 run /scripts/k6-rate-limit.js
+```
 
 ## 安全约束
 

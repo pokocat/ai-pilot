@@ -17,6 +17,7 @@ import { withLlmSlot, type LlmLane } from '../../services/llmGate.js';
  * 于是并发上限、排队、排队超时降级、429 整窗冷却全部可复现，且**零 Token 成本**。
  *   AI_MOCK_LATENCY_MS        模拟上游耗时（0=不启用，行为与原来逐字节一致）
  *   AI_MOCK_LATENCY_JITTER_MS 在上面基础上叠加 [0, jitter) 的随机抖动，避免整齐的同步波形
+ *   AI_MOCK_429_FIRST_N       进程启动后前 N 个请求确定性抛 429（用于可重复的冷却/恢复测试）
  *   AI_MOCK_429_RATE          按该概率(0..1)抛 429，用来验证整窗冷却与恢复爬坡
  * 生产不会配这些变量，故这条路径在生产恒为「直接返回」。
  */
@@ -29,6 +30,17 @@ function envNum(name: string, dflt: number): number {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+let injected429Count = 0;
+
+function shouldInject429(): boolean {
+  const firstN = Math.floor(envNum('AI_MOCK_429_FIRST_N', 0));
+  if (injected429Count < firstN) {
+    injected429Count += 1;
+    return true;
+  }
+  const rate = envNum('AI_MOCK_429_RATE', 0);
+  return rate > 0 && Math.random() < rate;
+}
 
 /** 是否已开启「mock 模拟真实上游」（仅压测用）。 */
 export function mockUpstreamEnabled(): boolean {
@@ -44,8 +56,7 @@ export async function mockUpstream<T>(produce: () => T, lane: LlmLane = 'main'):
   return withLlmSlot(async () => {
     const jitter = envNum('AI_MOCK_LATENCY_JITTER_MS', 0);
     await sleep(envNum('AI_MOCK_LATENCY_MS', 0) + (jitter > 0 ? Math.floor(Math.random() * jitter) : 0));
-    const rate = envNum('AI_MOCK_429_RATE', 0);
-    if (rate > 0 && Math.random() < rate) {
+    if (shouldInject429()) {
       // 带 statusCode 让闸门确定性识别为限流（而不是靠文案匹配），从而进入整窗冷却。
       throw Object.assign(new Error('mock 上游注入 429: too many requests'), { statusCode: 429 });
     }

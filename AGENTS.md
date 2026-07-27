@@ -521,13 +521,15 @@ cd admin && npm test   # 同上
 - 入口：`server/src/app.ts` 的 `buildApp()` 工厂（`index.ts` 用它 listen，测试用 `app.inject` 免端口）。
 - 跑法：备好测试库 → `DATABASE_URL=...junshi_test npm run db:push` → `AI_PROVIDER=mock npm test`。
 - **隔离服务器压测**：使用 `loadtest/docker-compose.yml` 部署独立 API/PostgreSQL/网关，网关仅绑定
-  `127.0.0.1:14080`，通过 SSH 隧道从外部运行 `loadtest/k6-readonly.js`。运行态固定
-  `NODE_ENV=test`、`AI_PROVIDER=mock`，API 仅接无公网出口的 Docker internal network；
+  `127.0.0.1:14080`，可通过 SSH 隧道从外部运行 `loadtest/k6-readonly.js`；在测试机本机运行 k6 时必须加入
+  `junshi-loadtest_edge` 并访问 `http://gateway:8080`，不能从容器访问宿主 loopback。运行态固定
+  `NODE_ENV=production`、HS256 JWT、Redis 限流与 `SCHEDULER_ENABLED=false`，同时使用 `AI_PROVIDER=mock`；API 仅接无公网出口的 Docker internal network；
   短信、微信、支付、OSS、embedding/rerank 与生产数据库均不接入。数据由
   `server/prisma/loadtestSeed.ts` 生成确定性假数据，禁止复制线上用户数据。操作与清理命令见
   `loadtest/README.md`。真实 LLM 仅允许使用独立的 `loadtest/k6-llm.js` 最小消耗探针：
-  一个字符输入、`max_tokens=1`、固定请求数、逐档核算总 Token；密钥只进临时 `0600`
+  一个字符输入、`max_tokens=1`、固定请求数、逐档核算总 Token；0600 token 文件挂入 k6 时使用只读 root 容器，不放宽宿主文件权限；密钥只进临时 `0600`
   env 文件且测试后删除，不得接入业务生成接口或写入仓库。
+- **LLM 零 Token 闸门补测（2026-07-28）**：默认 mock 不占槽位；仅隔离压测显式配置 `AI_MOCK_LATENCY_MS>0` 时，`providers/mock.ts` 才经同一 `llmGate` 持槽，配合 `k6-llm-queue.js` 实测 8/12/20/40 并发的排队与超时行为。`AI_MOCK_429_FIRST_N` 可确定性注入前 N 次 429，用于验证冷却及恢复，默认 0；这些变量禁止出现在生产环境。实测 40 个约 3 秒的同到请求全部成功，最大队列 28、最长等待 9.64 秒；这不是供应商并发配额，真实提供方仍须使用可撤销、日限额的独立 key 做最小探针。
 - 全程 mock 模型（确定性、可复现），无需真实 key/pgvector。**现状 724 用例 / 114 套件（0 跳过）**；覆盖微信登录 openid 复登、运营后台鉴权、算力/套餐购买、智能体权益、军师档案访谈与用户主路径。最近一次本地 PostgreSQL 测试库实跑为 2026-07-27，724/724 全过（有 / 无 `server/.env` 两种条件下各跑一次，结果一致）。
 - **★ 测试环境自足（hermetic env，2026-07-27 起）**：`npm test` 只吃 `.env.test` + 真实 shell 环境 + 用例内显式设置，**绝不吃开发机的 `server/.env`**——否则用例红绿取决于谁的机器（CI 没有 `.env` 故长期为绿）。三层机制：① `src/env.ts` 在 `NODE_ENV=test` 时整体跳过 dotenv；② `@prisma/client` 会在 import 与每次 `new PrismaClient()` 时**无条件**读 `server/.env`（路径烤进生成产物、与 cwd 无关，Prisma 5.22 无 opt-out），故 `test/hermeticEnv.mjs`（由 test 脚本 `--import` 预载）记下进程启动时的键集合并抹除后来被注入的键，`src/db.ts` 在构造语句下一行调该钩子；③ 守卫用例 `test/envHermetic.test.ts` 读 `.env` 的键做通用断言（不 pin 变量名），所以往 `.env` 里加新键不会再弄红测试。**推论**：用例要用的变量写进 `.env.test` 或在用例里显式 set/delete，别指望 `.env`。
 - 覆盖：鉴权隔离、微信 openid 登录/复登、注册花名、军师档案、运营后台鉴权、多智能体对话、智能体 `free/unlock/metered` 权益、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发回归（智能体购买、套餐发放、短信发放/消费、报告版本、智能体发布）、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
@@ -612,7 +614,7 @@ mock 可随时预览；**正式上传/审核**还需：
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 输入审核与缓存已抽象可插拔：审核 `services/moderation.ts`（keyword 默认 / `MODERATION_PROVIDER=http` 接合规服务，当前只用于用户输入前置拦截）；缓存 `services/cache.ts`（内存默认 / 配 `REDIS_URL`+ioredis 切 Redis，客户端在 `services/redis.ts` 与限流共用）。计量台账仍为演示级，生产接真实计费台账。
 - **压测后续待办（2026-07-26，A/B 级已落，以下是等复测或需运维前置的）**——完整计划见 `docs/[OPUS5]LOADTEST_OPT_PLAN_2026-07-26.md`，复测方案见 `docs/[OPUS5]LOADTEST_PLAN_V2_2026-07-26.md`：
-  - **同机多进程（收益待实测）**：上一轮压测的 API 容器写死了 `cpus: 2.25`（`loadtest/docker-compose.yml:86`），观测到的 229.65% CPU 是**容器配额跑满**，不是 Node 单进程的架构上限。报告据此推出的"单进程到顶、应横向扩"缺少数据支撑，多进程收益要等 V2 的 T1/T2 对照实验。当前仍是单进程（`deploy/junshi-api.service` 的 `node dist/index.js`）。
+  - **同机多进程（收益待实测）**：V2 已完成 T0/T1：同机 PostgreSQL 的单 API 进程在基础假数据下 450 RPS 连续 5 分钟 0 错误，600 RPS 触发过载闸；10 倍数据下 350 RPS 已超过 1% 错误，完整证据见 `docs/[OPUS5]LOADTEST_REPORT_V2_2026-07-27.md`。这仍不是独立 RDS 或多进程结论，不能据此直接横向扩容；当前仍是单进程（`deploy/junshi-api.service` 的 `node dist/index.js`）。
   - **scheduler 选主（多进程/多实例的硬前置，仍待）**：`services/scheduler.ts` 仍是每进程 `setInterval` 跑全量 job，直接加进程会重复推送微信订阅消息、重复发一次性额度。需 Redis 选主或拆独立 cron worker + `(userId,scene,date)` 幂等唯一约束。**这条不做完，不许加第二个进程。**
     2026-07-27 补了 `SCHEDULER_ENABLED`（默认 true，行为不变）作为**过渡手段**：可把所有 API 进程置 false、只留一个专职进程为 true，从而在选主落地前也能跑多进程；压测栈已置 false（切到 `production` 后定时任务会真跑，周期性全量扫库给容量测量掺背景负载）。**它不是选主**——靠人工保证「只有一个 true」，配错就退化成原问题，因此 T2/T3 拓扑仍以真正的选主为前提。
   - **Puppeteer 出 API 进程**：`services/reportPdf.ts` 仍是进程内单浏览器单例。本轮只读压测完全没碰它，所以 450 RPS 这个数字不含报告渲染；生产上并发出报告会和只读流量抢同一个进程的资源。**报告功能对外放量前必须完成。**
