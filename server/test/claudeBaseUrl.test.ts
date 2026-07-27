@@ -30,6 +30,8 @@ describe('Claude custom gateway baseUrl', () => {
       apiKey: 'sk-test',
       embeddingModel: '',
       temperature: 0.7,
+      thinkingMode: 'disabled',
+      thinkingBudget: 1024,
       timeoutMs: 60_000,
       embeddingEnabled: false,
       embeddingBaseUrl: '',
@@ -42,5 +44,33 @@ describe('Claude custom gateway baseUrl', () => {
 
     assert.equal(claudeRawRequest(cfg, 'system', 'ping').temperature, 0.7);
     assert.equal(claudeRawRequest({ ...cfg, temperature: 1 }, 'system', 'ping').temperature, 1);
+    assert.deepEqual(claudeRawRequest(cfg, 'system', 'ping').thinking, { type: 'disabled', budget_tokens: 0 });
+  });
+
+  test('探活携带 Thinking 配置并自动锁定 temperature/max_tokens', () => {
+    const cfg = {
+      provider: 'claude',
+      label: 'test',
+      baseUrl: 'https://gateway.example.com',
+      model: 'claude-opus-4-6',
+      apiKey: 'sk-test',
+      embeddingModel: '',
+      temperature: 0.3,
+      thinkingMode: 'enabled',
+      thinkingBudget: 2048,
+      timeoutMs: 60_000,
+      embeddingEnabled: false,
+      embeddingBaseUrl: '',
+      embeddingApiKey: '',
+      rerankEnabled: false,
+      rerankModel: '',
+      rerankBaseUrl: '',
+      rerankApiKey: '',
+    } satisfies ResolvedAiConfig;
+
+    const req = claudeRawRequest(cfg, 'system', 'ping');
+    assert.equal(req.temperature, 1);
+    assert.equal(req.max_tokens, 2560);
+    assert.deepEqual(req.thinking, { type: 'enabled', budget_tokens: 2048 });
   });
 });

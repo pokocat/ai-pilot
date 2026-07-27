@@ -10,7 +10,7 @@ import type {
   Deliverable, DeliverableSection, DeliverableCover, DeliverableTone, DeliverableTableCell, ChatReply, ChatAsk,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
-  AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
+  AiProvider, AiThinkingMode, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
   AiModel, AiModelUpsert, AiModelTest,
   SkillsConfig, LlmContextTrace,
 } from '../../../shared/contracts';
@@ -18,7 +18,7 @@ export type {
   Deliverable, DeliverableSection, DeliverableCover, DeliverableTone, DeliverableTableCell, ChatReply, ChatAsk,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
-  AiProvider, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
+  AiProvider, AiThinkingMode, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
   AiModel, AiModelUpsert, AiModelTest,
   SkillsConfig,
 };

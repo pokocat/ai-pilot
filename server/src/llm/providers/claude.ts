@@ -9,8 +9,10 @@ import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/
 import { runToolLoop } from '../tools/loop.js';
 import type { AdaptiveOut } from './openai.js';
 import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js';
+import { maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
+type ClaudeRawRequest = Anthropic.MessageCreateParamsNonStreaming & { thinking?: ThinkingParam };
 
 // system 拆成「稳定前缀(打缓存断点) + 每轮变化的参考资料」两块，命中缓存按 ~1/10 计费。
 // 提示词不足最低缓存阈值(Opus 4.8 约 4096 token、Sonnet 约 2048)时 cache_control 自动忽略，无副作用。
@@ -101,7 +103,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
   const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
     model: cfg.model,
     max_tokens: DELIVERABLE_MAX_TOKENS,
-    temperature: cfg.temperature,
+    ...thinkingRequestTuning(cfg, { allowThinking: false }),
     system: systemBlocks(`${stable}\n\n${structureHint}\n务必调用 emit_deliverable 工具输出结构化成果，不要输出自由长文。`, dynamic),
     tools: [DELIVERABLE_TOOL],
     tool_choice: { type: 'tool', name: 'emit_deliverable' },
@@ -159,7 +161,7 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
   const res = await getClient(cfg.apiKey, cfg.baseUrl).messages.create({
     model: cfg.model,
     max_tokens: CHAT_MAX_TOKENS,
-    temperature: cfg.temperature,
+    ...thinkingRequestTuning(cfg),
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
     messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
   }, { timeout: cfg.timeoutMs });
@@ -183,7 +185,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   const stream = getClient(cfg.apiKey, cfg.baseUrl).messages.stream({
     model: cfg.model,
     max_tokens: CHAT_MAX_TOKENS,
-    temperature: cfg.temperature,
+    ...thinkingRequestTuning(cfg),
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
     messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
   }, { timeout: Math.max(cfg.timeoutMs, 120_000) });
@@ -205,11 +207,11 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
-export function claudeRawRequest(cfg: ResolvedAiConfig, system: string, user: string): Anthropic.MessageCreateParamsNonStreaming {
+export function claudeRawRequest(cfg: ResolvedAiConfig, system: string, user: string): ClaudeRawRequest {
   return {
     model: cfg.model,
-    max_tokens: 700,
-    temperature: cfg.temperature,
+    max_tokens: maxTokensForThinking(700, cfg),
+    ...thinkingRequestTuning(cfg),
     system,
     messages: [{ role: 'user', content: user }],
   };
@@ -254,10 +256,10 @@ export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[]): StepFn
     const toolDefs: Anthropic.Tool[] = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Tool['input_schema'] }));
     if (opts.finalTool) toolDefs.push({ name: opts.finalTool.name, description: opts.finalTool.description, input_schema: opts.finalTool.schema as Anthropic.Tool['input_schema'] });
 
-    const req: Anthropic.MessageCreateParamsNonStreaming = {
+    const req: ClaudeRawRequest = {
       model: cfg.model,
       max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : CHAT_MAX_TOKENS,
-      temperature: cfg.temperature,
+      ...thinkingRequestTuning(cfg, { allowThinking: false }),
       system: systemBlocks(system, ''),
       messages: msgs,
     };

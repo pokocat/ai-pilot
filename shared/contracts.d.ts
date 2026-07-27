@@ -692,6 +692,8 @@ export interface SummarizeResult {
 
 /* ────────────── AI 模型配置（运营后台可随时切换大模型） ────────────── */
 export type AiProvider = 'mock' | 'claude' | 'openai';
+/** Claude 思考模式：关闭 / 固定预算 / 模型自适应。 */
+export type AiThinkingMode = 'disabled' | 'enabled' | 'adaptive';
 /** 对外暴露的当前配置（不含明文 key） */
 export interface AiConfig {
   provider: AiProvider;
@@ -700,6 +702,8 @@ export interface AiConfig {
   model: string;          // 文本模型 id
   embeddingModel: string; // 嵌入模型 id（留空=本地确定性嵌入）
   temperature: number;
+  thinkingMode: AiThinkingMode;
+  thinkingBudget: number; // enabled 时生效；范围 1024..7000，且始终小于业务 max_tokens=8000
   hasKey: boolean;        // 是否已配置 key（不回传明文）
   ready: boolean;         // 当前是否就绪（provider+key 有效，否则降级 mock）
   effectiveProvider: AiProvider; // 实际生效（未就绪时为 mock）
@@ -718,6 +722,7 @@ export interface AiConfig {
 export interface AiConfigUpdate {
   provider?: AiProvider; label?: string; baseUrl?: string; model?: string;
   apiKey?: string; embeddingModel?: string; temperature?: number;
+  thinkingMode?: AiThinkingMode; thinkingBudget?: number;
   embeddingEnabled?: boolean; embeddingBaseUrl?: string; embeddingApiKey?: string;
   rerankEnabled?: boolean; rerankModel?: string; rerankBaseUrl?: string; rerankApiKey?: string;
 }
@@ -735,6 +740,8 @@ export interface AiModel {
   model: string;          // 文本模型 id
   embeddingModel: string; // 嵌入模型 id（可空）
   temperature: number;
+  thinkingMode: AiThinkingMode;
+  thinkingBudget: number;
   hasKey: boolean;        // 是否已配置 key（不回传明文）
   preset?: string | null; // 来源内置接入商 id（自定义/自主定义则空）
   active: boolean;        // 是否当前生效（= AiSetting.activeModelId 指向本行）
@@ -747,6 +754,7 @@ export interface AiModel {
 export interface AiModelUpsert {
   provider: AiProvider; label: string; baseUrl?: string; model: string;
   apiKey?: string; embeddingModel?: string; temperature?: number; preset?: string | null;
+  thinkingMode?: AiThinkingMode; thinkingBudget?: number;
   priceInput?: number; priceOutput?: number; priceCachedInput?: number;
 }
 /** 测试某个模型入参（连接探活；modelId 传入时，apiKey 留空则取该模型已存 key） */

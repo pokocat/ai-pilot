@@ -952,6 +952,8 @@ model AiSetting {
   apiKey         String  @default("") @db.Text
   embeddingModel String  @default("")
   temperature    Float   @default(0.7)
+  thinkingMode   String  @default("disabled") // disabled | enabled | adaptive
+  thinkingBudget Int     @default(1024) // enabled 时生效；1024..7000
   activeModelId  String? // 指向当前生效的 AiModel.id（后台高亮用，运行时不依赖）
 
   // 向量嵌入接入（开关 + 可独立配凭证；留空回退对话模型的 baseUrl/key）。
@@ -981,6 +983,8 @@ model AiModel {
   apiKey           String   @default("") @db.Text
   embeddingModel   String   @default("")
   temperature      Float    @default(0.7)
+  thinkingMode     String   @default("disabled") // disabled | enabled | adaptive
+  thinkingBudget   Int      @default(1024) // enabled 时生效；1024..7000
   preset           String? // 来源内置接入商 id（自定义/自主定义则空）
   // 内部成本核算单价（元 / 1M token）。0=未配置 → 回退内置价表/兜底。Token 用量看板按此估算总成本。
   priceInput       Float    @default(0)

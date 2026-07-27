@@ -259,9 +259,10 @@ Provider（`provider` 字段，由 `effectiveProvider` 决定实际生效）：
 - **mock**：模板产出，零成本可离线（`providers/mock.ts`）。
 - **claude**：Anthropic 原生 `/v1/messages` 协议，tool use 强约束（`providers/claude.ts`）；官方直连 `baseUrl` 留空，第三方网关填 Anthropic 根路径（如 qnaigc `/bypass/anthropic`）。后台必须允许该模式填写 `baseUrl`；服务端会裁掉误粘贴的尾部 `/v1` 或 `/v1/messages`，再由 SDK 统一补 `/v1/messages`，避免重复路径 404。
 - **openai**：OpenAI 通用协议，兼容 **Agnes / DeepSeek / Moonshot(Kimi) / 通义千问** 等（`providers/openai.ts`，function calling 强约束）。
-- `temperature` 保留为模型级运营参数；后台“测试连接”必须与真实调用使用同一值。qnaigc 的 `dj-claude-*` 若走 OpenAI thinking/adaptive 兼容链路，temperature 小于 1 会返回 400，须设为 `1`；不得用省略 temperature 的轻量请求把错误配置测成“连通”。
+- Claude 模型（`provider=claude` 或 OpenAI 兼容模型名含 `claude`）可在后台配置 `thinkingMode=disabled|enabled|adaptive`；`enabled` 的 `thinkingBudget` 限 1024–7000（业务普通聊天 `max_tokens=8000`，必须留出正文预算）。开启 `enabled/adaptive` 后 temperature 自动锁为 `1`；关闭时七牛等第三方网关显式发送 `thinking.type=disabled`，避免网关默认开启思考，Anthropic 官方直连则按官方协议省略 thinking。后台“测试连接”与普通聊天必须携带同一 Thinking/temperature 配置。结构化成果及多轮工具调用显式关闭 Thinking：Anthropic Thinking 只允许 `tool_choice=auto/none` 且要求跨轮保留 thinking block，与现有强制 `emit_deliverable` 收口不兼容，不能为开关破坏成果链路。
+- `temperature` 保留为模型级运营参数；Thinking 关闭时可调，开启时由上述联动固定为 `1`。不得用省略 temperature/Thinking 的轻量请求把错误配置测成“连通”。
 - `isRealKey()` 识别占位/假 key——**未配置真实 key 一律降级 mock**，不发网络请求；后台填入真实 key 即时切真实模型（无需重启/改 env）。
-- baseUrl/model/key/温度/嵌入模型 全部来自运行时配置，providers 接 `ResolvedAiConfig` 入参。
+- baseUrl/model/key/温度/Thinking/嵌入模型 全部来自运行时配置，providers 接 `ResolvedAiConfig` 入参。
 
 环境变量（见 `server/.env.example`）：
 ```
@@ -323,7 +324,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `ReportDoc`（逻辑报告，`(tenantId,slug)` 唯一，`currentVersion`）+ `ReportVersion`（不可变快照，`contentHash` 去重，`changeSummary` 变更摘要，`(reportId,version)` 唯一）。`Deliverable.reportId` 桥接。
 - `KnowledgeItem`（知识条目，可挂项目）+ `KnowledgeChunk`（切片 + `embedding`）。
 - `Message.refsJson`（本条消息引用的 项目/报告/知识/记忆）。
-- `AiSetting`（单例 id=`default`，大模型配置：provider/baseUrl/model/apiKey/embeddingModel/temperature）；pgvector 开启时 `knowledge_chunk`/`memory` 另有 `embedding_vec vector(N)` 列（由 `prisma/pgvector.sql` 建，非 Prisma 管理）。
+- `AiSetting`（单例 id=`default`，大模型配置：provider/baseUrl/model/apiKey/embeddingModel/temperature/thinkingMode/thinkingBudget）；pgvector 开启时 `knowledge_chunk`/`memory` 另有 `embedding_vec vector(N)` 列（由 `prisma/pgvector.sql` 建，非 Prisma 管理）。
 - `Casefile` + `CasefileOrder`（军令，`aligned` 对齐性标注）+ `CasefileMetric`（每日回填，`(casefileId,date)` 唯一）——执行闭环（M0 PR-EX），用户级 active 案卷唯一。
 - `NatalChart`（命盘，`userId` 唯一、重排覆盖；`engineVersion` 支持按版本批量复算；`chartJson`=ChartView 全量结构）——排盘引擎（M1 PR-1）。生辰输入与「不信命理」偏好存 `Profile.extraJson.bazi`。
 - `ReviewLog`（复盘日志，`(userId,layer,date)` 唯一）——M2 PR-8：六层复盘事件账本；day 层由执行页发起复盘时落库（快照当日军令完成/对齐/回填事实）；**对齐率=对齐军令÷总军令、连续复盘天数由服务端从行计算**（今天未复盘不打断，从昨天起算）；scheduler 挂断档提醒（`review-gap-reminder`）。注入【复盘账本】块。

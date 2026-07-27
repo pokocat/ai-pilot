@@ -26,3 +26,8 @@ export function modelGatewayField(provider: AiProvider): ModelGatewayField {
     note: '适用于 OpenAI 兼容接口，包括使用 Claude 模型但请求路径为 /v1/chat/completions 的网关。',
   };
 }
+
+/** Anthropic 原生或 OpenAI 兼容 Claude 模型都可显示 Thinking 配置。 */
+export function modelSupportsThinking(provider: AiProvider, model: string): boolean {
+  return provider === 'claude' || /claude/i.test(model);
+}

@@ -309,6 +309,8 @@ export async function adminRoutes(app: FastifyInstance) {
       apiKey: b.apiKey && b.apiKey.length ? b.apiKey : saved.apiKey,
       embeddingModel: b.embeddingModel ?? saved.embeddingModel,
       temperature: b.temperature ?? saved.temperature,
+      thinkingMode: b.thinkingMode ?? saved.thinkingMode,
+      thinkingBudget: b.thinkingBudget ?? saved.thinkingBudget,
       embeddingEnabled: b.embeddingEnabled ?? saved.embeddingEnabled,
       embeddingBaseUrl: b.embeddingBaseUrl ?? saved.embeddingBaseUrl,
       embeddingApiKey: b.embeddingApiKey && b.embeddingApiKey.length ? b.embeddingApiKey : saved.embeddingApiKey,

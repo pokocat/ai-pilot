@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-27** · **后台补齐 Claude Thinking 开关、预算与温度联动**：模型配置新增 `Thinking=关闭/手动预算/自适应`，同时兼容 Anthropic 原生与 OpenAI 兼容的 Claude 模型别名；手动预算按七牛/Anthropic 约束限制为 1024–7000，开启思考时 temperature 自动锁为 1，测试连接与普通聊天统一携带当前 Thinking 配置。关闭时七牛等第三方网关显式发送 `thinking.type=disabled`，不再受网关默认思考模式影响；Anthropic 官方直连按官方协议省略 thinking。结构化成果和多轮工具调用因 Anthropic Thinking 只允许 `tool_choice=auto/none` 且要求跨轮保留 thinking block，继续显式关闭思考以保护既有强制成果工具链。新增共享契约字段、`AiSetting/AiModel` 数据列、请求参数归一化及 server/admin 回归测试。影响面：admin 模型配置、server OpenAI/Claude provider、数据库纯加法字段；小程序无需发版。
+
 - **2026-07-27** · **修复 Claude“测试连接”未携带 temperature 导致错误配置假绿**：保留后台模型级 temperature 参数；线上历史 trace 确认 qnaigc `dj-claude-4.6-opus` 在 OpenAI thinking/adaptive 兼容链路下使用 `0.7` 会返回 400、要求固定为 `1`。OpenAI 探活原本已通过统一 `callChat` 携带 temperature，Claude 探活 `claudeRaw` 却遗漏该字段，导致测试请求与真实聊天不一致；现抽出可回归的 `claudeRawRequest` 并显式携带当前配置值，后台连接测试会按表单/已存 temperature 暴露真实错误，不再假绿。影响面：server Claude provider 与模型连接测试；不改 API/数据库结构，不改小程序。
 
 - **2026-07-27** · **修复后台“完全自主定义”误配 Claude 网关后 404**：线上确认 `provider=claude + qnaigc /v1 + dj-claude-4.6-opus` 会被 Anthropic SDK 再次补成错误的 `/v1/v1/messages` 路径，探活返回 404；同一 key 改回 `openai + /v1 + dj-claude-4.6-opus` 及 `claude + /bypass/anthropic + claude-opus-4-6` 均实测连通。运营后台现对 Claude 同样展示 baseUrl 输入，并按协议明确区分 OpenAI `/v1/chat/completions` 与 Anthropic `/v1/messages`；服务端统一裁掉 Claude baseUrl 尾部 `/v1`/`/v1/messages` 后再交给 SDK 补路径，避免历史或手工配置重复拼接。新增 admin 指引与 server URL 规范化回归测试。影响面：admin 模型配置、server Claude provider、共享契约注释；无 API 字段和数据库结构变化，小程序无需发版。
