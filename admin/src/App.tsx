@@ -48,6 +48,7 @@ import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
 import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
+import { modelGatewayField } from './modelGateway';
 import logo from './assets/logo.png';
 
 type Tab = 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
@@ -2172,7 +2173,7 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
       if (!p) { set({ preset: '' }); return; }
       set({ preset: p.id, provider: p.provider, label: form.label.trim() ? form.label : p.label, baseUrl: p.baseUrl, model: p.model });
     };
-    const showBaseUrl = form.provider === 'openai';
+    const gatewayField = modelGatewayField(form.provider);
     const showKey = form.provider !== 'mock';
 
     const testModel = async () => {
@@ -2235,8 +2236,11 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
           )}
 
           <Field label="展示名"><input className="ai-input" value={form.label} onChange={(e) => set({ label: e.target.value })} placeholder="Agnes 2.0 Flash" /></Field>
-          {showBaseUrl && (
-            <Field label="网关地址 baseUrl（带 /v1）"><input className="ai-input" value={form.baseUrl} onChange={(e) => set({ baseUrl: e.target.value })} placeholder="https://apihub.agnes-ai.com/v1" /></Field>
+          {gatewayField.visible && (
+            <>
+              <Field label={gatewayField.label}><input className="ai-input" value={form.baseUrl} onChange={(e) => set({ baseUrl: e.target.value })} placeholder={gatewayField.placeholder} /></Field>
+              {gatewayField.note && <div className="ai-note" style={{ marginTop: 0, marginBottom: 12 }}>{gatewayField.note}</div>}
+            </>
           )}
           {form.provider !== 'mock' && (
             <Field label="模型 model"><input className="ai-input" value={form.model} onChange={(e) => set({ model: e.target.value })} placeholder="agnes-2.0-flash" /></Field>

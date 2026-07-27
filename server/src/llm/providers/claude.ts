@@ -25,12 +25,17 @@ function systemBlocks(stableText: string, dynamic: string): Anthropic.TextBlockP
 
 // 按 (key + baseUrl) 缓存 client（后台切换 key/接入点后自动新建）。
 // 第三方 Anthropic 兼容网关（如七牛 qnaigc 的 /bypass/anthropic）：填了 baseUrl 时
-// ① 透传 baseURL —— SDK 会自动补 /v1/messages，故把用户可能粘贴的 /v1/messages 后缀去掉，避免重复成 404；
+// ① 透传 baseURL —— SDK 会自动补 /v1/messages，故把用户可能粘贴的 /v1 或 /v1/messages 后缀去掉，
+//    避免重复成 /v1/v1/messages 后 404；
 // ② 这类网关多用 Authorization: Bearer 鉴权，而官方 SDK 默认只发 x-api-key，故额外补一个 Bearer 头
 //    （两头并存，官方端会忽略多余的 Authorization）。baseUrl 留空＝官方 Anthropic，保持 x-api-key 原状不变。
+export function normalizeClaudeBaseUrl(baseUrl?: string): string {
+  return baseUrl?.trim().replace(/\/+$/, '').replace(/\/v1\/messages$/i, '').replace(/\/v1$/i, '') || '';
+}
+
 let cached: { key: string; client: Anthropic } | null = null;
 function getClient(apiKey: string, baseUrl?: string): Anthropic {
-  const base = baseUrl?.trim().replace(/\/+$/, '').replace(/\/v1\/messages$/, '') || '';
+  const base = normalizeClaudeBaseUrl(baseUrl);
   const cacheKey = `${apiKey}|${base}`;
   if (!cached || cached.key !== cacheKey) {
     cached = {

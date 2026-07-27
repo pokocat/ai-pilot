@@ -8,6 +8,8 @@
 
 > 格式：`YYYY-MM-DD · 改动 · 影响面`
 
+- **2026-07-27** · **修复后台“完全自主定义”误配 Claude 网关后 404**：线上确认 `provider=claude + qnaigc /v1 + dj-claude-4.6-opus` 会被 Anthropic SDK 再次补成错误的 `/v1/v1/messages` 路径，探活返回 404；同一 key 改回 `openai + /v1 + dj-claude-4.6-opus` 及 `claude + /bypass/anthropic + claude-opus-4-6` 均实测连通。运营后台现对 Claude 同样展示 baseUrl 输入，并按协议明确区分 OpenAI `/v1/chat/completions` 与 Anthropic `/v1/messages`；服务端统一裁掉 Claude baseUrl 尾部 `/v1`/`/v1/messages` 后再交给 SDK 补路径，避免历史或手工配置重复拼接。新增 admin 指引与 server URL 规范化回归测试。影响面：admin 模型配置、server Claude provider、共享契约注释；无 API 字段和数据库结构变化，小程序无需发版。
+
 - **2026-07-25** · **修复老用户重复弹首次入局与五 Tab 功能引导**：根因有三处——冷启动时本地无 `junshi.onboarded` 会在 `/me` 返回前被直接当成未建档；服务端登录与 `/me` 仅用“是否存在 Profile 行”判断，历史账号缺行即误判新人；CoachMarks 只看本机 `done` storage，老账号升级/换机后也会补弹。前端 store 新增 `onboardingKnown` 水合态，问策/军情只在服务端权威状态已知且明确未入局时跳转；入局页若迟到的 `/me` 确认老用户会自动退出，Profile 保存失败改为留页显式重试。服务端新增统一 `hasCompletedOnboarding`：Profile、2026-07-21 前存量账号、已有企业身份或真实业务资产任一命中均视为已入局，登录与 `/me` 同口径。五 Tab 引导新增 `armed` 门禁，仅真正完成首次入局的出口启用，老账号缺 storage 不再补弹。新增 3 项前端门禁测试及 2 项后端回流集成用例；app 19 项测试/tsc/正式 weapp 构建、server tsc 与全量测试全绿。影响面：app 首次入局/功能引导状态机、server 登录与 `/me` 的 onboarded 判定；无接口字段、数据库结构变化，需同时发布 server 与新小程序版本后生产生效。
 
 - **2026-07-25** · **小程序新增 mock 可见标识与发布硬守卫**：五个主 Tab 在 mock 构建中常驻红色「MOCK · 本地数据」，设置页版本改为显示 `版本 · MOCK/正式 · commit`；app 包版本从长期滞后的 `0.1.6` 对齐当前 `0.2.21`。weapp 构建新增 `junshi-build-meta.json`（mode/api/version/gitSha），正式上传统一收口到 `npm run release:weapp -- --version x.y.z --desc "说明"`：强制重建生产 server 包并核对模式、生产 API、构建/上传版本一致后才调用 DevTools CLI（`--dry-run` 可只验不传）；miniprogram-ci 与旧上传脚本同步执行元数据校验。实测 mock 构建被拒、server 构建放行、版本不一致被拒；新增 3 项上传守卫测试，既有 16 项 app 测试、tsc、mock/server 构建全绿。影响面：app 构建配置、主 Tab/设置页、上传脚本与发布文档；不改服务端/API/数据结构，本次未再次上传微信后台。

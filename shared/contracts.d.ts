@@ -696,7 +696,7 @@ export type AiProvider = 'mock' | 'claude' | 'openai';
 export interface AiConfig {
   provider: AiProvider;
   label: string;          // 展示名，如「Agnes 2.0 Flash」
-  baseUrl: string;        // openai 兼容网关地址（带 /v1）
+  baseUrl: string;        // openai 兼容地址通常带 /v1；claude 为 Anthropic 网关根路径，官方直连可空
   model: string;          // 文本模型 id
   embeddingModel: string; // 嵌入模型 id（留空=本地确定性嵌入）
   temperature: number;
@@ -731,7 +731,7 @@ export interface AiModel {
   id: string;
   provider: AiProvider;
   label: string;          // 展示名，如「Agnes 2.0 Flash」
-  baseUrl: string;        // openai 兼容网关地址（带 /v1）；claude/mock 可空
+  baseUrl: string;        // openai 兼容地址通常带 /v1；claude 为 Anthropic 网关根路径；mock 可空
   model: string;          // 文本模型 id
   embeddingModel: string; // 嵌入模型 id（可空）
   temperature: number;
