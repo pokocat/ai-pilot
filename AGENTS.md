@@ -498,6 +498,14 @@ cd admin && npm install && npm run dev   # 运营后台
 cd app   && npm test   # node --import tsx --test src/**/*.test.ts
 cd admin && npm test   # 同上
 ```
+**CI：`.github/workflows/frontend-unit.yml`**（2026-07-27 起）用 `admin` / `app` 两个 matrix job 跑 `npm ci` + `npm test`。
+此前 CI 只跑 server，这两条命令全靠人工执行，`admin` 的 `tsx` 漏装后测试基座整整停摆一段时间都没人发现。
+两个坑写在这里，别再踩：
+- **Node 必须 >= 22**：`src/**/*.test.ts` 不是被 shell 展开的（npm 用 `/bin/sh`，不支持 globstar，原样透传给 node），
+  而是 `node --test` 自己 glob——该能力 Node 22 才有。CI 固定 node 24；照抄 `server-integration.yml` 的 node 20 会直接找不到用例。
+- **`node --test` 匹配到 0 个文件时退出码仍是 0**（只打印 `tests 0`），测试基座整体失踪也会是一片绿。
+  所以 CI 那步额外断言 `pass` 计数 > 0；移动/重命名测试文件后留意这个守卫。
+
 两端 `tsconfig.json` 都 `exclude: ["src/**/*.test.ts"]`——测试文件不参与 `tsc -b`/`build:weapp` 的生产编译门
 （两端都没有 `@types/node`，`node:test`/`node:assert` 类型解析不进生产类型检查范围）；新增纯函数时尽量一并补测试，
 但不要为了凑测试覆盖率把需要真实 DOM/Taro 运行时的组件也塞进这套基座。

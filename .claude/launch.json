@@ -4,15 +4,34 @@
     {
       "name": "h5-preview",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["app/scripts/serve-h5.mjs"],
+      "runtimeArgs": [
+        "app/scripts/serve-h5.mjs"
+      ],
       "port": 5173,
       "autoPort": true
     },
     {
       "name": "roadshow-slides",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8927", "--directory", "docs/roadshow"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8927",
+        "--directory",
+        "docs/roadshow"
+      ],
       "port": 8927
+    },
+    {
+      "name": "admin-preprod",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "admin",
+        "run",
+        "dev:preprod"
+      ],
+      "port": 5174
     }
   ]
 }

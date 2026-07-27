@@ -9,7 +9,8 @@
     "lint:ui": "node ../scripts/audit-admin-ui.mjs",
     "build": "npm run lint:ui && tsc -b && vite build",
     "preview": "vite preview",
-    "test": "node --import tsx --test src/**/*.test.ts"
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "dev:preprod": "ADMIN_API_TARGET=https://wxapi.aibuzz.cn ADMIN_API_PREFIX=/api_preprod vite"
   },
   "dependencies": {
     "react": "^18.3.1",
