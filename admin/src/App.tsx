@@ -15,6 +15,7 @@ import {
   type AiConfig,
   type AiPreset,
   type AiProvider,
+  type AiThinkingMode,
   type AiModel,
   type AiRouting,
   type AiRoutingStatus,
@@ -50,6 +51,7 @@ import AgentDetailPanel from './AgentDetailPanel';
 import NumInput from './NumInput';
 import AdminLogin from './AdminLogin';
 import { getAdminToken, clearAdminToken } from './auth';
+import { modelGatewayField, modelSupportsThinking } from './modelGateway';
 import logo from './assets/logo.png';
 
 type Tab = 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent' | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say' | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
@@ -2107,12 +2109,18 @@ interface ModelForm {
   model: string;
   apiKey: string;
   temperature: number;
+  thinkingMode: AiThinkingMode;
+  thinkingBudget: number;
   priceInput: number;       // 元 / 1M 输入 token（内部成本核算）
   priceOutput: number;      // 元 / 1M 输出 token
   priceCachedInput: number; // 元 / 1M 命中缓存输入 token（0=同输入价）
   hasKey: boolean;      // 编辑时该模型是否已存 key（决定 Key 占位符）
 }
-const BLANK_MODEL: ModelForm = { mode: 'builtin', preset: '', provider: 'openai', label: '', baseUrl: '', model: '', apiKey: '', temperature: 0.7, priceInput: 0, priceOutput: 0, priceCachedInput: 0, hasKey: false };
+const BLANK_MODEL: ModelForm = {
+  mode: 'builtin', preset: '', provider: 'openai', label: '', baseUrl: '', model: '', apiKey: '',
+  temperature: 0.7, thinkingMode: 'disabled', thinkingBudget: 1024,
+  priceInput: 0, priceOutput: 0, priceCachedInput: 0, hasKey: false,
+};
 
 function ModelView({ toast }: { toast: (m: string) => void }) {
   const [cfg, setCfg] = useState<AiConfig | null>(null);
@@ -2179,6 +2187,7 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
       id: m.id, mode: m.preset ? 'builtin' : m.provider === 'openai' ? 'compatible' : 'custom',
       preset: m.preset || '', provider: m.provider, label: m.label, baseUrl: m.baseUrl, model: m.model,
       apiKey: '', temperature: m.temperature,
+      thinkingMode: m.thinkingMode, thinkingBudget: m.thinkingBudget,
       priceInput: m.priceInput, priceOutput: m.priceOutput, priceCachedInput: m.priceCachedInput, hasKey: m.hasKey,
     });
   };
@@ -2197,8 +2206,14 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
       if (!p) { set({ preset: '' }); return; }
       set({ preset: p.id, provider: p.provider, label: form.label.trim() ? form.label : p.label, baseUrl: p.baseUrl, model: p.model });
     };
-    const showBaseUrl = form.provider === 'openai';
+    const gatewayField = modelGatewayField(form.provider);
     const showKey = form.provider !== 'mock';
+    const showThinking = modelSupportsThinking(form.provider, form.model);
+    const thinkingOn = form.thinkingMode !== 'disabled';
+    const setThinkingMode = (thinkingMode: AiThinkingMode) => set({
+      thinkingMode,
+      ...(thinkingMode === 'disabled' ? {} : { temperature: 1 }),
+    });
 
     const testModel = async () => {
       setBusy(true); setTest(null);
@@ -2206,6 +2221,7 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
         const r = await api.testAiModel({
           provider: form.provider, label: form.label, baseUrl: form.baseUrl, model: form.model,
           temperature: Number(form.temperature),
+          thinkingMode: form.thinkingMode, thinkingBudget: Number(form.thinkingBudget),
           ...(form.apiKey ? { apiKey: form.apiKey } : {}), ...(form.id ? { modelId: form.id } : {}),
         });
         setTest({ ok: r.ok, msg: r.ok ? `连通 · ${r.latencyMs}ms · ${r.model}${r.sample ? ' · 「' + r.sample + '」' : ''}` : (r.error || '未连通') });
@@ -2218,6 +2234,7 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
       const body: AiModelUpsert = {
         provider: form.provider, label: form.label.trim(), baseUrl: form.baseUrl.trim(), model: form.model.trim(),
         temperature: Number(form.temperature), preset: form.preset || null,
+        thinkingMode: form.thinkingMode, thinkingBudget: Number(form.thinkingBudget),
         priceInput: Number(form.priceInput) || 0, priceOutput: Number(form.priceOutput) || 0, priceCachedInput: Number(form.priceCachedInput) || 0,
         ...(form.apiKey ? { apiKey: form.apiKey } : {}),
       };
@@ -2260,8 +2277,11 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
           )}
 
           <Field label="展示名"><input className="ai-input" value={form.label} onChange={(e) => set({ label: e.target.value })} placeholder="Agnes 2.0 Flash" /></Field>
-          {showBaseUrl && (
-            <Field label="网关地址 baseUrl（带 /v1）"><input className="ai-input" value={form.baseUrl} onChange={(e) => set({ baseUrl: e.target.value })} placeholder="https://apihub.agnes-ai.com/v1" /></Field>
+          {gatewayField.visible && (
+            <>
+              <Field label={gatewayField.label}><input className="ai-input" value={form.baseUrl} onChange={(e) => set({ baseUrl: e.target.value })} placeholder={gatewayField.placeholder} /></Field>
+              {gatewayField.note && <div className="ai-note" style={{ marginTop: 0, marginBottom: 12 }}>{gatewayField.note}</div>}
+            </>
           )}
           {form.provider !== 'mock' && (
             <Field label="模型 model"><input className="ai-input" value={form.model} onChange={(e) => set({ model: e.target.value })} placeholder="agnes-2.0-flash" /></Field>
@@ -2275,8 +2295,41 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
             <div className="ai-note" style={{ marginTop: 0, marginBottom: 12 }}>嵌入 / 重排模型不在这里配——它们是「检索增强」的全局配置(下方),独立于对话模型、不随切换变动。</div>
           )}
           <Field label={`温度 temperature · ${form.temperature}`}>
-            <input className="ai-range" type="range" min={0} max={1} step={0.1} value={form.temperature} onChange={(e) => set({ temperature: Number(e.target.value) })} />
+            <input className="ai-range" type="range" min={0} max={1} step={0.1} value={form.temperature} disabled={thinkingOn} onChange={(e) => set({ temperature: Number(e.target.value) })} />
           </Field>
+          {showThinking && (
+            <>
+              <Field label="Thinking 思考模式">
+                <div className="bill-seg">
+                  {([
+                    ['disabled', '关闭'],
+                    ['enabled', '手动预算'],
+                    ['adaptive', '自适应（4.6）'],
+                  ] as const).map(([v, l]) => (
+                    <div key={v} className={`bill-opt ${form.thinkingMode === v ? 'on' : ''}`} onClick={() => setThinkingMode(v)}>
+                      <div className="bo-t">{l}</div>
+                    </div>
+                  ))}
+                </div>
+              </Field>
+              {form.thinkingMode === 'enabled' && (
+                <Field label="思考预算 budget_tokens（1024–7000）">
+                  <input
+                    className="ai-input"
+                    type="number"
+                    min={1024}
+                    max={7000}
+                    step={256}
+                    value={form.thinkingBudget}
+                    onChange={(e) => set({ thinkingBudget: Number(e.target.value) })}
+                  />
+                </Field>
+              )}
+              <div className="ai-note">
+                开启思考后 temperature 自动固定为 1；测试连接会携带当前 Thinking 配置。结构化成果和多轮工具调用按 Anthropic 限制自动关闭思考，避免工具链报错。
+              </div>
+            </>
+          )}
 
           {form.provider !== 'mock' && (
             <>
@@ -2367,7 +2420,7 @@ function ModelView({ toast }: { toast: (m: string) => void }) {
             <span className="mi"><Icon name="insight" size={16} /></span>
             <div className="mb" style={{ cursor: 'pointer' }} onClick={() => edit(m)}>
               <div className="mt">{m.label}{m.active && <span className="tag" style={{ marginLeft: 6 }}>生效中</span>}{!m.hasKey && m.provider !== 'mock' && <span className="tag" style={{ marginLeft: 6 }}>未配 Key</span>}</div>
-              <div className="mm">{m.provider} · {m.model || '—'}{m.preset ? ` · 内置:${m.preset}` : ''}{(m.priceInput > 0 || m.priceOutput > 0) ? ` · 单价 入¥${m.priceInput}/出¥${m.priceOutput} 每1M` : ' · 单价待配'}{m.poolEnabled ? ` · 池内 权重${m.weight}${m.tier > 0 ? ` 备份T${m.tier}` : ''}${m.maxConcurrency > 0 ? ` 并发${m.maxConcurrency}` : ''}` : ''}</div>
+              <div className="mm">{m.provider} · {m.model || '—'}{modelSupportsThinking(m.provider, m.model) ? ` · Thinking:${m.thinkingMode}` : ''}{m.preset ? ` · 内置:${m.preset}` : ''}{(m.priceInput > 0 || m.priceOutput > 0) ? ` · 单价 入¥${m.priceInput}/出¥${m.priceOutput} 每1M` : ' · 单价待配'}{m.poolEnabled ? ` · 池内 权重${m.weight}${m.tier > 0 ? ` 备份T${m.tier}` : ''}${m.maxConcurrency > 0 ? ` 并发${m.maxConcurrency}` : ''}` : ''}</div>
             </div>
             {!m.active && <button className="mini-btn" onClick={() => activate(m)} disabled={busy}>切换</button>}
             <button className={`mini-btn ${m.poolEnabled ? 'primary' : ''}`} disabled={busy} title={m.poolEnabled ? '已在分流池内，点击移出' : '加入分流池，参与多路分流与故障转移'} onClick={() => togglePool(m)}>

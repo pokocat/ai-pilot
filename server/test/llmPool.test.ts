@@ -17,14 +17,16 @@ import type { ResolvedAiConfig } from '../src/services/aiConfig.js';
 
 const base: ResolvedAiConfig = {
   provider: 'openai', label: 'base', baseUrl: 'https://base/v1', model: 'base-model',
-  apiKey: 'sk-base', embeddingModel: '', temperature: 0.7, timeoutMs: 60_000,
+  apiKey: 'sk-base', embeddingModel: '', temperature: 0.7,
+  thinkingMode: 'disabled', thinkingBudget: 1024, timeoutMs: 60_000,
   embeddingEnabled: false, embeddingBaseUrl: '', embeddingApiKey: '',
   rerankEnabled: false, rerankModel: '', rerankBaseUrl: '', rerankApiKey: '',
 };
 
 const ep = (id: string, over: Partial<PoolEndpoint> = {}): PoolEndpoint => ({
   id, label: id, provider: 'openai', baseUrl: `https://${id}/v1`, apiKey: `sk-${id}`,
-  model: `m-${id}`, temperature: 0.7, weight: 1, tier: 0, maxConcurrency: 0, ...over,
+  model: `m-${id}`, temperature: 0.7, thinkingMode: 'disabled', thinkingBudget: 1024,
+  weight: 1, tier: 0, maxConcurrency: 0, ...over,
 });
 
 const POOL = [ep('a'), ep('b'), ep('c')];
@@ -57,6 +59,23 @@ describe('未启用池时零变化', () => {
     __setPoolForTest([], { mode: 'pool', sticky: true });
     const c = await resolveCandidates(base);
     assert.equal(c[0], base);
+  });
+
+  test('辅助档显式绕过主端点池，保留 AI_AUX_* 选择的模型与账号', async () => {
+    usePool();
+    const aux = { ...base, model: 'aux-model', apiKey: 'sk-aux', lane: 'aux' as const, poolBypass: true };
+    const c = await resolveCandidates(aux);
+    assert.deepEqual(c, [aux]);
+    assert.equal(c[0].endpointId, undefined);
+  });
+
+  test('只选择与当前 provider 相同协议的端点，避免跨协议误发请求', async () => {
+    usePool([
+      ep('oa'),
+      ep('cl', { provider: 'claude', baseUrl: 'https://claude.example', model: 'claude-opus-4-6' }),
+    ]);
+    const c = await resolveCandidates(base, { affinityKey: 'k' });
+    assert.deepEqual(c.map((x) => x.endpointId), ['oa']);
   });
 });
 
@@ -210,12 +229,25 @@ describe('故障转移', () => {
   });
 
   test('成功路径下 cfg 带的是选中端点的 baseUrl/key/model，不是 base 的', async () => {
-    usePool();
+    usePool([ep('thinking', { thinkingMode: 'enabled', thinkingBudget: 4096, temperature: 1 })]);
     const seen = await withEndpoint(base, async (cfg) => cfg, { affinityKey: 'k' });
     assert.ok(seen.endpointId);
     assert.equal(seen.baseUrl, `https://${seen.endpointId}/v1`);
     assert.equal(seen.apiKey, `sk-${seen.endpointId}`);
     assert.equal(seen.model, `m-${seen.endpointId}`);
+    assert.equal(seen.thinkingMode, 'enabled');
+    assert.equal(seen.thinkingBudget, 4096);
     assert.notEqual(seen.baseUrl, base.baseUrl);
+  });
+
+  test('达到尝试上限的最后一个失败端点也会进入冷却', async () => {
+    process.env.LLM_POOL_MAX_ATTEMPTS = '1';
+    usePool([ep('a'), ep('b')]);
+    const first = (await resolveCandidates(base, { affinityKey: 'last-attempt' }))[0].endpointId!;
+    await assert.rejects(withEndpoint(base, async () => {
+      throw Object.assign(new Error('upstream boom'), { statusCode: 503 });
+    }, { affinityKey: 'last-attempt' }));
+    const next = await resolveCandidates(base, { affinityKey: 'last-attempt' });
+    assert.notEqual(next[0].endpointId, first, '最后一次失败也必须共享冷却，不能继续排第一');
   });
 });

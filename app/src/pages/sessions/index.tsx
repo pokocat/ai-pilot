@@ -17,6 +17,7 @@ import { getToken } from '../../services/token';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, MORE_SPECIALIST_KEYS } from '../../data/council';
 import NextStepCard from '../../components/NextStepCard';
 import CoachMarks from '../../components/CoachMarks'; // 保持 CoachMarks 全站最后（避免 common chunk CSS 顺序告警，AGENTS.md §7.2）
+import { shouldOpenOnboarding } from '../../services/onboardingStateCore';
 import './index.scss';
 
 function relTime(iso: string): string {
@@ -59,6 +60,9 @@ export default function Sessions() {
   const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false); // 检索进行中（防抖 + 请求期间给「检索中」占位，避免空态误判）
+  const authed = s.isAuthed();
+  const onboardingKnown = s.isOnboardingKnown();
+  const onboarded = s.isOnboarded();
 
   const presentSessions = (list: SessionItem[]) => list.map((it) => (
     it.generating || !isChatPending(it.id)
@@ -116,9 +120,9 @@ export default function Sessions() {
   };
   // 已登录但未建档 → 进入全屏入局仪式。
   const gateOnboarding = () => {
-    if (s.isAuthed() && !s.isOnboarded()) goOnboarding();
+    if (shouldOpenOnboarding({ authed, onboardingKnown, onboarded })) goOnboarding();
   };
-  useEffect(() => { gateOnboarding(); }, []);
+  useEffect(() => { gateOnboarding(); }, [authed, onboardingKnown, onboarded]);
 
   // V7-14 跨域搜索：输入 300ms 防抖 → api.search（mock 亦返回本地匹配，同一路径）；空 q 隐藏结果。
   useEffect(() => {

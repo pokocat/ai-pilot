@@ -258,7 +258,21 @@ export async function adminRoutes(app: FastifyInstance) {
     const cfg = await getAiConfig(true);
     return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
   });
-  app.put<{ Body: AiConfigUpdate }>('/admin/ai-config', async (req) => {
+  app.put<{ Body: AiConfigUpdate }>('/admin/ai-config', async (req, reply) => {
+    if (req.body?.provider !== undefined) {
+      const [setting, poolRows] = await Promise.all([
+        prisma.aiSetting.findUnique({ where: { id: 'default' }, select: { routingMode: true } }),
+        prisma.aiModel.findMany({ where: { poolEnabled: true }, select: { label: true, provider: true } }),
+      ]);
+      const incompatible = poolRows.filter((m) => m.provider !== req.body.provider);
+      if (setting?.routingMode === 'pool' && (req.body.provider === 'mock' || incompatible.length > 0)) {
+        return reply.code(409).send({
+          error: `端点池已启用，修改协议前请先移出不同协议端点`
+            + (incompatible.length ? `：${incompatible.map((m) => m.label).join('、')}` : ''),
+          code: 'AI_POOL_PROVIDER_MISMATCH',
+        });
+      }
+    }
     const cfg = await setAiConfig(req.body ?? {});
     await recordAudit({ action: 'admin.ai.update', payload: { provider: cfg.provider, model: cfg.model } });
     return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
@@ -268,11 +282,36 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Body: AiModelUpsert }>('/admin/ai-models', async (req, reply) => {
     const b = req.body;
     if (!b || !b.label?.trim() || !b.provider) return reply.code(400).send({ error: '缺少展示名或协议' });
+    if (b.poolEnabled) {
+      const setting = await prisma.aiSetting.findUnique({
+        where: { id: 'default' },
+        select: { provider: true, routingMode: true },
+      });
+      if (setting?.routingMode === 'pool' && b.provider !== setting.provider) {
+        return reply.code(409).send({
+          error: `端点池已启用，只能新增与当前生效模型相同协议（${setting.provider}）的池端点`,
+          code: 'AI_POOL_PROVIDER_MISMATCH',
+        });
+      }
+    }
     const m = await addModel(b);
     await recordAudit({ action: 'admin.ai.model.add', payload: { id: m.id, provider: m.provider, model: m.model } });
     return m;
   });
   app.patch<{ Params: { id: string }; Body: AiModelUpsert }>('/admin/ai-models/:id', async (req, reply) => {
+    const [existing, setting] = await Promise.all([
+      prisma.aiModel.findUnique({ where: { id: req.params.id }, select: { provider: true, poolEnabled: true } }),
+      prisma.aiSetting.findUnique({ where: { id: 'default' }, select: { provider: true, routingMode: true } }),
+    ]);
+    if (!existing) return reply.code(404).send({ error: '模型不存在' });
+    const nextProvider = req.body?.provider ?? existing.provider;
+    const nextPoolEnabled = req.body?.poolEnabled ?? existing.poolEnabled;
+    if (setting?.routingMode === 'pool' && nextPoolEnabled && nextProvider !== setting.provider) {
+      return reply.code(409).send({
+        error: `端点池已启用，只能加入与当前生效模型相同协议（${setting.provider}）的端点`,
+        code: 'AI_POOL_PROVIDER_MISMATCH',
+      });
+    }
     const m = await updateModel(req.params.id, req.body ?? ({} as AiModelUpsert));
     if (!m) return reply.code(404).send({ error: '模型不存在' });
     await recordAudit({ action: 'admin.ai.model.update', payload: { id: m.id, provider: m.provider, model: m.model } });
@@ -286,6 +325,19 @@ export async function adminRoutes(app: FastifyInstance) {
   });
   app.post<{ Params: { id: string } }>('/admin/ai-models/:id/activate', async (req, reply) => {
     try {
+      const [target, setting, poolRows] = await Promise.all([
+        prisma.aiModel.findUnique({ where: { id: req.params.id }, select: { provider: true } }),
+        prisma.aiSetting.findUnique({ where: { id: 'default' }, select: { routingMode: true } }),
+        prisma.aiModel.findMany({ where: { poolEnabled: true }, select: { label: true, provider: true } }),
+      ]);
+      if (!target) return reply.code(404).send({ error: '模型不存在' });
+      const incompatible = poolRows.filter((m) => m.provider !== target.provider);
+      if (setting?.routingMode === 'pool' && (target.provider === 'mock' || incompatible.length > 0)) {
+        return reply.code(409).send({
+          error: `端点池已启用，切换前请先移出不同协议端点：${incompatible.map((m) => m.label).join('、')}`,
+          code: 'AI_POOL_PROVIDER_MISMATCH',
+        });
+      }
       const cfg = await activateModel(req.params.id);
       await recordAudit({ action: 'admin.ai.model.activate', payload: { id: req.params.id, provider: cfg.provider, model: cfg.model } });
       return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
@@ -309,8 +361,20 @@ export async function adminRoutes(app: FastifyInstance) {
 
     // 切到 pool 前先确认池里真有可用端点，否则等于把 AI 关了。
     if (data.routingMode === 'pool') {
-      const n = await prisma.aiModel.count({ where: { poolEnabled: true } });
-      if (n === 0) return reply.code(409).send({ error: '池内没有已启用的端点，请先在模型列表勾选「加入分流池」' });
+      const [setting, models] = await Promise.all([
+        prisma.aiSetting.findUnique({ where: { id: 'default' }, select: { provider: true } }),
+        prisma.aiModel.findMany({ where: { poolEnabled: true }, select: { label: true, provider: true } }),
+      ]);
+      if (models.length === 0) return reply.code(409).send({ error: '池内没有已启用的端点，请先在模型列表勾选「加入分流池」' });
+      const activeProvider = setting?.provider ?? '';
+      const incompatible = models.filter((m) => m.provider !== activeProvider);
+      if (activeProvider === 'mock' || incompatible.length > 0) {
+        return reply.code(409).send({
+          error: `端点池只能包含与当前生效模型相同协议（${activeProvider || '未配置'}）的端点`
+            + (incompatible.length ? `；请先移出：${incompatible.map((m) => m.label).join('、')}` : ''),
+          code: 'AI_POOL_PROVIDER_MISMATCH',
+        });
+      }
     }
     await prisma.aiSetting.update({ where: { id: 'default' }, data });
     __resetLlmPool();
@@ -335,6 +399,8 @@ export async function adminRoutes(app: FastifyInstance) {
       apiKey: b.apiKey && b.apiKey.length ? b.apiKey : saved.apiKey,
       embeddingModel: b.embeddingModel ?? saved.embeddingModel,
       temperature: b.temperature ?? saved.temperature,
+      thinkingMode: b.thinkingMode ?? saved.thinkingMode,
+      thinkingBudget: b.thinkingBudget ?? saved.thinkingBudget,
       embeddingEnabled: b.embeddingEnabled ?? saved.embeddingEnabled,
       embeddingBaseUrl: b.embeddingBaseUrl ?? saved.embeddingBaseUrl,
       embeddingApiKey: b.embeddingApiKey && b.embeddingApiKey.length ? b.embeddingApiKey : saved.embeddingApiKey,

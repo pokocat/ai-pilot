@@ -14,6 +14,7 @@ import { resolveUser } from '../services/context.js';
 import { maskAuditPhone, recordAudit, requestMeta, summarizeForAudit } from '../services/audit.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 import { applyPlanPurchase } from '../services/purchase.js';
+import { hasCompletedOnboarding } from '../services/onboarding.js';
 
 const phoneRule = z.string().regex(/^1\d{10}$/, '请输入有效的手机号');
 const loginSchema = z.object({
@@ -57,6 +58,7 @@ type AuthUser = {
   wechatOpenId?: string | null;
   wechatUnionId?: string | null;
   wechatLinkedAt?: Date | null;
+  createdAt: Date;
 };
 
 function authAttemptPayload(req: FastifyRequest, extra: Record<string, unknown>): Prisma.InputJsonValue {
@@ -148,7 +150,7 @@ async function createUserWithTenant(opts: {
 }
 
 async function onboardedOf(user: AuthUser): Promise<boolean> {
-  return !!(await prisma.profile.findFirst({ where: { tenantId: user.tenantId } }));
+  return hasCompletedOnboarding(user);
 }
 
 function loginResult(user: AuthUser, isNew: boolean, onboarded: boolean) {

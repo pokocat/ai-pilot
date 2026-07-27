@@ -7,14 +7,14 @@
 // 所有支付触点（套餐 Plans / 通用 PaySheet / 智库深度整理 / 模块开通）统一走这里，不要各写一套重试。
 import Taro from '@tarojs/taro';
 import { api, type WechatPayParams } from './api';
-import { IS_MOCK } from './config';
+import { useMockApi } from './runtimeMode';
 
 export type PayApplyState = 'applied' | 'pending' | 'failed';
 
 // —— H5 守卫（P1）：wx.requestPayment 仅小程序可用。mock 模式不拦（下单会走演示通道，调不到 requestPayment）；
 // server 模式跑在 H5 时，在「下单之前」拦下并给明确指引，避免创建一笔注定付不了的订单。
 export function payEnvSupported(): boolean {
-  return IS_MOCK || Taro.getEnv() === Taro.ENV_TYPE.WEAPP;
+  return useMockApi() || Taro.getEnv() === Taro.ENV_TYPE.WEAPP;
 }
 
 /** 支付入口统一前置检查：环境不支持时提示并返回 false（调用方直接 return）。 */

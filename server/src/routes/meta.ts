@@ -11,6 +11,7 @@ import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
+import { hasCompletedOnboarding } from '../services/onboarding.js';
 
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -63,7 +64,7 @@ export async function metaRoutes(app: FastifyInstance) {
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
     });
-    const onboarded = !!(await prisma.profile.findFirst({ where: { tenantId: user.tenantId } }));
+    const onboarded = await hasCompletedOnboarding(user);
     const understanding = await buildClientUnderstanding(user);
     const quota = await getQuotaState(user.id); // 本月 token 额度（客户端只看进度 %）
     const planStatus = await getPlanStatus(user.id); // 套餐状态：驱动前端只读模式 + 到期日/剩余天数/下次额度重置日

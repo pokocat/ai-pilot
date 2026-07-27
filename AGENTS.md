@@ -79,8 +79,10 @@ repo/
 
 实现要点：
 - `app/config/index.ts`：通过 `defineConstants` 显式注入 `process.env.TARO_APP_MODE` / `process.env.TARO_APP_API`，确保 H5/weapp 构建产物在浏览器/小程序运行时拿到构建期模式与 API 地址。
+- **构建身份与防误传**：`app/config/index.ts` 同时注入 `TARO_APP_VERSION/TARO_APP_BUILD_SHA`，并给 weapp 产物生成 `dist/junshi-build-meta.json`（mode/api/version/gitSha）。mock 包五个主 Tab 左上常驻红色「MOCK · 本地数据」，设置页「当前版本」显示 `版本 · MOCK/正式 · commit`；正式发布统一走 `npm run release:weapp -- --version x.y.z --desc "说明"`，该命令会强制重建 server 包，再对 mode/API/版本做硬校验，任一不符直接拒绝上传。`upload:weapp` 及旧 CI 脚本也执行同口径元数据校验；不得用裸 DevTools CLI 或 GUI 绕过。
 - `app/src/services/config.ts`：`APP_MODE`（读已注入的 `process.env.TARO_APP_MODE`，默认 `mock`）、`IS_MOCK`、`BASE_URL`（读已注入的 `TARO_APP_API`）。不要在浏览器运行时再用 `typeof process` 包裹，否则 H5 bundle 会退回 mock/default。
-- `app/src/services/api.ts`：每个方法按 `IS_MOCK` 分流 mock 或真实请求，**两种模式同口径**（同样的入参/返回类型）。
+- `app/src/services/api.ts`：每个方法按 `useMockApi()` 分流 mock 或真实请求（通常等价于构建期 `IS_MOCK`，附身会按下条运行时切换），**两种模式同口径**（同样的入参/返回类型）。
+- **附身登录是唯一运行时数据源例外**：`api.verifyImpersonation` 无论 `APP_MODE` 为 `mock` 还是 `server` 都必须直连真实 `/me`，绝不能回退 `mock.me()`；server 包复用当前 `BASE_URL`（生产/预发不串环境），mock 包优先使用显式 `TARO_APP_API`，未传时固定验生产 `https://wxapi.aibuzz.cn/api`。验令通过并把三段 JWT 落入 storage 后，`services/runtimeMode.ts` 会让整个会话（普通 API、文件上传、流式对话、案卷与支付环境判断）跟随该真实身份走同一服务端；退出/换回 `mock-*` token 后自动恢复本地 mock。附身 token 只由真实后端签发；仅修验令而不切后续数据源会出现“登录成功但看到 mock 账号”的假附身。
 - `app/src/services/mock.ts`：前端 mock 后端，实现 login/me/agents/survey/profile/sayings/sessions/generate/library 全量接口；mock 数据来自 `app/src/data/agents.ts`、`app/src/data/deliverables.ts`（**由后端 seed 自动生成，勿手改**）。
 - mock 模式下登录/数据按 `mock-<手机号>` token 隔离并持久化，可切换账号验证隔离。
 - weapp + server 模式下登录弹层优先提供「微信账号登录」：前端 `Taro.login` 取 code，后端 `/auth/wechat-login` 调微信 `jscode2session` 换 openid/unionid 并签发自有 token；H5/mock 不显示该入口。
@@ -184,10 +186,11 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **H5 token 双写**：新增/修改 `app.scss` 里 `page {}` 的设计 token 时，必须同步 `app.h5.scss` 的 `:root` 兼容层（H5 没有 `page` 节点），否则 H5 上新 token 全部失效（深绿 hero 曾因此透明）。
 
 ### 7.3 启动流程
-`app.tsx` 启动拉 `loadAgents()` + `loadMe()` + `loadBadges()`（未登录跳过）。首页：未登录→登录弹层；已登录未建档→本命色/30 秒建档 picker。
+`app.tsx` 启动拉 `loadAgents()` + `loadMe()` + `loadBadges()`（未登录跳过）。首页：未登录→登录弹层；已登录账号必须等 `/me.onboarded` 权威结果完成水合后再裁定是否进入全屏入局，不能把“本地无 `junshi.onboarded` / `/me` 尚未返回”当成未建档。服务端 `services/onboarding.ts` 统一判定：有 Profile、2026-07-21 入局仪式上线前创建的存量账号、或已有企业身份/会话/项目/成果/资料/案卷任一真实使用痕迹，均视为已入局；登录响应与 `/me` 必须复用该口径。只有服务端明确未完成的新账号才走「择本命色 → 填行业/阶段/痛点 → 首判」；Profile 保存失败必须停留原页显式重试，不得只写本地完成态。
 
 ### 7.4 状态与主题
 - `services/store.ts`：轻量全局 store（订阅式）。本命色 / 用户 / 智能体缓存 / tab / overlay / 登录态 / 底栏角标；`loadBadges()` 以 15 秒节流单飞聚合会话未读与复盘账本，问策显示未读数，21:00 后当日尚未复盘时军令显示红点，复盘落账后强制回刷熄灭。
+- `components/CoachMarks` 的五 Tab「功能点亮」不是“所有没看过 storage 的账号都补弹”：它只在真正完成首次入局的出口写入当前 token 的 `armed` 标记后展示，完成/跳过即清除；历史账号、换机或清 storage 后登录都不得因缺 `done` key 被重新引导。
 - `loadAgents()` 必须保留 `DEFAULT_AGENTS` 的 `billing/price/owned` 兜底字段；线上旧 `/agents` 若缺权益字段，不能覆盖掉前台解锁门禁，否则 `💎xN` 专项能力会被误判为可直接进入。
 - `data/colors.ts`：6 套本命色主题变量（`--accent` 系列）。
 
@@ -257,10 +260,12 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 Provider（`provider` 字段，由 `effectiveProvider` 决定实际生效）：
 - **mock**：模板产出，零成本可离线（`providers/mock.ts`）。
-- **claude**：Anthropic，tool use 强约束（`providers/claude.ts`）。
+- **claude**：Anthropic 原生 `/v1/messages` 协议，tool use 强约束（`providers/claude.ts`）；官方直连 `baseUrl` 留空，第三方网关填 Anthropic 根路径（如 qnaigc `/bypass/anthropic`）。后台必须允许该模式填写 `baseUrl`；服务端会裁掉误粘贴的尾部 `/v1` 或 `/v1/messages`，再由 SDK 统一补 `/v1/messages`，避免重复路径 404。
 - **openai**：OpenAI 通用协议，兼容 **Agnes / DeepSeek / Moonshot(Kimi) / 通义千问** 等（`providers/openai.ts`，function calling 强约束）。
+- Claude 模型（`provider=claude` 或 OpenAI 兼容模型名含 `claude`）可在后台配置 `thinkingMode=disabled|enabled|adaptive`；`enabled` 的 `thinkingBudget` 限 1024–7000（业务普通聊天 `max_tokens=8000`，必须留出正文预算）。开启 `enabled/adaptive` 后 temperature 自动锁为 `1`；关闭时七牛等第三方网关显式发送 `thinking.type=disabled`，避免网关默认开启思考，Anthropic 官方直连则按官方协议省略 thinking。后台“测试连接”与普通聊天必须携带同一 Thinking/temperature 配置。结构化成果及多轮工具调用显式关闭 Thinking：Anthropic Thinking 只允许 `tool_choice=auto/none` 且要求跨轮保留 thinking block，与现有强制 `emit_deliverable` 收口不兼容，不能为开关破坏成果链路。
+- `temperature` 保留为模型级运营参数；Thinking 关闭时可调，开启时由上述联动固定为 `1`。不得用省略 temperature/Thinking 的轻量请求把错误配置测成“连通”。
 - `isRealKey()` 识别占位/假 key——**未配置真实 key 一律降级 mock**，不发网络请求；后台填入真实 key 即时切真实模型（无需重启/改 env）。
-- baseUrl/model/key/温度/嵌入模型 全部来自运行时配置，providers 接 `ResolvedAiConfig` 入参。
+- baseUrl/model/key/温度/Thinking/嵌入模型 全部来自运行时配置，providers 接 `ResolvedAiConfig` 入参。
 
 环境变量（见 `server/.env.example`）：
 ```
@@ -277,9 +282,9 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 **兼容网关超时口径**：`OPENAI_TIMEOUT_MS` 控制普通对话，以及流式的首包/相邻数据块空闲上限；收到任意上游字节即续期，不能再因累计总时长截断正常流。强制结构化成果（含工具循环终结轮）取 `max(OPENAI_TIMEOUT_MS, 120000)`，避免较长报告在 60 秒整被本服务取消。失败日志只记录网关 host、模型、阶段、超时配置与耗时，不记录 prompt 或密钥；超时以 `AI_TIMEOUT` 归一为用户可读的重试提示。
 
 ### 8.3 其它服务
-- `services/llmGate.ts`（2026-07-26 压测 P0-2）：**上游模型的全局并发闸**。挂在 `llm/providers/{claude,openai,dify}.ts` 的真实外呼处（不挂 gateway 的业务分支——那里有 17 个动态 import 调用点，逐个包既漏又难维护；挂 provider 层则新增调用路径自动被覆盖）。车道键已泛化为任意字符串（`main` / `aux` / `main#<endpointId>`），接入端点池后**每个端点各占一条独立车道**，并发预算与 429 冷却都按端点算，一个端点被限流不连累其它端点。默认 8 并发 / 12 突发（`LLM_MAX_CONCURRENCY` / `LLM_BURST_CONCURRENCY`），排队超 15s 降级为 `AI_BUSY(503)`。**429 走整窗冷却**：压测实测 20 并发触发 429 后，紧接着的 12 并发复测 48/48 全挂，说明上游是滚动时间窗限额，所以收到 429 就整窗停发（优先采信 `Retry-After`，否则指数退避），冷却结束从低水位逐步爬回常态——而不是让每条请求各自重试去放大打击。显式速率窗口 `LLM_RATE_MAX_PER_MIN` 默认 0（关闭），等线上跑出真实 429 率再校准，不去猜上游配额。流式路径手动 `acquireLlmSlot`/`release`，槽位持有到整条流消费完（只包"建流"那一下等于没限）。mock provider 不过闸，测试与演示环境不受影响。`llmGateStats()` 供后续 `/metrics`。
+- `services/llmGate.ts`（2026-07-26 压测 P0-2）：**上游模型的全局并发闸**。挂在 `llm/providers/{claude,openai,dify}.ts` 的真实外呼处（不挂 gateway 的业务分支——那里有 17 个动态 import 调用点，逐个包既漏又难维护；挂 provider 层则新增调用路径自动被覆盖）。车道键已泛化为任意字符串（`main` / `aux` / `main#<endpointId>`），接入端点池后**每个端点各占一条独立车道**，并发预算与 429 冷却都按端点算，一个端点被限流不连累其它端点。默认 8 并发 / 12 突发（`LLM_MAX_CONCURRENCY` / `LLM_BURST_CONCURRENCY`），排队超 15s 降级为 `AI_BUSY(503)`。**429 走整窗冷却**：压测实测 20 并发触发 429 后，紧接着的 12 并发复测 48/48 全挂，说明上游是滚动时间窗限额，所以收到 429 就整窗停发（优先采信 `Retry-After`，否则指数退避），冷却结束从低水位逐步爬回常态——而不是让每条请求各自重试去放大打击；只有一次完整成功才清零连续 429 计数并推进爬坡，失败请求释放槽位时不得提前复位退避状态。显式速率窗口 `LLM_RATE_MAX_PER_MIN` 默认 0（关闭），等线上跑出真实 429 率再校准，不去猜上游配额。流式路径手动 `acquireLlmSlot`/`release`，槽位持有到整条流消费完（只包"建流"那一下等于没限）。mock provider 不过闸，测试与演示环境不受影响。`llmGateStats()` 供后续 `/metrics`。
 - **辅助档（aux tier，2026-07-26）**：`services/aiConfig.resolveAuxConfig()` + `llmGate` 的 main/aux **双车道**。核对发现一条用户消息实际触发 3–4 次模型调用——主生成 + `extractInsights`（记忆学习）+ `extractProphecies`（预言抽取）+ 首条消息的 `summarizeSessionTitle`——原来全走同一个 `getAiConfig()`，**上游 8 个槽位里 2–3 个被后台任务占着**。配 `AI_AUX_MODEL` 即把抽取切小模型；再配 `AI_AUX_BASE_URL` / `AI_AUX_API_KEY`（独立账号）则切到独立并发车道（默认 4 并发、5s 排队超时），主配额全留给用户可见生成。只换模型名不换账号时车道仍是 main——同账号配额本就共享，分两个计数器等于把限额悄悄放大一倍。**收口点是 `gateway.ts` 的 `rawText()`**：所有抽取（`extractInsights`/`extractProphecies`/`summarizeSessionTitle`/`extractGraphTriples`/`summarizePoints`/`llmJson`/`completeJson`/`structured*`）都经它落地，新增抽取路径自动继承；调用方显式指定 `model` 时（评测评委要独立模型避免自评）不被覆盖。**对话与成果生成永远走主配置，提示词不受影响**；`AI_AUX_MODEL` 留空则行为与改动前完全一致。
-- `services/llmPool.ts`（2026-07-27）：**上游端点池——多路分流 + 故障转移，分布式安全**。此前后台只能让一个 `AiModel` 生效（`AiSetting.activeModelId`），该端点一被上游限流全站 AI 就停摆。现在 `AiSetting.routingMode='pool'` 时，所有 `poolEnabled=true` 的 `AiModel` 组成池。**路由用加权 Rendezvous 哈希（HRW）+ 会话粘性，不是轮询**——理由是生产实测提示词缓存已只剩 12% 命中而系统提示词占单次输入约 95%，轮询会把同一会话打散到不同端点、把缓存彻底归零（上游缓存按账号/端点隔离）。HRW 的四个性质正好对上：① 无状态无需协调，各实例用同样输入独立算出同样结果 → 多实例天然一致；② key 取 sessionId → 同一会话恒定同端点，缓存保得住；③ 成员变化只重映射 1/N（端点冷却下线只迁走它承载的那部分）；④ 支持权重。**分布式健康态**：429 冷却写 Redis（`llm:pool:cool:<id>`，TTL=冷却时长）跨实例可见——否则实例 A 撞 429 标冷却、实例 B 毫不知情继续打，上游滚动窗口惩罚会被持续续期；无 Redis 时退化进程内（单实例正确，多实例恢复慢但不崩）。**tier**：0=同质对等正常分流，1+=降级备份仅当低 tier 全冷却才启用（跨模型降级会改变回答质量，故默认全 tier 0，需显式配）。**转移判定**：429/5xx/超时转移并冷却；4xx、`AI_BUSY`、审核拦截、输出截断不转移（换端点也一样）。上限 `LLM_POOL_MAX_ATTEMPTS`（默认 3）。**明确不做**：跨实例精确并发计数——`maxConcurrency` 是**每实例**上限，全局精确信号量要 Redis INCR/DECR + 泄漏回收，复杂度和失败模式都高，而端点真实约束是上游配额、本来就只能撞了才知道，已由 429 整窗冷却兜住；多实例按实例数分摊配置即可。`routingMode` 默认 `single`，**不配就完全是旧行为**。**覆盖面**：openai 兼容协议的非流式 + claude 协议的全部 5 处调用点（含流式）已接入转移；claude 流式只在**尚未吐出任何 delta 前**才允许转移（已 yield 过内容再换端点会让前后文对不上）；openai 兼容的流式转移尚未做。注意 `claude.ts` 的 `getClient` 已从单槽缓存改为 Map——接池后相邻请求在不同 `(apiKey, baseUrl)` 间交替，单槽会每次重建 client 丢掉连接池。运营后台配置在「模型」页的「端点池」分区（入池开关、权重/备份层/每实例并发、实时冷却态）。
+- `services/llmPool.ts`（2026-07-27）：**上游端点池——多路分流 + 故障转移，分布式安全**。此前后台只能让一个 `AiModel` 生效（`AiSetting.activeModelId`），该端点一被上游限流全站 AI 就停摆。现在 `AiSetting.routingMode='pool'` 时，所有 `poolEnabled=true` 的 `AiModel` 组成池。**路由用加权 Rendezvous 哈希（HRW）+ 会话粘性，不是轮询**——理由是生产实测提示词缓存已只剩 12% 命中而系统提示词占单次输入约 95%，轮询会把同一会话打散到不同端点、把缓存彻底归零（上游缓存按账号/端点隔离）。HRW 的四个性质正好对上：① 无状态无需协调，各实例用同样输入独立算出同样结果 → 多实例天然一致；② key 取 sessionId → 同一会话恒定同端点，缓存保得住；③ 成员变化只重映射 1/N（端点冷却下线只迁走它承载的那部分）；④ 支持权重。**协议与配置边界**：池只会选与当前激活模型 `effectiveProvider` 一致的端点，后台保存路由、修改入池模型或切换激活模型时也会拒绝 Claude/OpenAI 混池；这是协议硬约束，不是模型名偏好。`AI_AUX_*` 显式辅助档始终 `poolBypass`，防止抽取任务被主池改回主模型/账号。池内每个 Claude 端点保留自己的 `thinkingMode/thinkingBudget/temperature`，连接测试与真实请求同口径。**分布式健康态**：429 冷却写 Redis（`llm:pool:cool:<id>`，TTL=冷却时长）跨实例可见——否则实例 A 撞 429 标冷却、实例 B 毫不知情继续打，上游滚动窗口惩罚会被持续续期；无 Redis 时退化进程内（单实例正确，多实例恢复慢但不崩）。达到尝试上限的最后一个/唯一一个端点失败也必须写入共享冷却，不能因已无下一跳就遗漏健康状态。**tier**：0=同质对等正常分流，1+=降级备份仅当低 tier 全冷却才启用（跨模型降级会改变回答质量，故默认全 tier 0，需显式配）。**转移判定**：429/5xx/超时转移并冷却；4xx、`AI_BUSY`、审核拦截、输出截断不转移（换端点也一样）。上限 `LLM_POOL_MAX_ATTEMPTS`（默认 3）。**明确不做**：跨实例精确并发计数——`maxConcurrency` 是**每实例**上限，全局精确信号量要 Redis INCR/DECR + 泄漏回收，复杂度和失败模式都高，而端点真实约束是上游配额、本来就只能撞了才知道，已由 429 整窗冷却兜住；多实例按实例数分摊配置即可。`routingMode` 默认 `single`，**不配就完全是旧行为**。**覆盖面**：openai 兼容协议的非流式 + claude 协议的全部 5 处调用点（含流式）已接入转移；claude 流式只在**尚未吐出任何 delta 前**才允许转移（已 yield 过内容再换端点会让前后文对不上）；openai 兼容的流式转移尚未做。注意 `claude.ts` 的 `getClient` 已从单槽缓存改为 Map——接池后相邻请求在不同 `(apiKey, baseUrl)` 间交替，单槽会每次重建 client 丢掉连接池。运营后台配置在「模型」页的「端点池」分区（入池开关、权重/备份层/每实例并发、实时冷却态）。
 - `services/redis.ts`：共享 Redis 客户端（可选依赖，懒加载）。从 `cache.ts` 抽出独立成模块，因为缓存、全站限流的跨实例 store、后续的 LLM 队列/调度选主需要**同一个连接**。未配 `REDIS_URL` 或 ioredis 不可用 → 返回 null，各调用方回退进程内实现，绝不因此让进程起不来。
 - `services/context.ts`：`resolveUser`（严格鉴权）、`buildGenContext`（注入 档案/基准/记忆/本命色 + **军师档案 + 项目背景 + 显式引用 + 知识库混合召回 + 天势档案**）。
 - `services/cardHtml.ts`（M4 PR-15 第一批）：B 级卡片渲染——每日战报（军令/对齐率/回填/段位/连续天数）、天时日历（命盘 12 月攻守+拐点+谶语）、天命速写（送你一卦：命格/大势/建议由命盘确定性生成；朋友生辰 `computeChart` 现算**不落库**）。铁律：卡上每个数字都来自服务端账本，读不到整块不显示；品牌一律军师参谋部（V6.0 原稿外置 CSS 未保留，样式按小程序设计体系重制）；卡片发布走自有域名 `{PUBLIC_BASE_URL}/api/r/:id`。`services/reportHtml.ts` 的普通报告模板已改为 V6.0 天势卡片风（暖纸底、深绿封面、白色章节卡、金印落款、军师参谋部品牌）；报告 `htmlUrl` 也固定返回自有域名 `/api/r/:id` 供小程序 web-view 打开，OSS 仅作为可选 `cdnUrl` 镜像，旧 OSS `htmlUrl` 会在再次请求时迁回自有域名；不要回退旧米色卷轴页脚或 OSS 直开入口。叙事线/谶语存 `StrategicProfile.extraJson`（PUT /profile/strategic 接受 narrative/verse，注入块带「跨月复述一致/全年沿用」口径）。剩余 9 卡 + A 级模板见 §13。
@@ -312,6 +317,8 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 
 页面/接口：概览看板、**注册用户管理**（小程序注册用户、微信绑定、租户/套餐、最后会话、会话/成果数、算力余额，并可点进用户详情为其开通/取消 `unlock` 智能体）、**算力消耗**（按用户汇总赠送/消耗/余额、30 天活跃、成果数）、**审计日志**（最近 100 条，时间精确到秒；默认过滤 `admin.*` 后台自身行为，以单行列表展示用户 API、登录尝试、业务动作、用户/租户、摘要、方法/路径/状态码、IP/UA；窄屏切换为紧凑事件流，避免手机横向滚动；每条可点击打开详情面板，查看完整账号上下文、请求状态、IP/UA 与原始 payload；需要后台日志时传 `includeAdmin=true`）、每日献策库（增删改启停）、智能体/功能配置（新增智能体、基础信息、`free/unlock/metered` 定价、System 提示词 + Agent Memory 策略 + **上架/下架**，前台 `/agents` 默认只展示已上架功能）、**技能库**（新增/编辑自定义 HTTP 工具，复用后台统一的 `add-btn full`、`crd new-agent`、`ai-field`、`ai-btn`、`mini-btn` 组件语汇，避免局部 inline button 样式）、**模型配置（默认 Agnes，可一键切 DeepSeek/Qwen…，含测试连接，即时生效）**、建档问卷、套餐编辑。所有 `/api/admin/*` 路由由 `services/adminAuth.ts` 保护：运营端登录页填写后端 `ADMIN_TOKEN`，请求以 `x-admin-token` 发送；后端也支持 `role=admin` 用户。新增/扩展 admin API：`GET /admin/users/:id`、`POST /admin/users/:id/agents`、`DELETE /admin/users/:id/agents/:key`、`POST /admin/agents`、`PATCH /admin/plans/:id`，并保留 `GET /admin/users`、`GET /admin/usage`、`GET /admin/audit-logs`。入口 `admin/src/App.tsx`（`UsersView/UserDetailPanel/UsageView/AuditView/ModelView/PlansView`）+ `AgentDetailPanel.tsx`，API `admin/src/api.ts`（类型来自 SSOT）。默认 System Prompt 位于 `server/src/data/agents.ts`，商业咨询类按麦肯锡式问题解决法（MECE、假设驱动、80/20、金字塔原则、So what/Now what、30 天行动清单）设置；上线同步用 `cd server && npm run admin:sync-content`，同步智能体基础信息、权益计费、提示词与记忆配置并追加缺失每日献策，不删除业务数据、不覆盖启停状态。Agent Memory 开关保存到 `Agent.memoryConfig` 并由后端真实读取：`longTerm=false` 时不召回/不写入长期记忆，`autoLearn=false` 或去掉 `conversation` 来源时不从对话学习，`intensity/retentionDays` 影响写入权重和过期时间，`deliverable_feedback` 控制成果反馈回流。LLM 调用详情的 `LlmTrace.contextJson` 持久化本轮回忆意图、近期/较早消息数量以及召回记忆的 id/score/source/时间（不存记忆正文），运营后台「调用诊断」可直接查看；部署这次结构加法时需先执行既有 `prisma db push` 流程。开发期 Vite 代理 `/api → localhost:4000`。本地后台使用全屏无边框容器，`admin/src/styles/admin.css` 需要保持视口安全收缩、横向隐藏和长文本断行，底部导航为横向滚动，避免新增模块或模型 URL/API Key/状态文案撑出屏幕。
 
+模型“完全自主定义”按协议显示不同 baseUrl 指引：OpenAI 兼容地址通常带 `/v1`；Claude 官方直连可留空，第三方填写 Anthropic 网关根路径；只提供 `/v1/chat/completions` 的 Claude 模型网关仍应选择 `openai` provider。
+
 ---
 
 ## 10. 数据库（Prisma · `server/prisma/schema.prisma`）
@@ -324,7 +331,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `ReportDoc`（逻辑报告，`(tenantId,slug)` 唯一，`currentVersion`）+ `ReportVersion`（不可变快照，`contentHash` 去重，`changeSummary` 变更摘要，`(reportId,version)` 唯一）。`Deliverable.reportId` 桥接。
 - `KnowledgeItem`（知识条目，可挂项目）+ `KnowledgeChunk`（切片 + `embedding`）。
 - `Message.refsJson`（本条消息引用的 项目/报告/知识/记忆）。
-- `AiSetting`（单例 id=`default`，大模型配置：provider/baseUrl/model/apiKey/embeddingModel/temperature）；pgvector 开启时 `knowledge_chunk`/`memory` 另有 `embedding_vec vector(N)` 列（由 `prisma/pgvector.sql` 建，非 Prisma 管理）。
+- `AiSetting`（单例 id=`default`，大模型配置：provider/baseUrl/model/apiKey/embeddingModel/temperature/thinkingMode/thinkingBudget）；pgvector 开启时 `knowledge_chunk`/`memory` 另有 `embedding_vec vector(N)` 列（由 `prisma/pgvector.sql` 建，非 Prisma 管理）。
 - `Casefile` + `CasefileOrder`（军令，`aligned` 对齐性标注）+ `CasefileMetric`（每日回填，`(casefileId,date)` 唯一）——执行闭环（M0 PR-EX），用户级 active 案卷唯一。
 - `NatalChart`（命盘，`userId` 唯一、重排覆盖；`engineVersion` 支持按版本批量复算；`chartJson`=ChartView 全量结构）——排盘引擎（M1 PR-1）。生辰输入与「不信命理」偏好存 `Profile.extraJson.bazi`。
 - `ReviewLog`（复盘日志，`(userId,layer,date)` 唯一）——M2 PR-8：六层复盘事件账本；day 层由执行页发起复盘时落库（快照当日军令完成/对齐/回填事实）；**对齐率=对齐军令÷总军令、连续复盘天数由服务端从行计算**（今天未复盘不打断，从昨天起算）；scheduler 挂断档提醒（`review-gap-reminder`）。注入【复盘账本】块。
@@ -422,19 +429,19 @@ TARO_APP_MODE=server TARO_APP_API="http://$LAN_IP:4000/api" npm run dev:weapp
 
 **小程序发布上线（开发版 → 体验版 → 发布）**
 
-小程序是独立于服务端的发布渠道，**不在 `deploy-prod.sh` 内**；后端用 `deploy-prod.sh` 单独上线，且必须向后兼容线上旧版小程序（新增字段/可选参数/新端点，不改既有响应契约）。发布前务必 **server 模式构建**，否则连的是 mock 而非线上 API：
+小程序是独立于服务端的发布渠道，**不在 `deploy-prod.sh` 内**；后端用 `deploy-prod.sh` 单独上线，且必须向后兼容线上旧版小程序（新增字段/可选参数/新端点，不改既有响应契约）。发布前统一走**一体化正式发布命令**，它会强制 server 模式重建并校验构建身份，避免复用旧 dist 或误传 mock：
 ```bash
 cd /Users/donis/dev/ai-pilot/app
-npm run build:weapp:server   # = TARO_APP_MODE=server TARO_APP_API=https://wxapi.aibuzz.cn/api npm run build:weapp
+npm run release:weapp -- --version <版本号> --desc "<本次变更说明>"
 ```
-产物在 `app/dist/`（`miniprogramRoot=dist/`）。**上传这一步由 agent 自己执行，不要甩给用户**——历史反复踩坑：曾误以为上传只能让用户在 GUI 里点，其实开发者工具自带 CLI 可直接上传（用已登录会话、无需密钥）。默认用①：
-1. **微信开发者工具 CLI（首选，agent 直接跑，无需上传密钥）**：复用已登录的 DevTools 会话。前置：DevTools 已打开且开启「设置 → 安全 → 服务端口」。`--project` 指向 `app/`（含 `project.config.json`，**不是** `dist/`）：
+该命令依次执行 `build:weapp:server` → 校验 `dist/junshi-build-meta.json` 的 `mode=server`、生产 API 与上传版本完全一致 → 检查 DevTools 登录态 → CLI 上传；加 `--dry-run` 可只构建校验、不触达微信。产物在 `app/dist/`（`miniprogramRoot=dist/`）。**上传这一步由 agent 自己执行，不要甩给用户**。DevTools 需已打开且开启「设置 → 安全 → 服务端口」。底层等效命令如下，仅用于排障，正常发布不得直接调用：
+1. **微信开发者工具 CLI（底层首选，无需上传密钥）**：复用已登录的 DevTools 会话，`--project` 指向 `app/`（含 `project.config.json`，**不是** `dist/`）：
    ```bash
    /Applications/wechatwebdevtools.app/Contents/MacOS/cli upload \
      --project /Users/donis/dev/ai-pilot/app \
      -v <版本号> -d "<本次变更说明>"
    ```
-   退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。**版本号每次递增，最近一次上传 `0.2.8`**（2026-06-21）；上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 等效（仅当 CLI 不可用时回退）：DevTools 只导入 `app/` → 右上角「上传」→ 填版本号 + 备注。
+   退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。**版本号每次递增，最近一次上传 `0.2.21`**（2026-07-25）；上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 仅作为 CLI 不可用时的最后回退：上传前必须人工打开 `dist/junshi-build-meta.json` 核对 `mode=server`、API 与版本，且预览中不得出现红色 MOCK 标识。
 2. **miniprogram-ci（CI/headless 备选）**：需在 mp 后台 *开发管理 → 开发设置 → 小程序代码上传* 下载上传密钥 `private.<appid>.key` 并把**本机公网 IP**加进白名单。该密钥本地通常没有，**除非用户给出密钥路径，否则一律用①**：
    ```bash
    cd app && WEAPP_UPLOAD_KEY=/绝对路径/private.<appid>.key \
@@ -537,16 +544,12 @@ cd admin && npm test   # 同上
 
 ### 本机上传到小程序平台（miniprogram-ci）
 > 云端沙箱网络白名单未放行 `servicewechat.com`，需在**本机**执行。
-> 每次上传前后必须同步 `docs/WEAPP_RELEASES.md`，上传命令里的版本号/描述要与该文件记录一致；不要把每次上传明细塞进 AGENTS.md。
+> 每次上传前后必须同步 `docs/WEAPP_RELEASES.md`，上传命令里的版本号/描述要与该文件记录一致；不要把每次上传明细塞进 AGENTS.md。正式上传只走 `release:weapp`，不要裸调 DevTools CLI/GUI。
 ```bash
-cd app && npm run build:weapp:server   # 产物在 app/dist（server 版，连 https://wxapi.aibuzz.cn/api）
-npx miniprogram-ci upload \
-  --pp ./ \                              # 项目路径=app（其 project.config.json 的 miniprogramRoot=dist/）
-  --pkp /path/to/private.<appid>.key \
-  --appid wx810ebe6dfef8e75f \
-  --uv 0.1.0 -r 1 --ud "junshi server build"
+cd app
+npm run release:weapp -- --version 0.2.22 --desc "本次变更说明"
 ```
-注意：上传脚本会拒绝未注入 `https://wxapi.aibuzz.cn/api` 或仍包含 `localhost:4000/api` 的产物；上传密钥若在小程序后台开启了 **IP 白名单**，须把本机出口 IP 加入；连真实后端版本另需把 API 域名加入 request 合法域名（见 §12）。
+注意：发布脚本会强制重建并校验 `junshi-build-meta.json`，拒绝 mock、非生产 API、旧产物及构建/上传版本号不一致；备用 `upload:weapp` 使用上传密钥时仍受 **IP 白名单**约束。连真实后端版本另需把 API 域名加入 request 合法域名（见 §12）。
 
 ### 微信账号登录联调
 ```bash
@@ -591,6 +594,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
+- **OpenAI 兼容协议端点池后续（2026-07-27，当前生产未使用，按产品决定延后）**：`callChatStream` 尚未接端点池的建流前故障转移；非流式 `callChat` 目前在一次 `withEndpoint` 尝试链中复用同一个 `AbortSignal`，首端点超时后信号已终止，不能安全重试下一端点。生产当前走 Claude/七牛链路，不阻塞本次上线；启用 OpenAI 兼容网关前应为每次端点尝试创建独立 deadline，并补齐流式首 delta 前转移测试。
 - **产品观察（2026-07-20 例行 QA，未处理，待产品确认）**：`576be96` 把成果卡操作行从 `onSave/onExport/onShare/onPdf` 收敛为单一 `onShareMenu` 后，`app/src/packages/main/chat/index.tsx` 里原本跳转小程序内 `/packages/work/webview` 查看自有域名报告网页版的 `shareReport()` 函数已不再被任何地方调用（`grep` 确认），但函数本体和 webview 页面本身都还在，commit message 写「网页版 shareReport 函数与 webview 页保留不动」，读起来像是想保留这个入口，但收敛后的分享选单目前只剩图片/PDF/复制全文，没有一个选项能触达它。不确定是有意去掉「查看网页版」这个入口还是遗漏，未改动代码，留给产品侧确认后再决定是重新接回选单还是连同 webview 页一起清理。
 - **产品决策记录（2026-07-11）**：`docs/[FABLE5]DECISIONS_2026-07-11.md` 已拍板 D-1 多入口+来源归因 / D-2 军师收编 4+1 / D-3 七参数（记忆用户级共享、复盘日周月、健康度 LLM 估测水位约束框架、报告分享转图片、保底额度可配置默认 6、生态纯跳转）。与旧规格冲突以决策文档为准；全局复审待办清单见 `docs/[FABLE5]REVIEW_2026-07-11.md`（**批次一 P0 五项 + 批次二 P1 七项 + D-8/D-10/D-11 + WO-09 端到端接线均已完成**；**批次三亦已完成**（D-1 归因/D-3-3 健康度/D-3-4 转图片/D-3-7 生态跳转/WO-08~14 全部管道/文案 sweep/主包瘦身，计划见 `docs/[FABLE5]BATCH3_PLAN.md`），仅剩该计划「明确不做」清单挂 backlog）。遗留注意：① `/casefile/review` 直连 API 仍接受 quarter/year/team 层（前端无入口暂不 clamp）；② **D-3-7 运维前提：EcoTool 目标小程序（数字人等）须与本小程序同一微信开放平台主体关联，`navigateToMiniProgram` 才可用**，appId 由运营在 admin「生态工具」录入；③ 批次三 schema 新增 ActivationEvent/EcoTool/Prescription.followupAt/PaymentOrder.attrSource（纯加法），prod 部署时 db push 带上并可跑 `prisma/seedBenchmarks.ts` 种子；④ 报告分享图/周报卡等 canvas 出图需真机抽查；⑤ estimateHealth 的 product/brand 维暂无服务端信号源常态 na。注意存量已排盘用户的 `NatalChart` 数据在命理关闭后仅停止读取展示、未物理清除，如合规要求下架历史命盘数据需另开任务。
 - **小程序方向调整（2026-07-05）：从「减法」改为「精细打磨现有功能」**。原 `docs/[FABLE5]*` 三份文档是「先减法后加法」方案；产品侧判断"功能都是客户想要的"，**不再做减法**，改为按文档把各功能逻辑捋顺、补全、打磨。已执行的处置：
@@ -603,7 +607,7 @@ mock 可随时预览；**正式上传/审核**还需：
   - **其余打磨待办**：prompt 去机制化（A-1/P-12，动生产 V6.0 prompt）、UserJourney 诊断轮次持久化（F-5）、账本 App 页+verify 入口+最小样本（F-8/P-2）、复盘周期聚合+grace 全层保底（A-4/A-8）、报告脱敏分享等——见 POLISH_PLAN §3 批次。
   - **WO-03 §3（服务端，仍待）**：`server/src/services/context.ts`【段位·里程碑】块 `streak<3` 时去具体百分比字段（只留天数），配 server 集成测试。
 - **存量「米诺 / Mino」品牌残留待清扫**（规则见 §0 #10；新增内容一律禁用，存量后扫）：① `server/src/data/prompts/strat.v6.baseline.md`——2026-06-20 从 prod 拉的原始基线快照，正文含米诺品牌（该目录 README 记录了去品牌映射，运行时不加载、tsc 不打包，风险=仓库存档层面）；② `app/src/data/operatingSystem.ts` SKILL_MARKET 里 `id: 'mino'`（三势初判的内部 id，用户不可见，改名需同步排查引用）；③ `server/src/data/agents.ts` 顶部注释书名号里的《米诺战略参谋部…》字样；④ 两个 prompt 目录并存待合并（运行时加载 `server/prompts/`，基线存档在 `server/src/data/prompts/`）。清扫时机：M1 收尾或专项小 PR。
-- **miniprogram-ci 上传**：云端执行环境的网络白名单未放行 `servicewechat.com`（报 `Host not in allowlist`），无法在本沙箱内直传。需从**本机**执行上传，或放开环境网络策略后重试；另注意上传密钥若开了 IP 白名单，需把执行机出口 IP 加入小程序后台。本机命令见 §11。
+- **小程序上传鉴权（2026-07-25 现状）**：本机 DevTools CLI 服务端口已开启且扫码登录恢复，`0.2.21` 已通过 DevTools CLI 上传成功；本机备用密钥 `/Users/donis/dev/aliyun/private.wx810ebe6dfef8e75f.key` 可被 `miniprogram-ci` 正常读取、编译和打包，但当前出口 IP `120.204.218.229` 未加入小程序后台上传密钥白名单，CI 直传仍会返回 `-10008 invalid ip`。后续优先复用 DevTools CLI 登录态，或在 mp 后台把当前出口 IP 加白后走 `npm run upload:weapp`；云端执行环境另有 `servicewechat.com Host not in allowlist` 的历史限制。
 - 自有登录态支持 JWT（`services/userToken.ts`，HS256）：配 `APP_JWT_SECRET` 后登录签发 JWT、`resolveUser`/审计/admin role/entitlement 统一 `verifyUserToken` 校验；未配则回退历史 `token=userId`，`APP_JWT_REQUIRED=true` 可强制只认 JWT。短信强制校验开关（`SMS_REQUIRE_CODE`）已就绪，生产置 true 即可。
 - `server/.env.example` 的 `OPENAI_API_KEY` 是 fake 占位，自动降级 mock；填真实 key 才走真模型。
 - 输入审核与缓存已抽象可插拔：审核 `services/moderation.ts`（keyword 默认 / `MODERATION_PROVIDER=http` 接合规服务，当前只用于用户输入前置拦截）；缓存 `services/cache.ts`（内存默认 / 配 `REDIS_URL`+ioredis 切 Redis，客户端在 `services/redis.ts` 与限流共用）。计量台账仍为演示级，生产接真实计费台账。

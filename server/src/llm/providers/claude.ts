@@ -14,8 +14,10 @@ import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js'
 import { withLlmSlot, acquireLlmSlot, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable } from '../../services/llmPool.js';
+import { maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
+type ClaudeRawRequest = Anthropic.MessageCreateParamsNonStreaming & { thinking?: ThinkingParam };
 
 // system 拆成「稳定前缀(打缓存断点) + 每轮变化的参考资料」两块，命中缓存按 ~1/10 计费。
 // 提示词不足最低缓存阈值(Opus 4.8 约 4096 token、Sonnet 约 2048)时 cache_control 自动忽略，无副作用。
@@ -30,15 +32,20 @@ function systemBlocks(stableText: string, dynamic: string): Anthropic.TextBlockP
 
 // 按 (key + baseUrl) 缓存 client（后台切换 key/接入点后自动新建）。
 // 第三方 Anthropic 兼容网关（如七牛 qnaigc 的 /bypass/anthropic）：填了 baseUrl 时
-// ① 透传 baseURL —— SDK 会自动补 /v1/messages，故把用户可能粘贴的 /v1/messages 后缀去掉，避免重复成 404；
+// ① 透传 baseURL —— SDK 会自动补 /v1/messages，故把用户可能粘贴的 /v1 或 /v1/messages 后缀去掉，
+//    避免重复成 /v1/v1/messages 后 404；
 // ② 这类网关多用 Authorization: Bearer 鉴权，而官方 SDK 默认只发 x-api-key，故额外补一个 Bearer 头
 //    （两头并存，官方端会忽略多余的 Authorization）。baseUrl 留空＝官方 Anthropic，保持 x-api-key 原状不变。
+export function normalizeClaudeBaseUrl(baseUrl?: string): string {
+  return baseUrl?.trim().replace(/\/+$/, '').replace(/\/v1\/messages$/i, '').replace(/\/v1$/i, '') || '';
+}
+
 // 按 (apiKey, baseUrl) 缓存多个 client。**必须是 Map 不能是单槽**：接了端点池之后，
 // 相邻请求会在不同 (key, baseUrl) 之间交替，单槽缓存等于每次都重建 client、丢掉底层连接池。
 // 上限 16，超了清空重来（端点数量级远小于此，纯属防御）。
 const clients = new Map<string, Anthropic>();
 function getClient(apiKey: string, baseUrl?: string): Anthropic {
-  const base = baseUrl?.trim().replace(/\/+$/, '').replace(/\/v1\/messages$/, '') || '';
+  const base = normalizeClaudeBaseUrl(baseUrl);
   const cacheKey = `${apiKey}|${base}`;
   let c = clients.get(cacheKey);
   if (!c) {
@@ -112,7 +119,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
   const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create({
     model: ep.model,
     max_tokens: DELIVERABLE_MAX_TOKENS,
-    temperature: ep.temperature,
+    ...thinkingRequestTuning(ep, { allowThinking: false }),
     system: systemBlocks(`${stable}\n\n${structureHint}\n务必调用 emit_deliverable 工具输出结构化成果，不要输出自由长文。`, dynamic),
     tools: [DELIVERABLE_TOOL],
     tool_choice: { type: 'tool', name: 'emit_deliverable' },
@@ -170,7 +177,7 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
   const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create({
     model: ep.model,
     max_tokens: CHAT_MAX_TOKENS,
-    temperature: ep.temperature,
+    ...thinkingRequestTuning(ep),
     system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
     messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
   }, { timeout: ep.timeoutMs }), { affinityKey: affinityOf(ctx) });
@@ -211,7 +218,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
       const stream = getClient(ep.apiKey, ep.baseUrl).messages.stream({
         model: ep.model,
         max_tokens: CHAT_MAX_TOKENS,
-        temperature: ep.temperature,
+        ...thinkingRequestTuning(ep),
         system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
         messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
       }, { timeout: Math.max(ep.timeoutMs, 120_000) });
@@ -236,9 +243,10 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
       lastErr = err;
       slot.noteError(err);
       const last = attempt === maxAttempts - 1;
-      // 已经吐过内容 / 不可转移的错 / 没有下一个候选 → 如实抛出，不做无意义的重试。
-      if (yieldedAny || !ep.endpointId || !isTransferable(err) || last) throw err;
-      await coolEndpoint(ep.endpointId, 30_000, 'stream_error', lane);
+      // 已经吐过内容 / 不可转移的错 → 如实抛出；可转移错误即使没有下一个候选也要共享冷却态。
+      if (yieldedAny || !ep.endpointId || !isTransferable(err)) throw err;
+      await coolEndpoint(ep.endpointId, 30_000, 'stream_error');
+      if (last) throw err;
       console.warn(`[claude] 流式端点 ${ep.label || ep.endpointId} 建流失败，转移到下一个：${(err as Error).message}`);
     } finally {
       // 客户端中断（generator 提前 return）也会走到这里，槽位不会泄漏。
@@ -249,14 +257,22 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
-export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
-  // 轻量补全必须设超时：SDK 默认 600s + 自动重试，网关一挂会把同步等它的路由（如 /casefile/accept）吊死。
-  const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create({
-    model: ep.model,
-    max_tokens: 700,
+export function claudeRawRequest(cfg: ResolvedAiConfig, system: string, user: string): ClaudeRawRequest {
+  return {
+    model: cfg.model,
+    max_tokens: maxTokensForThinking(700, cfg),
+    ...thinkingRequestTuning(cfg),
     system,
     messages: [{ role: 'user', content: user }],
-  }, { timeout: ep.timeoutMs, maxRetries: 1 }), { laneClass: cfg.lane === 'aux' ? 'aux' : 'main' });
+  };
+}
+
+export async function claudeRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
+  // 轻量补全必须设超时：SDK 默认 600s + 自动重试，网关一挂会把同步等它的路由（如 /casefile/accept）吊死。
+  const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create(
+    claudeRawRequest(ep, system, user),
+    { timeout: ep.timeoutMs, maxRetries: 1 },
+  ), { laneClass: cfg.lane === 'aux' ? 'aux' : 'main' });
   return res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
 }
 
@@ -290,10 +306,9 @@ export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[], affinit
     const toolDefs: Anthropic.Tool[] = tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Tool['input_schema'] }));
     if (opts.finalTool) toolDefs.push({ name: opts.finalTool.name, description: opts.finalTool.description, input_schema: opts.finalTool.schema as Anthropic.Tool['input_schema'] });
 
-    const req: Anthropic.MessageCreateParamsNonStreaming = {
+    const req: ClaudeRawRequest = {
       model: cfg.model,
       max_tokens: opts.finalTool ? DELIVERABLE_MAX_TOKENS : CHAT_MAX_TOKENS,
-      temperature: cfg.temperature,
       system: systemBlocks(system, ''),
       messages: msgs,
     };
@@ -311,7 +326,8 @@ export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[], affinit
     }
 
     const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create(
-      { ...req, model: ep.model }, { timeout: Math.max(ep.timeoutMs, 120_000) },
+      { ...req, model: ep.model, ...thinkingRequestTuning(ep, { allowThinking: false }) },
+      { timeout: Math.max(ep.timeoutMs, 120_000) },
     ), { affinityKey });
     const usage = usageOf(res);
     assertChatOutputComplete('Claude', res.stop_reason, usage.outputTokens);

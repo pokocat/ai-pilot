@@ -4,6 +4,7 @@ import Taro, { useDidShow } from '@tarojs/taro';
 import { switchTo } from '../../services/nav';
 import { store } from '../../services/store';
 import { getToken } from '../../services/token';
+import { shouldShowCoach } from '../../services/onboardingStateCore';
 import './index.scss';
 
 // 功能点亮 · 五步 coach marks（原型交互）：入局后依次点亮五个 tab，
@@ -17,6 +18,7 @@ import './index.scss';
 const KEY_PREFIX = 'junshi.coach.v1.';
 const doneKey = () => `${KEY_PREFIX}${getToken() || 'anon'}`;
 const stepKey = () => `${KEY_PREFIX}step.${getToken() || 'anon'}`;
+const armedKey = () => `${KEY_PREFIX}armed.${getToken() || 'anon'}`;
 
 const STEPS = [
   { route: '/pages/sessions/index', title: '问策 · 有事问军师', text: '总军师置顶统筹，专业军师分线出策，结论汇回主线。像发微信一样，直接说你的问题。' },
@@ -29,11 +31,18 @@ const CN = ['一', '二', '三', '四', '五'];
 
 /** 本账号是否还欠这轮功能点亮（onboarding 出口据此决定落到哪个 tab）。 */
 export function coachPending(): boolean {
-  try { return Taro.getStorageSync(doneKey()) !== '1'; } catch { return false; }
+  try {
+    return Taro.getStorageSync(armedKey()) === '1' && Taro.getStorageSync(doneKey()) !== '1';
+  } catch { return false; }
+}
+/** 只在真正走完首次入局时启用；历史账号因没有 armed 标记不会被升级后补弹。 */
+export function armCoach(): void {
+  try { Taro.setStorageSync(armedKey(), '1'); } catch { /* noop */ }
 }
 function markCoachDone(): void {
   try { Taro.setStorageSync(doneKey(), '1'); } catch { /* noop */ }
   try { Taro.removeStorageSync(stepKey()); } catch { /* noop */ }
+  try { Taro.removeStorageSync(armedKey()); } catch { /* noop */ }
 }
 function loadStep(): number {
   try {
@@ -67,7 +76,18 @@ const notify = () => listeners.forEach((l) => l());
 
 // 依据登录/建档态与 storage 重新裁定是否展示（各实例 mount 与 onShow 时调用）。
 function evaluate(): void {
-  const active = store.isAuthed() && store.isOnboarded() && coachPending();
+  let armed = false;
+  let done = false;
+  try {
+    armed = Taro.getStorageSync(armedKey()) === '1';
+    done = Taro.getStorageSync(doneKey()) === '1';
+  } catch { /* storage 不可用则保持不展示 */ }
+  const active = shouldShowCoach({
+    authed: store.isAuthed(),
+    onboarded: store.isOnboarded(),
+    armed,
+    done,
+  });
   shared.active = active;
   if (active) {
     const persisted = loadStep();

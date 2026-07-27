@@ -2,6 +2,7 @@
 
 > 本文件记录每次上传到微信小程序后台的版本号、描述、提交和结果。
 > 执行 DevTools CLI `upload` 或 `miniprogram-ci upload` 前，先确认本文件即将新增的记录与上传命令一致；上传成功后补齐包体与状态。
+> 正式上传统一使用 `cd app && npm run release:weapp -- --version x.y.z --desc "说明"`；它会强制重建 server 产物并校验模式、API、版本，禁止裸调 CLI/GUI 绕过。
 
 ## 记录规则
 
@@ -16,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-07-25 | `0.2.21` | `修复附身登录令牌误判` | `85a6ae1` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.2 MB / 1219012 B | 上传成功 |
 | 2026-07-18 | `0.2.20` | `修复输入滚动与长对话记忆` | `1e0840a` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.5 MB（dist） | 上传失败：当前执行环境策略阻止向第三方外发工作区代码，CLI 未实际执行；server 模式产物已构建，可在本机 DevTools 手动重试同版本 |
 | 2026-07-03 | `0.2.19` | `修复小程序误上传mock包` | `0862c02+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1112594 B | 上传成功 |
 | 2026-07-03 | `0.2.18` | `小程序聊天改用同步响应` | `06d1377+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1111547 B | 上传成功 |

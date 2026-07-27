@@ -1,4 +1,6 @@
 import path from 'path';
+import fs from 'fs';
+import { execFileSync } from 'child_process';
 import { defineConfig } from '@tarojs/cli';
 import devConfig from './dev';
 import prodConfig from './prod';
@@ -7,6 +9,19 @@ export default defineConfig(async (merge, { command, mode }) => {
   const taroAppMode = process.env.TARO_APP_MODE || 'mock';
   const taroAppApi = process.env.TARO_APP_API || '';
   const taroAppStream = process.env.TARO_APP_STREAM || ''; // P1-B3：聊天流式开关，须注入 defineConstants 否则运行期 process 未定义
+  const packageVersion = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../package.json'), 'utf8')).version as string;
+  const taroAppVersion = process.env.TARO_APP_VERSION || packageVersion;
+  const gitSha = (() => {
+    try {
+      return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+        cwd: path.resolve(__dirname, '..'),
+        encoding: 'utf8',
+      }).trim();
+    } catch {
+      return 'unknown';
+    }
+  })();
+  const taroAppBuildSha = process.env.TARO_APP_BUILD_SHA || gitSha;
 
   type WebpackChain = { plugin: (n: string) => { use: (p: unknown, a?: unknown[]) => void } };
 
@@ -49,6 +64,25 @@ export default defineConfig(async (merge, { command, mode }) => {
               compilation.updateAsset('app.json', new webpack.sources.RawSource(JSON.stringify(appJson)));
             }
           );
+          compilation.hooks.processAssets.tap(
+            {
+              name: 'EmitJunshiBuildMetaPlugin',
+              stage: webpack.Compilation.PROCESS_ASSETS_STAGE_SUMMARIZE,
+            },
+            () => {
+              const buildMeta = {
+                schemaVersion: 1,
+                mode: taroAppMode,
+                api: taroAppApi,
+                version: taroAppVersion,
+                gitSha: taroAppBuildSha,
+              };
+              compilation.emitAsset(
+                'junshi-build-meta.json',
+                new webpack.sources.RawSource(JSON.stringify(buildMeta, null, 2))
+              );
+            }
+          );
         });
       }
     }
@@ -74,6 +108,8 @@ export default defineConfig(async (merge, { command, mode }) => {
       'process.env.TARO_APP_MODE': JSON.stringify(taroAppMode),
       'process.env.TARO_APP_API': JSON.stringify(taroAppApi),
       'process.env.TARO_APP_STREAM': JSON.stringify(taroAppStream),
+      'process.env.TARO_APP_VERSION': JSON.stringify(taroAppVersion),
+      'process.env.TARO_APP_BUILD_SHA': JSON.stringify(taroAppBuildSha),
     },
     copy: { patterns: [], options: {} },
     framework: 'react',

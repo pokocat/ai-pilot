@@ -175,20 +175,24 @@ function scheduleWake(lane: LlmLane, at: number): void {
 function makeSlot(lane: LlmLane): LlmSlot {
   const s = laneOf(lane);
   let released = false;
+  let failed = false;
   return {
     release() {
       if (released) return;
       released = true;
       s.inFlight--;
-      // 一次干净的返回：清连续 429 计数，并让爬升水位往上走一格。
-      s.consecutive429 = 0;
-      if (s.rampCeiling > 0) {
-        s.rampCeiling++;
-        if (s.rampCeiling >= cfg(lane).max) s.rampCeiling = 0; // 爬满，回到常态
+      // 只有干净成功才清连续 429 并推进爬升；失败归还槽位不等于上游已恢复。
+      if (!failed) {
+        s.consecutive429 = 0;
+        if (s.rampCeiling > 0) {
+          s.rampCeiling++;
+          if (s.rampCeiling >= cfg(lane).max) s.rampCeiling = 0; // 爬满，回到常态
+        }
       }
       pump(lane);
     },
     noteError(err: unknown) {
+      failed = true;
       if (is429(err)) noteUpstreamRateLimited(retryAfterSecOf(err), lane);
     },
   };

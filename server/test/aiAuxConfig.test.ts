@@ -52,6 +52,7 @@ describe('只换模型（同账号）', () => {
     assert.notEqual(aux, main);
     assert.equal(aux.model, 'claude-haiku-4-5');
     assert.equal(aux.lane, 'main', '同账号必须共用 main 车道');
+    assert.equal(aux.poolBypass, true, '辅助模型不能再被主端点池覆盖');
     assert.equal(aux.apiKey, main.apiKey, '未指定 key 时沿用主 key');
     assert.equal(aux.provider, main.provider);
   });

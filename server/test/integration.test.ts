@@ -971,6 +971,33 @@ describe('TC-M 首登建档 → 个性化产出', () => {
 
 // ───────────────────────── TC-N 老用户回流（持久化） ─────────────────────────
 describe('TC-N 老用户回流持久化', () => {
+  test('N0 入局仪式上线前创建的历史账号无 Profile 也视为已入局', async () => {
+    const phone = uniquePhone();
+    const first = await api('POST', '/api/auth/login', { body: { phone, name: '历史主公' } });
+    assert.equal(first.body.onboarded, false, '刚注册且无档案时仍应走首次入局');
+    await prisma.user.update({
+      where: { id: first.body.token },
+      data: { createdAt: new Date('2026-07-01T00:00:00.000Z') },
+    });
+
+    const again = await api('POST', '/api/auth/login', { body: { phone } });
+    assert.equal(again.body.onboarded, true, '上线前历史账号复登不得重复弹首次入局');
+    const me = await api('GET', '/api/me', { token: first.body.token });
+    assert.equal(me.body.onboarded, true, '/me 与登录响应必须同口径');
+  });
+
+  test('N0b 已产生真实业务资产的回流账号无 Profile 也视为已入局', async () => {
+    const phone = uniquePhone();
+    const first = await api('POST', '/api/auth/login', { body: { phone, name: '回流主公' } });
+    assert.equal(first.body.onboarded, false);
+    await api('POST', '/api/projects', { token: first.body.token, body: { name: '历史项目' } });
+
+    const me = await api('GET', '/api/me', { token: first.body.token });
+    assert.equal(me.body.onboarded, true, '已有业务资产时不得因缺 Profile 重走入局');
+    const again = await api('POST', '/api/auth/login', { body: { phone } });
+    assert.equal(again.body.onboarded, true, '复登响应应保持已入局');
+  });
+
   test('N1 同手机号复登 token 不变，历史数据仍在', async () => {
     const phone = uniquePhone();
     const t1 = await login(phone, '回流公司');

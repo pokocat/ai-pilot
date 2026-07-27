@@ -12,6 +12,7 @@ import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js'
 import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint } from '../../services/llmPool.js';
+import { maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
 
 interface OAToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
 // 多模态内容片段（OpenAI vision 协议）：文本或 data URL 图片。
@@ -112,7 +113,11 @@ async function callChat(cfg: ResolvedAiConfig, body: Record<string, unknown>, ph
       const res = await fetch(`${epBase}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
-        body: JSON.stringify({ model: ep.model, temperature: ep.temperature, ...body }),
+        body: JSON.stringify({
+          model: ep.model,
+          ...body,
+          ...thinkingRequestTuning(ep, { allowThinking: !body.tools && !body.tool_choice }),
+        }),
         signal: watch.signal,
       });
       const data = (await res.json().catch(() => ({}))) as OAResponse;
@@ -184,8 +189,8 @@ async function callChatStream(cfg: ResolvedAiConfig, body: Record<string, unknow
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({
         model: cfg.model,
-        temperature: cfg.temperature,
         ...body,
+        ...thinkingRequestTuning(cfg, { allowThinking: !body.tools && !body.tool_choice }),
         stream: true,
         ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
       }),
@@ -360,7 +365,7 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回 content 文本。 */
 export async function openaiRaw(cfg: ResolvedAiConfig, system: string, user: string): Promise<string> {
   const data = await callChat(cfg, {
-    max_tokens: 700,
+    max_tokens: maxTokensForThinking(700, cfg),
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }] as OAMessage[],
   });
   return (data.choices?.[0]?.message?.content ?? '').trim();

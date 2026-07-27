@@ -43,6 +43,24 @@ function assertServerBuild() {
     console.error('Missing built app.json. Run npm run build:weapp:server first.');
     process.exit(1);
   }
+  const metaPath = path.join(DIST_ROOT, 'junshi-build-meta.json');
+  if (!fs.existsSync(metaPath)) {
+    console.error('Missing junshi-build-meta.json; refusing to upload an old or unverified build.');
+    process.exit(1);
+  }
+  const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  if (meta.schemaVersion !== 1 || meta.mode !== 'server') {
+    console.error(`Build mode is ${String(meta.mode).toUpperCase()}, not SERVER; refusing to upload.`);
+    process.exit(1);
+  }
+  if (meta.api !== EXPECTED_API || meta.api.includes('localhost')) {
+    console.error(`Build API ${meta.api} does not match expected API ${EXPECTED_API}; refusing to upload.`);
+    process.exit(1);
+  }
+  if (meta.version !== version) {
+    console.error(`Build version ${meta.version} does not match upload version ${version}; refusing to upload.`);
+    process.exit(1);
+  }
   const bundle = readBuiltJs(DIST_ROOT);
   if (!bundle.includes(EXPECTED_API)) {
     console.error(`dist missing expected API ${EXPECTED_API}. Run npm run build:weapp:server before upload.`);

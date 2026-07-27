@@ -175,6 +175,7 @@ describe('429 整窗冷却', () => {
     await assert.rejects(withLlmSlot(async () => { throw boom; }));
     assert.equal(llmGateStats().coolingDown, true);
     assert.equal(llmGateStats().seen429, 1);
+    assert.equal(llmGateStats().consecutive429, 1, '失败归还槽位不能把连续 429 误当成成功清零');
   });
 
   test('withLlmSlot 正常返回时归还槽位且不误判冷却', async () => {

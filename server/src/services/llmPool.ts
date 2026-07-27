@@ -33,9 +33,10 @@ import { prisma } from '../db.js';
 import { getRedis } from './redis.js';
 import { decryptSecretSafe } from './secretBox.js';
 import { isRealKey } from '../env.js';
-import { endpointLane, setLaneMaxConcurrency, withLlmSlot, is429, retryAfterSecOf, noteUpstreamRateLimited, type LlmLaneClass } from './llmGate.js';
+import { endpointLane, setLaneMaxConcurrency, withLlmSlot, is429, retryAfterSecOf, type LlmLaneClass } from './llmGate.js';
 import type { ResolvedAiConfig } from './aiConfig.js';
-import type { AiProvider } from '../llm/schema.js';
+import type { AiProvider, AiThinkingMode } from '../llm/schema.js';
+import { effectiveThinkingTemperature, normalizeThinkingBudget, normalizeThinkingMode } from '../llm/thinking.js';
 
 const CONFIG_TTL_MS = 5_000;   // 端点列表缓存（后台改配置后最多 5s 生效）
 const HEALTH_TTL_MS = 1_000;   // 冷却状态本地缓存，避免热路径每次打 Redis
@@ -48,6 +49,8 @@ export interface PoolEndpoint {
   apiKey: string;
   model: string;
   temperature: number;
+  thinkingMode: AiThinkingMode;
+  thinkingBudget: number;
   weight: number;
   tier: number;
   maxConcurrency: number;
@@ -86,7 +89,12 @@ export async function loadPool(force = false): Promise<{ endpoints: PoolEndpoint
           baseUrl: String(m.baseUrl ?? ''),
           apiKey: decryptSecretSafe(String(m.apiKey ?? '')),
           model: String(m.model ?? ''),
-          temperature: typeof m.temperature === 'number' ? m.temperature : 0.7,
+          temperature: effectiveThinkingTemperature(
+            typeof m.temperature === 'number' ? m.temperature : 0.7,
+            normalizeThinkingMode(m.thinkingMode),
+          ),
+          thinkingMode: normalizeThinkingMode(m.thinkingMode),
+          thinkingBudget: normalizeThinkingBudget(m.thinkingBudget),
           weight: Math.max(1, Number(m.weight ?? 1) || 1),
           tier: Math.max(0, Number(m.tier ?? 0) || 0),
           maxConcurrency: Math.max(0, Number(m.maxConcurrency ?? 0) || 0),
@@ -140,12 +148,10 @@ function isCooling(id: string, now = Date.now()): boolean {
 }
 
 /** 标记端点冷却。写 Redis（跨实例可见）+ 本地；同时让闸门对该端点车道停发槽位。 */
-export async function coolEndpoint(id: string, ms: number, reason: string, lane?: string): Promise<void> {
+export async function coolEndpoint(id: string, ms: number, reason: string): Promise<void> {
   const until = Date.now() + ms;
   const prev = localCool.get(id);
   if (!prev || prev.until < until) localCool.set(id, { until, reason });
-  if (lane) noteUpstreamRateLimited(Math.ceil(ms / 1000), lane);
-
   const redis = await getRedis();
   if (!redis) return;
   try {
@@ -186,16 +192,23 @@ export async function resolveCandidates(
   base: ResolvedAiConfig,
   opts?: { affinityKey?: string },
 ): Promise<ResolvedAiConfig[]> {
+  // 辅助档已经显式选择模型/账号，不参与主模型端点池，否则 AI_AUX_* 会被池内模型覆盖。
+  if (base.poolBypass) return [base];
   const { endpoints, settings } = await loadPool();
   if (settings.mode !== 'pool' || endpoints.length === 0) return [base];
 
-  await refreshHealth(endpoints.map((e) => e.id));
+  // provider 模块在进入端点池之前已选定；这里只能选择相同协议的端点。
+  // 混用会把 Anthropic messages 请求发到 OpenAI chat/completions 端点（反之亦然）。
+  const compatible = endpoints.filter((e) => e.provider === base.provider);
+  if (compatible.length === 0) return [base];
+
+  await refreshHealth(compatible.map((e) => e.id));
   const now = Date.now();
   // sticky 关闭时用随机 key → 退化为按权重随机分散（缓存命中会掉，仅在明确要均散时用）。
   const key = settings.sticky ? (opts?.affinityKey || 'anon') : `${now}:${Math.random()}`;
 
-  const healthy = endpoints.filter((e) => !isCooling(e.id, now));
-  const cooling = endpoints.filter((e) => isCooling(e.id, now));
+  const healthy = compatible.filter((e) => !isCooling(e.id, now));
+  const cooling = compatible.filter((e) => isCooling(e.id, now));
   const byTier = (list: PoolEndpoint[]) => {
     const tiers = [...new Set(list.map((e) => e.tier))].sort((a, b) => a - b);
     return tiers.flatMap((t) => hrwSort(list.filter((e) => e.tier === t), key));
@@ -214,6 +227,8 @@ function toCfg(base: ResolvedAiConfig, e: PoolEndpoint): ResolvedAiConfig {
     apiKey: e.apiKey || base.apiKey,
     model: e.model || base.model,
     temperature: e.temperature,
+    thinkingMode: e.thinkingMode,
+    thinkingBudget: e.thinkingBudget,
     keyDecryptFailed: false, // loadPool 已滤掉解不开 key 的端点
   };
 }
@@ -264,9 +279,11 @@ export async function withEndpoint<T>(
     } catch (err) {
       lastErr = err;
       const last = i === maxAttempts - 1;
-      if (!cfg.endpointId || !isTransferable(err) || last) throw err;
+      if (!cfg.endpointId || !isTransferable(err)) throw err;
       const ms = coolMsFor(err);
-      await coolEndpoint(cfg.endpointId, ms, is429(err) ? 'rate_limited' : 'error', lane);
+      // 即便已经没有下一个候选，也必须写入本地/Redis 冷却；否则其它实例会继续撞同一端点。
+      await coolEndpoint(cfg.endpointId, ms, is429(err) ? 'rate_limited' : 'error');
+      if (last) throw err;
       console.warn(`[llmPool] 端点 ${cfg.label || cfg.endpointId} 失败并冷却 ${Math.round(ms / 1000)}s，转移到下一个：${(err as Error).message}`);
     }
   }

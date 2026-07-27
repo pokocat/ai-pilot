@@ -2,6 +2,21 @@
   height: 100vh;
   box-sizing: border-box;
 }
+
+/* mock 包人工防误传标识：五个主 Tab 常驻可见，正式 server 构建会被编译期常量消除。 */
+.build-mode-badge {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 7px);
+  left: 8px;
+  z-index: 899; /* 低于全屏/半屏弹层，高于底栏 */
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #9C4A38;
+  color: #fff;
+  font: 600 9px/1.2 var(--sans);
+  letter-spacing: .05em;
+  pointer-events: none;
+}
 /* 自定义导航顶部让位：内容落到胶囊「底」之下（真机由 Screen JS 用胶囊 bottom+2 覆盖 --nav-inset-h；
    H5/无胶囊走 safe-area 兜底）。比原来 +52 略收紧到 +46。 */
 .nav-inset {

@@ -114,7 +114,7 @@ export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthRes
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
 export type { AdminSku, AdminSkuUpdate, SkuKind, ServiceAssignmentView, ServiceAssignmentUpdate } from '../../shared/contracts';
-export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider, AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus } from '../../shared/contracts';
+export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider, AiThinkingMode, AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus } from '../../shared/contracts';
 export type { AdminKnowledgeView, AdminKnowledgeItemRow, ReembedResult, AdminRetrievalDebug, RetrievalDebugCand } from '../../shared/contracts';
 export type { AdminUserContext, AdminUserMemory, KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow } from '../../shared/contracts';
 // —— 版本化 / 多运营 / 沙盒 / 评测（运营端调优发布） ——
