@@ -766,6 +766,31 @@ export function contextValues(ctx: GenContext): Record<string, string> {
 }
 
 /** 把 text 中的 {占位符} 替换为真实上下文值（不追加任何额外块）。Dify inputs 映射复用此函数。 */
+/**
+ * 每轮都变的占位符。**它们一旦出现在 agent 底座（→ stable 段），该 agent 的提示词缓存永不命中。**
+ *
+ * 提示词缓存是前缀匹配：`cache_control` 断点之前的字节只要变一个，整段前缀就失效。而 stable 段
+ * 恰恰在断点之前，所以往里填「本轮用户消息 / 本轮 RAG 召回 / 逐渐累积的长期记忆」等于每轮换一份前缀。
+ *
+ * 2026-07-28 登生产核对：`strat`/`growth` 的底座含 `{长期记忆}`、`intel` 含 `{知识库}` + `{引用资料}`，
+ * 这三个 agent 的缓存命中率恒为 0。主力 `general` 不含，故大头流量未受影响。
+ *
+ * 处置：这些占位符在 stable 段里**只留一个稳定指针**，真正的内容一律走 dynamic 段（断点之后）。
+ */
+const VOLATILE_PLACEHOLDERS = ['{用户消息}', '{知识库}', '{引用资料}', '{长期记忆}'] as const;
+type VolatilePlaceholder = (typeof VOLATILE_PLACEHOLDERS)[number];
+
+// 指针文案要让模型知道「内容在后面」，而不是以为这一项缺失。
+const STABLE_POINTER: Record<VolatilePlaceholder, string> = {
+  '{用户消息}': '（见本轮用户原文）',
+  '{知识库}': '（见下方「参考资料」中的知识库召回）',
+  '{引用资料}': '（见下方「参考资料」中的用户引用资料）',
+  '{长期记忆}': '（见下方「参考资料」中的长期记忆）',
+};
+
+// 只在首次遇到某个 agent 的违规组合时告警一次——每请求都打会淹掉日志。
+const warnedVolatile = new Set<string>();
+
 export function fillPlaceholders(text: string, ctx: GenContext): string {
   const values = contextValues(ctx);
   let out = text;
@@ -809,7 +834,21 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   const tianshiLine = ctx.tianshiLine ?? '';
   // 阶段适配（M3 PR-13）随用户档案稳定 → stable 段。
   const stageLine = ctx.stageLine ?? '';
-  const stable = [fillPlaceholders(base, ctx), guard, industryLine, tianshiLine, stageLine].filter(Boolean).join('\n\n');
+  // 把 base 里逐轮变化的占位符降级成稳定指针，内容改由 dynamic 段承载 —— 否则 stable 段每轮都变，
+  // 该 agent 的提示词缓存永不命中（见 VOLATILE_PLACEHOLDERS 注释）。
+  const volatileUsed = VOLATILE_PLACEHOLDERS.filter((k) => base.includes(k));
+  let baseStable = base;
+  for (const k of volatileUsed) baseStable = baseStable.replaceAll(k, STABLE_POINTER[k]);
+  if (volatileUsed.length) {
+    const sig = `${ctx.agentKey ?? '?'}|${volatileUsed.join(',')}`;
+    if (!warnedVolatile.has(sig)) {
+      warnedVolatile.add(sig);
+      console.warn(`[prompt] agent「${ctx.agentKey ?? '?'}」底座含逐轮变化占位符 ${volatileUsed.join('、')}，`
+        + '已自动降级为指针以保住提示词缓存；请在后台把这些占位符从底座移除（内容本就由参考资料段提供）。');
+    }
+  }
+
+  const stable = [fillPlaceholders(baseStable, ctx), guard, industryLine, tianshiLine, stageLine].filter(Boolean).join('\n\n');
 
   const parts: string[] = [];
   if (ctx.modeLine) parts.push(ctx.modeLine); // 本轮导引（模式/角色/轮次）：每轮变化，dynamic 首位
@@ -829,6 +868,12 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   if (ctx.bizMetricLine) blocks.push(ctx.bizMetricLine); // 经营序列：本周实报 + 与基准差（WO-10；差由系统算）
   if (ctx.prescriptionEffectLine) blocks.push(ctx.prescriptionEffectLine); // 处方效果：见效处方累计指标 + 占比（WO-14；月战报引用，系统算）
   if (ctx.healthLine) blocks.push(ctx.healthLine); // 健康度·军师估测：月度落库水位（D-3-3；只读引用，禁对话现算/换算百分比）
+  // {长期记忆} 是记忆进入提示词的**唯一通道**（没有独立的 dynamic 块），从 stable 段剥离后
+  // 必须在此补回，否则 strat/growth 会直接丢掉记忆。只对原本用了该占位符的 agent 注入，
+  // 不给其他 agent 凭空加一段——那会改掉它们既有的提示词行为。
+  if (volatileUsed.includes('{长期记忆}')) {
+    blocks.push(`【长期记忆】\n${ctx.memories.length ? ctx.memories.join('；') : '暂无长期记忆'}`);
+  }
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.dataSourceLine) blocks.push(ctx.dataSourceLine); // V7-07：已接入数据源清单（军师可据此要证据）
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);
