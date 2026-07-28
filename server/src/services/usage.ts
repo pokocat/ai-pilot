@@ -84,6 +84,21 @@ export function recordAuxUsage(model: string, provider: string, inputText: strin
   void recordTokenUsage({ kind: 'aux', provider, model, usage: { inputTokens, outputTokens, cachedInput: 0 } });
 }
 
+/**
+ * 取本次调用应扣的「输入 token 等价量」——额度扣减唯一入口。
+ *
+ * 真值由 gateway 的 `maybeRecord` 在记账时按实际 model + 后台单价算好回填到 `usage.billableTokens`
+ * （只有它同时握有这两样：端点池会换 model，路由拿不到）。这里只做读取与兜底，**不重新计算**，
+ * 以保证「扣的额度」与「token_usage 里记的 creditCost」永远是同一个数。
+ *
+ * 缺省（mock / 未过 maybeRecord / 记账失败）→ 回落裸 token 求和，与旧口径一致。
+ */
+export function billableOf(usage: { inputTokens: number; outputTokens: number; billableTokens?: number }): number {
+  const fallback = Math.max(0, usage.inputTokens) + Math.max(0, usage.outputTokens);
+  const b = usage.billableTokens;
+  return typeof b === 'number' && Number.isFinite(b) && b >= 0 ? b : fallback;
+}
+
 const dayKey = (d: Date): string => d.toISOString().slice(0, 10); // YYYY-MM-DD（UTC）
 
 /**

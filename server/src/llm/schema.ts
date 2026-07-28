@@ -116,6 +116,10 @@ export interface Usage {
   outputTokens: number;
   cachedInput: number;  // 命中提示缓存的输入 token（约 0.1× 计价；provider 不报则 0）
   cacheWrite?: number;  // 写入提示缓存的输入 token（Anthropic 约 1.25× 计价；provider 不报则 0）
+  // 按各档单价加权后的「输入 token 等价量」，由 gateway 的 maybeRecord 在记账时算好回填
+  // （只有它同时握有实际 model —— 端点池会换 model —— 和后台单价）。
+  // 额度扣减与消耗明细必须都用它，否则两处口径会分叉。缺省时调用方回落 input+output。
+  billableTokens?: number;
 }
 export type Metered<T> = { result: T; usage: Usage };
 export const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0, cacheWrite: 0 };

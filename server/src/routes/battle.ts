@@ -2,6 +2,7 @@
 // /battle/commit 串既有能力：buildGenContext → generateDeliverable → acceptDeliverable(建案卷/拆军令) →
 // saveReportVersion(桥接版本化报告)；额度门禁与 /generate-sync 同口径；5 分钟内幂等返回上次结果。
 import type { FastifyInstance } from 'fastify';
+import { billableOf } from '../services/usage.js';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
@@ -88,7 +89,7 @@ export async function battleRoutes(app: FastifyInstance) {
         content: result as object,
       });
 
-      const settled = usage ? await reservation.settle((result as { degraded?: boolean }).degraded ? 0 : (usage.inputTokens + usage.outputTokens), 1) : null;
+      const settled = usage ? await reservation.settle((result as { degraded?: boolean }).degraded ? 0 : billableOf(usage), 1) : null;
       void settled;
 
       const out: BattleCommitResult = {

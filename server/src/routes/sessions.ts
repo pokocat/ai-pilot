@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { billableOf } from '../services/usage.js';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { resolveUser, buildGenContext, isBriefInterviewRequest } from '../services/context.js';
@@ -15,7 +16,7 @@ import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
 import type { MessageRef, Deliverable, ChatReply } from '../llm/schema.js';
-import { scrubSectionJson } from '../llm/schema.js';
+import { type Usage, scrubSectionJson } from '../llm/schema.js';
 import { extractAndRecordProphecies } from '../services/prophecyLog.js';
 import { resolveMode } from '../services/intent.js';
 import { recordReview } from '../services/reviewLog.js';
@@ -308,7 +309,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
           const creditBalance = creditReservation?.balance ?? 0;
-          const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
+          const tokenQuota = quotaReservation ? await quotaReservation.settle(billableOf(usage), ratio) : null;
           return {
             sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat,
             memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, refNotices, creditBalance, tokenQuota,
@@ -321,7 +322,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const learned = await learn();
         const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
-        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : billableOf(usage), ratio) : null;
         return {
           sessionId: session.id, created, agentKey, kind: 'report', messageId: msg.id, deliverable,
           memory: learned ? { learned: true, agentName: agent.name } : null, knowledgeUsed, refNotices, creditBalance, tokenQuota,
@@ -342,7 +343,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         });
         // P0-4：降级（真实模型没出结构化成果、回退模板）不向用户计费——token settle(0) 退回、钻石也退回；真实 token 仍在 gateway 侧记账。
         const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
-        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : billableOf(usage), ratio) : null;
         return {
           sessionId: session.id, created, agentKey, kind: 'report',
           messageId: msg.id, deliverable,
@@ -357,7 +358,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       harvestProphecies(user, agentKey, replyChat.text);
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
       const creditBalance = creditReservation?.balance ?? 0;
-      const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
+      const tokenQuota = quotaReservation ? await quotaReservation.settle(billableOf(usage), ratio) : null;
       return { sessionId: session.id, created, agentKey, kind: 'chat', messageId: msg.id, reply: replyChat, knowledgeUsed, refNotices, creditBalance, tokenQuota };
     } catch (err) {
       if (creditReservation?.charged) {
@@ -534,7 +535,9 @@ export async function sessionRoutes(app: FastifyInstance) {
       if (onDemand && !wantsDeliverableRequest(text)) {
         send('meta', { kind: 'chat', refNotices });
         let reply2: ChatReply | null = null;
-        let usage = { inputTokens: 0, outputTokens: 0 };
+        // 显式标 Usage：初值只是占位，done 事件会整体替换成 gateway 那个（已带 billableTokens）。
+        // 若沿用推断出的窄类型，billableTokens 会在类型上消失，额度就悄悄退回旧口径。
+        let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
           if (ev.type === 'delta') send('token', { text: ev.text });
           else { reply2 = ev.result; usage = ev.usage; }
@@ -547,7 +550,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
         const creditBalance = creditReservation?.balance ?? 0;
-        const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(billableOf(usage), ratio) : null;
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       } else if (onDemand) {
@@ -563,7 +566,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
         const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
-        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : billableOf(usage), ratio) : null;
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       } else if (isDeliverable) {
@@ -600,14 +603,16 @@ export async function sessionRoutes(app: FastifyInstance) {
         }
         // P0-4：降级不向用户计费——token settle(0) 退回、钻石也退回；真实 token 仍在 gateway 侧记账。
         const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
-        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : usage.inputTokens + usage.outputTokens, ratio) : null;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(deliverable.degraded ? 0 : billableOf(usage), ratio) : null;
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       } else {
         send('meta', { kind: 'chat', refNotices });
         // 普通聊天优先走 provider 原生 token 流；只在输入侧先审核，输出完成后记账/trace。
         let reply2: ChatReply | null = null;
-        let usage = { inputTokens: 0, outputTokens: 0 };
+        // 显式标 Usage：初值只是占位，done 事件会整体替换成 gateway 那个（已带 billableTokens）。
+        // 若沿用推断出的窄类型，billableTokens 会在类型上消失，额度就悄悄退回旧口径。
+        let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
         for await (const ev of chatCompleteStream(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio })) {
           if (ev.type === 'delta') send('token', { text: ev.text });
           else { reply2 = ev.result; usage = ev.usage; }
@@ -621,7 +626,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         harvestProphecies(user, agentKey, reply2?.text);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const creditBalance = creditReservation?.balance ?? 0;
-        const tokenQuota = quotaReservation ? await quotaReservation.settle(usage.inputTokens + usage.outputTokens, ratio) : null;
+        const tokenQuota = quotaReservation ? await quotaReservation.settle(billableOf(usage), ratio) : null;
         send('credit', { balance: creditBalance, tokenQuota });
         send('done', { messageId: msg.id });
       }

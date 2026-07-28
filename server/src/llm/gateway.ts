@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
-import { getAiConfig, effectiveProvider, resolveAuxConfig, type ResolvedAiConfig } from '../services/aiConfig.js';
+import { getAiConfig, effectiveProvider, resolveAuxConfig, resolveModelRate, type ResolvedAiConfig } from '../services/aiConfig.js';
 // mockUpstream：仅当配了 AI_MOCK_LATENCY_MS 时，让 mock 占一个真实闸门槽位并模拟上游耗时，
 // 好让压测能压到 llmGate/端点池（见 providers/mock.ts 顶部注释）。默认 0 = 同步直出，行为不变。
 // **只用在「mock 就是配置的 provider」的分支**；真 provider 失败后的降级兜底一律不套——
@@ -16,6 +16,7 @@ import { getAiConfig, effectiveProvider, resolveAuxConfig, type ResolvedAiConfig
 import { mockChat, mockDeliverable, mockAdaptive, mockUpstream } from './providers/mock.js';
 import { ZERO_USAGE, extractAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
 import { recordTokenUsage, recordAuxUsage, type UsageMeta } from '../services/usage.js';
+import { billableTokenEquivalents } from '../data/modelPrices.js';
 import { recordTrace } from '../services/trace.js';
 import { moderate } from '../services/moderation.js';
 import { auditBannedWords } from '../services/bannedWords.js';
@@ -151,6 +152,7 @@ async function traced<T>(
 async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ctx: GenContext, meta?: UsageMeta): Promise<void> {
   if (meta?.sandbox) return; // 沙盒试跑不计入 token_usage（诊断 trace 仍由 traced() 记录）
   if (s.provider !== 'claude' && s.provider !== 'openai' && s.provider !== 'dify') return;
+  const billable = await fillBillable(s);
   await recordTokenUsage({
     tenantId: meta?.tenantId ?? null,
     userId: meta?.userId ?? null,
@@ -160,9 +162,30 @@ async function maybeRecord(s: Sourced<unknown>, kind: 'deliverable' | 'chat', ct
     provider: s.provider,
     model: s.model,
     usage: s.usage,
-    // 本次扣的月度额度 = ceil(真实token × ratio)，写入 token_usage 作为后台消耗明细口径
-    creditCost: Math.ceil((Math.max(0, s.usage.inputTokens) + Math.max(0, s.usage.outputTokens)) * (meta?.ratio ?? 1)),
+    // 本次扣的月度额度 = ceil(输入token等价量 × ratio)。等价量按后台单价把输出/缓存各档折算成
+    // 输入 token（见 billableTokenEquivalents）——等价合并会让长输出用户被系统性少扣。
+    creditCost: Math.ceil(billable * (meta?.ratio ?? 1)),
   });
+}
+
+/**
+ * 记账前把「输入 token 等价量」算好回填到 usage 上，供路由的额度扣减复用。
+ *
+ * 只有这里同时握有**实际生效的 model**（端点池会换 model，路由拿不到）和后台单价，所以加权
+ * 必须在此完成；路由只负责读 `usage.billableTokens`。两处都用同一个数，口径才不会分叉。
+ */
+async function fillBillable(s: Sourced<unknown>): Promise<number> {
+  const fallback = Math.max(0, s.usage.inputTokens) + Math.max(0, s.usage.outputTokens);
+  try {
+    const { rate } = await resolveModelRate(s.model);
+    const billable = billableTokenEquivalents(s.usage, rate);
+    s.usage.billableTokens = billable;
+    return billable;
+  } catch {
+    // 单价解析失败（DB 抖动等）绝不能拖垮产出：退回裸 token 求和，与旧口径一致。
+    s.usage.billableTokens = fallback;
+    return fallback;
+  }
 }
 
 // —— per-agent 接入覆盖（providerMode=openai/dify）：绕过全局 provider 与结果缓存 ——
