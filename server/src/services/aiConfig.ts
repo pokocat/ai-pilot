@@ -99,20 +99,63 @@ let cache: { cfg: ResolvedAiConfig; at: number } | null = null;
 const TTL = 4000;
 
 // 运营在「模型」配置里填的 token 单价（元/1M）：model 名 → 费率。短缓存，配置变更时清空。
+// 端点池允许多个接入点使用同一个 model 名，因此这里把价格定义成「模型级 SSOT」：
+// 同名模型只有完整且一致的 in/out 价格才校准；历史冲突/半配置确定性退回裸 token，不再由无序查询随机覆盖。
 let rateCache: { map: Map<string, ModelRate>; at: number } | null = null;
+let lastRateIssueSignature = '';
+
+type RateRow = { model: string; priceInput: number; priceOutput: number; priceCachedInput: number };
+
+export function buildConfiguredRateMap(rows: RateRow[]): { map: Map<string, ModelRate>; issues: string[] } {
+  const grouped = new Map<string, ModelRate[]>();
+  const issues: string[] = [];
+  for (const r of rows) {
+    const key = r.model.trim().toLowerCase();
+    if (!key) continue;
+    const hasAny = r.priceInput > 0 || r.priceOutput > 0 || r.priceCachedInput > 0;
+    if (!hasAny) continue;
+    if (!(r.priceInput > 0) || !(r.priceOutput > 0)) {
+      issues.push(`${r.model}: 输入价和输出价必须同时配置`);
+      continue;
+    }
+    const rate: ModelRate = {
+      in: r.priceInput,
+      out: r.priceOutput,
+      cachedIn: r.priceCachedInput > 0 ? r.priceCachedInput : undefined,
+    };
+    const list = grouped.get(key) ?? [];
+    list.push(rate);
+    grouped.set(key, list);
+  }
+
+  const map = new Map<string, ModelRate>();
+  for (const [model, rates] of grouped) {
+    const first = rates[0];
+    const same = rates.every((r) =>
+      r.in === first.in && r.out === first.out && (r.cachedIn ?? 0) === (first.cachedIn ?? 0));
+    if (!same) {
+      issues.push(`${model}: 同名模型存在冲突单价`);
+      continue;
+    }
+    map.set(model, first);
+  }
+  return { map, issues };
+}
 
 async function configuredRates(force = false): Promise<Map<string, ModelRate>> {
   if (!force && rateCache && Date.now() - rateCache.at < TTL) return rateCache.map;
   const map = new Map<string, ModelRate>();
   try {
     const rows = await prisma.aiModel.findMany({ select: { model: true, priceInput: true, priceOutput: true, priceCachedInput: true } });
-    for (const r of rows) {
-      if (r.model && (r.priceInput > 0 || r.priceOutput > 0)) {
-        map.set(r.model, { in: r.priceInput, out: r.priceOutput, cachedIn: r.priceCachedInput > 0 ? r.priceCachedInput : undefined });
-      }
+    const built = buildConfiguredRateMap(rows);
+    for (const [model, rate] of built.map) map.set(model, rate);
+    const issueSignature = built.issues.join('；');
+    if (issueSignature && issueSignature !== lastRateIssueSignature) {
+      console.error(`[aiConfig] 模型单价未校准：${issueSignature}`);
     }
+    lastRateIssueSignature = issueSignature;
   } catch {
-    /* DB 不可达：留空 → 回退内置价表 */
+    /* DB 不可达：留空 → 成本未校准、用户额度回退裸 token */
   }
   rateCache = { map, at: Date.now() };
   return map;
@@ -121,9 +164,9 @@ async function configuredRates(force = false): Promise<Map<string, ModelRate>> {
 /** 解析某模型的成本费率：只用运营在模型配置里填的单价（精确名/前缀命中）。没配 → 0，不回退、不估算。 */
 export async function resolveModelRate(model: string): Promise<{ rate: ModelRate; calibrated: boolean }> {
   const cfg = await configuredRates();
-  const exact = cfg.get(model);
+  const m = (model || '').trim().toLowerCase();
+  const exact = cfg.get(m);
   if (exact) return { rate: exact, calibrated: true };
-  const m = (model || '').toLowerCase();
   // P2-3：取**最长**匹配前缀（而非插入序第一个），避免 `gpt-4` 遮蔽更精确的 `gpt-4o`。
   let best: { len: number; v: ModelRate } | null = null;
   for (const [k, v] of cfg) {
@@ -132,6 +175,17 @@ export async function resolveModelRate(model: string): Promise<{ rate: ModelRate
   }
   if (best) return { rate: best.v, calibrated: true };
   return { rate: { in: 0, out: 0 }, calibrated: false }; // 没配单价 → 成本计 0（calibrated=false 供上层提示「未校准」）
+}
+
+/** 生成前并不知道端点池最终落点，故取所有已校准模型中的最贵相对权重做并发预留上界。 */
+export async function maxConfiguredRateWeights(): Promise<ModelRate> {
+  const rates = [...(await configuredRates()).values()];
+  if (!rates.length) return { in: 0, out: 0 };
+  let outputWeight = 1;
+  for (const rate of rates) {
+    outputWeight = Math.max(outputWeight, rate.out / rate.in);
+  }
+  return { in: 1, out: outputWeight };
 }
 
 /** 解析当前生效配置（DB 优先，env 兜底，带缓存）。 */

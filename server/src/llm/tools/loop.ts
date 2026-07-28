@@ -13,6 +13,7 @@ function addUsage(a: Usage, b: Usage): Usage {
     inputTokens: a.inputTokens + b.inputTokens,
     outputTokens: a.outputTokens + b.outputTokens,
     cachedInput: a.cachedInput + b.cachedInput,
+    cacheWrite: (a.cacheWrite ?? 0) + (b.cacheWrite ?? 0),
   };
 }
 

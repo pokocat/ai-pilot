@@ -8,7 +8,7 @@ import { builtinToolNames, resolveTools } from '../src/llm/tools/registry.js';
 import type { LoopMessage, StepFn, Tool, ToolContext } from '../src/llm/tools/types.js';
 
 const CTX: ToolContext = { tenantId: 't1', userId: 'u1', agentKey: 'ak', projectId: null, query: '增长怎么做' };
-const U = { inputTokens: 10, outputTokens: 5, cachedInput: 0 };
+const U = { inputTokens: 10, outputTokens: 5, cachedInput: 0, cacheWrite: 3 };
 
 function fakeTool(name: string, ret: string): Tool & { calls: Record<string, unknown>[] } {
   const calls: Record<string, unknown>[] = [];
@@ -30,7 +30,7 @@ describe('runToolLoop', () => {
     assert.equal(r.text, '基于检索给出判断');
     assert.equal(r.toolCalls, 1);
     assert.equal(r.iterations, 2);
-    assert.deepEqual(r.usage, { inputTokens: 20, outputTokens: 10, cachedInput: 0 }); // 两轮累加
+    assert.deepEqual(r.usage, { inputTokens: 20, outputTokens: 10, cachedInput: 0, cacheWrite: 6 }); // 两轮四档都累加
     assert.equal(tool.calls.length, 1); // 工具被执行一次
     assert.ok(seenResultsOnSecondCall && seenResultsOnSecondCall.role === 'tool_results');
     if (seenResultsOnSecondCall?.role === 'tool_results') {

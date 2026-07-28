@@ -10,7 +10,11 @@
 // 老用户余额观感基本不动，只有长输出场景才被正确加价。
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { billableTokenEquivalents, type ModelRate } from '../src/data/modelPrices.js';
+import {
+  billableTokenEquivalents,
+  weightedQuotaReserveTokens,
+  type ModelRate,
+} from '../src/data/modelPrices.js';
 import { billableOf } from '../src/services/usage.js';
 
 // 生产实配（2026-07-28 按 Anthropic Opus 4.6 官方价 × 汇率 7.2 刷入）：元 / 1M token
@@ -65,6 +69,14 @@ describe('兜底与开关', () => {
     assert.ok(Number.isFinite(got));
   });
 
+  test('只配输入价、漏配输出价 → 退回裸 token，不把输出免费送掉', () => {
+    const got = billableTokenEquivalents(
+      { inputTokens: 100, outputTokens: 50, cachedInput: 0 },
+      { in: 36, out: 0 },
+    );
+    assert.equal(got, 150);
+  });
+
   test('CREDIT_WEIGHTED=false → 立即退回旧口径（应急回滚，无需改代码）', () => {
     process.env.CREDIT_WEIGHTED = 'false';
     const got = billableTokenEquivalents({ inputTokens: 1000, outputTokens: 1000, cachedInput: 0 }, OPUS);
@@ -82,6 +94,22 @@ describe('兜底与开关', () => {
       OPUS,
     );
     assert.ok(got > 0 && Number.isFinite(got));
+  });
+});
+
+describe('生成前动态悲观预留', () => {
+  test('按最贵输入档 + 最大输出权重预留', () => {
+    const got = weightedQuotaReserveTokens(128_000, 8_000, OPUS);
+    assert.equal(got, 200_000, '输入缓存写最贵 1.25×，输出 ¥180/¥36=5×');
+  });
+
+  test('单价不完整时使用裸 token 上界', () => {
+    assert.equal(weightedQuotaReserveTokens(128_000, 8_000, { in: 36, out: 0 }), 136_000);
+  });
+
+  test('关闭加权开关时预留与旧口径同单位', () => {
+    process.env.CREDIT_WEIGHTED = 'false';
+    assert.equal(weightedQuotaReserveTokens(128_000, 8_000, OPUS), 136_000);
   });
 });
 

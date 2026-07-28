@@ -21,6 +21,22 @@ export interface ModelRate {
  */
 export const CACHE_WRITE_MULTIPLIER = 1.25;
 
+/** 生成请求的悲观预留：输入与输出分别按最贵档位折成输入 token 等价量。 */
+export function weightedQuotaReserveTokens(
+  maxInputTokens: number,
+  maxOutputTokens: number,
+  rate: ModelRate,
+): number {
+  const input = Math.max(0, maxInputTokens);
+  const output = Math.max(0, maxOutputTokens);
+  if ((process.env.CREDIT_WEIGHTED ?? 'true') === 'false') return Math.ceil(input + output);
+  // 输入/输出价必须成对配置；缺一档就无法可靠加权，退回裸 token 上界。
+  if (!(rate.in > 0) || !(rate.out > 0)) return Math.ceil(input + output);
+  const inputWeight = Math.max(1, (rate.cacheWrite ?? rate.in * CACHE_WRITE_MULTIPLIER) / rate.in);
+  const outputWeight = Math.max(1, rate.out / rate.in);
+  return Math.ceil(input * inputWeight + output * outputWeight);
+}
+
 /**
  * 把一次调用折成「**输入 token 等价量**」：按各档单价加权后的 token 数。
  *
@@ -44,7 +60,7 @@ export function billableTokenEquivalents(
   const total = Math.max(0, usage.inputTokens);
   const out = Math.max(0, usage.outputTokens);
   if ((process.env.CREDIT_WEIGHTED ?? 'true') === 'false') return total + out;
-  if (!(rate.in > 0)) return total + out; // 未配单价：没有权重可依据，保持旧口径
+  if (!(rate.in > 0) || !(rate.out > 0)) return total + out; // 单价缺任一主档：没有可靠权重，保持旧口径
 
   const cached = Math.min(Math.max(0, usage.cachedInput ?? 0), total);
   const written = Math.min(Math.max(0, usage.cacheWrite ?? 0), total - cached);

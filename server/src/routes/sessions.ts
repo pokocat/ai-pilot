@@ -11,7 +11,13 @@ import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
 import { refineSessionTitle } from '../services/sessionTitle.js';
 import { reserveCredits, type CreditReservation } from '../services/credits.js';
-import { reserveQuota, assertPlanActive, RESERVE_TOKENS, type QuotaReservation } from '../services/tokenQuota.js';
+import {
+  reserveQuota,
+  generationQuotaReserveTokens,
+  assertPlanActive,
+  RESERVE_TOKENS,
+  type QuotaReservation,
+} from '../services/tokenQuota.js';
 import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
@@ -238,7 +244,16 @@ export async function sessionRoutes(app: FastifyInstance) {
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
       // 复盘保底（M2 PR-6）：复盘类调用（buildReviewPrompt 的确定性前缀）额度耗尽仍每日限次放行
       const reviewIntent = /^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(text);
-      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio, reviewIntent ? { grace: 'review' } : undefined);  // P0-2：锁内预留额度（并发透支有界）
+      if (effective && !isImage) {
+        const reserveTokens = await generationQuotaReserveTokens({
+          forceLive: effective.providerMode === 'openai',
+          model: effective.providerMode === 'openai' ? effective.apiModel : null,
+        });
+        quotaReservation = await reserveQuota(user.id, ratio, {
+          reserveTokens,
+          ...(reviewIntent ? { grace: 'review' as const } : {}),
+        });
+      }
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
       if (quotaReservation) await quotaReservation.refund().catch(() => {});
@@ -444,7 +459,16 @@ export async function sessionRoutes(app: FastifyInstance) {
       await assertPlanActive(user.id); // 过期只读锁定（D4）：到期后拦一切 AI 交互（产出+对话+图片）→ PLAN_EXPIRED(403)
       if (effective) await assertAgentAccess(user.id, { key: effective.key, billing: effective.billing });
       const reviewIntent = /^帮我做 \d{4}-\d{2}-\d{2} 的执行复盘/.test(text); // 复盘保底（M2 PR-6）
-      if (effective && !isImage) quotaReservation = await reserveQuota(user.id, ratio, reviewIntent ? { grace: 'review' } : undefined);
+      if (effective && !isImage) {
+        const reserveTokens = await generationQuotaReserveTokens({
+          forceLive: effective.providerMode === 'openai',
+          model: effective.providerMode === 'openai' ? effective.apiModel : null,
+        });
+        quotaReservation = await reserveQuota(user.id, ratio, {
+          reserveTokens,
+          ...(reviewIntent ? { grace: 'review' as const } : {}),
+        });
+      }
       creditReservation = await reserveCredits(user.tenantId, user.id, diamondCost, `产出预扣 · ${effective?.name ?? agentKey}`);
     } catch (e) {
       if (quotaReservation) await quotaReservation.refund().catch(() => {});

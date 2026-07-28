@@ -9,6 +9,14 @@ import type { Prisma } from '@prisma/client';
 import { now, dayStart } from './clock.js';
 import { periodKeyOf, isExpired, nextResetAt, daysRemaining } from './planTime.js';
 import { featureFlagPayload } from './featureFlag.js';
+import { CHAT_MAX_TOKENS } from '../llm/providers/completionGuard.js';
+import { weightedQuotaReserveTokens } from '../data/modelPrices.js';
+import {
+  effectiveProvider,
+  getAiConfig,
+  maxConfiguredRateWeights,
+  resolveModelRate,
+} from './aiConfig.js';
 
 // P0-2：单次产出的悲观额度预留（token 计）。真实成本只有产出后才知道，故产出前先按此预扣、
 // 产出后 settle 按真实 token 多退少补。作用是**并发下把透支限制为有界**（每个在途请求各占一份），
@@ -16,6 +24,30 @@ import { featureFlagPayload } from './featureFlag.js';
 // 导出供 rawJson 系（extractGraphTriples/summarizePoints 等不回传真实 token 用量）的调用方
 // 按同一基准定额结算：reserveQuota 预留后 settle(RESERVE_TOKENS, ratio) = 全额扣留、不退。
 export const RESERVE_TOKENS = 2000;
+// 用户可见生成的最大输入预算：覆盖系统提示词、历史、120k 字符引用和档案块的悲观上界。
+// 最终预留还会叠加 CHAT_MAX_TOKENS × 当前最高输出权重；只影响在途占额，结算后多退少补。
+export const GENERATION_MAX_INPUT_TOKENS = 128_000;
+
+export async function generationQuotaReserveTokens(
+  opts?: { forceLive?: boolean; model?: string | null },
+): Promise<number> {
+  try {
+    const cfg = await getAiConfig();
+    // mock/测试调用没有真实 token 成本，保留小额并发门禁即可；自定义 OpenAI 智能体可用 forceLive 覆盖。
+    if (!opts?.forceLive && effectiveProvider(cfg) === 'mock') return RESERVE_TOKENS;
+    const rate = opts?.model
+      ? (await resolveModelRate(opts.model)).rate
+      : await maxConfiguredRateWeights();
+    return weightedQuotaReserveTokens(
+      GENERATION_MAX_INPUT_TOKENS,
+      CHAT_MAX_TOKENS,
+      rate,
+    );
+  } catch {
+    // DB/配置瞬时不可用时仍按裸 token 上界预留，不能退回旧的 2k 小额预留。
+    return GENERATION_MAX_INPUT_TOKENS + CHAT_MAX_TOKENS;
+  }
+}
 
 export class InsufficientQuotaError extends Error {
   statusCode = 402;
@@ -140,9 +172,9 @@ export interface QuotaReservation {
 }
 
 /**
- * P0-2：产出前在锁内**预扣**一份悲观估算额度（ceil(RESERVE_TOKENS × ratio)），返回结算句柄。
+ * P0-2：产出前在锁内**预扣**悲观估算额度（默认 RESERVE_TOKENS；用户可见生成传动态加权上界），返回结算句柄。
  * - 余额≤0 → 抛 402（与旧 ensureQuota 语义一致，仍允许「最后一次透支」：余额>0 即可预留一份）。
- * - 并发：advisory lock 串行化「读余额 + 扣预留」，故第二个并发请求会看到已被预留压低/转负的余额而被拦，透支有界。
+ * - 并发：advisory lock 串行化「读余额 + 扣预留」；上界大于余额时只占满余额到 0，预留本身不制造负数。
  * - settle：按真实 token 计算实际成本，delta = 预留 − 实际，>0 退回、<0 追扣（幂等：settle/refund 二选一只生效一次）。
  */
 // 复盘保底（M2 PR-6）：留存动作不因额度耗尽中断——余额≤0 时，复盘类调用每日最多放行 N 次
@@ -176,22 +208,35 @@ async function graceUsedToday(userId: string, kind: GraceKind): Promise<number> 
   });
 }
 
-export async function reserveQuota(userId: string, ratio = 1, opts?: { grace?: GraceKind }): Promise<QuotaReservation> {
+export async function reserveQuota(
+  userId: string,
+  ratio = 1,
+  opts?: { grace?: GraceKind; reserveTokens?: number },
+): Promise<QuotaReservation> {
   const w = await loadWallet(userId); // 锁外先确保账户存在 + 惰性月度重置（upsert 不宜进事务）
   if (!w) throw new InsufficientQuotaError('当前套餐无月度 token 额度，请升级套餐');
   if (isUnlimited(w.quota)) {
     return { unlimited: true, settle: async () => unlimitedState, refund: async () => {} };
   }
-  const reserved = Math.ceil(RESERVE_TOKENS * (ratio > 0 ? ratio : 1));
+  const targetReserved = Math.ceil(Math.max(0, opts?.reserveTokens ?? RESERVE_TOKENS) * (ratio > 0 ? ratio : 1));
+  let reserved = targetReserved;
   // 保底资格在锁外预查（并发极端下最多多放行一次，可接受；额度本身仍有界透支）
   const allowNegative = opts?.grace ? (await graceUsedToday(userId, opts.grace)) < (await gracePerDay(opts.grace)) : false;
   let graceGranted = false;
   await prisma.$transaction(async (tx) => {
     await lockQuota(tx, userId);
     const row = await tx.tokenWallet.findUnique({ where: { userId }, select: { balance: true } });
-    if ((row?.balance ?? 0) <= 0) {
+    const balance = row?.balance ?? 0;
+    if (balance <= 0) {
       if (!allowNegative) throw new InsufficientQuotaError();
       graceGranted = true; // 复盘保底：额度耗尽仍放行（透支记账）
+      // 保底本来就允许余额≤0 时再放行；此时不能把 20 万级生成上界整笔预扣成巨额负数。
+      // 只占基础 2k，完成后仍由 settle 按真实加权用量追扣，最终账不打折。
+      reserved = Math.min(targetReserved, RESERVE_TOKENS);
+    } else {
+      // 悲观上界可能大于当前余额：只占满现有余额，让其它并发看到 0 后被拦；
+      // 不能在真实调用发生前仅靠预留就把账户打成巨额负数。
+      reserved = Math.min(targetReserved, balance);
     }
     await tx.tokenWallet.update({ where: { userId }, data: { balance: { decrement: reserved } } });
   });

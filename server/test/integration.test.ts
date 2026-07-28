@@ -1542,14 +1542,40 @@ describe('TC-Z 月度 Token 额度', () => {
   test('Z4 P0-2：并发预留在锁内串行，透支有界（不再无界放行）', async () => {
     const t = await login(uniquePhone(), '额度丁');
     const tenantId = await tenantOf(t);
-    await setQuota(tenantId, t, 5000); // RESERVE_TOKENS=2000/次 → 5000 额度恰好放行 3 个并发后转负拦截
+    await setQuota(tenantId, t, 5000); // RESERVE_TOKENS=2000/次；末次只占满剩余 1000，不靠预留制造负数
     const results = await Promise.allSettled(Array.from({ length: 20 }, () => reserveQuota(t, 1)));
     const ok = results.filter((r) => r.status === 'fulfilled').length;
     const rejected = results.filter((r) => r.status === 'rejected').length;
-    assert.equal(ok, 3, '每次预留 2000 → 恰好放行 3 个（旧实现 ensureQuota 只判 balance>0 会放行全部 20 个）');
+    assert.equal(ok, 3, '两次各预留 2000、第三次占满剩余 1000 → 其余并发全部被拦');
     assert.equal(rejected, 17);
     const st = await getQuotaState(t);
-    assert.equal(st.balance, -1000, '透支有界：5000 − 3×2000 = −1000（约一份预留），而非任意负');
+    assert.equal(st.balance, 0, '悲观预留本身不应把余额打成负数；真实结算才允许单次透支');
+  });
+
+  test('Z4b 动态大额预留：余额低于上界时只放行一个在途生成', async () => {
+    const t = await login(uniquePhone(), '额度动态预留');
+    const tenantId = await tenantOf(t);
+    await setQuota(tenantId, t, 5000);
+    const results = await Promise.allSettled(
+      Array.from({ length: 10 }, () => reserveQuota(t, 1, { reserveTokens: 200_000 })),
+    );
+    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
+    assert.equal((await getQuotaState(t)).balance, 0);
+  });
+
+  test('Z4c 保底生成：动态大额上界只预留基础额度，结算再扣真实用量', async () => {
+    const t = await login(uniquePhone(), '额度保底预留');
+    const tenantId = await tenantOf(t);
+    await setQuota(tenantId, t, 0);
+
+    const reservation = await reserveQuota(t, 1, {
+      grace: 'quickscan',
+      reserveTokens: 200_000,
+    });
+    assert.equal((await getQuotaState(t)).balance, -2000);
+
+    await reservation.settle(5000, 1);
+    assert.equal((await getQuotaState(t)).balance, -5000);
   });
 
   test('Z3 /me 含 tokenQuota；/me/credits 返回钻石流水', async () => {

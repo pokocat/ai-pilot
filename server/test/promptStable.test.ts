@@ -81,6 +81,13 @@ describe('内容不能丢 —— 剥离只是换段落，不是删除', () => {
     const { stable } = buildSystemParts('知识：{知识库}。', TURN_A, 'chat');
     assert.match(stable, /参考资料/, '不能只是删掉——那样模型会以为这一项缺失');
   });
+
+  test('底座引用动态资料但本轮为空 → dynamic 明确给空态，不留下悬空指针', () => {
+    const empty = ctxOf({ knowledge: [], references: [] });
+    const { dynamic } = buildSystemParts('知识：{知识库}。引用：{引用资料}。', empty, 'chat');
+    assert.match(dynamic, /【知识库相关召回（仅供参考）】\n无相关知识/);
+    assert.match(dynamic, /【用户引用的资料（请优先采纳并标注出处）】\n无引用资料/);
+  });
 });
 
 describe('不含逐轮占位符的底座（general 的形态）不受影响', () => {

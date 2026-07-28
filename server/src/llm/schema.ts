@@ -881,8 +881,12 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.dataSourceLine) blocks.push(ctx.dataSourceLine); // V7-07：已接入数据源清单（军师可据此要证据）
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);
-  if (ctx.references?.length) blocks.push(`【用户引用的资料（请优先采纳并标注出处）】\n${ctx.references.join('\n')}`);
-  if (ctx.knowledge?.length) blocks.push(`【知识库相关召回（仅供参考）】\n${ctx.knowledge.join('\n')}`);
+  if (ctx.references?.length || volatileUsed.includes('{引用资料}')) {
+    blocks.push(`【用户引用的资料（请优先采纳并标注出处）】\n${ctx.references?.length ? ctx.references.join('\n') : '无引用资料'}`);
+  }
+  if (ctx.knowledge?.length || volatileUsed.includes('{知识库}')) {
+    blocks.push(`【知识库相关召回（仅供参考）】\n${ctx.knowledge?.length ? ctx.knowledge.join('\n') : '无相关知识'}`);
+  }
   if (ctx.understandingMaturity !== 'ready' && ctx.understandingQuestions?.length) {
     blocks.push(`【资料缺口（不足以判断时先追问）】\n${questionText}`);
   }
