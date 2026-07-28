@@ -9,9 +9,9 @@ import { runToolLoop } from '../tools/loop.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext, TurnOutput } from '../tools/types.js';
 import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js';
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。见 services/llmGate.ts 顶部说明。
-import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited } from '../../services/llmGate.js';
+import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
-import { withEndpoint } from '../../services/llmPool.js';
+import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable } from '../../services/llmPool.js';
 import { maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
 
 interface OAToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
@@ -110,36 +110,54 @@ async function callChat(
 ): Promise<OAResponse> {
   const base = cfg.baseUrl.replace(/\/+$/, '');
   const timeoutMs = requestTimeoutMs(cfg, phase);
-  const watch = deadline(timeoutMs);
+  // 超时窗必须**每次端点尝试各建各的**：池在 429/5xx 后会转移端点重发，若整个 callChat 共用
+  // 一个窗，第一个端点耗掉大半预算（或直接把窗打超时中止）后，转移到第二个端点的请求带着
+  // 已中止/濒死的 signal 立刻失败——重试形同虚设。lastWatch 只供失败诊断（耗时/是否超时）。
+  let lastWatch: ReturnType<typeof deadline> | null = null;
   try {
     // 过端点池 + 并发闸：ep 是本次实际选中的端点（未启用池时就是传入的 cfg）。
     // 请求体在闭包里按 ep 组装，故 429/5xx 转移到下一个端点时能原样重发。
     return await withEndpoint(cfg, async (ep) => {
-      const epBase = ep.baseUrl.replace(/\/+$/, '') || base;
-      const res = await fetch(`${epBase}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
-        body: JSON.stringify({
-          model: ep.model,
-          ...body,
-          ...thinkingRequestTuning(ep, {
-            allowThinking: allowThinking ?? (!body.tools && !body.tool_choice),
+      const watch = deadline(timeoutMs);
+      lastWatch = watch;
+      try {
+        const epBase = ep.baseUrl.replace(/\/+$/, '') || base;
+        const res = await fetch(`${epBase}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
+          body: JSON.stringify({
+            model: ep.model,
+            ...body,
+            ...thinkingRequestTuning(ep, {
+              allowThinking: allowThinking ?? (!body.tools && !body.tool_choice),
+            }),
           }),
-        }),
-        signal: watch.signal,
-      });
-      const data = (await res.json().catch(() => ({}))) as OAResponse;
-      if (!res.ok) {
-        // 带上 statusCode，让闸门/池能确定性识别 429 而不是靠文案匹配（429 → 整窗冷却 + 转移）。
-        throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), { statusCode: res.status });
+          signal: watch.signal,
+        });
+        const data = (await res.json().catch(() => ({}))) as OAResponse;
+        if (!res.ok) {
+          // 带上 statusCode，让闸门/池能确定性识别 429 而不是靠文案匹配（429 → 整窗冷却 + 转移）。
+          throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), { statusCode: res.status });
+        }
+        return data;
+      } finally {
+        watch.clear();
       }
-      return data;
     }, { affinityKey: affinity });
   } catch (err) {
-    throw providerFailure(err, cfg, base, phase, timeoutMs, watch);
-  } finally {
-    watch.clear();
+    throw providerFailure(err, cfg, base, phase, timeoutMs, lastWatch ?? deadlineStub());
   }
+}
+
+/** withEndpoint 前置阶段（解析候选/占并发槽）就抛错时还没有任何尝试窗——诊断按未超时、0 耗时计。 */
+function deadlineStub(): ReturnType<typeof deadline> {
+  return {
+    signal: new AbortController().signal,
+    refresh: () => {},
+    clear: () => {},
+    timedOut: () => false,
+    elapsedMs: () => 0,
+  };
 }
 
 async function* readOpenAIStream(res: Response, onChunk: () => void): AsyncGenerator<OAStreamChunk> {
@@ -184,46 +202,71 @@ async function* readOpenAIStream(res: Response, onChunk: () => void): AsyncGener
   }
 }
 
-async function callChatStream(cfg: ResolvedAiConfig, body: Record<string, unknown>, includeUsage = true): Promise<AsyncGenerator<OAStreamChunk>> {
-  const base = cfg.baseUrl.replace(/\/+$/, '');
-  const watch = deadline(cfg.timeoutMs);
-  // 流式的槽位要持有到整条流消费完（一条流在上游眼里全程占一个并发），所以手动 acquire，
-  // 并把释放责任移交给下面返回的 generator；建流阶段就失败时由本函数的 finally 兜底释放。
-  const slot = await acquireLlmSlot(cfg.lane);
-  let handedOff = false;
-  try {
-    const res = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({
-        model: cfg.model,
-        ...body,
-        ...thinkingRequestTuning(cfg, { allowThinking: !body.tools && !body.tool_choice }),
-        stream: true,
-        ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
-      }),
-      signal: watch.signal,
-    });
-    if (!res.ok) {
-      const data = (await res.clone().json().catch(async () => {
-        const text = await res.text().catch(() => '');
-        return text ? { error: { message: text } } : {};
-      })) as OAResponse;
-      if (res.status === 429) noteUpstreamRateLimited(undefined, cfg.lane);
-      throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), { statusCode: res.status });
+async function callChatStream(
+  cfg: ResolvedAiConfig,
+  body: Record<string, unknown>,
+  includeUsage = true,
+  affinity?: string,
+): Promise<AsyncGenerator<OAStreamChunk>> {
+  // 建流阶段走端点池（此前流式完全绕过池：单端点 429/宕机时流式对话没有任何兜底，
+  // 冷却态也不共享）。转移规则与 claude 流式一致：响应头返回（res.ok）之前的 429/5xx/超时
+  // 可换端点重试；流一旦建立只能如实消费/报错——中途换端点等于让用户看到重复的半截回答。
+  const cls = cfg.lane === 'aux' ? 'aux' : 'main';
+  const candidates = await resolveCandidates(cfg, { affinityKey: affinity });
+  const maxAttempts = Math.max(1, Math.min(candidates.length, Number(process.env.LLM_POOL_MAX_ATTEMPTS ?? 3) || 3));
+
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const ep = candidates[attempt];
+    const base = ep.baseUrl.replace(/\/+$/, '') || cfg.baseUrl.replace(/\/+$/, '');
+    const lane = ep.endpointId ? endpointLane(cls, ep.endpointId) : cfg.lane;
+    // 超时窗每次尝试各建各的（与 callChat 同一坑：共用窗会让转移后的请求带着濒死 signal 出发）。
+    const watch = deadline(ep.timeoutMs);
+    // 流式的槽位要持有到整条流消费完（一条流在上游眼里全程占一个并发），所以手动 acquire，
+    // 并把释放责任移交给下面返回的 generator；建流阶段失败由本轮 finally 兜底释放。
+    const slot = await acquireLlmSlot(lane);
+    let handedOff = false;
+    try {
+      const res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
+        body: JSON.stringify({
+          model: ep.model,
+          ...body,
+          ...thinkingRequestTuning(ep, { allowThinking: !body.tools && !body.tool_choice }),
+          stream: true,
+          ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
+        }),
+        signal: watch.signal,
+      });
+      if (!res.ok) {
+        const data = (await res.clone().json().catch(async () => {
+          const text = await res.text().catch(() => '');
+          return text ? { error: { message: text } } : {};
+        })) as OAResponse;
+        if (res.status === 429) noteUpstreamRateLimited(undefined, lane);
+        throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), { statusCode: res.status });
+      }
+      handedOff = true;
+      return (async function* () {
+        try { yield* readOpenAIStream(res, watch.refresh); }
+        catch (err) { slot.noteError(err); throw providerFailure(err, ep, base, 'chat_stream', ep.timeoutMs, watch); }
+        finally { watch.clear(); slot.release(); }
+      })();
+    } catch (err) {
+      lastErr = err;
+      slot.noteError(err);
+      const last = attempt === maxAttempts - 1;
+      // 不可转移（4xx 请求本身的问题等）或没有池端点 → 如实抛；可转移即使没有下一个候选也要写冷却态。
+      if (!ep.endpointId || !isTransferable(err)) throw providerFailure(err, ep, base, 'chat_stream', ep.timeoutMs, watch);
+      await coolEndpoint(ep.endpointId, 30_000, 'stream_error');
+      if (last) throw providerFailure(err, ep, base, 'chat_stream', ep.timeoutMs, watch);
+      console.warn(`[llm:openai] 流式端点 ${ep.label || ep.endpointId} 建流失败并冷却，转移到下一个：${(err as Error).message}`);
+    } finally {
+      if (!handedOff) { watch.clear(); slot.release(); }
     }
-    handedOff = true;
-    return (async function* () {
-      try { yield* readOpenAIStream(res, watch.refresh); }
-      catch (err) { slot.noteError(err); throw providerFailure(err, cfg, base, 'chat_stream', cfg.timeoutMs, watch); }
-      finally { watch.clear(); slot.release(); }
-    })();
-  } catch (err) {
-    slot.noteError(err);
-    throw providerFailure(err, cfg, base, 'chat_stream', cfg.timeoutMs, watch);
-  } finally {
-    if (!handedOff) slot.release();
   }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 /**
@@ -347,10 +390,10 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   };
   let chunks: AsyncGenerator<OAStreamChunk>;
   try {
-    chunks = await callChatStream(cfg, body, true);
+    chunks = await callChatStream(cfg, body, true, affinityOf(ctx));
   } catch (err) {
     if (!/stream_options|include_usage/i.test((err as Error).message)) throw err;
-    chunks = await callChatStream(cfg, body, false);
+    chunks = await callChatStream(cfg, body, false, affinityOf(ctx));
   }
   let text = '';
   let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };

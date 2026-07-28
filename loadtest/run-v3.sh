@@ -100,7 +100,13 @@ llm_rung() {
 }
 
 step "4. 重启 api：注入 mock 延迟 6s±3s，闸门/排队才真实占位"
-LT_MOCK_LATENCY_MS=6000 LT_MOCK_LATENCY_JITTER_MS=3000 "${DC[@]}" up -d api
+# v3 实测坑：DC 带 sudo 时，`VAR=x sudo docker compose` 的环境变量被 sudo 的 env_reset 剥掉，
+# compose 插值拿到空 → 延迟静默回落 0，这一档等于白跑。必须经 `sudo env` 显式透传。
+if docker ps >/dev/null 2>&1; then
+  LT_MOCK_LATENCY_MS=6000 LT_MOCK_LATENCY_JITTER_MS=3000 docker compose -f "$LT/docker-compose.yml" up -d api
+else
+  sudo env LT_MOCK_LATENCY_MS=6000 LT_MOCK_LATENCY_JITTER_MS=3000 docker compose -f "$LT/docker-compose.yml" up -d api
+fi
 sleep 20
 smoke || { echo "!! 注入延迟后网关不可达"; exit 1; }
 

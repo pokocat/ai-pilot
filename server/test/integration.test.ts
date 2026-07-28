@@ -22,6 +22,7 @@ import { dryRunTool } from '../src/services/skillTools.js';
 import { aggregateToolStats } from '../src/services/toolStats.js';
 import { percentEncode, canonicalQuery, aliyunSignature } from '../src/services/sms.js';
 import { _resetTokenCache } from '../src/services/wechat.js';
+import { applyPlanPurchase } from '../src/services/purchase.js';
 
 const tenantOf = async (token: string) =>
   (await prisma.user.findUnique({ where: { id: token } }))!.tenantId;
@@ -817,16 +818,21 @@ describe('TC-K 算力账户', () => {
     assert.equal(row.totalGranted, before + decision.creditsPerMonth);
   });
 
-  test('K5 购买企业版不限量后，报告产出不再扣减', async () => {
+  test('K5 开通企业版不限量后，报告产出不再扣减', async () => {
     const t = await login(uniquePhone());
     const plans = await api('GET', '/api/plans');
     const enterprise = plans.body.find((p: any) => p.creditsPerMonth < 0);
     assert.ok(enterprise, '应有不限量企业版套餐');
 
-    const buy = await api('POST', `/api/plans/${enterprise.id}/purchase`, { token: t, body: {} });
-    assert.equal(buy.status, 200);
-    assert.equal(buy.body.creditBalance, -1);
-    assert.equal(buy.body.grantedCredits, 0);
+    // 面议档不可自助 /purchase（CONTACT_SALES，见 planExpiryRoute 回归）；不限量语义
+    // 的正当开通路径是运营后台 admin_grant —— 与生产 41 个企业版的实际来源一致。
+    const denied = await api('POST', `/api/plans/${enterprise.id}/purchase`, { token: t, body: {} });
+    assert.equal(denied.status, 402, '面议档自助购买必须被拦');
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: t }, select: { tenantId: true } });
+    const planRow = await prisma.plan.findUniqueOrThrow({ where: { id: enterprise.id } });
+    const r = await applyPlanPurchase({ id: t, tenantId: user.tenantId }, planRow, { reason: '企业版 · 运营开通', source: 'admin_grant' });
+    assert.equal(r.creditBalance, -1);
+    assert.equal(r.grantedCredits, 0);
 
     const gen = await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
     assert.equal(gen.status, 200);
