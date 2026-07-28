@@ -3,7 +3,7 @@ import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import { upsertTriples, queryRelations, listEntities } from '../src/services/knowledgeGraph.js';
-import { getApp, closeApp, api, seedBaseline, cleanBusiness } from './helpers.js';
+import { getApp, closeApp, api, seedBaseline, cleanBusiness, anyPlanId } from './helpers.js';
 
 let tenantId = '', userId = '';
 
@@ -17,7 +17,7 @@ beforeEach(async () => {
   await seedBaseline();
   const tenant = await prisma.tenant.create({ data: { name: '图谱公司' } });
   tenantId = tenant.id;
-  const user = await prisma.user.create({ data: { tenantId, phone: '13600000001', name: '图谱用户', role: 'owner' } });
+  const user = await prisma.user.create({ data: { tenantId, phone: '13600000001', name: '图谱用户', role: 'owner', planId: await anyPlanId() } });
   userId = user.id;
 });
 

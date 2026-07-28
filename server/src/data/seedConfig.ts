@@ -52,26 +52,33 @@ export const PLANS: {
   features: string[];
   highlighted: boolean;
 }[] = [
+  // 2026-07-28 商业化改版：砍掉免费体验档，起步即收费。定价依据生产 30 天实测
+  // （一次完整咨询 ≈ 3 万加权 token ≈ ¥1.09 LLM 成本，重度用户月耗最高 269 万）：
+  //   入门版 满耗成本 ¥14.4 → 毛利 79%；决策版 满耗 ¥54 → 月付毛利 73% / 年付 67%。
+  // 入门版兼任测试期默认档（TEST_DEFAULT_PLAN_NAME=入门版）：额度即成本封顶，
+  // 每个测试期注册用户最多花掉 ¥14.4/月。
   {
-    name: '体验版',
-    price: 0,
+    name: '入门版',
+    price: 6800, // ¥68/月
     period: 'month',
-    creditsPerMonth: 10,
-    tokenQuotaPerMonth: 200000,
-    agentCount: 3,
-    features: ['10 点 / 月', '基础顾问 3 位', '适合轻量试用'],
+    creditsPerMonth: 20,
+    tokenQuotaPerMonth: 400000, // 加权 token（输入等价口径），约 13 次完整咨询
+    agentCount: 4,
+    features: ['每月约 13 次深度咨询', '20 点 / 月', '基础顾问 4 位', '知识库与项目管理'],
     highlighted: false,
   },
-  // 决策版·月付（D11 新增付费月付 SKU）：与年付同档月度权益（68 点/月、100 万 token/月、8 助手），
+  // 决策版·月付（D11 新增付费月付 SKU）：与年付同档月度权益（68 点/月、150 万 token/月、8 助手），
   // 仅计费周期不同 → 使「月→年升级折算」实际生效（业界 SaaS 通行的月/年同权益、年付更省）。
+  // 额度 100 万→150 万：算力改为按单价加权后（输出 5×），重度用户实测月耗 269 万，
+  // 100 万在新口径下 11 天即穿——150 万 ≈ 50 次咨询，覆盖到 P90 用户。
   {
     name: '决策版 · 月付',
     price: 19800, // ¥198/月（年付 ¥1980 ≈ 10 个月月付价 → 年付立省 2 个月）
     period: 'month',
     creditsPerMonth: 68,
-    tokenQuotaPerMonth: 1000000,
+    tokenQuotaPerMonth: 1500000,
     agentCount: 8,
-    features: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出', '按月付费 · 随时升年付'],
+    features: ['每月约 50 次深度咨询', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出', '按月付费 · 随时升年付'],
     highlighted: false,
   },
   // 决策版（年付）：旗舰主推（highlighted）。保持名称「决策版」不带后缀 = 头牌方案，亦兼容既有用例/演示数据。
@@ -80,9 +87,9 @@ export const PLANS: {
     price: 198000,
     period: 'year',
     creditsPerMonth: 68,
-    tokenQuotaPerMonth: 1000000,
+    tokenQuotaPerMonth: 1500000,
     agentCount: 8,
-    features: ['年付立省 2 个月（约 ¥396）', '不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
+    features: ['年付立省 2 个月（约 ¥396）', '每月约 50 次深度咨询', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
     highlighted: true,
   },
   {

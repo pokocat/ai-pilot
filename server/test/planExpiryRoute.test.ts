@@ -145,7 +145,9 @@ test('生产硬化：支付未配 + 非演示环境 → 付费套餐 /purchase �
   const token = await login(uniquePhone(), '生产购买者');
   const plans = await api('GET', '/api/plans', { token });
   const paid = (plans.body as Array<{ id: string; price: number }>).find((p) => p.price > 0)!;
-  const free = (plans.body as Array<{ id: string; price: number }>).find((p) => p.price === 0)!;
+  // 2026-07-28 去免费档：目录里不再有 price=0 的档，但 /purchase 的免费发放路径仍服务于
+  // 运营临时活动档等场景——测试自建一个验证该路径未被误伤。
+  const free = await prisma.plan.create({ data: { name: '临时活动档', price: 0, period: 'month', creditsPerMonth: 5, tokenQuotaPerMonth: 10_000, agentCount: 3, featuresJson: [], sort: 99 } });
 
   const prev = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production'; // 模拟生产：demoPurchaseEnabled() → false
@@ -161,4 +163,18 @@ test('生产硬化：支付未配 + 非演示环境 → 付费套餐 /purchase �
   // 恢复测试环境后（demoPurchaseEnabled=true）→ 付费套餐演示发放仍放行
   const okPaid = await api('POST', `/api/plans/${paid.id}/purchase`, { token });
   assert.equal(okPaid.status, 200, '测试/演示环境允许付费套餐演示发放');
+});
+
+test('生产硬化：面议档（price<0，企业版）绝不自助发放 → 402 CONTACT_SALES', async () => {
+  // 原判断只拦 price>0，负价（面议）从缝里漏过去：任何登录用户拿套餐 id 就能免费开通
+  // 「不限量点数 + 不限量 token + 永不过期」。演示环境也必须拦——这不是支付问题，是档位性质问题。
+  const token = await login(uniquePhone(), '面议试探者');
+  const plans = await api('GET', '/api/plans', { token });
+  const negotiated = (plans.body as Array<{ id: string; price: number }>).find((p) => p.price < 0)!;
+  assert.ok(negotiated, '目录应有面议档（企业版·私有化）');
+  const r = await api('POST', `/api/plans/${negotiated.id}/purchase`, { token });
+  assert.equal(r.status, 402);
+  assert.equal(r.body.code, 'CONTACT_SALES');
+  const u = await prisma.user.findUniqueOrThrow({ where: { id: token }, include: { plan: true } });
+  assert.notEqual(u.plan?.name, '企业版 · 私有化', '面议档绝不能被自助开通');
 });

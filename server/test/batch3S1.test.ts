@@ -3,7 +3,7 @@
 import { test, describe, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
-import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.js';
+import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone, anyPlanId } from './helpers.js';
 import { markPaidAndApply } from '../src/services/wechatPay.js';
 import { scanPrescriptionFollowups, pendingFollowupTools, prescriptionEffectBlock, toolMenu } from '../src/services/prescription.js';
 
@@ -17,7 +17,7 @@ const deliverableWith = (prescriptions: unknown) => ({
 
 async function createUserWithCredits(balance: number): Promise<{ tenantId: string; userId: string }> {
   const tenant = await prisma.tenant.create({ data: { name: 'S1 测试企业' } });
-  const user = await prisma.user.create({ data: { tenantId: tenant.id, phone: uniquePhone(), name: 'S1 用户', role: 'owner' } });
+  const user = await prisma.user.create({ data: { tenantId: tenant.id, phone: uniquePhone(), name: 'S1 用户', role: 'owner', planId: await anyPlanId() } });
   await prisma.creditLedger.create({ data: { tenantId: tenant.id, userId: user.id, delta: balance, reason: '测试初始余额', balance } });
   return { tenantId: tenant.id, userId: user.id };
 }

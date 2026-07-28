@@ -46,6 +46,8 @@ import { sandboxEnabled, assertSandboxSafe } from './services/sandbox.js';
 import { enterNow } from './services/clock.js';
 import { getRedis } from './services/redis.js';
 import { verifyUserToken } from './services/userToken.js';
+import { planGateState, PlanRequiredError } from './services/planGate.js';
+import { PlanExpiredError } from './services/tokenQuota.js';
 import {
   startEventLoopMonitor, noteRequestStart, noteRequestEnd, noteRequestAborted,
   gateEnter, gateLeave, gateInFlightNow, noteOverloadRejected,
@@ -189,6 +191,33 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
         const t = v.trim();
         const d = new Date(/^\d+$/.test(t) ? Number(t) : t);
         if (!Number.isNaN(d.getTime())) enterNow(d);
+      }
+    });
+  }
+
+  // 商业化禁写闸（2026-07-28 去免费档改版）：无有效套餐的登录用户只读，一切写方法 403 PLAN_REQUIRED。
+  // 放行前缀：auth（注册/登录本身写库）、付费转化全链路（plans/skus 下单+purchase、pay 支付回调/查单——
+  // 只读用户必须永远付得了钱，否则没人能从只读变付费）、wechat（平台回调无用户态）、admin（ADMIN_TOKEN 独立门）。
+  // 未带 token / token 无效的写请求不在此拦——各路由自身的 401 兜底，本闸只回答「这个已登录用户有没有开通」。
+  // 应急开关：PLAN_WRITE_GATE=false 全局停用。
+  if ((process.env.PLAN_WRITE_GATE ?? 'true') !== 'false') {
+    const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+    const ALLOW_PREFIX = ['/api/auth/', '/api/pay/', '/api/plans/', '/api/skus/', '/api/wechat/', '/api/admin'];
+    app.addHook('onRequest', async (req, reply) => {
+      if (!WRITE_METHODS.has(req.method)) return;
+      if (!req.url.startsWith('/api/')) return;
+      if (ALLOW_PREFIX.some((p) => req.url.startsWith(p))) return;
+      const userId = verifyUserToken(req.headers['x-user-id'] as string | undefined);
+      if (!userId) return;
+      const state = await planGateState(userId);
+      if (state === 'none') {
+        const e = new PlanRequiredError();
+        return reply.code(403).send({ error: e.message, code: e.code });
+      }
+      if (state === 'expired') {
+        // 与 assertPlanActive 同一错误码：前端据 PLAN_EXPIRED 进只读态 + 续费引导，不能被本闸抢答成「未开通」。
+        const e = new PlanExpiredError();
+        return reply.code(403).send({ error: e.message, code: e.code });
       }
     });
   }

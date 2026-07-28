@@ -22,8 +22,11 @@ beforeEach(async () => {
 
 async function createUserWithCredits(balance: number) {
   const tenant = await prisma.tenant.create({ data: { name: '并发测试企业' } });
+  // 去免费档改版后无套餐用户全局禁写（403 PLAN_REQUIRED）——本测试测的是并发双花，
+  // 用户必须先具备有效套餐才走得到扣减逻辑。
+  const plan = await prisma.plan.findFirstOrThrow({ orderBy: { sort: 'asc' } });
   const user = await prisma.user.create({
-    data: { tenantId: tenant.id, phone: uniquePhone(), name: '并发用户', role: 'owner' },
+    data: { tenantId: tenant.id, phone: uniquePhone(), name: '并发用户', role: 'owner', planId: plan.id },
   });
   await prisma.creditLedger.create({
     data: { tenantId: tenant.id, userId: user.id, delta: balance, reason: '测试初始余额', balance },

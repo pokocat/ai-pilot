@@ -26,6 +26,14 @@ import { _resetTokenCache } from '../src/services/wechat.js';
 const tenantOf = async (token: string) =>
   (await prisma.user.findUnique({ where: { id: token } }))!.tenantId;
 
+// 测试期默认开通（helpers 设 TEST_DEFAULT_PLAN_NAME）后，login 用户带 planActivatedAt 锚点。
+// 测试里手动 setQuota 必须传同一锚点，否则钱包周期键不匹配 → 下一次 loadWallet 触发
+// 惰性月度重置，把测试刚设的余额刷回满额（Z4 曾因此在并发中途多放行一个预留）。
+const setQuotaAnchored = async (tenantId: string, token: string, quota: number) => {
+  const u = await prisma.user.findUnique({ where: { id: token }, select: { planActivatedAt: true } });
+  await setQuota(tenantId, token, quota, u?.planActivatedAt ?? null);
+};
+
 before(async () => {
   process.env.ADMIN_TOKEN = 'test-admin-token';
   await cleanBusiness();
@@ -735,6 +743,9 @@ describe('TC-K 算力账户', () => {
   });
 
   test('K1b 测试期配置后，新注册用户默认开通决策版完整权益', async () => {
+    // helpers 全局设了 TEST_DEFAULT_PLAN_NAME=入门版（去免费档后 login 用户要能写库），
+    // 这里必须「保存-恢复」而不是 delete —— delete 会把全文件后续 login() 都变成无套餐裸注册。
+    const saved = process.env.TEST_DEFAULT_PLAN_NAME;
     process.env.TEST_DEFAULT_PLAN_NAME = '决策版';
     try {
       const t = await login(uniquePhone());
@@ -748,12 +759,13 @@ describe('TC-K 算力账户', () => {
       });
       assert.equal(user?.plan?.name, '决策版');
       assert.ok(user?.planExpiresAt && user.planExpiresAt.getTime() > Date.now(), '年付决策版应有未来到期日');
-      assert.equal(user?.tokenWallet?.quota, 1_000_000);
-      assert.equal(user?.tokenWallet?.balance, 1_000_000);
+      assert.equal(user?.tokenWallet?.quota, 1_500_000);
+      assert.equal(user?.tokenWallet?.balance, 1_500_000);
       assert.equal(ledger?.balance, 68);
       assert.equal(ledger?.reason, '决策版 · 测试期开通');
     } finally {
-      delete process.env.TEST_DEFAULT_PLAN_NAME;
+      if (saved === undefined) delete process.env.TEST_DEFAULT_PLAN_NAME;
+      else process.env.TEST_DEFAULT_PLAN_NAME = saved;
     }
   });
 
@@ -771,7 +783,7 @@ describe('TC-K 算力账户', () => {
   test('K3 额度不足 → 产出被 402 INSUFFICIENT_QUOTA 拦截、不留会话', async () => {
     const t = await login(uniquePhone());
     const tenantId = await tenantOf(t);
-    await setQuota(tenantId, t, 0); // 置零本月 token 额度
+    await setQuotaAnchored(tenantId, t, 0); // 置零本月 token 额度
     const r = await api('POST', '/api/generate-sync', { token: t, body: { text: '战略体检', agentKey: 'strat' } });
     assert.equal(r.status, 402);
     assert.equal(r.body.code, 'INSUFFICIENT_QUOTA');
@@ -1517,7 +1529,7 @@ describe('TC-Z 月度 Token 额度', () => {
   test('Z1 setQuota/charge/ensure：ceil(token×ratio) 扣减、透支后拦截', async () => {
     const t = await login(uniquePhone(), '额度甲');
     const tenantId = await tenantOf(t);
-    await setQuota(tenantId, t, 1000);
+    await setQuotaAnchored(tenantId, t, 1000);
     let st = await getQuotaState(t);
     assert.equal(st.quota, 1000);
     assert.equal(st.used, 0);
@@ -1533,7 +1545,7 @@ describe('TC-Z 月度 Token 额度', () => {
   test('Z2 不限量(quota=-1) 放行且不扣', async () => {
     const t = await login(uniquePhone(), '额度乙');
     const tenantId = await tenantOf(t);
-    await setQuota(tenantId, t, -1);
+    await setQuotaAnchored(tenantId, t, -1);
     await ensureQuota(t);
     const st = await chargeQuota(t, 99999, 5);
     assert.equal(st.unlimited, true);
@@ -1542,7 +1554,7 @@ describe('TC-Z 月度 Token 额度', () => {
   test('Z4 P0-2：并发预留在锁内串行，透支有界（不再无界放行）', async () => {
     const t = await login(uniquePhone(), '额度丁');
     const tenantId = await tenantOf(t);
-    await setQuota(tenantId, t, 5000); // RESERVE_TOKENS=2000/次；末次只占满剩余 1000，不靠预留制造负数
+    await setQuotaAnchored(tenantId, t, 5000); // RESERVE_TOKENS=2000/次；末次只占满剩余 1000，不靠预留制造负数
     const results = await Promise.allSettled(Array.from({ length: 20 }, () => reserveQuota(t, 1)));
     const ok = results.filter((r) => r.status === 'fulfilled').length;
     const rejected = results.filter((r) => r.status === 'rejected').length;
@@ -1555,7 +1567,7 @@ describe('TC-Z 月度 Token 额度', () => {
   test('Z4b 动态大额预留：余额低于上界时只放行一个在途生成', async () => {
     const t = await login(uniquePhone(), '额度动态预留');
     const tenantId = await tenantOf(t);
-    await setQuota(tenantId, t, 5000);
+    await setQuotaAnchored(tenantId, t, 5000);
     const results = await Promise.allSettled(
       Array.from({ length: 10 }, () => reserveQuota(t, 1, { reserveTokens: 200_000 })),
     );
@@ -1566,7 +1578,7 @@ describe('TC-Z 月度 Token 额度', () => {
   test('Z4c 保底生成：动态大额上界只预留基础额度，结算再扣真实用量', async () => {
     const t = await login(uniquePhone(), '额度保底预留');
     const tenantId = await tenantOf(t);
-    await setQuota(tenantId, t, 0);
+    await setQuotaAnchored(tenantId, t, 0);
 
     const reservation = await reserveQuota(t, 1, {
       grace: 'quickscan',
@@ -1581,7 +1593,7 @@ describe('TC-Z 月度 Token 额度', () => {
   test('Z3 /me 含 tokenQuota；/me/credits 返回钻石流水', async () => {
     const t = await login(uniquePhone(), '额度丙');
     const tenantId = await tenantOf(t);
-    await setQuota(tenantId, t, 500);
+    await setQuotaAnchored(tenantId, t, 500);
     const me = await api('GET', '/api/me', { token: t });
     assert.equal(me.status, 200);
     assert.equal(me.body.tokenQuota.limit, 500);
@@ -1594,7 +1606,7 @@ describe('TC-Z 月度 Token 额度', () => {
   test('Z4 注销连带清除 token_wallet（外键安全）', async () => {
     const t = await login(uniquePhone(), '额度丁');
     const tenantId = await tenantOf(t);
-    await setQuota(tenantId, t, 1000);
+    await setQuotaAnchored(tenantId, t, 1000);
     assert.equal(await prisma.tokenWallet.count({ where: { userId: t } }), 1);
     const del = await api('DELETE', '/api/me', { token: t });
     assert.equal(del.status, 200);

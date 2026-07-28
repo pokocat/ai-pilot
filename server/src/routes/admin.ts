@@ -24,6 +24,7 @@ import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { listModerationLogs } from '../services/moderation.js';
 import { isoSecond, recordAudit } from '../services/audit.js';
+import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
 import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
@@ -752,6 +753,7 @@ export async function adminRoutes(app: FastifyInstance) {
     const baseMs = Math.max(at.getTime(), user.planExpiresAt ? user.planExpiresAt.getTime() : at.getTime());
     const next = new Date(baseMs + days * 864e5);
     await prisma.user.update({ where: { id: userId }, data: { planExpiresAt: next } });
+    bustPlanGate(userId); // 过期账号被延期后立即恢复可写（禁写闸缓存 30s）
     await recordAudit({ tenantId: user.tenantId, userId, action: 'admin.user.plan.extend', payload: { by: actorName(actor), days, before: user.planExpiresAt ? isoSecond(user.planExpiresAt) : null, after: isoSecond(next) } });
     return { ok: true, planExpiresAt: next.toISOString() };
   });

@@ -2,7 +2,7 @@
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
-import { getApp, closeApp, api, seedBaseline, cleanBusiness } from './helpers.js';
+import { getApp, closeApp, api, seedBaseline, cleanBusiness, anyPlanId } from './helpers.js';
 
 const ADMIN = 'p1-master-key';
 let tenantId = '', userId = '', reportId = '';
@@ -19,7 +19,7 @@ beforeEach(async () => {
   await seedBaseline();
   const tenant = await prisma.tenant.create({ data: { name: '看板公司' } });
   tenantId = tenant.id;
-  const user = await prisma.user.create({ data: { tenantId, phone: '13700000009', name: '老板', role: 'owner' } });
+  const user = await prisma.user.create({ data: { tenantId, phone: '13700000009', name: '老板', role: 'owner', planId: await anyPlanId() } });
   userId = user.id;
   const project = await prisma.project.create({ data: { tenantId, userId, name: '融资冲刺', slug: 'rongzi' } });
   const report = await prisma.reportDoc.create({ data: { tenantId, userId, projectId: project.id, title: '战略体检', slug: 'zhanlue', type: '战略体检', currentVersion: 1 } });
@@ -75,9 +75,9 @@ test('报告重命名：改 title、租户隔离', async () => {
   const bad = await api('PATCH', `/api/reports/${reportId}`, { token: userId, body: { title: '  ' } });
   assert.equal(bad.status, 400);
 
-  // 他人无法改（租户隔离）
+  // 他人无法改（租户隔离）——给他人也挂套餐，让请求穿过禁写闸抵达路由，验证的才是隔离本身（404）
   const otherTenant = await prisma.tenant.create({ data: { name: '别家' } });
-  const other = await prisma.user.create({ data: { tenantId: otherTenant.id, phone: '13700000010', name: '别人', role: 'owner' } });
+  const other = await prisma.user.create({ data: { tenantId: otherTenant.id, phone: '13700000010', name: '别人', role: 'owner', planId: await anyPlanId() } });
   const denied = await api('PATCH', `/api/reports/${reportId}`, { token: other.id, body: { title: '篡改' } });
   assert.equal(denied.status, 404);
 });

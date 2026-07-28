@@ -95,10 +95,14 @@ async function createUserWithTenant(opts: {
   wechatOpenId?: string;
   wechatUnionId?: string;
 }): Promise<AuthUser> {
+  // 2026-07-28 去免费档改版：产品不再有免费档，注册默认**不送任何套餐**（裸注册账号只读，
+  // 见 app.ts 禁写闸）。唯一例外是测试期——TEST_DEFAULT_PLAN_NAME 配置后按正式购买链路
+  // 开通该套餐（带激活锚点与到期日，到期由运营用 plan-extend 续或用户付费转正）。
+  // 原「取排序第一的套餐白送」的回退已删：第一档现在是付费入门版，回退等于把它免费送出。
   const configuredPlanName = registrationDefaultPlanName();
   const plan = configuredPlanName
     ? await prisma.plan.findFirst({ where: { name: configuredPlanName } })
-    : await prisma.plan.findFirst({ orderBy: { sort: 'asc' } });
+    : null;
   if (configuredPlanName && !plan) {
     throw Object.assign(new Error(`测试期默认套餐「${configuredPlanName}」不存在`), {
       statusCode: 503,
@@ -122,25 +126,12 @@ async function createUserWithTenant(opts: {
       },
     });
     if (plan) {
-      const testingGrant = !!configuredPlanName;
-      if (testingGrant) {
-        await applyPlanPurchase(user, plan, {
-          reason: `${plan.name} · 测试期开通`,
-          source: 'test_default_grant',
-        }, tx);
-      } else {
-        // 未启用测试期配置时保持历史体验版注册口径：不写付费激活锚点，月度钱包仍按自然月惰性首建。
-        await tx.user.update({ where: { id: user.id }, data: { planId: plan.id } });
-        await tx.creditLedger.create({
-          data: {
-            tenantId: tenant.id,
-            userId: user.id,
-            delta: plan.creditsPerMonth,
-            reason: `${plan.name} · 开通赠送`,
-            balance: plan.creditsPerMonth,
-          },
-        });
-      }
+      // 测试期开通走正式购买链路：激活锚点 + 到期日 + 钻石/额度发放与付费同源，
+      // 测试期结束后这批账号自然过期转只读，不留「永久白嫖」的特殊态。
+      await applyPlanPurchase(user, plan, {
+        reason: `${plan.name} · 测试期开通`,
+        source: 'test_default_grant',
+      }, tx);
     }
     await tx.auditLog.create({
       data: { tenantId: tenant.id, userId: user.id, action: opts.auditAction, payloadJson: opts.auditPayload },

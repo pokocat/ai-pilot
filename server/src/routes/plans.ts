@@ -46,6 +46,12 @@ export async function planRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    // 面议档（price<0，企业版·私有化：不限量点数+不限量 token+永不过期）绝不自助发放——
+    // 原判断只拦 price>0，负价从缝里漏过去，任何登录用户拿套餐 id 就能免费开通不限量（生产实际发生，
+    // 41/52 用户在企业版）。面议档只能由运营后台 admin_grant 开通。
+    if (plan.price < 0) {
+      return reply.code(402).send({ error: '该套餐为企业定制，请联系商务开通', code: 'CONTACT_SALES' });
+    }
     // 付费套餐绝不免费发放：配了支付 → 强制走下单；未配支付 → 仅测试/显式开启的演示环境可发放，否则提示「支付即将开通」。
     if (plan.price > 0) {
       if (payConfigured()) {

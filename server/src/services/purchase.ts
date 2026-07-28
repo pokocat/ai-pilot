@@ -6,6 +6,7 @@ import { grantCredits } from './credits.js';
 import { setQuota } from './tokenQuota.js';
 import { now } from './clock.js';
 import { computeExpiry, renewExpiry } from './planTime.js';
+import { bustPlanGate } from './planGate.js';
 
 export interface PlanLike {
   id: string; name: string; price: number; period: string; creditsPerMonth: number; tokenQuotaPerMonth: number;
@@ -73,7 +74,9 @@ export async function applyPlanPurchase(
     }).catch(() => {});
     return { creditBalance, grantedCredits, grantedTokens: plan.tokenQuotaPerMonth, expiresAt };
   };
-  return db ? apply(db) : prisma.$transaction((tx) => apply(tx));
+  const result = db ? await apply(db) : await prisma.$transaction((tx) => apply(tx));
+  bustPlanGate(user.id); // 禁写闸缓存 30s：付完款/发放后必须立刻可写
+  return result;
 }
 
 export interface SkuLike {

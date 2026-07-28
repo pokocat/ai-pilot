@@ -1,7 +1,7 @@
 // 微信消息推送验签：GET 回显 echostr，POST 可信接收后返回 success。
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { getApp, closeApp, api, cleanBusiness, login, uniquePhone } from './helpers.js';
+import { getApp, closeApp, api, cleanBusiness, login, uniquePhone, anyPlanId } from './helpers.js';
 import { prisma } from '../src/db.js';
 import { signWechatMessage, verifyWechatMessageSignature, _resetTokenCache } from '../src/services/wechat.js';
 import { sendWechatSubscribeMessage } from '../src/services/wechatSubscribe.js';
@@ -13,6 +13,7 @@ const nonce = 'nonce-abc';
 before(async () => {
   process.env.WECHAT_MESSAGE_TOKEN = TOKEN;
   await getApp();
+  await anyPlanId(); // login() 依赖测试期默认套餐（入门版）存在；本文件不跑 seedBaseline，自行补齐
 });
 
 after(async () => {

@@ -9,6 +9,10 @@ import { SAYINGS, SURVEY, PLANS, SKUS } from '../src/data/seedConfig.js';
 // 安全兜底：标记测试运行，短信等外部服务一律走 mock，绝不真实触达（即使直接 node --test 跑本文件）。
 // SMS 发送在请求时才读 NODE_ENV（isSmsTestMode），此处赋值早于任何发送，足以拦截。
 process.env.NODE_ENV = 'test';
+// 2026-07-28 去免费档改版：注册默认不再送套餐（裸注册只读，见 app.ts 禁写闸）。
+// 测试里 login() 注册的用户要能正常写库/走生成，与生产测试期同一口径——默认开入门版。
+// 需要「裸注册无套餐」场景的测试，在 buildApp 前显式清掉本变量即可。
+process.env.TEST_DEFAULT_PLAN_NAME ??= '入门版';
 
 let app: FastifyInstance | null = null;
 
@@ -142,6 +146,17 @@ export async function login(phone: string, name?: string): Promise<string> {
 let seq = 0;
 export function uniquePhone(): string {
   return '1' + String(3_800_000_000 + (seq++)).padStart(10, '0');
+}
+
+/** 去免费档改版后：不走 login() 直建的测试用户没有套餐，会被全局禁写闸拦（403 PLAN_REQUIRED）。
+ *  写路径测试建用户时挂上这个套餐 id；库里没有套餐时自动补一个入门版（兼 login 的测试期默认档）。 */
+export async function anyPlanId(): Promise<string> {
+  const p = await prisma.plan.findFirst({ orderBy: { sort: 'asc' } });
+  if (p) return p.id;
+  const created = await prisma.plan.create({
+    data: { name: '入门版', price: 6800, period: 'month', creditsPerMonth: 20, tokenQuotaPerMonth: 400_000, agentCount: 4, featuresJson: [], sort: 0 },
+  });
+  return created.id;
 }
 
 /** 一个最小的结构化成果（用于存库 / 报告版本测试）。 */
