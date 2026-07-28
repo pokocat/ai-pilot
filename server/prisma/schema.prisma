@@ -224,6 +224,12 @@ model Profile {
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
 
+  // Prisma 不会为关系标量字段自动建索引。缺了它，按 tenantId 的 findFirst 会全表扫描：
+  // 2026-07-28 压测实测（1 万用户 / 5 分钟 450 RPS）该表被顺序扫 105,086 次、
+  // 累计读 5.35 亿行、索引扫描 0 次，是全场最慢语句（均值比其它查询高 20–50 倍）。
+  // 命中即停所以平均扫半张表 —— 开销随**总用户数**线性增长，是系统里唯一一处
+  // 随总数据量而非每用户数据量恶化的查询。
+  @@index([tenantId])
   @@map("profile")
 }
 
