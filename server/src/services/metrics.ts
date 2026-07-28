@@ -52,6 +52,18 @@ export function gateLeave(): void { if (gateInFlight > 0) gateInFlight--; }
 export function gateInFlightNow(): number { return gateInFlight; }
 export function noteOverloadRejected(): void { overloadRejected++; }
 
+/* ──────────────── 用量漏账（provider 未回传 usage）──────────────── */
+
+// 真实 provider 调用完成却报不出 token 用量 → 该次消耗在 token_usage 里查不到任何行。
+// `usageOf` 里的 `?? 0` 把「字段缺失」和「真的是 0」抹平了，所以只能靠这个计数器暴露。
+// 按 provider+model 分标签：切换接入点后若这个数开始涨，说明新网关不回传 usage，成本口径有缺口。
+const usageUnreported = new Map<string, number>();
+export function noteUsageUnreported(provider: string, model: string): void {
+  const k = `${provider}|${model}`;
+  usageUnreported.set(k, (usageUnreported.get(k) ?? 0) + 1);
+}
+export function usageUnreportedNow(): Map<string, number> { return usageUnreported; }
+
 /* ──────────────── 事件循环延迟 ──────────────── */
 
 // 进程启动即开始采样（libuv 层的 unref 定时器，开销可忽略，且不会把进程挂住）。
@@ -151,6 +163,17 @@ export async function renderMetrics(): Promise<string> {
     .samples.push(fmt('junshi_http_overload_limit', Number(process.env.MAX_IN_FLIGHT ?? 200)));
   push(metric('junshi_http_overload_rejected_total', '被过载闸主动 503 的请求数', 'counter'))
     .samples.push(fmt('junshi_http_overload_rejected_total', overloadRejected));
+
+  // 漏账计数：真实 provider 未回传 usage 的调用次数。>0 即表示成本统计有缺口。
+  const unreported = push(metric('junshi_usage_unreported_total', '真实 provider 未回传 token usage 的调用次数（成本漏账）', 'counter'));
+  if (usageUnreported.size === 0) {
+    unreported.samples.push(fmt('junshi_usage_unreported_total', 0));
+  } else {
+    for (const [k, v] of usageUnreported) {
+      const [provider, model] = k.split('|');
+      unreported.samples.push(fmt('junshi_usage_unreported_total', v, { provider, model }));
+    }
+  }
   push(metric('junshi_http_rate_limited_total', '被限流 429 的响应数', 'counter'))
     .samples.push(fmt('junshi_http_rate_limited_total', rateLimited));
 
@@ -233,6 +256,7 @@ export async function renderMetrics(): Promise<string> {
 
 /** 仅供测试：复位全部计数。 */
 export function __resetMetrics(): void {
+  usageUnreported.clear();
   inFlight = 0; inFlightPeak = 0;
   gateInFlight = 0; gateInFlightPeak = 0;
   responsesByClass.clear();

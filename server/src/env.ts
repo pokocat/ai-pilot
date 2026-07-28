@@ -39,8 +39,28 @@ export function registrationDefaultPlanName(): string {
   return (process.env.TEST_DEFAULT_PLAN_NAME ?? '').trim();
 }
 
+/**
+ * 读数值型环境变量。**任何数值 env 都必须走这里，不要写 `Number(process.env.X ?? 默认值)`。**
+ *
+ * `??` 只挡 `undefined`，挡不住空串；而 `.env` 与 docker-compose 里「设了但留空」极常见
+ * （`RATE_LIMIT_MAX=`、`MAX_IN_FLIGHT: ""`）。`Number('')` 是 **0** 而不是 NaN，于是空串会被
+ * 当成「显式配了 0」，默认值形同虚设。这个坑已经咬过三次：
+ *   · `services/llmGate.ts` 的并发上限被算成 1，把上游吞吐锁死（已修，见该文件 num()）；
+ *   · `app.ts` 的 `MAX_IN_FLIGHT` 空串 → 0 → 过载闸被 `if (maxInFlight > 0)` 判掉，**保护静默关闭**；
+ *   · `app.ts` 的 `RATE_LIMIT_MAX` 空串 → `max: 0` → **每个请求都 429**，等于全站宕机。
+ *
+ * 语义：未设置 / 空串 / 非有限数 / 负数 → 返回默认值；显式写 `0` 才真的是 0。
+ * 需要「0 有特殊含义（如关闭开关）」时，调用方自己判 raw 是否为 '0'，不要靠本函数区分。
+ */
+export function envNum(name: string, dflt: number): number {
+  const raw = process.env[name];
+  if (raw == null || raw.trim() === '') return dflt;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : dflt;
+}
+
 export const env = {
-  port: Number(process.env.PORT ?? 4000),
+  port: envNum('PORT', 4000),
   aiProvider: (process.env.AI_PROVIDER ?? 'mock') as 'mock' | 'claude' | 'openai',
 
   // Claude（Anthropic）
@@ -51,7 +71,7 @@ export const env = {
   openaiApiKey: process.env.OPENAI_API_KEY ?? '',
   openaiBaseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
   openaiModel: process.env.OPENAI_MODEL ?? 'gpt-4o-mini',
-  openaiTimeoutMs: Number(process.env.OPENAI_TIMEOUT_MS ?? 20000),
+  openaiTimeoutMs: envNum('OPENAI_TIMEOUT_MS', 20000),
   // 真实 provider 调用失败时是否静默兜底 mock。生产必须为 false：宁可报错，也不返回答非所问的模板。
   // §8.0 生产禁止静默降级：默认 false；联调/演示时显式设 AI_FALLBACK_MOCK=true。
   aiFallbackMock: (process.env.AI_FALLBACK_MOCK ?? 'false') === 'true',
@@ -76,7 +96,7 @@ export const env = {
   llmTraceCaptureText: (process.env.LLM_TRACE_CAPTURE_TEXT ?? 'false') === 'true',
 
   // 自定义技能（HTTP 工具）：单次调用超时；是否允许指向私网/环回（调内网自有服务时才开，默认拒，防 SSRF）。
-  skillToolTimeoutMs: Number(process.env.SKILL_TOOL_TIMEOUT_MS ?? 15000),
+  skillToolTimeoutMs: envNum('SKILL_TOOL_TIMEOUT_MS', 15000),
   skillToolAllowPrivateNet: (process.env.SKILL_TOOL_ALLOW_PRIVATE_NET ?? 'false') === 'true',
 
   // 可分享报告页的对外基址（拼分享链接：{publicBaseUrl}/api/r/<id>）。生产配成用户可访问的域名。
@@ -92,10 +112,10 @@ export const env = {
   smsProvider: (process.env.SMS_PROVIDER ?? 'console') as 'console' | 'aliyun',
   smsRequireCode: (process.env.SMS_REQUIRE_CODE ?? 'false') === 'true', // 生产置 true：/auth/login 强制校验验证码
   smsReturnCode: (process.env.SMS_RETURN_CODE ?? 'false') === 'true',   // 强制把验证码随响应返回（默认仅 console+非生产时返回）
-  smsCodeTtlSec: Number(process.env.SMS_CODE_TTL_SEC ?? 300),           // 验证码有效期
-  smsResendCooldownSec: Number(process.env.SMS_RESEND_COOLDOWN_SEC ?? 60), // 同号两次发送最小间隔
-  smsMaxPerHour: Number(process.env.SMS_MAX_PER_HOUR ?? 5),             // 同号每小时上限
-  smsMaxAttempts: Number(process.env.SMS_MAX_ATTEMPTS ?? 5),            // 同一验证码最多校验次数
+  smsCodeTtlSec: envNum('SMS_CODE_TTL_SEC', 300),           // 验证码有效期
+  smsResendCooldownSec: envNum('SMS_RESEND_COOLDOWN_SEC', 60), // 同号两次发送最小间隔
+  smsMaxPerHour: envNum('SMS_MAX_PER_HOUR', 5),             // 同号每小时上限
+  smsMaxAttempts: envNum('SMS_MAX_ATTEMPTS', 5),            // 同一验证码最多校验次数
   // 阿里云短信（SMS_PROVIDER=aliyun 时必填）
   aliyunSmsKeyId: process.env.ALIYUN_SMS_ACCESS_KEY_ID ?? '',
   aliyunSmsKeySecret: process.env.ALIYUN_SMS_ACCESS_KEY_SECRET ?? '',
@@ -113,5 +133,5 @@ export const env = {
   ossAccessKeySecret: process.env.AEP_CDN_OSS_ACCESS_KEY_SECRET ?? '',
   ossBaseUrl: (process.env.AEP_CDN_OSS_BASE_URL ?? '').replace(/\/+$/, ''), // 如 https://aiartist.oss-cn-hangzhou.aliyuncs.com
   ossKeyPrefix: (process.env.AEP_CDN_OSS_KEY_PREFIX ?? '').replace(/^\/+|\/+$/g, ''), // 如 junshi
-  ossTimeoutMs: Number(process.env.AEP_CDN_OSS_TIMEOUT_MS ?? 10000),
+  ossTimeoutMs: envNum('AEP_CDN_OSS_TIMEOUT_MS', 10000),
 };

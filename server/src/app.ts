@@ -4,7 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import { isAiTestMode } from './env.js';
+import { isAiTestMode, envNum } from './env.js';
 import { authRoutes } from './routes/auth.js';
 import { metaRoutes } from './routes/meta.js';
 import { metricsRoutes } from './routes/metrics.js';
@@ -110,7 +110,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     const redis = await getRedis();
     await app.register(rateLimit, {
       global: true,
-      max: Number(process.env.RATE_LIMIT_MAX ?? 600),
+      max: envNum('RATE_LIMIT_MAX', 600),
       timeWindow: process.env.RATE_LIMIT_WINDOW ?? '1 minute',
       ...(redis ? { redis } : {}),
       keyGenerator: (req) => {
@@ -138,7 +138,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   //      /api/brand-kit/generate、/api/me/dossier/generate）——它们一挂就是几十秒到几分钟，
   //      算进一个 200 的在途预算会瞬间占满，让这道闸对真正要防的「快接口排队」失去意义。
   //      这类请求的并发由 services/llmGate.ts 按上游配额单独管，本闸不重复管。
-  const maxInFlight = Number(process.env.MAX_IN_FLIGHT ?? 200);
+  const maxInFlight = envNum('MAX_IN_FLIGHT', 200);
   if (maxInFlight > 0 && !isAiTestMode()) {
     const isLongRunning = (url: string) => url.includes('/generate') || url.includes('/stream');
     app.addHook('onRequest', async (req, reply) => {

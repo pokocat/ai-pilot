@@ -5,6 +5,7 @@
 import { prisma } from '../db.js';
 import { estimateCostMicros } from '../data/modelPrices.js';
 import { resolveModelRate } from './aiConfig.js';
+import { noteUsageUnreported } from './metrics.js';
 import type { Usage } from '../llm/schema.js';
 import type { AdminTokenUsageView } from '../../../shared/contracts';
 
@@ -30,7 +31,14 @@ export async function recordTokenUsage(
     const inputTokens = Math.max(0, u.inputTokens);
     const outputTokens = Math.max(0, u.outputTokens);
     const totalTokens = inputTokens + outputTokens;
-    if (totalTokens <= 0) return;
+    if (totalTokens <= 0) {
+      // mock / Dify v1 无 usage 时为 0 属预期，直接跳过保持「表=真实消耗」。
+      // 但真实付费 provider 报 0 一定是它没回传 usage（`?? 0` 把「字段缺失」和「真的是 0」
+      // 抹平了）——这类调用真金白银花掉却在表里查不到任何行，是**静默漏账**。
+      // 不写垃圾行，但必须让它可见：计数进 /metrics，供成本告警发现口径缺口。
+      if (args.provider !== 'mock') noteUsageUnreported(args.provider, args.model);
+      return;
+    }
     const { rate } = await resolveModelRate(args.model); // 运营在模型配置里填的单价优先，否则内置价表
     await prisma.tokenUsage.create({
       data: {
