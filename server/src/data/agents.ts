@@ -5,10 +5,16 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-// PR-5a：大部头提示词纳入仓库版本管理（server/prompts/*.md），seed 时随注册表入库。
-// 文件缺失（尚未从线上库取回）→ 返回 null，调用处回退占位模板，行为与旧版一致。
-// 注意：线上库的 agent.systemPrompt 仍是运行时事实来源（运营后台可改）；本文件只保证
-// 「仓库初始化 = V6.0 全文」且提示词变更从此走版本管理。
+// 大部头提示词放在 server/prompts/*.md，**仅作新环境初始化的种子**。
+// 文件缺失 → 返回 null，调用处回退占位模板，行为与旧版一致。
+//
+// 口径（2026-07-28 定调，见 prompts/README.md）：**数据库 agent.systemPrompt 是唯一运行时
+// 事实来源**，运营在后台调教。本目录不参与已有环境的提示词管理，也不需要定期回灌对齐——
+// admin:sync-content 因此默认跳过 systemPrompt/greet（scripts/syncAdminContent.ts 的
+// OPERATOR_OWNED），那是有意的。此前这里写着「提示词变更从此走版本管理」，与上一句自相
+// 矛盾，也正是同步脚本曾静默覆盖线上调教的根源，已删除。
+//
+// ⚠️ 文件全文即提示词（下面 readFileSync 后只做 trim），不要在 md 里加任何说明文字或注释。
 function loadPromptFile(name: string): string | null {
   const candidates = [
     resolve(process.cwd(), 'prompts', name), // server/ 下运行（dev/test/prod dist）
