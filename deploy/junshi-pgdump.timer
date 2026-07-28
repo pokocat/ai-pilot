@@ -1,0 +1,12 @@
+[Unit]
+Description=junshi daily pg_dump backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# 机器停机跨过触发点时，开机后补跑一次——否则关机一晚就断一天备份。
+Persistent=true
+# 避开整点，减少与其他定时任务撞车。
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

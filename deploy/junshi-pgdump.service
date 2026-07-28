@@ -1,0 +1,21 @@
+# 生产库每日逻辑备份。安装见 deploy/README-backup.md。
+#   sudo cp deploy/junshi-pgdump.sh /usr/local/bin/junshi-pgdump.sh && sudo chmod 755 ...
+#   sudo cp deploy/junshi-pgdump.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now junshi-pgdump.timer
+[Unit]
+Description=junshi daily pg_dump backup
+# 备份失败必须可见。默认只进 journal，靠人查——这是当前的可观测性缺口，
+# 接了告警通道后应在这里挂 OnFailure=。
+Documentation=file:///opt/junshi/deploy/README-backup.md
+
+[Service]
+Type=oneshot
+User=junshi
+# 脚本自带 pipefail + 三项校验 + 校验后才轮转，逻辑不要再写回 ExecStart 一行流。
+ExecStart=/usr/local/bin/junshi-pgdump.sh
+# 备份跑在凌晨，给它低优先级，别和线上请求抢 IO。
+IOSchedulingClass=idle
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
