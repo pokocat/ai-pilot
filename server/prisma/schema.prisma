@@ -711,6 +711,7 @@ model TokenUsage {
   inputTokens  Int      @default(0)
   outputTokens Int      @default(0)
   cachedInput  Int      @default(0) // 命中提示缓存的输入 token（计价更低）
+  cacheWrite   Int      @default(0) // 写入提示缓存的输入 token（Anthropic 约 1.25× 计费；纯加法列）
   totalTokens  Int      @default(0) // = input + output，便于 SUM
   costMicros   Int      @default(0) // 估算成本，单位 1e-6 元（微元），整数防浮点漂移
   creditCost   Int      @default(0) // 本次扣的点；P1 恒为 0，P2 接按 token 扣费时填实际
@@ -745,6 +746,7 @@ model LlmTrace {
   inputTokens  Int      @default(0)
   outputTokens Int      @default(0)
   cachedInput  Int      @default(0) // 命中提示缓存的输入 token（按 ~1/10 计费；provider 不报则 0）
+  cacheWrite   Int      @default(0) // 写入提示缓存的输入 token（约 1.25× 计费；provider 不报则 0）
   totalTokens  Int      @default(0)
   promptText   String?  @db.Text
   responseText String?  @db.Text

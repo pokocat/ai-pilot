@@ -53,6 +53,7 @@ export async function recordTrace(t: TraceInput): Promise<void> {
         inputTokens: Math.max(0, u?.inputTokens ?? 0),
         outputTokens: Math.max(0, u?.outputTokens ?? 0),
         cachedInput: Math.max(0, u?.cachedInput ?? 0),
+        cacheWrite: Math.max(0, u?.cacheWrite ?? 0),
         totalTokens: Math.max(0, (u?.inputTokens ?? 0) + (u?.outputTokens ?? 0)),
         promptText: env.llmTraceCaptureText ? clip(t.promptText) : null,
         responseText: env.llmTraceCaptureText ? clip(t.responseText) : null,

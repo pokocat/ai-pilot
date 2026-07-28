@@ -110,12 +110,15 @@ export interface AgentRuntime {
 
 // —— Token 用量（计费/统计 P1）。provider 把真实 token 抹平成 Usage 吐出，网关归集落库。 ——
 export interface Usage {
+  // inputTokens 是**输入总量**，等于 cachedInput + cacheWrite + 未缓存部分。
+  // 三档单价不同（见 data/modelPrices.ts），故必须分别记录，不能只留总数。
   inputTokens: number;
   outputTokens: number;
-  cachedInput: number; // 命中提示缓存的输入 token（计价更低；provider 不报则 0）
+  cachedInput: number;  // 命中提示缓存的输入 token（约 0.1× 计价；provider 不报则 0）
+  cacheWrite?: number;  // 写入提示缓存的输入 token（Anthropic 约 1.25× 计价；provider 不报则 0）
 }
 export type Metered<T> = { result: T; usage: Usage };
-export const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
+export const ZERO_USAGE: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0, cacheWrite: 0 };
 
 function textOf(value: unknown): string {
   return typeof value === 'string' ? value.trim() : typeof value === 'number' || typeof value === 'boolean' ? String(value) : '';

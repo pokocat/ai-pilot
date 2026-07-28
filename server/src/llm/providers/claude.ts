@@ -89,7 +89,11 @@ function metaOf(ctx: GenContext): string {
   return parts.length ? parts.join(' · ') : '经营快照';
 }
 
-// Anthropic usage → 归一 Usage。input_tokens 不含缓存命中，故 total 要把 cache_read/create 加回。
+// Anthropic usage → 归一 Usage。input_tokens 只含未缓存部分，故 total 要把 cache_read/create 加回。
+//
+// 三档必须分别上报：读缓存约 0.1×、写缓存约 1.25×（5m TTL）、其余 1×。早期实现把
+// cache_creation 并进 inputTokens 且不单独记，于是缓存写按 1× 计价——每次写都少算 25%，
+// 且用量不落库、事后无法量化。现在 cacheWrite 独立上报并持久化。
 function usageOf(res: Anthropic.Message): Usage {
   const u = res.usage as { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null };
   const cacheRead = u.cache_read_input_tokens ?? 0;
@@ -98,6 +102,7 @@ function usageOf(res: Anthropic.Message): Usage {
     inputTokens: u.input_tokens + cacheRead + cacheCreate,
     outputTokens: u.output_tokens,
     cachedInput: cacheRead,
+    cacheWrite: cacheCreate,
   };
 }
 

@@ -44,6 +44,7 @@ export async function recordTokenUsage(
         inputTokens,
         outputTokens,
         cachedInput: Math.max(0, u.cachedInput ?? 0),
+        cacheWrite: Math.max(0, u.cacheWrite ?? 0),
         totalTokens,
         costMicros: estimateCostMicros(u, rate),
         creditCost: args.creditCost ?? 0,
