@@ -65,3 +65,5 @@ coverage/
 
 # 密钥/凭证（如微信小程序上传私钥 private.*.key）——禁止入库
 *.key
+
+loadtest
