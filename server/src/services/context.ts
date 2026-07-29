@@ -26,6 +26,7 @@ import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } from './agentVersions.js';
 import { isRecallIntent } from './recallIntent.js';
+import { formatDigestBlock, type SessionDigestItem } from './sessionDigest.js';
 
 // 把 Agent 的「接入方式」解析成运行时覆盖。inherit / 未配置完整 → null（走全局模型）。
 function resolveAgentRuntime(
@@ -93,6 +94,9 @@ export async function buildGenContext(opts: {
   preview?: PreviewTarget;         // 沙盒/评测：用草稿或指定版本（默认走已发布版本）
   effective?: EffectiveAgentConfig; // 调用方已解析好的有效配置（避免重复解析、保证与计费一致）
   sessionMode?: string | null;     // 会话粘性模式（M3 PR-11，路由传入 Session.mode）
+  // 会话既往脉络（批次 3）：由路由传入已就绪的快照条目——本函数不做任何 DB/LLM 调用来取它，
+  // 因为「要不要现抽」是路由层的决策（报告轮同步补齐 / 聊天轮纯读）。
+  digestItems?: SessionDigestItem[] | null;
 }): Promise<{ ctx: GenContext; memoryConfig: MemoryConfig; knowledgeUsed: string[]; refNotices: string[]; effective: EffectiveAgentConfig }> {
   // C 端默认读 Agent.publishedVersionId 指向的已发布快照（resolveEffectiveAgent）；
   // 草稿/历史版本由 opts.preview 指定（沙盒、评测、AB）。调用方可传 opts.effective 复用。
@@ -204,6 +208,9 @@ export async function buildGenContext(opts: {
   const projectName: string | null = projRow?.name ?? null;
   const projectSummary: string | null = projRow?.summary ?? null;
 
+  // 会话既往脉络（批次 3）：路由已把快照条目取好，这里只渲染成注入块（纯函数，零 I/O）。
+  const digestLine = opts.digestItems?.length ? formatDigestBlock(opts.digestItems) : null;
+
   const { lines: refLines, labels: refLabels, notices: refNotices } = refsResult;
   const knowledge = hits.map((h) => `【知识：${h.item.title ?? h.item.kind}】${h.snippet}`);
   const knowledgeUsed = [...refLabels, ...hits.map((h) => h.item.title ?? h.snippet.slice(0, 20))];
@@ -234,6 +241,7 @@ export async function buildGenContext(opts: {
     toolMenuLine,
     modeLine,
     stageLine,
+    digestLine,
     userMessage: opts.userMessage,
     images: images.length ? images : undefined,
     history: opts.history,
@@ -250,6 +258,8 @@ export async function buildGenContext(opts: {
         score: m.score,
         createdAt: m.createdAt.toISOString(),
       })),
+      // 注入的是渲染后的块（可能因 cap 丢过条目），故 injectedChars 记实际字符数而非条目数推算值。
+      ...(digestLine ? { digest: { items: opts.digestItems?.length ?? 0, injectedChars: digestLine.length } } : {}),
     },
     references: refLines,
     knowledge,

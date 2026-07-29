@@ -384,12 +384,13 @@ model Session {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id])
-  user         User          @relation(fields: [userId], references: [id])
-  agent        Agent         @relation(fields: [agentKey], references: [key])
-  project      Project?      @relation(fields: [projectId], references: [id])
+  tenant       Tenant                  @relation(fields: [tenantId], references: [id])
+  user         User                    @relation(fields: [userId], references: [id])
+  agent        Agent                   @relation(fields: [agentKey], references: [key])
+  project      Project?                @relation(fields: [projectId], references: [id])
   messages     Message[]
   deliverables Deliverable[]
+  digest       SessionContextSnapshot?
 
   @@index([userId, agentKey])
   @@index([projectId])
@@ -409,6 +410,27 @@ model Message {
 
   @@index([sessionId])
   @@map("message")
+}
+
+/// 会话上下文快照（批次 3）：长会话的「带来源的结构化摘要层」。
+/// 原始 Message 始终是事实源，本表只是索引与压缩层——每条摘要经 sourceMessageIds 可溯源回原始消息。
+/// itemsJson 只追加不改写：前后矛盾的事实各留一条按时间排序，由模型在读取时按「时间靠后为准」判断，
+/// 系统不做覆盖（覆盖等于替客户做了它没授权的事实判定）。
+model SessionContextSnapshot {
+  id            String    @id @default(cuid())
+  sessionId     String    @unique
+  tenantId      String
+  userId        String
+  version       Int       @default(0)
+  lastMessageId String? // 已消化到的最后一条消息（含）
+  lastMessageAt DateTime? // 增量游标：只处理 createdAt 严格大于此值的消息
+  itemsJson     Json // SessionDigestItem[]（只追加，不改写既有条目）
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("session_context_snapshot")
 }
 
 /// 成果（方案库）。存库即桥接到版本化报告（reportId 指向 ReportDoc）。
@@ -534,33 +556,33 @@ model ReportVersion {
 
 /// 知识库条目（租户级，可挂项目）—— 统一承载：对话提炼 / 上传文档 / 报告引用
 model KnowledgeItem {
-  id          String   @id @default(cuid())
-  tenantId    String
-  projectId   String?
-  userId      String
-  kind        String // insight | document | decision | todo | report_ref
-  title       String?
-  text        String   @db.Text // 规范化文本（用于检索/注入）
-  sourceType  String // conversation | upload | deliverable | manual
-  sourceId    String? // sessionId / reportVersionId / uploadId
-  tagsJson    Json     @default("[]")
+  id           String   @id @default(cuid())
+  tenantId     String
+  projectId    String?
+  userId       String
+  kind         String // insight | document | decision | todo | report_ref
+  title        String?
+  text         String   @db.Text // 规范化文本（用于检索/注入）
+  sourceType   String // conversation | upload | deliverable | manual
+  sourceId     String? // sessionId / reportVersionId / uploadId
+  tagsJson     Json     @default("[]")
   // —— V7-06 三段式资料整理管道（加法，存量数据零迁移）——
-  stage       String   @default("confirmed") // staging 待整理（不进检索）| optimized 已优化（待确认）| confirmed 知识库（已嵌入）
-  bizCategory String? // AI 粗分业务类目 key（见 data/bizCategories.ts）
-  batchId     String? // 同批上传标识（整理动作以批为单位）
-  dupOfId     String? // 规则去重命中的原件 id（同名+同大小）
+  stage        String   @default("confirmed") // staging 待整理（不进检索）| optimized 已优化（待确认）| confirmed 知识库（已嵌入）
+  bizCategory  String? // AI 粗分业务类目 key（见 data/bizCategories.ts）
+  batchId      String? // 同批上传标识（整理动作以批为单位）
+  dupOfId      String? // 规则去重命中的原件 id（同名+同大小）
   // —— 文档上传管线（sourceType=upload）：解析状态 + 原件元信息 ——
-  status      String   @default("ready") // ready | parsing | embedding | failed（非上传项一律 ready）
-  fileName    String? // 原始文件名
-  fileType    String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
-  fileSize    Int? // 字节
-  fileKey     String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
-  error       String?  @db.Text // 解析/嵌入失败原因
+  status       String   @default("ready") // ready | parsing | embedding | failed（非上传项一律 ready）
+  fileName     String? // 原始文件名
+  fileType     String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
+  fileSize     Int? // 字节
+  fileKey      String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
+  error        String?  @db.Text // 解析/嵌入失败原因
   // WO-09 经营体检：财务表结构化抽取 + 纯代码派生指标的落库快照（{ financials, metrics }）。
   // 报告正文数字一律以此为准（数字铁律）；非财务/未分析条目为 null。db push 纯加法。
   analysisJson Json?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @default(now()) @updatedAt
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
 
   tenant  Tenant           @relation(fields: [tenantId], references: [id])
   project Project?         @relation(fields: [projectId], references: [id])
@@ -990,21 +1012,21 @@ model AiSetting {
 /// 已添加的模型接入点（运营可添加多个，快速切换其一生效）。
 /// 来源三种：内置接入商预设（preset 记其 id）/ 自定义通用兼容协议 / 完全自主定义。
 model AiModel {
-  id               String   @id @default(cuid())
-  provider         String   @default("openai") // mock | claude | openai
+  id               String  @id @default(cuid())
+  provider         String  @default("openai") // mock | claude | openai
   label            String // 展示名，如「Agnes 2.0 Flash」
-  baseUrl          String   @default("")
-  model            String   @default("")
-  apiKey           String   @default("") @db.Text
-  embeddingModel   String   @default("")
-  temperature      Float    @default(0.7)
-  thinkingMode     String   @default("disabled") // disabled | enabled | adaptive
-  thinkingBudget   Int      @default(1024) // enabled 时生效；1024..7000
+  baseUrl          String  @default("")
+  model            String  @default("")
+  apiKey           String  @default("") @db.Text
+  embeddingModel   String  @default("")
+  temperature      Float   @default(0.7)
+  thinkingMode     String  @default("disabled") // disabled | enabled | adaptive
+  thinkingBudget   Int     @default(1024) // enabled 时生效；1024..7000
   preset           String? // 来源内置接入商 id（自定义/自主定义则空）
   // 内部成本核算单价（元 / 1M token）。0=未配置 → 回退内置价表/兜底。Token 用量看板按此估算总成本。
-  priceInput       Float    @default(0)
-  priceOutput      Float    @default(0)
-  priceCachedInput Float    @default(0) // 命中缓存输入价；0=按 priceInput 计
+  priceInput       Float   @default(0)
+  priceOutput      Float   @default(0)
+  priceCachedInput Float   @default(0) // 命中缓存输入价；0=按 priceInput 计
 
   // —— 端点池（多路分流 + 故障转移，见 services/llmPool.ts）——
   // 默认 poolEnabled=false → 不入池，行为与旧版完全一致（仍可被 activateModel 单选生效）。
@@ -1013,8 +1035,8 @@ model AiModel {
   tier           Int     @default(0) // 0=同质对等；1+=降级备份（低 tier 全冷却才启用）
   maxConcurrency Int     @default(0) // 该端点**每实例**并发上限；0=用全局默认
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("ai_model")
 }

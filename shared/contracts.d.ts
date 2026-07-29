@@ -512,6 +512,16 @@ export interface SessionMessage {
   id: string; role: string; content: any; at: string;
   refs?: MessageRef[]; // 本条消息引用的 项目/报告/知识/记忆
 }
+// 会话上下文快照（批次 3）：长会话只带最近 N 条原文，早期确认过的事实/约束/决策会掉出窗口。
+// 系统按时间增量抽取成结构化条目做「索引 + 压缩层」；原始消息始终是事实源，故每条必须能溯源回消息 id。
+// 只追加不改写：前后矛盾的两条都留着（按 at 升序），谁作数交给模型按时间判断，系统不替客户裁决。
+export type SessionDigestKind = 'fact' | 'goal' | 'constraint' | 'metric' | 'decision' | 'advice' | 'open_question' | 'action_item' | 'quote' | 'deliverable_ref';
+export interface SessionDigestItem {
+  kind: SessionDigestKind;
+  text: string;               // 一句话，含具体数字/名词，≤160 字符
+  sourceMessageIds: string[]; // 溯源：本条摘要来自哪些原始消息（1-8 个）
+  at: string;                 // ISO 时间：最早来源消息的 createdAt
+}
 export interface SessionDetail {
   id: string; agentKey: string;
   agent: { key: string; name: string; role: string; icon: string; greet: string; chips: [string, string][]; memText: string; learnText: string };
@@ -1212,6 +1222,8 @@ export interface LlmContextTrace {
     score: number;
     createdAt: string;
   }>;
+  // 会话摘要注入（批次 3）：本轮快照条目数与实际注入字符数（超 cap 丢类后的真实值），排障用；未注入则缺省。
+  digest?: { items: number; injectedChars: number };
 }
 export interface AdminTraceDetail extends AdminTraceItem {
   iterations: number;

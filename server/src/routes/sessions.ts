@@ -31,6 +31,7 @@ import { notifyReportReady } from '../services/wechatSubscribe.js';
 import { isRecallIntent, sessionRecallScore } from '../services/recallIntent.js';
 import { isSessionGenerating, trackSessionGeneration } from '../services/sessionGeneration.js';
 import { cardSection } from '../services/deliverableSection.js';
+import { updateSessionDigest, readSessionDigest, type SessionDigestItem } from '../services/sessionDigest.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -63,6 +64,57 @@ function harvestText(d: Deliverable): string {
 }
 function notifySessionReport(user: { tenantId: string; id: string }, deliverable: Deliverable): void {
   notifyReportReady({ tenantId: user.tenantId, userId: user.id, title: deliverable.title || '报告已生成' });
+}
+
+// 报告轮「同步补齐」的墙钟预算。
+// 为什么必须有：updateSessionDigest 全链路没有 deadline——每批 structured 最坏 2 轮 × 端点池 3 个端点
+// × 20s ≈ 120s，3 批就是 6 分钟，还可能排在上一轮 bumpSessionDigest（5 批）的会话锁后面；
+// 而 /generate-sync 整个 handler 必须在 nginx proxy_read_timeout(180s) 内跑完。摘要是增强层，
+// 绝不允许它把主流程拖超时。超时**不打断**后台那次更新——会话锁会让它自然跑完，下一轮直接受益。
+const DIGEST_SYNC_BUDGET_MS = 25_000;
+const DIGEST_BUDGET_EXCEEDED = Symbol('digest-budget-exceeded');
+
+// 会话既往脉络（批次 3）：普通轮只带最近 16 条原文，早期确认过的事实/约束/决策会掉出窗口。
+// 快照层把它们索引下来（每条可溯源到消息 id），在这里取出来注入本轮上下文。
+//
+// 取数分两档，因为「现抽」要跑一次辅助模型（有延迟）而「读快照」不用：
+//   · 报告轮（本轮真会出成果）：同步补齐，最多 3 批 + 墙钟预算——报告最吃早期脉络，值这点延迟。
+//   · 普通聊天轮：纯读，零延迟；本轮的内容由收尾的即发即忘更新补进去，供下一轮使用。
+// 首条消息的新会话没有历史可摘，直接跳过。任何失败一律降级为 null——摘要是增强层，不是主流程依赖。
+export async function loadTurnDigest(p: {
+  tenantId: string; userId: string; sessionId: string; isNewSession: boolean; willDeliver: boolean;
+  budgetMs?: number;
+}): Promise<{ items: SessionDigestItem[]; caughtUp: boolean } | null> {
+  if (p.isNewSession) return null;
+  // caughtUp 只用于报告轮收窄历史窗；纯读路径恒为 false（读到的快照未必已追平，宁可不收窄）。
+  const readOnly = async () => {
+    const read = await readSessionDigest(p.sessionId, p.userId).catch(() => null);
+    return read ? { items: read.items, caughtUp: false } : null;
+  };
+  if (!p.willDeliver) return readOnly();
+
+  const pending = updateSessionDigest({
+    tenantId: p.tenantId, userId: p.userId, sessionId: p.sessionId, maxBatches: 3,
+  }).catch(() => null);
+  let timer: NodeJS.Timeout | undefined;
+  const budget = new Promise<typeof DIGEST_BUDGET_EXCEEDED>((resolve) => {
+    timer = setTimeout(() => resolve(DIGEST_BUDGET_EXCEEDED), p.budgetMs ?? DIGEST_SYNC_BUDGET_MS);
+  });
+  try {
+    const winner = await Promise.race([pending, budget]);
+    if (winner !== DIGEST_BUDGET_EXCEEDED) return winner;
+  } finally {
+    clearTimeout(timer);
+  }
+  // 超预算：本轮退回「现状快照」（可能含刚落库的前几批，per-batch upsert 的好处），
+  // 并按未追平处理——历史窗不收窄，16 条原文照旧带上，宁可多带原文也不能既没摘要又砍了原文。
+  return readOnly();
+}
+
+// 每轮收尾即发即忘更新快照（写法参照同文件的 refineSessionTitle）：让下一轮聊天纯读就能读到含本轮的脉络。
+// 只挂在成功路径上——失败的一轮没有可信内容可摘。失败静默，绝不回头影响已经完成的这一轮。
+function bumpSessionDigest(user: { tenantId: string; id: string }, sessionId: string): void {
+  void updateSessionDigest({ tenantId: user.tenantId, userId: user.id, sessionId }).catch(() => {});
 }
 
 type GenerationError = Error & { code?: string; statusCode?: number };
@@ -292,7 +344,16 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
     const sessionMode = modePersist !== undefined ? modePersist : session.mode;
 
-    const conversation = await loadConversationHistory(session.id, userMsg.id, text);
+    const agent = session.agent;
+    const isDeliverable = !!effective?.deliverableKey; // 是否产出 = 已发布版本的 deliverableKey
+    // 按需产出：deliverableKey 已配 + skillsConfig.deliverableMode='on-demand' → 模型自行决定本轮出报告还是对话。
+    const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
+    const willDeliver = onDemand ? wantsDeliverableRequest(text) : isDeliverable;
+    const digest = await loadTurnDigest({
+      tenantId: user.tenantId, userId: user.id, sessionId: session.id, isNewSession: created, willDeliver,
+    });
+
+    const conversation = await loadConversationHistory(session.id, userMsg.id, text, deliverableRecentLimit(willDeliver, digest));
     const history = conversation.history;
     await recordAudit({
       tenantId: user.tenantId,
@@ -301,16 +362,13 @@ export async function sessionRoutes(app: FastifyInstance) {
       payload: { mode: 'sync', sessionId: session.id, agentKey, projectId, diamondCost, ratio, refs: refs?.length ?? 0 },
     });
 
-    const agent = session.agent;
-    const isDeliverable = !!effective?.deliverableKey; // 是否产出 = 已发布版本的 deliverableKey
-    // 按需产出：deliverableKey 已配 + skillsConfig.deliverableMode='on-demand' → 模型自行决定本轮出报告还是对话。
-    const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
     const { ctx, memoryConfig, knowledgeUsed, refNotices } = await buildGenContext({
       userId: user.id, tenantId: user.tenantId, agentKey, userMessage: text, projectId, refs,
       sessionId: session.id, difyConversationId: session.difyConversationId,
       effective: effective ?? undefined, history,
       historyTrace: conversation.trace,
       sessionMode,
+      digestItems: digest?.items ?? null,
       });
 
     try {
@@ -321,6 +379,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object } });
           harvestProphecies(user, agentKey, replyChat.text);
+          bumpSessionDigest(user, session.id);
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
           const creditBalance = creditReservation?.balance ?? 0;
@@ -334,6 +393,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: deliverable as object } });
         harvestProphecies(user, agentKey, harvestText(deliverable));
         notifySessionReport(user, deliverable);
+        bumpSessionDigest(user, session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const learned = await learn();
         const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
@@ -350,6 +410,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           data: { sessionId: session.id, role: 'report', contentJson: deliverable as object },
         });
         notifySessionReport(user, deliverable);
+        bumpSessionDigest(user, session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         // A-3：总军师也写记忆（含产出结论）。
         const learned = await learnFromConversation({
@@ -371,6 +432,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object },
       });
       harvestProphecies(user, agentKey, replyChat.text);
+      bumpSessionDigest(user, session.id);
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
       const creditBalance = creditReservation?.balance ?? 0;
       const tokenQuota = quotaReservation ? await quotaReservation.settle(billableOf(usage), ratio) : null;
@@ -492,8 +554,10 @@ export async function sessionRoutes(app: FastifyInstance) {
     };
 
     let finishGeneration: (() => void) | null = null;
+    let createdSession = false;
     try {
       if (!session) {
+        createdSession = true;
         session = await prisma.session.create({
           data: { tenantId: user.tenantId, userId: user.id, agentKey, projectId, title: text.slice(0, 18) },
           include: { agent: true },
@@ -524,7 +588,15 @@ export async function sessionRoutes(app: FastifyInstance) {
     }
     const sessionMode = modePersist !== undefined ? modePersist : session.mode;
 
-      const conversation = await loadConversationHistory(session.id, userMsg.id, text);
+      const agent = session.agent;
+      const isDeliverable = !!effective?.deliverableKey; // 顾问/创作智能体 → 结构化成果（按已发布版本）
+      const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
+      const willDeliver = onDemand ? wantsDeliverableRequest(text) : isDeliverable;
+      const digest = await loadTurnDigest({
+        tenantId: user.tenantId, userId: user.id, sessionId: session.id, isNewSession: createdSession, willDeliver,
+      });
+
+      const conversation = await loadConversationHistory(session.id, userMsg.id, text, deliverableRecentLimit(willDeliver, digest));
       const history = conversation.history;
       await recordAudit({
         tenantId: user.tenantId,
@@ -533,9 +605,6 @@ export async function sessionRoutes(app: FastifyInstance) {
         payload: { mode: 'sse', sessionId: session.id, agentKey, projectId, diamondCost, ratio, refs: refs?.length ?? 0 },
       });
 
-      const agent = session.agent;
-      const isDeliverable = !!effective?.deliverableKey; // 顾问/创作智能体 → 结构化成果（按已发布版本）
-      const onDemand = isDeliverable && (effective?.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
       const { ctx, memoryConfig, refNotices } = await buildGenContext({
         userId: user.id,
         tenantId: user.tenantId,
@@ -549,6 +618,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         history,
         historyTrace: conversation.trace,
         sessionMode,
+        digestItems: digest?.items ?? null,
       });
 
       const learnSse = async () => {
@@ -571,6 +641,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         send('chat', reply2);
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object } });
         harvestProphecies(user, agentKey, reply2?.text);
+        bumpSessionDigest(user, session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
         const creditBalance = creditReservation?.balance ?? 0;
@@ -587,6 +658,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'report', contentJson: deliverable as object } });
         harvestProphecies(user, agentKey, harvestText(deliverable));
         notifySessionReport(user, deliverable);
+        bumpSessionDigest(user, session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
         const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
@@ -610,6 +682,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           data: { sessionId: session.id, role: 'report', contentJson: deliverable as object },
         });
         notifySessionReport(user, deliverable);
+        bumpSessionDigest(user, session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
 
         // A-3：记忆学习（含总军师；用户级共享事实池）。
@@ -648,6 +721,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
         });
         harvestProphecies(user, agentKey, reply2?.text);
+        bumpSessionDigest(user, session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const creditBalance = creditReservation?.balance ?? 0;
         const tokenQuota = quotaReservation ? await quotaReservation.settle(billableOf(usage), ratio) : null;
@@ -678,6 +752,9 @@ export async function sessionRoutes(app: FastifyInstance) {
 // 长会话上下文：常规轮带最近 16 条；用户明确问“之前说过/你忘了吗”时，再从较早 160 条中
 // 按业务词重合度挑 6 条原始摘录，作为“较早内容回顾”前置。两段都有字符预算，避免为了记得更多挤爆模型窗口。
 const RECENT_HISTORY_MESSAGES = 16;
+// 报告轮专用的收窄窗口（批次 3）：只有在快照已追平且非空时才用——早期脉络已由摘要块兜住，
+// 原文只留最近 8 条，把省下的窗口让给摘要与知识召回。**聊天轮永远 16 条，不受此影响。**
+const DELIVERABLE_HISTORY_MESSAGES = 8;
 const RECALL_HISTORY_SCAN = 160;
 const RECALL_HISTORY_MATCHES = 6;
 const RECENT_HISTORY_CHAR_BUDGET = 12_000;
@@ -743,16 +820,25 @@ function mergeHistory(messages: { role: string; text: string }[]): { role: strin
   return merged;
 }
 
+/** 本轮该带几条原文：仅「报告轮 + 快照已追平且非空」三条件同时成立才收窄到 8 条，其余一律沿用 16 条。 */
+export function deliverableRecentLimit(
+  willDeliver: boolean,
+  digest: { items: SessionDigestItem[]; caughtUp: boolean } | null,
+): number | undefined {
+  return willDeliver && digest?.caughtUp && digest.items.length > 0 ? DELIVERABLE_HISTORY_MESSAGES : undefined;
+}
+
 export async function loadConversationHistory(
   sessionId: string,
   excludeId: string,
   currentText = '',
+  recentLimit?: number,
 ): Promise<{ history: { role: string; text: string }[]; trace: ConversationHistoryTrace }> {
   const recallIntent = isRecallIntent(currentText);
   const recentRows = await prisma.message.findMany({
     where: { sessionId, id: { not: excludeId }, role: { in: ['user', 'assistant', 'report'] } },
     orderBy: { createdAt: 'desc' },
-    take: RECENT_HISTORY_MESSAGES,
+    take: recentLimit ?? RECENT_HISTORY_MESSAGES,
   });
   const recent = fitRecentBudget(recentRows.reverse().map(historyMessage).filter((m): m is { role: string; text: string } => !!m));
 

@@ -61,6 +61,9 @@ export interface GenContext {
   progressLine?: string | null;
   // 本轮导引（M3 PR-11/12/14）：模式/角色语气/诊断轮次指令（每轮变化 → dynamic 首位）。
   modeLine?: string | null;
+  // 会话既往脉络（批次 3）：本会话早期事实/约束/决策的结构化索引块（services/sessionDigest.formatDigestBlock）。
+  // 每轮可能变化 → 只能进 dynamic 段；无快照/空快照不注入。
+  digestLine?: string | null;
   // 阶段适配（M3 PR-13）：营收阶段指令（随用户稳定 → stable 段）。
   stageLine?: string | null;
   userMessage: string;
@@ -878,6 +881,9 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
   if (volatileUsed.includes('{长期记忆}')) {
     blocks.push(`【长期记忆】\n${ctx.memories.length ? ctx.memories.join('；') : '暂无长期记忆'}`);
   }
+  // 会话既往脉络（批次 3）：早期已确认的事实/约束/决策，排在客户档案之前——它是本会话内确认过的，
+  // 比跨会话推断出的档案更贴近当下这轮讨论。逐轮变化，必须留在 dynamic 段（进 stable 会打穿提示词缓存前缀）。
+  if (ctx.digestLine) blocks.push(ctx.digestLine);
   blocks.push(`【客户档案（只能据此判断客户事实）】\n${understandingText}`);
   if (ctx.dataSourceLine) blocks.push(ctx.dataSourceLine); // V7-07：已接入数据源清单（军师可据此要证据）
   if (ctx.projectSummary) blocks.push(`【当前项目】${projText}`);
