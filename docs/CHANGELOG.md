@@ -6,6 +6,20 @@
 
 ## 变更日志
 
+### 2026-07-29 · 修钻石预扣「双退」资损：`CreditReservation.refund` 改为幂等 · 影响面：`server/src/services/credits.ts` + `server/src/routes/sessions.ts`（注释）+ `server/test/creditReservation.test.ts`
+
+`reserveCredits` 返回的 `refund` 是裸闭包，调多少次就追加多少条正向流水。而路由里退款路径本来就会叠：
+
+- 降级产出（真实模型没出结构化成果）走 `settleCreditForDeliverable` 退一次钻石；
+- 紧随其后的 `quotaReservation.settle(...)` 若抛错（DB 抖动 / 连接超时），catch 块按 `charged` 仍为 true 再退一次；
+- 两次都落账 → 同一次预扣退了两笔，用户白拿一份钻石。窗口很窄但代码上必然可达，且 sync 与 SSE 两条路径都有（`sessions.ts` :401/:423 与 :666/:704 → catch :444/:735）。
+
+改法对齐 `tokenQuota.QuotaReservation` 的 `done` 标志思路：把「已退过」记在 reservation 自己身上，`refund` 只生效一次，重复调用直接返回首次退款后的余额、不再落账。因 `refund` 需要返回余额（`settleCreditForDeliverable` 拿它当 `creditBalance` 回给前端），标志位实现为**记忆化 promise**，顺带让并发调用共享同一次落账。
+
+**退款失败不置位**——与 `tokenQuota.settle` 同一取舍：若失败也算「已退」，一次 DB 抖动就把用户的钻石吞掉；失败清空重置，后续 catch 路径仍能把钻石退回去。
+
+`sessions.ts` 只补注释说明双退靠 reservation 侧幂等兜住，两条路径语义不变（降级只退一次、断连只退一次、失败退款仍可重试）。新增 `test/creditReservation.test.ts` 三例：refund 调两次只退一次（流水断言 `[-cost, +cost]`）、`cost<=0` 多次 refund 不写流水、退款失败后重试仍能退回。回归前把 fix 撤掉验证过用例会红（余额 20 → 23）。
+
 ### 2026-07-28 · 运营后台菜单按「看 vs 改」重排为 7 组（修上一版分组逻辑错误）· 影响面：`admin/src/nav.ts` + views 文件名
 
 上一版（`795d89a`）的分组有两处逻辑错误，运营实际用起来才暴露：

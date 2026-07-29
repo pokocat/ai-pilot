@@ -112,6 +112,7 @@ export async function grantCredits(
 export interface CreditReservation {
   charged: boolean;
   balance: number;
+  /** 幂等：一次预扣最多只退一次；重复调用返回首次退款后的余额，不再追加正向流水。 */
   refund: (reason?: string) => Promise<number>;
 }
 
@@ -127,9 +128,23 @@ export async function reserveCredits(
     return { charged: false, balance: bal, refund: async () => bal };
   }
   const balance = await chargeCredits(tenantId, userId, cost, reason);
+  // 幂等护栏（对齐 tokenQuota.QuotaReservation 的 done 标志）：调用方有多条退款路径会叠在一起——
+  // sessions.ts 降级退款（settleCreditForDeliverable）跑完后，若紧随的 quotaReservation.settle 抛错，
+  // catch 块会照着 `charged` 再退一次 → 同一次预扣追加两条正向流水 = 双退资损。
+  // 这里用「已退过就不再退」把 refund 收成只生效一次；因 refund 要返回余额，用记忆化 promise 兼做
+  // 结果缓存，顺带让并发调用共享同一次落账。退款失败则清空重置——失败不算已退，catch 仍能把钻石退回去。
+  let refunded: Promise<number> | null = null;
   return {
     charged: true,
     balance,
-    refund: (refundReason = `${reason} · 失败退回`) => refundCredits(tenantId, userId, cost, refundReason),
+    refund: (refundReason = `${reason} · 失败退回`) => {
+      if (!refunded) {
+        refunded = refundCredits(tenantId, userId, cost, refundReason).catch((e) => {
+          refunded = null;
+          throw e;
+        });
+      }
+      return refunded;
+    },
   };
 }

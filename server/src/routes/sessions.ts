@@ -38,6 +38,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // 降级结算（真实模型没出结构化成果、回退 mock 模板 = deliverable.degraded）：token 额度侧已 settle(0) 退回，
 // 钻石预留也必须一并退回——否则图片类 agent 拿到废模板还照扣钻石（两轴计费不对齐的资损，见售卖前体检 P1）。
 // 非降级或未实扣（文本 agent diamondCost=0）时按原余额返回，不动。
+// 注：这里退过之后，若紧随的 quotaReservation.settle 抛错，下面 catch 块会照着 `charged` 再退一次；
+// 不叠成双退靠 CreditReservation.refund 自身幂等（credits.ts），此处无需再加标志位。
 async function settleCreditForDeliverable(res: CreditReservation | null, degraded: boolean | undefined): Promise<number> {
   const bal = res?.balance ?? 0;
   if (!degraded || !res?.charged) return bal;
