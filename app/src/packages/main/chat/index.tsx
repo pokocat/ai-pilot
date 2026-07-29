@@ -760,11 +760,22 @@ export default function Chat() {
       if (elapsed >= REATTACH_POLL_MAX_MS) {
         clearChatPending(sid);
         finish();
-        setMsgs((m) => [...m, {
-          role: 'assistant',
-          reply: { text: '这次思考时间有点久，结果完成后仍会保存在本会话，请稍后回来查看。' },
-          uid: nextMsgUid(),
-        }]);
+        // 轮询到顶仍无定论：残留的流式报告卡收成中断态（trust 行说明 + degraded 状态位），
+        // 不能让它永远转圈，也不能装「已生成」——真结果若随后落库，重进会话即以服务端为准重绘。
+        setMsgs((m) => {
+          const i = m.length - 1;
+          let out = m;
+          if (i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming) {
+            const cur = m[i] as Extract<Msg, { role: 'report' }>;
+            out = m.slice();
+            out[i] = { ...cur, streaming: false, deliverable: { ...cur.deliverable, trust: REPORT_INTERRUPTED_TRUST, degraded: true } };
+          }
+          return [...out, {
+            role: 'assistant',
+            reply: { text: '这次思考时间有点久，结果完成后仍会保存在本会话，请稍后回来查看。' },
+            uid: nextMsgUid(),
+          }];
+        });
         return;
       }
       const delay = elapsed < REATTACH_POLL_FAST_WINDOW_MS ? REATTACH_POLL_FAST_MS : REATTACH_POLL_SLOW_MS;
@@ -1971,6 +1982,10 @@ export default function Chat() {
             );
           }
           // report
+          // 报告操作硬条件（2026-07-28 假完成修复）：必须有真实落库 messageId、非空正文、非流式、
+          // 非降级草稿，才开放查看/分享/存入/认可。此前只看 streaming 位——断流对账交回轮询后卡片
+          // 被误收成非流式（messageId 为空、正文可能半截），操作全开、状态误写「已生成」。
+          const reportReady = !m.streaming && !!m.messageId && !m.deliverable.degraded && (m.deliverable.sections?.length ?? 0) > 0;
           return (
             // P2-14：报告气泡用稳定 uid 作 key（创建即有，先于 messageId），避免「延迟插入记忆 / 顶部插历史」导致索引位移、ReportCard 渐显动画状态错位。
             <View key={m.uid ?? m.messageId ?? `r-${i}`} className="msg a">
@@ -1980,10 +1995,11 @@ export default function Chat() {
                   data={m.deliverable}
                   animate={m.animate}
                   streaming={m.streaming}
+                  operable={reportReady}
                   saved={m.saved}
-                  onView={m.streaming ? undefined : () => shareReport(m.messageId)}
-                  onSave={m.streaming ? undefined : () => saveDeliverable(m.deliverable, m.messageId)}
-                  onShareMenu={m.streaming ? undefined : (kind) => onReportShareMenu(kind, m.deliverable, m.messageId)}
+                  onView={reportReady ? () => shareReport(m.messageId) : undefined}
+                  onSave={reportReady ? () => saveDeliverable(m.deliverable, m.messageId) : undefined}
+                  onShareMenu={reportReady ? (kind) => onReportShareMenu(kind, m.deliverable, m.messageId) : undefined}
                 />
               </View>
               {/* 记债项10：报告流失败/降级——单一话术（trust 行「生成中断——已生成部分已保留，可点击重试补全」）+ ↻ 重试入口。
@@ -1998,8 +2014,8 @@ export default function Chat() {
               ) : null}
               <RefNotices notices={m.refNotices} />
               {/* 认可方案 → 沉淀报告并进入执行承接（对齐「认可后拆成军令/复盘」动线）。
-                  中断/降级报告（retryText 或 degraded）不开放认可，先重试补全再认可。 */}
-              {!m.streaming && !m.deliverable.degraded && !m.retryText ? (
+                  硬条件同上（reportReady），中断/降级/未落库一律不开放认可，先重试补全再认可。 */}
+              {reportReady && !m.retryText ? (
                 <View className="accept-card">
                   <View className="accept-b">
                     <Text className="accept-t">认可这份方案？</Text>

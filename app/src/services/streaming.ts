@@ -1,6 +1,7 @@
 import { getApiBaseUrl } from './runtimeMode';
 import { getToken } from './token';
 import { parseSSE, decodeUtf8, sliceCompleteBlocks } from './sse';
+import { streamClosedWithoutVerdict } from './liveGenCore';
 import type { GenRequest, ChatReply, Deliverable, DeliverableSection } from '../../../shared/contracts';
 
 // 错误分两类，收尾语义不同：'disconnect' 是链路被掐断（小程序切后台被杀请求 / 网络抖动），
@@ -169,10 +170,11 @@ export async function generateStream(body: GenRequest, h: StreamHandlers, contro
     }
     // 一个事件都没收到：链路层异常（连接被掐 / 代理吞流），服务端可能照常在生成，按断流交调用方对账。
     if (!sawEvent) h.onError?.(NETWORK_HINT, 'disconnect');
-    // P0-5：流正常收尾但未收到 done/error 事件时补发一次 onDone，避免报告卡永久停在「产出中」。
-    // finished 幂等保护：已由 done/error 收尾的流不再补发。
-    if (state.rendered && !state.finished) { state.finished = true; h.onDone?.(); }
-    return ok && state.rendered;
+    // 已渲染却没收到 done/error 终态（反代切流 / 服务端中途死了 / 连接被安静收掉）：服务端多半仍在
+    // 生成，一律按断流交调用方对账。旧 P0-5 在这里补发 onDone(undefined)，正是「假已生成」的源头之一
+    // ——对账后 stored/handoff/dead 三条路都有各自的收尾，报告卡不会再停在「产出中」。
+    if (streamClosedWithoutVerdict(state)) { state.finished = true; h.onError?.(NETWORK_HINT, 'disconnect'); }
+    return ok && state.rendered && state.finished;
   }
 
   if (process.env.TARO_ENV === 'weapp') {
@@ -206,10 +208,10 @@ export async function generateStream(body: GenRequest, h: StreamHandlers, contro
         if (!sawEvent && typeof data === 'string' && data.trim()) {
           consumeText(data.endsWith('\n\n') ? data : `${data}\n\n`);
         }
-        // P0-5：流正常收尾但未收到 done/error 事件时补发一次 onDone，避免报告卡永久停在「产出中」。
-        // finished 幂等保护：已由 done/error 收尾的流不再补发。
-        if (state.rendered && !state.finished) { state.finished = true; h.onDone?.(); }
-        resolve(ok && state.rendered);
+        // 已渲染却没收到 done/error 终态（服务端/反代把响应安静收掉了）：服务端多半仍在生成，
+        // 按断流交调用方对账，不再合成 onDone(undefined) 造成「假已生成」（与 h5 路径同一裁决）。
+        if (streamClosedWithoutVerdict(state)) { state.finished = true; h.onError?.(NETWORK_HINT, 'disconnect'); }
+        resolve(ok && state.rendered && state.finished);
       };
 
       const wxApi = (globalThis as unknown as {

@@ -50,12 +50,14 @@ function getClient(apiKey: string, baseUrl?: string): Anthropic {
   let c = clients.get(cacheKey);
   if (!c) {
     if (clients.size >= 16) clients.clear();
-    // maxRetries 显式设 2（SDK 默认值，但写明以防未来默认变动）——配合各调用点的 timeout，
-    // 把「网关慢/挂时单请求最坏 10 分钟 × 自动重试」这类阻塞收敛为有界（见售卖前体检 P1）。
+    // maxRetries 设 0：SDK 内部重试关死，重试权唯一归任务层（withEndpoint 端点池：可转移错误
+    // → 冷却 → 换端点，至多 LLM_POOL_MAX_ATTEMPTS 次）。此前 SDK 层 2 次 × 端点池 3 次层层相乘，
+    // 报告最坏 3×3×120s≈18 分钟——客户端 180s 就断了，剩下的全是白烧 token 的僵尸请求
+    // （2026-07-28 报告卡死修复）。关掉后最坏收敛为 3×120s=6 分钟硬上界。
     c = new Anthropic(
       base
-        ? { apiKey, baseURL: base, defaultHeaders: { Authorization: `Bearer ${apiKey}` }, maxRetries: 2 }
-        : { apiKey, maxRetries: 2 },
+        ? { apiKey, baseURL: base, defaultHeaders: { Authorization: `Bearer ${apiKey}` }, maxRetries: 0 }
+        : { apiKey, maxRetries: 0 },
     );
     clients.set(cacheKey, c);
   }
@@ -286,10 +288,11 @@ export async function claudeRaw(
   user: string,
   opts: ClaudeRawOptions = {},
 ): Promise<string> {
-  // 轻量补全必须设超时：SDK 默认 600s + 自动重试，网关一挂会把同步等它的路由（如 /casefile/accept）吊死。
+  // 轻量补全必须设超时：SDK 默认 600s，网关一挂会把同步等它的路由（如 /casefile/accept）吊死。
+  // 重试不在此处配——client 已 maxRetries:0，统一由 withEndpoint 控制。
   const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create(
     claudeRawRequest(ep, system, user, opts),
-    { timeout: ep.timeoutMs, maxRetries: 1 },
+    { timeout: ep.timeoutMs },
   ), { affinityKey: opts.affinityKey, laneClass: cfg.lane === 'aux' ? 'aux' : 'main' });
   return res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
 }

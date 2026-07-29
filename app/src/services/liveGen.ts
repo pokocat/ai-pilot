@@ -1,9 +1,13 @@
 import { generateStream, type StreamControl, type StreamHandlers, type StreamErrorKind } from './streaming';
 import { api } from './api';
 import { markChatPending, clearChatPending } from './chatPending';
+import { classifyReconcileTick, reportCloseAction, type ReconcileOutcome } from './liveGenCore';
 import type {
   GenRequest, GenResult, ChatReply, Deliverable, DeliverableSection, SessionDetail, SessionMessage,
 } from '../../../shared/contracts';
+
+// 收尾裁决的纯逻辑在 liveGenCore（可单测）；这里保留 re-export 兼容既有引用（chat/index.tsx）。
+export { storedReplyFor } from './liveGenCore';
 
 /**
  * liveGen —— 跨页面存活的「军师推演」单例。
@@ -45,20 +49,6 @@ const RECONCILE_TRIES = 3;
 const RECONCILE_GAP_MS = 1200;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/**
- * 本轮回复是否已落库：末条不是用户消息，且其前最近的那条用户消息正是本轮原文。
- * 后半个条件不可省——请求根本没送达服务端时，末条会是上一轮的回复，只看角色会把它误判成「本轮已完成」。
- */
-export function storedReplyFor(messages: SessionMessage[], userText: string): SessionMessage | null {
-  const last = messages.length ? messages[messages.length - 1] : null;
-  if (!last || last.role === 'user') return null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role !== 'user') continue;
-    return String((messages[i].content as { text?: string } | null)?.text ?? '') === userText ? last : null;
-  }
-  return null;
-}
 
 // 页面提供的 UI 观察者：liveGen 在「实时事件」与「重进重放」两条路径上调用同一组方法，
 // 页面据此做 setMsgs / 滚动 / busy 等副作用。所有方法都应对「当前无对应气泡」保持幂等/安全。
@@ -211,7 +201,7 @@ function handleError(entry: LiveGenEntry, message: string, kind: StreamErrorKind
   surfaceError(entry, message);
 }
 
-type ReconcileResult = 'stored' | 'handoff' | 'dead';
+type ReconcileResult = Exclude<ReconcileOutcome, null>;
 
 // 对账认定本轮已完成：撤掉断流留下的失败态，改按正常收尾语义走。
 function applyStoredReply(entry: LiveGenEntry, detail: SessionDetail, stored: SessionMessage) {
@@ -239,11 +229,16 @@ async function reconcileDisconnect(entry: LiveGenEntry): Promise<ReconcileResult
     try { detail = await api.session(entry.sessionId); } catch { detail = null; }
     if (entry.aborted) return 'dead';
     if (!detail) continue; // 对账请求本身也可能被后台掐断，用完剩余次数再判
-    const stored = storedReplyFor(detail.messages, entry.userText);
-    if (stored) { applyStoredReply(entry, detail, stored); return 'stored'; }
-    // 服务端仍在生成：页面在场就交回它的 generating 轮询；页面不在场无人可交，继续用完剩余次数
+    // 单次判定收拢到纯核：已落库 → stored；仍在生成且页面在场 → handoff；否则 pending 继续等
     // ——报告落库通常比 generating 落幕早一步，多等一轮就能等到，进而完成自动入库。
-    if (detail.generating && entry.view) {
+    const tick = classifyReconcileTick({
+      messages: detail.messages,
+      generating: !!detail.generating,
+      userText: entry.userText,
+      hasView: !!entry.view,
+    });
+    if (tick.verdict === 'stored') { applyStoredReply(entry, detail, tick.stored); return 'stored'; }
+    if (tick.verdict === 'handoff' && entry.view) {
       entry.streamErrored = false;
       entry.errorMessage = undefined;
       entry.view.resumeServerPolling(entry.sessionId);
@@ -307,7 +302,7 @@ async function drive(entry: LiveGenEntry) {
     !entry.aborted && entry.disconnected ? await reconcileDisconnect(entry) : null;
 
   if (entry.aborted) {
-    // 主动停止：聊天空占位清掉，report 卡由下方双保险收尾。
+    // 主动停止：聊天空占位清掉，report 卡由下方收尾裁决按中断收（不装「已生成」）。
     if (entry.kind === 'chat') entry.view?.abortedChat();
   } else if (reconciled === 'dead') {
     // 对账无果（服务端确实没落库、也不在生成，或对账请求本身也断了）：这才是真失败。
@@ -329,9 +324,19 @@ async function drive(entry: LiveGenEntry) {
     }
   }
 
-  // P0-5 双保险：报告流无论结果（含主动停止 / 中途抛错），最终强制把报告卡 streaming 置 false，
-  // 避免流未触发 onDone/onError 时报告卡永久停在「产出中」。幂等：onDone 已收尾时守卫不命中即 no-op。
-  if (entry.kind === 'report') entry.view?.finishReport(entry.messageId, entry.refNotices);
+  // 报告卡收尾裁决（2026-07-28 假完成修复，取代旧 P0-5「无脑 finishReport」双保险）：
+  // - handoff/stored：轮询或服务端真值已接管本卡，这里绝不能再收——旧行为在 handoff 后仍调
+  //   finishReport，把还在生成的卡收成「已生成」（无 messageId、正文可能半截），正是线上假完成的病灶；
+  // - 有真实 messageId：正常完成收尾（onDone 已收过时守卫不命中即 no-op，保持幂等）；
+  // - 无 id 且错误路径没收过（主动停止 / 流静默结束）：按中断收尾，保留已流出分段 + 重试，不装完成。
+  const close = reportCloseAction({
+    kind: entry.kind,
+    reconciled,
+    messageId: entry.messageId,
+    streamErrored: entry.streamErrored,
+  });
+  if (close === 'finish') entry.view?.finishReport(entry.messageId, entry.refNotices);
+  else if (close === 'interrupt') surfaceError(entry, entry.aborted ? '已停止生成' : '生成连接中断，请稍后回来查看或重试');
 
   // 已把思考态交给页面轮询时不能清 busy——否则页面刚接手就被抹掉，重新卡成「什么都没有」。
   if (reconciled !== 'handoff') entry.view?.clearBusy();

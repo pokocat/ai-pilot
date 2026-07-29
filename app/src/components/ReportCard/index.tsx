@@ -28,6 +28,9 @@ interface Props {
   data: Deliverable;
   animate?: boolean; // 渐进式呈现（新产出）vs 直接展示（历史还原）
   streaming?: boolean; // 服务端 SSE 仍在产出中：展示当前已到达分段，暂不开放操作
+  // 假完成硬条件（2026-07-28）：只有真实落库的完整报告（有 messageId、非空正文、非降级草稿）
+  // 才算「已生成」并开放查看/分享/存入；中断/降级卡收成「已中断」，操作一律不开。由父级判定传入。
+  operable?: boolean;
   saved?: boolean;
   onSave?: () => void;
   // 主操作：查看网页版报告全文（复活死代码 shareReport → 生成网页版并打开）。
@@ -37,7 +40,7 @@ interface Props {
 }
 
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
-export default function ReportCard({ data, animate = false, streaming = false, saved = false, onSave, onView, onShareMenu }: Props) {
+export default function ReportCard({ data, animate = false, streaming = false, operable = true, saved = false, onSave, onView, onShareMenu }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   // D-3-4：每张卡一块隐藏 canvas，用于分享图出图（唯一 id 防列表内串扰）。
@@ -96,14 +99,14 @@ export default function ReportCard({ data, animate = false, streaming = false, s
   // 第一张卡片读到 false 后立即写回 true，后续卡片的读会看到已写入的值，从而只有一张显示。
   const [showGuide, setShowGuide] = useState(false);
   useEffect(() => {
-    if (!isDone) return;
+    if (!isDone || !operable) return;
     try {
       if (!Taro.getStorageSync(GUIDE_KEY)) {
         Taro.setStorageSync(GUIDE_KEY, 1);
         setShowGuide(true);
       }
     } catch { /* noop */ }
-  }, [isDone]);
+  }, [isDone, operable]);
   const dismissGuide = () => {
     setShowGuide(false);
     try { Taro.setStorageSync(GUIDE_KEY, 1); } catch { /* noop */ }
@@ -139,7 +142,8 @@ export default function ReportCard({ data, animate = false, streaming = false, s
           <Text className="m">{data.meta}</Text>
         </View>
         {isDone ? (
-          <Text className="status">已生成</Text>
+          // 硬条件不满足（无落库 id / 降级 / 中断）绝不写「已生成」——那正是线上误导的来源。
+          <Text className="status">{operable ? '已生成' : '已中断'}</Text>
         ) : (
           <View className="gen">
             <View className="spin" style={{ borderTopColor: accent }} />
@@ -194,6 +198,9 @@ export default function ReportCard({ data, animate = false, streaming = false, s
             <Icon name="shield" size={13} color="#7E848B" />
             <Text className="foot-t">{data.trust}</Text>
           </View>
+          {/* 操作行硬条件：非 operable（无落库 id / 降级 / 中断）只留 trust 行说明现状，
+              查看/分享/存入一律不开——半截或未落库的内容开放操作只会引导用户拿到错误结果。 */}
+          {operable && (
           <View className="acts">
             {/* 主操作：查看网页版报告全文；primary Icon 烘焙进 SVG，用白色。 */}
             <View className="act primary" style={{ background: accent }} onClick={() => onView?.()}>
@@ -218,6 +225,7 @@ export default function ReportCard({ data, animate = false, streaming = false, s
               </View>
             )}
           </View>
+          )}
           {/* D-3-4 隐藏出图画布（屏外，仅点分享图时绘制导出） */}
           <Canvas type="2d" id={shareCanvasId} className="rc-share-canvas" style={{ width: '600px', height: '900px' }} />
         </>
