@@ -1,4 +1,5 @@
-// 稳定性：调用诊断 / 内容审核 / 审计日志。
+// 观测：调用诊断 / 内容审核 / 审计日志 —— 只读的「发生过什么」。
+// 模型配置曾误放本组（见 nav.ts 顶部说明），已移入「配置」——那是写屏，不是观测屏。
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '../Icon';
 import { api, type AdminAuditItem, type AdminTraceListView, type AdminTraceDetail, type AdminModerationLogView } from '../api';

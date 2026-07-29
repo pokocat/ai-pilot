@@ -1,7 +1,7 @@
 // 运营后台外壳：鉴权 → 分组导航 → 分区渲染 → 详情面板 / 命令面板 / toast。
 //
 // 改版要点（旧版问题见 nav.ts 与 router.ts 顶部注释）：
-//   ① 22 个目的地不再平铺在横滚底栏里，而是收敛成 6 个运营场景组 + 组内 segmented 分区；
+//   ① 22 个目的地不再平铺在横滚底栏里，而是按「看 vs 改」收敛成 7 个运营场景组 + 组内 segmented 分区；
 //   ② 当前位置写进 hash，刷新 / 返回 / 分享链接都不丢现场；
 //   ③ ⌘K 命令面板可直达任意一屏，也能按姓名/手机号直接跳到某个用户；
 //   ④ 桌面端左栏常驻、内容进 max-width 容器，不再把 1440px 屏当成手机用。
@@ -20,9 +20,10 @@ import logo from './assets/logo.png';
 import { OverviewView } from './views/overview';
 import { UsersView, UserDetailPanel } from './views/users';
 import { PaymentsView, FunnelView, UsageView, TokenUsageView } from './views/revenue';
-import { ObservabilityView, ModerationView, AuditView } from './views/health';
+import { ObservabilityView, ModerationView, AuditView } from './views/observe';
 import { AgentsView, SkillLibraryView, KnowledgeView, RetrievalDebugView } from './views/studio';
-import { PlansView, SkusView, EcoToolsView, BenchmarksView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/config';
+import { PlansView, SkusView, EcoToolsView } from './views/catalog';
+import { BenchmarksView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
 import { ModelView } from './views/model';
 
 export default function App() {
@@ -114,7 +115,7 @@ export default function App() {
   return (
     <div className="screen">
       <div className="shell">
-        {/* 桌面端左栏：品牌 + 6 个运营场景组 + 命令面板入口 + 账户 */}
+        {/* 桌面端左栏：品牌 + 运营场景组（见 nav.ts）+ 命令面板入口 + 账户 */}
         <aside className="rail">
           <div className="rail-brand">
             <img className="rail-mk" src={logo} alt="军师" />
@@ -220,7 +221,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* 移动端底栏：只放 6 个组 → 永远放得下，不再横滚 */}
+      {/* 移动端底栏：只放组（7 个，flex 均分）→ 永远放得下，不再横滚 */}
       <nav className="botnav" aria-label="功能分组">
         {groups.map((g) => (
           <button

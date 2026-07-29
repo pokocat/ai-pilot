@@ -322,8 +322,8 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 
 改版动机是「22 个目的地平铺在一条 56px 宽横滚底栏里、桌面端整屏当手机用、请求失败伪装成没数据」。现在的结构：
 
-- **`admin/src/nav.ts` 是导航 SSOT**：22 个 section 归入 6 个运营场景组——`today 今日`（概览）、`people 用户`、`revenue 经营`（订单/漏斗/钻石/Token）、`studio 智能体`（顾问/技能库/知识库/检索）、`health 稳定性`（诊断/审核/审计/模型）、`config 配置`（套餐/单次付费/生态工具/行业基准/开关/献策/问卷/账户）。label、hint、icon、`ownerOnly`、命令面板别名都在这里，页面不再各写一份标题。
-- **外壳 `admin/src/App.tsx` 只做**：鉴权、分组导航（桌面左栏 204px / 移动底栏 6 格，组数固定=永不横滚）、分区 segmented、hash 路由、详情面板挂载、命令面板、toast、改密弹层。业务视图全在 `admin/src/views/{overview,users,revenue,health,studio,config,model}.tsx`（原 2841 行 App.tsx 已拆分），共享格式化在 `format.tsx`，共享组件在 `components.tsx`。
+- **`admin/src/nav.ts` 是导航 SSOT**：22 个 section 按**「只读的归观测、可写的归配置」**归入 7 个运营场景组——`today 今日`（概览）、`people 用户`、`revenue 经营`（订单/漏斗/钻石消耗/Token 成本）、`studio 智能体`（顾问/技能库/知识库/检索调试）、`observe 观测`（调用诊断/内容审核/审计日志）、`catalog 商品`（套餐/单次付费/生态工具）、`settings 配置`（模型配置/功能开关/行业基准/献策/问卷/运营账户）。label、hint、icon、`ownerOnly`、命令面板别名都在这里，页面不再各写一份标题。**分组时看页面的主导动词，别看次要属性**——初版把「模型配置」放进「稳定性」（理由是端点池冷却算健康信号），但该页主体是写操作，一个写屏混在三个只读观测屏里正是运营找不到东西的根因；同期「配置」组堆到 8 项混装商品/开关/内容/权限，也一并按此原则拆开。新增分区要么进现有组，要么拆组，**单组不超过 8 项**。
+- **外壳 `admin/src/App.tsx` 只做**：鉴权、分组导航（桌面左栏 204px / 移动底栏按组 flex 均分，组数有界=永不横滚；组名保持 2-3 字）、分区 segmented、hash 路由、详情面板挂载、命令面板、toast、改密弹层。业务视图全在 `admin/src/views/{overview,users,revenue,studio,observe,catalog,settings,model}.tsx`（原 2841 行 App.tsx 已拆分，文件名对齐组名；`model.tsx` 因页面体量单独成文件，逻辑上属 `settings` 组），共享格式化在 `format.tsx`，共享组件在 `components.tsx`。
 - **`admin/src/router.ts`（极简 hash 路由，零依赖）**：`#/<section>[/<id>][?params]`。刷新 / 浏览器返回 / 把链接甩给同事都能回到同一现场（含打开着的用户详情，如 `#/users/<userId>`）；非法或越权 hash 兜回 `#/home` 而不是白屏。旧版当前 tab 与详情态只在 React state 里，F5 就丢现场。
 - **命令面板 ⌘K / Ctrl+K（`CommandPalette.tsx`）**：按名称/别名跳任意一屏，或按姓名/手机号直接定位用户（纯数字输入优先匹配用户）。新增目的地必须能在这里被搜到。
 - **`admin/src/useResource.ts` + `components.tsx` 的 `ViewState`**：统一 loading（骨架屏）/ error（带服务端原文 + 重试）/ empty 三态，并在 `PageHead` 显示数据新鲜度。替掉旧版散落 32 处的 `.catch(() => {})`——接口 500 时页面渲染成「近 30 天暂无订单」，运营会把它当业务结论上报。

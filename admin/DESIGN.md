@@ -244,14 +244,22 @@ Inputs are utilitarian and stable.
 
 ### Navigation
 
-Navigation is grouped by **operator task**, not by backend module. The 22 destinations live in six
-scenario groups (`今日 / 用户 / 经营 / 智能体 / 稳定性 / 配置`) declared once in `admin/src/nav.ts` —
+Navigation is grouped by **operator task**, not by backend module. The 22 destinations live in seven
+scenario groups (`今日 / 用户 / 经营 / 智能体 / 观测 / 商品 / 配置`) declared once in `admin/src/nav.ts` —
 that file is the single source of truth for labels, hints, icons, group membership, and palette aliases.
+
+**The Read-vs-Write Rule.** Grouping follows one testable principle: **read-only surfaces go to
+观测/经营, writable surfaces go to 商品/配置.** A screen's dominant verb decides its group, not a
+secondary attribute. The first cut violated this by filing 模型配置 under a health group because the
+endpoint pool exposes cooling status — but that page's substance is writing (swap model, API keys,
+unit prices, pool weights, embedding/rerank). One write screen among three read-only ones is precisely
+what makes a console hard to navigate. Group icon = that group's flagship section's icon.
 
 - **Desktop (≥960px):** A persistent left rail (`204px`) holds the brand, the six groups, the command
   palette entry, and the account menu. Content sits in a `--wrap` (1180px) max-width container.
 - **Mobile (<960px):** A compact top bar carries brand + palette + account; a bottom nav carries the
-  **six groups only**. Group count is fixed, so the bottom nav never scrolls horizontally.
+  **groups only**, flex-distributed. Group count is bounded (7 today), so the bottom nav never scrolls
+  horizontally. Keep group labels to 2–3 characters so they survive `375px / n` per item.
 - **Section nav:** Within a group, sections render as a segmented `subnav` row under the chrome.
   A group with a single section renders no subnav (no fake tabs).
 - **Page head (`ph`):** Every screen's title and one-line hint come from `nav.ts`, plus a refresh

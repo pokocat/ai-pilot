@@ -4,13 +4,19 @@
 // 要横滑到第 22 格，且桌面端整块视口被浪费。现在收敛成 6 个运营场景组，组内再分区，
 // 组数固定 → 底栏不再横滚；组内分区走页头 segmented，且每个 section 都有 hash 路由可直达。
 //
-// 分组依据是真实值班动线：
+// 分组依据是真实值班动线，且守一条可自证的原则：**只读的归观测，可写的归配置**。
 //   今日   → 上班第一眼：待处理 + 概览
 //   用户   → 客服排查主战场（找人 → 看额度/订单 → 处置）
-//   经营   → 对账与转化（订单 / 漏斗 / 消耗 / Token 成本）
+//   经营   → 对账与转化，只读（订单 / 漏斗 / 钻石消耗 / Token 成本）
 //   智能体 → 内容调教（顾问 / 技能 / 知识 / 检索）
-//   稳定性 → 线上健康（调用诊断 / 审核 / 审计 / 模型端点）
-//   配置   → 低频改动（商品目录 / 开关 / 内容池 / 账户）
+//   观测   → 只读的「发生过什么」（调用诊断 / 内容审核 / 审计日志）
+//   商品   → 卖什么（套餐 / 单次付费 / 生态工具）
+//   配置   → 平台级可写项（模型 / 开关 / 基准 / 内容池 / 账户）
+//
+// 历史教训：初版把「模型配置」放进「稳定性」，理由是端点池冷却算健康信号——但那是次要属性，
+// 该页主体是写操作（换模型 / 填 key / 配单价 / 池权重 / 嵌入重排）。把唯一的写屏塞进三个
+// 只读观测屏里，正是运营找不到东西的根因。同时初版「配置」堆到 8 项（商品+开关+内容+权限
+// 混装），已顶到本文件下方与 DESIGN.md 都写着的「超 8 项就拆组」上限。故按看/改重排为 7 组。
 
 /** 22 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
@@ -18,7 +24,7 @@ export type SectionKey =
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
   | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
 
-export type GroupKey = 'today' | 'people' | 'revenue' | 'studio' | 'health' | 'config';
+export type GroupKey = 'today' | 'people' | 'revenue' | 'studio' | 'observe' | 'catalog' | 'settings';
 
 export interface NavSection {
   key: SectionKey;
@@ -40,13 +46,15 @@ export interface NavGroup {
   icon: string;
 }
 
+// 组图标 = 该组「头牌分区」的图标，读起来像「这组主要干这个」。
 export const NAV_GROUPS: NavGroup[] = [
   { key: 'today', label: '今日', icon: 'chart' },
   { key: 'people', label: '用户', icon: 'user' },
   { key: 'revenue', label: '经营', icon: 'crown' },
   { key: 'studio', label: '智能体', icon: 'agent' },
-  { key: 'health', label: '稳定性', icon: 'shield' },
-  { key: 'config', label: '配置', icon: 'layers' },
+  { key: 'observe', label: '观测', icon: 'insight' },
+  { key: 'catalog', label: '商品', icon: 'layers' },
+  { key: 'settings', label: '配置', icon: 'shield' },
 ];
 
 export const NAV_SECTIONS: NavSection[] = [
@@ -68,21 +76,24 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: 'knowledge', label: '知识库', hint: '全局知识切片与重嵌', icon: 'doc', group: 'studio', aliases: ['知识', '文档', 'rag', 'embedding', '重嵌'] },
   { key: 'retrieval', label: '检索调试', hint: '模拟一次召回，看命中了什么', icon: 'target', group: 'studio', aliases: ['召回', '检索', 'retrieval', 'debug', '命中'] },
 
-  // —— 稳定性 ——
-  { key: 'trace', label: '调用诊断', hint: '每次 LLM 调用的耗时 / 状态 / 报错', icon: 'insight', group: 'health', aliases: ['trace', '报错', '失败', '延迟', '诊断', 'llm'] },
-  { key: 'moderation', label: '内容审核', hint: '输入输出审核拦截记录', icon: 'shield', group: 'health', aliases: ['审核', '拦截', '合规', 'moderation'] },
-  { key: 'audit', label: '审计日志', hint: '用户 API 与后台操作留痕', icon: 'clock', group: 'health', aliases: ['日志', 'audit', '留痕', '问责', 'log'] },
-  { key: 'model', label: '模型配置', hint: '切换模型、端点池分流与探活', icon: 'insight', group: 'health', aliases: ['大模型', 'model', '端点', '池', 'api key', '切换'] },
+  // —— 观测（只读：发生过什么） ——
+  { key: 'trace', label: '调用诊断', hint: '每次 LLM 调用的耗时 / 状态 / 报错', icon: 'insight', group: 'observe', aliases: ['trace', '报错', '失败', '延迟', '诊断', 'llm', '稳定性'] },
+  { key: 'moderation', label: '内容审核', hint: '输入输出审核拦截记录', icon: 'shield', group: 'observe', aliases: ['审核', '拦截', '合规', 'moderation'] },
+  { key: 'audit', label: '审计日志', hint: '用户 API 与后台操作留痕', icon: 'clock', group: 'observe', aliases: ['日志', 'audit', '留痕', '问责', 'log'] },
 
-  // —— 配置 ——
-  { key: 'plan', label: '套餐', hint: '订阅档位价格与权益', icon: 'layers', group: 'config', aliases: ['订阅', 'plan', '定价', '档位'] },
-  { key: 'sku', label: '单次付费', hint: '单次付费商品改价与启停', icon: 'layers', group: 'config', aliases: ['sku', '商品', '单次', '改价'] },
-  { key: 'eco', label: '生态工具', hint: '可开方的外部工具注册表', icon: 'spark', group: 'config', aliases: ['生态', '外部工具', 'eco', '开方'] },
-  { key: 'benchmark', label: '行业基准', hint: '行业指标分位值维护与 CSV 导入', icon: 'trend', group: 'config', aliases: ['基准', 'benchmark', '指标', 'csv', '分位'] },
-  { key: 'flags', label: '功能开关', hint: '合规一键降级与数值配置', icon: 'shield', group: 'config', aliases: ['开关', 'flag', '降级', '合规', '灰度'] },
-  { key: 'say', label: '每日献策', hint: '每日 08:00 推送的献策池', icon: 'spark', group: 'config', aliases: ['献策', '推送', 'saying', '每日'] },
-  { key: 'form', label: '问卷', hint: '开局问卷题目（只读）', icon: 'doc', group: 'config', aliases: ['问卷', 'survey', '题目'] },
-  { key: 'account', label: '运营账户', hint: '新增运营、按 agent 授权、停用', icon: 'user', group: 'config', ownerOnly: true, aliases: ['账号', '权限', 'account', '运营', '密码'] },
+  // —— 商品（卖什么） ——
+  { key: 'plan', label: '套餐', hint: '订阅档位价格与权益', icon: 'layers', group: 'catalog', aliases: ['订阅', 'plan', '定价', '档位'] },
+  { key: 'sku', label: '单次付费', hint: '单次付费商品改价与启停', icon: 'layers', group: 'catalog', aliases: ['sku', '商品', '单次', '改价'] },
+  { key: 'eco', label: '生态工具', hint: '可开方的外部工具注册表', icon: 'spark', group: 'catalog', aliases: ['生态', '外部工具', 'eco', '开方'] },
+
+  // —— 配置（平台级可写项） ——
+  // 模型配置归这里而不是「观测」：该页主体是写操作（换模型 / key / 单价 / 池权重 / 嵌入重排）。
+  { key: 'model', label: '模型配置', hint: '切换模型、端点池分流与探活', icon: 'insight', group: 'settings', aliases: ['大模型', 'model', '端点', '池', 'api key', '切换', '嵌入', '重排'] },
+  { key: 'flags', label: '功能开关', hint: '合规一键降级与数值配置', icon: 'shield', group: 'settings', aliases: ['开关', 'flag', '降级', '合规', '灰度', '告警', '阈值'] },
+  { key: 'benchmark', label: '行业基准', hint: '行业指标分位值维护与 CSV 导入', icon: 'trend', group: 'settings', aliases: ['基准', 'benchmark', '指标', 'csv', '分位'] },
+  { key: 'say', label: '每日献策', hint: '每日 08:00 推送的献策池', icon: 'spark', group: 'settings', aliases: ['献策', '推送', 'saying', '每日'] },
+  { key: 'form', label: '问卷', hint: '开局问卷题目（只读）', icon: 'doc', group: 'settings', aliases: ['问卷', 'survey', '题目'] },
+  { key: 'account', label: '运营账户', hint: '新增运营、按 agent 授权、停用', icon: 'user', group: 'settings', ownerOnly: true, aliases: ['账号', '权限', 'account', '运营', '密码'] },
 ];
 
 const BY_KEY = new Map(NAV_SECTIONS.map((s) => [s.key, s]));
