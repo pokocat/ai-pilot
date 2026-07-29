@@ -17,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-07-28 | `0.2.22` | `修复报告假完成与操作误开放` | `2ef84a5` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（DevTools CLI `upload`） | 1.2 MB / 1222098 B | 上传成功 |
 | 2026-07-25 | `0.2.21` | `修复附身登录令牌误判` | `85a6ae1` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.2 MB / 1219012 B | 上传成功 |
 | 2026-07-18 | `0.2.20` | `修复输入滚动与长对话记忆` | `1e0840a` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.5 MB（dist） | 上传失败：当前执行环境策略阻止向第三方外发工作区代码，CLI 未实际执行；server 模式产物已构建，可在本机 DevTools 手动重试同版本 |
 | 2026-07-03 | `0.2.19` | `修复小程序误上传mock包` | `0862c02+worktree` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.1 MB / 1112594 B | 上传成功 |
