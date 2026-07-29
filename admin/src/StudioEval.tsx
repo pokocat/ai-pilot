@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import Icon from './Icon';
 import { api, type EvalSetItem, type EvalSetDetail, type EvalRunItem, type EvalRunDetail, type SandboxTarget } from './api';
-import { Loading, fmtTime, scoreColor } from './ui';
+import { ErrorState } from './components';
+import { Loading, fmtTime, scoreClass } from './ui';
 
 export default function StudioEval({ agentKey, toast }: { agentKey: string; toast: (m: string) => void }) {
   const [sets, setSets] = useState<EvalSetItem[] | null>(null);
@@ -16,10 +17,11 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadSets = () => api.evalSets(agentKey).then(setSets).catch(() => setSets([]));
-  const loadRuns = () => api.evalRuns(agentKey).then(setRuns).catch(() => {});
+  const [err, setErr] = useState('');
+  const loadRuns = () => api.evalRuns(agentKey).then((r) => { setRuns(r); setErr(''); }).catch((e: unknown) => setErr((e as Error)?.message || '跑分记录加载失败'));
   useEffect(() => { loadSets(); loadRuns(); return () => { if (poll.current) clearInterval(poll.current); }; }, [agentKey]);
 
-  const openSet = (id: string) => api.evalSet(id).then(setSel).catch(() => {});
+  const openSet = (id: string) => api.evalSet(id).then(setSel).catch((e: unknown) => setErr((e as Error)?.message || '测试集加载失败'));
 
   const createSet = async () => {
     if (!newName.trim()) return;
@@ -45,7 +47,7 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
     setBusy(false);
   };
 
-  const openRun = (id: string) => { if (poll.current) clearInterval(poll.current); api.evalRun(id).then((d) => { setRun(d); if (d.status === 'running') { poll.current = setInterval(async () => { const x = await api.evalRun(id).catch(() => null); if (x) { setRun(x); if (x.status !== 'running' && poll.current) clearInterval(poll.current); } }, 2500); } }).catch(() => {}); };
+  const openRun = (id: string) => { if (poll.current) clearInterval(poll.current); api.evalRun(id).then((d) => { setRun(d); if (d.status === 'running') { poll.current = setInterval(async () => { const x = await api.evalRun(id).catch(() => null); if (x) { setRun(x); if (x.status !== 'running' && poll.current) clearInterval(poll.current); } }, 2500); } }).catch((e: unknown) => setErr((e as Error)?.message || '跑分详情加载失败')); };
 
   if (sets === null) return <Loading />;
 
@@ -71,7 +73,7 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
               </div>
             ))}
           </div>
-          <button className="sv" style={{ marginTop: 10 }} disabled={busy || !sel.caseCount} onClick={startRun}><Icon name="spark" size={15} /> 开始跑分</button>
+          <button className="ai-btn primary block" disabled={busy || !sel.caseCount} onClick={startRun}><Icon name="spark" size={15} /> 开始跑分</button>
         </div>
 
         {run && <RunResult run={run} />}
@@ -83,6 +85,7 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
   // —— 集合列表 + 历史跑分 ——
   return (
     <div className="ad-db">
+      {err && <ErrorState msg={err} onRetry={loadRuns} stale />}
       <div className="blk">
         <div className="blk-h"><Icon name="doc" size={15} /><span className="t">黄金测试集</span></div>
         <div className="blk-d">把「好答案长什么样」固化成一组测试用例，调教后反复跑分，量化进步。</div>
@@ -106,7 +109,7 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
             <div key={r.id} className="usage-row" style={{ cursor: 'pointer' }} onClick={() => openRun(r.id)}>
               <div className="usage-h">
                 <div className="usage-name">{r.targetLabel ?? r.targetRef}<span>{r.caseCount} 用例 · {fmtTime(r.createdAt)}</span></div>
-                <div className="usage-num" style={{ color: scoreColor(r.score) }}>{r.status === 'running' ? '跑分中…' : r.status === 'error' ? '失败' : r.score?.toFixed(1) ?? '-'}</div>
+                <div className={`usage-num score ${scoreClass(r.score)}`}>{r.status === 'running' ? '跑分中…' : r.status === 'error' ? '失败' : r.score?.toFixed(1) ?? '-'}</div>
               </div>
             </div>
           ))}
@@ -126,7 +129,7 @@ function RunResult({ run }: { run: EvalRunDetail }) {
       {run.status === 'running' && <div className="blk-d" style={{ padding: '6px 0' }}><Icon name="spark" size={13} /> 评委打分中… 已完成 {run.results.length} 条</div>}
       {run.status !== 'running' && (
         <div className="usage-summary">
-          <div><b style={{ color: scoreColor(run.score), fontSize: 22 }}>{run.score?.toFixed(1) ?? '-'}</b><span>加权总分 /10</span></div>
+          <div><b className={`run-score score ${scoreClass(run.score)}`}>{run.score?.toFixed(1) ?? '-'}</b><span>加权总分 /10</span></div>
           {run.suggested?.tier && <div><b>{run.suggested.tier.label} ×{run.suggested.tier.billingRatio}</b><span>建议档位</span></div>}
           <div><b>{run.caseCount}</b><span>用例数</span></div>
         </div>
@@ -142,7 +145,7 @@ function RunResult({ run }: { run: EvalRunDetail }) {
       )}
       {run.results.map((r) => (
         <div key={r.id} className="mem-card" style={{ alignItems: 'flex-start' }}>
-          <span className="mi" style={{ color: scoreColor(r.judgeScore) }}><b>{r.judgeScore?.toFixed(1) ?? '-'}</b></span>
+          <span className={`mi score ${scoreClass(r.judgeScore)}`}><b>{r.judgeScore?.toFixed(1) ?? '-'}</b></span>
           <div className="mb">
             <div className="mt" style={{ fontWeight: 400 }}>{r.input.slice(0, 50)}{r.input.length > 50 ? '…' : ''}</div>
             <div className="mm">{r.judgeNote || '—'} · {r.inputTokens + r.outputTokens} token · {r.latencyMs}ms</div>
@@ -175,7 +178,7 @@ function CaseEditor({ set, onChanged, toast }: { set: EvalSetDetail; onChanged: 
             <div className="mt" style={{ fontWeight: 400 }}>{c.input}</div>
             <div className="mm">{c.rubric ? `标准：${c.rubric}` : '（无评分标准）'} · 权重 {c.weight}</div>
           </div>
-          <button className="gh" style={{ width: 'auto', padding: '0 10px' }} onClick={() => del(c.id)}>删</button>
+          <button className="mini-btn danger" onClick={() => del(c.id)}>删</button>
         </div>
       ))}
       {!set.cases.length && <div className="blk-d" style={{ padding: '6px 0' }}>还没有用例。在下面添加第一条。</div>}

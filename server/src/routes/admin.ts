@@ -28,6 +28,7 @@ import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
 import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
+import { ALERT_CONFIG_DEFS, feishuStatus, setFeishuTarget, sendFeishuText } from '../services/alertConfig.js';
 import { REVIEW_GRACE_PER_DAY, getQuotaState, getPlanStatus, setQuota } from '../services/tokenQuota.js';
 import { getBalance, grantCredits, chargeCredits } from '../services/credits.js';
 import { now, dayStart } from '../services/clock.js';
@@ -69,6 +70,13 @@ const FEATURE_FLAG_CATALOG: FlagDef[] = [
   { id: 'fortune', label: '命理能力', desc: '关闭即全产品下线八字/命盘/天时日历/送你一卦，对话不再引用命盘（合规一键降级）', compliance: isComplianceFlag('fortune'), kind: 'toggle' },
   // D-10 复盘保底额度：额度耗尽时复盘类调用每日仍放行的次数（覆盖「日复盘+军令生成+2-3 次追问」动线，默认 6）。
   { id: 'review-grace', label: '复盘保底额度', desc: '月度 token 额度耗尽时，复盘类对话每日仍放行的次数（保住留存动线）', compliance: false, kind: 'number', payloadKey: 'perDay', def: REVIEW_GRACE_PER_DAY, min: 0, max: 50, unit: '次/日' },
+  // 监控告警阈值（监控大盘二期）：注册表在 services/alertConfig.ts，默认值=压测方案 §7 口径。
+  // 值经 /api/metrics 的 junshi_alert_config 指标喂给 Prometheus 告警规则，改动 ≤75s 生效（60s 缓存 + 一个抓取周期）。
+  ...ALERT_CONFIG_DEFS.map((d): FlagDef => ({
+    id: d.id, label: `告警 · ${d.label}`,
+    desc: `${d.desc}（默认 ${d.def}${d.unit}；后台改完约 1 分钟内生效，无需发版）`,
+    compliance: false, kind: 'number', payloadKey: 'value', def: d.def, min: d.min, max: d.max, unit: d.unit,
+  })),
 ];
 
 // 把 service 抛出的 {statusCode, code} 错误统一回成 HTTP 响应。
@@ -1639,6 +1647,27 @@ export async function adminRoutes(app: FastifyInstance) {
     await setFeatureFlag(def.id, req.body.enabled); // 立即清缓存（合规开关本就直读 DB）
     await recordAudit({ action: 'admin.flag.update', payload: { id: def.id, enabled: req.body.enabled } });
     return shapeFlag(def, { enabled: req.body.enabled, payload: null });
+  });
+
+  // —— 告警通知渠道（监控大盘二期）：飞书群机器人 webhook，存库加密、掩码回显 ——
+  // Alertmanager 打到 /api/alerts/webhook 后由服务端按这里的配置转发；后台改 webhook 即时生效。
+  app.get('/admin/monitor-notify', async () => feishuStatus());
+  // 写 = 能把内部告警外发到外部群，与资金操作同级（requireSuper）；URL 白名单限飞书机器人域名（防外带）。
+  app.put<{ Body: { url?: string; secret?: string } }>('/admin/monitor-notify', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    try {
+      await setFeishuTarget(String(req.body?.url ?? ''), String(req.body?.secret ?? ''));
+    } catch (e) { return sendErr(reply, e); }
+    const status = await feishuStatus();
+    await recordAudit({ action: 'admin.monitor.notify.update', payload: { configured: status.configured, by: actorAccountId(actor) } });
+    return status;
+  });
+  app.post('/admin/monitor-notify/test', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const r = await sendFeishuText('✅ 军师监控 · 告警通道测试消息（来自运营后台）', { fresh: true });
+    return r.sent ? { sent: true } : reply.code(502).send({ sent: false, reason: r.reason, error: '发送失败：' + (r.reason ?? '未知原因') });
   });
 
   // —— 套餐 ——

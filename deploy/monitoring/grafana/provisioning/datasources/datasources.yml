@@ -1,0 +1,37 @@
+# Grafana 数据源预置。uid 是看板 JSON 里引用的锚点,改了 uid 看板全瞎,别动。
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://127.0.0.1:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+
+  # 业务大盘的历史类面板直查业务库（只读账号,建法见 docs/MONITORING.md §3）。
+  # 密码从容器环境变量取（docker-compose.yml 里由 .env 的 GRAFANA_PG_PASSWORD 注入;
+  # provisioning 文件支持 $VAR 环境变量插值）。
+  - name: JunshiDB
+    uid: junshi-pg
+    type: postgres
+    access: proxy
+    url: 127.0.0.1:5432
+    database: junshi
+    user: junshi_ro
+    secureJsonData:
+      password: $GRAFANA_PG_PASSWORD
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1400
+      maxOpenConns: 4    # 看板刷新别挤占业务连接
+      maxIdleConns: 2
+
+  # Loki 只有 --profile logs 起了才有数据;没起也不影响其它看板。
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://127.0.0.1:3100

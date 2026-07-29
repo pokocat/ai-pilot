@@ -60,7 +60,7 @@ export default function StudioSandbox({ agentKey, draftDirty }: { agentKey: stri
           </div>
         )}
 
-        <button className="sv" style={{ marginTop: 10 }} onClick={run} disabled={busy}>
+        <button className="ai-btn primary block" onClick={run} disabled={busy}>
           <Icon name="spark" size={15} /> {busy ? '试跑中…' : `用${target === 'draft' ? '草稿' : '已发布版本'}试跑`}
         </button>
         {err && <div className="ai-test err" style={{ marginTop: 8 }}><Icon name="alert" size={13} /> {err}</div>}
@@ -75,7 +75,7 @@ export default function StudioSandbox({ agentKey, draftDirty }: { agentKey: stri
             <div><b>{result.trace.latencyMs}ms</b><span>延迟</span></div>
             <div><b>{result.trace.totalTokens}</b><span>token</span></div>
             <div><b>{result.trace.cachedInput}</b><span>缓存命中</span></div>
-            <div><b style={{ color: '#c98a2e' }}>{result.charged}</b><span>模拟扣额 ×{result.billingRatio}</span></div>
+            <div><b className="score warn">{result.charged}</b><span>模拟扣额 ×{result.billingRatio}</span></div>
           </div>
           <div className="blk-d" style={{ margin: '4px 0 10px' }}>provider={result.trace.provider} / {result.trace.model} · 倍率 {result.billingRatio}（真实产出会按此扣月度额度）</div>
           {result.kind === 'report' && result.deliverable && <DeliverableView d={result.deliverable} />}

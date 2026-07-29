@@ -5,6 +5,7 @@
 
 import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
+import { noteCreditDelta } from './metrics.js';
 
 // P2-4：CREDIT_COST 已移除（仅被死函数 entitlements.agentCost 引用；实际计费走 meterUnit/billingRatio）。
 
@@ -55,6 +56,7 @@ async function appendCreditDelta(
   const balance = bal + delta;
   if (balance < 0) throw new InsufficientCreditsError();
   await db.creditLedger.create({ data: { tenantId, userId, delta, reason, balance } });
+  noteCreditDelta(delta, reason); // 观测口径=「尝试落账」：外层事务仍可能回滚，容忍少量偏差（对账以 credit_ledger 为准）
   return balance;
 }
 
@@ -101,6 +103,7 @@ export async function grantCredits(
     const delta = unlimited ? 0 : amount;
     const balance = unlimited ? -1 : (isUnlimited(bal) ? amount : bal + amount);
     await client.creditLedger.create({ data: { tenantId, userId, delta, reason, balance } });
+    noteCreditDelta(delta, reason);
     return balance;
   };
   return db ? apply(db) : prisma.$transaction((tx) => apply(tx));

@@ -108,6 +108,29 @@ server {
         proxy_set_header Host $host;
     }
 
+    # —— 指标端点不出公网（双保险）——
+    # 应用侧本来就要求 Bearer METRICS_TOKEN（见 server/src/routes/metrics.ts），
+    # 但这个端点只有本机 Prometheus 用（走 127.0.0.1:4000 直连，不经 Nginx），公网直接 404。
+    location = /api/metrics {
+        return 404;
+    }
+
+    # —— Grafana 监控看板（deploy/monitoring，可选）——
+    # 容器只监听 127.0.0.1:3000，经这里出公网；有 Grafana 自己的登录页。
+    # 配套：deploy/monitoring/.env 里设 GRAFANA_ROOT_URL=https://你的域名/grafana/、GRAFANA_SUB_PATH=true。
+    # 不部署监控栈时删掉本段即可。
+    location /grafana/ {
+        proxy_pass http://127.0.0.1:3000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Grafana Live（实时推送）走 WebSocket
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
     # —— 运营后台（admin/dist，子路径；需以 base=/admin/ 构建）——
     location = /admin {
         return 301 /admin/;              # 避免 /admin 被 H5 fallback 当成主页

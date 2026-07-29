@@ -1,0 +1,41 @@
+# 军师 · Alertmanager 路由
+#
+# 通知走后端转发（监控大盘二期）：告警打到 API 的 /api/alerts/webhook（Bearer=METRICS_TOKEN，
+# 与抓取同一份 secrets/metrics.token），由服务端按运营后台配置的飞书群机器人转发——
+# webhook 地址在后台「功能开关 → 告警通知」改,即时生效,不用动本文件。
+# 后台没配飞书时,API 记一笔 not_configured（junshi_alerts_forwarded_total）并静默吞掉,不算失败。
+#
+# 诚实边界：API 进程挂掉时本通道跟着失联（JunshiApiDown 只在 Alertmanager UI 可见）——
+# 要「服务挂了也能收到通知」,得配外部拨测（Uptime Kuma / 云监控,见 docs/MONITORING.md §7）。
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: 'junshi-api'
+  group_by: ['alertname', 'severity']
+  group_wait: 30s        # 同组告警攒 30s 一起发,避免一炸一屏
+  group_interval: 5m
+  repeat_interval: 4h    # 没恢复的告警每 4 小时提醒一次
+  routes:
+    - matchers: [severity = critical]
+      repeat_interval: 1h  # critical 催得更勤
+
+receivers:
+  - name: 'junshi-api'
+    webhook_configs:
+      - url: 'http://127.0.0.1:4000/api/alerts/webhook'
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /etc/alertmanager/metrics.token
+
+inhibit_rules:
+  # critical 已在响时压住同名 warning,少一层噪音
+  - source_matchers: [severity = critical]
+    target_matchers: [severity = warning]
+    equal: ['alertname']
+  # 主机都挂了就别再报 API 的各种细节
+  - source_matchers: [alertname = JunshiApiDown]
+    target_matchers: [alertname =~ "JunshiApi.*|JunshiLlm.*"]

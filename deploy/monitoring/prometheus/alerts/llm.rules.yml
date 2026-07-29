@@ -1,0 +1,78 @@
+# LLM 网关告警。429 率 / 队列等待 / Token 成本的**默认阈值** = 压测方案 §7 告警线原文；
+# 运行值全部从 junshi_alert_config 取（运营后台「功能开关」页「告警 ·」系列可调，≤75s 生效）。
+# 注意：junshi_alert_config 来自 API 的 /api/metrics——API 挂掉时这些规则静默不评估，
+# 由 api.rules.yml 的 JunshiApiDown（不依赖动态阈值）兜底。
+groups:
+  - name: junshi-llm
+    rules:
+      - alert: JunshiLlm429RateHigh
+        expr: >
+          sum(rate(junshi_llm_upstream_429_total[10m]))
+            / clamp_min(sum(rate(junshi_llm_granted_total[10m])), 1e-9)
+          >= scalar(junshi_alert_config{key="llm_429_warn_permille"}) / 1000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "上游 429 率超过预警线（车道维度见看板「LLM 网关」；阈值后台可调）"
+      - alert: JunshiLlm429RateCritical
+        expr: >
+          sum(rate(junshi_llm_upstream_429_total[10m]))
+            / clamp_min(sum(rate(junshi_llm_granted_total[10m])), 1e-9)
+          >= scalar(junshi_alert_config{key="llm_429_crit_permille"}) / 1000
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "上游 429 率超过严重线——按压测方案：收紧 LLM_MAX_CONCURRENCY、延长退避"
+
+      # 口径注：进程只报等待峰值（gauge），没有等待分位直方图；用峰值近似 §7 的「等待 P95」，
+      # 阈值不变（峰值≥P95，触发只会更早不会漏）。
+      - alert: JunshiLlmQueueWaitLong
+        expr: max(junshi_llm_wait_max_seconds) >= scalar(junshi_alert_config{key="llm_wait_warn_s"})
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "LLM 排队等待峰值超过预警线（当前 {{ $value | printf \"%.1f\" }}s）"
+      - alert: JunshiLlmQueueWaitCritical
+        expr: max(junshi_llm_wait_max_seconds) >= scalar(junshi_alert_config{key="llm_wait_crit_s"})
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "LLM 排队等待峰值超过严重线——按压测方案：降级或暂停接单"
+
+      - alert: JunshiLlmCoolingLong
+        expr: junshi_llm_cooling == 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "车道 {{ $labels.lane }} 因连续 429 冷却超过 5 分钟——上游配额可能被调低"
+
+      # —— Token 日成本（§7：日预算 70% 预警 / 90% 收缩 / 100% 硬停止）——
+      # 日预算=后台「告警 · Token 日预算」数值项（默认 200 元/天），70%/90% 由表达式派生。
+      - alert: JunshiTokenCostBudget70
+        expr: sum(increase(junshi_llm_cost_cny_total[1d])) > 0.7 * scalar(junshi_alert_config{key="token_daily_budget_cny"})
+        labels: { severity: warning }
+        annotations:
+          summary: "今日 Token 成本已过日预算 70%（当前 {{ $value | printf \"%.0f\" }} 元）"
+      - alert: JunshiTokenCostBudget90
+        expr: sum(increase(junshi_llm_cost_cny_total[1d])) > 0.9 * scalar(junshi_alert_config{key="token_daily_budget_cny"})
+        labels: { severity: critical }
+        annotations:
+          summary: "今日 Token 成本已过日预算 90%——按压测方案：关非核心自动任务；到 100% 硬停止"
+
+      - alert: JunshiUsageUnreported
+        expr: increase(junshi_usage_unreported_total[1h]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "真实 provider 未回传 token 用量（{{ $labels.provider }}/{{ $labels.model }}）——成本统计出现漏账口子"
+
+      - alert: JunshiGenDegraded
+        expr: increase(junshi_gen_degraded_total[15m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "产出降级发生（path={{ $labels.path }}）——用户正在拿到 mock 兜底内容，查 provider 可用性"
+
+      - alert: JunshiOutputTruncatedSpike
+        expr: increase(junshi_llm_output_truncated_total[1h]) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: "1 小时内 >5 次输出截断（AI_OUTPUT_TRUNCATED）——模型输出预算可能不够或上游变了"

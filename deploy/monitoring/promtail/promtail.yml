@@ -1,0 +1,40 @@
+# Promtail：journald（junshi-api 等 systemd 服务）+ Nginx 日志 → Loki
+server:
+  http_listen_address: 127.0.0.1
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions/positions.yaml
+
+clients:
+  - url: http://127.0.0.1:3100/loki/api/v1/push
+
+scrape_configs:
+  # systemd journal：API 进程日志都在这（journalctl -u junshi-api）。
+  # 前提：journald 持久化已开启（/var/log/journal 存在）。
+  - job_name: journal
+    journal:
+      max_age: 12h
+      labels:
+        job: journal
+    relabel_configs:
+      - source_labels: ['__journal__systemd_unit']
+        target_label: unit
+      # 只收关心的单元,别把整机 journal 都灌进来
+      - source_labels: ['__journal__systemd_unit']
+        regex: '(junshi-api|nginx|postgresql|junshi-pgdump)\.service'
+        action: keep
+
+  - job_name: nginx
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: nginx
+          type: access
+          __path__: /var/log/nginx/access.log
+      - targets: [localhost]
+        labels:
+          job: nginx
+          type: error
+          __path__: /var/log/nginx/error.log

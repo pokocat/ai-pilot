@@ -18,6 +18,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { applyPlanPurchase, applySkuGrant } from './purchase.js';
 import { parseAttribution, recordActivation } from './activation.js';
+import { notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep } from './metrics.js';
 import { sandboxEnabled } from './sandbox.js';
 import { chargeCredits } from './credits.js';
 import { sendWechatSubscribeMessage } from './wechatSubscribe.js';
@@ -247,6 +248,7 @@ export async function createJsapiOrder(args: {
   const data = (await res.json()) as { prepay_id?: string };
   if (!data.prepay_id) throw Object.assign(new Error('微信未返回 prepay_id'), { code: 'WECHAT_PAY_CREATE_FAILED', statusCode: 502 });
   await prisma.paymentOrder.update({ where: { outTradeNo }, data: { prepayId: data.prepay_id } });
+  notePayOrderCreated();
   return { outTradeNo, pay: buildPayParams(data.prepay_id) };
 }
 
@@ -488,6 +490,7 @@ async function markPaidAndApplyTx(parsed: {
     }
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
+    notePayApplied(order.skuKey ? 'sku' : 'plan', order.amount); // 观测口径=发放动作完成；对账以 payment_order 为准
     return { applied: true };
   });
 }
@@ -612,6 +615,7 @@ export async function sweepPendingOrders(opts: { batch?: number } = {}): Promise
       }
     }
   }
+  notePaySweep(stats);
   return stats;
 }
 
@@ -740,6 +744,7 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
       },
     }).catch(() => {});
   });
+  notePayRefund(order.amount);
   return { ok: true, refundId: data.refund_id ?? outRefundNo, wechatStatus };
 }
 

@@ -8,6 +8,7 @@ import { isAiTestMode, envNum } from './env.js';
 import { authRoutes } from './routes/auth.js';
 import { metaRoutes } from './routes/meta.js';
 import { metricsRoutes } from './routes/metrics.js';
+import { alertRoutes } from './routes/alerts.js';
 import { agentRoutes } from './routes/agents.js';
 import { profileRoutes } from './routes/profile.js';
 import { quickscanRoutes } from './routes/quickscan.js';
@@ -51,6 +52,7 @@ import { PlanExpiredError } from './services/tokenQuota.js';
 import {
   startEventLoopMonitor, noteRequestStart, noteRequestEnd, noteRequestAborted,
   gateEnter, gateLeave, gateInFlightNow, noteOverloadRejected,
+  noteHttpTiming, notePlanGateBlocked,
 } from './services/metrics.js';
 
 /**
@@ -172,6 +174,9 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     if (!r.__metered) return;
     r.__metered = false;
     noteRequestEnd(reply.statusCode);
+    // 路由级时延直方图：route 用路由模板（/api/agents/:key）而非原始 URL，控标签基数；
+    // 未命中路由的 404 归入 unmatched（扫描器噪声不该各占一条序列）。
+    noteHttpTiming(req.method, req.routeOptions?.url ?? 'unmatched', reply.statusCode, reply.elapsedTime / 1000);
   });
   // 客户端提前断开（小程序切后台、SSE 被掐）不会走 onResponse，须单独归还在途计数。
   app.addHook('onRequestAbort', async (req) => {
@@ -211,10 +216,12 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       if (!userId) return;
       const state = await planGateState(userId);
       if (state === 'none') {
+        notePlanGateBlocked('none');
         const e = new PlanRequiredError();
         return reply.code(403).send({ error: e.message, code: e.code });
       }
       if (state === 'expired') {
+        notePlanGateBlocked('expired');
         // 与 assertPlanActive 同一错误码：前端据 PLAN_EXPIRED 进只读态 + 续费引导，不能被本闸抢答成「未开通」。
         const e = new PlanExpiredError();
         return reply.code(403).send({ error: e.message, code: e.code });
@@ -227,6 +234,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(authRoutes, { prefix: '/api' });
   await app.register(metaRoutes, { prefix: '/api' });
   await app.register(metricsRoutes, { prefix: '/api' }); // Prometheus 指标（需 METRICS_TOKEN，未配则 404）
+  await app.register(alertRoutes, { prefix: '/api' }); // Alertmanager 告警回传 → 飞书转发（同一把 METRICS_TOKEN）
   await app.register(agentRoutes, { prefix: '/api' });
   await app.register(profileRoutes, { prefix: '/api' });
   await app.register(quickscanRoutes, { prefix: '/api' }); // 3 问速诊（WO-06：获客入口 → 初诊卡）

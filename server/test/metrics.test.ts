@@ -15,6 +15,9 @@ import { metricsRoutes } from '../src/routes/metrics.js';
 import {
   noteRequestStart, noteRequestEnd, noteOverloadRejected,
   gateEnter, __resetMetrics, __stopEventLoopMonitor,
+  noteHttpTiming, noteLlmCall, noteTokenUsage, noteGenDegraded, noteOutputTruncated,
+  noteRegistration, noteModeration, noteCreditDelta, notePlanGateBlocked,
+  notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep,
 } from '../src/services/metrics.js';
 import { __setPoolForTest, __resetLlmPool } from '../src/services/llmPool.js';
 import { __resetLlmGate, acquireLlmSlot } from '../src/services/llmGate.js';
@@ -111,12 +114,88 @@ describe('指标内容', () => {
         `不合法的指标行：${l}`,
       );
     }
-    // 每个出现的指标名都必须有 TYPE 声明（Prometheus 不强制，但缺了就没法在面板里分类）
+    // 每个出现的指标名都必须有 TYPE 声明（Prometheus 不强制，但缺了就没法在面板里分类）。
+    // 直方图的 _bucket/_sum/_count 样本行归属基名的 TYPE 声明。
     const names = new Set(samples.map((l) => l.replace(/\{.*/, '').split(' ')[0]));
     for (const n of names) {
       if (n.startsWith('prisma_')) continue; // Prisma 自带的那段由它自己声明
-      assert.ok(body.includes(`# TYPE ${n} `), `${n} 缺少 # TYPE`);
+      const base = n.replace(/_(bucket|sum|count)$/, '');
+      assert.ok(body.includes(`# TYPE ${n} `) || body.includes(`# TYPE ${base} histogram`), `${n} 缺少 # TYPE`);
     }
+  });
+
+  test('HTTP 路由级直方图：bucket/sum/count 齐全且按路由模板分序列', async () => {
+    noteHttpTiming('GET', '/api/agents/:key', 200, 0.08);
+    noteHttpTiming('GET', '/api/agents/:key', 200, 0.3);
+    noteHttpTiming('POST', '/api/generate', 500, 42);
+    const body = await get();
+    assert.match(body, /# TYPE junshi_http_request_duration_seconds histogram/);
+    // 0.08 与 0.3 都 ≤0.5 → le=0.5 桶计 2
+    assert.match(body, /junshi_http_request_duration_seconds_bucket\{method="GET",route="\/api\/agents\/:key",le="0\.5"\} 2/);
+    assert.match(body, /junshi_http_request_duration_seconds_count\{method="GET",route="\/api\/agents\/:key"\} 2/);
+    // 42s 的慢请求只落在 ≥60 的桶
+    assert.match(body, /junshi_http_request_duration_seconds_bucket\{method="POST",route="\/api\/generate",le="30"\} 0/);
+    assert.match(body, /junshi_http_request_duration_seconds_bucket\{method="POST",route="\/api\/generate",le="60"\} 1/);
+    // 路由级状态分类（找 5xx 冒烟点用）
+    assert.match(body, /junshi_http_route_responses_total\{method="POST",route="\/api\/generate",class="5xx"\} 1/);
+  });
+
+  test('LLM 调用 / token / 成本计数与告警口径对齐', async () => {
+    noteLlmCall('chat', 'claude', 'ok', 3200);
+    noteLlmCall('deliverable', 'claude', 'error', 60000);
+    noteTokenUsage({ kind: 'chat', provider: 'claude', model: 'claude-opus-4-6', inputTokens: 1000, outputTokens: 500, cachedInput: 200, cacheWrite: 0, costMicros: 12_340_000 });
+    const body = await get();
+    assert.match(body, /junshi_llm_calls_total\{kind="chat",provider="claude",status="ok"\} 1/);
+    assert.match(body, /junshi_llm_calls_total\{kind="deliverable",provider="claude",status="error"\} 1/);
+    assert.match(body, /junshi_llm_call_duration_seconds_bucket\{kind="chat",provider="claude",le="5"\} 1/);
+    assert.match(body, /junshi_llm_tokens_total\{kind="chat",provider="claude",model="claude-opus-4-6",dir="input"\} 1000/);
+    assert.match(body, /junshi_llm_tokens_total\{[^}]*dir="cached_input"\} 200/);
+    // 12_340_000 微元 = 12.34 元
+    assert.match(body, /junshi_llm_cost_cny_total\{kind="chat",provider="claude",model="claude-opus-4-6"\} 12\.34/);
+  });
+
+  test('产出降级 / 截断 / 审核 / 禁写闸计数', async () => {
+    noteGenDegraded('deliverable');
+    noteOutputTruncated('claude');
+    noteModeration('input', false);
+    noteModeration('output', true);
+    notePlanGateBlocked('none');
+    const body = await get();
+    assert.match(body, /junshi_gen_degraded_total\{path="deliverable"\} 1/);
+    assert.match(body, /junshi_llm_output_truncated_total\{provider="claude"\} 1/);
+    assert.match(body, /junshi_moderation_checks_total\{ref="input",verdict="block"\} 1/);
+    assert.match(body, /junshi_moderation_checks_total\{ref="output",verdict="pass"\} 1/);
+    assert.match(body, /junshi_plan_gate_blocked_total\{state="none"\} 1/);
+  });
+
+  test('业务事件：注册 / 算力（reason 取 · 首段）/ 支付金额折元', async () => {
+    noteRegistration('wechat_register');
+    noteCreditDelta(-30, '深度报告 · 战略参谋');
+    noteCreditDelta(500, '决策版 · 微信支付');
+    notePayOrderCreated();
+    notePayApplied('plan', 12800);
+    notePayRefund(12800);
+    notePaySweep({ scanned: 5, applied: 1, failed: 0, closed: 2 });
+    const body = await get();
+    assert.match(body, /junshi_user_registrations_total\{channel="wechat_register"\} 1/);
+    assert.match(body, /junshi_credits_flow_total\{direction="spent",reason="深度报告"\} 30/);
+    assert.match(body, /junshi_credits_flow_total\{direction="granted",reason="决策版"\} 500/);
+    assert.match(body, /^junshi_pay_orders_created_total 1$/m);
+    assert.match(body, /junshi_pay_orders_applied_total\{type="plan"\} 1/);
+    assert.match(body, /junshi_pay_amount_cny_total\{type="plan"\} 128$/m);
+    assert.match(body, /^junshi_pay_refunds_total 1$/m);
+    assert.match(body, /junshi_pay_sweep_last\{result="scanned"\} 5/);
+    assert.match(body, /junshi_pay_sweep_last\{result="closed"\} 2/);
+    assert.match(body, /^junshi_pay_sweep_runs_total 1$/m);
+  });
+
+  test('标签基数保护：reason 超 100 种折叠进 other，direction 维度保留、总量守恒', async () => {
+    for (let i = 0; i < 130; i++) noteCreditDelta(-1, `理由${i}`);
+    const body = await get();
+    assert.match(body, /junshi_credits_flow_total\{direction="spent",reason="other"\} 30/);
+    const total = [...body.matchAll(/junshi_credits_flow_total\{[^}]*direction="spent"[^}]*\} (\d+)/g)]
+      .reduce((acc, m) => acc + Number(m[1]), 0);
+    assert.equal(total, 130, '折叠后总量必须守恒');
   });
 
   test('HTTP 计数如实反映在途与响应分类', async () => {
@@ -180,6 +259,13 @@ describe('指标内容', () => {
     const body = await get();
     assert.match(body, /^junshi_llm_pool_enabled 0$/m);
     assert.match(body, /^junshi_llm_pool_endpoints 0$/m);
+  });
+
+  test('告警阈值配置指标存在（Prometheus 规则 scalar() 的数据源）', async () => {
+    const body = await get();
+    assert.match(body, /junshi_alert_config\{key="token_daily_budget_cny"\} 200/);
+    assert.match(body, /junshi_alert_config\{key="host_cpu_warn_pct"\} 65/);
+    assert.match(body, /junshi_alert_config\{key="llm_429_crit_permille"\} 20/);
   });
 
   test('进程与事件循环指标存在（耐久场景靠它们判漂移）', async () => {

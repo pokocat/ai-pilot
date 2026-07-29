@@ -1,0 +1,64 @@
+# 主机与数据库告警。CPU / 连接使用率**默认阈值** = 压测方案 §7 告警线原文；
+# 运行值从 junshi_alert_config 取（运营后台「功能开关」页可调）。改默认口径才动 alertConfig.ts + 压测方案。
+groups:
+  - name: junshi-system
+    rules:
+      - alert: HostCpuHigh
+        expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) >= scalar(junshi_alert_config{key="host_cpu_warn_pct"})
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "主机 CPU 超过预警线已持续 5 分钟（当前 {{ $value | printf \"%.0f\" }}%；阈值后台可调）"
+      - alert: HostCpuCritical
+        expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) >= scalar(junshi_alert_config{key="host_cpu_crit_pct"})
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "主机 CPU 超过严重线已持续 3 分钟——按压测方案该扩容了（当前 {{ $value | printf \"%.0f\" }}%）"
+
+      - alert: HostMemoryLow
+        expr: 100 * node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 12
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "可用内存不足 12%（当前 {{ $value | printf \"%.0f\" }}%）"
+
+      - alert: HostDiskFilling
+        expr: 100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > 85
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "磁盘 {{ $labels.mountpoint }} 使用率 >85%"
+      - alert: HostDiskWillFillIn24h
+        expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 24*3600) < 0
+        for: 30m
+        labels: { severity: critical }
+        annotations:
+          summary: "磁盘 {{ $labels.mountpoint }} 按当前增速 24 小时内写满（DB/日志同盘，写满=全站停摆）"
+
+      - alert: PgConnectionsHigh
+        expr: 100 * sum(pg_stat_activity_count) / pg_settings_max_connections >= scalar(junshi_alert_config{key="pg_conn_warn_pct"})
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "PG 连接使用率超过预警线（当前 {{ $value | printf \"%.0f\" }}%）——检查是否有实例连接池超配"
+      - alert: PgConnectionsCritical
+        expr: 100 * sum(pg_stat_activity_count) / pg_settings_max_connections >= scalar(junshi_alert_config{key="pg_conn_crit_pct"})
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "PG 连接使用率超过严重线——按压测方案：限流并扩连接层/规格"
+
+      - alert: PgDown
+        expr: pg_up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "postgres_exporter 连不上 PostgreSQL"
+
+      - alert: PgLongTransaction
+        expr: pg_stat_activity_max_tx_duration{datname="junshi"} > 300
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "存在超过 5 分钟的事务（长事务会拖住 vacuum 与锁）"

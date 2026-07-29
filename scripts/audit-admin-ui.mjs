@@ -11,8 +11,18 @@ import path from 'node:path';
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const CSS = path.join(ROOT, 'admin/src/styles/admin.css');
-const TSX = ['App.tsx', 'AgentDetailPanel.tsx', 'AdminLogin.tsx', 'NumInput.tsx', 'Icon.tsx', 'main.tsx']
-  .map((f) => path.join(ROOT, 'admin/src', f)).filter((f) => fs.existsSync(f));
+// 递归扫 admin/src 下所有 .tsx（旧版是 6 个文件的硬编码清单，新增文件会静默逃过合规检查——
+// 拆分 App.tsx 成 views/ 后必须按目录扫，否则新页面可以随便写裸 class 和硬编码颜色）。
+function collectTsx(dir) {
+  const out = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) out.push(...collectTsx(p));
+    else if (e.name.endsWith('.tsx') && !e.name.endsWith('.test.tsx')) out.push(p);
+  }
+  return out;
+}
+const TSX = collectTsx(path.join(ROOT, 'admin/src')).sort();
 
 const css = fs.readFileSync(CSS, 'utf8');
 const cssClasses = new Set([...css.matchAll(/\.([A-Za-z_][\w-]*)/g)].map((m) => m[1]));
@@ -23,7 +33,8 @@ for (const m of root.matchAll(/--([\w-]+)\s*:\s*(#[0-9a-fA-F]{3,8})/g)) tokenByV
 const ALLOW_HEX = new Set(['#fff', '#ffffff', '#000', '#000000']); // 纯黑白允许直写
 
 const violations = [];
-const add = (file, line, msg) => violations.push(`${path.basename(file)}:${line}  ${msg}`);
+// 相对路径而非 basename：views/ 下会出现同名文件，basename 无法定位。
+const add = (file, line, msg) => violations.push(`${path.relative(ROOT, file)}:${line}  ${msg}`);
 
 // —— .tsx 扫描 ——
 for (const f of TSX) {

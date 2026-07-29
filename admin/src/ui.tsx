@@ -2,21 +2,23 @@
 import Icon from './Icon';
 import type { Deliverable, DeliverableSection, DeliverableTableCell, ChatReply } from '../../shared/contracts';
 
+// 骨架屏优先（见 components.tsx 的 Skeleton）；这里保留一个纯文本兜底给 studio 子页。
 export function Loading() {
-  return <div className="pad" style={{ padding: 40, textAlign: 'center', color: '#969BA1' }}>加载中…</div>;
+  return <div className="empty">加载中…</div>;
 }
 
 export function fmtTime(s: string) {
   return s.replace('T', ' ').replace('Z', '');
 }
 
-// 0-10 分 → 颜色（红→黄→绿）。
-export function scoreColor(score: number | null): string {
-  if (score === null) return '#969BA1';
-  if (score >= 8.5) return '#1a8a5a';
-  if (score >= 7) return '#caa53d';
-  if (score >= 5) return '#c98a2e';
-  return '#d4503a';
+// 0-10 分 → 色阶类名（.score.ok/.mid/.warn/.bad，颜色定义在 admin.css）。
+// 旧版直接返回 hex 拼进 inline style，绕过了设计系统 token。
+export function scoreClass(score: number | null): 'none' | 'ok' | 'mid' | 'warn' | 'bad' {
+  if (score === null) return 'none';
+  if (score >= 8.5) return 'ok';
+  if (score >= 7) return 'mid';
+  if (score >= 5) return 'warn';
+  return 'bad';
 }
 
 // 报告 V2 最小防线（同 app/src/components/ReportCard 的 cardSection）：把 12 种类型化 section

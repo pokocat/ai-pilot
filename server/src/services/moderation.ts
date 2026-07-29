@@ -7,6 +7,7 @@
 
 import { env } from '../env.js';
 import { prisma } from '../db.js';
+import { noteModeration } from './metrics.js';
 import type { AdminModerationLogItem } from '../../../shared/contracts';
 
 // 演示用关键词表（生产用合规审核服务替代）。P1-B5：可经 MODERATION_KEYWORDS（逗号分隔）覆盖，无需改代码。
@@ -86,6 +87,7 @@ export async function moderate(refType: 'input' | 'output', text: string, opts?:
   // 输出侧默认 fail-closed（合规硬门槛：AI 产出宁拦错不放过）；输入侧沿用全局 MODERATION_FAIL_OPEN。
   const failClosed = opts?.failClosed ?? (refType === 'output');
   const verdict = moderationProvider() === 'http' ? await httpCheck(text, failClosed) : keywordCheck(text);
+  noteModeration(refType, verdict.pass);
   await prisma.moderationLog
     .create({
       data: {

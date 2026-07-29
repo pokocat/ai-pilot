@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: junshi
+    folder: 军师监控
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true   # 允许在 UI 上临时改;要固化改动请改 build.mjs 重新生成
+    options:
+      path: /var/lib/grafana/dashboards

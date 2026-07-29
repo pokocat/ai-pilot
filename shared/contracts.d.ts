@@ -1311,6 +1311,13 @@ export interface AdminFeatureFlag {
 /** 改开关（PATCH /admin/flags/:id）：toggle 传 enabled；number 传 value。 */
 export interface AdminFeatureFlagUpdate { enabled?: boolean; value?: number }
 
+/** 告警通知渠道状态（GET/PUT /admin/monitor-notify）。webhook 加密落库，只回掩码，绝不回明文。 */
+export interface AdminMonitorNotify {
+  configured: boolean;        // 是否已配置飞书群机器人
+  urlMasked: string | null;   // 掩码后的 webhook（…/bot/v2/hook/***xxxxxx）
+  hasSecret: boolean;         // 是否启用了签名校验
+}
+
 /* ────────────── 调教沙盒（用草稿/某版本即时试跑，返回产出 + 诊断 trace） ────────────── */
 export type SandboxTarget = 'draft' | 'published' | { versionId: string };
 export interface SandboxProfile { companyName?: string; industry?: string; stage?: string; pain?: string }

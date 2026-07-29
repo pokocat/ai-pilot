@@ -5,7 +5,7 @@
 import { prisma } from '../db.js';
 import { estimateCostMicros } from '../data/modelPrices.js';
 import { resolveModelRate } from './aiConfig.js';
-import { noteUsageUnreported } from './metrics.js';
+import { noteUsageUnreported, noteTokenUsage } from './metrics.js';
 import type { Usage } from '../llm/schema.js';
 import type { AdminTokenUsageView } from '../../../shared/contracts';
 
@@ -40,6 +40,14 @@ export async function recordTokenUsage(
       return;
     }
     const { rate } = await resolveModelRate(args.model); // 运营在模型配置里填的单价优先，否则内置价表
+    const costMicros = estimateCostMicros(u, rate);
+    // Prometheus 侧同口径累计（成本告警数据源）。先记后写库：钱已经花了，写库失败不该让消耗隐身。
+    noteTokenUsage({
+      kind: args.kind, provider: args.provider, model: args.model,
+      inputTokens, outputTokens,
+      cachedInput: Math.max(0, u.cachedInput ?? 0), cacheWrite: Math.max(0, u.cacheWrite ?? 0),
+      costMicros,
+    });
     await prisma.tokenUsage.create({
       data: {
         tenantId: args.tenantId ?? null,
@@ -54,7 +62,7 @@ export async function recordTokenUsage(
         cachedInput: Math.max(0, u.cachedInput ?? 0),
         cacheWrite: Math.max(0, u.cacheWrite ?? 0),
         totalTokens,
-        costMicros: estimateCostMicros(u, rate),
+        costMicros,
         creditCost: args.creditCost ?? 0,
       },
     });

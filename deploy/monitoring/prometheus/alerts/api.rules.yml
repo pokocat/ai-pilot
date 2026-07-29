@@ -1,0 +1,74 @@
+# API 服务告警。P95/错误率阈值 = 压测方案 §7「普通接口」告警线；
+# 「普通接口」= 剔除 LLM 长路径（generate/stream）与探活，与 app.ts 过载闸口径一致。
+groups:
+  - name: junshi-api
+    rules:
+      - alert: JunshiApiDown
+        expr: up{job="junshi-api"} == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "API /metrics 抓取失败——进程挂了或 METRICS_TOKEN 不匹配（curl -H 'Authorization: Bearer …' 127.0.0.1:4000/api/metrics 自查）"
+
+      - alert: JunshiProbeFailed
+        expr: probe_success == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "探活失败：{{ $labels.instance }}（本机探针挂=服务问题；公网探针挂=Nginx/TLS/DNS 问题）"
+
+      - alert: JunshiTlsCertExpiringSoon
+        expr: probe_ssl_earliest_cert_expiry - time() < 14 * 24 * 3600
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "TLS 证书 14 天内到期：{{ $labels.instance }}（certbot renew 是否还在跑？）"
+
+      - alert: JunshiApiP95High
+        expr: >
+          histogram_quantile(0.95, sum by (le) (
+            rate(junshi_http_request_duration_seconds_bucket{route!~".*(generate|stream).*", route!~"/api/health.*"}[5m])
+          )) > scalar(junshi_alert_config{key="api_p95_warn_ms"}) / 1000
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "普通接口 P95 超过预警线已持续 5 分钟（当前 {{ $value | printf \"%.2f\" }}s；阈值后台可调）"
+      - alert: JunshiApiP95Critical
+        expr: >
+          histogram_quantile(0.95, sum by (le) (
+            rate(junshi_http_request_duration_seconds_bucket{route!~".*(generate|stream).*", route!~"/api/health.*"}[5m])
+          )) > scalar(junshi_alert_config{key="api_p95_crit_ms"}) / 1000
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "普通接口 P95 超过严重线——按压测方案：停止放量，先查瓶颈"
+
+      - alert: JunshiApi5xxRateHigh
+        expr: >
+          sum(rate(junshi_http_responses_total{class="5xx"}[5m]))
+            / sum(rate(junshi_http_responses_total[5m]))
+          > scalar(junshi_alert_config{key="api_5xx_crit_permille"}) / 1000
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "5xx 错误率超过严重线（看板「API 服务」的路由级面板定位是哪条路由在冒；阈值后台可调）"
+
+      - alert: JunshiOverloadRejecting
+        expr: increase(junshi_http_overload_rejected_total[5m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "过载闸开始主动 503（在途 ≥MAX_IN_FLIGHT）——流量超容量了"
+
+      - alert: JunshiEventLoopSlow
+        expr: junshi_nodejs_event_loop_delay_seconds{quantile="0.95"} > 0.2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "事件循环 P95 延迟 >200ms（注意：该分位自进程启动累计，重启后才复位；持续升高=单进程 CPU 被绑住）"
+
+      - alert: JunshiRssGrowing
+        expr: junshi_process_resident_memory_bytes > scalar(junshi_alert_config{key="rss_warn_mb"}) * 1024 * 1024
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "API 进程 RSS 超过预警线且持续 30 分钟——对照发布时间排查泄漏（阈值后台可调）"

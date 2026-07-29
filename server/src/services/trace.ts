@@ -3,6 +3,7 @@
 import { prisma } from '../db.js';
 import { Prisma } from '@prisma/client';
 import { env } from '../env.js';
+import { noteLlmCall } from './metrics.js';
 import type { Usage } from '../llm/schema.js';
 import type { UsageMeta } from './usage.js';
 import type { AdminTraceDetail, AdminTraceItem, AdminTraceListView, LlmContextTrace } from '../../../shared/contracts';
@@ -33,6 +34,8 @@ export interface TraceInput {
 
 /** 记一条 trace。内部 catch，绝不影响主流程。 */
 export async function recordTrace(t: TraceInput): Promise<void> {
+  // Prometheus 侧同口径计数（先记内存再写库：写库失败也不能丢观测）。
+  noteLlmCall(t.kind, t.provider, t.status, t.latencyMs);
   try {
     const u = t.usage;
     await prisma.llmTrace.create({

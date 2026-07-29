@@ -1,0 +1,76 @@
+# 军师 · Prometheus 抓取配置（全部走宿主 loopback，见 docker-compose.yml 的 host 网络说明）
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    env: prod
+    app: junshi
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['127.0.0.1:9093']
+
+scrape_configs:
+  # 后端 API 自报指标（进程/HTTP/LLM 闸门/端点池/业务事件/Prisma 池）。
+  # 鉴权：API 侧必须配 METRICS_TOKEN（routes/metrics.ts），token 放 secrets/metrics.token。
+  - job_name: junshi-api
+    metrics_path: /api/metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/metrics.token
+    static_configs:
+      - targets: ['127.0.0.1:4000']
+
+  # 主机资源（CPU/内存/磁盘/网络/文件句柄）
+  - job_name: node
+    static_configs:
+      - targets: ['127.0.0.1:9100']
+
+  # PostgreSQL（连接数/TPS/缓存命中/锁/库大小）
+  - job_name: postgres
+    static_configs:
+      - targets: ['127.0.0.1:9187']
+
+  # 端到端探活：走本机直连（不出公网也能测 API 存活）
+  - job_name: blackbox-local
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://127.0.0.1:4000/api/health/ready
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
+  # 端到端探活：走公网域名（连 Nginx/TLS/证书一起测；域名按实际部署改）
+  - job_name: blackbox-public
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - https://wxapi.aibuzz.cn/api/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115
+
+  # 自监控
+  - job_name: prometheus
+    static_configs:
+      - targets: ['127.0.0.1:9090']
+  - job_name: alertmanager
+    static_configs:
+      - targets: ['127.0.0.1:9093']

@@ -19,6 +19,11 @@ const PATHS: Record<string, string> = {
   user: '<circle cx="12" cy="8" r="3.4"/><path d="M5.5 19.5c.6-3.4 3.2-5.2 6.5-5.2s5.9 1.8 6.5 5.2"/>',
   image: '<rect x="4" y="5" width="16" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M5 17l4-3.5 3 2.5 3-3 4 4"/>',
   video: '<rect x="3.5" y="6" width="12.5" height="12" rx="2.5"/><path d="M16 10.5 20.5 8v8L16 13.5"/>',
+  // shield 此前被「内容审核 / 功能开关 / 沙盒可信标记」引用，但 PATHS 里没有 —— 渲染成空 SVG（图标位空白）。
+  shield: '<path d="M12 3.4l7 2.5v5.3c0 4-2.9 7.3-7 9.4-4.1-2.1-7-5.4-7-9.4V5.9l7-2.5Z"/>',
+  search: '<circle cx="11" cy="11" r="6.2"/><path d="M15.6 15.6 20 20"/>',
+  refresh: '<path d="M19.5 12a7.5 7.5 0 1 1-2.4-5.5"/><path d="M19.5 4.8v4.7h-4.7"/>',
+  close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/>',
 };
 
 export default function Icon({ name, size = 18 }: { name: string; size?: number }) {

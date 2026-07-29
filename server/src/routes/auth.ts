@@ -12,6 +12,7 @@ import { issueSmsCode, verifySmsCode } from '../services/sms.js';
 import { signUserToken } from '../services/userToken.js';
 import { resolveUser } from '../services/context.js';
 import { maskAuditPhone, recordAudit, requestMeta, summarizeForAudit } from '../services/audit.js';
+import { noteRegistration } from '../services/metrics.js';
 import { suggestAliasName } from '../data/aliasNames.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
@@ -136,6 +137,9 @@ async function createUserWithTenant(opts: {
     await tx.auditLog.create({
       data: { tenantId: tenant.id, userId: user.id, action: opts.auditAction, payloadJson: opts.auditPayload },
     }).catch(() => {});
+    return user;
+  }).then((user) => {
+    noteRegistration(opts.auditAction.replace(/^auth\./, '')); // register | wechat_register
     return user;
   });
 }

@@ -10,13 +10,14 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { renderMetrics } from '../services/metrics.js';
 
-function bearerOf(req: FastifyRequest): string {
+export function bearerOf(req: FastifyRequest): string {
   const raw = req.headers.authorization;
   const v = Array.isArray(raw) ? raw[0] : raw;
   return (v ?? '').replace(/^Bearer\s+/i, '').trim();
 }
 
-function tokenMatches(provided: string, configured: string): boolean {
+// routes/alerts.ts 的告警回传端点也用同一把 METRICS_TOKEN（同属监控栈信任域，不加第二个密钥）。
+export function tokenMatches(provided: string, configured: string): boolean {
   if (!provided || !configured) return false;
   const a = Buffer.from(provided);
   const b = Buffer.from(configured);

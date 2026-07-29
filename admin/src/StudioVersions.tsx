@@ -3,26 +3,39 @@
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
 import { api, type AgentVersionListView, type AgentVersionDetail } from './api';
+import { ErrorState, ConfirmDialog, type ConfirmSpec } from './components';
 import { Loading, fmtTime } from './ui';
 
 export default function StudioVersions({ agentKey, onChanged, toast }: { agentKey: string; onChanged: () => void; toast: (m: string) => void }) {
   const [data, setData] = useState<AgentVersionListView | null>(null);
   const [busy, setBusy] = useState('');
   const [detail, setDetail] = useState<AgentVersionDetail | null>(null); // P1-A6：版本内容查看（回滚前可审）
-  const load = () => api.agentVersions(agentKey).then(setData).catch(() => {});
+  const [err, setErr] = useState('');
+  const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
+  const load = () => api.agentVersions(agentKey).then((d) => { setData(d); setErr(''); }).catch((e: unknown) => setErr((e as Error)?.message || '版本历史加载失败'));
   useEffect(() => { load(); }, [agentKey]);
-  if (!data) return <Loading />;
+  if (!data) return <div className="ad-db">{err ? <ErrorState msg={err} onRetry={load} /> : <Loading />}</div>;
 
   const rollback = async (id: string, version: number) => {
-    if (!confirm(`回滚到 v${version}？C 端用户将立即切回该版本（含其倍率/定价）。草稿不受影响。`)) return;
-    setBusy(id);
-    try { await api.rollbackAgent(agentKey, id); toast(`已回滚到 v${version}`); await load(); onChanged(); }
-    catch (e) { toast((e as Error)?.message || '回滚失败'); }
-    setBusy('');
+    setConfirmSpec({
+      title: `回滚到 v${version}`,
+      desc: 'C 端用户将立即切回该版本（含其倍率 / 定价）。草稿不受影响，可再改再发。',
+      echo: [{ k: '顾问', v: agentKey }, { k: '目标版本', v: `v${version}` }],
+      warn: '对用户即时生效。',
+      confirmText: '确认回滚',
+      danger: true,
+      onConfirm: async () => {
+        setBusy(id);
+        try { await api.rollbackAgent(agentKey, id); toast(`已回滚到 v${version}`); await load(); onChanged(); }
+        finally { setBusy(''); }
+      },
+    });
   };
 
   return (
     <div className="ad-db">
+      {err && <ErrorState msg={err} onRetry={load} stale />}
+      {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
       <div className="blk">
         <div className="blk-h"><Icon name="layers" size={15} /><span className="t">版本历史</span>
           {data.draftDirty

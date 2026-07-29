@@ -1,0 +1,848 @@
+{
+  "uid": "junshi-business",
+  "title": "军师 · 业务大盘",
+  "tags": [
+    "junshi"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 54,
+      "type": "stat",
+      "title": "总用户数",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT count(*)::float AS value FROM app_user",
+          "rawQuery": true,
+          "format": "table",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 55,
+      "type": "stat",
+      "title": "今日注册",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT count(*)::float AS value FROM app_user WHERE \"createdAt\" >= date_trunc('day', now())",
+          "rawQuery": true,
+          "format": "table",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 56,
+      "type": "stat",
+      "title": "今日 GMV(元)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT COALESCE(sum(amount), 0) / 100.0 AS value FROM payment_order WHERE status IN ('applied','refunded') AND \"paidAt\" >= date_trunc('day', now())",
+          "rawQuery": true,
+          "format": "table",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 57,
+      "type": "stat",
+      "title": "今日订单(入账)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT count(*)::float AS value FROM payment_order WHERE status IN ('applied','refunded') AND \"paidAt\" >= date_trunc('day', now())",
+          "rawQuery": true,
+          "format": "table",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 58,
+      "type": "stat",
+      "title": "卡单(已付未发放)",
+      "description": ">0 超 10 分钟会触发 critical 告警,处理入口=运营后台「订单」页",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "junshi_pay_stuck_paid_unapplied",
+          "legendFormat": "__auto",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 59,
+      "type": "stat",
+      "title": "今日产出(报告)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT count(*)::float AS value FROM llm_trace WHERE kind = 'deliverable' AND status = 'ok' AND \"createdAt\" >= date_trunc('day', now())",
+          "rawQuery": true,
+          "format": "table",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 60,
+      "type": "timeseries",
+      "title": "注册趋势（日）",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT date_trunc('day', \"createdAt\") AS time, count(*)::float AS \"注册数\" FROM app_user WHERE $__timeFilter(\"createdAt\") GROUP BY 1 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 61,
+      "type": "timeseries",
+      "title": "日活（当天有过模型调用的用户）",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT date_trunc('day', \"createdAt\") AS time, count(DISTINCT \"userId\")::float AS \"DAU\" FROM llm_trace WHERE \"userId\" IS NOT NULL AND $__timeFilter(\"createdAt\") GROUP BY 1 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 62,
+      "type": "timeseries",
+      "title": "GMV 与订单量（日,按支付时间）",
+      "description": "口径=完成支付的订单（含事后退款的）;退款金额单看下面退款面板",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT date_trunc('day', \"paidAt\") AS time, sum(amount)/100.0 AS \"GMV(元)\" FROM payment_order WHERE status IN ('applied','refunded') AND $__timeFilter(\"paidAt\") GROUP BY 1 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        },
+        {
+          "refId": "B",
+          "rawSql": "SELECT date_trunc('day', \"paidAt\") AS time, count(*)::float AS \"订单数\" FROM payment_order WHERE status IN ('applied','refunded') AND $__timeFilter(\"paidAt\") GROUP BY 1 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 63,
+      "type": "timeseries",
+      "title": "Token 成本（元/日,含基建调用）",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT date_trunc('day', \"createdAt\") AS time, sum(\"costMicros\")/1e6 AS \"成本(元)\" FROM token_usage WHERE $__timeFilter(\"createdAt\") GROUP BY 1 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 64,
+      "type": "timeseries",
+      "title": "算力流水（日）",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT date_trunc('day', \"createdAt\") AS time, sum(-delta)::float AS \"消耗\" FROM credit_ledger WHERE delta < 0 AND $__timeFilter(\"createdAt\") GROUP BY 1 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        },
+        {
+          "refId": "B",
+          "rawSql": "SELECT date_trunc('day', \"createdAt\") AS time, sum(delta)::float AS \"发放\" FROM credit_ledger WHERE delta > 0 AND $__timeFilter(\"createdAt\") GROUP BY 1 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 65,
+      "type": "timeseries",
+      "title": "产出量（日 × 类型）",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT date_trunc('day', \"createdAt\") AS time, kind AS metric, count(*)::float AS value FROM llm_trace WHERE status = 'ok' AND $__timeFilter(\"createdAt\") GROUP BY 1, 2 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 21,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 66,
+      "type": "table",
+      "title": "套餐分布（当前存量）",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT CASE WHEN u.\"planId\" IS NULL THEN '无套餐' WHEN u.\"planExpiresAt\" IS NOT NULL AND u.\"planExpiresAt\" <= now() THEN '已过期' ELSE p.name END AS \"套餐\", count(*) AS \"用户数\" FROM app_user u LEFT JOIN plan p ON p.id = u.\"planId\" GROUP BY 1 ORDER BY 2 DESC",
+          "rawQuery": true,
+          "format": "table",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "id": 67,
+      "type": "timeseries",
+      "title": "退款（日）",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT date_trunc('day', \"refundedAt\") AS time, sum(amount)/100.0 AS \"退款(元)\" FROM payment_order WHERE status = 'refunded' AND $__timeFilter(\"refundedAt\") GROUP BY 1 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 29,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 68,
+      "type": "timeseries",
+      "title": "审核拦截（日 × 方向）",
+      "datasource": {
+        "type": "postgres",
+        "uid": "junshi-pg"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT date_trunc('day', \"createdAt\") AS time, \"refType\" AS metric, count(*)::float AS value FROM moderation_log WHERE verdict = 'block' AND $__timeFilter(\"createdAt\") GROUP BY 1, 2 ORDER BY 1",
+          "rawQuery": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "postgres",
+            "uid": "junshi-pg"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 69,
+      "type": "timeseries",
+      "title": "转化信号：禁写闸拦截（想用但没套餐/已到期）",
+      "description": "none=未开通用户在尝试写操作（销售线索）;expired=到期用户还在用（续费提醒线索）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (state) (rate(junshi_plan_gate_blocked_total[1h])) * 3600",
+          "legendFormat": "{{state}}/小时",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 37,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Icon from './Icon';
 import NumInput from './NumInput';
 import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta, type AdminAgentMemoryItem, type ToolStatItem } from './api';
+import { ConfirmDialog, type ConfirmSpec } from './components';
 import StudioSandbox from './StudioSandbox';
 import StudioVersions, { tierName } from './StudioVersions';
 import StudioEval from './StudioEval';
@@ -90,8 +91,11 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
     }).catch((e) => setLoadErr(e?.message || '加载顾问详情失败，请重试'));
   }, [agentKey]);
 
+  const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
+
   // 版本/回滚变更后刷新「草稿是否脏 / 线上版本号」标识。
-  const refreshMeta = () => api.agent(agentKey).then((d) => { setDirty(d.draftDirty ?? false); setPubVersion(d.publishedVersion ?? null); }).catch(() => {});
+  // 只刷徽标（草稿脏标 / 线上版本号），失败不打断当前编辑——正文数据由主 load 负责报错。
+  const refreshMeta = () => api.agent(agentKey).then((d) => { setDirty(d.draftDirty ?? false); setPubVersion(d.publishedVersion ?? null); }).catch(() => { /* 徽标刷新失败不影响编辑 */ });
 
   // 可勾选的内置工具元信息（一次性加载）。
   useEffect(() => { api.skillTools().then(setAvailTools).catch(() => setAvailTools([])); }, []);
@@ -165,19 +169,28 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   const save = async () => { if (await saveDraft()) { setDirty(true); toast('已保存草稿（未发布，C 端不受影响）'); } };
 
   // 发布：先把当前编辑落库，再冻结成新版本并指向它（C 端立即切换）。
-  const publish = async () => {
-    setPublishing(true);
-    if (!(await saveDraft())) { setPublishing(false); return; }
-    const label = (window.prompt('给这个版本起个名字（可选，便于回滚识别）：') || '').trim();
-    try {
-      const r = await api.publishAgent(agentKey, label || undefined);
-      setDirty(false); setPubVersion(r.version);
-      // P1-A2：发布软门警示（配 EVAL_GATE_MIN 时）——已发布但提示评测分偏低，不拦截。
-      if (r.warning) toast(`已发布 v${r.version}，但 ${r.warning}`);
-      else toast(r.changed ? `已发布 v${r.version} · C 端已切到新版本` : '与当前线上版本相同，未产生新版本');
-    } catch (e) { toast((e as Error)?.message || '发布失败'); }
-    setPublishing(false);
-  };
+  // 版本名原先用 window.prompt 收（系统弹窗，不显示「这次会对 C 端生效」，回车即发布）。
+  const publish = () => setConfirmSpec({
+    title: '发布新版本',
+    desc: '先把当前草稿落库，再冻结成新版本并把线上指针指向它。C 端用户立即切到新版本（含其倍率 / 定价）。',
+    echo: [
+      { k: '顾问', v: agentKey },
+      { k: '当前线上', v: pubVersion ? `v${pubVersion}` : '未发布' },
+    ],
+    reason: { label: '版本名（可选，便于回滚识别）', maxLength: 40 },
+    confirmText: '发布',
+    onConfirm: async (label) => {
+      setPublishing(true);
+      try {
+        if (!(await saveDraft())) throw new Error('草稿保存失败，未发布');
+        const r = await api.publishAgent(agentKey, label || undefined);
+        setDirty(false); setPubVersion(r.version);
+        // P1-A2：发布软门警示（配 EVAL_GATE_MIN 时）——已发布但提示评测分偏低，不拦截。
+        if (r.warning) toast(`已发布 v${r.version}，但 ${r.warning}`);
+        else toast(r.changed ? `已发布 v${r.version} · C 端已切到新版本` : '与当前线上版本相同，未产生新版本');
+      } finally { setPublishing(false); }
+    },
+  });
 
   const runTest = () => {
     let runtime: AgentRuntimeUpdate;
@@ -227,6 +240,8 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           <div key={k} className={`sn ${section === k ? 'on' : ''}`} onClick={() => setSection(k)}>{SECTION_LABEL[k]}</div>
         ))}
       </div>
+
+      {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
 
       {section === 'sandbox' && <StudioSandbox agentKey={agentKey} draftDirty={dirty} />}
       {section === 'versions' && <StudioVersions agentKey={agentKey} toast={toast} onChanged={refreshMeta} />}
@@ -443,7 +458,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
               {agentMems.map((m) => (
                 <div key={m.id} className="mem-card">
                   <div className="mb"><div className="mt">{m.text.slice(0, 40)}</div><div className="mm">用户 {m.userId.slice(0, 8)} · {m.kind} · {new Date(m.createdAt).toLocaleDateString()}</div></div>
-                  <button className="mini-btn" onClick={() => api.deleteAgentMemory(agentKey, m.id).then(() => setAgentMems((cur) => cur ? cur.filter((x) => x.id !== m.id) : cur)).catch(() => {})}>删除</button>
+                  <button className="mini-btn" onClick={() => api.deleteAgentMemory(agentKey, m.id).then(() => setAgentMems((cur) => cur ? cur.filter((x) => x.id !== m.id) : cur)).catch((e: unknown) => toast((e as Error)?.message || '删除记忆失败'))}>删除</button>
                 </div>
               ))}
             </div>

@@ -13,7 +13,89 @@
 import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
 import { llmGateStatsAll } from './llmGate.js';
 import { poolStatus } from './llmPool.js';
+import { alertConfigValues } from './alertConfig.js';
 import { prisma } from '../db.js';
+
+/* ─────────────── 带标签的计数器 / 直方图（基建） ─────────────── */
+
+// 不引入 prom-client：现有渲染是手写文本格式，引库要把全部既有指标迁一遍口径；
+// 这里补一个最小实现（labels → series），保持单文件可审计。
+// 防雷点：任何来自业务数据的标签值都必须过 maxSeries 上限，超限折叠进 other——
+// 标签基数失控会让 /metrics 输出与 Prometheus 内存一起膨胀。
+
+type LabelValues = Record<string, string>;
+
+function seriesKey(labels: LabelValues): string {
+  // 分隔符必须写成转义序列而非字面控制字符——否则本文件会被 grep 判为二进制整体跳过（见 test/sourceHygiene.test.ts）。
+  return Object.keys(labels).sort().map((k) => `${k}\u0000${labels[k]}`).join('\u0001');
+}
+
+class LabeledCounter {
+  private series = new Map<string, { labels: LabelValues; value: number }>();
+  constructor(readonly name: string, readonly help: string, private maxSeries = 200) {}
+  inc(labels: LabelValues, v = 1): void {
+    const key = seriesKey(labels);
+    let s = this.series.get(key);
+    if (!s) {
+      if (this.series.size >= this.maxSeries) {
+        // 折叠：全部标签置 other，保总量不丢
+        const folded: LabelValues = Object.fromEntries(Object.keys(labels).map((k) => [k, 'other']));
+        const fk = seriesKey(folded);
+        s = this.series.get(fk) ?? { labels: folded, value: 0 };
+        this.series.set(fk, s);
+      } else {
+        s = { labels, value: 0 };
+        this.series.set(key, s);
+      }
+    }
+    s.value += v;
+  }
+  renderInto(ms: Metric[]): void {
+    const m = metric(this.name, this.help, 'counter');
+    for (const s of this.series.values()) m.samples.push(fmt(this.name, s.value, s.labels));
+    if (!this.series.size) m.samples.push(fmt(this.name, 0));
+    ms.push(m);
+  }
+  reset(): void { this.series.clear(); }
+}
+
+class LabeledHistogram {
+  private series = new Map<string, { labels: LabelValues; counts: number[]; sum: number; count: number }>();
+  constructor(readonly name: string, readonly help: string, private buckets: number[], private maxSeries = 300) {}
+  observe(labels: LabelValues, value: number): void {
+    if (!Number.isFinite(value) || value < 0) return;
+    const key = seriesKey(labels);
+    let s = this.series.get(key);
+    if (!s) {
+      if (this.series.size >= this.maxSeries) {
+        const folded: LabelValues = Object.fromEntries(Object.keys(labels).map((k) => [k, 'other']));
+        const fk = seriesKey(folded);
+        s = this.series.get(fk) ?? { labels: folded, counts: this.buckets.map(() => 0), sum: 0, count: 0 };
+        this.series.set(fk, s);
+      } else {
+        s = { labels, counts: this.buckets.map(() => 0), sum: 0, count: 0 };
+        this.series.set(key, s);
+      }
+    }
+    for (let i = 0; i < this.buckets.length; i++) if (value <= this.buckets[i]) s.counts[i]++;
+    s.sum += value;
+    s.count++;
+  }
+  renderInto(ms: Metric[]): void {
+    if (!this.series.size) return;
+    const m = metric(this.name, this.help, 'histogram');
+    for (const s of this.series.values()) {
+      for (let i = 0; i < this.buckets.length; i++) {
+        m.samples.push(fmt(`${this.name}_bucket`, s.counts[i], { ...s.labels, le: String(this.buckets[i]) }));
+      }
+      m.samples.push(fmt(`${this.name}_bucket`, s.count, { ...s.labels, le: '+Inf' }));
+      m.samples.push(fmt(`${this.name}_sum`, s.sum, s.labels));
+      m.samples.push(fmt(`${this.name}_count`, s.count, s.labels));
+    }
+    ms.push(m);
+  }
+  reset(): void { this.series.clear(); }
+}
 
 /* ─────────────────────── HTTP 层 ─────────────────────── */
 
@@ -51,6 +133,139 @@ export function gateEnter(): void {
 export function gateLeave(): void { if (gateInFlight > 0) gateInFlight--; }
 export function gateInFlightNow(): number { return gateInFlight; }
 export function noteOverloadRejected(): void { overloadRejected++; }
+
+/* ──────────────── HTTP 路由级时延 / 状态 ──────────────── */
+
+// 告警线「普通接口 P95 ≥200ms 预警 / ≥500ms 严重」需要**服务端自采**的分位数——压测期靠 k6 采，
+// 线上没有 k6，只能靠这里的直方图 + PromQL histogram_quantile。
+// route 用 Fastify 路由模板（/api/agents/:key），不是原始 URL——否则每个 id 一条序列，基数爆炸。
+const httpDuration = new LabeledHistogram(
+  'junshi_http_request_duration_seconds',
+  '请求处理时长（按方法/路由模板；含 LLM 长路径，看板侧按 route 过滤）',
+  [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300],
+);
+const httpRouteResponses = new LabeledCounter(
+  'junshi_http_route_responses_total',
+  '响应数（按路由模板/方法/状态码大类；定位「哪条路由在冒 5xx」用）',
+  400,
+);
+
+export function noteHttpTiming(method: string, route: string, status: number, seconds: number): void {
+  const cls = `${Math.floor(status / 100)}xx`;
+  httpDuration.observe({ method, route }, seconds);
+  httpRouteResponses.inc({ method, route, class: cls });
+}
+
+/* ──────────────── LLM 调用（与 llm_trace 同源） ──────────────── */
+
+// 挂在 recordTrace 上：每次模型调用（含 mock / 错误）都过那里，是唯一不漏的口子。
+const llmCalls = new LabeledCounter('junshi_llm_calls_total', 'LLM 调用数（与 llm_trace 同口径，含 mock 与错误）');
+const llmCallDuration = new LabeledHistogram(
+  'junshi_llm_call_duration_seconds',
+  'LLM 单次调用时长（含工具循环整体耗时）',
+  [0.5, 1, 2, 5, 10, 20, 30, 60, 120, 180, 300, 600],
+);
+
+export function noteLlmCall(kind: string, provider: string, status: 'ok' | 'error', latencyMs: number): void {
+  llmCalls.inc({ kind, provider, status });
+  llmCallDuration.observe({ kind, provider }, latencyMs / 1000);
+}
+
+/* ──────────────── Token 用量与成本（与 token_usage 同源） ──────────────── */
+
+// 告警线「Token 成本：日预算 70%/90%/100%」的数据源。金额单位元（micros/1e6），
+// 用 increase(junshi_llm_cost_cny_total[1d]) 对着日预算画线即可。
+const llmTokens = new LabeledCounter('junshi_llm_tokens_total', 'Token 消耗（dir=input|output|cached_input|cache_write）');
+const llmCost = new LabeledCounter('junshi_llm_cost_cny_total', 'Token 成本（元；按运营配置单价折算，与 token_usage.costMicros 同口径）');
+
+export function noteTokenUsage(args: {
+  kind: string; provider: string; model: string;
+  inputTokens: number; outputTokens: number; cachedInput: number; cacheWrite: number; costMicros: number;
+}): void {
+  const l = { kind: args.kind, provider: args.provider, model: args.model };
+  if (args.inputTokens > 0) llmTokens.inc({ ...l, dir: 'input' }, args.inputTokens);
+  if (args.outputTokens > 0) llmTokens.inc({ ...l, dir: 'output' }, args.outputTokens);
+  if (args.cachedInput > 0) llmTokens.inc({ ...l, dir: 'cached_input' }, args.cachedInput);
+  if (args.cacheWrite > 0) llmTokens.inc({ ...l, dir: 'cache_write' }, args.cacheWrite);
+  if (args.costMicros > 0) llmCost.inc(l, args.costMicros / 1e6);
+}
+
+/* ──────────────── 产出质量（降级 / 截断） ──────────────── */
+
+// 「报告假完成」「降级模板」这类缺陷线上最难被用户报出来——用户只觉得内容差，不会截图报错。
+// path 标签指认降级发生在哪条产出路径（gateway 各 fallback 分支）。
+const genDegraded = new LabeledCounter('junshi_gen_degraded_total', '产出降级次数（mock 兜底 / 工程语境泄漏替换）');
+export function noteGenDegraded(path: string): void { genDegraded.inc({ path }); }
+
+const outputTruncated = new LabeledCounter('junshi_llm_output_truncated_total', '输出达 token 上限被判残缺的次数（AI_OUTPUT_TRUNCATED）');
+export function noteOutputTruncated(provider: string): void { outputTruncated.inc({ provider }); }
+
+/* ──────────────── 业务事件 ──────────────── */
+
+const registrations = new LabeledCounter('junshi_user_registrations_total', '新注册用户数（channel=注册入口）');
+export function noteRegistration(channel: string): void { registrations.inc({ channel }); }
+
+const moderationChecks = new LabeledCounter('junshi_moderation_checks_total', '内容审核判定数（ref=input|output，verdict=pass|block）');
+export function noteModeration(ref: string, pass: boolean): void {
+  moderationChecks.inc({ ref, verdict: pass ? 'pass' : 'block' });
+}
+
+// reason 取「· 分隔的首段 + 截断」：套餐名/智能体名有限集合，防运营改文案把基数打飞。
+// 首段去重集超 100 后新 reason 一律归 other——只折叠 reason 这一个维度，direction 保留（看板要分方向）。
+const creditsFlow = new LabeledCounter('junshi_credits_flow_total', '算力流水（direction=spent|granted，单位=点）', 300);
+const knownCreditReasons = new Set<string>();
+export function noteCreditDelta(delta: number, reason: string): void {
+  if (delta === 0) return;
+  let r = (reason ?? '').split('·')[0].trim().slice(0, 24) || 'unknown';
+  if (!knownCreditReasons.has(r)) {
+    if (knownCreditReasons.size >= 100) r = 'other';
+    else knownCreditReasons.add(r);
+  }
+  creditsFlow.inc({ direction: delta < 0 ? 'spent' : 'granted', reason: r }, Math.abs(delta));
+}
+
+const planGateBlocked = new LabeledCounter('junshi_plan_gate_blocked_total', '商业化禁写闸拦截数（state=none 未开通 | expired 已过期）——转化/续费信号');
+export function notePlanGateBlocked(state: string): void { planGateBlocked.inc({ state }); }
+
+/* ──────────────── 支付 ──────────────── */
+
+const payOrdersCreated = new LabeledCounter('junshi_pay_orders_created_total', '微信支付下单成功数');
+const payApplied = new LabeledCounter('junshi_pay_orders_applied_total', '支付入账（权益发放）成功数（type=plan|sku）');
+const payAmount = new LabeledCounter('junshi_pay_amount_cny_total', '入账金额（元）');
+const payRefunds = new LabeledCounter('junshi_pay_refunds_total', '全额退款成功数');
+const payRefundAmount = new LabeledCounter('junshi_pay_refund_amount_cny_total', '退款金额（元）');
+export function notePayOrderCreated(): void { payOrdersCreated.inc({}); }
+export function notePayApplied(type: 'plan' | 'sku', amountFen: number): void {
+  payApplied.inc({ type });
+  if (amountFen > 0) payAmount.inc({ type }, amountFen / 100);
+}
+export function notePayRefund(amountFen: number): void {
+  payRefunds.inc({});
+  if (amountFen > 0) payRefundAmount.inc({}, amountFen / 100);
+}
+
+// 告警转发（Alertmanager → 飞书）自身的成败——通知链路哑了也得有人知道。
+const alertForwards = new LabeledCounter('junshi_alerts_forwarded_total', '告警转发次数（outcome=sent|failed|not_configured）');
+export function noteAlertForward(outcome: string): void { alertForwards.inc({ outcome }); }
+
+// 对账 sweep 每 5 分钟跑一轮；last_* 是上一轮结果快照（gauge），runs 是累计轮数。
+let paySweep = { scanned: 0, applied: 0, failed: 0, closed: 0, runs: 0 };
+export function notePaySweep(r: { scanned: number; applied: number; failed: number; closed: number }): void {
+  paySweep = { ...r, runs: paySweep.runs + 1 };
+}
+
+// 卡单（scrape 时查库，60s 缓存）：paid 未 applied = 用户付了钱没拿到权益，任何 >0 都值得看。
+let stuckCache = { at: 0, paidUnapplied: 0, createdStale: 0 };
+async function stuckOrders(): Promise<{ paidUnapplied: number; createdStale: number }> {
+  const now = Date.now();
+  if (now - stuckCache.at < 60_000) return stuckCache;
+  const [paidUnapplied, createdStale] = await Promise.all([
+    prisma.paymentOrder.count({ where: { status: 'paid', appliedAt: null } }),
+    prisma.paymentOrder.count({ where: { status: 'created', createdAt: { lt: new Date(now - 15 * 60_000) } } }),
+  ]);
+  stuckCache = { at: now, paidUnapplied, createdStale };
+  return stuckCache;
+}
 
 /* ──────────────── 用量漏账（provider 未回传 usage）──────────────── */
 
@@ -101,9 +316,9 @@ function fmt(name: string, value: number, labels?: Labels): string {
   return `${name}{${inner}} ${v}`;
 }
 
-interface Metric { name: string; help: string; type: 'gauge' | 'counter'; samples: string[] }
+interface Metric { name: string; help: string; type: 'gauge' | 'counter' | 'histogram'; samples: string[] }
 
-function metric(name: string, help: string, type: 'gauge' | 'counter'): Metric {
+function metric(name: string, help: string, type: 'gauge' | 'counter' | 'histogram'): Metric {
   return { name, help, type, samples: [] };
 }
 
@@ -134,6 +349,9 @@ export async function renderMetrics(): Promise<string> {
     .samples.push(fmt('junshi_process_heap_used_bytes', mem.heapUsed));
   push(metric('junshi_process_uptime_seconds', '进程运行时长', 'gauge'))
     .samples.push(fmt('junshi_process_uptime_seconds', Math.round(process.uptime())));
+  const cpu = process.cpuUsage(); // 微秒累计 → rate() 后即该进程的 CPU 核数占用
+  push(metric('junshi_process_cpu_seconds_total', '进程累计 CPU 时间（user+system）', 'counter'))
+    .samples.push(fmt('junshi_process_cpu_seconds_total', (cpu.user + cpu.system) / 1e6));
 
   /* —— 事件循环 —— */
   try {
@@ -181,6 +399,57 @@ export async function renderMetrics(): Promise<string> {
   for (const k of ['2xx', '3xx', '4xx', '5xx']) {
     cls.samples.push(fmt('junshi_http_responses_total', responsesByClass.get(k) ?? 0, { class: k }));
   }
+
+  /* —— 路由级时延 / 状态 —— */
+  httpDuration.renderInto(ms);
+  httpRouteResponses.renderInto(ms);
+
+  /* —— LLM 调用 / Token / 成本 / 产出质量 —— */
+  llmCalls.renderInto(ms);
+  llmCallDuration.renderInto(ms);
+  llmTokens.renderInto(ms);
+  llmCost.renderInto(ms);
+  genDegraded.renderInto(ms);
+  outputTruncated.renderInto(ms);
+
+  /* —— 业务事件 —— */
+  registrations.renderInto(ms);
+  moderationChecks.renderInto(ms);
+  creditsFlow.renderInto(ms);
+  planGateBlocked.renderInto(ms);
+
+  /* —— 支付 —— */
+  payOrdersCreated.renderInto(ms);
+  payApplied.renderInto(ms);
+  payAmount.renderInto(ms);
+  payRefunds.renderInto(ms);
+  payRefundAmount.renderInto(ms);
+  push(metric('junshi_pay_sweep_runs_total', '支付对账 sweep 累计轮数', 'counter'))
+    .samples.push(fmt('junshi_pay_sweep_runs_total', paySweep.runs));
+  const sweepLast = push(metric('junshi_pay_sweep_last', '上一轮对账 sweep 结果（result=scanned|applied|failed|closed）', 'gauge'));
+  for (const k of ['scanned', 'applied', 'failed', 'closed'] as const) {
+    sweepLast.samples.push(fmt('junshi_pay_sweep_last', paySweep[k], { result: k }));
+  }
+  try {
+    const stuck = await stuckOrders();
+    push(metric('junshi_pay_stuck_paid_unapplied', '已支付未发放权益的订单数（>0 即该看，sweep 会自愈但要盯）', 'gauge'))
+      .samples.push(fmt('junshi_pay_stuck_paid_unapplied', stuck.paidUnapplied));
+    push(metric('junshi_pay_stuck_created_stale', '超 15 分钟仍停在 created 的订单数（大多是用户放弃支付，sweep 会关单）', 'gauge'))
+      .samples.push(fmt('junshi_pay_stuck_created_stale', stuck.createdStale));
+  } catch { /* 未连库时跳过 */ }
+
+  /* —— 告警阈值（后台「功能开关」页可调，规则用 scalar() 取值）——
+     注意：本指标缺席（如 API 刚重启还没连上库）时，引用它的告警表达式会静默不评估——
+     但那种状态下 up==0/JunshiApiDown 一定已经在响，不会静默漏大事。 */
+  try {
+    const cfg = push(metric('junshi_alert_config', '告警阈值运行值（后台可调；单位编码在 key 后缀：_ms/_permille/_pct/_cny/_mb/_s）', 'gauge'));
+    for (const { key, value } of await alertConfigValues()) {
+      cfg.samples.push(fmt('junshi_alert_config', value, { key }));
+    }
+  } catch { /* 未连库时跳过（告警规则随之不评估，由 JunshiApiDown 兜底） */ }
+
+  /* —— 告警转发自观测 —— */
+  alertForwards.renderInto(ms);
 
   /* —— LLM 并发闸（按车道，含每端点车道）—— */
   try {
@@ -261,4 +530,12 @@ export function __resetMetrics(): void {
   gateInFlight = 0; gateInFlightPeak = 0;
   responsesByClass.clear();
   overloadRejected = 0; rateLimited = 0;
+  httpDuration.reset(); httpRouteResponses.reset();
+  llmCalls.reset(); llmCallDuration.reset(); llmTokens.reset(); llmCost.reset();
+  genDegraded.reset(); outputTruncated.reset();
+  registrations.reset(); moderationChecks.reset(); creditsFlow.reset(); knownCreditReasons.clear(); planGateBlocked.reset();
+  payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset();
+  alertForwards.reset();
+  paySweep = { scanned: 0, applied: 0, failed: 0, closed: 0, runs: 0 };
+  stuckCache = { at: 0, paidUnapplied: 0, createdStale: 0 };
 }

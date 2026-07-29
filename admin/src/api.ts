@@ -135,12 +135,12 @@ import type {
   SandboxRequest, SandboxResult, EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, StartEvalRunRequest, PricingTier,
   AdminSku, AdminSkuUpdate, ServiceAssignmentView, ServiceAssignmentUpdate,
-  AdminFeatureFlag,
+  AdminFeatureFlag, AdminMonitorNotify,
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
   AdminBenchmark, AdminBenchmarkUpsert,
   AdminUserUsage, AdminPaymentsView, AdminPayReconcileResult,
 } from '../../shared/contracts';
-export type { AdminFeatureFlag } from '../../shared/contracts';
+export type { AdminFeatureFlag, AdminMonitorNotify } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
 export type { AdminBenchmark, AdminBenchmarkUpsert } from '../../shared/contracts';
 // —— per-user 用量下钻 + 支付订单只读 ——
@@ -220,6 +220,10 @@ export const api = {
   flags: () => req<AdminFeatureFlag[]>('/admin/flags'),
   setFlag: (id: string, enabled: boolean) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { enabled }),
   setFlagValue: (id: string, value: number) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { value }),
+  // —— 告警通知（监控大盘二期）：飞书群机器人 webhook，仅 owner/master 可写 ——
+  monitorNotify: () => req<AdminMonitorNotify>('/admin/monitor-notify'),
+  saveMonitorNotify: (url: string, secret: string) => req<AdminMonitorNotify>('/admin/monitor-notify', 'PUT', { url, secret }),
+  testMonitorNotify: () => req<{ sent: boolean }>('/admin/monitor-notify/test', 'POST'),
   plans: () => req<Plan[]>('/admin/plans'),
   savePlan: (id: string, body: Partial<Pick<Plan, 'name' | 'price' | 'creditsPerMonth' | 'tokenQuotaPerMonth' | 'agentCount' | 'featuresJson' | 'highlighted'>>) =>
     req<Plan>(`/admin/plans/${id}`, 'PATCH', body),

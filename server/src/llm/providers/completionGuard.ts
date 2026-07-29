@@ -1,3 +1,5 @@
+import { noteOutputTruncated } from '../../services/metrics.js';
+
 export const CHAT_MAX_TOKENS = 8000;
 
 const TRUNCATED_REASONS = new Set(['length', 'max_tokens']);
@@ -8,6 +10,7 @@ export function assertChatOutputComplete(
   outputTokens: number,
 ): void {
   if (!finishReason || !TRUNCATED_REASONS.has(finishReason)) return;
+  noteOutputTruncated(provider.toLowerCase());
   throw Object.assign(
     new Error(`${provider} 对话输出达到 ${outputTokens || CHAT_MAX_TOKENS} token 上限，回复未完整结束`),
     {

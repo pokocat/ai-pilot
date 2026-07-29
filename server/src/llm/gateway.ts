@@ -18,6 +18,7 @@ import { ZERO_USAGE, extractAsks, type Deliverable, type ChatReply, type GenCont
 import { recordTokenUsage, recordAuxUsage, type UsageMeta } from '../services/usage.js';
 import { billableTokenEquivalents } from '../data/modelPrices.js';
 import { recordTrace } from '../services/trace.js';
+import { noteGenDegraded } from '../services/metrics.js';
 import { moderate } from '../services/moderation.js';
 import { auditBannedWords } from '../services/bannedWords.js';
 import { cacheGet, cacheSet } from '../services/cache.js';
@@ -98,6 +99,7 @@ function sanitizeDeliverable(ctx: GenContext, d: Deliverable): Deliverable {
     agentKey: ctx.agentKey,
     deliverableKey: ctx.deliverableKey,
   });
+  noteGenDegraded('context_leak');
   return { ...mockDeliverable(ctx), degraded: true };
 }
 
@@ -307,6 +309,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
     } catch (err) {
       console.error('[gateway] runtime deliverable fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
+      noteGenDegraded('runtime_deliverable');
       sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: '' };
     }
     sourced.result = sanitizeDeliverable(ctx, sourced.result);
@@ -346,6 +349,7 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   } catch (err) {
     console.error('[gateway] deliverable fallback to mock:', (err as Error).message);
     if (!env.aiFallbackMock) throw aiUnavailable(err);
+    noteGenDegraded('deliverable');
     sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   }
 
@@ -371,6 +375,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
     } catch (err) {
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
+      noteGenDegraded('runtime_chat');
       return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
     await moderateOutputOrThrow(s.result.text, ctx, meta);
@@ -404,6 +409,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
     console.error('[gateway] chat fallback to mock:', (err as Error).message);
     if ((err as Error & { code?: string }).code === 'AI_OUTPUT_TRUNCATED') throw err;
     if (!env.aiFallbackMock) throw aiUnavailable(err);
+    noteGenDegraded('chat');
   }
   if (chatResult) {
     await moderateOutputOrThrow(chatResult.result.text, ctx, meta);
@@ -566,6 +572,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     } catch (err) {
       console.error('[gateway] runtime adaptive fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
+      noteGenDegraded('runtime_adaptive');
       return { kind: 'chat', reply: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
     return { kind: 'chat', reply: withAsks(s.result), usage: s.usage };
@@ -606,6 +613,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     });
     console.error('[gateway] adaptive fallback to mock:', (err as Error).message);
     if (!env.aiFallbackMock) throw aiUnavailable(err);
+    noteGenDegraded('adaptive');
     const m = mockAdaptive(ctx);
     provider = 'mock'; usage = ZERO_USAGE; toolCalls = undefined; iterations = undefined;
     out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };

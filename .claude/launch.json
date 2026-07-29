@@ -32,6 +32,17 @@
         "dev:preprod"
       ],
       "port": 5174
+    },
+    {
+      "name": "admin-local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "admin",
+        "run",
+        "dev"
+      ],
+      "port": 5174
     }
   ]
 }
