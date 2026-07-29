@@ -119,8 +119,13 @@ server {
     # 容器只监听 127.0.0.1:3000，经这里出公网；有 Grafana 自己的登录页。
     # 配套：deploy/monitoring/.env 里设 GRAFANA_ROOT_URL=https://你的域名/grafana/、GRAFANA_SUB_PATH=true。
     # 不部署监控栈时删掉本段即可。
+    #
+    # ★ proxy_pass 末尾**绝不能加斜杠**（2026-07-29 线上踩坑，nginx -t 查不出来）：
+    #   带斜杠时 nginx 会把 /grafana/ 前缀剥掉再转发（/grafana/login → /login），而 Grafana 配了
+    #   GF_SERVER_SERVE_FROM_SUB_PATH=true，认定自己就该收到带前缀的路径，于是按 root_url 把请求
+    #   301 回 /grafana/ —— 浏览器无限重定向，页面永远打不开。不带斜杠才是原样透传。
     location /grafana/ {
-        proxy_pass http://127.0.0.1:3000/;
+        proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
