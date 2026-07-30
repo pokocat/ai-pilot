@@ -21,6 +21,11 @@ function traceUser(t: { userName: string | null; userPhone: string | null; userI
   return `${t.userName || '未命名用户'} · ${t.userPhone || t.userId.slice(0, 8)}`;
 }
 
+function traceEndpoint(t: { provider: string; model: string; endpointId: string | null; endpointLabel: string | null }): string {
+  const endpoint = t.endpointLabel || t.endpointId;
+  return `${t.provider}/${t.model || '-'}${endpoint ? ` · ${endpoint}` : ''}`;
+}
+
 export function ObservabilityView() {
   const [status, setStatus] = useState<'' | 'ok' | 'error'>('');
   const [detail, setDetail] = useState<AdminTraceDetail | null>(null);
@@ -59,7 +64,7 @@ export function ObservabilityView() {
               {data.items.map((t) => (
                 <div key={t.id} className="usage-row" style={{ cursor: 'pointer' }} onClick={() => openTrace(t.id)}>
                   <div className="usage-h">
-                    <div className="usage-name">{traceAgent(t)}<span>{TRACE_KIND_LABEL[t.kind] ?? t.kind} · {t.provider}/{t.model || '-'}</span></div>
+                    <div className="usage-name">{traceAgent(t)}<span>{TRACE_KIND_LABEL[t.kind] ?? t.kind} · {traceEndpoint(t)}</span></div>
                     <div className={`usage-num ${t.status === 'error' ? '' : 'ok'}`}>{t.status === 'error' ? '错误' : `${t.latencyMs}ms`}</div>
                   </div>
                   <div className="usage-meta">来源：{traceUser(t)}{t.tenantName ? ` · ${t.tenantName}` : ''}</div>
@@ -72,7 +77,7 @@ export function ObservabilityView() {
       </ViewState>
       {detail && (
         <div className="ad-detail show" onClick={() => setDetail(null)}>
-          <div className="ad-dh"><div className="bk" onClick={() => setDetail(null)}><Icon name="arrow" size={18} /></div><div className="dt"><div className="t">{traceAgent(detail)}</div><div className="s">{TRACE_KIND_LABEL[detail.kind] ?? detail.kind} · {detail.provider}/{detail.model || '-'}</div></div></div>
+          <div className="ad-dh"><div className="bk" onClick={() => setDetail(null)}><Icon name="arrow" size={18} /></div><div className="dt"><div className="t">{traceAgent(detail)}</div><div className="s">{TRACE_KIND_LABEL[detail.kind] ?? detail.kind} · {traceEndpoint(detail)}</div></div></div>
           <div className="ad-db" onClick={(e) => e.stopPropagation()}>
             <div className="usage-summary">
               <div><b>{detail.status === 'error' ? '错误' : '成功'}</b><span>状态</span></div>
@@ -89,6 +94,7 @@ export function ObservabilityView() {
                 <div className="audit-detail-kv"><span>租户</span><b>{detail.tenantName || detail.tenantId || '—'}</b></div>
                 <div className="audit-detail-kv"><span>智能体</span><b>{traceAgent(detail)}</b></div>
                 <div className="audit-detail-kv"><span>调用类型</span><b>{TRACE_KIND_LABEL[detail.kind] ?? detail.kind}</b></div>
+                <div className="audit-detail-kv wide"><span>实际端点</span><b>{detail.endpointLabel || '—'}{detail.endpointId ? ` · ${detail.endpointId}` : ''} · {detail.provider}/{detail.model || '—'}</b></div>
                 <div className="audit-detail-kv wide"><span>排障标识</span><b>agent={detail.agentKey || '—'} · kind={detail.kind} · session={detail.sessionId || '—'} · user={detail.userId || '—'}</b></div>
               </div>
             </div>

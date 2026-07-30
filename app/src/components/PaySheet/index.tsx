@@ -5,7 +5,7 @@ import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type ActivationSource } from '../../services/api';
-import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, requestWechatPayment } from '../../services/pay';
+import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, payOrder } from '../../services/pay';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import './index.scss';
 
@@ -66,11 +66,12 @@ export default function PaySheet({
         if (!ensurePayableEnv()) return; // H5（server 模式）：下单前拦下
         const order = await api.createSkuOrder(skuKey, undefined, { source, refId });
         if (order.payParams) {
-          await requestWechatPayment(order.payParams);
+          // mock=true（服务端 PAY_MOCK_SUCCESS 测试期）→ 跳过 wx.requestPayment 走模拟到账。
+          const mocked = await payOrder({ outTradeNo: order.orderId, pay: order.payParams, mock: order.mock });
           // —— 支付已成功（钱已扣）：后续刷新/查询失败只影响提示，绝不能再报「支付失败」。 ——
           const applied = await awaitPaymentApplied(order.orderId);
           await store.loadMe().catch(() => {});
-          Taro.showToast(payAppliedToast(applied, '已开通，权益已更新'));
+          Taro.showToast(payAppliedToast(applied, '已开通，权益已更新', { mock: mocked }));
         } else {
           // mock/演示通道：下单即已本地发放
           await store.loadMe().catch(() => {});

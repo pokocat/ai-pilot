@@ -751,29 +751,31 @@ model TokenUsage {
 /// LLM 调用诊断 trace（可观测）。与 token_usage 分表：trace 要记 mock/0token/错误，不污染计费口径。
 /// 不挂关系，纯写入 + 索引查询。promptText/responseText 仅在 LLM_TRACE_CAPTURE_TEXT=true 时截断存储。
 model LlmTrace {
-  id           String   @id @default(cuid())
-  tenantId     String?
-  userId       String?
-  sessionId    String?
-  agentKey     String?
-  versionId    String? // P1-A1：产出所用的已发布版本(AgentVersion.id)，把质量回归归因到具体版本
-  kind         String // deliverable | chat
-  provider     String // openai | claude | mock | dify
-  model        String
-  status       String // ok | error
-  errorMessage String?  @db.Text
-  latencyMs    Int      @default(0)
-  toolCalls    Int      @default(0) // 启用技能时的工具调用次数
-  iterations   Int      @default(0) // 工具循环轮数
-  inputTokens  Int      @default(0)
-  outputTokens Int      @default(0)
-  cachedInput  Int      @default(0) // 命中提示缓存的输入 token（按 ~1/10 计费；provider 不报则 0）
-  cacheWrite   Int      @default(0) // 写入提示缓存的输入 token（约 1.25× 计费；provider 不报则 0）
-  totalTokens  Int      @default(0)
-  promptText   String?  @db.Text
-  responseText String?  @db.Text
-  contextJson  Json? // 本轮历史窗口与记忆召回 id/分数/来源；不存记忆正文，便于排查“有记忆但没带入”
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  tenantId      String?
+  userId        String?
+  sessionId     String?
+  agentKey      String?
+  versionId     String? // P1-A1：产出所用的已发布版本(AgentVersion.id)，把质量回归归因到具体版本
+  kind          String // deliverable | chat
+  provider      String // openai | claude | mock | dify
+  model         String // 本次实际命中端点的 model
+  endpointId    String? // AiModel.id；自定义 per-agent/Dify/mock 无池端点时为空
+  endpointLabel String? // 调用时名称快照，防端点改名/删除后历史记录失真
+  status        String // ok | error
+  errorMessage  String?  @db.Text
+  latencyMs     Int      @default(0)
+  toolCalls     Int      @default(0) // 启用技能时的工具调用次数
+  iterations    Int      @default(0) // 工具循环轮数
+  inputTokens   Int      @default(0)
+  outputTokens  Int      @default(0)
+  cachedInput   Int      @default(0) // 命中提示缓存的输入 token（按 ~1/10 计费；provider 不报则 0）
+  cacheWrite    Int      @default(0) // 写入提示缓存的输入 token（约 1.25× 计费；provider 不报则 0）
+  totalTokens   Int      @default(0)
+  promptText    String?  @db.Text
+  responseText  String?  @db.Text
+  contextJson   Json? // 本轮历史窗口与记忆召回 id/分数/来源；不存记忆正文，便于排查“有记忆但没带入”
+  createdAt     DateTime @default(now())
 
   @@index([tenantId, createdAt])
   @@index([agentKey, createdAt])

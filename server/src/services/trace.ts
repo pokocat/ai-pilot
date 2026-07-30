@@ -21,6 +21,8 @@ export interface TraceInput {
   kind: 'chat' | 'deliverable';
   provider: string;
   model: string;
+  endpointId?: string | null;
+  endpointLabel?: string | null;
   status: 'ok' | 'error';
   errorMessage?: string | null;
   latencyMs: number;
@@ -48,6 +50,8 @@ export async function recordTrace(t: TraceInput): Promise<void> {
         kind: t.kind,
         provider: t.provider,
         model: t.model,
+        endpointId: t.endpointId ?? null,
+        endpointLabel: t.endpointLabel ?? null,
         status: t.status,
         errorMessage: clip(t.errorMessage),
         latencyMs: Math.max(0, Math.round(t.latencyMs)),
@@ -79,6 +83,8 @@ type TraceRow = {
   kind: string;
   provider: string;
   model: string;
+  endpointId: string | null;
+  endpointLabel: string | null;
   status: string;
   latencyMs: number;
   toolCalls: number;
@@ -109,7 +115,10 @@ function toItem(r: TraceRow, source: TraceSource = {}): AdminTraceItem {
     sessionId: r.sessionId,
     kind: r.kind,
     provider: r.provider,
-    model: r.model, status: r.status === 'error' ? 'error' : 'ok', latencyMs: r.latencyMs,
+    model: r.model,
+    endpointId: r.endpointId,
+    endpointLabel: r.endpointLabel,
+    status: r.status === 'error' ? 'error' : 'ok', latencyMs: r.latencyMs,
     toolCalls: r.toolCalls, totalTokens: r.totalTokens, cachedInput: r.cachedInput, errorMessage: r.errorMessage,
   };
 }

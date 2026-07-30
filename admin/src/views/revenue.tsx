@@ -55,24 +55,30 @@ export function PaymentsView({ toast, isSuper, onFindUser }: { toast: (m: string
   // 全额退款（仅 owner/master 可见）：真金白银且不可撤销 —— 回显用户/单号/金额，
   // 必填原因（入审计），并要求手打「退款」。旧版这一切都靠一个 window.prompt，
   // 既不显示退给谁多少钱，回车即执行。
-  const refund = (o: { outTradeNo: string; userName: string; amount: number }) => setConfirmSpec({
-    title: '全额退款并回收权益',
-    desc: '原路退回至用户支付账户，并幂等回收该订单发放过的权益（套餐 / 钻石 / 模块）。执行后不可撤销。',
+  // mock 单（PAY_MOCK_SUCCESS 测试期模拟支付）走同一个端点，但服务端不会调微信真退款：
+  // 没有资金可退，只做本地权益回收。文案必须跟着变，否则运营会以为自己在退真钱。
+  const refund = (o: { outTradeNo: string; userName: string; amount: number; mock?: boolean }) => setConfirmSpec({
+    title: o.mock ? '撤销模拟支付并回收权益' : '全额退款并回收权益',
+    desc: o.mock
+      ? '这是测试期模拟支付单（未实际付款）：不会调用微信退款，仅幂等回收该订单发放过的权益（套餐 / 钻石 / 模块）。执行后不可撤销。'
+      : '原路退回至用户支付账户，并幂等回收该订单发放过的权益（套餐 / 钻石 / 模块）。执行后不可撤销。',
     echo: [
       { k: '用户', v: o.userName || '（未命名）' },
       { k: '单号', v: o.outTradeNo },
-      { k: '退款额', v: `¥${fmtYuan(o.amount)}`, amount: true },
+      { k: o.mock ? '订单金额' : '退款额', v: `¥${fmtYuan(o.amount)}`, amount: true },
     ],
-    warn: '这是一笔真实资金动作，不可撤销，操作会连同原因写入审计。',
+    warn: o.mock
+      ? '模拟单没有真实资金流，本操作只回收权益，仍会连同原因写入审计。'
+      : '这是一笔真实资金动作，不可撤销，操作会连同原因写入审计。',
     reason: { label: '退款原因（必填，写入审计）', required: true, maxLength: 80 },
     typed: '退款',
-    confirmText: '确认退款',
+    confirmText: o.mock ? '确认回收' : '确认退款',
     danger: true,
     onConfirm: async (reason) => {
       setBusyNo(o.outTradeNo);
       try {
         const r = await api.refundPayment(o.outTradeNo, reason);
-        toast(`已退款（${r.wechatStatus}），权益已回收`);
+        toast(o.mock ? '模拟单已撤销，权益已回收' : `已退款（${r.wechatStatus}），权益已回收`);
         load();
       } finally { setBusyNo(''); }
     },
@@ -108,11 +114,16 @@ export function PaymentsView({ toast, isSuper, onFindUser }: { toast: (m: string
         {res.initial ? <Skeleton kind="stats" /> : !data ? null : (
           <>
             <div className="usage-summary">
-              <div><b>¥{fmtYuan(data.summary.paidAmount)}</b><span>期内实收</span></div>
+              <div><b>¥{fmtYuan(data.summary.paidAmount)}</b><span>期内实收（不含 mock）</span></div>
               <div><b>{data.summary.paidCount}</b><span>支付订单</span></div>
               <div><b>{data.items.length}</b><span>列表条数</span></div>
               <div><b>¥{data.summary.paidCount > 0 ? fmtYuan(Math.round(data.summary.paidAmount / data.summary.paidCount)) : '0.00'}</b><span>客单价</span></div>
             </div>
+            {/* 测试期模拟支付单（PAY_MOCK_SUCCESS）没有真实资金：营收四格已把它们排除，
+                但订单列表照常显示并打 mock 标——运营要能看见测试期发了多少权益出去。 */}
+            {data.items.some((p) => p.mock) && (
+              <div className="usage-meta">列表中带 <span className="tag warn">mock</span> 的是测试期模拟支付单（未实际付款），不计入上方营收金额。</div>
+            )}
             {data.stuck.length > 0 && (
               <>
                 <div className="sec-h"><span className="t">需要处理（{data.stuck.length}）</span><span className="s">已支付未发放 = 资损单，优先查单补账；超时未支付由对账任务自动关单</span></div>
@@ -121,14 +132,16 @@ export function PaymentsView({ toast, isSuper, onFindUser }: { toast: (m: string
                     <div className="usage-h">
                       <div className="usage-name">
                         {o.userName || '（未命名）'}
+                        {o.mock && <span className="tag warn">mock</span>}
                         <span>{o.kind === 'paid_unapplied' ? '已支付未发放' : '超时未支付'} · {o.skuKey || o.planId || '—'}</span>
                       </div>
                       <div className="usage-num">¥{fmtYuan(o.amount)}</div>
                     </div>
                     <div className="usage-meta">{o.outTradeNo} · {o.paidAt ? '支付 ' + fmtTime(o.paidAt) : '下单 ' + fmtTime(o.createdAt)}</div>
                     <div className="crd-actions">
+                      {/* mock 单不可查单补账（微信侧没有这笔交易），用户点一下模拟支付即可到账 */}
                       <button type="button" className="mini-btn primary" disabled={busyNo === o.outTradeNo || o.provider !== 'wechat'} onClick={() => reconcile(o)}>
-                        {busyNo === o.outTradeNo ? '查单中…' : o.provider === 'wechat' ? '查单补账' : '沙箱单'}
+                        {busyNo === o.outTradeNo ? '查单中…' : o.provider === 'wechat' ? '查单补账' : o.mock ? '模拟单' : '沙箱单'}
                       </button>
                       {isSuper && o.kind === 'paid_unapplied' && o.provider === 'wechat' && (
                         <button type="button" className="mini-btn danger" disabled={busyNo === o.outTradeNo} onClick={() => refund(o)}>退款</button>
@@ -144,10 +157,14 @@ export function PaymentsView({ toast, isSuper, onFindUser }: { toast: (m: string
             {data.items.map((p, i) => (
               <div key={i} className="usage-row" title={p.outTradeNo} onClick={() => copyNo(p.outTradeNo)}>
                 <div className="usage-h">
-                  <div className="usage-name">{p.userName || '（未命名）'}<span>尾号 {p.orderNo}{p.attrSource ? ` · ${p.attrSource}` : ''}</span></div>
+                  <div className="usage-name">
+                    {p.userName || '（未命名）'}
+                    {p.mock && <span className="tag warn">mock</span>}
+                    <span>尾号 {p.orderNo}{p.attrSource ? ` · ${p.attrSource}` : ''}</span>
+                  </div>
                   <div className={`usage-num ${p.status === 'applied' || p.status === 'paid' ? 'ok' : ''}`}>¥{fmtYuan(p.amount)}</div>
                 </div>
-                <div className="usage-meta">{payStatusLabel(p.status)} · {p.paidAt ? '支付 ' + fmtTime(p.paidAt) : '下单 ' + fmtTime(p.createdAt)}（点击复制完整单号）</div>
+                <div className="usage-meta">{payStatusLabel(p.status)}{p.mock ? ' · 测试期模拟支付（未实际付款）' : ''} · {p.paidAt ? '支付 ' + fmtTime(p.paidAt) : '下单 ' + fmtTime(p.createdAt)}（点击复制完整单号）</div>
                 <div className="crd-actions">
                   <button type="button" className="mini-btn" onClick={(e) => { e.stopPropagation(); findUser(p.userName); }}>查用户</button>
                   {isSuper && (p.status === 'applied' || p.status === 'paid') && (

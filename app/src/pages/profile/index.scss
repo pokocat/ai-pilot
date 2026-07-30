@@ -138,39 +138,37 @@
 .menu-s { flex-shrink: 0; font-size: 12.5px; color: var(--ink-3); }
 .menu-go { flex-shrink: 0; font-size: 16px; color: var(--ink-3); }
 
-/* —— 年度谶语卡（留存机制 #16 M1，档案组顶部）——
-   卡片语言沿用本页 .rank-card / .menu：白面 + 18px 圆角 + .card 描边与轻投影；
-   谶语走宋体竖排，烫金用 --warn（现有 token，不新造颜色），落款/说明用 --gold-deep / --ink-3。 */
-.verse-card {
-  margin: 0 0 12px;
-  padding: 16px;
-  border-radius: 18px;
+/* —— 年度谶语题字带（留存机制 #16 M1）：账户服务卡的收口 ——
+   刻意不做成第三个盒子（上面已有权益格 + 服务格两排盒子），只用一条发丝线分隔、与卡内各行同宽，
+   卡里因此只有一套左右边界。烫金沿用卡内既有的 #F4D99E（member-pill / apm-code 同色），不新造颜色。 */
+.verse-band { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, .16); }
+.vb-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.vb-kicker { color: rgba(255, 255, 255, .52); font-size: 10.5px; font-weight: 700; letter-spacing: .16em; }
+.vb-sign {
+  flex-shrink: 0; color: rgba(244, 217, 158, .82);
+  font-size: 11px; font-weight: 600; letter-spacing: .04em; white-space: nowrap;
 }
-.vc-kicker {
-  display: block;
-  color: var(--gold-deep); font-size: var(--fs-11); font-weight: 800; letter-spacing: .16em;
+/* 一句一行居中，读起来是一副对子；字距末尾会多出一个字宽，补等量左内边距把光学重心拉回中线 */
+.vb-lines { margin: 9px 0 7px; text-align: center; }
+.vb-line {
+  display: block; padding-left: .16em;
+  color: #F4D99E; font-size: 16px; font-weight: 600; line-height: 1.6; letter-spacing: .16em;
 }
-/* 竖排：一句一列，row-reverse 使首句居右（自右向左读） */
-.vc-cols {
-  display: flex; flex-direction: row-reverse; justify-content: center;
-  gap: 16px; margin: 14px 0 12px;
+/* 点谶足迹（周期陪伴）；无记录时落到岁验预告，保持带子收口完整 */
+.vb-moment {
+  display: block; text-align: center;
+  color: rgba(255, 255, 255, .52); font-size: 10.5px; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.vc-col { display: flex; flex-direction: column; align-items: center; }
-.vc-ch {
-  display: block;
-  color: var(--warn); font-size: 19px; font-weight: 600; line-height: 1.44; letter-spacing: .04em;
-}
-.vc-foot { display: flex; align-items: baseline; justify-content: center; gap: 8px; }
-.vc-sign { color: var(--gold-deep); font-size: 12.5px; font-weight: 600; letter-spacing: .06em; }
-.vc-note { color: var(--ink-3); font-size: var(--fs-11); font-weight: 500; }
 
-/* 无谶态：求谶引导（点进命盘报告） */
-.verse-empty { display: flex; align-items: center; gap: 12px; }
-.verse-empty:active { opacity: .85; }
-.vc-eb { flex: 1; min-width: 0; }
-.vc-et { display: block; color: var(--ink); font-size: 15px; font-weight: 600; }
-.vc-es { display: block; margin-top: 5px; color: var(--ink-2); font-size: var(--fs-12); line-height: 1.5; font-weight: 500; }
-.vc-ego { flex-shrink: 0; color: var(--gold-deep); font-size: 13px; font-weight: 600; white-space: nowrap; }
+/* 无谶态：同一条带子里一行求谶引导（点进命盘报告），不另起盒子 */
+.verse-ask { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.verse-ask:active { opacity: .8; }
+.va-t {
+  flex: 1; min-width: 0; color: rgba(255, 255, 255, .82); font-size: 12px; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.va-go { flex-shrink: 0; color: #F4D99E; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
 
 /* —— 服务老师 / 深度能力（account-teacher / account-depth） —— */
 .account-teacher,

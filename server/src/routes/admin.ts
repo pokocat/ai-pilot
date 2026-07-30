@@ -58,7 +58,7 @@ import type {
   AdminUserUsage, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult,
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView, AdminCreativeJobItem,
 } from '../../../shared/contracts';
-import { reconcileOrder, refundWechatOrder } from '../services/wechatPay.js';
+import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { signUserToken, jwtEnabled } from '../services/userToken.js';
 import { Prisma } from '@prisma/client';
@@ -795,15 +795,18 @@ export async function adminRoutes(app: FastifyInstance) {
     const pageSize = Math.min(100, Math.max(1, Math.floor(Number(req.query.pageSize ?? 20)) || 20));
     const PAID = ['paid', 'applied']; // 已支付口径：paid 及其后继终态 applied
     const listWhere = await paymentListWhere({ since, status, q });
+    // 营收口径只认 provider='wechat'（真实收款）：测试期模拟支付单（PAY_MOCK_SUCCESS，provider='mock' +
+    // snapshotJson.mock=true）与沙箱单都没有真实资金，计进「期内实收 / 客单价 / 按天曲线」就是往
+    // 经营看板里灌假钱——假钱比缺个数字更糟。它们仍出现在下方 items 列表里，并带 mock 标记。
     const [orders, total, paidAgg, dayRows] = await Promise.all([
       prisma.paymentOrder.findMany({ where: listWhere, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
       prisma.paymentOrder.count({ where: listWhere }),
-      prisma.paymentOrder.aggregate({ where: { paidAt: { gte: since }, status: { in: PAID } }, _sum: { amount: true }, _count: { _all: true } }),
+      prisma.paymentOrder.aggregate({ where: { provider: 'wechat', paidAt: { gte: since }, status: { in: PAID } }, _sum: { amount: true }, _count: { _all: true } }),
       prisma.$queryRaw<{ day: string; amount: bigint | number }[]>`
         SELECT to_char((("paidAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD') AS day,
                COALESCE(SUM("amount"), 0) AS amount
         FROM payment_order
-        WHERE "paidAt" >= ${since} AND "status" IN ('paid', 'applied')
+        WHERE "paidAt" >= ${since} AND "status" IN ('paid', 'applied') AND "provider" = 'wechat'
         GROUP BY 1 ORDER BY 1`,
     ]);
     // 卡单清单（P0）：paid 未 applied = 收钱未发权益（资损，最高优先）；created 超 30 分钟 = 回调可能丢失/用户未支付。
@@ -833,6 +836,7 @@ export async function adminRoutes(app: FastifyInstance) {
       attrSource: o.attrSource,
       paidAt: o.paidAt ? isoSecond(o.paidAt) : null,
       createdAt: isoSecond(o.createdAt),
+      mock: isMockOrder(o), // 列表可见但显式标出：这单是测试期模拟支付，未计入上面的营收金额
     }));
     const stuck: AdminPaymentStuckItem[] = stuckRows.map((o) => ({
       outTradeNo: o.outTradeNo,
@@ -845,6 +849,7 @@ export async function adminRoutes(app: FastifyInstance) {
       skuKey: o.skuKey,
       paidAt: o.paidAt ? isoSecond(o.paidAt) : null,
       createdAt: isoSecond(o.createdAt),
+      mock: isMockOrder(o),
     }));
     return {
       summary: {
@@ -887,11 +892,13 @@ export async function adminRoutes(app: FastifyInstance) {
       const snap = (o.snapshotJson ?? null) as { plan?: { name?: string }; sku?: { name?: string } } | null;
       return snap?.plan?.name ?? snap?.sku?.name ?? (o.skuKey ?? o.planId);
     };
-    const header = ['商户单号', '用户', '手机号', '商品', '金额(元)', '状态', '归因', '下单时间', '支付时间', '退款时间'];
+    // 「模拟单」列：导出常被拿去对账/算营收，必须让人在表格里一眼把测试期假单剔掉。
+    const header = ['商户单号', '用户', '手机号', '商品', '金额(元)', '状态', '模拟单', '归因', '下单时间', '支付时间', '退款时间'];
     const lines = orders.map((o) => {
       const u = userMap.get(o.userId);
       return [
         o.outTradeNo, u?.name ?? '', u?.phone ?? '', itemName(o), (o.amount / 100).toFixed(2), o.status,
+        isMockOrder(o) ? 'mock' : '',
         o.attrSource ?? '', isoSecond(o.createdAt), o.paidAt ? isoSecond(o.paidAt) : '', o.refundedAt ? isoSecond(o.refundedAt) : '',
       ].map(esc).join(',');
     });

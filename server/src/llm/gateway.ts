@@ -22,6 +22,11 @@ import { noteGenDegraded } from '../services/metrics.js';
 import { moderate } from '../services/moderation.js';
 import { auditBannedWords } from '../services/bannedWords.js';
 import { cacheGet, cacheSet } from '../services/cache.js';
+import {
+  createEndpointCapture,
+  runWithEndpointCapture,
+  type EndpointCapture,
+} from '../services/llmPool.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
 function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
@@ -68,7 +73,28 @@ async function assertKeyHealthy(): Promise<void> {
 
 // 把「产出 + 真实 token + 来源」打包，便于在输出审核/缓存前统一记账。
 // toolCalls/iterations：启用技能的工具调用循环才有，供可观测 trace 记录。
-type Sourced<T> = { result: T; usage: Usage; provider: string; model: string; toolCalls?: number; iterations?: number };
+type Sourced<T> = {
+  result: T;
+  usage: Usage;
+  provider: string;
+  model: string;
+  endpointId?: string | null;
+  endpointLabel?: string | null;
+  toolCalls?: number;
+  iterations?: number;
+};
+
+function withActualEndpoint<T>(s: Sourced<T>, capture: EndpointCapture): Sourced<T> {
+  const hit = capture.hit;
+  if (!hit) return s;
+  return {
+    ...s,
+    provider: hit.provider || s.provider,
+    model: hit.model || s.model,
+    endpointId: hit.endpointId,
+    endpointLabel: hit.endpointLabel,
+  };
+}
 
 function deliverableText(d: Deliverable): string {
   return d.sections.map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n');
@@ -123,10 +149,12 @@ async function traced<T>(
   args: { kind: 'deliverable' | 'chat'; ctx: GenContext; meta?: UsageMeta; provider: string; respText: (r: T) => string },
 ): Promise<Sourced<T>> {
   const t0 = Date.now();
+  const capture = createEndpointCapture();
   try {
-    const s = await run();
+    const s = withActualEndpoint(await runWithEndpointCapture(capture, run), capture);
     await recordTrace({
       meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind, provider: s.provider, model: s.model,
+      endpointId: s.endpointId, endpointLabel: s.endpointLabel,
       status: 'ok', latencyMs: Date.now() - t0, toolCalls: s.toolCalls, iterations: s.iterations, usage: s.usage,
       promptText: args.ctx.userMessage, responseText: args.respText(s.result), context: args.ctx.contextTrace,
     });
@@ -142,7 +170,11 @@ async function traced<T>(
     return s;
   } catch (err) {
     await recordTrace({
-      meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind, provider: args.provider, model: '',
+      meta: args.meta, agentKey: args.ctx.agentKey, versionId: args.ctx.versionId, kind: args.kind,
+      provider: capture.hit?.provider ?? args.provider,
+      model: capture.hit?.model ?? '',
+      endpointId: capture.hit?.endpointId,
+      endpointLabel: capture.hit?.endpointLabel,
       status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: args.ctx.userMessage,
       context: args.ctx.contextTrace,
     });
@@ -195,7 +227,17 @@ async function fillBillable(s: Sourced<unknown>): Promise<number> {
 // 把 per-agent 自定义 OpenAI 端点并入一个 ResolvedAiConfig（其余沿用全局/默认）。
 function openaiOverrideCfg(ctx: GenContext, base: ResolvedAiConfig): ResolvedAiConfig {
   const rt = ctx.runtime!;
-  return { ...base, provider: 'openai', baseUrl: rt.baseUrl || base.baseUrl, model: rt.model || base.model, apiKey: rt.apiKey || '', temperature: rt.temperature ?? base.temperature };
+  return {
+    ...base,
+    provider: 'openai',
+    baseUrl: rt.baseUrl || base.baseUrl,
+    model: rt.model || base.model,
+    apiKey: rt.apiKey || '',
+    temperature: rt.temperature ?? base.temperature,
+    // per-agent 自定义接入不等于全局 activeModelId，避免 trace 误归因。
+    traceEndpointId: undefined,
+    traceEndpointLabel: `${ctx.agentKey} 自定义端点`,
+  };
 }
 
 // Dify 返回的 conversation_id 回写 Session，维持后续多轮上下文。
@@ -450,8 +492,16 @@ async function* tracedChatProviderStream(
   const t0 = Date.now();
   let text = '';
   let done: { result: ChatReply; usage: Usage } | null = null;
+  const capture = createEndpointCapture();
+  const iterator = stream[Symbol.asyncIterator]();
+  let iteratorFinished = false;
   try {
-    for await (const ev of stream) {
+    for (;;) {
+      // provider 的 async generator 是惰性执行；每次 next 都要进入本轮隔离的 capture，
+      // 否则流式路径实际选中的端点会丢失。
+      const step = await runWithEndpointCapture(capture, () => iterator.next());
+      if (step.done) { iteratorFinished = true; break; }
+      const ev = step.value;
       if (ev.type === 'delta') {
         text += ev.text;
         yield ev;
@@ -460,8 +510,10 @@ async function* tracedChatProviderStream(
       }
     }
     if (!done) throw Object.assign(new Error(`${provider} 流式响应未返回完整结果`), { code: 'AI_EMPTY_RESPONSE' });
+    const actual = withActualEndpoint({ result: done.result, usage: done.usage, provider, model }, capture);
     await recordTrace({
-      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
+      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider: actual.provider, model: actual.model,
+      endpointId: actual.endpointId, endpointLabel: actual.endpointLabel,
       status: 'ok', latencyMs: Date.now() - t0, usage: done.usage,
       promptText: ctx.userMessage, responseText: done.result.text, context: ctx.contextTrace,
     });
@@ -473,16 +525,26 @@ async function* tracedChatProviderStream(
       kind: 'chat',
       text: done.result.text,
     });
-    await maybeRecord({ result: done.result, usage: done.usage, provider, model }, 'chat', ctx, meta);
+    await maybeRecord(actual, 'chat', ctx, meta);
     // 尾部 ```ask 块在完整结果处剥离并结构化（token 流里已原样流出，前端流式期间负责隐藏）。
     yield { type: 'done', result: withAsks(done.result), usage: done.usage };
   } catch (err) {
     await recordTrace({
-      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider, model,
+      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat',
+      provider: capture.hit?.provider ?? provider,
+      model: capture.hit?.model ?? model,
+      endpointId: capture.hit?.endpointId,
+      endpointLabel: capture.hit?.endpointLabel,
       status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
       responseText: text, context: ctx.contextTrace,
     });
     throw err;
+  } finally {
+    // 保留原 for-await 的取消语义：客户端断开导致外层 generator 提前 return 时，
+    // 必须把 return 透给 provider，释放流式连接与并发槽位。
+    if (!iteratorFinished && iterator.return) {
+      await runWithEndpointCapture(capture, () => iterator.return!(undefined as never)).catch(() => {});
+    }
   }
 }
 
@@ -581,9 +643,10 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
   const cfg = await getAiConfig();
   const live = liveProvider(cfg);
   const t0 = Date.now();
+  const endpointCapture = createEndpointCapture();
   let out: { kind: 'report'; result: Deliverable } | { kind: 'chat'; result: ChatReply };
   let provider = 'mock';
-  const model = cfg.model;
+  const configuredModel = cfg.model;
   let toolCalls: number | undefined;
   let iterations: number | undefined;
   let usage: Usage = ZERO_USAGE;
@@ -592,13 +655,13 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     if (live === 'openai') {
       const oa = await import('./providers/openai.js');
       const tools = await skillToolsFor(ctx);
-      const m = await oa.openaiAdaptive(ctx, cfg, tools);
+      const m = await runWithEndpointCapture(endpointCapture, () => oa.openaiAdaptive(ctx, cfg, tools));
       provider = 'openai'; usage = m.usage; toolCalls = m.toolCalls; iterations = m.iterations;
       out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
     } else if (live === 'claude') {
       const cl = await import('./providers/claude.js');
       const tools = await skillToolsFor(ctx);
-      const m = await cl.claudeAdaptive(ctx, cfg, tools);
+      const m = await runWithEndpointCapture(endpointCapture, () => cl.claudeAdaptive(ctx, cfg, tools));
       provider = 'claude'; usage = m.usage; toolCalls = m.toolCalls; iterations = m.iterations;
       out = m.kind === 'report' ? { kind: 'report', result: m.deliverable } : { kind: 'chat', result: m.reply };
     } else {
@@ -607,7 +670,11 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
     }
   } catch (err) {
     await recordTrace({
-      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat', provider: live ?? 'mock', model: '',
+      meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat',
+      provider: endpointCapture.hit?.provider ?? live ?? 'mock',
+      model: endpointCapture.hit?.model ?? '',
+      endpointId: endpointCapture.hit?.endpointId,
+      endpointLabel: endpointCapture.hit?.endpointLabel,
       status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
       context: ctx.contextTrace,
     });
@@ -620,14 +687,17 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
   }
 
   const recKind: 'deliverable' | 'chat' = out.kind === 'report' ? 'deliverable' : 'chat';
+  const model = provider === 'mock' ? configuredModel : (endpointCapture.hit?.model ?? configuredModel);
+  const endpointId = provider === 'mock' ? null : endpointCapture.hit?.endpointId;
+  const endpointLabel = provider === 'mock' ? null : endpointCapture.hit?.endpointLabel;
   if (out.kind === 'report') out.result = sanitizeDeliverable(ctx, out.result);
   const respText = out.kind === 'report' ? deliverableText(out.result) : out.result.text;
   await recordTrace({
-    meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: recKind, provider, model,
+    meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: recKind, provider, model, endpointId, endpointLabel,
     status: 'ok', latencyMs: Date.now() - t0, toolCalls, iterations, usage,
     promptText: ctx.userMessage, responseText: respText, context: ctx.contextTrace,
   });
-  await maybeRecord({ result: out.result, usage, provider, model, toolCalls, iterations }, recKind, ctx, meta);
+  await maybeRecord({ result: out.result, usage, provider, model, endpointId, endpointLabel, toolCalls, iterations }, recKind, ctx, meta);
 
   return out.kind === 'report'
     ? { kind: 'report', deliverable: out.result, usage }

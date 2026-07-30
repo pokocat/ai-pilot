@@ -10,7 +10,10 @@ import {
   type DeliverableInput,
 } from '../services/casefile.js';
 import type { GoalLadder } from '../../../shared/contracts';
-import { extractStrategicFacts, upsertStrategicProfile, extractForceVerdict, upsertForce } from '../services/strategicProfile.js';
+import {
+  extractStrategicFacts, upsertStrategicProfile, extractForceVerdict, upsertForce,
+  maybeMarkVerseMoment, verseEventFromDeliverable,
+} from '../services/strategicProfile.js';
 import { recordDecisionFromAccept } from '../services/decisionLog.js';
 import { listReviews, recordReview, reviewStreak, type ReviewLayer } from '../services/reviewLog.js';
 import { syncProgress } from '../services/progress.js';
@@ -43,6 +46,14 @@ export async function casefileRoutes(app: FastifyInstance) {
       patch: extractStrategicFacts(deliverable),
       verseSource: 'llm',
     }).catch(() => {});
+    // 谶语周期陪伴：认可方案 = 老板确认的一件真事 → 试着把它对到当年谶的某半句上（命中才落一条点谶）。
+    // void + fire-safe：判定要调模型，绝不能拖慢认可这条热路径；对不上就什么也不发生。
+    void maybeMarkVerseMoment({
+      tenantId: user.tenantId,
+      userId: user.id,
+      source: 'accept',
+      eventText: verseEventFromDeliverable(deliverable),
+    });
     // L-6 三势真数据化：认可的是「市势/人势研判」→ 提炼 攻/守/等/撤 结论回写，军情页三势卡回显真结论
     if (force === '市势' || force === '人势') {
       void extractForceVerdict(force, deliverable)

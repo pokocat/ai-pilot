@@ -37,7 +37,7 @@ function waitFor(ms: number, signal?: AbortSignal): Promise<void> {
 
 afterEach(() => { globalThis.fetch = realFetch; });
 
-test('结构化成果至少允许 120 秒预算，不受普通 40ms 对话超时截断', async () => {
+test('结构化成果使用独立长等待预算，不受普通 40ms 对话超时截断', async () => {
   globalThis.fetch = (async (_url: string, init?: RequestInit) => {
     await waitFor(70, init?.signal ?? undefined);
     return new Response(JSON.stringify({

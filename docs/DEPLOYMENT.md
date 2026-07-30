@@ -156,8 +156,22 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 | `EMBEDDING_MODEL` | 嵌入模型 | 留空=本地确定性嵌入；配则走 `/embeddings` |
 | `MODERATION_ENABLED` | 内容审核开关 | `true`（演示级关键词；生产换合规服务） |
 | `PGVECTOR_ENABLED` | pgvector 近邻检索 | `false`（启用见 §6） |
+| `WECHAT_PAY_MCHID` 等六项 | 微信支付 v3 真实凭据（全部配齐才 `payConfigured()=true`） | 见 `.env.example`「微信支付 v3」段 |
+| `PAY_MOCK_SUCCESS` | **测试期模拟支付成功**（无商户凭据时把真实支付管线跑通） | **默认不设**；仅测试期设 `true`，见下方警示 |
 
 > 模型 key 优先存数据库（后台「模型」页，运行时可切换、不入仓库）；env 仅作兜底。
+>
+> **`PAY_MOCK_SUCCESS=true` 的含义与代价（务必读完再开）**：开启后 `POST /plans/:id/order` 与
+> `POST /skus/:key/order` 在**没有微信支付商户凭据**的情况下也放行，照常建真实 `PaymentOrder`
+> （条款快照 / 实付金额 / 归因 / 下单频控 / 关同类旧单一个不跳），只是不调微信 JSAPI 下单；
+> 端上拿到 `mock: true` 就跳过 `wx.requestPayment`，改调 `POST /pay/mock/pay`（普通用户鉴权 +
+> 校验订单归属，他人订单 404），由**真实的** `markPaidAndApply` 幂等发放权益、落 `ActivationEvent`
+> 并发「支付到账」订阅消息。这样订单状态机 / 幂等 / 权益发放 / 到账通知在拿到凭据前就能被完整验证
+> （对比一下：`/plans/:id/purchase` 的演示发放是**整条绕过**支付管线的，什么也验不到）。
+> - ⚠️ **开启即等于任何登录用户都可以自助领取任意付费套餐 / SKU**（下单 → 点一下模拟支付 → 权益到账）。**仅测试期使用**，测试结束后删掉这一行并重启 API。
+> - ✅ **真凭据配齐后自动失效**：`payMockSuccessEnabled()` 的判定是 `PAY_MOCK_SUCCESS==='true' && !payConfigured()`，六项 `WECHAT_PAY_*` 一配齐 mock 即让位，**不需要改任何代码**，也不存在「配了真支付却还能白拿」的窗口（忘删这一行也不会出事）。
+> - 与 `PAY_SANDBOX`（`/pay/sandbox/notify` 仿真回调，admin 鉴权 + 生产启动期硬禁）不同，本开关**允许在生产启用**——这是产品测试期的显式决定，故 `assertSandboxSafe()` 不拦它。
+> - 假到账**不污染真实链路**：这些单带 `provider='mock'` + `snapshotJson.mock=true` + `transactionId` 以 `mock` 开头。对账 sweep / 主动查单 / 微信关单 / 微信退款一律跳过（跳过而非标 failed）；营收统计（后台「期内实收 / 客单价 / 按天曲线」与 `junshi_pay_amount_cny_total`）**不含** mock 单，改计 `junshi_pay_mock_total`；后台订单列表与 CSV 导出显式标「mock」。运营对 mock 单执行退款时**不调微信**，但**本地权益回收照常**（撤掉测试期误发放）。每次模拟到账都落审计 `pay.mock.paid`（单号 / 金额 / 套餐或 SKU）。
 > **海报成品图（`canvas_design`）没有任何环境变量**——开关 / 单价 / 日限额 / 渲染超时 / 模板启停 / 图片供应商接入点（含密钥）全在**后台**「创作任务」页，存 `FeatureFlag` 行 `creative-poster` 的 `enabled + payload`（密钥经 `secretBox` 加密），约 1 分钟内生效、不用重启。2026-07-29 删掉了 `CANVAS_DESIGN_ENABLED` / `_ENGINE` / `_MAX_CONCURRENCY` / `_TIMEOUT_MS` 四个：`ENABLED` 与后台开关取合取，制造「后台开了却不生效」的静默失败，而作为熔断闸它要 SSH + 改 env + 重启，比后台点一下慢一个数量级；`ENGINE` 全仓无分支（改它只改变库里那个标签的字面值）；后两个只作 payload 缺省值，而后台保存是全量重写 payload，**运营点过一次保存后改 env 重启就永久无效果**。别再往回加——理由与代码注释同步记在 `server/src/env.ts` 的同名段落。
 
 ### 5.1 海报成品图上线三步（缺一不可）

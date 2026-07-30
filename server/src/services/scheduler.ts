@@ -169,6 +169,7 @@ export async function scanDailyReviewReminders(): Promise<number> {
       tenantId: cf.tenantId,
       userId: cf.userId,
       scene: 'review',
+      category: '复盘提醒',
       title: '今晚复盘提醒',
       note: '记录今日结果，调整明天军令',
     });
@@ -180,13 +181,18 @@ export async function scanDailyReviewReminders(): Promise<number> {
 
 // ============ 任务：预言到期验证候选（M2 PR-9） ============
 // pending 且 dueDate ≤ 今天 且未提醒过 → 登记「天机对账」候选（行级 dueNotifiedAt 幂等），
-// 下次日/月复盘时由军师带出来逐条对账（发送提醒走订阅消息通道）。
+// 下次日/月复盘时由军师带出来逐条对账。
+// #1 预言揭封（留存机制）：此前这里只记账不推送——「预言到期」这个全体系最强的回访事件在用户
+// 手机上毫无动静。补上订阅消息推送：借 review 场景模板（与 reminders.ts 同口径，不新增 scene），
+// 额度制天然限频；岁验（年度谶语，basis 约定前缀）换专属措辞。best-effort：推送失败/无额度
+// 不阻断 dueNotifiedAt 锚点——对账候选照常进复盘，推送只是多一次拉回。
 export async function scanDueProphecies(): Promise<number> {
   const today = dateKey();
   const due = await prisma.prophecyLog.findMany({
     where: { status: 'pending', dueNotifiedAt: null, dueDate: { not: null, lte: today } },
     take: 200,
   });
+  const pushed = new Set<string>(); // 同一轮同一用户至多推一条（多条同日到期只打扰一次，进复盘自会看到全部）
   for (const p of due) {
     await recordAudit({
       tenantId: p.tenantId,
@@ -194,9 +200,21 @@ export async function scanDueProphecies(): Promise<number> {
       action: 'system.prophecy.due',
       payload: { prophecyId: p.id, seq: p.seq, dueDate: p.dueDate, prophecy: p.prophecy.slice(0, 100) },
     });
+    if (!pushed.has(p.userId)) {
+      pushed.add(p.userId);
+      const isOmen = (p.basis ?? '').startsWith('年度谶语·岁验'); // 与 strategicProfile.registerVerseOmen 的约定值对齐
+      await sendWechatSubscribeMessage({
+        tenantId: p.tenantId,
+        userId: p.userId,
+        scene: 'review',
+        category: isOmen ? '岁验' : '预言对账',
+        title: isOmen ? '一年前那句话，今日对账' : '预言到期·今日对账',
+        note: p.prophecy, // 发送侧 clip 到 20 字；谶语「七言，七言」整 15 字恰好完整可见
+      }).catch(() => {});
+    }
     await prisma.prophecyLog.update({ where: { id: p.id }, data: { dueNotifiedAt: new Date() } });
   }
-  if (due.length) console.log(`[scheduler] prophecies due: ${due.length}`);
+  if (due.length) console.log(`[scheduler] prophecies due: ${due.length} (pushed ${pushed.size})`);
   return due.length;
 }
 

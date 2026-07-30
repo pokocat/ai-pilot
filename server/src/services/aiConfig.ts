@@ -45,6 +45,10 @@ export interface ResolvedAiConfig {
   // 端点池选中的 AiModel.id（services/llmPool）。未启用池时为 undefined。
   // 有值时闸门按「每端点」独立计并发与冷却，一个端点被限流不连累其它端点。
   endpointId?: string;
+  // 仅供 LlmTrace 归因，不参与并发车道/路由。single 模式下记录 activeModelId；
+  // pool 模式下 services/llmPool 会用本次候选覆盖成实际命中的端点。
+  traceEndpointId?: string;
+  traceEndpointLabel?: string;
   // 辅助抽取等已显式选择独立模型/账号的调用不得再被主端点池覆盖。
   poolBypass?: boolean;
 }
@@ -215,6 +219,8 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
         rerankBaseUrl: row.rerankBaseUrl || '',
         rerankApiKey: decryptSecretSafe(row.rerankApiKey),
         keyDecryptFailed: decryptFailed(row.apiKey),
+        traceEndpointId: row.activeModelId ?? undefined,
+        traceEndpointLabel: row.label || undefined,
       };
       // 破「零报错、零 trace」的静默：对话 key 密文解不开时明确记 error 级日志，供告警。
       if (cfg.keyDecryptFailed) {
@@ -271,6 +277,9 @@ export function resolveAuxConfig(main: ResolvedAiConfig): ResolvedAiConfig {
       : 0,
     lane: separateAccount ? 'aux' : 'main',
     poolBypass: true,
+    // 独立辅助档不是全局 activeModelId 对应的接入点，不能把主端点误记到 trace。
+    traceEndpointId: separateAccount ? undefined : main.traceEndpointId,
+    traceEndpointLabel: separateAccount ? `${main.label} · aux(${model})` : main.traceEndpointLabel,
     // key 换过就不能沿用主档的解密失败标记（否则主 key 坏了会连累辅助档全线短路）。
     keyDecryptFailed: apiKey ? false : main.keyDecryptFailed,
   };

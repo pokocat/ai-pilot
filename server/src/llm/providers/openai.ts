@@ -11,8 +11,9 @@ import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js'
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。见 services/llmGate.ts 顶部说明。
 import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
-import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable } from '../../services/llmPool.js';
+import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt } from '../../services/llmPool.js';
 import { maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
+import { deliverableTimeoutMs } from '../providerTimeouts.js';
 
 interface OAToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
 // 多模态内容片段（OpenAI vision 协议）：文本或 data URL 图片。
@@ -47,15 +48,11 @@ interface OAStreamChunk {
 }
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
-// 结构化成果通常比普通问答更慢，尤其是强制 tool calling 的兼容网关。
-// 保留 OPENAI_TIMEOUT_MS 作为全局下限；成果请求至少允许两分钟完成。
-const DELIVERABLE_TIMEOUT_MS = 120_000;
-
 type RequestPhase = 'chat_completion' | 'deliverable' | 'chat_stream';
 
 function requestTimeoutMs(cfg: ResolvedAiConfig, phase: RequestPhase): number {
   return phase === 'deliverable'
-    ? Math.max(cfg.timeoutMs, DELIVERABLE_TIMEOUT_MS)
+    ? deliverableTimeoutMs(cfg.timeoutMs)
     : cfg.timeoutMs;
 }
 
@@ -227,6 +224,7 @@ async function callChatStream(
     const slot = await acquireLlmSlot(lane);
     let handedOff = false;
     try {
+      noteEndpointAttempt(ep);
       const res = await fetch(`${base}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },

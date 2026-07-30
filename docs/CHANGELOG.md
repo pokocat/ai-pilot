@@ -6,6 +6,70 @@
 
 ## 变更日志
 
+### 2026-07-30 · 测试期 mock 支付（`PAY_MOCK_SUCCESS`）：没有商户凭据也把**真实支付管线整条跑通** · 影响面：server（`services/wechatPay.ts` / `services/sandbox.ts` 注释 / `services/metrics.ts` / `routes/{pay,plans,sku,admin}.ts` + 新增 `test/payMockSuccess.test.ts`）+ shared（下单/订单契约加 `mock` 标记 + `PayMockPayResult`）+ admin（`views/revenue.tsx` mock 徽章与营收口径）+ app（`services/pay.ts` 统一 `payOrder` + 4 个支付触点 + PaySheet/Plans/credits/thinktank）+ docs（`AGENTS.md` §6 支付段、`DEPLOYMENT.md` §5、`.env.example`）
+
+**动因**：生产一直没有微信支付商户凭据，回落路径 `/plans/:id/purchase`（演示发放）**整条绕过支付管线**——不建 PaymentOrder、不走 `markPaidAndApply`、不发到账通知。结果是订单状态机、幂等锁、条款快照、权益发放、到账订阅消息这一大片代码**在真实环境里从未被执行过**（同日刚修的 payment 模板字段键就是例证：错了半个月无人发现，因为那条路根本没跑过）。
+
+**做法**：新开关 `PAY_MOCK_SUCCESS=true`，与演示发放正好相反——**只把「调微信」那两步换成本地模拟，其余全走真实代码**。下单仍走既有 `createJsapiOrder`（条款快照 `snapshotJson`、金额、归因 `parseAttribution`、下单频控、关同类旧单一个不跳），只是不请求微信 JSAPI、`pay` 返回占位值并带 `mock:true`；到账由新端点 `POST /pay/mock/pay` 触发**真实的** `markPaidAndApply`（advisory lock + `appliedAt` 终态锚点 + `ActivationEvent` + 到账订阅消息），`source='wechat_pay_mock'`。
+
+**「将来零改动替换」写进了开关本身**：`payMockSuccessEnabled() = PAY_MOCK_SUCCESS==='true' && !payConfigured()`——真凭据一配齐 mock 自动让位，不需要记得去删 env，也不存在「配了真支付却还能白拿套餐」的窗口。函数放在 `wechatPay.ts` 而非 `sandbox.ts`：`payConfigured` 住在前者，放后者会成环（`wechatPay → sandbox → wechatPay`），`sandbox.ts` 头部留指路注释 + 四套「白拿通道」对照表（① 本地 mock 微信网关 ② `PAY_SANDBOX` 仿真回调 ③ `demoPurchase` 演示发放 ④ 本次）。
+
+**三道闸**（`/pay/mock/pay`）：开关（含真凭据让位，在任何库查询之前）→ 订单归属（他人单 404，与 `/pay/orders/:no` 同口径不区分「不存在/不是你的」）→ **只认 mock 单**（真实微信单一律 409 `ORDER_NOT_MOCK`，绝不能被这条端点「模拟」成已付款）。金额自校验复用真实回调那段防串单逻辑。每笔落审计 `pay.mock.paid`（单号/金额/套餐或 SKU）。
+
+**mock 单不污染真实链路**（逐处处理）：标记锚在**下单时写死的** `snapshotJson.mock=true` + `provider='mock'` + `transactionId=mock<纯数字>`（`isMockOrder` 优先读快照 flag，故关掉开关乃至配齐真凭据后历史单仍可正确识别）。① 对账 sweep 与 `reconcileOrder` 跳过且**不标 failed**；② 关陈旧单走本地置 closed，不调微信（测试用 fetch 桩断言全程零出站）；③ 退款跳过微信接口但**本地权益回收照常**（套餐立即到期 + 追回未消耗算力 + 停模块），`wechatStatus='MOCK'`；④ **营收不含 mock**——`notePayApplied`/`notePayRefund` 对 mock 单不计，改计 `junshi_pay_mock_total`；`/admin/payments` 的 `paidAmount`/`paidCount`/`byDay` 与卡单 gauge 全部加 `provider='wechat'` 过滤（否则 mock created 单永不被 sweep 关单 → 只涨不落的假告警）。订单列表/CSV 仍可见并显式标「模拟单」，运营端退款弹窗改口径为「撤销模拟支付并回收权益」。
+
+`transactionId` 形状是 `mock` + 13 位时间戳 + 6 位随机数字，正则 `^mock\d+$` 收得很紧——本地 mock 微信网关给**真实路径**订单发的是 `mocktx_*`，用 `startsWith('mock')` 会把真单误判成模拟单从而跳过真退款（实测在 `wechatPayMockFlow` 退款用例上踩到）。数字为主也是为了到账模板 `number6` 位（微信 number 类型只认纯数字，发送侧抽数字后仍能对回订单）。
+
+**小程序端**：新增统一 `services/pay.ts › payOrder({outTradeNo, pay, mock})`，4 个支付触点各改一行；mock 时跳过 `wx.requestPayment` 直接调 mock 端点，复用既有 `awaitPaymentApplied` 轮询。到账提示明确写「模拟支付已到账（测试期，未实际付款）」——**不伪装成真实支付成功**，避免用户以为自己付了钱。
+
+**顺手修注释**：`demoPurchaseEnabled()` 原注释称「生产恒 false」，但代码只判 `NODE_ENV==='test' || ALLOW_DEMO_PURCHASE==='true'`，并不排除 production。按「不收紧只改注释」处理（收紧会打断在用的演示环境），写清真实语义与生产真正的防线。
+
+⚠️ **启用即任何登录用户可自助领取任意付费套餐/SKU**，仅测试期使用；测试期收口时移除该 env，`snapshotJson.mock` 标记可用于把测试期订单从账目里干净摘出。已知限制：下单仍要求 openid（纯短信注册账号测不了，改动点是路由的 `OPENID_REQUIRED`）、H5 仍被 `ensurePayableEnv()` 拦在下单前（「继续支付」路径已按 `o.mock` 放行）。
+
+**测试**：新增 `payMockSuccessEnabled` 全链路 16 例（下单→模拟付款→权益/到期日/算力真落地 + 到账订阅消息真发；重复付款只发一次；**`payConfigured()` 为真时一律拒绝**；env 未设时拒绝；他人订单 404；真实单 409；sweep 跳过不标 failed；关单/退款零出站 + 权益被回收）。server `npm test` **1080 例全绿**、tsc 0 错；app tsc 0 错 + 33 例绿；admin `lint:ui` + `tsc -b` 0 错。
+
+### 2026-07-30 · 老板页年度谶语并入账户服务卡（去掉夹在档案组里的独立白卡）· 影响面：app（`pages/profile/index.tsx` / `index.scss`）+ docs（CHANGELOG、RETENTION_MECHANISMS #16）
+
+用户反馈：「谶语和上面个人信息栏能不能整合到一起，这块空间排版有点乱。」原谶语卡夹在「档案」组标题与菜单之间，上下都是卡、自成一张白面，视觉上像掉队的一块，且 19px 竖排七言独占约 290px 高度，把段位卡和菜单全顶到折叠线以下。
+
+- **有谶态**：谶语落到深色账户服务卡尾部的**题字带**（`.verse-band`）——一条 `rgba(255,255,255,.16)` 发丝线收口，带子与卡内各行同宽同边距。头行左「年 度 谶 语」右「丙午年 · 军师赠」，中间一句一行居中排成一副对子（16px 宋体，烫金沿用卡内既有的 `#F4D99E`，与 member-pill / 邀请码同色，不新造颜色；`letter-spacing` 末尾多出的一个字宽用等量 `padding-left` 补回中线），末行点谶足迹「已点谶 N 次 · 最近：…」，无点谶记录时落「岁末逐句对账」。原竖排改横排：竖排七言在卡内要占 160px+ 且只能靠边栏摆，会让权益格/服务格/落款各自一个右边界。
+- **无谶态**：同一条带子里一行「年度谶语 · 你还没有今年的谶 / 去命盘领一句 ›」，不另起虚线盒子（卡内已有两排盒子，第三个盒子只会更碎）。
+- **一卡一套对齐**（第一版侧栏方案的返工原因）：先试过把竖排谶语挂在资料区右侧分栏，实测卡内出现两套右边界——权益格停在竖线、服务动作却通到卡边，落款又悬在左侧空档上，「不对齐 / 有的挤有的空」。改成全宽题字带后卡内只剩一套左右边界。
+- **净效果**：我的页首屏少一张卡、约省 190px；战略段位卡与「档案」菜单组回到首屏可见。命理开关关闭时整块不渲染（gating 不变），谶语数据链路与文案口径未动；`verseColumns` 随之更名 `verseLines`（一句一行，仍最多 4 行、>8 字按 7 字再断）。
+
+### 2026-07-30 · 年度谶语升级为「周期陪伴」（点谶/半验/岁验锚点/换谶归档）+ 预言到期订阅消息推送（#1 补上缺失的推送半截）+ **修订阅消息模板字段键（review/payment 两个模板全错，推送全线静默失效）** · 影响面：server（`services/strategicProfile.ts` / `services/scheduler.ts` / `services/wechatSubscribe.ts` / `services/reminders.ts` / `services/reviewLog.ts` / `services/prophecyLog.ts` / `routes/casefiles.ts` / `data/prompts/strat.v6.md` §4.4 + 新增 `test/verseCompanion.test.ts`、`test/prophecyLog.test.ts` 与 `test/wechatMessage.test.ts` 追加）+ shared（`contracts.d.ts` 加 `VerseMoment`/`verseAt`/`verseMoments`，并从可写 Patch 集合 Omit）+ app（老板页谶语卡点谶足迹 + mock）+ docs（AGENTS §services、RETENTION_MECHANISMS #1/#16）
+
+**谶语从「挂一年的一句话」升级为「军师全年主动把真实事件对到谶上的一条线」**（产品意图：贯穿周期的陪伴，军师睿智的体现）：
+
+- **点谶**：`maybeMarkVerseMoment` 在 认可方案（`/casefile/accept`）、复盘落账（`recordReview`——`/casefile/review` 与聊天复盘意图两条路都汇到这）、预言应验（`verifyProphecy` hit 分支）三处 fire-safe 触发；LLM 严判「这件真事与谶中某半句**真切相应**」（含糊/牵强/气氛相近一律不算——点谶的分量全在真切，不能把谶语做成星座运势），命中才落 `extraJson.verseMoments[]`（`{at, clause:1|2, note≤40字}`，年上限 12、同日同来源去重）。全部短路条件（无当年谶/命理关/已满/当日已点/空复盘）都在调模型之前判完；判定期间档案可能被并发写过 → 落库前重读复查守卫，防整块 extraJson 回压。测试注入确定性判官（`judge?` 参数），生产走 `llmJson`。
+- **注入块周期上下文**：谶语行升级为「N月获谶 + 已点谶 K 次 + 最近一次（M月：note）」+ 点谶行为指引（引原句半联+一句白话，一次对话至多一次，对不上不硬圆、平时不提）；获谶满 6 个整月且后半句尚无点谶时追加**半验**提示（复盘带出「谶语过半，前半句已有眉目」）。跨年未换谶时只报句子——去年的点谶不当今年的账。增量约 120 字。
+- **岁验锚点**：谶语盖章/换句成功即幂等登记一条岁验预言——`ProphecyLog` 无 kind 列，用 `basis='年度谶语·岁验·<谶年>'` 约定值承载，`(userId, basis)` 兼作幂等键（同年升级只 update 文本，跨年才新建）；到期 = min(获谶+1年, 次年 2-04 立春)。到期后自动骑 `prophecy-due-scan`。
+- **换谶归档 `verseHistory[]`**：任何真正换句/换谶年的写入都先把旧谶连同它的点谶推进归档（上限 10）——岁验对的是「去年那句」，跨年 auto 兜底谶一落库旧谶就没了，不归档等于把去年的账烧掉。manual 复写原句（老板点保存）不算换谶：不清点谶、不重记 `verseAt`。存量谶下次盖章补记 `verseAt`。
+- **prompt**：`strat.v6.md` §4.4 补封面 motto 落位铁律（A 级/交底报告封面 motto 固定写谶语本句，语录放正文）——提高认可时模型谶的捕获命中率。
+- **app**：老板页谶语卡尾部一行点谶足迹（已点谶 N 次 · 最近一句白话；无 moments 不渲染）。
+
+**预言到期推送（#1 的缺失半截）**：`scanDueProphecies` 此前只记审计 + 标 `dueNotifiedAt`，用户手机上毫无动静——全体系最强回访事件（预言到期）静默漏掉。补上订阅消息推送：借 review 场景模板（与 reminders.ts 同口径，不新增 scene），同轮同用户至多一条（多条同日到期只打扰一次），岁验预言（basis 前缀识别）用专属措辞「岁验之日·一年前那句话」+ 谶语整句作备注（恰 15 字 ≤ 模板 20 字上限）；best-effort——推送失败/无额度不阻断 `dueNotifiedAt` 锚点，对账候选照常进复盘。公众号模板消息方案经决策**不做**，只走小程序订阅消息。
+
+**同日修复：三个订阅消息模板里两个的字段键全错，对应推送在生产恒 47003 拒发（用户一条也没收到过）。** 对着微信后台三个模板的「详细内容」逐字核对后发现：
+
+- **review（26922「最新分析报告提醒」）曾全错**：模板要 `thing2`(报告类型)/`thing3`(报告名称)/`thing5`(备注)/`time6`(生成时间)，代码发的是 `thing1`/`time2`/`thing3` → 早间军令、每日复盘、周复盘、久不复盘召回、以及本次新接的预言到期/岁验推送**全部静默失效**。已改为真实键，并补一个「报告类型」位（新增 `category` 参数：复盘提醒/军令提醒/周复盘/预言对账/岁验），否则该位只能重复标题。
+- **payment（29967「套餐购买成功通知」）曾全错且缺位**：模板要 `thing1`(类型)/`amount2`(金额)/`thing3`(用户)/`time5`(时间)/`number6`(订单号)，代码发的 `phrase2`/`time3`/`thing4` 三个键**模板里根本不存在**，还缺金额/用户/订单号三个位 → 支付到账通知同样恒 47003（用户付了钱收不到确认，会以为没买成）。已补全：金额走 `amount2` 金额型（`¥6888.00`，币种符号 + 两位小数）、用户位取账户昵称（发送侧本来就要查用户，顺带取 `name`）、订单号走 `number6` **数字型（纯数字 ≤32 位）**——我们的商户单号形如 `js{时间戳}{hex}` 带字母，发上去必被拒，故优先发微信自己的 `transactionId`（全数字，也正是用户在微信账单里看到的那个号），回调未回填时退化为商户单号抽数字。
+- **report（76218「报告生成通知」）本来就是对的**：`thing1/phrase2/time3/thing4` 与历史写法恰好一致——三条里唯一一直正常的，未改。
+
+根因是这类失败**只落 `WechatNotificationLog`、线上无人翻**，键错了看起来和"用户没授权"一模一样。`wechatMessage.test.ts` 新增一例按 scene 钉死三个模板的键集与各位语义（含带字母单号必须抽成纯数字），文档也补了「改字段键前必读」的警示——这类漂移只有断言拦得住。
+
+**测试**：新增 `verseCompanion.test.ts` 16 例（换谶归档三条路/点谶短路与去重/注入行/omen 幂等/契约字段）+ `prophecyLog.test.ts` 追加到期推送 1 例（额度扣减/岁验措辞/同轮去重/重扫零网络）；server `npm test` **1053 例全绿**、tsc 0 错；app 33 例全绿 + tsc 0 错。
+
+### 2026-07-30 · 报告等待上限提高到 5 分钟，调用诊断记录实际命中端点/model · 影响面：shared 诊断契约 + server（provider 超时、端点命中捕获、trace 落库）+ Prisma 纯加法字段 + admin 调用诊断 + tests + docs
+
+生产报告失败集中暴露了两个独立问题：结构化报告虽然已经异步生成、用户可以退出后再回来，但 provider 仍沿用最低 120 秒等待，长报告会被本服务提前取消；同时 `LlmTrace.model` 过去写的是调用开始前的全局配置，端点池成功记录无法回答「最终究竟命中了哪个端点和模型」。
+
+本次将强制结构化成果（含工具循环终结轮）的上游等待下限从 **120 秒提高到 300 秒**，OpenAI/Claude 两条协议统一复用 `deliverableTimeoutMs()`；配置本来高于 300 秒时仍尊重更高值。**普通对话的超时、转移判定和故障转移体验完全不动**，不把报告的异步容忍度扩散到即时对话。
+
+端点追踪由 `llmPool` 在当前异步调用上下文记录每次真实尝试，gateway 在成功时写最终命中的 `provider/model/endpointId/endpointLabel`，全链路失败时写最后一次实际尝试；single 模式写当前激活模型快照，智能体自定义 OpenAI 端点标为「`<agentKey> 自定义端点`」。`LlmTrace` 新增 nullable `endpointId/endpointLabel`（纯加法），后台「调用诊断」列表与详情同时展示；老记录字段为空时保持兼容。部署需沿用既有流程先执行 `prisma db push` 再重启 API。
+
+验证：Prisma format/generate 与本地测试库 `db push` 通过；server/admin 正式构建通过，app TypeScript 检查通过；端点命中、超时下限、trace API/自定义端点及 provider 超时定向测试 **43/43** 通过；server 全量测试 **1036/1036** 通过；admin `lint:ui` 通过。
+
 ### 2026-07-29 · 海报「AI 排版引擎」（第 3 档）：模型自己写整张海报的 HTML/CSS + 量测 refine 闭环 + 模板回落 · 影响面：shared 契约（`AdminCreativeConfig.layoutEngine`、`AdminCreativeJobItem.layoutEngine/rounds/aiEngineError`）+ server（`llm/gateway.completeText`、providers `maxTokens`、`services/reportPdf` 渲染加固、`services/creative/{canvasEngine,canvasSanitize,canvasMeasure,manifesto,renderer,worker,philosophy,config}`、`services/metrics`、`routes/admin`）+ tests（新增 `test/creativeCanvas.test.ts` 45 例 + `test/fixtures/posterBriefs.ts`）+ docs
 
 动因是真机实测那张图很差，且**根因不在"观测缺口"而在画质本身**：给图片模型的只有一句 ≤80 字的 `visualPrompt`，palette / 构图 / 材质全没传（于是墨绿页头压一块大红照片），「留出负空间供排版」被画成了三个空的粉色占位卡片；LLM 算出的六维度视觉哲学模板只消费 `palette + movement`，设计思考全被丢掉。而上游 `canvas-design` 根本不用图片模型——**哲学长文 → 模型用代码在画布上创作 → 强制二次打磨**。本笔把那三步做成自动化等价物。

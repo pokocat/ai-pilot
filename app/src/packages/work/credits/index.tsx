@@ -7,7 +7,7 @@ import AsyncState from '../../../components/AsyncState';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type MyCreditItem, type PayOrderListItem } from '../../../services/api';
-import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, requestWechatPayment } from '../../../services/pay';
+import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, payOrder } from '../../../services/pay';
 import './index.scss';
 
 // 支付订单状态 → 用户可读标签（refunded/failed 走 danger 色）。
@@ -42,14 +42,15 @@ export default function Credits() {
   // 继续支付（P1）：对未过支付时限的待支付单重签调起参数 → 到账确认与四个支付触点同口径。
   const repay = async (o: PayOrderListItem) => {
     if (repaying) return;
-    if (!ensurePayableEnv()) return;
+    // 测试期模拟支付单不需要 wx.requestPayment，所以也不受「必须在小程序内」的环境限制。
+    if (!o.mock && !ensurePayableEnv()) return;
     setRepaying(o.outTradeNo);
     try {
       const r = await api.orderPayParams(o.outTradeNo);
-      await requestWechatPayment(r.pay);
+      const mocked = await payOrder({ outTradeNo: o.outTradeNo, pay: r.pay, mock: r.mock });
       const applied = await awaitPaymentApplied(o.outTradeNo);
       await store.loadMe().catch(() => {});
-      Taro.showToast(payAppliedToast(applied, '支付成功，权益已更新'));
+      Taro.showToast(payAppliedToast(applied, '支付成功，权益已更新', { mock: mocked }));
       load();
     } catch (e: any) {
       if (e?.errMsg && /cancel/i.test(e.errMsg)) Taro.showToast({ title: '已取消支付', icon: 'none' });
@@ -121,15 +122,16 @@ export default function Credits() {
                 <View key={o.outTradeNo} className="cd-row">
                   <View className="cd-rl">
                     <Text className="cd-rt">{o.itemName}</Text>
+                    {/* 测试期模拟支付单必须如实标注：不能让用户以为这笔真的付过钱 */}
                     <Text className="cd-rat">
-                      {ORDER_STATUS_LABEL[o.status] ?? o.status} · {fmtAt(o.paidAt ?? o.createdAt)} · 单号 …{o.outTradeNo.slice(-6)}
+                      {ORDER_STATUS_LABEL[o.status] ?? o.status}{o.mock ? ' · 测试期模拟支付' : ''} · {fmtAt(o.paidAt ?? o.createdAt)} · 单号 …{o.outTradeNo.slice(-6)}
                     </Text>
                   </View>
                   <View className="cd-ord-r">
                     <Text className={`cd-rd serif ${o.status === 'refunded' || o.status === 'failed' ? 'neg' : 'pos'}`}>¥{(o.amount / 100).toFixed(2)}</Text>
                     {o.payable && (
                       <View className="cd-repay" style={{ background: accent }} onClick={() => repay(o)}>
-                        <Text>{repaying === o.outTradeNo ? '拉起中…' : '继续支付'}</Text>
+                        <Text>{repaying === o.outTradeNo ? '拉起中…' : o.mock ? '模拟支付' : '继续支付'}</Text>
                       </View>
                     )}
                   </View>

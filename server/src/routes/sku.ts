@@ -3,7 +3,7 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
-import { payConfigured, createJsapiOrder } from '../services/wechatPay.js';
+import { payConfigured, createJsapiOrder, payMockSuccessEnabled } from '../services/wechatPay.js';
 import { sandboxEnabled } from '../services/sandbox.js';
 import { parseAttribution } from '../services/activation.js';
 import type { SkuView, SkuOrderResult } from '../../../shared/contracts';
@@ -23,7 +23,10 @@ export async function skuRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const sku = await prisma.sku.findUnique({ where: { key: req.params.key } });
     if (!sku || !sku.enabled) return reply.code(404).send({ error: '商品不存在', code: 'SKU_NOT_FOUND' });
-    if (!payConfigured() && !sandboxEnabled()) return reply.code(501).send({ error: '微信支付未配置', code: 'PAYMENT_NOT_CONFIGURED' });
+    // PAY_MOCK_SUCCESS 一并放行（与 /plans/:id/order 同口径）：真实建单，只把「调微信」换成 /pay/mock/pay。
+    if (!payConfigured() && !sandboxEnabled() && !payMockSuccessEnabled()) {
+      return reply.code(501).send({ error: '微信支付未配置', code: 'PAYMENT_NOT_CONFIGURED' });
+    }
     if (sku.priceFen <= 0) return reply.code(400).send({ error: '免费商品无需支付', code: 'SKU_FREE' });
     const openid = (req.body?.openid || (user as { wechatOpenId?: string | null }).wechatOpenId || '').trim();
     if (!openid) return reply.code(400).send({ error: '缺少支付用户 openid', code: 'OPENID_REQUIRED' });
@@ -31,7 +34,7 @@ export async function skuRoutes(app: FastifyInstance) {
     const attribution = parseAttribution(req.body?.source, req.body?.refId);
     try {
       const r = await createJsapiOrder({ user, sku: { key: sku.key, name: sku.name, priceFen: sku.priceFen }, openid, attribution });
-      return { orderId: r.outTradeNo, payParams: r.pay };
+      return { orderId: r.outTradeNo, payParams: r.pay, ...(r.mock ? { mock: true as const } : {}) };
     } catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
       return reply.code(err.statusCode ?? 502).send({ error: err.message ?? '下单失败', code: err.code ?? 'WECHAT_PAY_CREATE_FAILED' });

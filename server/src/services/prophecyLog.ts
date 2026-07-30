@@ -102,6 +102,17 @@ export async function verifyProphecy(args: {
     where: { id: row.id },
     data: { status: args.outcome, verifiedAt: new Date(), verifyNote: (args.note ?? '').trim().slice(0, 500) },
   });
+  // 谶语周期陪伴：预言应验是最硬的「事实对上了」——试着把它也对到当年谶的某半句上（命中才落点谶）。
+  // 只在 hit 时点（未命中按「人谋可以改命」口径讲，不该去应谶）；void + fire-safe，不拖慢对账返回。
+  // 用动态 import：strategicProfile 反过来静态依赖本文件（谶语盖章要登记岁验预言），静态互引会成环。
+  if (args.outcome === 'hit') {
+    void import('./strategicProfile.js').then((m) => m.maybeMarkVerseMoment({
+      tenantId: updated.tenantId,
+      userId: args.userId,
+      source: 'prophecy',
+      eventText: [`预言应验：${updated.prophecy}`, updated.verifyNote ? `事实：${updated.verifyNote}` : ''].filter(Boolean).join('\n'),
+    })).catch(() => {});
+  }
   return toView(updated);
 }
 

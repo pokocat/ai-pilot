@@ -66,6 +66,8 @@ test('调用诊断返回来源用户、租户与智能体可读名称', async ()
       kind: 'deliverable',
       provider: 'mock',
       model: 'mock',
+      endpointId: 'endpoint-source-test',
+      endpointLabel: '来源端点',
       status: 'ok',
       latencyMs: 12,
       totalTokens: 20,
@@ -82,6 +84,9 @@ test('调用诊断返回来源用户、租户与智能体可读名称', async ()
   assert.equal(typeof item?.agentName, 'string');
   assert.notEqual(item?.agentName, 'general');
   assert.equal(item?.sessionId, 'session-source-test');
+  assert.equal(item?.endpointId, 'endpoint-source-test');
+  assert.equal(item?.endpointLabel, '来源端点');
+  assert.equal(item?.model, 'mock');
 });
 
 test('审计默认排除历史 /api/metrics 抓取，显式开启时仍可查看', async () => {

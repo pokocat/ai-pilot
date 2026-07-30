@@ -98,6 +98,13 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.kind, 'chat');
     assert.equal(r.body.reply.text, '机构级判断：先稳现金流，再谈增长。');
+    const trace = await prisma.llmTrace.findFirstOrThrow({
+      where: { userId: t, status: 'ok' },
+      orderBy: { createdAt: 'desc' },
+    });
+    assert.equal(trace.model, 'mock-model', 'trace 应记录实际请求 model');
+    assert.equal(trace.endpointId, null, 'per-agent 自定义接入没有全局 AiModel.id');
+    assert.equal(trace.endpointLabel, 'general 自定义端点', 'trace 应标明实际自定义端点，不能误记全局 activeModel');
   });
 
   test('/generate 普通聊天 → OpenAI 原生 stream 分段下发，输出不再走阻塞审核', async () => {

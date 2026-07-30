@@ -13,8 +13,9 @@ import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js'
 // 是因为 gateway 有 17 个动态 import 调用点，逐个包既漏又难维护。
 import { withLlmSlot, acquireLlmSlot, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移。未启用池时只有一个候选，行为与直接过闸完全一致。
-import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable } from '../../services/llmPool.js';
+import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt } from '../../services/llmPool.js';
 import { maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
+import { deliverableTimeoutMs } from '../providerTimeouts.js';
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
 type ClaudeRawRequest = Anthropic.MessageCreateParamsNonStreaming & { thinking?: ThinkingParam };
@@ -131,7 +132,7 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
     tools: [DELIVERABLE_TOOL],
     tool_choice: { type: 'tool', name: 'emit_deliverable' },
     messages: [...dlvHistory, { role: 'user', content: claudeUserContent(ctx.userMessage || `请为我产出一份${tpl?.title ?? '咨询成果'}。`, ctx.images) }],
-  }, { timeout: Math.max(ep.timeoutMs, 120_000) }), { affinityKey: affinityOf(ctx) });
+  }, { timeout: deliverableTimeoutMs(ep.timeoutMs) }), { affinityKey: affinityOf(ctx) });
   const usage = usageOf(res);
 
   const toolUse = res.content.find((c) => c.type === 'tool_use');
@@ -221,6 +222,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
     const slot = await acquireLlmSlot(lane);
     let yieldedAny = false;
     try {
+      noteEndpointAttempt(ep);
       // 流式调用也须设超时兜底：SDK 默认 600s，网关卡住会把这条流吊到 10 分钟。给足流式时长同时有界。
       const stream = getClient(ep.apiKey, ep.baseUrl).messages.stream({
         model: ep.model,
@@ -350,7 +352,7 @@ export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[], affinit
 
     const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create(
       { ...req, model: ep.model, ...thinkingRequestTuning(ep, { allowThinking: false }) },
-      { timeout: Math.max(ep.timeoutMs, 120_000) },
+      { timeout: opts.finalTool ? deliverableTimeoutMs(ep.timeoutMs) : Math.max(ep.timeoutMs, 120_000) },
     ), { affinityKey });
     const usage = usageOf(res);
     assertChatOutputComplete('Claude', res.stop_reason, usage.outputTokens);

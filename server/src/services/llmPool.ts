@@ -29,6 +29,7 @@
 // 上游配额本来就只能「撞了才知道」——429 整窗冷却已经在兜这一层。多实例部署时按实例数分摊配置即可。
 
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { prisma } from '../db.js';
 import { getRedis } from './redis.js';
 import { decryptSecretSafe } from './secretBox.js';
@@ -57,6 +58,39 @@ export interface PoolEndpoint {
 }
 
 interface PoolSettings { mode: 'single' | 'pool'; sticky: boolean }
+
+/** 本轮真实尝试的端点快照；由 gateway 落进 LlmTrace。 */
+export interface EndpointHit {
+  endpointId: string | null;
+  endpointLabel: string | null;
+  provider: string;
+  model: string;
+}
+export interface EndpointCapture { hit: EndpointHit | null }
+
+// 一次 gateway 调用可能穿过 provider → tool loop → withEndpoint 多层异步边界。
+// AsyncLocalStorage 只承载排障元数据，不参与路由决策；并发请求各自隔离。
+const endpointCaptureStore = new AsyncLocalStorage<EndpointCapture>();
+
+export function createEndpointCapture(): EndpointCapture {
+  return { hit: null };
+}
+
+export function runWithEndpointCapture<T>(capture: EndpointCapture, run: () => Promise<T>): Promise<T> {
+  return endpointCaptureStore.run(capture, run);
+}
+
+/** provider 手动管理候选（流式路径）时也调用；普通 withEndpoint 会自动调用。 */
+export function noteEndpointAttempt(cfg: ResolvedAiConfig): void {
+  const capture = endpointCaptureStore.getStore();
+  if (!capture) return;
+  capture.hit = {
+    endpointId: cfg.endpointId ?? cfg.traceEndpointId ?? null,
+    endpointLabel: cfg.traceEndpointLabel ?? cfg.label ?? null,
+    provider: cfg.provider,
+    model: cfg.model,
+  };
+}
 
 let cfgCache: { at: number; endpoints: PoolEndpoint[]; settings: PoolSettings } | null = null;
 /** 进程内冷却表（无 Redis 时的唯一来源；有 Redis 时作为读缓存）。 */
@@ -228,6 +262,8 @@ function toCfg(base: ResolvedAiConfig, e: PoolEndpoint): ResolvedAiConfig {
     thinkingMode: e.thinkingMode,
     thinkingBudget: e.thinkingBudget,
     keyDecryptFailed: false, // loadPool 已滤掉解不开 key 的端点
+    traceEndpointId: e.id,
+    traceEndpointLabel: e.label || undefined,
   };
 }
 
@@ -273,7 +309,10 @@ export async function withEndpoint<T>(
     const cfg = candidates[i];
     const lane = cfg.endpointId ? endpointLane(cls, cfg.endpointId) : cls;
     try {
-      return await withLlmSlot(() => fn(cfg), lane);
+      return await withLlmSlot(() => {
+        noteEndpointAttempt(cfg);
+        return fn(cfg);
+      }, lane);
     } catch (err) {
       lastErr = err;
       const last = i === maxAttempts - 1;

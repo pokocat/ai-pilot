@@ -5,6 +5,7 @@ import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
 import { dateKey, dayStart, weekStart } from './clock.js';
 import { activeCasefile, todayStr } from './casefile.js';
+import { maybeMarkVerseMoment } from './strategicProfile.js';
 
 // 复盘覆盖区间：day=当天；week=本周一→今天；month=当月 1 号→今天（quarter/year/team 暂按当天，随后续聚合）。
 // 日历日/周一一律按 Asia/Shanghai 派生（P1-4），不依赖进程 TZ。
@@ -19,6 +20,11 @@ function periodRange(layer: ReviewLayer, today: string): { date: string; from: s
 
 export const REVIEW_LAYERS = ['day', 'week', 'month', 'quarter', 'year', 'team'] as const;
 export type ReviewLayer = (typeof REVIEW_LAYERS)[number];
+
+// 复盘层的中文说法（点谶事件文本用；不进用户界面文案）。
+const LAYER_CN: Record<ReviewLayer, string> = {
+  day: '日复盘', week: '周复盘', month: '月复盘', quarter: '季度复盘', year: '年度复盘', team: '团队复盘',
+};
 
 export interface ReviewView {
   id: string;
@@ -46,10 +52,12 @@ export async function recordReview(args: {
 
   // 覆盖区间事实快照：军令完成/对齐 + CasefileMetric(线索/咨询/成交)求和（week/month=期聚合，修 A-4「月复盘 LLM 现编」）。
   let ordersTotal = 0, ordersDone = 0, alignedTotal = 0, leads = 0, consults = 0, deals = 0, hasBackfill = false;
+  let doneTexts: string[] = []; // 已完成军令原文（点谶的事件素材，不入库）
   if (cf) {
     const orders = await prisma.casefileOrder.findMany({ where: { casefileId: cf.id, date: { gte: from, lte: today } } });
     ordersTotal = orders.length;
     ordersDone = orders.filter((o) => o.done).length;
+    doneTexts = orders.filter((o) => o.done).map((o) => o.text.trim()).filter(Boolean);
     alignedTotal = orders.filter((o) => o.aligned === true).length;
     const metrics = await prisma.casefileMetric.findMany({ where: { casefileId: cf.id, date: { gte: from, lte: today } } });
     for (const m of metrics) { leads += m.leads; consults += m.consults; deals += m.deals; }
@@ -72,6 +80,19 @@ export async function recordReview(args: {
   });
   // WO-07：首次日复盘 → journey executing→reviewing（review.first；仅 day 层，重复触发幂等）
   if (layer === 'day') await import('./journey.js').then((m) => m.applyJourneyEvent(args.userId, args.tenantId, 'review.first')).catch(() => {});
+  // 谶语周期陪伴：复盘是全年最该「对谶」的时刻，也是复盘链路上唯一有真实内容文本的落点——
+  // recordReview 的事实快照（已完成军令原文 + 期内回填数字 + 老板自述）。执行页发起复盘与聊天里
+  // 的复盘意图都汇到这一处，无需两边各挂一次；「当日 + review 来源」在点谶侧天然只算一条。
+  // 只在真有事发生时才判（0 完成 + 无回填 + 无自述的空复盘没什么可对的，不值得调模型）。
+  if (ordersDone > 0 || hasBackfill || data.note) {
+    const eventText = [
+      `${LAYER_CN[layer]}（${date}）：军令 ${ordersDone}/${ordersTotal} 完成${alignRate !== null ? `，对齐率 ${alignRate}%` : ''}`,
+      doneTexts.length ? `已完成：${doneTexts.slice(0, 8).join('；')}` : '',
+      hasBackfill ? `经营数据：线索 ${leads} · 咨询 ${consults} · 成交 ${deals}` : '',
+      data.note ? `老板自述：${data.note}` : '',
+    ].filter(Boolean).join('\n');
+    void maybeMarkVerseMoment({ tenantId: args.tenantId, userId: args.userId, source: 'review', eventText });
+  }
   // D-3-3：月复盘落库成功 → 健康度估测挂钩（每月幂等一次；动态 import 断开与 health.ts 的静态环）。
   // fire-and-forget：估测不阻塞月复盘返回，失败也不影响本次复盘落库。
   if (layer === 'month') void import('./health.js').then((m) => m.maybeEstimateMonthlyHealth(args.userId, args.tenantId)).catch(() => {});

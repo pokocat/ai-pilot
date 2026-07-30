@@ -273,6 +273,16 @@ export function notePayRefund(amountFen: number): void {
   if (amountFen > 0) payRefundAmount.inc({}, amountFen / 100);
 }
 
+// PAY_MOCK_SUCCESS（测试期模拟支付）自成一条计数器，**故意不带金额**：这些单没有真实资金，
+// 混进 junshi_pay_amount_cny_total 就等于往营收看板里灌假钱。但量还是要能看见（测试期用了多少次、
+// 撤了多少次），否则没人知道生产上还开着这个开关。
+const payMockEvents = new LabeledCounter(
+  'junshi_pay_mock_total',
+  '模拟支付事件数（PAY_MOCK_SUCCESS；event=created|applied|refunded）。>0 即说明该环境仍开着测试期模拟支付',
+  10,
+);
+export function notePayMock(event: 'created' | 'applied' | 'refunded'): void { payMockEvents.inc({ event }); }
+
 // 告警转发（Alertmanager → 飞书）自身的成败——通知链路哑了也得有人知道。
 const alertForwards = new LabeledCounter('junshi_alerts_forwarded_total', '告警转发次数（outcome=sent|failed|not_configured）');
 export function noteAlertForward(outcome: string): void { alertForwards.inc({ outcome }); }
@@ -288,9 +298,11 @@ let stuckCache = { at: 0, paidUnapplied: 0, createdStale: 0 };
 async function stuckOrders(): Promise<{ paidUnapplied: number; createdStale: number }> {
   const now = Date.now();
   if (now - stuckCache.at < 60_000) return stuckCache;
+  // 只统计真实微信单（provider='wechat'）：沙箱单与 PAY_MOCK_SUCCESS 模拟单既不是资损、
+  // 也不会被对账 sweep 关单（sweep 同样只扫 wechat），计进来就是一条只涨不落的假告警。
   const [paidUnapplied, createdStale] = await Promise.all([
-    prisma.paymentOrder.count({ where: { status: 'paid', appliedAt: null } }),
-    prisma.paymentOrder.count({ where: { status: 'created', createdAt: { lt: new Date(now - 15 * 60_000) } } }),
+    prisma.paymentOrder.count({ where: { provider: 'wechat', status: 'paid', appliedAt: null } }),
+    prisma.paymentOrder.count({ where: { provider: 'wechat', status: 'created', createdAt: { lt: new Date(now - 15 * 60_000) } } }),
   ]);
   stuckCache = { at: now, paidUnapplied, createdStale };
   return stuckCache;
@@ -456,6 +468,7 @@ export async function renderMetrics(): Promise<string> {
   payAmount.renderInto(ms);
   payRefunds.renderInto(ms);
   payRefundAmount.renderInto(ms);
+  payMockEvents.renderInto(ms);
   push(metric('junshi_pay_sweep_runs_total', '支付对账 sweep 累计轮数', 'counter'))
     .samples.push(fmt('junshi_pay_sweep_runs_total', paySweep.runs));
   const sweepLast = push(metric('junshi_pay_sweep_last', '上一轮对账 sweep 结果（result=scanned|applied|failed|closed）', 'gauge'));
@@ -567,7 +580,7 @@ export function __resetMetrics(): void {
   genDegraded.reset(); outputTruncated.reset();
   registrations.reset(); moderationChecks.reset(); creditsFlow.reset(); knownCreditReasons.clear(); planGateBlocked.reset();
   creativeJobs.reset(); creativeFailures.reset(); creativeEngines.reset();
-  payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset();
+  payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset(); payMockEvents.reset();
   alertForwards.reset();
   paySweep = { scanned: 0, applied: 0, failed: 0, closed: 0, runs: 0 };
   stuckCache = { at: 0, paidUnapplied: 0, createdStale: 0 };

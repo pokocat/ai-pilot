@@ -18,7 +18,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { applyPlanPurchase, applySkuGrant } from './purchase.js';
 import { parseAttribution, recordActivation } from './activation.js';
-import { notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep } from './metrics.js';
+import { notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep, notePayMock } from './metrics.js';
 import { sandboxEnabled } from './sandbox.js';
 import { chargeCredits } from './credits.js';
 import { sendWechatSubscribeMessage } from './wechatSubscribe.js';
@@ -45,6 +45,64 @@ function cfg() {
 export function payConfigured(): boolean {
   const c = cfg();
   return !!(c.appId && c.mchId && c.apiV3Key && c.certSerial && c.privateKey && c.notifyUrl);
+}
+
+/**
+ * PAY_MOCK_SUCCESS：**没有微信支付商户凭据时，也把真实支付管线整条跑通**。
+ *
+ * 与 demoPurchaseEnabled()（/plans/:id/purchase 演示发放）的根本区别：演示发放整条**绕过**支付管线
+ * ——不建 PaymentOrder、不走 markPaidAndApply、不发到账通知，所以订单状态机 / 幂等 / 权益发放 /
+ * 到账订阅消息在真实环境里从未被执行过。本开关反过来：下单走既有 createJsapiOrder（条款快照、
+ * 金额、归因、下单频控、关同类旧单一个不跳），到账走**真实的** markPaidAndApply（advisory lock +
+ * appliedAt 终态锚点 + ActivationEvent + 订阅消息）；唯一的差别是「调微信」那两步换成本地模拟
+ * （下单不请求 JSAPI，付款由 POST /pay/mock/pay 触发）。
+ *
+ * 「将来零改动替换」的实现方式就是下面这个 `!payConfigured()`：**真凭据一配齐，mock 自动让位**。
+ * 不需要记得去删 PAY_MOCK_SUCCESS，也不存在「配了真支付却还能白拿套餐」的窗口。
+ *
+ * ⚠️ **允许在生产启用**（产品测试期的显式决定，故 assertSandboxSafe() 不拦它）。代价必须说清：
+ * 开启即等于**任何登录用户都可以自助领取任意付费套餐 / SKU**（下单→点一下模拟支付→权益到账），
+ * 仅测试期使用；这些单在库里带 snapshotJson.mock=true、provider='mock'、transactionId 以 `mock` 开头，
+ * 已从营收金额统计里排除，并在运营端订单列表显式标「mock」。
+ */
+export function payMockSuccessEnabled(): boolean {
+  return process.env.PAY_MOCK_SUCCESS === 'true' && !payConfigured();
+}
+
+/**
+ * 是否为 PAY_MOCK_SUCCESS 造出来的模拟单。判定锚在**下单时写死的快照 flag** 上（不是当前 env）：
+ * 关掉开关、乃至后来配齐真凭据之后，历史 mock 单仍然可被 sweep/退款/营收统计正确识别与追溯。
+ * transactionId 前缀 `mock` 只是给人看的第二重线索（快照缺失的极端情况下兜底）。
+ */
+export function isMockOrder(order: { snapshotJson?: unknown; transactionId?: string | null }): boolean {
+  const snap = (order.snapshotJson ?? null) as { mock?: boolean } | null;
+  if (snap?.mock === true) return true;
+  return MOCK_TXN_RE.test(order.transactionId ?? '');
+}
+
+// 模拟微信支付单号形状。**`mock` 后面必须紧跟纯数字、且不许有别的字符**：
+//   ① 到账订阅消息的 number6 位是微信 number 类型、只认纯数字，发送侧 digitsOnly 会把字母抽掉
+//      （见 services/wechatSubscribe.ts 顶部注释），所以造的是「mock + 时间戳 + 随机数字」，
+//      抽完仍是一串有意义、可对回订单的数字；
+//   ② 这个正则同时是 isMockOrder 的兜底判据，**必须收得足够紧**——本地 mock 微信网关
+//      （services/wechatPayMock.ts）给**真实路径**订单发的是 `mocktx_*`，用 startsWith('mock')
+//      会把那些真单误判成模拟单，从而跳过真退款（实测踩到：wechatPayMockFlow 的退款用例）。
+const MOCK_TXN_RE = /^mock\d+$/;
+
+/** 造一个「以数字为主」的模拟微信支付单号（mock + 13 位时间戳 + 6 位随机数字）。 */
+export function genMockTransactionId(): string {
+  return `mock${Date.now()}${String(Math.floor(Math.random() * 1e6)).padStart(6, '0')}`;
+}
+
+/** 模拟单的「调起参数」占位：端上看到 mock=true 就该跳过 wx.requestPayment，绝不会真用这些值。 */
+function mockPayParams(outTradeNo: string): CreateOrderResult['pay'] {
+  return {
+    timeStamp: Math.floor(Date.now() / 1000).toString(),
+    nonceStr: `paymock${outTradeNo.slice(-8)}`,
+    package: `prepay_id=paymock_${outTradeNo}`,
+    signType: 'RSA',
+    paySign: 'PAY_MOCK_NO_SIGN',
+  };
 }
 
 /** 商户订单号：时间 + 随机，控制在微信要求长度内（≤32）。 */
@@ -76,6 +134,8 @@ function buildPayParams(prepayId: string): { timeStamp: string; nonceStr: string
 export interface CreateOrderResult {
   outTradeNo: string;
   pay: { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string };
+  /** PAY_MOCK_SUCCESS 模拟单：pay 是占位值，端上必须跳过 wx.requestPayment，改调 POST /pay/mock/pay。 */
+  mock?: true;
 }
 
 // 下单频控（P2）：同一用户 10 分钟内最多 10 笔新订单（覆盖套餐+SKU），超出 429。
@@ -133,15 +193,23 @@ export async function closeWechatOrder(outTradeNo: string): Promise<void> {
  * 下新单前关掉同类旧未付单：套餐单关用户全部旧套餐 created 单（防「折算下单→续费→再付旧折算单」），
  * SKU 单只关同 skuKey 的旧 created 单（不同 SKU 可合法并存待付）。
  * 远端关单成功/查无此单才置本地 closed；已支付等失败一律跳过（交回调/对账兜底），绝不本地先斩。
+ *
+ * opts.mock = PAY_MOCK_SUCCESS 模拟单的关单：语义、筛选与顺序完全照抄真实路径，只是**不调微信**
+ * （那笔交易在微信侧根本不存在，调了必然报错），直接置本地 closed——本来也没有远端状态需要对齐。
  */
-async function closeStalePendingOrders(userId: string, target: { planOrder?: boolean; skuKey?: string }): Promise<void> {
+async function closeStalePendingOrders(
+  userId: string,
+  target: { planOrder?: boolean; skuKey?: string },
+  opts: { mock?: boolean } = {},
+): Promise<void> {
+  const provider = opts.mock ? 'mock' : 'wechat';
   const where: Prisma.PaymentOrderWhereInput = target.planOrder
-    ? { userId, provider: 'wechat', status: 'created', appliedAt: null, planId: { not: '' } }
-    : { userId, provider: 'wechat', status: 'created', appliedAt: null, skuKey: target.skuKey };
+    ? { userId, provider, status: 'created', appliedAt: null, planId: { not: '' } }
+    : { userId, provider, status: 'created', appliedAt: null, skuKey: target.skuKey };
   const stale = await prisma.paymentOrder.findMany({ where, select: { outTradeNo: true }, take: 5, orderBy: { createdAt: 'asc' } });
   for (const o of stale) {
     try {
-      await closeWechatOrder(o.outTradeNo);
+      if (!opts.mock) await closeWechatOrder(o.outTradeNo);
       await prisma.paymentOrder.updateMany({
         where: { outTradeNo: o.outTradeNo, status: 'created', appliedAt: null },
         data: { status: 'closed' },
@@ -198,8 +266,30 @@ export async function createJsapiOrder(args: {
     };
   }
 
+  const staleTarget = args.plan ? { planOrder: true } : { skuKey: args.sku?.key };
+
+  // PAY_MOCK_SUCCESS（测试期，无真凭据）：走**同一段**真实下单逻辑——关同类旧单、下单频控、
+  // 条款快照、金额、归因全部照旧，只把「调微信 JSAPI 下单」换成不做（没有 prepay_id 可拿）。
+  // 快照打 mock=true，让 sweep / 退款 / 营收统计 / 运营列表都能识别它，且历史单永久可追溯。
+  // 付款动作由 POST /pay/mock/pay 触发，到账仍走真实 markPaidAndApply。
+  if (payMockSuccessEnabled()) {
+    await closeStalePendingOrders(args.user.id, staleTarget, { mock: true });
+    await prisma.$transaction(async (tx) => {
+      await assertOrderRate(tx, args.user.id);
+      await tx.paymentOrder.create({
+        data: {
+          outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
+          amount: total, provider: 'mock', status: 'created', attrSource, attrRefId,
+          snapshotJson: { ...((snapshotJson as object | undefined) ?? {}), mock: true } as Prisma.InputJsonValue,
+        },
+      });
+    });
+    notePayMock('created'); // 不计 notePayOrderCreated：那条指标的口径是「微信支付下单成功数」
+    return { outTradeNo, pay: mockPayParams(outTradeNo), mock: true };
+  }
+
   // 关同类旧未付单（P1）：微信侧关掉才置本地 closed，消除陈旧单被后付的窗口。
-  await closeStalePendingOrders(args.user.id, args.plan ? { planOrder: true } : { skuKey: args.sku?.key });
+  await closeStalePendingOrders(args.user.id, staleTarget);
 
   const c = cfg();
   await prisma.$transaction(async (tx) => {
@@ -263,6 +353,8 @@ export async function repayParams(outTradeNo: string, userId: string): Promise<C
   if (Date.now() - order.createdAt.getTime() > REPAY_SAFE_WINDOW_MS) {
     throw Object.assign(new Error('订单已过支付时限，请重新下单'), { code: 'ORDER_EXPIRED', statusCode: 409 });
   }
+  // PAY_MOCK_SUCCESS 模拟单：继续支付同样不调微信，回 mock 标记让端上改调 POST /pay/mock/pay。
+  if (isMockOrder(order)) return { outTradeNo, pay: mockPayParams(outTradeNo), mock: true };
   if (order.provider === 'mock') {
     // 沙箱单：与下单时同款合成参数。
     return {
@@ -396,6 +488,8 @@ interface OrderSnapshot {
   kind: 'plan' | 'sku';
   plan?: { id: string; name: string; price: number; period: string; creditsPerMonth: number; tokenQuotaPerMonth: number };
   sku?: { key: string; name: string; kind: string; priceFen: number; grantsModuleKey: string | null; metaJson: unknown };
+  /** PAY_MOCK_SUCCESS 模拟单标记（见 isMockOrder）。schema 不加列，标记只挂在这份 Json 快照里。 */
+  mock?: boolean;
 }
 
 export async function markPaidAndApply(parsed: {
@@ -455,7 +549,11 @@ async function markPaidAndApplyTx(parsed: {
     });
     if (claim.count !== 1) return { applied: false, reason: 'already_applied' };
 
-    const payLabel = source === 'wechat_pay_sandbox' ? '微信支付(沙箱)' : '微信支付';
+    // 流水/审计里的支付方式标签。mock 单必须自带「测试模拟」字样：这条 reason 会出现在用户的
+    // 算力流水与运营的审计里，不写清楚事后就分不出哪些额度是测试期白发的。
+    const payLabel = source === 'wechat_pay_sandbox' ? '微信支付(沙箱)'
+      : source === 'wechat_pay_mock' ? '微信支付(测试模拟)'
+      : '微信支付';
     // 条款快照优先（P1）：发放按下单时点的配置，防「下单后改价/改额度/删配置」漂移；
     // 历史无快照订单回退读当前配置（行为与旧版一致）。
     const snapshot = (order.snapshotJson ?? null) as OrderSnapshot | null;
@@ -490,7 +588,11 @@ async function markPaidAndApplyTx(parsed: {
     }
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
-    notePayApplied(order.skuKey ? 'sku' : 'plan', order.amount); // 观测口径=发放动作完成；对账以 payment_order 为准
+    // 观测口径=发放动作完成；对账以 payment_order 为准。
+    // mock 单**不进营收指标**（单量与金额都不进）——假钱进营收看板比缺个数字更糟；
+    // 它单独计一条 junshi_pay_mock_total，测试期的量仍然可见。
+    if (isMockOrder(order)) notePayMock('applied');
+    else notePayApplied(order.skuKey ? 'sku' : 'plan', order.amount);
     return { applied: true };
   });
 }
@@ -541,6 +643,10 @@ export async function reconcileOrder(outTradeNo: string): Promise<{ applied: boo
   const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
   if (!order) return { applied: false, reason: 'order_not_found' };
   if (order.appliedAt || order.status === 'applied') return { applied: false, reason: 'already_applied' };
+  // PAY_MOCK_SUCCESS 模拟单：微信侧根本没有这笔交易，查单必然报错（或被 sweep 当成卡单误处置）。
+  // 显式短路——**只跳过，绝不标 failed**：它是一笔合法的本地测试单，等用户点模拟支付即可。
+  // 这一条也是 sweepPendingOrders 的兜底（sweep 的 provider='wechat' 筛选已把它排除在外）。
+  if (isMockOrder(order)) return { applied: false, reason: 'mock_order' };
   if (order.provider !== 'wechat') return { applied: false, reason: 'provider_not_wechat' };
   if (!payConfigured()) return { applied: false, reason: 'pay_not_configured' };
   if (!['created', 'paid'].includes(order.status)) return { applied: false, reason: `status_${order.status}` };
@@ -579,6 +685,8 @@ export async function sweepPendingOrders(opts: { batch?: number } = {}): Promise
   const batch = opts.batch ?? 50;
   const staleCreatedBefore = new Date(Date.now() - 15 * 60_000);
   const horizon = new Date(Date.now() - 7 * 86400_000); // 只扫近 7 天，历史遗留交人工
+  // provider='wechat' 这一条同时把沙箱单与 PAY_MOCK_SUCCESS 模拟单（provider='mock'）挡在批扫之外——
+  // 它们在微信侧不存在，查单必然报错。reconcileOrder 里还有一道按快照 flag 的显式短路兜底。
   const candidates = await prisma.paymentOrder.findMany({
     where: {
       provider: 'wechat',
@@ -632,8 +740,12 @@ async function notifyPaymentApplied(outTradeNo: string): Promise<void> {
     tenantId: order.tenantId,
     userId: order.userId,
     scene: 'payment',
-    title: snapshotItemName(order),
-    note: `已到账 ¥${(order.amount / 100).toFixed(2)}，权益已生效`,
+    title: snapshotItemName(order), // 模板「类型」位 = 套餐/能力名
+    note: `已到账 ¥${(order.amount / 100).toFixed(2)}，权益已生效`, // 该模板无备注位，只留作通知日志可读
+    amountFen: order.amount,
+    // 订单号位是纯数字型：优先微信支付单号（全数字，也正是用户在微信账单里看到的那个），
+    // 回调还没回填时退化为我们的商户单号（发送侧抽数字）。
+    orderNo: order.transactionId || order.outTradeNo,
   });
 }
 
@@ -696,36 +808,48 @@ async function revokeOrderGrant(
 export async function refundWechatOrder(outTradeNo: string, opts: { reason?: string; by?: string } = {}): Promise<RefundResult> {
   const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
   if (!order) throw Object.assign(new Error('订单不存在'), { code: 'ORDER_NOT_FOUND', statusCode: 404 });
-  if (order.provider !== 'wechat') throw Object.assign(new Error('非微信支付订单，无法原路退款'), { code: 'PROVIDER_NOT_WECHAT', statusCode: 409 });
+  // PAY_MOCK_SUCCESS 模拟单可退：**不调微信真退款接口**（那笔交易在微信侧不存在，也确实没有钱要退），
+  // 但**本地权益回收照常执行**——运营必须能撤掉测试期的误发放（套餐立即到期 / 追回未消耗算力 /
+  // 停用模块），否则测试期白发的权益永远撤不掉。沙箱单（provider='mock' 但无 mock 快照）行为不变，
+  // 仍然拒绝退款。
+  const mock = isMockOrder(order);
+  if (!mock && order.provider !== 'wechat') throw Object.assign(new Error('非微信支付订单，无法原路退款'), { code: 'PROVIDER_NOT_WECHAT', statusCode: 409 });
   if (order.refundedAt || order.status === 'refunded') throw Object.assign(new Error('订单已退款'), { code: 'ALREADY_REFUNDED', statusCode: 409 });
   if (!['paid', 'applied'].includes(order.status)) throw Object.assign(new Error('订单未支付成功，无款可退'), { code: 'ORDER_NOT_PAID', statusCode: 409 });
-  if (!payConfigured()) throw Object.assign(new Error('微信支付未配置'), { code: 'PAYMENT_NOT_CONFIGURED', statusCode: 501 });
+  if (!mock && !payConfigured()) throw Object.assign(new Error('微信支付未配置'), { code: 'PAYMENT_NOT_CONFIGURED', statusCode: 501 });
 
   // 商户退款单号：js 前缀换 rf，长度不变（≤32），同单幂等复用同一退款单号。
   const outRefundNo = `rf${outTradeNo.slice(2)}`.slice(0, 32);
-  const urlPath = '/v3/refund/domestic/refunds';
-  const body = JSON.stringify({
-    out_trade_no: outTradeNo,
-    out_refund_no: outRefundNo,
-    reason: (opts.reason ?? '').trim().slice(0, 80) || undefined,
-    amount: { refund: order.amount, total: order.amount, currency: 'CNY' },
-  });
-  let res: Response;
-  try {
-    res = await fetch(payBase() + urlPath, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: buildAuthToken('POST', urlPath, body) },
-      body,
+  let remoteRefundId: string | undefined;
+  // 模拟单的「退款受理状态」标 MOCK：它会进 user.pay.refund 审计与运营端提示，
+  // 一眼能看出这笔退款没有真实资金流。
+  let wechatStatus = 'MOCK';
+  if (!mock) {
+    const urlPath = '/v3/refund/domestic/refunds';
+    const body = JSON.stringify({
+      out_trade_no: outTradeNo,
+      out_refund_no: outRefundNo,
+      reason: (opts.reason ?? '').trim().slice(0, 80) || undefined,
+      amount: { refund: order.amount, total: order.amount, currency: 'CNY' },
     });
-  } catch (err) {
-    throw Object.assign(new Error(`微信退款网络异常：${(err as Error).message}`), { code: 'WECHAT_PAY_REFUND_FAILED', statusCode: 502 });
+    let res: Response;
+    try {
+      res = await fetch(payBase() + urlPath, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: buildAuthToken('POST', urlPath, body) },
+        body,
+      });
+    } catch (err) {
+      throw Object.assign(new Error(`微信退款网络异常：${(err as Error).message}`), { code: 'WECHAT_PAY_REFUND_FAILED', statusCode: 502 });
+    }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw Object.assign(new Error(`微信退款失败：HTTP ${res.status} ${errText}`), { code: 'WECHAT_PAY_REFUND_FAILED', statusCode: 502 });
+    }
+    const data = (await res.json()) as { refund_id?: string; status?: string };
+    remoteRefundId = data.refund_id;
+    wechatStatus = data.status ?? 'PROCESSING';
   }
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw Object.assign(new Error(`微信退款失败：HTTP ${res.status} ${errText}`), { code: 'WECHAT_PAY_REFUND_FAILED', statusCode: 502 });
-  }
-  const data = (await res.json()) as { refund_id?: string; status?: string };
-  const wechatStatus = data.status ?? 'PROCESSING';
 
   // 微信已受理退款（SUCCESS/PROCESSING 均不可逆）→ 幂等落状态 + 回收权益（同订单 advisory lock 串行化）。
   await prisma.$transaction(async (tx) => {
@@ -735,17 +859,19 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
     if (cur.appliedAt) await revokeOrderGrant(cur, tx);
     await tx.paymentOrder.update({
       where: { outTradeNo },
-      data: { status: 'refunded', refundId: data.refund_id ?? outRefundNo, refundedAt: new Date(), refundReason: (opts.reason ?? '').trim().slice(0, 200) || null },
+      data: { status: 'refunded', refundId: remoteRefundId ?? outRefundNo, refundedAt: new Date(), refundReason: (opts.reason ?? '').trim().slice(0, 200) || null },
     });
     await tx.auditLog.create({
       data: {
         tenantId: order.tenantId, userId: order.userId, action: 'user.pay.refund',
-        payloadJson: { outTradeNo, outRefundNo, amount: order.amount, reason: opts.reason ?? null, by: opts.by ?? null, wechatStatus, item: snapshotItemName(order) },
+        payloadJson: { outTradeNo, outRefundNo, amount: order.amount, reason: opts.reason ?? null, by: opts.by ?? null, wechatStatus, mock, item: snapshotItemName(order) },
       },
     }).catch(() => {});
   });
-  notePayRefund(order.amount);
-  return { ok: true, refundId: data.refund_id ?? outRefundNo, wechatStatus };
+  // mock 单同样不进退款金额指标（进了会把营收/退款两侧同时污染）；单独计 mock 事件。
+  if (mock) notePayMock('refunded');
+  else notePayRefund(order.amount);
+  return { ok: true, refundId: remoteRefundId ?? outRefundNo, wechatStatus };
 }
 
 /**

@@ -121,13 +121,33 @@ function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | n
   return 'pages/studio/index';
 }
 
-function dataForScene(scene: WechatSubscribeScene, opts: { title: string; note?: string }) {
+// 模板字段键 = 微信后台该模板的实际关键词编号，对不上整条推送被拒（errcode 47003），且只有
+// 事后翻 WechatNotificationLog 才看得出——所以每个 scene 的键都必须对着后台模板逐字核过，
+// 不能照别的模板抄。核对方法：微信公众平台 → 订阅消息 → 我的模板 → 详细内容里的 {{thingN.DATA}}。
+//
+// 三个 scene 的键，2026-07-30 全部对着后台模板详情逐字核过：
+//   review （26922「最新分析报告提醒」）：thing2=报告类型 thing3=报告名称 thing5=备注 time6=生成时间
+//     ⚠️ 此前发的是 thing1/time2/thing3，与模板完全不符 → 所有借它的推送（早间军令 / 每日复盘 /
+//     周复盘 / 久不复盘召回 / 预言到期 / 岁验）在生产恒 47003 拒发，用户一条也收不到。
+//     语义映射：category→报告类型（提醒品类）、title→报告名称、note→备注。
+//   report （76218「报告生成通知」）：thing1=报告名称 phrase2=生成状态 time3=完成时间 thing4=温馨提示
+//     —— 与历史写法恰好一致，这条一直是好的（唯一没坏的一个）。
+//   payment（29967「套餐购买成功通知」）：thing1=类型 amount2=金额 thing3=用户 time5=时间 number6=订单号
+//     ⚠️ 此前发的 phrase2/time3/thing4 三个键模板里根本不存在，还缺金额/用户/订单号三个位 →
+//     支付到账通知同样恒 47003。amount2 是金额类型（币种符号+数字，带 2 位小数）；
+//     number6 是数字类型（纯数字，≤32 位）——我们自己的 outTradeNo 形如 js{时间戳}{hex} 带字母，
+//     发上去必被拒，故优先用微信自己的 transactionId（全数字，也正是用户在微信账单里看到的那个号），
+//     缺失时退化为从 outTradeNo 抽数字。
+function dataForScene(scene: WechatSubscribeScene, opts: {
+  title: string; note?: string; category?: string; userName?: string; amountFen?: number; orderNo?: string;
+}) {
   if (scene === 'payment') {
     return {
       thing1: { value: clip(opts.title, 20) },
-      phrase2: { value: '已到账' },
-      time3: { value: timeValue() },
-      thing4: { value: clip(opts.note || '权益已生效，点击查看订单', 20) },
+      amount2: { value: `¥${((opts.amountFen ?? 0) / 100).toFixed(2)}` },
+      thing3: { value: clip(opts.userName || '老板', 20) },
+      time5: { value: timeValue() },
+      number6: { value: digitsOnly(opts.orderNo) },
     };
   }
   if (scene === 'report') {
@@ -139,10 +159,16 @@ function dataForScene(scene: WechatSubscribeScene, opts: { title: string; note?:
     };
   }
   return {
-    thing1: { value: clip(opts.title || '今晚复盘提醒', 20) },
-    time2: { value: timeValue() },
-    thing3: { value: clip(opts.note || '记录今日结果，调整明天军令', 20) },
+    thing2: { value: clip(opts.category || '军师提醒', 20) },
+    thing3: { value: clip(opts.title || '今晚复盘提醒', 20) },
+    thing5: { value: clip(opts.note || '记录今日结果，调整明天军令', 20) },
+    time6: { value: timeValue() },
   };
+}
+
+/** 微信 number 类型只认纯数字（≤32 位）：带字母的单号发上去整条被拒，故抽数字后再发。 */
+function digitsOnly(v?: string): string {
+  return (String(v || '').replace(/\D/g, '') || '0').slice(0, 32);
 }
 
 async function postWechatSubscribe(payload: object): Promise<{ errcode?: number; errmsg?: string }> {
@@ -193,6 +219,9 @@ export async function sendWechatSubscribeMessage(args: {
   scene: WechatSubscribeScene;
   title: string;
   note?: string;
+  category?: string; // review 模板的「报告类型」位（提醒品类）；缺省「军师提醒」
+  amountFen?: number; // payment 模板的「金额」位（分）
+  orderNo?: string; // payment 模板的「订单号」位；传微信 transactionId 优先（纯数字）
   reportId?: string | null;
   logSkipped?: boolean;
 }): Promise<{ sent: boolean; reason?: string }> {
@@ -201,7 +230,7 @@ export async function sendWechatSubscribeMessage(args: {
     if (args.logSkipped) await logNotification({ ...args, status: 'skipped', reason: 'template not configured' });
     return { sent: false, reason: 'template not configured' };
   }
-  const user = await prisma.user.findUnique({ where: { id: args.userId }, select: { wechatOpenId: true } });
+  const user = await prisma.user.findUnique({ where: { id: args.userId }, select: { wechatOpenId: true, name: true } });
   if (!user?.wechatOpenId) {
     if (args.logSkipped) await logNotification({ ...args, templateId, status: 'skipped', reason: 'wechat openid missing' });
     return { sent: false, reason: 'wechat openid missing' };
@@ -238,7 +267,10 @@ export async function sendWechatSubscribeMessage(args: {
     page: pageForScene(args.scene, { reportId: args.reportId }),
     miniprogram_state: miniprogramState(),
     lang: 'zh_CN',
-    data: dataForScene(args.scene, { title: args.title, note: args.note }),
+    data: dataForScene(args.scene, {
+      title: args.title, note: args.note, category: args.category,
+      userName: user.name, amountFen: args.amountFen, orderNo: args.orderNo,
+    }),
   };
 
   let data: { errcode?: number; errmsg?: string };
@@ -293,6 +325,7 @@ export function notifyReviewReminder(args: {
     tenantId: args.tenantId,
     userId: args.userId,
     scene: 'review',
+    category: '复盘提醒',
     title: '今晚复盘提醒',
     note: args.lastReviewDate ? `上次复盘 ${args.lastReviewDate}` : '记录今日结果，调整明天军令',
   }).catch((err) => console.error('[wechat-subscribe] review notify failed:', (err as Error).message));

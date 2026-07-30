@@ -15,7 +15,7 @@ import type {
   FateCardContent, MemoryLibraryView, DossierView, DossierReport,
   DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats,
   QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
-  SkuView, SkuOrderResult, PayOrderStatus, PayOrderListResult, PayRepayResult, BattleForce, BattleCommitResult,
+  SkuView, SkuOrderResult, PayOrderStatus, PayOrderListResult, PayRepayResult, PayMockPayResult, BattleForce, BattleCommitResult,
   DataSourcesView, ModulesView, ModuleView, ReminderView, WorkbenchView, SearchResult,
   KnowledgePipelineView, OrganizeResult, ConfirmResult, StagedUploadResult,
   StrategicProfile, ReviewLogItem, ReviewsResult,
@@ -45,7 +45,7 @@ export type {
   CreativeStatusResult, CreativeUploadResult, CreativeJobView, CreativeAssetView,
   CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
 } from '../../../shared/contracts';
-export type { SkuView, SkuOrderResult, SkuKind, WechatPayParams, PayOrderStatus, PayOrderListItem, PayOrderListResult, PayRepayResult } from '../../../shared/contracts';
+export type { SkuView, SkuOrderResult, SkuKind, WechatPayParams, PayOrderStatus, PayOrderListItem, PayOrderListResult, PayRepayResult, PayMockPayResult } from '../../../shared/contracts';
 export type {
   BattleForce, BattleCommitResult, ForceKind, ForceLevel, ForceTone,
   DataSourceView, DataSourcesView, DataSourceStatus,
@@ -478,6 +478,10 @@ export const api = {
   // 服务端在未发放时会先主动查单补账（回调丢失也能自愈）。统一走 services/pay.ts 的 awaitPaymentApplied。
   payOrderStatus: (outTradeNo: string) =>
     useMockApi() ? mock.payOrderStatus(outTradeNo) : request<PayOrderStatus>(`/pay/orders/${outTradeNo}`),
+  // 测试期模拟支付（服务端 PAY_MOCK_SUCCESS）：下单返回 mock:true 时代替 wx.requestPayment，
+  // 服务端走真实 markPaidAndApply 发放权益；随后仍用 awaitPaymentApplied 轮询确认到账。
+  payMock: (outTradeNo: string) =>
+    useMockApi() ? mock.payMock(outTradeNo) : request<PayMockPayResult>('/pay/mock/pay', 'POST', { outTradeNo }),
   // 我的支付订单列表（订单明细页）+ 继续支付（对未过时限的待支付单重签调起参数）。
   myOrders: () => (useMockApi() ? mock.myOrders() : request<PayOrderListResult>('/pay/orders')),
   orderPayParams: (outTradeNo: string) =>

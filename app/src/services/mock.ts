@@ -12,7 +12,7 @@ import type {
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
   QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
-  SkuView, SkuOrderResult, PayOrderStatus, PayOrderListResult, BattleForce, BattleCommitResult,
+  SkuView, SkuOrderResult, PayOrderStatus, PayOrderListResult, PayMockPayResult, BattleForce, BattleCommitResult,
   DataSourcesView, DataSourceView, DataSourceStatus, ModulesView, ModuleView,
   ReminderView, WorkbenchView, ServiceAssignmentView, SearchHit, SearchResult,
   KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, OrganizeItem, StagedUploadResult, ConfirmResult,
@@ -1003,6 +1003,11 @@ export const mock = {
   async payOrderStatus(outTradeNo: string): Promise<PayOrderStatus> {
     return delay({ outTradeNo, status: 'applied' as const, amount: 0, appliedAt: now() });
   },
+  // 测试期模拟支付：mock 模式下单（createSkuOrder）本就直接发放权益、从不返回 mock:true，
+  // 所以这条只是为了让 api.payMock 在两种模式下同口径存在，被误调时也按「已到账」应答。
+  async payMock(_outTradeNo: string): Promise<PayMockPayResult> {
+    return delay({ ok: true, applied: true, status: 'applied' });
+  },
   // 支付订单列表/继续支付：mock 走演示通道（无真实 PaymentOrder），列表为空、继续支付不可用。
   async myOrders(): Promise<PayOrderListResult> {
     return delay({ items: [] });
@@ -1399,10 +1404,22 @@ export const mock = {
   // 战略档案（mock）：谶语门槛与真实端同一条（有八字且信命理 → 当年有谶），
   // 老板页「年度谶语」卡两态（出谶 / 求谶引导）才能在本地 mock 下都走查到——
   // 此前 mock 恒返回 null，卡永远只有空态，正是这个 bug 长期没被走查发现的原因。
+  // 点谶（周期陪伴）同样给两条确定性样例，让谶语卡的「已点谶 N 次 + 最近一次」小字可本地走查。
   async strategicProfile(): Promise<{ strategic: Partial<StrategicProfile> | null }> {
     const bazi = (current().d as { bazi?: { believe?: boolean } }).bazi ?? null;
     if (!bazi || bazi.believe === false) return delay({ strategic: null });
-    return delay({ strategic: { verse: SAMPLE_VERSE, verseYear: new Date().getFullYear() } });
+    const yr = new Date().getFullYear();
+    return delay({
+      strategic: {
+        verse: SAMPLE_VERSE,
+        verseYear: yr,
+        verseAt: `${yr}-02-10T02:00:00.000Z`,
+        verseMoments: [
+          { at: `${yr}-04-18`, clause: 1, note: '老客带新客回头，守住客心这半句先应了' },
+          { at: `${yr}-06-05`, clause: 1, note: '复购占到六成，门前客真没走' },
+        ],
+      },
+    });
   },
   // 送你一卦预览（mock：给确定性样例卡文本，不排盘不落库——让画卡/分享链路可本地走查）
   async fateCardPreview(body: { friendName?: string; consent?: boolean }): Promise<{ friendName: string; subtitle: string; sketch: string; trend: string; advice: string }> {

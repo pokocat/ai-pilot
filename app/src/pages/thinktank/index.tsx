@@ -22,7 +22,7 @@ import {
   type ModulesView, type ModuleView, type ModuleTier, type ModuleGroup,
   type ReportItem,
 } from '../../services/api';
-import { awaitPaymentApplied, ensurePayableEnv, requestWechatPayment } from '../../services/pay';
+import { awaitPaymentApplied, ensurePayableEnv, payOrder } from '../../services/pay';
 import './index.scss';
 
 type ThinkTab = 'assets' | 'data' | 'modules' | 'reports';
@@ -297,7 +297,8 @@ export default function ThinkTank() {
           if (!ensurePayableEnv()) return; // H5（server 模式）：下单前拦下
           const order = await api.createSkuOrder('deep-organize', undefined, { source: 'catalog' });
           if (order.payParams) {
-            await requestWechatPayment(order.payParams);
+            // mock=true（服务端 PAY_MOCK_SUCCESS 测试期）→ 走模拟到账，不调 wx.requestPayment
+            await payOrder({ outTradeNo: order.orderId, pay: order.payParams, mock: order.mock });
             // 到账确认（统一收口）：轮询订单状态直至凭据发放（服务端会主动查单补账），
             // 再触发整理——SKU_REQUIRED 竞态重试仍保留作兜底。
             await awaitPaymentApplied(order.orderId);
@@ -455,12 +456,14 @@ export default function ThinkTank() {
 
   // sku：先微信支付下单，再 enableModule（服务端购买即授予对应模块）。
   const doEnableSku = async (m: ModuleView) => {
+    let mocked = false; // 本次是否走了测试期模拟支付（决定末尾提示口径）
     try {
       if (m.price?.skuKey) {
         if (!ensurePayableEnv()) return; // H5（server 模式）：下单前拦下
         const order = await api.createSkuOrder(m.price.skuKey, undefined, { source: 'catalog' });
         if (order.payParams) {
-          await requestWechatPayment(order.payParams);
+          // mock=true（服务端 PAY_MOCK_SUCCESS 测试期）→ 走模拟到账，不调 wx.requestPayment
+          mocked = await payOrder({ outTradeNo: order.orderId, pay: order.payParams, mock: order.mock });
           // 到账确认（统一收口）：先等权益发放（服务端会主动查单补账），下方 enableModule 重试仅作兜底。
           await awaitPaymentApplied(order.orderId);
         }
@@ -474,7 +477,7 @@ export default function ThinkTank() {
       }
       closePay();
       await loadModules();
-      Taro.showToast({ title: '已开通', icon: 'success' });
+      Taro.showToast(mocked ? { title: '已开通（测试期模拟支付，未实际付款）', icon: 'none' } : { title: '已开通', icon: 'success' });
     } catch (e) {
       closePay();
       if ((e as { errMsg?: string })?.errMsg && /cancel/i.test((e as { errMsg?: string }).errMsg!)) { Taro.showToast({ title: '已取消支付', icon: 'none' }); return; }

@@ -6,6 +6,7 @@ import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone 
 import { prisma } from '../src/db.ts';
 import { extractAndRecordProphecies, prophecyBriefing } from '../src/services/prophecyLog.ts';
 import { scanDueProphecies } from '../src/services/scheduler.ts';
+import { _resetTokenCache } from '../src/services/wechat.ts';
 import { buildGenContext } from '../src/services/context.ts';
 import { buildSystemParts } from '../src/llm/schema.ts';
 
@@ -109,6 +110,78 @@ test('到期扫描：pending 且到期 → 登记对账候选，行级幂等；�
 
   // 重扫幂等（dueNotifiedAt 已置）
   assert.equal(await scanDueProphecies(), 0);
+});
+
+test('到期推送：有额度→推一条并扣减；岁验预言用谶语措辞；同轮多条到期只打扰一次；重扫不复推', async () => {
+  process.env.WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID = 'tpl-review-prophecy';
+  process.env.WECHAT_MINI_APPID = 'wx-test-app';
+  process.env.WECHAT_MINI_SECRET = 'secret-test';
+  _resetTokenCache();
+  const oldFetch = globalThis.fetch;
+  const calls: { url: string; body?: { touser?: string; data?: Record<string, { value: string }> } }[] = [];
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    const href = String(url);
+    calls.push({ url: href, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    return {
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => (href.includes('/stable_token')
+        ? { access_token: 'access-token-test', expires_in: 7200 }
+        : { errcode: 0, errmsg: 'ok' }),
+    } as unknown as Response;
+  }) as typeof fetch;
+  try {
+    // 用户 A：岁验预言到期（basis 走 registerVerseOmen 的约定前缀）
+    const tokenA = await login(uniquePhone(), '岁验推送用户');
+    const userA = await prisma.user.findFirstOrThrow({ where: { id: tokenA } });
+    await prisma.user.update({ where: { id: tokenA }, data: { wechatOpenId: 'openid-omen-due' } });
+    await prisma.wechatSubscription.create({
+      data: { tenantId: userA.tenantId, userId: userA.id, scene: 'review', templateId: 'tpl-review-prophecy', status: 'accept', remaining: 3, acceptedAt: new Date() },
+    });
+    await prisma.prophecyLog.create({
+      data: { tenantId: userA.tenantId, userId: userA.id, seq: 900001, prophecy: '利刃藏锋不轻鸣，今岁南风助势成', basis: '年度谶语·岁验·2025', dueDate: '2026-02-04', status: 'pending' },
+    });
+    // 用户 B：两条普通预言同日到期 → 只推一条
+    const tokenB = await login(uniquePhone(), '普通预言推送用户');
+    const userB = await prisma.user.findFirstOrThrow({ where: { id: tokenB } });
+    await prisma.user.update({ where: { id: tokenB }, data: { wechatOpenId: 'openid-prophecy-due' } });
+    await prisma.wechatSubscription.create({
+      data: { tenantId: userB.tenantId, userId: userB.id, scene: 'review', templateId: 'tpl-review-prophecy', status: 'accept', remaining: 3, acceptedAt: new Date() },
+    });
+    await prisma.prophecyLog.create({ data: { tenantId: userB.tenantId, userId: userB.id, seq: 900002, prophecy: '3 月回款延迟', dueDate: '2026-03-31', status: 'pending' } });
+    await prisma.prophecyLog.create({ data: { tenantId: userB.tenantId, userId: userB.id, seq: 900003, prophecy: '4 月有意外进账', dueDate: '2026-04-30', status: 'pending' } });
+
+    const n = await scanDueProphecies();
+    assert.equal(n, 3, '三条到期都登记对账候选');
+
+    const sends = calls.filter((c) => c.url.includes('/message/subscribe/send'));
+    assert.equal(sends.length, 2, '每用户每轮至多一条推送（B 的两条只打扰一次）');
+    const toA = sends.find((c) => c.body?.touser === 'openid-omen-due');
+    assert.ok(toA, '岁验用户收到推送');
+    // 字段键 = review 模板 26922 的真实关键词（thing2 类型 / thing3 名称 / thing5 备注）
+    assert.equal(toA!.body!.data!.thing2.value, '岁验', '岁验走专属类型位');
+    assert.equal(toA!.body!.data!.thing3.value, '一年前那句话，今日对账', '岁验专属措辞');
+    assert.equal(toA!.body!.data!.thing5.value, '利刃藏锋不轻鸣，今岁南风助势成', '谶语整句可见（恰 15 字 ≤ 20 字上限）');
+    const toB = sends.find((c) => c.body?.touser === 'openid-prophecy-due');
+    assert.equal(toB!.body!.data!.thing2.value, '预言对账');
+    assert.equal(toB!.body!.data!.thing3.value, '预言到期·今日对账');
+
+    // 额度各扣一份；推送有日志
+    assert.equal((await prisma.wechatSubscription.findFirstOrThrow({ where: { userId: userA.id } })).remaining, 2);
+    assert.equal((await prisma.wechatSubscription.findFirstOrThrow({ where: { userId: userB.id } })).remaining, 2);
+    assert.equal(await prisma.wechatNotificationLog.count({ where: { userId: userB.id, scene: 'review', status: 'sent' } }), 1);
+
+    // 重扫：dueNotifiedAt 已置 → 不复推不复记
+    const before = calls.length;
+    assert.equal(await scanDueProphecies(), 0);
+    assert.equal(calls.length, before, '重扫零网络调用');
+  } finally {
+    globalThis.fetch = oldFetch;
+    delete process.env.WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID;
+    delete process.env.WECHAT_MINI_APPID;
+    delete process.env.WECHAT_MINI_SECRET;
+    _resetTokenCache();
+  }
 });
 
 test('隔离：他人不能验证我的预言', async () => {

@@ -6,7 +6,7 @@ import Sheet from '../Sheet';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Plan } from '../../services/api';
-import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, requestWechatPayment } from '../../services/pay';
+import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, payOrder } from '../../services/pay';
 import './index.scss';
 
 interface Props {
@@ -85,16 +85,16 @@ export default function Plans({ open, onClose }: Props) {
         if (!modal.confirm) { Taro.showToast({ title: '已取消支付', icon: 'none' }); return; } // 未付订单由服务端对账任务自动关闭
       }
 
-      // 调起微信支付（小程序 JSAPI）
-      await requestWechatPayment(order.pay);
+      // 调起微信支付（小程序 JSAPI）；mock=true 时改走服务端模拟到账（测试期，未实际付款）
+      const mocked = await payOrder({ outTradeNo: order.outTradeNo, pay: order.pay, mock: order.mock });
       // —— 到这里支付已成功（钱已扣）：后续任何查询/刷新失败都只影响提示文案，绝不能再报「支付失败」。 ——
       // 到账确认：轮询订单状态（服务端未发放时会主动查单补账），appliedAt 有值才如实报成功。
       const applied = await awaitPaymentApplied(order.outTradeNo);
       await store.loadMe().catch(() => {}); // 刷新失败不改变支付结果，下次进页自然更新
-      if (order.proration?.applies && applied === 'applied') {
+      if (!mocked && order.proration?.applies && applied === 'applied') {
         Taro.showToast({ title: `方案已更新，已抵扣 ¥${Math.round(order.proration.remainingValue / 100)}`, icon: 'none' });
       } else {
-        Taro.showToast(payAppliedToast(applied, '支付成功，方案已更新'));
+        Taro.showToast(payAppliedToast(applied, '支付成功，方案已更新', { mock: mocked }));
       }
     } catch (e: any) {
       if (e?.errMsg && /cancel/i.test(e.errMsg)) Taro.showToast({ title: '已取消支付', icon: 'none' });

@@ -10,6 +10,7 @@ import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   resolveCandidates, withEndpoint, coolEndpoint, isTransferable,
+  createEndpointCapture, runWithEndpointCapture,
   __resetLlmPool, __setPoolForTest, type PoolEndpoint,
 } from '../src/services/llmPool.js';
 import { __resetLlmGate } from '../src/services/llmGate.js';
@@ -239,6 +240,21 @@ describe('故障转移', () => {
     assert.equal(seen.thinkingBudget, 4096);
     assert.equal(seen.temperature, 0.3, '端点池必须保留配置温度；请求层再按 Thinking 临时锁为 1');
     assert.notEqual(seen.baseUrl, base.baseUrl);
+  });
+
+  test('调用级 capture 记录实际尝试的 endpoint/model，而不是全局 base 配置', async () => {
+    usePool([ep('actual', { label: '实际端点', model: 'actual-model' })]);
+    const capture = createEndpointCapture();
+    const out = await runWithEndpointCapture(capture, () =>
+      withEndpoint(base, async (cfg) => `from:${cfg.model}`, { affinityKey: 'trace-source' }));
+
+    assert.equal(out, 'from:actual-model');
+    assert.deepEqual(capture.hit, {
+      endpointId: 'actual',
+      endpointLabel: '实际端点',
+      provider: 'openai',
+      model: 'actual-model',
+    });
   });
 
   test('达到尝试上限的最后一个失败端点也会进入冷却', async () => {

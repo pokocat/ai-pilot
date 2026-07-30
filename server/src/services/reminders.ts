@@ -107,6 +107,7 @@ export async function morningOrderReminderScan(): Promise<number> {
         tenantId: cf.tenantId,
         userId: cf.userId,
         scene: 'review',
+        category: '军令提醒',
         title: '今日军令待完成',
         note: '18:00 前补充高意向咨询记录',
       }).catch(() => ({ sent: false }));
@@ -164,6 +165,7 @@ export async function weeklyReviewReminderScan(): Promise<number> {
         tenantId: cf.tenantId,
         userId: cf.userId,
         scene: 'review',
+        category: '周复盘',
         title: '周复盘提醒',
         note: '本周五检查成交漏斗和内容表现',
       }).catch(() => ({ sent: false }));

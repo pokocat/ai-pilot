@@ -23,11 +23,11 @@ V6.0 提示词的上瘾设计精髓：**把可变奖励建立在「老板对自�
 
 | # | 机制 | 一句话 | 依托现状 |
 |---|---|---|---|
-| 1 | **预言揭封日** 🔥 | 预言到期→推送→火漆信封回填揭封→命中卡可分享 | `prophecy-due-scan` 已在跑（6h），只差推送+揭封 UX |
+| 1 | **预言揭封日** 🔥 | 预言到期→推送→火漆信封回填揭封→命中卡可分享 | `prophecy-due-scan` 已在跑（6h），**到期推送已通（2026-07-30，订阅消息 review 模板，同轮同用户至多一条）**；只差揭封 UX |
 | 2 | 立军令状 | 重大决策做成火漆手印的自我承诺卡，到期验证记战功 | 决策日志已入账（AuditLog） |
 | 3 | **章回体连载** 🔥 | 月复盘生成命运叙事线"第 N 回"，下一回回目提前预告 | 月复盘流程已有；叙事线在 V6.0 档案内 |
 | 4 | 军师公开命中率（大胆项） | 全体用户真实聚合命中率公示，样本不足不显示 | ProphecyLog 可聚合；需灰度与门槛 |
-| 16 | **年度谶语 · 岁验** 🔥 | 一句七言常驻一年→年中半验→岁末逐句对账揭晓→新岁求新谶 | 出谶 + 捕获两条链路已在跑（2026-07-29 补齐）：`ensureAnnualVerse` 按盘出兜底谶（auto）→ 认可方案时从封面 motto / 谶语分节抽模型亲写的谶（llm，当年可升级 auto 一次）→ 老板手改（manual）压全场；存战略档案 extraJson（verse/verseYear/verseSource）+ 注入块「全年沿用」铁律 + 报告封面复现。**仍缺**：唯一展示面（天时日历卡）已随入口下线，且无应验闭环（年中半验 / 岁末对账） |
+| 16 | **年度谶语 · 岁验** 🔥 | 一句七言常驻一年→年中半验→岁末逐句对账揭晓→新岁求新谶 | 出谶 + 捕获 + **周期陪伴（2026-07-30 升级）**都已在跑：出谶/捕获三来源优先级（auto→llm→manual）见 2026-07-29 记；陪伴 = 军师全年在认可/复盘/预言应验三处**点谶**（LLM 严判、年上限 12、注入块带周期上下文与最近一次点谶）+ 获谶满半年注入**半验**提示 + 盖章即登记**岁验预言**（到期 = min(获谶+1年, 次年立春)，骑 #1 推送）+ 换谶归档 verseHistory；老板页谶语已并入账户服务卡尾部的题字带（发丝线收口 + 全宽同边距：头行 kicker/落款，中间一句一行居中，末行点谶足迹；无谶态收成同一条带里一行求谶引导，2026-07-30）。**仍缺**：岁验揭封 UX（逐句对账 + 应验卷出图）、显式求谶仪式入口 |
 
 ### B. 每日回访锚点（V6.0 完全缺失的一层）
 
@@ -76,9 +76,13 @@ V6.0 提示词的上瘾设计精髓：**把可变奖励建立在「老板对自�
 
 | scene | 模板 | 模板 ID | 环境变量 | 状态 |
 |---|---|---|---|---|
-| payment | 套餐购买成功通知 | `oL68CyMuNgQk9UjyMky7dOjSkmdFu4tZt1ZTQgch7Nw` | `WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID` | ✅ 已配（本地 .env 已写入） |
-| report | 报告生成通知 | `eHPbItaG03wXTZjtKHZ1rTwlCMexJqjrjlFOiPzkeBQ` | `WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID` | ✅ 已配（本地 .env 已写入） |
-| review | 最新分析报告提醒 | `Qd_F_5LkURRqczOjI9mVpYCkPp8ys-kwsjn1nVx2lWo` | `WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID` | ✅ 已配（本地 .env 已写入）。⚠️ 代码按 `thing1/time2/thing3` 发送，若与模板实际关键词不符会报 47003，首发时核对 |
+| payment | 套餐购买成功通知（编号 29967） | `oL68CyMuNgQk9UjyMky7dOjSkmdFu4tZt1ZTQgch7Nw` | `WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID` | ✅ 已配 + 字段键已核准（2026-07-30）：`thing1`=类型 · `amount2`=金额 · `thing3`=用户 · `time5`=时间 · `number6`=订单号。**曾全错**（发 `thing1/phrase2/time3/thing4`，后三个键模板里不存在且缺金额/用户/订单号）→ 到账通知恒 47003。注意 `number6` 是数字型（纯数字 ≤32 位）：优先发微信 `transactionId`，回调未回填时用商户单号抽数字 |
+| report | 报告生成通知（编号 76218） | `eHPbItaG03wXTZjtKHZ1rTwlCMexJqjrjlFOiPzkeBQ` | `WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID` | ✅ 已配 + 字段键已核准（2026-07-30）：`thing1`=报告名称 · `phrase2`=生成状态 · `time3`=完成时间 · `thing4`=温馨提示。与历史写法恰好一致，**三条里唯一一直正常的** |
+| review | 最新分析报告提醒（编号 26922） | `Qd_F_5LkURRqczOjI9mVpYCkPp8ys-kwsjn1nVx2lWo` | `WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID` | ✅ 已配 + 字段键已核准（2026-07-30）：`thing2`=报告类型 · `thing3`=报告名称 · `thing5`=备注 · `time6`=生成时间。**曾全错**（发 `thing1/time2/thing3`）→ 所有借此模板的提醒（复盘/军令/周复盘/召回/预言到期/岁验）恒 47003 |
+
+> ⚠️ **改这三处字段键前必读**：键与后台模板「详细内容」逐字对应，错一个字整条被微信拒收（`errcode 47003`），
+> 而失败只落 `WechatNotificationLog`、线上无人翻 —— 这就是 2026-07-30 之前三条模板里两条静默失效
+> 却无人发现的原因。`server/test/wechatMessage.test.ts` 已按 scene 钉死键集与各位语义，改模板必须同步改断言。
 
 > 生产/预发生效步骤：把同名变量写入服务器 `.env` 并重启 junshi-api（订阅链路读 env，非 ai_setting）。
 > review 模板申请时注意 §4 合规措辞。

@@ -89,7 +89,8 @@ test('订阅消息 accept 后累计一次额度，发送成功后扣减', async 
   assert.equal((await prisma.wechatSubscription.findFirstOrThrow({ where: { userId: token, scene: 'review' } })).remaining, 1);
 
   const oldFetch = globalThis.fetch;
-  const calls: { url: string; body?: unknown }[] = [];
+  type SendBody = { touser?: string; template_id?: string; data: Record<string, { value: string }> };
+  const calls: { url: string; body?: SendBody }[] = [];
   globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
     const href = String(url);
     calls.push({ url: href, body: init?.body ? JSON.parse(String(init.body)) : undefined });
@@ -117,9 +118,119 @@ test('订阅消息 accept 后累计一次额度，发送成功后扣减', async 
   assert.equal(calls.length, 2);
   assert.equal(calls[1].body.touser, 'openid-subscribe-user');
   assert.equal(calls[1].body.template_id, 'tpl-review');
+  // 模板字段键钉死：review = 微信后台模板 26922「最新分析报告提醒」的真实关键词编号
+  // （thing2 报告类型 / thing3 报告名称 / thing5 备注 / time6 生成时间）。键错整条被拒 47003，
+  // 而拒发只落在 WechatNotificationLog 里、线上无人看——2026-07-30 前这里发的是 thing1/time2/thing3，
+  // 所有借 review 模板的推送（复盘/军令/周复盘/预言到期/岁验）在生产一条都没到过用户手机。
+  assert.deepEqual(Object.keys(calls[1].body.data).sort(), ['thing2', 'thing3', 'thing5', 'time6']);
+  assert.equal(calls[1].body.data.thing3.value, '今晚复盘提醒', '报告名称位 = title');
+  assert.equal(calls[1].body.data.thing5.value, '记录今日结果，调整明天军令', '备注位 = note');
+  assert.equal(calls[1].body.data.thing2.value, '军师提醒', '未传 category 时报告类型位取缺省');
+  assert.match(calls[1].body.data.time6.value, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/, '时间位走微信认的格式');
   assert.equal((await prisma.wechatSubscription.findFirstOrThrow({ where: { userId: token, scene: 'review' } })).remaining, 0);
   const log = await prisma.wechatNotificationLog.findFirstOrThrow({ where: { userId: token, scene: 'review' } });
   assert.equal(log.status, 'sent');
+});
+
+// 三个模板的字段键都必须与微信后台「详细内容」逐字一致，否则整条 47003 拒发、且只在
+// WechatNotificationLog 里留痕（线上无人翻）——2026-07-30 核对发现 review 与 payment 两条全错，
+// 上线以来一条都没真正送达。键集本身就是契约，故逐 scene 钉死。
+test('订阅消息模板字段键与微信后台模板逐字一致（review 26922 / report 76218 / payment 29967）', async () => {
+  await cleanBusiness();
+  process.env.WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID = 'tpl-review';
+  process.env.WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID = 'tpl-report';
+  process.env.WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID = 'tpl-payment';
+  process.env.WECHAT_MINI_APPID = 'wx-test-app';
+  process.env.WECHAT_MINI_SECRET = 'secret-test';
+  _resetTokenCache();
+
+  const token = await login(uniquePhone(), '模板字段用户');
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: token } });
+  await prisma.user.update({ where: { id: token }, data: { wechatOpenId: 'openid-template-keys' } });
+  for (const [scene, templateId] of [['review', 'tpl-review'], ['report', 'tpl-report'], ['payment', 'tpl-payment']] as const) {
+    await prisma.wechatSubscription.create({
+      data: { tenantId: user.tenantId, userId: token, scene, templateId, status: 'accept', remaining: 1, acceptedAt: new Date() },
+    });
+  }
+
+  const oldFetch = globalThis.fetch;
+  const sent: Record<string, { value: string }>[] = [];
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (href.includes('/message/subscribe/send')) sent.push(JSON.parse(String(init!.body)).data);
+    return {
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => (href.includes('/stable_token')
+        ? { access_token: 'access-token-test', expires_in: 7200 }
+        : { errcode: 0, errmsg: 'ok' }),
+    } as unknown as Response;
+  }) as typeof fetch;
+  try {
+    const base = { tenantId: user.tenantId, userId: token };
+    await sendWechatSubscribeMessage({ ...base, scene: 'review', category: '复盘提醒', title: '今晚复盘提醒', note: '记录今日结果' });
+    await sendWechatSubscribeMessage({ ...base, scene: 'report', title: '三城布局方略' });
+    await sendWechatSubscribeMessage({ ...base, scene: 'payment', title: '将帅版·年付', amountFen: 688800, orderNo: '4200002026073012345678' });
+  } finally {
+    globalThis.fetch = oldFetch;
+    delete process.env.WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID;
+    delete process.env.WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID;
+    delete process.env.WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID;
+    delete process.env.WECHAT_MINI_APPID;
+    delete process.env.WECHAT_MINI_SECRET;
+    _resetTokenCache();
+  }
+  assert.equal(sent.length, 3, '三条都发出去了');
+  const [review, report, payment] = sent;
+
+  // review（26922）：thing2 报告类型 / thing3 报告名称 / thing5 备注 / time6 生成时间
+  assert.deepEqual(Object.keys(review).sort(), ['thing2', 'thing3', 'thing5', 'time6']);
+  assert.equal(review.thing2.value, '复盘提醒');
+  assert.equal(review.thing3.value, '今晚复盘提醒');
+
+  // report（76218）：thing1 报告名称 / phrase2 生成状态 / time3 完成时间 / thing4 温馨提示
+  assert.deepEqual(Object.keys(report).sort(), ['phrase2', 'thing1', 'thing4', 'time3']);
+  assert.equal(report.thing1.value, '三城布局方略');
+  assert.equal(report.phrase2.value, '已生成');
+
+  // payment（29967）：thing1 类型 / amount2 金额 / thing3 用户 / time5 时间 / number6 订单号
+  assert.deepEqual(Object.keys(payment).sort(), ['amount2', 'number6', 'thing1', 'thing3', 'time5']);
+  assert.equal(payment.thing1.value, '将帅版·年付');
+  assert.equal(payment.amount2.value, '¥6888.00', '金额位带币种符号 + 两位小数');
+  assert.equal(payment.thing3.value, '模板字段用户', '用户位取账户昵称');
+  assert.equal(payment.number6.value, '4200002026073012345678', '订单号位纯数字');
+  assert.match(payment.time5.value, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+
+  // 商户单号（js{时间戳}{hex}，带字母）走 number 位时必须抽成纯数字，否则整条 47003
+  assert.match(
+    (await (async () => {
+      const calls: Record<string, { value: string }>[] = [];
+      process.env.WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID = 'tpl-payment';
+      process.env.WECHAT_MINI_APPID = 'wx-test-app';
+      process.env.WECHAT_MINI_SECRET = 'secret-test';
+      _resetTokenCache();
+      await prisma.wechatSubscription.updateMany({ where: { userId: token, scene: 'payment' }, data: { remaining: 1 } });
+      const prev = globalThis.fetch;
+      globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+        const href = String(url);
+        if (href.includes('/message/subscribe/send')) calls.push(JSON.parse(String(init!.body)).data);
+        return { ok: true, headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => (href.includes('/stable_token') ? { access_token: 't', expires_in: 7200 } : { errcode: 0 }) } as unknown as Response;
+      }) as typeof fetch;
+      try {
+        await sendWechatSubscribeMessage({ tenantId: user.tenantId, userId: token, scene: 'payment', title: '入门版', amountFen: 9900, orderNo: 'js1780000000abcd1234' });
+      } finally {
+        globalThis.fetch = prev;
+        delete process.env.WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID;
+        delete process.env.WECHAT_MINI_APPID;
+        delete process.env.WECHAT_MINI_SECRET;
+        _resetTokenCache();
+      }
+      return calls[0].number6.value;
+    })()),
+    /^\d+$/,
+    '带字母的商户单号被抽成纯数字',
+  );
 });
 
 // 回归：sendWechatSubscribeMessage 此前「先查 remaining>0 放行 → 调用微信真实推送接口(不可逆外部副作用)

@@ -38,6 +38,24 @@ export async function requestWechatPayment(pay: WechatPayParams): Promise<void> 
   });
 }
 
+/**
+ * 统一「付这一单」：所有支付触点都走这里，不要各写一套 if。
+ *   order.mock=true（服务端 PAY_MOCK_SUCCESS 测试期模拟支付）→ 调 /pay/mock/pay 让服务端走
+ *     真实入账链路，**不调 wx.requestPayment**（那单在微信侧根本不存在，调了必然报错）；
+ *   否则 → 正常调起微信支付。
+ * 两种情况之后都要接 awaitPaymentApplied 轮询到账（模拟单也是异步发放，口径不变）。
+ * 返回 true = 本次是模拟支付，调用方据此走「未实际付款」的提示文案。
+ */
+export async function payOrder(order: { outTradeNo: string; pay?: WechatPayParams; mock?: boolean }): Promise<boolean> {
+  if (order.mock) {
+    await api.payMock(order.outTradeNo);
+    return true;
+  }
+  if (!order.pay) throw Object.assign(new Error('缺少支付参数，请重新下单'), { code: 'ORDER_NOT_PAYABLE' });
+  await requestWechatPayment(order.pay);
+  return false;
+}
+
 export async function awaitPaymentApplied(
   outTradeNo: string | undefined,
   opts: { attempts?: number; intervalMs?: number } = {},
@@ -56,8 +74,17 @@ export async function awaitPaymentApplied(
   return 'pending';
 }
 
-/** 到账确认后的统一提示文案：applied 才说「成功/已更新」，其余如实说「到账中」。 */
-export function payAppliedToast(state: PayApplyState, appliedTitle: string): { title: string; icon: 'success' | 'none' } {
+/**
+ * 到账确认后的统一提示文案：applied 才说「成功/已更新」，其余如实说「到账中」。
+ * opts.mock=true（测试期模拟支付）时**绝不能沿用真实支付的成功文案**——用户没付钱，
+ * 说「支付成功」会让人以为已经扣款。统一用 icon:'none' + 明写「模拟支付 · 未实际付款」。
+ */
+export function payAppliedToast(state: PayApplyState, appliedTitle: string, opts: { mock?: boolean } = {}): { title: string; icon: 'success' | 'none' } {
+  if (opts.mock) {
+    return state === 'applied'
+      ? { title: '模拟支付已到账（测试期，未实际付款）', icon: 'none' }
+      : { title: '模拟支付已提交，权益到账中（测试期，未实际付款）', icon: 'none' };
+  }
   return state === 'applied'
     ? { title: appliedTitle, icon: 'success' }
     : { title: '支付成功，权益到账中，稍后自动生效', icon: 'none' };

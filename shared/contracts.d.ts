@@ -364,6 +364,9 @@ export interface SurveyQuestion { key: string; title: string; options: string[];
 export interface SurveyAdmin { id: string; key: string; title: string; optionsJson: string[]; enabled: boolean; }
 export interface Profile { industry?: string | null; stage?: string | null; pain?: string | null; extra?: unknown; }
 
+/** 点谶记录（周期陪伴）：军师把某天的真事对到谶中某半句上。clause=1 前半句、2 后半句；note≤40 字白话。 */
+export interface VerseMoment { at: string; clause: 1 | 2; note: string }
+
 /** 已确认的战略档案（GET /profile/strategic）：谶语按 verseYear 盖章，一年一句。 */
 export interface StrategicProfile {
   mainContradiction: string;
@@ -373,9 +376,12 @@ export interface StrategicProfile {
   narrative: string;
   verse: string;
   verseYear: number | null;
+  verseAt?: string | null; // 获谶时刻（ISO）：半验「满六个月」的锚点
+  verseMoments?: VerseMoment[]; // 当年点谶记录（全年上限 12 条，换谶/跨年清空）
   updatedAt: string | null;
 }
-export type StrategicProfilePatch = Partial<Omit<StrategicProfile, 'updatedAt' | 'verseYear'>>;
+// verseYear/verseAt/verseMoments 都由服务端随谶语盖章与点谶维护，不接受外部传入。
+export type StrategicProfilePatch = Partial<Omit<StrategicProfile, 'updatedAt' | 'verseYear' | 'verseAt' | 'verseMoments'>>;
 
 /** 复盘账本（GET /reviews）：日期统一为上海时区 YYYY-MM-DD。 */
 export interface ReviewLogItem {
@@ -1061,8 +1067,10 @@ export interface SkuView {
   key: string; name: string; desc: string; priceFen: number;
   kind: SkuKind; grantsModuleKey?: string | null;
 }
-/** 下单结果（POST /skus/:key/order）。payParams 走 wx.requestPayment；demo=演示发放（未配支付时）。 */
-export interface SkuOrderResult { orderId: string; payParams?: WechatPayParams; demo?: boolean; }
+/** 下单结果（POST /skus/:key/order）。payParams 走 wx.requestPayment；demo=演示发放（未配支付时）；
+ *  mock=测试期模拟支付单（PAY_MOCK_SUCCESS）：payParams 是占位值，端上必须跳过 wx.requestPayment，
+ *  改调 POST /pay/mock/pay 触发到账，再复用 awaitPaymentApplied 轮询确认。 */
+export interface SkuOrderResult { orderId: string; payParams?: WechatPayParams; demo?: boolean; mock?: true; }
 /** 运营端 SKU 行（GET /admin/skus） */
 export interface AdminSku { id: string; key: string; name: string; desc: string; priceFen: number; kind: SkuKind; grantsModuleKey: string | null; enabled: boolean; sort: number; }
 /** 运营端更新 SKU（PATCH /admin/skus/:key）：改价/启停/展示（key 与 kind/grantsModuleKey 走代码目录，不在此改） */
@@ -1131,6 +1139,8 @@ export interface WechatOrderResult {
   pay: { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string };
   // 月→年升级折算明细（applies=true 时前端可展示「已抵扣 ¥X」）。
   proration?: { applies: boolean; fullPrice: number; remainingDays: number; remainingValue: number; chargeAmount: number };
+  /** 测试期模拟支付单（PAY_MOCK_SUCCESS）：pay 是占位值，端上跳过 wx.requestPayment，改调 POST /pay/mock/pay。 */
+  mock?: true;
 }
 /** 支付订单状态（GET /pay/orders/:outTradeNo）：requestPayment 成功后前端轮询用；
  *  未发放且已配支付时服务端会先主动查单补账，消除回调竞态。 */
@@ -1149,10 +1159,16 @@ export interface PayOrderListItem extends PayOrderStatus {
   createdAt: string;
   refundedAt?: string;
   payable: boolean; // created 且未过支付时限 → 可调 POST /pay/orders/:outTradeNo/pay-params 继续支付
+  mock?: true; // 测试期模拟支付单（PAY_MOCK_SUCCESS）：未实际付款，前台需明示
 }
 export interface PayOrderListResult { items: PayOrderListItem[] }
-/** 继续支付（POST /pay/orders/:outTradeNo/pay-params）：重签 wx.requestPayment 调起参数。 */
-export interface PayRepayResult { ok: true; outTradeNo: string; pay: WechatPayParams }
+/** 继续支付（POST /pay/orders/:outTradeNo/pay-params）：重签 wx.requestPayment 调起参数。
+ *  mock=true 时 pay 是占位值，改调 POST /pay/mock/pay。 */
+export interface PayRepayResult { ok: true; outTradeNo: string; pay: WechatPayParams; mock?: true }
+/** 测试期模拟支付（POST /pay/mock/pay，仅 PAY_MOCK_SUCCESS 且未配真凭据时可用）：
+ *  等价于「用户点了支付且微信回调成功」，走真实 markPaidAndApply 发放权益。applied=false + reason
+ *  多为幂等重复调用（already_applied），端上仍应按成功处理并轮询订单状态。 */
+export interface PayMockPayResult { ok: boolean; applied: boolean; reason?: string; status: string }
 
 export type WechatSubscribeScene = 'review' | 'report' | 'payment';
 export type WechatSubscribeStatus = 'accept' | 'reject' | 'ban' | 'filter';
@@ -1255,6 +1271,7 @@ export interface AdminPaymentItem {
   orderNo: string; // 尾 6 位（列表紧凑展示）
   outTradeNo: string; // 完整商户单号（微信商户平台查单/对账用）
   userName: string; amount: number; status: string; attrSource: string | null; paidAt: string | null; createdAt: string;
+  mock: boolean; // 测试期模拟支付单（PAY_MOCK_SUCCESS）：无真实资金，已从 summary 营收金额里排除
 }
 /** 需要运营关注的异常单：paid_unapplied=收钱未发权益（资损，可一键查单补账）；created_stale=超时未支付（等 sweep 关单或人工核实）。 */
 export interface AdminPaymentStuckItem {
@@ -1262,8 +1279,11 @@ export interface AdminPaymentStuckItem {
   kind: 'paid_unapplied' | 'created_stale';
   provider: string; planId: string; skuKey: string | null;
   paidAt: string | null; createdAt: string;
+  mock: boolean; // 测试期模拟支付单：不是资损，也不需要查单补账
 }
 export interface AdminPaymentsView {
+  // paidAmount / paidCount / byDay 只统计真实微信收款（provider='wechat'）——
+  // 模拟支付单与沙箱单不进营收金额，否则测试期的假钱会污染经营看板。
   summary: { paidAmount: number; paidCount: number; byDay: { day: string; amount: number }[] }
   items: AdminPaymentItem[]
   stuck: AdminPaymentStuckItem[]
@@ -1431,7 +1451,9 @@ export interface AdminTraceItem {
 
   kind: string;        // deliverable | chat
   provider: string;    // openai | claude | mock | dify
-  model: string;
+  model: string;       // 本次实际命中端点的 model（不是全局激活配置的占位值）
+  endpointId: string | null;
+  endpointLabel: string | null; // 调用时快照；端点后续改名/删除也不影响历史排障
   status: 'ok' | 'error';
   latencyMs: number;
   toolCalls: number;

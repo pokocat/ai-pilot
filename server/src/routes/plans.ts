@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { applyPlanPurchase } from '../services/purchase.js';
-import { payConfigured, createJsapiOrder } from '../services/wechatPay.js';
+import { payConfigured, createJsapiOrder, payMockSuccessEnabled } from '../services/wechatPay.js';
 import { sandboxEnabled, demoPurchaseEnabled } from '../services/sandbox.js';
 import { computeUpgradeProration } from '../services/proration.js';
 import { isExpired, daysRemaining } from '../services/planTime.js';
@@ -71,7 +71,11 @@ export async function planRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
-    if (!payConfigured() && !sandboxEnabled()) return reply.code(501).send({ error: '微信支付未配置，演示环境请走 /plans/:id/purchase', code: 'PAYMENT_NOT_CONFIGURED' });
+    // PAY_MOCK_SUCCESS 一并放行：它建的是**真实 PaymentOrder**（快照/金额/归因/频控/关旧单全走），
+    // 只是不去调微信 JSAPI，付款由 POST /pay/mock/pay 模拟——这样订单状态机与发放链路在无凭据环境下也能被跑通。
+    if (!payConfigured() && !sandboxEnabled() && !payMockSuccessEnabled()) {
+      return reply.code(501).send({ error: '微信支付未配置，演示环境请走 /plans/:id/purchase', code: 'PAYMENT_NOT_CONFIGURED' });
+    }
     if (plan.price <= 0) return reply.code(400).send({ error: '免费套餐无需支付', code: 'PLAN_FREE' });
     const openid = (req.body?.openid || (user as { wechatOpenId?: string | null }).wechatOpenId || '').trim();
     if (!openid) return reply.code(400).send({ error: '缺少支付用户 openid', code: 'OPENID_REQUIRED' });
@@ -113,6 +117,7 @@ export async function planRoutes(app: FastifyInstance) {
       }
       return {
         ok: true, outTradeNo: r.outTradeNo, amount: proration.chargeAmount, pay: r.pay,
+        ...(r.mock ? { mock: true as const } : {}),
         proration: proration.applies
           ? { applies: true, fullPrice: proration.fullPrice, remainingDays: proration.remainingDays, remainingValue: proration.remainingValue, chargeAmount: proration.chargeAmount }
           : undefined,

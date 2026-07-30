@@ -95,33 +95,34 @@ export default function Profile() {
 
   const fortuneOn = s.fortuneOn(); // P0-2：命理关 → 隐藏「送你一卦」入口
 
-  // 年度谶语卡（留存机制 #16 M1，档案组顶部、命盘报告入口之上）：
-  // 有谶 → 竖排七言 + 干支落款（verseYear 缺失只落「军师赠」）；无谶 → 求谶引导（点进命盘报告）。
-  // 命理开关关闭时整卡不渲染（与命盘报告入口同一 gating）。
+  // 年度谶语（留存机制 #16 M1）：并入账户服务卡尾部的题字带，不再单独占一张白卡（原来夹在「档案」组标题
+  // 和菜单之间，上下都是卡、空间散）。题字带与卡内其它行同宽同边距——卡内只保留一套对齐，不另开边栏，
+  // 否则权益格/服务格/落款会各自一个右边界，看着错乱。无谶 → 同一条带里一行求谶引导（点进命盘报告）。
+  // 命理开关关闭时整块不渲染（与命盘报告入口同一 gating）。
   const verse = (strategic?.verse || '').trim();
   const verseGanZhi = ganZhiYear(strategic?.verseYear);
-  const verseCard = !fortuneOn ? null : verse ? (
-    <View className="verse-card card">
-      <Text className="vc-kicker">年 度 谶 语</Text>
-      <View className="vc-cols">
-        {verseColumns(verse).map((col, ci) => (
-          <View key={`vc-${ci}`} className="vc-col">
-            {col.map((ch, i) => <Text key={`vc-${ci}-${i}`} className="vc-ch serif">{ch}</Text>)}
-          </View>
+  // 周期陪伴：军师全年把真实事件对到谶上（点谶）。无记录时这行落到岁验预告，不留空。
+  const moments = strategic?.verseMoments ?? [];
+  const lastMoment = moments.length ? moments[moments.length - 1] : null;
+  const verseBand = !fortuneOn ? null : verse ? (
+    <View className="verse-band">
+      <View className="vb-head">
+        <Text className="vb-kicker">年 度 谶 语</Text>
+        <Text className="vb-sign serif">{verseGanZhi ? `${verseGanZhi}年 · 军师赠` : '军师赠'}</Text>
+      </View>
+      <View className="vb-lines">
+        {verseLines(verse).map((line, i) => (
+          <Text key={`vb-${i}`} className="vb-line serif">{line}</Text>
         ))}
       </View>
-      <View className="vc-foot">
-        <Text className="vc-sign serif">{verseGanZhi ? `${verseGanZhi}年 · 军师赠` : '军师赠'}</Text>
-        <Text className="vc-note">岁末对账</Text>
-      </View>
+      <Text className="vb-moment">
+        {lastMoment ? `已点谶 ${moments.length} 次 · 最近：${lastMoment.note}` : '岁末逐句对账'}
+      </Text>
     </View>
   ) : (
-    <View className="verse-card verse-empty card" onClick={() => navTo('/packages/work/mingpan/index')}>
-      <View className="vc-eb">
-        <Text className="vc-et serif">你还没有今年的谶</Text>
-        <Text className="vc-es">做完命盘，我赠你一句。</Text>
-      </View>
-      <Text className="vc-ego">去命盘 ›</Text>
+    <View className="verse-band verse-ask" onClick={() => navTo('/packages/work/mingpan/index')}>
+      <Text className="va-t">年度谶语 · 你还没有今年的谶</Text>
+      <Text className="va-go">去命盘领一句 ›</Text>
     </View>
   );
 
@@ -234,6 +235,9 @@ export default function Profile() {
               </View>
             </View>
           </View>
+
+          {/* 年度谶语题字带：卡尾用一条发丝线收口，与上面各行同宽 */}
+          {verseBand}
         </View>
 
         {/* 经营统计（account-statline）：案卷 / 方案 / 资料（真实计数，四名词统一） */}
@@ -272,7 +276,6 @@ export default function Profile() {
         {menuGroups.map((g) => (
           <View key={g.title} className="menu-group">
             <Text className="menu-group-title">{g.title}</Text>
-            {g.title === '档案' ? verseCard : null}
             <View className="menu card">
               {g.rows.map((r) => (
                 <View key={r.t} className="menu-row" onClick={r.onClick}>
@@ -457,20 +460,20 @@ function ganZhiYear(y?: number | null): string {
   const z = (((y - 4) % 12) + 12) % 12;
   return `${TIAN_GAN[g]}${DI_ZHI[z]}`;
 }
-// 竖排断句：按标点切句，一句一列（渲染时自右向左），标点不入列；最多 4 列。
-// 无标点连写的长句（如两句七言写成一串）按 7 字再断，免得单列过长把卡片顶穿。
-function verseColumns(verse: string): string[][] {
-  const cols: string[][] = [];
-  for (const line of verse.split(/[，,。.；;、！!？?｜|/\s]+/)) {
-    const chars = Array.from(line.trim());
+// 断句：按标点切句，一句一行（居中排，读起来是一副对子），标点不入行；最多 4 行。
+// 无标点连写的长句（如两句七言写成一串）按 7 字再断，免得单行过长撑破卡宽。
+function verseLines(verse: string): string[] {
+  const lines: string[] = [];
+  for (const seg of verse.split(/[，,。.；;、！!？?｜|/\s]+/)) {
+    const chars = Array.from(seg.trim());
     if (!chars.length) continue;
     if (chars.length > 8) {
-      for (let i = 0; i < chars.length; i += 7) cols.push(chars.slice(i, i + 7));
+      for (let i = 0; i < chars.length; i += 7) lines.push(chars.slice(i, i + 7).join(''));
     } else {
-      cols.push(chars);
+      lines.push(chars.join(''));
     }
   }
-  return cols.slice(0, 4);
+  return lines.slice(0, 4);
 }
 
 // 提醒菜单右值：有社群显示复盘时间，否则留空。
