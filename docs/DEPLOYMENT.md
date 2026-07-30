@@ -170,10 +170,17 @@ npm run db:upgrade-poster-prompt               # ③ 先 dry-run 看将要发生
 npm run db:upgrade-poster-prompt -- --apply    #    再真写库：幂等把「成品图版式推荐」段落追加进 poster 提示词
 # 运行时读的是 AgentVersion 的已发布快照，所以脚本同时改 Agent.systemPrompt 与已发布版本，否则 C 端不生效
 ```
-② **中文字体**：Docker 路径已在 `deploy/Dockerfile.server` 装好 `fonts-noto-cjk`（开源 OFL，可商用打包）；**裸机部署需自行安装**，否则渲染出的海报中文全是方框：
+② **中文字体**：Docker 路径已在 `deploy/Dockerfile.server` 装好 `fonts-noto-cjk`（开源 OFL，可商用打包）。裸机按发行版装，**包名和 family 名都因发行版而异**，装完必须用 `fc-match` 验证 family 能命中，不要只看包装上了：
+
 ```bash
-sudo apt-get install -y fontconfig fonts-noto-cjk fonts-noto-cjk-extra && fc-cache -f
+fc-list :lang=zh | wc -l && fc-match "Noto Sans CJK SC" && fc-match "Noto Serif CJK SC"
 ```
+
+- **当前生产 ECS（Alibaba Cloud Linux 4）已自带** `google-noto-cjk`，提供 `Noto Sans CJK SC` / `Noto Serif CJK SC`，无需安装（2026-07-29 实测 14 个字体文件在位）。注意它**没有** apt，`apt-get install fonts-noto-cjk` 在这台机器上跑不通。
+- Debian/Ubuntu：`sudo apt-get install -y fontconfig fonts-noto-cjk fonts-noto-cjk-extra && fc-cache -f`
+- RHEL/Anolis/alinux：`sudo dnf install -y fontconfig google-noto-sans-cjk-fonts google-noto-serif-cjk-fonts && fc-cache -f`
+
+⚠️ **family 名的坑**：Pan-CJK 包装出来的名字是 `Noto Sans CJK SC`，与 Google Fonts 子集版的 `Noto Sans SC` 是**两个不同 family**。生产实测 `fc-match "Noto Sans SC"` 命中的是纯拉丁的 `NotoSans-VF.ttf`（连 `fc-match "Noto Serif SC"` 也是它，衬线都不保）。`templates.ts` 的字体栈两种名字都写了，动那里时不要删掉 CJK 名——只留子集名会让整栈落空到通用 `sans-serif`，中文全靠 Chromium 逐字回退，版式的衬线区分随之丢失。
 最后再置 `CANVAS_DESIGN_ENABLED=true` 重启 API 放量。回滚不需要发版：后台「创作任务」页关掉开关即时熔断（已入队任务留在库里，重新打开后 worker 继续跑）。仓库**不提交字体二进制**。
 
 ## 6. （可选）启用 pgvector 语义检索加速

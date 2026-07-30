@@ -17,9 +17,11 @@ ENV NODE_ENV=production
 # 进程本地时区（server/src/services/clock.ts 的 now() 是裸 new Date()），node:20-slim
 # 默认 UTC，不固定会导致这些判断全部按 UTC 算，与产品预期的北京时间错开 8 小时。
 ENV TZ=Asia/Shanghai
-# 海报成品图 2026-07-29：Puppeteer 渲染中文海报依赖系统 CJK 字体（模板字体栈首选
-# "Noto Sans SC"/"Noto Serif SC" = fonts-noto-cjk，开源 OFL 可商用打包）。slim 基础镜像
-# 无任何中文字体，不装会整版豆腐块；fontconfig 让 Chromium 能发现字体。
+# 海报成品图 2026-07-29：Puppeteer 渲染中文海报依赖系统 CJK 字体。fonts-noto-cjk 装出的
+# family 名是 "Noto Sans CJK SC"/"Noto Serif CJK SC"（Pan-CJK），不是 Google Fonts 子集
+# 版的 "Noto Sans SC"/"Noto Serif SC"——两者是不同 family，templates.ts 的字体栈两种都写
+# 了，改这里时不要只留一种。slim 基础镜像无任何中文字体，不装会整版豆腐块；
+# fontconfig 让 Chromium 能发现字体。
 RUN apt-get update && apt-get install -y --no-install-recommends tzdata fontconfig fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /repo/server/node_modules ./node_modules

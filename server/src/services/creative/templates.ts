@@ -17,9 +17,17 @@ export const CANVAS = { width: 540, height: 720, scale: 2 } as const;
 /** 画布根元素 class。渲染器的溢出量测要对准它（不是 document），改名务必同步 renderer.ts。 */
 export const CANVAS_CLASS = 'poster';
 
-/** 中文字体栈：全部为镜像内置或系统自带（Docker 装 fonts-noto-cjk）；不下载、不外链。 */
-const FONT_SANS = '"Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-const FONT_SERIF = '"Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif';
+/** 中文字体栈：全部为镜像内置或系统自带；不下载、不外链。
+ *  必须同时写 Pan-CJK 名（"Noto Sans CJK SC"）和 Google Fonts 子集名（"Noto Sans SC"）——
+ *  它们是两个不同的 family，装了前者不代表后者能命中。2026-07-29 在生产 ECS
+ *  （Alibaba Cloud Linux 4 + google-noto-cjk 包）实测：
+ *    fc-match "Noto Sans SC"   -> NotoSans-VF.ttf（纯拉丁，无中文字形）
+ *    fc-match "Noto Serif SC"  -> NotoSans-VF.ttf（同上，连衬线都不是）
+ *    fc-match "Noto Sans CJK SC" -> NotoSansCJKsc-Regular.otf ✓
+ *  只写子集名会让整个栈落空到通用 sans-serif（也是纯拉丁），中文全靠 Chromium
+ *  逐字回退，衬线/无衬线的版式区分随之丢失。 */
+const FONT_SANS = '"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+const FONT_SERIF = '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif';
 
 /** AI 生成标识文案（默认渲染，样式可配，整体不可关）。 */
 export const AI_MARK_TEXT = 'AI 生成内容 · 军师参谋部';
