@@ -18,11 +18,11 @@
 // 只读观测屏里，正是运营找不到东西的根因。同时初版「配置」堆到 8 项（商品+开关+内容+权限
 // 混装），已顶到本文件下方与 DESIGN.md 都写着的「超 8 项就拆组」上限。故按看/改重排为 7 组。
 
-/** 22 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
+/** 23 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
   | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
-  | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags';
+  | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative';
 
 export type GroupKey = 'today' | 'people' | 'revenue' | 'studio' | 'observe' | 'catalog' | 'settings';
 
@@ -90,6 +90,9 @@ export const NAV_SECTIONS: NavSection[] = [
   // 模型配置归这里而不是「观测」：该页主体是写操作（换模型 / key / 单价 / 池权重 / 嵌入重排）。
   { key: 'model', label: '模型配置', hint: '切换模型、端点池分流与探活', icon: 'insight', group: 'settings', aliases: ['大模型', 'model', '端点', '池', 'api key', '切换', '嵌入', '重排'] },
   { key: 'flags', label: '功能开关', hint: '合规一键降级与数值配置', icon: 'shield', group: 'settings', aliases: ['开关', 'flag', '降级', '合规', '灰度', '告警', '阈值'] },
+  // 海报成品图归「配置」而不是「观测」：本页主体是写操作（功能开关 / 改单价 / 填供应商 key / 模板启停），
+  // 任务台只是这套配置的验收面（同「模型配置」——端点冷却是次要属性，不足以把唯一写屏塞进只读组）。
+  { key: 'creative', label: '创作任务', hint: '海报成品图开关、单价、图片供应商与任务台', icon: 'image', group: 'settings', aliases: ['海报', '成品图', '出图', '创作', 'canvas', 'canvas_design', 'poster', '供应商', '图片', '任务台', '重试', '钻石单价'] },
   { key: 'benchmark', label: '行业基准', hint: '行业指标分位值维护与 CSV 导入', icon: 'trend', group: 'settings', aliases: ['基准', 'benchmark', '指标', 'csv', '分位'] },
   { key: 'say', label: '每日献策', hint: '每日 08:00 推送的献策池', icon: 'spark', group: 'settings', aliases: ['献策', '推送', 'saying', '每日'] },
   { key: 'form', label: '问卷', hint: '开局问卷题目（只读）', icon: 'doc', group: 'settings', aliases: ['问卷', 'survey', '题目'] },

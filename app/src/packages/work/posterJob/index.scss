@@ -1,0 +1,105 @@
+/* 海报成品图 · 任务详情。原生页面滚动（表单就地展开，不用 fixed 弹层，见 AGENTS.md §7.2）。 */
+
+.poster-job {
+  background: var(--bg);
+  padding-bottom: 44px;
+}
+.pj-pad { padding: 0 18px; }
+
+.pj-loading { padding: 60px 0; text-align: center; color: var(--ink-3); font-size: 14px; }
+.pj-empty { padding: 64px 8px; text-align: center; }
+.pj-empty-t { display: block; font-size: 19px; font-weight: 600; color: var(--ink); margin-bottom: 18px; }
+.pj-note { display: block; margin-top: 12px; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); }
+
+/* —— 制作中 —— */
+.pj-making { padding: 44px 8px 8px; text-align: center; }
+.pj-spin {
+  width: 28px; height: 28px; margin: 0 auto;
+  border: 2px solid var(--line); border-top-color: var(--ink-2); border-radius: 999px;
+  animation: pj-rot .8s linear infinite;
+}
+@keyframes pj-rot { to { transform: rotate(360deg); } }
+.pj-making-t { display: block; margin-top: 16px; font-size: 20px; font-weight: 600; color: var(--ink); }
+.pj-making-d { display: block; margin-top: 8px; font-size: 13px; line-height: 1.6; color: var(--ink-3); }
+.pj-stages {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  margin: 26px 0 4px;
+}
+.pj-stage { width: 23%; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.pj-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--line); }
+.pj-stage-t { font-size: 11.5px; color: var(--ink-3); }
+.pj-stage-t.on { color: var(--ink); font-weight: 600; }
+
+/* —— 成品大图 —— */
+.pj-canvas {
+  margin-top: 14px; padding: 12px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+}
+.pj-img { width: 100%; height: 420px; }
+
+.pj-acts { display: flex; align-items: center; gap: 9px; margin-top: 12px; }
+.pj-act {
+  flex: 1; height: 46px; border-radius: 13px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--surface-2);
+}
+.pj-act.ghost { background: var(--surface-2); border: 1px solid var(--line); }
+.pj-act-t { font-size: 14px; font-weight: 500; color: var(--ink-2); }
+.pj-act-t.on { color: #fff; }
+.pj-act-c { font-size: 11.5px; color: var(--ink-3); }
+
+/* —— 失败 / 取消 —— */
+.pj-state { padding: 52px 8px 8px; text-align: center; }
+.pj-state-t { display: block; font-size: 20px; font-weight: 600; color: var(--ink); }
+.pj-state-d { display: block; margin-top: 10px; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.pj-state-r { display: block; margin-top: 8px; font-size: 12.5px; color: var(--ink-3); }
+
+/* —— 就地展开的编辑面板 —— */
+.pj-panel {
+  margin-top: 20px; padding: 15px 14px 16px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--surface);
+}
+.pj-panel-h { display: flex; align-items: center; justify-content: space-between; }
+.pj-panel-t { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink); }
+.pj-panel-x { width: 26px; text-align: right; font-size: 18px; color: var(--ink-3); }
+.pj-panel-d { display: block; margin-top: 7px; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); }
+
+.pj-field { margin-top: 14px; }
+.pj-flabel { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.pj-fl { font-size: 13px; font-weight: 600; color: var(--ink); }
+.pj-ferr { display: block; margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--danger); }
+.pj-count { font-size: 11.5px; color: var(--ink-3); }
+.pj-count.over { color: var(--danger); font-weight: 600; }
+
+/* 原生 Input 定高三件套：height / min-height / line-height 三等值，padding 只写水平向。 */
+.pj-input {
+  box-sizing: border-box; width: 100%;
+  height: 46px; min-height: 46px; line-height: 46px;
+  padding: 0 13px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface-2); font-size: 14.5px; color: var(--ink);
+}
+.pj-area {
+  box-sizing: border-box; width: 100%;
+  height: 84px; padding: 11px 13px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface-2); font-size: 14px; line-height: 1.6; color: var(--ink);
+}
+
+.pj-tpls { display: flex; flex-direction: column; gap: 9px; }
+.pj-tpl { padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+.pj-tpl-h { display: flex; align-items: center; justify-content: space-between; }
+.pj-tpl-n { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.pj-tpl-d { display: block; margin-top: 4px; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+
+.pj-btn {
+  margin-top: 18px; height: 48px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.pj-btn.ghost { background: transparent; border: 1px solid var(--line); }
+.pj-btn.ghost Text, .pj-btn.ghost text { color: var(--ink-2); font-size: 14px; font-weight: 500; }
+.pj-btn-t { font-size: 15.5px; font-weight: 600; color: #fff; }
+.pj-btn-c { font-size: 13px; color: rgba(255, 255, 255, .8); }
+
+.pj-prev { display: block; margin-top: 22px; text-align: center; font-size: 13.5px; font-weight: 600; }

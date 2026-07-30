@@ -19,6 +19,8 @@ import type {
   DataSourcesView, ModulesView, ModuleView, ReminderView, WorkbenchView, SearchResult,
   KnowledgePipelineView, OrganizeResult, ConfirmResult, StagedUploadResult,
   StrategicProfile, ReviewLogItem, ReviewsResult,
+  CreativeStatusResult, PosterBriefDraft, CreativeUploadResult, CreativeJobView,
+  CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -36,6 +38,12 @@ export type { QuickScanRequest, QuickScanResult } from '../../../shared/contract
 export type { JourneyView, JourneyStage, JourneyNextStep } from '../../../shared/contracts';
 export type { PrescriptionView, PrescriptionListView, DeliverablePrescription } from '../../../shared/contracts';
 export type { BrandKitView, BrandKitPersona, BrandKitVoice, BrandKitTheme } from '../../../shared/contracts';
+// 海报成品图（canvas_design）：确认页 / 详情页 / 成果卡入口共用的契约类型。
+export type {
+  PosterBrief, PosterBriefDraft, PosterScene, PosterRatio,
+  CreativeStatusResult, CreativeUploadResult, CreativeJobView, CreativeAssetView,
+  CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
+} from '../../../shared/contracts';
 export type { SkuView, SkuOrderResult, SkuKind, WechatPayParams, PayOrderStatus, PayOrderListItem, PayOrderListResult, PayRepayResult } from '../../../shared/contracts';
 export type {
   BattleForce, BattleCommitResult, ForceKind, ForceLevel, ForceTone,
@@ -96,6 +104,19 @@ export interface ProgressView {
   milestones: Record<string, string>;
   nextRank: { rank: string; requirement: string } | null;
 }
+
+// 海报成品图建单返回。注意：服务端 POST /creative/posters|revise|regenerate 回的是**轻量建单结果**
+// （jobId/status/creditCost/reused），不是 CreativeJobView——拿到 jobId 后由详情页再查 GET /creative/jobs/:id。
+// SSOT（shared/contracts）里只定义了请求体与 CreativeJobView，这个返回体按 api.ts 既有惯例在前端就地声明。
+export interface CreatePosterJobResult {
+  jobId: string;
+  status: string;
+  creditCost: number;
+  /** true = 命中幂等键，返回的是既有任务（未重复扣费）。重复点击/断网重试都会走到这里。 */
+  reused: boolean;
+}
+/** 源素材角色（服务端按 role 归类 CreativeAsset，仅用于审计与归属校验）。 */
+export type CreativeUploadRole = 'portrait' | 'logo' | 'qr';
 
 // WO-10 经营周报：模板（按行业返回可报指标）/ 周序列（最近 N 周）。字段由行业决定，前端动态渲染。
 export interface BizMetricTemplateItem { metricKey: string; metricName: string; unit: string; }
@@ -387,6 +408,24 @@ async function uploadChatImageFile(
   try { return JSON.parse(res.data) as { id: string }; } catch { return { id: '' }; }
 }
 
+// 海报源素材上传（人像 / Logo / 二维码）：multipart 单文件 → 私有 OSS + CreativeAsset(kind='source')。
+// 服务端约束：仅 png/jpg/gif/webp、单张 ≤10MB；越限回 413/415，这里把 error 原样透出（服务端文案已面向用户）。
+async function uploadCreativeAssetFile(filePath: string, role: CreativeUploadRole): Promise<CreativeUploadResult> {
+  const res = await Taro.uploadFile({
+    url: `${getApiBaseUrl()}/creative/uploads?role=${role}`,
+    filePath,
+    name: 'file',
+    header: { 'x-user-id': getToken() },
+  });
+  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode >= 400) {
+    let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
+    try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }
+    throw Object.assign(new Error(msg), { code, statusCode: res.statusCode });
+  }
+  return JSON.parse(res.data) as CreativeUploadResult;
+}
+
 // 头像上传：multipart 单文件 → 后端存 OSS → 落库 user.avatarUrl，返回公网链接。
 async function uploadAvatarFile(filePath: string): Promise<{ ok: boolean; avatarUrl: string }> {
   const res = await Taro.uploadFile({ url: `${getApiBaseUrl()}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': getToken() } });
@@ -635,6 +674,35 @@ export const api = {
   // —— 报告网页版（render_report → 自有域名 /api/r/:id）：产出后按需生成可分享链接 ——
   renderReport: (sessionId: string, messageId: string): Promise<{ htmlUrl?: string; cdnUrl?: string }> =>
     useMockApi() ? Promise.resolve({}) : request<{ htmlUrl?: string; cdnUrl?: string }>(`/sessions/${sessionId}/messages/${messageId}/report`, 'POST'),
+
+  // —— 海报成品图（canvas_design）——
+  // 能力状态：enabled=false 时前端**整块隐藏**出图入口（不露按钮再让用户点到 403）。缓存见 services/creative.ts。
+  creativeStatus: () =>
+    useMockApi() ? mock.creativeStatus() : request<CreativeStatusResult>('/creative/status'),
+  // 需求单草稿：按设计师成果 + 已确认品牌资产包预填，templateReason 是给用户看的推荐理由。
+  posterBriefDraft: (sessionId?: string, messageId?: string) => {
+    if (useMockApi()) return mock.posterBriefDraft(sessionId, messageId);
+    const qs: string[] = [];
+    if (sessionId) qs.push(`sessionId=${encodeURIComponent(sessionId)}`);
+    if (messageId) qs.push(`messageId=${encodeURIComponent(messageId)}`);
+    return request<PosterBriefDraft>(`/creative/posters/brief-draft${qs.length ? `?${qs.join('&')}` : ''}`);
+  },
+  uploadCreativeAsset: (filePath: string, role: CreativeUploadRole) =>
+    useMockApi() ? mock.uploadCreativeAsset(role) : uploadCreativeAssetFile(filePath, role),
+  // 建任务（幂等键按用户唯一 → 重复点击拿回原任务，reused=true 且不重复扣费）。
+  createPosterJob: (body: CreatePosterJobRequest) =>
+    useMockApi() ? mock.createPosterJob(body) : request<CreatePosterJobResult>('/creative/posters', 'POST', body),
+  // 任务详情（轮询这个；签名 URL 每次下发重签，**不要缓存 URL**）。
+  creativeJob: (id: string) =>
+    useMockApi() ? mock.creativeJob(id) : request<CreativeJobView>(`/creative/jobs/${id}`),
+  // 改文案重排：不再扣钻石，产出新任务（parentJobId 指向来源）。
+  reviseJob: (id: string, body: RevisePosterJobRequest) =>
+    useMockApi() ? mock.reviseJob(id, body) : request<CreatePosterJobResult>(`/creative/jobs/${id}/revise`, 'POST', body),
+  // 重出主视觉：再扣一次钻石，产出新任务。
+  regenerateJob: (id: string, body: RegeneratePosterJobRequest) =>
+    useMockApi() ? mock.regenerateJob(id, body) : request<CreatePosterJobResult>(`/creative/jobs/${id}/regenerate`, 'POST', body),
+  cancelJob: (id: string) =>
+    useMockApi() ? mock.cancelJob(id) : request<CreativeJobView>(`/creative/jobs/${id}/cancel`, 'POST', {}),
 };
 
 /** 由网页版链接（/api/r/:id）推导同一报告的 PDF 下载地址（/api/r/:id/pdf）。取不到则返回 null。 */

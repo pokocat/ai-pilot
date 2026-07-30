@@ -93,6 +93,27 @@ function businessPrompt(agentName: string, mission: string, output: string): str
   return `${BUSINESS_BOUNDARY}\n\n${MCKINSEY_METHOD}\n\n你是「${agentName}」。${mission}\n\n输出要求：${output}`;
 }
 
+/**
+ * 「海报成品图」（canvas_design）对 poster 提示词的追加段：让设计师在成果里给出模板推荐 + 一句理由。
+ *
+ * 为什么单独导出：**存量库里的提示词是运营在后台逐版调教出来的资产**（见 scripts/syncAdminContent.ts
+ * 文件头的漂移记录），不能整段覆盖。所以这一段做成可幂等追加的独立块，由
+ * `scripts/upgradePosterPrompt.ts` 按 MARKER 判重后 append 到库内现行提示词末尾。
+ * 本文件的 seed 值与那个脚本共用这一个常量 —— 只有一处 SSOT，不会两边漂。
+ *
+ * MARKER 换新版（比如以后加第四套模板）时：改 v1 → v2，脚本会把旧段整段替换成新段。
+ */
+export const POSTER_TEMPLATE_BLOCK_MARKER = '（本段为「海报成品图」能力的服务端约定，标记：canvas_design/template-recommendation/v1）';
+export const POSTER_TEMPLATE_BLOCK = '\n\n成果最后必须单独有一条「成品图版式推荐」，独占一行，格式固定为：'
+  + '\n成品图版式推荐：人物主视觉（person_hero）—— 推荐理由一句话'
+  + '\n三个版式只能选一个：人物主视觉（person_hero）、编辑杂志（editorial）、商业发布（business_launch）；'
+  + '括号里的英文标识原样保留，不要改写或翻译。理由写给客户看：一句话说清这版式为什么配得上他这次要办的事，'
+  + '不要出现参数、模型、渲染、模板 key 之类的技术说法。'
+  + `\n${POSTER_TEMPLATE_BLOCK_MARKER}`;
+
+/** 匹配任意版本的本段（升级时用来剔除旧段）。 */
+export const POSTER_TEMPLATE_BLOCK_MARKER_RE = /\n*（本段为「海报成品图」能力的服务端约定，标记：canvas_design\/template-recommendation\/v\d+）/g;
+
 function creativePrompt(agentName: string, mission: string, output: string): string {
   return `${BUSINESS_BOUNDARY}\n\n你是「${agentName}」。${mission}\n\n输出要求：${output}\n\n所有创作都必须服务于客户的商业目标、目标客群和品牌定位；不要解释模型能力、生成原理或内部流程。`;
 }
@@ -382,8 +403,9 @@ export const AGENTS: AgentSeed[] = [
     deliverableKey: '海报设计',
     systemPrompt: creativePrompt(
       '海报设计师',
-      '一张海报只讲一件事，用视觉层级和短文案服务单一商业转化目标。',
-      '产出：主视觉概念、主副文案、版式结构、色彩建议（结合 {本命色}）、多规格物料建议和投放场景。',
+      '一张海报只讲一件事，用视觉层级和短文案服务单一商业转化目标。先定视觉气质与信息层级，再落文案；信息装不下就建议拆成多张，不靠缩小字号硬塞。',
+      '产出：主视觉概念、主副文案、版式结构、色彩建议（结合 {本命色}）、多规格物料建议和投放场景。'
+      + POSTER_TEMPLATE_BLOCK,
     ),
     memoryConfig: defaultMemory,
     sort: 11,

@@ -22,6 +22,12 @@ const PDF_VH_OVERRIDE_CSS = `.cover{min-height:${RENDER_VIEWPORT_HEIGHT}px !impo
 // 故 CSS px 上限 = 200×96 = 19200；留一点余量取 19000，避免踩边界导致生成失败。超长报告 clamp 到此值并记 log。
 const MAX_PDF_HEIGHT_PX = 19_000;
 
+/** 最小合法 PNG（1×1 透明）——test 环境的截图桩；调用方按 isPdfTestMode() 跳过尺寸校验。 */
+export const STUB_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=',
+  'base64',
+);
+
 /** 最小合法 PDF（单空白页）——test 环境/需要占位时返回，浏览器可正常打开。 */
 const STUB_PDF = Buffer.from(
   '%PDF-1.4\n' +
@@ -49,12 +55,14 @@ export class PdfUnavailableError extends Error {
 
 // puppeteer 的最小结构类型（避免在无 Chromium 环境对完整类型的硬依赖，且便于 test 短路）。
 interface PdfPage {
-  setViewport(opts: { width: number; height: number }): Promise<void>;
+  setViewport(opts: { width: number; height: number; deviceScaleFactor?: number }): Promise<void>;
   setContent(html: string, opts: { waitUntil: string; timeout: number }): Promise<void>;
   emulateMediaType(type: string): Promise<void>;
   addStyleTag(opts: { content: string }): Promise<unknown>;
   evaluate<T>(fn: () => T): Promise<T>;
+  evaluate<T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
   pdf(opts: Record<string, unknown>): Promise<Uint8Array | Buffer>;
+  screenshot(opts: Record<string, unknown>): Promise<Uint8Array | Buffer>;
   close(): Promise<void>;
 }
 interface PdfBrowser {
@@ -144,6 +152,85 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
   if (isPdfTestMode()) return STUB_PDF;
   // 挂到队列尾部串行执行；无论成败都让队列继续（.catch 吞掉，仅用于排队，不影响本次结果）。
   const run = queue.then(() => withTimeout(renderOnce(html), PDF_TIMEOUT_MS, '报告 PDF 生成'));
+  queue = run.catch(() => {});
+  return run;
+}
+
+async function screenshotOnce(html: string, o: RenderPngOptions): Promise<RenderPngResult> {
+  const browser = await getBrowser();
+  let page: PdfPage | null = null;
+  try {
+    page = await browser.newPage();
+    // 分辨率由 viewport × deviceScaleFactor 决定（先渲染后放大会糊，故不做后期放大）。
+    await page.setViewport({ width: o.width, height: o.height, deviceScaleFactor: o.deviceScaleFactor ?? 2 });
+    await page.setContent(html, { waitUntil: 'networkidle0', timeout: o.timeoutMs ?? PDF_TIMEOUT_MS });
+    // 溢出量测（固定画布的质量闸）：截图只取视口，内容超出会被无声裁掉——把句子裁成半个笔画这种
+    // 缺陷交给调用方判定，而不是让它悄悄发到用户手里。
+    //
+    // ⚠️ 必须量「画布容器自身」而不是 document：固定画布通常带 overflow:hidden，
+    // 内部溢出会被它吃掉，document.scrollHeight 依然等于视口高 —— 这样量等于什么都没量到
+    // （首版就踩了这个坑，负向用例塞 160 字标题也报「没溢出」）。overflow:hidden 元素的
+    // scrollHeight 会如实报出内容高度，所以对准容器量才有意义。
+    // 回调在浏览器上下文执行；服务端 tsconfig 未含 dom lib，故经 globalThis 取 document。
+    const box = await page.evaluate((selector: string | null) => {
+      const doc = (globalThis as unknown as {
+        document: {
+          documentElement: { scrollWidth: number; scrollHeight: number };
+          body: { scrollWidth: number; scrollHeight: number };
+          querySelector(s: string): { scrollWidth: number; scrollHeight: number } | null;
+        };
+      }).document;
+      const el = selector ? doc.querySelector(selector) : null;
+      if (el) return { scrollWidth: el.scrollWidth, scrollHeight: el.scrollHeight };
+      return {
+        scrollWidth: Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth),
+        scrollHeight: Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight),
+      };
+    }, o.measureSelector ?? null);
+    // 海报是固定画布：按屏幕媒体渲染 + 只截视口，不做 fullPage。
+    const out = await page.screenshot({
+      type: 'png',
+      fullPage: false,
+      omitBackground: false,
+      clip: { x: 0, y: 0, width: o.width, height: o.height },
+    });
+    return { buffer: Buffer.isBuffer(out) ? out : Buffer.from(out), ...box };
+  } finally {
+    if (page) await page.close().catch(() => {});
+  }
+}
+
+/** 截图入参。分辨率 = width×deviceScaleFactor × height×deviceScaleFactor（如 540×720 @2x → 1080×1440）。 */
+export interface RenderPngOptions {
+  width: number;
+  height: number;
+  deviceScaleFactor?: number;
+  timeoutMs?: number;
+  /**
+   * 溢出量测对准的元素（CSS 选择器）。固定画布带 overflow:hidden 时**必须**传它，
+   * 否则量到的是 document，内部溢出被容器吃掉，等于没量（见 screenshotOnce 里的注释）。
+   * 缺省量 document。
+   */
+  measureSelector?: string;
+}
+
+/** 截图产物 + 文档实际尺寸（scrollWidth/Height > 视口 = 内容被裁，调用方据此判不合格）。 */
+export interface RenderPngResult {
+  buffer: Buffer;
+  scrollWidth: number;
+  scrollHeight: number;
+}
+
+/**
+ * HTML → 固定画布 PNG。与 htmlToPdf **共用**同一个浏览器单例 + 单并发队列 + 超时骨架
+ * （绝不另起浏览器实例：Chromium 一份就吃几百 MB，两份并发能把小机器打爆）。
+ * test 环境返回 1×1 桩 PNG（scroll 尺寸报为视口尺寸，即「没溢出」）；
+ * launch 失败抛 PdfUnavailableError（调用方转失败并退款）。
+ */
+export async function renderHtmlToPng(html: string, o: RenderPngOptions): Promise<RenderPngResult> {
+  if (isPdfTestMode()) return { buffer: STUB_PNG, scrollWidth: o.width, scrollHeight: o.height };
+  const timeoutMs = o.timeoutMs ?? PDF_TIMEOUT_MS;
+  const run = queue.then(() => withTimeout(screenshotOnce(html, o), timeoutMs, '海报截图'));
   queue = run.catch(() => {});
   return run;
 }

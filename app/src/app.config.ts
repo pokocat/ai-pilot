@@ -42,6 +42,9 @@ export default defineAppConfig({
         'webview/index',
         'command/index',
         'reminders/index',
+        // 海报成品图（canvas_design）：需求单确认页 + 任务详情页，入口在对话页的海报设计师成果卡。
+        'poster/index',
+        'posterJob/index',
       ],
     },
   ],
@@ -60,6 +63,12 @@ export default defineAppConfig({
       packages: ['packages/work', 'packages/main'],
     },
     'pages/thinktank/index': {
+      network: 'all',
+      packages: ['packages/work'],
+    },
+    // 对话页是海报成品图的唯一入口（成果卡「生成成品图」→ packages/work 的确认页/详情页）：
+    // 在这里预下载 work 分包，点按钮时不必等分包下载。
+    'packages/main/chat/index': {
       network: 'all',
       packages: ['packages/work'],
     },

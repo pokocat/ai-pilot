@@ -15,9 +15,13 @@ export function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toa
   const load = async () => res.reload();
   const toggle = async (e: MouseEvent, a: AdminAgent) => {
     e.stopPropagation();
-    await api.saveAgent(a.key, { enabled: !a.enabled });
-    await load();
-    toast(a.enabled ? '功能已下架' : '功能已上架');
+    // 上下架要 editor 权限：viewer 协作者能在列表里看到这个 agent，点下去会 403。
+    // 没有 catch 的话（403 不再踢回登录页后）就是一个彻底静默的「什么也没发生」。
+    try {
+      await api.saveAgent(a.key, { enabled: !a.enabled });
+      await load();
+      toast(a.enabled ? '功能已下架' : '功能已上架');
+    } catch (err) { toast((err as Error)?.message || '操作失败'); }
   };
   const openEdit = (e: MouseEvent, key: string) => {
     e.stopPropagation();
@@ -26,11 +30,13 @@ export function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toa
   const create = async () => {
     if (!/^[a-z][a-z0-9_]{1,30}$/.test(form.key)) return toast('key 需小写字母开头');
     if (!form.name.trim()) return toast('请填写名称');
+    // 新增智能体是 requireSuper：非超管拿到的是 403「需要 owner 权限」，
+    // catch 别再一律说成「key 可能已存在」——那会让运营反复改 key 试。
     try {
       await api.createAgent({ key: form.key, name: form.name, role: form.role, billing: form.billing, price: form.billing === 'free' ? 0 : form.price });
       setAdding(false); setForm({ key: '', name: '', role: '', billing: 'unlock', price: 10 });
       await load(); toast('已新增智能体（默认下架，点击可配置上架）');
-    } catch { toast('新增失败（key 可能已存在）'); }
+    } catch (e) { toast((e as Error)?.message || '新增失败（key 可能已存在）'); }
   };
   return (
     <>
@@ -96,7 +102,7 @@ type SkillForm = { id?: string; key: string; name: string; description: string; 
 
 const BLANK_SKILL: SkillForm = { key: '', name: '', description: '', httpMethod: 'POST', httpUrl: '', argsLocation: 'body', enabled: true, headersText: '', schemaText: '{\n  "type": "object",\n  "properties": {\n    "query": { "type": "string", "description": "参数说明" }\n  },\n  "required": ["query"]\n}' };
 
-const KIND_LABEL: Record<string, string> = { tool: '模型工具', output: '产出处理' };
+const KIND_LABEL: Record<string, string> = { tool: '模型工具', output: '产出处理', artifact: '成品交付' };
 
 export function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
   const [form, setForm] = useState<SkillForm | null>(null);

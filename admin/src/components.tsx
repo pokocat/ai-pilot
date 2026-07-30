@@ -64,7 +64,7 @@ export function ViewState<T>({ res, skeleton = 'rows', children }: {
   children: (data: T) => ReactNode;
 }) {
   if (res.error && res.data === null) {
-    return <div className="pad"><ErrorState msg={res.error} onRetry={res.reload} /></div>;
+    return <div className="pad"><ErrorState msg={res.error} onRetry={res.reload} forbidden={res.forbidden} /></div>;
   }
   if (res.initial) {
     return skeleton === 'none' ? null : <div className="pad"><Skeleton kind={skeleton} /></div>;
@@ -73,21 +73,22 @@ export function ViewState<T>({ res, skeleton = 'rows', children }: {
   return (
     <>
       {/* 已有旧数据但刷新失败：保留数据、顶部提示，不把运营已经在看的内容抽走 */}
-      {res.error && <div className="pad"><ErrorState msg={res.error} onRetry={res.reload} stale /></div>}
+      {res.error && <div className="pad"><ErrorState msg={res.error} onRetry={res.reload} stale forbidden={res.forbidden} /></div>}
       {children(res.data)}
     </>
   );
 }
 
-export function ErrorState({ msg, onRetry, stale = false }: { msg: string; onRetry?: () => void; stale?: boolean }) {
+/** forbidden=403：登录态没问题，是这个账户权限不够——文案要指向「找 owner 授权」，且不给重试按钮（再点还是 403）。 */
+export function ErrorState({ msg, onRetry, stale = false, forbidden = false }: { msg: string; onRetry?: () => void; stale?: boolean; forbidden?: boolean }) {
   return (
     <div className="state-err">
       <span className="ic"><Icon name="alert" size={16} /></span>
       <div className="b">
-        <div className="t">{stale ? '刷新失败，下面是上一次的数据' : '数据没能加载出来'}</div>
-        <div className="m">{msg}</div>
+        <div className="t">{forbidden ? (stale ? '权限已变化，下面是上一次的数据' : '当前账户没有查看这块内容的权限') : stale ? '刷新失败，下面是上一次的数据' : '数据没能加载出来'}</div>
+        <div className="m">{forbidden ? `${msg} · 需要的话请让 owner 调整授权（重试无效）` : msg}</div>
       </div>
-      {onRetry && <button type="button" className="mini-btn" onClick={onRetry}>重试</button>}
+      {onRetry && !forbidden && <button type="button" className="mini-btn" onClick={onRetry}>重试</button>}
     </div>
   );
 }

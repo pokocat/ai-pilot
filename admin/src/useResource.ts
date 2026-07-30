@@ -8,6 +8,7 @@
 // 「刚刚更新」），让运营知道自己看的是不是新鲜数据。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isForbidden } from './api';
 
 /** PageHead 等只读消费者用的窄接口——不含 setData，避免 Resource<T> 因入参逆变而无法赋给 Resource<unknown>。 */
 export interface ResourceStatus {
@@ -20,6 +21,8 @@ export interface Resource<T> extends ResourceStatus {
   data: T | null;
   /** 空串 = 无错误 */
   error: string;
+  /** 错误是 403「权限不足」而不是「加载失败」：登录态好着，文案该说去要授权，重试也没用 */
+  forbidden: boolean;
   /** 首次加载中（无任何数据）——用于骨架屏；刷新时为 false，避免整页闪回骨架 */
   initial: boolean;
   /** 就地替换数据（操作返回了新快照时省掉一次往返） */
@@ -33,6 +36,7 @@ export interface Resource<T> extends ResourceStatus {
 export function useResource<T>(fetcher: () => Promise<T>, deps: readonly unknown[] = []): Resource<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
+  const [forbidden, setForbidden] = useState(false);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState(0);
   // 递增请求号：只接受最后一次请求的结果，避免快速切筛选时旧响应盖掉新响应。
@@ -50,12 +54,15 @@ export function useResource<T>(fetcher: () => Promise<T>, deps: readonly unknown
         if (!alive.current || my !== reqId.current) return;
         setData(v);
         setError('');
+        setForbidden(false);
         setUpdatedAt(Date.now());
       })
       .catch((e: unknown) => {
         if (!alive.current || my !== reqId.current) return;
-        // 401/403 已由 api.req 广播 admin:unauth 切登录页，这里不再抛错误态（否则登录页背后闪一屏红字）。
+        // 401 已由 api.req 广播 admin:unauth 切登录页，这里不再抛错误态（否则登录页背后闪一屏红字）。
         if ((e as { code?: string })?.code === 'ADMIN_UNAUTHORIZED') return;
+        // 403 不是掉线：登录态保留，就地渲染成「需要授权」（旧版连它一起踢回登录页）。
+        setForbidden(isForbidden(e));
         setError((e as Error)?.message || '加载失败');
       })
       .finally(() => {
@@ -69,7 +76,7 @@ export function useResource<T>(fetcher: () => Promise<T>, deps: readonly unknown
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   const replace = useCallback((next: T) => { setData(next); setUpdatedAt(Date.now()); }, []);
 
-  return { data, error, loading, initial: loading && data === null, reload, updatedAt, setData: replace };
+  return { data, error, forbidden, loading, initial: loading && data === null, reload, updatedAt, setData: replace };
 }
 
 /** 「刚刚 / 3 分钟前」——页头的数据新鲜度标记。 */

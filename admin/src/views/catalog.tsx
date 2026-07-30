@@ -20,6 +20,8 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
     setForm({ name: p.name, priceYuan: p.price < 0 ? -1 : p.price / 100, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount, features: p.featuresJson.join('\n') });
   };
   const save = async (id: string) => {
+    // 套餐改价是 requireSuper：非超管会拿到 403「需要 owner 权限」，catch 必须原文透出，
+    // 不能盖成「保存失败」让运营去查网络（403 不再踢登录页，见 api.ts）。
     try {
       await api.savePlan(id, {
         name: form.name,
@@ -30,7 +32,7 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
         featuresJson: form.features.split('\n').map((s) => s.trim()).filter(Boolean),
       });
       setEditId(null); await load(); toast('套餐已更新');
-    } catch { toast('保存失败'); }
+    } catch (e) { toast((e as Error)?.message || '保存失败'); }
   };
   return (
     <>
@@ -81,7 +83,7 @@ export function SkusView({ toast }: { toast: (m: string) => void }) {
   };
   const toggleEnabled = async (s: AdminSku) => {
     try { await api.updateSku(s.key, { enabled: !s.enabled }); await load(); toast(s.enabled ? '已下架' : '已上架'); }
-    catch { toast('操作失败'); }
+    catch (e) { toast((e as Error)?.message || '操作失败'); } // 同 requireSuper：403 文案要原样透出
   };
   const save = async (key: string) => {
     try {
@@ -93,7 +95,7 @@ export function SkusView({ toast }: { toast: (m: string) => void }) {
         sort: form.sort,
       });
       setEditKey(null); await load(); toast('SKU 已更新');
-    } catch { toast('保存失败'); }
+    } catch (e) { toast((e as Error)?.message || '保存失败'); }
   };
   return (
     <>

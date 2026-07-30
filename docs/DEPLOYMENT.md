@@ -156,8 +156,25 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 | `EMBEDDING_MODEL` | 嵌入模型 | 留空=本地确定性嵌入；配则走 `/embeddings` |
 | `MODERATION_ENABLED` | 内容审核开关 | `true`（演示级关键词；生产换合规服务） |
 | `PGVECTOR_ENABLED` | pgvector 近邻检索 | `false`（启用见 §6） |
+| `CANVAS_DESIGN_ENABLED` | 海报成品图（`canvas_design`）**部署级硬开关** | 先发代码时留 `false`，走完 §5.1 三步再置 `true` 放量；与后台开关 `creative-poster` 是**合取**关系，任一关闭即整体关闭 |
+| `CANVAS_DESIGN_MAX_CONCURRENCY` / `CANVAS_DESIGN_TIMEOUT_MS` | 海报 worker 并发 / 单任务端到端超时（毫秒） | `1` / `180000`。渲染复用 `reportPdf` 的单例浏览器 + 单并发队列，上调并发不会真的并行，只会同时占内存 |
 
 > 模型 key 优先存数据库（后台「模型」页，运行时可切换、不入仓库）；env 仅作兜底。
+> 海报的价格 / 日限额 / 模板启停 / 图片供应商接入点（含密钥）都在**后台**「创作任务」页（存 `FeatureFlag` 行 `creative-poster` 的 payload，密钥经 `secretBox` 加密），不走 env。
+
+### 5.1 海报成品图上线三步（缺一不可）
+```bash
+cd /opt/junshi/server
+npm run db:push                                # ① 建 creative_job / creative_asset（本仓无 migrations 目录）
+npm run db:upgrade-poster-prompt               # ③ 先 dry-run 看将要发生的变更
+npm run db:upgrade-poster-prompt -- --apply    #    再真写库：幂等把「成品图版式推荐」段落追加进 poster 提示词
+# 运行时读的是 AgentVersion 的已发布快照，所以脚本同时改 Agent.systemPrompt 与已发布版本，否则 C 端不生效
+```
+② **中文字体**：Docker 路径已在 `deploy/Dockerfile.server` 装好 `fonts-noto-cjk`（开源 OFL，可商用打包）；**裸机部署需自行安装**，否则渲染出的海报中文全是方框：
+```bash
+sudo apt-get install -y fontconfig fonts-noto-cjk fonts-noto-cjk-extra && fc-cache -f
+```
+最后再置 `CANVAS_DESIGN_ENABLED=true` 重启 API 放量。回滚不需要发版：后台「创作任务」页关掉开关即时熔断（已入队任务留在库里，重新打开后 worker 继续跑）。仓库**不提交字体二进制**。
 
 ## 6. （可选）启用 pgvector 语义检索加速
 默认走"内存余弦"，数据量大时再开 pgvector（HNSW ANN）：
@@ -182,6 +199,7 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 - [ ] **鉴权**：短信验证码与小程序本机号登录已接入；当前小程序登录态仍是 `token=userId`（演示）→ 换 JWT；运营后台已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权，生产仍需细粒度 RBAC、管理员账号体系与密钥轮换策略。
 - [ ] **密钥**：`AiSetting.apiKey` 现明文存库 → 加密 / 接密管；`ADMIN_TOKEN` 必须使用高强度随机值并仅在服务端环境变量保存。
 - [ ] **内容审核/计量**：关键词→合规审核服务；算力按次扣减已实现，充值/支付/token 级归集待接。
+- [ ] **图片内容审核（海报成品图放量前必过）**：`services/creative/imageModeration.ts` 默认 `provider='none'` = 放行 + 审计记 `skipped`。放量前须接一家图片内容安全服务（后台「创作任务」页把 provider 置 `http` 并配地址/密钥），否则用户上传的人像与生成的主视觉都没有机器审核。文案侧已走既有 `moderate()`。
 - [ ] **限流 / 超时 / 重试**：给 `/api/generate*` 加限流；LLM 调用超时与重试。
 - [ ] **数据库**：定时备份（`pg_dump`）、连接加密、最小权限账号。
 - [ ] **CORS**：现 `origin: true`（放开）→ 生产收敛到你的域名白名单。

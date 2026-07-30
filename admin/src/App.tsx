@@ -25,6 +25,7 @@ import { AgentsView, SkillLibraryView, KnowledgeView, RetrievalDebugView } from 
 import { PlansView, SkusView, EcoToolsView } from './views/catalog';
 import { BenchmarksView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
 import { ModelView } from './views/model';
+import { CreativeView } from './views/creative';
 
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getAdminToken());
@@ -40,7 +41,8 @@ export default function App() {
 
   const showToast = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(''), 1800); }, []);
 
-  // 任一请求 401/403（密钥失效/被撤销）→ 切回登录页
+  // 任一请求 401（密钥失效/被撤销）→ 切回登录页。403 不在此列：那是权限不足，
+  // 登录态还好着，由页面就地提示（见 api.ts 的 401/403 分流）。
   useEffect(() => {
     const onUnauth = () => setAuthed(false);
     window.addEventListener('admin:unauth', onUnauth);
@@ -193,6 +195,7 @@ export default function App() {
               {key === 'moderation' && <ModerationView onOpenUser={openUser} />}
               {key === 'model' && <ModelView toast={showToast} />}
               {key === 'flags' && <FlagsView toast={showToast} isSuper={isOwner} />}
+              {key === 'creative' && <CreativeView toast={showToast} isSuper={isOwner} />}
               {key === 'form' && <SurveyView />}
               {key === 'plan' && <PlansView toast={showToast} />}
               {key === 'sku' && <SkusView toast={showToast} />}

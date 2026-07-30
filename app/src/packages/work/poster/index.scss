@@ -1,0 +1,115 @@
+/* 海报成品图 · 需求单确认页。原生页面滚动（表单页不套 ScrollView，见 AGENTS.md §7.2 Android Input 约束）。 */
+
+.poster-set {
+  background: var(--bg);
+  padding-bottom: 40px;
+}
+.ps-pad { padding: 0 18px; }
+
+.ps-loading { padding: 60px 0; text-align: center; color: var(--ink-3); font-size: 14px; }
+
+.ps-empty { padding: 70px 8px; text-align: center; }
+.ps-empty-t { display: block; font-size: 20px; font-weight: 600; color: var(--ink); }
+.ps-empty-d { display: block; margin-top: 10px; font-size: 13px; line-height: 1.6; color: var(--ink-3); }
+
+/* 版式推荐理由（设计师的「为什么这样设计」，原样展示） */
+.ps-reason {
+  margin-top: 10px; padding: 13px 14px;
+  border: 1px solid var(--line); border-left-width: 3px; border-radius: 12px;
+  background: var(--surface);
+}
+.ps-reason-h { display: flex; align-items: center; gap: 5px; }
+.ps-reason-k { font-size: 11.5px; font-weight: 600; letter-spacing: .1em; color: var(--ink-3); }
+.ps-reason-b { display: block; margin-top: 7px; font-size: 13.5px; line-height: 1.62; color: var(--ink); }
+
+.ps-note { display: block; margin-top: 12px; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); }
+
+.ps-sec {
+  display: block; margin: 26px 0 4px;
+  font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink);
+}
+
+.ps-field { margin-top: 14px; }
+.ps-flabel { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.ps-fl { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.ps-fl.sm { font-size: 12.5px; font-weight: 400; color: var(--ink-3); }
+.ps-fhint { display: block; margin: -3px 0 7px; font-size: 12px; line-height: 1.55; color: var(--ink-3); }
+.ps-ferr { display: block; margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--danger); }
+.ps-count { font-size: 11.5px; color: var(--ink-3); }
+.ps-count.over { color: var(--danger); font-weight: 600; }
+
+/* 原生 Input 定高三件套：height / min-height / line-height 三等值，padding 只写水平向。
+   微信原生 Input 不随内容撑高，只靠垂直 padding 定高会把宋体高字形上下裁切（真机必现）。 */
+.ps-input {
+  box-sizing: border-box; width: 100%;
+  height: 46px; min-height: 46px; line-height: 46px;
+  padding: 0 13px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface-2); font-size: 14.5px; color: var(--ink);
+}
+/* 多行输入用显式高度（不靠 padding 撑） */
+.ps-area {
+  box-sizing: border-box; width: 100%;
+  height: 92px; padding: 11px 13px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface-2); font-size: 14px; line-height: 1.6; color: var(--ink);
+}
+.ps-proof { margin-top: 10px; }
+
+/* 版式三选一 */
+.ps-tpls { display: flex; flex-direction: column; gap: 9px; }
+.ps-tpl {
+  padding: 12px 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+}
+.ps-tpl.on { background: var(--surface-2); }
+.ps-tpl-h { display: flex; align-items: center; justify-content: space-between; }
+.ps-tpl-n { font-size: 14px; font-weight: 600; color: var(--ink); }
+.ps-tpl-d { display: block; margin-top: 5px; font-size: 12.5px; line-height: 1.55; color: var(--ink-3); }
+
+/* 肖像确认 */
+.ps-consent {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin-top: 12px; padding: 12px 13px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+}
+.ps-check {
+  flex: 0 0 auto; width: 18px; height: 18px; margin-top: 1px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 5px; background: var(--surface-2);
+}
+.ps-consent-b { flex: 1; }
+.ps-consent-t { display: block; font-size: 13px; font-weight: 600; color: var(--ink); }
+.ps-consent-l { display: block; margin-top: 5px; font-size: 12px; line-height: 1.55; color: var(--ink-3); }
+
+/* 素材三格（两列约定用 48.5%，此处三列同理用 31.5% + space-between，不用 calc+gap） */
+.ps-slots { display: flex; flex-wrap: wrap; justify-content: space-between; margin-top: 12px; }
+.ps-slot { width: 31.5%; }
+.ps-slot-add {
+  height: 88px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  border: 1px dashed var(--line); border-radius: 12px; background: var(--surface-2);
+}
+.ps-slot-t { font-size: 12px; color: var(--ink-3); }
+.ps-thumb-wrap { position: relative; height: 88px; border-radius: 12px; overflow: hidden; background: var(--surface-2); }
+.ps-thumb { width: 100%; height: 88px; }
+.ps-thumb-x {
+  position: absolute; top: 4px; right: 4px;
+  width: 20px; height: 20px; line-height: 20px; text-align: center;
+  border-radius: 999px; background: rgba(0, 0, 0, .45); color: #fff; font-size: 14px;
+}
+.ps-slot-k { display: block; margin-top: 6px; text-align: center; font-size: 11.5px; color: var(--ink-3); }
+
+.ps-submit-err {
+  margin-top: 18px; padding: 11px 13px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+}
+.ps-submit-err-t { display: block; font-size: 13px; line-height: 1.55; color: var(--ink); }
+.ps-submit-err-a { display: block; margin-top: 7px; font-size: 13px; font-weight: 600; }
+
+.ps-foot { margin-top: 26px; }
+.ps-foot-note { display: block; margin-bottom: 10px; font-size: 12px; color: var(--ink-3); }
+.ps-btn {
+  height: 50px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.ps-btn-t { font-size: 15.5px; font-weight: 600; color: #fff; }
+.ps-btn-c { font-size: 13px; color: rgba(255, 255, 255, .8); }

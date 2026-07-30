@@ -9,6 +9,12 @@ import type { Tool, OutputSkill, SkillMeta } from './types.js';
 const TOOL_SKILLS: Tool[] = [searchKnowledge, recallMemory];   // kind='tool'：模型主动调用
 const OUTPUT_SKILLS: OutputSkill[] = [renderReport];           // kind='output'：产出后处理
 
+// kind='artifact'：异步任务产二进制交付物，不进模型循环、也没有可注册的执行体（提交入口是 creative 服务函数）。
+// 因此这里只登记元信息供技能库展示 + 按 agent 勾选；出现第二个 artifact 技能时再抽 ArtifactSkill 注册表。
+const ARTIFACT_SKILL_META: SkillMeta[] = [
+  { key: 'canvas_design', name: '海报成品图', description: '将海报设计师的方案渲染为可保存分享的成品图片', kind: 'artifact', builtin: true },
+];
+
 const TOOLS = new Map(TOOL_SKILLS.map((t) => [t.name, t]));
 const OUTPUTS = new Map(OUTPUT_SKILLS.map((s) => [s.key, s]));
 
@@ -22,12 +28,18 @@ export function builtinToolMeta(): { name: string; description: string }[] {
   return TOOL_SKILLS.map((t) => ({ name: t.name, description: t.description }));
 }
 
-/** 全部 native 技能的统一元信息(tool + output，带 kind)，供技能库展示。 */
+/** 全部 native 技能的统一元信息(tool + output + artifact，带 kind)，供技能库展示。 */
 export function nativeSkillMeta(): SkillMeta[] {
   return [
     ...TOOL_SKILLS.map((t) => ({ key: t.name, name: t.name, description: t.description, kind: 'tool' as const, builtin: true })),
     ...OUTPUT_SKILLS.map((s) => ({ key: s.key, name: s.name, description: s.description, kind: 'output' as const, builtin: true })),
+    ...ARTIFACT_SKILL_META,
   ];
+}
+
+/** 内置 artifact 技能的 key(与 output 同理：不是模型工具，解析工具时要排除)。 */
+export function builtinArtifactKeys(): string[] {
+  return ARTIFACT_SKILL_META.map((m) => m.key);
 }
 
 /** 内置 output 技能的 key(用于把它们从「喂给模型的工具」里排除)。 */

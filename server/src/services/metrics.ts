@@ -227,6 +227,23 @@ export function noteCreditDelta(delta: number, reason: string): void {
 const planGateBlocked = new LabeledCounter('junshi_plan_gate_blocked_total', '商业化禁写闸拦截数（state=none 未开通 | expired 已过期）——转化/续费信号');
 export function notePlanGateBlocked(state: string): void { planGateBlocked.inc({ state }); }
 
+/* ──────────────── 创作任务（海报成品图 canvas_design） ──────────────── */
+// 三个最小埋点：建单 / 成功 / 失败。失败按 code 分桶（供应商挂了 vs 渲染挂了 vs 审核拦了，处置动作完全不同）。
+// provider 标签取「有没有接图片模型」这一维（none = 纯排版路径），不带具体厂商名——厂商由运营在后台配，
+// 直接当标签会让基数随配置漂移。
+const creativeJobs = new LabeledCounter('junshi_creative_jobs_total', '创作任务事件数（skill=技能 key，provider=none|configured，event=created|succeeded|failed）');
+const creativeFailures = new LabeledCounter('junshi_creative_job_failures_total', '创作任务失败数（code=错误码）');
+export function noteCreativeJobCreated(skill: string, provider: string): void {
+  creativeJobs.inc({ skill, provider, event: 'created' });
+}
+export function noteCreativeJobSucceeded(skill: string, provider: string): void {
+  creativeJobs.inc({ skill, provider, event: 'succeeded' });
+}
+export function noteCreativeJobFailed(skill: string, provider: string, code: string): void {
+  creativeJobs.inc({ skill, provider, event: 'failed' });
+  creativeFailures.inc({ code: (code || 'UNKNOWN').slice(0, 32) });
+}
+
 /* ──────────────── 支付 ──────────────── */
 
 const payOrdersCreated = new LabeledCounter('junshi_pay_orders_created_total', '微信支付下单成功数');
@@ -417,6 +434,8 @@ export async function renderMetrics(): Promise<string> {
   moderationChecks.renderInto(ms);
   creditsFlow.renderInto(ms);
   planGateBlocked.renderInto(ms);
+  creativeJobs.renderInto(ms);
+  creativeFailures.renderInto(ms);
 
   /* —— 支付 —— */
   payOrdersCreated.renderInto(ms);
@@ -534,6 +553,7 @@ export function __resetMetrics(): void {
   llmCalls.reset(); llmCallDuration.reset(); llmTokens.reset(); llmCost.reset();
   genDegraded.reset(); outputTruncated.reset();
   registrations.reset(); moderationChecks.reset(); creditsFlow.reset(); knownCreditReasons.clear(); planGateBlocked.reset();
+  creativeJobs.reset(); creativeFailures.reset();
   payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset();
   alertForwards.reset();
   paySweep = { scanned: 0, applied: 0, failed: 0, closed: 0, runs: 0 };

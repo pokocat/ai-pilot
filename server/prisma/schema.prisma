@@ -1427,3 +1427,73 @@ model EcoTool {
 
   @@map("eco_tool")
 }
+
+/// 创作任务（产物型技能 kind='artifact' 的通用任务表；首个消费方 = 海报成品图 canvas_design）。
+/// 通用而非海报专用，便于后续扩展封面/长图/分镜图。方案见 docs/CANVAS_DESIGN_SKILL_INTEGRATION_PLAN.md §5.4。
+/// ★ 状态以本表为真源，不许只活在进程内存或页面 state（历史坑：会话 generating 在内存 Map、
+///   知识库 processDocument fire-and-forget，进程重启即卡死）。故第一天就配 sweep 兜底 + 幂等退款。
+model CreativeJob {
+  id             String    @id @default(cuid())
+  tenantId       String
+  userId         String
+  sessionId      String?
+  messageId      String? // 触发本任务的成果消息（成功后按「成果补丁」路径回写 assets）
+  agentKey       String
+  skillKey       String // 'canvas_design'
+  kind           String // poster | cover | social_card
+  status         String    @default("pending") // pending | running | succeeded | failed | cancelled
+  progress       String? // 用户可读阶段：philosophy | visual | render | upload
+  parentJobId    String? // revise/regenerate 版本链：新任务指向来源任务，成功任务的资产永不被覆盖
+  engine         String    @default("native") // native | anthropic_skill
+  provider       String? // 图片供应商标识（后台配置，不硬编码）
+  providerTaskId String? // 异步图片任务 id（sweep 据此续查）
+  requestJson    Json // PosterBrief 快照（建任务时定格，后续改文案走新任务）
+  resultJson     Json?
+  /// 编排侧标记（非业务入参）：running 中的取消请求 cancelRequested + 时间戳等。
+  /// 为什么不直接改 status：running 任务被外部强改状态会留下悬空产物与未退的钻石，
+  /// 只能打标记由 worker 在阶段检查点自行收口（见 services/creative/jobs.cancelJob）。
+  metadataJson   Json?
+  promptSnapshot String?   @db.Text // 视觉哲学 + 图片提示词原文（可追溯/可复现）
+  idempotencyKey String
+  creditCost     Int       @default(0) // 名义价（钻石）；不限量用户实扣 0 但此处仍记名义价
+  chargedAt      DateTime? // 非空=已扣；退款前置条件
+  refundedAt     DateTime? // 非空=已退；updateMany 抢占保证只退一次
+  errorCode      String?
+  errorMessage   String?   @db.Text
+  attempts       Int       @default(0)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  assets CreativeAsset[]
+
+  @@unique([userId, idempotencyKey]) // 幂等键按用户隔离：客户端生成的 key 不做全局唯一，避免跨用户撞键/探测
+  @@index([userId, createdAt])
+  @@index([status, createdAt]) // worker 抢占 pending + sweep 捞超时 running
+  @@index([tenantId])
+  @@map("creative_job")
+}
+
+/// 创作任务的资产（源素材 / 中间主视觉 / 成品图）。全部私有 OSS，key 不可猜：creative/{tenantId}/{jobId}/{assetId}.png。
+/// jobId 可空：源素材「先传后建任务」，此时按 userId 做归属校验（用户只能引用自己的素材）。
+model CreativeAsset {
+  id           String   @id @default(cuid())
+  jobId        String? // 空 = 尚未挂到任务上的源素材
+  tenantId     String
+  userId       String // 归属校验真源（brief 引用 assetId 时比对）
+  kind         String // source | visual | poster_png
+  ossKey       String
+  mimeType     String
+  width        Int?
+  height       Int?
+  bytes        Int?
+  metadataJson Json?
+  createdAt    DateTime @default(now())
+
+  job CreativeJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([jobId])
+  @@index([userId, createdAt])
+  @@map("creative_asset")
+}

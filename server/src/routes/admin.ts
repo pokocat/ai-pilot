@@ -23,7 +23,9 @@ import { encryptSecret, decryptSecretSafe } from '../services/secretBox.js';
 import { tokenUsageSummary } from '../services/usage.js';
 import { listTraces, getTrace } from '../services/trace.js';
 import { listModerationLogs } from '../services/moderation.js';
-import { isoSecond, recordAudit } from '../services/audit.js';
+import { isoSecond, recordAudit, maskAuditPhone } from '../services/audit.js';
+import { getCreativeConfig, updateCreativeConfig, publicCreativeConfig } from '../services/creative/config.js';
+import { dryRunVisualProvider } from '../services/creative/visualProvider.js';
 import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
@@ -54,6 +56,7 @@ import type {
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
   AdminBenchmark, AdminBenchmarkUpsert,
   AdminUserUsage, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult,
+  AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView, AdminCreativeJobItem,
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
@@ -987,6 +990,137 @@ export async function adminRoutes(app: FastifyInstance) {
     const r = await prisma.userModule.updateMany({ where: { userId: user.id, moduleKey: req.params.key }, data: { enabled: false } });
     await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'admin.user.module.revoke', payload: { by: actorName(actor), moduleKey: req.params.key, found: r.count > 0 } });
     return { ok: true, moduleKey: req.params.key, enabled: false };
+  });
+
+  /* ─────────── 海报成品图（canvas_design 创作任务）运营配置与任务台 ───────────
+   * 配置持久化 = FeatureFlag 单行 id='creative-poster'（enabled + payload），理由见
+   * services/creative/config.ts 文件头：不新增只有一行的配置表、复用现成的读缓存/写失效路径、
+   * 与 review-grace / 告警阈值同一心智。apiKey 写入加密、读出只回 hasKey。
+   * 权限：改价与供应商密钥直接影响营收与外部调用 → 写操作一律 requireSuper（与套餐改价、资金三写同级）；
+   *      读（配置/任务列表）沿用插件级 requireAdmin，运营值班可看。
+   */
+  app.get('/admin/creative/config', async (): Promise<AdminCreativeConfig> => {
+    return publicCreativeConfig(await getCreativeConfig({ fresh: true }));
+  });
+
+  app.put<{ Body: AdminCreativeConfigUpdate }>('/admin/creative/config', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const before = publicCreativeConfig(await getCreativeConfig({ fresh: true }));
+    try {
+      const after = await updateCreativeConfig(req.body ?? {});
+      await recordAudit({
+        action: 'admin.creative.config.update',
+        payload: {
+          by: actorName(actor),
+          // 审计只记「可复核的差异」，绝不记密钥本身（连密文都不记）。
+          before: { enabled: before.enabled, price: before.pricePerPoster, dailyLimit: before.dailyLimit, visualEnabled: before.visual.enabled, hasKey: before.visual.hasKey },
+          after: { enabled: after.enabled, price: after.pricePerPoster, dailyLimit: after.dailyLimit, visualEnabled: after.visual.enabled, hasKey: after.visual.hasKey },
+          keyChanged: req.body?.visual?.apiKey !== undefined,
+        },
+      });
+      return after;
+    } catch (e) {
+      return sendErr(reply, e, 422);
+    }
+  });
+
+  // 供应商连通性试跑：真发一次最小请求，只回「通/不通 + 耗时」，不落任何资产、不回上游响应原文。
+  app.post('/admin/creative/provider/dry-run', async (req, reply): Promise<AdminCreativeDryRunResult | void> => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const r = await dryRunVisualProvider();
+    await recordAudit({ action: 'admin.creative.provider.dryRun', payload: { by: actorName(actor), ok: r.ok, ms: r.ms } });
+    return r;
+  });
+
+  // 任务列表（含用户脱敏标识、成本、错误、是否已退款）。
+  app.get<{ Querystring: { status?: string; page?: string; pageSize?: string } }>('/admin/creative/jobs', async (req): Promise<AdminCreativeJobsView> => {
+    const status = (req.query.status ?? '').trim();
+    const page = Math.max(1, Math.floor(Number(req.query.page ?? 1)) || 1);
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(req.query.pageSize ?? 20)) || 20));
+    const where: Prisma.CreativeJobWhereInput = status ? { status } : {};
+    const [rows, total, byStatus, refunded] = await Promise.all([
+      prisma.creativeJob.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+      prisma.creativeJob.count({ where }),
+      prisma.creativeJob.groupBy({ by: ['status'], _count: { _all: true } }),
+      prisma.creativeJob.count({ where: { refundedAt: { not: null } } }),
+    ]);
+    const userIds = [...new Set(rows.map((r) => r.userId))];
+    const users = userIds.length
+      ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const assetCounts = rows.length
+      ? await prisma.creativeAsset.groupBy({ by: ['jobId'], where: { jobId: { in: rows.map((r) => r.id) } }, _count: { _all: true } })
+      : [];
+    const assetMap = new Map(assetCounts.map((a) => [a.jobId, a._count._all]));
+    const countOf = (s: string) => byStatus.find((g) => g.status === s)?._count._all ?? 0;
+    return {
+      items: rows.map((j): AdminCreativeJobItem => {
+        const u = userMap.get(j.userId);
+        const brief = ((j.requestJson ?? {}) as { brief?: { templateKey?: unknown } }).brief;
+        return {
+          id: j.id,
+          // 脱敏：昵称 + 掩码手机号（与订单列表同口径，不出全量手机号）。
+          userLabel: `${u?.name ?? '—'}${u?.phone ? ` · ${maskAuditPhone(u.phone) ?? ''}` : ''}`,
+          agentKey: j.agentKey,
+          kind: j.kind,
+          status: j.status,
+          progress: j.progress,
+          templateKey: typeof brief?.templateKey === 'string' ? brief.templateKey : null,
+          engine: j.engine,
+          provider: j.provider,
+          creditCost: j.creditCost,
+          charged: !!j.chargedAt,
+          refunded: !!j.refundedAt,
+          errorCode: j.errorCode,
+          errorMessage: j.errorMessage,
+          attempts: j.attempts,
+          assetCount: assetMap.get(j.id) ?? 0,
+          createdAt: isoSecond(j.createdAt),
+          completedAt: j.completedAt ? isoSecond(j.completedAt) : null,
+        };
+      }),
+      total, page, pageSize,
+      summary: {
+        pending: countOf('pending'), running: countOf('running'), succeeded: countOf('succeeded'),
+        failed: countOf('failed'), cancelled: countOf('cancelled'), refunded,
+      },
+    };
+  });
+
+  // 重试失败任务：failed → pending + attempts 清零。**不重复扣费**，也**不动 chargedAt/refundedAt**。
+  //
+  // 为什么一个字段都不能碰（想清楚再改，这里是资金路径）：
+  //   失败任务通常已经幂等退过款（refundedAt 非空），语义是「这次没交付，钱已还给用户」。
+  //   运营点重试 = 出于善意再免费跑一次，成功则用户白得一张（这正是运营处置系统性失败时想要的）。
+  //   若把 refundedAt 清空想「让这笔钱重新算作已消费」，会踩两个坑：
+  //     ① 重试再失败 → refundJob 抢占成功 → 又退一次 10 钻，而用户只付过一次 → 白送 10 钻（资损）；
+  //     ② 退款幂等这条不变式被破坏，之后任何一条失败路径都可能重复退。
+  //   所以：保留 refundedAt，让 refundJob 天然把后续退款请求判为「已退过」。
+  app.post<{ Params: { id: string } }>('/admin/creative/jobs/:id/retry', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const job = await prisma.creativeJob.findUnique({ where: { id: req.params.id } });
+    if (!job) return reply.code(404).send({ error: '任务不存在', code: 'NOT_FOUND' });
+    if (job.status !== 'failed') {
+      return reply.code(409).send({ error: `只有失败任务可重试（当前 ${job.status}）`, code: 'JOB_NOT_RETRIABLE' });
+    }
+    const r = await prisma.creativeJob.updateMany({
+      where: { id: job.id, status: 'failed' },
+      data: { status: 'pending', progress: null, attempts: 0, errorCode: null, errorMessage: null, completedAt: null, startedAt: null },
+    });
+    if (r.count === 0) return reply.code(409).send({ error: '任务状态已变化，请刷新重试', code: 'JOB_NOT_RETRIABLE' });
+    await recordAudit({
+      tenantId: job.tenantId, userId: job.userId, action: 'admin.creative.job.retry',
+      payload: {
+        by: actorName(actor), jobId: job.id, prevErrorCode: job.errorCode, prevAttempts: job.attempts,
+        // 已退款的任务重试成功 = 免费补发一张，落审计便于成本核对。
+        alreadyRefunded: !!job.refundedAt, creditCost: job.creditCost,
+      },
+    });
+    return { ok: true, jobId: job.id, status: 'pending' };
   });
 
   // —— 用户上下文中心：个人档案 + 长期记忆（按顾问）+ 知识库文档（观测与纠偏） ——

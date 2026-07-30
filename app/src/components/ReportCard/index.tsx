@@ -37,10 +37,17 @@ interface Props {
   onView?: () => void;
   // 「分享」选单里由父级承接的三项：PDF 发好友 / 查看保存 PDF / 复制全文（图片两项在组件内自持出图）。
   onShareMenu?: (kind: 'pdfFriend' | 'pdfView' | 'copy') => void;
+  // 海报成品图入口（canvas_design）：只在「成品图能力已开启 + 本卡是海报设计师的落库成果」时由父级传入。
+  // 能力关闭 / 非 poster 成果 / 卡片不可操作时父级不传，这一行整块不渲染（不露按钮再让用户点到 403）。
+  posterPrice?: number;
+  onPoster?: () => void;
 }
 
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
-export default function ReportCard({ data, animate = false, streaming = false, operable = true, saved = false, onSave, onView, onShareMenu }: Props) {
+export default function ReportCard({
+  data, animate = false, streaming = false, operable = true, saved = false,
+  onSave, onView, onShareMenu, posterPrice, onPoster,
+}: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   // D-3-4：每张卡一块隐藏 canvas，用于分享图出图（唯一 id 防列表内串扰）。
@@ -226,6 +233,14 @@ export default function ReportCard({ data, animate = false, streaming = false, o
             )}
           </View>
           )}
+          {/* 海报成品图入口：单独一行，不挤进上面的三键操作行（真机上四键会挤到换行/裁字）。 */}
+          {operable && onPoster && typeof posterPrice === 'number' ? (
+            <View className="rc-poster" onClick={onPoster}>
+              <Icon name="image" size={14} color={accent} />
+              <Text className="rc-poster-t">生成成品图</Text>
+              <Text className="rc-poster-c">{`💎x${posterPrice}`}</Text>
+            </View>
+          ) : null}
           {/* D-3-4 隐藏出图画布（屏外，仅点分享图时绘制导出） */}
           <Canvas type="2d" id={shareCanvasId} className="rc-share-canvas" style={{ width: '600px', height: '900px' }} />
         </>

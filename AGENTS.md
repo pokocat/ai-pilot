@@ -20,7 +20,7 @@
 6. **新增全屏弹层**记得置 `store.setOverlay(open)`；遵守 **§7.2 UI 约定**，勿回退已修复的坑。
 7. **登录态失效必须显式打断（全局铁律）**：任何页面 / 接口收到 401（token 失效或未登录），**绝不能静默降级**——不许让用户滞留在小程序界面看旧缓存 + 新功能空白（用户点名要修的真问题）。机制已集中在 `app/src/services/api.ts`：`request()` 与文件上传收到 401 会**无条件**触发全局 `onAuthLost`（由 `store.ts` 用 `setAuthLostHandler` 注册 → 清登录态 + 提示「登录态已失效，请重新登录」+ `reLaunch` 回登录入口 `pages/sessions`，其 `Login` 弹层按 `!isAuthed()` 拉起）。因此：① 页面 `.catch` 只负责**本地非鉴权兜底**（网络 / 空数据），**不得吞掉鉴权后果**——401 一定已被 `request()` 打断到重新登录；② 新增任何直连后端的鉴权调用，让它经 `request()`（默认即可），别绕过；面向用户的错误优先走 `store.handleApiError`，而非裸 `.catch(()=>{})`。**历史坑**：军师记忆库 / 完整履历页曾用 `.catch(()=>{})` 吞掉 401，掉登录后页面空白、用户不自知仍以为功能坏了（2026-07-07 修）。
 8. **小程序改动先查约束清单**：凡改 `app/` 的微信小程序页面、tabbar、弹层、登录、键盘、网络请求、路由分包或项目配置，先对照 **§7.2 小程序工程约束清单**；不确定时按清单保守实现，避免回退真机已修复问题。
-9. **运营后台 UI 改动守设计系统**：凡改 `admin/` 前端（`.tsx`/`admin.css`），必须对齐 **`admin/DESIGN.md`「Engineering Compliance」**——颜色只用 `:root` token（禁硬编码 hex/rgb）、只用已定义的组件类（禁裸 class 与一次性 inline 控件样式）、z 轴只用 `--z-*`。提交前跑 `cd admin && npm run lint:ui`（`scripts/audit-admin-ui.mjs`，**递归扫描** `admin/src/**/*.tsx`，已接入 `build`）保持全绿。另外四条硬约束（2026-07-28 运营视角改版后）：① 新页面先在 `admin/src/nav.ts` 登记（归属六组之一 + 一句话 hint + 命令面板别名），页面本身不再手写顶层 `sec-h`，标题走 `PageHead k="<section>"`；② 取数一律 `useResource` + `ViewState`，**禁止 `.catch(() => {})`**——请求失败必须与「确实没数据」区分开且可重试；③ 破坏性/资金动作用 `ConfirmDialog`（回显对象 + 必要时手打确认词），**禁止 `window.confirm/prompt/alert`**；④ 业务视图放 `admin/src/views/<组>.tsx`，`App.tsx` 只留外壳。
+9. **运营后台 UI 改动守设计系统**：凡改 `admin/` 前端（`.tsx`/`admin.css`），必须对齐 **`admin/DESIGN.md`「Engineering Compliance」**——颜色只用 `:root` token（禁硬编码 hex/rgb）、只用已定义的组件类（禁裸 class 与一次性 inline 控件样式）、z 轴只用 `--z-*`。提交前跑 `cd admin && npm run lint:ui`（`scripts/audit-admin-ui.mjs`，**递归扫描** `admin/src/**/*.tsx`，已接入 `build`）保持全绿。另外四条硬约束（2026-07-28 运营视角改版后）：① 新页面先在 `admin/src/nav.ts` 登记（归属六组之一 + 一句话 hint + 命令面板别名），页面本身不再手写顶层 `sec-h`，标题走 `PageHead k="<section>"`；② 取数一律 `useResource` + `ViewState`，**禁止 `.catch(() => {})`**——请求失败必须与「确实没数据」区分开且可重试；写操作的 `catch` 必须透出 `e.message`（**禁止盖成固定文案**），否则 403「需要 owner 权限」会被说成「保存失败」，见 §9 的 401/403 分流；③ 破坏性/资金动作用 `ConfirmDialog`（回显对象 + 必要时手打确认词），**禁止 `window.confirm/prompt/alert`**；④ 业务视图放 `admin/src/views/<组>.tsx`，`App.tsx` 只留外壳。
 10. **品牌红线：禁止「米诺 / Mino」**（避免品牌纷争）：任何新增或修改的产品文案、提示词、交付物模板、代码标识符、注释、seed 数据里，一律使用「军师参谋部 / Junshi Strategic Staff」，不得出现「米诺 / Mino」。从 Notion 原稿（含 12 张 B 级卡片骨架、A 级报告模板）移植内容时必须先按 `server/src/data/prompts/README.md` 的映射去品牌再入库。存量残留的清扫任务见 §13 TODO。
 
 > 判定标准：**文档与代码不一致 = 缺陷。** 纯探索 / 未落地的尝试可以不记；一旦落到代码就必须记。
@@ -244,6 +244,14 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `GET /reminders` | V7-11 提醒日历（今日军令截止/20:30 复盘/周五周复盘，纯读派生） | 是 |
 | `GET /skus` · `POST /skus/:key/order` | V7-12 单次付费商品目录(公开) · JSAPI 下单(挂 skuKey，回调复用 markPaidAndApply 幂等发放) | 列表否·下单是 |
 | `GET /me/workbench` · `GET /me/service` · `GET /search?q=` | V7-13 档案工作台(bizCategory 真实计数) · 社群服务分配 · V7-14 跨域搜索(军师/会话/方案/资料，知识仅 confirmed) | 是 |
+| `GET /creative/status` | 海报成品图能力位（`enabled` = env 硬开关 && 后台 `creative-poster` 开关；`pricePerPoster` 供前端显示 `💎x`）——成果卡据此决定**整块隐藏还是显示按钮**，不露出按钮再让用户点到 403 | 是 |
+| `GET /creative/posters/brief-draft` | 从成果消息 + 已确认 BrandKit 预填需求单草稿（含 `templateKey`/`templateReason`；LLM 不可用时确定性回退，不阻塞） | 是 |
+| `POST /creative/uploads` | 源素材上传（人像/Logo/二维码，multipart 单文件；MIME 白名单 + 10MB，落私有 OSS，`kind='source'`） | 是 |
+| `POST /creative/posters` | 建海报任务（`idempotencyKey` 按用户唯一：命中回 **200 + `reused:true`**，新建回 201）；门禁顺序=开关→解锁→套餐→校验→审核→幂等→日限额→扣费 | 是 |
+| `GET /creative/jobs/:id` · `POST /creative/jobs/:id/cancel` | 任务状态/成品资产（越权一律 404）· 取消（pending 立即退款；running 只打 `cancelRequested`，worker 在阶段检查点收口） | 是 |
+| `POST /creative/jobs/:id/revise` · `POST /creative/jobs/:id/regenerate` | 只改文案重排（**不扣钻石**，复用父任务主视觉）· 重出主视觉（**再扣一次**）；两者都新建任务并挂 `parentJobId`，旧资产永不覆盖 | 是 |
+| `GET /creative/assets/:id/file` | 资产文件：归属校验后配了 OSS 则 302 短签名 URL，否则流式返回（本地/测试内存回退） | 是 |
+| `GET/PUT /admin/creative/config` · `POST /admin/creative/provider/dry-run` · `GET /admin/creative/jobs` · `POST /admin/creative/jobs/:id/retry` | 海报配置读/改（改价与密钥要 owner）· 图片供应商连通性试跑 · 任务台（脱敏用户标识 + 退款计数）· 重试失败任务（**不重复扣费、不动 chargedAt/refundedAt**） | 管理员（写=owner） |
 | `GET/PUT /admin/ai-config` · `POST /admin/ai-config/test` | 大模型配置（读/改/测试连接，可随时切换） | 管理员 |
 | `GET/PATCH /admin/skus(:key)` · `GET/PUT /admin/users/:id/service` | V7-12 SKU 改价/启停 · V7-13 社群分班/配老师 | 管理员 |
 | `/admin/*` | 运营后台 API（见 §9）：用户/算力/审计/智能体/套餐/模型/SKU等 | 管理员 |
@@ -314,6 +322,21 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - `services/audit.ts`（★）：统一审计记录与秒级 ISO 时间格式；Fastify `onResponse` 钩子会记录除 `/api/health` 外的所有 `/api/*` 行为，覆盖匿名、无效 token、登录、后台与用户请求，payload 写入方法/路径/状态码/耗时/IP/UA/鉴权状态/脱敏 body 摘要；登录、短信、后台账号等入口另写成功失败语义审计，关键业务动作继续写语义日志（建档、产出、存库、汇总、后台配置变更）。
 - 内容审核 `moderation_log`、审计 `audit_log`（演示级，生产替换合规服务）。
 
+### 8.4 海报成品图（`canvas_design` artifact 技能，2026-07-29）
+
+「海报设计师」（agent `poster`）出的是文本方案；这个技能把方案变成**真图**（3:4 PNG，1080×1440）。完整设计见 `docs/CANVAS_DESIGN_SKILL_INTEGRATION_PLAN.md`，实现落在 `server/src/services/creative/*` + `routes/creative.ts` + admin`views/creative.tsx` + app `packages/work/poster|posterJob`。
+
+- **第三类技能**：`SkillKind` 从 `tool | output` 扩到 `tool | output | artifact`。artifact 只进 `nativeSkillMeta()` 的元信息登记（后台技能库 kind 文案「成品交付」、agent 可勾选），**不建通用 ArtifactSkill 注册表**——只有一个成员时抽象是负债。
+- **双表任务模型**：`CreativeJob`（一次出图动作 = 一行，状态机 `pending → running → succeeded|failed|cancelled`，progress `philosophy|visual|render|upload`）+ `CreativeAsset`（`source|visual|poster_png`，`jobId` 可空以支持「先传素材后建任务」，`userId` 是归属校验真源）。**状态真源是数据库行，不是进程内 Map**——这条是从两处教训来的：会话 generating 活在内存里重启即丢，知识库 `processDocument` 曾 fire-and-forget 把条目永久卡在 parsing。
+- **计费：预扣即实扣 + job 行幂等退款**。10 钻/张（价格存后台配置，**不硬编码**）。建单事务内 `chargeCredits` + 写 `chargedAt`；退款唯一入口 `refundJob()` 用 `updateMany({ where: { chargedAt: {not:null}, refundedAt: null } })` 抢占，抢到才真退 → worker catch / sweep / 用户取消三条路径叠一起也只退一次。**刻意不用 `credits.reserveCredits` 的内存闭包**（跨不过 worker 进程边界）。三条不变式：① 不限量用户（余额 -1）`chargedAt` 恒为 null（`appendCreditDelta` 对不限量零流水，标了 chargedAt 一次退款就是凭空铸币 10 钻），`creditCost` 仍记名义价供成本统计；② revise 不扣钻（`creditCost=0`），regenerate 重新扣；③ **admin 重试不动 `chargedAt/refundedAt`**（清 `refundedAt` 想「让钱重新算消费」= 重试再失败又退一次，资损）。
+- **worker**：`FOR UPDATE SKIP LOCKED` 抢占，2s 轮询，`setInterval+unref`，`NODE_ENV=test` 不自启（测试直接调 `tickCreativeWorker()`）。**不继承 scheduler 的单实例约束**（那是选主未做完的历史包袱，多进程抢占本身是安全的）。`sweepCreativeJobs`（挂 scheduler，5min）：running 超 10 分钟 → 回 pending（`attempts<=3`）或 failed+退款（超限），外加「已扣未退的终态任务」兜底重扫。
+- **渲染**：`services/creative/renderer.ts` 调 `reportPdf.renderHtmlToPng`，**复用同一个 puppeteer 单例 + 单并发队列 + 超时骨架**（绝不另起浏览器，一份 Chromium 就几百 MB）。模板自包含 HTML（无外链/无脚本/字体只用系统栈），渲染前跑确定性自检 + **溢出闸**（文档高于画布即整单失败退款，不把裁掉半个字的图发给用户）。test 模式返回 1×1 桩 PNG 但仍上报名义尺寸。
+- **模板白名单**：MVP 三套 3:4（`person_hero` / `editorial` / `business_launch`）。poster 提示词让模型在成果里给出「成品图版式推荐：xxx（key）—— 理由」，服务端**只认白名单**，无效或被运营停用一律回退 scene 默认（`SCENE_DEFAULT_TEMPLATE`）；连默认模板都被停用才 422。文案长度超限 **422 不截断**；`ratio` 第一期只放行 `3:4`（9:16/1:1 是「能力未就绪」，不是「可以兜底」）。
+- **功能双开关**：env `CANVAS_DESIGN_ENABLED`（部署级硬开关，默认 false）**&&** 后台功能开关行 `creative-poster`（运营的即时熔断闸，行缺省视为开）。配置持久化复用 `FeatureFlag` 单行的 `enabled + payload`（价格/日限额/并发/模板启停/图片供应商接入点），供应商 `apiKey` 经 `secretBox` 加密、对外只回 `hasKey`。**图片供应商不硬编码**：未配置时任务走「无主视觉」纯排版路径（不报错，纯排版本身是完整可交付产物）。
+- **图片审核**：`services/creative/imageModeration.ts` 默认 `provider='none'`（放行 + 审计记 skipped），`http` 形态留了配置位，**未接真实供应商**（见 §13）。文案走既有 `moderate('input'|'output')`。
+- **部署要求**（三条，缺一不可）：① `cd server && npm run db:push`（建 `creative_job` / `creative_asset`，本仓无 migrations 目录）；② 中文字体——`deploy/Dockerfile.server` 已装 `fonts-noto-cjk`，**裸机部署需自行装**，否则中文掉方框；③ `npm run db:upgrade-poster-prompt -- --apply` 幂等把版式推荐段落追加进库内 poster 提示词（同时改 `Agent.systemPrompt` 与已发布的 `AgentVersion`，否则 C 端不生效；默认 dry-run）。放量最后一步才把 `CANVAS_DESIGN_ENABLED` 置 true。
+- **测试基线**：`server/test/creative.test.ts`（28 例：门禁/校验/幂等/计费/status/brief 草稿/admin 配置与任务台/纯函数）+ `server/test/creativeWorker.test.ts`（17 例：生命周期/退款不变量/sweep）。`.env.test` 里 `CANVAS_DESIGN_ENABLED=true`——`env` 是模块加载时冻结的单例，用例内改 `process.env` 已经太晚，而 `hermeticEnv.mjs` 会抹掉进程启动后新增的键。改开关后必须 `__clearFeatureCache()`（featureFlag 有 60s 读缓存，而 `cleanBusiness()` 只删库不清缓存）。
+
 ---
 
 ## 9. 运营后台（admin）
@@ -327,6 +350,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 - **`admin/src/router.ts`（极简 hash 路由，零依赖）**：`#/<section>[/<id>][?params]`。刷新 / 浏览器返回 / 把链接甩给同事都能回到同一现场（含打开着的用户详情，如 `#/users/<userId>`）；非法或越权 hash 兜回 `#/home` 而不是白屏。旧版当前 tab 与详情态只在 React state 里，F5 就丢现场。
 - **命令面板 ⌘K / Ctrl+K（`CommandPalette.tsx`）**：按名称/别名跳任意一屏，或按姓名/手机号直接定位用户（纯数字输入优先匹配用户）。新增目的地必须能在这里被搜到。
 - **`admin/src/useResource.ts` + `components.tsx` 的 `ViewState`**：统一 loading（骨架屏）/ error（带服务端原文 + 重试）/ empty 三态，并在 `PageHead` 显示数据新鲜度。替掉旧版散落 32 处的 `.catch(() => {})`——接口 500 时页面渲染成「近 30 天暂无订单」，运营会把它当业务结论上报。
+- **`admin/src/api.ts` 的 401 / 403 分流（2026-07-29 修，回归用例 `admin/src/api.auth.test.ts`）**：**401 才是掉线**——清 token + 广播 `admin:unauth` 切回登录页；**403 是权限不足**——保留登录态，抛 `{ code, status: 403 }` 由页面就地提示（服务端原文优先，缺文案时按 `OWNER_ONLY` / `ADMIN_AGENT_FORBIDDEN` / `ADMIN_FORBIDDEN` 兜底人话）。`useResource` 把 403 记进 `Resource.forbidden`，`ErrorState forbidden` 换成「没有查看这块内容的权限 · 找 owner 授权」并撤掉重试按钮（再点还是 403）。**新增 requireSuper 交互时的两条要求**：① 入口按 `isSuper` 收起并写明只读（别摆注定失败的按钮）；② 写操作的 `catch` 必须透出 `e.message`，禁止盖成固定文案——`catch { toast('保存失败') }` 会把「需要 owner 权限」说成故障，让运营去查网络或反复改参数。旧写法是 `401 || 403` 一起踢登出，等于把权限问题伪装成掉线，且重新登录必然重现。
 - **今日「待处理」队列**：卡单（已支付未发放=资损单）、近 24h 调用失败、端点冷却、审核拦截、额度耗尽五格，全部复用既有接口（`payments.stuck` / `traces` / `aiRouting` / `moderationLogs` / `users`），点进去就是筛好的清单；各格独立取数，一个接口挂了只该格显示「—」。全零才折叠成一行「无待处理」。
 - **资金/破坏性动作统一 `ConfirmDialog`**：回显「对谁/多少钱/哪一单」，退款与关闭合规开关要求手打确认词，退款原因在弹层内收集并入审计。旧版退款原因是 `window.prompt` 收的、回车即执行、不显示金额。
 - **跨屏直达**：订单 →「查用户」（订单契约只有 `userName`，故按姓名带进用户搜索 `#/users?q=…`；补 `userId` 需改后端契约，留作后续）、审核拦截 →「查看用户」、Token Top 用户 → 用户详情。
@@ -612,6 +636,11 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
+- **海报成品图 MVP 明确不做 / 后置项（2026-07-29，已拍板，不要当遗漏来"补齐"）**：
+  - **PDF 交付是二期**：MVP 只出 PNG。印刷级 PDF 要处理出血/CMYK/字体嵌入/矢量文字，与当前「截图式渲染」不是同一条管线，不为一个未验证需求先建它。
+  - **图片审核未接真实供应商**：`services/creative/imageModeration.ts` 默认 `provider='none'` = 放行 + 审计记 `skipped`，`http` 形态只留了配置位（未对接、未联调）。**这是合规缺口而不是技术债**：真实上线放量前必须接一家图片内容安全服务（把 provider 置 `http` 并配地址/密钥），否则用户上传的人像与生成的主视觉都没有机器审核。文案侧走既有 `moderate()`，不受影响。
+  - **9:16 / 1:1 规格后置**：渲染器与三套模板都只按 3:4（540×720@2x）做过版式与溢出验证，`ratio` 传其它值一律 422。要开新比例得**每套模板各写一份布局**并重跑溢出闸，不能靠缩放同一份 HTML（字号/留白/行数比例全变，出来就是错版式）。
+  - **模板视觉回归靠人工**：`auditPosterHtml` 只查结构性问题（AI 标识在位、无外链、无脚本）+ 渲染器的溢出闸，**没有像素级基线比对**。改模板 CSS 后仍需人工看图（方案 §18.3 的视觉回归未落）。
 - **订单→用户精确跳转待补契约（2026-07-28，运营后台改版留坑）**：`AdminPaymentItem` / `AdminPaymentStuckItem` 只有 `userName`，没有 `userId`，所以「订单 → 查用户」目前是按姓名带进用户搜索（`#/users?q=…`），同名用户需人工分辨。要做精确跳转须先在 `shared/contracts.d.ts` 给两个接口加 `userId`，再改 `server/src/routes/admin.ts` 的订单查询 select 与运营端跳转。本次改版只动 `admin/`，未动后端契约，故延后。
 - **本地 seed 的删除顺序缺陷（2026-07-28 发现，未修）**：`server/prisma/seed.ts` 在 `prisma.user.deleteMany()` 之前没有清 `TokenWallet`，本地库已有用户数据时 seed 会因 `token_wallet_userId_fkey` 报 P2003 中断（空库首次 seed 不受影响）。本次只在本地手工 `TRUNCATE` 绕过，未改脚本，避免与他人并行改动冲突。修法：把 `tokenWallet.deleteMany()` 补进现有删除序列的 `user` 之前。
 - **`.tag.warn` / `.tag.live` 仍是硬编码色值（2026-07-28）**：`admin/src/styles/admin.css` 末尾这两个状态徽标用的 `#FBE9D8/#C1791F/#DCEEE2/#1A8A5A` 不等于任何 `:root` token，`lint:ui` 因此放过。要彻底守住「颜色只走 token」需先在 `:root` 加 warn/live 两组底色 token 再替换；本次未动以免改变现有视觉。

@@ -2,7 +2,9 @@
 // agent 的 skillsConfig.tools 里既可能是内置工具名，也可能是自定义工具 key；本服务统一解析。
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { builtinToolNames, nativeSkillMeta, resolveTools, resolveOutputSkills } from '../llm/tools/registry.js';
+import {
+  builtinToolNames, builtinOutputKeys, builtinArtifactKeys, nativeSkillMeta, resolveTools, resolveOutputSkills,
+} from '../llm/tools/registry.js';
 import { makeHttpTool } from '../llm/tools/httpTool.js';
 import { encryptSecret, decryptSecretSafe } from './secretBox.js';
 import type { Tool, OutputSkill, ToolContext } from '../llm/tools/types.js';
@@ -10,6 +12,11 @@ import type { SkillToolDef, SkillToolMeta, SkillToolUpsert, AgentToolDryRunResul
 
 const KEY_RE = /^[a-z][a-z0-9_]*$/;
 const HTTP_METHODS = new Set(['GET', 'POST']);
+
+/** 全部内置技能 key（tool + output + artifact）。key 冲突校验与「非 tool key 排除」都用它。 */
+function builtinSkillKeys(): string[] {
+  return [...builtinToolNames(), ...builtinOutputKeys(), ...builtinArtifactKeys()];
+}
 
 type Row = {
   id: string; key: string; name: string; description: string; inputSchema: unknown;
@@ -55,7 +62,10 @@ function toDef(r: Row): SkillToolDef {
 function validate(input: SkillToolUpsert, create: boolean): void {
   if (create) {
     if (!KEY_RE.test(input.key ?? '')) throw new Error('工具标识(key) 需小写字母开头，仅含小写字母/数字/下划线');
-    if (builtinToolNames().includes(input.key)) throw new Error('该标识与内置工具冲突，请换一个');
+    // 冲突校验要覆盖**全部**内置技能 key（tool + output + artifact），不只是 tool：
+    // 三类在技能库里同一个命名空间（agent.skillsConfig.tools 混存），只查 tool 会放行一个
+    // 与 render_report / canvas_design 同名的自建工具，之后按名解析必然打架。
+    if (builtinSkillKeys().includes(input.key)) throw new Error('该标识与内置技能冲突，请换一个');
   }
   if (!input.name?.trim()) throw new Error('请填写展示名');
   if (!input.description?.trim()) throw new Error('请填写描述（模型据此判断何时调用）');
@@ -124,10 +134,15 @@ export async function loadOutputSkillsByNames(names?: string[] | null): Promise<
 export async function loadToolsByNames(names?: string[] | null): Promise<Tool[]> {
   if (!names?.length) return [];
   const builtinSet = new Set(builtinToolNames());
+  // 内置的 output / artifact 技能同住 skillsConfig.tools 这个命名空间，但**不是模型工具**：
+  // 它们既不该被当自定义工具去查 SkillTool 表，也不该被下面的「未知工具」告警点名——
+  // 此前每次组装工具都会为 render_report / canvas_design 刷一条 console.warn 噪音，
+  // 真正的悬挂引用反而被淹没。这里显式排除，让告警只报真问题。
+  const nonToolSet = new Set([...builtinOutputKeys(), ...builtinArtifactKeys()]);
   const builtinNames = names.filter((n) => builtinSet.has(n));
-  const customKeys = names.filter((n) => !builtinSet.has(n));
+  const customKeys = names.filter((n) => !builtinSet.has(n) && !nonToolSet.has(n));
   const tools: Tool[] = resolveTools(builtinNames);
-  const resolved = new Set<string>(builtinNames);
+  const resolved = new Set<string>([...builtinNames, ...names.filter((n) => nonToolSet.has(n))]);
   if (customKeys.length) {
     const rows = await prisma.skillTool.findMany({ where: { key: { in: customKeys }, enabled: true } });
     for (const r of rows) {

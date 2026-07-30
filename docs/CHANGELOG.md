@@ -6,6 +6,46 @@
 
 ## 变更日志
 
+### 2026-07-29 · 修运营后台「403 被当 401 踢登出」 · 影响面：`admin/src/{api.ts,useResource.ts,components.tsx,App.tsx}` + 视图 `views/{catalog,studio,settings,creative}.tsx` + 新增 `admin/src/api.auth.test.ts`（清 `AGENTS.md` §13 TODO）
+
+`admin/src/api.ts` 的 `req()` 原先写成 `if (res.status === 401 || res.status === 403)`：两者一起清 token + 广播 `admin:unauth` 切回登录页。于是普通运营点**任何** `requireSuper` 接口——支付退款、创作任务改价 `/admin/creative/config`、供应商 dry-run、新增智能体、套餐/SKU 改价、告警通知——看到的都是「掉线，请重新登录」。这个伪装的代价不只是文案：运营会去查密钥和网络，重新登录还必然重现同一现象，而真正该做的是找 owner 要授权。同一文件的 `uploadUserKnowledge` 有同样的合并，`downloadPaymentsCsv` 则连 401 都没清登录态。
+
+**现在的契约**：401 = 掉线（清登录态 + 广播，唯一该踢回登录页的状态）；403 = 权限不足（**保留登录态**，抛 `{ code, status: 403 }` 交给页面就地提示）。文案取服务端原文（它更具体，如「你对该智能体仅有只读权限」），服务端只回 code 时按 `OWNER_ONLY` / `ADMIN_AGENT_FORBIDDEN` / `ADMIN_FORBIDDEN` 兜底人话；响应体不是 JSON（反代兜的 403 页）也照此处理，不再退化成裸状态码。三处 fetch（`req` / 知识库上传 / CSV 导出）口径统一。
+
+**只读通道**：`useResource` 只对 401 静默（那已经在切登录页，再闪一屏红字没意义），403 记进新增的 `Resource.forbidden` 并照常进错误态；`ErrorState` 的 `forbidden` 形态把标题换成「当前账户没有查看这块内容的权限」、补一句「让 owner 调整授权」，并**撤掉重试按钮**——再点还是 403，给重试等于让人白试。`ViewState` 与 `AccountsView`（`GET /admin/accounts` 本身就是 requireSuper）已接。
+
+**顺带修的三处「静默/说谎」**（403 不再踢登出后，这些 catch 就成了唯一出口）：① `views/studio.tsx` 的上下架 `await api.saveAgent(...)` 没有 catch，viewer 协作者点下去会变成彻底无声的「什么也没发生」；② 同文件新增智能体一律 `toast('新增失败（key 可能已存在）')`，会让非超管反复改 key 试；③ `views/catalog.tsx` 套餐/SKU 改价与 `settings.tsx` 的 `saveKeys` 用 `catch { toast('保存失败') }` 盖掉了服务端权限文案。**各页「藏按钮 + isSuper」的做法保留**——先让运营知道自己不能改，比点下去再吃错误好；403 兜底只是 `me()` 取不到角色或被降权时的第二道网。
+
+**测试**：新增 `admin/src/api.auth.test.ts`（5 例，`cd admin && npm test` 20/20）钉住 401 清登录态 + 广播、403 保留登录态 + 不广播 + 带 code、403 无文案/非 JSON 的兜底、500 不吞服务端原文。`npx tsc --noEmit`、`npm run lint:ui`、`npm run build` 全绿。**未动后端**：`requireSuper` 回的仍是 403 `OWNER_ONLY`（语义本就正确，错在前端消费）。
+
+### 2026-07-29 · 海报成品图（`canvas_design` artifact 技能）全链路 · 影响面：server（契约/两张表/creative 服务与路由/worker/sweep/admin 段）+ admin（创作任务页）+ app（成果卡入口/需求确认页/制作中页）+ deploy（字体/环境变量/上线动作）
+
+「海报设计师」此前只出文本方案，用户拿到的还是一段"怎么做"，得自己找设计。这次把方案变成**真图**：3:4 竖版 PNG（1080×1440），10 钻/张。完整设计与决策记录见 `docs/CANVAS_DESIGN_SKILL_INTEGRATION_PLAN.md`，工程约定收进 `AGENTS.md` §8.4。
+
+**技能体系**：`SkillKind` 从 `tool | output` 扩到 `tool | output | artifact`。artifact 只做元信息登记（后台技能库显示「成品交付」、agent 可勾选），**没有**建通用 ArtifactSkill 注册表——只有一个成员时抽象是负债。
+
+**任务模型**：`CreativeJob`（一次出图 = 一行）+ `CreativeAsset`（`source|visual|poster_png`）。状态真源是数据库行，不是进程内 Map——会话 generating 活在内存里重启即丢、知识库 `processDocument` 曾把条目永久卡在 parsing，这两处教训是第一天就配 sweep + 幂等退款的原因。worker 用 `FOR UPDATE SKIP LOCKED` 抢占（不继承 scheduler 的单实例约束），`sweepCreativeJobs` 每 5 分钟捞 running 超 10 分钟的任务：`attempts<=3` 回队列，超限 failed + 退款。
+
+**计费三条不变式**（都有回归用例钉住）：
+
+- **退款只退一次**：唯一入口 `refundJob()` 用 `updateMany({ chargedAt: {not:null}, refundedAt: null })` 抢占，抢到才真退。worker catch / sweep / 用户取消三条路径叠在一起也只落一条正向流水。刻意不用 `credits.reserveCredits` 的内存闭包——它跨不过 worker 进程边界。
+- **不限量用户不铸币**：余额 -1 的用户 `appendCreditDelta` 直接 return（连流水都不写），所以 `chargedAt` 必须保持 null；若按「名义价非 0 就标已扣」写，一次失败退款就凭空给用户发 10 钻。`creditCost` 仍记名义价，成本统计看它、是否退钱看 `chargedAt`，两件事分开。余额还必须在**事务内**读：事务外读会留一个「套餐从不限量切成限量」的窗口。
+- **admin 重试不动资金字段**：失败任务通常已退过款，运营点重试 = 善意再免费跑一次。清 `refundedAt` 想「让这笔钱重新算消费」会导致重试再失败又退 10 钻（用户只付过一次）。
+
+**revise vs regenerate**：只改文案重排不扣钻（复用父任务主视觉），重出主视觉再扣一次；两者都新建任务并挂 `parentJobId`，**成功任务的资产永不被覆盖**。
+
+**渲染**：复用 `reportPdf` 的 puppeteer 单例 + 单并发队列（绝不另起浏览器，一份 Chromium 就几百 MB），新增导出 `renderHtmlToPng`。模板是自包含 HTML（无外链、无脚本、字体只用系统栈），渲染前跑确定性自检，渲染后过**溢出闸**——固定画布只截视口，文档一旦更高超出部分就被无声裁掉（最常见形态正是最后一条卖点被切掉半个笔画），所以宁可整单失败退款也不发裁字的图。
+
+**模板与校验**：MVP 三套 3:4（`person_hero`/`editorial`/`business_launch`）。poster 提示词让模型在成果里直出「成品图版式推荐：xxx（key）—— 理由」，服务端只认白名单，无效/被停用回退 scene 默认。文案超限 **422 不静默截断**（不让用户以为写进去了却被砍掉）；`ratio` 只放行 `3:4`。
+
+**功能双开关**：env `CANVAS_DESIGN_ENABLED`（部署级硬开关，默认 false）&& 后台功能开关 `creative-poster`（运营的即时熔断闸）。配置复用 `FeatureFlag` 单行的 `enabled + payload` 存价格/日限额/并发/模板启停/图片供应商接入点（apiKey 经 `secretBox` 加密、对外只回 `hasKey`），不为一行配置新建一张表。**图片供应商不硬编码**，未配置时走「无主视觉」纯排版路径——纯排版本身就是完整可交付产物，不该因为没配供应商就报错。
+
+**顺带修的缺陷**（P5 测试期发现）：老任务带着已下线的 `templateKey` 时，`RENDERERS[key]` 是 undefined，直接调用抛 `... is not a function`，被 worker 归成 `errorCode='INTERNAL'`——运营在任务台上分不清「模板问题」和「代码 bug」。现在 `renderPosterHtml` 显式判空、`renderPoster` 把拼 HTML 阶段的异常收成 `PosterRenderError`，落成有语义的 `POSTER_RENDER_FAILED`。
+
+**测试**：新增 `server/test/creative.test.ts`（28 例）+ `server/test/creativeWorker.test.ts`（17 例），覆盖幂等（含 6 路并发同 key）、三条财务不变量、五类门禁、brief 校验、worker 生命周期与成果消息回写、sweep 两条分支、`parseTemplateRecommendation` 三态、admin 配置与任务台。`.env.test` 加 `CANVAS_DESIGN_ENABLED=true`（`env` 是模块加载时冻结的单例，用例内改 `process.env` 太晚，而 `hermeticEnv.mjs` 会抹掉进程启动后新增的键）。全量 `npm test` 964 例通过。
+
+**上线动作（三条，缺一不可）**：① `cd server && npm run db:push` 建两张表（本仓无 migrations）；② 中文字体——镜像已装 `fonts-noto-cjk`，**裸机部署需自行安装**，否则海报中文掉方框；③ `npm run db:upgrade-poster-prompt -- --apply` 幂等把版式推荐段落追加进库内 poster 提示词（同时改草稿与已发布快照，否则 C 端不生效）。放量最后一步才把 `CANVAS_DESIGN_ENABLED` 置 true。**明确不做 / 后置**：PDF 二期、图片审核供应商未接（默认 none = 放行）、9:16 与 1:1 后置 —— 清单见 `AGENTS.md` §13。
+
 ### 2026-07-29 · 修钻石预扣「双退」资损：`CreditReservation.refund` 改为幂等 · 影响面：`server/src/services/credits.ts` + `server/src/routes/sessions.ts`（注释）+ `server/test/creditReservation.test.ts`
 
 `reserveCredits` 返回的 `refund` 是裸闭包，调多少次就追加多少条正向流水。而路由里退款路径本来就会叠：

@@ -3,18 +3,50 @@ import type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthRes
 
 const BASE = '/api';
 
+/* ────────────── 401 与 403 是两件事 ──────────────
+   401 = 掉线（token 失效 / 被撤销）→ 清登录态 + 广播，App 切回登录页。
+   403 = 登录态好着，只是这个账户没有这一步的权限（requireSuper 的 owner-only 接口、
+         没被授权的 agent）→ **保留登录态**，抛带 code 的错误让调用方就地提示。
+
+   历史坑（2026-07-29 修）：这里原先把 `401 || 403` 一起当「鉴权失效」处理，于是普通运营
+   点任何 requireSuper 接口（支付退款、创作任务改价 /admin/creative/config、供应商 dry-run）
+   都被直接踢回登录页——把「你没这个权限」说成「你掉线了」。运营会拿着这个现象去查登录/
+   密钥，而真正该做的是找 owner 要授权。 */
+
+/** 服务端只回了 code、没回文案时的兜底人话（正常情况下用服务端原文，它更具体）。 */
+const FORBIDDEN_FALLBACK: Record<string, string> = {
+  OWNER_ONLY: '这一步需要超级管理员（owner / master）权限，当前账户是普通运营',
+  ADMIN_AGENT_FORBIDDEN: '你没有该智能体的操作权限，请联系 owner 分配',
+  ADMIN_FORBIDDEN: '当前账号没有运营后台管理员权限',
+};
+
+function unauthorizedError(status: number): Error {
+  clearAdminToken();
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('admin:unauth'));
+  return Object.assign(new Error('未授权访问运营后台'), { code: 'ADMIN_UNAUTHORIZED', status });
+}
+
+function forbiddenError(body: { error?: string; code?: string }): Error {
+  const code = body.code || 'ADMIN_FORBIDDEN';
+  return Object.assign(
+    new Error(body.error || FORBIDDEN_FALLBACK[code] || '没有执行该操作的权限'),
+    { code, status: 403 },
+  );
+}
+
+/** 「权限不足」而不是「加载/操作失败」——视图据此换文案（提示找 owner 授权，而不是重试）。 */
+export function isForbidden(e: unknown): boolean {
+  return (e as { status?: number } | null)?.status === 403;
+}
+
 async function req<T>(path: string, method = 'GET', body?: object): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: { 'Content-Type': 'application/json', 'x-admin-token': getAdminToken() },
     body: body ? JSON.stringify(body) : undefined,
   });
-  // 鉴权失效：清登录态并广播，App 切回登录页
-  if (res.status === 401 || res.status === 403) {
-    clearAdminToken();
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event('admin:unauth'));
-    throw Object.assign(new Error('未授权访问运营后台'), { code: 'ADMIN_UNAUTHORIZED', status: res.status });
-  }
+  if (res.status === 401) throw unauthorizedError(res.status);
+  if (res.status === 403) throw forbiddenError((await res.json().catch(() => ({}))) as { error?: string; code?: string });
   if (!res.ok) {
     // 带回服务端错误文案（如「订单已退款」），比裸 HTTP 状态码可读。
     const e = (await res.json().catch(() => ({}))) as { error?: string };
@@ -31,6 +63,8 @@ export async function downloadPaymentsCsv(q: { status?: string; days?: number; q
   if (q.q) p.set('q', q.q);
   const qs = p.toString();
   const res = await fetch(`${BASE}/admin/payments/export${qs ? '?' + qs : ''}`, { headers: { 'x-admin-token': getAdminToken() } });
+  if (res.status === 401) throw unauthorizedError(res.status);
+  if (res.status === 403) throw forbiddenError((await res.json().catch(() => ({}))) as { error?: string; code?: string });
   if (!res.ok) {
     const e = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(e.error || `导出失败 HTTP ${res.status}`);
@@ -53,11 +87,8 @@ export async function uploadUserKnowledge(userId: string, file: File): Promise<{
     headers: { 'x-admin-token': getAdminToken() }, // 不设 Content-Type，让浏览器带 multipart boundary
     body: fd,
   });
-  if (res.status === 401 || res.status === 403) {
-    clearAdminToken();
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event('admin:unauth'));
-    throw new Error('未授权访问运营后台');
-  }
+  if (res.status === 401) throw unauthorizedError(res.status);
+  if (res.status === 403) throw forbiddenError((await res.json().catch(() => ({}))) as { error?: string; code?: string });
   if (!res.ok) {
     const e = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(e.error || `上传失败 HTTP ${res.status}`);
@@ -139,12 +170,18 @@ import type {
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
   AdminBenchmark, AdminBenchmarkUpsert,
   AdminUserUsage, AdminPaymentsView, AdminPayReconcileResult,
+  AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag, AdminMonitorNotify } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
 export type { AdminBenchmark, AdminBenchmarkUpsert } from '../../shared/contracts';
 // —— per-user 用量下钻 + 支付订单只读 ——
 export type { AdminUserUsage, AdminUserQuota, AdminUserPlanStatus, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult } from '../../shared/contracts';
+// —— 海报成品图（canvas_design）配置与任务台（P3 页面消费）——
+export type {
+  AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeVisualConfig,
+  AdminCreativeDryRunResult, AdminCreativeJobsView, AdminCreativeJobItem,
+} from '../../shared/contracts';
 // —— 附身登录（impersonation，owner-only）——
 export type { AdminImpersonateResult } from '../../shared/contracts';
 import type { AdminImpersonateResult } from '../../shared/contracts';
@@ -265,6 +302,24 @@ export const api = {
   reconcilePayment: (outTradeNo: string) => req<AdminPayReconcileResult>(`/admin/payments/${encodeURIComponent(outTradeNo)}/reconcile`, 'POST', {}),
   // 全额退款（仅 owner/master）：原路退回 + 幂等权益回收。
   refundPayment: (outTradeNo: string, reason: string) => req<{ ok: boolean; refundId: string; wechatStatus: string }>(`/admin/payments/${encodeURIComponent(outTradeNo)}/refund`, 'POST', { reason }),
+  // —— 海报成品图（canvas_design 创作任务）：配置 / 供应商试跑 / 任务台 ——
+  // 配置存 FeatureFlag 单行（id='creative-poster'）：enabled 是运行时开关，payload 承载价格/限额/供应商。
+  // envEnabled 只读：部署级 CANVAS_DESIGN_ENABLED 关着时，后台把 enabled 打开也不生效（两层双开才算开）。
+  creativeConfig: () => req<AdminCreativeConfig>('/admin/creative/config'),
+  // apiKey 语义同大模型配置：不传=不动、传空串=清空、传值=加密写入；读回永远只有 hasKey。
+  saveCreativeConfig: (body: AdminCreativeConfigUpdate) => req<AdminCreativeConfig>('/admin/creative/config', 'PUT', body),
+  // 连通性试跑（仅 owner/master）：真发一次最小请求，只回通/不通 + 耗时，不落资产。
+  creativeProviderDryRun: () => req<AdminCreativeDryRunResult>('/admin/creative/provider/dry-run', 'POST', {}),
+  creativeJobs: (q: { status?: string; page?: number; pageSize?: number } = {}) => {
+    const p = new URLSearchParams();
+    if (q.status) p.set('status', q.status);
+    if (q.page) p.set('page', String(q.page));
+    if (q.pageSize) p.set('pageSize', String(q.pageSize));
+    const qs = p.toString();
+    return req<AdminCreativeJobsView>(`/admin/creative/jobs${qs ? '?' + qs : ''}`);
+  },
+  // 重试失败任务（仅 owner/master）：failed → pending、attempts 清零，不重复扣费。
+  retryCreativeJob: (id: string) => req<{ ok: boolean; jobId: string; status: string }>(`/admin/creative/jobs/${encodeURIComponent(id)}/retry`, 'POST', {}),
   // 手动开通套餐 / 发放·收回模块（仅 owner/master）。
   grantUserPlan: (userId: string, planId: string) => req<{ ok: boolean; planName: string; expiresAt: string | null; grantedCredits: number }>(`/admin/users/${userId}/plan`, 'POST', { planId }),
   grantUserModule: (userId: string, moduleKey: string) => req<{ ok: boolean }>(`/admin/users/${userId}/modules`, 'POST', { moduleKey }),

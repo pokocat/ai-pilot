@@ -18,8 +18,13 @@ import type {
   KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, OrganizeItem, StagedUploadResult, ConfirmResult,
   KnowledgeBatch, KnowledgeBatchFile,
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
+  CreativeStatusResult, PosterBrief, PosterBriefDraft, PosterScene, CreativeUploadResult,
+  CreativeJobView, CreativeAssetView, CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
 } from '../../../shared/contracts';
-import type { ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek, MingpanReport } from './api';
+import type {
+  ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek, MingpanReport,
+  CreatePosterJobResult, CreativeUploadRole,
+} from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
 import { agentForText } from '../data/intents';
@@ -699,6 +704,120 @@ function loadBizSeriesM(token: string): BizMetricWeek[] {
 }
 function saveBizSeriesM(token: string, s: BizMetricWeek[]) { try { Taro.setStorageSync(`mock.bizmetrics.${token}`, JSON.stringify(s)); } catch { /* noop */ } }
 
+/* ────────────── 海报成品图 mock（canvas_design · P4） ──────────────
+ * 与服务端同口径：建单只回 { jobId,status,creditCost,reused }，详情由 GET /creative/jobs/:id 给全量视图。
+ * 状态推进**不用常驻 timer**（页面切走后 timer 会被回收，重进就永远停在 pending）：
+ * 只存 createdAt，每次查询按「当前时间 − 建单时间」推算 pending → running → succeeded（约 3.2 秒走完）。
+ * 成品图是内置纯色渐变 PNG 占位（不是真渲染结果），仅供确认页/详情页的版式与交互自测。
+ */
+const MOCK_POSTER_PRICE = 10;
+// 60×80 3:4 渐变占位 PNG（墨绿→纸白 + 两条浅色「标题」带）。base64 内联，避免 mock 依赖网络与 OSS。
+const MOCK_POSTER_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADwAAABQCAIAAADKqIEEAAAB2klEQVR42tXOW0vTcQCH8edVBBFUkoghggzzkJlhmeKBMRhmaYllBzWGMjxgJqZ4RpNhiWklw5KRNUYmZqiMxViZ5hFLLKSuvO4N9Ap+eiV/vvC5fx6O2E7I4WhilByOJUXL4XhqjBxOpp2Ww6n0ODnEZMTLITYzQQ5xl2xyiL+cKIeEnGQ52PJS5XCm4JwcUuzn5XDWcUEO6c6LcsgozJJDZlGOHLKu5cohuyTf5N9exFqmMXJL7SaWT5vGyC9zmFg+bRrDfstpYvm0aQzH7UITy6dNYzjvFcnhSmWxHK7evy6HElepHG7U3JRDmbvcJBLyH559ugeivPauyaFO79M9EHfqK+RQ0Vglh6omlxxczdVyqG5xy8HdWiuHuvZ6OTR0NsrhQXeTHB72Nsuhpf+RHNoG2uTQ7umQQ9dglxx6hnrk0DfcJ4eBkcdy8Dz3yOHJ2KAchrxP5fBsfFgOo69H5PDS90IO3jdjchh/65XDhP+VHHyBCTlMTvnk4J+elENg5p0cpmYDcpieey+Hjwsf5PApOCOH+dCsHILhOTmEIgtyCH8NyiHy7bMcFr+H5bC8+kUOK+uLcljfXJLD5taKHH5sr8lhe2dDDr9+b8lhd/enHP783ZHzHwStB5oWBI+zAAAAAElFTkSuQmCC';
+
+interface CreativeJobRec {
+  id: string;
+  createdAt: number;          // 毫秒时间戳：状态按时间差推算，不常驻 timer
+  idempotencyKey: string;
+  brief: PosterBrief;
+  creditCost: number;
+  parentJobId?: string;
+  /** 终态才落这里（cancelled/failed）；空 = 按时间差推算 pending/running/succeeded。 */
+  terminal?: 'cancelled' | 'failed';
+  terminalAt?: number;
+  refunded?: boolean;
+}
+function loadCreativeM(token: string): CreativeJobRec[] {
+  try {
+    const raw = Taro.getStorageSync(`mock.creative.${token}`);
+    if (raw) {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (Array.isArray(parsed)) return parsed as CreativeJobRec[];
+    }
+  } catch { /* noop */ }
+  return [];
+}
+function saveCreativeM(token: string, jobs: CreativeJobRec[]) {
+  // 只留最近 30 条，避免长期本地演示把 storage 撑爆。
+  try { Taro.setStorageSync(`mock.creative.${token}`, JSON.stringify(jobs.slice(-30))); } catch { /* noop */ }
+}
+/** 时间差 → 状态与阶段（与服务端 progress 取值一致：philosophy | visual | render | upload）。 */
+function creativePhaseM(rec: CreativeJobRec): { status: CreativeJobView['status']; progress: string } {
+  if (rec.terminal === 'cancelled') return { status: 'cancelled', progress: 'upload' };
+  if (rec.terminal === 'failed') return { status: 'failed', progress: 'visual' };
+  const ms = Date.now() - rec.createdAt;
+  if (ms < 900) return { status: 'pending', progress: 'philosophy' };
+  if (ms < 1800) return { status: 'running', progress: 'visual' };
+  if (ms < 2600) return { status: 'running', progress: 'render' };
+  if (ms < 3200) return { status: 'running', progress: 'upload' };
+  return { status: 'succeeded', progress: 'upload' };
+}
+function creativeActionsM(status: CreativeJobView['status']): CreativeJobView['actions'] {
+  if (status === 'pending' || status === 'running') return ['cancel'];
+  if (status === 'succeeded') return ['revise', 'regenerate'];
+  return ['regenerate'];
+}
+function creativeViewM(rec: CreativeJobRec): CreativeJobView {
+  const { status, progress } = creativePhaseM(rec);
+  const assets: CreativeAssetView[] = status === 'succeeded'
+    ? [{
+        id: `${rec.id}-png`, kind: 'poster_png', mimeType: 'image/png',
+        width: 1080, height: 1440, previewUrl: MOCK_POSTER_PNG, downloadUrl: MOCK_POSTER_PNG,
+      }]
+    : [];
+  const done = status === 'succeeded' || status === 'failed' || status === 'cancelled';
+  return {
+    id: rec.id,
+    kind: 'poster',
+    status,
+    progress,
+    creditCost: rec.creditCost,
+    refunded: !!rec.refunded,
+    ...(status === 'cancelled' ? { errorMessage: '已取消' } : {}),
+    ...(status === 'failed' ? { errorMessage: '出图失败，已退回钻石' } : {}),
+    createdAt: new Date(rec.createdAt).toISOString(),
+    ...(done ? { completedAt: new Date(rec.terminalAt ?? rec.createdAt + 3200).toISOString() } : {}),
+    assets,
+    ...(rec.parentJobId ? { parentJobId: rec.parentJobId } : {}),
+    actions: creativeActionsM(status),
+  };
+}
+function creativeJobNotFoundM(): never {
+  throw Object.assign(new Error('任务不存在'), { code: 'NOT_FOUND', statusCode: 404 });
+}
+/** mock 需求单预填：优先读该成果消息的标题/分段，读不到再用确定性兜底（不编造客户业务结论）。 */
+function posterDraftM(d: UserData, sessionId?: string, messageId?: string): PosterBriefDraft {
+  let title = '';
+  let firstList: string[] = [];
+  for (const s of d.sessions) {
+    if (sessionId && s.id !== sessionId) continue;
+    for (const m of s.messages) {
+      if (m.role !== 'report') continue;
+      if (messageId && m.id !== messageId) continue;
+      const c = m.content as unknown as Deliverable;
+      title = String(c?.title ?? '').replace(/[《》]/g, '');
+      firstList = (c?.sections ?? []).flatMap((sec) => (sec as { list?: string[] }).list ?? []).slice(0, 3);
+      break;
+    }
+    if (title) break;
+  }
+  const scene: PosterScene = 'personal_brand';
+  return {
+    brief: {
+      scene,
+      goal: '让潜在客户看懂你在做什么',
+      audience: '有相同问题、还没找到解法的人',
+      headline: (title || '一件事，做到别人做不到').slice(0, 20),
+      subheadline: '',
+      proofPoints: firstList.map((x) => String(x).replace(/[*#`]/g, '').slice(0, 20)).filter(Boolean),
+      cta: '扫码来聊',
+      visualDirection: '干净留白、克制的墨色与暖金、正面柔光、竖版三分构图',
+      templateKey: 'person_hero',
+      ratio: '3:4',
+    },
+    templateReason: '你的成果里人物信任感是主要抓手，人物主视觉能让第一眼先记住人，再记住主张。',
+  };
+}
+
 // ── mock api（与后端同口径） ──
 export const mock = {
   async suggestAlias(): Promise<AliasSuggestionResult> {
@@ -966,9 +1085,9 @@ export const mock = {
   reminders(): Promise<ReminderView> {
     return Promise.resolve({
       items: [
-        { key: 'order', time: '18:00', title: '今日军令截止', desc: '18:00 前补充高意向咨询记录。', kind: 'order', subscribed: false },
-        { key: 'review', time: '21:30', title: '今日复盘', desc: '21:30 生成今日复盘。', kind: 'review', subscribed: false },
-        { key: 'weekly', time: '周五', title: '周复盘', desc: '本周五检查成交漏斗和内容表现。', kind: 'weekly', subscribed: false },
+        { key: 'order', time: '18:00', title: '今日军令截止', desc: '18:00 前补充高意向咨询记录。', kind: 'order', subscribed: false, scene: 'review', canSubscribe: false },
+        { key: 'review', time: '21:30', title: '今日复盘', desc: '21:30 生成今日复盘。', kind: 'review', subscribed: false, scene: 'review', canSubscribe: false },
+        { key: 'weekly', time: '周五', title: '周复盘', desc: '本周五检查成交漏斗和内容表现。', kind: 'weekly', subscribed: false, scene: 'review', canSubscribe: false },
       ],
       subscribeReady: false,
     });
@@ -1723,5 +1842,97 @@ export const mock = {
     if (insight) ingestKnowledgeLocal(d, { kind: 'insight', title: deliverable.title, text: insight, projectId: s.projectId ?? null, sourceType: 'conversation', sourceId: s.id, tags: [ag.name, '对话纪要'] });
     save(token, d);
     return delay({ reportId: saved.reportId, version: saved.version, title: deliverable.title, knowledgeAdded: insight ? 1 : 0 });
+  },
+
+  // —— 海报成品图（canvas_design）——
+  // mock 恒开、单价 10；不动钻石余额（本地演示不模拟扣退款，避免与 credits 页对不上账）。
+  async creativeStatus(): Promise<CreativeStatusResult> {
+    return delay({ enabled: true, pricePerPoster: MOCK_POSTER_PRICE }, 60);
+  },
+  async posterBriefDraft(sessionId?: string, messageId?: string): Promise<PosterBriefDraft> {
+    const { d } = current();
+    return delay(posterDraftM(d, sessionId, messageId), 240);
+  },
+  async uploadCreativeAsset(role: CreativeUploadRole): Promise<CreativeUploadResult> {
+    return delay({ assetId: uid(`asset-${role}-`) }, 320);
+  },
+  async createPosterJob(body: CreatePosterJobRequest): Promise<CreatePosterJobResult> {
+    const { token } = current();
+    const jobs = loadCreativeM(token);
+    const key = String(body?.idempotencyKey ?? '').trim();
+    if (!key) throw Object.assign(new Error('idempotencyKey 非法'), { code: 'IDEMPOTENCY_KEY_INVALID', statusCode: 422 });
+    const dup = jobs.find((j) => j.idempotencyKey === key);
+    if (dup) return delay({ jobId: dup.id, status: creativePhaseM(dup).status, creditCost: dup.creditCost, reused: true }, 160);
+    const rec: CreativeJobRec = {
+      id: uid('cj-'), createdAt: Date.now(), idempotencyKey: key,
+      brief: body.brief, creditCost: MOCK_POSTER_PRICE,
+    };
+    jobs.push(rec); saveCreativeM(token, jobs);
+    return delay({ jobId: rec.id, status: 'pending', creditCost: rec.creditCost, reused: false }, 260);
+  },
+  async creativeJob(id: string): Promise<CreativeJobView> {
+    const { token } = current();
+    const rec = loadCreativeM(token).find((j) => j.id === id);
+    if (!rec) creativeJobNotFoundM();
+    return delay(creativeViewM(rec), 120);
+  },
+  async reviseJob(id: string, patch: RevisePosterJobRequest): Promise<CreatePosterJobResult> {
+    const { token } = current();
+    const jobs = loadCreativeM(token);
+    const parent = jobs.find((j) => j.id === id);
+    if (!parent) creativeJobNotFoundM();
+    const key = String(patch?.idempotencyKey ?? '').trim() || `revise:${id}:${Date.now()}`;
+    const dup = jobs.find((j) => j.idempotencyKey === key);
+    if (dup) return delay({ jobId: dup.id, status: creativePhaseM(dup).status, creditCost: dup.creditCost, reused: true }, 160);
+    const rec: CreativeJobRec = {
+      id: uid('cj-'), createdAt: Date.now(), idempotencyKey: key, parentJobId: parent.id,
+      creditCost: 0, // 改文案不再扣钻石
+      brief: {
+        ...parent.brief,
+        ...(patch.headline !== undefined ? { headline: patch.headline } : {}),
+        ...(patch.subheadline !== undefined ? { subheadline: patch.subheadline } : {}),
+        ...(patch.proofPoints !== undefined ? { proofPoints: patch.proofPoints } : {}),
+        ...(patch.cta !== undefined ? { cta: patch.cta } : {}),
+        ...(patch.templateKey !== undefined ? { templateKey: patch.templateKey } : {}),
+      },
+    };
+    jobs.push(rec); saveCreativeM(token, jobs);
+    return delay({ jobId: rec.id, status: 'pending', creditCost: 0, reused: false }, 260);
+  },
+  async regenerateJob(id: string, patch: RegeneratePosterJobRequest): Promise<CreatePosterJobResult> {
+    const { token } = current();
+    const jobs = loadCreativeM(token);
+    const parent = jobs.find((j) => j.id === id);
+    if (!parent) creativeJobNotFoundM();
+    const key = String(patch?.idempotencyKey ?? '').trim() || `regen:${id}:${Date.now()}`;
+    const dup = jobs.find((j) => j.idempotencyKey === key);
+    if (dup) return delay({ jobId: dup.id, status: creativePhaseM(dup).status, creditCost: dup.creditCost, reused: true }, 160);
+    const rec: CreativeJobRec = {
+      id: uid('cj-'), createdAt: Date.now(), idempotencyKey: key, parentJobId: parent.id,
+      creditCost: MOCK_POSTER_PRICE, // 重出主视觉再扣一次
+      brief: {
+        ...parent.brief,
+        ...(patch.visualDirection !== undefined ? { visualDirection: patch.visualDirection } : {}),
+        ...(patch.negativePrompt !== undefined ? { negativePrompt: patch.negativePrompt } : {}),
+        ...(patch.templateKey !== undefined ? { templateKey: patch.templateKey } : {}),
+      },
+    };
+    jobs.push(rec); saveCreativeM(token, jobs);
+    return delay({ jobId: rec.id, status: 'pending', creditCost: rec.creditCost, reused: false }, 260);
+  },
+  async cancelJob(id: string): Promise<CreativeJobView> {
+    const { token } = current();
+    const jobs = loadCreativeM(token);
+    const rec = jobs.find((j) => j.id === id);
+    if (!rec) creativeJobNotFoundM();
+    const cur = creativePhaseM(rec).status;
+    // 已成功的任务不可取消（与服务端 actions 口径一致）；仍在途的标记取消并按已退款展示。
+    if (cur === 'pending' || cur === 'running') {
+      rec.terminal = 'cancelled';
+      rec.terminalAt = Date.now();
+      rec.refunded = rec.creditCost > 0;
+      saveCreativeM(token, jobs);
+    }
+    return delay(creativeViewM(rec), 200);
   },
 };

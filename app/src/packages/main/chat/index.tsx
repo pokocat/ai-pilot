@@ -9,7 +9,7 @@ import SafeHeader from '../../../components/SafeHeader';
 import AdvisorAvatar from '../../../components/AdvisorAvatar';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
-import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate, type SessionDetail } from '../../../services/api';
+import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate, type SessionDetail, type CreativeStatusResult } from '../../../services/api';
 import { STREAM_CHAT } from '../../../services/config';
 import {
   startLiveGen, attachLiveGenView, detachLiveGenView, peekLiveGen, stopLiveGen, dropLiveGen, storedReplyFor,
@@ -24,6 +24,7 @@ import { CHAT_GUIDES } from '../../../data/operatingSystem';
 import { acceptDeliverable } from '../../../services/dossier';
 import { navTo } from '../../../services/nav';
 import { chatPendingAge, clearChatPending, isChatPending, markChatPending } from '../../../services/chatPending';
+import { getCreativeStatus, peekCreativeStatus } from '../../../services/creative';
 import './index.scss';
 
 // uid：每条消息的稳定 key（服务端消息用其 id，本地临时消息造递增 uid），供列表渲染 key 用。
@@ -312,6 +313,8 @@ export default function Chat() {
   const [refs, setRefs] = useState<MessageRef[]>([]);
   const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
   const [picker, setPicker] = useState(false);
+  // 海报成品图能力：仅海报设计师会话需要，null = 未知/不可用 → 成果卡不露出出图入口（方案 §16 降级口径）。
+  const [creativeStatus, setCreativeStatus] = useState<CreativeStatusResult | null>(() => peekCreativeStatus());
   const [pick, setPick] = useState<{ projects: ProjectItem[]; reports: ReportItem[]; knowledge: KnowledgeItemT[]; memories: MemoryCandidate[] }>({ projects: [], reports: [], knowledge: [], memories: [] });
   const logHeightRef = useRef(0);
   const logRef = useRef<Msg[]>([]);
@@ -1293,6 +1296,25 @@ export default function Chat() {
     if (next > 0) setTimeout(scrollToEnd, 40);
   };
 
+  // 海报成品图能力探测：只在海报设计师会话里问一次（模块级按 token 缓存 + 单飞，切会话不重复打服务端）。
+  // 失败/未登录返回 null → 成果卡不显示出图入口，不弹错（探测失败不该打扰用户）。
+  useEffect(() => {
+    if (agent?.key !== 'poster' || !store.isAuthed()) return;
+    let alive = true;
+    void getCreativeStatus().then((st) => { if (alive) setCreativeStatus(st); });
+    return () => { alive = false; };
+  }, [agent?.key]);
+
+  // 进海报确认页：带 sessionId + messageId 让服务端预填需求单。分包跳转失败必须提示（AGENTS.md §7.2）。
+  const openPosterConfirm = (messageId?: string) => {
+    if (!messageId) return;
+    const qs = `?messageId=${encodeURIComponent(messageId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ''}`;
+    const started = navTo(`/packages/work/poster/index${qs}`, {
+      fail: () => Taro.showToast({ title: '成品图页面加载失败，请重试', icon: 'none' }),
+    });
+    if (!started) Taro.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
+  };
+
   // 卡片 saved 态点亮：把该 messageId 的报告消息标记 saved（供 ReportCard saved prop 同步、历史 restore 一致）。
   const markMsgSaved = (messageId?: string) => {
     if (!messageId) return;
@@ -1986,6 +2008,9 @@ export default function Chat() {
           // 非降级草稿，才开放查看/分享/存入/认可。此前只看 streaming 位——断流对账交回轮询后卡片
           // 被误收成非流式（messageId 为空、正文可能半截），操作全开、状态误写「已生成」。
           const reportReady = !m.streaming && !!m.messageId && !m.deliverable.degraded && (m.deliverable.sections?.length ?? 0) > 0;
+          // 出图入口条件：海报设计师 + 成品图能力已开启 + 本卡是已落库可操作成果（降级/半截卡不给出图，
+          // 否则等于拿一份不完整方案去扣钻石）。能力关闭时整块不渲染，不做「点了再报 403」。
+          const posterEntryOn = reportReady && agent?.key === 'poster' && !!creativeStatus?.enabled;
           return (
             // P2-14：报告气泡用稳定 uid 作 key（创建即有，先于 messageId），避免「延迟插入记忆 / 顶部插历史」导致索引位移、ReportCard 渐显动画状态错位。
             <View key={m.uid ?? m.messageId ?? `r-${i}`} className="msg a">
@@ -2000,6 +2025,8 @@ export default function Chat() {
                   onView={reportReady ? () => shareReport(m.messageId) : undefined}
                   onSave={reportReady ? () => saveDeliverable(m.deliverable, m.messageId) : undefined}
                   onShareMenu={reportReady ? (kind) => onReportShareMenu(kind, m.deliverable, m.messageId) : undefined}
+                  posterPrice={posterEntryOn ? creativeStatus!.pricePerPoster : undefined}
+                  onPoster={posterEntryOn ? () => openPosterConfirm(m.messageId) : undefined}
                 />
               </View>
               {/* 记债项10：报告流失败/降级——单一话术（trust 行「生成中断——已生成部分已保留，可点击重试补全」）+ ↻ 重试入口。

@@ -5,10 +5,14 @@ import type { Usage, Deliverable } from '../schema.js';
 
 // —— 可插拔技能体系 ——
 // 技能库不再只装「HTTP 工具」。一个技能(Skill)有统一元信息 + 一种 kind 决定它在哪个点执行：
-//   kind='tool'   模型在产出/对话循环里主动调用，返回文本喂回模型(search_knowledge / recall_memory / 运营 HTTP 工具)。
-//   kind='output' 不进模型循环；在成果产出后对结构化成果做确定性处理，产出副产物(如 render_report→网页分享链接、未来 PDF/推送)。
-// native 技能由代码模块提供并注册进 registry；运营 HTTP 工具仍走 DB。两类在「技能库」里统一列出、按 agent 勾选。
-export type SkillKind = 'tool' | 'output';
+//   kind='tool'     模型在产出/对话循环里主动调用，返回文本喂回模型(search_knowledge / recall_memory / 运营 HTTP 工具)。
+//   kind='output'   不进模型循环；在成果产出后对结构化成果做确定性处理，产出副产物(如 render_report→网页分享链接)。
+//   kind='artifact' 不进模型循环；创建**异步任务**生成二进制交付物(PNG 等)，由 REST 接口 / 成果卡按钮触发，
+//                   执行确定性、跨进程(worker 消费 CreativeJob)、可能计费与退款(如 canvas_design→海报成品图)。
+// native 技能由代码模块提供并注册进 registry；运营 HTTP 工具仍走 DB。三类在「技能库」里统一列出、按 agent 勾选。
+// 注：artifact 第一期只登记元信息(不建通用 ArtifactSkill 多态注册表)——只有 canvas_design 一个消费方，
+// 提交入口直接是 creative 服务模块的函数；出现第二个 artifact 技能时再抽注册表接口。
+export type SkillKind = 'tool' | 'output' | 'artifact';
 
 /** 技能库统一元信息(后台展示 + agent 勾选用)。tool 技能 key=name。 */
 export interface SkillMeta {

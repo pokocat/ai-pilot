@@ -1,7 +1,7 @@
 # Canvas Design 接入军师 App 方案
 
-> 状态：方案评审稿，尚未实施  
-> 日期：2026-07-28  
+> 状态：评审后修订稿 v2（已对照代码逐项核实，开放问题已于 2026-07-29 全部拍板），尚未实施  
+> 日期：2026-07-28 初稿 · 2026-07-29 按代码现状评审修订  
 > 适用范围：`shared/`、`server/`、`app/`、`admin/`  
 > 目标能力：个人宣传海报、品牌主视觉、活动海报等 PNG/PDF 静态视觉产出
 
@@ -40,22 +40,24 @@ canvas_design 形成视觉哲学与画面规格
 
 军师当前已经有：
 
-- `poster` 海报设计师智能体；
-- `BrandKit` 的 IP 人设、话术与视觉调性；
-- `SkillKind = tool | output` 的可插拔技能注册表；
-- 运营后台自定义 HTTP Skill；
-- OSS 私有/公开文件存储；
-- 钻石算力预扣与失败退款；
-- 小程序 Canvas 图片导出、保存相册与图片分享；
-- 长任务退出重进后的状态恢复经验。
+- `poster` 海报设计师智能体（`server/src/data/agents.ts:368`，`billing='unlock'`、`price=8`、`deliverableKey='海报设计'`）；
+- `BrandKit` 的 IP 人设、话术与视觉调性（persona/voice/theme + `version` + `approvedAt`，生态产品只读取已确认版本）；
+- `SkillKind = 'tool' | 'output'` 的可插拔技能注册表（`server/src/llm/tools/registry.ts`）；
+- 运营后台自定义 HTTP Skill（`httpTool.ts`，含 SSRF 防护与请求头加密）；
+- OSS 私有/公开文件存储与短时签名 URL（`ossUpload.ts`，单 bucket 按对象 ACL）；
+- 钻石预扣与失败退款（`credits.ts` 的 `reserveCredits`）、token 额度预留结算（`tokenQuota.ts` 的 `reserveQuota`，带 `done` 幂等标志，是幂等标杆）；
+- Puppeteer HTML→PDF 生产级管线（`reportPdf.ts`：浏览器单例 + 单并发队列 + 超时 + 测试短路）；
+- 小程序 Canvas 图片导出、保存相册与图片分享（`canvasCard.ts` / `reportShareCard.ts`）；
+- 长任务退出重进恢复的成熟模式（`chatPending` TTL 桥接 + 服务端权威真值 + 分档轮询 + `liveGenCore` 收尾裁决）。
 
 当前缺口不是“再加一段海报提示词”，而是：
 
 1. 海报设计师目前只产出主视觉概念、文案和版式建议，没有成品文件；
-2. 现有 `Tool` 只返回文本，现有 `OutputSkill` 只返回成果字段补丁；
-3. 没有 PNG/PDF 二进制产物的通用任务和资产模型；
-4. 没有图片模型、排版渲染器与最终交付之间的标准管线；
-5. 没有按“重新生成主视觉”和“只改文字重排”区分计费。
+2. 现有 `Tool` 只返回文本，现有 `OutputSkill` 只返回成果字段补丁（全库现存仅 `render_report` 一个）；
+3. 没有任何图片生成模型接入（`server/src/llm/providers/` 只有 openai/claude 文本 provider；`meterUnit='image'` 目前只是计费口径，没有出图实现）；
+4. 没有 PNG 截图渲染（Puppeteer 管线只做 PDF）；没有通用异步任务表与资产表（OSS key 目前散挂在各业务行字段上）；
+5. 内容审核仅覆盖文本（`moderation.ts` 的 provider 抽象是 `(text) => verdict`），图片审核是全新能力；
+6. 没有按“重新生成主视觉”和“只改文字重排”区分计费。
 
 Canvas Design 适合作为这条管线的视觉方法底座。
 
@@ -75,11 +77,13 @@ Canvas Design 适合作为这条管线的视觉方法底座。
 
 ### 3.2 用户入口
 
-主入口放在：
+主入口放在（对齐现有信息架构：执行 tab 现名「军令」，创作能力所在区块为「AI 创作发布」）：
 
 ```text
-执行 → 军师代笔 · 内容出品 → 海报设计师
+执行（军令）→ AI 创作发布 → 海报设计师
 ```
+
+对话 tab 的海报设计师会话本身也是入口：成果卡上直接提供「生成成品图」。
 
 次入口可以放在：
 
@@ -197,7 +201,7 @@ flowchart LR
 
 ### 5.2 Skill 类型扩展
 
-当前：
+当前（`server/src/llm/tools/types.ts:11`）：
 
 ```ts
 type SkillKind = 'tool' | 'output';
@@ -212,10 +216,16 @@ type SkillKind = 'tool' | 'output' | 'artifact';
 语义：
 
 - `tool`：模型在对话或成果生成中主动调用，返回文本；
-- `output`：对结构化成果做确定性后处理，如生成网页版报告；
+- `output`：对结构化成果做确定性后处理，如生成网页版报告（执行点在 `POST /sessions/:id/messages/:mid/report`，不在模型循环内）；
 - `artifact`：创建异步任务并生成 PNG、PDF 等二进制交付物。
 
-建议新增：
+第一期收敛（避免为单实例引入第三套执行语义）：
+
+1. `artifact` 只作为 `SkillMeta.kind` 的新枚举值登记进技能库（后台统一展示、按 agent 勾选），改动量一行级别；同步改 admin 技能库的 kind 文案映射（`admin/src/views/studio.tsx` 的 `KIND_LABEL`）与 `normalizeSkills` 校验；
+2. 不建通用 `ArtifactSkill` 多态注册表：第一期只有 `canvas_design` 一个 artifact 技能，`submit` 直接实现为 creative 服务模块的函数；等出现第二个 artifact 技能（封面/长图）再抽象注册表接口；
+3. `artifact` 技能不进模型工具循环：模型不会调用它，触发点是成果卡按钮 / REST API（见 §9），执行是确定性的。
+
+二期抽象时的目标契约（现在仅作参考，不落代码）：
 
 ```ts
 interface ArtifactSkillContext {
@@ -239,7 +249,7 @@ interface ArtifactSkill {
 }
 ```
 
-`canvas_design` 注册为原生 `artifact` Skill，不作为普通 HTTP Tool 返回文本。
+`canvas_design` 注册为原生 `artifact` Skill，不作为普通 HTTP Tool 返回文本（key 命名符合技能库 `^[a-z][a-z0-9_]*$` 校验约束）。
 
 ### 5.3 PosterBrief 契约
 
@@ -266,7 +276,7 @@ export interface PosterBrief {
   cta: string;
   visualDirection: string;
   negativePrompt?: string;
-  templateKey: string;
+  templateKey?: string; // 缺省由服务端按 scene 选默认模板
   ratio: PosterRatio;
   portraitAssetId?: string;
   logoAssetId?: string;
@@ -285,6 +295,12 @@ export interface PosterBrief {
 - 画布比例；
 - 模板是否启用。
 
+补充约定：
+
+- `brandKitVersion` 只允许引用已确认（`approvedAt` 非空）的品牌资产包版本，与 BrandKit 现有口径一致（生态产品只读取 approved 的资产包）；
+- PosterBrief 不要求用户从零手填：服务端根据海报设计师成果消息 + BrandKit 预填草稿（见 §9.1 的 `brief-draft`），用户在确认页只做增删改；
+- 模板推荐写进海报设计师提示词（2026-07-29 拍板）：设计师在成果中按用户意图给出 `templateKey` 推荐 + 一句「为什么这样设计」的推荐理由，`brief-draft` 预填采纳、确认页向用户展示理由制造惊喜感；**服务端只认模板白名单内的 key**，无效或缺失一律按 `scene` 回退默认模板，确认页允许用户手动更换——推荐是提示词的事，兜底是服务端的事，两者不混。
+
 ### 5.4 通用任务模型
 
 建议使用通用 `CreativeJob`，而不是只为 Canvas Design 建一张专用表，方便后续扩展封面、长图、视频封面和分镜图。
@@ -300,13 +316,15 @@ model CreativeJob {
   skillKey         String
   kind             String   // poster | cover | social_card
   status           String   // pending | running | succeeded | failed | cancelled
+  progress         String?  // 用户可读阶段：philosophy | visual | render | upload
+  parentJobId      String?  // revise/regenerate 版本链：新任务指向来源任务，成功任务的资产永不被覆盖
   engine           String   // native | anthropic_skill
   provider         String?
   providerTaskId   String?
   requestJson      Json
   resultJson       Json?
   promptSnapshot   String?  @db.Text
-  idempotencyKey   String   @unique
+  idempotencyKey   String
   creditCost       Int      @default(0)
   chargedAt        DateTime?
   refundedAt       DateTime?
@@ -319,6 +337,7 @@ model CreativeJob {
   updatedAt        DateTime @updatedAt
   assets           CreativeAsset[]
 
+  @@unique([userId, idempotencyKey]) // 幂等键按用户隔离：客户端生成的 key 不做全局唯一，避免跨用户撞键/探测
   @@index([userId, createdAt])
   @@index([status, createdAt])
   @@index([tenantId])
@@ -344,7 +363,9 @@ model CreativeAsset {
 }
 ```
 
-任务状态必须以数据库为真源，不能只存在于进程内存或页面 React 状态。
+任务状态必须以数据库为真源，不能只存在于进程内存或页面 React 状态。这是从两处现状教训得来的硬要求：会话 `generating` 真值目前是进程内 Map（`sessionGeneration.ts`，重启即丢）；知识库 `processDocument` 曾用 fire-and-forget，进程重启会把条目永久卡在 `parsing` 且无人捞。CreativeJob 从第一天就要配 sweep 兜底（§10.3）。
+
+命名对齐：`xxxJson` 字段后缀、`@@map` snake_case、cuid 主键、`tenantId` 必带，均沿用现有 schema 约定；仓库目前没有任何 Job/Asset 表，这两张是全新表。
 
 ### 5.5 成果资产契约
 
@@ -370,32 +391,37 @@ export interface Deliverable {
 
 对话消息里只保存资产 ID 和必要元数据，不保存大体积 base64。
 
+落点：任务成功后按现有「成果补丁」路径回写成果消息 `contentJson`（与 `render_report` 写回 `htmlUrl` 是同一模式），前端 ReportCard 沿用「有 messageId + 非降级才算已生成」的硬规则展示，保存/分享复用 `reportShareCard` 链路。
+
 ## 6. Canvas Design 的两种执行引擎
 
 ### 6.1 正式推荐：军师原生引擎
 
-目录建议：
+目录建议（对齐现有结构：任务与渲染属于服务层，不是 LLM 工具；注册胶水才进 `llm/tools/`）：
 
 ```text
-server/src/skills/canvas-design/
+server/src/creative/canvas-design/   # 方法资产：上游许可证、设计哲学、字体、模板
 ├── LICENSE.txt
 ├── NOTICE.md
 ├── design-philosophy.md
 ├── fonts/
-├── templates/
+└── templates/
+server/src/services/creative/        # 运行时：契约校验、哲学生成、渲染、任务 worker
 ├── schema.ts
 ├── philosophy.ts
 ├── renderer.ts
-└── index.ts
+├── jobs.ts
+└── worker.ts
+server/src/llm/tools/registry.ts     # 仅登记 SkillMeta(kind='artifact')
 ```
 
 执行步骤：
 
-1. 基于 PosterBrief、品牌资产和用户历史生成“视觉哲学”；
+1. 基于 PosterBrief、品牌资产和用户历史生成“视觉哲学”（走现有服务端 LLM 池，token 消耗计入任务成本，不额外扣用户 token 额度）；
 2. 把视觉哲学约束为结构化 `CanvasSpec`；
 3. 如需要人物或场景，调用独立图片模型生成无文字主视觉；
 4. 使用 HTML/CSS/SVG 构建海报；
-5. 通过现有 Puppeteer 截图生成 PNG；
+5. 复用 `reportPdf.ts` 的浏览器单例/队列/超时骨架，新增 `page.screenshot` 生成 PNG（现有管线只做 PDF，截图是新增的函数级能力，不是新依赖）；
 6. 需要 PDF 时复用浏览器打印管线；
 7. 校验尺寸、文字溢出和文件完整性；
 8. 上传 OSS；
@@ -478,7 +504,9 @@ interface VisualProvider {
 }
 ```
 
-第一期至少实现一个生产供应商，并保持供应商可切换。图片模型只返回主视觉素材，最终海报仍由 `canvas_design` 统一排版。
+注意现状：仓库目前没有任何图片生成接入（providers 目录只有 openai/claude 文本 provider），`VisualProvider` 是从零新建的模块。
+
+接入方式（2026-07-29 拍板）：**不硬编码供应商，做成后台可配的模型接入点**——第一期交付通用适配器（baseUrl / model / apiKey / 请求参数模板，密钥走 `secretBox` 加密存储，复用 aiConfig 的 provider 配置模式）+ 后台配置页 + 连通性试跑（dry-run），具体供应商由运营在后台配置并可随时切换。图片模型只返回主视觉素材，最终海报仍由 `canvas_design` 统一排版。
 
 ## 8. 渲染器设计
 
@@ -492,11 +520,17 @@ HTML + CSS + SVG + Puppeteer screenshot
 
 理由：
 
-- 服务端已经依赖 Puppeteer；
+- 服务端已依赖 Puppeteer 且有生产级管线（浏览器单例、单并发队列、超时、测试短路、`onClose` 收尾）；
 - 中文字体、自动换行和渐变比纯 Canvas 更容易控制；
 - 模板容易预览、测试和运营验收；
 - PNG 与 PDF 可以共用一套布局；
 - 不需要新增难部署的原生图形依赖。
+
+落地注意：
+
+- 输出分辨率用 viewport + `deviceScaleFactor` 控制（如 3:4 主规格 1080×1440 = 540×720 @2x），不要渲染后再放大；
+- 现有渲染队列是单并发，`CANVAS_DESIGN_MAX_CONCURRENCY` 必须与之对齐——第一期直接用 1，或给海报单独的浏览器实例池并压内存上限；不能配置一个队列根本不会执行的并发数；
+- 部署镜像必须内置商用授权中文字体（`deploy/Dockerfile.server` 加字体层），海报渲染不得依赖宿主机系统字体。
 
 ### 8.2 画布规格
 
@@ -523,7 +557,7 @@ MVP 先支持：
 - 不允许元素越界；
 - 二维码留足静区；
 - Logo 不拉伸；
-- 中文字体有合法授权；
+- 中文字体用开源授权（2026-07-29 拍板：OFL 字体，如思源黑体 / 思源宋体 / 霞鹜文楷，允许商用与打包分发），随镜像内置；
 - 1080px 级输出清晰；
 - 最终图片不引用会过期的外链资源。
 
@@ -532,8 +566,14 @@ MVP 先支持：
 ### 9.1 创建海报任务
 
 ```http
+GET  /creative/posters/brief-draft?sessionId=&messageId=   # 从成果消息 + BrandKit 预填 PosterBrief 草稿
+POST /creative/uploads                                     # 人像/Logo/二维码源素材上传，落 CreativeAsset(kind='source')
 POST /creative/posters
 ```
+
+`POST /creative/posters` 门禁顺序：登录 → 功能开关 → 海报设计师已解锁（未解锁 403 `AGENT_LOCKED`，与 `assertAgentAccess` 同口径）→ 套餐有效（403 `PLAN_EXPIRED`）→ 钻石充足（402 `INSUFFICIENT_CREDITS`）→ Brief 校验 → 频控/日限额。
+
+`/creative/uploads` 复用聊天图片上传的约束口径（MIME 白名单、单张 ≤10MB、私有 OSS）。
 
 请求：
 
@@ -552,7 +592,7 @@ POST /creative/posters
 {
   "jobId": "xxx",
   "status": "pending",
-  "creditCost": 3
+  "creditCost": 10
 }
 ```
 
@@ -594,7 +634,7 @@ GET /creative/assets/:id/file
 
 默认要求登录并校验资产归属。服务端可以：
 
-- 返回短时 OSS 签名 URL；
+- 返回短时 OSS 签名 URL（`ossSignedUrl` 现成，默认 600 秒）；
 - 或直接流式返回文件。
 
 不要把用户人像与企业物料默认设为永久 public-read。
@@ -603,10 +643,10 @@ GET /creative/assets/:id/file
 
 ### 10.1 任务执行
 
-第一期可以使用数据库任务表 + 单独 worker，不强依赖 Redis 队列：
+第一期可以使用数据库任务表 + 单独 worker，不强依赖 Redis 队列（`ioredis` 本就是 optionalDependency，未配置时各服务均回退进程内实现）：
 
-1. API 事务内创建任务并预扣；
-2. worker 抢占 `pending` 任务；
+1. API 事务内创建任务并预扣（`chargeCredits` 支持传入事务句柄，同事务写 `chargedAt`）；
+2. worker 用 `SELECT ... FOR UPDATE SKIP LOCKED` 抢占 `pending` 任务——天然多进程安全。现有 interval scheduler 注释明确「选主没做完，多进程只许一个实例开 `SCHEDULER_ENABLED`」，创作 worker 不要复刻这个单实例约束；
 3. 写入 `running` 与 `startedAt`；
 4. 调用视觉供应商；
 5. 下载供应商临时结果；
@@ -621,9 +661,10 @@ GET /creative/assets/:id/file
 
 小程序不得只依赖组件内 `busy`：
 
-- 任务状态以 `CreativeJob.status` 为真源；
+- 任务状态以 `CreativeJob.status` 为真源（DB 行，比会话 `generating` 的进程内 Map 更强：服务重启不丢）；
+- 「点击生成 → 服务端落任务」的网络窗口用本地短标记桥接（同 `chatPending` 的 TTL 模式），任务落库后一切以任务行为准；
 - 进入海报详情或会话成果卡时查询任务；
-- `pending/running` 时按先快后慢轮询；
+- `pending/running` 时按先快后慢轮询（复用聊天恢复的分档节奏：前 30 秒约 1.2s 一次，此后 3s，设总时长上限）；
 - 完成后自动替换为成品预览；
 - 会话列表可显示“海报制作中”；
 - 用户离开页面不取消任务；
@@ -631,7 +672,7 @@ GET /creative/assets/:id/file
 
 ### 10.3 服务重启恢复
 
-worker 启动时处理：
+worker 启动 + 周期 sweep 处理（照抄支付对账 `sweepPendingOrders` 的「状态列 + 周期扫描自愈」模板；反例是知识库 fire-and-forget 把条目永久卡在 `parsing` 无人捞）：
 
 - 长时间停留在 `running` 的任务；
 - 已拿到 `providerTaskId` 的任务继续查询；
@@ -650,16 +691,17 @@ worker 启动时处理：
 
 第一期计费规则：
 
-- 进入图片模型前预扣；
+- 任务创建事务内预扣（与 §10.1 一致：预扣即实扣，失败路径靠退款回补，形态与现有钻石轴一致）；
 - 生成成功后完成消费；
 - 供应商失败、审核失败、渲染失败：退款；
 - 用户主动取消且供应商尚未产生计费：退款；
 - 只修改文字并重新排版：不再扣图片生成费用；
 - 重新生成人物、背景或风格：再次扣费；
-- 退款必须通过 `refundedAt` 和条件更新保证只执行一次；
-- 无限量套餐仍需记录任务成本与调用次数，但不扣余额。
+- 退款必须通过 `CreativeJob.refundedAt` 条件更新（`updateMany where refundedAt: null` 抢占）保证只执行一次。**不要复用 `sessions.ts` 的 `CreditReservation` 内存闭包**：它跨不过 worker/服务重启的进程边界，且现有 `refund` 闭包本身没有幂等标志（`credits.ts:130-134`，与 `tokenQuota` 的 `done` 标志不对称，是已知坑）；
+- 无限量套餐（余额 `-1`）现状是零流水（`appendCreditDelta` 对不限量直接 return，连 `CreditLedger` 都不写），因此任务成本与调用次数以 `creative_job.creditCost` 行记录为准，不指望流水表；
+- 海报出图不走 `sessions.ts` 的 `meterUnit='image'` 路径（那是对话轮次内的计费口径），也不改 poster 的 `meterUnit`——保持 `text`：对话策划仍扣 token 额度，成品图在 creative API 单独扣钻石，两轴不混。
 
-具体点数由真实供应商成本测试后决定，不在本方案中硬编码。
+初始定价 **10 钻/张**（2026-07-29 拍板：先随定后校准）。价格写入后台可改配置，不硬编码在代码里；上线后按真实供应商成本与毛利目标校准。
 
 ## 12. OSS 与隐私
 
@@ -706,7 +748,13 @@ worker 启动时处理：
 - 禁止侵权 Logo 与未经授权的品牌素材；
 - 记录 provider request id、模型、Prompt 快照和审核结果；
 - 清除不必要的 EXIF 和定位信息；
-- 最终作品增加可配置的 AI 生成内容标识。
+- 最终作品增加 AI 生成内容标识（显式水印 + 文件元数据隐式标识，见下方合规说明）。
+
+现状与新增工作量：
+
+- 文本侧可直接复用 `moderate()`（输出侧默认 fail-closed）；
+- 图片审核是全新能力：现有 provider 抽象是 `(text) => verdict`，需要新增图片审核 provider（候选：阿里云内容安全，与现有 ali-oss / 阿里云短信同生态），覆盖用户上传源图与供应商输出图，列入阶段 B 工作项；
+- AI 生成内容标识按《人工智能生成合成内容标识办法》（2025-09-01 施行）执行：显式标识默认开启、不提供整体关闭（可配置的只是样式与位置），并在文件元数据写入隐式标识。
 
 审核失败时不向用户展示原始违规结果，并按实际供应商是否已计费决定退款策略；对用户侧统一返回可理解的失败原因。
 
@@ -730,6 +778,12 @@ worker 启动时处理：
 - 供应商成本与用户扣费统计。
 
 任何密钥只保存在服务端加密字段或环境变量中，不下发前端。
+
+工程约束：
+
+- 新页面按后台规范登记 `admin/src/nav.ts`（归组 + hint + 命令面板别名），取数一律 `useResource` + `ViewState`，重试/退款等资金动作走 `ConfirmDialog`，样式只用 design token，提交前 `npm run lint:ui` 全绿；
+- 技能库 kind 文案映射（`KIND_LABEL`）补 `artifact` 一项；
+- 启停/引擎/价格等运行时开关走数据库配置（沿用 featureFlag / aiConfig 模式，后台可改、无需重启），环境变量 `CANVAS_DESIGN_ENABLED` 只作部署级硬开关；两层任一关闭即视为关闭。
 
 ## 15. 可观测性
 
@@ -804,6 +858,7 @@ CANVAS_DESIGN_ENABLED=false
 - 生成一张无人物的品牌海报；
 - 输出 PNG 与视觉哲学 Markdown；
 - 检查中文字体、边界和文件完整性；
+- 在部署镜像同构环境（Docker + 内置字体）跑通渲染，不只在开发机验证；
 - 与 Claude Custom Skill API 输出做一次质量对照。
 
 不接 C 端，不扣费，不改生产数据库。
@@ -826,8 +881,11 @@ CANVAS_DESIGN_ENABLED=false
 - 接入 OSS；
 - 接入一个图片供应商；
 - 接入预扣、退款与幂等；
-- 新增创建、查询、修改、取消、文件接口；
-- 增加内容审核和审计。
+- 新增创建、查询、修改、取消、文件接口，以及 brief 预填与源素材上传端点；
+- 海报设计师提示词升级：按用户意图推荐模板（`templateKey` + 推荐理由），供 brief 预填采纳，服务端白名单兜底；
+- 图片供应商后台配置页（通用适配器 + 密钥加密 + dry-run 试跑），不硬编码供应商；
+- 增加内容审核（文本复用 `moderate()`，图片接新供应商）和审计；
+- 同步 `AGENTS.md` 与 `docs/CHANGELOG.md`（仓库活文档铁律）。
 
 验收：
 
@@ -896,6 +954,7 @@ CANVAS_DESIGN_ENABLED=false
 - 并发重复提交 → 只创建一个任务；
 - 服务重启 → running 恢复；
 - 越权读取任务/资产 → 404；
+- 未解锁海报设计师 → 403 AGENT_LOCKED；
 - 套餐过期 → 403；
 - 钻石不足 → 402；
 - 401 → 小程序全局登录失效流程。
@@ -931,6 +990,7 @@ CANVAS_DESIGN_ENABLED=false
 
 第一期不做：
 
+- PDF 成品交付（打印管线现成、成本低，但小程序保存/分享场景只需要 PNG；接口与模板层预留，二期开放）；
 - 人物 LoRA/专属模型训练；
 - 无限画布和自由拖拽设计器；
 - 复杂图层编辑；
@@ -978,7 +1038,24 @@ CANVAS_DESIGN_ENABLED=false
 | 文件存储 | OSS private，按权限下载 |
 | 长任务 | 数据库任务 + worker，可退出重进 |
 | 计费 | 成品图按任务预扣，失败幂等退款 |
+| 任务扣款锚点 | `CreativeJob` 行 `chargedAt/refundedAt` 条件更新，不用内存闭包 |
+| 图片审核 | 新增图片审核供应商（现有 moderation 仅文本） |
+| 渲染并发 | 复用浏览器单例骨架，第一期并发 1，与队列对齐 |
+| MVP 交付物 | 仅 PNG（PDF 二期，打印管线已现成） |
+| Skill 抽象 | `SkillKind` 加 `artifact` 枚举登记；通用 `ArtifactSkill` 注册表等第二个实例再抽象 |
+| 初始定价 | 10 钻/张（后台可改，上线后按真实成本校准） |
+| 图片供应商 | 后台可配的通用接入点（密钥加密 + dry-run），不硬编码供应商 |
+| 字体 | 开源 OFL 字体（思源黑体/宋体、霞鹜文楷等），随镜像内置 |
+| 模板选择 | 海报设计师提示词按意图推荐（带推荐理由）+ 服务端白名单兜底 + 确认页可换 |
 | 第一主场景 | 个人宣传海报 |
 | MVP 主规格 | 3:4 |
 | 第一阶段 | 技术 POC，不接生产、不扣费 |
+
+## 22. 决策记录（2026-07-29 拍板，原「开放问题」全部关闭）
+
+1. **单张钻石定价 → 已定**：先定 10 钻/张（覆盖「哲学生成 + 出图 + 渲染」全任务），价格进后台配置，上线后按真实供应商成本校准。参考锚点：现有 `meterUnit='image'` 为 3 钻/次（ip 智能体，无出图实现），海报为多段成本任务，定高是合理起点。
+2. **图片供应商 → 已定**：不做供应商选型前置，第一期交付后台可配的模型接入点（通用适配器 + `secretBox` 密钥加密 + dry-run），供应商由运营后续配置。
+3. **字体 → 已定**：开源 OFL 字体（思源黑体 / 思源宋体 / 霞鹜文楷），允许商用与镜像打包，无采购前置。
+4. **模板缺省策略 → 已定**：海报设计师提示词按用户意图推荐 `templateKey` 并附推荐理由（确认页展示，制造惊喜感）；服务端白名单校验，无效按 `scene` 回退默认，用户可手动更换。
+5. **钻石退款幂等修复 → 已在修**：拆为独立会话进行中（与本方案解耦，不阻塞任何阶段）。
 

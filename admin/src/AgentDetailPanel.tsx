@@ -345,7 +345,10 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
               </div>
               {skillsEnabled && (
                 <div className="mem-list" style={{ marginTop: 8 }}>
-                  {availTools.filter((t) => t.kind !== 'output').map((t) => {
+                  {/* 只列 kind==='tool'：白名单而不是「排除 output」——排除法在新增第三种 kind（artifact，
+                      如海报成品图 canvas_design）时会把它静默混进「模型工具」组，让运营以为那是模型会自己
+                      调用的工具（实际是异步任务产二进制交付物，不进模型循环）。artifact 单独一组见下方。 */}
+                  {availTools.filter((t) => t.kind === 'tool').map((t) => {
                     const on = skillTools.includes(t.name);
                     return (
                       <div key={t.name} className="mem-card">
@@ -356,8 +359,32 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
                       </div>
                     );
                   })}
-                  {!availTools.some((t) => t.kind !== 'output') && <div className="blk-d">（暂无可用工具）</div>}
+                  {!availTools.some((t) => t.kind === 'tool') && <div className="blk-d">（暂无可用工具）</div>}
                 </div>
+              )}
+              {/* 成品交付（kind='artifact'）：勾选后该顾问才对外开放这项交付能力，但它不进模型工具循环
+                  ——由异步任务（CreativeJob）执行、可能单独计费与退款，所以既要能勾选，又不能和「模型工具」
+                  混在一组（也没有「试跑」——试跑走的是工具调用协议，对交付物没意义）。
+                  不受上面「启用技能（工具调用）」开关约束：即便这位顾问不用工具调用，也可以开成品交付。 */}
+              {availTools.some((t) => t.kind === 'artifact') && (
+                <>
+                  <div className="blk-d" style={{ marginTop: 10 }}>成品交付（异步出成品文件 · 按次计费，失败自动退款 · 需勾选才对外开放）</div>
+                  <div className="mem-list" style={{ marginTop: 6 }}>
+                    {availTools.filter((t) => t.kind === 'artifact').map((t) => {
+                      const on = skillTools.includes(t.name);
+                      return (
+                        <div key={t.name} className="mem-card">
+                          <span className="mi"><Icon name="image" size={16} /></span>
+                          <div className="mb">
+                            <div className="mt">{t.name}<span className="tag off">成品交付</span>{t.builtin && <span className="tag off">内置</span>}</div>
+                            <div className="mm">{t.description}</div>
+                          </div>
+                          <div className={`sw ${on ? 'on' : ''}`} onClick={() => setSkillTools((s) => on ? s.filter((x) => x !== t.name) : [...s, t.name])}><i /></div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               )}
               {availTools.some((t) => t.kind === 'output') && (
                 <>

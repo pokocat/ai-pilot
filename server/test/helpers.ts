@@ -92,6 +92,12 @@ export async function cleanBusiness(): Promise<void> {
   await prisma.memory.deleteMany();
   await prisma.project.deleteMany();
   await prisma.userAgent.deleteMany();
+  // 创作任务（海报成品图）：两张表的 userId/tenantId 是裸字符串列、**没有**指向 User/Tenant 的外键，
+  // 所以下面的 user.deleteMany() 清不掉它们 —— 不显式删就会跨用例泄漏，让 worker 抢到上一个用例
+  // 遗留的 pending 任务（本轮实测踩到：本该失败的任务一直停在 pending，因为 worker 去跑旧任务了）。
+  // 先删 asset 再删 job（asset.jobId 是 SetNull，反序会留下 jobId=null 的孤儿行）。
+  await prisma.creativeAsset.deleteMany();
+  await prisma.creativeJob.deleteMany();
   await prisma.creditLedger.deleteMany();
   await prisma.tokenUsage.deleteMany();
   await prisma.tokenWallet.deleteMany();

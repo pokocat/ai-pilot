@@ -134,4 +134,14 @@ export const env = {
   ossBaseUrl: (process.env.AEP_CDN_OSS_BASE_URL ?? '').replace(/\/+$/, ''), // 如 https://aiartist.oss-cn-hangzhou.aliyuncs.com
   ossKeyPrefix: (process.env.AEP_CDN_OSS_KEY_PREFIX ?? '').replace(/^\/+|\/+$/g, ''), // 如 junshi
   ossTimeoutMs: envNum('AEP_CDN_OSS_TIMEOUT_MS', 10000),
+
+  // —— 海报成品图（canvas_design 产物型技能）——
+  // 部署级硬开关，默认关：与「后台运行时配置」两层，任一关闭即整体关闭（新能力先上线代码、后放量）。
+  canvasDesignEnabled: (process.env.CANVAS_DESIGN_ENABLED ?? 'false') === 'true',
+  // native=军师原生引擎（视觉哲学 + 图片模型 + 确定性渲染器）；anthropic_skill 为预留的 POC 形态。
+  canvasDesignEngine: (process.env.CANVAS_DESIGN_ENGINE ?? 'native') as 'native' | 'anthropic_skill',
+  // worker 同时在跑的海报任务数。渲染复用 reportPdf 的单例浏览器 + 单并发队列，默认 1（勿轻易上调）。
+  canvasDesignMaxConcurrency: envNum('CANVAS_DESIGN_MAX_CONCURRENCY', 1),
+  // 单个海报任务端到端超时（含图片生成 + 渲染 + 上传）；超时按失败处理并幂等退款。
+  canvasDesignTimeoutMs: envNum('CANVAS_DESIGN_TIMEOUT_MS', 180000),
 };

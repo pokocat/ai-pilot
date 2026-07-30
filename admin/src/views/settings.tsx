@@ -198,8 +198,9 @@ export function BenchmarksView({ toast }: { toast: (m: string) => void }) {
 
 // 功能开关（P0-2）：命理等合规开关一键降级。关闭合规开关前二次确认，避免误触把全产品命理下线。
 // 监控大盘二期：告警阈值也注册为 number 类开关（monitor.* 前缀），改动 ≤75s 喂给 Prometheus；
-// 底部「告警通知」卡（仅 owner/master）配置飞书群机器人 webhook——api.req 对 403 会强制登出，
-// 所以非超管必须整卡不渲染，而不是点击后再报错。
+// 底部「告警通知」卡（仅 owner/master）配置飞书群机器人 webhook：非超管整卡不渲染，
+// 别摆一个注定 403 的入口；万一 me() 拿不到角色而露了出来，403 也会照原文 toast 出来
+// （api.ts 的 401/403 已分流，403 不再踢回登录页）。
 export function FlagsView({ toast, isSuper }: { toast: (m: string) => void; isSuper: boolean }) {
   const [list, setList] = useState<AdminFeatureFlag[]>([]);
   const [busy, setBusy] = useState('');
@@ -416,13 +417,15 @@ export function AccountsView({ toast }: { toast: (m: string) => void }) {
       toast('密码已重置');
     },
   });
-  const saveKeys = async (a: AdminAccountItem) => { try { await api.updateAccount(a.id, { agentKeys: editKeys }); setEditId(null); await load(); toast('负责 agent 已更新'); } catch { toast('保存失败'); } };
+  const saveKeys = async (a: AdminAccountItem) => { try { await api.updateAccount(a.id, { agentKeys: editKeys }); setEditId(null); await load(); toast('负责 agent 已更新'); } catch (e) { toast((e as Error)?.message || '保存失败'); } };
 
   return (
     <>
       <PageHead k="account" res={res} badge={`${list.length} 个`} />
       <div className="pad">
-        {res.error && <ErrorState msg={res.error} onRetry={res.reload} />}
+        {/* GET /admin/accounts 本身就是 requireSuper：被降权的运营（或 me() 没取到角色时）
+            会拿到 403，这里必须显示成「没有权限」而不是「加载失败」。 */}
+        {res.error && <ErrorState msg={res.error} onRetry={res.reload} forbidden={res.forbidden} />}
         {!adding ? (
           <button className="add-btn full" onClick={() => setAdding(true)}><Icon name="spark" size={15} /> 新增运营账户</button>
         ) : (

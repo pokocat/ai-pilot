@@ -15,6 +15,7 @@ import { quickscanRoutes } from './routes/quickscan.js';
 import { journeyRoutes } from './routes/journey.js';
 import { prescriptionRoutes } from './routes/prescriptions.js';
 import { brandKitRoutes } from './routes/brandKit.js';
+import { creativeRoutes } from './routes/creative.js';
 import { bizMetricRoutes } from './routes/bizMetrics.js';
 import { sayingRoutes } from './routes/sayings.js';
 import { sessionRoutes } from './routes/sessions.js';
@@ -241,6 +242,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(journeyRoutes, { prefix: '/api' }); // 用户 journey 状态机（WO-07：全 tab「下一步」卡）
   await app.register(prescriptionRoutes, { prefix: '/api' }); // 处方引擎（WO-12：诊断结论 → 生态工具的结构化桥）
   await app.register(brandKitRoutes, { prefix: '/api' }); // 品牌资产包（WO-13：档案 → 数字人/短剧预填输入）
+  await app.register(creativeRoutes, { prefix: '/api' }); // 海报成品图（canvas_design：产物型技能 kind='artifact'）
   await app.register(bizMetricRoutes, { prefix: '/api' }); // 结构化经营周报（WO-10：报什么就能对比什么）
   await app.register(sayingRoutes, { prefix: '/api' });
   await app.register(sessionRoutes, { prefix: '/api' });
@@ -269,8 +271,17 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(adminAccountRoutes, { prefix: '/api' }); // 后台账户登录（公开 + 自证），不挂全局 requireAdmin
   await app.register(adminRoutes, { prefix: '/api' });
 
-  // 关闭时释放无头 Chromium（若曾懒启动过；test/未生成过则 no-op）。
+  // 创作任务 worker（海报成品图）：DB 队列 + FOR UPDATE SKIP LOCKED 抢占，2s 轮询。
+  // test 环境与 CANVAS_DESIGN_ENABLED=false 时内部直接 return（测试用 tickCreativeWorker 手动驱动）。
+  {
+    const { startCreativeWorker } = await import('./services/creative/worker.js');
+    startCreativeWorker();
+  }
+
+  // 关闭时停 worker + 释放无头 Chromium（若曾懒启动过；test/未生成过则 no-op）。
   app.addHook('onClose', async () => {
+    const { stopCreativeWorker } = await import('./services/creative/worker.js');
+    stopCreativeWorker();
     const { closePdfBrowser } = await import('./services/reportPdf.js');
     await closePdfBrowser();
   });

@@ -69,7 +69,9 @@ export interface SkillToolMeta {
   name: string;        // 技能 key（= skillsConfig.tools 里存的值）
   description: string;
   builtin: boolean;    // true=代码内置（search_knowledge / render_report…），false=运营自建 HTTP
-  kind: 'tool' | 'output'; // tool=模型主动调用 | output=产出后处理（如 render_report 网页报告）
+  // tool=模型主动调用 | output=产出后处理（如 render_report 网页报告）
+  // | artifact=异步任务产二进制交付物，不进模型循环（如 canvas_design 海报成品图）
+  kind: 'tool' | 'output' | 'artifact';
 }
 
 /** 自定义 HTTP 工具：后台读取视图（鉴权头脱敏为 headerKeys/hasHeaders） */
@@ -461,6 +463,16 @@ export type DeliverableSection =
 
 /** 报告封面文案（AI 生成；badge/印章/meta 落款由模板固定）。无则用 Deliverable.title 兜底。 */
 export interface DeliverableCover { title: string; subtitle?: string; motto?: string; }
+/** 成果附带的二进制交付物（海报成品图等）。消息 contentJson 只存 id + 必要元数据，不存 base64。 */
+export interface DeliverableAsset {
+  id: string;
+  kind: 'poster_png';
+  mimeType: string;
+  width?: number;
+  height?: number;
+  previewUrl?: string;  // 私有 OSS 签名预览链接（短时效，服务端每次下发时重签）
+  downloadUrl?: string; // 私有 OSS 签名下载链接（短时效）
+}
 export interface Deliverable {
   title: string; icon: string; meta: string;
   cover?: DeliverableCover; // 报告 V2：封面文案
@@ -469,6 +481,8 @@ export interface Deliverable {
   cdnUrl?: string; // 可选 OSS/CDN 镜像；不作为小程序内打开入口
   degraded?: boolean; // P0-4：真实模型未产出结构化成果、回退本地模板时为 true（前端提示可重试；用户不计费）
   prescriptions?: DeliverablePrescription[]; // WO-12：方案开出的处方（问题→打法→生态工具 key，最多 3 条）
+  assets?: DeliverableAsset[]; // 海报成品图等二进制交付物（任务成功后按「成果补丁」路径回写，同 htmlUrl）
+  creativeJobId?: string;      // 产出上述 assets 的创作任务 id（最近一次成功的；版本链见 CreativeJobView.parentJobId）
 }
 /** 成果模板（mock 提供方 / few-shot 结构约束消费） */
 export interface DeliverableTemplate { icon: string; title: string; sections: DeliverableSection[]; }
@@ -490,6 +504,156 @@ export interface BrandKitTheme { keywords: string[]; colorHint: string; styleRef
 export interface BrandKitView {
   persona: BrandKitPersona; voice: BrandKitVoice; theme: BrandKitTheme;
   version: number; approved: boolean; generatedAt: string;
+}
+
+/* ────────────── 海报成品图（canvas_design：产物型技能 kind='artifact'） ────────────── */
+// 「海报设计师」出方案（文本成果）→ 用户确认需求单 PosterBrief → 服务端建异步创作任务 → 出 PNG 成品图。
+// 方案见 docs/CANVAS_DESIGN_SKILL_INTEGRATION_PLAN.md §5。约束：图片模型只出主视觉，
+// 全部中文文案/Logo/二维码/AI 标识由服务端确定性渲染器排版（§4.1）。
+
+/** 海报场景（决定默认模板与文案骨架）。 */
+export type PosterScene = 'personal_brand' | 'event' | 'service' | 'product';
+/** 海报画幅。MVP 只开 3:4，其余为后续扩展位。 */
+export type PosterRatio = '3:4' | '9:16' | '1:1';
+
+/** 海报需求单：用户在确认页最终敲定的入参（服务端仍会再校验长度/归属/白名单）。 */
+export interface PosterBrief {
+  scene: PosterScene;
+  goal: string;              // 商业目标（这张海报要促成什么）
+  audience: string;          // 目标客群
+  headline: string;          // 主标题（一张海报只讲一件事）
+  subheadline?: string;      // 副标题
+  proofPoints: string[];     // 证明点/卖点，最多 3 条
+  cta: string;               // 行动号召
+  visualDirection: string;   // 视觉方向（描述画面属性，不指名复刻在世创作者）
+  negativePrompt?: string;   // 排除项（同样只写属性）
+  templateKey?: string;      // 缺省或不在白名单 → 服务端按 scene 回退默认模板
+  ratio: PosterRatio;
+  portraitAssetId?: string;  // 人物照（kind='source' 的 CreativeAsset，须属本人）
+  logoAssetId?: string;
+  qrAssetId?: string;
+  brandKitVersion?: number;  // 只允许引用已确认（approved）的品牌资产包版本
+}
+/** GET/POST brief-draft 返回：服务端按设计师成果 + 品牌资产包预填的草稿。 */
+export interface PosterBriefDraft {
+  brief: Partial<PosterBrief>;
+  templateReason?: string; // 设计师给的「为什么这样设计」推荐理由，确认页原样展示
+}
+
+/** 创作任务产出的资产视图（url 为短时效签名链接，每次下发重签）。 */
+export interface CreativeAssetView {
+  id: string;
+  kind: 'source' | 'visual' | 'poster_png';
+  mimeType: string;
+  width?: number;
+  height?: number;
+  previewUrl?: string;
+  downloadUrl?: string;
+}
+/** 创作任务视图（前端轮询这个；状态以库为真源，进程内存不算）。 */
+export interface CreativeJobView {
+  id: string;
+  kind: string;                 // poster | cover | social_card（MVP 只有 poster）
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  progress?: string;            // 用户可读阶段：philosophy | visual | render | upload
+  creditCost: number;           // 名义价（钻石）；不限量用户仍记名义价，实扣为 0
+  refunded: boolean;            // 已退款（失败/超限退回）
+  errorMessage?: string;        // 面向用户的失败原因（克制口径，不透内部细节）
+  createdAt: string;
+  completedAt?: string;
+  assets: CreativeAssetView[];
+  parentJobId?: string;         // 版本链：revise/regenerate 产生的新任务指向来源任务
+  actions: Array<'revise' | 'regenerate' | 'cancel'>; // 当前状态下前端可展示的操作
+}
+/** 源素材上传返回（先传后建任务，故此时还没有 jobId）。 */
+export interface CreativeUploadResult { assetId: string; }
+/**
+ * 成品图能力状态（GET /creative/status，需登录）。小程序据此决定**是否显示出图入口**（方案 §16 降级口径）：
+ * 关闭时前端不该露出按钮再让用户点到 403，而应整块隐藏。
+ * enabled = env 部署级硬开关 && DB 运行时配置，任一关闭即为 false。
+ */
+export interface CreativeStatusResult {
+  enabled: boolean;
+  pricePerPoster: number; // 单张价格（钻石），供前端展示 💎x；后台可改，默认 10
+}
+/** 创建任务请求（idempotencyKey 由客户端生成，按用户唯一 → 重复点击返回原任务）。 */
+export interface CreatePosterJobRequest {
+  brief: PosterBrief;
+  sessionId?: string;
+  messageId?: string;
+  idempotencyKey: string;
+}
+/** 只改文案重排（不重出主视觉 → 不再扣钻石）。字段留空 = 沿用父任务。 */
+export interface RevisePosterJobRequest {
+  headline?: string;
+  subheadline?: string;
+  proofPoints?: string[];
+  cta?: string;
+  templateKey?: string;
+  idempotencyKey?: string;
+}
+/** 重出主视觉（重新扣费）。 */
+export interface RegeneratePosterJobRequest {
+  visualDirection?: string;
+  negativePrompt?: string;
+  templateKey?: string;
+  idempotencyKey?: string;
+}
+
+/* ────────────── 海报成品图 · 运营后台（P2 服务端 / P3 页面） ────────────── */
+/** 图片供应商接入点（apiKey 只写不读；读出只回 hasKey）。 */
+export interface AdminCreativeVisualConfig {
+  enabled: boolean;
+  baseUrl: string;
+  model: string;
+  size: string;              // 请求参数模板：图片尺寸（OpenAI images 兼容 size 字段）
+  timeoutMs: number;
+  extraParams: Record<string, unknown>; // 额外请求参数模板（原样合并进请求体）
+  hasKey: boolean;           // 读出脱敏：是否已配置密钥
+  apiKey?: string;           // 仅写入方向；GET 永不回传
+}
+export interface AdminCreativeConfig {
+  enabled: boolean;              // DB 运行时开关（与 env CANVAS_DESIGN_ENABLED 双开才算开）
+  envEnabled: boolean;           // 只读：部署级硬开关现状（关闭时后台改 enabled 也不生效）
+  pricePerPoster: number;        // 单价（钻石/张）
+  dailyLimit: number;            // 每用户每日任务数上限
+  maxConcurrency: number;        // worker 并发槽（渲染队列单并发，慎调）
+  timeoutMs: number;             // 单任务端到端超时
+  templates: Record<string, boolean>; // 模板启停（key = person_hero | editorial | business_launch）
+  visual: AdminCreativeVisualConfig;
+  imageModerationProvider: 'none' | 'http';
+}
+export type AdminCreativeConfigUpdate = Partial<Omit<AdminCreativeConfig, 'envEnabled' | 'visual'>> & {
+  visual?: Partial<Omit<AdminCreativeVisualConfig, 'hasKey'>>;
+};
+/** 供应商连通性试跑结果（不回传响应原文，避免把上游内部信息带进后台）。 */
+export interface AdminCreativeDryRunResult { ok: boolean; message: string; ms: number }
+export interface AdminCreativeJobItem {
+  id: string;
+  userLabel: string;         // 脱敏用户标识（昵称 + 手机号掩码）
+  agentKey: string;
+  kind: string;
+  status: string;
+  progress: string | null;
+  templateKey: string | null;
+  engine: string;
+  provider: string | null;
+  creditCost: number;
+  charged: boolean;
+  refunded: boolean;
+  errorCode: string | null;
+  errorMessage: string | null;
+  attempts: number;
+  assetCount: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+export interface AdminCreativeJobsView {
+  items: AdminCreativeJobItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  summary: { pending: number; running: number; succeeded: number; failed: number; cancelled: number; refunded: number };
 }
 
 /* ────────────── 自由对话回复 ────────────── */
@@ -1504,10 +1668,12 @@ export type ReminderKind = 'order' | 'review' | 'weekly' | 'custom';
 export interface ReminderItem {
   key: string; time: string; title: string; desc: string;
   kind: ReminderKind; subscribed: boolean;
+  scene: WechatSubscribeScene;  // 该提醒实际走的订阅模板场景（服务端唯一口径，前端不再自行映射）
+  canSubscribe: boolean;        // 该场景模板已配置 → 可引导授权
 }
 export interface ReminderView {
   items: ReminderItem[];
-  subscribeReady: boolean; // 是否已配置订阅模板
+  subscribeReady: boolean; // 是否至少一条提醒可订阅（= items.some(canSubscribe)）
 }
 
 /* ── V7-13：社群服务分配 + 档案工作台 ── */
