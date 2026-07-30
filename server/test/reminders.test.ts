@@ -64,9 +64,39 @@ test('buildReminderView：活跃案卷 + 军令 → 三条提醒节奏（逐字�
   assert.equal(weekly.time, '周五');
   assert.equal(weekly.desc, '本周五检查成交漏斗和内容表现。');
 
-  // 测试环境未配模板 → subscribeReady=false；无订阅行 → subscribed=false
+  // 测试环境未配模板 → canSubscribe/subscribeReady=false；无订阅行 → subscribed=false
   assert.equal(view.subscribeReady, false);
+  assert.deepEqual(view.items.map((i) => i.canSubscribe), [false, false, false]);
   assert.equal(order.subscribed, false);
+  // 三条提醒的场景一律 review：服务端推送扣的就是 review 额度，前端不得自行映射到 report
+  assert.deepEqual(view.items.map((i) => i.scene), ['review', 'review', 'review']);
+});
+
+test('buildReminderView：配了 review 模板 → canSubscribe=true；额度耗尽（remaining=0）→ 回到未订阅可续订', async () => {
+  process.env.WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID = 'tpl-review-reminders';
+  try {
+    await makeCasefileWithOrder();
+
+    const ready = await buildReminderView({ tenantId, userId });
+    assert.equal(ready.subscribeReady, true);
+    assert.deepEqual(ready.items.map((i) => i.canSubscribe), [true, true, true]);
+    assert.deepEqual(ready.items.map((i) => i.subscribed), [false, false, false]);
+
+    // 授权一次 → 三条都显示已订阅（共享同一模板额度池）
+    const sub = await prisma.wechatSubscription.create({
+      data: { tenantId, userId, scene: 'review', templateId: 'tpl-review-reminders', status: 'accept', remaining: 1, acceptedAt: now() },
+    });
+    const accepted = await buildReminderView({ tenantId, userId });
+    assert.deepEqual(accepted.items.map((i) => i.subscribed), [true, true, true]);
+
+    // 推送一次后 remaining→0、status 仍是 accept：必须回到「可订阅」，否则永久停在已订阅、续订不了
+    await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { remaining: 0 } });
+    const spent = await buildReminderView({ tenantId, userId });
+    assert.deepEqual(spent.items.map((i) => i.subscribed), [false, false, false]);
+    assert.deepEqual(spent.items.map((i) => i.canSubscribe), [true, true, true]);
+  } finally {
+    delete process.env.WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID;
+  }
 });
 
 test('buildReminderView：无 dueAt / 无案卷 → order 时间默认 18:00，仍返回三条', async () => {

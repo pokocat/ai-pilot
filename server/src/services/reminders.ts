@@ -25,8 +25,12 @@ const WEEKLY_DESC = '本周五检查成交漏斗和内容表现。';
 /**
  * 提醒日历派生视图（GET /reminders）：纯读派生，不建表。
  * order 项时间取活跃案卷内最近一条未完成军令的 dueAt（无则默认 18:00）；
- * subscribed 取 WechatSubscription（scene 'review'，status accept）是否存在；
- * subscribeReady 取 review 订阅模板是否已配置（未配则前端不引导授权）。
+ * scene 一律 'review'——三条提醒的服务端推送（morningOrderReminderScan / daily-review /
+ * weeklyReviewReminderScan）都走 review 模板，前端若自行把军令映射到 report 场景，授权拿到的是
+ * report 额度、而推送扣的是 review 额度，订阅等于白点（已修）。故场景由服务端下发，前端不再映射。
+ * subscribed 要求 review 订阅行 status=accept 且 remaining>0：订阅消息是一次性额度，推送一次即
+ * remaining→0 而 status 仍是 accept，只看 status 会让行永久停在「已订阅」、用户再也续订不上。
+ * canSubscribe 取该场景模板是否已配置（未配则前端不引导授权，显示「暂不可订阅」）。
  */
 export async function buildReminderView(args: { tenantId: string; userId: string }): Promise<ReminderView> {
   const { userId } = args;
@@ -44,18 +48,20 @@ export async function buildReminderView(args: { tenantId: string; userId: string
   }
 
   const sub = await prisma.wechatSubscription.findFirst({
-    where: { userId, scene: 'review', status: 'accept' },
+    where: { userId, scene: 'review', status: 'accept', remaining: { gt: 0 } },
     select: { id: true },
   });
   const subscribed = !!sub;
+  const canSubscribe = templateIdForScene('review') !== '';
+  const base = { scene: 'review' as const, subscribed, canSubscribe };
 
   const items: ReminderItem[] = [
-    { key: 'order', time: orderTime, title: '今日军令截止', desc: ORDER_DESC, kind: 'order', subscribed },
-    { key: 'review', time: '20:30', title: '今日复盘', desc: REVIEW_DESC, kind: 'review', subscribed },
-    { key: 'weekly', time: '周五', title: '周复盘', desc: WEEKLY_DESC, kind: 'weekly', subscribed },
+    { key: 'order', time: orderTime, title: '今日军令截止', desc: ORDER_DESC, kind: 'order', ...base },
+    { key: 'review', time: '20:30', title: '今日复盘', desc: REVIEW_DESC, kind: 'review', ...base },
+    { key: 'weekly', time: '周五', title: '周复盘', desc: WEEKLY_DESC, kind: 'weekly', ...base },
   ];
 
-  return { items, subscribeReady: templateIdForScene('review') !== '' };
+  return { items, subscribeReady: items.some((i) => i.canSubscribe) };
 }
 
 /**

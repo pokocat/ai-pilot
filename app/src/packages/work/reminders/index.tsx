@@ -28,10 +28,12 @@ export default function Reminders() {
     if (busy) return;
     setBusy(it.key);
     try {
-      // 复盘/周复盘 → review 模板；军令截止等 → report 模板。
-      const scene: 'review' | 'report' = it.kind === 'review' || it.kind === 'weekly' ? 'review' : 'report';
-      const ok = await requestWechatSubscribe(scene);
-      if (ok) setView((v) => (v ? { ...v, items: v.items.map((x) => (x.key === it.key ? { ...x, subscribed: true } : x)) } : v));
+      // 场景由服务端下发（it.scene）：三条提醒的推送都扣 review 额度，前端不能自行把军令映射到
+      // report——那样授权拿到的是 report 额度、推送扣的是 review 额度，订阅等于白点。
+      const ok = await requestWechatSubscribe(it.scene);
+      // 一次授权只加一份额度，且三条提醒共享同一模板额度池 → 成功后整表按服务端口径重取，
+      // 别只把当前行标成已订阅（会谎报另两行仍未订阅）。
+      if (ok) load();
     } catch {
       Taro.showToast({ title: '订阅失败，请稍后重试', icon: 'none' });
     } finally {
@@ -40,7 +42,6 @@ export default function Reminders() {
   };
 
   const items = view?.items ?? [];
-  const ready = view?.subscribeReady ?? false;
 
   return (
     <View className={`page reminders-page ${s.themeClass()}`} style={{ minHeight: '100vh' }}>
@@ -70,7 +71,7 @@ export default function Reminders() {
                 </View>
                 {it.subscribed ? (
                   <Text className="rm-state">已订阅</Text>
-                ) : ready ? (
+                ) : it.canSubscribe ? (
                   <Text className={`rm-sub ${busy === it.key ? 'busy' : ''}`} style={{ background: accent }} onClick={() => subscribe(it)}>{busy === it.key ? '…' : '订阅'}</Text>
                 ) : (
                   <Text className="rm-state muted">暂不可订阅</Text>
