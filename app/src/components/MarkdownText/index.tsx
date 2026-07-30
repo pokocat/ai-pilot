@@ -11,7 +11,8 @@ type Block =
   | { type: 'list'; ordered: boolean; items: string[] };
 
 interface Props {
-  text: string;
+  // 可缺：调用方常直接透传落库字段（如 m.reply?.text），运行期缺值一律由 asText 收成 ''。
+  text?: string;
   className?: string;
   inline?: boolean;
   selectable?: boolean;
@@ -20,24 +21,47 @@ interface Props {
   streaming?: boolean;
 }
 
+/**
+ * 入参防线：正文一律先落成字符串再解析。
+ *
+ * 为什么必须在这里兜：本组件是「所有正文」的唯一渲染口（聊天气泡正文/要点、成果卡 b/list 项、
+ * 报告详情正文都走它），而 parseBlocks 第一行就是 `input.replace(...)`——传进来一个 undefined
+ * 或对象，立刻 `Cannot read properties of undefined (reading 'replace')` / `e.replace is not a
+ * function`，渲染期抛错在小程序里就是**整页白屏**（无红屏、无堆栈）。
+ * 已知会喂进脏值的两类存量数据（2026-07-29 品牌营销官会话实测复现）：
+ *   ① 早于「报告 V2 归一化」（server normalizeDeliverableSections）落库的历史成果消息，
+ *      section.list 项 / b 字段是对象而非字符串；会话详情读取端**不做** healDeliverableSections，
+ *      脏值原样到端上；
+ *   ② assistant 消息 contentJson 缺 text（半截落库/旧格式），父级 m.reply.text 取到 undefined。
+ * 类型上 text 是 string，脏值全部来自运行期数据，故这里按 unknown 处理而非改签名放松约束。
+ */
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  // 对象/数组：JSON 化保底展示，不静默吞掉内容（上游 cardSection 已按服务端口径过滤过一层）。
+  try { return JSON.stringify(value); } catch { return ''; }
+}
+
 // 流式渲染高频重绘：memo + 按 text 缓存 parseBlocks，避免每个 token 重复全量解析/重建块。
 // 流式期间进一步拆成「stable 前缀（解析并缓存）+ growing 尾巴（纯文本）」：
 // 把「对增长整串重跑 parseBlocks」的 O(n²) 降到「每段解析一次」的 O(n) 累计成本。
 function MarkdownText({ text, className = '', inline = false, selectable = false, streaming = false }: Props) {
   const streamSplit = streaming && !inline;
+  const src = asText(text);
   // 以最后一个空行（\n\n）为界：其前皆为完整块（stable），其后为半截尾巴（growing）。
-  const splitAt = streamSplit ? text.lastIndexOf('\n\n') : -1;
-  const stableText = splitAt >= 0 ? text.slice(0, splitAt) : '';
-  const tailText = splitAt >= 0 ? text.slice(splitAt + 2) : (streamSplit ? text : '');
+  const splitAt = streamSplit ? src.lastIndexOf('\n\n') : -1;
+  const stableText = splitAt >= 0 ? src.slice(0, splitAt) : '';
+  const tailText = splitAt >= 0 ? src.slice(splitAt + 2) : (streamSplit ? src : '');
   // 非流式解析整串；流式只解析 stable 前缀。parseTarget 不变时 useMemo 命中，跳过解析与建节点。
-  const parseTarget = streamSplit ? stableText : text;
+  const parseTarget = streamSplit ? stableText : src;
   const rendered = useMemo(
     () => (inline ? null : parseBlocks(parseTarget).map((b, i) => renderBlock(b, i, selectable))),
     [inline, parseTarget, selectable],
   );
 
   if (inline) {
-    const body = selectable ? cleanSelectableInline(text) : renderInline(cleanInline(text));
+    const body = selectable ? cleanSelectableInline(src) : renderInline(cleanInline(src));
     return <Text className={`md-inline ${className}`} {...selectProps(selectable)}>{body}</Text>;
   }
 

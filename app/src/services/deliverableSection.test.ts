@@ -57,6 +57,54 @@ describe('cardSection · 报告 V2 类型化 section 不能被剥空', () => {
   });
 });
 
+// 2026-07-29 白屏回归：军师 tab 点「品牌营销官」进对话页整页白屏。
+// 根因是渲染期抛错——存量成果消息（早于服务端 normalizeDeliverableSections 落库，且会话详情读取端
+// 不做 healDeliverableSections）里 section 的叶子字段是对象、容器字段不是数组，cardSection 原样透传后：
+//   · 对象叶子 → <MarkdownText> 的 parseBlocks 执行 `input.replace(...)` → `e.replace is not a function`
+//   · 非数组容器 → cardSection 自身 `.map/.join/展开` → TypeError
+// 小程序渲染期抛错没有红屏，只有白屏。cardSection 是「最小防线」，必须真的兑现返回类型。
+describe('cardSection · 脏数据不能抛错，且必须真的落成 {h:string,b?:string,list?:string[]}', () => {
+  test('白卡 list 项是对象（旧格式）→ 按服务端 listOf 口径丢弃，绝不把对象透给 MarkdownText', () => {
+    const v = cardSection({ h: '内容方向', list: [{ point: '客户证言', why: '建立可信度' }, '场景化短视频'] } as unknown as Section);
+    assert.deepEqual(v.list, ['场景化短视频']);
+    for (const x of v.list ?? []) assert.equal(typeof x, 'string');
+  });
+
+  test('白卡 b 是对象 → 落成空字符串（falsy，展示位据此不渲染正文）', () => {
+    const v = cardSection({ h: '核心信息', b: { zh: '对象型正文' } } as unknown as Section);
+    assert.equal(v.b, '');
+  });
+
+  test('h 是对象 → 落成空字符串，不能把对象交给 <Text>（React 会抛 Objects are not valid as a React child）', () => {
+    const v = cardSection({ h: { zh: '标题' }, b: '正文' } as unknown as Section);
+    assert.equal(typeof v.h, 'string');
+  });
+
+  test('容器字段不是数组（items/rows/paras/people/quads 存成对象或字符串）→ 一律不抛', () => {
+    const dirty: unknown[] = [
+      { type: 'hero', h: 'h', paras: '不是数组' },
+      { type: 'stats', items: { a: 1 } },
+      { type: 'roster', people: 'x' },
+      { type: 'table', headers: 'x', rows: { a: 1 } },
+      { type: 'phases', items: 'x' },
+      { type: 'timeline', items: 1 },
+      { type: 'letter', paras: 'x' },
+      { type: 'gauge', items: 'x' },
+      { type: 'matrix', quads: 'x' },
+      { type: 'gantt', rows: 'x' },
+      { h: 'h', list: { a: 1 } },
+      null,
+    ];
+    for (const s of dirty) {
+      assert.doesNotThrow(() => cardSection(s as Section), `section = ${JSON.stringify(s)}`);
+      const v = cardSection(s as Section);
+      assert.equal(typeof v.h, 'string');
+      if (v.b !== undefined) assert.equal(typeof v.b, 'string');
+      for (const x of v.list ?? []) assert.equal(typeof x, 'string');
+    }
+  });
+});
+
 describe('cardSectionText · diff 改前/改后一行预览', () => {
   test('undefined → 空字符串（新增/删除侧缺失时不能抛异常）', () => {
     assert.equal(cardSectionText(undefined), '');

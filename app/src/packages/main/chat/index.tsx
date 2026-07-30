@@ -98,15 +98,16 @@ function sectionToLines(sec: Section): string[] {
 }
 
 // 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
+// sections 按类型必填，但存量脏数据里可能整字段缺失（见 ReportCard 的 secs 注释），这里同样兜一层。
 function deliverableToText(d: Deliverable): string {
-  const lines: string[] = [d.title];
-  if (d.meta) lines.push(d.meta);
+  const lines: string[] = [String(d?.title ?? '')];
+  if (d?.meta) lines.push(d.meta);
   lines.push('');
-  for (const sec of d.sections) {
+  for (const sec of Array.isArray(d?.sections) ? d.sections : []) {
     for (const l of sectionToLines(sec)) lines.push(l);
     lines.push('');
   }
-  if (d.trust) lines.push(d.trust);
+  if (d?.trust) lines.push(d.trust);
   return lines.join('\n').trim();
 }
 function copyDeliverable(d: Deliverable) {
@@ -128,14 +129,41 @@ function copyText(text: string, title = '已复制') {
 }
 
 function replyToText(reply: ChatReplyT): string {
-  return [reply.text, ...(reply.points ?? [])].filter(Boolean).join('\n\n');
+  return [reply?.text, ...(Array.isArray(reply?.points) ? reply.points : [])].filter(Boolean).join('\n\n');
+}
+
+/**
+ * 落库 assistant 消息 contentJson → 可渲染的 ChatReply。
+ * 服务端写的是 { text, points?, acts?, asks? }，但存量/异常数据里出现过：整条不是对象、缺 text、
+ * points/asks 不是数组。这些值一路带进渲染期后：`m.reply.text` 交给 MarkdownText 会在
+ * parseBlocks 抛错，`mm.reply.asks?.length` 在 activeAskIdx 计算里抛错——都是整页白屏。
+ * 这里把它收成「一定能渲染」的形状；asks 逐项也要保证 options 是数组（渲染时直接 .map）。
+ */
+function asReply(content: unknown): ChatReplyT {
+  // 口径与服务端 llm/schema.ts 的 textOf 一致：非字符串标量转字符串，对象丢弃。
+  const txt = (v: unknown): string =>
+    typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : '';
+  const c = (content && typeof content === 'object' ? content : {}) as Record<string, unknown>;
+  const asks = Array.isArray(c.asks)
+    ? c.asks
+        .filter((a): a is Record<string, unknown> => !!a && typeof a === 'object')
+        .map((a) => ({ q: txt(a.q), options: (Array.isArray(a.options) ? a.options : []).map(txt).filter(Boolean) }))
+        .filter((a) => a.q || a.options.length)
+    : undefined;
+  return {
+    text: txt(c.text),
+    ...(Array.isArray(c.points) ? { points: c.points.map(txt).filter(Boolean) } : {}),
+    ...(Array.isArray(c.acts) ? { acts: c.acts as ChatReplyT['acts'] } : {}),
+    ...(asks?.length ? { asks } : {}),
+  };
 }
 
 // 军师反问选项：流式期间隐藏正文尾部的 ```ask 结构块（含尚未流完的半截围栏），
 // 完整回复（onChat）到达后由服务端剥离过的正文 + 结构化 asks 权威替换。
-function visibleStreamText(text: string): string {
-  const cut = text.indexOf('```ask');
-  const t = cut >= 0 ? text.slice(0, cut) : text;
+function visibleStreamText(text?: string): string {
+  const src = String(text ?? '');
+  const cut = src.indexOf('```ask');
+  const t = cut >= 0 ? src.slice(0, cut) : src;
   return t.replace(/`{1,3}(?:a(?:s(?:k)?)?)?$/, '');
 }
 
@@ -672,10 +700,12 @@ export default function Chat() {
     let lastUserText = '';
     messages.forEach((m) => {
       // 稳定 key：服务端消息一律用其 id 作 uid（重复 restore/轮询不换 key，避免整列重挂）。
-      if (m.role === 'user') { lastUserText = m.content?.text || ''; out.push({ role: 'user', text: m.content.text, refs: m.refs, uid: m.id }); }
+      // 三个分支的 content 一律按「可能缺/可能不是对象」处理：restore 本身在 initChat 的 try 里
+      // （抛错只会退化成「只剩问候」），但残缺 Msg 会带着进渲染期，那里抛错就是整页白屏。
+      if (m.role === 'user') { lastUserText = String(m.content?.text ?? ''); out.push({ role: 'user', text: lastUserText, refs: m.refs, uid: m.id }); }
       // B4：已入库真值——优先取服务端字段（若有），否则回落到本地保存记录，避免已入库方案重复显示「存入方案库」。
       else if (m.role === 'report') {
-        const deliverable = m.content as Deliverable;
+        const deliverable = (m.content ?? {}) as Deliverable;
         // 记债项10：还原历史里的降级/中断报告——统一中断话术 + ↻ 重试入口（与实时失败一致）。
         const degraded = !!deliverable?.degraded;
         out.push({
@@ -686,7 +716,9 @@ export default function Chat() {
           retryText: degraded && lastUserText ? lastUserText : undefined,
         });
       }
-      else out.push({ role: 'assistant', reply: m.content, uid: m.id });
+      // assistant / system：contentJson 正常是 { text, points?, asks? }；缺 text 或整个不是对象时
+      // 补成 { text: '' }，否则渲染期 m.reply.text / m.reply.asks 会抛错。
+      else out.push({ role: 'assistant', reply: asReply(m.content), uid: m.id });
     });
     // 末条仍是用户消息 = 有一轮问对尚未落回复：记下原文，回前台对账据此认领本轮。
     const tail = messages[messages.length - 1];
@@ -892,7 +924,9 @@ export default function Chat() {
         if (!flushTimerRef.current) flushTimerRef.current = setTimeout(flushTokenBuf, TOKEN_FLUSH_MS);
       },
       // 权威完整回复整体替换 reply：先把缓冲清掉（其内容已被 reply 覆盖），避免残余 token 事后重复追加。
-      setChat: (reply) => { resetTokenBuf(); patchChat((msg) => ({ ...msg, reply })); },
+      // SSE 的 chat 事件在「provider 流没吐出最终结果」时会带 null（服务端 send('chat', reply2) 的
+      // reply2 可为 null）——直接塞进 msg.reply 会让下一帧 m.reply.text 抛错、整页白屏。过 asReply 收口。
+      setChat: (reply) => { resetTokenBuf(); patchChat((msg) => ({ ...msg, reply: asReply(reply) })); },
       finishReport: (messageId, refNotices) => {
         // 自动存入由 liveGen 侧统一触发（保证退页面后台完成也入库），此处只收 streaming 态。
         patchReport((d) => d, { streaming: false, messageId, refNotices }, { appendIfMissing: false });
@@ -931,7 +965,7 @@ export default function Chat() {
             if (!(i >= 0 && m[i].role === 'report' && (m[i] as { streaming?: boolean }).streaming)) return m;
             const cur = m[i] as Extract<Msg, { role: 'report' }>;
             const copy = m.slice();
-            if (cur.deliverable.sections.length > 0) {
+            if ((Array.isArray(cur.deliverable?.sections) ? cur.deliverable.sections.length : 0) > 0) {
               // 有部分内容：保留已流出分段，trust 行统一为中断话术 + ↻ 重试；degraded 仅留作状态位。
               copy[i] = {
                 ...cur,
@@ -1123,11 +1157,13 @@ export default function Chat() {
     for (let i = msgs.length - 1; i >= 0; i--) {
       const mm = msgs[i];
       if (mm.role === 'memory' || mm.role === 'greet') continue;
-      if (mm.role === 'assistant' && !mm.streaming && mm.reply.asks?.length) activeAskIdx = i;
+      if (mm.role === 'assistant' && !mm.streaming && mm.reply?.asks?.length) activeAskIdx = i;
       break;
     }
   }
-  const activeAsks = activeAskIdx >= 0 ? (msgs[activeAskIdx] as Extract<Msg, { role: 'assistant' }>).reply.asks! : [];
+  // 这一段跑在渲染体里（不在 JSX 内），任何解引用抛错都直接整页白屏 —— reply/asks 一律按可缺处理。
+  const rawAsks = activeAskIdx >= 0 ? (msgs[activeAskIdx] as Extract<Msg, { role: 'assistant' }>).reply?.asks : undefined;
+  const activeAsks = Array.isArray(rawAsks) ? rawAsks : [];
   // 选择草稿按消息索引挂靠：换了一条新的提问消息即自动作废旧草稿。
   const [askDraft, setAskDraft] = useState<{ idx: number; sel: Record<number, string>; other: Record<number, string> }>({ idx: -1, sel: {}, other: {} });
   const [askComposerTarget, setAskComposerTarget] = useState<{ idx: number; qi: number } | null>(null);
@@ -1866,7 +1902,8 @@ export default function Chat() {
                     </View>
                   </View>
                   <View className="acts">
-                    {m.agent.chips.map(([ic, label]) => (
+                    {/* chips 来自 GET /agents（服务端 chipsJson 列），非数组时 .map 抛错即白屏 —— 兜一层空数组。 */}
+                    {(Array.isArray(m.agent?.chips) ? m.agent.chips : []).map(([ic, label]) => (
                       <View key={label} className="act-chip" onClick={() => doSend(label, sessionId, m.agent.key)}>
                         <Icon name={ic} size={13} color={accent} /><Text>{label}</Text>
                       </View>
@@ -1914,20 +1951,20 @@ export default function Chat() {
               <View key={m.uid} className="msg a">
                 <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
                 <View className="ai-text" onLongPress={() => copyText(replyToText(m.reply))}>
-                  {m.streaming && !m.reply.text ? (
+                  {m.streaming && !m.reply?.text ? (
                     <View className="think-dots">
                       <View className="think-dot" style={{ background: accent }} />
                       <View className="think-dot d2" style={{ background: accent }} />
                       <View className="think-dot d3" style={{ background: accent }} />
                     </View>
                   ) : (
-                    <MarkdownText text={m.streaming ? visibleStreamText(m.reply.text) : m.reply.text} streaming={m.streaming} selectable />
+                    <MarkdownText text={m.streaming ? visibleStreamText(m.reply?.text) : m.reply?.text} streaming={m.streaming} selectable />
                   )}
-                  {m.reply.points && (
+                  {Array.isArray(m.reply?.points) && m.reply.points.length ? (
                     <View className="points">
                       {m.reply.points.map((p, j) => <View key={j} className="pt"><View className="pd" style={{ background: accent }} /><MarkdownText text={p} className="pt-t" selectable /></View>)}
                     </View>
-                  )}
+                  ) : null}
                 </View>
                 <RefNotices notices={m.refNotices} />
                 {/* 军师反问选项卡：保留卡片内填写；可见文字用 View 渲染，键盘由 ScrollView 外的 Textarea 承接。 */}
@@ -1954,7 +1991,7 @@ export default function Chat() {
                             <Text className="ask-qt">{a.q}</Text>
                           </View>
                           <View className="ask-opts">
-                            {a.options.map((op) => (
+                            {(Array.isArray(a?.options) ? a.options : []).map((op) => (
                               <View
                                 key={op}
                                 className={`ask-chip ${askSel[qi] === op ? 'on' : ''}`}
@@ -2017,7 +2054,7 @@ export default function Chat() {
           // 报告操作硬条件（2026-07-28 假完成修复）：必须有真实落库 messageId、非空正文、非流式、
           // 非降级草稿，才开放查看/分享/存入/认可。此前只看 streaming 位——断流对账交回轮询后卡片
           // 被误收成非流式（messageId 为空、正文可能半截），操作全开、状态误写「已生成」。
-          const reportReady = !m.streaming && !!m.messageId && !m.deliverable.degraded && (m.deliverable.sections?.length ?? 0) > 0;
+          const reportReady = !m.streaming && !!m.messageId && !m.deliverable?.degraded && (m.deliverable?.sections?.length ?? 0) > 0;
           // 出图入口条件：海报设计师 + 成品图能力已开启 + 本卡是已落库可操作成果（降级/半截卡不给出图，
           // 否则等于拿一份不完整方案去扣钻石）。能力关闭时整块不渲染，不做「点了再报 403」。
           const posterEntryOn = reportReady && agent?.key === 'poster' && !!creativeStatus?.enabled;
@@ -2037,7 +2074,7 @@ export default function Chat() {
                   onShareMenu={reportReady ? (kind) => onReportShareMenu(kind, m.deliverable, m.messageId) : undefined}
                   posterPrice={posterEntryOn ? creativeStatus!.pricePerPoster : undefined}
                   onPoster={posterEntryOn ? () => openPosterConfirm(m.messageId) : undefined}
-                  onViewPoster={m.deliverable.creativeJobId ? () => openPosterJob(m.deliverable.creativeJobId) : undefined}
+                  onViewPoster={m.deliverable?.creativeJobId ? () => openPosterJob(m.deliverable.creativeJobId) : undefined}
                 />
               </View>
               {/* 记债项10：报告流失败/降级——单一话术（trust 行「生成中断——已生成部分已保留，可点击重试补全」）+ ↻ 重试入口。
@@ -2279,8 +2316,10 @@ export default function Chat() {
 }
 
 function stripTags(html: string): string {
-  return html.replace(/<[^>]+>/g, '');
+  // memText 来自 GET /agents（服务端非空列），但运营后台/版本覆盖链路一旦回 null 就会在渲染期抛错；
+  // 这一处在军师印象条上，抛错即整页白屏，故按字符串强制处理。
+  return String(html ?? '').replace(/<[^>]+>/g, '');
 }
 function data_delay(d: Deliverable): number {
-  return 900 + d.sections.length * 640 + 500;
+  return 900 + (Array.isArray(d?.sections) ? d.sections.length : 0) * 640 + 500;
 }

@@ -18,6 +18,12 @@ function stripInlineMarks(s: string): string {
   return String(s ?? '').replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/==([^=\n]+)==/g, '$1').replace(/!!([^!\n]+)!!/g, '$1').replace(/##([^#\n]+)##/g, '$1');
 }
 
+// 直接进 <Text> 的字段防线：非字符串标量转字符串，对象/数组丢弃。
+// React 把对象当 children 会抛「Objects are not valid as a React child」——在小程序里同样是整页白屏。
+function plain(v: unknown): string {
+  return typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : '';
+}
+
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 // 首次成果引导条一次性标记：展示过即写，此后任何成果卡都不再出现。
 const GUIDE_KEY = 'report_guide_shown';
@@ -46,9 +52,13 @@ interface Props {
   onViewPoster?: () => void;
 }
 
+// data 的最后兜底：调用方透传的是落库 contentJson，脏数据下整条可能缺失。
+// 默认参数只在传入 undefined 时生效，正常路径不受影响。
+const EMPTY_DELIVERABLE = { title: '', icon: 'doc', meta: '', sections: [], trust: '', actions: [] } as unknown as Deliverable;
+
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
 export default function ReportCard({
-  data, animate = false, streaming = false, operable = true, saved = false,
+  data = EMPTY_DELIVERABLE, animate = false, streaming = false, operable = true, saved = false,
   onSave, onView, onShareMenu, posterPrice, onPoster, onViewPoster,
 }: Props) {
   const s = useStore();
@@ -93,12 +103,18 @@ export default function ReportCard({
       } catch { /* 用户取消 */ }
     }
   };
-  const [revealed, setRevealed] = useState(animate ? 0 : data.sections.length);
+  // 分段防线（2026-07-29 白屏根因）：`data.sections` 在类型上是必填数组，但运行期可能整个字段缺失
+  // ——存量成果消息（早于报告 V2）或被截断的 contentJson 都出现过。此前这里直接 `data.sections.length`，
+  // 一读就 `Cannot read properties of undefined (reading 'length')`，渲染期抛错 = 小程序整页白屏。
+  // 注意父级 chat/index.tsx 判 reportReady 时早已写成 `sections?.length ?? 0`，本组件却没跟上——
+  // 于是「父级判定为不可操作卡（已中断）」和「子组件直接崩」同时成立，白屏而非降级展示。
+  const secs = Array.isArray(data.sections) ? data.sections : [];
+  const [revealed, setRevealed] = useState(animate ? 0 : secs.length);
   const [done, setDone] = useState(!animate);
   const [isSaved, setIsSaved] = useState(saved);
   // 自动存入成功后父级会把消息 saved 置真 → 卡片 saved 态随之点亮（本地 setIsSaved 只 flip 不回退）。
   useEffect(() => { if (saved) setIsSaved(true); }, [saved]);
-  const shown = streaming ? data.sections.length : revealed;
+  const shown = streaming ? secs.length : revealed;
   const isDone = !streaming && done;
 
   // 首次成果引导条（一次性）：完成态时「读+写」必须在同一个 effect 里原子完成，不能拆成
@@ -131,7 +147,7 @@ export default function ReportCard({
     const tick = () => {
       i += 1;
       setRevealed(i);
-      if (i < data.sections.length) {
+      if (i < secs.length) {
         timers.push(setTimeout(tick, 160));
       } else {
         timers.push(setTimeout(() => setDone(true), 160));
@@ -139,17 +155,17 @@ export default function ReportCard({
     };
     timers.push(setTimeout(tick, 200));
     return () => timers.forEach(clearTimeout);
-  }, [animate, data.sections.length]);
+  }, [animate, secs.length]);
 
   return (
     <View className="report">
       <View className="rh">
         <View className="ic-wrap" style={{ background: 'var(--accent-soft)' }}>
-          <Icon name={data.icon} size={18} color={accent} />
+          <Icon name={plain(data.icon) || 'doc'} size={18} color={accent} />
         </View>
         <View className="tt">
-          <Text className="t">{data.title}</Text>
-          <Text className="m">{data.meta}</Text>
+          <Text className="t">{plain(data.title)}</Text>
+          <Text className="m">{plain(data.meta)}</Text>
         </View>
         {isDone ? (
           // 硬条件不满足（无落库 id / 降级 / 中断）绝不写「已生成」——那正是线上误导的来源。
@@ -171,7 +187,7 @@ export default function ReportCard({
             <View className="skl w50" />
           </View>
         )}
-        {data.sections.slice(0, shown).map((sec, i) => {
+        {secs.slice(0, shown).map((sec, i) => {
           const v = cardSection(sec);
           return (
             <View key={i} className="rsec reveal">
@@ -206,7 +222,7 @@ export default function ReportCard({
           <View className="foot">
             {/* B9：Icon 颜色烘焙进 SVG，不能用 var()；此处取与 --ink-3(#7E848B) 等值的 hex。 */}
             <Icon name="shield" size={13} color="#7E848B" />
-            <Text className="foot-t">{data.trust}</Text>
+            <Text className="foot-t">{plain(data.trust)}</Text>
           </View>
           {/* 操作行硬条件：非 operable（无落库 id / 降级 / 中断）只留 trust 行说明现状，
               查看/分享/存入一律不开——半截或未落库的内容开放操作只会引导用户拿到错误结果。 */}

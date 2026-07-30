@@ -22,7 +22,7 @@ import { assertAgentAccess } from '../services/entitlements.js';
 import { recordAudit } from '../services/audit.js';
 import { KEY2AGENT } from '../data/agents.js';
 import type { MessageRef, Deliverable, ChatReply } from '../llm/schema.js';
-import { type Usage, scrubSectionJson } from '../llm/schema.js';
+import { type Usage, scrubSectionJson, healDeliverableSections } from '../llm/schema.js';
 import { extractAndRecordProphecies } from '../services/prophecyLog.js';
 import { resolveMode } from '../services/intent.js';
 import { recordReview } from '../services/reviewLog.js';
@@ -121,6 +121,19 @@ function bumpSessionDigest(user: { tenantId: string; id: string }, sessionId: st
 
 type GenerationError = Error & { code?: string; statusCode?: number };
 
+/**
+ * 流式聊天收尾守卫：流跑完却没拿到最终结果（provider 流静默结束，只来过 delta 或一个事件都没来）。
+ * 此前这里会 `send('chat', null)` —— 端上收到后把 null 整体替换进气泡，下一帧读 `m.reply.text`
+ * 立刻抛错、整页白屏（小程序无红屏）；而紧随其后的 message.create 又因 contentJson 是必填 Json
+ * 列而拒绝 null，本来也落不了库。既然这一轮确实没有回复，就按失败抛出：交给外层 catch 退预留 +
+ * send('error')，端上走既有的错误气泡 + ↻ 重试，而不是「看起来成功、内容为空」。
+ */
+function assertStreamReply(reply: ChatReply | null): asserts reply is ChatReply {
+  if (!reply) {
+    throw Object.assign(new Error('AI 服务暂时不可用，请稍后重试'), { code: 'AI_UNAVAILABLE' });
+  }
+}
+
 function publicGenerationError(err: GenerationError): { message: string; code: string } {
   const code = err.code ?? 'INTERNAL';
   if (code === 'MODERATION_BLOCK') {
@@ -217,7 +230,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       title: s.title,
       projectId: s.projectId,
       generating: isSessionGenerating(s.id),
-      messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: scrubAssistantContent(m.role, m.contentJson), at: m.createdAt, refs: (m.refsJson as MessageRef[] | null) ?? undefined })),
+      messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: presentMessageContent(m.role, m.contentJson), at: m.createdAt, refs: (m.refsJson as MessageRef[] | null) ?? undefined })),
     };
   });
 
@@ -640,6 +653,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           if (clientGone) break; // 断连：停消费(取消 provider 流)，退预留、不持久化残缺回复
         }
         if (clientGone) { await refundReservations(); return; }
+        assertStreamReply(reply2);
         send('chat', reply2);
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object } });
         harvestProphecies(user, agentKey, reply2?.text);
@@ -718,6 +732,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           if (clientGone) break; // 断连：停消费(取消 provider 流)，退预留、不持久化残缺回复
         }
         if (clientGone) { await refundReservations(); return; }
+        assertStreamReply(reply2);
         send('chat', reply2); // 完整回复（含 points/acts）兜底，兼容不消费 token 流的客户端
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
@@ -786,12 +801,49 @@ function historyMessage(row: HistoryRow): { role: string; text: string } | null 
   return { role, text };
 }
 
-// 读取端展示清洗（存量自愈，不改库）：对 role=assistant 的 contentJson.text 擦除泄漏的 section JSON。
+/**
+ * 会话消息 contentJson 的读取端出口（GET /sessions/:id 唯一使用者）。
+ *
+ * 为什么读时治愈而不是刷库：小程序渲染期一旦解引用到脏形状就是**整页白屏**（无红屏、无堆栈），
+ * 而端上防御要等发版审核才能到用户手里；读取端治愈只需部署服务端，线上现有版本立刻不再白屏。
+ * 2026-07-29 实测：军师 tab 点「品牌营销官」进对话页白屏，根因是历史成果消息的 sections
+ * 未过归一化（叶子是对象 → 端上 parseBlocks 的 `input.replace` 抛错）。方案库/版本化报告读取路径
+ * 早就套了 healDeliverableSections，唯独会话详情这条最热的读取路径漏了——本函数补齐口径。
+ *
+ * 两类处理，都是纯内存变换、零额外 IO、对健康数据幂等：
+ *  · report：healDeliverableSections —— 走一遍 normalizeDeliverableSections，
+ *    保证 sections 是数组、每段是合法 typed/白卡、叶子是字符串（正常数据进出等价）；
+ *  · assistant/system：擦除泄漏的 section JSON（原 scrubAssistantContent 行为），并**保证
+ *    contentJson.text 一定是字符串** —— 缺 text 的存量消息会让端上 m.reply.text 落到
+ *    parseBlocks(undefined) 抛错，同样白屏。
+ */
+function presentMessageContent(role: string, content: unknown): unknown {
+  if (role === 'report') return presentReportContent(content);
+  // assistant / system 才做文本清洗与形状保证；user 原文与未来新增角色一律原样透传。
+  if (role === 'assistant' || role === 'system') return scrubAssistantContent(content);
+  return content;
+}
+
+/**
+ * 成果消息读取端自愈：sections 归一化 + 「sections 一定是数组」的形状保证。
+ * healDeliverableSections 对「根本没有 sections 字段」的对象刻意原样返回（它是通用工具，不该给
+ * 任意对象凭空加字段，见 reportV2.test.ts 的幂等断言），但端上 ReportCard 直接读 data.sections.length，
+ * 缺字段就是整页白屏——所以这里在会话读取路径上把这一步补齐。健康数据走 heal 后原样返回，不额外分配。
+ */
+function presentReportContent(content: unknown): unknown {
+  const healed = healDeliverableSections(content);
+  if (!healed || typeof healed !== 'object' || Array.isArray(healed)) return { sections: [] };
+  return 'sections' in healed ? healed : { ...(healed as object), sections: [] };
+}
+
+// 读取端展示清洗（存量自愈，不改库）：擦除 contentJson.text 里泄漏的 section JSON。
 // 解析不出可读结构时统一用占位句；DB 数据保持原样，仅读时清洗。
-function scrubAssistantContent(role: string, content: unknown): unknown {
-  if (role !== 'assistant' || !content || typeof content !== 'object') return content;
+// 另附形状保证：text 缺失/非字符串时补成空串（端上把它直接当字符串用，缺值即渲染期抛错→白屏）。
+function scrubAssistantContent(content: unknown): unknown {
+  if (!content || typeof content !== 'object' || Array.isArray(content)) return { text: '' };
   const c = content as { text?: unknown };
-  if (typeof c.text !== 'string' || !c.text) return content;
+  if (typeof c.text !== 'string') return { ...c, text: '' };
+  if (!c.text) return content;
   const cleaned = scrubSectionJson(c.text);
   return cleaned === c.text ? content : { ...c, text: cleaned };
 }
