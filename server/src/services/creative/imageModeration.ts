@@ -1,17 +1,22 @@
 // 图片审核（全新能力：现有 moderation.ts 的 provider 抽象是 (text) => verdict，图片得单开一路）。
 //
-// 第一期只交付**接口 + 默认 'none' provider**（放行 + 落一条 skipped 审计，让「没审」这件事在
-// audit_log 里可查，而不是零痕迹放过），http 形态留配置位不接真实供应商（方案 §13 列入阶段 B）。
-// 覆盖两处调用点：用户上传源素材（uploads.ts）、供应商产出主视觉（worker.ts）。
-import { assertSafeUrl } from '../../llm/tools/httpTool.js';
+// 现状（诚实版）：**只有 'none' 一种实现** —— 放行 + 落一条 skipped 审计，让「没审」这件事在
+// audit_log 里可查，而不是零痕迹放过。合规缺口记录见 AGENTS.md §13，二期（阶段 B）才接真实供应商。
+//
+// 2026-07-29 删掉了 HttpModerator 半成品与 imageModerationProvider 配置项。删除理由：
+// 那个实现直读三个**全仓只在本文件出现、既不在 env.ts 也不在 .env.example**的 process.env
+// （CREATIVE_IMAGE_MODERATION_URL/_KEY/_TIMEOUT_MS），而 provider='http' 但缺 URL 时它 return
+// NoneModerator —— 也就是后台显示「已开审核」、实际全部放行、连一条 error 审计都没有。
+// 一个让人误以为已经在审的开关，比明确的"未接入"危险得多。真接供应商时连着实现一起加回来：
+// 保留下面的 ImageModerator 接口就是为了那时候只需新增一个 class + 一个 resolve 分支。
 import { recordAudit } from '../audit.js';
-import { getCreativeConfig } from './config.js';
 
 export interface ImageModerationVerdict {
   pass: boolean;
-  provider: 'none' | 'http';
+  /** 判定来源。目前恒为 'none'；接入真实供应商时在此扩联合类型。 */
+  provider: 'none';
   label?: string;
-  /** true = 未真正审核（默认 provider 或服务未配），已落 skipped 审计。 */
+  /** true = 未真正审核（默认 provider），已落 skipped 审计。 */
   skipped?: boolean;
 }
 
@@ -23,15 +28,20 @@ export interface ImageModerationContext {
   scene?: 'source' | 'visual' | 'poster';
 }
 
+/**
+ * 图片审核器接口（二期接入缝）。
+ * 入参收窄为 Buffer：两个调用点（uploads 的用户上传、worker 的供应商产出）手上都已经是字节，
+ * 曾经的 `Buffer | { ossKey }` 联合从没有人走过第二个分支，只是让每个实现都要写两套编码逻辑。
+ */
 export interface ImageModerator {
-  readonly provider: 'none' | 'http';
-  check(input: Buffer | { ossKey: string }, ctx?: ImageModerationContext): Promise<ImageModerationVerdict>;
+  readonly provider: 'none';
+  check(input: Buffer, ctx?: ImageModerationContext): Promise<ImageModerationVerdict>;
 }
 
 /** 默认：放行 + 记一条 skipped 审计（合规追溯要能证明「这批图当时没有图片审核能力」）。 */
 class NoneModerator implements ImageModerator {
   readonly provider = 'none' as const;
-  async check(input: Buffer | { ossKey: string }, ctx?: ImageModerationContext): Promise<ImageModerationVerdict> {
+  async check(input: Buffer, ctx?: ImageModerationContext): Promise<ImageModerationVerdict> {
     await recordAudit({
       tenantId: ctx?.tenantId ?? null,
       userId: ctx?.userId ?? null,
@@ -40,70 +50,22 @@ class NoneModerator implements ImageModerator {
         provider: 'none',
         scene: ctx?.scene ?? 'source',
         refId: ctx?.refId ?? null,
-        bytes: Buffer.isBuffer(input) ? input.length : null,
-        ossKey: Buffer.isBuffer(input) ? null : input.ossKey,
-        reason: '未配置图片审核供应商，按放行处理',
+        bytes: input.length,
+        reason: '未接入图片审核供应商，按放行处理',
       },
     });
     return { pass: true, provider: 'none', skipped: true };
   }
 }
 
-/**
- * http 形态：**配置位，未接真实供应商**。
- * 约定 POST { imageBase64 | ossKey } → { pass, label? }。
- * 未配 URL 时降级为 none（放行 + skipped 审计），绝不因为审核没接好把上传全拦死。
- */
-class HttpModerator implements ImageModerator {
-  readonly provider = 'http' as const;
-  constructor(private url: string, private apiKey: string, private timeoutMs: number) {}
-
-  async check(input: Buffer | { ossKey: string }, ctx?: ImageModerationContext): Promise<ImageModerationVerdict> {
-    try {
-      await assertSafeUrl(this.url);
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
-      try {
-        const res = await fetch(this.url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}) },
-          body: JSON.stringify(Buffer.isBuffer(input) ? { imageBase64: input.toString('base64') } : { ossKey: input.ossKey }),
-          signal: ctrl.signal,
-        });
-        if (!res.ok) throw new Error(`图片审核服务 HTTP ${res.status}`);
-        const data = (await res.json()) as { pass?: boolean; block?: boolean; label?: string };
-        const pass = typeof data.pass === 'boolean' ? data.pass : !data.block;
-        return { pass, provider: 'http', ...(data.label ? { label: data.label } : {}) };
-      } finally {
-        clearTimeout(timer);
-      }
-    } catch (e) {
-      // 图片审核抖动：**fail-closed**（合规侧宁拦错不放过；用户重试一次即可），并记审计便于排查。
-      await recordAudit({
-        tenantId: ctx?.tenantId ?? null,
-        userId: ctx?.userId ?? null,
-        action: 'creative.image.moderation.error',
-        payload: { provider: 'http', scene: ctx?.scene ?? 'source', refId: ctx?.refId ?? null, error: (e as Error).message },
-      });
-      return { pass: false, provider: 'http', label: 'moderation_unavailable' };
-    }
-  }
-}
-
-/** 取当前生效的图片审核器（后台配置 provider；http 未配地址时退回 none）。 */
+/** 取当前生效的图片审核器。二期接入真实供应商时在这里加配置分支。 */
 export async function resolveImageModerator(): Promise<ImageModerator> {
-  const cfg = await getCreativeConfig();
-  if (cfg.imageModerationProvider !== 'http') return new NoneModerator();
-  const url = (process.env.CREATIVE_IMAGE_MODERATION_URL ?? '').trim();
-  if (!url) return new NoneModerator();
-  const key = (process.env.CREATIVE_IMAGE_MODERATION_KEY ?? '').trim();
-  const timeoutMs = Number(process.env.CREATIVE_IMAGE_MODERATION_TIMEOUT_MS ?? 5000);
-  return new HttpModerator(url, key, Number.isFinite(timeoutMs) ? timeoutMs : 5000);
+  return new NoneModerator();
 }
 
 /** 便捷入口：审一张图。 */
 export async function checkImage(
-  input: Buffer | { ossKey: string },
+  input: Buffer,
   ctx?: ImageModerationContext,
 ): Promise<ImageModerationVerdict> {
   const moderator = await resolveImageModerator();

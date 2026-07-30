@@ -7,7 +7,6 @@
 // 永久卡在 parsing 且无人捞）。所以第一天就配 sweep 兜底 + 幂等退款。
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db.js';
-import { env } from '../../env.js';
 import { now } from '../clock.js';
 import { recordAudit } from '../audit.js';
 import { registerJob } from '../scheduler.js';
@@ -24,10 +23,31 @@ import type { TemplateAssets } from './templates.js';
 import type { Deliverable, DeliverableAsset } from '../../../../shared/contracts';
 
 const POLL_INTERVAL_MS = 2000;
-/** running 超过此时长视为卡死（进程被杀 / 上游 hang），由 sweep 回收。 */
+/**
+ * 一轮 tick 最多**连续处理**几单。注意这不是并发：下面是串行 `await runJobOnce()`，
+ * 而渲染本身还被 reportPdf 的单例浏览器 + 单并发队列串起来，所以真正的并行度恒为 1。
+ * 曾有一个后台可配的 `maxConcurrency`（标签写着「worker 并发槽 1–8」），那是个假承诺 ——
+ * 调大它只会让任务在渲染队列里排队并同时占内存。要真并发得先把 Puppeteer 拆出 API 进程。
+ */
+const TICK_BATCH_SIZE = 2;
+/**
+ * running 超过此时长视为卡死（进程被杀 / 上游 hang），由 sweep 回收。
+ * ★ 不变式：必须**大于** config.ts 的 MAX_TIMEOUT_MS（渲染超时上限 480s）。否则一次正常的长渲染
+ *   还没结束就被 sweep 判为卡死重新入队 → 同一单跑两遍、产出两张资产。改这两个数要一起看。
+ */
 export const STALE_RUNNING_MS = 10 * 60_000;
-/** 最大尝试次数；超过即 failed + 幂等退款。 */
+/** 最大尝试次数；超过即 failed + 幂等退款。判定统一走 canRetry()。 */
 export const MAX_ATTEMPTS = 3;
+
+/**
+ * 还能不能再试一次。**唯一实现**：worker 收口与 sweep 回收必须用同一把尺子 ——
+ * 此前两处分别写 `attempts < MAX_ATTEMPTS` 与 `attempts <= MAX_ATTEMPTS`，
+ * 于是「worker 判定已用完重试、落了终态失败」的任务，在 sweep 眼里还能再入队一次。
+ * @param attempts 已发生的尝试次数（claimNextJob 抢占时就 +1，所以传进来的值含当前这次）。
+ */
+export function canRetry(attempts: number): boolean {
+  return attempts < MAX_ATTEMPTS;
+}
 
 class JobCancelled extends Error {
   readonly code = 'CANCELLED';
@@ -160,7 +180,17 @@ async function patchDeliverable(job: { id: string; messageId: string | null; use
 
 /* ───────────────── 执行管线 ───────────────── */
 
-interface RunOutcome { status: 'succeeded' | 'failed' | 'cancelled'; code?: string; message?: string }
+/**
+ * 一次执行的结论。
+ * `skipped` = 本轮什么都没做（任务已被别人收口）：不落状态、不退款、不记指标，也不算失败。
+ * `providerLabel` = **实际**的主视觉来源，供 metrics 用（不是建单时那个 'configured' 快照）。
+ */
+interface RunOutcome {
+  status: 'succeeded' | 'failed' | 'cancelled' | 'skipped';
+  code?: string;
+  message?: string;
+  providerLabel?: string;
+}
 
 async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
   const { job, brief } = input;
@@ -172,13 +202,20 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
   const philosophy: VisualPhilosophy = await generatePhilosophy({
     brief, brandKit: input.brandKit, tenantId: job.tenantId, userId: job.userId,
   });
-  await prisma.creativeJob.update({
-    where: { id: job.id },
+  // 带 status 守卫：任务若已被他人收口（sweep 回队后老进程还在跑），不该覆盖它的快照。
+  await prisma.creativeJob.updateMany({
+    where: { id: job.id, status: 'running' },
     data: { promptSnapshot: philosophyText(philosophy) },
   });
 
   // ── 阶段 2：主视觉（未配供应商 / 复用父任务资产 → 跳过，不报错）──
+  //
+  // 降级要留痕（D7）：供应商挂掉时这里只 console.warn 过，而 CreativeJob.provider 是**建单时**
+  // 的快照 'configured'、metrics 也用它 —— 结果供应商挂一整天，任务台全绿、监控全绿，
+  // 用户拿到的却全是"无主视觉"版。所以把结论写进 resultJson.degraded + visualError，任务台展示。
   let visualAssetId = input.sourceVisualAssetId;
+  let providerLabel = visualAssetId ? 'reused' : 'none';
+  let visualError: string | null = null;
   if (!visualAssetId && visualProviderConfigured(cfg)) {
     await setProgress(job.id, 'visual');
     await checkpoint(job.id);
@@ -191,12 +228,7 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
           prompt,
           ...(brief.negativePrompt ? { negativePrompt: brief.negativePrompt } : {}),
         });
-        if (submitted.status === 'pending' && submitted.taskId) {
-          // 异步供应商：记下 providerTaskId 让 sweep 续查，本轮先按「无主视觉」继续出图——
-          // 用户宁可先拿到一版纯排版，也不该盯着「制作中」等一个不知何时回来的上游。
-          await prisma.creativeJob.update({ where: { id: job.id }, data: { providerTaskId: submitted.taskId } });
-          console.warn('[creative] 图片供应商返回异步任务，本轮走纯排版路径：', job.id, submitted.taskId);
-        } else if (submitted.status === 'succeeded' && submitted.image) {
+        if (submitted.status === 'succeeded' && submitted.image) {
           const verdict = await checkImage(submitted.image.buffer, {
             tenantId: job.tenantId, userId: job.userId, refId: job.id, scene: 'visual',
           });
@@ -207,15 +239,24 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
             metadata: { prompt, provider: provider.name, moderation: { provider: verdict.provider, skipped: !!verdict.skipped } },
           });
           visualAssetId = saved.id;
+          providerLabel = provider.name;
         } else {
+          visualError = '主视觉未生成，本张为纯排版版式';
           console.warn('[creative] 图片供应商未产出主视觉，走纯排版路径：', job.id, submitted.error ?? '');
         }
       } catch (e) {
         // 供应商失败**不**让整个任务失败：纯排版模板本身就是完整可交付的产物（方案 §7 拍板）。
+        visualError = '主视觉生成失败，本张为纯排版版式';
         console.warn('[creative] 主视觉生成失败，降级为纯排版：', job.id, (e as Error).message);
       }
     }
+    // 配了供应商却没拿到图 = 降级。未配供应商是既定形态（纯排版路径），不算降级。
+    if (!visualAssetId) {
+      providerLabel = 'degraded';
+      visualError ??= '主视觉未生成，本张为纯排版版式';
+    }
   }
+  const degraded = providerLabel === 'degraded';
 
   // ── 阶段 3：渲染 ──
   await setProgress(job.id, 'render');
@@ -241,8 +282,13 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
   });
 
   const url = creativeAssetUrl(poster.id, poster.ossKey);
-  await prisma.creativeJob.update({
-    where: { id: job.id },
+  // ★ 成功写入必须带 `status:'running'` 守卫（失败路径一直有，成功路径曾经没有）。
+  // 场景：sweep 把这一单判为卡死并回队 → 别的 worker 抢走跑完置了终态，而老进程这时才回来。
+  // 无守卫的 update 会把它的终态覆盖掉（连 completedAt / resultJson 一起换成本轮的），
+  // 于是同一单在库里只剩一个成功结论、却挂着两张成品资产。抢不到就认输：只 warn，不抛错
+  //（抛错会走 runJobOnce 的失败分支 → 触发一次不该发生的退款）。
+  const settled = await prisma.creativeJob.updateMany({
+    where: { id: job.id, status: 'running' },
     data: {
       status: 'succeeded',
       progress: null,
@@ -256,9 +302,15 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
         movement: philosophy.movement,
         philosophySource: philosophy.source,
         visualAssetId: visualAssetId ?? null,
+        degraded,
+        ...(visualError ? { visualError } : {}),
       } as Prisma.InputJsonValue,
     },
   });
+  if (settled.count === 0) {
+    console.warn('[creative] 收口时任务已不在 running（已被他人收口），放弃写入本轮结果：', job.id);
+    return { status: 'skipped', code: 'ALREADY_SETTLED' };
+  }
 
   await patchDeliverable(job, {
     id: poster.id,
@@ -270,15 +322,24 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
     downloadUrl: url,
   }).catch((e) => console.error('[creative] 成果消息回写失败（不影响任务成功）：', (e as Error).message));
 
-  return { status: 'succeeded' };
+  return { status: 'succeeded', providerLabel };
 }
 
-/** 已抢占的任务无法展开成可执行输入时，直接落终态并退款——不能让它留在 running 等 sweep 兜（10 分钟）。 */
+/**
+ * 已抢占的任务无法展开成可执行输入时，直接落终态并退款——不能让它留在 running 等 sweep 兜（10 分钟）。
+ * **只有真的把 running 改成 failed 才退款**：这个函数在状态守卫之前被调用（判状态得先加载，而它
+ * 正是加载失败的分支），若无条件退款，一个已成功交付的任务只要 requestJson 恰好读不出来，
+ * 就会白退给用户 10 钻。抢不到就当作已被他人收口。
+ */
 async function failUnloadable(jobId: string, code: string, message: string): Promise<RunOutcome> {
-  await prisma.creativeJob.updateMany({
+  const claimed = await prisma.creativeJob.updateMany({
     where: { id: jobId, status: 'running' },
     data: { status: 'failed', progress: null, completedAt: now(), errorCode: code, errorMessage: message.slice(0, 500) },
   });
+  if (claimed.count === 0) {
+    console.warn('[creative] 展开失败但任务已不在 running，跳过收口与退款：', jobId, code);
+    return { status: 'skipped', code: 'NOT_RUNNING' };
+  }
   await refundJob(jobId, `失败 · ${code}`).catch(() => {});
   noteCreativeJobFailed(POSTER_SKILL_KEY, 'none', code);
   return { status: 'failed', code, message };
@@ -295,7 +356,14 @@ export async function runJobOnce(jobId: string): Promise<RunOutcome> {
     return failUnloadable(jobId, (e as { code?: string }).code ?? 'INTERNAL', (e as Error).message);
   }
   if (!input) return failUnloadable(jobId, 'NOT_FOUND', '任务不存在');
-  const providerLabel = input.job.provider ?? 'none';
+
+  // 双执行闸（D3 前半）：只有仍是 running 的任务才允许进管线。
+  // 光靠收口时的 status 守卫不够——管线中途会 saveAsset，等到最后一步才发现"已被他人收口"时，
+  // 第二张成品资产已经落库了（资产不会因为状态写失败而消失）。所以在入口就判一次。
+  if (input.job.status !== 'running') {
+    console.warn('[creative] 任务不在 running，跳过本轮执行：', jobId, input.job.status);
+    return { status: 'skipped', code: 'NOT_RUNNING' };
+  }
 
   let outcome: RunOutcome;
   try {
@@ -306,18 +374,23 @@ export async function runJobOnce(jobId: string): Promise<RunOutcome> {
       : { status: 'failed', code: (e as { code?: string }).code ?? 'INTERNAL', message: (e as Error).message };
   }
 
+  if (outcome.status === 'skipped') return outcome; // 已被他人收口：不落状态、不退款、不记指标
+
   if (outcome.status === 'succeeded') {
-    noteCreativeJobSucceeded(POSTER_SKILL_KEY, providerLabel);
+    // provider 标签用**本轮实际结果**（reused / 供应商名 / degraded），不是建单时的 'configured' 快照——
+    // 用快照的后果是供应商挂掉时监控看不出任何异常。
+    noteCreativeJobSucceeded(POSTER_SKILL_KEY, outcome.providerLabel ?? 'none');
     await recordAudit({
       tenantId: input.job.tenantId, userId: input.job.userId, action: 'creative.job.succeeded',
-      payload: { jobId, templateKey: input.brief.templateKey },
+      payload: { jobId, templateKey: input.brief.templateKey, provider: outcome.providerLabel ?? 'none' },
     });
     return outcome;
   }
 
   // 失败/取消：落错误 + 幂等退款。attempts 用完才算终态失败，否则回 pending 让下一轮重试。
+  const providerLabel = input.job.provider ?? 'none';
   const retriable = outcome.status === 'failed'
-    && input.job.attempts < MAX_ATTEMPTS
+    && canRetry(input.job.attempts)
     && outcome.code !== 'IMAGE_MODERATION_BLOCKED'   // 审核结论重试无意义
     && outcome.code !== 'BRIEF_MISSING';
   if (retriable) {
@@ -351,13 +424,15 @@ export async function runJobOnce(jobId: string): Promise<RunOutcome> {
   return outcome;
 }
 
-/** 跑一轮：按并发槽抢占并执行。返回本轮处理的任务数（供测试驱动，不依赖真实计时器）。 */
+/**
+ * 跑一轮：串行抢占并执行至多 TICK_BATCH_SIZE 单。返回本轮处理的任务数（供测试驱动，不依赖真实计时器）。
+ * 功能开关在这里判（getCreativeConfig 走 featureFlag 的 60s 缓存，所以 2s 轮询不会每次都打 DB）。
+ */
 export async function tickCreativeWorker(): Promise<number> {
   const cfg = await getCreativeConfig();
   if (!cfg.enabled) return 0; // 功能关闭时不消费队列（已入队的任务留着，开启后继续）
-  const slots = Math.max(1, cfg.maxConcurrency);
   let handled = 0;
-  for (let i = 0; i < slots; i++) {
+  for (let i = 0; i < TICK_BATCH_SIZE; i++) {
     const jobId = await claimNextJob();
     if (!jobId) break;
     handled += 1;
@@ -378,7 +453,7 @@ export async function sweepCreativeJobs(): Promise<{ requeued: number; failed: n
     select: { id: true, tenantId: true, userId: true, attempts: true },
   });
   for (const job of stale) {
-    if (job.attempts <= MAX_ATTEMPTS) {
+    if (canRetry(job.attempts)) {
       const r = await prisma.creativeJob.updateMany({
         where: { id: job.id, status: 'running' },
         data: { status: 'pending', progress: null, errorCode: 'STALE_REQUEUED', errorMessage: '超时未完成，已重新入队' },
@@ -423,10 +498,17 @@ registerJob({
 let timer: ReturnType<typeof setInterval> | null = null;
 let ticking = false;
 
-/** 启动 worker 轮询（2s）。NODE_ENV=test 不自启——测试直接调 tickCreativeWorker 驱动。 */
+/**
+ * 启动 worker 轮询（2s）。NODE_ENV=test 不自启——测试直接调 tickCreativeWorker 驱动。
+ *
+ * **无条件起定时器**：功能开关由 tick 内部判（关着就 return 0，不碰队列）。曾在这里读部署级
+ * env CANVAS_DESIGN_ENABLED 提前 return —— 那个 env 已删，而且改成"启动时读一次 DB 开关"是错的：
+ * 进程启动早于运营放量，读一次就永远不轮询了，运营在后台打开开关也得等重启。
+ * 空转成本可忽略：tick 第一件事是 getCreativeConfig()，走 featureFlag 的 60s 缓存 →
+ * 关闭状态下每分钟才一次单行主键查询。
+ */
 export function startCreativeWorker(): void {
   if (timer || process.env.NODE_ENV === 'test') return;
-  if (!env.canvasDesignEnabled) return; // 部署级硬开关关着就不轮询（DB 开关由 tick 内部再判一次）
   timer = setInterval(() => {
     if (ticking) return; // 上一轮还没跑完就跳过，避免 tick 叠加
     ticking = true;

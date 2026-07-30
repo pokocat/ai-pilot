@@ -13,9 +13,10 @@ import Icon from '../../../components/Icon';
 import SafeHeader from '../../../components/SafeHeader';
 import KbInput from '../../../components/KbInput';
 import { useStore } from '../../../hooks/useStore';
-import { api, type CreativeJobView, type CreativeAssetView } from '../../../services/api';
+import { api, type CreativeJobView, type CreativeAssetView, type PosterTemplateOption } from '../../../services/api';
 import {
-  absoluteCreativeUrl, fetchPosterFile, getCreativeStatus, POSTER_TEMPLATES, progressText,
+  absoluteCreativeUrl, fetchPosterFile, getCreativeStatus, POSTER_LIMITS as LIMITS,
+  PROGRESS_STAGES as STAGES, progressText, type PosterProgressStage,
 } from '../../../services/creative';
 import { clearPosterPendingByJob } from '../../../services/posterPending';
 import { navTo, redirectToGuarded } from '../../../services/nav';
@@ -26,12 +27,7 @@ const POLL_SLOW_MS = 3000;
 const POLL_FAST_WINDOW_MS = 30_000;
 const POLL_MAX_MS = 10 * 60_000;
 
-// 与服务端 schema.ts LIMITS 同口径（改文字/换风格允许改的字段）。
-const LIMITS = { headline: 20, proofPoint: 20, cta: 15, visualDirection: 100 } as const;
 const PROOF_SLOTS = 3;
-
-// 制作中的四个阶段（服务端 progress 取值顺序），用于画进度条与当前阶段文案。
-const STAGES = ['philosophy', 'visual', 'render', 'upload'] as const;
 
 function isInFlight(status?: string): boolean {
   return status === 'pending' || status === 'running';
@@ -74,6 +70,8 @@ export default function PosterJobPage() {
   const [loadErr, setLoadErr] = useState('');
   const [timedOut, setTimedOut] = useState(false);
   const [price, setPrice] = useState<number | null>(null);
+  // 启用中的版式清单由 /creative/status 下发；空清单 = 换风格面板不给选版式（只能改视觉方向）。
+  const [templates, setTemplates] = useState<PosterTemplateOption[]>([]);
   const [panel, setPanel] = useState<'' | 'revise' | 'style'>('');
   const [headline, setHeadline] = useState('');
   const [proofs, setProofs] = useState<string[]>(['', '', '']);
@@ -174,7 +172,11 @@ export default function PosterJobPage() {
 
   useEffect(() => {
     let alive = true;
-    void getCreativeStatus().then((st) => { if (alive && st) setPrice(st.pricePerPoster); });
+    void getCreativeStatus().then((st) => {
+      if (!alive || !st) return;
+      setPrice(st.pricePerPoster);
+      setTemplates(st.templates ?? []);
+    });
     return () => { alive = false; };
   }, []);
 
@@ -257,6 +259,15 @@ export default function PosterJobPage() {
     setPanel('style');
   };
 
+  /** 重取启用中的版式清单（后台停用某套版式后，本页缓存的清单会过期）。 */
+  const refreshTemplates = async () => {
+    const st = await getCreativeStatus({ force: true });
+    if (!aliveRef.current || !st) return;
+    const tpls = st.templates ?? [];
+    setTemplates(tpls);
+    setTplKey((cur) => (cur && tpls.some((t) => t.key === cur) ? cur : ''));
+  };
+
   const submitRevise = async () => {
     if (busy || !job) return;
     const next: Record<string, string> = {};
@@ -294,7 +305,14 @@ export default function PosterJobPage() {
     }
   };
 
-  /** 重出主视觉：会再扣一次钻石。failed/cancelled 的「重新生成」也走这里（不带 patch）。 */
+  /**
+   * 重出主视觉：会再扣一次钻石。failed/cancelled 的「重新生成」也走这里（不带 patch）。
+   *
+   * 只发用户在面板里改动的两项。**不需要**（也无法）补发 negativePrompt / brandKitVersion：
+   * 服务端 regenerateJob 以父任务存档的整份 brief 为底，只覆盖 patch 里显式给出的键，
+   * 所以品牌资产包版本与排除项沿版本链自动继承——前提是确认页建单时带上了它们（见 poster/index.tsx）。
+   * 本页拿到的 CreativeJobView 里没有 brief，凭空造这两个值只会把继承来的正确值覆盖掉。
+   */
   const submitRegenerate = async (opts: { usePanel?: boolean } = {}) => {
     if (busy || !job) return;
     if (opts.usePanel && visual.trim().length > LIMITS.visualDirection) {
@@ -317,8 +335,12 @@ export default function PosterJobPage() {
       const code = String((e as { code?: string }).code || (e as { data?: { code?: string } }).data?.code || '');
       if (code === 'INSUFFICIENT_CREDITS') setErrors({ form: '钻石不足，去「我的 · 权益额度」看看余额。' });
       else if (code === 'CREATIVE_DAILY_LIMIT') setErrors({ form: '今日出图额度已满，明天再来。' });
-      else if (code === 'BRIEF_INVALID' || code === 'MODERATION_BLOCKED') setErrors({ form: String((e as Error).message || '没通过校验，改一下再试。') });
-      else s.handleApiError(e, { fallbackTitle: '换风格失败，请重试' });
+      else if (code === 'BRIEF_INVALID' || code === 'MODERATION_BLOCKED') {
+        const msg = String((e as Error).message || '');
+        setErrors({ form: msg || '没通过校验，改一下再试。' });
+        // 版式在本页停留期间被后台停用（服务端 422，不静默换版）：重取清单让那一项立刻消失。
+        if (/版式/.test(msg)) void refreshTemplates();
+      } else s.handleApiError(e, { fallbackTitle: '换风格失败，请重试' });
     } finally {
       if (aliveRef.current) setBusy('');
     }
@@ -343,7 +365,7 @@ export default function PosterJobPage() {
 
   const setProof = (i: number, v: string) => setProofs((cur) => cur.map((x, j) => (j === i ? v : x)));
 
-  const stageIdx = Math.max(0, STAGES.indexOf((job?.progress ?? 'philosophy') as typeof STAGES[number]));
+  const stageIdx = Math.max(0, STAGES.indexOf((job?.progress ?? 'philosophy') as PosterProgressStage));
   const actions = job?.actions ?? [];
 
   return (
@@ -485,27 +507,31 @@ export default function PosterJobPage() {
                   <Text className="pj-panel-x" onClick={() => setPanel('')}>×</Text>
                 </View>
                 <Text className="pj-panel-d">重出主视觉，会再扣一次钻石。旧版本不会被覆盖，随时能回看。</Text>
-                <Field label="版式">
-                  <View className="pj-tpls">
-                    {POSTER_TEMPLATES.map((t) => {
-                      const on = t.key === tplKey;
-                      return (
-                        <View
-                          key={t.key}
-                          className={`pj-tpl${on ? ' on' : ''}`}
-                          style={on ? { borderColor: accent } : undefined}
-                          onClick={() => setTplKey(on ? '' : t.key)}
-                        >
-                          <View className="pj-tpl-h">
-                            <Text className="pj-tpl-n">{t.name}</Text>
-                            {on ? <Icon name="check" size={13} color={accent} /> : null}
+                {/* 版式清单来自 /creative/status（只含启用中的）；不选 = 沿用上一版的版式。
+                    一套都没下发时整块不渲染——不要给出一个服务端会 422 的选项。 */}
+                {templates.length ? (
+                  <Field label="版式">
+                    <View className="pj-tpls">
+                      {templates.map((t) => {
+                        const on = t.key === tplKey;
+                        return (
+                          <View
+                            key={t.key}
+                            className={`pj-tpl${on ? ' on' : ''}`}
+                            style={on ? { borderColor: accent } : undefined}
+                            onClick={() => setTplKey(on ? '' : t.key)}
+                          >
+                            <View className="pj-tpl-h">
+                              <Text className="pj-tpl-n">{t.name}</Text>
+                              {on ? <Icon name="check" size={13} color={accent} /> : null}
+                            </View>
+                            <Text className="pj-tpl-d">{t.desc}</Text>
                           </View>
-                          <Text className="pj-tpl-d">{t.desc}</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </Field>
+                        );
+                      })}
+                    </View>
+                  </Field>
+                ) : null}
                 <Field label="视觉方向" err={errors.visual} count={<Counter value={visual} max={LIMITS.visualDirection} />}>
                   <Textarea className="pj-area" value={visual} placeholder="留空 = 沿用上一版；只写画面属性" onInput={(e) => setVisual(e.detail.value)} />
                 </Field>

@@ -513,8 +513,20 @@ export interface BrandKitView {
 
 /** 海报场景（决定默认模板与文案骨架）。 */
 export type PosterScene = 'personal_brand' | 'event' | 'service' | 'product';
-/** 海报画幅。MVP 只开 3:4，其余为后续扩展位。 */
-export type PosterRatio = '3:4' | '9:16' | '1:1';
+/**
+ * 海报画幅。**只有 '3:4'**：服务端对其余值一律 422（schema.ts），三套模板画布也写死 540×720。
+ * 曾写成 '3:4' | '9:16' | '1:1'「留扩展位」，结果契约在说一件服务端从不接受的事 ——
+ * 前端照它做选择器就会做出一个必然 422 的入口。二期真放开比例时再连着模板一起加。
+ */
+export type PosterRatio = '3:4';
+/** 模板白名单（服务端 TEMPLATE_KEYS 同口径；启用中的清单由 GET /creative/status 下发）。 */
+export type PosterTemplateKey = 'person_hero' | 'editorial' | 'business_launch';
+/** 一套可选版式（status 只下发**启用中的**，前端照它渲染选择器，不要再硬编码本地目录）。 */
+export interface PosterTemplateOption {
+  key: PosterTemplateKey;
+  name: string;  // 中文名，如「人物主视觉」
+  desc: string;  // 一句话说明，供确认页副标
+}
 
 /** 海报需求单：用户在确认页最终敲定的入参（服务端仍会再校验长度/归属/白名单）。 */
 export interface PosterBrief {
@@ -553,7 +565,7 @@ export interface CreativeAssetView {
 /** 创作任务视图（前端轮询这个；状态以库为真源，进程内存不算）。 */
 export interface CreativeJobView {
   id: string;
-  kind: string;                 // poster | cover | social_card（MVP 只有 poster）
+  kind: string;                 // 'poster'（本表通用，但目前只有海报一种消费方）
   status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   progress?: string;            // 用户可读阶段：philosophy | visual | render | upload
   creditCost: number;           // 名义价（钻石）；不限量用户仍记名义价，实扣为 0
@@ -570,11 +582,17 @@ export interface CreativeUploadResult { assetId: string; }
 /**
  * 成品图能力状态（GET /creative/status，需登录）。小程序据此决定**是否显示出图入口**（方案 §16 降级口径）：
  * 关闭时前端不该露出按钮再让用户点到 403，而应整块隐藏。
- * enabled = env 部署级硬开关 && DB 运行时配置，任一关闭即为 false。
+ * enabled 的唯一真源 = 后台功能开关（FeatureFlag 行 'creative-poster'，行缺失视为关）。
  */
 export interface CreativeStatusResult {
   enabled: boolean;
   pricePerPoster: number; // 单张价格（钻石），供前端展示 💎x；后台可改，默认 10
+  /**
+   * 当前**启用中**的版式清单（后台停用的不下发）。前端必须照这个列表渲染版式选择器：
+   * 硬编码三套恒可选会让用户选到已停用的版式，而服务端对显式请求停用模板一律 422。
+   * 功能关闭时为空数组。
+   */
+  templates: PosterTemplateOption[];
 }
 /** 创建任务请求（idempotencyKey 由客户端生成，按用户唯一 → 重复点击返回原任务）。 */
 export interface CreatePosterJobRequest {
@@ -612,18 +630,26 @@ export interface AdminCreativeVisualConfig {
   hasKey: boolean;           // 读出脱敏：是否已配置密钥
   apiKey?: string;           // 仅写入方向；GET 永不回传
 }
+/**
+ * 海报功能的运行时配置（FeatureFlag 行 'creative-poster' 的 enabled + payload）。
+ *
+ * 三个字段是 2026-07-29 **删掉的**，不要再加回来：
+ *   · `envEnabled`（部署级 CANVAS_DESIGN_ENABLED 的只读镜像）—— 合取双开关制造「后台开了却不生效」
+ *     的静默失败，作熔断又比 DB 开关慢（要 SSH + 重启）。现在 enabled 就是唯一真源。
+ *   · `maxConcurrency`（worker 并发槽）—— worker 是串行 await，渲染又被 reportPdf 单并发队列串起来，
+ *     这个旋钮从来没有真正生效过，是个假承诺。worker 内部改用常量 TICK_BATCH_SIZE。
+ *   · `imageModerationProvider`（none|http）—— http 形态是半成品（缺 URL 就静默退回放行且无审计），
+ *     "已开审核"状态下全部放行比不开更危险。二期真接供应商时连着 Moderator 实现一起加。
+ */
 export interface AdminCreativeConfig {
-  enabled: boolean;              // DB 运行时开关（与 env CANVAS_DESIGN_ENABLED 双开才算开）
-  envEnabled: boolean;           // 只读：部署级硬开关现状（关闭时后台改 enabled 也不生效）
+  enabled: boolean;              // 功能总开关（唯一真源；行缺失视为关）
   pricePerPoster: number;        // 单价（钻石/张）
-  dailyLimit: number;            // 每用户每日任务数上限
-  maxConcurrency: number;        // worker 并发槽（渲染队列单并发，慎调）
-  timeoutMs: number;             // 单任务端到端超时
+  dailyLimit: number;            // 每用户每日任务数上限；**0 = 不限量**（紧急停量请用 enabled）
+  timeoutMs: number;             // 单次渲染超时（只传给渲染器，不是端到端）；上限 480000，见 config.ts
   templates: Record<string, boolean>; // 模板启停（key = person_hero | editorial | business_launch）
   visual: AdminCreativeVisualConfig;
-  imageModerationProvider: 'none' | 'http';
 }
-export type AdminCreativeConfigUpdate = Partial<Omit<AdminCreativeConfig, 'envEnabled' | 'visual'>> & {
+export type AdminCreativeConfigUpdate = Partial<Omit<AdminCreativeConfig, 'visual'>> & {
   visual?: Partial<Omit<AdminCreativeVisualConfig, 'hasKey'>>;
 };
 /** 供应商连通性试跑结果（不回传响应原文，避免把上游内部信息带进后台）。 */
@@ -637,7 +663,14 @@ export interface AdminCreativeJobItem {
   progress: string | null;
   templateKey: string | null;
   engine: string;
+  /** 建单时的供应商快照（'configured' | null）。**实际是否产出主视觉看 degraded**。 */
   provider: string | null;
+  /**
+   * 本单是否走了降级路径（配了图片供应商但没拿到主视觉 → 纯排版出图）。
+   * 老任务（resultJson 无此字段）按 false。任务台要显示它：否则供应商挂一整天，
+   * 任务台仍然全绿，运营看不出用户拿到的都是"无主视觉"版。
+   */
+  degraded: boolean;
   creditCost: number;
   charged: boolean;
   refunded: boolean;
@@ -645,6 +678,8 @@ export interface AdminCreativeJobItem {
   errorMessage: string | null;
   attempts: number;
   assetCount: number;
+  /** 视觉哲学快照（六维度 + note）。列表接口超 2000 字符截断并在尾部标注。 */
+  promptSnapshot?: string;
   createdAt: string;
   completedAt: string | null;
 }

@@ -24,7 +24,6 @@ import { assertCreativeEnabled, visualProviderConfigured, type CreativeRuntimeCo
 import { normalizePosterBrief, briefModerationText, LIMITS, type NormalizedPosterBrief } from './schema.js';
 import { resolveBriefAssets, UploadRejectedError } from './uploads.js';
 import { creativeAssetUrl } from './storage.js';
-import { env } from '../../env.js';
 import type {
   CreativeJobView, CreativeAssetView, PosterBrief,
   RevisePosterJobRequest, RegeneratePosterJobRequest,
@@ -33,6 +32,12 @@ import type {
 export const POSTER_SKILL_KEY = 'canvas_design';
 export const POSTER_AGENT_KEY = 'poster';
 export const POSTER_JOB_KIND = 'poster';
+/**
+ * CreativeJob.engine 的唯一取值。曾由 env CANVAS_DESIGN_ENGINE 决定，但全仓没有一处
+ * `engine === ...` 分支、anthropic_skill 也没有实现 → 那个 env 只会让运维以为自己能切引擎。
+ * 已删掉 env，这里写死常量；DB 列保留（已有行全是 'native'，无迁移），二期真接第二种引擎时再放开。
+ */
+const POSTER_ENGINE = 'native';
 
 export class CreativeError extends Error {
   statusCode: number;
@@ -51,13 +56,15 @@ export class JobNotFoundError extends CreativeError {
   constructor() { super('任务不存在', 'NOT_FOUND', 404); }
 }
 
-/** requestJson 里除 brief 之外的编排元信息。 */
+/**
+ * requestJson 里除 brief 之外的编排元信息。
+ * 曾有一个 `visualConfigured` 布尔（建单时的供应商可用性快照）：只写不读，且与 `provider` 列
+ * 表达同一件事 → 已删。**实际是否产出了主视觉**看 resultJson.degraded，那才是有读者的字段。
+ */
 interface RequestSnapshot {
   brief: NormalizedPosterBrief;
   /** revise 复用父任务主视觉时记来源资产 id（worker 据此跳过 visual 阶段）。 */
   sourceVisualAssetId?: string | null;
-  /** 建单时的哲学/供应商可用性快照，便于事后复现。 */
-  visualConfigured?: boolean;
 }
 
 type JobRow = {
@@ -94,14 +101,16 @@ function actionsFor(status: string): CreativeJobView['actions'] {
   return [];
 }
 
-/** 面向用户的失败原因（克制口径，不透内部细节；内部原文留在 errorMessage 里给运营看）。 */
+/**
+ * 面向用户的失败原因（克制口径，不透内部细节；内部原文留在 errorMessage 里给运营看）。
+ * 只列**真的会落到 errorCode 上**的码。删掉过三个永不出现的：MODERATION_BLOCKED（建单前就 422，
+ * 不会变成任务的终态）、VISUAL_PROVIDER_FAILED（供应商失败一律降级为纯排版，从不置此码）、
+ * ASSET_STORE_FAILED（那是上传期抛的 502 UploadRejectedError）。未列出的码统一回落到兜底文案。
+ */
 const USER_FACING_ERROR: Record<string, string> = {
-  MODERATION_BLOCKED: '内容未通过审核，调整文案后再试',
   IMAGE_MODERATION_BLOCKED: '主视觉未通过审核，换个视觉方向再试',
-  VISUAL_PROVIDER_FAILED: '主视觉生成失败，已退回钻石',
   POSTER_RENDER_FAILED: '出图失败，已退回钻石',
   PDF_UNAVAILABLE: '出图服务暂不可用，已退回钻石',
-  ASSET_STORE_FAILED: '成品保存失败，已退回钻石',
   TIMEOUT: '出图超时，已退回钻石',
   CANCELLED: '已取消',
 };
@@ -148,6 +157,15 @@ export async function getJobView(jobId: string, userId: string): Promise<Creativ
  * 幂等退款。`updateMany({ chargedAt: {not:null}, refundedAt: null })` 抢占成功才真退——
  * 多条失败路径（worker catch、sweep、用户取消）叠在一起也只会退一次。
  * creditCost=0（revise / 不限量用户名义价为 0 的场景）直接标记不退。
+ *
+ * **标记与钱在同一个事务里**（2026-07-29 改）。原先是「先标 refundedAt → 再退款 → 出错就复位标记」，
+ * 那个补偿写法有两个真实缺口：
+ *   ① 复位本身失败时（刚写成功的同一条连接下一句写失败，罕见但真实）任务停在「已标已退、钱没退」，
+ *      而 sweep 的兜底扫描正是以 refundedAt 为空为条件 → 这单永远捞不回来，用户白丢一次钻石；
+ *   ② `recordAudit` 当时在 try 内，**审计写失败会走进 catch 复位标记，而钱已经退出去了** →
+ *      sweep 重扫再退一次，这是一条真正的双退路径。
+ * refundCredits 支持传入事务客户端，所以这两个缺口都没有必要存在。审计移到事务外：
+ * 审计失败不该回滚已经退成的钱，只记日志。
  */
 export async function refundJob(jobId: string, reason: string): Promise<{ refunded: boolean }> {
   const job = await prisma.creativeJob.findUnique({
@@ -157,26 +175,23 @@ export async function refundJob(jobId: string, reason: string): Promise<{ refund
   if (!job) return { refunded: false };
   if (!job.chargedAt || job.refundedAt) return { refunded: false };
 
-  const claimed = await prisma.creativeJob.updateMany({
-    where: { id: jobId, chargedAt: { not: null }, refundedAt: null },
-    data: { refundedAt: now() },
-  });
-  if (claimed.count === 0) return { refunded: false }; // 别人先抢到了
-
-  if (job.creditCost <= 0) return { refunded: false }; // 名义价 0：标记已处理即可，无流水可退
-  try {
-    await refundCredits(job.tenantId, job.userId, job.creditCost, `海报成品图 · ${reason}`);
-    await recordAudit({
-      tenantId: job.tenantId, userId: job.userId, action: 'creative.job.refunded',
-      payload: { jobId, credits: job.creditCost, reason },
+  const refunded = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.creativeJob.updateMany({
+      where: { id: jobId, chargedAt: { not: null }, refundedAt: null },
+      data: { refundedAt: now() },
     });
-    return { refunded: true };
-  } catch (e) {
-    // 退款落账失败：清掉 refundedAt 让后续 sweep 还能再试（不能既标已退又没退到）。
-    await prisma.creativeJob.updateMany({ where: { id: jobId }, data: { refundedAt: null } }).catch(() => {});
-    console.error('[creative] 退款失败，已复位 refundedAt 供重试：', jobId, (e as Error).message);
-    throw e;
-  }
+    if (claimed.count === 0) return false; // 别人先抢到了
+    if (job.creditCost <= 0) return false; // 名义价 0：标记已处理即可，无流水可退
+    await refundCredits(job.tenantId, job.userId, job.creditCost, `海报成品图 · ${reason}`, tx);
+    return true;
+  });
+
+  if (!refunded) return { refunded: false };
+  await recordAudit({
+    tenantId: job.tenantId, userId: job.userId, action: 'creative.job.refunded',
+    payload: { jobId, credits: job.creditCost, reason },
+  }).catch((e) => console.error('[creative] 退款已落账但审计写失败：', jobId, (e as Error).message));
+  return { refunded: true };
 }
 
 /* ───────────────── 建单 ───────────────── */
@@ -248,7 +263,6 @@ async function insertJob(input: {
   const request: RequestSnapshot = {
     brief: input.brief,
     ...(input.sourceVisualAssetId ? { sourceVisualAssetId: input.sourceVisualAssetId } : {}),
-    visualConfigured: visualReady,
   };
   const nominalCost = input.charge ? cfg.pricePerPoster : 0;
 
@@ -276,7 +290,7 @@ async function insertJob(input: {
           skillKey: POSTER_SKILL_KEY,
           kind: POSTER_JOB_KIND,
           status: 'pending',
-          engine: env.canvasDesignEngine,
+          engine: POSTER_ENGINE,
           provider: visualReady ? 'configured' : null,
           requestJson: request as unknown as Prisma.InputJsonValue,
           idempotencyKey: input.idempotencyKey,
@@ -318,7 +332,7 @@ export async function createPosterJob(
   rawBrief: unknown,
   opts: CreatePosterJobOpts,
 ): Promise<CreatePosterJobResult> {
-  const cfg = await assertCreativeEnabled();              // ① 功能开关（env && DB 双开）
+  const cfg = await assertCreativeEnabled();              // ① 功能开关（后台单一开关）
   await assertPosterAccess(user.id);                      // ② 智能体已解锁 → 403 AGENT_LOCKED
   await assertPlanActive(user.id);                        // ③ 套餐有效 → 403 PLAN_EXPIRED
   const brief = normalizePosterBrief(rawBrief, cfg.templates); // ④ brief 校验 → 422
@@ -396,6 +410,9 @@ async function reusableVisualAssetId(job: JobRow): Promise<string | null> {
 /**
  * 只改文案重排：**不再扣钻石**（creditCost=0 / chargedAt=null），复用父任务主视觉。
  * 仍生成新任务（parentJobId 指向来源）——成功任务的资产永不被覆盖。
+ *
+ * 门禁与 create/regenerate 完全一致（含 assertPosterAccess）：revise 不收费不代表它不是出图动作。
+ * 少了解锁校验，一个被回收了 poster 权限的用户仍能拿着旧 jobId 无限免费出新版本。
  */
 export async function reviseJob(
   user: { id: string; tenantId: string },
@@ -403,6 +420,7 @@ export async function reviseJob(
   patch: RevisePosterJobRequest,
 ): Promise<CreatePosterJobResult> {
   const cfg = await assertCreativeEnabled();
+  await assertPosterAccess(user.id);
   await assertPlanActive(user.id);
   const parent = await loadOwnedJob(jobId, user.id);
   const base = requestOf(parent).brief;

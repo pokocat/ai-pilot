@@ -1315,6 +1315,16 @@ export default function Chat() {
     if (!started) Taro.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
   };
 
+  // 回看已出的成品图：jobId 取成果消息里回写的 creativeJobId（服务端在任务成功时补进 contentJson）。
+  // 没有这个入口，用户一离开详情页就再也找不回那张海报（本地在途标记进终态即清）。
+  const openPosterJob = (jobId?: string) => {
+    if (!jobId) return;
+    const started = navTo(`/packages/work/posterJob/index?jobId=${encodeURIComponent(jobId)}`, {
+      fail: () => Taro.showToast({ title: '成品图页面加载失败，请重试', icon: 'none' }),
+    });
+    if (!started) Taro.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
+  };
+
   // 卡片 saved 态点亮：把该 messageId 的报告消息标记 saved（供 ReportCard saved prop 同步、历史 restore 一致）。
   const markMsgSaved = (messageId?: string) => {
     if (!messageId) return;
@@ -2027,6 +2037,7 @@ export default function Chat() {
                   onShareMenu={reportReady ? (kind) => onReportShareMenu(kind, m.deliverable, m.messageId) : undefined}
                   posterPrice={posterEntryOn ? creativeStatus!.pricePerPoster : undefined}
                   onPoster={posterEntryOn ? () => openPosterConfirm(m.messageId) : undefined}
+                  onViewPoster={m.deliverable.creativeJobId ? () => openPosterJob(m.deliverable.creativeJobId) : undefined}
                 />
               </View>
               {/* 记债项10：报告流失败/降级——单一话术（trust 行「生成中断——已生成部分已保留，可点击重试补全」）+ ↻ 重试入口。

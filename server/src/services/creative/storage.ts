@@ -55,8 +55,3 @@ export function creativeAssetUrl(assetId: string, ossKey: string, expiresSec = 6
   if (ossConfigured()) return ossSignedUrl(ossKey, expiresSec);
   return `/api/creative/assets/${assetId}/file`;
 }
-
-/** 测试辅助：清空内存回退区。 */
-export function __clearCreativeMemStore(): void {
-  memStore.clear();
-}

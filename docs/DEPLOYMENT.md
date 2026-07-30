@@ -156,13 +156,14 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 | `EMBEDDING_MODEL` | 嵌入模型 | 留空=本地确定性嵌入；配则走 `/embeddings` |
 | `MODERATION_ENABLED` | 内容审核开关 | `true`（演示级关键词；生产换合规服务） |
 | `PGVECTOR_ENABLED` | pgvector 近邻检索 | `false`（启用见 §6） |
-| `CANVAS_DESIGN_ENABLED` | 海报成品图（`canvas_design`）**部署级硬开关** | 先发代码时留 `false`，走完 §5.1 三步再置 `true` 放量；与后台开关 `creative-poster` 是**合取**关系，任一关闭即整体关闭 |
-| `CANVAS_DESIGN_MAX_CONCURRENCY` / `CANVAS_DESIGN_TIMEOUT_MS` | 海报 worker 并发 / 单任务端到端超时（毫秒） | `1` / `180000`。渲染复用 `reportPdf` 的单例浏览器 + 单并发队列，上调并发不会真的并行，只会同时占内存 |
 
 > 模型 key 优先存数据库（后台「模型」页，运行时可切换、不入仓库）；env 仅作兜底。
-> 海报的价格 / 日限额 / 模板启停 / 图片供应商接入点（含密钥）都在**后台**「创作任务」页（存 `FeatureFlag` 行 `creative-poster` 的 payload，密钥经 `secretBox` 加密），不走 env。
+> **海报成品图（`canvas_design`）没有任何环境变量**——开关 / 单价 / 日限额 / 渲染超时 / 模板启停 / 图片供应商接入点（含密钥）全在**后台**「创作任务」页，存 `FeatureFlag` 行 `creative-poster` 的 `enabled + payload`（密钥经 `secretBox` 加密），约 1 分钟内生效、不用重启。2026-07-29 删掉了 `CANVAS_DESIGN_ENABLED` / `_ENGINE` / `_MAX_CONCURRENCY` / `_TIMEOUT_MS` 四个：`ENABLED` 与后台开关取合取，制造「后台开了却不生效」的静默失败，而作为熔断闸它要 SSH + 改 env + 重启，比后台点一下慢一个数量级；`ENGINE` 全仓无分支（改它只改变库里那个标签的字面值）；后两个只作 payload 缺省值，而后台保存是全量重写 payload，**运营点过一次保存后改 env 重启就永久无效果**。别再往回加——理由与代码注释同步记在 `server/src/env.ts` 的同名段落。
 
 ### 5.1 海报成品图上线三步（缺一不可）
+
+顺序是「先把能力装齐，最后才放量」。**放量不在这三步里**，见文末——它是后台点一下的事，不需要改 env、不需要重启。
+
 ```bash
 cd /opt/junshi/server
 npm run db:push                                # ① 建 creative_job / creative_asset（本仓无 migrations 目录）
@@ -180,8 +181,12 @@ fc-list :lang=zh | wc -l && fc-match "Noto Sans CJK SC" && fc-match "Noto Serif 
 - Debian/Ubuntu：`sudo apt-get install -y fontconfig fonts-noto-cjk fonts-noto-cjk-extra && fc-cache -f`
 - RHEL/Anolis/alinux：`sudo dnf install -y fontconfig google-noto-sans-cjk-fonts google-noto-serif-cjk-fonts && fc-cache -f`
 
-⚠️ **family 名的坑**：Pan-CJK 包装出来的名字是 `Noto Sans CJK SC`，与 Google Fonts 子集版的 `Noto Sans SC` 是**两个不同 family**。生产实测 `fc-match "Noto Sans SC"` 命中的是纯拉丁的 `NotoSans-VF.ttf`（连 `fc-match "Noto Serif SC"` 也是它，衬线都不保）。`templates.ts` 的字体栈两种名字都写了，动那里时不要删掉 CJK 名——只留子集名会让整栈落空到通用 `sans-serif`，中文全靠 Chromium 逐字回退，版式的衬线区分随之丢失。
-最后再置 `CANVAS_DESIGN_ENABLED=true` 重启 API 放量。回滚不需要发版：后台「创作任务」页关掉开关即时熔断（已入队任务留在库里，重新打开后 worker 继续跑）。仓库**不提交字体二进制**。
+⚠️ **family 名的坑**：Pan-CJK 包装出来的名字是 `Noto Sans CJK SC`，与 Google Fonts 子集版的 `Noto Sans SC` 是**两个不同 family**。生产实测 `fc-match "Noto Sans SC"` 命中的是纯拉丁的 `NotoSans-VF.ttf`（连 `fc-match "Noto Serif SC"` 也是它，衬线都不保）。`templates.ts` 的字体栈两种名字都写了，动那里时不要删掉 CJK 名——只留子集名会让整栈落空到通用 `sans-serif`，中文全靠 Chromium 逐字回退，版式的衬线区分随之丢失。仓库**不提交字体二进制**。
+
+**放量 / 回滚（都不动部署）**：三步做完后，到运营后台「创作任务」页打开功能开关即放量；关掉即熔断。两个方向都约 1 分钟内生效（`FeatureFlag` 有 60s 读缓存），不发版、不重启、不 SSH。已入队任务留在库里，重新打开后 worker 接着跑。
+
+> **先发代码不会误放量**：唯一的开关就是 `FeatureFlag` 行 `creative-poster` 的 `enabled`，而**行缺失被显式当作「关」**（生产库本来就没有这一行）。所以不存在「忘了留 false」这种事。
+> ⚠️ 但注意另一面：这一行在 prisma 里 `enabled` 是 `@default(true)`，后台写 payload 走 upsert。服务端因此在保存配置时**每次都显式落一遍 `enabled`**（patch 没带就回落到当前值），否则运营第一次进后台「只改个单价」就会创建出 `enabled=true` 的行，把还没验收的功能放出去。改 `updateCreativeConfig` 时别把这一步当冗余删掉。
 
 ## 6. （可选）启用 pgvector 语义检索加速
 默认走"内存余弦"，数据量大时再开 pgvector（HNSW ANN）：

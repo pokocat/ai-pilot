@@ -45,22 +45,15 @@ export interface TemplateInput {
   brief: NormalizedPosterBrief;
   philosophy: VisualPhilosophy;
   assets: TemplateAssets;
-  /** 落款（默认用品牌名；P4 可传用户/企业名）。超 SIGNATURE_MAX 字截断——见 signatureOf。 */
-  signature?: string;
 }
-
-/** 落款字数上限。 */
-export const SIGNATURE_MAX = 16;
 
 /**
- * 落款取值：**唯一不经 PosterBrief zod 校验的文字字段**（由调用方直传），所以必须在这里自己收口。
- * 版面预算的前提是「每个文字块都有上界」，留一个无界字段就等于把画布交给调用方——
- * 真实渲染验证时，一个 600 字落款把主视觉带整条挤没了（虽未裁字，但画面已不是设计的样子）。
+ * 落款（常量）。曾是 `TemplateInput.signature?` 可选入参 + `signatureOf()` 截断到 SIGNATURE_MAX ——
+ * 注释写着「P4 可传用户/企业名」，但 P4 已上线且没有任何调用点传值，等于一个只有兜底分支的参数。
+ * 二期真要放开自定义落款，必须连着"每个文字块都有上界"这条版面预算一起做：当年真实渲染验证里，
+ * 一个 600 字落款把主视觉带整条挤没了（未裁字，但画面已不是设计的样子）——所以那时要重新加回截断。
  */
-function signatureOf(raw?: string): string {
-  const s = (raw ?? '').trim() || '军师参谋部';
-  return s.length > SIGNATURE_MAX ? s.slice(0, SIGNATURE_MAX) : s;
-}
+const SIGNATURE = '军师参谋部';
 
 function esc(s: string): string {
   return String(s ?? '')
@@ -167,7 +160,6 @@ function personHero(input: TemplateInput): string {
   const hero = safeUrl(assets.visualUrl) ?? safeUrl(assets.portraitUrl);
   const qr = safeUrl(assets.qrUrl);
   const logo = safeUrl(assets.logoUrl);
-  const sign = signatureOf(input.signature);
 
   const css = baseCss(philosophy) + `
   /* 主视觉带 = 弹性块：基准 336px（按最坏情况文案量算出的余量），文案长时自动让位，下限 170px。 */
@@ -206,7 +198,7 @@ function personHero(input: TemplateInput): string {
     `</div>`,
     `<div class="foot">`,
     `<div class="ctaWrap"><div class="cta"><span class="clamp1">${esc(brief.cta)}</span><span class="arrow">→</span></div>`,
-    `<div class="sign clamp1">${esc(sign)}</div></div>`,
+    `<div class="sign clamp1">${esc(SIGNATURE)}</div></div>`,
     qrHtml(qr, '扫码了解'),
     `</div>`,
     aiMarkHtml(),
@@ -223,7 +215,6 @@ function editorial(input: TemplateInput): string {
   const art = safeUrl(assets.visualUrl) ?? safeUrl(assets.portraitUrl);
   const qr = safeUrl(assets.qrUrl);
   const logo = safeUrl(assets.logoUrl);
-  const sign = signatureOf(input.signature);
 
   const css = baseCss(philosophy) + `
   body{background:${c.paper}}
@@ -256,7 +247,7 @@ function editorial(input: TemplateInput): string {
     `<div class="art elastic">${art ? `<img src="${esc(art)}" alt="">` : ''}</div>`,
     `<div class="foot">`,
     `<div class="ctaWrap"><div class="cta"><span class="clamp1">${esc(brief.cta)}</span></div>`,
-    `<div class="sign clamp1">${esc(sign)}</div></div>`,
+    `<div class="sign clamp1">${esc(SIGNATURE)}</div></div>`,
     qrHtml(qr, '扫码咨询'),
     `</div>`,
     aiMarkHtml(),
@@ -273,7 +264,6 @@ function businessLaunch(input: TemplateInput): string {
   const art = safeUrl(assets.visualUrl) ?? safeUrl(assets.portraitUrl);
   const qr = safeUrl(assets.qrUrl);
   const logo = safeUrl(assets.logoUrl);
-  const sign = signatureOf(input.signature);
 
   const css = baseCss(philosophy) + `
   .head{padding:28px 30px 24px;background:linear-gradient(150deg,${c.mid},${c.ink});color:#fff}
@@ -311,7 +301,7 @@ function businessLaunch(input: TemplateInput): string {
     art ? `<div class="art elastic"><img src="${esc(art)}" alt=""></div>` : '',
     `<div class="main${art ? '' : ' noart'}">${pointsHtml(brief.proofPoints)}</div>`,
     `<div class="ctaBar"><div class="cta"><span class="clamp1">${esc(brief.cta)}</span></div><span>→</span></div>`,
-    `<div class="foot"><div class="sign clamp1">${esc(sign)}</div>${qrHtml(qr, '扫码报名')}</div>`,
+    `<div class="foot"><div class="sign clamp1">${esc(SIGNATURE)}</div>${qrHtml(qr, '扫码报名')}</div>`,
     aiMarkHtml(),
   ].join('');
 

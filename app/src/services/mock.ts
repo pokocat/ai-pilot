@@ -18,7 +18,7 @@ import type {
   KnowledgeStage, KnowledgePipelineView, KnowledgePipelineFolder, OrganizeResult, OrganizeItem, StagedUploadResult, ConfirmResult,
   KnowledgeBatch, KnowledgeBatchFile,
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
-  CreativeStatusResult, PosterBrief, PosterBriefDraft, PosterScene, CreativeUploadResult,
+  CreativeStatusResult, PosterBrief, PosterBriefDraft, PosterScene, PosterTemplateOption, CreativeUploadResult,
   CreativeJobView, CreativeAssetView, CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
 } from '../../../shared/contracts';
 import type {
@@ -711,6 +711,13 @@ function saveBizSeriesM(token: string, s: BizMetricWeek[]) { try { Taro.setStora
  * 成品图是内置纯色渐变 PNG 占位（不是真渲染结果），仅供确认页/详情页的版式与交互自测。
  */
 const MOCK_POSTER_PRICE = 10;
+// 版式清单与服务端 TEMPLATE_CATALOG（config.ts）逐字对齐 —— mock 是前端唯一的离线口径，
+// 描述文案漂一个字，自测出来的界面就跟真机不是同一个产品。真实接口只下发启用中的，mock 恒三套全开。
+const MOCK_POSTER_TEMPLATES: PosterTemplateOption[] = [
+  { key: 'person_hero', name: '人物主视觉', desc: '真人照片打底，人物占据主视觉' },
+  { key: 'editorial', name: '编辑杂志', desc: '杂志内页式排版，图文并重' },
+  { key: 'business_launch', name: '商业发布', desc: '发布会 / 新品公告气质' },
+];
 // 60×80 3:4 渐变占位 PNG（墨绿→纸白 + 两条浅色「标题」带）。base64 内联，避免 mock 依赖网络与 OSS。
 const MOCK_POSTER_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADwAAABQCAIAAADKqIEEAAAB2klEQVR42tXOW0vTcQCH8edVBBFUkoghggzzkJlhmeKBMRhmaYllBzWGMjxgJqZ4RpNhiWklw5KRNUYmZqiMxViZ5hFLLKSuvO4N9Ap+eiV/vvC5fx6O2E7I4WhilByOJUXL4XhqjBxOpp2Ww6n0ODnEZMTLITYzQQ5xl2xyiL+cKIeEnGQ52PJS5XCm4JwcUuzn5XDWcUEO6c6LcsgozJJDZlGOHLKu5cohuyTf5N9exFqmMXJL7SaWT5vGyC9zmFg+bRrDfstpYvm0aQzH7UITy6dNYzjvFcnhSmWxHK7evy6HElepHG7U3JRDmbvcJBLyH559ugeivPauyaFO79M9EHfqK+RQ0Vglh6omlxxczdVyqG5xy8HdWiuHuvZ6OTR0NsrhQXeTHB72Nsuhpf+RHNoG2uTQ7umQQ9dglxx6hnrk0DfcJ4eBkcdy8Dz3yOHJ2KAchrxP5fBsfFgOo69H5PDS90IO3jdjchh/65XDhP+VHHyBCTlMTvnk4J+elENg5p0cpmYDcpieey+Hjwsf5PApOCOH+dCsHILhOTmEIgtyCH8NyiHy7bMcFr+H5bC8+kUOK+uLcljfXJLD5taKHH5sr8lhe2dDDr9+b8lhd/enHP783ZHzHwStB5oWBI+zAAAAAElFTkSuQmCC';
 
@@ -1847,7 +1854,7 @@ export const mock = {
   // —— 海报成品图（canvas_design）——
   // mock 恒开、单价 10；不动钻石余额（本地演示不模拟扣退款，避免与 credits 页对不上账）。
   async creativeStatus(): Promise<CreativeStatusResult> {
-    return delay({ enabled: true, pricePerPoster: MOCK_POSTER_PRICE }, 60);
+    return delay({ enabled: true, pricePerPoster: MOCK_POSTER_PRICE, templates: MOCK_POSTER_TEMPLATES }, 60);
   },
   async posterBriefDraft(sessionId?: string, messageId?: string): Promise<PosterBriefDraft> {
     const { d } = current();

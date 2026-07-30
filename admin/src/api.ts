@@ -304,7 +304,7 @@ export const api = {
   refundPayment: (outTradeNo: string, reason: string) => req<{ ok: boolean; refundId: string; wechatStatus: string }>(`/admin/payments/${encodeURIComponent(outTradeNo)}/refund`, 'POST', { reason }),
   // —— 海报成品图（canvas_design 创作任务）：配置 / 供应商试跑 / 任务台 ——
   // 配置存 FeatureFlag 单行（id='creative-poster'）：enabled 是运行时开关，payload 承载价格/限额/供应商。
-  // envEnabled 只读：部署级 CANVAS_DESIGN_ENABLED 关着时，后台把 enabled 打开也不生效（两层双开才算开）。
+  // enabled 是**唯一**真源（行缺失视为关）：2026-07 删掉了部署级 CANVAS_DESIGN_ENABLED，不再有「双开才算开」。
   creativeConfig: () => req<AdminCreativeConfig>('/admin/creative/config'),
   // apiKey 语义同大模型配置：不传=不动、传空串=清空、传值=加密写入；读回永远只有 hasKey。
   saveCreativeConfig: (body: AdminCreativeConfigUpdate) => req<AdminCreativeConfig>('/admin/creative/config', 'PUT', body),

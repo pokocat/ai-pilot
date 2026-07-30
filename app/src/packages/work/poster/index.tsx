@@ -15,23 +15,14 @@ import KbInput from '../../../components/KbInput';
 import AgentUnlock from '../../../components/AgentUnlock';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
-import { api, type Agent, type PosterBrief, type PosterScene, type CreativeUploadRole } from '../../../services/api';
-import { getCreativeStatus, POSTER_TEMPLATES } from '../../../services/creative';
+import {
+  api, type Agent, type PosterBrief, type PosterScene, type CreativeUploadRole, type PosterTemplateOption,
+} from '../../../services/api';
+import { getCreativeStatus, POSTER_LIMITS as LIMITS } from '../../../services/creative';
 import { attachPosterJob, markPosterPending, posterScope, readPosterPending } from '../../../services/posterPending';
 import { checkImageUpload } from '../../../services/uploadGuard';
 import { navTo, redirectToGuarded } from '../../../services/nav';
 import './index.scss';
-
-// 与服务端 server/src/services/creative/schema.ts LIMITS 逐项对齐。改一处必须改两处。
-const LIMITS = {
-  goal: 60,
-  audience: 40,
-  headline: 20,
-  subheadline: 30,
-  proofPoint: 20,
-  cta: 15,
-  visualDirection: 100,
-} as const;
 
 const PROOF_SLOTS = 3;
 
@@ -96,7 +87,18 @@ export default function PosterConfirmPage() {
   const [proofs, setProofs] = useState<string[]>(['', '', '']);
   const [cta, setCta] = useState('');
   const [visual, setVisual] = useState('');
-  const [templateKey, setTemplateKey] = useState('person_hero');
+  // 启用中的版式清单由 /creative/status 下发（不再硬编码本地目录）。取不到就不渲染版式选择器，
+  // 也不带 templateKey 提交——服务端按 scene 回退默认版式，比让用户选到一个必然 422 的版式好。
+  const [templates, setTemplates] = useState<PosterTemplateOption[]>([]);
+  const [templateKey, setTemplateKey] = useState('');
+  // 以下两项**用户不填也看不到**，只从服务端草稿透传回 submit（方案 §5.3 的 BrandKit 集成靠它落地）：
+  //   · brandKitVersion —— 服务端据它取已确认（approved）的品牌资产包，合并品牌语气与主题色板进提示词；
+  //   · negativePrompt  —— 服务端从 BrandKit 的品牌禁忌生成的排除项。
+  // 曾经确认页 submit 重拼 brief 时把这两个字段丢了 → 服务端侧 brief.brandKitVersion 恒为 null，
+  // 整条品牌资产包链路（语气合并 + 色板映射）成了死代码，海报完全忽略用户已确认的品牌资产。
+  // MVP 刻意不给 negativePrompt 输入框（不让用户写排除项），所以这里只做透传，不做编辑。
+  const [brandKitVersion, setBrandKitVersion] = useState<number | null>(null);
+  const [negativePrompt, setNegativePrompt] = useState('');
   const [assets, setAssets] = useState<Partial<Record<CreativeUploadRole, AssetSlot>>>({});
   const [consent, setConsent] = useState(false);
   const [uploading, setUploading] = useState('');
@@ -136,7 +138,9 @@ export default function PosterConfirmPage() {
       ]);
       if (!alive) return;
       if (st && !st.enabled) { setDisabled(true); setLoading(false); return; }
-      if (st) setPrice(st.pricePerPoster);
+      const tpls = st?.templates ?? [];
+      // 默认选中第一套启用中的版式（草稿取不到时也得有个可见的选中态；草稿的推荐值在下面覆盖它）。
+      if (st) { setPrice(st.pricePerPoster); setTemplates(tpls); setTemplateKey(tpls[0]?.key ?? ''); }
       if (draft) {
         const b = draft.brief ?? {};
         if (b.scene) setScene(b.scene);
@@ -148,7 +152,12 @@ export default function PosterConfirmPage() {
         setProofs([pp[0] ?? '', pp[1] ?? '', pp[2] ?? '']);
         setCta(b.cta ?? '');
         setVisual(b.visualDirection ?? '');
-        if (b.templateKey && POSTER_TEMPLATES.some((t) => t.key === b.templateKey)) setTemplateKey(b.templateKey);
+        // 品牌资产包透传（不渲染，不给编辑）：草稿里有就存进 state，submit 时原样带回。
+        setBrandKitVersion(typeof b.brandKitVersion === 'number' ? b.brandKitVersion : null);
+        setNegativePrompt(b.negativePrompt ?? '');
+        // 推荐版式已被后台停用时：改选一个**启用中的**并让选中态可见，不静默沿用一个必然 422 的 key。
+        const rec = String(b.templateKey ?? '');
+        setTemplateKey(tpls.length ? (tpls.some((t) => t.key === rec) ? rec : (tpls[0]?.key ?? '')) : rec);
         setReason(draft.templateReason ?? '');
       } else {
         setLoadErr('需求单预填没取到，可以直接手填后生成。');
@@ -160,6 +169,15 @@ export default function PosterConfirmPage() {
   }, []);
 
   const setProof = (i: number, v: string) => setProofs((cur) => cur.map((x, j) => (j === i ? v : x)));
+
+  /** 重取启用中的版式清单（后台停用某套版式后，本页缓存的清单会过期）。 */
+  const refreshTemplates = async () => {
+    const st = await getCreativeStatus({ force: true });
+    if (!aliveRef.current || !st) return;
+    const tpls = st.templates ?? [];
+    setTemplates(tpls);
+    setTemplateKey((cur) => (tpls.some((t) => t.key === cur) ? cur : (tpls[0]?.key ?? '')));
+  };
 
   /** 前置校验：与服务端同口径。返回 true = 可提交。 */
   const validate = (): boolean => {
@@ -236,11 +254,16 @@ export default function PosterConfirmPage() {
       proofPoints: proofs.map((p) => p.trim()).filter(Boolean),
       cta: cta.trim(),
       visualDirection: visual.trim(),
-      templateKey,
+      // 服务端生成的排除项，原样带回（用户看不到也改不了，丢了就等于关掉品牌禁忌）。
+      ...(negativePrompt.trim() ? { negativePrompt: negativePrompt.trim() } : {}),
+      // 空串 = 版式清单没取到 → 不带该字段，让服务端按 scene 回退默认版式。
+      ...(templateKey ? { templateKey } : {}),
       ratio: '3:4',
       ...(assets.portrait ? { portraitAssetId: assets.portrait.assetId } : {}),
       ...(assets.logo ? { logoAssetId: assets.logo.assetId } : {}),
       ...(assets.qr ? { qrAssetId: assets.qr.assetId } : {}),
+      // 品牌资产包版本：服务端据此取 approved BrandKit 并把品牌语气/色板合进提示词。必须带回。
+      ...(brandKitVersion ? { brandKitVersion } : {}),
     };
     setSubmitting(true);
     // 先落幂等键，再发请求：请求在途被杀进程也留得下键，重进本页沿用同一键不会重复扣费。
@@ -276,6 +299,9 @@ export default function PosterConfirmPage() {
         setSubmitErr('当前方案已到期，续期后可继续出图。');
       } else if (code === 'BRIEF_INVALID' || code === 'MODERATION_BLOCKED') {
         setSubmitErr(msg || '需求单没通过校验，改一下再试。');
+        // 版式在本页停留期间被后台停用（服务端对显式请求停用版式一律 422，不静默换版照常扣费）：
+        // 强制重取一次清单，让选择器立刻少掉那一项，用户改选后就能继续，而不是卡在同一个错误上。
+        if (/版式/.test(msg)) void refreshTemplates();
       } else {
         s.handleApiError(e, { fallbackTitle: '发起出图失败，请重试' });
       }
@@ -366,27 +392,31 @@ export default function PosterConfirmPage() {
             <Field label="视觉方向" hint="只写画面属性：结构 / 色彩 / 材质 / 光线 / 构图" err={errors.visual} count={<Counter value={visual} max={LIMITS.visualDirection} />}>
               <Textarea className="ps-area" value={visual} placeholder="如：干净留白、克制的墨色与暖金、正面柔光" onInput={(e) => setVisual(e.detail.value)} />
             </Field>
-            <Field label="版式">
-              <View className="ps-tpls">
-                {POSTER_TEMPLATES.map((t) => {
-                  const on = t.key === templateKey;
-                  return (
-                    <View
-                      key={t.key}
-                      className={`ps-tpl${on ? ' on' : ''}`}
-                      style={on ? { borderColor: accent } : undefined}
-                      onClick={() => setTemplateKey(t.key)}
-                    >
-                      <View className="ps-tpl-h">
-                        <Text className="ps-tpl-n">{t.name}</Text>
-                        {on ? <Icon name="check" size={13} color={accent} /> : null}
+            {/* 版式清单来自 /creative/status（只含启用中的）。一套都没下发时整块不渲染：
+                硬编码三套恒可选会让用户选到已停用的版式，而服务端对此一律 422。 */}
+            {templates.length ? (
+              <Field label="版式">
+                <View className="ps-tpls">
+                  {templates.map((t) => {
+                    const on = t.key === templateKey;
+                    return (
+                      <View
+                        key={t.key}
+                        className={`ps-tpl${on ? ' on' : ''}`}
+                        style={on ? { borderColor: accent } : undefined}
+                        onClick={() => setTemplateKey(t.key)}
+                      >
+                        <View className="ps-tpl-h">
+                          <Text className="ps-tpl-n">{t.name}</Text>
+                          {on ? <Icon name="check" size={13} color={accent} /> : null}
+                        </View>
+                        <Text className="ps-tpl-d">{t.desc}</Text>
                       </View>
-                      <Text className="ps-tpl-d">{t.desc}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </Field>
+                    );
+                  })}
+                </View>
+              </Field>
+            ) : null}
 
             <Text className="ps-sec">素材（可留空）</Text>
             {/* 肖像确认：人像上传的前置门（未勾选不给选图），文案取方案 §12.3 精简版 */}

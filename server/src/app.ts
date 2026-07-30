@@ -272,7 +272,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(adminRoutes, { prefix: '/api' });
 
   // 创作任务 worker（海报成品图）：DB 队列 + FOR UPDATE SKIP LOCKED 抢占，2s 轮询。
-  // test 环境与 CANVAS_DESIGN_ENABLED=false 时内部直接 return（测试用 tickCreativeWorker 手动驱动）。
+  // test 环境内部直接 return（测试用 tickCreativeWorker 手动驱动）。功能开关在每轮 tick 里判
+  // （后台 FeatureFlag 'creative-poster'，走 60s 缓存），所以运营放量/熔断都不需要重启进程。
   {
     const { startCreativeWorker } = await import('./services/creative/worker.js');
     startCreativeWorker();

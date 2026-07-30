@@ -1,10 +1,9 @@
 // 海报渲染：HTML → PNG。**不另起浏览器实例**——直接调 reportPdf.renderHtmlToPng，
 // 复用那边的 puppeteer 懒启动单例 + 单并发队列 + withTimeout + isPdfTestMode 短路（见 reportPdf.ts 文件头红线）。
 // 本模块只负责：拼画布参数、跑模板自检、校验输出 PNG 的真实尺寸。
-import { renderHtmlToPng, isPdfTestMode, PdfUnavailableError } from '../reportPdf.js';
+// PdfUnavailableError 由 worker 直接从 reportPdf 引入（本模块曾原样转出一次，无人引用 → 已删）。
+import { renderHtmlToPng, isPdfTestMode } from '../reportPdf.js';
 import { CANVAS, CANVAS_CLASS, renderPosterHtml, auditPosterHtml, type TemplateInput } from './templates.js';
-
-export { PdfUnavailableError };
 
 export class PosterRenderError extends Error {
   readonly code = 'POSTER_RENDER_FAILED';
@@ -23,12 +22,12 @@ export function readPngSize(buf: Buffer): { width: number; height: number } | nu
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
 }
 
+/** 渲染产物。刻意**不回传 html**：那份字符串没有任何读取方，却是整条链路里最大的一块内存。 */
 export interface PosterRenderResult {
   buffer: Buffer;
   mimeType: 'image/png';
   width: number;
   height: number;
-  html: string;
 }
 
 /**
@@ -71,12 +70,12 @@ export async function renderPoster(input: TemplateInput, opts: { timeoutMs?: num
 
   // test 模式拿到的是 1×1 桩 PNG，尺寸校验只在真实渲染路径生效（否则整个测试链路都得跑 Chromium）。
   if (isPdfTestMode()) {
-    return { buffer, mimeType: 'image/png', width: expected.width, height: expected.height, html };
+    return { buffer, mimeType: 'image/png', width: expected.width, height: expected.height };
   }
   const size = readPngSize(buffer);
   if (!size) throw new PosterRenderError('渲染产物不是合法 PNG');
   if (size.width !== expected.width || size.height !== expected.height) {
     throw new PosterRenderError(`渲染尺寸不符：期望 ${expected.width}×${expected.height}，实际 ${size.width}×${size.height}`);
   }
-  return { buffer, mimeType: 'image/png', width: size.width, height: size.height, html };
+  return { buffer, mimeType: 'image/png', width: size.width, height: size.height };
 }

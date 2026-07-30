@@ -67,15 +67,11 @@ export function attachPosterJob(scope: string, jobId: string) {
   write({ ...cur, [scope]: { ...prev, jobId, at: Date.now() } });
 }
 
-/** 任务已进终态（成功/失败/取消）→ 清标记，别让旧任务把下一次生成劫持到老详情页。 */
-export function clearPosterPending(scope: string) {
-  if (!scope) return;
-  const next = read();
-  delete next[scope];
-  write(next);
-}
-
-/** 按 jobId 清（详情页只知道 jobId，不知道自己属于哪个 scope）。 */
+/**
+ * 任务已进终态（成功/失败/取消）→ 清标记，别让旧任务把下一次生成劫持到老详情页。
+ * 按 jobId 清而不是按 scope：详情页只拿到 jobId，不知道自己属于哪个成果消息。
+ * （曾另有一个按 scope 的 clearPosterPending，零调用点，2026-07-29 删除。）
+ */
 export function clearPosterPendingByJob(jobId: string) {
   if (!jobId) return;
   const cur = read();

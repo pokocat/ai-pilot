@@ -9,8 +9,10 @@
 // 403 与 401 分开（403 保留登录态、抛带 code 的错误），这里的 toast / ConfirmDialog 内联
 // 错误 / 试跑结果条会把「需要 owner 权限」原样显示出来。
 //
-// 两层开关：env CANVAS_DESIGN_ENABLED（部署级硬开关）与本页 enabled（运行时闸门）**双开才算开**。
-// envEnabled 只读，关着时页面必须显著提示「这里打开不生效」，否则运营会以为自己已经放量了。
+// 开关只有一层：本页 enabled（FeatureFlag 行 'creative-poster'）就是唯一真源。2026-07 删掉了部署级
+// env 开关 CANVAS_DESIGN_ENABLED —— 合取双开关制造「后台开了却不生效」的静默失败，作熔断还比 DB 开关
+// 慢（要 SSH + 重启）。代价是这个开关变重了：打开保存 = 立刻放量 + 立刻开始扣钻，没有第二道闸门兜底。
+// 所以页面必须把这件事写在开关旁（.ai-note），并对 关→开 走 ConfirmDialog 回显单价与限额。
 
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '../Icon';
@@ -20,7 +22,12 @@ import { PageHead, ViewState, ConfirmDialog, ErrorState, Skeleton, type ConfirmS
 import { useResource } from '../useResource';
 import { fmtTime } from '../format';
 
-/** 模板白名单与中文名（服务端 TEMPLATE_KEYS 同口径；缺省视为启用，运营只需显式停用问题模板）。 */
+/**
+ * 模板白名单与中文名（描述与服务端 TEMPLATE_CATALOG 对齐；缺省视为启用，运营只需显式停用问题模板）。
+ *
+ * 为什么后台不像小程序那样吃服务端下发的列表：`/creative/status` 只下发**启用中**的版式，
+ * 而后台恰恰要把被停用的那几套也列出来才能重新打开。所以这份本地目录必须留着。
+ */
 const TEMPLATES: [string, string, string][] = [
   ['person_hero', '人物主视觉', '真人照片打底，人物占据主视觉'],
   ['editorial', '编辑杂志', '杂志内页式排版，图文并重'],
@@ -58,7 +65,6 @@ interface CfgDraft {
   enabled: boolean;
   pricePerPoster: number;
   dailyLimit: number;
-  maxConcurrency: number;
   timeoutMs: number;
   templates: Record<string, boolean>;
   visualEnabled: boolean;
@@ -82,7 +88,6 @@ function toDraft(c: AdminCreativeConfig): CfgDraft {
     enabled: c.enabled,
     pricePerPoster: c.pricePerPoster,
     dailyLimit: c.dailyLimit,
-    maxConcurrency: c.maxConcurrency,
     timeoutMs: c.timeoutMs,
     templates: { ...c.templates },
     visualEnabled: c.visual.enabled,
@@ -99,7 +104,6 @@ function basicsDirty(d: CfgDraft, c: AdminCreativeConfig): boolean {
   return d.enabled !== c.enabled
     || d.pricePerPoster !== c.pricePerPoster
     || d.dailyLimit !== c.dailyLimit
-    || d.maxConcurrency !== c.maxConcurrency
     || d.timeoutMs !== c.timeoutMs
     || TEMPLATES.some(([k]) => !!d.templates[k] !== !!c.templates[k]);
 }
@@ -127,6 +131,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
   const [busy, setBusy] = useState('');
   const [dry, setDry] = useState<{ ok: boolean; msg: string } | null>(null);
   const [openErr, setOpenErr] = useState('');
+  const [openPhil, setOpenPhil] = useState('');
   const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
 
   const cfg = cfgRes.data;
@@ -153,23 +158,35 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       enabled: draft.enabled,
       pricePerPoster: draft.pricePerPoster,
       dailyLimit: draft.dailyLimit,
-      maxConcurrency: draft.maxConcurrency,
       timeoutMs: draft.timeoutMs,
       templates: draft.templates,
     };
     const run = async () => { setBusy('basics'); try { await put(body, '配置已保存'); } finally { setBusy(''); } };
-    // 单价是资金动作：改一次影响此后每一张海报的扣费，必须回显新旧值再确认。
-    if (draft.pricePerPoster !== cfg.pricePerPoster) {
+    // 两类改动必须回显再确认：
+    //   · 开关 关→开：这是唯一的放量闸门（部署级 env 开关已删），保存即刻放量并开始扣钻；
+    //   · 单价变更：改一次影响此后每一张海报的扣费。
+    // 两件事常常一起发生（先定价再开量），合成**一个**对话框回显，不要连弹两次。
+    // 关闭方向不拦：停量是止血动作，多一次点击就是多一分钟的损失。
+    const turningOn = draft.enabled && !cfg.enabled;
+    const priceChanged = draft.pricePerPoster !== cfg.pricePerPoster;
+    if (turningOn || priceChanged) {
+      const echo: NonNullable<ConfirmSpec['echo']> = [];
+      if (turningOn) echo.push({ k: '功能开关', v: '未开启 → 已开启' });
+      if (priceChanged) {
+        echo.push({ k: '原价', v: `${cfg.pricePerPoster} 钻 / 张`, amount: true });
+        echo.push({ k: '新价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
+      } else {
+        echo.push({ k: '单价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
+      }
+      echo.push({ k: '每日限额', v: draft.dailyLimit === 0 ? '不限量（0 = 不限）' : `${draft.dailyLimit} 张 / 人` });
       setConfirmSpec({
-        title: '修改单张海报价格',
-        desc: '保存后立即生效：此后每次出图按新价预扣钻石（失败自动退款）。已在队列里的任务按创建时的价格结算，不受影响。',
-        echo: [
-          { k: '原价', v: `${cfg.pricePerPoster} 钻 / 张`, amount: true },
-          { k: '新价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true },
-          { k: '每日限额', v: `${draft.dailyLimit} 张 / 人` },
-        ],
-        warn: '这是资金口径变更，会写入审计日志。',
-        confirmText: '确认改价并保存',
+        title: turningOn ? '开启海报出图（等于放量）' : '修改单张海报价格',
+        desc: turningOn
+          ? '保存后立刻对所有已解锁 poster 的用户生效：小程序侧出现出图入口，用户每出一张按下面回显的单价预扣钻石（失败自动退款）。这是唯一的闸门，没有部署级开关兜底；要停量就回到这里关掉它。'
+          : '保存后立即生效：此后每次出图按新价预扣钻石（失败自动退款）。已在队列里的任务按创建时的价格结算，不受影响。',
+        warn: priceChanged ? '这是资金口径变更，会写入审计日志。' : '开关变更会写入审计日志。',
+        echo,
+        confirmText: turningOn ? '确认开启并放量' : '确认改价并保存',
         onConfirm: async () => { await run(); },
       });
       return;
@@ -259,7 +276,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       <PageHead
         k="creative"
         res={{ loading: cfgRes.loading || jobs.loading, reload: reloadAll, updatedAt: Math.max(cfgRes.updatedAt, jobs.updatedAt) }}
-        badge={cfg ? (cfg.enabled && cfg.envEnabled ? `已开启 · ${cfg.pricePerPoster} 钻/张` : '未开启') : undefined}
+        badge={cfg ? (cfg.enabled ? `已开启 · ${cfg.pricePerPoster} 钻/张` : '未开启') : undefined}
       />
 
       {!isSuper && (
@@ -275,25 +292,23 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       <ViewState res={cfgRes} skeleton="rows">
         {(c: AdminCreativeConfig) => !draft ? null : (
           <div className="pad">
-            {!c.envEnabled && (
-              <div className="ai-test err">
-                <Icon name="alert" size={13} />
-                部署级开关未开（env CANVAS_DESIGN_ENABLED=false）：此处开启不生效，需要改部署环境变量并重启服务。
-              </div>
-            )}
             <div className="crd new-agent">
               <div className="cfg">
                 <div className="cfg-row">
                   <div className="cb">
-                    <div className="ct">功能开关（运行时）</div>
+                    <div className="ct">功能开关（= 放量开关）</div>
                     <div className="cs">
-                      {c.envEnabled
-                        ? '关闭后小程序侧不再展示出图入口、接口直接 403，队列里的任务照旧跑完'
-                        : '部署级开关已关闭，这里的状态只是预设值，不会真正放量'}
+                      打开并保存即刻放量：小程序侧出现出图入口，用户每出一张按下方单价预扣钻石。
+                      关闭后入口隐藏、接口直接 403，队列里已经建好的任务照旧跑完。
                     </div>
                   </div>
                   <div className={`sw ${draft.enabled ? 'on' : ''}`} onClick={() => isSuper && set({ enabled: !draft.enabled })}><i /></div>
                 </div>
+              </div>
+              <div className="ai-note">
+                这个开关是唯一的闸门。原先还有一道部署级环境变量（CANVAS_DESIGN_ENABLED）要同时打开才算开，
+                2026-07 已删除 —— 好处是这里的改动即时生效、不用重启服务；代价是没有第二层兜着，
+                所以「开」的方向会先弹确认框回显单价与限额，「关」的方向立即执行不拦。
               </div>
 
               <div className="ai-field">
@@ -301,20 +316,18 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                 <NumInput className="ai-input" min={0} max={10_000} step={1} value={draft.pricePerPoster} disabled={!isSuper} onChange={(pricePerPoster) => set({ pricePerPoster })} />
               </div>
               <div className="ai-field">
-                <div className="ai-fl">每人每日任务上限（0–1000 · 0=不允许创建）</div>
+                <div className="ai-fl">每人每日任务上限（0–1000 · 0 = 不限量；紧急停量请用上方功能开关）</div>
                 <NumInput className="ai-input" min={0} max={1000} step={1} value={draft.dailyLimit} disabled={!isSuper} onChange={(dailyLimit) => set({ dailyLimit })} />
               </div>
+              {/* 上限 480000 不是随手填的：服务端 clamp 到 480s，必须低于 worker sweep 的 10 分钟卡死阈值，
+                  否则一次正常的长渲染会被判定为卡死并重新入队 → 同一单跑两遍、出两张图。 */}
               <div className="ai-field">
-                <div className="ai-fl">worker 并发槽（1–8 · 渲染队列本身单并发，调大只会堆在渲染前）</div>
-                <NumInput className="ai-input" min={1} max={8} step={1} value={draft.maxConcurrency} disabled={!isSuper} onChange={(maxConcurrency) => set({ maxConcurrency })} />
-              </div>
-              <div className="ai-field">
-                <div className="ai-fl">单任务端到端超时（毫秒 · 10000–900000 · {msHint(draft.timeoutMs)}）</div>
-                <NumInput className="ai-input" min={10_000} max={900_000} step={5000} value={draft.timeoutMs} disabled={!isSuper} onChange={(timeoutMs) => set({ timeoutMs })} />
+                <div className="ai-fl">渲染超时（毫秒 · 10000–480000 · {msHint(draft.timeoutMs)}）</div>
+                <NumInput className="ai-input" min={10_000} max={480_000} step={5000} value={draft.timeoutMs} disabled={!isSuper} onChange={(timeoutMs) => set({ timeoutMs })} />
               </div>
 
               <div className="ai-field">
-                <div className="ai-fl">模板启停（MVP 三套 3:4；全部停用时任务按场景回退默认模板）</div>
+                <div className="ai-fl">模板启停（MVP 三套 3:4 · 全部停用则无法建单，建单返回 422）</div>
                 <div className="cfg">
                   {TEMPLATES.map(([k, label, desc]) => (
                     <div key={k} className="cfg-row">
@@ -324,8 +337,6 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                   ))}
                 </div>
               </div>
-
-              <div className="ai-note">图片审核通道：{c.imageModerationProvider === 'http' ? '外部 HTTP 审核' : '未接入（放行 + 记审计日志）'} · 尚未对接真实审核供应商，本页暂不开放切换。</div>
 
               {isSuper && (
                 <button
@@ -427,7 +438,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       )}
 
       {/* ── 任务台 ── */}
-      <div className="sec-h"><span className="t">任务台</span><span className="s">用户脱敏标识 / 成本 / 退款态 / 失败原因</span></div>
+      <div className="sec-h"><span className="t">任务台</span><span className="s">用户脱敏标识 / 成本 / 退款态 / 降级 / 失败原因</span></div>
       <div className="pad">
         <div className="filter-bar">
           <div className="chip-row">
@@ -456,6 +467,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
 
             {jobData.items.map((j) => {
               const expanded = openErr === j.id;
+              const philOpen = openPhil === j.id;
               const err = j.errorMessage || j.errorCode || '';
               return (
                 <div key={j.id} className="usage-row">
@@ -469,6 +481,8 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                   <div className="usage-meta">
                     <span className={statusTag(j.status)}>{STATUS_LABEL[j.status] ?? j.status}</span>
                     {j.status === 'running' && j.progress && <span className="tag off">{j.progress}</span>}
+                    {/* 降级 = 配了图片供应商但这一单没拿到主视觉。不显示它的话，供应商挂一整天任务台仍然全绿。 */}
+                    {j.degraded && <span className="tag warn" title="本单走了降级路径：没拿到主视觉，用户收到的是纯排版海报">无主视觉</span>}
                     {j.refunded && <span className="tag off">已退款</span>}
                     {!j.charged && <span className="tag off">未扣费</span>}
                     {j.status === 'failed' && j.charged && !j.refunded && <span className="tag warn">未退款</span>}
@@ -481,10 +495,18 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                     </div>
                   )}
                   {err && expanded && <div className="trace-text">{j.errorCode ? `[${j.errorCode}] ` : ''}{j.errorMessage ?? ''}</div>}
+                  {/* 视觉哲学（六维度 + note）是每单真金白银调 LLM 生成的，此前没有任何读者：
+                      C 端不展示、任务台不展示。运营排「为什么这版这么丑」只能靠猜。列表已按 2000 字截断。 */}
+                  {philOpen && j.promptSnapshot && <div className="trace-text">{j.promptSnapshot}</div>}
                   <div className="crd-actions">
                     {err && (
                       <button type="button" className="mini-btn" onClick={() => setOpenErr(expanded ? '' : j.id)}>
                         {expanded ? '收起原因' : '展开原因'}
+                      </button>
+                    )}
+                    {j.promptSnapshot && (
+                      <button type="button" className="mini-btn" onClick={() => setOpenPhil(philOpen ? '' : j.id)}>
+                        {philOpen ? '收起视觉哲学' : '展开视觉哲学'}
                       </button>
                     )}
                     {isSuper && j.status === 'failed' && (

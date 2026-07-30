@@ -6,6 +6,38 @@
 
 ## 变更日志
 
+### 2026-07-29 · 海报成品图：配置面简化（去掉部署级开关）+ 七个真缺陷 · 影响面：server（`env.ts` / `services/creative/*` / `routes/creative.ts` / 两份测试）+ shared（`contracts.d.ts`）+ admin（创作任务页 / 任务台）+ app（确认页 / 换风格面板）+ docs（`AGENTS.md` §8.4 §13、`DEPLOYMENT.md` §5 §5.1、方案 §6.2 §8.1 §14 §16 §21 §22）+ `server/.env.example` / `.env.test`
+
+同一天上线的功能（`d2de9a8` / `bce1969` / `fcfadad`）在两轮独立评审后做的收口。起因是「配置面冗余」这一条：一个功能挂了 4 个环境变量 + 一排后台配置项，而这 4 个 env **没有一个是运维真的会去调的**，却各自制造了一种失败模式。顺着同一条线索翻出七个真缺陷——其中最重的一个让整套 BrandKit 集成在生产上根本走不到。
+
+**开关从两层收成一层**。原设计是 env `CANVAS_DESIGN_ENABLED`（部署级硬开关）**&&** 后台 `creative-poster` 开关，实现后立刻暴露两个问题：① 运营在后台打开却不生效，界面还无法解释原因——这是静默失败；② 它想承担的「部署级熔断」要 SSH + 改 env + 重启，比后台点一下慢一个数量级，真出事时没人会走这条路。现在唯一真源是后台那个开关，**行缺失显式视为关**（`isFeatureEnabled(CREATIVE_FLAG_ID, false)` —— 该函数默认值参数缺省是 `true`，这里必须显式传 false，删了就是无声放量）。判断依据：env 开关在本仓的正当用途是回答「外部依赖是否存在」（embedding / rerank / moderation / pgvector 那批），而 puppeteer 与 OSS 是既有功能的硬依赖、字体已确认在位；预发是独立库 `junshi_preprod`，DB 开关本就按环境隔离。**放量动作随之从「改 .env 置 true + 重启 API」变成「后台点一下」**，回滚同理。
+
+**顺带堵住一个会自己放量的坑**：`FeatureFlag.enabled` 在 prisma 里是 `@default(true)`，而写 payload 走 upsert，生产库本来没有 `creative-poster` 这一行。运营第一次进后台**只改个单价**并保存，行被创建时 `enabled` 就取默认 `true` → 一次改价把还没验收的功能放出去了。`updateCreativeConfig` 现在每次都显式落一遍 `enabled`（patch 不带就回落到读到的当前值，行缺失=false）。
+
+**另外三个 env 各有各的死法**（一并删，理由写进 `env.ts` 与 `.env.example` 同名段落，防止后人加回来）：`_ENGINE` 全仓没有一处 `engine ===` 分支、`anthropic_skill` 也无实现，改它只改变库里那个标签的字面值——一个会撒谎的旋钮；`_MAX_CONCURRENCY` / `_TIMEOUT_MS` 只作 payload 缺省值，而后台保存是**全量重写 payload**，运营点过一次保存后改 env 重启就永久无效果（双真源）。**`maxConcurrency` 这个配置项本身也删了**：worker 一轮是串行 `await`，渲染又被 `reportPdf` 的单并发队列串起来，后台标签「worker 并发槽（1–8）」是个不会兑现的承诺；现为内部常量 `TICK_BATCH_SIZE = 2`（含义是「一轮最多连处理几单」，不是并发）。**本功能现在一个环境变量都没有。**
+
+**七个真缺陷**：
+
+- **BrandKit 集成在生产走不到（最重）**：服务端 brief 草稿下发了 `brandKitVersion`，但确认页 submit 时重拼 brief 把它丢了，于是建单恒为 null → `approvedBrandKit()` 查询、提示词里的品牌语气块、`THEME_HINT_COLORS` 色板表、语气合并**整条链路都是死代码**。「已确认的品牌资产会进海报」这个承诺在生产上一次都没兑现过。修法是确认页与换风格面板原样带回 `brandKitVersion` / `negativePrompt`（水化时也存进 state），并补服务端测试断言带 approved BrandKit 建单时提示词快照里有品牌痕迹——**这类"前端丢字段"的缺陷只有端到端断言抓得住**，服务端单测各自都是绿的。
+- **`reviseJob` 漏门禁**：`createPosterJob` / `regenerateJob` 都有 `assertPosterAccess`，只有 revise 少这一行（归属校验 `loadOwnedJob` 在，缺的是权益校验）。于是权益到期或被运营取消开通的用户，照样能对自己的历史任务无限次发起「改文案重排」——revise 不扣钻，所以这条路是**免费**的。三个建单入口的门禁必须一致，补齐后 403 `AGENT_LOCKED`。
+- **成功写入缺状态守卫，双执行可覆盖终态**：失败路径有 `status:'running'` 守卫，成功路径的 `update` 没有。叠加下一条的阈值错配就会产出两张资产、两条成功消息。改成 `updateMany({ where: { id, status: 'running' } })`，影响行数为 0 视为已被他人收口——记一条 warn 后放弃写入，**不抛错**（抛了会触发退款路径，而钱早已正常结算）。
+- **渲染超时上限（900s）> sweep 卡死阈值（600s）**：两个数写在两个文件里、谁都没看谁。后果是**一次正常的长渲染会在还没结束时被 sweep 判为卡死、抢回队列重跑**。上限收到 480s（留足余量），并在两处加互相引用的注释把这个不变式写死。
+- **重试上限 off-by-one**：`attempts < MAX_ATTEMPTS` 与 `attempts <= MAX_ATTEMPTS` 各出现一次，同一个任务在两条路径上对「还能不能重试」给出不同答案，而测试用 `MAX_ATTEMPTS + 1` 把错误固化了。抽 `canRetry()` 单一实现，两处都用。
+- **模板被停用后静默换版且照常扣费**：运营停用某套版式通常正是因为它出问题了，而服务端把「显式请求了它」和「没指定」当成一件事，都回退默认模板照收 10 钻——用户为自己挑的那套付了钱，拿到的是别的。现在显式请求被停用模板返回 **422**（这句文案早就写好了，只是走不到），未指定才按 scene 回退；启用中的清单由 `GET /creative/status` 下发（`templates` 字段），app 删掉硬编码目录（三份目录到上线时 app 与 admin 的描述已经对不上）；全部停用 = 无法建单。
+- **供应商降级零痕迹**：两条降级路径只 `console.warn`，而任务台的 `provider` 是**建单时**快照的 `'configured'`，metrics 也用它——**供应商挂一整天，任务台全绿，用户拿到的全是纯排版版本**。现在 `resultJson` 带 `degraded` + `visualError`（对外可读文案），任务台显示「无主视觉」标签，metrics 的 provider 标签取本轮实际结果（`reused` / 供应商名 / `degraded`）。老任务无该字段按 false。
+
+**删掉图片审核的 `http` 半成品**（`HttpModerator` + 三处 `process.env` 读取 + `imageModerationProvider` 配置项）。它直读 `CREATIVE_IMAGE_MODERATION_URL/_KEY/_TIMEOUT_MS` 三个**全仓只在该文件出现、既不在 `env.ts` 也不在 `.env.example`** 的变量，且 `provider='http'` 但缺 URL 时 `return new NoneModerator()` —— 后台显示「已开审核」、实际全部放行、连一条 error 审计都没有。**一个让人误以为已经在审的开关，比明确的「未接入」危险得多。** 保留 `ImageModerator` 接口 + `NoneModerator` 作二期接入缝（真接入时只需加一个 class + 一个 resolve 分支），`check()` 入参从 `Buffer | {ossKey}` 收窄为 `Buffer`（第二个分支从没有人走）。**「图片内容审核未接 = 合规缺口」这条记录保留在 `AGENTS.md` §13**，删的是半成品，不是待办。
+
+**后台文案与行为对齐**（三处说的都不是代码在做的事）：`dailyLimit=0` 从「不允许创建」正名为**不限量**——0=不限是通行约定，紧急停量该用功能开关（一次操作、语义明确、有审计），不该靠把限额改成 0 等用户撞墙，契约注释同步并补测试钉住；`timeoutMs` 从「单任务端到端超时」改为**渲染超时**（它只传给 `renderPoster`）；模板全停从「按场景回退默认」改为「无法建单（422）」。
+
+**契约收窄到现实**：`PosterRatio` → `'3:4'` 单值（9:16 / 1:1 服务端一律 422、模板画布写死 540×720，二期放开时往联合类型里加，让编译器去找该改的地方）；`CreativeJobView.kind` 注释里的 `cover | social_card` 收成 `'poster'`；上传入口从「query + multipart 两种」收成一种。**同批清死代码**：异步供应商整条分支（`query()` / `VisualQueryResult` / `status:'pending'` / 写 `providerTaskId` 那句「让 sweep 续查」的假注释——sweep 从不查它）、`TemplateInput.signature` + `signatureOf()`（注释写「P4 可传」，P4 已上线且没传）、`VisualRequest.size`、`RequestSnapshot.visualConfigured`、三个永不出现的 `USER_FACING_ERROR` key、`templateName()` / `clearPosterPending()` / `__clearCreativeMemStore()` 等零引用导出，`resolveBriefAssets()` 返回值三个调用点全丢弃 → 签名改 `Promise<void>`。app 两份 LIMITS 与两份 progress 词表各自合一。
+
+**兑现已付出的 LLM 成本**：`promptSnapshot`（视觉哲学六维度 + note）此前**没有任何读者**——模型每单都在算，运营和用户都看不到。任务台行内加「展开视觉哲学」（`AdminCreativeJobItem.promptSnapshot`，列表接口超 2000 字符截断并标注，避免大字段拖慢列表）。
+
+**测试**：`server/test/creative.test.ts` 28 → 37 例、`creativeWorker.test.ts` 17 → 21 例，全量 `npm test` **964 → 977** 例通过。新增覆盖：BrandKit 命中、revise 门禁、终态守卫（手工置 succeeded 后再驱动一轮，断言资产不翻倍）、`timeoutMs` 900s 被 clamp 到 480s、`dailyLimit=0` 不拦截、显式请求停用模板 422、降级留痕、主视觉复用路径（此前整条零覆盖——原测试标题声称的两件事都没断言，且测试环境无供应商，父任务本就不产 visual 资产）。`.env.test` 里那行 `CANVAS_DESIGN_ENABLED=true` 随 env 一起删；**用例改开关后仍必须 `__clearFeatureCache()`**，只是原因从「env 单例冻结」换成了「featureFlag 的 60s 读缓存」。
+
+**明确不做（需产品决策，单独提）**：`Deliverable.assets` / `creativeJobId` 服务端已回写且有测试，但「用户过一周想再拿一次那张图」该从哪进、要不要版本列表页、同一方案出过三版怎么排——没有产品答案，不是补两行代码的活，记进 `AGENTS.md` §13。
+
 ### 2026-07-29 · 修运营后台「403 被当 401 踢登出」 · 影响面：`admin/src/{api.ts,useResource.ts,components.tsx,App.tsx}` + 视图 `views/{catalog,studio,settings,creative}.tsx` + 新增 `admin/src/api.auth.test.ts`（清 `AGENTS.md` §13 TODO）
 
 `admin/src/api.ts` 的 `req()` 原先写成 `if (res.status === 401 || res.status === 403)`：两者一起清 token + 广播 `admin:unauth` 切回登录页。于是普通运营点**任何** `requireSuper` 接口——支付退款、创作任务改价 `/admin/creative/config`、供应商 dry-run、新增智能体、套餐/SKU 改价、告警通知——看到的都是「掉线，请重新登录」。这个伪装的代价不只是文案：运营会去查密钥和网络，重新登录还必然重现同一现象，而真正该做的是找 owner 要授权。同一文件的 `uploadUserKnowledge` 有同样的合并，`downloadPaymentsCsv` 则连 401 都没清登录态。
@@ -38,13 +70,13 @@
 
 **模板与校验**：MVP 三套 3:4（`person_hero`/`editorial`/`business_launch`）。poster 提示词让模型在成果里直出「成品图版式推荐：xxx（key）—— 理由」，服务端只认白名单，无效/被停用回退 scene 默认。文案超限 **422 不静默截断**（不让用户以为写进去了却被砍掉）；`ratio` 只放行 `3:4`。
 
-**功能双开关**：env `CANVAS_DESIGN_ENABLED`（部署级硬开关，默认 false）&& 后台功能开关 `creative-poster`（运营的即时熔断闸）。配置复用 `FeatureFlag` 单行的 `enabled + payload` 存价格/日限额/并发/模板启停/图片供应商接入点（apiKey 经 `secretBox` 加密、对外只回 `hasKey`），不为一行配置新建一张表。**图片供应商不硬编码**，未配置时走「无主视觉」纯排版路径——纯排版本身就是完整可交付产物，不该因为没配供应商就报错。
+**功能双开关**（⚠️ **同日已推翻，见本文顶部那条**：env `CANVAS_DESIGN_ENABLED` 与 `_ENGINE` / `_MAX_CONCURRENCY` / `_TIMEOUT_MS` 全部删除，开关收成后台一层、行缺失视为关；`maxConcurrency` 配置项亦删。下面保留当日原文以记录判断的演变）：~~env `CANVAS_DESIGN_ENABLED`（部署级硬开关，默认 false）&& 后台功能开关 `creative-poster`（运营的即时熔断闸）~~。配置复用 `FeatureFlag` 单行的 `enabled + payload` 存价格/日限额/~~并发~~/模板启停/图片供应商接入点（apiKey 经 `secretBox` 加密、对外只回 `hasKey`），不为一行配置新建一张表。**图片供应商不硬编码**，未配置时走「无主视觉」纯排版路径——纯排版本身就是完整可交付产物，不该因为没配供应商就报错。
 
 **顺带修的缺陷**（P5 测试期发现）：老任务带着已下线的 `templateKey` 时，`RENDERERS[key]` 是 undefined，直接调用抛 `... is not a function`，被 worker 归成 `errorCode='INTERNAL'`——运营在任务台上分不清「模板问题」和「代码 bug」。现在 `renderPosterHtml` 显式判空、`renderPoster` 把拼 HTML 阶段的异常收成 `PosterRenderError`，落成有语义的 `POSTER_RENDER_FAILED`。
 
-**测试**：新增 `server/test/creative.test.ts`（28 例）+ `server/test/creativeWorker.test.ts`（17 例），覆盖幂等（含 6 路并发同 key）、三条财务不变量、五类门禁、brief 校验、worker 生命周期与成果消息回写、sweep 两条分支、`parseTemplateRecommendation` 三态、admin 配置与任务台。`.env.test` 加 `CANVAS_DESIGN_ENABLED=true`（`env` 是模块加载时冻结的单例，用例内改 `process.env` 太晚，而 `hermeticEnv.mjs` 会抹掉进程启动后新增的键）。全量 `npm test` 964 例通过。
+**测试**：新增 `server/test/creative.test.ts`（28 例）+ `server/test/creativeWorker.test.ts`（17 例），覆盖幂等（含 6 路并发同 key）、三条财务不变量、五类门禁、brief 校验、worker 生命周期与成果消息回写、sweep 两条分支、`parseTemplateRecommendation` 三态、admin 配置与任务台。~~`.env.test` 加 `CANVAS_DESIGN_ENABLED=true`（`env` 是模块加载时冻结的单例，用例内改 `process.env` 太晚，而 `hermeticEnv.mjs` 会抹掉进程启动后新增的键）~~（该 env 同日删除，这行也随之删掉；改开关后仍需 `__clearFeatureCache()`）。全量 `npm test` 964 例通过。
 
-**上线动作（三条，缺一不可）**：① `cd server && npm run db:push` 建两张表（本仓无 migrations）；② 中文字体——镜像已装 `fonts-noto-cjk`，**裸机部署需自行安装**，否则海报中文掉方框；③ `npm run db:upgrade-poster-prompt -- --apply` 幂等把版式推荐段落追加进库内 poster 提示词（同时改草稿与已发布快照，否则 C 端不生效）。放量最后一步才把 `CANVAS_DESIGN_ENABLED` 置 true。**明确不做 / 后置**：PDF 二期、图片审核供应商未接（默认 none = 放行）、9:16 与 1:1 后置 —— 清单见 `AGENTS.md` §13。
+**上线动作（三条，缺一不可）**：① `cd server && npm run db:push` 建两张表（本仓无 migrations）；② 中文字体——镜像已装 `fonts-noto-cjk`，**裸机部署需自行安装**，否则海报中文掉方框；③ `npm run db:upgrade-poster-prompt -- --apply` 幂等把版式推荐段落追加进库内 poster 提示词（同时改草稿与已发布快照，否则 C 端不生效）。~~放量最后一步才把 `CANVAS_DESIGN_ENABLED` 置 true~~ → **放量 = 后台「创作任务」页打开开关**（同日改，不再需要改 env 重启；现行步骤见 `docs/DEPLOYMENT.md` §5.1）。**明确不做 / 后置**：PDF 二期、图片审核供应商未接（默认 none = 放行）、9:16 与 1:1 后置 —— 清单见 `AGENTS.md` §13。
 
 ### 2026-07-29 · 修钻石预扣「双退」资损：`CreditReservation.refund` 改为幂等 · 影响面：`server/src/services/credits.ts` + `server/src/routes/sessions.ts`（注释）+ `server/test/creditReservation.test.ts`
 

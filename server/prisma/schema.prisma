@@ -1440,13 +1440,15 @@ model CreativeJob {
   messageId      String? // 触发本任务的成果消息（成功后按「成果补丁」路径回写 assets）
   agentKey       String
   skillKey       String // 'canvas_design'
-  kind           String // poster | cover | social_card
+  kind           String // 'poster'（本表通用，二期扩封面/长图时再加取值）
   status         String    @default("pending") // pending | running | succeeded | failed | cancelled
   progress       String? // 用户可读阶段：philosophy | visual | render | upload
   parentJobId    String? // revise/regenerate 版本链：新任务指向来源任务，成功任务的资产永不被覆盖
-  engine         String    @default("native") // native | anthropic_skill
-  provider       String? // 图片供应商标识（后台配置，不硬编码）
-  providerTaskId String? // 异步图片任务 id（sweep 据此续查）
+  engine         String    @default("native") // 恒为 'native'（服务端写死常量）；二期若接 anthropic_skill 再启用第二取值
+  provider       String? // 建单时的供应商可用性快照（'configured' | null）。实际是否产出主视觉看 resultJson.degraded
+  /// 异步图片任务 id。**当前恒为空**：适配器只支持同步返回图片，sweep 也没有续查逻辑。
+  /// 保留列是为了二期真接异步供应商时不用改表（那时要连 worker 状态机 + sweep 续查一起做）。
+  providerTaskId String?
   requestJson    Json // PosterBrief 快照（建任务时定格，后续改文案走新任务）
   resultJson     Json?
   /// 编排侧标记（非业务入参）：running 中的取消请求 cancelRequested + 时间戳等。

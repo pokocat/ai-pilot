@@ -4,11 +4,13 @@
 // 错误码约定（方案 §9）：
 //   401 未登录 · 402 INSUFFICIENT_CREDITS · 403 AGENT_LOCKED | PLAN_EXPIRED | CANVAS_DISABLED
 //   404 NOT_FOUND（含越权：不区分「不存在」与「不是你的」，否则接口本身就是探测器）
-//   409 IDEMPOTENCY_CONFLICT · 422 校验 · 429 CREATIVE_DAILY_LIMIT
+//   422 校验 · 429 CREATIVE_DAILY_LIMIT
+//   （**没有 409**：命中幂等键回 200 + reused=true，见建单端点的说明。曾在这里写着
+//    409 IDEMPOTENCY_CONFLICT，但代码从来没返回过它 —— 文档注释也是会撒谎的地方。）
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
-import { getCreativeConfig } from '../services/creative/config.js';
+import { getCreativeConfig, enabledTemplateOptions } from '../services/creative/config.js';
 import { buildPosterBriefDraft } from '../services/creative/briefDraft.js';
 import {
   createPosterJob, reviseJob, regenerateJob, cancelJob, getJobView,
@@ -31,10 +33,18 @@ export async function creativeRoutes(app: FastifyInstance) {
   // 能力状态：小程序据此决定是否显示出图入口（方案 §16 降级口径）——关闭时整块隐藏，
   // 而不是露出按钮再让用户点到 403。刻意做成最轻的一次查询（只读配置，不查任务/余额），
   // 因为它会被成果卡渲染时高频调用。
+  //
+  // 同时下发**启用中的版式清单**：前端此前硬编码三套恒可选，运营停用一套之后用户照样能选到它，
+  // 而服务端对显式请求停用模板一律 422（此前是静默换版 + 照常扣费，更糟）。清单从这里来才不会脱节。
   app.get('/creative/status', async (req): Promise<CreativeStatusResult> => {
     await resolveUser(req.headers['x-user-id'] as string | undefined); // 需登录（401 由 resolveUser 抛）
     const cfg = await getCreativeConfig();
-    return { enabled: cfg.enabled, pricePerPoster: cfg.pricePerPoster };
+    return {
+      enabled: cfg.enabled,
+      pricePerPoster: cfg.pricePerPoster,
+      // 功能关着时不下发清单：前端本就该整块隐藏入口，给了列表反而像"能用"。
+      templates: cfg.enabled ? enabledTemplateOptions(cfg) : [],
+    };
   });
 
   // 需求单草稿：成果消息 + 已确认 BrandKit 预填（用户在确认页只做增删改）。
@@ -52,7 +62,9 @@ export async function creativeRoutes(app: FastifyInstance) {
   });
 
   // 源素材上传（人像 / Logo / 二维码，multipart 单文件）。约束同聊天图片上传：MIME 白名单 + 10MB。
-  app.post<{ Querystring: { role?: string } }>('/creative/uploads', async (req, reply) => {
+  // role 只从 **multipart 字段**取（曾同时接 query，两个入口对同一个字段是无谓的分叉；role 本身
+  // 也只是存档元信息，见 uploads.ts 的说明）。
+  app.post('/creative/uploads', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     if (!creativeStorageReady() && process.env.NODE_ENV !== 'test') {
       return reply.code(503).send({ error: '图片存储未配置', code: 'OSS_NOT_CONFIGURED' });
@@ -76,7 +88,6 @@ export async function creativeRoutes(app: FastifyInstance) {
     if (data.file.truncated || buf.length > MAX_IMAGE_BYTES) {
       return reply.code(413).send({ error: '图片过大（单张上限 10MB）', code: 'IMAGE_TOO_LARGE' });
     }
-    // role 既可走 query 也可走 multipart 字段（小程序两种写法都常见）。
     const roleField = (data.fields as Record<string, { value?: string } | undefined> | undefined)?.role?.value;
     try {
       return await ingestSourceAsset({
@@ -84,7 +95,7 @@ export async function creativeRoutes(app: FastifyInstance) {
         userId: user.id,
         mimeType: data.mimetype,
         buf,
-        role: req.query.role ?? roleField,
+        role: roleField,
         fileName: data.filename ?? null,
       });
     } catch (e) {

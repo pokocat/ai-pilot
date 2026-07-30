@@ -5,10 +5,11 @@
 //   响应：{ data: [{ b64_json }] } 或 { data: [{ url }] } —— 两种都吃；国内厂商多兼容此形态。
 // 未配置或 disabled → 上层跳过 visual 阶段走「无主视觉」纯排版路径（不报错，见方案 §7）。
 //
-// 同步 vs 异步：本适配器按**同步返回**实现（OpenAI images 是同步的），submit 直接拿到图；
-// 为了让 worker 与 sweep 的状态机对异步供应商也成立，接口仍保留 submit/query 两段：
-// 同步供应商的 submit 直接回 status='succeeded' + 图，query 只在 taskId 形如异步任务时才有意义。
-// 真接了异步供应商（先返回 taskId 后轮询）时，在这里补一个 provider 分支即可，调用方不动。
+// **只支持同步返回**（OpenAI images 就是同步的）：submit 一次调用要么拿到图，要么算失败。
+// 曾经还有一条 `status:'pending'` + `query(taskId)` 的异步分支，写着「记下 providerTaskId 让 sweep
+// 续查」—— 但 sweep 从来没有查过它，query() 也没有任何调用点。那条分支的真实行为就是"当次降级为
+// 纯排版，providerTaskId 写进库再没人看"。删掉假承诺后语义变诚实：异步响应 = 失败 → 上层降级。
+// 真要接异步供应商，得连着 worker 的状态机与 sweep 的续查一起做，不是补一个方法就成立的。
 //
 // 安全：目标地址过 assertSafeUrl（复用 llm/tools/httpTool 的 SSRF 防护——运营可在后台填任意
 // baseUrl，不设防等于给了一个内网探测器）；下载图片同样要过。密钥永不出现在日志与错误文案里。
@@ -20,19 +21,10 @@ export interface VisualRequest {
   prompt: string;
   /** 负向提示（供应商支持时透传；不支持则拼进 prompt 尾部由模型自行理解）。 */
   negativePrompt?: string;
-  size?: string;
 }
-export type VisualStatus = 'pending' | 'succeeded' | 'failed';
 export interface VisualSubmitResult {
-  taskId: string;
-  status: VisualStatus;
-  /** 同步供应商在 submit 阶段就带回图片字节。 */
-  image?: { buffer: Buffer; mimeType: string };
-  error?: string;
-}
-export interface VisualQueryResult {
-  status: VisualStatus;
-  imageUrl?: string;
+  status: 'succeeded' | 'failed';
+  /** 成功时必带图片字节（同步供应商在 submit 阶段就拿到）。 */
   image?: { buffer: Buffer; mimeType: string };
   error?: string;
 }
@@ -41,7 +33,6 @@ export interface VisualDryRunResult { ok: boolean; message: string; ms: number }
 export interface VisualProvider {
   readonly name: string;
   submit(req: VisualRequest): Promise<VisualSubmitResult>;
-  query(taskId: string): Promise<VisualQueryResult>;
   dryRun(): Promise<VisualDryRunResult>;
 }
 
@@ -112,7 +103,7 @@ function decodeB64Image(b64: string): { buffer: Buffer; mimeType: string } {
 
 type ImagesResponse = {
   data?: Array<{ b64_json?: unknown; url?: unknown }>;
-  // 部分厂商把异步任务 id 放在这些字段上；有 id 无图时按异步任务处理。
+  // 部分厂商把异步任务 id 放在这些字段上。本适配器只支持同步返回 → 认出来只为给一条能排障的错误文案。
   id?: unknown; task_id?: unknown; output?: { task_id?: unknown; task_status?: unknown };
 };
 
@@ -137,7 +128,7 @@ class OpenAiCompatibleVisualProvider implements VisualProvider {
       ...this.cfg.visual.extraParams,
       prompt,
       model: this.cfg.visual.model,
-      size: req.size || this.cfg.visual.size,
+      size: this.cfg.visual.size,
       response_format: 'b64_json',
     };
   }
@@ -152,31 +143,17 @@ class OpenAiCompatibleVisualProvider implements VisualProvider {
 
     const first = Array.isArray(json.data) ? json.data[0] : undefined;
     if (first && typeof first.b64_json === 'string' && first.b64_json) {
-      return { taskId: `sync:${Date.now()}`, status: 'succeeded', image: decodeB64Image(first.b64_json) };
-    }
-    if (first && typeof first.url === 'string' && first.url) {
-      return { taskId: `sync:${Date.now()}`, status: 'succeeded', image: await downloadVisual(first.url, this.cfg.visual.timeoutMs) };
-    }
-    // 异步形态：只回了任务 id → 交给 query/sweep 续查。
-    const asyncId = [json.id, json.task_id, json.output?.task_id].find((v) => typeof v === 'string' && v);
-    if (typeof asyncId === 'string') return { taskId: asyncId, status: 'pending' };
-    return { taskId: '', status: 'failed', error: '供应商未返回图片' };
-  }
-
-  async query(taskId: string): Promise<VisualQueryResult> {
-    if (taskId.startsWith('sync:')) return { status: 'failed', error: '同步供应商任务不可续查' };
-    const url = joinUrl(this.cfg.visual.baseUrl, `images/generations/${encodeURIComponent(taskId)}`);
-    const json = (await fetchJson(url, { method: 'GET', headers: this.headers() }, this.cfg.visual.timeoutMs)) as ImagesResponse;
-    const first = Array.isArray(json.data) ? json.data[0] : undefined;
-    if (first && typeof first.b64_json === 'string' && first.b64_json) {
       return { status: 'succeeded', image: decodeB64Image(first.b64_json) };
     }
     if (first && typeof first.url === 'string' && first.url) {
-      return { status: 'succeeded', imageUrl: first.url, image: await downloadVisual(first.url, this.cfg.visual.timeoutMs) };
+      return { status: 'succeeded', image: await downloadVisual(first.url, this.cfg.visual.timeoutMs) };
     }
-    const state = String(json.output?.task_status ?? '').toUpperCase();
-    if (state === 'FAILED' || state === 'CANCELED') return { status: 'failed', error: `供应商任务状态 ${state}` };
-    return { status: 'pending' };
+    // 异步形态（只回任务 id）：本适配器不支持轮询 → 按失败上报，上层降级为纯排版。
+    const asyncId = [json.id, json.task_id, json.output?.task_id].find((v) => typeof v === 'string' && v);
+    if (typeof asyncId === 'string') {
+      return { status: 'failed', error: '供应商返回异步任务，当前只支持同步返回图片的接口' };
+    }
+    return { status: 'failed', error: '供应商未返回图片' };
   }
 
   /** 连通性试跑：发一条最小提示词，只看能不能拿回一张图。不落任何资产。 */
@@ -188,7 +165,6 @@ class OpenAiCompatibleVisualProvider implements VisualProvider {
       if (r.status === 'succeeded' && r.image) {
         return { ok: true, message: `连通正常，返回 ${r.image.mimeType} ${Math.round(r.image.buffer.length / 1024)}KB`, ms };
       }
-      if (r.status === 'pending') return { ok: true, message: `连通正常（异步任务已受理：${r.taskId}）`, ms };
       return { ok: false, message: r.error ?? '供应商未返回图片', ms };
     } catch (e) {
       return { ok: false, message: (e as Error).message, ms: Date.now() - t0 };

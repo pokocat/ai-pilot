@@ -1,5 +1,10 @@
-// 海报成品图（canvas_design）前端共用件：能力状态缓存、模板目录、资产 URL 归一与取图。
+// 海报成品图（canvas_design）前端共用件：能力状态缓存、字数上限、阶段词表、资产 URL 归一与取图。
 // 页面只从这里拿，不各自散写一套——成果卡入口、确认页、详情页三处都要用同一份口径。
+//
+// 这里**没有**模板目录：启用中的版式清单由 GET /creative/status 下发（CreativeStatusResult.templates）。
+// 曾经在本文件硬编码过三套恒可选的版式，结果两件事同时发生：一是本地描述与服务端 TEMPLATE_CATALOG
+// 早已漂移（同一套版式在小程序和后台叫不同的东西），二是后台停用某套版式后用户照旧能选中它，
+// 而服务端对「显式请求了被停用的版式」一律 422。前端不要再建本地目录。
 import Taro from '@tarojs/taro';
 import { api, type CreativeStatusResult } from './api';
 import { getApiBaseUrl } from './runtimeMode';
@@ -36,19 +41,31 @@ export function peekCreativeStatus(): CreativeStatusResult | null {
   return cache.value;
 }
 
-/* ───────────────── 模板目录（key 白名单以服务端为准，此处只做中文展示） ───────────────── */
+/* ───────────────── 文案字数上限（确认页与详情页共用一份） ───────────────── */
 
-export interface PosterTemplateOption { key: string; name: string; desc: string }
-export const POSTER_TEMPLATES: PosterTemplateOption[] = [
-  { key: 'person_hero', name: '人物主视觉', desc: '人像占主画面，先记住人，再记住主张' },
-  { key: 'editorial', name: '编辑杂志', desc: '大留白强标题，适合观点与专业服务' },
-  { key: 'business_launch', name: '商业发布', desc: '信息层级清楚，适合活动、课程、报名' },
-];
-export function templateName(key?: string): string {
-  return POSTER_TEMPLATES.find((t) => t.key === key)?.name ?? '';
-}
+/**
+ * 前置校验用的字数上限。**权威在服务端** `server/src/services/creative/schema.ts` 的 LIMITS：
+ * 超限一律 422，前端这份只为「敲字时就标红」的即时反馈，不是判定依据。
+ * 之所以复制而不是共享：SSOT `shared/contracts.d.ts` 是 .d.ts，放不了运行时值。改服务端那份务必回头改这里。
+ *
+ * 确认页用全部字段，详情页（改文字 / 换风格）只用其中 4 项——曾经各存一份，
+ * 结果同一个上限有两个来源，改一处漏一处就会出现「前端放行、服务端 422」。
+ */
+export const POSTER_LIMITS = {
+  goal: 60,
+  audience: 40,
+  headline: 20,
+  subheadline: 30,
+  proofPoint: 20,
+  cta: 15,
+  visualDirection: 100,
+} as const;
 
 /* ───────────────── 制作中阶段文案（服务端 progress 取值 → 用户可读） ───────────────── */
+
+/** 服务端 progress 的取值顺序，详情页照它画进度点（顺序即阶段先后）。 */
+export const PROGRESS_STAGES = ['philosophy', 'visual', 'render', 'upload'] as const;
+export type PosterProgressStage = typeof PROGRESS_STAGES[number];
 
 const PROGRESS_TEXT: Record<string, string> = {
   philosophy: '构思视觉',

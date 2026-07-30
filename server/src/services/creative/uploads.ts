@@ -7,7 +7,11 @@ import { checkImage } from './imageModeration.js';
 import { creativeAssetKey, putCreativeObject, deleteCreativeObject } from './storage.js';
 import type { CreativeUploadResult } from '../../../../shared/contracts';
 
-/** 源素材用途（只作元信息，渲染时按 brief 的 xxxAssetId 取用，不依赖此字段）。 */
+/**
+ * 源素材用途。**仅存档用**：只写进 metadataJson，没有任何读取方 —— 渲染一律按 brief 的
+ * portraitAssetId / logoAssetId / qrAssetId 取用。保留它是因为对象存储的元信息在排障时有价值
+ * （"用户传的这张图当时是当二维码传的"），但不要据它做业务判断。
+ */
 export const SOURCE_ROLES = ['portrait', 'logo', 'qr'] as const;
 export type SourceRole = (typeof SOURCE_ROLES)[number];
 
@@ -86,18 +90,21 @@ export async function ingestSourceAsset(opts: {
 
 /**
  * 校验 brief 引用的源素材：必须属本人、kind='source'、MIME 在白名单内。
- * 返回 id → { ossKey, mimeType } 映射；任一不满足抛 422（不静默丢弃引用——用户会以为图已用上）。
+ * 任一不满足抛 422（不静默丢弃引用——用户会以为图已用上）。
+ *
+ * **纯断言，无返回值**：曾返回 id → { ossKey, mimeType } 映射，但三个调用点（create / revise /
+ * regenerate）全部把它丢掉 —— 渲染期 worker.resolveTemplateAssets 是重新查一遍库的（它要连
+ * visualAssetId 一起取，且必须读回字节内联成 data URI）。留着那个 Map 只会让人以为它被用上了。
  */
 export async function resolveBriefAssets(
   userId: string,
   ids: { portraitAssetId?: string; logoAssetId?: string; qrAssetId?: string },
-): Promise<Map<string, { ossKey: string; mimeType: string }>> {
+): Promise<void> {
   const wanted = [ids.portraitAssetId, ids.logoAssetId, ids.qrAssetId].filter((v): v is string => !!v);
-  const out = new Map<string, { ossKey: string; mimeType: string }>();
-  if (!wanted.length) return out;
+  if (!wanted.length) return;
   const rows = await prisma.creativeAsset.findMany({
     where: { id: { in: [...new Set(wanted)] }, userId, kind: 'source' },
-    select: { id: true, ossKey: true, mimeType: true },
+    select: { id: true, mimeType: true },
   });
   const found = new Map(rows.map((r) => [r.id, r]));
   for (const id of wanted) {
@@ -105,7 +112,5 @@ export async function resolveBriefAssets(
     // 越权引用（别人的素材）与不存在合并为同一条错误：不区分才不泄露「这个 id 存在但不是你的」。
     if (!row) throw new UploadRejectedError('引用的素材不存在或不属于你', 'ASSET_NOT_FOUND', 422);
     if (!imageExtFromMime(row.mimeType)) throw new UploadRejectedError('引用的素材类型不受支持', 'IMAGE_BAD_TYPE', 422);
-    out.set(id, { ossKey: row.ossKey, mimeType: row.mimeType });
   }
-  return out;
 }

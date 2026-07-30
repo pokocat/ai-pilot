@@ -73,10 +73,16 @@ function isTemplateKey(v: unknown): v is TemplateKey {
   return typeof v === 'string' && (TEMPLATE_KEYS as readonly string[]).includes(v);
 }
 
+/** 模板停用时的统一文案（显式请求了停用模板、以及场景默认模板也被停用两种情形共用）。 */
+const TEMPLATE_OFF_MESSAGE = '该版式暂时不可用，请稍后再试';
+
 /**
  * 校验 + 规整 brief。
- * @param enabledTemplates 模板启停 map（后台可停用某套模板）；被停用的模板同样回退到 scene 默认，
- *        默认模板本身也被停用时报 422——不能默默出一版运营已经判定有问题的版式。
+ * @param enabledTemplates 模板启停 map（后台可停用某套模板）。分两种情形：
+ *        · **显式请求了一套被停用的模板 → 422**。不静默换版：用户在确认页明确选了它，
+ *          悄悄换成别的版式再照常扣 10 钻，是"拿了钱交付了别的东西"（GET /creative/status
+ *          只下发启用中的清单，正常前端根本选不到停用项 —— 走到这里说明清单已过期或有人直连接口）。
+ *        · 未指定 templateKey（或值不在白名单）→ 按 scene 回退默认；默认模板本身也被停用时同样 422。
  */
 export function normalizePosterBrief(
   raw: unknown,
@@ -91,10 +97,10 @@ export function normalizePosterBrief(
   if (b.ratio !== '3:4') throw new BriefInvalidError('当前只支持 3:4 竖版海报');
 
   const isOn = (k: TemplateKey) => !enabledTemplates || enabledTemplates[k] !== false;
-  const fallback = SCENE_DEFAULT_TEMPLATE[b.scene];
   const requested = isTemplateKey(b.templateKey) ? b.templateKey : null;
-  const templateKey = requested && isOn(requested) ? requested : fallback;
-  if (!isOn(templateKey)) throw new BriefInvalidError('该版式暂时不可用，请稍后再试');
+  if (requested && !isOn(requested)) throw new BriefInvalidError(TEMPLATE_OFF_MESSAGE);
+  const templateKey = requested ?? SCENE_DEFAULT_TEMPLATE[b.scene];
+  if (!isOn(templateKey)) throw new BriefInvalidError(TEMPLATE_OFF_MESSAGE);
 
   // 空字符串卖点在校验后剔除（用户删了一行的常见形态），保序去重。
   const seen = new Set<string>();

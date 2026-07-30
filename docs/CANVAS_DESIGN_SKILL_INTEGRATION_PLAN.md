@@ -462,15 +462,21 @@ server/src/llm/tools/registry.ts     # 仅登记 SkillMeta(kind='artifact')
 - 生成结果和军师自己的任务/计费/审计需要额外桥接；
 - 官方文档目前明确提示 Agent Skills 不属于 Zero Data Retention 能力，个人肖像与企业敏感素材需要更严格评估。
 
-预留配置：
+预留配置：~~已废弃，2026-07-29 全部删除，一个都没有落地保留~~
 
 ```env
-CANVAS_DESIGN_ENABLED=false
-CANVAS_DESIGN_ENGINE=native
-CANVAS_DESIGN_ANTHROPIC_SKILL_ID=
-CANVAS_DESIGN_MAX_CONCURRENCY=2
-CANVAS_DESIGN_TIMEOUT_MS=180000
+# ⚠️ 以下五个变量已于 2026-07-29 从代码、.env.example、.env.test 中**彻底删除**
+#（`_ANTHROPIC_SKILL_ID` 一天都没实现过）。保留这段只为记录「当初为什么想要它们、
+# 后来为什么一个都不留」，不要照着配。
+CANVAS_DESIGN_ENABLED=false            # 删：与后台开关取合取 → 静默失败；作熔断又要 SSH+重启
+CANVAS_DESIGN_ENGINE=native            # 删：全仓无 `engine ===` 分支，改它只改变库里那个标签
+CANVAS_DESIGN_ANTHROPIC_SKILL_ID=      # 删：POC 引擎没做（§19 明确不做），配置位空挂
+CANVAS_DESIGN_MAX_CONCURRENCY=2        # 删：连配置项本身一起删（见 §8.1 与 §21「渲染并发」行）
+CANVAS_DESIGN_TIMEOUT_MS=180000        # 删：只作 payload 缺省，后台保存一次即永久失效（双真源）
 ```
+
+本功能最终**一个环境变量都没有**：开关 / 单价 / 日限额 / 渲染超时 / 模板启停 / 图片供应商全在后台「创作任务」页，
+单一真源 = `FeatureFlag` 行 `creative-poster` 的 `enabled + payload`。理由见 §14 与 `server/src/env.ts` 同名段落。
 
 ## 7. 图片生成与 Canvas Design 的边界
 
@@ -529,7 +535,8 @@ HTML + CSS + SVG + Puppeteer screenshot
 落地注意：
 
 - 输出分辨率用 viewport + `deviceScaleFactor` 控制（如 3:4 主规格 1080×1440 = 540×720 @2x），不要渲染后再放大；
-- 现有渲染队列是单并发，`CANVAS_DESIGN_MAX_CONCURRENCY` 必须与之对齐——第一期直接用 1，或给海报单独的浏览器实例池并压内存上限；不能配置一个队列根本不会执行的并发数；
+- 现有渲染队列是单并发，所以**根本不该有「并发」这个旋钮**——这条当初写成「`CANVAS_DESIGN_MAX_CONCURRENCY` 必须与队列对齐、第一期用 1」，实现时还是既加了 env 又加了后台配置项，标签写「worker 并发槽（1–8）」。2026-07-29 连配置项一起删掉：worker 一轮是串行 `await`，渲染又被 `reportPdf` 的单并发队列串起来，任何大于 1 的值都只是个不会兑现的承诺。现为内部常量 `TICK_BATCH_SIZE = 2`（含义是「一轮最多连处理几单」，不是并发）。真要并行得先给海报单独的浏览器实例池并压内存上限，那时再谈参数；
+- 渲染超时（`timeoutMs`，后台可配）上限 480s 是个**不变式**：必须小于 worker 的 `STALE_RUNNING_MS`（10 分钟，sweep 判卡死重新入队的阈值），否则一次正常的长渲染会在还没结束时被抢回队列、同一单跑两遍产出两张资产。第一版把上限写成 900s，正好越过这条线；
 - 部署镜像必须内置商用授权中文字体（`deploy/Dockerfile.server` 加字体层），海报渲染不得依赖宿主机系统字体。
 
 ### 8.2 画布规格
@@ -783,7 +790,8 @@ worker 启动 + 周期 sweep 处理（照抄支付对账 `sweepPendingOrders` �
 
 - 新页面按后台规范登记 `admin/src/nav.ts`（归组 + hint + 命令面板别名），取数一律 `useResource` + `ViewState`，重试/退款等资金动作走 `ConfirmDialog`，样式只用 design token，提交前 `npm run lint:ui` 全绿；
 - 技能库 kind 文案映射（`KIND_LABEL`）补 `artifact` 一项；
-- 启停/引擎/价格等运行时开关走数据库配置（沿用 featureFlag / aiConfig 模式，后台可改、无需重启），环境变量 `CANVAS_DESIGN_ENABLED` 只作部署级硬开关；两层任一关闭即视为关闭。
+- 启停/价格等运行时开关走数据库配置（沿用 featureFlag / aiConfig 模式，后台可改、无需重启）。**开关只有这一层**（2026-07-29 定稿）：`FeatureFlag` 行 `creative-poster` 的 `enabled` 就是唯一真源，**行缺失视为关**（安全默认，先发代码天然不放量）。原计划的「env `CANVAS_DESIGN_ENABLED` 作部署级硬开关、两层任一关闭即关闭」已废弃——合取让「后台开了却不生效」成为静默失败，而它想承担的熔断职责比后台点一下慢一个数量级（SSH + 改 env + 重启）。「引擎」这个旋钮也一并删了（见 §6.2）。
+- ⚠️ **后台写 payload 必须同时显式落 `enabled`**：`FeatureFlag.enabled` 在 prisma 里是 `@default(true)`，写 payload 走 upsert，而生产库本来没有这一行。运营第一次进后台「只改个单价」就会创建出 `enabled=true` 的行，把未验收的功能放量。`updateCreativeConfig` 因此在 patch 不带 `enabled` 时回落到当前值（行缺失 = false）。
 
 ## 15. 可观测性
 
@@ -822,11 +830,9 @@ junshi_creative_queue_depth{status}
 
 ## 16. 降级与回滚
 
-功能开关：
+功能开关（最终形态：**后台一个开关，没有 env**）：
 
-```env
-CANVAS_DESIGN_ENABLED=false
-```
+运营后台「创作任务」页 → 功能开关，即 `FeatureFlag` 行 `creative-poster` 的 `enabled`。关一下约 1 分钟内生效（60s 读缓存），不发版、不重启、不 SSH。原计划这里写的是 `CANVAS_DESIGN_ENABLED=false`，已删——熔断闸最重要的属性是「快且确定」，一个要登机器改文件重启进程的开关两条都不满足。
 
 关闭后：
 
@@ -1031,7 +1037,7 @@ CANVAS_DESIGN_ENABLED=false
 | 是否直接安装链接 | 不可以 |
 | 许可证 | Apache 2.0，保留许可证与修改声明 |
 | 正式运行方式 | 军师原生 `artifact` Skill |
-| 原版 Claude Skill API | 仅 POC/质量对照，可配置备用 |
+| 原版 Claude Skill API | 仅 POC/质量对照；**没有实现，也不留配置位**（原计划的 `CANVAS_DESIGN_ENGINE` 已删，见 §6.2） |
 | 产品入口 | 执行 → 海报设计师 |
 | 中文/Logo/二维码 | 确定性渲染，不交给图片模型 |
 | 人物写真 | 独立图片模型提供 |
@@ -1039,16 +1045,18 @@ CANVAS_DESIGN_ENABLED=false
 | 长任务 | 数据库任务 + worker，可退出重进 |
 | 计费 | 成品图按任务预扣，失败幂等退款 |
 | 任务扣款锚点 | `CreativeJob` 行 `chargedAt/refundedAt` 条件更新，不用内存闭包 |
-| 图片审核 | 新增图片审核供应商（现有 moderation 仅文本） |
-| 渲染并发 | 复用浏览器单例骨架，第一期并发 1，与队列对齐 |
+| 图片审核 | 需新增图片审核供应商（现有 moderation 仅文本）；**MVP 未接 = 合规缺口**，接口留缝、`http` 半成品已删（§13、AGENTS.md §13） |
+| 渲染并发 | 复用浏览器单例骨架；**不提供并发配置项**（队列本就单并发，旋钮是假承诺），内部常量 `TICK_BATCH_SIZE=2` |
+| 功能开关 | **只有一层**：后台 `FeatureFlag` 行 `creative-poster` 的 `enabled`，行缺失视为关；本功能无任何环境变量 |
+| 渲染超时 | 后台可配，上限 480s；**必须小于 sweep 的 `STALE_RUNNING_MS`（10min）**，否则长渲染被重新入队双执行 |
 | MVP 交付物 | 仅 PNG（PDF 二期，打印管线已现成） |
 | Skill 抽象 | `SkillKind` 加 `artifact` 枚举登记；通用 `ArtifactSkill` 注册表等第二个实例再抽象 |
 | 初始定价 | 10 钻/张（后台可改，上线后按真实成本校准） |
 | 图片供应商 | 后台可配的通用接入点（密钥加密 + dry-run），不硬编码供应商 |
 | 字体 | 开源 OFL 字体（思源黑体/宋体、霞鹜文楷等），随镜像内置 |
-| 模板选择 | 海报设计师提示词按意图推荐（带推荐理由）+ 服务端白名单兜底 + 确认页可换 |
+| 模板选择 | 海报设计师提示词按意图推荐（带推荐理由）+ 服务端白名单兜底 + 确认页可换（启用中的清单由 `/creative/status` 下发）；**显式请求被停用的模板 → 422**，未指定才按 scene 回退 |
 | 第一主场景 | 个人宣传海报 |
-| MVP 主规格 | 3:4 |
+| MVP 主规格 | 3:4（`PosterRatio` 契约已**收窄为单值** `'3:4'`；9:16 / 1:1 二期放开时往联合类型里加，让编译器指出该改的地方） |
 | 第一阶段 | 技术 POC，不接生产、不扣费 |
 
 ## 22. 决策记录（2026-07-29 拍板，原「开放问题」全部关闭）
@@ -1056,6 +1064,8 @@ CANVAS_DESIGN_ENABLED=false
 1. **单张钻石定价 → 已定**：先定 10 钻/张（覆盖「哲学生成 + 出图 + 渲染」全任务），价格进后台配置，上线后按真实供应商成本校准。参考锚点：现有 `meterUnit='image'` 为 3 钻/次（ip 智能体，无出图实现），海报为多段成本任务，定高是合理起点。
 2. **图片供应商 → 已定**：不做供应商选型前置，第一期交付后台可配的模型接入点（通用适配器 + `secretBox` 密钥加密 + dry-run），供应商由运营后续配置。
 3. **字体 → 已定**：开源 OFL 字体（思源黑体 / 思源宋体 / 霞鹜文楷），允许商用与镜像打包，无采购前置。
-4. **模板缺省策略 → 已定**：海报设计师提示词按用户意图推荐 `templateKey` 并附推荐理由（确认页展示，制造惊喜感）；服务端白名单校验，无效按 `scene` 回退默认，用户可手动更换。
+4. **模板缺省策略 → 已定，上线后收紧过一次**：海报设计师提示词按用户意图推荐 `templateKey` 并附推荐理由（确认页展示，制造惊喜感）；服务端白名单校验，用户可手动更换。**「未指定」与「指定了被停用的」必须区别对待**（2026-07-29 修）：未指定按 `scene` 回退默认；**显式请求了被运营停用的模板返回 422**，不静默换一套版式还照常扣 10 钻——用户为自己挑的那套付了钱，而运营停用某套模板通常正是因为它出问题了。启用中的清单由 `GET /creative/status` 下发（前端不再存本地目录），全部停用 = 无法建单。
 5. **钻石退款幂等修复 → 已在修**：拆为独立会话进行中（与本方案解耦，不阻塞任何阶段）。
+6. **功能开关层数 → 已定为一层（2026-07-29，上线当天推翻原设计）**：唯一真源 = 后台「创作任务」页那个开关（`FeatureFlag` 行 `creative-poster` 的 `enabled`），**行缺失显式视为关**。原设计的 env `CANVAS_DESIGN_ENABLED` 与它取合取，实现后立刻暴露两个问题：① 运营在后台打开却不生效，且界面无法解释原因，这是静默失败；② 它想承担的「部署级熔断」职责需要 SSH + 改 env + 重启，比后台点一下慢一个数量级，真出事时没人会走这条路。判断依据：env 开关在本仓的正当用途是回答「外部依赖是否存在」（embedding / rerank / moderation / pgvector 那批），而 puppeteer 与 OSS 是既有功能的硬依赖、字体已确认在镜像里，海报不属于那一类；预发是独立库 `junshi_preprod`，DB 开关本就按环境隔离。同批删掉 `_ENGINE`（会撒谎的旋钮：全仓无分支）与 `_MAX_CONCURRENCY` / `_TIMEOUT_MS`（只作 payload 缺省，后台保存一次即永久失效的双真源）——**本功能现在一个环境变量都没有**。
+7. **`dailyLimit=0` 的语义 → 已定为「不限量」**：不是「禁止创建」。0=不限是通行约定，而且紧急停量该用功能开关（一次操作、语义明确、有审计），不该靠把限额改成 0 等用户撞墙。后台文案与契约注释已对齐，并有测试把「0 不拦截」钉住。
 

@@ -12,14 +12,41 @@ import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.js';
 import { grantCredits, getBalance } from '../src/services/credits.js';
-import { __clearFeatureCache } from '../src/services/featureFlag.js';
-import { tickCreativeWorker, sweepCreativeJobs, STALE_RUNNING_MS, MAX_ATTEMPTS } from '../src/services/creative/worker.js';
+import { setFeatureFlag, setFeatureFlagPayload, __clearFeatureCache } from '../src/services/featureFlag.js';
+import {
+  tickCreativeWorker, runJobOnce, sweepCreativeJobs, canRetry, STALE_RUNNING_MS, MAX_ATTEMPTS,
+} from '../src/services/creative/worker.js';
 import { refundJob } from '../src/services/creative/jobs.js';
-import { DEFAULT_PRICE_PER_POSTER } from '../src/services/creative/config.js';
+import { CREATIVE_FLAG_ID, DEFAULT_PRICE_PER_POSTER } from '../src/services/creative/config.js';
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
 
 const PRICE = DEFAULT_PRICE_PER_POSTER;
+
+/** 打开功能开关并清缓存（行缺失=关，cleanBusiness 每例都把行删了）。 */
+async function enableCreative(): Promise<void> {
+  await setFeatureFlag(CREATIVE_FLAG_ID, true);
+  __clearFeatureCache();
+}
+
+/**
+ * 反复驱动 worker 直到任务落终态（或达到上限）。
+ * 为什么不按 tick 次数循环：一轮 tick 最多连处理 TICK_BATCH_SIZE 单，而失败任务会回 pending，
+ * 于是同一轮里可能被再抢一次 —— 「几次 tick」和「几次尝试」不是同一个量。
+ * @param onPending 每次驱动前对"仍在排队"的中间态做断言。
+ */
+async function drainJob(
+  jobId: string,
+  onPending?: (job: { status: string; attempts: number; refundedAt: Date | null }) => Promise<void> | void,
+): Promise<void> {
+  for (let i = 0; i < MAX_ATTEMPTS + 3; i++) {
+    const job = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
+    if (job.status !== 'pending' && job.status !== 'running') return;
+    if (onPending) await onPending(job);
+    await tickCreativeWorker();
+  }
+  throw new Error(`任务 ${jobId} 在 ${MAX_ATTEMPTS + 3} 轮后仍未落终态`);
+}
 
 function brief(over: Record<string, unknown> = {}) {
   return {
@@ -69,7 +96,7 @@ before(async () => { await getApp(); });
 after(async () => { await closeApp(); });
 
 describe('海报成品图 · worker 生命周期', () => {
-  beforeEach(async () => { await cleanBusiness(); await seedBaseline(); __clearFeatureCache(); });
+  beforeEach(async () => { await cleanBusiness(); await seedBaseline(); await enableCreative(); });
 
   test('create → tick → succeeded：CreativeAsset 落库、resultJson 完整、名义尺寸 1080×1440', async () => {
     const { token } = await posterUser();
@@ -144,23 +171,154 @@ describe('海报成品图 · worker 生命周期', () => {
     assert.equal(content2.creativeJobId, regen.body.jobId, 'creativeJobId 指向最近一次成功');
   });
 
-  test('revise 复用父任务主视觉：不再产出 visual 资产、不扣费、仍出一张新成品', async () => {
-    const { token } = await posterUser();
+  // K5：这条用例的标题声称两件事，此前一件都没断言 —— 而且测试环境没有图片供应商，父任务本就
+  // 不产出 visual 资产，所以 reusableVisualAssetId() / sourceVisualAssetId / worker 的复用分支
+  // **整条零覆盖**。修法：手工往父任务插一条 kind='visual' 的资产，再验子任务真的复用了它。
+  test('revise 复用父任务主视觉：sourceVisualAssetId 命中、不新增 visual 资产、不扣费、仍出一张新成品', async () => {
+    const { token, tenantId } = await posterUser();
     const parentId = await createJob(token, 'w-rev-1');
     await tickCreativeWorker();
     const balanceAfterParent = await getBalance(token);
 
+    // 模拟「父任务当年配了供应商、产出过主视觉」：内存回退区里没有这个 key，
+    // 渲染取图会拿到 null 并按无图路径继续 —— 复用链路本身与字节是否可读无关。
+    const parentVisual = await prisma.creativeAsset.create({
+      data: {
+        tenantId, userId: token, jobId: parentId, kind: 'visual',
+        ossKey: `creative/${tenantId}/${parentId}/fake-visual.png`, mimeType: 'image/png', bytes: 1,
+      },
+    });
+
     const revised = await api('POST', `/api/creative/jobs/${parentId}/revise`, { token, body: { headline: '换个说法', idempotencyKey: 'w-rev-2' } });
     assert.equal(revised.status, 200, JSON.stringify(revised.body));
-    await tickCreativeWorker();
 
+    // 建单时就把来源资产写进 requestJson（worker 据此跳过 visual 阶段）
+    const childRow = await prisma.creativeJob.findUniqueOrThrow({ where: { id: revised.body.jobId } });
+    assert.equal(
+      (childRow.requestJson as { sourceVisualAssetId?: string }).sourceVisualAssetId,
+      parentVisual.id,
+      'revise 必须沿版本链找到父任务的主视觉并记下来（否则复用分支永远走不到）',
+    );
+
+    await tickCreativeWorker();
     const child = await prisma.creativeJob.findUniqueOrThrow({ where: { id: revised.body.jobId } });
     assert.equal(child.status, 'succeeded', `${child.errorCode} ${child.errorMessage}`);
     assert.equal(child.creditCost, 0);
     assert.equal(await getBalance(token), balanceAfterParent, 'revise 全程零扣费');
-    // 父任务资产不被覆盖（版本链上各自一张）
+    // 结果里把复用的主视觉记下来，且**没有**新产出 visual 资产（复用的意义就在这里）
+    assert.equal((child.resultJson as { visualAssetId: string | null }).visualAssetId, parentVisual.id);
+    assert.equal(await prisma.creativeAsset.count({ where: { jobId: child.id, kind: 'visual' } }), 0, '子任务不该新产 visual');
+    assert.equal(await prisma.creativeAsset.count({ where: { kind: 'visual' } }), 1, '全库仍只有那一张主视觉');
+    // 父任务资产不被覆盖（版本链上各自一张成品）
     assert.equal(await prisma.creativeAsset.count({ where: { jobId: parentId, kind: 'poster_png' } }), 1);
     assert.equal(await prisma.creativeAsset.count({ where: { jobId: child.id, kind: 'poster_png' } }), 1);
+  });
+
+  // D1：BrandKit 集成此前在生产走不到（确认页 submit 重拼 brief 时丢了 brandKitVersion），
+  // 于是 approvedBrandKit() / 品牌提示块 / 色板表 / 语气合并全是死代码。服务端这一侧必须有覆盖：
+  // 带 brandKitVersion 的任务要真的把品牌语气与色板带进视觉哲学（落在 promptSnapshot 里可验）。
+  test('brief 带 brandKitVersion → 已确认 BrandKit 的语气与色板进入 promptSnapshot', async () => {
+    const { token, tenantId } = await posterUser();
+    await prisma.brandKit.create({
+      data: {
+        tenantId, userId: token, version: 3, approvedAt: new Date(),
+        personaJson: { name: '增长顾问', tagline: '十年操盘', tone: '沉稳克制、只说做得到的事', story: '', doNots: [] },
+        voiceJson: { hooks: [], openers: [], ctas: [], taboos: ['浮夸'] },
+        // colorHint 命中 THEME_HINT_COLORS 的「金」一档 → 回退色板换成金色系
+        themeJson: { keywords: ['克制'], colorHint: '金属金', styleRefs: [] },
+      },
+    });
+
+    const r = await api('POST', '/api/creative/posters', {
+      token,
+      body: { brief: { ...brief({ brandKitVersion: 3 }) }, idempotencyKey: 'w-brandkit' },
+    });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    await tickCreativeWorker();
+
+    const job = await prisma.creativeJob.findUniqueOrThrow({ where: { id: r.body.jobId } });
+    assert.equal(job.status, 'succeeded', `${job.errorCode} ${job.errorMessage}`);
+    const snapshot = job.promptSnapshot ?? '';
+    assert.match(snapshot, /沿用品牌语气：沉稳克制、只说做得到的事/, 'BrandKit 的 persona.tone 必须并进气质');
+    assert.match(snapshot, /#C9A227/, 'theme.colorHint「金」应命中金色系色板（THEME_HINT_COLORS）');
+
+    // 反证：不带 brandKitVersion 的同一份 brief 不会带上品牌痕迹（说明上面命中的不是巧合）
+    const plain = await api('POST', '/api/creative/posters', { token, body: { brief: brief(), idempotencyKey: 'w-nokit' } });
+    assert.equal(plain.status, 201, JSON.stringify(plain.body));
+    await tickCreativeWorker();
+    const plainSnapshot = (await prisma.creativeJob.findUniqueOrThrow({ where: { id: plain.body.jobId } })).promptSnapshot ?? '';
+    assert.doesNotMatch(plainSnapshot, /沿用品牌语气/, '没引用资产包就不该出现品牌语气');
+  });
+
+  // D3：成功写入此前是无守卫的 update（失败路径一直有守卫）。叠加 D4 的阈值错配就会出现
+  // 「sweep 把长渲染判为卡死回队 → 另一个 worker 跑完置终态 → 老进程回来覆盖终态」，
+  // 结果同一单挂着两张成品资产。守卫要在**入口**判：管线中途 saveAsset 已经落库了就来不及了。
+  test('终态任务被再驱动一次：资产不翻倍、终态与 resultJson 不被覆盖', async () => {
+    const { token } = await posterUser();
+    const jobId = await createJob(token, 'w-double');
+    await tickCreativeWorker();
+
+    const first = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
+    assert.equal(first.status, 'succeeded');
+    const firstResult = JSON.stringify(first.resultJson);
+    const firstCompletedAt = first.completedAt?.toISOString();
+
+    // 直接再驱动一次（模拟老进程回来收口 / 运维误并发驱动同一个 id）
+    const outcome = await runJobOnce(jobId);
+    assert.equal(outcome.status, 'skipped', '已收口的任务应被跳过，而不是当成功或失败处理');
+
+    const again = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
+    assert.equal(again.status, 'succeeded');
+    assert.equal(again.completedAt?.toISOString(), firstCompletedAt, '终态时间不被改写');
+    assert.equal(JSON.stringify(again.resultJson), firstResult, 'resultJson 不被本轮结果覆盖');
+    assert.equal(await prisma.creativeAsset.count({ where: { jobId, kind: 'poster_png' } }), 1, '成品资产不翻倍');
+    assert.equal(again.refundedAt, null, '跳过不该触发退款');
+    assert.equal(await refundLedgerCount(token), 0);
+  });
+
+  // D7：供应商降级此前零痕迹 —— 只 console.warn，而 provider 列是建单时的 'configured' 快照，
+  // metrics 也用它 → 供应商挂一整天，任务台与监控全绿，用户拿到的全是"无主视觉"版。
+  test('图片供应商不可用 → 任务仍成功，但 resultJson.degraded=true 且任务台可见', async () => {
+    const { token } = await posterUser();
+    // 配一个必然打不通的供应商：127.0.0.1 会被 assertSafeUrl 的 SSRF 防护直接拦下，
+    // 不依赖任何真实网络（也不会误发请求到外部）。
+    await setFeatureFlagPayload(CREATIVE_FLAG_ID, {
+      visual: { enabled: true, baseUrl: 'http://127.0.0.1:9/v1', model: 'demo-model' },
+    });
+    __clearFeatureCache();
+
+    const jobId = await createJob(token, 'w-degraded');
+    assert.equal(
+      (await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } })).provider,
+      'configured',
+      '建单时供应商配着 → 快照是 configured（正是它让降级看不出来）',
+    );
+    await tickCreativeWorker();
+
+    const job = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
+    assert.equal(job.status, 'succeeded', `纯排版本身是完整交付物，不该失败：${job.errorCode} ${job.errorMessage}`);
+    const result = job.resultJson as { degraded?: boolean; visualError?: string; visualAssetId: string | null };
+    assert.equal(result.degraded, true, '配了供应商却没拿到主视觉 = 降级，必须留痕');
+    assert.ok(result.visualError && result.visualError.length > 0, '带一句对外可读的说明');
+    assert.doesNotMatch(String(result.visualError), /127\.0\.0\.1|ECONNREFUSED|SSRF/i, '对外文案不含内部细节');
+    assert.equal(result.visualAssetId, null);
+    assert.equal(await prisma.creativeAsset.count({ where: { jobId, kind: 'visual' } }), 0);
+
+    // 任务台看得见（老任务无该字段按 false，这里是新任务 → true）
+    const list = await api('GET', '/api/admin/creative/jobs');
+    assert.equal(list.status, 200, JSON.stringify(list.body));
+    assert.equal(list.body.items[0].degraded, true, '运营在任务台上要能看出这一单没有主视觉');
+  });
+
+  test('未配供应商的正常任务：degraded=false（"没配"不是"降级"）', async () => {
+    const { token } = await posterUser();
+    const jobId = await createJob(token, 'w-not-degraded');
+    await tickCreativeWorker();
+    const job = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
+    assert.equal(job.status, 'succeeded');
+    assert.equal((job.resultJson as { degraded?: boolean }).degraded, false);
+    assert.equal(job.provider, null, '没配供应商时建单快照就是 null');
+    assert.equal((await api('GET', '/api/admin/creative/jobs')).body.items[0].degraded, false);
   });
 
   test('渲染抛错 → 重试用尽后 failed + 退款一次（退款流水只有一条）', async () => {
@@ -170,17 +328,17 @@ describe('海报成品图 · worker 生命周期', () => {
     assert.equal(await getBalance(token), before - PRICE, '建单即实扣');
     await poisonTemplate(jobId);
 
-    // 前 MAX_ATTEMPTS-1 轮：失败但回 pending 等重试，钱不动
-    for (let i = 1; i < MAX_ATTEMPTS; i++) {
-      assert.equal(await tickCreativeWorker(), 1, `第 ${i} 轮应抢到任务`);
-      const mid = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
-      assert.equal(mid.status, 'pending', `第 ${i} 轮失败后回队列重试`);
-      assert.equal(mid.attempts, i);
+    // 中途每一次仍在排队时：状态回 pending 等重试、不退款、钱不动
+    let midChecks = 0;
+    await drainJob(jobId, async (mid) => {
+      midChecks += 1;
+      assert.equal(mid.status, 'pending', '失败后回队列重试，不该停在 running');
+      assert.ok(mid.attempts < MAX_ATTEMPTS, `还能重试的任务 attempts 必须 < ${MAX_ATTEMPTS}，实际 ${mid.attempts}`);
       assert.equal(mid.refundedAt, null, '还要重试的任务不退款');
       assert.equal(await getBalance(token), before - PRICE);
-    }
-    // 最后一轮：终态失败 + 退款
-    assert.equal(await tickCreativeWorker(), 1);
+    });
+    assert.ok(midChecks >= 2, `应经历多次重试（实际驱动 ${midChecks} 次）`);
+
     const job = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
     assert.equal(job.status, 'failed');
     assert.equal(job.attempts, MAX_ATTEMPTS);
@@ -225,7 +383,6 @@ describe('海报成品图 · worker 生命周期', () => {
       data: { status: 'running', startedAt: new Date(), progress: 'philosophy', attempts: 1, metadataJson: { cancelRequested: true } },
     });
     // 直接驱动这一个任务（tick 只抢 pending，这里任务已是 running）
-    const { runJobOnce } = await import('../src/services/creative/worker.js');
     const outcome = await runJobOnce(jobId);
     assert.equal(outcome.status, 'cancelled');
 
@@ -239,8 +396,6 @@ describe('海报成品图 · worker 生命周期', () => {
   test('功能关闭时 worker 不消费队列（任务留着，开启后继续）', async () => {
     const { token } = await posterUser();
     const jobId = await createJob(token, 'w-paused');
-    const { setFeatureFlag } = await import('../src/services/featureFlag.js');
-    const { CREATIVE_FLAG_ID } = await import('../src/services/creative/config.js');
 
     await setFeatureFlag(CREATIVE_FLAG_ID, false);
     assert.equal(await tickCreativeWorker(), 0, '关着不抢任务');
@@ -253,14 +408,14 @@ describe('海报成品图 · worker 生命周期', () => {
 });
 
 describe('海报成品图 · 退款不变量', () => {
-  beforeEach(async () => { await cleanBusiness(); await seedBaseline(); __clearFeatureCache(); });
+  beforeEach(async () => { await cleanBusiness(); await seedBaseline(); await enableCreative(); });
 
   test('已退款任务再触发退款路径 → 不二次退', async () => {
     const { token } = await posterUser();
     const before = await getBalance(token);
     const jobId = await createJob(token, 'r-once');
     await poisonTemplate(jobId);
-    for (let i = 0; i < MAX_ATTEMPTS; i++) await tickCreativeWorker();
+    await drainJob(jobId);
     assert.equal(await getBalance(token), before);
     assert.equal(await refundLedgerCount(token), 1);
 
@@ -279,7 +434,7 @@ describe('海报成品图 · 退款不变量', () => {
     const before = await getBalance(token);
     const jobId = await createJob(token, 'r-retry');
     await poisonTemplate(jobId);
-    for (let i = 0; i < MAX_ATTEMPTS; i++) await tickCreativeWorker();
+    await drainJob(jobId);
     const failed = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
     assert.equal(failed.status, 'failed');
     assert.ok(failed.refundedAt);
@@ -294,7 +449,7 @@ describe('海报成品图 · 退款不变量', () => {
     assert.ok(requeued.chargedAt, 'chargedAt 也不动');
 
     // 重试仍然失败（模板还是坏的）→ 跑满重试
-    for (let i = 0; i < MAX_ATTEMPTS; i++) await tickCreativeWorker();
+    await drainJob(jobId);
     const again = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
     assert.equal(again.status, 'failed');
     assert.equal(await getBalance(token), before, '重试再失败不再退款');
@@ -306,7 +461,7 @@ describe('海报成品图 · 退款不变量', () => {
     const before = await getBalance(token);
     const jobId = await createJob(token, 'r-retry-ok');
     await poisonTemplate(jobId);
-    for (let i = 0; i < MAX_ATTEMPTS; i++) await tickCreativeWorker();
+    await drainJob(jobId);
     assert.equal(await getBalance(token), before, '失败已退款');
 
     // 运营修好模板（这里恢复合法 key）后重试
@@ -333,7 +488,7 @@ describe('海报成品图 · 退款不变量', () => {
 
     const jobId = await createJob(token, 'r-unlimited');
     await poisonTemplate(jobId);
-    for (let i = 0; i < MAX_ATTEMPTS; i++) await tickCreativeWorker();
+    await drainJob(jobId);
 
     const job = await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } });
     assert.equal(job.status, 'failed');
@@ -357,7 +512,7 @@ describe('海报成品图 · 退款不变量', () => {
 
     const revised = await api('POST', `/api/creative/jobs/${parentId}/revise`, { token, body: { headline: '再改一版', idempotencyKey: 'r-rev-2' } });
     await poisonTemplate(revised.body.jobId);
-    for (let i = 0; i < MAX_ATTEMPTS; i++) await tickCreativeWorker();
+    await drainJob(revised.body.jobId);
 
     const child = await prisma.creativeJob.findUniqueOrThrow({ where: { id: revised.body.jobId } });
     assert.equal(child.status, 'failed');
@@ -368,7 +523,7 @@ describe('海报成品图 · 退款不变量', () => {
 });
 
 describe('海报成品图 · sweep 自愈', () => {
-  beforeEach(async () => { await cleanBusiness(); await seedBaseline(); __clearFeatureCache(); });
+  beforeEach(async () => { await cleanBusiness(); await seedBaseline(); await enableCreative(); });
 
   /** 把任务摆成「卡死的 running」：startedAt 推到 11 分钟前。 */
   async function staleRunning(jobId: string, attempts: number): Promise<void> {
@@ -404,11 +559,17 @@ describe('海报成品图 · sweep 自愈', () => {
     assert.equal((await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } })).status, 'succeeded');
   });
 
-  test('卡死 running（attempts 超限）→ sweep 置 failed + 退款一次', async () => {
+  // D5：worker 收口与 sweep 回收必须用同一把尺子（canRetry）。此前两处分别写 `<` 与 `<=`，
+  // 于是 attempts 正好等于 MAX_ATTEMPTS 的任务被 worker 判为"重试用尽、终态失败"，
+  // 同一个数在 sweep 眼里却还能再入队一次。这里用 MAX_ATTEMPTS（而不是 +1）钉住边界。
+  test('卡死 running（attempts 已用尽）→ sweep 置 failed + 退款一次', async () => {
+    assert.equal(canRetry(MAX_ATTEMPTS - 1), true, '还差一次：可重试');
+    assert.equal(canRetry(MAX_ATTEMPTS), false, `attempts=${MAX_ATTEMPTS} 就是用尽 —— worker 与 sweep 同一判定`);
+
     const { token } = await posterUser();
     const before = await getBalance(token);
     const jobId = await createJob(token, 's-fail');
-    await staleRunning(jobId, MAX_ATTEMPTS + 1);
+    await staleRunning(jobId, MAX_ATTEMPTS);
 
     const r = await sweepCreativeJobs();
     assert.equal(r.failed, 1);

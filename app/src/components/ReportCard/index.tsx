@@ -41,12 +41,15 @@ interface Props {
   // 能力关闭 / 非 poster 成果 / 卡片不可操作时父级不传，这一行整块不渲染（不露按钮再让用户点到 403）。
   posterPrice?: number;
   onPoster?: () => void;
+  // 已出过成品图时的回看入口。判据是 deliverable.creativeJobId（任务成功后服务端回写进本条成果消息），
+  // 由父级传入。没有这一行的话，用户一离开详情页（本地在途标记随即清空）就再也回不到那张海报。
+  onViewPoster?: () => void;
 }
 
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
 export default function ReportCard({
   data, animate = false, streaming = false, operable = true, saved = false,
-  onSave, onView, onShareMenu, posterPrice, onPoster,
+  onSave, onView, onShareMenu, posterPrice, onPoster, onViewPoster,
 }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -233,6 +236,14 @@ export default function ReportCard({
             )}
           </View>
           )}
+          {/* 已出图的回看入口：不带价签（回看不扣费），与下面的「生成成品图」并列成两行。 */}
+          {operable && onViewPoster ? (
+            <View className="rc-poster" onClick={onViewPoster}>
+              <Icon name="image" size={14} color={accent} />
+              <Text className="rc-poster-t">查看成品图</Text>
+              <Text className="rc-poster-c">不扣钻石</Text>
+            </View>
+          ) : null}
           {/* 海报成品图入口：单独一行，不挤进上面的三键操作行（真机上四键会挤到换行/裁字）。 */}
           {operable && onPoster && typeof posterPrice === 'number' ? (
             <View className="rc-poster" onClick={onPoster}>

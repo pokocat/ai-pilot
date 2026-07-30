@@ -41,6 +41,7 @@ export type { BrandKitView, BrandKitPersona, BrandKitVoice, BrandKitTheme } from
 // 海报成品图（canvas_design）：确认页 / 详情页 / 成果卡入口共用的契约类型。
 export type {
   PosterBrief, PosterBriefDraft, PosterScene, PosterRatio,
+  PosterTemplateKey, PosterTemplateOption,
   CreativeStatusResult, CreativeUploadResult, CreativeJobView, CreativeAssetView,
   CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
 } from '../../../shared/contracts';

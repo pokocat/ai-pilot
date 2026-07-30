@@ -999,6 +999,11 @@ export async function adminRoutes(app: FastifyInstance) {
    * 权限：改价与供应商密钥直接影响营收与外部调用 → 写操作一律 requireSuper（与套餐改价、资金三写同级）；
    *      读（配置/任务列表）沿用插件级 requireAdmin，运营值班可看。
    */
+  /** 视觉哲学快照的列表口径：超上限截断并显式标注（不静默截断，运营要知道自己看的是节选）。 */
+  const PROMPT_SNAPSHOT_MAX = 2000;
+  const clipPromptSnapshot = (s: string): string =>
+    s.length > PROMPT_SNAPSHOT_MAX ? `${s.slice(0, PROMPT_SNAPSHOT_MAX)}…（已截断，共 ${s.length} 字）` : s;
+
   app.get('/admin/creative/config', async (): Promise<AdminCreativeConfig> => {
     return publicCreativeConfig(await getCreativeConfig({ fresh: true }));
   });
@@ -1034,7 +1039,11 @@ export async function adminRoutes(app: FastifyInstance) {
     return r;
   });
 
-  // 任务列表（含用户脱敏标识、成本、错误、是否已退款）。
+  // 任务列表（含用户脱敏标识、成本、错误、是否已退款、是否降级、视觉哲学快照）。
+  //
+  // promptSnapshot 按需截断：那是六个维度的整段文字（LLM 真金白银生成的，此前**没有任何读者** ——
+  // 任务台不展示、C 端也不展示），全量带进列表会让 20 行的响应体涨到几十 KB。2000 字符足够运营
+  // 判断"这一版的美学立场是什么"，要全文就去看单任务。
   app.get<{ Querystring: { status?: string; page?: string; pageSize?: string } }>('/admin/creative/jobs', async (req): Promise<AdminCreativeJobsView> => {
     const status = (req.query.status ?? '').trim();
     const page = Math.max(1, Math.floor(Number(req.query.page ?? 1)) || 1);
@@ -1060,6 +1069,7 @@ export async function adminRoutes(app: FastifyInstance) {
       items: rows.map((j): AdminCreativeJobItem => {
         const u = userMap.get(j.userId);
         const brief = ((j.requestJson ?? {}) as { brief?: { templateKey?: unknown } }).brief;
+        const result = (j.resultJson ?? {}) as { degraded?: unknown };
         return {
           id: j.id,
           // 脱敏：昵称 + 掩码手机号（与订单列表同口径，不出全量手机号）。
@@ -1071,6 +1081,8 @@ export async function adminRoutes(app: FastifyInstance) {
           templateKey: typeof brief?.templateKey === 'string' ? brief.templateKey : null,
           engine: j.engine,
           provider: j.provider,
+          // 老任务（本轮之前成功的）resultJson 里没有这个字段 → 一律按 false，不臆断。
+          degraded: result.degraded === true,
           creditCost: j.creditCost,
           charged: !!j.chargedAt,
           refunded: !!j.refundedAt,
@@ -1078,6 +1090,7 @@ export async function adminRoutes(app: FastifyInstance) {
           errorMessage: j.errorMessage,
           attempts: j.attempts,
           assetCount: assetMap.get(j.id) ?? 0,
+          ...(j.promptSnapshot ? { promptSnapshot: clipPromptSnapshot(j.promptSnapshot) } : {}),
           createdAt: isoSecond(j.createdAt),
           completedAt: j.completedAt ? isoSecond(j.completedAt) : null,
         };
