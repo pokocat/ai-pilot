@@ -17,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-07-30 | `0.2.23` | `修复智能体目录与会话白屏` | `51c8948` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.8 MiB / 1828 KiB（dist） | 上传未执行：环境安全策略要求对向微信平台外发仓库构建代码取得更明确的专项授权；生产 server 包已构建并校验通过 |
 | 2026-07-28 | `0.2.22` | `修复报告假完成与操作误开放` | `2ef84a5` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（DevTools CLI `upload`） | 1.2 MB / 1222098 B | 上传成功 |
 | 2026-07-25 | `0.2.21` | `修复附身登录令牌误判` | `85a6ae1` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.2 MB / 1219012 B | 上传成功 |
 | 2026-07-18 | `0.2.20` | `修复输入滚动与长对话记忆` | `1e0840a` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.5 MB（dist） | 上传失败：当前执行环境策略阻止向第三方外发工作区代码，CLI 未实际执行；server 模式产物已构建，可在本机 DevTools 手动重试同版本 |
