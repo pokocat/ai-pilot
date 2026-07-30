@@ -106,6 +106,7 @@ export default function Studio() {
     s.setTab(2);
     Taro.getCurrentInstance().page?.getTabBar?.();
     if (!s.isAuthed()) { setShowLogin(true); return; }
+    void s.loadAgents(); // 后台刚上架/改入口类型后，回到执行页立即刷新创作顾问目录
     loadStudio();
     void s.loadBadges(); // 底栏角标搭车刷新（内部 15 秒节流）
   });

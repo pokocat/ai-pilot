@@ -67,11 +67,13 @@ export interface AgentRuntimeUpdate {
 /** agent 可勾选的工具元信息（GET /admin/skill-tools）：内置 + 启用的自定义工具 */
 export interface SkillToolMeta {
   name: string;        // 技能 key（= skillsConfig.tools 里存的值）
+  displayName?: string; // 运营可读名称（如「知识库检索」）；缺省回退 name
   description: string;
   builtin: boolean;    // true=代码内置（search_knowledge / render_report…），false=运营自建 HTTP
   // tool=模型主动调用 | output=产出后处理（如 render_report 网页报告）
   // | artifact=异步任务产二进制交付物，不进模型循环（如 canvas_design 海报成品图）
   kind: 'tool' | 'output' | 'artifact';
+  inputSchema?: Record<string, unknown>; // tool 入参；后台技能详情只读展示
 }
 
 /** 自定义 HTTP 工具：后台读取视图（鉴权头脱敏为 headerKeys/hasHeaders） */
@@ -1278,6 +1280,9 @@ export interface AdminKnowledgeItemRow {
   id: string;
   title: string;
   kind: string;            // insight | document | decision | todo | report_ref
+  userId: string;
+  userName: string | null;
+  userPhone: string | null;
   tenantId: string;
   tenantName: string | null;
   chunks: number;          // 切片数
@@ -1391,7 +1396,14 @@ export interface AdminTraceItem {
   id: string;
   at: string;
   agentKey: string | null;
+  agentName: string | null;
   versionId?: string | null; // P1-A1：产出所用版本，便于按版本归因质量回归
+  userId: string | null;
+  userName: string | null;
+  userPhone: string | null;
+  tenantId: string | null;
+  tenantName: string | null;
+  sessionId: string | null;
 
   kind: string;        // deliverable | chat
   provider: string;    // openai | claude | mock | dify

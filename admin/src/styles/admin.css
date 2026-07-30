@@ -310,6 +310,8 @@ body {
 .seg b.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
 .mem-list { display: flex; flex-direction: column; gap: 9px; }
 .mem-card { display: flex; align-items: center; gap: 11px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; padding: 12px 14px; box-shadow: var(--shadow-sm); }
+.mem-card.actionable { cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.mem-card.actionable:hover { border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .mem-card .mi { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; }
 .mem-card .mb { flex: 1; min-width: 0; } .mem-card .mt { font-size: 12.5px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; } .mem-card .mm { font-size: 10.5px; color: var(--ink-3); margin-top: 3px; }
 .mem-meter { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 11px; }

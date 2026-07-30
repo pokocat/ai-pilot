@@ -7,6 +7,20 @@ import { PageHead, ViewState, ErrorState, Skeleton, SearchBox } from '../compone
 import { useResource } from '../useResource';
 import { fmtTime, fmtShortTime, actorText, compactActorText, mobileAuditMeta, auditTarget, actionKind, statusClass, formatPayload, auditLabel } from '../format';
 
+const TRACE_KIND_LABEL: Record<string, string> = {
+  chat: '对话回复',
+  deliverable: '方案生成',
+};
+
+function traceAgent(t: { agentName: string | null; agentKey: string | null }): string {
+  return t.agentName || (t.agentKey ? `智能体 ${t.agentKey}` : '全局调用');
+}
+
+function traceUser(t: { userName: string | null; userPhone: string | null; userId: string | null }): string {
+  if (!t.userId) return '系统任务 / 未关联用户';
+  return `${t.userName || '未命名用户'} · ${t.userPhone || t.userId.slice(0, 8)}`;
+}
+
 export function ObservabilityView() {
   const [status, setStatus] = useState<'' | 'ok' | 'error'>('');
   const [detail, setDetail] = useState<AdminTraceDetail | null>(null);
@@ -45,9 +59,10 @@ export function ObservabilityView() {
               {data.items.map((t) => (
                 <div key={t.id} className="usage-row" style={{ cursor: 'pointer' }} onClick={() => openTrace(t.id)}>
                   <div className="usage-h">
-                    <div className="usage-name">{t.agentKey ?? '（全局）'}<span>{t.kind} · {t.provider}/{t.model || '-'}</span></div>
+                    <div className="usage-name">{traceAgent(t)}<span>{TRACE_KIND_LABEL[t.kind] ?? t.kind} · {t.provider}/{t.model || '-'}</span></div>
                     <div className={`usage-num ${t.status === 'error' ? '' : 'ok'}`}>{t.status === 'error' ? '错误' : `${t.latencyMs}ms`}</div>
                   </div>
+                  <div className="usage-meta">来源：{traceUser(t)}{t.tenantName ? ` · ${t.tenantName}` : ''}</div>
                   <div className="usage-meta">{new Date(t.at).toLocaleString()} · {t.totalTokens} token{t.cachedInput ? ` · 缓存命中 ${t.cachedInput}` : ''}{t.toolCalls ? ` · 工具×${t.toolCalls}` : ''}{t.errorMessage ? ` · ${t.errorMessage.slice(0, 40)}` : ''}</div>
                 </div>
               ))}
@@ -57,7 +72,7 @@ export function ObservabilityView() {
       </ViewState>
       {detail && (
         <div className="ad-detail show" onClick={() => setDetail(null)}>
-          <div className="ad-dh"><div className="bk" onClick={() => setDetail(null)}><Icon name="arrow" size={18} /></div><div className="dt"><div className="t">调用详情</div><div className="s">{detail.kind} · {detail.provider}/{detail.model || '-'}</div></div></div>
+          <div className="ad-dh"><div className="bk" onClick={() => setDetail(null)}><Icon name="arrow" size={18} /></div><div className="dt"><div className="t">{traceAgent(detail)}</div><div className="s">{TRACE_KIND_LABEL[detail.kind] ?? detail.kind} · {detail.provider}/{detail.model || '-'}</div></div></div>
           <div className="ad-db" onClick={(e) => e.stopPropagation()}>
             <div className="usage-summary">
               <div><b>{detail.status === 'error' ? '错误' : '成功'}</b><span>状态</span></div>
@@ -67,6 +82,16 @@ export function ObservabilityView() {
               <div><b>{detail.cachedInput}</b><span>缓存命中</span></div>
             </div>
             {detail.errorMessage && <div className="ai-test err" style={{ marginTop: 8 }}><Icon name="spark" size={14} /> {detail.errorMessage}</div>}
+            <div className="blk">
+              <div className="blk-h"><Icon name="user" size={15} /><span className="t">来源用户</span></div>
+              <div className="audit-detail-grid">
+                <div className="audit-detail-kv wide"><span>用户</span><b>{traceUser(detail)}</b></div>
+                <div className="audit-detail-kv"><span>租户</span><b>{detail.tenantName || detail.tenantId || '—'}</b></div>
+                <div className="audit-detail-kv"><span>智能体</span><b>{traceAgent(detail)}</b></div>
+                <div className="audit-detail-kv"><span>调用类型</span><b>{TRACE_KIND_LABEL[detail.kind] ?? detail.kind}</b></div>
+                <div className="audit-detail-kv wide"><span>排障标识</span><b>agent={detail.agentKey || '—'} · kind={detail.kind} · session={detail.sessionId || '—'} · user={detail.userId || '—'}</b></div>
+              </div>
+            </div>
             <div className="sec-h" style={{ marginTop: 8 }}><span className="t">上下文召回</span></div>
             <pre className="trace-text">{detail.context
               ? JSON.stringify(detail.context, null, 2)
@@ -128,8 +153,9 @@ export function ModerationView({ onOpenUser }: { onOpenUser: (id: string) => voi
 export function AuditView() {
   const [selected, setSelected] = useState<AdminAuditItem | null>(null);
   const [includeAdmin, setIncludeAdmin] = useState(false); // P2-11：可显式查看后台自身操作（多运营问责）
+  const [includeMetrics, setIncludeMetrics] = useState(false); // Prometheus /api/metrics 历史抓取默认隐藏，避免淹没用户动作
   const [q, setQ] = useState('');
-  const res = useResource(useCallback(() => api.auditLogs({ includeAdmin }), [includeAdmin]), [includeAdmin]);
+  const res = useResource(useCallback(() => api.auditLogs({ includeAdmin, includeMetrics }), [includeAdmin, includeMetrics]), [includeAdmin, includeMetrics]);
   const all = res.data ?? [];
   // 100 条日志里找一次特定动作/用户/IP，旧版只能靠眼扫；前端过滤足够（后端已限量返回）。
   const list = q.trim()
@@ -152,6 +178,7 @@ export function AuditView() {
             {([[false, '用户行为'], [true, '含后台操作']] as const).map(([v, l]) => (
               <button key={String(v)} type="button" className={`chip ${includeAdmin === v ? 'on' : ''}`} onClick={() => setIncludeAdmin(v)}>{l}</button>
             ))}
+            <button type="button" className={`chip ${includeMetrics ? 'on' : ''}`} onClick={() => setIncludeMetrics((v) => !v)}>含监控抓取</button>
           </div>
         </div>
         {res.error && all.length === 0 && <ErrorState msg={res.error} onRetry={res.reload} />}

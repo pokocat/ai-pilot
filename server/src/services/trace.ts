@@ -68,9 +68,47 @@ export async function recordTrace(t: TraceInput): Promise<void> {
   }
 }
 
-function toItem(r: { id: string; createdAt: Date; agentKey: string | null; versionId?: string | null; kind: string; provider: string; model: string; status: string; latencyMs: number; toolCalls: number; totalTokens: number; cachedInput: number; errorMessage: string | null }): AdminTraceItem {
+type TraceRow = {
+  id: string;
+  createdAt: Date;
+  tenantId: string | null;
+  userId: string | null;
+  sessionId: string | null;
+  agentKey: string | null;
+  versionId?: string | null;
+  kind: string;
+  provider: string;
+  model: string;
+  status: string;
+  latencyMs: number;
+  toolCalls: number;
+  totalTokens: number;
+  cachedInput: number;
+  errorMessage: string | null;
+};
+
+type TraceSource = {
+  userName?: string | null;
+  userPhone?: string | null;
+  tenantName?: string | null;
+  agentName?: string | null;
+};
+
+function toItem(r: TraceRow, source: TraceSource = {}): AdminTraceItem {
   return {
-    id: r.id, at: r.createdAt.toISOString(), agentKey: r.agentKey, versionId: r.versionId ?? null, kind: r.kind, provider: r.provider,
+    id: r.id,
+    at: r.createdAt.toISOString(),
+    agentKey: r.agentKey,
+    agentName: source.agentName ?? null,
+    versionId: r.versionId ?? null,
+    userId: r.userId,
+    userName: source.userName ?? null,
+    userPhone: source.userPhone ?? null,
+    tenantId: r.tenantId,
+    tenantName: source.tenantName ?? null,
+    sessionId: r.sessionId,
+    kind: r.kind,
+    provider: r.provider,
     model: r.model, status: r.status === 'error' ? 'error' : 'ok', latencyMs: r.latencyMs,
     toolCalls: r.toolCalls, totalTokens: r.totalTokens, cachedInput: r.cachedInput, errorMessage: r.errorMessage,
   };
@@ -91,10 +129,35 @@ export async function listTraces(opts: { days?: number; status?: string; agentKe
     prisma.llmTrace.aggregate({ where, _count: { _all: true }, _avg: { latencyMs: true } }),
     prisma.llmTrace.count({ where: { ...where, status: 'error' } }),
   ]);
+  const userIds = [...new Set(rows.map((r) => r.userId).filter((id): id is string => !!id))];
+  const tenantIds = [...new Set(rows.map((r) => r.tenantId).filter((id): id is string => !!id))];
+  const agentKeys = [...new Set(rows.map((r) => r.agentKey).filter((key): key is string => !!key))];
+  const [users, tenants, agents] = await Promise.all([
+    userIds.length
+      ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
+      : [],
+    tenantIds.length
+      ? prisma.tenant.findMany({ where: { id: { in: tenantIds } }, select: { id: true, name: true } })
+      : [],
+    agentKeys.length
+      ? prisma.agent.findMany({ where: { key: { in: agentKeys } }, select: { key: true, name: true } })
+      : [],
+  ]);
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  const tenantMap = new Map(tenants.map((t) => [t.id, t.name]));
+  const agentMap = new Map(agents.map((a) => [a.key, a.name]));
   return {
     windowDays: days,
     totals: { calls: agg._count._all, errors, avgLatencyMs: Math.round(agg._avg.latencyMs ?? 0) },
-    items: rows.map(toItem),
+    items: rows.map((r) => {
+      const user = r.userId ? userMap.get(r.userId) : null;
+      return toItem(r, {
+        userName: user?.name ?? null,
+        userPhone: user?.phone ?? null,
+        tenantName: r.tenantId ? tenantMap.get(r.tenantId) ?? null : null,
+        agentName: r.agentKey ? agentMap.get(r.agentKey) ?? null : null,
+      });
+    }),
   };
 }
 
@@ -102,8 +165,24 @@ export async function listTraces(opts: { days?: number; status?: string; agentKe
 export async function getTrace(id: string): Promise<AdminTraceDetail | null> {
   const r = await prisma.llmTrace.findUnique({ where: { id } });
   if (!r) return null;
+  const [user, tenant, agent] = await Promise.all([
+    r.userId
+      ? prisma.user.findUnique({ where: { id: r.userId }, select: { name: true, phone: true } })
+      : null,
+    r.tenantId
+      ? prisma.tenant.findUnique({ where: { id: r.tenantId }, select: { name: true } })
+      : null,
+    r.agentKey
+      ? prisma.agent.findUnique({ where: { key: r.agentKey }, select: { name: true } })
+      : null,
+  ]);
   return {
-    ...toItem(r),
+    ...toItem(r, {
+      userName: user?.name ?? null,
+      userPhone: user?.phone ?? null,
+      tenantName: tenant?.name ?? null,
+      agentName: agent?.name ?? null,
+    }),
     iterations: r.iterations,
     inputTokens: r.inputTokens,
     outputTokens: r.outputTokens,

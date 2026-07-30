@@ -120,9 +120,27 @@ export async function deleteTool(id: string): Promise<boolean> {
 
 /** agent 勾选列表（统一技能库）：native 技能(tool + output，带 kind) + 启用的运营自建 HTTP 工具(kind=tool)。 */
 export async function selectableMeta(): Promise<SkillToolMeta[]> {
-  const native = nativeSkillMeta().map((m) => ({ name: m.key, description: m.description, builtin: true, kind: m.kind }));
+  const nativeDisplayNames: Record<string, string> = {
+    search_knowledge: '知识库检索',
+    recall_memory: '长期记忆召回',
+  };
+  const native = nativeSkillMeta().map((m) => ({
+    name: m.key,
+    displayName: nativeDisplayNames[m.key] ?? m.name,
+    description: m.description,
+    builtin: true,
+    kind: m.kind,
+    inputSchema: m.kind === 'tool' ? resolveTools([m.key])[0]?.inputSchema : undefined,
+  }));
   const custom = await prisma.skillTool.findMany({ where: { enabled: true }, orderBy: { createdAt: 'desc' } });
-  return [...native, ...custom.map((c) => ({ name: c.key, description: c.description, builtin: false, kind: 'tool' as const }))];
+  return [...native, ...custom.map((c) => ({
+    name: c.key,
+    displayName: c.name,
+    description: c.description,
+    builtin: false,
+    kind: 'tool' as const,
+    inputSchema: (c.inputSchema as Record<string, unknown>) ?? {},
+  }))];
 }
 
 /** agent 勾选的「产出处理」技能(kind=output)。当前仅 native；未来可扩展 HTTP output。 */

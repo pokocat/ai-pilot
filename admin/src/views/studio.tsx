@@ -2,14 +2,14 @@
 import { useEffect, useState, type MouseEvent } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
-import { api, type AdminAgent, type AgentBilling, type AdminUserItem, type SkillToolDef, type SkillToolUpsert, type SkillToolMeta, type AdminKnowledgeView, type AdminRetrievalDebug } from '../api';
+import { api, type AdminAgent, type AgentType, type AgentBilling, type AdminUserItem, type SkillToolDef, type SkillToolUpsert, type SkillToolMeta, type AdminKnowledgeView, type AdminRetrievalDebug, type KnowledgeDetail } from '../api';
 import { PageHead, ViewState, ErrorState, ConfirmDialog, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { billingTag } from '../format';
 
 export function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toast: (m: string) => void }) {
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ key: '', name: '', role: '', billing: 'unlock' as AgentBilling, price: 10 });
+  const [form, setForm] = useState({ key: '', name: '', role: '', type: 'advisory' as AgentType, billing: 'unlock' as AgentBilling, price: 10 });
   const res = useResource(api.agents, []);
   const list = res.data ?? [];
   const load = async () => res.reload();
@@ -33,8 +33,8 @@ export function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toa
     // 新增智能体是 requireSuper：非超管拿到的是 403「需要 owner 权限」，
     // catch 别再一律说成「key 可能已存在」——那会让运营反复改 key 试。
     try {
-      await api.createAgent({ key: form.key, name: form.name, role: form.role, billing: form.billing, price: form.billing === 'free' ? 0 : form.price });
-      setAdding(false); setForm({ key: '', name: '', role: '', billing: 'unlock', price: 10 });
+      await api.createAgent({ key: form.key, name: form.name, role: form.role, type: form.type, billing: form.billing, price: form.billing === 'free' ? 0 : form.price });
+      setAdding(false); setForm({ key: '', name: '', role: '', type: 'advisory', billing: 'unlock', price: 10 });
       await load(); toast('已新增智能体（默认下架，点击可配置上架）');
     } catch (e) { toast((e as Error)?.message || '新增失败（key 可能已存在）'); }
   };
@@ -50,6 +50,14 @@ export function AgentsView({ onOpen, toast }: { onOpen: (k: string) => void; toa
             <div className="ai-field"><div className="ai-fl">key（唯一，小写）</div><input className="ai-input" value={form.key} onChange={(e) => setForm({ ...form, key: e.target.value })} placeholder="如 legal" /></div>
             <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="如 法务顾问" /></div>
             <div className="ai-field"><div className="ai-fl">一句话定位</div><input className="ai-input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="合同 · 风险 · 合规" /></div>
+            <div className="ai-field">
+              <div className="ai-fl">用户端入口</div>
+              <select className="ai-input" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as AgentType })}>
+                <option value="advisory">对话 · 专业顾问</option>
+                <option value="creative">执行 · 内容出品</option>
+                <option value="custom">对话 · 自定义顾问</option>
+              </select>
+            </div>
             <div className="ai-field">
               <div className="ai-fl">计费</div>
               <select className="ai-input" value={form.billing} onChange={(e) => setForm({ ...form, billing: e.target.value as AgentBilling })}>
@@ -103,9 +111,17 @@ type SkillForm = { id?: string; key: string; name: string; description: string; 
 const BLANK_SKILL: SkillForm = { key: '', name: '', description: '', httpMethod: 'POST', httpUrl: '', argsLocation: 'body', enabled: true, headersText: '', schemaText: '{\n  "type": "object",\n  "properties": {\n    "query": { "type": "string", "description": "参数说明" }\n  },\n  "required": ["query"]\n}' };
 
 const KIND_LABEL: Record<string, string> = { tool: '模型工具', output: '产出处理', artifact: '成品交付' };
+const KNOWLEDGE_KIND_LABEL: Record<string, string> = {
+  document: '资料',
+  insight: '洞察',
+  decision: '决策',
+  todo: '待办',
+  report_ref: '方案引用',
+};
 
 export function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
   const [form, setForm] = useState<SkillForm | null>(null);
+  const [selectedSkill, setSelectedSkill] = useState<SkillToolMeta | null>(null);
   const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
   const custom = useResource(api.customSkillTools, []);
   const builtin = useResource(api.skillTools, []);
@@ -182,12 +198,13 @@ export function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
         {builtin.initial && <div className="skel"><div className="skel-b skel-r" /><div className="skel-b skel-r" /></div>}
         {!builtin.initial && nativeSkills.length === 0 && <div className="empty">没有内置技能。</div>}
         {nativeSkills.map((m) => (
-          <div key={m.name} className="mem-card">
+          <div key={m.name} className="mem-card actionable" onClick={() => setSelectedSkill(m)}>
             <span className="mi"><Icon name={m.kind === 'output' ? 'layers' : 'insight'} size={16} /></span>
             <div className="mb">
-              <div className="mt">{m.name}<span className="tag">{KIND_LABEL[m.kind] ?? m.kind}</span><span className="tag off">内置</span></div>
+              <div className="mt">{m.displayName || m.name}<span className="tag off">{m.name}</span><span className="tag">{KIND_LABEL[m.kind] ?? m.kind}</span><span className="tag off">内置</span></div>
               <div className="mm">{m.description}</div>
             </div>
+            <Icon name="arrow" size={14} />
           </div>
         ))}
         <div className="sec-h"><span className="t">自定义 HTTP 工具</span><span className="s">运营自建</span></div>
@@ -205,6 +222,7 @@ export function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
         ))}
       </div>
       {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
+      {selectedSkill && <SkillDetailPanel skill={selectedSkill} onClose={() => setSelectedSkill(null)} />}
     </>
   );
 }
@@ -213,7 +231,21 @@ export function SkillLibraryView({ toast }: { toast: (m: string) => void }) {
 export function KnowledgeView({ toast }: { toast: (m: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
+  const [userId, setUserId] = useState('');
+  const [selectedItem, setSelectedItem] = useState<AdminKnowledgeView['items'][number] | null>(null);
+  const [detail, setDetail] = useState<KnowledgeDetail | null>(null);
+  const [detailErr, setDetailErr] = useState('');
   const res = useResource(api.knowledge, []);
+  const openItem = async (item: AdminKnowledgeView['items'][number]) => {
+    setSelectedItem(item);
+    setDetail(null);
+    setDetailErr('');
+    try {
+      setDetail(await api.userKnowledgeDetail(item.userId, item.id));
+    } catch (e) {
+      setDetailErr((e as Error).message || '知识详情加载失败');
+    }
+  };
   return (
     <>
       <PageHead k="knowledge" res={res} badge={res.data ? `${res.data.totals.items} 项` : undefined} />
@@ -221,6 +253,12 @@ export function KnowledgeView({ toast }: { toast: (m: string) => void }) {
         {(data: AdminKnowledgeView) => {
           const { totals } = data;
           const stale = totals.staleChunks > 0 || totals.staleMemories > 0;
+          const users = [...new Map(data.items.map((it) => [it.userId, {
+            id: it.userId,
+            name: it.userName,
+            phone: it.userPhone,
+          }])).values()].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-CN'));
+          const items = userId ? data.items.filter((it) => it.userId === userId) : data.items;
           const reembed = () => setConfirmSpec({
             title: '重新嵌入存量',
             desc: '用当前嵌入模型重嵌全部知识库切片与长期记忆。数据量大时会跑一段时间，期间召回质量可能波动。',
@@ -253,15 +291,26 @@ export function KnowledgeView({ toast }: { toast: (m: string) => void }) {
                 <div><b>{totals.memories}</b><span>长期记忆</span></div>
                 <div><b>{totals.staleChunks + totals.staleMemories}</b><span>待重嵌</span></div>
               </div>
+              <div className="filter-bar">
+                <select className="ai-input" value={userId} onChange={(e) => setUserId(e.target.value)}>
+                  <option value="">全部用户 · {users.length} 人</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>{u.name || '未命名用户'} · {u.phone || u.id.slice(0, 8)}</option>
+                  ))}
+                </select>
+              </div>
               <button type="button" className="add-btn full" onClick={reembed} disabled={busy}><Icon name="spark" size={15} /> {busy ? '重新嵌入中…' : '重新嵌入存量'}</button>
               {data.items.length === 0 && <div className="empty">还没有知识库内容。用户在对话里 @ 引用资料 / 上传 / 沉淀成果后，会在此显示。</div>}
-              {data.items.map((it) => (
-                <div key={it.id} className="mem-card">
+              {data.items.length > 0 && items.length === 0 && <div className="empty">该用户还没有知识库内容。</div>}
+              {items.map((it) => (
+                <div key={it.id} className="mem-card actionable" onClick={() => openItem(it)}>
                   <span className="mi"><Icon name="doc" size={16} /></span>
                   <div className="mb">
-                    <div className="mt">{it.title}<span className="tag off">{it.kind}</span>{it.stale && <span className="tag warn">旧维度</span>}</div>
-                    <div className="mm">{it.tenantName ?? it.tenantId.slice(0, 8)} · {it.chunks} 切片 · 维度 {it.dims.join('/') || '—'}</div>
+                    <div className="mt">{it.title}<span className="tag off">{KNOWLEDGE_KIND_LABEL[it.kind] ?? it.kind}</span>{it.stale && <span className="tag warn">旧维度</span>}</div>
+                    <div className="mm">{it.userName || '未命名用户'} · {it.userPhone || it.userId.slice(0, 8)} · {it.tenantName ?? it.tenantId.slice(0, 8)}</div>
+                    <div className="mm">{it.chunks} 切片 · 维度 {it.dims.join('/') || '—'} · {new Date(it.createdAt).toLocaleString()}</div>
                   </div>
+                  <Icon name="arrow" size={14} />
                 </div>
               ))}
             </div>
@@ -269,7 +318,104 @@ export function KnowledgeView({ toast }: { toast: (m: string) => void }) {
         }}
       </ViewState>
       {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
+      {selectedItem && (
+        <KnowledgeDetailPanel
+          item={selectedItem}
+          detail={detail}
+          error={detailErr}
+          onClose={() => { setSelectedItem(null); setDetail(null); setDetailErr(''); }}
+        />
+      )}
     </>
+  );
+}
+
+function SkillDetailPanel({ skill, onClose }: { skill: SkillToolMeta; onClose: () => void }) {
+  const execution = skill.kind === 'tool'
+    ? '模型在对话或产出过程中按需调用，结果会回到本轮上下文。'
+    : skill.kind === 'output'
+      ? '结构化成果生成后执行，用于补充可交付结果。'
+      : '通过异步任务生成图片等成品文件，不进入模型工具循环。';
+  return (
+    <div className="ad-detail show">
+      <div className="ad-dh">
+        <button className="bk" type="button" onClick={onClose} aria-label="关闭技能详情"><Icon name="arrow" size={18} /></button>
+        <div className="di"><Icon name={skill.kind === 'artifact' ? 'image' : skill.kind === 'output' ? 'layers' : 'insight'} size={18} /></div>
+        <div className="dt"><div className="t">{skill.displayName || skill.name}</div><div className="s">{KIND_LABEL[skill.kind] ?? skill.kind} · {skill.builtin ? '代码内置' : '运营自建'}</div></div>
+      </div>
+      <div className="ad-db">
+        <div className="blk">
+          <div className="blk-h"><Icon name="insight" size={15} /><span className="t">技能说明</span></div>
+          <div className="audit-detail-grid">
+            <div className="audit-detail-kv"><span>技能 key</span><b>{skill.name}</b></div>
+            <div className="audit-detail-kv"><span>执行类型</span><b>{KIND_LABEL[skill.kind] ?? skill.kind}</b></div>
+            <div className="audit-detail-kv wide"><span>用途</span><b>{skill.description}</b></div>
+            <div className="audit-detail-kv wide"><span>工作方式</span><b>{execution}</b></div>
+          </div>
+        </div>
+        <div className="blk">
+          <div className="blk-h"><Icon name="doc" size={15} /><span className="t">输入参数</span></div>
+          <pre className="trace-text">{skill.inputSchema ? JSON.stringify(skill.inputSchema, null, 2) : '该技能不接收模型工具参数。'}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KnowledgeDetailPanel({
+  item,
+  detail,
+  error,
+  onClose,
+}: {
+  item: AdminKnowledgeView['items'][number];
+  detail: KnowledgeDetail | null;
+  error: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="ad-detail show">
+      <div className="ad-dh">
+        <button className="bk" type="button" onClick={onClose} aria-label="关闭知识详情"><Icon name="arrow" size={18} /></button>
+        <div className="di"><Icon name="doc" size={18} /></div>
+        <div className="dt"><div className="t">{item.title}</div><div className="s">{item.userName || '未命名用户'} · {item.userPhone || item.userId.slice(0, 8)}</div></div>
+      </div>
+      <div className="ad-db">
+        {error && <ErrorState msg={error} />}
+        {!detail && !error && <div className="skel"><div className="skel-b skel-r" /><div className="skel-b skel-r" /></div>}
+        {detail && (
+          <>
+            <div className="blk">
+              <div className="blk-h"><Icon name="user" size={15} /><span className="t">归属与来源</span></div>
+              <div className="audit-detail-grid">
+                <div className="audit-detail-kv wide"><span>用户</span><b>{item.userName || '未命名用户'} · {item.userPhone || item.userId}</b></div>
+                <div className="audit-detail-kv"><span>类型</span><b>{KNOWLEDGE_KIND_LABEL[detail.kind] ?? detail.kind}</b></div>
+                <div className="audit-detail-kv"><span>来源</span><b>{detail.sourceType}</b></div>
+                <div className="audit-detail-kv"><span>状态</span><b>{detail.status}</b></div>
+                <div className="audit-detail-kv"><span>切片</span><b>{detail.chunks.length}</b></div>
+                <div className="audit-detail-kv wide"><span>文件</span><b>{detail.fileName || '—'}{detail.fileType ? ` · ${detail.fileType}` : ''}</b></div>
+              </div>
+            </div>
+            <div className="blk">
+              <div className="blk-h"><Icon name="doc" size={15} /><span className="t">正文预览</span></div>
+              <pre className="trace-text">{detail.textPreview || '（无正文）'}</pre>
+            </div>
+            <div className="blk">
+              <div className="blk-h"><Icon name="layers" size={15} /><span className="t">切片内容</span><span className="badge">{detail.chunks.length}</span></div>
+              <div className="mem-list">
+                {detail.chunks.map((chunk) => (
+                  <div key={chunk.id} className="mem-card">
+                    <span className="mi">{chunk.ord + 1}</span>
+                    <div className="mb"><div className="mt">第 {chunk.ord + 1} 片<span className="tag off">{chunk.dim} 维</span></div><div className="mm">{chunk.text}</div></div>
+                  </div>
+                ))}
+                {!detail.chunks.length && <div className="empty">这条知识还没有切片。</div>}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

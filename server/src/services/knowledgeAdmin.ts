@@ -14,7 +14,7 @@ export async function knowledgeView(): Promise<AdminKnowledgeView> {
   const embedModel = embedRemote ? cfg.embeddingModel : '本地确定性嵌入';
 
   const items = await prisma.knowledgeItem.findMany({
-    select: { id: true, title: true, kind: true, tenantId: true, createdAt: true },
+    select: { id: true, title: true, kind: true, tenantId: true, userId: true, createdAt: true },
     orderBy: { createdAt: 'desc' },
     take: 500,
   });
@@ -37,10 +37,17 @@ export async function knowledgeView(): Promise<AdminKnowledgeView> {
   }
 
   const tenantIds = [...new Set(items.map((i) => i.tenantId))];
-  const tenants = tenantIds.length
-    ? await prisma.tenant.findMany({ where: { id: { in: tenantIds } }, select: { id: true, name: true } })
-    : [];
+  const userIds = [...new Set(items.map((i) => i.userId))];
+  const [tenants, users] = await Promise.all([
+    tenantIds.length
+      ? prisma.tenant.findMany({ where: { id: { in: tenantIds } }, select: { id: true, name: true } })
+      : [],
+    userIds.length
+      ? prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, phone: true } })
+      : [],
+  ]);
   const tn = new Map(tenants.map((t) => [t.id, t.name]));
+  const un = new Map(users.map((u) => [u.id, u]));
 
   const rows: AdminKnowledgeItemRow[] = items.map((i) => {
     const e = byItem.get(i.id);
@@ -49,6 +56,9 @@ export async function knowledgeView(): Promise<AdminKnowledgeView> {
       id: i.id,
       title: i.title || '（无标题）',
       kind: i.kind,
+      userId: i.userId,
+      userName: un.get(i.userId)?.name ?? null,
+      userPhone: un.get(i.userId)?.phone ?? null,
       tenantId: i.tenantId,
       tenantName: tn.get(i.tenantId) ?? null,
       chunks: e?.chunks ?? 0,

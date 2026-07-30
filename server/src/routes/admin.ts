@@ -197,6 +197,10 @@ const BILLINGS: AgentBilling[] = ['free', 'unlock', 'metered'];
 function normalizeBilling(b: unknown): AgentBilling {
   return BILLINGS.includes(b as AgentBilling) ? (b as AgentBilling) : 'free';
 }
+const AGENT_TYPES = ['general', 'advisory', 'creative', 'custom'] as const;
+function normalizeAgentType(type: unknown): typeof AGENT_TYPES[number] {
+  return AGENT_TYPES.includes(type as typeof AGENT_TYPES[number]) ? type as typeof AGENT_TYPES[number] : 'custom';
+}
 
 const PROVIDER_MODES: AgentProviderMode[] = ['inherit', 'openai', 'dify'];
 
@@ -1168,28 +1172,37 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // 某用户知识项详情（切片钻入 + 每片向量维度）
   app.get<{ Params: { id: string; kid: string } }>('/admin/users/:id/knowledge/:kid', async (req, reply) => {
-    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true } });
-    if (!user) return reply.code(404).send({ error: 'user not found' });
-    const detail = await getKnowledgeDetail(user.tenantId, req.params.kid);
+    const item = await prisma.knowledgeItem.findFirst({
+      where: { id: req.params.kid, userId: req.params.id },
+      select: { tenantId: true },
+    });
+    if (!item) return reply.code(404).send({ error: 'knowledge not found' });
+    const detail = await getKnowledgeDetail(item.tenantId, req.params.kid);
     if (!detail) return reply.code(404).send({ error: 'knowledge not found' });
     return detail;
   });
 
   // 删除某用户知识项（含 OSS 原件）
   app.delete<{ Params: { id: string; kid: string } }>('/admin/users/:id/knowledge/:kid', async (req, reply) => {
-    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true } });
-    if (!user) return reply.code(404).send({ error: 'user not found' });
-    await deleteKnowledge(user.tenantId, req.params.kid);
-    await recordAudit({ tenantId: user.tenantId, userId: req.params.id, action: 'admin.user.knowledge.delete', payload: { itemId: req.params.kid } });
+    const item = await prisma.knowledgeItem.findFirst({
+      where: { id: req.params.kid, userId: req.params.id },
+      select: { tenantId: true },
+    });
+    if (!item) return reply.code(404).send({ error: 'knowledge not found' });
+    await deleteKnowledge(item.tenantId, req.params.kid);
+    await recordAudit({ tenantId: item.tenantId, userId: req.params.id, action: 'admin.user.knowledge.delete', payload: { itemId: req.params.kid } });
     return { ok: true };
   });
 
   // 重嵌某用户知识项（从已存正文重新切片+向量化）
   app.post<{ Params: { id: string; kid: string } }>('/admin/users/:id/knowledge/:kid/reembed', async (req, reply) => {
-    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true } });
-    if (!user) return reply.code(404).send({ error: 'user not found' });
-    const r = await reembedItem(user.tenantId, req.params.kid);
-    await recordAudit({ tenantId: user.tenantId, userId: req.params.id, action: 'admin.user.knowledge.reembed', payload: { itemId: req.params.kid, chunks: r.chunks } });
+    const item = await prisma.knowledgeItem.findFirst({
+      where: { id: req.params.kid, userId: req.params.id },
+      select: { tenantId: true },
+    });
+    if (!item) return reply.code(404).send({ error: 'knowledge not found' });
+    const r = await reembedItem(item.tenantId, req.params.kid);
+    await recordAudit({ tenantId: item.tenantId, userId: req.params.id, action: 'admin.user.knowledge.reembed', payload: { itemId: req.params.kid, chunks: r.chunks } });
     return r;
   });
 
@@ -1254,21 +1267,41 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // —— 审计日志：默认看用户 API / 登录尝试；后台自身行为可用 includeAdmin=true 显式查看 ——
-  app.get<{ Querystring: { limit?: string; userId?: string; action?: string; includeAdmin?: string } }>(
+  app.get<{ Querystring: { limit?: string; userId?: string; action?: string; includeAdmin?: string; includeMetrics?: string } }>(
     '/admin/audit-logs',
     async (req): Promise<AdminAuditItem[]> => {
       const take = Math.min(Math.max(Number(req.query.limit ?? 100) || 100, 1), 200);
       const includeAdmin = req.query.includeAdmin === 'true' || req.query.includeAdmin === '1';
+      const includeMetrics = req.query.includeMetrics === 'true' || req.query.includeMetrics === '1';
+      const exclusions: Prisma.AuditLogWhereInput[] = [];
+      if (!includeAdmin && !req.query.action) exclusions.push({ action: { startsWith: 'admin.' } });
       const where: Prisma.AuditLogWhereInput = {
         ...(req.query.userId ? { userId: req.query.userId } : {}),
         ...(req.query.action ? { action: req.query.action } : {}),
-        ...(!includeAdmin && !req.query.action ? { NOT: { action: { startsWith: 'admin.' } } } : {}),
+        ...(exclusions.length ? { NOT: exclusions } : {}),
       };
-      const logs = await prisma.auditLog.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        take,
-      });
+      // 兼容修复前已经写入的 Prometheus 抓取记录。Prisma 的 JSON path `NOT equals`
+      // 会把「payload 里根本没有 path」的正常业务日志也按 SQL NULL 一起排掉，不能直接塞进 where。
+      // 因此分批向后取并在服务层跳过 /api/metrics，直到凑满用户要看的数量；新抓取已不再入库。
+      const logs = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < 20 && logs.length < take; page++) {
+        const batch = await prisma.auditLog.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: includeMetrics ? take : 500,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        if (!batch.length) break;
+        for (const log of batch) {
+          const payload = log.payloadJson as { path?: unknown } | null;
+          if (!includeMetrics && payload?.path === '/api/metrics') continue;
+          logs.push(log);
+          if (logs.length >= take) break;
+        }
+        cursor = batch[batch.length - 1]?.id;
+        if (batch.length < (includeMetrics ? take : 500)) break;
+      }
       const userIds = [...new Set(logs.map((l) => l.userId).filter(Boolean))] as string[];
       const tenantIds = [...new Set(logs.map((l) => l.tenantId).filter(Boolean))] as string[];
       const [users, tenants] = await Promise.all([
@@ -1401,7 +1434,7 @@ export async function adminRoutes(app: FastifyInstance) {
         name,
         role: (b.role ?? '').trim() || '自定义智能体',
         icon: b.icon || 'spark',
-        type: b.type ?? 'custom',
+        type: normalizeAgentType(b.type),
         gift: billing === 'free',
         billing,
         price: billing === 'free' ? 0 : Math.max(0, Math.trunc(b.price ?? 0)),
@@ -1437,7 +1470,7 @@ export async function adminRoutes(app: FastifyInstance) {
           name: b.name?.trim() || undefined,
           role: b.role?.trim() || undefined,
           icon: b.icon || undefined,
-          type: b.type || undefined,
+          type: b.type === undefined ? undefined : normalizeAgentType(b.type),
           gift: targetBilling === 'free',
           billing,
           // free 计费价格强制归零；否则按入参（非负整数）

@@ -139,7 +139,7 @@ export const adminAuth = {
 };
 
 // 数据模型统一来自 SSOT（shared/contracts），与前端/后端同口径；按运营端旧名再导出。
-export type { Overview, AdminAgent, AgentDetail, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, AdminAgentMemoryItem } from '../../shared/contracts';
+export type { Overview, AdminAgent, AgentDetail, AgentType, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, AdminAgentMemoryItem } from '../../shared/contracts';
 export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsConfig, SkillToolMeta, SkillToolDef, SkillToolUpsert, ToolStatItem } from '../../shared/contracts';
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
@@ -228,9 +228,10 @@ export const api = {
   createSkillTool: (body: SkillToolUpsert) => req<SkillToolDef>('/admin/skill-tools/custom', 'POST', body),
   updateSkillTool: (id: string, body: SkillToolUpsert) => req<SkillToolDef>(`/admin/skill-tools/custom/${id}`, 'PATCH', body),
   delSkillTool: (id: string) => req<{ ok: boolean }>(`/admin/skill-tools/custom/${id}`, 'DELETE'),
-  auditLogs: (q: { includeAdmin?: boolean; action?: string; userId?: string } = {}) => {
+  auditLogs: (q: { includeAdmin?: boolean; includeMetrics?: boolean; action?: string; userId?: string } = {}) => {
     const p = new URLSearchParams();
     if (q.includeAdmin) p.set('includeAdmin', 'true');
+    if (q.includeMetrics) p.set('includeMetrics', 'true');
     if (q.action) p.set('action', q.action);
     if (q.userId) p.set('userId', q.userId);
     const qs = p.toString();

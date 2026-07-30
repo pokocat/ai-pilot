@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
 import NumInput from './NumInput';
-import { api, type AgentDetail, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta, type AdminAgentMemoryItem, type ToolStatItem } from './api';
+import { api, type AgentDetail, type AgentType, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta, type AdminAgentMemoryItem, type ToolStatItem } from './api';
 import { ConfirmDialog, type ConfirmSpec } from './components';
 import StudioSandbox from './StudioSandbox';
 import StudioVersions, { tierName } from './StudioVersions';
@@ -40,6 +40,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   const [publishing, setPublishing] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState('');
+  const [agentType, setAgentType] = useState<AgentType>('advisory');
   const [billing, setBilling] = useState<AgentBilling>('free');
   const [price, setPrice] = useState(0);
   const [billingRatio, setBillingRatio] = useState(1);
@@ -75,6 +76,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
     api.agent(agentKey).then((d) => {
       setData(d);
       setName(d.name); setRole(d.role);
+      setAgentType(d.type);
       setBilling(d.billing); setPrice(d.price);
       setBillingRatio(d.billingRatio ?? 1); setMeterUnit(d.meterUnit ?? 'text');
       setPrompt(d.systemPrompt);
@@ -150,13 +152,14 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
     return rt;
   };
 
-  // 落库当前草稿（不发布）。C 端继续用已发布版本，直到点「发布新版本」。
+  // 落库当前草稿（不发布）。提示词/计费/接入等版本字段继续用已发布版本；
+  // 名称、角色、类型/用户端入口属于 Agent 身份字段，保存后即时生效。
   const saveDraft = async (): Promise<boolean> => {
     let runtime: AgentRuntimeUpdate;
     try { runtime = buildRuntime(); } catch (e) { setTest({ ok: false, error: 'Dify inputs JSON 格式错误：' + (e as Error).message }); return false; }
     try {
       await api.saveAgent(agentKey, {
-        name, role, gift: billing === 'free', billing,
+        name, role, type: agentType, gift: billing === 'free', billing,
         price: billing === 'free' ? 0 : Math.max(0, Math.trunc(price)),
         billingRatio: meterUnit === 'text' ? Math.max(0.1, billingRatio) : 1,
         meterUnit,
@@ -166,7 +169,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
     } catch (e) { toast((e as Error)?.message || '保存失败'); return false; }
   };
 
-  const save = async () => { if (await saveDraft()) { setDirty(true); toast('已保存草稿（未发布，C 端不受影响）'); } };
+  const save = async () => { if (await saveDraft()) { setDirty(true); toast('已保存草稿；用户端入口等基础信息已生效，内容配置待发布'); } };
 
   // 发布：先把当前编辑落库，再冻结成新版本并指向它（C 端立即切换）。
   // 版本名原先用 window.prompt 收（系统弹窗，不显示「这次会对 C 端生效」，回车即发布）。
@@ -253,6 +256,16 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           <div className="blk-h"><Icon name="agent" size={15} /><span className="t">基础信息</span></div>
           <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="ai-field"><div className="ai-fl">一句话定位</div><input className="ai-input" value={role} onChange={(e) => setRole(e.target.value)} /></div>
+          <div className="ai-field">
+            <div className="ai-fl">用户端入口</div>
+            <select className="ai-input" value={agentType} onChange={(e) => setAgentType(e.target.value as AgentType)}>
+              <option value="general" disabled={agentKey !== 'general'}>对话 · 总军师</option>
+              <option value="advisory">对话 · 专业顾问</option>
+              <option value="creative">执行 · 内容出品</option>
+              <option value="custom">对话 · 自定义顾问</option>
+            </select>
+            <div className="blk-d">上架后按这里进入用户端目录；“内容出品”显示在执行页，其余顾问显示在对话页。</div>
+          </div>
         </div>
 
         <div className="blk">

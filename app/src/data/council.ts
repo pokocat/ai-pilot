@@ -34,8 +34,11 @@ export const CORE_SPECIALISTS: SpecialistMeta[] = [
   { agentKey: 'ops', duty: '数据 · 复盘 · 节奏', syncDesc: '数据更新，明日打法随调' },
 ];
 
-// 更多专业军师（顾问目录的其余 advisory 智能体按需展开）。
-export const MORE_SPECIALIST_KEYS = ['intel', 'fund', 'model', 'org', 'brand'];
+/** 后台上架目录 → 对话页动态顾问区；创作型统一去执行页，已占常驻位的 key 不重复。 */
+export function dialogueDirectoryAgents<T extends { key: string; type: string }>(agents: T[]): T[] {
+  const coreKeys = new Set(['general', ...CORE_SPECIALISTS.map((sp) => sp.agentKey)]);
+  return agents.filter((agent) => agent.type !== 'creative' && !coreKeys.has(agent.key));
+}
 
 // 总军师对话里的「派给专业军师」建议 chips。
 export const DISPATCH_SUGGESTIONS = [

@@ -6,6 +6,14 @@
 
 ## 变更日志
 
+### 2026-07-29 · 修运营后台与用户端配置脱节：新上架智能体动态可见、技能/知识可钻取、调用来源可辨识、审计降噪 · 影响面：shared 契约 + server（智能体类型、技能元信息、知识归属、LLM trace 来源、audit 过滤）+ admin（智能体/技能库/知识库/调用诊断/审计日志）+ app（对话/执行智能体目录）+ tests
+
+后台新增/上架的智能体不再依赖小程序写死 key：`advisory/custom` 动态进入「对话 → 专业参谋」，`creative` 进入「执行 → 内容出品」，两页 `useDidShow` 都会刷新 `/agents`；后台新增与详情面板补「用户端入口」类型选择，避免 `custom` 智能体上架后无落点。技能库内置项可点开查看中文名称、执行方式和只读参数 Schema；知识库列表补 `userId/姓名/手机号`，可按用户筛选并点开正文与切片，用户知识详情/删除/重嵌 URL 同时收紧为 `userId + itemId` 真归属校验。
+
+调用诊断现在由 `LlmTrace` 的既有 `userId/tenantId/sessionId/agentKey` 回填用户、手机号、租户和智能体名称；界面优先显示「方案生成 / 对话回复」与顾问中文名，`general/deliverable/ip` 等原始值只留在排障标识。HTTP 审计不再记录 `/api/metrics` Prometheus 抓取，历史抓取默认过滤、需要时可点「含监控抓取」查看；分批回读避免历史 metric 把最近 100 条真实用户动作淹没。
+
+验证：按暂存区生成干净源码快照后，server `npm run build`、admin `npm run build`（含 `lint:ui`）、app TypeScript 检查全部通过；server 定向集成 `adminVisibility.test.ts` 4/4、app `npm test` 33/33 通过。
+
 ### 2026-07-29 · 海报成品图：配置面简化（去掉部署级开关）+ 七个真缺陷 · 影响面：server（`env.ts` / `services/creative/*` / `routes/creative.ts` / 两份测试）+ shared（`contracts.d.ts`）+ admin（创作任务页 / 任务台）+ app（确认页 / 换风格面板）+ docs（`AGENTS.md` §8.4 §13、`DEPLOYMENT.md` §5 §5.1、方案 §6.2 §8.1 §14 §16 §21 §22）+ `server/.env.example` / `.env.test`
 
 同一天上线的功能（`d2de9a8` / `bce1969` / `fcfadad`）在两轮独立评审后做的收口。起因是「配置面冗余」这一条：一个功能挂了 4 个环境变量 + 一排后台配置项，而这 4 个 env **没有一个是运维真的会去调的**，却各自制造了一种失败模式。顺着同一条线索翻出七个真缺陷——其中最重的一个让整套 BrandKit 集成在生产上根本走不到。

@@ -14,7 +14,7 @@ import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
 import { api, type Agent, type SessionItem, type SearchHit } from '../../services/api';
 import { getToken } from '../../services/token';
-import { ADVISOR_ALIAS, CORE_SPECIALISTS, MORE_SPECIALIST_KEYS } from '../../data/council';
+import { ADVISOR_ALIAS, CORE_SPECIALISTS, dialogueDirectoryAgents } from '../../data/council';
 import NextStepCard from '../../components/NextStepCard';
 import CoachMarks from '../../components/CoachMarks'; // 保持 CoachMarks 全站最后（避免 common chunk CSS 顺序告警，AGENTS.md §7.2）
 import { shouldOpenOnboarding } from '../../services/onboardingStateCore';
@@ -181,7 +181,9 @@ export default function Sessions() {
 
   const master = findAgent('general');
   const masterLast = latestOf('general');
-  const moreAgents = MORE_SPECIALIST_KEYS.map(findAgent).filter(Boolean) as Agent[];
+  // 后台上架是用户目录的真源：除总军师/常驻顾问/创作型外，其余已上架顾问都动态进入
+  // 「专业参谋」。不能再靠写死 key 白名单，否则运营新增或重新上架的顾问接口里有、页面却消失。
+  const moreAgents = dialogueDirectoryAgents(s.agents());
   const filteredSessions = sessions.filter(matchSession);
 
   // V7-15 未读徽章：unreadCount>0 → 数字徽章（>99 记 99+）；缺省则回退旧版 hasUnread 红点。

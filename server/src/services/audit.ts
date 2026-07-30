@@ -98,7 +98,9 @@ export function registerHttpAudit(app: FastifyInstance) {
 
   app.addHook('onResponse', async (req, reply) => {
     const path = req.url.split('?')[0] ?? req.url;
-    if (!path.startsWith('/api/') || path === '/api/health') return;
+    // 健康检查与 Prometheus 抓取是机器高频轮询，不是用户行为。写进 audit_log 只会把
+    // 真正的登录、支付、资料与产出动作淹没；监控本身已有 Prometheus 时序数据。
+    if (!path.startsWith('/api/') || path === '/api/health' || path === '/api/metrics') return;
 
     const token = (req.headers['x-user-id'] as string | undefined)?.trim();
     const resolvedId = verifyUserToken(token); // JWT→sub / 历史→userId 原样
