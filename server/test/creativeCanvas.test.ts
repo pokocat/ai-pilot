@@ -18,11 +18,14 @@ import {
   CANVAS_PLACEHOLDER,
 } from '../src/services/creative/canvasSanitize.js';
 import {
-  generateCanvasPoster, MAX_HTML_CALLS,
+  generateCanvasPoster, MAX_HTML_CALLS, MAX_DEBUG_HTML_CHARS,
   type CompleteTextFn, type CanvasRenderFn,
 } from '../src/services/creative/canvasEngine.js';
 import { generateManifesto } from '../src/services/creative/manifesto.js';
-import { violationsCritique, MEASURE_LIMITS, type PosterViolation } from '../src/services/creative/canvasMeasure.js';
+import {
+  violationsCritique, MEASURE_LIMITS, DECOR_ATTR, posterScanFn, posterScanArg,
+  type PosterViolation,
+} from '../src/services/creative/canvasMeasure.js';
 import { renderCanvasPoster } from '../src/services/creative/renderer.js';
 import { composeVisualPrompt, fallbackPhilosophy } from '../src/services/creative/philosophy.js';
 import { completeText } from '../src/llm/gateway.js';
@@ -47,6 +50,11 @@ function okHtml(tag: string): string {
     + `font-family:${FONT_SANS};background:linear-gradient(160deg,#16241E,#1E5A43)}</style></head>`
     + `<body><div class="${CANVAS_CLASS}"><h1>${BRIEF.headline}</h1><p>${tag}</p>`
     + `<div>${AI_MARK_TEXT}</div></div></body></html>`;
+}
+
+/** 同形但超过 lastHtml 截断上限的产物（验证失败留痕被钉在上限内；标记 tag 仍落在前 24k 字符里）。 */
+function bigHtml(tag: string): string {
+  return okHtml(tag).replace('</div></body>', `<div>${'x'.repeat(30_000)}</div></div></body>`);
 }
 
 function stubComplete(replies: (string | null)[]): { fn: CompleteTextFn; calls: { system: string; user: string }[] } {
@@ -103,6 +111,19 @@ describe('AI 排版引擎 · 静态审计（LLM 写的 HTML 是不可信输入�
       + `<img src="${CANVAS_PLACEHOLDER.qr}" data-role="qr">`
       + `<img src="data:image/png;base64,iVBORw0KGgo=">`
       + `<div>${AI_MARK_TEXT}</div></div></body></html>`;
+    const r = sanitizeCanvasHtml(html);
+    assert.equal(r.ok, true, r.ok ? '' : r.issues.join('；'));
+  });
+
+  // 量测器约定的 data-* 属性必须能穿过静态审计：资源地址正则里有 `data` 与 `poster` 两个属性名，
+  // 但它们后面钉着 `\s*=`，`data-poster-decor="1"` 匹配不上。这条用例把它钉死（改那个正则会立刻红）。
+  test('量测器约定的 data-poster-decor / data-poster-exempt 属性放行（不被当成资源地址）', () => {
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">`
+      + `<style>.${CANVAS_CLASS}{width:540px;height:720px;overflow:hidden;position:relative}</style></head>`
+      + `<body><div class="${CANVAS_CLASS}">`
+      + `<div ${DECOR_ATTR}="1" style="font-size:220px;opacity:.12">直</div>`
+      + `<h1>${BRIEF.headline}</h1>`
+      + `<div data-poster-exempt="1">${AI_MARK_TEXT}</div></div></body></html>`;
     const r = sanitizeCanvasHtml(html);
     assert.equal(r.ok, true, r.ok ? '' : r.issues.join('；'));
   });
@@ -272,6 +293,25 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.ok(!r.ok && /margin/.test(r.reason), `回落原因要写清楚：${!r.ok ? r.reason : ''}`);
   });
 
+  // ★ 失败留痕：回落时必须留下模型最后想画的东西。2026-07-30 的实锤（三轮全卡 text_overlap）
+  //   只能靠猜——违规码说不出"模型用的是哪种手法"，而误伤判定必须看产物。
+  test(`${MAX_HTML_CALLS} 轮仍违规 → ok:false 带最后一轮产物 lastHtml，且被截断上限钉住`, async () => {
+    const c = stubComplete([bigHtml('a'), bigHtml('b'), bigHtml('c'), bigHtml('never')]);
+    const render = stubRender([[marginViolation], [marginViolation], [marginViolation]]);
+    const r = await runEngine(c.fn, render.fn);
+    assert.equal(r.ok, false);
+    assert.ok(!r.ok && r.lastHtml, '没有产物留痕的话，下次误伤仍然只能猜');
+    assert.equal(!r.ok && r.lastHtml!.length, MAX_DEBUG_HTML_CHARS, '截断上限要钉住（这串会进 DB 的 metadataJson）');
+    assert.ok(!r.ok && r.lastHtml!.includes('<p>c</p>'), `留的必须是第 ${MAX_HTML_CALLS} 轮那份产物`);
+    assert.ok(!r.ok && !r.lastHtml!.includes('<p>b</p>'));
+  });
+
+  test('模型压根没产出（首轮就 null）→ 没有 lastHtml 这个键（不留空串假装有留痕）', async () => {
+    const r = await runEngine(stubComplete([null]).fn, stubRender([[]]).fn);
+    assert.equal(r.ok, false);
+    assert.equal(!r.ok && r.lastHtml, undefined);
+  });
+
   test('打磨轮把画面弄坏了 → 退回上一版干净图（绝不为"执行了打磨"交一张更差的图）', async () => {
     const c = stubComplete([okHtml('clean'), okHtml('worse')]);
     const render = stubRender([[], [marginViolation]]);
@@ -356,6 +396,23 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.match(usr, /不要留空的图位/, '没素材时明确禁止"留占位框"（真机翻车形态之一）');
   });
 
+  // ★ 与量测器的 decor 豁免是**一份口径两处实现**：提示词不说清楚，模型就不会打标记，
+  //   量测器那一侧的豁免等于永不生效（生产实锤就是三轮全卡在 text_overlap 上）。
+  test('创作提示词写清装饰叠层约定：带 data-poster-decor 才放行重叠，信息层之间禁止真重叠', async () => {
+    const c = stubComplete([okHtml('a'), okHtml('b')]);
+    await runEngine(c.fn, stubRender([[], []]).fn);
+    const sys = c.calls[0].system;
+    assert.ok(sys.includes(DECOR_ATTR), '属性名必须直接引用量测器的常量口径，不在提示词里另抄一个名字');
+    assert.equal(DECOR_ATTR, 'data-poster-decor');
+    assert.match(sys, /文字叠层是受欢迎的设计手法/, '要先把叠层说成正当手法，否则模型只会一味避让');
+    assert.match(sys, /信息层之间禁止真重叠/);
+    assert.match(sys, /主标题、副标题、卖点、CTA、落款/, '信息层要点名，不能只说"信息"');
+    assert.match(sys, /只豁免重叠这一项/, 'decor 不是万能豁免：出画/贴边/最小字号照旧');
+    // 打磨轮同样带着这条约束（system 是拼在打磨指令前面的整段）
+    assert.ok(c.calls[1].system.includes(DECOR_ATTR), '打磨轮不许丢掉这条约定');
+    assert.match(c.calls[1].system, /别把信息文字标成装饰/, '打磨轮最容易发生"给信息文字贴 decor 逃逸"');
+  });
+
   test('提供二维码素材 → 提示词要求 data-role="qr" 与白底静区', async () => {
     const c = stubComplete([okHtml('a'), okHtml('b')]);
     await generateCanvasPoster(
@@ -396,7 +453,141 @@ describe('AI 排版引擎 · 宣言与提示词', () => {
   });
 });
 
-/* ───────────────── ⑤ 量测器（真实浏览器；缺 Chromium 则跳过） ───────────────── */
+/* ───────────────── ⑤ 量测器 · 叠层豁免判定（假 DOM，不起浏览器） ───────────────── */
+
+// posterScanFn 是**页内自包含函数**（只经 globalThis 取 document / getComputedStyle，不引用任何模块常量），
+// 所以给它一个最小假 DOM 就能在常规 npm test 里钉住判定分支——不必把这组用例押在 Chromium 上。
+// 与下面 ⑥ 的真渲染组互补：这里管「分支对不对」，那里管「量的是不是真实布局」。
+interface FakeNode {
+  tag?: string;
+  cls?: string;
+  /** 叶子块的自有文字（有 children 的节点不参与文字判定，与真实 DOM 同口径）。 */
+  text?: string;
+  /** [left, top, right, bottom]，画布坐标。 */
+  rect: [number, number, number, number];
+  fontSize?: number;
+  attrs?: Record<string, string>;
+  children?: FakeNode[];
+}
+
+interface FakeEl {
+  tagName: string; className: string; children: FakeEl[]; parentElement: FakeEl | null;
+  textContent: string; fontSize: number;
+  getAttribute(n: string): string | null;
+  getBoundingClientRect(): { left: number; top: number; right: number; bottom: number; width: number; height: number };
+  querySelectorAll(s: string): FakeEl[];
+  querySelector(s: string): FakeEl | null;
+  scrollWidth: number; scrollHeight: number;
+  contains(o: unknown): boolean;
+}
+
+function buildFake(spec: FakeNode, parent: FakeEl | null): FakeEl {
+  const [left, top, right, bottom] = spec.rect;
+  const kids: FakeEl[] = [];
+  const el: FakeEl = {
+    tagName: (spec.tag ?? 'p').toUpperCase(),
+    className: spec.cls ?? '',
+    children: kids,
+    parentElement: parent,
+    textContent: spec.text ?? '',
+    fontSize: spec.fontSize ?? 16,
+    getAttribute: (n) => spec.attrs?.[n] ?? null,
+    getBoundingClientRect: () => ({ left, top, right, bottom, width: right - left, height: bottom - top }),
+    querySelectorAll: () => descendants(el),
+    querySelector: () => null,
+    scrollWidth: right - left,
+    scrollHeight: bottom - top,
+    contains: (o) => o === el || kids.some((k) => k.contains(o)),
+  };
+  for (const c of spec.children ?? []) kids.push(buildFake(c, el));
+  return el;
+}
+
+function descendants(el: FakeEl): FakeEl[] {
+  const out: FakeEl[] = [];
+  for (const k of el.children) { out.push(k); out.push(...descendants(k)); }
+  return out;
+}
+
+/**
+ * 在假 DOM 上跑一遍量测。默认 headline 传空串（跳过标题在场检查），画面文字里塞好 AI 标识，
+ * 这样每条用例只需要盯自己那一类违规。
+ */
+function scanFake(nodes: FakeNode[], o: { headline?: string } = {}): PosterViolation[] {
+  const canvas = buildFake({ tag: 'div', cls: CANVAS_CLASS, rect: [0, 0, 540, 720], children: nodes }, null);
+  const innerText = [...descendants(canvas).map((n) => n.textContent).filter(Boolean), AI_MARK_TEXT].join(' ');
+  const g = globalThis as unknown as Record<string, unknown>;
+  const prevDoc = g.document;
+  const prevCs = g.getComputedStyle;
+  g.document = {
+    body: { innerText, innerHTML: innerText },
+    querySelector: (s: string) => (s === `.${CANVAS_CLASS}` ? canvas : null),
+    querySelectorAll: () => [],
+  };
+  g.getComputedStyle = (el: FakeEl) => ({
+    fontSize: `${el.fontSize}px`, display: 'block', visibility: 'visible', opacity: '1',
+    backgroundColor: 'rgb(255,255,255)',
+    paddingTop: '8px', paddingRight: '8px', paddingBottom: '8px', paddingLeft: '8px',
+    objectFit: 'contain',
+  });
+  try {
+    return posterScanFn(posterScanArg({ headline: o.headline ?? '', expectQr: false, canvasClass: CANVAS_CLASS })).violations;
+  } finally {
+    g.document = prevDoc;
+    g.getComputedStyle = prevCs;
+  }
+}
+
+const of = (vs: PosterViolation[], code: string): PosterViolation[] => vs.filter((v) => v.code === code);
+
+describe('AI 排版引擎 · 量测器叠层豁免（decor 只免重叠，不免出画）', () => {
+  /** 两块几乎完全重合的文字（交叠远超较小块 25%）。attrs 挂在其中一块上。 */
+  const stacked = (attrs?: Record<string, string>): FakeNode[] => [
+    { tag: 'div', text: '大字背景', rect: [60, 200, 460, 420], fontSize: 180, ...(attrs ? { attrs } : {}) },
+    { tag: 'p', text: '层叠标注', rect: [70, 210, 450, 400], fontSize: 18 },
+  ];
+
+  test('两个普通文字块重叠 → 照旧报 text_overlap（信息层之间禁止真重叠）', () => {
+    const vs = scanFake(stacked());
+    assert.equal(of(vs, 'text_overlap').length, 1, `实际：${vs.map((v) => v.code).join(',') || '无'}`);
+    assert.match(of(vs, 'text_overlap')[0].detail, /压/);
+  });
+
+  test(`一方带 ${DECOR_ATTR} → 不再报 text_overlap（大字当背景图形是正当手法）`, () => {
+    const vs = scanFake(stacked({ [DECOR_ATTR]: '1' }));
+    assert.deepEqual(of(vs, 'text_overlap'), [], `装饰叠层被误伤：${vs.map((v) => v.code).join(',')}`);
+  });
+
+  test('装饰属性挂在祖先容器上也算（叠层通常是一个容器裹着若干文字叶子）', () => {
+    const vs = scanFake([
+      {
+        tag: 'div', attrs: { [DECOR_ATTR]: '1' }, rect: [60, 200, 460, 420],
+        children: [{ tag: 'span', text: '大字背景', rect: [60, 200, 460, 420], fontSize: 180 }],
+      },
+      { tag: 'p', text: '层叠标注', rect: [70, 210, 450, 400], fontSize: 18 },
+    ]);
+    assert.deepEqual(of(vs, 'text_overlap'), [], '只认叶子上的属性会逼模型给每个字都贴一遍');
+  });
+
+  test(`${DECOR_ATTR} **不**豁免出画/边距/最小字号（装饰字也不许出画）`, () => {
+    const vs = scanFake([
+      { tag: 'div', text: '出画的大字', rect: [-80, 200, 300, 420], fontSize: 180, attrs: { [DECOR_ATTR]: '1' } },
+    ]);
+    assert.equal(of(vs, 'out_of_bounds').length, 1, `实际：${vs.map((v) => v.code).join(',') || '无'}`);
+    assert.match(of(vs, 'out_of_bounds')[0].detail, /left=-80/);
+    assert.equal(of(vs, 'margin').length, 1, 'decor 不是万能豁免：贴边照旧报');
+
+    const tiny = scanFake([{ tag: 'div', text: '小字', rect: [60, 200, 200, 220], fontSize: 7, attrs: { [DECOR_ATTR]: '1' } }]);
+    assert.equal(of(tiny, 'min_font').length, 1, '装饰字也不许小到印不出来');
+  });
+
+  test('exempt 与 decor 语义不串：exempt 只免边距，不免重叠', () => {
+    const vs = scanFake(stacked({ 'data-poster-exempt': '1' }));
+    assert.equal(of(vs, 'text_overlap').length, 1, 'exempt 是服务端注入物的边距豁免，不该顺带放行压字');
+  });
+});
+
+/* ───────────────── ⑥ 量测器（真实浏览器；缺 Chromium 则跳过） ───────────────── */
 
 // NODE_ENV=test 下 renderHtmlToPng 默认返回 1×1 桩 PNG（reportPdf 的红线①），
 // 而量测器量的就是真实布局 —— 只能显式 allowInTestMode 打开真渲染。
@@ -465,6 +656,28 @@ describe('AI 排版引擎 · 量测器（真实渲染）', { skip: realBrowser ?
     assert.match(overlap.find((v) => v.code === 'text_overlap')!.detail, /重叠/);
   });
 
+  // 真实布局下的叠层豁免（假 DOM 那组管分支，这里管「浏览器里量出来也一样」）。
+  test(`真实渲染：带 ${DECOR_ATTR} 的大字叠层不报 text_overlap，但出画照旧报`, async () => {
+    const layer = (attr: string): string =>
+      `<div ${attr} style="position:absolute;left:40px;top:180px;font-size:190px;line-height:1;`
+      + `letter-spacing:-.04em;color:rgba(255,255,255,.10)">直</div>`
+      + `<h1 style="position:absolute;left:60px;top:240px;width:380px;font-size:30px;margin:0">${BRIEF.headline}</h1>`
+      + `<div>${AI_MARK_TEXT}</div>`;
+
+    const plain = await measure(page(layer('')));
+    assert.ok(codes(plain).includes('text_overlap'), `没标记的重叠必须拦：${codes(plain).join(',')}`);
+
+    const declared = await measure(page(layer(`${DECOR_ATTR}="1"`)));
+    assert.ok(!codes(declared).includes('text_overlap'), `声明为装饰层就不该误伤：${codes(declared).join(',')}`);
+
+    const outOfPage = await measure(page(
+      `<div ${DECOR_ATTR}="1" style="position:absolute;left:-90px;top:180px;font-size:190px;line-height:1">直</div>`
+      + `<h1 style="position:absolute;left:60px;top:520px;font-size:30px;margin:0">${BRIEF.headline}</h1>`
+      + `<div>${AI_MARK_TEXT}</div>`,
+    ));
+    assert.ok(codes(outOfPage).includes('out_of_bounds'), `装饰字出画照旧报：${codes(outOfPage).join(',')}`);
+  });
+
   test('必要文案缺失 / AI 标识被隐藏 / 占位符残留 各自被抓到', async () => {
     const noHeadline = await measure(page(`<div style="padding:40px">别的文案</div><div>${AI_MARK_TEXT}</div>`));
     assert.ok(codes(noHeadline).includes('headline_missing'));
@@ -528,7 +741,7 @@ describe('AI 排版引擎 · 量测器（真实渲染）', { skip: realBrowser ?
   });
 });
 
-/* ───────────────── ⑥ worker 回落矩阵与后台开关 ───────────────── */
+/* ───────────────── ⑦ worker 回落矩阵与后台开关 ───────────────── */
 
 async function posterUser(credits = 200): Promise<{ token: string; tenantId: string }> {
   const token = await login(uniquePhone(), '排版引擎用户');

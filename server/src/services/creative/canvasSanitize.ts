@@ -55,7 +55,13 @@ export function stripHtmlFence(raw: string): string {
   return s.trim();
 }
 
-/** 收集一段 HTML 里所有「资源地址」出现的位置：src / href / srcset / xlink:href / CSS url(...)。 */
+/**
+ * 收集一段 HTML 里所有「资源地址」出现的位置：src / href / srcset / xlink:href / CSS url(...)。
+ *
+ * 注意属性名后面钉着 `\s*=`：`data-poster-exempt="1"` / `data-poster-decor="1"` 这类量测器约定的
+ * data-* 属性因此**不会**被误当成 `data=` / `poster=` 资源地址（'data' 后面是 '-'，匹配不上）。
+ * 量测器约定的属性是白名单外的自由文本，本审计刻意不管它们——它管的是能发起网络请求的形态。
+ */
 function resourceUrls(html: string): { where: string; value: string }[] {
   const out: { where: string; value: string }[] = [];
   const attr = /\b(src|href|srcset|xlink:href|poster|data|formaction)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi;

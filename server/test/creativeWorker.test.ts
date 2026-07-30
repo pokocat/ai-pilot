@@ -14,7 +14,7 @@ import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone 
 import { grantCredits, getBalance } from '../src/services/credits.js';
 import { setFeatureFlag, setFeatureFlagPayload, __clearFeatureCache } from '../src/services/featureFlag.js';
 import {
-  tickCreativeWorker, runJobOnce, sweepCreativeJobs, canRetry, STALE_RUNNING_MS, MAX_ATTEMPTS,
+  tickCreativeWorker, runJobOnce, sweepCreativeJobs, canRetry, recordAiDebug, STALE_RUNNING_MS, MAX_ATTEMPTS,
 } from '../src/services/creative/worker.js';
 import { refundJob } from '../src/services/creative/jobs.js';
 import { CREATIVE_FLAG_ID, DEFAULT_PRICE_PER_POSTER } from '../src/services/creative/config.js';
@@ -391,6 +391,42 @@ describe('海报成品图 · worker 生命周期', () => {
     assert.ok(job.refundedAt);
     assert.equal(await getBalance(token), before, '取消退款');
     assert.equal(await prisma.creativeAsset.count({ where: { jobId } }), 0, '取消不留悬空产物');
+  });
+
+  // AI 引擎回落留痕：违规码 + 模型最后那份 HTML 落 metadataJson.aiDebug（resultJson 只留一句 aiEngineError）。
+  // 直接测 recordAiDebug 而不是走整条 AI 路径：测试环境没有 live provider，AI 路径在宣言那一步就断了，
+  // 根本到不了「三轮仍违规」这一格 —— 而这里真正要钉的是**合并写**，那是与 cancelRequested 共用一个键的风险点。
+  test('AI 回落留痕：metadataJson.aiDebug 可读，且不覆盖 cancelRequested 那些键', async () => {
+    const { token } = await posterUser();
+    const jobId = await createJob(token, 'w-aidebug');
+    const cancelAt = new Date().toISOString();
+    await prisma.creativeJob.update({
+      where: { id: jobId },
+      data: {
+        status: 'running', startedAt: new Date(), progress: 'render', attempts: 1,
+        metadataJson: { cancelRequested: true, cancelRequestedAt: cancelAt },
+      },
+    });
+
+    await recordAiDebug(jobId, { violations: ['text_overlap', 'text_overlap', 'margin'], lastHtml: '<!DOCTYPE html><p>模型想画的东西</p>' });
+
+    const meta = (await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } })).metadataJson as {
+      cancelRequested?: boolean; cancelRequestedAt?: string;
+      aiDebug?: { violations?: string[]; lastHtml?: string; at?: string };
+    };
+    assert.deepEqual(meta.aiDebug?.violations, ['text_overlap', 'text_overlap', 'margin'], '违规码列表要能直接读');
+    assert.match(String(meta.aiDebug?.lastHtml), /模型想画的东西/, '下次误伤要能直接看到模型想画什么');
+    assert.ok(meta.aiDebug?.at, '留痕带时间戳（一单可能被重试，得分清是哪一次）');
+    assert.equal(meta.cancelRequested, true, '整块替换会抹掉用户的取消请求 → worker 检查点再也停不下来');
+    assert.equal(meta.cancelRequestedAt, cancelAt);
+
+    // 已被他人收口的任务不许再被留痕改行（与本文件其它写入同一把 status 守卫）
+    await prisma.creativeJob.update({ where: { id: jobId }, data: { status: 'succeeded' } });
+    await recordAiDebug(jobId, { violations: ['min_font'] });
+    const after = (await prisma.creativeJob.findUniqueOrThrow({ where: { id: jobId } })).metadataJson as {
+      aiDebug?: { violations?: string[] };
+    };
+    assert.deepEqual(after.aiDebug?.violations, ['text_overlap', 'text_overlap', 'margin'], '终态任务的行不该被回落留痕改写');
   });
 
   test('功能关闭时 worker 不消费队列（任务留着，开启后继续）', async () => {

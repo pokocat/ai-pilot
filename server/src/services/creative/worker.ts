@@ -85,6 +85,42 @@ async function setProgress(jobId: string, progress: string): Promise<void> {
   await prisma.creativeJob.updateMany({ where: { id: jobId, status: 'running' }, data: { progress } });
 }
 
+/**
+ * AI 引擎回落留痕：把「最后一轮量出的违规码 + 模型最后那份 HTML」写进 metadataJson.aiDebug。
+ *
+ * 为什么落 metadataJson 而不是 resultJson：resultJson 是对外结论（任务台/小程序都读它），
+ * 要保持轻且字段稳定 —— 回落原因已经以 `aiEngineError` 一句话在那里了。这里是排障原料：
+ * 「量测器是不是误伤了某种手法」只有看到模型想画的东西才判得出来（2026-07-30 的 text_overlap 实锤
+ * 就是靠猜才拖了一轮）。
+ *
+ * 两条注意：
+ *   · **合并写**，不覆盖：同一个键上住着 cancelRequested / cancelRequestedAt（jobs.cancelJob 写的），
+ *     整块替换会把用户的取消请求抹掉 → worker 的检查点再也停不下来。
+ *   · 带 `status:'running'` 守卫（与本文件其它写入同口径）：任务若已被他人收口就别再碰它的行。
+ * 失败只 warn：留痕是排障便利，绝不能让它把一单正常回落搞成异常。
+ */
+export async function recordAiDebug(
+  jobId: string,
+  debug: { violations: string[]; lastHtml?: string },
+): Promise<void> {
+  try {
+    const row = await prisma.creativeJob.findUnique({ where: { id: jobId }, select: { metadataJson: true } });
+    const raw = row?.metadataJson;
+    const meta = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+    await prisma.creativeJob.updateMany({
+      where: { id: jobId, status: 'running' },
+      data: {
+        metadataJson: {
+          ...meta,
+          aiDebug: { at: now().toISOString(), violations: debug.violations, ...(debug.lastHtml ? { lastHtml: debug.lastHtml } : {}) },
+        } as Prisma.InputJsonValue,
+      },
+    });
+  } catch (e) {
+    console.warn('[creative] AI 回落留痕写入失败（不影响回落）：', jobId, (e as Error).message);
+  }
+}
+
 /** 阶段检查点：用户请求取消就在这里停（不强杀，避免留悬空产物）。 */
 async function checkpoint(jobId: string): Promise<void> {
   const row = await prisma.creativeJob.findUnique({ where: { id: jobId }, select: { metadataJson: true } });
@@ -235,6 +271,7 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
     if (ai.outcome) return ai.outcome;
     aiError = ai.error ?? 'AI 引擎未产出';
     console.warn('[creative] AI 排版引擎未产出，回落模板路径：', job.id, aiError);
+    if (ai.debug) await recordAiDebug(job.id, ai.debug);
   }
 
   return runTemplatePipeline(input, cfg, philosophy, aiError);
@@ -251,7 +288,7 @@ async function runAiEngine(
   input: JobExecutionInput,
   cfg: CreativeRuntimeConfig,
   philosophy: VisualPhilosophy,
-): Promise<{ outcome?: RunOutcome; error?: string }> {
+): Promise<{ outcome?: RunOutcome; error?: string; debug?: { violations: string[]; lastHtml?: string } }> {
   const { job, brief } = input;
   const startedAt = Date.now();
   // 进度沿用既有四段（philosophy|visual|render|upload）：AI 引擎的创作+打磨+渲染整体属于 'render'。
@@ -287,7 +324,16 @@ async function runAiEngine(
       // 交付闸门带任务上下文：审核记录要能落到这单头上（与宣言过审同一口径）。
       moderateText: (t) => moderate('output', t, { tenantId: job.tenantId, userId: job.userId }),
     });
-    if (!r.ok) return { error: r.reason };
+    if (!r.ok) {
+      // 留痕原料：违规码列表（最多 20 条，够看"卡在哪一类"）+ 模型最后那份 HTML（引擎已截断）。
+      return {
+        error: r.reason,
+        debug: {
+          violations: r.violations.slice(0, 20).map((v) => v.code),
+          ...(r.lastHtml ? { lastHtml: r.lastHtml } : {}),
+        },
+      };
+    }
     poster = r.poster;
   } catch (e) {
     if (e instanceof JobCancelled) throw e;

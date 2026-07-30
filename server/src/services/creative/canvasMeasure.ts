@@ -16,7 +16,7 @@ import { CANVAS_SPEC } from './canvasSanitize.js';
  * · `out_of_bounds`        可见元素的包围盒越出画布（容差 1px）
  * · `margin`               可见文字元素距画布边 < 12px（贴边即廉价感；豁免见 EXEMPT_ATTR）
  * · `min_font`             可见文字字号 < 10px（印出来不可读）
- * · `text_overlap`         两个文字块包围盒重叠且交叠面积 ≥ 较小者 25%（互相压字）
+ * · `text_overlap`         两个文字块包围盒重叠且交叠面积 ≥ 较小者 25%（互相压字；豁免见 DECOR_ATTR）
  * · `headline_missing`     brief 主标题不在画面文字里（模型自己改写/漏排了标题）
  * · `aimark_missing`       AI 生成标识不在画面文字里（注入后仍缺失 = 被 CSS 隐藏了）
  * · `qr_quiet_zone`        二维码可扫性：缺 data-role="qr" / 本体 < 64px / 静区 < 4px / 底色非白
@@ -54,6 +54,24 @@ export const MEASURE_LIMITS = {
 /** 带此属性的元素跳过 margin 检查（服务端注入的 AI 标识角标本来就贴边，那是设计不是缺陷）。 */
 export const EXEMPT_ATTR = 'data-poster-exempt';
 
+/**
+ * 装饰性文字叠层声明（**只豁免 text_overlap**）。
+ *
+ * 与 EXEMPT_ATTR 的语义必须分清，两者不可互换：
+ *   · `EXEMPT_ATTR`（exempt）= **服务端注入物**的边距豁免。我们自己贴上去的 AI 标识角标本来就贴边，
+ *     那是设计，不是缺陷。它豁免的是 `margin`。
+ *   · `DECOR_ATTR`（decor）= **模型声明**「这一层文字是图形元素，不是信息」。大字当背景纹理、层叠标注、
+ *     错落压印都是正当的排印手法，量测器不该把它们判成"互相压字"。它豁免的只有 `text_overlap`。
+ *
+ * decor **不豁免** `out_of_bounds` / `overflow` / `margin` / `min_font`：装饰字也不许出画、不许贴边、
+ * 不许小到印不出来。生产实锤（2026-07-30）是引擎三轮全卡在 text_overlap 上回落模板 —— 误伤的是叠层手法，
+ * 不是越界，所以这里刻意只开一个口子。
+ *
+ * 判定按「自身或任一祖先带该属性」：叠层通常是一个装饰容器裹着若干文字叶子块，
+ * 只认叶子上的属性会逼模型给每个字都贴一遍。
+ */
+export const DECOR_ATTR = 'data-poster-decor';
+
 export interface PosterScanArg {
   width: number;
   height: number;
@@ -64,6 +82,8 @@ export interface PosterScanArg {
   limits: typeof MEASURE_LIMITS;
   canvasClass: string;
   exemptAttr: string;
+  /** 装饰性叠层属性名（豁免 text_overlap）。与 exemptAttr 一样必须经 arg 传入：扫描函数不能引用模块常量。 */
+  decorAttr: string;
 }
 
 /**
@@ -128,6 +148,18 @@ export const posterScanFn = (arg: PosterScanArg): { violations: PosterViolation[
     return r.width > 0.5 && r.height > 0.5;
   };
 
+  // 装饰性叠层：自身或任一祖先带 decorAttr 即算（叠层通常是一个装饰容器裹着若干文字叶子块）。
+  // 它**只**用于跳过 text_overlap；越界/边距/最小字号照旧逐条量（装饰字也不许出画、不许小到印不出来）。
+  const decorated = (el: El): boolean => {
+    let cur: El | null = el;
+    for (let i = 0; cur && i < 12; i++) {
+      if (cur.getAttribute(arg.decorAttr) !== null) return true;
+      if (cur.tagName.toLowerCase() === 'body') return false;
+      cur = cur.parentElement;
+    }
+    return false;
+  };
+
   const norm = (s: string): string => (s || '').replace(/\s+/g, '');
 
   // ① 溢出：量画布容器自身（带 overflow:hidden，量 document 量不到内部溢出）。
@@ -148,7 +180,7 @@ export const posterScanFn = (arg: PosterScanArg): { violations: PosterViolation[
 
   // ② 逐元素：越界 / 边距 / 最小字号，并顺手收集「有自己文字的叶子块」用于重叠判定。
   const all = canvas.querySelectorAll('*');
-  const textBoxes: { el: El; r: Rect; text: string }[] = [];
+  const textBoxes: { el: El; r: Rect; text: string; decor: boolean }[] = [];
   for (let i = 0; i < all.length; i++) {
     const el = all[i];
     if (!visible(el)) continue;
@@ -176,14 +208,19 @@ export const posterScanFn = (arg: PosterScanArg): { violations: PosterViolation[
           '文字距画布边仅 ' + round(gap) + 'px（下限 ' + arg.limits.minMarginPx + 'px）：「' + own.slice(0, 16) + '」');
       }
     }
-    if (tag !== 'br' && textBoxes.length < arg.limits.maxTextNodes) textBoxes.push({ el, r, text: own });
+    if (tag !== 'br' && textBoxes.length < arg.limits.maxTextNodes) {
+      textBoxes.push({ el, r, text: own, decor: decorated(el) });
+    }
   }
 
   // ③ 文字块两两重叠（只比叶子文字块，且跳过祖先/后代关系——嵌套本来就"重叠"）。
+  // 相交双方任一被声明为装饰层（decorAttr）即跳过：那是排印手法，不是压字。
+  // 两个都是普通文字块 → 照旧违规（信息层之间禁止真重叠，模型不许拿 decor 逃逸）。
   for (let i = 0; i < textBoxes.length; i++) {
     for (let j = i + 1; j < textBoxes.length; j++) {
       const a = textBoxes[i];
       const b = textBoxes[j];
+      if (a.decor || b.decor) continue;
       if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
       const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
       const h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
@@ -270,6 +307,7 @@ export function posterScanArg(o: { headline: string; expectQr: boolean; canvasCl
     limits: MEASURE_LIMITS,
     canvasClass: o.canvasClass,
     exemptAttr: EXEMPT_ATTR,
+    decorAttr: DECOR_ATTR,
   };
 }
 

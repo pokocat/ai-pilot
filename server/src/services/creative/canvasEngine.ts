@@ -23,7 +23,7 @@
 import { completeText } from '../../llm/gateway.js';
 import { moderate } from '../moderation.js';
 import { AI_MARK_TEXT, CANVAS_CLASS, FONT_SANS, FONT_SERIF } from './templates.js';
-import { MEASURE_LIMITS, violationsCritique, type PosterViolation } from './canvasMeasure.js';
+import { DECOR_ATTR, MEASURE_LIMITS, violationsCritique, type PosterViolation } from './canvasMeasure.js';
 import {
   CANVAS_PLACEHOLDER, CANVAS_SPEC, availablePlaceholders, ensureAiMark, fillPlaceholders,
   sanitizeCanvasHtml, type CanvasAssetUrls,
@@ -38,6 +38,13 @@ export const MAX_HTML_CALLS = 3;
 export const AI_ENGINE_BUDGET_MS = 180_000;
 /** 单次 HTML 生成的 token 预算：一页 540×720 的手写 HTML/CSS 约 2–4k token。 */
 const HTML_MAX_TOKENS = 6000;
+/**
+ * 失败留痕里 `lastHtml` 的截断上限。
+ * 回落时把模型最后那份产物留下来（worker 写进 CreativeJob.metadataJson.aiDebug）：
+ * 「量测器误伤了什么手法」这种问题，只有看到模型想画的东西才判得出来，靠 reason 里的违规码猜不出来。
+ * 24k 字符约等于一页正常产物的全文（6–20KB），够看构图；再大就该去查资产 metadata 里的最终 HTML 了。
+ */
+export const MAX_DEBUG_HTML_CHARS = 24_000;
 
 /* ───────────────── 提示词 ───────────────── */
 
@@ -76,8 +83,8 @@ function canvasSystemPrompt(): string {
     '  **不要直白复述卖点**，也不得为了「艺术性」牺牲主标题可读性、CTA 显著性或二维码可扫性。',
     '',
     '【文字】文字本身就是图形。音量由场景决定：可以是有力的大字排印，也可以是耳语般的小字。',
-    '字号敢差出一个量级，字距敢拉开。但无论怎么排——**任何元素都不出画、任何两块文字都不重叠**，',
-    '每个元素都有呼吸空间。这是专业执行的底线，不可协商。',
+    '字号敢差出一个量级，字距敢拉开。但无论怎么排——**任何元素都不出画、信息文字之间不互相压字**',
+    '（装饰性叠层是允许的，按硬约束 10 声明），每个元素都有呼吸空间。这是专业执行的底线，不可协商。',
     '',
     `【硬约束（渲染后会被机器逐条量测，违反即打回重写）】`,
     `1. 画布固定 ${CANVAS_SPEC.width}×${CANVAS_SPEC.height} px（3:4，@${CANVAS_SPEC.scale}x 输出）。`,
@@ -101,10 +108,16 @@ function canvasSystemPrompt(): string {
     `   · 所有可见元素完整落在画布内（容差 ${L.boundsTolerancePx}px）；画布内容不得溢出（溢出部分会被裁掉）；`,
     `   · 可见文字距画布边 ≥${L.minMarginPx}px；文字块之间间距 ≥${L.minGapPx}px；`,
     `   · 任何可见文字字号 ≥${L.minFontPx}px；`,
-    '   · 任何两块文字的包围盒不得重叠。',
+    '   · 任何两块文字的包围盒不得重叠（唯一例外是按第 10 条声明的装饰叠层）。',
     '   文案装不下时**压缩排版、精简层级或加大留白**，不要靠缩小字号硬塞。',
     '9. 色板：用宣言给的色板或与之同源的推导色。禁止大面积高饱和互补色硬碰（例如墨绿页头压一块大红），',
     '   对比靠明度与面积经营，不靠两个对立色对撞。',
+    `10. 文字叠层是受欢迎的设计手法（大字当背景图形、层叠的标注与编号、压在色域上的排印），`
+    + `但装饰层必须带 ${DECOR_ATTR}="1" 属性声明「这层文字是图形元素」——`,
+    '   量测器只放行带这个标记的重叠，没标记的重叠一律判违规打回。',
+    '   而**信息层之间禁止真重叠**：主标题、副标题、卖点、CTA、落款彼此必须各自完整可读、互不压字；',
+    `   不许给这些信息文字加 ${DECOR_ATTR} 来绕过量测（打磨轮里也一样，别把信息文字标成装饰）。`,
+    '   声明为装饰也**只豁免重叠这一项**：装饰字同样不许出画、不许贴边、不许低于最小字号。',
     '',
     '【输出格式】只输出 HTML 源码本身，从 <!DOCTYPE html> 到 </html>。',
     '不要 Markdown 围栏，不要任何解释、前言或后记。',
@@ -240,7 +253,15 @@ export interface CanvasPoster {
 
 export type CanvasEngineOutcome =
   | { ok: true; poster: CanvasPoster }
-  | { ok: false; reason: string; rounds: number; violations: PosterViolation[] };
+  | {
+    ok: false; reason: string; rounds: number; violations: PosterViolation[];
+    /**
+     * 最后一轮渲染过的产物（截断到 MAX_DEBUG_HTML_CHARS）。可能缺：模型压根没产出、
+     * 或最后一轮被静态审计拒在浏览器之前（此时手上只有更早那一轮）。
+     * 用途单一：回落排障时看模型到底想画什么（量测器误伤的判定依据）。
+     */
+    lastHtml?: string;
+  };
 
 interface Attempt {
   html: string;
@@ -320,6 +341,17 @@ export async function generateCanvasPoster(
   const deadline = now() + (input.budgetMs ?? AI_ENGINE_BUDGET_MS);
   const outOfTime = (): boolean => now() >= deadline;
 
+  /** 失败出口的唯一收口：顺手把最后一轮产物截断后带上（有就带，没有就不带这个键）。 */
+  const fail = (
+    o: { reason: string; rounds: number; violations: PosterViolation[]; html?: string | null },
+  ): CanvasEngineOutcome => ({
+    ok: false,
+    reason: o.reason,
+    rounds: o.rounds,
+    violations: o.violations,
+    ...(o.html ? { lastHtml: o.html.slice(0, MAX_DEBUG_HTML_CHARS) } : {}),
+  });
+
   /**
    * 交付闸门（三个成功出口的唯一收口）：模型自创的画面文字过输出侧审核，不过审即回落模板。
    * 放在最后而不是逐轮审：文字在打磨轮间基本不变（brief 原文 + 少量装饰字），逐轮审是三倍成本；
@@ -334,7 +366,7 @@ export async function generateCanvasPoster(
     }
     if (!pass) {
       console.warn('[creative] AI 画面文字未过输出侧审核，回落模板路径');
-      return { ok: false, reason: '画面文字未过内容审核', rounds, violations: [] };
+      return fail({ reason: '画面文字未过内容审核', rounds, violations: [], html: a.html });
     }
     return { ok: true, poster: toPoster(a, rounds, fvc, reverted) };
   };
@@ -402,7 +434,7 @@ export async function generateCanvasPoster(
 
   // 轮次/预算用尽。手上有干净图就交（例如超时发生在打磨轮之前）。
   if (lastClean) return deliver(lastClean, calls, firstViolationCount, !!current && current !== lastClean);
-  return { ok: false, reason, rounds: calls, violations: pending };
+  return fail({ reason, rounds: calls, violations: pending, html: current?.html });
 }
 
 function toPoster(a: Attempt, rounds: number, firstViolationCount: number, polishReverted: boolean): CanvasPoster {
