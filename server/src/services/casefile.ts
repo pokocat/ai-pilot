@@ -24,6 +24,7 @@ export interface DeliverableSectionInput {
 
 export interface DeliverableInput {
   title?: string;
+  cover?: { title?: string; subtitle?: string; motto?: string }; // 封面（#16 年度谶语落在 motto，见 strategicProfile.extractStrategicFacts）
   sections?: DeliverableSectionInput[];
 }
 

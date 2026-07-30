@@ -5,7 +5,7 @@ import { recordAudit } from '../services/audit.js';
 import { computeAndStoreChart, loadChart, validatePaipanInput, type PaipanInput } from '../services/paipan.js';
 import { buildMingpanReport } from '../services/mingpan.js';
 import { fortuneDisabledGuard } from '../services/featureFlag.js';
-import { loadStrategicProfile, upsertStrategicProfile } from '../services/strategicProfile.js';
+import { loadStrategicProfile, upsertStrategicProfile, ensureAnnualVerse } from '../services/strategicProfile.js';
 import { cityLongitude } from '../data/cityLongitude.js';
 import { yearOf } from '../services/clock.js';
 
@@ -132,7 +132,14 @@ export async function profileRoutes(app: FastifyInstance) {
   // —— 战略档案（M1 PR-3）：读取 + 手动校准（镜子要能被老板改） ——
   app.get('/profile/strategic', async (req) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    return { strategic: await loadStrategicProfile(user.id) };
+    let strategic = await loadStrategicProfile(user.id);
+    // #16 出谶触发点：有八字就该有当年谶语（老板页读档案时补齐；命理关或无命盘时不出）。
+    // fire-safe：出谶失败绝不拖垮档案读取（老板页会落到空态引导，不至于整卡消失）。
+    if (!strategic?.verse || strategic.verseYear !== yearOf()) {
+      const wrote = await ensureAnnualVerse({ tenantId: user.tenantId, userId: user.id }).catch(() => false);
+      if (wrote) strategic = await loadStrategicProfile(user.id);
+    }
+    return { strategic };
   });
 
   app.put<{ Body: { mainContradiction?: string; positioning?: string; track?: string; stage?: string; narrative?: string; verse?: string } }>(
@@ -151,7 +158,7 @@ export async function profileRoutes(app: FastifyInstance) {
           narrative: pick(req.body?.narrative)?.slice(0, 500),
           verse: pick(req.body?.verse)?.slice(0, 40),
         },
-        forceVerse: true, // 手动改谶是老板的显式动作，不受「一年一句」守卫拦（抽取管线才受）
+        verseSource: 'manual', // 手动改谶是老板的显式动作，压得住算法谶与模型谶，不受「一年一句」守卫拦
       });
       await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.strategic.update', payload: {} });
       return { strategic: await loadStrategicProfile(user.id) };

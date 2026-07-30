@@ -78,7 +78,7 @@ export async function battleRoutes(app: FastifyInstance) {
 
       // 建案卷 + 拆军令（复用认可动线），并回写战略档案。
       const accepted = await acceptDeliverable({ tenantId: user.tenantId, userId: user.id, deliverable: result as DeliverableInput, agentName: '总军师' });
-      await upsertStrategicProfile({ tenantId: user.tenantId, userId: user.id, patch: extractStrategicFacts(result as DeliverableInput) }).catch(() => {});
+      await upsertStrategicProfile({ tenantId: user.tenantId, userId: user.id, patch: extractStrategicFacts(result as DeliverableInput), verseSource: 'llm' }).catch(() => {});
       await import('../services/journey.js').then((m) => m.applyJourneyEvent(user.id, user.tenantId, 'plan.accept')).catch(() => {});
 
       // 桥接版本化报告（战局军令与报告，V7-09 报告面板消费）。

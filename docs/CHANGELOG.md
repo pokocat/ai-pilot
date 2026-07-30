@@ -6,6 +6,26 @@
 
 ## 变更日志
 
+### 2026-07-29 · 海报「AI 排版引擎」（第 3 档）：模型自己写整张海报的 HTML/CSS + 量测 refine 闭环 + 模板回落 · 影响面：shared 契约（`AdminCreativeConfig.layoutEngine`、`AdminCreativeJobItem.layoutEngine/rounds/aiEngineError`）+ server（`llm/gateway.completeText`、providers `maxTokens`、`services/reportPdf` 渲染加固、`services/creative/{canvasEngine,canvasSanitize,canvasMeasure,manifesto,renderer,worker,philosophy,config}`、`services/metrics`、`routes/admin`）+ tests（新增 `test/creativeCanvas.test.ts` 45 例 + `test/fixtures/posterBriefs.ts`）+ docs
+
+动因是真机实测那张图很差，且**根因不在"观测缺口"而在画质本身**：给图片模型的只有一句 ≤80 字的 `visualPrompt`，palette / 构图 / 材质全没传（于是墨绿页头压一块大红照片），「留出负空间供排版」被画成了三个空的粉色占位卡片；LLM 算出的六维度视觉哲学模板只消费 `palette + movement`，设计思考全被丢掉。而上游 `canvas-design` 根本不用图片模型——**哲学长文 → 模型用代码在画布上创作 → 强制二次打磨**。本笔把那三步做成自动化等价物。
+
+**新链路**（`layoutEngine='ai'`，**默认**）：`manifesto`（LLM，4–6 段中文宣言 + 色板 + 隐性主题）→ `canvasEngine`（LLM 直接产出 540×720 整页 HTML/CSS，纯 CSS/SVG 作画，不调图片供应商）→ 静态审计 → 占位符替换 + AI 标识兜底注入 → 渲染（`javaScriptEnabled:false` + 请求白名单）+ **量测** → **无条件打磨一轮** → 最多再修一轮。三条不变式：① HTML 相关 LLM 调用 ≤3 次（含宣言整单 ≤4），整段预算 180s；② **打磨轮不许让画面变差**（首轮干净而打磨轮量出违规 → 退回首轮那张，`polishReverted` 留痕）；③ 引擎内部失败一律**返回**而不抛（抛会被 worker 归成 INTERNAL 并退款，而那时用户本该拿到一张模板图）。
+
+**「首轮干净也打磨一轮」是移植的核心机制，不是可选优化**（上游 FINAL STEP：*"The user ALREADY said it isn't perfect… take a second pass."*）。用「LLM 被调 2 次而不是 1 次」的断言把它钉住——这条断言在，任何「干净就直接交付」的省钱优化都会立刻红。
+
+**回落矩阵**（付费任务永不因 AI 引擎失败）：模型不可用 / 宣言不完整或未过审 / 三轮仍违规 / 渲染异常 / 量测拿不到结果 / 超预算 → 全部回落，且**复用同一个 `runTemplatePipeline`**（图片供应商调用、`degraded/visualError` 降级留痕、弹性版面契约、溢出闸这些教训都在那条路径上，抄一份等于把它们作废一次）。回落原因落 `resultJson.aiEngineError` 并在任务台可见——`layoutEngine='template_fallback'` 的斜率就是「AI 排版在生产悄悄失效」的告警信号，新增指标 `junshi_creative_engine_total{engine=ai:Nrounds|template|template_fallback}`。
+
+**把 LLM 写的 HTML 当不可信输入**：静态审计**只拒不洗**（洗一洗再渲染既改变构图意图又给 `<scr<script>ipt>` 这类嵌套留缝，且拒绝可回喂、清洗不可观测）；白名单口径——`<head>` 只放行 `meta charset/viewport + title + style`，图片只放行占位符与 `data:image`，`script/on*/iframe/object/embed/link/base/@import/javascript:/外链 url()` 一律整份打回。渲染层再加两道：CDP 关掉页面脚本执行（**已在真实 Chromium 上实测：内联脚本改不动 DOM，而 `page.evaluate` 照常工作**），请求拦截只放行 `data:` 与 OSS 签名域。
+
+**量测器**（`canvasMeasure.posterScanFn`，puppeteer 页内纯 DOM 扫描）违规码：`html_rejected / overflow / out_of_bounds / margin / min_font / text_overlap / headline_missing / aimark_missing / qr_quiet_zone / placeholder_residue`，每条带 **selector + 实测数值**并逐条回喂——模糊的「有问题请改进」喂回去等于没喂。两个刻意的设计：未提供素材的占位符**不清理**（留成 `placeholder_residue` 违规，否则模型永远不知道自己引用错了）；AI 标识缺失**直接注入**而不回喂（合规是服务端义务，不能取决于模型这一轮听不听话）。
+
+**顺带止血了模板/回落路径**：`composeVisualPrompt()` 把色板主色（转中文色彩词）与负向约束（禁文字/禁 UI 卡片占位框/禁 logo/禁边框）拼进图片提示词，`worker` 那句兜底同步加强。
+
+**踩到并修掉的坑**：`page.evaluate` 是把函数**源码**送进浏览器执行的，`npm test` 走 tsx/esbuild（默认 `--keep-names`）会往函数体里塞 `__name(fn,"name")` helper → 浏览器里 `ReferenceError: __name is not defined`，而 `tsc` 编译的生产产物没有这层，典型的「测试炸/生产好用」错配；现在渲染前用**字符串表达式**注入恒等 `__name` shim（用箭头函数注入会被同一个转译器改写，等于用坏的工具修坏的工具）。另一处：`openaiRaw/claudeRaw` 的 `max_tokens` 硬编码 700（辅助抽取预算），一页 HTML 会被拦腰截断 → 两个 provider 加可选 `maxTokens`，**缺省仍是 700**，`completeText` 传 4000 并 `allowAux:false`（画质任务不该被切到小模型）。
+
+**验证**：`cd server && npm run build` 0 错；`npm test` **1032/1032 通过**（新增 40 例常规 + 5 例真实渲染量测）；量测器那组默认 skip（`NODE_ENV=test` 下 `renderHtmlToPng` 返回 1×1 桩），用 `PUPPETEER_REAL=1 npm test` 跑真实 Chromium，本地 45/45 全绿。`admin npm run build`（含 `lint:ui`）通过——契约新增字段都是只读消费，未破坏编译；后台 UI 暴露 `layoutEngine` 开关与任务台 `layoutEngine/rounds` 列由 admin 那一包跟进。真图对比只能部署后在生产做（本地无模型 key），brief 形状已固化为 `test/fixtures/posterBriefs.ts`（酒店 OTA 获客场景，就是那张差图的输入）。
+
 ### 2026-07-29 · 修运营后台与用户端配置脱节：新上架智能体动态可见、技能/知识可钻取、调用来源可辨识、审计降噪 · 影响面：shared 契约 + server（智能体类型、技能元信息、知识归属、LLM trace 来源、audit 过滤）+ admin（智能体/技能库/知识库/调用诊断/审计日志）+ app（对话/执行智能体目录）+ tests
 
 后台新增/上架的智能体不再依赖小程序写死 key：`advisory/custom` 动态进入「对话 → 专业参谋」，`creative` 进入「执行 → 内容出品」，两页 `useDidShow` 都会刷新 `/agents`；后台新增与详情面板补「用户端入口」类型选择，避免 `custom` 智能体上架后无落点。技能库内置项可点开查看中文名称、执行方式和只读参数 Schema；知识库列表补 `userId/姓名/手机号`，可按用户筛选并点开正文与切片，用户知识详情/删除/重嵌 URL 同时收紧为 `userId + itemId` 真归属校验。
@@ -13,6 +33,52 @@
 调用诊断现在由 `LlmTrace` 的既有 `userId/tenantId/sessionId/agentKey` 回填用户、手机号、租户和智能体名称；界面优先显示「方案生成 / 对话回复」与顾问中文名，`general/deliverable/ip` 等原始值只留在排障标识。HTTP 审计不再记录 `/api/metrics` Prometheus 抓取，历史抓取默认过滤、需要时可点「含监控抓取」查看；分批回读避免历史 metric 把最近 100 条真实用户动作淹没。
 
 验证：按暂存区生成干净源码快照后，server `npm run build`、admin `npm run build`（含 `lint:ui`）、app TypeScript 检查全部通过；server 定向集成 `adminVisibility.test.ts` 4/4、app `npm test` 33/33 通过。
+
+### 2026-07-29 · 年度谶语捕获链路补齐（#16）：模型亲写的谶可入档 + 三来源优先级（auto → llm → manual）· 影响面：server（`services/strategicProfile.ts` / `services/casefile.ts` `DeliverableInput` / `routes/casefiles.ts` / `routes/battle.ts` / `routes/profile.ts` + `test/strategicProfile.test.ts`）+ docs（`AGENTS.md` §services、`docs/[FABLE5]RETENTION_MECHANISMS.md` #16、`docs/[FABLE5]RETENTION_DESIGN_SPECS.md` §5.1/5.3）
+
+承接同日「出谶触发点 `ensureAnnualVerse`」那笔（那笔只解决「卡恒空」，谶语仍是**按盘算出来的兜底句**，不是老板那一份）。本笔补的是**捕获**：`strat.v6.md` §4.4 要求模型在 A 级报告封面写一句七言/五言谶语、§第 6 轮交底仪式当场念给老板听，但 `extractStrategicFacts()` 只认 主要矛盾/定位/赛道/阶段 四种分节标题，**既不读封面 `cover.motto` 也不读任何「谶语/箴言」分节**（`builtin.ts` 的 `withVerseCover` 只把档案里的谶补进渲染入参，是反方向），所以模型亲写的那句从来落不进 `StrategicProfile.extraJson` —— 文档（RETENTION_MECHANISMS #16 / DESIGN_SPECS §5.1）声称的「verse 捕获已在跑」对捕获侧一直不成立。
+
+**捕获**：认可方案（`/casefile/accept`、`battle/commit`）时先认「谶语/箴言」分节，再退到封面 `cover.motto`（`DeliverableInput` 补 `cover` 字段；剥「年度谶语：」前缀与各式引号、半角逗号归一、去句末句号，与 `composeAnnualVerse` 同口径）。**形状闸门**：只收七言或五言两句、两句等长、纯汉字的句子——§4.4 明说封面上谶语与毛选语录并列，而谶语一旦收下就锁一整年，宁可漏收也不能把一句语录当成老板的谶（「一切反动派都是纸老虎」「藏锋，今岁南风助势成」这类一律不收）。抽不到就不给 `verse` 键，避免 undefined 键把库里的谶清空。
+
+**优先级（本笔的真问题）**：兜底谶现在会在老板首访老板页时落库，原来的「一年一句」守卫（`当年已有谶 → 一律不采`）会把随后到来的、真正个人化的交底谶语一并挡死。改为按来源单向升级：`extraJson.verseSource` 记 `auto`（按盘出谶）/ `llm`（模型亲写）/ `manual`（老板手改 PUT），跨年或从未有谶直接立谶，当年已有谶时**只允许 auto → llm → manual 升级一次**，同级/降级一律不采（`forceVerse` 参数由 `verseSource` 取代）。两条护栏：① `manual` 任何时候都压得住自动路——老板的最终解释权不变；② 同一句原样回传时不改来源，免得兜底谶被一次回传镀成「模型谶」白占掉当年唯一的升级额度（认可动线传的 deliverable 来自库里未注入 motto 的原件，本不构成回环，但这条闸门不依赖那个前提）。「一年一句、不改不换」在 llm/manual 落定后仍然成立：同年再认可几份带谶的报告都不换。
+
+**未做（仍是 M2/M3）**：显式「求谶」按钮（当前 auto 那条是读档案时隐式触发，缺仪式感）、ProphecyLog `kind:'omen'` 登记、岁验对账与应验卷、旧谶 `verseHistory[]` 留档。文档三处「捕获已在跑」的表述已按实际实现改写。
+
+**测试**：`test/strategicProfile.test.ts` 新增 3 例（捕获与形状闸门：谶语分节/封面 motto/语录散文不收/五言也收/不留 undefined 键；优先级：auto 可被 llm 升级一次、同句回传不改来源、同年第二句 llm 不换、manual 压全场、跨年重新开局；端到端：录生辰得兜底谶 → 认可带封面谶语的交底全案即升级 → 同年再认可不换），全量 `npm test` **985 → 988** 例通过，`npm run build` 0 错。
+
+### 2026-07-29 · 修「军师 tab 点品牌营销官进对话页整页白屏」（双层：服务端读取端自愈 + app 端渲染防御）· 影响面：server（`routes/sessions.ts` + 新增 `test/sessionReadHeal.test.ts`）+ app（`components/MarkdownText` / `components/ReportCard` / `packages/main/chat` / `services/deliverableSection.ts` + `deliverableSection.test.ts`）+ docs（`AGENTS.md` 接口表 `GET /sessions/:id`）
+
+用户生产真机实测：军师 tab 点「品牌营销官」进对话页**整页白屏**。**不是当天海报成品图两个提交（`d2de9a8` / `c0a7e41`）的回归**——那两笔在对话页新增的代码 brand 会话一行都走不到（`posterEntryOn` 第一个条件就是 `agent?.key === 'poster'`），唯一无条件求值的新表达式 `m.deliverable.creativeJobId` 所依赖的 `m.deliverable`，在它之前早已被既有代码 `!m.deliverable.degraded`（2026-07-28 起）解引用过，没有引入任何新的抛错点。
+
+**根因：渲染期解引用存量脏形状抛错。** 小程序渲染期抛错既无红屏也无堆栈，表现就是白屏。已在 H5 mock 里逐条复现并拿到确切堆栈，三条同形状的 throw 表达式：
+
+- ① `ReportCard` 的 `useState(animate ? 0 : data.sections.length)`（另有 `data.sections.slice` 与 effect 依赖数组）→ 成果消息 contentJson **缺 `sections` 字段** → `Cannot read properties of undefined (reading 'length')`。讽刺的是父级 `chat/index.tsx` 判 `reportReady` 时早就写成 `sections?.length ?? 0`，子组件没跟上——于是「父级判定为已中断卡」和「子组件直接崩」同时成立。
+- ② `services/deliverableSection.ts` 的 `cardSection` 把非字符串叶子原样透给 `<MarkdownText>` → `parseBlocks` 首行 `input.replace(...)` → `e.replace is not a function`。脏形状是 section 的 `list` 项 / `b` 是**对象**——早于服务端 `normalizeDeliverableSections`（报告 V2 归一化）落库的历史成果消息就是这个样子。
+- ③ 同一个 `parseBlocks` → `role=assistant` 消息 contentJson **缺 `text`**。
+
+**为什么偏偏是品牌营销官**：`/agents` 线上数据已核实，brand 的 agent 记录本身完全健康（chips / memText 齐全），排除配置。但 `retireAgents` 之后线上顾问只剩 `general/strat/growth/ops/brand`，**brand 是「专业参谋」组唯一还在的一行**；而它的开场 chip 发的正是 `营销内容` = 自身 `deliverableKey`，所以 brand 会话是**成果消息为主**的会话，正好是 ①② 的载体。另一条关键事实：`GET /sessions/:id` 的读取端此前**只做 `scrubAssistantContent`、不做 `healDeliverableSections`**（那只用在方案库 / 版本化报告读取路径），脏数据原样到端上——这也解释了为什么同一份报告在「方案库详情」不炸、只在会话成果卡炸。
+
+**第一层（服务端，部署即救线上，不必发版）**：`GET /sessions/:id` 补齐读取端自愈口径，与方案库 / 版本化报告统一。`presentMessageContent` 按角色分流——report 走 `healDeliverableSections`；`scrubAssistantContent` 在原有 section JSON 擦除之外，追加「`text` 一定是字符串」的形状保证；user 原文与未来新增角色一律原样透传（不做任何形状改写）。**`sections` 字段整个缺失的情况单独补**：`healDeliverableSections` 对「没有 sections 字段」的对象刻意原样返回（它是通用工具，不该给任意对象凭空加字段，`reportV2.test.ts` 有幂等断言钉着），所以补成空数组这一步放在会话读取路径的 `presentReportContent` 里，不动共享工具的语义。**热路径成本已量**：纯内存变换、零额外 IO、健康数据幂等——满配 12 段成果消息单条 **4.39 µs**，一条含 30 份成果的会话合计 **0.132 ms**，约为同一条消息 `JSON.stringify` 的 1.8×（响应序列化本来就要做一次），相对该路由既有的三次 DB 往返（session findFirst + lastReadAt UPDATE + agentVersion findUnique）可忽略；正常数据不触发 `JSON.parse`（`parseStringifiedSections` 只做一次锚定正则 test 就返回）。
+
+**顺带堵掉一条同形状的对话中途白屏**：流式聊天的 `send('chat', reply2)` 里 `reply2` 可为 `null`（provider 流静默收尾、只来过 delta），端上把 null 整体替换进气泡后下一帧读 `m.reply.text` 就抛错；而紧随其后的 `message.create` 又因 `contentJson` 是必填 Json 列而拒绝 null，这一轮本来也落不了库。新增 `assertStreamReply` 断言守卫：没有结果就按 `AI_UNAVAILABLE` 抛出，交给既有 catch 退预留 + `send('error')`，端上走错误气泡 + ↻ 重试，而不是「看起来成功、内容为空」。
+
+**第二层（app 端渲染防御，随下次发版加固）**：脏数据不止一个来源，端上也不能靠服务端兜住一切。`MarkdownText`（全站正文唯一渲染口）新增 `asText()` 入参防线，一处收口掉整类 `parseBlocks` 崩溃，`text` 类型同步放宽为可选；`cardSection` 真正兑现声明的 `{h:string; b?:string; list?:string[]}`——新增 `str()/arr()/strList()`，12 个分支的容器字段（`items/rows/paras/people/quads/headers/list`）全部过 `arr()`（防 `.map/.join/展开` 抛错），叶子全部过 `str()`，**口径与服务端 `textOf/listOf` 一致（非字符串标量转字符串、对象丢弃），保证会话成果卡与方案库详情显示同一份内容**；`ReportCard` 用 `secs = Array.isArray(data.sections) ? … : []` 替换三处直读，`title/meta/trust/icon` 过 `plain()`（对象进 `<Text>` 会触发 React「Objects are not valid as a React child」，同样白屏），`data` 加空成果默认参数；`chat/index.tsx` 新增 `asReply()` 收口 assistant contentJson（`restore` 与 SSE `setChat` 两个入口都过），并给 `mm.reply.asks`、`m.reply.text/points`、`a.options`、`m.agent.chips`、`m.deliverable?.*`、`cur.deliverable?.sections`、`stripTags`、`data_delay`、`deliverableToText`、`visibleStreamText` 补齐同形状防御。
+
+**降级后的表现**（修复前全部白屏）：缺 sections → 骨架 + 「已中断」，且查看/分享/存入/认可一律不开；对象叶子 → 该段只留编号标题（与方案库详情一致）；缺 text → 只渲染 points。海报会话共用同一个 `ReportCard`，同受影响、同被覆盖，回归验证「查看成品图 / 生成成品图 💎x10」两行入口不变。
+
+**测试**：server `test/sessionReadHeal.test.ts` 新增 5 例（缺 sections 补空数组且不改库 / 对象叶子归一化且健康段完整保留 / assistant 缺 text 补空串 / 健康数据逐字段幂等 / user 原文不被改写），全量 `npm test` **980 → 985** 例通过；app `deliverableSection.test.ts` 新增 4 例（对象 list 项、对象 b、对象 h、10 种非数组容器不抛错），`npm test` **28 → 32** 例通过。
+
+### 2026-07-29 · 年度谶语补上出谶触发点（有八字必有当年谶）· 影响面：server（`services/mingpan.ts` / `services/strategicProfile.ts` / `routes/profile.ts` / `test/strategicProfile.test.ts`）+ app（`services/mock.ts` / `services/api.ts` 的 mock 分支）+ docs（`AGENTS.md` §services）
+
+用户实测：「我已经有八字了，但年度谶语还是没显示」。不是回归，是 `3bce564`（老板页年度谶语卡）上线以来的存量缺陷——**谶语在生产上从来没有任何自动写入方**。
+
+**根因（精确到条件表达式）**：`upsertStrategicProfile` 里的 `if (verse && (forceVerse || !extra.verse || extra.verseYear !== thisYear))` 从未有机会成立。两条写入路径：① 自动路径（认可方案 `/casefile/accept`、`/battle/commit`）传的是 `extractStrategicFacts(deliverable)`，而该函数只按分节标题匹配 主要矛盾/定位/赛道/阶段 四个键，**返回的 patch 里永远没有 `verse`**；② 手动路径 `PUT /profile/strategic` 能写谶，但小程序端只有 GET，没有任何调用方。于是 `strategic.verse` 恒为 `''`，老板页那张卡对所有真实用户恒落空态「你还没有今年的谶 · 去命盘 ›」，而命盘报告页也没有任何出谶动作 —— 空态把人指过去，那边什么也不会发生，是条断头路。（`RETENTION_MECHANISMS.md` #16 里「verse 捕获已在跑」这句只对存储管线成立，捕获本身没在跑。）
+
+**修法**：谶语本就该由命盘确定性派生（与「天命速写」同口径，零 LLM），缺的只是触发点。`mingpan.ts` 新增纯函数 `composeAnnualVerse(chart, year)`——上句取命局本气（喜用五行 × 日主旺衰），下句取流年应期（流年天干五行与喜用/日主的生克关系 × 流年干阴阳），**同盘同年恒同句**（「一年一句·不改不换」不允许随机），阴阳这一维保证相邻两年必换新谶（否则甲乙、丙丁这类同五行年份会出同一句）。`strategicProfile.ts` 新增 `ensureAnnualVerse`：命理开 + 有 `NatalChart` + 当年无谶 → 出谶；`GET /profile/strategic` 读档案时顺手补齐（fire-safe，出谶失败不拖垮档案读取）。「一年一句」守卫仍由 `upsertStrategicProfile` 统一执行 —— 已有当年谶（含老板手动改的、或将来 LLM 抽取到的）绝不被这条路覆盖；命理开关关闭时不出谶，也就不进注入块。
+
+**存量用户自动恢复**：无需任何补数据操作。已有八字的用户下一次进老板 tab（`useDidShow` → `api.strategicProfile()`）就会写入当年谶语并立刻显示。没有八字的用户维持求谶引导，录完生辰返回老板页即出谶。
+
+**顺带**：mock 的 `strategicProfile` 此前恒返回 `null`，导致这张卡在本地/H5 走查里**永远只有空态**——这正是缺陷长期没被发现的原因；现在 mock 按「有八字且信命理才有谶」镜像真实端两态（谶语仍是固定样例，mock 不排盘），与样例履历封面共用同一句。测试 +3（出谶纯函数锚定 1988-03-15 命例 2026 年出句、连续六年六句不重复；有八字 → 读档案即得当年谶语且再读不换、手动改谶不被回压；命理关 → 有八字也不出谶）。
 
 ### 2026-07-29 · 海报成品图：配置面简化（去掉部署级开关）+ 七个真缺陷 · 影响面：server（`env.ts` / `services/creative/*` / `routes/creative.ts` / 两份测试）+ shared（`contracts.d.ts`）+ admin（创作任务页 / 任务台）+ app（确认页 / 换风格面板）+ docs（`AGENTS.md` §8.4 §13、`DEPLOYMENT.md` §5 §5.1、方案 §6.2 §8.1 §14 §16 §21 §22）+ `server/.env.example` / `.env.test`
 

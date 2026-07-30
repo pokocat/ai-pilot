@@ -522,10 +522,9 @@ export const api = {
   // 命盘报告（八字 × 紫微综合印证）：无生辰 → { needBazi:true }；有生辰 → 按需现算 MingpanReport（不落库）
   myChartReport: () =>
     useMockApi() ? mock.myChartReport() : request<MingpanReportResp>('/profile/chart/report'),
-  // 战略档案（年度谶语卡）：mock 无战略档案数据源 → null（前端落到求谶引导态，不编造谶语）
+  // 战略档案（年度谶语卡）：mock 按「有八字才有谶」镜像真实端两态；真实端出谶在 GET /profile/strategic 内补齐
   strategicProfile: () =>
-    useMockApi() ? Promise.resolve({ strategic: null as StrategicProfileView | null })
-      : request<{ strategic: StrategicProfileView | null }>('/profile/strategic'),
+    useMockApi() ? mock.strategicProfile() : request<{ strategic: StrategicProfileView | null }>('/profile/strategic'),
   // 用户进度（段位/里程碑）与复盘账本（M4 PR-18 前端落位；mock 无账本返回空 → 界面隐藏对应区块）
   progress: () =>
     useMockApi() ? mock.progress() : request<{ progress: ProgressView | null }>('/progress'),

@@ -37,6 +37,77 @@ export function hourLabelOf(hour: number | null | undefined): string | null {
 export const MINGPAN_DISCLAIMER =
   '本报告基于传统子平八字与紫微斗数之推演口径，由确定性算法排盘，仅供文化研究与参考，不构成任何决策依据。';
 
+// —— 年度谶语（留存机制 #16）：由命盘确定性派生的七言两句 ——
+// 口径同「天命速写」（cardHtml.fateCardContent）：命理文本全部由盘确定性派生，零 LLM。
+// 「一年一句·不改不换」是这机制的全部分量所在 → 出谶必须同盘同年必同句（随机/时间戳一律不可用）。
+// 结构：上句写命局本气（喜用五行 × 日主旺衰），下句写流年应期（流年天干五行与喜用/日主的生克关系）。
+const GEN_TO: Record<WuXing, WuXing> = { 木: '火', 火: '土', 土: '金', 金: '水', 水: '木' }; // 我生
+
+// 上句：喜用五行 × 身弱/身强（借势 / 泄秀两种取象）
+const VERSE_OPEN: Record<WuXing, Record<'身弱' | '身强', string>> = {
+  木: { 身弱: '春木得雨枝先发', 身强: '林深自有清风来' },
+  火: { 身弱: '炉火添薪光渐盛', 身强: '烈焰须风方远明' },
+  土: { 身弱: '厚土载物根自稳', 身强: '高原积厚待春耕' },
+  金: { 身弱: '顽金入火终成器', 身强: '利刃藏锋不轻鸣' },
+  水: { 身弱: '涸辙逢泉鱼自跃', 身强: '大江行舟顺水东' },
+};
+
+// 下句：流年五行 × 与命局的关系（顺=流年为喜用 / 平=帮身不入喜用 / 逆=既非喜用又不帮身）× 流年干阴阳。
+// 阴阳这一维不是装饰：流年干阴阳逐年交替，有它才保证「新岁必得新谶」——
+// 否则甲乙、丙丁这类同五行的相邻两年会出同一句，岁末换谶的仪式感就没了。
+type VerseTrend = '顺' | '平' | '逆';
+const VERSE_CLOSE: Record<WuXing, Record<VerseTrend, Record<'阳' | '阴', string>>> = {
+  木: {
+    顺: { 阳: '今岁东风正可乘', 阴: '今岁细雨润新枝' },
+    平: { 阳: '今岁培根未见荣', 阴: '今岁静守一枝青' },
+    逆: { 阳: '今岁枝繁反损精', 阴: '今岁藤缠须早剪' },
+  },
+  火: {
+    顺: { 阳: '今岁南风助势成', 阴: '今岁一灯照夜明' },
+    平: { 阳: '今岁添薪静候明', 阴: '今岁守炉勿扬声' },
+    逆: { 阳: '今岁焰高须避锋', 阴: '今岁烟浮宜养神' },
+  },
+  土: {
+    顺: { 阳: '今岁培土正堪耕', 阴: '今岁田畴宜细耘' },
+    平: { 阳: '今岁固基缓图名', 阴: '今岁筑垄待雨足' },
+    逆: { 阳: '今岁土重宜疏行', 阴: '今岁积尘须勤拂' },
+  },
+  金: {
+    顺: { 阳: '今岁金鸣器已成', 阴: '今岁细锉见锋棱' },
+    平: { 阳: '今岁磨砺待时鸣', 阴: '今岁敛锐守其钝' },
+    逆: { 阳: '今岁锋寒宜守城', 阴: '今岁刃钝且回炉' },
+  },
+  水: {
+    顺: { 阳: '今岁北水送舟轻', 阴: '今岁静波可稳行' },
+    平: { 阳: '今岁蓄流未可行', 阴: '今岁潜渊养其鳞' },
+    逆: { 阳: '今岁水泛宜筑堤', 阴: '今岁潮暗慎涉津' },
+  },
+};
+
+/** 流年天干（干支纪年：天干 (year-4)%10）。 */
+function liuNianGan(year: number): string {
+  return '甲乙丙丁戊己庚辛壬癸'[(((year - 4) % 10) + 10) % 10];
+}
+
+/**
+ * 年度谶语：同一命盘 + 同一年 → 恒为同一句（纯函数，可复算）。
+ * 存量 v1 命盘快照缺字段时逐级兜底（喜用 → 调候 → 日主本气），不抛错。
+ */
+export function composeAnnualVerse(chart: ChartView, year: number): string {
+  const dm = chart.dayMaster?.element as WuXing;
+  const dmElement: WuXing = dm in VERSE_OPEN ? dm : '土'; // 快照字段异常也必出句（此函数在读档案热路径上，不许抛）
+  const favorable = [...(chart.favorableElements ?? []), ...(chart.tiaoHou?.elements ?? [])] as WuXing[];
+  const key = (favorable.find((e) => e in VERSE_OPEN) ?? dmElement) as WuXing;
+  const open = VERSE_OPEN[key][chart.dayMaster?.strength === '身强' ? '身强' : '身弱'];
+
+  const gan = liuNianGan(year);
+  const ln = GAN_ELEMENT[gan];
+  const trend: VerseTrend = favorable.includes(ln)
+    ? '顺'
+    : (ln === dmElement || GEN_TO[ln] === dmElement) ? '平' : '逆'; // 同我/生我 = 帮身 → 平
+  return `${open}，${VERSE_CLOSE[ln][trend][GAN_YINYANG[gan]]}`;
+}
+
 export interface MingpanPalace {
   name: string;
   stem: string;

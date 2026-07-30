@@ -7,7 +7,7 @@ import type {
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SectionDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
   MemoryLibraryView, MemoryLibraryGroup, MemoryLibraryEntry, MemoryCategoryKey, MemoryFillLevel,
-  DossierView, DossierReport, DossierSection, DossierBlock,
+  DossierView, DossierReport, DossierSection, DossierBlock, StrategicProfile,
   Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
@@ -280,6 +280,10 @@ function current(): { token: string; d: UserData } {
 
 const agentOf = (key: string): Agent =>
   DEFAULT_AGENTS.find((a) => a.key === key) || DEFAULT_AGENTS.find((a) => a.key === 'general')!;
+
+// 样例年度谶语（mock 专用）：真实端由服务端按命盘确定性出谶，mock 不排盘 → 固定一句，
+// 与样例履历封面共用同一句，保持 mock 人格自洽。
+const SAMPLE_VERSE = '守得客心三尺暖，何愁门前客不还';
 
 // 确定性样例命盘（mock 专用 UI 预览假数据，结构对齐 ChartSummary；非真排盘）
 function sampleChartM(): ChartSummary {
@@ -1392,6 +1396,14 @@ export const mock = {
     if (!bazi) return delay({ needBazi: true } as { needBazi: true });
     return delay(sampleReportM());
   },
+  // 战略档案（mock）：谶语门槛与真实端同一条（有八字且信命理 → 当年有谶），
+  // 老板页「年度谶语」卡两态（出谶 / 求谶引导）才能在本地 mock 下都走查到——
+  // 此前 mock 恒返回 null，卡永远只有空态，正是这个 bug 长期没被走查发现的原因。
+  async strategicProfile(): Promise<{ strategic: Partial<StrategicProfile> | null }> {
+    const bazi = (current().d as { bazi?: { believe?: boolean } }).bazi ?? null;
+    if (!bazi || bazi.believe === false) return delay({ strategic: null });
+    return delay({ strategic: { verse: SAMPLE_VERSE, verseYear: new Date().getFullYear() } });
+  },
   // 送你一卦预览（mock：给确定性样例卡文本，不排盘不落库——让画卡/分享链路可本地走查）
   async fateCardPreview(body: { friendName?: string; consent?: boolean }): Promise<{ friendName: string; subtitle: string; sketch: string; trend: string; advice: string }> {
     const name = (body.friendName || '').trim();
@@ -1798,7 +1810,7 @@ export const mock = {
     const report: DossierReport = {
       name,
       headline: `扎在社区、靠复购立身的${ind}品牌`,
-      verse: '守得客心三尺暖，何愁门前客不还',
+      verse: SAMPLE_VERSE,
       sections,
       generatedAt: new Date().toISOString(),
     };

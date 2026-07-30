@@ -36,10 +36,12 @@ export async function casefileRoutes(app: FastifyInstance) {
       agentName: String(agentName || '军师').slice(0, 40),
     });
     // 战略档案回写（PR-3）：认可 = 用户确认的战略事实，提取 主要矛盾/定位/赛道/阶段 落档案
+    // #16：连带抽封面/谶语分节里模型亲写的年度谶语（verseSource='llm'，当年可升级算法兜底谶一次）
     await upsertStrategicProfile({
       tenantId: user.tenantId,
       userId: user.id,
       patch: extractStrategicFacts(deliverable),
+      verseSource: 'llm',
     }).catch(() => {});
     // L-6 三势真数据化：认可的是「市势/人势研判」→ 提炼 攻/守/等/撤 结论回写，军情页三势卡回显真结论
     if (force === '市势' || force === '人势') {
