@@ -152,12 +152,21 @@ export async function generateManifesto(opts: {
     ai = await structured(ManifestoSchema, {
       system: MANIFESTO_SYS,
       user: digest(opts.brief, opts.brandKit),
-      maxChars: 2000,
+      maxChars: 4000,
+      // ★ 必须显式给产出预算：provider 辅助档缺省 700 token，而 4-6 段中文宣言 + JSON 壳
+      //   远超 700 —— 2026-07-30 生产实锤被拦腰截断，首轮与纠错轮一起截，structured 恒 null，
+      //   AI 排版引擎 100% 静默回落模板（错误话术只说「产出不完整」，实际是这里）。
+      maxTokens: 2600,
     });
   } catch (err) {
     console.warn('[creative] 宣言生成失败：', (err as Error).message);
   }
-  if (!ai) return null;
+  if (!ai) {
+    // structured 返回 null 有自己的沉默路径（无 live provider / 两轮 JSON 校验都不过）。
+    // 这个分支曾经静默返回——生产回落时 journalctl 里一条痕迹都没有，排障只能靠猜。
+    console.warn('[creative] 宣言生成未产出（无 provider 或两轮 JSON 校验失败），回落模板路径');
+    return null;
+  }
 
   const paragraphs = (ai.manifesto ?? []).map((p) => String(p ?? '').trim()).filter(Boolean).slice(0, 6);
   const body = paragraphs.join('');

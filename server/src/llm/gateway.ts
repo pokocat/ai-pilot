@@ -815,7 +815,10 @@ export interface StructuredOutcome<T> { data: T | null; attempts: number; live: 
 
 export async function structuredMetered<S extends z.ZodTypeAny>(
   schema: S,
-  o: { system: string; user: string; maxChars?: number; temperature?: number; model?: string },
+  // maxTokens：产出预算（provider 缺省 700，见 rawText）。**长文 JSON 必须显式给**——
+  // 2026-07-30 生产实锤：海报宣言（4-6 段中文 + JSON 壳）被 700 拦腰截断，首轮与纠错轮
+  // 一起截，structured 恒 null，AI 排版引擎 100% 回落模板，而错误话术只说「产出不完整」。
+  o: { system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string },
 ): Promise<StructuredOutcome<z.output<S>>> {
   let attempts = 0;
   let live = false;
@@ -830,12 +833,13 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
     const user = o.user.slice(0, o.maxChars ?? 4000);
     // 调用前自增：即使 rawText 抛错（超时/5xx），provider 侧可能已计费——保守计入本轮。
     attempts++;
-    const first = coerceJson(schema, await rawText(cfg, lp, o.system, user, { allowAux: !o.model }));
+    const mt = o.maxTokens ? { maxTokens: o.maxTokens } : {};
+    const first = coerceJson(schema, await rawText(cfg, lp, o.system, user, { allowAux: !o.model, ...mt }));
     if (first.ok) return { data: first.data, attempts, live };
     // 一轮修复：把校验错误回喂，要求只输出合规 JSON。
     const repairSys = `${o.system}\n\n【纠错】上次输出无法通过校验：${first.error}。请只输出严格符合要求的 JSON，不要任何解释或多余文字。`;
     attempts++;
-    const second = coerceJson(schema, await rawText(cfg, lp, repairSys, user, { allowAux: !o.model }));
+    const second = coerceJson(schema, await rawText(cfg, lp, repairSys, user, { allowAux: !o.model, ...mt }));
     return { data: second.ok ? second.data : null, attempts, live };
   } catch (err) {
     console.error('[gateway] structured failed:', (err as Error).message);
@@ -861,7 +865,7 @@ export function structuredBillTokens(o: { ok: boolean; attempts: number; estToke
  */
 export async function structured<S extends z.ZodTypeAny>(
   schema: S,
-  o: { system: string; user: string; maxChars?: number; temperature?: number; model?: string },
+  o: { system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string },
 ): Promise<z.output<S> | null> {
   return (await structuredMetered(schema, o)).data;
 }
