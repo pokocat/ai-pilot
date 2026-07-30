@@ -2,7 +2,11 @@
 
 > **性质**：本文件是「海报成品图」（`canvas_design`）服务端提示词的**中文底稿**，
 > 由 `SKILL.upstream.md`（Anthropic `canvas-design`，Apache 2.0，见 `NOTICE.md`）的方法论改编而来，
-> 适配为「单张商业海报 · 固定画布 · 白名单模板 · 确定性渲染」的服务端流水线。
+> 适配为「单张商业海报 · 固定画布」的服务端流水线。
+>
+> **★ 2026-07-29 起有两条路径**：默认是 §5「AI 排版引擎」（模型自己写整页 HTML/CSS + 量测 refine 闭环）；
+> §1–§3 描述的「白名单模板 + 确定性渲染 + 图片模型主视觉」是**回落路径**，AI 引擎任一步走不通即走它。
+> 读本文时先认这一条，否则会把回落路径的约束当成全局约束。
 >
 > **工程约定**：这是人类可读底稿，**运行时不要用 `fs` 读取**（生产镜像只含 `dist/`，不含 `src/`）。
 > 落代码时把需要的段落内联为 TS 常量；本文件是「这段提示词为什么这么写」的唯一解释来源，
@@ -19,7 +23,9 @@
 工作流分两段，服务端严格按序执行，中间产物落库可追溯：
 
 1. **阶段一 · 视觉哲学**（文本产物）：给这张海报一个美学立场；
-2. **阶段二 · 视觉表达**（图像 + 排版产物）：主视觉按哲学生成，文字由渲染器确定性排版。
+2. **阶段二 · 视觉表达**（图像 + 排版产物）：
+   · **AI 排版引擎（默认）**：宣言交给模型，它用代码在画布上创作，渲染后量测、无条件打磨一轮（§5）；
+   · **模板回落**：主视觉按哲学由图片模型生成，文字由渲染器确定性排版（§2）。
 
 ---
 
@@ -76,6 +82,10 @@
 但无论音量大小，铁律不变——**不出画、不重叠、不压到安全边距以内**，每个元素都有呼吸空间。
 
 ### 2.2 职责边界：图片模型不写中文
+
+> ★ 2026-07-29：本节只适用于**模板 / 回落路径**（`layoutEngine='template'`）。
+> 默认路径已换成 §5 的「AI 排版引擎」——那条路不调图片模型，文字由模型自己排版、由量测器把关。
+> 「图片模型不写中文」这条铁律在两条路径上都成立（AI 路径压根不用图片模型）。
 
 这是本项目相对上游最硬的一条改动（方案 §4.1）。
 
@@ -148,3 +158,62 @@
 - [ ] 是否有元素出画、重叠、压安全边距？二维码是否完整可扫、Logo 是否未变形？
 - [ ] AI 生成标识是否在位？
 - [ ] 信息量是否超载到该建议拆成多张？
+
+---
+
+## 5. AI 排版引擎的两个提示词（2026-07-29，第 3 档）
+
+前面 §1–§3 描述的是「哲学 → 图片模型主视觉 + 确定性模板排版」。2026-07-29 拍板改为**最接近上游 skill 的第 3 档**：
+**模型自己写整张海报的 HTML/CSS**。实现在 `services/creative/{manifesto,canvasEngine}.ts`，两个提示词的
+设计意图记在这里（改提示词必须同步改本节，否则视为文档与代码不一致，AGENTS.md §0）。
+
+### 5.1 提示词 A · 宣言（`manifesto.ts`，LLM #1）
+
+产出 `{movement, manifesto[4–6 段], palette[3–5], reference}`。与 §1 那份六维度哲学的分工：
+六维度是**给模板填空**用的结构化字段，宣言是**给创作者读**的长文；两份并存不是重复，回落时用前者。
+
+从上游 SKILL.upstream.md 原样移植的指令（代码里逐条标了对照关系）：
+
+| 上游原文 | 本提示词 |
+|---|---|
+| "Write a manifesto for an art movement" | 「为下面这一张商业海报**写一篇美学运动的宣言**」 |
+| "Name the movement (1-2 words)" | movement：1–2 个词的中文命名 |
+| "Articulate the philosophy (4-6 paragraphs)" | manifesto：4–6 段，每段 2–4 句 |
+| "Avoid redundancy: each design aspect mentioned once" | 【避免冗余】同一件事不要在多段里反复重申 |
+| "Emphasize craftsmanship REPEATEDLY … meticulously crafted / product of deep expertise / painstaking attention / master-level execution" | 【工艺感必须反复强调】精工细作、深厚专业积累的产物、近乎苛刻的推敲、大师级执行 |
+| "Leave creative space … room to make interpretive choices also at an extremely high level of craft" | 【留出创作空间】写到「读完就知道往哪走，但还有的选」为止 |
+| "Information lives in design, not paragraphs" | 【视觉优先】信息活在设计里，不活在段落里 |
+| "a subtle, niche reference … like a jazz musician quoting another song" | 【隐性主题】爵士乐手引用另一首曲子那句原样保留 |
+
+商业耦合（上游没有）：宣言必须与 `goal`/`audience` 气质一致；艺术性不得牺牲主标题可读性、CTA 显著性、
+二维码可扫性。**没有确定性兜底长文**——产出不完整或未过审就整条回落模板，因为一篇谁都能写的兜底宣言
+只会让模型照着它自由发挥，画质反而不如调过版的模板。
+
+### 5.2 提示词 B · 创作与打磨（`canvasEngine.ts`，LLM #2/#3）
+
+创作提示词 = 【标准】+【怎么画】+【文字】+ 9 条**可量测**硬约束 +【输出格式】。移植对照：
+
+| 上游原文（CANVAS CREATION 段） | 本提示词 |
+|---|---|
+| "museum or magazine quality work" | 【标准】做出博物馆或杂志级的东西 |
+| "use repeating patterns and perfect shapes" | 【怎么画】用重复的图案与精确的形作画 |
+| "dense accumulation of marks, repeated elements, layered patterns that build meaning through patient repetition" | 密集排列的刻度与标记、层叠的色域，靠耐心的重复累积出意义 |
+| "sparse, clinical typography … a diagram from an imaginary discipline" | 像一本假想学科的图谱：克制的、近乎临床的小字标注与系统性编号 |
+| "nothing falls off the page and nothing overlaps … non-negotiable" | 【文字】任何元素都不出画、任何两块文字都不重叠——不可协商（并由量测器执行） |
+| "someone at the absolute top of their field labored over every detail" | 【标准】像这一行最顶尖的人对每一个细节都苛刻过 |
+
+打磨提示词（**无条件执行一轮**，上游 FINAL STEP 整段是它的出处）：
+
+| 上游原文 | 本提示词 |
+|---|---|
+| "The user ALREADY said 'It isn't perfect enough. It must be pristine, a masterpiece of craftsmanship, as if it were about to be displayed in a museum.'" | 直译保留（用户已经说了：这还不够完美……像是马上要被摆进博物馆展出） |
+| "avoid adding more graphics; instead refine what has been created and make it extremely crisp" | 【打磨不是加东西】不要再加图形、不要换字体、不要套滤镜 |
+| "If the instinct is to call a new function or draw a new shape, STOP and instead ask: How can I make what's already here more of a piece of art?" | 原样直译保留 |
+| "Take a second pass." | 「再走一遍代码，把它打磨成一件有哲学支撑的杰作。」 |
+
+**上游没有、本项目必须有的**：把「不出画、不重叠」从人的自律变成机器闸门——渲染后量测，违规带
+selector + 实测数值逐条回喂（`margin`/`min_font`/`out_of_bounds`/`text_overlap`/`headline_missing`/
+`aimark_missing`/`qr_quiet_zone`/`placeholder_residue`/`overflow`）。另外三条硬改编：
+① 上游让模型下载字体（`./canvas-fonts`），本项目渲染无网络 → 字体栈锁死在镜像内置的两个；
+② 文案只能用 brief 原文，一个字都不许自创（图片模型时代最常见的翻车是自创业务承诺）；
+③ AI 生成标识不可省略/改写/隐藏，缺了由服务端注入（合规是服务端的义务）。

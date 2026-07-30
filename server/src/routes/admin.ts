@@ -1073,7 +1073,7 @@ export async function adminRoutes(app: FastifyInstance) {
       items: rows.map((j): AdminCreativeJobItem => {
         const u = userMap.get(j.userId);
         const brief = ((j.requestJson ?? {}) as { brief?: { templateKey?: unknown } }).brief;
-        const result = (j.resultJson ?? {}) as { degraded?: unknown };
+        const result = (j.resultJson ?? {}) as { degraded?: unknown; engine?: unknown; rounds?: unknown; aiEngineError?: unknown };
         return {
           id: j.id,
           // 脱敏：昵称 + 掩码手机号（与订单列表同口径，不出全量手机号）。
@@ -1084,6 +1084,12 @@ export async function adminRoutes(app: FastifyInstance) {
           progress: j.progress,
           templateKey: typeof brief?.templateKey === 'string' ? brief.templateKey : null,
           engine: j.engine,
+          // 排版引擎：老任务（本轮之前成功的）resultJson 里没有 engine 字段 → null，不臆断成 'template'。
+          layoutEngine: typeof result.engine === 'string' ? result.engine : null,
+          rounds: typeof result.rounds === 'number' ? result.rounds : null,
+          ...(typeof result.aiEngineError === 'string' && result.aiEngineError
+            ? { aiEngineError: result.aiEngineError.slice(0, 300) }
+            : {}),
           provider: j.provider,
           // 老任务（本轮之前成功的）resultJson 里没有这个字段 → 一律按 false，不臆断。
           degraded: result.degraded === true,

@@ -750,7 +750,7 @@ export async function providerInfo() {
 // 那种指定是有意的，不能被辅助档覆盖。
 async function rawText(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
-  opts?: { allowAux?: boolean },
+  opts?: { allowAux?: boolean; maxTokens?: number },
 ): Promise<string> {
   // 未配 AI_AUX_MODEL 时 resolveAuxConfig 原样返回，下面两行等于无操作（默认行为零变化）。
   const useCfg = opts?.allowAux === false ? cfg : resolveAuxConfig(cfg);
@@ -760,13 +760,15 @@ async function rawText(
   // 辅助任务没有 sessionId；用输入摘要做稳定亲和键，既能跨双端点分流，又让同一抽取复用同端点缓存。
   const affinityKey = `aux:${createHash('sha1').update(system).update('\0').update(user).digest('hex').slice(0, 16)}`;
 
+  // maxTokens 只在调用方显式要求时传（缺省 undefined → provider 沿用 700 的辅助档预算，行为零变化）。
+  const mt = opts?.maxTokens ? { maxTokens: opts.maxTokens } : {};
   let out: string;
   if (useLive === 'openai') {
     const { openaiRaw } = await import('./providers/openai.js');
-    out = await openaiRaw(useCfg, system, user, { allowThinking: false, affinityKey });
+    out = await openaiRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt });
   } else {
     const { claudeRaw } = await import('./providers/claude.js');
-    out = await claudeRaw(useCfg, system, user, { allowThinking: false, affinityKey });
+    out = await claudeRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt });
   }
   // 辅助调用（洞察/预言/势研判/履历/汇总/图谱等）此前不入 token_usage → 成本低估。按 kind='aux' 记入基建用量。
   recordAuxUsage(useCfg.model, useLive, `${system}\n${user}`, out);
@@ -862,6 +864,42 @@ export async function structured<S extends z.ZodTypeAny>(
   o: { system: string; user: string; maxChars?: number; temperature?: number; model?: string },
 ): Promise<z.output<S> | null> {
   return (await structuredMetered(schema, o)).data;
+}
+
+/**
+ * **原样文本补全**（raw text，不做 JSON 解析）。骨架照 structuredMetered 抄：
+ * `getAiConfig → liveProvider → rawText`，无 live provider（mock / NODE_ENV=test）或任何异常 → `null`，
+ * 由调用方兜底 —— 与 `structured` / `completeJson` / `extractInsights` 同一口径，绝不伪造产出。
+ *
+ * 为什么不复用 `structured()`：产物是**一整页 HTML/CSS**。塞进 JSON string 要转义换行与引号，
+ * 模型极易在长文本里破坏转义 → 整份产物因一个反斜杠报废；而 HTML 本身有 `<!DOCTYPE` 起始与
+ * 标签闭合，可直接做结构校验，不需要 JSON 这层壳。调用方（海报 AI 排版引擎）自己剥 ``` 围栏。
+ *
+ * 两个刻意的默认值：
+ * · `maxTokens` 默认 4000（`rawText`/provider 的辅助档缺省是 700，会把一页 HTML 拦腰截断）；
+ * · `allowAux: false` —— 这不是记忆抽取那类辅助任务，切到小模型等于把「画质」这件事交给最弱的模型。
+ */
+export async function completeText(
+  system: string,
+  user: string,
+  o: { maxChars?: number; maxTokens?: number; temperature?: number; model?: string } = {},
+): Promise<string | null> {
+  const base = await getAiConfig();
+  const live = liveProvider(base);
+  if (!live) return null;
+  const cfg: ResolvedAiConfig = (o.temperature != null || o.model)
+    ? { ...base, ...(o.temperature != null ? { temperature: o.temperature } : {}), ...(o.model ? { model: o.model } : {}) }
+    : base;
+  try {
+    const text = await rawText(cfg, live, system, user.slice(0, o.maxChars ?? 12_000), {
+      allowAux: false,
+      maxTokens: o.maxTokens ?? 4000,
+    });
+    return text.trim() || null;
+  } catch (err) {
+    console.error('[gateway] completeText failed:', (err as Error).message);
+    return null;
+  }
 }
 
 /** 通用 JSON 补全（评测评委等内部用）：用就绪模型发一次并解析 JSON；未就绪（mock）/失败返回 null。 */

@@ -204,6 +204,47 @@ export async function generatePhilosophy(opts: {
   return out;
 }
 
+/* ───────────────── 图片供应商提示词（模板/回落路径专用） ───────────────── */
+
+// 色板 → 可读的色彩指令。图片模型不认十六进制，认「深墨绿 / 暖砂纸 / 哑光金」这类词，
+// 所以按明度与色相把 hex 粗分成几档中文说法。粗糙但足够：目的只是不让它自由发挥出撞色。
+function colorWords(hex: string): string {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!m) return '';
+  const [r, g, b] = [1, 2, 3].map((i) => parseInt(m[i], 16));
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  const tone = lum < 0.25 ? '深' : lum > 0.8 ? '浅' : '中';
+  if (max - min < 18) return `${tone}中性灰调`;
+  const hue = max === r ? (g >= b ? '暖红棕' : '紫红') : max === g ? '绿' : '蓝';
+  return `${tone}${hue}`;
+}
+
+/**
+ * 拼给图片供应商的提示词（**模板路径与 AI 回落路径共用**；AI 引擎本身不调图片模型）。
+ *
+ * 2026-07-29 止血：此前只发 `philosophy.visualPrompt` 那一句 ≤80 字，palette / 构图 / 材质全没传。
+ * 真机实测的两个后果：① 图片模型自选配色 → 墨绿页头压一块大红照片（撞色）；
+ * ② 「留出负空间供排版」被理解成"画三个空的粉色占位卡片"。所以这里必须把
+ * **色板主色（转成中文色彩词）** 与 **负向约束** 一起拼进去，而不是指望模型猜。
+ */
+export function composeVisualPrompt(brief: NormalizedPosterBrief, p: VisualPhilosophy): string {
+  const base = p.visualPrompt?.trim()
+    || `${brief.visualDirection || p.mood || '克制的商业海报主视觉'}；${p.movement ? `气质参照「${p.movement}」；` : ''}真实商业摄影或抽象材质，构图简洁`;
+  const colors = p.palette.slice(0, 3).map(colorWords).filter(Boolean);
+  const parts = [
+    base,
+    colors.length ? `整体色调锁定在：${colors.join('、')}（不要引入这几个色系之外的高饱和色，尤其不要互补色大面积对置）` : '',
+    '在画面上部或一侧留出**干净、无图案**的负空间供后续排版',
+    // 负向约束单独成句：图片模型对「不要 X」的服从度远高于把它藏在长句里。
+    '画面中不要出现任何文字、字母、数字、水印、logo、二维码',
+    '不要画 UI 界面、不要画卡片/相框/占位框/圆角矩形色块，不要加边框与装饰线框',
+    brief.negativePrompt ? `另外避免：${brief.negativePrompt}` : '',
+  ];
+  return parts.filter(Boolean).join('；');
+}
+
 /** 哲学正文（落 CreativeJob.promptSnapshot 可追溯；也是送审文本）。 */
 export function philosophyText(p: VisualPhilosophy): string {
   return [

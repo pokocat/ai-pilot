@@ -39,6 +39,21 @@ export const TEMPLATE_CATALOG: Record<TemplateKey, { name: string; desc: string 
   business_launch: { name: '商业发布', desc: '发布会 / 新品公告气质' },
 };
 
+/**
+ * 排版引擎（2026-07-29 第 3 档拍板）。
+ * · `'ai'`（**默认**）：模型自己写整张海报的 HTML/CSS（宣言 → 创作 → 量测 → 无条件打磨），
+ *   失败一律回落 `'template'` 的完整逻辑，付费任务永不因 AI 引擎失败；
+ * · `'template'`：只走三套白名单模板（含图片供应商主视觉），即上一代行为。
+ * 取值收窄成联合类型而不是任意字符串：payload 里读到别的值一律按默认处理（见 layoutEngineOf）。
+ */
+export const LAYOUT_ENGINES = ['ai', 'template'] as const;
+export type LayoutEngine = (typeof LAYOUT_ENGINES)[number];
+export const DEFAULT_LAYOUT_ENGINE: LayoutEngine = 'ai';
+
+function layoutEngineOf(v: unknown): LayoutEngine {
+  return (LAYOUT_ENGINES as readonly string[]).includes(v as string) ? (v as LayoutEngine) : DEFAULT_LAYOUT_ENGINE;
+}
+
 export const DEFAULT_PRICE_PER_POSTER = 10; // 钻石/张（2026-07-29 拍板，可后台改）
 export const DEFAULT_DAILY_LIMIT = 20;      // 每用户每日任务数（0 = 不限量）
 /**
@@ -61,6 +76,8 @@ export interface CreativeRuntimeConfig {
   dailyLimit: number;
   /** 单次渲染超时（传给 renderPoster）；上限见 MAX_TIMEOUT_MS 的不变式说明。 */
   timeoutMs: number;
+  /** 排版引擎（默认 'ai'，AI 失败自动回落模板）。 */
+  layoutEngine: LayoutEngine;
   templates: Record<TemplateKey, boolean>;
   visual: {
     enabled: boolean;
@@ -75,7 +92,7 @@ export interface CreativeRuntimeConfig {
 
 type RawPayload = {
   pricePerPoster?: unknown; dailyLimit?: unknown; timeoutMs?: unknown;
-  templates?: unknown; visual?: unknown;
+  layoutEngine?: unknown; templates?: unknown; visual?: unknown;
 };
 
 function num(v: unknown, def: number, min: number, max: number): number {
@@ -115,6 +132,9 @@ export async function getCreativeConfig(opts: { fresh?: boolean } = {}): Promise
     pricePerPoster: num(p.pricePerPoster, DEFAULT_PRICE_PER_POSTER, 0, 10_000),
     dailyLimit: num(p.dailyLimit, DEFAULT_DAILY_LIMIT, 0, 1000),
     timeoutMs: num(p.timeoutMs, DEFAULT_TIMEOUT_MS, 10_000, MAX_TIMEOUT_MS),
+    // 缺省即 'ai'：这意味着**部署即切 AI 引擎**（运营不需要动配置）。安全性由回落矩阵兜住，
+    // 见 worker.ts 的 runPipeline —— AI 引擎任何一步失败都退回模板路径，不影响交付与计费。
+    layoutEngine: layoutEngineOf(p.layoutEngine),
     templates: templatesOf(p.templates),
     visual: {
       enabled: !!(visualRaw.enabled as boolean),
@@ -154,6 +174,7 @@ export function publicCreativeConfig(cfg: CreativeRuntimeConfig): AdminCreativeC
     pricePerPoster: cfg.pricePerPoster,
     dailyLimit: cfg.dailyLimit,
     timeoutMs: cfg.timeoutMs,
+    layoutEngine: cfg.layoutEngine,
     templates: cfg.templates,
     visual,
   };
@@ -177,6 +198,7 @@ export async function updateCreativeConfig(patch: AdminCreativeConfigUpdate): Pr
     pricePerPoster: patch.pricePerPoster === undefined ? cur.pricePerPoster : num(patch.pricePerPoster, cur.pricePerPoster, 0, 10_000),
     dailyLimit: patch.dailyLimit === undefined ? cur.dailyLimit : num(patch.dailyLimit, cur.dailyLimit, 0, 1000),
     timeoutMs: patch.timeoutMs === undefined ? cur.timeoutMs : num(patch.timeoutMs, cur.timeoutMs, 10_000, MAX_TIMEOUT_MS),
+    layoutEngine: patch.layoutEngine === undefined ? cur.layoutEngine : layoutEngineOf(patch.layoutEngine),
     templates: patch.templates === undefined ? cur.templates : templatesOf({ ...cur.templates, ...plainObject(patch.templates) }),
     visual: {
       enabled: vp.enabled === undefined ? cur.visual.enabled : !!vp.enabled,

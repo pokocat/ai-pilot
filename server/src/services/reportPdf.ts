@@ -54,6 +54,11 @@ export class PdfUnavailableError extends Error {
 }
 
 // puppeteer 的最小结构类型（避免在无 Chromium 环境对完整类型的硬依赖，且便于 test 短路）。
+interface PdfRequest {
+  url(): string;
+  continue(): Promise<void>;
+  abort(): Promise<void>;
+}
 interface PdfPage {
   setViewport(opts: { width: number; height: number; deviceScaleFactor?: number }): Promise<void>;
   setContent(html: string, opts: { waitUntil: string; timeout: number }): Promise<void>;
@@ -61,8 +66,14 @@ interface PdfPage {
   addStyleTag(opts: { content: string }): Promise<unknown>;
   evaluate<T>(fn: () => T): Promise<T>;
   evaluate<T, A>(fn: (arg: A) => T, arg: A): Promise<T>;
+  /** 字符串表达式形态（puppeteer 支持；用来注入不能被转译器改写的 shim，见 installEvaluateShim）。 */
+  evaluate<T>(expression: string): Promise<T>;
   pdf(opts: Record<string, unknown>): Promise<Uint8Array | Buffer>;
   screenshot(opts: Record<string, unknown>): Promise<Uint8Array | Buffer>;
+  /** 不可信 HTML 的加固开关（见 RenderPngOptions.javaScriptEnabled）。 */
+  setJavaScriptEnabled(enabled: boolean): Promise<void>;
+  setRequestInterception(enabled: boolean): Promise<void>;
+  on(event: 'request', cb: (req: PdfRequest) => void): void;
   close(): Promise<void>;
 }
 interface PdfBrowser {
@@ -156,6 +167,46 @@ export async function htmlToPdf(html: string): Promise<Buffer> {
   return run;
 }
 
+/**
+ * 不可信 HTML 的加固（opt-in，只有传了对应字段才生效 —— 报告 PDF 与模板海报的行为一字不变）：
+ *   ① `javaScriptEnabled:false` → CDP Emulation.setScriptExecutionDisabled，页面内联 `<script>` 不执行。
+ *      **不影响 page.evaluate**（走 Runtime.evaluate，不受该开关约束；已在真实 Chromium 上实测过：
+ *      内联脚本篡改 DOM 未生效，而 evaluate 仍能读到 computedStyle 与 boundingRect）。
+ *   ② `allowUrlPrefixes` → 请求拦截白名单：`data:` / `about:` / `blob:` 恒放行（setContent 自身需要），
+ *      其余一律只放行给定前缀（OSS 签名域），命中不了就 abort。这是「LLM 写的 HTML 里塞了外链」的
+ *      最后一道闸：静态 sanitizer 可能被没想到的写法绕过，网络层拦截不会。
+ */
+async function hardenPage(page: PdfPage, o: RenderPngOptions): Promise<void> {
+  if (o.javaScriptEnabled === false) await page.setJavaScriptEnabled(false);
+  if (!o.allowUrlPrefixes) return;
+  const allow = o.allowUrlPrefixes;
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    const url = req.url();
+    const ok = url.startsWith('data:') || url.startsWith('about:') || url.startsWith('blob:')
+      || allow.some((p) => p && url.startsWith(p));
+    // 拦截回调里不许抛：一个 unhandled rejection 会带走整个渲染（甚至进程）。
+    void (ok ? req.continue() : req.abort()).catch(() => {});
+    if (!ok) console.warn('[reportPdf] 已拦截海报 HTML 的外链请求：', url.slice(0, 120));
+  });
+}
+
+/**
+ * page.evaluate 是把函数**源码**丢进浏览器执行的，所以转译器往函数体里塞的 helper 会跟着过去，
+ * 而浏览器里没有那些 helper → `ReferenceError: __name is not defined`（真实踩到过：`npm test`
+ * 走 tsx/esbuild，它默认 `--keep-names`，会把命名函数包一层 `__name(fn,"name")`；`tsc` 编译的
+ * 生产产物没有这层，于是「生产好用、测试炸」或反过来，非常难查）。
+ *
+ * 这里在页面里补一个恒等 `__name`，让两种产物在浏览器侧行为一致。**必须用字符串表达式注入**：
+ * 若用箭头函数注入，它自己也会被同一个转译器改写，等于用坏了的工具去修坏了的工具。
+ */
+async function installEvaluateShim(page: PdfPage): Promise<void> {
+  await page.evaluate<void>(
+    'globalThis.__name = globalThis.__name || function (f) { return f; };'
+    + 'globalThis.__publicField = globalThis.__publicField || function (o, k, v) { o[k] = v; return v; };',
+  );
+}
+
 async function screenshotOnce(html: string, o: RenderPngOptions): Promise<RenderPngResult> {
   const browser = await getBrowser();
   let page: PdfPage | null = null;
@@ -163,6 +214,8 @@ async function screenshotOnce(html: string, o: RenderPngOptions): Promise<Render
     page = await browser.newPage();
     // 分辨率由 viewport × deviceScaleFactor 决定（先渲染后放大会糊，故不做后期放大）。
     await page.setViewport({ width: o.width, height: o.height, deviceScaleFactor: o.deviceScaleFactor ?? 2 });
+    // 加固必须在 setContent **之前**（脚本禁用与请求拦截都是对「接下来这次加载」生效）。
+    await hardenPage(page, o);
     await page.setContent(html, { waitUntil: 'networkidle0', timeout: o.timeoutMs ?? PDF_TIMEOUT_MS });
     // 溢出量测（固定画布的质量闸）：截图只取视口，内容超出会被无声裁掉——把句子裁成半个笔画这种
     // 缺陷交给调用方判定，而不是让它悄悄发到用户手里。
@@ -187,6 +240,16 @@ async function screenshotOnce(html: string, o: RenderPngOptions): Promise<Render
         scrollHeight: Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight),
       };
     }, o.measureSelector ?? null);
+    // DOM 扫描（opt-in）：调用方给一段**自包含**函数（不许有闭包引用，会被序列化进浏览器上下文执行），
+    // 返回值原样带回 `result.scan`。海报 AI 引擎用它做量测（越界/边距/最小字号/文案在场/二维码静区）。
+    // 放在截图之前：量的必须是这一帧的布局。
+    // 入参类型在 RenderPngOptions 上刻意收成 `(arg: never)`，好让调用方必须自己保证「函数与 arg 配套」；
+    // 这里统一断言成 unknown 桥接 evaluate 的 <T, A> 签名（两端是同一对 fn/arg，不存在错配风险）。
+    let scan: unknown;
+    if (o.domScan) {
+      await installEvaluateShim(page);
+      scan = await page.evaluate(o.domScan.fn as unknown as (arg: unknown) => unknown, o.domScan.arg);
+    }
     // 海报是固定画布：按屏幕媒体渲染 + 只截视口，不做 fullPage。
     const out = await page.screenshot({
       type: 'png',
@@ -194,7 +257,7 @@ async function screenshotOnce(html: string, o: RenderPngOptions): Promise<Render
       omitBackground: false,
       clip: { x: 0, y: 0, width: o.width, height: o.height },
     });
-    return { buffer: Buffer.isBuffer(out) ? out : Buffer.from(out), ...box };
+    return { buffer: Buffer.isBuffer(out) ? out : Buffer.from(out), ...box, ...(scan === undefined ? {} : { scan }) };
   } finally {
     if (page) await page.close().catch(() => {});
   }
@@ -212,6 +275,23 @@ export interface RenderPngOptions {
    * 缺省量 document。
    */
   measureSelector?: string;
+  /**
+   * 页面内 JS 是否可执行。**缺省 true（不传即旧行为）**；传 false 用于渲染不可信 HTML
+   * （海报 AI 排版引擎：整页 HTML 由模型生成）。不影响 `domScan` —— 见 hardenPage 注释。
+   */
+  javaScriptEnabled?: boolean;
+  /**
+   * 请求白名单前缀（如 OSS 签名域）。**不传即不启用拦截（旧行为）**；传了则只放行
+   * `data:`/`about:`/`blob:` 与这些前缀，其余 abort。
+   */
+  allowUrlPrefixes?: string[];
+  /** 渲染后在页面上下文跑一段自包含函数，返回值原样带回 `RenderPngResult.scan`。 */
+  domScan?: { fn: (arg: never) => unknown; arg: unknown };
+  /**
+   * 允许在 NODE_ENV=test 下**真的**拉起浏览器（默认 false → 返回 1×1 桩 PNG）。
+   * 只给「必须验证真实渲染结果」的用例用（量测器单测），生产代码一律不传。
+   */
+  allowInTestMode?: boolean;
 }
 
 /** 截图产物 + 文档实际尺寸（scrollWidth/Height > 视口 = 内容被裁，调用方据此判不合格）。 */
@@ -219,6 +299,8 @@ export interface RenderPngResult {
   buffer: Buffer;
   scrollWidth: number;
   scrollHeight: number;
+  /** `domScan` 的返回值（未传 domScan 时为 undefined；test 桩路径也是 undefined）。 */
+  scan?: unknown;
 }
 
 /**
@@ -228,7 +310,8 @@ export interface RenderPngResult {
  * launch 失败抛 PdfUnavailableError（调用方转失败并退款）。
  */
 export async function renderHtmlToPng(html: string, o: RenderPngOptions): Promise<RenderPngResult> {
-  if (isPdfTestMode()) return { buffer: STUB_PNG, scrollWidth: o.width, scrollHeight: o.height };
+  // test 短路可被 allowInTestMode 显式解除（量测器单测要真实布局；生产代码不传这个字段）。
+  if (isPdfTestMode() && !o.allowInTestMode) return { buffer: STUB_PNG, scrollWidth: o.width, scrollHeight: o.height };
   const timeoutMs = o.timeoutMs ?? PDF_TIMEOUT_MS;
   const run = queue.then(() => withTimeout(screenshotOnce(html, o), timeoutMs, '海报截图'));
   queue = run.catch(() => {});

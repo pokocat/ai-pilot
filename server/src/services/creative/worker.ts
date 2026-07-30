@@ -10,12 +10,15 @@ import { prisma } from '../../db.js';
 import { now } from '../clock.js';
 import { recordAudit } from '../audit.js';
 import { registerJob } from '../scheduler.js';
-import { noteCreativeJobSucceeded, noteCreativeJobFailed } from '../metrics.js';
+import { noteCreativeJobSucceeded, noteCreativeJobFailed, noteCreativeEngine } from '../metrics.js';
 import { PdfUnavailableError } from '../reportPdf.js';
-import { getCreativeConfig, visualProviderConfigured } from './config.js';
-import { generatePhilosophy, philosophyText, type VisualPhilosophy } from './philosophy.js';
+import { getCreativeConfig, visualProviderConfigured, type CreativeRuntimeConfig } from './config.js';
+import { generatePhilosophy, philosophyText, composeVisualPrompt, type VisualPhilosophy } from './philosophy.js';
+import { generateManifesto, manifestoText } from './manifesto.js';
+import { generateCanvasPoster, AI_ENGINE_BUDGET_MS, type CanvasPoster } from './canvasEngine.js';
 import { renderPoster, PosterRenderError } from './renderer.js';
 import { resolveVisualProvider } from './visualProvider.js';
+import { moderate } from '../moderation.js';
 import { checkImage } from './imageModeration.js';
 import { creativeAssetKey, putCreativeObject, getCreativeObject, creativeAssetUrl } from './storage.js';
 import { cancelRequested, loadJobExecutionInput, refundJob, POSTER_SKILL_KEY, type JobExecutionInput } from './jobs.js';
@@ -190,13 +193,30 @@ interface RunOutcome {
   code?: string;
   message?: string;
   providerLabel?: string;
+  /** 本轮实际用的排版引擎（metrics 与审计用）：ai | template | template_fallback。 */
+  engineLabel?: string;
 }
 
+/**
+ * 管线总入口。**两条排版路径 + 一条回落边**：
+ *
+ *   layoutEngine='ai'（默认）
+ *     ├─ 宣言(LLM) → 创作 HTML(LLM) → 量测 → 无条件打磨 → 成功            → engine='ai'
+ *     └─ 任一步走不通（模型不可用/宣言不完整/三轮仍违规/渲染或量测异常/超预算）
+ *          → **回落模板路径的完整逻辑**                                    → engine='template_fallback'
+ *   layoutEngine='template'
+ *     └─ 三套白名单模板（含图片供应商主视觉）                              → engine='template'
+ *
+ * 回落**复用同一个 runTemplatePipeline**（不复制一份）：图片供应商调用、降级留痕（degraded/visualError）、
+ * 弹性版面契约、溢出闸这些教训全在那条路径上，抄一份就等于把它们全部作废一次。
+ */
 async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
   const { job, brief } = input;
   const cfg = await getCreativeConfig();
 
   // ── 阶段 1：视觉哲学（永不抛错，失败自动回退确定性哲学）──
+  // 两条路径都要它：模板路径整套版式靠它，AI 路径拿它的色板作宣言色板的兜底，
+  // 且它是回落时唯一还在手上的美学输入。
   await setProgress(job.id, 'philosophy');
   await checkpoint(job.id);
   const philosophy: VisualPhilosophy = await generatePhilosophy({
@@ -207,6 +227,112 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
     where: { id: job.id, status: 'running' },
     data: { promptSnapshot: philosophyText(philosophy) },
   });
+
+  // ── 阶段 2：AI 排版引擎（默认路径）──
+  let aiError: string | null = null;
+  if (cfg.layoutEngine === 'ai') {
+    const ai = await runAiEngine(input, cfg, philosophy);
+    if (ai.outcome) return ai.outcome;
+    aiError = ai.error ?? 'AI 引擎未产出';
+    console.warn('[creative] AI 排版引擎未产出，回落模板路径：', job.id, aiError);
+  }
+
+  return runTemplatePipeline(input, cfg, philosophy, aiError);
+}
+
+/**
+ * AI 排版引擎路径。**永不让整单失败**：拿不到产物就返回 error，由 runPipeline 回落模板。
+ * 唯一会往外抛的是 JobCancelled（用户取消必须原样冒到 runJobOnce，不能被当成"AI 引擎失败"吞掉）。
+ *
+ * 刻意不调图片供应商（canvas-design 精神：图形与排印即艺术，也省一笔生图成本）；
+ * 用户自己上传的 portrait/logo/qr 经占位符嵌入。revise 复用的 sourceVisualAssetId 在这条路径上被忽略。
+ */
+async function runAiEngine(
+  input: JobExecutionInput,
+  cfg: CreativeRuntimeConfig,
+  philosophy: VisualPhilosophy,
+): Promise<{ outcome?: RunOutcome; error?: string }> {
+  const { job, brief } = input;
+  const startedAt = Date.now();
+  // 进度沿用既有四段（philosophy|visual|render|upload）：AI 引擎的创作+打磨+渲染整体属于 'render'。
+  // 刻意不新增 'compose' —— 小程序的进度条是按这四个值写死的（app/src/services/creative.ts），
+  // 新值会让它退回第一档文案。等前端跟上再拆。
+  await setProgress(job.id, 'render');
+  await checkpoint(job.id);
+
+  let poster: CanvasPoster;
+  let movement: string;
+  try {
+    const manifesto = await generateManifesto({
+      brief, brandKit: input.brandKit, fallbackPalette: philosophy.palette,
+      tenantId: job.tenantId, userId: job.userId,
+    });
+    if (!manifesto) return { error: '视觉哲学宣言不可用（模型未就绪 / 产出不完整 / 未过审）' };
+    movement = manifesto.movement;
+    // 宣言进 promptSnapshot（覆盖阶段 1 写的六维度；六维度仍拼在后面，回落排障要看得到两份）。
+    await prisma.creativeJob.updateMany({
+      where: { id: job.id, status: 'running' },
+      data: { promptSnapshot: `${manifestoText(manifesto)}\n\n—— 以下为模板回落用的六维度哲学 ——\n${philosophyText(philosophy)}` },
+    });
+    await checkpoint(job.id);
+
+    const assets = await resolveTemplateAssets(input, null);
+    const spent = Date.now() - startedAt;
+    const r = await generateCanvasPoster({
+      brief, manifesto, assets,
+      timeoutMs: cfg.timeoutMs,
+      // 预算扣掉宣言已花的时间，且至少留 30s（不留余量的话超时判定会在第一轮就命中，等于从不启用）。
+      budgetMs: Math.max(30_000, AI_ENGINE_BUDGET_MS - spent),
+    }, {
+      // 交付闸门带任务上下文：审核记录要能落到这单头上（与宣言过审同一口径）。
+      moderateText: (t) => moderate('output', t, { tenantId: job.tenantId, userId: job.userId }),
+    });
+    if (!r.ok) return { error: r.reason };
+    poster = r.poster;
+  } catch (e) {
+    if (e instanceof JobCancelled) throw e;
+    return { error: `AI 引擎异常：${(e as Error).message}` };
+  }
+
+  await checkpoint(job.id);
+  return {
+    outcome: await settlePoster(input, {
+      rendered: poster,
+      // 主视觉来源仍是「无」：AI 引擎不调图片供应商。引擎维度单独一个 label（见 noteCreativeEngine）。
+      providerLabel: 'none',
+      engineLabel: `ai:${poster.rounds}rounds`,
+      assetMetadata: {
+        engine: 'ai',
+        movement,
+        rounds: poster.rounds,
+        violationsFixed: poster.violationsFixed,
+        polishReverted: poster.polishReverted,
+        aiMarkInjected: poster.aiMarkInjected,
+        // 最终 HTML 只存在资产 metadata 里（排障用）；不进 CreativeJob 行，那张表要保持轻。
+        html: poster.html,
+      },
+      result: {
+        engine: 'ai',
+        rounds: poster.rounds,
+        violationsFixed: poster.violationsFixed,
+        ...(poster.polishReverted ? { polishReverted: true } : {}),
+        movement,
+        philosophySource: philosophy.source,
+        visualAssetId: null,
+        degraded: false,
+      },
+    }),
+  };
+}
+
+/** 模板路径（既有逻辑原样保留）。`aiError` 非空表示这是 AI 引擎失败后的回落，需留痕。 */
+async function runTemplatePipeline(
+  input: JobExecutionInput,
+  cfg: CreativeRuntimeConfig,
+  philosophy: VisualPhilosophy,
+  aiError: string | null,
+): Promise<RunOutcome> {
+  const { job, brief } = input;
 
   // ── 阶段 2：主视觉（未配供应商 / 复用父任务资产 → 跳过，不报错）──
   //
@@ -222,8 +348,11 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
     const provider = await resolveVisualProvider(cfg);
     if (provider) {
       try {
-        const prompt = philosophy.visualPrompt?.trim()
-          || `${brief.visualDirection || philosophy.mood || '克制的商业海报主视觉'}；在画面上部留出干净负空间供后续排版；画面中不要出现任何文字`;
+        // 止血（2026-07-29）：原先只发一句 ≤80 字的 visualPrompt，palette/构图/材质全没传 →
+        // 真机实测出现「墨绿页头 + 大红照片」的撞色，且「留出负空间供排版」被画成了三个空的粉色占位卡片。
+        // composeVisualPrompt 把色板主色与负向约束（禁文字/禁 UI 卡片占位框/禁 logo/禁边框）拼进去，
+        // 兜底文案同步加强。这条路径现在是回落路径，但仍是付费用户会拿到的图。
+        const prompt = composeVisualPrompt(brief, philosophy);
         const submitted = await provider.submit({
           prompt,
           ...(brief.negativePrompt ? { negativePrompt: brief.negativePrompt } : {}),
@@ -272,13 +401,53 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
   }
 
   // ── 阶段 4：上传 + 收口 ──
+  return settlePoster(input, {
+    rendered,
+    providerLabel,
+    engineLabel: aiError ? 'template_fallback' : 'template',
+    assetMetadata: {
+      engine: aiError ? 'template_fallback' : 'template',
+      templateKey: brief.templateKey,
+      movement: philosophy.movement,
+      philosophySource: philosophy.source,
+    },
+    result: {
+      engine: aiError ? 'template_fallback' : 'template',
+      templateKey: brief.templateKey,
+      movement: philosophy.movement,
+      philosophySource: philosophy.source,
+      visualAssetId: visualAssetId ?? null,
+      degraded,
+      ...(visualError ? { visualError } : {}),
+      // 回落原因落库：否则「AI 引擎在生产静默失效」这件事只存在于日志里，任务台全是绿的模板图。
+      ...(aiError ? { aiEngineError: aiError.slice(0, 300) } : {}),
+    },
+  });
+}
+
+/**
+ * 上传成品 + 收口（两条排版路径共用）。
+ * `result` 是 resultJson 的**附加**字段，assetId/kind/宽高由本函数统一写，避免两处各写一份口径。
+ */
+async function settlePoster(
+  input: JobExecutionInput,
+  o: {
+    rendered: { buffer: Buffer; mimeType: string; width: number; height: number };
+    providerLabel: string;
+    engineLabel: string;
+    assetMetadata: Record<string, unknown>;
+    result: Record<string, unknown>;
+  },
+): Promise<RunOutcome> {
+  const { job } = input;
+  const { rendered } = o;
   await setProgress(job.id, 'upload');
   await checkpoint(job.id);
   const poster = await saveAsset({
     jobId: job.id, tenantId: job.tenantId, userId: job.userId, kind: 'poster_png',
     buffer: rendered.buffer, mimeType: rendered.mimeType,
     width: rendered.width, height: rendered.height,
-    metadata: { templateKey: brief.templateKey, movement: philosophy.movement, philosophySource: philosophy.source },
+    metadata: o.assetMetadata,
   });
 
   const url = creativeAssetUrl(poster.id, poster.ossKey);
@@ -298,12 +467,7 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
         kind: 'poster_png',
         width: rendered.width,
         height: rendered.height,
-        templateKey: brief.templateKey,
-        movement: philosophy.movement,
-        philosophySource: philosophy.source,
-        visualAssetId: visualAssetId ?? null,
-        degraded,
-        ...(visualError ? { visualError } : {}),
+        ...o.result,
       } as Prisma.InputJsonValue,
     },
   });
@@ -322,7 +486,7 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
     downloadUrl: url,
   }).catch((e) => console.error('[creative] 成果消息回写失败（不影响任务成功）：', (e as Error).message));
 
-  return { status: 'succeeded', providerLabel };
+  return { status: 'succeeded', providerLabel: o.providerLabel, engineLabel: o.engineLabel };
 }
 
 /**
@@ -380,9 +544,15 @@ export async function runJobOnce(jobId: string): Promise<RunOutcome> {
     // provider 标签用**本轮实际结果**（reused / 供应商名 / degraded），不是建单时的 'configured' 快照——
     // 用快照的后果是供应商挂掉时监控看不出任何异常。
     noteCreativeJobSucceeded(POSTER_SKILL_KEY, outcome.providerLabel ?? 'none');
+    // 引擎维度单独一个计数器（不往 creativeJobs 那个 counter 上加标签：同名指标的标签集必须稳定，
+    // created/failed 事件没有 engine 这一维，混着加会让同一指标出现两种 series 形状）。
+    noteCreativeEngine(POSTER_SKILL_KEY, outcome.engineLabel ?? 'template');
     await recordAudit({
       tenantId: input.job.tenantId, userId: input.job.userId, action: 'creative.job.succeeded',
-      payload: { jobId, templateKey: input.brief.templateKey, provider: outcome.providerLabel ?? 'none' },
+      payload: {
+        jobId, templateKey: input.brief.templateKey, provider: outcome.providerLabel ?? 'none',
+        engine: outcome.engineLabel ?? 'template',
+      },
     });
     return outcome;
   }

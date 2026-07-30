@@ -243,6 +243,18 @@ export function noteCreativeJobFailed(skill: string, provider: string, code: str
   creativeJobs.inc({ skill, provider, event: 'failed' });
   creativeFailures.inc({ code: (code || 'UNKNOWN').slice(0, 32) });
 }
+// 排版引擎维度（2026-07-29，第 3 档 AI 排版引擎上线）。**独立计数器，不给 creativeJobs 加标签**：
+// 同名指标的标签集必须稳定，而 created/failed 事件没有 engine 这一维，混着加会让一个指标出现两种
+// series 形状（Prometheus 侧表现为奇怪的空标签）。engine 取值有界：ai:1rounds/ai:2rounds/ai:3rounds/
+// template/template_fallback —— **`template_fallback` 的斜率就是「AI 引擎在生产悄悄失效」的告警信号**。
+const creativeEngines = new LabeledCounter(
+  'junshi_creative_engine_total',
+  '成品图排版引擎用量（skill=技能 key，engine=ai:Nrounds|template|template_fallback）',
+  40,
+);
+export function noteCreativeEngine(skill: string, engine: string): void {
+  creativeEngines.inc({ skill, engine: (engine || 'unknown').slice(0, 24) });
+}
 
 /* ──────────────── 支付 ──────────────── */
 
@@ -436,6 +448,7 @@ export async function renderMetrics(): Promise<string> {
   planGateBlocked.renderInto(ms);
   creativeJobs.renderInto(ms);
   creativeFailures.renderInto(ms);
+  creativeEngines.renderInto(ms);
 
   /* —— 支付 —— */
   payOrdersCreated.renderInto(ms);
@@ -553,7 +566,7 @@ export function __resetMetrics(): void {
   llmCalls.reset(); llmCallDuration.reset(); llmTokens.reset(); llmCost.reset();
   genDegraded.reset(); outputTruncated.reset();
   registrations.reset(); moderationChecks.reset(); creditsFlow.reset(); knownCreditReasons.clear(); planGateBlocked.reset();
-  creativeJobs.reset(); creativeFailures.reset();
+  creativeJobs.reset(); creativeFailures.reset(); creativeEngines.reset();
   payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset();
   alertForwards.reset();
   paySweep = { scanned: 0, applied: 0, failed: 0, closed: 0, runs: 0 };

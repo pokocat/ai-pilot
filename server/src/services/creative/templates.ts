@@ -26,8 +26,10 @@ export const CANVAS_CLASS = 'poster';
  *    fc-match "Noto Sans CJK SC" -> NotoSansCJKsc-Regular.otf ✓
  *  只写子集名会让整个栈落空到通用 sans-serif（也是纯拉丁），中文全靠 Chromium
  *  逐字回退，衬线/无衬线的版式区分随之丢失。 */
-const FONT_SANS = '"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-const FONT_SERIF = '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif';
+/** ★ 同时也是 AI 排版引擎提示词里唯一允许的两个字体栈（canvasEngine 直接引用本常量，
+ *  绝不在提示词里另抄一份——抄一份就等于给「生产字体栈落空」这个已经踩过的坑留了第二个入口）。 */
+export const FONT_SANS = '"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+export const FONT_SERIF = '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif';
 
 /** AI 生成标识文案（默认渲染，样式可配，整体不可关）。 */
 export const AI_MARK_TEXT = 'AI 生成内容 · 军师参谋部';

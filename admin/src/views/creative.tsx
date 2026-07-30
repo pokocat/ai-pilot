@@ -13,6 +13,11 @@
 // env 开关 CANVAS_DESIGN_ENABLED —— 合取双开关制造「后台开了却不生效」的静默失败，作熔断还比 DB 开关
 // 慢（要 SSH + 重启）。代价是这个开关变重了：打开保存 = 立刻放量 + 立刻开始扣钻，没有第二道闸门兜底。
 // 所以页面必须把这件事写在开关旁（.ai-note），并对 关→开 走 ConfirmDialog 回显单价与限额。
+//
+// 排版引擎（2026-07-29 起）是另一回事，别按开关的规格对待它：AI 排版失败必回落模板，付费任务不会因它
+// 失败，所以它可逆、不涉资金、不弹确认框，文案也不该写成「实验性功能」。它真正的风险是**静默失效** ——
+// AI 挂了照样出模板图、任务照样全绿，配置页看起来一直是「AI 排版」。所以观测的重心放在任务台：每行显示
+// 本单实际引擎，template_fallback 用警示色 + 回落原因，汇总条给一个（本页样本的）AI 回落率。
 
 import { useCallback, useEffect, useState } from 'react';
 import Icon from '../Icon';
@@ -33,6 +38,22 @@ const TEMPLATES: [string, string, string][] = [
   ['editorial', '编辑杂志', '杂志内页式排版，图文并重'],
   ['business_launch', '商业发布', '发布会 / 新品公告气质'],
 ];
+
+/**
+ * 排版引擎两项（措辞对齐 shared/contracts.d.ts 的契约注释）。
+ *
+ * 刻意**不**写成「实验性 / 有风险 / 可能失败」：AI 引擎的任何一步走不通（模型不可用、HTML 不合规、
+ * 量测反复不过）都会自动回落到模板路径，付费任务不会因为它失败。所以这是「要不要试更好的画质」，
+ * 不是风险开关，恐吓文案只会让运营永远不敢打开它。真正需要盯的是**回落率** —— 见任务台汇总条。
+ */
+const LAYOUT_ENGINES: ['ai' | 'template', string, string][] = [
+  ['ai', 'AI 排版', '模型按设计哲学自由创作整页版式，量测不过自动修正，失败自动回落模板'],
+  ['template', '模板排版', '固定三套版式（上一代行为），不调用创作模型'],
+];
+
+function engineName(k: string): string {
+  return LAYOUT_ENGINES.find(([key]) => key === k)?.[1] ?? k;
+}
 
 const JOB_STATUS: [string, string][] = [
   ['', '全部'], ['pending', '排队中'], ['running', '生成中'],
@@ -56,6 +77,63 @@ function templateLabel(k: string | null): string {
   return TEMPLATES.find(([key]) => key === k)?.[1] ?? k;
 }
 
+/**
+ * 本单**实际**走的排版引擎 → 行内 tag。
+ *
+ * 为什么必须显眼：AI 引擎失败会静默回落成一张模板图，任务照样是绿的、照样扣费。不显示的话，
+ * 「AI 排版在生产整天没生效」这件事只存在于服务端日志里（供应商降级 degraded 已经踩过一次）。
+ * 所以 template_fallback 用警示色，并把 aiEngineError 挂到 title 上 —— 这是运营唯一的入口。
+ *
+ * 返回 null = 不显示标签：老任务 / 未完成任务的 layoutEngine 是 null，硬显示成「模板」是撒谎。
+ * 未来出现的新引擎值原样显示（中性色），也不冒充已知的三种。
+ */
+export function engineTag(
+  j: Pick<AdminCreativeJobItem, 'layoutEngine' | 'rounds' | 'aiEngineError'>,
+): { cls: string; label: string; title: string } | null {
+  const e = j.layoutEngine;
+  if (!e) return null;
+  if (e === 'ai') {
+    return {
+      cls: 'tag',
+      // rounds：1=一次成（未打磨，理论上不该出现）、2=创作 + 强制打磨、3=还修了一轮违规。
+      label: j.rounds ? `AI 排版 · ${j.rounds}轮` : 'AI 排版',
+      title: j.rounds
+        ? `模型自由创作成功，共 ${j.rounds} 轮 LLM 调用（含量测后的打磨/修正）`
+        : '模型自由创作成功（未记录轮数）',
+    };
+  }
+  if (e === 'template') return { cls: 'tag off', label: '模板', title: '按配置走模板排版路径，未调用创作模型' };
+  if (e === 'template_fallback') {
+    return {
+      cls: 'tag warn',
+      label: '回落模板',
+      title: `AI 排版没跑通，本单已回落模板出图（用户拿到的是模板版）。原因：${j.aiEngineError || '未记录'}`,
+    };
+  }
+  return { cls: 'tag off', label: e, title: `未知排版引擎取值：${e}` };
+}
+
+/**
+ * 当前页 AI 回落率。分母只算**判定过排版引擎**的单（ai + template_fallback）：
+ * template 是运营自己选的路径、null 是老任务，都不该稀释这个比例。分母 0 时返回 null（不显示瓷贴）。
+ *
+ * 这不是精确指标 —— 只统计当前页（且受状态筛选影响），所以呈现时必须写明「本页样本」，
+ * 不能让运营拿它当 SLO。真要精确口径得服务端出聚合，不在本页职责内。
+ */
+export function fallbackStat(
+  items: Pick<AdminCreativeJobItem, 'layoutEngine'>[],
+): { fallback: number; total: number; pct: number } | null {
+  let ai = 0;
+  let fallback = 0;
+  for (const j of items) {
+    if (j.layoutEngine === 'ai') ai += 1;
+    else if (j.layoutEngine === 'template_fallback') fallback += 1;
+  }
+  const total = ai + fallback;
+  if (total === 0) return null;
+  return { fallback, total, pct: Math.round((fallback / total) * 100) };
+}
+
 /** 毫秒配置项的人话副标（运营调的是「几分钟」，输入框收的是毫秒）。 */
 function msHint(ms: number): string {
   return ms >= 60_000 ? `约 ${(ms / 60_000).toFixed(1)} 分钟` : `约 ${Math.round(ms / 1000)} 秒`;
@@ -66,6 +144,7 @@ interface CfgDraft {
   pricePerPoster: number;
   dailyLimit: number;
   timeoutMs: number;
+  layoutEngine: 'ai' | 'template';
   templates: Record<string, boolean>;
   visualEnabled: boolean;
   baseUrl: string;
@@ -89,6 +168,7 @@ function toDraft(c: AdminCreativeConfig): CfgDraft {
     pricePerPoster: c.pricePerPoster,
     dailyLimit: c.dailyLimit,
     timeoutMs: c.timeoutMs,
+    layoutEngine: c.layoutEngine,
     templates: { ...c.templates },
     visualEnabled: c.visual.enabled,
     baseUrl: c.visual.baseUrl,
@@ -105,6 +185,7 @@ function basicsDirty(d: CfgDraft, c: AdminCreativeConfig): boolean {
     || d.pricePerPoster !== c.pricePerPoster
     || d.dailyLimit !== c.dailyLimit
     || d.timeoutMs !== c.timeoutMs
+    || d.layoutEngine !== c.layoutEngine
     || TEMPLATES.some(([k]) => !!d.templates[k] !== !!c.templates[k]);
 }
 
@@ -159,6 +240,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       pricePerPoster: draft.pricePerPoster,
       dailyLimit: draft.dailyLimit,
       timeoutMs: draft.timeoutMs,
+      layoutEngine: draft.layoutEngine,
       templates: draft.templates,
     };
     const run = async () => { setBusy('basics'); try { await put(body, '配置已保存'); } finally { setBusy(''); } };
@@ -167,8 +249,12 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
     //   · 单价变更：改一次影响此后每一张海报的扣费。
     // 两件事常常一起发生（先定价再开量），合成**一个**对话框回显，不要连弹两次。
     // 关闭方向不拦：停量是止血动作，多一次点击就是多一分钟的损失。
+    //
+    // 排版引擎切换**自己不弹框**：它可逆、不涉资金、失败必回落（见 LAYOUT_ENGINES 注释）。但如果它和
+    // 改价/放量同批保存，就顺带回显一行 —— 一次保存里改了几件事，确认框必须说全，否则回显反而误导。
     const turningOn = draft.enabled && !cfg.enabled;
     const priceChanged = draft.pricePerPoster !== cfg.pricePerPoster;
+    const engineChanged = draft.layoutEngine !== cfg.layoutEngine;
     if (turningOn || priceChanged) {
       const echo: NonNullable<ConfirmSpec['echo']> = [];
       if (turningOn) echo.push({ k: '功能开关', v: '未开启 → 已开启' });
@@ -179,6 +265,12 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
         echo.push({ k: '单价', v: `${draft.pricePerPoster} 钻 / 张`, amount: true });
       }
       echo.push({ k: '每日限额', v: draft.dailyLimit === 0 ? '不限量（0 = 不限）' : `${draft.dailyLimit} 张 / 人` });
+      if (engineChanged) {
+        echo.push({
+          k: '排版引擎',
+          v: `${engineName(cfg.layoutEngine)} → ${engineName(draft.layoutEngine)}（同批保存）`,
+        });
+      }
       setConfirmSpec({
         title: turningOn ? '开启海报出图（等于放量）' : '修改单张海报价格',
         desc: turningOn
@@ -270,13 +362,14 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
 
   const jobData = jobs.data;
   const pages = jobData ? Math.max(1, Math.ceil(jobData.total / (jobData.pageSize || 20))) : 1;
+  const fbStat = jobData ? fallbackStat(jobData.items) : null;
 
   return (
     <>
       <PageHead
         k="creative"
         res={{ loading: cfgRes.loading || jobs.loading, reload: reloadAll, updatedAt: Math.max(cfgRes.updatedAt, jobs.updatedAt) }}
-        badge={cfg ? (cfg.enabled ? `已开启 · ${cfg.pricePerPoster} 钻/张` : '未开启') : undefined}
+        badge={cfg ? (cfg.enabled ? `已开启 · ${cfg.pricePerPoster} 钻/张 · ${engineName(cfg.layoutEngine)}` : '未开启') : undefined}
       />
 
       {!isSuper && (
@@ -288,7 +381,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       )}
 
       {/* ── 功能配置 ── */}
-      <div className="sec-h"><span className="t">功能配置</span><span className="s">开关 / 单价 / 限额 / 模板启停</span></div>
+      <div className="sec-h"><span className="t">功能配置</span><span className="s">开关 / 单价 / 限额 / 排版引擎 / 模板启停</span></div>
       <ViewState res={cfgRes} skeleton="rows">
         {(c: AdminCreativeConfig) => !draft ? null : (
           <div className="pad">
@@ -326,8 +419,33 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                 <NumInput className="ai-input" min={10_000} max={480_000} step={5000} value={draft.timeoutMs} disabled={!isSuper} onChange={(timeoutMs) => set({ timeoutMs })} />
               </div>
 
+              {/* 排版引擎：可逆、不涉资金、失败必回落 → 不弹确认框，切完直接「保存配置」。 */}
               <div className="ai-field">
-                <div className="ai-fl">模板启停（MVP 三套 3:4 · 全部停用则无法建单，建单返回 422）</div>
+                <div className="ai-fl">排版引擎（决定海报版式是模型现场创作还是套固定模板）</div>
+                <div className="bill-seg">
+                  {LAYOUT_ENGINES.map(([k, label, desc]) => (
+                    <div
+                      key={k}
+                      className={`bill-opt ${draft.layoutEngine === k ? 'on' : ''}`}
+                      onClick={() => isSuper && set({ layoutEngine: k })}
+                    >
+                      <div className="bo-t">{label}</div>
+                      <div className="bo-d">{desc}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="ai-note">
+                  AI 排版不是风险开关：模型不可用、产出不合规、量测反复不过，任何一步走不通都会自动回落到模板路径出图，
+                  付费任务不会因为它失败。要盯的是下面任务台的「AI 回落率」—— 回落率高说明 AI 排版名义上开着、
+                  实际大多在出模板图，那时候才该回去查模型配置或切回模板排版。
+                </div>
+              </div>
+
+              <div className="ai-field">
+                <div className="ai-fl">
+                  模板启停（MVP 三套 3:4 · 全部停用则无法建单，建单返回 422
+                  {draft.layoutEngine === 'ai' ? '；AI 排版下这三套仍是回落时的兜底池，别全关' : ''}）
+                </div>
                 <div className="cfg">
                   {TEMPLATES.map(([k, label, desc]) => (
                     <div key={k} className="cfg-row">
@@ -438,7 +556,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       )}
 
       {/* ── 任务台 ── */}
-      <div className="sec-h"><span className="t">任务台</span><span className="s">用户脱敏标识 / 成本 / 退款态 / 降级 / 失败原因</span></div>
+      <div className="sec-h"><span className="t">任务台</span><span className="s">用户脱敏标识 / 成本 / 退款态 / 排版引擎 / 降级 / 失败原因</span></div>
       <div className="pad">
         <div className="filter-bar">
           <div className="chip-row">
@@ -457,6 +575,14 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
               <div><b>{jobData.summary.succeeded}</b><span>已完成</span></div>
               <div><b>{jobData.summary.failed}</b><span>失败</span></div>
               <div><b>{jobData.summary.refunded}</b><span>已退款</span></div>
+              {/* AI 回落率：AI 排版失败会静默出一张模板图，任务全绿 —— 这个数是「引擎到底生效了没」
+                  的唯一体感入口。口径只到当前页（还受上面的状态筛选影响），所以副标注明本页样本。 */}
+              {fbStat && (
+                <div>
+                  <b>{fbStat.pct}%</b>
+                  <span>AI 回落率 · 本页样本 {fbStat.fallback} / {fbStat.total} 单</span>
+                </div>
+              )}
             </div>
 
             {jobData.items.length === 0 && (
@@ -469,6 +595,10 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
               const expanded = openErr === j.id;
               const philOpen = openPhil === j.id;
               const err = j.errorMessage || j.errorCode || '';
+              const eng = engineTag(j);
+              // 回落原因挂在**成功**的单上（AI 挂了但图出了），所以它不能只走「失败原因」那条路径，
+              // 否则永远不显示。≤300 字，行内截断 + title 全文 + 展开处全文。
+              const fbErr = j.layoutEngine === 'template_fallback' ? (j.aiEngineError || '') : '';
               return (
                 <div key={j.id} className="usage-row">
                   <div className="usage-h">
@@ -481,6 +611,8 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                   <div className="usage-meta">
                     <span className={statusTag(j.status)}>{STATUS_LABEL[j.status] ?? j.status}</span>
                     {j.status === 'running' && j.progress && <span className="tag off">{j.progress}</span>}
+                    {/* 实际排版引擎。null（老任务/未完成）不显示——冒充「模板」会让回落率失真。 */}
+                    {eng && <span className={eng.cls} title={eng.title}>{eng.label}</span>}
                     {/* 降级 = 配了图片供应商但这一单没拿到主视觉。不显示它的话，供应商挂一整天任务台仍然全绿。 */}
                     {j.degraded && <span className="tag warn" title="本单走了降级路径：没拿到主视觉，用户收到的是纯排版海报">无主视觉</span>}
                     {j.refunded && <span className="tag off">已退款</span>}
@@ -494,14 +626,25 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                       失败原因：{err.length > 72 ? `${err.slice(0, 72)}…` : err}
                     </div>
                   )}
-                  {err && expanded && <div className="trace-text">{j.errorCode ? `[${j.errorCode}] ` : ''}{j.errorMessage ?? ''}</div>}
+                  {fbErr && !expanded && (
+                    <div className="usage-meta" title={fbErr}>
+                      AI 排版回落原因：{fbErr.length > 72 ? `${fbErr.slice(0, 72)}…` : fbErr}
+                    </div>
+                  )}
+                  {expanded && (
+                    <div className="trace-text">
+                      {err ? `${j.errorCode ? `[${j.errorCode}] ` : ''}${j.errorMessage ?? ''}` : ''}
+                      {err && fbErr ? '\n\n' : ''}
+                      {fbErr ? `AI 排版回落原因：${fbErr}` : ''}
+                    </div>
+                  )}
                   {/* 视觉哲学（六维度 + note）是每单真金白银调 LLM 生成的，此前没有任何读者：
                       C 端不展示、任务台不展示。运营排「为什么这版这么丑」只能靠猜。列表已按 2000 字截断。 */}
                   {philOpen && j.promptSnapshot && <div className="trace-text">{j.promptSnapshot}</div>}
                   <div className="crd-actions">
-                    {err && (
+                    {(err || fbErr) && (
                       <button type="button" className="mini-btn" onClick={() => setOpenErr(expanded ? '' : j.id)}>
-                        {expanded ? '收起原因' : '展开原因'}
+                        {expanded ? '收起原因' : err ? '展开原因' : '展开回落原因'}
                       </button>
                     )}
                     {j.promptSnapshot && (

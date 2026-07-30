@@ -3,7 +3,9 @@
 // 本模块只负责：拼画布参数、跑模板自检、校验输出 PNG 的真实尺寸。
 // PdfUnavailableError 由 worker 直接从 reportPdf 引入（本模块曾原样转出一次，无人引用 → 已删）。
 import { renderHtmlToPng, isPdfTestMode } from '../reportPdf.js';
+import { env } from '../../env.js';
 import { CANVAS, CANVAS_CLASS, renderPosterHtml, auditPosterHtml, type TemplateInput } from './templates.js';
+import { posterScanFn, posterScanArg, parseScan, scanBodyText, type PosterViolation } from './canvasMeasure.js';
 
 export class PosterRenderError extends Error {
   readonly code = 'POSTER_RENDER_FAILED';
@@ -78,4 +80,69 @@ export async function renderPoster(input: TemplateInput, opts: { timeoutMs?: num
     throw new PosterRenderError(`渲染尺寸不符：期望 ${expected.width}×${expected.height}，实际 ${size.width}×${size.height}`);
   }
   return { buffer, mimeType: 'image/png', width: size.width, height: size.height };
+}
+
+/* ───────────────── AI 排版引擎的渲染 + 量测 ───────────────── */
+
+/**
+ * 请求拦截白名单：`data:` 恒放行（素材一律内联字节），另外放行 OSS 域，
+ * 因为 `creativeAssetUrl()` 在配了 OSS 的生产环境返回的是签名 URL。
+ * 未配 OSS（测试/本地）时列表只剩空串被过滤掉 → 等于只放行 data:，正是我们要的最小面。
+ */
+function allowedAssetPrefixes(): string[] {
+  const host = env.ossBucket && env.ossEndpoint ? `https://${env.ossBucket}.${env.ossEndpoint}` : '';
+  return [host].filter(Boolean);
+}
+
+export interface CanvasRenderResult extends PosterRenderResult {
+  violations: PosterViolation[];
+  /** 页面可见文字（量测时顺带收集）：AI 引擎交付前要对模型自创的画面文字做输出侧审核。 */
+  bodyText: string;
+}
+
+/**
+ * 渲染**模型生成的**整页 HTML，并在同一帧上量测。与 renderPoster 的区别只在于「输入不可信」：
+ *   · `javaScriptEnabled:false`：页面内联脚本不执行（静态审计已拒 `<script>`，这里是第二道）；
+ *   · `allowUrlPrefixes`：只放行 data: 与 OSS 签名域，其余外链在网络层 abort；
+ *   · `domScan`：拿回结构化违规清单（越界/边距/字号/重叠/文案在场/二维码/占位符残留）。
+ *
+ * 量测结果拿不到（形状不对 / test 桩路径）时**不当成干净**：返回 `violations: null` 的语义交给
+ * 调用方——canvasEngine 会把它当作「无法验证」并按配置决定是否回落。这里用空数组 + `measured` 标志区分。
+ */
+export async function renderCanvasPoster(
+  html: string,
+  o: { headline: string; expectQr: boolean; timeoutMs?: number; allowInTestMode?: boolean },
+): Promise<{ rendered: CanvasRenderResult; measured: boolean }> {
+  const expected = { width: CANVAS.width * CANVAS.scale, height: CANVAS.height * CANVAS.scale };
+  const res = await renderHtmlToPng(html, {
+    width: CANVAS.width,
+    height: CANVAS.height,
+    deviceScaleFactor: CANVAS.scale,
+    measureSelector: `.${CANVAS_CLASS}`,
+    javaScriptEnabled: false,
+    allowUrlPrefixes: allowedAssetPrefixes(),
+    domScan: { fn: posterScanFn as unknown as (arg: never) => unknown, arg: posterScanArg({ headline: o.headline, expectQr: o.expectQr, canvasClass: CANVAS_CLASS }) },
+    ...(o.timeoutMs ? { timeoutMs: o.timeoutMs } : {}),
+    ...(o.allowInTestMode ? { allowInTestMode: true } : {}),
+  });
+  if (!res.buffer?.length) throw new PosterRenderError('渲染返回空内容');
+  const violations = parseScan(res.scan);
+
+  // 尺寸校验：test 桩是 1×1，只有真实渲染路径才校验（与 renderPoster 同口径）。
+  const stubbed = isPdfTestMode() && !o.allowInTestMode;
+  let width = expected.width;
+  let height = expected.height;
+  if (!stubbed) {
+    const size = readPngSize(res.buffer);
+    if (!size) throw new PosterRenderError('渲染产物不是合法 PNG');
+    if (size.width !== expected.width || size.height !== expected.height) {
+      throw new PosterRenderError(`渲染尺寸不符：期望 ${expected.width}×${expected.height}，实际 ${size.width}×${size.height}`);
+    }
+    width = size.width;
+    height = size.height;
+  }
+  return {
+    rendered: { buffer: res.buffer, mimeType: 'image/png', width, height, violations: violations ?? [], bodyText: scanBodyText(res.scan) },
+    measured: violations !== null,
+  };
 }

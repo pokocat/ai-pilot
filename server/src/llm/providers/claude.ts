@@ -264,7 +264,9 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
-type ClaudeRawOptions = { allowThinking?: boolean; affinityKey?: string };
+// maxTokens：**缺省仍是 700**（辅助抽取的既定预算，不动）。只有产物本身就长的调用方才传大值——
+// 目前唯一的是海报 AI 排版引擎（gateway.completeText，一整页 HTML/CSS 几千 token，700 会被硬截断成半张页面）。
+type ClaudeRawOptions = { allowThinking?: boolean; affinityKey?: string; maxTokens?: number };
 
 export function claudeRawRequest(
   cfg: ResolvedAiConfig,
@@ -275,7 +277,7 @@ export function claudeRawRequest(
   const allowThinking = opts.allowThinking ?? true;
   return {
     model: cfg.model,
-    max_tokens: maxTokensForThinking(700, cfg, allowThinking),
+    max_tokens: maxTokensForThinking(opts.maxTokens ?? 700, cfg, allowThinking),
     ...thinkingRequestTuning(cfg, { allowThinking }),
     system,
     messages: [{ role: 'user', content: user }],

@@ -648,6 +648,14 @@ export interface AdminCreativeConfig {
   pricePerPoster: number;        // 单价（钻石/张）
   dailyLimit: number;            // 每用户每日任务数上限；**0 = 不限量**（紧急停量请用 enabled）
   timeoutMs: number;             // 单次渲染超时（只传给渲染器，不是端到端）；上限 480000，见 config.ts
+  /**
+   * 排版引擎（2026-07-29 新增，**缺省 'ai'**）。
+   * · `'ai'`：模型自己写整张海报的 HTML/CSS（宣言 → 创作 → 量测 → 无条件打磨一轮），
+   *   任何一步走不通自动回落模板路径 —— 付费任务永不因 AI 引擎失败，所以这个开关**不是**风险开关，
+   *   而是「要不要试更好的画质」。切成 'template' 只是回到上一代行为（三套模板 + 图片供应商主视觉）。
+   * · 后台文案建议：「AI 排版（模型自由创作，失败自动回落模板）」/「模板排版（固定三套版式）」。
+   */
+  layoutEngine: 'ai' | 'template';
   templates: Record<string, boolean>; // 模板启停（key = person_hero | editorial | business_launch）
   visual: AdminCreativeVisualConfig;
 }
@@ -664,7 +672,23 @@ export interface AdminCreativeJobItem {
   status: string;
   progress: string | null;
   templateKey: string | null;
+  /**
+   * `CreativeJob.engine` 列：**任务模型的实现引擎**，恒为 `'native'`（军师原生管线）。
+   * 与排版引擎不是一回事，别混——排版引擎看下面的 `layoutEngine`。
+   */
   engine: string;
+  /**
+   * 本单**实际**用的排版引擎（读 resultJson.engine）：
+   * `'ai'`（模型创作成功）| `'template'`（配置就是模板路径）| `'template_fallback'`（AI 引擎失败后回落）
+   * | `null`（老任务 / 未完成任务）。
+   * **任务台必须显示它**：AI 引擎失败会静默回落成一张模板图，任务照样是绿的——不显示就等于
+   * 「AI 排版在生产整天没生效」这件事只存在于日志里（这正是供应商降级 degraded 那次踩过的坑）。
+   */
+  layoutEngine: string | null;
+  /** AI 引擎的 LLM 轮数（1=只创作，2=创作+打磨/修复，3=再修一轮）；非 AI 路径为 null。 */
+  rounds: number | null;
+  /** AI 引擎回落原因（layoutEngine='template_fallback' 时有值，运营排障用）。 */
+  aiEngineError?: string;
   /** 建单时的供应商快照（'configured' | null）。**实际是否产出主视觉看 degraded**。 */
   provider: string | null;
   /**
