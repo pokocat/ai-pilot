@@ -78,8 +78,17 @@ function calloutHtml(s: Extract<DeliverableSection, { type: 'callout' }>): strin
   const cls = TONE_CLASS[s.tone] ?? 'def';
   return `<section><div class="callout ${cls}"><span class="tag">${esc(s.tone)}</span><div class="ct">${esc(stripMarks(s.h))}</div><div class="cp">${richInline(s.b)}</div></div></section>`;
 }
+// stats 数字卡：num 按字符数降档字号——手机两列时每格净宽仅 ~137px，32px 大字碰上
+// 「5000-10000」这类区间数会被折成两行，读起来像两个数（2026-07-31 线上截图实证）。
+function numSizeClass(num: string, unit?: string): string {
+  const len = num.length + (unit ? unit.length : 0);
+  if (len >= 13) return ' xxs';
+  if (len >= 10) return ' xs';
+  if (len >= 7) return ' sm';
+  return '';
+}
 function statsHtml(s: Extract<DeliverableSection, { type: 'stats' }>): string {
-  const cells = s.items.map((it) => `<div class="stat"><div class="num">${esc(it.num)}${it.unit ? `<small>${esc(it.unit)}</small>` : ''}</div><div class="lbl">${esc(it.label)}</div></div>`).join('');
+  const cells = s.items.map((it) => `<div class="stat"><div class="num${numSizeClass(it.num, it.unit)}">${esc(it.num)}${it.unit ? `<small>${esc(it.unit)}</small>` : ''}</div><div class="lbl">${esc(it.label)}</div></div>`).join('');
   return `<div class="stats">${cells}</div>`;
 }
 function rosterHtml(s: Extract<DeliverableSection, { type: 'roster' }>): string {
@@ -87,16 +96,30 @@ function rosterHtml(s: Extract<DeliverableSection, { type: 'roster' }>): string 
   const cards = s.people.map((p) => `<div class="person"><div class="pn serif">${esc(p.name)}${p.role ? `<span class="pr">${esc(p.role)}</span>` : ''}</div>${p.desc ? `<div class="pd">${richInline(p.desc)}</div>` : ''}</div>`).join('');
   return `${intro}<div class="roster">${cards}</div>`;
 }
-function cellHtml(c: DeliverableTableCell, isHeader: boolean): string {
+function cellHtml(c: DeliverableTableCell, isHeader: boolean, header?: string): string {
   const text = typeof c === 'string' ? c : c.text;
   const trend = typeof c === 'string' ? undefined : c.trend;
   const inner = trend ? `<span class="${trend === 'up' ? 'up' : 'dn'}">${esc(text)}</span>` : esc(text);
-  return isHeader ? `<th>${inner}</th>` : `<td>${inner}</td>`;
+  // data-h 是窄屏卡片模式下的「随值走的表头」（CSS ::before 取用）；表格模式下不显示。
+  return isHeader ? `<th>${inner}</th>` : `<td data-h="${esc(header ?? '')}">${inner}</td>`;
+}
+// table：≥3 列的表在手机上每格净宽只剩 ~100px（约 7 个汉字一行），长句会被断成两三行碎词；
+// 这类表挂 cardify，窄屏改成「一行一卡、表头随值走」，宽屏与 PDF 仍是正常表格（2026-07-31 线上截图实证）。
+// 但只看列数会误伤「80 里 / 高 / 中」这种短值对比表——卡片化反而把一行摊成三张卡。
+// 判据取「首列之外最长单元格的实字数」：够短就仍是表格，长句才卡片化。
+function shouldCardify(s: Extract<DeliverableSection, { type: 'table' }>): boolean {
+  if (s.headers.length < 3) return false;
+  const longest = s.rows.reduce((max, r) => r.slice(1).reduce((m, c) => {
+    const text = typeof c === 'string' ? c : c.text;
+    return Math.max(m, text.replace(/\s/g, '').length); // 空格不算，「7 家 · 2 家强」实为 6 字
+  }, max), 0);
+  return longest >= 10; // ≥10 字 ≈ 窄屏两行以上
 }
 function tableHtml(s: Extract<DeliverableSection, { type: 'table' }>): string {
   const thead = `<thead><tr>${s.headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>`;
-  const tbody = `<tbody>${s.rows.map((r) => `<tr>${r.map((c, ci) => cellHtml(c, ci === 0)).join('')}</tr>`).join('')}</tbody>`;
-  return `<div class="tbl-wrap"><table>${thead}${tbody}</table></div>`;
+  const tbody = `<tbody>${s.rows.map((r) => `<tr>${r.map((c, ci) => cellHtml(c, ci === 0, s.headers[ci])).join('')}</tr>`).join('')}</tbody>`;
+  const cardify = shouldCardify(s) ? ' cardify' : '';
+  return `<div class="tbl-wrap${cardify}"><table>${thead}${tbody}</table></div>`;
 }
 function phasesHtml(s: Extract<DeliverableSection, { type: 'phases' }>): string {
   return s.items.map((it) => {
@@ -142,15 +165,21 @@ function gaugeHtml(s: Extract<DeliverableSection, { type: 'gauge' }>): string {
   return `<div class="gauge"><div class="gauge-dial">${dial}${verdict}</div>${right}</div>`;
 }
 // matrix 四象限：2×2 直角格 + 轴标签在格外侧居中。quads 顺序 = 左上→右上→左下→右下。
+// 手机上 2×2 每格净宽只剩 ~150px，条目碎成三四行、两侧还要让位给竖排轴标签——窄屏改单列四卡，
+// 象限坐标（如「高客单 · 轻交付」）写进每张卡的角标，顶替被隐藏的外侧轴标签（2026-07-31 线上截图实证）。
 function matrixHtml(s: Extract<DeliverableSection, { type: 'matrix' }>): string {
   const quads = (s.quads ?? []).slice(0, 4);
   while (quads.length < 4) quads.push({ title: '', items: [] });
-  const cell = (q: { title: string; tone?: string; items: string[] }) => {
+  const yT = s.yLabels?.[0] ?? '', yB = s.yLabels?.[1] ?? '', xL = s.xLabels?.[0] ?? '', xR = s.xLabels?.[1] ?? '';
+  const coords = [[yT, xL], [yT, xR], [yB, xL], [yB, xR]]; // 与 quads 同序：左上→右上→左下→右下
+  const cell = (q: { title: string; tone?: string; items: string[] }, qi: number) => {
     const cls = q.tone ? TONE_CLASS[q.tone] ?? 'def' : '';
     const dot = q.title ? `<span class="mx-dot ${cls}"></span>` : '';
     const title = q.title ? `<div class="mx-title">${dot}${esc(q.title)}</div>` : '';
+    const coordText = coords[qi].filter(Boolean).join(' · ');
+    const coord = coordText ? `<div class="mx-coord">${esc(coordText)}</div>` : '';
     const items = q.items?.length ? `<ul class="mx-list">${q.items.map((i) => `<li>${richInline(i)}</li>`).join('')}</ul>` : '';
-    return `<div class="mx-quad">${title}${items}</div>`;
+    return `<div class="mx-quad">${coord}${title}${items}</div>`;
   };
   const grid = `<div class="mx-grid">${quads.map(cell).join('')}</div>`;
   const yTop = s.yLabels?.[0] ? `<div class="mx-axis mx-ytop">${esc(s.yLabels[0])}</div>` : '<div></div>';
@@ -159,22 +188,30 @@ function matrixHtml(s: Extract<DeliverableSection, { type: 'matrix' }>): string 
   const xRight = s.xLabels?.[1] ? `<div class="mx-axis mx-xright">${esc(s.xLabels[1])}</div>` : '<div></div>';
   return `<div class="matrix"><div></div>${yTop}<div></div>${xLeft}${grid}${xRight}<div></div>${yBot}<div></div></div>`;
 }
-// gantt 泳道条：顶部刻度行（1…total）+ 每行 label + 按 from/to 百分比定位的色条。纯百分比布局，PDF 静态可靠。
+// gantt 泳道条：顶部刻度行（1…total）+ 每行「标题 + 区间徽章」→ 整幅色条 → 条下注解。纯百分比布局，PDF 静态可靠。
+// 色条内一律不放文字：手机窄屏下一格刻度只有几十 px（8 周刻度 ≈ 26px/周），条内 note 必被 overflow 裁成半个词，
+// label 也被 88px 固定列挤成两行断字（2026-07-31 线上截图实证：「你出方案」只剩「你出方」）。
+// 文案全部移到色条上下的整幅行里 → 任意长度都能换行显示，色条只负责「什么时候、占多久」的时间语义。
 function ganttHtml(s: Extract<DeliverableSection, { type: 'gantt' }>): string {
   const rows = s.rows ?? [];
   const unit = s.unit ?? '周';
   const total = Math.max(1, s.total ?? rows.reduce((m, r) => Math.max(m, r.to), 1));
-  const grid = `background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/${total}) 100%`;
-  const scaleCells = Array.from({ length: total }, (_, i) => `<span class="gt-tick">${i + 1}</span>`).join('');
-  const scale = `<div class="gantt-scale"><span class="gt-cap">${esc(unit)}</span><div class="gt-ticks">${scaleCells}</div></div>`;
+  // 刻度抽稀：schema 允许 total 到 120（如按周排一年半），逐格标数字会糊成一片、网格线会连成灰带。
+  // 每 step 格标一个数字、画一条竖线，最多 12 个数字；总时长由 gt-cap 的「共 N 周」交代。
+  const step = total <= 12 ? 1 : Math.ceil(total / 12);
+  const grid = `background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%*${step}/${total}) 100%`;
+  const scaleCells = Array.from({ length: total }, (_, i) => `<span class="gt-tick">${i % step === 0 ? i + 1 : ''}</span>`).join('');
+  const scale = `<div class="gantt-scale"><span class="gt-cap">共 ${total} ${esc(unit)}</span><div class="gt-ticks">${scaleCells}</div></div>`;
   const rowsHtml = rows.map((r) => {
     const from = Math.max(1, Math.min(total, r.from));
     const to = Math.max(from, Math.min(total, r.to));
     const left = ((from - 1) / total * 100).toFixed(3);
     const width = ((to - from + 1) / total * 100).toFixed(3);
     const cls = r.tone ? TONE_CLASS[r.tone] ?? '' : '';
-    const note = r.note ? `<span class="gb-note">${esc(stripMarks(r.note))}</span>` : '';
-    return `<div class="gantt-row"><span class="g-label">${esc(r.label)}</span><div class="g-track" style="${grid}"><div class="g-bar ${cls}" style="left:${left}%;width:${width}%">${note}</div></div></div>`;
+    const span = from === to ? `第 ${from} ${esc(unit)}` : `第 ${from}–${to} ${esc(unit)}`;
+    const note = r.note ? `<p class="gb-note">${esc(stripMarks(r.note))}</p>` : '';
+    const head = `<div class="g-head"><span class="g-label"><i class="g-dot ${cls}"></i>${esc(r.label)}</span><span class="g-span">${span}</span></div>`;
+    return `<div class="gantt-row">${head}<div class="g-track" style="${grid}"><div class="g-bar ${cls}" style="left:${left}%;width:${width}%"></div></div>${note}</div>`;
   }).join('');
   return `<div class="gantt">${scale}${rowsHtml}</div>`;
 }
@@ -342,10 +379,21 @@ strong{font-weight:700;color:var(--ink)}
 /* stats */
 .stats{display:grid;grid-template-columns:repeat(2,1fr);border:1px solid var(--line);border-bottom:none;border-right:none;background:var(--card)}
 .stat{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:18px 14px;text-align:center}
-.stat .num{font-family:var(--serif);font-size:32px;line-height:1;color:var(--green);letter-spacing:1px}
+.stat .num{font-family:var(--serif);font-size:32px;line-height:1.12;color:var(--green);letter-spacing:1px;white-space:nowrap;font-variant-numeric:tabular-nums}
+/* 长数字降档：区间数（5000-10000）在两列格子里塞不下 32px，按字符数逐级收字号 */
+.stat .num.sm{font-size:25px;letter-spacing:.5px}
+.stat .num.xs{font-size:21px;letter-spacing:0}
+.stat .num.xxs{font-size:17px;letter-spacing:0;white-space:normal;overflow-wrap:anywhere}
 .stat .num small{font-size:15px;color:var(--gold);margin-left:2px}
+.stat .num.xs small,.stat .num.xxs small{font-size:.62em}
 .stat .lbl{font-size:11.5px;color:var(--ink2);margin-top:8px;letter-spacing:1px}
-@media(min-width:520px){.stats{grid-template-columns:repeat(3,1fr)}}
+/* 落单的末项跨满整行，不留半格空白 */
+.stats .stat:last-child:nth-child(odd){grid-column:1/-1}
+@media(min-width:520px){
+  .stats{grid-template-columns:repeat(3,1fr)}
+  .stats .stat:last-child:nth-child(odd){grid-column:auto}
+  .stats .stat:last-child:nth-child(3n+1){grid-column:1/-1}
+}
 /* roster */
 .roster-intro{font-size:12.5px;color:var(--ink2);margin:0 0 16px;line-height:1.9}
 .roster{display:grid;gap:14px}
@@ -362,6 +410,20 @@ tbody td{padding:11px 12px;border-top:1px solid var(--line);color:var(--ink);ver
 tbody th{padding:11px 12px;border-top:1px solid var(--line);text-align:left;font-family:var(--serif);font-weight:400;color:var(--green);white-space:nowrap}
 tbody tr:nth-child(even){background:rgba(30,90,67,.035)}
 td .up,th .up{color:var(--adv)}td .dn,th .dn{color:var(--risk)}
+/* 窄屏 ≥3 列表格 → 一行一卡、表头随值走（data-h）；宽屏与 PDF 仍是正常表格 */
+@media(max-width:519px){
+  .tbl-wrap.cardify{border:none;overflow:visible}
+  .tbl-wrap.cardify table{display:block;min-width:0;font-size:13px}
+  .tbl-wrap.cardify thead{display:none}
+  .tbl-wrap.cardify tbody{display:block}
+  .tbl-wrap.cardify tbody tr{display:block;border:1px solid var(--line);background:var(--card);margin-top:10px}
+  .tbl-wrap.cardify tbody tr:first-child{margin-top:0}
+  .tbl-wrap.cardify tbody tr:nth-child(even){background:var(--card)}
+  .tbl-wrap.cardify tbody th{display:block;border-top:none;padding:9px 13px;font-size:14.5px;white-space:normal;background:rgba(30,90,67,.06)}
+  .tbl-wrap.cardify tbody td{display:block;border-top:1px solid var(--line);padding:9px 13px;line-height:1.8}
+  .tbl-wrap.cardify tbody td::before{content:attr(data-h);display:block;font-family:var(--serif);font-size:11px;color:var(--gold);letter-spacing:1.5px;margin-bottom:2px}
+  .tbl-wrap.cardify tbody td[data-h=""]::before{display:none}
+}
 /* phases */
 .phase{background:var(--card);border:1px solid var(--line);padding:22px 18px 16px;margin-top:22px;position:relative}
 .phase:first-child{margin-top:6px}
@@ -400,30 +462,43 @@ td .up,th .up{color:var(--adv)}td .dn,th .dn{color:var(--risk)}
 .gauge-item .gi-score{font-family:var(--serif);font-size:16px;flex:0 0 auto}
 .gauge-item .gi-track{height:6px;background:rgba(42,46,42,.09)}
 .gauge-item .gi-fill{height:100%}
-/* matrix 四象限 */
-.matrix{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto 1fr auto;gap:6px 8px;align-items:center}
-.matrix .mx-axis{font-family:var(--serif);font-size:12px;color:var(--gold);letter-spacing:1px;text-align:center}
-.matrix .mx-xleft,.matrix .mx-xright{writing-mode:vertical-rl;justify-self:center}
-.mx-grid{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-left:none;border-top:none;background:var(--card)}
-.mx-quad{border-left:1px solid var(--line);border-top:1px solid var(--line);padding:13px 14px;min-height:96px}
-.mx-title{font-family:var(--serif);font-size:14px;color:var(--ink);margin-bottom:8px;display:flex;align-items:center;gap:7px}
+/* matrix 四象限：窄屏单列四卡（坐标角标代轴标签），≥520px 才回到 2×2 直角格 */
+.matrix{display:block}
+.matrix .mx-axis{display:none}
+.mx-grid{display:grid;gap:10px;background:transparent}
+.mx-quad{border:1px solid var(--line);background:var(--card);padding:13px 14px}
+.mx-coord{font-family:var(--serif);font-size:11px;color:var(--gold);letter-spacing:1.5px;margin-bottom:6px}
+.mx-title{font-family:var(--serif);font-size:15px;color:var(--ink);margin-bottom:8px;display:flex;align-items:center;gap:7px}
 .mx-dot{width:10px;height:10px;flex:0 0 auto;background:var(--gold)}
 .mx-dot.win{background:var(--win)}.mx-dot.risk{background:var(--risk)}.mx-dot.order{background:var(--order)}.mx-dot.def{background:var(--def)}.mx-dot.adv{background:var(--adv)}
 .mx-list{list-style:none;margin:0;padding:0}
-.mx-list li{font-size:12px;color:var(--ink2);line-height:1.75;padding-left:12px;position:relative}
+.mx-list li{font-size:13px;color:var(--ink2);line-height:1.85;padding-left:12px;position:relative;margin-top:3px}
 .mx-list li::before{content:"·";position:absolute;left:2px;top:-1px;color:var(--gold);font-size:14px}
-/* gantt 泳道条 */
-.gantt{background:var(--card);border:1px solid var(--line);padding:16px 16px 18px}
-.gantt-scale{display:flex;align-items:flex-end;margin-bottom:10px}
-.gantt-scale .gt-cap{width:88px;flex:0 0 auto;font-family:var(--serif);font-size:11.5px;color:var(--gold);letter-spacing:1px}
-.gantt-scale .gt-ticks{flex:1;display:flex}
+@media(min-width:520px){
+  .matrix{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto 1fr auto;gap:6px 8px;align-items:center}
+  .matrix .mx-axis{display:block;font-family:var(--serif);font-size:12px;color:var(--gold);letter-spacing:1px;text-align:center}
+  .matrix .mx-xleft,.matrix .mx-xright{writing-mode:vertical-rl;justify-self:center}
+  .mx-grid{grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);border-left:none;border-top:none;background:var(--card)}
+  .mx-quad{border:none;border-left:1px solid var(--line);border-top:1px solid var(--line);min-height:96px}
+  .mx-coord{display:none}
+  .mx-title{font-size:14px}
+  .mx-list li{font-size:12px;line-height:1.75;margin-top:0}
+}
+/* gantt 泳道条：标题+区间徽章一行 → 整幅色条一行 → 注解一行；条内不写字，任何窄屏都不裁文案 */
+.gantt{background:var(--card);border:1px solid var(--line);padding:14px 16px 4px}
+.gantt-scale{margin-bottom:9px}
+.gantt-scale .gt-cap{display:block;font-family:var(--serif);font-size:11.5px;color:var(--gold);letter-spacing:1px;margin-bottom:5px}
+.gantt-scale .gt-ticks{display:flex}
 .gantt-scale .gt-tick{flex:1;text-align:center;font-size:10.5px;color:var(--ink2);font-family:var(--serif)}
-.gantt-row{display:flex;align-items:center;margin-top:9px}
-.gantt-row .g-label{width:88px;flex:0 0 auto;font-size:12px;color:var(--ink);padding-right:8px;line-height:1.4}
-.gantt-row .g-track{flex:1;position:relative;height:22px;background-repeat:repeat}
-.gantt-row .g-bar{position:absolute;top:3px;bottom:3px;background:var(--green);display:flex;align-items:center;overflow:hidden}
-.gantt-row .g-bar.win{background:var(--win)}.gantt-row .g-bar.risk{background:var(--risk)}.gantt-row .g-bar.order{background:var(--order)}.gantt-row .g-bar.def{background:var(--def)}.gantt-row .g-bar.adv{background:var(--adv)}
-.gantt-row .gb-note{font-size:10.5px;color:#F1ECDD;padding:0 7px;white-space:nowrap;letter-spacing:.5px}
+.gantt-row{padding:11px 0 13px;border-top:1px solid var(--line)}
+.gantt-row .g-head{display:flex;align-items:baseline;gap:10px}
+.gantt-row .g-label{flex:1;font-size:13px;color:var(--ink);line-height:1.6}
+.gantt-row .g-dot{display:inline-block;width:8px;height:8px;margin-right:7px;background:var(--green);font-style:normal}
+.gantt-row .g-span{flex:0 0 auto;font-family:var(--serif);font-size:11.5px;color:var(--gold);letter-spacing:.5px;white-space:nowrap}
+.gantt-row .g-track{position:relative;height:13px;margin-top:8px;background-repeat:repeat}
+.gantt-row .g-bar{position:absolute;top:0;bottom:0;background:var(--green)}
+.gantt .g-bar.win,.gantt .g-dot.win{background:var(--win)}.gantt .g-bar.risk,.gantt .g-dot.risk{background:var(--risk)}.gantt .g-bar.order,.gantt .g-dot.order{background:var(--order)}.gantt .g-bar.def,.gantt .g-dot.def{background:var(--def)}.gantt .g-bar.adv,.gantt .g-dot.adv{background:var(--adv)}
+.gantt-row .gb-note{font-size:12px;color:var(--ink2);line-height:1.75;margin-top:8px}
 /* quote */
 .quote{text-align:center;padding:46px 26px;background:var(--paper)}
 .quote .qr{width:38px;height:1px;background:var(--gold);margin:0 auto 24px}
@@ -454,7 +529,10 @@ footer .fsmall{font-size:10.5px;color:var(--ink2);line-height:2;margin-top:12px;
   .sec-head{page-break-after:avoid}
   .callout,.stat,.person,.phase,.quote,.tl,.hero,.letter{page-break-inside:avoid}
   .stats,.roster,.tbl-wrap,table,tr,.timeline{page-break-inside:avoid}
-  .gauge,.matrix,.mx-quad,.gantt,.gantt-row{page-break-inside:avoid}
+  /* gantt 整块不再 avoid：改版后一行占三段（标题/色条/注解），十几行必然超过一页，
+     整块 avoid 会逼出一整页空白再溢出裁切。改成「单行不裁 + 刻度行不与首行分离」。 */
+  .gauge,.matrix,.mx-quad,.gantt-row{page-break-inside:avoid}
+  .gantt-scale{page-break-after:avoid}
   footer{page-break-inside:avoid}
 }
 </style></head>

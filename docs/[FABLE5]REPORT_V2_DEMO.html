@@ -117,10 +117,21 @@
   .stats{display:grid;grid-template-columns:repeat(2,1fr);border:1px solid var(--line);
     border-bottom:none;border-right:none;background:var(--card)}
   .stat{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:18px 14px;text-align:center}
-  .stat .num{font-family:var(--serif);font-size:32px;line-height:1;color:var(--green);letter-spacing:1px}
+  .stat .num{font-family:var(--serif);font-size:32px;line-height:1.12;color:var(--green);letter-spacing:1px;
+    white-space:nowrap;font-variant-numeric:tabular-nums}
+  /* 长数字降档（渲染端按字符数挂 sm/xs/xxs）：区间数在手机两列格里塞不下 32px */
+  .stat .num.sm{font-size:25px;letter-spacing:.5px}
+  .stat .num.xs{font-size:21px;letter-spacing:0}
+  .stat .num.xxs{font-size:17px;letter-spacing:0;white-space:normal;overflow-wrap:anywhere}
   .stat .num small{font-size:15px;color:var(--gold);margin-left:2px}
+  .stat .num.xs small,.stat .num.xxs small{font-size:.62em}
   .stat .lbl{font-size:11.5px;color:var(--ink2);margin-top:8px;letter-spacing:1px}
-  @media(min-width:520px){.stats{grid-template-columns:repeat(3,1fr)}}
+  .stats .stat:last-child:nth-child(odd){grid-column:1/-1} /* 落单末项跨满整行 */
+  @media(min-width:520px){
+    .stats{grid-template-columns:repeat(3,1fr)}
+    .stats .stat:last-child:nth-child(odd){grid-column:auto}
+    .stats .stat:last-child:nth-child(3n+1){grid-column:1/-1}
+  }
 
   /* ============ roster 人物卡 ============ */
   .roster{display:grid;gap:14px;margin-top:16px}
@@ -140,6 +151,22 @@
     font-family:var(--serif);font-weight:400;color:var(--green);white-space:nowrap}
   tbody tr:nth-child(even){background:rgba(30,90,67,.035)}
   td .up{color:var(--adv)} td .dn{color:var(--risk)}
+  /* 窄屏 ≥3 列表格（渲染端挂 .cardify）→ 一行一卡、表头随值走；宽屏与 PDF 仍是正常表格 */
+  @media(max-width:519px){
+    .tbl-wrap.cardify{border:none;overflow:visible}
+    .tbl-wrap.cardify table{display:block;min-width:0;font-size:13px}
+    .tbl-wrap.cardify thead{display:none}
+    .tbl-wrap.cardify tbody{display:block}
+    .tbl-wrap.cardify tbody tr{display:block;border:1px solid var(--line);background:var(--card);margin-top:10px}
+    .tbl-wrap.cardify tbody tr:first-child{margin-top:0}
+    .tbl-wrap.cardify tbody tr:nth-child(even){background:var(--card)}
+    .tbl-wrap.cardify tbody th{display:block;border-top:none;padding:9px 13px;font-size:14.5px;
+      white-space:normal;background:rgba(30,90,67,.06)}
+    .tbl-wrap.cardify tbody td{display:block;border-top:1px solid var(--line);padding:9px 13px;line-height:1.8}
+    .tbl-wrap.cardify tbody td::before{content:attr(data-h);display:block;font-family:var(--serif);
+      font-size:11px;color:var(--gold);letter-spacing:1.5px;margin-bottom:2px}
+    .tbl-wrap.cardify tbody td[data-h=""]::before{display:none}
+  }
 
   /* ============ phases 作战阶段 ============ */
   .phase{background:var(--card);border:1px solid var(--line);padding:22px 18px 16px;margin-top:22px;position:relative}
@@ -186,35 +213,53 @@
   .gauge-item .gi-fill{height:100%}
 
   /* ============ matrix 四象限 ============ */
-  .matrix{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto 1fr auto;
-    gap:6px 8px;align-items:center;margin-top:6px}
-  .matrix .mx-axis{font-family:var(--serif);font-size:12px;color:var(--gold);letter-spacing:1px;text-align:center}
-  .matrix .mx-xleft,.matrix .mx-xright{writing-mode:vertical-rl;justify-self:center}
-  .mx-grid{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);
-    border-left:none;border-top:none;background:var(--card)}
-  .mx-quad{border-left:1px solid var(--line);border-top:1px solid var(--line);padding:13px 14px;min-height:96px}
-  .mx-title{font-family:var(--serif);font-size:14px;color:var(--ink);margin-bottom:8px;
+  /* 2026-07-31 改版：窄屏单列四卡（坐标角标 mx-coord 顶替被隐藏的外侧轴标签），
+     ≥520px 才回到 2×2 直角格——手机上每格净宽只有 ~150px，条目会碎成三四行。 */
+  .matrix{display:block;margin-top:6px}
+  .matrix .mx-axis{display:none}
+  .mx-grid{display:grid;gap:10px;background:transparent}
+  .mx-quad{border:1px solid var(--line);background:var(--card);padding:13px 14px}
+  .mx-coord{font-family:var(--serif);font-size:11px;color:var(--gold);letter-spacing:1.5px;margin-bottom:6px}
+  .mx-title{font-family:var(--serif);font-size:15px;color:var(--ink);margin-bottom:8px;
     display:flex;align-items:center;gap:7px}
   .mx-dot{width:10px;height:10px;flex:0 0 auto;background:var(--gold)}
   .mx-dot.win{background:var(--win)}.mx-dot.risk{background:var(--risk)}.mx-dot.order{background:var(--order)}
   .mx-dot.def{background:var(--def)}.mx-dot.adv{background:var(--adv)}
   .mx-list{list-style:none;margin:0;padding:0}
-  .mx-list li{font-size:12px;color:var(--ink2);line-height:1.75;padding-left:12px;position:relative}
+  .mx-list li{font-size:13px;color:var(--ink2);line-height:1.85;padding-left:12px;position:relative;margin-top:3px}
   .mx-list li::before{content:"·";position:absolute;left:2px;top:-1px;color:var(--gold);font-size:14px}
+  @media(min-width:520px){
+    .matrix{display:grid;grid-template-columns:auto 1fr auto;grid-template-rows:auto 1fr auto;
+      gap:6px 8px;align-items:center}
+    .matrix .mx-axis{display:block;font-family:var(--serif);font-size:12px;color:var(--gold);
+      letter-spacing:1px;text-align:center}
+    .matrix .mx-xleft,.matrix .mx-xright{writing-mode:vertical-rl;justify-self:center}
+    .mx-grid{grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--line);
+      border-left:none;border-top:none;background:var(--card)}
+    .mx-quad{border:none;border-left:1px solid var(--line);border-top:1px solid var(--line);min-height:96px}
+    .mx-coord{display:none}
+    .mx-title{font-size:14px}
+    .mx-list li{font-size:12px;line-height:1.75;margin-top:0}
+  }
 
   /* ============ gantt 泳道条 ============ */
-  .gantt{background:var(--card);border:1px solid var(--line);padding:16px 16px 18px;margin-top:6px}
-  .gantt-scale{display:flex;align-items:flex-end;margin-bottom:10px}
-  .gantt-scale .gt-cap{width:88px;flex:0 0 auto;font-family:var(--serif);font-size:11.5px;color:var(--gold);letter-spacing:1px}
-  .gantt-scale .gt-ticks{flex:1;display:flex}
+  /* 2026-07-31 改版：标题+区间徽章一行 → 整幅色条一行 → 注解一行。色条内一律不写字——
+     手机窄屏一格刻度只有几十 px，条内文案必被裁成半个词，label 挤 88px 固定列也会断字。 */
+  .gantt{background:var(--card);border:1px solid var(--line);padding:14px 16px 4px;margin-top:6px}
+  .gantt-scale{margin-bottom:9px}
+  .gantt-scale .gt-cap{display:block;font-family:var(--serif);font-size:11.5px;color:var(--gold);letter-spacing:1px;margin-bottom:5px}
+  .gantt-scale .gt-ticks{display:flex}
   .gantt-scale .gt-tick{flex:1;text-align:center;font-size:10.5px;color:var(--ink2);font-family:var(--serif)}
-  .gantt-row{display:flex;align-items:center;margin-top:9px}
-  .gantt-row .g-label{width:88px;flex:0 0 auto;font-size:12px;color:var(--ink);padding-right:8px;line-height:1.4}
-  .gantt-row .g-track{flex:1;position:relative;height:22px;background-repeat:repeat}
-  .gantt-row .g-bar{position:absolute;top:3px;bottom:3px;background:var(--green);display:flex;align-items:center;overflow:hidden}
-  .gantt-row .g-bar.win{background:var(--win)}.gantt-row .g-bar.risk{background:var(--risk)}
-  .gantt-row .g-bar.order{background:var(--order)}.gantt-row .g-bar.def{background:var(--def)}.gantt-row .g-bar.adv{background:var(--adv)}
-  .gantt-row .gb-note{font-size:10.5px;color:#F1ECDD;padding:0 7px;white-space:nowrap;letter-spacing:.5px}
+  .gantt-row{padding:11px 0 13px;border-top:1px solid var(--line)}
+  .gantt-row .g-head{display:flex;align-items:baseline;gap:10px}
+  .gantt-row .g-label{flex:1;font-size:13px;color:var(--ink);line-height:1.6}
+  .gantt-row .g-dot{display:inline-block;width:8px;height:8px;margin-right:7px;background:var(--green);font-style:normal}
+  .gantt-row .g-span{flex:0 0 auto;font-family:var(--serif);font-size:11.5px;color:var(--gold);letter-spacing:.5px;white-space:nowrap}
+  .gantt-row .g-track{position:relative;height:13px;margin-top:8px;background-repeat:repeat}
+  .gantt-row .g-bar{position:absolute;top:0;bottom:0;background:var(--green)}
+  .gantt .g-bar.win,.gantt .g-dot.win{background:var(--win)}.gantt .g-bar.risk,.gantt .g-dot.risk{background:var(--risk)}
+  .gantt .g-bar.order,.gantt .g-dot.order{background:var(--order)}.gantt .g-bar.def,.gantt .g-dot.def{background:var(--def)}.gantt .g-bar.adv,.gantt .g-dot.adv{background:var(--adv)}
+  .gantt-row .gb-note{font-size:12px;color:var(--ink2);line-height:1.75;margin-top:8px}
 
   /* ============ quote 金句 ============ */
   .quote{text-align:center;padding:46px 26px;background:var(--paper)}
@@ -346,18 +391,19 @@
       </div>
     </div>
 
+    <!-- 短值对比表：首列外最长单元格实字数 < 10，渲染端不挂 cardify，窄屏仍是表格 -->
     <div class="tbl-wrap">
       <table>
         <thead>
           <tr><th>维度</th><th>青州</th><th>沧澜</th><th>临汀</th></tr>
         </thead>
         <tbody>
-          <tr><th>离本城距离</th><td>80 里</td><td>200 里</td><td>320 里</td></tr>
-          <tr><th>茶饮消费力</th><td><span class="up">高</span></td><td>中</td><td><span class="up">高</span></td></tr>
-          <tr><th>同类对手</th><td>2 家 · 都弱</td><td>5 家 · 1 家强</td><td><span class="dn">7 家 · 2 家强</span></td></tr>
-          <tr><th>租金水平</th><td>低</td><td>中</td><td><span class="dn">高</span></td></tr>
-          <tr><th>本城口碑能否覆盖</th><td><span class="up">能覆盖</span></td><td>覆盖一半</td><td><span class="dn">覆盖不到</span></td></tr>
-          <tr><th>军师判断</th><td><span class="up">首取</span></td><td>次图</td><td><span class="dn">暂缓</span></td></tr>
+          <tr><th>离本城距离</th><td data-h="青州">80 里</td><td data-h="沧澜">200 里</td><td data-h="临汀">320 里</td></tr>
+          <tr><th>茶饮消费力</th><td data-h="青州"><span class="up">高</span></td><td data-h="沧澜">中</td><td data-h="临汀"><span class="up">高</span></td></tr>
+          <tr><th>同类对手</th><td data-h="青州">2 家 · 都弱</td><td data-h="沧澜">5 家 · 1 家强</td><td data-h="临汀"><span class="dn">7 家 · 2 家强</span></td></tr>
+          <tr><th>租金水平</th><td data-h="青州">低</td><td data-h="沧澜">中</td><td data-h="临汀"><span class="dn">高</span></td></tr>
+          <tr><th>本城口碑能否覆盖</th><td data-h="青州"><span class="up">能覆盖</span></td><td data-h="沧澜">覆盖一半</td><td data-h="临汀"><span class="dn">覆盖不到</span></td></tr>
+          <tr><th>军师判断</th><td data-h="青州"><span class="up">首取</span></td><td data-h="沧澜">次图</td><td data-h="临汀"><span class="dn">暂缓</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -525,18 +571,22 @@
       <div class="mx-axis mx-xleft">对 内</div>
       <div class="mx-grid">
         <div class="mx-quad">
+          <div class="mx-coord">有利 · 对内</div>
           <div class="mx-title"><span class="mx-dot win"></span>优势</div>
           <ul class="mx-list"><li>本城品牌立住，四成顾客认牌</li><li>老客回头率 38%</li><li>可动用现金 620 万</li></ul>
         </div>
         <div class="mx-quad">
+          <div class="mx-coord">有利 · 对外</div>
           <div class="mx-title"><span class="mx-dot adv"></span>机会</div>
           <ul class="mx-list"><li>青州对手都弱，无强敌</li><li>新茶旺季 9-10 月客流转旺</li></ul>
         </div>
         <div class="mx-quad">
+          <div class="mx-coord">不利 · 对内</div>
           <div class="mx-title"><span class="mx-dot risk"></span>劣势</div>
           <ul class="mx-list"><li>4 家门店月月贴钱</li><li>旺店利润被亏损店抽走</li></ul>
         </div>
         <div class="mx-quad">
+          <div class="mx-coord">不利 · 对外</div>
           <div class="mx-title"><span class="mx-dot def"></span>威胁</div>
           <ul class="mx-list"><li>临汀 7 家在抢，2 家很强</li><li>热门地段租金上行</li></ul>
         </div>
@@ -560,41 +610,45 @@
 
     <div class="gantt">
       <div class="gantt-scale">
-        <span class="gt-cap">周</span>
+        <span class="gt-cap">共 8 周</span>
         <div class="gt-ticks">
           <span class="gt-tick">1</span><span class="gt-tick">2</span><span class="gt-tick">3</span><span class="gt-tick">4</span>
           <span class="gt-tick">5</span><span class="gt-tick">6</span><span class="gt-tick">7</span><span class="gt-tick">8</span>
         </div>
       </div>
       <div class="gantt-row">
-        <span class="g-label">止血固本</span>
-        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
-          <div class="g-bar risk" style="left:0%;width:25%"><span class="gb-note">关亏损店</span></div>
+        <div class="g-head"><span class="g-label"><i class="g-dot risk"></i>止血固本</span><span class="g-span">第 1–2 周</span></div>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%*1/8) 100%">
+          <div class="g-bar risk" style="left:0%;width:25%"></div>
         </div>
+        <p class="gb-note">关掉四家亏损店里最吃利润的两家，剩下两家给三个月观察期。</p>
       </div>
       <div class="gantt-row">
-        <span class="g-label">现金归拢</span>
-        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
+        <div class="g-head"><span class="g-label"><i class="g-dot"></i>现金归拢</span><span class="g-span">第 2–3 周</span></div>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%*1/8) 100%">
           <div class="g-bar" style="left:12.5%;width:25%"></div>
         </div>
       </div>
       <div class="gantt-row">
-        <span class="g-label">青州探路</span>
-        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
-          <div class="g-bar adv" style="left:12.5%;width:37.5%"><span class="gb-note">苏晚先行</span></div>
+        <div class="g-head"><span class="g-label"><i class="g-dot adv"></i>青州探路</span><span class="g-span">第 2–4 周</span></div>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%*1/8) 100%">
+          <div class="g-bar adv" style="left:12.5%;width:37.5%"></div>
         </div>
+        <p class="gb-note">苏晚先行踩点，选址标准由老板亲自过一遍。</p>
       </div>
       <div class="gantt-row">
-        <span class="g-label">首店落地</span>
-        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
-          <div class="g-bar order" style="left:37.5%;width:37.5%"><span class="gb-note">林砚带队</span></div>
+        <div class="g-head"><span class="g-label"><i class="g-dot order"></i>首店落地</span><span class="g-span">第 4–6 周</span></div>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%*1/8) 100%">
+          <div class="g-bar order" style="left:37.5%;width:37.5%"></div>
         </div>
+        <p class="gb-note">林砚带队驻场，装修到开业压在六周内跑完。</p>
       </div>
       <div class="gantt-row">
-        <span class="g-label">复盘定夺</span>
-        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%/8) 100%">
-          <div class="g-bar def" style="left:75%;width:25%"><span class="gb-note">进沧澜？</span></div>
+        <div class="g-head"><span class="g-label"><i class="g-dot def"></i>复盘定夺</span><span class="g-span">第 7–8 周</span></div>
+        <div class="g-track" style="background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px);background-size:calc(100%*1/8) 100%">
+          <div class="g-bar def" style="left:75%;width:25%"></div>
         </div>
+        <p class="gb-note">首店跑通再谈沧澜，跑不通就止步一城。</p>
       </div>
     </div>
   </section>

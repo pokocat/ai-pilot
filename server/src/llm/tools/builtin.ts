@@ -51,16 +51,26 @@ export const recallMemory: Tool = {
   },
 };
 
-// 报告封面谶语兜底（#16 M1 封面插槽）：模型没写封面箴言时，用老板当年的谶语补位——
+/** 封面箴言取舍（纯函数，便于测试）：谶语优先。
+ *  原先是「模型没写才补谶语」，但提示词的封面示例就带着 "谋定而后动，先胜而后求战" 这类通用套话，
+ *  模型几乎每次都会填，个人谶语从来轮不上——一年一句的分量就废在这（2026-07-31 线上封面实证）。
+ *  现在反过来：有谶语就顶掉模型那句，没谶语才回落模型 motto。 */
+export function pickCoverMotto(modelMotto: string | undefined, verse: string | undefined): string | undefined {
+  const v = (verse ?? '').replace(/^[「『"'“”]+|[」』"'“”]+$/g, '').trim(); // 谶语自带引号时剥掉，括号由封面模板出
+  if (v) return v;
+  return (modelMotto ?? '').trim() || undefined;
+}
+
+// 报告封面谶语（#16 M1 封面插槽）：用老板当年的谶语当封面箴言——
 // 一年一句在报告封面上反复照面，才有「惦记一整年」的分量。
 // 只补渲染入参、不回填成果：存库的成果永远不带这句，重渲染/分享都从档案重新取，
-// 也不会把模板加的「」写进 motto 再套一层。
+// 也不会把模板加的「」写进 motto 再套一层；立谶时从存库成果的 motto 抽取（extractStrategicFacts）也不受影响。
 async function withVerseCover(d: Deliverable, userId: string | null): Promise<Deliverable> {
-  if (!userId || d.cover?.motto?.trim()) return d;
+  if (!userId) return d;
   const { loadStrategicProfile } = await import('../../services/strategicProfile.js');
   const verse = (await loadStrategicProfile(userId).catch(() => null))?.verse ?? '';
-  const motto = verse.replace(/^[「『"'“”]+|[」』"'“”]+$/g, '').trim(); // 谶语自带引号时剥掉，括号由封面模板出
-  if (!motto) return d;
+  const motto = pickCoverMotto(d.cover?.motto, verse);
+  if (!motto || motto === d.cover?.motto?.trim()) return d;
   return { ...d, cover: { ...(d.cover ?? { title: d.title }), motto } };
 }
 

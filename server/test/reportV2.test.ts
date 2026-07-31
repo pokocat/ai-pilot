@@ -202,11 +202,49 @@ describe('renderReportHtml · 类型化渲染', () => {
     assert.match(html, /月流水/);
   });
 
+  // 手机两列格净宽 ~137px，32px 大字放不下「5000-10000」这类区间数（2026-07-31 线上截图实证）。
+  test('stats 长数字按字符数降档字号', () => {
+    const html = renderReportHtml(base([{ type: 'stats', items: [
+      { num: '20000', unit: '元', label: '短' },
+      { num: '50000+', unit: '元', label: '临界 7 字符' },
+      { num: '5000-10000', unit: '元', label: '区间' },
+      { num: '1234567890123', unit: '元', label: '离谱长' },
+    ] }]));
+    assert.match(html, /class="num">20000/); // 5+1 → 不降档
+    assert.match(html, /class="num sm">50000\+/); // 6+1 → sm
+    assert.match(html, /class="num xs">5000-10000/); // 10+1 → xs
+    assert.match(html, /class="num xxs">1234567890123/); // 13+1 → xxs（允许换行兜底）
+  });
+
   test('table 渲染表头 + 首列 th + trend span', () => {
     const html = renderReportHtml(base([{ type: 'table', headers: ['维度', '青州'], rows: [['判断', { text: '首取', trend: 'up' }]] }]));
     assert.match(html, /<thead><tr><th>维度<\/th><th>青州<\/th><\/tr><\/thead>/);
     assert.match(html, /<th>判断<\/th>/); // 首列为行头
     assert.match(html, /<span class="up">首取<\/span>/);
+  });
+
+  // ≥3 列的表在 375px 下每格只剩 ~100px，长句碎成两三行断词；窄屏改「一行一卡、表头随值走」。
+  // 但短值对比表（80 里 / 高 / 中）卡片化反而把一行摊成三张卡，故判据是「首列外最长单元格实字数」。
+  test('table：长句 ≥3 列挂 cardify；短值表与 2 列表保持表格；每格带 data-h', () => {
+    const wide = renderReportHtml(base([{ type: 'table', headers: ['事项', '袁主席做', '你做'], rows: [
+      ['私董会', '出面邀请、站台背书、讲行业趋势', '策划方案、设计内容、现场演示'],
+    ] }]));
+    assert.match(wide, /class="tbl-wrap cardify"/);
+    assert.match(wide, /<td data-h="袁主席做">出面邀请、站台背书、讲行业趋势<\/td>/);
+    assert.match(wide, /<td data-h="你做">策划方案、设计内容、现场演示<\/td>/);
+    assert.match(wide, /<th>私董会<\/th>/); // 首列仍是行头（卡片标题）
+
+    // 「7 家 · 2 家强」带空格 10 字符、实字 6 → 短值表仍是表格
+    const short = renderReportHtml(base([{ type: 'table', headers: ['维度', '青州', '沧澜', '临汀'], rows: [
+      ['离本城距离', '80 里', '200 里', '320 里'],
+      ['同类对手', '2 家 · 都弱', '5 家 · 1 家强', '7 家 · 2 家强'],
+    ] }]));
+    assert.match(short, /<div class="tbl-wrap"><table>/); // 注意：CSS 里也有 cardify 串，只能断言标记本身
+    assert.doesNotMatch(short, /class="tbl-wrap cardify"/);
+
+    const narrow = renderReportHtml(base([{ type: 'table', headers: ['档位', '说明'], rows: [['入门', '够长的一句说明文字撑过阈值']] }]));
+    assert.doesNotMatch(narrow, /class="tbl-wrap cardify"/); // 2 列再长也不卡片化
+    assert.match(narrow, /<td data-h="说明">够长的一句说明文字撑过阈值<\/td>/); // data-h 照挂，只是不卡片化
   });
 
   test('phases 渲染军令状线', () => {
@@ -272,6 +310,26 @@ describe('renderReportHtml · 类型化渲染', () => {
     assert.match(html, /品牌立住/);
   });
 
+  // 窄屏 2×2 每格净宽 ~150px，条目碎成三四行；改单列四卡后轴标签隐藏，坐标改由每卡角标交代。
+  test('matrix 坐标角标：按 左上→右上→左下→右下 拼 y·x；缺轴标签则不出角标', () => {
+    const html = renderReportHtml(base([{ type: 'matrix', xLabels: ['轻交付', '重交付'], yLabels: ['高客单', '低客单'], quads: [
+      { title: '优先做', items: ['a'] }, { title: '第二步做', items: ['b'] },
+      { title: '持续做', items: ['c'] }, { title: '暂时不碰', items: ['d'] },
+    ] }]));
+    const coords = [...html.matchAll(/class="mx-coord">([^<]+)</g)].map((m) => m[1]);
+    assert.deepEqual(coords, ['高客单 · 轻交付', '高客单 · 重交付', '低客单 · 轻交付', '低客单 · 重交付']);
+
+    const half = renderReportHtml(base([{ type: 'matrix', yLabels: ['高', '低'], quads: [
+      { title: 'A', items: ['a'] }, { title: 'B', items: ['b'] }, { title: 'C', items: ['c'] }, { title: 'D', items: ['d'] },
+    ] }]));
+    assert.deepEqual([...half.matchAll(/class="mx-coord">([^<]+)</g)].map((m) => m[1]), ['高', '高', '低', '低']); // 只有 y 轴 → 只出 y
+
+    const bare = renderReportHtml(base([{ type: 'matrix', quads: [
+      { title: 'A', items: ['a'] }, { title: 'B', items: ['b'] }, { title: 'C', items: ['c'] }, { title: 'D', items: ['d'] },
+    ] }]));
+    assert.doesNotMatch(bare, /class="mx-coord"/); // 无轴标签 → 不留空角标（CSS 里也有 mx-coord 串，故只断言标记）
+  });
+
   test('gantt 渲染刻度行 + 按 from/to 定位色条', () => {
     const html = renderReportHtml(base([{ type: 'gantt', unit: '周', total: 8, rows: [
       { label: '止血', from: 1, to: 2, tone: '风险', note: '关店' },
@@ -282,6 +340,32 @@ describe('renderReportHtml · 类型化渲染', () => {
     assert.match(html, /class="g-bar risk" style="left:0.000%;width:25.000%/);
     assert.match(html, /class="g-bar order" style="left:37.500%;width:37.500%/);
     assert.match(html, /class="gb-note">关店</);
+  });
+
+  // 手机窄屏实证：8 周刻度下一格只有 ~26px，任何写进色条的中文都会被 overflow 裁成半个词
+  //（2026-07-31 线上截图：「你出方案」只剩「你出方」）。文案必须在色条之外。
+  test('gantt 文案不进色条：色条空元素 + 区间徽章 + 注解独立成行', () => {
+    const html = renderReportHtml(base([{ type: 'gantt', unit: '周', total: 8, rows: [
+      { label: '策划私董会方案+袁主席对齐', from: 1, to: 1, tone: '行动', note: '你出方案，袁主席背书' },
+      { label: '资源对接业务启动', from: 4, to: 6, tone: '布局' },
+    ] }]));
+    assert.doesNotMatch(html, /<div class="g-bar[^>]*>[^<]/); // 色条内无文本
+    assert.doesNotMatch(html, /<div class="g-bar[^>]*><span/); // 色条内无 note 子元素
+    assert.match(html, /class="g-label">.*策划私董会方案\+袁主席对齐<\/span>/); // label 整幅一行，不再挤 88px 列
+    assert.match(html, /class="g-span">第 1 周</); // 单刻度 → 「第 1 周」
+    assert.match(html, /class="g-span">第 4–6 周</); // 跨刻度 → 「第 4–6 周」
+    assert.match(html, /<p class="gb-note">你出方案，袁主席背书<\/p>/); // 注解独立成行，可换行
+  });
+
+  test('gantt 刻度抽稀：total 超过 12 时每 step 格标一个数字，网格线同步稀释', () => {
+    const html = renderReportHtml(base([{ type: 'gantt', unit: '月', total: 36, rows: [
+      { label: '一期', from: 1, to: 8 },
+    ] }]));
+    assert.match(html, /background-size:calc\(100%\*3\/36\) 100%/); // 36/12 → 每 3 格一条线
+    assert.match(html, /class="gt-tick">1<\/span><span class="gt-tick"><\/span>/); // 1 标，2 空
+    assert.match(html, /class="gt-tick">34</); // 抽稀后仍标到尾段
+    assert.equal((html.match(/class="gt-tick">\d/g) ?? []).length, 12); // 最多 12 个数字
+    assert.equal((html.match(/class="gt-tick">/g) ?? []).length, 36); // 但格子仍是 36 个（对齐色条）
   });
 
   test('三新型脏数据不 crash', () => {

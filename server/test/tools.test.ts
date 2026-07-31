@@ -5,6 +5,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { runToolLoop } from '../src/llm/tools/loop.js';
 import { builtinToolNames, resolveTools } from '../src/llm/tools/registry.js';
+import { pickCoverMotto } from '../src/llm/tools/builtin.js';
 import type { LoopMessage, StepFn, Tool, ToolContext } from '../src/llm/tools/types.js';
 
 const CTX: ToolContext = { tenantId: 't1', userId: 'u1', agentKey: 'ak', projectId: null, query: '增长怎么做' };
@@ -95,5 +96,23 @@ describe('registry', () => {
   test('resolveTools 空/undefined → []', () => {
     assert.deepEqual(resolveTools(undefined), []);
     assert.deepEqual(resolveTools([]), []);
+  });
+});
+
+// 提示词的封面示例带着「谋定而后动，先胜而后求战」这类套话，模型几乎每次都会填 motto；
+// 若谶语只当兜底就永远轮不上，一年一句的分量就废了（2026-07-31 线上封面实证）。
+describe('pickCoverMotto · 封面箴言谶语优先', () => {
+  test('有谶语 → 顶掉模型那句套话', () => {
+    assert.equal(pickCoverMotto('谋定而后动，先胜而后求战。', '守拙藏锋，静待其时'), '守拙藏锋，静待其时');
+  });
+  test('谶语自带引号 → 剥掉（括号由封面模板出，不套两层）', () => {
+    assert.equal(pickCoverMotto('谋定而后动。', '「守拙藏锋，静待其时」'), '守拙藏锋，静待其时');
+    assert.equal(pickCoverMotto(undefined, '“守拙藏锋”'), '守拙藏锋');
+  });
+  test('无谶语 → 回落模型 motto；两者皆空 → undefined', () => {
+    assert.equal(pickCoverMotto('谋定而后动。', ''), '谋定而后动。');
+    assert.equal(pickCoverMotto('谋定而后动。', '   '), '谋定而后动。');
+    assert.equal(pickCoverMotto(undefined, undefined), undefined);
+    assert.equal(pickCoverMotto('  ', ''), undefined);
   });
 });
