@@ -2,6 +2,9 @@ import Taro from '@tarojs/taro';
 import { colorByKey } from '../data/colors';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { api, getUserId, setUserId, clearUserId, setAuthLostHandler, type Agent, type Me } from './api';
+// 静态引入（勿改动态 import）：小程序打包会把动态 import 切成独立 chunk，真机上有解析风险。
+// wechatSubscribe 只依赖 ./api、不反向依赖 store，无循环引用。
+import { prefetchWechatSubscribeTemplates } from './wechatSubscribe';
 import { syncTabBarHidden } from './tabbar';
 
 // 轻量全局状态：本命色主题 + 用户/智能体缓存 + 订阅。
@@ -253,6 +256,13 @@ export const store = {
     await this.loadMe();
     await this.loadAgents();
     void this.loadBadges({ force: true }); // 换账号即重算角标，不沿用上一个账号的未读/复盘态
+    // 订阅模板预热必须在这里再来一次（2026-07-31 真机实测的坑）：app.tsx 的 useLaunch 里那次
+    // 带 `!getUserId()` 前置，**新用户启动时还没登录，那次直接空转**，tplCache 恒为 null。
+    // 于是点「购买」时 requestWechatSubscribe 只能先 await 拉模板，第一个 await 就落在
+    // requestSubscribeMessage 之前 → 手势上下文丢失 → 微信拒（can only be invoked by user TAP
+    // gesture）→ 弹窗不出、不留记录、购买照常继续，用户永远拿不到 payment 配额、收不到到账通知。
+    // 内部对 tplCache 已有幂等判断，已热则直接返回。
+    void prefetchWechatSubscribeTemplates();
   },
   logout() {
     clearUserId();

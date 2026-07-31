@@ -36,6 +36,13 @@ export async function requestWechatSubscribe(scene: WechatSubscribeScene): Promi
   // 缓存命中：不 await，手势上下文内直接唤起弹窗。未命中才退回即时拉取（顺带补热缓存）。
   let tpl = tplCache?.find((s) => s.scene === scene);
   if (!tpl) {
+    // ⚠️ 走到这里这一次授权**大概率已经废了**：下面的 await 会吃掉点击手势上下文，
+    // 微信随后拒 requestSubscribeMessage（can only be invoked by user TAP gesture），
+    // 弹窗不出、不留记录、调用方 catch 一吞就彻底无痕——2026-07-31 真机实测就是这么丢掉
+    // 全部 payment 授权的（新用户启动时未登录 → app.tsx 的预热空转 → 缓存恒 null）。
+    // 现在 store.afterLogin 也会预热，正常路径不该再落到这里；真落到了就明确留痕，
+    // 并且仍然把模板拉回来补热缓存——用户下一次点击就能正常弹窗。
+    console.warn(`[subscribe] 模板缓存未命中（scene=${scene}），本次授权可能因手势上下文丢失而静默失败；已补热缓存，下次点击可正常唤起`);
     const scenes = (await api.wechatSubscribeTemplates()).scenes.map((s) => ({ scene: s.scene, templateId: s.templateId }));
     tplCache = scenes;
     tpl = scenes.find((s) => s.scene === scene);
