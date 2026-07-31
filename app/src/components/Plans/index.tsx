@@ -7,6 +7,7 @@ import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Plan } from '../../services/api';
 import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, payOrder } from '../../services/pay';
+import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import './index.scss';
 
 interface Props {
@@ -57,12 +58,20 @@ export default function Plans({ open, onClose }: Props) {
       Taro.showToast({ title: '已记录企业版意向', icon: 'none' });
       return;
     }
+    // 到账提醒索权（scene=payment）：此前套餐购买整条链路从不索权 → 用户永远没有 payment 配额，
+    // 服务端 sendWechatSubscribeMessage 静默跳过（真机实测：订单全 applied，payment 通知 0 条）。
+    // 与 PaySheet 同一模式：微信要求订阅弹窗由点击手势直接唤起，故必须在本函数**首个 await 之前**同步发出
+    // （模板配置已在登录后预热，缓存命中时同步唤起）；免费档走 demoGrant（无支付、无到账通知）不索权。
+    const subscribing = p.price > 0 && process.env.TARO_ENV === 'weapp'
+      ? requestWechatSubscribe('payment').catch((e) => { console.warn('[subscribe] payment 授权失败', e); return false; })
+      : Promise.resolve(false);
     setBusy(p.id);
     try {
       if (p.price === 0) { await demoGrant(p); return; } // 免费层无需支付
       if (!ensurePayableEnv()) return; // H5（server 模式）：requestPayment 不可用，下单前拦下
+      await subscribing; // 先等订阅弹窗落定再下单，避免与折算/支付弹窗抢焦点；拒绝或失败一律不阻断购买
 
-      // 付费套餐：先向后端下单（月→年自动折算实付）
+      // 付费套餐：先向后端下单（升级自动折算实付）
       let order;
       try {
         order = await api.createOrder(p.id);
@@ -73,12 +82,13 @@ export default function Plans({ open, onClose }: Props) {
         throw e;
       }
 
-      // 月→年折算：付款前明确披露实付与抵扣（此前只在支付成功后 toast，实扣 ≠ 列表价却无事前确认）。
+      // 升级折算：付款前明确披露实付与抵扣（此前只在支付成功后 toast，实扣 ≠ 列表价却无事前确认）。
+      // 文案按服务端返回的 proration 通用渲染（月→年、同周期升档如 入门版→决策版·月付 都走这里），不写死周期。
       if (order.proration?.applies) {
         const pr = order.proration;
         const modal = await Taro.showModal({
           title: '升级折算确认',
-          content: `年付原价 ¥${(pr.fullPrice / 100).toFixed(2)}，抵扣当前月付剩余价值 ¥${(pr.remainingValue / 100).toFixed(2)}（剩 ${pr.remainingDays} 天），本次实付 ¥${(order.amount / 100).toFixed(2)}。`,
+          content: `新方案原价 ¥${(pr.fullPrice / 100).toFixed(2)}，抵扣当前方案剩余价值 ¥${(pr.remainingValue / 100).toFixed(2)}（剩 ${pr.remainingDays} 天），本次实付 ¥${(order.amount / 100).toFixed(2)}。`,
           confirmText: '确认支付',
           cancelText: '再想想',
         });

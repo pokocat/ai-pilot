@@ -166,6 +166,48 @@ test('降级守卫：活跃年付降月付 409，同套餐续费放行，过期�
   assert.equal(afterExpire.status, 200, JSON.stringify(afterExpire.body));
 });
 
+// 同周期跨档升级（此前被降级守卫误伤 409：付费用户想升更高档只能等到期）。
+// 放行判定唯一来源 = computeUpgradeProration → 这里钉住 HTTP 层放行 + 折后实付落库 + 反向仍 409。
+test('同周期升级：¥68 月付 → ¥198 月付 放行、折后实付落库；反向降级 / 企业版仍 409', async () => {
+  const months = await prisma.plan.findMany({ where: { period: 'month', price: { gt: 0 } }, orderBy: { price: 'asc' } });
+  assert.ok(months.length >= 2, '需要两档付费月付套餐（入门版 ¥68 / 决策版·月付 ¥198）');
+  const low = months[0]!, high = months[months.length - 1]!;
+  assert.equal(low.price, 6800, '低档 = 入门版 ¥68/月');
+  assert.equal(high.price, 19800, '高档 = 决策版·月付 ¥198/月');
+
+  // 入门版持有中、剩 15 天 → 升决策版·月付：实付 = ¥198 − round(¥68/30×15) = ¥198 − ¥34 = ¥164
+  const u = await prisma.user.create({ data: { tenantId, phone: '13900000090', name: '同周期升级用户', role: 'owner', wechatOpenId: 'o_upgrade_1', planId: low.id, planActivatedAt: new Date(), planExpiresAt: new Date(Date.now() + 15 * 86400_000) } });
+  const deduct = Math.round((low.price / 30) * 15); // 3400 分
+  const up = await http('POST', `/plans/${high.id}/order`, { user: u.id, body: { openid: 'o_upgrade_1' } });
+  assert.equal(up.status, 200, `同周期真升级必须放行：${JSON.stringify(up.body)}`);
+  assert.equal(up.body.proration?.applies, true, '同周期升级应触发折算');
+  assert.equal(up.body.proration.remainingDays, 15);
+  assert.equal(up.body.proration.remainingValue, deduct, '抵扣 = 老套餐日单价 × 剩余天数 = ¥34');
+  assert.equal(up.body.amount, high.price - deduct, '实付 ¥164');
+  assert.equal(up.body.amount, 16400);
+  const dbUp = await prisma.paymentOrder.findUnique({ where: { outTradeNo: up.body.outTradeNo } });
+  assert.equal(dbUp!.amount, 16400, '落库 amount = 折后实付（与返回一致）');
+  assert.equal(mock.orders.get(up.body.outTradeNo)!.amountTotal, 16400, '微信侧收款额 = 折后实付');
+  const audit = await prisma.auditLog.findFirst({ where: { userId: u.id, action: 'user.plan.proration' } });
+  assert.ok(audit, '折算应写审计留痕');
+
+  // 反向（同周期降级）：¥198 月付活跃 → 买 ¥68 月付 仍 409 且不落单
+  const d = await prisma.user.create({ data: { tenantId, phone: '13900000091', name: '同周期降级用户', role: 'owner', wechatOpenId: 'o_downgrade_1', planId: high.id, planActivatedAt: new Date(), planExpiresAt: new Date(Date.now() + 20 * 86400_000) } });
+  const down = await http('POST', `/plans/${low.id}/order`, { user: d.id, body: { openid: 'o_downgrade_1' } });
+  assert.equal(down.status, 409, `同周期降级必须仍拦下：${JSON.stringify(down.body)}`);
+  assert.equal(down.body.code, 'PLAN_SWITCH_BLOCKED');
+  assert.equal(await prisma.paymentOrder.count({ where: { userId: d.id } }), 0, '被拦下的降级不得创建订单');
+
+  // 企业版（price<0）持有者切档：仍由运营管理，409
+  const ent = await prisma.plan.findFirst({ where: { price: { lt: 0 } } });
+  assert.ok(ent, '缺少企业版面议档');
+  const e = await prisma.user.create({ data: { tenantId, phone: '13900000092', name: '企业版用户', role: 'owner', wechatOpenId: 'o_ent_1', planId: ent!.id, planActivatedAt: new Date(), planExpiresAt: null } });
+  const entSwitch = await http('POST', `/plans/${high.id}/order`, { user: e.id, body: { openid: 'o_ent_1' } });
+  assert.equal(entSwitch.status, 409, JSON.stringify(entSwitch.body));
+  assert.equal(entSwitch.body.code, 'PLAN_SWITCH_BLOCKED');
+  assert.equal(await prisma.paymentOrder.count({ where: { userId: e.id } }), 0);
+});
+
 test('对账 sweep：回调丢失的已付单自动补账；微信侧无单的超期 created 自动关单', async () => {
   // A：真实下单 → mock 已支付但回调「丢失」 → 回溯 createdAt 使其进入 sweep 窗口（>15min）
   const r = await http('POST', `/plans/${planId}/order`, { user: userId, body: { openid: 'o_mockflow_1' } });

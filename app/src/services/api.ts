@@ -466,7 +466,7 @@ export const api = {
   plans: () => (useMockApi() ? mock.plans() : request<Plan[]>('/plans')),
   purchasePlan: (id: string) =>
     useMockApi() ? mock.purchasePlan(id) : request<PlanPurchaseResult>(`/plans/${id}/purchase`, 'POST', {}),
-  // 微信支付下单（小程序 JSAPI）：返回 wx.requestPayment 调起参数 + 月→年折算明细。
+  // 微信支付下单（小程序 JSAPI）：返回 wx.requestPayment 调起参数 + 升级折算明细（月→年 / 同周期升档）。
   createOrder: (id: string, openid?: string) =>
     useMockApi() ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', openid ? { openid } : {}),
   // V7-12：单次付费商品（SKU）目录 + 下单。mock 走假支付成功流并本地发放权益。

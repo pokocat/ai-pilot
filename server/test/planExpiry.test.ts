@@ -11,7 +11,7 @@ import { getQuotaState, chargeQuota, assertPlanActive, getPlanStatus, PlanExpire
 import { addMonthsClamped, periodKeyOf, isExpired, computeExpiry, nextResetAt } from '../src/services/planTime.js';
 import { cleanBusiness, closeApp } from './helpers.js';
 
-let tenantId = '', userId = '', monthlyId = '', yearlyId = '', freeId = '';
+let tenantId = '', userId = '', monthlyId = '', yearlyId = '', freeId = '', starterId = '', peerId = '', entId = '';
 
 before(async () => { await cleanBusiness(); });
 after(async () => { await closeApp(); });
@@ -24,7 +24,11 @@ beforeEach(async () => {
   const monthly = await prisma.plan.create({ data: { name: 'M', price: 19800, period: 'month', creditsPerMonth: 68, tokenQuotaPerMonth: 1_000_000, agentCount: 8, featuresJson: [], sort: 1 } });
   const yearly = await prisma.plan.create({ data: { name: 'Y', price: 198000, period: 'year', creditsPerMonth: 68, tokenQuotaPerMonth: 1_000_000, agentCount: 8, featuresJson: [], sort: 2 } });
   const free = await prisma.plan.create({ data: { name: 'F', price: 0, period: 'month', creditsPerMonth: 10, tokenQuotaPerMonth: 100_000, agentCount: 3, featuresJson: [], sort: 0 } });
-  monthlyId = monthly.id; yearlyId = yearly.id; freeId = free.id;
+  // 同周期升级折算用：S = 入门版口径（¥68/月，低档月付）；P = 与 M 同价的平级月付（横切不折算）；E = 企业版面议档。
+  const starter = await prisma.plan.create({ data: { name: 'S', price: 6800, period: 'month', creditsPerMonth: 20, tokenQuotaPerMonth: 400_000, agentCount: 4, featuresJson: [], sort: 3 } });
+  const peer = await prisma.plan.create({ data: { name: 'P', price: 19800, period: 'month', creditsPerMonth: 68, tokenQuotaPerMonth: 1_500_000, agentCount: 8, featuresJson: [], sort: 4 } });
+  const ent = await prisma.plan.create({ data: { name: 'E', price: -1, period: 'year', creditsPerMonth: -1, tokenQuotaPerMonth: -1, agentCount: 14, featuresJson: [], sort: 5 } });
+  monthlyId = monthly.id; yearlyId = yearly.id; freeId = free.id; starterId = starter.id; peerId = peer.id; entId = ent.id;
   const user = await prisma.user.create({ data: { tenantId, phone: '13900000099', name: '到期测试', role: 'owner' } });
   userId = user.id;
 });
@@ -192,6 +196,74 @@ test('续费再锚点（修复月末漂移）：1/31 月付续费 → 到期 3/3
   u = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
   assert.equal(u.planActivatedAt?.toISOString(), '2026-01-31T00:00:00.000Z', '续费保留 1/31 锚点');
   assert.equal(u.planExpiresAt?.toISOString(), '2026-03-31T00:00:00.000Z', '从激活锚点再派生到 3/31，而非漂移的 3/28');
+});
+
+// —— 同周期升级折算（放开「同周期真升级」：入门版¥68/月 → 决策版¥198/月 此前被降级守卫误伤 409）——
+test('同周期升级：¥68 月付剩 15 天 → 升 ¥198 月付，抵 ¥34 实付 ¥164（按老套餐日单价）+ 有效期从 now 起算整月', async () => {
+  const T0 = new Date('2026-01-01T00:00:00Z'); // S(¥68/月) 到期 2026-02-01
+  await runWithNow(T0, async () => applyPlanPurchase({ id: userId, tenantId }, await plan(starterId), { reason: 'buy', source: 'test' }));
+  const T1 = new Date('2026-01-17T00:00:00Z'); // 距到期正好 15 天
+  await runWithNow(T1, async () => {
+    const pr = await computeUpgradeProration({ id: userId }, { id: monthlyId, price: 19800, period: 'month' });
+    assert.equal(pr.applies, true, '同周期向上升级应触发折算（老月付 → 新月付、新价 > 老价）');
+    assert.equal(pr.remainingDays, 15);
+    assert.equal(pr.remainingValue, 3400, '¥68/30 × 15 天 = ¥34（按老套餐日单价，绝不用新套餐单价换算）');
+    assert.equal(pr.chargeAmount, 16400, '¥198 − ¥34 = ¥164');
+    assert.equal(pr.fromPlanId, starterId);
+    assert.ok(pr.remainingValue <= pr.fullPrice && pr.chargeAmount >= 0, '抵扣不超过新单原价（只抵现金、不退现）');
+    // 已为「剩余时间价值」拿到现金抵扣 → 新套餐从 now 起算一个完整月，旧剩余时长作为折扣被消耗
+    await applyPlanPurchase({ id: userId, tenantId }, await plan(monthlyId), { reason: 'up', source: 'test' });
+  });
+  const u = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+  assert.equal(u.planId, monthlyId);
+  assert.equal(u.planActivatedAt?.toISOString(), '2026-01-17T00:00:00.000Z', '同周期升级：锚点重置到 now');
+  assert.equal(u.planExpiresAt?.toISOString(), '2026-02-17T00:00:00.000Z', '月付升级：到期 = now + 1 整月（不叠加旧剩余时长）');
+});
+
+test('同周期反套利封顶：¥68 月付（31 天）满剩余天数即时升 ¥198 月付 → 抵扣封顶老套餐实付 ¥68（非 ¥70.27）', async () => {
+  const T0 = new Date('2026-01-01T00:00:00Z'); // 到期 2026-02-01 → 31 天跨度
+  await runWithNow(T0, async () => {
+    await applyPlanPurchase({ id: userId, tenantId }, await plan(starterId), { reason: 'buy', source: 'test' });
+    const pr = await computeUpgradeProration({ id: userId }, { id: monthlyId, price: 19800, period: 'month' });
+    assert.equal(pr.remainingDays, 31);
+    assert.ok(pr.remainingValue <= 6800, `抵扣不得超过老套餐实付 ¥68，实际 ${pr.remainingValue}`);
+    assert.equal(pr.remainingValue, 6800, '封顶到 ¥68（裸算 ¥68/30×31=¥70.27 会被夹回）');
+    assert.equal(pr.chargeAmount, 13000, '¥198 − ¥68 = ¥130');
+    assert.ok(pr.chargeAmount >= 0, '不退现：实付永不为负');
+  });
+});
+
+test('只放开升级：同周期降级 / 年→月 / 同价平级横切 一律不折算（applies=false → 路由继续 409）', async () => {
+  const T0 = new Date('2026-01-01T00:00:00Z');
+  // 同周期降级：¥198 月付 → ¥68 月付
+  await runWithNow(T0, async () => applyPlanPurchase({ id: userId, tenantId }, await plan(monthlyId), { reason: 'buy', source: 'test' }));
+  let pr = await runWithNow(new Date('2026-01-10T00:00:00Z'), () => computeUpgradeProration({ id: userId }, { id: starterId, price: 6800, period: 'month' }));
+  assert.equal(pr.applies, false, '同周期降级不折算（会烧掉剩余时长且不退现）');
+  assert.equal(pr.chargeAmount, 6800, '不折算 → 全价');
+  // 同价平级横切：¥198 月付 → 另一个 ¥198 月付
+  pr = await runWithNow(new Date('2026-01-10T00:00:00Z'), () => computeUpgradeProration({ id: userId }, { id: peerId, price: 19800, period: 'month' }));
+  assert.equal(pr.applies, false, '同价横切不折算（新价须严格 > 老价）');
+  assert.equal(pr.chargeAmount, 19800);
+  // 年付 → 月付（跨周期降级）
+  const u2 = await prisma.user.create({ data: { tenantId, phone: '13900000066', name: '年付降月付', role: 'owner' } });
+  await runWithNow(T0, async () => applyPlanPurchase({ id: u2.id, tenantId }, await plan(yearlyId), { reason: 'buy', source: 'test' }));
+  pr = await runWithNow(new Date('2026-01-10T00:00:00Z'), () => computeUpgradeProration({ id: u2.id }, { id: monthlyId, price: 19800, period: 'month' }));
+  assert.equal(pr.applies, false, '年→月不折算');
+  assert.equal(pr.chargeAmount, 19800);
+});
+
+test('企业版（price<0）不参与折算：作为目标不折算、作为老套餐也不折算', async () => {
+  const T0 = new Date('2026-01-01T00:00:00Z');
+  // 目标 = 企业版面议档（price<0）→ 不折算
+  await runWithNow(T0, async () => applyPlanPurchase({ id: userId, tenantId }, await plan(monthlyId), { reason: 'buy', source: 'test' }));
+  let pr = await runWithNow(new Date('2026-01-10T00:00:00Z'), () => computeUpgradeProration({ id: userId }, { id: entId, price: -1, period: 'year' }));
+  assert.equal(pr.applies, false, '面议档不参与折算');
+  // 老套餐 = 企业版（不限量、永不过期）→ 升任何档都不折算
+  const u2 = await prisma.user.create({ data: { tenantId, phone: '13900000055', name: '企业版用户', role: 'owner' } });
+  await runWithNow(T0, async () => applyPlanPurchase({ id: u2.id, tenantId }, await plan(entId), { reason: 'ent', source: 'test' }));
+  pr = await runWithNow(new Date('2026-01-10T00:00:00Z'), () => computeUpgradeProration({ id: u2.id }, { id: yearlyId, price: 198000, period: 'year' }));
+  assert.equal(pr.applies, false, '企业版老套餐不参与折算（不限量/price≤0）');
+  assert.equal(pr.chargeAmount, 198000, '全价');
 });
 
 test('折算反套利：免费→年付不折算；年→年(续费)不折算；过期月付不折算 → 一律全价', async () => {

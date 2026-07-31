@@ -746,6 +746,11 @@ async function notifyPaymentApplied(outTradeNo: string): Promise<void> {
     // 订单号位是纯数字型：优先微信支付单号（全数字，也正是用户在微信账单里看到的那个），
     // 回调还没回填时退化为我们的商户单号（发送侧抽数字）。
     orderNo: order.transactionId || order.outTradeNo,
+    // 跳过也要留痕（2026-07-31 真机实测教训）：套餐购买路径此前从不索权 payment 场景，
+    // 用户永远没有配额 → 这里静默 return，`wechat_notification_log` 里一条记录都没有，
+    // 于是「到账通知从未发出」这件事在库里完全无痕、查不到任何线索，上线至今无人发现。
+    // 有了 skipped 行（reason='no subscription quota'），这类失败下次一眼可见。
+    logSkipped: true,
   });
 }
 
