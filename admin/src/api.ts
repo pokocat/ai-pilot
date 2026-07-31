@@ -49,8 +49,9 @@ async function req<T>(path: string, method = 'GET', body?: object): Promise<T> {
   if (res.status === 403) throw forbiddenError((await res.json().catch(() => ({}))) as { error?: string; code?: string });
   if (!res.ok) {
     // 带回服务端错误文案（如「订单已退款」），比裸 HTTP 状态码可读。
-    const e = (await res.json().catch(() => ({}))) as { error?: string };
-    throw Object.assign(new Error(e.error || `HTTP ${res.status}`), { status: res.status });
+    // code 一并带上：调用方需要按机器可读的错误码分流（如 409 PLAN_CHANGE_SHORTENS → 弹二次确认）。
+    const e = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+    throw Object.assign(new Error(e.error || `HTTP ${res.status}`), { status: res.status, code: e.code });
   }
   return res.json();
 }
@@ -322,7 +323,10 @@ export const api = {
   // 重试失败任务（仅 owner/master）：failed → pending、attempts 清零，不重复扣费。
   retryCreativeJob: (id: string) => req<{ ok: boolean; jobId: string; status: string }>(`/admin/creative/jobs/${encodeURIComponent(id)}/retry`, 'POST', {}),
   // 手动开通套餐 / 发放·收回模块（仅 owner/master）。
-  grantUserPlan: (userId: string, planId: string) => req<{ ok: boolean; planName: string; expiresAt: string | null; grantedCredits: number }>(`/admin/users/${userId}/plan`, 'POST', { planId }),
+  // force：改档会缩短用户有效期时（降级 / 不限期→限期）服务端回 409 PLAN_CHANGE_SHORTENS，
+  // 运营看清损失天数后带 force=true 重试才执行。升级/同档会自动结转剩余天数（carriedDays）。
+  grantUserPlan: (userId: string, planId: string, force = false) =>
+    req<{ ok: boolean; planName: string; expiresAt: string | null; grantedCredits: number; carriedDays: number }>(`/admin/users/${userId}/plan`, 'POST', { planId, ...(force ? { force: true } : {}) }),
   grantUserModule: (userId: string, moduleKey: string) => req<{ ok: boolean }>(`/admin/users/${userId}/modules`, 'POST', { moduleKey }),
   revokeUserModule: (userId: string, moduleKey: string) => req<{ ok: boolean }>(`/admin/users/${userId}/modules/${encodeURIComponent(moduleKey)}`, 'DELETE'),
   // —— 大模型配置（可随时切换） ——

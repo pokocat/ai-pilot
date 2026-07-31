@@ -48,6 +48,8 @@ async function main() {
     const yearly = (plansRes.body as any[]).find((p) => p.period === 'year' && p.price > 0);
     check('套餐目录含 付费月付 + 付费年付', !!monthly && !!yearly, { monthly: monthly?.name, yearly: yearly?.name });
     if (!monthly || !yearly) throw new Error('缺少付费套餐，请先 npm run db:sync-plans');
+    // 所有金额/额度断言一律从被选中的套餐派生，定价改版不会腐坏断言。
+    const monthlyQuota = monthly.tokenQuotaPerMonth as number;
 
     // 1) mock 下单（沙箱）
     const order = await inj('POST', `/api/plans/${monthly.id}/order`, { user: user.id, body: { openid: user.wechatOpenId } });
@@ -64,7 +66,10 @@ async function main() {
     const me1 = await inj('GET', '/api/me', { user: user.id });
     check('/me 套餐 = 月付', me1.body.plan?.name === monthly.name, me1.body.plan);
     check('/me planStatus.active=true 且有 expiresAt', me1.body.planStatus?.active === true && !!me1.body.planStatus?.expiresAt, me1.body.planStatus);
-    check('/me 月度额度 = 100 万', me1.body.tokenQuota?.limit === 1_000_000, me1.body.tokenQuota);
+    // 期望额度**从实际选中的那个套餐派生**（monthly.tokenQuotaPerMonth），不写死数字：
+    // 原先硬编码 1_000_000，2026-07-28 定价改版后「第一个付费月付套餐」变成入门版（40 万），
+    // 断言当场腐坏成假失败——坏断言长期挂着会掩盖真问题，比没有断言更糟。
+    check(`/me 月度额度 = 套餐月额度（${monthlyQuota}）`, me1.body.tokenQuota?.limit === monthlyQuota, me1.body.tokenQuota);
     const expiresAt = new Date(me1.body.planStatus.expiresAt);
 
     // 4) 仿真回调幂等：重复投递不二次发放
@@ -93,7 +98,7 @@ async function main() {
     const reOrder = await inj('POST', `/api/plans/${monthly.id}/order`, { user: user.id, body: { openid: user.wechatOpenId }, testNow: future });
     await inj('POST', '/api/pay/sandbox/notify', { admin: true, body: { outTradeNo: reOrder.body.outTradeNo }, testNow: future });
     const meRe = await inj('GET', '/api/me', { user: user.id, testNow: future });
-    check('续费后即时恢复有效 + 额度满', meRe.body.planStatus?.active === true && meRe.body.tokenQuota?.limit === 1_000_000, meRe.body.planStatus);
+    check('续费后即时恢复有效 + 额度满', meRe.body.planStatus?.active === true && meRe.body.tokenQuota?.limit === monthlyQuota, meRe.body.planStatus);
 
     // —— V7-12：SKU 单次付费段（下单 → 仿真回调 → 权益发放 → 幂等）——
     // 自带 SKU 目录（不依赖 admin:sync-content 先跑）。
@@ -107,7 +112,8 @@ async function main() {
       });
     }
     const skusRes = await inj('GET', '/api/skus');
-    check('SKU 目录 ≥ 6 条', (skusRes.body as any[]).length >= 6, { count: (skusRes.body as any[]).length });
+    // 期望条数派生自刚 upsert 的 SKU 目录（原写死 6，SKU 增删即腐坏）；语义不变：目录里至少有种子这几条。
+    check(`SKU 目录 ≥ ${SKUS.length} 条（种子目录条数）`, (skusRes.body as any[]).length >= SKUS.length, { count: (skusRes.body as any[]).length, seeded: SKUS.length });
 
     // 9) module SKU：下单 → 沙箱回调 → 发放 UserModule
     const skuOrder = await inj('POST', '/api/skus/deep-contradiction/order', { user: user.id, body: { openid: user.wechatOpenId } });

@@ -60,6 +60,7 @@ import type {
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
+import { isExpired, daysRemaining } from '../services/planTime.js';
 import { signUserToken, jwtEnabled } from '../services/userToken.js';
 import { Prisma } from '@prisma/client';
 
@@ -958,23 +959,78 @@ export async function adminRoutes(app: FastifyInstance) {
     }
   });
 
+  // 套餐档位次序：price<0（企业版·私有化，面议）是**最高档**，不是「比 0 还便宜」。
+  // 直接比 price 会把「企业版 → 入门版」判成升级（400 > -1），从而把不限期权益静默换成 1 个月。
+  const planTier = (price: number): number => (price < 0 ? Number.POSITIVE_INFINITY : price);
+
   // 手动开通套餐（P2，仅 owner/master）：给任意用户直接发放套餐权益（含无套餐用户，补齐 plan-extend 的 NO_PLAN 缺口）。
-  // 复用 applyPlanPurchase（与支付/演示同一发放口径），source='admin_grant'。
-  app.post<{ Params: { id: string }; Body: { planId?: string } }>('/admin/users/:id/plan', async (req, reply) => {
+  // 复用 applyPlanPurchase（与支付/演示同一发放口径，签名与 C 端行为一字不动），source='admin_grant'。
+  //
+  // ★ 不许静默烧掉用户剩余时长（真实投诉形态：「客服帮我升级，结果少了 20 天」）。applyPlanPurchase 的
+  //   isRenewal 只认「同套餐」，改成别的套餐即 planExpiresAt = computeExpiry(now, period) —— 手里的付费
+  //   剩余时长直接归零。C 端下单路径早有降级守卫 + 折算，只有运营这条是裸的。现在：
+  //   ① 升级 / 同档改档（目标档位 ≥ 当前档位）且当前是付费未过期 → **结转**剩余天数到新到期日（审计 carriedDays）；
+  //   ② 会缩短的改档（降级；或当前不限期而目标有到期日）→ 未给 force 一律 409，文案带确切损失天数 + 两个套餐名，
+  //      用户套餐**一点不动**；给了 force 照常执行并审计 daysLost + force。运营的超级权限保留，只是不许静默造成损失。
+  //   ③ 同套餐（续费）不在此列：applyPlanPurchase 自己走 renewExpiry 叠加时长，再结转会双算。
+  //   ④ planExpiresAt = null（不限期：企业版 / 历史人工改库）**不当成 0 天**——daysRemaining 返回 null，
+  //      既无天数可结转，也不能报「还有 0 天」；它换成限期档属于「会缩短」，须 force 并在文案里说清是不限期。
+  app.post<{ Params: { id: string }; Body: { planId?: string; force?: boolean } }>('/admin/users/:id/plan', async (req, reply) => {
     const actor = actorOf(req);
     try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
-    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, tenantId: true, planId: true, planExpiresAt: true } });
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, tenantId: true, planId: true, planExpiresAt: true, plan: { select: { id: true, name: true, price: true } } },
+    });
     if (!user) return reply.code(404).send({ error: '用户不存在', code: 'USER_NOT_FOUND' });
     const planId = (req.body?.planId ?? '').trim();
     if (!planId) return reply.code(400).send({ error: '缺少 planId', code: 'PLAN_ID_REQUIRED' });
     const plan = await prisma.plan.findUnique({ where: { id: planId } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    const force = req.body?.force === true;
+
+    const at = now();
+    const cur = user.plan;
+    // 需要保护的只有「付费(含企业版) + 未过期 + 真的换档」这一种；免费档/无套餐/已过期没有剩余时长可损失。
+    const protectable = !!cur && cur.price !== 0 && !isExpired(user.planExpiresAt, at) && cur.id !== plan.id;
+    const remaining = daysRemaining(user.planExpiresAt, at); // null = 不限期（≠ 0 天）
+    const targetDated = plan.price > 0; // applyPlanPurchase 对 price ≤ 0 是 noExpiry（无到期日）
+    // 会缩短：降级（目标档位 < 当前档位），或当前不限期而目标有到期日（不限期 → 限期同样是损失）。
+    const shortens = protectable && (planTier(plan.price) < planTier(cur!.price) || (remaining === null && targetDated));
+    // 可结转：不缩短 + 有确切剩余天数 + 目标档确实有到期日（目标不限期时无处可加，也无损失）。
+    const carriedDays = protectable && !shortens && targetDated && remaining !== null && remaining > 0 ? remaining : 0;
+
+    if (shortens && !force) {
+      return reply.code(409).send({
+        error: remaining === null
+          ? `当前套餐「${cur!.name}」为不限期方案，改为「${plan.name}」后将变成限期方案，且没有剩余天数可折算；确认要改请带 force=true 重试`
+          : `将「${cur!.name}」改为「${plan.name}」会让该用户损失剩余 ${remaining} 天有效期（不折算、不退现）；确认要改请带 force=true 重试`,
+        code: 'PLAN_CHANGE_SHORTENS',
+        daysLost: remaining, fromPlanName: cur!.name, toPlanName: plan.name,
+      });
+    }
+
     const r = await applyPlanPurchase({ id: user.id, tenantId: user.tenantId }, plan, { reason: `${plan.name} · 运营开通`, source: 'admin_grant' });
+    // 结转：运营路径无并发压力，改档后一次 user.update 把剩余天数加到新到期日上即可
+    // （不动 applyPlanPurchase 的签名/行为——支付路径靠它，回归风险高）。
+    let expiresAt = r.expiresAt;
+    if (carriedDays > 0 && expiresAt) {
+      expiresAt = new Date(expiresAt.getTime() + carriedDays * 864e5);
+      await prisma.user.update({ where: { id: user.id }, data: { planExpiresAt: expiresAt } });
+      bustPlanGate(user.id); // 到期日刚被推后，禁写闸缓存（30s）要立刻失效
+    }
     await recordAudit({
       tenantId: user.tenantId, userId: user.id, action: 'admin.user.plan.grant',
-      payload: { by: actorName(actor), planId: plan.id, planName: plan.name, beforePlanId: user.planId, beforeExpiresAt: user.planExpiresAt ? isoSecond(user.planExpiresAt) : null, expiresAt: r.expiresAt ? isoSecond(r.expiresAt) : null, grantedCredits: r.grantedCredits },
+      payload: {
+        by: actorName(actor), planId: plan.id, planName: plan.name, beforePlanId: user.planId,
+        beforeExpiresAt: user.planExpiresAt ? isoSecond(user.planExpiresAt) : null,
+        expiresAt: expiresAt ? isoSecond(expiresAt) : null, grantedCredits: r.grantedCredits,
+        // 时长去向必须可追溯：结转了几天 / 强制改档损失了几天（不限期 → 限期记 null，天数无从计量）。
+        carriedDays,
+        ...(shortens ? { daysLost: remaining, force: true } : {}),
+      },
     });
-    return { ok: true, planId: plan.id, planName: plan.name, expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null, grantedCredits: r.grantedCredits };
+    return { ok: true, planId: plan.id, planName: plan.name, expiresAt: expiresAt ? expiresAt.toISOString() : null, grantedCredits: r.grantedCredits, carriedDays };
   });
 
   // 手动发放/收回模块（P2，仅 owner/master）：UserModule source='admin'（与购买发放 source='purchase' 区分）。

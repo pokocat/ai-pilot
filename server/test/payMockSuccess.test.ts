@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import {
   payMockSuccessEnabled, isMockOrder, sweepPendingOrders, reconcileOrder, refundWechatOrder,
+  resolvePayerOpenid,
 } from '../src/services/wechatPay.js';
 import { _resetTokenCache } from '../src/services/wechat.js';
 import { generateWechatPayMockKeys } from '../src/services/wechatPayMock.js';
@@ -27,7 +28,7 @@ const TOUCHED_ENV = [
 ] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
-let userId = '', tenantId = '', otherId = '';
+let userId = '', tenantId = '', otherId = '', noOpenidId = '';
 let planId = '', planName = '', planPrice = 0, planCredits = 0, planTokens = 0;
 
 // 真实可用的商户私钥（本地生成，非真凭据）：让「配齐凭据」后的失败是**纯网络失败**，
@@ -88,6 +89,9 @@ beforeEach(async () => {
   userId = u.id;
   const other = await prisma.user.create({ data: { tenantId, phone: uniquePhone(), name: '隔壁老板', role: 'owner', wechatOpenId: 'o_paymock_2' } });
   otherId = other.id;
+  // 纯短信注册账号（没有 openid）——预发 HTTP E2E 用的就是这种号，mock 模式必须能替它下单。
+  const noOpenid = await prisma.user.create({ data: { tenantId, phone: uniquePhone(), name: '无 openid 账号', role: 'owner' } });
+  noOpenidId = noOpenid.id;
   const plan = await prisma.plan.findFirst({ where: { period: 'month', price: { gt: 0 } }, orderBy: { sort: 'asc' } });
   assert.ok(plan, '缺少付费月付套餐（seedBaseline 应已灌入）');
   planId = plan!.id; planName = plan!.name; planPrice = plan!.price;
@@ -439,4 +443,74 @@ test('前台可见性：订单列表带 mock 标记与继续支付能力（重�
   const rp = await api('POST', `/api/pay/orders/${no}/pay-params`, { token: userId });
   assert.equal(rp.status, 200, JSON.stringify(rp.body));
   assert.equal(rp.body.mock, true, '继续支付同样回 mock 标记（端上据此改调 /pay/mock/pay）');
+});
+
+/* ────────────── payer openid 取值（resolvePayerOpenid，套餐/SKU 两条下单路径共用）──────────────
+   真实支付模式下 openid 决定微信向**谁**收款，绝不能由请求体任意指定。历史实现
+   `req.body.openid || user.wechatOpenId` 让调用方拿任意 openid 建单（付款人与订单归属账号脱钩）。 */
+
+test('openid：body 里传别人的/伪造的 openid 一律不被采纳（纯函数口径）', () => {
+  const me = { id: 'u_me', wechatOpenId: 'o_me' };
+  assert.equal(resolvePayerOpenid(me, 'o_victim'), 'o_me', '别人的 openid 必须被忽略，回落自己的');
+  assert.equal(resolvePayerOpenid(me, '  o_forged  '), 'o_me', '伪造值同理（含空白也不放过）');
+  assert.equal(resolvePayerOpenid(me, 'o_me'), resolvePayerOpenid(me), '传自己的 openid ≡ 不传');
+  assert.equal(resolvePayerOpenid(me, ''), 'o_me');
+});
+
+test('openid：mock 模式下无 openid 账号合成 mockopenid:<userId>；真凭据配齐时绝不合成', async () => {
+  const bare = { id: 'u_bare', wechatOpenId: null };
+  assert.equal(resolvePayerOpenid(bare), 'mockopenid:u_bare', '确定性占位值（永不发往微信：mock 分支不调 JSAPI）');
+  assert.equal(resolvePayerOpenid(bare, 'o_victim'), 'mockopenid:u_bare', '合成值也不接受 body 指定');
+  await withPayCredentials(async () => {
+    assert.equal(resolvePayerOpenid(bare), '', '真凭据配齐 → 不合成，交由调用方回 OPENID_REQUIRED');
+    assert.equal(resolvePayerOpenid(bare, 'o_victim'), '', 'body 值在真实模式下更不可能被采纳');
+  });
+});
+
+test('openid：mock 模式下无 openid 账号能完整下单并到账（合成值生效）', async () => {
+  const r = await api('POST', `/api/plans/${planId}/order`, { token: noOpenidId, body: {} });
+  assert.equal(r.status, 200, `纯短信账号在 mock 模式必须能下单：${JSON.stringify(r.body)}`);
+  assert.equal(r.body.mock, true);
+  const pay = await api('POST', '/api/pay/mock/pay', { token: noOpenidId, body: { outTradeNo: r.body.outTradeNo } });
+  assert.equal(pay.body.applied, true, '权益仍走真实 markPaidAndApply 发放');
+  const u = await prisma.user.findUnique({ where: { id: noOpenidId } });
+  assert.equal(u!.planId, planId);
+  // SKU 路径同口径（同一个共用函数）
+  const sku = await api('POST', '/api/skus/deep-contradiction/order', { token: noOpenidId, body: {} });
+  assert.equal(sku.status, 200, JSON.stringify(sku.body));
+  assert.equal(sku.body.mock, true);
+});
+
+test('openid：真凭据配齐时，无 openid 账号仍 OPENID_REQUIRED（不合成、不建单）', async () => {
+  await withPayCredentials(async () => {
+    for (const [label, url] of [['套餐', `/api/plans/${planId}/order`], ['SKU', '/api/skus/deep-contradiction/order']] as const) {
+      // 连伪造 openid 一起送上：仍必须 400，而不是拿着它去微信下单（那会变成 502 网络失败）。
+      const r = await api('POST', url, { token: noOpenidId, body: { openid: 'o_forged_payer' } });
+      assert.equal(r.status, 400, `${label}：${JSON.stringify(r.body)}`);
+      assert.equal(r.body.code, 'OPENID_REQUIRED');
+    }
+  });
+  assert.equal(await prisma.paymentOrder.count({ where: { userId: noOpenidId } }), 0, '被拒的请求不得留下订单');
+});
+
+test('openid：真实下单发往微信的 payer.openid 必定是账号自己的（body 伪造值不会上路）', async () => {
+  const oldFetch = globalThis.fetch;
+  const jsapiBodies: { payer?: { openid?: string } }[] = [];
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (href.includes('/v3/pay/transactions/jsapi')) jsapiBodies.push(JSON.parse(String(init?.body ?? '{}')));
+    // 一律失败：本用例只关心「送出去的 openid 是谁」，不需要真的拿到 prepay_id。
+    return { ok: false, status: 500, text: async () => 'stubbed' } as unknown as Response;
+  }) as typeof fetch;
+  try {
+    await withPayCredentials(async () => {
+      const r = await api('POST', `/api/plans/${planId}/order`, { token: userId, body: { openid: 'o_victim_pays' } });
+      assert.equal(r.status, 502, `应真的去调微信（stub 令其失败）：${JSON.stringify(r.body)}`);
+      assert.equal(r.body.code, 'WECHAT_PAY_CREATE_FAILED');
+    });
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+  assert.equal(jsapiBodies.length, 1, '应有且仅有一次 JSAPI 下单请求');
+  assert.equal(jsapiBodies[0].payer?.openid, 'o_paymock_1', '收款对象只能是账号自己的 openid，绝不是 body 里指定的那个');
 });

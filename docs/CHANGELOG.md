@@ -6,6 +6,28 @@
 
 ## 变更日志
 
+### 2026-07-31 · 支付/权益四处收口：同周期升级解禁 + 套餐购买补索权 + 付款人 openid 硬化 + 运营改档不烧时长 · 影响面：server（`services/{wechatPay,proration,scheduler}.ts` / `routes/{plans,sku,admin}.ts` / `scripts/pay-e2e.ts` + `test/{planExpiry,wechatPayMockFlow,payMockSuccess,adminOps}.test.ts`）+ admin（`api.ts` / `views/users.tsx`）+ app（`components/Plans/index.tsx` / `services/api.ts`）+ docs（`AGENTS.md` §6 支付段）
+
+真机在预发实测触发的一串连锁排查。**四个 bug 里有三个属于同一类：失败无人可见。**
+
+**① 同周期跨档升级被守卫拦死**（真机：持决策版年付点任何套餐都 409，`payment_order` 生产表 0 行 —— mock 支付一次都没被摸到，此前误判为「mock 没生效/没部署」）。根因：升级规则在**两处各写一份**——`routes/plans.ts` 写死 `curPlan.period==='month' && plan.period==='year'`，`proration.ts` 规则 5 同义重复。于是入门版¥68/月 → 决策版¥198/月这种**真升级、同为月付**被误伤，付费用户想升同周期更高档只能等到期。修法：折算触发推广到「任何真升级」= 月→年 **或** 同周期涨价；`computeUpgradeProration` 成为「是不是真升级」的**唯一判定源**，路由改读 `applies`。降级/同价横切/同套餐续费仍不折算 → 守卫继续 409（那条守卫本身是对的：降级会烧掉剩余时长且不支持退现）。反套利五条一条未松：按**老套餐自己的日单价**折未消耗天数、双重封顶 `min(新单原价, 老套餐实付)`、只抵现金不退现、credits/token 不参与。顺带：付费但无到期日的历史不限期档，409 文案不再报「还有 0 天」。
+
+**② 套餐购买从不申请到账提醒授权**（真机：订单全 `applied`，但 `wechat_notification_log` 里 payment 记录 **0 条**、`wechat_subscription` 里**没有 payment 场景**）。根因：`components/Plans`（套餐路径）整条链路从未调用 `requestWechatSubscribe('payment')`，而 `PaySheet`（SKU/算力）有 —— 微信订阅消息是**一次授权一条配额**，没授权就没配额，服务端 `sendWechatSubscribeMessage` 查不到配额直接 return。修法：照 PaySheet 模式在本函数**首个 `await` 之前**同步索权（微信要求订阅弹窗由点击手势直接唤起，先 await 网络请求会丢手势上下文、真机上弹窗静默不出），拒绝或失败不阻断购买；免费档不索权。**并给 `notifyPaymentApplied` 加 `logSkipped: true`** —— 此前「无配额」这一跳连日志都不落，于是「到账通知从未发出」在库里**完全无痕**，这才是它上线至今无人发现的真正原因。
+
+叠加同日修的模板字段键与生产缺配模板 ID，结论是：**军师上线至今，套餐到账通知从来没有成功发出过一条**，三层原因（生产没配模板 ID → 字段键全错 → 购买路径不索权）缺一层都发不出。
+
+**③ 付款人 openid 可由请求体任意指定**。历史实现 `req.body.openid || user.wechatOpenId` —— 真实支付模式下 openid 决定微信向**谁**收款，绝不能由请求体指定；且已核实小程序端 `api.createOrder/createSkuOrder` 从不传 openid，body 那个入口纯属测试遗留。修法：新增 plans/sku **共用**的 `resolvePayerOpenid()`（不再两处各写一份 —— 本仓刚因此栽过一次，见①），body 值只在等于调用者自己的 openid 时采纳，否则静默忽略 + `console.warn` 留线索。mock 模式下无 openid 的账号（纯短信注册，预发 HTTP E2E 用的就是这类）合成 `mockopenid:<userId>`，且 `createJsapiOrder` 真实 JSAPI 分支加 `isMockPayerOpenid` 兜底断言，保证合成值绝不上路。
+
+**④ 运营手动改档静默烧掉用户剩余时长**（`POST /admin/users/:id/plan` 直调 `applyPlanPurchase`，无守卫无折算；`isRenewal` 只认同套餐，改档即 `planExpiresAt = computeExpiry(now, period)`）。真实投诉形态：「客服帮我升级，结果少了 20 天」。C 端早有守卫+折算，只有运营这条是裸的。修法（保留超级权限，只是不许静默造成损失）：升级/同档 → **结转**剩余天数到新到期日（审计 `carriedDays`）；会缩短的 → 无 `force` 返回 409 `PLAN_CHANGE_SHORTENS`，文案带确切损失天数与两个套餐名、**用户套餐一点不动**，带 `force:true` 才执行并审计 `daysLost`。档位比较用 `planTier(price<0)=+∞` —— **企业版是最高档**，直接比 price 会把「企业版→入门版」判成升级（400 > -1）从而把不限期权益静默换成 1 个月。`planExpiresAt=null` 明确**不当成 0 天**。运营端 409 文案原样透出 + 「确认强制改档」二次确认（换选套餐会清掉该确认，否则强制会打到别的套餐上）。
+
+**顺带修两处「不核实的计数器」**（与②同源的观测盲区）：`scanDueProphecies` 的 `pushed` 统计的是「尝试过的用户数」且 `.catch()` 吞掉了结果、`r.sent` 根本没读 —— 无配额/微信拒收时日志照样宣称「pushed N」；改为只把真送达的计入。`scripts/pay-e2e.ts` 硬编码 `tokenQuota.limit === 1_000_000` 在 2026-07-28 定价改版后恒失败（脚本取的第一个付费月付套餐已是入门版 400k），坏断言会长期掩盖真问题；改为从它实际选中的套餐派生（另两处硬编码同样派生化），`pay:e2e` 回到 **22/22**。
+
+**未改（明示取舍）**：升级按新套餐**足额**发 credits、`setQuota` 硬覆盖 token 额度 —— 「买入门版¥68 → 当天升决策版月付」现金侧密不透风（合计 ¥198 = 直接买的原价），但用量侧多拿 20 点 + 400k token（≈¥69 成本/客）。该形状在**已上线的月→年路径上完全相同**，非本次引入；且不可循环（升完想再来一次须先降级，降级被 409 拦住），最长链条 入门版→决策版月付→决策版年付 即终止。按差额发点数会让「升级后当月可用量少于直接购买同档」，客诉成本大于收益，故保留原口径；月付档位增多、链条变长时再收口。
+
+**测试**：`payMockSuccess` +5、`adminOps` +8、`planExpiry` +4、`wechatPayMockFlow` +1；覆盖伪造/他人 openid 不被采纳（纯函数 + 端到端 + stub fetch 抓包断言「发往微信的 payer.openid 必是账号自己的」）、mock 无 openid 账号可下单到账、真凭据配齐时仍 `OPENID_REQUIRED`、升级结转 20 天、降级无 force 409 且套餐未动、降级带 force 审计 `daysLost`、不限期两个方向、同套餐续费不双算、同周期折算金额 `19800-round(6800/30*15)=16400`、31 天月封顶 `remainingValue<=old.price`、月→年既有金额回归未变。`npm test` **1153 全绿**、tsc 0 错、`pay:e2e` 22/22、`pay:e2e:mock` 19/19、app tsc 0 错、admin `lint:ui` + `tsc -b` 0 错。
+
+**⚠️ 同机并行跑全量测试会互相打断**：多个会话共用 `junshi_test` 库，彼此的 `seedBaseline()` / `plan.deleteMany()` 会打断对方 `login()` 的 `app_user_planId_fkey`（症状是随机文件随机失败、两轮失败集合完全不同，且单跑全绿）。验收请错开，或给每个会话一个独立测试库（`createdb junshi_test_iso && prisma db push && DATABASE_URL=… npm test`）。
+
 ### 2026-07-30 · 测试期 mock 支付（`PAY_MOCK_SUCCESS`）：没有商户凭据也把**真实支付管线整条跑通** · 影响面：server（`services/wechatPay.ts` / `services/sandbox.ts` 注释 / `services/metrics.ts` / `routes/{pay,plans,sku,admin}.ts` + 新增 `test/payMockSuccess.test.ts`）+ shared（下单/订单契约加 `mock` 标记 + `PayMockPayResult`）+ admin（`views/revenue.tsx` mock 徽章与营收口径）+ app（`services/pay.ts` 统一 `payOrder` + 4 个支付触点 + PaySheet/Plans/credits/thinktank）+ docs（`AGENTS.md` §6 支付段、`DEPLOYMENT.md` §5、`.env.example`）
 
 **动因**：生产一直没有微信支付商户凭据，回落路径 `/plans/:id/purchase`（演示发放）**整条绕过支付管线**——不建 PaymentOrder、不走 `markPaidAndApply`、不发到账通知。结果是订单状态机、幂等锁、条款快照、权益发放、到账订阅消息这一大片代码**在真实环境里从未被执行过**（同日刚修的 payment 模板字段键就是例证：错了半个月无人发现，因为那条路根本没跑过）。

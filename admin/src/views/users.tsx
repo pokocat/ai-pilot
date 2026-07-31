@@ -525,6 +525,8 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
   const [planList, setPlanList] = useState<{ id: string; name: string; price: number }[]>([]);
   const [grantPlanId, setGrantPlanId] = useState('');
   const [moduleKey, setModuleKey] = useState('');
+  // 改档会缩短用户有效期时服务端回 409（带确切损失天数），这里存原文并要求二次确认后才带 force 重试。
+  const [shortenWarn, setShortenWarn] = useState('');
 
   useEffect(() => {
     if (kind === 'grantPlan') api.plans().then((ps) => setPlanList(ps.map((p: { id: string; name: string; price: number }) => ({ id: p.id, name: p.name, price: p.price })))).catch((e) => setErr((e as Error).message || '套餐列表加载失败，无法选择'));
@@ -535,10 +537,16 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
     setQuota: { title: '调整月度额度', desc: '直接设定月度 token 额度：填 -1 表示不限量，0 及以上为具体额度。' },
     credits: { title: '补发 / 扣减钻石', desc: '正数补发、负数扣减；扣减不得使余额为负。事由必填，写入流水（前缀 admin:）。' },
     extend: { title: '延长套餐有效期', desc: '在当前到期日（或今日，取较晚者）基础上顺延天数（1-366）。仅推有效期，不动快照与钱包。' },
-    grantPlan: { title: '开通套餐（运营发放）', desc: `不经支付直接发放套餐权益（含无套餐用户）。当前：${plan.planName ?? '无套餐'}。发放走与支付同一口径（有效期/钻石/额度），审计记 admin_grant。` },
+    grantPlan: { title: '开通套餐（运营发放）', desc: `不经支付直接发放套餐权益（含无套餐用户）。当前：${plan.planName ?? '无套餐'}。发放走与支付同一口径（有效期/钻石/额度），审计记 admin_grant。升级/同档会自动结转剩余天数；会缩短有效期的改档需二次确认。` },
     module: { title: '模块管理（发放 / 收回）', desc: '按 moduleKey 直接发放（source=admin，与购买区分）或收回模块权益。key 可在「能力模块」或 SKU 目录查看。' },
   };
   const cfg = meta[kind];
+
+  /** 开通套餐（force=true 即运营已确认承担时长损失）。carriedDays>0 说明剩余时长被结转，回显给运营。 */
+  const doGrantPlan = async (force: boolean) => {
+    const r = await api.grantUserPlan(userId, grantPlanId, force);
+    toast(`已开通「${r.planName}」${r.carriedDays > 0 ? ` · 结转 ${r.carriedDays} 天` : ''}${r.grantedCredits > 0 ? ` · 发放 ${r.grantedCredits} 钻石` : ''}`);
+  };
 
   const submit = async () => {
     setErr('');
@@ -569,8 +577,18 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
       } else if (kind === 'grantPlan') {
         if (!grantPlanId) { setErr('请选择要开通的套餐'); return; }
         setBusy(true);
-        const r = await api.grantUserPlan(userId, grantPlanId);
-        toast(`已开通「${r.planName}」${r.grantedCredits > 0 ? ` · 发放 ${r.grantedCredits} 钻石` : ''}`);
+        try {
+          await doGrantPlan(false);
+        } catch (e) {
+          // 409 PLAN_CHANGE_SHORTENS：会让用户损失剩余时长 → 原样透出服务端文案（含确切天数与两个套餐名），
+          // 由运营看见后再点「确认强制改档」。绝不吞成「操作失败」，也不自动补 force。
+          if ((e as { code?: string }).code === 'PLAN_CHANGE_SHORTENS') {
+            setBusy(false);
+            setShortenWarn((e as Error).message || '该改档会缩短用户有效期');
+            return;
+          }
+          throw e;
+        }
       } else {
         const key = moduleKey.trim();
         if (!key) { setErr('请填写 moduleKey'); return; }
@@ -593,10 +611,23 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
         {kind === 'setQuota' && <NumInput className="al-input" value={quota} onChange={setQuota} />}
         {kind === 'extend' && <NumInput className="al-input" min={1} max={366} value={days} onChange={setDays} />}
         {kind === 'grantPlan' && (
-          <select className="al-input" value={grantPlanId} onChange={(e) => setGrantPlanId(e.target.value)}>
-            <option value="">选择套餐…</option>
-            {planList.map((p) => <option key={p.id} value={p.id}>{p.name}{p.price > 0 ? ` · ¥${fmtYuan(p.price)}` : p.price < 0 ? ' · 面议' : ' · 免费'}</option>)}
-          </select>
+          <>
+            {/* 换选套餐必须清掉上一次的强制确认，否则「确认强制改档」会打到另一个套餐上。 */}
+            <select className="al-input" value={grantPlanId} onChange={(e) => { setShortenWarn(''); setGrantPlanId(e.target.value); }}>
+              <option value="">选择套餐…</option>
+              {planList.map((p) => <option key={p.id} value={p.id}>{p.name}{p.price > 0 ? ` · ¥${fmtYuan(p.price)}` : p.price < 0 ? ' · 面议' : ' · 免费'}</option>)}
+            </select>
+            {shortenWarn && (
+              <>
+                <div className="al-err"><Icon name="alert" size={13} /> {shortenWarn}</div>
+                <button type="button" className="al-btn" disabled={busy} onClick={async () => {
+                  setErr(''); setBusy(true);
+                  try { await doGrantPlan(true); onDone(); }
+                  catch (e) { setBusy(false); setErr((e as Error)?.message || '强制改档失败'); }
+                }}><Icon name="alert" size={15} /> {busy ? '提交中…' : '确认强制改档（承担上述时长损失）'}</button>
+              </>
+            )}
+          </>
         )}
         {kind === 'module' && (
           <>

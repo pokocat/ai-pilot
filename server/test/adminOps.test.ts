@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, uniquePhone } from './helpers.js';
 import { createOperator, createSession } from '../src/services/adminAccount.js';
-import { periodKeyOf } from '../src/services/planTime.js';
+import { periodKeyOf, computeExpiry, addMonthsClamped } from '../src/services/planTime.js';
 import { dateKey, now } from '../src/services/clock.js';
 
 process.env.ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'test-admin-token';
@@ -309,5 +309,137 @@ describe('S4 · GET /admin/payments', () => {
     const paidOnly = await api('GET', '/api/admin/payments?status=paid');
     assert.equal(paidOnly.body.items.length, 1);
     assert.equal(paidOnly.body.items[0].status, 'paid');
+  });
+});
+
+/* ────────────── S5 · POST /admin/users/:id/plan（运营手动改档）──────────────
+   缺陷形态：直调 applyPlanPurchase，没有守卫也不折算。applyPlanPurchase 的 isRenewal 只认「同套餐」，
+   换成别的套餐即 planExpiresAt = computeExpiry(now, period) —— 用户手里的付费剩余时长直接归零
+   （真实投诉：「客服帮我升级，结果少了 20 天」）。C 端下单路径早有降级守卫 + 折算，只有运营这条是裸的。
+   现在的语义：升级/同档自动结转剩余天数；会缩短的改档必须 force，且未给 force 时用户套餐一点不动。 */
+describe('S5 · POST /admin/users/:id/plan 改档不静默烧时长', () => {
+  beforeEach(async () => { await cleanBusiness(); await seedBaseline(); });
+
+  // 两个不同价位的付费月付套餐（low=入门档、high=高档）+ 企业版（price<0，最高档、无到期日）。
+  async function paidMonthPlans() {
+    const list = await prisma.plan.findMany({ where: { period: 'month', price: { gt: 0 } }, orderBy: { price: 'asc' } });
+    assert.ok(list.length >= 2, '需要两个不同价位的付费月付套餐（seedBaseline 应已灌入）');
+    return { low: list[0], high: list[list.length - 1] };
+  }
+  async function entPlan() {
+    const p = await prisma.plan.findFirst({ where: { price: { lt: 0 } } });
+    assert.ok(p, '需要企业版（price<0）套餐');
+    return p!;
+  }
+  /** 造一个「付费未过期、剩余 days 天」的用户：到期日按锚点派生，避免续费叠加口径与锚点链脱钩。 */
+  async function userWithPlan(planId: string, days: number | null) {
+    const activatedAt = new Date(Date.now() - 10 * 864e5);
+    return mkTenantUser({ planId, planActivatedAt: activatedAt, planExpiresAt: days === null ? null : new Date(Date.now() + days * 864e5) });
+  }
+
+  test('operator → 403（资金敏感，仅 owner/master）', async () => {
+    const { low } = await paidMonthPlans();
+    const { userId } = await userWithPlan(low.id, 20);
+    const r = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: low.id }, adminToken: await operatorToken() });
+    assert.equal(r.status, 403);
+  });
+
+  test('升级结转：剩 20 天 → 高档月付，新到期 = now+1月+20天，审计 carriedDays=20', async () => {
+    const { low, high } = await paidMonthPlans();
+    const { userId } = await userWithPlan(low.id, 20);
+    const at = new Date();
+    const r = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: high.id } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.carriedDays, 20, '剩余 20 天必须被结转，不许静默烧掉');
+    const u = await prisma.user.findUnique({ where: { id: userId } });
+    assert.equal(u!.planId, high.id);
+    const expected = computeExpiry(at, high.period).getTime() + 20 * 864e5;
+    assert.ok(Math.abs(u!.planExpiresAt!.getTime() - expected) < 5000, `新到期应 = now+1月+20天，实际 ${u!.planExpiresAt?.toISOString()}`);
+    const audit = await prisma.auditLog.findFirst({ where: { userId, action: 'admin.user.plan.grant' }, orderBy: { createdAt: 'desc' } });
+    assert.equal((audit!.payloadJson as { carriedDays?: number }).carriedDays, 20);
+    assert.equal((audit!.payloadJson as { daysLost?: number }).daysLost, undefined, '升级不该有 daysLost');
+  });
+
+  test('降级无 force → 409（文案含损失天数与两个套餐名）且用户套餐未被改动', async () => {
+    const { low, high } = await paidMonthPlans();
+    const { userId } = await userWithPlan(high.id, 20);
+    const before = await prisma.user.findUnique({ where: { id: userId } });
+    const r = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: low.id } });
+    assert.equal(r.status, 409, JSON.stringify(r.body));
+    assert.equal(r.body.code, 'PLAN_CHANGE_SHORTENS');
+    assert.equal(r.body.daysLost, 20);
+    assert.ok(r.body.error.includes('20 天'), `文案要带确切天数：${r.body.error}`);
+    assert.ok(r.body.error.includes(high.name) && r.body.error.includes(low.name), `文案要带两个套餐名：${r.body.error}`);
+    const after = await prisma.user.findUnique({ where: { id: userId } });
+    assert.equal(after!.planId, before!.planId, '被拒的改档不得动套餐');
+    assert.equal(after!.planExpiresAt!.getTime(), before!.planExpiresAt!.getTime(), '到期日也不得动');
+    assert.equal(await prisma.creditLedger.count({ where: { userId } }), 0, '更不得发放任何权益');
+  });
+
+  test('降级带 force → 执行且审计记 daysLost / force', async () => {
+    const { low, high } = await paidMonthPlans();
+    const { userId } = await userWithPlan(high.id, 20);
+    const at = new Date();
+    const r = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: low.id, force: true } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.carriedDays, 0, '强制降级不结转（运营已确认承担损失）');
+    const u = await prisma.user.findUnique({ where: { id: userId } });
+    assert.equal(u!.planId, low.id);
+    assert.ok(Math.abs(u!.planExpiresAt!.getTime() - computeExpiry(at, low.period).getTime()) < 5000);
+    const audit = await prisma.auditLog.findFirst({ where: { userId, action: 'admin.user.plan.grant' }, orderBy: { createdAt: 'desc' } });
+    const p = audit!.payloadJson as { daysLost?: number; force?: boolean; carriedDays?: number };
+    assert.equal(p.daysLost, 20);
+    assert.equal(p.force, true);
+    assert.equal(p.carriedDays, 0);
+  });
+
+  test('不限期（planExpiresAt=null）不被当成 0 天：企业版 → 限期档需 force，文案说不限期', async () => {
+    const ent = await entPlan();
+    const { high } = await paidMonthPlans();
+    const { userId } = await userWithPlan(ent.id, null); // 企业版：无到期日
+    const blocked = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: high.id } });
+    assert.equal(blocked.status, 409, JSON.stringify(blocked.body));
+    assert.equal(blocked.body.daysLost, null, 'null 不该被算成 0 天');
+    assert.ok(blocked.body.error.includes('不限期'), `文案要说清是不限期方案：${blocked.body.error}`);
+    assert.ok(!blocked.body.error.includes('0 天'), '绝不能报「还有 0 天」');
+    assert.equal((await prisma.user.findUnique({ where: { id: userId } }))!.planId, ent.id);
+
+    const forced = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: high.id, force: true } });
+    assert.equal(forced.status, 200, JSON.stringify(forced.body));
+    assert.equal(forced.body.carriedDays, 0);
+    const audit = await prisma.auditLog.findFirst({ where: { userId, action: 'admin.user.plan.grant' }, orderBy: { createdAt: 'desc' } });
+    assert.equal((audit!.payloadJson as { daysLost?: number | null }).daysLost, null);
+  });
+
+  test('升到企业版（无到期日）：不需要 force，剩余天数无处可加也不算损失', async () => {
+    const ent = await entPlan();
+    const { low } = await paidMonthPlans();
+    const { userId } = await userWithPlan(low.id, 20);
+    const r = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: ent.id } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.carriedDays, 0);
+    assert.equal(r.body.expiresAt, null, '企业版 noExpiry：无到期日');
+    assert.equal((await prisma.user.findUnique({ where: { id: userId } }))!.planExpiresAt, null);
+  });
+
+  test('同套餐续费不结转（否则与 applyPlanPurchase 的 renewExpiry 双算时长）', async () => {
+    const { low } = await paidMonthPlans();
+    const activatedAt = new Date(Date.now() - 10 * 864e5);
+    const prevExpires = addMonthsClamped(activatedAt, 1);
+    const { userId } = await mkTenantUser({ planId: low.id, planActivatedAt: activatedAt, planExpiresAt: prevExpires });
+    const r = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: low.id } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.carriedDays, 0);
+    const u = await prisma.user.findUnique({ where: { id: userId } });
+    const expected = addMonthsClamped(activatedAt, 2).getTime(); // 续费=锚点+2月，不再额外加剩余天数
+    assert.equal(u!.planExpiresAt!.getTime(), expected, `续费应叠加一个周期，实际 ${u!.planExpiresAt?.toISOString()}`);
+  });
+
+  test('已过期的付费套餐改档：无剩余时长可损失 → 不拦、不结转', async () => {
+    const { low, high } = await paidMonthPlans();
+    const { userId } = await mkTenantUser({ planId: high.id, planActivatedAt: new Date(Date.now() - 40 * 864e5), planExpiresAt: new Date(Date.now() - 864e5) });
+    const r = await api('POST', `/api/admin/users/${userId}/plan`, { body: { planId: low.id } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.carriedDays, 0);
   });
 });

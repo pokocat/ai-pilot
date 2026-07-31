@@ -192,7 +192,8 @@ export async function scanDueProphecies(): Promise<number> {
     where: { status: 'pending', dueNotifiedAt: null, dueDate: { not: null, lte: today } },
     take: 200,
   });
-  const pushed = new Set<string>(); // 同一轮同一用户至多推一条（多条同日到期只打扰一次，进复盘自会看到全部）
+  const tried = new Set<string>(); // 同一轮同一用户至多推一条（多条同日到期只打扰一次，进复盘自会看到全部）
+  const pushed = new Set<string>(); // 其中真正送达微信的（供日志如实计数，勿与 tried 混用）
   for (const p of due) {
     await recordAudit({
       tenantId: p.tenantId,
@@ -200,17 +201,21 @@ export async function scanDueProphecies(): Promise<number> {
       action: 'system.prophecy.due',
       payload: { prophecyId: p.id, seq: p.seq, dueDate: p.dueDate, prophecy: p.prophecy.slice(0, 100) },
     });
-    if (!pushed.has(p.userId)) {
-      pushed.add(p.userId);
+    if (!tried.has(p.userId)) {
+      tried.add(p.userId);
       const isOmen = (p.basis ?? '').startsWith('年度谶语·岁验'); // 与 strategicProfile.registerVerseOmen 的约定值对齐
-      await sendWechatSubscribeMessage({
+      // 只把**真发出去的**计入 pushed。此前这里统计的是「尝试过的用户数」且吞掉了 r.sent，
+      // 于是无配额/微信拒收时日志照样宣称「pushed N」——正是这类不核实的计数器，
+      // 掩盖了「套餐到账通知从未发出」整整半个月（2026-07-31 真机实测才发现）。
+      const r = await sendWechatSubscribeMessage({
         tenantId: p.tenantId,
         userId: p.userId,
         scene: 'review',
         category: isOmen ? '岁验' : '预言对账',
         title: isOmen ? '一年前那句话，今日对账' : '预言到期·今日对账',
         note: p.prophecy, // 发送侧 clip 到 20 字；谶语「七言，七言」整 15 字恰好完整可见
-      }).catch(() => {});
+      }).catch(() => ({ sent: false }));
+      if (r.sent) pushed.add(p.userId);
     }
     await prisma.prophecyLog.update({ where: { id: p.id }, data: { dueNotifiedAt: new Date() } });
   }

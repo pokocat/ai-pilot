@@ -69,6 +69,48 @@ export function payMockSuccessEnabled(): boolean {
   return process.env.PAY_MOCK_SUCCESS === 'true' && !payConfigured();
 }
 
+// PAY_MOCK_SUCCESS 下给「没有 openid 的账号」合成的占位 openid 命名空间（形如 `mockopenid:<userId>`）。
+// 冒号让它与微信真实 openid（^[A-Za-z0-9_-]+$）天然不可能相撞。
+const MOCK_OPENID_PREFIX = 'mockopenid:';
+
+/**
+ * 解析本次下单的付款人 openid。**套餐（/plans/:id/order）与 SKU（/skus/:key/order）两条下单路径共用**
+ * ——同一条规则绝不在两个路由各写一份（本仓已经因为「同一规则两处各写一份」踩过坑）。
+ *
+ * 为什么 body 里的 openid 不能直接采纳：真实支付模式下 openid 决定微信向**谁**收款，
+ * 绝不能由请求体任意指定。历史实现是 `req.body.openid || user.wechatOpenId`，等于让调用方拿任意
+ * openid 建单（付款人与订单归属账号脱钩）。小程序端 `api.createOrder/createSkuOrder` 从不传 openid
+ * （见 app/src/services/api.ts），body 那个入口纯属测试遗留。
+ * 现在的规则：body 值**只在与调用者自己的 wechatOpenId 完全一致时**被采纳（此时与不传等价），
+ * 其余一律静默忽略——不报错，忽略后自然落到调用方既有的 OPENID_REQUIRED 判定。
+ *
+ * mock 兜底：payMockSuccessEnabled() 为真且账号确实没有 openid（如纯短信注册的预发 HTTP E2E 账号）时，
+ * 合成确定性占位值 `mockopenid:<userId>`，让「测试期真实支付管线」也能被这类账号跑通。该值
+ * **永不会被发往微信**：mock 分支根本不调 JSAPI（见 createJsapiOrder 里 payMockSuccessEnabled() 那段，
+ * 全程不引用 openid），继续支付（repayParams）对 mock 单也只回本地占位参数；真实 JSAPI 路径另有
+ * 兜底断言把它拦死。**真实凭据配齐时绝不合成**——payMockSuccessEnabled() 自带 `!payConfigured()`，
+ * 那时无 openid 账号必须照旧吃 OPENID_REQUIRED。
+ */
+export function resolvePayerOpenid(
+  user: { id: string; wechatOpenId?: string | null },
+  claimedOpenid?: string,
+): string {
+  const own = (user.wechatOpenId ?? '').trim();
+  const claimed = (claimedOpenid ?? '').trim();
+  if (claimed && claimed !== own) {
+    // 留一条线索：正常端上根本不传 openid，传了且不是自己的 = 要么是老脚本，要么有人在试。
+    console.warn('[pay] 已忽略请求体里的 openid（不等于调用者自己的 openid），user:', user.id);
+  }
+  if (own) return own;
+  if (payMockSuccessEnabled()) return `${MOCK_OPENID_PREFIX}${user.id}`;
+  return '';
+}
+
+/** 是否为上面合成的模拟 openid（真实 JSAPI 路径的兜底断言用）。 */
+export function isMockPayerOpenid(openid: string): boolean {
+  return openid.startsWith(MOCK_OPENID_PREFIX);
+}
+
 /**
  * 是否为 PAY_MOCK_SUCCESS 造出来的模拟单。判定锚在**下单时写死的快照 flag** 上（不是当前 env）：
  * 关掉开关、乃至后来配齐真凭据之后，历史 mock 单仍然可被 sweep/退款/营收统计正确识别与追溯。
@@ -286,6 +328,12 @@ export async function createJsapiOrder(args: {
     });
     notePayMock('created'); // 不计 notePayOrderCreated：那条指标的口径是「微信支付下单成功数」
     return { outTradeNo, pay: mockPayParams(outTradeNo), mock: true };
+  }
+
+  // 兜底断言：合成的模拟 openid 绝不能走到真实 JSAPI（微信不认识它，且这意味着
+  // 「账号无 openid + 真凭据已配齐」这种本该被 OPENID_REQUIRED 拦住的组合漏了下来）。
+  if (isMockPayerOpenid(args.openid)) {
+    throw Object.assign(new Error('缺少支付用户 openid'), { code: 'OPENID_REQUIRED', statusCode: 400 });
   }
 
   // 关同类旧未付单（P1）：微信侧关掉才置本地 closed，消除陈旧单被后付的窗口。

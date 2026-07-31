@@ -3,7 +3,7 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
-import { payConfigured, createJsapiOrder, payMockSuccessEnabled } from '../services/wechatPay.js';
+import { payConfigured, createJsapiOrder, payMockSuccessEnabled, resolvePayerOpenid } from '../services/wechatPay.js';
 import { sandboxEnabled } from '../services/sandbox.js';
 import { parseAttribution } from '../services/activation.js';
 import type { SkuView, SkuOrderResult } from '../../../shared/contracts';
@@ -28,7 +28,9 @@ export async function skuRoutes(app: FastifyInstance) {
       return reply.code(501).send({ error: '微信支付未配置', code: 'PAYMENT_NOT_CONFIGURED' });
     }
     if (sku.priceFen <= 0) return reply.code(400).send({ error: '免费商品无需支付', code: 'SKU_FREE' });
-    const openid = (req.body?.openid || (user as { wechatOpenId?: string | null }).wechatOpenId || '').trim();
+    // openid 取值与 /plans/:id/order 同一函数（resolvePayerOpenid）：body 值只在等于调用者自己的
+    // wechatOpenId 时被采纳，否则忽略 → 落到下面这行 OPENID_REQUIRED。理由见该函数注释。
+    const openid = resolvePayerOpenid(user, req.body?.openid);
     if (!openid) return reply.code(400).send({ error: '缺少支付用户 openid', code: 'OPENID_REQUIRED' });
     // D-1 开通来源归因：下单时带入 source/refId，随订单落库，支付回调发放权益时写 ActivationEvent。
     const attribution = parseAttribution(req.body?.source, req.body?.refId);
