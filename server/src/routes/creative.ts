@@ -13,7 +13,7 @@ import { resolveUser } from '../services/context.js';
 import { getCreativeConfig, enabledTemplateOptions } from '../services/creative/config.js';
 import { buildPosterBriefDraft } from '../services/creative/briefDraft.js';
 import {
-  createPosterJob, reviseJob, regenerateJob, cancelJob, getJobView,
+  createPosterJob, reviseJob, regenerateJob, cancelJob, getJobView, listPosterJobs,
 } from '../services/creative/jobs.js';
 import { ingestSourceAsset } from '../services/creative/uploads.js';
 import { creativeStorageReady, getCreativeObject } from '../services/creative/storage.js';
@@ -115,6 +115,29 @@ export async function creativeRoutes(app: FastifyInstance) {
       // 命中幂等键返回 200 + reused（不是 409）：客户端重复点击拿回原任务是**正常结果**，
       // 409 会被前端错误分支吞成"失败"。真正的冲突（同 key 不同入参）在服务层无从判定，故不造假。
       return reply.code(r.reused ? 200 : 201).send(r);
+    } catch (e) {
+      return sendErr(reply, e, 422);
+    }
+  });
+
+  // 作品库：本人的历史成品图列表（createdAt 倒序 + 游标分页）。
+  //
+  // 为什么需要它：此前小程序**没有**任何面向 C 端的任务列表接口，只有按 id 查。用户一离开成品图详情页，
+  // 就只能回到产出它的那张成果卡点「查看成品图」才能找回海报，而成果卡只记得最近一次出图 ——
+  // 早期版本得顺着版本链一层层往上翻。列表接口是把这些资产变成"可浏览"的前提。
+  //
+  // **不进任何响应缓存**（本路由刻意不碰 services/cache 的 cacheGet/cacheSet）：每项都带 600 秒的
+  // OSS 短签名 URL，缓存下来过期后就是一格破图；而且那是私有资产（人像/企业物料）的直连地址，
+  // 留在共享缓存里等于把它发给了下一个请求者。响应头同样按私有 + no-store 下发。
+  app.get<{ Querystring: { cursor?: string; limit?: string } }>('/creative/posters', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      const r = await listPosterJobs(user.id, {
+        cursor: (req.query.cursor ?? '').trim() || null,
+        limit: req.query.limit === undefined ? undefined : Number(req.query.limit),
+      });
+      reply.header('cache-control', 'private, max-age=0, no-store');
+      return r;
     } catch (e) {
       return sendErr(reply, e, 422);
     }

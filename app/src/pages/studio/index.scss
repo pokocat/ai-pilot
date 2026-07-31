@@ -392,6 +392,14 @@
 .acard .ap { display: block; font-size: 11px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; min-height: 30px; }
 .acard .ameta { display: block; font-size: 11px; font-weight: 500; margin-top: 4px; }
 
+/* —— 作品库入口（创作智能体网格下方的一行） —— */
+.works-row { display: flex; align-items: center; gap: 11px; padding: 13px 14px; border-radius: var(--r-md); margin-top: 2px; }
+.works-row .wr-ic { width: 34px; height: 34px; border-radius: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.works-row .wr-b { flex: 1; min-width: 0; }
+.works-row .wr-t { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
+.works-row .wr-s { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 3px; line-height: 1.4; }
+.works-row .wr-go { font-size: 16px; color: var(--ink-3); }
+
 /* —— 底部主行动 —— */
 .exec-cta {
   display: flex; align-items: center; justify-content: center; gap: 8px;

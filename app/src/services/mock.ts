@@ -20,6 +20,7 @@ import type {
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
   CreativeStatusResult, PosterBrief, PosterBriefDraft, PosterScene, PosterTemplateOption, CreativeUploadResult,
   CreativeJobView, CreativeAssetView, CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
+  CreativePosterListItem, CreativePosterListResult,
 } from '../../../shared/contracts';
 import type {
   ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek, MingpanReport,
@@ -794,6 +795,30 @@ function creativeViewM(rec: CreativeJobRec): CreativeJobView {
 }
 function creativeJobNotFoundM(): never {
   throw Object.assign(new Error('任务不存在'), { code: 'NOT_FOUND', statusCode: 404 });
+}
+/** 作品库分页页长（与服务端 POSTER_LIST_DEFAULT_LIMIT / MAX_LIMIT 同口径）。 */
+const MOCK_POSTER_PAGE = 20;
+const MOCK_POSTER_PAGE_MAX = 50;
+/**
+ * 作品库列表项（口径必须与服务端 listPosterJobs 一致，否则本地自测出来的界面不是同一个产品）：
+ * 只收「已完成（有成品图）」与「制作中」，failed/cancelled 不收；版本链平铺，每一版单独成项。
+ */
+function creativePosterItemM(rec: CreativeJobRec): CreativePosterListItem | null {
+  const view = creativeViewM(rec);
+  if (view.status === 'failed' || view.status === 'cancelled') return null;
+  const poster = view.assets.find((a) => a.kind === 'poster_png');
+  if (view.status === 'succeeded' && !poster) return null;
+  return {
+    jobId: rec.id,
+    status: view.status as CreativePosterListItem['status'],
+    createdAt: view.createdAt,
+    ...(view.completedAt && view.status === 'succeeded' ? { completedAt: view.completedAt } : {}),
+    headline: String(rec.brief?.headline ?? '').trim(),
+    ...(rec.brief?.templateKey ? { templateKey: rec.brief.templateKey } : {}),
+    ...(view.status !== 'succeeded' && view.progress ? { progress: view.progress } : {}),
+    ...(poster ? { poster } : {}),
+    ...(rec.parentJobId ? { parentJobId: rec.parentJobId } : {}),
+  };
 }
 /** mock 需求单预填：优先读该成果消息的标题/分段，读不到再用确定性兜底（不编造客户业务结论）。 */
 function posterDraftM(d: UserData, sessionId?: string, messageId?: string): PosterBriefDraft {
@@ -1970,5 +1995,33 @@ export const mock = {
       saveCreativeM(token, jobs);
     }
     return delay(creativeViewM(rec), 200);
+  },
+  // 作品库：本地 storage 里的任务倒序 + 游标分页。游标格式同服务端 `<createdAt 毫秒>:<jobId>`，
+  // 保证前端翻页代码在 mock 与真机上走的是同一条分支（不给"还有"就是到底了）。
+  async creativePosters(opts: { cursor?: string; limit?: number } = {}): Promise<CreativePosterListResult> {
+    const { token } = current();
+    const all = loadCreativeM(token)
+      .map(creativePosterItemM)
+      .filter((x): x is CreativePosterListItem => !!x)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || (a.jobId < b.jobId ? 1 : -1));
+    const limit = Math.min(Math.max(Math.trunc(Number(opts.limit)) || MOCK_POSTER_PAGE, 1), MOCK_POSTER_PAGE_MAX);
+    let rest = all;
+    const raw = String(opts.cursor ?? '').trim();
+    if (raw) {
+      const m = /^(\d{1,15}):(.+)$/.exec(raw);
+      if (!m) throw Object.assign(new Error('分页游标非法'), { code: 'CURSOR_INVALID', statusCode: 422 });
+      const at = Number(m[1]);
+      const id = m[2];
+      rest = all.filter((it) => {
+        const t = Date.parse(it.createdAt);
+        return t < at || (t === at && it.jobId < id);
+      });
+    }
+    const items = rest.slice(0, limit);
+    const last = items[items.length - 1];
+    return delay({
+      items,
+      ...(rest.length > limit && last ? { nextCursor: `${Date.parse(last.createdAt)}:${last.jobId}` } : {}),
+    }, 220);
   },
 };

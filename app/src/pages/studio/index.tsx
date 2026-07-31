@@ -136,6 +136,16 @@ export default function Studio() {
     else openAgent(a.key);
   };
 
+  // 作品库（历史成品图）：创作智能体的产出此前只能从产出它的那张成果卡找回，且成果卡只记最近一版。
+  // 入口挂在「内容出品」区块内（§7.2 页头零按钮 —— 新入口一律回归所属内容区），
+  // 与老板 tab「资产」组的那一条指向同一个页面（同一资产的两个自然落点，不是重复入口）。
+  const goGallery = () => {
+    const ok = navTo('/packages/work/gallery/index', {
+      fail: () => Taro.showToast({ title: '作品库加载失败，请重试', icon: 'none' }),
+    });
+    if (!ok) Taro.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
+  };
+
   // 打卡走乐观更新（即点即勾），服务端结果回来后校准；失败重新拉取兜底。
   // 待办→完成：就地展开「数据回填」；取消完成：收起回填。
   const onToggle = (id: string) => {
@@ -640,6 +650,16 @@ export default function Studio() {
               </View>
             );
           })}
+        </View>
+
+        {/* 历史成品图回看入口（作品库）。放在创作智能体网格正下方：产出它们的地方，就是找回它们的地方。 */}
+        <View className="works-row card" onClick={goGallery}>
+          <View className="wr-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="image" size={16} color={accent} /></View>
+          <View className="wr-b">
+            <Text className="wr-t">我的作品库</Text>
+            <Text className="wr-s">出过的每一版海报都在这里回看、保存与分享</Text>
+          </View>
+          <Text className="wr-go">›</Text>
         </View>
 
         {/* C7：主入口收敛到 deck「今日主令」卡（3 态更全、带上下文）。此底部条降级为次要样式，

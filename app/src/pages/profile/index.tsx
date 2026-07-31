@@ -145,6 +145,9 @@ export default function Profile() {
       title: '资产',
       rows: [
         { ic: 'layers', t: '方案库', s: `${libCount + reportCount}`, onClick: () => navTo('/packages/work/library/index') },
+        // 作品库（历史成品图）：与方案库/品牌资产/资料库同属「资产」，故落在这一组而不是页头。
+        // 刻意**不按出图开关隐藏**：这是回看已有资产的入口，不是出图入口（出图按钮的降级口径在作品库页内处理）。
+        { ic: 'image', t: '我的作品库 · 历史成品图', s: '海报', onClick: () => navTo('/packages/work/gallery/index') },
         { ic: 'spark', t: '我的品牌资产', s: '数字人/短视频预填', onClick: () => navTo('/packages/work/brandkit/index') },
         { ic: 'attach', t: '我的资料库', s: '', onClick: () => navTo('/packages/work/knowledge/index') },
         { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => navTo('/packages/work/bindings/index') },

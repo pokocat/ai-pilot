@@ -45,6 +45,8 @@ export default defineAppConfig({
         // 海报成品图（canvas_design）：需求单确认页 + 任务详情页，入口在对话页的海报设计师成果卡。
         'poster/index',
         'posterJob/index',
+        // 作品库：历史成品图网格（+ 文字成果跳方案库）。入口在老板 tab「资产」组与军令 tab「内容出品」区块。
+        'gallery/index',
       ],
     },
   ],

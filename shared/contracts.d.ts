@@ -587,6 +587,40 @@ export interface CreativeJobView {
 }
 /** 源素材上传返回（先传后建任务，故此时还没有 jobId）。 */
 export interface CreativeUploadResult { assetId: string; }
+
+/**
+ * 作品库列表项（GET /creative/posters）。
+ *
+ * 刻意**不含** brief 全文、creditCost 与 actions：列表只回答「我那张图在哪」，
+ * 点进详情页由 GET /creative/jobs/:id 给全量视图（改文字 / 换风格 / 版本链都在那边）。
+ * 也不含 failed / cancelled —— 那些任务没有可看的成品，摆进作品库只是一格永久的破图。
+ */
+export interface CreativePosterListItem {
+  jobId: string;
+  /** 只有三种：制作中（pending / running）与已完成（succeeded）。 */
+  status: 'pending' | 'running' | 'succeeded';
+  createdAt: string;
+  completedAt?: string;
+  /** 列表标题 = 建单时定格的主标题（brief.headline）。历史行缺字段时为空串，由前端兜底文案。 */
+  headline: string;
+  /** 建单时定格的版式 key（前端只做展示，不据它渲染选择器——启用清单看 /creative/status）。 */
+  templateKey?: string;
+  /** 制作中项的阶段（同 CreativeJobView.progress）；已完成项没有。 */
+  progress?: string;
+  /**
+   * 已完成项的成品图。**previewUrl/downloadUrl 是短时效签名链接（600 秒）**，
+   * 服务端每次下发重签 → 整个响应不得进任何缓存层。制作中项没有这个字段。
+   */
+  poster?: CreativeAssetView;
+  /** 版本链：revise/regenerate 出来的项指向来源任务（列表据此标「改版」）。 */
+  parentJobId?: string;
+}
+/** 作品库分页结果（游标分页，createdAt 倒序）。 */
+export interface CreativePosterListResult {
+  items: CreativePosterListItem[];
+  /** 还有下一页时给出游标；**不给 = 已到底**（不要用空串表达"还有"）。 */
+  nextCursor?: string;
+}
 /**
  * 成品图能力状态（GET /creative/status，需登录）。小程序据此决定**是否显示出图入口**（方案 §16 降级口径）：
  * 关闭时前端不该露出按钮再让用户点到 403，而应整块隐藏。

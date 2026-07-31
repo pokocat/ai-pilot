@@ -21,6 +21,7 @@ import type {
   StrategicProfile, ReviewLogItem, ReviewsResult,
   CreativeStatusResult, PosterBriefDraft, CreativeUploadResult, CreativeJobView,
   CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
+  CreativePosterListResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -38,12 +39,13 @@ export type { QuickScanRequest, QuickScanResult } from '../../../shared/contract
 export type { JourneyView, JourneyStage, JourneyNextStep } from '../../../shared/contracts';
 export type { PrescriptionView, PrescriptionListView, DeliverablePrescription } from '../../../shared/contracts';
 export type { BrandKitView, BrandKitPersona, BrandKitVoice, BrandKitTheme } from '../../../shared/contracts';
-// 海报成品图（canvas_design）：确认页 / 详情页 / 成果卡入口共用的契约类型。
+// 海报成品图（canvas_design）：确认页 / 详情页 / 成果卡入口 / 作品库共用的契约类型。
 export type {
   PosterBrief, PosterBriefDraft, PosterScene, PosterRatio,
   PosterTemplateKey, PosterTemplateOption,
   CreativeStatusResult, CreativeUploadResult, CreativeJobView, CreativeAssetView,
   CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
+  CreativePosterListItem, CreativePosterListResult,
 } from '../../../shared/contracts';
 export type { SkuView, SkuOrderResult, SkuKind, WechatPayParams, PayOrderStatus, PayOrderListItem, PayOrderListResult, PayRepayResult, PayMockPayResult } from '../../../shared/contracts';
 export type {
@@ -707,6 +709,14 @@ export const api = {
     useMockApi() ? mock.regenerateJob(id, body) : request<CreatePosterJobResult>(`/creative/jobs/${id}/regenerate`, 'POST', body),
   cancelJob: (id: string) =>
     useMockApi() ? mock.cancelJob(id) : request<CreativeJobView>(`/creative/jobs/${id}/cancel`, 'POST', {}),
+  // 作品库：本人历史成品图（倒序 + 游标分页）。每项的预览链接同样是短签名，**不要缓存**。
+  creativePosters: (opts: { cursor?: string; limit?: number } = {}) => {
+    if (useMockApi()) return mock.creativePosters(opts);
+    const qs: string[] = [];
+    if (opts.cursor) qs.push(`cursor=${encodeURIComponent(opts.cursor)}`);
+    if (opts.limit) qs.push(`limit=${opts.limit}`);
+    return request<CreativePosterListResult>(`/creative/posters${qs.length ? `?${qs.join('&')}` : ''}`);
+  },
 };
 
 /** 由网页版链接（/api/r/:id）推导同一报告的 PDF 下载地址（/api/r/:id/pdf）。取不到则返回 null。 */

@@ -27,6 +27,7 @@ import { creativeAssetUrl } from './storage.js';
 import type {
   CreativeJobView, CreativeAssetView, PosterBrief,
   RevisePosterJobRequest, RegeneratePosterJobRequest,
+  CreativePosterListItem, CreativePosterListResult,
 } from '../../../../shared/contracts';
 
 export const POSTER_SKILL_KEY = 'canvas_design';
@@ -149,6 +150,124 @@ export async function getJobView(jobId: string, userId: string): Promise<Creativ
     select: { id: true, kind: true, ossKey: true, mimeType: true, width: true, height: true },
   });
   return toView(job as JobRow, assets);
+}
+
+/* ───────────────── 作品库列表（历史成品图） ───────────────── */
+
+export const POSTER_LIST_DEFAULT_LIMIT = 20;
+export const POSTER_LIST_MAX_LIMIT = 50;
+
+/**
+ * 游标格式：`<createdAt 毫秒>:<jobId>`。
+ *
+ * 为什么不用 Prisma 的 `cursor: { id }` + `skip: 1`：那个写法把「上一页最后一行」当成锚点，
+ * 而锚点行如果不满足本查询的 where（例如它在翻页期间被 revise 顶成了别的状态、或干脆是别人的 id），
+ * 结果会静默变成空页 —— 一个「还有数据但翻不到」的哑失败。keyset 自己算就没有这个耦合：
+ * 游标只是一个 (createdAt, id) 坐标，与那一行还在不在无关。
+ */
+function decodeCursor(raw: string): { at: Date; id: string } {
+  const m = /^(\d{1,15}):([A-Za-z0-9_-]{1,40})$/.exec(raw);
+  const ms = m ? Number(m[1]) : NaN;
+  if (!m || !Number.isFinite(ms)) throw new CreativeError('分页游标非法', 'CURSOR_INVALID', 422);
+  return { at: new Date(ms), id: m[2] };
+}
+function encodeCursor(row: { createdAt: Date; id: string }): string {
+  return `${row.createdAt.getTime()}:${row.id}`;
+}
+
+/** 安全读出建单时定格的 brief 字段（requestJson 是裸 JSON，历史行可能缺字段/被改坏）。 */
+function briefTextOf(requestJson: unknown, key: 'headline' | 'templateKey'): string {
+  const brief = (requestJson as { brief?: Record<string, unknown> } | null)?.brief;
+  const v = brief?.[key];
+  return typeof v === 'string' ? v.trim() : '';
+}
+
+/**
+ * 作品库：用户自己的海报任务列表（createdAt 倒序，游标分页）。
+ *
+ * 收录口径 = 「有东西可看的」：succeeded 且真有 poster_png 资产，或仍在途（pending/running）。
+ * succeeded 却没有成品资产的行是数据异常（worker 半途丢了产物），列表里放它只会给用户一格破图；
+ * failed / cancelled 同理不收 —— 用户要的是找回作品，不是回顾失败史（重试入口在详情页）。
+ *
+ * **版本链全部平铺**：revise/regenerate 出来的每一版都是独立一项。这正是本功能要解的痛点——
+ * 此前同一张成果卡只记得最近一次出图，早期版本只能顺着 parentJobId 一层层往上翻。
+ *
+ * 归属隔离：where 恒带 userId，越权 id 当游标只会得到空页（不区分「不存在」与「不是你的」）。
+ */
+export async function listPosterJobs(
+  userId: string,
+  opts: { cursor?: string | null; limit?: number } = {},
+): Promise<CreativePosterListResult> {
+  const rawLimit = Math.trunc(Number(opts.limit));
+  const limit = Number.isFinite(rawLimit) && rawLimit > 0
+    ? Math.min(rawLimit, POSTER_LIST_MAX_LIMIT)
+    : POSTER_LIST_DEFAULT_LIMIT;
+  const rawCursor = String(opts.cursor ?? '').trim();
+  const cur = rawCursor ? decodeCursor(rawCursor) : null;
+
+  const rows = await prisma.creativeJob.findMany({
+    where: {
+      userId,
+      kind: POSTER_JOB_KIND,
+      AND: [
+        {
+          OR: [
+            { status: { in: ['pending', 'running'] } },
+            { status: 'succeeded', assets: { some: { kind: 'poster_png' } } },
+          ],
+        },
+        // keyset：严格小于上一页最后一行的 (createdAt, id)，与下面的 orderBy 同序。
+        ...(cur
+          ? [{ OR: [{ createdAt: { lt: cur.at } }, { createdAt: cur.at, id: { lt: cur.id } }] }]
+          : []),
+      ],
+    },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1, // 多取一条只为判断「还有没有下一页」，不下发
+    select: {
+      id: true, status: true, progress: true, parentJobId: true,
+      createdAt: true, completedAt: true, requestJson: true,
+    },
+  });
+
+  const page = rows.slice(0, limit);
+  const doneIds = page.filter((r) => r.status === 'succeeded').map((r) => r.id);
+  const assets = doneIds.length
+    ? await prisma.creativeAsset.findMany({
+      where: { jobId: { in: doneIds }, kind: 'poster_png' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, jobId: true, kind: true, ossKey: true, mimeType: true, width: true, height: true },
+    })
+    : [];
+  // 一条任务理论上只有一张成品图；真有多张时取最新（orderBy desc + 先到先占）。
+  const posterOf = new Map<string, CreativeAssetView>();
+  for (const a of assets) {
+    if (!a.jobId || posterOf.has(a.jobId)) continue;
+    posterOf.set(a.jobId, assetView(a));
+  }
+
+  const items: CreativePosterListItem[] = page.map((r) => {
+    const poster = posterOf.get(r.id);
+    const templateKey = briefTextOf(r.requestJson, 'templateKey');
+    return {
+      jobId: r.id,
+      status: r.status as CreativePosterListItem['status'],
+      createdAt: r.createdAt.toISOString(),
+      ...(r.completedAt ? { completedAt: r.completedAt.toISOString() } : {}),
+      headline: briefTextOf(r.requestJson, 'headline'),
+      ...(templateKey ? { templateKey } : {}),
+      // progress 只对在途项有意义（终态行里它停在最后一个阶段，展示出来像"还在跑"）。
+      ...(r.status !== 'succeeded' && r.progress ? { progress: r.progress } : {}),
+      ...(poster ? { poster } : {}),
+      ...(r.parentJobId ? { parentJobId: r.parentJobId } : {}),
+    };
+  });
+
+  const last = page[page.length - 1];
+  return {
+    items,
+    ...(rows.length > limit && last ? { nextCursor: encodeCursor(last) } : {}),
+  };
 }
 
 /* ───────────────── 退款（全局唯一入口） ───────────────── */
