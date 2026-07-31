@@ -10,6 +10,7 @@
 import { z } from 'zod';
 import { structured } from '../../llm/gateway.js';
 import { moderate } from '../moderation.js';
+import { styleCatalogDigest } from './styleLibrary.js';
 import type { NormalizedPosterBrief } from './schema.js';
 import type { TemplateKey } from './config.js';
 import type { BrandKitView } from '../../../../shared/contracts';
@@ -31,7 +32,38 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 //   "Information lives in design, not paragraphs"             → 【视觉优先】
 //   "a subtle, niche reference embedded within the art
 //    itself ... like a jazz musician quoting another song"    → 【隐性主题】爵士乐引用那句原样保留
-const MANIFESTO_SYS = [
+/**
+ * 影像主导路线的增补段（**只在 photo 路线可能成立时拼进去**）。
+ *
+ * 为什么条件拼接而不是恒定拼上：没配图片供应商 / 用户传了本人照片时 photo 路线根本走不通
+ * （门禁见 posterRoute.ts），给模型一个走不通的选项只会白烧 token，还可能让它按 photo 的思路
+ * 写出一篇「主视觉承重」的宣言，然后被强制降级到 graphic —— 那篇宣言与实际路线不匹配，画质更差。
+ */
+function photoRouteDirective(): string {
+  return [
+    '',
+    '【本张海报可以走两条路线，你要选一条】',
+    '- graphic（纯图形排印）：没有照片，由排版层用纯 CSS/SVG 作画——几何母题、色域、刻度、排印对比。',
+    '- photo（影像主导）：先由顶级生图模型出一张**全幅无文字主视觉**铺满画布，排版层只做克制的文字叠层。',
+    '  适合「一张脸/一件物就能立住信任」的诉求；不适合信息密度高、需要图表化表达的诉求。',
+    '',
+    '选 photo 时必须一起给：',
+    '- styleKey：从下面 12 档风格里选一档（只能用给出的 key，别自造）。',
+    '- subject：**一句英文**主体描述，只写「主角是谁/是什么」，不要写光线、镜头、画幅、风格词——',
+    '  那些已经写在该档的骨架里了，你再写一遍只会互相打架（尤其**不要写景别**：close-up / medium shot /',
+    '  wide shot / full body 这类词一律不要，骨架已经定好了景别，多一个就是社区公认的首要翻车原因）。',
+    '  也不要写 masterpiece / 8k / highly detailed / award-winning 这类词（2026 年的模型对它们已不响应，',
+    '  甚至反向降质）。就写清楚人物气质或物件本体，例如 "a composed Chinese woman in her forties, a tax advisor"。',
+    '  不要写具体人名，不要指名任何在世人物。',
+    '',
+    '【12 档风格】',
+    styleCatalogDigest(),
+    '',
+    '选 graphic 时 styleKey 与 subject 留空字符串即可。',
+  ].join('\n');
+}
+
+const MANIFESTO_SYS_BASE = [
   '你是「军师参谋部」的视觉总监。为下面这一张商业海报**写一篇美学运动的宣言**——不是排版方案，',
   '不是执行清单，而是一套可被人读懂的美学立场：它信什么、拒绝什么、如何用空间与色彩说话。',
   '这篇宣言接下来会交给同一水准的设计师，由他直接用代码在画布上把它表达出来。',
@@ -67,10 +99,27 @@ const MANIFESTO_SYS = [
   '艺术性不得牺牲主标题可读性、CTA 显著性或二维码可扫性。',
   '',
   '【红线】不得指名复刻任何在世创作者或其作品；只描述画面属性（结构/色彩/材质/光线/构图）。',
-  '',
-  '只输出 JSON：{"movement":"","manifesto":["段一","段二","段三","段四"],"palette":["#RRGGBB"],"reference":""}',
-  '全部用中文，克制、具体、不说空话。',
 ].join('\n');
+
+/**
+ * 拼系统提示词。`allowPhoto` 为假时**完全不提** photo 这个词（见 photoRouteDirective 的注释）。
+ * 两种形态的 JSON 契约不同：不给 photo 选项时就不要求它输出 mode/styleKey/subject 三个字段。
+ */
+function manifestoSystem(allowPhoto: boolean): string {
+  const tail = allowPhoto
+    ? [
+      '',
+      '只输出 JSON：{"movement":"","manifesto":["段一","段二","段三","段四"],"palette":["#RRGGBB"],"reference":"",',
+      ' "mode":"graphic 或 photo","styleKey":"","subject":""}',
+      'movement / manifesto / reference 全部用中文；subject 用英文。克制、具体、不说空话。',
+    ].join('\n')
+    : [
+      '',
+      '只输出 JSON：{"movement":"","manifesto":["段一","段二","段三","段四"],"palette":["#RRGGBB"],"reference":""}',
+      '全部用中文，克制、具体、不说空话。',
+    ].join('\n');
+  return `${MANIFESTO_SYS_BASE}${allowPhoto ? photoRouteDirective() : ''}${tail}`;
+}
 
 /** 模板选择只作气质提示（AI 引擎不套模板，但用户挑的那套版式表达了他要的音量）。 */
 const TEMPLATE_TENDENCY: Record<TemplateKey, string> = {
@@ -88,6 +137,11 @@ const ManifestoSchema = z.object({
   ),
   palette: z.array(z.string()).catch([]).default([]),
   reference: z.string().catch('').default(''),
+  // ★ 路线三件套：只有 allowPhoto 时才要求模型输出，缺省一律空 —— 空值的语义是「走 graphic」，
+  //   由 posterRoute.resolvePosterRoute 统一裁定（这里刻意不做判定，路线规则只有一处实现）。
+  mode: z.string().catch('').default(''),
+  styleKey: z.string().catch('').default(''),
+  subject: z.string().catch('').default(''),
 });
 
 export interface PosterManifesto {
@@ -97,6 +151,12 @@ export interface PosterManifesto {
   palette: string[];
   /** 隐性主题私语（进提示词，不进画面）。 */
   reference: string;
+  /**
+   * 模型自选的路线三件套（**原始值，未归一**）。
+   * 归一与门禁一律走 posterRoute.resolvePosterRoute —— 这里保留原样是为了排障时能看出
+   * 「模型想走 photo 但被门禁降级了」和「模型自己选的 graphic」不是一回事。
+   */
+  route: { mode: string; styleKey: string; subject: string };
 }
 
 /** 宣言全文（落 CreativeJob.promptSnapshot 可追溯；也是送审文本）。 */
@@ -106,6 +166,10 @@ export function manifestoText(m: PosterManifesto): string {
     ...m.paragraphs,
     `色板：${m.palette.join(' ')}`,
     m.reference ? `隐性主题：${m.reference}` : '',
+    // 路线三件套也进快照与送审文本：subject 是模型自创的英文文本，它会决定画面主体，
+    // 属于「间接决定对外成品」的内容，必须和宣言正文一起过输出侧审核。
+    m.route.mode ? `路线：${m.route.mode}${m.route.styleKey ? ` · ${m.route.styleKey}` : ''}` : '',
+    m.route.subject ? `影像主体：${m.route.subject}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -146,11 +210,16 @@ export async function generateManifesto(opts: {
   fallbackPalette: string[];
   tenantId?: string | null;
   userId?: string | null;
+  /**
+   * 是否给模型「影像主导」这个选项（= photo 路线的门禁在**调模型之前**就已经过了）。
+   * 缺省 false：调用方没显式开就不给选项 —— 宁可少一条路线，也不要让模型选个走不通的（白烧 token）。
+   */
+  allowPhoto?: boolean;
 }): Promise<PosterManifesto | null> {
   let ai: z.infer<typeof ManifestoSchema> | null = null;
   try {
     ai = await structured(ManifestoSchema, {
-      system: MANIFESTO_SYS,
+      system: manifestoSystem(!!opts.allowPhoto),
       user: digest(opts.brief, opts.brandKit),
       maxChars: 4000,
       // ★ 必须显式给产出预算：provider 辅助档缺省 700 token，而 4-6 段中文宣言 + JSON 壳
@@ -182,6 +251,15 @@ export async function generateManifesto(opts: {
     paragraphs,
     palette: hex.length >= 3 ? hex.slice(0, 5) : opts.fallbackPalette,
     reference: ai.reference.trim().slice(0, 200),
+    // allowPhoto=false 时即使模型硬塞了 mode:'photo' 也不采信：门禁在调模型前就已判定不可用，
+    // 采信它只会让 resolvePosterRoute 白走一趟再降级（且 promptSnapshot 上留下一条误导的路线记录）。
+    route: opts.allowPhoto
+      ? {
+        mode: ai.mode.trim().slice(0, 16),
+        styleKey: ai.styleKey.trim().slice(0, 40),
+        subject: ai.subject.trim().slice(0, 240),
+      }
+      : { mode: '', styleKey: '', subject: '' },
   };
 
   // 输出侧审核（fail-closed，同 philosophy）：宣言会进 promptSnapshot 并间接决定画面，必须过审。

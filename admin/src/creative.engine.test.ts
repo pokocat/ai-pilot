@@ -10,11 +10,14 @@
 //   cd admin && npm test
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { engineTag, fallbackStat } from './views/creative.js';
+import { engineTag, fallbackStat, styleLabel } from './views/creative.js';
 
 type Job = Parameters<typeof engineTag>[0];
 const job = (layoutEngine: string | null, rounds: number | null = null, aiEngineError?: string): Job =>
   ({ layoutEngine, rounds, ...(aiEngineError === undefined ? {} : { aiEngineError }) }) as Job;
+/** AI 引擎成功的单 + 创作路线（2026-07-30 影像主导模式）。 */
+const aiJob = (aiMode: string | null, rounds: number | null = 2, styleKey: string | null = null): Job =>
+  ({ layoutEngine: 'ai', rounds, aiMode, styleKey }) as Job;
 
 describe('engineTag · 每行的排版引擎标签', () => {
   test('ai + rounds：显示轮数（2 = 一次成 + 强制打磨）', () => {
@@ -60,6 +63,54 @@ describe('engineTag · 每行的排版引擎标签', () => {
     const t = engineTag(job('svg_v2'));
     assert.equal(t?.label, 'svg_v2');
     assert.equal(t?.cls, 'tag off');
+  });
+});
+
+describe('engineTag · AI 创作路线（影像 / 纯图形是两种成品，标签必须分得开）', () => {
+  test('aiMode=photo → 「AI 影像 ·N轮」，title 带风格中文名', () => {
+    const t = engineTag(aiJob('photo', 2, 'mono_authority_portrait'));
+    assert.equal(t?.label, 'AI 影像 · 2轮');
+    assert.equal(t?.cls, 'tag');
+    assert.match(t?.title ?? '', /黑白权威肖像/, '运营看的是人话，不是 snake_case 的 key');
+    assert.match(t?.title ?? '', /全幅主视觉/);
+  });
+
+  test('aiMode=graphic → 仍是「AI 排版 ·N轮」，title 说明未调生图模型', () => {
+    const t = engineTag(aiJob('graphic', 3));
+    assert.equal(t?.label, 'AI 排版 · 3轮');
+    assert.match(t?.title ?? '', /未调生图模型/);
+  });
+
+  test('aiMode=null（老任务 / 本轮之前成功的单）→ 按「AI 排版」显示，不冒充 photo', () => {
+    assert.equal(engineTag(aiJob(null, 2))?.label, 'AI 排版 · 2轮');
+  });
+
+  test('photo 但风格档缺失 → 标签仍是「AI 影像」，title 不硬塞一个不存在的风格名', () => {
+    const t = engineTag(aiJob('photo', 2, null));
+    assert.equal(t?.label, 'AI 影像 · 2轮');
+    assert.doesNotMatch(t?.title ?? '', /风格：/);
+  });
+
+  test('未知风格 key 原样显示（同 engineTag 对未知引擎的口径：不假装认识）', () => {
+    assert.equal(styleLabel('wabi_sabi_stone'), 'wabi_sabi_stone');
+    assert.equal(styleLabel('quiet_luxury_grey'), '静奢空间摄影');
+    assert.equal(styleLabel(null), '');
+    assert.equal(styleLabel(undefined), '');
+  });
+
+  // 12 档必须都有中文名：任务台把 key 原样显示出来虽不致命，但运营与用户没法对话
+  //（服务端 styleLibrary.POSTER_STYLES 是唯一真源，这里是它的展示副本）。
+  test('12 档风格 key 全部有中文名', () => {
+    const keys = [
+      'quiet_luxury_grey', 'baroque_icon_gold', 'editorial_black_gold', 'neo_chinese_void',
+      'documentary_film_grain', 'luxury_magazine_cover', 'airy_japanese_light', 'cyber_tech_blue',
+      'retro_hongkong', 'glossy_3d_trend', 'mono_authority_portrait', 'surreal_object_metaphor',
+    ];
+    for (const k of keys) {
+      const label = styleLabel(k);
+      assert.notEqual(label, k, `${k} 缺中文名（会在任务台上原样露出 snake_case）`);
+      assert.ok(label.length > 0);
+    }
   });
 });
 

@@ -29,6 +29,7 @@ import {
   sanitizeCanvasHtml, type CanvasAssetUrls,
 } from './canvasSanitize.js';
 import { renderCanvasPoster } from './renderer.js';
+import { SAFE_ZONE_HINTS, type PosterStyle } from './styleLibrary.js';
 import type { NormalizedPosterBrief } from './schema.js';
 import type { PosterManifesto } from './manifesto.js';
 
@@ -63,7 +64,7 @@ export const MAX_DEBUG_HTML_CHARS = 24_000;
 //   "The topic is a subtle, niche reference embedded within
 //    the art itself"                                          → 【隐性主题】
 // 上游的「下载字体 / 用 ./canvas-fonts」在本项目不适用（镜像内置字体栈、渲染无网络），已改写为硬约束 4。
-function canvasSystemPrompt(): string {
+function canvasSystemPrompt(photo?: PosterStyle): string {
   const L = MEASURE_LIMITS;
   return [
     '你是「军师参谋部」的海报设计师，也是这一行最顶尖的手艺人。你要用代码在画布上**创作一件作品**：',
@@ -72,15 +73,17 @@ function canvasSystemPrompt(): string {
     '【标准】做出博物馆或杂志级的东西。成品要看起来像花了很久——精工细作、反复推敲、大师级执行，',
     '像是这一行最顶尖的人对每一个细节都苛刻过。任何「一眼像自动生成」的画面都不合格。',
     '',
-    '【怎么画】',
-    '- 先读下面那篇视觉哲学宣言，把它当作这张海报的美学法律：气质、取舍、色彩关系、层级都由它决定。',
-    '- 用重复的图案与精确的形作画：几何母题、密集排列的刻度与标记、层叠的色域——靠耐心的重复累积出意义，',
-    '  让画面经得起久看。可以像一本假想学科的图谱：克制的、近乎临床的小字标注与系统性编号，',
-    '  用分析性的视觉语言去讲一件关乎人的事。',
-    '- 画面 ≈ 90% 视觉 + 10% 必要文字。信息活在设计里，不活在段落里。',
-    '- 只用纯 CSS/SVG 作画：渐变、图案、网格、几何形、遮罩、混合模式、字重与字距对比。没有照片也要成立。',
-    '- 隐性主题：把这门生意的灵魂藏进纹理、色彩关系与重复母题里——懂的人会心一笑，不懂的人也看到一件好作品。',
-    '  **不要直白复述卖点**，也不得为了「艺术性」牺牲主标题可读性、CTA 显著性或二维码可扫性。',
+    ...(photo ? photoHowTo(photo) : [
+      '【怎么画】',
+      '- 先读下面那篇视觉哲学宣言，把它当作这张海报的美学法律：气质、取舍、色彩关系、层级都由它决定。',
+      '- 用重复的图案与精确的形作画：几何母题、密集排列的刻度与标记、层叠的色域——靠耐心的重复累积出意义，',
+      '  让画面经得起久看。可以像一本假想学科的图谱：克制的、近乎临床的小字标注与系统性编号，',
+      '  用分析性的视觉语言去讲一件关乎人的事。',
+      '- 画面 ≈ 90% 视觉 + 10% 必要文字。信息活在设计里，不活在段落里。',
+      '- 只用纯 CSS/SVG 作画：渐变、图案、网格、几何形、遮罩、混合模式、字重与字距对比。没有照片也要成立。',
+      '- 隐性主题：把这门生意的灵魂藏进纹理、色彩关系与重复母题里——懂的人会心一笑，不懂的人也看到一件好作品。',
+      '  **不要直白复述卖点**，也不得为了「艺术性」牺牲主标题可读性、CTA 显著性或二维码可扫性。',
+    ]),
     '',
     '【文字】文字本身就是图形。音量由场景决定：可以是有力的大字排印，也可以是耳语般的小字。',
     '字号敢差出一个量级，字距敢拉开。但无论怎么排——**任何元素都不出画、信息文字之间不互相压字**',
@@ -118,10 +121,44 @@ function canvasSystemPrompt(): string {
     '   而**信息层之间禁止真重叠**：主标题、副标题、卖点、CTA、落款彼此必须各自完整可读、互不压字；',
     `   不许给这些信息文字加 ${DECOR_ATTR} 来绕过量测（打磨轮里也一样，别把信息文字标成装饰）。`,
     '   声明为装饰也**只豁免重叠这一项**：装饰字同样不许出画、不许贴边、不许低于最小字号。',
+    ...(photo ? [
+      `11. **全幅背景层（本张是影像主导版）**：${CANVAS_PLACEHOLDER.visual} 必须作为画布最底层铺满整张画布——`,
+      `   <img src="${CANVAS_PLACEHOLDER.visual}"> 写成 position:absolute;left:0;top:0;`,
+      `   width:${CANVAS_SPEC.width}px;height:${CANVAS_SPEC.height}px;object-fit:cover;object-position:center;z-index:0。`,
+      '   不许把它缩成一张卡片、不许加圆角、不许留白边、不许只当装饰小图用——它就是这张海报的主视觉。',
+      '   也不要用 transform:scale / 负 margin 去二次裁切：那会把主体或人脸切掉，而画面构图是按整幅算好的。',
+      `12. **文字只能落在安全区**：这张主视觉在生成时就为排版留好了空区 —— ${SAFE_ZONE_HINTS[photo.safeZone]}。`,
+      '   所有信息文字（主标题/副标题/卖点/CTA/落款/AI 标识）都必须落在这片区域内，',
+      '   **绝不许压在人物面部或主体上**（这一项机器量不出来，只能靠你自己守；打磨轮请专门自查一遍）。',
+      '   需要提升可读性时只能加一层极轻的渐变蒙版（linear-gradient 到半透明黑/白），',
+      '   不许铺满不透明色块把照片盖掉。',
+    ] : []),
     '',
     '【输出格式】只输出 HTML 源码本身，从 <!DOCTYPE html> 到 </html>。',
     '不要 Markdown 围栏，不要任何解释、前言或后记。',
   ].join('\n');
+}
+
+/**
+ * 影像主导路线的【怎么画】段。与 graphic 段是**互斥替换**，不是叠加 ——
+ * graphic 那段在教模型「用图案与几何把整幅画满」，photo 这段要它**收手**：
+ * 主视觉已经由生图模型画完了，排版层再堆图形只会和照片抢注意力（这是这类海报最典型的翻车形态）。
+ */
+function photoHowTo(style: PosterStyle): string[] {
+  return [
+    '【怎么画 · 影像主导】',
+    '- 先读下面那篇视觉哲学宣言，把它当作这张海报的美学法律：气质、取舍、色彩关系、层级都由它决定。',
+    `- **画布最底层已经有一张全幅主视觉**（风格：${style.name}），由顶级生图模型出的无文字照片/画作，`,
+    '  按硬约束 11 铺满整张画布。你的工作不是再画一张图，而是给它做**克制的排版叠层**。',
+    '- 允许的手法只有这些：一层极轻的渐变蒙版（只为文字可读性）、细线与细分隔、小色块、',
+    '  金属质感/描边的大字标题、字重与字距的对比、极小的英文标注。',
+    '  **不要**再铺满几何图案、不要画装饰插画、不要加边框把照片框起来——那是在跟主视觉抢画面。',
+    `- 排版气质（这一档的语法，按它走）：${style.typographyHints}`,
+    `- 色板优先用这一档的：${style.palette.join('  ')}；宣言色板作辅助与推导。`,
+    '- 画面 ≈ 90% 视觉 + 10% 必要文字。信息活在设计里，不活在段落里。',
+    '- 隐性主题：把这门生意的灵魂藏进色彩关系与文字节奏里——**不要直白复述卖点**，',
+    '  也不得为了「艺术性」牺牲主标题可读性、CTA 显著性或二维码可扫性。',
+  ];
 }
 
 // 上游 → 打磨提示词的移植对照（SKILL.upstream.md「FINAL STEP」段，整段是本机制的出处）：
@@ -165,10 +202,19 @@ function canvasUserPrompt(o: {
   brief: NormalizedPosterBrief;
   manifesto: PosterManifesto;
   assets: CanvasAssetUrls;
+  photo?: PosterStyle | null;
 }): string {
   const { brief, manifesto } = o;
   const placeholders = availablePlaceholders(o.assets);
   const lines = [
+    ...(o.photo ? [
+      `【本张走影像主导路线 · ${o.photo.name}（${o.photo.key}）】`,
+      `全幅主视觉占位符：${CANVAS_PLACEHOLDER.visual}（服务端渲染前替换成真实图片字节）`,
+      `文字安全区：${SAFE_ZONE_HINTS[o.photo.safeZone]} —— 所有文字必须落在这里，不许压主体/人脸`,
+      `风格色板：${o.photo.palette.join('  ')}`,
+      `排版气质：${o.photo.typographyHints}`,
+      '',
+    ] : []),
     `【视觉哲学宣言 · ${manifesto.movement}】`,
     ...manifesto.paragraphs,
     `色板：${manifesto.palette.join('  ')}`,
@@ -328,6 +374,13 @@ export async function generateCanvasPoster(
     brief: NormalizedPosterBrief;
     manifesto: PosterManifesto;
     assets: CanvasAssetUrls;
+    /**
+     * 影像主导路线的风格档（photo route）。给了它就走 photo 变体提示词：
+     * 全幅背景层规则 + 安全区排版 + 该档的排版气质与色板。
+     * **它与 assets.visualUrl 必须同时给**：只给 style 不给图，模型会去引用一个不存在的占位符
+     * （量测器报 placeholder_residue，白烧三轮）。worker 那侧保证两者同进同出。
+     */
+    photoStyle?: PosterStyle | null;
     /** 单次渲染超时（沿用后台配置的 timeoutMs）。 */
     timeoutMs?: number;
     budgetMs?: number;
@@ -371,8 +424,9 @@ export async function generateCanvasPoster(
     return { ok: true, poster: toPoster(a, rounds, fvc, reverted) };
   };
 
-  const system = canvasSystemPrompt();
-  const user = canvasUserPrompt(input);
+  const photo = input.photoStyle ?? null;
+  const system = canvasSystemPrompt(photo ?? undefined);
+  const user = canvasUserPrompt({ ...input, photo });
 
   let calls = 0;
   let firstViolationCount = 0;

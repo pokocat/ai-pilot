@@ -54,6 +54,23 @@ function layoutEngineOf(v: unknown): LayoutEngine {
   return (LAYOUT_ENGINES as readonly string[]).includes(v as string) ? (v as LayoutEngine) : DEFAULT_LAYOUT_ENGINE;
 }
 
+/**
+ * AI 创作路线（2026-07-30 影像主导模式拍板）。**只在 layoutEngine='ai' 时有意义。**
+ * · `'auto'`（**默认**）：模型在宣言阶段自选 graphic / photo（提示词里同时给两个选项）；
+ * · `'photo'`：强制影像主导（仍受两条门禁约束，不满足时降 graphic —— 见 posterRoute.ts）；
+ * · `'graphic'`：强制纯图形排印（宣言提示词里根本不给 photo 选项，省 token 也免得模型选个走不通的）。
+ *
+ * 为什么不做成「风险开关」文案：photo 链任一步失败退回 graphic 复用同一篇宣言，再失败才回落模板 ——
+ * 交付与计费都不会因它出问题。真正要盯的是任务台上的实际路线（AI 影像 / AI 排版 / 回落模板）。
+ */
+export const AI_MODES = ['auto', 'graphic', 'photo'] as const;
+export type AiMode = (typeof AI_MODES)[number];
+export const DEFAULT_AI_MODE: AiMode = 'auto';
+
+function aiModeOf(v: unknown): AiMode {
+  return (AI_MODES as readonly string[]).includes(v as string) ? (v as AiMode) : DEFAULT_AI_MODE;
+}
+
 export const DEFAULT_PRICE_PER_POSTER = 10; // 钻石/张（2026-07-29 拍板，可后台改）
 export const DEFAULT_DAILY_LIMIT = 20;      // 每用户每日任务数（0 = 不限量）
 /**
@@ -78,6 +95,8 @@ export interface CreativeRuntimeConfig {
   timeoutMs: number;
   /** 排版引擎（默认 'ai'，AI 失败自动回落模板）。 */
   layoutEngine: LayoutEngine;
+  /** AI 创作路线（默认 'auto'=模型自选）。只在 layoutEngine='ai' 时被读。 */
+  aiMode: AiMode;
   templates: Record<TemplateKey, boolean>;
   visual: {
     enabled: boolean;
@@ -92,7 +111,7 @@ export interface CreativeRuntimeConfig {
 
 type RawPayload = {
   pricePerPoster?: unknown; dailyLimit?: unknown; timeoutMs?: unknown;
-  layoutEngine?: unknown; templates?: unknown; visual?: unknown;
+  layoutEngine?: unknown; aiMode?: unknown; templates?: unknown; visual?: unknown;
 };
 
 function num(v: unknown, def: number, min: number, max: number): number {
@@ -135,6 +154,9 @@ export async function getCreativeConfig(opts: { fresh?: boolean } = {}): Promise
     // 缺省即 'ai'：这意味着**部署即切 AI 引擎**（运营不需要动配置）。安全性由回落矩阵兜住，
     // 见 worker.ts 的 runPipeline —— AI 引擎任何一步失败都退回模板路径，不影响交付与计费。
     layoutEngine: layoutEngineOf(p.layoutEngine),
+    // 缺省 'auto'：模型自选路线。photo 走不通时自动降 graphic（posterRoute.ts 的两条门禁），
+    // graphic 走不通时回落模板 —— 所以这个旋钮同样不是风险开关。
+    aiMode: aiModeOf(p.aiMode),
     templates: templatesOf(p.templates),
     visual: {
       enabled: !!(visualRaw.enabled as boolean),
@@ -175,6 +197,7 @@ export function publicCreativeConfig(cfg: CreativeRuntimeConfig): AdminCreativeC
     dailyLimit: cfg.dailyLimit,
     timeoutMs: cfg.timeoutMs,
     layoutEngine: cfg.layoutEngine,
+    aiMode: cfg.aiMode,
     templates: cfg.templates,
     visual,
   };
@@ -199,6 +222,7 @@ export async function updateCreativeConfig(patch: AdminCreativeConfigUpdate): Pr
     dailyLimit: patch.dailyLimit === undefined ? cur.dailyLimit : num(patch.dailyLimit, cur.dailyLimit, 0, 1000),
     timeoutMs: patch.timeoutMs === undefined ? cur.timeoutMs : num(patch.timeoutMs, cur.timeoutMs, 10_000, MAX_TIMEOUT_MS),
     layoutEngine: patch.layoutEngine === undefined ? cur.layoutEngine : layoutEngineOf(patch.layoutEngine),
+    aiMode: patch.aiMode === undefined ? cur.aiMode : aiModeOf(patch.aiMode),
     templates: patch.templates === undefined ? cur.templates : templatesOf({ ...cur.templates, ...plainObject(patch.templates) }),
     visual: {
       enabled: vp.enabled === undefined ? cur.visual.enabled : !!vp.enabled,

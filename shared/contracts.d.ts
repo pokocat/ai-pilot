@@ -662,6 +662,16 @@ export interface AdminCreativeConfig {
    * · 后台文案建议：「AI 排版（模型自由创作，失败自动回落模板）」/「模板排版（固定三套版式）」。
    */
   layoutEngine: 'ai' | 'template';
+  /**
+   * AI 创作路线（2026-07-30 影像主导模式，**缺省 'auto'**）。只在 layoutEngine='ai' 时被读。
+   * · `'auto'`：模型在宣言阶段自选 —— 纯图形排印（graphic）或影像主导（photo）；
+   * · `'photo'`：强制影像主导。**仍受三条门禁**（未配图片供应商 / 用户上传了本人照片 /
+   *   模型没给出可用的英文主体描述 → 一律降 graphic），所以「强制」是「优先」而不是「一定」；
+   * · `'graphic'`：强制纯图形排印（宣言提示词里根本不给 photo 选项）。
+   * 与 layoutEngine 同理，这**不是**风险开关：photo 链任一步失败退回 graphic 复用同一篇宣言，
+   * 再失败才回落模板 —— 交付与计费都不受影响。要盯的是任务台上每行的**实际**路线。
+   */
+  aiMode: 'auto' | 'graphic' | 'photo';
   templates: Record<string, boolean>; // 模板启停（key = person_hero | editorial | business_launch）
   visual: AdminCreativeVisualConfig;
 }
@@ -693,8 +703,23 @@ export interface AdminCreativeJobItem {
   layoutEngine: string | null;
   /** AI 引擎的 LLM 轮数（1=只创作，2=创作+打磨/修复，3=再修一轮）；非 AI 路径为 null。 */
   rounds: number | null;
+  /**
+   * 本单**实际**走的 AI 创作路线（读 resultJson.aiMode）：
+   * `'photo'`（影像主导：生图模型出全幅主视觉 + 排版层叠字）| `'graphic'`（纯图形排印）
+   * | `null`（模板路径 / 老任务 / 未完成）。
+   * 与配置里的 aiMode 不是一回事：配置是意图，这里是结果。photo 有三条门禁 + 一条回落边，
+   * 「配置成 photo 却整天在出 graphic」必须在任务台看得出来，否则又是一次静默失明。
+   */
+  aiMode: string | null;
+  /** 影像路线用的风格档 key（如 mono_authority_portrait）；graphic / 模板路径为 null。 */
+  styleKey: string | null;
   /** AI 引擎回落原因（layoutEngine='template_fallback' 时有值，运营排障用）。 */
   aiEngineError?: string;
+  /**
+   * 影像路线**尝试过但没走通**的原因（此时 aiMode='graphic'，任务仍成功）。
+   * 与 aiEngineError 是两层：这条说「photo 降级成 graphic」，那条说「AI 引擎整体回落模板」。
+   */
+  photoError?: string;
   /** 建单时的供应商快照（'configured' | null）。**实际是否产出主视觉看 degraded**。 */
   provider: string | null;
   /**

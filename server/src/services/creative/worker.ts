@@ -14,8 +14,10 @@ import { noteCreativeJobSucceeded, noteCreativeJobFailed, noteCreativeEngine } f
 import { PdfUnavailableError } from '../reportPdf.js';
 import { getCreativeConfig, visualProviderConfigured, type CreativeRuntimeConfig } from './config.js';
 import { generatePhilosophy, philosophyText, composeVisualPrompt, type VisualPhilosophy } from './philosophy.js';
-import { generateManifesto, manifestoText } from './manifesto.js';
+import { generateManifesto, manifestoText, type PosterManifesto } from './manifesto.js';
 import { generateCanvasPoster, AI_ENGINE_BUDGET_MS, type CanvasPoster } from './canvasEngine.js';
+import { photoRouteAllowedFor, resolvePosterRouteFor, type ResolvedPosterRoute } from './posterRoute.js';
+import { assembleImagePrompt } from './imagePrompt.js';
 import { renderPoster, PosterRenderError } from './renderer.js';
 import { resolveVisualProvider } from './visualProvider.js';
 import { moderate } from '../moderation.js';
@@ -234,6 +236,25 @@ interface RunOutcome {
 }
 
 /**
+ * 测试注入缝（**只为测试存在，生产恒空**）。
+ *
+ * 为什么需要它：AI 引擎的价值在「几条子路、什么时候退回哪一条」这套编排，而它在测试环境里根本跑不到 ——
+ * `completeText` 无 live provider 恒 null，于是宣言就地失败、photo 子路一次也不会被走到。
+ * 没有这个缝，「photo 失败 → graphic 同宣言重试 → 仍败 → 模板」这条三层回落链就只能靠人肉在生产上验证。
+ * 口径与 canvasEngine.CanvasEngineDeps 一致：缺省即真实实现，绝不允许「没注入就跳过某一步」。
+ */
+export interface CreativeWorkerDeps {
+  /** 宣言生成（注入以跳过真 LLM）。 */
+  manifesto?: typeof generateManifesto;
+  /** photo 子路的主视觉产出（注入以跳过真图片供应商与真审核）。 */
+  photoVisual?: (
+    input: JobExecutionInput, cfg: CreativeRuntimeConfig, route: ResolvedPosterRoute,
+  ) => Promise<PhotoVisualResult>;
+  /** 排版（注入以按「有没有 photoStyle」分别返回成功/失败，从而钉住回落链）。 */
+  compose?: typeof generateCanvasPoster;
+}
+
+/**
  * 管线总入口。**两条排版路径 + 一条回落边**：
  *
  *   layoutEngine='ai'（默认）
@@ -246,7 +267,7 @@ interface RunOutcome {
  * 回落**复用同一个 runTemplatePipeline**（不复制一份）：图片供应商调用、降级留痕（degraded/visualError）、
  * 弹性版面契约、溢出闸这些教训全在那条路径上，抄一份就等于把它们全部作废一次。
  */
-async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
+async function runPipeline(input: JobExecutionInput, deps: CreativeWorkerDeps = {}): Promise<RunOutcome> {
   const { job, brief } = input;
   const cfg = await getCreativeConfig();
 
@@ -267,7 +288,7 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
   // ── 阶段 2：AI 排版引擎（默认路径）──
   let aiError: string | null = null;
   if (cfg.layoutEngine === 'ai') {
-    const ai = await runAiEngine(input, cfg, philosophy);
+    const ai = await runAiEngine(input, cfg, philosophy, deps);
     if (ai.outcome) return ai.outcome;
     aiError = ai.error ?? 'AI 引擎未产出';
     console.warn('[creative] AI 排版引擎未产出，回落模板路径：', job.id, aiError);
@@ -277,17 +298,49 @@ async function runPipeline(input: JobExecutionInput): Promise<RunOutcome> {
   return runTemplatePipeline(input, cfg, philosophy, aiError);
 }
 
+/** photo 子路第一步（出主视觉）的结论。失败一律走 `error`，绝不抛。 */
+export interface PhotoVisualResult {
+  /** 已落库的 kind='visual' 资产 id（成功时必有，进 resultJson.visualAssetId）。 */
+  assetId?: string;
+  /** 供应商名（metrics 的 provider 维度用真实名字，不用建单时的 'configured' 快照）。 */
+  providerLabel?: string;
+  /** 主视觉字节的 data URI（直接喂给排版层的 {{VISUAL_URL}}，不再从 OSS 读回）。 */
+  dataUri?: string;
+  error?: string;
+}
+
+/** 一次「创作 → 量测 → 打磨」尝试的结论（photo 与 graphic 两条子路共用）。 */
+interface CanvasAttempt {
+  poster?: CanvasPoster;
+  error?: string;
+  debug?: { violations: string[]; lastHtml?: string };
+}
+
 /**
  * AI 排版引擎路径。**永不让整单失败**：拿不到产物就返回 error，由 runPipeline 回落模板。
  * 唯一会往外抛的是 JobCancelled（用户取消必须原样冒到 runJobOnce，不能被当成"AI 引擎失败"吞掉）。
  *
- * 刻意不调图片供应商（canvas-design 精神：图形与排印即艺术，也省一笔生图成本）；
- * 用户自己上传的 portrait/logo/qr 经占位符嵌入。revise 复用的 sourceVisualAssetId 在这条路径上被忽略。
+ * ── 两条子路 + 一条**内部**回落边（2026-07-30 影像主导模式）──
+ *
+ *   photo（影像主导，门禁见 posterRoute.ts）
+ *     └─ 拼 prompt → 图片供应商出全幅无文字主视觉 → 图片审核 → 存 kind='visual' 资产
+ *        → 排版层（photo 变体提示词：全幅铺底 + 安全区叠层）→ 量测/打磨/交付闸门照旧
+ *   graphic（纯图形排印，上一代 AI 引擎行为，一字不改）
+ *
+ * **photo 链任一步失败 → 退回 graphic 复用同一篇宣言**（不重新生成宣言，省一次 LLM 调用；
+ * 而且那篇宣言本身是过审过的、与本单商业目标匹配的，重新生成只会换来一篇不一定更好的）。
+ * graphic 也失败才把 error 交给 runPipeline 去回落模板。三层回落链的单测在
+ * server/test/creativePhotoRoute.test.ts 钉住。
+ *
+ * 时间预算：photo 与 graphic 两次排版**共享**同一个 AI_ENGINE_BUDGET_MS（deadline 从本函数开始算），
+ * 所以 photo 烧掉大半预算后 graphic 只拿到 30s 下限（够跑一轮创作，多半没有打磨轮）。
+ * 这是刻意取舍：宁可交一张没打磨的图，也不要让一单在 running 里耗到被 sweep 判卡死（那会重跑 + 两张资产）。
  */
 async function runAiEngine(
   input: JobExecutionInput,
   cfg: CreativeRuntimeConfig,
   philosophy: VisualPhilosophy,
+  deps: CreativeWorkerDeps = {},
 ): Promise<{ outcome?: RunOutcome; error?: string; debug?: { violations: string[]; lastHtml?: string } }> {
   const { job, brief } = input;
   const startedAt = Date.now();
@@ -297,34 +350,51 @@ async function runAiEngine(
   await setProgress(job.id, 'render');
   await checkpoint(job.id);
 
-  let poster: CanvasPoster;
-  let movement: string;
-  try {
-    const manifesto = await generateManifesto({
-      brief, brandKit: input.brandKit, fallbackPalette: philosophy.palette,
-      tenantId: job.tenantId, userId: job.userId,
-    });
-    if (!manifesto) return { error: '视觉哲学宣言不可用（模型未就绪 / 产出不完整 / 未过审）' };
-    movement = manifesto.movement;
-    // 宣言进 promptSnapshot（覆盖阶段 1 写的六维度；六维度仍拼在后面，回落排障要看得到两份）。
-    await prisma.creativeJob.updateMany({
-      where: { id: job.id, status: 'running' },
-      data: { promptSnapshot: `${manifestoText(manifesto)}\n\n—— 以下为模板回落用的六维度哲学 ——\n${philosophyText(philosophy)}` },
-    });
-    await checkpoint(job.id);
+  // 门禁在**调宣言之前**先判一次：不满足就不给模型 photo 选项（省 token，也免得它选个走不通的）。
+  const allowPhoto = photoRouteAllowedFor(cfg, brief);
 
-    const assets = await resolveTemplateAssets(input, null);
-    const spent = Date.now() - startedAt;
-    const r = await generateCanvasPoster({
-      brief, manifesto, assets,
-      timeoutMs: cfg.timeoutMs,
-      // 预算扣掉宣言已花的时间，且至少留 30s（不留余量的话超时判定会在第一轮就命中，等于从不启用）。
-      budgetMs: Math.max(30_000, AI_ENGINE_BUDGET_MS - spent),
-    }, {
-      // 交付闸门带任务上下文：审核记录要能落到这单头上（与宣言过审同一口径）。
-      moderateText: (t) => moderate('output', t, { tenantId: job.tenantId, userId: job.userId }),
+  let manifesto: PosterManifesto | null;
+  try {
+    manifesto = await (deps.manifesto ?? generateManifesto)({
+      brief, brandKit: input.brandKit, fallbackPalette: philosophy.palette,
+      tenantId: job.tenantId, userId: job.userId, allowPhoto,
     });
-    if (!r.ok) {
+  } catch (e) {
+    if (e instanceof JobCancelled) throw e;
+    return { error: `AI 引擎异常：${(e as Error).message}` };
+  }
+  if (!manifesto) return { error: '视觉哲学宣言不可用（模型未就绪 / 产出不完整 / 未过审）' };
+  // 收成 const：下面两个闭包要用它，而 let 在闭包里不会被 TS 收窄成非空。
+  const doc: PosterManifesto = manifesto;
+  const movement = doc.movement;
+  const route = resolvePosterRouteFor(cfg, brief, doc.route);
+
+  // 宣言进 promptSnapshot（覆盖阶段 1 写的六维度；六维度仍拼在后面，回落排障要看得到两份）。
+  // 路线裁定结论也写进去：「模型想走 photo 但被门禁降级」这件事只有这里看得见。
+  await prisma.creativeJob.updateMany({
+    where: { id: job.id, status: 'running' },
+    data: {
+      promptSnapshot: `${manifestoText(doc)}\n路线裁定：${route.mode} · ${route.reason}`
+        + `\n\n—— 以下为模板回落用的六维度哲学 ——\n${philosophyText(philosophy)}`,
+    },
+  });
+  await checkpoint(job.id);
+
+  const moderateText = (t: string): Promise<boolean> =>
+    // 交付闸门带任务上下文：审核记录要能落到这单头上（与宣言过审同一口径）。
+    moderate('output', t, { tenantId: job.tenantId, userId: job.userId });
+  // 预算扣掉已花的时间，且至少留 30s（不留余量的话超时判定会在第一轮就命中，等于从不启用）。
+  const budget = (): number => Math.max(30_000, AI_ENGINE_BUDGET_MS - (Date.now() - startedAt));
+
+  const compose = async (assets: TemplateAssets, photoStyle: ResolvedPosterRoute['style'] | null): Promise<CanvasAttempt> => {
+    try {
+      const r = await (deps.compose ?? generateCanvasPoster)({
+        brief, manifesto: doc, assets,
+        ...(photoStyle ? { photoStyle } : {}),
+        timeoutMs: cfg.timeoutMs,
+        budgetMs: budget(),
+      }, { moderateText });
+      if (r.ok) return { poster: r.poster };
       // 留痕原料：违规码列表（最多 20 条，够看"卡在哪一类"）+ 模型最后那份 HTML（引擎已截断）。
       return {
         error: r.reason,
@@ -333,42 +403,159 @@ async function runAiEngine(
           ...(r.lastHtml ? { lastHtml: r.lastHtml } : {}),
         },
       };
+    } catch (e) {
+      if (e instanceof JobCancelled) throw e;
+      return { error: `AI 引擎异常：${(e as Error).message}` };
     }
-    poster = r.poster;
-  } catch (e) {
-    if (e instanceof JobCancelled) throw e;
-    return { error: `AI 引擎异常：${(e as Error).message}` };
-  }
+  };
 
-  await checkpoint(job.id);
-  return {
-    outcome: await settlePoster(input, {
-      rendered: poster,
-      // 主视觉来源仍是「无」：AI 引擎不调图片供应商。引擎维度单独一个 label（见 noteCreativeEngine）。
-      providerLabel: 'none',
-      engineLabel: `ai:${poster.rounds}rounds`,
+  /** 收口：两条子路成功时共用同一份 resultJson 口径（aiMode / styleKey 只在这里写一次）。 */
+  const settle = async (o: {
+    poster: CanvasPoster;
+    aiMode: 'graphic' | 'photo';
+    providerLabel: string;
+    visualAssetId: string | null;
+    photoError: string | null;
+  }): Promise<RunOutcome> => {
+    await checkpoint(job.id);
+    return settlePoster(input, {
+      rendered: o.poster,
+      providerLabel: o.providerLabel,
+      engineLabel: `ai${o.aiMode === 'photo' ? '_photo' : ''}:${o.poster.rounds}rounds`,
       assetMetadata: {
         engine: 'ai',
+        aiMode: o.aiMode,
         movement,
-        rounds: poster.rounds,
-        violationsFixed: poster.violationsFixed,
-        polishReverted: poster.polishReverted,
-        aiMarkInjected: poster.aiMarkInjected,
+        rounds: o.poster.rounds,
+        violationsFixed: o.poster.violationsFixed,
+        polishReverted: o.poster.polishReverted,
+        aiMarkInjected: o.poster.aiMarkInjected,
+        ...(o.aiMode === 'photo' ? { styleKey: route.styleKey, subject: route.subject } : {}),
         // 最终 HTML 只存在资产 metadata 里（排障用）；不进 CreativeJob 行，那张表要保持轻。
-        html: poster.html,
+        html: o.poster.html,
       },
       result: {
         engine: 'ai',
-        rounds: poster.rounds,
-        violationsFixed: poster.violationsFixed,
-        ...(poster.polishReverted ? { polishReverted: true } : {}),
+        // 实际路线（不是配置意图）：photo 静默降级成 graphic 时任务台必须看得出来，
+        // 否则「影像路线名义上开着、其实全在出图形版」又只存在于日志里（degraded 那次的教训）。
+        aiMode: o.aiMode,
+        ...(o.aiMode === 'photo' ? { styleKey: route.styleKey } : {}),
+        rounds: o.poster.rounds,
+        violationsFixed: o.poster.violationsFixed,
+        ...(o.poster.polishReverted ? { polishReverted: true } : {}),
         movement,
         philosophySource: philosophy.source,
-        visualAssetId: null,
+        visualAssetId: o.visualAssetId,
         degraded: false,
+        // photo 尝试过但没走通（本单实际是 graphic）：原因落库，任务台展示。
+        ...(o.photoError ? { photoError: o.photoError.slice(0, 300) } : {}),
       },
+    });
+  };
+
+  // ── 子路 A：影像主导 ──
+  let photoError: string | null = null;
+  if (route.mode === 'photo') {
+    const visual = await (deps.photoVisual ?? runPhotoVisual)(input, cfg, route);
+    if (visual.assetId && visual.dataUri) {
+      // 主视觉走**手上的字节**直接拼 data URI，不再从 OSS 读回：字节已经在内存里，读回只是多一次
+      // 往返和多一条「落库了却读不回」的失败分支。其它素材（logo/qr）照旧走 resolveTemplateAssets。
+      const assets: TemplateAssets = { ...(await resolveTemplateAssets(input, null)), visualUrl: visual.dataUri };
+      const r = await compose(assets, route.style);
+      if (r.poster) {
+        return {
+          outcome: await settle({
+            poster: r.poster,
+            aiMode: 'photo',
+            // photo 成功时 provider label 用真实供应商名（metrics 要能看出影像路线在跑）。
+            providerLabel: visual.providerLabel ?? 'none',
+            visualAssetId: visual.assetId,
+            photoError: null,
+          }),
+        };
+      }
+      photoError = `影像版排版未通过：${r.error ?? '未知原因'}`;
+    } else {
+      photoError = visual.error ?? '主视觉未产出';
+    }
+    console.warn('[creative] 影像主导路线未走通，退回纯图形路线（复用同一篇宣言）：', job.id, photoError);
+  }
+
+  // ── 子路 B：纯图形排印（photo 的回落边，也是默认路线）──
+  const assets = await resolveTemplateAssets(input, null);
+  const g = await compose(assets, null);
+  if (!g.poster) {
+    return {
+      // 两条子路都失败时把 photo 的原因也带上：只报 graphic 的原因会让排障丢掉一半线索。
+      error: photoError ? `${g.error ?? 'AI 引擎未产出'}（影像路线亦失败：${photoError}）` : g.error ?? 'AI 引擎未产出',
+      ...(g.debug ? { debug: g.debug } : {}),
+    };
+  }
+  return {
+    outcome: await settle({
+      poster: g.poster,
+      aiMode: 'graphic',
+      providerLabel: 'none',   // graphic 子路不调图片供应商
+      visualAssetId: null,
+      photoError,
     }),
   };
+}
+
+/**
+ * photo 子路的第一步：拼 prompt → 供应商出图 → 图片审核 → 存 kind='visual' 资产。
+ *
+ * **一律不抛**：任何一步走不通都回 `{ error }`，由 runAiEngine 退回 graphic。
+ * 特别注意图片审核不过这一格：模板路径上它是 `IMAGE_MODERATION_BLOCKED`（整单失败 + 退款），
+ * 但在这里**只是这条子路不通** —— graphic 子路的画面完全不含那张图，没有理由让用户为此拿不到海报。
+ */
+async function runPhotoVisual(
+  input: JobExecutionInput,
+  cfg: CreativeRuntimeConfig,
+  route: ResolvedPosterRoute,
+): Promise<PhotoVisualResult> {
+  const { job, brief } = input;
+  await setProgress(job.id, 'visual');
+  await checkpoint(job.id);
+  const provider = await resolveVisualProvider(cfg);
+  if (!provider) return { error: '图片供应商不可用' };
+
+  const assembled = assembleImagePrompt({ style: route.style, subject: route.subject, brief });
+  try {
+    const submitted = await provider.submit({ prompt: assembled.prompt, negativePrompt: assembled.negativePrompt });
+    if (submitted.status !== 'succeeded' || !submitted.image) {
+      return { error: `主视觉未生成：${submitted.error ?? '供应商未返回图片'}` };
+    }
+    const verdict = await checkImage(submitted.image.buffer, {
+      tenantId: job.tenantId, userId: job.userId, refId: job.id, scene: 'visual',
+    });
+    if (!verdict.pass) return { error: '主视觉未通过图片审核' };
+    const saved = await saveAsset({
+      jobId: job.id, tenantId: job.tenantId, userId: job.userId, kind: 'visual',
+      buffer: submitted.image.buffer, mimeType: submitted.image.mimeType,
+      metadata: {
+        route: 'photo',
+        styleKey: assembled.styleKey,
+        subject: assembled.subject,
+        prompt: assembled.prompt,
+        negativePrompt: assembled.negativePrompt,
+        // 剥了什么词也留痕：模型反复塞禁用词/景别词是提示词该改的信号，不是每次现场猜。
+        ...(assembled.strippedWords.length ? { strippedWords: assembled.strippedWords } : {}),
+        ...(assembled.strippedShotSizes.length ? { strippedShotSizes: assembled.strippedShotSizes } : {}),
+        provider: provider.name,
+        moderation: { provider: verdict.provider, skipped: !!verdict.skipped },
+      },
+    });
+    await setProgress(job.id, 'render');
+    return {
+      assetId: saved.id,
+      providerLabel: provider.name,
+      dataUri: `data:${submitted.image.mimeType};base64,${submitted.image.buffer.toString('base64')}`,
+    };
+  } catch (e) {
+    if (e instanceof JobCancelled) throw e;
+    return { error: `主视觉生成失败：${(e as Error).message}` };
+  }
 }
 
 /** 模板路径（既有逻辑原样保留）。`aiError` 非空表示这是 AI 引擎失败后的回落，需留痕。 */
@@ -556,7 +743,7 @@ async function failUnloadable(jobId: string, code: string, message: string): Pro
 }
 
 /** 执行一个已抢占的任务并收口（成功/失败/取消都在这里落库；失败一律幂等退款）。 */
-export async function runJobOnce(jobId: string): Promise<RunOutcome> {
+export async function runJobOnce(jobId: string, deps: CreativeWorkerDeps = {}): Promise<RunOutcome> {
   // 展开阶段自身也会抛（requestJson 损坏 → BRIEF_MISSING）。它在 try 之外，所以必须单独收口，
   // 否则任务会一直停在 running（正是「知识库条目永久卡在 parsing」那类坑的复刻）。
   let input: JobExecutionInput | null;
@@ -577,7 +764,7 @@ export async function runJobOnce(jobId: string): Promise<RunOutcome> {
 
   let outcome: RunOutcome;
   try {
-    outcome = await runPipeline(input);
+    outcome = await runPipeline(input, deps);
   } catch (e) {
     outcome = e instanceof JobCancelled
       ? { status: 'cancelled', code: 'CANCELLED', message: '用户取消' }

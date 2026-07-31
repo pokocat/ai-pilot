@@ -55,6 +55,51 @@ function engineName(k: string): string {
   return LAYOUT_ENGINES.find(([key]) => key === k)?.[1] ?? k;
 }
 
+/**
+ * AI 创作路线三项（2026-07-30 影像主导模式）。措辞对齐 shared/contracts.d.ts 的契约注释。
+ *
+ * 同样**不写成风险开关**：photo 链任一步走不通就退回 graphic 复用同一篇宣言，再失败才回落模板，
+ * 交付与计费都不受影响。但它有**三条门禁**，副文案必须说清 —— 否则运营切到「影像」后看到任务台
+ * 全是「AI 排版」，会以为功能坏了（真实原因往往是没配图片供应商，或用户传了本人照片）。
+ */
+const AI_MODES: ['auto' | 'graphic' | 'photo', string, string][] = [
+  ['auto', '模型自选', '让模型按这张海报的诉求自己决定走影像还是纯图形（推荐）'],
+  ['photo', '影像优先', '优先让生图模型出全幅主视觉、排版层只叠字；不满足门禁时自动降为纯图形'],
+  ['graphic', '纯图形', '只用 CSS/SVG 图形与排印作画，完全不调生图模型'],
+];
+
+function aiModeName(k: string): string {
+  return AI_MODES.find(([key]) => key === k)?.[1] ?? k;
+}
+
+/**
+ * 影像风格档中文名（12 档，与服务端 styleLibrary.POSTER_STYLES 同口径）。
+ *
+ * 为什么后台留一份本地目录：这里只做**展示**（任务台要把 `mono_authority_portrait` 说成人话），
+ * 运营不选档、也没有「启用/停用某一档」的动作 —— 档位由模型按 brief 选。所以不值得为它开一个
+ * 下发接口；真要下发时（例如将来允许运营锁定某几档）再换成服务端目录。
+ * 未知 key 原样显示，不冒充已知档（同 engineTag 的口径）。
+ */
+const POSTER_STYLE_NAMES: Record<string, string> = {
+  quiet_luxury_grey: '静奢空间摄影',
+  baroque_icon_gold: '巴洛克圣像金',
+  editorial_black_gold: '编辑部黑金',
+  neo_chinese_void: '新中式留白',
+  documentary_film_grain: '纪实胶片',
+  luxury_magazine_cover: '奢侈品杂志封面',
+  airy_japanese_light: '清透日系',
+  cyber_tech_blue: '赛博科技蓝',
+  retro_hongkong: '复古港风',
+  glossy_3d_trend: '3D 潮流',
+  mono_authority_portrait: '黑白权威肖像',
+  surreal_object_metaphor: '超现实隐喻静物',
+};
+
+export function styleLabel(k: string | null | undefined): string {
+  if (!k) return '';
+  return POSTER_STYLE_NAMES[k] ?? k;
+}
+
 const JOB_STATUS: [string, string][] = [
   ['', '全部'], ['pending', '排队中'], ['running', '生成中'],
   ['succeeded', '已完成'], ['failed', '失败'], ['cancelled', '已取消'],
@@ -88,18 +133,27 @@ function templateLabel(k: string | null): string {
  * 未来出现的新引擎值原样显示（中性色），也不冒充已知的三种。
  */
 export function engineTag(
-  j: Pick<AdminCreativeJobItem, 'layoutEngine' | 'rounds' | 'aiEngineError'>,
+  j: Pick<AdminCreativeJobItem, 'layoutEngine' | 'rounds' | 'aiEngineError' | 'aiMode' | 'styleKey'>,
 ): { cls: string; label: string; title: string } | null {
   const e = j.layoutEngine;
   if (!e) return null;
   if (e === 'ai') {
+    // 影像主导（photo）与纯图形（graphic）是两种成品，标签必须分得开：一个是「生图模型出主视觉 +
+    // 排版层叠字」，一个是「纯 CSS/SVG 作画」。老任务的 aiMode 是 null → 按原来的「AI 排版」显示
+    //（不冒充 graphic：那会让「影像路线占比」这个判断失真，和 layoutEngine=null 同一个道理）。
+    const photo = j.aiMode === 'photo';
+    const name = photo ? 'AI 影像' : 'AI 排版';
+    const style = photo ? styleLabel(j.styleKey) : '';
     return {
       cls: 'tag',
       // rounds：1=一次成（未打磨，理论上不该出现）、2=创作 + 强制打磨、3=还修了一轮违规。
-      label: j.rounds ? `AI 排版 · ${j.rounds}轮` : 'AI 排版',
-      title: j.rounds
-        ? `模型自由创作成功，共 ${j.rounds} 轮 LLM 调用（含量测后的打磨/修正）`
-        : '模型自由创作成功（未记录轮数）',
+      label: j.rounds ? `${name} · ${j.rounds}轮` : name,
+      title: [
+        photo
+          ? `影像主导：生图模型出全幅主视觉${style ? `（风格：${style}）` : ''}，排版层只做文字叠层`
+          : '纯图形排印：模型用 CSS/SVG 自由创作，未调生图模型',
+        j.rounds ? `共 ${j.rounds} 轮 LLM 调用（含量测后的打磨/修正）` : '未记录轮数',
+      ].join('。'),
     };
   }
   if (e === 'template') return { cls: 'tag off', label: '模板', title: '按配置走模板排版路径，未调用创作模型' };
@@ -145,6 +199,7 @@ interface CfgDraft {
   dailyLimit: number;
   timeoutMs: number;
   layoutEngine: 'ai' | 'template';
+  aiMode: 'auto' | 'graphic' | 'photo';
   templates: Record<string, boolean>;
   visualEnabled: boolean;
   baseUrl: string;
@@ -169,6 +224,7 @@ function toDraft(c: AdminCreativeConfig): CfgDraft {
     dailyLimit: c.dailyLimit,
     timeoutMs: c.timeoutMs,
     layoutEngine: c.layoutEngine,
+    aiMode: c.aiMode,
     templates: { ...c.templates },
     visualEnabled: c.visual.enabled,
     baseUrl: c.visual.baseUrl,
@@ -186,6 +242,7 @@ function basicsDirty(d: CfgDraft, c: AdminCreativeConfig): boolean {
     || d.dailyLimit !== c.dailyLimit
     || d.timeoutMs !== c.timeoutMs
     || d.layoutEngine !== c.layoutEngine
+    || d.aiMode !== c.aiMode
     || TEMPLATES.some(([k]) => !!d.templates[k] !== !!c.templates[k]);
 }
 
@@ -241,6 +298,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       dailyLimit: draft.dailyLimit,
       timeoutMs: draft.timeoutMs,
       layoutEngine: draft.layoutEngine,
+      aiMode: draft.aiMode,
       templates: draft.templates,
     };
     const run = async () => { setBusy('basics'); try { await put(body, '配置已保存'); } finally { setBusy(''); } };
@@ -269,6 +327,14 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
         echo.push({
           k: '排版引擎',
           v: `${engineName(cfg.layoutEngine)} → ${engineName(draft.layoutEngine)}（同批保存）`,
+        });
+      }
+      // 同上：路线切换自己不弹框，但和改价/放量同批保存时必须一起回显 —— 一次保存里改了几件事，
+      // 确认框说不全反而误导。
+      if (draft.aiMode !== cfg.aiMode) {
+        echo.push({
+          k: 'AI 创作路线',
+          v: `${aiModeName(cfg.aiMode)} → ${aiModeName(draft.aiMode)}（同批保存）`,
         });
       }
       setConfirmSpec({
@@ -369,7 +435,12 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       <PageHead
         k="creative"
         res={{ loading: cfgRes.loading || jobs.loading, reload: reloadAll, updatedAt: Math.max(cfgRes.updatedAt, jobs.updatedAt) }}
-        badge={cfg ? (cfg.enabled ? `已开启 · ${cfg.pricePerPoster} 钻/张 · ${engineName(cfg.layoutEngine)}` : '未开启') : undefined}
+        badge={cfg
+          ? (cfg.enabled
+            ? `已开启 · ${cfg.pricePerPoster} 钻/张 · ${engineName(cfg.layoutEngine)}`
+              + (cfg.layoutEngine === 'ai' ? ` / ${aiModeName(cfg.aiMode)}` : '')
+            : '未开启')
+          : undefined}
       />
 
       {!isSuper && (
@@ -441,6 +512,34 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                 </div>
               </div>
 
+              {/* AI 创作路线：同样可逆、不涉资金、失败必回落 → 不弹确认框。只在 AI 排版下生效，
+                  切到模板排版时整块置灰并说明原因（藏起来会让运营以为设置丢了）。 */}
+              <div className="ai-field">
+                <div className="ai-fl">
+                  AI 创作路线（影像主导 = 生图模型出全幅主视觉，排版层只叠字）
+                  {draft.layoutEngine === 'ai' ? '' : ' · 当前排版引擎为「模板排版」，本项不生效'}
+                </div>
+                <div className="bill-seg">
+                  {AI_MODES.map(([k, label, desc]) => (
+                    <div
+                      key={k}
+                      className={`bill-opt ${draft.aiMode === k ? 'on' : ''}`}
+                      onClick={() => isSuper && draft.layoutEngine === 'ai' && set({ aiMode: k })}
+                    >
+                      <div className="bo-t">{label}</div>
+                      <div className="bo-d">{desc}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="ai-note">
+                  影像路线有三条门禁，任一不满足时这一单就自动降为纯图形（任务仍成功、照样扣费，只是画风不同）：
+                  ① 上方「图片供应商」未启用或没填接口地址/模型；② 用户自己上传了本人照片
+                  （v1 不做真人融合：模型生成的脸和用户的照片放一起必然打架）；③ 模型没给出可用的影像主体描述。
+                  影像版排版失败时还会退回纯图形版（复用同一篇宣言，不重出主视觉），再失败才回落模板。
+                  所以切到「影像优先」后若任务台仍全是「AI 排版」，先去查这三条，而不是怀疑功能没上线。
+                </div>
+              </div>
+
               <div className="ai-field">
                 <div className="ai-fl">
                   模板启停（MVP 三套 3:4 · 全部停用则无法建单，建单返回 422
@@ -497,6 +596,13 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
             <div className="ai-field">
               <div className="ai-fl">请求尺寸 size（海报按 3:4 裁切，这里只是给上游的参数模板）</div>
               <input className="ai-input" value={draft.size} disabled={!isSuper} placeholder="1024x1024" onChange={(e) => set({ size: e.target.value })} />
+              <div className="ai-note">
+                走影像路线时建议把尺寸配成 3:4（如 896×1152 / 1080×1440）：海报画布就是 3:4，
+                拿一张 1:1 去 object-fit:cover 铺底会把左右两侧裁掉，而构图（尤其留白区）是按整幅算好的。
+                另外注意生图模型选型 —— 摄影质感类（Midjourney 档）文字必渲染成乱码，对我们反而安全；
+                中文语义与版面留白理解最好的一类（Seedream / 即梦）恰恰擅长渲染文字，会主动往留白处写标题，
+                只能靠提示词里写死的禁字条款压住（服务端已把 no-text 钉在提示词正文末尾）。出图带字就换模型或加负向词。
+              </div>
             </div>
             <div className="ai-field">
               <div className="ai-fl">供应商请求超时（毫秒 · 1000–300000 · {msHint(draft.visualTimeoutMs)}）</div>
@@ -556,7 +662,7 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
       )}
 
       {/* ── 任务台 ── */}
-      <div className="sec-h"><span className="t">任务台</span><span className="s">用户脱敏标识 / 成本 / 退款态 / 排版引擎 / 降级 / 失败原因</span></div>
+      <div className="sec-h"><span className="t">任务台</span><span className="s">用户脱敏标识 / 成本 / 退款态 / 排版引擎与创作路线 / 降级 / 失败原因</span></div>
       <div className="pad">
         <div className="filter-bar">
           <div className="chip-row">
@@ -599,6 +705,9 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
               // 回落原因挂在**成功**的单上（AI 挂了但图出了），所以它不能只走「失败原因」那条路径，
               // 否则永远不显示。≤300 字，行内截断 + title 全文 + 展开处全文。
               const fbErr = j.layoutEngine === 'template_fallback' ? (j.aiEngineError || '') : '';
+              // 影像路线降级原因：本单**成功**且实际是 graphic，所以它同样不能只走「失败原因」那条路径。
+              // 不显示的话，「影像路线名义上开着、实际全在出图形版」又只存在于服务端日志里。
+              const phErr = j.photoError || '';
               return (
                 <div key={j.id} className="usage-row">
                   <div className="usage-h">
@@ -631,20 +740,27 @@ export function CreativeView({ toast, isSuper }: { toast: (m: string) => void; i
                       AI 排版回落原因：{fbErr.length > 72 ? `${fbErr.slice(0, 72)}…` : fbErr}
                     </div>
                   )}
+                  {phErr && !expanded && (
+                    <div className="usage-meta" title={phErr}>
+                      影像路线降级原因：{phErr.length > 72 ? `${phErr.slice(0, 72)}…` : phErr}
+                    </div>
+                  )}
                   {expanded && (
                     <div className="trace-text">
                       {err ? `${j.errorCode ? `[${j.errorCode}] ` : ''}${j.errorMessage ?? ''}` : ''}
                       {err && fbErr ? '\n\n' : ''}
                       {fbErr ? `AI 排版回落原因：${fbErr}` : ''}
+                      {(err || fbErr) && phErr ? '\n\n' : ''}
+                      {phErr ? `影像路线降级原因：${phErr}` : ''}
                     </div>
                   )}
                   {/* 视觉哲学（六维度 + note）是每单真金白银调 LLM 生成的，此前没有任何读者：
                       C 端不展示、任务台不展示。运营排「为什么这版这么丑」只能靠猜。列表已按 2000 字截断。 */}
                   {philOpen && j.promptSnapshot && <div className="trace-text">{j.promptSnapshot}</div>}
                   <div className="crd-actions">
-                    {(err || fbErr) && (
+                    {(err || fbErr || phErr) && (
                       <button type="button" className="mini-btn" onClick={() => setOpenErr(expanded ? '' : j.id)}>
-                        {expanded ? '收起原因' : err ? '展开原因' : '展开回落原因'}
+                        {expanded ? '收起原因' : err ? '展开原因' : fbErr ? '展开回落原因' : '展开降级原因'}
                       </button>
                     )}
                     {j.promptSnapshot && (

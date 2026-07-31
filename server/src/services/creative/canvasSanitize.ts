@@ -13,11 +13,18 @@
 // 没混进外链），这里审的是**模型生成的整页文档**，强度完全不同，故不复用。
 import { AI_MARK_TEXT, CANVAS, CANVAS_CLASS } from './templates.js';
 
-/** 资产占位符：模型只能这么引用用户素材（真实 URL/字节由服务端在渲染前替换进去）。 */
+/**
+ * 资产占位符：模型只能这么引用用户素材（真实 URL/字节由服务端在渲染前替换进去）。
+ *
+ * `visual` 是影像主导路线（photo route）的全幅主视觉——由生图模型产出、服务端存成 kind='visual'
+ * 资产后注入。它与 `portrait` 互斥：photo 路线的门禁就是「用户上传了本人照片 → 不走 photo」
+ * （见 posterRoute.ts 的注释），所以这两个占位符在同一张海报上不会同时可用。
+ */
 export const CANVAS_PLACEHOLDER = {
   portrait: '{{PORTRAIT_URL}}',
   logo: '{{LOGO_URL}}',
   qr: '{{QR_URL}}',
+  visual: '{{VISUAL_URL}}',
 } as const;
 
 /** 占位符通用形态（量测器据此判「残留」：模型引用了一个没提供的素材）。 */
@@ -138,11 +145,15 @@ export interface CanvasAssetUrls {
   portraitUrl?: string | null;
   logoUrl?: string | null;
   qrUrl?: string | null;
+  /** 影像主导路线的全幅主视觉（生图模型产出，无文字）。graphic 路线恒空。 */
+  visualUrl?: string | null;
 }
 
 /** 素材清单（喂给提示词：告诉模型**只有这些**占位符可用）。 */
 export function availablePlaceholders(assets: CanvasAssetUrls): string[] {
   const out: string[] = [];
+  // 主视觉排最前：photo 路线里它是画布底层，模型该先看到它。
+  if (assets.visualUrl) out.push(CANVAS_PLACEHOLDER.visual);
   if (assets.portraitUrl) out.push(CANVAS_PLACEHOLDER.portrait);
   if (assets.logoUrl) out.push(CANVAS_PLACEHOLDER.logo);
   if (assets.qrUrl) out.push(CANVAS_PLACEHOLDER.qr);
@@ -165,6 +176,7 @@ export function fillPlaceholders(html: string, assets: CanvasAssetUrls): { html:
     out = out.split(token).join(url);
     filled.push(token);
   };
+  put(CANVAS_PLACEHOLDER.visual, assets.visualUrl);
   put(CANVAS_PLACEHOLDER.portrait, assets.portraitUrl);
   put(CANVAS_PLACEHOLDER.logo, assets.logoUrl);
   put(CANVAS_PLACEHOLDER.qr, assets.qrUrl);

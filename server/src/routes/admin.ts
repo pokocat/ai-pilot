@@ -1080,7 +1080,10 @@ export async function adminRoutes(app: FastifyInstance) {
       items: rows.map((j): AdminCreativeJobItem => {
         const u = userMap.get(j.userId);
         const brief = ((j.requestJson ?? {}) as { brief?: { templateKey?: unknown } }).brief;
-        const result = (j.resultJson ?? {}) as { degraded?: unknown; engine?: unknown; rounds?: unknown; aiEngineError?: unknown };
+        const result = (j.resultJson ?? {}) as {
+          degraded?: unknown; engine?: unknown; rounds?: unknown; aiEngineError?: unknown;
+          aiMode?: unknown; styleKey?: unknown; photoError?: unknown;
+        };
         return {
           id: j.id,
           // 脱敏：昵称 + 掩码手机号（与订单列表同口径，不出全量手机号）。
@@ -1094,8 +1097,15 @@ export async function adminRoutes(app: FastifyInstance) {
           // 排版引擎：老任务（本轮之前成功的）resultJson 里没有 engine 字段 → null，不臆断成 'template'。
           layoutEngine: typeof result.engine === 'string' ? result.engine : null,
           rounds: typeof result.rounds === 'number' ? result.rounds : null,
+          // AI 创作路线与风格档（2026-07-30 影像主导模式）：老任务没有这两个字段 → null，不臆断。
+          aiMode: typeof result.aiMode === 'string' ? result.aiMode : null,
+          styleKey: typeof result.styleKey === 'string' ? result.styleKey : null,
           ...(typeof result.aiEngineError === 'string' && result.aiEngineError
             ? { aiEngineError: result.aiEngineError.slice(0, 300) }
+            : {}),
+          // 影像路线尝试过但降级成 graphic 的原因（任务仍成功 → 不能只走「失败原因」那条路径）。
+          ...(typeof result.photoError === 'string' && result.photoError
+            ? { photoError: result.photoError.slice(0, 300) }
             : {}),
           provider: j.provider,
           // 老任务（本轮之前成功的）resultJson 里没有这个字段 → 一律按 false，不臆断。
