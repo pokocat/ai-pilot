@@ -6,6 +6,14 @@
 
 ## 变更日志
 
+### 2026-08-01 · 文案终稿二次工程复核：收紧生产草稿、发布与离线镜像保护 · 影响面：docs（`文案优化终稿.md`）
+
+纠正初稿中会误导实施的执行路径：不再用 `--dump-prompts` 把完整提示词写进仓库，也不再建议通过全量 `admin:sync-content` 更新 `memText/learnText`；改为仓库外仅备份草稿/已发布公开文案和版本状态，先扩窄字段契约与后台编辑能力，再逐个核草稿 diff、沙盒验收并发布。同步策略收敛为只处理 `greet/memText/learnText` 与默认回复的文案字段专用同步器，避免顺手改变 mock 目录、权益与行为字段；同时补齐服务端 journey、执行页和 mock 目录遗漏的「认可」文案台账，并把 `systemPrompt` 验收从字符数升级为内容哈希。仅文档调整，不改变当前运行时文案。
+
+### 2026-08-01 · 文案优化终稿完成工程校正：补运行时真相源、统一声音分层并收敛过度人格化表达 · 影响面：docs（`文案优化终稿.md`）
+
+将原“可直接执行的终稿”调整为待运行时台账验收的终稿候选：明确智能体文案必须覆盖数据库 `Agent` 草稿与已发布 `AgentVersion`、服务端模板、前端自动生成离线镜像和页面 fallback，不能只改 `app/src/data`；把声音规则改为“表达者 + 场景”双维度，Toast 只报告结果，军师叙述才使用第一人称；禁词由全仓单字归零改为用户可见短语审查，保留「产出额度 / 已启用 / 专项能力」等既有产品名词；收敛「坐。」「把故事圆上」「哪块是虚的」「掰扯」等命令感、误导性或过度市井表达；新增 weapp server、weapp mock / 离线、H5 server 与生产智能体版本四类验收矩阵。仅文档调整，不改变当前运行时文案。
+
 ### 2026-07-31 · 支付/权益四处收口：同周期升级解禁 + 套餐购买补索权 + 付款人 openid 硬化 + 运营改档不烧时长 · 影响面：server（`services/{wechatPay,proration,scheduler}.ts` / `routes/{plans,sku,admin}.ts` / `scripts/pay-e2e.ts` + `test/{planExpiry,wechatPayMockFlow,payMockSuccess,adminOps}.test.ts`）+ admin（`api.ts` / `views/users.tsx`）+ app（`components/Plans/index.tsx` / `services/api.ts`）+ docs（`AGENTS.md` §6 支付段）
 
 真机在预发实测触发的一串连锁排查。**四个 bug 里有三个属于同一类：失败无人可见。**
