@@ -20,6 +20,17 @@ after(async () => {
   await closeApp();
 });
 
+// scanDueProphecies 按设计扫全库（不带 userId 过滤），所以断言「本轮到期几条」的用例必须先把
+// 前序用例遗留的 pending 行锚死，否则别处的 dueDate 会漂进本轮全局计数。
+// 曾踩：注入用例写死 dueDate '2026-08-01'，到了那天它自己变成「到期」→ 到期扫描用例 n=2≠1。
+const isolateDueScan = async () => {
+  await prisma.prophecyLog.updateMany({ where: { dueNotifiedAt: null }, data: { dueNotifiedAt: new Date() } });
+  await prisma.auditLog.deleteMany({ where: { action: 'system.prophecy.due' } });
+};
+
+// 相对今天的日期键，避免写死未来日期到了那天变成过去（'YYYY-MM-DD'，与 dateKey 同口径粒度）。
+const dayKeyFromNow = (days: number) => new Date(Date.now() + days * 86400_000).toISOString().slice(0, 10);
+
 test('记录 + 验证 → 命中率服务端算；未验证时 hitRate=null 不编 0%；已验证 <5 条也不出比率', async () => {
   const token = await login(uniquePhone(), '天机用户');
   const record = (prophecy: string, extra: Record<string, unknown> = {}) => api('POST', '/api/prophecies', { token, body: { prophecy, ...extra } });
@@ -79,7 +90,7 @@ test('真实性铁律：mock/测试环境抽取器返回空 → 不产生伪预�
 test('注入：有预言 → dynamic 段带【天机账本】；未命中口径含「人谋可以改命」提示', async () => {
   const token = await login(uniquePhone(), '注入天机用户');
   const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
-  await api('POST', '/api/prophecies', { token, body: { prophecy: '下月有贵人引荐', dueDate: '2026-08-01' } });
+  await api('POST', '/api/prophecies', { token, body: { prophecy: '下月有贵人引荐', dueDate: dayKeyFromNow(30) } });
 
   const line = await prophecyBriefing(user.id);
   assert.ok(line);
@@ -93,14 +104,14 @@ test('注入：有预言 → dynamic 段带【天机账本】；未命中口径�
 });
 
 test('到期扫描：pending 且到期 → 登记对账候选，行级幂等；未到期/已验证不动', async () => {
-  await prisma.auditLog.deleteMany({ where: { action: 'system.prophecy.due' } });
+  await isolateDueScan();
   const token = await login(uniquePhone(), '到期用户');
   const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
   const mk = (prophecy: string, dueDate: string | null, status = 'pending') =>
     prisma.prophecyLog.create({ data: { tenantId: user.tenantId, userId: user.id, seq: Math.floor(Math.random() * 1e9), prophecy, dueDate, status } });
-  const due = await mk('已到期预言', '2026-06-30');
-  await mk('未到期预言', '2099-01-01');
-  await mk('已验证预言', '2026-06-01', 'hit');
+  const due = await mk('已到期预言', dayKeyFromNow(-30));
+  await mk('未到期预言', dayKeyFromNow(30));
+  await mk('已验证预言', dayKeyFromNow(-60), 'hit');
 
   const n = await scanDueProphecies();
   assert.equal(n, 1);
@@ -131,6 +142,7 @@ test('到期推送：有额度→推一条并扣减；岁验预言用谶语措�
     } as unknown as Response;
   }) as typeof fetch;
   try {
+    await isolateDueScan(); // 同上：本用例断言全局到期条数与推送条数，前序遗留的 pending 行必须先锚死
     // 用户 A：岁验预言到期（basis 走 registerVerseOmen 的约定前缀）
     const tokenA = await login(uniquePhone(), '岁验推送用户');
     const userA = await prisma.user.findFirstOrThrow({ where: { id: tokenA } });
