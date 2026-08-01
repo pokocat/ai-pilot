@@ -12,8 +12,6 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "db:sync-plans": "tsx scripts/syncPlans.ts",
-    "db:bump-free-quota": "tsx scripts/bumpFreeQuota.ts",
     "db:grant-test-plan": "tsx scripts/grantTestPlan.ts",
     "db:upgrade-poster-prompt": "tsx scripts/upgradePosterPrompt.ts",
     "pay:e2e": "tsx scripts/pay-e2e.ts",

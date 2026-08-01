@@ -42,7 +42,22 @@ export const SURVEY: { key: string; title: string; options: string[] }[] = [
   { key: 'pain', title: '最头疼的事？', options: ['增长乏力', '现金流', '融资', '组织 / 团队', '定位 / 竞争'] },
 ];
 
-export const PLANS: {
+/**
+ * ⚠️ 本地开发 / 自动化测试的**夹具**，不是生产套餐目录的真相源。
+ *
+ * 2026-08-01 起：**线上套餐（价格/额度/权益/上下架）一律由运营后台配置**
+ * （`GET/POST/PATCH/DELETE /admin/plans`，requireSuper + 审计），代码不再往真实环境写套餐。
+ * 全新部署也走后台配置，不 seed —— 这是刻意的：定价是运营资产，代码里的常量必然滞后于线上改价。
+ *
+ * 历史教训：`scripts/syncPlans.ts`（已删除）按 name 全字段 upsert，运营把入门版从 ¥68 改到 ¥99 后，
+ * 任何一次全量同步都会把线上价**打回 ¥68**（2026-08-01 dry-run 实测会「更新 入门版」）。
+ * 同理已删除 `scripts/bumpFreeQuota.ts`：它写死 `PLANS[0]`，免费档下架后 `PLANS[0]` 变成付费入门版，
+ * 跑一次就把付费用户的 token 钱包 quota/balance 重置成夹具值。
+ *
+ * 所以：**这里的数字只用来喂 `prisma/seed.ts`（带生产护栏）和 `test/helpers.ts`。改这里不影响线上，
+ * 也不要指望改这里能改线上。** 线上现价请以运营后台 / `GET /admin/plans` 为准。
+ */
+export const DEV_PLANS: {
   name: string;
   price: number; // 分
   period: string;
@@ -53,11 +68,12 @@ export const PLANS: {
   highlighted: boolean;
   hidden?: boolean; // 隐藏档：列表不返回、仅 TEST_PLAN_PHONES 白名单可见/可购（缺省 false）
 }[] = [
-  // 2026-07-28 商业化改版：砍掉免费体验档，起步即收费。定价依据生产 30 天实测
-  // （一次完整咨询 ≈ 3 万加权 token ≈ ¥1.09 LLM 成本，重度用户月耗最高 269 万）：
+  // 下列数字是 2026-07-28 商业化改版时的档位形状（砍掉免费体验档，起步即收费），保留是因为
+  // 测试断言和本地联调依赖这个形状（两档付费月付 + 年付 + 面议档 + 隐藏支付测试档）。
+  // 定价依据当时生产 30 天实测（一次完整咨询 ≈ 3 万加权 token ≈ ¥1.09 LLM 成本，重度用户月耗最高 269 万）：
   //   入门版 满耗成本 ¥14.4 → 毛利 79%；决策版 满耗 ¥54 → 月付毛利 73% / 年付 67%。
-  // 入门版兼任测试期默认档（TEST_DEFAULT_PLAN_NAME=入门版）：额度即成本封顶，
-  // 每个测试期注册用户最多花掉 ¥14.4/月。
+  // 入门版兼任测试期默认档（TEST_DEFAULT_PLAN_NAME=入门版）：额度即成本封顶。
+  // ⚠️ 线上入门版实价已由运营改为 ¥99/月，这里的 6800 是**夹具值，不是线上价**（见上方注释）。
   {
     name: '入门版',
     price: 6800, // ¥68/月

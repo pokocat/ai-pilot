@@ -1109,6 +1109,17 @@ export interface Plan {
   id: string; name: string; price: number; period: string;
   creditsPerMonth: number; tokenQuotaPerMonth: number; agentCount: number; featuresJson: string[]; highlighted: boolean;
 }
+/** 运营后台的套餐行（GET /admin/plans）：**线上套餐目录的唯一真相源**——代码侧不再有同步脚本，
+ *  seedConfig.DEV_PLANS 只是本地/测试夹具。比公开 Plan 多出 hidden（停售/白名单档）与 sort（展示序）。 */
+export interface AdminPlan extends Plan { hidden: boolean; sort: number; }
+/** 新建套餐（POST /admin/plans，requireSuper）。period 只认 month/year；price 为分，-1=面议。 */
+export interface AdminPlanCreate {
+  name: string; price: number; period?: 'month' | 'year';
+  creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number;
+  featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number;
+}
+/** 改档（PATCH /admin/plans/:id，requireSuper）：全字段可选，只改传入的。 */
+export type AdminPlanUpdate = Partial<AdminPlanCreate>;
 export interface PlanPurchaseResult {
   ok: true;
   plan: Plan;

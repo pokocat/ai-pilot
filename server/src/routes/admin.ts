@@ -1930,10 +1930,59 @@ export async function adminRoutes(app: FastifyInstance) {
   });
 
   // —— 套餐 ——
+  // 2026-08-01：套餐目录**唯一的真相源就是这里**。代码侧不再有 syncPlans 之类的同步脚本
+  //（它按 name 全字段 upsert，运营把入门版改 ¥99 之后任何一次全量同步都会打回代码里的 ¥68），
+  // seedConfig.DEV_PLANS 降级为本地/测试夹具。所以运营必须能在后台**建档/改档/下架**，
+  // 否则全新部署起来一个套餐都没有、付费转化路径直接断（无套餐用户被 planGate 全局禁写）。
   app.get('/admin/plans', async () => prisma.plan.findMany({ orderBy: { sort: 'asc' } }));
+
+  /** period 只认月/年：计费周期参与到期日推算与升级折算（proration），自由字符串会让两边同时算错。 */
+  const PLAN_PERIODS = ['month', 'year'] as const;
+
+  // 新建套餐：与改价同级风险（新档立刻对外可售）→ requireSuper + 审计。
+  app.post<{ Body: { name?: string; price?: number; period?: string; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number } }>(
+    '/admin/plans',
+    async (req, reply) => {
+      const actor = actorOf(req);
+      try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+      const b = req.body ?? {};
+      const name = typeof b.name === 'string' ? b.name.trim().slice(0, 60) : '';
+      if (!name) return reply.code(400).send({ error: '套餐名称必填', code: 'PLAN_NAME_REQUIRED' });
+      // 同名套餐会让「按 name 找档」的存量逻辑（TEST_DEFAULT_PLAN_NAME 等）撞车，直接拒。
+      if (await prisma.plan.findFirst({ where: { name } })) {
+        return reply.code(409).send({ error: `已存在同名套餐「${name}」`, code: 'PLAN_NAME_EXISTS' });
+      }
+      const period = typeof b.period === 'string' && (PLAN_PERIODS as readonly string[]).includes(b.period) ? b.period : 'month';
+      // price：分；-1=面议（企业版语义，自助购买会 402 CONTACT_SALES），其余须 ≥0。
+      const price = typeof b.price === 'number' && Number.isFinite(b.price) && (b.price >= 0 || Math.round(b.price) === -1)
+        ? Math.round(b.price) : null;
+      if (price === null) return reply.code(400).send({ error: '价格非法（分；-1=面议）', code: 'PLAN_PRICE_INVALID' });
+      const num = (v: unknown, min: number) => typeof v === 'number' && Number.isFinite(v) && v >= min ? Math.round(v) : null;
+      // creditsPerMonth 允许负数（-1=不限量）；额度/助手数须 ≥0。
+      const creditsPerMonth = typeof b.creditsPerMonth === 'number' && Number.isFinite(b.creditsPerMonth) ? Math.round(b.creditsPerMonth) : 0;
+      const tokenQuotaPerMonth = num(b.tokenQuotaPerMonth, 0) ?? 0;
+      const agentCount = num(b.agentCount, 0) ?? 0;
+      // sort 缺省排到末尾，避免新档默契插到第一个（前台按 sort 展示，第一档还兼作历史默认档语义）。
+      const maxSort = (await prisma.plan.aggregate({ _max: { sort: true } }))._max.sort ?? -1;
+      const plan = await prisma.plan.create({
+        data: {
+          name, price, period, creditsPerMonth, tokenQuotaPerMonth, agentCount,
+          featuresJson: Array.isArray(b.featuresJson) ? b.featuresJson.map(String).slice(0, 20) : [],
+          highlighted: b.highlighted === true,
+          hidden: b.hidden === true,
+          sort: num(b.sort, 0) ?? maxSort + 1,
+        },
+      });
+      await recordAudit({
+        action: 'admin.plan.create',
+        payload: { by: actorName(actor), id: plan.id, name: plan.name, price: plan.price, period: plan.period, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount, hidden: plan.hidden, sort: plan.sort },
+      });
+      return reply.code(201).send(plan);
+    },
+  );
   // 改价直接影响营收：仅 owner/master（requireSuper，与资金三写同级）；字段白名单 + 数值校验
   //（此前 data: req.body 直透 prisma 属 mass-assignment 隐患）；审计带操作人与改前/改后快照。
-  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; period?: string; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number } }>(
     '/admin/plans/:id',
     async (req, reply) => {
       const actor = actorOf(req);
@@ -1951,18 +2000,46 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof b.agentCount === 'number' && Number.isFinite(b.agentCount) && b.agentCount >= 0) data.agentCount = Math.round(b.agentCount);
       if (Array.isArray(b.featuresJson)) data.featuresJson = b.featuresJson.map(String).slice(0, 20);
       if (typeof b.highlighted === 'boolean') data.highlighted = b.highlighted;
+      // period / hidden / sort 此前只能靠脚本改——脚本删掉后必须在这里补齐，否则运营配不出年付档和隐藏档。
+      if (typeof b.period === 'string' && (PLAN_PERIODS as readonly string[]).includes(b.period)) data.period = b.period;
+      if (typeof b.hidden === 'boolean') data.hidden = b.hidden;
+      if (typeof b.sort === 'number' && Number.isFinite(b.sort) && b.sort >= 0) data.sort = Math.round(b.sort);
       const plan = await prisma.plan.update({ where: { id: req.params.id }, data });
       await recordAudit({
         action: 'admin.plan.update',
         payload: {
           by: actorName(actor), id: plan.id, name: plan.name,
-          before: { price: before.price, creditsPerMonth: before.creditsPerMonth, tokenQuotaPerMonth: before.tokenQuotaPerMonth, agentCount: before.agentCount },
-          after: { price: plan.price, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount },
+          before: { price: before.price, period: before.period, creditsPerMonth: before.creditsPerMonth, tokenQuotaPerMonth: before.tokenQuotaPerMonth, agentCount: before.agentCount, hidden: before.hidden, sort: before.sort },
+          after: { price: plan.price, period: plan.period, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount, hidden: plan.hidden, sort: plan.sort },
         },
       });
       return plan;
     },
   );
+
+  // 下架/删除套餐：**有用户在册就一律不删**（Plan 被 user.planId 引用，硬删会打断外键；
+  // 且在册用户的权益锚点、续费、升级折算都要回读该档）。这条引用计数守卫替代了原先脚本里的同名逻辑。
+  // 想让一个档停售但不影响在册用户 → 改 hidden=true（列表不返回、非白名单不可购）。
+  app.delete<{ Params: { id: string } }>('/admin/plans/:id', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
+    if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    const refs = await prisma.user.count({ where: { planId: plan.id } });
+    if (refs > 0) {
+      return reply.code(409).send({
+        error: `「${plan.name}」仍有 ${refs} 个用户在册，不能删除。先把这些用户改到其他套餐，或改为「隐藏」停售。`,
+        code: 'PLAN_IN_USE',
+        refs,
+      });
+    }
+    await prisma.plan.delete({ where: { id: plan.id } });
+    await recordAudit({
+      action: 'admin.plan.delete',
+      payload: { by: actorName(actor), id: plan.id, name: plan.name, price: plan.price, period: plan.period },
+    });
+    return { ok: true };
+  });
 
   // V7-12：单次付费商品（SKU）目录——运营可改价/启停（key、kind、grantsModuleKey 走代码目录 admin:sync-content，不在此改）。
   app.get('/admin/skus', async () => prisma.sku.findMany({ orderBy: { sort: 'asc' } }));

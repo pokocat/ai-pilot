@@ -4,6 +4,10 @@
 //   npm run admin:sync-content -- --dry-run    # 只打印将要发生的变更，不写库
 //   npm run admin:sync-content -- --dump-prompts <目录>   # 把库里的现行提示词导出到文件（回灌仓库用）
 //   npm run admin:sync-content -- --force-prompts         # 确实要用仓库文件覆盖提示词（危险，带护栏）
+//   npm run admin:sync-content -- --force-pricing         # 确实要用仓库常量覆盖线上定价（危险，默认不覆盖）
+//
+// 注：**套餐（Plan）不在本脚本范围内**，也没有任何「同步套餐到线上」的脚本了。
+// 线上套餐的价格/额度/权益/上下架全部由运营后台维护（`/admin/plans`），见 src/data/seedConfig.ts 顶部。
 //
 // ── 为什么默认不覆盖提示词 ──
 // 2026-07-27 登生产核对：`general` 的 systemPrompt 线上是 49,094 字符，仓库文件只有 17,230，
@@ -28,6 +32,18 @@ const prisma = new PrismaClient();
 /** 运营在后台调教过的字段：create 写初值，update 默认不碰。 */
 export const OPERATOR_OWNED = ['systemPrompt', 'greet'] as const;
 export type OperatorOwnedField = (typeof OPERATOR_OWNED)[number];
+
+/**
+ * 计价字段（2026-08-01 加）：与提示词同一约定——**create 写初值，update 默认不碰**，
+ * 确需用仓库值覆盖线上定价时显式加 `--force-pricing`。
+ *
+ * 为什么：这些字段全在运营后台的 PATCH 白名单里（`AdminAgentUpdate` / `PATCH /admin/skus/:key`），
+ * 运营改完价，下一次 `admin:sync-content` 原本会无声打回仓库常量——和已删除的 `syncPlans.ts`
+ * 把入门版 ¥99 打回 ¥68 是同一个缺陷。钱的字段以线上为准，仓库常量只是新建时的初值。
+ */
+export const AGENT_PRICING_FIELDS = ['gift', 'billing', 'price', 'billingRatio', 'meterUnit'] as const;
+/** SKU 侧同理：这四个都能在后台改（kind/grantsModuleKey/metaJson 仍是仓库真相源，后台改不了）。 */
+export const SKU_PRICING_FIELDS = ['name', 'desc', 'priceFen', 'sort'] as const;
 
 /** 仓库版本比线上短这么多就判为「仓库是旧快照」，拒绝覆盖。 */
 export const SHRINK_REFUSE_RATIO = 0.8;
@@ -76,7 +92,7 @@ export function decidePromptWrite(
   return { ...base, action: 'write', reason: `覆盖（库 ${dbLen} → 仓库 ${repoLen} 字符）` };
 }
 
-interface SyncOpts { dryRun?: boolean; forcePrompts?: boolean; allowShrink?: boolean }
+interface SyncOpts { dryRun?: boolean; forcePrompts?: boolean; allowShrink?: boolean; forcePricing?: boolean }
 
 async function syncAgents(opts: SyncOpts) {
   let updated = 0;
@@ -96,11 +112,6 @@ async function syncAgents(opts: SyncOpts) {
       role: a.role,
       icon: a.icon,
       type: a.type,
-      gift: a.gift,
-      billing: a.billing,
-      price: a.price,
-      ...(a.billingRatio !== undefined && { billingRatio: a.billingRatio }),
-      ...(a.meterUnit !== undefined && { meterUnit: a.meterUnit }),
       chipsJson: a.chips as object,
       memText: a.memText,
       learnText: a.learnText,
@@ -108,19 +119,27 @@ async function syncAgents(opts: SyncOpts) {
       memoryConfig: a.memoryConfig as object,
       sort: a.sort,
     };
+    // 计价字段：新建写初值；已存在的默认不碰（运营所有），--force-pricing 才回写。
+    const pricing = {
+      gift: a.gift,
+      billing: a.billing,
+      price: a.price,
+      ...(a.billingRatio !== undefined && { billingRatio: a.billingRatio }),
+      ...(a.meterUnit !== undefined && { meterUnit: a.meterUnit }),
+    };
 
     if (!existed) {
-      // 新建：运营所有字段也要写初值，否则新 agent 没有提示词。
+      // 新建：运营所有字段也要写初值，否则新 agent 没有提示词/没有计价。
       if (!opts.dryRun) {
         await prisma.agent.create({
-          data: { key: a.key, enabled: a.enabled, systemPrompt: a.systemPrompt, greet: a.greet, ...structural },
+          data: { key: a.key, enabled: a.enabled, systemPrompt: a.systemPrompt, greet: a.greet, ...structural, ...pricing },
         });
       }
       created++;
       continue;
     }
 
-    const update: Record<string, unknown> = { ...structural };
+    const update: Record<string, unknown> = { ...structural, ...(opts.forcePricing ? pricing : {}) };
     for (const field of OPERATOR_OWNED) {
       const d = decidePromptWrite(field, existed[field], a[field], opts);
       decisions.push({ ...d, agent: a.key });
@@ -177,18 +196,32 @@ async function syncSurvey(opts: SyncOpts) {
   return { updated, created };
 }
 
-// V7-12：单次付费商品目录。按 key upsert（更新展示/定价，保留运营的 enabled 启停）。
+// V7-12：单次付费商品目录。按 key upsert，**但只有结构性字段是仓库真相源**。
+//
+// 2026-08-01 收口：`priceFen` / `name` / `desc` / `sort` 全都能在运营后台改（`PATCH /admin/skus/:key`），
+// 原实现的 update 分支无条件回写这四个字段 → 运营调过价，下一次 `admin:sync-content` 就静默打回仓库值。
+// 这与套餐那边被删掉的 syncPlans.ts 是同一个缺陷（运营把入门版改 ¥99，全量同步打回 ¥68）。
+// 现在定价/文案/排序按 OPERATOR_OWNED 同一约定处理：**create 写初值，update 不碰**。
+// 仓库仍拥有 `kind` / `grantsModuleKey` / `metaJson`——它们必须与 data/modules.ts 的 moduleKey 对齐，
+// 运营后台也改不了（不在 PATCH 白名单里），发生漂移只会让支付后发不出权益。
 async function syncSkus(opts: SyncOpts) {
   let updated = 0;
   let created = 0;
   for (let i = 0; i < SKUS.length; i++) {
     const s = SKUS[i];
     const existed = await prisma.sku.findUnique({ where: { key: s.key }, select: { key: true } });
+    const structural = {
+      kind: s.kind,
+      grantsModuleKey: s.grantsModuleKey ?? null,
+      metaJson: s.metaBytes ? { bytes: s.metaBytes } : undefined,
+    };
+    const pricing = { name: s.name, desc: s.desc, priceFen: s.priceFen, sort: i };
     if (!opts.dryRun) {
       await prisma.sku.upsert({
         where: { key: s.key },
-        update: { name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind, grantsModuleKey: s.grantsModuleKey ?? null, metaJson: s.metaBytes ? { bytes: s.metaBytes } : undefined, sort: i }, // 不动 enabled
-        create: { key: s.key, name: s.name, desc: s.desc, priceFen: s.priceFen, kind: s.kind, grantsModuleKey: s.grantsModuleKey ?? null, metaJson: s.metaBytes ? { bytes: s.metaBytes } : undefined, sort: i },
+        // update 不动 priceFen/name/desc/sort/enabled —— 运营所有；--force-pricing 才回写。
+        update: { ...structural, ...(opts.forcePricing ? pricing : {}) },
+        create: { key: s.key, ...pricing, ...structural },
       });
     }
     existed ? updated++ : created++;
@@ -231,6 +264,7 @@ export async function main(argv: string[] = process.argv.slice(2)) {
     dryRun: has('--dry-run'),
     forcePrompts: has('--force-prompts'),
     allowShrink: has('--allow-shrink'),
+    forcePricing: has('--force-pricing'),
   };
 
   if (opts.dryRun) console.log('== DRY RUN：只打印，不写库 ==\n');
@@ -256,6 +290,10 @@ export async function main(argv: string[] = process.argv.slice(2)) {
   if (!opts.forcePrompts) {
     console.log('\n提示：systemPrompt / greet 默认不覆盖（运营调教资产）。'
       + '要回灌线上版本到仓库，先跑 --dump-prompts <目录>。');
+  }
+  if (!opts.forcePricing) {
+    console.log(`提示：计价字段默认不覆盖（运营所有）——agent ${AGENT_PRICING_FIELDS.join('/')}、`
+      + `sku ${SKU_PRICING_FIELDS.join('/')}。确需用仓库常量改线上定价才加 --force-pricing。`);
   }
 
   console.log(`\n${JSON.stringify({

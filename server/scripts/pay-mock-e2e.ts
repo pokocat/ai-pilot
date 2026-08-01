@@ -29,7 +29,7 @@ delete process.env.PAY_SANDBOX; // 关键：绝不走沙箱，验证的是真实
 const { buildApp } = await import('../src/app.js');
 const { prisma } = await import('../src/db.js');
 const { payConfigured } = await import('../src/services/wechatPay.js');
-const { PLANS, SKUS } = await import('../src/data/seedConfig.js');
+const { DEV_PLANS, SKUS } = await import('../src/data/seedConfig.js');
 
 let pass = 0, fail = 0;
 function check(name: string, ok: boolean, extra?: unknown) {
@@ -64,7 +64,7 @@ async function main() {
   const user = await prisma.user.create({ data: { tenantId: tenant.id, phone: '1' + String(9_100_000_000 + Math.floor(Math.random() * 1_000_000_00)).slice(0, 10), name: 'MockPay', role: 'owner', wechatOpenId: `o_mock_${Date.now()}` } });
   let monthly = await prisma.plan.findFirst({ where: { period: 'month', price: { gt: 0 } }, orderBy: { sort: 'asc' } });
   if (!monthly) {
-    const p = PLANS.find((x) => x.period === 'month' && x.price > 0)!;
+    const p = DEV_PLANS.find((x) => x.period === 'month' && x.price > 0)!;
     monthly = await prisma.plan.create({ data: { name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount, featuresJson: p.features, highlighted: p.highlighted, sort: 99 } });
   }
   const sk = SKUS.find((s) => s.grantsModuleKey && s.priceFen > 0)!;

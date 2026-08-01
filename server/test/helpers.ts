@@ -4,7 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { prisma } from '../src/db.js';
 import { AGENTS } from '../src/data/agents.js';
-import { SAYINGS, SURVEY, PLANS, SKUS } from '../src/data/seedConfig.js';
+import { SAYINGS, SURVEY, DEV_PLANS, SKUS } from '../src/data/seedConfig.js';
 
 // 安全兜底：标记测试运行，短信等外部服务一律走 mock，绝不真实触达（即使直接 node --test 跑本文件）。
 // SMS 发送在请求时才读 NODE_ENV（isSmsTestMode），此处赋值早于任何发送，足以拦截。
@@ -51,8 +51,8 @@ export async function seedAgents(): Promise<void> {
 /** 灌入基础预设：套餐 + 智能体 + 献策 + 问卷（login 取套餐赠算力、献策/问卷接口依赖）。 */
 export async function seedBaseline(): Promise<void> {
   await prisma.plan.deleteMany();
-  for (let i = 0; i < PLANS.length; i++) {
-    const p = PLANS[i];
+  for (let i = 0; i < DEV_PLANS.length; i++) {
+    const p = DEV_PLANS[i];
     await prisma.plan.create({ data: { name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount, featuresJson: p.features, highlighted: p.highlighted, hidden: p.hidden ?? false, sort: i } });
   }
   await seedAgents();

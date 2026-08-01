@@ -1,12 +1,41 @@
+// ⚠️ **仅本地开发 / 测试机**。本脚本对套餐、智能体、格言、问卷都是 deleteMany + 重建，
+// 拿它对着生产跑会打断真实用户的外键引用、并把运营在后台配好的套餐（含改过的价）全部推平。
+// 生产环境的套餐/定价由运营后台维护（见 src/data/seedConfig.ts 顶部说明），没有「同步到生产」这条路。
+// 因此下方有 assertNotProduction() 护栏：认出生产痕迹就直接退出，需要真跑请显式 --i-know（仅限本地）。
 import { PrismaClient } from '@prisma/client';
+import { pathToFileURL } from 'node:url';
 import { AGENTS } from '../src/data/agents.js';
-import { SAYINGS, SURVEY, PLANS } from '../src/data/seedConfig.js';
+import { SAYINGS, SURVEY, DEV_PLANS } from '../src/data/seedConfig.js';
 import { saveReportVersion, slugify } from '../src/services/reports.js';
 import { ingestKnowledge } from '../src/services/knowledge.js';
 
 const prisma = new PrismaClient();
 
+/**
+ * 破坏性 seed 的生产护栏。判定「像生产」的依据，命中任一即拒绝：
+ *   - NODE_ENV=production
+ *   - DATABASE_URL 的 host 不是本地回环（localhost / 127.0.0.1 / ::1 / db / postgres 容器名）
+ * 逃生门 `--i-know`：本地连远程测试库时用；它不放行 NODE_ENV=production。
+ */
+export function assertNotProduction(env: NodeJS.ProcessEnv = process.env, argv: string[] = process.argv): void {
+  const escape = argv.includes('--i-know');
+  if (env.NODE_ENV === 'production') {
+    throw new Error('拒绝执行：NODE_ENV=production。seed 是破坏性的（deleteMany 套餐/智能体），生产套餐请走运营后台配置。');
+  }
+  const url = env.DATABASE_URL ?? '';
+  // host 取 postgres://user:pass@HOST:port/db 里的 HOST；解析不出来（空 URL）就当本地放行。
+  const host = /^[a-z]+:\/\/[^@/]*@?([^:/?]+)/i.exec(url)?.[1]?.toLowerCase() ?? '';
+  const localish = !host || ['localhost', '127.0.0.1', '::1', '[::1]', 'db', 'postgres', 'host.docker.internal'].includes(host);
+  if (!localish && !escape) {
+    throw new Error(
+      `拒绝执行：DATABASE_URL 指向非本地库（host=${host}）。seed 会 deleteMany 套餐/智能体等预设数据，`
+      + '对着线上跑会推平运营后台的配置并打断用户外键。确认是测试库请加 --i-know。',
+    );
+  }
+}
+
 async function main() {
+  assertNotProduction();
   console.log('🌱 seeding 军师 数据库 …');
 
   // 先清理有外键依赖的业务数据，避免重复 seed 时报 FK 约束
@@ -22,11 +51,11 @@ async function main() {
   await prisma.project.deleteMany();
   await prisma.creditLedger.deleteMany();
 
-  // —— 套餐 ——
+  // —— 套餐（夹具，仅本地）：生产由运营后台配置，这里只为让本地/测试机有可买的档位 ——
   await prisma.plan.deleteMany();
   const plans = [];
-  for (let i = 0; i < PLANS.length; i++) {
-    const p = PLANS[i];
+  for (let i = 0; i < DEV_PLANS.length; i++) {
+    const p = DEV_PLANS[i];
     plans.push(
       await prisma.plan.create({
         data: {
@@ -215,11 +244,16 @@ async function main() {
   console.log('✅ seed done');
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+// 只在直接执行时跑：import 进测试（取 assertNotProduction 做回归）时不能顺手把库 seed 一遍。
+// 与 scripts/syncAdminContent.ts 同一写法。
+const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectRun) {
+  main()
+    .catch((e) => {
+      console.error(e);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

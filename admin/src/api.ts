@@ -140,7 +140,7 @@ export const adminAuth = {
 };
 
 // 数据模型统一来自 SSOT（shared/contracts），与前端/后端同口径；按运营端旧名再导出。
-export type { Overview, AdminAgent, AgentDetail, AgentType, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, AdminAgentMemoryItem } from '../../shared/contracts';
+export type { Overview, AdminAgent, AgentDetail, AgentType, AgentBilling, AdminAgentCreate, AdminAgentUpdate, MemoryConfig, MemoryIntensity, MemorySource, Plan, AdminPlan, AdminPlanCreate, AdminPlanUpdate, AdminUserItem, AdminUserDetail, AdminUserAgentRow, AdminUsageView, AdminTokenUsageView, AdminAuditItem, AdminTraceListView, AdminTraceItem, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, AdminAgentMemoryItem } from '../../shared/contracts';
 export type { AgentProviderMode, AgentRuntimeView, AgentRuntimeUpdate, SkillsConfig, SkillToolMeta, SkillToolDef, SkillToolUpsert, ToolStatItem } from '../../shared/contracts';
 export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthResult, AdminChangePasswordRequest } from '../../shared/contracts';
 export type { AdminSaying as Saying } from '../../shared/contracts';
@@ -158,7 +158,7 @@ export type {
 } from '../../shared/contracts';
 
 import type {
-  Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, Plan, AdminSaying,
+  Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, AdminPlan, AdminPlanCreate, AdminPlanUpdate, AdminSaying,
   AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
   AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult, ToolStatsView, ToolStatItem,
   AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
@@ -263,9 +263,12 @@ export const api = {
   monitorNotify: () => req<AdminMonitorNotify>('/admin/monitor-notify'),
   saveMonitorNotify: (url: string, secret: string) => req<AdminMonitorNotify>('/admin/monitor-notify', 'PUT', { url, secret }),
   testMonitorNotify: () => req<{ sent: boolean }>('/admin/monitor-notify/test', 'POST'),
-  plans: () => req<Plan[]>('/admin/plans'),
-  savePlan: (id: string, body: Partial<Pick<Plan, 'name' | 'price' | 'creditsPerMonth' | 'tokenQuotaPerMonth' | 'agentCount' | 'featuresJson' | 'highlighted'>>) =>
-    req<Plan>(`/admin/plans/${id}`, 'PATCH', body),
+  // —— 套餐：**线上目录的唯一入口**（代码侧已无同步脚本，改价/建档/停售全在这里）——
+  plans: () => req<AdminPlan[]>('/admin/plans'),
+  savePlan: (id: string, body: AdminPlanUpdate) => req<AdminPlan>(`/admin/plans/${id}`, 'PATCH', body),
+  createPlan: (body: AdminPlanCreate) => req<AdminPlan>('/admin/plans', 'POST', body),
+  // 删除仅限「无用户在册」的档（后端 409 PLAN_IN_USE 兜底）；停售请用 hidden。
+  deletePlan: (id: string) => req<{ ok: boolean }>(`/admin/plans/${id}`, 'DELETE'),
   // —— 单次付费 SKU：改价 / 启停 / 展示（key、kind、解锁模块走代码目录，不在此改）——
   adminSkus: () => req<AdminSku[]>('/admin/skus'),
   updateSku: (key: string, body: AdminSkuUpdate) => req<AdminSku>(`/admin/skus/${key}`, 'PATCH', body),

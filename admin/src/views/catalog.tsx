@@ -3,51 +3,117 @@
 import { useState } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
-import { api, type Plan, type AdminSku, type AdminEcoTool } from '../api';
+import { api, type AdminPlan, type AdminSku, type AdminEcoTool } from '../api';
 import { PageHead, ConfirmDialog, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
+
+// 套餐目录：**线上套餐的唯一维护入口**。2026-08-01 起代码侧不再有 syncPlans 之类的同步脚本
+//（它按 name 全字段 upsert，运营改过价之后一跑就把线上价打回代码常量），server 的 seedConfig
+// 只剩本地/测试夹具。所以这里必须能建档、改档、停售，否则全新部署一个套餐都没有、
+// 而无套餐用户被 planGate 全局禁写 → 付费转化路径直接断。
+const PLAN_BLANK = { name: '', priceYuan: 0, period: 'month' as 'month' | 'year', creditsPerMonth: 0, tokenQuotaPerMonth: 0, agentCount: 0, features: '', highlighted: false, hidden: false, sort: 0 };
 
 export function PlansView({ toast }: { toast: (m: string) => void }) {
 
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', priceYuan: 0, creditsPerMonth: 0, tokenQuotaPerMonth: 0, agentCount: 0, features: '' });
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState(PLAN_BLANK);
+  const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
   const res = useResource(api.plans, []);
   const list = res.data ?? [];
   const load = () => res.reload();
-  const priceLabel = (p: Plan) => p.price < 0 ? '面议' : p.price === 0 ? '¥0' : `¥${(p.price / 100).toLocaleString()}${p.period === 'year' ? '/年' : '/月'}`;
-  const startEdit = (p: Plan) => {
+  const set = (patch: Partial<typeof PLAN_BLANK>) => setForm((f) => ({ ...f, ...patch }));
+  const priceLabel = (p: AdminPlan) => p.price < 0 ? '面议' : p.price === 0 ? '¥0' : `¥${(p.price / 100).toLocaleString()}${p.period === 'year' ? '/年' : '/月'}`;
+  const startEdit = (p: AdminPlan) => {
+    setAdding(false);
     setEditId(p.id);
-    setForm({ name: p.name, priceYuan: p.price < 0 ? -1 : p.price / 100, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount, features: p.featuresJson.join('\n') });
+    setForm({
+      name: p.name, priceYuan: p.price < 0 ? -1 : p.price / 100, period: p.period === 'year' ? 'year' : 'month',
+      creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount,
+      features: p.featuresJson.join('\n'), highlighted: p.highlighted, hidden: p.hidden, sort: p.sort,
+    });
   };
+  // -1=面议（企业版语义）；其余按元→分。前端不做四舍五入以外的加工，校验以服务端为准。
+  const payload = () => ({
+    name: form.name,
+    price: form.priceYuan < 0 ? -1 : Math.round(form.priceYuan * 100),
+    period: form.period,
+    creditsPerMonth: form.creditsPerMonth,
+    tokenQuotaPerMonth: form.tokenQuotaPerMonth,
+    agentCount: form.agentCount,
+    featuresJson: form.features.split('\n').map((s) => s.trim()).filter(Boolean),
+    highlighted: form.highlighted,
+    hidden: form.hidden,
+    sort: form.sort,
+  });
   const save = async (id: string) => {
     // 套餐改价是 requireSuper：非超管会拿到 403「需要 owner 权限」，catch 必须原文透出，
     // 不能盖成「保存失败」让运营去查网络（403 不再踢登录页，见 api.ts）。
     try {
-      await api.savePlan(id, {
-        name: form.name,
-        price: form.priceYuan < 0 ? -1 : Math.round(form.priceYuan * 100),
-        creditsPerMonth: form.creditsPerMonth,
-        tokenQuotaPerMonth: form.tokenQuotaPerMonth,
-        agentCount: form.agentCount,
-        featuresJson: form.features.split('\n').map((s) => s.trim()).filter(Boolean),
-      });
+      await api.savePlan(id, payload());
       setEditId(null); await load(); toast('套餐已更新');
     } catch (e) { toast((e as Error)?.message || '保存失败'); }
   };
+  const create = async () => {
+    if (!form.name.trim()) return toast('请先填套餐名称');
+    try {
+      await api.createPlan(payload());
+      setAdding(false); setForm(PLAN_BLANK); await load(); toast('套餐已创建');
+    } catch (e) { toast((e as Error)?.message || '创建失败'); }
+  };
+  // 删除只对「无用户在册」的档放行（服务端 409 PLAN_IN_USE 兜底，文案带在册人数）。
+  // 想停售但保住在册用户 → 用「隐藏」。
+  const remove = (p: AdminPlan) => setConfirmSpec({
+    title: '删除套餐',
+    desc: '仅当没有用户在册时可删。想停售又不影响在册用户，请改用「隐藏（停售）」。',
+    echo: [{ k: '套餐', v: p.name }, { k: '价格', v: priceLabel(p) }],
+    confirmText: '删除',
+    danger: true,
+    onConfirm: async () => { await api.deletePlan(p.id); await load(); toast('已删除'); },
+  });
+  const fields = (
+    <>
+      <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="如 入门版" /></div>
+      <div className="ai-field"><div className="ai-fl">价格（元，-1=面议）</div><NumInput className="ai-input" value={form.priceYuan} onChange={(priceYuan) => set({ priceYuan })} /></div>
+      <div className="ai-field">
+        <div className="ai-fl">计费周期（参与到期日推算与升级折算）</div>
+        <select className="ai-input" value={form.period} onChange={(e) => set({ period: e.target.value === 'year' ? 'year' : 'month' })}>
+          <option value="month">按月</option>
+          <option value="year">按年</option>
+        </select>
+      </div>
+      <div className="ai-field"><div className="ai-fl">每月赠送钻石（-1=不限量）</div><NumInput className="ai-input" value={form.creditsPerMonth} onChange={(creditsPerMonth) => set({ creditsPerMonth })} /></div>
+      <div className="ai-field"><div className="ai-fl">每月 token 额度（产出消耗池，-1=不限量）</div><NumInput className="ai-input" value={form.tokenQuotaPerMonth} onChange={(tokenQuotaPerMonth) => set({ tokenQuotaPerMonth })} /></div>
+      <div className="ai-field"><div className="ai-fl">含智能体数</div><NumInput className="ai-input" value={form.agentCount} onChange={(agentCount) => set({ agentCount })} /></div>
+      <div className="ai-field"><div className="ai-fl">权益（每行一条）</div><textarea className="ta" rows={4} value={form.features} onChange={(e) => set({ features: e.target.value })} /></div>
+      <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => set({ sort })} /></div>
+      <div className="cfg">
+        <div className="cfg-row"><div className="cb"><div className="ct">主推（最受欢迎）</div><div className="cs">前台高亮这一档</div></div><div className={`sw ${form.highlighted ? 'on' : ''}`} onClick={() => set({ highlighted: !form.highlighted })}><i /></div></div>
+        <div className="cfg-row"><div className="cb"><div className="ct">隐藏（停售）</div><div className="cs">套餐列表不返回；仅测试白名单手机号可见可购。在册用户的权益不受影响</div></div><div className={`sw ${form.hidden ? 'on' : ''}`} onClick={() => set({ hidden: !form.hidden })}><i /></div></div>
+      </div>
+    </>
+  );
   return (
     <>
       <PageHead k="plan" res={res} badge={`${list.length} 档`} />
       <div className="pad">
+        {!adding ? (
+          <button className="add-btn full" onClick={() => { setEditId(null); setForm(PLAN_BLANK); setAdding(true); }}><Icon name="spark" size={15} /> 新增套餐</button>
+        ) : (
+          <div className="crd new-agent">
+            {fields}
+            <div className="ai-actions">
+              <button className="ai-btn ghost" onClick={() => { setAdding(false); setForm(PLAN_BLANK); }}>取消</button>
+              <button className="ai-btn primary" onClick={create}><Icon name="check" size={14} /> 创建套餐</button>
+            </div>
+          </div>
+        )}
         {list.map((p) => editId === p.id ? (
           <div key={p.id} className="crd new-agent">
-            <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-            <div className="ai-field"><div className="ai-fl">价格（元，-1=面议）</div><NumInput className="ai-input" value={form.priceYuan} onChange={(priceYuan) => setForm({ ...form, priceYuan })} /></div>
-            <div className="ai-field"><div className="ai-fl">每月赠送钻石（-1=不限量）</div><NumInput className="ai-input" value={form.creditsPerMonth} onChange={(creditsPerMonth) => setForm({ ...form, creditsPerMonth })} /></div>
-            <div className="ai-field"><div className="ai-fl">每月 token 额度（产出消耗池，-1=不限量）</div><NumInput className="ai-input" value={form.tokenQuotaPerMonth} onChange={(tokenQuotaPerMonth) => setForm({ ...form, tokenQuotaPerMonth })} /></div>
-            <div className="ai-field"><div className="ai-fl">含智能体数</div><NumInput className="ai-input" value={form.agentCount} onChange={(agentCount) => setForm({ ...form, agentCount })} /></div>
-            <div className="ai-field"><div className="ai-fl">权益（每行一条）</div><textarea className="ta" rows={4} value={form.features} onChange={(e) => setForm({ ...form, features: e.target.value })} /></div>
+            {fields}
             <div className="ai-actions">
               <button className="ai-btn ghost" onClick={() => setEditId(null)}>取消</button>
+              <button className="ai-btn ghost" onClick={() => remove(p)}><Icon name="alert" size={14} /> 删除</button>
               <button className="ai-btn primary" onClick={() => save(p.id)}><Icon name="check" size={14} /> 保存</button>
             </div>
           </div>
@@ -56,6 +122,7 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
             <div className="plan-h">
               <span className="pn">{p.name}</span>
               {p.highlighted && <span className="tag">最受欢迎</span>}
+              {p.hidden && <span className="tag">已隐藏</span>}
               <span className="pp">{priceLabel(p)}</span>
             </div>
             <div className="plan-meta">{p.creditsPerMonth < 0 ? '不限量权益点' : `${p.creditsPerMonth} 点/月`} · 含 {p.agentCount} 智能体 · {p.featuresJson.join(' · ')}</div>
@@ -63,6 +130,7 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
           </div>
         ))}
       </div>
+      {confirmSpec && <ConfirmDialog spec={confirmSpec} onClose={() => setConfirmSpec(null)} />}
     </>
   );
 }
