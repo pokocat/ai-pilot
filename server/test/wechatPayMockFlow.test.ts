@@ -169,7 +169,8 @@ test('降级守卫：活跃年付降月付 409，同套餐续费放行，过期�
 // 同周期跨档升级（此前被降级守卫误伤 409：付费用户想升更高档只能等到期）。
 // 放行判定唯一来源 = computeUpgradeProration → 这里钉住 HTTP 层放行 + 折后实付落库 + 反向仍 409。
 test('同周期升级：¥68 月付 → ¥198 月付 放行、折后实付落库；反向降级 / 企业版仍 409', async () => {
-  const months = await prisma.plan.findMany({ where: { period: 'month', price: { gt: 0 } }, orderBy: { price: 'asc' } });
+  // 排除 hidden：¥0.01「支付链路测试」隐藏档也是付费月付，不排掉会顶替「最低档=入门版」。
+  const months = await prisma.plan.findMany({ where: { period: 'month', price: { gt: 0 }, hidden: false }, orderBy: { price: 'asc' } });
   assert.ok(months.length >= 2, '需要两档付费月付套餐（入门版 ¥68 / 决策版·月付 ¥198）');
   const low = months[0]!, high = months[months.length - 1]!;
   assert.equal(low.price, 6800, '低档 = 入门版 ¥68/月');

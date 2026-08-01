@@ -53,7 +53,7 @@ export async function seedBaseline(): Promise<void> {
   await prisma.plan.deleteMany();
   for (let i = 0; i < PLANS.length; i++) {
     const p = PLANS[i];
-    await prisma.plan.create({ data: { name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount, featuresJson: p.features, highlighted: p.highlighted, sort: i } });
+    await prisma.plan.create({ data: { name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount, featuresJson: p.features, highlighted: p.highlighted, hidden: p.hidden ?? false, sort: i } });
   }
   await seedAgents();
   await prisma.sku.deleteMany();

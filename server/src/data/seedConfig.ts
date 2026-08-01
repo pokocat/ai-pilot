@@ -51,6 +51,7 @@ export const PLANS: {
   agentCount: number;
   features: string[];
   highlighted: boolean;
+  hidden?: boolean; // 隐藏档：列表不返回、仅 TEST_PLAN_PHONES 白名单可见/可购（缺省 false）
 }[] = [
   // 2026-07-28 商业化改版：砍掉免费体验档，起步即收费。定价依据生产 30 天实测
   // （一次完整咨询 ≈ 3 万加权 token ≈ ¥1.09 LLM 成本，重度用户月耗最高 269 万）：
@@ -101,6 +102,22 @@ export const PLANS: {
     agentCount: 14,
     features: ['私有化部署', '接入内部系统', '专属助手配置', '数据不出内网'],
     highlighted: false,
+  },
+  // 支付链路测试（隐藏档）：生产真实支付 ¥0.01 全链路验证专用（下单→requestPayment→回调入账→admin 原路退款）。
+  // hidden=true：/plans 列表不返回、非 TEST_PLAN_PHONES 白名单不可购（404 不泄露存在性）；
+  // 下单时绕过降级守卫（白名单账号通常已有未到期套餐，此档必然低价触发 409）——购买会重置
+  // 现有套餐锚点，退款后套餐立即到期，需运营后台重新改档，这是白名单内部账号明确接受的代价。
+  // 验证完成后从本数组删除并跑 syncPlans（有订单引用的用户先迁移，脚本会告警不误删）。
+  {
+    name: '支付链路测试',
+    price: 1, // ¥0.01
+    period: 'month',
+    creditsPerMonth: 1,
+    tokenQuotaPerMonth: 10000,
+    agentCount: 1,
+    features: ['支付链路验证专用（内部）'],
+    highlighted: false,
+    hidden: true,
   },
 ];
 

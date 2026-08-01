@@ -35,9 +35,27 @@ function publicPlan(plan: {
   };
 }
 
+// 隐藏档（Plan.hidden）白名单：TEST_PLAN_PHONES（逗号分隔手机号）内的账号才能在列表看到、
+// 才能下单购买隐藏套餐。用途：生产 ¥0.01 支付链路验证——测试档对线上用户完全不可见，
+// 非白名单请求一律按「套餐不存在」处理（404，不泄露存在性）。
+function canSeeHiddenPlans(user: { phone: string | null } | null): boolean {
+  if (!user?.phone) return false;
+  const list = (process.env.TEST_PLAN_PHONES ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  return list.includes(user.phone);
+}
+
+// GET /plans 历史上是匿名端点；隐藏档判定需要身份，故带 token 时**尽力**解析、
+// 解析失败仍按匿名返回公开套餐（列表页绝不能因过期 token 变 401）。
+async function resolveUserOptional(token?: string) {
+  if (!token) return null;
+  try { return await resolveUser(token); } catch { return null; }
+}
+
 export async function planRoutes(app: FastifyInstance) {
-  app.get('/plans', async (): Promise<PlanView[]> => {
-    const plans = await prisma.plan.findMany({ orderBy: { sort: 'asc' } });
+  app.get('/plans', async (req): Promise<PlanView[]> => {
+    const user = await resolveUserOptional(req.headers['x-user-id'] as string | undefined);
+    const where = canSeeHiddenPlans(user) ? {} : { hidden: false };
+    const plans = await prisma.plan.findMany({ where, orderBy: { sort: 'asc' } });
     return plans.map(publicPlan);
   });
 
@@ -46,6 +64,8 @@ export async function planRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    // 隐藏档对非白名单等同不存在（同 404，不泄露存在性）。
+    if (plan.hidden && !canSeeHiddenPlans(user)) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
     // 面议档（price<0，企业版·私有化：不限量点数+不限量 token+永不过期）绝不自助发放——
     // 原判断只拦 price>0，负价从缝里漏过去，任何登录用户拿套餐 id 就能免费开通不限量（生产实际发生，
     // 41/52 用户在企业版）。面议档只能由运营后台 admin_grant 开通。
@@ -71,6 +91,8 @@ export async function planRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    // 隐藏档对非白名单等同不存在（同 404，不泄露存在性）。
+    if (plan.hidden && !canSeeHiddenPlans(user)) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
     // PAY_MOCK_SUCCESS 一并放行：它建的是**真实 PaymentOrder**（快照/金额/归因/频控/关旧单全走），
     // 只是不去调微信 JSAPI，付款由 POST /pay/mock/pay 模拟——这样订单状态机与发放链路在无凭据环境下也能被跑通。
     if (!payConfigured() && !sandboxEnabled() && !payMockSuccessEnabled()) {
@@ -92,7 +114,10 @@ export async function planRoutes(app: FastifyInstance) {
     const proration = await computeUpgradeProration(user, { id: plan.id, price: plan.price, period: plan.period });
     // 降级守卫（P0）：applyPlanPurchase 对「不同套餐」一律重置有效期锚点——年付降月付/平级横切
     // 会直接烧掉当前套餐剩余时长且无折算（不支持退现）。仅放行：同套餐续费、可折算的升级、当前套餐已过期/免费。
-    if (curPlan && curPlan.id !== plan.id) {
+    // 隐藏测试档绕过降级守卫：它必然低于任何在售套餐价格（¥0.01），白名单账号又通常持有
+    // 未到期付费套餐，不绕过则恒 409 测不了。代价（现有套餐锚点被重置、退款后立即到期）
+    // 只落在白名单内部账号身上，见 seedConfig 该档注释。
+    if (curPlan && curPlan.id !== plan.id && !plan.hidden) {
       if (curPlan.price < 0) {
         return reply.code(409).send({ error: '企业版套餐由运营管理，如需调整请联系客服', code: 'PLAN_SWITCH_BLOCKED' });
       }

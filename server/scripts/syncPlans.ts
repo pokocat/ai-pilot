@@ -18,7 +18,7 @@ async function main() {
     const data = {
       price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth,
       tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount,
-      featuresJson: p.features, highlighted: p.highlighted, sort: i,
+      featuresJson: p.features, highlighted: p.highlighted, hidden: p.hidden ?? false, sort: i,
     };
     const existing = await prisma.plan.findFirst({ where: { name: p.name } });
     if (existing) {
@@ -26,7 +26,7 @@ async function main() {
         && existing.creditsPerMonth === data.creditsPerMonth
         && existing.tokenQuotaPerMonth === data.tokenQuotaPerMonth
         && existing.agentCount === data.agentCount
-        && existing.highlighted === data.highlighted && existing.sort === data.sort
+        && existing.highlighted === data.highlighted && existing.hidden === data.hidden && existing.sort === data.sort
         && JSON.stringify(existing.featuresJson) === JSON.stringify(data.featuresJson);
       if (same) {
         console.log(`  = 不变 ${p.name}（id=${existing.id}）`);

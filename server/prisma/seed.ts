@@ -38,6 +38,7 @@ async function main() {
           agentCount: p.agentCount,
           featuresJson: p.features,
           highlighted: p.highlighted,
+          hidden: p.hidden ?? false,
           sort: i,
         },
       }),

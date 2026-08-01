@@ -646,6 +646,7 @@ model Plan {
   agentCount         Int
   featuresJson       Json
   highlighted        Boolean @default(false)
+  hidden             Boolean @default(false) // 隐藏档：/plans 列表不返回、非白名单不可购（TEST_PLAN_PHONES）——生产支付链路验证专用
   sort               Int     @default(0)
 
   users User[]
