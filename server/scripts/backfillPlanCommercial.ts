@@ -10,7 +10,8 @@ function familyName(name: string): string {
 }
 
 async function main() {
-  const plans = await prisma.plan.findMany({ orderBy: [{ sort: 'asc' }, { createdAt: 'asc' }] });
+  // Plan 没有 createdAt；用业务排序 + 主键做稳定次排序，确保 dry-run/apply 输出一致。
+  const plans = await prisma.plan.findMany({ orderBy: [{ sort: 'asc' }, { id: 'asc' }] });
   if (!plans.length) {
     console.log('没有套餐，无需回填。');
     return;

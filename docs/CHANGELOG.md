@@ -17,6 +17,7 @@
 额度并发边界同步收口：跨激活锚点月度周期的惰性重置与预扣共用 `quota:<userId>` 事务锁，另一请求已重置后不再二次刷满。运营改档的损失保护继续返回 `daysLost`，不因新的用户权益事务锁而丢失既有提示契约。
 
 预发支付隔离同步改为部署脚本硬保证：`scripts/deploy-preprod.sh` 每次都删除全部 `WECHAT_PAY_*` 真商户凭据，强制 `NODE_ENV=development` + `PAY_MOCK_SUCCESS=true`，同时关闭 `PAY_SANDBOX/ALLOW_DEMO_PURCHASE`，并在重启前 fail-closed 检查。这仅影响预发：可验真实订单、回调入账与权益状态机，不触发微信真扣款，不修改生产服务或生产库。
+预发首次 dry-run 还抓到回填脚本误用不存在的 `Plan.createdAt` 排序；已改用 `sort + id` 稳定排序，保证 dry-run/apply 在真实 Prisma schema 上可执行且输出一致。
 
 ### 2026-08-02 · 后端 GitHub Actions 对齐 Node 24，消除 Node 20 异步测试误取消 · 影响面：CI（`server-integration.yml`）+ 工程测试基线（`AGENTS.md`）
 
