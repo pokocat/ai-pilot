@@ -201,14 +201,23 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     });
   }
 
-  // 商业化禁写闸（2026-07-28 去免费档改版）：无有效套餐的登录用户只读，一切写方法 403 PLAN_REQUIRED。
+  // 商业化禁写闸（2026-07-28 去免费档改版）：无有效套餐的登录用户默认只读，写方法 403 PLAN_REQUIRED。
   // 放行前缀：auth（注册/登录本身写库）、付费转化全链路（plans/skus 下单+purchase、pay 支付回调/查单——
   // 只读用户必须永远付得了钱，否则没人能从只读变付费）、wechat（平台回调无用户态）、admin（ADMIN_TOKEN 独立门）。
+  // 无套餐新用户另外只放行首次入局必需的精确路由：账号身份/本命色/建档与 quickscan 首判。
+  // quickscan 路由内仍由 grace:'quickscan' 控制每日仅 1 次无额度保底；已过期用户不享受该例外。
   // 未带 token / token 无效的写请求不在此拦——各路由自身的 401 兜底，本闸只回答「这个已登录用户有没有开通」。
   // 应急开关：PLAN_WRITE_GATE=false 全局停用。
   if ((process.env.PLAN_WRITE_GATE ?? 'true') !== 'false') {
     const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
     const ALLOW_PREFIX = ['/api/auth/', '/api/pay/', '/api/plans/', '/api/skus/', '/api/wechat/', '/api/admin'];
+    const ALLOW_NONE_ONLY = new Set([
+      'PUT /api/me',
+      'PUT /api/me/color',
+      'POST /api/me/avatar',
+      'PUT /api/profile',
+      'POST /api/quickscan',
+    ]);
     app.addHook('onRequest', async (req, reply) => {
       if (!WRITE_METHODS.has(req.method)) return;
       if (!req.url.startsWith('/api/')) return;
@@ -217,6 +226,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
       if (!userId) return;
       const state = await planGateState(userId);
       if (state === 'none') {
+        const path = req.url.split('?', 1)[0];
+        if (ALLOW_NONE_ONLY.has(`${req.method} ${path}`)) return;
         notePlanGateBlocked('none');
         const e = new PlanRequiredError();
         return reply.code(403).send({ error: e.message, code: e.code });

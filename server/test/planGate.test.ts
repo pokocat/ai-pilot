@@ -3,8 +3,9 @@
 //
 // 口径：
 //   - 没有免费档了，注册默认不送套餐（除非 TEST_DEFAULT_PLAN_NAME 配置了测试期默认档）
-//   - 无套餐 / 套餐到期 → 一切 POST/PUT/PATCH/DELETE 拦 403 PLAN_REQUIRED；GET 不受影响
+//   - 无套餐 / 套餐到期 → 业务写操作拦 403 PLAN_REQUIRED；GET 不受影响
 //   - auth / pay / wechat / admin 前缀放行（注册、购买、平台回调、后台各有各的门）
+//   - 无套餐新用户可写入局资料，并且 quickscan 每日 1 次 grace 首判；已过期用户仍禁写
 //   - 未带 token 的写请求不在此拦，路由自身 401 兜底
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,13 +33,45 @@ test('测试期默认开通：login 注册即有入门版，写操作放行', as
   assert.ok(u?.planExpiresAt, '测试期开通走正式购买链路，必须有到期日');
 });
 
-test('无套餐用户：写 403 PLAN_REQUIRED，读放行', async () => {
+test('无套餐用户：业务写 403 PLAN_REQUIRED，读放行', async () => {
   const id = await bareUser();
   const w = await api('POST', '/api/projects', { token: id, body: { name: 'x' } });
   assert.equal(w.status, 403);
   assert.equal(w.body.code, 'PLAN_REQUIRED');
   const r = await api('GET', '/api/projects', { token: id });
   assert.notEqual(r.status, 403, 'GET 不应被禁写闸拦');
+});
+
+test('无套餐新账号：可完成入局建档与每日 1 次首判，其他写能力仍锁定', async () => {
+  const id = await bareUser();
+
+  const identity = await api('PUT', '/api/me', { token: id, body: { company: '新品牌' } });
+  assert.equal(identity.status, 200, JSON.stringify(identity.body));
+  const color = await api('PUT', '/api/me/color', { token: id, body: { color: 'green' } });
+  assert.equal(color.status, 200, JSON.stringify(color.body));
+  const profile = await api('PUT', '/api/profile', {
+    token: id,
+    body: { industry: '美业', stage: '100-500 万', pain: '获客越来越贵' },
+  });
+  assert.equal(profile.status, 200, JSON.stringify(profile.body));
+
+  const first = await api('POST', '/api/quickscan', {
+    token: id,
+    body: { industry: '美业', revenueBand: '100-500 万', pain: '获客越来越贵' },
+  });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.ok(first.body.judgement, '首判应返回军师判断');
+
+  const second = await api('POST', '/api/quickscan', {
+    token: id,
+    body: { industry: '美业', revenueBand: '100-500 万', pain: '复购停滞' },
+  });
+  assert.equal(second.status, 402, '无套餐用户当日第 2 次首判不应继续免费放行');
+  assert.equal(second.body.code, 'INSUFFICIENT_QUOTA');
+
+  const project = await api('POST', '/api/projects', { token: id, body: { name: 'x' } });
+  assert.equal(project.status, 403);
+  assert.equal(project.body.code, 'PLAN_REQUIRED');
 });
 
 test('套餐已到期：同样禁写，但错误码是 PLAN_EXPIRED（前端续费引导依赖它）', async () => {
@@ -48,6 +81,12 @@ test('套餐已到期：同样禁写，但错误码是 PLAN_EXPIRED（前端续�
   const w = await api('POST', '/api/projects', { token, body: { name: 'x' } });
   assert.equal(w.status, 403);
   assert.equal(w.body.code, 'PLAN_EXPIRED', '到期 ≠ 未开通：不能把续费用户引去「开通」文案');
+  const onboardingWrite = await api('PUT', '/api/profile', {
+    token,
+    body: { industry: '美业', stage: '100-500 万', pain: '获客贵' },
+  });
+  assert.equal(onboardingWrite.status, 403);
+  assert.equal(onboardingWrite.body.code, 'PLAN_EXPIRED', '首次入局例外只属于从未开通的新账号');
 });
 
 test('放行前缀：无套餐也能走 auth / pay 写路径（不被 PLAN_REQUIRED 拦）', async () => {

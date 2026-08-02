@@ -110,8 +110,9 @@ repo/
 
 ## 6. 账号与数据隔离
 
-- **登录**（2026-06 重构，默认微信优先）：登录页**默认微信账号登录**（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号），一键切换**短信验证码登录**（`POST /auth/sms/send` → `POST /auth/login`，生产设 `SMS_PROVIDER=aliyun`、`SMS_REQUIRE_CODE=true`；当前阿里云短信模板 `ALIYUN_SMS_TEMPLATE_CODE=SMS_508120103`）。微信登录后**强制绑定手机号才能继续使用**（`bindphone` 拦截页，无跳过、仅"退出登录"逃生；前端绑定页不提供“暂不绑定”入口，首页对已登录但 `me.user.phone` 为空的账号也会拉起该页）：`POST /auth/bind-phone` 二选一——①微信一键 `{phoneCode}`（`getPhoneNumber` → 服务端 `getPhoneNumberByCode` 换号）②短信兜底 `{phone,code}`（`scene=bind`）；均带跨账号占用守卫（已被占用→409 `PHONE_TAKEN`）。绑定后再进**可选可跳过的「完善资料」**：`chooseAvatar`+`type=nickname`（微信头像昵称填写能力，可改）同步头像/昵称——头像 `POST /me/avatar` 传 OSS public-read 存 `User.avatarUrl`、昵称走 `PUT /me`。注意微信头像昵称**只能用户点选**（chooseAvatar 默认项「使用微信头像」+ 昵称键盘自动填充），`getUserProfile` 自 2022-10 起手机端返回匿名「微信用户」+灰头像，仅 PC/Mac/旧基础库返回真实（故「一键填入头像昵称」只在 PC/Mac 显示）。本机号一键登录端点 `POST /auth/wechat-phone`（`getPhoneNumber` 换号即登录）保留但**不再是登录页主入口**。手机号免码登录仅保留为开发/测试兼容兜底。注册称呼可留空，也可点称呼框右侧的 spark 图标从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户，套餐赠送算力。
-- **测试期默认套餐**：服务端设置 `TEST_DEFAULT_PLAN_NAME=决策版` 后，微信/短信/本机号等所有新注册入口统一在建号事务中开通指定套餐并发放完整额度；存量低档用户运行 `npm run db:grant-test-plan -- --plan=决策版 --apply` 升级，脚本保留有效同档和企业私有化用户，不重复发放、不降级。测试结束后清空环境变量并重启 API，新注册即恢复默认体验版。
+- **登录**（2026-06 重构，默认微信优先）：登录页**默认微信账号登录**（`wx.login` code → 服务端 `jscode2session` → openid/unionid 建号），一键切换**短信验证码登录**（`POST /auth/sms/send` → `POST /auth/login`，生产设 `SMS_PROVIDER=aliyun`、`SMS_REQUIRE_CODE=true`；当前阿里云短信模板 `ALIYUN_SMS_TEMPLATE_CODE=SMS_508120103`）。微信登录后**强制绑定手机号才能继续使用**（`bindphone` 拦截页，无跳过、仅"退出登录"逃生；前端绑定页不提供“暂不绑定”入口，首页对已登录但 `me.user.phone` 为空的账号也会拉起该页）：`POST /auth/bind-phone` 二选一——①微信一键 `{phoneCode}`（`getPhoneNumber` → 服务端 `getPhoneNumberByCode` 换号）②短信兜底 `{phone,code}`（`scene=bind`）；均带跨账号占用守卫（已被占用→409 `PHONE_TAKEN`）。绑定后再进**可选可跳过的「完善资料」**：`chooseAvatar`+`type=nickname`（微信头像昵称填写能力，可改）同步头像/昵称——头像 `POST /me/avatar` 传 OSS public-read 存 `User.avatarUrl`、昵称走 `PUT /me`。注意微信头像昵称**只能用户点选**（chooseAvatar 默认项「使用微信头像」+ 昵称键盘自动填充），`getUserProfile` 自 2022-10 起手机端返回匿名「微信用户」+灰头像，仅 PC/Mac/旧基础库返回真实（故「一键填入头像昵称」只在 PC/Mac 显示）。本机号一键登录端点 `POST /auth/wechat-phone`（`getPhoneNumber` 换号即登录）保留但**不再是登录页主入口**。手机号免码登录仅保留为开发/测试兼容兜底。注册称呼可留空，也可点称呼框右侧的 spark 图标从 `GET /auth/suggest-name` 取古典武侠/军事花名；花名只写 `User.name`，新租户公司名仍留空，避免把称呼误当公司。新账号自动建独立租户+用户；是否自动开通套餐只由 `TEST_DEFAULT_PLAN_NAME` 决定，未配置时不赠送套餐或额度。
+- **测试期默认套餐**：服务端设置 `TEST_DEFAULT_PLAN_NAME=决策版` 后，微信/短信/本机号等所有新注册入口统一在建号事务中开通指定套餐并发放完整额度；存量低档用户运行 `npm run db:grant-test-plan -- --plan=决策版 --apply` 升级，脚本保留有效同档和企业私有化用户，不重复发放、不降级。测试结束后清空环境变量并重启 API，新注册即恢复默认不送套餐。
+- **无套餐首次入局例外**：`PLAN_WRITE_GATE` 仍默认禁止无套餐账号的业务写操作，但为了让默认不送套餐的新账号能完成「择色 → 立案卷 → 首判」，对 `state=none` 精确放行 `PUT /me`、`PUT /me/color`、`POST /me/avatar`、`PUT /profile` 和 `POST /quickscan`；不使用 `/me/*` 宽前缀。`/quickscan` 仍由 `grace:'quickscan'` 限制无额度时每日仅 1 次保底，第 2 次返回 `INSUFFICIENT_QUOTA`；套餐已过期用户不享受该例外，仍返回 `PLAN_EXPIRED`。
 - **Token**：演示版 `token = userId`，前端存 `junshi.userId`，每次请求带 `x-user-id` 头。
 - **隔离**：后端 `resolveUser` 严格按 token 解析，**无/失效 token 一律 401**（无 demo 兜底）；所有业务查询按 `userId/tenantId` 过滤。
 - **微信密钥**：`WECHAT_MINI_SECRET` 与消息推送 `WECHAT_MESSAGE_TOKEN` 只在服务端环境变量保存；微信 `session_key` 仅服务端换取时使用，**不下发前端**。
@@ -217,6 +218,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 | `POST /agents/:key/purchase` | 用算力一次性解锁 `unlock` 智能体（幂等，已开通不重复扣费） | 是 |
 | `GET /survey` | 建档问卷 | 否 |
 | `GET /profile` · `PUT /profile` | 企业档案读/写（写=完成建档） | 是 |
+| `POST /quickscan` | 3 问首判；有额度正常计量，无套餐新账号享每日 1 次 `grace:'quickscan'` 保底 | 是 |
 | `PUT /profile/bazi` · `GET /profile/chart` | 八字采集（→排盘引擎落库；believe=false=不信命理只存偏好；出生城市自动查经度表做真太阳时） · 我的命盘读取 | 是 |
 | `GET /profile/strategic` · `PUT /profile/strategic` | 战略档案（已确认战略事实）读取 · 手动校准（局部更新） | 是 |
 | `GET /decisions` · `POST /decisions` · `POST /decisions/:id/verify` | 决策日志：列表+统计 · 手动记录 · 验证（correct/revise，准确率服务端算） | 是 |
