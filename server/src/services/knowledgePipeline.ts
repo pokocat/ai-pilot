@@ -17,7 +17,7 @@ import { structured, structuredMetered } from '../llm/gateway.js';
 import { chunkAndEmbed } from './knowledge.js';
 import { saveReportVersion } from './reports.js';
 import { TRUST_NOTE } from '../data/deliverables.js';
-import { parseDocument, detectDocType } from './docParse.js';
+import { parseDocument, detectDocType, normalizeDocumentText } from './docParse.js';
 import { BIZ_CATEGORIES, BIZ_CATEGORY_KEYS, bizCategoryLabel, isBizCategory, type BizCategoryKey } from '../data/bizCategories.js';
 import { bestUploadName, displayUploadName, inferUploadNameFromContent } from './uploadName.js';
 import type { Deliverable } from '../llm/schema.js';
@@ -29,6 +29,13 @@ export const FREE_BYTES = 200 * 1024 * 1024;
 
 // 深度整理一次性服务凭据（购买后记为 UserModule.moduleKey='sku:deep-organize'，见 schema 注释）。
 const DEEP_ORGANIZE_MODULE_KEY = 'sku:deep-organize';
+
+/**
+ * 确认前预览只返回归一化后的内容文本，原文件样式、标记与脚本不进入用户视图。
+ */
+export function formatKnowledgePreview(value: string, fileType: string | null, maxChars = 1200): string {
+  return normalizeDocumentText(value, fileType).slice(0, maxChars).trim();
+}
 
 /** 领域错误：{message, statusCode, code}（+ 可选 skuKey），供路由边界原样转发。 */
 function pipelineError(message: string, statusCode: number, code: string, extra?: Record<string, unknown>): Error {
@@ -263,7 +270,7 @@ function itemMeta(r: {
     nameSource: originalName ? 'original' : contentName ? 'content' : 'fallback',
     category,
     summary,
-    preview: r.text.trim().slice(0, 1200),
+    preview: formatKnowledgePreview(r.text, r.fileType),
     isDup: r.dupOfId != null,
   };
 }

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.js';
 import {
+  formatKnowledgePreview,
   ingestStagedFile,
   buildPipeline,
   organizeBatch,
@@ -217,6 +218,13 @@ test('organize 逐份回传 items（分类/摘要/去重标记）', async () => 
   assert.equal(csv.isDup, false);
   const dupCount = res.items.filter((i) => i.isDup).length;
   assert.equal(dupCount, 1, '一份应标记为重复');
+});
+
+test('HTML 资料的确认前预览剔除源码噪音，只保留标题和正文', () => {
+  const preview = formatKnowledgePreview('<!doctype html><html><head><title>三城布局方案</title><style>.card{width:100%}</style></head><body><h1>三城布局</h1><p>先稳住核心市场，再验证第二增长曲线。</p></body></html>', 'html');
+  assert.match(preview, /三城布局方案/);
+  assert.match(preview, /先稳住核心市场/);
+  assert.doesNotMatch(preview, /<style|width:100%|<!doctype/i);
 });
 
 // 9) 已优化持久化：organize 后 buildPipeline 从库内重建 optimizedItems + optimized 阶段 folders（刷新不丢）。

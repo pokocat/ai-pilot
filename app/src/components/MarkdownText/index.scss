@@ -1,6 +1,6 @@
 .md { display: flex; flex-direction: column; gap: 8px; }
 .md-inline { line-height: inherit; color: inherit; }
-.md-p { display: block; font-size: inherit; line-height: inherit; color: inherit; }
+.md-p { display: block; font-size: inherit; line-height: inherit; color: inherit; overflow-wrap: anywhere; word-break: break-word; }
 .md-h {
   display: block;
   color: var(--ink);
@@ -13,7 +13,7 @@
 .md-list { display: flex; flex-direction: column; gap: 5px; }
 .md-li { display: flex; align-items: flex-start; gap: 7px; }
 .md-marker { width: 22px; flex-shrink: 0; color: var(--accent); font-size: 12px; line-height: 1.7; font-weight: 600; }
-.md-li-text { flex: 1; min-width: 0; font-size: inherit; line-height: inherit; color: inherit; }
+.md-li-text { flex: 1; min-width: 0; font-size: inherit; line-height: inherit; color: inherit; overflow-wrap: anywhere; word-break: break-word; }
 .md-quote {
   background: var(--accent-soft);
   border-radius: 10px;
@@ -40,13 +40,15 @@
 .md-tr + .md-tr { border-top: 1px solid var(--line); }
 .md-td {
   flex: 1; min-width: 0; padding: 7px 10px;
-  font-size: 12.5px; line-height: 1.5; color: var(--ink-2);
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; word-break: break-word;
 }
 .md-td + .md-td { border-left: 1px solid var(--line-2); }
 .md-tr.head .md-td { font-weight: 600; color: var(--ink); background: var(--surface-2); }
 .md-codeblock {
   display: block;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: var(--ink-2);
   background: var(--surface-2);
   border-radius: 10px;

@@ -5,7 +5,6 @@ import Screen from '../../components/Screen';
 import TabHeader from '../../components/TabHeader';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
-import MarkdownText from '../../components/MarkdownText';
 import AsyncState from '../../components/AsyncState';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
@@ -15,6 +14,7 @@ import { navTo, switchTo } from '../../services/nav';
 import { useStore } from '../../hooks/useStore';
 import { checkUpload } from '../../services/uploadGuard';
 import { displaySourceName, sourceUploadName } from '../../services/uploadName';
+import { displayKnowledgePreview } from '../../services/knowledgePreview';
 import {
   api,
   type KnowledgePipelineView, type OrganizeResult, type OrganizeItem, type KnowledgeBatchFile,
@@ -102,7 +102,7 @@ const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function previewBoxHeight(text: string): number {
   const visualLines = String(text || '').split(/\r?\n/).reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 22)), 0);
-  return Math.min(300, Math.max(96, visualLines * 24 + 24));
+  return Math.min(220, Math.max(96, visualLines * 24 + 24));
 }
 
 interface PayState {
@@ -608,6 +608,7 @@ export default function ThinkTank() {
                           <Text className="orgd-tag">待确认</Text>
                         </View>
                         {organized.items.map((it) => {
+                          const preview = displayKnowledgePreview(it.preview, it.fileType);
                           const previewing = !!openPreview[it.id];
                           return (
                             <View key={it.id} className={`organized-item ${it.isDup ? 'dup' : ''}`}>
@@ -620,13 +621,13 @@ export default function ThinkTank() {
                                 </View>
                                 {it.isDup ? <Text className="or-dup">已合并</Text> : <Text className="or-tag">{categoryLabel(it.category)}</Text>}
                               </View>
-                              <View className={`preview-toggle ${it.preview ? '' : 'disabled'}`} onClick={() => it.preview && setOpenPreview((m) => ({ ...m, [it.id]: !previewing }))}>
-                                <Text>{it.preview ? (previewing ? '收起正文预览' : '预览正文') : '未提取到可预览正文'}</Text>
-                                {it.preview ? <Text>{previewing ? '⌃' : '⌄'}</Text> : null}
+                              <View className={`preview-toggle ${preview ? '' : 'disabled'}`} onClick={() => preview && setOpenPreview((m) => ({ ...m, [it.id]: !previewing }))}>
+                                <Text>{preview ? (previewing ? '收起正文预览' : '预览正文') : '未提取到可预览正文'}</Text>
+                                {preview ? <Text>{previewing ? '⌃' : '⌄'}</Text> : null}
                               </View>
-                              {previewing && it.preview ? (
-                                <ScrollView className="item-preview" scrollY style={{ height: `${previewBoxHeight(it.preview)}px` }}>
-                                  <MarkdownText text={it.preview} selectable />
+                              {previewing && preview ? (
+                                <ScrollView className="item-preview" scrollY style={{ height: `${previewBoxHeight(preview)}px` }}>
+                                  <Text className="item-preview-text" selectable>{preview}</Text>
                                 </ScrollView>
                               ) : null}
                             </View>
@@ -701,6 +702,7 @@ export default function ThinkTank() {
                   <>
                     <View className="asset-list card">
                       {optimizedItems.map((it) => {
+                        const preview = displayKnowledgePreview(it.preview, it.fileType);
                         const previewing = !!openPreview[it.id];
                         return (
                           <View key={it.id} className={`asset-list-item ${it.isDup ? 'dup' : ''}`}>
@@ -713,13 +715,13 @@ export default function ThinkTank() {
                               </View>
                               {it.isDup ? <Text className="al-dup">已合并</Text> : <Text className="al-tag">{categoryLabel(it.category)}</Text>}
                             </View>
-                            <View className={`preview-toggle ${it.preview ? '' : 'disabled'}`} onClick={() => it.preview && setOpenPreview((m) => ({ ...m, [it.id]: !previewing }))}>
-                              <Text>{it.preview ? (previewing ? '收起正文预览' : '预览正文') : '未提取到可预览正文'}</Text>
-                              {it.preview ? <Text>{previewing ? '⌃' : '⌄'}</Text> : null}
+                            <View className={`preview-toggle ${preview ? '' : 'disabled'}`} onClick={() => preview && setOpenPreview((m) => ({ ...m, [it.id]: !previewing }))}>
+                              <Text>{preview ? (previewing ? '收起正文预览' : '预览正文') : '未提取到可预览正文'}</Text>
+                              {preview ? <Text>{previewing ? '⌃' : '⌄'}</Text> : null}
                             </View>
-                            {previewing && it.preview ? (
-                              <ScrollView className="item-preview" scrollY style={{ height: `${previewBoxHeight(it.preview)}px` }}>
-                                <MarkdownText text={it.preview} selectable />
+                            {previewing && preview ? (
+                              <ScrollView className="item-preview" scrollY style={{ height: `${previewBoxHeight(preview)}px` }}>
+                                <Text className="item-preview-text" selectable>{preview}</Text>
                               </ScrollView>
                             ) : null}
                           </View>
