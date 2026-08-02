@@ -6,6 +6,10 @@
 
 ## 变更日志
 
+### 2026-08-02 · 后端 GitHub Actions 对齐 Node 24，消除 Node 20 异步测试误取消 · 影响面：CI（`server-integration.yml`）+ 工程测试基线（`AGENTS.md`）
+
+`Server Integration` 的 build、Prisma schema sync 与业务断言均已通过，但 Node 20.20.2 的 `node:test` 会在 gateway provider 的 500 分支和 LLM 队列计时分支仍有待决 Promise 时提前结束事件循环，使 19 条测试被标记 `cancelledByParent`、job 以 exit 1 结束。这不是产品逻辑回归：同一组 28 条针对性用例在 Node 24.13.0 全部通过（0 cancelled）。后端 workflow 现使用与前端 CI 一致的 Node 24；禁止后续因“后端原先是 20”而降回该不稳定组合。
+
 ### 2026-08-01 · 资料预览统一为纯内容视图，修复溢出与 HTML 源码直出 · 影响面：app（智库资料确认页）+ server（文档解析/资料整理预览）+ 回归测试
 
 确认前预览统一为纯内容文本，不再按原始文件的样式渲染：PDF、Word、Excel、CSV、TXT 使用其提取文本；Markdown 去掉标题/加粗/链接/列表等标记；HTML/HTM 文件去掉 doctype、标签、样式和脚本，仅保留标题与正文，并纳入可上传格式。服务端在入库时完成归一化，客户端对历史响应重复兜底，预览区使用原生纯文本而非 Markdown 渲染。预览滚动区按父卡片计算宽度、长链接/代码自动断行，最大展开高度从 300px 收紧到 220px；公共 Markdown 正文、列表、表格和代码块也补上同一断行保护。不再出现预览框越过卡片右边缘、长内容挤压确认操作的问题。新增前后端回归测试覆盖 HTML、Markdown 清理与预览长度边界。无接口或数据契约变更。

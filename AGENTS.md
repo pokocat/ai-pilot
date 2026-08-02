@@ -576,7 +576,7 @@ cd admin && npm test   # 同上
 此前 CI 只跑 server，这两条命令全靠人工执行，`admin` 的 `tsx` 漏装后测试基座整整停摆一段时间都没人发现。
 两个坑写在这里，别再踩：
 - **Node 必须 >= 22**：`src/**/*.test.ts` 不是被 shell 展开的（npm 用 `/bin/sh`，不支持 globstar，原样透传给 node），
-  而是 `node --test` 自己 glob——该能力 Node 22 才有。CI 固定 node 24；照抄 `server-integration.yml` 的 node 20 会直接找不到用例。
+  而是 `node --test` 自己 glob——该能力 Node 22 才有。前后端 CI 都固定 node 24；后端 gateway/LLM gate 的异步计时用例在 Node 20 会被测试运行器提前结束事件循环并批量标为 cancelled，禁止降回 Node 20。
 - **`node --test` 匹配到 0 个文件时退出码仍是 0**（只打印 `tests 0`），测试基座整体失踪也会是一片绿。
   所以 CI 那步额外断言 `pass` 计数 > 0；移动/重命名测试文件后留意这个守卫。
 
@@ -601,7 +601,7 @@ cd admin && npm test   # 同上
 - **★ 测试环境自足（hermetic env，2026-07-27 起）**：`npm test` 只吃 `.env.test` + 真实 shell 环境 + 用例内显式设置，**绝不吃开发机的 `server/.env`**——否则用例红绿取决于谁的机器（CI 没有 `.env` 故长期为绿）。三层机制：① `src/env.ts` 在 `NODE_ENV=test` 时整体跳过 dotenv；② `@prisma/client` 会在 import 与每次 `new PrismaClient()` 时**无条件**读 `server/.env`（路径烤进生成产物、与 cwd 无关，Prisma 5.22 无 opt-out），故 `test/hermeticEnv.mjs`（由 test 脚本 `--import` 预载）记下进程启动时的键集合并抹除后来被注入的键，`src/db.ts` 在构造语句下一行调该钩子；③ 守卫用例 `test/envHermetic.test.ts` 读 `.env` 的键做通用断言（不 pin 变量名），所以往 `.env` 里加新键不会再弄红测试。**推论**：用例要用的变量写进 `.env.test` 或在用例里显式 set/delete，别指望 `.env`。
 - **测试夹具不得依赖日历碰巧未过功能上线日**：只验证 provider/gateway 的新注册用户必须显式创建 Profile 或其它已入局锚点，不能靠 `createdAt < ONBOARDING_ROLLOUT_AT` 绕过首次入局；否则固定上线日期一过，请求会被补档案流程提前接管，原本绿色的测试会集体变红。
 - 覆盖：鉴权隔离、微信 openid 登录/复登、注册花名、军师档案、运营后台鉴权、多智能体对话、智能体 `free/unlock/metered` 权益、记忆语义召回+TTL、项目+知识库+跨对话召回、跨项目隔离、对话汇总、版本化报告+diff、**★跨用户隔离（防信息泄露 TC-G）**、模型配置不泄露明文 key、SSE 流式、内容审核拦截、算力赠送/扣减/不足拦截、套餐购买/企业版不限量、并发回归（智能体购买、套餐发放、短信发放/消费、报告版本、智能体发布）、首登建档个性化、老用户回流、跨智能体协同+引用闭环、成果反馈回流、用户主路径、边界健壮性。
-- CI：`.github/workflows/server-integration.yml` 用 GitHub Actions `postgres:16-alpine` 服务（tmpfs 数据目录）执行 `npm ci`、`prisma generate`、后端 build、`prisma db push`、`npm test`。
+- CI：`.github/workflows/server-integration.yml` 用 GitHub Actions Node 24 + `postgres:16-alpine` 服务（tmpfs 数据目录）执行 `npm ci`、`prisma generate`、后端 build、`prisma db push`、`npm test`。
 - 红线：改 路由/鉴权/检索/上下文/数据模型 后必须 `npm test` 全绿；新增可隔离数据类型须在 TC-G 补「跨用户不可见」断言。
 
 ### 微信支付本地验证（不触达微信，两条通道互补）
