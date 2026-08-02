@@ -221,7 +221,7 @@ export default function Knowledge() {
                     {/* 一行摘要：解析出的正文首段；解析中/失败或待整理则给状态化说明，不再只报份数 */}
                     <Text className="ki-sum">
                       {staging
-                        ? '待整理 · 整理确认后才可被军师调用'
+                        ? '待整理 · 确认入库后军师才能用上'
                         : failed
                           ? (it.error || '解析失败，删掉重传即可')
                           : it.summary || (isSettled(it.status) ? '（该资料无可预览正文）' : '正在解析正文…')}

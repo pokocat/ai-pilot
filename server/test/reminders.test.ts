@@ -58,7 +58,7 @@ test('buildReminderView：活跃案卷 + 军令 → 三条提醒节奏（逐字�
 
   const review = view.items.find((i) => i.kind === 'review')!;
   assert.equal(review.time, '20:30');
-  assert.equal(review.desc, '20:30 生成今日复盘。');
+  assert.equal(review.desc, '20:30 今晚复盘。');
 
   const weekly = view.items.find((i) => i.kind === 'weekly')!;
   assert.equal(weekly.time, '周五');

@@ -19,7 +19,7 @@ const DEFAULT_SURVEY: SurveyQ[] = [
 
 type Step = 'color' | 'casefile' | 'judge';
 
-const LEAD = '军师正在核阅你的案卷，研判当前处境……';
+const LEAD = '我先看看你的案卷，判断眼下的处境……';
 const FALLBACK_TODO = '先把最近 7 天的关键数（线索 / 咨询 / 成交）拉齐——军师入局后据此为你定策。';
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {

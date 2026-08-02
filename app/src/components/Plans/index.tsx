@@ -135,9 +135,9 @@ export default function Plans({ open, onClose }: Props) {
           </View>
         </View>
       </View>
-      <Text className="ps-sub">权益点用于深度方案与启用专项顾问。选择方案后，本月权益点会同步更新。</Text>
+      <Text className="ps-sub">权益点可以做深度方案、启用专项顾问。换套餐后，本月权益点跟着变。</Text>
       {me?.planStatus?.expired && (
-        <Text className="ps-sub" style={{ color: 'var(--danger)' }}>当前套餐已到期：内容只读、AI 交互暂停，续费后立即恢复。</Text>
+        <Text className="ps-sub" style={{ color: 'var(--danger)' }}>套餐已到期：内容只能看不能改，军师暂停服务，续费后马上恢复。</Text>
       )}
 
       <ScrollView scrollY enhanced showScrollbar={false} className="ps-list">

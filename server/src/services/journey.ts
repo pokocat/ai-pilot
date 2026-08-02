@@ -58,9 +58,9 @@ export function deriveNextStep(input: {
     case 'scanned':
       return { key: 'continue_diagnosis', title: '进参谋室，开始诊断', desc: '速诊只是开胃，六轮深聊才出完整打法。', route: 'chat' };
     case 'diagnosing':
-      return { key: 'continue_diagnosis', title: `继续第 ${diagRound + 1} 轮诊断`, desc: '把打法聊定，认可后自动拆成军令。', route: 'chat' };
+      return { key: 'continue_diagnosis', title: `继续第 ${diagRound + 1} 轮诊断`, desc: '把打法聊定，方案定了就自动拆成军令。', route: 'chat' };
     case 'plan_ready':
-      return { key: 'accept_plan', title: '认可方案，生成军令', desc: '认可后自动拆成今日军令。', route: 'chat' };
+      return { key: 'accept_plan', title: '去定方案，生成军令', desc: '方案定下后，自动拆成今日军令。', route: 'chat' };
     case 'executing':
     case 'reviewing': {
       if (input.todayOrdersTotal > 0 && input.todayOrdersDone < input.todayOrdersTotal)

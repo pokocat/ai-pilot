@@ -131,7 +131,7 @@ export default function MingpanReportPage() {
         {fortuneOff ? (
           <View className="mp-hero">
             <Text className="mp-hero-t serif">命盘报告暂不可用</Text>
-            <Text className="mp-hero-s">军师已按当前策略暂停命理视角的推演。你的战略判断、军令与复盘不受影响，可继续在参谋室与军师对话。</Text>
+            <Text className="mp-hero-s">命理视角的推演已暂停。你的战略判断、军令与复盘不受影响，可继续在参谋室与军师对话。</Text>
           </View>
         ) : !authed ? (
           <>

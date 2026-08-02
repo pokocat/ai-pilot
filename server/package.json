@@ -20,6 +20,7 @@
     "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
     "db:pgvector": "psql \"$DATABASE_URL\" -f prisma/pgvector.sql",
     "admin:sync-content": "tsx scripts/syncAdminContent.ts",
+    "copy:sync": "tsx scripts/syncAppCopy.ts",
     "db:reembed": "tsx scripts/reembed.ts",
     "secrets:encrypt": "tsx scripts/encryptSecrets.ts",
     "pretest": "node --env-file=.env.test node_modules/prisma/build/index.js db push --skip-generate",

@@ -83,7 +83,7 @@ export default function LedgerPage() {
             {(dec?.items ?? []).map((d) => (
               <DecisionRow key={d.id} d={d} busy={busy === d.id} onVerify={verifyDec} accent={accent} disputed={disputed.has(d.id)} onDisputed={markDisputed} />
             ))}
-            {dec && !dec.items.length ? <Text className="lg-empty">还没有决策记账。认可方案 = 一次战略决策，军师会自动记进来。</Text> : null}
+            {dec && !dec.items.length ? <Text className="lg-empty">还没有决策记录。方案定一次 = 一次战略决策，我会自动记进来。</Text> : null}
           </>
         ) : (
           <>

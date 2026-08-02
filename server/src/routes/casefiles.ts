@@ -87,7 +87,7 @@ export async function casefileRoutes(app: FastifyInstance) {
     const text = String(req.body?.text ?? '').trim().replace(/\s+/g, ' ');
     if (!text) return reply.code(400).send({ error: '军令内容不能为空' });
     const cf = await activeCasefile(user.id);
-    if (!cf) return reply.code(409).send({ error: '还没有案卷，先认可一份军师方案', code: 'NO_CASEFILE' });
+    if (!cf) return reply.code(409).send({ error: '还没有案卷，先在对话里定下一份军师方案', code: 'NO_CASEFILE' });
     const date = todayStr();
     const existing = await prisma.casefileOrder.findMany({
       where: { casefileId: cf.id, date },
@@ -137,7 +137,7 @@ export async function casefileRoutes(app: FastifyInstance) {
     async (req, reply) => {
       const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
       const cf = await activeCasefile(user.id);
-      if (!cf) return reply.code(409).send({ error: '还没有案卷，先认可一份军师方案', code: 'NO_CASEFILE' });
+      if (!cf) return reply.code(409).send({ error: '还没有案卷，先在对话里定下一份军师方案', code: 'NO_CASEFILE' });
       const toInt = (v: unknown) => {
         const n = parseInt(String(v ?? ''), 10);
         return Number.isFinite(n) && n >= 0 ? Math.min(n, 1_000_000) : 0;
@@ -158,7 +158,7 @@ export async function casefileRoutes(app: FastifyInstance) {
   app.put<{ Body: Partial<GoalLadder> }>('/casefile/goals', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const cf = await activeCasefile(user.id);
-    if (!cf) return reply.code(409).send({ error: '还没有案卷，先认可一份军师方案', code: 'NO_CASEFILE' });
+    if (!cf) return reply.code(409).send({ error: '还没有案卷，先在对话里定下一份军师方案', code: 'NO_CASEFILE' });
     const body = req.body ?? {};
     const existing = (cf.goalsJson as GoalLadder | null) ?? {};
     const pick = (k: keyof GoalLadder): string | null =>

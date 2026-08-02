@@ -139,7 +139,7 @@ export default function TianshiCalendar() {
         {fortuneOff ? (
           <View className="tc-hero">
             <Text className="tc-year serif">全年天时暂不可用</Text>
-            <Text className="tc-sub">军师已按当前策略暂停命理视角的经营节奏推演。你的战略判断、军令与复盘不受影响，可继续在参谋室与军师对话。</Text>
+            <Text className="tc-sub">命理视角的经营节奏推演已暂停。你的战略判断、军令与复盘不受影响，可继续在参谋室与军师对话。</Text>
           </View>
         ) : !authed ? (
           <>
@@ -203,7 +203,7 @@ export default function TianshiCalendar() {
         ) : loaded ? (
           <>
             <View className="tc-hero">
-              <Text className="tc-year serif">先补生辰，解锁你的全年天时</Text>
+              <Text className="tc-year serif">先补生辰，看你的全年天时</Text>
               <Text className="tc-sub">排盘在服务端引擎完成，只算一次长期使用；只用于经营节奏参考。</Text>
             </View>
             <View className="tc-form">

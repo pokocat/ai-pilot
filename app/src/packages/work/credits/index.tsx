@@ -72,7 +72,7 @@ export default function Credits() {
 
       <View className="pad" style={{ paddingTop: '12px' }}>
         <View className="cd-hero">
-          <Text className="cd-k">算力 · 解锁专项顾问</Text>
+          <Text className="cd-k">算力 · 启用专项顾问</Text>
           <View className="cd-vrow">
             <Icon name="diamond" size={20} color={color.vars['--accent-bright']} />
             <Text className="cd-v serif" style={{ color: 'var(--accent-bright)' }}>
@@ -93,12 +93,12 @@ export default function Credits() {
         </View>
 
         <Text className="cd-sech serif">算力消耗明细</Text>
-        <Text className="cd-secs">解锁顾问 / 图片产出 / 充值赠送</Text>
+        <Text className="cd-secs">启用顾问 / 出图 / 充值赠送</Text>
 
         {loading && items.length === 0 ? (
           <AsyncState loading skeletonRows={3} />
         ) : items.length === 0 ? (
-          <Text className="cd-empty">暂无算力流水。解锁专项顾问或充值后会显示在这里。</Text>
+          <Text className="cd-empty">还没有算力记录。启用顾问或充值后就有了。</Text>
         ) : (
           <View className="cd-list">
             {items.map((it, i) => (

@@ -155,10 +155,10 @@ export async function buildClientUnderstanding(user: UserForUnderstanding): Prom
   const evidenceTotal = evidenceCount.profile + evidenceCount.memories + evidenceCount.projects + evidenceCount.knowledge + evidenceCount.sessions;
   const maturity = evidenceTotal === 0 && !identity.length ? 'empty' : nextQuestions.length > 2 ? 'forming' : 'ready';
   const summary = maturity === 'empty'
-    ? '军师还没有足够资料形成判断。补齐基本情况后，后续建议会优先依据你的真实业务来推演。'
+    ? '我还没有足够资料下判断。把基本情况补齐，后面的建议才能贴着你的真实业务走。'
     : maturity === 'forming'
-      ? `军师已掌握 ${evidenceTotal} 条经营线索，能做初步判断；关键背景仍需继续补齐，避免替你假设业务事实。`
-      : `军师已沉淀 ${evidenceTotal} 条经营线索，可作为后续咨询、复盘和方案产出的底稿。`;
+      ? `我已经拿到 ${evidenceTotal} 条经营线索，能给初步判断；关键背景还得补，免得我替你假设业务事实。`
+      : `我已经攒下 ${evidenceTotal} 条经营线索，后面咨询、复盘和出方案都能拿它当底稿。`;
 
   const updatedAtCandidates = [
     profile?.updatedAt,
@@ -180,9 +180,9 @@ export async function buildClientUnderstanding(user: UserForUnderstanding): Prom
     section('identity', '经营身份', identity, '还没记录你的称呼、公司、行业和阶段。'),
     section('journey', '创业路径', journey, '还没形成创业路径。可以告诉军师：你怎么开始、做过哪些转折、现在走到哪一步。'),
     section('difficulties', '当前难题', difficulties, '还没记录明确难题。后续咨询会先追问关键约束，再给建议。'),
-    section('materials', '已沉淀资料', materials, '还没有长期线索。对话、项目、报告和知识库都会逐步沉淀到这里。'),
+    section('materials', '已存资料', materials, '还没有长期线索。对话、案卷、方案和资料库都会慢慢存到这里。'),
   ];
-  if (dossierText) sections.push(section('dossier', '战略档案（持续沉淀）', [dossierText], '尚未沉淀战略档案。'));
+  if (dossierText) sections.push(section('dossier', '战略档案（持续累积）', [dossierText], '还没有战略档案。'));
 
   // 战略档案真结论（战局 hero 优先展示「主要矛盾」而非通用摘要，修 hero 标签与内容不符）
   const strategic = await loadStrategicProfile(user.id).catch(() => null);

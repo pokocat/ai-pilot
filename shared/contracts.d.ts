@@ -157,7 +157,7 @@ export interface AgentDetail {
   key: string; name: string; role: string; icon: string; type: AgentType;
   gift: boolean; billing: AgentBilling; price: number; billingRatio: number; meterUnit: 'text' | 'image';
   enabled: boolean; systemPrompt: string; memoryConfig: MemoryConfig; deliverableKey: string | null;
-  greet?: string;
+  greet?: string; memText: string; learnText: string;
   runtime: AgentRuntimeView; // 接入方式（跟随全局 / 自定义端点 / Dify 应用）
   // 版本化（P0+）：本详情 = 草稿态；C 端实际跑 publishedVersionId 指向的快照
   publishedVersionId?: string | null;
@@ -176,7 +176,7 @@ export interface AdminAgentCreate {
 export interface AdminAgentUpdate {
   name?: string; role?: string; icon?: string; type?: AgentType;
   gift?: boolean; billing?: AgentBilling; price?: number; billingRatio?: number; meterUnit?: 'text' | 'image'; enabled?: boolean;
-  greet?: string; deliverableKey?: string | null;
+  greet?: string; memText?: string; learnText?: string; deliverableKey?: string | null;
   systemPrompt?: string; memoryConfig?: MemoryConfig;
   runtime?: AgentRuntimeUpdate; // 接入方式配置
 }

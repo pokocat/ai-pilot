@@ -56,7 +56,7 @@ export default function Market() {
     if (m.id === 'knowledge-base') { navTo('/packages/work/knowledge/index'); return; }
     if (m.id === 'data-bindings') { navTo('/packages/work/bindings/index'); return; }
     if (m.agentKey && m.prompt) { goChat(m.agentKey, m.prompt); return; }
-    Taro.showToast({ title: '该能力随方案认可后自动启用', icon: 'none' });
+    Taro.showToast({ title: '方案定了，这个能力自动启用', icon: 'none' });
   };
 
   return (
@@ -121,7 +121,7 @@ export default function Market() {
 
         <View className="sec-head">
           <Text className="sec-title">锦囊市场</Text>
-          <Text className="sec-more">军师调用的方法能力包</Text>
+          <Text className="sec-more">军师用得上的方法能力包</Text>
         </View>
         <View className="skill-grid">
           {SKILL_MARKET.map((sk) => (

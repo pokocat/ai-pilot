@@ -132,13 +132,13 @@ export default function Profile() {
     {
       title: '档案',
       rows: [
-        { ic: 'insight', t: '个人档案 · 军师记忆', s: briefLine(me?.understanding), onClick: () => navTo('/packages/main/brief/index') },
+        { ic: 'insight', t: '个人档案', s: briefLine(me?.understanding), onClick: () => navTo('/packages/main/brief/index') },
         { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: openDossier },
         ...(fortuneOn ? [
           { ic: 'trend', t: '命盘报告 · 八字紫微印证', s: '', onClick: () => navTo('/packages/work/mingpan/index') },
         ] : []),
         { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => navTo('/packages/work/projects/index') },
-        { ic: 'flag', t: '战略账本 · 决策与天机', s: '记账验证', onClick: () => navTo('/packages/work/ledger/index') },
+        { ic: 'flag', t: '战略账本 · 决策与天机', s: '决策记录', onClick: () => navTo('/packages/work/ledger/index') },
       ],
     },
     {
@@ -148,7 +148,7 @@ export default function Profile() {
         // 作品库（历史成品图）：与方案库/品牌资产/资料库同属「资产」，故落在这一组而不是页头。
         // 刻意**不按出图开关隐藏**：这是回看已有资产的入口，不是出图入口（出图按钮的降级口径在作品库页内处理）。
         { ic: 'image', t: '我的作品库 · 历史成品图', s: '海报', onClick: () => navTo('/packages/work/gallery/index') },
-        { ic: 'spark', t: '我的品牌资产', s: '数字人/短视频预填', onClick: () => navTo('/packages/work/brandkit/index') },
+        { ic: 'spark', t: '我的品牌资产', s: '数字人/短视频素材', onClick: () => navTo('/packages/work/brandkit/index') },
         { ic: 'attach', t: '我的资料库', s: '', onClick: () => navTo('/packages/work/knowledge/index') },
         { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => navTo('/packages/work/bindings/index') },
       ],
@@ -305,8 +305,8 @@ export default function Profile() {
         {/* 深度能力解锁（account-depth 绿卡） */}
         <View className="account-depth" onClick={() => setShowPlans(true)}>
           <View className="ad-b">
-            <Text className="ad-t">深度能力解锁</Text>
-            <Text className="ad-s">更高产出额度、进阶锦囊、数据增强与长期监控</Text>
+            <Text className="ad-t">进阶能力</Text>
+            <Text className="ad-s">更高产出额度、进阶锦囊、数据加持与长期跟进</Text>
           </View>
           <Text className="ad-em">管理</Text>
         </View>

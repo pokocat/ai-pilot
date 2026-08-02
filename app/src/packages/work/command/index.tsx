@@ -26,8 +26,8 @@ const ACTION_LABEL: Record<OrderActionType, string> = {
 const ACTION_HINT: Record<OrderActionType, string> = {
   upload: '上传后进入智库待整理区，再回写到军师判断。',
   backfill: '记录线索、咨询、成交，提交后进入今日复盘。',
-  review: '填入完成数据，生成今日复盘并校准明日军令。',
-  topics: '进入能力页调用对应军师，把军令落到工具。',
+  review: '填入完成数据，今晚复盘并调整明日军令。',
+  topics: '去能力页找对应军师，把军令落到工具。',
   none: '按步骤推进这条军令，完成后回执行页打卡。',
 };
 

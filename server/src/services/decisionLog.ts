@@ -124,7 +124,7 @@ export async function recordDecisionFromAccept(args: {
         userId: args.userId,
         scene,
         decision,
-        reasons: [`由${args.agentName}产出并经客户认可`],
+        reasons: [`由${args.agentName}给出，客户已定`],
         verifyStandard: '按该方案拆出的军令完成情况与线索/咨询/成交回填数据验证',
         verifyByDate,
         fast: false,

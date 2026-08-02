@@ -12,16 +12,16 @@ export interface EmptyState {
 export const EMPTY_STATES = {
   // 战局页：无军师判断 / 无案卷（冷启动）
   battle: {
-    kicker: '还没建档',
-    title: '军师还没为你建档',
-    desc: '3 个问题，10 分钟拿到你的初诊判断。',
-    cta: '开始初诊',
+    kicker: '还没立案',
+    title: '还没给你立过案卷',
+    desc: '答 3 个问题，我先帮你判断眼下最要紧的事。',
+    cta: '先聊聊',
   },
   // 执行页：无案卷 / 无作战方案
   execution: {
     kicker: '还没有方案',
-    title: '还没有作战方案',
-    desc: '先去参谋室和军师聊一次，认可方案后自动拆成今日军令。',
+    title: '还没给你出过方案',
+    desc: '去参谋室和军师聊一次，方案定了，军令自然就有了。',
     cta: '去参谋室',
   },
 } satisfies Record<string, EmptyState>;

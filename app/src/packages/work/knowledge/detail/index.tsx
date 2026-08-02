@@ -125,7 +125,7 @@ export default function KnowledgeDetailPage() {
           <View className={`kd-analyze card ${busy ? 'busy' : ''}`} onClick={analyze}>
             <View className="kd-an-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="chart" size={20} color={accent} /></View>
             <View className="kd-an-b">
-              <Text className="kd-an-t">{busy ? '军师正在过账…' : '生成经营体检'}</Text>
+              <Text className="kd-an-t">{busy ? '正在检查…' : '帮我做经营体检'}</Text>
               <Text className="kd-an-s">让军师过一遍账，读出隐患，开三条军令</Text>
             </View>
             <View className="kd-an-go" style={{ background: accent }}><Text>{busy ? '…' : '›'}</Text></View>

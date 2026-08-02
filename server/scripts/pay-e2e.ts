@@ -47,7 +47,7 @@ async function main() {
     const monthly = (plansRes.body as any[]).find((p) => p.period === 'month' && p.price > 0);
     const yearly = (plansRes.body as any[]).find((p) => p.period === 'year' && p.price > 0);
     check('套餐目录含 付费月付 + 付费年付', !!monthly && !!yearly, { monthly: monthly?.name, yearly: yearly?.name });
-    if (!monthly || !yearly) throw new Error('缺少付费套餐，请先 npm run db:sync-plans');
+    if (!monthly || !yearly) throw new Error('缺少付费套餐：本地先跑 npm run db:seed 灌夹具，线上到运营后台「商品 · 套餐」建档（代码侧已无同步脚本）');
     // 所有金额/额度断言一律从被选中的套餐派生，定价改版不会腐坏断言。
     const monthlyQuota = monthly.tokenQuotaPerMonth as number;
 

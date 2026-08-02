@@ -195,7 +195,7 @@ export async function sessionRoutes(app: FastifyInstance) {
           agentName: s.agent.name,
           agentIcon: s.agent.icon,
           title: s.title,
-          snippet: generating ? '军师正在思考…' : snippet,
+          snippet: generating ? '容我想想…' : snippet,
           updatedAt: s.updatedAt,
           projectId: s.projectId,
           generating,

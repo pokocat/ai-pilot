@@ -27,7 +27,7 @@ type ExecView = 'today' | 'week' | 'review';
 
 // 提醒节奏：微信订阅消息是一次性授权，用户每点一次订阅可触达一次。
 const REMINDERS = [
-  { time: '每天 09:00', text: '生成今日军令' },
+  { time: '每天 09:00', text: '出今日军令' },
   { time: `每天 ${REVIEW_TIME}`, text: '记录战果，生成当日复盘' },
   { time: '每周五 18:00', text: '生成周复盘，调整下周打法' },
 ];
@@ -166,7 +166,7 @@ export default function Studio() {
     if (!updated) { Taro.showToast({ title: '回填未成，稍后再试', icon: 'none' }); return; }
     setDossier(updated);
     setFilling((cur) => { const n = { ...cur }; delete n[id]; return n; });
-    Taro.showToast({ title: '已回填 · 复盘时军师据此校准', icon: 'none' });
+    Taro.showToast({ title: '数据已回填', icon: 'none' });
   };
   const onRemove = (id: string) =>
     Taro.showModal({ title: '删除军令', content: '删除这条军令？', confirmText: '删除' }).then(async (r) => {
@@ -174,7 +174,7 @@ export default function Studio() {
     });
   const onAdd = async () => {
     if (!newOrder.trim()) return;
-    if (!dossier) { Taro.showToast({ title: '先认可一份军师方案生成案卷', icon: 'none' }); return; }
+    if (!dossier) { Taro.showToast({ title: '先和军师定下一份方案，生成案卷', icon: 'none' }); return; }
     try {
       setDossier(await addOrder(newOrder));
       setNewOrder('');
@@ -183,17 +183,17 @@ export default function Studio() {
     }
   };
   const onSaveBackfill = async () => {
-    if (!dossier) { Taro.showToast({ title: '先认可一份军师方案生成案卷', icon: 'none' }); return; }
+    if (!dossier) { Taro.showToast({ title: '先和军师定下一份方案，生成案卷', icon: 'none' }); return; }
     try {
       setDossier(await saveBackfill(bf));
-      Taro.showToast({ title: '已记录 · 复盘时军师会参考这些数', icon: 'none' });
+      Taro.showToast({ title: '数据已记录', icon: 'none' });
     } catch {
       Taro.showToast({ title: '保存失败，请重试', icon: 'none' });
     }
   };
   // V7-10：目标阶梯 —— 打开某一格的内联编辑浮层
   const openGoalEdit = (field: GoalField, label: string, current: string) => {
-    if (!dossier) { Taro.showToast({ title: '先认可一份军师方案生成案卷', icon: 'none' }); return; }
+    if (!dossier) { Taro.showToast({ title: '先和军师定下一份方案，生成案卷', icon: 'none' }); return; }
     setGoalDraft(current);
     setGoalEdit({ field, label });
   };
@@ -207,7 +207,7 @@ export default function Studio() {
       .catch((e) => s.handleApiError(e));
   };
   const genOrders = () =>
-    goChat('general', '基于我们最近认可的方案，把今天最重要的 1-3 件事拆成今日军令，并给出每件事的完成标准。');
+    goChat('general', '按我们最近定下的方案，把今天最重要的 1-3 件事拆成今日军令，并给出每件事的完成标准。');
   // 发起复盘：先落复盘账（服务端记连续天数，不阻塞跳转），再带真实数据进复盘对话。
   // 复盘走总军师（M2 PR-6：复盘是留存生命线，订阅内免费，不设解锁墙；经营参谋 ops 保留为可解锁深聊）。
   const genReview = () => {
@@ -224,7 +224,7 @@ export default function Studio() {
   const genScript = () =>
     goChat('ip', firstUndone
       ? `围绕这条军令帮我产出可直接使用的内容脚本：「${firstUndone.text}」。`
-      : '基于我们最近认可的方案，帮我生成今天要发布的内容脚本。');
+      : '按我们最近定下的方案，帮我写今天要发布的内容脚本。');
 
   // 每日战报卡（M4 PR-15）：服务端按真实账本渲染，复制可分享链接
   const shareDailyCard = async () => {
@@ -261,14 +261,14 @@ export default function Studio() {
         ]
       : [
           '和军师聊透当前处境，产出一份方案',
-          '认可方案，自动拆成今日军令',
+          '方案定了，自动拆成今日军令',
           '每日打卡 + 录入数据，晚间复盘',
         ];
   const xianceSource = dossier
     ? doneTodayOrders.length && !pendingTodayOrders.length
       ? `源自案卷「${dossier.title}」· 今日完成项已归档`
-      : `源自案卷「${dossier.title}」· 已认可，已生成军令`
-    : '认可方案后，这里会换成你的破局三步';
+      : `源自案卷「${dossier.title}」· 方案已定，军令已出`
+    : '方案定了以后，这里是你的破局三步';
   const mainOrderTitle = firstUndone ? firstUndone.text : todayOrders.length ? '今日军令已归档' : '今天还没有军令';
   const mainOrderDesc = firstUndone
     ? '可让 IP 军师直接生成配套内容脚本。'
@@ -276,7 +276,7 @@ export default function Studio() {
       ? '完成项已归档，去录入数据、做复盘。'
       : '让军师根据案卷生成今天最重要的 1-3 件事。';
   const mainOrderAction = firstUndone ? genScript : todayOrders.length ? genReview : genOrders;
-  const mainOrderButton = firstUndone ? '生成脚本' : todayOrders.length ? '生成复盘' : '生成今日军令';
+  const mainOrderButton = firstUndone ? '帮我写脚本' : todayOrders.length ? '开始复盘' : '帮我出今日军令';
 
   return (
     <Screen topInset scroll={false}>
@@ -300,9 +300,9 @@ export default function Studio() {
               <View className="deck-card battle-card">
                 <Text className="deck-k">今日战役 · {dateStr}</Text>
                 <Text className="deck-title serif">{dossier.title}</Text>
-                <Text className="deck-desc">源自认可方案 · 由{dossier.sourceAgent}生成 · 打卡记录，复盘定夺明日军令。</Text>
+                <Text className="deck-desc">源自已定方案 · 由{dossier.sourceAgent}给出 · 打卡记录，复盘决定明日军令。</Text>
                 <View className="deck-progress"><View className="deck-fill" style={{ width: `${progress.percent}%` }} /></View>
-                <Text className="deck-foot">{progress.total ? `完成度 ${progress.percent}% · ${REVIEW_TIME} 复盘` : `待生成军令 · ${REVIEW_TIME} 复盘`}</Text>
+                <Text className="deck-foot">{progress.total ? `完成度 ${progress.percent}% · ${REVIEW_TIME} 复盘` : `军令还没出 · ${REVIEW_TIME} 复盘`}</Text>
               </View>
             ) : (
               <View className="deck-card battle-card" onClick={() => switchTo('/pages/sessions/index')}>
@@ -362,7 +362,7 @@ export default function Studio() {
           <AdvisorAvatar agentKey="general" size={42} online />
           <View className="ac-b">
             <Text className="ac-t serif">总军师督战</Text>
-            <Text className="ac-d">{dossier ? '打卡与数据悉数呈报总军师，据此调度明日安排。' : '认可方案后，各军师的动作会汇总到这里协同推进。'}</Text>
+            <Text className="ac-d">{dossier ? '打卡和数据我都看在眼里，据此调整明日安排。' : '方案定了以后，各军师的动作会在这里汇合，一起推进。'}</Text>
           </View>
           <Text className="ac-go">去对话</Text>
         </View>
@@ -401,7 +401,7 @@ export default function Studio() {
             <View className="ge-head">
               <View className="ge-copy">
                 <Text className="gs-title serif">{goalEdit.label}目标</Text>
-                <Text className="gs-hint">一句话目标 + 关键指标，军师复盘时对齐这条。</Text>
+                <Text className="gs-hint">一句话目标 + 关键指标，复盘时按这条对照。</Text>
               </View>
               <Text className="ge-close" onClick={() => setGoalEdit(null)}>取消</Text>
             </View>
@@ -436,7 +436,7 @@ export default function Studio() {
               <View className="command-card card" onClick={() => goChat('general', '帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}>
                 <Text className="command-badge">第 0 号军令 · 补资料</Text>
                 <Text className="command-title serif">{und.nextQuestions[0]}</Text>
-                <Text className="command-desc">补齐后，军师会重算判断和任务优先级 · 还有 {und.nextQuestions.length} 条待补</Text>
+                <Text className="command-desc">补齐后，判断和任务优先级会跟着更新 · 还有 {und.nextQuestions.length} 条待补</Text>
                 <Text className="payoff">补齐后，战局判断与军师档案同步更新</Text>
               </View>
             ) : null}
@@ -445,8 +445,8 @@ export default function Studio() {
             {pendingTodayOrders.length === 0 && doneTodayOrders.length === 0 ? (
               <View className="orders-empty card" onClick={genOrders}>
                 <Text className="oe-t serif">今天还没有军令</Text>
-                <Text className="oe-d">{dossier ? '让军师根据案卷生成今天最重要的 1-3 件事。' : '认可一份军师方案后，这里会自动生成今日军令。'}</Text>
-                <Text className="oe-go">{dossier ? '生成今日军令 ›' : '去对话 ›'}</Text>
+                <Text className="oe-d">{dossier ? '让军师根据案卷给出今天最重要的 1-3 件事。' : '方案定了以后，今天该干什么我自动给你排好。'}</Text>
+                <Text className="oe-go">{dossier ? '帮我出今日军令 ›' : '去对话 ›'}</Text>
               </View>
             ) : (
               listOrders.map((o) => {
@@ -549,14 +549,14 @@ export default function Studio() {
                 ))}
               </View>
               <View className="df-save" onClick={onSaveBackfill}><Text>保存数据</Text></View>
-              <Text className="payoff">军师复盘时据此校准，必要时调整明日军令</Text>
+              <Text className="payoff">这些数据我会留到复盘时对照，必要时调整明日军令</Text>
             </View>
 
             {/* 复盘前检查（review-before，真实状态） */}
             <View className="review-before card">
               <Text className="rb-k">复盘前检查</Text>
               <View className="rb-line">
-                <Text className={`rb-state ${progress.total && progress.done < progress.total ? 'warn' : ''}`}>{progress.total ? `${progress.done}/${progress.total}` : '待生成'}</Text>
+                <Text className={`rb-state ${progress.total && progress.done < progress.total ? 'warn' : ''}`}>{progress.total ? `${progress.done}/${progress.total}` : '还没出'}</Text>
                 <Text className="rb-text">今日军令完成情况</Text>
               </View>
               <View className="rb-line">
@@ -565,7 +565,7 @@ export default function Studio() {
               </View>
               <View className="rb-line" onClick={genReview}>
                 <Text className="rb-state">{REVIEW_TIME}</Text>
-                <Text className="rb-text">生成今日复盘，决定明日是否调整军令</Text>
+                <Text className="rb-text">今晚复盘，决定明日是否调整军令</Text>
               </View>
             </View>
           </>
@@ -575,8 +575,8 @@ export default function Studio() {
           weekGroups.length === 0 ? (
             <View className="orders-empty card" onClick={genOrders}>
               <Text className="oe-t serif">本周还没有军令记录</Text>
-              <Text className="oe-d">认可方案或生成今日军令后，这里按天沉淀执行记录。</Text>
-              <Text className="oe-go">生成今日军令 ›</Text>
+              <Text className="oe-d">方案定了或出过今日军令后，这里按天保留执行记录。</Text>
+              <Text className="oe-go">帮我出今日军令 ›</Text>
             </View>
           ) : (
             <View className="week-list card">
@@ -601,12 +601,12 @@ export default function Studio() {
             <WeeklyBizMetrics accent={accent} onFilledChange={setBizFilled} />
             <View className="review-card card">
               <Text className="rc-k">今晚复盘{streak ? ` · 已连续 ${streak} 天` : ''}</Text>
-              <Text className="rc-t">军师依今日军令完成度与实绩数据，诊断症结，给出明日军令。</Text>
+              <Text className="rc-t">今天做得怎么样、数据有什么变化，我晚上一起盘一遍，再给你明日军令。</Text>
               <Text className="payoff">依据：今日军令 {progress.done}/{progress.total || 0} · 数据{backfillSaved ? '已录' : '未录'}</Text>
               {bizFilled === false ? <Text className="rc-hint">本周经营数据还没填，填了复盘对账更准（不填也能复盘）。</Text> : null}
               <View className="rc-btn" onClick={genReview}>
                 <Icon name="doc" size={15} color="#fff" />
-                <Text>生成今日复盘</Text>
+                <Text>今晚复盘</Text>
               </View>
               <View className="rc-btn ghost" onClick={shareDailyCard}>
                 <Icon name="image" size={15} color={accent} />

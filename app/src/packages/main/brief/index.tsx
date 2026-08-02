@@ -67,7 +67,7 @@ export default function BriefPage() {
           </View>
           <Text className="bf-k">军师有多了解你的生意</Text>
           <Text className="bf-t serif">{understanding?.title ?? '个人档案'}</Text>
-          <Text className="bf-summary">{understanding?.summary ?? '登录并补充经营资料后，军师会把对你的理解整理在这里。'}</Text>
+          <Text className="bf-summary">{understanding?.summary ?? '登录并补充经营资料后，我会把对你的理解整理在这里。'}</Text>
           {understanding ? <Text className="bf-counts">{evidenceLine(understanding)}</Text> : null}
         </View>
 
@@ -159,7 +159,7 @@ export default function BriefPage() {
           </>
         ) : (
           <View className="bf-sec">
-            <Text className="bf-empty">暂无资料。先登录并完成建档，后续对话、案卷、方案和资料库都会逐步沉淀到个人档案。</Text>
+            <Text className="bf-empty">暂无资料。先登录并完成建档，后续对话、案卷、方案和资料库都会慢慢存进个人档案。</Text>
           </View>
         )}
 
@@ -193,7 +193,7 @@ function evidenceLine(u: ClientUnderstanding): string {
     u.evidenceCount.knowledge ? `资料 ${u.evidenceCount.knowledge}` : '',
     u.evidenceCount.sessions ? `对话 ${u.evidenceCount.sessions}` : '',
   ].filter(Boolean);
-  return parts.length ? parts.join(' · ') : '暂无沉淀资料';
+  return parts.length ? parts.join(' · ') : '还没有资料';
 }
 
 function startInterview(focus?: string) {

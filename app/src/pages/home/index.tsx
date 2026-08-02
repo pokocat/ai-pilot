@@ -177,7 +177,7 @@ export default function Home() {
     if (s.isAuthed()) {
       jobs.push(api.refreshForces().then(() => store.loadMe()).catch(s.handleApiError)); // V7-04：刷新结构化三势后回读 /me
     }
-    Promise.all(jobs).then(() => Taro.showToast({ title: '军情已刷新', icon: 'none' }));
+    Promise.all(jobs).then(() => Taro.showToast({ title: '军情已更新', icon: 'none' }));
   };
   const startInterview = () =>
     goChat(`agentKey=general&continue=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
@@ -201,7 +201,7 @@ export default function Home() {
         setCta('done');
         store.loadMe();
         refreshDossier().then(setDossier); // 认可即建案卷、拆军令 → 刷新下一步/不能做
-        Taro.showToast({ title: '军令与方案已生成', icon: 'none' });
+        Taro.showToast({ title: '军令和方案已出', icon: 'none' });
       })
       .catch((e: unknown) => {
         setCta('idle');
@@ -213,10 +213,10 @@ export default function Home() {
   };
 
   const ctaText = cta === 'generating'
-    ? { t: '正在生成军令与方案…', s: '读取案卷、战局和执行建议', icon: '…' }
+    ? { t: '正在翻你的案卷，排兵布阵…', s: '梳理战局、拆解任务、拟定军令', icon: '…' }
     : cta === 'done'
-      ? { t: '已生成 → 查看军令与方案', s: `已同步到执行页、方案库和 ${REVIEW_TIME} 复盘`, icon: '✓' }
-      : { t: '认可判断 → 生成军令与方案', s: `同步到执行页、方案库和 ${REVIEW_TIME} 复盘`, icon: '›' };
+      ? { t: '军令已出 · 去看看', s: `已更新到执行页和方案库，今晚 ${REVIEW_TIME} 复盘`, icon: '✓' }
+      : { t: '就按这个来 · 出军令与方案', s: `军师拆成军令和方案，更新到执行页和方案库，今晚 ${REVIEW_TIME} 复盘`, icon: '›' };
 
   return (
     <Screen topInset className="home">
@@ -246,10 +246,10 @@ export default function Home() {
               ) : (
                 <>
                   <Text className="bh-source">
-                    {dossier ? `当前案卷 · ${dossier.title} · 军师持续推演，动态校准` : '还没有战略案卷 · 认可军师方案，即刻成卷'}
+                    {dossier ? `当前案卷 · ${dossier.title} · 军师持续跟进，随变而调` : '还没有案卷 · 和军师聊一次，方案定了就成卷'}
                   </Text>
                   <Text className={`bh-title serif ${heroExpanded ? 'expanded' : ''}`}>
-                    {judgment || '先和军师聊聊当前处境，判断会沉淀在这里'}
+                    {judgment || '先说说你的处境，判断我会写在这里'}
                   </Text>
                   {hasJudgment ? (
                     <View className="bh-foot">
@@ -289,7 +289,7 @@ export default function Home() {
               {forces.length ? (
                 <Text className="force-hint" onClick={openForces}><Text className="fh-b">整卡</Text>看全解 · 小框看单势</Text>
               ) : null}
-              <Text className="force-redo" onClick={refresh}>重算<Text className="fr-ic">↻</Text></Text>
+              <Text className="force-redo" onClick={refresh}>刷新判断</Text>
             </View>
           </View>
           {!hydrated ? (
@@ -318,8 +318,8 @@ export default function Home() {
             </View>
           ) : (
             <View className="force-empty card" onClick={() => goChat('agentKey=general&continue=1')}>
-              <Text className="fe-t serif">三势判断待生成</Text>
-              <Text className="fe-d">先和军师聊清目标、现状和卡点，天势 / 市势 / 人势会显示在这里。</Text>
+              <Text className="fe-t serif">三势还没断</Text>
+              <Text className="fe-d">跟我聊透目标、现状和卡点，天势、市势、人势自然就清楚了。</Text>
               <Text className="fe-go" style={{ color: accent }}>去对话 ›</Text>
             </View>
           )}
@@ -371,7 +371,7 @@ export default function Home() {
             {dossier.risks.map((r) => (
               <Text key={r} className="nono">× {r}</Text>
             ))}
-            <Text className="nono-src">来自你认可的《{dossier.title}》</Text>
+            <Text className="nono-src">来自你定下的《{dossier.title}》</Text>
           </View>
         ) : null}
 
@@ -408,7 +408,7 @@ export default function Home() {
       >
         <Text className="fs-kicker">三 势 合 参</Text>
         <Text className="fs-title serif">三势全解：先拆三势，再做合参</Text>
-        <Text className="fs-quote">三势不是三个孤立指标。天势决定能不能借风，市势决定怎么差异化，人势决定能不能放大。</Text>
+        <Text className="fs-quote">三势不是三个孤立的数。天势看能不能借风，市势看怎么打出差异，人势看能不能放大。</Text>
         <ScrollView scrollY className="fs-body">
           <View className="forces-breakdown">
             {forces.map((f) => {
@@ -450,7 +450,7 @@ export default function Home() {
       <PaySheet
         open={payOpen}
         mode="member"
-        title="续费会员，继续认可判断"
+        title="续费会员，继续出军令与方案"
         desc="套餐已到期，续费后可继续一键生成军令与方案。"
         confirmText="去续费"
         onConfirm={() => setPayOpen(false)}
@@ -460,7 +460,7 @@ export default function Home() {
         open={exceptionOpen}
         kind="power"
         title="算力不足"
-        desc="本月额度已用尽，补充算力或升级套餐后再生成军令与方案。"
+        desc="本月额度已用尽，补充算力或升级套餐后再出军令与方案。"
         onPrimary={() => setExceptionOpen(false)}
         onClose={() => setExceptionOpen(false)}
       />

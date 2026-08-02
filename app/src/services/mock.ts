@@ -95,7 +95,7 @@ const PLANS: Plan[] = [
 
 // V7-12：单次付费商品目录（前端离线兜底，与服务端 seedConfig.SKUS 同口径）。
 const SKUS: { key: string; name: string; desc: string; priceFen: number; kind: 'module' | 'service' | 'storage'; grantsModuleKey?: string }[] = [
-  { key: 'deep-organize', name: '深度整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成可直接调用的知识。', priceFen: 3900, kind: 'service' },
+  { key: 'deep-organize', name: '深度整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成军师能直接用上的知识。', priceFen: 3900, kind: 'service' },
   { key: 'storage-2g', name: '资料空间包', desc: '为资料库扩容约 2GB，容纳更多经营材料。', priceFen: 1900, kind: 'storage' },
   { key: 'deep-contradiction', name: '深度矛盾分析', desc: '围绕主要矛盾做一次深度拆解，给出结构化打法与验证标准。', priceFen: 2900, kind: 'module', grantsModuleKey: 'deep-contradiction' },
   { key: 'fin-checkup', name: '财务经营体检', desc: '对经营与财务数据做一次系统体检，定位现金与利润风险。', priceFen: 4900, kind: 'module', grantsModuleKey: 'fin-checkup' },
@@ -130,15 +130,15 @@ type ModuleGroupM = 'free' | 'deep' | 'member';
 type ModuleTierM = 'free' | 'sku' | 'credits' | 'member';
 const MOCK_MODULES: Omit<ModuleView, 'enabled' | 'hidden' | 'sortOrder'>[] = [
   { key: 'trend', label: '三势初判', desc: '天势 / 市势 / 人势，先给基础判断', iconChar: '势', group: 'free', tier: 'free', stateLabel: '默认启用', agentKey: 'general', detail: { scene: '案卷资料齐了先跑一遍三势', input: '案卷资料', output: '三势判断', cost: '免费', writeback: '战局页' } },
-  { key: 'conflict', label: '矛盾初筛', desc: '识别当前最卡住增长的主线问题', iconChar: '矛', group: 'free', tier: 'free', stateLabel: '可直接调用', agentKey: 'general', detail: { scene: '拿不准最该解决什么时用', input: '对话 + 案卷', output: '主要矛盾', cost: '免费', writeback: '战局页' } },
+  { key: 'conflict', label: '矛盾初筛', desc: '识别当前最卡住增长的主线问题', iconChar: '矛', group: 'free', tier: 'free', stateLabel: '可直接用', agentKey: 'general', detail: { scene: '拿不准最该解决什么时用', input: '对话 + 案卷', output: '主要矛盾', cost: '免费', writeback: '战局页' } },
   { key: 'deep-contradiction', label: '深度矛盾分析', desc: '输出阶段打法、风险边界和不可做清单', iconChar: '深', group: 'deep', tier: 'sku', price: { skuKey: 'deep-contradiction', priceFen: 2900 }, stateLabel: '¥29 启用', detail: { scene: '主要矛盾已明确，要深挖打法', input: '完整案卷', output: '深度诊断', cost: '¥29', writeback: '方案库' } },
   { key: 'growth', label: '增长漏斗诊断', desc: '结合店铺、私域和内容数据做深度推演', iconChar: '漏', group: 'deep', tier: 'credits', price: { credits: 80 }, stateLabel: '消耗 80 算力', agentKey: 'growth', detail: { scene: '有成交漏斗数据后重算损耗', input: '成交漏斗表', output: '转化断点', cost: '80 算力', writeback: '执行页' } },
   { key: 'ip-engine', label: 'IP 内容引擎', desc: '定位、选题、脚本、发布计划一体生成', iconChar: 'IP', group: 'deep', tier: 'member', price: { planRequired: true }, stateLabel: '会员可用', agentKey: 'ip', detail: { scene: '要批量产出可执行内容', input: 'IP 资料', output: '选题脚本', cost: '会员', writeback: '执行页' } },
   { key: 'finance', label: '财务经营体检', desc: '现金流、成本结构、利润风险初步拆解', iconChar: '财', group: 'deep', tier: 'sku', price: { skuKey: 'fin-checkup', priceFen: 4900 }, stateLabel: '¥49 启用', detail: { scene: '担心现金和利润风险时', input: '财务表', output: '经营体检', cost: '¥49', writeback: '方案库' } },
-  { key: 'daily-command', label: '每日军令', desc: '任务、提醒、复盘，承接认可后的方案', iconChar: '令', group: 'member', tier: 'free', stateLabel: '基础版免费', detail: { scene: '认可判断后自动承接执行', input: '认可判断', output: '每日军令', cost: '免费', writeback: '执行页' } },
+  { key: 'daily-command', label: '每日军令', desc: '任务、提醒、复盘，承接已经定下的方案', iconChar: '令', group: 'member', tier: 'free', stateLabel: '基础版免费', detail: { scene: '判断定了，自动接到执行页', input: '已定判断', output: '每日军令', cost: '免费', writeback: '执行页' } },
   { key: 'topic-bank', label: 'IP 选题库高级版', desc: '按人设、产品和渠道生成长期选题池', iconChar: '题', group: 'member', tier: 'sku', price: { skuKey: 'ip-topics-pro', priceFen: 9900 }, stateLabel: '¥99 单独购买', detail: { scene: '需要长期内容选题储备', input: '人设产品', output: '长期选题', cost: '¥99', writeback: '知识库' } },
   { key: 'shop-board', label: '店铺数据看板', desc: '曝光、点击、转化、复购持续追踪', iconChar: '店', group: 'member', tier: 'sku', price: { skuKey: 'shop-dashboard', priceFen: 19900 }, stateLabel: '¥199 单独购买', detail: { scene: '要持续盯店铺经营指标', input: '店铺授权', output: '数据看板', cost: '¥199', writeback: '数据源' } },
-  { key: 'weekly-review', label: '周复盘增强', desc: '自动汇总执行、数据和下一周军令', iconChar: '复', group: 'member', tier: 'member', price: { planRequired: true }, stateLabel: '会员解锁', detail: { scene: '每周要系统复盘并排下周军令', input: '本周执行', output: '周复盘', cost: '会员', writeback: '方案库' } },
+  { key: 'weekly-review', label: '周复盘增强', desc: '自动汇总执行、数据和下一周军令', iconChar: '复', group: 'member', tier: 'member', price: { planRequired: true }, stateLabel: '会员可用', detail: { scene: '每周要系统复盘并排下周军令', input: '本周执行', output: '周复盘', cost: '会员', writeback: '方案库' } },
 ];
 const MOCK_SKU_MODULE_KEY: Record<string, string> = { 'deep-contradiction': 'deep-contradiction', finance: 'fin-checkup', 'topic-bank': 'ip-topics-pro', 'shop-board': 'shop-dashboard' };
 
@@ -392,7 +392,7 @@ function mockQuota(d: UserData): TokenQuotaView {
 function ensureMockQuota(d: UserData): void {
   const limit = planOf(d).tokenQuotaPerMonth;
   if (limit >= 0 && (d.tokenUsed ?? 0) >= limit) {
-    throw Object.assign(new Error('本月 token 额度已用尽，请升级套餐或下月再用'), { code: 'INSUFFICIENT_QUOTA', data: { code: 'INSUFFICIENT_QUOTA' } });
+    throw Object.assign(new Error('本月额度已用尽，可在「我的」升级套餐，或下月再用'), { code: 'INSUFFICIENT_QUOTA', data: { code: 'INSUFFICIENT_QUOTA' } });
   }
 }
 function chargeMockQuota(d: UserData, ratio: number, inputLen: number, outputLen: number): TokenQuotaView {
@@ -483,10 +483,10 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
   const evidenceTotal = evidenceCount.profile + evidenceCount.projects + evidenceCount.knowledge + evidenceCount.sessions;
   const maturity = evidenceTotal === 0 && !identity.length ? 'empty' : nextQuestions.length > 2 ? 'forming' : 'ready';
   const summary = maturity === 'empty'
-    ? '军师还没有足够资料形成判断。补齐基本情况后，后续建议会优先依据你的真实业务来推演。'
+    ? '我还没有足够资料下判断。把基本情况补齐，后面的建议才能贴着你的真实业务走。'
     : maturity === 'forming'
-      ? `军师已掌握 ${evidenceTotal} 条经营线索，能做初步判断；关键背景仍需继续补齐，避免替你假设业务事实。`
-      : `军师已沉淀 ${evidenceTotal} 条经营线索，可作为后续咨询、复盘和方案产出的底稿。`;
+      ? `我已经拿到 ${evidenceTotal} 条经营线索，能给初步判断；关键背景还得补，免得我替你假设业务事实。`
+      : `我已经攒下 ${evidenceTotal} 条经营线索，后面咨询、复盘和出方案都能拿它当底稿。`;
 
   return {
     title: '个人档案',
@@ -506,7 +506,7 @@ function buildUnderstandingM(d: UserData): ClientUnderstanding {
       { key: 'identity', title: '经营身份', items: identity, emptyText: '还没记录你的称呼、公司、行业和阶段。' },
       { key: 'journey', title: '创业路径', items: journey, emptyText: '还没形成创业路径。可以告诉军师：你怎么开始、做过哪些转折、现在走到哪一步。' },
       { key: 'difficulties', title: '当前难题', items: difficulties, emptyText: '还没记录明确难题。后续咨询会先追问关键约束，再给建议。' },
-      { key: 'materials', title: '已沉淀资料', items: materials, emptyText: '还没有长期线索。对话、案卷、方案和资料库都会逐步沉淀到这里。' },
+      { key: 'materials', title: '已存资料', items: materials, emptyText: '还没有长期线索。对话、案卷、方案和资料库都会慢慢存到这里。' },
     ],
     nextQuestions: nextQuestions.slice(0, 4),
     evidenceCount,
@@ -1127,7 +1127,7 @@ export const mock = {
     return Promise.resolve({
       items: [
         { key: 'order', time: '18:00', title: '今日军令截止', desc: '18:00 前补充高意向咨询记录。', kind: 'order', subscribed: false, scene: 'review', canSubscribe: false },
-        { key: 'review', time: '21:30', title: '今日复盘', desc: '21:30 生成今日复盘。', kind: 'review', subscribed: false, scene: 'review', canSubscribe: false },
+        { key: 'review', time: '21:30', title: '今日复盘', desc: '21:30 今晚复盘。', kind: 'review', subscribed: false, scene: 'review', canSubscribe: false },
         { key: 'weekly', time: '周五', title: '周复盘', desc: '本周五检查成交漏斗和内容表现。', kind: 'weekly', subscribed: false, scene: 'review', canSubscribe: false },
       ],
       subscribeReady: false,
@@ -1311,7 +1311,7 @@ export const mock = {
       sections: [
         { h: '归类结果', list: r.items.map((it) => `${it.fileName} → ${it.category}${it.isDup ? '（重复已合并）' : ''}`) },
         { h: '提炼要点', list: r.items.filter((it) => !it.isDup).map((it) => `${it.fileName}：${it.summary}`) },
-        { h: '下一步', b: '确认入库后，这批资料即可被战局、方案与后续对话直接调用。' },
+        { h: '下一步', b: '确认入库后，战局判断、方案和后续对话就能用上这批资料。' },
       ],
       actions: ['确认入库'],
     };
@@ -1347,7 +1347,7 @@ export const mock = {
     d.ownedAgents.push(key);
     if (!unlimited) {
       d.creditBalance -= agent.price;
-      (d.creditLog ??= []).push({ at: now(), reason: `解锁智能体 · ${agent.name}`, delta: -agent.price, balance: d.creditBalance });
+      (d.creditLog ??= []).push({ at: now(), reason: `启用智能体 · ${agent.name}`, delta: -agent.price, balance: d.creditBalance });
     }
     save(token, d);
     return delay({ ok: true, agentKey: key, pricePaid: unlimited ? 0 : agent.price, creditBalance: d.creditBalance, alreadyOwned: false });
@@ -1360,7 +1360,7 @@ export const mock = {
     if (!d.profile?.industry) {
       return delay({ stage: 'new', diagRound: 0, nextStep: { key: 'quickscan', title: '先做个 3 问速诊', desc: '10 分钟拿到主要矛盾与今天能做的一件事。', route: '/packages/work/quickscan/index' } });
     }
-    return delay({ stage: 'diagnosing', diagRound: 2, nextStep: { key: 'continue_diagnosis', title: '继续第 3 轮诊断', desc: '把打法聊定，认可后自动拆成军令。', route: 'chat' } });
+    return delay({ stage: 'diagnosing', diagRound: 2, nextStep: { key: 'continue_diagnosis', title: '继续第 3 轮诊断', desc: '把打法聊定，方案定了就自动拆成军令。', route: 'chat' } });
   },
 
   // WO-12：处方样例（军令页展示「军师配了工具」）。

@@ -16,7 +16,7 @@ async function main() {
     throw new Error('缺少目标套餐：请传 --plan=套餐名，或配置 TEST_DEFAULT_PLAN_NAME');
   }
   const plan = await prisma.plan.findFirst({ where: { name: PLAN_NAME } });
-  if (!plan) throw new Error(`未找到套餐「${PLAN_NAME}」，请先运行 npm run db:sync-plans`);
+  if (!plan) throw new Error(`未找到套餐「${PLAN_NAME}」：线上请到运营后台「商品 · 套餐」建档（代码侧已无同步脚本），本地跑 npm run db:seed 灌夹具`);
 
   const users = await prisma.user.findMany({
     select: {

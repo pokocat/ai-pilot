@@ -89,7 +89,7 @@ describe('V7-15 会话协同披露 + 未读数', () => {
       const list = await api('GET', '/api/sessions', { token });
       const item = list.body.find((x: { id: string }) => x.id === sid);
       assert.equal(item.generating, true);
-      assert.equal(item.snippet, '军师正在思考…');
+      assert.equal(item.snippet, '容我想想…');
 
       const detail = await api('GET', `/api/sessions/${sid}`, { token });
       assert.equal(detail.body.generating, true);

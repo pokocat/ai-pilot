@@ -28,7 +28,7 @@ export default function Bindings() {
         <View className="db-hero card">
           <Text className="kicker">Data Context</Text>
           <Text className="h1">数据源绑定</Text>
-          <Text className="db-p">军师会在对话中判断需要哪些数据。绑定后，增长、IP、经营复盘等军师能基于真实情况给判断、拆动作。</Text>
+          <Text className="db-p">对话里会告诉你还缺哪些数据。绑定后，增长、IP、经营复盘等判断都能更贴近真实情况。</Text>
         </View>
 
         <View className="db-security card">

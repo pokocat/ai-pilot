@@ -291,7 +291,7 @@ export function verseEventFromDeliverable(d: DeliverableInput): string {
     .map((s) => [s.h, s.b || (s.list?.join('；') ?? '')].filter(Boolean).join('：'))
     .filter(Boolean)
     .join('\n');
-  return [d.title ? `老板认可了方案《${d.title}》` : '老板认可了一份方案', body].filter(Boolean).join('\n').slice(0, 600);
+  return [d.title ? `老板定下了方案《${d.title}》` : '老板定下了一份方案', body].filter(Boolean).join('\n').slice(0, 600);
 }
 
 export interface VerseJudgement { hit: boolean; clause: 1 | 2; note: string }

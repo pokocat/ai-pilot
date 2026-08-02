@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Icon from './Icon';
 import NumInput from './NumInput';
-import { api, type AgentDetail, type AgentType, type AgentBilling, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta, type AdminAgentMemoryItem, type ToolStatItem } from './api';
+import { api, type AgentDetail, type AgentType, type AgentBilling, type AdminAgentUpdate, type MemoryConfig, type MemoryIntensity, type MemorySource, type AgentProviderMode, type AgentRuntimeUpdate, type AiTestResult, type SkillToolMeta, type AdminAgentMemoryItem, type ToolStatItem } from './api';
 import { ConfirmDialog, type ConfirmSpec } from './components';
 import StudioSandbox from './StudioSandbox';
 import StudioVersions, { tierName } from './StudioVersions';
@@ -47,6 +47,8 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
   const [meterUnit, setMeterUnit] = useState<'text' | 'image'>('text');
   const [prompt, setPrompt] = useState('');
   const [greet, setGreet] = useState(''); // P2-13：开场白
+  const [memText, setMemText] = useState('');
+  const [learnText, setLearnText] = useState('');
   const [deliverableKey, setDeliverableKey] = useState(''); // P2-13：产出模板键
   const [mem, setMem] = useState<MemoryConfig | null>(null);
   // —— 接入方式 ——
@@ -80,7 +82,7 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
       setBilling(d.billing); setPrice(d.price);
       setBillingRatio(d.billingRatio ?? 1); setMeterUnit(d.meterUnit ?? 'text');
       setPrompt(d.systemPrompt);
-      setGreet(d.greet ?? ''); setDeliverableKey(d.deliverableKey ?? '');
+      setGreet(d.greet ?? ''); setMemText(d.memText); setLearnText(d.learnText); setDeliverableKey(d.deliverableKey ?? '');
       setMem(d.memoryConfig);
       const r = d.runtime;
       setMode(r.providerMode);
@@ -158,18 +160,43 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
     let runtime: AgentRuntimeUpdate;
     try { runtime = buildRuntime(); } catch (e) { setTest({ ok: false, error: 'Dify inputs JSON 格式错误：' + (e as Error).message }); return false; }
     try {
-      await api.saveAgent(agentKey, {
-        name, role, type: agentType, gift: billing === 'free', billing,
-        price: billing === 'free' ? 0 : Math.max(0, Math.trunc(price)),
-        billingRatio: meterUnit === 'text' ? Math.max(0.1, billingRatio) : 1,
-        meterUnit,
-        systemPrompt: prompt, greet, deliverableKey: deliverableKey.trim() || null, memoryConfig: mem, runtime,
-      });
+      // 真正的 dirty-field PATCH：发布前不再把整个表单重发一遍，避免只改展示文案时夹带
+      // prompt / 定价 / 接入配置等未编辑字段。API Key 仅在重新输入时下发。
+      const patch: AdminAgentUpdate = {};
+      if (name !== data.name) patch.name = name;
+      if (role !== data.role) patch.role = role;
+      if (agentType !== data.type) patch.type = agentType;
+      if (billing !== data.billing) { patch.billing = billing; patch.gift = billing === 'free'; }
+      const nextPrice = billing === 'free' ? 0 : Math.max(0, Math.trunc(price));
+      if (nextPrice !== data.price) patch.price = nextPrice;
+      const nextRatio = meterUnit === 'text' ? Math.max(0.1, billingRatio) : 1;
+      if (nextRatio !== data.billingRatio) patch.billingRatio = nextRatio;
+      if (meterUnit !== data.meterUnit) patch.meterUnit = meterUnit;
+      if (prompt !== data.systemPrompt) patch.systemPrompt = prompt;
+      if (greet !== (data.greet ?? '')) patch.greet = greet;
+      if (memText !== data.memText) patch.memText = memText;
+      if (learnText !== data.learnText) patch.learnText = learnText;
+      const nextDeliverable = deliverableKey.trim() || null;
+      if (nextDeliverable !== data.deliverableKey) patch.deliverableKey = nextDeliverable;
+      if (JSON.stringify(mem) !== JSON.stringify(data.memoryConfig)) patch.memoryConfig = mem;
+      const currentRuntime = data.runtime;
+      const runtimeChanged = mode !== currentRuntime.providerMode
+        || apiBaseUrl !== currentRuntime.apiBaseUrl || apiModel !== currentRuntime.apiModel
+        || (apiTemperature.trim() === '' ? null : Number(apiTemperature)) !== currentRuntime.apiTemperature
+        || difyBaseUrl !== currentRuntime.difyBaseUrl
+        || JSON.stringify(JSON.parse(difyInputsText.trim() || '{}')) !== JSON.stringify(currentRuntime.difyInputs ?? {})
+        || skillsEnabled !== (currentRuntime.skills?.enabled ?? false)
+        || JSON.stringify(skillTools) !== JSON.stringify(currentRuntime.skills?.tools ?? [])
+        || !!apiKey.trim() || !!difyApiKey.trim();
+      if (runtimeChanged) patch.runtime = runtime;
+      if (Object.keys(patch).length) await api.saveAgent(agentKey, patch);
+      const latest = await api.agent(agentKey);
+      setData(latest); setDirty(latest.draftDirty ?? false); setPubVersion(latest.publishedVersion ?? null);
       return true;
     } catch (e) { toast((e as Error)?.message || '保存失败'); return false; }
   };
 
-  const save = async () => { if (await saveDraft()) { setDirty(true); toast('已保存草稿；用户端入口等基础信息已生效，内容配置待发布'); } };
+  const save = async () => { if (await saveDraft()) toast('已保存草稿；用户端入口等基础信息已生效，内容配置待发布'); };
 
   // 发布：先把当前编辑落库，再冻结成新版本并指向它（C 端立即切换）。
   // 版本名原先用 window.prompt 收（系统弹窗，不显示「这次会对 C 端生效」，回车即发布）。
@@ -320,11 +347,13 @@ export default function AgentDetailPanel({ agentKey, onClose, toast }: { agentKe
           </div>
         </div>
 
-        {/* P2-13：开场白 + 产出模板键（此前面板无法编辑，只能改库/建接口） */}
+        {/* 用户端公开文案随版本发布；dirty-field PATCH 防止文案修改夹带 prompt/定价/接入配置。 */}
         <div className="blk">
-          <div className="blk-h"><Icon name="pen" size={15} /><span className="t">开场白 / 产出模板</span></div>
-          <div className="blk-d">开场白：进入对话的问候语。产出模板键：结构化成果模板（留空=纯对话，不产出报告）。</div>
+          <div className="blk-h"><Icon name="pen" size={15} /><span className="t">用户端公开文案 / 产出模板</span></div>
+          <div className="blk-d">开场白、记忆说明和学习状态会随版本发布到 C 端；保存时只提交实际改动字段。</div>
           <textarea className="ta" value={greet} onChange={(e) => setGreet(e.target.value)} rows={2} placeholder="开场白" />
+          <textarea className="ta" value={memText} onChange={(e) => setMemText(e.target.value)} rows={2} placeholder="记忆说明（支持 <b>关键名词</b>）" />
+          <textarea className="ta" value={learnText} onChange={(e) => setLearnText(e.target.value)} rows={1} placeholder="学习状态，如：记下了" />
           <textarea className="ta" value={deliverableKey} onChange={(e) => setDeliverableKey(e.target.value)} rows={1} placeholder="产出模板键（如 战略体检；留空=纯对话）" />
         </div>
 

@@ -28,7 +28,7 @@ export const ADVISOR_ALIAS: Record<string, string> = {
 
 // 常驻专业军师（参谋室置顶线程）：战略 / 增长 / IP / 经营复盘。
 export const CORE_SPECIALISTS: SpecialistMeta[] = [
-  { agentKey: 'strat', duty: '主要矛盾 · 取舍', syncDesc: '战略判断沉淀为战局主线' },
+  { agentKey: 'strat', duty: '主要矛盾 · 取舍', syncDesc: '战略判断写进战局主线' },
   { agentKey: 'growth', duty: '获客 · 转化 · 复购', syncDesc: '转化路径直通执行指标' },
   { agentKey: 'ip', duty: '定位 · 内容 · 发布', syncDesc: '内容任务写入每日军令' },
   { agentKey: 'ops', duty: '数据 · 复盘 · 节奏', syncDesc: '数据更新，明日打法随调' },
@@ -54,7 +54,7 @@ export const QUICK_STARTERS = [
     agentKey: 'general',
     icon: 'spark',
     title: '生成战略案卷',
-    prompt: '基于我们最近认可的方案，生成一份战略案卷：拆成目标、任务、报告、提醒和复盘节点。',
+    prompt: '按我们最近定的方案，出一份战略案卷：拆成目标、任务、报告、提醒和复盘节点。',
   },
   {
     agentKey: 'ip',

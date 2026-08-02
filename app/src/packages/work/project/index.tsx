@@ -93,7 +93,7 @@ export default function Project() {
           <View className="pd-list">
             <View className="pd-item card" onClick={() => switchTo('/pages/studio/index')}>
               <View className="pd-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="check" size={16} color={accent} /></View>
-              <View className="pd-ib"><Text className="pd-it">在「执行」承接军令与复盘</Text><Text className="pd-im">认可方案后拆成军令，打卡、回填、复盘都在执行页</Text></View>
+              <View className="pd-ib"><Text className="pd-it">在「执行」承接军令与复盘</Text><Text className="pd-im">方案定了拆成军令，打卡、回填、复盘都在执行页</Text></View>
               <Text className="pd-go">›</Text>
             </View>
             {detail.sessions.length === 0 ? <Text className="pd-empty">还没有归属本案卷的对话。</Text> :
@@ -126,7 +126,7 @@ export default function Project() {
               <Input className="pd-kinput" value={kInput} placeholder="记一条资料/决策，回车入库（可被对话引用）" confirmType="done" onInput={(e) => setKInput(e.detail.value)} onConfirm={addKnowledge} />
               <View className={`pd-kbtn ${kBusy ? 'busy' : ''}`} style={{ background: accent }} onClick={addKnowledge}><Icon name="check" size={15} color="#fff" /></View>
             </View>
-            {detail.knowledge.length === 0 ? <Text className="pd-empty">资料库为空。对话「生成纪要」或在此手动记录，都会沉淀到这里。</Text> :
+            {detail.knowledge.length === 0 ? <Text className="pd-empty">资料库为空。对话里出一份纪要，或在这里手动记录，都会留在这里。</Text> :
               detail.knowledge.map((k) => (
                 <View key={k.id} className="pd-kitem card" onClick={() => navTo(`/packages/work/knowledge/detail/index?id=${k.id}`)}>
                   <View className="pd-ktag" style={{ background: 'var(--accent-soft)', color: accent }}><Text>{kindLabel(k.kind)}</Text></View>

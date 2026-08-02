@@ -39,14 +39,14 @@ export const MODULE_MARKET: ModuleItem[] = [
     icon: 'check',
     category: '执行拆解',
     title: '每日军令与周计划',
-    desc: '认可方案自动拆解为每日任务、提醒、复盘与数据记录。',
+    desc: '方案定了，自动拆成每日任务、提醒、复盘和数据记录。',
     status: '已启用',
     tier: 'free',
     price: '基础版',
     depth: '自动排程属方案权益',
     placement: '执行',
     agentKey: 'general',
-    prompt: '基于我们最近认可的方案，生成今天的军令和本周计划。',
+    prompt: '按我们最近定的方案，出今天的军令和本周计划。',
   },
   {
     id: 'ip-os',
@@ -148,7 +148,7 @@ export const SKILL_MARKET: SkillItem[] = [
   { id: 'trend', icon: 'spark', title: '趋势参照', desc: '用时机、变化、进退辅助做阶段判断。', status: '方案权益', tier: 'plan', cost: '方案权益', prompt: '结合当前时机和趋势，帮我判断该进攻、收缩还是等待。' },
   { id: 'founder-rhythm', icon: 'crown', title: '创始人节奏', desc: '辅助判断创始人优势、压力点和决策节奏。', status: '需补充档案', tier: 'plan', cost: '方案权益', prompt: '基于我的档案，帮我分析我的决策节奏、优势和压力点。' },
   { id: 'shop-funnel', icon: 'chart', title: '增长漏斗诊断', desc: '分析曝光、点击、转化、复购和客单价。', status: '建议绑定数据', tier: 'power', cost: '💎x80', prompt: '帮我做一次增长漏斗诊断：曝光、点击、转化、复购、客单价，问题出在哪一层？' },
-  { id: 'ip-content', icon: 'pen', title: 'IP 内容引擎', desc: '从定位生成选题、脚本、发布计划和复盘。', status: '可调用', tier: 'single', cost: '💎x29/次', prompt: '调用 IP 内容引擎：从我的定位出发生成选题、脚本和发布计划。' },
+  { id: 'ip-content', icon: 'pen', title: 'IP 内容引擎', desc: '从定位生成选题、脚本、发布计划和复盘。', status: '可用', tier: 'single', cost: '💎x29/次', prompt: '用 IP 内容引擎：从我的定位出发生成选题、脚本和发布计划。' },
   { id: 'finance-health', icon: 'lock', title: '经营财务体检', desc: '看现金流、利润结构、成本和风险边界。', status: '需上传资料', tier: 'single', cost: '💎x49/次', prompt: '帮我做一次经营财务体检，看现金流、利润结构和风险边界。' },
 ];
 
@@ -216,7 +216,7 @@ export const DATA_BINDINGS = [
 export const CHAT_GUIDES = [
   { icon: 'upload', label: '上传资料到资料库', url: '/packages/work/knowledge/index', hint: '让军师先读懂你的公司、产品、财务和历史方案' },
   { icon: 'attach', label: '绑定店铺/账号数据', url: '/packages/work/bindings/index', hint: '让增长、IP、经营军师基于真实数据判断' },
-  { icon: 'grid', label: '打开模块市场', url: '/packages/work/market/index', hint: '把认可的方案拆成可移动、可增减的模块' },
+  { icon: 'grid', label: '打开模块市场', url: '/packages/work/market/index', hint: '把定下的方案拆成能挪、能加减的模块' },
 ];
 
 // 智库页「军师的方法底座」：判断背后的方法论目录（静态框架，不含用户业务结论）。
@@ -224,7 +224,7 @@ export const DOCTRINES = [
   { name: '矛盾分析', point: '抓主要矛盾', use: '所有建议先围绕你最痛的一个问题，不平均用力。' },
   { name: '结构拆解', point: 'MECE 分层', use: '把问题拆成定位、人群、产品、转化、复盘等可执行层。' },
   { name: '三势合参', point: '天势 · 市势 · 人势', use: '每个方案都判断该攻、该守、该等还是该撤。' },
-  { name: '数据复盘', point: '以事实修正判断', use: '执行数据记录后，军师会更新下一轮判断和动作。' },
+  { name: '数据复盘', point: '以事实修正判断', use: '执行数据记录后，下一轮判断和动作会跟着更新。' },
 ];
 
 // 战局页「三势判断」方法框架：静态说明 + 发起真实判断的入口（结论必须来自对话，不预置）。

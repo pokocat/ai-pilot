@@ -8,7 +8,7 @@ export type AgentBilling = 'free' | 'unlock' | 'metered';
 export class AgentLockedError extends Error {
   statusCode = 403;
   code = 'AGENT_LOCKED';
-  constructor(msg = '该智能体未开通，请先解锁后再使用') {
+  constructor(msg = '这位军师还没启用，去锦囊里看看。') {
     super(msg);
   }
 }

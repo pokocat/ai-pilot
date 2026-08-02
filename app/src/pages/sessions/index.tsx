@@ -35,7 +35,7 @@ const QUICK_CARDS = [
   { t: '绑定数据源', d: '店铺、账号、企微、财务表', url: '/packages/work/bindings/index' },
   { t: '军师锦囊 / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
   { t: '生成方案', d: '把这次对话炼成一份方案', url: '/packages/work/library/index' },
-  { t: '转成军令', d: '认可即拆解为今日军令', tab: '/pages/studio/index' },
+  { t: '转成军令', d: '方案定了，自动拆成今天要做的事', tab: '/pages/studio/index' },
   { t: '今日执行', d: '军令、任务、打卡、复盘', tab: '/pages/studio/index' },
 ] as { t: string; d: string; url?: string; tab?: string }[];
 
@@ -67,7 +67,7 @@ export default function Sessions() {
   const presentSessions = (list: SessionItem[]) => list.map((it) => (
     it.generating || !isChatPending(it.id)
       ? it
-      : { ...it, generating: true, snippet: '军师正在思考…' }
+      : { ...it, generating: true, snippet: '容我想想…' }
   ));
 
   // 会话列表加载（C2）：失败区分未授权（弹登录）与网络错误（错误态可重试），不再一律伪装成空态。
@@ -343,7 +343,7 @@ export default function Sessions() {
               <View className="sess-empty">
                 <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="chat" size={22} color={accent} /></View>
                 <Text className="et">{q ? '没有匹配的会话' : '还没有会话'}</Text>
-                <Text className="es">不拘总军师还是专业军师——各线独立留档，要害汇入主线判断。</Text>
+                <Text className="es">跟谁聊都留底，要紧的我会汇到主线判断里。</Text>
                 <Text className="es-link" style={{ color: accent }} onClick={() => newWith('general')}>＋ 发起新对话</Text>
               </View>
             ) : (

@@ -59,7 +59,7 @@ export default function Reminders() {
         ) : err ? (
           <AsyncState error onRetry={load} />
         ) : items.length === 0 ? (
-          <Text className="rm-empty">暂无提醒。生成军令与复盘后，提醒节奏会显示在这里。</Text>
+          <Text className="rm-empty">还没有提醒。军令和复盘出来后，提醒节奏就在这里。</Text>
         ) : (
           <View className="rm-list">
             {items.map((it) => (

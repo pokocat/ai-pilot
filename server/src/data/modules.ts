@@ -132,14 +132,14 @@ export const MODULES: ModuleCatalogItem[] = [
   {
     key: 'daily-command',
     label: '每日军令',
-    desc: '任务、提醒、复盘，承接认可后的方案',
+    desc: '任务、提醒、复盘，承接已经定下的方案',
     iconChar: '令',
     group: 'member',
     tier: 'free',
     stateLabel: '基础版免费',
     detail: {
-      scene: '把认可后的方案拆成每日任务、提醒和复盘，承接执行闭环并回写案卷。',
-      input: '认可判断',
+      scene: '把定下的方案拆成每日任务、提醒和复盘，接到执行页并回写案卷。',
+      input: '已定判断',
       output: '每日军令',
       cost: '免费',
       writeback: '执行页',

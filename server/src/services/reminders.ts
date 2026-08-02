@@ -16,7 +16,7 @@ import {
 } from './wechatSubscribe.js';
 
 // 设计 §13.2 逐字文案（禁改）：三提醒节奏 20:30 今日复盘 / 18:00 补咨询记录 / 周五 周复盘。
-const REVIEW_DESC = '20:30 生成今日复盘。';
+const REVIEW_DESC = '20:30 今晚复盘。';
 const ORDER_DESC = '18:00 前补充高意向咨询记录。';
 const WEEKLY_DESC = '本周五检查成交漏斗和内容表现。';
 

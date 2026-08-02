@@ -96,15 +96,15 @@ export default function PaySheet({
       overlayKey="paysheet"
       footer={
         <View className="pay-actions">
-          <View className="btn btn-ghost pay-secondary" onClick={onClose}><Text>先不启用</Text></View>
+          <View className="btn btn-ghost pay-secondary" onClick={onClose}><Text>先不了</Text></View>
           <View className={`btn btn-primary pay-primary ${busy ? 'disabled' : ''}`} style={{ background: accent }} onClick={confirm}>
-            <Text>{busy ? '处理中…' : (confirmText || '确认启用')}</Text>
+            <Text>{busy ? '处理中…' : (confirmText || '确认')}</Text>
           </View>
         </View>
       }
     >
       <Text className="pay-k">{kicker}</Text>
-      <Text className="pay-title serif">{title || '确认启用'}</Text>
+      <Text className="pay-title serif">{title || '确认'}</Text>
       {!!desc && <Text className="pay-desc">{desc}</Text>}
 
       <View className="pay-ledger">

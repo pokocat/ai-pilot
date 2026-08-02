@@ -6,6 +6,36 @@
 
 ## 变更日志
 
+### 2026-08-01 · 小程序全站文案终稿本地落地：军师人格、操作词与状态词统一，补安全的文案镜像和后台窄字段编辑链路 · 影响面：app + server + admin + shared + docs
+
+按 `docs/文案优化终稿.md` 完成仓库侧落地：14 位军师的 `greet/memText/learnText`、默认回复模板、战局/执行/智库/我的/对话/资料/套餐等页面文案统一改为更自然的中文；用户动作收敛为「就按这个来」，状态与描述收敛为「定了」，生成态统一为「容我想想…」，并补齐 onboarding、上传进度、提醒和无障碍文案等全量检索漏项。`PRODUCT.md` 与 `AGENTS.md` 同步更新产品口径。
+
+新增 `server/scripts/syncAppCopy.ts`（`npm run copy:sync` / `--check`），只从服务端源同步 app 镜像中的 `greet/memText/learnText` 与 `REPLIES['默认']`，明确不触碰 `enabled/owned/billing/price/deliverableKey` 和 `DELIVERABLES` 全表；新增回归测试锁定幂等性与行为字段不变。`AgentDetail/AdminAgentUpdate` 补齐 `memText/learnText`，后台智能体详情可编辑三项公开文案并采用 dirty-field PATCH，只发送实际改动字段；后端继续做权限、审计与 `draftDirty` 重算，发布前不会夹带未编辑的 prompt、模型、权益或运行参数。
+
+生产仅做只读前置检查：14 位 agent 当前均无脏草稿，4 位下架状态未变；`general/poster` 已有发布版本，其余首次发布项以开工前干净草稿快照作为完整字段基线。未执行生产写入、智能体发布或小程序上传，标题继续保留「终稿候选」，待四类环境和真机验收后再转终稿方案。
+
+全量回归同时暴露并修正两处过期夹具：`gatewayProvider.test.ts` 的新注册用户没有 Profile，过去只因测试运行日早于首次入局上线日而偶然绕过补档案流程；上线日过去后，10 条 provider 用例里 9 条被首次入局提前接管。绕过入局后又发现该测试仍只改 `Agent` 草稿，而当前 C 端运行时读取已发布 `AgentVersion`，因此仍走旧快照。现由测试显式创建已入局 Profile、发布测试端点配置，并在结束时发布恢复配置，确保它只验证 Gateway，不再随日历日期或历史版本数据变红。
+
+验证：文案镜像 `--check` 通过；server/admin TypeScript 构建通过，admin `lint:ui` 通过；weapp server 包与 H5 server 包编译通过（H5 仅保留既有 bundle 体积告警）；app 36 项、admin 38 项、server 1188 项测试全绿。
+
+### 2026-08-01 · 定价真相源迁到运营后台：删掉两个会打回线上价的脚本 + 套餐后台可建可删 + 计价字段列为「运营所有」 · 影响面：server（删 `scripts/{syncPlans,bumpFreeQuota}.ts`、`scripts/syncAdminContent.ts`、`prisma/seed.ts`、`src/routes/admin.ts`、`src/data/seedConfig.ts`、`package.json` + 新增 `test/pricingOperatorOwned.test.ts`）+ admin（`api.ts` / `views/catalog.tsx`）+ shared（`contracts.d.ts`）+ docs（`AGENTS.md`）
+
+**起因是一个 dry-run**：生产入门版实价是运营在后台改的 ¥99/月，而 `seedConfig.PLANS` 里写着 6800，`scripts/syncPlans.ts` 按 name 做全字段 upsert —— dry-run 打印「更新 入门版」，也就是说**任何一次全量同步都会把线上价静默打回 ¥68**（30% 的价，全站在售）。这不是新发现：`docs/[FABLE5]PRELAUNCH_AUDIT_2026-07-22.md` 第 64 行早就写过「`db:sync-plans` 会把 seedConfig 覆盖回 DB（运营在 admin 改价后跑它=回退），固化『价格真相源』流程」——当时只记了风险，没定流程，十天后就踩上了。
+
+**这次定的流程：线上定价的真相源是运营后台，代码只有夹具。** 不是「把 6800 改成 9900」——那只是把同一个陷阱重设一遍，下次运营再改价还是会被打回。
+
+**① 删掉两个能改真实数据的脚本。** `syncPlans.ts` 连 `db:sync-plans` 一起删除。顺带查出同类第二个：`bumpFreeQuota.ts` 写死 `PLANS[0]`，而 2026-07-28 砍掉免费体验档后 `PLANS[0]` 已经变成**付费入门版**——这个脚本现在跑一次就把付费用户的 token 钱包 `quota/balance` 重置成夹具值（40 万），一并删除。`seedConfig.PLANS` 改名 `DEV_PLANS` 并在文件头写清「本地/测试夹具，改它不影响线上、也别指望能改线上」——改名是刻意的，`PLANS` 这个名字被当成过生产真相源。
+
+**② 套餐后台补齐 CRUD，否则「后台配置」是句空话。** 原先 admin 只有 `GET` + `PATCH`，且 PATCH 白名单里连 `period`/`hidden`/`sort` 都没有——年付档和隐藏档**只能靠脚本建**。脚本删了不补 CRUD，全新部署会起来一个套餐都没有，而无套餐用户被 `planGate` 全局禁写 → 付费转化路径直接断。新增 `POST /admin/plans`（requireSuper + 审计；同名 409 `PLAN_NAME_EXISTS`——同名会让 `TEST_DEFAULT_PLAN_NAME` 这类「按 name 找档」的存量逻辑撞车；`price=-1` 面议档放行，其余负数 400；`period` 只认 month/year，野值回落 month 而不是写进库，它参与到期日推算与升级折算；`sort` 缺省排末尾，不抢第一档位置）、`DELETE /admin/plans/:id`（**有用户在册一律 409 `PLAN_IN_USE`**，文案带确切在册人数并指路「改 hidden 停售」——引用计数守卫从被删的脚本里搬过来，Plan 被 `user.planId` 引用且在册用户的续费/折算都要回读该档）。PATCH 补 `period`/`hidden`/`sort`，审计的 before/after 快照跟着补这三个字段。运营端「商品 · 套餐」页补新建表单、删除确认弹窗、周期下拉、主推/隐藏开关与排序。
+
+**③ 同一缺陷在 `admin:sync-content` 里还有两处。** 它的 update 分支无条件回写 `sku.priceFen` 和 `agent.price`，而这两个字段都在运营后台的 PATCH 白名单里（`AdminAgentUpdate` / `PATCH /admin/skus/:key`）——运营调完价，下一次同步照样打回。改为沿用本文件已有的 `OPERATOR_OWNED`（提示词）约定：计价字段 **create 写初值、update 默认不碰**，`--force-pricing` 才回写。agent 侧 `gift/billing/price/billingRatio/meterUnit`、sku 侧 `name/desc/priceFen/sort` 归运营；`kind`/`grantsModuleKey`/`metaJson` 仍是仓库真相源（必须与 `data/modules.ts` 的 moduleKey 对齐，漂移会让支付后发不出权益）。
+
+**④ `db:seed` 加生产护栏。** 它对套餐/智能体/格言/问卷都是 `deleteMany` + 重建，此前只靠「别在生产跑」的口头约定。现在 `assertNotProduction()`：`NODE_ENV=production` 一律拒绝（`--i-know` 也救不回来），`DATABASE_URL` 的 host 不是回环地址则拒绝（连远程测试库的正当场景才加 `--i-know`）。同时给 seed 加 `isDirectRun` 守卫——`import` 它取护栏函数做回归时不能顺手把库 seed 一遍（写这条测试时就踩到了）。
+
+**未改（明示取舍）**：`DEV_PLANS` 里入门版仍是 6800。它现在只喂本地 seed 和 `test/helpers.ts`，而 `wechatPayMockFlow`/`planExpiry` 的折算金额断言都钉在这个形状上（¥68→¥198 抵 ¥34 实付 ¥164）；把夹具改成 9900 只会为了「看起来和线上一致」去动一批与线上无关的断言，而线上价本来就不该从这里读。**代价说清楚**：`GET /admin/plans` 才是线上现价的唯一答案，本地起的库价格与线上不同是预期行为。另外没给套餐做「改价前后影响面预演」（改价不影响已购用户的锚点，续费才按新价）——现有审计已能回答「谁把价从多少改成多少」，预演等有真实客诉再说。
+
+**测试**：新增 `test/pricingOperatorOwned.test.ts` 20 例——建档 201 + 落库 + 审计、operator 越权 403 且套餐不动、缺名 400 / 同名 409 / 负价 400、面议档可建、非法 period 回落、sort 排末尾、PATCH 三个新字段 + 审计 before/after、DELETE 无人在册可删并留痕 / 有人在册 409 且库不动 / 迁走后可删 / 404 / 越权 403、seed 护栏四个方向、sync-content 默认不动 sku priceFen 与 agent price、结构性字段照常同步、`--force-pricing` 才覆盖、`--dry-run` 连 force 都不落库、计价字段清单完整性（漏一个就等于留一条静默打回的路）。另有两例钉死「syncPlans.ts / bumpFreeQuota.ts 与对应 npm script 不得复活」「`PLANS` 这个导出名不得回来」——这类脚本复活等于线上价随时会被打回。`npm test` **1185 全绿**、server tsc 0 错、admin `tsc -b` + `lint:ui` 0 错。
+
 ### 2026-08-01 · 文案终稿二次工程复核：收紧生产草稿、发布与离线镜像保护 · 影响面：docs（`文案优化终稿.md`）
 
 纠正初稿中会误导实施的执行路径：不再用 `--dump-prompts` 把完整提示词写进仓库，也不再建议通过全量 `admin:sync-content` 更新 `memText/learnText`；改为仓库外仅备份草稿/已发布公开文案和版本状态，先扩窄字段契约与后台编辑能力，再逐个核草稿 diff、沙盒验收并发布。同步策略收敛为只处理 `greet/memText/learnText` 与默认回复的文案字段专用同步器，避免顺手改变 mock 目录、权益与行为字段；同时补齐服务端 journey、执行页和 mock 目录遗漏的「认可」文案台账，并把 `systemPrompt` 验收从字符数升级为内容哈希。仅文档调整，不改变当前运行时文案。

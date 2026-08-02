@@ -169,9 +169,9 @@ export interface ReplyTemplate {
 
 export const REPLIES: Record<string, ReplyTemplate> = {
   默认: {
-    t: '收到。军师正在为你拆解这个问题，直接给你一个可执行的判断：',
-    points: ['先界定问题的本质与边界', '再用数据验证关键假设', '最后给出 1 个主方案 + 1 个备选'],
-    acts: [['spark', '展开分析'], ['chat', '继续追问']],
+    t: '知道了。这事我先帮你理清楚——',
+    points: ['先看这问题到底卡在哪，别被表象带偏', '再拿你的数对一遍，看假设站不站得住', '最后给你一条主路子，外加一个退路'],
+    acts: [['spark', '展开说说'], ['chat', '再聊聊']],
   },
 };
 

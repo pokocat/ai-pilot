@@ -88,7 +88,7 @@ export default function Gift() {
         <View className="pad">
           <View className="gf-hero">
             <Text className="gf-ht serif">天命速写卡暂不可用</Text>
-            <Text className="gf-hd">军师已按当前策略暂停命理速写。你与军师的战略对话、方案与复盘不受影响。</Text>
+            <Text className="gf-hd">命理速写已暂停。你与军师的战略对话、方案与复盘不受影响。</Text>
           </View>
         </View>
       ) : (

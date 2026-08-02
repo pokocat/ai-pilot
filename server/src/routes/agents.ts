@@ -50,7 +50,7 @@ export async function agentRoutes(app: FastifyInstance) {
         if (existing) {
           return { alreadyOwned: true, creditBalance: await getBalance(user.id), pricePaid: 0 };
         }
-        const creditBalance = await chargeCredits(user.tenantId, user.id, agent.price, `解锁智能体 · ${agent.name}`, tx);
+        const creditBalance = await chargeCredits(user.tenantId, user.id, agent.price, `启用智能体 · ${agent.name}`, tx);
         const pricePaid = creditBalance < 0 ? 0 : agent.price;
         await tx.userAgent.create({
           data: { userId: user.id, agentKey: agent.key, source: 'purchase', pricePaid },

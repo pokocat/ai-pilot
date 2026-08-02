@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, login, api, uniquePhone } from './helpers.js';
 import { prisma } from '../src/db.js';
 import { env } from '../src/env.js';
+import { publishDraft } from '../src/services/agentVersions.js';
 
 const CHAT_URL = '/chat/completions';
 const realFetch = globalThis.fetch;
@@ -22,12 +23,14 @@ async function makeGeneralOpenai() {
     where: { key: 'general' },
     data: { providerMode: 'openai', apiBaseUrl: 'http://mock.test/v1', apiModel: 'mock-model', apiKey: 'sk-test-real-123' },
   });
+  await publishDraft('general', { label: 'gateway provider test' });
 }
 async function resetGeneral() {
   await prisma.agent.update({
     where: { key: 'general' },
     data: { providerMode: 'inherit', apiBaseUrl: null, apiModel: null, apiKey: null },
   });
+  await publishDraft('general', { label: 'gateway provider reset' });
 }
 
 // 只拦截 chat/completions；其余出站请求一律报错（不该有——嵌入/检索在测试里走本地确定性，不出网）。
@@ -70,6 +73,15 @@ async function gen(token: string, text: string) {
   return api('POST', '/api/generate-sync', { token, body: { text, agentKey: 'general' } });
 }
 
+// Gateway 用例只测 provider，不测首次入局。2026-07-21 入局门上线后，新注册账号必须先有 Profile，
+// 否则请求会被补档案流程提前接管；过去这组测试只因运行日期尚早于上线日而偶然通过。
+async function loginReady(): Promise<string> {
+  const token = await login(uniquePhone());
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: token }, select: { tenantId: true } });
+  await prisma.profile.create({ data: { tenantId: user.tenantId, industry: '企业服务' } });
+  return token;
+}
+
 describe('Gateway × Provider 错误路径', () => {
   before(async () => {
     process.env.AI_ALLOW_REAL_PROVIDER = '1'; // 放行真实 provider 代码路径（fetch 仍被打桩）
@@ -93,7 +105,7 @@ describe('Gateway × Provider 错误路径', () => {
       ok: true, status: 200,
       body: { choices: [{ message: { content: '机构级判断：先稳现金流，再谈增长。' } }], usage: { prompt_tokens: 12, completion_tokens: 8 } },
     }));
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await gen(t, '我该先做什么');
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.kind, 'chat');
@@ -119,7 +131,7 @@ describe('Gateway × Provider 错误路径', () => {
       assert.equal(body.stream, true, '普通聊天必须请求 provider 原生 stream');
       assert.deepEqual(body.stream_options, { include_usage: true });
     });
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await api('POST', '/api/generate', { token: t, body: { text: '聊聊合规风险', agentKey: 'general' } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(called, 1, '原生流式成功时不应再补打一遍非流式请求');
@@ -140,7 +152,7 @@ describe('Gateway × Provider 错误路径', () => {
       'data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":8000}}\n\n',
       'data: [DONE]\n\n',
     ]);
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await api('POST', '/api/generate', { token: t, body: { text: '给我完整长方案', agentKey: 'general' } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     const sse = String(r.body);
@@ -159,7 +171,7 @@ describe('Gateway × Provider 错误路径', () => {
   test('429 + AI_FALLBACK_MOCK=false → 503 AI_UNAVAILABLE', async () => {
     env.aiFallbackMock = false;
     stubFetch(() => ({ ok: false, status: 429, body: { error: { message: 'rate limited' } } }));
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await gen(t, '帮我看下增长');
     assert.equal(r.status, 503);
     assert.equal(r.body.code, 'AI_UNAVAILABLE');
@@ -168,7 +180,7 @@ describe('Gateway × Provider 错误路径', () => {
   test('500 + AI_FALLBACK_MOCK=false → 503 AI_UNAVAILABLE', async () => {
     env.aiFallbackMock = false;
     stubFetch(() => ({ ok: false, status: 500, body: { error: { message: 'boom' } } }));
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await gen(t, '诊断一下');
     assert.equal(r.status, 503);
     assert.equal(r.body.code, 'AI_UNAVAILABLE');
@@ -183,7 +195,7 @@ describe('Gateway × Provider 错误路径', () => {
         usage: { prompt_tokens: 120, completion_tokens: 1500 },
       },
     }));
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await gen(t, '我已经给了背景，继续判断');
     assert.equal(r.status, 503);
     assert.equal(r.body.code, 'AI_OUTPUT_TRUNCATED');
@@ -217,7 +229,7 @@ describe('Gateway × Provider 错误路径', () => {
         },
       };
     });
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await gen(t, '出报告');
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.kind, 'report');
@@ -253,7 +265,7 @@ describe('Gateway × Provider 错误路径', () => {
         usage: { prompt_tokens: 120, completion_tokens: 80 },
       },
     }));
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await gen(t, '出报告');
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.kind, 'report');
@@ -265,7 +277,7 @@ describe('Gateway × Provider 错误路径', () => {
   test('超时(abort) + AI_FALLBACK_MOCK=false → 503 且提示「超时」', async () => {
     env.aiFallbackMock = false;
     stubAbort();
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await gen(t, '慢慢想');
     assert.equal(r.status, 503);
     assert.equal(r.body.code, 'AI_UNAVAILABLE');
@@ -275,7 +287,7 @@ describe('Gateway × Provider 错误路径', () => {
   test('429 + AI_FALLBACK_MOCK=true → 静默兜底 mock，200', async () => {
     env.aiFallbackMock = true;
     stubFetch(() => ({ ok: false, status: 429, body: { error: { message: 'rate limited' } } }));
-    const t = await login(uniquePhone());
+    const t = await loginReady();
     const r = await gen(t, '兜底应答');
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(r.body.kind, 'chat');

@@ -187,7 +187,7 @@ export default function GalleryPage() {
       <SafeHeader title="我的作品库" onBack={() => Taro.navigateBack()} titleClassName="gl-title" />
 
       <View className="pad" style={{ paddingTop: '12px' }}>
-        <Text className="gl-hint">出过的每一版海报都留在这里，点开可保存相册、分享好友或改文字重排。</Text>
+        <Text className="gl-hint">出过的每一版海报都在这里，点开可以保存、分享，也能改文字重新排。</Text>
 
         <View className="gl-sec">
           <Text className="gl-sec-t">海报成品图</Text>
@@ -206,7 +206,7 @@ export default function GalleryPage() {
               <Text className="et">还没有成品图</Text>
               <Text className="es">
                 {canCreate
-                  ? '在对话里让海报设计师出方案，再点「生成成品图」，出好的每一版都会沉淀在这里。'
+                  ? '在对话里让海报设计师出方案，再点「生成成品图」，出好的每一版都留在这里。'
                   : '成品图能力当前未开启，已出过的作品仍会保留在这里。'}
               </Text>
               {canCreate ? (
@@ -247,7 +247,7 @@ export default function GalleryPage() {
           <View className="gl-row-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="layers" size={18} color={accent} /></View>
           <View className="gl-row-b">
             <Text className="gl-row-t">我的方案库</Text>
-            <Text className="gl-row-s">对话产出的方案与报告，按版本沉淀</Text>
+            <Text className="gl-row-s">对话里出的方案和报告，按版本留档</Text>
           </View>
           <Text className="gl-row-go">›</Text>
         </View>

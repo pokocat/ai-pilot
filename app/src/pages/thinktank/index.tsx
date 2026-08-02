@@ -201,7 +201,7 @@ export default function ThinkTank() {
       try {
         const r = await api.uploadKnowledge('', undefined, true, activeBatch || undefined);
         setActiveBatch(r.batchId || activeBatch);
-        Taro.showToast({ title: '资料已进入待整理区', icon: 'none' });
+        Taro.showToast({ title: '资料已收到，待整理', icon: 'none' });
         await loadPipeline();
       } catch (e) { s.handleApiError(e); }
       setUploading(false);
@@ -237,7 +237,7 @@ export default function ThinkTank() {
         bid = r.batchId || bid;
       }
       setActiveBatch(bid || null);
-      Taro.showToast({ title: `${files.length} 份资料已进入待整理区`, icon: 'none' });
+      Taro.showToast({ title: `已收到 ${files.length} 份资料，待整理`, icon: 'none' });
       await loadPipeline();
     } catch (e) { s.handleApiError(e); }
     setUploading(false);
@@ -260,7 +260,7 @@ export default function ThinkTank() {
       setOrganized(res);
       setOrganizing(false);
       await loadPipeline();
-      Taro.showToast({ title: deep ? '深度整理完成' : '整理完成', icon: 'none' });
+      Taro.showToast({ title: deep ? '资料已完成深度整理' : '资料已整理完成', icon: 'none' });
     } catch (e) {
       clearInterval(timer);
       setOrganizing(false);
@@ -289,7 +289,7 @@ export default function ThinkTank() {
     } catch { /* 拉取失败时用兜底价，不阻塞支付弹窗 */ }
     setPay({
       open: true, mode: 'sku', skuKey: 'deep-organize',
-      title: '深度资料整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成可直接调用的知识。',
+      title: '深度资料整理', desc: '军师对上传资料做深度去重、提炼与补标，整理成军师能直接用上的知识。',
       costValue: `¥${yuan}`, balanceValue: '微信支付', afterValue: '支付后立即整理',
       confirmText: `确认支付 ¥${yuan}`, result: '支付后开始深度整理，并写入待确认区。',
       onConfirm: async () => {
@@ -326,7 +326,7 @@ export default function ThinkTank() {
       content: noPreview
         ? `共 ${ids.length} 份，其中 ${noPreview} 份没有提取到可预览正文。建议先核对或重新上传，仍要继续吗？`
         : `共 ${ids.length} 份。请先展开每份资料核对正文，确认后将供战局、方案和对话引用。`,
-      confirmText: noPreview ? '仍然入库' : '确认入库',
+      confirmText: noPreview ? '仍然入库' : '确认，写入知识库',
       cancelText: '再检查下',
     });
     if (!confirm.confirm) return;
@@ -339,7 +339,7 @@ export default function ThinkTank() {
       setActiveBatch(null);
       const refreshed = await loadPipeline();
       setStage('confirmed');
-      Taro.showToast({ title: refreshed ? `已写入知识库 · ${r.count} 份` : '已入库，页面刷新失败，请稍后重试', icon: 'none' });
+      Taro.showToast({ title: refreshed ? `${r.count} 份资料已入库` : '已入库，页面刷新失败，请稍后重试', icon: 'none' });
     } catch (e) {
       s.handleApiError(e);
     } finally {
@@ -558,7 +558,7 @@ export default function ThinkTank() {
                   <View className="uz-b">
                     <Text className="uz-k">第一步 · 接住乱资料</Text>
                     <Text className="uz-t serif">上传资料</Text>
-                    <Text className="uz-d">先上传并检查资料，再点击「开始资料整理」。确认后才会进入知识库，供战局和对话调用。</Text>
+                    <Text className="uz-d">先把资料放进来，我过一遍。理清楚了你点个头，我再收进知识库，判断时用上。</Text>
                   </View>
                   <View className="uz-btn"><Text>{uploading ? '上传中…' : '＋ 上传'}</Text></View>
                 </View>
@@ -572,7 +572,7 @@ export default function ThinkTank() {
                     <Text className="next-step-t serif">资料已接收，先让军师整理</Text>
                     <Text className="next-step-d">会先识别类型、去重、归类并提炼摘要。整理完成后，你再确认哪些资料进入知识库。</Text>
                     <View className="next-step-actions">
-                      <View className="next-step-primary" style={{ background: accent }} onClick={() => runOrganize(batches[0].id, false)}><Text>开始资料整理</Text></View>
+                      <View className="next-step-primary" style={{ background: accent }} onClick={() => runOrganize(batches[0].id, false)}><Text>帮我整理这批资料</Text></View>
                       <View className="next-step-secondary" onClick={() => runOrganize(batches[0].id, true)}><Text>深度整理</Text></View>
                     </View>
                   </View>
@@ -682,7 +682,7 @@ export default function ThinkTank() {
                     })}
 
                     {!batches.length && !organized ? (
-                      <View className="stage-empty"><Text className="se-t">待整理区还是空的</Text><Text className="se-s">先把散落在微信、表格、文档、图片里的材料放进来。</Text></View>
+                      <View className="stage-empty"><Text className="se-t">还没放资料进来</Text><Text className="se-s">微信聊天、表格、文档、图片——散在各处的材料，先丢进来。</Text></View>
                     ) : null}
                   </>
                 )}
@@ -694,7 +694,7 @@ export default function ThinkTank() {
               <>
                 <View className="stage-summary card">
                   <Text className="ss-t serif">已优化，等你确认</Text>
-                  <Text className="ss-s">这里只放系统整理后的结果，用户确认后再写入知识库。</Text>
+                  <Text className="ss-s">这是我理过一遍的，你过目，没问题我就入库了。</Text>
                   <Text className="ss-em">{counts.optimized} 份</Text>
                 </View>
                 {optimizedItems.length ? (
@@ -727,7 +727,7 @@ export default function ThinkTank() {
                       })}
                     </View>
                     <View className={`confirm-library card ${confirming ? 'busy' : ''}`} onClick={confirmOptimized}>
-                      <Text className="cl-t serif">{confirming ? '正在写入知识库' : '下一步：确认入库'}</Text>
+                      <Text className="cl-t serif">{confirming ? '正在写入知识库' : '确认，写入知识库'}</Text>
                       <Text className="cl-s">{confirming ? '正在切片并建立检索索引，请稍候，不要重复操作。' : '确认后将回写战局页、方案页和后续对话引用。'}</Text>
                       <View className="cl-btn" style={{ background: accent }}>
                         {confirming ? <View className="cl-spinner" /> : null}
@@ -749,7 +749,7 @@ export default function ThinkTank() {
               <>
                 <View className="stage-summary card">
                   <Text className="ss-t serif">已进入知识库</Text>
-                  <Text className="ss-s">这里的资料已经可被战局、方案和对话直接调用。</Text>
+                  <Text className="ss-s">这些资料我都读过了，做判断时会用上。</Text>
                   <Text className="ss-em">{counts.confirmed} 份</Text>
                 </View>
                 {confirmedFolders.length ? (
@@ -772,8 +772,8 @@ export default function ThinkTank() {
                   </>
                 ) : (
                   <View className="stage-empty">
-                    <Text className="se-t">知识库还是空的</Text>
-                    <Text className="se-s">确认优化后的资料入库后，会在这里按目录沉淀，供战局、方案和对话调用。</Text>
+                    <Text className="se-t">知识库还空着</Text>
+                    <Text className="se-s">资料理好、确认入库后，我做判断和出方案就能直接用上。</Text>
                   </View>
                 )}
               </>
@@ -790,8 +790,8 @@ export default function ThinkTank() {
           <>
             <View className="ds-hero card">
               <Text className="dh-k">经营数据源</Text>
-              <Text className="dh-t serif">让军师判断有真实证据</Text>
-              <Text className="dh-d">先支持上传表格、截图和聊天记录，再逐步做后台授权。数据会参与战局判断、执行复盘和方案更新。</Text>
+              <Text className="dh-t serif">让军师的判断有根有据</Text>
+              <Text className="dh-d">先上传表格、截图和聊天记录，后续再做后台授权。这些数据会用在战局判断、复盘和方案更新里。</Text>
               <View className="dh-metrics">
                 <View className="dh-m"><Text className="dh-mv serif">{dsView?.bound ?? 0}</Text><Text className="dh-ml">已绑定</Text></View>
                 <View className="dh-m"><Text className="dh-mv serif">{dsView?.needed ?? 0}</Text><Text className="dh-ml">待补关键项</Text></View>
@@ -834,8 +834,8 @@ export default function ThinkTank() {
           <>
             <View className="module-hero card">
               <Text className="mh-k">能力中心</Text>
-              <Text className="mh-t serif">按当前案卷调用能力</Text>
-              <Text className="mh-d">免费能力先判断，深度能力做推演，会员模块承接长期执行。</Text>
+              <Text className="mh-t serif">按当前案卷选能力</Text>
+              <Text className="mh-d">免费能力先判断，深度能力做推演，会员模块负责长期执行。</Text>
               <View className="mh-stats">
                 <View className="mh-s"><Text className="mh-sv serif">{modStats.free}</Text><Text className="mh-sl">免费可用</Text></View>
                 <View className="mh-s"><Text className="mh-sv serif">{modStats.deep}</Text><Text className="mh-sl">深度能力</Text></View>
@@ -881,8 +881,8 @@ export default function ThinkTank() {
             {reports.length === 0 ? (
               <View className="think-empty">
                 <View className="e-ic" style={{ background: 'var(--accent-soft)' }}><Icon name="doc" size={22} color={accent} /></View>
-                <Text className="et">还没有沉淀方案</Text>
-                <Text className="es">在战局页认可判断、或让军师产出方案后，方案会按版本沉淀在这里。</Text>
+                <Text className="et">还没有方案</Text>
+                <Text className="es">在战局页定下判断，或让军师出一份方案，每次都会按版本留档在这里。</Text>
               </View>
             ) : (
               reports.map((r) => (
@@ -899,8 +899,8 @@ export default function ThinkTank() {
             <View className="report card" onClick={() => switchTo('/pages/sessions/index')}>
               <View className="report-ic"><Text className="serif">新</Text></View>
               <View className="report-b">
-                <Text className="report-t serif">从对话生成新方案</Text>
-                <Text className="report-s">认可判断后生成，并同步到执行模块</Text>
+                <Text className="report-t serif">让军师出新方案</Text>
+                <Text className="report-s">判断定了自动出方案，更新到执行页</Text>
               </View>
               <Text className="report-state">生成</Text>
             </View>
@@ -908,7 +908,7 @@ export default function ThinkTank() {
               <View className="report-ic"><Text className="serif">案</Text></View>
               <View className="report-b">
                 <Text className="report-t serif">我的方案库</Text>
-                <Text className="report-s">对话产出的结构化方案，存库即沉淀一版</Text>
+                <Text className="report-s">对话里出的方案，存一次就留一版</Text>
               </View>
               <Text className="report-state">查看</Text>
             </View>
@@ -1004,7 +1004,7 @@ function ModSheet({ sel, onClose, onPrimary }: { sel: ModuleView | null; onClose
       footer={
         <View className="tk-actions">
           <View className="tk-secondary" onClick={onClose}><Text>返回</Text></View>
-          <View className="tk-primary" style={{ background: accent }} onClick={onPrimary}><Text>{callable ? '立即调用' : '查看启用方式'}</Text></View>
+          <View className="tk-primary" style={{ background: accent }} onClick={onPrimary}><Text>{callable ? '立即使用' : '查看启用方式'}</Text></View>
         </View>
       }
     >

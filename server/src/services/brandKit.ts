@@ -9,7 +9,7 @@ import type { BrandKitView } from '../../../shared/contracts';
 
 export class BrandKitLockedError extends Error {
   statusCode = 403; code = 'BRANDKIT_LOCKED';
-  constructor() { super('先和军师聊定一份方案并认可（进入执行），再生成品牌资产包'); }
+  constructor() { super('先和军师聊定一份方案，点「就按这个来」进入执行，再生成品牌资产包'); }
 }
 
 const StrArr = z.array(z.string().trim().min(1)).catch([]).default([]);

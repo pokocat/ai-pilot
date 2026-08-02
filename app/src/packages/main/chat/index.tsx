@@ -210,7 +210,7 @@ type ChatScrollEvent = {
 // 模型选择：后端统一调度，前端暂固定展示一档（预留多模型切换入口）。
 const FIXED_MODEL = '军师 · 标准';
 // 记债项10：报告流失败/降级统一话术——只此一句 + ↻ 重试入口，不再另出「保底草案」提示。
-const REPORT_INTERRUPTED_TRUST = '生成中断——已生成部分已保留，可点击重试补全';
+const REPORT_INTERRUPTED_TRUST = '中断了——已出的部分留着，点重试继续补全';
 const JUMP_LATEST_SHOW_DISTANCE = 420;
 const JUMP_LATEST_HIDE_DISTANCE = 140;
 // B1 贴底判定阈值：距底 ≤ 此值视为「贴底跟随」，用户上滑超过即暂停自动滚底。
@@ -269,7 +269,7 @@ type UploadStatus = 'waiting' | 'uploading' | 'done' | 'failed' | 'cancelled';
 interface UploadEntry { id: string; name: string; size: number; path: string; pct: number; status: UploadStatus; }
 
 const UPLOAD_STATUS_TEXT: Record<UploadStatus, string> = {
-  waiting: '候着', uploading: '呈送中', done: '已呈上', failed: '未送达', cancelled: '已撤回',
+  waiting: '排队中', uploading: '发送中', done: '已送达', failed: '发送失败', cancelled: '已撤回',
 };
 
 // 引用签的类型称谓（军师文风）：与 @引用选择器分组标题保持一致，附卷=归卷后的知识。
@@ -586,12 +586,12 @@ export default function Chat() {
 
   const errorReply = (e: unknown): string => {
     if (isUnauthorized(e)) return '登录态已失效，请重新登录后再发送。';
-    if ((e as any)?.data?.code === 'AGENT_LOCKED') return '该专项顾问尚未启用，请到「智库 / 工坊」查看可用方案。';
-    if ((e as any)?.data?.code === 'INSUFFICIENT_QUOTA') return '本月 token 额度已用尽，请在「我的」升级套餐或下月再用。';
-    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '算力不足，请在「我的」充值或解锁后再继续。';
+    if ((e as any)?.data?.code === 'AGENT_LOCKED') return '这位军师还没启用，去锦囊里看看。';
+    if ((e as any)?.data?.code === 'INSUFFICIENT_QUOTA') return '本月额度已用尽，可在「我的」升级套餐，或下月再用。';
+    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '算力不足，可在「我的」充值后继续。';
     const msg = String((e as any)?.message || '');
     if (msg && msg !== 'undefined') return msg;
-    return '抱歉，产出失败了，请稍后再试。';
+    return '没出来，再试一次？还是不行就换个说法。';
   };
 
   // 审核类错误（输入/输出未通过内容审核）：重试同样内容必再次被拦，故不提供「重试」，也避免叠出重复气泡。
@@ -1418,7 +1418,7 @@ export default function Chat() {
   const turnIntoOrders = () => {
     const lastReport = [...logRef.current].reverse().find((m) => m.role === 'report') as Extract<Msg, { role: 'report' }> | undefined;
     if (!lastReport) {
-      Taro.showToast({ title: '先让军师产出一份方案，认可后即可转成军令', icon: 'none' });
+      Taro.showToast({ title: '先让军师出一份方案，定了才能转成军令', icon: 'none' });
       return;
     }
     acceptPlan(lastReport.deliverable, lastReport.messageId);
@@ -1624,7 +1624,7 @@ export default function Chat() {
         if (st === 'done') ok++;
         if (st === 'done' || st === 'cancelled') delete next[u.id];
       }
-      if (ok) Taro.showToast({ title: `${ok} 份已呈上，拆读中…可直接发问`, icon: 'none' });
+      if (ok) Taro.showToast({ title: `${ok} 份已送达，拆读中…可以直接发问`, icon: 'none' });
       return next;
     });
   };
@@ -1676,7 +1676,7 @@ export default function Chat() {
       if (cur[id]?.status !== 'done') return cur;
       const next = { ...cur };
       delete next[id];
-      Taro.showToast({ title: `「${u.name}」已呈上，拆读中`, icon: 'none' });
+      Taro.showToast({ title: `「${u.name}」已送达，拆读中`, icon: 'none' });
       return next;
     });
   };
@@ -1741,7 +1741,7 @@ export default function Chat() {
         if (st === 'done') ok++;
         if (st === 'done' || st === 'cancelled') delete next[u.id];
       }
-      if (ok) Taro.showToast({ title: `${ok} 张已呈上，军师即刻阅图`, icon: 'none' });
+      if (ok) Taro.showToast({ title: `${ok} 张已送达，我现在就看`, icon: 'none' });
       return next;
     });
   };
@@ -1894,7 +1894,7 @@ export default function Chat() {
                       <Icon name="layers" size={13} color={accent} />
                       <Text style={{ color: accent }}>军师印象</Text>
                     </View>
-                    <Text className="md-copy">我会参考你在本账号沉淀的企业档案、历史偏好和本次引用资料，让建议保持同一套业务口径。</Text>
+                    <Text className="md-copy">我会参考你在本账号存的企业档案、历史偏好和本次引用的资料，让建议保持同一套业务口径。</Text>
                     <View className="md-tags">
                       <Text>企业档案</Text>
                       <Text>对话偏好</Text>
@@ -2044,9 +2044,9 @@ export default function Chat() {
           }
           if (m.role === 'memory') {
             return (
-              <View key={m.uid} className="mem-learned" onLongPress={() => copyText(`军师印象已更新：${m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。`)}>
+              <View key={m.uid} className="mem-learned" onLongPress={() => copyText(`${m.agentName} 记下了这次对话里的偏好和口径，往后说话会更贴你的实际。`)}>
                 <Icon name="spark" size={13} color={accent} />
-                <Text>军师印象已更新：{m.agentName} 已校准本次对话里的业务偏好和判断口径，后续产出会更贴合。</Text>
+                <Text>{m.agentName} 记下了这次对话里的偏好和口径，往后说话会更贴你的实际。</Text>
               </View>
             );
           }
@@ -2093,12 +2093,12 @@ export default function Chat() {
               {reportReady && !m.retryText ? (
                 <View className="accept-card">
                   <View className="accept-b">
-                    <Text className="accept-t">认可这份方案？</Text>
-                    <Text className="accept-d">存入方案库沉淀为一版方案，执行页承接军令与复盘。</Text>
+                    <Text className="accept-t">这份方案，就按这个来？</Text>
+                    <Text className="accept-d">存入方案库留一版，执行页承接军令与复盘。</Text>
                   </View>
                   <View className="accept-btn" style={{ background: accent }} onClick={() => acceptPlan(m.deliverable)}>
                     <Icon name="check" size={13} color="#fff" />
-                    <Text>认可 · 去执行</Text>
+                    <Text>就按这个来 · 去执行</Text>
                   </View>
                 </View>
               ) : null}
@@ -2143,7 +2143,7 @@ export default function Chat() {
             <View className="ub-head">
               <Text className="ub-t">
                 {uploading
-                  ? `呈送资料 ${uploadList.filter((u) => u.status === 'done').length}/${uploadList.length}`
+                  ? `发送资料 ${uploadList.filter((u) => u.status === 'done').length}/${uploadList.length}`
                   : `${uploadList.filter((u) => u.status === 'failed').length} 份未送达`}
               </Text>
               {uploading ? <Text className="ub-cancel" style={{ color: accent }} onClick={cancelAllUploads}>全部撤回</Text> : null}
@@ -2224,7 +2224,7 @@ export default function Chat() {
                 {busy ? (
                   reattachedBusy ? (
                     // 重进后已恢复思考态，但原请求属于上一页面实例，不能展示一个实际无效的“停止”按钮。
-                    <View className="csend waiting" aria-label="军师正在思考" style={{ borderColor: accent }}>
+                    <View className="csend waiting" aria-label="容我想想" style={{ borderColor: accent }}>
                       <View className="waiting-dot" style={{ background: accent }} />
                     </View>
                   ) : (
