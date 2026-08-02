@@ -7,6 +7,7 @@ import { store } from '../../services/store';
 import { api, type ActivationSource } from '../../services/api';
 import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, payOrder } from '../../services/pay';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
+import { paymentErrorMessage } from '../../services/paymentFeedback';
 import './index.scss';
 
 export interface PaySheetProps {
@@ -79,11 +80,8 @@ export default function PaySheet({
         }
       }
       onClose?.();
-    } catch (e: any) {
-      const code = e?.code || e?.data?.code;
-      if (e?.errMsg && /cancel/i.test(e.errMsg)) Taro.showToast({ title: '已取消支付', icon: 'none' });
-      else if (code === 'PAYMENT_NOT_CONFIGURED' || code === 'PAYMENT_COMING_SOON') Taro.showToast({ title: '支付即将开通，敬请期待', icon: 'none' });
-      else s.handleApiError(e, { fallbackTitle: '支付失败，请重试' });
+    } catch (e) {
+      Taro.showToast({ title: paymentErrorMessage(e, 'payment'), icon: 'none' });
     } finally {
       setBusy(false);
     }

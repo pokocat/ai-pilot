@@ -14,6 +14,10 @@
 import type { PrismaClient } from '@prisma/client';
 
 export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
+  await prisma.monthlyCreditGrant.deleteMany();
+  await prisma.tokenQuotaAdjustment.deleteMany();
+  await prisma.planEntitlement.deleteMany();
+  await prisma.skuEntitlement.deleteMany();
   await prisma.userModule.deleteMany();
   await prisma.userDataSource.deleteMany();
   await prisma.serviceAssignment.deleteMany();

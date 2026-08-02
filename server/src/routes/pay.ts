@@ -3,7 +3,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   verifyNotifySignature, decryptNotifyResource, markPaidAndApply, markRefundNotified, payConfigured,
-  reconcileOrder, repayParams, orderPayable, payMockSuccessEnabled, isMockOrder, genMockTransactionId,
+  reconcileOrder, repayParams, orderPayable, orderPayableUntil, payMockSuccessEnabled, isMockOrder, genMockTransactionId,
 } from '../services/wechatPay.js';
 import { sandboxEnabled } from '../services/sandbox.js';
 import { requireAdmin } from '../services/adminAuth.js';
@@ -39,10 +39,12 @@ export async function payRoutes(app: FastifyInstance) {
       skuKey: o.skuKey ?? undefined,
       paidAt: o.paidAt?.toISOString(),
       appliedAt: o.appliedAt?.toISOString(),
+      refundStatus: (o.refundStatus as PayOrderListItem['refundStatus']) ?? null,
       refundedAt: o.refundedAt?.toISOString(),
       itemName: itemNameOf(o),
       createdAt: o.createdAt.toISOString(),
       payable: orderPayable(o),
+      payableUntil: orderPayableUntil(o),
       ...(isMockOrder(o) ? { mock: true as const } : {}), // 前台要能看出这单是测试期模拟支付，不能装成真付款
     }));
     return { items };
@@ -85,6 +87,8 @@ export async function payRoutes(app: FastifyInstance) {
       skuKey: order.skuKey ?? undefined,
       paidAt: order.paidAt?.toISOString(),
       appliedAt: order.appliedAt?.toISOString(),
+      refundStatus: (order.refundStatus as PayOrderStatus['refundStatus']) ?? null,
+      payableUntil: orderPayableUntil(order),
     };
   });
 
@@ -183,6 +187,10 @@ export async function payRoutes(app: FastifyInstance) {
         appid?: string; mchid?: string; amount?: { total?: number };
       };
       if (!decoded.out_trade_no) return reply.code(400).send({ code: 'FAIL', message: '解密结果缺少订单号' });
+      if (!decoded.transaction_id || decoded.trade_state !== 'SUCCESS' || typeof decoded.amount?.total !== 'number'
+        || !decoded.appid || !decoded.mchid) {
+        return reply.code(400).send({ code: 'FAIL', message: '解密结果缺少必填交易字段' });
+      }
       const r = await markPaidAndApply({
         outTradeNo: decoded.out_trade_no,
         transactionId: decoded.transaction_id,
@@ -193,7 +201,11 @@ export async function payRoutes(app: FastifyInstance) {
         appId: decoded.appid,
         mchId: decoded.mchid,
       });
-      // 即便业务侧判为「已处理/非成功态」，也回 SUCCESS 让微信停止重试（订单状态已落库，可对账）。
+      // 已幂等处理可回成功；关键字段不一致必须拒绝，让微信重试并保留告警窗口。
+      if (!r.applied && r.reason?.startsWith('field_mismatch_')) {
+        console.error('[pay] notify rejected:', r.reason, decoded.out_trade_no);
+        return reply.code(400).send({ code: 'FAIL', message: '交易字段不一致' });
+      }
       if (!r.applied && r.reason && !['already_applied', 'trade_state_SUCCESS'].includes(r.reason)) {
         console.warn('[pay] notify not applied:', r.reason, decoded.out_trade_no);
       }

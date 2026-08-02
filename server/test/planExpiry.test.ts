@@ -7,7 +7,7 @@ import { runWithNow } from '../src/services/clock.js';
 import { applyPlanPurchase } from '../src/services/purchase.js';
 import { getBalance } from '../src/services/credits.js';
 import { computeUpgradeProration } from '../src/services/proration.js';
-import { getQuotaState, chargeQuota, assertPlanActive, getPlanStatus, PlanExpiredError } from '../src/services/tokenQuota.js';
+import { getQuotaState, chargeQuota, reserveQuota, assertPlanActive, getPlanStatus, PlanExpiredError, RESERVE_TOKENS } from '../src/services/tokenQuota.js';
 import { addMonthsClamped, periodKeyOf, isExpired, computeExpiry, nextResetAt } from '../src/services/planTime.js';
 import { cleanBusiness, closeApp } from './helpers.js';
 
@@ -103,6 +103,28 @@ test('锚点月度重置：年付有效期内跨月 → 复用快照重置 balan
     assert.equal(st.quota, 1_000_000, '应复用购买时快照 1,000,000，而非 live plan 的 500,000');
     assert.equal(st.balance, 1_000_000, '跨子周期 balance 重置满');
   });
+});
+
+test('并发跨锚点周期预留：钱包只重置一次，不能把其它请求已预扣的额度刷回去', async () => {
+  const T0 = new Date('2026-01-15T00:00:00Z');
+  await runWithNow(T0, async () => {
+    await applyPlanPurchase({ id: userId, tenantId }, await plan(yearlyId), { reason: 'buy', source: 'test' });
+    await chargeQuota(userId, 300_000, 1);
+    assert.equal((await getQuotaState(userId)).balance, 700_000);
+  });
+
+  const concurrency = 12;
+  await runWithNow(new Date('2026-02-16T00:00:00Z'), async () => {
+    await Promise.all(Array.from({ length: concurrency }, () => reserveQuota(userId)));
+  });
+
+  const state = await runWithNow(new Date('2026-02-16T00:00:00Z'), () => getQuotaState(userId));
+  assert.equal(state.quota, 1_000_000);
+  assert.equal(
+    state.balance,
+    1_000_000 - concurrency * RESERVE_TOKENS,
+    '跨期并发请求应各自只预扣一次，后到的重置不得覆盖先到请求的扣减',
+  );
 });
 
 test('续费同套餐（未过期）：叠加时长 + 保留锚点', async () => {

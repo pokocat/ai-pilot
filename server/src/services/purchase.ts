@@ -7,9 +7,15 @@ import { setQuota } from './tokenQuota.js';
 import { now } from './clock.js';
 import { computeExpiry, renewExpiry } from './planTime.js';
 import { bustPlanGate } from './planGate.js';
+import { periodKeyOf } from './planTime.js';
+import { planFamilyKey, planTierRank, sameCommercialTier } from './planRules.js';
+import { recordPlanEntitlement } from './planEntitlements.js';
 
 export interface PlanLike {
   id: string; name: string; price: number; period: string; creditsPerMonth: number; tokenQuotaPerMonth: number;
+  planFamilyKey?: string | null; tierRank?: number | null; usageLevel?: string | null; usageLabel?: string | null;
+  usageNormalPercent?: number | null; usageNearPercent?: number | null;
+  agentCount?: number; featuresJson?: unknown; highlighted?: boolean;
 }
 
 export interface GrantResult { creditBalance: number; grantedCredits: number; grantedTokens: number; expiresAt: Date | null; }
@@ -25,7 +31,10 @@ export interface GrantResult { creditBalance: number; grantedCredits: number; gr
 export async function applyPlanPurchase(
   user: { id: string; tenantId: string },
   plan: PlanLike,
-  opts: { reason: string; source: string },
+  opts: {
+    reason: string; source: string;
+    order?: { id: string; outTradeNo: string; amount: number; termsHash: string | null; quote?: { remainingValue?: number } | null };
+  },
   db?: Prisma.TransactionClient,
 ): Promise<GrantResult> {
   const unlimited = plan.creditsPerMonth < 0;
@@ -35,19 +44,27 @@ export async function applyPlanPurchase(
     const noExpiry = plan.price <= 0; // 免费层 / 企业版私有化：不设到期
     const prev = await tx.user.findUnique({
       where: { id: user.id },
-      select: { planId: true, planActivatedAt: true, planExpiresAt: true },
+      select: {
+        planId: true, planActivatedAt: true, planExpiresAt: true,
+        plan: { select: { id: true, price: true, period: true, planFamilyKey: true, tierRank: true } },
+      },
     });
     const isRenewal = !noExpiry && prev?.planId === plan.id && !!prev.planExpiresAt && prev.planExpiresAt.getTime() > at.getTime();
+    const isBillingChange = !noExpiry && !!prev?.plan && prev.plan.id !== plan.id
+      && !!prev.planExpiresAt && prev.planExpiresAt.getTime() > at.getTime()
+      && sameCommercialTier(prev.plan, plan);
     // 防刷：免费/永久套餐(noExpiry)已在该套餐上时，重复"购买"不再发钻石（钻石是累加流水，且免费路径无支付幂等键兜底；
     // 付费套餐的重复发放由支付层 outTradeNo 幂等防住）。月度额度由锚点重置链单独发放，不依赖此处重复点击。
     const skipFreeRegrant = noExpiry && prev?.planId === plan.id;
+    const skipCurrentPeriodRegrant = skipFreeRegrant || isRenewal || isBillingChange;
     // 实际发放额：保留负数=不限量语义（企业版）；防刷跳过时为 0（grantCredits 对 0 是无操作）。
-    const creditGrantAmount = skipFreeRegrant ? 0 : plan.creditsPerMonth;
+    const creditGrantAmount = skipCurrentPeriodRegrant ? 0 : plan.creditsPerMonth;
     // 展示/审计额：不限量与跳过均记 0。
-    const grantedCredits = unlimited || skipFreeRegrant ? 0 : plan.creditsPerMonth;
-    const activatedAt = isRenewal ? (prev!.planActivatedAt ?? at) : at;
+    const grantedCredits = unlimited || skipCurrentPeriodRegrant ? 0 : plan.creditsPerMonth;
+    const activatedAt = isRenewal || isBillingChange ? (prev!.planActivatedAt ?? at) : at;
     // 续费：从激活锚点重派生到期（renewExpiry，防月末 clamp 漂移、与额度锚点链对齐）；新购/升级：from now。
     const expiresAt = noExpiry ? null : (isRenewal ? renewExpiry(activatedAt, prev!.planExpiresAt!, plan.period) : computeExpiry(at, plan.period));
+    const entitlementStartsAt = isRenewal && prev?.planExpiresAt ? prev.planExpiresAt : at;
 
     await tx.user.update({
       where: { id: user.id },
@@ -57,7 +74,31 @@ export async function applyPlanPurchase(
     // skipFreeRegrant 同样必须挡住 token 额度覆盖式授予：setQuota 是硬覆盖 balance=quota（见 tokenQuota.ts），
     // 与"月度额度由锚点重置链单独发放"这句注释描述的惰性重置是两条独立路径——不挡住这里会让重复点击
     // 免费套餐的"购买"把已用尽的 token 额度刷回满额，形成与钻石防刷同源但未被堵上的刷额度口子。
-    if (!skipFreeRegrant) await setQuota(user.tenantId, user.id, plan.tokenQuotaPerMonth, activatedAt, tx);
+    if (!skipCurrentPeriodRegrant) await setQuota(user.tenantId, user.id, plan.tokenQuotaPerMonth, activatedAt, tx);
+    // 初次购买/升级已经在这里发了当期钻石，写幂等锚点；续期/同档转年付不重复发当期权益。
+    if (!skipCurrentPeriodRegrant && !unlimited && plan.creditsPerMonth > 0) {
+      await tx.monthlyCreditGrant.upsert({
+        where: { userId_periodKey: { userId: user.id, periodKey: periodKeyOf(activatedAt, at) } },
+        update: {},
+        create: {
+          tenantId: user.tenantId, userId: user.id, periodKey: periodKeyOf(activatedAt, at), planId: plan.id,
+          sourceOrderId: opts.order?.id, amount: plan.creditsPerMonth,
+        },
+      });
+    }
+    if (!skipFreeRegrant) {
+      await recordPlanEntitlement(tx, {
+        tenantId: user.tenantId, userId: user.id,
+        plan: {
+          ...plan,
+          agentCount: plan.agentCount ?? 0,
+          featuresJson: plan.featuresJson ?? [],
+          highlighted: plan.highlighted ?? false,
+        },
+        startsAt: entitlementStartsAt, expiresAt, anchorAt: activatedAt,
+        previousPlanId: prev?.planId, order: opts.order,
+      });
+    }
     await tx.auditLog.create({
       data: {
         tenantId: user.tenantId,
@@ -67,12 +108,15 @@ export async function applyPlanPurchase(
           planId: plan.id, planName: plan.name, grantedCredits, creditBalance,
           grantedTokens: plan.tokenQuotaPerMonth, source: opts.source,
           renewal: isRenewal,
+          billingChange: isBillingChange,
+          planFamilyKey: planFamilyKey(plan),
+          tierRank: planTierRank(plan),
           planActivatedAt: activatedAt.toISOString(),
           planExpiresAt: expiresAt ? expiresAt.toISOString() : null,
         },
       },
     }).catch(() => {});
-    return { creditBalance, grantedCredits, grantedTokens: plan.tokenQuotaPerMonth, expiresAt };
+    return { creditBalance, grantedCredits, grantedTokens: skipCurrentPeriodRegrant ? 0 : plan.tokenQuotaPerMonth, expiresAt };
   };
   const result = db ? await apply(db) : await prisma.$transaction((tx) => apply(tx));
   bustPlanGate(user.id); // 禁写闸缓存 30s：付完款/发放后必须立刻可写
@@ -93,7 +137,7 @@ export interface SkuLike {
 export async function applySkuGrant(
   user: { id: string; tenantId: string },
   sku: SkuLike,
-  opts: { reason: string; source: string },
+  opts: { reason: string; source: string; orderId?: string },
   tx: Prisma.TransactionClient,
 ): Promise<void> {
   if (sku.kind === 'module' && sku.grantsModuleKey) {
@@ -118,6 +162,13 @@ export async function applySkuGrant(
       where: { userId_moduleKey: { userId: user.id, moduleKey: `sku:${sku.key}` } },
       update: { enabled: true, source: 'purchase' },
       create: { tenantId: user.tenantId, userId: user.id, moduleKey: `sku:${sku.key}`, enabled: true, source: 'purchase' },
+    });
+  }
+  if (opts.orderId) {
+    const entitlementKey = sku.kind === 'module' && sku.grantsModuleKey ? sku.grantsModuleKey : `sku:${sku.key}`;
+    await tx.skuEntitlement.upsert({
+      where: { sourceOrderId: opts.orderId }, update: {},
+      create: { tenantId: user.tenantId, userId: user.id, skuKey: sku.key, sourceOrderId: opts.orderId, entitlementKey, kind: sku.kind },
     });
   }
   // 备注型 0 额流水（订单流水页复用 CreditLedger，不加新端点）。

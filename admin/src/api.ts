@@ -171,13 +171,14 @@ import type {
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
   AdminBenchmark, AdminBenchmarkUpsert,
   AdminUserUsage, AdminPaymentsView, AdminPayReconcileResult,
+  AdminUserQuotaView, AdminQuotaAdjustRequest,
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag, AdminMonitorNotify } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
 export type { AdminBenchmark, AdminBenchmarkUpsert } from '../../shared/contracts';
 // —— per-user 用量下钻 + 支付订单只读 ——
-export type { AdminUserUsage, AdminUserQuota, AdminUserPlanStatus, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult } from '../../shared/contracts';
+export type { AdminUserUsage, AdminUserQuota, AdminUserPlanStatus, AdminTokenAgg, AdminPaymentsView, AdminPaymentItem, AdminPaymentStuckItem, AdminPayReconcileResult, AdminUserQuotaView, AdminQuotaAdjustRequest } from '../../shared/contracts';
 // —— 海报成品图（canvas_design）配置与任务台（P3 页面消费）——
 export type {
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeVisualConfig,
@@ -288,6 +289,9 @@ export const api = {
   setUserService: (id: string, body: ServiceAssignmentUpdate) => req<{ service: ServiceAssignmentView | null }>(`/admin/users/${id}/service`, 'PUT', body),
   // —— per-user 用量下钻（额度 / 30 天 token / 钻石流水 / 支付 / 开通归因）——
   userUsage: (id: string, days = 30) => req<AdminUserUsage>(`/admin/users/${id}/usage?days=${days}`),
+  userQuotaDetail: (id: string) => req<AdminUserQuotaView>(`/admin/users/${id}/token-quota-detail`),
+  adjustUserQuota: (id: string, body: AdminQuotaAdjustRequest) => req<{ ok: boolean; id: string }>(`/admin/users/${id}/token-quota-adjustments`, 'POST', body),
+  restoreUserQuota: (id: string) => req<{ ok: boolean }>(`/admin/users/${id}/token-quota/restore-plan`, 'POST', {}),
   // —— 运营动作（owner-only；后端 requireSuper + 审计带 before/after）——
   setUserQuota: (id: string, body: { mode: 'reset_to_plan' | 'set'; quota?: number }) => req<{ ok: boolean }>(`/admin/users/${id}/token-quota`, 'POST', body),
   adjustUserCredits: (id: string, body: { delta: number; reason: string }) => req<{ ok: boolean }>(`/admin/users/${id}/credits`, 'POST', body),

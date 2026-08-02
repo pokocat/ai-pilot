@@ -2,14 +2,16 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
 import { applyPlanPurchase } from '../services/purchase.js';
-import { payConfigured, createJsapiOrder, payMockSuccessEnabled, resolvePayerOpenid } from '../services/wechatPay.js';
+import { payConfigured, createJsapiOrder, orderPayable, orderPayableUntil, payMockSuccessEnabled, resolvePayerOpenid } from '../services/wechatPay.js';
 import { sandboxEnabled, demoPurchaseEnabled } from '../services/sandbox.js';
-import { computeUpgradeProration } from '../services/proration.js';
-import { isExpired, daysRemaining } from '../services/planTime.js';
+import { isExpired } from '../services/planTime.js';
 import { now } from '../services/clock.js';
 import { parseAttribution } from '../services/activation.js';
 import { recordAudit } from '../services/audit.js';
-import type { Plan as PlanView, PlanPurchaseResult, WechatOrderResult } from '../../../shared/contracts';
+import type { Plan as PlanView, PlanAction, PlanFunnelEvent, PlanOption, PlanOptionsResult, PlanPurchaseResult, PlanRelation, WechatOrderResult } from '../../../shared/contracts';
+import { getPlanStatus, getQuotaState } from '../services/tokenQuota.js';
+import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, usageView } from '../services/planRules.js';
+import { commercialTerms, hashTerms, quotePlanChange } from '../services/planEntitlements.js';
 
 function publicPlan(plan: {
   id: string;
@@ -21,6 +23,10 @@ function publicPlan(plan: {
   agentCount: number;
   featuresJson: unknown;
   highlighted: boolean;
+  planFamilyKey?: string | null;
+  tierRank?: number | null;
+  usageLevel?: string | null;
+  usageLabel?: string | null;
 }): PlanView {
   return {
     id: plan.id,
@@ -32,6 +38,10 @@ function publicPlan(plan: {
     agentCount: plan.agentCount,
     featuresJson: Array.isArray(plan.featuresJson) ? plan.featuresJson.map(String) : [],
     highlighted: plan.highlighted,
+    planFamilyKey: planFamilyKey(plan),
+    tierRank: planTierRank(plan),
+    usageLevel: publicUsageLevel(plan),
+    usageLabel: publicUsageLabel(plan),
   };
 }
 
@@ -52,11 +62,107 @@ async function resolveUserOptional(token?: string) {
 }
 
 export async function planRoutes(app: FastifyInstance) {
+  const funnelEvents = new Set<PlanFunnelEvent>(['page_open', 'current_view', 'renew_click', 'upgrade_click', 'billing_change_click', 'downgrade_remind_click', 'quote_success', 'quote_failure', 'quote_confirm', 'payment_cancel', 'payment_failure', 'payment_success', 'payment_pending', 'entitlement_applied', 'order_view', 'order_continue']);
+
+  app.post<{ Body: { event?: string; planId?: string; relation?: string; orderNo?: string; code?: string } }>('/plans/events', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const event = req.body?.event as PlanFunnelEvent;
+    if (!funnelEvents.has(event)) return reply.code(400).send({ error: '事件类型无效', code: 'PLAN_EVENT_INVALID' });
+    await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.plan.funnel', payload: {
+      event, planId: req.body?.planId?.slice(0, 80) || null, relation: req.body?.relation?.slice(0, 30) || null,
+      orderNo: req.body?.orderNo?.slice(-32) || null, code: req.body?.code?.slice(0, 60) || null,
+    } });
+    return { ok: true };
+  });
   app.get('/plans', async (req): Promise<PlanView[]> => {
     const user = await resolveUserOptional(req.headers['x-user-id'] as string | undefined);
     const where = canSeeHiddenPlans(user) ? {} : { hidden: false };
     const plans = await prisma.plan.findMany({ where, orderBy: { sort: 'asc' } });
     return plans.map(publicPlan);
+  });
+
+  // 用户态方案目录：升降档关系和动作只由服务端计算，客户端不复制价格/周期启发式。
+  app.get('/plans/options', async (req): Promise<PlanOptionsResult> => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const visibleWhere = canSeeHiddenPlans(user) ? {} : { hidden: false };
+    const [plans, state, quota, pending, status] = await Promise.all([
+      prisma.plan.findMany({ where: visibleWhere, orderBy: { sort: 'asc' } }),
+      prisma.user.findUnique({ where: { id: user.id }, select: { planId: true, planExpiresAt: true, plan: true } }),
+      getQuotaState(user.id),
+      prisma.paymentOrder.findMany({ where: { userId: user.id, status: { in: ['created', 'paid'] }, appliedAt: null }, orderBy: { createdAt: 'desc' }, take: 20 }),
+      getPlanStatus(user.id),
+    ]);
+    const current = state?.plan ?? null;
+    const active = !!current && !isExpired(state?.planExpiresAt, now());
+    const pendingByPlan = new Map<string, (typeof pending)[number]>();
+    for (const order of pending) if (order.planId && !pendingByPlan.has(order.planId)) pendingByPlan.set(order.planId, order);
+    const currentTier = current ? planTierRank(current) : -1;
+    const nextTier = plans.filter((p) => p.price >= 0 && planTierRank(p) > currentTier).sort((a, b) => planTierRank(a) - planTierRank(b))[0];
+    const publicUsage = usageView(quota, status.nextResetAt, current);
+    const options: PlanOption[] = plans.map((plan) => {
+      const pendingOrder = pendingByPlan.get(plan.id);
+      let relation: PlanRelation = 'available';
+      let action: PlanAction = 'buy';
+      let canPurchase = plan.price >= 0;
+      let reason: string | undefined;
+      if (plan.hidden && plan.price > 0) {
+        // 生产隐藏支付验证档只对白名单可见；一旦可见就延续既有语义，
+        // 不让用户的真实高档套餐把 1 分测试档判成降档而拦住。
+        relation = 'available'; action = 'buy'; canPurchase = true;
+      } else if (plan.price < 0) {
+        relation = 'enterprise'; action = 'contact'; canPurchase = false;
+      } else if (pendingOrder?.status === 'paid') {
+        action = 'wait_applied'; canPurchase = false; reason = '支付已完成，权益正在到账';
+      } else if (pendingOrder && orderPayable(pendingOrder)) {
+        action = 'continue_payment'; canPurchase = true;
+      } else if (current && active) {
+        if (current.id === plan.id) {
+          relation = 'renew'; action = 'renew';
+        } else {
+          const curTier = planTierRank(current);
+          const targetTier = planTierRank(plan);
+          const sameFamily = planFamilyKey(current) === planFamilyKey(plan);
+          if (sameFamily && curTier === targetTier && current.period === 'month' && plan.period === 'year') {
+            relation = 'billing_change'; action = 'change_billing';
+          } else if (targetTier > curTier) {
+            relation = 'upgrade'; action = 'upgrade';
+          } else {
+            relation = 'downgrade'; action = 'remind'; canPurchase = false;
+            reason = '当前方案到期后可购买';
+          }
+        }
+      } else if (current?.id === plan.id) {
+        relation = 'current'; action = 'buy';
+      }
+      return {
+        plan: publicPlan(plan), relation, action, canPurchase, reason,
+        recommended: (publicUsage.usageStatus === 'exhausted' || publicUsage.usageStatus === 'near_limit') && !!nextTier && plan.id === nextTier.id,
+        expiresAt: state?.planExpiresAt?.toISOString() ?? null,
+        resetsAt: status.nextResetAt,
+        ...(pendingOrder ? { pendingOrder: {
+          outTradeNo: pendingOrder.outTradeNo,
+          status: pendingOrder.status as NonNullable<PlanOption['pendingOrder']>['status'],
+          amount: pendingOrder.amount,
+          planId: pendingOrder.planId || undefined,
+          paidAt: pendingOrder.paidAt?.toISOString(), appliedAt: pendingOrder.appliedAt?.toISOString(),
+          itemName: plan.name, createdAt: pendingOrder.createdAt.toISOString(),
+          payable: orderPayable(pendingOrder),
+          payableUntil: orderPayableUntil(pendingOrder),
+        } } : {}),
+      };
+    });
+    return { currentPlanId: state?.planId ?? null, usage: publicUsage, options };
+  });
+
+  app.post<{ Params: { id: string } }>('/plans/:id/quote', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
+    if (!plan || (plan.hidden && !canSeeHiddenPlans(user))) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    try { return await quotePlanChange(user.id, plan); }
+    catch (e) {
+      const err = e as { message?: string; statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 409).send({ error: err.message ?? '暂时无法变更方案', code: err.code ?? 'PLAN_SWITCH_BLOCKED' });
+    }
   });
 
   // 演示购买：直接发放权益（不经支付）。仅免费套餐 + 演示环境可用；付费套餐必须走支付。
@@ -87,7 +193,7 @@ export async function planRoutes(app: FastifyInstance) {
 
   // 微信支付下单（小程序 JSAPI）：创建订单并返回小程序调起支付所需参数。需配齐支付凭据。
   // P2：接受 source/refId 归因（与 SKU 下单同口径），回调发放时落 ActivationEvent（itemType='plan'）。
-  app.post<{ Params: { id: string }; Body: { openid?: string; source?: string; refId?: string } }>('/plans/:id/order', async (req, reply): Promise<WechatOrderResult | void> => {
+  app.post<{ Params: { id: string }; Body: { openid?: string; source?: string; refId?: string; clientRequestId?: string; quoteFingerprint?: string; expectedChargeAmount?: number } }>('/plans/:id/order', async (req, reply): Promise<WechatOrderResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
@@ -103,52 +209,46 @@ export async function planRoutes(app: FastifyInstance) {
     // 等于调用者自己的 wechatOpenId 时被采纳，其余静默忽略 → 落到下面这行 OPENID_REQUIRED。理由见该函数注释。
     const openid = resolvePayerOpenid(user, req.body?.openid);
     if (!openid) return reply.code(400).send({ error: '缺少支付用户 openid', code: 'OPENID_REQUIRED' });
-    const cur = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: { planExpiresAt: true, plan: { select: { id: true, name: true, price: true, period: true } } },
-    });
-    const curPlan = cur?.plan;
-    // 升级折算（D5）：实付 = max(0, 新套餐原价 − 老套餐剩余价值)；不触发时 = 原价。
-    // 同时是下面降级守卫的**唯一判定源**——「是不是真升级」的规则只存在于 proration 服务里（只读，不写库），
-    // 路由不再自带第二份（此前路由写死「月付→年付」，同周期升级如 入门版→决策版·月付 被守卫误伤 409）。
-    const proration = await computeUpgradeProration(user, { id: plan.id, price: plan.price, period: plan.period });
-    // 降级守卫（P0）：applyPlanPurchase 对「不同套餐」一律重置有效期锚点——年付降月付/平级横切
-    // 会直接烧掉当前套餐剩余时长且无折算（不支持退现）。仅放行：同套餐续费、可折算的升级、当前套餐已过期/免费。
-    // 隐藏测试档绕过降级守卫：它必然低于任何在售套餐价格（¥0.01），白名单账号又通常持有
-    // 未到期付费套餐，不绕过则恒 409 测不了。代价（现有套餐锚点被重置、退款后立即到期）
-    // 只落在白名单内部账号身上，见 seedConfig 该档注释。
-    if (curPlan && curPlan.id !== plan.id && !plan.hidden) {
-      if (curPlan.price < 0) {
-        return reply.code(409).send({ error: '企业版套餐由运营管理，如需调整请联系客服', code: 'PLAN_SWITCH_BLOCKED' });
-      }
-      if (curPlan.price > 0 && !isExpired(cur?.planExpiresAt, now()) && !proration.applies) {
-        const days = daysRemaining(cur?.planExpiresAt, now());
-        return reply.code(409).send({
-          // days=null = 付费套餐但无到期日（历史数据/人工改库的不限期档）：说人话，别报「还有 0 天」。
-          error: days === null
-            ? `当前套餐「${curPlan.name}」为不限期方案，切换方案请联系客服`
-            : `当前套餐「${curPlan.name}」还有 ${days} 天有效期，现在切换将丢失剩余时长；请到期后再购买`,
-          code: 'PLAN_SWITCH_BLOCKED',
-        });
-      }
+    let quote;
+    try { quote = await quotePlanChange(user.id, plan); }
+    catch (e) {
+      const err = e as { message?: string; statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 409).send({ error: err.message ?? '暂时无法变更方案', code: err.code ?? 'PLAN_SWITCH_BLOCKED' });
+    }
+    const needsQuote = quote?.relation === 'upgrade' || quote?.relation === 'billing_change';
+    const assertedQuote = req.body?.quoteFingerprint !== undefined || req.body?.expectedChargeAmount !== undefined;
+    if ((needsQuote || assertedQuote) && (req.body?.quoteFingerprint !== quote.quoteFingerprint || req.body?.expectedChargeAmount !== quote.chargeAmount)) {
+      return reply.code(409).send({ error: '方案价格或权益状态已变化，请重新确认', code: 'QUOTE_CHANGED' });
     }
     const attribution = parseAttribution(req.body?.source, req.body?.refId);
     try {
-      const r = await createJsapiOrder({ user, plan: { id: plan.id, name: plan.name, price: plan.price }, openid, amount: proration.chargeAmount, attribution });
-      if (proration.applies) {
+      const r = await createJsapiOrder({
+        user, plan: { id: plan.id, name: plan.name, price: plan.price }, openid,
+        amount: quote.chargeAmount, attribution,
+        clientRequestId: req.body?.clientRequestId?.trim() || undefined,
+        quote: {
+          quoteFingerprint: quote.quoteFingerprint,
+          remainingValue: quote.remainingValue,
+          chargeAmount: quote.chargeAmount,
+          relation: quote.relation,
+        },
+        termsHash: hashTerms(commercialTerms(plan)),
+      });
+      if (quote.relation === 'upgrade' || quote.relation === 'billing_change') {
         await recordAudit({
           tenantId: user.tenantId, userId: user.id, action: 'user.plan.proration',
           payload: {
-            outTradeNo: r.outTradeNo, fromPlanId: proration.fromPlanId, fromPlanName: proration.fromPlanName, toPlanId: plan.id,
-            fullPrice: proration.fullPrice, remainingDays: proration.remainingDays, remainingValue: proration.remainingValue, chargeAmount: proration.chargeAmount,
+            outTradeNo: r.outTradeNo, fromPlanId: quote.currentPlan?.id, fromPlanName: quote.currentPlan?.name, toPlanId: plan.id,
+            relation: quote.relation, fullPrice: quote.fullPrice, remainingDays: quote.remainingDays,
+            remainingValue: quote.remainingValue, chargeAmount: quote.chargeAmount,
           },
         });
       }
       return {
-        ok: true, outTradeNo: r.outTradeNo, amount: proration.chargeAmount, pay: r.pay,
+        ok: true, outTradeNo: r.outTradeNo, amount: quote.chargeAmount, pay: r.pay,
         ...(r.mock ? { mock: true as const } : {}),
-        proration: proration.applies
-          ? { applies: true, fullPrice: proration.fullPrice, remainingDays: proration.remainingDays, remainingValue: proration.remainingValue, chargeAmount: proration.chargeAmount }
+        proration: quote.relation === 'upgrade' || quote.relation === 'billing_change'
+          ? { applies: true, fullPrice: quote.fullPrice, remainingDays: quote.remainingDays, remainingValue: quote.remainingValue, chargeAmount: quote.chargeAmount }
           : undefined,
       };
     } catch (e) {

@@ -29,6 +29,7 @@ export default defineAppConfig({
         'project/index',
         'report/index',
         'credits/index',
+        'plans/index',
         'bindings/index',
         'market/index',
         'community/index',

@@ -7,7 +7,6 @@ import TabHeader from '../../components/TabHeader';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import Picker from '../../components/Picker';
-import Plans from '../../components/Plans';
 import BaseSheet from '../../components/Sheet';
 import CoachMarks from '../../components/CoachMarks';
 import { navTo, switchTo } from '../../services/nav';
@@ -30,7 +29,6 @@ export default function Profile() {
   const [projCount, setProjCount] = useState(0);
   const [reportCount, setReportCount] = useState(0);
   const [showPicker, setShowPicker] = useState(false);
-  const [showPlans, setShowPlans] = useState(false);
   const [prog, setProg] = useState<ProgressView | null>(null);
   const [strategic, setStrategic] = useState<StrategicProfileView | null>(null);
   const [workbench, setWorkbench] = useState<WorkbenchView | null>(null);
@@ -62,7 +60,7 @@ export default function Profile() {
 
   // 权益三格（§10.1 membership-strip）：本月算力 % / 案卷完整度 %。深度报告次数无 plan features 数据 → 隐藏。
   const strip: { l: string; v: string; onClick: () => void }[] = [
-    { l: '本月算力', v: powerPct(me?.tokenQuota), onClick: () => setShowPlans(true) },
+    { l: '本月算力', v: me?.usage?.unlimited ? '专属' : `${me?.usage?.usagePercent ?? 0}%`, onClick: () => navTo('/packages/work/plans/index') },
     { l: '案卷完整度', v: `${completeness}%`, onClick: () => setSheet('workbench') },
   ];
 
@@ -203,7 +201,7 @@ export default function Profile() {
               <Text className="account-profile-name serif">{me?.user.name || '完善你的资料 ›'}</Text>
               {orgLine(me) ? <Text className="account-profile-role">{orgLine(me)}</Text> : null}
             </View>
-            <Text className="member-pill" onClick={() => setShowPlans(true)}>{me?.plan?.name || '免费版'}</Text>
+            <Text className="member-pill" onClick={() => navTo('/packages/work/plans/index')}>{me?.plan?.name || '尚未开通'}</Text>
           </View>
 
           <View className="account-profile-meta">
@@ -303,7 +301,7 @@ export default function Profile() {
         </View>
 
         {/* 深度能力解锁（account-depth 绿卡） */}
-        <View className="account-depth" onClick={() => setShowPlans(true)}>
+        <View className="account-depth" onClick={() => navTo('/packages/work/plans/index')}>
           <View className="ad-b">
             <Text className="ad-t">进阶能力</Text>
             <Text className="ad-s">更高产出额度、进阶锦囊、数据加持与长期跟进</Text>
@@ -405,7 +403,6 @@ export default function Profile() {
       </Sheet>
 
       <Picker open={showPicker} first={false} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
-      <Plans open={showPlans} onClose={() => setShowPlans(false)} />
 
       {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉我的页数据 */}
       <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadProfile(); }} />
@@ -440,13 +437,6 @@ function phoneTail(phone?: string): string {
   return phone.slice(-4);
 }
 
-// 本月算力（membership-strip 用）：不限量 / 未开通 / round(used/limit)%。
-function powerPct(q?: { limit: number; used: number; unlimited: boolean }): string {
-  if (!q) return '—';
-  if (q.unlimited || q.limit < 0) return '不限';
-  if (q.limit <= 0) return '未开通';
-  return `${Math.min(100, Math.round((q.used / q.limit) * 100))}%`;
-}
 // 案卷完整度兜底（workbench 拉取失败时按理解成熟度估算）。
 function maturityPct(m?: string): number {
   if (m === 'ready') return 85;

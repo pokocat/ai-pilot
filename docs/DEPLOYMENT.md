@@ -107,6 +107,32 @@ journalctl -u junshi-api -f # 看日志，确认「军师 API ready」
 ```
 自检：`curl http://127.0.0.1:4000/api/health` → `{"ok":true}`。
 
+#### 方案/支付账本首次发布前置（2026-08-02）
+
+本次 schema 会为微信 `transactionId` 与 `(userId, clientRequestId)` 增加唯一约束。不要直接把 `db push` 当成数据清洗；先只读检查历史重复值（正常应为 0 行）：
+
+```sql
+SELECT "transactionId", COUNT(*)
+FROM "payment_order"
+WHERE "transactionId" IS NOT NULL
+GROUP BY "transactionId"
+HAVING COUNT(*) > 1;
+
+```
+
+如有重复，先根据订单、微信交易号和权益实际发放结果人工核对，不得盲删。`clientRequestId` 是本次新增的可空字段，历史行均为 null，不会与 `(userId, clientRequestId)` 唯一约束冲突。唯一约束落库后，回填存量套餐的商业稳定字段：
+
+固定生产部署脚本为这类已经人工复核的新唯一约束保留了显式开关：`ACCEPT_DATA_LOSS=1 bash scripts/deploy-prod.sh`。只能在上述查重为空、当次 schema diff 已人工确认无删列/缩粄类型后使用；不要把该开关设为常驻默认值。
+
+```bash
+cd /opt/junshi/server
+npm run db:backfill-plan-commercial
+# 复核 family / tier / usage 和每月权益输出后再执行
+npm run db:backfill-plan-commercial -- --apply
+```
+
+最后在运营后台复核同 family 月付/年付的月度权益相同，`standard/5x/20x` 的真实倍率校验通过。回填脚本不修改价格，定价仍只归运营后台管理。
+
 ### C. 前端 H5 + 运营后台（静态）
 ```bash
 # H5（指向你的公网 API）
@@ -156,7 +182,9 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 | `EMBEDDING_MODEL` | 嵌入模型 | 留空=本地确定性嵌入；配则走 `/embeddings` |
 | `MODERATION_ENABLED` | 内容审核开关 | `true`（演示级关键词；生产换合规服务） |
 | `PGVECTOR_ENABLED` | pgvector 近邻检索 | `false`（启用见 §6） |
-| `WECHAT_PAY_MCHID` 等六项 | 微信支付 v3 真实凭据（全部配齐才 `payConfigured()=true`） | 见 `.env.example`「微信支付 v3」段 |
+| `WECHAT_PAY_MCHID` 等基础项 | 微信支付 v3 真实凭据（基础项全部配齐才 `payConfigured()=true`） | 见 `.env.example`「微信支付 v3」段 |
+| `WECHAT_PAY_PLATFORM_CERT`/`WECHAT_PAY_PLATFORM_CERT_SERIAL` | 本地平台证书兜底，证书必须与序列号成对 | 优先使用 APIv3 自动下载/轮换；静态证书只作兜底 |
+| `WECHAT_PAY_PUBLIC_KEY`/`WECHAT_PAY_PUBLIC_KEY_ID` | 微信支付公钥验签模式 | 使用 `PUB_KEY_ID_*` 时必须成对配置；无匹配证书/公钥时回调 fail-closed |
 | `PAY_MOCK_SUCCESS` | **测试期模拟支付成功**（无商户凭据时把真实支付管线跑通） | **默认不设**；仅测试期设 `true`，见下方警示 |
 
 > 模型 key 优先存数据库（后台「模型」页，运行时可切换、不入仓库）；env 仅作兜底。
@@ -169,8 +197,8 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 > 并发「支付到账」订阅消息。这样订单状态机 / 幂等 / 权益发放 / 到账通知在拿到凭据前就能被完整验证
 > （对比一下：`/plans/:id/purchase` 的演示发放是**整条绕过**支付管线的，什么也验不到）。
 > - ⚠️ **开启即等于任何登录用户都可以自助领取任意付费套餐 / SKU**（下单 → 点一下模拟支付 → 权益到账）。**仅测试期使用**，测试结束后删掉这一行并重启 API。
-> - ✅ **真凭据配齐后自动失效**：`payMockSuccessEnabled()` 的判定是 `PAY_MOCK_SUCCESS==='true' && !payConfigured()`，六项 `WECHAT_PAY_*` 一配齐 mock 即让位，**不需要改任何代码**，也不存在「配了真支付却还能白拿」的窗口（忘删这一行也不会出事）。
-> - 与 `PAY_SANDBOX`（`/pay/sandbox/notify` 仿真回调，admin 鉴权 + 生产启动期硬禁）不同，本开关**允许在生产启用**——这是产品测试期的显式决定，故 `assertSandboxSafe()` 不拦它。
+> - ✅ **真凭据配齐后自动失效**：`payMockSuccessEnabled()` 的判定仍要求 `!payConfigured()`；但生产环境不得保留该变量，`assertSandboxSafe()` 会在 `NODE_ENV=production` 且任一 `PAY_MOCK_SUCCESS/PAY_SANDBOX/ALLOW_DEMO_PURCHASE=true` 时直接拒绝启动。
+> - 与 `PAY_SANDBOX` 一样，本开关只允许 test/development；发布前必须清除所有免支付权益通道，并配齐真实支付凭据与回调验签证书/公钥。
 > - 假到账**不污染真实链路**：这些单带 `provider='mock'` + `snapshotJson.mock=true` + `transactionId` 以 `mock` 开头。对账 sweep / 主动查单 / 微信关单 / 微信退款一律跳过（跳过而非标 failed）；营收统计（后台「期内实收 / 客单价 / 按天曲线」与 `junshi_pay_amount_cny_total`）**不含** mock 单，改计 `junshi_pay_mock_total`；后台订单列表与 CSV 导出显式标「mock」。运营对 mock 单执行退款时**不调微信**，但**本地权益回收照常**（撤掉测试期误发放）。每次模拟到账都落审计 `pay.mock.paid`（单号 / 金额 / 套餐或 SKU）。
 > **海报成品图（`canvas_design`）没有任何环境变量**——开关 / 单价 / 日限额 / 渲染超时 / 模板启停 / 图片供应商接入点（含密钥）全在**后台**「创作任务」页，存 `FeatureFlag` 行 `creative-poster` 的 `enabled + payload`（密钥经 `secretBox` 加密），约 1 分钟内生效、不用重启。2026-07-29 删掉了 `CANVAS_DESIGN_ENABLED` / `_ENGINE` / `_MAX_CONCURRENCY` / `_TIMEOUT_MS` 四个：`ENABLED` 与后台开关取合取，制造「后台开了却不生效」的静默失败，而作为熔断闸它要 SSH + 改 env + 重启，比后台点一下慢一个数量级；`ENGINE` 全仓无分支（改它只改变库里那个标签的字面值）；后两个只作 payload 缺省值，而后台保存是全量重写 payload，**运营点过一次保存后改 env 重启就永久无效果**。别再往回加——理由与代码注释同步记在 `server/src/env.ts` 的同名段落。
 

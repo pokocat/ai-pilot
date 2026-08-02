@@ -11,7 +11,12 @@ import { useResource } from '../useResource';
 //（它按 name 全字段 upsert，运营改过价之后一跑就把线上价打回代码常量），server 的 seedConfig
 // 只剩本地/测试夹具。所以这里必须能建档、改档、停售，否则全新部署一个套餐都没有、
 // 而无套餐用户被 planGate 全局禁写 → 付费转化路径直接断。
-const PLAN_BLANK = { name: '', priceYuan: 0, period: 'month' as 'month' | 'year', creditsPerMonth: 0, tokenQuotaPerMonth: 0, agentCount: 0, features: '', highlighted: false, hidden: false, sort: 0 };
+const PLAN_BLANK = {
+  name: '', priceYuan: 0, period: 'month' as 'month' | 'year',
+  planFamilyKey: '', tierRank: 0, usageLevel: 'custom' as 'standard' | '5x' | '20x' | 'custom', usageLabel: '扩展用量',
+  usageNormalPercent: 50, usageNearPercent: 80,
+  creditsPerMonth: 0, tokenQuotaPerMonth: 0, agentCount: 0, features: '', highlighted: false, hidden: false, sort: 0,
+};
 
 export function PlansView({ toast }: { toast: (m: string) => void }) {
 
@@ -29,6 +34,8 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
     setEditId(p.id);
     setForm({
       name: p.name, priceYuan: p.price < 0 ? -1 : p.price / 100, period: p.period === 'year' ? 'year' : 'month',
+      planFamilyKey: p.planFamilyKey, tierRank: p.tierRank, usageLevel: p.usageLevel, usageLabel: p.usageLabel,
+      usageNormalPercent: p.usageNormalPercent, usageNearPercent: p.usageNearPercent,
       creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount,
       features: p.featuresJson.join('\n'), highlighted: p.highlighted, hidden: p.hidden, sort: p.sort,
     });
@@ -38,6 +45,9 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
     name: form.name,
     price: form.priceYuan < 0 ? -1 : Math.round(form.priceYuan * 100),
     period: form.period,
+    planFamilyKey: form.planFamilyKey.trim(), tierRank: form.tierRank,
+    usageLevel: form.usageLevel, usageLabel: form.usageLabel.trim(),
+    usageNormalPercent: form.usageNormalPercent, usageNearPercent: form.usageNearPercent,
     creditsPerMonth: form.creditsPerMonth,
     tokenQuotaPerMonth: form.tokenQuotaPerMonth,
     agentCount: form.agentCount,
@@ -45,6 +55,7 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
     highlighted: form.highlighted,
     hidden: form.hidden,
     sort: form.sort,
+    syncFamilyBenefits: true,
   });
   const save = async (id: string) => {
     // 套餐改价是 requireSuper：非超管会拿到 403「需要 owner 权限」，catch 必须原文透出，
@@ -82,13 +93,24 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
           <option value="year">按年</option>
         </select>
       </div>
+      <div className="ai-field"><div className="ai-fl">方案分组标识（月付/年付同组，保存时月度权益会同步）</div><input className="ai-input" value={form.planFamilyKey} onChange={(e) => set({ planFamilyKey: e.target.value })} placeholder="如 decision" /></div>
+      <div className="ai-field"><div className="ai-fl">商业档位（数字越大档位越高）</div><NumInput className="ai-input" min={0} value={form.tierRank} onChange={(tierRank) => set({ tierRank })} /></div>
+      <div className="ai-field">
+        <div className="ai-fl">用户侧用量等级</div>
+        <select className="ai-input" value={form.usageLevel} onChange={(e) => set({ usageLevel: e.target.value as typeof form.usageLevel })}>
+          <option value="standard">标准用量</option><option value="5x">5x 用量</option><option value="20x">20x 用量</option><option value="custom">自定义</option>
+        </select>
+      </div>
+      <div className="ai-field"><div className="ai-fl">用户侧用量名称</div><input className="ai-input" value={form.usageLabel} onChange={(e) => set({ usageLabel: e.target.value })} placeholder="如 扩展用量 / 专属用量" /></div>
+      <div className="ai-field"><div className="ai-fl">进入「正常使用」的百分比</div><NumInput className="ai-input" min={1} value={form.usageNormalPercent} onChange={(usageNormalPercent) => set({ usageNormalPercent })} /></div>
+      <div className="ai-field"><div className="ai-fl">进入「接近上限」的百分比</div><NumInput className="ai-input" min={2} value={form.usageNearPercent} onChange={(usageNearPercent) => set({ usageNearPercent })} /></div>
       <div className="ai-field"><div className="ai-fl">每月赠送钻石（-1=不限量）</div><NumInput className="ai-input" value={form.creditsPerMonth} onChange={(creditsPerMonth) => set({ creditsPerMonth })} /></div>
       <div className="ai-field"><div className="ai-fl">每月 token 额度（产出消耗池，-1=不限量）</div><NumInput className="ai-input" value={form.tokenQuotaPerMonth} onChange={(tokenQuotaPerMonth) => set({ tokenQuotaPerMonth })} /></div>
       <div className="ai-field"><div className="ai-fl">含智能体数</div><NumInput className="ai-input" value={form.agentCount} onChange={(agentCount) => set({ agentCount })} /></div>
       <div className="ai-field"><div className="ai-fl">权益（每行一条）</div><textarea className="ta" rows={4} value={form.features} onChange={(e) => set({ features: e.target.value })} /></div>
       <div className="ai-field"><div className="ai-fl">排序（小在前）</div><NumInput className="ai-input" value={form.sort} onChange={(sort) => set({ sort })} /></div>
       <div className="cfg">
-        <div className="cfg-row"><div className="cb"><div className="ct">主推（最受欢迎）</div><div className="cs">前台高亮这一档</div></div><div className={`sw ${form.highlighted ? 'on' : ''}`} onClick={() => set({ highlighted: !form.highlighted })}><i /></div></div>
+        <div className="cfg-row"><div className="cb"><div className="ct">常用配置</div><div className="cs">前台优先展示这一档</div></div><div className={`sw ${form.highlighted ? 'on' : ''}`} onClick={() => set({ highlighted: !form.highlighted })}><i /></div></div>
         <div className="cfg-row"><div className="cb"><div className="ct">隐藏（停售）</div><div className="cs">套餐列表不返回；仅测试白名单手机号可见可购。在册用户的权益不受影响</div></div><div className={`sw ${form.hidden ? 'on' : ''}`} onClick={() => set({ hidden: !form.hidden })}><i /></div></div>
       </div>
     </>
@@ -121,11 +143,11 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
           <div key={p.id} className={`plan ${p.highlighted ? 'feat' : ''}`}>
             <div className="plan-h">
               <span className="pn">{p.name}</span>
-              {p.highlighted && <span className="tag">最受欢迎</span>}
+              {p.highlighted && <span className="tag">常用配置</span>}
               {p.hidden && <span className="tag">已隐藏</span>}
               <span className="pp">{priceLabel(p)}</span>
             </div>
-            <div className="plan-meta">{p.creditsPerMonth < 0 ? '不限量权益点' : `${p.creditsPerMonth} 点/月`} · 含 {p.agentCount} 智能体 · {p.featuresJson.join(' · ')}</div>
+            <div className="plan-meta">{p.usageLabel} · 档位 {p.tierRank} · {p.planFamilyKey} · {p.creditsPerMonth < 0 ? '不限量权益点' : `${p.creditsPerMonth} 点/月`} · 含 {p.agentCount} 智能体 · {p.featuresJson.join(' · ')}</div>
             <button className="plan-edit" onClick={() => startEdit(p)}><Icon name="pen" size={13} /> 编辑套餐</button>
           </div>
         ))}

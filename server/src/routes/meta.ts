@@ -12,6 +12,7 @@ import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
+import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, usageView } from '../services/planRules.js';
 
 const AVATAR_MIME: Record<string, string> = { 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
@@ -88,9 +89,14 @@ export async function metaRoutes(app: FastifyInstance) {
       industry: hasIndustryIdentity(user.tenant.industry)
         ? { code: resolveIndustryPack(user.tenant.industry).key, label: resolveIndustryPack(user.tenant.industry).label }
         : null,
-      plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth } : null,
+      plan: plan ? {
+        id: plan.id, name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth,
+        planFamilyKey: planFamilyKey(plan), tierRank: planTierRank(plan), period: plan.period,
+        usageLevel: publicUsageLevel(plan), usageLabel: publicUsageLabel(plan), purchaseMode: 'manual' as const,
+      } : null,
       creditBalance: credit?.balance ?? 0,
       tokenQuota: { limit: quota.quota, used: quota.used, remaining: quota.balance, unlimited: quota.unlimited },
+      usage: usageView(quota, planStatus.nextResetAt, plan),
       planStatus, // { active, expired, expiresAt, daysRemaining, nextResetAt } —— 前端据此切只读态、展示到期/重置日
       onboarded,
       ai: await providerInfo(),
@@ -205,6 +211,10 @@ export async function metaRoutes(app: FastifyInstance) {
         await tx.creditLedger.deleteMany({ where: { tenantId } });
         await tx.tokenUsage.deleteMany({ where: { tenantId } });
         await tx.tokenWallet.deleteMany({ where: { tenantId } });
+        await tx.monthlyCreditGrant.deleteMany({ where: { tenantId } });
+        await tx.tokenQuotaAdjustment.deleteMany({ where: { tenantId } });
+        await tx.planEntitlement.deleteMany({ where: { tenantId } });
+        await tx.skuEntitlement.deleteMany({ where: { tenantId } });
         await tx.profile.deleteMany({ where: { tenantId } });
         await tx.auditLog.deleteMany({ where: { tenantId } });
         await tx.userAgent.deleteMany({ where: { userId: user.id } });
@@ -216,6 +226,10 @@ export async function metaRoutes(app: FastifyInstance) {
         await tx.creditLedger.deleteMany({ where: { userId: user.id } });
         await tx.tokenUsage.deleteMany({ where: { userId: user.id } });
         await tx.tokenWallet.deleteMany({ where: { userId: user.id } });
+        await tx.monthlyCreditGrant.deleteMany({ where: { userId: user.id } });
+        await tx.tokenQuotaAdjustment.deleteMany({ where: { userId: user.id } });
+        await tx.planEntitlement.deleteMany({ where: { userId: user.id } });
+        await tx.skuEntitlement.deleteMany({ where: { userId: user.id } });
         await tx.deliverable.deleteMany({ where: { userId: user.id } });
         await tx.session.deleteMany({ where: { userId: user.id } });
         await tx.memory.deleteMany({ where: { userId: user.id } });

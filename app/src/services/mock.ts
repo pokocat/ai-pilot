@@ -8,7 +8,7 @@ import type {
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
   MemoryLibraryView, MemoryLibraryGroup, MemoryLibraryEntry, MemoryCategoryKey, MemoryFillLevel,
   DossierView, DossierReport, DossierSection, DossierBlock, StrategicProfile,
-  Plan, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
+  Plan, PlanOptionsResult, PlanQuote, PlanPurchaseResult, AgentPurchaseResult, ClientUnderstanding, AliasSuggestionResult,
   MyCreditItem, MyCreditsView, TokenQuotaView, SmsSendResult,
   DecisionView, DecisionStats, DecisionLedger, ProphecyView, ProphecyStats, ProphecyLedger,
   QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
@@ -52,10 +52,11 @@ const PLANS: Plan[] = [
     name: '体验版',
     price: 0,
     period: 'month',
+    planFamilyKey: 'experience', tierRank: 0, usageLevel: 'standard', usageLabel: '标准用量',
     creditsPerMonth: 10,
     tokenQuotaPerMonth: 100000,
     agentCount: 3,
-    featuresJson: ['10 点 / 月', '基础顾问 3 位', '适合轻量试用'],
+    featuresJson: ['日常经营判断', '基础顾问阵容', '知识库与项目管理'],
     highlighted: false,
   },
   {
@@ -63,10 +64,11 @@ const PLANS: Plan[] = [
     name: '决策版 · 月付',
     price: 19800,
     period: 'month',
+    planFamilyKey: 'decision', tierRank: 20, usageLevel: '5x', usageLabel: '5x 用量',
     creditsPerMonth: 68,
     tokenQuotaPerMonth: 1000000,
     agentCount: 8,
-    featuresJson: ['不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出', '按月付费 · 随时升年付'],
+    featuresJson: ['持续经营分析', '更长的连续研判', '完整顾问阵容', '方案库与导出'],
     highlighted: false,
   },
   {
@@ -74,10 +76,11 @@ const PLANS: Plan[] = [
     name: '决策版',
     price: 198000,
     period: 'year',
+    planFamilyKey: 'decision', tierRank: 20, usageLevel: '5x', usageLabel: '5x 用量',
     creditsPerMonth: 68,
     tokenQuotaPerMonth: 1000000,
     agentCount: 8,
-    featuresJson: ['年付立省 2 个月（约 ¥396）', '不限量对话', '68 点 / 月', '顾问助手 8 位', '方案库 + 导出'],
+    featuresJson: ['持续经营分析', '更长的连续研判', '完整顾问阵容', '方案库与导出'],
     highlighted: true,
   },
   {
@@ -85,6 +88,7 @@ const PLANS: Plan[] = [
     name: '企业版 · 私有化',
     price: -1,
     period: 'year',
+    planFamilyKey: 'enterprise', tierRank: 100, usageLevel: 'custom', usageLabel: '专属用量',
     creditsPerMonth: -1,
     tokenQuotaPerMonth: -1,
     agentCount: 14,
@@ -950,9 +954,18 @@ export const mock = {
     return delay({
       user: { id: getToken(), name: d.name, role: 'owner', benmingColor: d.benmingColor, avatarUrl: d.avatarUrl ?? null, phone: /^1\d{10}$/.test(d.phone) ? d.phone : '', wechatLinked: !!d.wechatLinked },
       tenant: { id: `t-${d.phone}`, name: d.company, industry: d.profile?.industry ?? null, stage: d.profile?.stage ?? null },
-      plan: plan ? { name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth } : null,
+      plan: plan ? {
+        id: plan.id, name: plan.name, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth,
+        planFamilyKey: plan.planFamilyKey, tierRank: plan.tierRank, period: plan.period as 'month' | 'year',
+        usageLevel: plan.usageLevel, usageLabel: plan.usageLabel, purchaseMode: 'manual',
+      } : null,
       creditBalance: d.creditBalance,
       tokenQuota: mockQuota(d),
+      usage: (() => {
+        const q = mockQuota(d);
+        const usagePercent = q.unlimited ? 0 : q.limit > 0 ? Math.min(100, Math.max(0, Math.round((q.used / q.limit) * 100))) : 100;
+        return { usagePercent, usageStatus: usagePercent >= 100 ? 'exhausted' as const : usagePercent >= 80 ? 'near_limit' as const : usagePercent >= 50 ? 'normal' as const : 'sufficient' as const, resetsAt: new Date(Date.now() + 30 * 86400000).toISOString(), unlimited: q.unlimited };
+      })(),
       planStatus: { active: true, expired: false, expiresAt: null, daysRemaining: null, nextResetAt: new Date(Date.now() + 30 * 86400000).toISOString() },
       onboarded: d.onboarded,
       ai: { provider: 'mock', model: 'template', ready: false, claudeReady: false },
@@ -980,6 +993,50 @@ export const mock = {
 
   async plans(): Promise<Plan[]> { return delay(PLANS); },
 
+  async planOptions(): Promise<PlanOptionsResult> {
+    const { d } = current();
+    const currentPlan = PLANS.find((p) => p.id === d.planId) ?? PLANS[1];
+    const me = await this.me();
+    return delay({
+      currentPlanId: currentPlan?.id ?? null,
+      usage: me.usage,
+      options: PLANS.map((plan) => {
+        const enterprise = plan.price < 0;
+        const current = plan.id === currentPlan?.id;
+        const billing = !current && plan.planFamilyKey === currentPlan?.planFamilyKey && plan.tierRank === currentPlan?.tierRank && currentPlan?.period === 'month' && plan.period === 'year';
+        const upgrade = !current && !billing && plan.tierRank > (currentPlan?.tierRank ?? -1);
+        const downgrade = !current && !billing && !upgrade && !enterprise;
+        return {
+          plan,
+          relation: enterprise ? 'enterprise' as const : current ? 'renew' as const : billing ? 'billing_change' as const : upgrade ? 'upgrade' as const : downgrade ? 'downgrade' as const : 'available' as const,
+          action: enterprise ? 'contact' as const : current ? 'renew' as const : billing ? 'change_billing' as const : upgrade ? 'upgrade' as const : downgrade ? 'remind' as const : 'buy' as const,
+          canPurchase: !enterprise && !downgrade,
+          reason: downgrade ? '当前方案到期后可购买' : undefined,
+          resetsAt: me.usage.resetsAt,
+        };
+      }),
+    });
+  },
+
+  async quotePlan(id: string): Promise<PlanQuote> {
+    const { d } = current();
+    const target = PLANS.find((p) => p.id === id);
+    const currentPlan = PLANS.find((p) => p.id === d.planId) ?? PLANS[1];
+    if (!target) throw Object.assign(new Error('套餐不存在'), { code: 'PLAN_NOT_FOUND' });
+    const billing = target.planFamilyKey === currentPlan.planFamilyKey && target.period === 'year' && currentPlan.period === 'month';
+    const upgrade = target.tierRank > currentPlan.tierRank;
+    if (!billing && !upgrade && target.id !== currentPlan.id) throw Object.assign(new Error('当前方案到期后可购买'), { code: 'PLAN_SWITCH_BLOCKED' });
+    const remainingValue = billing || upgrade ? Math.min(currentPlan.price, Math.round(currentPlan.price / 2)) : 0;
+    const chargeAmount = Math.max(0, target.price - remainingValue);
+    return delay({
+      allowed: true, currentPlan, targetPlan: target,
+      relation: target.id === currentPlan.id ? 'renew' : billing ? 'billing_change' : 'upgrade',
+      fullPrice: target.price, remainingDays: remainingValue ? 15 : 0, remainingValue, chargeAmount,
+      effectiveAt: now(), newExpiresAt: new Date(Date.now() + (target.period === 'year' ? 365 : 30) * 86400000).toISOString(),
+      expiresAt: new Date(Date.now() + 10 * 60000).toISOString(), quoteFingerprint: `mock-${id}-${chargeAmount}`,
+    });
+  },
+
   // mock 模式无真实微信支付：抛 PAYMENT_NOT_CONFIGURED 让前端回退演示发放（purchasePlan）。
   async createOrder(_id: string): Promise<never> {
     await delay(null);
@@ -995,11 +1052,17 @@ export const mock = {
     const { token, d } = current();
     const plan = PLANS.find((p) => p.id === id);
     if (!plan) throw Object.assign(new Error('套餐不存在'), { code: 'PLAN_NOT_FOUND' });
-    const grantedCredits = plan.creditsPerMonth < 0 ? 0 : plan.creditsPerMonth;
+    const previous = PLANS.find((p) => p.id === d.planId);
+    const renewal = previous?.id === plan.id;
+    const billingChange = !!previous && previous.planFamilyKey === plan.planFamilyKey && previous.tierRank === plan.tierRank;
+    const preserveCurrentPeriod = renewal || billingChange;
+    const grantedCredits = preserveCurrentPeriod || plan.creditsPerMonth < 0 ? 0 : plan.creditsPerMonth;
     d.planId = plan.id;
-    d.creditBalance = plan.creditsPerMonth < 0 ? -1 : (d.creditBalance < 0 ? grantedCredits : d.creditBalance + grantedCredits);
-    d.tokenUsed = 0; // 套餐授予/重置当月 token 额度
-    (d.creditLog ??= []).push({ at: now(), reason: `${plan.name} · 套餐购买`, delta: grantedCredits, balance: d.creditBalance });
+    if (!preserveCurrentPeriod) {
+      d.creditBalance = plan.creditsPerMonth < 0 ? -1 : (d.creditBalance < 0 ? grantedCredits : d.creditBalance + grantedCredits);
+      d.tokenUsed = 0;
+      (d.creditLog ??= []).push({ at: now(), reason: `${plan.name} · 套餐购买`, delta: grantedCredits, balance: d.creditBalance });
+    }
     save(token, d);
     return delay({ ok: true, plan, creditBalance: d.creditBalance, grantedCredits, grantedTokens: plan.tokenQuotaPerMonth });
   },

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
-import { api, uploadUserKnowledge, type ServiceAssignmentView, type AdminUserItem, type AdminUserDetail, type AdminUserUsage, type AdminUserPlanStatus, type AdminUserContext, type KnowledgeDetail, type AdminImpersonateResult } from '../api';
+import { api, uploadUserKnowledge, type ServiceAssignmentView, type AdminUserItem, type AdminUserDetail, type AdminUserUsage, type AdminUserPlanStatus, type AdminUserContext, type AdminUserQuotaView, type KnowledgeDetail, type AdminImpersonateResult } from '../api';
 import { PageHead, ViewState, SearchBox, ConfirmDialog, ErrorState, Skeleton, type ConfirmSpec } from '../components';
 import { useResource } from '../useResource';
 import { KV, sum, fmtTime, creditText, sourceLabel, fmtTokens, fmtCny, fmtYuan, fmtSize, planStatusText } from '../format';
@@ -351,7 +351,7 @@ export function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: s
   );
 }
 
-type OpsKind = 'reset' | 'setQuota' | 'credits' | 'extend' | 'grantPlan' | 'module';
+type OpsKind = 'reset' | 'adjustQuota' | 'credits' | 'extend' | 'grantPlan' | 'module';
 
 function Fold({ icon, title, count, open, onToggle, children }: { icon: string; title: string; count: number; open: boolean; onToggle: () => void; children: ReactNode }) {
   return (
@@ -367,10 +367,13 @@ function Fold({ icon, title, count, open, onToggle, children }: { icon: string; 
 
 function UsageQuotaBlock({ userId, isOwner, toast }: { userId: string; isOwner: boolean; toast: (m: string) => void }) {
   const [data, setData] = useState<AdminUserUsage | null>(null);
+  const [quotaDetail, setQuotaDetail] = useState<AdminUserQuotaView | null>(null);
   const [modal, setModal] = useState<OpsKind | null>(null);
   const [open, setOpen] = useState<'' | 'credits' | 'payments' | 'activations'>('');
   const [err, setErr] = useState('');
-  const load = () => api.userUsage(userId, 30).then((d) => { setData(d); setErr(''); }).catch((e) => setErr((e as Error).message || '用量加载失败'));
+  const load = () => Promise.all([api.userUsage(userId, 30), api.userQuotaDetail(userId)])
+    .then(([usage, detail]) => { setData(usage); setQuotaDetail(detail); setErr(''); })
+    .catch((e) => setErr((e as Error).message || '用量加载失败'));
   useEffect(() => { load(); }, [userId]);
   // 额度/用量是客服排查的第一屏信息，取不到必须说出来——否则运营会以为这个用户「没有用量」。
   if (!data) {
@@ -406,6 +409,16 @@ function UsageQuotaBlock({ userId, isOwner, toast }: { userId: string; isOwner: 
             </div>
             <div className="usage-meta">已用 {fmtTokens(quota.used)} / {fmtTokens(quota.limit)} · 套餐 {plan.planName ?? '—'} · {planStatusText(plan)}</div>
             <div className="meter"><i style={{ width: `${quota.limit > 0 ? Math.min(100, Math.max(2, Math.round((quota.used / quota.limit) * 100))) : 2}%` }} /></div>
+          </div>
+        )}
+        {quotaDetail && quotaDetail.adjustments.filter((item) => !item.revokedAt).length > 0 && (
+          <div className="mem-list">
+            {quotaDetail.adjustments.filter((item) => !item.revokedAt).map((item) => (
+              <div key={item.id} className="mem-card">
+                <span className="mi"><Icon name="spark" size={16} /></span>
+                <div className="mb"><div className="mt">临时调整 {item.delta > 0 ? '+' : ''}{fmtTokens(item.delta)}</div><div className="mm">{item.reason} · {item.expiresAt ? `${fmtTime(item.expiresAt)} 失效` : '本周期持续有效'}</div></div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -496,8 +509,8 @@ function UsageQuotaBlock({ userId, isOwner, toast }: { userId: string; isOwner: 
           <div className="blk-h"><Icon name="insight" size={15} /><span className="t">运营动作</span><span className="badge">仅超管</span></div>
           <div className="blk-d">额度、钻石、套餐有效期为资金敏感动作，操作会留审计（before/after）。</div>
           <div className="ops-actions">
-            <button type="button" className="mini-btn" onClick={() => setModal('reset')}>重置额度</button>
-            <button type="button" className="mini-btn" onClick={() => setModal('setQuota')}>调整额度</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('reset')}>恢复套餐标准</button>
+            <button type="button" className="mini-btn" onClick={() => setModal('adjustQuota')}>临时调整额度</button>
             <button type="button" className="mini-btn primary" onClick={() => setModal('credits')}>补发钻石</button>
             <button type="button" className="mini-btn" onClick={() => setModal('extend')}>延长套餐</button>
             <button type="button" className="mini-btn" onClick={() => setModal('grantPlan')}>开通套餐</button>
@@ -519,6 +532,7 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
   const [quota, setQuota] = useState(0);
   const [delta, setDelta] = useState(0);
   const [reason, setReason] = useState('');
+  const [quotaExpiresAt, setQuotaExpiresAt] = useState('');
   const [days, setDays] = useState(30);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -533,8 +547,8 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
   }, [kind]);
 
   const meta: Record<OpsKind, { title: string; desc: string }> = {
-    reset: { title: '重置月度额度', desc: `将该用户月度 token 额度重置为当前套餐（${plan.planName ?? '无套餐'}）的每月额度。` },
-    setQuota: { title: '调整月度额度', desc: '直接设定月度 token 额度：填 -1 表示不限量，0 及以上为具体额度。' },
+    reset: { title: '恢复套餐标准额度', desc: `撤销该用户当前有效的临时调整，按套餐（${plan.planName ?? '无套餐'}）标准恢复；已用量不会清零。` },
+    adjustQuota: { title: '临时调整月度额度', desc: '填写增量，正数加额、负数扣减；不会覆盖已用量。可设置自动失效时间，所有操作留审计。' },
     credits: { title: '补发 / 扣减钻石', desc: '正数补发、负数扣减；扣减不得使余额为负。事由必填，写入流水（前缀 admin:）。' },
     extend: { title: '延长套餐有效期', desc: '在当前到期日（或今日，取较晚者）基础上顺延天数（1-366）。仅推有效期，不动快照与钱包。' },
     grantPlan: { title: '开通套餐（运营发放）', desc: `不经支付直接发放套餐权益（含无套餐用户）。当前：${plan.planName ?? '无套餐'}。发放走与支付同一口径（有效期/钻石/额度），审计记 admin_grant。升级/同档会自动结转剩余天数；会缩短有效期的改档需二次确认。` },
@@ -553,13 +567,17 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
     try {
       if (kind === 'reset') {
         setBusy(true);
-        await api.setUserQuota(userId, { mode: 'reset_to_plan' });
-        toast('已按套餐重置额度');
-      } else if (kind === 'setQuota') {
-        if (!Number.isInteger(quota) || quota < -1) { setErr('额度需为 -1（不限量）或 ≥ 0 的整数'); return; }
+        await api.restoreUserQuota(userId);
+        toast('已恢复套餐标准，保留当前已用量');
+      } else if (kind === 'adjustQuota') {
+        if (!Number.isInteger(quota) || quota === 0) { setErr('调整量需为非 0 整数'); return; }
+        const r = reason.trim();
+        if (!r) { setErr('请填写调整原因'); return; }
+        if (r.length > 100) { setErr('调整原因不超过 100 字'); return; }
+        const expiresAt = quotaExpiresAt ? new Date(quotaExpiresAt).toISOString() : null;
         setBusy(true);
-        await api.setUserQuota(userId, { mode: 'set', quota });
-        toast(quota === -1 ? '已设为不限量' : `额度已设为 ${quota}`);
+        await api.adjustUserQuota(userId, { delta: quota, reason: r, expiresAt });
+        toast(`已临时${quota > 0 ? '增加' : '扣减'} ${Math.abs(quota)} 额度`);
       } else if (kind === 'credits') {
         if (!Number.isInteger(delta) || delta === 0) { setErr('增减数需为非 0 整数'); return; }
         const r = reason.trim();
@@ -608,7 +626,14 @@ function OpsActionModal({ kind, userId, plan, onClose, onDone, toast }: {
       <div className="al-card" style={{ width: 300, margin: 0 }} onClick={(e) => e.stopPropagation()}>
         <div className="al-label">{cfg.title}</div>
         <div className="blk-d">{cfg.desc}</div>
-        {kind === 'setQuota' && <NumInput className="al-input" value={quota} onChange={setQuota} />}
+        {kind === 'adjustQuota' && (
+          <>
+            <NumInput className="al-input" value={quota} onChange={setQuota} placeholder="增量（正数增加 / 负数扣减）" />
+            <div style={{ marginTop: 10 }}><input className="al-input" value={reason} maxLength={100} placeholder="调整原因（必填）" onChange={(e) => setReason(e.target.value)} /></div>
+            <div style={{ marginTop: 10 }}><input className="al-input" type="datetime-local" value={quotaExpiresAt} onChange={(e) => setQuotaExpiresAt(e.target.value)} /></div>
+            <div className="al-note">失效时间可留空；留空表示本周期持续有效。</div>
+          </>
+        )}
         {kind === 'extend' && <NumInput className="al-input" min={1} max={366} value={days} onChange={setDays} />}
         {kind === 'grantPlan' && (
           <>

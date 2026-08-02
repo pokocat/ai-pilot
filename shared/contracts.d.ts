@@ -300,6 +300,15 @@ export interface TokenQuotaView {
   remaining: number; // 剩余（可为负=已耗尽）
   unlimited: boolean;
 }
+export type UsageStatus = 'sufficient' | 'normal' | 'near_limit' | 'exhausted';
+export type UsageLevel = 'standard' | '5x' | '20x' | 'custom';
+/** 用户侧只消费相对进度，不读取内部额度原值；旧版兼容期 TokenQuotaView 仍保留。 */
+export interface PublicUsageView {
+  usagePercent: number;
+  usageStatus: UsageStatus;
+  resetsAt: string;
+  unlimited: boolean;
+}
 /** 套餐有效期状态：驱动前端只读态 + 展示到期/剩余天数/下次额度重置日。 */
 export interface PlanStatusView {
   active: boolean;            // 套餐有效（未过期）
@@ -320,9 +329,14 @@ export interface MyCreditsView { items: MyCreditItem[]; }
 export interface Me {
   user: { id: string; name: string; role: string; benmingColor: string; avatarUrl?: string | null; phone?: string; wechatLinked?: boolean };
   tenant: { id: string; name: string; industry?: string | null; stage?: string | null };
-  plan: { name: string; creditsPerMonth: number; tokenQuotaPerMonth: number } | null;
+  plan: {
+    id: string; name: string; creditsPerMonth: number; tokenQuotaPerMonth: number;
+    planFamilyKey: string; tierRank: number; period: 'month' | 'year';
+    usageLevel: UsageLevel; usageLabel: string; purchaseMode: 'manual';
+  } | null;
   creditBalance: number; // 钻石(点)余额：解锁 / 图片按张
   tokenQuota: TokenQuotaView; // 本月 token 额度（文本产出消耗池）
+  usage: PublicUsageView; // 新版客户端用量展示真相源（不公开原始额度）
   planStatus?: PlanStatusView; // 套餐有效期状态（过期 → 只读）
   onboarded?: boolean;
   ai: AiInfo;
@@ -1108,18 +1122,68 @@ export interface AdminSaying { id: string; text: string; enabled: boolean; pushe
 export interface Plan {
   id: string; name: string; price: number; period: string;
   creditsPerMonth: number; tokenQuotaPerMonth: number; agentCount: number; featuresJson: string[]; highlighted: boolean;
+  planFamilyKey: string; tierRank: number; usageLevel: UsageLevel; usageLabel: string;
 }
 /** 运营后台的套餐行（GET /admin/plans）：**线上套餐目录的唯一真相源**——代码侧不再有同步脚本，
  *  seedConfig.DEV_PLANS 只是本地/测试夹具。比公开 Plan 多出 hidden（停售/白名单档）与 sort（展示序）。 */
-export interface AdminPlan extends Plan { hidden: boolean; sort: number; }
+export interface AdminPlan extends Plan { hidden: boolean; sort: number; usageNormalPercent: number; usageNearPercent: number; }
 /** 新建套餐（POST /admin/plans，requireSuper）。period 只认 month/year；price 为分，-1=面议。 */
 export interface AdminPlanCreate {
   name: string; price: number; period?: 'month' | 'year';
+  planFamilyKey: string; tierRank: number; usageLevel: UsageLevel; usageLabel?: string;
+  usageNormalPercent?: number; usageNearPercent?: number;
   creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number;
   featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number;
+  /** 编辑同一商业档的月付/年付时，原子同步月度权益与公开用量配置。 */
+  syncFamilyBenefits?: boolean;
 }
 /** 改档（PATCH /admin/plans/:id，requireSuper）：全字段可选，只改传入的。 */
 export type AdminPlanUpdate = Partial<AdminPlanCreate>;
+export interface AdminQuotaAdjustment {
+  id: string; delta: number; reason: string; operatorId: string | null;
+  startsAt: string; expiresAt: string | null; revokedAt: string | null;
+}
+export interface AdminUserQuotaView {
+  userId: string; planId: string | null; planName: string | null;
+  quota: number; used: number; remaining: number; periodKey: string;
+  adjustments: AdminQuotaAdjustment[];
+}
+export interface AdminQuotaAdjustRequest { delta: number; reason: string; expiresAt?: string | null; }
+export type PlanRelation = 'available' | 'current' | 'renew' | 'upgrade' | 'billing_change' | 'downgrade' | 'enterprise';
+export type PlanAction = 'buy' | 'renew' | 'upgrade' | 'change_billing' | 'remind' | 'contact' | 'continue_payment' | 'wait_applied';
+export interface PlanOption {
+  plan: Plan;
+  relation: PlanRelation;
+  action: PlanAction;
+  canPurchase: boolean;
+  reason?: string;
+  expiresAt?: string | null;
+  resetsAt?: string;
+  pendingOrder?: PayOrderListItem;
+  recommended?: boolean;
+}
+export interface PlanOptionsResult {
+  currentPlanId: string | null;
+  usage: PublicUsageView;
+  options: PlanOption[];
+}
+export interface PlanQuote {
+  allowed: true;
+  currentPlan: Plan | null;
+  targetPlan: Plan;
+  relation: PlanRelation;
+  fullPrice: number;
+  remainingDays: number;
+  remainingValue: number;
+  chargeAmount: number;
+  effectiveAt: string;
+  newExpiresAt: string | null;
+  expiresAt: string;
+  quoteFingerprint: string;
+}
+export type PlanFunnelEvent = 'page_open' | 'current_view' | 'renew_click' | 'upgrade_click' | 'billing_change_click'
+  | 'downgrade_remind_click' | 'quote_success' | 'quote_failure' | 'quote_confirm' | 'payment_cancel'
+  | 'payment_failure' | 'payment_success' | 'payment_pending' | 'entitlement_applied' | 'order_view' | 'order_continue';
 export interface PlanPurchaseResult {
   ok: true;
   plan: Plan;
@@ -1222,6 +1286,8 @@ export interface PayOrderStatus {
   skuKey?: string; // SKU 订单
   paidAt?: string;
   appliedAt?: string; // 有值 = 权益已发放，前端可停止轮询
+  refundStatus?: 'refund_requested' | 'refund_processing' | 'refund_closed' | 'refund_abnormal' | 'refunded' | null;
+  payableUntil?: string;
 }
 /** 我的支付订单列表（GET /pay/orders）：订单明细页展示 + 继续支付入口。 */
 export interface PayOrderListItem extends PayOrderStatus {

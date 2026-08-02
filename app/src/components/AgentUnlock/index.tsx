@@ -7,6 +7,7 @@ import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type Agent, type ActivationSource } from '../../services/api';
 import { diamondCost } from '../../services/format';
+import { paymentErrorMessage } from '../../services/paymentFeedback';
 import './index.scss';
 
 interface Props {
@@ -42,11 +43,8 @@ export default function AgentUnlock({ agent, onClose, onUnlocked, source = 'cata
       const fresh = store.agents().find((a) => a.key === agent.key) ?? { ...agent, owned: true };
       onUnlocked(fresh);
     } catch (e) {
-      const code = (e as any)?.code || (e as any)?.data?.code;
-      if (code === 'INSUFFICIENT_CREDITS') {
-        Taro.showToast({ title: '权益点不足，请先调整方案', icon: 'none' });
-      } else {
-        s.handleApiError(e, { fallbackTitle: '启用失败，请重试' });
+      if (s.handleApiError(e, { silent: true }) !== 'unauthorized') {
+        Taro.showToast({ title: paymentErrorMessage(e, 'entitlement'), icon: 'none' });
       }
     } finally {
       setBusy(false);

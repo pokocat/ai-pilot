@@ -9,7 +9,7 @@ import { recordAudit } from './audit.js';
 import { now, dateKey, hourOf, dayStart } from './clock.js';
 import { MORNING_ORDER_JOB, WEEKLY_REVIEW_JOB } from './reminders.js';
 import { scanPrescriptionFollowups } from './prescription.js';
-import { sweepPendingOrders } from './wechatPay.js';
+import { sweepPendingOrders, sweepPendingRefunds } from './wechatPay.js';
 import {
   hasSentWechatNotificationToday,
   hasWechatSubscriptionQuota,
@@ -243,5 +243,7 @@ registerJob(WEEKLY_REVIEW_JOB);
 // 未配支付（payConfigured=false）时 sweep 内部直接短路，注册无副作用。
 registerJob({ name: 'pay-reconcile-sweep', intervalMs: 5 * 60_000, run: async () => {
   const r = await sweepPendingOrders();
+  const refunds = await sweepPendingRefunds();
   if (r.applied || r.failed || r.closed) console.log(`[scheduler] pay sweep: applied=${r.applied} failed=${r.failed} closed=${r.closed} (scanned ${r.scanned})`);
+  if (refunds.scanned) console.log(`[scheduler] refund sweep: completed=${refunds.completed} (scanned ${refunds.scanned})`);
 } });

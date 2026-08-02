@@ -6,6 +6,18 @@
 
 ## 变更日志
 
+### 2026-08-02 · 方案购买与月度权益全链路重构：稳定档位、账本报价、支付幂等、退款状态机与不透明额度 · 影响面：app + server + admin + shared + Prisma + tests + deployment docs
+
+小程序新增独立「方案与权益」页，当前方案固定置顶，只展示用量等级、服务端百分比状态、恢复日、有效期与手动购买口径；升级、续期、转年付、降档提醒、企业顾问、待支付继续和到账处理中均由 `GET /plans/options` 的服务端 relation/action 驱动，不再按名称或价格猜测，也不渲染 Token、精确咨询次数、点数/月或顾问数量。确认购买先取账本报价，显示原价、剩余价值抵扣、实付与新有效期；同一购买意图复用 `clientRequestId`，报价变化返回 `QUOTE_CHANGED`。订单页展示真实继续支付截止时间和退款中间态，支付文案按业务限制、取消、创建失败、支付失败、到账中分流；方案页新增到期提示、基于公开用量状态的轻量推荐和分阶段漏斗审计。
+
+后端新增 `planFamilyKey/tierRank/usageLevel/usageLabel`、`PlanEntitlement/MonthlyCreditGrant/TokenQuotaAdjustment` 与订单报价/退款字段：商业档位与公开用量表达彻底分离，月付/年付同档月度权益后台原子同步；升级折抵优先按真实来源权益账本计算，退款只撤对应成功退款的来源。订单回调增加用户级权益锁，不同订单并发到账正确累计；同 intent 并发的唯一键竞态与关旧单误关自身均已收口。续期和同档转年不再刷满当月钱包，年付钻石按激活锚点逐月幂等补发。退款申请保留 PROCESSING/CLOSED/ABNORMAL，只有 SUCCESS 全额退款才写终态并回收权益，定时任务主动查退款补偿。回调验签改为 fail-closed，支持平台证书轮换、匹配序列号的静态证书和微信支付公钥，强校验五分钟时间窗及交易必填字段；所有微信 HTTP 请求统一 5 秒超时，production 发现任一免支付开关即拒绝启动。
+
+运营后台套餐表单可配置 family、档位、公开用量名与状态阈值，并校验 standard/5x/20x 真实倍率；用户额度处置改为带原因、可选失效时间的临时增减和保留已用量的恢复标准。新增 `db:backfill-plan-commercial` dry-run/apply 脚本与测试矩阵，存量原始额度字段仅为旧版小程序兼容保留，新版客户端不读取。完整实施方案与验收映射见 `docs/SUBSCRIPTION_PURCHASE_UX_PLAN.md`、`docs/SUBSCRIPTION_PURCHASE_TEST_MATRIX.md`。
+
+额度并发边界同步收口：跨激活锚点月度周期的惰性重置与预扣共用 `quota:<userId>` 事务锁，另一请求已重置后不再二次刷满。运营改档的损失保护继续返回 `daysLost`，不因新的用户权益事务锁而丢失既有提示契约。
+
+预发支付隔离同步改为部署脚本硬保证：`scripts/deploy-preprod.sh` 每次都删除全部 `WECHAT_PAY_*` 真商户凭据，强制 `NODE_ENV=development` + `PAY_MOCK_SUCCESS=true`，同时关闭 `PAY_SANDBOX/ALLOW_DEMO_PURCHASE`，并在重启前 fail-closed 检查。这仅影响预发：可验真实订单、回调入账与权益状态机，不触发微信真扣款，不修改生产服务或生产库。
+
 ### 2026-08-02 · 后端 GitHub Actions 对齐 Node 24，消除 Node 20 异步测试误取消 · 影响面：CI（`server-integration.yml`）+ 工程测试基线（`AGENTS.md`）
 
 `Server Integration` 的 build、Prisma schema sync 与业务断言均已通过，但 Node 20.20.2 的 `node:test` 会在 gateway provider 的 500 分支和 LLM 队列计时分支仍有待决 Promise 时提前结束事件循环，使 19 条测试被标记 `cancelledByParent`、job 以 exit 1 结束。这不是产品逻辑回归：同一组 28 条针对性用例在 Node 24.13.0 全部通过（0 cancelled）。后端 workflow 现使用与前端 CI 一致的 Node 24；禁止后续因“后端原先是 20”而降回该不稳定组合。

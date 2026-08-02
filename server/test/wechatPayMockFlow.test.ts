@@ -167,7 +167,7 @@ test('降级守卫：活跃年付降月付 409，同套餐续费放行，过期�
 });
 
 // 同周期跨档升级（此前被降级守卫误伤 409：付费用户想升更高档只能等到期）。
-// 放行判定唯一来源 = computeUpgradeProration → 这里钉住 HTTP 层放行 + 折后实付落库 + 反向仍 409。
+// 先获取只读报价，再带 quoteFingerprint + expectedChargeAmount 下单；这里钉住报价确认、实付落库与反向守卫。
 test('同周期升级：¥68 月付 → ¥198 月付 放行、折后实付落库；反向降级 / 企业版仍 409', async () => {
   // 排除 hidden：¥0.01「支付链路测试」隐藏档也是付费月付，不排掉会顶替「最低档=入门版」。
   const months = await prisma.plan.findMany({ where: { period: 'month', price: { gt: 0 }, hidden: false }, orderBy: { price: 'asc' } });
@@ -179,7 +179,16 @@ test('同周期升级：¥68 月付 → ¥198 月付 放行、折后实付落库
   // 入门版持有中、剩 15 天 → 升决策版·月付：实付 = ¥198 − round(¥68/30×15) = ¥198 − ¥34 = ¥164
   const u = await prisma.user.create({ data: { tenantId, phone: '13900000090', name: '同周期升级用户', role: 'owner', wechatOpenId: 'o_upgrade_1', planId: low.id, planActivatedAt: new Date(), planExpiresAt: new Date(Date.now() + 15 * 86400_000) } });
   const deduct = Math.round((low.price / 30) * 15); // 3400 分
-  const up = await http('POST', `/plans/${high.id}/order`, { user: u.id, body: { openid: 'o_upgrade_1' } });
+  const quote = await http('POST', `/plans/${high.id}/quote`, { user: u.id, body: {} });
+  assert.equal(quote.status, 200, `升级报价必须成功：${JSON.stringify(quote.body)}`);
+  const up = await http('POST', `/plans/${high.id}/order`, {
+    user: u.id,
+    body: {
+      openid: 'o_upgrade_1',
+      quoteFingerprint: quote.body.quoteFingerprint,
+      expectedChargeAmount: quote.body.chargeAmount,
+    },
+  });
   assert.equal(up.status, 200, `同周期真升级必须放行：${JSON.stringify(up.body)}`);
   assert.equal(up.body.proration?.applies, true, '同周期升级应触发折算');
   assert.equal(up.body.proration.remainingDays, 15);

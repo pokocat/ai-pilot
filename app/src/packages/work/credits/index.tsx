@@ -8,6 +8,7 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type MyCreditItem, type PayOrderListItem } from '../../../services/api';
 import { awaitPaymentApplied, payAppliedToast, ensurePayableEnv, payOrder } from '../../../services/pay';
+import { paymentErrorMessage } from '../../../services/paymentFeedback';
 import './index.scss';
 
 // 支付订单状态 → 用户可读标签（refunded/failed 走 danger 色）。
@@ -18,6 +19,10 @@ const ORDER_STATUS_LABEL: Record<PayOrderListItem['status'], string> = {
   failed: '支付失败',
   closed: '已关闭',
   refunded: '已退款',
+};
+const REFUND_STATUS_LABEL: Record<NonNullable<PayOrderListItem['refundStatus']>, string> = {
+  refund_requested: '退款已申请', refund_processing: '退款处理中', refund_closed: '退款已关闭',
+  refund_abnormal: '退款异常', refunded: '已退款',
 };
 
 // 算力明细：余额 + 本月算力（token 池，只看 %）+ 消耗流水 + 支付订单（P1：状态/继续支付）。
@@ -53,11 +58,8 @@ export default function Credits() {
       Taro.showToast(payAppliedToast(applied, '支付成功，权益已更新', { mock: mocked }));
       load();
     } catch (e: any) {
-      if (e?.errMsg && /cancel/i.test(e.errMsg)) Taro.showToast({ title: '已取消支付', icon: 'none' });
-      else if ((e?.code || e?.data?.code) === 'ORDER_EXPIRED' || (e?.code || e?.data?.code) === 'ORDER_NOT_PAYABLE') {
-        Taro.showToast({ title: '订单已过支付时限，请重新下单', icon: 'none' });
-        load();
-      } else s.handleApiError(e, { fallbackTitle: '支付失败，请重试' });
+      Taro.showToast({ title: paymentErrorMessage(e, 'payment'), icon: 'none' });
+      if ((e?.code || e?.data?.code) === 'ORDER_EXPIRED' || (e?.code || e?.data?.code) === 'ORDER_NOT_PAYABLE') load();
     } finally {
       setRepaying('');
     }
@@ -84,10 +86,10 @@ export default function Credits() {
           <View className="cd-quota">
             <View className="cd-qhead">
               <Text className="cd-ql">本月算力</Text>
-              <Text className="cd-qv serif">{quotaLabel(me?.tokenQuota)}</Text>
+              <Text className="cd-qv serif">{usageLabel(me?.usage)}</Text>
             </View>
             <View className="cd-track">
-              <View className="cd-fill" style={{ width: `${quotaPct(me?.tokenQuota)}%`, background: accent }} />
+              <View className="cd-fill" style={{ width: `${me?.usage.unlimited ? 100 : (me?.usage.usagePercent ?? 0)}%`, background: accent }} />
             </View>
           </View>
         </View>
@@ -124,7 +126,8 @@ export default function Credits() {
                     <Text className="cd-rt">{o.itemName}</Text>
                     {/* 测试期模拟支付单必须如实标注：不能让用户以为这笔真的付过钱 */}
                     <Text className="cd-rat">
-                      {ORDER_STATUS_LABEL[o.status] ?? o.status}{o.mock ? ' · 测试期模拟支付' : ''} · {fmtAt(o.paidAt ?? o.createdAt)} · 单号 …{o.outTradeNo.slice(-6)}
+                      {o.refundStatus ? REFUND_STATUS_LABEL[o.refundStatus] : (ORDER_STATUS_LABEL[o.status] ?? o.status)}{o.mock ? ' · 测试期模拟支付' : ''} · {fmtAt(o.paidAt ?? o.createdAt)} · 单号 …{o.outTradeNo.slice(-6)}
+                      {o.payable && o.payableUntil ? ` · 可支付至 ${fmtAt(o.payableUntil)}` : ''}
                     </Text>
                   </View>
                   <View className="cd-ord-r">
@@ -147,21 +150,9 @@ export default function Credits() {
 
 // 本月算力（客户端只看 %，不显示 token 数）。limit<0=不限量；limit=0=未开通（无额度）。
 // 整数百分比、向上取整：有消耗即至少 1%（避免大额度下小用量被抹成 0%）。
-function quotaLabel(q?: { limit: number; used: number; unlimited: boolean }): string {
-  if (!q) return '—';
-  if (q.unlimited || q.limit < 0) return '不限量';
-  if (q.limit === 0) return '未开通'; // 无额度：与「已用 0%」区分，避免误以为额度充足
-  if (q.used <= 0) return '本月已用 0%';
-  return `本月已用 ${pctOf(q.used, q.limit)}%`;
-}
-function quotaPct(q?: { limit: number; used: number; unlimited: boolean }): number {
-  if (!q || q.limit < 0) return q?.unlimited ? 100 : 0;
-  if (q.limit <= 0 || q.used <= 0) return 0;
-  return pctOf(q.used, q.limit);
-}
-// 向上取整的整数百分比，限定 [1, 100]（已有消耗）。
-function pctOf(used: number, limit: number): number {
-  return Math.min(100, Math.max(1, Math.ceil((used / limit) * 100)));
+function usageLabel(usage?: { usagePercent: number; unlimited: boolean }): string {
+  if (!usage) return '—';
+  return usage.unlimited ? '不限量' : `本月已用 ${usage.usagePercent}%`;
 }
 // ISO → MM-DD HH:mm
 function fmtAt(iso: string): string {

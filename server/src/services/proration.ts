@@ -31,7 +31,7 @@ export interface ProrationResult {
 /** 计算把 user 升级到 newPlan 时应实付的金额（月→年 或 同周期向上升级触发折算）。只读，不写库。 */
 export async function computeUpgradeProration(
   user: { id: string },
-  newPlan: { id: string; price: number; period: string },
+  newPlan: { id: string; price: number; period: string; planFamilyKey?: string | null; tierRank?: number | null },
 ): Promise<ProrationResult> {
   const fullPrice = newPlan.price;
   const base: ProrationResult = {
@@ -43,7 +43,7 @@ export async function computeUpgradeProration(
 
   const u = await prisma.user.findUnique({
     where: { id: user.id },
-    select: { planId: true, planExpiresAt: true, plan: { select: { id: true, name: true, price: true, period: true } } },
+    select: { planId: true, planExpiresAt: true, plan: { select: { id: true, name: true, price: true, period: true, planFamilyKey: true, tierRank: true } } },
   });
   const old = u?.plan;
   const at = now();
@@ -51,8 +51,14 @@ export async function computeUpgradeProration(
   if (!old || old.price <= 0 || old.id === newPlan.id) return base;
   if (isExpired(u?.planExpiresAt, at)) return base;
   // 只放开「升级」（规则 5）：月付→年付，或同周期涨价。降级/同价横切一律不折算。
-  const monthToYear = old.period === 'month' && newPlan.period === 'year';
-  const sameCycleUpgrade = old.period === newPlan.period && fullPrice > old.price;
+  // tierRank 是唯一商业档位真相源；迁移期字段为空才回退价格（回填完成后删除兜底）。
+  const oldTier = old.tierRank ?? old.price;
+  const newTier = newPlan.tierRank ?? newPlan.price;
+  const sameFamily = (old.planFamilyKey || old.id) === (newPlan.planFamilyKey || newPlan.id);
+  const monthToYear = old.period === 'month' && newPlan.period === 'year' && newTier >= oldTier;
+  const sameCycleUpgrade = old.period === newPlan.period && newTier > oldTier;
+  // 同档月转年必须属于同一 family；跨 family 的同价横切仍由降档守卫拦截。
+  if (monthToYear && newTier === oldTier && !sameFamily) return base;
   if (!monthToYear && !sameCycleUpgrade) return base;
 
   const remainingDays = daysRemaining(u?.planExpiresAt, at) ?? 0;

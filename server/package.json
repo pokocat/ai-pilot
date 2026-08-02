@@ -13,6 +13,7 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:grant-test-plan": "tsx scripts/grantTestPlan.ts",
+    "db:backfill-plan-commercial": "tsx scripts/backfillPlanCommercial.ts",
     "db:upgrade-poster-prompt": "tsx scripts/upgradePosterPrompt.ts",
     "pay:e2e": "tsx scripts/pay-e2e.ts",
     "pay:mock": "tsx scripts/wechat-pay-mock.ts",
@@ -23,7 +24,7 @@
     "copy:sync": "tsx scripts/syncAppCopy.ts",
     "db:reembed": "tsx scripts/reembed.ts",
     "secrets:encrypt": "tsx scripts/encryptSecrets.ts",
-    "pretest": "node --env-file=.env.test node_modules/prisma/build/index.js db push --skip-generate",
+    "pretest": "node --env-file=.env.test node_modules/prisma/build/index.js db push --skip-generate --accept-data-loss",
     "test": "node --env-file=.env.test --import ./test/hermeticEnv.mjs --import tsx --test --test-concurrency=1 test/*.test.ts"
   },
   "prisma": {

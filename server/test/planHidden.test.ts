@@ -73,6 +73,28 @@ test('下单/演示购买：非白名单对隐藏套餐一律 404，不泄露存
   assert.equal(purchase.body.code, 'PLAN_NOT_FOUND');
 });
 
+test('用户态 options：白名单隐藏支付档始终是 available/buy，不被当前高档套餐判成降档', async () => {
+  const phone = uniquePhone();
+  process.env.TEST_PLAN_PHONES = phone;
+  const token = await login(phone, '链路测试员');
+  await prisma.user.update({
+    where: { id: token },
+    data: {
+      planId: paidPlanId,
+      planActivatedAt: new Date(),
+      planExpiresAt: new Date(Date.now() + 20 * 24 * 3600 * 1000),
+    },
+  });
+
+  const response = await api('GET', '/api/plans/options', { token });
+  assert.equal(response.status, 200, JSON.stringify(response.body));
+  const option = response.body.options.find((item: any) => item.plan.id === hiddenPlanId);
+  assert.ok(option, '白名单用户的 options 必须包含隐藏支付验证档');
+  assert.equal(option.relation, 'available');
+  assert.equal(option.action, 'buy');
+  assert.equal(option.canPurchase, true);
+});
+
 test('白名单 + 持有未到期付费套餐：购买隐藏档绕过降级守卫（PAY_MOCK_SUCCESS 链路下单成功）', async (t) => {
   const phone = uniquePhone();
   process.env.TEST_PLAN_PHONES = phone;

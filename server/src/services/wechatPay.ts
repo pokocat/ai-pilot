@@ -9,9 +9,7 @@
 //   WECHAT_PAY_PRIVATE_KEY    商户私钥 PEM（apiclient_key.pem 内容；\n 用真实换行或字面 \n）
 //   WECHAT_PAY_NOTIFY_URL     支付结果回调地址（公网 https）
 //
-// 安全注记：回调资源用 APIv3 密钥做 AES-256-GCM 解密（已实现）。回调「签名」应再用微信平台证书
-// （RSA-SHA256，Wechatpay-Signature 头）验证——平台证书需另行下载/缓存，配 WECHAT_PAY_PLATFORM_CERT
-// （PEM）后由 verifyNotifySignature 校验；未配则仅依赖 AEAD 解密（解不出即判伪），并记日志提醒补证书。
+// 安全注记：回调先用与 Wechatpay-Serial 匹配的平台证书/公钥验签，再做 AEAD 解密；任一步缺失或失败都拒绝。
 
 import { createSign, createVerify, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
@@ -22,6 +20,7 @@ import { notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep, noteP
 import { sandboxEnabled } from './sandbox.js';
 import { chargeCredits } from './credits.js';
 import { sendWechatSubscribeMessage } from './wechatSubscribe.js';
+import { revokePlanEntitlement } from './planEntitlements.js';
 
 // 微信支付 API 基址。默认真实商户网关；本地联调可用 WECHAT_PAY_BASE 指向
 // mock 微信支付服务器（scripts/wechat-pay-mock.ts），走完整签名/验签/AEAD 解密链路。
@@ -38,8 +37,13 @@ function cfg() {
     privateKey: (process.env.WECHAT_PAY_PRIVATE_KEY ?? '').replace(/\\n/g, '\n').trim(),
     notifyUrl: (process.env.WECHAT_PAY_NOTIFY_URL ?? '').trim(),
     platformCert: (process.env.WECHAT_PAY_PLATFORM_CERT ?? '').replace(/\\n/g, '\n').trim(),
+    platformCertSerial: (process.env.WECHAT_PAY_PLATFORM_CERT_SERIAL ?? '').trim(),
+    publicKeyId: (process.env.WECHAT_PAY_PUBLIC_KEY_ID ?? '').trim(),
+    publicKey: (process.env.WECHAT_PAY_PUBLIC_KEY ?? '').replace(/\\n/g, '\n').trim(),
   };
 }
+
+const WECHAT_HTTP_TIMEOUT_MS = 5_000;
 
 /** 是否配齐真实支付凭据。未配齐 → 路由回退演示购买。 */
 export function payConfigured(): boolean {
@@ -60,7 +64,7 @@ export function payConfigured(): boolean {
  * 「将来零改动替换」的实现方式就是下面这个 `!payConfigured()`：**真凭据一配齐，mock 自动让位**。
  * 不需要记得去删 PAY_MOCK_SUCCESS，也不存在「配了真支付却还能白拿套餐」的窗口。
  *
- * ⚠️ **允许在生产启用**（产品测试期的显式决定，故 assertSandboxSafe() 不拦它）。代价必须说清：
+ * ⚠️ 只允许非生产测试环境启用；assertSandboxSafe() 会在 production 启动时拒绝该配置。代价必须说清：
  * 开启即等于**任何登录用户都可以自助领取任意付费套餐 / SKU**（下单→点一下模拟支付→权益到账），
  * 仅测试期使用；这些单在库里带 snapshotJson.mock=true、provider='mock'、transactionId 以 `mock` 开头，
  * 已从营收金额统计里排除，并在运营端订单列表显式标「mock」。
@@ -204,7 +208,16 @@ async function buildOrderSnapshot(args: { planId?: string; skuKey?: string }): P
   if (args.planId) {
     const p = await prisma.plan.findUnique({ where: { id: args.planId } });
     if (!p) return undefined;
-    return { kind: 'plan', plan: { id: p.id, name: p.name, price: p.price, period: p.period, creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth } };
+    return {
+      kind: 'plan',
+      plan: {
+        id: p.id, name: p.name, price: p.price, period: p.period,
+        planFamilyKey: p.planFamilyKey, tierRank: p.tierRank, usageLevel: p.usageLevel, usageLabel: p.usageLabel,
+        usageNormalPercent: p.usageNormalPercent, usageNearPercent: p.usageNearPercent,
+        creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth,
+        agentCount: p.agentCount, featuresJson: p.featuresJson, highlighted: p.highlighted,
+      },
+    };
   }
   if (args.skuKey) {
     const s = await prisma.sku.findUnique({ where: { key: args.skuKey } });
@@ -223,6 +236,7 @@ export async function closeWechatOrder(outTradeNo: string): Promise<void> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: buildAuthToken('POST', urlPath, body) },
     body,
+    signal: AbortSignal.timeout(WECHAT_HTTP_TIMEOUT_MS),
   });
   // 204 = 关单成功；404 = 微信侧无此交易（用户从未调起支付）——两者都可安全置本地 closed。
   if (res.status === 204 || res.status === 404) return;
@@ -242,13 +256,14 @@ export async function closeWechatOrder(outTradeNo: string): Promise<void> {
 async function closeStalePendingOrders(
   userId: string,
   target: { planOrder?: boolean; skuKey?: string },
-  opts: { mock?: boolean } = {},
+  opts: { mock?: boolean; excludeClientRequestId?: string } = {},
 ): Promise<void> {
   const provider = opts.mock ? 'mock' : 'wechat';
   const where: Prisma.PaymentOrderWhereInput = target.planOrder
     ? { userId, provider, status: 'created', appliedAt: null, planId: { not: '' } }
     : { userId, provider, status: 'created', appliedAt: null, skuKey: target.skuKey };
-  const stale = await prisma.paymentOrder.findMany({ where, select: { outTradeNo: true }, take: 5, orderBy: { createdAt: 'asc' } });
+  if (opts.excludeClientRequestId) where.NOT = { clientRequestId: opts.excludeClientRequestId };
+  const stale = await prisma.paymentOrder.findMany({ where, select: { outTradeNo: true }, take: 20, orderBy: { createdAt: 'asc' } });
   for (const o of stale) {
     try {
       if (!opts.mock) await closeWechatOrder(o.outTradeNo);
@@ -257,7 +272,8 @@ async function closeStalePendingOrders(
         data: { status: 'closed' },
       });
     } catch (err) {
-      console.warn('[pay] close stale order skipped:', o.outTradeNo, (err as Error).message);
+      console.warn('[pay] close stale order blocked new order:', o.outTradeNo, (err as Error).message);
+      throw Object.assign(new Error('上一笔待支付订单状态尚未确认，请稍后再试'), { code: 'PENDING_ORDER_UNRESOLVED', statusCode: 409 });
     }
   }
 }
@@ -278,6 +294,9 @@ export async function createJsapiOrder(args: {
   openid: string;
   amount?: number;
   attribution?: { source: string; refId: string | null }; // D-1 开通来源归因（回调发放时落 ActivationEvent）
+  clientRequestId?: string;
+  quote?: { quoteFingerprint: string; remainingValue: number; chargeAmount: number; relation: string };
+  termsHash?: string;
 }): Promise<CreateOrderResult> {
   const itemName = args.plan?.name ?? args.sku?.name ?? '专项能力';
   const itemPrice = args.plan?.price ?? args.sku?.priceFen ?? 0;
@@ -288,20 +307,67 @@ export async function createJsapiOrder(args: {
   const total = args.amount ?? itemPrice;
   const outTradeNo = genOutTradeNo();
 
-  const snapshotJson = await buildOrderSnapshot({ planId: args.plan?.id, skuKey: args.sku?.key });
+  const existingIntentResult = (existing: {
+    outTradeNo: string; status: string; provider: string; prepayId: string | null; snapshotJson: Prisma.JsonValue;
+    planId: string; skuKey: string | null; amount: number; quoteFingerprint: string | null;
+  }): CreateOrderResult => {
+    const samePayload = existing.planId === planId
+      && existing.skuKey === skuKey
+      && existing.amount === total
+      && existing.quoteFingerprint === (args.quote?.quoteFingerprint ?? null);
+    if (!samePayload) {
+      throw Object.assign(new Error('购买请求已用于其他方案，请重新确认'), { code: 'IDEMPOTENCY_CONFLICT', statusCode: 409 });
+    }
+    if (existing.status !== 'created') {
+      throw Object.assign(new Error('该购买请求已处理，请刷新方案状态'), { code: 'ORDER_ALREADY_PROCESSED', statusCode: 409 });
+    }
+    if (isMockOrder(existing)) return { outTradeNo: existing.outTradeNo, pay: mockPayParams(existing.outTradeNo), mock: true };
+    if (sandboxEnabled() && existing.provider === 'mock') {
+      return {
+        outTradeNo: existing.outTradeNo,
+        pay: { timeStamp: Math.floor(Date.now() / 1000).toString(), nonceStr: `sandbox${existing.outTradeNo.slice(-8)}`, package: `prepay_id=mock_${existing.outTradeNo}`, signType: 'RSA', paySign: 'SANDBOX_NO_SIGN' },
+      };
+    }
+    if (existing.prepayId) return { outTradeNo: existing.outTradeNo, pay: buildPayParams(existing.prepayId) };
+    throw Object.assign(new Error('订单正在创建，请稍后重试'), { code: 'ORDER_CREATING', statusCode: 409 });
+  };
+
+  const recoverIntentRace = async (error: unknown): Promise<CreateOrderResult> => {
+    if ((error as { code?: string })?.code !== 'P2002' || !args.clientRequestId) throw error;
+    const existing = await prisma.paymentOrder.findUnique({
+      where: { userId_clientRequestId: { userId: args.user.id, clientRequestId: args.clientRequestId } },
+    });
+    if (!existing) throw error;
+    return existingIntentResult(existing);
+  };
+
+  if (args.clientRequestId) {
+    const existing = await prisma.paymentOrder.findUnique({
+      where: { userId_clientRequestId: { userId: args.user.id, clientRequestId: args.clientRequestId } },
+    });
+    if (existing) {
+      return existingIntentResult(existing);
+    }
+  }
+
+  const baseSnapshot = await buildOrderSnapshot({ planId: args.plan?.id, skuKey: args.sku?.key });
+  const snapshotJson = args.quote
+    ? { ...((baseSnapshot as object | undefined) ?? {}), quote: args.quote } as Prisma.InputJsonValue
+    : baseSnapshot;
 
   // 沙箱（可测性 D9）：跳过真实微信下单，落 provider='mock' 单 + 返回合成调起参数（不签名）。
   // 由 /pay/sandbox/notify 仿真回调驱动入账；真实 notify 端点严格不动。
   if (sandboxEnabled()) {
-    await prisma.$transaction(async (tx) => {
+    try { await prisma.$transaction(async (tx) => {
       await assertOrderRate(tx, args.user.id);
       await tx.paymentOrder.create({
         data: {
           outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
           amount: total, provider: 'mock', status: 'created', attrSource, attrRefId, snapshotJson,
+          clientRequestId: args.clientRequestId, quoteFingerprint: args.quote?.quoteFingerprint, termsHash: args.termsHash,
         },
       });
-    });
+    }); } catch (error) { return recoverIntentRace(error); }
     return {
       outTradeNo,
       pay: { timeStamp: Math.floor(Date.now() / 1000).toString(), nonceStr: `sandbox${outTradeNo.slice(-8)}`, package: `prepay_id=mock_${outTradeNo}`, signType: 'RSA', paySign: 'SANDBOX_NO_SIGN' },
@@ -315,17 +381,19 @@ export async function createJsapiOrder(args: {
   // 快照打 mock=true，让 sweep / 退款 / 营收统计 / 运营列表都能识别它，且历史单永久可追溯。
   // 付款动作由 POST /pay/mock/pay 触发，到账仍走真实 markPaidAndApply。
   if (payMockSuccessEnabled()) {
-    await closeStalePendingOrders(args.user.id, staleTarget, { mock: true });
-    await prisma.$transaction(async (tx) => {
+    await closeStalePendingOrders(args.user.id, staleTarget, { mock: true, excludeClientRequestId: args.clientRequestId });
+    try { await prisma.$transaction(async (tx) => {
       await assertOrderRate(tx, args.user.id);
       await tx.paymentOrder.create({
         data: {
           outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
           amount: total, provider: 'mock', status: 'created', attrSource, attrRefId,
           snapshotJson: { ...((snapshotJson as object | undefined) ?? {}), mock: true } as Prisma.InputJsonValue,
+          clientRequestId: args.clientRequestId,
+          quoteFingerprint: args.quote?.quoteFingerprint, termsHash: args.termsHash,
         },
       });
-    });
+    }); } catch (error) { return recoverIntentRace(error); }
     notePayMock('created'); // 不计 notePayOrderCreated：那条指标的口径是「微信支付下单成功数」
     return { outTradeNo, pay: mockPayParams(outTradeNo), mock: true };
   }
@@ -337,18 +405,20 @@ export async function createJsapiOrder(args: {
   }
 
   // 关同类旧未付单（P1）：微信侧关掉才置本地 closed，消除陈旧单被后付的窗口。
-  await closeStalePendingOrders(args.user.id, staleTarget);
+  await closeStalePendingOrders(args.user.id, staleTarget, { excludeClientRequestId: args.clientRequestId });
 
   const c = cfg();
-  await prisma.$transaction(async (tx) => {
+  try { await prisma.$transaction(async (tx) => {
     await assertOrderRate(tx, args.user.id);
     await tx.paymentOrder.create({
       data: {
         outTradeNo, tenantId: args.user.tenantId, userId: args.user.id, planId, skuKey,
         amount: total, provider: 'wechat', status: 'created', attrSource, attrRefId, snapshotJson,
+        clientRequestId: args.clientRequestId,
+        quoteFingerprint: args.quote?.quoteFingerprint, termsHash: args.termsHash,
       },
     });
-  });
+  }); } catch (error) { return recoverIntentRace(error); }
 
   // 订单支付截止时刻（RFC3339，真实时钟）：2 小时后微信侧不可再支付，杜绝陈旧 prepay 被后付。
   const timeExpire = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().replace(/\.\d{3}Z$/, '+00:00');
@@ -373,6 +443,7 @@ export async function createJsapiOrder(args: {
         Authorization: buildAuthToken('POST', urlPath, body),
       },
       body,
+      signal: AbortSignal.timeout(WECHAT_HTTP_TIMEOUT_MS),
     });
   } catch (err) {
     await prisma.paymentOrder.update({ where: { outTradeNo }, data: { status: 'failed' } }).catch(() => {});
@@ -422,10 +493,13 @@ export function orderPayable(order: { status: string; createdAt: Date; provider:
   return order.provider === 'mock' || !!order.prepayId;
 }
 
+export function orderPayableUntil(order: { createdAt: Date }): string {
+  return new Date(order.createdAt.getTime() + REPAY_SAFE_WINDOW_MS).toISOString();
+}
+
 // —— 回调验签（平台证书 RSA-SHA256）——
 // 证书来源优先级：① 自动下载缓存中与回调头 Wechatpay-Serial 匹配的证书（轮换无感）；
-// ② env 静态证书 WECHAT_PAY_PLATFORM_CERT（兜底/离线）。两者皆无 → 跳过签名校验，
-// 仅靠 AEAD 解密判真伪（与历史行为一致，记日志提醒）。
+// ② env 静态证书 WECHAT_PAY_PLATFORM_CERT（兜底/离线，必须同时配置匹配序列号）。两者皆无则拒绝。
 export async function verifyNotifySignature(headers: Record<string, string | undefined>, rawBody: string): Promise<boolean> {
   const c = cfg();
   const ts = headers['wechatpay-timestamp'];
@@ -433,18 +507,19 @@ export async function verifyNotifySignature(headers: Record<string, string | und
   const signature = headers['wechatpay-signature'];
   const serial = headers['wechatpay-serial'];
 
+  if (!ts || !nonce || !signature || !serial) return false;
+  const tsSeconds = Number(ts);
+  if (!Number.isFinite(tsSeconds) || Math.abs(Date.now() / 1000 - tsSeconds) > 5 * 60) return false;
+
   let certPem = '';
-  if (serial && payConfigured()) {
+  if (serial === c.publicKeyId && c.publicKey) certPem = c.publicKey;
+  if (!certPem && serial && payConfigured()) {
     let certs = await fetchPlatformCertificates();
     if (!certs.has(serial)) certs = await fetchPlatformCertificates(true); // 未知 serial：多半在轮换，强刷一次
     certPem = certs.get(serial) ?? '';
   }
-  if (!certPem) certPem = c.platformCert;
-  if (!certPem) {
-    console.warn('[pay] 无可用平台证书（自动下载失败且未配 WECHAT_PAY_PLATFORM_CERT）：跳过回调签名校验，仅靠 AEAD 解密判真伪');
-    return true;
-  }
-  if (!ts || !nonce || !signature) return false;
+  if (!certPem && c.platformCert && c.platformCertSerial === serial) certPem = c.platformCert;
+  if (!certPem) return false;
   const message = `${ts}\n${nonce}\n${rawBody}\n`;
   try {
     return createVerify('RSA-SHA256').update(message).verify(certPem, signature, 'base64');
@@ -495,6 +570,7 @@ export async function fetchPlatformCertificates(force = false): Promise<Map<stri
     const res = await fetch(payBase() + urlPath, {
       method: 'GET',
       headers: { Accept: 'application/json', Authorization: buildAuthToken('GET', urlPath, '') },
+      signal: AbortSignal.timeout(WECHAT_HTTP_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json()) as { data?: { serial_no?: string; encrypt_certificate?: { ciphertext: string; nonce: string; associated_data?: string } }[] };
@@ -534,10 +610,15 @@ export function resetPlatformCertCache(): void {
 // 下单时落库的条款快照形状（buildOrderSnapshot 产出）。
 interface OrderSnapshot {
   kind: 'plan' | 'sku';
-  plan?: { id: string; name: string; price: number; period: string; creditsPerMonth: number; tokenQuotaPerMonth: number };
+  plan?: {
+    id: string; name: string; price: number; period: string; creditsPerMonth: number; tokenQuotaPerMonth: number;
+    planFamilyKey?: string | null; tierRank?: number | null; usageLevel?: string | null; usageLabel?: string | null;
+    usageNormalPercent?: number; usageNearPercent?: number; agentCount?: number; featuresJson?: unknown; highlighted?: boolean;
+  };
   sku?: { key: string; name: string; kind: string; priceFen: number; grantsModuleKey: string | null; metaJson: unknown };
   /** PAY_MOCK_SUCCESS 模拟单标记（见 isMockOrder）。schema 不加列，标记只挂在这份 Json 快照里。 */
   mock?: boolean;
+  quote?: { quoteFingerprint?: string; remainingValue?: number; chargeAmount?: number; relation?: string };
 }
 
 export async function markPaidAndApply(parsed: {
@@ -562,6 +643,8 @@ async function markPaidAndApplyTx(parsed: {
     const order = await tx.paymentOrder.findUnique({ where: { outTradeNo: parsed.outTradeNo } });
     if (!order) return { applied: false, reason: 'order_not_found' };
     if (order.appliedAt || order.status === 'applied') return { applied: false, reason: 'already_applied' };
+    // 不同订单也必须按用户串行化，否则两笔同时到账会各自读取同一份旧套餐状态，造成时长覆盖。
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${order.userId}`}))`;
 
     // 报文一致性校验（防串单/防伪造的标准防御）：字段存在才比对（沙箱/降级报文可能不带）。
     // 不一致时保持订单原状态（绝不发放、也不标 failed——伪造报文不能影响真单），
@@ -616,7 +699,7 @@ async function markPaidAndApplyTx(parsed: {
       await applySkuGrant(
         { id: order.userId, tenantId: order.tenantId },
         { key: sku.key, name: sku.name, kind: sku.kind, grantsModuleKey: sku.grantsModuleKey, metaJson: sku.metaJson },
-        { reason: `${sku.name} · ${payLabel}`, source },
+        { reason: `${sku.name} · ${payLabel}`, source, orderId: order.id },
         tx,
       );
       // D-1 开通来源归因：SKU 发放成功 → 落 ActivationEvent（来源来自下单时随订单存的 attrSource；缺省 catalog）。
@@ -628,7 +711,13 @@ async function markPaidAndApplyTx(parsed: {
       await applyPlanPurchase(
         { id: order.userId, tenantId: order.tenantId },
         plan,
-        { reason: `${plan.name} · ${payLabel}`, source },
+        {
+          reason: `${plan.name} · ${payLabel}`, source,
+          order: {
+            id: order.id, outTradeNo: order.outTradeNo, amount: order.amount, termsHash: order.termsHash,
+            quote: snapshot?.quote ?? null,
+          },
+        },
         tx,
       );
       // 套餐订单归因（P2）：与 SKU 同口径落 ActivationEvent，供多来源漏斗报表。
@@ -663,6 +752,7 @@ export async function queryWechatOrder(outTradeNo: string): Promise<WechatTransa
     res = await fetch(payBase() + urlPath, {
       method: 'GET',
       headers: { Accept: 'application/json', Authorization: buildAuthToken('GET', urlPath, '') },
+      signal: AbortSignal.timeout(WECHAT_HTTP_TIMEOUT_MS),
     });
   } catch (err) {
     throw Object.assign(new Error(`微信查单网络异常：${(err as Error).message}`), { code: 'WECHAT_PAY_QUERY_FAILED', statusCode: 502 });
@@ -703,6 +793,10 @@ export async function reconcileOrder(outTradeNo: string): Promise<{ applied: boo
   const tradeState = String(tx.trade_state ?? 'UNKNOWN');
   if (tradeState !== 'SUCCESS' && !TERMINAL_FAIL_STATES.has(tradeState)) {
     return { applied: false, reason: `trade_state_${tradeState}`, tradeState };
+  }
+  if (tradeState === 'SUCCESS' && (!tx.transaction_id || typeof (tx.amount as { total?: unknown } | undefined)?.total !== 'number'
+    || typeof tx.appid !== 'string' || typeof tx.mchid !== 'string')) {
+    return { applied: false, reason: 'missing_required_transaction_fields', tradeState };
   }
   // SUCCESS 入账；终态失败由 markPaidAndApply 的非 SUCCESS 分支标 failed —— 两条路径共用同一幂等锁。
   const amt = (tx.amount as { total?: number } | undefined)?.total;
@@ -812,7 +906,7 @@ async function notifyPaymentApplied(outTradeNo: string): Promise<void> {
 export interface RefundResult { ok: boolean; refundId: string; wechatStatus: string }
 
 async function revokeOrderGrant(
-  order: { outTradeNo: string; tenantId: string; userId: string; planId: string; skuKey: string | null; snapshotJson: unknown },
+  order: { id: string; outTradeNo: string; tenantId: string; userId: string; planId: string; skuKey: string | null; snapshotJson: unknown },
   tx: Prisma.TransactionClient,
 ): Promise<void> {
   const snap = (order.snapshotJson ?? null) as OrderSnapshot | null;
@@ -820,6 +914,13 @@ async function revokeOrderGrant(
     const skuRow = snap?.kind === 'sku' && snap.sku ? null : await tx.sku.findUnique({ where: { key: order.skuKey } });
     const kind = snap?.sku?.kind ?? skuRow?.kind ?? 'module';
     const grantsModuleKey = snap?.sku?.grantsModuleKey ?? skuRow?.grantsModuleKey ?? null;
+    const sourceEntitlement = await tx.skuEntitlement.findUnique({ where: { sourceOrderId: order.id } });
+    if (sourceEntitlement && sourceEntitlement.status === 'active') {
+      await tx.skuEntitlement.update({ where: { id: sourceEntitlement.id }, data: { status: 'refunded', refundedAt: new Date() } });
+    }
+    const otherActiveSources = sourceEntitlement
+      ? await tx.skuEntitlement.count({ where: { userId: order.userId, entitlementKey: sourceEntitlement.entitlementKey, status: 'active' } })
+      : 0;
     if (kind === 'storage') {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`storage:${order.userId}`}))`;
       const bytes = Number((snap?.sku?.metaJson as { bytes?: number } | null)?.bytes ?? (skuRow?.metaJson as { bytes?: number } | null)?.bytes ?? 0);
@@ -829,24 +930,26 @@ async function revokeOrderGrant(
         const bonus = Math.max(0, Number(extra.storageBonus ?? 0) - bytes);
         await tx.profile.update({ where: { id: profile.id }, data: { extraJson: { ...extra, storageBonus: bonus } as Prisma.InputJsonValue } });
       }
-    } else if (kind === 'module' && grantsModuleKey) {
+    } else if (kind === 'module' && grantsModuleKey && (!sourceEntitlement || otherActiveSources === 0)) {
       await tx.userModule.updateMany({
         where: { userId: order.userId, moduleKey: grantsModuleKey, source: 'purchase' },
         data: { enabled: false },
       });
-    } else {
+    } else if (!sourceEntitlement || otherActiveSources === 0) {
       await tx.userModule.updateMany({
         where: { userId: order.userId, moduleKey: `sku:${order.skuKey}` },
         data: { enabled: false },
       });
     }
   } else {
-    const user = await tx.user.findUnique({ where: { id: order.userId }, select: { planId: true } });
-    if (user?.planId === order.planId) {
-      await tx.user.update({ where: { id: order.userId }, data: { planExpiresAt: new Date() } });
+    const ledger = await revokePlanEntitlement(tx, { orderId: order.id, userId: order.userId });
+    if (!ledger.handled) {
+      // 迁移前历史订单无权益账本，只能保留旧版保守回收口径。
+      const user = await tx.user.findUnique({ where: { id: order.userId }, select: { planId: true } });
+      if (user?.planId === order.planId) await tx.user.update({ where: { id: order.userId }, data: { planExpiresAt: new Date() } });
     }
     const planRow = snap?.kind === 'plan' && snap.plan ? null : await tx.plan.findUnique({ where: { id: order.planId } });
-    const granted = snap?.plan?.creditsPerMonth ?? planRow?.creditsPerMonth ?? 0;
+    const granted = ledger.handled ? ledger.creditsToRevoke : (snap?.plan?.creditsPerMonth ?? planRow?.creditsPerMonth ?? 0);
     if (granted > 0) {
       const last = await tx.creditLedger.findFirst({ where: { userId: order.userId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
       const balance = last?.balance ?? 0;
@@ -883,6 +986,7 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
       out_trade_no: outTradeNo,
       out_refund_no: outRefundNo,
       reason: (opts.reason ?? '').trim().slice(0, 80) || undefined,
+      notify_url: cfg().notifyUrl,
       amount: { refund: order.amount, total: order.amount, currency: 'CNY' },
     });
     let res: Response;
@@ -891,6 +995,7 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: buildAuthToken('POST', urlPath, body) },
         body,
+        signal: AbortSignal.timeout(WECHAT_HTTP_TIMEOUT_MS),
       });
     } catch (err) {
       throw Object.assign(new Error(`微信退款网络异常：${(err as Error).message}`), { code: 'WECHAT_PAY_REFUND_FAILED', statusCode: 502 });
@@ -904,15 +1009,28 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
     wechatStatus = data.status ?? 'PROCESSING';
   }
 
-  // 微信已受理退款（SUCCESS/PROCESSING 均不可逆）→ 幂等落状态 + 回收权益（同订单 advisory lock 串行化）。
+  const normalized = wechatStatus.toUpperCase();
+  const finalSuccess = mock || normalized === 'SUCCESS';
+  const refundStatus = finalSuccess ? 'refunded'
+    : normalized === 'CLOSED' ? 'refund_closed'
+      : normalized === 'ABNORMAL' ? 'refund_abnormal'
+        : normalized === 'PROCESSING' ? 'refund_processing' : 'refund_requested';
+  // 申请受理不等于退款完成。只有 SUCCESS（或无真实资金流的 mock）才回收权益并写 refundedAt。
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outTradeNo}))`;
     const cur = await tx.paymentOrder.findUnique({ where: { outTradeNo } });
     if (!cur || cur.refundedAt) return;
-    if (cur.appliedAt) await revokeOrderGrant(cur, tx);
+    if (finalSuccess) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${cur.userId}`}))`;
+      if (cur.appliedAt) await revokeOrderGrant(cur, tx);
+    }
     await tx.paymentOrder.update({
       where: { outTradeNo },
-      data: { status: 'refunded', refundId: remoteRefundId ?? outRefundNo, refundedAt: new Date(), refundReason: (opts.reason ?? '').trim().slice(0, 200) || null },
+      data: {
+        ...(finalSuccess ? { status: 'refunded', refundedAt: new Date() } : {}),
+        refundStatus, refundUpdatedAt: new Date(), refundId: remoteRefundId ?? outRefundNo,
+        refundReason: (opts.reason ?? '').trim().slice(0, 200) || null,
+      },
     });
     await tx.auditLog.create({
       data: {
@@ -922,8 +1040,10 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
     }).catch(() => {});
   });
   // mock 单同样不进退款金额指标（进了会把营收/退款两侧同时污染）；单独计 mock 事件。
-  if (mock) notePayMock('refunded');
-  else notePayRefund(order.amount);
+  if (finalSuccess) {
+    if (mock) notePayMock('refunded');
+    else notePayRefund(order.amount);
+  }
   return { ok: true, refundId: remoteRefundId ?? outRefundNo, wechatStatus };
 }
 
@@ -941,41 +1061,49 @@ export async function markRefundNotified(decoded: {
 }): Promise<void> {
   if (!decoded.out_trade_no) return;
   const outTradeNo = decoded.out_trade_no;
-  const success = (decoded.refund_status ?? '').toUpperCase() === 'SUCCESS';
+  const remoteStatus = (decoded.refund_status ?? '').toUpperCase();
+  const success = remoteStatus === 'SUCCESS';
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${outTradeNo}))`;
     const cur = await tx.paymentOrder.findUnique({ where: { outTradeNo } });
     if (!cur) return;
     // 已是退款终态（本地主动退款已处理，或此前回调已回收）：仅幂等补记原文。
     if (cur.refundedAt || cur.status === 'refunded') {
-      await tx.paymentOrder.update({ where: { outTradeNo }, data: { rawNotifyJson: decoded as Prisma.InputJsonValue } });
+      await tx.paymentOrder.update({ where: { outTradeNo }, data: { refundRawJson: decoded as Prisma.InputJsonValue, refundUpdatedAt: new Date() } });
       return;
     }
     // 非成功态（CLOSED/ABNORMAL 等）：不动权益，只记原文。
     if (!success) {
-      await tx.paymentOrder.update({ where: { outTradeNo }, data: { rawNotifyJson: decoded as Prisma.InputJsonValue } });
+      const refundStatus = remoteStatus === 'CLOSED' ? 'refund_closed'
+        : remoteStatus === 'ABNORMAL' ? 'refund_abnormal'
+          : remoteStatus === 'PROCESSING' ? 'refund_processing' : 'refund_requested';
+      await tx.paymentOrder.update({ where: { outTradeNo }, data: { refundStatus, refundRawJson: decoded as Prisma.InputJsonValue, refundUpdatedAt: new Date() } });
       return;
     }
     // 金额校验：仅全额退款自动回收；部分退款或金额不符 → 记原文 + 审计告警，交人工，绝不误撤。
     const refundAmt = decoded.amount?.refund;
-    if (typeof refundAmt === 'number' && refundAmt !== cur.amount) {
-      await tx.paymentOrder.update({ where: { outTradeNo }, data: { rawNotifyJson: decoded as Prisma.InputJsonValue } });
+    const totalAmt = decoded.amount?.total;
+    if (typeof refundAmt !== 'number' || typeof totalAmt !== 'number' || refundAmt !== cur.amount || totalAmt !== cur.amount) {
+      await tx.paymentOrder.update({ where: { outTradeNo }, data: { refundRawJson: decoded as Prisma.InputJsonValue, refundUpdatedAt: new Date() } });
       await tx.auditLog.create({
         data: { tenantId: cur.tenantId, userId: cur.userId, action: 'user.pay.refund.partial_unhandled',
-          payloadJson: { outTradeNo, refundAmt, orderAmount: cur.amount, item: snapshotItemName(cur) } },
+          payloadJson: { outTradeNo, refundAmt, totalAmt, orderAmount: cur.amount, item: snapshotItemName(cur) } },
       }).catch(() => {});
       return;
     }
     // 商户后台退款成功、本地尚未回收：撤权益（仅 appliedAt 已发放的单）+ 置 refunded。
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${cur.userId}`}))`;
     if (cur.appliedAt) await revokeOrderGrant(cur, tx);
     await tx.paymentOrder.update({
       where: { outTradeNo },
       data: {
         status: 'refunded',
+        refundStatus: 'refunded',
         refundId: decoded.refund_id ?? decoded.out_refund_no ?? null,
         refundedAt: new Date(),
+        refundUpdatedAt: new Date(),
         refundReason: '商户后台退款（回调触发）',
-        rawNotifyJson: decoded as Prisma.InputJsonValue,
+        refundRawJson: decoded as Prisma.InputJsonValue,
       },
     });
     await tx.auditLog.create({
@@ -983,4 +1111,49 @@ export async function markRefundNotified(decoded: {
         payloadJson: { outTradeNo, refundId: decoded.refund_id ?? null, amount: cur.amount, item: snapshotItemName(cur), source: 'merchant_backend' } },
     }).catch(() => {});
   });
+}
+
+/** 主动查退款：通知丢失时仍可把 PROCESSING 推进到成功/关闭/异常终态。 */
+export async function queryWechatRefund(outRefundNo: string): Promise<Record<string, unknown>> {
+  const urlPath = `/v3/refund/domestic/refunds/${encodeURIComponent(outRefundNo)}`;
+  let res: Response;
+  try {
+    res = await fetch(payBase() + urlPath, {
+      method: 'GET',
+      headers: { Accept: 'application/json', Authorization: buildAuthToken('GET', urlPath, '') },
+      signal: AbortSignal.timeout(WECHAT_HTTP_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw Object.assign(new Error(`微信查退款网络异常：${(err as Error).message}`), { code: 'WECHAT_PAY_REFUND_QUERY_FAILED', statusCode: 502 });
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw Object.assign(new Error(`微信查退款失败：HTTP ${res.status} ${detail}`), { code: 'WECHAT_PAY_REFUND_QUERY_FAILED', statusCode: 502 });
+  }
+  return await res.json() as Record<string, unknown>;
+}
+
+export async function sweepPendingRefunds(opts: { batch?: number } = {}): Promise<{ scanned: number; completed: number }> {
+  if (!payConfigured()) return { scanned: 0, completed: 0 };
+  const rows = await prisma.paymentOrder.findMany({
+    where: { provider: 'wechat', refundedAt: null, refundStatus: { in: ['refund_requested', 'refund_processing'] }, refundId: { not: null } },
+    orderBy: { refundUpdatedAt: 'asc' }, take: Math.min(Math.max(opts.batch ?? 50, 1), 200),
+  });
+  let completed = 0;
+  for (const row of rows) {
+    try {
+      const remote = await queryWechatRefund(row.refundId!);
+      await markRefundNotified({
+        out_trade_no: String(remote.out_trade_no ?? row.outTradeNo),
+        refund_status: String(remote.status ?? 'PROCESSING'),
+        refund_id: typeof remote.refund_id === 'string' ? remote.refund_id : row.refundId ?? undefined,
+        out_refund_no: typeof remote.out_refund_no === 'string' ? remote.out_refund_no : undefined,
+        amount: remote.amount as { refund?: number; total?: number; payer_refund?: number } | undefined,
+      });
+      if (String(remote.status ?? '').toUpperCase() === 'SUCCESS') completed += 1;
+    } catch (err) {
+      console.warn('[pay] refund sweep failed:', row.outTradeNo, (err as Error).message);
+    }
+  }
+  return { scanned: rows.length, completed };
 }

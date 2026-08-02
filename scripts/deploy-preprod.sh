@@ -108,6 +108,30 @@ else
   echo "  由生产 .env 派生（DATABASE_URL→${PREPROD_DB}, PORT=${PORT}, AI_FALLBACK_MOCK=false）"
 fi
 
+# 预发支付必须永久与生产商户隔离：即使首次环境从生产 .env 派生，也不得
+# 携带任何 WECHAT_PAY_* 凭据。预发只跑 PAY_MOCK_SUCCESS 的真实订单/权益管线，
+# 不触达微信收款；每次部署都重申这个状态，防止手工改配后带着真商户出现。
+set_env_value() {
+  local key="$1" value="$2"
+  if sudo grep -qE "^${key}=" "$PREPROD_ROOT/server/.env"; then
+    sudo sed -i -E "s#^${key}=.*#${key}=${value}#" "$PREPROD_ROOT/server/.env"
+  else
+    printf '%s=%s\n' "$key" "$value" | sudo tee -a "$PREPROD_ROOT/server/.env" >/dev/null
+  fi
+}
+sudo sed -i -E '/^WECHAT_PAY_[A-Z0-9_]*=/d' "$PREPROD_ROOT/server/.env"
+set_env_value NODE_ENV development
+set_env_value PAY_MOCK_SUCCESS true
+set_env_value PAY_SANDBOX false
+set_env_value ALLOW_DEMO_PURCHASE false
+sudo chown "$RUNTIME_USER:$RUNTIME_USER" "$PREPROD_ROOT/server/.env"
+sudo chmod 600 "$PREPROD_ROOT/server/.env"
+if sudo grep -qE '^WECHAT_PAY_[A-Z0-9_]*=.' "$PREPROD_ROOT/server/.env"; then
+  echo "!! 预发 .env 仍含真实微信支付配置，拒绝部署" >&2
+  exit 1
+fi
+echo "  支付隔离已锁定：PAY_MOCK_SUCCESS=true · WECHAT_PAY_*=unset"
+
 echo "== systemd 单元 $SERVICE =="
 if [ ! -f "/etc/systemd/system/${SERVICE}.service" ]; then
   sudo tee "/etc/systemd/system/${SERVICE}.service" >/dev/null <<UNIT

@@ -641,6 +641,12 @@ model Plan {
   name               String
   price              Int // 分
   period             String // month | year
+  planFamilyKey      String? // 同一方案的月付/年付稳定分组；迁移期可空，服务层兼容回退 id
+  tierRank           Int? // 商业档位排序；只用于升降档/折算，不与公开用量等级混用
+  usageLevel         String? // standard | 5x | 20x | custom（对外用量等级）
+  usageLabel         String? // 用户侧展示，如「标准用量」「扩展用量」「专属用量」
+  usageNormalPercent Int     @default(50) // 用户侧「正常使用」阈值上界（整数百分比）
+  usageNearPercent   Int     @default(80) // 用户侧「接近上限」阈值起点（整数百分比）
   creditsPerMonth    Int // 钻石(点)：每月赠送，用于一次性解锁 + 图片按张
   tokenQuotaPerMonth Int     @default(0) // 月度 token 额度（文本产出消耗池），-1=不限量
   agentCount         Int
@@ -658,33 +664,120 @@ model Plan {
 /// 状态流：created → paid（回调验签通过）→ applied（权益已发放，幂等终态）；或 closed/failed。
 /// 幂等：appliedAt 为「恰好一次」入账的原子锚点（条件更新抢占，防重复回调/并发双发权益）。
 model PaymentOrder {
-  id            String    @id @default(cuid())
-  outTradeNo    String    @unique // 商户订单号（我们生成，提交给微信）
-  tenantId      String
-  userId        String
-  planId        String    @default("") // 套餐订单挂 planId；SKU 订单为空串
-  skuKey        String? // V7-12：单次付费商品订单挂 SKU key（与 planId 二选一）
-  amount        Int // 应付金额（分）
-  currency      String    @default("CNY")
-  provider      String    @default("wechat") // wechat | mock（未配支付时的演示通道）
-  status        String    @default("created") // created | paid | applied | failed | closed | refunded
-  prepayId      String? // 微信预支付交易会话标识
-  transactionId String? // 微信支付订单号（回调返回）
-  paidAt        DateTime?
-  appliedAt     DateTime? // 权益发放完成时间 = 幂等终态锚点
-  rawNotifyJson Json? // 回调解密后的原文（排查用）
-  attrSource    String? // D-1 开通来源归因（下单时从请求体带入，回调发放时落 ActivationEvent）：prescription | catalog | market
-  attrRefId     String? // attrSource=prescription 时的 prescriptionId
-  snapshotJson  Json? // 下单时的套餐/SKU 条款快照（P1：发放以此为准，防「下单后改价/删配置」漂移；无快照的历史单回退读当前配置）
-  refundId      String? // 微信退款单号（out_refund_no）
-  refundedAt    DateTime? // 退款完成时间 = 退款幂等终态锚点
-  refundReason  String? // 退款原因（运营填写，进审计）
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  outTradeNo       String    @unique // 商户订单号（我们生成，提交给微信）
+  tenantId         String
+  userId           String
+  planId           String    @default("") // 套餐订单挂 planId；SKU 订单为空串
+  skuKey           String? // V7-12：单次付费商品订单挂 SKU key（与 planId 二选一）
+  amount           Int // 应付金额（分）
+  currency         String    @default("CNY")
+  provider         String    @default("wechat") // wechat | mock（未配支付时的演示通道）
+  status           String    @default("created") // created | paid | applied | failed | closed | refunded
+  prepayId         String? // 微信预支付交易会话标识
+  transactionId    String?   @unique // 微信支付订单号（回调返回）；同一微信交易不得关联两笔本地订单
+  paidAt           DateTime?
+  appliedAt        DateTime? // 权益发放完成时间 = 幂等终态锚点
+  rawNotifyJson    Json? // 回调解密后的原文（排查用）
+  attrSource       String? // D-1 开通来源归因（下单时从请求体带入，回调发放时落 ActivationEvent）：prescription | catalog | market
+  attrRefId        String? // attrSource=prescription 时的 prescriptionId
+  snapshotJson     Json? // 下单时的套餐/SKU 条款快照（P1：发放以此为准，防「下单后改价/删配置」漂移；无快照的历史单回退读当前配置）
+  clientRequestId  String? // 客户端一次购买意图的幂等键；同用户重试返回原订单
+  quoteFingerprint String? // 用户确认的报价指纹；下单事务内重算并核对
+  termsHash        String? // 下单时完整商业条款哈希，供权益账本与退款追溯
+  refundId         String? // 微信退款单号（out_refund_no）
+  refundStatus     String? // refund_requested | refund_processing | refunded | refund_closed | refund_abnormal
+  refundUpdatedAt  DateTime?
+  refundRawJson    Json?
+  refundedAt       DateTime? // 退款完成时间 = 退款幂等终态锚点
+  refundReason     String? // 退款原因（运营填写，进审计）
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
+  @@unique([userId, clientRequestId])
   @@index([userId])
   @@index([status])
   @@map("payment_order")
+}
+
+/// 套餐权益账本：每笔购买/续期/升级均保留来源订单与真实实付，报价和退款不再猜当前套餐价格。
+model PlanEntitlement {
+  id                  String    @id @default(cuid())
+  tenantId            String
+  userId              String
+  planId              String
+  sourceOrderId       String?   @unique
+  sourceOutTradeNo    String?   @unique
+  planFamilyKey       String
+  tierRank            Int
+  period              String
+  listPrice           Int
+  paidAmount          Int
+  creditedAmount      Int       @default(0) // 已被后续升级折抵的现金价值
+  startsAt            DateTime
+  expiresAt           DateTime?
+  anchorAt            DateTime
+  status              String    @default("active") // active | superseded | refunded
+  supersededByOrderId String?
+  termsHash           String
+  refundedAt          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([userId, status, expiresAt])
+  @@index([planId])
+  @@map("plan_entitlement")
+}
+
+/// 每月钻石权益幂等发放锚点。年付每个锚点周期最多发一次，提前续费不会重复发当月。
+model MonthlyCreditGrant {
+  id            String   @id @default(cuid())
+  tenantId      String
+  userId        String
+  periodKey     String
+  planId        String
+  sourceOrderId String?
+  amount        Int
+  grantedAt     DateTime @default(now())
+
+  @@unique([userId, periodKey])
+  @@index([planId])
+  @@map("monthly_credit_grant")
+}
+
+/// 运营临时加额：增量、有效期、原因和操作者独立留痕，不覆盖套餐标准钱包和已用量。
+model TokenQuotaAdjustment {
+  id         String    @id @default(cuid())
+  tenantId   String
+  userId     String
+  delta      Int
+  reason     String
+  operatorId String?
+  startsAt   DateTime  @default(now())
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, startsAt, expiresAt])
+  @@map("token_quota_adjustment")
+}
+
+/// 单次付费 SKU 的来源权益。重复购买按来源订单累计，退款一单只撤该来源。
+model SkuEntitlement {
+  id             String    @id @default(cuid())
+  tenantId       String
+  userId         String
+  skuKey         String
+  sourceOrderId  String    @unique
+  entitlementKey String
+  kind           String
+  quantity       Int       @default(1)
+  status         String    @default("active") // active | refunded
+  grantedAt      DateTime  @default(now())
+  refundedAt     DateTime?
+
+  @@index([userId, entitlementKey, status])
+  @@map("sku_entitlement")
 }
 
 /// 算力账户流水

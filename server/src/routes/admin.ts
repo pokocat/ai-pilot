@@ -60,6 +60,7 @@ import type {
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
+import { MAX_TIER_RANK, planTierRank } from '../services/planRules.js';
 import { isExpired, daysRemaining } from '../services/planTime.js';
 import { signUserToken, jwtEnabled } from '../services/userToken.js';
 import { Prisma } from '@prisma/client';
@@ -85,8 +86,12 @@ const FEATURE_FLAG_CATALOG: FlagDef[] = [
 
 // 把 service 抛出的 {statusCode, code} 错误统一回成 HTTP 响应。
 function sendErr(reply: import('fastify').FastifyReply, e: unknown, fallback = 400) {
-  const err = e as { statusCode?: number; code?: string; message?: string };
-  return reply.code(err.statusCode ?? fallback).send({ error: err.message ?? '操作失败', code: err.code });
+  const err = e as { statusCode?: number; code?: string; message?: string; daysLost?: number | null };
+  return reply.code(err.statusCode ?? fallback).send({
+    error: err.message ?? '操作失败',
+    code: err.code,
+    ...(err.daysLost !== undefined ? { daysLost: err.daysLost } : {}),
+  });
 }
 
 // 操作者可见/可编辑的 agent → 角色映射；超管返回 null（=全部可编辑）。用于列表过滤与 canEdit。
@@ -725,6 +730,70 @@ export async function adminRoutes(app: FastifyInstance) {
     return { ok: true, quota: after };
   });
 
+  // 新额度控制：临时增量单独记账，不覆盖已用量；恢复标准时撤销所有有效增量并保留 used。
+  app.get<{ Params: { id: string } }>('/admin/users/:id/token-quota-detail', async (req, reply) => {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, planId: true, plan: { select: { name: true } } } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    const state = await getQuotaState(user.id);
+    const wallet = await prisma.tokenWallet.findUnique({ where: { userId: user.id } });
+    const adjustments = await prisma.tokenQuotaAdjustment.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' } });
+    return {
+      userId: user.id, planId: user.planId, planName: user.plan?.name ?? null,
+      quota: state.quota, used: state.used, remaining: state.balance, periodKey: wallet?.periodKey ?? '',
+      adjustments: adjustments.map((item) => ({
+        id: item.id, delta: item.delta, reason: item.reason, operatorId: item.operatorId,
+        startsAt: item.startsAt.toISOString(), expiresAt: item.expiresAt?.toISOString() ?? null, revokedAt: item.revokedAt?.toISOString() ?? null,
+      })),
+    };
+  });
+
+  app.post<{ Params: { id: string }; Body: { delta?: number; reason?: string; expiresAt?: string | null } }>('/admin/users/:id/token-quota-adjustments', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const delta = req.body?.delta;
+    const reason = (req.body?.reason ?? '').trim();
+    const expiresAt = req.body?.expiresAt ? new Date(req.body.expiresAt) : null;
+    if (typeof delta !== 'number' || !Number.isInteger(delta) || delta === 0) return reply.code(400).send({ error: '临时加额必须是非 0 整数', code: 'BAD_DELTA' });
+    if (!reason || reason.length > 100) return reply.code(400).send({ error: '原因必填且不超过 100 字', code: 'BAD_REASON' });
+    if (expiresAt && (!Number.isFinite(expiresAt.getTime()) || expiresAt <= now())) return reply.code(400).send({ error: '失效时间必须晚于当前时间', code: 'BAD_EXPIRES_AT' });
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true } });
+    if (!user) return reply.code(404).send({ error: 'user not found' });
+    await getQuotaState(req.params.id); // 确保钱包存在并完成周期切换
+    let row;
+    try {
+      row = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`quota:${req.params.id}`}))`;
+        const wallet = await tx.tokenWallet.findUniqueOrThrow({ where: { userId: req.params.id } });
+        if (wallet.quota >= 0 && wallet.balance + delta < 0) throw Object.assign(new Error('调整后剩余额度不能小于 0'), { code: 'QUOTA_ADJUSTMENT_OVERDRAW', statusCode: 409 });
+        const created = await tx.tokenQuotaAdjustment.create({
+          data: { tenantId: user.tenantId, userId: req.params.id, delta, reason, operatorId: actorAccountId(actor), expiresAt },
+        });
+        if (wallet.quota >= 0) await tx.tokenWallet.update({ where: { userId: req.params.id }, data: { quota: { increment: delta }, balance: { increment: delta } } });
+        return created;
+      });
+    } catch (e) { return sendErr(reply, e); }
+    await recordAudit({ tenantId: user.tenantId, userId: req.params.id, action: 'admin.user.quota.adjust', payload: { by: actorName(actor), adjustmentId: row.id, delta, reason, expiresAt: expiresAt?.toISOString() ?? null } });
+    return reply.code(201).send({ ok: true, id: row.id });
+  });
+
+  app.post<{ Params: { id: string } }>('/admin/users/:id/token-quota/restore-plan', async (req, reply) => {
+    const actor = actorOf(req);
+    try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
+    const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { tenantId: true, plan: { select: { tokenQuotaPerMonth: true } } } });
+    if (!user?.plan) return reply.code(400).send({ error: '用户当前无套餐，无法恢复标准额度', code: 'NO_PLAN' });
+    await getQuotaState(req.params.id);
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`quota:${req.params.id}`}))`;
+      const wallet = await tx.tokenWallet.findUniqueOrThrow({ where: { userId: req.params.id } });
+      const used = wallet.quota < 0 ? 0 : Math.max(0, wallet.quota - wallet.balance);
+      const quota = user.plan!.tokenQuotaPerMonth;
+      await tx.tokenWallet.update({ where: { userId: req.params.id }, data: { quota, balance: quota < 0 ? -1 : quota - used } });
+      await tx.tokenQuotaAdjustment.updateMany({ where: { userId: req.params.id, revokedAt: null }, data: { revokedAt: now() } });
+    });
+    await recordAudit({ tenantId: user.tenantId, userId: req.params.id, action: 'admin.user.quota.restore_plan', payload: { by: actorName(actor), quota: user.plan.tokenQuotaPerMonth } });
+    return { ok: true };
+  });
+
   // 补发/扣减钻石（CreditLedger）。走 credits 服务的入账函数，reason 存成 admin:{reason}；负 delta 越界 400。
   app.post<{ Params: { id: string }; Body: { delta?: number; reason?: string } }>('/admin/users/:id/credits', async (req, reply) => {
     const actor = actorOf(req);
@@ -961,8 +1030,6 @@ export async function adminRoutes(app: FastifyInstance) {
 
   // 套餐档位次序：price<0（企业版·私有化，面议）是**最高档**，不是「比 0 还便宜」。
   // 直接比 price 会把「企业版 → 入门版」判成升级（400 > -1），从而把不限期权益静默换成 1 个月。
-  const planTier = (price: number): number => (price < 0 ? Number.POSITIVE_INFINITY : price);
-
   // 手动开通套餐（P2，仅 owner/master）：给任意用户直接发放套餐权益（含无套餐用户，补齐 plan-extend 的 NO_PLAN 缺口）。
   // 复用 applyPlanPurchase（与支付/演示同一发放口径，签名与 C 端行为一字不动），source='admin_grant'。
   //
@@ -978,47 +1045,45 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string }; Body: { planId?: string; force?: boolean } }>('/admin/users/:id/plan', async (req, reply) => {
     const actor = actorOf(req);
     try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
-      select: { id: true, tenantId: true, planId: true, planExpiresAt: true, plan: { select: { id: true, name: true, price: true } } },
-    });
-    if (!user) return reply.code(404).send({ error: '用户不存在', code: 'USER_NOT_FOUND' });
     const planId = (req.body?.planId ?? '').trim();
     if (!planId) return reply.code(400).send({ error: '缺少 planId', code: 'PLAN_ID_REQUIRED' });
     const plan = await prisma.plan.findUnique({ where: { id: planId } });
     if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
     const force = req.body?.force === true;
-
-    const at = now();
-    const cur = user.plan;
-    // 需要保护的只有「付费(含企业版) + 未过期 + 真的换档」这一种；免费档/无套餐/已过期没有剩余时长可损失。
-    const protectable = !!cur && cur.price !== 0 && !isExpired(user.planExpiresAt, at) && cur.id !== plan.id;
-    const remaining = daysRemaining(user.planExpiresAt, at); // null = 不限期（≠ 0 天）
-    const targetDated = plan.price > 0; // applyPlanPurchase 对 price ≤ 0 是 noExpiry（无到期日）
-    // 会缩短：降级（目标档位 < 当前档位），或当前不限期而目标有到期日（不限期 → 限期同样是损失）。
-    const shortens = protectable && (planTier(plan.price) < planTier(cur!.price) || (remaining === null && targetDated));
-    // 可结转：不缩短 + 有确切剩余天数 + 目标档确实有到期日（目标不限期时无处可加，也无损失）。
-    const carriedDays = protectable && !shortens && targetDated && remaining !== null && remaining > 0 ? remaining : 0;
-
-    if (shortens && !force) {
-      return reply.code(409).send({
-        error: remaining === null
-          ? `当前套餐「${cur!.name}」为不限期方案，改为「${plan.name}」后将变成限期方案，且没有剩余天数可折算；确认要改请带 force=true 重试`
-          : `将「${cur!.name}」改为「${plan.name}」会让该用户损失剩余 ${remaining} 天有效期（不折算、不退现）；确认要改请带 force=true 重试`,
-        code: 'PLAN_CHANGE_SHORTENS',
-        daysLost: remaining, fromPlanName: cur!.name, toPlanName: plan.name,
+    let result;
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${req.params.id}`}))`;
+        const user = await tx.user.findUnique({
+          where: { id: req.params.id },
+          select: { id: true, tenantId: true, planId: true, planExpiresAt: true, plan: { select: { id: true, name: true, price: true, period: true, planFamilyKey: true, tierRank: true } } },
+        });
+        if (!user) throw Object.assign(new Error('用户不存在'), { code: 'USER_NOT_FOUND', statusCode: 404 });
+        const at = now();
+        const cur = user.plan;
+        const protectable = !!cur && cur.price !== 0 && !isExpired(user.planExpiresAt, at) && cur.id !== plan.id;
+        const remaining = daysRemaining(user.planExpiresAt, at);
+        const targetDated = plan.price > 0;
+        const shortens = protectable && (planTierRank(plan) < planTierRank(cur!) || (remaining === null && targetDated));
+        const carriedDays = protectable && !shortens && targetDated && remaining !== null && remaining > 0 ? remaining : 0;
+        if (shortens && !force) {
+          throw Object.assign(new Error(remaining === null
+            ? `当前套餐「${cur!.name}」为不限期方案，改为「${plan.name}」后将变成限期方案，且没有剩余天数可折算；确认要改请带 force=true 重试`
+            : `将「${cur!.name}」改为「${plan.name}」会让该用户损失剩余 ${remaining} 天有效期（不折算、不退现）；确认要改请带 force=true 重试`), {
+            code: 'PLAN_CHANGE_SHORTENS', statusCode: 409, daysLost: remaining,
+          });
+        }
+        const purchase = await applyPlanPurchase({ id: user.id, tenantId: user.tenantId }, plan, { reason: `${plan.name} · 运营开通`, source: 'admin_grant' }, tx);
+        let expiresAt = purchase.expiresAt;
+        if (carriedDays > 0 && expiresAt) {
+          expiresAt = new Date(expiresAt.getTime() + carriedDays * 864e5);
+          await tx.user.update({ where: { id: user.id }, data: { planExpiresAt: expiresAt } });
+        }
+        return { user, purchase, expiresAt, carriedDays, shortens, remaining };
       });
-    }
-
-    const r = await applyPlanPurchase({ id: user.id, tenantId: user.tenantId }, plan, { reason: `${plan.name} · 运营开通`, source: 'admin_grant' });
-    // 结转：运营路径无并发压力，改档后一次 user.update 把剩余天数加到新到期日上即可
-    // （不动 applyPlanPurchase 的签名/行为——支付路径靠它，回归风险高）。
-    let expiresAt = r.expiresAt;
-    if (carriedDays > 0 && expiresAt) {
-      expiresAt = new Date(expiresAt.getTime() + carriedDays * 864e5);
-      await prisma.user.update({ where: { id: user.id }, data: { planExpiresAt: expiresAt } });
-      bustPlanGate(user.id); // 到期日刚被推后，禁写闸缓存（30s）要立刻失效
-    }
+    } catch (e) { return sendErr(reply, e); }
+    const { user, purchase: r, expiresAt, carriedDays, shortens, remaining } = result;
+    bustPlanGate(user.id);
     await recordAudit({
       tenantId: user.tenantId, userId: user.id, action: 'admin.user.plan.grant',
       payload: {
@@ -1944,9 +2009,47 @@ export async function adminRoutes(app: FastifyInstance) {
 
   /** period 只认月/年：计费周期参与到期日推算与升级折算（proration），自由字符串会让两边同时算错。 */
   const PLAN_PERIODS = ['month', 'year'] as const;
+  const USAGE_LEVELS = ['standard', '5x', '20x', 'custom'] as const;
+
+  async function validatePlanCommercial(candidate: {
+    id?: string; price: number; planFamilyKey: string; tierRank: number; usageLevel: string; usageLabel: string;
+    tokenQuotaPerMonth: number; creditsPerMonth: number; agentCount: number;
+    usageNormalPercent: number; usageNearPercent: number; syncFamilyBenefits?: boolean;
+  }) {
+    if (!candidate.planFamilyKey.trim()) throw Object.assign(new Error('方案分组标识必填'), { code: 'PLAN_FAMILY_REQUIRED', statusCode: 400 });
+    if (!Number.isInteger(candidate.tierRank) || candidate.tierRank < 0 || candidate.tierRank > MAX_TIER_RANK) throw Object.assign(new Error(`商业档位必须是 0-${MAX_TIER_RANK} 的整数`), { code: 'PLAN_TIER_INVALID', statusCode: 400 });
+    if (!(USAGE_LEVELS as readonly string[]).includes(candidate.usageLevel)) throw Object.assign(new Error('公开用量等级无效'), { code: 'PLAN_USAGE_LEVEL_INVALID', statusCode: 400 });
+    if (!candidate.usageLabel.trim()) throw Object.assign(new Error('用户侧用量名称必填'), { code: 'PLAN_USAGE_LABEL_REQUIRED', statusCode: 400 });
+    if (!(candidate.usageNormalPercent > 0 && candidate.usageNormalPercent < candidate.usageNearPercent && candidate.usageNearPercent < 100)) {
+      throw Object.assign(new Error('用量状态阈值需满足 0 < 正常阈值 < 接近上限阈值 < 100'), { code: 'PLAN_USAGE_THRESHOLDS_INVALID', statusCode: 400 });
+    }
+    if (candidate.price < 0 && (candidate.usageLevel !== 'custom' || candidate.usageLabel !== '专属用量')) {
+      throw Object.assign(new Error('企业私有化方案只能配置为「专属用量」'), { code: 'PLAN_ENTERPRISE_USAGE_INVALID', statusCode: 400 });
+    }
+    const others = await prisma.plan.findMany({ where: candidate.id ? { id: { not: candidate.id } } : {} });
+    for (const other of others.filter((p) => p.planFamilyKey === candidate.planFamilyKey && !candidate.syncFamilyBenefits)) {
+      if ((other.tierRank ?? candidate.tierRank) !== candidate.tierRank || (other.usageLevel ?? candidate.usageLevel) !== candidate.usageLevel
+        || other.tokenQuotaPerMonth !== candidate.tokenQuotaPerMonth || other.creditsPerMonth !== candidate.creditsPerMonth || other.agentCount !== candidate.agentCount) {
+        throw Object.assign(new Error(`同一方案分组的月付与年付必须保持档位、用量等级和月度权益一致（冲突：${other.name}）`), { code: 'PLAN_FAMILY_BENEFITS_MISMATCH', statusCode: 409 });
+      }
+    }
+    const standards = others.filter((p) => p.usageLevel === 'standard' && (!candidate.syncFamilyBenefits || p.planFamilyKey !== candidate.planFamilyKey));
+    if (candidate.usageLevel === 'standard' && standards.some((p) => p.tokenQuotaPerMonth !== candidate.tokenQuotaPerMonth)) {
+      throw Object.assign(new Error('所有标准用量方案必须使用同一月度基线'), { code: 'PLAN_STANDARD_BASELINE_MISMATCH', statusCode: 409 });
+    }
+    const multiple = candidate.usageLevel === '5x' ? 5 : candidate.usageLevel === '20x' ? 20 : 0;
+    if (multiple) {
+      const baseline = standards[0]?.tokenQuotaPerMonth;
+      if (baseline === undefined) throw Object.assign(new Error(`配置 ${multiple}x 用量前必须先配置标准用量基线`), { code: 'PLAN_STANDARD_BASELINE_REQUIRED', statusCode: 409 });
+      if (candidate.tokenQuotaPerMonth < baseline * multiple) {
+        const actual = baseline > 0 ? (candidate.tokenQuotaPerMonth / baseline).toFixed(2) : '0';
+        throw Object.assign(new Error(`当前月度额度仅为标准档的 ${actual}x，不能标记为 ${multiple}x 用量`), { code: 'PLAN_USAGE_MULTIPLIER_MISMATCH', statusCode: 409 });
+      }
+    }
+  }
 
   // 新建套餐：与改价同级风险（新档立刻对外可售）→ requireSuper + 审计。
-  app.post<{ Body: { name?: string; price?: number; period?: string; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number } }>(
+  app.post<{ Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number } }>(
     '/admin/plans',
     async (req, reply) => {
       const actor = actorOf(req);
@@ -1966,13 +2069,24 @@ export async function adminRoutes(app: FastifyInstance) {
       const num = (v: unknown, min: number) => typeof v === 'number' && Number.isFinite(v) && v >= min ? Math.round(v) : null;
       // creditsPerMonth 允许负数（-1=不限量）；额度/助手数须 ≥0。
       const creditsPerMonth = typeof b.creditsPerMonth === 'number' && Number.isFinite(b.creditsPerMonth) ? Math.round(b.creditsPerMonth) : 0;
-      const tokenQuotaPerMonth = num(b.tokenQuotaPerMonth, 0) ?? 0;
+      const tokenQuotaPerMonth = typeof b.tokenQuotaPerMonth === 'number' && Number.isFinite(b.tokenQuotaPerMonth)
+        && (b.tokenQuotaPerMonth >= 0 || Math.round(b.tokenQuotaPerMonth) === -1)
+        ? Math.round(b.tokenQuotaPerMonth) : 0;
       const agentCount = num(b.agentCount, 0) ?? 0;
+      const planFamilyKey = typeof b.planFamilyKey === 'string' ? b.planFamilyKey.trim().slice(0, 60) : '';
+      const tierRank = num(b.tierRank, 0) ?? 0;
+      const usageLevel = typeof b.usageLevel === 'string' ? b.usageLevel : '';
+      const usageLabel = typeof b.usageLabel === 'string' ? b.usageLabel.trim().slice(0, 30) : '';
+      const usageNormalPercent = num(b.usageNormalPercent, 1) ?? 50;
+      const usageNearPercent = num(b.usageNearPercent, 1) ?? 80;
+      try { await validatePlanCommercial({ price, planFamilyKey, tierRank, usageLevel, usageLabel, tokenQuotaPerMonth, creditsPerMonth, agentCount, usageNormalPercent, usageNearPercent }); }
+      catch (e) { return sendErr(reply, e); }
       // sort 缺省排到末尾，避免新档默契插到第一个（前台按 sort 展示，第一档还兼作历史默认档语义）。
       const maxSort = (await prisma.plan.aggregate({ _max: { sort: true } }))._max.sort ?? -1;
       const plan = await prisma.plan.create({
         data: {
-          name, price, period, creditsPerMonth, tokenQuotaPerMonth, agentCount,
+          name, price, period, planFamilyKey, tierRank, usageLevel, usageLabel, usageNormalPercent, usageNearPercent,
+          creditsPerMonth, tokenQuotaPerMonth, agentCount,
           featuresJson: Array.isArray(b.featuresJson) ? b.featuresJson.map(String).slice(0, 20) : [],
           highlighted: b.highlighted === true,
           hidden: b.hidden === true,
@@ -1988,7 +2102,7 @@ export async function adminRoutes(app: FastifyInstance) {
   );
   // 改价直接影响营收：仅 owner/master（requireSuper，与资金三写同级）；字段白名单 + 数值校验
   //（此前 data: req.body 直透 prisma 属 mass-assignment 隐患）；审计带操作人与改前/改后快照。
-  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; period?: string; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number; syncFamilyBenefits?: boolean } }>(
     '/admin/plans/:id',
     async (req, reply) => {
       const actor = actorOf(req);
@@ -2002,7 +2116,8 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof b.price === 'number' && Number.isFinite(b.price) && (b.price >= 0 || Math.round(b.price) === -1)) data.price = Math.round(b.price);
       // creditsPerMonth：负数=企业版不限量语义，放行任意整数
       if (typeof b.creditsPerMonth === 'number' && Number.isFinite(b.creditsPerMonth)) data.creditsPerMonth = Math.round(b.creditsPerMonth);
-      if (typeof b.tokenQuotaPerMonth === 'number' && Number.isFinite(b.tokenQuotaPerMonth) && b.tokenQuotaPerMonth >= 0) data.tokenQuotaPerMonth = Math.round(b.tokenQuotaPerMonth);
+      if (typeof b.tokenQuotaPerMonth === 'number' && Number.isFinite(b.tokenQuotaPerMonth)
+        && (b.tokenQuotaPerMonth >= 0 || Math.round(b.tokenQuotaPerMonth) === -1)) data.tokenQuotaPerMonth = Math.round(b.tokenQuotaPerMonth);
       if (typeof b.agentCount === 'number' && Number.isFinite(b.agentCount) && b.agentCount >= 0) data.agentCount = Math.round(b.agentCount);
       if (Array.isArray(b.featuresJson)) data.featuresJson = b.featuresJson.map(String).slice(0, 20);
       if (typeof b.highlighted === 'boolean') data.highlighted = b.highlighted;
@@ -2010,13 +2125,43 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof b.period === 'string' && (PLAN_PERIODS as readonly string[]).includes(b.period)) data.period = b.period;
       if (typeof b.hidden === 'boolean') data.hidden = b.hidden;
       if (typeof b.sort === 'number' && Number.isFinite(b.sort) && b.sort >= 0) data.sort = Math.round(b.sort);
-      const plan = await prisma.plan.update({ where: { id: req.params.id }, data });
+      if (typeof b.planFamilyKey === 'string') data.planFamilyKey = b.planFamilyKey.trim().slice(0, 60);
+      if (typeof b.tierRank === 'number' && Number.isFinite(b.tierRank) && b.tierRank >= 0) data.tierRank = Math.round(b.tierRank);
+      if (typeof b.usageLevel === 'string' && (USAGE_LEVELS as readonly string[]).includes(b.usageLevel)) data.usageLevel = b.usageLevel;
+      if (typeof b.usageLabel === 'string') data.usageLabel = b.usageLabel.trim().slice(0, 30);
+      if (typeof b.usageNormalPercent === 'number') data.usageNormalPercent = Math.round(b.usageNormalPercent);
+      if (typeof b.usageNearPercent === 'number') data.usageNearPercent = Math.round(b.usageNearPercent);
+      const candidate = { ...before, ...data } as typeof before;
+      try {
+        await validatePlanCommercial({
+          id: before.id, price: Number(candidate.price), planFamilyKey: String(candidate.planFamilyKey ?? ''), tierRank: Number(candidate.tierRank ?? 0),
+          usageLevel: String(candidate.usageLevel ?? ''), usageLabel: String(candidate.usageLabel ?? ''),
+          tokenQuotaPerMonth: Number(candidate.tokenQuotaPerMonth), creditsPerMonth: Number(candidate.creditsPerMonth), agentCount: Number(candidate.agentCount),
+          usageNormalPercent: Number(candidate.usageNormalPercent), usageNearPercent: Number(candidate.usageNearPercent),
+          syncFamilyBenefits: b.syncFamilyBenefits === true,
+        });
+      } catch (e) { return sendErr(reply, e); }
+      const plan = await prisma.$transaction(async (tx) => {
+        const updated = await tx.plan.update({ where: { id: req.params.id }, data });
+        if (b.syncFamilyBenefits === true && updated.planFamilyKey) {
+          await tx.plan.updateMany({
+            where: { id: { not: updated.id }, planFamilyKey: updated.planFamilyKey },
+            data: {
+              tierRank: updated.tierRank, usageLevel: updated.usageLevel, usageLabel: updated.usageLabel,
+              usageNormalPercent: updated.usageNormalPercent, usageNearPercent: updated.usageNearPercent,
+              creditsPerMonth: updated.creditsPerMonth, tokenQuotaPerMonth: updated.tokenQuotaPerMonth, agentCount: updated.agentCount,
+            },
+          });
+        }
+        return updated;
+      });
       await recordAudit({
         action: 'admin.plan.update',
         payload: {
           by: actorName(actor), id: plan.id, name: plan.name,
           before: { price: before.price, period: before.period, creditsPerMonth: before.creditsPerMonth, tokenQuotaPerMonth: before.tokenQuotaPerMonth, agentCount: before.agentCount, hidden: before.hidden, sort: before.sort },
           after: { price: plan.price, period: plan.period, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount, hidden: plan.hidden, sort: plan.sort },
+          syncFamilyBenefits: b.syncFamilyBenefits === true, planFamilyKey: plan.planFamilyKey,
         },
       });
       return plan;

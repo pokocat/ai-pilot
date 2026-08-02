@@ -61,6 +61,10 @@ export const DEV_PLANS: {
   name: string;
   price: number; // 分
   period: string;
+  planFamilyKey: string;
+  tierRank: number;
+  usageLevel: 'standard' | '5x' | '20x' | 'custom';
+  usageLabel: string;
   creditsPerMonth: number;
   tokenQuotaPerMonth: number;
   agentCount: number;
@@ -78,6 +82,7 @@ export const DEV_PLANS: {
     name: '入门版',
     price: 6800, // ¥68/月
     period: 'month',
+    planFamilyKey: 'starter', tierRank: 1, usageLevel: 'standard', usageLabel: '标准用量',
     creditsPerMonth: 20,
     tokenQuotaPerMonth: 400000, // 加权 token（输入等价口径），约 13 次完整咨询
     agentCount: 4,
@@ -92,6 +97,7 @@ export const DEV_PLANS: {
     name: '决策版 · 月付',
     price: 19800, // ¥198/月（年付 ¥1980 ≈ 10 个月月付价 → 年付立省 2 个月）
     period: 'month',
+    planFamilyKey: 'decision', tierRank: 2, usageLevel: 'custom', usageLabel: '进阶用量',
     creditsPerMonth: 68,
     tokenQuotaPerMonth: 1500000,
     agentCount: 8,
@@ -103,6 +109,7 @@ export const DEV_PLANS: {
     name: '决策版',
     price: 198000,
     period: 'year',
+    planFamilyKey: 'decision', tierRank: 2, usageLevel: 'custom', usageLabel: '进阶用量',
     creditsPerMonth: 68,
     tokenQuotaPerMonth: 1500000,
     agentCount: 8,
@@ -113,6 +120,7 @@ export const DEV_PLANS: {
     name: '企业版 · 私有化',
     price: -1, // 面议
     period: 'year',
+    planFamilyKey: 'enterprise', tierRank: 999, usageLevel: 'custom', usageLabel: '专属用量',
     creditsPerMonth: -1,
     tokenQuotaPerMonth: -1,
     agentCount: 14,
@@ -129,6 +137,7 @@ export const DEV_PLANS: {
     name: '支付链路测试',
     price: 1, // ¥0.01
     period: 'month',
+    planFamilyKey: 'payment-test', tierRank: 0, usageLevel: 'custom', usageLabel: '测试用量',
     creditsPerMonth: 1,
     tokenQuotaPerMonth: 10000,
     agentCount: 1,

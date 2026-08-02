@@ -33,6 +33,7 @@ async function operatorToken(): Promise<string> {
 
 const NEW_PLAN = {
   name: '运营自建档', price: 9900, period: 'month',
+  planFamilyKey: 'operator-created', tierRank: 1, usageLevel: 'standard', usageLabel: '标准用量',
   creditsPerMonth: 20, tokenQuotaPerMonth: 400_000, agentCount: 4,
   featuresJson: ['每月约 13 次深度咨询'], highlighted: false,
 };
@@ -96,12 +97,36 @@ describe('套餐目录：运营后台是唯一入口', () => {
 
   test('建档：price=-1 面议档可建；period 非法回落 month；sort 缺省排到末尾', async () => {
     const maxBefore = (await prisma.plan.aggregate({ _max: { sort: true } }))._max.sort ?? -1;
-    const r = await api('POST', '/api/admin/plans', { body: { ...NEW_PLAN, name: '运营自建档-面议', price: -1, period: 'forever' } });
+    const r = await api('POST', '/api/admin/plans', { body: {
+      ...NEW_PLAN,
+      name: '运营自建档-面议', price: -1, period: 'forever',
+      planFamilyKey: 'operator-enterprise', tierRank: 999, usageLevel: 'custom', usageLabel: '专属用量',
+    } });
     assert.equal(r.status, 201);
     assert.equal(r.body.price, -1, '面议档（自助购买会 402 CONTACT_SALES）');
     assert.equal(r.body.period, 'month', 'period 只认 month/year，非法值回落 month 而不是写进库');
     assert.equal(r.body.sort, maxBefore + 1, '新档默认排末尾，不抢第一档位置');
     await prisma.plan.delete({ where: { id: r.body.id } });
+  });
+
+  test('公开用量倍率：不足 5x 硬拒绝，达到标准基线 5 倍才允许建档', async () => {
+    const base = {
+      ...NEW_PLAN,
+      name: '运营自建档-5x', planFamilyKey: 'operator-5x', tierRank: 3,
+      usageLevel: '5x', usageLabel: '5x 用量', tokenQuotaPerMonth: 1_999_999,
+    };
+    const rejected = await api('POST', '/api/admin/plans', { body: base });
+    assert.equal(rejected.status, 409, JSON.stringify(rejected.body));
+    assert.equal(rejected.body.code, 'PLAN_USAGE_MULTIPLIER_MISMATCH');
+    assert.match(rejected.body.error, /5x/);
+    assert.equal(await prisma.plan.count({ where: { name: base.name } }), 0);
+
+    const accepted = await api('POST', '/api/admin/plans', {
+      body: { ...base, tokenQuotaPerMonth: 2_000_000 },
+    });
+    assert.equal(accepted.status, 201, JSON.stringify(accepted.body));
+    assert.equal(accepted.body.usageLevel, '5x');
+    await prisma.plan.delete({ where: { id: accepted.body.id } });
   });
 
   test('PATCH 现在能改 period / hidden / sort（此前只有脚本能改）', async () => {

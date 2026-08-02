@@ -10,7 +10,7 @@ import type {
   ReportItem, ReportDetail, ReportVersionContent, ReportDiff, SaveReportRequest, SaveReportResult,
   KnowledgeItemT, KnowledgeHit, CreateKnowledgeRequest, SummarizeResult, MessageRef, MemoryCandidate,
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
-  Plan, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
+  Plan, PlanOptionsResult, PlanQuote, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
   BindPhoneResult, WechatOrderResult, WechatSubscribeTemplatesResult, WechatSubscribeChoice, WechatSubscribeRecordResult,
   FateCardContent, MemoryLibraryView, DossierView, DossierReport,
   DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats,
@@ -63,7 +63,8 @@ export type {
   ReportItem, ReportDetail, ReportVersionItem, ReportVersionContent, ReportDiff, SectionDiff,
   KnowledgeItemT, KnowledgeHit, SummarizeResult, MessageRef, RefKind,
   KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow, AnalyzeResult,
-  Plan, PlanPurchaseResult, AgentPurchaseResult, AgentBilling,
+  Plan, PlanOptionsResult, PlanOption, PlanQuote, PlanRelation, PlanAction, PublicUsageView, UsageLevel, UsageStatus,
+  PlanPurchaseResult, AgentPurchaseResult, AgentBilling,
   ClientUnderstanding, ClientUnderstandingSection, UnderstandingMaturity, AliasSuggestionResult,
   TokenQuotaView, MyCreditItem, MyCreditsView,
   WechatSubscribeScene, WechatSubscribeStatus, WechatSubscribeTemplate, WechatSubscribeTemplatesResult,
@@ -466,11 +467,15 @@ export const api = {
     requestWithToken<Me>('/me', token),
   myCredits: () => (useMockApi() ? mock.myCredits() : request<MyCreditsView>('/me/credits')),
   plans: () => (useMockApi() ? mock.plans() : request<Plan[]>('/plans')),
+  planOptions: () => (useMockApi() ? mock.planOptions() : request<PlanOptionsResult>('/plans/options')),
+  planEvent: (body: { event: import('../../../shared/contracts').PlanFunnelEvent; planId?: string; relation?: string; orderNo?: string; code?: string }) =>
+    useMockApi() ? Promise.resolve({ ok: true }) : request<{ ok: true }>('/plans/events', 'POST', body),
+  quotePlan: (id: string) => (useMockApi() ? mock.quotePlan(id) : request<PlanQuote>(`/plans/${id}/quote`, 'POST', {})),
   purchasePlan: (id: string) =>
     useMockApi() ? mock.purchasePlan(id) : request<PlanPurchaseResult>(`/plans/${id}/purchase`, 'POST', {}),
   // 微信支付下单（小程序 JSAPI）：返回 wx.requestPayment 调起参数 + 升级折算明细（月→年 / 同周期升档）。
-  createOrder: (id: string, openid?: string) =>
-    useMockApi() ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', openid ? { openid } : {}),
+  createOrder: (id: string, opts?: { openid?: string; clientRequestId?: string; quoteFingerprint?: string; expectedChargeAmount?: number }) =>
+    useMockApi() ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', opts ?? {}),
   // V7-12：单次付费商品（SKU）目录 + 下单。mock 走假支付成功流并本地发放权益。
   skus: () => (useMockApi() ? mock.skus() : request<SkuView[]>('/skus')),
   // D-1 开通来源归因：下单带可选 source（'prescription'|'catalog'|'market'）+ refId（source=prescription 时的处方 id）。

@@ -11,6 +11,7 @@ import { periodKeyOf, isExpired, nextResetAt, daysRemaining } from './planTime.j
 import { featureFlagPayload } from './featureFlag.js';
 import { CHAT_MAX_TOKENS } from '../llm/providers/completionGuard.js';
 import { weightedQuotaReserveTokens } from '../data/modelPrices.js';
+import { grantCredits } from './credits.js';
 import {
   effectiveProvider,
   getAiConfig,
@@ -84,7 +85,7 @@ function toState(quota: number, balance: number): QuotaState {
 async function loadWallet(userId: string): Promise<{ quota: number; balance: number } | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { tenantId: true, planActivatedAt: true, planExpiresAt: true, plan: { select: { tokenQuotaPerMonth: true } } },
+    select: { tenantId: true, planActivatedAt: true, planExpiresAt: true, plan: { select: { id: true, name: true, tokenQuotaPerMonth: true, creditsPerMonth: true, period: true } } },
   });
   if (!user) return null;
   const at = now();
@@ -94,7 +95,7 @@ async function loadWallet(userId: string): Promise<{ quota: number; balance: num
   const initial = expired ? 0 : planQuota;
 
   // 防并发首建竞争（userId 唯一）：upsert 在 Prisma 下并发仍可能 P2002，捕获后回读。
-  const w = await prisma.tokenWallet
+  let w = await prisma.tokenWallet
     .upsert({
       where: { userId },
       update: {},
@@ -106,15 +107,64 @@ async function loadWallet(userId: string): Promise<{ quota: number; balance: num
     });
   if (!w) return null;
 
+  // 到期临时加额惰性回收：quota 与 balance 同减，保持 used 不变；审计记录本身保留。
+  const expiredAdjustments = await prisma.tokenQuotaAdjustment.findMany({
+    where: { userId, revokedAt: null, expiresAt: { lte: at } }, select: { id: true, delta: true },
+  });
+  if (expiredAdjustments.length) {
+    w = await prisma.$transaction(async (tx) => {
+      await lockQuota(tx, userId);
+      const fresh = await tx.tokenWallet.findUniqueOrThrow({ where: { userId } });
+      const ids = expiredAdjustments.map((item) => item.id);
+      const stillActive = await tx.tokenQuotaAdjustment.findMany({ where: { id: { in: ids }, revokedAt: null }, select: { id: true, delta: true } });
+      const delta = stillActive.reduce((sum, item) => sum + item.delta, 0);
+      if (stillActive.length) await tx.tokenQuotaAdjustment.updateMany({ where: { id: { in: stillActive.map((item) => item.id) } }, data: { revokedAt: at } });
+      if (!delta || fresh.quota < 0) return fresh;
+      return tx.tokenWallet.update({ where: { userId }, data: { quota: { decrement: delta }, balance: { decrement: delta } } });
+    });
+  }
+
+  // 年付套餐按锚点月惰性发放每月钻石。首见当前周期只补 marker（购买路径已发过），
+  // 仅确认钱包从旧 periodKey 跨入新周期时才实际发放；唯一键保证并发/重复读取恰好一次。
+  const ensureMonthlyCredits = async (crossedPeriod: boolean) => {
+    if (expired || user.plan?.period !== 'year' || (user.plan.creditsPerMonth ?? 0) <= 0) return;
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${userId}`}))`;
+      const exists = await tx.monthlyCreditGrant.findUnique({ where: { userId_periodKey: { userId, periodKey: pk } } });
+      if (exists) return;
+      // 存量年付用户可能在旧版本里已跨月但从未得到钻石。即便钱包此前已被旧代码重置到当前 pk，
+      // 只要当前已不是激活首周期且没有 marker，也补发当前周期；首周期仅补 marker，避免把购买时已发的一次再发一遍。
+      const activationPeriod = periodKeyOf(user.planActivatedAt, user.planActivatedAt ?? at);
+      const amount = crossedPeriod || pk !== activationPeriod ? user.plan!.creditsPerMonth : 0;
+      if (amount > 0) await grantCredits(user.tenantId, userId, amount, `${user.plan!.name} · 月度权益恢复`, tx);
+      const source = await tx.planEntitlement.findFirst({
+        where: { userId, planId: user.plan!.id, status: 'active', startsAt: { lte: at }, OR: [{ expiresAt: null }, { expiresAt: { gt: at } }] },
+        orderBy: { startsAt: 'desc' }, select: { sourceOrderId: true },
+      });
+      await tx.monthlyCreditGrant.create({
+        data: { tenantId: user.tenantId, userId, periodKey: pk, planId: user.plan!.id, sourceOrderId: source?.sourceOrderId, amount },
+      });
+    });
+  };
+
   // 跨子周期：复用快照（不回读 live plan）；过期则归 0。
   if (w.periodKey !== pk) {
-    const q = expired ? 0 : w.quota;
-    const reset = await prisma.tokenWallet.update({
-      where: { userId },
-      data: { quota: q, balance: q, periodKey: pk },
+    const resetResult = await prisma.$transaction(async (tx) => {
+      await lockQuota(tx, userId);
+      const fresh = await tx.tokenWallet.findUniqueOrThrow({ where: { userId } });
+      // 另一个并发请求可能已完成跨期重置并开始预扣；此时绝不能再把余额刷回满额。
+      if (fresh.periodKey === pk) return { wallet: fresh, crossed: false };
+      const q = expired ? 0 : fresh.quota;
+      const reset = await tx.tokenWallet.update({
+        where: { userId },
+        data: { quota: q, balance: q, periodKey: pk },
+      });
+      return { wallet: reset, crossed: true };
     });
-    return { quota: reset.quota, balance: reset.balance };
+    await ensureMonthlyCredits(resetResult.crossed);
+    return { quota: resetResult.wallet.quota, balance: resetResult.wallet.balance };
   }
+  await ensureMonthlyCredits(false);
   // 同子周期内刚过期：立即冻结到 0（至多一次过渡写，之后幂等）。
   if (expired && (w.quota !== 0 || w.balance !== 0)) {
     const z = await prisma.tokenWallet.update({ where: { userId }, data: { quota: 0, balance: 0 } });
