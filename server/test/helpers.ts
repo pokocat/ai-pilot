@@ -5,6 +5,7 @@ import { buildApp } from '../src/app.js';
 import { prisma } from '../src/db.js';
 import { AGENTS } from '../src/data/agents.js';
 import { SAYINGS, SURVEY, DEV_PLANS, SKUS } from '../src/data/seedConfig.js';
+import { resetBusinessData } from '../prisma/resetBusinessData.js';
 
 // 安全兜底：标记测试运行，短信等外部服务一律走 mock，绝不真实触达（即使直接 node --test 跑本文件）。
 // SMS 发送在请求时才读 NODE_ENV（isSmsTestMode），此处赋值早于任何发送，足以拦截。
@@ -69,54 +70,9 @@ export async function seedBaseline(): Promise<void> {
 
 /** 清空业务数据（按外键顺序）；保留 agent 注册表。 */
 export async function cleanBusiness(): Promise<void> {
-  await prisma.userModule.deleteMany();
-  await prisma.userDataSource.deleteMany();
-  await prisma.serviceAssignment.deleteMany();
-  await prisma.paymentOrder.deleteMany();
-  await prisma.casefileMetric.deleteMany();
-  await prisma.casefileOrder.deleteMany();
-  await prisma.casefile.deleteMany();
-  await prisma.natalChart.deleteMany();
-  await prisma.strategicProfile.deleteMany();
-  await prisma.decisionLog.deleteMany();
-  await prisma.reviewLog.deleteMany();
-  await prisma.prophecyLog.deleteMany();
-  await prisma.userProgress.deleteMany();
-  await prisma.message.deleteMany();
-  await prisma.reportVersion.deleteMany();
-  await prisma.reportDoc.deleteMany();
-  await prisma.knowledgeChunk.deleteMany();
-  await prisma.knowledgeItem.deleteMany();
-  await prisma.deliverable.deleteMany();
-  await prisma.session.deleteMany();
-  await prisma.memory.deleteMany();
-  await prisma.project.deleteMany();
-  await prisma.userAgent.deleteMany();
-  // 创作任务（海报成品图）：两张表的 userId/tenantId 是裸字符串列、**没有**指向 User/Tenant 的外键，
-  // 所以下面的 user.deleteMany() 清不掉它们 —— 不显式删就会跨用例泄漏，让 worker 抢到上一个用例
-  // 遗留的 pending 任务（本轮实测踩到：本该失败的任务一直停在 pending，因为 worker 去跑旧任务了）。
-  // 先删 asset 再删 job（asset.jobId 是 SetNull，反序会留下 jobId=null 的孤儿行）。
-  await prisma.creativeAsset.deleteMany();
-  await prisma.creativeJob.deleteMany();
-  await prisma.creditLedger.deleteMany();
-  await prisma.tokenUsage.deleteMany();
-  await prisma.tokenWallet.deleteMany();
-  await prisma.wechatNotificationLog.deleteMany();
-  await prisma.wechatSubscription.deleteMany();
-  await prisma.auditLog.deleteMany();
-  await prisma.smsCode.deleteMany();
-  await prisma.profile.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.tenant.deleteMany();
-  await prisma.userJourney.deleteMany();
-  await prisma.prescription.deleteMany();
-  await prisma.activationEvent.deleteMany();
-  await prisma.ecoTool.deleteMany();
-  await prisma.brandKit.deleteMany();
-  await prisma.featureFlag.deleteMany();
-  await prisma.industryBenchmark.deleteMany();
-  await prisma.moderationLog.deleteMany();
-  await prisma.aiSetting.deleteMany();
+  // 顺序表见 prisma/resetBusinessData.ts（与 prisma/seed.ts 共用同一份，别在这里再复制一遍——
+  // 这两份曾各自维护，seed 那份漏了 tokenWallet 导致 seed 不幂等）。
+  await resetBusinessData(prisma);
 }
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';

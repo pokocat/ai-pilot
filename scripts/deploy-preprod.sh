@@ -9,8 +9,23 @@
 # 从生产库复制 ai_setting/ai_model(真 AI 密钥)。之后每次运行只做：上传 HEAD → 构建 → 迁移 → 重启。
 # 生产的 junshi-api / junshi 库 / /opt/junshi 全程不受影响（AI 复制仅只读生产库）。
 #
-# 用法：bash scripts/deploy-preprod.sh
+# 用法：
+#   bash scripts/deploy-preprod.sh              # 常规部署：**不动预发数据**，保留累积的测试数据
+#   bash scripts/deploy-preprod.sh --reseed     # 额外重置业务数据（清空用户/会话/报告…并重建演示租户）
+#
+# 关于 seed：`db:seed` 是破坏性的（清空全部业务数据 + 重建 plan/agent/saying/survey 目录）。
+# 它此前每次部署无条件执行，等于每次把预发验收环境推平；且当时 seed 不幂等（见下方 seed 段注释），
+# 失败又被 `|| echo` 咽掉，实际长期没跑成。现在改为**默认不 seed**，只有两种情况会跑：
+#   ① 显式 --reseed；② 本次刚 createdb（空库不 seed 会得到没有 agent/套餐的坏预发）。
 set -euo pipefail
+
+RESEED=0
+for arg in "$@"; do
+  case "$arg" in
+    --reseed) RESEED=1 ;;
+    *) printf "未知参数：%s\n用法：bash scripts/deploy-preprod.sh [--reseed]\n" "$arg" >&2; exit 2 ;;
+  esac
+done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_HOST="${DEPLOY_HOST:-ecs-user@8.136.36.175}"
@@ -38,7 +53,7 @@ scp -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking
 
 log "远端建立/更新 preprod"
 ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$DEPLOY_HOST" \
-  "SHA='${SHA}' PREPROD_ROOT='$PREPROD_ROOT' PROD_ROOT='$PROD_ROOT' PORT='$PORT' SERVICE='$SERVICE' PREPROD_DB='$PREPROD_DB' RUNTIME_USER='$RUNTIME_USER' bash -se" <<'REMOTE'
+  "SHA='${SHA}' PREPROD_ROOT='$PREPROD_ROOT' PROD_ROOT='$PROD_ROOT' PORT='$PORT' SERVICE='$SERVICE' PREPROD_DB='$PREPROD_DB' RUNTIME_USER='$RUNTIME_USER' RESEED='$RESEED' bash -se" <<'REMOTE'
 set -euo pipefail
 ARCHIVE="/tmp/junshi-preprod-${SHA}.tar.gz"
 RELEASE="/tmp/junshi-preprod-release-${SHA}"
@@ -62,9 +77,11 @@ for path in package.json admin app chats deploy docs project scripts server shar
 done
 
 echo "== 数据库 $PREPROD_DB =="
+DB_CREATED=0
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$PREPROD_DB'" | grep -q 1; then
   sudo -u postgres createdb -O "$RUNTIME_USER" "$PREPROD_DB"
-  echo "  建库完成"
+  DB_CREATED=1
+  echo "  建库完成（空库 → 稍后强制 seed 一次，否则预发没有 agent/套餐）"
 else
   echo "  已存在，跳过建库"
 fi
@@ -143,8 +160,25 @@ npx prisma generate
 sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$PREPROD_ROOT/server' && ./node_modules/.bin/prisma db push --skip-generate --accept-data-loss"
 sudo -u postgres psql -d "$PREPROD_DB" -f "$PREPROD_ROOT/server/prisma/pgvector.sql" >/dev/null 2>&1 || echo "  (pgvector.sql 已处理或不需要)"
 
-echo "== 种子数据（幂等）=="
-sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$PREPROD_ROOT/server' && npm run db:seed" || echo "  seed 有非致命告警，继续"
+echo "== 种子数据 =="
+# 破坏性：db:seed 会清空全部业务数据（用户/会话/报告/知识库/钱包/订单…）并重建
+# plan/agent/saying/survey 目录，然后造演示租户。因此**默认不跑**，保住预发上累积的测试数据。
+#
+# 这一步曾经无条件执行 + `|| echo "seed 有非致命告警，继续"`，把真实失败咽成一行提示
+# （与下方 AI 复制 2026-07-27 那个坑同源：吞退出码 → 脚本谎报成功）。2026-08-01 实测：
+# seed 第二次跑必然在 user.deleteMany() 撞 token_wallet_userId_fkey 报 P2003，
+# 脚本照样打印成功，演示租户其实一直没重建。seed 现已幂等
+# （prisma/resetBusinessData.ts 是唯一顺序表 + test/seedIdempotent.test.ts 兜底），
+# 所以它一旦失败就是真出事：直接中止。此时新代码还没构建/重启，旧服务照常在跑。
+if [ "$RESEED" = "1" ] || [ "$DB_CREATED" = "1" ]; then
+  [ "$DB_CREATED" = "1" ] && echo "  触发原因：本次刚建库（空库必须 seed）" || echo "  触发原因：--reseed"
+  if ! sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" bash -c "cd '$PREPROD_ROOT/server' && npm run db:seed"; then
+    echo "!! seed 失败（真实报错见上方输出）。已中止，未构建、未重启，旧服务不受影响。" >&2
+    exit 1
+  fi
+else
+  echo "  跳过（默认不动预发数据）。需要重置验收环境时加 --reseed。"
+fi
 
 echo "== 从生产库复制 AI 配置（真 AI 密钥；只读生产）=="
 # 这一步曾经**静默失败并谎报成功**（2026-07-27）。旧实现是

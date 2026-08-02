@@ -8,6 +8,7 @@ import { AGENTS } from '../src/data/agents.js';
 import { SAYINGS, SURVEY, DEV_PLANS } from '../src/data/seedConfig.js';
 import { saveReportVersion, slugify } from '../src/services/reports.js';
 import { ingestKnowledge } from '../src/services/knowledge.js';
+import { resetBusinessData } from './resetBusinessData.js';
 
 const prisma = new PrismaClient();
 
@@ -38,18 +39,9 @@ async function main() {
   assertNotProduction();
   console.log('🌱 seeding 军师 数据库 …');
 
-  // 先清理有外键依赖的业务数据，避免重复 seed 时报 FK 约束
-  await prisma.userAgent.deleteMany();
-  await prisma.message.deleteMany();
-  await prisma.deliverable.deleteMany();
-  await prisma.session.deleteMany();
-  await prisma.memory.deleteMany();
-  await prisma.reportVersion.deleteMany();
-  await prisma.reportDoc.deleteMany();
-  await prisma.knowledgeChunk.deleteMany();
-  await prisma.knowledgeItem.deleteMany();
-  await prisma.project.deleteMany();
-  await prisma.creditLedger.deleteMany();
+  // 先按外键顺序清空业务数据，保证 seed 幂等（顺序表见 prisma/resetBusinessData.ts，勿在此处复制副本）。
+  // 注意：它也会清 aiSetting，而下方会重建——所以这一步必须在创建 ai-setting 之前。
+  await resetBusinessData(prisma);
 
   // —— 套餐（夹具，仅本地）：生产由运营后台配置，这里只为让本地/测试机有可买的档位 ——
   await prisma.plan.deleteMany();
@@ -128,11 +120,8 @@ async function main() {
   });
   console.log('  ✓ ai-setting=Agnes 2.0 Flash（填 key 后即切真实模型）');
 
-  // —— 演示租户与用户（云栖科技 / 王总） ——
-  await prisma.auditLog.deleteMany();
-  await prisma.profile.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.tenant.deleteMany();
+  // —— 演示租户与用户（云栖科技 / 王总）——租户/用户/档案已由开头的 resetBusinessData 清空，
+  // 这里不再重复 deleteMany（原来那 4 行是 resetBusinessData 的过时子集，缺 tokenWallet 导致 seed 不幂等）。
   const decisionPlan = plans.find((p) => p.name === '决策版') ?? plans[0];
   const tenant = await prisma.tenant.create({
     data: { name: '云栖科技', industry: 'SaaS / 软件', stage: 'A 轮前后' },
