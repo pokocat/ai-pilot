@@ -17,7 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
-| 2026-08-02 | `0.2.24` | `资料预览统一为纯内容` | `d20f36a` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp` | 正式 server 包构建并校验通过 | 上传失败：微信开发者工具关闭 CLI 服务端口，未实际上传；开启「设置 → 安全设置 → 服务端口」后可重试同版本 |
+| 2026-08-02 | `0.2.24` | `资料预览统一为纯内容` | `bb97651` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp` | 1.2 MB / 1307324 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-07-30 | `0.2.23` | `修复智能体目录与会话白屏` | `51c8948` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.8 MiB / 1828 KiB（dist） | 上传未执行：环境安全策略要求对向微信平台外发仓库构建代码取得更明确的专项授权；生产 server 包已构建并校验通过 |
 | 2026-07-28 | `0.2.22` | `修复报告假完成与操作误开放` | `2ef84a5` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（DevTools CLI `upload`） | 1.2 MB / 1222098 B | 上传成功 |
 | 2026-07-25 | `0.2.21` | `修复附身登录令牌误判` | `85a6ae1` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | WeChat DevTools CLI `upload` | 1.2 MB / 1219012 B | 上传成功 |
