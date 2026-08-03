@@ -408,6 +408,7 @@ function UsageQuotaBlock({ userId, isOwner, toast }: { userId: string; isOwner: 
               <div className={`usage-num ${quota.remaining > 0 ? 'ok' : ''}`}>剩 {fmtTokens(quota.remaining)}</div>
             </div>
             <div className="usage-meta">已用 {fmtTokens(quota.used)} / {fmtTokens(quota.limit)} · 套餐 {plan.planName ?? '—'} · {planStatusText(plan)}</div>
+            {plan.subscription && <div className="usage-meta">自动续费：{plan.subscription.status === 'active' ? `已开启${plan.subscription.nextBillingAt ? ` · ${fmtTime(plan.subscription.nextBillingAt)} 发起续费` : ''}` : plan.subscription.status === 'pending' ? '等待微信签约结果' : plan.subscription.status === 'cancel_pending' ? '关闭中' : '续费失败，需用户重新开通'}</div>}
             <div className="meter"><i style={{ width: `${quota.limit > 0 ? Math.min(100, Math.max(2, Math.round((quota.used / quota.limit) * 100))) : 2}%` }} /></div>
           </div>
         )}

@@ -185,6 +185,8 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 | `WECHAT_PAY_MCHID` 等基础项 | 微信支付 v3 真实凭据（基础项全部配齐才 `payConfigured()=true`） | 见 `.env.example`「微信支付 v3」段 |
 | `WECHAT_PAY_PLATFORM_CERT`/`WECHAT_PAY_PLATFORM_CERT_SERIAL` | 本地平台证书兜底，证书必须与序列号成对 | 优先使用 APIv3 自动下载/轮换；静态证书只作兜底 |
 | `WECHAT_PAY_PUBLIC_KEY`/`WECHAT_PAY_PUBLIC_KEY_ID` | 微信支付公钥验签模式 | 使用 `PUB_KEY_ID_*` 时必须成对配置；无匹配证书/公钥时回调 fail-closed |
+| `WECHAT_PAY_V2_KEY` | 委托代扣 APIv2 密钥（32 位） | 仅服务端保存；与 v3 的 APIv3 Key 不是同一个配置项 |
+| `WECHAT_PAPAY_PAY_NOTIFY_URL`/`WECHAT_PAPAY_CONTRACT_NOTIFY_URL` | 自动续费扣款/签解约回调 | 分别填公网 HTTPS `/api/pay/wechat/v2/notify` 与 `/api/pay/wechat/contract/notify` |
 | `PAY_MOCK_SUCCESS` | **测试期模拟支付成功**（无商户凭据时把真实支付管线跑通） | **默认不设**；仅测试期设 `true`，见下方警示 |
 
 > 模型 key 优先存数据库（后台「模型」页，运行时可切换、不入仓库）；env 仅作兜底。
@@ -202,7 +204,20 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 > - 假到账**不污染真实链路**：这些单带 `provider='mock'` + `snapshotJson.mock=true` + `transactionId` 以 `mock` 开头。对账 sweep / 主动查单 / 微信关单 / 微信退款一律跳过（跳过而非标 failed）；营收统计（后台「期内实收 / 客单价 / 按天曲线」与 `junshi_pay_amount_cny_total`）**不含** mock 单，改计 `junshi_pay_mock_total`；后台订单列表与 CSV 导出显式标「mock」。运营对 mock 单执行退款时**不调微信**，但**本地权益回收照常**（撤掉测试期误发放）。每次模拟到账都落审计 `pay.mock.paid`（单号 / 金额 / 套餐或 SKU）。
 > **海报成品图（`canvas_design`）没有任何环境变量**——开关 / 单价 / 日限额 / 渲染超时 / 模板启停 / 图片供应商接入点（含密钥）全在**后台**「创作任务」页，存 `FeatureFlag` 行 `creative-poster` 的 `enabled + payload`（密钥经 `secretBox` 加密），约 1 分钟内生效、不用重启。2026-07-29 删掉了 `CANVAS_DESIGN_ENABLED` / `_ENGINE` / `_MAX_CONCURRENCY` / `_TIMEOUT_MS` 四个：`ENABLED` 与后台开关取合取，制造「后台开了却不生效」的静默失败，而作为熔断闸它要 SSH + 改 env + 重启，比后台点一下慢一个数量级；`ENGINE` 全仓无分支（改它只改变库里那个标签的字面值）；后两个只作 payload 缺省值，而后台保存是全量重写 payload，**运营点过一次保存后改 env 重启就永久无效果**。别再往回加——理由与代码注释同步记在 `server/src/env.ts` 的同名段落。
 
-### 5.1 海报成品图上线三步（缺一不可）
+### 5.1 微信自动续费上线清单
+
+代码同时支持「单次购买」与微信官方委托代扣「自动续费」；自动续费从不默认勾选。上线前需在微信支付商户平台申请委托代扣权限及自动续费模板，选择「通知后 24 小时扣费」，再完成以下配置：
+
+1. 服务端设置 `WECHAT_PAY_V2_KEY`、两条 `WECHAT_PAPAY_*_NOTIFY_URL`，保留现有 v3 单次支付配置。
+2. 运营后台逐套餐填写审核通过的数字模板 ID，并打开「允许用户选择自动续费」。未同时满足全局配置与套餐配置时，C 端自动隐藏续费选项。
+3. 发布时执行 `cd server && npm run db:push`，新增 `subscription_contract` 及订单关联字段；先用内部账号跑「单次购买、支付中签约、主动关闭、微信侧解约、一次周期续费」五条验收。
+4. 核对商户平台模板的签约/解约通知地址与服务端一致。签约回调丢失时，正式开放的 `/papay/querycontract` 会按模板 ID + 商户协议号补查并激活；扣款申请只代表受理，扣款异步回调是当前主链路。`/pay/paporderquery` 目前仍由微信灰度开放，商户获权后代码会自动用它补查，未获权时查询失败只告警、不影响回调入账。重复通知由状态条件更新、订单锁和 `appliedAt` 幂等。
+
+当前实现使用官方默认的「通知后 24 小时扣费」：权益到期前 24 小时提交申请，微信通知用户后在到期点附近执行扣款。后台改价、手动换档、退款或用户关闭续费都会先停掉本地调度并补做微信侧解约，不会沿旧授权静默扣新条款。
+
+代扣失败按同周期最多两次处理，但只有微信明确返回业务失败才允许第二次尝试；`SYSTEMERROR`、网络超时、响应验签或解析失败均可能是“微信已受理但本地未知”，必须保留原单等待回调/查单确认，不得换新单，避免原单晚到成功后发生重复扣款。查询接口未获灰度权限时，这类订单需在运营订单页结合微信商户平台人工核对后处理。用户关闭续费遇到同类不确定结果时，状态保持“关闭中”且本地立即停扣，scheduler 会重试远端解约。
+
+### 5.2 海报成品图上线三步（缺一不可）
 
 顺序是「先把能力装齐，最后才放量」。**放量不在这三步里**，见文末——它是后台点一下的事，不需要改 env、不需要重启。
 

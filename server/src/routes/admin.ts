@@ -64,6 +64,7 @@ import { MAX_TIER_RANK, planTierRank } from '../services/planRules.js';
 import { isExpired, daysRemaining } from '../services/planTime.js';
 import { signUserToken, jwtEnabled } from '../services/userToken.js';
 import { Prisma } from '@prisma/client';
+import { papayConfigured } from '../services/wechatPapay.js';
 
 // 功能开关目录（P0-2 / D-10）：label/desc/compliance/kind 写死在代码；DB 存 enabled(toggle) 或 payload(number)。
 // number 类：payloadKey=payload 里的字段名；def=默认值；min/max=校验区间；unit=单位标签。
@@ -655,12 +656,17 @@ export async function adminRoutes(app: FastifyInstance) {
       quota = { limit: st.quota, used: st.used, remaining: st.balance, unlimited: st.unlimited, periodKey: w1?.periodKey ?? wallet0.periodKey };
     }
 
-    const ps = await getPlanStatus(userId);
+    const [ps, subscription] = await Promise.all([
+      getPlanStatus(userId),
+      prisma.subscriptionContract.findFirst({ where: { userId, status: { in: ['pending', 'active', 'cancel_pending', 'failed'] } }, orderBy: { createdAt: 'desc' } }),
+    ]);
+    const subscriptionPlan = subscription ? await prisma.plan.findUnique({ where: { id: subscription.planId }, select: { name: true } }) : null;
     const plan: AdminUserUsage['plan'] = {
       planName: user.plan?.name ?? null,
       expiresAt: ps.expiresAt,
       daysLeft: ps.daysRemaining,
       status: !user.plan ? 'none' : ps.expired ? 'expired' : 'active',
+      subscription: subscription ? { id: subscription.id, status: subscription.status as 'pending' | 'active' | 'cancel_pending' | 'cancelled' | 'failed', nextBillingAt: subscription.nextBillingAt?.toISOString() ?? null, planName: subscriptionPlan?.name ?? '方案' } : null,
     };
 
     const tokenWhere = { userId, createdAt: { gte: since } };
@@ -2005,7 +2011,10 @@ export async function adminRoutes(app: FastifyInstance) {
   //（它按 name 全字段 upsert，运营把入门版改 ¥99 之后任何一次全量同步都会打回代码里的 ¥68），
   // seedConfig.DEV_PLANS 降级为本地/测试夹具。所以运营必须能在后台**建档/改档/下架**，
   // 否则全新部署起来一个套餐都没有、付费转化路径直接断（无套餐用户被 planGate 全局禁写）。
-  app.get('/admin/plans', async () => prisma.plan.findMany({ orderBy: { sort: 'asc' } }));
+  const adminPlanView = <T extends { autoRenewEnabled: boolean; wechatContractPlanId: string | null; autoRenewMode: string; price: number }>(p: T) => ({
+    ...p, autoRenewAvailable: !!(papayConfigured() && p.autoRenewEnabled && p.wechatContractPlanId && p.autoRenewMode === 'delay_24h' && p.price > 0),
+  });
+  app.get('/admin/plans', async () => (await prisma.plan.findMany({ orderBy: { sort: 'asc' } })).map(adminPlanView));
 
   /** period 只认月/年：计费周期参与到期日推算与升级折算（proration），自由字符串会让两边同时算错。 */
   const PLAN_PERIODS = ['month', 'year'] as const;
@@ -2015,6 +2024,7 @@ export async function adminRoutes(app: FastifyInstance) {
     id?: string; price: number; planFamilyKey: string; tierRank: number; usageLevel: string; usageLabel: string;
     tokenQuotaPerMonth: number; creditsPerMonth: number; agentCount: number;
     usageNormalPercent: number; usageNearPercent: number; syncFamilyBenefits?: boolean;
+    autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: string;
   }) {
     if (!candidate.planFamilyKey.trim()) throw Object.assign(new Error('方案分组标识必填'), { code: 'PLAN_FAMILY_REQUIRED', statusCode: 400 });
     if (!Number.isInteger(candidate.tierRank) || candidate.tierRank < 0 || candidate.tierRank > MAX_TIER_RANK) throw Object.assign(new Error(`商业档位必须是 0-${MAX_TIER_RANK} 的整数`), { code: 'PLAN_TIER_INVALID', statusCode: 400 });
@@ -2025,6 +2035,11 @@ export async function adminRoutes(app: FastifyInstance) {
     }
     if (candidate.price < 0 && (candidate.usageLevel !== 'custom' || candidate.usageLabel !== '专属用量')) {
       throw Object.assign(new Error('企业私有化方案只能配置为「专属用量」'), { code: 'PLAN_ENTERPRISE_USAGE_INVALID', statusCode: 400 });
+    }
+    if (candidate.autoRenewEnabled) {
+      if (candidate.price <= 0) throw Object.assign(new Error('只有正价套餐可开启自动续费'), { code: 'PLAN_AUTO_RENEW_PRICE_INVALID', statusCode: 400 });
+      if (!/^\d{1,32}$/.test(candidate.wechatContractPlanId ?? '')) throw Object.assign(new Error('开启自动续费前必须填写微信委托代扣模板 ID'), { code: 'PLAN_CONTRACT_TEMPLATE_REQUIRED', statusCode: 400 });
+      if (candidate.autoRenewMode !== 'delay_24h') throw Object.assign(new Error('当前只支持「通知后 24 小时扣费」模式'), { code: 'PLAN_AUTO_RENEW_MODE_INVALID', statusCode: 400 });
     }
     const others = await prisma.plan.findMany({ where: candidate.id ? { id: { not: candidate.id } } : {} });
     for (const other of others.filter((p) => p.planFamilyKey === candidate.planFamilyKey && !candidate.syncFamilyBenefits)) {
@@ -2049,7 +2064,7 @@ export async function adminRoutes(app: FastifyInstance) {
   }
 
   // 新建套餐：与改价同级风险（新档立刻对外可售）→ requireSuper + 审计。
-  app.post<{ Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number } }>(
+  app.post<{ Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number; autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: string } }>(
     '/admin/plans',
     async (req, reply) => {
       const actor = actorOf(req);
@@ -2079,7 +2094,10 @@ export async function adminRoutes(app: FastifyInstance) {
       const usageLabel = typeof b.usageLabel === 'string' ? b.usageLabel.trim().slice(0, 30) : '';
       const usageNormalPercent = num(b.usageNormalPercent, 1) ?? 50;
       const usageNearPercent = num(b.usageNearPercent, 1) ?? 80;
-      try { await validatePlanCommercial({ price, planFamilyKey, tierRank, usageLevel, usageLabel, tokenQuotaPerMonth, creditsPerMonth, agentCount, usageNormalPercent, usageNearPercent }); }
+      const autoRenewEnabled = b.autoRenewEnabled === true;
+      const wechatContractPlanId = typeof b.wechatContractPlanId === 'string' ? b.wechatContractPlanId.trim().slice(0, 32) || null : null;
+      const autoRenewMode = 'delay_24h';
+      try { await validatePlanCommercial({ price, planFamilyKey, tierRank, usageLevel, usageLabel, tokenQuotaPerMonth, creditsPerMonth, agentCount, usageNormalPercent, usageNearPercent, autoRenewEnabled, wechatContractPlanId, autoRenewMode }); }
       catch (e) { return sendErr(reply, e); }
       // sort 缺省排到末尾，避免新档默契插到第一个（前台按 sort 展示，第一档还兼作历史默认档语义）。
       const maxSort = (await prisma.plan.aggregate({ _max: { sort: true } }))._max.sort ?? -1;
@@ -2090,6 +2108,7 @@ export async function adminRoutes(app: FastifyInstance) {
           featuresJson: Array.isArray(b.featuresJson) ? b.featuresJson.map(String).slice(0, 20) : [],
           highlighted: b.highlighted === true,
           hidden: b.hidden === true,
+          autoRenewEnabled, wechatContractPlanId, autoRenewMode,
           sort: num(b.sort, 0) ?? maxSort + 1,
         },
       });
@@ -2097,12 +2116,12 @@ export async function adminRoutes(app: FastifyInstance) {
         action: 'admin.plan.create',
         payload: { by: actorName(actor), id: plan.id, name: plan.name, price: plan.price, period: plan.period, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount, hidden: plan.hidden, sort: plan.sort },
       });
-      return reply.code(201).send(plan);
+      return reply.code(201).send(adminPlanView(plan));
     },
   );
   // 改价直接影响营收：仅 owner/master（requireSuper，与资金三写同级）；字段白名单 + 数值校验
   //（此前 data: req.body 直透 prisma 属 mass-assignment 隐患）；审计带操作人与改前/改后快照。
-  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number; syncFamilyBenefits?: boolean } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number; syncFamilyBenefits?: boolean; autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: string } }>(
     '/admin/plans/:id',
     async (req, reply) => {
       const actor = actorOf(req);
@@ -2131,6 +2150,9 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof b.usageLabel === 'string') data.usageLabel = b.usageLabel.trim().slice(0, 30);
       if (typeof b.usageNormalPercent === 'number') data.usageNormalPercent = Math.round(b.usageNormalPercent);
       if (typeof b.usageNearPercent === 'number') data.usageNearPercent = Math.round(b.usageNearPercent);
+      if (typeof b.autoRenewEnabled === 'boolean') data.autoRenewEnabled = b.autoRenewEnabled;
+      if (typeof b.wechatContractPlanId === 'string' || b.wechatContractPlanId === null) data.wechatContractPlanId = b.wechatContractPlanId?.trim().slice(0, 32) || null;
+      if (typeof b.autoRenewMode === 'string') data.autoRenewMode = b.autoRenewMode;
       const candidate = { ...before, ...data } as typeof before;
       try {
         await validatePlanCommercial({
@@ -2139,6 +2161,7 @@ export async function adminRoutes(app: FastifyInstance) {
           tokenQuotaPerMonth: Number(candidate.tokenQuotaPerMonth), creditsPerMonth: Number(candidate.creditsPerMonth), agentCount: Number(candidate.agentCount),
           usageNormalPercent: Number(candidate.usageNormalPercent), usageNearPercent: Number(candidate.usageNearPercent),
           syncFamilyBenefits: b.syncFamilyBenefits === true,
+          autoRenewEnabled: Boolean(candidate.autoRenewEnabled), wechatContractPlanId: candidate.wechatContractPlanId, autoRenewMode: candidate.autoRenewMode,
         });
       } catch (e) { return sendErr(reply, e); }
       const plan = await prisma.$transaction(async (tx) => {
@@ -2164,7 +2187,7 @@ export async function adminRoutes(app: FastifyInstance) {
           syncFamilyBenefits: b.syncFamilyBenefits === true, planFamilyKey: plan.planFamilyKey,
         },
       });
-      return plan;
+      return adminPlanView(plan);
     },
   );
 

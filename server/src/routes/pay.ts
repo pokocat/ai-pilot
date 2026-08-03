@@ -11,6 +11,7 @@ import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { prisma } from '../db.js';
 import type { PayOrderStatus, PayOrderListItem, PayOrderListResult, PayRepayResult, PayMockPayResult } from '../../../shared/contracts';
+import { buildV2PayParams, handleContractNotify, handlePapayPaymentNotify, papayConfigured, papayFailXml, papaySuccessXml, parsePapayXml, reconcilePapayOrder } from '../services/wechatPapay.js';
 
 // 快照里的商品名（订单明细展示；历史无快照单按类型兜底）。
 function itemNameOf(order: { snapshotJson: unknown; skuKey: string | null }): string {
@@ -23,6 +24,7 @@ interface NotifyBody {
 }
 
 export async function payRoutes(app: FastifyInstance) {
+  app.addContentTypeParser(['text/xml', 'application/xml'], { parseAs: 'string' }, (_req, body, done) => done(null, body));
   // 我的支付订单列表（P1，鉴权）：订单明细页展示；created 且未过支付时限的单可继续支付。
   app.get('/pay/orders', async (req): Promise<PayOrderListResult> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
@@ -54,8 +56,18 @@ export async function payRoutes(app: FastifyInstance) {
   app.post<{ Params: { outTradeNo: string } }>('/pay/orders/:outTradeNo/pay-params', async (req, reply): Promise<PayRepayResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {
-      const r = await repayParams(req.params.outTradeNo, user.id);
-      return { ok: true, outTradeNo: r.outTradeNo, pay: r.pay, ...(r.mock ? { mock: true as const } : {}) };
+      const order = await prisma.paymentOrder.findUnique({ where: { outTradeNo: req.params.outTradeNo } });
+      if (!order || order.userId !== user.id) return reply.code(404).send({ error: '订单不存在', code: 'ORDER_NOT_FOUND' });
+      let r;
+      if (order.payMode === 'contract_initial') {
+        if (!orderPayable(order)) throw Object.assign(new Error('订单已不可支付，请重新下单'), { code: 'ORDER_NOT_PAYABLE', statusCode: 409 });
+        if (!papayConfigured()) throw Object.assign(new Error('自动续费尚未配置'), { code: 'PAPAY_NOT_CONFIGURED', statusCode: 501 });
+        if (!order.prepayId) throw Object.assign(new Error('订单缺少支付会话，请重新下单'), { code: 'ORDER_NOT_PAYABLE', statusCode: 409 });
+        r = { outTradeNo: order.outTradeNo, pay: buildV2PayParams(order.prepayId) };
+      } else {
+        r = await repayParams(req.params.outTradeNo, user.id);
+      }
+      return { ok: true, outTradeNo: r.outTradeNo, pay: r.pay, ...('mock' in r && r.mock ? { mock: true as const } : {}) };
     } catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
       return reply.code(err.statusCode ?? 502).send({ error: err.message ?? '获取支付参数失败', code: err.code ?? 'ORDER_NOT_PAYABLE' });
@@ -71,9 +83,10 @@ export async function payRoutes(app: FastifyInstance) {
     let order = await prisma.paymentOrder.findUnique({ where: { outTradeNo } });
     if (!order || order.userId !== user.id) return reply.code(404).send({ error: '订单不存在', code: 'ORDER_NOT_FOUND' });
 
-    if (order.provider === 'wechat' && !order.appliedAt && ['created', 'paid'].includes(order.status) && payConfigured()) {
+    if (order.provider === 'wechat' && !order.appliedAt && ['created', 'paid'].includes(order.status) && (payConfigured() || papayConfigured())) {
       try {
-        await reconcileOrder(outTradeNo);
+        if (['contract_initial', 'papay_recurring'].includes(order.payMode)) await reconcilePapayOrder(outTradeNo);
+        else await reconcileOrder(outTradeNo);
         order = (await prisma.paymentOrder.findUnique({ where: { outTradeNo } })) ?? order;
       } catch (err) {
         console.warn('[pay] reconcile on poll failed:', outTradeNo, (err as Error).message);
@@ -214,6 +227,28 @@ export async function payRoutes(app: FastifyInstance) {
       // 解密失败 = 报文不可信或密钥不符：拒绝，微信会重试。
       console.error('[pay] notify decrypt/handle failed:', (err as Error).message);
       return reply.code(400).send({ code: 'FAIL', message: '处理失败' });
+    }
+  });
+
+  // 微信支付 V2 委托代扣回调：XML 签名自证；成功应答也必须是 XML，否则平台会持续重试。
+  app.post('/pay/wechat/v2/notify', async (req, reply) => {
+    reply.type('application/xml; charset=utf-8');
+    try {
+      await handlePapayPaymentNotify(parsePapayXml(String(req.body ?? '')));
+      return reply.code(200).send(papaySuccessXml());
+    } catch (err) {
+      console.error('[papay] payment notify failed:', (err as Error).message);
+      return reply.code(400).send(papayFailXml('处理失败'));
+    }
+  });
+  app.post('/pay/wechat/contract/notify', async (req, reply) => {
+    reply.type('application/xml; charset=utf-8');
+    try {
+      await handleContractNotify(parsePapayXml(String(req.body ?? '')));
+      return reply.code(200).send(papaySuccessXml());
+    } catch (err) {
+      console.error('[papay] contract notify failed:', (err as Error).message);
+      return reply.code(400).send(papayFailXml('处理失败'));
     }
   });
 }

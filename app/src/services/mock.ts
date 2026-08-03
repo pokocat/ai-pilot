@@ -58,6 +58,7 @@ const PLANS: Plan[] = [
     agentCount: 3,
     featuresJson: ['日常经营判断', '基础顾问阵容', '知识库与项目管理'],
     highlighted: false,
+    autoRenewAvailable: false,
   },
   {
     id: 'mock-plan-decision-monthly',
@@ -70,6 +71,7 @@ const PLANS: Plan[] = [
     agentCount: 8,
     featuresJson: ['持续经营分析', '更长的连续研判', '完整顾问阵容', '方案库与导出'],
     highlighted: false,
+    autoRenewAvailable: false,
   },
   {
     id: 'mock-plan-decision',
@@ -82,6 +84,7 @@ const PLANS: Plan[] = [
     agentCount: 8,
     featuresJson: ['持续经营分析', '更长的连续研判', '完整顾问阵容', '方案库与导出'],
     highlighted: true,
+    autoRenewAvailable: false,
   },
   {
     id: 'mock-plan-enterprise',
@@ -94,6 +97,7 @@ const PLANS: Plan[] = [
     agentCount: 14,
     featuresJson: ['私有化部署', '接入内部系统', '专属助手配置', '数据不出内网'],
     highlighted: false,
+    autoRenewAvailable: false,
   },
 ];
 
@@ -1000,6 +1004,7 @@ export const mock = {
     return delay({
       currentPlanId: currentPlan?.id ?? null,
       usage: me.usage,
+      subscription: null,
       options: PLANS.map((plan) => {
         const enterprise = plan.price < 0;
         const current = plan.id === currentPlan?.id;

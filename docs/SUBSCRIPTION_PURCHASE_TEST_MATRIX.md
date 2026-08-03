@@ -136,7 +136,24 @@ node --env-file=.env.test --import ./test/hermeticEnv.mjs --import tsx --test --
   test/pricingOperatorOwned.test.ts \
   test/adminOps.test.ts \
   test/wechatRefund.test.ts
+  test/wechatPapay.test.ts
 ```
+
+### 3.1 自动续费专项矩阵
+
+| 场景 | 自动化断言 | 真机/商户平台断言 |
+|---|---|---|
+| 默认购买方式 | 每次打开确认页均为单次购买 | 微信支付页不会默认开启自动续费 |
+| 配置降级 | APIv2 Key、回调、套餐开关或模板缺一即 `autoRenewAvailable=false` | 只显示单次购买且可正常付款 |
+| 支付中签约 | XML 签名及各报文实际携带的 openid/模板/协议号/appid/mchid 不一致均拒绝 | 主动选择后收到 ADD 回调，当前卡显示已开启 |
+| 签约首单幂等/继续支付 | 同 `clientRequestId` 仅在套餐、金额、报价指纹、条款哈希完全一致且仍为支付窗口内的 `created` 单时复用；并发仅一次微信外呼；终态/过期/载荷变化返回 409 | 网络重试复用原单，退出支付页后可继续支付；已关闭、过期或已变更报价不能再次调起 |
+| 只付款未签约 | 初始支付仍发当前周期权益；无 ADD 且查关系未签约时，已付款 pending 保留完整 6 小时窗口后清理 | 当前卡不把“确认中”冒充“已开启” |
+| 周期扣款 | 到期前 24h 只创建一笔 PAP 申请；回调重复只发一次权益 | 商户平台可见扣款前通知与最终续期订单 |
+| 签约回调丢失 | `/papay/querycontract` 按模板 ID + 商户协议号补激活，回包身份不一致时保持 pending | 断开签约回调后恢复，当前卡仍能进入“已开启” |
+| 扣款回调丢失 | 获灰度权限后由 `/pay/paporderquery` 补账；ACCEPT 不提前发权益 | 断开扣款回调后恢复仍能到账；未获查单权限时以平台订单人工核对 |
+| 失败重试 | 同周期最多两次；只有明确业务失败才重试，网络超时/SYSTEMERROR/验签解析失败保留原单且重复扫描不换单 | 余额不足等明确失败可二次尝试，结果不确定时不得形成双单 |
+| 关闭/微信侧解约 | DELETE 回调幂等，`nextBillingAt=null`；解约请求结果不确定时保持 `cancel_pending` 停扣并重试 | 当前周期继续用，后续不再扣款；网络抖动时先显示“关闭中” |
+| 改价/换档/退款 | 本地先停扣并由 scheduler 补做微信侧解约 | 旧授权不得按新价格或旧套餐扣款 |
 
 ## 4. 真机与线上配置验收记录模板
 
@@ -148,7 +165,7 @@ node --env-file=.env.test --import ./test/hermeticEnv.mjs --import tsx --test --
 | 测试账号（脱敏） |  |
 | 当前方案 / 目标方案 ID |  |
 | clientRequestId / outTradeNo |  |
-| 场景 | 新购 / 续期 / 升级 / 转年付 / 继续支付 / 取消 / 退款 |
+| 场景 | 新购 / 续期 / 升级 / 转年付 / 单次购买 / 自动续费签约 / 自动扣款 / 解约 / 继续支付 / 取消 / 退款 |
 | 微信是否调起 / 是否真实扣款 |  |
 | 页面最终状态与文案 |  |
 | 后台订单状态 / entitlement / quota period |  |

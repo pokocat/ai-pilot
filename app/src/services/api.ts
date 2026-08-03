@@ -476,6 +476,10 @@ export const api = {
   // 微信支付下单（小程序 JSAPI）：返回 wx.requestPayment 调起参数 + 升级折算明细（月→年 / 同周期升档）。
   createOrder: (id: string, opts?: { openid?: string; clientRequestId?: string; quoteFingerprint?: string; expectedChargeAmount?: number }) =>
     useMockApi() ? mock.createOrder(id) : request<WechatOrderResult>(`/plans/${id}/order`, 'POST', opts ?? {}),
+  createContractOrder: (id: string, opts: { clientRequestId: string; quoteFingerprint: string; expectedChargeAmount: number }) =>
+    request<WechatOrderResult>(`/plans/${id}/contract-order`, 'POST', opts),
+  cancelPlanSubscription: (id: string) =>
+    request<import('../../../shared/contracts').AutoRenewCancelResult>(`/plans/subscriptions/${id}/cancel`, 'POST', {}),
   // V7-12：单次付费商品（SKU）目录 + 下单。mock 走假支付成功流并本地发放权益。
   skus: () => (useMockApi() ? mock.skus() : request<SkuView[]>('/skus')),
   // D-1 开通来源归因：下单带可选 source（'prescription'|'catalog'|'market'）+ refId（source=prescription 时的处方 id）。

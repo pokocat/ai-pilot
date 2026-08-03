@@ -22,6 +22,7 @@ export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
   await prisma.userDataSource.deleteMany();
   await prisma.serviceAssignment.deleteMany();
   await prisma.paymentOrder.deleteMany();
+  await prisma.subscriptionContract.deleteMany();
   await prisma.casefileMetric.deleteMany();
   await prisma.casefileOrder.deleteMany();
   await prisma.casefile.deleteMany();

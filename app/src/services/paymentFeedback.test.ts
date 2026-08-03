@@ -20,6 +20,11 @@ test('支付反馈：业务错误码使用可行动文案，兼容顶层与 data
     ['ORDER_EXPIRED', '订单已过支付时限，请重新下单'],
     ['PAYMENT_NOT_CONFIGURED', '支付暂未开放'],
     ['PAYMENT_COMING_SOON', '支付即将开通，敬请期待'],
+    ['PAPAY_NOT_CONFIGURED', '自动续费暂未开放，可选择单次购买'],
+    ['PLAN_AUTO_RENEW_UNAVAILABLE', '该方案暂不支持自动续费，可选择单次购买'],
+    ['SUBSCRIPTION_EXISTS', '当前方案已开启或正在确认自动续费'],
+    ['PAPAY_ZERO_AMOUNT_UNSUPPORTED', '本次无需付款，请先用单次购买完成变更'],
+    ['SUBSCRIPTION_CANCEL_FAILED', '暂时没能关闭自动续费，请稍后重试'],
     ['INSUFFICIENT_CREDITS', '权益点不足，请先调整方案'],
   ];
   for (const [code, expected] of cases) {

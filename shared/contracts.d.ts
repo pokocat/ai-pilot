@@ -1123,10 +1123,15 @@ export interface Plan {
   id: string; name: string; price: number; period: string;
   creditsPerMonth: number; tokenQuotaPerMonth: number; agentCount: number; featuresJson: string[]; highlighted: boolean;
   planFamilyKey: string; tierRank: number; usageLevel: UsageLevel; usageLabel: string;
+  /** 权限、V2 密钥、模板和套餐开关均齐全时才为 true；false 时前端只展示单次购买。 */
+  autoRenewAvailable: boolean;
 }
 /** 运营后台的套餐行（GET /admin/plans）：**线上套餐目录的唯一真相源**——代码侧不再有同步脚本，
  *  seedConfig.DEV_PLANS 只是本地/测试夹具。比公开 Plan 多出 hidden（停售/白名单档）与 sort（展示序）。 */
-export interface AdminPlan extends Plan { hidden: boolean; sort: number; usageNormalPercent: number; usageNearPercent: number; }
+export interface AdminPlan extends Plan {
+  hidden: boolean; sort: number; usageNormalPercent: number; usageNearPercent: number;
+  autoRenewEnabled: boolean; wechatContractPlanId: string | null; autoRenewMode: 'delay_24h';
+}
 /** 新建套餐（POST /admin/plans，requireSuper）。period 只认 month/year；price 为分，-1=面议。 */
 export interface AdminPlanCreate {
   name: string; price: number; period?: 'month' | 'year';
@@ -1134,6 +1139,7 @@ export interface AdminPlanCreate {
   usageNormalPercent?: number; usageNearPercent?: number;
   creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number;
   featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number;
+  autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: 'delay_24h';
   /** 编辑同一商业档的月付/年付时，原子同步月度权益与公开用量配置。 */
   syncFamilyBenefits?: boolean;
 }
@@ -1166,7 +1172,14 @@ export interface PlanOptionsResult {
   currentPlanId: string | null;
   usage: PublicUsageView;
   options: PlanOption[];
+  subscription: AutoRenewSubscriptionView | null;
 }
+export type AutoRenewSubscriptionStatus = 'pending' | 'active' | 'cancel_pending' | 'cancelled' | 'failed';
+export interface AutoRenewSubscriptionView {
+  id: string; planId: string; planName: string; status: AutoRenewSubscriptionStatus;
+  nextBillingAt: string | null; cancelledAt: string | null;
+}
+export interface AutoRenewCancelResult { ok: true; subscription: AutoRenewSubscriptionView; }
 export interface PlanQuote {
   allowed: true;
   currentPlan: Plan | null;
@@ -1183,7 +1196,8 @@ export interface PlanQuote {
 }
 export type PlanFunnelEvent = 'page_open' | 'current_view' | 'renew_click' | 'upgrade_click' | 'billing_change_click'
   | 'downgrade_remind_click' | 'quote_success' | 'quote_failure' | 'quote_confirm' | 'payment_cancel'
-  | 'payment_failure' | 'payment_success' | 'payment_pending' | 'entitlement_applied' | 'order_view' | 'order_continue';
+  | 'payment_failure' | 'payment_success' | 'payment_pending' | 'entitlement_applied' | 'order_view' | 'order_continue'
+  | 'auto_renew_select' | 'auto_renew_signed' | 'auto_renew_cancel';
 export interface PlanPurchaseResult {
   ok: true;
   plan: Plan;
@@ -1192,7 +1206,7 @@ export interface PlanPurchaseResult {
   grantedTokens?: number; // 本次授予/重置的月度 token 额度
 }
 /** 小程序调起 wx.requestPayment 的参数（server 侧 RSA 签名产出）。 */
-export interface WechatPayParams { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string; }
+export interface WechatPayParams { timeStamp: string; nonceStr: string; package: string; signType: 'RSA' | 'MD5' | 'HMAC-SHA256'; paySign: string; }
 
 /* ────────────── V7-12：单次付费商品（SKU） ────────────── */
 export type SkuKind = 'module' | 'service' | 'storage';
@@ -1270,11 +1284,13 @@ export interface WechatOrderResult {
   ok: true;
   outTradeNo: string;
   amount: number; // 实付金额（分）。月→年升级时 = 折后差价
-  pay: { timeStamp: string; nonceStr: string; package: string; signType: 'RSA'; paySign: string };
+  pay: WechatPayParams;
   // 月→年升级折算明细（applies=true 时前端可展示「已抵扣 ¥X」）。
   proration?: { applies: boolean; fullPrice: number; remainingDays: number; remainingValue: number; chargeAmount: number };
   /** 测试期模拟支付单（PAY_MOCK_SUCCESS）：pay 是占位值，端上跳过 wx.requestPayment，改调 POST /pay/mock/pay。 */
   mock?: true;
+  /** true 表示本单使用官方「支付中签约」；微信支付页仍由用户主动选择是否开通，不能默认勾选。 */
+  autoRenewRequested?: true;
 }
 /** 支付订单状态（GET /pay/orders/:outTradeNo）：requestPayment 成功后前端轮询用；
  *  未发放且已配支付时服务端会先主动查单补账，消除回调竞态。 */
@@ -1384,7 +1400,10 @@ export interface AdminUsageView {
 }
 // —— per-user 用量下钻（GET /admin/users/:id/usage?days=30） ——
 export interface AdminUserQuota { limit: number; used: number; remaining: number; unlimited: boolean; periodKey: string | null }
-export interface AdminUserPlanStatus { planName: string | null; expiresAt: string | null; daysLeft: number | null; status: string }
+export interface AdminUserPlanStatus {
+  planName: string | null; expiresAt: string | null; daysLeft: number | null; status: string;
+  subscription: { id: string; status: AutoRenewSubscriptionStatus; nextBillingAt: string | null; planName: string } | null;
+}
 export interface AdminTokenAgg { key: string; totalTokens: number; costMicros: number; calls: number }
 export interface AdminUserUsage {
   quota: AdminUserQuota | null            // null = 无钱包

@@ -33,7 +33,7 @@ export async function requestWechatPayment(pay: WechatPayParams): Promise<void> 
     timeStamp: pay.timeStamp,
     nonceStr: pay.nonceStr,
     package: pay.package,
-    signType: pay.signType as 'RSA',
+    signType: pay.signType as 'RSA' | 'MD5' | 'HMAC-SHA256',
     paySign: pay.paySign,
   });
 }

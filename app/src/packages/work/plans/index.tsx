@@ -11,7 +11,7 @@ import { awaitPaymentApplied, ensurePayableEnv, payAppliedToast, payOrder } from
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
 import { paymentErrorMessage } from '../../../services/paymentFeedback';
 import { useMockApi } from '../../../services/runtimeMode';
-import { ACTION_LABEL, STATUS_LABEL, canStartPurchase, currentPlanOption, isPlanExpired, publicFeatures, visiblePlanOptions } from './model';
+import { ACTION_LABEL, DEFAULT_PURCHASE_MODE, STATUS_LABEL, canStartPurchase, currentPlanOption, effectivePurchaseMode, isPlanExpired, publicFeatures, type PurchaseMode, visiblePlanOptions } from './model';
 import './index.scss';
 
 function money(fen: number) { return `¥${(fen / 100).toLocaleString(undefined, { minimumFractionDigits: fen % 100 ? 2 : 0 })}`; }
@@ -38,6 +38,7 @@ export default function PlanManagement() {
   const [period, setPeriod] = useState<'month' | 'year'>('month');
   const [quote, setQuote] = useState<PlanQuote | null>(null);
   const [purchaseIntentId, setPurchaseIntentId] = useState('');
+  const [purchaseMode, setPurchaseMode] = useState<PurchaseMode>(DEFAULT_PURCHASE_MODE);
   const [busy, setBusy] = useState('');
 
   const track = (event: Parameters<typeof api.planEvent>[0]['event'], extra: Omit<Parameters<typeof api.planEvent>[0], 'event'> = {}) => {
@@ -84,6 +85,7 @@ export default function PlanManagement() {
     setBusy(option.plan.id);
     try {
       setQuote(await api.quotePlan(option.plan.id));
+      setPurchaseMode(DEFAULT_PURCHASE_MODE); // 官方要求自动续费不能默认勾选；每次报价都从单次购买开始。
       track('quote_success', { planId: option.plan.id, relation: option.relation });
       setPurchaseIntentId(clientRequestId());
     }
@@ -110,9 +112,14 @@ export default function PlanManagement() {
     setBusy(quote.targetPlan.id);
     try {
       await subscribing;
-      const order = await api.createOrder(quote.targetPlan.id, {
+      const mode = effectivePurchaseMode(purchaseMode, quote.targetPlan.autoRenewAvailable);
+      const order = mode === 'auto'
+        ? await api.createContractOrder(quote.targetPlan.id, {
+          clientRequestId: purchaseIntentId || clientRequestId(), quoteFingerprint: quote.quoteFingerprint, expectedChargeAmount: quote.chargeAmount,
+        })
+        : await api.createOrder(quote.targetPlan.id, {
         clientRequestId: purchaseIntentId || clientRequestId(), quoteFingerprint: quote.quoteFingerprint, expectedChargeAmount: quote.chargeAmount,
-      });
+        });
       const mocked = await payOrder({ outTradeNo: order.outTradeNo, pay: order.pay, mock: order.mock });
       track('payment_success', { planId: quote.targetPlan.id, orderNo: order.outTradeNo });
       const applied = await awaitPaymentApplied(order.outTradeNo);
@@ -126,6 +133,21 @@ export default function PlanManagement() {
       Taro.showToast({ title: message, icon: 'none' });
       if ((e as { code?: string })?.code === 'QUOTE_CHANGED') { setQuote(null); setPurchaseIntentId(''); }
     } finally { setBusy(''); }
+  };
+
+  const cancelAutoRenew = async () => {
+    const subscription = data?.subscription;
+    if (!subscription || busy) return;
+    const modal = await Taro.showModal({ title: '关闭自动续费', content: '关闭后当前已购周期仍可继续使用，到期后不会再自动扣款。', confirmText: '确认关闭', confirmColor: '#8C3B2E' });
+    if (!modal.confirm) return;
+    setBusy(subscription.id);
+    try {
+      const result = await api.cancelPlanSubscription(subscription.id);
+      track('auto_renew_cancel', { planId: subscription.planId });
+      await load();
+      Taro.showToast({ title: result.subscription.status === 'cancelled' ? '已关闭自动续费' : '已提交关闭，请稍后确认', icon: 'success' });
+    } catch (e) { Taro.showToast({ title: paymentErrorMessage(e, 'payment'), icon: 'none' }); }
+    finally { setBusy(''); }
   };
 
   return (
@@ -142,7 +164,9 @@ export default function PlanManagement() {
                 {!currentExpired && <View className="usage-row"><Text>{STATUS_LABEL[data!.usage.usageStatus]}</Text><Text>{data!.usage.unlimited ? '专属配置' : `${data!.usage.usagePercent}%`}</Text></View>}
                 {!currentExpired && !data!.usage.unlimited && <View className="usage-track"><View className="usage-fill" style={{ width: `${data!.usage.usagePercent}%`, background: accent }} /></View>}
                 <Text className="current-meta">{currentExpired ? `已于 ${dateLabel(current.expiresAt)} 到期` : `有效期至 ${dateLabel(current.expiresAt)}，本周期将于 ${dateLabel(data!.usage.resetsAt)} 恢复`}</Text>
-                <Text className="manual-note">本方案按次购买，不会自动续费</Text>
+                {data!.subscription && ['pending', 'active', 'cancel_pending'].includes(data!.subscription.status)
+                  ? <View className="subscription-row"><View><Text className="subscription-title">{data!.subscription.status === 'active' ? '自动续费已开启' : data!.subscription.status === 'cancel_pending' ? '自动续费关闭中' : '自动续费确认中'}</Text><Text className="manual-note">{data!.subscription.status === 'active' && data!.subscription.nextBillingAt ? `预计 ${dateLabel(data!.subscription.nextBillingAt)} 发起下周期续费` : data!.subscription.status === 'pending' ? '以微信支付页的最终选择为准' : '当前周期仍可继续使用'}</Text></View>{data!.subscription.status !== 'cancel_pending' && <Text className="subscription-cancel" onClick={cancelAutoRenew}>{busy === data!.subscription.id ? '处理中…' : '关闭'}</Text>}</View>
+                  : <Text className="manual-note">当前未开启自动续费</Text>}
                 {expiresSoon(current.expiresAt) && <Text className="expiry-note">方案即将到期，建议提前续期，避免工作中断</Text>}
                 <View className="current-actions">
                   <View className="primary-action" style={{ background: accent }} onClick={() => choose(current)}><Text>{busy === current.plan.id ? '处理中…' : currentExpired ? '重新开通' : `续期 1 ${current.plan.period === 'year' ? '年' : '个月'}`}</Text></View>
@@ -173,7 +197,11 @@ export default function PlanManagement() {
         <View className="quote-line"><Text>方案价格</Text><Text>{money(quote.fullPrice)}</Text></View>
         {quote.remainingValue > 0 && <View className="quote-line"><Text>当前剩余价值抵扣</Text><Text>-{money(quote.remainingValue)}</Text></View>}
         <View className="quote-total"><Text>本次实付</Text><Text>{money(quote.chargeAmount)}</Text></View>
-        <Text className="quote-note">支付后立即生效，有效期至 {dateLabel(quote.newExpiresAt)}。不会自动续费。{quote.relation === 'renew' || quote.relation === 'billing_change' ? '当前月用量不会因续期或转年付重置。' : '升级后的方案权益将立即生效。'}</Text>
+        {quote.targetPlan.autoRenewAvailable && <View className="purchase-modes">
+          <View className={`purchase-mode ${purchaseMode === 'manual' ? 'selected' : ''}`} onClick={() => setPurchaseMode('manual')}><View className="mode-radio">{purchaseMode === 'manual' ? '●' : '○'}</View><View><Text className="mode-title">单次购买</Text><Text className="mode-desc">只购买当前周期，到期后由你决定是否续费</Text></View></View>
+          <View className={`purchase-mode ${purchaseMode === 'auto' ? 'selected' : ''}`} onClick={() => { setPurchaseMode('auto'); track('auto_renew_select', { planId: quote.targetPlan.id }); }}><View className="mode-radio">{purchaseMode === 'auto' ? '●' : '○'}</View><View><Text className="mode-title">自动续费</Text><Text className="mode-desc">本次 {money(quote.chargeAmount)}，之后每{quote.targetPlan.period === 'year' ? '年' : '月'} {money(quote.fullPrice)}；可随时关闭</Text></View></View>
+        </View>}
+        <Text className="quote-note">支付后立即生效，有效期至 {dateLabel(quote.newExpiresAt)}。{purchaseMode === 'auto' && quote.targetPlan.autoRenewAvailable ? `你将在微信支付页主动确认自动续费授权；后续每${quote.targetPlan.period === 'year' ? '年' : '月'}续费。` : '本次为单次购买，不会自动续费。'}{quote.relation === 'renew' || quote.relation === 'billing_change' ? '当前月用量不会因续期或转年付重置。' : '升级后的方案权益将立即生效。'}</Text>
         <View className="quote-confirm" style={{ background: accent }} onClick={confirmPay}><Text>{busy ? '处理中…' : '确认并支付'}</Text></View>
       </View></View>}
     </View>

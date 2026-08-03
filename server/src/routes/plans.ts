@@ -12,6 +12,7 @@ import type { Plan as PlanView, PlanAction, PlanFunnelEvent, PlanOption, PlanOpt
 import { getPlanStatus, getQuotaState } from '../services/tokenQuota.js';
 import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, usageView } from '../services/planRules.js';
 import { commercialTerms, hashTerms, quotePlanChange } from '../services/planEntitlements.js';
+import { cancelSubscription, createContractOrder, papayConfigured, subscriptionView } from '../services/wechatPapay.js';
 
 function publicPlan(plan: {
   id: string;
@@ -27,6 +28,9 @@ function publicPlan(plan: {
   tierRank?: number | null;
   usageLevel?: string | null;
   usageLabel?: string | null;
+  autoRenewEnabled?: boolean;
+  wechatContractPlanId?: string | null;
+  autoRenewMode?: string;
 }): PlanView {
   return {
     id: plan.id,
@@ -42,6 +46,7 @@ function publicPlan(plan: {
     tierRank: planTierRank(plan),
     usageLevel: publicUsageLevel(plan),
     usageLabel: publicUsageLabel(plan),
+    autoRenewAvailable: !!(papayConfigured() && plan.autoRenewEnabled && plan.wechatContractPlanId && plan.autoRenewMode === 'delay_24h' && plan.price > 0),
   };
 }
 
@@ -62,7 +67,7 @@ async function resolveUserOptional(token?: string) {
 }
 
 export async function planRoutes(app: FastifyInstance) {
-  const funnelEvents = new Set<PlanFunnelEvent>(['page_open', 'current_view', 'renew_click', 'upgrade_click', 'billing_change_click', 'downgrade_remind_click', 'quote_success', 'quote_failure', 'quote_confirm', 'payment_cancel', 'payment_failure', 'payment_success', 'payment_pending', 'entitlement_applied', 'order_view', 'order_continue']);
+  const funnelEvents = new Set<PlanFunnelEvent>(['page_open', 'current_view', 'renew_click', 'upgrade_click', 'billing_change_click', 'downgrade_remind_click', 'quote_success', 'quote_failure', 'quote_confirm', 'payment_cancel', 'payment_failure', 'payment_success', 'payment_pending', 'entitlement_applied', 'order_view', 'order_continue', 'auto_renew_select', 'auto_renew_signed', 'auto_renew_cancel']);
 
   app.post<{ Body: { event?: string; planId?: string; relation?: string; orderNo?: string; code?: string } }>('/plans/events', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
@@ -85,12 +90,13 @@ export async function planRoutes(app: FastifyInstance) {
   app.get('/plans/options', async (req): Promise<PlanOptionsResult> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const visibleWhere = canSeeHiddenPlans(user) ? {} : { hidden: false };
-    const [plans, state, quota, pending, status] = await Promise.all([
+    const [plans, state, quota, pending, status, subscription] = await Promise.all([
       prisma.plan.findMany({ where: visibleWhere, orderBy: { sort: 'asc' } }),
       prisma.user.findUnique({ where: { id: user.id }, select: { planId: true, planExpiresAt: true, plan: true } }),
       getQuotaState(user.id),
       prisma.paymentOrder.findMany({ where: { userId: user.id, status: { in: ['created', 'paid'] }, appliedAt: null }, orderBy: { createdAt: 'desc' }, take: 20 }),
       getPlanStatus(user.id),
+      prisma.subscriptionContract.findFirst({ where: { userId: user.id, status: { in: ['pending', 'active', 'cancel_pending'] } }, orderBy: { createdAt: 'desc' } }),
     ]);
     const current = state?.plan ?? null;
     const active = !!current && !isExpired(state?.planExpiresAt, now());
@@ -151,14 +157,59 @@ export async function planRoutes(app: FastifyInstance) {
         } } : {}),
       };
     });
-    return { currentPlanId: state?.planId ?? null, usage: publicUsage, options };
+    const subPlan = subscription ? plans.find((p) => p.id === subscription.planId) ?? await prisma.plan.findUnique({ where: { id: subscription.planId } }) : null;
+    return { currentPlanId: state?.planId ?? null, usage: publicUsage, options, subscription: subscription ? subscriptionView(subscription, subPlan?.name ?? '方案') : null };
+  });
+
+  // 官方「支付中签约」：首次付款与自动续费授权合并，但微信支付页的自动续费开关由用户主动选择，不能默认开启。
+  app.post<{ Params: { id: string }; Body: { clientRequestId?: string; quoteFingerprint?: string; expectedChargeAmount?: number; source?: string; refId?: string } }>('/plans/:id/contract-order', async (req, reply): Promise<WechatOrderResult | void> => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
+    if (!plan || (plan.hidden && !canSeeHiddenPlans(user))) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    if (!papayConfigured() || !plan.autoRenewEnabled || !plan.wechatContractPlanId) return reply.code(501).send({ error: '该方案自动续费尚未开放', code: 'PAPAY_NOT_CONFIGURED' });
+    if (plan.price <= 0) return reply.code(400).send({ error: '该方案不支持自动续费', code: 'PLAN_AUTO_RENEW_UNAVAILABLE' });
+    const openid = resolvePayerOpenid(user);
+    if (!openid) return reply.code(400).send({ error: '请先使用微信账号登录后开通自动续费', code: 'OPENID_REQUIRED' });
+    try {
+      const quote = await quotePlanChange(user.id, plan);
+      if (quote.chargeAmount <= 0) return reply.code(409).send({ error: '本次无需付款，请先用单次购买完成方案变更；下个周期可再开自动续费', code: 'PAPAY_ZERO_AMOUNT_UNSUPPORTED' });
+      if (req.body?.quoteFingerprint !== quote.quoteFingerprint || req.body?.expectedChargeAmount !== quote.chargeAmount) {
+        return reply.code(409).send({ error: '方案价格或权益状态已变化，请重新确认', code: 'QUOTE_CHANGED' });
+      }
+      const attribution = parseAttribution(req.body?.source, req.body?.refId);
+      const result = await createContractOrder({
+        user, plan, openid, amount: quote.chargeAmount, clientRequestId: req.body?.clientRequestId?.trim() || `contract-${Date.now()}`,
+        quoteFingerprint: quote.quoteFingerprint, termsHash: hashTerms(commercialTerms(plan)), spbillCreateIp: req.ip,
+        attribution: { source: attribution.source, ...(attribution.refId ? { refId: attribution.refId } : {}) },
+      });
+      return { ok: true, outTradeNo: result.outTradeNo, amount: quote.chargeAmount, pay: result.pay, autoRenewRequested: true };
+    } catch (e) {
+      const err = e as { message?: string; statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 502).send({ error: err.message ?? '自动续费签约失败', code: err.code ?? 'PAPAY_CREATE_FAILED' });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>('/plans/subscriptions/:id/cancel', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      const contract = await cancelSubscription(user.id, req.params.id);
+      const plan = await prisma.plan.findUnique({ where: { id: contract.planId } });
+      await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.plan.subscription.cancel', payload: { subscriptionId: contract.id, planId: contract.planId } });
+      return { ok: true, subscription: subscriptionView(contract, plan?.name ?? '方案') };
+    } catch (e) {
+      const err = e as { message?: string; statusCode?: number; code?: string };
+      return reply.code(err.statusCode ?? 502).send({ error: err.message ?? '关闭自动续费失败', code: err.code ?? 'SUBSCRIPTION_CANCEL_FAILED' });
+    }
   });
 
   app.post<{ Params: { id: string } }>('/plans/:id/quote', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
     if (!plan || (plan.hidden && !canSeeHiddenPlans(user))) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
-    try { return await quotePlanChange(user.id, plan); }
+    try {
+      const quote = await quotePlanChange(user.id, plan);
+      return { ...quote, currentPlan: quote.currentPlan ? { ...quote.currentPlan, autoRenewAvailable: false } : null, targetPlan: publicPlan(plan) };
+    }
     catch (e) {
       const err = e as { message?: string; statusCode?: number; code?: string };
       return reply.code(err.statusCode ?? 409).send({ error: err.message ?? '暂时无法变更方案', code: err.code ?? 'PLAN_SWITCH_BLOCKED' });

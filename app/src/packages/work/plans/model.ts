@@ -1,5 +1,13 @@
 import type { PlanOption, PlanOptionsResult } from '../../../services/api';
 
+export type PurchaseMode = 'manual' | 'auto';
+export const DEFAULT_PURCHASE_MODE: PurchaseMode = 'manual';
+
+/** 自动续费未开放时，即便端上残留了旧选择也必须回落单次购买。 */
+export function effectivePurchaseMode(requested: PurchaseMode, autoRenewAvailable: boolean): PurchaseMode {
+  return requested === 'auto' && autoRenewAvailable ? 'auto' : 'manual';
+}
+
 export const ACTION_LABEL: Record<PlanOption['action'], string> = {
   buy: '立即开通', renew: '续期', upgrade: '升级到此方案', change_billing: '转为年付',
   remind: '到期后可购买', contact: '联系顾问', continue_payment: '继续支付', wait_applied: '到账处理中',

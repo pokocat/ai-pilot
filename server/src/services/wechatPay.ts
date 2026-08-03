@@ -204,7 +204,7 @@ async function assertOrderRate(tx: Prisma.TransactionClient, userId: string): Pr
 
 // 下单时的条款快照（P1）：发放以下单时点的套餐/SKU 配置为准，防「下单后改价/改额度/删配置」漂移；
 // 也让 plan_not_found/sku_not_found 类卡单可以从快照恢复发放。
-async function buildOrderSnapshot(args: { planId?: string; skuKey?: string }): Promise<Prisma.InputJsonValue | undefined> {
+export async function buildOrderSnapshot(args: { planId?: string; skuKey?: string }): Promise<Prisma.InputJsonValue | undefined> {
   if (args.planId) {
     const p = await prisma.plan.findUnique({ where: { id: args.planId } });
     if (!p) return undefined;
@@ -725,6 +725,28 @@ async function markPaidAndApplyTx(parsed: {
     }
     // appliedAt 在 applyPlanPurchase 成功后才设置，确保 paid+appliedAt=null 的订单可被后续回调恢复。
     await tx.paymentOrder.update({ where: { outTradeNo: parsed.outTradeNo }, data: { status: 'applied', appliedAt: new Date() } });
+    // 委托代扣订单到账后，以**实际发放后的**权益到期日作为下一周期锚点：到期前 24h 提交申请，
+    // 对齐微信自动续费「通知后 24 小时扣费」。签约回调与支付回调无先后保证，因此这里允许
+    // pending 协议先写锚点，ADD 回调随后只负责激活；重复支付回调仍被 appliedAt 拦住。
+    if (!order.skuKey) {
+      const entitlementUser = await tx.user.findUnique({ where: { id: order.userId }, select: { planExpiresAt: true } });
+      const expiresAt = entitlementUser?.planExpiresAt ?? null;
+      // 同方案手动续期也要顺延下一扣款锚点；手动换档则立即停掉旧协议的本地扣款调度，
+      // 避免旧套餐在原到期点再次扣费（远端协议可由用户/运营后续解约，状态 cancel_pending 可审）。
+      await tx.subscriptionContract.updateMany({
+        where: order.subscriptionContractId
+          ? { id: order.subscriptionContractId, status: { in: ['pending', 'active'] } }
+          : { userId: order.userId, planId: order.planId, status: 'active' },
+        data: {
+          nextBillingAt: expiresAt ? new Date(expiresAt.getTime() - 24 * 3600_000) : null,
+          ...(order.payMode === 'papay_recurring' ? { lastChargeAt: new Date() } : {}),
+        },
+      });
+      await tx.subscriptionContract.updateMany({
+        where: { userId: order.userId, planId: { not: order.planId }, status: 'active' },
+        data: { status: 'cancel_pending', nextBillingAt: null },
+      });
+    }
     // 观测口径=发放动作完成；对账以 payment_order 为准。
     // mock 单**不进营收指标**（单量与金额都不进）——假钱进营收看板比缺个数字更糟；
     // 它单独计一条 junshi_pay_mock_total，测试期的量仍然可见。
@@ -832,6 +854,7 @@ export async function sweepPendingOrders(opts: { batch?: number } = {}): Promise
   const candidates = await prisma.paymentOrder.findMany({
     where: {
       provider: 'wechat',
+      payMode: 'jsapi',
       appliedAt: null,
       createdAt: { gt: horizon },
       OR: [
@@ -1023,6 +1046,7 @@ export async function refundWechatOrder(outTradeNo: string, opts: { reason?: str
     if (finalSuccess) {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${cur.userId}`}))`;
       if (cur.appliedAt) await revokeOrderGrant(cur, tx);
+      if (cur.subscriptionContractId) await tx.subscriptionContract.updateMany({ where: { id: cur.subscriptionContractId, status: { in: ['pending', 'active'] } }, data: { status: 'cancel_pending', nextBillingAt: null } });
     }
     await tx.paymentOrder.update({
       where: { outTradeNo },
@@ -1094,6 +1118,7 @@ export async function markRefundNotified(decoded: {
     // 商户后台退款成功、本地尚未回收：撤权益（仅 appliedAt 已发放的单）+ 置 refunded。
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`entitlement:${cur.userId}`}))`;
     if (cur.appliedAt) await revokeOrderGrant(cur, tx);
+    if (cur.subscriptionContractId) await tx.subscriptionContract.updateMany({ where: { id: cur.subscriptionContractId, status: { in: ['pending', 'active'] } }, data: { status: 'cancel_pending', nextBillingAt: null } });
     await tx.paymentOrder.update({
       where: { outTradeNo },
       data: {

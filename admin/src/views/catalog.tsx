@@ -16,6 +16,7 @@ const PLAN_BLANK = {
   planFamilyKey: '', tierRank: 0, usageLevel: 'custom' as 'standard' | '5x' | '20x' | 'custom', usageLabel: '扩展用量',
   usageNormalPercent: 50, usageNearPercent: 80,
   creditsPerMonth: 0, tokenQuotaPerMonth: 0, agentCount: 0, features: '', highlighted: false, hidden: false, sort: 0,
+  autoRenewEnabled: false, wechatContractPlanId: '',
 };
 
 export function PlansView({ toast }: { toast: (m: string) => void }) {
@@ -38,6 +39,7 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
       usageNormalPercent: p.usageNormalPercent, usageNearPercent: p.usageNearPercent,
       creditsPerMonth: p.creditsPerMonth, tokenQuotaPerMonth: p.tokenQuotaPerMonth, agentCount: p.agentCount,
       features: p.featuresJson.join('\n'), highlighted: p.highlighted, hidden: p.hidden, sort: p.sort,
+      autoRenewEnabled: p.autoRenewEnabled, wechatContractPlanId: p.wechatContractPlanId ?? '',
     });
   };
   // -1=面议（企业版语义）；其余按元→分。前端不做四舍五入以外的加工，校验以服务端为准。
@@ -55,6 +57,9 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
     highlighted: form.highlighted,
     hidden: form.hidden,
     sort: form.sort,
+    autoRenewEnabled: form.autoRenewEnabled,
+    wechatContractPlanId: form.wechatContractPlanId.trim() || null,
+    autoRenewMode: 'delay_24h' as const,
     syncFamilyBenefits: true,
   });
   const save = async (id: string) => {
@@ -112,7 +117,9 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
       <div className="cfg">
         <div className="cfg-row"><div className="cb"><div className="ct">常用配置</div><div className="cs">前台优先展示这一档</div></div><div className={`sw ${form.highlighted ? 'on' : ''}`} onClick={() => set({ highlighted: !form.highlighted })}><i /></div></div>
         <div className="cfg-row"><div className="cb"><div className="ct">隐藏（停售）</div><div className="cs">套餐列表不返回；仅测试白名单手机号可见可购。在册用户的权益不受影响</div></div><div className={`sw ${form.hidden ? 'on' : ''}`} onClick={() => set({ hidden: !form.hidden })}><i /></div></div>
+        <div className="cfg-row"><div className="cb"><div className="ct">允许用户选择自动续费</div><div className="cs">同时保留单次购买；用户每次都需主动选择自动续费，默认不会勾选</div></div><div className={`sw ${form.autoRenewEnabled ? 'on' : ''}`} onClick={() => set({ autoRenewEnabled: !form.autoRenewEnabled })}><i /></div></div>
       </div>
+      {form.autoRenewEnabled && <div className="ai-field"><div className="ai-fl">微信委托代扣模板 ID（通知后 24 小时扣费）</div><input className="ai-input" value={form.wechatContractPlanId} onChange={(e) => set({ wechatContractPlanId: e.target.value.replace(/\D/g, '') })} placeholder="商户平台审核通过后的数字模板 ID" /></div>}
     </>
   );
   return (
@@ -145,6 +152,7 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
               <span className="pn">{p.name}</span>
               {p.highlighted && <span className="tag">常用配置</span>}
               {p.hidden && <span className="tag">已隐藏</span>}
+              {p.autoRenewEnabled && <span className="tag">{p.autoRenewAvailable ? '自动续费可用' : '自动续费待配置'}</span>}
               <span className="pp">{priceLabel(p)}</span>
             </div>
             <div className="plan-meta">{p.usageLabel} · 档位 {p.tierRank} · {p.planFamilyKey} · {p.creditsPerMonth < 0 ? '不限量权益点' : `${p.creditsPerMonth} 点/月`} · 含 {p.agentCount} 智能体 · {p.featuresJson.join(' · ')}</div>

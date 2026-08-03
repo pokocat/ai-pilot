@@ -39,7 +39,7 @@ export function commercialTerms(plan: CommercialPlan) {
 }
 
 function publicPlan(plan: CommercialPlan) {
-  return { ...commercialTerms(plan), highlighted: plan.highlighted };
+  return { ...commercialTerms(plan), highlighted: plan.highlighted, autoRenewAvailable: false };
 }
 
 function relationOf(current: CommercialPlan | null, target: CommercialPlan, active: boolean): PlanRelation {

@@ -12,6 +12,10 @@
 .usage-fill { height: 100%; border-radius: inherit; }
 .current-meta, .manual-note { display: block; margin-top: 10px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }
 .manual-note { margin-top: 2px; }
+.subscription-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); }
+.subscription-title { display: block; color: var(--accent-ink); font-size: 12px; font-weight: 600; }
+.subscription-row .manual-note { margin-top: 3px; }
+.subscription-cancel { flex: none; color: var(--warn); font-size: 12px; }
 .expiry-note { display: block; margin-top: 8px; color: var(--warn); font-size: 12px; }
 .current-actions { gap: 10px; margin-top: 18px; }
 .primary-action, .secondary-action { flex: 1; padding: 11px 12px; border-radius: 999px; text-align: center; font-size: 13px; }
@@ -40,4 +44,10 @@
 .quote-line { margin-top: 10px; color: var(--ink-2); font-size: 13px; }
 .quote-total { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--ink); font-size: 18px; font-weight: 600; }
 .quote-note { display: block; margin-top: 14px; color: var(--ink-3); font-size: 12px; line-height: 1.65; }
+.purchase-modes { margin-top: 16px; }
+.purchase-mode { display: flex; gap: 10px; margin-top: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; }
+.purchase-mode.selected { border-color: var(--accent); background: var(--accent-soft); }
+.mode-radio { flex: none; color: var(--accent-ink); font-size: 16px; line-height: 20px; }
+.mode-title { display: block; color: var(--ink); font-size: 13px; font-weight: 600; }
+.mode-desc { display: block; margin-top: 3px; color: var(--ink-3); font-size: 11px; line-height: 1.5; }
 .quote-confirm { margin-top: 18px; padding: 13px; border-radius: 999px; color: var(--surface); text-align: center; font-weight: 600; }
