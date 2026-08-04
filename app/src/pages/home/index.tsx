@@ -10,12 +10,14 @@ import Sheet from '../../components/Sheet';
 import CoachMarks from '../../components/CoachMarks';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type BattleForce, type ForceKind, type ChartSummary } from '../../services/api';
+import { api, type BattleForce, type ForceKind, type ChartSummary, type DecisionView } from '../../services/api';
 import { MODULE_MARKET } from '../../data/operatingSystem';
 import { refreshDossier, type Dossier } from '../../services/dossier';
 import { navTo, switchTo } from '../../services/nav';
 import { REVIEW_TIME } from '../../data/constants';
+import { ARCHIVE_INTERVIEW_PROMPT, archiveAnswerPrompt } from '../../data/intents';
 import { shouldOpenOnboarding } from '../../services/onboardingStateCore';
+import { pickDecisionToVerify } from '../../services/decisionPick';
 import './index.scss';
 
 function todayLabel() {
@@ -81,6 +83,14 @@ function chartTurningMonths(chart: ChartSummary): string {
   return t.length ? `${t.join('/')}月` : '无';
 }
 
+// 三视角 tab（新设计稿 battle-mode-tabs）：经营战局是主视角，另两个只调节奏，命理关时不渲染。
+type BattleMode = 'business' | 'timing' | 'destiny';
+const BATTLE_MODES: { key: BattleMode; label: string }[] = [
+  { key: 'business', label: '经营战局' },
+  { key: 'timing', label: '时运策' },
+  { key: 'destiny', label: '命盘分析' },
+];
+
 function forceSynthesis(forces: BattleForce[]): { title: string; body: string } {
   const strong = forces.find((f) => f.level === 'strong');
   const weak = forces.find((f) => f.level === 'weak');
@@ -112,8 +122,23 @@ export default function Home() {
   // 主要矛盾卡：点击就地展开/收起全文（有判断时），而非跳对话
   const [heroExpanded, setHeroExpanded] = useState(false);
   // 天势接命盘：实时拉命盘摘要（不落库）。无命盘/命理关/404 → null，静默不打扰。
-  const [chart, setChart] = useState<ChartSummary | null>(null);
+  const [chartRaw, setChartRaw] = useState<ChartSummary | null>(null);
+  // 三视角（新设计稿 battle-mode-tabs）：经营战局 / 时运策 / 命盘分析。
+  // 时运与命盘原来只藏在三势全解 sheet 的天势小节里，设计稿把它们提为与经营判断并列的视角——
+  // 口径不变：它们只调节奏与优先级，不替代经营数据下的判断。
+  const [modePick, setModePick] = useState<BattleMode>('business');
+  // 决策日志 · 待验证（真实决策账本的最近一条 pending）：设计稿把它放在三势结论下面，作为「判断→验证」的闭环提示。
+  const [pendingDecision, setPendingDecision] = useState<DecisionView | null>(null);
   const me = s.me();
+  const fortuneOn = s.fortuneOn(); // P0-2：命理关 → 时运策 / 命盘分析 两个视角整体不出现
+  // 生效视角由开关推导，而不是让 modePick 自己管：用户停在时运策/命盘分析时后端把命理开关关掉
+  // （下一次 /me 回读就会变），只藏 tab 会留下一个还在屏上的命理面板，而把 modePick 当真又会让
+  // 三个面板同时不满足条件、整页空白。推导成 business 一次把两种情况都收住。
+  const mode: BattleMode = fortuneOn ? modePick : 'business';
+  // 命盘数据同样过一遍开关：原来只靠服务端在命理关时拒发 /profile/chart，客户端自己不判，
+  // 于是「已取到的 chart 还留在内存里 + 开关刚关」这一帧，天势卡尾行仍会印格局与本月攻守。
+  // 命理下线要求的是 UI 层立刻不见（P0-2），不能只依赖接口不给数据。
+  const chart: ChartSummary | null = fortuneOn ? chartRaw : null;
   const und = me?.understanding;
   // 三势一律来自真实军师档案（und.battleForces）；为空时走 force-empty 空态引导对话，绝不预置结论（P0-3）。
   const forces: BattleForce[] = und?.battleForces ?? [];
@@ -129,7 +154,15 @@ export default function Home() {
     if (s.isAuthed()) {
       jobs.push(store.loadMe()); // 刷新军师档案（对话/资料变化后战局判断与三势随之更新）
       // 天势接命盘：并行拉命盘摘要（失败/无盘/命理关静默兜底 null）。
-      jobs.push(api.myChart().then((r) => setChart(r.chart)).catch(() => setChart(null)));
+      // 命理关时连请求都不发（省一次往返，也不把命盘留在内存里）。
+      if (fortuneOn) jobs.push(api.myChart().then((r) => setChartRaw(r.chart)).catch(() => setChartRaw(null)));
+      // 决策日志：取「现在最该验证」的那一条（pickDecisionToVerify 显式排序，不依赖接口返回顺序）；
+      // 无账本/无 pending → null，区块整体不渲染，不摆空卡。
+      jobs.push(
+        api.decisions()
+          .then((r) => setPendingDecision(pickDecisionToVerify(r.items)))
+          .catch(() => setPendingDecision(null)),
+      );
     }
     Promise.all(jobs).catch(() => {}).then(() => setHydrated(true));
   });
@@ -179,8 +212,13 @@ export default function Home() {
     }
     Promise.all(jobs).then(() => Taro.showToast({ title: '军情已更新', icon: 'none' }));
   };
+  // 聚合入口（「待补资料 N」指标格）：不指定哪条，让军师挑最关键的几条问。
   const startInterview = () =>
-    goChat(`agentKey=general&continue=1&send=${encodeURIComponent('帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}`);
+    goChat(`agentKey=general&continue=1&send=${encodeURIComponent(ARCHIVE_INTERVIEW_PROMPT)}`);
+  // 具体某条待补证据：把用户点的那条原样带进去，军师只问这一条。
+  // 原来每行都调 startInterview——行是分开的、动作却是同一个，点第 3 条也只会收到批量提问。
+  const askArchive = (q: string) =>
+    goChat(`agentKey=general&continue=1&send=${encodeURIComponent(archiveAnswerPrompt(q))}`);
   const askRisks = () =>
     goChat(`agentKey=strat&continue=1&send=${encodeURIComponent('基于我当前的情况，给我 2-3 条「现在不能做」的风险锁，并说明原因。')}`);
 
@@ -226,6 +264,148 @@ export default function Home() {
             所以下移到「三势判断」段头，动作与它的作用对上。 */}
         <TabHeader title="军情" kicker="看今日判断" glyph="势" />
 
+        {/* 今日献策（每日批语）：从页尾提到页头，紧接标题区那条细线当一句眉批。
+            放页尾时它一天一换却基本没人滚到，而且夹在「现在不能做」和认可 CTA 之间会打断
+            「看完判断 → 认可判断」的动线；提到这里既天天被看见，也不跟任何功能区抢位置。
+            它与三个视角无关（是当天的一句话），所以在 mode 切换之外，属页面级。 */}
+        <View className="say-strip">
+          <Text className="say-k" style={{ color: accent }}>今日献策 · {saying.date}</Text>
+          <SayingLine html={saying.text} accent={accent} />
+        </View>
+
+        {/* 三视角切换（新设计稿 battle-mode-tabs）：经营战局是主视角，时运策与命盘分析只调节奏。
+            命理开关关闭时整条 tab 不出现（P0-2：命理下线要能一键全产品隐藏），页面回到单视角形态。 */}
+        {fortuneOn ? (
+          <View className="battle-mode-tabs">
+            {BATTLE_MODES.map((m) => (
+              <View
+                key={m.key}
+                className={`bmt ${mode === m.key ? 'on' : ''}`}
+                style={mode === m.key ? { color: accent, borderColor: accent } : {}}
+                onClick={() => setModePick(m.key)}
+              >
+                <Text>{m.label}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* ===================== 时运策（design battle-mode-panel[timing]） =====================
+            只写命盘真实算出来的东西：本月攻守、全年拐点、格局宜/避。没有命盘就引导补生辰，不编节奏。
+            这里必须再判一次 fortuneOn：只藏 tab 不够——用户停在本视角时后端把命理开关关掉（下一次 /me 回读），
+            tab 会消失但面板还留在屏上，等于命理 UI 没下线（P0-2 要求一键全产品隐藏）。 */}
+        {mode === 'timing' ? (
+          <View className="mode-panel">
+            <View className="timing-hero card">
+              <Text className="th-k">时运策 · {chart ? '已授权' : '待补生辰'}</Text>
+              <Text className="th-t serif">{chart ? `本月宜${PHASE_WORD[currentMonthOutlook(chart)?.phase ?? ''] ?? currentMonthOutlook(chart)?.phase ?? '稳中蓄力'}` : '录入生辰后再谈节奏'}</Text>
+              <Text className="th-d">只调整行动节奏与优先级。经营判断仍以案卷、数据和执行回填为准。</Text>
+            </View>
+
+            {chart ? (
+              <>
+                <View className="timing-grid">
+                  <View className="tg-cell card">
+                    <Text className="tg-t">本月攻守</Text>
+                    <Text className="tg-d">{chartCardLine(chart)}</Text>
+                  </View>
+                  <View className="tg-cell card">
+                    <Text className="tg-t">全年拐点</Text>
+                    <Text className="tg-d">{chartTurningMonths(chart)}</Text>
+                  </View>
+                </View>
+
+                <View className="timing-band card">
+                  <Text className="section-label">本 周 边 界</Text>
+                  {/* suits/avoid 可能缺（旧版命盘只回基础字段，命盘报告页同样是 `pattern.suits?.length` 取值）——
+                      直接 .join() 遇到 undefined 会抛在 render 里，把整个军情页打白，所以兜一层空数组。 */}
+                  <Text className="tb-row"><Text className="tb-k" style={{ color: accent }}>宜</Text>{(chart.pattern.suits ?? []).join(' · ') || '按当前判断推进'}</Text>
+                  <Text className="tb-row"><Text className="tb-k danger">避</Text>{(chart.pattern.avoid ?? []).join(' · ') || '暂无明确禁忌'}</Text>
+                  <Text className="tb-src">格局：{chart.pattern.name} · {chart.pattern.traits}</Text>
+                </View>
+
+                <View className="mode-link card" onClick={() => navTo('/packages/work/calendar/index')}>
+                  <Text className="ml-t">天时日历 · 逐月攻守</Text>
+                  <Text className="ml-go" style={{ color: accent }}>打开 ›</Text>
+                </View>
+              </>
+            ) : (
+              <View className="force-empty card" onClick={() => navTo('/packages/work/calendar/index')}>
+                <Text className="fe-t serif">还没有命盘</Text>
+                <Text className="fe-d">录入生辰后，天势会参命盘给出本月攻守和全年拐点。它只调节奏，不替你做经营判断。</Text>
+                <Text className="fe-go" style={{ color: accent }}>去录生辰 ›</Text>
+              </View>
+            )}
+
+            <View className="mode-back" onClick={() => setModePick('business')}><Text>返回经营判断</Text></View>
+          </View>
+        ) : null}
+
+        {/* ===================== 命盘分析（design battle-mode-panel[destiny]） =====================
+            设计稿口径：命盘只用于识别工作节律、决策偏好与风险提醒，不替代经营数据。四柱/日主/格局全部取真实命盘。 */}
+        {mode === 'destiny' ? (
+          <View className="mode-panel">
+            <View className="destiny-hero card">
+              <Text className="th-k">命盘分析 · {chart ? '已授权' : '待补生辰'}</Text>
+              <Text className="th-t serif">以节律校准判断，不替代判断</Text>
+              <Text className="th-d">命盘只用来识别你的工作节律、决策偏好和风险提醒，不参与经营结论。</Text>
+            </View>
+
+            {chart ? (
+              <>
+                <View className="pillar-card card">
+                  <Text className="section-label">命 盘 四 柱</Text>
+                  <View className="pillar-row">
+                    {([['年柱', chart.pillars.year.ganZhi, '根基'], ['月柱', chart.pillars.month.ganZhi, '节律'], ['日柱', chart.pillars.day.ganZhi, '自驱'],
+                      ...(chart.hourKnown && chart.pillars.time ? [['时柱', chart.pillars.time.ganZhi, '表达'] as [string, string, string]] : [])] as [string, string, string][]).map(([k, v, tag]) => (
+                      <View key={k} className="pillar-cell">
+                        <Text className="pc-k">{k}</Text>
+                        <Text className="pc-v serif">{v}</Text>
+                        <Text className="pc-tag">{tag}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  {!chart.hourKnown ? <Text className="pillar-note">时辰未录 · 补上后表达与外显判断会更准</Text> : null}
+                </View>
+
+                <View className="destiny-analysis card">
+                  <Text className="section-label">对 应 分 析</Text>
+                  <View className="da-row">
+                    <Text className="da-t">日主 · {chart.dayMaster.gan}（{chart.dayMaster.element}）{chart.dayMaster.strength}</Text>
+                    <Text className="da-d">{chart.favorableElements?.length ? `喜用：${chart.favorableElements.join(' · ')}` : '喜用五行待补全'}</Text>
+                  </View>
+                  <View className="da-row">
+                    <Text className="da-t">格局 · {chart.pattern.name}</Text>
+                    <Text className="da-d">{chart.pattern.traits}</Text>
+                  </View>
+                  {chart.ziwei?.soulMajorStars.length ? (
+                    <View className="da-row">
+                      <Text className="da-t">紫微 · 命宫主星</Text>
+                      <Text className="da-d">{chart.ziwei.soulMajorStars.join(' · ')}</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                <View className="mode-link card" onClick={() => navTo('/packages/work/mingpan/index')}>
+                  <Text className="ml-t">命盘报告 · 八字紫微印证</Text>
+                  <Text className="ml-go" style={{ color: accent }}>打开 ›</Text>
+                </View>
+              </>
+            ) : (
+              <View className="force-empty card" onClick={() => navTo('/packages/work/mingpan/index')}>
+                <Text className="fe-t serif">还没有命盘</Text>
+                <Text className="fe-d">录入生辰后这里会显示四柱、日主和格局，用于校准你的工作节律。</Text>
+                <Text className="fe-go" style={{ color: accent }}>去命盘 ›</Text>
+              </View>
+            )}
+
+            <View className="mode-back" onClick={() => setModePick('business')}><Text>返回经营判断</Text></View>
+          </View>
+        ) : null}
+
+        {/* ===================== 经营战局（design battle-mode-panel[business]）：原有全部内容 ===================== */}
+        {mode !== 'business' ? null : (
+        <>
         {/* 军师判断 hero：主要矛盾 —— 有判断时点击就地展开/收起全文；尚无判断时点击去对话 */}
         {(() => {
           const judgment = und?.mainContradiction || und?.summary || dossier?.judgment || '';
@@ -325,6 +505,74 @@ export default function Home() {
           )}
         </View>
 
+        {/* 判断依据（新设计稿 battle-panel[evidence]）：把「凭什么这么判」摊开成两组——
+            已引用来自军师档案的真实证据计数，待补来自 nextQuestions（同一份缺口，和上面「待补资料」是一个来源）。
+            两组都空（未建档）时整块不渲染，不摆空壳。 */}
+        {(() => {
+          const ec = und?.evidenceCount;
+          // 每一项都要有去处：给不出去处的 chip 长得能点但点不动，比不显示更差。
+          // 契约里 evidenceCount 是五类（profile/memories/projects/knowledge/sessions），五类都要列——
+          // 少列一类，「已引用 N 类」就在真实证据面前撒谎。档案与军师记忆同落个人档案页。
+          const cited: [string, number, string][] = ec
+            ? ([['对话问对', ec.sessions, 'tab:/pages/sessions/index'], ['档案', ec.profile, '/packages/main/brief/index'],
+                ['案卷', ec.projects, '/packages/work/projects/index'], ['资料', ec.knowledge, '/packages/work/knowledge/index'],
+                ['军师记忆', ec.memories, '/packages/main/brief/index']] as [string, number, string][])
+              .filter(([, n]) => n > 0)
+            : [];
+          const missing = und?.nextQuestions ?? [];
+          if (!cited.length && !missing.length) return null;
+          return (
+            <View className="evidence-card card">
+              <View className="ev-head">
+                <Text className="section-label">判 断 依 据</Text>
+                <Text className="ev-sum">已引用 {cited.length} 类 · 待补 {missing.length} 项</Text>
+              </View>
+              {cited.length ? (
+                <View className="ev-group">
+                  <Text className="ev-gl">已引用证据</Text>
+                  <View className="ev-chips">
+                    {cited.map(([label, n, url]) => (
+                      <Text
+                        key={label}
+                        className="ev-chip"
+                        onClick={() => (url.startsWith('tab:') ? switchTo(url.slice(4)) : navTo(url))}
+                      >{label} {n}</Text>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+              {missing.length ? (
+                <View className="ev-group">
+                  <Text className="ev-gl">待补证据 · 按对判断的影响排序</Text>
+                  {missing.map((q, i) => (
+                    <View key={q} className="ev-row" onClick={() => askArchive(q)}>
+                      <Text className="ev-i serif" style={{ background: 'var(--accent-soft)', color: accent }}>{i + 1}</Text>
+                      <Text className="ev-q">{q}</Text>
+                      <Text className="ev-go" style={{ color: accent }}>去补</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          );
+        })()}
+
+        {/* 决策日志 · 待验证（新设计稿 three-force-decision）：真实决策账本里最近一条未验证的决策。
+            设计稿把它挂在三势结论后面，作用是提醒「这条判断还没被结果验证」，避免把假设当结论用。 */}
+        {pendingDecision ? (
+          <View className="decision-card card" onClick={() => navTo('/packages/work/ledger/index')}>
+            <View className="dc-head">
+              <Text className="section-label">决 策 日 志 · 待验证</Text>
+              <Text className="dc-seq">决策 #{pendingDecision.seq}</Text>
+            </View>
+            <Text className="dc-t serif">{pendingDecision.decision}</Text>
+            {pendingDecision.verifyStandard ? <Text className="dc-d">验证标准：{pendingDecision.verifyStandard}</Text> : null}
+            <Text className="dc-go" style={{ color: accent }}>
+              {pendingDecision.verifyByDate ? `验证日 ${pendingDecision.verifyByDate} · 看战略账本 ›` : '看战略账本 ›'}
+            </Text>
+          </View>
+        ) : null}
+
         {/* 关联模块（module-card）：军师方案的功能化承接 */}
         <View className="battle-actions module-card card">
           <Text className="section-label">关 联 模 块</Text>
@@ -375,26 +623,22 @@ export default function Home() {
           </View>
         ) : null}
 
-        {/* 今日献策：保留的每日批语（设计稿外的轻量存在，置于页尾） */}
-        <View className="say-strip">
-          <Text className="say-k" style={{ color: accent }}>今日献策 · {saying.date}</Text>
-          <SayingLine html={saying.text} accent={accent} />
+        {/* 认可判断 CTA（battle-cta 三态机）：新设计稿把它从固定悬浮改回文档流内（position: static），
+            落在经营战局的内容末尾——读完判断、依据和不能做，紧接着就是「认可它」，动线是顺的。
+            悬浮版的问题是它常年压在内容上方，且与底栏胶囊叠在一起挤成两条。
+            只在经营战局视角出现：在时运策/命盘分析里摆一个「确认当前战局」会让人以为是在认可命盘。 */}
+        <View
+          className={`battle-cta ${cta === 'generating' ? 'generating' : ''} ${cta === 'done' ? 'generated' : ''}`}
+          onClick={handleBattleCta}
+        >
+          <View className="bc-b">
+            <Text className="bc-t">{ctaText.t}</Text>
+            <Text className="bc-s">{ctaText.s}</Text>
+          </View>
+          <View className="bc-arrow"><Text>{ctaText.icon}</Text></View>
         </View>
-
-        {/* 固定底部 CTA 让位（内容不被浮层遮挡） */}
-        <View className="battle-cta-spacer" />
-      </View>
-
-      {/* 认可判断 CTA（battle-cta 三态机）：固定底部，浮于底栏之上（设计 §4.5） */}
-      <View
-        className={`battle-cta ${cta === 'generating' ? 'generating' : ''} ${cta === 'done' ? 'generated' : ''}`}
-        onClick={handleBattleCta}
-      >
-        <View className="bc-b">
-          <Text className="bc-t">{ctaText.t}</Text>
-          <Text className="bc-s">{ctaText.s}</Text>
-        </View>
-        <View className="bc-arrow"><Text>{ctaText.icon}</Text></View>
+        </>
+        )}
       </View>
 
       {/* 三势全解 sheet（设计 §4.6 forces）：3 条 force-read + 合参结论——迁入 Sheet 基座 */}
@@ -419,8 +663,9 @@ export default function Home() {
                   <Text className="fr-title serif">{r.title}</Text>
                   <Text className="fr-body">{r.body}</Text>
                   <Text className={`fr-tactic ${f.tacticTone}`}>{r.tactic}</Text>
-                  {/* 天势小节接命盘：有盘展开四柱/日主/格局/攻守 + 跳天时日历；无盘一行引导补生辰 */}
-                  {f.kind === 'sky' ? (chart ? (
+                  {/* 天势小节接命盘：有盘展开四柱/日主/格局/攻守 + 跳天时日历；无盘一行引导补生辰。
+                      整段过 fortuneOn：无盘引导也是命理入口（指向天时日历），命理关时连引导都不能露。 */}
+                  {f.kind === 'sky' && fortuneOn ? (chart ? (
                     <View className="fr-chart">
                       <Text className="frc-line">四柱：{chartFourPillars(chart)}</Text>
                       <Text className="frc-line">日主{chart.dayMaster.gan}{chart.dayMaster.element}·{chart.dayMaster.strength} · {chart.pattern.name}</Text>

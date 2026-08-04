@@ -25,12 +25,14 @@
 }
 .set-save.off { opacity: .45; }
 
-.set-row { display: flex; align-items: center; padding: 14px 15px; }
+.set-row { display: flex; align-items: center; gap: 6px; padding: 14px 15px; }
 .set-row + .set-row { border-top: 1px solid var(--line-2, #efede5); }
 .set-rt { flex: 1; font-size: 14.5px; color: var(--ink); }
 .set-rv { font-size: 13px; color: var(--ink-3); font-family: var(--mono, monospace); }
 .set-rv.is-mock { color: var(--danger); font-weight: 600; }
 .set-go { color: var(--ink-3); font-size: 17px; }
+/* 本命色行的色块（偏好小节）：右值前一枚当前主题色小方块 */
+.set-sw { width: 15px; height: 15px; border-radius: 5px; flex-shrink: 0; }
 /* 客服入口用 <Button openType="contact">，重置微信 Button 默认样式使其与 set-row 一致 */
 .set-contact-btn {
   width: 100%; margin: 0; padding: 14px 15px; background: transparent; border: none;

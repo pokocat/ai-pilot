@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Input, Canvas, Image } from '@tarojs/components';
+import { View, Text, Input, Canvas, Image, Button } from '@tarojs/components';
 import Taro, { useDidShow, useShareAppMessage } from '@tarojs/taro';
 import Login from '../../../components/Login';
 import SafeHeader from '../../../components/SafeHeader';
@@ -7,6 +7,8 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type ChartSummary } from '../../../services/api';
 import { SHICHEN } from '../../../data/shichen';
+import { IS_WEAPP } from '../../../services/config';
+import { navTo } from '../../../services/nav';
 import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
 import './index.scss';
 
@@ -16,7 +18,7 @@ const CH = 940;
 
 // 全年天时（战局「天势」卡的落地页）：排盘引擎算好的 12 个月攻守直接原生展示——
 // 不引导对话、不跳网页；右上角微信转发可分享（朋友打开看自己的天时，没命盘就地补生辰）。
-// 网页打印版（publishCard calendar）降级为页脚次要入口，供打印贴办公室。
+// 打印版 = 存相册后自行打印（图片交付，无公开链接）。
 // 转发落地约束：被转发者是冷启动直达本页——未登录不外弹（本页自己承接 Login），
 // 401 一律 silent 处理不跳走；返回键无页面栈时兜底切回战局 tab。
 
@@ -50,6 +52,8 @@ export default function TianshiCalendar() {
   const [day, setDay] = useState('');
   const [hourIdx, setHourIdx] = useState(0);
   const [gender, setGender] = useState<'male' | 'female'>('male');
+  // 出生地 → 服务端查城市经度做真太阳时校正（详见 mingpan 页同名 state 的说明）。
+  const [place, setPlace] = useState('');
   const [busy, setBusy] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [imgPath, setImgPath] = useState<string | null>(null);
@@ -94,10 +98,13 @@ export default function TianshiCalendar() {
     setBusy(true);
     Taro.showLoading({ title: '排盘中…' });
     try {
-      const r = await api.saveBazi({ calendar, year: +year, month: +month, day: +day, hour: SHICHEN[hourIdx].hour, gender });
+      const r = await api.saveBazi({ calendar, year: +year, month: +month, day: +day, hour: SHICHEN[hourIdx].hour, gender, birthPlace: place.trim() || undefined });
       Taro.hideLoading();
-      if (r.chart) { setChart(r.chart); Taro.showToast({ title: '命盘已生成', icon: 'none' }); }
-      else Taro.showToast({ title: '生成失败，请检查生辰', icon: 'none' });
+      if (r.chart) {
+        setChart(r.chart);
+        const p = place.trim();
+        Taro.showToast({ title: p ? (r.matchedCity ? `已按${r.matchedCity}校正真太阳时` : `未识别「${p}」，按北京时间排盘`) : '命盘已生成', icon: 'none' });
+      } else Taro.showToast({ title: '生成失败，请检查生辰', icon: 'none' });
     } catch (e) {
       Taro.hideLoading();
       if (errCode(e) === 'FEATURE_DISABLED') { setDisabled(true); Taro.showToast({ title: '命理能力已下线', icon: 'none' }); }
@@ -110,6 +117,7 @@ export default function TianshiCalendar() {
   // 出图：把天时日历卡画到 canvas 导出图片——发好友/存相册（存相册即可打印贴办公室），无公开链接
   const makeImage = async () => {
     if (!chart || busy) return;
+    if (!IS_WEAPP) { Taro.showToast({ title: '请在小程序内生成日历图', icon: 'none' }); return; } // 同 gift：H5 无 canvas 2d 节点
     setBusy(true);
     setImgPath(null);
     Taro.showLoading({ title: '生成天时日历图…' });
@@ -175,6 +183,12 @@ export default function TianshiCalendar() {
               <Text className="lg turn">◆ 拐点提前布局</Text>
             </View>
 
+            {/* 生辰的唯一编辑处在命盘报告页（同一去处只留一个入口）；本页有盘之后原本
+                完全没有回头路，录错了只能干看着。 */}
+            <View className="tc-edit-birth" onClick={() => navTo('/packages/work/mingpan/index')}>
+              <Text className="tc-eb-t">生辰录错了？去命盘报告修改 ›</Text>
+            </View>
+
             {turningMonths ? (
               <View className="tc-note card">
                 <Text className="tc-nt serif">年度关键节点</Text>
@@ -183,7 +197,10 @@ export default function TianshiCalendar() {
             ) : null}
 
             <View className="tc-actions">
-              <Text className="tc-share-hint">点右上角「···」可把本页转发给朋友，让他也看看自己的全年节奏</Text>
+              {/* 显式转发按钮（openType=share 触发 useShareAppMessage）。
+                  原来只有一句「点右上角『···』」的文字引导——用户既要认得那个入口、又要自己去点，
+                  转发率完全靠运气。与 quickscan 同一写法。 */}
+              <Button className="tc-share" openType="share" hoverClass="none"><Text>转发给朋友看他的全年节奏</Text></Button>
               <View className={`tc-imgbtn ${busy ? 'off' : ''}`} style={!busy ? { background: accent } : {}} onClick={makeImage}>
                 <Text>{busy ? '生成中…' : imgPath ? '重新生成图片' : '生成天时日历图片 · 存相册/发朋友'}</Text>
               </View>
@@ -239,6 +256,14 @@ export default function TianshiCalendar() {
                   </View>
                 ))}
               </View>
+              {/* 出生地（选填）：不填按北京时间排盘；识别不出会在 toast 里明说，不静默 */}
+              <Input
+                className="pf-input tc-place"
+                value={place}
+                maxlength={20}
+                placeholder="出生城市（选填，用于真太阳时校正）"
+                onInput={(e) => setPlace(e.detail.value)}
+              />
               <View className={`tc-btn ${valid && !busy ? '' : 'off'}`} style={valid ? { background: accent } : {}} onClick={saveBirth}>
                 <Text>{busy ? '排盘中…' : '生成我的天时日历'}</Text>
               </View>

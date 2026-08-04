@@ -30,10 +30,11 @@ function relTime(iso: string): string {
 }
 
 // 快捷补给（对齐设计稿 6 卡）：资料、数据、模块、报告 + 军令 / 执行动线。
+// 快捷补给（新设计稿 quick-card-strip）：原来的「绑定数据源」并入「账号与数据」（账号矩阵 + 授权 + 经营数据同一入口），
+// 「军师锦囊 / 模块」这张卡按设计稿撤掉——锦囊本来就是底部 tab，不必在对话页再摆一遍。
 const QUICK_CARDS = [
   { t: '上传经营资料', d: '企业、老板、产品、财务资料', url: '/packages/work/knowledge/index' },
-  { t: '绑定数据源', d: '店铺、账号、企微、财务表', url: '/packages/work/bindings/index' },
-  { t: '军师锦囊 / 模块', d: '免费初判、深度推演、高级模块', url: '/packages/work/market/index' },
+  { t: '账号与数据', d: '账号矩阵、授权与经营数据', url: '/packages/work/bindings/index' },
   { t: '生成方案', d: '把这次对话炼成一份方案', url: '/packages/work/library/index' },
   { t: '转成军令', d: '方案定了，自动拆成今天要做的事', tab: '/pages/studio/index' },
   { t: '今日执行', d: '军令、任务、打卡、复盘', tab: '/pages/studio/index' },

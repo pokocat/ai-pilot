@@ -48,6 +48,11 @@ export default defineAppConfig({
         'posterJob/index',
         // 作品库：历史成品图网格（+ 文字成果跳方案库）。入口在老板 tab「资产」组与军令 tab「内容出品」区块。
         'gallery/index',
+        // 新设计稿新增的三个业务面，入口都在老板 tab（账户权益格 + 档案菜单组）：
+        // architecture=公司与事业架构、relations=人脉圈与持续记忆、enterprise=企业服务办理台。
+        'architecture/index',
+        'relations/index',
+        'enterprise/index',
       ],
     },
   ],

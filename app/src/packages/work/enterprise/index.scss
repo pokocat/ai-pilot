@@ -1,0 +1,84 @@
+/* 企业服务办理台：hero / 归档位置 / 六条服务线（可展开资料清单） / 页尾双动作 */
+
+.ent-page .ent-hero { padding: 18px 16px; border-radius: var(--r-lg); }
+.ent-page .ent-hero .h1 { margin: 6px 0 8px; }
+.ent-page .ent-p { display: block; font-size: 12.5px; line-height: 1.65; color: var(--ink-2); }
+
+/* 归档位置：办理结果落在资料库，不另造「资产云」 */
+.ent-page .ent-cloud {
+  display: flex; align-items: center; gap: 11px;
+  margin-top: 12px; padding: 13px 14px;
+  border-radius: var(--r-md); background: rgba(255, 255, 255, .86); border: 1px solid var(--line);
+}
+.ent-page .ent-cloud:active { opacity: .85; }
+.ent-page .ent-cloud-ic {
+  width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.ent-page .ent-cloud-b { flex: 1; min-width: 0; }
+.ent-page .ent-cloud-t { display: block; font-size: 14px; font-weight: 600; color: var(--ink); }
+.ent-page .ent-cloud-s { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.55; color: var(--ink-3); }
+.ent-page .ent-cloud-go { flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+
+.ent-page .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 18px 4px 8px; }
+.ent-page .sec-title { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.ent-page .sec-more { font-size: 11.5px; color: var(--ink-3); }
+
+/* 服务线卡 */
+.ent-page .ent-card { margin-top: 10px; padding: 14px 16px; border-radius: var(--r-md); }
+.ent-page .ent-card:active { opacity: .92; }
+.ent-page .ent-card.is-open { background: rgba(255, 255, 255, .94); }
+.ent-page .ent-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ent-page .ent-b { flex: 1; min-width: 0; }
+.ent-page .ent-t { display: block; font-size: 16px; font-weight: 600; color: var(--ink); }
+.ent-page .ent-d { display: block; margin-top: 5px; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
+.ent-page .ent-fold { flex-shrink: 0; font-size: 11.5px; font-weight: 600; }
+
+/* 办理路径：静态路径示意（无进度条——没有真实进度就不画进度） */
+.ent-page .ent-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 10px; }
+.ent-page .ent-step { display: flex; align-items: center; gap: 4px; }
+.ent-page .ent-step-t {
+  padding: 3px 8px; border-radius: 999px;
+  background: var(--surface-2); color: var(--ink-2);
+  font-size: 10.5px; font-weight: 600;
+}
+.ent-page .ent-step-arrow { color: var(--ink-3); font-size: 11px; }
+
+/* 展开区：触发条件 / 资料清单 / 交接 / 回写 */
+.ent-page .ent-detail { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ent-page .ent-dk {
+  display: block; margin: 10px 0 5px;
+  font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--ink-3);
+}
+.ent-page .ent-dk:first-child { margin-top: 0; }
+.ent-page .ent-dv { display: block; font-size: 12px; line-height: 1.65; color: var(--ink-2); }
+.ent-page .ent-mat { display: flex; align-items: center; gap: 9px; padding: 5px 0; }
+.ent-page .ent-mat-i {
+  width: 20px; height: 20px; flex-shrink: 0; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+}
+.ent-page .ent-mat-t { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500; color: var(--ink); }
+
+/* 页尾双动作 */
+.ent-page .ent-actions { margin-top: 20px; display: flex; flex-direction: column; gap: 9px; }
+.ent-page .ent-act {
+  height: 46px; border-radius: 13px; border: 1px solid;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  font-size: 14.5px; font-weight: 600;
+}
+.ent-page .ent-act:active { opacity: .88; }
+.ent-page .ent-act-main { border-color: transparent; color: #FBFAF6; }
+
+/* 私有化部署（从老板 tab 菜单并入的企业版意向登记）：页尾轻卡 */
+.ent-page .ent-private {
+  display: flex; align-items: center; gap: 12px;
+  margin-top: 14px; padding: 13px 15px;
+  border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.ent-page .ent-private:active { opacity: .85; }
+.ent-page .ent-private-b { flex: 1; min-width: 0; }
+.ent-page .ent-private-t { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.ent-page .ent-private-s { display: block; margin-top: 3px; font-size: 11px; line-height: 1.45; color: var(--ink-3); }
+.ent-page .ent-private-go { flex-shrink: 0; font-size: 13px; font-weight: 600; white-space: nowrap; }

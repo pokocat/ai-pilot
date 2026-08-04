@@ -52,6 +52,19 @@ function streamResponse(chunks: string[]): Response {
   }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
+/** 按调用序返回不同的流：第 n 次请求用 sequences[n]（用尽后沿用最后一条）。供续写路径测试。 */
+function stubStreamSeq(sequences: string[][], inspect?: (body: Record<string, unknown>, call: number) => void) {
+  let call = 0;
+  globalThis.fetch = (async (url: any, init?: RequestInit) => {
+    if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    const i = call++;
+    inspect?.(body, i);
+    return streamResponse(sequences[Math.min(i, sequences.length - 1)]);
+  }) as unknown as typeof fetch;
+  return () => call;
+}
+
 function stubStream(chunks: string[], inspect?: (body: Record<string, unknown>) => void) {
   globalThis.fetch = (async (url: any, init?: RequestInit) => {
     if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
@@ -145,27 +158,75 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(outputLogs, 0, '输出不再进入阻塞式 moderation_log');
   });
 
-  test('/generate 流式撞输出上限 → 提示未完成且不落残缺 assistant 消息', async () => {
-    stubStream([
-      'data: {"choices":[{"delta":{"content":"这是一段还没写完的长回复"}}]}\n\n',
-      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n',
-      'data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":8000}}\n\n',
-      'data: [DONE]\n\n',
-    ]);
+  test('/generate 流式撞输出上限 → 自动续写接上，用户看到一条完整回复', async () => {
+    // 第 1 轮 finish_reason=length（没写完），第 2 轮正常收尾。用户视角是一条连续的回复。
+    const calls = stubStreamSeq([
+      [
+        'data: {"choices":[{"delta":{"content":"这是一段还没写完的长回复"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n',
+        'data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":8000}}\n\n',
+        'data: [DONE]\n\n',
+      ],
+      [
+        'data: {"choices":[{"delta":{"content":"，后半段补齐了。"}}]}\n\n',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n',
+        'data: {"choices":[],"usage":{"prompt_tokens":300,"completion_tokens":40}}\n\n',
+        'data: [DONE]\n\n',
+      ],
+    ], (body, call) => {
+      const msgs = body.messages as { role: string; content: string }[];
+      if (call === 0) return;
+      // 续写请求的形态是「残文进 assistant 历史 + 指令进 user 轮」——**不能**是末轮 assistant
+      // prefill：Claude Opus 4.6 及以后已移除末轮 prefill，会直接 400。
+      assert.equal(msgs[msgs.length - 1].role, 'user', '续写指令必须在 user 轮，不能用末轮 assistant prefill');
+      assert.equal(msgs[msgs.length - 2].role, 'assistant');
+      assert.match(msgs[msgs.length - 2].content, /这是一段还没写完的长回复/, '残文要作为上下文带回去');
+      assert.match(msgs[msgs.length - 1].content, /接着写完/);
+    });
     const t = await loginReady();
     const r = await api('POST', '/api/generate', { token: t, body: { text: '给我完整长方案', agentKey: 'general' } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(calls(), 2, '撞上限应自动续写一轮');
     const sse = String(r.body);
-    assert.match(sse, /event: token/, '已收到的 provider token 可以正常流出');
-    assert.match(sse, /event: error/);
-    assert.match(sse, /AI_OUTPUT_TRUNCATED/);
-    assert.match(sse, /还没完整写完/);
-    assert.doesNotMatch(sse, /event: done/);
-    assert.doesNotMatch(sse, /event: memory/);
-    const assistantMessages = await prisma.message.count({
+    assert.match(sse, /event: token\ndata: \{"text":"这是一段还没写完的长回复"\}/);
+    assert.match(sse, /后半段补齐了。/, '续写内容要接着流给用户');
+    assert.match(sse, /event: chat/);
+    assert.doesNotMatch(sse, /event: error/, '能续写完就不是错误');
+    assert.doesNotMatch(sse, /truncated/, '续写成功后不该再标未写完');
+    assert.match(sse, /event: done/);
+    const msg = await prisma.message.findFirstOrThrow({
       where: { role: 'assistant', session: { userId: t } },
+      orderBy: { createdAt: 'desc' },
     });
-    assert.equal(assistantMessages, 0, '残缺正文不得作为成功 assistant 消息落库');
+    const content = msg.contentJson as { text?: string; truncated?: boolean };
+    assert.equal(content.text, '这是一段还没写完的长回复，后半段补齐了。', '落库的是拼接后的完整正文');
+    assert.equal(content.truncated, undefined);
+  });
+
+  test('/generate 续写轮数用尽仍未写完 → 内容照常落库并标 truncated，不报错', async () => {
+    // 每一轮都 length：首轮 + 2 轮续写用尽后，交回用户决定是否继续。
+    const calls = stubStreamSeq([[
+      'data: {"choices":[{"delta":{"content":"永远写不完的长回复"}}]}\n\n',
+      'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n',
+      'data: {"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":8000}}\n\n',
+      'data: [DONE]\n\n',
+    ]]);
+    const t = await loginReady();
+    const r = await api('POST', '/api/generate', { token: t, body: { text: '这个问题请讲透一点，越细越好', agentKey: 'general' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(calls(), 3, '首轮 + 2 轮续写，不能无限续');
+    const sse = String(r.body);
+    assert.doesNotMatch(sse, /event: error/, '有可读内容就不能变成错误气泡');
+    assert.match(sse, /event: chat/);
+    assert.match(sse, /"truncated":true/, '要把「还没写完」透给端上做「继续」入口');
+    assert.match(sse, /event: done/);
+    const msg = await prisma.message.findFirstOrThrow({
+      where: { role: 'assistant', session: { userId: t } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const content = msg.contentJson as { text?: string; truncated?: boolean };
+    assert.equal(content.truncated, true, '未写完的标记要跟着消息落库，重进会话仍能点继续');
+    assert.ok((content.text ?? '').includes('永远写不完的长回复'), '已写出的内容不得丢弃');
   });
 
   test('429 + AI_FALLBACK_MOCK=false → 503 AI_UNAVAILABLE', async () => {
@@ -186,21 +247,56 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(r.body.code, 'AI_UNAVAILABLE');
   });
 
-  test('OpenAI 兼容返回 length → 503 截断提示，不落固定追问兜底', async () => {
+  test('OpenAI 兼容返回 length 且正文为空 → 503 截断（无锚点可续写），不落固定追问兜底', async () => {
+    // 这个形态几乎总是思考预算把 max_tokens 占满了：没有任何正文可作续写锚点，只能如实报错。
     env.aiFallbackMock = false;
-    stubFetch(() => ({
-      ok: true, status: 200,
-      body: {
-        choices: [{ finish_reason: 'length', message: { content: '' } }],
-        usage: { prompt_tokens: 120, completion_tokens: 1500 },
-      },
-    }));
+    let calls = 0;
+    stubFetch(() => {
+      calls++;
+      return {
+        ok: true, status: 200,
+        body: {
+          choices: [{ finish_reason: 'length', message: { content: '' } }],
+          usage: { prompt_tokens: 120, completion_tokens: 1500 },
+        },
+      };
+    });
     const t = await loginReady();
     const r = await gen(t, '我已经给了背景，继续判断');
     assert.equal(r.status, 503);
     assert.equal(r.body.code, 'AI_OUTPUT_TRUNCATED');
-    assert.match(String(r.body.error), /还没完整写完/);
+    assert.equal(calls, 1, '没有正文时不该空转续写');
     assert.doesNotMatch(String(r.body.error), /我需要更多信息/);
+  });
+
+  test('OpenAI 兼容非流式撞上限但有正文 → 自动续写后返回完整回复', async () => {
+    env.aiFallbackMock = false;
+    let calls = 0;
+    stubFetch((_url, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { messages: { role: string; content: string }[] };
+      const first = calls++ === 0;
+      if (!first) {
+        const msgs = body.messages;
+        assert.equal(msgs[msgs.length - 1].role, 'user', '续写指令必须在 user 轮');
+        assert.match(msgs[msgs.length - 2].content, /前半段判断/);
+      }
+      return {
+        ok: true, status: 200,
+        body: {
+          choices: [{
+            finish_reason: first ? 'length' : 'stop',
+            message: { content: first ? '前半段判断' : '，以及后半段结论。' },
+          }],
+          usage: { prompt_tokens: 120, completion_tokens: first ? 8000 : 30 },
+        },
+      };
+    });
+    const t = await loginReady();
+    const r = await gen(t, '给我完整判断');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(calls, 2);
+    assert.equal((r.body as { reply?: { text?: string; truncated?: boolean } }).reply?.text, '前半段判断，以及后半段结论。');
+    assert.equal((r.body as { reply?: { truncated?: boolean } }).reply?.truncated, undefined);
   });
 
   test('on-demand 明确“出报告” → 强制结构化成果，sections 非数组也不报 AI_UNAVAILABLE', async () => {

@@ -6,11 +6,11 @@ import Screen from '../../components/Screen';
 import TabHeader from '../../components/TabHeader';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
-import Picker from '../../components/Picker';
 import BaseSheet from '../../components/Sheet';
 import CoachMarks from '../../components/CoachMarks';
 import { navTo, switchTo } from '../../services/nav';
 import { REVIEW_TIME } from '../../data/constants';
+import { archiveAnswerPrompt } from '../../data/intents';
 import { useStore } from '../../hooks/useStore';
 import { api, type ProgressView, type StrategicProfileView, type WorkbenchView } from '../../services/api';
 import './index.scss';
@@ -28,7 +28,6 @@ export default function Profile() {
   const [libCount, setLibCount] = useState(0);
   const [projCount, setProjCount] = useState(0);
   const [reportCount, setReportCount] = useState(0);
-  const [showPicker, setShowPicker] = useState(false);
   const [prog, setProg] = useState<ProgressView | null>(null);
   const [strategic, setStrategic] = useState<StrategicProfileView | null>(null);
   const [workbench, setWorkbench] = useState<WorkbenchView | null>(null);
@@ -58,14 +57,20 @@ export default function Profile() {
   const wbSections = workbench?.sections ?? [];
   const wbMissing = workbench?.missing ?? [];
 
-  // 权益三格（§10.1 membership-strip）：本月算力 % / 案卷完整度 %。深度报告次数无 plan features 数据 → 隐藏。
-  const strip: { l: string; v: string; onClick: () => void }[] = [
-    { l: '本月算力', v: me?.usage?.unlimited ? '专属' : `${me?.usage?.usagePercent ?? 0}%`, onClick: () => navTo('/packages/work/plans/index') },
-    { l: '案卷完整度', v: `${completeness}%`, onClick: () => setSheet('workbench') },
+  // 账户权益三格（新设计稿 account-benefit-grid）：算力 / 深度报告 / 企业服务。
+  // 与旧 membership-strip 的差别：不再是「大数字 + 标签」，而是「权益名 + 一句状态」——每格都是状态加动作。
+  // 数值口径：算力 = 本月用量 %（PublicUsageView，不公开原始额度）+ 可见钻石余额（对外统一叫算力，V7 D-4）；
+  // 深度报告 = 创始人战略档案（军师执笔的长文报告），不编造「本月可用 N 次」这种没有数据源的次数；
+  // 案卷完整度从这里挪走 → 落到「个人 / 企业档案」菜单行的右值（设计稿同一处置）。
+  const benefits: { t: string; s: string; onClick: () => void }[] = [
+    { t: '算力', s: powerLine(me), onClick: () => navTo('/packages/work/credits/index') },
+    { t: '深度报告', s: '军师执笔', onClick: () => openDossier() }, // openDossier 在下方声明，包一层箭头避开 TDZ
+    { t: '企业服务', s: '工商 / 财税 / 商标', onClick: () => navTo('/packages/work/enterprise/index') },
   ];
 
   const openTeacher = () => { if (svc) setSheet('teacher'); else Taro.showToast({ title: '服务老师分配后开放', icon: 'none' }); };
   const openGroup = () => { if (svc) setSheet('group'); else Taro.showToast({ title: '社群分配后开放', icon: 'none' }); };
+  const goCommunity = () => navTo('/packages/work/community/index'); // 未分配态双卡的去处：分班申请
   const openDossier = () => {
     const started = navTo('/packages/work/dossier/index', {
       fail: () => Taro.showToast({ title: '完整履历页面加载失败，请重试', icon: 'none' }),
@@ -74,6 +79,15 @@ export default function Profile() {
   };
   const closeSheet = () => setSheet('');
   const goFill = () => { setSheet(''); switchTo('/pages/thinktank/index'); };
+  // 「当前最该补」其实混了两类东西（服务端 community.ts）：
+  //   next-*  → understanding.nextQuestions，是**要在对话里回答的问题**（「你的公司叫什么？」）
+  //   其它    → FALLBACK_MISSING，是**要上传的资料**（价格体系 / 成交漏斗表 / 案例证明）
+  // 以前两类都跳智库上传，于是点一条问句会被送去传文件。按 key 分流：问句进对话并带上原话。
+  const fillMissing = (m: { key: string; title: string }) => {
+    if (!m.key.startsWith('next-')) { goFill(); return; }
+    setSheet('');
+    navTo(`/packages/main/chat/index?agentKey=general&continue=1&send=${encodeURIComponent(archiveAnswerPrompt(m.title))}`);
+  };
 
   const copyWechat = () => {
     if (!svc) return;
@@ -124,51 +138,47 @@ export default function Profile() {
     </View>
   );
 
-  // C7：15 项菜单按「档案 / 资产 / 账户 / 系统」分组，行样式不变，仅加小节标题，降低长列表扫描成本。
-  type MenuRow = { ic: string; t: string; s: string; sw?: boolean; onClick: () => void };
+  // 菜单收敛（23 → 12 行）：只留设计稿六行 + 无第二入口的四个功能面，按「同一去处只保留一个入口」删并：
+  // - 完整履历 → 账户卡「深度报告」格；我的案卷/方案库/资料库 → 统计三格；方案与权益 → 会员牌；
+  //   订单/算力明细 → 「算力」权益格；军师社群 → 未分配时点老师/群卡直达分班页。
+  // - 军师对我的理解 → 档案工作台 sheet 内；送你一卦 → 命盘报告页内；本命色 → 设置页「偏好」；
+  //   私有化部署 → 企业服务页尾。
+  // - 「账户」组整组消失：账户能力全部住在账户卡上（权益格 + 会员牌 + 老师/群双卡），正是设计稿意图。
+  type MenuRow = { ic: string; t: string; s: string; onClick: () => void };
   const menuGroups: { title: string; rows: MenuRow[] }[] = [
     {
       title: '档案',
       rows: [
-        { ic: 'insight', t: '个人档案', s: briefLine(me?.understanding), onClick: () => navTo('/packages/main/brief/index') },
-        { ic: 'doc', t: '完整履历 · 创始人战略档案', s: '军师执笔', onClick: openDossier },
+        // 设计稿的「个人 / 企业档案 · 待补 N 项」：右值是状态 + 动作，点开档案工作台（案卷完整度四分区 + 当前最该补）。
+        { ic: 'grid', t: '个人 / 企业档案', s: wbMissing.length ? `待补 ${wbMissing.length} 项` : `完整度 ${completeness}%`, onClick: () => setSheet('workbench') },
+        // 公司与事业架构：设计稿里由战略报告识别到多主体需求后才亮（architectureEnabled）；
+        // 后端还没有这个识别信号，先常驻显示并落「待建立」态，不做假的条件隐藏。
+        { ic: 'flow', t: '公司与事业架构', s: '待建立', onClick: () => navTo('/packages/work/architecture/index') },
         ...(fortuneOn ? [
           { ic: 'trend', t: '命盘报告 · 八字紫微印证', s: '', onClick: () => navTo('/packages/work/mingpan/index') },
         ] : []),
-        { ic: 'grid', t: '我的案卷', s: projCount ? `${projCount}` : '', onClick: () => navTo('/packages/work/projects/index') },
+        // 人脉圈与持续记忆：设计稿新增的档案面——个人微信记忆授权 + 关系与承诺清单。
+        { ic: 'user', t: '人脉圈与持续记忆', s: '未开通', onClick: () => navTo('/packages/work/relations/index') },
         { ic: 'flag', t: '战略账本 · 决策与天机', s: '决策记录', onClick: () => navTo('/packages/work/ledger/index') },
       ],
     },
     {
       title: '资产',
       rows: [
-        { ic: 'layers', t: '方案库', s: `${libCount + reportCount}`, onClick: () => navTo('/packages/work/library/index') },
-        // 作品库（历史成品图）：与方案库/品牌资产/资料库同属「资产」，故落在这一组而不是页头。
+        // 作品库/品牌资产：全站唯一入口（studio 入口的旧注释已核实失效），不能删。
         // 刻意**不按出图开关隐藏**：这是回看已有资产的入口，不是出图入口（出图按钮的降级口径在作品库页内处理）。
         { ic: 'image', t: '我的作品库 · 历史成品图', s: '海报', onClick: () => navTo('/packages/work/gallery/index') },
         { ic: 'spark', t: '我的品牌资产', s: '数字人/短视频素材', onClick: () => navTo('/packages/work/brandkit/index') },
-        { ic: 'attach', t: '我的资料库', s: '', onClick: () => navTo('/packages/work/knowledge/index') },
-        { ic: 'chart', t: '数据授权与数据源', s: '', onClick: () => navTo('/packages/work/bindings/index') },
-      ],
-    },
-    {
-      title: '账户',
-      rows: [
-        { ic: 'doc', t: '订单支付 / 算力明细', s: '', onClick: () => navTo('/packages/work/credits/index') },
-        ...(fortuneOn ? [
-          { ic: 'spark', t: '送你一卦 · 给朋友出速写卡', s: '', onClick: () => navTo('/packages/work/gift/index') },
-        ] : []),
-        { ic: 'clock', t: '提醒与日历', s: reminderHint(me?.service), onClick: () => navTo('/packages/work/reminders/index') },
-        { ic: 'crown', t: '我的本命色', s: color.short, sw: true, onClick: () => setShowPicker(true) },
+        { ic: 'chart', t: '数据授权与隐私', s: '', onClick: () => navTo('/packages/work/bindings/index') },
       ],
     },
     {
       title: '系统',
       rows: [
-        // 承接原页头右侧的「设置」（页头一律不放按钮）；用户卡姓名那块仍可点进同一页，但标签是「完善你的资料」，看不出是设置。
-        { ic: 'user', t: '设置 · 资料与关于', s: '', onClick: () => navTo('/packages/main/settings/index') },
+        { ic: 'clock', t: '提醒与日历', s: reminderHint(me?.service), onClick: () => navTo('/packages/work/reminders/index') },
+        // 承接原页头右侧的「设置」（页头一律不放按钮）；本命色已并入设置页「偏好」小节。
+        { ic: 'user', t: '设置 · 资料与偏好', s: '', onClick: () => navTo('/packages/main/settings/index') },
         { ic: 'grid', t: '模块管理 · 添加 / 隐藏', s: '', onClick: () => navTo('/packages/work/market/index') },
-        { ic: 'shield', t: '私有化部署 · 企业版', s: '预约', onClick: () => Taro.showToast({ title: '已记录企业版意向', icon: 'none' }) },
         {
           ic: 'lock', t: '退出登录', s: '',
           onClick: () =>
@@ -204,35 +214,50 @@ export default function Profile() {
             <Text className="member-pill" onClick={() => navTo('/packages/work/plans/index')}>{me?.plan?.name || '尚未开通'}</Text>
           </View>
 
+          {/* 资料行（新设计稿 account-profile-meta）：收敛成「手机 / 邀请码」两行内联。
+              「所在社群」不再单独占一行——它作为班级群卡的副标题出现，同一事实不在卡里写两遍。 */}
           <View className="account-profile-meta">
-            <View className="apm-row"><Text className="apm-k">手机</Text><Text className="apm-v">{maskPhone(me?.user.phone)}</Text></View>
-            <View className="apm-row"><Text className="apm-k">所在社群</Text><Text className="apm-v">{svc?.className ? `${svc.className} · 服务中` : '待分配'}</Text></View>
-            <View className="apm-row"><Text className="apm-k">邀请码</Text><Text className="apm-v"><Text className="apm-code">{me?.inviteCode || '—'}</Text></Text></View>
+            <Text className="apm-line">手机 {maskPhone(me?.user.phone)}</Text>
+            <Text className="apm-line">邀请码 <Text className="apm-code">{me?.inviteCode || '—'}</Text></Text>
           </View>
 
-          <View className="membership-strip">
-            {strip.map((c) => (
-              <View key={c.l} className="ms-cell" onClick={c.onClick}>
-                <Text className="ms-v serif">{c.v}</Text>
-                <Text className="ms-l">{c.l}</Text>
+          {/* 账户权益三格（account-benefit-grid）：权益名 + 一句状态，取代原来的大数字三格 */}
+          <View className="account-benefit-grid">
+            {benefits.map((c) => (
+              <View key={c.t} className="account-benefit" onClick={c.onClick}>
+                <Text className="ab-t">{c.t}</Text>
+                <Text className="ab-s">{c.s}</Text>
               </View>
             ))}
           </View>
 
-          {/* C7：未分配服务时置灰 + 说明（.is-empty 关掉 pointer-events），不再做可点的假按钮 */}
+          {/* 老师与社群双卡（新设计稿 service-action-row）：绿卡上的两张白卡，三个动作各自独立——
+              点老师卡 → 老师详情；点卡内微信号 → 直接复制（不再要先进半屏再复制）；点班级群 → 群二维码。
+              未分配时不再置灰锁死：两张卡都直达军师社群页（分班申请就是拿到老师和群的路径）——
+              这也让原「军师社群」菜单行可删（同一去处只留一个入口）。 */}
           <View className="service-action-row">
-            <View className={`service-action ${svc ? '' : 'is-empty'}`} onClick={svc ? openTeacher : undefined}>
-              <Text className="sa-i serif">微</Text>
-              <View className="sa-b">
-                <Text className="sa-t">{svc ? `${svc.teacherName}微信` : '服务老师微信'}</Text>
-                <Text className="sa-s">{svc ? '服务老师 / 资料确认' : '分配服务老师后开放'}</Text>
+            <View className={`service-action service-action-teacher ${svc ? '' : 'is-empty'}`}>
+              <View className="service-action-main" onClick={svc ? openTeacher : goCommunity}>
+                <Text className="sa-i serif">微</Text>
+                <Text className="sa-t">{svc ? `${svc.teacherName}微信` : '老师微信'}</Text>
               </View>
+              {svc ? (
+                <View className="teacher-wechat-id" onClick={copyWechat}>
+                  <Text className="twi-id">{svc.teacherWechat}</Text>
+                  <Text className="twi-em">复制</Text>
+                </View>
+              ) : (
+                <Text className="teacher-wechat-id twi-ph" onClick={goCommunity}>待分配 · 去申请分班 ›</Text>
+              )}
             </View>
-            <View className={`service-action ${svc ? '' : 'is-empty'}`} onClick={svc ? openGroup : undefined}>
-              <Text className="sa-i serif">码</Text>
+            <View className={`service-action service-action-group ${svc ? '' : 'is-empty'}`} onClick={svc ? openGroup : goCommunity}>
+              <View className="sa-qr" aria-label="群二维码">
+                <View className="sa-qr-d" /><View className="sa-qr-d" />
+                <View className="sa-qr-d" /><View className="sa-qr-d is-hollow" />
+              </View>
               <View className="sa-b">
-                <Text className="sa-t">群二维码</Text>
-                <Text className="sa-s">{svc ? '入群 / 二维码' : '分配社群后开放'}</Text>
+                <Text className="sa-t">班级群</Text>
+                <Text className="sa-s">{svc ? `${svc.className} · 服务中` : '去申请分班 ›'}</Text>
               </View>
             </View>
           </View>
@@ -282,7 +307,6 @@ export default function Profile() {
                 <View key={r.t} className="menu-row" onClick={r.onClick}>
                   <View className="menu-ic"><Icon name={r.ic} size={14} color={accent} /></View>
                   <Text className="menu-t">{r.t}</Text>
-                  {r.sw ? <View className="menu-sw" style={{ background: accent }} /> : null}
                   <Text className="menu-s">{r.s}</Text>
                   <Text className="menu-go">›</Text>
                 </View>
@@ -291,23 +315,9 @@ export default function Profile() {
           </View>
         ))}
 
-        {/* 服务老师 / 军师社群（account-teacher 暖金卡） */}
-        <View className="account-teacher" onClick={() => navTo('/packages/work/community/index')}>
-          <View className="at-b">
-            <Text className="at-t">军师社群 · 服务老师</Text>
-            <Text className="at-s">分班与入群任务 · 服务老师带你把军师用起来</Text>
-          </View>
-          <Text className="at-em">进入</Text>
-        </View>
-
-        {/* 深度能力解锁（account-depth 绿卡） */}
-        <View className="account-depth" onClick={() => navTo('/packages/work/plans/index')}>
-          <View className="ad-b">
-            <Text className="ad-t">进阶能力</Text>
-            <Text className="ad-s">更高产出额度、进阶锦囊、数据加持与长期跟进</Text>
-          </View>
-          <Text className="ad-em">管理</Text>
-        </View>
+        {/* 页尾原有「军师社群 · 服务老师」与「进阶能力」两张卡按新设计稿移除：
+            前者与账户卡的老师/班级群双卡重复，后者与会员牌 + 算力权益格重复。
+            两个去处已改挂到「账户」菜单组，同一件事不在一页里出现两次。 */}
       </View>
 
       {/* 档案工作台（§10.4 profile-files 半屏详情） */}
@@ -336,6 +346,13 @@ export default function Profile() {
             ))}
           </View>
 
+          {/* 军师对我的理解（brief）：原菜单行并进档案工作台——它就是档案的「军师视角摘要」，
+              单独占一行菜单和「个人 / 企业档案」在语义上打架。关 sheet 再跳，返回时不叠层。 */}
+          <View className="pf-fieldrow" onClick={() => { closeSheet(); navTo('/packages/main/brief/index'); }}>
+            <Text className="pf-fk">军师对我的理解</Text>
+            <Text className="pf-fv-go">{briefLine(me?.understanding) || '查看'} ›</Text>
+          </View>
+
           <View className="profile-missing-list">
             <View className="pml-head">
               <Text className="pml-t">当前最该补</Text>
@@ -348,7 +365,7 @@ export default function Profile() {
                   <Text className="pmr-t">{m.title}</Text>
                   <Text className="pmr-s">{m.desc}</Text>
                 </View>
-                <Text className="pmr-go" onClick={goFill}>去补</Text>
+                <Text className="pmr-go" onClick={() => fillMissing(m)}>去补</Text>
               </View>
             ))}
           </View>
@@ -402,7 +419,6 @@ export default function Profile() {
         <View className={`pf-primary ${svc?.groupQrUrl ? '' : 'is-disabled'}`} onClick={saveQr}><Text>{svc?.groupQrUrl ? '保存二维码' : '二维码待分配'}</Text></View>
       </Sheet>
 
-      <Picker open={showPicker} first={false} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
 
       {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉我的页数据 */}
       <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadProfile(); }} />
@@ -435,6 +451,21 @@ function maskPhone(phone?: string): string {
 function phoneTail(phone?: string): string {
   if (!phone || phone.length < 4) return '****';
   return phone.slice(-4);
+}
+
+// 算力权益格右侧状态行：本月用量 % + 可见的算力（钻石）余额。
+// 只用 PublicUsageView 的百分比，不落原始 token 额度（契约：用户侧不读取内部额度原值）；
+// 余额用 creditBalance——它本来就是对用户可见的那本账（解锁顾问 / 出图按张）。
+// usage 按契约是必填，但这里跟着原来的写法保持可选取值（`me?.usage?.usagePercent ?? 0`）：
+// 老版本 /me 或缓存档案缺这一段时，直接解引用会抛在 render 里，把老板 tab 整页打白——
+// 一个权益格的数字不值这个风险。
+function powerLine(me: { usage?: { usagePercent?: number; unlimited?: boolean }; creditBalance?: number } | null): string {
+  if (!me) return '—';
+  if (me.usage?.unlimited) return '不限量';
+  const used = `已用 ${me.usage?.usagePercent ?? 0}%`;
+  const bal = me.creditBalance;
+  if (typeof bal !== 'number') return used;
+  return bal < 0 ? `${used} · 余不限量` : `${used} · 余 ${bal}`;
 }
 
 // 案卷完整度兜底（workbench 拉取失败时按理解成熟度估算）。

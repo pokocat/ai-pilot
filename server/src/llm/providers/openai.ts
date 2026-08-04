@@ -2,17 +2,30 @@
 // 走标准 /v1/chat/completions，兼容 OpenAI / Agnes / DeepSeek / Moonshot(Kimi) / 通义千问兼容模式 等。
 // 结构化成果用 function calling（tools）强约束。baseUrl/model/key/温度 来自运行时配置（可后台切换）。
 
-import { DELIVERABLE_TOOL, injectVariables, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { CHAT_STYLE_GUIDE, DELIVERABLE_TOOL, ZERO_USAGE, injectVariables, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import { runToolLoop } from '../tools/loop.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext, TurnOutput } from '../tools/types.js';
-import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js';
+import {
+  assertChatBodyProduced,
+  assertChatOutputComplete,
+  continuationPrompt,
+  dedupeContinuation,
+  isTruncatedFinish,
+  joinContinuation,
+  noteChatTruncated,
+  CHAT_MAX_TOKENS,
+  CHAT_TOTAL_MAX_TOKENS,
+  CONTINUE_DEADLINE_MS,
+  CONTINUE_DEDUPE_BUFFER_CHARS,
+  MAX_CHAT_CONTINUATIONS,
+} from './completionGuard.js';
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。见 services/llmGate.ts 顶部说明。
 import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt } from '../../services/llmPool.js';
-import { maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
+import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
 import { deliverableTimeoutMs } from '../providerTimeouts.js';
 
 interface OAToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
@@ -355,60 +368,169 @@ export async function openaiDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
   return { result: { ...mockDeliverable(ctx), degraded: true }, usage };
 }
 
-export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<ChatReply>> {
-  const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
-  const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
-  const data = await callChat(cfg, {
-    max_tokens: CHAT_MAX_TOKENS,
-    messages: [
-      { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。` },
-      ...history,
-      { role: 'user', content: openaiUserContent(ctx.userMessage, ctx.images) },
-    ] as OAMessage[],
-  });
-  const usage = usageOf(data);
-  assertChatOutputComplete('OpenAI', data.choices?.[0]?.finish_reason, usage.outputTokens);
-  const text = requireText(data.choices?.[0]?.message?.content, usage, 'chat');
+function sumUsage(a: Usage, b: Usage): Usage {
   return {
-    result: { text },
-    usage,
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cachedInput: a.cachedInput + b.cachedInput,
+    cacheWrite: (a.cacheWrite ?? 0) + (b.cacheWrite ?? 0),
   };
 }
 
-export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
+/** 对话首轮的 messages。续写轮在其后追加「残文 assistant 轮 + 续写指令 user 轮」。 */
+function chatBaseMessages(ctx: GenContext): OAMessage[] {
   const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
-  const body = {
-    max_tokens: CHAT_MAX_TOKENS,
-    messages: [
-      { role: 'system', content: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。` },
-      ...history,
-      { role: 'user', content: openaiUserContent(ctx.userMessage, ctx.images) },
-    ] as OAMessage[],
-  };
+  return [
+    { role: 'system', content: `${system}\n\n${CHAT_STYLE_GUIDE}` },
+    ...history,
+    { role: 'user', content: openaiUserContent(ctx.userMessage, ctx.images) },
+  ] as OAMessage[];
+}
+
+/**
+ * 续写轮 messages。与 Claude 侧同一套写法（残文进 assistant 历史、指令进 user 轮）——
+ * OpenAI 协议虽然容得下末轮 assistant 续写，但同一网关背后常挂 Claude 模型，
+ * 用同一套跨模型都安全的形态，省掉一个按模型分叉的坑。
+ */
+function continuationMessages(base: OAMessage[], accumulated: string): OAMessage[] {
+  return [
+    ...base,
+    { role: 'assistant', content: accumulated },
+    { role: 'user', content: continuationPrompt(accumulated) },
+  ] as OAMessage[];
+}
+
+export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<ChatReply>> {
+  const base = chatBaseMessages(ctx);
+  const startedAt = Date.now();
+  let text = '';
+  let usage: Usage = ZERO_USAGE;
+  let truncated = false;
+
+  // 撞上限即自动续写（同 Claude 侧口径）：finish_reason=length 不是失败，是「还没写完」。
+  for (let round = 0; ; round++) {
+    const data = await callChat(cfg, {
+      max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, cfg, round === 0),
+      messages: round === 0 ? base : continuationMessages(base, text),
+    }, 'chat_completion', affinityOf(ctx), round === 0);
+    usage = sumUsage(usage, usageOf(data));
+    text = joinContinuation(text, (data.choices?.[0]?.message?.content ?? '').trim());
+
+    const reason = data.choices?.[0]?.finish_reason;
+    if (!isTruncatedFinish(reason)) break;
+    // 一个字正文都没写就撞上限：没有锚点可续写，如实抛错并指向预算（见 assertChatBodyProduced）。
+    if (!text) assertChatBodyProduced('OpenAI', reason, usage.outputTokens);
+    if (round >= MAX_CHAT_CONTINUATIONS
+      || usage.outputTokens >= CHAT_TOTAL_MAX_TOKENS
+      || Date.now() - startedAt > CONTINUE_DEADLINE_MS) {
+      truncated = true;
+      noteChatTruncated('OpenAI', 'given_up');
+      break;
+    }
+    noteChatTruncated('OpenAI', 'continued');
+  }
+
+  return { result: { text: requireText(text, usage, 'chat'), ...(truncated ? { truncated: true } : {}) }, usage };
+}
+
+type StreamRoundOut = { text: string; usage: Usage; truncated: boolean };
+
+/**
+ * 一轮流式对话：逐字 yield，返回本轮正文 / 用量 / 是否撞上限。
+ * `dedupeAgainst` 有值时（续写轮）开头先攒一小段再下发，好把模型复述的半句剪掉。
+ */
+async function* streamChatRound(
+  cfg: ResolvedAiConfig,
+  messages: OAMessage[],
+  opts: { allowThinking: boolean; affinity?: string; dedupeAgainst?: string; onDelta?: () => void },
+): AsyncGenerator<{ type: 'delta'; text: string }, StreamRoundOut> {
+  const body = { max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, cfg, opts.allowThinking), messages };
   let chunks: AsyncGenerator<OAStreamChunk>;
   try {
-    chunks = await callChatStream(cfg, body, true, affinityOf(ctx));
+    chunks = await callChatStream(cfg, body, true, opts.affinity);
   } catch (err) {
     if (!/stream_options|include_usage/i.test((err as Error).message)) throw err;
-    chunks = await callChatStream(cfg, body, false, affinityOf(ctx));
+    chunks = await callChatStream(cfg, body, false, opts.affinity);
   }
+
   let text = '';
-  let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
+  let usage: Usage = ZERO_USAGE;
   let finishReason: string | null = null;
+  let head: string | null = opts.dedupeAgainst ? '' : null; // null=已过缓冲期/首轮，直接下发
+
+  const emit = (chunk: string): { type: 'delta'; text: string } | null => {
+    if (!chunk) return null;
+    text += chunk;
+    opts.onDelta?.();
+    return { type: 'delta', text: chunk };
+  };
+
   for await (const chunk of chunks) {
     if (chunk.usage) usage = usageOf({ usage: chunk.usage });
     const reason = chunk.choices?.find((choice) => choice.finish_reason)?.finish_reason;
     if (reason) finishReason = reason;
     const delta = chunk.choices?.map((c) => c.delta?.content ?? '').join('') ?? '';
-    if (delta) {
-      text += delta;
-      yield { type: 'delta', text: delta };
+    if (!delta) continue;
+    if (head !== null) {
+      head += delta;
+      if (head.length < CONTINUE_DEDUPE_BUFFER_CHARS) continue;
+      const cleaned = dedupeContinuation(opts.dedupeAgainst!, head);
+      head = null;
+      const ev = emit(cleaned);
+      if (ev) yield ev;
+      continue;
+    }
+    const ev = emit(delta);
+    if (ev) yield ev;
+  }
+  if (head) { // 整轮短于缓冲长度（续写只补了一句）
+    const ev = emit(dedupeContinuation(opts.dedupeAgainst!, head));
+    if (ev) yield ev;
+  }
+
+  return { text, usage, truncated: isTruncatedFinish(finishReason) };
+}
+
+export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
+  const base = chatBaseMessages(ctx);
+  const affinity = affinityOf(ctx);
+  const startedAt = Date.now();
+
+  const first = yield* streamChatRound(cfg, base, { allowThinking: true, affinity });
+  let text = first.text;
+  let usage = first.usage;
+  let truncated = first.truncated;
+  // 一个字正文都没写就撞上限：没有锚点可续写，如实抛错并指向预算（见 assertChatBodyProduced）。
+  if (truncated && !text) assertChatBodyProduced('OpenAI', 'length', usage.outputTokens);
+
+  // —— 续写轮：撞上限不是失败，是「还没写完」——
+  // 续写失败**不算整轮失败**：手里已有可读内容，宁可标 truncated 交给用户点「继续」，
+  // 也不能把用户已经看完的半篇回答换成一个错误气泡。affinity 不变，尽量落回同一端点保住缓存。
+  for (let round = 1; truncated && text && round <= MAX_CHAT_CONTINUATIONS; round++) {
+    if (usage.outputTokens >= CHAT_TOTAL_MAX_TOKENS) break;
+    // 墙钟兜底：宁可标 truncated 给「继续写完」，也不能为了补齐把整轮拖到客户端超时——
+    // 那会走 clientGone（退预留、不落库），用户连已经看完的半篇都拿不到。
+    if (Date.now() - startedAt > CONTINUE_DEADLINE_MS) break;
+    try {
+      const cont = yield* streamChatRound(cfg, continuationMessages(base, text), {
+        allowThinking: false,
+        affinity,
+        dedupeAgainst: text,
+      });
+      usage = sumUsage(usage, cont.usage);
+      text += cont.text; // 轮内已去重，此处只做拼接（避免与已下发的 delta 对不上）
+      truncated = cont.truncated;
+      noteChatTruncated('OpenAI', 'continued');
+    } catch (err) {
+      console.warn(`[llm:openai] 第 ${round} 轮续写失败，按未写完交回用户：${(err as Error).message}`);
+      break;
     }
   }
-  assertChatOutputComplete('OpenAI', finishReason, usage.outputTokens);
+  if (truncated) noteChatTruncated('OpenAI', 'given_up');
+
   const out = requireText(text, usage, 'chat_stream');
-  yield { type: 'done', result: { text: out }, usage };
+  yield { type: 'done', result: { text: out, ...(truncated ? { truncated: true } : {}) }, usage };
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回 content 文本。 */
@@ -474,7 +596,7 @@ export async function openaiChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
   const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const r = await runToolLoop({
     step: openaiStep(cfg, ctx.images),
-    system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`,
+    system: `${system}\n\n${CHAT_STYLE_GUIDE}`,
     history: ctx.history,
     userMessage: ctx.userMessage,
     tools,
@@ -482,7 +604,7 @@ export async function openaiChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
   });
   const text = requireText(r.text, r.usage, 'chat_tools');
   return {
-    result: { text },
+    result: { text, ...(r.truncated ? { truncated: true } : {}) },
     usage: r.usage,
     toolCalls: r.toolCalls,
     iterations: r.iterations,
@@ -584,7 +706,7 @@ export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
   const text = requireText(r.text, r.usage, 'adaptive');
   return {
     kind: 'chat',
-    reply: { text },
+    reply: { text, ...(r.truncated ? { truncated: true } : {}) },
     usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
   };
 }
@@ -615,9 +737,15 @@ export function openaiStep(cfg: ResolvedAiConfig, images?: ImageInput[]): StepFn
 
     const data = await callChat(cfg, body, opts.finalTool ? 'deliverable' : 'chat_completion');
     const usage = usageOf(data);
-    assertChatOutputComplete('OpenAI', data.choices?.[0]?.finish_reason, usage.outputTokens);
     const msg = data.choices?.[0]?.message;
     const calls = msg?.tool_calls ?? [];
+    // 撞上限的处理按「产物能不能半份出厂」分两种：
+    //   · 有 tool_calls / 本轮期待结构化成果 → 截断的 arguments 就是坏 JSON，半份报告不能出厂，按失败抛；
+    //   · 纯文本对话（含自适应回落文本）→ 内容是可读的，标 truncated 交回，由端上给「继续」。
+    const truncated = isTruncatedFinish(data.choices?.[0]?.finish_reason);
+    if (truncated && (calls.length || (opts.finalTool && opts.forceFinalTool !== false))) {
+      assertChatOutputComplete('OpenAI', data.choices?.[0]?.finish_reason, usage.outputTokens);
+    }
 
     // 命中终结工具 → 最终 deliverable 入参。
     if (finalName) {
@@ -631,6 +759,6 @@ export function openaiStep(cfg: ResolvedAiConfig, images?: ImageInput[]): StepFn
       return { kind: 'tool_calls', calls: mapped, usage } as TurnOutput;
     }
     // 无工具调用 → 文本即最终答案。
-    return { kind: 'final', text: (msg?.content ?? '').trim(), usage };
+    return { kind: 'final', text: (msg?.content ?? '').trim(), usage, truncated };
   };
 }

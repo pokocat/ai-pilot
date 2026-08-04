@@ -85,10 +85,14 @@ export interface FinalTool {
   schema: Record<string, unknown>;
 }
 
-/** 一次 provider step 的产出：要么请求继续调工具，要么给出最终答案。 */
+/**
+ * 一次 provider step 的产出：要么请求继续调工具，要么给出最终答案。
+ * truncated：本轮文本撞了 max_tokens、内容可读但没写完（结构化成果路径不会走到这里——
+ * 半份报告不能出厂，provider 直接抛错）。透到 ChatReply 上让端上给「继续」入口。
+ */
 export type TurnOutput =
   | { kind: 'tool_calls'; calls: ToolCall[]; usage: Usage }
-  | { kind: 'final'; text?: string; toolInput?: Record<string, unknown>; usage: Usage };
+  | { kind: 'final'; text?: string; toolInput?: Record<string, unknown>; usage: Usage; truncated?: boolean };
 
 /** provider 的「一步」原语：发当前消息栈 + 工具定义，返回 tool_calls 或 final。 */
 export type StepFn = (

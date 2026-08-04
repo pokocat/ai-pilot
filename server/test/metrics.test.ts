@@ -156,13 +156,16 @@ describe('指标内容', () => {
 
   test('产出降级 / 截断 / 审核 / 禁写闸计数', async () => {
     noteGenDegraded('deliverable');
-    noteOutputTruncated('claude');
+    noteOutputTruncated('claude', 'continued'); // 撞上限但被自动续写救回（用户无感）
+    noteOutputTruncated('claude', 'given_up'); // 续写用尽/结构化产出，交回用户
     noteModeration('input', false);
     noteModeration('output', true);
     notePlanGateBlocked('none');
     const body = await get();
     assert.match(body, /junshi_gen_degraded_total\{path="deliverable"\} 1/);
-    assert.match(body, /junshi_llm_output_truncated_total\{provider="claude"\} 1/);
+    // continued 与 given_up 必须分开可见：前者高说明该调输出预算或长度约束，后者才是用户真的看到未写完。
+    assert.match(body, /junshi_llm_output_truncated_total\{provider="claude",resolved="continued"\} 1/);
+    assert.match(body, /junshi_llm_output_truncated_total\{provider="claude",resolved="given_up"\} 1/);
     assert.match(body, /junshi_moderation_checks_total\{ref="input",verdict="block"\} 1/);
     assert.match(body, /junshi_moderation_checks_total\{ref="output",verdict="pass"\} 1/);
     assert.match(body, /junshi_plan_gate_blocked_total\{state="none"\} 1/);

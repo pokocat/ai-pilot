@@ -197,8 +197,12 @@ export function noteTokenUsage(args: {
 const genDegraded = new LabeledCounter('junshi_gen_degraded_total', '产出降级次数（mock 兜底 / 工程语境泄漏替换）');
 export function noteGenDegraded(path: string): void { genDegraded.inc({ path }); }
 
-const outputTruncated = new LabeledCounter('junshi_llm_output_truncated_total', '输出达 token 上限被判残缺的次数（AI_OUTPUT_TRUNCATED）');
-export function noteOutputTruncated(provider: string): void { outputTruncated.inc({ provider }); }
+// resolved=continued：撞上限后被自动续写救回（用户无感）；given_up：续写用尽/结构化产出，按残缺处理。
+// 两者要分开看：continued 高说明输出预算或提示词长度约束该调，given_up 高才是用户真的看到了未写完。
+const outputTruncated = new LabeledCounter('junshi_llm_output_truncated_total', '输出达 token 上限的次数（resolved=continued 已续写救回 / given_up 交回用户）');
+export function noteOutputTruncated(provider: string, resolved: 'continued' | 'given_up' = 'given_up'): void {
+  outputTruncated.inc({ provider, resolved });
+}
 
 /* ──────────────── 业务事件 ──────────────── */
 

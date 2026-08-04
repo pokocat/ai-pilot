@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Input, ScrollView } from '@tarojs/components';
+import { View, Text, Input, ScrollView, Canvas } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import TabHeader from '../../components/TabHeader';
@@ -8,22 +8,33 @@ import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
+import SharePreview from '../../components/SharePreview';
 import { navTo, switchTo } from '../../services/nav';
 import { REVIEW_TIME } from '../../data/constants';
 import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
-import { api, type Agent, type GoalLadder, type ReminderItem, type BizMetricTemplateItem } from '../../services/api';
+import { api, type Agent, type GoalLadder, type ReminderItem, type BizMetricTemplateItem, type ForceKind, type DecisionView } from '../../services/api';
 import {
   addOrder, buildReviewPrompt, doneOrdersOf, ordersOf, pendingOrdersOf, recentOrders, refreshDossier,
   removeOrder, saveBackfill, saveGoals, setOrderResult, startReview, today, todayProgress, toggleOrder, type Dossier, type DossierOrder,
 } from '../../services/dossier';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
+import { pickDecisionToVerify } from '../../services/decisionPick';
+import { useShareImage } from '../../hooks/useShareImage';
+import { makeDailyBattleImage } from '../../services/dailyBattleCard';
 import { EMPTY_STATES } from '../../data/emptyStates';
+import { ARCHIVE_INTERVIEW_PROMPT, archiveAnswerPrompt } from '../../data/intents';
 import PrescriptionStrip from '../../components/PrescriptionStrip';
 import CoachMarks from '../../components/CoachMarks';
 import './index.scss';
 
 type ExecView = 'today' | 'week' | 'review';
+
+// 三势对账（新设计稿 v2-review-card「三势检查」）：复盘前先确认今天的动作还在不在主线上。
+// 势的结论一律来自真实军师档案（battleForces），这里只负责让用户逐势自评「符合 / 偏了」，
+// 自评结果拼进复盘开场——军师据此判断是执行没跟上，还是判断本身该改。
+const FORCE_LABEL: Record<ForceKind, string> = { sky: '天势', market: '市势', people: '人势' };
+type ForceVerdict = 'on' | 'off';
 
 // 提醒节奏：微信订阅消息是一次性授权，用户每点一次订阅可触达一次。
 const REMINDERS = [
@@ -86,6 +97,13 @@ export default function Studio() {
   const [goalDraft, setGoalDraft] = useState('');
   // WO-10：本周经营周报是否已填报（用于复盘按钮旁的轻提示；null=未知/无行业模板不提示）
   const [bizFilled, setBizFilled] = useState<boolean | null>(null);
+  // 三势对账（复盘视图）：kind → 符合/偏了；不选也能复盘，只是开场少一段上下文。
+  // 这是「今天」的自评，所以连日期一起存：小程序页面能在后台活很久，跨天回来若还留着昨天的勾选，
+  // 会被当成今天的判断再发一遍给军师。按 useDidShow 里比对日期清空；提交复盘后也清（已被消费）。
+  const [forceVerdict, setForceVerdict] = useState<{ day: string; v: Record<string, ForceVerdict> }>({ day: today(), v: {} });
+  // 决策验证（新设计稿 v2 决策验证卡）：最近一条待验证决策，复盘时就地判「应验 / 需修正」。
+  const [pendingDecision, setPendingDecision] = useState<DecisionView | null>(null);
+  const [verifying, setVerifying] = useState(false);
   const und = s.me()?.understanding;
 
   // C1：数据拉取（登录后才拉；未登录只挂登录引导，不请求）。
@@ -100,11 +118,15 @@ export default function Studio() {
     api.reviews().then((r) => setStreak(r.streak)).catch(() => setStreak(null));
     // V7-11：提醒节奏（服务端提醒体系；失败静默，卡片降级到默认文案）
     api.reminders().then((r) => setReminders(r.items)).catch((e) => { s.handleApiError(e, { silent: true }); setReminders(null); });
+    // 决策验证：取「现在最该验证」的那一条（与军情页同一个选择口径，见 services/decisionPick）。
+    api.decisions().then((r) => setPendingDecision(pickDecisionToVerify(r.items))).catch(() => setPendingDecision(null));
   };
 
   useDidShow(() => {
     s.setTab(2);
     Taro.getCurrentInstance().page?.getTabBar?.();
+    // 跨天回到本页：清掉昨天的三势自评（只在日期真的变了时清，否则从半屏返回也会把用户刚勾的清掉）。
+    setForceVerdict((c) => (c.day === today() ? c : { day: today(), v: {} }));
     if (!s.isAuthed()) { setShowLogin(true); return; }
     void s.loadAgents(); // 后台刚上架/改入口类型后，回到执行页立即刷新创作顾问目录
     loadStudio();
@@ -210,9 +232,37 @@ export default function Studio() {
     goChat('general', '按我们最近定下的方案，把今天最重要的 1-3 件事拆成今日军令，并给出每件事的完成标准。');
   // 发起复盘：先落复盘账（服务端记连续天数，不阻塞跳转），再带真实数据进复盘对话。
   // 复盘走总军师（M2 PR-6：复盘是留存生命线，订阅内免费，不设解锁墙；经营参谋 ops 保留为可解锁深聊）。
+  // 三势对账 → 复盘上下文：只带用户明确点过的势，没点的不替他表态。
+  const forceCheckLines = (): string[] => {
+    const rows = (und?.battleForces ?? []).filter((f) => forceVerdict.v[f.kind]);
+    if (!rows.length) return [];
+    return [
+      '三势对账（我自己的判断）：',
+      ...rows.map((f) => `- ${FORCE_LABEL[f.kind]}（打法：${f.tactic}）：今天${forceVerdict.v[f.kind] === 'on' ? '在主线上' : '偏了'}。`),
+      '如果某一势连续偏离，请直接说是执行没跟上，还是这一势的判断该改。',
+    ];
+  };
+
   const genReview = () => {
+    const lines = forceCheckLines(); // 先取，再清——清完就读不到了
     void startReview('day').then(() => s.loadBadges({ force: true })); // 复盘账已落 → 立刻重算军令红点（今日已复盘即熄）
-    goChat('general', buildReviewPrompt(dossier));
+    goChat('general', buildReviewPrompt(dossier, lines));
+    setForceVerdict({ day: today(), v: {} }); // 自评已带进复盘，不留在界面上让人以为还没提交
+  };
+
+  // 决策验证：复盘时就地把待验证决策判掉，直接落决策账本（与战略账本页同一个端点）。
+  const verifyPending = async (outcome: 'correct' | 'revise') => {
+    if (!pendingDecision || verifying) return;
+    setVerifying(true);
+    try {
+      await api.verifyDecision(pendingDecision.id, outcome);
+      setPendingDecision(null);
+      Taro.showToast({ title: outcome === 'correct' ? '已记为判断正确' : '已记为需修正', icon: 'none' });
+    } catch (e) {
+      s.handleApiError(e);
+    } finally {
+      setVerifying(false);
+    }
   };
   const subscribeReview = async () => {
     try {
@@ -226,28 +276,31 @@ export default function Studio() {
       ? `围绕这条军令帮我产出可直接使用的内容脚本：「${firstUndone.text}」。`
       : '按我们最近定下的方案，帮我写今天要发布的内容脚本。');
 
-  // 每日战报卡（M4 PR-15）：服务端按真实账本渲染，复制可分享链接
-  const shareDailyCard = async () => {
-    Taro.showLoading({ title: '生成战报卡…' });
-    try {
-      const r = await api.publishCard('daily');
-      Taro.hideLoading();
-      if (r.htmlUrl) {
-        Taro.setClipboardData({ data: r.htmlUrl, success: () => Taro.showToast({ title: '战报卡链接已复制 · 可发朋友圈/群', icon: 'none' }) });
-      } else {
-        Taro.showToast({ title: '本地预览模式无卡片', icon: 'none' });
-      }
-    } catch {
-      Taro.hideLoading();
-      Taro.showToast({ title: '生成失败，请重试', icon: 'none' });
-    }
-  };
-
   const dateStr = (() => { const d = new Date(); return `${d.getMonth() + 1}月${d.getDate()}日`; })();
 
+  // 每日战报卡：端上 canvas 出图 → 预览 → 发好友/存相册。
+  // 原来是调 POST /cards/daily 拿一条 http 链接塞剪贴板，提示「可发朋友圈/群」——小程序里这条
+  // 路走不通（链接在小程序内打不开、朋友圈也不接受粘贴链接），用户拿到的只是一串没处贴的文本；
+  // 而且那条 /api/r/:id 公开页无鉴权无有效期，还把线索/咨询/成交原始数字挂在公网。
+  // 现在数据全在端上（本页 state），不再需要那个接口，卡面数字也只画进度、不画经营三件套。
+  const dailyCard = useShareImage(
+    (canvasId) => makeDailyBattleImage(canvasId, {
+      dateLabel: dateStr,
+      casefileTitle: dossier?.title,
+      total: todayOrders.length,
+      done: doneTodayOrders.length,
+      streak,
+      orders: todayOrders.map((o) => ({ text: o.text, done: o.done })),
+      backfilled: backfillSaved,
+    }),
+    { canvasId: 'stDailyCanvas', loadingTitle: '生成战报卡…', failTip: '战报卡生成失败，请重试' },
+  );
+
   // 今日最重要（today-focus）：先补资料 > 首条未完成军令
+  // 卡上显示的是哪条问题，点进对话就带哪条（archiveAnswerPrompt）。
+  // 原来发的是批量话术「你先问我最关键的 1-3 个问题」，把用户刚点的那条丢了，军师会重新再问一遍。
   const focus = und?.nextQuestions.length
-    ? { t: '先补资料，别让判断失真', d: und.nextQuestions[0], act: () => goChat('general', '帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。') }
+    ? { t: '先补资料，别让判断失真', d: und.nextQuestions[0], act: () => goChat('general', archiveAnswerPrompt(und.nextQuestions[0])) }
     : firstUndone
       ? { t: firstUndone.text, d: '完成后打卡，复盘会参考执行情况', act: () => {} }
       : null;
@@ -350,7 +403,8 @@ export default function Studio() {
         {/* 执行信号（exec-stats） */}
         <View className="exec-stats">
           <View className="exec-stat card"><Text className="stat-n serif">{todayOrders.length ? pendingTodayOrders.length : '—'}</Text><Text className="stat-l">待执行军令</Text></View>
-          <View className="exec-stat card" onClick={() => goChat('general', '帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}>
+          {/* 聚合入口：不指定哪一条，走批量提问（与点具体问题的第 0 号军令卡刻意不同） */}
+          <View className="exec-stat card" onClick={() => goChat('general', ARCHIVE_INTERVIEW_PROMPT)}>
             <Text className={`stat-n serif ${und?.nextQuestions.length ? 'warn' : ''}`}>{und ? und.nextQuestions.length : '—'}</Text>
             <Text className="stat-l">待补资料</Text>
           </View>
@@ -433,7 +487,7 @@ export default function Studio() {
           <>
             {/* 第 0 号军令（command-card 金边）：补资料（军师档案真实待补问题） */}
             {und?.nextQuestions.length ? (
-              <View className="command-card card" onClick={() => goChat('general', '帮我补齐军师档案：你先问我最关键的 1-3 个问题，我来答。')}>
+              <View className="command-card card" onClick={() => goChat('general', archiveAnswerPrompt(und.nextQuestions[0]))}>
                 <Text className="command-badge">第 0 号军令 · 补资料</Text>
                 <Text className="command-title serif">{und.nextQuestions[0]}</Text>
                 <Text className="command-desc">补齐后，判断和任务优先级会跟着更新 · 还有 {und.nextQuestions.length} 条待补</Text>
@@ -597,6 +651,59 @@ export default function Studio() {
 
         {view === 'review' ? (
           <>
+            {/* 三势对账（新设计稿 v2-review-card）：复盘前先逐势确认今天的动作还在不在主线上。
+                势与打法全部来自真实军师档案；没有三势（未建档）时整块不出现，改为引导去军情页先出判断。 */}
+            {(und?.battleForces ?? []).length ? (
+              <View className="force-check card">
+                <View className="fc-head">
+                  <Text className="fc-k">三势检查 · 每日复盘</Text>
+                  <Text className="fc-t">今天的动作是否还在主线上？</Text>
+                </View>
+                {(und?.battleForces ?? []).map((f) => {
+                  const v = forceVerdict.v[f.kind];
+                  return (
+                    <View key={f.kind} className="fc-row">
+                      <View className="fc-b">
+                        <Text className="fc-l">{FORCE_LABEL[f.kind]} · {f.conclusion}</Text>
+                        <Text className="fc-d">打法：{f.tactic}</Text>
+                      </View>
+                      <View className="fc-ops">
+                        <Text
+                          className={`fc-op ${v === 'on' ? 'on' : ''}`}
+                          style={v === 'on' ? { background: accent, borderColor: accent, color: '#fff' } : {}}
+                          onClick={() => setForceVerdict((c) => ({ day: today(), v: { ...c.v, [f.kind]: 'on' } }))}
+                        >符合</Text>
+                        <Text
+                          className={`fc-op ${v === 'off' ? 'off' : ''}`}
+                          onClick={() => setForceVerdict((c) => ({ day: today(), v: { ...c.v, [f.kind]: 'off' } }))}
+                        >偏了</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+                <Text className="fc-note">选过的势会写进复盘开场；没选的军师不替你表态。</Text>
+              </View>
+            ) : null}
+
+            {/* 决策验证（新设计稿 v2 决策验证卡）：把「这条判断到底应验了没」在复盘当场判掉，落决策账本。 */}
+            {pendingDecision ? (
+              <View className="decision-verify card">
+                <View className="dv-head">
+                  <Text className="dv-k">决策验证 · 待验证</Text>
+                  <Text className="dv-seq">决策 #{pendingDecision.seq}</Text>
+                </View>
+                <Text className="dv-t">{pendingDecision.decision}</Text>
+                {pendingDecision.verifyStandard ? <Text className="dv-d">验证标准：{pendingDecision.verifyStandard}</Text> : null}
+                {/* 动词跟战略账本页保持一致：决策账本说「判断正确 / 需修正」，
+                    「应验 / 没应验」是天机账本（预言）的词——同一条记录在两个页面用两套说法会让人以为是两件事。 */}
+                <View className="dv-ops">
+                  <Text className={`dv-op main ${verifying ? 'busy' : ''}`} style={{ background: accent }} onClick={() => verifyPending('correct')}>判断正确</Text>
+                  <Text className={`dv-op ${verifying ? 'busy' : ''}`} onClick={() => verifyPending('revise')}>需修正</Text>
+                </View>
+                <Text className="dv-more" onClick={() => navTo('/packages/work/ledger/index')}>看完整战略账本 ›</Text>
+              </View>
+            ) : null}
+
             {/* WO-10：本周经营数据填报（周复盘上方，字段按行业动态渲染） */}
             <WeeklyBizMetrics accent={accent} onFilledChange={setBizFilled} />
             <View className="review-card card">
@@ -608,9 +715,9 @@ export default function Studio() {
                 <Icon name="doc" size={15} color="#fff" />
                 <Text>今晚复盘</Text>
               </View>
-              <View className="rc-btn ghost" onClick={shareDailyCard}>
+              <View className={`rc-btn ghost ${dailyCard.busy ? 'off' : ''}`} onClick={dailyCard.make}>
                 <Icon name="image" size={15} color={accent} />
-                <Text>生成每日战报卡（可分享）</Text>
+                <Text>{dailyCard.busy ? '生成中…' : '生成每日战报卡'}</Text>
               </View>
             </View>
             <View className="remind card">
@@ -677,6 +784,13 @@ export default function Studio() {
         open={showLogin}
         onLoggedIn={() => { setShowLogin(false); loadStudio(); }}
       />
+      {/* 每日战报卡：屏外画布（只用于出图，不参与布局）+ 出图后的预览层。
+          分享形态是图片而不是链接——小程序里链接给不出去，见 services/dailyBattleCard.ts。 */}
+      <Canvas type="2d" id="stDailyCanvas" className="st-daily-canvas" />
+      {dailyCard.path ? (
+        <SharePreview path={dailyCard.path} note="经营数字已隐去，可安心示人" onClose={dailyCard.close} />
+      ) : null}
+
       <CoachMarks />
     </Screen>
   );

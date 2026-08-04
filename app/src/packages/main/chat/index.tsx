@@ -11,6 +11,7 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate, type SessionDetail, type CreativeStatusResult } from '../../../services/api';
 import { STREAM_CHAT } from '../../../services/config';
+import { asReply, replyToText } from '../../../services/chatReply';
 import {
   startLiveGen, attachLiveGenView, detachLiveGenView, peekLiveGen, stopLiveGen, dropLiveGen, storedReplyFor,
   type LiveGenView,
@@ -18,7 +19,8 @@ import {
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
 import { checkUpload, checkImageUpload } from '../../../services/uploadGuard';
 import { sourceUploadName } from '../../../services/uploadName';
-import { agentForText } from '../../../data/intents';
+import { nativeWriteStep } from '../../../services/nativeInputWrite';
+import { agentForText, DIAGNOSIS_ASKS, DIAGNOSIS_CHIPS } from '../../../data/intents';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, DISPATCH_SUGGESTIONS } from '../../../data/council';
 import { CHAT_GUIDES } from '../../../data/operatingSystem';
 import { acceptDeliverable } from '../../../services/dossier';
@@ -97,7 +99,7 @@ function sectionToLines(sec: Section): string[] {
   return out;
 }
 
-// 把结构化成果序列化为纯文本，复制到剪贴板（替代尚未实现的 PDF 导出）。
+// 把结构化成果序列化为纯文本，复制到剪贴板（供粘贴进自己的文档；PDF 导出另有入口）。
 // sections 按类型必填，但存量脏数据里可能整字段缺失（见 ReportCard 的 secs 注释），这里同样兜一层。
 function deliverableToText(d: Deliverable): string {
   const lines: string[] = [String(d?.title ?? '')];
@@ -126,36 +128,6 @@ function copyText(text: string, title = '已复制') {
     success: () => Taro.showToast({ title, icon: 'success' }),
     fail: () => Taro.showToast({ title: '复制失败', icon: 'none' }),
   });
-}
-
-function replyToText(reply: ChatReplyT): string {
-  return [reply?.text, ...(Array.isArray(reply?.points) ? reply.points : [])].filter(Boolean).join('\n\n');
-}
-
-/**
- * 落库 assistant 消息 contentJson → 可渲染的 ChatReply。
- * 服务端写的是 { text, points?, acts?, asks? }，但存量/异常数据里出现过：整条不是对象、缺 text、
- * points/asks 不是数组。这些值一路带进渲染期后：`m.reply.text` 交给 MarkdownText 会在
- * parseBlocks 抛错，`mm.reply.asks?.length` 在 activeAskIdx 计算里抛错——都是整页白屏。
- * 这里把它收成「一定能渲染」的形状；asks 逐项也要保证 options 是数组（渲染时直接 .map）。
- */
-function asReply(content: unknown): ChatReplyT {
-  // 口径与服务端 llm/schema.ts 的 textOf 一致：非字符串标量转字符串，对象丢弃。
-  const txt = (v: unknown): string =>
-    typeof v === 'string' ? v : typeof v === 'number' || typeof v === 'boolean' ? String(v) : '';
-  const c = (content && typeof content === 'object' ? content : {}) as Record<string, unknown>;
-  const asks = Array.isArray(c.asks)
-    ? c.asks
-        .filter((a): a is Record<string, unknown> => !!a && typeof a === 'object')
-        .map((a) => ({ q: txt(a.q), options: (Array.isArray(a.options) ? a.options : []).map(txt).filter(Boolean) }))
-        .filter((a) => a.q || a.options.length)
-    : undefined;
-  return {
-    text: txt(c.text),
-    ...(Array.isArray(c.points) ? { points: c.points.map(txt).filter(Boolean) } : {}),
-    ...(Array.isArray(c.acts) ? { acts: c.acts as ChatReplyT['acts'] } : {}),
-    ...(asks?.length ? { asks } : {}),
-  };
 }
 
 // 军师反问选项：流式期间隐藏正文尾部的 ```ask 结构块（含尚未流完的半截围栏），
@@ -211,6 +183,10 @@ type ChatScrollEvent = {
 const FIXED_MODEL = '军师 · 标准';
 // 记债项10：报告流失败/降级统一话术——只此一句 + ↻ 重试入口，不再另出「保底草案」提示。
 const REPORT_INTERRUPTED_TRUST = '中断了——已出的部分留着，点重试继续补全';
+// 「继续写完」发出的正文。服务端已把未写完的那条 assistant 消息落库，模型在历史里能看到断点，
+// 所以这里不需要复述断点内容，一句自然话就够；它会照常作为一条用户消息落库，
+// 因此必须是**用户看着也合理**的文案（退出重进会原样显示），不能写成系统指令腔。
+const CONTINUE_REQUEST_TEXT = '接着上面继续写完';
 const JUMP_LATEST_SHOW_DISTANCE = 420;
 const JUMP_LATEST_HIDE_DISTANCE = 140;
 // B1 贴底判定阈值：距底 ≤ 此值视为「贴底跟随」，用户上滑超过即暂停自动滚底。
@@ -241,6 +217,11 @@ const PASTE_DELTA_MIN = 500;
 const PASTE_SETTLE_MS = 250;
 // absorbPasteToFile 去重窗口：10s 内完全相同的 pasted 文本（长度 + 首尾片段指纹）直接跳过，不建第二份。
 const PASTE_DEDUP_MS = 10_000;
+// 程序性写入原生输入框的等待：Stencil 首帧渲染是异步的，就绪前写 value 会在其 watchValue 里抛错
+// （见 services/nativeInputWrite 注释）。每 ~32ms 探一次、最多 ~0.5s；等不到就放弃——
+// 值仍在 input state 里（字数/发送键/草稿判定都准），只是原生框这一次没同步上。
+const NATIVE_WRITE_RETRY_MS = 32;
+const NATIVE_WRITE_MAX_TRIES = 15;
 
 // 单次插入下，用公共前缀 + 公共后缀 diff 出这回粘进来的文本段。
 // prefix：prev 与 v 的公共前缀长；suffix：剩余部分的公共后缀长（上限 = prev.length - prefix，防前后缀重叠）。
@@ -377,6 +358,8 @@ export default function Chat() {
   // 输入框非受控：Textarea 不绑 value（避免 React 重渲染把陈旧值断言回原生 → 语音重复上屏、中间删字光标跳末尾）。
   // 程序性写入统一走 writeInput，经此 ref 直写 FormElement.value（weapp）/ Stencil value（h5）驱动原生同步。
   const taRef = useRef<any>(null);
+  // 等 Stencil 首帧渲染出原生节点再写 value 的重试定时器（见 writeInputNative）。
+  const nativeWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 粘贴 burst：命中一次长文暴增即记 baseline（暴增前的输入），burst 期间每个 onInput 都重置结算定时器。
   const pasteBurstRef = useRef<{ baseline: string } | null>(null);
   const pasteSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -555,6 +538,7 @@ export default function Chat() {
     aliveRef.current = false;
     if (reattachTimerRef.current) clearTimeout(reattachTimerRef.current);
     if (pasteSettleTimerRef.current) clearTimeout(pasteSettleTimerRef.current);
+    if (nativeWriteTimerRef.current) clearTimeout(nativeWriteTimerRef.current);
     // 卸载前把 token 缓冲同步 flush 掉、清定时器：不丢字（累计文本仍在 liveGen 快照里，重进会重放），也不留悬空定时器。
     flushTokenBuf();
     store.setOverlay(false, 'ref-picker');
@@ -1276,6 +1260,29 @@ export default function Chat() {
     writeInput(kept);
   };
 
+  // h5：Stencil 渲染出内部 <textarea> 才算就绪（见 nativeInputWrite 注释：早写会在 watchValue 里抛错，
+  // 且被 Stencil 自己 catch 成一行 console.error，外层 try/catch 兜不住）。weapp 的 FormElement 无此结构，恒就绪。
+  const inputElRendered = (el: any): boolean =>
+    IS_WEAPP || (typeof el?.querySelector === 'function' && !!el.querySelector('textarea'));
+
+  // 真正落到原生框的一步：未就绪就下一帧再试，作废/等不到就放弃（值仍在 input state 里，不丢）。
+  const writeInputNative = (text: string, tries: number) => {
+    const el = taRef.current;
+    const step = nativeWriteStep({
+      hasEl: !!el,
+      elRendered: inputElRendered(el),
+      stale: lastValueRef.current !== text,
+      tries,
+      maxTries: NATIVE_WRITE_MAX_TRIES,
+    });
+    if (step === 'drop') return;
+    if (step === 'retry') {
+      nativeWriteTimerRef.current = setTimeout(() => writeInputNative(text, tries + 1), NATIVE_WRITE_RETRY_MS);
+      return;
+    }
+    try { el.value = text; } catch { /* noop */ }
+  };
+
   // 程序性写入输入框（草稿恢复 / 粘贴归卷回填 / 粘贴结算 / 发送清空）。
   // Textarea 已解除受控（不绑 value），故必须经 ref 直写原生框：
   //  - weapp：taRef.current 是 Taro FormElement，其 value setter → setAttribute(VALUE) → setData，更新原生 textarea；
@@ -1284,8 +1291,9 @@ export default function Chat() {
   const writeInput = (text: string) => {
     setInput(text);
     lastValueRef.current = text;
-    const el = taRef.current;
-    if (el) { try { el.value = text; } catch { /* noop */ } }
+    // 上一次写入还在等原生节点就绪时又来一次：旧的直接作废，只留最新值。
+    if (nativeWriteTimerRef.current) { clearTimeout(nativeWriteTimerRef.current); nativeWriteTimerRef.current = null; }
+    writeInputNative(text, 0);
   };
 
   const handleInput = (e: { detail: { value: string } }) => {
@@ -1910,6 +1918,31 @@ export default function Chat() {
                     ))}
                   </View>
                 </View>
+
+                {/* 问诊四问（新设计稿 diagnosis-card）：只在总军师的新会话露出——
+                    专业军师线程有自己的开场，已经聊起来的会话再摆一遍四问就是噪音。
+                    下面的 chips 按「卡点」进对话，与上面 acts 里按「产出」进对话的服务端 chips 互补，不替换它们。 */}
+                {m.agent.key === 'general' && msgs.length <= 1 ? (
+                  <View className="diagnosis-card">
+                    <Text className="dg-t">今天先把案卷跑通</Text>
+                    <Text className="dg-s">你可以先按这 4 件事讲，讲不全也没关系，我会继续问。</Text>
+                    <View className="dg-list">
+                      {DIAGNOSIS_ASKS.map(([k, d], di) => (
+                        <View key={k} className="dg-row">
+                          <Text className="dg-no serif" style={{ background: 'var(--accent-soft)', color: accent }}>{di + 1}</Text>
+                          <Text className="dg-rt"><Text className="dg-rk">{k}</Text>：{d}</Text>
+                        </View>
+                      ))}
+                    </View>
+                    <View className="dg-chips">
+                      {DIAGNOSIS_CHIPS.map((c) => (
+                        <View key={c.label} className="dg-chip" style={{ borderColor: accent }} onClick={() => doSend(c.text, sessionId, m.agent.key)}>
+                          <Text style={{ color: accent }}>{c.label}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
               </View>
             );
           }
@@ -1966,6 +1999,28 @@ export default function Chat() {
                     </View>
                   ) : null}
                 </View>
+                {/*
+                  「还没写完」提示。服务端撞输出上限时已自动续写，走到这里说明连续写几轮都没收住
+                  （多半是用户要的其实是一份报告）。正文是真内容、不是错误，所以这里只做**说明 + 续写入口**，
+                  绝不做成错误气泡。
+                  续写入口只挂在最后一条上：点它是往会话末尾追加一轮，模型接的是最新上下文；
+                  历史里更早那条即使也没写完，也只保留说明，不给按钮——否则点了会接错地方。
+                */}
+                {!m.streaming && m.reply?.truncated ? (
+                  <View className="unfinished">
+                    <Icon name="pen" size={13} color={accent} />
+                    <Text className="unfinished-t">内容较长，先写到这里</Text>
+                    {i === msgs.length - 1 ? (
+                      <Text
+                        className={`unfinished-go ${busy ? 'off' : ''}`}
+                        style={busy ? {} : { color: accent }}
+                        onClick={() => { if (!busy) doSend(CONTINUE_REQUEST_TEXT, sessionId, agent?.key ?? '', [], true); }}
+                      >
+                        继续写完
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
                 <RefNotices notices={m.refNotices} />
                 {/* 军师反问选项卡：保留卡片内填写；可见文字用 View 渲染，键盘由 ScrollView 外的 Textarea 承接。 */}
                 {i === activeAskIdx && activeAsks.length ? (

@@ -53,8 +53,10 @@ async function settleCreditForDeliverable(res: CreditReservation | null, degrade
 
 // 预言收割（M2 PR-9）：总军师输出后异步抽取「具体、可验证、有期限」的天势判断落账。
 // 真实模型不可用时抽取器返回空（不产生伪预言）；失败静默，绝不影响回复主流程。
-function harvestProphecies(user: { tenantId: string; id: string }, agentKey: string, text: string | null | undefined): void {
-  if (agentKey !== 'general' || !text) return;
+// truncated=true 的正文是「还没写完」，最后一句很可能断在半截。预言账本按句抽取，
+// 采到半句预测就是记错账（且这条会长期留在账本里），故未写完的回复一律不采。
+function harvestProphecies(user: { tenantId: string; id: string }, agentKey: string, text: string | null | undefined, truncated?: boolean): void {
+  if (agentKey !== 'general' || !text || truncated) return;
   void extractAndRecordProphecies({ tenantId: user.tenantId, userId: user.id, text }).catch(() => {});
 }
 // 2026-07-22 例行 QA 修复：d.sections 是报告 V2 类型化 section，quote/letter 没有 h、
@@ -151,7 +153,9 @@ function publicGenerationError(err: GenerationError): { message: string; code: s
     return { message: err.message || 'AI 服务暂时不可用，请稍后重试', code };
   }
   if (code === 'AI_OUTPUT_TRUNCATED') {
-    return { message: '这次内容比较长，军师还没完整写完。请重试，或让军师分段继续。', code };
+    // 对话路径不会再走到这里（撞上限已改为自动续写 + reply.truncated 标记，内容照常呈现）。
+    // 剩下的只有结构化成果：半份报告不能出厂，只能如实报错让用户重试。
+    return { message: '这份成果内容偏多，军师没能一次写完。请重试，或把范围缩小一点再出一次。', code };
   }
   return { message: '军师暂时没能完成这次回答，请稍后重试。', code };
 }
@@ -393,7 +397,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         if (!wantsDeliverableRequest(text)) {
           const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object } });
-          harvestProphecies(user, agentKey, replyChat.text);
+          harvestProphecies(user, agentKey, replyChat.text, replyChat.truncated);
           bumpSessionDigest(user, session.id);
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
@@ -446,7 +450,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       const msg = await prisma.message.create({
         data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object },
       });
-      harvestProphecies(user, agentKey, replyChat.text);
+      harvestProphecies(user, agentKey, replyChat.text, replyChat.truncated);
       bumpSessionDigest(user, session.id);
       await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
       const creditBalance = creditReservation?.balance ?? 0;
@@ -656,7 +660,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         assertStreamReply(reply2);
         send('chat', reply2);
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object } });
-        harvestProphecies(user, agentKey, reply2?.text);
+        harvestProphecies(user, agentKey, reply2?.text, reply2?.truncated);
         bumpSessionDigest(user, session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
@@ -737,7 +741,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const msg = await prisma.message.create({
           data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object },
         });
-        harvestProphecies(user, agentKey, reply2?.text);
+        harvestProphecies(user, agentKey, reply2?.text, reply2?.truncated);
         bumpSessionDigest(user, session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const creditBalance = creditReservation?.balance ?? 0;

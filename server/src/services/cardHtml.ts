@@ -8,6 +8,7 @@ import { activeCasefile, todayStr } from './casefile.js';
 import { reviewStreak } from './reviewLog.js';
 import { syncProgress } from './progress.js';
 import { loadChart, computeChart, type ChartView, type PaipanInput } from './paipan.js';
+import { matchCity } from '../data/cityLongitude.js';
 import { miniCodeDataUri } from './wechat.js';
 import { env } from '../env.js';
 import type { FateCardContent } from '../../../shared/contracts';
@@ -203,9 +204,14 @@ export async function publishCard(args: {
     if (!chart) throw Object.assign(new Error('还没有命盘，先在建档里补生辰'), { statusCode: 400, code: 'NO_CHART' });
     return publishCardHtml(args.tenantId, '天时日历', renderCalendarCard(chart, args.ownerLabel || '主理人', args.verse), 'calendar');
   }
-  // fate：优先朋友生辰现算（送你一卦，不落库）；否则用自己的命盘
+  // fate：优先朋友生辰现算（送你一卦，不落库）；否则用自己的命盘。
+  // 注：routes/cards.ts 已用 USE_FATE_PREVIEW 把 fate+friendBazi 拦到 /cards/fate/preview，
+  // 这条分支当前不可达；仍按同一口径查城市表，避免哪天重新放开时两条路径的四柱又不一致。
   const chart = args.friendBazi
-    ? computeChart(args.friendBazi, yearOf())
+    ? computeChart(
+        { ...args.friendBazi, longitude: args.friendBazi.longitude ?? matchCity(args.friendBazi.birthPlace)?.longitude },
+        yearOf(),
+      )
     : await loadChart(args.userId);
   if (!chart) throw Object.assign(new Error('缺少生辰：提供朋友生辰，或先补自己的命盘'), { statusCode: 400, code: 'NO_CHART' });
   return publishCardHtml(args.tenantId, '天命速写', renderFateCard(chart, args.friendName), 'fate');

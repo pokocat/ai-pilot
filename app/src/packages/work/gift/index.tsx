@@ -6,6 +6,7 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, type FateCardContent } from '../../../services/api';
 import { SHICHEN } from '../../../data/shichen';
+import { IS_WEAPP } from '../../../services/config';
 import { renderCardToImage, shareCardImage, saveCardImage, wrapText, roundRect } from '../../../services/canvasCard';
 import './index.scss';
 
@@ -40,6 +41,7 @@ export default function Gift() {
   const [day, setDay] = useState('');
   const [hourIdx, setHourIdx] = useState(0);
   const [gender, setGender] = useState<'male' | 'female'>('male');
+  const [place, setPlace] = useState(''); // 朋友的出生地 → 真太阳时校正（不落库，仅本次现算）
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [imgPath, setImgPath] = useState<string | null>(null);
@@ -57,13 +59,16 @@ export default function Gift() {
 
   const makeCard = async () => {
     if (!valid || busy) return;
+    // 端守卫：H5 没有小程序 canvas 2d 节点，renderCardToImage 必抛「canvas 未就绪」，
+    // 用户只会看到一句泛化的「生成失败，请检查生辰后重试」——把生辰写对了也没用。
+    if (!IS_WEAPP) { Taro.showToast({ title: '请在小程序内生成速写卡', icon: 'none' }); return; }
     setBusy(true);
     setImgPath(null);
     Taro.showLoading({ title: '排盘出卡中…' });
     try {
       const content = await api.fateCardPreview({
         friendName: name.trim(),
-        friendBazi: { calendar, year: +year, month: +month, day: +day, hour: SHICHEN[hourIdx].hour, gender },
+        friendBazi: { calendar, year: +year, month: +month, day: +day, hour: SHICHEN[hourIdx].hour, gender, birthPlace: place.trim() || undefined },
         consent: true,
       });
       const path = await renderCardToImage('fateCanvas', CW, CH, (ctx) => paintFateCard(ctx, content));
@@ -135,7 +140,7 @@ export default function Gift() {
         </View>
 
         <View className="pf-q">
-          <Text className="pf-qt">4. 性别</Text>
+          <Text className="pf-qt">4. 性别与出生地</Text>
           <View className="pf-opts">
             {([['male', '男'], ['female', '女']] as const).map(([g, label]) => (
               <View key={g} className={`pf-opt ${gender === g ? 'on' : ''}`}
@@ -145,6 +150,15 @@ export default function Gift() {
               </View>
             ))}
           </View>
+          {/* 出生地并进本组而不新起编号：后面的同意声明块按「4 项之后」排版，另起一节要连带改文案。
+              服务端 /cards/fate/preview 现在也查城市表了，这里填了才真的影响朋友那张卡的四柱。 */}
+          <Input
+            className="pf-input gf-place"
+            value={place}
+            maxlength={20}
+            placeholder="出生城市（选填，用于真太阳时校正）"
+            onInput={(e) => setPlace(e.detail.value)}
+          />
         </View>
 
         {/* 同意声明（PIPL：采集第三人敏感生辰前必须确认已获授权） */}

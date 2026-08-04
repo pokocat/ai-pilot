@@ -36,6 +36,13 @@
 
 .tc-actions { margin-top: 18px; }
 .tc-share-hint { display: block; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+/* 显式转发按钮：重置微信 Button 默认样式，与页内其它次级按钮同形 */
+.tcal .tc-share {
+  width: 100%; margin: 0; padding: 0; height: 44px; line-height: 44px;
+  background: transparent; border: 1.5px solid var(--accent); border-radius: 14px;
+  font-size: 14px; color: var(--accent); font-weight: 600;
+}
+.tcal .tc-share::after { border: none; }
 .tc-print { display: block; margin-top: 8px; font-size: 12.5px; font-weight: 600; color: var(--green); }
 .tc-print:active { opacity: .7; }
 
@@ -52,6 +59,8 @@
   background: var(--surface-2, #f3f1ea); font-size: 14.5px; color: var(--ink);
 }
 .tc-date { display: flex; gap: 8px; margin-top: 12px; }
+/* 出生地行：独占一行（真太阳时校正用） */
+.tcal .tc-place { width: 100%; box-sizing: border-box; margin-top: 10px; }
 .tc-date .tc-y { flex: 1.4; }
 .tc-date .tc-md { flex: 1; }
 .tc-btn {
@@ -91,3 +100,8 @@
 .tc-canvas { position: fixed; left: -9999px; top: 0; }
 
 .tc-foot { display: block; margin-top: 20px; font-size: 11px; line-height: 1.7; color: var(--ink-3); }
+
+/* 指向命盘报告的改生辰入口（本页不重复放表单，生辰只有一个编辑处） */
+.tcal .tc-edit-birth { margin-top: 14px; }
+.tcal .tc-edit-birth:active { opacity: .7; }
+.tcal .tc-eb-t { font-size: 11px; color: var(--ink-3); }

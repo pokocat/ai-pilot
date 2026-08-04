@@ -2,19 +2,33 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { DELIVERABLE_TOOL, buildSystemParts, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { CHAT_STYLE_GUIDE, DELIVERABLE_TOOL, ZERO_USAGE, buildSystemParts, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
 import { runToolLoop } from '../tools/loop.js';
 import type { AdaptiveOut } from './openai.js';
-import { assertChatOutputComplete, CHAT_MAX_TOKENS } from './completionGuard.js';
+import {
+  assertChatBodyProduced,
+  assertChatOutputComplete,
+  continuationPrompt,
+  dedupeContinuation,
+  isTruncatedFinish,
+  joinContinuation,
+  noteChatTruncated,
+  CHAT_MAX_TOKENS,
+  CHAT_TOTAL_MAX_TOKENS,
+  CONTINUE_DEADLINE_MS,
+  CONTINUE_DEDUPE_BUFFER_CHARS,
+  CONTINUE_STREAM_TIMEOUT_MS,
+  MAX_CHAT_CONTINUATIONS,
+} from './completionGuard.js';
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。挂在 provider 层而不是 gateway 的业务分支，
 // 是因为 gateway 有 17 个动态 import 调用点，逐个包既漏又难维护。
 import { withLlmSlot, acquireLlmSlot, endpointLane } from '../../services/llmGate.js';
 // 端点池：多路分流 + 故障转移。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt } from '../../services/llmPool.js';
-import { maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
+import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
 import { deliverableTimeoutMs } from '../providerTimeouts.js';
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
@@ -176,35 +190,155 @@ export async function claudeDeliverable(ctx: GenContext, cfg: ResolvedAiConfig):
   return { result: { ...mockDeliverable(ctx), degraded: true }, usage };
 }
 
-export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<ChatReply>> {
-  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
-  const history = (ctx.history ?? []).map((m) => ({
+function sumUsage(a: Usage, b: Usage): Usage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    cachedInput: a.cachedInput + b.cachedInput,
+    cacheWrite: (a.cacheWrite ?? 0) + (b.cacheWrite ?? 0),
+  };
+}
+
+function chatHistory(ctx: GenContext): Anthropic.MessageParam[] {
+  return (ctx.history ?? []).map((m) => ({
     role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
     content: m.text,
   }));
-  const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create({
+}
+
+/** 对话首轮的 system（稳定段打缓存断点）+ messages。续写轮在此基础上追加两条消息。 */
+function chatRequestBase(ctx: GenContext): { system: Anthropic.TextBlockParam[]; messages: Anthropic.MessageParam[] } {
+  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
+  return {
+    system: systemBlocks(`${stable}\n\n${CHAT_STYLE_GUIDE}`, dynamic),
+    messages: [...chatHistory(ctx), { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
+  };
+}
+
+/**
+ * 续写轮的 messages：把残文当**历史里的** assistant 轮，续写指令放在其后的 user 轮。
+ *
+ * 不能用「末轮 assistant prefill 接着写」那套老写法——Claude Opus 4.6 及以后已移除末轮 prefill，
+ * 会直接 400。放 user 轮是官方替代方案，新旧模型与三方兼容网关都安全。
+ */
+function continuationMessages(base: Anthropic.MessageParam[], accumulated: string): Anthropic.MessageParam[] {
+  return [
+    ...base,
+    { role: 'assistant', content: accumulated },
+    { role: 'user', content: continuationPrompt(accumulated) },
+  ];
+}
+
+/** 续写轮显式关思考：这一轮只是把话写完，再想一遍纯属白烧预算，也把 max_tokens 整个让给正文。 */
+const CONTINUE_TUNING = { allowThinking: false } as const;
+
+function textOf(res: Anthropic.Message): string {
+  return res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
+}
+
+export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promise<Metered<ChatReply>> {
+  const { system, messages: base } = chatRequestBase(ctx);
+  const startedAt = Date.now();
+  let text = '';
+  let usage: Usage = ZERO_USAGE;
+  let truncated = false;
+
+  // 撞上限即自动续写：max_tokens 是模型看不见的硬闸刀，报错丢内容是最差的处理方式。
+  for (let round = 0; ; round++) {
+    const messages = round === 0 ? base : continuationMessages(base, text);
+    const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create({
+      model: ep.model,
+      max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, ep, round === 0),
+      ...thinkingRequestTuning(ep, round === 0 ? {} : CONTINUE_TUNING),
+      system,
+      messages,
+    }, { timeout: ep.timeoutMs }), { affinityKey: affinityOf(ctx) });
+    usage = sumUsage(usage, usageOf(res));
+    text = joinContinuation(text, textOf(res));
+
+    if (!isTruncatedFinish(res.stop_reason)) break;
+    // 一个字正文都没写就撞上限：没有锚点可续写，如实抛错并指向预算（见 assertChatBodyProduced）。
+    if (!text) assertChatBodyProduced('Claude', res.stop_reason, usage.outputTokens);
+    if (round >= MAX_CHAT_CONTINUATIONS
+      || usage.outputTokens >= CHAT_TOTAL_MAX_TOKENS
+      || Date.now() - startedAt > CONTINUE_DEADLINE_MS) {
+      truncated = true;
+      noteChatTruncated('Claude', 'given_up');
+      break;
+    }
+    noteChatTruncated('Claude', 'continued');
+  }
+
+  return { result: { text: requireText(text, usage, 'chat'), ...(truncated ? { truncated: true } : {}) }, usage };
+}
+
+type StreamRoundOut = { text: string; usage: Usage; truncated: boolean };
+
+/**
+ * 一轮流式对话：逐字 yield，返回本轮正文 / 用量 / 是否撞上限。
+ *
+ * `dedupeAgainst` 有值时（续写轮）先把开头攒够 CONTINUE_DEDUPE_BUFFER_CHARS 再下发，
+ * 好把模型复述的半句剪掉——逐字吐出去就撤不回来了。首轮无重叠可言，即时下发。
+ */
+async function* streamChatRound(
+  ep: ResolvedAiConfig,
+  system: Anthropic.TextBlockParam[],
+  messages: Anthropic.MessageParam[],
+  opts: { allowThinking: boolean; dedupeAgainst?: string; onDelta?: () => void; timeoutMs?: number },
+): AsyncGenerator<{ type: 'delta'; text: string }, StreamRoundOut> {
+  // 流式调用也须设超时兜底：SDK 默认 600s，网关卡住会把这条流吊到 10 分钟。给足流式时长同时有界。
+  const stream = getClient(ep.apiKey, ep.baseUrl).messages.stream({
     model: ep.model,
-    max_tokens: CHAT_MAX_TOKENS,
-    ...thinkingRequestTuning(ep),
-    system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
-    messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
-  }, { timeout: ep.timeoutMs }), { affinityKey: affinityOf(ctx) });
-  assertChatOutputComplete('Claude', res.stop_reason, res.usage.output_tokens);
-  const text = res.content
-    .filter((c) => c.type === 'text')
-    .map((c) => (c.type === 'text' ? c.text : ''))
-    .join('\n')
-    .trim();
-  const usage = usageOf(res);
-  return { result: { text: requireText(text, usage, 'chat') }, usage };
+    max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, ep, opts.allowThinking),
+    ...thinkingRequestTuning(ep, opts.allowThinking ? {} : CONTINUE_TUNING),
+    system,
+    messages,
+  }, { timeout: opts.timeoutMs ?? Math.max(ep.timeoutMs, 120_000) });
+
+  let text = '';
+  let usage: Usage = ZERO_USAGE;
+  let head: string | null = opts.dedupeAgainst ? '' : null; // null=已过缓冲期/首轮，直接下发
+
+  const emit = (chunk: string): { type: 'delta'; text: string } | null => {
+    if (!chunk) return null;
+    text += chunk;
+    opts.onDelta?.();
+    return { type: 'delta', text: chunk };
+  };
+
+  for await (const event of stream) {
+    if (event.type === 'message_start') usage = usageOf(event.message);
+    else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
+    else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+      if (head !== null) {
+        head += event.delta.text;
+        if (head.length < CONTINUE_DEDUPE_BUFFER_CHARS) continue;
+        const cleaned = dedupeContinuation(opts.dedupeAgainst!, head);
+        head = null;
+        const ev = emit(cleaned);
+        if (ev) yield ev;
+        continue;
+      }
+      const ev = emit(event.delta.text);
+      if (ev) yield ev;
+    }
+  }
+  if (head) { // 整轮短于缓冲长度（续写只补了一句）
+    const ev = emit(dedupeContinuation(opts.dedupeAgainst!, head));
+    if (ev) yield ev;
+  }
+
+  const final = await stream.finalMessage().catch(() => null);
+  if (final) usage = usageOf(final);
+  // 没收到任何 text_delta 但 finalMessage 有正文时的回落。续写轮的回落**必须同样去重**：
+  // 否则「逐字流里被剪掉的重复」会从这条回落原样进落库文本，用户看到的和存下来的对不上。
+  const fallback = final ? textOf(final) : '';
+  const body = text || (opts.dedupeAgainst ? dedupeContinuation(opts.dedupeAgainst, fallback) : fallback);
+  return { text: body, usage, truncated: isTruncatedFinish(final?.stop_reason) };
 }
 
 export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
-  const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
-  const history = (ctx.history ?? []).map((m) => ({
-    role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
-    content: m.text,
-  }));
+  const { system, messages: base } = chatRequestBase(ctx);
   // 流式的槽位必须持有到整条流消费完，不能只包住「建流」那一下——一条流在上游眼里全程占用一个并发，
   // 只包建流会让闸门形同虚设（8 个槽位瞬间放完 8 条流，紧接着又放 8 条）。故手动 acquire/release。
   //
@@ -214,40 +348,30 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   const candidates = await resolveCandidates(cfg, { affinityKey: affinityOf(ctx) });
   const maxAttempts = Math.max(1, Math.min(candidates.length, Number(process.env.LLM_POOL_MAX_ATTEMPTS ?? 3) || 3));
   const cls = cfg.lane === 'aux' ? 'aux' : 'main';
+  const laneOf = (ep: ResolvedAiConfig) => (ep.endpointId ? endpointLane(cls, ep.endpointId) : cls);
 
+  const startedAt = Date.now();
+  let text = '';
+  let usage: Usage = ZERO_USAGE;
+  let truncated = false;
+  let served: ResolvedAiConfig | null = null;
   let lastErr: unknown;
+
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const ep = candidates[attempt];
-    const lane = ep.endpointId ? endpointLane(cls, ep.endpointId) : cls;
-    const slot = await acquireLlmSlot(lane);
+    const slot = await acquireLlmSlot(laneOf(ep));
     let yieldedAny = false;
     try {
       noteEndpointAttempt(ep);
-      // 流式调用也须设超时兜底：SDK 默认 600s，网关卡住会把这条流吊到 10 分钟。给足流式时长同时有界。
-      const stream = getClient(ep.apiKey, ep.baseUrl).messages.stream({
-        model: ep.model,
-        max_tokens: CHAT_MAX_TOKENS,
-        ...thinkingRequestTuning(ep),
-        system: systemBlocks(`${stable}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`, dynamic),
-        messages: [...history, { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
-      }, { timeout: Math.max(ep.timeoutMs, 120_000) });
-      let text = '';
-      let usage: Usage = { inputTokens: 0, outputTokens: 0, cachedInput: 0 };
-      for await (const event of stream) {
-        if (event.type === 'message_start') usage = usageOf(event.message);
-        else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
-        else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-          text += event.delta.text;
-          yieldedAny = true; // 过了这一行就不能再转移端点了
-          yield { type: 'delta', text: event.delta.text };
-        }
-      }
-      const final = await stream.finalMessage().catch(() => null);
-      if (final) usage = usageOf(final);
-      assertChatOutputComplete('Claude', final?.stop_reason, usage.outputTokens);
-      const out = requireText(text || final?.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n'), usage, 'chat_stream');
-      yield { type: 'done', result: { text: out }, usage };
-      return;
+      const round = yield* streamChatRound(ep, system, base, {
+        allowThinking: true,
+        onDelta: () => { yieldedAny = true; }, // 置位后就不能再转移端点了
+      });
+      served = ep;
+      text = round.text;
+      usage = round.usage;
+      truncated = round.truncated;
+      break;
     } catch (err) {
       lastErr = err;
       slot.noteError(err);
@@ -262,7 +386,43 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
       slot.release();
     }
   }
-  throw lastErr;
+  if (!served) throw lastErr;
+  // 一个字正文都没写就撞上限：没有锚点可续写，如实抛错并指向预算（见 assertChatBodyProduced）。
+  if (truncated && !text) assertChatBodyProduced('Claude', 'max_tokens', usage.outputTokens);
+
+  // —— 续写轮：撞上限不是失败，是「还没写完」——
+  // 固定用首轮那个端点（换端点=丢提示词缓存且换了口吻）；不做故障转移（已经吐过字）。
+  // 续写本身失败也**不算整轮失败**：手里已有可读内容，宁可标 truncated 交给用户点「继续」，
+  // 也不能把用户已经看完的半篇回答换成一个错误气泡。
+  for (let round = 1; truncated && text && round <= MAX_CHAT_CONTINUATIONS; round++) {
+    if (usage.outputTokens >= CHAT_TOTAL_MAX_TOKENS) break;
+    // 墙钟兜底：宁可标 truncated 给「继续写完」，也不能为了补齐把整轮拖到客户端超时——
+    // 那会走 clientGone（退预留、不落库），用户连已经看完的半篇都拿不到。
+    if (Date.now() - startedAt > CONTINUE_DEADLINE_MS) break;
+    const slot = await acquireLlmSlot(laneOf(served));
+    try {
+      noteEndpointAttempt(served);
+      const cont = yield* streamChatRound(served, system, continuationMessages(base, text), {
+        allowThinking: false,
+        dedupeAgainst: text,
+        timeoutMs: Math.min(Math.max(served.timeoutMs, 120_000), CONTINUE_STREAM_TIMEOUT_MS),
+      });
+      usage = sumUsage(usage, cont.usage);
+      text += cont.text; // 轮内已去重，此处只做拼接（避免与已下发的 delta 对不上）
+      truncated = cont.truncated;
+      noteChatTruncated('Claude', 'continued');
+    } catch (err) {
+      slot.noteError(err);
+      console.warn(`[claude] 第 ${round} 轮续写失败，按未写完交回用户：${(err as Error).message}`);
+      break;
+    } finally {
+      slot.release();
+    }
+  }
+  if (truncated) noteChatTruncated('Claude', 'given_up');
+
+  const out = requireText(text, usage, 'chat_stream');
+  yield { type: 'done', result: { text: out, ...(truncated ? { truncated: true } : {}) }, usage };
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
@@ -355,8 +515,14 @@ export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[], affinit
       { timeout: opts.finalTool ? deliverableTimeoutMs(ep.timeoutMs) : Math.max(ep.timeoutMs, 120_000) },
     ), { affinityKey });
     const usage = usageOf(res);
-    assertChatOutputComplete('Claude', res.stop_reason, usage.outputTokens);
     const toolUses = res.content.filter((c): c is Anthropic.ToolUseBlock => c.type === 'tool_use');
+    // 撞上限的处理按「产物能不能半份出厂」分两种：
+    //   · 有 tool_use 块 / 本轮期待结构化成果 → 截断的 tool 入参就是坏 JSON，半份报告不能出厂，按失败抛；
+    //   · 纯文本对话（含自适应回落文本）→ 内容是可读的，标 truncated 交回，由端上给「继续」。
+    const truncated = isTruncatedFinish(res.stop_reason);
+    if (truncated && (toolUses.length || (opts.finalTool && opts.forceFinalTool !== false))) {
+      assertChatOutputComplete('Claude', res.stop_reason, usage.outputTokens);
+    }
 
     if (finalName) {
       const fin = toolUses.find((c) => c.name === finalName);
@@ -367,8 +533,7 @@ export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[], affinit
       const mapped: ToolCall[] = regular.map((c) => ({ id: c.id, name: c.name, args: (c.input as Record<string, unknown>) ?? {} }));
       return { kind: 'tool_calls', calls: mapped, usage };
     }
-    const text = res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
-    return { kind: 'final', text, usage };
+    return { kind: 'final', text: textOf(res), usage, truncated };
   };
 }
 
@@ -386,13 +551,18 @@ export async function claudeChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
   const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
   const r = await runToolLoop({
     step: claudeStep(cfg, ctx.images, affinityOf(ctx)),
-    system: `${system}\n\n回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。`,
+    system: `${system}\n\n${CHAT_STYLE_GUIDE}`,
     history: ctx.history,
     userMessage: ctx.userMessage,
     tools,
     toolCtx: toolCtxOf(ctx),
   });
-  return { result: { text: requireText(r.text, r.usage, 'chat_tools') }, usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations };
+  return {
+    result: { text: requireText(r.text, r.usage, 'chat_tools'), ...(r.truncated ? { truncated: true } : {}) },
+    usage: r.usage,
+    toolCalls: r.toolCalls,
+    iterations: r.iterations,
+  };
 }
 
 /** 启用技能时的产出（claude）：循环里可先检索/召回，最后强制 emit_deliverable 收口。 */
@@ -484,7 +654,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
   }
   return {
     kind: 'chat',
-    reply: { text: requireText(r.text, r.usage, 'adaptive') },
+    reply: { text: requireText(r.text, r.usage, 'adaptive'), ...(r.truncated ? { truncated: true } : {}) },
     usage: r.usage, toolCalls: r.toolCalls, iterations: r.iterations,
   };
 }

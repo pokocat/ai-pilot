@@ -53,50 +53,85 @@
 }
 .member-pill:active { opacity: .8; }
 
-/* 资料 3 行：手机 / 所在社群 / 邀请码 */
-.account-profile-meta { margin-top: 14px; display: flex; flex-direction: column; gap: 7px; }
-.apm-row { display: flex; align-items: center; gap: 10px; }
-.apm-k { width: 56px; flex-shrink: 0; color: rgba(255, 255, 255, .58); font-size: 12px; font-weight: 600; }
-.apm-v {
-  flex: 1; min-width: 0; color: rgba(255, 255, 255, .92); font-size: 12.5px; font-weight: 600;
+/* 资料两行（account-profile-meta）：手机 / 邀请码 内联排，不再做 k-v 对齐栏。
+   「所在社群」已挪到班级群卡的副标题，卡里同一事实只写一遍。 */
+.account-profile-meta { margin-top: 12px; display: flex; flex-direction: column; gap: 3px; }
+.apm-line {
+  display: block; color: rgba(255, 255, 255, .72); font-size: 11.5px; line-height: 1.4; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .apm-code { color: #F4D99E; font-weight: 800; letter-spacing: .04em; }
 
-/* 权益 3 格（membership-strip） */
-.membership-strip { display: flex; gap: 8px; margin-top: 14px; }
-.ms-cell {
+/* 账户权益 3 格（account-benefit-grid）：权益名 + 一句状态，等宽三列。
+   比原来的大数字三格矮，腾出的高度给下面的老师/班级群双卡。 */
+.account-benefit-grid { display: flex; gap: 6px; margin-top: 12px; }
+.account-benefit {
   flex: 1; min-width: 0; box-sizing: border-box;
-  padding: 10px 8px; border-radius: 13px;
-  background: rgba(255, 255, 255, .10); border: 1px solid rgba(255, 255, 255, .14);
-  text-align: center;
+  padding: 9px 8px; border-radius: 12px;
+  background: rgba(255, 255, 255, .12); border: 1px solid rgba(255, 255, 255, .16);
 }
-.ms-cell:active { opacity: .8; }
-.ms-v { display: block; color: #fff; font-size: 17px; font-weight: 700; }
-.ms-l { display: block; margin-top: 3px; color: rgba(255, 255, 255, .66); font-size: 10.5px; font-weight: 600; }
+.account-benefit:active { opacity: .8; }
+.ab-t { display: block; color: #fff; font-size: 12px; font-weight: 700; }
+.ab-s {
+  display: block; margin-top: 4px; color: rgba(255, 255, 255, .66);
+  font-size: 10px; line-height: 1.25; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
-/* 服务动作 2 按钮（service-action-row）：服务老师微信 / 群二维码 */
-.service-action-row { display: flex; gap: 8px; margin-top: 10px; }
+/* 老师与社群双卡（service-action-row）：深绿卡上的两张白卡。
+   设计稿把这里从「半透明白 + 白字」改成「实白卡 + 墨字」，卡片更小、密度更高，
+   老师卡内再叠一行可点的微信号（复制不必先进半屏）。 */
+.service-action-row { display: flex; gap: 7px; margin-top: 12px; }
 .service-action {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px;
-  padding: 10px 11px; border-radius: 13px;
-  background: rgba(255, 255, 255, .10); border: 1px solid rgba(255, 255, 255, .14);
+  flex: 1; min-width: 0; box-sizing: border-box;
+  min-height: 54px; padding: 8px 9px; border-radius: 13px;
+  display: flex; align-items: center; gap: 7px;
+  background: rgba(255, 255, 255, .94);
+  border: 1px solid rgba(255, 255, 255, .34);
 }
-.service-action:active { opacity: .8; }
-.service-action.is-empty { opacity: .55; pointer-events: none; } /* C7：未分配置灰且不可点 */
+.service-action:active { opacity: .88; }
+/* 未分配态：压暗但**可点**——点了去军师社群页申请分班（拿到老师和群的真路径），不是死按钮 */
+.service-action.is-empty { opacity: .62; }
+
+/* 老师卡：上行主动作（图标 + 老师微信），下行微信号复制条 */
+.service-action-teacher { flex-direction: column; align-items: stretch; justify-content: center; gap: 4px; }
+.service-action-main { display: flex; align-items: center; gap: 7px; }
+.service-action-main:active { opacity: .7; }
+.teacher-wechat-id {
+  display: flex; align-items: center; gap: 5px; padding-left: 33px;
+  overflow: hidden;
+}
+.teacher-wechat-id:active { opacity: .7; }
+.twi-id {
+  min-width: 0; color: var(--green); font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.twi-em { flex-shrink: 0; color: var(--ink-3); font-size: 9.5px; font-weight: 600; }
+.twi-ph { padding-left: 33px; color: var(--ink-3); font-size: 9.5px; font-weight: 600; }
+
 .sa-i {
-  width: 30px; height: 30px; flex-shrink: 0; border-radius: 9px;
+  width: 26px; height: 26px; flex-shrink: 0; border-radius: 9px;
   display: flex; align-items: center; justify-content: center;
-  color: #F4D99E; background: rgba(255, 255, 255, .14);
-  font-size: 14px; font-weight: 700;
+  color: #fff; background: var(--green);
+  font-size: 12px; font-weight: 700;
 }
+/* 群二维码图标：设计稿限定 26px 小图标（原来是「码」字块，撑版面）——四点码眼，两行两列，右下留空 */
+.sa-qr {
+  width: 26px; height: 26px; flex-shrink: 0; box-sizing: border-box;
+  padding: 4px; border-radius: 8px;
+  display: flex; flex-wrap: wrap; gap: 2px; align-content: center;
+  background: #fff; border: 1px solid rgba(30, 90, 67, .18);
+}
+.sa-qr-d { width: 7px; height: 7px; border-radius: 2px; background: var(--green); }
+.sa-qr-d.is-hollow { background: rgba(30, 90, 67, .22); }
+
 .sa-b { flex: 1; min-width: 0; }
 .sa-t {
-  display: block; color: #fff; font-size: 13px; font-weight: 600;
+  display: block; color: var(--ink); font-size: 12px; font-weight: 700;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sa-s {
-  display: block; margin-top: 2px; color: rgba(255, 255, 255, .62); font-size: 10.5px; font-weight: 600;
+  display: block; margin-top: 2px; color: var(--ink-3); font-size: 9.5px; line-height: 1.2; font-weight: 600;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -134,7 +169,6 @@
   background: var(--accent-soft);
 }
 .menu-t { flex: 1; min-width: 0; font-size: 15px; font-weight: 500; color: var(--ink); }
-.menu-sw { width: 15px; height: 15px; border-radius: 5px; flex-shrink: 0; }
 .menu-s { flex-shrink: 0; font-size: 12.5px; color: var(--ink-3); }
 .menu-go { flex-shrink: 0; font-size: 16px; color: var(--ink-3); }
 
@@ -170,32 +204,8 @@
 }
 .va-go { flex-shrink: 0; color: #F4D99E; font-size: 11.5px; font-weight: 700; white-space: nowrap; }
 
-/* —— 服务老师 / 深度能力（account-teacher / account-depth） —— */
-.account-teacher,
-.account-depth {
-  display: flex; align-items: center; gap: 12px;
-  margin-top: 12px; padding: 15px 16px;
-  border-radius: 18px;
-}
-.account-teacher:active, .account-depth:active { opacity: .85; }
-.account-teacher {
-  border: 1px solid #E6D2A6;
-  background: #FEF7EA;
-}
-.at-b { flex: 1; min-width: 0; }
-.at-t { display: block; color: var(--gold-deep); font-size: 14.5px; font-weight: 600; }
-.at-s { display: block; margin-top: 5px; color: #7D6740; font-size: 12px; line-height: 1.5; font-weight: 500; }
-.at-em { flex-shrink: 0; color: var(--gold-deep); font-size: 14px; font-weight: 600; white-space: nowrap; }
-
-.account-depth {
-  margin-bottom: 4px;
-  border: 1px solid #5FB389;
-  background: var(--green-soft);
-}
-.ad-b { flex: 1; min-width: 0; }
-.ad-t { display: block; color: var(--green); font-size: 14.5px; font-weight: 600; }
-.ad-s { display: block; margin-top: 5px; color: var(--green-deep); font-size: 12px; line-height: 1.5; font-weight: 500; }
-.ad-em { flex-shrink: 0; color: var(--green); font-size: 14px; font-weight: 600; white-space: nowrap; }
+/* account-teacher / account-depth（页尾暖金卡 + 绿卡）已随两张重复卡一起删除，
+   样式一并清掉——旧卡片规则留着会继续参与账户页布局计算。 */
 
 /* —— 战略段位卡（M4 PR-18，真实计数） —— */
 .rank-card {
@@ -239,6 +249,8 @@
 }
 .pf-fk, .pf-tk { color: var(--ink-3); font-size: 12.5px; font-weight: 600; }
 .pf-fv { color: var(--ink); font-size: 14px; font-weight: 700; letter-spacing: .03em; }
+/* 工作台内跳转行的右值（军师对我的理解）：可点语气，弱于 pf-fv 的强调 */
+.pf-fv-go { color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
 .pf-tv { color: var(--green); font-size: 15px; font-weight: 700; }
 
 /* 档案工作台（profile-file-workbench §10.4） */

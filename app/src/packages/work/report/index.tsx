@@ -16,10 +16,10 @@ import SharePreview from '../../../components/SharePreview';
 // 共用同一套映射，避免「方案库详情」页在报告 V2 落地后仍停留在旧白卡假设（2026-07-21 例行 QA 发现）。
 import { cardSection, cardSectionText } from '../../../services/deliverableSection';
 import { switchTo } from '../../../services/nav';
+import { IS_WEAPP } from '../../../services/config';
 import { REVIEW_TIME } from '../../../data/constants';
 import './index.scss';
 
-const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 
 // 编号章节用中文序号（设计规格 §9.1：一 / 二 / 三 / 四）。
 const CN = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];

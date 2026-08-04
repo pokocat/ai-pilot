@@ -6,7 +6,7 @@ import { computeAndStoreChart, loadChart, validatePaipanInput, type PaipanInput 
 import { buildMingpanReport } from '../services/mingpan.js';
 import { fortuneDisabledGuard } from '../services/featureFlag.js';
 import { loadStrategicProfile, upsertStrategicProfile, ensureAnnualVerse } from '../services/strategicProfile.js';
-import { cityLongitude } from '../data/cityLongitude.js';
+import { matchCity } from '../data/cityLongitude.js';
 import { yearOf } from '../services/clock.js';
 
 export async function profileRoutes(app: FastifyInstance) {
@@ -82,19 +82,22 @@ export async function profileRoutes(app: FastifyInstance) {
     // 校验（与「送你一卦」fate 预览同一口径，抽成 validatePaipanInput；日期合法性由历法库把关）
     const v = validatePaipanInput(b, yearOf());
     if (!v.ok) return reply.code(400).send({ error: v.error });
+    // 经度：显式传入优先；否则按出生城市查映射表（未命中不做真太阳时校正）。
+    // matchedCity 回执给前端——识别不出要明说识别不出，别静默吞：这是用户唯一能发现
+    // 「我填了出生地但没生效」的途径。
+    const matched = v.input.longitude === undefined ? matchCity(v.input.birthPlace) : undefined;
     try {
       const chart = await computeAndStoreChart({
         tenantId: user.tenantId,
         userId: user.id,
-        // 经度：显式传入优先；否则按出生城市查映射表（未命中不做真太阳时校正）
-        input: { ...v.input, longitude: v.input.longitude ?? cityLongitude(b.birthPlace) },
+        input: { ...v.input, longitude: v.input.longitude ?? matched?.longitude },
         targetYear: yearOf(),
       });
       await recordAudit({
         tenantId: user.tenantId, userId: user.id, action: 'user.bazi.chart',
         payload: { engine: chart.engineVersion, hourKnown: chart.hourKnown, trueSolar: chart.trueSolarApplied },
       });
-      return { believe: true, chart };
+      return { believe: true, chart, matchedCity: matched?.city ?? null };
     } catch {
       return reply.code(400).send({ error: '生辰无法排盘，请检查日期是否存在（如农历大小月/闰月）' });
     }

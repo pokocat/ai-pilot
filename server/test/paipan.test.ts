@@ -159,6 +159,36 @@ test('真太阳时叠加均时差：有经度才校正，trueSolarApplied 标注
   assert.equal(withLng.pillars.day.ganZhi, noLng.pillars.day.ganZhi);
 });
 
+// —— 真太阳时校正的两个回归点（2026-08 修）——
+
+test('真太阳时：偏移恰为 0 也算已校正（有经度即 trueSolarApplied）', () => {
+  // 旧实现按 offsetMin!==0 判定，杭州这类近 120° 的城市全年有约十天偏移抵消为 0，
+  // 那几天前端会显示「未校正」，是错的暗示。有经度就是按经度算过。
+  const eot = equationOfTimeMinutes(1988, 3, 15);
+  const zeroLng = 120 - eot / 4; // 令 (lng-120)*4 + eot 恰好为 0
+  const c = computeChart({ ...KNOWN, hour: 12, longitude: zeroLng }, 2026);
+  assert.equal(Math.abs(Math.round((zeroLng - 120) * 4 + eot)), 0); // Math.round 可能给 -0，取绝对值再比
+  assert.equal(c.trueSolarApplied, true);
+});
+
+test('真太阳时：分钟进位走 UTC，不受服务器时区 DST 影响（可复算铁律）', () => {
+  // 用本地时间构造时，TZ=America/Los_Angeles 下 2021-03-14 02:57 会被静默平移成 03:57
+  // （美国夏令时跳变缺口），足以改时柱。这里在进程内切换 TZ 复算，两次必须逐字一致。
+  const input: PaipanInput = { calendar: 'solar', year: 2021, month: 3, day: 14, hour: 2, minute: 30, gender: 'male', longitude: 126.6 };
+  const orig = process.env.TZ;
+  try {
+    process.env.TZ = 'Asia/Shanghai';
+    const sh = computeChart(input, 2026);
+    process.env.TZ = 'America/Los_Angeles';
+    const la = computeChart(input, 2026);
+    assert.equal(la.pillars.time?.ganZhi, sh.pillars.time?.ganZhi);
+    assert.equal(la.pillars.day.ganZhi, sh.pillars.day.ganZhi);
+    assert.equal(la.solarDate, sh.solarDate);
+  } finally {
+    if (orig === undefined) delete process.env.TZ; else process.env.TZ = orig;
+  }
+});
+
 test('落库：每用户一张命盘（重排覆盖），loadChart 取回一致', async () => {
   const token = await login(uniquePhone(), '命盘用户');
   const user = await prisma.user.findFirstOrThrow({ where: { id: token } });

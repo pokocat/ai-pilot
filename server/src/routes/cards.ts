@@ -5,6 +5,7 @@ import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { publishCard, fateCardContent, type CardKind } from '../services/cardHtml.js';
 import { computeChart, validatePaipanInput, type PaipanInput } from '../services/paipan.js';
+import { matchCity } from '../data/cityLongitude.js';
 import { fortuneDisabledGuard } from '../services/featureFlag.js';
 import { yearOf } from '../services/clock.js';
 
@@ -27,7 +28,12 @@ export async function cardRoutes(app: FastifyInstance) {
       if (!v.ok) return reply.code(400).send({ error: v.error });
       let chart;
       try {
-        chart = computeChart(v.input, yearOf());
+        // 与 PUT /profile/bazi 同一口径查城市表。这条支路以前直接 computeChart，
+        // 于是同一份生辰「自己的命盘」校正真太阳时、「送朋友的卦」不校正，两处四柱可能不同。
+        chart = computeChart(
+          { ...v.input, longitude: v.input.longitude ?? matchCity(v.input.birthPlace)?.longitude },
+          yearOf(),
+        );
       } catch {
         return reply.code(400).send({ error: '生辰无法排盘，请检查日期是否存在（如农历大小月/闰月）' });
       }

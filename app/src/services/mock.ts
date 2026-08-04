@@ -24,7 +24,7 @@ import type {
 } from '../../../shared/contracts';
 import type {
   ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek, MingpanReport,
-  CreatePosterJobResult, CreativeUploadRole,
+  CreatePosterJobResult, CreativeUploadRole, BaziBody,
 } from './api';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { DELIVERABLES, REPLIES, TRUST_NOTE } from '../data/deliverables';
@@ -312,7 +312,23 @@ function sampleChartM(): ChartSummary {
 
 // 确定性样例命盘报告（mock 专用 UI 预览假数据，结构对齐 MingpanReport；非真排盘）——
 // 让「命盘报告」页在本地 mock/H5 下可完整走查六大区块（含 12 宫 / 四化 / 时间轴）。
-function sampleReportM(): MingpanReport {
+// 出生地 → 城市（mock）：镜像服务端 server/src/data/cityLongitude.ts 收紧后的口径——
+// 精确匹配优先、再「输入含有城市名」取最长命中、单字一律不匹配。只取常用几座城做本地走查，
+// 不复制整表（真值以服务端为准，这里只为让「已识别 / 未识别」两条 UI 分支都能在 H5 下走到）。
+const MOCK_CITIES = ['北京', '上海', '广州', '深圳', '杭州', '南京', '成都', '重庆', '西安', '哈尔滨', '乌鲁木齐', '拉萨', '长春', '长沙'];
+function mockMatchCity(place?: string): string | null {
+  if (!place) return null;
+  const s = place.replace(/[省市区县]|自治区|特别行政区/g, '').trim();
+  if (s.length < 2) return null;
+  if (MOCK_CITIES.includes(s)) return s;
+  let best: string | null = null;
+  for (const c of MOCK_CITIES) {
+    if (s.includes(c) && (!best || c.length > best.length)) best = c;
+  }
+  return best;
+}
+
+function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanReport {
   const yr = new Date().getFullYear();
   const P = (ganZhi: string, sg: string, hide: string[], sz: string[], ny: string) =>
     ({ ganZhi, shiShenGan: sg, hideGan: hide, shiShenZhi: sz, naYin: ny });
@@ -334,7 +350,7 @@ function sampleReportM(): MingpanReport {
   ];
   return {
     engineVersion: 'paipan-v2',
-    base: { solarDate: '1990-06-18', lunarDate: '庚午年五月廿六', gender: '男', hourKnown: true, hourLabel: '巳时', trueSolarApplied: true, birthPlace: '浙江杭州' },
+    base: { solarDate: '1990-06-18', lunarDate: '庚午年五月廿六', gender: '男', hourKnown: true, hourLabel: '巳时', trueSolarApplied, birthPlace },
     bazi: {
       pillars: {
         year: P('庚午', '偏财', ['丁', '己'], ['正印', '劫财'], '路旁土'),
@@ -1214,7 +1230,10 @@ export const mock = {
         { key: 'product', label: '产品服务', hint: '价格体系、交付流程、客户画像', count: 0, ready: false },
         { key: 'finance', label: '财务经营', hint: '预算表、现金流、利润估算', count: 0, ready: false },
       ],
-      missing: (und.nextQuestions.length ? und.nextQuestions.slice(0, 3).map((q, i) => ({ key: `q${i}`, title: q, desc: '补齐后会刷新战局判断。' })) : [
+      // key 必须与服务端一致（server/src/services/community.ts）：`next-N` = 要在对话里回答的问题，
+      // 其余（pricing/funnel/proof）= 要上传的资料。前端按这个前缀分流「去补」的去处，
+      // mock 原来用 `q${i}`，于是同一段代码在本地走去智库、在线上走去对话。
+      missing: (und.nextQuestions.length ? und.nextQuestions.slice(0, 3).map((q, i) => ({ key: `next-${i + 1}`, title: q, desc: '补齐后会刷新战局判断。' })) : [
         { key: 'pricing', title: '产品价格体系', desc: '影响方案报价、成交判断和复购建议。' },
         { key: 'funnel', title: '近 30 天成交漏斗表', desc: '战局页会用它判断卡点和优先级。' },
         { key: 'proof', title: '案例结果与客户反馈', desc: '用于生成信任证明和内容选题。' },
@@ -1477,22 +1496,31 @@ export const mock = {
 
   // 八字采集（mock）：存偏好 + 返回一份**确定性样例命盘**（固定假数据，非真排盘——真排盘是服务端引擎的职责）。
   // 有样例盘后，天时日历/战局天势卡/送你一卦等命理 UI 在本地 mock/H5 下可完整走查（修 review 铁律③「mock 命盘恒空」）。
-  async saveBazi(body: object): Promise<{ believe: boolean; chart: ChartSummary | null }> {
+  async saveBazi(body: object): Promise<{ believe: boolean; chart: ChartSummary | null; matchedCity: string | null }> {
     const { token, d } = current();
     (d as { bazi?: object }).bazi = body; save(token, d);
     const believe = (body as { believe?: boolean }).believe !== false;
-    return delay({ believe, chart: believe ? sampleChartM() : null });
+    // 出生地要真的被消费：以前 mock 只把 body 整包存下、返回与入参无关的固定样例盘，
+    // 于是「表单没传 birthPlace」这个缺口在本地/H5 走查里完全看不出来——正是它藏了这么久的原因。
+    // （ChartSummary 没有 trueSolarApplied 字段，校正态只体现在命盘报告的 base 上，见 myChartReport。）
+    const matchedCity = mockMatchCity((body as { birthPlace?: string }).birthPlace);
+    return delay({ believe, chart: believe ? sampleChartM() : null, matchedCity });
   },
-  async myChart(): Promise<{ bazi: object | null; chart: ChartSummary | null }> {
-    const bazi = (current().d as { bazi?: { believe?: boolean } }).bazi ?? null;
+  // bazi 用 BaziBody 而不是 object：调用方（命盘页「修改生辰」）要按字段回填表单，
+  // 返回 object 会让 api.myChart() 的联合类型被拖宽成 object，取 .year 直接编译不过。
+  async myChart(): Promise<{ bazi: BaziBody | null; chart: ChartSummary | null }> {
+    const bazi = (current().d as { bazi?: BaziBody }).bazi ?? null;
     const chart = bazi && bazi.believe !== false ? sampleChartM() : null;
     return delay({ bazi, chart });
   },
   // 命盘报告（mock）：无生辰 → needBazi；有生辰 → 确定性样例 MingpanReport（含 12 宫/四化/时间轴，供本地走查）
   async myChartReport(): Promise<MingpanReport | { needBazi: true }> {
-    const bazi = (current().d as { bazi?: { believe?: boolean } }).bazi ?? null;
+    const bazi = (current().d as { bazi?: { believe?: boolean; birthPlace?: string } }).bazi ?? null;
     if (!bazi) return delay({ needBazi: true } as { needBazi: true });
-    return delay(sampleReportM());
+    // 校正态跟着用户实际填的出生地走，不再写死 true——写死会把「未校正」那条提示的 UI 整个盖掉，
+    // 而未校正恰恰是存量用户 100% 会遇到的状态。
+    const matchedCity = mockMatchCity(bazi.birthPlace);
+    return delay(sampleReportM(bazi.birthPlace, !!matchedCity));
   },
   // 战略档案（mock）：谶语门槛与真实端同一条（有八字且信命理 → 当年有谶），
   // 老板页「年度谶语」卡两态（出谶 / 求谶引导）才能在本地 mock 下都走查到——
@@ -1775,7 +1803,11 @@ export const mock = {
   },
   async decisions(): Promise<DecisionLedger> {
     const { token } = current(); const l = loadLedgerM(token); saveLedgerM(token, l);
-    return delay({ items: l.decisions, stats: decStatsM(l.decisions) });
+    // 与服务端一致按 seq 倒序（decisionLog.ts: orderBy { seq: 'desc' }）。
+    // 原来直接返回插入顺序（最旧在前），账本页整列渲染看不出差别，但任何按顺序取第一条的调用方
+    // 在本地走查和线上会拿到不同记录——mock 要镜像契约行为，不能只镜像字段。
+    const items = l.decisions.slice().sort((a, b) => b.seq - a.seq);
+    return delay({ items, stats: decStatsM(l.decisions) });
   },
   async verifyDecision(id: string, outcome: 'correct' | 'revise'): Promise<{ decision: DecisionView; stats: DecisionStats }> {
     const { token } = current(); const l = loadLedgerM(token);
@@ -1785,7 +1817,9 @@ export const mock = {
   },
   async prophecies(): Promise<ProphecyLedger> {
     const { token } = current(); const l = loadLedgerM(token); saveLedgerM(token, l);
-    return delay({ items: l.prophecies, stats: proStatsM(l.prophecies) });
+    // 同上：与服务端一致按 seq 倒序（prophecyLog.ts 同样 orderBy { seq: 'desc' }）。
+    const items = l.prophecies.slice().sort((a, b) => b.seq - a.seq);
+    return delay({ items, stats: proStatsM(l.prophecies) });
   },
   async verifyProphecy(id: string, outcome: 'hit' | 'miss'): Promise<{ prophecy: ProphecyView; stats: ProphecyStats }> {
     const { token } = current(); const l = loadLedgerM(token);

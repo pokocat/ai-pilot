@@ -341,7 +341,8 @@ export function todayProgress(d: Dossier | null): { total: number; done: number;
 }
 
 // 组装「今日复盘」的对话开场：带上真实军令完成情况与回填数据，交给经营参谋生成复盘。
-export function buildReviewPrompt(d: Dossier | null): string {
+// extra：调用方补充的复盘上下文（如执行页的三势对账结论），插在「请判断今天的主要问题」之前。
+export function buildReviewPrompt(d: Dossier | null, extra: string[] = []): string {
   const date = today();
   const orders = ordersOf(d, date);
   const bf = d?.backfill[date];
@@ -358,6 +359,7 @@ export function buildReviewPrompt(d: Dossier | null): string {
   } else {
     lines.push('今天还没有记录数据。');
   }
+  if (extra.length) lines.push(...extra);
   lines.push('请判断今天的主要问题，并给出明天的 1-3 条军令。');
   return lines.join('\n');
 }

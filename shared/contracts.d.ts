@@ -800,7 +800,15 @@ export interface AdminCreativeJobsView {
 // 军师反问的结构化提问：q 为问题原文，options 为 2-4 个推荐答案（前端渲染为可点选项 + 自动附「其他」）。
 // 由模型在回复末尾以 ```ask 代码块产出，网关解析剥离后挂到 asks（见 server/llm/schema.extractAsks）。
 export interface ChatAsk { q: string; options: string[]; }
-export interface ChatReply { text: string; points?: string[]; acts?: [string, string][]; asks?: ChatAsk[]; }
+export interface ChatReply {
+  text: string; points?: string[]; acts?: [string, string][]; asks?: ChatAsk[];
+  /**
+   * 正文撞了模型输出上限、**服务端自动续写后仍未写完**（正常情况看不到这个标记：
+   * 撞上限会先自动续写，用户无感）。text 是可读的真实内容，不是错误——端上要按
+   * 「还没写完」呈现并给「继续」入口，不能当失败气泡，也不能丢弃。
+   */
+  truncated?: boolean;
+}
 export interface ReplyTemplate { t: string; points: string[]; acts: [string, string][]; }
 
 /* ────────────── 会话 ────────────── */

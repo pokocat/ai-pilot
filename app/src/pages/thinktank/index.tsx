@@ -30,7 +30,7 @@ type Stage = 'staging' | 'optimized' | 'confirmed';
 
 const TABS: { key: ThinkTab; label: string }[] = [
   { key: 'assets', label: '案卷资产' },
-  { key: 'data', label: '数据源' },
+  { key: 'data', label: '账号与数据' }, // 新设计稿改名：这一栏不只是数据源，还承接账号资产与持续记忆的入口
   { key: 'modules', label: '能力' },
   { key: 'reports', label: '方案' },
 ];
@@ -791,14 +791,36 @@ export default function ThinkTank() {
           ) : (
           <>
             <View className="ds-hero card">
-              <Text className="dh-k">经营数据源</Text>
-              <Text className="dh-t serif">让军师的判断有根有据</Text>
-              <Text className="dh-d">先上传表格、截图和聊天记录，后续再做后台授权。这些数据会用在战局判断、复盘和方案更新里。</Text>
+              <Text className="dh-k">账号资产 · 持续记忆 · 经营数据</Text>
+              <Text className="dh-t serif">让军师长期理解你正在做什么</Text>
+              <Text className="dh-d">内容账号连接执行与复盘，个人微信、会议和日历形成持续记忆。每个来源独立授权，也可以随时暂停和删除。</Text>
               <View className="dh-metrics">
                 <View className="dh-m"><Text className="dh-mv serif">{dsView?.bound ?? 0}</Text><Text className="dh-ml">已绑定</Text></View>
                 <View className="dh-m"><Text className="dh-mv serif">{dsView?.needed ?? 0}</Text><Text className="dh-ml">待补关键项</Text></View>
                 <View className="dh-m"><Text className="dh-mv serif">{dsView?.total ?? 0}</Text><Text className="dh-ml">类经营来源</Text></View>
               </View>
+            </View>
+
+            {/* 入口区（新设计稿 data-source-hub）：主页面只留入口和状态，复杂的账号矩阵去独立小程序管理。
+                矩阵小程序本轮不做，这里按设计稿保留入口并说清现状——账号绑定仍走下方「经营来源」。 */}
+            <Text className="think-h2">入口</Text>
+            <View className="ds-hub card" onClick={() => Taro.showToast({ title: '矩阵小程序即将上线，账号绑定先在下方经营来源做', icon: 'none', duration: 2600 })}>
+              <View className="dsh-ic"><Text className="serif">阵</Text></View>
+              <View className="dsh-b">
+                <Text className="dsh-t serif">账号矩阵</Text>
+                <Text className="dsh-s">按账号类型、项目、平台和授权状态统一管理。</Text>
+                <Text className="dsh-m">独立矩阵小程序 · 即将上线</Text>
+              </View>
+              <Text className="dsh-em">待上线</Text>
+            </View>
+            <View className="ds-hub card" onClick={() => navTo('/packages/work/relations/index')}>
+              <View className="dsh-ic"><Text className="serif">忆</Text></View>
+              <View className="dsh-b">
+                <Text className="dsh-t serif">持续记忆</Text>
+                <Text className="dsh-s">个人微信、会议和日历构成持续记忆，你确认后才回写判断。</Text>
+                <Text className="dsh-m">可单独开通 · 只读导入 · 支持删除</Text>
+              </View>
+              <Text className="dsh-em">查看</Text>
             </View>
 
             <Text className="think-h2">经营来源</Text>

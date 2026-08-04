@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { View, Text, Input, Button, Image } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import Icon from '../../../components/Icon';
+import Picker from '../../../components/Picker';
 import SafeHeader from '../../../components/SafeHeader';
 import ImpersonateSheet from '../../../components/ImpersonateSheet';
 import { useStore } from '../../../hooks/useStore';
@@ -25,6 +26,7 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [showImp, setShowImp] = useState(false); // 换身注入弹层（长按版本号呼出，运营排查）
+  const [showPicker, setShowPicker] = useState(false); // 本命色选择（从老板 tab 菜单并入）
   const avatarUrl = me?.user.avatarUrl || '';
 
   const onChooseAvatar = async (e: { detail?: { avatarUrl?: string } }) => {
@@ -135,6 +137,17 @@ export default function Settings() {
           <Text>{saving ? '保存中…' : '保存'}</Text>
         </View>
 
+        {/* 偏好：本命色从老板 tab 菜单并入（老板 tab 菜单收敛）——主题偏好本来就该住在设置里 */}
+        <Text className="set-sec">偏好</Text>
+        <View className="set-card">
+          <View className="set-row" onClick={() => setShowPicker(true)}>
+            <Text className="set-rt">我的本命色</Text>
+            <View className="set-sw" style={{ background: accent }} />
+            <Text className="set-rv">{s.color().short}</Text>
+            <Text className="set-go">›</Text>
+          </View>
+        </View>
+
         <Text className="set-sec">关于</Text>
         <View className="set-card">
           {/* 长按版本号：呼出换身注入弹层——运营凭主公令牌直接切到目标身份排查（无需先退出）。 */}
@@ -177,6 +190,8 @@ export default function Settings() {
         </View>
         <Text className="set-danger" onClick={deleteAccount}>注销账号</Text>
       </View>
+
+      <Picker open={showPicker} first={false} onClose={() => setShowPicker(false)} onConfirm={() => setShowPicker(false)} />
 
       {/* 换身注入弹层：校验通过后已覆盖 token 为新身份，reLaunch 回首页 tab 让各页按新身份重拉。 */}
       <ImpersonateSheet

@@ -36,3 +36,7 @@ export const IMPERSONATION_BASE_URL = resolveImpersonationBaseUrl(
 // 微信小程序走 wx.request enableChunked + RequestTask.onChunkReceived。
 // 如需临时回退非流式，构建时置 TARO_APP_STREAM=0。
 export const STREAM_CHAT = process.env.TARO_APP_STREAM !== '0';
+
+// 端判定（单一真相源）。此前各页各自 `const IS_WEAPP = process.env.TARO_ENV === 'weapp'`，
+// 于是「谁记得写守卫谁就有」——canvas 出图的四个调用点里有两个漏了，H5 下直接哑失败。
+export const IS_WEAPP = process.env.TARO_ENV === 'weapp';

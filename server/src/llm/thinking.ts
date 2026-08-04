@@ -77,3 +77,23 @@ export function maxTokensForThinking(base: number, cfg: ThinkingConfigLike, allo
     ? Math.max(base, normalizeThinkingBudget(cfg.thinkingBudget) + 512)
     : base;
 }
+
+/**
+ * 对话正文预算 → 实际下发的 max_tokens。
+ *
+ * `max_tokens` 在 Anthropic 协议里管的是「thinking + 正文」的总量，模型自己看不到这个数、
+ * 撞上就断句。所以正文预算必须是**净额**：开 Thinking 时把思考预算整个叠加上去，运营调
+ * thinkingBudget 只影响思考深度，永远不会偷走正文的 8000。
+ *
+ * 此前 chat 路径写死 `max_tokens: CHAT_MAX_TOKENS`（只有辅助抽取走了 maxTokensForThinking），
+ * 于是 thinkingBudget=7000 时正文只剩 1000 token —— 这就是「回复未完整结束」的根因。
+ *
+ * `adaptive` 的思考量由模型自己决定、无预算可查，只能按手动档上限保守预留，宁可多给。
+ */
+export function chatMaxTokens(bodyBudget: number, cfg: ThinkingConfigLike, allowThinking = true): number {
+  if (!allowThinking || !supportsThinkingConfig(cfg)) return bodyBudget;
+  const mode = normalizeThinkingMode(cfg.thinkingMode);
+  if (mode === 'enabled') return bodyBudget + normalizeThinkingBudget(cfg.thinkingBudget);
+  if (mode === 'adaptive') return bodyBudget + MAX_THINKING_BUDGET;
+  return bodyBudget;
+}

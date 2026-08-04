@@ -351,6 +351,45 @@
 .biz-fill .bm-edit::after { content: ''; position: absolute; top: -14px; bottom: -14px; left: -16px; right: -12px; }
 
 /* —— 复盘视图 —— */
+/* —— 三势对账（复盘视图，design v2-review-card） —— */
+.force-check { margin-top: 14px; padding: 16px; border-radius: 17px; }
+.fc-head { margin-bottom: 4px; }
+.fc-k { display: block; font-size: 11.5px; font-weight: 700; letter-spacing: .08em; color: var(--ink-3); }
+.fc-t { display: block; margin-top: 6px; font-size: 15.5px; font-weight: 600; color: var(--ink); }
+.fc-row { display: flex; align-items: center; gap: 10px; padding: 11px 0; border-top: 1px solid var(--line); }
+.fc-row:first-of-type { margin-top: 8px; }
+.fc-b { flex: 1; min-width: 0; }
+.fc-l { display: block; font-size: 13px; font-weight: 600; color: var(--ink); }
+.fc-d { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.45; color: var(--ink-3); }
+.fc-ops { flex-shrink: 0; display: flex; gap: 6px; }
+.fc-op {
+  padding: 5px 11px; border-radius: 999px;
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .7);
+  color: var(--ink-3); font-size: 11.5px; font-weight: 600;
+}
+.fc-op:active { opacity: .75; }
+.fc-op.off { border-color: var(--danger); color: var(--danger); }
+.fc-note { display: block; margin-top: 11px; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+
+/* —— 决策验证（复盘视图，design v2 决策验证卡） —— */
+.decision-verify { margin-top: 12px; padding: 16px; border-radius: 17px; }
+.dv-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.dv-k { font-size: 11.5px; font-weight: 700; letter-spacing: .08em; color: var(--gold-deep); }
+.dv-seq { flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
+.dv-t { display: block; margin-top: 9px; font-size: 15px; line-height: 1.45; font-weight: 600; color: var(--ink); }
+.dv-d { display: block; margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
+.dv-ops { display: flex; gap: 8px; margin-top: 13px; }
+.dv-op {
+  flex: 1; min-width: 0; height: 40px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .7);
+  color: var(--ink-2); font-size: 13.5px; font-weight: 600;
+}
+.dv-op.main { border-color: transparent; color: #fff; }
+.dv-op:active { opacity: .85; }
+.dv-op.busy { opacity: .6; }
+.dv-more { display: block; margin-top: 11px; font-size: 12px; font-weight: 600; color: var(--ink-3); }
+
 .review-card { margin-top: 14px; padding: 16px; border-radius: 17px; }
 .rc-hint { display: block; margin-top: 8px; font-size: 11.5px; font-weight: 600; color: var(--gold-deep); line-height: 1.5; }
 .rc-k { display: block; color: var(--green); font-size: 12px; font-weight: 600; letter-spacing: .06em; }
@@ -446,3 +485,6 @@
   font-size: 14px; font-weight: 600; height: 46px; justify-content: center; margin-top: 14px;
 }
 .ge-save:active { opacity: .85; }
+
+/* 每日战报卡的屏外画布：只用于 canvas 出图，不参与布局（尺寸由 renderCardToImage 按 dpr 设定）。 */
+.st-daily-canvas { position: fixed; left: -9999px; top: 0; width: 600px; height: 900px; }

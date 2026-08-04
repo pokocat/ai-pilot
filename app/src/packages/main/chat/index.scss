@@ -132,11 +132,49 @@
   font-size: 10.5px; font-weight: 600; color: var(--accent-ink);
 }
 
+/* 问诊四问卡（新设计稿 diagnosis-card）：总军师新会话的开场引导，气泡之外独立成卡 */
+.diagnosis-card {
+  margin-top: 9px; padding: 14px 15px;
+  border-radius: 14px; background: rgba(255, 255, 255, .9); border: 1px solid var(--line);
+}
+.dg-t { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.dg-s { display: block; margin-top: 5px; font-size: 12px; line-height: 1.55; color: var(--ink-3); }
+.dg-list { margin-top: 11px; display: flex; flex-direction: column; gap: 8px; }
+.dg-row { display: flex; align-items: flex-start; gap: 9px; }
+.dg-no {
+  width: 19px; height: 19px; flex-shrink: 0; margin-top: 1px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+}
+.dg-rt { flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+.dg-rk { font-weight: 600; color: var(--ink); }
+.dg-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
+.dg-chip {
+  padding: 6px 11px; border-radius: 999px; border: 1px solid;
+  font-size: 12px; font-weight: 600;
+}
+.dg-chip:active { opacity: .7; }
+
 .mem-learned {
   display: flex; gap: 7px; align-items: flex-start;
   background: var(--accent-soft); border-radius: 12px; padding: 10px 13px; margin-bottom: 16px;
 }
 .mem-learned Text { font-size: 12px; line-height: 1.5; color: var(--accent-ink); flex: 1; }
+
+/* 「还没写完」条：说明 + 续写入口。刻意做得比错误提示轻——正文是真内容，不是失败。
+   左内边距与 .ai-text 的 32px 对齐，视觉上属于这条回复而不是独立一条消息。 */
+.unfinished {
+  display: flex; align-items: center; gap: 6px;
+  margin: 8px 4px 0 32px;
+}
+.unfinished .unfinished-t { font-size: 12.5px; color: var(--ink-3); flex: 1; }
+.unfinished .unfinished-go {
+  font-size: 13px; font-weight: 600; flex: none;
+  padding: 3px 10px; border-radius: 11px; background: var(--accent-soft);
+}
+/* 生成中：保留按钮形态整体压暗，而不是换成同色背景——换背景在 --bg 上等于按钮消失，
+   用户会以为入口没了；压暗才读得出「还是那个按钮，此刻点不了」。 */
+.unfinished .unfinished-go.off { color: var(--ink-3); opacity: .45; }
 
 .composer {
   padding: 8px 12px calc(10px + env(safe-area-inset-bottom));

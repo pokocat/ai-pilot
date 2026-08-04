@@ -1,0 +1,77 @@
+/* 人脉圈与持续记忆：hero / 人脉零态 / 五个来源（可展开读取范围） / 隐私边界 / 页尾双动作 */
+
+.rel-page .rel-hero { padding: 18px 16px; border-radius: var(--r-lg); }
+.rel-page .rel-hero .h1 { margin: 6px 0 8px; }
+.rel-page .rel-p { display: block; font-size: 12.5px; line-height: 1.65; color: var(--ink-2); }
+
+/* 人脉圈概览三格（真零态） */
+.rel-page .rel-stats { display: flex; gap: 8px; margin-top: 12px; }
+.rel-page .rel-stat {
+  flex: 1; min-width: 0; box-sizing: border-box;
+  padding: 12px 8px; border-radius: var(--r-md); text-align: center;
+}
+.rel-page .rel-stat-v { display: block; font-size: 20px; font-weight: 600; color: var(--ink-3); }
+.rel-page .rel-stat-l { display: block; margin-top: 3px; font-size: 11px; font-weight: 600; color: var(--ink-3); }
+
+.rel-page .rel-empty { margin-top: 9px; padding: 14px 16px; border-radius: var(--r-md); }
+.rel-page .rel-empty-t { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.rel-page .rel-empty-d { display: block; margin-top: 6px; font-size: 12px; line-height: 1.65; color: var(--ink-3); }
+
+.rel-page .sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 18px 4px 8px; }
+.rel-page .sec-title { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.rel-page .sec-more { font-size: 11.5px; color: var(--ink-3); }
+
+/* 来源卡 */
+.rel-page .rel-src { margin-top: 10px; padding: 14px 16px; border-radius: var(--r-md); }
+.rel-page .rel-src:active { opacity: .92; }
+.rel-page .rel-src.is-open { background: rgba(255, 255, 255, .94); }
+.rel-page .rel-src-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.rel-page .rel-src-b { flex: 1; min-width: 0; }
+.rel-page .rel-src-t { display: block; font-size: 16px; font-weight: 600; color: var(--ink); }
+.rel-page .rel-src-d { display: block; margin-top: 5px; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
+.rel-page .rel-src-st { flex-shrink: 0; font-size: 11.5px; font-weight: 600; }
+
+.rel-page .rel-src-detail { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.rel-page .rel-dk {
+  display: block; margin: 12px 0 7px;
+  font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--ink-3);
+}
+.rel-page .rel-dk:first-child { margin-top: 0; }
+
+/* 产出四格 */
+.rel-page .rel-vgrid { display: flex; flex-wrap: wrap; gap: 7px; }
+.rel-page .rel-vcell {
+  width: calc(50% - 3.5px); box-sizing: border-box;
+  padding: 10px 11px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--line);
+}
+.rel-page .rel-vcell-t { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.rel-page .rel-vcell-d { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+
+/* 读取范围逐行 */
+.rel-page .rel-scope { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.rel-page .rel-scope:last-child { border-bottom: 0; }
+.rel-page .rel-scope-t { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.rel-page .rel-scope-d { display: block; margin-top: 3px; font-size: 11.5px; line-height: 1.55; color: var(--ink-3); }
+
+/* 隐私边界 */
+.rel-page .rel-privacy {
+  display: flex; align-items: flex-start; gap: 11px;
+  margin-top: 16px; padding: 14px 16px; border-radius: var(--r-md);
+}
+.rel-page .rel-privacy-ic {
+  width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.rel-page .rel-privacy-b { flex: 1; min-width: 0; }
+.rel-page .rel-privacy-t { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.rel-page .rel-privacy-d { display: block; margin-top: 6px; font-size: 12px; line-height: 1.65; color: var(--ink-3); }
+
+.rel-page .rel-actions { margin-top: 20px; display: flex; flex-direction: column; gap: 9px; }
+.rel-page .rel-act {
+  height: 46px; border-radius: 13px; border: 1px solid;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  font-size: 14.5px; font-weight: 600;
+}
+.rel-page .rel-act:active { opacity: .88; }
+.rel-page .rel-act-main { border-color: transparent; color: #FBFAF6; }

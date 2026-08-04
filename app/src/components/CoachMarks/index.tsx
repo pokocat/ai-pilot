@@ -25,7 +25,7 @@ const STEPS = [
   { route: '/pages/home/index', title: '军情 · 每天的判断', text: '今天的主要矛盾、下一步就做、现在别做，一屏讲清——先判断，再行动。' },
   { route: '/pages/studio/index', title: '军令 · 把话变成事', text: '判断拆成今日任务：做完打卡、回填战果，军师据此修正下一轮判断。' },
   { route: '/pages/thinktank/index', title: '锦囊 · 越攒越值钱', text: '资料、方法、历次方案都留档在这，是你的家底，越攒越厚。' },
-  { route: '/pages/profile/index', title: '老板 · 你自己', text: '档案、算力、本命色都在这里打理。往后有事，随时唤军师。' },
+  { route: '/pages/profile/index', title: '老板 · 你自己', text: '档案、算力、服务老师都在这里打理。往后有事，随时唤军师。' },
 ] as const;
 const CN = ['一', '二', '三', '四', '五'];
 

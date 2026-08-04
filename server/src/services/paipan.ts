@@ -56,12 +56,27 @@ export function validatePaipanInput(b: Partial<PaipanInput> | undefined, maxYear
   if (hourKnown && (!Number.isInteger(Number(raw.hour)) || Number(raw.hour) < 0 || Number(raw.hour) > 23)) {
     return { ok: false, error: '时辰不合法（0-23，或不填表示不确定）' };
   }
+  // 出生地：只做长度上限（与前端 maxlength=20 对齐）。内容不校验——城市识别由 matchCity 负责，
+  // 识别不出就是不校正，不该在这里把用户挡回去。
+  if (raw.birthPlace !== undefined && raw.birthPlace !== null) {
+    if (typeof raw.birthPlace !== 'string') return { ok: false, error: '出生地格式不合法' };
+    if (raw.birthPlace.length > 20) return { ok: false, error: '出生地过长（不超过 20 字）' };
+  }
+  // 经度：以前原样透传，字符串 "121.5" 会静默不校正、NaN 会一路落库让 Prisma 抛错，
+  // 最后被外层 catch 成「生辰无法排盘，请检查日期」——错误信息与真实原因完全无关。
+  if (raw.longitude !== undefined && raw.longitude !== null) {
+    const lng = Number(raw.longitude);
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) return { ok: false, error: '经度不合法' };
+  }
+  const place = typeof raw.birthPlace === 'string' ? raw.birthPlace.trim() : undefined;
   return {
     ok: true,
     input: {
       calendar: raw.calendar, year: yearNum, month: monthNum, day: dayNum,
       hour: hourKnown ? Number(raw.hour) : null, minute: raw.minute ?? 0,
-      gender: raw.gender, birthPlace: raw.birthPlace, longitude: raw.longitude,
+      gender: raw.gender,
+      birthPlace: place || undefined,
+      longitude: raw.longitude === undefined || raw.longitude === null ? undefined : Number(raw.longitude),
     },
   };
 }
@@ -172,11 +187,22 @@ function resolveSolar(input: PaipanInput): { solar: Solar; trueSolarApplied: boo
   if (hourKnown && typeof input.longitude === 'number' && input.longitude > 70 && input.longitude < 140) {
     const eot = equationOfTimeMinutes(solar.getYear(), solar.getMonth(), solar.getDay());
     const offsetMin = Math.round((input.longitude - 120) * 4 + eot);
+    // 分钟溢出借 Date 做进位（跨时/跨日/跨月/跨年），但必须走 UTC 而不是本地时间。
+    // 本地时间构造 `new Date(y, m-1, d, h, min+off)` 会掉进服务器时区的 DST 缺口：
+    // 实测 TZ=America/Los_Angeles 下 2021-03-14 02:57 被静默平移成 03:57（整整一小时，
+    // 足以改时柱）。生产在 Asia/Shanghai（1991 年后无夏令时）碰不到，但这与本文件
+    // 「同输入同输出、可复算」的承诺矛盾，且换台机器跑测试就会出现两套四柱。
+    // UTC 构造与回读全程不经过任何时区规则，纯日历算术。
     if (offsetMin !== 0) {
-      const d = new Date(solar.getYear(), solar.getMonth() - 1, solar.getDay(), solar.getHour(), solar.getMinute() + offsetMin, 0);
-      solar = Solar.fromDate(d);
-      trueSolarApplied = true;
+      const utc = new Date(Date.UTC(solar.getYear(), solar.getMonth() - 1, solar.getDay(), solar.getHour(), solar.getMinute() + offsetMin, 0));
+      solar = Solar.fromYmdHms(
+        utc.getUTCFullYear(), utc.getUTCMonth() + 1, utc.getUTCDate(),
+        utc.getUTCHours(), utc.getUTCMinutes(), 0,
+      );
     }
+    // 有经度就是「已按经度校正」，哪怕这一天的偏移恰好抵消为 0（杭州 120.2° 全年有约十天如此）。
+    // 旧实现把 offsetMin===0 也算作未校正，前端徽记会显示「未校正」，是错的暗示。
+    trueSolarApplied = true;
   }
   return { solar, trueSolarApplied, hourKnown };
 }

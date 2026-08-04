@@ -529,9 +529,11 @@ export const api = {
   approveBrandKit: () => (useMockApi() ? mock.approveBrandKit() : request<{ ok: boolean }>('/brand-kit/approve', 'POST')),
   getProfile: () => (useMockApi() ? mock.getProfile() : request<Profile | null>('/profile')),
   saveProfile: (p: Profile) => (useMockApi() ? mock.saveProfile(p) : request<Profile>('/profile', 'PUT', p)),
-  // 八字采集（M1 PR-2）：录入生辰 → 服务端排盘引擎落库；believe=false 表示不用命理视角
+  // 八字采集（M1 PR-2）：录入生辰 → 服务端排盘引擎落库；believe=false 表示不用命理视角。
+  // matchedCity：出生地命中的城市名（未命中/未填 = null）——前端据此回执「已按杭州校正」
+  // 或「未识别，按北京时间排盘」，不让「填了但没生效」这种事悄悄发生。
   saveBazi: (body: BaziBody) =>
-    useMockApi() ? mock.saveBazi(body) : request<{ believe: boolean; chart: ChartSummary | null }>('/profile/bazi', 'PUT', body),
+    useMockApi() ? mock.saveBazi(body) : request<{ believe: boolean; chart: ChartSummary | null; matchedCity?: string | null }>('/profile/bazi', 'PUT', body),
   myChart: () =>
     useMockApi() ? mock.myChart() : request<{ bazi: BaziBody | null; chart: ChartSummary | null }>('/profile/chart'),
   // 命盘报告（八字 × 紫微综合印证）：无生辰 → { needBazi:true }；有生辰 → 按需现算 MingpanReport（不落库）
@@ -566,9 +568,10 @@ export const api = {
     useMockApi() ? mock.bizMetricSeries(weeks) : request<{ items: BizMetricWeek[] }>(`/biz-metrics?weeks=${weeks}`),
   saveBizMetrics: (weekStart: string, metrics: Record<string, number>) =>
     useMockApi() ? mock.saveBizMetrics(weekStart, metrics) : request<{ ok: boolean }>(`/biz-metrics/${weekStart}`, 'PUT', { metrics }),
-  // B 级卡片（每日战报/天时日历）：返回可分享网页链接；mock 无渲染管道返回 null
-  publishCard: (kind: 'daily' | 'calendar', body?: { friendName?: string; friendBazi?: BaziBody }) =>
-    useMockApi() ? Promise.resolve({ htmlUrl: null as string | null }) : request<{ htmlUrl: string | null }>(`/cards/${kind}`, 'POST', body ?? {}),
+  // publishCard（POST /cards/:kind → 可分享网页链接）已从前端移除：
+  // 小程序里裸链给不出去（内部打不开、朋友圈不接受粘贴），而那条 /api/r/:id 公开页无鉴权无有效期
+  // 却渲染了经营原始数字。每日战报与天时日历一律改为端上 canvas 出图（图片交付）：
+  // services/dailyBattleCard.ts / packages/work/calendar。服务端端点保留给运营内部用。
   // 送你一卦「天命速写」预览（合规打磨·P-4）：现算即返、不落库、无公开链接；前端 canvas 画卡导出图片分享
   fateCardPreview: (body: { friendName: string; friendBazi: BaziBody; consent: boolean }) =>
     useMockApi() ? mock.fateCardPreview(body) : request<FateCardContent>('/cards/fate/preview', 'POST', body),

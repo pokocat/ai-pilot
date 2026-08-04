@@ -35,6 +35,7 @@ export interface LoopResult {
   usage: Usage;
   toolCalls: number;
   iterations: number;
+  truncated?: boolean; // 收口那一轮的文本撞了 max_tokens（可读但没写完），透给 ChatReply
 }
 
 export async function runToolLoop(opts: LoopOpts): Promise<LoopResult> {
@@ -54,7 +55,7 @@ export async function runToolLoop(opts: LoopOpts): Promise<LoopResult> {
     usage = addUsage(usage, out.usage);
 
     if (out.kind === 'final') {
-      return { text: out.text, toolInput: out.toolInput, usage, toolCalls, iterations: i + 1 };
+      return { text: out.text, toolInput: out.toolInput, usage, toolCalls, iterations: i + 1, truncated: out.truncated };
     }
 
     // tool_calls：执行并回灌
