@@ -17,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-08-04 | `0.2.26` | `设计稿改版与长回复不再中断` | `82b6005` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.3 MB / 1373229 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-02 | `0.2.25` | `方案购买支持单次与自动续费` | `12d66c5` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp` | 1.3 MB / 1322630 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-02 | `0.2.24` | `资料预览统一为纯内容` | `bb97651` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp` | 1.2 MB / 1307324 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-07-30 | `0.2.23` | `修复智能体目录与会话白屏` | `51c8948` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.8 MiB / 1828 KiB（dist） | 上传未执行：环境安全策略要求对向微信平台外发仓库构建代码取得更明确的专项授权；生产 server 包已构建并校验通过 |
