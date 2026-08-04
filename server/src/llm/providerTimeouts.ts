@@ -20,10 +20,15 @@ export function deliverableTimeoutMs(configuredMs: number): number {
  * 两条路径统一到同一下限。**不要改成抬高 `OPENAI_TIMEOUT_MS`**：那个值同时管着 700 token
  * 的辅助抽取（记忆/摘要），抬高只会让网关卡住时那些短调用一起吊死。
  *
+ * 为什么是 150s 而不是原来流式那个 120s：线上实测这个上游 55–130 token/s（干净时 ~127，
+ * 带负载/思考时 ~55），而开思考后 max_tokens 是 8000 正文 + 7000 思考 = 15000，最长回复
+ * 在慢的时候要 200s+。120s 会在「已经流出上万字之后」把整轮判失败——那正是这次要消灭的
+ * 那类事故。150s + 续写 60s 的最坏组合仍留在 nginx 180s 内（见 CONTINUE_DEADLINE_MS）。
+ *
  * 续写轮不用这个下限，用 `CONTINUE_ROUND_TIMEOUT_MS`（更短）——否则「首轮 + 续写」会顶穿
  * nginx `proxy_read_timeout` 180s。
  */
-export const CHAT_TIMEOUT_MS = 120_000;
+export const CHAT_TIMEOUT_MS = 150_000;
 
 export function chatTimeoutMs(configuredMs: number): number {
   return Math.max(configuredMs, CHAT_TIMEOUT_MS);

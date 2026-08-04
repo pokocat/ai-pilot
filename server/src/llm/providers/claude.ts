@@ -284,7 +284,9 @@ async function* streamChatRound(
   ep: ResolvedAiConfig,
   system: Anthropic.TextBlockParam[],
   messages: Anthropic.MessageParam[],
-  opts: { allowThinking: boolean; dedupeAgainst?: string; onDelta?: () => void; timeoutMs?: number },
+  // sink：把「已经下发给用户的正文/用量」实时写给调用方。流中途抛错时调用方才拿得到它们——
+  // 用户眼睛已经看过的字不能再被换成错误气泡（与撞上限同一原则）。
+  opts: { allowThinking: boolean; dedupeAgainst?: string; onDelta?: () => void; timeoutMs?: number; sink?: { text: string; usage: Usage } },
 ): AsyncGenerator<{ type: 'delta'; text: string }, StreamRoundOut> {
   // 流式调用也须设超时兜底：SDK 默认 600s，网关卡住会把这条流吊到 10 分钟。给足流式时长同时有界。
   const stream = getClient(ep.apiKey, ep.baseUrl).messages.stream({
@@ -302,6 +304,7 @@ async function* streamChatRound(
   const emit = (chunk: string): { type: 'delta'; text: string } | null => {
     if (!chunk) return null;
     text += chunk;
+    if (opts.sink) opts.sink.text = text;
     opts.onDelta?.();
     return { type: 'delta', text: chunk };
   };
@@ -309,6 +312,7 @@ async function* streamChatRound(
   for await (const event of stream) {
     if (event.type === 'message_start') usage = usageOf(event.message);
     else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
+    if (opts.sink) opts.sink.usage = usage;
     else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
       if (head !== null) {
         head += event.delta.text;
@@ -360,12 +364,14 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const ep = candidates[attempt];
     const slot = await acquireLlmSlot(laneOf(ep));
+    const sink = { text: '', usage: ZERO_USAGE };
     let yieldedAny = false;
     try {
       noteEndpointAttempt(ep);
       const round = yield* streamChatRound(ep, system, base, {
         allowThinking: true,
         onDelta: () => { yieldedAny = true; }, // 置位后就不能再转移端点了
+        sink,
       });
       served = ep;
       text = round.text;
@@ -376,6 +382,18 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
       lastErr = err;
       slot.noteError(err);
       const last = attempt === maxAttempts - 1;
+      // 流中途出错但**已经有正文流给用户**（多见于慢网关打满 150s 流超时）：不能把用户
+      // 已经读到的上万字换成一个错误气泡。按「没写完」收尾——与撞上限完全同一处理：
+      // 内容照常落库 + 标 truncated + 端上给「继续写完」。只有一个字都没吐出来时才如实报错。
+      if (yieldedAny && sink.text) {
+        console.warn(`[claude] 流中途失败但已有正文（${sink.text.length} 字），按未写完交回：${(err as Error).message}`);
+        served = ep;
+        text = sink.text;
+        usage = sink.usage;
+        truncated = true;
+        noteChatTruncated('Claude', 'given_up');
+        break;
+      }
       // 已经吐过内容 / 不可转移的错 → 如实抛出；可转移错误即使没有下一个候选也要共享冷却态。
       if (yieldedAny || !ep.endpointId || !isTransferable(err)) throw err;
       await coolEndpoint(ep.endpointId, 30_000, 'stream_error');

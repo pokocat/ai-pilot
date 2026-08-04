@@ -162,3 +162,45 @@ test('一个字正文都没写就撞上限 → 无锚点可续写，如实抛 AI
   );
   assert.equal(calls, 1, '没有正文时不该空转续写');
 });
+
+test('流中途断掉但已有正文 → 保留已流出的内容并标 truncated，不抛错', async () => {
+  // 慢网关打满流超时是线上真实形态：此时上万字已经流给用户了，把整轮判失败等于
+  // 把用户读过的内容换成错误气泡——与撞上限同一类事故，必须同一处理。
+  globalThis.fetch = (async () => {
+    const enc = new TextEncoder();
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"这是已经流给用户的正文"}}]}\n\n'));
+        // 必须等这块被读走再 error：同步 controller.error() 会把已入队的 chunk 一起丢掉，
+        // 那就变成「一个字都没吐出来」的另一种场景了（见下一条用例）。
+        setTimeout(() => controller.error(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })), 30);
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  }) as typeof fetch;
+
+  const events: string[] = [];
+  let done: { text: string; truncated?: boolean } | null = null;
+  for await (const event of openaiChatStream(CTX, CFG(1_000))) {
+    if (event.type === 'delta') events.push(event.text);
+    else done = event.result;
+  }
+  assert.deepEqual(events, ['这是已经流给用户的正文']);
+  assert.equal(done?.text, '这是已经流给用户的正文', '已流出的正文一个字都不能丢');
+  assert.equal(done?.truncated, true, '要标未写完，端上才给「继续写完」');
+});
+
+test('一个字都没吐出来就断掉 → 仍如实抛错（没有可保留的内容）', async () => {
+  globalThis.fetch = (async () => {
+    const enc = new TextEncoder();
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode(': ping\n\n'));
+        controller.error(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }));
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  }) as typeof fetch;
+
+  await assert.rejects(async () => {
+    for await (const _ of openaiChatStream(CTX, CFG(1_000))) { /* drain */ }
+  });
+});

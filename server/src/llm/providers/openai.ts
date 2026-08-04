@@ -448,7 +448,8 @@ type StreamRoundOut = { text: string; usage: Usage; truncated: boolean };
 async function* streamChatRound(
   cfg: ResolvedAiConfig,
   messages: OAMessage[],
-  opts: { allowThinking: boolean; affinity?: string; dedupeAgainst?: string; onDelta?: () => void },
+  // sink：见 claude 侧同名参数——流中途抛错时，调用方靠它拿回已经下发给用户的正文。
+  opts: { allowThinking: boolean; affinity?: string; dedupeAgainst?: string; onDelta?: () => void; sink?: { text: string; usage: Usage } },
 ): AsyncGenerator<{ type: 'delta'; text: string }, StreamRoundOut> {
   const body = { max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, cfg, opts.allowThinking), messages };
   let chunks: AsyncGenerator<OAStreamChunk>;
@@ -467,12 +468,13 @@ async function* streamChatRound(
   const emit = (chunk: string): { type: 'delta'; text: string } | null => {
     if (!chunk) return null;
     text += chunk;
+    if (opts.sink) opts.sink.text = text;
     opts.onDelta?.();
     return { type: 'delta', text: chunk };
   };
 
   for await (const chunk of chunks) {
-    if (chunk.usage) usage = usageOf({ usage: chunk.usage });
+    if (chunk.usage) { usage = usageOf({ usage: chunk.usage }); if (opts.sink) opts.sink.usage = usage; }
     const reason = chunk.choices?.find((choice) => choice.finish_reason)?.finish_reason;
     if (reason) finishReason = reason;
     const delta = chunk.choices?.map((c) => c.delta?.content ?? '').join('') ?? '';
@@ -502,10 +504,25 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   const affinity = affinityOf(ctx);
   const startedAt = Date.now();
 
-  const first = yield* streamChatRound(cfg, base, { allowThinking: true, affinity });
-  let text = first.text;
-  let usage = first.usage;
-  let truncated = first.truncated;
+  // 流中途出错但已有正文时，用 sink 把它取回来按「没写完」收尾（详见 claude 侧同一处理）。
+  const sink = { text: '', usage: ZERO_USAGE };
+  let text = '';
+  let usage: Usage = ZERO_USAGE;
+  let truncated = false;
+  try {
+    const first = yield* streamChatRound(cfg, base, { allowThinking: true, affinity, sink });
+    text = first.text;
+    usage = first.usage;
+    truncated = first.truncated;
+  } catch (err) {
+    // 用户已经读到的正文不能换成错误气泡；一个字都没吐出来时才如实报错。
+    if (!sink.text) throw err;
+    console.warn(`[llm:openai] 流中途失败但已有正文（${sink.text.length} 字），按未写完交回：${(err as Error).message}`);
+    text = sink.text;
+    usage = sink.usage;
+    truncated = true;
+    noteChatTruncated('OpenAI', 'given_up');
+  }
   // 一个字正文都没写就撞上限：没有锚点可续写，如实抛错并指向预算（见 assertChatBodyProduced）。
   if (truncated && !text) assertChatBodyProduced('OpenAI', 'length', usage.outputTokens);
 
