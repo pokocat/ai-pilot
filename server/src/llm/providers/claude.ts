@@ -20,7 +20,7 @@ import {
   CHAT_TOTAL_MAX_TOKENS,
   CONTINUE_DEADLINE_MS,
   CONTINUE_DEDUPE_BUFFER_CHARS,
-  CONTINUE_STREAM_TIMEOUT_MS,
+  CONTINUE_ROUND_TIMEOUT_MS,
   MAX_CHAT_CONTINUATIONS,
 } from './completionGuard.js';
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。挂在 provider 层而不是 gateway 的业务分支，
@@ -29,7 +29,7 @@ import { withLlmSlot, acquireLlmSlot, endpointLane } from '../../services/llmGat
 // 端点池：多路分流 + 故障转移。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning, type ThinkingParam } from '../thinking.js';
-import { deliverableTimeoutMs } from '../providerTimeouts.js';
+import { chatTimeoutMs, deliverableTimeoutMs } from '../providerTimeouts.js';
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
 type ClaudeRawRequest = Anthropic.MessageCreateParamsNonStreaming & { thinking?: ThinkingParam };
@@ -252,7 +252,7 @@ export async function claudeChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
       ...thinkingRequestTuning(ep, round === 0 ? {} : CONTINUE_TUNING),
       system,
       messages,
-    }, { timeout: ep.timeoutMs }), { affinityKey: affinityOf(ctx) });
+    }, { timeout: round === 0 ? chatTimeoutMs(ep.timeoutMs) : CONTINUE_ROUND_TIMEOUT_MS }), { affinityKey: affinityOf(ctx) });
     usage = sumUsage(usage, usageOf(res));
     text = joinContinuation(text, textOf(res));
 
@@ -293,7 +293,7 @@ async function* streamChatRound(
     ...thinkingRequestTuning(ep, opts.allowThinking ? {} : CONTINUE_TUNING),
     system,
     messages,
-  }, { timeout: opts.timeoutMs ?? Math.max(ep.timeoutMs, 120_000) });
+  }, { timeout: opts.timeoutMs ?? chatTimeoutMs(ep.timeoutMs) });
 
   let text = '';
   let usage: Usage = ZERO_USAGE;
@@ -405,7 +405,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
       const cont = yield* streamChatRound(served, system, continuationMessages(base, text), {
         allowThinking: false,
         dedupeAgainst: text,
-        timeoutMs: Math.min(Math.max(served.timeoutMs, 120_000), CONTINUE_STREAM_TIMEOUT_MS),
+        timeoutMs: CONTINUE_ROUND_TIMEOUT_MS,
       });
       usage = sumUsage(usage, cont.usage);
       text += cont.text; // 轮内已去重，此处只做拼接（避免与已下发的 delta 对不上）
@@ -512,7 +512,7 @@ export function claudeStep(cfg: ResolvedAiConfig, images?: ImageInput[], affinit
 
     const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create(
       { ...req, model: ep.model, ...thinkingRequestTuning(ep, { allowThinking: false }) },
-      { timeout: opts.finalTool ? deliverableTimeoutMs(ep.timeoutMs) : Math.max(ep.timeoutMs, 120_000) },
+      { timeout: opts.finalTool ? deliverableTimeoutMs(ep.timeoutMs) : chatTimeoutMs(ep.timeoutMs) },
     ), { affinityKey });
     const usage = usageOf(res);
     const toolUses = res.content.filter((c): c is Anthropic.ToolUseBlock => c.type === 'tool_use');

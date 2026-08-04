@@ -19,6 +19,7 @@ import {
   CHAT_TOTAL_MAX_TOKENS,
   CONTINUE_DEADLINE_MS,
   CONTINUE_DEDUPE_BUFFER_CHARS,
+  CONTINUE_ROUND_TIMEOUT_MS,
   MAX_CHAT_CONTINUATIONS,
 } from './completionGuard.js';
 // 全局并发闸：所有真实外呼都要过闸（压测 P0-2）。见 services/llmGate.ts 顶部说明。
@@ -26,7 +27,7 @@ import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane } fr
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
-import { deliverableTimeoutMs } from '../providerTimeouts.js';
+import { chatTimeoutMs, deliverableTimeoutMs } from '../providerTimeouts.js';
 
 interface OAToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
 // 多模态内容片段（OpenAI vision 协议）：文本或 data URL 图片。
@@ -61,12 +62,16 @@ interface OAStreamChunk {
 }
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
-type RequestPhase = 'chat_completion' | 'deliverable' | 'chat_stream';
+// chat_sync=用户可见的非流式对话（吃 chatTimeoutMs 下限）；
+// chat_completion=辅助抽取（记忆/摘要等 700 token 短调用，保持配置值，不抬高）。
+type RequestPhase = 'chat_sync' | 'chat_continue' | 'chat_completion' | 'deliverable' | 'chat_stream';
 
 function requestTimeoutMs(cfg: ResolvedAiConfig, phase: RequestPhase): number {
-  return phase === 'deliverable'
-    ? deliverableTimeoutMs(cfg.timeoutMs)
-    : cfg.timeoutMs;
+  if (phase === 'deliverable') return deliverableTimeoutMs(cfg.timeoutMs);
+  if (phase === 'chat_sync') return chatTimeoutMs(cfg.timeoutMs);
+  // 续写轮：首轮已产出可读正文，这一轮只是补完，预算收紧才不会顶穿 nginx 180s。
+  if (phase === 'chat_continue') return CONTINUE_ROUND_TIMEOUT_MS;
+  return cfg.timeoutMs;
 }
 
 function gatewayHost(base: string): string {
@@ -413,7 +418,7 @@ export async function openaiChat(ctx: GenContext, cfg: ResolvedAiConfig): Promis
     const data = await callChat(cfg, {
       max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, cfg, round === 0),
       messages: round === 0 ? base : continuationMessages(base, text),
-    }, 'chat_completion', affinityOf(ctx), round === 0);
+    }, round === 0 ? 'chat_sync' : 'chat_continue', affinityOf(ctx), round === 0);
     usage = sumUsage(usage, usageOf(data));
     text = joinContinuation(text, (data.choices?.[0]?.message?.content ?? '').trim());
 

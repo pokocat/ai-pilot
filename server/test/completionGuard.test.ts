@@ -10,10 +10,11 @@ import {
   CHAT_MAX_TOKENS,
   CHAT_TOTAL_MAX_TOKENS,
   CONTINUE_DEADLINE_MS,
-  CONTINUE_STREAM_TIMEOUT_MS,
+  CONTINUE_ROUND_TIMEOUT_MS,
   MAX_CHAT_CONTINUATIONS,
 } from '../src/llm/providers/completionGuard.js';
 import { chatMaxTokens, MAX_THINKING_BUDGET } from '../src/llm/thinking.js';
+import { CHAT_TIMEOUT_MS, chatTimeoutMs, deliverableTimeoutMs } from '../src/llm/providerTimeouts.js';
 import type { ThinkingConfigLike } from '../src/llm/thinking.js';
 
 const claude: ThinkingConfigLike = {
@@ -32,8 +33,8 @@ describe('chat completion guard', () => {
   // 顶穿的后果比截断更糟：clientGone 会退预留、不落库，用户连已经看完的半篇都拿不到。
   test('续写墙钟预算 + 单轮续写超时必须留在客户端 180s 之内', () => {
     assert.ok(
-      CONTINUE_DEADLINE_MS + CONTINUE_STREAM_TIMEOUT_MS < 180_000,
-      `最坏 ${CONTINUE_DEADLINE_MS + CONTINUE_STREAM_TIMEOUT_MS}ms 必须小于客户端 180000ms`,
+      CONTINUE_DEADLINE_MS + CONTINUE_ROUND_TIMEOUT_MS < 180_000,
+      `最坏 ${CONTINUE_DEADLINE_MS + CONTINUE_ROUND_TIMEOUT_MS}ms 必须小于客户端 180000ms`,
     );
   });
 
@@ -143,5 +144,31 @@ describe('思考预算不得抢占正文预算', () => {
   test('非 Claude 模型不下发思考，预算不叠加', () => {
     const cfg = { ...claude, provider: 'openai' as const, model: 'gpt-4o', thinkingMode: 'enabled' as const, thinkingBudget: 7000 };
     assert.equal(chatMaxTokens(CHAT_MAX_TOKENS, cfg), CHAT_MAX_TOKENS);
+  });
+});
+
+// 2026-08-04 线上「连续超时」：每次截断报错后端上补发的非流式兜底都卡在精确的 60.0s。
+// 流式路径早有 120s 下限，非流式却直接吃 OPENAI_TIMEOUT_MS=60000，而实测上游 ≈59 token/s，
+// 60s 只够 ~3500 token。两条路径必须同一下限。
+describe('对话上游等待下限', () => {
+  test('配置低于下限时抬到 120s（非流式对话不能只等 60s）', () => {
+    assert.equal(chatTimeoutMs(60_000), CHAT_TIMEOUT_MS);
+    assert.equal(chatTimeoutMs(20_000), CHAT_TIMEOUT_MS);
+  });
+
+  test('配置高于下限时听运营的（下限只兜底，不设上限）', () => {
+    assert.equal(chatTimeoutMs(150_000), 150_000);
+  });
+
+  test('成果预算仍远高于对话（成果是异步生成，可以等更久）', () => {
+    assert.ok(deliverableTimeoutMs(60_000) > chatTimeoutMs(60_000));
+  });
+
+  test('最坏「首轮 + 一轮续写」必须留在 nginx proxy_read_timeout 180s 之内', () => {
+    // 墙钟只允许在 100s 之前**开始**续写；续写轮自身上限 60s。
+    const worst = CONTINUE_DEADLINE_MS + CONTINUE_ROUND_TIMEOUT_MS;
+    assert.ok(worst < 180_000, `最坏 ${worst}ms 必须小于 180000ms`);
+    // 首轮单独超时也不能顶穿。
+    assert.ok(chatTimeoutMs(60_000) < 180_000);
   });
 });

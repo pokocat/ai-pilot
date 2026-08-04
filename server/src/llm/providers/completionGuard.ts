@@ -31,8 +31,11 @@ export const CHAT_TOTAL_MAX_TOKENS = CHAT_MAX_TOKENS * (MAX_CHAT_CONTINUATIONS +
  */
 export const CONTINUE_DEADLINE_MS = 100_000;
 
-/** 续写轮的流超时上限：这一轮只是把话写完（已关思考），不该比首轮还久。 */
-export const CONTINUE_STREAM_TIMEOUT_MS = 60_000;
+/**
+ * 续写轮的上游超时上限（流式与非流式共用）：这一轮只是把话写完（已关思考），不该比首轮还久。
+ * 也是 180s 客户端预算的一部分——见 CONTINUE_DEADLINE_MS 的算式。
+ */
+export const CONTINUE_ROUND_TIMEOUT_MS = 60_000;
 
 /** 续写时回看的正文尾巴长度（既要够模型定位断点，又不能白烧 input token）。 */
 const CONTINUE_TAIL_CHARS = 240;
