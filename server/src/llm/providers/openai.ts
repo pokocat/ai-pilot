@@ -27,7 +27,8 @@ import { withLlmSlot, acquireLlmSlot, noteUpstreamRateLimited, endpointLane } fr
 // 端点池：多路分流 + 故障转移（压测后续）。未启用池时只有一个候选，行为与直接过闸完全一致。
 import { withEndpoint, resolveCandidates, coolEndpoint, isTransferable, noteEndpointAttempt } from '../../services/llmPool.js';
 import { chatMaxTokens, maxTokensForThinking, thinkingRequestTuning } from '../thinking.js';
-import { chatTimeoutMs, deliverableTimeoutMs } from '../providerTimeouts.js';
+import { chatTimeoutMs, deliverableTimeoutMs, streamFirstEventIdleMs, streamIdleMs } from '../providerTimeouts.js';
+import { noteChatFirstToken, noteChatPartialKept, noteChatStreamStall } from '../../services/metrics.js';
 
 interface OAToolCall { id?: string; type?: string; function?: { name?: string; arguments?: string } }
 // 多模态内容片段（OpenAI vision 协议）：文本或 data URL 图片。
@@ -79,17 +80,20 @@ function gatewayHost(base: string): string {
   catch { return 'invalid-base-url'; }
 }
 
+// 非流式：timeoutMs 就是总预算，arm 一次即止。
+// 流式：首字节前用宽的（模型可能先思考很久且期间不发字节），之后每收到字节按更短的空闲阈值续期
+// ——**空闲口径，不是总时长**，正常写着的长回复不该被判失败（见 providerTimeouts 说明）。
 function deadline(timeoutMs: number) {
   const ctrl = new AbortController();
   const startedAt = Date.now();
   let timedOut = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const arm = () => {
+  const arm = (ms: number = timeoutMs) => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timedOut = true;
       ctrl.abort();
-    }, timeoutMs);
+    }, ms);
   };
   arm();
   return {
@@ -236,7 +240,7 @@ async function callChatStream(
     const base = ep.baseUrl.replace(/\/+$/, '') || cfg.baseUrl.replace(/\/+$/, '');
     const lane = ep.endpointId ? endpointLane(cls, ep.endpointId) : cfg.lane;
     // 超时窗每次尝试各建各的（与 callChat 同一坑：共用窗会让转移后的请求带着濒死 signal 出发）。
-    const watch = deadline(ep.timeoutMs);
+    const watch = deadline(streamFirstEventIdleMs());
     // 流式的槽位要持有到整条流消费完（一条流在上游眼里全程占一个并发），所以手动 acquire，
     // 并把释放责任移交给下面返回的 generator；建流阶段失败由本轮 finally 兜底释放。
     const slot = await acquireLlmSlot(lane);
@@ -265,18 +269,24 @@ async function callChatStream(
       }
       handedOff = true;
       return (async function* () {
-        try { yield* readOpenAIStream(res, watch.refresh); }
-        catch (err) { slot.noteError(err); throw providerFailure(err, ep, base, 'chat_stream', ep.timeoutMs, watch); }
-        finally { watch.clear(); slot.release(); }
+        let sawByte = false;
+        try {
+          yield* readOpenAIStream(res, () => { sawByte = true; watch.refresh(streamIdleMs()); });
+        } catch (err) {
+          slot.noteError(err);
+          // 空闲看门狗打的：这不是「慢」，是上游不发了——单独打点，告警才分得清。
+          if (watch.timedOut()) noteChatStreamStall('openai', sawByte ? 'mid_stream' : 'first_event');
+          throw providerFailure(err, ep, base, 'chat_stream', sawByte ? streamIdleMs() : streamFirstEventIdleMs(), watch);
+        } finally { watch.clear(); slot.release(); }
       })();
     } catch (err) {
       lastErr = err;
       slot.noteError(err);
       const last = attempt === maxAttempts - 1;
       // 不可转移（4xx 请求本身的问题等）或没有池端点 → 如实抛；可转移即使没有下一个候选也要写冷却态。
-      if (!ep.endpointId || !isTransferable(err)) throw providerFailure(err, ep, base, 'chat_stream', ep.timeoutMs, watch);
+      if (!ep.endpointId || !isTransferable(err)) throw providerFailure(err, ep, base, 'chat_stream', streamFirstEventIdleMs(), watch);
       await coolEndpoint(ep.endpointId, 30_000, 'stream_error');
-      if (last) throw providerFailure(err, ep, base, 'chat_stream', ep.timeoutMs, watch);
+      if (last) throw providerFailure(err, ep, base, 'chat_stream', streamFirstEventIdleMs(), watch);
       console.warn(`[llm:openai] 流式端点 ${ep.label || ep.endpointId} 建流失败并冷却，转移到下一个：${(err as Error).message}`);
     } finally {
       if (!handedOff) { watch.clear(); slot.release(); }
@@ -449,8 +459,9 @@ async function* streamChatRound(
   cfg: ResolvedAiConfig,
   messages: OAMessage[],
   // sink：见 claude 侧同名参数——流中途抛错时，调用方靠它拿回已经下发给用户的正文。
-  opts: { allowThinking: boolean; affinity?: string; dedupeAgainst?: string; onDelta?: () => void; sink?: { text: string; usage: Usage } },
+  opts: { allowThinking: boolean; affinity?: string; dedupeAgainst?: string; onDelta?: () => void; measureFirstToken?: boolean; sink?: { text: string; usage: Usage } },
 ): AsyncGenerator<{ type: 'delta'; text: string }, StreamRoundOut> {
+  const roundStartedAt = Date.now();
   const body = { max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, cfg, opts.allowThinking), messages };
   let chunks: AsyncGenerator<OAStreamChunk>;
   try {
@@ -465,8 +476,14 @@ async function* streamChatRound(
   let finishReason: string | null = null;
   let head: string | null = opts.dedupeAgainst ? '' : null; // null=已过缓冲期/首轮，直接下发
 
+  let firstDeltaAt = 0;
   const emit = (chunk: string): { type: 'delta'; text: string } | null => {
     if (!chunk) return null;
+    if (!firstDeltaAt) {
+      firstDeltaAt = Date.now();
+      // 首字延迟只在首轮有产品含义（续写轮的「首字」是接着写，不是用户的等待）。
+      if (opts.measureFirstToken) noteChatFirstToken('openai', (firstDeltaAt - roundStartedAt) / 1000);
+    }
     text += chunk;
     if (opts.sink) opts.sink.text = text;
     opts.onDelta?.();
@@ -509,8 +526,10 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   let text = '';
   let usage: Usage = ZERO_USAGE;
   let truncated = false;
+  // 「已下发正文被保全」只记一次，且要记对原因（与 claude 侧同口径）。
+  let partialCause: 'truncated' | 'stream_error' | null = null;
   try {
-    const first = yield* streamChatRound(cfg, base, { allowThinking: true, affinity, sink });
+    const first = yield* streamChatRound(cfg, base, { allowThinking: true, affinity, measureFirstToken: true, sink });
     text = first.text;
     usage = first.usage;
     truncated = first.truncated;
@@ -521,7 +540,7 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
     text = sink.text;
     usage = sink.usage;
     truncated = true;
-    noteChatTruncated('OpenAI', 'given_up');
+    partialCause = 'stream_error';
   }
   // 一个字正文都没写就撞上限：没有锚点可续写，如实抛错并指向预算（见 assertChatBodyProduced）。
   if (truncated && !text) assertChatBodyProduced('OpenAI', 'length', usage.outputTokens);
@@ -529,7 +548,9 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   // —— 续写轮：撞上限不是失败，是「还没写完」——
   // 续写失败**不算整轮失败**：手里已有可读内容，宁可标 truncated 交给用户点「继续」，
   // 也不能把用户已经看完的半篇回答换成一个错误气泡。affinity 不变，尽量落回同一端点保住缓存。
-  for (let round = 1; truncated && text && round <= MAX_CHAT_CONTINUATIONS; round++) {
+  // partialCause=stream_error 时**不续写**：续写是为「撞上限」设计的，流被掐断/装死时
+  // 立刻拿同一个端点再试一轮，只会再赔一个空闲超时，还把用户已有的正文压在后面不给。
+  for (let round = 1; truncated && text && !partialCause && round <= MAX_CHAT_CONTINUATIONS; round++) {
     if (usage.outputTokens >= CHAT_TOTAL_MAX_TOKENS) break;
     // 墙钟兜底：宁可标 truncated 给「继续写完」，也不能为了补齐把整轮拖到客户端超时——
     // 那会走 clientGone（退预留、不落库），用户连已经看完的半篇都拿不到。
@@ -549,7 +570,10 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
       break;
     }
   }
-  if (truncated) noteChatTruncated('OpenAI', 'given_up');
+  if (truncated) {
+    noteChatTruncated('OpenAI', 'given_up');
+    if (text) noteChatPartialKept('openai', partialCause ?? 'truncated');
+  }
 
   const out = requireText(text, usage, 'chat_stream');
   yield { type: 'done', result: { text: out, ...(truncated ? { truncated: true } : {}) }, usage };

@@ -18,7 +18,7 @@ import { ZERO_USAGE, extractAsks, looksLikeAsking, normalizeAsks, type Deliverab
 import { recordTokenUsage, recordAuxUsage, type UsageMeta } from '../services/usage.js';
 import { billableTokenEquivalents } from '../data/modelPrices.js';
 import { recordTrace } from '../services/trace.js';
-import { noteGenDegraded, noteAsksRecovered } from '../services/metrics.js';
+import { noteChatNonStream, noteGenDegraded, noteAsksRecovered } from '../services/metrics.js';
 import { moderate } from '../services/moderation.js';
 import { auditBannedWords } from '../services/bannedWords.js';
 import { cacheGet, cacheSet } from '../services/cache.js';
@@ -607,10 +607,14 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
   }
 
   let emitted = false;
+  // 为什么要记「这轮为什么没走原生流」：非流式对话吃的是总时长超时，2026-08-04 线上那 6 次
+  // 精确 60.0s 超时全部落在这条路上。原因分布是那类事故最早的可观测信号（见 metrics.noteChatNonStream）。
+  let fellBack: 'tools' | 'dify' | 'mock' | 'stream_failed' | null = null;
   try {
     if (ctx.runtime?.mode === 'openai') {
       const cfg = openaiOverrideCfg(ctx, await getAiConfig());
       const tools = await skillToolsFor(ctx);
+      if (tools.length) fellBack = 'tools';
       if (isRealKey(cfg.apiKey) && !tools.length) {
         const oa = await import('./providers/openai.js');
         for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg))) {
@@ -625,6 +629,8 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
       const cfg = await getAiConfig();
       const live = liveProvider(cfg);
       const tools = (live === 'openai' || live === 'claude') ? await skillToolsFor(ctx) : [];
+      if (!live) fellBack = 'mock';
+      else if (tools.length) fellBack = 'tools';
       if (live === 'openai' && !tools.length) {
         const oa = await import('./providers/openai.js');
         for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg))) {
@@ -644,12 +650,16 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
     }
   } catch (err) {
     if (emitted) throw err;
+    fellBack = 'stream_failed';
     console.error('[gateway] native chat stream fallback:', (err as Error).message);
     if (!env.aiFallbackMock) {
       // 保持老行为：流式握手失败时仍尝试非流式 provider；若 provider 真不可用，chatComplete 会抛 AI_UNAVAILABLE。
     }
   }
 
+  // 走到这里就一定是非流式了（原生流成功的分支全都 return 了）。dify runtime 不进上面任何分支，
+  // 也没有别的判据能落到 fellBack 上，故在此兜底归类。
+  noteChatNonStream(fellBack ?? (ctx.runtime?.mode === 'dify' ? 'dify' : 'stream_failed'));
   for await (const ev of chunkedChatFallback(ctx, meta, true)) yield ev;
 }
 

@@ -50,5 +50,23 @@ export function chatTimeoutMs(configuredMs: number): number {
  * 首个事件给得宽（90s）：开着 thinking 时模型可能先想很久，期间**可能一个事件都不发**。
  * 之后收紧（30s）：实测相邻 delta 间隔在毫秒级，30s 已经极宽松，还留着网关抖动的余量。
  */
-export const STREAM_FIRST_EVENT_IDLE_MS = 90_000;
-export const STREAM_IDLE_MS = 30_000;
+export const STREAM_FIRST_EVENT_IDLE_MS_DEFAULT = 90_000;
+export const STREAM_IDLE_MS_DEFAULT = 30_000;
+
+// 运行时可覆盖（与 LLM_POOL_MAX_ATTEMPTS 同套路）：上游换了、或压测要把阈值压小时不必发版。
+// **每次调用都读 env** 而不是模块加载时读一次——否则测试没法在不重排 import 的情况下压小阈值，
+// 而「看门狗到底会不会真的开火」正是最该测的那件事。
+function envMs(key: string, def: number): number {
+  const n = Number(process.env[key] ?? '');
+  return Number.isFinite(n) && n > 0 ? n : def;
+}
+
+/** 响应头到达后、第一个流事件之前的空闲上限。开着 thinking 时模型可能先想很久且不发事件。 */
+export function streamFirstEventIdleMs(): number {
+  return envMs('STREAM_FIRST_EVENT_IDLE_MS', STREAM_FIRST_EVENT_IDLE_MS_DEFAULT);
+}
+
+/** 已经开始出事件之后的相邻事件空闲上限（实测毫秒级，这里给的余量已极宽松）。 */
+export function streamIdleMs(): number {
+  return envMs('STREAM_IDLE_MS', STREAM_IDLE_MS_DEFAULT);
+}

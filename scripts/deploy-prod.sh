@@ -64,8 +64,20 @@ if [ -f "$APP_ROOT/server/.env" ]; then
   sudo cp -p "$APP_ROOT/server/.env" "$ENV_BACKUP"
 fi
 
+# deploy/monitoring/secrets/ 是 gitignore 的（Prometheus 抓 /api/metrics 的 credentials_file），
+# 但下面对 deploy/ 是 rm -rf 后整目录替换 —— 于是每次部署都会把它删掉。
+#
+# 之所以长期没被发现：docker 的**文件** bind mount 在容器启动时就绑定了 inode，host 侧删掉后
+# 运行中的 Prometheus 照样读得到、target 一直是 up；直到容器/主机重启才炸，而且 compose 会在
+# 缺失的源路径上造出一个同名**目录**，报错形态完全不指向真因。2026-08-04 三次部署踩响过一次。
+SECRETS_BACKUP="/tmp/junshi-monitoring-secrets-${SHA}"
+if [ -d "$APP_ROOT/deploy/monitoring/secrets" ]; then
+  sudo rm -rf "$SECRETS_BACKUP"
+  sudo cp -a "$APP_ROOT/deploy/monitoring/secrets" "$SECRETS_BACKUP"
+fi
+
 # Replace tracked application paths so deleted files do not linger. Preserve
-# server/.env, backups, logos, and other host-owned runtime artifacts.
+# server/.env, monitoring secrets, backups, logos, and other host-owned runtime artifacts.
 for path in \
   AGENTS.md PRODUCT.md IMPLEMENTATION.md README.md package.json .gitignore \
   .github admin app chats deploy docs project scripts server shared
@@ -80,6 +92,13 @@ done
 if [ -f "$ENV_BACKUP" ]; then
   sudo mkdir -p "$APP_ROOT/server"
   sudo cp -p "$ENV_BACKUP" "$APP_ROOT/server/.env"
+fi
+
+# 还原监控凭证（-a 保权限与属主：compose 里 prometheus 是 user: root，文件保持 0600 root 即可读）。
+if [ -d "$SECRETS_BACKUP" ]; then
+  sudo rm -rf "$APP_ROOT/deploy/monitoring/secrets"
+  sudo cp -a "$SECRETS_BACKUP" "$APP_ROOT/deploy/monitoring/secrets"
+  sudo rm -rf "$SECRETS_BACKUP"
 fi
 
 echo "== server dependencies and prisma =="

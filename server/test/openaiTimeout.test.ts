@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { openaiChatStream, openaiDeliverable } from '../src/llm/providers/openai.js';
 import type { GenContext } from '../src/llm/schema.js';
 import type { ResolvedAiConfig } from '../src/services/aiConfig.js';
+import { renderMetrics, __resetMetrics } from '../src/services/metrics.js';
 
 const realFetch = globalThis.fetch;
 
@@ -203,4 +204,70 @@ test('一个字都没吐出来就断掉 → 仍如实抛错（没有可保留的
   await assert.rejects(async () => {
     for await (const _ of openaiChatStream(CTX, CFG(1_000))) { /* drain */ }
   });
+});
+
+test('流卡死（发完一段就静默）→ 看门狗开火、保留已下发正文、记 stall 打点', async () => {
+  // 这是 claude 侧最要紧的那个缺口的可测替身：两个 provider 共用同一组阈值与同一套处理。
+  process.env.STREAM_FIRST_EVENT_IDLE_MS = '400';
+  process.env.STREAM_IDLE_MS = '120';
+  __resetMetrics();
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    const enc = new TextEncoder();
+    const signal = init?.signal as AbortSignal | undefined;
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode('data: {"choices":[{"delta":{"content":"开头这段已经流给用户了"}}]}\n\n'));
+        // 之后永不再发、也永不 close —— 正是「网关发完头就装死」的形状。
+        // 桩必须响应 abort：真实 fetch 在 signal 触发时会让 body 流出错，
+        // 桩不照做的话看门狗开了火也停不下来（本用例第一版就这么挂死过）。
+        signal?.addEventListener('abort', () => {
+          controller.error(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }));
+        }, { once: true });
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  }) as unknown as typeof fetch;
+
+  try {
+    const events: string[] = [];
+    let done: { text: string; truncated?: boolean } | null = null;
+    for await (const event of openaiChatStream(CTX, CFG(10_000))) {
+      if (event.type === 'delta') events.push(event.text);
+      else done = event.result;
+    }
+    assert.deepEqual(events, ['开头这段已经流给用户了']);
+    assert.equal(done?.text, '开头这段已经流给用户了', '卡死前已下发的正文一个字都不能丢');
+    assert.equal(done?.truncated, true, '要标未写完，端上才给「继续写完」');
+    const body = await renderMetrics();
+    assert.match(body, /junshi_chat_stream_stall_total\{provider="openai",phase="mid_stream"\} 1/);
+    assert.match(body, /junshi_chat_partial_kept_total\{provider="openai",cause="stream_error"\} 1/);
+    assert.match(body, /junshi_chat_first_token_seconds_count\{provider="openai"\} 1/, '首字延迟要记一次');
+  } finally {
+    delete process.env.STREAM_FIRST_EVENT_IDLE_MS;
+    delete process.env.STREAM_IDLE_MS;
+  }
+});
+
+test('响应头到了但一个事件都不来 → phase=first_event，且无正文时如实报错', async () => {
+  process.env.STREAM_FIRST_EVENT_IDLE_MS = '200';
+  __resetMetrics();
+  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+    const signal = init?.signal as AbortSignal | undefined;
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        // 头已返回，正文永不到来；abort 时如实让流出错（同上）。
+        signal?.addEventListener('abort', () => {
+          controller.error(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }));
+        }, { once: true });
+      },
+    }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
+  }) as unknown as typeof fetch;
+
+  try {
+    await assert.rejects(async () => {
+      for await (const _ of openaiChatStream(CTX, CFG(10_000))) { /* drain */ }
+    });
+    assert.match(await renderMetrics(), /junshi_chat_stream_stall_total\{provider="openai",phase="first_event"\} 1/);
+  } finally {
+    delete process.env.STREAM_FIRST_EVENT_IDLE_MS;
+  }
 });

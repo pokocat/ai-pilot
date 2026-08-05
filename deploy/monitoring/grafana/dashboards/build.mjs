@@ -244,7 +244,9 @@ const llmDash = dashboard({
     ] }),
     timeseries({ title: '产出质量：降级 / 截断 / 漏账（都该是 0）', targets: [
       promTarget('sum by (path) (increase(junshi_gen_degraded_total[15m]))', '降级 {{path}}'),
-      promTarget('sum by (provider) (increase(junshi_llm_output_truncated_total[15m]))', '截断 {{provider}}'),
+      // 必须按 resolved 拆：given_up 才是用户真看到了未写完；continued 是被自动续写救回来的，
+      // 混在一起会把「救回来了」也画成事故（面板标题写着「都该是 0」，那就更误导）。
+      promTarget('sum by (provider) (increase(junshi_llm_output_truncated_total{resolved="given_up"}[15m]))', '未写完交回 {{provider}}'),
       promTarget('sum(increase(junshi_usage_unreported_total[15m]))', '用量漏账'),
     ] }),
     timeseries({ title: '端点池：权重与冷却', targets: [
@@ -255,6 +257,56 @@ const llmDash = dashboard({
       promTarget('sum by (lane) (increase(junshi_llm_rejected_total[10m]))', '{{lane}} 队满拒绝'),
       promTarget('sum by (lane) (increase(junshi_llm_timed_out_total[10m]))', '{{lane}} 排队超时'),
     ] }),
+
+    // ── 对话交互质量（2026-08-04 截断/超时复盘后补）──
+    // 上面那些指标全绿也可能体验很糟：首字等 40 秒、逐字流其实没在流、半篇回答被换成错误气泡。
+    // 这一组专答「用户这一轮体验到了什么」，告警规则在 llm.rules.yml 的 junshi-chat 组。
+    row('对话交互质量'),
+    stat({
+      title: '首字延迟 P95(30m)', unit: 's', decimals: 1,
+      targets: [promTarget('histogram_quantile(0.95, sum(rate(junshi_chat_first_token_seconds_bucket[30m])) by (le))')],
+      steps: [[null, 'green'], [12, 'yellow'], [20, 'red']],
+      desc: '用户唯一直接体感到的等待。实测干净时 4–11s；红线与后台「告警 · 首字延迟 P95 线」联动',
+    }),
+    stat({
+      title: '流卡死(1h)', targets: [promTarget('sum(increase(junshi_chat_stream_stall_total[1h]))')],
+      steps: [[null, 'green'], [1, 'red']],
+      desc: '空闲看门狗开火次数。这不是「慢」，是上游发完响应头就不发了；>0 就该查上游',
+    }),
+    stat({
+      title: '未写完交回用户(1h)', targets: [promTarget('sum(increase(junshi_llm_output_truncated_total{resolved="given_up"}[1h]))')],
+      steps: [[null, 'green'], [1, 'yellow'], [5, 'red']],
+      desc: '自动续写后仍没写完、端上出「继续写完」的次数',
+    }),
+    stat({
+      title: '自动续写救回(1h)', targets: [promTarget('sum(increase(junshi_llm_output_truncated_total{resolved="continued"}[1h]))')],
+      steps: [[null, 'green'], [20, 'yellow']],
+      desc: '用户无感，但每次都多烧一轮 token。持续偏高＝该调输出预算或提示词长度约束',
+    }),
+    stat({
+      title: '残文保全(1h)', targets: [promTarget('sum(increase(junshi_chat_partial_kept_total[1h]))')],
+      desc: '已下发正文没被换成错误气泡的次数。上面两格在涨而这里恒 0，说明安全网破了（见 JunshiChatPartialKeptBroken）',
+    }),
+    stat({
+      title: '非流式对话占比(1h)', unit: 'percentunit', decimals: 2,
+      targets: [promTarget('sum(increase(junshi_chat_nonstream_total[1h])) / clamp_min(sum(increase(junshi_chat_first_token_seconds_count[1h])) + sum(increase(junshi_chat_nonstream_total[1h])), 1e-9)')],
+      steps: [[null, 'green'], [0.2, 'yellow'], [0.5, 'red']],
+      desc: '非流式没有逐字手感，且吃总时长超时。配了技能的智能体天然在这一类里',
+    }),
+    timeseries({ title: '首字延迟分位', unit: 's', targets: [
+      promTarget('histogram_quantile(0.5, sum by (le, provider) (rate(junshi_chat_first_token_seconds_bucket[10m])))', 'P50 {{provider}}'),
+      promTarget('histogram_quantile(0.95, sum by (le, provider) (rate(junshi_chat_first_token_seconds_bucket[10m])))', 'P95 {{provider}}'),
+    ] }),
+    timeseries({ title: '非流式回落原因', stack: true, targets: [
+      promTarget('sum by (reason) (increase(junshi_chat_nonstream_total[15m]))', '{{reason}}'),
+    ], desc: 'stream_failed 与 sync 同时抬头＝2026-08-04 那次「连续 60s 超时」的形状' }),
+    timeseries({ title: '截断处置：救回 vs 交回用户', targets: [
+      promTarget('sum by (resolved) (increase(junshi_llm_output_truncated_total[15m]))', '{{resolved}}'),
+    ], desc: 'continued 高＝预算/长度约束该调；given_up 高＝用户真的在看到未写完' }),
+    timeseries({ title: '流卡死与残文保全', targets: [
+      promTarget('sum by (phase) (increase(junshi_chat_stream_stall_total[15m]))', '卡死 {{phase}}'),
+      promTarget('sum by (cause) (increase(junshi_chat_partial_kept_total[15m]))', '保全 {{cause}}'),
+    ], desc: 'first_event=发完头就断供；mid_stream=中途被掐。保全曲线该跟着卡死曲线走' }),
   ],
 });
 

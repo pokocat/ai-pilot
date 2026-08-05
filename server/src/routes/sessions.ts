@@ -7,6 +7,7 @@ import { bumpDiagRound } from '../services/strategicProfile.js';
 import { resolveEffectiveAgent } from '../services/agentVersions.js';
 import { generateDeliverable, chatComplete, chatCompleteStream, hasLiveProvider } from '../llm/gateway.js';
 import { learnFromConversation } from '../services/memory.js';
+import { noteChatNonStream } from '../services/metrics.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
 import { refineSessionTitle } from '../services/sessionTitle.js';
@@ -395,7 +396,10 @@ export async function sessionRoutes(app: FastifyInstance) {
         // A-3：总军师也写记忆（用户级共享事实池）。
         const learn = async () => learnFromConversation({ tenantId: user.tenantId, userId: user.id, agentKey, cfg: memoryConfig, userText: text, projectId });
         if (!wantsDeliverableRequest(text)) {
-          const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
+          // /generate-sync 天然非流式（端上 TARO_APP_STREAM=0，或 liveGen 静默失败后的补发兜底）。
+          // 单独归一类：它吃的是总时长超时，也是 2026-08-04「连续 60s 超时」的实际发生地。
+          noteChatNonStream('sync');
+          const { result: replyChat, usage } = await chatComplete(ctx,{ tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object } });
           harvestProphecies(user, agentKey, replyChat.text, replyChat.truncated);
           bumpSessionDigest(user, session.id);
@@ -446,7 +450,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           knowledgeUsed, refNotices, creditBalance, tokenQuota,
         };
       }
-      const { result: replyChat, usage } = await chatComplete(ctx, { tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
+      noteChatNonStream('sync'); // 同上：/generate-sync 的另一分支（非 on-demand 智能体）
+      const { result: replyChat, usage } = await chatComplete(ctx,{ tenantId: user.tenantId, userId: user.id, sessionId: session.id, agentKey, ratio });
       const msg = await prisma.message.create({
         data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object },
       });

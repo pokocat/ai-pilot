@@ -15,7 +15,7 @@
   },
   "panels": [
     {
-      "id": 54,
+      "id": 65,
       "type": "stat",
       "title": "总用户数",
       "datasource": {
@@ -69,7 +69,7 @@
       }
     },
     {
-      "id": 55,
+      "id": 66,
       "type": "stat",
       "title": "今日注册",
       "datasource": {
@@ -123,7 +123,7 @@
       }
     },
     {
-      "id": 56,
+      "id": 67,
       "type": "stat",
       "title": "今日 GMV(元)",
       "datasource": {
@@ -178,7 +178,7 @@
       }
     },
     {
-      "id": 57,
+      "id": 68,
       "type": "stat",
       "title": "今日订单(入账)",
       "datasource": {
@@ -232,7 +232,7 @@
       }
     },
     {
-      "id": 58,
+      "id": 69,
       "type": "stat",
       "title": "卡单(已付未发放)",
       "description": ">0 超 10 分钟会触发 critical 告警,处理入口=运营后台「订单」页",
@@ -291,7 +291,7 @@
       }
     },
     {
-      "id": 59,
+      "id": 70,
       "type": "stat",
       "title": "今日产出(报告)",
       "datasource": {
@@ -345,7 +345,7 @@
       }
     },
     {
-      "id": 60,
+      "id": 71,
       "type": "timeseries",
       "title": "注册趋势（日）",
       "datasource": {
@@ -394,7 +394,7 @@
       }
     },
     {
-      "id": 61,
+      "id": 72,
       "type": "timeseries",
       "title": "日活（当天有过模型调用的用户）",
       "datasource": {
@@ -443,7 +443,7 @@
       }
     },
     {
-      "id": 62,
+      "id": 73,
       "type": "timeseries",
       "title": "GMV 与订单量（日,按支付时间）",
       "description": "口径=完成支付的订单（含事后退款的）;退款金额单看下面退款面板",
@@ -503,7 +503,7 @@
       }
     },
     {
-      "id": 63,
+      "id": 74,
       "type": "timeseries",
       "title": "Token 成本（元/日,含基建调用）",
       "datasource": {
@@ -552,7 +552,7 @@
       }
     },
     {
-      "id": 64,
+      "id": 75,
       "type": "timeseries",
       "title": "算力流水（日）",
       "datasource": {
@@ -611,7 +611,7 @@
       }
     },
     {
-      "id": 65,
+      "id": 76,
       "type": "timeseries",
       "title": "产出量（日 × 类型）",
       "datasource": {
@@ -660,7 +660,7 @@
       }
     },
     {
-      "id": 66,
+      "id": 77,
       "type": "table",
       "title": "套餐分布（当前存量）",
       "datasource": {
@@ -697,7 +697,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 78,
       "type": "timeseries",
       "title": "退款（日）",
       "datasource": {
@@ -746,7 +746,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 79,
       "type": "timeseries",
       "title": "审核拦截（日 × 方向）",
       "datasource": {
@@ -795,7 +795,7 @@
       }
     },
     {
-      "id": 69,
+      "id": 80,
       "type": "timeseries",
       "title": "转化信号：禁写闸拦截（想用但没套餐/已到期）",
       "description": "none=未开通用户在尝试写操作（销售线索）;expired=到期用户还在用（续费提醒线索）",

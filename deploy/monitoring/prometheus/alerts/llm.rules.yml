@@ -71,8 +71,69 @@ groups:
         annotations:
           summary: "产出降级发生（path={{ $labels.path }}）——用户正在拿到 mock 兜底内容，查 provider 可用性"
 
-      - alert: JunshiOutputTruncatedSpike
-        expr: increase(junshi_llm_output_truncated_total[1h]) > 5
+  # ──────────────────────────────────────────────────────────────────────
+  # 对话交互质量（2026-08-04 截断/超时复盘后补）
+  #
+  # 这一组回答「用户这一轮体验到了什么」，与上面的调用量/成本互补：全都 200 成功、
+  # 但首字等 40 秒、或逐字流其实没在流、或半篇回答被换成错误气泡——上面那些指标一个都看不出来。
+  # 阈值同样走 junshi_alert_config（后台「功能开关」页「告警 ·」系列可调，≤75s 生效）。
+  # ──────────────────────────────────────────────────────────────────────
+  - name: junshi-chat
+    rules:
+      # 撞输出上限后**自动续写仍没写完**：用户真的看到了「内容较长，先写到这里」。
+      # 注意必须按 resolved="given_up" 过滤——resolved="continued" 是被救回来的，那是好事不是事故。
+      - alert: JunshiChatTruncatedGivenUp
+        expr: >
+          sum(increase(junshi_llm_output_truncated_total{resolved="given_up"}[1h]))
+          > scalar(junshi_alert_config{key="chat_truncated_1h"})
         labels: { severity: warning }
         annotations:
-          summary: "1 小时内 >5 次输出截断（AI_OUTPUT_TRUNCATED）——模型输出预算可能不够或上游变了"
+          summary: "1 小时内 {{ $value | printf \"%.0f\" }} 次「续写后仍未写完」交回用户——查输出预算(CHAT_MAX_TOKENS+思考预算)与提示词长度约束"
+
+      # 续写被频繁触发：用户无感，但每次都在多烧一轮 token，且说明预算/长度约束不匹配当前用法。
+      - alert: JunshiChatContinuationBusy
+        expr: >
+          sum(increase(junshi_llm_output_truncated_total{resolved="continued"}[1h]))
+          > scalar(junshi_alert_config{key="chat_continued_1h"})
+        labels: { severity: info }
+        annotations:
+          summary: "1 小时内 {{ $value | printf \"%.0f\" }} 次自动续写（用户无感但在多烧 token）——该调 CHAT_MAX_TOKENS 或 CHAT_TAIL_DIRECTIVE 的长度契约"
+
+      # 空闲看门狗触发＝上游发完响应头就不发了。这不是「慢」，是「装死」，>0 就该看。
+      # first_event 多＝上游排队/思考期就断供；mid_stream 多＝流中途被掐。
+      - alert: JunshiChatStreamStall
+        expr: increase(junshi_chat_stream_stall_total[15m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "流式静默超时（{{ $labels.provider }} / {{ $labels.phase }}）——上游发头后停止推送，已 abort 释放并发槽"
+
+      # 原生流建流失败回落非流式：非流式吃总时长超时，正是 2026-08-04 那 6 次精确 60.0s 超时的前置。
+      - alert: JunshiChatStreamFallback
+        expr: increase(junshi_chat_nonstream_total{reason="stream_failed"}[15m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "原生流建流失败、对话回落非流式——用户失去逐字手感且改吃总时长超时，查上游 SSE 支持与网关"
+
+      # 首字延迟 P95：用户唯一直接体感到的等待。histogram_quantile 需要 _bucket 序列。
+      - alert: JunshiChatFirstTokenSlow
+        expr: >
+          histogram_quantile(0.95, sum(rate(junshi_chat_first_token_seconds_bucket[30m])) by (le))
+          > scalar(junshi_alert_config{key="chat_first_token_p95_s"})
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "流式对话首字延迟 P95 {{ $value | printf \"%.1f\" }}s 超线——上游排队或思考预算过大"
+
+      # 安全网健康度：stall 在涨，但「已下发正文被保全」却是 0 —— 说明那张网破了，
+      # 用户读过的内容又在被换成错误气泡。这条是防回归的，不是查上游的。
+      #
+      # 两侧都必须先 sum() 成无标签、且用 `and on()`：PromQL 的 and 要求两侧标签集匹配，
+      # 左边带 {provider,phase} 而右边无标签的话，这条规则永远不会触发（静默失效）。
+      - alert: JunshiChatPartialKeptBroken
+        expr: >
+          sum(increase(junshi_chat_stream_stall_total[1h])) > 0
+          and on() sum(increase(junshi_chat_partial_kept_total[1h])) == 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "发生了流卡死但一次「残文保全」都没记到——已下发正文可能又在被丢弃，查 provider 的 sink 链路"

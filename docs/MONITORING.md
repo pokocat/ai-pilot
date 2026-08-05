@@ -43,7 +43,8 @@
 | LLM 调用 | `llm_calls_total{kind,provider,status}` · `llm_call_duration_seconds` | `services/trace.ts` recordTrace（与 llm_trace 表同口径） |
 | LLM 闸门/池 | `llm_{in_flight,queued,ceiling,cooling,upstream_429_total,...}{lane}` · `llm_pool_endpoint_*` | `llmGate.ts` / `llmPool.ts` |
 | Token 成本 | `llm_tokens_total{kind,provider,model,dir}` · `llm_cost_cny_total`（元）· `usage_unreported_total`（漏账） | `services/usage.ts` recordTokenUsage（与 token_usage 表同口径） |
-| 产出质量 | `gen_degraded_total{path}`（mock 兜底/工程语境替换）· `llm_output_truncated_total{provider}` | `llm/gateway.ts` 各 fallback 分支 / `completionGuard.ts` |
+| 产出质量 | `gen_degraded_total{path}`（mock 兜底/工程语境替换）· `llm_output_truncated_total{provider,resolved}`（**resolved=continued 已自动续写救回 / given_up 交回用户**——告警与看板一律按 resolved 拆，混在一起会把「救回来了」画成事故） | `llm/gateway.ts` 各 fallback 分支 / `completionGuard.ts` |
+| 对话交互质量 | `chat_first_token_seconds`（直方图,首字延迟,只统计原生流式）· `chat_stream_stall_total{provider,phase}`（空闲看门狗开火：first_event 发完响应头就断供 / mid_stream 中途静默）· `chat_nonstream_total{reason}`（tools\|dify\|mock\|stream_failed\|sync）· `chat_partial_kept_total{provider,cause}`（已下发正文没被换成错误气泡的次数=安全网健康度） | `providers/{claude,openai}.ts` streamChatRound / `llm/gateway.ts` 回落处 / `routes/sessions.ts` 的 /generate-sync |
 | 业务事件 | `user_registrations_total{channel}` · `moderation_checks_total{ref,verdict}` · `credits_flow_total{direction,reason}` · `plan_gate_blocked_total{state}` | `routes/auth.ts` / `moderation.ts` / `credits.ts` / `app.ts` 禁写闸 |
 | 支付 | `pay_orders_created_total` · `pay_orders_applied_total{type}` · `pay_amount_cny_total` · `pay_refunds_total` · `pay_sweep_*` · `pay_stuck_paid_unapplied`（抓取时查库,60s 缓存） | `services/wechatPay.ts` |
 | 告警配套 | `alert_config{key}`（阈值运行值,后台「功能开关」页可调）· `alerts_forwarded_total{outcome}`（飞书转发成败） | `services/alertConfig.ts` / `routes/alerts.ts` |
@@ -112,7 +113,7 @@ UI 上的改动只是临时的（provisioning 每 30s 会对回文件）。
 
 ## 5. 告警（`deploy/monitoring/prometheus/alerts/`,默认阈值=压测方案 §7,运行值后台可调）
 
-**阈值配置化（二期）**：15 项阈值（CPU/PG 连接/P95/5xx/429 率/队列等待/Token 日预算/RSS/退款/审核）
+**阈值配置化（二期）**：18 项阈值（CPU/PG 连接/P95/5xx/429 率/队列等待/Token 日预算/RSS/退款/审核/未写完/续写频次/首字延迟 P95）
 注册为运营后台「功能开关」页的「告警 ·」数值项,存 DB → `/api/metrics` 吐 `junshi_alert_config{key}` →
 规则里 `scalar()` 取值。**后台改完 ≤75s 生效**（60s 缓存 + 一个抓取周期）,不改文件、不发版、不重启。
 默认值是压测口径基线,改基线才动 `server/src/services/alertConfig.ts` + 压测方案文档。
@@ -121,7 +122,8 @@ UI 上的改动只是临时的（provisioning 每 30s 会对回文件）。
 |---|---|---|
 | `system.rules.yml` | 主机 CPU/内存/磁盘（含 24h 写满预测）、PG 连接/死锁/长事务 | CPU ≥65% 预警 / ≥80% 扩容；PG 连接 ≥60% / ≥75% |
 | `api.rules.yml` | 服务/探活挂、TLS 证书 14 天到期、P95、5xx 率、过载闸、事件循环、RSS | 普通接口 P95 >200ms 预警 / >500ms 或 5xx≥1% 停止放量 |
-| `llm.rules.yml` | 上游 429 率、队列等待、长冷却、Token 日预算、漏账、降级、截断 | 429 ≥0.5% / ≥2%；等待 ≥5s / ≥15s；日成本 70%/90%（日预算默认 200 元/天,后台可调） |
+| `llm.rules.yml` · `junshi-llm` 组 | 上游 429 率、队列等待、长冷却、Token 日预算、漏账、降级 | 429 ≥0.5% / ≥2%；等待 ≥5s / ≥15s；日成本 70%/90%（日预算默认 200 元/天,后台可调） |
+| `llm.rules.yml` · `junshi-chat` 组 | **对话交互质量**：未写完交回用户、自动续写频次、流卡死、原生流回落非流式、首字延迟 P95、安全网破损 | 未写完 >5 次/h；续写 >20 次/h（info）；卡死/回落 >0 即报；首字 P95 >20s 持续 10m |
 | `business.rules.yml` | 已付未发放（资损!）、sweep 失败、退款激增、审核拦截激增、72h 零注册 | 已付未发放 >10 分钟 = critical |
 
 **推送到飞书（后台配置,无需发版）**：Alertmanager 已默认把告警投给 `POST /api/alerts/webhook`
@@ -129,6 +131,19 @@ UI 上的改动只是临时的（provisioning 每 30s 会对回文件）。
 后台「功能开关 → 告警通知」填入飞书群自定义机器人的 webhook（可选签名密钥）→ 点「发测试消息」验证。
 webhook 加密落库、掩码回显；URL 白名单只收 `open.feishu.cn` 机器人域名。未配置时告警只在
 Grafana/Alertmanager 界面可见（API 侧记 `junshi_alerts_forwarded_total{outcome="not_configured"}`）。
+
+**规则与指标必须对账（`server/test/alertRules.test.ts`）**：告警规则里写错指标名、引用未注册的
+`alert_config` key、或 `and`/`unless` 两侧标签集不匹配，Prometheus 都**不报错**——那条规则只是永远不触发,
+监控看着「配好了」实际那一路是聋的。`promtool check rules` 对这三种也一律 SUCCESS。所以加了对账测试:
+规则引用的每个 `junshi_*` 指标名要在应用侧真的渲染、每个阈值 key 要在 `ALERT_CONFIG_DEFS` 里、
+`and`/`unless` 两侧要么都聚合成无标签要么显式写 `on(...)`。改规则后跑 `cd server && npm test` 即校验。
+
+**改完规则怎么生效**：规则文件由 `scripts/deploy-prod.sh` 随代码一起同步到
+`/opt/junshi/deploy/monitoring/prometheus/alerts`（容器只读挂载该目录）,之后
+`curl -X POST 127.0.0.1:9090/-/reload` 热加载,不重启容器。
+**注意 `deploy/monitoring/secrets/` 是 gitignore 的**,部署脚本已显式备份还原——早期版本没有,
+于是每次部署都会删掉 Prometheus 的 `credentials_file`,而 docker 的文件 bind mount 在容器启动时
+已绑定 inode,运行中照样 up,**直到容器/主机重启才炸**且报错完全不指向真因（2026-08-04 踩过）。
 
 ## 6. 日常运维
 
