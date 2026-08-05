@@ -17,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-08-05 | `0.2.27` | `粘贴长文归卷交互与附件卡视觉` | `8c32d65` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.3 MB / 1384219 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-04 | `0.2.26` | `设计稿改版与长回复不再中断` | `82b6005` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.3 MB / 1373229 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-02 | `0.2.25` | `方案购买支持单次与自动续费` | `12d66c5` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp` | 1.3 MB / 1322630 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-02 | `0.2.24` | `资料预览统一为纯内容` | `bb97651` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp` | 1.2 MB / 1307324 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
