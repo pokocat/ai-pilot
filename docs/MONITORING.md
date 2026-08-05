@@ -138,12 +138,29 @@ Grafana/Alertmanager 界面可见（API 侧记 `junshi_alerts_forwarded_total{ou
 规则引用的每个 `junshi_*` 指标名要在应用侧真的渲染、每个阈值 key 要在 `ALERT_CONFIG_DEFS` 里、
 `and`/`unless` 两侧要么都聚合成无标签要么显式写 `on(...)`。改规则后跑 `cd server && npm test` 即校验。
 
-**改完规则怎么生效**：规则文件由 `scripts/deploy-prod.sh` 随代码一起同步到
-`/opt/junshi/deploy/monitoring/prometheus/alerts`（容器只读挂载该目录）,之后
-`curl -X POST 127.0.0.1:9090/-/reload` 热加载,不重启容器。
-**注意 `deploy/monitoring/secrets/` 是 gitignore 的**,部署脚本已显式备份还原——早期版本没有,
-于是每次部署都会删掉 Prometheus 的 `credentials_file`,而 docker 的文件 bind mount 在容器启动时
-已绑定 inode,运行中照样 up,**直到容器/主机重启才炸**且报错完全不指向真因（2026-08-04 踩过）。
+**改完规则怎么生效**：规则文件由 `scripts/deploy-prod.sh` 随代码同步到
+`/opt/junshi/deploy/monitoring/prometheus/alerts`（容器只读挂载该目录）,脚本末尾自动
+`promtool check rules` + `/-/reload`,并对账「加载到的规则条目数必须 >0」。不重启容器。
+
+**`deploy/` 必须原地 rsync,绝不能 rm -rf 后整目录替换**（2026-08-05 修）。bind mount 在**容器启动时**
+就绑定了 inode,换 inode 等于把容器的视图钉死在已删除的旧对象上:
+
+| 挂载 | 类型 | 被 rm -rf 后的表现 |
+|---|---|---|
+| `prometheus/alerts` | 目录 | 容器里变成**空目录** → `groups: []`,**全部告警规则静默失效**（不只新加的）,`/-/reload` 也救不回来 |
+| `secrets/metrics.token` | 文件 | 旧 inode 仍被挂载引用 → 运行中照样 up,**直到容器/主机重启才炸**,且 compose 会在缺失路径造出同名目录,报错完全不指向真因 |
+| `.env`（gitignore） | — | 被删后**任何 `docker compose` 命令都因变量缺失直接失败**,监控栈从此无法运维（这也是上一条长期修不动的原因） |
+
+三者叠加的实际后果:**告警规则自监控栈上线后的每次部署都是关着的**,而 target 一直显示 up、
+看板照常出数,所以没人察觉。现在脚本用
+`rsync -a --delete --exclude 'monitoring/.env' --exclude 'monitoring/secrets/'` 原地更新,
+目录 inode 不变、容器视图立刻跟上。**往 `deploy/monitoring/.gitignore` 加条目时,必须同步加到那两个
+`--exclude`**,否则又会把主机侧的运行时凭证同步掉。
+
+**若曾被删过怎么恢复**：`.env` 与 `metrics.token` 的值可从运行中容器的 `docker inspect ... .Config.Env`
+里搬（compose 创建容器时已把插值结果固化进去）,不必重设 Grafana 密码；恢复后
+`docker compose up -d --force-recreate prometheus` 让挂载重新解析,再确认
+`/api/v1/rules` 的组数 >0。
 
 ## 6. 日常运维
 

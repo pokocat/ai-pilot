@@ -64,23 +64,13 @@ if [ -f "$APP_ROOT/server/.env" ]; then
   sudo cp -p "$APP_ROOT/server/.env" "$ENV_BACKUP"
 fi
 
-# deploy/monitoring/secrets/ 是 gitignore 的（Prometheus 抓 /api/metrics 的 credentials_file），
-# 但下面对 deploy/ 是 rm -rf 后整目录替换 —— 于是每次部署都会把它删掉。
-#
-# 之所以长期没被发现：docker 的**文件** bind mount 在容器启动时就绑定了 inode，host 侧删掉后
-# 运行中的 Prometheus 照样读得到、target 一直是 up；直到容器/主机重启才炸，而且 compose 会在
-# 缺失的源路径上造出一个同名**目录**，报错形态完全不指向真因。2026-08-04 三次部署踩响过一次。
-SECRETS_BACKUP="/tmp/junshi-monitoring-secrets-${SHA}"
-if [ -d "$APP_ROOT/deploy/monitoring/secrets" ]; then
-  sudo rm -rf "$SECRETS_BACKUP"
-  sudo cp -a "$APP_ROOT/deploy/monitoring/secrets" "$SECRETS_BACKUP"
-fi
-
 # Replace tracked application paths so deleted files do not linger. Preserve
-# server/.env, monitoring secrets, backups, logos, and other host-owned runtime artifacts.
+# server/.env, backups, logos, and other host-owned runtime artifacts.
+#
+# **deploy/ 不在这个列表里**——它被监控栈 bind mount 着，见下面单独处理。
 for path in \
   AGENTS.md PRODUCT.md IMPLEMENTATION.md README.md package.json .gitignore \
-  .github admin app chats deploy docs project scripts server shared
+  .github admin app chats docs project scripts server shared
 do
   sudo rm -rf "$APP_ROOT/$path"
   if [ -e "$RELEASE/$path" ]; then
@@ -89,16 +79,44 @@ do
   fi
 done
 
+# ── deploy/ 必须**原地同步**，绝不能 rm -rf 后整目录替换 ──
+#
+# 监控栈把 deploy/monitoring 下的路径 bind mount 进容器：
+#   ./prometheus/prometheus.yml -> /etc/prometheus/prometheus.yml   （文件）
+#   ./prometheus/alerts         -> /etc/prometheus/alerts           （目录）
+#   ./secrets/metrics.token     -> /etc/prometheus/metrics.token    （文件）
+#
+# bind mount 在**容器启动时**就绑定了 inode。rm -rf 再重建等于换了 inode，容器那边还盯着
+# 已删除的旧 inode：
+#   · alerts 目录 → 容器里变成**空目录**，Prometheus `groups: []`，**全部告警规则静默失效**
+#     （system/api/llm/business 全部，不只是新加的）。/-/reload 也救不回来，因为它读的就是空目录。
+#   · metrics.token → 文件 inode 还在（被挂载引用着），运行中照样 up，直到容器/主机重启才炸，
+#     且 compose 会在缺失的源路径造出一个同名**目录**，报错形态完全不指向真因。
+#
+# 2026-08-04 查这两件事时才发现：告警规则其实自监控栈上线后的每次部署都是关着的。
+# rsync 原地更新，目录 inode 不变，容器视图立刻跟上；secrets/ 是 gitignore 的运行时凭证，排除。
+#
+# 排除项 = deploy/monitoring/.gitignore 里的全部条目（那些是主机侧维护的运行时凭证，
+# 归档里根本没有，同步过去只会把它们删掉）：
+#   · monitoring/.env                 GRAFANA_ADMIN_PASSWORD 等 —— 删了之后**任何 docker compose
+#                                     命令都会因变量缺失直接失败**，监控栈从此无法运维（这也是
+#                                     上面那个「告警静默」长期没人修得动的原因）；
+#   · monitoring/secrets/metrics.token Prometheus 抓 /api/metrics 的凭证。
+# 新增 gitignore 条目时**必须同步加到这里**。
+sudo rsync -a --delete \
+  --exclude 'monitoring/.env' \
+  --exclude 'monitoring/secrets/' \
+  "$RELEASE/deploy/" "$APP_ROOT/deploy/"
+sudo chown -R "$DEPLOY_USER:$DEPLOY_GROUP" "$APP_ROOT/deploy"
+# 凭证目录属主/权限由主机侧维护（0600 root，compose 里 prometheus 是 user: root），别被上面 chown 带走。
+if [ -f "$APP_ROOT/deploy/monitoring/secrets/metrics.token" ]; then
+  sudo chown root:root "$APP_ROOT/deploy/monitoring/secrets/metrics.token"
+  sudo chmod 0600 "$APP_ROOT/deploy/monitoring/secrets/metrics.token"
+fi
+
 if [ -f "$ENV_BACKUP" ]; then
   sudo mkdir -p "$APP_ROOT/server"
   sudo cp -p "$ENV_BACKUP" "$APP_ROOT/server/.env"
-fi
-
-# 还原监控凭证（-a 保权限与属主：compose 里 prometheus 是 user: root，文件保持 0600 root 即可读）。
-if [ -d "$SECRETS_BACKUP" ]; then
-  sudo rm -rf "$APP_ROOT/deploy/monitoring/secrets"
-  sudo cp -a "$SECRETS_BACKUP" "$APP_ROOT/deploy/monitoring/secrets"
-  sudo rm -rf "$SECRETS_BACKUP"
 fi
 
 echo "== server dependencies and prisma =="
@@ -147,6 +165,27 @@ printf '%s\n' "${SHA}" | sudo tee "$APP_ROOT/.deploy-version" >/dev/null
 echo "== nginx reload =="
 sudo nginx -t
 sudo systemctl reload nginx
+
+# 告警规则随代码一起同步过来了，让 Prometheus 热加载（规则改动才会生效）。
+# 监控栈没起就跳过——它是可选组件，不能因为没装监控就让部署失败。
+if sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^monitoring-prometheus-1$'; then
+  echo "== prometheus rules reload =="
+  # 先 promtool 验一遍：坏规则热加载会被整份拒绝，那等于把全部告警一起关掉。
+  if sudo docker exec monitoring-prometheus-1 promtool check rules /etc/prometheus/alerts/*.yml; then
+    sudo docker exec monitoring-prometheus-1 wget -qO- --post-data='' http://127.0.0.1:9090/-/reload >/dev/null \
+      && echo "  已热加载"
+    # 对账：规则组数必须 >0。0 组说明挂载点被孤立（见上面 deploy/ 的 rsync 说明），静默失效必须叫出来。
+    GROUPS=$(sudo docker exec monitoring-prometheus-1 wget -qO- 'http://127.0.0.1:9090/api/v1/rules' 2>/dev/null \
+      | tr ',' '\n' | grep -c '"name"' || true)
+    if [ "${GROUPS:-0}" -eq 0 ]; then
+      echo "  !! Prometheus 已加载 0 条规则——告警全部静默，请检查 alerts 目录挂载" >&2
+    else
+      echo "  规则条目数：${GROUPS}"
+    fi
+  else
+    echo "  !! promtool 校验未通过，跳过 reload（保留旧规则，不要让坏规则关掉全部告警）" >&2
+  fi
+fi
 
 echo "== local smoke =="
 curl -fsS http://127.0.0.1/api/health
