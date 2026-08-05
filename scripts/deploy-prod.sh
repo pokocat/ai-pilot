@@ -171,7 +171,8 @@ sudo systemctl reload nginx
 if sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^monitoring-prometheus-1$'; then
   echo "== prometheus rules reload =="
   # 先 promtool 验一遍：坏规则热加载会被整份拒绝，那等于把全部告警一起关掉。
-  if sudo docker exec monitoring-prometheus-1 promtool check rules /etc/prometheus/alerts/*.yml; then
+  # 必须套 sh -c：docker exec 不经 shell，通配符会被原样传给 promtool（"path ... does not exist"）。
+  if sudo docker exec monitoring-prometheus-1 sh -c 'promtool check rules /etc/prometheus/alerts/*.yml'; then
     sudo docker exec monitoring-prometheus-1 wget -qO- --post-data='' http://127.0.0.1:9090/-/reload >/dev/null \
       && echo "  已热加载"
     # 对账：规则组数必须 >0。0 组说明挂载点被孤立（见上面 deploy/ 的 rsync 说明），静默失效必须叫出来。
