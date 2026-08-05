@@ -33,3 +33,22 @@ export const CHAT_TIMEOUT_MS = 150_000;
 export function chatTimeoutMs(configuredMs: number): number {
   return Math.max(configuredMs, CHAT_TIMEOUT_MS);
 }
+
+/**
+ * 流式的**空闲**看门狗：多久没有任何流事件就判上游装死。
+ *
+ * 为什么必须是空闲而不是总时长：一条正常写着的长回复不能因为「写了太久」被判失败——那正是
+ * 2026-08-04 那类事故的形状。但**完全不设保护也不行**：网关发完响应头就静默，会把请求一直挂着
+ * 并占住一个 LLM 并发槽，只能等客户端断开。
+ *
+ * 为什么 claude 侧非补不可：`@anthropic-ai/sdk` 的 `fetchWithTimeout` 在 fetch promise 的
+ * `.finally()` 里 `clearTimeout`，而流式 fetch 在**响应头到达时**就 resolve，`streaming.js` /
+ * `MessageStream.js` 里再无任何超时逻辑——所以 SDK 的 `timeout` 只约束「多久拿到响应头」，
+ * 之后零保护。openai 侧本来就是空闲口径（`readOpenAIStream` 每收到字节 refresh），这里把两边
+ * 统一到同一组阈值。
+ *
+ * 首个事件给得宽（90s）：开着 thinking 时模型可能先想很久，期间**可能一个事件都不发**。
+ * 之后收紧（30s）：实测相邻 delta 间隔在毫秒级，30s 已经极宽松，还留着网关抖动的余量。
+ */
+export const STREAM_FIRST_EVENT_IDLE_MS = 90_000;
+export const STREAM_IDLE_MS = 30_000;

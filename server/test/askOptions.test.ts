@@ -1,7 +1,8 @@
 // 军师反问选项协议：extractAsks 从回复尾部解析 ```ask 块 → ChatReply.asks（纯函数，零 I/O）。
+// 另含兜底抽取用到的两块：normalizeAsks（与 extractAsks 共用的归一化口径）、looksLikeAsking（触发闸门）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractAsks } from '../src/llm/schema.ts';
+import { extractAsks, looksLikeAsking, normalizeAsks, CHAT_TAIL_DIRECTIVE } from '../src/llm/schema.ts';
 
 test('extractAsks：尾部 ask 块解析为结构化问题+选项，并从正文剥离', () => {
   const text = '好，我先问清楚。\n你现在主要做哪个行业？\n\n```ask\n[{"q":"你现在主要做哪个行业？","options":["餐饮","电商零售","本地服务"]}]\n```';
@@ -43,4 +44,39 @@ test('extractAsks：选项不足 2 项 / q 为空的条目被丢弃；超长裁�
   const r = extractAsks(`问：\n\`\`\`ask\n${block}\n\`\`\``);
   assert.equal(r.asks?.length, 1);
   assert.deepEqual(r.asks![0], { q: '正常问题', options: ['a', 'b', 'c', 'd'] });
+});
+
+// —— 兜底抽取（gateway.recoverAsks）依赖的两块纯逻辑 ——
+// 兜底和协议解析必须共用同一把裁剪尺子，否则「模型给的」与「事后补抽的」端上表现会不一致。
+test('normalizeAsks：与 extractAsks 同一口径（裁剪 4×4、丢弃残缺项、非数组返回 undefined）', () => {
+  assert.equal(normalizeAsks(null), undefined);
+  assert.equal(normalizeAsks({ q: '不是数组' }), undefined);
+  assert.equal(normalizeAsks([{ q: '选项不够', options: ['一个'] }]), undefined);
+  const many = normalizeAsks(Array.from({ length: 6 }, (_, i) => ({ q: `问题${i}`, options: ['a', 'b'] })));
+  assert.equal(many?.length, 4);
+  // question 别名与逐项长度裁剪都要跟 extractAsks 一致
+  const aliased = normalizeAsks([{ question: '别名字段', options: ['x'.repeat(40), 'y'] }]);
+  assert.equal(aliased?.[0].q, '别名字段');
+  assert.equal(aliased?.[0].options[0].length, 24);
+});
+
+test('looksLikeAsking：只看尾部——结尾提问命中，中段修辞反问不命中', () => {
+  // 线上那条 2845 字长回复的真实形态：问题在倒数第二段，后面还跟两句陈述收尾。
+  assert.equal(looksLikeAsking('客户找你做得最多的是哪一种图？\n\n这个答案决定你的MVP砍成什么形状。答完我帮你画产品骨架。'), true);
+  // 中段反问 + 长尾陈述：不该触发兜底抽取（白烧一次调用）
+  const rhetorical = `你以为这是产品问题？其实是渠道问题。${'先把渠道盘清楚再谈产品迭代。'.repeat(30)}`;
+  assert.equal(looksLikeAsking(rhetorical), false);
+  assert.equal(looksLikeAsking(''), false);
+});
+
+// 提示词装配的回归闸：ask 协议必须在尾部指令里、且排在体例约束之后（位置就是这次修的东西）。
+test('CHAT_TAIL_DIRECTIVE：含提问选项协议，且排在体例约束之后', () => {
+  const styleIdx = CHAT_TAIL_DIRECTIVE.indexOf('回复要冷静、克制、机构级');
+  const askIdx = CHAT_TAIL_DIRECTIVE.indexOf('提问选项协议');
+  assert.ok(styleIdx >= 0, '体例约束应在尾部指令内');
+  assert.ok(askIdx > styleIdx, 'ask 协议必须排在体例约束之后（靠近生成点）');
+  // 「严禁 JSON」那条必须显式豁免 ask 块，否则它就是在禁止下面这份协议
+  assert.match(CHAT_TAIL_DIRECTIVE, /唯一例外是下面「提问选项协议」规定的 ```ask 块/);
+  // 长回复丢块是线上实测的主要失败形态，复查指令不能被后续改动删掉
+  assert.match(CHAT_TAIL_DIRECTIVE, /长回复（含表格、分段、多标题的回复）同样不能省/);
 });

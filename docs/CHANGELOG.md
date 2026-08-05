@@ -6,6 +6,28 @@
 
 ## 变更日志
 
+### 2026-08-04 · 提问选项（```ask 块）在长回复里丢失：协议移到提示词最末 + 服务端兜底抽取 · 影响面：server（llm/schema + gateway + 两个 provider + metrics + tests）
+
+**现象**：军师提了问题，端上不出可点选项。
+
+**线上定位**（生产库只读查证，两条真实测试消息）：一条 2845 字的长回复结尾问了三个问题，`asks` 为空、正文里连半截 ```ask 围栏都没有（`truncated` 也为空 → 正常收尾），即**模型压根没输出这个块**；同一会话下一条 727 字的短回复正常带上了块，但把选项在正文里又用 Markdown 列表抄了一遍。ask 协议的代码链路（提示词注入 → `extractAsks` 剥离 → SSE 下发 → 端上 `ask-card` 渲染）逐环核查完好，不是链路故障。
+
+**根因分两层**。①「回复越长、越容易丢块」是长期存在的模型遵从性问题：近 14 天「结尾提问的回复」带 asks 比例与平均长度明显负相关（1076 字 → 74%，3168 字 → 29%），规律贯穿本次部署前后。② 上一次「对话撞输出上限改为自动续写」（94f6ae6）把 `chatMaxTokens` 从写死 8000（thinking 与正文共用总闸）改成正文净额 + 思考预算叠加，线上 `thinkingMode=adaptive` 下即 8000+7000=15000。改动前 adaptive 的 thinking 会吃掉大半预算，长回复物理上写不出来；改好之后长回复第一次能正常产出，于是把①这个既有缺陷从「被截断掩盖」变成了天天可见。另外 `adaptive`/`enabled` 都被 Anthropic 强制 `temperature: 1`，格式约定的稳定性本就更差。
+
+**改动**：
+- `ASK_OPTIONS_DIRECTIVE` 从 `buildSystemParts` 的 stable 段（业务守则之后）移出，与 `CHAT_STYLE_GUIDE` 合成新的 `CHAT_TAIL_DIRECTIVE`，由对话路径拼在系统提示词**最末尾**（dynamic 段之后）。原先它前面还压着体例约束和整个 dynamic 段——线上一轮 dynamic 能有两万多 token 的参考资料/长期记忆/会话快照，指令离生成点太远。stable 段仍是独立 `cache_control` 块，缓存前缀不被打断；反而比原先「体例约束拼进 stable」更好——改体例不再废掉缓存。顺带收益：成果/工具路径不再收到对话专用的 ask 协议。
+- 体例约束里「严禁输出 `[{"type":...}]` 形式的结构化 JSON」显式豁免 ```ask 块（ask 块本身正是 `[{...}]` JSON，这条排在协议之后，等于在禁止它）；「先给纲要再问用户展开哪一部分」补上按协议附块的回指；协议本身按线上两种失败形态各加一条（长回复复查、不要在正文重复列选项）。
+- `claudeAdaptive` / `openaiAdaptive` 此前只拼 hint、**完全没有**体例约束与 ask 协议，一并补上 tail。
+- 新增服务端兜底：`recoverAsks` 在「正文尾部像在提问 + `asks` 为空」时走 `completeJson`（辅助路径、已关思考、几百 token）把末尾问题抽成 asks，归一化与 `extractAsks` 共用抽出的 `normalizeAsks`。抽不出/超时/上游不可用一律静默返回原 reply——兜底失败绝不能让整轮对话失败。mock 降级路径不兜底（上游已不可用，再发一次只是白等）。触发闸门 `looksLikeAsking` 只看末 300 字，避免长回复中段的修辞性反问白烧调用。
+- 新增指标 `junshi_chat_asks_recovered_total{outcome=recovered|miss}`：这是**模型对 ask 协议遵从率的反向指标**。涨说明提示词层失效了，该回去调协议措辞或考虑改 tool use；归零说明模型自己守约，兜底可以收窄触发面省钱。
+
+**未做 / 留给后续治理**：
+1. **ask 块改 tool use** 是最可靠的解法（模型对 tool schema 的遵从性远高于「在末尾追加代码块」），但 `chatCompleteStream` 要求 `!tools.length` 才走 provider 原生流式，加 tool 会把普通对话踢出流式路径、失去逐字体验。等上面那条指标能证明提示词层不够用了再做这个取舍。
+2. **提示词缓存完全没命中**：本次三条 trace 的 `cachedInput` 全是 0，单轮 input 27379 / 29008 token 全价买。与 ask 无关，但是笔实钱，需单独查（端点亲和是否生效、stable 段是否真稳定、第三方网关是否透传 `cache_control`）。
+3. **adaptive thinking 下的延迟离超时线不远**：本次实测单轮 94s / 96s，其中一条 96 秒、4057 output token 的请求走了 `clientGone`（退预留、不落库），用户白等且拿不到内容。流超时 150s、客户端 180s 的余量需要复核。
+
+测试：server 1253 例全绿（新增 3 例：`normalizeAsks` 与 `extractAsks` 同口径、`looksLikeAsking` 只看尾部、`CHAT_TAIL_DIRECTIVE` 装配顺序回归闸）。
+
 ### 2026-08-02 · 微信官方自动续费完整接入并保留单次购买 · 影响面：app + server + admin + shared + Prisma + tests + deployment docs
 
 方案购买确认页新增用户主动二选一：「单次购买」只买当前周期、到期后手动续费；「自动续费」使用微信支付委托代扣支付中签约，默认从不勾选。当前方案卡展示签约确认/已开启/关闭中状态和下一续费时间，并允许随时关闭；全局权限、APIv2 Key、回调或套餐模板任一未配置时自动隐藏该选项，现有单次购买不受影响。运营后台逐套餐配置是否开放及模板 ID，并显示“可用/待配置”；用户用量下钻可见真实订阅状态。

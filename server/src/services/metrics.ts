@@ -204,6 +204,50 @@ export function noteOutputTruncated(provider: string, resolved: 'continued' | 'g
   outputTruncated.inc({ provider, resolved });
 }
 
+/* ──────────────── 对话交互质量（2026-08-04 截断/超时复盘后补） ──────────────── */
+//
+// 这一组回答的是「用户这一轮对话体验到了什么」，与上面按 provider 记的调用量互补：
+// 谁都成功了但首字要等 40 秒、或者逐字流其实没在流，靠 llm_calls_total 是看不出来的。
+
+// 流式空闲看门狗触发：上游发完响应头就装死（phase=first_event）或中途静默（phase=mid_stream）。
+// >0 就该看上游——这不是「慢」，是「不发了」。
+const chatStreamStall = new LabeledCounter('junshi_chat_stream_stall_total', '流式空闲看门狗触发次数（phase=first_event 响应头后无事件 / mid_stream 中途静默）');
+export function noteChatStreamStall(provider: string, phase: 'first_event' | 'mid_stream'): void {
+  chatStreamStall.inc({ provider, phase });
+}
+
+// 对话走了非流式（用户看到的是「完整结果再假分块」，没有真逐字手感）。
+// reason=tools 配了技能 / dify / mock / stream_failed 建流失败回落 / sync 端上直接打 /generate-sync。
+// stream_failed 与 sync 连续升高正是 2026-08-04「连续 60s 超时」的前置信号。
+const chatNonStream = new LabeledCounter('junshi_chat_nonstream_total', '对话走非流式的次数（reason=tools|dify|mock|stream_failed|sync）');
+export function noteChatNonStream(reason: 'tools' | 'dify' | 'mock' | 'stream_failed' | 'sync'): void {
+  chatNonStream.inc({ reason });
+}
+
+// 首字延迟：用户按下发送到看见第一个字。只统计原生流式（非流式没有「首字」这个概念）。
+const chatFirstToken = new LabeledHistogram(
+  'junshi_chat_first_token_seconds',
+  '流式对话首字延迟（发起到第一个 delta；只统计原生流式）',
+  [0.5, 1, 2, 3, 5, 8, 12, 20, 30, 45, 60, 90],
+);
+export function noteChatFirstToken(provider: string, seconds: number): void {
+  chatFirstToken.observe({ provider }, seconds);
+}
+
+// 已下发正文被保全的次数：撞上限或流中途失败时，没把用户读过的字换成错误气泡。
+// 这个计数是那张安全网真的在工作的证据；掉到 0 而 stall/truncated 却在涨，说明网破了。
+const chatPartialKept = new LabeledCounter('junshi_chat_partial_kept_total', '已下发正文被保全交回的次数（cause=truncated 撞上限 / stream_error 流中途失败）');
+export function noteChatPartialKept(provider: string, cause: 'truncated' | 'stream_error'): void {
+  chatPartialKept.inc({ provider, cause });
+}
+
+// 提问选项被兜底抽取救回的次数（模型没按协议给 ```ask 块，服务端补抽的那些）。
+// 这条就是「模型对 ask 协议的遵从率」的反向指标：涨说明提示词层不管用了，该回去调协议措辞
+// 或考虑改 tool use；归零说明模型自己守约，兜底可以考虑收窄触发面省钱。
+// outcome=recovered 抽到了选项；miss=抽了但判定没有真问题（修辞性反问）。两者相加＝协议漏给的总次数。
+const asksRecovered = new LabeledCounter('junshi_chat_asks_recovered_total', '提问选项兜底抽取次数（outcome=recovered 救回 / miss 判定无待答问题）');
+export function noteAsksRecovered(outcome: 'recovered' | 'miss'): void { asksRecovered.inc({ outcome }); }
+
 /* ──────────────── 业务事件 ──────────────── */
 
 const registrations = new LabeledCounter('junshi_user_registrations_total', '新注册用户数（channel=注册入口）');
@@ -456,6 +500,11 @@ export async function renderMetrics(): Promise<string> {
   llmCost.renderInto(ms);
   genDegraded.renderInto(ms);
   outputTruncated.renderInto(ms);
+  chatStreamStall.renderInto(ms);
+  chatNonStream.renderInto(ms);
+  chatFirstToken.renderInto(ms);
+  chatPartialKept.renderInto(ms);
+  asksRecovered.renderInto(ms);
 
   /* —— 业务事件 —— */
   registrations.renderInto(ms);
@@ -581,7 +630,8 @@ export function __resetMetrics(): void {
   overloadRejected = 0; rateLimited = 0;
   httpDuration.reset(); httpRouteResponses.reset();
   llmCalls.reset(); llmCallDuration.reset(); llmTokens.reset(); llmCost.reset();
-  genDegraded.reset(); outputTruncated.reset();
+  genDegraded.reset(); outputTruncated.reset(); asksRecovered.reset();
+  chatStreamStall.reset(); chatNonStream.reset(); chatFirstToken.reset(); chatPartialKept.reset();
   registrations.reset(); moderationChecks.reset(); creditsFlow.reset(); knownCreditReasons.clear(); planGateBlocked.reset();
   creativeJobs.reset(); creativeFailures.reset(); creativeEngines.reset();
   payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset(); payMockEvents.reset();

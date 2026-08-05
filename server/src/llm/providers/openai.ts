@@ -2,7 +2,7 @@
 // 走标准 /v1/chat/completions，兼容 OpenAI / Agnes / DeepSeek / Moonshot(Kimi) / 通义千问兼容模式 等。
 // 结构化成果用 function calling（tools）强约束。baseUrl/model/key/温度 来自运行时配置（可后台切换）。
 
-import { CHAT_STYLE_GUIDE, DELIVERABLE_TOOL, ZERO_USAGE, injectVariables, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { CHAT_TAIL_DIRECTIVE, DELIVERABLE_TOOL, ZERO_USAGE, injectVariables, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import { runToolLoop } from '../tools/loop.js';
@@ -387,7 +387,7 @@ function chatBaseMessages(ctx: GenContext): OAMessage[] {
   const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const history: OAMessage[] = (ctx.history ?? []).map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
   return [
-    { role: 'system', content: `${system}\n\n${CHAT_STYLE_GUIDE}` },
+    { role: 'system', content: `${system}\n\n${CHAT_TAIL_DIRECTIVE}` },
     ...history,
     { role: 'user', content: openaiUserContent(ctx.userMessage, ctx.images) },
   ] as OAMessage[];
@@ -618,7 +618,7 @@ export async function openaiChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
   const system = injectVariables(ctx.systemPrompt, ctx, 'chat');
   const r = await runToolLoop({
     step: openaiStep(cfg, ctx.images),
-    system: `${system}\n\n${CHAT_STYLE_GUIDE}`,
+    system: `${system}\n\n${CHAT_TAIL_DIRECTIVE}`,
     history: ctx.history,
     userMessage: ctx.userMessage,
     tools,
@@ -698,7 +698,7 @@ export async function openaiAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
   const hint = '默认用文字正常对话回答用户。只有当你判断此刻需要交付一份完整的报告或卡片成果时，才调用 emit_deliverable 以结构化分段输出（含标题与各段小标题/正文/要点）；其余所有情况都直接用文字回复，不要调用 emit_deliverable。';
   const r = await runToolLoop({
     step: openaiStep(cfg, ctx.images),
-    system: `${system}\n\n${hint}`,
+    system: `${system}\n\n${hint}\n\n${CHAT_TAIL_DIRECTIVE}`,
     history: ctx.history,
     userMessage: ctx.userMessage,
     tools,

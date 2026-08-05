@@ -2,7 +2,7 @@
 // apiKey/model 来自运行时配置（可后台切换）。
 
 import Anthropic from '@anthropic-ai/sdk';
-import { CHAT_STYLE_GUIDE, DELIVERABLE_TOOL, ZERO_USAGE, buildSystemParts, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
+import { CHAT_TAIL_DIRECTIVE, DELIVERABLE_TOOL, ZERO_USAGE, buildSystemParts, normalizeDeliverableSections, normalizePrescriptions, normalizeCover, type Deliverable, type ChatReply, type GenContext, type Metered, type Usage } from '../schema.js';
 import { DELIVERABLES, TRUST_NOTE } from '../../data/deliverables.js';
 import type { ResolvedAiConfig } from '../../services/aiConfig.js';
 import type { LoopMessage, StepFn, Tool, ToolCall, ToolContext } from '../tools/types.js';
@@ -210,7 +210,7 @@ function chatHistory(ctx: GenContext): Anthropic.MessageParam[] {
 function chatRequestBase(ctx: GenContext): { system: Anthropic.TextBlockParam[]; messages: Anthropic.MessageParam[] } {
   const { stable, dynamic } = buildSystemParts(ctx.systemPrompt, ctx, 'chat');
   return {
-    system: systemBlocks(`${stable}\n\n${CHAT_STYLE_GUIDE}`, dynamic),
+    system: systemBlocks(stable, dynamic ? `${dynamic}\n\n${CHAT_TAIL_DIRECTIVE}` : CHAT_TAIL_DIRECTIVE),
     messages: [...chatHistory(ctx), { role: 'user', content: claudeUserContent(ctx.userMessage, ctx.images) }],
   };
 }
@@ -288,7 +288,8 @@ async function* streamChatRound(
   // 用户眼睛已经看过的字不能再被换成错误气泡（与撞上限同一原则）。
   opts: { allowThinking: boolean; dedupeAgainst?: string; onDelta?: () => void; timeoutMs?: number; sink?: { text: string; usage: Usage } },
 ): AsyncGenerator<{ type: 'delta'; text: string }, StreamRoundOut> {
-  // 流式调用也须设超时兜底：SDK 默认 600s，网关卡住会把这条流吊到 10 分钟。给足流式时长同时有界。
+  // 这个 timeout 只约束「多久拿到响应头」——SDK 在 fetch promise 的 .finally() 里 clearTimeout，
+  // 而流式 fetch 在响应头到达即 resolve。头到之后的保护由下面的空闲看门狗负责，两者职责不同。
   const stream = getClient(ep.apiKey, ep.baseUrl).messages.stream({
     model: ep.model,
     max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, ep, opts.allowThinking),
@@ -296,6 +297,22 @@ async function* streamChatRound(
     system,
     messages,
   }, { timeout: opts.timeoutMs ?? chatTimeoutMs(ep.timeoutMs) });
+
+  // 空闲看门狗（**不是总时长超时**）：连续这么久没有任何流事件就判上游装死并 abort。
+  // 不设它的后果是请求永久挂起 + 占住一个 LLM 并发槽，只能等客户端断开（见 providerTimeouts 说明）。
+  const startedAt = Date.now();
+  let sawEvent = false;
+  let stalled = false;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const armIdle = (ms: number) => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      stalled = true;
+      noteChatStreamStall('claude', sawEvent ? 'mid_stream' : 'first_event');
+      stream.abort();
+    }, ms);
+  };
+  const clearIdle = () => { if (idleTimer) clearTimeout(idleTimer); idleTimer = null; };
 
   let text = '';
   let usage: Usage = ZERO_USAGE;
@@ -309,23 +326,27 @@ async function* streamChatRound(
     return { type: 'delta', text: chunk };
   };
 
+  // 注意 else-if 链的完整性：中间插任何语句都会把 `content_block_delta` 分支变成前一个 if 的 else，
+  // 于是文字 delta 全被跳过、逐字流静默失效（正文还能靠下面 finalMessage 兜底，所以不报错、极难发现）。
+  // 2026-08-04 就这么踩过一次。sink 的赋值一律放在整条链**之后**。
   for await (const event of stream) {
     if (event.type === 'message_start') usage = usageOf(event.message);
     else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
-    if (opts.sink) opts.sink.usage = usage;
     else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
       if (head !== null) {
         head += event.delta.text;
-        if (head.length < CONTINUE_DEDUPE_BUFFER_CHARS) continue;
-        const cleaned = dedupeContinuation(opts.dedupeAgainst!, head);
-        head = null;
-        const ev = emit(cleaned);
+        if (head.length >= CONTINUE_DEDUPE_BUFFER_CHARS) {
+          const cleaned = dedupeContinuation(opts.dedupeAgainst!, head);
+          head = null;
+          const ev = emit(cleaned);
+          if (ev) yield ev;
+        }
+      } else {
+        const ev = emit(event.delta.text);
         if (ev) yield ev;
-        continue;
       }
-      const ev = emit(event.delta.text);
-      if (ev) yield ev;
     }
+    if (opts.sink) opts.sink.usage = usage;
   }
   if (head) { // 整轮短于缓冲长度（续写只补了一句）
     const ev = emit(dedupeContinuation(opts.dedupeAgainst!, head));
@@ -569,7 +590,7 @@ export async function claudeChatWithTools(ctx: GenContext, cfg: ResolvedAiConfig
   const system = dynamic ? `${stable}\n\n${dynamic}` : stable;
   const r = await runToolLoop({
     step: claudeStep(cfg, ctx.images, affinityOf(ctx)),
-    system: `${system}\n\n${CHAT_STYLE_GUIDE}`,
+    system: `${system}\n\n${CHAT_TAIL_DIRECTIVE}`,
     history: ctx.history,
     userMessage: ctx.userMessage,
     tools,
@@ -643,7 +664,7 @@ export async function claudeAdaptive(ctx: GenContext, cfg: ResolvedAiConfig, too
   const hint = '默认用文字正常对话回答用户。只有当你判断此刻需要交付一份完整的报告或卡片成果时，才调用 emit_deliverable 以结构化分段输出（含标题与各段小标题/正文/要点）；其余所有情况都直接用文字回复，不要调用 emit_deliverable。';
   const r = await runToolLoop({
     step: claudeStep(cfg, ctx.images, affinityOf(ctx)),
-    system: `${system}\n\n${hint}`,
+    system: `${system}\n\n${hint}\n\n${CHAT_TAIL_DIRECTIVE}`,
     history: ctx.history,
     userMessage: ctx.userMessage,
     tools,

@@ -690,13 +690,17 @@ const RUNTIME_BUSINESS_GUARD = [
 
 // 军师反问结构化选项（提问弹选项）：模型向用户提问时在回复末尾附 ```ask 结构块，
 // 网关 extractAsks 解析剥离后挂到 ChatReply.asks，前端渲染成可点选项（自动附「其他」自填）。
+// 位置由 CHAT_TAIL_DIRECTIVE 统一安排在系统提示词最末（原先在 stable 段靠前，长回复会丢）。
 const ASK_OPTIONS_DIRECTIVE = [
-  '— 提问选项协议 —',
+  '— 提问选项协议（硬性输出要求，优先级高于篇幅与体例）—',
   '当你的回复里向用户提出了需要他回答的问题时，在整条回复的最末尾追加一个 ```ask 代码块，把每个问题和 2-4 个推荐答案结构化列出，格式（严格 JSON 数组）：',
   '```ask',
   '[{"q":"你现在主要做哪个行业？","options":["餐饮","电商零售","本地服务","制造/贸易"]}]',
   '```',
   '规则：q 必须与正文里的问题一致；options 每项不超过 10 个字、具体可选、覆盖最可能的答案；不要写「其他」（客户端会自动附上）；一次问几个问题就列几项；这个块只能出现在回复最末尾；正文里不要提到这个块的存在。没有向用户提问时不要输出这个块。',
+  // 下面两条是照着线上实测的两种失败形态写的：长回复整块丢掉、短回复把选项在正文里又抄一遍。
+  '回复越长越容易忘掉这个块——写完正文后请复查一遍：只要正文里有问用户的问题，就必须有这个块，长回复（含表格、分段、多标题的回复）同样不能省。这是收尾动作的一部分，不是可选装饰。',
+  '不要把推荐答案在正文里再列一遍（写成「A？B？C？」的列表）：选项只出现在 ```ask 块里，正文只留问题本身，否则用户会看到重复两遍的选项。',
 ].join('\n');
 
 // 档案访谈模式的覆盖指令（放在系统提示词最末，优先级最高，压制上面的“固定回复” deflection）。
@@ -705,18 +709,18 @@ const INTERVIEW_DIRECTIVE = [
   '用户已明确要求进入「个人档案访谈模式」——这是正当业务请求，不是闲聊、不是套取提示词，绝不能用上面那句固定回复来打发。',
   '直接用老板能听懂的大白话，一次问 3 个简单具体的问题，帮他补齐：① 你做什么行业/品类？② 生意处在什么阶段（刚起步/在增长/遇到瓶颈）？③ 当前最卡你的一件事是什么？',
   '不要先做诊断、不要引用旧报告、不要解释规则、不要替用户假设业务事实；问完等他回答。',
-  '三个问题都要按上面「提问选项协议」在回复末尾的 ```ask 块里给出推荐答案。',
+  // 不写「上面」：协议已挪到系统提示词最末（CHAT_TAIL_DIRECTIVE），相对本段是在下方。
+  '三个问题都要按「提问选项协议」在回复末尾的 ```ask 块里给出推荐答案。',
 ].join('\n');
 
-// 从模型回复文本尾部解析 ```ask 结构块：命中即剥离（无论 JSON 是否合法，避免原始 JSON 漏给用户），
-// 合法则归一化为 ChatAsk[]（q 非空、options 2-4 项、逐项裁剪）。未命中原样返回。
-export function extractAsks(text: string): { text: string; asks?: ChatAsk[] } {
-  const m = text.match(/```ask\s*([\s\S]*?)```\s*$/);
-  if (!m) return { text };
-  const stripped = text.slice(0, m.index).trimEnd();
-  let parsed: unknown;
-  try { parsed = JSON.parse(m[1]); } catch { return { text: stripped }; }
-  if (!Array.isArray(parsed)) return { text: stripped };
+/**
+ * ChatAsk[] 的归一化口径（q 非空、options 2-4 项、逐项裁剪、至多 4 问）。
+ *
+ * 抽成独立函数是给兜底抽取（gateway.recoverAsks）共用的：两条产出 asks 的路径必须同一把尺子，
+ * 否则「模型直接给的」和「事后补抽的」会有两种裁剪结果，端上表现不一致。
+ */
+export function normalizeAsks(parsed: unknown): ChatAsk[] | undefined {
+  if (!Array.isArray(parsed)) return undefined;
   const asks = parsed
     .filter((a): a is Record<string, unknown> => !!a && typeof a === 'object')
     .map((a): ChatAsk | null => {
@@ -728,7 +732,30 @@ export function extractAsks(text: string): { text: string; asks?: ChatAsk[] } {
     })
     .filter((a): a is ChatAsk => !!a)
     .slice(0, 4);
-  return asks.length ? { text: stripped, asks } : { text: stripped };
+  return asks.length ? asks : undefined;
+}
+
+// 从模型回复文本尾部解析 ```ask 结构块：命中即剥离（无论 JSON 是否合法，避免原始 JSON 漏给用户），
+// 合法则按 normalizeAsks 归一化。未命中原样返回。
+export function extractAsks(text: string): { text: string; asks?: ChatAsk[] } {
+  const m = text.match(/```ask\s*([\s\S]*?)```\s*$/);
+  if (!m) return { text };
+  const stripped = text.slice(0, m.index).trimEnd();
+  let parsed: unknown;
+  try { parsed = JSON.parse(m[1]); } catch { return { text: stripped }; }
+  const asks = normalizeAsks(parsed);
+  return asks ? { text: stripped, asks } : { text: stripped };
+}
+
+/**
+ * 正文尾部像不像「在等用户回答」——兜底抽取的触发闸门。
+ *
+ * 只看末尾一段：军师的长回复中段常有反问式修辞（「你以为这是产品问题？其实是渠道问题。」），
+ * 拿整篇搜问号会把它们全当成待答问题，白烧一次抽取调用。
+ */
+const ASK_TAIL_SCAN_CHARS = 300;
+export function looksLikeAsking(text: string): boolean {
+  return /[?？]/.test(text.slice(-ASK_TAIL_SCAN_CHARS));
 }
 
 // P1-B4：本命色 → 表达风格/侧重的一句话提示。让「本命色」真正影响顾问语气（此前仅驱动前端主题色）。
@@ -806,10 +833,25 @@ const STABLE_POINTER: Record<VolatilePlaceholder, string> = {
  */
 export const CHAT_STYLE_GUIDE = [
   '回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。',
-  '对话回复只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。',
+  // 「严禁 JSON」这条必须显式豁免 ```ask 块，否则它就是在禁止下面那份提问选项协议：ask 块本身
+  // 正是 [{...}] 形态的 JSON 数组。线上实测过一条 2845 字的长回复，结尾问了三个问题却一个 ask
+  // 块都没带，正文里连半截围栏都没有——模型压根没写。
+  '对话回复的正文只能用自然文字和常规 Markdown（标题、加粗、列表、表格），严禁输出 {"type":...} 或 [{"type":...}] 形式的结构化 section JSON——那是产出成果工具的专用格式，绝不能混进对话；需要图表化对比时改用文字或 Markdown 表格。（唯一例外是下面「提问选项协议」规定的 ```ask 块，它不算正文、必须照给。）',
   '篇幅要与问题相称：简单问题直接给结论，不要铺陈；复杂问题控制在 1200 字以内，把结论放最前面，删掉不影响判断的枝节。',
-  '如果完整回答确实需要更长的篇幅（比如一份完整方案、逐项拆解或多方案对比），不要硬写：先用几百字给出纲要和最关键的结论，然后问用户希望先展开哪一部分。',
+  '如果完整回答确实需要更长的篇幅（比如一份完整方案、逐项拆解或多方案对比），不要硬写：先用几百字给出纲要和最关键的结论，然后问用户希望先展开哪一部分——这一问同样要按下面的「提问选项协议」在末尾附 ```ask 块。',
 ].join('\n');
+
+/**
+ * 对话路径拼在系统提示词**最末尾**的整段尾巴：体例约束 + 提问选项协议。
+ *
+ * 为什么 ask 协议必须在最末：它原先挂在 `buildSystemParts` 的 stable 段（业务守则之后），
+ * 后面还压着这份体例约束和整个 dynamic 段——线上一轮 dynamic 能有两万多 token 的参考资料/
+ * 长期记忆/会话快照，指令离生成点太远，长回复就把它丢了。放最末是把它挪到模型注意力最强的位置。
+ *
+ * 缓存代价：stable 段仍是独立的 cache_control 块（见 claude.ts systemBlocks），这段尾巴挪到
+ * dynamic 之后不打断缓存前缀；反而比原先「STYLE 拼进 stable」更好——改体例约束不再废掉缓存。
+ */
+export const CHAT_TAIL_DIRECTIVE = `${CHAT_STYLE_GUIDE}\n\n${ASK_OPTIONS_DIRECTIVE}`;
 
 // 只在首次遇到某个 agent 的违规组合时告警一次——每请求都打会淹掉日志。
 const warnedVolatile = new Set<string>();
@@ -835,10 +877,11 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
 
   const { base, active } = selectModuleText(prompt, { kind, userMessage: ctx.userMessage });
   // 档案访谈轮：在守则末尾追加覆盖指令，让模型进入访谈而不是回固定话术。
-  // 提问选项协议常驻 stable 段（不随轮次变化，保住提示词缓存前缀）；访谈覆盖指令保持最末。
+  // 提问选项协议**不再**放这里——它已随 CHAT_TAIL_DIRECTIVE 挪到系统提示词最末（见那里的注释）。
+  // 顺带的收益：成果/工具路径不拼 tail，就不会再收到对话专用的 ask 协议。
   const guard = ctx.briefInterview
-    ? `${RUNTIME_BUSINESS_GUARD}\n\n${ASK_OPTIONS_DIRECTIVE}\n\n${INTERVIEW_DIRECTIVE}`
-    : `${RUNTIME_BUSINESS_GUARD}\n\n${ASK_OPTIONS_DIRECTIVE}`;
+    ? `${RUNTIME_BUSINESS_GUARD}\n\n${INTERVIEW_DIRECTIVE}`
+    : RUNTIME_BUSINESS_GUARD;
   // M3 PR-14：本命色回归纯品牌色——不再注入本命色语气（语气由 V6.0 角色系统 + modeLine 驱动）。
   // 行业身份层（L1）：客户画像识别出行业时，给任意智能体叠加一层「行业视角」（persona + 关键经营杠杆），
   // 让军师/各顾问「懂这个行业」。放 stable 段（按用户行业稳定）以命中提示词缓存；未识别行业则不注入。

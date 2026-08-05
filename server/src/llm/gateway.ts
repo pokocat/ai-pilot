@@ -14,11 +14,11 @@ import { getAiConfig, effectiveProvider, resolveAuxConfig, resolveModelRate, typ
 // **只用在「mock 就是配置的 provider」的分支**；真 provider 失败后的降级兜底一律不套——
 // 故障路径本就该尽快返回，再叠一层模拟延迟只会把故障放大。
 import { mockChat, mockDeliverable, mockAdaptive, mockUpstream } from './providers/mock.js';
-import { ZERO_USAGE, extractAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
+import { ZERO_USAGE, extractAsks, looksLikeAsking, normalizeAsks, type Deliverable, type ChatReply, type GenContext, type AiTestResult, type Usage } from './schema.js';
 import { recordTokenUsage, recordAuxUsage, type UsageMeta } from '../services/usage.js';
 import { billableTokenEquivalents } from '../data/modelPrices.js';
 import { recordTrace } from '../services/trace.js';
-import { noteGenDegraded } from '../services/metrics.js';
+import { noteGenDegraded, noteAsksRecovered } from '../services/metrics.js';
 import { moderate } from '../services/moderation.js';
 import { auditBannedWords } from '../services/bannedWords.js';
 import { cacheGet, cacheSet } from '../services/cache.js';
@@ -105,6 +105,47 @@ function deliverableText(d: Deliverable): string {
 function withAsks(reply: ChatReply): ChatReply {
   const { text, asks } = extractAsks(reply.text);
   return asks ? { ...reply, text, asks } : { ...reply, text };
+}
+
+/**
+ * 兜底抽取：正文在问用户、但模型没给 ```ask 块时，补一次轻量抽取把选项救回来。
+ *
+ * 为什么需要这层：ask 块是「文本尾部约定」，模型的遵从性天生不稳，且**回复越长越容易丢**
+ * （线上实测 2845 字的长回复整块丢掉，727 字的正常带上）。而 thinking 开着时 temperature 被
+ * Anthropic 强制为 1（见 thinking.ts），格式约定的稳定性只会更差。提示词层能提高命中率，
+ * 但治不到 100%——这一层是保下限的：不管模型守不守协议，问用户就该有选项可点。
+ *
+ * 成本与风险控制：
+ * - 只在「正文尾部像在提问 + asks 为空」时触发，绝大多数回复不进这条路；
+ * - 走 completeJson（辅助路径、已关思考、几百 token 预算），不碰主链路的预算与流式；
+ * - 抽不出/超时/上游不可用 → 静默返回原 reply。兜底失败绝不能让整轮对话失败；
+ * - 抽取模型自己判断是否真在等答案，修辞性问句返回空数组。
+ */
+async function recoverAsks(reply: ChatReply): Promise<ChatReply> {
+  if (reply.asks?.length || !reply.text || !looksLikeAsking(reply.text)) return reply;
+  try {
+    const out = await completeJson(ASK_RECOVERY_SYSTEM, reply.text.slice(-1200));
+    const asks = normalizeAsks(out?.asks);
+    noteAsksRecovered(asks ? 'recovered' : 'miss');
+    if (!asks) return reply;
+    return { ...reply, asks };
+  } catch (err) {
+    console.warn('[gateway] ask 兜底抽取失败，按无选项交回：', (err as Error).message);
+    return reply;
+  }
+}
+
+const ASK_RECOVERY_SYSTEM = [
+  '你在给一个商业顾问对话产品补「问题的推荐答案选项」。下面给你的是顾问回复的结尾部分。',
+  '任务：找出结尾处**真正在等用户回答**的问题（最多 4 个），给每个问题配 2-4 个推荐答案。',
+  '只输出 JSON，格式：{"asks":[{"q":"问题原文","options":["选项1","选项2","选项3"]}]}',
+  '规则：q 用回复里的问题原文（不要改写、不超过 120 字）；options 每项不超过 10 个字、具体可选、覆盖最可能的答案；不要写「其他」。',
+  '如果结尾只是修辞性反问、自问自答、或并没有在等用户回答，返回 {"asks":[]}。宁可少给也不要硬凑。',
+].join('\n');
+
+/** chat 出口统一入口：先按协议剥离，缺了再兜底抽一次。 */
+async function withAsksRecovered(reply: ChatReply): Promise<ChatReply> {
+  return recoverAsks(withAsks(reply));
 }
 
 // 只匹配「模型把自己当代码助手、自述找不到项目/工作区上下文」的串味输出。
@@ -418,10 +459,11 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       noteGenDegraded('runtime_chat');
+      // mock 路径不做 ask 兜底：mockChat 自带 asks，且降级到这里意味着上游已不可用，再发一次抽取只会白等一次失败。
       return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
     await moderateOutputOrThrow(s.result.text, ctx, meta);
-    return { result: withAsks(s.result), usage: s.usage };
+    return { result: await withAsksRecovered(s.result), usage: s.usage };
   }
 
   const cfg = await getAiConfig();
@@ -455,7 +497,7 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
   }
   if (chatResult) {
     await moderateOutputOrThrow(chatResult.result.text, ctx, meta);
-    return { result: withAsks(chatResult.result), usage: chatResult.usage };
+    return { result: await withAsksRecovered(chatResult.result), usage: chatResult.usage };
   }
   // live 为空 = mock 就是配置的 provider；live 有值却走到这里 = 真 provider 失败后的降级兜底（不注入延迟）。
   const reply = live ? mockChat(ctx) : await mockUpstream(() => mockChat(ctx));
@@ -527,7 +569,7 @@ async function* tracedChatProviderStream(
     });
     await maybeRecord(actual, 'chat', ctx, meta);
     // 尾部 ```ask 块在完整结果处剥离并结构化（token 流里已原样流出，前端流式期间负责隐藏）。
-    yield { type: 'done', result: withAsks(done.result), usage: done.usage };
+    yield { type: 'done', result: await withAsksRecovered(done.result), usage: done.usage };
   } catch (err) {
     await recordTrace({
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat',
@@ -635,9 +677,10 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
       console.error('[gateway] runtime adaptive fallback to mock:', (err as Error).message);
       if (!env.aiFallbackMock) throw aiUnavailable(err);
       noteGenDegraded('runtime_adaptive');
+      // mock 路径不做 ask 兜底：mockChat 自带 asks，且降级到这里意味着上游已不可用，再发一次抽取只会白等一次失败。
       return { kind: 'chat', reply: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
-    return { kind: 'chat', reply: withAsks(s.result), usage: s.usage };
+    return { kind: 'chat', reply: await withAsksRecovered(s.result), usage: s.usage };
   }
 
   const cfg = await getAiConfig();
@@ -701,7 +744,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
 
   return out.kind === 'report'
     ? { kind: 'report', deliverable: out.result, usage }
-    : { kind: 'chat', reply: withAsks(out.result), usage };
+    : { kind: 'chat', reply: await withAsksRecovered(out.result), usage };
 }
 
 /**
