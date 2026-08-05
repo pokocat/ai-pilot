@@ -57,7 +57,10 @@
 .jump-latest:active { opacity: .82; transform: translateY(1px); }
 
 .msg { margin-bottom: 16px; }
-.msg.u { display: flex; justify-content: flex-end; }
+/* 用户轮 = 纵向栈：附件卡在上、气泡在下，整列右对齐。
+   曾是 `display:flex; justify-content:flex-end` 的行方向——气泡与 .uref 成了并排的两个 flex 子节点，
+   带附件时正文被挤成窄条、附件卡贴在右侧，多份时整块排版散掉（真机实拍复现）。 */
+.msg.u { display: flex; flex-direction: column; align-items: flex-end; }
 /* pre-line：保留换行（多题选项合并回答按行展示；用户手输换行同样受益） */
 .ubub { max-width: 80%; color: #fff; padding: 10px 14px; border-radius: 16px 16px 4px 16px; font-size: 14px; line-height: 1.5; white-space: pre-line; }
 .msg.a .who { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
@@ -239,6 +242,17 @@
 
 /* B5 非模态上传条（可取消） */
 .composer-dock { position: relative; }
+/* 对话内容滑到输入区那一刻不该被一刀切断（改前问卷卡正好被齐平裁在附件卡上沿）：
+   dock 顶上盖一条由透明渐到面色的渐变，读成「内容从这块面板底下过去」。
+   这是本页唯一真正需要的「模糊感」——backdrop-filter 在小程序 WebView 不可靠，
+   且 dock 本身不透明、底下没有东西可虚化，能起作用的只有这条渐变。
+   起点写 rgba(255,255,255,0) 而不是 transparent：老 WebKit 会让 transparent 经黑色插值，出灰带。
+   pointer-events:none —— 只挡视线不吃点击，底下最后 20px 的内容照样点得到。 */
+.dock-fade {
+  position: absolute; left: 0; right: 0; top: -20px; height: 20px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--surface));
+}
 /* 问卷答题激活时隐藏底部输入栏：display:none 让 chat-log(flex:1) 吃掉空间，问卷可视区更大、少被键盘遮 */
 .composer-dock.ask-hidden { display: none; }
 /* 引用未尽之处：没带上／还在拆读／读不出——一律在气泡下明说，不静默 */
@@ -312,15 +326,21 @@
 .accept-btn:active { opacity: .85; }
 
 /* 用户消息上的引用 → 直角文件/附卷卡：气泡下方、右对齐、多份自动换行 */
-.msg.u .uref { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+/* width:100% 不是装饰：纵向栈里 .uref 若按内容收缩，子卡的 max-width:82% 就没有确定的参照宽度可算，
+   卡会被压到刚好裁掉元信息尾字（实测「3622字 · 附卷」缺 4px）。给足确定宽度，再靠 flex-end 右对齐。 */
+.msg.u .uref { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-bottom: 6px; width: 100%; }
+/* 同 .paste-card 的边与浮起，但不给本命色脊、阴影用更轻的 --shadow-sm：
+   已发出的是「落定的引用」，输入区那张是「此刻要带上的」，层级上后者更亮。
+   白卡压在 --paper 上只有 1.08:1，边框若还用 --line（对 --paper 1.22:1）整张卡就是一片糊白。 */
 .uref-card {
   display: flex; align-items: center; gap: 8px; max-width: 82%; min-width: 0;
   padding: 6px 9px 6px 6px; background: var(--surface);
-  border: 1px solid var(--line); border-radius: 3px;
+  border: 1px solid var(--line-strong); border-radius: 3px; box-shadow: var(--shadow-sm);
 }
 .uref-ic {
   flex-shrink: 0; width: 26px; height: 26px; border-radius: 3px;
   display: flex; align-items: center; justify-content: center; background: var(--accent-soft);
+  border: 1px solid var(--accent-glow); box-sizing: border-box;
 }
 .uref-tx { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .uref-t { font-size: 12.5px; font-weight: 600; color: var(--ink); line-height: 1.25; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -346,6 +366,88 @@
   flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
   color: var(--gold-deep); background: var(--gold-soft);
 }
+
+/* 粘贴长文卡（输入区上方）：通栏一张卡，露字数 + 内容摘要 + ✕。
+   只写「粘贴长文」四个字是信不过的——主公看不出存了什么，就会以为没成功再粘一遍。
+   卡面参照 ChatGPT / Claude 的 pasted-text 附件：标题带体量、副行露内容、整卡可点开看全文。 */
+/* 层次三件套，缺一件卡就「糊」在底上（改前实测三处同色叠在 60px 之内）：
+   ① 底色离开 --surface-2——它跟下方输入框 .box 是同一个值，两块紧贴时读成一整块灰，卡不像独立物件；
+   ② 边用 --line-strong 而不是 --line（后者在原底色上只有 1.12:1，画了也看不见）；
+   ③ 白卡压白底只靠边框会贴死，要 --shadow-card 把它浮起来。
+   左侧 2px 本命色脊：一眼认出「这是带上的资料」，且随设置里的本命色走，不写死绿。 */
+.paste-card {
+  display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0;
+  padding: 7px 10px 7px 8px; background: var(--surface);
+  border: 1px solid var(--line-strong); border-left: 2px solid var(--accent);
+  border-radius: 3px; box-shadow: var(--shadow-card);
+  /* 按下与重复高亮都要插值，不能瞬切（瞬切读成闪一下故障，插值才读成「回应了这一下」） */
+  transition: background-color .26s cubic-bezier(.32, .72, 0, 1),
+              box-shadow .26s cubic-bezier(.32, .72, 0, 1),
+              transform .26s cubic-bezier(.32, .72, 0, 1);
+}
+/* 按下即压实：轻微缩 + 收阴影，手感上「按到了一个实体」 */
+.paste-card:active { transform: scale(.994); box-shadow: 0 1px 2px rgba(22, 25, 29, .05); }
+/* 重复粘贴时短暂高亮已在的那张卡：不新建第二份，把视线引回来。
+   用本命色柔光外环 + 淡底，比加粗边框更容易在余光里被抓到，且不改变卡的尺寸（不引起重排）。 */
+.paste-card.dup { background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent-glow), var(--shadow-card); }
+/* 归卷在途：脊先不上色（未成卷不冒充已成），压低阴影表示还没落地。不用虚线边——3px 直角上的虚线只会显得潦草 */
+.paste-card.pending { border-left-color: var(--line-strong); box-shadow: var(--shadow-sm); }
+/* 内核自带一圈：--accent-soft 在白底只有 1.18:1，没这圈就是「图标浮在虚空里」（改前实测 1.04:1，更糟） */
+.paste-ic {
+  flex-shrink: 0; width: 28px; height: 28px; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--accent-glow); box-sizing: border-box;
+}
+.paste-b { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.paste-t { font-size: 12.5px; font-weight: 600; color: var(--ink); line-height: 1.25; }
+.paste-m { font-size: 10.5px; color: var(--ink-3); line-height: 1.3; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.paste-x { flex-shrink: 0; font-size: 12px; color: var(--ink-3); padding: 4px 2px 4px 8px; }
+.paste-badge {
+  flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+  color: var(--gold-deep); background: var(--gold-soft);
+  /* 呼吸而不是转圈：在途状态要能被余光察觉，又不该在输入区上方抢注意力 */
+  animation: paste-breathe 1.5s cubic-bezier(.4, 0, .6, 1) infinite;
+}
+@keyframes paste-breathe {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+/* 「长文会自动归卷」只解释一次（看过写 storage）：toast 一闪即逝，教不会人。
+   只给一圈本命色柔光边、不给脊也不给阴影——它是卡片的注脚，不能跟卡片争层级。 */
+.paste-hint {
+  display: flex; align-items: center; gap: 8px;
+  margin: 6px 14px 0; padding: 7px 10px;
+  background: var(--accent-soft); border: 1px solid var(--accent-glow); border-radius: 3px;
+}
+.paste-hint-t { flex: 1; min-width: 0; font-size: 11px; line-height: 1.5; color: var(--accent-ink); }
+.paste-hint-x { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--accent-ink); padding: 2px 4px; }
+
+/* 粘贴长文预览弹层：复用 .ref-sheet 外壳。正文区给明确高度——
+   §7.2「超一屏的全屏弹层必须用带明确高度的原生 ScrollView」，靠 flex:1 在微信真机可能整段滑不动。 */
+.paste-panel { max-height: 76vh; }
+.paste-scroll { position: relative; }
+.paste-body { height: 46vh; }
+.paste-body-in { padding-bottom: 4px; }
+/* 与 .dock-fade 同一套渐隐（本组件里「内容从面下过去」只用这一种手法，不再另立） */
+.paste-body-fade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 26px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--surface));
+}
+.paste-full { font-size: 13px; line-height: 1.75; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+/* 弹层底部动作：边同样走 --line-strong（--line 在白面板上只有 1.27:1，按钮会读成一片白），
+   并在正文与动作之间压一条分隔线，让「读」和「做」分区 */
+.paste-acts {
+  display: flex; gap: 8px; margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.paste-act {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  height: 40px; border: 1px solid var(--line-strong); border-radius: 3px; font-size: 13px; font-weight: 600;
+  transition: background-color .2s cubic-bezier(.32, .72, 0, 1), transform .2s cubic-bezier(.32, .72, 0, 1);
+}
+.paste-act:active { transform: scale(.985); background: var(--surface-2); }
+.paste-act.del { color: var(--danger); }
 
 /* @引用选择器底部弹层 */
 .ref-sheet { position: fixed; inset: 0; z-index: 50; }

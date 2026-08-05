@@ -12,6 +12,7 @@ import { store } from '../../../services/store';
 import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate, type SessionDetail, type CreativeStatusResult } from '../../../services/api';
 import { STREAM_CHAT } from '../../../services/config';
 import { asReply, replyToText } from '../../../services/chatReply';
+import { diffPasted, pasteExcerpt, isSamePaste } from '../../../services/pasteAbsorb';
 import {
   startLiveGen, attachLiveGenView, detachLiveGenView, peekLiveGen, stopLiveGen, dropLiveGen, storedReplyFor,
   type LiveGenView,
@@ -215,26 +216,17 @@ const PASTE_DELTA_MIN = 500;
 // 粘贴防抖合并窗口：微信 textarea 一次粘贴会连发多个 onInput（devtools 按行拆发），
 // 用一个 ~250ms 定时器把这串事件合并成「一次结算」，避免各建一份 knowledge 撞满九份。
 const PASTE_SETTLE_MS = 250;
-// absorbPasteToFile 去重窗口：10s 内完全相同的 pasted 文本（长度 + 首尾片段指纹）直接跳过，不建第二份。
-const PASTE_DEDUP_MS = 10_000;
+// 重复粘贴时已有卡片的高亮时长：够看见，又不至于一直闪。
+const PASTE_DUP_FLASH_MS = 1800;
 // 程序性写入原生输入框的等待：Stencil 首帧渲染是异步的，就绪前写 value 会在其 watchValue 里抛错
 // （见 services/nativeInputWrite 注释）。每 ~32ms 探一次、最多 ~0.5s；等不到就放弃——
 // 值仍在 input state 里（字数/发送键/草稿判定都准），只是原生框这一次没同步上。
 const NATIVE_WRITE_RETRY_MS = 32;
 const NATIVE_WRITE_MAX_TRIES = 15;
 
-// 单次插入下，用公共前缀 + 公共后缀 diff 出这回粘进来的文本段。
-// prefix：prev 与 v 的公共前缀长；suffix：剩余部分的公共后缀长（上限 = prev.length - prefix，防前后缀重叠）。
-function diffPasted(prev: string, v: string): { pasted: string; kept: string } {
-  const n = prev.length;
-  let prefix = 0;
-  while (prefix < n && prev[prefix] === v[prefix]) prefix++;
-  let suffix = 0;
-  const maxSuffix = n - prefix;
-  while (suffix < maxSuffix && prev[n - 1 - suffix] === v[v.length - 1 - suffix]) suffix++;
-  const pasted = v.slice(prefix, v.length - suffix);
-  const kept = v.slice(0, prefix) + v.slice(v.length - suffix);
-  return { pasted, kept };
+// 引用签是不是「粘贴长文」归的卷：卡面要露字数 + 摘要 + 可点开看全文，与上传的文件卡区别开。
+function isPasteRef(r: MessageRef): boolean {
+  return r.kind === 'knowledge' && String(r.label ?? '').startsWith('粘贴长文');
 }
 
 const IS_WEAPP = process.env.TARO_ENV === 'weapp';
@@ -300,6 +292,14 @@ const markReportSaved = (id?: string) => {
   if (!id) return;
   try { const ids = getSavedReportIds(); if (!ids.includes(id)) Taro.setStorageSync(SAVED_REPORTS_KEY, [...ids, id]); } catch { /* noop */ }
 };
+// 「长文自动归卷」这件事只解释一次：第一次撞见时在卡下说明白，之后不再打扰。
+const PASTE_HINTED_KEY = 'chat-paste-hinted';
+const isPasteHinted = (): boolean => {
+  try { return Taro.getStorageSync(PASTE_HINTED_KEY) === 1; } catch { return false; }
+};
+const markPasteHinted = () => {
+  try { Taro.setStorageSync(PASTE_HINTED_KEY, 1); } catch { /* noop */ }
+};
 
 export default function Chat() {
   const router = useRouter();
@@ -363,8 +363,14 @@ export default function Chat() {
   // 粘贴 burst：命中一次长文暴增即记 baseline（暴增前的输入），burst 期间每个 onInput 都重置结算定时器。
   const pasteBurstRef = useRef<{ baseline: string } | null>(null);
   const pasteSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 粘贴去重：记上次已归卷 pasted 的指纹（长度 + 首尾片段）与时间戳，窗口内完全相同的直接跳过。
-  const recentPasteRef = useRef<{ sig: string; at: number } | null>(null);
+  // 本轮粘贴长文的全文（引用签 id → 原文）：预览、复制、去重都读它，零网络、点开即有。
+  // 作用域 = 当前这一轮 composer：发出这一轮或撤掉卡片即忘。
+  const pasteTextRef = useRef<Map<string, string>>(new Map());
+  const pasteSeqRef = useRef(0);
+  const pasteDupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 在途占位卡的 key（与 pastePendings 同步增删的 ref 版）：去重判定要在定时器回调里同步问「这份还在屏上吗」，
+  // 读 state 会慢一拍。
+  const pastePendingKeysRef = useRef<Set<string>>(new Set());
   // 粘贴转附卷：在途份数（await createKnowledge 期间计数），与 refs 合并判九份上限、防并发超挂。
   const pasteInflightRef = useRef(0);
   const sessionIdRef = useRef('');
@@ -391,6 +397,14 @@ export default function Chat() {
   // 刚传上来的资料还在后台拆读（解析异步），此刻发问军师未必读得到正文——引用签上标「拆读中」明示。
   // 不轮询：签只从「挂上引用」活到「发出这一轮」；发出后由服务端 refNotices 据实回话（谁没读完、谁读不出）。
   const [parsingRefIds, setParsingRefIds] = useState<string[]>([]);
+  // 粘贴归卷的乐观占位卡：清空输入框与卡片出现是同一帧，网络再慢也不出现「字没了、卡还没来」的空窗。
+  const [pastePendings, setPastePendings] = useState<{ key: string; chars: number; excerpt: string; text: string }[]>([]);
+  // 粘贴长文预览浮层（点卡片打开）：看全文 / 复制 / 移除。refId 为空表示看的是还在归卷的占位卡。
+  const [pastePreview, setPastePreview] = useState<{ refId: string; chars: number; text: string } | null>(null);
+  // 重复粘贴时短暂高亮已在的那张卡：不新建第二份，而是把主公的视线引到它上面。
+  const [pasteDupId, setPasteDupId] = useState('');
+  // 首次自动归卷时在卡下解释一次（toast 1.5 秒就没了，教不会人）：看过即不再出现。
+  const [pasteHint, setPasteHint] = useState(false);
   // 图片引用的签名预览 URL 缓存（按需取、进程内缓存）：签名 URL 有时效，重进/失效时按需重取。
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({});
   const imageUrlFetching = useRef<Record<string, boolean>>({});
@@ -538,10 +552,12 @@ export default function Chat() {
     aliveRef.current = false;
     if (reattachTimerRef.current) clearTimeout(reattachTimerRef.current);
     if (pasteSettleTimerRef.current) clearTimeout(pasteSettleTimerRef.current);
+    if (pasteDupTimerRef.current) clearTimeout(pasteDupTimerRef.current);
     if (nativeWriteTimerRef.current) clearTimeout(nativeWriteTimerRef.current);
     // 卸载前把 token 缓冲同步 flush 掉、清定时器：不丢字（累计文本仍在 liveGen 快照里，重进会重放），也不留悬空定时器。
     flushTokenBuf();
     store.setOverlay(false, 'ref-picker');
+    store.setOverlay(false, 'paste-preview');
     // 页面真卸载（返回列表 / redirect）时解绑 view：停止对已死组件的 UI 副作用，但不终止流——
     // liveGen 快照照常累计，重进本会话即 attach 重放，thinking/逐字流无缝续上。
     if (liveKeyRef.current && liveViewRef.current) detachLiveGenView(liveKeyRef.current, liveViewRef.current);
@@ -1212,22 +1228,48 @@ export default function Chat() {
     doSend(lines.join('\n'), sessionId, agent?.key ?? '');
   };
 
-  // pasted 指纹：长度 + 首尾片段，够区分「同一段粘贴」而无需存整段。
-  const pasteSig = (pasted: string) => `${pasted.length}:${pasted.slice(0, 32)}:${pasted.slice(-32)}`;
+  // 撤掉一份粘贴长文时连本地全文一起忘掉：忘了才允许主公有意重新粘同一段（去重不该挡住真心想重来的）。
+  const forgetPaste = (id: string) => { pasteTextRef.current.delete(id); };
+
+  // 本轮里找一份「实质上就是这段」的已归卷长文，返回它的引用签 id（判定规则与用例见 services/pasteAbsorb）。
+  const findDupPaste = (pasted: string): string => {
+    let hit = '';
+    pasteTextRef.current.forEach((text, id) => {
+      if (!hit && isSamePaste(pasted, text)) hit = id;
+    });
+    return hit;
+  };
+
+  // 点卡片 = 看全文（不是删除）。旧实现整张卡的点击都走 toggleRef，主公想核对内容，一点反而把长文删了。
+  // 全文取本地 pasteTextRef，点开即有、不打网络。refId 为空 = 还在归卷的占位卡，此时只能看不能移除。
+  const openPastePreview = (refId: string, text: string) => {
+    if (!text) return;
+    setPastePreview({ refId, chars: text.length, text });
+    store.setOverlay(true, 'paste-preview');
+  };
+  const closePastePreview = () => {
+    setPastePreview(null);
+    store.setOverlay(false, 'paste-preview');
+  };
 
   // 长文粘贴 → 归为附卷：异步建知识，成功挂引用签；期间不卡输入。fullValue = 粘贴后完整文本，供满卷/失败时回填。
+  // 关键时序：先落一张 pending 占位卡，再去打网络。输入框清空与卡片出现同帧——
+  // 旧实现要等 createKnowledge 回来才 setRefs，弱网下就是「框里的字没了、卡片还没来」，主公只能理解成粘贴失败 → 再粘一遍。
   const absorbPasteToFile = async (pasted: string, fullValue: string) => {
-    // 保险丝：10s 内完全相同的 pasted 直接跳过，绝不建第二份（防同一次粘贴被结算两次）。
-    const sig = pasteSig(pasted);
-    const now = Date.now();
-    if (recentPasteRef.current && recentPasteRef.current.sig === sig && now - recentPasteRef.current.at < PASTE_DEDUP_MS) return;
-    recentPasteRef.current = { sig, at: now };
-    // 满卷判断已上提至结算处；此处仅做成功 setter 里的二次核验防并发越挂。
-    const title = `粘贴长文·${pasted.length}字`;
+    const key = `p${(pasteSeqRef.current += 1)}`;
+    const chars = pasted.length;
+    const title = `粘贴长文·${chars}字`;
+    const excerpt = pasteExcerpt(pasted);
+    setPastePendings((cur) => [...cur, { key, chars, excerpt, text: pasted }]);
+    // 在途这一份也立刻记进账本（先挂占位 key，成功后换成真 id）：
+    // 否则第一份还在打网络时又粘一遍，去重扫不到它，照样会出两份。
+    pasteTextRef.current.set(key, pasted);
+    pastePendingKeysRef.current.add(key);
+    if (!isPasteHinted()) { setPasteHint(true); markPasteHinted(); }
     pasteInflightRef.current += 1;
-    Taro.showToast({ title: '长文归卷中…', icon: 'none' });
     try {
       const { id } = await api.createKnowledge({ kind: 'document', title, text: pasted, sourceType: 'paste' });
+      pasteTextRef.current.set(id, pasted);
       // ready 状态，无需标「拆读中」；再核一次上限，防并发越挂。
       setRefs((cur) => (cur.length >= UPLOAD_COUNT_MAX || cur.some((x) => x.kind === 'knowledge' && x.id === id))
         ? cur : [...cur, { kind: 'knowledge', id, label: title }]);
@@ -1236,6 +1278,9 @@ export default function Chat() {
       Taro.showToast({ title: '长文归卷未成，稍后再试', icon: 'none' });
     } finally {
       pasteInflightRef.current -= 1;
+      pasteTextRef.current.delete(key); // 占位 key 让位给真 id（失败则本轮无此份，一并清掉）
+      pastePendingKeysRef.current.delete(key);
+      setPastePendings((cur) => cur.filter((p) => p.key !== key));
     }
   };
 
@@ -1251,6 +1296,22 @@ export default function Chat() {
     if (!(final.length > INPUT_MAX && final.length - baseline.length >= PASTE_DELTA_MIN)) return;
     const { pasted, kept } = diffPasted(baseline, final);
     if (!pasted) return;
+    // 同一段长文本轮已经归过卷：不建第二份，把视线引回已在的那张卡。
+    // （主公以为上一次没成功、又粘了一遍——这正是双份附卷的来路。）
+    // 但命中的那份必须此刻真在屏上（在途占位卡，或已挂上的引用签）：极小概率下正文记了账却没挂上签
+    // （并发把附卷顶到九份上限），那时说「已在附卷里」是在撒谎，得让这次照常归卷。
+    const dupId = findDupPaste(pasted);
+    const dupLive = !!dupId
+      && (pastePendingKeysRef.current.has(dupId) || refs.some((x) => x.kind === 'knowledge' && x.id === dupId));
+    if (dupId && !dupLive) forgetPaste(dupId);
+    if (dupLive) {
+      writeInput(kept);
+      setPasteDupId(dupId);
+      if (pasteDupTimerRef.current) clearTimeout(pasteDupTimerRef.current);
+      pasteDupTimerRef.current = setTimeout(() => { setPasteDupId(''); pasteDupTimerRef.current = null; }, PASTE_DUP_FLASH_MS);
+      Taro.showToast({ title: '这段长文已在附卷里', icon: 'none' });
+      return;
+    }
     // 附卷已满九份：不转，完整粘贴内容留在输入框，容主公自行取舍。
     if (refs.length + pasteInflightRef.current >= UPLOAD_COUNT_MAX) {
       Taro.showToast({ title: `附卷已满${UPLOAD_COUNT_MAX}份，容后再呈`, icon: 'none' });
@@ -1331,6 +1392,11 @@ export default function Chat() {
     const sending = refs;
     setRefs([]);
     setParsingRefIds([]); // 引用签已随本轮发出；之后谁没读完由服务端 refNotices 据实说
+    // 粘贴账本随这一轮出清：下一轮再粘同一段是新的一次引用，不该被上一轮的去重挡住。
+    // 在途占位 key 不清（它们的 finally 还要用来收尾），发出后归卷成功仍会挂到新一轮的引用签上。
+    pasteTextRef.current.forEach((_t, id) => { if (!pastePendingKeysRef.current.has(id)) pasteTextRef.current.delete(id); });
+    setPasteHint(false);
+    closePastePreview();
     doSend(v, sessionId, agent.key, sending);
   };
 
@@ -1775,6 +1841,8 @@ export default function Chat() {
   const closePicker = () => { setPicker(false); store.setOverlay(false, 'ref-picker'); };
   const toggleRef = (r: MessageRef) => {
     setRefs((cur) => cur.some((x) => x.kind === r.kind && x.id === r.id) ? cur.filter((x) => !(x.kind === r.kind && x.id === r.id)) : [...cur, r]);
+    // 撤掉粘贴长文时连指纹与本地全文一起忘掉：忘了才允许主公有意重新粘同一段。
+    if (isPasteRef(r) && refs.some((x) => x.kind === r.kind && x.id === r.id)) forgetPaste(r.id);
   };
   const hasRef = (kind: string, id: string) => refs.some((x) => x.kind === kind && x.id === id);
   const renderGroup = (title: string, items: { kind: MessageRef['kind']; id: string; label: string; sub?: string; version?: number }[]) => {
@@ -1949,7 +2017,8 @@ export default function Chat() {
           if (m.role === 'user') {
             return (
               <View key={m.uid} className="msg u">
-                <View className="ubub" style={{ background: accent }} onLongPress={() => copyText(m.text)}><Text>{m.text}</Text></View>
+                {/* 附件在正文之上：与输入区「卡片在上、输入框在下」同序，也与 ChatGPT / Claude 的用户轮一致。
+                    旧版把 .uref 当 .msg.u 的第二个 flex 子节点，行方向下气泡与附件卡并排挤在一行，多份时排版彻底散掉。 */}
                 {m.refs?.length ? (
                   <View className="uref">
                     {m.refs.map((r, j) => {
@@ -1976,6 +2045,7 @@ export default function Chat() {
                     })}
                   </View>
                 ) : null}
+                <View className="ubub" style={{ background: accent }} onLongPress={() => copyText(m.text)}><Text>{m.text}</Text></View>
               </View>
             );
           }
@@ -2192,6 +2262,9 @@ export default function Chat() {
       {/* B6：引用行 + 上传条 + 输入区打包成 dock，统一测量高度驱动 jump-latest 定位 */}
       {/* 问卷答题激活时视觉隐藏（display:none），让 chat-log 吃掉这块空间、少被键盘遮挡；不卸载以保住 taRef 与测量稳定 */}
       <View className={`composer-dock ${activeAskComposer ? 'ask-hidden' : ''}`}>
+        {/* 顶沿渐隐：让对话内容读成「从输入区底下过去」，而不是被齐平裁断。absolute 在 dock 盒外，
+            不影响 .composer-dock 的 boundingClientRect（jump-latest 定位靠它测高） */}
+        <View className="dock-fade" />
         {/* B5：非模态上传清单（逐份真进度 / 逐份可撤回；失败可单独重递或删掉） */}
         {uploadList.length ? (
           <View className="upload-bar">
@@ -2224,19 +2297,72 @@ export default function Chat() {
           </View>
         ) : null}
 
-        {/* 已选引用（刚传上来的标「拆读中」：正文还没拆完，此刻发问军师未必读得到） */}
-        {refs.length ? (
+        {/* 已选引用（刚传上来的标「拆读中」：正文还没拆完，此刻发问军师未必读得到）
+            粘贴长文单独走一张宽卡：露字数 + 内容摘要 + 可点开看全文，主公才认得出「这就是我刚粘的那段」。 */}
+        {(refs.length || pastePendings.length) ? (
           <View className="ref-row">
-            {refs.map((r, j) => (
-              <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
-                {r.kind === 'image' && imageUrls[r.id]
-                  ? <Image className="ref-chip-thumb" src={imageUrls[r.id]} mode="aspectFill" />
-                  : <Icon name={refCardParts(r).icon} size={12} color={accent} />}
-                <Text className="ref-chip-l" style={{ color: accent }}>{refCardParts(r).title}</Text>
-                {r.kind === 'knowledge' && parsingRefIds.includes(r.id) ? <Text className="ref-parsing">拆读中</Text> : null}
-                <Text className="ref-x">✕</Text>
+            {refs.map((r, j) => {
+              if (isPasteRef(r)) {
+                const c = refCardParts(r);
+                const text = pasteTextRef.current.get(r.id) ?? '';
+                return (
+                  <View
+                    key={j}
+                    className={`paste-card ${pasteDupId === r.id ? 'dup' : ''}`}
+                    style={pasteDupId === r.id ? { borderColor: accent } : {}}
+                    onClick={() => openPastePreview(r.id, text)}
+                  >
+                    <View className="paste-ic" style={{ background: 'var(--accent-soft)' }}>
+                      <Icon name={c.icon} size={15} color={accent} />
+                    </View>
+                    <View className="paste-b">
+                      <Text className="paste-t">粘贴长文 · {r.label.replace('粘贴长文·', '')}</Text>
+                      <Text className="paste-m">{text ? pasteExcerpt(text) : '点开可看全文'}</Text>
+                    </View>
+                    <Text
+                      className="paste-x"
+                      onClick={(e) => { e.stopPropagation?.(); forgetPaste(r.id); setRefs((cur) => cur.filter((x) => !(x.kind === r.kind && x.id === r.id))); }}
+                    >✕</Text>
+                  </View>
+                );
+              }
+              return (
+                <View key={j} className="ref-chip" style={{ borderColor: accent }} onClick={() => toggleRef(r)}>
+                  {r.kind === 'image' && imageUrls[r.id]
+                    ? <Image className="ref-chip-thumb" src={imageUrls[r.id]} mode="aspectFill" />
+                    : <Icon name={refCardParts(r).icon} size={12} color={accent} />}
+                  <Text className="ref-chip-l" style={{ color: accent }}>{refCardParts(r).title}</Text>
+                  {r.kind === 'knowledge' && parsingRefIds.includes(r.id) ? <Text className="ref-parsing">拆读中</Text> : null}
+                  <Text className="ref-x">✕</Text>
+                </View>
+              );
+            })}
+            {/* 归卷在途的占位卡：与输入框清空同帧出现，弱网也不会出现「字没了、卡还没来」的空窗 */}
+            {pastePendings.map((p) => (
+              <View
+                key={p.key}
+                className={`paste-card pending ${pasteDupId === p.key ? 'dup' : ''}`}
+                style={pasteDupId === p.key ? { borderColor: accent } : {}}
+                onClick={() => openPastePreview('', p.text)}
+              >
+                <View className="paste-ic" style={{ background: 'var(--accent-soft)' }}>
+                  <Icon name="doc" size={15} color={accent} />
+                </View>
+                <View className="paste-b">
+                  <Text className="paste-t">粘贴长文 · {p.chars}字</Text>
+                  <Text className="paste-m">{p.excerpt}</Text>
+                </View>
+                <Text className="paste-badge">归卷中</Text>
               </View>
             ))}
+          </View>
+        ) : null}
+
+        {/* 「长文自动归卷」只解释这一次：toast 一闪就没，说不清也留不住 */}
+        {pasteHint && (refs.some(isPasteRef) || pastePendings.length) ? (
+          <View className="paste-hint">
+            <Text className="paste-hint-t">长文已归为附卷，军师会通读全文；点卡片可查看或移除。</Text>
+            <Text className="paste-hint-x" onClick={() => setPasteHint(false)}>知道了</Text>
           </View>
         ) : null}
 
@@ -2358,6 +2484,48 @@ export default function Chat() {
           </View>
         </View>
       )}
+
+      {/* 粘贴长文预览：点卡片打开。看全文（消除「到底传上去没有」的疑心）+ 复制 + 移除。
+          不做「放回输入框」——本页发送硬上限 2000 字，把 2000+ 的长文塞回去只会撞上限，是死路。 */}
+      {pastePreview ? (
+        <View className="ref-sheet">
+          <View className="ref-mask" onClick={closePastePreview} />
+          <View className="ref-panel paste-panel">
+            <View className="ref-ph">
+              <Text className="ref-pt">粘贴长文 · {pastePreview.chars}字</Text>
+              <Text className="ref-done" style={{ color: accent }} onClick={closePastePreview}>关闭</Text>
+            </View>
+            <View className="paste-scroll">
+              <ScrollView scrollY className="paste-body" enhanced showScrollbar={false}>
+                <View className="paste-body-in">
+                  {/* Taro Text 合法的长按选择属性只有 selectable；userSelect 不是（见 MarkdownText/selectProps） */}
+                  <Text className="paste-full" selectable>{pastePreview.text}</Text>
+                </View>
+              </ScrollView>
+              {/* 与 dock-fade 同一套渐隐：正文滑到动作条前先化掉，而不是被齐平切在半个字上 */}
+              <View className="paste-body-fade" />
+            </View>
+            <View className="paste-acts">
+              <View className="paste-act" onClick={() => copyText(pastePreview.text, '全文已复制')}>
+                <Text style={{ color: accent }}>复制全文</Text>
+              </View>
+              {pastePreview.refId ? (
+                <View
+                  className="paste-act del"
+                  onClick={() => {
+                    const id = pastePreview.refId;
+                    forgetPaste(id);
+                    setRefs((cur) => cur.filter((x) => !(x.kind === 'knowledge' && x.id === id)));
+                    closePastePreview();
+                  }}
+                >
+                  <Text>移除这份</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       <Login
         open={showLogin}
