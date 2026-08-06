@@ -1264,7 +1264,7 @@ model ModerationLog {
 
 /// 大模型配置（单例，记录「当前生效」模型 = 运行时实际读取的解析配置）。
 /// 运营后台可在已添加的 AiModel 之间快速切换：切换=把目标 AiModel 拷进本行 + 记 activeModelId。
-/// getAiConfig 仍只读本行，运行时路径不变。生产应加密存储 apiKey / 接密管。
+/// getAiConfig 仍只读本行，运行时路径不变。模型/Embedding/Rerank 凭证按产品决策明文存库，API 只回 hasKey。
 model AiSetting {
   id             String  @id @default("default")
   provider       String  @default("openai") // mock | claude | openai(兼容 Agnes/DeepSeek/Qwen…)
@@ -1300,7 +1300,7 @@ model AiSetting {
 }
 
 /// 已添加的模型接入点（运营可添加多个，快速切换其一生效）。
-/// 来源三种：内置接入商预设（preset 记其 id）/ 自定义通用兼容协议 / 完全自主定义。
+/// 来源三种：内置接入商预设（preset 记其 id）/ 自定义通用兼容协议 / 完全自主定义。apiKey 明文存库，API 不回传。
 model AiModel {
   id               String  @id @default(cuid())
   provider         String  @default("openai") // mock | claude | openai

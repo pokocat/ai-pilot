@@ -2,13 +2,13 @@
 // 解析优先级：数据库 AiSetting（单例）> 环境变量兜底。带短缓存，避免每次调用查库。
 // 未配置真实 key 时 effectiveProvider 自动降级 mock，保证演示永远可跑。
 //
-// 安全：apiKey 经 secretBox（AES-256-GCM）加密存库（配置 APP_ENCRYPTION_KEY 后生效，未配则透传明文兼容演示）；
-//       读取边界解密、写入边界加密；对外一律只回传 hasKey，不出明文。
+// 存储：AiSetting / AiModel 的对话、Embedding、Rerank API Key 明文存库；读取兼容历史 enc:v1 密文，
+//       部署脚本会做一次性明文化迁移。对外一律只回传 hasKey，不出明文。
 
 import { prisma } from '../db.js';
 import { env, isRealKey } from '../env.js';
 import type { ModelRate } from '../data/modelPrices.js';
-import { encryptSecret, decryptSecretSafe, decryptFailed } from './secretBox.js';
+import { aiCredentialReadFailed, plainAiCredential, readAiCredential, storeAiCredential } from './aiCredentialStorage.js';
 import type { AiProvider, AiThinkingMode, AiConfig, AiPreset, AiModel, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 import {
   DEFAULT_THINKING_MODE,
@@ -36,8 +36,8 @@ export interface ResolvedAiConfig {
   rerankModel: string;
   rerankBaseUrl: string;
   rerankApiKey: string;
-  // 库内 apiKey 是密文但解不开（主密钥轮换错/未配）→ 这是**配置故障**，不是「未配置」。
-  // 生产（AI_FALLBACK_MOCK=false）下不得据此静默降级 mock，须让 gateway 抛 AI_UNAVAILABLE。
+  // 滚动迁移期若库内仍是历史密文但解不开 → 这是**配置故障**，不是「未配置」。
+  // 迁移完成后明文凭证不再依赖 APP_ENCRYPTION_KEY，此标记应恒为 false。
   keyDecryptFailed?: boolean;
   // 并发闸车道（services/llmGate）。仅当本配置是「独立账号的辅助档」时才为 'aux'，
   // 表示它有自己的上游配额、不该和主对话抢槽位。未配辅助档时恒为 undefined（= main）。
@@ -204,7 +204,7 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
         label: row.label || cfg.label,
         baseUrl: row.baseUrl || cfg.baseUrl,
         model: row.model || cfg.model,
-        apiKey: decryptSecretSafe(row.apiKey),
+        apiKey: readAiCredential(row.apiKey),
         embeddingModel: row.embeddingModel || '',
         thinkingMode: normalizeThinkingMode(row.thinkingMode),
         thinkingBudget: normalizeThinkingBudget(row.thinkingBudget),
@@ -213,16 +213,16 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
         timeoutMs: env.openaiTimeoutMs,
         embeddingEnabled: row.embeddingEnabled ?? false,
         embeddingBaseUrl: row.embeddingBaseUrl || '',
-        embeddingApiKey: decryptSecretSafe(row.embeddingApiKey),
+        embeddingApiKey: readAiCredential(row.embeddingApiKey),
         rerankEnabled: row.rerankEnabled ?? false,
         rerankModel: row.rerankModel || '',
         rerankBaseUrl: row.rerankBaseUrl || '',
-        rerankApiKey: decryptSecretSafe(row.rerankApiKey),
-        keyDecryptFailed: decryptFailed(row.apiKey),
+        rerankApiKey: readAiCredential(row.rerankApiKey),
+        keyDecryptFailed: aiCredentialReadFailed(row.apiKey),
         traceEndpointId: row.activeModelId ?? undefined,
         traceEndpointLabel: row.label || undefined,
       };
-      // 破「零报错、零 trace」的静默：对话 key 密文解不开时明确记 error 级日志，供告警。
+      // 滚动迁移保护：历史密文解不开时明确记 error 级日志，供告警。
       if (cfg.keyDecryptFailed) {
         console.error('[aiConfig] 对话模型 apiKey 解密失败（APP_ENCRYPTION_KEY 轮换错误或未配但库内为密文）——'
           + '生产将抛 AI_UNAVAILABLE 而非静默降级 mock。请核对主密钥。');
@@ -312,18 +312,18 @@ export async function setAiConfig(patch: {
   if (patch.label !== undefined) data.label = patch.label;
   if (patch.baseUrl !== undefined) data.baseUrl = patch.baseUrl;
   if (patch.model !== undefined) data.model = patch.model;
-  if (patch.apiKey !== undefined) data.apiKey = encryptSecret(patch.apiKey); // 空串=清空 key
+  if (patch.apiKey !== undefined) data.apiKey = storeAiCredential(patch.apiKey); // 空串=清空 key
   if (patch.embeddingModel !== undefined) data.embeddingModel = patch.embeddingModel;
   if (patch.temperature !== undefined) data.temperature = patch.temperature;
   if (patch.thinkingMode !== undefined) data.thinkingMode = normalizeThinkingMode(patch.thinkingMode);
   if (patch.thinkingBudget !== undefined) data.thinkingBudget = normalizeThinkingBudget(patch.thinkingBudget);
   if (patch.embeddingEnabled !== undefined) data.embeddingEnabled = patch.embeddingEnabled;
   if (patch.embeddingBaseUrl !== undefined) data.embeddingBaseUrl = patch.embeddingBaseUrl;
-  if (patch.embeddingApiKey !== undefined) data.embeddingApiKey = encryptSecret(patch.embeddingApiKey);
+  if (patch.embeddingApiKey !== undefined) data.embeddingApiKey = storeAiCredential(patch.embeddingApiKey);
   if (patch.rerankEnabled !== undefined) data.rerankEnabled = patch.rerankEnabled;
   if (patch.rerankModel !== undefined) data.rerankModel = patch.rerankModel;
   if (patch.rerankBaseUrl !== undefined) data.rerankBaseUrl = patch.rerankBaseUrl;
-  if (patch.rerankApiKey !== undefined) data.rerankApiKey = encryptSecret(patch.rerankApiKey);
+  if (patch.rerankApiKey !== undefined) data.rerankApiKey = storeAiCredential(patch.rerankApiKey);
 
   await prisma.aiSetting.upsert({
     where: { id: 'default' },
@@ -334,18 +334,18 @@ export async function setAiConfig(patch: {
       label: patch.label ?? 'Agnes 2.0 Flash',
       baseUrl: patch.baseUrl ?? 'https://apihub.agnes-ai.com/v1',
       model: patch.model ?? 'agnes-2.0-flash',
-      apiKey: encryptSecret(patch.apiKey ?? ''),
+      apiKey: storeAiCredential(patch.apiKey),
       embeddingModel: patch.embeddingModel ?? '',
       thinkingMode: normalizeThinkingMode(patch.thinkingMode),
       thinkingBudget: normalizeThinkingBudget(patch.thinkingBudget),
       temperature: patch.temperature ?? 0.7,
       embeddingEnabled: patch.embeddingEnabled ?? false,
       embeddingBaseUrl: patch.embeddingBaseUrl ?? '',
-      embeddingApiKey: encryptSecret(patch.embeddingApiKey ?? ''),
+      embeddingApiKey: storeAiCredential(patch.embeddingApiKey),
       rerankEnabled: patch.rerankEnabled ?? false,
       rerankModel: patch.rerankModel ?? '',
       rerankBaseUrl: patch.rerankBaseUrl ?? '',
-      rerankApiKey: encryptSecret(patch.rerankApiKey ?? ''),
+      rerankApiKey: storeAiCredential(patch.rerankApiKey),
     },
   });
   cache = null;
@@ -377,7 +377,7 @@ export function publicModel(m: ModelRow, activeId: string | null): AiModel {
     thinkingMode: normalizeThinkingMode(m.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(m.thinkingBudget),
     temperature: m.temperature,
-    hasKey: isRealKey(decryptSecretSafe(m.apiKey)),
+    hasKey: isRealKey(readAiCredential(m.apiKey)),
     preset: m.preset ?? null,
     active: !!activeId && m.id === activeId,
     priceInput: m.priceInput ?? 0,
@@ -397,8 +397,8 @@ export function publicModel(m: ModelRow, activeId: string | null): AiModel {
 async function syncActiveSetting(m: ModelRow): Promise<void> {
   const fields = {
     provider: m.provider, label: m.label, baseUrl: m.baseUrl, model: m.model,
-    // m.apiKey 来自 AiModel（已密文）；encryptSecret 幂等。embeddingModel 不随切换同步（main 06-16）。
-    apiKey: encryptSecret(m.apiKey),
+    // 历史密文先解开再拷贝，保证 AiSetting 新写入始终是明文。embeddingModel 不随切换同步（main 06-16）。
+    apiKey: plainAiCredential(m.apiKey),
     thinkingMode: normalizeThinkingMode(m.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(m.thinkingBudget),
     temperature: m.temperature,
@@ -423,7 +423,7 @@ async function ensureSeededModels(): Promise<void> {
     return tx.aiModel.create({
       data: {
         provider: cfg.provider, label: cfg.label || '当前模型', baseUrl: cfg.baseUrl, model: cfg.model,
-        apiKey: encryptSecret(cfg.apiKey), embeddingModel: cfg.embeddingModel, temperature: cfg.temperature,
+        apiKey: storeAiCredential(cfg.apiKey), embeddingModel: cfg.embeddingModel, temperature: cfg.temperature,
         thinkingMode: cfg.thinkingMode, thinkingBudget: cfg.thinkingBudget,
       },
     });
@@ -451,7 +451,7 @@ export async function addModel(input: AiModelUpsert): Promise<AiModel> {
       label: input.label?.trim() || '未命名模型',
       baseUrl: input.baseUrl?.trim() ?? '',
       model: input.model?.trim() ?? '',
-      apiKey: encryptSecret(input.apiKey ?? ''),
+      apiKey: storeAiCredential(input.apiKey),
       embeddingModel: input.embeddingModel?.trim() ?? '',
       thinkingMode: normalizeThinkingMode(input.thinkingMode),
       thinkingBudget: normalizeThinkingBudget(input.thinkingBudget),
@@ -476,7 +476,7 @@ export async function updateModel(id: string, patch: AiModelUpsert): Promise<AiM
   if (patch.label !== undefined) data.label = patch.label.trim() || existing.label;
   if (patch.baseUrl !== undefined) data.baseUrl = patch.baseUrl.trim();
   if (patch.model !== undefined) data.model = patch.model.trim();
-  if (patch.apiKey !== undefined && patch.apiKey !== '') data.apiKey = encryptSecret(patch.apiKey); // 留空=保留现有 key
+  if (patch.apiKey !== undefined && patch.apiKey !== '') data.apiKey = storeAiCredential(patch.apiKey); // 留空=保留现有 key
   if (patch.embeddingModel !== undefined) data.embeddingModel = patch.embeddingModel.trim();
   if (patch.temperature !== undefined) data.temperature = patch.temperature;
   if (patch.thinkingMode !== undefined) {
@@ -528,7 +528,7 @@ export async function mergedTestConfig(b: AiModelTest): Promise<ResolvedAiConfig
   let apiKey = b.apiKey ?? '';
   if ((!apiKey || !apiKey.length) && b.modelId) {
     const row = await prisma.aiModel.findUnique({ where: { id: b.modelId } });
-    apiKey = decryptSecretSafe(row?.apiKey); // 库内密文 → 解密供探活
+    apiKey = readAiCredential(row?.apiKey); // 明文直读；滚动迁移期兼容历史密文
   }
   return {
     ...base,

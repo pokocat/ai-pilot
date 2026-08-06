@@ -59,10 +59,11 @@ function aiUnavailable(err: unknown): Error {
   );
 }
 
-// 密钥解密失败（APP_ENCRYPTION_KEY 轮换错/未配但库内密文）是**配置故障**，不是「未配置」。
+// 滚动迁移期的历史密钥解密失败（APP_ENCRYPTION_KEY 轮换错/未配但库内密文）是**配置故障**，不是「未配置」。
 // 生产（AI_FALLBACK_MOCK=false）下必须抛 AI_UNAVAILABLE，而不是让下游 isRealKey('')=false 静默降级 mock
 // ——否则全站悄悄返回 mock 模板、零报错、trace 无记录，且 AI_FALLBACK_MOCK=false 也挡不住（走的是
-// 「无 live provider」正常分支不经 catch）。见售卖前体检 P1。测试/显式允许 mock 的环境不拦。
+// 「无 live provider」正常分支不经 catch）。迁移完成后 AI 凭证明文存库，该保护自然不再触发。
+// 测试/显式允许 mock 的环境不拦。
 async function assertKeyHealthy(): Promise<void> {
   if (env.aiFallbackMock || isAiTestMode()) return;
   const cfg = await getAiConfig();

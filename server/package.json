@@ -24,6 +24,7 @@
     "copy:sync": "tsx scripts/syncAppCopy.ts",
     "db:reembed": "tsx scripts/reembed.ts",
     "secrets:encrypt": "tsx scripts/encryptSecrets.ts",
+    "secrets:decrypt-ai": "tsx scripts/decryptAiModelKeys.ts",
     "pretest": "node --env-file=.env.test node_modules/prisma/build/index.js db push --skip-generate --accept-data-loss",
     "test": "node --env-file=.env.test --import ./test/hermeticEnv.mjs --import tsx --test --test-concurrency=1 test/*.test.ts"
   },

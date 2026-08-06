@@ -6,7 +6,7 @@
 #
 # 首次运行自动完成：建库 junshi_preprod、写 preprod .env(改 DATABASE_URL+PORT)、
 # 装 systemd 单元 junshi-api-preprod、在 nginx wxapi 块追加 location /api_preprod/(带 nginx -t 兜底)、
-# 从生产库复制 ai_setting/ai_model(真 AI 密钥)。之后每次运行只做：上传 HEAD → 构建 → 迁移 → 重启。
+# 从生产库复制 ai_setting/ai_model(真 AI 密钥，复制后统一明文化)。之后每次运行只做：上传 HEAD → 构建 → 迁移 → 重启。
 # 生产的 junshi-api / junshi 库 / /opt/junshi 全程不受影响（AI 复制仅只读生产库）。
 #
 # 用法：
@@ -120,24 +120,6 @@ set_env_value() {
   fi
 }
 
-# 预发每次都会从生产库复制 ai_setting / ai_model；其中 apiKey 是由生产
-# APP_ENCRYPTION_KEY 加密的密文。只复制数据库行、不复制对应解密钥匙，会让预发看似有 4 个
-# 带 key 的模型，运行时却全部解密失败并报 AI_UNAVAILABLE。这里仅同步这一个“配置解密钥匙”，
-# 不复制 JWT / 支付 / 微信等其它生产凭据；全程不打印值，并在重启前 fail-closed 对账。
-PROD_ENCRYPTION_KEY="$(sudo sed -n 's/^APP_ENCRYPTION_KEY=//p' "$PROD_ROOT/server/.env" | head -1 | tr -d '"\r')"
-if [ -z "$PROD_ENCRYPTION_KEY" ]; then
-  echo "!! 生产 APP_ENCRYPTION_KEY 缺失，无法在预发解密即将复制的 AI 配置" >&2
-  exit 1
-fi
-sudo sed -i -E '/^APP_ENCRYPTION_KEY=/d' "$PREPROD_ROOT/server/.env"
-printf 'APP_ENCRYPTION_KEY=%s\n' "$PROD_ENCRYPTION_KEY" | sudo tee -a "$PREPROD_ROOT/server/.env" >/dev/null
-PREPROD_ENCRYPTION_KEY="$(sudo sed -n 's/^APP_ENCRYPTION_KEY=//p' "$PREPROD_ROOT/server/.env" | head -1 | tr -d '"\r')"
-if [ "$PREPROD_ENCRYPTION_KEY" != "$PROD_ENCRYPTION_KEY" ]; then
-  echo "!! 预发 APP_ENCRYPTION_KEY 写入后对账失败，拒绝部署" >&2
-  exit 1
-fi
-unset PREPROD_ENCRYPTION_KEY PROD_ENCRYPTION_KEY
-
 sudo sed -i -E '/^WECHAT_PAY_[A-Z0-9_]*=/d' "$PREPROD_ROOT/server/.env"
 set_env_value NODE_ENV development
 set_env_value PAY_MOCK_SUCCESS true
@@ -149,7 +131,7 @@ if sudo grep -qE '^WECHAT_PAY_[A-Z0-9_]*=.' "$PREPROD_ROOT/server/.env"; then
   echo "!! 预发 .env 仍含真实微信支付配置，拒绝部署" >&2
   exit 1
 fi
-echo "  AI 配置解密钥匙已对齐（值不回显）"
+echo "  AI 模型凭证不再要求预发持有生产 APP_ENCRYPTION_KEY"
 echo "  支付隔离已锁定：PAY_MOCK_SUCCESS=true · WECHAT_PAY_*=unset"
 
 echo "== systemd 单元 $SERVICE =="
@@ -269,6 +251,39 @@ if [ "$AI_SET_N" != "1" ] || [ "$AI_KEY_N" -lt 1 ]; then
   echo "   先核对生产库 ai_setting/ai_model 是否有数据、两库列是否严重漂移，再重跑本脚本。" >&2
   exit 1
 fi
+
+# 生产尚未发布本版本前，复制来的 AI 字段可能仍是 enc:v1 密文。仅在这一瞬间从生产 .env
+# 读取旧主密钥并通过进程环境交给迁移脚本；不写入 preprod .env、不打印值。所有字段先解密成功
+# 才会开启事务写入，错误密钥不会造成半迁移。生产完成迁移后这里自然变成 0 项、无需主密钥。
+AI_ENCRYPTED_N="$(sudo -u postgres psql -Atq -d "$PREPROD_DB" -c \
+  "SELECT
+     (SELECT count(*) FROM ai_model WHERE coalesce(\"apiKey\",'') LIKE 'enc:v1:%') +
+     (SELECT count(*) FROM ai_setting WHERE coalesce(\"apiKey\",'') LIKE 'enc:v1:%'
+       OR coalesce(\"embeddingApiKey\",'') LIKE 'enc:v1:%'
+       OR coalesce(\"rerankApiKey\",'') LIKE 'enc:v1:%')")"
+if [ "$AI_ENCRYPTED_N" -gt 0 ]; then
+  PROD_ENCRYPTION_KEY="$(sudo sed -n 's/^APP_ENCRYPTION_KEY=//p' "$PROD_ROOT/server/.env" | head -1 | tr -d '"\r')"
+  if [ -z "$PROD_ENCRYPTION_KEY" ]; then
+    echo "!! 复制到 ${AI_ENCRYPTED_N} 行历史 AI 密文，但生产 APP_ENCRYPTION_KEY 缺失，拒绝半迁移" >&2
+    exit 1
+  fi
+  sudo -u "$RUNTIME_USER" env HOME="/home/${RUNTIME_USER}" APP_ENCRYPTION_KEY="$PROD_ENCRYPTION_KEY" \
+    bash -c "cd '$PREPROD_ROOT/server' && npm run secrets:decrypt-ai"
+  unset PROD_ENCRYPTION_KEY
+else
+  echo "  AI 凭证已是明文，无需迁移"
+fi
+AI_ENCRYPTED_AFTER="$(sudo -u postgres psql -Atq -d "$PREPROD_DB" -c \
+  "SELECT
+     (SELECT count(*) FROM ai_model WHERE coalesce(\"apiKey\",'') LIKE 'enc:v1:%') +
+     (SELECT count(*) FROM ai_setting WHERE coalesce(\"apiKey\",'') LIKE 'enc:v1:%'
+       OR coalesce(\"embeddingApiKey\",'') LIKE 'enc:v1:%'
+       OR coalesce(\"rerankApiKey\",'') LIKE 'enc:v1:%')")"
+if [ "$AI_ENCRYPTED_AFTER" != "0" ]; then
+  echo "!! AI 凭证明文化后仍有 ${AI_ENCRYPTED_AFTER} 行密文，拒绝重启" >&2
+  exit 1
+fi
+echo "  AI 凭证存储校验：历史密文 0 行"
 
 echo "== 构建 + 重启 =="
 sudo rm -rf dist

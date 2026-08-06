@@ -315,7 +315,8 @@ export const api = {
   // 配置存 FeatureFlag 单行（id='creative-poster'）：enabled 是运行时开关，payload 承载价格/限额/供应商。
   // enabled 是**唯一**真源（行缺失视为关）：2026-07 删掉了部署级 CANVAS_DESIGN_ENABLED，不再有「双开才算开」。
   creativeConfig: () => req<AdminCreativeConfig>('/admin/creative/config'),
-  // apiKey 语义同大模型配置：不传=不动、传空串=清空、传值=加密写入；读回永远只有 hasKey。
+  // 图片供应商 apiKey：不传=不动、传空串=清空、传值=secretBox 加密写入；读回永远只有 hasKey。
+  // 注意大模型 AiSetting/AiModel 已改为明文存库，二者只共享表单语义，不共享存储口径。
   saveCreativeConfig: (body: AdminCreativeConfigUpdate) => req<AdminCreativeConfig>('/admin/creative/config', 'PUT', body),
   // 连通性试跑（仅 owner/master）：真发一次最小请求，只回通/不通 + 耗时，不落资产。
   creativeProviderDryRun: () => req<AdminCreativeDryRunResult>('/admin/creative/provider/dry-run', 'POST', {}),

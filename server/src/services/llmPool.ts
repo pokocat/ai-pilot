@@ -32,7 +32,7 @@ import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { prisma } from '../db.js';
 import { getRedis } from './redis.js';
-import { decryptSecretSafe } from './secretBox.js';
+import { readAiCredential } from './aiCredentialStorage.js';
 import { isRealKey } from '../env.js';
 import { endpointLane, setLaneMaxConcurrency, withLlmSlot, is429, retryAfterSecOf, type LlmLaneClass } from './llmGate.js';
 import type { ResolvedAiConfig } from './aiConfig.js';
@@ -121,7 +121,7 @@ export async function loadPool(force = false): Promise<{ endpoints: PoolEndpoint
           label: String(m.label ?? ''),
           provider: (m.provider as AiProvider) ?? 'openai',
           baseUrl: String(m.baseUrl ?? ''),
-          apiKey: decryptSecretSafe(String(m.apiKey ?? '')),
+          apiKey: readAiCredential(String(m.apiKey ?? '')),
           model: String(m.model ?? ''),
           // 保留端点的运营配置温度；只有实际启用 Thinking 的请求才在 provider 层临时锁为 1。
           temperature: typeof m.temperature === 'number' ? m.temperature : 0.7,

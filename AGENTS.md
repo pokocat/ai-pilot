@@ -553,7 +553,7 @@ bash scripts/deploy-prod.sh
 `.claude/worktrees/*/AGENTS.md` 是 Claude 工作树副本，不是维护源；需要固化流程时改根目录 `AGENTS.md`、`scripts/deploy-prod.sh` 和必要的 `docs/*`。
 正式微信小程序发布仍走 §11「本机上传到小程序平台」：上传前后同步 `docs/WEAPP_RELEASES.md`，版本号/描述与上传命令一致；连真实后端的小程序包用 `TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp`。
 
-**预发环境**固定为 `/opt/junshi-preprod` · `junshi-api-preprod` · `:4001` · DB `junshi_preprod` · `https://wxapi.aibuzz.cn/api_preprod`，只用 `scripts/deploy-preprod.sh`。该脚本每次部署都会复制生产 `ai_setting/ai_model` 供真实模型验收，因此必须同时把生产 `APP_ENCRYPTION_KEY` 写入预发并做不回显的一致性校验；只复制加密配置行却漏这把钥匙，会表现为“库里有带 key 的模型，但运行时全部 `AI_UNAVAILABLE`”。脚本仍会删除预发 `.env` 中所有 `WECHAT_PAY_*` 真商户凭据，并强制 `NODE_ENV=development` + `PAY_MOCK_SUCCESS=true` + `PAY_SANDBOX=false` + `ALLOW_DEMO_PURCHASE=false`：预发可走真实订单/权益状态机，但绝不触发微信真扣款。小程序预发包用 `cd app && npm run build:weapp:preprod`，并核对 `dist/junshi-build-meta.json` 的 `mode/api/gitSha`；DevTools CLI 的 `--project` 仍指向 `app/`，不是 `app/dist/`。
+**预发环境**固定为 `/opt/junshi-preprod` · `junshi-api-preprod` · `:4001` · DB `junshi_preprod` · `https://wxapi.aibuzz.cn/api_preprod`，只用 `scripts/deploy-preprod.sh`。该脚本每次部署都会复制生产 `ai_setting/ai_model` 供真实模型验收；AI 对话/Embedding/Rerank 凭证现统一明文存库，不再把生产 `APP_ENCRYPTION_KEY` 持久写进预发。兼容窗口里若生产行仍是旧 `enc:v1` 密文，脚本只在迁移进程环境中临时传入生产旧主密钥，整批解密成功后原子写为明文，并硬验密文为 0；生产完成同一迁移后自然不再需要主密钥。脚本仍会删除预发 `.env` 中所有 `WECHAT_PAY_*` 真商户凭据，并强制 `NODE_ENV=development` + `PAY_MOCK_SUCCESS=true` + `PAY_SANDBOX=false` + `ALLOW_DEMO_PURCHASE=false`：预发可走真实订单/权益状态机，但绝不触发微信真扣款。小程序预发包用 `cd app && npm run build:weapp:preprod`，并核对 `dist/junshi-build-meta.json` 的 `mode/api/gitSha`；DevTools CLI 的 `--project` 仍指向 `app/`，不是 `app/dist/`。
 
 ### ★ 一键开发（PostgreSQL，推荐）
 ```bash
@@ -728,7 +728,7 @@ mock 可随时预览；**正式上传/审核**还需：
 - **微信自动续费运维前置（代码已完成，权限待用户配置）**：在微信支付商户平台申请委托代扣自动续费权限与各套餐模板，选择「通知后 24 小时扣费」，再配置 `WECHAT_PAY_V2_KEY` 与两条 `WECHAT_PAPAY_*_NOTIFY_URL` 并在运营后台填模板 ID。可选的「预扣费通知 API」属于另一种模板/权限模式，本期没有暴露半套开关；如未来改用，需按官方时窗另做完整状态机。
 - 签名服务偶发不可用时提交为未签名（不影响功能）。
 - **pgvector 路径已实现但未真库验证**：本地无扩展，默认 `PGVECTOR_ENABLED=false` 走内存余弦（已验证）；上真库执行 `npm run db:pgvector` 并置 true 后需端到端验一遍（升级路径 1）。
-- **模型密钥加密存库**：`services/secretBox.ts`（AES-256-GCM）对 模型/Dify/技能库 密钥写时加密、读时解密，配 `APP_ENCRYPTION_KEY` 后生效（未配=透传明文兼容演示），存量跑 `npm run secrets:encrypt` 回填。仍待：密钥接 KMS/密管 + 轮换策略（升级路径 8）。
+- **AI 模型凭证已拍板明文存库**：`AiSetting.{apiKey,embeddingApiKey,rerankApiKey}` 与 `AiModel.apiKey` 新写直接落明文，对外接口仍只回 `hasKey`；`services/aiCredentialStorage.ts` 只为滚动部署兼容读取旧 `enc:v1`，`npm run secrets:decrypt-ai` 负责 fail-closed 原子明文化。代价是数据库读权限与备份持有者可见这些凭证，故继续依赖数据库最小权限、0600 备份与主机权限隔离。`secretBox` 仍负责 Agent/Dify/技能库/告警/图片供应商等其它业务密钥，`npm run secrets:encrypt` 不再触碰 AI 模型表。
 - 运营后台 项目/报告 只读看板已加（`GET /admin/projects`、`GET /admin/reports`）；知识库看板走既有 `/admin/knowledge`。前端看板页待接。
 - **时序知识图谱**（Graphiti 式）已落首版：`GraphEntity/GraphRelation`（关系带有效时间窗）+ `services/knowledgeGraph.ts`（实体去重、新事实软失效旧事实、as-of 查询）+ `routes/graph.ts`（抽取/实体/关系查询）。抽取依赖真实模型（mock 返回空）。仍可增强：对话汇总/知识入库时自动触发抽取、图谱可视化前端。
 - **@引用** 选择器候选含 项目/报告/知识/记忆：记忆候选走 `GET /memories`（后端就绪），`resolveReferences` 支持 `kind:'memory'`；前端选择器接「记忆」分组待补。

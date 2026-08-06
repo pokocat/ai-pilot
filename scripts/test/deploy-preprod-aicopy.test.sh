@@ -11,6 +11,7 @@
 #   ② 证明旧实现（pg_dump --column-inserts | psql >/dev/null 2>&1）会**谎报成功**
 #   ③ 证明新实现能正确复制共有列，且预发新增列由默认值补齐
 #   ④ 证明新实现在真正失败时会以非零码退出
+#   ⑤ 证明生产 APP_ENCRYPTION_KEY 不会持久写入预发，并在重启前执行/校验明文化迁移
 set -uo pipefail
 
 SRC=junshi_copytest_src   # 扮演生产
@@ -19,7 +20,11 @@ PASS=0; FAIL=0
 ok(){ printf '  \033[32m✔\033[0m %s\n' "$*"; PASS=$((PASS+1)); }
 no(){ printf '  \033[31m✖\033[0m %s\n' "$*"; FAIL=$((FAIL+1)); }
 
-cleanup(){ dropdb --if-exists "$SRC" 2>/dev/null; dropdb --if-exists "$DST" 2>/dev/null; }
+cleanup(){
+  dropdb --if-exists "$SRC" 2>/dev/null
+  dropdb --if-exists "$DST" 2>/dev/null
+  rm -f "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_fns.sh"
+}
 trap cleanup EXIT
 cleanup
 createdb "$SRC"; createdb "$DST"
@@ -85,6 +90,19 @@ DEF="$(psql -Atq -d "$DST" -c 'SELECT DISTINCT "poolEnabled" FROM ai_model')"
 echo "== ③ 新实现：真失败时必须非零退出 =="
 psql -q -d "$DST" -c 'DROP TABLE ai_model' >/dev/null 2>&1
 if copy_ai_table ai_model 2>/dev/null; then no "目标表不存在时仍返回 0"; else ok "目标表不存在 → 返回非 0"; fi
+
+echo "== ④ AI 凭证迁移边界静态守卫 =="
+DEPLOY_SCRIPT="$REPO/scripts/deploy-preprod.sh"
+if grep -Eq "printf .*APP_ENCRYPTION_KEY=.*tee -a.*PREPROD_ROOT" "$DEPLOY_SCRIPT"; then
+  no "仍会把生产 APP_ENCRYPTION_KEY 持久写入预发"
+else
+  ok "不再把生产 APP_ENCRYPTION_KEY 持久写入预发"
+fi
+if grep -q 'npm run secrets:decrypt-ai' "$DEPLOY_SCRIPT" && grep -q 'AI_ENCRYPTED_AFTER' "$DEPLOY_SCRIPT"; then
+  ok "重启前执行 AI 凭证明文化并校验密文为 0"
+else
+  no "缺少明文化执行或迁移后校验"
+fi
 
 echo
 printf '通过 %d · 失败 %d\n' "$PASS" "$FAIL"

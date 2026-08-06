@@ -301,7 +301,7 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 
 ## 9. 上线前安全/生产硬约束（务必过一遍 · 详见 ROADMAP P2）
 - [ ] **鉴权**：短信验证码与小程序本机号登录已接入；当前小程序登录态仍是 `token=userId`（演示）→ 换 JWT；运营后台已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权，生产仍需细粒度 RBAC、管理员账号体系与密钥轮换策略。
-- [ ] **密钥**：`AiSetting.apiKey` 现明文存库 → 加密 / 接密管；`ADMIN_TOKEN` 必须使用高强度随机值并仅在服务端环境变量保存。
+- [x] **AI 模型凭证存储口径（产品已拍板）**：`AiSetting` 的对话/Embedding/Rerank Key 与 `AiModel.apiKey` 明文存库，对外接口只回 `hasKey`；部署执行 `npm run secrets:decrypt-ai` 清理历史密文。接受的代价是数据库读权限与备份持有者可见凭证，因此数据库账号最小权限、备份 0600 与主机访问控制是硬要求。`ADMIN_TOKEN` 仍必须使用高强度随机值并仅在服务端环境变量保存；Agent/Dify/技能库/告警/图片供应商等其它业务密钥继续走 `secretBox`。
 - [ ] **内容审核/计量**：关键词→合规审核服务；算力按次扣减已实现，充值/支付/token 级归集待接。
 - [ ] **图片内容审核（海报成品图放量前必过）**：`services/creative/imageModeration.ts` 默认 `provider='none'` = 放行 + 审计记 `skipped`。放量前须接一家图片内容安全服务（后台「创作任务」页把 provider 置 `http` 并配地址/密钥），否则用户上传的人像与生成的主视觉都没有机器审核。文案侧已走既有 `moderate()`。
 - [ ] **限流 / 超时 / 重试**：给 `/api/generate*` 加限流；LLM 调用超时与重试。

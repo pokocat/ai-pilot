@@ -1,10 +1,11 @@
 // 密钥/敏感字段对称加密（AES-256-GCM，Node 内置 crypto，零外部依赖）。
 //
-// 设计目标：把存库的明文密钥（AiSetting/AiModel/Agent.apiKey、difyApiKey、SkillTool 鉴权头…）
+// 设计目标：把存库的明文业务密钥（Agent.apiKey、difyApiKey、SkillTool 鉴权头、告警/图片供应商…）
 // 改为「写时加密、读时解密」，同时**向后兼容**历史明文：
 //   - 加密产物带版本前缀 `enc:v1:`，解密时据此判别；无前缀 → 视为历史明文，原样返回。
 //   - 未配置 APP_ENCRYPTION_KEY 时退化为透传（演示/本地零配置仍可跑），仅在写入时不加密。
 // 这样上线只需设一个环境变量并对存量字段跑一次回填脚本（scripts/encryptSecrets.ts），无需停机改造读路径。
+// AiSetting/AiModel 模型凭证自 2026-08-05 起明文存库，仅在 aiCredentialStorage 中兼容读取历史密文。
 
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
 

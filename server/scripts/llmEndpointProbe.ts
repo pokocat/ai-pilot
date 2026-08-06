@@ -7,13 +7,12 @@
  * 不是实测出来的。走 gateway 只会测到这个自设值，永远问不出上游的真实上限。本探针直接打
  * {baseUrl}/v1/messages，并显式关掉 SDK 重试（用裸 fetch），让 429 / 5xx 原样暴露出来。
  *
- * 安全：密钥经 loadPool() 在进程内解密后只用于请求头，**从不打印**（只输出 sha256 前 8 位用于区分端点）。
+ * 安全：密钥经 loadPool() 读入进程后只用于请求头，**从不打印**（只输出 sha256 前 8 位用于区分端点）。
  * 花费：每次请求极小 payload（约 20 输入 + ≤8 输出 token）。按 ¥36/¥180 per 1M 算约 ¥0.0016/次，
  *      默认阶梯合计 <200 次 ≈ ¥0.3。--budget 是元为单位的硬上限，预估超了直接不跑。
  */
 import { createHash } from 'node:crypto';
-// 必须最先 import：secretBox 在**调用时**才读 process.env.APP_ENCRYPTION_KEY，
-// 若 dotenv 还没跑，池里的 key 会静默解不开 → endpoints 全被过滤掉 → 探针误报「池内无端点」。
+// 必须最先 import：先加载 server/.env，再让 loadPool 打开数据库并解析运行时配置。
 import '../src/env.js';
 import { loadPool } from '../src/services/llmPool.js';
 

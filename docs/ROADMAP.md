@@ -40,7 +40,7 @@
 - [x] 知识库**文档上传**（`POST /knowledge/upload`，纯文本即入库；PDF/图片走 `services/ocr.ts` 配 `OCR_*` 启用）。
 
 ### P2 · 生产硬化
-- [x] **密钥加密**：`services/secretBox.ts`（AES-256-GCM）模型/Dify/技能库密钥写时加密读时解密（配 `APP_ENCRYPTION_KEY`，`npm run secrets:encrypt` 回填）。**RBAC**：`AdminAccount.role`（super_admin/operator）+ `requireSuperAdmin` 守护密钥配置/账号管理 + `/admin/accounts` 多账号。仍待：密钥接 KMS/轮换、前端账号管理页。
+- [x] **密钥存储口径**：AI 对话/Embedding/Rerank 模型凭证按 2026-08-05 决策明文存库（历史密文 `npm run secrets:decrypt-ai` 原子迁移，对外仍掩码）；Agent/Dify/技能库/告警/图片供应商等其它业务密钥继续由 `secretBox` AES-256-GCM 加密（`npm run secrets:encrypt` 不触碰 AI 表）。**RBAC**：`AdminAccount.role`（super_admin/operator）+ `requireSuperAdmin` 守护密钥配置/账号管理 + `/admin/accounts` 多账号。仍待：前端账号管理页。
 - [x] 鉴权升级：JWT（`services/userToken.ts`，配 `APP_JWT_SECRET`，`APP_JWT_REQUIRED` 强制）；短信强制校验开关 `SMS_REQUIRE_CODE` 就绪。
 - [x] 内容审核 / 缓存：`services/moderation.ts`（keyword/http 可插拔）+ `services/cache.ts`（内存/Redis 可选依赖 ioredis）。
 - [x] **算力按次扣减 + 余额不足拦截**（`services/credits.ts`，TC-K 守护）。
@@ -53,5 +53,5 @@
 
 ## 三、风险登记
 - **信息泄露（高）**：跨租户/跨用户数据隔离——已由 `TC-G` 集成测试守护，**大改后必须跑通**（见 `docs/TESTING.md`）。
-- **密钥明文（已缓解）**：模型/Dify/技能库 key 已支持 AES-256-GCM 加密存库（配 `APP_ENCRYPTION_KEY` 启用 + `npm run secrets:encrypt` 回填）；细粒度 RBAC 已落（super_admin/operator）。仍待密钥接 KMS/轮换。
+- **AI 模型凭证明文（已接受的产品取舍）**：对话/Embedding/Rerank Key 明文存库，接口不回明文；数据库读权限与备份持有者可见，必须靠最小权限、备份 0600 与主机访问控制收口。Agent/Dify/技能库/告警/图片供应商等其它 key 继续 AES-256-GCM 加密；细粒度 RBAC 已落（super_admin/operator）。
 - **pgvector 未真验（中）**：路径实现但本地无扩展未端到端跑，启用前在真库验证。

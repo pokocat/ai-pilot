@@ -150,6 +150,12 @@ DB_PUSH_EXTRA=""
 sudo -u "$REMOTE_RUNTIME_USER" env HOME="/home/$REMOTE_RUNTIME_USER" APP_ROOT="$APP_ROOT" DB_PUSH_EXTRA="$DB_PUSH_EXTRA" bash -c \
   'cd "$APP_ROOT/server" && ./node_modules/.bin/prisma db push --skip-generate $DB_PUSH_EXTRA'
 
+# 2026-08-05 产品决策：AI 模型、Embedding、Rerank 凭证明文存库。旧服务本就兼容明文，
+# 所以可在重启前原子迁移；若历史密文与 APP_ENCRYPTION_KEY 不匹配，脚本 fail-closed，旧服务继续运行。
+echo "== AI credential plaintext migration =="
+sudo -u "$REMOTE_RUNTIME_USER" env HOME="/home/$REMOTE_RUNTIME_USER" APP_ROOT="$APP_ROOT" bash -c \
+  'cd "$APP_ROOT/server" && npm run secrets:decrypt-ai'
+
 echo "== server build and restart =="
 sudo rm -rf dist
 npm run build

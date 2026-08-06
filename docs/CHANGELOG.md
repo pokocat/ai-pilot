@@ -6,19 +6,25 @@
 
 ## 变更日志
 
+### 2026-08-05 · 取消 AI 模型凭证存库加密，保留旧密文无停机迁移 · 影响面：server + deployment + docs
+
+按产品决策，`AiSetting` 的对话/Embedding/Rerank API Key 与 `AiModel.apiKey` 新写统一明文存库，不再让真实 AI 运行依赖 `APP_ENCRYPTION_KEY`；运营 API 仍只返回 `hasKey`，不向前端下发明文。新增 `aiCredentialStorage` 作为唯一读写口径：读路径兼容历史 `enc:v1`，写路径遇到旧密文先解开再落明文；新增幂等 `npm run secrets:decrypt-ai`，所有字段先成功解密后才在同一事务写入，错钥/缺钥 fail-closed，不会留下半迁移。
+
+生产部署在服务重启前执行同一迁移，旧版本本就兼容读取明文，因此数据库切换不要求停机。预发仍从生产复制 `ai_setting/ai_model`，但不再把生产 `APP_ENCRYPTION_KEY` 持久写入预发；兼容窗口仅通过迁移进程环境临时传入旧钥，并在重启前硬验 AI 密文为 0。`secrets:encrypt` 同步移除 AI 表，避免后续运维命令反向加密；Agent/Dify/技能库/告警/图片供应商等其它业务密钥仍走 `secretBox`。接受的取舍是数据库读权限与备份持有者可见模型凭证，须继续以最小权限、备份 0600 和主机访问控制收口；无接口/数据库结构变化，小程序无需因本项单独发版。
+
 ### 2026-08-05 · 对话生成可靠性方案落地，并完成每日战报内嵌化与排盘 v3 · 影响面：shared + Prisma + server + app + monitoring + deployment + docs
 
 新增持久化 `GenerationJob / GenerationAttempt / GenerationEffect`：新客户端以稳定 `clientRequestId` 建单，同一用户请求只落一条 user message、一次额度预留和一个生成任务；worker 用租约、心跳与 `leaseVersion` fencing 跨进程接管，按权威全文快照续流。页面退出、切后台、弱网或 HTTP 断开只结束订阅，不再取消后端任务；会话列表展示生成阶段，进入原会话按 `generationId + snapshotVersion` 恢复，不强制跳页，只有显式停止才写持久取消。生成中的输入仍锁定，服务端同时禁止同会话并发。同步兼容入口超过等待预算返回 202 后转轮询，不再空白收尾。
 
 生产兼容旧客户端时，即使请求没有 `clientRequestId`，服务端也会生成一次性 `legacy-<uuid>` 并强制进入持久任务链路，避免旧包继续触发“断连即退款/丢结果”和旧结算分支；跨 HTTP 重传幂等仍只由升级后的客户端稳定 key 保证。
 
-预发首次真实生成冒烟又发现部署脚本只复制生产 `ai_setting/ai_model` 密文，预发 `.env` 却没有生产 `APP_ENCRYPTION_KEY`，于是数据库校验显示 4 个带 key 模型、运行时仍全部解密失败并返回 `AI_UNAVAILABLE`。`deploy-preprod.sh` 现同步且不回显地对账这一个配置解密钥匙，失败即在重启前中止；JWT、微信、支付等其它生产凭据不复制，预发真支付隔离仍保持。
+预发首次真实生成冒烟又发现部署脚本只复制生产 `ai_setting/ai_model` 密文，预发 `.env` 却没有生产 `APP_ENCRYPTION_KEY`，于是数据库校验显示 4 个带 key 模型、运行时仍全部解密失败并返回 `AI_UNAVAILABLE`。当时先补了同步且不回显地对账配置解密钥匙的止血；随后产品决定取消 AI 模型凭证加密，已由上方新条目的“临时解密迁移、预发不持有生产旧钥”替代。JWT、微信、支付等其它生产凭据始终不复制，预发真支付隔离仍保持。
 
 同轮补正 `deploy-preprod-aicopy.test.sh` 中环境变量紧邻中文右引号却未加 `${...}` 的 Bash 展开歧义；旧写法在当前 locale 下把右引号字节并入变量名，导致回归脚本还没测到复制逻辑就因 `set -u` 退出。
 
 用量改为按真实 provider attempt 统一结算：完成、截断、失败、取消、租约恢复与推荐选项补生成均累计 provider usage，缺失时保守估算；纯 mock、缓存命中及 provider 前审核拦截为 0。主回复先持久化，再用独立 `ask_recovery` attempt 在 3 秒预算内补推荐选项；补出的可见文本纳入用户/租户/会话成本归因、输出审核和禁用词审计，失败只少选项。进程若在 `finalize` 阶段退出，接管者只恢复推荐项与终态，不重新调用主 provider、不改写已交付正文；重进端也持续锁定输入直到 job 真正终态。结果终态与 `GenerationEffect` outbox 同事务登记，失败/stale effect 后续补偿投递；业务目标仍按 at-least-once 语义自行幂等。
 
-同时完成相关止损与产品项：provider AbortSignal、首事件/流中空闲窗与续写墙钟、工具路径续写、残文/usage 保全、OpenAI 端点命中后再构造 body；长文归卷 uploading/failed 均禁止发送，失败不覆盖新草稿；每日战报改为 `GET /cards/daily` + `packages/work/daily` 登录态内嵌页，旧 canvas/发布入口已删除或 410、历史 daily 公开页 404；排盘升级 `paipan-v3`，新排/主动重排写 v3，存量 v1/v2 不改。补齐生成生命周期/首字/恢复/估算指标与告警，provider 前无 attempt 的确定 0 不误报为估算；部署脚本对监控单文件挂载做哈希重建，并把已存在但 exited 的监控容器拉起后做 readiness/SHA/规则数硬验收。当前仅完成本地实现与回归，**尚未部署**；生产发布后仍须按 `docs/CHAT_STREAMING_RELIABILITY_PLAN.md` §12.4 连续观察 24 小时。
+同时完成相关止损与产品项：provider AbortSignal、首事件/流中空闲窗与续写墙钟、工具路径续写、残文/usage 保全、OpenAI 端点命中后再构造 body；长文归卷 uploading/failed 均禁止发送，失败不覆盖新草稿；每日战报改为 `GET /cards/daily` + `packages/work/daily` 登录态内嵌页，旧 canvas/发布入口已删除或 410、历史 daily 公开页 404；排盘升级 `paipan-v3`，新排/主动重排写 v3，存量 v1/v2 不改。补齐生成生命周期/首字/恢复/估算指标与告警，provider 前无 attempt 的确定 0 不误报为估算；部署脚本对监控单文件挂载做哈希重建，并把已存在但 exited 的监控容器拉起后做 readiness/SHA/规则数硬验收。已部署预发并完成真实断连续跑/重进恢复验收，生产尚未发布；生产发布后仍须按 `docs/CHAT_STREAMING_RELIABILITY_PLAN.md` §12.4 连续观察 24 小时。
 
 ### 2026-08-05 · 附件卡视觉层次重做：新增 --line-strong / --shadow-card 两个 token + 渐隐式深度 · 影响面：app（app.scss + app.h5.scss token；chat 页卡片/弹层样式 + 两个渐隐层）
 
