@@ -63,12 +63,22 @@ file_hash() {
   fi
 }
 
+directory_hash() {
+  if sudo test -d "$1"; then
+    sudo find "$1" -type f -exec sha256sum {} \; | sort | sha256sum | awk '{print $1}'
+  else
+    printf 'missing\n'
+  fi
+}
+
 # bind mount 文件内容变更后仅 reload 并不总能覆盖组件自身的配置生命周期；先记发布前哈希，
 # 同步后按变化精确 force-recreate 对应组件。不存在也记为 missing，首次补配置同样可识别。
 PROM_CONFIG="$APP_ROOT/deploy/monitoring/prometheus/prometheus.yml"
 ALERT_CONFIG="$APP_ROOT/deploy/monitoring/alertmanager/alertmanager.yml"
+GRAFANA_DASHBOARDS="$APP_ROOT/deploy/monitoring/grafana/dashboards"
 PROM_CONFIG_BEFORE="$(file_hash "$PROM_CONFIG")"
 ALERT_CONFIG_BEFORE="$(file_hash "$ALERT_CONFIG")"
+GRAFANA_DASHBOARDS_BEFORE="$(directory_hash "$GRAFANA_DASHBOARDS")"
 
 echo "== prepare release ${SHA} =="
 rm -rf "$RELEASE"
@@ -130,6 +140,7 @@ if [ -f "$APP_ROOT/deploy/monitoring/secrets/metrics.token" ]; then
 fi
 PROM_CONFIG_AFTER="$(file_hash "$PROM_CONFIG")"
 ALERT_CONFIG_AFTER="$(file_hash "$ALERT_CONFIG")"
+GRAFANA_DASHBOARDS_AFTER="$(directory_hash "$GRAFANA_DASHBOARDS")"
 
 if [ -f "$ENV_BACKUP" ]; then
   sudo mkdir -p "$APP_ROOT/server"
@@ -193,9 +204,11 @@ sudo systemctl reload nginx
 # ready 与实际规则数任一步失败都必须让部署失败，不能把“业务发布成功、监控静默”当成功。
 PROM_PRESENT=0
 ALERT_PRESENT=0
+GRAFANA_PRESENT=0
 # 用 ps -a：监控容器即使当前 exited 也属于“已安装”，发布必须尝试拉起并验收，不能静默跳过。
 sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^monitoring-prometheus-1$' && PROM_PRESENT=1
 sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^monitoring-alertmanager-1$' && ALERT_PRESENT=1
+sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^monitoring-grafana-1$' && GRAFANA_PRESENT=1
 
 wait_ready() {
   local url="$1"
@@ -212,13 +225,35 @@ wait_ready() {
   return 1
 }
 
-if [ "$PROM_PRESENT" = "1" ] || [ "$ALERT_PRESENT" = "1" ]; then
+if [ "$PROM_PRESENT" = "1" ] || [ "$ALERT_PRESENT" = "1" ] || [ "$GRAFANA_PRESENT" = "1" ]; then
   MONITOR_DIR="$APP_ROOT/deploy/monitoring"
   sudo test -f "$MONITOR_DIR/.env" || { echo "监控栈运行中但 monitoring/.env 缺失" >&2; exit 1; }
   sudo test -f "$MONITOR_DIR/secrets/metrics.token" || { echo "监控栈运行中但 metrics.token 缺失" >&2; exit 1; }
   sudo test ! -d "$MONITOR_DIR/secrets/metrics.token" || { echo "metrics.token 被错误创建成目录" >&2; exit 1; }
   cd "$MONITOR_DIR"
   sudo docker compose config --quiet
+fi
+
+if [ "$GRAFANA_PRESENT" = "1" ]; then
+  echo "== grafana dashboards verify =="
+  HOST_DASHBOARD_COUNT="$(sudo find "$GRAFANA_DASHBOARDS" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')"
+  [ "${HOST_DASHBOARD_COUNT:-0}" -gt 0 ] || { echo "Grafana 主机看板目录为空" >&2; exit 1; }
+
+  # rsync 会原地保留目录，但历史部署曾让容器继续盯着已删除的旧目录 inode，表现为主机有 JSON、
+  # 容器目录为空、UI 仍展示数据库里的旧看板。内容变化或主机/容器文件数不一致都必须重建。
+  CONTAINER_DASHBOARD_COUNT="$(sudo docker exec monitoring-grafana-1 sh -c 'find /var/lib/grafana/dashboards -maxdepth 1 -type f -name "*.json" 2>/dev/null | wc -l' 2>/dev/null || printf '0')"
+  if [ "$GRAFANA_DASHBOARDS_BEFORE" != "$GRAFANA_DASHBOARDS_AFTER" ] || [ "$CONTAINER_DASHBOARD_COUNT" != "$HOST_DASHBOARD_COUNT" ]; then
+    sudo docker compose up -d --force-recreate grafana
+  else
+    sudo docker compose up -d grafana
+  fi
+  wait_ready http://127.0.0.1:3000/api/health Grafana
+  CONTAINER_DASHBOARD_COUNT="$(sudo docker exec monitoring-grafana-1 sh -c 'find /var/lib/grafana/dashboards -maxdepth 1 -type f -name "*.json" | wc -l')"
+  [ "$CONTAINER_DASHBOARD_COUNT" = "$HOST_DASHBOARD_COUNT" ] || {
+    echo "Grafana 容器看板数 ${CONTAINER_DASHBOARD_COUNT} 与主机 ${HOST_DASHBOARD_COUNT} 不一致" >&2
+    exit 1
+  }
+  echo "  已挂载看板：${CONTAINER_DASHBOARD_COUNT} 个"
 fi
 
 if [ "$ALERT_PRESENT" = "1" ]; then

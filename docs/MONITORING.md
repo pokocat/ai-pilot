@@ -114,6 +114,7 @@ Prometheus `127.0.0.1:9090/targets` 全绿。
 
 四块看板当前共 **95 个面板**。JSON 由 `deploy/monitoring/grafana/dashboards/build.mjs` 生成——**改看板改脚本再 `node build.mjs`**,
 UI 上的改动只是临时的（provisioning 每 30s 会对回文件）。
+生产发布脚本会对比看板目录内容哈希，并校验 Grafana 容器实际挂载的 JSON 数量；内容变化或主机/容器文件数不一致时强制重建 Grafana，避免 bind mount 继续指向旧目录、界面长期显示数据库中的旧看板。
 
 ## 5. 告警（`deploy/monitoring/prometheus/alerts/`,默认阈值=压测方案 §7,运行值后台可调）
 
