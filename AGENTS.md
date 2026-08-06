@@ -527,7 +527,7 @@ npm run release:weapp -- --version <版本号> --desc "<本次变更说明>"
      --project /Users/donis/dev/ai-pilot/app \
      -v <版本号> -d "<本次变更说明>"
    ```
-   退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。**版本号每次递增，最近一次上传 `0.2.21`**（2026-07-25）；上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 仅作为 CLI 不可用时的最后回退：上传前必须人工打开 `dist/junshi-build-meta.json` 核对 `mode=server`、API 与版本，且预览中不得出现红色 MOCK 标识。
+   退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。**版本号每次递增，最近一次上传 `0.2.28`**（2026-08-05）；上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 仅作为 CLI 不可用时的最后回退：上传前必须人工打开 `dist/junshi-build-meta.json` 核对 `mode=server`、API 与版本，且预览中不得出现红色 MOCK 标识。
 2. **miniprogram-ci（CI/headless 备选）**：需在 mp 后台 *开发管理 → 开发设置 → 小程序代码上传* 下载上传密钥 `private.<appid>.key` 并把**本机公网 IP**加进白名单。该密钥本地通常没有，**除非用户给出密钥路径，否则一律用①**：
    ```bash
    cd app && WEAPP_UPLOAD_KEY=/绝对路径/private.<appid>.key \

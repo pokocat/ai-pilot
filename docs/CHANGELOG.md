@@ -6,6 +6,10 @@
 
 ## 变更日志
 
+### 2026-08-05 · 生产发布 `279fa6c` 并上传微信小程序 `0.2.28` 开发版 · 影响面：production + server/admin/H5 + 微信开发版
+
+生产已完成纯加法 GenerationJob 数据结构迁移、AI 模型凭证明文化、server/admin/H5 构建与切换，线上部署版本为 `279fa6c`；API 健康、数据库、运营后台与 H5 均返回 200，`junshi-api` active，AI 历史密文字段为 0，Prometheus 41 条规则已加载。小程序按生产 server 模式与 `https://wxapi.aibuzz.cn/api` 重建，类型检查和构建元数据校验通过后，以 `0.2.28` /「断连续生成、内嵌战报与命盘军令修复」上传成功，包体 1.3 MB（1407403 B）。本次只进入微信后台开发版，尚未提交审核或正式发布。
+
 ### 2026-08-05 · 修复军令页未定义日期变量导致的运行时白屏，并给小程序构建补类型闸门 · 影响面：app + build
 
 预发真机点击「军令」后路由已切换、相关 `/casefile`/`/me`/`/decisions` 请求也全部 200，但页面没有挂载任何节点。根因是战役卡引用了未定义的 `dateStr`；Taro/Babel 只做转译仍显示 `Compiled successfully`，真机首次渲染才抛 `ReferenceError`。现由 `todayDate` 明确派生月日文案，并新增 `npm run typecheck`：app 单测、weapp/H5 正式构建、生产与预发专用构建均先执行 `tsc --noEmit`，同类未定义变量不再进入预览或上传产物。
