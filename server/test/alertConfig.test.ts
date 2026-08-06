@@ -133,7 +133,7 @@ describe('格式化', () => {
           status: 'firing', startsAt: '2026-07-28T12:00:00.000Z',
           labels: { alertname: 'JunshiApiP95High', severity: 'critical', category: 'api', route: '/api/me' },
           annotations: {
-            title: 'API 延迟严重', summary: '普通接口持续变慢', current: '0.82 秒', threshold: '超过动态严重线 5 分钟',
+            title: 'API 延迟严重', summary: '普通接口持续变慢', current: '0.82 秒', threshold: '严重线 0.50 秒', excess: '高于告警线 64%',
             impact: '用户页面加载明显变慢', action: '停止放量并检查最慢路由', dashboard: 'junshi-api',
           },
         },
@@ -142,8 +142,13 @@ describe('格式化', () => {
     }, { nowMs: Date.parse('2026-07-28T12:05:00.000Z'), environment: '预发', grafanaBaseUrl: 'https://ops.example.com/grafana/' });
     const header = card.header as Record<string, unknown>;
     assert.equal(header.template, 'red');
-    assert.match(JSON.stringify(card), /严重告警 · API 服务/);
+    assert.match(JSON.stringify(card), /API 延迟严重等 2 条关联告警/);
+    assert.match(JSON.stringify(card), /P1 严重 · API 服务 · 2 个关联信号/);
     assert.match(JSON.stringify(card), /0.82 秒/);
+    assert.match(JSON.stringify(card), /严重线 0.50 秒/);
+    assert.match(JSON.stringify(card), /高于告警线 64%/);
+    assert.match(JSON.stringify(card), /超限状态/);
+    assert.match(JSON.stringify(card), /font color='red'/);
     assert.match(JSON.stringify(card), /用户页面加载明显变慢/);
     assert.match(JSON.stringify(card), /停止放量并检查最慢路由/);
     assert.match(JSON.stringify(card), /5 分 0 秒/);
@@ -162,7 +167,9 @@ describe('格式化', () => {
     }, { nowMs: Date.parse('2026-07-28T14:00:00.000Z') });
     const header = card.header as Record<string, unknown>;
     assert.equal(header.template, 'green');
-    assert.match(JSON.stringify(card), /告警恢复 · 主机资源/);
+    assert.match(JSON.stringify(card), /CPU 高负载 · 已恢复/);
+    assert.match(JSON.stringify(card), /P2 预警 · 主机资源 · 当前：已恢复/);
+    assert.match(JSON.stringify(card), /已回落至告警线内/);
     assert.match(JSON.stringify(card), /1 小时 30 分/);
   });
 

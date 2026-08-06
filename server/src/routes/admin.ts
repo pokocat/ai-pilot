@@ -2005,16 +2005,16 @@ export async function adminRoutes(app: FastifyInstance) {
     const now = new Date();
     const r = await sendFeishuCard(formatAlertCard({
       status: 'firing',
-      groupLabels: { category: 'monitoring', severity: 'info' },
+      groupLabels: { category: 'api', severity: 'critical' },
       commonLabels: { environment: process.env.MONITOR_ENV_LABEL || '当前环境' },
       alerts: [{
         status: 'firing', startsAt: now.toISOString(),
-        labels: { alertname: 'JunshiAlertChannelTest', severity: 'info', category: 'monitoring', instance: '运营后台' },
+        labels: { alertname: 'JunshiAlertChannelTest', severity: 'critical', category: 'api', instance: '运营后台模拟数据' },
         annotations: {
-          title: '告警通道测试',
-          summary: '飞书机器人配置、签名校验与 Card 2.0 渲染均已打通。',
-          current: '测试消息已送达', threshold: '人工触发',
-          impact: '无业务影响', action: '确认卡片排版与看板按钮符合预期即可。', dashboard: 'junshi-system',
+          title: '普通接口延迟严重（测试）',
+          summary: '普通接口响应时间持续超过严重线，部分用户操作可能超时。',
+          current: '接口 P95 0.82 秒', threshold: '严重线 0.50 秒', excess: '高于告警线 64%',
+          impact: '测试消息，无真实业务影响。', action: '确认标题、P 级别、指标高亮与处置区排版符合预期。', dashboard: 'junshi-api',
         },
       }],
     }, {

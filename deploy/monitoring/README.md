@@ -13,6 +13,7 @@ docker compose --profile logs up -d                      # 可选:Loki + Promtai
 
 看板 JSON 由 `grafana/dashboards/build.mjs` 生成,改看板改脚本后 `node build.mjs` 重新生成。
 
-告警按 `category + severity` 聚合后由 API 转成飞书 Card 2.0；卡片包含当前值、阈值、影响、动作、
+告警按 `category + severity` 聚合后由 API 转成飞书 Card 2.0；卡片标题直接写具体故障，副标题展示
+P 级别与当前信号，指标区分栏展示当前值、告警条件、超限幅度/状态，并补齐业务影响、处置建议、
 持续/恢复耗时与看板按钮。API 的 `server/.env` 可配 `MONITOR_ENV_LABEL`、`MONITOR_GRAFANA_URL`、
-`MONITOR_TIME_ZONE`；完整口径与 52 条规则清单见 `docs/MONITORING.md` §5。
+`MONITOR_TIME_ZONE`；完整口径与 51 条可处置规则清单见 `docs/MONITORING.md` §5。

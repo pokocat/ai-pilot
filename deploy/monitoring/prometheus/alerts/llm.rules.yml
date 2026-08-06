@@ -16,8 +16,8 @@ groups:
         for: 5m
         labels: { severity: warning, category: llm_gateway, signal: llm_429_rate }
         annotations:
-          summary: "上游 429 率超过预警线（车道维度见看板「LLM 网关」；阈值后台可调）"
-          current: "10 分钟 429 率 {{ $value | humanizePercentage }}"
+          summary: "模型服务限流率升高，部分请求正在被上游拒绝。"
+          current: "10 分钟限流率 {{ $value | humanizePercentage }}"
       - alert: JunshiLlm429RateCritical
         expr: >
           (
@@ -29,8 +29,8 @@ groups:
         for: 5m
         labels: { severity: critical, category: llm_gateway, signal: llm_429_rate }
         annotations:
-          summary: "上游 429 率超过严重线——按压测方案：收紧 LLM_MAX_CONCURRENCY、延长退避"
-          current: "10 分钟 429 率 {{ $value | humanizePercentage }}"
+          summary: "模型服务限流严重，生成等待和失败风险快速上升。"
+          current: "10 分钟限流率 {{ $value | humanizePercentage }}"
 
       - alert: JunshiLlmErrorRateHigh
         expr: >
@@ -43,7 +43,7 @@ groups:
         for: 5m
         labels: { severity: critical, category: llm_gateway }
         annotations:
-          summary: "模型调用错误率超过 10%，且 15 分钟样本不少于 10 次"
+          summary: "模型调用失败率超过 10%，对话或方案生成可能失败。"
           current: "15 分钟错误率 {{ $value | humanizePercentage }}"
 
       - alert: JunshiLlmCallP95Slow
@@ -54,7 +54,7 @@ groups:
         for: 10m
         labels: { severity: warning, category: llm_gateway }
         annotations:
-          summary: "模型调用 P95 耗时超过后台配置线，已持续 10 分钟"
+          summary: "模型调用耗时持续超过预警线，用户等待时间正在变长。"
           current: "30 分钟调用 P95 {{ $value | printf \"%.1f\" }} 秒"
 
       # 口径注：进程只报等待峰值（gauge），没有等待分位直方图；用峰值近似 §7 的「等待 P95」，
@@ -64,14 +64,14 @@ groups:
         for: 5m
         labels: { severity: warning, category: llm_gateway, signal: llm_queue_wait }
         annotations:
-          summary: "LLM 排队等待峰值超过预警线（当前 {{ $value | printf \"%.1f\" }}s）"
+          summary: "模型请求排队时间持续超过预警线。"
           current: "等待峰值 {{ $value | printf \"%.1f\" }} 秒"
       - alert: JunshiLlmQueueWaitCritical
         expr: max(junshi_llm_wait_max_seconds) >= scalar(junshi_alert_config{key="llm_wait_crit_s"})
         for: 5m
         labels: { severity: critical, category: llm_gateway, signal: llm_queue_wait }
         annotations:
-          summary: "LLM 排队等待峰值超过严重线——按压测方案：降级或暂停接单"
+          summary: "模型请求排队严重，部分请求已接近超时。"
           current: "等待峰值 {{ $value | printf \"%.1f\" }} 秒"
 
       - alert: JunshiLlmQueueRejected
@@ -80,16 +80,16 @@ groups:
             + sum by (lane) (increase(junshi_llm_timed_out_total[15m])) > 0
         labels: { severity: critical, category: llm_gateway }
         annotations:
-          summary: "LLM 队列出现满载拒绝或排队超时"
-          current: "车道 {{ $labels.lane }} · 15 分钟 {{ $value | printf \"%.0f\" }} 次"
+          summary: "模型请求因队列满载或等待超时被拒绝。"
+          current: "调用通道 {{ $labels.lane }} · 15 分钟 {{ $value | printf \"%.0f\" }} 次"
 
       - alert: JunshiLlmCoolingLong
         expr: junshi_llm_cooling == 1
         for: 5m
         labels: { severity: warning, category: llm_gateway }
         annotations:
-          summary: "车道 {{ $labels.lane }} 因连续 429 冷却超过 5 分钟——上游配额可能被调低"
-          current: "车道 {{ $labels.lane }} · cooling=1 已持续 5 分钟"
+          summary: "模型调用通道因连续限流暂停接单超过 5 分钟。"
+          current: "调用通道 {{ $labels.lane }} · 已暂停接单 5 分钟"
 
       # —— Token 日成本（§7：日预算 70% 预警 / 90% 收缩 / 100% 硬停止）——
       # 日预算=后台「告警 · Token 日预算」数值项（默认 200 元/天），70%/90% 由表达式派生。
@@ -97,35 +97,35 @@ groups:
         expr: sum(increase(junshi_llm_cost_cny_total[1d])) > 0.7 * scalar(junshi_alert_config{key="token_daily_budget_cny"})
         labels: { severity: warning, category: cost, signal: token_daily_cost }
         annotations:
-          summary: "今日 Token 成本已过日预算 70%（当前 {{ $value | printf \"%.0f\" }} 元）"
+          summary: "过去 24 小时模型成本已达到日预算的 70%，进入关注区。"
           current: "滚动 24 小时 {{ $value | printf \"%.2f\" }} 元"
       - alert: JunshiTokenCostBudget90
         expr: sum(increase(junshi_llm_cost_cny_total[1d])) > 0.9 * scalar(junshi_alert_config{key="token_daily_budget_cny"})
         labels: { severity: critical, category: cost, signal: token_daily_cost }
         annotations:
-          summary: "今日 Token 成本已过日预算 90%——按压测方案：关非核心自动任务；到 100% 硬停止"
+          summary: "过去 24 小时模型成本已达到日预算的 90%，接近成本红线。"
           current: "滚动 24 小时 {{ $value | printf \"%.2f\" }} 元"
 
       - alert: JunshiTokenCostBudget100
         expr: sum(increase(junshi_llm_cost_cny_total[1d])) >= scalar(junshi_alert_config{key="token_daily_budget_cny"})
         labels: { severity: critical, category: cost, signal: token_daily_cost }
         annotations:
-          summary: "Token 成本已达到日预算 100%，触发成本硬停止红线"
+          summary: "过去 24 小时模型成本已用尽日预算，必须执行成本控制。"
           current: "滚动 24 小时 {{ $value | printf \"%.2f\" }} 元"
 
       - alert: JunshiUsageUnreported
         expr: increase(junshi_usage_unreported_total[1h]) > 0
         labels: { severity: warning, category: cost }
         annotations:
-          summary: "真实 provider 未回传 token 用量（{{ $labels.provider }}/{{ $labels.model }}）——成本统计出现漏账口子"
-          current: "{{ $labels.provider }}/{{ $labels.model }} · 1 小时 {{ $value | printf \"%.0f\" }} 次"
+          summary: "模型服务未返回完整用量数据，成本报表可能低估实际消耗。"
+          current: "来源 {{ $labels.provider }} · 模型 {{ $labels.model }} · 1 小时缺失 {{ $value | printf \"%.0f\" }} 次"
 
       - alert: JunshiGenDegraded
         expr: increase(junshi_gen_degraded_total[15m]) > 0
         labels: { severity: warning, category: business }
         annotations:
-          summary: "产出降级发生（path={{ $labels.path }}）——用户正在拿到 mock 兜底内容，查 provider 可用性"
-          current: "path={{ $labels.path }} · 15 分钟 {{ $value | printf \"%.0f\" }} 次"
+          summary: "AI 产出已触发保底内容，用户获得的结果质量可能低于正常水平。"
+          current: "降级路径 {{ $labels.path }} · 15 分钟 {{ $value | printf \"%.0f\" }} 次"
 
   # ──────────────────────────────────────────────────────────────────────
   # 对话交互质量（2026-08-04 截断/超时复盘后补）
@@ -144,7 +144,7 @@ groups:
           > scalar(junshi_alert_config{key="chat_truncated_1h"})
         labels: { severity: warning, category: chat_experience }
         annotations:
-          summary: "1 小时内 {{ $value | printf \"%.0f\" }} 次「续写后仍未写完」交回用户——查输出预算(CHAT_MAX_TOKENS+思考预算)与提示词长度约束"
+          summary: "自动续写后仍有回答未完整生成，用户可能拿到不完整内容。"
           current: "1 小时 {{ $value | printf \"%.0f\" }} 次"
 
       # 续写被频繁触发：用户无感，但每次都在多烧一轮 token，且说明预算/长度约束不匹配当前用法。
@@ -154,7 +154,7 @@ groups:
           > scalar(junshi_alert_config{key="chat_continued_1h"})
         labels: { severity: info, category: chat_experience }
         annotations:
-          summary: "1 小时内 {{ $value | printf \"%.0f\" }} 次自动续写（用户无感但在多烧 token）——该调 CHAT_MAX_TOKENS 或 CHAT_TAIL_DIRECTIVE 的长度契约"
+          summary: "自动续写次数明显升高，响应时长和模型成本同步增加。"
           current: "1 小时 {{ $value | printf \"%.0f\" }} 次"
 
       # 空闲看门狗触发＝上游发完响应头就不发了。这不是「慢」，是「装死」，>0 就该看。
@@ -163,15 +163,15 @@ groups:
         expr: increase(junshi_chat_stream_stall_total[15m]) > 0
         labels: { severity: warning, category: chat_experience }
         annotations:
-          summary: "流式静默超时（{{ $labels.provider }} / {{ $labels.phase }}）——上游发头后停止推送，已 abort 释放并发槽"
-          current: "{{ $labels.provider }} / {{ $labels.phase }} · 15 分钟 {{ $value | printf \"%.0f\" }} 次"
+          summary: "模型输出中途停止，系统已终止异常连接并释放资源。"
+          current: "来源 {{ $labels.provider }} · 阶段 {{ $labels.phase }} · 15 分钟 {{ $value | printf \"%.0f\" }} 次"
 
       # 原生流建流失败回落非流式：非流式吃总时长超时，正是 2026-08-04 那 6 次精确 60.0s 超时的前置。
       - alert: JunshiChatStreamFallback
         expr: increase(junshi_chat_nonstream_total{reason="stream_failed"}[15m]) > 0
         labels: { severity: warning, category: chat_experience }
         annotations:
-          summary: "原生流建流失败、对话回落非流式——用户失去逐字手感且改吃总时长超时，查上游 SSE 支持与网关"
+          summary: "逐字输出不可用，部分对话已切换为完整生成后一次性返回。"
           current: "15 分钟 {{ $value | printf \"%.0f\" }} 次"
 
       # 首字延迟 P95：用户唯一直接体感到的等待。histogram_quantile 需要 _bucket 序列。
@@ -182,7 +182,7 @@ groups:
         for: 10m
         labels: { severity: warning, category: chat_experience }
         annotations:
-          summary: "流式对话首字延迟 P95 {{ $value | printf \"%.1f\" }}s 超线——上游排队或思考预算过大"
+          summary: "用户发送消息后，首段内容出现时间持续超过预警线。"
           current: "首字 P95 {{ $value | printf \"%.1f\" }} 秒"
 
       # 安全网健康度：只看 had_text=yes 的 stall；首事件卡死、只有 thinking/ping 的中途卡死
@@ -196,8 +196,8 @@ groups:
         for: 5m
         labels: { severity: critical, category: chat_experience }
         annotations:
-          summary: "发生了流卡死但一次「残文保全」都没记到——已下发正文可能又在被丢弃，查 provider 的 sink 链路"
-          current: "{{ $labels.provider }} 已出现正文 stall，但保全计数为 0"
+          summary: "模型输出中断后，已经展示的回答可能未被正确保留。"
+          current: "来源 {{ $labels.provider }} · 已出现正文中断 · 保全记录 0 次"
 
       # 持久生成任务的结果面：有一定样本后失败率 >10% 才报，
       # 避免低流量时单个用户取消/网络波动放大成 100% 假警。
@@ -212,19 +212,12 @@ groups:
         for: 5m
         labels: { severity: warning, category: chat_experience }
         annotations:
-          summary: "持久对话生成失败率超过 10%——查 GenerationJob 终态、provider 错误与结算记录"
+          summary: "15 分钟内对话生成失败率超过 10%，用户可能需要重试。"
           current: "15 分钟失败率 {{ $value | humanizePercentage }}"
 
       - alert: JunshiChatGenerationRecovered
         expr: increase(junshi_chat_generation_recovered_total[15m]) > 0
         labels: { severity: warning, category: chat_experience }
         annotations:
-          summary: "GenerationJob 发生租约过期接管——检查 API 进程重启/卡死，旧 attempt 已按估算消耗封账"
-          current: "15 分钟 {{ $value | printf \"%.0f\" }} 次接管"
-
-      - alert: JunshiChatUsageEstimated
-        expr: sum(increase(junshi_chat_usage_estimated_total[15m])) > 0
-        labels: { severity: info, category: chat_experience }
-        annotations:
-          summary: "对话生成出现估算用量结算——provider 未回传 usage 或任务经过故障恢复"
-          current: "15 分钟 {{ $value | printf \"%.0f\" }} 次估算结算"
+          summary: "对话生成任务发生自动接管，通常表示服务重启或任务长时间未完成。"
+          current: "15 分钟自动接管 {{ $value | printf \"%.0f\" }} 次"

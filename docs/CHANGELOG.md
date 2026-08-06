@@ -8,9 +8,11 @@
 
 ### 2026-08-06 · 监控告警整体梳理并升级高信息量飞书 Card 2.0 · 影响面：server + Prometheus/Alertmanager + 运维配置/文档
 
-飞书通知由一行 text 升级为 Card 2.0：Alertmanager 改按 `category + severity` 聚合同领域关联信号，卡片用严重/预警/提示/恢复四色标题，固定展示环境与时间、状态/信号数/持续或恢复耗时、逐信号当前值/阈值、影响、建议动作、对象标签和 Grafana 看板按钮；告警风暴最多展开 8 条并明示剩余数量，外部标签与注解进入 Markdown 前统一转义。新增 `services/alertCard.ts` 告警知识字典，所有 alertname 都有中文标题、阈值解释、影响和动作；规则侧强制 `category/current/summary`，对账测试会阻止“只有 PromQL、没有可读卡片”的新规则进入。生产发布后用后台“发测试消息”向当前飞书机器人发送完整卡片作为验收，不以代码已合并代替线上渲染确认。
+告警口径按可处置性再次收紧：`JunshiChatUsageEstimated` 只是正常兜底统计，没有独立人工动作，已撤出 Alertmanager 并继续保留为 Grafana 指标；真正需要通知的“模型用量数据缺失”与“对话生成任务异常接管”拆开说明成本报表影响和用户体验影响。用户可见摘要统一改为自然中文，不再直接暴露 `provider / usage / fallback / sweep / GenerationJob` 等实现词，并增加回归测试防止重新引入。
 
-规则从 41 条补到 52 条：新增 API 429 激增、LLM 调用错误率/P95/队列拒绝、Token 日预算 100% 红线、支付 sweep 停跑、创作失败率/AI 排版模板回退、主机文件句柄、PG 死锁与监控 target 离线；动态阈值从 18 项扩为 20 项（API 429 频次、模型调用 P95）。成对预警/严重规则新增 `signal`，critical 只压住同信号 warning，避免不同告警因缺标签被误抑制；info 重复提醒降为 12 小时。四块 Grafana 看板从 81 个补到 95 个面板，新增 target/飞书转发自检、LLM 错误率/P95、支付 sweep 心跳和创作失败/回退定位。后台“发测试消息”同步改为完整卡片验收，`server/.env.example` 新增环境名、Grafana 地址和卡片时区。server 1,284 个测试与 TypeScript 构建、Prometheus 2.53 `promtool` 52 条规则及 Alertmanager 0.27 `amtool` 配置校验均通过。
+飞书通知由一行 text 升级为 Card 2.0：Alertmanager 改按 `category + severity` 聚合同领域关联信号；卡片标题直接写具体故障，副标题固定 `P1/P2/P3 + 业务领域 + 当前信号`，结论区展示环境与时间。全局态势保留状态/信号数/持续或恢复耗时，每个信号新增“当前指标 / 告警条件 / 超限状态”三栏指标区，超限幅度或状态按级别高亮，恢复时明确显示已回落至告警线内；下方再展示现象、业务影响、处置建议、影响对象和 Grafana 看板按钮。告警风暴最多展开 8 条并明示剩余数量，外部标签与注解进入 Markdown 前统一转义。新增 `services/alertCard.ts` 告警知识字典，所有 alertname 都有中文标题、阈值解释、影响和动作；规则侧强制 `category/current/summary`，对账测试会阻止“只有 PromQL、没有可读卡片”的新规则进入。生产发布后用后台“发测试消息”向当前飞书机器人发送完整卡片作为验收，不以代码已合并代替线上渲染确认。
+
+规则从 41 条补到 51 条可处置告警：新增 API 限流激增、模型调用错误率/P95/队列拒绝、模型日预算 100% 红线、支付自动对账停跑、创作失败率/AI 排版模板回退、主机文件句柄、数据库死锁与监控采集目标离线；动态阈值从 18 项扩为 20 项（API 限流频次、模型调用 P95）。成对预警/严重规则新增 `signal`，critical 只压住同信号 warning，避免不同告警因缺标签被误抑制；info 重复提醒降为 12 小时。四块 Grafana 看板从 81 个补到 95 个面板，新增采集目标/飞书转发自检、模型错误率/P95、支付自动对账心跳和创作失败/回退定位。后台“发测试消息”同步改为完整卡片验收，`server/.env.example` 新增环境名、Grafana 地址和卡片时区。
 
 生产首次实发捕获到飞书 webhook `10002 invalid background_style`：Card 2.0 文档声明可用的 `rgba(...)` 在机器人入口被拒绝。三格态势分栏已去掉该非必需背景字段，保留分栏、留白和全部信息层级；回归测试禁止卡片重新带入 `background_style/rgba()`。生产最终部署为 `0853c37`，`junshi-api` 健康、Alertmanager 配置通过、Prometheus 实际加载 52 条规则；后台实发测试卡获得飞书成功回执 `sent:true`。
 

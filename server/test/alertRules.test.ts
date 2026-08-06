@@ -95,6 +95,19 @@ describe('告警规则 × 应用指标对账', () => {
     assert.deepEqual(bad, [], `以下告警不能生成完整飞书卡片：\n${bad.join('\n')}`);
   });
 
+  test('规则摘要不直接暴露实现术语，估算结算只做指标不发告警', () => {
+    const rules = allRules();
+    assert.equal(rules.some((r) => r.name === 'JunshiChatUsageEstimated'), false, '估算结算没有人工处置动作，不应作为告警');
+    const forbidden = /\b(provider|usage|GenerationJob|attempt|fallback|sweep|MAX_IN_FLIGHT|probe_success|pg_up)\b|cooling=|\b(path|ref|job|instance)=|\bup=0\b/i;
+    const bad = rules
+      .filter((r) => {
+        const renderedCopy = `${r.annotations.summary ?? ''}\n${r.annotations.current ?? ''}`.replace(/\{\{[^}]+\}\}/g, '动态值');
+        return forbidden.test(renderedCopy);
+      })
+      .map((r) => `${r.file}/${r.name}`);
+    assert.deepEqual(bad, [], `以下用户可见告警仍含实现术语：\n${bad.join('\n')}`);
+  });
+
   test('Alertmanager 按领域+等级组卡，成对阈值只按非空 signal 抑制', () => {
     const config = yaml.load(readFileSync(ALERTMANAGER_CONFIG, 'utf8')) as {
       route?: { group_by?: string[] };

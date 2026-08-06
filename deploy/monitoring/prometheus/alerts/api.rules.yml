@@ -8,24 +8,24 @@ groups:
         for: 1m
         labels: { severity: critical, category: availability }
         annotations:
-          summary: "API /metrics 抓取失败——进程挂了或 METRICS_TOKEN 不匹配（curl -H 'Authorization: Bearer …' 127.0.0.1:4000/api/metrics 自查）"
-          current: "{{ $labels.instance }} 已连续 1 分钟无法抓取"
+          summary: "API 监控数据连续 1 分钟无法采集，服务可能已经离线。"
+          current: "目标 {{ $labels.instance }} · 已中断 1 分钟"
 
       - alert: JunshiProbeFailed
         expr: probe_success == 0
         for: 2m
         labels: { severity: critical, category: availability }
         annotations:
-          summary: "探活失败：{{ $labels.instance }}（本机探针挂=服务问题；公网探针挂=Nginx/TLS/DNS 问题）"
-          current: "{{ $labels.instance }} · probe_success=0"
+          summary: "服务端到端探活失败；本机失败通常是服务问题，仅公网失败通常是网关、域名或证书问题。"
+          current: "目标 {{ $labels.instance }} · 探活失败"
 
       - alert: JunshiTlsCertExpiringSoon
         expr: probe_ssl_earliest_cert_expiry - time() < 14 * 24 * 3600
         for: 1h
         labels: { severity: warning, category: availability }
         annotations:
-          summary: "TLS 证书 14 天内到期：{{ $labels.instance }}（certbot renew 是否还在跑？）"
-          current: "{{ $labels.instance }} · 剩余 {{ $value | humanizeDuration }}"
+          summary: "HTTPS 证书将在 14 天内到期，届时小程序和后台将无法正常访问。"
+          current: "目标 {{ $labels.instance }} · 剩余 {{ $value | humanizeDuration }}"
 
       - alert: JunshiApiP95High
         expr: >
@@ -35,7 +35,7 @@ groups:
         for: 5m
         labels: { severity: warning, category: api, signal: api_latency }
         annotations:
-          summary: "普通接口 P95 超过预警线已持续 5 分钟（当前 {{ $value | printf \"%.2f\" }}s；阈值后台可调）"
+          summary: "普通接口 P95 响应时间持续超过预警线，用户等待时间正在变长。"
           current: "P95 {{ $value | printf \"%.2f\" }} 秒"
       - alert: JunshiApiP95Critical
         expr: >
@@ -45,7 +45,7 @@ groups:
         for: 5m
         labels: { severity: critical, category: api, signal: api_latency }
         annotations:
-          summary: "普通接口 P95 超过严重线——按压测方案：停止放量，先查瓶颈"
+          summary: "普通接口 P95 响应时间持续超过严重线，部分用户操作可能超时。"
           current: "P95 {{ $value | printf \"%.2f\" }} 秒"
 
       - alert: JunshiApi5xxRateHigh
@@ -56,21 +56,21 @@ groups:
         for: 5m
         labels: { severity: critical, category: api }
         annotations:
-          summary: "5xx 错误率超过严重线（看板「API 服务」的路由级面板定位是哪条路由在冒；阈值后台可调）"
-          current: "5 分钟 5xx 率 {{ $value | humanizePercentage }}"
+          summary: "服务端错误率超过严重线，部分用户请求已经失败。"
+          current: "5 分钟服务端错误率 {{ $value | humanizePercentage }}"
 
       - alert: JunshiApiRateLimitedSpike
         expr: increase(junshi_http_rate_limited_total[5m]) > scalar(junshi_alert_config{key="http_429_5m"})
         labels: { severity: warning, category: api }
         annotations:
-          summary: "API 429 限流响应在 5 分钟内超过后台配置线"
-          current: "5 分钟 {{ $value | printf \"%.0f\" }} 次 429"
+          summary: "API 限流次数超过配置线，正常用户可能开始受到影响。"
+          current: "5 分钟限流 {{ $value | printf \"%.0f\" }} 次"
 
       - alert: JunshiOverloadRejecting
         expr: increase(junshi_http_overload_rejected_total[5m]) > 0
         labels: { severity: warning, category: api }
         annotations:
-          summary: "过载闸开始主动 503（在途 ≥MAX_IN_FLIGHT）——流量超容量了"
+          summary: "服务容量已触顶，系统开始主动拒绝部分请求以保护核心链路。"
           current: "5 分钟主动拒绝 {{ $value | printf \"%.0f\" }} 次"
 
       - alert: JunshiEventLoopSlow
@@ -78,13 +78,13 @@ groups:
         for: 10m
         labels: { severity: warning, category: api }
         annotations:
-          summary: "事件循环 P95 延迟 >200ms（注意：该分位自进程启动累计，重启后才复位；持续升高=单进程 CPU 被绑住）"
-          current: "事件循环 P95 {{ $value | printf \"%.3f\" }} 秒"
+          summary: "API 主线程响应持续变慢，可能影响全部接口。"
+          current: "主线程 P95 延迟 {{ $value | printf \"%.3f\" }} 秒"
 
       - alert: JunshiRssGrowing
         expr: junshi_process_resident_memory_bytes > scalar(junshi_alert_config{key="rss_warn_mb"}) * 1024 * 1024
         for: 30m
         labels: { severity: warning, category: api }
         annotations:
-          summary: "API 进程 RSS 超过预警线且持续 30 分钟——对照发布时间排查泄漏（阈值后台可调）"
-          current: "RSS {{ $value | printf \"%.0f\" }} 字节"
+          summary: "API 进程内存持续超过预警线，继续增长可能导致服务重启。"
+          current: "进程常驻内存 {{ $value | printf \"%.0f\" }} 字节"
