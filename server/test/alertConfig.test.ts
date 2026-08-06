@@ -34,11 +34,14 @@ afterEach(async () => {
 });
 
 describe('阈值', () => {
-  test('无覆盖时全部返回默认值（=压测方案 §7 口径）', async () => {
+  test('无覆盖时返回默认基线（API 用生产 SLO，容量/成本沿用压测口径）', async () => {
     const values = new Map((await alertConfigValues()).map((v) => [v.key, v.value]));
     for (const d of ALERT_CONFIG_DEFS) assert.equal(values.get(d.key), d.def, d.key);
     assert.equal(values.get('token_daily_budget_cny'), 200);
     assert.equal(values.get('host_cpu_warn_pct'), 65);
+    assert.equal(values.get('api_p95_warn_ms'), 800);
+    assert.equal(values.get('api_p95_crit_ms'), 2000);
+    assert.equal(values.get('api_min_requests_15m'), 20);
   });
 
   test('DB 覆盖生效；越界/脏值回落默认', async () => {
@@ -57,6 +60,8 @@ describe('阈值', () => {
       assert.equal(d.id, `monitor.${d.key}`);
       assert.ok(d.min <= d.def && d.def <= d.max, `${d.key} 默认值必须在 min-max 内`);
     }
+    const byKey = new Map(ALERT_CONFIG_DEFS.map((d) => [d.key, d.def]));
+    assert.ok(byKey.get('api_p95_warn_ms')! < byKey.get('api_p95_crit_ms')!, 'API 预警线必须低于严重线');
   });
 });
 

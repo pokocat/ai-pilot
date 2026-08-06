@@ -183,25 +183,27 @@ const sysDash = dashboard({
 
 /* ════════ 2. API 服务 ════════ */
 
-// 「普通接口」= 剔除 LLM 长路径与探活,与压测 §7 / app.ts 过载闸同口径
-const NORMAL = 'route!~".*(generate|stream).*", route!~"/api/health.*"';
-const apiP95 = (q) => `histogram_quantile(${q}, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{${NORMAL}}[5m])))`;
+// 「用户交互接口」只看会直接影响页面操作的请求。生成/流式、上传、监控 webhook、支付回调、
+// metrics/health 都有不同 SLO；尤其不能让告警 webhook 自身污染 P95 并形成自激告警。
+const USER_API = 'route!~".*(generate|stream|upload|webhook|callback|metrics|health).*"';
+const apiP95 = (q) => `histogram_quantile(${q}, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{${USER_API}}[15m])))`;
+const userApi5xx = `sum(increase(junshi_http_route_responses_total{class="5xx", ${USER_API}}[15m])) / clamp_min(sum(increase(junshi_http_route_responses_total{${USER_API}}[15m])), 1)`;
 
 const apiDash = dashboard({
   uid: 'junshi-api', title: '军师 · API 服务',
   panels: [
     stat({ title: '服务状态', targets: [promTarget('up{job="junshi-api"}')], steps: [[null, 'red'], [1, 'green']], mappings: [{ type: 'value', options: { 0: { text: 'DOWN' }, 1: { text: 'UP' } } }] }),
     stat({ title: 'RPS(5m)', decimals: 1, targets: [promTarget('sum(rate(junshi_http_responses_total[5m]))')] }),
-    stat({ title: '普通接口 P95', unit: 's', decimals: 3, targets: [promTarget(apiP95(0.95))], steps: [[null, 'green'], [0.2, 'yellow'], [0.5, 'red']], desc: '告警线：>200ms 预警 / >500ms 停止放量（压测方案 §7）' }),
-    stat({ title: '5xx 率(5m)', unit: 'percentunit', decimals: 3, targets: [promTarget('sum(rate(junshi_http_responses_total{class="5xx"}[5m])) / clamp_min(sum(rate(junshi_http_responses_total[5m])), 1e-9)')], steps: [[null, 'green'], [0.005, 'yellow'], [0.01, 'red']] }),
+    stat({ title: '用户接口 P95（15m）', unit: 's', decimals: 3, targets: [promTarget(apiP95(0.95))], steps: [[null, 'green'], [0.8, 'yellow'], [2, 'red']], desc: '生产 SLO：>0.8s 预警 / >2s 严重；15 分钟样本不足 20 次不发告警' }),
+    stat({ title: '用户接口 5xx 率（15m）', unit: 'percentunit', decimals: 3, targets: [promTarget(userApi5xx)], steps: [[null, 'green'], [0.005, 'yellow'], [0.01, 'red']], desc: '只看用户交互接口；样本不足 20 次不发告警' }),
     stat({ title: '在途请求', targets: [promTarget('junshi_http_in_flight')], steps: [[null, 'green'], [100, 'yellow'], [180, 'red']] }),
     stat({ title: '进程内存 RSS', unit: 'bytes', targets: [promTarget('junshi_process_resident_memory_bytes')], steps: [[null, 'green'], [1e9, 'yellow'], [1.5e9, 'red']] }),
     timeseries({ title: '请求速率按状态类', unit: 'reqps', stack: true, targets: [promTarget('sum by (class) (rate(junshi_http_responses_total[5m]))', '{{class}}')] }),
-    timeseries({ title: '普通接口时延分位', unit: 's', targets: [
+    timeseries({ title: '用户接口时延分位（15m）', unit: 's', targets: [
       promTarget(apiP95(0.5), 'P50'), promTarget(apiP95(0.95), 'P95'), promTarget(apiP95(0.99), 'P99'),
     ] }),
     timeseries({ title: '最慢路由 Top（P95）', unit: 's', targets: [
-      promTarget(`topk(8, histogram_quantile(0.95, sum by (le, route) (rate(junshi_http_request_duration_seconds_bucket{${NORMAL}}[10m]))))`, '{{route}}'),
+      promTarget(`topk(8, histogram_quantile(0.95, sum by (le, route) (rate(junshi_http_request_duration_seconds_bucket{${USER_API}}[15m]))))`, '{{route}}'),
     ] }),
     timeseries({ title: '路由级 5xx（哪条在冒错）', unit: 'reqps', targets: [
       promTarget('sum by (route) (rate(junshi_http_route_responses_total{class="5xx"}[5m])) > 0', '{{route}}'),

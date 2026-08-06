@@ -143,8 +143,8 @@
     {
       "id": 31,
       "type": "stat",
-      "title": "普通接口 P95",
-      "description": "告警线：>200ms 预警 / >500ms 停止放量（压测方案 §7）",
+      "title": "用户接口 P95（15m）",
+      "description": "生产 SLO：>0.8s 预警 / >2s 严重；15 分钟样本不足 20 次不发告警",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -152,7 +152,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream).*\", route!~\"/api/health.*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream|upload|webhook|callback|metrics|health).*\"}[15m])))",
           "legendFormat": "__auto",
           "range": true,
           "datasource": {
@@ -179,11 +179,11 @@
                 "color": "green"
               },
               {
-                "value": 0.2,
+                "value": 0.8,
                 "color": "yellow"
               },
               {
-                "value": 0.5,
+                "value": 2,
                 "color": "red"
               }
             ]
@@ -207,7 +207,8 @@
     {
       "id": 32,
       "type": "stat",
-      "title": "5xx 率(5m)",
+      "title": "用户接口 5xx 率（15m）",
+      "description": "只看用户交互接口；样本不足 20 次不发告警",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -215,7 +216,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(junshi_http_responses_total{class=\"5xx\"}[5m])) / clamp_min(sum(rate(junshi_http_responses_total[5m])), 1e-9)",
+          "expr": "sum(increase(junshi_http_route_responses_total{class=\"5xx\", route!~\".*(generate|stream|upload|webhook|callback|metrics|health).*\"}[15m])) / clamp_min(sum(increase(junshi_http_route_responses_total{route!~\".*(generate|stream|upload|webhook|callback|metrics|health).*\"}[15m])), 1)",
           "legendFormat": "__auto",
           "range": true,
           "datasource": {
@@ -446,7 +447,7 @@
     {
       "id": 36,
       "type": "timeseries",
-      "title": "普通接口时延分位",
+      "title": "用户接口时延分位（15m）",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -454,7 +455,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream).*\", route!~\"/api/health.*\"}[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream|upload|webhook|callback|metrics|health).*\"}[15m])))",
           "legendFormat": "P50",
           "range": true,
           "datasource": {
@@ -464,7 +465,7 @@
         },
         {
           "refId": "B",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream).*\", route!~\"/api/health.*\"}[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream|upload|webhook|callback|metrics|health).*\"}[15m])))",
           "legendFormat": "P95",
           "range": true,
           "datasource": {
@@ -474,7 +475,7 @@
         },
         {
           "refId": "C",
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream).*\", route!~\"/api/health.*\"}[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream|upload|webhook|callback|metrics|health).*\"}[15m])))",
           "legendFormat": "P99",
           "range": true,
           "datasource": {
@@ -523,7 +524,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(8, histogram_quantile(0.95, sum by (le, route) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream).*\", route!~\"/api/health.*\"}[10m]))))",
+          "expr": "topk(8, histogram_quantile(0.95, sum by (le, route) (rate(junshi_http_request_duration_seconds_bucket{route!~\".*(generate|stream|upload|webhook|callback|metrics|health).*\"}[15m]))))",
           "legendFormat": "{{route}}",
           "range": true,
           "datasource": {

@@ -1,5 +1,6 @@
-# API 服务告警。P95/错误率阈值 = 压测方案 §7「普通接口」告警线；
-# 「普通接口」= 剔除 LLM 长路径（generate/stream）与探活，与 app.ts 过载闸口径一致。
+# API 服务告警。线上告警只统计用户交互接口，并要求最小样本量；压测容量线继续留在压测方案，
+# 不直接拿来触发生产故障通知。剔除生成/流式、上传、监控、回调、探活等天然长耗时或控制面路径，
+# 尤其不能把 /api/alerts/webhook 自身算进 API P95，否则会形成“通知慢 → 再通知”的自激循环。
 groups:
   - name: junshi-api
     rules:
@@ -29,35 +30,53 @@ groups:
 
       - alert: JunshiApiP95High
         expr: >
-          histogram_quantile(0.95, sum by (le) (
-            rate(junshi_http_request_duration_seconds_bucket{route!~".*(generate|stream).*", route!~"/api/health.*"}[5m])
-          )) > scalar(junshi_alert_config{key="api_p95_warn_ms"}) / 1000
-        for: 5m
+          (
+            histogram_quantile(0.95, sum by (le) (
+              rate(junshi_http_request_duration_seconds_bucket{route!~".*(generate|stream|upload|webhook|callback|metrics|health).*"}[15m])
+            )) > scalar(junshi_alert_config{key="api_p95_warn_ms"}) / 1000
+          )
+          and on()
+          sum(increase(junshi_http_request_duration_seconds_count{route!~".*(generate|stream|upload|webhook|callback|metrics|health).*"}[15m]))
+            >= scalar(junshi_alert_config{key="api_min_requests_15m"})
+        for: 10m
         labels: { severity: warning, category: api, signal: api_latency }
         annotations:
-          summary: "普通接口 P95 响应时间持续超过预警线，用户等待时间正在变长。"
-          current: "P95 {{ $value | printf \"%.2f\" }} 秒"
+          summary: "用户交互接口整体变慢，且已排除监控回调、文件上传等天然长耗时请求。"
+          current: '15 分钟用户接口 P95 {{ $value | printf "%.2f" }} 秒'
+          threshold: 'P95 > {{ with query "junshi_alert_config{key=\"api_p95_warn_ms\"}" }}{{ . | first | value | humanize }}{{ end }} 毫秒 · 样本达到后台配置线 · 持续 10 分钟'
       - alert: JunshiApiP95Critical
         expr: >
-          histogram_quantile(0.95, sum by (le) (
-            rate(junshi_http_request_duration_seconds_bucket{route!~".*(generate|stream).*", route!~"/api/health.*"}[5m])
-          )) > scalar(junshi_alert_config{key="api_p95_crit_ms"}) / 1000
+          (
+            histogram_quantile(0.95, sum by (le) (
+              rate(junshi_http_request_duration_seconds_bucket{route!~".*(generate|stream|upload|webhook|callback|metrics|health).*"}[15m])
+            )) > scalar(junshi_alert_config{key="api_p95_crit_ms"}) / 1000
+          )
+          and on()
+          sum(increase(junshi_http_request_duration_seconds_count{route!~".*(generate|stream|upload|webhook|callback|metrics|health).*"}[15m]))
+            >= scalar(junshi_alert_config{key="api_min_requests_15m"})
         for: 5m
         labels: { severity: critical, category: api, signal: api_latency }
         annotations:
-          summary: "普通接口 P95 响应时间持续超过严重线，部分用户操作可能超时。"
-          current: "P95 {{ $value | printf \"%.2f\" }} 秒"
+          summary: "用户交互接口延迟严重，部分用户操作可能已经出现明显卡顿或超时。"
+          current: '15 分钟用户接口 P95 {{ $value | printf "%.2f" }} 秒'
+          threshold: 'P95 > {{ with query "junshi_alert_config{key=\"api_p95_crit_ms\"}" }}{{ . | first | value | humanize }}{{ end }} 毫秒 · 样本达到后台配置线 · 持续 5 分钟'
 
       - alert: JunshiApi5xxRateHigh
         expr: >
-          sum(rate(junshi_http_responses_total{class="5xx"}[5m]))
-            / sum(rate(junshi_http_responses_total[5m]))
-          > scalar(junshi_alert_config{key="api_5xx_crit_permille"}) / 1000
+          (
+            sum(increase(junshi_http_route_responses_total{class="5xx", route!~".*(generate|stream|upload|webhook|callback|metrics|health).*"}[15m]))
+              / clamp_min(sum(increase(junshi_http_route_responses_total{route!~".*(generate|stream|upload|webhook|callback|metrics|health).*"}[15m])), 1)
+            > scalar(junshi_alert_config{key="api_5xx_crit_permille"}) / 1000
+          )
+          and on()
+          sum(increase(junshi_http_route_responses_total{route!~".*(generate|stream|upload|webhook|callback|metrics|health).*"}[15m]))
+            >= scalar(junshi_alert_config{key="api_min_requests_15m"})
         for: 5m
         labels: { severity: critical, category: api }
         annotations:
-          summary: "服务端错误率超过严重线，部分用户请求已经失败。"
-          current: "5 分钟服务端错误率 {{ $value | humanizePercentage }}"
+          summary: "用户交互接口错误率持续超过严重线，部分用户请求已经失败。"
+          current: '15 分钟用户接口错误率 {{ $value | humanizePercentage }}'
+          threshold: '错误率 > {{ with query "junshi_alert_config{key=\"api_5xx_crit_permille\"}" }}{{ . | first | value | humanize }}{{ end }}‰ · 样本达到后台配置线 · 持续 5 分钟'
 
       - alert: JunshiApiRateLimitedSpike
         expr: increase(junshi_http_rate_limited_total[5m]) > scalar(junshi_alert_config{key="http_429_5m"})

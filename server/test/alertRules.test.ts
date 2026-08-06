@@ -193,6 +193,21 @@ describe('告警规则 × 应用指标对账', () => {
     }
   });
 
+  test('API P95/错误率只看用户交互接口，并以 15 分钟最小样本量防低流量误报', () => {
+    const names = ['JunshiApiP95High', 'JunshiApiP95Critical', 'JunshiApi5xxRateHigh'];
+    const rules = allRules().filter((r) => names.includes(r.name));
+    assert.equal(rules.length, names.length);
+    for (const r of rules) {
+      assert.match(r.expr, /api_min_requests_15m/);
+      assert.match(r.expr, /\[15m\]/);
+      assert.match(r.expr, /route!~"\.\*\(generate\|stream\|upload\|webhook\|callback\|metrics\|health\)\.\*"/);
+      assert.match(r.expr, /and\s+on\(\)/);
+    }
+    const errors = rules.find((r) => r.name === 'JunshiApi5xxRateHigh')!;
+    assert.match(errors.expr, /junshi_http_route_responses_total/);
+    assert.doesNotMatch(errors.expr, /junshi_http_responses_total/);
+  });
+
   test('残文保全告警只看已有可见正文的 stall，并按 provider 对齐', () => {
     const rule = allRules().find((r) => r.name === 'JunshiChatPartialKeptBroken');
     assert.ok(rule);

@@ -38,13 +38,15 @@ export interface AlertConfigDef {
 const D = (key: string, label: string, desc: string, def: number, min: number, max: number, unit: string): AlertConfigDef =>
   ({ id: `monitor.${key}`, key, label, desc, def, min, max, unit });
 
-// 容量/成本默认值 = 压测方案 §7；对话体验默认值来自线上事故复盘（下方会单独标注）。
+// 成本/容量护栏参考压测方案 §7；面向用户的 API 时延告警使用生产 SLO，不能把压测容量线
+// 直接当线上故障线。对话体验默认值来自线上事故复盘（下方会单独标注）。
 // 后台改的是「运行值」；默认值是口径基线，改基线仍走对应文档+代码。
 export const ALERT_CONFIG_DEFS: AlertConfigDef[] = [
   D('token_daily_budget_cny', 'Token 日预算', '达 70% 预警 / 90% 严重（成本告警基准）', 200, 10, 1_000_000, '元/天'),
-  D('api_p95_warn_ms', '接口 P95 预警线', '普通接口（剔除生成/流式）P95 超过即预警', 200, 10, 60_000, 'ms'),
-  D('api_p95_crit_ms', '接口 P95 严重线', '超过即「停止放量」级告警', 500, 10, 60_000, 'ms'),
-  D('api_5xx_crit_permille', '5xx 错误率严重线', '千分比：10 = 1%', 10, 1, 1000, '‰'),
+  D('api_p95_warn_ms', '用户接口 P95 预警线', '用户交互接口 15 分钟 P95 超过即预警；默认 800ms', 800, 100, 60_000, 'ms'),
+  D('api_p95_crit_ms', '用户接口 P95 严重线', '用户交互接口 15 分钟 P95 超过即严重；默认 2000ms', 2000, 100, 60_000, 'ms'),
+  D('api_min_requests_15m', '接口告警最小样本量', '15 分钟请求量低于该值时不评估 P95/错误率，防低流量单样本放大', 20, 5, 1_000_000, '次/15分钟'),
+  D('api_5xx_crit_permille', '5xx 错误率严重线', '用户交互接口 15 分钟错误率；千分比：10 = 1%', 10, 1, 1000, '‰'),
   D('http_429_5m', 'API 限流频次线', '5 分钟内 429 响应数超过即预警', 50, 1, 1_000_000, '次/5分钟'),
   D('llm_429_warn_permille', 'LLM 429 率预警线', '千分比：5 = 0.5%（上游限流开始冒头）', 5, 1, 1000, '‰'),
   D('llm_429_crit_permille', 'LLM 429 率严重线', '千分比：20 = 2%（该收紧并发/延长退避）', 20, 1, 1000, '‰'),
