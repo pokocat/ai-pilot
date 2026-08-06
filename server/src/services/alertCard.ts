@@ -203,7 +203,9 @@ function validHttpUrl(value: string | undefined): string | null {
 
 function metricColumn(label: string, value: string, note: string): CardElement {
   return {
-    tag: 'column', width: 'weighted', weight: 1, padding: '8px', background_style: 'rgba(100,106,115,0.08)',
+    // 飞书 Card 2.0 的 column.background_style 虽在文档中声明支持 RGBA，机器人
+    // webhook 实际会以 10002 拒绝 rgba(...)；保留分栏与内边距，交由默认主题着色。
+    tag: 'column', width: 'weighted', weight: 1, padding: '8px',
     elements: [
       { tag: 'markdown', content: `**${md(label, 24)}**`, text_size: 'caption' },
       { tag: 'markdown', content: `## ${md(value, 40)}`, text_size: 'title' },

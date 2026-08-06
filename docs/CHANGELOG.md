@@ -12,6 +12,8 @@
 
 规则从 41 条补到 52 条：新增 API 429 激增、LLM 调用错误率/P95/队列拒绝、Token 日预算 100% 红线、支付 sweep 停跑、创作失败率/AI 排版模板回退、主机文件句柄、PG 死锁与监控 target 离线；动态阈值从 18 项扩为 20 项（API 429 频次、模型调用 P95）。成对预警/严重规则新增 `signal`，critical 只压住同信号 warning，避免不同告警因缺标签被误抑制；info 重复提醒降为 12 小时。四块 Grafana 看板从 81 个补到 95 个面板，新增 target/飞书转发自检、LLM 错误率/P95、支付 sweep 心跳和创作失败/回退定位。后台“发测试消息”同步改为完整卡片验收，`server/.env.example` 新增环境名、Grafana 地址和卡片时区。server 1,284 个测试与 TypeScript 构建、Prometheus 2.53 `promtool` 52 条规则及 Alertmanager 0.27 `amtool` 配置校验均通过。
 
+生产首次实发捕获到飞书 webhook `10002 invalid background_style`：Card 2.0 文档声明可用的 `rgba(...)` 在机器人入口被拒绝。三格态势分栏已去掉该非必需背景字段，保留分栏、留白和全部信息层级；回归测试禁止卡片重新带入 `background_style/rgba()`。
+
 ### 2026-08-06 · 生产发布 `9f7167e` 并上传微信小程序 `0.2.29` 开发版 · 影响面：production + server/admin/H5 + 微信开发版
 
 生产已部署游客浏览与动作级登录调整：服务端、运营后台和 H5 均由提交 `9f7167e` 构建并切换，线上 `.deploy-version` 与该提交一致；`junshi-api` active、`NRestarts=0`、健康检查数据库正常，发布后 15 分钟无 warning/error。匿名 `/api/modules` 返回 10 项公开目录、匿名 `/api/plans` 返回 4 个方案，无效 token 请求公开模块仍严格返回 401；H5 与 `/admin/` 均返回 200。小程序按生产 server 模式重建并核对生产 API、版本与 Git SHA 后，以 `0.2.29` /「游客浏览与动作登录优化」上传成功，包体 1.3 MB（1412678 B）。本次只进入微信后台开发版；经营主体/备案/联系方式等外部事实与微信后台隐私指引尚未补齐，因此未提交审核或正式发布。

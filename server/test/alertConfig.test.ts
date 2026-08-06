@@ -148,6 +148,7 @@ describe('格式化', () => {
     assert.match(JSON.stringify(card), /停止放量并检查最慢路由/);
     assert.match(JSON.stringify(card), /5 分 0 秒/);
     assert.match(JSON.stringify(card), /https:\/\/ops.example.com\/grafana\/d\/junshi-api/);
+    assert.doesNotMatch(JSON.stringify(card), /background_style|rgba\(/);
   });
 
   test('resolved 组：绿色恢复态并展示从触发到恢复耗时', () => {
