@@ -553,7 +553,7 @@ bash scripts/deploy-prod.sh
 `.claude/worktrees/*/AGENTS.md` 是 Claude 工作树副本，不是维护源；需要固化流程时改根目录 `AGENTS.md`、`scripts/deploy-prod.sh` 和必要的 `docs/*`。
 正式微信小程序发布仍走 §11「本机上传到小程序平台」：上传前后同步 `docs/WEAPP_RELEASES.md`，版本号/描述与上传命令一致；连真实后端的小程序包用 `TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp`。
 
-**预发环境**固定为 `/opt/junshi-preprod` · `junshi-api-preprod` · `:4001` · DB `junshi_preprod` · `https://wxapi.aibuzz.cn/api_preprod`，只用 `scripts/deploy-preprod.sh`。该脚本每次部署都会删除预发 `.env` 中所有 `WECHAT_PAY_*` 真商户凭据，并强制 `NODE_ENV=development` + `PAY_MOCK_SUCCESS=true` + `PAY_SANDBOX=false` + `ALLOW_DEMO_PURCHASE=false`：预发可走真实订单/权益状态机，但绝不触发微信真扣款。小程序预发包用 `cd app && npm run build:weapp:preprod`，并核对 `dist/junshi-build-meta.json` 的 `mode/api/gitSha`；DevTools CLI 的 `--project` 仍指向 `app/`，不是 `app/dist/`。
+**预发环境**固定为 `/opt/junshi-preprod` · `junshi-api-preprod` · `:4001` · DB `junshi_preprod` · `https://wxapi.aibuzz.cn/api_preprod`，只用 `scripts/deploy-preprod.sh`。该脚本每次部署都会复制生产 `ai_setting/ai_model` 供真实模型验收，因此必须同时把生产 `APP_ENCRYPTION_KEY` 写入预发并做不回显的一致性校验；只复制加密配置行却漏这把钥匙，会表现为“库里有带 key 的模型，但运行时全部 `AI_UNAVAILABLE`”。脚本仍会删除预发 `.env` 中所有 `WECHAT_PAY_*` 真商户凭据，并强制 `NODE_ENV=development` + `PAY_MOCK_SUCCESS=true` + `PAY_SANDBOX=false` + `ALLOW_DEMO_PURCHASE=false`：预发可走真实订单/权益状态机，但绝不触发微信真扣款。小程序预发包用 `cd app && npm run build:weapp:preprod`，并核对 `dist/junshi-build-meta.json` 的 `mode/api/gitSha`；DevTools CLI 的 `--project` 仍指向 `app/`，不是 `app/dist/`。
 
 ### ★ 一键开发（PostgreSQL，推荐）
 ```bash

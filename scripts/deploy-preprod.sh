@@ -119,6 +119,25 @@ set_env_value() {
     printf '%s=%s\n' "$key" "$value" | sudo tee -a "$PREPROD_ROOT/server/.env" >/dev/null
   fi
 }
+
+# 预发每次都会从生产库复制 ai_setting / ai_model；其中 apiKey 是由生产
+# APP_ENCRYPTION_KEY 加密的密文。只复制数据库行、不复制对应解密钥匙，会让预发看似有 4 个
+# 带 key 的模型，运行时却全部解密失败并报 AI_UNAVAILABLE。这里仅同步这一个“配置解密钥匙”，
+# 不复制 JWT / 支付 / 微信等其它生产凭据；全程不打印值，并在重启前 fail-closed 对账。
+PROD_ENCRYPTION_KEY="$(sudo sed -n 's/^APP_ENCRYPTION_KEY=//p' "$PROD_ROOT/server/.env" | head -1 | tr -d '"\r')"
+if [ -z "$PROD_ENCRYPTION_KEY" ]; then
+  echo "!! 生产 APP_ENCRYPTION_KEY 缺失，无法在预发解密即将复制的 AI 配置" >&2
+  exit 1
+fi
+sudo sed -i -E '/^APP_ENCRYPTION_KEY=/d' "$PREPROD_ROOT/server/.env"
+printf 'APP_ENCRYPTION_KEY=%s\n' "$PROD_ENCRYPTION_KEY" | sudo tee -a "$PREPROD_ROOT/server/.env" >/dev/null
+PREPROD_ENCRYPTION_KEY="$(sudo sed -n 's/^APP_ENCRYPTION_KEY=//p' "$PREPROD_ROOT/server/.env" | head -1 | tr -d '"\r')"
+if [ "$PREPROD_ENCRYPTION_KEY" != "$PROD_ENCRYPTION_KEY" ]; then
+  echo "!! 预发 APP_ENCRYPTION_KEY 写入后对账失败，拒绝部署" >&2
+  exit 1
+fi
+unset PREPROD_ENCRYPTION_KEY PROD_ENCRYPTION_KEY
+
 sudo sed -i -E '/^WECHAT_PAY_[A-Z0-9_]*=/d' "$PREPROD_ROOT/server/.env"
 set_env_value NODE_ENV development
 set_env_value PAY_MOCK_SUCCESS true
@@ -130,6 +149,7 @@ if sudo grep -qE '^WECHAT_PAY_[A-Z0-9_]*=.' "$PREPROD_ROOT/server/.env"; then
   echo "!! 预发 .env 仍含真实微信支付配置，拒绝部署" >&2
   exit 1
 fi
+echo "  AI 配置解密钥匙已对齐（值不回显）"
 echo "  支付隔离已锁定：PAY_MOCK_SUCCESS=true · WECHAT_PAY_*=unset"
 
 echo "== systemd 单元 $SERVICE =="

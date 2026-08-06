@@ -52,8 +52,8 @@ else
 fi
 OLD_ROWS="$(psql -Atq -d "$DST" -c 'SELECT count(*) FROM ai_model')"
 [ "$OLD_SAYS" = "成功" ] && [ "$OLD_ROWS" = "0" ] \
-  && ok "旧实现报告「$OLD_SAYS」，但实际复制了 $OLD_ROWS 行 —— 静默失败已复现" \
-  || no "预期旧实现谎报成功且 0 行，实际报告=$OLD_SAYS 行数=$OLD_ROWS"
+  && ok "旧实现报告「${OLD_SAYS}」，但实际复制了 ${OLD_ROWS} 行 —— 静默失败已复现" \
+  || no "预期旧实现谎报成功且 0 行，实际报告=${OLD_SAYS} 行数=${OLD_ROWS}"
 
 echo "== ② 新实现：共有列精确复制 =="
 reset_dst

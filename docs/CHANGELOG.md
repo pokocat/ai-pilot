@@ -12,6 +12,10 @@
 
 生产兼容旧客户端时，即使请求没有 `clientRequestId`，服务端也会生成一次性 `legacy-<uuid>` 并强制进入持久任务链路，避免旧包继续触发“断连即退款/丢结果”和旧结算分支；跨 HTTP 重传幂等仍只由升级后的客户端稳定 key 保证。
 
+预发首次真实生成冒烟又发现部署脚本只复制生产 `ai_setting/ai_model` 密文，预发 `.env` 却没有生产 `APP_ENCRYPTION_KEY`，于是数据库校验显示 4 个带 key 模型、运行时仍全部解密失败并返回 `AI_UNAVAILABLE`。`deploy-preprod.sh` 现同步且不回显地对账这一个配置解密钥匙，失败即在重启前中止；JWT、微信、支付等其它生产凭据不复制，预发真支付隔离仍保持。
+
+同轮补正 `deploy-preprod-aicopy.test.sh` 中环境变量紧邻中文右引号却未加 `${...}` 的 Bash 展开歧义；旧写法在当前 locale 下把右引号字节并入变量名，导致回归脚本还没测到复制逻辑就因 `set -u` 退出。
+
 用量改为按真实 provider attempt 统一结算：完成、截断、失败、取消、租约恢复与推荐选项补生成均累计 provider usage，缺失时保守估算；纯 mock、缓存命中及 provider 前审核拦截为 0。主回复先持久化，再用独立 `ask_recovery` attempt 在 3 秒预算内补推荐选项；补出的可见文本纳入用户/租户/会话成本归因、输出审核和禁用词审计，失败只少选项。进程若在 `finalize` 阶段退出，接管者只恢复推荐项与终态，不重新调用主 provider、不改写已交付正文；重进端也持续锁定输入直到 job 真正终态。结果终态与 `GenerationEffect` outbox 同事务登记，失败/stale effect 后续补偿投递；业务目标仍按 at-least-once 语义自行幂等。
 
 同时完成相关止损与产品项：provider AbortSignal、首事件/流中空闲窗与续写墙钟、工具路径续写、残文/usage 保全、OpenAI 端点命中后再构造 body；长文归卷 uploading/failed 均禁止发送，失败不覆盖新草稿；每日战报改为 `GET /cards/daily` + `packages/work/daily` 登录态内嵌页，旧 canvas/发布入口已删除或 410、历史 daily 公开页 404；排盘升级 `paipan-v3`，新排/主动重排写 v3，存量 v1/v2 不改。补齐生成生命周期/首字/恢复/估算指标与告警，provider 前无 attempt 的确定 0 不误报为估算；部署脚本对监控单文件挂载做哈希重建，并把已存在但 exited 的监控容器拉起后做 readiness/SHA/规则数硬验收。当前仅完成本地实现与回归，**尚未部署**；生产发布后仍须按 `docs/CHAT_STREAMING_RELIABILITY_PLAN.md` §12.4 连续观察 24 小时。
