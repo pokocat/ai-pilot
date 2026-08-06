@@ -1,7 +1,7 @@
 // Alertmanager → 飞书 转发端点（监控大盘二期：通知渠道后台配置化）。
 //
 // 链路：Prometheus 告警规则 → Alertmanager（分组/去重/抑制）→ 本端点（Bearer METRICS_TOKEN）
-//       → services/alertConfig.sendFeishuText（webhook 存 DB、后台「功能开关」页配置）。
+//       → services/alertConfig.sendFeishuCard（webhook 存 DB、后台「功能开关」页配置）。
 // 为什么经应用转发而不是 Alertmanager 直发/PrometheusAlert 桥：
 //   ① 飞书 webhook 地址成为运行时配置（后台改，不发版、不重启容器）；
 //   ② 少维护一个桥接容器；③ 转发成败进 /metrics（junshi_alerts_forwarded_total），通知链路本身可观测。
@@ -9,7 +9,7 @@
 //   需要外部拨测兜底——见 docs/MONITORING.md §7。
 import type { FastifyInstance } from 'fastify';
 import { bearerOf, tokenMatches } from './metrics.js';
-import { sendFeishuText, formatAlertText, type AmWebhookPayload } from '../services/alertConfig.js';
+import { sendFeishuCard, formatAlertCard, type AmWebhookPayload } from '../services/alertConfig.js';
 import { noteAlertForward } from '../services/metrics.js';
 
 export async function alertRoutes(app: FastifyInstance) {
@@ -25,7 +25,12 @@ export async function alertRoutes(app: FastifyInstance) {
     if (!Array.isArray(payload.alerts) || payload.alerts.length === 0) {
       return { forwarded: false, reason: 'empty' };
     }
-    const r = await sendFeishuText(formatAlertText(payload));
+    const card = formatAlertCard(payload, {
+      environment: process.env.MONITOR_ENV_LABEL,
+      grafanaBaseUrl: process.env.MONITOR_GRAFANA_URL,
+      timeZone: process.env.MONITOR_TIME_ZONE,
+    });
+    const r = await sendFeishuCard(card);
     noteAlertForward(r.sent ? 'sent' : r.reason === 'not_configured' ? 'not_configured' : 'failed');
     if (!r.sent && r.reason !== 'not_configured') {
       // 转发失败回 502：Alertmanager 会按自己的重试策略再投，不丢告警。

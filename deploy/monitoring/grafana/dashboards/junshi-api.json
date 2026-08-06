@@ -15,7 +15,7 @@
   },
   "panels": [
     {
-      "id": 23,
+      "id": 29,
       "type": "stat",
       "title": "服务状态",
       "datasource": {
@@ -86,7 +86,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 30,
       "type": "stat",
       "title": "RPS(5m)",
       "datasource": {
@@ -141,7 +141,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 31,
       "type": "stat",
       "title": "普通接口 P95",
       "description": "告警线：>200ms 预警 / >500ms 停止放量（压测方案 §7）",
@@ -205,7 +205,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 32,
       "type": "stat",
       "title": "5xx 率(5m)",
       "datasource": {
@@ -268,7 +268,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 33,
       "type": "stat",
       "title": "在途请求",
       "datasource": {
@@ -330,7 +330,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 34,
       "type": "stat",
       "title": "进程内存 RSS",
       "datasource": {
@@ -392,7 +392,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 35,
       "type": "timeseries",
       "title": "请求速率按状态类",
       "datasource": {
@@ -444,7 +444,7 @@
       }
     },
     {
-      "id": 30,
+      "id": 36,
       "type": "timeseries",
       "title": "普通接口时延分位",
       "datasource": {
@@ -513,7 +513,7 @@
       }
     },
     {
-      "id": 31,
+      "id": 37,
       "type": "timeseries",
       "title": "最慢路由 Top（P95）",
       "datasource": {
@@ -562,7 +562,7 @@
       }
     },
     {
-      "id": 32,
+      "id": 38,
       "type": "timeseries",
       "title": "路由级 5xx（哪条在冒错）",
       "datasource": {
@@ -611,7 +611,7 @@
       }
     },
     {
-      "id": 33,
+      "id": 39,
       "type": "timeseries",
       "title": "限流 429 / 过载 503",
       "datasource": {
@@ -670,7 +670,7 @@
       }
     },
     {
-      "id": 34,
+      "id": 40,
       "type": "timeseries",
       "title": "事件循环延迟（自启动累计分位）",
       "datasource": {
@@ -729,7 +729,7 @@
       }
     },
     {
-      "id": 35,
+      "id": 41,
       "type": "timeseries",
       "title": "进程资源",
       "datasource": {
@@ -798,7 +798,7 @@
       }
     },
     {
-      "id": 36,
+      "id": 42,
       "type": "timeseries",
       "title": "Prisma 连接池（连接该配多少的直接依据）",
       "datasource": {
@@ -867,7 +867,7 @@
       }
     },
     {
-      "id": 37,
+      "id": 43,
       "type": "timeseries",
       "title": "探活耗时（本机直连 vs 公网全链路）",
       "datasource": {

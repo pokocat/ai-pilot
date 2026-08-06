@@ -17,6 +17,8 @@
 import { createHmac } from 'node:crypto';
 import { featureFlagPayload, setFeatureFlagPayload } from './featureFlag.js';
 import { encryptSecret, decryptSecretSafe } from './secretBox.js';
+export { formatAlertCard, formatAlertText } from './alertCard.js';
+export type { AmAlert, AmWebhookPayload, AlertCardOptions } from './alertCard.js';
 
 /* ─────────────── 阈值注册表 ─────────────── */
 
@@ -36,15 +38,17 @@ export interface AlertConfigDef {
 const D = (key: string, label: string, desc: string, def: number, min: number, max: number, unit: string): AlertConfigDef =>
   ({ id: `monitor.${key}`, key, label, desc, def, min, max, unit });
 
-// 默认值 = 压测方案 §7 告警线原文（docs/[OPUS5]LOADTEST_OPT_PLAN_2026-07-26.md）。
-// 后台改的是「运行值」；默认值是口径基线，改基线仍走文档+代码。
+// 容量/成本默认值 = 压测方案 §7；对话体验默认值来自线上事故复盘（下方会单独标注）。
+// 后台改的是「运行值」；默认值是口径基线，改基线仍走对应文档+代码。
 export const ALERT_CONFIG_DEFS: AlertConfigDef[] = [
   D('token_daily_budget_cny', 'Token 日预算', '达 70% 预警 / 90% 严重（成本告警基准）', 200, 10, 1_000_000, '元/天'),
   D('api_p95_warn_ms', '接口 P95 预警线', '普通接口（剔除生成/流式）P95 超过即预警', 200, 10, 60_000, 'ms'),
   D('api_p95_crit_ms', '接口 P95 严重线', '超过即「停止放量」级告警', 500, 10, 60_000, 'ms'),
   D('api_5xx_crit_permille', '5xx 错误率严重线', '千分比：10 = 1%', 10, 1, 1000, '‰'),
+  D('http_429_5m', 'API 限流频次线', '5 分钟内 429 响应数超过即预警', 50, 1, 1_000_000, '次/5分钟'),
   D('llm_429_warn_permille', 'LLM 429 率预警线', '千分比：5 = 0.5%（上游限流开始冒头）', 5, 1, 1000, '‰'),
   D('llm_429_crit_permille', 'LLM 429 率严重线', '千分比：20 = 2%（该收紧并发/延长退避）', 20, 1, 1000, '‰'),
+  D('llm_call_p95_s', '模型调用 P95 线', '30 分钟模型调用 P95 超过即预警', 60, 1, 600, '秒'),
   D('llm_wait_warn_s', 'LLM 排队等待预警线', '排队等待峰值超过即预警', 5, 1, 600, '秒'),
   D('llm_wait_crit_s', 'LLM 排队等待严重线', '超过即「降级或暂停接单」级告警', 15, 1, 600, '秒'),
   D('host_cpu_warn_pct', '主机 CPU 预警线', '持续 5 分钟超过即预警', 65, 10, 100, '%'),
@@ -117,39 +121,6 @@ export function feishuSign(secret: string, timestampSec: number): string {
 
 /* ─────────────── Alertmanager → 飞书 转发 ─────────────── */
 
-// Alertmanager webhook v4 载荷里本次要用的字段（其余忽略）。
-export interface AmAlert {
-  status?: string;
-  labels?: Record<string, string>;
-  annotations?: Record<string, string>;
-  startsAt?: string;
-}
-export interface AmWebhookPayload {
-  status?: string; // firing | resolved（组级）
-  groupLabels?: Record<string, string>;
-  alerts?: AmAlert[];
-}
-
-const sevIcon = (sev: string | undefined) => (sev === 'critical' ? '🔴' : sev === 'warning' ? '🟡' : '🔵');
-
-/** 把一组告警拼成飞书 text 消息（自定义机器人 text 不渲染 markdown，用行文本+emoji）。 */
-export function formatAlertText(p: AmWebhookPayload): string {
-  const alerts = p.alerts ?? [];
-  const firing = alerts.filter((a) => a.status !== 'resolved');
-  const resolved = alerts.filter((a) => a.status === 'resolved');
-  const head = p.status === 'resolved'
-    ? `✅ 告警恢复：${p.groupLabels?.alertname ?? ''}`
-    : `${sevIcon(alerts[0]?.labels?.severity)} 军师告警：${p.groupLabels?.alertname ?? ''}（${firing.length} 条）`;
-  const line = (a: AmAlert) => {
-    const sev = a.labels?.severity ?? 'info';
-    const summary = a.annotations?.summary ?? a.labels?.alertname ?? '(无描述)';
-    const at = a.startsAt ? ` · 始于 ${a.startsAt.slice(0, 19).replace('T', ' ')}Z` : '';
-    return `${sevIcon(sev)} [${sev}] ${summary}${at}`;
-  };
-  const lines = [head, ...firing.map(line), ...(resolved.length ? ['— 已恢复 —', ...resolved.map(line)] : [])];
-  return lines.join('\n');
-}
-
 // 测试 seam：单测替换传输层，不真出网（参照 llmPool.__setPoolForTest 先例）。
 type Transport = (url: string, body: unknown) => Promise<{ ok: boolean; status: number; text: string }>;
 const defaultTransport: Transport = async (url, body) => {
@@ -171,9 +142,18 @@ export function __setFeishuTransportForTest(t: Transport | null): void {
  * 飞书返回体 { code:0 } 才算成功（HTTP 200 但 code!=0 是配置错，如签名不对/机器人被移除）。
  */
 export async function sendFeishuText(text: string, opts: { fresh?: boolean } = {}): Promise<{ sent: boolean; reason?: string }> {
+  return sendFeishuPayload({ msg_type: 'text', content: { text } }, opts);
+}
+
+/** 发 Card 2.0。卡片内容由 alertCard.ts 纯函数生成，传输层只负责目标、签名、超时与回执。 */
+export async function sendFeishuCard(card: Record<string, unknown>, opts: { fresh?: boolean } = {}): Promise<{ sent: boolean; reason?: string }> {
+  return sendFeishuPayload({ msg_type: 'interactive', card }, opts);
+}
+
+async function sendFeishuPayload(message: Record<string, unknown>, opts: { fresh?: boolean }): Promise<{ sent: boolean; reason?: string }> {
   const target = await feishuTarget(opts);
   if (!target) return { sent: false, reason: 'not_configured' };
-  const body: Record<string, unknown> = { msg_type: 'text', content: { text } };
+  const body: Record<string, unknown> = { ...message };
   if (target.secret) {
     const ts = Math.floor(Date.now() / 1000);
     body.timestamp = String(ts);

@@ -15,7 +15,7 @@
   },
   "panels": [
     {
-      "id": 65,
+      "id": 73,
       "type": "stat",
       "title": "总用户数",
       "datasource": {
@@ -69,7 +69,7 @@
       }
     },
     {
-      "id": 66,
+      "id": 74,
       "type": "stat",
       "title": "今日注册",
       "datasource": {
@@ -123,7 +123,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 75,
       "type": "stat",
       "title": "今日 GMV(元)",
       "datasource": {
@@ -178,7 +178,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 76,
       "type": "stat",
       "title": "今日订单(入账)",
       "datasource": {
@@ -232,7 +232,7 @@
       }
     },
     {
-      "id": 69,
+      "id": 77,
       "type": "stat",
       "title": "卡单(已付未发放)",
       "description": ">0 超 10 分钟会触发 critical 告警,处理入口=运营后台「订单」页",
@@ -291,7 +291,7 @@
       }
     },
     {
-      "id": 70,
+      "id": 78,
       "type": "stat",
       "title": "今日产出(报告)",
       "datasource": {
@@ -345,7 +345,354 @@
       }
     },
     {
-      "id": 71,
+      "id": 79,
+      "type": "row",
+      "title": "支付可靠性与创作质量",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 80,
+      "type": "stat",
+      "title": "支付 sweep(15m)",
+      "description": "API 运行超过 20 分钟且这里为 0，会触发 JunshiPaySweepStopped",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(junshi_pay_sweep_runs_total[15m])",
+          "legendFormat": "__auto",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "red"
+              },
+              {
+                "value": 1,
+                "color": "green"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 81,
+      "type": "stat",
+      "title": "创作失败率(1h)",
+      "description": "样本≥5 且 >20% 会触发 JunshiCreativeFailureRateHigh",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(junshi_creative_jobs_total{event=\"failed\"}[1h])) / clamp_min(sum(increase(junshi_creative_jobs_total{event=\"created\"}[1h])), 1)",
+          "legendFormat": "__auto",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 4,
+        "y": 6,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 0.1,
+                "color": "yellow"
+              },
+              {
+                "value": 0.2,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 82,
+      "type": "stat",
+      "title": "AI 排版模板回退(1h)",
+      "description": "任务可能成功，但 AI 排版已退化；>3 触发告警",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(junshi_creative_engine_total{engine=\"template_fallback\"}[1h]))",
+          "legendFormat": "__auto",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 8,
+        "y": 6,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "yellow"
+              },
+              {
+                "value": 4,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 83,
+      "type": "timeseries",
+      "title": "创作任务结果（1h 滚动）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (event) (increase(junshi_creative_jobs_total[1h]))",
+          "legendFormat": "{{event}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 6,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 84,
+      "type": "timeseries",
+      "title": "创作失败码（1h 滚动）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (code) (increase(junshi_creative_job_failures_total[1h]))",
+          "legendFormat": "{{code}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 85,
+      "type": "timeseries",
+      "title": "排版引擎实际落点（1h 滚动）",
+      "description": "ai:Nrounds=AI 排版成功；template=主动模板；template_fallback=AI 失败后回落",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (engine) (increase(junshi_creative_engine_total[1h]))",
+          "legendFormat": "{{engine}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 14,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 86,
       "type": "timeseries",
       "title": "注册趋势（日）",
       "datasource": {
@@ -366,7 +713,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -394,7 +741,7 @@
       }
     },
     {
-      "id": 72,
+      "id": 87,
       "type": "timeseries",
       "title": "日活（当天有过模型调用的用户）",
       "datasource": {
@@ -415,7 +762,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 5,
+        "y": 22,
         "w": 12,
         "h": 8
       },
@@ -443,7 +790,7 @@
       }
     },
     {
-      "id": 73,
+      "id": 88,
       "type": "timeseries",
       "title": "GMV 与订单量（日,按支付时间）",
       "description": "口径=完成支付的订单（含事后退款的）;退款金额单看下面退款面板",
@@ -475,7 +822,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 13,
+        "y": 30,
         "w": 12,
         "h": 8
       },
@@ -503,7 +850,7 @@
       }
     },
     {
-      "id": 74,
+      "id": 89,
       "type": "timeseries",
       "title": "Token 成本（元/日,含基建调用）",
       "datasource": {
@@ -524,7 +871,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 13,
+        "y": 30,
         "w": 12,
         "h": 8
       },
@@ -552,7 +899,7 @@
       }
     },
     {
-      "id": 75,
+      "id": 90,
       "type": "timeseries",
       "title": "算力流水（日）",
       "datasource": {
@@ -583,7 +930,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 21,
+        "y": 38,
         "w": 12,
         "h": 8
       },
@@ -611,7 +958,7 @@
       }
     },
     {
-      "id": 76,
+      "id": 91,
       "type": "timeseries",
       "title": "产出量（日 × 类型）",
       "datasource": {
@@ -632,7 +979,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 21,
+        "y": 38,
         "w": 12,
         "h": 8
       },
@@ -660,7 +1007,7 @@
       }
     },
     {
-      "id": 77,
+      "id": 92,
       "type": "table",
       "title": "套餐分布（当前存量）",
       "datasource": {
@@ -681,7 +1028,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 29,
+        "y": 46,
         "w": 12,
         "h": 8
       },
@@ -697,7 +1044,7 @@
       }
     },
     {
-      "id": 78,
+      "id": 93,
       "type": "timeseries",
       "title": "退款（日）",
       "datasource": {
@@ -718,7 +1065,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 29,
+        "y": 46,
         "w": 12,
         "h": 8
       },
@@ -746,7 +1093,7 @@
       }
     },
     {
-      "id": 79,
+      "id": 94,
       "type": "timeseries",
       "title": "审核拦截（日 × 方向）",
       "datasource": {
@@ -767,7 +1114,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 37,
+        "y": 54,
         "w": 12,
         "h": 8
       },
@@ -795,7 +1142,7 @@
       }
     },
     {
-      "id": 80,
+      "id": 95,
       "type": "timeseries",
       "title": "转化信号：禁写闸拦截（想用但没套餐/已到期）",
       "description": "none=未开通用户在尝试写操作（销售线索）;expired=到期用户还在用（续费提醒线索）",
@@ -817,7 +1164,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 37,
+        "y": 54,
         "w": 12,
         "h": 8
       },

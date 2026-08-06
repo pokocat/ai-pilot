@@ -6,59 +6,91 @@ groups:
       - alert: HostCpuHigh
         expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) >= scalar(junshi_alert_config{key="host_cpu_warn_pct"})
         for: 5m
-        labels: { severity: warning }
+        labels: { severity: warning, category: system, signal: host_cpu }
         annotations:
           summary: "主机 CPU 超过预警线已持续 5 分钟（当前 {{ $value | printf \"%.0f\" }}%；阈值后台可调）"
+          current: "CPU {{ $value | printf \"%.0f\" }}%"
       - alert: HostCpuCritical
         expr: 100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) >= scalar(junshi_alert_config{key="host_cpu_crit_pct"})
         for: 3m
-        labels: { severity: critical }
+        labels: { severity: critical, category: system, signal: host_cpu }
         annotations:
           summary: "主机 CPU 超过严重线已持续 3 分钟——按压测方案该扩容了（当前 {{ $value | printf \"%.0f\" }}%）"
+          current: "CPU {{ $value | printf \"%.0f\" }}%"
 
       - alert: HostMemoryLow
         expr: 100 * node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 12
         for: 5m
-        labels: { severity: warning }
+        labels: { severity: warning, category: system }
         annotations:
           summary: "可用内存不足 12%（当前 {{ $value | printf \"%.0f\" }}%）"
+          current: "可用内存 {{ $value | printf \"%.0f\" }}%"
 
       - alert: HostDiskFilling
         expr: 100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > 85
         for: 10m
-        labels: { severity: warning }
+        labels: { severity: warning, category: system }
         annotations:
           summary: "磁盘 {{ $labels.mountpoint }} 使用率 >85%"
+          current: "{{ $labels.mountpoint }} 使用率 {{ $value | printf \"%.1f\" }}%"
       - alert: HostDiskWillFillIn24h
         expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 24*3600) < 0
         for: 30m
-        labels: { severity: critical }
+        labels: { severity: critical, category: system }
         annotations:
           summary: "磁盘 {{ $labels.mountpoint }} 按当前增速 24 小时内写满（DB/日志同盘，写满=全站停摆）"
+          current: "{{ $labels.mountpoint }} 预测 24 小时后可用 {{ $value | printf \"%.0f\" }} 字节"
+
+      - alert: HostFileDescriptorsHigh
+        expr: 100 * node_filefd_allocated / clamp_min(node_filefd_maximum, 1) > 80
+        for: 10m
+        labels: { severity: warning, category: system }
+        annotations:
+          summary: "主机文件句柄占用超过 80%，新连接与文件打开存在失败风险"
+          current: "文件句柄使用率 {{ $value | printf \"%.1f\" }}%"
 
       - alert: PgConnectionsHigh
         expr: 100 * sum(pg_stat_activity_count) / pg_settings_max_connections >= scalar(junshi_alert_config{key="pg_conn_warn_pct"})
         for: 5m
-        labels: { severity: warning }
+        labels: { severity: warning, category: database, signal: pg_connections }
         annotations:
           summary: "PG 连接使用率超过预警线（当前 {{ $value | printf \"%.0f\" }}%）——检查是否有实例连接池超配"
+          current: "连接使用率 {{ $value | printf \"%.0f\" }}%"
       - alert: PgConnectionsCritical
         expr: 100 * sum(pg_stat_activity_count) / pg_settings_max_connections >= scalar(junshi_alert_config{key="pg_conn_crit_pct"})
         for: 3m
-        labels: { severity: critical }
+        labels: { severity: critical, category: database, signal: pg_connections }
         annotations:
           summary: "PG 连接使用率超过严重线——按压测方案：限流并扩连接层/规格"
+          current: "连接使用率 {{ $value | printf \"%.0f\" }}%"
 
       - alert: PgDown
         expr: pg_up == 0
         for: 1m
-        labels: { severity: critical }
+        labels: { severity: critical, category: database }
         annotations:
           summary: "postgres_exporter 连不上 PostgreSQL"
+          current: "{{ $labels.instance }} · pg_up=0"
 
       - alert: PgLongTransaction
         expr: pg_stat_activity_max_tx_duration{datname="junshi"} > 300
         for: 5m
-        labels: { severity: warning }
+        labels: { severity: warning, category: database }
         annotations:
           summary: "存在超过 5 分钟的事务（长事务会拖住 vacuum 与锁）"
+          current: "最长事务 {{ $value | printf \"%.0f\" }} 秒"
+
+      - alert: PgDeadlocksDetected
+        expr: increase(pg_stat_database_deadlocks{datname="junshi"}[1h]) > 0
+        labels: { severity: critical, category: database }
+        annotations:
+          summary: "junshi 数据库 1 小时内检测到死锁，至少一个事务已被回滚"
+          current: "1 小时 {{ $value | printf \"%.0f\" }} 次死锁"
+
+      - alert: MonitoringTargetDown
+        expr: up{job=~"node|postgres|blackbox-local|blackbox-public|alertmanager"} == 0
+        for: 2m
+        labels: { severity: warning, category: monitoring }
+        annotations:
+          summary: "监控采集目标离线，相关指标或通知能力出现盲区"
+          current: "job={{ $labels.job }} · instance={{ $labels.instance }} · up=0"

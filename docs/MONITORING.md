@@ -3,8 +3,8 @@
 > 给「帮我看/搭监控」的人看：照本文件即可在生产机上起一套完整监控——系统资源 + 业务指标 + 看板 + 告警。
 > 组件全部是成熟开源：**Prometheus + Grafana + Alertmanager + node_exporter + postgres_exporter + blackbox_exporter**（可选 **Loki + Promtail** 收日志）。
 > 配套模板见 `deploy/monitoring/`；应用侧打点在 `server/src/services/metrics.ts`（`/api/metrics` 端点）。
-> 口径铁律（压测方案 V2 §6）：**压测采集什么，线上就告警什么，指标名一致**。告警阈值全部来自
-> `docs/[OPUS5]LOADTEST_OPT_PLAN_2026-07-26.md` §7，改阈值先改那边的口径。
+> 口径铁律（压测方案 V2 §6）：**压测采集什么，线上就告警什么，指标名一致**。容量/成本阈值来自
+> `docs/[OPUS5]LOADTEST_OPT_PLAN_2026-07-26.md` §7；对话体验等运行质量线来自线上事故复盘，规则文件会标明来源。
 
 ---
 
@@ -24,7 +24,7 @@
                        │         ├─► postgres_exporter :9187（连接/TPS/缓存/锁）                 │
                        │         ├─► blackbox_exporter :9115（本机探活 + 公网 HTTPS 探活）       │
                        │         └─► 告警规则 ──► Alertmanager :9093 ──► API /api/alerts/webhook │
-                       │                    （阈值经 junshi_alert_config 后台可调）└─► 飞书群机器人 │
+                       │               （领域+等级聚合）                    └─► 飞书 Card 2.0 │
                        │                                               Promtail（journald+nginx）│
                        └────────────────────────────────────────────────────────────────────────┘
 ```
@@ -67,6 +67,9 @@
 ```bash
 # ① API 侧开指标端点：server/.env 追加（token 自己生成,如 openssl rand -hex 24）
 #    METRICS_TOKEN=<随机串>
+#    MONITOR_ENV_LABEL=生产环境
+#    MONITOR_GRAFANA_URL=https://你的域名/grafana   # 卡片看板按钮；可选
+#    MONITOR_TIME_ZONE=Asia/Shanghai               # 卡片显示时区；可选
 #    然后 systemctl restart junshi-api
 #    自查：curl -s -H "Authorization: Bearer <随机串>" 127.0.0.1:4000/api/metrics | head
 
@@ -104,32 +107,54 @@ Prometheus `127.0.0.1:9090/targets` 全绿。
 
 | 看板 | uid | 内容 | 数据源 |
 |---|---|---|---|
-| 军师 · 主机与数据库 | `junshi-system` | CPU/内存/磁盘/网络/句柄 + PG 连接/TPS/缓存命中/死锁/临时文件 | Prometheus |
+| 军师 · 主机与数据库 | `junshi-system` | CPU/内存/磁盘/网络/句柄 + PG 连接/TPS/缓存命中/死锁/临时文件 + 采集 target/飞书转发自检 | Prometheus |
 | 军师 · API 服务 | `junshi-api` | RPS、普通接口 P50/95/99、最慢路由 Top、路由级 5xx、429/过载 503、事件循环、Prisma 池、探活耗时 | Prometheus |
-| 军师 · LLM 网关 | `junshi-llm` | 车道并发/排队/冷却、429 率、调用时延、token 流向、成本速率、降级/截断/漏账、端点池权重 | Prometheus |
-| 军师 · 业务大盘 | `junshi-business` | 注册/DAU/GMV/订单/退款/算力流水/产出量/套餐分布/审核拦截/禁写闸转化信号 | Prometheus + JunshiDB（PG 只读直查） |
+| 军师 · LLM 网关 | `junshi-llm` | 车道并发/排队/冷却、429/调用错误率/调用 P95、token 流向、成本、降级/截断/漏账、端点池权重 | Prometheus |
+| 军师 · 业务大盘 | `junshi-business` | 注册/DAU/GMV/订单/退款/支付 sweep、创作失败/模板回退、算力、产出、套餐、审核、禁写闸 | Prometheus + JunshiDB（PG 只读直查） |
 
-看板 JSON 由 `deploy/monitoring/grafana/dashboards/build.mjs` 生成——**改看板改脚本再 `node build.mjs`**,
+四块看板当前共 **95 个面板**。JSON 由 `deploy/monitoring/grafana/dashboards/build.mjs` 生成——**改看板改脚本再 `node build.mjs`**,
 UI 上的改动只是临时的（provisioning 每 30s 会对回文件）。
 
 ## 5. 告警（`deploy/monitoring/prometheus/alerts/`,默认阈值=压测方案 §7,运行值后台可调）
 
-**阈值配置化（二期）**：18 项阈值（CPU/PG 连接/P95/5xx/429 率/队列等待/Token 日预算/RSS/退款/审核/未写完/续写频次/首字延迟 P95）
+**阈值配置化（二期）**：20 项阈值（CPU/PG 连接/API P95/5xx/API 限流频次/LLM 429 率/模型调用 P95/队列等待/Token 日预算/RSS/退款/审核/未写完/续写频次/首字延迟 P95）
 注册为运营后台「功能开关」页的「告警 ·」数值项,存 DB → `/api/metrics` 吐 `junshi_alert_config{key}` →
 规则里 `scalar()` 取值。**后台改完 ≤75s 生效**（60s 缓存 + 一个抓取周期）,不改文件、不发版、不重启。
 默认值是压测口径基线,改基线才动 `server/src/services/alertConfig.ts` + 压测方案文档。
 
 | 规则文件 | 覆盖 | 关键线 |
 |---|---|---|
-| `system.rules.yml` | 主机 CPU/内存/磁盘（含 24h 写满预测）、PG 连接/死锁/长事务 | CPU ≥65% 预警 / ≥80% 扩容；PG 连接 ≥60% / ≥75% |
-| `api.rules.yml` | 服务/探活挂、TLS 证书 14 天到期、P95、5xx 率、过载闸、事件循环、RSS | 普通接口 P95 >200ms 预警 / >500ms 或 5xx≥1% 停止放量 |
-| `llm.rules.yml` · `junshi-llm` 组 | 上游 429 率、队列等待、长冷却、Token 日预算、漏账、降级 | 429 ≥0.5% / ≥2%，但 10m 至少 20 次获得槽位才评估，避免低流量单个 429 被放大成 100% 假警；日成本 70%/90% |
+| `system.rules.yml`（12 条） | 主机 CPU/内存/磁盘/文件句柄、PG 连接/死锁/长事务、监控 target 离线 | CPU ≥65% 预警 / ≥80% 扩容；PG 连接 ≥60% / ≥75%；死锁 >0 即 critical |
+| `api.rules.yml`（10 条） | 服务/探活挂、TLS 证书 14 天到期、P95、5xx、429 激增、过载闸、事件循环、RSS | 普通接口 P95 >200ms 预警 / >500ms 或 5xx≥1% 停止放量；429 频次后台可调 |
+| `llm.rules.yml` · `junshi-llm` 组 | 上游 429/调用错误率/调用 P95、队列拒绝与等待、长冷却、Token 日预算 70%/90%/**100%**、漏账、降级 | 429 ≥0.5% / ≥2%，但 10m 至少 20 次获得槽位才评估；调用错误率 >10% 且样本≥10；日成本 100% 为硬停止红线 |
 | `llm.rules.yml` · `junshi-chat` 组 | **对话交互质量 + 持久任务**：未写完、续写、stall、首字、残文保全、GenerationJob 失败率/租约接管/估算结算 | 失败率 >10% 且 15m 样本≥5；租约接管 >0 即 warning；估算结算 >0 记 info |
-| `business.rules.yml` | 已付未发放（资损!）、sweep 失败、退款激增、审核拦截激增、72h 零注册 | 已付未发放 >10 分钟 = critical |
+| `business.rules.yml`（8 条） | 已付未发放（资损）、sweep 失败/停跑、退款激增、审核拦截、72h 零注册、创作失败率与模板回退 | 已付未发放 >10 分钟 = critical；sweep 15m 未跑 = critical；创作失败率 >20% 且样本≥5 |
+
+四个文件当前合计 **52 条规则**。其中成对阈值使用统一 `signal` 标签：critical 触发时会压住同信号 warning；
+没有 `signal` 的不同告警不会互相误抑制。
+
+### 5.1 飞书告警卡片（Card 2.0）
+
+Alertmanager 不再按 `alertname` 一条条刷短文本，而是按 **`category + severity`** 在 30 秒窗口内聚合相关信号。
+例如一次 CPU 飙升同时引发 API P95 与事件循环告警，会按领域形成少量态势卡，而不是连续十几条难以关联的消息。
+
+每张卡固定包含：
+
+- 红/橙/蓝/绿标题色带：严重、预警、提示、恢复一眼区分；副标题显示环境与业务时区。
+- 三格态势：当前状态、信号数量、已持续/恢复耗时；恢复卡使用真实 `startsAt → endsAt`。
+- 每个信号的完整证据：中文标题、规则摘要、**当前值 / 触发阈值、影响判断、建议动作、对象标签**。
+- 告警风暴保护：一张卡最多展开 8 个信号，超出数量明确提示去看板，不会静默丢失数量。
+- 配置 `MONITOR_GRAFANA_URL` 后显示对应四大看板的跳转按钮；未配时卡片仍完整，只隐藏按钮。
+- 所有 Alertmanager 字段先转义再进 Markdown，避免 route/label 中的特殊字符破坏排版。
+
+`server/src/services/alertCard.ts` 是卡片展示真源：`ALERT_KNOWLEDGE` 为每个 alertname 提供标题、阈值解释、
+影响与动作；规则本身负责 `category/current/summary`。`server/test/alertRules.test.ts` 会强制检查每条规则四者齐全，
+新增一条“只有 PromQL、没有人话卡片”的规则会直接让测试失败。
 
 **推送到飞书（后台配置,无需发版）**：Alertmanager 已默认把告警投给 `POST /api/alerts/webhook`
 （Bearer=同一份 `secrets/metrics.token`,compose 已挂载）,服务端按运营后台配置转发：
-后台「功能开关 → 告警通知」填入飞书群自定义机器人的 webhook（可选签名密钥）→ 点「发测试消息」验证。
+后台「功能开关 → 告警通知」填入飞书群自定义机器人的 webhook（可选签名密钥）→ 点「发测试消息」验证；
+测试消息本身也是完整 Card 2.0，可同时验收签名、卡片渲染、环境名和看板按钮。
 webhook 加密落库、掩码回显；URL 白名单只收 `open.feishu.cn` 机器人域名。未配置时告警只在
 Grafana/Alertmanager 界面可见（API 侧记 `junshi_alerts_forwarded_total{outcome="not_configured"}`）。
 

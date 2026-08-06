@@ -2,7 +2,7 @@
 //   ① 阈值：默认值=压测方案 §7 口径；DB 覆盖生效；越界脏值回落默认（配置坏了不能把告警线带沟里）。
 //   ② 飞书渠道：URL 白名单（这是「把内部告警外发到任意 URL」的通道，不能变成数据外带口）；
 //      掩码回显绝不吐明文 hook id；签名算法锁定（key=`${ts}\n${secret}`、空消息、base64）。
-//   ③ 转发：Alertmanager 载荷 → 飞书 text；带 secret 时 body 里有 timestamp+sign；飞书 code!=0 判失败。
+//   ③ 转发：Alertmanager 载荷 → 飞书 Card 2.0；带 secret 时 body 里有 timestamp+sign；飞书 code!=0 判失败。
 //   ④ 端点：/api/alerts/webhook 与 /api/metrics 同门禁（未配 404 / 不对 401）；转发失败回 502 让 AM 重投。
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,8 +10,8 @@ import Fastify from 'fastify';
 import { prisma } from '../src/db.js';
 import { __clearFeatureCache, setFeatureFlagPayload } from '../src/services/featureFlag.js';
 import {
-  ALERT_CONFIG_DEFS, alertConfigValues, feishuSign, formatAlertText,
-  setFeishuTarget, feishuStatus, sendFeishuText, __setFeishuTransportForTest,
+  ALERT_CONFIG_DEFS, alertConfigValues, feishuSign, formatAlertCard,
+  setFeishuTarget, feishuStatus, sendFeishuText, sendFeishuCard, __setFeishuTransportForTest,
 } from '../src/services/alertConfig.js';
 import { alertRoutes } from '../src/routes/alerts.js';
 import { __resetMetrics } from '../src/services/metrics.js';
@@ -102,6 +102,21 @@ describe('飞书渠道', () => {
     assert.match(bad.reason!, /19021/);
   });
 
+  test('Card 2.0 走 interactive 消息，签名与回执规则复用文本通道', async () => {
+    await setFeishuTarget(HOOK, 's3cret');
+    let body: Record<string, unknown> | null = null;
+    __setFeishuTransportForTest(async (_url, value) => {
+      body = value as Record<string, unknown>;
+      return { ok: true, status: 200, text: '{"code":0}' };
+    });
+    const r = await sendFeishuCard({ schema: '2.0', body: { elements: [] } }, { fresh: true });
+    assert.equal(r.sent, true);
+    assert.equal(body!.msg_type, 'interactive');
+    assert.deepEqual((body!.card as Record<string, unknown>).schema, '2.0');
+    assert.equal(typeof body!.timestamp, 'string');
+    assert.equal(typeof body!.sign, 'string');
+  });
+
   test('未配置渠道 → not_configured（不算失败）', async () => {
     const r = await sendFeishuText('hello', { fresh: true });
     assert.deepEqual(r, { sent: false, reason: 'not_configured' });
@@ -109,27 +124,56 @@ describe('飞书渠道', () => {
 });
 
 describe('格式化', () => {
-  test('firing 组：标题带条数，行带 severity 图标与 summary', () => {
-    const text = formatAlertText({
+  test('firing 组：严重度配色、三格态势、当前值/阈值/影响/动作和看板入口齐全', () => {
+    const card = formatAlertCard({
       status: 'firing',
-      groupLabels: { alertname: 'JunshiApiP95High' },
+      groupLabels: { category: 'api', severity: 'critical' },
       alerts: [
-        { status: 'firing', labels: { severity: 'critical' }, annotations: { summary: 'P95 超严重线' }, startsAt: '2026-07-28T12:00:00.000Z' },
-        { status: 'firing', labels: { severity: 'warning' }, annotations: { summary: '429 冒头' } },
+        {
+          status: 'firing', startsAt: '2026-07-28T12:00:00.000Z',
+          labels: { alertname: 'JunshiApiP95High', severity: 'critical', category: 'api', route: '/api/me' },
+          annotations: {
+            title: 'API 延迟严重', summary: '普通接口持续变慢', current: '0.82 秒', threshold: '超过动态严重线 5 分钟',
+            impact: '用户页面加载明显变慢', action: '停止放量并检查最慢路由', dashboard: 'junshi-api',
+          },
+        },
+        { status: 'firing', labels: { alertname: 'X', severity: 'warning', category: 'api' }, annotations: { title: '另一个信号' } },
       ],
-    });
-    assert.match(text, /军师告警：JunshiApiP95High（2 条）/);
-    assert.match(text, /🔴 \[critical\] P95 超严重线 · 始于 2026-07-28 12:00:00Z/);
-    assert.match(text, /🟡 \[warning\] 429 冒头/);
+    }, { nowMs: Date.parse('2026-07-28T12:05:00.000Z'), environment: '预发', grafanaBaseUrl: 'https://ops.example.com/grafana/' });
+    const header = card.header as Record<string, unknown>;
+    assert.equal(header.template, 'red');
+    assert.match(JSON.stringify(card), /严重告警 · API 服务/);
+    assert.match(JSON.stringify(card), /0.82 秒/);
+    assert.match(JSON.stringify(card), /用户页面加载明显变慢/);
+    assert.match(JSON.stringify(card), /停止放量并检查最慢路由/);
+    assert.match(JSON.stringify(card), /5 分 0 秒/);
+    assert.match(JSON.stringify(card), /https:\/\/ops.example.com\/grafana\/d\/junshi-api/);
   });
 
-  test('resolved 组：✅ 恢复标题', () => {
-    const text = formatAlertText({
+  test('resolved 组：绿色恢复态并展示从触发到恢复耗时', () => {
+    const card = formatAlertCard({
       status: 'resolved',
-      groupLabels: { alertname: 'HostCpuHigh' },
-      alerts: [{ status: 'resolved', labels: { severity: 'warning' }, annotations: { summary: 'CPU 回落' } }],
-    });
-    assert.match(text, /^✅ 告警恢复：HostCpuHigh/);
+      groupLabels: { category: 'system' },
+      alerts: [{
+        status: 'resolved', startsAt: '2026-07-28T12:00:00.000Z', endsAt: '2026-07-28T13:30:00.000Z',
+        labels: { alertname: 'HostCpuHigh', severity: 'warning', category: 'system' }, annotations: { title: 'CPU 高负载' },
+      }],
+    }, { nowMs: Date.parse('2026-07-28T14:00:00.000Z') });
+    const header = card.header as Record<string, unknown>;
+    assert.equal(header.template, 'green');
+    assert.match(JSON.stringify(card), /告警恢复 · 主机资源/);
+    assert.match(JSON.stringify(card), /1 小时 30 分/);
+  });
+
+  test('标签与注解按数据转义，告警风暴最多展开 8 条并明示截断', () => {
+    const alerts = Array.from({ length: 10 }, (_, i) => ({
+      status: 'firing', labels: { alertname: `A${i}`, severity: 'warning', category: 'api', route: '*坏_[值]*' },
+      annotations: { title: `信号 ${i}`, summary: '<script>alert(1)</script>' },
+    }));
+    const json = JSON.stringify(formatAlertCard({ status: 'firing', alerts, truncatedAlerts: 2 }));
+    assert.doesNotMatch(json, /<script>/);
+    assert.match(json, /还有 4 条信号未在卡片中展开/);
+    assert.doesNotMatch(json, /信号 8/);
   });
 });
 

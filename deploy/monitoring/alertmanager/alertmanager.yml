@@ -13,13 +13,16 @@ global:
 
 route:
   receiver: 'junshi-api'
-  group_by: ['alertname', 'severity']
-  group_wait: 30s        # 同组告警攒 30s 一起发,避免一炸一屏
+  # 按领域+等级合并：同一故障引发的多条关联信号组成一张飞书态势卡，而不是连续刷多条短消息。
+  group_by: ['category', 'severity']
+  group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h    # 没恢复的告警每 4 小时提醒一次
   routes:
     - matchers: [severity = critical]
       repeat_interval: 1h  # critical 催得更勤
+    - matchers: [severity = info]
+      repeat_interval: 12h # 信息型信号主要用于趋势提示，避免重复刷屏
 
 receivers:
   - name: 'junshi-api'
@@ -32,10 +35,10 @@ receivers:
             credentials_file: /etc/alertmanager/metrics.token
 
 inhibit_rules:
-  # critical 已在响时压住同名 warning,少一层噪音
-  - source_matchers: [severity = critical]
-    target_matchers: [severity = warning]
-    equal: ['alertname']
+  # 同一 signal 的 critical 已在响时压住 warning；成对阈值规则必须带相同 signal 标签。
+  - source_matchers: [severity = critical, signal =~ ".+"]
+    target_matchers: [severity = warning, signal =~ ".+"]
+    equal: ['category', 'signal']
   # 主机都挂了就别再报 API 的各种细节
   - source_matchers: [alertname = JunshiApiDown]
     target_matchers: [alertname =~ "JunshiApi.*|JunshiLlm.*"]

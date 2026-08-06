@@ -153,6 +153,31 @@ const sysDash = dashboard({
       promTarget('rate(pg_stat_database_tup_deleted{datname="junshi"}[5m])', 'deleted'),
     ] }),
     timeseries({ title: '临时文件写入（>0 说明 work_mem 不够或有烂查询）', unit: 'Bps', targets: [promTarget('rate(pg_stat_database_temp_bytes{datname="junshi"}[5m])', 'temp bytes')] }),
+    row('监控链路自检'),
+    stat({
+      title: '离线采集目标',
+      targets: [promTarget('sum(up{job=~"node|postgres|blackbox-local|blackbox-public|alertmanager"} == 0)')],
+      steps: [[null, 'green'], [1, 'red']],
+      desc: '对应 MonitoringTargetDown；>0 表示监控本身出现数据或通知盲区',
+    }),
+    stat({
+      title: '告警转发失败(1h)',
+      targets: [promTarget('sum(increase(junshi_alerts_forwarded_total{outcome="failed"}[1h]))')],
+      steps: [[null, 'green'], [1, 'red']],
+      desc: '飞书 webhook HTTP/签名/返回码失败次数；失败时 Alertmanager 会重试',
+    }),
+    stat({
+      title: '未配置飞书(1h)',
+      targets: [promTarget('sum(increase(junshi_alerts_forwarded_total{outcome="not_configured"}[1h]))')],
+      steps: [[null, 'green'], [1, 'yellow']],
+      desc: '>0 说明告警已产生但后台没有有效机器人配置',
+    }),
+    timeseries({ title: '采集目标状态（1=正常）', targets: [
+      promTarget('up{job=~"junshi-api|node|postgres|blackbox-local|blackbox-public|prometheus|alertmanager"}', '{{job}} · {{instance}}'),
+    ], min: 0, max: 1 }),
+    timeseries({ title: '告警转发结果', targets: [
+      promTarget('sum by (outcome) (increase(junshi_alerts_forwarded_total[15m]))', '{{outcome}}'),
+    ], desc: 'sent=送达飞书；failed=发送失败；not_configured=未配置而静默吞掉' }),
   ],
 });
 
@@ -214,6 +239,18 @@ const llmDash = dashboard({
     stat({ title: '在途上游调用', targets: [promTarget('sum(junshi_llm_in_flight)')] }),
     stat({ title: '排队中', targets: [promTarget('sum(junshi_llm_queued)')], steps: [[null, 'green'], [1, 'yellow'], [5, 'red']] }),
     stat({ title: '上游 429 率(10m)', unit: 'percentunit', decimals: 4, targets: [promTarget(llm429Rate)], steps: [[null, 'green'], [0.005, 'yellow'], [0.02, 'red']], desc: '告警线：≥0.5% 预警 / ≥2% 收紧并发（压测方案 §7）' }),
+    stat({
+      title: '调用错误率(15m)', unit: 'percentunit', decimals: 3,
+      targets: [promTarget('sum(increase(junshi_llm_calls_total{status="error"}[15m])) / clamp_min(sum(increase(junshi_llm_calls_total[15m])), 1)')],
+      steps: [[null, 'green'], [0.05, 'yellow'], [0.1, 'red']],
+      desc: '样本≥10 且 >10% 会触发 JunshiLlmErrorRateHigh',
+    }),
+    stat({
+      title: '模型调用 P95(30m)', unit: 's', decimals: 1,
+      targets: [promTarget('histogram_quantile(0.95, sum by (le) (rate(junshi_llm_call_duration_seconds_bucket[30m])))')],
+      steps: [[null, 'green'], [30, 'yellow'], [60, 'red']],
+      desc: '红线与后台「告警 · 模型调用 P95 线」联动',
+    }),
     stat({ title: '冷却中车道', targets: [promTarget('sum(junshi_llm_cooling)')], steps: [[null, 'green'], [1, 'red']] }),
     stat({ title: '今日 Token 成本(元)', decimals: 1, targets: [promTarget('sum(increase(junshi_llm_cost_cny_total[1d]))')], steps: [[null, 'green'], [140, 'yellow'], [180, 'red']], desc: '阈值与 llm.rules.yml 的日预算联动（当前基准 200 元/天）' }),
     stat({ title: '今日 Token 量', unit: 'short', targets: [promTarget('sum(increase(junshi_llm_tokens_total[1d]))')] }),
@@ -324,6 +361,32 @@ const bizDash = dashboard({
     stat({ title: '今日订单(入账)', targets: [pgTarget(q(`SELECT count(*)::float AS value FROM payment_order WHERE status IN ('applied','refunded') AND "paidAt" >= date_trunc('day', now())`), 'A', 'table')] }),
     stat({ title: '卡单(已付未发放)', targets: [promTarget('junshi_pay_stuck_paid_unapplied')], steps: [[null, 'green'], [1, 'red']], desc: '>0 超 10 分钟会触发 critical 告警,处理入口=运营后台「订单」页' }),
     stat({ title: '今日产出(报告)', targets: [pgTarget(q(`SELECT count(*)::float AS value FROM llm_trace WHERE kind = 'deliverable' AND status = 'ok' AND "createdAt" >= date_trunc('day', now())`), 'A', 'table')] }),
+    row('支付可靠性与创作质量'),
+    stat({
+      title: '支付 sweep(15m)', targets: [promTarget('increase(junshi_pay_sweep_runs_total[15m])')],
+      steps: [[null, 'red'], [1, 'green']],
+      desc: 'API 运行超过 20 分钟且这里为 0，会触发 JunshiPaySweepStopped',
+    }),
+    stat({
+      title: '创作失败率(1h)', unit: 'percentunit', decimals: 2,
+      targets: [promTarget('sum(increase(junshi_creative_jobs_total{event="failed"}[1h])) / clamp_min(sum(increase(junshi_creative_jobs_total{event="created"}[1h])), 1)')],
+      steps: [[null, 'green'], [0.1, 'yellow'], [0.2, 'red']],
+      desc: '样本≥5 且 >20% 会触发 JunshiCreativeFailureRateHigh',
+    }),
+    stat({
+      title: 'AI 排版模板回退(1h)', targets: [promTarget('sum(increase(junshi_creative_engine_total{engine="template_fallback"}[1h]))')],
+      steps: [[null, 'green'], [1, 'yellow'], [4, 'red']],
+      desc: '任务可能成功，但 AI 排版已退化；>3 触发告警',
+    }),
+    timeseries({ title: '创作任务结果（1h 滚动）', targets: [
+      promTarget('sum by (event) (increase(junshi_creative_jobs_total[1h]))', '{{event}}'),
+    ] }),
+    timeseries({ title: '创作失败码（1h 滚动）', targets: [
+      promTarget('sum by (code) (increase(junshi_creative_job_failures_total[1h]))', '{{code}}'),
+    ] }),
+    timeseries({ title: '排版引擎实际落点（1h 滚动）', targets: [
+      promTarget('sum by (engine) (increase(junshi_creative_engine_total[1h]))', '{{engine}}'),
+    ], desc: 'ai:Nrounds=AI 排版成功；template=主动模板；template_fallback=AI 失败后回落' }),
     timeseries({ title: '注册趋势（日）', targets: [pgTarget(q(`
       SELECT date_trunc('day', "createdAt") AS time, count(*)::float AS "注册数"
       FROM app_user WHERE $__timeFilter("createdAt") GROUP BY 1 ORDER BY 1`))] }),

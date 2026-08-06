@@ -30,7 +30,7 @@ import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
 import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
-import { ALERT_CONFIG_DEFS, feishuStatus, setFeishuTarget, sendFeishuText } from '../services/alertConfig.js';
+import { ALERT_CONFIG_DEFS, feishuStatus, setFeishuTarget, sendFeishuCard, formatAlertCard } from '../services/alertConfig.js';
 import { REVIEW_GRACE_PER_DAY, getQuotaState, getPlanStatus, setQuota } from '../services/tokenQuota.js';
 import { getBalance, grantCredits, chargeCredits } from '../services/credits.js';
 import { now, dayStart } from '../services/clock.js';
@@ -2002,7 +2002,26 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post('/admin/monitor-notify/test', async (req, reply) => {
     const actor = actorOf(req);
     try { requireSuper(actor); } catch (e) { return sendErr(reply, e, 403); }
-    const r = await sendFeishuText('✅ 军师监控 · 告警通道测试消息（来自运营后台）', { fresh: true });
+    const now = new Date();
+    const r = await sendFeishuCard(formatAlertCard({
+      status: 'firing',
+      groupLabels: { category: 'monitoring', severity: 'info' },
+      commonLabels: { environment: process.env.MONITOR_ENV_LABEL || '当前环境' },
+      alerts: [{
+        status: 'firing', startsAt: now.toISOString(),
+        labels: { alertname: 'JunshiAlertChannelTest', severity: 'info', category: 'monitoring', instance: '运营后台' },
+        annotations: {
+          title: '告警通道测试',
+          summary: '飞书机器人配置、签名校验与 Card 2.0 渲染均已打通。',
+          current: '测试消息已送达', threshold: '人工触发',
+          impact: '无业务影响', action: '确认卡片排版与看板按钮符合预期即可。', dashboard: 'junshi-system',
+        },
+      }],
+    }, {
+      environment: process.env.MONITOR_ENV_LABEL,
+      grafanaBaseUrl: process.env.MONITOR_GRAFANA_URL,
+      timeZone: process.env.MONITOR_TIME_ZONE,
+    }), { fresh: true });
     return r.sent ? { sent: true } : reply.code(502).send({ sent: false, reason: r.reason, error: '发送失败：' + (r.reason ?? '未知原因') });
   });
 

@@ -6,6 +6,12 @@
 
 ## 变更日志
 
+### 2026-08-06 · 监控告警整体梳理并升级高信息量飞书 Card 2.0 · 影响面：server + Prometheus/Alertmanager + 运维配置/文档
+
+飞书通知由一行 text 升级为 Card 2.0：Alertmanager 改按 `category + severity` 聚合同领域关联信号，卡片用严重/预警/提示/恢复四色标题，固定展示环境与时间、状态/信号数/持续或恢复耗时、逐信号当前值/阈值、影响、建议动作、对象标签和 Grafana 看板按钮；告警风暴最多展开 8 条并明示剩余数量，外部标签与注解进入 Markdown 前统一转义。新增 `services/alertCard.ts` 告警知识字典，所有 alertname 都有中文标题、阈值解释、影响和动作；规则侧强制 `category/current/summary`，对账测试会阻止“只有 PromQL、没有可读卡片”的新规则进入。生产发布后用后台“发测试消息”向当前飞书机器人发送完整卡片作为验收，不以代码已合并代替线上渲染确认。
+
+规则从 41 条补到 52 条：新增 API 429 激增、LLM 调用错误率/P95/队列拒绝、Token 日预算 100% 红线、支付 sweep 停跑、创作失败率/AI 排版模板回退、主机文件句柄、PG 死锁与监控 target 离线；动态阈值从 18 项扩为 20 项（API 429 频次、模型调用 P95）。成对预警/严重规则新增 `signal`，critical 只压住同信号 warning，避免不同告警因缺标签被误抑制；info 重复提醒降为 12 小时。四块 Grafana 看板从 81 个补到 95 个面板，新增 target/飞书转发自检、LLM 错误率/P95、支付 sweep 心跳和创作失败/回退定位。后台“发测试消息”同步改为完整卡片验收，`server/.env.example` 新增环境名、Grafana 地址和卡片时区。server 1,284 个测试与 TypeScript 构建、Prometheus 2.53 `promtool` 52 条规则及 Alertmanager 0.27 `amtool` 配置校验均通过。
+
 ### 2026-08-06 · 生产发布 `9f7167e` 并上传微信小程序 `0.2.29` 开发版 · 影响面：production + server/admin/H5 + 微信开发版
 
 生产已部署游客浏览与动作级登录调整：服务端、运营后台和 H5 均由提交 `9f7167e` 构建并切换，线上 `.deploy-version` 与该提交一致；`junshi-api` active、`NRestarts=0`、健康检查数据库正常，发布后 15 分钟无 warning/error。匿名 `/api/modules` 返回 10 项公开目录、匿名 `/api/plans` 返回 4 个方案，无效 token 请求公开模块仍严格返回 401；H5 与 `/admin/` 均返回 200。小程序按生产 server 模式重建并核对生产 API、版本与 Git SHA 后，以 `0.2.29` /「游客浏览与动作登录优化」上传成功，包体 1.3 MB（1412678 B）。本次只进入微信后台开发版；经营主体/备案/联系方式等外部事实与微信后台隐私指引尚未补齐，因此未提交审核或正式发布。

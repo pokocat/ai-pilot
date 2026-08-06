@@ -19,21 +19,32 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import yaml from 'js-yaml';
 import { ALERT_CONFIG_DEFS } from '../src/services/alertConfig.js';
+import { ALERT_KNOWLEDGE } from '../src/services/alertCard.js';
 import { renderMetrics } from '../src/services/metrics.js';
 
 const ALERTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'deploy', 'monitoring', 'prometheus', 'alerts');
 const METRICS_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'services', 'metrics.ts');
+const ALERTMANAGER_CONFIG = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'deploy', 'monitoring', 'alertmanager', 'alertmanager.yml');
 
-interface Rule { alert?: string; record?: string; expr?: string }
+interface Rule {
+  alert?: string;
+  record?: string;
+  expr?: string;
+  labels?: Record<string, string>;
+  annotations?: Record<string, string>;
+}
 interface RuleFile { groups?: { name?: string; rules?: Rule[] }[] }
 
-function allRules(): { file: string; group: string; name: string; expr: string }[] {
-  const out: { file: string; group: string; name: string; expr: string }[] = [];
+function allRules(): { file: string; group: string; name: string; expr: string; labels: Record<string, string>; annotations: Record<string, string> }[] {
+  const out: { file: string; group: string; name: string; expr: string; labels: Record<string, string>; annotations: Record<string, string> }[] = [];
   for (const file of readdirSync(ALERTS_DIR).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))) {
     const doc = yaml.load(readFileSync(join(ALERTS_DIR, file), 'utf8')) as RuleFile;
     for (const g of doc.groups ?? []) {
       for (const r of g.rules ?? []) {
-        out.push({ file, group: g.name ?? '?', name: r.alert ?? r.record ?? '?', expr: r.expr ?? '' });
+        out.push({
+          file, group: g.name ?? '?', name: r.alert ?? r.record ?? '?', expr: r.expr ?? '',
+          labels: r.labels ?? {}, annotations: r.annotations ?? {},
+        });
       }
     }
   }
@@ -66,6 +77,45 @@ describe('告警规则 × 应用指标对账', () => {
     const rules = allRules();
     assert.ok(rules.length >= 10, `只解析出 ${rules.length} 条规则，规则目录或格式有问题`);
     for (const r of rules) assert.ok(r.expr.trim(), `${r.file}/${r.name} 的 expr 为空`);
+  });
+
+  test('每条告警都有卡片分组、实时值、摘要与人类可读处置知识', () => {
+    const bad: string[] = [];
+    for (const r of allRules()) {
+      if (!r.name || r.name === '?') continue;
+      if (!r.labels.severity) bad.push(`${r.file}/${r.name} 缺 severity`);
+      if (!r.labels.category) bad.push(`${r.file}/${r.name} 缺 category（飞书无法按领域组卡）`);
+      if (!r.annotations.summary) bad.push(`${r.file}/${r.name} 缺 summary`);
+      if (!r.annotations.current) bad.push(`${r.file}/${r.name} 缺 current（卡片无法显示实时值）`);
+      const knowledge = ALERT_KNOWLEDGE[r.name];
+      if (!knowledge?.title || !knowledge?.threshold || !knowledge?.impact || !knowledge?.action) {
+        bad.push(`${r.file}/${r.name} 缺完整告警知识（title/threshold/impact/action）`);
+      }
+    }
+    assert.deepEqual(bad, [], `以下告警不能生成完整飞书卡片：\n${bad.join('\n')}`);
+  });
+
+  test('Alertmanager 按领域+等级组卡，成对阈值只按非空 signal 抑制', () => {
+    const config = yaml.load(readFileSync(ALERTMANAGER_CONFIG, 'utf8')) as {
+      route?: { group_by?: string[] };
+      inhibit_rules?: { source_matchers?: string[]; target_matchers?: string[]; equal?: string[] }[];
+    };
+    assert.deepEqual(config.route?.group_by, ['category', 'severity']);
+    const paired = (config.inhibit_rules ?? []).find((r) => r.equal?.includes('signal'));
+    assert.ok(paired, '缺少同 signal 的 warning/critical 抑制规则');
+    assert.ok(paired.source_matchers?.some((m) => /signal\s*=~\s*"\.\+"/.test(m)), 'source 必须限定 signal 非空，否则会误抑制同领域无 signal 告警');
+    assert.ok(paired.target_matchers?.some((m) => /signal\s*=~\s*"\.\+"/.test(m)), 'target 必须限定 signal 非空');
+
+    const bySignal = new Map<string, Set<string>>();
+    for (const rule of allRules()) {
+      if (!rule.labels.signal) continue;
+      const levels = bySignal.get(rule.labels.signal) ?? new Set<string>();
+      levels.add(rule.labels.severity);
+      bySignal.set(rule.labels.signal, levels);
+    }
+    for (const [signal, levels] of bySignal) {
+      assert.ok(levels.has('warning') && levels.has('critical'), `${signal} 带 signal 但不是 warning/critical 成对规则`);
+    }
   });
 
   test('引用的每个 junshi_* 指标名，应用侧真的会渲染', async () => {
