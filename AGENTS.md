@@ -687,6 +687,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
+- **Notion 工程变更日志待补登录后同步（2026-08-06）**：监控告警 Card 2.0 已部署 `097069a` 并完成飞书客户端验收，仓库 `docs/CHANGELOG.md` 已记录完整结论；但当前浏览器无可用 Notion 登录会话，未能把现有「军师 · 工程变更日志（持续更新）」顶部记录从“尚未部署”更新为线上验收结果。取得登录态后应补写：51 条可处置规则、估算结算只保留看板指标、P1/P2/P3 直接标题与超限指标区、生产实发通过。
 - **小程序登录合规仍有两类外部事实待运营补齐（2026-08-06，代码主链已完成）**：① `app/src/packages/main/legal/index.tsx` 已把微信登录无需手机号、可选自动续费、实际全额退款能力等代码事实改正并清掉正文 `【待确认】`，但经营主体全称、ICP、算法/生成式 AI 备案号、注册地址、客服邮箱、个人信息保护邮箱与管辖地在仓库及公开信息里均无法权威确认，当前 `【填写】` 不得靠猜；须由小程序主体负责人提供后再提审。② 微信后台《用户隐私保护指引》需由有后台权限的人按实际能力声明并提交，属于平台外部配置，代码无法代办；当前真实调用为 `Taro.login`（openid/unionid 登录）、`chooseAvatar`、`chooseImage`、`chooseMessageFile`、`saveImageToPhotosAlbum`、`requestSubscribeMessage`、`openType=contact` 与只写不读的 `setClipboardData`。当前包没有 `getPhoneNumber/getUserProfile/getUserInfo/getDeviceInfo`、剪贴板读取或位置接口，手机号只在用户主动选择短信登录/绑定时手输，后台不得超范围申报；逐项用途和调用点见登录整改方案 P0-9。未完成这两项不得宣称 P0 合规闭环或提交审核。
 - **游客完整速诊与足迹继承后置（2026-08-06）**：本轮按过审必需范围开放真实公共内容、军师开场白、能力目录与套餐价格；自由对话仍不向游客开放，`POST /quickscan` 仍需登录。若后续做游客 3 问速诊，必须先补设备指纹 + IP 双维度每日限流和低成本模型档，不能直接放开现有鉴权端点。游客浏览足迹归户、登录半屏化属于体验 P2，待上线后按转化数据决定。
 - **GenerationEffect 是 at-least-once，不是 exactly-once（2026-08-05）**：终态与 outbox 已同事务落库，pending/failed/stale-running 会补偿，报告通知也会等待真实发送结果后才完成 effect；但进程若在“外部动作已成功、effect 尚未标 completed”之间退出，仍可能重投。标题覆盖与记忆近重已有天然幂等，digest/预言有来源去重；微信报告通知等外部动作还没有统一的 `jobId/effectKey` 下游唯一键。上多实例或把通知升级为资金/权益类动作前，必须给目标账本补幂等键，不能依赖 effect 状态冒充 exactly-once。
