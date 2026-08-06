@@ -3,6 +3,7 @@ import { BASE_URL, IMPERSONATION_BASE_URL } from './config';
 import { getToken, setToken, clearToken } from './token';
 import { getApiBaseUrl, useMockApi } from './runtimeMode';
 import { mock } from './mock';
+import { shouldInterruptForUnauthorized } from './authGate';
 import type {
   Me, Agent, SurveyQuestion, SessionItem, SessionDetail,
   GenResult, GenRequest, LibItem, LoginResult, Profile, TodaySaying, SaveLibRequest,
@@ -76,12 +77,26 @@ export type {
 // token 助手（兼容旧导出名）
 export { getToken as getUserId, setToken as setUserId, clearToken as clearUserId } from './token';
 
-// 登录态失效的全局回调：request()/上传 收到 401 时**无条件**触发（由 store 注册）。
-// 目的：即便调用方 .catch 吞掉了错误，也一定会走到「重新登录」流程——绝不让用户滞留在失效界面看旧缓存。
+// 登录态失效的全局回调：request()/上传在「请求发出时带有 token」且收到 401 时触发（由 store 注册）。
+// 从未登录的游客访问鉴权接口只收到本地 UNAUTHORIZED，由动作级登录门承接；不能误报「登录态失效」。
+// 已有 token 却失效时，即便调用方 .catch 吞掉错误，也一定会走到重新登录流程。
 // 见 AGENTS.md「登录态失效必须显式打断」铁律。
 let onAuthLost: (() => void) | null = null;
 export function setAuthLostHandler(fn: () => void) { onAuthLost = fn; }
 export { BASE_URL };
+
+function throwUnauthorized(tokenAtRequest: string, data?: unknown, message = '未登录'): never {
+  const hadToken = shouldInterruptForUnauthorized(tokenAtRequest);
+  if (hadToken) {
+    clearToken();
+    onAuthLost?.();
+  }
+  throw Object.assign(new Error((data as { error?: string } | undefined)?.error || message), {
+    code: 'UNAUTHORIZED',
+    data,
+    hadToken,
+  });
+}
 
 // D-1 开通来源归因：随解锁/下单请求带入的位子来源（与 UserAgent.source 正交）。
 // source=prescription 时 refId=处方 id；catalog=货架/锦囊直接购买；market=生态市场常规浏览。
@@ -289,13 +304,14 @@ function httpErrorInfo(statusCode: number, data: unknown): { message: string; co
 export async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
   const apiBaseUrl = getApiBaseUrl();
   const url = `${apiBaseUrl}${path}`;
+  const tokenAtRequest = getToken();
   let res: Taro.request.SuccessCallbackResult;
   try {
     res = await Taro.request({
       url,
       method: method as any,
       data,
-      header: { 'Content-Type': 'application/json', 'x-user-id': getToken() },
+      header: { 'Content-Type': 'application/json', 'x-user-id': tokenAtRequest },
       // 微信默认约 60s；同步生成只是旧环境兜底，必须至少覆盖服务端 150s 对话预算。
       ...(path.startsWith('/generate-sync') ? { timeout: 180_000 } : {}),
     });
@@ -306,9 +322,7 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
     throw Object.assign(new Error(info.message), { code: 'NETWORK_ERROR', reason: info.reason, errMsg, url, origin, technicalMessage: info.technicalMessage });
   }
   if (res.statusCode === 401) {
-    clearToken(); // token 失效：清掉
-    onAuthLost?.(); // 无条件打断到重新登录，哪怕调用方吞掉下面这个 error
-    throw Object.assign(new Error((res.data as any)?.error || '未登录'), { code: 'UNAUTHORIZED', data: res.data });
+    throwUnauthorized(tokenAtRequest, res.data);
   }
   if (res.statusCode >= 400) {
     const info = httpErrorInfo(res.statusCode, res.data);
@@ -369,18 +383,19 @@ async function uploadKnowledgeFile(
   if (opts.staged) qs.push('staged=true');
   if (opts.batchId) qs.push(`batchId=${opts.batchId}`);
   const url = `${getApiBaseUrl()}/knowledge/upload${qs.length ? `?${qs.join('&')}` : ''}`;
+  const tokenAtRequest = getToken();
   // Taro.uploadFile 返回 UploadTaskPromise：既是 Promise 又带 abort/onProgressUpdate，先拿 task 再 await 结果。
   const task = Taro.uploadFile({
     url,
     filePath,
     name: 'file',
     formData: opts.originalName ? { originalName: opts.originalName } : undefined,
-    header: { 'x-user-id': getToken() },
+    header: { 'x-user-id': tokenAtRequest },
   });
   if (hooks?.onProgress) task.onProgressUpdate?.((e) => hooks.onProgress!(e.progress));
   hooks?.onTask?.(task);
   const res = await task;
-  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode === 401) throwUnauthorized(tokenAtRequest);
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`;
     try { msg = (JSON.parse(res.data) as { error?: string }).error || msg; } catch { /* 非 JSON 响应 */ }
@@ -397,17 +412,18 @@ async function uploadChatImageFile(
   hooks?: UploadHooks,
 ): Promise<{ id: string }> {
   const qs = opts.projectId ? `?projectId=${opts.projectId}` : '';
+  const tokenAtRequest = getToken();
   const task = Taro.uploadFile({
     url: `${getApiBaseUrl()}/chat/image-upload${qs}`,
     filePath,
     name: 'file',
     formData: opts.originalName ? { originalName: opts.originalName } : undefined,
-    header: { 'x-user-id': getToken() },
+    header: { 'x-user-id': tokenAtRequest },
   });
   if (hooks?.onProgress) task.onProgressUpdate?.((e) => hooks.onProgress!(e.progress));
   hooks?.onTask?.(task);
   const res = await task;
-  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode === 401) throwUnauthorized(tokenAtRequest);
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
     try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }
@@ -419,13 +435,14 @@ async function uploadChatImageFile(
 // 海报源素材上传（人像 / Logo / 二维码）：multipart 单文件 → 私有 OSS + CreativeAsset(kind='source')。
 // 服务端约束：仅 png/jpg/gif/webp、单张 ≤10MB；越限回 413/415，这里把 error 原样透出（服务端文案已面向用户）。
 async function uploadCreativeAssetFile(filePath: string, role: CreativeUploadRole): Promise<CreativeUploadResult> {
+  const tokenAtRequest = getToken();
   const res = await Taro.uploadFile({
     url: `${getApiBaseUrl()}/creative/uploads?role=${role}`,
     filePath,
     name: 'file',
-    header: { 'x-user-id': getToken() },
+    header: { 'x-user-id': tokenAtRequest },
   });
-  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  if (res.statusCode === 401) throwUnauthorized(tokenAtRequest);
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
     try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }
@@ -436,8 +453,9 @@ async function uploadCreativeAssetFile(filePath: string, role: CreativeUploadRol
 
 // 头像上传：multipart 单文件 → 后端存 OSS → 落库 user.avatarUrl，返回公网链接。
 async function uploadAvatarFile(filePath: string): Promise<{ ok: boolean; avatarUrl: string }> {
-  const res = await Taro.uploadFile({ url: `${getApiBaseUrl()}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': getToken() } });
-  if (res.statusCode === 401) { clearToken(); onAuthLost?.(); throw Object.assign(new Error('未登录'), { code: 'UNAUTHORIZED' }); }
+  const tokenAtRequest = getToken();
+  const res = await Taro.uploadFile({ url: `${getApiBaseUrl()}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': tokenAtRequest } });
+  if (res.statusCode === 401) throwUnauthorized(tokenAtRequest);
   if (res.statusCode >= 400) {
     let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
     try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }

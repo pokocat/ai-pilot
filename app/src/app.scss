@@ -68,6 +68,13 @@ page {
   --space-5: 20px;
   --space-6: 24px;
 
+  /* —— 页面纵向节奏（语义层） ——
+     同组卡片 / 独立内容块 / 章节切换分别走 12 / 16 / 24，页面不要再散写 9/10/13/14px
+     让相邻卡片和跨章节留白看起来一样近。 */
+  --rhythm-card: var(--space-3);
+  --rhythm-block: var(--space-4);
+  --rhythm-section: var(--space-6);
+
   /* —— 阴影 —— */
   /* brief/settings 早已引用 --shadow-sm 却从未定义（死令牌），此处补上即修复 */
   --shadow-sm: 0 1px 2px rgba(22, 25, 29, .04), 0 2px 8px rgba(22, 25, 29, .05);
@@ -132,7 +139,8 @@ input, textarea { font-family: var(--sans); }
 /* —— 通用卡片 —— */
 .card {
   background: var(--surface);
-  border: 1px solid var(--line);
+  /* 真卡用实边；--line 只留给卡内分割线。 */
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-lg);
   box-shadow: 0 2px 6px rgba(22,25,29,.04), 0 12px 30px rgba(22,25,29,.05);
 }
@@ -140,7 +148,7 @@ input, textarea { font-family: var(--sans); }
 /* —— 段头 —— */
 .sec-head {
   display: flex; align-items: center; justify-content: space-between;
-  margin: 18px 0 10px;
+  margin: var(--rhythm-section) 0 var(--rhythm-card);
 }
 .sec-title { font-family: var(--serif); font-size: 16px; font-weight: 600; color: var(--ink); }
 .sec-more { font-size: 12px; color: var(--ink-3); display: flex; align-items: center; gap: 3px; }

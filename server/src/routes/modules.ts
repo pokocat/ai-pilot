@@ -5,12 +5,15 @@ import type { FastifyInstance } from 'fastify';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { getModule } from '../data/modules.js';
-import { listForUser, enable, patchModule } from '../services/modules.js';
+import { listForUser, listPublicModules, enable, patchModule } from '../services/modules.js';
 
 export async function moduleRoutes(app: FastifyInstance) {
   // 能力面板：目录 + 用户启用态 + 推荐位
   app.get('/modules', async (req) => {
-    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const token = req.headers['x-user-id'] as string | undefined;
+    if (!token) return listPublicModules();
+    // 带 token 时保持严格校验：无效/过期 token 必须 401，不能悄悄降级成游客态。
+    const user = await resolveUser(token);
     return listForUser({ tenantId: user.tenantId, userId: user.id });
   });
 

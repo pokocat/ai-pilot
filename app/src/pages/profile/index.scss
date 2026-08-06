@@ -64,7 +64,7 @@
 
 /* 账户权益 3 格（account-benefit-grid）：权益名 + 一句状态，等宽三列。
    比原来的大数字三格矮，腾出的高度给下面的老师/班级群双卡。 */
-.account-benefit-grid { display: flex; gap: 6px; margin-top: 12px; }
+.account-benefit-grid { display: flex; gap: var(--space-2); margin-top: 12px; }
 .account-benefit {
   flex: 1; min-width: 0; box-sizing: border-box;
   padding: 9px 8px; border-radius: 12px;
@@ -81,7 +81,7 @@
 /* 老师与社群双卡（service-action-row）：深绿卡上的两张白卡。
    设计稿把这里从「半透明白 + 白字」改成「实白卡 + 墨字」，卡片更小、密度更高，
    老师卡内再叠一行可点的微信号（复制不必先进半屏）。 */
-.service-action-row { display: flex; gap: 7px; margin-top: 12px; }
+.service-action-row { display: flex; gap: var(--space-2); margin-top: 12px; }
 .service-action {
   flex: 1; min-width: 0; box-sizing: border-box;
   min-height: 54px; padding: 8px 9px; border-radius: 13px;
@@ -136,9 +136,9 @@
 }
 
 /* —— 经营统计（account-statline） —— */
-.account-statline { display: flex; justify-content: space-between; margin-top: 10px; }
+.account-statline { display: flex; gap: var(--space-2); margin-top: 10px; }
 .account-stat {
-  width: 31.8%; min-height: 52px; box-sizing: border-box;
+  flex: 1; min-width: 0; min-height: 52px; box-sizing: border-box;
   padding: 10px 8px; border-radius: 16px;
   background: rgba(255, 255, 255, .86);
   text-align: center;
@@ -149,9 +149,9 @@
 
 /* —— 菜单（design menu：左色块图标 + 右值 + ›） —— */
 /* C7：分组小节标题（档案/资产/账户/系统），行样式保持不变 */
-.menu-group { margin-top: 16px; }
+.menu-group { margin-top: var(--rhythm-section); }
 .menu-group-title {
-  display: block; margin: 0 4px 8px;
+  display: block; margin: 0 4px var(--rhythm-card);
   font-size: 12px; font-weight: 600; letter-spacing: .08em; color: var(--ink-3);
 }
 .menu-group .menu { margin-top: 0; }
@@ -161,6 +161,11 @@
   height: 54px; padding: 0 16px;
   border-bottom: 1px solid var(--line);
 }
+.guest-contact {
+  width: 100%; margin: 0; border-radius: 0; background: transparent;
+  line-height: normal; text-align: left; font-size: inherit;
+}
+.guest-contact::after { border: 0; }
 .menu-row:last-child { border-bottom: 0; }
 .menu-row:active { background: var(--surface-2); }
 .menu-ic {

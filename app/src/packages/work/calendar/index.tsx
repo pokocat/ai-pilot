@@ -275,7 +275,7 @@ export default function TianshiCalendar() {
 
         <Text className="tc-foot">命理内容为文化视角的经营节奏参考，不构成决策依据；「人谋可以改命」。</Text>
       </View>
-      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadChart(); }} />
+      <Login open={showLogin} onClose={() => setShowLogin(false)} onLoggedIn={() => { setShowLogin(false); loadChart(); }} />
     </View>
   );
 }

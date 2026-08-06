@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { View, Text, Image, ScrollView } from '@tarojs/components';
+import { View, Text, Image, ScrollView, Button } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import TabHeader from '../../components/TabHeader';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
+import AsyncState from '../../components/AsyncState';
 import BaseSheet from '../../components/Sheet';
 import CoachMarks from '../../components/CoachMarks';
 import { navTo, switchTo } from '../../services/nav';
@@ -13,9 +14,11 @@ import { REVIEW_TIME } from '../../data/constants';
 import { archiveAnswerPrompt } from '../../data/intents';
 import { useStore } from '../../hooks/useStore';
 import { api, type ProgressView, type StrategicProfileView, type WorkbenchView } from '../../services/api';
+import type { AuthReason } from '../../services/authGate';
 import './index.scss';
 
 type SheetKey = '' | 'workbench' | 'teacher' | 'group';
+const isWeapp = process.env.TARO_ENV === 'weapp';
 
 // 我的页 —— 对齐设计稿 page-profile（V7-13）：居中标题 / 深绿账户服务卡（社群 + 邀请码 + 权益三格 + 服务动作）
 // / 统计 / 菜单 / 服务老师 · 群二维码 · 档案工作台半屏详情。
@@ -32,7 +35,8 @@ export default function Profile() {
   const [strategic, setStrategic] = useState<StrategicProfileView | null>(null);
   const [workbench, setWorkbench] = useState<WorkbenchView | null>(null);
   const [sheet, setSheet] = useState<SheetKey>('');
-  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginReason, setLoginReason] = useState<AuthReason>('profile');
 
   // C1：登录后才拉数据（未登录不再空拉 api.library 等弹错误 toast）。
   const loadProfile = () => {
@@ -47,7 +51,15 @@ export default function Profile() {
 
   useDidShow(() => {
     s.setTab(4);
-    if (!s.isAuthed()) { setShowLogin(true); return; }
+    if (!s.isAuthed()) {
+      setLibCount(0);
+      setProjCount(0);
+      setReportCount(0);
+      setProg(null);
+      setStrategic(null);
+      setWorkbench(null);
+      return;
+    }
     loadProfile();
     void s.loadBadges(); // 底栏角标搭车刷新（内部 15 秒节流）
   });
@@ -189,6 +201,42 @@ export default function Profile() {
       ],
     },
   ];
+
+  if (!s.isAuthed()) {
+    const askLogin = (reason: AuthReason) => { setLoginReason(reason); setShowLogin(true); };
+    return (
+      <Screen topInset>
+        <View className="pad account">
+          <TabHeader title="老板" kicker="你自己" glyph="我" />
+          <AsyncState
+            empty
+            emptyText="尚未登录"
+            emptyAction={{ text: '登录', onClick: () => askLogin('profile') }}
+          />
+          <View className="menu-group">
+            <Text className="menu-group-title">服务</Text>
+            <View className="menu card">
+              <View className="menu-row" onClick={() => navTo('/packages/work/plans/index')}><View className="menu-ic"><Icon name="spark" size={14} color={accent} /></View><Text className="menu-t">方案与价格</Text><Text className="menu-s" /><Text className="menu-go">›</Text></View>
+              <View className="menu-row" onClick={() => switchTo('/pages/thinktank/index')}><View className="menu-ic"><Icon name="grid" size={14} color={accent} /></View><Text className="menu-t">军师能力目录</Text><Text className="menu-s" /><Text className="menu-go">›</Text></View>
+            </View>
+          </View>
+          <View className="menu-group">
+            <Text className="menu-group-title">规则与隐私</Text>
+            <View className="menu card">
+              <View className="menu-row" onClick={() => navTo('/packages/main/legal/index?doc=agreement')}><View className="menu-ic"><Icon name="doc" size={14} color={accent} /></View><Text className="menu-t">用户协议</Text><Text className="menu-s" /><Text className="menu-go">›</Text></View>
+              <View className="menu-row" onClick={() => navTo('/packages/main/legal/index?doc=privacy')}><View className="menu-ic"><Icon name="lock" size={14} color={accent} /></View><Text className="menu-t">隐私政策</Text><Text className="menu-s" /><Text className="menu-go">›</Text></View>
+              {isWeapp ? (
+                <Button className="menu-row guest-contact" openType="contact"><View className="menu-ic"><Icon name="user" size={14} color={accent} /></View><Text className="menu-t">联系客服</Text><Text className="menu-s" /><Text className="menu-go">›</Text></Button>
+              ) : (
+                <View className="menu-row" onClick={() => Taro.showModal({ title: '联系客服', content: '请在微信小程序「军师」内进入本页，点击“联系客服”。', showCancel: false })}><View className="menu-ic"><Icon name="user" size={14} color={accent} /></View><Text className="menu-t">联系客服</Text><Text className="menu-s" /><Text className="menu-go">›</Text></View>
+              )}
+            </View>
+          </View>
+        </View>
+        <Login open={showLogin} reason={loginReason} onClose={() => setShowLogin(false)} onLoggedIn={() => { setShowLogin(false); loadProfile(); }} />
+      </Screen>
+    );
+  }
 
   return (
     <Screen topInset>
@@ -421,7 +469,7 @@ export default function Profile() {
 
 
       {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉我的页数据 */}
-      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadProfile(); }} />
+      <Login open={showLogin} reason={loginReason} onClose={() => setShowLogin(false)} onLoggedIn={() => { setShowLogin(false); loadProfile(); }} />
       <CoachMarks />
     </Screen>
   );

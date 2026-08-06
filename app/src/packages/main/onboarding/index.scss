@@ -213,6 +213,14 @@
   color: var(--ink-3);
 }
 
+.ob-skip {
+  display: block;
+  padding: 18px 0 8px;
+  color: var(--ink-3);
+  font-size: 13px;
+  text-align: center;
+}
+
 /* —— 首判 —— */
 .ob-marshal {
   display: flex;

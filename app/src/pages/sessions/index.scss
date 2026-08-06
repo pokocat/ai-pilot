@@ -3,7 +3,7 @@
 /* —— 搜索行：pill 占满 + 右侧「历史」（承接原页头右侧入口，页头一律不放按钮） —— */
 .council-searchrow {
   display: flex; align-items: center; gap: 6px;
-  margin-top: 13px;
+  margin-top: var(--rhythm-block);
 }
 .council-hist {
   flex-shrink: 0;
@@ -30,13 +30,14 @@
 .cs-clear::after { content: ''; position: absolute; top: -13px; bottom: -13px; left: -13px; right: -9px; }
 
 /* —— 快捷补给横滑卡（quick-card-strip） —— */
-.quick-row { white-space: nowrap; margin-top: 12px; width: 100%; }
+.quick-row { white-space: nowrap; margin-top: var(--rhythm-block); width: 100%; }
 .quick-card {
   display: inline-flex; flex-direction: column; gap: 6px;
   width: 132px; min-height: 66px; box-sizing: border-box;
-  padding: 13px 12px; margin-right: 10px;
+  padding: 13px 12px; margin-right: var(--rhythm-card);
   border-radius: 18px; vertical-align: top;
   background: rgba(255, 255, 255, .92);
+  border: 1px solid var(--line-strong);
   box-shadow: 0 8px 22px rgba(42, 36, 20, .055);
 }
 .quick-card:active { opacity: .8; }
@@ -48,7 +49,7 @@
 
 /* —— 微信式军师线程列表（thread-list）：半透明白底 + 上下发丝线，通栏 —— */
 .wx-list {
-  margin: 14px -18px 0;
+  margin: var(--rhythm-block) -18px 0;
   padding: 0 16px;
   background: rgba(255, 255, 255, .56);
   border-top: 1px solid var(--line);
@@ -84,7 +85,7 @@
 
 /* —— 分组标题（thread-section） —— */
 .wx-section {
-  margin: 14px 2px 0;
+  margin: var(--rhythm-section) 2px 0;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--line);
   font-size: 12px; font-weight: 600; color: var(--ink-3);
@@ -98,7 +99,7 @@
 .es-link { display: block; font-size: 13px; font-weight: 600; margin-top: 10px; }
 
 /* —— 跨域搜索结果（V7-14）：分组复用 wx-section / wx-list，行不带头像 —— */
-.search-results { margin-top: 4px; }
+.search-results { margin-top: var(--rhythm-card); }
 .sr-item {
   display: flex; align-items: center; gap: 10px;
   min-height: 62px; box-sizing: border-box;

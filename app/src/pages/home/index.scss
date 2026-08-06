@@ -65,7 +65,7 @@
 .mode-back:active { opacity: .8; }
 
 /* —— 判断依据（battle-panel[evidence]）：已引用 / 待补 两组 —— */
-.evidence-card { margin-top: 14px; padding: 15px 16px 12px; border-radius: 18px; }
+.evidence-card { margin-top: var(--rhythm-block); padding: 15px 16px 12px; border-radius: 18px; }
 .ev-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .ev-sum { flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
 .ev-group { margin-top: 12px; }
@@ -87,7 +87,7 @@
 .ev-go { flex-shrink: 0; font-size: 12px; font-weight: 700; }
 
 /* —— 决策日志 · 待验证（three-force-decision） —— */
-.decision-card { margin-top: 14px; padding: 15px 16px; border-radius: 18px; }
+.decision-card { margin-top: var(--rhythm-block); padding: 15px 16px; border-radius: 18px; }
 .decision-card:active { opacity: .88; }
 .dc-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .dc-seq { flex-shrink: 0; font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
@@ -142,11 +142,11 @@
 
 /* —— 战局信号（metric-grid） —— */
 .metric-grid {
-  display: flex; justify-content: space-between;
+  display: flex; gap: var(--space-2);
   margin: 12px 0 4px;
 }
 .metric {
-  width: 31.8%; box-sizing: border-box;
+  flex: 1; min-width: 0; box-sizing: border-box;
   padding: 14px 10px 12px; border-radius: 15px;
   text-align: left;
 }
@@ -227,7 +227,7 @@
 
 /* —— 下一步动作 / 关联模块（battle-actions） —— */
 .battle-actions {
-  margin-top: 16px;
+  margin-top: var(--rhythm-section);
   padding: 16px 16px 4px;
   border-radius: 18px;
 }
@@ -265,7 +265,7 @@
 
 /* —— 现在不能做（nono-card） —— */
 .nono-card {
-  margin-top: 14px;
+  margin-top: var(--rhythm-block);
   padding: 18px 17px 16px;
   border-radius: 18px;
   background: #F0EFE9;
@@ -280,9 +280,10 @@
 
 /* —— 今日献策（每日批语）：页头细线下的一句眉批，不占卡、不描边 —— */
 /* 只靠字号与颜色分层：kicker 用本命色小字，批语用宋体一行。上下留白比正文卡窄，读作页头的一部分。 */
-.say-strip { margin: 2px 0 14px; }
+.say-strip { margin: 2px 0 var(--rhythm-block); }
 .say-k { font-size: 11px; letter-spacing: .12em; font-weight: 600; }
 .say-line { display: block; font-size: 15px; line-height: 1.5; color: var(--ink-2); margin-top: 5px; }
+.home .guest-notice { margin-bottom: var(--rhythm-section); }
 
 /* —— 认可判断 CTA（battle-cta 三态机）：文档流内，经营战局内容末尾 —— */
 /* 新设计稿把这里从固定悬浮改成 position: static（margin: 16px 0 12px），不再压内容、不再与底栏叠。 */
@@ -315,13 +316,13 @@
 .battle-cta.generated .bc-arrow { color: #174F3D; }
 
 /* —— 经营数据（M4 PR-16 看板第一层 v1：近 7 天回填） —— */
-.kpi-card { margin-top: 14px; padding: 16px 16px 14px; border-radius: 18px; }
+.kpi-card { margin-top: var(--rhythm-block); padding: 16px 16px 14px; border-radius: 18px; }
 .kpi-card:active { opacity: .85; }
 .kpi-head { display: flex; align-items: center; justify-content: space-between; }
 .kpi-head .section-label { margin-bottom: 0; }
 .kpi-sub { font-size: 11px; color: var(--ink-3); font-weight: 600; }
-.kpi-row { display: flex; justify-content: space-between; margin-top: 12px; }
-.kpi-cell { width: 31.8%; text-align: center; padding: 10px 6px; border-radius: 13px; background: var(--surface-2); }
+.kpi-row { display: flex; gap: var(--space-2); margin-top: 12px; }
+.kpi-cell { flex: 1; min-width: 0; text-align: center; padding: 10px 6px; border-radius: 13px; background: var(--surface-2); }
 .kpi-v { display: block; font-size: 20px; font-weight: 600; color: var(--green); }
 .kpi-l { display: block; margin-top: 4px; font-size: 11px; color: var(--ink-3); font-weight: 600; }
 

@@ -260,7 +260,7 @@ export default function MingpanReportPage() {
         ) : null}
       </BaseSheet>
 
-      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadReport(); }} />
+      <Login open={showLogin} onClose={() => setShowLogin(false)} onLoggedIn={() => { setShowLogin(false); loadReport(); }} />
     </View>
   );
 

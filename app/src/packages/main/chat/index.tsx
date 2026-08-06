@@ -28,6 +28,7 @@ import { acceptDeliverable } from '../../../services/dossier';
 import { navTo } from '../../../services/nav';
 import { chatPendingAge, clearChatPending, isChatPending, markChatPending } from '../../../services/chatPending';
 import { getCreativeStatus, peekCreativeStatus } from '../../../services/creative';
+import type { AuthReason } from '../../../services/authGate';
 import './index.scss';
 
 // uid：每条消息的稳定 key（服务端消息用其 id，本地临时消息造递增 uid），供列表渲染 key 用。
@@ -329,7 +330,8 @@ export default function Chat() {
   const [scrollTop, setScrollTop] = useState(0);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
-  const [showLogin, setShowLogin] = useState(() => !store.isAuthed());
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginReason, setLoginReason] = useState<AuthReason>('chat');
   const [picker, setPicker] = useState(false);
   // 海报成品图能力：仅海报设计师会话需要，null = 未知/不可用 → 成果卡不露出出图入口（方案 §16 降级口径）。
   const [creativeStatus, setCreativeStatus] = useState<CreativeStatusResult | null>(() => peekCreativeStatus());
@@ -608,7 +610,8 @@ export default function Chat() {
   // 审核类错误（输入/输出未通过内容审核）：重试同样内容必再次被拦，故不提供「重试」，也避免叠出重复气泡。
   const isModerationErr = (s?: string) => !!s && /审核/.test(s);
 
-  const promptLogin = (title = '请先登录后再开始对话') => {
+  const promptLogin = (title = '请先登录后再开始对话', reason: AuthReason = 'chat') => {
+    setLoginReason(reason);
     setShowLogin(true);
     Taro.showToast({ title, icon: 'none' });
   };
@@ -649,7 +652,7 @@ export default function Chat() {
       } else {
         await primeGuestThread();
       }
-      promptLogin();
+      if (send) writeInput(decodeURIComponent(send));
       return;
     }
 
@@ -1128,9 +1131,7 @@ export default function Chat() {
   async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true, activeProjectId = projectId) {
     if (busy) return;
     if (!store.isAuthed()) {
-      promptLogin();
-      setMsgs((m) => [...m, { role: 'assistant', reply: { text: '请先登录后再继续对话。' }, uid: nextMsgUid() }]);
-      setTimeout(scrollToEnd, 30);
+      promptLogin('登录后即可发送，刚才写的内容会为你保留', 'chat');
       return;
     }
     // 过期只读锁定（D4）：到期后前端即拦 AI 交互，提示续费（后端 PLAN_EXPIRED 403 为兜底硬保证）。
@@ -1488,6 +1489,10 @@ export default function Chat() {
       Taro.showToast({ title: '言过两千，可精简或粘贴成附卷', icon: 'none' });
       return;
     }
+    if (!store.isAuthed()) {
+      promptLogin('登录后即可发送，刚才写的内容会为你保留', 'chat');
+      return;
+    }
     writeInput('');
     // 发送即作废在途的粘贴结算，免得定时器到点后把已清空/新输入误判成粘贴。
     if (pasteSettleTimerRef.current) { clearTimeout(pasteSettleTimerRef.current); pasteSettleTimerRef.current = null; }
@@ -1721,8 +1726,7 @@ export default function Chat() {
     if (busy) return;
     setInputFocus(false);
     if (!store.isAuthed()) {
-      setShowLogin(true);
-      Taro.showToast({ title: '请先登录', icon: 'none' });
+      promptLogin('登录后即可上传或引用资料', 'upload');
       return;
     }
     Taro.showActionSheet({
@@ -1928,8 +1932,7 @@ export default function Chat() {
   const openPicker = async () => {
     setInputFocus(false);
     if (!store.isAuthed()) {
-      setShowLogin(true);
-      Taro.showToast({ title: '请先登录', icon: 'none' });
+      promptLogin('登录后即可引用你的案卷、方案和资料', 'save');
       return;
     }
     setPicker(true);
@@ -2637,6 +2640,8 @@ export default function Chat() {
 
       <Login
         open={showLogin}
+        reason={loginReason}
+        onClose={() => setShowLogin(false)}
         onLoggedIn={() => {
           setShowLogin(false);
           initChat();

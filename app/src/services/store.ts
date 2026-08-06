@@ -77,6 +77,8 @@ function resetAuthState() {
 
 function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?: string } = {}): ApiErrorKind {
   if (isUnauthorizedError(e)) {
+    // 游客从未持有 token：这是动作级登录门，不是「登录态失效」。不清状态、不提示、不跳路由。
+    if ((e as { hadToken?: boolean })?.hadToken === false) return 'unauthorized';
     resetAuthState();
     emit();
     if (!options.silent) {
@@ -107,9 +109,10 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
   return 'other';
 }
 
-// 全局登录态失效处理：api.request() 收到 401 时**无条件**回调这里，即便页面 .catch 吞掉了错误，
-// 也会走到「清登录态 + 提示重新登录 + reLaunch 回登录入口」。杜绝用户滞留在失效界面看旧缓存。
-setAuthLostHandler(() => reportApiError({ code: 'UNAUTHORIZED' }));
+// 全局登录态失效处理：api.request() 只有在请求发出时携带过 token 且收到 401 才回调这里；
+// 即便页面 .catch 吞掉了错误，也会走到「清登录态 + 提示重新登录 + reLaunch 回登录入口」。
+// 游客请求的 401 留给动作级登录门处理，不提示“登录态失效”。
+setAuthLostHandler(() => reportApiError({ code: 'UNAUTHORIZED', hadToken: true }));
 
 type Listener = () => void;
 const listeners = new Set<Listener>();

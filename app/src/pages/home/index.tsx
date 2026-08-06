@@ -4,6 +4,8 @@ import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import TabHeader from '../../components/TabHeader';
 import Login from '../../components/Login';
+import GuestNotice from '../../components/GuestNotice';
+import AsyncState from '../../components/AsyncState';
 import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
 import Sheet from '../../components/Sheet';
@@ -11,12 +13,12 @@ import CoachMarks from '../../components/CoachMarks';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
 import { api, type BattleForce, type ForceKind, type ChartSummary, type DecisionView } from '../../services/api';
+import type { AuthReason } from '../../services/authGate';
 import { MODULE_MARKET } from '../../data/operatingSystem';
 import { refreshDossier, type Dossier } from '../../services/dossier';
 import { navTo, switchTo } from '../../services/nav';
 import { REVIEW_TIME } from '../../data/constants';
 import { ARCHIVE_INTERVIEW_PROMPT, archiveAnswerPrompt } from '../../data/intents';
-import { shouldOpenOnboarding } from '../../services/onboardingStateCore';
 import { pickDecisionToVerify } from '../../services/decisionPick';
 import './index.scss';
 
@@ -105,11 +107,9 @@ function forceSynthesis(forces: BattleForce[]): { title: string; body: string } 
 // 判断内容一律来自真实军师档案（me.understanding，含结构化 battleForces）与案卷；资料不足时引导进入对话访谈，不预置结论。
 export default function Home() {
   const s = useStore();
-  const authed = s.isAuthed();
-  const onboardingKnown = s.isOnboardingKnown();
-  const onboarded = s.isOnboarded();
   const accent = s.color().vars['--accent'];
-  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginReason, setLoginReason] = useState<AuthReason>('chat');
   const [saying, setSaying] = useState<{ text: string; date: string }>({ text: '先把自己<em>立于不败</em>，再等对手露出破绽。', date: todayLabel() });
   const [dossier, setDossier] = useState<Dossier | null>(null);
   // 首帧水合标记（C2）：未完成首轮拉取前，hero 与三势区渲染骨架，避免兜底文案闪一帧再跳变。
@@ -130,7 +130,7 @@ export default function Home() {
   // 决策日志 · 待验证（真实决策账本的最近一条 pending）：设计稿把它放在三势结论下面，作为「判断→验证」的闭环提示。
   const [pendingDecision, setPendingDecision] = useState<DecisionView | null>(null);
   const me = s.me();
-  const fortuneOn = s.fortuneOn(); // P0-2：命理关 → 时运策 / 命盘分析 两个视角整体不出现
+  const fortuneOn = s.isAuthed() && s.fortuneOn(); // 游客只看经营战局；个人命盘与时运均在登录后展示
   // 生效视角由开关推导，而不是让 modePick 自己管：用户停在时运策/命盘分析时后端把命理开关关掉
   // （下一次 /me 回读就会变），只藏 tab 会留下一个还在屏上的命理面板，而把 modePick 当真又会让
   // 三个面板同时不满足条件、整页空白。推导成 business 一次把两种情况都收住。
@@ -149,9 +149,9 @@ export default function Home() {
     // 今日是否已认可判断（本地按天幂等）→ 直接回显已生成态
     try { if (Taro.getStorageSync(COMMIT_KEY) === dayKey()) setCta('done'); } catch { /* noop */ }
     void s.loadBadges(); // 底栏角标（问策未读 / 军令待复盘）搭车刷新：内部 15 秒节流 + 未登录直返
-    // 首轮拉取（案卷 + 军师档案）完成后再标记水合，hero/三势区据此收起骨架。
-    const jobs: Promise<unknown>[] = [refreshDossier().then(setDossier)];
     if (s.isAuthed()) {
+      // 首轮拉取（案卷 + 军师档案）完成后再标记水合，hero/三势区据此收起骨架。
+      const jobs: Promise<unknown>[] = [refreshDossier().then(setDossier)];
       jobs.push(store.loadMe()); // 刷新军师档案（对话/资料变化后战局判断与三势随之更新）
       // 天势接命盘：并行拉命盘摘要（失败/无盘/命理关静默兜底 null）。
       // 命理关时连请求都不发（省一次往返，也不把命盘留在内存里）。
@@ -163,32 +163,29 @@ export default function Home() {
           .then((r) => setPendingDecision(pickDecisionToVerify(r.items)))
           .catch(() => setPendingDecision(null)),
       );
+      Promise.all(jobs).catch(() => {}).then(() => setHydrated(true));
+    } else {
+      setDossier(null);
+      setChartRaw(null);
+      setPendingDecision(null);
+      setHydrated(true);
     }
-    Promise.all(jobs).catch(() => {}).then(() => setHydrated(true));
   });
 
-  useEffect(() => {
-    // 登录门：未登录先登录；已登录但未建档再走本命色/建档
-    if (!authed) {
-      setShowLogin(true);
-    } else if (shouldOpenOnboarding({ authed, onboardingKnown, onboarded })) {
-      goOnboarding();
-    }
-  }, [authed, onboardingKnown, onboarded]);
   useEffect(() => {
     api.todaySaying().then((r) => setSaying({ text: r.text, date: r.date || todayLabel() })).catch(() => {});
   }, []);
 
   // 三势全解弹层底栏协调（setOverlay）已收敛至 Sheet 基座。
 
-  const requireLogin = () => {
+  const requireLogin = (reason: AuthReason) => {
     if (s.isAuthed()) return true;
+    setLoginReason(reason);
     setShowLogin(true);
-    Taro.showToast({ title: '请先登录后再开始对话', icon: 'none' });
     return false;
   };
   const goChat = (params: string) => {
-    if (!requireLogin()) return false;
+    // 军师人设和开场白公开；带 send 的游客入口由聊天页预填，真正发送时再登录。
     navTo(`/packages/main/chat/index?${params}`);
     return true;
   };
@@ -205,6 +202,7 @@ export default function Home() {
   const maturityLabel = !s.isAuthed() || !und ? '—' : und.maturity === 'ready' ? '可用' : und.maturity === 'forming' ? '整理中' : '待建档';
 
   const refresh = () => {
+    if (!requireLogin('profile')) return;
     // C5：toast 移到全部刷新完成后再提示，避免「已刷新」抢在数据回来之前弹出。
     const jobs: Promise<unknown>[] = [refreshDossier().then(setDossier)];
     if (s.isAuthed()) {
@@ -231,7 +229,7 @@ export default function Home() {
   const handleBattleCta = () => {
     if (cta === 'generating') return; // 生成中锁定
     if (cta === 'done') { switchTo('/pages/studio/index'); return; } // 已生成 → 去执行页看军令与报告
-    if (!requireLogin()) return;
+    if (!requireLogin('execute')) return;
     setCta('generating');
     api.battleCommit()
       .then(() => {
@@ -249,6 +247,39 @@ export default function Home() {
         s.handleApiError(e);
       });
   };
+
+  if (!s.isAuthed()) {
+    return (
+      <Screen topInset className="home">
+        <View className="pad">
+          <TabHeader title="军情" kicker="看今日判断" glyph="势" />
+          <View className="say-strip">
+            <Text className="say-k" style={{ color: accent }}>今日献策 · {saying.date}</Text>
+            <SayingLine html={saying.text} accent={accent} />
+          </View>
+          <AsyncState
+            empty
+            emptyText="还没有战局判断"
+            emptyAction={{ text: '去问策', onClick: () => switchTo('/pages/sessions/index') }}
+          />
+        </View>
+        <Login
+          open={showLogin}
+          reason={loginReason}
+          onClose={() => setShowLogin(false)}
+          onLoggedIn={() => {
+            setShowLogin(false);
+            setHydrated(false);
+            Promise.all([
+              store.loadMe(),
+              refreshDossier().then(setDossier),
+              api.decisions().then((r) => setPendingDecision(pickDecisionToVerify(r.items))).catch(() => setPendingDecision(null)),
+            ]).finally(() => setHydrated(true));
+          }}
+        />
+      </Screen>
+    );
+  }
 
   const ctaText = cta === 'generating'
     ? { t: '正在翻你的案卷，排兵布阵…', s: '梳理战局、拆解任务、拟定军令', icon: '…' }
@@ -272,6 +303,15 @@ export default function Home() {
           <Text className="say-k" style={{ color: accent }}>今日献策 · {saying.date}</Text>
           <SayingLine html={saying.text} accent={accent} />
         </View>
+
+        {!s.isOnboarded() ? (
+          <GuestNotice
+            title="你的战局还没有建档"
+            desc="建档是自愿的；完成三问后，军师会把第一份判断写到这里。"
+            action="开始建档"
+            onAction={goOnboarding}
+          />
+        ) : null}
 
         {/* 三视角切换（新设计稿 battle-mode-tabs）：经营战局是主视角，时运策与命盘分析只调节奏。
             命理开关关闭时整条 tab 不出现（P0-2：命理下线要能一键全产品隐藏），页面回到单视角形态。 */}
@@ -445,7 +485,7 @@ export default function Home() {
 
         {/* 战局信号（metric-grid）：案卷完整度 / 待补资料 / 风险锁 —— 全部真实状态 */}
         <View className="metric-grid">
-          <View className="metric card" onClick={() => requireLogin() && navTo('/packages/main/brief/index')}>
+          <View className="metric card" onClick={() => requireLogin('profile') && navTo('/packages/main/brief/index')}>
             <Text className="metric-v serif">{maturityLabel}</Text>
             <Text className="metric-l">案卷完整度</Text>
           </View>
@@ -712,9 +752,16 @@ export default function Home() {
 
       <Login
         open={showLogin}
-        onLoggedIn={(onboarded) => {
+        reason={loginReason}
+        onClose={() => setShowLogin(false)}
+        onLoggedIn={() => {
           setShowLogin(false);
-          if (!onboarded) goOnboarding();
+          setHydrated(false);
+          Promise.all([
+            store.loadMe(),
+            refreshDossier().then(setDossier),
+            api.decisions().then((r) => setPendingDecision(pickDecisionToVerify(r.items))).catch(() => setPendingDecision(null)),
+          ]).finally(() => setHydrated(true));
         }}
       />
       <CoachMarks />

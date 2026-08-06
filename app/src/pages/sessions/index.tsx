@@ -13,11 +13,11 @@ import AgentUnlock from '../../components/AgentUnlock';
 import { useStore } from '../../hooks/useStore';
 import { diamondCost } from '../../services/format';
 import { api, type Agent, type SessionItem, type SearchHit } from '../../services/api';
+import type { AuthReason } from '../../services/authGate';
 import { getToken } from '../../services/token';
 import { ADVISOR_ALIAS, CORE_SPECIALISTS, dialogueDirectoryAgents } from '../../data/council';
 import NextStepCard from '../../components/NextStepCard';
 import CoachMarks from '../../components/CoachMarks'; // 保持 CoachMarks 全站最后（避免 common chunk CSS 顺序告警，AGENTS.md §7.2）
-import { shouldOpenOnboarding } from '../../services/onboardingStateCore';
 import './index.scss';
 
 function relTime(iso: string): string {
@@ -58,12 +58,10 @@ export default function Sessions() {
   const [buying, setBuying] = useState<Agent | null>(null);
   const [query, setQuery] = useState('');
   const [showHistory, setShowHistory] = useState(false);
-  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginReason, setLoginReason] = useState<AuthReason>('chat');
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false); // 检索进行中（防抖 + 请求期间给「检索中」占位，避免空态误判）
-  const authed = s.isAuthed();
-  const onboardingKnown = s.isOnboardingKnown();
-  const onboarded = s.isOnboarded();
 
   const presentSessions = (list: SessionItem[]) => list.map((it) => (
     it.generating || !isChatPending(it.id)
@@ -103,7 +101,6 @@ export default function Sessions() {
     Taro.getCurrentInstance().page?.getTabBar?.();
     s.loadAgents();
     if (!s.isAuthed()) {
-      setShowLogin(true);
       setSessions([]);
       setSessErr(false);
       return;
@@ -111,19 +108,6 @@ export default function Sessions() {
     loadSessions();
     void s.loadBadges({ skipSessions: true }); // 军令红点搭车刷新；未读由上面的 loadSessions 就地同步，不重复拉 /sessions
   });
-
-  // 首登入局仪式（择色 → 立案卷 → 首判）。防重复：页栈已有 onboarding 就不再跳（navTo 另有 800ms 防连点锁）。
-  // 建档后的功能引导由 <CoachMarks>（功能点亮 · 五步）自持 storage 触发，取代旧 4 步 OnboardSheet。
-  const goOnboarding = () => {
-    const pages = (Taro.getCurrentPages?.() || []) as { route?: string }[];
-    if (pages.some((p) => (p.route || '').includes('packages/main/onboarding'))) return;
-    navTo('/packages/main/onboarding/index');
-  };
-  // 已登录但未建档 → 进入全屏入局仪式。
-  const gateOnboarding = () => {
-    if (shouldOpenOnboarding({ authed, onboardingKnown, onboarded })) goOnboarding();
-  };
-  useEffect(() => { gateOnboarding(); }, [authed, onboardingKnown, onboarded]);
 
   // V7-14 跨域搜索：输入 300ms 防抖 → api.search（mock 亦返回本地匹配，同一路径）；空 q 隐藏结果。
   useEffect(() => {
@@ -143,24 +127,27 @@ export default function Sessions() {
   const latestOf = (agentKey: string) => sessions.find((x) => x.agentKey === agentKey);
   const aliasOf = (key: string) => ADVISOR_ALIAS[key] || '';
 
-  const requireLogin = () => {
+  const requireLogin = (reason: AuthReason) => {
     if (s.isAuthed()) return true;
+    setLoginReason(reason);
     setShowLogin(true);
     return false;
   };
-  const continueWith = (key: string) => { if (requireLogin()) navTo(`/packages/main/chat/index?agentKey=${key}&continue=1`); };
-  const newWith = (key: string) => { if (requireLogin()) navTo(`/packages/main/chat/index?agentKey=${key}&fresh=1`); };
-  const openSession = (id: string) => { if (requireLogin()) navTo(`/packages/main/chat/index?sessionId=${id}`); };
+  // 军师人设与开场白是公开内容；游客也能进入对话页浏览，真正发送时再登录。
+  const continueWith = (key: string) => navTo(`/packages/main/chat/index?agentKey=${key}&continue=1`);
+  const newWith = (key: string) => { if (requireLogin('chat')) navTo(`/packages/main/chat/index?agentKey=${key}&fresh=1`); };
+  const openSession = (id: string) => { if (requireLogin('history')) navTo(`/packages/main/chat/index?sessionId=${id}`); };
   // 搜索结果跳转：智库为 tab 页用 switchTo，其余（/packages/... 含 chat 分包页）用 navTo。
   const openHit = (h: SearchHit) => {
-    if (!requireLogin()) return;
+    if (!requireLogin('search')) return;
     if (h.route.startsWith('/pages/thinktank')) switchTo(h.route.split('?')[0]);
     else navTo(h.route);
   };
 
   // 线程入口：未启用的专项军师先走启用弹层，其余续接最近线程
   const tapAdvisor = (a: Agent) => {
-    if (a.billing === 'unlock' && !a.owned) setBuying(a);
+    if (!s.isAuthed()) continueWith(a.key);
+    else if (a.billing === 'unlock' && !a.owned) setBuying(a);
     else continueWith(a.key);
   };
 
@@ -198,7 +185,7 @@ export default function Sessions() {
   // 微信式军师线程行
   const advisorRow = (a: Agent, duty: string, syncDesc: string, online = false) => {
     const last = latestOf(a.key);
-    const locked = a.billing === 'unlock' && !a.owned;
+    const locked = s.isAuthed() && a.billing === 'unlock' && !a.owned;
     return (
       <View key={a.key} className="wx-item" onClick={() => tapAdvisor(a)}>
         <AdvisorAvatar agentKey={a.key} size={50} online={online} />
@@ -227,8 +214,8 @@ export default function Sessions() {
             「历史」下移到搜索行右侧——翻旧对话与搜索同属「找东西」，且它是旧线程的唯一入口。 */}
         <TabHeader title="问策" kicker="有事问军师" glyph="谋" />
 
-        {/* WO-07：全 tab「下一步」卡（服务端 journey 派生） */}
-        <NextStepCard />
+        {/* WO-07：登录后才展示个人 journey；未登录不再额外解释浏览权限。 */}
+        {s.isAuthed() ? <NextStepCard /> : null}
 
         {/* 搜索行（设计稿 search-pill：白底大圆角）+ 右侧「历史」切换最近会话 */}
         <View className="council-searchrow">
@@ -242,12 +229,20 @@ export default function Sessions() {
             />
             {query ? <Text className="cs-clear" onClick={() => setQuery('')}>✕</Text> : null}
           </View>
-          <View className={`council-hist ${showHistory ? 'on' : ''}`} onClick={() => setShowHistory((v) => !v)}>
+          <View className={`council-hist ${showHistory ? 'on' : ''}`} onClick={() => {
+            if (requireLogin('history')) setShowHistory((v) => !v);
+          }}>
             <Text>{showHistory ? '返回' : '历史'}</Text>
           </View>
         </View>
 
-        {q ? (
+        {q ? !s.isAuthed() ? (
+          <AsyncState
+            empty
+            emptyText="搜索个人内容"
+            emptyAction={{ text: '登录', onClick: () => requireLogin('search') }}
+          />
+        ) : (
           /* V7-14 跨域搜索结果：按 军师 / 会话 / 方案 / 资料 分组，点按走 hit.route */
           <View className="search-results">
             {searchHits.length ? (
@@ -289,7 +284,7 @@ export default function Sessions() {
                 <View
                   key={c.t}
                   className="quick-card card"
-                  onClick={() => requireLogin() && (c.tab ? switchTo(c.tab) : navTo(c.url!))}
+                  onClick={() => requireLogin(c.t.includes('资料') ? 'upload' : c.t.includes('方案') ? 'save' : 'execute') && (c.tab ? switchTo(c.tab) : navTo(c.url!))}
                 >
                   <Text className="qt">{c.t}</Text>
                   <Text className="qd">{c.d}</Text>
@@ -373,11 +368,9 @@ export default function Sessions() {
 
       <AgentUnlock agent={buying} onClose={() => setBuying(null)} onUnlocked={(a) => { setBuying(null); continueWith(a.key); }} />
       <CoachMarks />
-      <Login open={showLogin} onLoggedIn={(onboarded) => {
+      <Login open={showLogin} reason={loginReason} onClose={() => setShowLogin(false)} onLoggedIn={() => {
         setShowLogin(false);
         loadSessions();
-        // 新用户（未建档）登录后进入全屏入局仪式；已建档的功能点亮由 CoachMarks 自触发。
-        if (!onboarded) goOnboarding();
       }} />
     </Screen>
   );

@@ -20,7 +20,7 @@
 
 /* —— 分区小标题 —— */
 .think-h2 {
-  display: block; margin: 20px 2px 10px;
+  display: block; margin: var(--rhythm-section) 2px var(--rhythm-card);
   font-family: var(--serif);
   font-size: 17px; font-weight: 600; color: var(--ink);
 }
@@ -387,7 +387,7 @@
 .skill {
   display: flex; align-items: center; gap: 12px;
   min-height: 78px; box-sizing: border-box;
-  padding: 14px; margin-bottom: 10px; border-radius: 16px;
+  padding: 14px; margin-bottom: var(--rhythm-card); border-radius: 16px;
 }
 .skill:active { opacity: .8; }
 .skill-ic {

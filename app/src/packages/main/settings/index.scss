@@ -31,6 +31,16 @@
 .set-rv { font-size: 13px; color: var(--ink-3); font-family: var(--mono, monospace); }
 .set-rv.is-mock { color: var(--danger); font-weight: 600; }
 .set-go { color: var(--ink-3); font-size: 17px; }
+.set-phone-title { flex: 1; min-width: 0; }
+.set-phone-title .set-rt { display: block; }
+.set-phone-note { display: block; margin-top: 4px; color: var(--ink-3); font-size: 12px; line-height: 1.5; }
+.set-phone-form { padding: 2px 15px 16px; border-top: 1px solid var(--line-2, #efede5); }
+.set-phone-input { height: 42px; border-bottom: 1px solid var(--line-2, #efede5); color: var(--ink); font-size: 15px; }
+.set-code-row { display: flex; align-items: center; }
+.set-phone-input.code { flex: 1; min-width: 0; }
+.set-code-send { flex-shrink: 0; padding-left: 14px; font-size: 13px; font-weight: 600; }
+.set-bind-action { height: 42px; margin-top: 16px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 600; }
+.set-bind-cancel { display: block; padding-top: 14px; color: var(--ink-3); font-size: 13px; text-align: center; }
 /* 本命色行的色块（偏好小节）：右值前一枚当前主题色小方块 */
 .set-sw { width: 15px; height: 15px; border-radius: 5px; flex-shrink: 0; }
 /* 客服入口用 <Button openType="contact">，重置微信 Button 默认样式使其与 set-row 一致 */

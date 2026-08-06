@@ -25,6 +25,11 @@ export default function Settings() {
   const [company, setCompany] = useState('');
   const [saving, setSaving] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [showPhoneBind, setShowPhoneBind] = useState(false);
+  const [bindPhone, setBindPhone] = useState('');
+  const [bindCode, setBindCode] = useState('');
+  const [bindCountdown, setBindCountdown] = useState(0);
+  const [bindBusy, setBindBusy] = useState(false);
   const [showImp, setShowImp] = useState(false); // 换身注入弹层（长按版本号呼出，运营排查）
   const [showPicker, setShowPicker] = useState(false); // 本命色选择（从老板 tab 菜单并入）
   const avatarUrl = me?.user.avatarUrl || '';
@@ -55,6 +60,12 @@ export default function Settings() {
     setCompany(me?.tenant.name ?? '');
   }, [me?.user.name, me?.tenant.name]);
 
+  useEffect(() => {
+    if (bindCountdown <= 0) return;
+    const timer = setTimeout(() => setBindCountdown((n) => Math.max(0, n - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [bindCountdown]);
+
   const dirty = (name.trim() !== (me?.user.name ?? '')) || (company.trim() !== (me?.tenant.name ?? ''));
 
   const save = async () => {
@@ -75,9 +86,39 @@ export default function Settings() {
   const openDoc = (doc: 'agreement' | 'privacy' | 'refund') =>
     Taro.navigateTo({ url: `/packages/main/legal/index?doc=${doc}` });
 
-  // 非 weapp 环境（H5）无微信客服组件，退回展示联系方式占位。
+  const sendBindCode = async () => {
+    const phone = bindPhone.trim();
+    if (!/^1\d{10}$/.test(phone)) { Taro.showToast({ title: '请填写 11 位手机号', icon: 'none' }); return; }
+    if (bindBusy || bindCountdown > 0) return;
+    setBindBusy(true);
+    try {
+      await api.sendSmsCode(phone, 'bind');
+      setBindCountdown(60);
+      Taro.showToast({ title: '验证码已发送', icon: 'none' });
+    } catch (e) { s.handleApiError(e, { fallbackTitle: '验证码发送失败' }); }
+    finally { setBindBusy(false); }
+  };
+
+  const confirmBindPhone = async () => {
+    const phone = bindPhone.trim();
+    const code = bindCode.trim();
+    if (!/^1\d{10}$/.test(phone) || !/^\d{4,8}$/.test(code)) { Taro.showToast({ title: '请填写正确的手机号和验证码', icon: 'none' }); return; }
+    if (bindBusy) return;
+    setBindBusy(true);
+    try {
+      await api.bindPhone(phone, code);
+      await store.loadMe();
+      setShowPhoneBind(false);
+      setBindPhone('');
+      setBindCode('');
+      Taro.showToast({ title: '手机号已绑定', icon: 'success' });
+    } catch (e) { s.handleApiError(e, { fallbackTitle: '绑定失败，请重试' }); }
+    finally { setBindBusy(false); }
+  };
+
+  // 非 weapp 环境（H5）没有微信客服组件，明确引导回小程序联系，不展示虚构渠道。
   const contactFallback = () =>
-    Taro.showModal({ title: '联系客服', content: '【待补充客服渠道：微信客服 / 客服电话 / 邮箱】', showCancel: false, confirmText: '我知道了' });
+    Taro.showModal({ title: '联系客服', content: '请在微信小程序「军师」的设置页点击“联系客服”，进入微信客服会话。', showCancel: false, confirmText: '我知道了' });
 
   const logout = () =>
     Taro.showModal({ title: '退出登录', content: '确定退出当前账号？' }).then((r) => {
@@ -135,6 +176,31 @@ export default function Settings() {
         </View>
         <View className={`set-save ${dirty ? '' : 'off'}`} style={{ background: accent }} onClick={save}>
           <Text>{saving ? '保存中…' : '保存'}</Text>
+        </View>
+
+        <Text className="set-sec">账号联系信息</Text>
+        <View className="set-card">
+          {me?.user.phone ? (
+            <View className="set-row static"><Text className="set-rt">手机号</Text><Text className="set-rv">{me.user.phone.replace(/^(\d{3})\d{4}(\d{4})$/, '$1****$2')}</Text></View>
+          ) : (
+            <>
+              <View className="set-row" onClick={() => setShowPhoneBind((v) => !v)}>
+                <View className="set-phone-title"><Text className="set-rt">绑定手机号（可选）</Text><Text className="set-phone-note">用于短信登录与重要服务联系，不影响当前使用</Text></View>
+                <Text className="set-go">{showPhoneBind ? '⌃' : '›'}</Text>
+              </View>
+              {showPhoneBind ? (
+                <View className="set-phone-form">
+                  <Input className="set-phone-input" type="number" maxlength={11} value={bindPhone} placeholder="手机号" onInput={(e) => setBindPhone(e.detail.value)} />
+                  <View className="set-code-row">
+                    <Input className="set-phone-input code" type="number" maxlength={8} value={bindCode} placeholder="短信验证码" onInput={(e) => setBindCode(e.detail.value)} />
+                    <Text className="set-code-send" style={{ color: accent }} onClick={sendBindCode}>{bindCountdown > 0 ? `${bindCountdown}s` : bindBusy ? '发送中…' : '发送验证码'}</Text>
+                  </View>
+                  <View className="set-bind-action" style={{ background: accent }} onClick={confirmBindPhone}><Text>{bindBusy ? '处理中…' : '确认绑定'}</Text></View>
+                  <Text className="set-bind-cancel" onClick={() => setShowPhoneBind(false)}>取消</Text>
+                </View>
+              ) : null}
+            </>
+          )}
         </View>
 
         {/* 偏好：本命色从老板 tab 菜单并入（老板 tab 菜单收敛）——主题偏好本来就该住在设置里 */}

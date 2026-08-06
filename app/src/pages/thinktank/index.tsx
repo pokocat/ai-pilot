@@ -10,6 +10,7 @@ import PaySheet from '../../components/PaySheet';
 import ExceptionSheet from '../../components/ExceptionSheet';
 import Sheet from '../../components/Sheet';
 import CoachMarks from '../../components/CoachMarks';
+import type { AuthReason } from '../../services/authGate';
 import { navTo, switchTo } from '../../services/nav';
 import { useStore } from '../../hooks/useStore';
 import { checkUpload } from '../../services/uploadGuard';
@@ -118,7 +119,8 @@ export default function ThinkTank() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [tab, setTab] = useState<ThinkTab>('assets');
-  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginReason, setLoginReason] = useState<AuthReason>('save');
   // C2：四个 tab 各自的加载失败标记（失败给可重试错误态，不再静默空白）。
   const [err, setErr] = useState({ assets: false, data: false, modules: false, reports: false });
 
@@ -173,7 +175,11 @@ export default function ThinkTank() {
   useDidShow(() => {
     s.setTab(3);
     Taro.getCurrentInstance().page?.getTabBar?.();
-    if (!s.isAuthed()) { setShowLogin(true); return; }
+    if (!s.isAuthed()) {
+      setTab('modules');
+      loadModules();
+      return;
+    }
     loadAll();
     void s.loadBadges(); // 底栏角标搭车刷新（内部 15 秒节流）
   });
@@ -396,6 +402,12 @@ export default function ThinkTank() {
 
   const primaryModule = () => {
     if (!modSel) return;
+    if (!s.isAuthed()) {
+      setModSel(null);
+      setLoginReason(modSel.tier === 'free' ? 'chat' : 'purchase');
+      setShowLogin(true);
+      return;
+    }
     const m = modSel;
     if (m.enabled || m.tier === 'free') {
       setModSel(null);
@@ -503,6 +515,38 @@ export default function ThinkTank() {
       </View>
     );
   };
+
+  if (!s.isAuthed()) {
+    return (
+      <Screen topInset>
+        <View className="pad think">
+          <TabHeader title="锦囊" kicker="存你的家底" glyph="库" />
+          <View className="think-tabs">
+            {TABS.map((it) => (
+              <View
+                key={it.key}
+                className={`think-tab ${it.key === 'modules' ? 'on' : ''}`}
+                onClick={() => {
+                  if (it.key === 'modules') return;
+                  setLoginReason(it.key === 'assets' ? 'upload' : 'save');
+                  setShowLogin(true);
+                }}
+              ><Text>{it.label}</Text></View>
+            ))}
+          </View>
+          <View className="sec-head"><Text className="sec-title">军师能力目录</Text><Text className="sec-more">点开看用途与价格</Text></View>
+          {err.modules && !modView ? <AsyncState error onRetry={loadModules} /> : modules.map(modCard)}
+        </View>
+        <ModSheet sel={modSel} onClose={() => setModSel(null)} onPrimary={primaryModule} />
+        <Login
+          open={showLogin}
+          reason={loginReason}
+          onClose={() => setShowLogin(false)}
+          onLoggedIn={() => { setShowLogin(false); loadAll(); }}
+        />
+      </Screen>
+    );
+  }
 
   return (
     <Screen topInset>
@@ -967,7 +1011,7 @@ export default function ThinkTank() {
       />
 
       {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉智库四 tab 数据 */}
-      <Login open={showLogin} onLoggedIn={() => { setShowLogin(false); loadAll(); }} />
+      <Login open={showLogin} reason={loginReason} onClose={() => setShowLogin(false)} onLoggedIn={() => { setShowLogin(false); loadAll(); }} />
       <CoachMarks />
     </Screen>
   );

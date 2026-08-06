@@ -112,6 +112,19 @@ export async function listForUser(args: { tenantId: string; userId: string }): P
   return { recommended, modules };
 }
 
+/** 匿名目录：只暴露产品事实，不推断用户推荐位，也不伪造任何启用/隐藏状态。 */
+export function listPublicModules(): ModulesView {
+  const rows: RowMap = new Map();
+  const modules = MODULES.map((m) => ({
+    ...toView(m, rows),
+    enabled: false,
+    hidden: false,
+    sortOrder: MODULE_INDEX.get(m.key) ?? 0,
+    stateLabel: m.stateLabel,
+  }));
+  return { recommended: null, modules };
+}
+
 /**
  * 某能力对该用户是否已启用（门禁复用：如「经营体检」analyze 前先查 finance 模块是否已购）。
  * 复用 computeEnabled 的口径：free 恒真；sku 看购买集合任一命中；credits/member 看自身行。未知 key → false。

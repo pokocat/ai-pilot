@@ -71,8 +71,8 @@
 }
 
 /* —— 执行信号（exec-stats，左对齐） —— */
-.exec-stats { display: flex; justify-content: space-between; margin-top: 12px; }
-.exec-stat { width: 31.8%; box-sizing: border-box; padding: 14px 12px 12px; border-radius: 15px; text-align: left; }
+.exec-stats { display: flex; gap: var(--space-2); margin-top: var(--rhythm-block); }
+.exec-stat { flex: 1; min-width: 0; box-sizing: border-box; padding: 14px 12px 12px; border-radius: 15px; text-align: left; }
 .stat-n { display: block; font-size: 20px; font-weight: 600; line-height: 1.2; color: var(--green); }
 .stat-n.warn { color: var(--gold-deep); }
 .stat-l { display: block; margin-top: 6px; color: var(--ink-3); font-size: 11px; font-weight: 600; }

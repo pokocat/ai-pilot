@@ -76,7 +76,7 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
   };
 
   const finishProfile = async () => {
-    // 称呼已在登录时必填，这里不再重复采集；仅收公司（选填）与问卷。
+    // 登录只建立账号，不强制补资料；这里也只收公司（选填）与问卷，称呼可在「我的」里随时完善。
     if (company.trim()) await api.updateIdentity({ company: company.trim() }).catch(() => {});
     if (Object.keys(answers).length) await api.saveProfile(answers).catch(() => {});
     await store.loadMe();

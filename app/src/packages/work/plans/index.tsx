@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { ScrollView, Text, View } from '@tarojs/components';
 import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro';
-import SafeHeader from '../../../components/SafeHeader';
 import Icon from '../../../components/Icon';
+import SafeHeader from '../../../components/SafeHeader';
+import Login from '../../../components/Login';
 import AsyncState from '../../../components/AsyncState';
-import { api, type PayOrderListItem, type PlanOption, type PlanOptionsResult, type PlanQuote } from '../../../services/api';
+import { api, type PayOrderListItem, type Plan, type PlanOption, type PlanOptionsResult, type PlanQuote } from '../../../services/api';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { awaitPaymentApplied, ensurePayableEnv, payAppliedToast, payOrder } from '../../../services/pay';
@@ -34,7 +35,9 @@ export default function PlanManagement() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
   const [data, setData] = useState<PlanOptionsResult | null>(null);
+  const [publicPlans, setPublicPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showLogin, setShowLogin] = useState(false);
   const [period, setPeriod] = useState<'month' | 'year'>('month');
   const [quote, setQuote] = useState<PlanQuote | null>(null);
   const [purchaseIntentId, setPurchaseIntentId] = useState('');
@@ -45,12 +48,20 @@ export default function PlanManagement() {
     void api.planEvent({ event, ...extra }).catch((e) => console.warn('[plan-event]', event, e));
   };
 
-  const load = (done?: () => void) => api.planOptions().then((result) => {
+  const load = (done?: () => void) => {
+    if (!s.isAuthed()) {
+      return api.plans()
+        .then(setPublicPlans)
+        .catch((e) => s.handleApiError(e, { silent: true }))
+        .finally(() => { setLoading(false); done?.(); });
+    }
+    return api.planOptions().then((result) => {
     setData(result);
     if (result.currentPlanId) track('current_view', { planId: result.currentPlanId });
     for (const option of result.options) if (option.pendingOrder) track('order_view', { planId: option.plan.id, orderNo: option.pendingOrder.outTradeNo });
-  }).catch((e) => s.handleApiError(e)).finally(() => { setLoading(false); done?.(); });
-  useDidShow(() => { track('page_open'); load(); });
+    }).catch((e) => s.handleApiError(e)).finally(() => { setLoading(false); done?.(); });
+  };
+  useDidShow(() => { if (s.isAuthed()) track('page_open'); load(); });
   usePullDownRefresh(() => load(() => Taro.stopPullDownRefresh()));
 
   const current = currentPlanOption(data);
@@ -149,6 +160,35 @@ export default function PlanManagement() {
     } catch (e) { Taro.showToast({ title: paymentErrorMessage(e, 'payment'), icon: 'none' }); }
     finally { setBusy(''); }
   };
+
+  if (!s.isAuthed()) {
+    const guestOptions = publicPlans.filter((plan) => plan.period === period);
+    return (
+      <View className={`page plan-page ${s.themeClass()}`}>
+        <SafeHeader title="方案与权益" onBack={() => Taro.navigateBack()} />
+        {loading && !publicPlans.length ? <View className="plan-pad"><AsyncState loading skeletonRows={4} /></View> : (
+          <ScrollView scrollY enhanced showScrollbar={false} className="plan-scroll">
+            <View className="plan-pad">
+              <View className="section-head"><Text className="section-title">选择方案</Text><View className="period-switch"><View className={period === 'month' ? 'active' : ''} onClick={() => setPeriod('month')}><Text>月付</Text></View><View className={period === 'year' ? 'active' : ''} onClick={() => setPeriod('year')}><Text>年付</Text></View></View></View>
+              {guestOptions.map((plan) => (
+                <View key={plan.id} className="option-row">
+                  <View className="option-main">
+                    <View className="option-title-row"><Text className="option-name">{plan.name}{plan.highlighted ? ' · 推荐' : ''}</Text><Text className="option-price">{plan.price < 0 ? '面议' : money(plan.price)}</Text></View>
+                    <Text className="option-level">{plan.usageLabel}</Text>
+                    <View className="feature-list">{publicFeatures(plan.featuresJson).map((feature) => <View key={feature}><Icon name="check" size={11} color={accent} /><Text>{feature}</Text></View>)}</View>
+                  </View>
+                  <View className="option-action enabled" style={{ color: accent, borderColor: accent }} onClick={() => setShowLogin(true)}><Text>{plan.price < 0 ? '咨询' : '购买'}</Text></View>
+                </View>
+              ))}
+              {!loading && !guestOptions.length ? <AsyncState empty emptyText="暂无这一周期的方案" /> : null}
+              <View className="plan-bottom" />
+            </View>
+          </ScrollView>
+        )}
+        <Login open={showLogin} reason="purchase" onClose={() => setShowLogin(false)} onLoggedIn={() => { setShowLogin(false); setLoading(true); track('page_open'); load(); }} />
+      </View>
+    );
+  }
 
   return (
     <View className={`page plan-page ${s.themeClass()}`}>

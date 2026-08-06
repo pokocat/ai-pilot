@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.ts';
 import { prisma } from '../src/db.ts';
 import { getBalance, chargeCredits } from '../src/services/credits.ts';
-import { listForUser, enable, patchModule } from '../src/services/modules.ts';
+import { listForUser, listPublicModules, enable, patchModule } from '../src/services/modules.ts';
 
 let userA = '', tenantA = '';
 let userB = '', tenantB = '';
@@ -44,6 +44,14 @@ test('listForUser：目录 10 条；免费启用 / 付费未启用；推荐位�
   // 新用户无案卷、无 journey 行 → stage 'new' → 推荐 conflict
   assert.ok(view.recommended);
   assert.equal(view.recommended!.key, 'conflict');
+});
+
+test('listPublicModules：匿名只看目录，不泄漏推荐、启用、隐藏或排序偏好', () => {
+  const view = listPublicModules();
+  assert.equal(view.recommended, null);
+  assert.equal(view.modules.length, 10);
+  assert.ok(view.modules.every((m) => m.enabled === false && m.hidden === false));
+  assert.equal(view.modules.find((m) => m.key === 'growth')?.price?.credits, 80);
 });
 
 test('enable free：直启 + 幂等（无重复行、无扣费）', async () => {
@@ -141,12 +149,17 @@ test('TC-G 跨用户隔离：A 启用不泄漏给 B；B 无法读到 A 的态', 
   assert.equal(bView2.modules.find((m) => m.key === 'shop-board')!.hidden, false);
 });
 
-// HTTP 冒烟：parent 在 app.ts 注册 moduleRoutes 后应 200（未接线前 404，容忍）。
-test('HTTP GET /api/modules（parent 接线后生效）', async () => {
+test('HTTP GET /api/modules：游客可浏览，登录后返回用户态', async () => {
+  const guest = await api('GET', '/api/modules');
+  assert.equal(guest.status, 200);
+  assert.equal(guest.body.recommended, null);
+  assert.ok(guest.body.modules.every((m: any) => m.enabled === false && m.hidden === false));
+
   const r = await api('GET', '/api/modules', { token: userA });
-  assert.ok(r.status === 200 || r.status === 404, `期望 200(已接线) 或 404(未接线)，实得 ${r.status}`);
-  if (r.status === 200) {
-    assert.equal(r.body.modules.length, 10);
-    assert.ok('recommended' in r.body);
-  }
+  assert.equal(r.status, 200);
+  assert.equal(r.body.modules.length, 10);
+  assert.ok(r.body.recommended);
+
+  const invalid = await api('GET', '/api/modules', { token: 'invalid-token' });
+  assert.equal(invalid.status, 401);
 });

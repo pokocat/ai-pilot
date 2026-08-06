@@ -6,6 +6,7 @@ import TabHeader from '../../components/TabHeader';
 import KbInput from '../../components/KbInput';
 import Icon from '../../components/Icon';
 import Login from '../../components/Login';
+import AsyncState from '../../components/AsyncState';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
 import { navTo, switchTo } from '../../services/nav';
@@ -23,6 +24,7 @@ import { EMPTY_STATES } from '../../data/emptyStates';
 import { ARCHIVE_INTERVIEW_PROMPT, archiveAnswerPrompt } from '../../data/intents';
 import PrescriptionStrip from '../../components/PrescriptionStrip';
 import CoachMarks from '../../components/CoachMarks';
+import type { AuthReason } from '../../services/authGate';
 import './index.scss';
 
 type ExecView = 'today' | 'week' | 'review';
@@ -79,7 +81,8 @@ function orderMetaText(o: DossierOrder): string {
 export default function Studio() {
   const s = useStore();
   const accent = s.color().vars['--accent'];
-  const [showLogin, setShowLogin] = useState(() => !s.isAuthed());
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginReason, setLoginReason] = useState<AuthReason>('execute');
   const [buying, setBuying] = useState<Agent | null>(null);
   const [dossier, setDossier] = useState<Dossier | null>(null);
   const [view, setView] = useState<ExecView>('today');
@@ -124,7 +127,13 @@ export default function Studio() {
     Taro.getCurrentInstance().page?.getTabBar?.();
     // 跨天回到本页：清掉昨天的三势自评（只在日期真的变了时清，否则从半屏返回也会把用户刚勾的清掉）。
     setForceVerdict((c) => (c.day === today() ? c : { day: today(), v: {} }));
-    if (!s.isAuthed()) { setShowLogin(true); return; }
+    if (!s.isAuthed()) {
+      setDossier(null);
+      setStreak(null);
+      setReminders(null);
+      setPendingDecision(null);
+      return;
+    }
     void s.loadAgents(); // 后台刚上架/改入口类型后，回到执行页立即刷新创作顾问目录
     loadStudio();
     void s.loadBadges(); // 底栏角标搭车刷新（内部 15 秒节流）
@@ -309,6 +318,32 @@ export default function Studio() {
       : '让军师根据案卷生成今天最重要的 1-3 件事。';
   const mainOrderAction = firstUndone ? genScript : todayOrders.length ? genReview : genOrders;
   const mainOrderButton = firstUndone ? '帮我写脚本' : todayOrders.length ? '开始复盘' : '帮我出今日军令';
+
+  const requireLogin = (reason: AuthReason = 'execute') => {
+    setLoginReason(reason);
+    setShowLogin(true);
+  };
+
+  if (!s.isAuthed()) {
+    return (
+      <Screen topInset scroll={false}>
+        <View className="pad exec">
+          <TabHeader title="军令" kicker="做今天的事" glyph="令" />
+          <AsyncState
+            empty
+            emptyText="还没有军令"
+            emptyAction={{ text: '去问策', onClick: () => switchTo('/pages/sessions/index') }}
+          />
+        </View>
+        <Login
+          open={showLogin}
+          reason={loginReason}
+          onClose={() => setShowLogin(false)}
+          onLoggedIn={() => { setShowLogin(false); void s.loadAgents(); loadStudio(); }}
+        />
+      </Screen>
+    );
+  }
 
   return (
     <Screen topInset scroll={false}>
@@ -761,6 +796,8 @@ export default function Studio() {
       {/* C1：登录门（对齐 sessions/home）——未登录先引导，登录后再拉执行页数据 */}
       <Login
         open={showLogin}
+        reason={loginReason}
+        onClose={() => setShowLogin(false)}
         onLoggedIn={() => { setShowLogin(false); loadStudio(); }}
       />
       <CoachMarks />

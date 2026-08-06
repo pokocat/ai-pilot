@@ -65,6 +65,11 @@ body,
   --space-5: 20px;
   --space-6: 24px;
 
+  /* 与 app.scss 同步：同组卡片 / 内容块 / 章节切换的语义节奏。 */
+  --rhythm-card: var(--space-3);
+  --rhythm-block: var(--space-4);
+  --rhythm-section: var(--space-6);
+
   --shadow-sm: 0 1px 2px rgba(22, 25, 29, .04), 0 2px 8px rgba(22, 25, 29, .05);
   /* 与 app.scss 同步：--shadow-card 用于浮在同色底上的卡片 */
   --shadow-card: 0 1px 1px rgba(22, 25, 29, .03), 0 2px 6px rgba(22, 25, 29, .05), 0 8px 20px -6px rgba(22, 25, 29, .07);

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Input, ScrollView } from '@tarojs/components';
+import Taro from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
 import { armCoach, coachPending } from '../../../components/CoachMarks';
 import { COLORS, colorIndex } from '../../../data/colors';
@@ -158,12 +159,20 @@ export default function Onboarding() {
     switchTo(coachPending() ? '/pages/sessions/index' : '/pages/home/index');
   };
 
+  const leaveOnboarding = () => {
+    if (Taro.getCurrentPages().length > 1) {
+      Taro.navigateBack({ fail: () => switchTo('/pages/sessions/index') });
+      return;
+    }
+    switchTo('/pages/sessions/index');
+  };
+
   const judgeDone = settled && typed.length >= targetRef.current.length && targetRef.current.length > 0;
 
   return (
     <View className={`page onboarding ${s.themeClass()}`}>
-      {/* 顶部安全区统一走 SafeHeader（AGENTS.md §7.2：页面内不得自测胶囊）；仪式页无返回键、无标题，纯让位。 */}
-      <SafeHeader className="ob-head" left={<View />} rightReserve={false} />
+      {/* 建档是用户主动进入的可选流程，始终可返回或稍后再做。 */}
+      <SafeHeader className="ob-head" onBack={leaveOnboarding} rightReserve={false} />
       <ScrollView scrollY className="ob-scroll" enhanced showScrollbar={false}>
         {step === 'color' && (
           <View className="ob-step" key="color">
@@ -197,6 +206,7 @@ export default function Onboarding() {
             <View className="ob-cta serif" onClick={() => setStep('casefile')}>
               <Text>落 定 · 下 一 步</Text>
             </View>
+            <Text className="ob-skip" onClick={leaveOnboarding}>稍后再说</Text>
           </View>
         )}
 
@@ -250,6 +260,7 @@ export default function Onboarding() {
             >
               <Text>{surveyDone ? '请 军 师 首 判' : '先答完上面几题'}</Text>
             </View>
+            <Text className="ob-skip" onClick={leaveOnboarding}>稍后再建档</Text>
           </View>
         )}
 
@@ -288,6 +299,7 @@ export default function Onboarding() {
                 <View className="ob-cta serif" onClick={enterHQ}>
                   <Text>进 入 参 谋 部</Text>
                 </View>
+                <Text className="ob-skip" onClick={leaveOnboarding}>稍后再看</Text>
               </>
             )}
           </View>
