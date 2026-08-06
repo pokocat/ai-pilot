@@ -258,6 +258,96 @@ async function graceUsedToday(userId: string, kind: GraceKind): Promise<number> 
   });
 }
 
+/**
+ * GenerationJob 的持久预留前置准备。钱包的首建/跨期/过期回收仍复用 loadWallet，
+ * 真正的「读余额→扣预留」由 reserveDurableQuotaInTransaction 在建 job 的事务内完成。
+ */
+export interface DurableQuotaPreparation {
+  unlimited: boolean;
+  allowNegative: boolean;
+}
+
+export async function prepareDurableQuota(
+  userId: string,
+  grace?: GraceKind,
+): Promise<DurableQuotaPreparation> {
+  const wallet = await loadWallet(userId);
+  if (!wallet) throw new InsufficientQuotaError('当前套餐无月度 token 额度，请升级套餐');
+  if (isUnlimited(wallet.quota)) return { unlimited: true, allowNegative: false };
+  const allowNegative = grace
+    ? (await graceUsedToday(userId, grace)) < (await gracePerDay(grace))
+    : false;
+  return { unlimited: false, allowNegative };
+}
+
+export interface DurableQuotaReservation {
+  periodKey: string | null;
+  reserved: number;
+  unlimited: boolean;
+  graceGranted: boolean;
+}
+
+/** 在 GenerationJob 创建事务中执行的持久 Token 预留。 */
+export async function reserveDurableQuotaInTransaction(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  ratio: number,
+  reserveTokens: number,
+  prepared: DurableQuotaPreparation,
+): Promise<DurableQuotaReservation> {
+  await lockQuota(tx, userId);
+  const row = await tx.tokenWallet.findUnique({
+    where: { userId },
+    select: { quota: true, balance: true, periodKey: true },
+  });
+  if (!row) throw new InsufficientQuotaError('当前套餐无月度 token 额度，请升级套餐');
+  if (prepared.unlimited || isUnlimited(row.quota)) {
+    return { periodKey: row.periodKey, reserved: 0, unlimited: true, graceGranted: false };
+  }
+
+  const target = Math.ceil(Math.max(0, reserveTokens) * (ratio > 0 ? ratio : 1));
+  let reserved: number;
+  let graceGranted = false;
+  if (row.balance <= 0) {
+    if (!prepared.allowNegative) throw new InsufficientQuotaError();
+    graceGranted = true;
+    reserved = Math.min(target, RESERVE_TOKENS);
+  } else {
+    reserved = Math.min(target, row.balance);
+  }
+  if (reserved > 0) {
+    await tx.tokenWallet.update({ where: { userId }, data: { balance: { decrement: reserved } } });
+  }
+  return { periodKey: row.periodKey, reserved, unlimited: false, graceGranted };
+}
+
+/**
+ * GenerationJob 终态事务内的唯一钱包调整。charged 已包含 billing ratio。
+ * 跨周期时只保留 job/TokenUsage 事实，不把旧周期预留差额返进新周期。
+ */
+export async function settleDurableQuotaInTransaction(
+  tx: Prisma.TransactionClient,
+  args: { userId: string; periodKey: string | null; reserved: number; charged: number; unlimited?: boolean },
+): Promise<QuotaState> {
+  await lockQuota(tx, args.userId);
+  const row = await tx.tokenWallet.findUnique({
+    where: { userId: args.userId },
+    select: { quota: true, balance: true, periodKey: true },
+  });
+  if (!row) return emptyState;
+  if (args.unlimited || isUnlimited(row.quota)) return unlimitedState;
+  if (args.periodKey !== row.periodKey) return toState(row.quota, row.balance);
+  const delta = Math.max(0, args.reserved) - Math.max(0, args.charged);
+  const updated = delta === 0
+    ? row
+    : await tx.tokenWallet.update({
+      where: { userId: args.userId },
+      data: { balance: { increment: delta } },
+      select: { quota: true, balance: true, periodKey: true },
+    });
+  return toState(updated.quota, updated.balance);
+}
+
 export async function reserveQuota(
   userId: string,
   ratio = 1,

@@ -126,6 +126,7 @@ async function callChat(
   phase: RequestPhase = 'chat_completion',
   affinity?: string,
   allowThinking?: boolean,
+  externalSignal?: AbortSignal,
 ): Promise<OAResponse> {
   const base = cfg.baseUrl.replace(/\/+$/, '');
   const timeoutMs = requestTimeoutMs(cfg, phase);
@@ -141,6 +142,7 @@ async function callChat(
       lastWatch = watch;
       try {
         const epBase = ep.baseUrl.replace(/\/+$/, '') || base;
+        const signal = externalSignal ? AbortSignal.any([watch.signal, externalSignal]) : watch.signal;
         const res = await fetch(`${epBase}/chat/completions`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
@@ -151,7 +153,7 @@ async function callChat(
               allowThinking: allowThinking ?? (!body.tools && !body.tool_choice),
             }),
           }),
-          signal: watch.signal,
+          signal,
         });
         const data = (await res.json().catch(() => ({}))) as OAResponse;
         if (!res.ok) {
@@ -226,6 +228,7 @@ async function callChatStream(
   body: Record<string, unknown>,
   includeUsage = true,
   affinity?: string,
+  externalSignal?: AbortSignal,
 ): Promise<AsyncGenerator<OAStreamChunk>> {
   // 建流阶段走端点池（此前流式完全绕过池：单端点 429/宕机时流式对话没有任何兜底，
   // 冷却态也不共享）。转移规则与 claude 流式一致：响应头返回（res.ok）之前的 429/5xx/超时
@@ -247,6 +250,7 @@ async function callChatStream(
     let handedOff = false;
     try {
       noteEndpointAttempt(ep);
+      const signal = externalSignal ? AbortSignal.any([watch.signal, externalSignal]) : watch.signal;
       const res = await fetch(`${base}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ep.apiKey}` },
@@ -257,7 +261,7 @@ async function callChatStream(
           stream: true,
           ...(includeUsage ? { stream_options: { include_usage: true } } : {}),
         }),
-        signal: watch.signal,
+        signal,
       });
       if (!res.ok) {
         const data = (await res.clone().json().catch(async () => {
@@ -270,12 +274,16 @@ async function callChatStream(
       handedOff = true;
       return (async function* () {
         let sawByte = false;
+        let sawText = false;
         try {
-          yield* readOpenAIStream(res, () => { sawByte = true; watch.refresh(streamIdleMs()); });
+          for await (const chunk of readOpenAIStream(res, () => { sawByte = true; watch.refresh(streamIdleMs()); })) {
+            if (chunk.choices?.some((choice) => !!choice.delta?.content)) sawText = true;
+            yield chunk;
+          }
         } catch (err) {
           slot.noteError(err);
           // 空闲看门狗打的：这不是「慢」，是上游不发了——单独打点，告警才分得清。
-          if (watch.timedOut()) noteChatStreamStall('openai', sawByte ? 'mid_stream' : 'first_event');
+          if (watch.timedOut()) noteChatStreamStall('openai', sawByte ? 'mid_stream' : 'first_event', sawText);
           throw providerFailure(err, ep, base, 'chat_stream', sawByte ? streamIdleMs() : streamFirstEventIdleMs(), watch);
         } finally { watch.clear(); slot.release(); }
       })();
@@ -459,16 +467,16 @@ async function* streamChatRound(
   cfg: ResolvedAiConfig,
   messages: OAMessage[],
   // sink：见 claude 侧同名参数——流中途抛错时，调用方靠它拿回已经下发给用户的正文。
-  opts: { allowThinking: boolean; affinity?: string; dedupeAgainst?: string; onDelta?: () => void; measureFirstToken?: boolean; sink?: { text: string; usage: Usage } },
+  opts: { allowThinking: boolean; affinity?: string; dedupeAgainst?: string; onDelta?: () => void; measureFirstToken?: boolean; firstTokenStartedAtMs?: number; sink?: { text: string; usage: Usage }; signal?: AbortSignal },
 ): AsyncGenerator<{ type: 'delta'; text: string }, StreamRoundOut> {
   const roundStartedAt = Date.now();
   const body = { max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, cfg, opts.allowThinking), messages };
   let chunks: AsyncGenerator<OAStreamChunk>;
   try {
-    chunks = await callChatStream(cfg, body, true, opts.affinity);
+    chunks = await callChatStream(cfg, body, true, opts.affinity, opts.signal);
   } catch (err) {
     if (!/stream_options|include_usage/i.test((err as Error).message)) throw err;
-    chunks = await callChatStream(cfg, body, false, opts.affinity);
+    chunks = await callChatStream(cfg, body, false, opts.affinity, opts.signal);
   }
 
   let text = '';
@@ -482,7 +490,10 @@ async function* streamChatRound(
     if (!firstDeltaAt) {
       firstDeltaAt = Date.now();
       // 首字延迟只在首轮有产品含义（续写轮的「首字」是接着写，不是用户的等待）。
-      if (opts.measureFirstToken) noteChatFirstToken('openai', (firstDeltaAt - roundStartedAt) / 1000);
+      if (opts.measureFirstToken) {
+        const origin = opts.firstTokenStartedAtMs ?? roundStartedAt;
+        noteChatFirstToken('openai', Math.max(0, firstDeltaAt - origin) / 1000, (firstDeltaAt - roundStartedAt) / 1000);
+      }
     }
     text += chunk;
     if (opts.sink) opts.sink.text = text;
@@ -516,20 +527,31 @@ async function* streamChatRound(
   return { text, usage, truncated: isTruncatedFinish(finishReason) };
 }
 
-export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
+export async function* openaiChatStream(
+  ctx: GenContext,
+  cfg: ResolvedAiConfig,
+  opts: { signal?: AbortSignal; firstTokenStartedAtMs?: number } = {},
+): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
   const base = chatBaseMessages(ctx);
   const affinity = affinityOf(ctx);
   const startedAt = Date.now();
 
   // 流中途出错但已有正文时，用 sink 把它取回来按「没写完」收尾（详见 claude 侧同一处理）。
-  const sink = { text: '', usage: ZERO_USAGE };
+  const sink = { text: '', usage: { ...ZERO_USAGE } };
   let text = '';
   let usage: Usage = ZERO_USAGE;
   let truncated = false;
   // 「已下发正文被保全」只记一次，且要记对原因（与 claude 侧同口径）。
   let partialCause: 'truncated' | 'stream_error' | null = null;
   try {
-    const first = yield* streamChatRound(cfg, base, { allowThinking: true, affinity, measureFirstToken: true, sink });
+    const first = yield* streamChatRound(cfg, base, {
+      allowThinking: true,
+      affinity,
+      measureFirstToken: true,
+      firstTokenStartedAtMs: opts.firstTokenStartedAtMs,
+      sink,
+      signal: opts.signal,
+    });
     text = first.text;
     usage = first.usage;
     truncated = first.truncated;
@@ -555,19 +577,31 @@ export async function* openaiChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
     // 墙钟兜底：宁可标 truncated 给「继续写完」，也不能为了补齐把整轮拖到客户端超时——
     // 那会走 clientGone（退预留、不落库），用户连已经看完的半篇都拿不到。
     if (Date.now() - startedAt > CONTINUE_DEADLINE_MS) break;
+    const contSink = { text: '', usage: { ...ZERO_USAGE } };
+    const totalCtrl = new AbortController();
+    const totalTimer = setTimeout(() => totalCtrl.abort(), CONTINUE_ROUND_TIMEOUT_MS);
+    const signal = opts.signal ? AbortSignal.any([opts.signal, totalCtrl.signal]) : totalCtrl.signal;
     try {
       const cont = yield* streamChatRound(cfg, continuationMessages(base, text), {
         allowThinking: false,
         affinity,
         dedupeAgainst: text,
+        sink: contSink,
+        signal,
       });
       usage = sumUsage(usage, cont.usage);
       text += cont.text; // 轮内已去重，此处只做拼接（避免与已下发的 delta 对不上）
       truncated = cont.truncated;
       noteChatTruncated('OpenAI', 'continued');
     } catch (err) {
+      if (contSink.text) {
+        text += contSink.text;
+        usage = sumUsage(usage, contSink.usage);
+      }
       console.warn(`[llm:openai] 第 ${round} 轮续写失败，按未写完交回用户：${(err as Error).message}`);
       break;
+    } finally {
+      clearTimeout(totalTimer);
     }
   }
   if (truncated) {
@@ -586,13 +620,13 @@ export async function openaiRaw(
   user: string,
   // maxTokens：**缺省仍是 700**（辅助抽取的既定预算，不动）。只有产物本身就长的调用方才传大值——
   // 目前唯一的是海报 AI 排版引擎（gateway.completeText，一整页 HTML/CSS 几千 token，700 会被硬截断成半张页面）。
-  opts: { allowThinking?: boolean; affinityKey?: string; maxTokens?: number } = {},
+  opts: { allowThinking?: boolean; affinityKey?: string; maxTokens?: number; signal?: AbortSignal } = {},
 ): Promise<string> {
   const allowThinking = opts.allowThinking ?? true;
   const data = await callChat(cfg, {
     max_tokens: maxTokensForThinking(opts.maxTokens ?? 700, cfg, allowThinking),
     messages: [{ role: 'system', content: system }, { role: 'user', content: user }] as OAMessage[],
-  }, 'chat_completion', opts.affinityKey, allowThinking);
+  }, 'chat_completion', opts.affinityKey, allowThinking, opts.signal);
   return (data.choices?.[0]?.message?.content ?? '').trim();
 }
 

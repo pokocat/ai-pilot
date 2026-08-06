@@ -20,7 +20,7 @@ import type {
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
   CreativeStatusResult, PosterBrief, PosterBriefDraft, PosterScene, PosterTemplateOption, CreativeUploadResult,
   CreativeJobView, CreativeAssetView, CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
-  CreativePosterListItem, CreativePosterListResult,
+  CreativePosterListItem, CreativePosterListResult, DailyBattleReportView,
 } from '../../../shared/contracts';
 import type {
   ChartSummary, ProgressView, BizMetricTemplateItem, BizMetricWeek, MingpanReport,
@@ -300,7 +300,7 @@ function sampleChartM(): ChartSummary {
   const PHASES = ['进攻', '平稳', '防守', '进攻', '平稳', '进攻', '防守', '平稳', '进攻', '平稳', '防守', '平稳'];
   const TURN = new Set([3, 7, 11]);
   return {
-    engineVersion: 'paipan-v2',
+    engineVersion: 'paipan-v3',
     hourKnown: true,
     pillars: { year: { ganZhi: '庚午' }, month: { ganZhi: '壬午' }, day: { ganZhi: '戊子' }, time: { ganZhi: '甲寅' } },
     dayMaster: { gan: '戊', element: '土', strength: '身强' },
@@ -313,19 +313,20 @@ function sampleChartM(): ChartSummary {
 // 确定性样例命盘报告（mock 专用 UI 预览假数据，结构对齐 MingpanReport；非真排盘）——
 // 让「命盘报告」页在本地 mock/H5 下可完整走查六大区块（含 12 宫 / 四化 / 时间轴）。
 // 出生地 → 城市（mock）：镜像服务端 server/src/data/cityLongitude.ts 收紧后的口径——
-// 精确匹配优先、再「输入含有城市名」取最长命中、单字一律不匹配。只取常用几座城做本地走查，
+// 精确匹配优先、再按文本出现顺序取第一个城市、单字一律不匹配。只取常用几座城做本地走查，
 // 不复制整表（真值以服务端为准，这里只为让「已识别 / 未识别」两条 UI 分支都能在 H5 下走到）。
 const MOCK_CITIES = ['北京', '上海', '广州', '深圳', '杭州', '南京', '成都', '重庆', '西安', '哈尔滨', '乌鲁木齐', '拉萨', '长春', '长沙'];
 function mockMatchCity(place?: string): string | null {
   if (!place) return null;
-  const s = place.replace(/[省市区县]|自治区|特别行政区/g, '').trim();
+  const s = place.replace(/特别行政区|(?:壮族|回族|维吾尔族)?自治区|自治州|地区/g, '').replace(/[省市区县旗]/g, '').replace(/[，,、；;\s]+/g, '').trim();
   if (s.length < 2) return null;
   if (MOCK_CITIES.includes(s)) return s;
-  let best: string | null = null;
+  let best: { city: string; index: number } | null = null;
   for (const c of MOCK_CITIES) {
-    if (s.includes(c) && (!best || c.length > best.length)) best = c;
+    const index = s.indexOf(c);
+    if (index >= 0 && (!best || index < best.index || (index === best.index && c.length > best.city.length))) best = { city: c, index };
   }
-  return best;
+  return best?.city ?? null;
 }
 
 function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanReport {
@@ -349,7 +350,7 @@ function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanRe
     { name: '兄弟', stem: '戊', branch: '辰', isSoul: false, isBody: false, majorStars: [M('天同', '平', null), M('天梁', '得', null)], minorStars: ['天钺'], adjectiveStars: ['天喜'], decadal: { start: 116, end: 125 } },
   ];
   return {
-    engineVersion: 'paipan-v2',
+    engineVersion: 'paipan-v3',
     base: { solarDate: '1990-06-18', lunarDate: '庚午年五月廿六', gender: '男', hourKnown: true, hourLabel: '巳时', trueSolarApplied, birthPlace },
     bazi: {
       pillars: {
@@ -401,7 +402,7 @@ function sampleReportM(birthPlace?: string, trueSolarApplied = false): MingpanRe
         { star: '廉贞', hua: '忌', palace: '财帛' },
       ],
     },
-    disclaimer: `命理内容为文化视角的研究与参考，不构成投资、经营或人生决策依据；「人谋可以改命」。引擎 paipan-v2 · 数据由算法层确定性推算，${yr} 年为准。`,
+    disclaimer: `命理内容为文化视角的研究与参考，不构成投资、经营或人生决策依据；「人谋可以改命」。引擎 paipan-v3 · 数据由算法层确定性推算，${yr} 年为准。`,
   };
 }
 
@@ -1799,6 +1800,42 @@ export const mock = {
         milestones: { '7': '2026-07-01', '14': '2026-07-08' },
         nextRank: { rank: '校官', requirement: '连续复盘 30 天 + 完成首次月度战报' },
       },
+    });
+  },
+  async dailyBattleReport(): Promise<DailyBattleReportView> {
+    const { token } = current();
+    const date = (() => {
+      const d = new Date();
+      const p = (n: number) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    })();
+    type LocalDossier = {
+      title?: string;
+      orders?: Array<{ id: string; text: string; date: string; done: boolean; aligned?: boolean | null }>;
+      backfill?: Record<string, { leads?: string; consults?: string; deals?: string }>;
+    };
+    let dossier: LocalDossier | null = null;
+    try {
+      const raw = Taro.getStorageSync(`junshi.dossier.${token}`);
+      if (raw) dossier = (typeof raw === 'string' ? JSON.parse(raw) : raw) as LocalDossier;
+    } catch { /* 空案卷按真实端空态返回 */ }
+    const orders = (dossier?.orders ?? []).filter((order) => order.date === date);
+    const done = orders.filter((order) => order.done).length;
+    const aligned = orders.filter((order) => order.aligned === true).length;
+    const metric = dossier?.backfill?.[date];
+    const numberOf = (value: string | undefined) => Number.isFinite(Number(value)) ? Number(value) : 0;
+    return delay({
+      date,
+      casefileTitle: dossier?.title ?? null,
+      rank: '尉官',
+      streak: 15,
+      orders: orders.map((order) => ({ id: order.id, text: order.text, done: order.done, aligned: order.aligned ?? null })),
+      done,
+      total: orders.length,
+      aligned,
+      alignRate: orders.length ? Math.round((aligned / orders.length) * 100) : null,
+      backfill: metric ? { leads: numberOf(metric.leads), consults: numberOf(metric.consults), deals: numberOf(metric.deals) } : null,
+      quote: '善战者，求之于势，不责于人。',
     });
   },
   async decisions(): Promise<DecisionLedger> {

@@ -298,29 +298,38 @@ async function* streamChatRound(
   messages: Anthropic.MessageParam[],
   // sink：把「已经下发给用户的正文/用量」实时写给调用方。流中途抛错时调用方才拿得到它们——
   // 用户眼睛已经看过的字不能再被换成错误气泡（与撞上限同一原则）。
-  opts: { allowThinking: boolean; dedupeAgainst?: string; onDelta?: () => void; timeoutMs?: number; measureFirstToken?: boolean; sink?: { text: string; usage: Usage } },
+  opts: { allowThinking: boolean; dedupeAgainst?: string; onDelta?: () => void; timeoutMs?: number; totalTimeoutMs?: number; measureFirstToken?: boolean; firstTokenStartedAtMs?: number; sink?: { text: string; usage: Usage }; signal?: AbortSignal },
 ): AsyncGenerator<{ type: 'delta'; text: string }, StreamRoundOut> {
   // 这个 timeout 只约束「多久拿到响应头」——SDK 在 fetch promise 的 .finally() 里 clearTimeout，
   // 而流式 fetch 在响应头到达即 resolve。头到之后的保护由下面的空闲看门狗负责，两者职责不同。
+  const totalCtrl = opts.totalTimeoutMs ? new AbortController() : null;
+  let totalTimedOut = false;
+  const totalTimer = totalCtrl ? setTimeout(() => {
+    totalTimedOut = true;
+    totalCtrl.abort();
+  }, opts.totalTimeoutMs) : null;
+  const signals = [opts.signal, totalCtrl?.signal].filter(Boolean) as AbortSignal[];
+  const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
   const stream = getClient(ep.apiKey, ep.baseUrl).messages.stream({
     model: ep.model,
     max_tokens: chatMaxTokens(CHAT_MAX_TOKENS, ep, opts.allowThinking),
     ...thinkingRequestTuning(ep, opts.allowThinking ? {} : CONTINUE_TUNING),
     system,
     messages,
-  }, { timeout: opts.timeoutMs ?? chatTimeoutMs(ep.timeoutMs) });
+  }, { timeout: opts.timeoutMs ?? chatTimeoutMs(ep.timeoutMs), ...(signal ? { signal } : {}) });
 
   // 空闲看门狗（**不是总时长超时**）：连续这么久没有任何流事件就判上游装死并 abort。
   // 不设它的后果是请求永久挂起 + 占住一个 LLM 并发槽，只能等客户端断开（见 providerTimeouts 说明）。
   const startedAt = Date.now();
   let sawEvent = false;
+  let sawContent = false;
   let stalled = false;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   const armIdle = (ms: number) => {
     if (idleTimer) clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       stalled = true;
-      noteChatStreamStall('claude', sawEvent ? 'mid_stream' : 'first_event');
+      noteChatStreamStall('claude', sawContent ? 'mid_stream' : 'first_event', text.length > 0);
       stream.abort();
     }, ms);
   };
@@ -336,7 +345,10 @@ async function* streamChatRound(
     if (!firstDeltaAt) {
       firstDeltaAt = Date.now();
       // 首字延迟只在首轮有产品含义（续写轮的「首字」是接着写，不是用户的等待）。
-      if (opts.measureFirstToken) noteChatFirstToken('claude', (firstDeltaAt - startedAt) / 1000);
+      if (opts.measureFirstToken) {
+        const origin = opts.firstTokenStartedAtMs ?? startedAt;
+        noteChatFirstToken('claude', Math.max(0, firstDeltaAt - origin) / 1000, (firstDeltaAt - startedAt) / 1000);
+      }
     }
     text += chunk;
     if (opts.sink) opts.sink.text = text;
@@ -353,6 +365,7 @@ async function* streamChatRound(
       if (event.type === 'message_start') usage = usageOf(event.message);
       else if (event.type === 'message_delta') usage = { ...usage, outputTokens: event.usage.output_tokens };
       else if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        sawContent = true;
         if (head !== null) {
           head += event.delta.text;
           if (head.length >= CONTINUE_DEDUPE_BUFFER_CHARS) {
@@ -367,9 +380,10 @@ async function* streamChatRound(
         }
       }
       if (opts.sink) opts.sink.usage = usage;
-      // 任何事件都算「活着」——thinking 期间来的是 thinking_delta，也该续期。
+      // thinking / message_start 也算「活着」，但在首个正文 delta 前继续给首字宽窗口；
+      // 不能让一个 message_start 把 90s 首字窗口误切成 30s 中途窗口。
       sawEvent = true;
-      armIdle(streamIdleMs());
+      armIdle(sawContent ? streamIdleMs() : streamFirstEventIdleMs());
     }
     if (head) { // 整轮短于缓冲长度（续写只补了一句）
       const ev = emit(dedupeContinuation(opts.dedupeAgainst!, head));
@@ -379,13 +393,17 @@ async function* streamChatRound(
     // 看门狗自己 abort 的：换成语义明确的错误，别让上层把「上游装死」读成「用户取消」。
     if (stalled) {
       throw Object.assign(
-        new Error(`Claude 流式静默超时（${sawEvent ? '中途' : '响应头后'}无事件，已下发 ${text.length} 字）`),
+        new Error(`Claude 流式静默超时（${sawContent ? '中途' : '首段正文前'}无事件，已下发 ${text.length} 字）`),
         { code: 'AI_STREAM_STALL' },
       );
+    }
+    if (totalTimedOut) {
+      throw Object.assign(new Error(`Claude 续写轮总时长超过 ${opts.totalTimeoutMs}ms`), { code: 'AI_TIMEOUT' });
     }
     throw err;
   } finally {
     clearIdle();
+    if (totalTimer) clearTimeout(totalTimer);
   }
 
   const final = await stream.finalMessage().catch(() => null);
@@ -397,7 +415,11 @@ async function* streamChatRound(
   return { text: body, usage, truncated: isTruncatedFinish(final?.stop_reason) };
 }
 
-export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
+export async function* claudeChatStream(
+  ctx: GenContext,
+  cfg: ResolvedAiConfig,
+  opts: { signal?: AbortSignal; firstTokenStartedAtMs?: number } = {},
+): AsyncGenerator<{ type: 'delta'; text: string } | { type: 'done'; result: ChatReply; usage: Usage }> {
   const { system, messages: base } = chatRequestBase(ctx);
   // 流式的槽位必须持有到整条流消费完，不能只包住「建流」那一下——一条流在上游眼里全程占用一个并发，
   // 只包建流会让闸门形同虚设（8 个槽位瞬间放完 8 条流，紧接着又放 8 条）。故手动 acquire/release。
@@ -422,7 +444,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const ep = candidates[attempt];
     const slot = await acquireLlmSlot(laneOf(ep));
-    const sink = { text: '', usage: ZERO_USAGE };
+    const sink = { text: '', usage: { ...ZERO_USAGE } };
     let yieldedAny = false;
     try {
       noteEndpointAttempt(ep);
@@ -430,7 +452,9 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
         allowThinking: true,
         onDelta: () => { yieldedAny = true; }, // 置位后就不能再转移端点了
         measureFirstToken: true,
+        firstTokenStartedAtMs: opts.firstTokenStartedAtMs,
         sink,
+        signal: opts.signal,
       });
       served = ep;
       text = round.text;
@@ -451,7 +475,6 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
         text = sink.text;
         usage = sink.usage;
         truncated = true;
-        noteChatTruncated('Claude', 'given_up');
         break;
       }
       // 已经吐过内容 / 不可转移的错 → 如实抛出；可转移错误即使没有下一个候选也要共享冷却态。
@@ -480,12 +503,16 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
     // 那会走 clientGone（退预留、不落库），用户连已经看完的半篇都拿不到。
     if (Date.now() - startedAt > CONTINUE_DEADLINE_MS) break;
     const slot = await acquireLlmSlot(laneOf(served));
+    const contSink = { text: '', usage: { ...ZERO_USAGE } };
     try {
       noteEndpointAttempt(served);
       const cont = yield* streamChatRound(served, system, continuationMessages(base, text), {
         allowThinking: false,
         dedupeAgainst: text,
         timeoutMs: CONTINUE_ROUND_TIMEOUT_MS,
+        totalTimeoutMs: CONTINUE_ROUND_TIMEOUT_MS,
+        sink: contSink,
+        signal: opts.signal,
       });
       usage = sumUsage(usage, cont.usage);
       text += cont.text; // 轮内已去重，此处只做拼接（避免与已下发的 delta 对不上）
@@ -493,6 +520,10 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
       noteChatTruncated('Claude', 'continued');
     } catch (err) {
       slot.noteError(err);
+      if (contSink.text) {
+        text += contSink.text;
+        usage = sumUsage(usage, contSink.usage);
+      }
       console.warn(`[claude] 第 ${round} 轮续写失败，按未写完交回用户：${(err as Error).message}`);
       break;
     } finally {
@@ -511,7 +542,7 @@ export async function* claudeChatStream(ctx: GenContext, cfg: ResolvedAiConfig):
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回文本。 */
 // maxTokens：**缺省仍是 700**（辅助抽取的既定预算，不动）。只有产物本身就长的调用方才传大值——
 // 目前唯一的是海报 AI 排版引擎（gateway.completeText，一整页 HTML/CSS 几千 token，700 会被硬截断成半张页面）。
-type ClaudeRawOptions = { allowThinking?: boolean; affinityKey?: string; maxTokens?: number };
+type ClaudeRawOptions = { allowThinking?: boolean; affinityKey?: string; maxTokens?: number; signal?: AbortSignal };
 
 export function claudeRawRequest(
   cfg: ResolvedAiConfig,
@@ -539,7 +570,7 @@ export async function claudeRaw(
   // 重试不在此处配——client 已 maxRetries:0，统一由 withEndpoint 控制。
   const res = await withEndpoint(cfg, (ep) => getClient(ep.apiKey, ep.baseUrl).messages.create(
     claudeRawRequest(ep, system, user, opts),
-    { timeout: ep.timeoutMs },
+    { timeout: ep.timeoutMs, ...(opts.signal ? { signal: opts.signal } : {}) },
   ), { affinityKey: opts.affinityKey, laneClass: cfg.lane === 'aux' ? 'aux' : 'main' });
   return res.content.filter((c) => c.type === 'text').map((c) => (c.type === 'text' ? c.text : '')).join('\n').trim();
 }

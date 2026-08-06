@@ -3,21 +3,12 @@
 // 品牌一律「军师参谋部」（AGENTS §0 #10 红线）；样式对齐小程序设计体系（暖纸底/深绿/金/宋体标题）。
 // 骨架语义源自 V6.0 §19（V6.0 原稿外置 CSS 未随文档保留，此处按品牌设计系统重制）。
 import { prisma } from '../db.js';
-import { yearOf, dayOfYear } from './clock.js';
-import { activeCasefile, todayStr } from './casefile.js';
-import { reviewStreak } from './reviewLog.js';
-import { syncProgress } from './progress.js';
+import { yearOf } from './clock.js';
 import { loadChart, computeChart, type ChartView, type PaipanInput } from './paipan.js';
 import { matchCity } from '../data/cityLongitude.js';
 import { miniCodeDataUri } from './wechat.js';
 import { env } from '../env.js';
 import type { FateCardContent } from '../../../shared/contracts';
-
-// 经典语录（V6.0 §18 语录库，公版内容）：按日期确定性轮换。
-const QUOTES = [
-  '集中优势兵力，各个歼灭。', '没有调查，就没有发言权。', '善战者，求之于势，不责于人。',
-  '伤其十指，不如断其一指。', '不打无准备之仗。', '知己知彼，百战不殆。', '兵贵神速。',
-];
 
 const BASE_CSS = `
   :root { --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", "SimSun", serif; }
@@ -72,46 +63,6 @@ function footer(refer?: string): string {
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function quoteOfToday(): string {
-  return QUOTES[dayOfYear() % QUOTES.length]; // 上海时区一年中的第几天（P1-4）
-}
-
-/** ⑦ 每日战报：当日军令完成/对齐/回填 + 段位/连续天数（全部服务端账本）。 */
-export async function renderDailyCard(args: { tenantId: string; userId: string }): Promise<string> {
-  const date = todayStr();
-  const cf = await activeCasefile(args.userId);
-  const orders = cf ? await prisma.casefileOrder.findMany({ where: { casefileId: cf.id, date }, orderBy: { createdAt: 'asc' } }) : [];
-  const metric = cf ? await prisma.casefileMetric.findUnique({ where: { casefileId_date: { casefileId: cf.id, date } } }) : null;
-  const [streak, progress] = await Promise.all([reviewStreak(args.userId), syncProgress(args.userId)]);
-
-  const done = orders.filter((o) => o.done).length;
-  const aligned = orders.filter((o) => o.aligned === true).length;
-  const alignRate = orders.length ? Math.round((aligned / orders.length) * 100) : null;
-
-  const list = orders.length
-    ? orders.map((o) => `<div class="li"><span class="${o.done ? 'ok' : 'no'}">${o.done ? '✓' : '✕'}</span>${esc(o.text)}</div>`).join('')
-    : '<div class="li">今天没有军令记录</div>';
-  const backfillRow = metric
-    ? `<div class="scores" style="margin-top:16px"><div class="score"><b>${metric.leads}</b><span>线索</span></div><div class="score"><b>${metric.consults}</b><span>咨询</span></div><div class="score"><b>${metric.deals}</b><span>成交</span></div></div>`
-    : '';
-
-  const body = `
-<div class="hd"><span class="badge">◆ 军师参谋部 ◆</span><h1>每日战报</h1>
-<div class="date">${date}${cf ? ` · 案卷《${esc(cf.title)}》` : ''}</div>
-<span class="rank">${progress?.rank ?? '新兵'} · 连续复盘第 ${streak} 天</span></div>
-<div class="bd">
-<div class="scores">
-<div class="score"><b>${done}/${orders.length}</b><span>军令完成</span></div>
-<div class="score gold"><b>${alignRate !== null ? `${alignRate}%` : '—'}</b><span>对齐率</span></div>
-<div class="score"><b>${metric ? '已回填' : '未回填'}</b><span>今日数据</span></div>
-</div>
-<div class="sec"><div class="sec-k">今 日 军 令</div>${list}</div>
-${backfillRow}
-<div class="quote">「${quoteOfToday()}」</div>
-</div>${footer('身边有同样在打仗的老板？把这张卡转给他')}`;
-  return page('每日战报', body);
 }
 
 /** ⑨ 天时日历：命盘年度逐月攻守（排盘引擎数据，无命盘由调用方拦 400）。 */
@@ -197,7 +148,7 @@ export async function publishCard(args: {
   verse?: string | null;    // calendar 卡：年度谶语（战略档案存档）
 }): Promise<string> {
   if (args.kind === 'daily') {
-    return publishCardHtml(args.tenantId, '每日战报', await renderDailyCard(args), 'daily');
+    throw Object.assign(new Error('每日战报已改为鉴权内嵌页'), { statusCode: 410, code: 'DAILY_REPORT_EMBEDDED_ONLY' });
   }
   if (args.kind === 'calendar') {
     const chart = await loadChart(args.userId);

@@ -76,7 +76,7 @@ describe('P0-2 命理功能开关三层', () => {
     }
 
     // 每日战报（daily）非命理：不被开关拦截（不返回 FEATURE_DISABLED）
-    const daily = await api('POST', '/api/cards/daily', { token, body: {} });
+    const daily = await api('GET', '/api/cards/daily', { token });
     assert.notEqual(daily.body?.code, 'FEATURE_DISABLED', 'daily 战报不受命理开关约束');
 
     // 上下文：降级为禁令句，不含命盘块

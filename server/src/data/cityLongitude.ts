@@ -1,4 +1,4 @@
-// 主要城市 → 东经（真太阳时校正用，M1 PR-2；匹配规则 2026-08 收紧）。
+// 主要城市 → 东经（真太阳时校正用，paipan-v3）。
 // 取市中心近似值（精确到 0.1° ≈ 24 秒时差，远小于时辰颗粒度）；未命中返回 undefined = 不校正。
 //
 // 为什么匹配必须保守：经度校正不是微调。经度每偏 1° 平移 4 分钟，时辰颗粒是 120 分钟，
@@ -29,26 +29,36 @@ export interface CityMatch { city: string; longitude: number }
 
 /**
  * 出生地字符串 → 城市经度。
- * 先精确匹配（「杭州市」「浙江杭州」去后缀后 === 杭州），再退到「输入含有城市名」。
- * 含有匹配按城市名长度降序取最长命中，避免「哈尔滨」被更短的城市名抢先。
+ * 先精确匹配，再按地址里的出现顺序取第一个城市；同一位置才取最长城市名。
+ * 这能正确处理「浙江杭州，现居上海」一类含两个城市名的输入——出生地在前，现居地在后；
+ * 也避免 CITY_LNG 的对象声明顺序决定结果。道路名（如「南京路」）不作为城市命中。
  */
 export function matchCity(place?: string | null): CityMatch | undefined {
   if (!place) return undefined;
-  const s = place.replace(/[省市区县]|自治区|特别行政区/g, '').trim();
+  // 长行政后缀必须先删。旧正则把单个「区」先删掉，导致「自治区/特别行政区」残留半截。
+  const s = place
+    .replace(/特别行政区|(?:壮族|回族|维吾尔族)?自治区|自治州|地区/g, '')
+    .replace(/[省市区县旗]/g, '')
+    .replace(/[，,、；;\s]+/g, '')
+    .trim();
   // 单字输入无法可靠定位（「南」既可能是南京也可能是南昌/南宁），一律不校正。
   if (s.length < 2) return undefined;
 
   const exact = CITY_LNG[s];
   if (typeof exact === 'number') return { city: s, longitude: exact };
 
-  // 最长命中优先：「黑龙江哈尔滨」既含「哈尔滨」也不含更短项时取「哈尔滨」；
-  // 若某天表里同时有「南京」和「南京市郊」，长的那个更具体。
-  let best: CityMatch | undefined;
+  let best: (CityMatch & { index: number }) | undefined;
   for (const [city, longitude] of Object.entries(CITY_LNG)) {
-    if (!s.includes(city)) continue;
-    if (!best || city.length > best.city.length) best = { city, longitude };
+    const index = s.indexOf(city);
+    if (index < 0) continue;
+    // 单独输入「南京路/上海街」是道路，不足以定位出生城市；带更早城市时由更早城市正常胜出。
+    const next = s[index + city.length];
+    if (index === 0 && /[路街巷道]/.test(next ?? '') && !Object.keys(CITY_LNG).some((other) => other !== city && s.indexOf(other) > index)) continue;
+    if (!best || index < best.index || (index === best.index && city.length > best.city.length)) {
+      best = { city, longitude, index };
+    }
   }
-  return best;
+  return best ? { city: best.city, longitude: best.longitude } : undefined;
 }
 
 /** 兼容旧签名：只要经度。新代码请用 matchCity（能拿到命中的城市名做回执）。 */

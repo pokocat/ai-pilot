@@ -107,6 +107,41 @@ journalctl -u junshi-api -f # 看日志，确认「军师 API ready」
 ```
 自检：`curl http://127.0.0.1:4000/api/health` → `{"ok":true}`。
 
+#### 持久对话生成首次发布（2026-08-05）
+
+本次数据库变更是加法：新增 `generation_job / generation_attempt / generation_effect`，并给
+`session.activeGenerationId`、`message.generationUserJob/generationResultJob` 增加可空关系与索引。
+生产仍须先备份并人工复核 `prisma db push` 预览，不得因为“理论上是加法”就常驻打开
+`ACCEPT_DATA_LOSS`。发布顺序固定为：
+
+1. 备份 PostgreSQL，执行 `bash scripts/deploy-prod.sh` 发布服务端与 schema；先不上传新小程序。
+2. 核对 `/opt/junshi/.deploy-version`、`junshi-api`、`/api/health` 与 `/api/metrics`；确认 worker 已启动，
+   `junshi_chat_generation_total`、分段时长、恢复与估算序列都可被 Prometheus 抓取。
+3. 用内部真实账号发起一轮至少 60 秒的对话：切后台/关闭页面后等待，再进入原会话。列表应显示阶段，
+   进入后继续看到同一 `generationId` 的权威快照；不得新增第二条 user message。另测一次显式“停止生成”。
+4. 查库确认一轮只有一个 job、一条 user message、最多一条结果消息，`settlementStatus` 已终态，
+   `quotaCharged` 与 attempts 累计一致；pending/running effect 能继续被 worker 消费。
+5. 服务端验证通过后，才用正式 `release:weapp` 上传带稳定 `clientRequestId` 的小程序版本；旧客户端未带该字段，
+   仍走兼容 inline 路径。每日战报旧 POST 返回 410、历史 daily HTML/PDF 返回 404 是本次预期收口，不得回滚成公开链接。
+
+抽查 SQL（只读）：
+
+```sql
+SELECT status, "settlementStatus", COUNT(*)
+FROM generation_job
+GROUP BY status, "settlementStatus"
+ORDER BY status, "settlementStatus";
+
+SELECT status, COUNT(*)
+FROM generation_effect
+GROUP BY status
+ORDER BY status;
+```
+
+回滚只回滚应用版本，不删新表、不清 generation/message/usage 事实。若只回滚小程序，新流量自然回到旧 inline
+入口；若回滚服务端，先确认没有 active job，保留新增表与可空字段，避免向后迁移造成数据损失。上线后按
+`docs/CHAT_STREAMING_RELIABILITY_PLAN.md` §12.4 连续观察 24 小时，达标前不得标记生产验收完成。
+
 #### 方案/支付账本首次发布前置（2026-08-02）
 
 本次 schema 会为微信 `transactionId` 与 `(userId, clientRequestId)` 增加唯一约束。不要直接把 `db push` 当成数据清洗；先只读检查历史重复值（正常应为 0 行）：
@@ -122,7 +157,7 @@ HAVING COUNT(*) > 1;
 
 如有重复，先根据订单、微信交易号和权益实际发放结果人工核对，不得盲删。`clientRequestId` 是本次新增的可空字段，历史行均为 null，不会与 `(userId, clientRequestId)` 唯一约束冲突。唯一约束落库后，回填存量套餐的商业稳定字段：
 
-固定生产部署脚本为这类已经人工复核的新唯一约束保留了显式开关：`ACCEPT_DATA_LOSS=1 bash scripts/deploy-prod.sh`。只能在上述查重为空、当次 schema diff 已人工确认无删列/缩粄类型后使用；不要把该开关设为常驻默认值。
+固定生产部署脚本为这类已经人工复核的新唯一约束保留了显式开关：`ACCEPT_DATA_LOSS=1 bash scripts/deploy-prod.sh`。只能在上述查重为空、当次 schema diff 已人工确认无删列/缩窄类型后使用；不要把该开关设为常驻默认值。
 
 ```bash
 cd /opt/junshi/server

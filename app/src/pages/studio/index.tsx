@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Input, ScrollView, Canvas } from '@tarojs/components';
+import { View, Text, Input, ScrollView } from '@tarojs/components';
 import Taro, { useDidShow } from '@tarojs/taro';
 import Screen from '../../components/Screen';
 import TabHeader from '../../components/TabHeader';
@@ -8,7 +8,6 @@ import Icon from '../../components/Icon';
 import Login from '../../components/Login';
 import AdvisorAvatar from '../../components/AdvisorAvatar';
 import AgentUnlock from '../../components/AgentUnlock';
-import SharePreview from '../../components/SharePreview';
 import { navTo, switchTo } from '../../services/nav';
 import { REVIEW_TIME } from '../../data/constants';
 import { useStore } from '../../hooks/useStore';
@@ -20,8 +19,6 @@ import {
 } from '../../services/dossier';
 import { requestWechatSubscribe } from '../../services/wechatSubscribe';
 import { pickDecisionToVerify } from '../../services/decisionPick';
-import { useShareImage } from '../../hooks/useShareImage';
-import { makeDailyBattleImage } from '../../services/dailyBattleCard';
 import { EMPTY_STATES } from '../../data/emptyStates';
 import { ARCHIVE_INTERVIEW_PROMPT, archiveAnswerPrompt } from '../../data/intents';
 import PrescriptionStrip from '../../components/PrescriptionStrip';
@@ -275,26 +272,6 @@ export default function Studio() {
     goChat('ip', firstUndone
       ? `围绕这条军令帮我产出可直接使用的内容脚本：「${firstUndone.text}」。`
       : '按我们最近定下的方案，帮我写今天要发布的内容脚本。');
-
-  const dateStr = (() => { const d = new Date(); return `${d.getMonth() + 1}月${d.getDate()}日`; })();
-
-  // 每日战报卡：端上 canvas 出图 → 预览 → 发好友/存相册。
-  // 原来是调 POST /cards/daily 拿一条 http 链接塞剪贴板，提示「可发朋友圈/群」——小程序里这条
-  // 路走不通（链接在小程序内打不开、朋友圈也不接受粘贴链接），用户拿到的只是一串没处贴的文本；
-  // 而且那条 /api/r/:id 公开页无鉴权无有效期，还把线索/咨询/成交原始数字挂在公网。
-  // 现在数据全在端上（本页 state），不再需要那个接口，卡面数字也只画进度、不画经营三件套。
-  const dailyCard = useShareImage(
-    (canvasId) => makeDailyBattleImage(canvasId, {
-      dateLabel: dateStr,
-      casefileTitle: dossier?.title,
-      total: todayOrders.length,
-      done: doneTodayOrders.length,
-      streak,
-      orders: todayOrders.map((o) => ({ text: o.text, done: o.done })),
-      backfilled: backfillSaved,
-    }),
-    { canvasId: 'stDailyCanvas', loadingTitle: '生成战报卡…', failTip: '战报卡生成失败，请重试' },
-  );
 
   // 今日最重要（today-focus）：先补资料 > 首条未完成军令
   // 卡上显示的是哪条问题，点进对话就带哪条（archiveAnswerPrompt）。
@@ -715,9 +692,9 @@ export default function Studio() {
                 <Icon name="doc" size={15} color="#fff" />
                 <Text>今晚复盘</Text>
               </View>
-              <View className={`rc-btn ghost ${dailyCard.busy ? 'off' : ''}`} onClick={dailyCard.make}>
-                <Icon name="image" size={15} color={accent} />
-                <Text>{dailyCard.busy ? '生成中…' : '生成每日战报卡'}</Text>
+              <View className="rc-btn ghost" onClick={() => navTo('/packages/work/daily/index')}>
+                <Icon name="doc" size={15} color={accent} />
+                <Text>查看每日战报</Text>
               </View>
             </View>
             <View className="remind card">
@@ -784,13 +761,6 @@ export default function Studio() {
         open={showLogin}
         onLoggedIn={() => { setShowLogin(false); loadStudio(); }}
       />
-      {/* 每日战报卡：屏外画布（只用于出图，不参与布局）+ 出图后的预览层。
-          分享形态是图片而不是链接——小程序里链接给不出去，见 services/dailyBattleCard.ts。 */}
-      <Canvas type="2d" id="stDailyCanvas" className="st-daily-canvas" />
-      {dailyCard.path ? (
-        <SharePreview path={dailyCard.path} note="经营数字已隐去，可安心示人" onClose={dailyCard.close} />
-      ) : null}
-
       <CoachMarks />
     </Screen>
   );

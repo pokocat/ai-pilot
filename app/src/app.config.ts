@@ -1,5 +1,8 @@
 export default defineAppConfig({
   lazyCodeLoading: 'requiredComponents',
+  // 普通接口沿用 60s；生成/订阅自身仍显式传 180s。这里补全微信全局网络上限，
+  // 避免某些基础库忽略单请求 timeout 后先于服务端 150s 预算断开。
+  networkTimeout: { request: 180000, connectSocket: 60000, uploadFile: 120000, downloadFile: 120000 },
   pages: [
     'pages/sessions/index',
     'pages/home/index',
@@ -43,6 +46,7 @@ export default defineAppConfig({
         'webview/index',
         'command/index',
         'reminders/index',
+        'daily/index',
         // 海报成品图（canvas_design）：需求单确认页 + 任务详情页，入口在对话页的海报设计师成果卡。
         'poster/index',
         'posterJob/index',

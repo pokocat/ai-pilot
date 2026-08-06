@@ -1,9 +1,10 @@
 // B 级卡片路由（M4 PR-15 第一批）：每日战报 / 天时日历 / 天命速写（送你一卦）。
-// 返回可分享 htmlUrl（自有域名 /api/r/:id）；卡上数字全部来自服务端账本。
+// 每日战报只返回登录态内嵌页数据；calendar 仍返回可分享 htmlUrl，fate 走不落库预览。
 import type { FastifyInstance } from 'fastify';
 import { resolveUser } from '../services/context.js';
 import { recordAudit } from '../services/audit.js';
 import { publishCard, fateCardContent, type CardKind } from '../services/cardHtml.js';
+import { dailyBattleReport } from '../services/dailyBattleReport.js';
 import { computeChart, validatePaipanInput, type PaipanInput } from '../services/paipan.js';
 import { matchCity } from '../data/cityLongitude.js';
 import { fortuneDisabledGuard } from '../services/featureFlag.js';
@@ -14,6 +15,12 @@ const KINDS: CardKind[] = ['daily', 'calendar', 'fate'];
 const FORTUNE_KINDS = new Set<CardKind>(['calendar', 'fate']);
 
 export async function cardRoutes(app: FastifyInstance) {
+  // 每日战报是登录后的经营内页：只返回当前用户数据，不生成永久公开 ReportHtml。
+  app.get('/cards/daily', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    return dailyBattleReport(user.id);
+  });
+
   // 送你一卦「天命速写」预览（合规打磨·AUDIT P-4）：校验朋友生辰 → 现算命盘 → 返回卡文本。
   // 第三人生辰**不落库、无公开链接**（旧 /cards/fate + friendBazi 会 reportHtml.create 永久公开，已封）；
   // 小程序端拿文本 canvas 画卡导出图片分享。需前端「已获对方同意」勾选（PIPL），此处只记审计不存生辰明文。
@@ -50,6 +57,12 @@ export async function cardRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const kind = req.params.kind as CardKind;
     if (!KINDS.includes(kind)) return reply.code(400).send({ error: '未知卡片类型' });
+    if (kind === 'daily') {
+      return reply.code(410).send({
+        error: '每日战报已改为小程序内嵌页，请使用 GET /cards/daily',
+        code: 'DAILY_REPORT_EMBEDDED_ONLY',
+      });
+    }
     if (FORTUNE_KINDS.has(kind) && (await fortuneDisabledGuard(reply))) return reply; // P0-2：命理卡下线 → 403
     // 封禁第三人生辰落库路径：fate + friendBazi 一律走 /cards/fate/preview（不落库）
     if (kind === 'fate' && req.body?.friendBazi) {

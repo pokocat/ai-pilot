@@ -17,6 +17,9 @@ export interface UsageMeta {
   agentKey?: string | null;
   ratio?: number; // 该智能体计费比例：creditCost(本次扣额) = ceil(totalTokens × ratio)
   sandbox?: boolean; // 运营沙盒试跑：仍记诊断 trace，但不写 token_usage（不污染计费统计、不真扣额度）
+  signal?: AbortSignal; // GenerationJob 显式取消/job 预算；只传执行链，不写入 usage/trace
+  skipAskRecovery?: boolean; // durable worker 先落主消息，再在独立 attempt + 3s 预算内补推荐选项
+  firstTokenStartedAtMs?: number; // 用户体验口径起点：GenerationJob 接单/创建时刻
 }
 
 /**
@@ -85,11 +88,17 @@ export function recordInfraUsage(kind: 'embedding' | 'rerank', model: string, to
  * 无 user 归属（辅助调用常无会话上下文），按 kind='aux' 归入基建用量；provider 无 usage 返回时按文本长度粗估
  * （CJK 为主 ≈ 2 字符/token）——仅供成本可见性，不参与按次扣费。fire-and-forget，绝不抛。
  */
-export function recordAuxUsage(model: string, provider: string, inputText: string, outputText: string): void {
+export function recordAuxUsage(
+  model: string,
+  provider: string,
+  inputText: string,
+  outputText: string,
+  meta?: UsageMeta,
+): void {
   const inputTokens = Math.ceil((inputText?.length ?? 0) / 2);
   const outputTokens = Math.ceil((outputText?.length ?? 0) / 2);
   if (inputTokens + outputTokens <= 0) return;
-  void recordTokenUsage({ kind: 'aux', provider, model, usage: { inputTokens, outputTokens, cachedInput: 0 } });
+  void recordTokenUsage({ ...meta, kind: 'aux', provider, model, usage: { inputTokens, outputTokens, cachedInput: 0 } });
 }
 
 /**

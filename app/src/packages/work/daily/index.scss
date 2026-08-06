@@ -1,0 +1,39 @@
+.daily-page { height: 100vh; display: flex; flex-direction: column; background: var(--paper); }
+.daily-scroll { flex: 1; min-height: 0; padding: 0 16px; box-sizing: border-box; }
+.daily-hero {
+  margin-top: 10px; padding: 24px 20px 22px; border-radius: 20px;
+  background: linear-gradient(150deg, var(--accent), var(--accent-deep)); color: #fff;
+  box-shadow: 0 15px 34px rgba(22, 25, 29, .12);
+}
+.daily-kicker { display: block; font-size: 11px; letter-spacing: .16em; opacity: .72; }
+.daily-title { display: block; margin-top: 10px; font-size: 29px; font-weight: 700; }
+.daily-date { display: block; margin-top: 6px; font-size: 12px; opacity: .7; line-height: 1.5; }
+.daily-rank { display: inline-flex; margin-top: 12px; padding: 5px 11px; border-radius: 999px; background: rgba(255,255,255,.14); font-size: 12px; font-weight: 600; }
+.daily-private { display: flex; align-items: center; gap: 7px; margin: 12px 2px 14px; color: var(--ink-3); font-size: 11.5px; line-height: 1.5; }
+.daily-private-dot { color: var(--accent); font-size: 7px; }
+.daily-scores { display: flex; gap: 9px; }
+.daily-score { flex: 1; min-width: 0; padding: 14px 5px 12px; text-align: center; border-radius: 14px; background: var(--surface); }
+.daily-score-v { display: block; color: var(--accent); font-size: 22px; font-weight: 700; white-space: nowrap; }
+.daily-score-v.gold { color: var(--gold-deep); }
+.daily-score-v.small { font-size: 16px; padding: 4px 0 2px; }
+.daily-score-k { display: block; margin-top: 5px; color: var(--ink-3); font-size: 10.5px; font-weight: 600; }
+.daily-section { margin-top: 12px; padding: 16px 15px 8px; border-radius: 15px; background: var(--surface); }
+.daily-section-k { display: block; margin-bottom: 5px; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .14em; }
+.daily-order { display: flex; align-items: flex-start; gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.daily-order:last-child { border-bottom: 0; }
+.daily-order-state { flex-shrink: 0; width: 18px; color: var(--ink-3); font-size: 15px; font-weight: 700; }
+.daily-order-state.done { color: var(--accent); }
+.daily-order-copy { flex: 1; min-width: 0; }
+.daily-order-text { display: block; color: var(--ink); font-size: 13.5px; line-height: 1.55; }
+.daily-order-text.done { color: var(--ink-2); }
+.daily-order-align { display: block; margin-top: 4px; color: var(--ink-3); font-size: 10.5px; }
+.daily-empty { display: block; padding: 24px 6px 28px; color: var(--ink-3); font-size: 13px; line-height: 1.65; text-align: center; }
+.daily-metrics { display: flex; padding: 10px 0 12px; }
+.daily-metrics > view { flex: 1; text-align: center; border-right: 1px solid var(--line); }
+.daily-metrics > view:last-child { border-right: 0; }
+.daily-metric-v { display: block; color: var(--ink); font-size: 23px; font-weight: 700; }
+.daily-metric-k { display: block; margin-top: 4px; color: var(--ink-3); font-size: 11px; }
+.daily-quote { margin-top: 14px; padding: 14px 15px; border-left: 3px solid var(--gold); background: var(--gold-soft); color: var(--gold-deep); font-size: 14px; line-height: 1.65; }
+.daily-foot { display: flex; flex-direction: column; align-items: center; gap: 5px; margin-top: 20px; color: var(--ink-3); font-size: 10px; letter-spacing: .08em; }
+.daily-foot .serif { color: var(--gold-deep); font-size: 14px; font-weight: 700; letter-spacing: .12em; }
+.daily-bottom { height: calc(34px + env(safe-area-inset-bottom)); }

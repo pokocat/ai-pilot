@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { billableOf } from '../services/usage.js';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
@@ -33,8 +34,36 @@ import { isRecallIntent, sessionRecallScore } from '../services/recallIntent.js'
 import { isSessionGenerating, trackSessionGeneration } from '../services/sessionGeneration.js';
 import { cardSection } from '../services/deliverableSection.js';
 import { updateSessionDigest, readSessionDigest, type SessionDigestItem } from '../services/sessionDigest.js';
+import { enqueueDurableGeneration, type DurableGenerationBody } from '../services/generationRequest.js';
+import { generationSummary, generationView, GenerationJobError } from '../services/generationJobs.js';
+import { pipeGenerationSSE, setupGenerationSSE } from './generations.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+type GenerationRequestBody = {
+  agentKey?: string;
+  sessionId?: string;
+  text: string;
+  projectId?: string;
+  refs?: MessageRef[];
+  clientRequestId?: string;
+  parentGenerationId?: string;
+};
+
+/**
+ * 生产上的旧客户端即使没有 clientRequestId，也必须进入持久任务链路：断连不是取消，且所有
+ * 已发生 provider 调用统一结算。服务端生成的 key 只能保证这一笔请求内部的唯一性，无法让旧
+ * 客户端跨 HTTP 重传幂等；新版客户端仍必须自己提供稳定 key。
+ *
+ * 测试套件的大量历史用例仍直接验证旧内联实现；只有显式打开开关的回归用例才走无 key 升级，
+ * 防止测试专用兼容分支被误带到 production。
+ */
+export function durableGenerationBody(body: GenerationRequestBody): DurableGenerationBody | null {
+  const provided = body.clientRequestId?.trim();
+  if (provided) return { ...body, clientRequestId: provided };
+  if (process.env.NODE_ENV === 'test' && process.env.TEST_DURABLE_LEGACY_GENERATION !== '1') return null;
+  return { ...body, clientRequestId: `legacy-${randomUUID()}` };
+}
 
 // 降级结算（真实模型没出结构化成果、回退 mock 模板 = deliverable.degraded）：token 额度侧已 settle(0) 退回，
 // 钻石预留也必须一并退回——否则图片类 agent 拿到废模板还照扣钻石（两轴计费不对齐的资损，见售卖前体检 P1）。
@@ -68,7 +97,16 @@ function harvestText(d: Deliverable): string {
   return `${d.title}\n${d.sections.map(cardSection).map((s) => `${s.h} ${s.b ?? ''} ${(s.list ?? []).join(' ')}`).join('\n')}`;
 }
 function notifySessionReport(user: { tenantId: string; id: string }, deliverable: Deliverable): void {
-  notifyReportReady({ tenantId: user.tenantId, userId: user.id, title: deliverable.title || '报告已生成' });
+  void notifyReportReady({ tenantId: user.tenantId, userId: user.id, title: deliverable.title || '报告已生成' })
+    .catch((err) => console.error('[sessions] report notify failed:', (err as Error).message));
+}
+
+function generationSnippet(active: ReturnType<typeof generationSummary> | null): string {
+  if (!active) return '容我想想…';
+  if (active.status === 'queued' || active.phase === 'queue') return '已排队，等军师接手…';
+  if (active.phase === 'context') return '正在梳理案卷与上下文…';
+  if (active.phase === 'provider') return '军师正在回复…';
+  return '回复已写完，正在收尾…';
 }
 
 // 报告轮「同步补齐」的墙钟预算。
@@ -177,7 +215,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     const sessions = await prisma.session.findMany({
       where: { userId: user.id },
       orderBy: { updatedAt: 'desc' },
-      include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 }, agent: true },
+      include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 }, agent: true, activeGeneration: true },
     });
     const EPOCH = new Date(0);
     // V7-15 未读数强化：unreadCount = 自 lastReadAt 起的 assistant 消息计数（服务端算；user/report/system 不计）。
@@ -185,7 +223,10 @@ export async function sessionRoutes(app: FastifyInstance) {
     return Promise.all(
       sessions.map(async (s) => {
         const last = s.messages[0];
-        const generating = isSessionGenerating(s.id);
+        const activeGeneration = s.activeGeneration && !['completed', 'truncated', 'failed', 'cancelled'].includes(s.activeGeneration.status)
+          ? generationSummary(s.activeGeneration)
+          : null;
+        const generating = !!activeGeneration || isSessionGenerating(s.id);
         let snippet = '新对话';
         if (last) {
           const c = last.contentJson as { text?: string; title?: string };
@@ -200,10 +241,11 @@ export async function sessionRoutes(app: FastifyInstance) {
           agentName: s.agent.name,
           agentIcon: s.agent.icon,
           title: s.title,
-          snippet: generating ? '容我想想…' : snippet,
+          snippet: generating ? generationSnippet(activeGeneration) : snippet,
           updatedAt: s.updatedAt,
           projectId: s.projectId,
           generating,
+          activeGeneration,
           unreadCount,
           // 未读红点（保留兼容既有消费者）：有未读 assistant（=unreadCount>0），或尾条为未读 report
           //（后台产出即置——列表红点提示，见 generate* 的 role='report' 落库）。
@@ -218,7 +260,7 @@ export async function sessionRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const s = await prisma.session.findFirst({
       where: { id: req.params.id, userId: user.id },
-      include: { messages: { orderBy: { createdAt: 'asc' } }, agent: true },
+      include: { messages: { orderBy: { createdAt: 'asc' } }, agent: true, activeGeneration: true },
     });
     if (!s) return reply.code(404).send({ error: 'session not found' });
     // 打开会话即标记已读（消除列表未读红点）。必须 await：此前 fire-and-forget（void + 不等待）
@@ -234,15 +276,40 @@ export async function sessionRoutes(app: FastifyInstance) {
       agent: { key: s.agent.key, name: s.agent.name, role: s.agent.role, icon: s.agent.icon, greet: pub?.greet ?? s.agent.greet, chips: (pub?.chipsJson ?? s.agent.chipsJson), memText: pub?.memText ?? s.agent.memText, learnText: pub?.learnText ?? s.agent.learnText },
       title: s.title,
       projectId: s.projectId,
-      generating: isSessionGenerating(s.id),
+      generating: !!(s.activeGeneration && !['completed', 'truncated', 'failed', 'cancelled'].includes(s.activeGeneration.status)) || isSessionGenerating(s.id),
+      activeGeneration: s.activeGeneration && !['completed', 'truncated', 'failed', 'cancelled'].includes(s.activeGeneration.status)
+        ? generationSummary(s.activeGeneration)
+        : null,
       messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: presentMessageContent(m.role, m.contentJson), at: m.createdAt, refs: (m.refsJson as MessageRef[] | null) ?? undefined })),
     };
   });
 
-  app.delete<{ Params: { id: string } }>('/sessions/:id', async (req) => {
+  app.delete<{ Params: { id: string } }>('/sessions/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    await prisma.message.deleteMany({ where: { session: { id: req.params.id, userId: user.id } } });
-    await prisma.session.deleteMany({ where: { id: req.params.id, userId: user.id } });
+    const result = await prisma.$transaction(async (tx) => {
+      // 与 GenerationJob 建单的 activeGenerationId CAS 串行：生成中禁止删会话，
+      // 避免级联删 job 后 provider 仍继续消耗、worker 却无从落库/结算。
+      await tx.$queryRaw`SELECT id FROM session WHERE id = ${req.params.id} AND "userId" = ${user.id} FOR UPDATE`;
+      const session = await tx.session.findFirst({
+        where: { id: req.params.id, userId: user.id },
+        include: { activeGeneration: true },
+      });
+      if (!session) return { kind: 'missing' as const };
+      const active = session.activeGeneration;
+      if (active && !['completed', 'truncated', 'failed', 'cancelled'].includes(active.status)) {
+        return { kind: 'active' as const, generationId: active.id };
+      }
+      await tx.message.deleteMany({ where: { sessionId: session.id } });
+      await tx.session.delete({ where: { id: session.id } });
+      return { kind: 'deleted' as const };
+    });
+    if (result.kind === 'active') {
+      return reply.code(409).send({
+        error: '这条回复还在生成，请先进入会话停止生成',
+        code: 'GENERATION_IN_PROGRESS',
+        generationId: result.generationId,
+      });
+    }
     return { ok: true };
   });
 
@@ -290,8 +357,37 @@ export async function sessionRoutes(app: FastifyInstance) {
 
   // 同步产出（跨端：H5 + 微信小程序均可用；前端做客户端渐进式呈现）。
   // 空会话不预先落库——首条消息时创建会话。
-  app.post<{ Body: { agentKey?: string; sessionId?: string; text: string; projectId?: string; refs?: MessageRef[] } }>('/generate-sync', async (req, reply) => {
+  app.post<{ Body: GenerationRequestBody }>('/generate-sync', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const durableBody = durableGenerationBody(req.body);
+    if (durableBody) {
+      try {
+        const created = await enqueueDurableGeneration(user, durableBody);
+        const deadline = Date.now() + 175_000;
+        let job = created.job;
+        while (!['completed', 'truncated', 'failed', 'cancelled'].includes(job.status) && Date.now() < deadline) {
+          await sleep(350);
+          job = await prisma.generationJob.findUniqueOrThrow({ where: { id: job.id } });
+        }
+        const view = generationView(job);
+        const statusCode = ['completed', 'truncated', 'failed', 'cancelled'].includes(job.status) ? 200 : 202;
+        return reply.code(statusCode).send({
+          sessionId: job.sessionId,
+          created: created.createdSession,
+          agentKey: created.agentKey,
+          kind: created.kind,
+          generationId: job.id,
+          status: view.status,
+          snapshotVersion: view.snapshotVersion,
+          messageId: view.resultMessageId ?? undefined,
+          ...(view.reply ? { reply: view.reply } : {}),
+          ...(view.deliverable ? { deliverable: view.deliverable } : {}),
+        });
+      } catch (error) {
+        const e = error as Error & { statusCode?: number; code?: string; generationId?: string };
+        return reply.code(e.statusCode ?? 500).send({ error: e.message, code: e.code ?? 'INTERNAL', ...(e.generationId ? { generationId: e.generationId } : {}) });
+      }
+    }
     const text = (req.body.text || '').trim();
     if (!text) return reply.code(400).send({ error: 'empty text' });
     const refs = req.body.refs;
@@ -520,8 +616,34 @@ export async function sessionRoutes(app: FastifyInstance) {
   });
 
   // 发送消息并流式产出（SSE；H5 ReadableStream / weapp chunk）。空会话不预先落库——首条消息时创建会话。
-  app.post<{ Body: { agentKey?: string; sessionId?: string; text: string; projectId?: string; refs?: MessageRef[] } }>('/generate', async (req, reply) => {
+  app.post<{ Body: GenerationRequestBody }>('/generate', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const durableBody = durableGenerationBody(req.body);
+    if (durableBody) {
+      try {
+        const created = await enqueueDurableGeneration(user, durableBody);
+        setupGenerationSSE(reply);
+        if (created.createdSession) {
+          reply.raw.write(`event: session\ndata: ${JSON.stringify({ id: created.session.id, agentKey: created.agentKey, title: created.session.title, projectId: created.session.projectId })}\n\n`);
+        }
+        reply.raw.write(`event: generation\ndata: ${JSON.stringify({ generationId: created.job.id, sessionId: created.job.sessionId, attached: created.attached, status: created.job.status, phase: created.job.phase, snapshotVersion: created.job.snapshotVersion })}\n\n`);
+        reply.raw.write(`event: meta\ndata: ${JSON.stringify({ kind: created.kind, refNotices: created.refNotices, generationId: created.job.id })}\n\n`);
+        await pipeGenerationSSE(reply, created.job.id, { compatibilityEvents: true });
+        if (!reply.raw.writableEnded && !reply.raw.destroyed) reply.raw.end();
+        return;
+      } catch (error) {
+        if (reply.raw.headersSent) {
+          const e = error as Error & { code?: string };
+          if (!reply.raw.writableEnded && !reply.raw.destroyed) {
+            reply.raw.write(`event: error\ndata: ${JSON.stringify({ message: e.message, code: e.code ?? 'INTERNAL' })}\n\n`);
+            reply.raw.end();
+          }
+          return;
+        }
+        const e = error as GenerationJobError & { statusCode?: number; code?: string; generationId?: string };
+        return reply.code(e.statusCode ?? 500).send({ error: e.message, code: e.code ?? 'INTERNAL', ...(e.generationId ? { generationId: e.generationId } : {}) });
+      }
+    }
     const text = (req.body.text || '').trim();
     if (!text) return reply.code(400).send({ error: 'empty text' });
     const refs = req.body.refs;
@@ -983,6 +1105,6 @@ function setupSSE(reply: FastifyReply) {
   });
 }
 
-function wantsDeliverableRequest(text: string): boolean {
+export function wantsDeliverableRequest(text: string): boolean {
   return /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|(?:重新)?出.{0,4}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|战略体检|转成军令|生成纪要/.test(text);
 }

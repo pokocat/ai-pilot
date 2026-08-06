@@ -36,6 +36,9 @@ services:
     image: prom/alertmanager:v0.27.0
     network_mode: host
     restart: unless-stopped
+    # metrics.token 在主机上为 root:root 0600；与 Prometheus 一样以 root 只读挂载，
+    # 确保 credentials_file 真能读取。默认 nobody 会在告警发送时才报 permission denied。
+    user: root
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --web.listen-address=127.0.0.1:9093

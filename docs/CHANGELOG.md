@@ -6,6 +6,16 @@
 
 ## 变更日志
 
+### 2026-08-05 · 对话生成可靠性方案落地，并完成每日战报内嵌化与排盘 v3 · 影响面：shared + Prisma + server + app + monitoring + deployment + docs
+
+新增持久化 `GenerationJob / GenerationAttempt / GenerationEffect`：新客户端以稳定 `clientRequestId` 建单，同一用户请求只落一条 user message、一次额度预留和一个生成任务；worker 用租约、心跳与 `leaseVersion` fencing 跨进程接管，按权威全文快照续流。页面退出、切后台、弱网或 HTTP 断开只结束订阅，不再取消后端任务；会话列表展示生成阶段，进入原会话按 `generationId + snapshotVersion` 恢复，不强制跳页，只有显式停止才写持久取消。生成中的输入仍锁定，服务端同时禁止同会话并发。同步兼容入口超过等待预算返回 202 后转轮询，不再空白收尾。
+
+生产兼容旧客户端时，即使请求没有 `clientRequestId`，服务端也会生成一次性 `legacy-<uuid>` 并强制进入持久任务链路，避免旧包继续触发“断连即退款/丢结果”和旧结算分支；跨 HTTP 重传幂等仍只由升级后的客户端稳定 key 保证。
+
+用量改为按真实 provider attempt 统一结算：完成、截断、失败、取消、租约恢复与推荐选项补生成均累计 provider usage，缺失时保守估算；纯 mock、缓存命中及 provider 前审核拦截为 0。主回复先持久化，再用独立 `ask_recovery` attempt 在 3 秒预算内补推荐选项；补出的可见文本纳入用户/租户/会话成本归因、输出审核和禁用词审计，失败只少选项。进程若在 `finalize` 阶段退出，接管者只恢复推荐项与终态，不重新调用主 provider、不改写已交付正文；重进端也持续锁定输入直到 job 真正终态。结果终态与 `GenerationEffect` outbox 同事务登记，失败/stale effect 后续补偿投递；业务目标仍按 at-least-once 语义自行幂等。
+
+同时完成相关止损与产品项：provider AbortSignal、首事件/流中空闲窗与续写墙钟、工具路径续写、残文/usage 保全、OpenAI 端点命中后再构造 body；长文归卷 uploading/failed 均禁止发送，失败不覆盖新草稿；每日战报改为 `GET /cards/daily` + `packages/work/daily` 登录态内嵌页，旧 canvas/发布入口已删除或 410、历史 daily 公开页 404；排盘升级 `paipan-v3`，新排/主动重排写 v3，存量 v1/v2 不改。补齐生成生命周期/首字/恢复/估算指标与告警，provider 前无 attempt 的确定 0 不误报为估算；部署脚本对监控单文件挂载做哈希重建，并把已存在但 exited 的监控容器拉起后做 readiness/SHA/规则数硬验收。当前仅完成本地实现与回归，**尚未部署**；生产发布后仍须按 `docs/CHAT_STREAMING_RELIABILITY_PLAN.md` §12.4 连续观察 24 小时。
+
 ### 2026-08-05 · 附件卡视觉层次重做：新增 --line-strong / --shadow-card 两个 token + 渐隐式深度 · 影响面：app（app.scss + app.h5.scss token；chat 页卡片/弹层样式 + 两个渐隐层）
 
 **现象**（真机反馈）：粘贴长文卡「颜色太像了，比如边框」。

@@ -44,7 +44,8 @@
 | LLM 闸门/池 | `llm_{in_flight,queued,ceiling,cooling,upstream_429_total,...}{lane}` · `llm_pool_endpoint_*` | `llmGate.ts` / `llmPool.ts` |
 | Token 成本 | `llm_tokens_total{kind,provider,model,dir}` · `llm_cost_cny_total`（元）· `usage_unreported_total`（漏账） | `services/usage.ts` recordTokenUsage（与 token_usage 表同口径） |
 | 产出质量 | `gen_degraded_total{path}`（mock 兜底/工程语境替换）· `llm_output_truncated_total{provider,resolved}`（**resolved=continued 已自动续写救回 / given_up 交回用户**——告警与看板一律按 resolved 拆，混在一起会把「救回来了」画成事故） | `llm/gateway.ts` 各 fallback 分支 / `completionGuard.ts` |
-| 对话交互质量 | `chat_first_token_seconds`（直方图,首字延迟,只统计原生流式）· `chat_stream_stall_total{provider,phase}`（空闲看门狗开火：first_event 发完响应头就断供 / mid_stream 中途静默）· `chat_nonstream_total{reason}`（tools\|dify\|mock\|stream_failed\|sync）· `chat_partial_kept_total{provider,cause}`（已下发正文没被换成错误气泡的次数=安全网健康度） | `providers/{claude,openai}.ts` streamChatRound / `llm/gateway.ts` 回落处 / `routes/sessions.ts` 的 /generate-sync |
+| 对话交互质量 | `chat_first_token_seconds`（用户发送/Job 接单→首字）· `chat_provider_first_token_seconds`（provider 建流→首字）· `chat_stream_stall_total{provider,phase,had_text}`（是否已有可见正文）· `chat_nonstream_total{reason}` · `chat_partial_kept_total{provider,cause}` · `chat_asks_recovered_total{outcome}` | provider 流式循环 / gateway / GenerationJob worker |
+| 持久生成 | `chat_generation_total{result}` · `chat_generation_duration_seconds{phase=queue\|provider\|finalize\|job}` · `chat_generation_recovered_total` · `chat_usage_estimated_total{provider}` | `services/generationJobs.ts` 终态与租约接管；区分排队慢/provider 慢/收尾慢及估算结算 |
 | 业务事件 | `user_registrations_total{channel}` · `moderation_checks_total{ref,verdict}` · `credits_flow_total{direction,reason}` · `plan_gate_blocked_total{state}` | `routes/auth.ts` / `moderation.ts` / `credits.ts` / `app.ts` 禁写闸 |
 | 支付 | `pay_orders_created_total` · `pay_orders_applied_total{type}` · `pay_amount_cny_total` · `pay_refunds_total` · `pay_sweep_*` · `pay_stuck_paid_unapplied`（抓取时查库,60s 缓存） | `services/wechatPay.ts` |
 | 告警配套 | `alert_config{key}`（阈值运行值,后台「功能开关」页可调）· `alerts_forwarded_total{outcome}`（飞书转发成败） | `services/alertConfig.ts` / `routes/alerts.ts` |
@@ -122,8 +123,8 @@ UI 上的改动只是临时的（provisioning 每 30s 会对回文件）。
 |---|---|---|
 | `system.rules.yml` | 主机 CPU/内存/磁盘（含 24h 写满预测）、PG 连接/死锁/长事务 | CPU ≥65% 预警 / ≥80% 扩容；PG 连接 ≥60% / ≥75% |
 | `api.rules.yml` | 服务/探活挂、TLS 证书 14 天到期、P95、5xx 率、过载闸、事件循环、RSS | 普通接口 P95 >200ms 预警 / >500ms 或 5xx≥1% 停止放量 |
-| `llm.rules.yml` · `junshi-llm` 组 | 上游 429 率、队列等待、长冷却、Token 日预算、漏账、降级 | 429 ≥0.5% / ≥2%；等待 ≥5s / ≥15s；日成本 70%/90%（日预算默认 200 元/天,后台可调） |
-| `llm.rules.yml` · `junshi-chat` 组 | **对话交互质量**：未写完交回用户、自动续写频次、流卡死、原生流回落非流式、首字延迟 P95、安全网破损 | 未写完 >5 次/h；续写 >20 次/h（info）；卡死/回落 >0 即报；首字 P95 >20s 持续 10m |
+| `llm.rules.yml` · `junshi-llm` 组 | 上游 429 率、队列等待、长冷却、Token 日预算、漏账、降级 | 429 ≥0.5% / ≥2%，但 10m 至少 20 次获得槽位才评估，避免低流量单个 429 被放大成 100% 假警；日成本 70%/90% |
+| `llm.rules.yml` · `junshi-chat` 组 | **对话交互质量 + 持久任务**：未写完、续写、stall、首字、残文保全、GenerationJob 失败率/租约接管/估算结算 | 失败率 >10% 且 15m 样本≥5；租约接管 >0 即 warning；估算结算 >0 记 info |
 | `business.rules.yml` | 已付未发放（资损!）、sweep 失败、退款激增、审核拦截激增、72h 零注册 | 已付未发放 >10 分钟 = critical |
 
 **推送到飞书（后台配置,无需发版）**：Alertmanager 已默认把告警投给 `POST /api/alerts/webhook`
@@ -138,9 +139,13 @@ Grafana/Alertmanager 界面可见（API 侧记 `junshi_alerts_forwarded_total{ou
 规则引用的每个 `junshi_*` 指标名要在应用侧真的渲染、每个阈值 key 要在 `ALERT_CONFIG_DEFS` 里、
 `and`/`unless` 两侧要么都聚合成无标签要么显式写 `on(...)`。改规则后跑 `cd server && npm test` 即校验。
 
-**改完规则怎么生效**：规则文件由 `scripts/deploy-prod.sh` 随代码同步到
-`/opt/junshi/deploy/monitoring/prometheus/alerts`（容器只读挂载该目录）,脚本末尾自动
-`promtool check rules` + `/-/reload`,并对账「加载到的规则条目数必须 >0」。不重启容器。
+**改完规则怎么生效**：规则与抓取配置由 `scripts/deploy-prod.sh` 随代码同步。脚本会先检查
+`.env`/`metrics.token` 存在且 token 不是目录，再跑 `docker compose config --quiet`、`promtool check config/rules`与
+`amtool check-config`。若 Prometheus/Alertmanager 单文件配置的 SHA256 变化，会 `--force-recreate`
+相应容器让 bind mount 重新解析；未换文件时也会普通 `compose up -d` 以吸收 compose 变更。检测使用
+`docker ps -a`，已存在但处于 exited 的监控容器也必须被拉起并通过验收，不能被当作“未安装”跳过。
+随后必须等待 readiness，对账容器内/主机配置 SHA，Prometheus reload 必须成功，并从
+`/api/v1/rules` 精确求和 `groups[].rules` 且条数 >0。任一步失败都让部署失败，不再只 warning。
 
 **`deploy/` 必须原地 rsync,绝不能 rm -rf 后整目录替换**（2026-08-05 修）。bind mount 在**容器启动时**
 就绑定了 inode,换 inode 等于把容器的视图钉死在已删除的旧对象上:
@@ -153,20 +158,24 @@ Grafana/Alertmanager 界面可见（API 侧记 `junshi_alerts_forwarded_total{ou
 
 三者叠加的实际后果:**告警规则自监控栈上线后的每次部署都是关着的**,而 target 一直显示 up、
 看板照常出数,所以没人察觉。现在脚本用
-`rsync -a --delete --exclude 'monitoring/.env' --exclude 'monitoring/secrets/'` 原地更新,
-目录 inode 不变、容器视图立刻跟上。**往 `deploy/monitoring/.gitignore` 加条目时,必须同步加到那两个
+`rsync -a --delete --exclude 'monitoring/.env' --exclude 'monitoring/secrets/'` 保留运行时凭证，并用配置哈希决定是否重建容器：
+目录挂载可直接 reload，单文件挂载只要内容变了就重建，不再假设 rsync 一定保留文件 inode。
+Alertmanager 显式以 root 运行，仅为读取同一份 `root:root 0600` 的 `metrics.token`；该文件仍是只读挂载。
+**往 `deploy/monitoring/.gitignore` 加条目时,必须同步加到那两个
 `--exclude`**,否则又会把主机侧的运行时凭证同步掉。
 
-**若曾被删过怎么恢复**：`.env` 与 `metrics.token` 的值可从运行中容器的 `docker inspect ... .Config.Env`
-里搬（compose 创建容器时已把插值结果固化进去）,不必重设 Grafana 密码；恢复后
-`docker compose up -d --force-recreate prometheus` 让挂载重新解析,再确认
-`/api/v1/rules` 的组数 >0。
+**若曾被删过怎么恢复**：`.env` 的插值值可从运行中容器的 `docker inspect ... .Config.Env`
+核对并恢复（compose 创建容器时会把环境变量固化进去）。`metrics.token` 是文件挂载，**不在容器环境变量里，
+不能从 inspect 找回**；必须从 `server/.env` 的 `METRICS_TOKEN` 或受控密码库恢复，并保持单行、
+`root:root 0600`。恢复后走 `scripts/deploy-prod.sh`，由脚本按哈希重建相关单文件挂载容器，再确认
+readiness、容器内 SHA 与 `/api/v1/rules` 实际规则数。
 
 ## 6. 日常运维
 
 ```bash
-# 改了告警规则/抓取配置 → 热加载（不用重启）
-curl -X POST 127.0.0.1:9090/-/reload
+# 只改目录挂载的 rules 可手动热加载；
+# prometheus.yml / alertmanager.yml 是单文件挂载，请走 deploy-prod.sh 的哈希检测+重建+验收。
+curl -fsS -X POST 127.0.0.1:9090/-/reload
 
 # 看当前在响的告警
 curl -s 127.0.0.1:9093/api/v2/alerts | python3 -m json.tool | head -40

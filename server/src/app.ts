@@ -19,6 +19,7 @@ import { creativeRoutes } from './routes/creative.js';
 import { bizMetricRoutes } from './routes/bizMetrics.js';
 import { sayingRoutes } from './routes/sayings.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { generationRoutes } from './routes/generations.js';
 import { libraryRoutes } from './routes/library.js';
 import { casefileRoutes } from './routes/casefiles.js';
 import { battleRoutes } from './routes/battle.js';
@@ -257,6 +258,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(bizMetricRoutes, { prefix: '/api' }); // 结构化经营周报（WO-10：报什么就能对比什么）
   await app.register(sayingRoutes, { prefix: '/api' });
   await app.register(sessionRoutes, { prefix: '/api' });
+  await app.register(generationRoutes, { prefix: '/api' });
   await app.register(libraryRoutes, { prefix: '/api' });
   await app.register(casefileRoutes, { prefix: '/api' }); // 战略案卷（执行闭环：军令/回填）
   await app.register(battleRoutes, { prefix: '/api' }); // V7-04：三势刷新 + 认可判断一键生成军令与报告
@@ -289,11 +291,19 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
     const { startCreativeWorker } = await import('./services/creative/worker.js');
     startCreativeWorker();
   }
+  // 对话/成果生成 worker：HTTP/SSE 只负责建单与订阅，客户端离开不再中止真实生成。
+  // test 环境不自动轮询，集成测试用 tickGenerationWorker 精确驱动。
+  {
+    const { startGenerationWorker } = await import('./services/generationWorker.js');
+    startGenerationWorker();
+  }
 
   // 关闭时停 worker + 释放无头 Chromium（若曾懒启动过；test/未生成过则 no-op）。
   app.addHook('onClose', async () => {
     const { stopCreativeWorker } = await import('./services/creative/worker.js');
     stopCreativeWorker();
+    const { stopGenerationWorker } = await import('./services/generationWorker.js');
+    stopGenerationWorker();
     const { closePdfBrowser } = await import('./services/reportPdf.js');
     await closePdfBrowser();
   });

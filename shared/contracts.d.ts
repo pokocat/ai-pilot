@@ -817,6 +817,7 @@ export interface SessionItem {
   title: string; snippet: string; updatedAt: string;
   projectId?: string | null; // 归属项目（无则散落）
   generating?: boolean; // 当前会话是否仍有一轮回复在服务端生成（退出聊天页后仍可恢复思考态）
+  activeGeneration?: GenerationSummary | null; // 持久生成事实；旧客户端可继续只读 generating
   hasUnread?: boolean; // 有未读 AI 回复（列表红点；退出后台生成完即置 true，打开会话即清）
   unreadCount?: number; // V7-15：未读 assistant 消息数（自 lastReadAt 起，服务端算；hasUnread 保留兼容）
 }
@@ -840,18 +841,55 @@ export interface SessionDetail {
   title: string;
   projectId?: string | null;
   generating?: boolean; // 服务端仍在处理本会话的回复；客户端重进后据此续显思考态并刷新结果
+  activeGeneration?: GenerationSummary | null;
   messages: SessionMessage[];
 }
 
 /* ────────────── 产出请求 / 结果 ────────────── */
+export type GenerationStatus = 'queued' | 'running' | 'completed' | 'truncated' | 'failed' | 'cancelled';
+export type GenerationPhase = 'queue' | 'context' | 'provider' | 'finalize';
+export type GenerationKind = 'chat' | 'report';
+export type GenerationUsageSource = 'provider' | 'estimated' | 'mixed';
+export interface GenerationSummary {
+  id: string;
+  sessionId: string;
+  status: GenerationStatus;
+  phase: GenerationPhase;
+  kind: GenerationKind;
+  snapshotVersion: number;
+  cancelRequested: boolean;
+  resultMessageId?: string | null;
+}
+export interface GenerationView extends GenerationSummary {
+  partialText: string;
+  reply?: ChatReply;
+  deliverable?: Deliverable;
+  usage?: { inputTokens: number; outputTokens: number; cachedInput?: number; billableTokens: number } | null;
+  usageSource?: GenerationUsageSource | null;
+  terminationReason?: string | null;
+  createdAt: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+}
+export interface GenerationSnapshotEvent {
+  generationId: string;
+  version: number;
+  text: string;
+  replace: true;
+  status: GenerationStatus;
+  phase: GenerationPhase;
+}
 export interface GenRequest {
   text: string; agentKey?: string; sessionId?: string;
+  clientRequestId?: string;  // 同一次用户发送在网络重试中保持不变；服务端据此幂等
+  parentGenerationId?: string; // 用户点「继续写完」时关联上一终态任务
   projectId?: string;       // 本次对话归属的项目（产出/记忆/知识会落到该项目）
   refs?: MessageRef[];      // 显式引用的资料（注入上下文，可溯源）
 }
 export interface GenResult {
   sessionId: string; created: boolean; agentKey: string;
-  kind: 'report' | 'chat'; messageId: string;
+  kind: 'report' | 'chat'; messageId?: string; // 202 仅返回在途 generation 时可空
+  generationId?: string; status?: GenerationStatus; snapshotVersion?: number;
   deliverable?: Deliverable; reply?: ChatReply;
   memory?: { learned: boolean; agentName: string } | null;
   knowledgeUsed?: string[]; // 本次自动召回/显式引用所用到的知识摘要（用于「参考了哪些资料」提示）
@@ -1793,6 +1831,28 @@ export interface FateCardContent {
   sketch: string;   // 命格速写
   trend: string;    // 今年大势
   advice: string;   // 一条核心建议
+}
+
+/** 每日战报内嵌页（GET /cards/daily）：只向当前登录用户返回当天经营账本，
+ *  不生成 ReportHtml、不返回公开链接，也不提供分享态。 */
+export interface DailyBattleOrder {
+  id: string;
+  text: string;
+  done: boolean;
+  aligned: boolean | null;
+}
+export interface DailyBattleReportView {
+  date: string;
+  casefileTitle: string | null;
+  rank: string;
+  streak: number;
+  orders: DailyBattleOrder[];
+  done: number;
+  total: number;
+  aligned: number;
+  alignRate: number | null;
+  backfill: { leads: number; consults: number; deals: number } | null;
+  quote: string;
 }
 
 /* ════════════════════════════════════════════════════════════

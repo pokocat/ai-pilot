@@ -224,16 +224,16 @@ export async function sendWechatSubscribeMessage(args: {
   orderNo?: string; // payment 模板的「订单号」位；传微信 transactionId 优先（纯数字）
   reportId?: string | null;
   logSkipped?: boolean;
-}): Promise<{ sent: boolean; reason?: string }> {
+}): Promise<{ sent: boolean; reason?: string; retryable?: boolean }> {
   const templateId = templateIdForScene(args.scene);
   if (!templateId) {
     if (args.logSkipped) await logNotification({ ...args, status: 'skipped', reason: 'template not configured' });
-    return { sent: false, reason: 'template not configured' };
+    return { sent: false, reason: 'template not configured', retryable: false };
   }
   const user = await prisma.user.findUnique({ where: { id: args.userId }, select: { wechatOpenId: true, name: true } });
   if (!user?.wechatOpenId) {
     if (args.logSkipped) await logNotification({ ...args, templateId, status: 'skipped', reason: 'wechat openid missing' });
-    return { sent: false, reason: 'wechat openid missing' };
+    return { sent: false, reason: 'wechat openid missing', retryable: false };
   }
   const sub = await prisma.wechatSubscription.findFirst({
     where: { userId: args.userId, scene: args.scene, templateId, status: 'accept', remaining: { gt: 0 } },
@@ -241,7 +241,7 @@ export async function sendWechatSubscribeMessage(args: {
   });
   if (!sub) {
     if (args.logSkipped) await logNotification({ ...args, templateId, status: 'skipped', reason: 'no subscription quota' });
-    return { sent: false, reason: 'no subscription quota' };
+    return { sent: false, reason: 'no subscription quota', retryable: false };
   }
 
   // 先原子「认领」一份额度，再调用微信推送——不能反过来（旧实现：先发送、发送成功后才扣减）。
@@ -258,7 +258,7 @@ export async function sendWechatSubscribeMessage(args: {
   });
   if (claimed.count === 0) {
     if (args.logSkipped) await logNotification({ ...args, templateId, status: 'skipped', reason: 'no subscription quota' });
-    return { sent: false, reason: 'no subscription quota' };
+    return { sent: false, reason: 'no subscription quota', retryable: false };
   }
 
   const payload = {
@@ -279,7 +279,7 @@ export async function sendWechatSubscribeMessage(args: {
   } catch (err) {
     await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { remaining: { increment: 1 } } }).catch(() => {});
     await logNotification({ ...args, templateId, status: 'failed', reason: (err as Error).message, payload: payload as Prisma.InputJsonValue });
-    return { sent: false, reason: (err as Error).message };
+    return { sent: false, reason: (err as Error).message, retryable: true };
   }
 
   if (data.errcode && data.errcode !== 0) {
@@ -292,12 +292,12 @@ export async function sendWechatSubscribeMessage(args: {
     }
     const reason = data.errmsg || `wechat errcode ${data.errcode}`;
     await logNotification({ ...args, templateId, status: 'failed', reason, payload: payload as Prisma.InputJsonValue });
-    return { sent: false, reason };
+    return { sent: false, reason, retryable: data.errcode !== 43101 };
   }
 
   await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { lastSentAt: now() } }).catch(() => {});
   await logNotification({ ...args, templateId, status: 'sent', payload: payload as Prisma.InputJsonValue });
-  return { sent: true };
+  return { sent: true, retryable: false };
 }
 
 export function notifyReportReady(args: {
@@ -305,15 +305,15 @@ export function notifyReportReady(args: {
   userId: string;
   title: string;
   reportId?: string | null;
-}): void {
-  void sendWechatSubscribeMessage({
+}): Promise<{ sent: boolean; reason?: string; retryable?: boolean }> {
+  return sendWechatSubscribeMessage({
     tenantId: args.tenantId,
     userId: args.userId,
     scene: 'report',
     title: args.title || '报告已生成',
     note: '点击查看报告',
     reportId: args.reportId,
-  }).catch((err) => console.error('[wechat-subscribe] report notify failed:', (err as Error).message));
+  });
 }
 
 export function notifyReviewReminder(args: {

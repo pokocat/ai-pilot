@@ -120,4 +120,21 @@ describe('告警规则 × 应用指标对账', () => {
       );
     }
   });
+
+  test('429 比率告警必须有最小样本门槛，低流量单个 429 不放大成假警', () => {
+    const rules = allRules().filter((r) => r.name === 'JunshiLlm429RateHigh' || r.name === 'JunshiLlm429RateCritical');
+    assert.equal(rules.length, 2);
+    for (const r of rules) {
+      assert.match(r.expr, /increase\(junshi_llm_granted_total\[10m\]\)\)\s*>=\s*20/);
+      assert.match(r.expr, /and\s+on\(\)/);
+    }
+  });
+
+  test('残文保全告警只看已有可见正文的 stall，并按 provider 对齐', () => {
+    const rule = allRules().find((r) => r.name === 'JunshiChatPartialKeptBroken');
+    assert.ok(rule);
+    assert.match(rule.expr, /junshi_chat_stream_stall_total\{had_text="yes"\}/);
+    assert.match(rule.expr, /junshi_chat_partial_kept_total\{cause="stream_error"\}/);
+    assert.match(rule.expr, /and\s+on\(provider\)/);
+  });
 });

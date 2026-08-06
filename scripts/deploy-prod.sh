@@ -55,6 +55,21 @@ ENV_BACKUP="/tmp/junshi-server-env-${SHA}"
 DEPLOY_USER="$(id -un)"
 DEPLOY_GROUP="$(id -gn)"
 
+file_hash() {
+  if sudo test -f "$1"; then
+    sudo sha256sum "$1" | awk '{print $1}'
+  else
+    printf 'missing\n'
+  fi
+}
+
+# bind mount 文件内容变更后仅 reload 并不总能覆盖组件自身的配置生命周期；先记发布前哈希，
+# 同步后按变化精确 force-recreate 对应组件。不存在也记为 missing，首次补配置同样可识别。
+PROM_CONFIG="$APP_ROOT/deploy/monitoring/prometheus/prometheus.yml"
+ALERT_CONFIG="$APP_ROOT/deploy/monitoring/alertmanager/alertmanager.yml"
+PROM_CONFIG_BEFORE="$(file_hash "$PROM_CONFIG")"
+ALERT_CONFIG_BEFORE="$(file_hash "$ALERT_CONFIG")"
+
 echo "== prepare release ${SHA} =="
 rm -rf "$RELEASE"
 mkdir -p "$RELEASE"
@@ -113,6 +128,8 @@ if [ -f "$APP_ROOT/deploy/monitoring/secrets/metrics.token" ]; then
   sudo chown root:root "$APP_ROOT/deploy/monitoring/secrets/metrics.token"
   sudo chmod 0600 "$APP_ROOT/deploy/monitoring/secrets/metrics.token"
 fi
+PROM_CONFIG_AFTER="$(file_hash "$PROM_CONFIG")"
+ALERT_CONFIG_AFTER="$(file_hash "$ALERT_CONFIG")"
 
 if [ -f "$ENV_BACKUP" ]; then
   sudo mkdir -p "$APP_ROOT/server"
@@ -166,26 +183,75 @@ echo "== nginx reload =="
 sudo nginx -t
 sudo systemctl reload nginx
 
-# 告警规则随代码一起同步过来了，让 Prometheus 热加载（规则改动才会生效）。
-# 监控栈没起就跳过——它是可选组件，不能因为没装监控就让部署失败。
-if sudo docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^monitoring-prometheus-1$'; then
-  echo "== prometheus rules reload =="
-  # 先 promtool 验一遍：坏规则热加载会被整份拒绝，那等于把全部告警一起关掉。
-  # 必须套 sh -c：docker exec 不经 shell，通配符会被原样传给 promtool（"path ... does not exist"）。
-  if sudo docker exec monitoring-prometheus-1 sh -c 'promtool check rules /etc/prometheus/alerts/*.yml'; then
-    sudo docker exec monitoring-prometheus-1 wget -qO- --post-data='' http://127.0.0.1:9090/-/reload >/dev/null \
-      && echo "  已热加载"
-    # 对账：规则组数必须 >0。0 组说明挂载点被孤立（见上面 deploy/ 的 rsync 说明），静默失效必须叫出来。
-    GROUPS=$(sudo docker exec monitoring-prometheus-1 wget -qO- 'http://127.0.0.1:9090/api/v1/rules' 2>/dev/null \
-      | tr ',' '\n' | grep -c '"name"' || true)
-    if [ "${GROUPS:-0}" -eq 0 ]; then
-      echo "  !! Prometheus 已加载 0 条规则——告警全部静默，请检查 alerts 目录挂载" >&2
-    else
-      echo "  规则条目数：${GROUPS}"
+# 监控栈未安装/未启动时仍保持可选；只要线上已有对应容器，配置校验、重建、热加载、
+# ready 与实际规则数任一步失败都必须让部署失败，不能把“业务发布成功、监控静默”当成功。
+PROM_PRESENT=0
+ALERT_PRESENT=0
+# 用 ps -a：监控容器即使当前 exited 也属于“已安装”，发布必须尝试拉起并验收，不能静默跳过。
+sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^monitoring-prometheus-1$' && PROM_PRESENT=1
+sudo docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^monitoring-alertmanager-1$' && ALERT_PRESENT=1
+
+wait_ready() {
+  local url="$1"
+  local label="$2"
+  local i
+  for i in $(seq 1 30); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      echo "  ${label} ready"
+      return 0
     fi
+    sleep 1
+  done
+  echo "  !! ${label} 30 秒内未 ready" >&2
+  return 1
+}
+
+if [ "$PROM_PRESENT" = "1" ] || [ "$ALERT_PRESENT" = "1" ]; then
+  MONITOR_DIR="$APP_ROOT/deploy/monitoring"
+  sudo test -f "$MONITOR_DIR/.env" || { echo "监控栈运行中但 monitoring/.env 缺失" >&2; exit 1; }
+  sudo test -f "$MONITOR_DIR/secrets/metrics.token" || { echo "监控栈运行中但 metrics.token 缺失" >&2; exit 1; }
+  sudo test ! -d "$MONITOR_DIR/secrets/metrics.token" || { echo "metrics.token 被错误创建成目录" >&2; exit 1; }
+  cd "$MONITOR_DIR"
+  sudo docker compose config --quiet
+fi
+
+if [ "$ALERT_PRESENT" = "1" ]; then
+  echo "== alertmanager config verify =="
+  # 即使 alertmanager.yml 没变，docker-compose.yml 的 user/挂载等配置也可能变；普通 up 会按
+  # compose config hash 精确重建。配置文件内容变化则明确 force-recreate，避免旧进程持有旧解析结果。
+  if [ "$ALERT_CONFIG_BEFORE" != "$ALERT_CONFIG_AFTER" ]; then
+    sudo docker compose up -d --force-recreate alertmanager
   else
-    echo "  !! promtool 校验未通过，跳过 reload（保留旧规则，不要让坏规则关掉全部告警）" >&2
+    sudo docker compose up -d alertmanager
   fi
+  wait_ready http://127.0.0.1:9093/-/ready Alertmanager
+  sudo docker exec monitoring-alertmanager-1 amtool check-config /etc/alertmanager/alertmanager.yml
+  ALERT_CONFIG_IN_CONTAINER="$(sudo docker exec monitoring-alertmanager-1 sha256sum /etc/alertmanager/alertmanager.yml | awk '{print $1}')"
+  [ "$ALERT_CONFIG_IN_CONTAINER" = "$ALERT_CONFIG_AFTER" ] || { echo "Alertmanager 容器配置哈希与主机不一致" >&2; exit 1; }
+fi
+
+if [ "$PROM_PRESENT" = "1" ]; then
+  echo "== prometheus config and rules verify =="
+  if [ "$PROM_CONFIG_BEFORE" != "$PROM_CONFIG_AFTER" ]; then
+    sudo docker compose up -d --force-recreate prometheus
+  else
+    sudo docker compose up -d prometheus
+  fi
+  wait_ready http://127.0.0.1:9090/-/ready Prometheus
+  # 必须套 sh -c：docker exec 不经 shell，通配符会被原样传给 promtool。校验放在 up/ready 后，
+  # 这样检查的是刚发布的文件，也能覆盖发布前容器处于 exited 的恢复路径。
+  sudo docker exec monitoring-prometheus-1 promtool check config /etc/prometheus/prometheus.yml
+  sudo docker exec monitoring-prometheus-1 sh -c 'promtool check rules /etc/prometheus/alerts/*.yml'
+  PROM_CONFIG_IN_CONTAINER="$(sudo docker exec monitoring-prometheus-1 sha256sum /etc/prometheus/prometheus.yml | awk '{print $1}')"
+  [ "$PROM_CONFIG_IN_CONTAINER" = "$PROM_CONFIG_AFTER" ] || { echo "Prometheus 容器配置哈希与主机不一致" >&2; exit 1; }
+
+  # 规则目录原地同步时不必重建，但 reload 必须成功；随后解析 JSON 精确数 data.groups[].rules，
+  # 不能再用 grep 'name'（会把组名/标签/注解一并误计）。
+  sudo docker exec monitoring-prometheus-1 wget -qO- --post-data='' http://127.0.0.1:9090/-/reload >/dev/null
+  RULES_JSON="$(sudo docker exec monitoring-prometheus-1 wget -qO- http://127.0.0.1:9090/api/v1/rules)"
+  RULE_COUNT="$(printf '%s' "$RULES_JSON" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(sum(len(g.get("rules", [])) for g in d.get("data", {}).get("groups", [])))')"
+  [ "${RULE_COUNT:-0}" -gt 0 ] || { echo "Prometheus 已加载 0 条规则——告警全部静默" >&2; exit 1; }
+  echo "  已加载规则：${RULE_COUNT} 条"
 fi
 
 echo "== local smoke =="

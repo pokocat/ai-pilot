@@ -49,15 +49,46 @@ async function appendCreditDelta(
   userId: string,
   delta: number,
   reason: string,
+  idempotencyKey?: string,
 ): Promise<number> {
   await lockCreditAccount(db, userId);
+  if (idempotencyKey) {
+    const existing = await db.creditLedger.findUnique({ where: { idempotencyKey } });
+    if (existing) return existing.balance;
+  }
   const bal = await balanceIn(db, userId);
   if (isUnlimited(bal)) return bal;
   const balance = bal + delta;
   if (balance < 0) throw new InsufficientCreditsError();
-  await db.creditLedger.create({ data: { tenantId, userId, delta, reason, balance } });
+  await db.creditLedger.create({ data: { tenantId, userId, delta, reason, balance, idempotencyKey } });
   noteCreditDelta(delta, reason); // 观测口径=「尝试落账」：外层事务仍可能回滚，容忍少量偏差（对账以 credit_ledger 为准）
   return balance;
+}
+
+/** GenerationJob/worker 使用的跨进程幂等扣费。 */
+export async function chargeCreditsOnce(
+  tenantId: string,
+  userId: string,
+  cost: number,
+  reason: string,
+  idempotencyKey: string,
+  db: CreditDb,
+): Promise<number> {
+  if (cost <= 0) return balanceIn(db, userId);
+  return appendCreditDelta(db, tenantId, userId, -cost, reason, idempotencyKey);
+}
+
+/** GenerationJob/worker 使用的跨进程幂等退款。 */
+export async function refundCreditsOnce(
+  tenantId: string,
+  userId: string,
+  cost: number,
+  reason: string,
+  idempotencyKey: string,
+  db: CreditDb,
+): Promise<number> {
+  if (cost <= 0) return balanceIn(db, userId);
+  return appendCreditDelta(db, tenantId, userId, cost, reason, idempotencyKey);
 }
 
 /** 原子扣费：追加一条 delta=-cost 的流水，返回新余额。 */

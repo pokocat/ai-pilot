@@ -239,6 +239,13 @@ const MAX_BATCH_UPLOAD_BYTES = 60 * 1024 * 1024; // 60MB/批
 
 // 每份上传的账：真进度 + 真取消都按份记，批次只是这些份的集合。
 type UploadStatus = 'waiting' | 'uploading' | 'done' | 'failed' | 'cancelled';
+type PastePending = {
+  key: string;
+  chars: number;
+  excerpt: string;
+  text: string;
+  status: 'uploading' | 'failed';
+};
 interface UploadEntry { id: string; name: string; size: number; path: string; pct: number; status: UploadStatus; }
 
 const UPLOAD_STATUS_TEXT: Record<UploadStatus, string> = {
@@ -315,8 +322,10 @@ export default function Chat() {
   const [inputFocus, setInputFocus] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
-  // true 表示 busy 来自“重进后恢复”，当前页面没有原请求的 abort 句柄，输入区应展示被动等待而非假停止键。
+  // true 表示 busy 来自“重进后恢复”；停止动作改走持久 generationId，不依赖原请求句柄。
   const [reattachedBusy, setReattachedBusy] = useState(false);
+  const [activeGenerationId, setActiveGenerationId] = useState('');
+  const [activeGenerationPhase, setActiveGenerationPhase] = useState('');
   const [scrollTop, setScrollTop] = useState(0);
   const [showJumpLatest, setShowJumpLatest] = useState(false);
   const [refs, setRefs] = useState<MessageRef[]>([]);
@@ -349,6 +358,8 @@ export default function Chat() {
   // 停止生成、卸载解绑、重进对账都经这两个 ref 定位到模块级单例里的这一轮生成。
   const liveViewRef = useRef<LiveGenView | null>(null);
   const liveKeyRef = useRef<string>('');
+  const activeGenerationIdRef = useRef<string>('');
+  const activeGenerationPhaseRef = useRef<string>('');
   // B3 草稿：用 ref 取最新值，供 onBlur / useDidHide 闭包读取。
   const inputRef = useRef('');
   inputRef.current = input;
@@ -398,7 +409,7 @@ export default function Chat() {
   // 不轮询：签只从「挂上引用」活到「发出这一轮」；发出后由服务端 refNotices 据实回话（谁没读完、谁读不出）。
   const [parsingRefIds, setParsingRefIds] = useState<string[]>([]);
   // 粘贴归卷的乐观占位卡：清空输入框与卡片出现是同一帧，网络再慢也不出现「字没了、卡还没来」的空窗。
-  const [pastePendings, setPastePendings] = useState<{ key: string; chars: number; excerpt: string; text: string }[]>([]);
+  const [pastePendings, setPastePendings] = useState<PastePending[]>([]);
   // 粘贴长文预览浮层（点卡片打开）：看全文 / 复制 / 移除。refId 为空表示看的是还在归卷的占位卡。
   const [pastePreview, setPastePreview] = useState<{ refId: string; chars: number; text: string } | null>(null);
   // 重复粘贴时短暂高亮已在的那张卡：不新建第二份，而是把主公的视线引到它上面。
@@ -743,10 +754,11 @@ export default function Chat() {
     setMsgs((m) => [...add, ...m]);
   };
 
-  // 页面退出不会中断原生成请求，但旧页面实例的 busy 状态已经销毁。重新进入后：
-  // 1) 立即恢复“正在思考”；2) 轮询同一会话详情；3) 服务端落库并清 generating 后，用完整历史替换页面。
+  // 页面退出不会中断 GenerationJob。重新进入后：
+  // 1) 立即恢复“正在思考”；2) 轮询任务权威全文快照，继续显示已生成正文；
+  // 3) 服务端落库并清 generating 后，用完整历史替换页面。
   // 若请求异常结束且没有军师回复，则明确给出可重试气泡，不让用户面对一条悬空的提问。
-  function resumeGeneration(sid: string, ag: Agent) {
+  function resumeGeneration(sid: string, ag: Agent, initialGenerationId?: string) {
     if (reattachTimerRef.current) clearTimeout(reattachTimerRef.current);
     const startedAt = Date.now();
     const seq = ++pollSeqRef.current; // 本代轮询的代号，见 pollSeqRef
@@ -756,6 +768,10 @@ export default function Chat() {
     const finish = () => {
       setBusy(false);
       setReattachedBusy(false);
+      activeGenerationIdRef.current = '';
+      activeGenerationPhaseRef.current = '';
+      setActiveGenerationId('');
+      setActiveGenerationPhase('');
       reattachTimerRef.current = null;
     };
     const poll = async () => {
@@ -763,12 +779,36 @@ export default function Chat() {
       try {
         const detail = await api.session(sid);
         if (!aliveRef.current || seq !== pollSeqRef.current) return;
+        const activeGenerationId = detail.activeGeneration?.id || initialGenerationId;
+        activeGenerationIdRef.current = activeGenerationId || '';
+        activeGenerationPhaseRef.current = detail.activeGeneration?.phase || '';
+        setActiveGenerationId(activeGenerationId || '');
+        setActiveGenerationPhase(detail.activeGeneration?.phase || '');
+        if (activeGenerationId && detail.activeGeneration?.kind !== 'report') {
+          const snapshot = await api.generation(activeGenerationId).catch(() => null);
+          if (!aliveRef.current || seq !== pollSeqRef.current) return;
+          if (snapshot?.partialText) {
+            setMsgs((current) => {
+              const next = current.slice();
+              const tail = next[next.length - 1];
+              if (tail?.role === 'assistant' && tail.streaming) {
+                next[next.length - 1] = { ...tail, reply: { ...(tail.reply || { text: '' }), text: snapshot.partialText } };
+              } else {
+                next.push({ role: 'assistant', reply: { text: snapshot.partialText }, streaming: true, uid: `generation:${activeGenerationId}` });
+              }
+              return next;
+            });
+            followBottom();
+          }
+        }
         const last = detail.messages[detail.messages.length - 1];
         const localAge = chatPendingAge(sid);
         const locallyHandingOff = localAge !== null && localAge < LOCAL_PENDING_HANDOFF_MS;
         // 回复已落库时不用等旧页面 finally 清本地标记；否则服务端不再生成后，最多给网络交接 5 秒宽限。
         const replyStored = !!last && last.role !== 'user';
-        if (replyStored || (!detail.generating && !locallyHandingOff)) {
+        // 主正文会先于推荐选项补生成落库；只要 active job 仍在 finalize，就继续锁住输入。
+        // 否则重进用户会提前获得发送能力，下一问又被服务端 409 拒绝。
+        if (!detail.generating && (replyStored || !locallyHandingOff)) {
           clearChatPending(sid);
           restore(ag, detail.messages);
           if (last?.role === 'user') {
@@ -907,6 +947,12 @@ export default function Chat() {
       });
     return {
       onSession: (id) => { if (id && !sessionIdRef.current) setSessionId(id); },
+      onGeneration: (data) => {
+        activeGenerationIdRef.current = data.generationId;
+        activeGenerationPhaseRef.current = data.phase || '';
+        setActiveGenerationId(data.generationId);
+        setActiveGenerationPhase(data.phase || '');
+      },
       startReport: () => { patchReport((d) => d); setTimeout(scrollToEnd, 30); },
       // meta kind=chat：先建聊天气泡（think-dots），避免 LLM 首字延迟期只剩全局 busy 无反馈。
       startChat: () => { resetTokenBuf(); setMsgs((m) => [...m, { role: 'assistant', reply: { text: '' }, streaming: true, uid: nextMsgUid() }]); setTimeout(scrollToEnd, 30); },
@@ -922,6 +968,11 @@ export default function Chat() {
         tokenBufRef.current += t;
         if (tokenBufRef.current.length >= TOKEN_FLUSH_CHARS) { flushTokenBuf(); return; }
         if (!flushTimerRef.current) flushTimerRef.current = setTimeout(flushTokenBuf, TOKEN_FLUSH_MS);
+      },
+      replaceToken: (text) => {
+        resetTokenBuf();
+        patchChat((msg) => ({ ...msg, reply: { ...(msg.reply || { text: '' }), text } }));
+        followBottom();
       },
       // 权威完整回复整体替换 reply：先把缓冲清掉（其内容已被 reply 覆盖），避免残余 token 事后重复追加。
       // SSE 的 chat 事件在「provider 流没吐出最终结果」时会带 null（服务端 send('chat', reply2) 的
@@ -1003,7 +1054,13 @@ export default function Chat() {
           return m;
         });
       },
-      clearBusy: () => setBusy(false),
+      clearBusy: () => {
+        activeGenerationIdRef.current = '';
+        activeGenerationPhaseRef.current = '';
+        setActiveGenerationId('');
+        setActiveGenerationPhase('');
+        setBusy(false);
+      },
     };
   };
 
@@ -1034,7 +1091,7 @@ export default function Chat() {
   // 调用方据此决定后续（加载路径的自动发送、回前台路径的收干净 busy）。
   const takeOverGeneration = (ag: Agent, sid: string, detail: SessionDetail): boolean => {
     if (reattachLive(ag, sid, detail.messages)) return true;
-    if (detail.generating || isChatPending(sid)) { resumeGeneration(sid, ag); return true; }
+    if (detail.generating || isChatPending(sid)) { resumeGeneration(sid, ag, detail.activeGeneration?.id); return true; }
     return false;
   };
 
@@ -1096,7 +1153,10 @@ export default function Chat() {
     // 报告 / 聊天分流完全由后端 SSE meta 事件决定，前端不再检查消息文本。
     // 路由带 send= 自动发送时，React state 里的 agent 可能还没刷新；必须按本次 agentKey 重新取配置。
     const sendingAgent = findAgent(agentKey) || agent;
-    const body = { text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined };
+    // 一次点击生成一个稳定 clientRequestId；同一轮的断网补发/同步兜底复用这份 body，
+    // 服务端只会 attach 原 GenerationJob，不会重复落用户消息或重复调用模型。
+    const clientRequestId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const body = { text, sessionId: sid || undefined, agentKey, projectId: activeProjectId || undefined, refs: sendRefs.length ? sendRefs : undefined, clientRequestId };
     const canStream = STREAM_CHAT && !!sendingAgent;
 
     if (canStream) {
@@ -1128,26 +1188,49 @@ export default function Chat() {
     // 非流式兜底（STREAM_CHAT 关或无 agent）：同步一次产出。此路径不跨页面存活（非默认路径）。
     // chatPending 由本路径自持（流式路径已上收至 liveGen 生命周期）：发送即标记、finally 清除。
     if (sid) { pendingSessionIdRef.current = sid; markChatPending(sid); }
+    let handedOff = false;
     try {
       const res = await api.generate(body);
-      renderGenerateResult(res, false, text);
-      setTimeout(scrollToEnd, 80);
+      if (res.generationId && (res.status === 'queued' || res.status === 'running')) {
+        handedOff = true;
+        if (res.sessionId && !sessionIdRef.current) setSessionId(res.sessionId);
+        activeGenerationIdRef.current = res.generationId;
+        setActiveGenerationId(res.generationId);
+        setReattachedBusy(true);
+        resumeGeneration(res.sessionId, sendingAgent || agent!, res.generationId);
+      } else {
+        renderGenerateResult(res, false, text);
+        setTimeout(scrollToEnd, 80);
+      }
     } catch (e) {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
       const reply = errorReply(e);
       // P2-15：保留原文供重试；但审核类错误不给重试（重试必再被拦）。
       setMsgs((m) => [...m, { role: 'assistant', reply: { text: reply }, retryText: isModerationErr(reply) ? undefined : text, uid: nextMsgUid() }]);
     } finally {
-      if (pendingSessionIdRef.current) clearChatPending(pendingSessionIdRef.current);
-      pendingSessionIdRef.current = '';
-      setBusy(false);
+      if (!handedOff) {
+        if (pendingSessionIdRef.current) clearChatPending(pendingSessionIdRef.current);
+        pendingSessionIdRef.current = '';
+        setBusy(false);
+      }
     }
   }
 
   // B2 停止生成：经 liveGen 中断当前流；收尾（清空占位 / busy）由 liveGen 走 aborted 分支处理。
   const stopGeneration = () => {
     if (!busy) return;
-    if (liveKeyRef.current) stopLiveGen(liveKeyRef.current);
+    // 主正文已经落库后只剩至多 3s 的推荐项收尾；此时不再展示/执行“停止”，避免假取消。
+    if (activeGenerationPhaseRef.current === 'finalize') return;
+    if (liveKeyRef.current && peekLiveGen(liveKeyRef.current)?.active) {
+      stopLiveGen(liveKeyRef.current);
+      return;
+    }
+    const generationId = activeGenerationIdRef.current;
+    if (generationId) {
+      void api.cancelGeneration(generationId)
+        .then(() => Taro.showToast({ title: '正在停止', icon: 'none' }))
+        .catch((e) => s.handleApiError(e));
+    }
   };
 
   // —— 军师反问选项（ChatReply.asks）——
@@ -1252,36 +1335,50 @@ export default function Chat() {
     store.setOverlay(false, 'paste-preview');
   };
 
-  // 长文粘贴 → 归为附卷：异步建知识，成功挂引用签；期间不卡输入。fullValue = 粘贴后完整文本，供满卷/失败时回填。
+  // 长文粘贴 → 归为附卷：异步建知识，成功挂引用签；期间允许继续写草稿但禁止发送。
   // 关键时序：先落一张 pending 占位卡，再去打网络。输入框清空与卡片出现同帧——
   // 旧实现要等 createKnowledge 回来才 setRefs，弱网下就是「框里的字没了、卡片还没来」，主公只能理解成粘贴失败 → 再粘一遍。
-  const absorbPasteToFile = async (pasted: string, fullValue: string) => {
-    const key = `p${(pasteSeqRef.current += 1)}`;
+  const absorbPasteToFile = async (pasted: string, retryKey?: string) => {
+    const key = retryKey ?? `p${(pasteSeqRef.current += 1)}`;
     const chars = pasted.length;
     const title = `粘贴长文·${chars}字`;
     const excerpt = pasteExcerpt(pasted);
-    setPastePendings((cur) => [...cur, { key, chars, excerpt, text: pasted }]);
+    setPastePendings((cur) => retryKey
+      ? cur.map((p) => p.key === key ? { ...p, status: 'uploading' } : p)
+      : [...cur, { key, chars, excerpt, text: pasted, status: 'uploading' }]);
     // 在途这一份也立刻记进账本（先挂占位 key，成功后换成真 id）：
     // 否则第一份还在打网络时又粘一遍，去重扫不到它，照样会出两份。
     pasteTextRef.current.set(key, pasted);
     pastePendingKeysRef.current.add(key);
     if (!isPasteHinted()) { setPasteHint(true); markPasteHinted(); }
     pasteInflightRef.current += 1;
+    let succeeded = false;
     try {
       const { id } = await api.createKnowledge({ kind: 'document', title, text: pasted, sourceType: 'paste' });
       pasteTextRef.current.set(id, pasted);
       // ready 状态，无需标「拆读中」；再核一次上限，防并发越挂。
       setRefs((cur) => (cur.length >= UPLOAD_COUNT_MAX || cur.some((x) => x.kind === 'knowledge' && x.id === id))
         ? cur : [...cur, { kind: 'knowledge', id, label: title }]);
+      succeeded = true;
     } catch {
-      writeInput(fullValue); // 归卷未成：长文塞回输入框，不丢字
-      Taro.showToast({ title: '长文归卷未成，稍后再试', icon: 'none' });
+      // 不再 writeInput(fullValue)：归卷期间用户可能已继续写了新草稿，
+      // 异步失败回填会把新草稿整段覆盖。失败卡保留全文，可预览、重试或移除。
+      setPastePendings((cur) => cur.map((p) => p.key === key ? { ...p, status: 'failed' } : p));
+      Taro.showToast({ title: '长文归卷未成，可重试', icon: 'none' });
     } finally {
       pasteInflightRef.current -= 1;
-      pasteTextRef.current.delete(key); // 占位 key 让位给真 id（失败则本轮无此份，一并清掉）
       pastePendingKeysRef.current.delete(key);
-      setPastePendings((cur) => cur.filter((p) => p.key !== key));
+      if (succeeded) {
+        pasteTextRef.current.delete(key); // 占位 key 让位给真 id
+        setPastePendings((cur) => cur.filter((p) => p.key !== key));
+      }
     }
+  };
+
+  const removePastePending = (key: string) => {
+    pasteTextRef.current.delete(key);
+    pastePendingKeysRef.current.delete(key);
+    setPastePendings((cur) => cur.filter((p) => p.key !== key));
   };
 
   // 粘贴 burst 结算：定时器到点后统一算一次账。以 lastValueRef 为准（同步、非陈旧），
@@ -1302,7 +1399,9 @@ export default function Chat() {
     // （并发把附卷顶到九份上限），那时说「已在附卷里」是在撒谎，得让这次照常归卷。
     const dupId = findDupPaste(pasted);
     const dupLive = !!dupId
-      && (pastePendingKeysRef.current.has(dupId) || refs.some((x) => x.kind === 'knowledge' && x.id === dupId));
+      && (pastePendings.some((p) => p.key === dupId)
+        || pastePendingKeysRef.current.has(dupId)
+        || refs.some((x) => x.kind === 'knowledge' && x.id === dupId));
     if (dupId && !dupLive) forgetPaste(dupId);
     if (dupLive) {
       writeInput(kept);
@@ -1317,7 +1416,7 @@ export default function Chat() {
       Taro.showToast({ title: `附卷已满${UPLOAD_COUNT_MAX}份，容后再呈`, icon: 'none' });
       return;
     }
-    void absorbPasteToFile(pasted, final);
+    void absorbPasteToFile(pasted);
     writeInput(kept);
   };
 
@@ -1377,6 +1476,11 @@ export default function Chat() {
 
   const onSend = (raw?: string) => {
     if (busy) return;
+    if (pastePendings.length) {
+      const failed = pastePendings.some((p) => p.status === 'failed');
+      Taro.showToast({ title: failed ? '请先处理归卷失败的长文' : '长文归卷中，稍候再发', icon: 'none' });
+      return;
+    }
     const v = (typeof raw === 'string' ? raw : input).trim();
     if (!v || !agent) return;
     // 软限制守卫：手动堆出的超长（非粘贴）在此拦下——粘贴早已转附卷，不会走到这。
@@ -2341,7 +2445,7 @@ export default function Chat() {
             {pastePendings.map((p) => (
               <View
                 key={p.key}
-                className={`paste-card pending ${pasteDupId === p.key ? 'dup' : ''}`}
+                className={`paste-card pending ${p.status === 'failed' ? 'failed' : ''} ${pasteDupId === p.key ? 'dup' : ''}`}
                 style={pasteDupId === p.key ? { borderColor: accent } : {}}
                 onClick={() => openPastePreview('', p.text)}
               >
@@ -2352,7 +2456,12 @@ export default function Chat() {
                   <Text className="paste-t">粘贴长文 · {p.chars}字</Text>
                   <Text className="paste-m">{p.excerpt}</Text>
                 </View>
-                <Text className="paste-badge">归卷中</Text>
+                {p.status === 'uploading' ? <Text className="paste-badge">归卷中</Text> : (
+                  <View className="paste-failed-actions" onClick={(e) => e.stopPropagation?.()}>
+                    <Text className="paste-retry" style={{ color: accent }} onClick={() => { void absorbPasteToFile(p.text, p.key); }}>重试</Text>
+                    <Text className="paste-remove" onClick={() => removePastePending(p.key)}>移除</Text>
+                  </View>
+                )}
               </View>
             ))}
           </View>
@@ -2403,13 +2512,12 @@ export default function Chat() {
               </View>
               <View className="cbar-r">
                 {busy ? (
-                  reattachedBusy ? (
-                    // 重进后已恢复思考态，但原请求属于上一页面实例，不能展示一个实际无效的“停止”按钮。
+                  activeGenerationPhase === 'finalize' || (reattachedBusy && !activeGenerationId) ? (
                     <View className="csend waiting" aria-label="容我想想" style={{ borderColor: accent }}>
                       <View className="waiting-dot" style={{ background: accent }} />
                     </View>
                   ) : (
-                    // B2：当前页面发起的生成中 → 停止键
+                    // 当前页发起时由 liveGen 取消；重进后由 generationId 取消，二者都是真停止。
                     <View
                       className="csend stop"
                       role="button"
@@ -2422,10 +2530,10 @@ export default function Chat() {
                   )
                 ) : (
                   <View
-                    className={`csend ${!input.trim() ? 'off' : ''}`}
+                    className={`csend ${!input.trim() || pastePendings.length ? 'off' : ''}`}
                     role="button"
                     aria-label="发送"
-                    style={input.trim() ? { background: accent } : {}}
+                    style={input.trim() && !pastePendings.length ? { background: accent } : {}}
                     onClick={(e) => { e.stopPropagation?.(); onSend(); }}
                   >
                     <Icon name="up" size={18} color="#fff" />

@@ -485,6 +485,3 @@
   font-size: 14px; font-weight: 600; height: 46px; justify-content: center; margin-top: 14px;
 }
 .ge-save:active { opacity: .85; }
-
-/* 每日战报卡的屏外画布：只用于 canvas 出图，不参与布局（尺寸由 renderCardToImage 按 dpr 设定）。 */
-.st-daily-canvas { position: fixed; left: -9999px; top: 0; width: 600px; height: 900px; }

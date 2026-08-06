@@ -121,13 +121,40 @@ function withAsks(reply: ChatReply): ChatReply {
  * - 抽不出/超时/上游不可用 → 静默返回原 reply。兜底失败绝不能让整轮对话失败；
  * - 抽取模型自己判断是否真在等答案，修辞性问句返回空数组。
  */
-async function recoverAsks(reply: ChatReply): Promise<ChatReply> {
-  if (reply.asks?.length || !reply.text || !looksLikeAsking(reply.text)) return reply;
+export function shouldRecoverChatAsks(reply: ChatReply): boolean {
+  return !reply.asks?.length && !!reply.text && looksLikeAsking(reply.text);
+}
+
+type AskRecoverySafety = { ctx: GenContext; meta?: UsageMeta };
+
+export async function recoverChatAsks(
+  reply: ChatReply,
+  signal?: AbortSignal,
+  safety?: AskRecoverySafety,
+): Promise<ChatReply> {
+  if (!shouldRecoverChatAsks(reply)) return reply;
   try {
-    const out = await completeJson(ASK_RECOVERY_SYSTEM, reply.text.slice(-1200));
+    const out = await completeJson(ASK_RECOVERY_SYSTEM, reply.text.slice(-1200), { signal, usageMeta: safety?.meta });
     const asks = normalizeAsks(out?.asks);
-    noteAsksRecovered(asks ? 'recovered' : 'miss');
-    if (!asks) return reply;
+    if (!asks) { noteAsksRecovered('miss'); return reply; }
+    const visibleText = JSON.stringify(asks);
+    if (safety) {
+      // 推荐选项是一次新的、直接面向用户的模型产出：与主正文一样纳入输出审核和禁用词审计。
+      // 审核未通过只丢弃增强项，已经持久化的主回复仍正常完成。
+      void auditBannedWords({
+        tenantId: safety.meta?.tenantId ?? safety.ctx.tenantId ?? null,
+        userId: safety.meta?.userId ?? safety.ctx.userId ?? null,
+        sessionId: safety.meta?.sessionId ?? null,
+        agentKey: safety.ctx.agentKey,
+        kind: 'chat.ask_recovery',
+        text: visibleText,
+      });
+      if (!(await moderate('output', visibleText, modOpts(safety.ctx, safety.meta)))) {
+        noteAsksRecovered('miss');
+        return reply;
+      }
+    }
+    noteAsksRecovered('recovered');
     return { ...reply, asks };
   } catch (err) {
     console.warn('[gateway] ask 兜底抽取失败，按无选项交回：', (err as Error).message);
@@ -144,8 +171,8 @@ const ASK_RECOVERY_SYSTEM = [
 ].join('\n');
 
 /** chat 出口统一入口：先按协议剥离，缺了再兜底抽一次。 */
-async function withAsksRecovered(reply: ChatReply): Promise<ChatReply> {
-  return recoverAsks(withAsks(reply));
+async function withAsksRecovered(reply: ChatReply, ctx: GenContext, meta?: UsageMeta): Promise<ChatReply> {
+  return recoverChatAsks(withAsks(reply), undefined, { ctx, meta });
 }
 
 // 只匹配「模型把自己当代码助手、自述找不到项目/工作区上下文」的串味输出。
@@ -173,9 +200,19 @@ function sanitizeDeliverable(ctx: GenContext, d: Deliverable): Deliverable {
 // 输出侧内容审核（合规硬门槛）：AI 产出在返回/持久化前审一遍，命中即抛 MODERATION_BLOCK。
 // 输出侧默认 fail-closed（moderation.moderate 对 refType='output' 的约定）——审核服务抖动时宁拦不放。
 // 输入侧审核在 7/4 流式化提交中被移除后，输出侧一直缺位；这里重新接回（见售卖前体检 P0/合规）。
-async function moderateOutputOrThrow(text: string, ctx: GenContext, meta?: UsageMeta): Promise<void> {
+async function moderateOutputOrThrow(
+  text: string,
+  ctx: GenContext,
+  meta?: UsageMeta,
+  consumed?: Pick<Sourced<unknown>, 'usage' | 'provider' | 'model'>,
+): Promise<void> {
   if (!(await moderate('output', text, modOpts(ctx, meta)))) {
-    throw Object.assign(new Error('产出未通过内容审核'), { code: 'MODERATION_BLOCK' });
+    const providerInvoked = !!consumed && ['claude', 'openai', 'dify'].includes(consumed.provider);
+    throw Object.assign(new Error('产出未通过内容审核'), {
+      code: 'MODERATION_BLOCK',
+      providerInvoked,
+      ...(providerInvoked ? { generationUsage: consumed!.usage, generationProvider: consumed!.provider, generationModel: consumed!.model } : {}),
+    });
   }
 }
 
@@ -299,7 +336,10 @@ async function runtimeChat(ctx: GenContext): Promise<Sourced<ChatReply>> {
     return { result: reply, usage, provider: 'dify', model: 'dify' };
   }
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
-  if (!isRealKey(cfg.apiKey)) return { result: await mockUpstream(() => mockChat(ctx)), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+  if (!isRealKey(cfg.apiKey)) {
+    if (!env.aiFallbackMock && !isAiTestMode()) throw Object.assign(new Error('智能体模型密钥不可用'), { code: 'AI_KEY_MISSING' });
+    return { result: await mockUpstream(() => mockChat(ctx)), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+  }
   const oa = await import('./providers/openai.js');
   const tools = await skillToolsFor(ctx);
   if (tools.length) {
@@ -329,7 +369,10 @@ async function runtimeDeliverable(ctx: GenContext): Promise<Sourced<Deliverable>
     return { result: deliverable, usage, provider: 'dify', model: 'dify' };
   }
   const cfg = openaiOverrideCfg(ctx, await getAiConfig());
-  if (!isRealKey(cfg.apiKey)) return { result: await mockUpstream(() => mockDeliverable(ctx)), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+  if (!isRealKey(cfg.apiKey)) {
+    if (!env.aiFallbackMock && !isAiTestMode()) throw Object.assign(new Error('智能体模型密钥不可用'), { code: 'AI_KEY_MISSING' });
+    return { result: await mockUpstream(() => mockDeliverable(ctx)), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
+  }
   const oa = await import('./providers/openai.js');
   const tools = await skillToolsFor(ctx);
   if (tools.length) {
@@ -378,7 +421,7 @@ function cacheKey(kind: string, ctx: GenContext, cfg: ResolvedAiConfig): string 
   return `${kind}:${tenantSig}:${userSig}:${effectiveProvider(cfg)}:${cfg.model}:${ctx.agentKey}:${ctx.deliverableKey ?? ''}:${ctx.userMessage}:${profileSig}:${ctxSig}`;
 }
 
-export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Promise<{ result: Deliverable; usage: Usage }> {
+export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Promise<{ result: Deliverable; usage: Usage; providerInvoked: boolean }> {
   await assertKeyHealthy();
   if (!(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
@@ -387,18 +430,22 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   // per-agent 接入覆盖：绕过全局 provider 与缓存（端点/会话因人/因体而异）。失败兜底 mock。
   if (ctx.runtime) {
     let sourced: Sourced<Deliverable>;
+    let providerInvoked = false;
     try {
+      providerInvoked = true;
       sourced = await traced(() => runtimeDeliverable(ctx), { kind: 'deliverable', ctx, meta, provider: ctx.runtime.mode === 'dify' ? 'dify' : 'openai', respText: deliverableText });
     } catch (err) {
       console.error('[gateway] runtime deliverable fallback to mock:', (err as Error).message);
-      if (!env.aiFallbackMock) throw aiUnavailable(err);
+      if (!env.aiFallbackMock) throw Object.assign(aiUnavailable(err), { providerInvoked });
       noteGenDegraded('runtime_deliverable');
       sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: '' };
     }
     sourced.result = sanitizeDeliverable(ctx, sourced.result);
-    await moderateOutputOrThrow(deliverableText(sourced.result), ctx, meta);
     await maybeRecord(sourced, 'deliverable', ctx, meta);
-    return { result: sourced.result, usage: sourced.usage };
+    // 真实 provider 调用已发生，即使输出审核拦下也要先入 TokenUsage，
+    // 并把 usage 挂到异常上供 GenerationJob 按实际消耗结算。
+    await moderateOutputOrThrow(deliverableText(sourced.result), ctx, meta, sourced);
+    return { result: sourced.result, usage: sourced.usage, providerInvoked };
   }
 
   const cfg = await getAiConfig();
@@ -409,19 +456,22 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
   const ck = cacheKey('deliverable', ctx, cfg);
   if (!tools.length) {
     const cached = await cacheGet<Deliverable>(ck);
-    if (cached) return { result: cached, usage: ZERO_USAGE }; // 缓存命中：0 token，不计额度（启用技能不缓存）
+    if (cached) return { result: cached, usage: ZERO_USAGE, providerInvoked: false }; // 缓存命中：0 token，不计额度（启用技能不缓存）
   }
 
   let sourced: Sourced<Deliverable>;
+  let providerInvoked = false;
   try {
     sourced = await traced(async () => {
       if (live === 'claude') {
+        providerInvoked = true;
         const cl = await import('./providers/claude.js');
         const m = tools.length ? await cl.claudeDeliverableWithTools(ctx, cfg, tools) : await cl.claudeDeliverable(ctx, cfg);
         const mt = m as { toolCalls?: number; iterations?: number };
         return { result: m.result, usage: m.usage, provider: 'claude', model: cfg.model, toolCalls: mt.toolCalls, iterations: mt.iterations };
       }
       if (live === 'openai') {
+        providerInvoked = true;
         const oa = await import('./providers/openai.js');
         const m = tools.length ? await oa.openaiDeliverableWithTools(ctx, cfg, tools) : await oa.openaiDeliverable(ctx, cfg);
         const mt = m as { toolCalls?: number; iterations?: number };
@@ -431,19 +481,19 @@ export async function generateDeliverable(ctx: GenContext, meta?: UsageMeta): Pr
     }, { kind: 'deliverable', ctx, meta, provider: live ?? 'mock', respText: deliverableText });
   } catch (err) {
     console.error('[gateway] deliverable fallback to mock:', (err as Error).message);
-    if (!env.aiFallbackMock) throw aiUnavailable(err);
+    if (!env.aiFallbackMock) throw Object.assign(aiUnavailable(err), { providerInvoked });
     noteGenDegraded('deliverable');
     sourced = { result: mockDeliverable(ctx), usage: ZERO_USAGE, provider: 'mock', model: cfg.model };
   }
 
   sourced.result = sanitizeDeliverable(ctx, sourced.result);
-  await moderateOutputOrThrow(deliverableText(sourced.result), ctx, meta);
   await maybeRecord(sourced, 'deliverable', ctx, meta);
+  await moderateOutputOrThrow(deliverableText(sourced.result), ctx, meta, sourced);
   if (!tools.length) await cacheSet(ck, sourced.result, CACHE_TTL);
-  return { result: sourced.result, usage: sourced.usage };
+  return { result: sourced.result, usage: sourced.usage, providerInvoked };
 }
 
-export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { inputModerated?: boolean }): Promise<{ result: ChatReply; usage: Usage }> {
+export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { inputModerated?: boolean }): Promise<{ result: ChatReply; usage: Usage; providerInvoked: boolean }> {
   await assertKeyHealthy();
   if (!opts?.inputModerated && !(await moderate('input', ctx.userMessage, modOpts(ctx, meta)))) {
     throw Object.assign(new Error('输入未通过内容审核'), { code: 'MODERATION_BLOCK' });
@@ -452,18 +502,20 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
   // per-agent 接入覆盖：走该智能体自己的端点 / Dify 应用。失败兜底 mock。
   if (ctx.runtime) {
     let s: Sourced<ChatReply>;
+    let providerInvoked = false;
     try {
+      providerInvoked = true;
       s = await traced(() => runtimeChat(ctx), { kind: 'chat', ctx, meta, provider: ctx.runtime.mode === 'dify' ? 'dify' : 'openai', respText: (r) => r.text });
       await maybeRecord(s, 'chat', ctx, meta);
     } catch (err) {
       console.error('[gateway] runtime chat fallback to mock:', (err as Error).message);
-      if (!env.aiFallbackMock) throw aiUnavailable(err);
+      if (!env.aiFallbackMock) throw Object.assign(aiUnavailable(err), { providerInvoked });
       noteGenDegraded('runtime_chat');
       // mock 路径不做 ask 兜底：mockChat 自带 asks，且降级到这里意味着上游已不可用，再发一次抽取只会白等一次失败。
-      return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
+      return { result: withAsks(mockChat(ctx)), usage: ZERO_USAGE, providerInvoked };
     }
-    await moderateOutputOrThrow(s.result.text, ctx, meta);
-    return { result: await withAsksRecovered(s.result), usage: s.usage };
+    await moderateOutputOrThrow(s.result.text, ctx, meta, s);
+    return { result: await withAsksRecovered(s.result, ctx, meta), usage: s.usage, providerInvoked };
   }
 
   const cfg = await getAiConfig();
@@ -471,10 +523,12 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
   // 「真 provider 失败后降级」——前者可注入压测用的模拟耗时，后者必须立刻返回。
   const live = liveProvider(cfg);
   let chatResult: Sourced<ChatReply> | null = null;
+  let providerInvoked = false;
   try {
     if (live) {
       const tools = (live === 'openai' || live === 'claude') ? await skillToolsFor(ctx) : []; // P1-D1：openai/claude 均支持工具
       const s = await traced(async () => {
+        providerInvoked = true;
         if (live === 'claude') {
           const cl = await import('./providers/claude.js');
           const m = tools.length ? await cl.claudeChatWithTools(ctx, cfg, tools) : await cl.claudeChat(ctx, cfg);
@@ -492,19 +546,22 @@ export async function chatComplete(ctx: GenContext, meta?: UsageMeta, opts?: { i
   } catch (err) {
     console.error('[gateway] chat fallback to mock:', (err as Error).message);
     if ((err as Error & { code?: string }).code === 'AI_OUTPUT_TRUNCATED') throw err;
-    if (!env.aiFallbackMock) throw aiUnavailable(err);
+    if (!env.aiFallbackMock) throw Object.assign(aiUnavailable(err), { providerInvoked });
     noteGenDegraded('chat');
   }
   if (chatResult) {
-    await moderateOutputOrThrow(chatResult.result.text, ctx, meta);
-    return { result: await withAsksRecovered(chatResult.result), usage: chatResult.usage };
+    await moderateOutputOrThrow(chatResult.result.text, ctx, meta, chatResult);
+    return { result: await withAsksRecovered(chatResult.result, ctx, meta), usage: chatResult.usage, providerInvoked };
   }
   // live 为空 = mock 就是配置的 provider；live 有值却走到这里 = 真 provider 失败后的降级兜底（不注入延迟）。
   const reply = live ? mockChat(ctx) : await mockUpstream(() => mockChat(ctx));
-  return { result: withAsks(reply), usage: ZERO_USAGE };
+  return { result: withAsks(reply), usage: ZERO_USAGE, providerInvoked };
 }
 
 export type ChatStreamEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'done'; result: ChatReply; usage: Usage; providerInvoked: boolean };
+type ProviderChatStreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'done'; result: ChatReply; usage: Usage };
 
@@ -519,9 +576,9 @@ function* chunkText(text: string): Generator<string> {
 }
 
 async function* chunkedChatFallback(ctx: GenContext, meta?: UsageMeta, inputModerated = false): AsyncGenerator<ChatStreamEvent> {
-  const { result, usage } = await chatComplete(ctx, meta, { inputModerated });
+  const { result, usage, providerInvoked } = await chatComplete(ctx, meta, { inputModerated });
   for (const piece of chunkText(result.text)) yield { type: 'delta', text: piece };
-  yield { type: 'done', result, usage };
+  yield { type: 'done', result, usage, providerInvoked };
 }
 
 async function* tracedChatProviderStream(
@@ -529,7 +586,7 @@ async function* tracedChatProviderStream(
   meta: UsageMeta | undefined,
   provider: 'openai' | 'claude',
   model: string,
-  stream: AsyncGenerator<ChatStreamEvent>,
+  stream: AsyncGenerator<ProviderChatStreamEvent>,
 ): AsyncGenerator<ChatStreamEvent> {
   const t0 = Date.now();
   let text = '';
@@ -569,7 +626,8 @@ async function* tracedChatProviderStream(
     });
     await maybeRecord(actual, 'chat', ctx, meta);
     // 尾部 ```ask 块在完整结果处剥离并结构化（token 流里已原样流出，前端流式期间负责隐藏）。
-    yield { type: 'done', result: await withAsksRecovered(done.result), usage: done.usage };
+    const parsed = withAsks(done.result);
+    yield { type: 'done', result: meta?.skipAskRecovery ? parsed : await recoverChatAsks(parsed, undefined, { ctx, meta }), usage: done.usage, providerInvoked: true };
   } catch (err) {
     await recordTrace({
       meta, agentKey: ctx.agentKey, versionId: ctx.versionId, kind: 'chat',
@@ -607,17 +665,20 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
   }
 
   let emitted = false;
+  let providerInvoked = false;
   // 为什么要记「这轮为什么没走原生流」：非流式对话吃的是总时长超时，2026-08-04 线上那 6 次
   // 精确 60.0s 超时全部落在这条路上。原因分布是那类事故最早的可观测信号（见 metrics.noteChatNonStream）。
-  let fellBack: 'tools' | 'dify' | 'mock' | 'stream_failed' | null = null;
+  let fellBack: 'tools' | 'dify' | 'mock' | 'no_key' | 'stream_failed' | null = null;
   try {
     if (ctx.runtime?.mode === 'openai') {
       const cfg = openaiOverrideCfg(ctx, await getAiConfig());
       const tools = await skillToolsFor(ctx);
-      if (tools.length) fellBack = 'tools';
+      if (!isRealKey(cfg.apiKey)) fellBack = 'no_key';
+      else if (tools.length) fellBack = 'tools';
       if (isRealKey(cfg.apiKey) && !tools.length) {
         const oa = await import('./providers/openai.js');
-        for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg))) {
+        providerInvoked = true;
+        for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg, { signal: meta?.signal, firstTokenStartedAtMs: meta?.firstTokenStartedAtMs }))) {
           if (ev.type === 'delta') emitted = true;
           yield ev;
         }
@@ -633,7 +694,8 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
       else if (tools.length) fellBack = 'tools';
       if (live === 'openai' && !tools.length) {
         const oa = await import('./providers/openai.js');
-        for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg))) {
+        providerInvoked = true;
+        for await (const ev of tracedChatProviderStream(ctx, meta, 'openai', cfg.model, oa.openaiChatStream(ctx, cfg, { signal: meta?.signal, firstTokenStartedAtMs: meta?.firstTokenStartedAtMs }))) {
           if (ev.type === 'delta') emitted = true;
           yield ev;
         }
@@ -641,7 +703,8 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
       }
       if (live === 'claude' && !tools.length) {
         const cl = await import('./providers/claude.js');
-        for await (const ev of tracedChatProviderStream(ctx, meta, 'claude', cfg.model, cl.claudeChatStream(ctx, cfg))) {
+        providerInvoked = true;
+        for await (const ev of tracedChatProviderStream(ctx, meta, 'claude', cfg.model, cl.claudeChatStream(ctx, cfg, { signal: meta?.signal, firstTokenStartedAtMs: meta?.firstTokenStartedAtMs }))) {
           if (ev.type === 'delta') emitted = true;
           yield ev;
         }
@@ -649,12 +712,19 @@ export async function* chatCompleteStream(ctx: GenContext, meta?: UsageMeta): As
       }
     }
   } catch (err) {
-    if (emitted) throw err;
+    if (emitted) throw Object.assign(err as object, { providerInvoked });
     fellBack = 'stream_failed';
-    console.error('[gateway] native chat stream fallback:', (err as Error).message);
+    console.error('[gateway] native chat stream failed before visible output:', (err as Error).message);
     if (!env.aiFallbackMock) {
-      // 保持老行为：流式握手失败时仍尝试非流式 provider；若 provider 真不可用，chatComplete 会抛 AI_UNAVAILABLE。
+      // 不再拿同一个故障网关做一次非流式重试：会重复花钱/再等一轮，且错误 usage 更难归集。
+      throw Object.assign(aiUnavailable(err), { providerInvoked });
     }
+    noteChatNonStream('stream_failed');
+    noteGenDegraded('chat_stream_failed');
+    const fallback = withAsks(mockChat(ctx));
+    for (const piece of chunkText(fallback.text)) yield { type: 'delta', text: piece };
+    yield { type: 'done', result: fallback, usage: ZERO_USAGE, providerInvoked };
+    return;
   }
 
   // 走到这里就一定是非流式了（原生流成功的分支全都 return 了）。dify runtime 不进上面任何分支，
@@ -690,7 +760,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
       // mock 路径不做 ask 兜底：mockChat 自带 asks，且降级到这里意味着上游已不可用，再发一次抽取只会白等一次失败。
       return { kind: 'chat', reply: withAsks(mockChat(ctx)), usage: ZERO_USAGE };
     }
-    return { kind: 'chat', reply: await withAsksRecovered(s.result), usage: s.usage };
+    return { kind: 'chat', reply: await withAsksRecovered(s.result, ctx, meta), usage: s.usage };
   }
 
   const cfg = await getAiConfig();
@@ -754,7 +824,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
 
   return out.kind === 'report'
     ? { kind: 'report', deliverable: out.result, usage }
-    : { kind: 'chat', reply: await withAsksRecovered(out.result), usage };
+    : { kind: 'chat', reply: await withAsksRecovered(out.result, ctx, meta), usage };
 }
 
 /**
@@ -873,14 +943,14 @@ export async function providerInfo() {
 // 那种指定是有意的，不能被辅助档覆盖。
 async function rawText(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
-  opts?: { allowAux?: boolean; maxTokens?: number },
+  opts?: { allowAux?: boolean; maxTokens?: number; signal?: AbortSignal; usageMeta?: UsageMeta },
 ): Promise<string> {
   // 未配 AI_AUX_MODEL 时 resolveAuxConfig 原样返回，下面两行等于无操作（默认行为零变化）。
   const useCfg = opts?.allowAux === false ? cfg : resolveAuxConfig(cfg);
   const useLive: 'claude' | 'openai' = useCfg === cfg
     ? live
     : (useCfg.provider === 'claude' ? 'claude' : 'openai');
-  // 辅助任务没有 sessionId；用输入摘要做稳定亲和键，既能跨双端点分流，又让同一抽取复用同端点缓存。
+  // 用输入摘要做稳定亲和键，既能跨双端点分流，又让同一抽取复用同端点缓存。
   const affinityKey = `aux:${createHash('sha1').update(system).update('\0').update(user).digest('hex').slice(0, 16)}`;
 
   // maxTokens 只在调用方显式要求时传（缺省 undefined → provider 沿用 700 的辅助档预算，行为零变化）。
@@ -888,20 +958,20 @@ async function rawText(
   let out: string;
   if (useLive === 'openai') {
     const { openaiRaw } = await import('./providers/openai.js');
-    out = await openaiRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt });
+    out = await openaiRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt, signal: opts?.signal });
   } else {
     const { claudeRaw } = await import('./providers/claude.js');
-    out = await claudeRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt });
+    out = await claudeRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt, signal: opts?.signal });
   }
   // 辅助调用（洞察/预言/势研判/履历/汇总/图谱等）此前不入 token_usage → 成本低估。按 kind='aux' 记入基建用量。
-  recordAuxUsage(useCfg.model, useLive, `${system}\n${user}`, out);
+  recordAuxUsage(useCfg.model, useLive, `${system}\n${user}`, out, opts?.usageMeta);
   return out;
 }
 
 // —— 内部：文本 → JSON 对象（正则抠 {…} + JSON.parse）。既有洞察抽取/汇总沿用此松散口径。 ——
 async function rawJson(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
-  opts?: { allowAux?: boolean },
+  opts?: { allowAux?: boolean; signal?: AbortSignal; usageMeta?: UsageMeta },
 ): Promise<Record<string, unknown> | null> {
   const content = await rawText(cfg, live, system, user, opts);
   const m = content.match(/\{[\s\S]*\}/);
@@ -1030,7 +1100,11 @@ export async function completeText(
 }
 
 /** 通用 JSON 补全（评测评委等内部用）：用就绪模型发一次并解析 JSON；未就绪（mock）/失败返回 null。 */
-export async function completeJson(system: string, user: string, opts?: { temperature?: number; model?: string }): Promise<Record<string, unknown> | null> {
+export async function completeJson(
+  system: string,
+  user: string,
+  opts?: { temperature?: number; model?: string; signal?: AbortSignal; usageMeta?: UsageMeta },
+): Promise<Record<string, unknown> | null> {
   const base = await getAiConfig();
   const live = liveProvider(base);
   if (!live) return null;
@@ -1040,7 +1114,7 @@ export async function completeJson(system: string, user: string, opts?: { temper
     : base;
   try {
     // 调用方显式指定 model（评测评委要独立模型避免自评）时不许辅助档覆盖。
-    return await rawJson(cfg, live, system, user, { allowAux: !opts?.model });
+    return await rawJson(cfg, live, system, user, { allowAux: !opts?.model, signal: opts?.signal, usageMeta: opts?.usageMeta });
   } catch (err) {
     console.error('[gateway] completeJson failed:', (err as Error).message);
     return null;

@@ -29,7 +29,7 @@ import { isRecallIntent } from './recallIntent.js';
 import { formatDigestBlock, type SessionDigestItem } from './sessionDigest.js';
 
 // 把 Agent 的「接入方式」解析成运行时覆盖。inherit / 未配置完整 → null（走全局模型）。
-function resolveAgentRuntime(
+export function resolveAgentRuntime(
   agent: { providerMode: string; apiBaseUrl: string | null; apiModel: string | null; apiTemperature: number | null; apiKey: string | null; difyBaseUrl: string | null; difyApiKey: string | null; difyInputs: unknown; skillsConfig: unknown },
   opts: { userId: string; sessionId?: string | null; difyConversationId?: string | null },
 ): AgentRuntime | null {

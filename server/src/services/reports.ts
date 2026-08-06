@@ -210,7 +210,8 @@ export async function saveReportVersion(opts: SaveVersionOpts): Promise<SaveRepo
     return { reportId: doc.id, version: nextVersion, created, changed: true };
   });
   if (saved.changed) {
-    notifyReportReady({ tenantId: opts.tenantId, userId: opts.userId, title: opts.title, reportId: saved.reportId });
+    void notifyReportReady({ tenantId: opts.tenantId, userId: opts.userId, title: opts.title, reportId: saved.reportId })
+      .catch((err) => console.error('[reports] report notify failed:', (err as Error).message));
   }
   return saved;
 }

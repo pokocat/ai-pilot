@@ -18,6 +18,7 @@ import {
   noteHttpTiming, noteLlmCall, noteTokenUsage, noteGenDegraded, noteOutputTruncated,
   noteRegistration, noteModeration, noteCreditDelta, notePlanGateBlocked,
   notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep,
+  noteChatFirstToken, noteChatGenerationFinalized,
 } from '../src/services/metrics.js';
 import { __setPoolForTest, __resetLlmPool } from '../src/services/llmPool.js';
 import { __resetLlmGate, acquireLlmSlot } from '../src/services/llmGate.js';
@@ -152,6 +153,32 @@ describe('指标内容', () => {
     assert.match(body, /junshi_llm_tokens_total\{[^}]*dir="cached_input"\} 200/);
     // 12_340_000 微元 = 12.34 元
     assert.match(body, /junshi_llm_cost_cny_total\{kind="chat",provider="claude",model="claude-opus-4-6"\} 12\.34/);
+  });
+
+  test('生成状态与封闭标签集从 0 暴露，首个故障不会被 increase 漏掉', async () => {
+    const zero = await get();
+    assert.match(zero, /junshi_chat_generation_total\{result="failed"\} 0/);
+    assert.match(zero, /junshi_chat_stream_stall_total\{provider="openai",phase="first_event",had_text="no"\} 0/);
+    assert.match(zero, /junshi_chat_usage_estimated_total\{provider="unknown"\} 0/);
+    assert.match(zero, /junshi_chat_provider_first_token_seconds_count\{provider="claude"\} 0/);
+
+    noteChatFirstToken('claude', 8.4, 2.1);
+    noteChatGenerationFinalized({
+      result: 'failed',
+      queueSeconds: 1.2,
+      providerSeconds: 4.5,
+      finalizeSeconds: 0.2,
+      jobSeconds: 5.9,
+      recovered: true,
+      usageSource: 'estimated',
+      provider: 'unknown',
+    });
+    const body = await get();
+    assert.match(body, /junshi_chat_first_token_seconds_sum\{provider="claude"\} 8\.4/);
+    assert.match(body, /junshi_chat_provider_first_token_seconds_sum\{provider="claude"\} 2\.1/);
+    assert.match(body, /junshi_chat_generation_total\{result="failed"\} 1/);
+    assert.match(body, /^junshi_chat_generation_recovered_total 1$/m);
+    assert.match(body, /junshi_chat_usage_estimated_total\{provider="unknown"\} 1/);
   });
 
   test('产出降级 / 截断 / 审核 / 禁写闸计数', async () => {

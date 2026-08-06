@@ -2,7 +2,7 @@ import { getApiBaseUrl } from './runtimeMode';
 import { getToken } from './token';
 import { parseSSE, decodeUtf8, sliceCompleteBlocks } from './sse';
 import { streamClosedWithoutVerdict } from './liveGenCore';
-import type { GenRequest, ChatReply, Deliverable, DeliverableSection } from '../../../shared/contracts';
+import type { GenRequest, ChatReply, Deliverable, DeliverableSection, GenerationPhase, GenerationStatus } from '../../../shared/contracts';
 
 // 错误分两类，收尾语义不同：'disconnect' 是链路被掐断（小程序切后台被杀请求 / 网络抖动），
 // 服务端不受影响，报告类多半照常生成并落库，调用方应先对账再判生死；
@@ -11,7 +11,8 @@ export type StreamErrorKind = 'disconnect' | 'fatal';
 
 export interface StreamHandlers {
   onSession?: (id: string) => void;
-  onToken?: (text: string) => void;   // 增量 token（渐进渲染）
+  onGeneration?: (data: { generationId: string; sessionId?: string; snapshotVersion?: number; phase?: GenerationPhase; status?: GenerationStatus }) => void;
+  onToken?: (text: string, replace?: boolean) => void; // 增量 token；replace=true 表示权威全文替换
   onChat?: (reply: ChatReply) => void; // 完整回复兜底（含 points/acts）
   onReportStart?: () => void; // report meta 已到达：先渲染成果卡骨架，避免当前页长时间只有 thinking
   onChatStart?: () => void; // chat meta 已到达：先建聊天气泡（think-dots），避免 LLM 首字延迟期无反馈
@@ -88,12 +89,23 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
   for (const e of events) {
     const d = e.data as {
       id?: string; text?: string; messageId?: string; message?: string; code?: string; kind?: string;
+      generationId?: string; sessionId?: string; snapshotVersion?: number; replace?: boolean;
+      status?: GenerationStatus; phase?: GenerationPhase;
       title?: string; icon?: string; meta?: string; index?: number; h?: string; b?: string; list?: string[];
       trust?: string; actions?: string[]; learned?: boolean; agentName?: string; refNotices?: string[];
     } & ChatReply;
     if (e.event === 'meta' && Array.isArray(d?.refNotices) && d.refNotices.length) h.onRefNotices?.(d.refNotices);
-    if (e.event === 'session') h.onSession?.(d?.id ?? '');
-    else if (e.event === 'token') { state.rendered = true; h.onToken?.(d?.text ?? ''); }
+    if ((e.event === 'generation' || e.event === 'snapshot') && (d?.generationId || d?.id)) {
+      h.onGeneration?.({
+        generationId: d.generationId || d.id!,
+        sessionId: d.sessionId,
+        snapshotVersion: d.snapshotVersion,
+        phase: d.phase,
+        status: d.status,
+      });
+    }
+    else if (e.event === 'session') h.onSession?.(d?.id ?? '');
+    else if (e.event === 'token') { state.rendered = true; h.onToken?.(d?.text ?? '', d?.replace === true); }
     else if (e.event === 'chat') { state.rendered = true; h.onChat?.(d); }
     else if (e.event === 'meta' && d?.kind === 'report' && h.onReportStart) { state.rendered = true; h.onReportStart(); }
     // meta kind=chat：仅建气泡占位，不置 state.rendered——占位≠已产出内容。若随后静默失败（无 token/chat），

@@ -238,7 +238,7 @@ test('流卡死（发完一段就静默）→ 看门狗开火、保留已下发�
     assert.equal(done?.text, '开头这段已经流给用户了', '卡死前已下发的正文一个字都不能丢');
     assert.equal(done?.truncated, true, '要标未写完，端上才给「继续写完」');
     const body = await renderMetrics();
-    assert.match(body, /junshi_chat_stream_stall_total\{provider="openai",phase="mid_stream"\} 1/);
+    assert.match(body, /junshi_chat_stream_stall_total\{provider="openai",phase="mid_stream",had_text="yes"\} 1/);
     assert.match(body, /junshi_chat_partial_kept_total\{provider="openai",cause="stream_error"\} 1/);
     assert.match(body, /junshi_chat_first_token_seconds_count\{provider="openai"\} 1/, '首字延迟要记一次');
   } finally {
@@ -266,7 +266,7 @@ test('响应头到了但一个事件都不来 → phase=first_event，且无正�
     await assert.rejects(async () => {
       for await (const _ of openaiChatStream(CTX, CFG(10_000))) { /* drain */ }
     });
-    assert.match(await renderMetrics(), /junshi_chat_stream_stall_total\{provider="openai",phase="first_event"\} 1/);
+    assert.match(await renderMetrics(), /junshi_chat_stream_stall_total\{provider="openai",phase="first_event",had_text="no"\} 1/);
   } finally {
     delete process.env.STREAM_FIRST_EVENT_IDLE_MS;
   }

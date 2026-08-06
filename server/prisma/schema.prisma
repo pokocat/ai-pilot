@@ -15,6 +15,49 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum GenerationStatus {
+  queued
+  running
+  completed
+  truncated
+  failed
+  cancelled
+}
+
+enum GenerationPhase {
+  queue
+  context
+  provider
+  finalize
+}
+
+enum GenerationKind {
+  chat
+  report
+}
+
+enum GenerationSettlementStatus {
+  none
+  reserved
+  settled
+  refunded
+}
+
+enum GenerationAttemptStatus {
+  pending
+  running
+  completed
+  failed
+  cancelled
+}
+
+enum GenerationEffectStatus {
+  pending
+  running
+  completed
+  failed
+}
+
 /// WO-07：用户级 journey 状态机（stage + 关键事件时间戳）。diagRound 仍以 StrategicProfile 为真源，派生时读入。
 model UserJourney {
   id             String    @id @default(cuid())
@@ -129,18 +172,19 @@ model Tenant {
   stage     String?
   createdAt DateTime @default(now())
 
-  users        User[]
-  profiles     Profile[]
-  sessions     Session[]
-  deliverables Deliverable[]
-  memories     Memory[]
-  credits      CreditLedger[]
-  audits       AuditLog[]
-  projects     Project[]
-  reports      ReportDoc[]
-  knowledge    KnowledgeItem[]
-  tokenUsages  TokenUsage[]
-  tokenWallets TokenWallet[]
+  users          User[]
+  profiles       Profile[]
+  sessions       Session[]
+  deliverables   Deliverable[]
+  memories       Memory[]
+  credits        CreditLedger[]
+  audits         AuditLog[]
+  projects       Project[]
+  reports        ReportDoc[]
+  knowledge      KnowledgeItem[]
+  tokenUsages    TokenUsage[]
+  tokenWallets   TokenWallet[]
+  generationJobs GenerationJob[]
 
   @@map("tenant")
 }
@@ -177,6 +221,7 @@ model User {
   tokenWallet         TokenWallet?
   wechatSubscriptions WechatSubscription[]
   wechatNotifications WechatNotificationLog[]
+  generationJobs      GenerationJob[]
 
   @@map("app_user")
 }
@@ -277,13 +322,14 @@ model Agent {
   sort      Int      @default(0)
   updatedAt DateTime @updatedAt
 
-  sessions      Session[]
-  deliverables  Deliverable[]
-  memories      Memory[]
-  reportDocs    ReportDoc[]
-  owners        UserAgent[]
-  versions      AgentVersion[]
-  collaborators AgentCollaborator[]
+  sessions       Session[]
+  deliverables   Deliverable[]
+  memories       Memory[]
+  reportDocs     ReportDoc[]
+  owners         UserAgent[]
+  versions       AgentVersion[]
+  collaborators  AgentCollaborator[]
+  generationJobs GenerationJob[]
 
   @@map("agent")
 }
@@ -381,16 +427,19 @@ model Session {
   difyConversationId String? // Dify 应用多轮上下文 id（providerMode=dify 时由 Dify 返回并回写）
   mode               String? // 会话模式（M3 PR-11 粘性）：'review:week' | 'urgent' | 'timing' | …；null=strategy
   lastReadAt         DateTime? // 未读判定：最后一条 AI 回复晚于此即未读；打开会话时置 now
+  activeGenerationId String?   @unique // 同一会话最多一个在途 GenerationJob；终态事务清空
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  tenant       Tenant                  @relation(fields: [tenantId], references: [id])
-  user         User                    @relation(fields: [userId], references: [id])
-  agent        Agent                   @relation(fields: [agentKey], references: [key])
-  project      Project?                @relation(fields: [projectId], references: [id])
-  messages     Message[]
-  deliverables Deliverable[]
-  digest       SessionContextSnapshot?
+  tenant           Tenant                  @relation(fields: [tenantId], references: [id])
+  user             User                    @relation(fields: [userId], references: [id])
+  agent            Agent                   @relation(fields: [agentKey], references: [key])
+  project          Project?                @relation(fields: [projectId], references: [id])
+  messages         Message[]
+  deliverables     Deliverable[]
+  digest           SessionContextSnapshot?
+  generationJobs   GenerationJob[]         @relation("SessionGenerations")
+  activeGeneration GenerationJob?          @relation("SessionActiveGeneration", fields: [activeGenerationId], references: [id], onDelete: SetNull)
 
   @@index([userId, agentKey])
   @@index([projectId])
@@ -406,10 +455,118 @@ model Message {
   refsJson    Json? // MessageRef[]：本条消息引用的 项目/报告/知识/记忆
   createdAt   DateTime @default(now())
 
-  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session            Session        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  generationAsUser   GenerationJob? @relation("GenerationUserMessage")
+  generationAsResult GenerationJob? @relation("GenerationResultMessage")
 
   @@index([sessionId])
   @@map("message")
+}
+
+/// 持久对话生成任务：HTTP/SSE 只是订阅通道，本行才是生成、恢复、取消与结算事实源。
+model GenerationJob {
+  id                     String                     @id @default(cuid())
+  tenantId               String
+  userId                 String
+  sessionId              String
+  agentKey               String
+  clientRequestId        String
+  requestFingerprint     String
+  parentGenerationId     String?
+  status                 GenerationStatus           @default(queued)
+  phase                  GenerationPhase            @default(queue)
+  kind                   GenerationKind             @default(chat)
+  userMessageId          String                     @unique
+  resultMessageId        String?                    @unique
+  requestJson            Json
+  contextJson            Json?
+  contextFrozenAt        DateTime?
+  partialText            String                     @default("") @db.Text
+  replyJson              Json?
+  snapshotVersion        Int                        @default(0)
+  usageJson              Json?
+  usageSource            String?
+  terminationReason      String?
+  quotaPeriodKey         String?
+  quotaReserved          Int                        @default(0)
+  quotaCharged           Int                        @default(0)
+  settlementStatus       GenerationSettlementStatus @default(none)
+  settledAt              DateTime?
+  creditReserved         Int                        @default(0)
+  creditSettlementStatus GenerationSettlementStatus @default(none)
+  leaseOwner             String?
+  leaseVersion           Int                        @default(0)
+  leaseExpiresAt         DateTime?
+  heartbeatAt            DateTime?
+  cancelRequestedAt      DateTime?
+  startedAt              DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+
+  tenant           Tenant              @relation(fields: [tenantId], references: [id])
+  user             User                @relation(fields: [userId], references: [id])
+  agent            Agent               @relation(fields: [agentKey], references: [key])
+  session          Session             @relation("SessionGenerations", fields: [sessionId], references: [id], onDelete: Cascade)
+  activeForSession Session?            @relation("SessionActiveGeneration")
+  userMessage      Message             @relation("GenerationUserMessage", fields: [userMessageId], references: [id], onDelete: Cascade)
+  resultMessage    Message?            @relation("GenerationResultMessage", fields: [resultMessageId], references: [id], onDelete: SetNull)
+  parentGeneration GenerationJob?      @relation("GenerationContinuation", fields: [parentGenerationId], references: [id], onDelete: SetNull)
+  childGenerations GenerationJob[]     @relation("GenerationContinuation")
+  attempts         GenerationAttempt[]
+  effects          GenerationEffect[]
+
+  @@unique([userId, clientRequestId])
+  @@index([status, leaseExpiresAt, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("generation_job")
+}
+
+/// 一次真实 provider 外呼；worker 恢复/故障转移产生新 attempt，但 job 只结算一次。
+model GenerationAttempt {
+  id                String                  @id @default(cuid())
+  jobId             String
+  attemptNo         Int
+  kind              String
+  provider          String?
+  model             String?
+  endpointId        String?
+  providerRequestId String?
+  status            GenerationAttemptStatus @default(pending)
+  usageJson         Json?
+  usageSource       String?
+  terminationReason String?
+  leaseVersion      Int
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  job GenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, attemptNo])
+  @@index([jobId, status])
+  @@map("generation_attempt")
+}
+
+/// 主结果之外的幂等副作用/outbox；目标服务仍须用 jobId/effectKey 做自身幂等。
+model GenerationEffect {
+  id          String                 @id @default(cuid())
+  jobId       String
+  effectKey   String
+  status      GenerationEffectStatus @default(pending)
+  attempt     Int                    @default(0)
+  lastError   String?                @db.Text
+  completedAt DateTime?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  job GenerationJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, effectKey])
+  @@index([status, updatedAt])
+  @@map("generation_effect")
 }
 
 /// 会话上下文快照（批次 3）：长会话的「带来源的结构化摘要层」。
@@ -637,26 +794,26 @@ model SurveyQuestion {
 
 /// 套餐与算力
 model Plan {
-  id                 String  @id @default(cuid())
-  name               String
-  price              Int // 分
-  period             String // month | year
-  planFamilyKey      String? // 同一方案的月付/年付稳定分组；迁移期可空，服务层兼容回退 id
-  tierRank           Int? // 商业档位排序；只用于升降档/折算，不与公开用量等级混用
-  usageLevel         String? // standard | 5x | 20x | custom（对外用量等级）
-  usageLabel         String? // 用户侧展示，如「标准用量」「扩展用量」「专属用量」
-  usageNormalPercent Int     @default(50) // 用户侧「正常使用」阈值上界（整数百分比）
-  usageNearPercent   Int     @default(80) // 用户侧「接近上限」阈值起点（整数百分比）
-  creditsPerMonth    Int // 钻石(点)：每月赠送，用于一次性解锁 + 图片按张
-  tokenQuotaPerMonth Int     @default(0) // 月度 token 额度（文本产出消耗池），-1=不限量
-  agentCount         Int
-  featuresJson       Json
-  highlighted        Boolean @default(false)
-  hidden             Boolean @default(false) // 隐藏档：/plans 列表不返回、非白名单不可购（TEST_PLAN_PHONES）——生产支付链路验证专用
-  autoRenewEnabled   Boolean @default(false) // 是否允许用户选择微信委托代扣自动续费；还需全局 V2 配置与模板 id 齐全
+  id                   String  @id @default(cuid())
+  name                 String
+  price                Int // 分
+  period               String // month | year
+  planFamilyKey        String? // 同一方案的月付/年付稳定分组；迁移期可空，服务层兼容回退 id
+  tierRank             Int? // 商业档位排序；只用于升降档/折算，不与公开用量等级混用
+  usageLevel           String? // standard | 5x | 20x | custom（对外用量等级）
+  usageLabel           String? // 用户侧展示，如「标准用量」「扩展用量」「专属用量」
+  usageNormalPercent   Int     @default(50) // 用户侧「正常使用」阈值上界（整数百分比）
+  usageNearPercent     Int     @default(80) // 用户侧「接近上限」阈值起点（整数百分比）
+  creditsPerMonth      Int // 钻石(点)：每月赠送，用于一次性解锁 + 图片按张
+  tokenQuotaPerMonth   Int     @default(0) // 月度 token 额度（文本产出消耗池），-1=不限量
+  agentCount           Int
+  featuresJson         Json
+  highlighted          Boolean @default(false)
+  hidden               Boolean @default(false) // 隐藏档：/plans 列表不返回、非白名单不可购（TEST_PLAN_PHONES）——生产支付链路验证专用
+  autoRenewEnabled     Boolean @default(false) // 是否允许用户选择微信委托代扣自动续费；还需全局 V2 配置与模板 id 齐全
   wechatContractPlanId String? // 微信支付委托代扣模板 ID（商户平台审核后填写）
-  autoRenewMode      String  @default("delay_24h") // 当前只支持官方默认「通知后 24h 扣费」
-  sort               Int     @default(0)
+  autoRenewMode        String  @default("delay_24h") // 当前只支持官方默认「通知后 24h 扣费」
+  sort                 Int     @default(0)
 
   users User[]
 
@@ -667,39 +824,39 @@ model Plan {
 /// 状态流：created → paid（回调验签通过）→ applied（权益已发放，幂等终态）；或 closed/failed。
 /// 幂等：appliedAt 为「恰好一次」入账的原子锚点（条件更新抢占，防重复回调/并发双发权益）。
 model PaymentOrder {
-  id               String    @id @default(cuid())
-  outTradeNo       String    @unique // 商户订单号（我们生成，提交给微信）
-  tenantId         String
-  userId           String
-  planId           String    @default("") // 套餐订单挂 planId；SKU 订单为空串
-  skuKey           String? // V7-12：单次付费商品订单挂 SKU key（与 planId 二选一）
-  amount           Int // 应付金额（分）
-  currency         String    @default("CNY")
-  provider         String    @default("wechat") // wechat | mock（未配支付时的演示通道）
-  status           String    @default("created") // created | paid | applied | failed | closed | refunded
-  prepayId         String? // 微信预支付交易会话标识
-  transactionId    String?   @unique // 微信支付订单号（回调返回）；同一微信交易不得关联两笔本地订单
-  paidAt           DateTime?
-  appliedAt        DateTime? // 权益发放完成时间 = 幂等终态锚点
-  rawNotifyJson    Json? // 回调解密后的原文（排查用）
-  attrSource       String? // D-1 开通来源归因（下单时从请求体带入，回调发放时落 ActivationEvent）：prescription | catalog | market
-  attrRefId        String? // attrSource=prescription 时的 prescriptionId
-  snapshotJson     Json? // 下单时的套餐/SKU 条款快照（P1：发放以此为准，防「下单后改价/删配置」漂移；无快照的历史单回退读当前配置）
-  clientRequestId  String? // 客户端一次购买意图的幂等键；同用户重试返回原订单
-  quoteFingerprint String? // 用户确认的报价指纹；下单事务内重算并核对
-  termsHash        String? // 下单时完整商业条款哈希，供权益账本与退款追溯
-  payMode          String    @default("jsapi") // jsapi | contract_initial | papay_recurring
+  id                     String    @id @default(cuid())
+  outTradeNo             String    @unique // 商户订单号（我们生成，提交给微信）
+  tenantId               String
+  userId                 String
+  planId                 String    @default("") // 套餐订单挂 planId；SKU 订单为空串
+  skuKey                 String? // V7-12：单次付费商品订单挂 SKU key（与 planId 二选一）
+  amount                 Int // 应付金额（分）
+  currency               String    @default("CNY")
+  provider               String    @default("wechat") // wechat | mock（未配支付时的演示通道）
+  status                 String    @default("created") // created | paid | applied | failed | closed | refunded
+  prepayId               String? // 微信预支付交易会话标识
+  transactionId          String?   @unique // 微信支付订单号（回调返回）；同一微信交易不得关联两笔本地订单
+  paidAt                 DateTime?
+  appliedAt              DateTime? // 权益发放完成时间 = 幂等终态锚点
+  rawNotifyJson          Json? // 回调解密后的原文（排查用）
+  attrSource             String? // D-1 开通来源归因（下单时从请求体带入，回调发放时落 ActivationEvent）：prescription | catalog | market
+  attrRefId              String? // attrSource=prescription 时的 prescriptionId
+  snapshotJson           Json? // 下单时的套餐/SKU 条款快照（P1：发放以此为准，防「下单后改价/删配置」漂移；无快照的历史单回退读当前配置）
+  clientRequestId        String? // 客户端一次购买意图的幂等键；同用户重试返回原订单
+  quoteFingerprint       String? // 用户确认的报价指纹；下单事务内重算并核对
+  termsHash              String? // 下单时完整商业条款哈希，供权益账本与退款追溯
+  payMode                String    @default("jsapi") // jsapi | contract_initial | papay_recurring
   subscriptionContractId String? // 自动续费协议（初次签约单/周期扣款单）
-  billingPeriodKey String? // 周期扣款幂等键（本次续费前的权益到期时间）
-  billingAttempt   Int? // 同一周期最多 2 次，符合微信自动续费限频
-  refundId         String? // 微信退款单号（out_refund_no）
-  refundStatus     String? // refund_requested | refund_processing | refunded | refund_closed | refund_abnormal
-  refundUpdatedAt  DateTime?
-  refundRawJson    Json?
-  refundedAt       DateTime? // 退款完成时间 = 退款幂等终态锚点
-  refundReason     String? // 退款原因（运营填写，进审计）
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  billingPeriodKey       String? // 周期扣款幂等键（本次续费前的权益到期时间）
+  billingAttempt         Int? // 同一周期最多 2 次，符合微信自动续费限频
+  refundId               String? // 微信退款单号（out_refund_no）
+  refundStatus           String? // refund_requested | refund_processing | refunded | refund_closed | refund_abnormal
+  refundUpdatedAt        DateTime?
+  refundRawJson          Json?
+  refundedAt             DateTime? // 退款完成时间 = 退款幂等终态锚点
+  refundReason           String? // 退款原因（运营填写，进审计）
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
   @@unique([userId, clientRequestId])
   @@unique([subscriptionContractId, billingPeriodKey, billingAttempt])
@@ -818,13 +975,14 @@ model SkuEntitlement {
 
 /// 算力账户流水
 model CreditLedger {
-  id        String   @id @default(cuid())
-  tenantId  String
-  userId    String
-  delta     Int // 正充值 / 负消耗
-  reason    String
-  balance   Int
-  createdAt DateTime @default(now())
+  id             String   @id @default(cuid())
+  tenantId       String
+  userId         String
+  delta          Int // 正充值 / 负消耗
+  reason         String
+  balance        Int
+  idempotencyKey String?  @unique // 跨 worker/重启的 reserve/refund 唯一键；旧流水为空
+  createdAt      DateTime @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id])
   user   User   @relation(fields: [userId], references: [id])

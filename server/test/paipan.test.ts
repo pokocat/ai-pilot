@@ -205,3 +205,27 @@ test('落库：每用户一张命盘（重排覆盖），loadChart 取回一致'
   assert.equal(loaded?.pattern.name, first.pattern.name);
   assert.equal(loaded?.hourKnown, false);
 });
+
+test('v3 升级不静默覆盖存量 v2 快照；用户主动重排才写 v3', async () => {
+  const token = await login(uniquePhone(), '命盘版本用户');
+  const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
+  const legacy = { ...computeChart(KNOWN, 2026), engineVersion: 'paipan-v2' };
+  await prisma.natalChart.create({
+    data: {
+      tenantId: user.tenantId,
+      userId: user.id,
+      engineVersion: 'paipan-v2',
+      gender: KNOWN.gender,
+      calendar: KNOWN.calendar,
+      birthDate: '1988-03-15',
+      birthHour: KNOWN.hour,
+      birthMinute: KNOWN.minute,
+      trueSolarApplied: false,
+      chartJson: legacy,
+    },
+  });
+
+  assert.equal((await loadChart(user.id))?.engineVersion, 'paipan-v2', '读取存量盘不得自动升级');
+  await computeAndStoreChart({ tenantId: user.tenantId, userId: user.id, input: KNOWN, targetYear: 2026 });
+  assert.equal((await loadChart(user.id))?.engineVersion, 'paipan-v3', '用户主动重排才升级');
+});

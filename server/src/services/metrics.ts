@@ -50,6 +50,7 @@ class LabeledCounter {
     }
     s.value += v;
   }
+  ensure(labels: LabelValues): void { this.inc(labels, 0); }
   renderInto(ms: Metric[]): void {
     const m = metric(this.name, this.help, 'counter');
     for (const s of this.series.values()) m.samples.push(fmt(this.name, s.value, s.labels));
@@ -80,6 +81,12 @@ class LabeledHistogram {
     for (let i = 0; i < this.buckets.length; i++) if (value <= this.buckets[i]) s.counts[i]++;
     s.sum += value;
     s.count++;
+  }
+  ensure(labels: LabelValues): void {
+    const key = seriesKey(labels);
+    if (!this.series.has(key)) {
+      this.series.set(key, { labels, counts: this.buckets.map(() => 0), sum: 0, count: 0 });
+    }
   }
   renderInto(ms: Metric[]): void {
     if (!this.series.size) return;
@@ -210,28 +217,37 @@ export function noteOutputTruncated(provider: string, resolved: 'continued' | 'g
 // 谁都成功了但首字要等 40 秒、或者逐字流其实没在流，靠 llm_calls_total 是看不出来的。
 
 // 流式空闲看门狗触发：上游发完响应头就装死（phase=first_event）或中途静默（phase=mid_stream）。
+// had_text 指这轮是否已经向用户下发可见正文；只有 yes 才应期待 partial_kept，thinking/ping 不算正文。
 // >0 就该看上游——这不是「慢」，是「不发了」。
-const chatStreamStall = new LabeledCounter('junshi_chat_stream_stall_total', '流式空闲看门狗触发次数（phase=first_event 响应头后无事件 / mid_stream 中途静默）');
-export function noteChatStreamStall(provider: string, phase: 'first_event' | 'mid_stream'): void {
-  chatStreamStall.inc({ provider, phase });
+const chatStreamStall = new LabeledCounter('junshi_chat_stream_stall_total', '流式空闲看门狗触发次数（phase=first_event|mid_stream，had_text=yes 表示已有可见正文）');
+export function noteChatStreamStall(provider: string, phase: 'first_event' | 'mid_stream', hadText = false): void {
+  chatStreamStall.inc({ provider, phase, had_text: hadText ? 'yes' : 'no' });
 }
 
 // 对话走了非流式（用户看到的是「完整结果再假分块」，没有真逐字手感）。
-// reason=tools 配了技能 / dify / mock / stream_failed 建流失败回落 / sync 端上直接打 /generate-sync。
+// reason=tools 配了技能 / dify / mock / no_key 智能体无可用 key / stream_failed 建流失败直降 mock /
+// sync 端上直接打 /generate-sync。
 // stream_failed 与 sync 连续升高正是 2026-08-04「连续 60s 超时」的前置信号。
 const chatNonStream = new LabeledCounter('junshi_chat_nonstream_total', '对话走非流式的次数（reason=tools|dify|mock|stream_failed|sync）');
-export function noteChatNonStream(reason: 'tools' | 'dify' | 'mock' | 'stream_failed' | 'sync'): void {
+export type ChatNonStreamReason = 'tools' | 'dify' | 'mock' | 'no_key' | 'stream_failed' | 'sync';
+export function noteChatNonStream(reason: ChatNonStreamReason): void {
   chatNonStream.inc({ reason });
 }
 
 // 首字延迟：用户按下发送到看见第一个字。只统计原生流式（非流式没有「首字」这个概念）。
 const chatFirstToken = new LabeledHistogram(
   'junshi_chat_first_token_seconds',
-  '流式对话首字延迟（发起到第一个 delta；只统计原生流式）',
+  '用户首字延迟（GenerationJob 接单到第一个可见 delta；只统计原生流式）',
   [0.5, 1, 2, 3, 5, 8, 12, 20, 30, 45, 60, 90],
 );
-export function noteChatFirstToken(provider: string, seconds: number): void {
-  chatFirstToken.observe({ provider }, seconds);
+const chatProviderFirstToken = new LabeledHistogram(
+  'junshi_chat_provider_first_token_seconds',
+  'provider 段首字延迟（开始建流到第一个可见 delta，不含接单、上下文与排队）',
+  [0.5, 1, 2, 3, 5, 8, 12, 20, 30, 45, 60, 90],
+);
+export function noteChatFirstToken(provider: string, userSeconds: number, providerSeconds = userSeconds): void {
+  chatFirstToken.observe({ provider }, userSeconds);
+  chatProviderFirstToken.observe({ provider }, providerSeconds);
 }
 
 // 已下发正文被保全的次数：撞上限或流中途失败时，没把用户读过的字换成错误气泡。
@@ -247,6 +263,56 @@ export function noteChatPartialKept(provider: string, cause: 'truncated' | 'stre
 // outcome=recovered 抽到了选项；miss=抽了但判定没有真问题（修辞性反问）。两者相加＝协议漏给的总次数。
 const asksRecovered = new LabeledCounter('junshi_chat_asks_recovered_total', '提问选项兜底抽取次数（outcome=recovered 救回 / miss 判定无待答问题）');
 export function noteAsksRecovered(outcome: 'recovered' | 'miss'): void { asksRecovered.inc({ outcome }); }
+
+// GenerationJob 生命周期：结果、分段时长、恢复接管与估算结算。用于区分“模型慢”与“排队/收尾慢”。
+const chatGenerations = new LabeledCounter('junshi_chat_generation_total', '持久化对话生成任务终态数（result=completed|truncated|failed|cancelled）');
+const chatGenerationDuration = new LabeledHistogram(
+  'junshi_chat_generation_duration_seconds',
+  '持久化对话生成任务分段时长（phase=queue|provider|finalize|job）',
+  [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 180, 300, 600],
+);
+const chatGenerationRecovered = new LabeledCounter('junshi_chat_generation_recovered_total', 'GenerationJob 租约过期后被新 worker 接管的任务数');
+const chatUsageEstimated = new LabeledCounter('junshi_chat_usage_estimated_total', '对话任务使用本地估算用量结算的次数（provider=unknown 代表 attempt 未取得来源）');
+
+export function noteChatGenerationFinalized(args: {
+  result: 'completed' | 'truncated' | 'failed' | 'cancelled';
+  queueSeconds: number;
+  providerSeconds: number;
+  finalizeSeconds: number;
+  jobSeconds: number;
+  recovered: boolean;
+  usageSource?: 'provider' | 'estimated' | 'mixed';
+  provider?: string | null;
+}): void {
+  chatGenerations.inc({ result: args.result });
+  chatGenerationDuration.observe({ phase: 'queue' }, args.queueSeconds);
+  chatGenerationDuration.observe({ phase: 'provider' }, args.providerSeconds);
+  chatGenerationDuration.observe({ phase: 'finalize' }, args.finalizeSeconds);
+  chatGenerationDuration.observe({ phase: 'job' }, args.jobSeconds);
+  if (args.recovered) chatGenerationRecovered.inc({});
+  if (args.usageSource && args.usageSource !== 'provider') chatUsageEstimated.inc({ provider: args.provider || 'unknown' });
+}
+
+/** 封闭标签集必须从 0 暴露。否则新序列第一次 scrape 就是 1，increase() 没有 0→1 基线，会漏首个事故。 */
+function seedClosedMetricSeries(): void {
+  for (const provider of ['claude', 'openai']) {
+    for (const resolved of ['continued', 'given_up']) outputTruncated.ensure({ provider, resolved });
+    for (const phase of ['first_event', 'mid_stream']) {
+      for (const hadText of ['no', 'yes']) chatStreamStall.ensure({ provider, phase, had_text: hadText });
+    }
+    for (const cause of ['truncated', 'stream_error']) chatPartialKept.ensure({ provider, cause });
+    chatFirstToken.ensure({ provider });
+    chatProviderFirstToken.ensure({ provider });
+  }
+  for (const reason of ['tools', 'dify', 'mock', 'no_key', 'stream_failed', 'sync']) chatNonStream.ensure({ reason });
+  for (const outcome of ['recovered', 'miss']) asksRecovered.ensure({ outcome });
+  for (const result of ['completed', 'truncated', 'failed', 'cancelled']) chatGenerations.ensure({ result });
+  for (const phase of ['queue', 'provider', 'finalize', 'job']) chatGenerationDuration.ensure({ phase });
+  chatGenerationRecovered.ensure({});
+  for (const provider of ['claude', 'openai', 'dify', 'unknown']) chatUsageEstimated.ensure({ provider });
+}
+
+seedClosedMetricSeries();
 
 /* ──────────────── 业务事件 ──────────────── */
 
@@ -503,8 +569,13 @@ export async function renderMetrics(): Promise<string> {
   chatStreamStall.renderInto(ms);
   chatNonStream.renderInto(ms);
   chatFirstToken.renderInto(ms);
+  chatProviderFirstToken.renderInto(ms);
   chatPartialKept.renderInto(ms);
   asksRecovered.renderInto(ms);
+  chatGenerations.renderInto(ms);
+  chatGenerationDuration.renderInto(ms);
+  chatGenerationRecovered.renderInto(ms);
+  chatUsageEstimated.renderInto(ms);
 
   /* —— 业务事件 —— */
   registrations.renderInto(ms);
@@ -631,11 +702,13 @@ export function __resetMetrics(): void {
   httpDuration.reset(); httpRouteResponses.reset();
   llmCalls.reset(); llmCallDuration.reset(); llmTokens.reset(); llmCost.reset();
   genDegraded.reset(); outputTruncated.reset(); asksRecovered.reset();
-  chatStreamStall.reset(); chatNonStream.reset(); chatFirstToken.reset(); chatPartialKept.reset();
+  chatStreamStall.reset(); chatNonStream.reset(); chatFirstToken.reset(); chatProviderFirstToken.reset(); chatPartialKept.reset();
+  chatGenerations.reset(); chatGenerationDuration.reset(); chatGenerationRecovered.reset(); chatUsageEstimated.reset();
   registrations.reset(); moderationChecks.reset(); creditsFlow.reset(); knownCreditReasons.clear(); planGateBlocked.reset();
   creativeJobs.reset(); creativeFailures.reset(); creativeEngines.reset();
   payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset(); payMockEvents.reset();
   alertForwards.reset();
   paySweep = { scanned: 0, applied: 0, failed: 0, closed: 0, runs: 0 };
   stuckCache = { at: 0, paidUnapplied: 0, createdStale: 0 };
+  seedClosedMetricSeries();
 }

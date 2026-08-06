@@ -12,7 +12,7 @@ import type {
   KnowledgeDocRow, KnowledgeDetail, AnalyzeResult,
   Plan, PlanOptionsResult, PlanQuote, PlanPurchaseResult, AgentPurchaseResult, AliasSuggestionResult, MyCreditsView, SmsSendResult,
   BindPhoneResult, WechatOrderResult, WechatSubscribeTemplatesResult, WechatSubscribeChoice, WechatSubscribeRecordResult,
-  FateCardContent, MemoryLibraryView, DossierView, DossierReport,
+  FateCardContent, DailyBattleReportView, MemoryLibraryView, DossierView, DossierReport,
   DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats,
   QuickScanRequest, QuickScanResult, JourneyView, PrescriptionListView, BrandKitView,
   SkuView, SkuOrderResult, PayOrderStatus, PayOrderListResult, PayRepayResult, PayMockPayResult, BattleForce, BattleCommitResult,
@@ -22,6 +22,7 @@ import type {
   CreativeStatusResult, PosterBriefDraft, CreativeUploadResult, CreativeJobView,
   CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
   CreativePosterListResult,
+  GenerationView,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -35,6 +36,7 @@ export type { MemoryCandidate, MemoryLibraryView, MemoryLibraryGroup, MemoryLibr
 export type { DossierView, DossierReport, DossierSection, DossierBlock } from '../../../shared/contracts';
 export type { DecisionLedger, DecisionView, DecisionStats, ProphecyLedger, ProphecyView, ProphecyStats } from '../../../shared/contracts';
 export type { FateCardContent } from '../../../shared/contracts';
+export type { DailyBattleReportView, DailyBattleOrder } from '../../../shared/contracts';
 export type { QuickScanRequest, QuickScanResult } from '../../../shared/contracts';
 export type { JourneyView, JourneyStage, JourneyNextStep } from '../../../shared/contracts';
 export type { PrescriptionView, PrescriptionListView, DeliverablePrescription } from '../../../shared/contracts';
@@ -162,7 +164,7 @@ export interface MpPalace {
   decadal: { start: number; end: number } | null;   // 大限虚岁区间
 }
 export interface MingpanReport {
-  engineVersion: string;               // 'paipan-v2'
+  engineVersion: string;               // 当前新盘为 'paipan-v3'；存量快照可为 v1/v2
   base: {
     solarDate: string; lunarDate: string; gender: '男' | '女';
     hourKnown: boolean; hourLabel: string | null;  // 时辰名（如「巳时」「早子时」「晚子时」）；缺时辰为 null
@@ -294,6 +296,8 @@ export async function request<T>(path: string, method: keyof typeof Taro.request
       method: method as any,
       data,
       header: { 'Content-Type': 'application/json', 'x-user-id': getToken() },
+      // 微信默认约 60s；同步生成只是旧环境兜底，必须至少覆盖服务端 150s 对话预算。
+      ...(path.startsWith('/generate-sync') ? { timeout: 180_000 } : {}),
     });
   } catch (e) {
     const errMsg = String((e as any)?.errMsg || (e as any)?.message || '');
@@ -568,10 +572,10 @@ export const api = {
     useMockApi() ? mock.bizMetricSeries(weeks) : request<{ items: BizMetricWeek[] }>(`/biz-metrics?weeks=${weeks}`),
   saveBizMetrics: (weekStart: string, metrics: Record<string, number>) =>
     useMockApi() ? mock.saveBizMetrics(weekStart, metrics) : request<{ ok: boolean }>(`/biz-metrics/${weekStart}`, 'PUT', { metrics }),
-  // publishCard（POST /cards/:kind → 可分享网页链接）已从前端移除：
-  // 小程序里裸链给不出去（内部打不开、朋友圈不接受粘贴），而那条 /api/r/:id 公开页无鉴权无有效期
-  // 却渲染了经营原始数字。每日战报与天时日历一律改为端上 canvas 出图（图片交付）：
-  // services/dailyBattleCard.ts / packages/work/calendar。服务端端点保留给运营内部用。
+  // 每日战报：鉴权内嵌页实时取当前用户账本，不生成 /api/r/:id 公开链接。
+  dailyBattleReport: () =>
+    useMockApi() ? mock.dailyBattleReport() : request<DailyBattleReportView>('/cards/daily'),
+  // 其他公开卡的旧 publishCard 调用已从前端移除；天时日历仍在端上 canvas 出图。
   // 送你一卦「天命速写」预览（合规打磨·P-4）：现算即返、不落库、无公开链接；前端 canvas 画卡导出图片分享
   fateCardPreview: (body: { friendName: string; friendBazi: BaziBody; consent: boolean }) =>
     useMockApi() ? mock.fateCardPreview(body) : request<FateCardContent>('/cards/fate/preview', 'POST', body),
@@ -582,6 +586,8 @@ export const api = {
     useMockApi() ? mock.deleteSession(id) : request(`/sessions/${id}`, 'DELETE'),
   generate: (body: GenRequest) =>
     useMockApi() ? mock.generate(body) : request<GenResult>('/generate-sync', 'POST', body),
+  generation: (id: string) => request<GenerationView>(`/generations/${id}`),
+  cancelGeneration: (id: string) => request<GenerationView>(`/generations/${id}/cancel`, 'POST', {}),
   library: () => (useMockApi() ? mock.library() : request<LibItem[]>('/library')),
   saveToLibrary: (body: SaveLibRequest) =>
     useMockApi() ? mock.saveToLibrary(body) : request<{ id: string; at: string; reportId?: string; version?: number }>('/library', 'POST', body),

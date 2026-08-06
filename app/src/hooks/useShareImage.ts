@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Taro from '@tarojs/taro';
 import { IS_WEAPP } from '../services/config';
 
-// 出图分享的统一管道（送你一卦 / 天时日历 / 方案库 / 成果卡 / 每日战报卡共用）。
+// 出图分享的统一管道（送你一卦 / 天时日历 / 方案库 / 成果卡共用）。
 //
 // 为什么要收敛：这五处此前各写各的「守卫 → showLoading → 出图 → 预览 → catch toast」，
 // 其中只有两处做了 IS_WEAPP 守卫。缺守卫的两处（gift / calendar）在 H5 下必然 reject——

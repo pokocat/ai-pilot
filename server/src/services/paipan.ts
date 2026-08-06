@@ -1,9 +1,9 @@
-// 排盘引擎 v1（M1 PR-1）：确定性命理/历法计算 —— 干支历用 lunar-typescript，紫微用 iztro。
+// 排盘引擎 v3：确定性命理/历法计算 —— 干支历用 lunar-typescript，紫微用 iztro。
 // 铁律：算 → 存 → 拼指令，AI 只负责行文。本文件产出的所有结论都是可复算的（同输入同输出），
 // 引擎带版本号（升级后可按版本批量复算）；启发式规则（身强弱/喜用/攻守）在 basis 字段写明依据，
 // 属 v1 简化口径，后续版本细化时以版本号区分，不悄悄改变历史命盘。
 //
-// 引擎边界（v2）：
+// 引擎边界（v3）：
 // - 真太阳时：经度平太阳时（(经度-120)×4 分钟）+ 均时差（Spencer 级数，见 equationOfTimeMinutes），
 //   合成后误差降到分钟级；仅在有经度时叠加（无经度不校正）。
 // - 晚子时流派：EightChar.setSect(2)——晚子（23:00-23:59）日柱算「当天」（大陆主流排盘软件口径），
@@ -21,10 +21,10 @@ import {
   type SiZhu, type Tiangan, type Dizhi, type WangShuaiVerdict,
 } from './baziEnrich.js';
 
-// v2：真太阳时补均时差 + 晚子时 setSect(2) + 旺衰/格局/调候加权（baziEnrich）。
-// 版本号 bump 使新排盘走 v2；存量命盘 chartJson 仍是 v1 快照，loadChart 不重算——
-// 用户下次编辑生辰（PUT /profile/bazi）时才覆盖为 v2（懒重算，无迁移脚本）。
-export const PAIPAN_ENGINE_VERSION = 'paipan-v2';
+// v3 固化此前已上线但未正确升版的三处输出变化：城市匹配、真太阳时 UTC 进位、
+// trueSolarApplied 判据；并修复出生地文本含两个城市时被城市表声明顺序误选的问题。
+// 存量 v1/v2 chartJson 快照由 loadChart 原样读取，不静默重算；只有用户主动重排才写 v3。
+export const PAIPAN_ENGINE_VERSION = 'paipan-v3';
 
 export interface PaipanInput {
   calendar: 'solar' | 'lunar';
@@ -181,7 +181,7 @@ function resolveSolar(input: PaipanInput): { solar: Solar; trueSolarApplied: boo
   } else {
     solar = Solar.fromYmdHms(input.year, input.month, input.day, hour, minute, 0);
   }
-  // 真太阳时（v2）：中国标准时按东经 120° 定，经度平太阳时（每偏 1° 校正 4 分钟）+ 均时差（EoT）。
+  // 真太阳时（v3）：中国标准时按东经 120° 定，经度平太阳时（每偏 1° 校正 4 分钟）+ 均时差（EoT）。
   // 只在有经度时叠加（无经度不校正，与既有口径一致）。EoT 按校正前的公历日取（同日内差异可忽略）。
   let trueSolarApplied = false;
   if (hourKnown && typeof input.longitude === 'number' && input.longitude > 70 && input.longitude < 140) {

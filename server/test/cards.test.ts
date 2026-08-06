@@ -4,7 +4,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone, deliverable } from './helpers.ts';
 import { prisma } from '../src/db.ts';
-import { renderDailyCard, fateCardContent, renderCalendarCard } from '../src/services/cardHtml.ts';
+import { fateCardContent, renderCalendarCard } from '../src/services/cardHtml.ts';
 import { computeChart } from '../src/services/paipan.ts';
 import { loadStrategicProfile, strategicBlock } from '../src/services/strategicProfile.ts';
 
@@ -25,33 +25,36 @@ const PLAN = deliverable('破局方案', [
 
 test('每日战报卡：军令完成/对齐率/回填/段位/连续天数全部来自真实账本', async () => {
   const token = await login(uniquePhone(), '战报用户');
-  const user = await prisma.user.findFirstOrThrow({ where: { id: token } });
   await api('POST', '/api/casefile/accept', { token, body: { deliverable: PLAN, agentName: '军师' } });
   const cf = await api('GET', '/api/casefile', { token });
   await api('PATCH', `/api/casefile/orders/${cf.body.casefile.orders[0].id}`, { token, body: { done: true } });
   await api('PUT', '/api/casefile/backfill', { token, body: { leads: 8, consults: 2, deals: 1 } });
   await api('POST', '/api/casefile/review', { token, body: {} });
 
-  const html = await renderDailyCard({ tenantId: user.tenantId, userId: user.id });
-  assert.match(html, /每日战报/);
-  assert.match(html, /1\/2/, '军令完成 1/2');
-  assert.match(html, /100%/, '对齐率（认可拆出的军令全对齐）');
-  assert.match(html, /已回填/);
-  assert.match(html, /连续复盘第 1 天/);
-  assert.match(html, /重做案例证明/);
-  assert.match(html, /军师参谋部/);
-  assert.doesNotMatch(html, /米诺|Mino/i, '品牌红线');
+  const report = await api('GET', '/api/cards/daily', { token });
+  assert.equal(report.status, 200);
+  assert.equal(report.body.done, 1);
+  assert.equal(report.body.total, 2);
+  assert.equal(report.body.alignRate, 100, '认可方案拆出的军令全对齐');
+  assert.deepEqual(report.body.backfill, { leads: 8, consults: 2, deals: 1 });
+  assert.equal(report.body.streak, 1);
+  assert.ok(report.body.orders.some((order: { text: string }) => order.text === '重做案例证明'));
 });
 
-test('卡片路由：daily 返回 htmlUrl（后端 /api/r/:id 兜底可打开）；未知类型 400', async () => {
+test('卡片路由：daily 仅允许鉴权 GET 内嵌取数，旧 POST 不再生成公开页', async () => {
   const token = await login(uniquePhone(), '路由用户');
-  const r = await api('POST', '/api/cards/daily', { token, body: {} });
-  assert.equal(r.status, 200);
-  assert.ok(r.body.htmlUrl, '应返回链接');
+  const before = await prisma.reportHtml.count({ where: { title: '每日战报' } });
+  const get = await api('GET', '/api/cards/daily', { token });
+  assert.equal(get.status, 200);
+  assert.equal(get.body.casefileTitle, null);
+  const unauth = await api('GET', '/api/cards/daily', {});
+  assert.equal(unauth.status, 401);
+  const legacy = await api('POST', '/api/cards/daily', { token, body: {} });
+  assert.equal(legacy.status, 410);
+  assert.equal(legacy.body.code, 'DAILY_REPORT_EMBEDDED_ONLY');
+  assert.equal(await prisma.reportHtml.count({ where: { title: '每日战报' } }), before, '不得创建公开页');
   const bad = await api('POST', '/api/cards/xxx', { token, body: {} });
   assert.equal(bad.status, 400);
-  // 留底行存在
-  assert.ok(await prisma.reportHtml.findFirst({ where: { title: '每日战报' } }));
 });
 
 test('天时日历卡：无命盘 400；有命盘含 12 个月攻守与拐点标注', async () => {
@@ -68,7 +71,7 @@ test('天时日历卡：无命盘 400；有命盘含 12 个月攻守与拐点标
   const html = renderCalendarCard(chart, '测试主理人', '守得寒冬三尺雪');
   for (let m = 1; m <= 12; m++) assert.match(html, new RegExp(`${m}月`));
   assert.match(html, /守得寒冬三尺雪/);
-  assert.match(html, /paipan-v2/);
+  assert.match(html, /paipan-v3/);
   assert.doesNotMatch(html, /米诺|Mino/i);
 });
 
@@ -116,17 +119,14 @@ test('叙事线/谶语存档：PUT 往返 + 注入块带「保持前后一致」
   assert.match(block!, /年度谶语：「蛰龙勿用待秋风」/);
 });
 
-test('卡片链接走自有域名（微信可直接打开）+ 小程序码注入降级安全', async () => {
+test('历史每日战报公开页统一失效 + 小程序码注入降级安全', async () => {
   const token = await login(uniquePhone(), '域名用户');
-  const r = await api('POST', '/api/cards/daily', { token, body: {} });
-  assert.equal(r.status, 200);
-  // 品牌域名链接（不是 OSS）：{PUBLIC_BASE_URL}/api/r/:id，微信聊天里点开即达
-  assert.match(r.body.htmlUrl, /\/api\/r\/[a-z0-9]+$/i, '卡片应返回自有域名 /api/r/ 链接');
-  assert.ok(!/aliyuncs\.com/.test(r.body.htmlUrl), '卡片不走 OSS 域名');
-
-  // 测试环境铁律：不打微信真实接口 → 无小程序码块
-  const row = await prisma.reportHtml.findFirst({ orderBy: { createdAt: 'desc' } });
-  assert.ok(row && !row.html.includes('长按识别小程序码'), '测试环境不应产生小程序码');
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: token } });
+  const legacy = await prisma.reportHtml.create({ data: { tenantId: user.tenantId, title: '每日战报', html: '<html><body>经营隐私</body></html>' } });
+  const page = await api('GET', `/api/r/${legacy.id}`, {});
+  assert.equal(page.status, 404, '历史 daily 公开链接必须立即失效');
+  const pdf = await api('GET', `/api/r/${legacy.id}/pdf`, {});
+  assert.equal(pdf.status, 404, '历史 daily PDF 也必须失效');
 
   // 注入器行为：有码 → 页脚出现长按识别块且结构完整；无码 → 原样
   const { withMiniCode } = await import('../src/services/cardHtml.ts');

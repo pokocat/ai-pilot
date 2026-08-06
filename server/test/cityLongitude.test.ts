@@ -29,6 +29,18 @@ test('地址串只按「输入含有城市名」正向匹配，取最长命中',
   assert.deepEqual(matchCity('长沙'), { city: '长沙', longitude: 113.0 });
 });
 
+test('v3：地址含两个城市时按文本中的第一个城市，不受城市表声明顺序影响', () => {
+  assert.deepEqual(matchCity('浙江杭州，现居上海'), { city: '杭州', longitude: 120.2 });
+  assert.deepEqual(matchCity('四川成都户籍，后来迁到深圳'), { city: '成都', longitude: 104.1 });
+});
+
+test('v3：完整行政区后缀先整体清理，道路名不误当出生城市', () => {
+  assert.deepEqual(matchCity('广西壮族自治区南宁市'), { city: '南宁', longitude: 108.4 });
+  assert.deepEqual(matchCity('香港特别行政区'), { city: '香港', longitude: 114.2 });
+  assert.equal(matchCity('南京路'), undefined);
+  assert.deepEqual(matchCity('上海市南京路'), { city: '上海', longitude: 121.5 });
+});
+
 test('表外城市静默不命中（不校正好过乱校正）', () => {
   for (const s of ['三亚', '昆山', '南通', '保定', '安庆']) {
     assert.equal(matchCity(s), undefined, `表外「${s}」应返回 undefined`);

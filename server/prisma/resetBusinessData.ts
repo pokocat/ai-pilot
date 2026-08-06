@@ -32,6 +32,10 @@ export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
   await prisma.reviewLog.deleteMany();
   await prisma.prophecyLog.deleteMany();
   await prisma.userProgress.deleteMany();
+  // 持久生成：effect/attempt 依赖 job，job 又唯一引用 user/result Message，必须先于 message/session 清。
+  await prisma.generationEffect.deleteMany();
+  await prisma.generationAttempt.deleteMany();
+  await prisma.generationJob.deleteMany();
   await prisma.message.deleteMany();
   await prisma.reportVersion.deleteMany();
   await prisma.reportDoc.deleteMany();

@@ -7,18 +7,24 @@ groups:
     rules:
       - alert: JunshiLlm429RateHigh
         expr: >
-          sum(rate(junshi_llm_upstream_429_total[10m]))
-            / clamp_min(sum(rate(junshi_llm_granted_total[10m])), 1e-9)
-          >= scalar(junshi_alert_config{key="llm_429_warn_permille"}) / 1000
+          (
+            sum(rate(junshi_llm_upstream_429_total[10m]))
+              / clamp_min(sum(rate(junshi_llm_granted_total[10m])), 1e-9)
+            >= scalar(junshi_alert_config{key="llm_429_warn_permille"}) / 1000
+          )
+          and on() sum(increase(junshi_llm_granted_total[10m])) >= 20
         for: 5m
         labels: { severity: warning }
         annotations:
           summary: "上游 429 率超过预警线（车道维度见看板「LLM 网关」；阈值后台可调）"
       - alert: JunshiLlm429RateCritical
         expr: >
-          sum(rate(junshi_llm_upstream_429_total[10m]))
-            / clamp_min(sum(rate(junshi_llm_granted_total[10m])), 1e-9)
-          >= scalar(junshi_alert_config{key="llm_429_crit_permille"}) / 1000
+          (
+            sum(rate(junshi_llm_upstream_429_total[10m]))
+              / clamp_min(sum(rate(junshi_llm_granted_total[10m])), 1e-9)
+            >= scalar(junshi_alert_config{key="llm_429_crit_permille"}) / 1000
+          )
+          and on() sum(increase(junshi_llm_granted_total[10m])) >= 20
         for: 5m
         labels: { severity: critical }
         annotations:
@@ -124,16 +130,42 @@ groups:
         annotations:
           summary: "流式对话首字延迟 P95 {{ $value | printf \"%.1f\" }}s 超线——上游排队或思考预算过大"
 
-      # 安全网健康度：stall 在涨，但「已下发正文被保全」却是 0 —— 说明那张网破了，
-      # 用户读过的内容又在被换成错误气泡。这条是防回归的，不是查上游的。
-      #
-      # 两侧都必须先 sum() 成无标签、且用 `and on()`：PromQL 的 and 要求两侧标签集匹配，
-      # 左边带 {provider,phase} 而右边无标签的话，这条规则永远不会触发（静默失效）。
+      # 安全网健康度：只看 had_text=yes 的 stall；首事件卡死、只有 thinking/ping 的中途卡死
+      # 本来就没有正文可保全，不能据此报 critical。两侧按 provider 对齐，要求同 provider 的
+      # stream_error 保全为 0 才报警。
       - alert: JunshiChatPartialKeptBroken
         expr: >
-          sum(increase(junshi_chat_stream_stall_total[1h])) > 0
-          and on() sum(increase(junshi_chat_partial_kept_total[1h])) == 0
+          sum by(provider) (increase(junshi_chat_stream_stall_total{had_text="yes"}[1h])) > 0
+          and on(provider)
+          sum by(provider) (increase(junshi_chat_partial_kept_total{cause="stream_error"}[1h])) == 0
         for: 5m
         labels: { severity: critical }
         annotations:
           summary: "发生了流卡死但一次「残文保全」都没记到——已下发正文可能又在被丢弃，查 provider 的 sink 链路"
+
+      # 持久生成任务的结果面：有一定样本后失败率 >10% 才报，
+      # 避免低流量时单个用户取消/网络波动放大成 100% 假警。
+      - alert: JunshiChatGenerationFailureRateHigh
+        expr: >
+          (
+            sum(increase(junshi_chat_generation_total{result="failed"}[15m]))
+              / clamp_min(sum(increase(junshi_chat_generation_total[15m])), 1)
+            > 0.1
+          )
+          and on() sum(increase(junshi_chat_generation_total[15m])) >= 5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "持久对话生成失败率超过 10%——查 GenerationJob 终态、provider 错误与结算记录"
+
+      - alert: JunshiChatGenerationRecovered
+        expr: increase(junshi_chat_generation_recovered_total[15m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "GenerationJob 发生租约过期接管——检查 API 进程重启/卡死，旧 attempt 已按估算消耗封账"
+
+      - alert: JunshiChatUsageEstimated
+        expr: sum(increase(junshi_chat_usage_estimated_total[15m])) > 0
+        labels: { severity: info }
+        annotations:
+          summary: "对话生成出现估算用量结算——provider 未回传 usage 或任务经过故障恢复"

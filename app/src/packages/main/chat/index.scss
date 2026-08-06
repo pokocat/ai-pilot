@@ -392,6 +392,7 @@
 .paste-card.dup { background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent-glow), var(--shadow-card); }
 /* 归卷在途：脊先不上色（未成卷不冒充已成），压低阴影表示还没落地。不用虚线边——3px 直角上的虚线只会显得潦草 */
 .paste-card.pending { border-left-color: var(--line-strong); box-shadow: var(--shadow-sm); }
+.paste-card.failed { border-left-color: var(--danger); }
 /* 内核自带一圈：--accent-soft 在白底只有 1.18:1，没这圈就是「图标浮在虚空里」（改前实测 1.04:1，更糟） */
 .paste-ic {
   flex-shrink: 0; width: 28px; height: 28px; border-radius: 3px;
@@ -408,6 +409,9 @@
   /* 呼吸而不是转圈：在途状态要能被余光察觉，又不该在输入区上方抢注意力 */
   animation: paste-breathe 1.5s cubic-bezier(.4, 0, .6, 1) infinite;
 }
+.paste-failed-actions { flex-shrink: 0; display: flex; align-items: center; gap: 9px; }
+.paste-retry, .paste-remove { font-size: 11px; font-weight: 600; padding: 5px 1px; }
+.paste-remove { color: var(--danger); }
 @keyframes paste-breathe {
   0%, 100% { opacity: .55; }
   50% { opacity: 1; }

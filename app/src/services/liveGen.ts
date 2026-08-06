@@ -4,6 +4,7 @@ import { markChatPending, clearChatPending } from './chatPending';
 import { classifyReconcileTick, reportCloseAction, type ReconcileOutcome } from './liveGenCore';
 import type {
   GenRequest, GenResult, ChatReply, Deliverable, DeliverableSection, SessionDetail, SessionMessage,
+  GenerationPhase, GenerationStatus,
 } from '../../../shared/contracts';
 
 // 收尾裁决的纯逻辑在 liveGenCore（可单测）；这里保留 re-export 兼容既有引用（chat/index.tsx）。
@@ -54,8 +55,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // 页面据此做 setMsgs / 滚动 / busy 等副作用。所有方法都应对「当前无对应气泡」保持幂等/安全。
 export interface LiveGenView {
   onSession(sessionId: string): void;
+  onGeneration(data: { generationId: string; phase?: GenerationPhase; status?: GenerationStatus }): void;
   startChat(): void;
   appendToken(text: string): void;
+  replaceToken(text: string): void;
   setChat(reply: ChatReply): void;
   startReport(): void;
   reportBegin(data: { title: string; icon: string; meta: string }): void;
@@ -103,6 +106,9 @@ interface LiveGenEntry {
   agentKey: string;
   userText: string;
   body: GenRequest;
+  generationId?: string;
+  generationPhase?: GenerationPhase;
+  generationStatus?: GenerationStatus;
   buildDeliverable: LiveGenStartParams['buildDeliverable'];
   autoSave: LiveGenStartParams['autoSave'];
   // —— 累计快照 ——
@@ -250,6 +256,18 @@ async function reconcileDisconnect(entry: LiveGenEntry): Promise<ReconcileResult
 
 function makeHandlers(entry: LiveGenEntry): StreamHandlers {
   return {
+    onGeneration: (data) => {
+      entry.generationId = data.generationId;
+      entry.generationPhase = data.phase;
+      entry.generationStatus = data.status;
+      if (data.sessionId) bindSession(entry, data.sessionId);
+      entry.view?.onGeneration(data);
+      // 用户可能在建单响应回来前就点了停止；拿到持久任务 id 后才真正发取消，
+      // 不能只 abort 订阅连接（退出/断网都不等于取消）。
+      if (entry.aborted) {
+        void api.cancelGeneration(data.generationId).finally(() => entry.control.abort());
+      }
+    },
     onSession: (id) => { if (id) { bindSession(entry, id); entry.view?.onSession(id); } },
     onReportStart: () => startReport(entry),
     onChatStart: () => startChat(entry),
@@ -268,11 +286,16 @@ function makeHandlers(entry: LiveGenEntry): StreamHandlers {
       entry.reportFooterData = data;
       entry.view?.reportFooter(data);
     },
-    onToken: (t) => {
+    onToken: (t, replace) => {
       if (entry.kind === 'report') return;
       startChat(entry);
-      entry.text += t;
-      entry.view?.appendToken(t);
+      if (replace) {
+        entry.text = t;
+        entry.view?.replaceToken(t);
+      } else {
+        entry.text += t;
+        entry.view?.appendToken(t);
+      }
     },
     onChat: (reply) => {
       if (entry.kind === 'report') return;
@@ -291,6 +314,7 @@ async function drive(entry: LiveGenEntry) {
   const control: StreamControl = { abort: () => {} };
   entry.control = control;
   let streamOk = false;
+  let syncHandoff = false;
   try {
     streamOk = await generateStream(entry.body, makeHandlers(entry), control);
   } catch {
@@ -312,10 +336,20 @@ async function drive(entry: LiveGenEntry) {
     // 这一步是真正的兜底生成（api.generate 会落库），即便页面已卸载也必须执行，否则用户什么都拿不到。
     try {
       const res = await api.generate(entry.body);
-      entry.kind = res.kind === 'report' ? 'report' : 'chat';
-      entry.messageId = res.messageId;
       if (res.sessionId) bindSession(entry, res.sessionId);
-      entry.view?.fallbackDone(res, entry.userText);
+      if (res.generationId && (res.status === 'queued' || res.status === 'running')) {
+        // 同步兜底复用了同一 clientRequestId，202 表示原 job 仍在跑，不是空结果。
+        // 交给持久任务轮询，禁止清 busy 或渲染“生成失败”。
+        entry.generationId = res.generationId;
+        if (entry.sessionId && entry.view) {
+          syncHandoff = true;
+          entry.view.resumeServerPolling(entry.sessionId);
+        }
+      } else {
+        entry.kind = res.kind === 'report' ? 'report' : 'chat';
+        entry.messageId = res.messageId;
+        entry.view?.fallbackDone(res, entry.userText);
+      }
     } catch (e) {
       const msg = String((e as { message?: string })?.message || '') || '生成失败';
       entry.streamErrored = true;
@@ -339,11 +373,11 @@ async function drive(entry: LiveGenEntry) {
   else if (close === 'interrupt') surfaceError(entry, entry.aborted ? '已停止生成' : '生成连接中断，请稍后回来查看或重试');
 
   // 已把思考态交给页面轮询时不能清 busy——否则页面刚接手就被抹掉，重新卡成「什么都没有」。
-  if (reconciled !== 'handoff') entry.view?.clearBusy();
+  if (reconciled !== 'handoff' && !syncHandoff) entry.view?.clearBusy();
   entry.stage = entry.errorMessage ? 'error' : 'done';
   // 收尾汇合处（done / error / abort / 兜底补发所有路径都经此）：清 chatPending。此后本轮以落库消息为准，
   // 列表页与重进不再据 chatPending 误显「正在思考」。新会话若从未绑定 sessionId 则为 no-op。
-  if (entry.sessionId) clearChatPending(entry.sessionId);
+  if (entry.sessionId && !syncHandoff) clearChatPending(entry.sessionId);
   scheduleDrop(entry);
 }
 
@@ -397,10 +431,13 @@ export function attachLiveGenView(key: string, view: LiveGenView): { active: boo
 }
 
 function replay(entry: LiveGenEntry, view: LiveGenView) {
+  if (entry.generationId) {
+    view.onGeneration({ generationId: entry.generationId, phase: entry.generationPhase, status: entry.generationStatus });
+  }
   // 仅重放「进行中」内容以重建气泡；已 done/error 的对账交给调用方（以落库消息为准），此处不重放终态。
   if (entry.kind === 'chat') {
     view.startChat();
-    if (entry.text) view.appendToken(entry.text);
+    if (entry.text) view.replaceToken(entry.text);
     if (entry.reply) view.setChat(entry.reply);
   } else if (entry.kind === 'report') {
     view.startReport();
@@ -423,7 +460,9 @@ export function stopLiveGen(key: string) {
   const entry = lookup(key);
   if (!entry) return;
   entry.aborted = true;
-  entry.control.abort();
+  if (entry.generationId) {
+    void api.cancelGeneration(entry.generationId).finally(() => entry.control.abort());
+  }
 }
 
 /** 重进对账：确认该轮已落库/无需重放时，丢弃 entry。 */
