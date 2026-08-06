@@ -6,6 +6,14 @@
 
 ## 变更日志
 
+### 2026-08-05 · 修复军令页未定义日期变量导致的运行时白屏，并给小程序构建补类型闸门 · 影响面：app + build
+
+预发真机点击「军令」后路由已切换、相关 `/casefile`/`/me`/`/decisions` 请求也全部 200，但页面没有挂载任何节点。根因是战役卡引用了未定义的 `dateStr`；Taro/Babel 只做转译仍显示 `Compiled successfully`，真机首次渲染才抛 `ReferenceError`。现由 `todayDate` 明确派生月日文案，并新增 `npm run typecheck`：app 单测、weapp/H5 正式构建、生产与预发专用构建均先执行 `tsc --noEmit`，同类未定义变量不再进入预览或上传产物。
+
+### 2026-08-05 · 命盘修改生辰入口与编辑区同位 · 影响面：app（命盘报告）
+
+修复命盘报告里「生辰录错了？修改并重新立盘」入口位于命主档头、编辑表单却渲染在整份长报告页尾的问题。表单现紧跟命主档头展开，并在从档头、真太阳时提示或报告中段补时辰入口进入时自动滚到编辑区；表单字段、原始生辰回填和主动重排 `paipan-v3` 口径不变。
+
 ### 2026-08-05 · 取消 AI 模型凭证存库加密，保留旧密文无停机迁移 · 影响面：server + deployment + docs
 
 按产品决策，`AiSetting` 的对话/Embedding/Rerank API Key 与 `AiModel.apiKey` 新写统一明文存库，不再让真实 AI 运行依赖 `APP_ENCRYPTION_KEY`；运营 API 仍只返回 `hasKey`，不向前端下发明文。新增 `aiCredentialStorage` 作为唯一读写口径：读路径兼容历史 `enc:v1`，写路径遇到旧密文先解开再落明文；新增幂等 `npm run secrets:decrypt-ai`，所有字段先成功解密后才在同一事务写入，错钥/缺钥 fail-closed，不会留下半迁移。

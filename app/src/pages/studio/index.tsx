@@ -131,6 +131,8 @@ export default function Studio() {
   });
 
   const todayDate = today();
+  const [, todayMonth, todayDay] = todayDate.split('-');
+  const dateStr = `${Number(todayMonth)}月${Number(todayDay)}日`;
   const progress = todayProgress(dossier);
   const todayOrders = ordersOf(dossier, todayDate);
   const pendingTodayOrders = pendingOrdersOf(dossier, todayDate);

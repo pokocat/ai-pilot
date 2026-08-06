@@ -152,6 +152,8 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 非 Tab 页：`pages/chat`（对话流 + 渐进式成果卡 + 参谋室协同导轨「派单/回总军师/转成军令/补上下文」+ 成果卡下「就按这个来→存方案库+生成本地案卷军令→去执行」）、`pages/brief`（军师档案详情）、`pages/settings` 留在主包；我的案卷（列表/详情，前台名词=案卷，工程模型仍是 Project）、方案库、方案详情、资料库、数据源绑定、模块市场、送你一卦、军师社群已拆到 `packages/work/*` 分包（`projects`、`project`、`library`、`report`、`knowledge`、`credits`、`bindings`、`market`、`gift`、`community`），由 `pages/profile`、`pages/thinktank` 与 `pages/chat` 预加载。`packages/work/quickscan` 初诊结果 CTA 统一用「继续问策，完善这份判断」进入总军师，不向用户暴露固定对话轮数。完整履历 `packages/work/dossier` 的个人档案/我的页入口必须反馈分包跳转失败和导航锁等待状态；页面读取失败展示可重试状态并走 `handleApiError`，首次无缓存但已有档案线索时直接自动生成，不得被手动按钮的 `ready` 门禁拦截。
 
+命盘报告 `packages/work/mingpan` 的「修改生辰」表单必须紧跟命主档头渲染，并在从档头或报告中段入口展开后自动滚到表单起点；禁止把表单放在八字、紫微、印证和时间轴之后，让用户点击上方入口却去页尾找编辑区。
+
 静态目录数据：`src/data/operatingSystem.ts`（模块市场/Skill 市场/知识分类框架/数据源目录/对话引导，均为能力目录与引导态文案，费用口径 `💎xN`）、`src/data/council.ts`（参谋室常驻军师/派单建议/快速起手式/`ADVISOR_ALIAS` 军师花名：玄衡/观澜/青衍/鸣璋/照微/云枢…）。**这两个文件不得写入用户业务结论**——用户数据一律走 api（会话/报告/知识/项目/`me.understanding`）。
 
 军师拟人头像：`components/AdvisorAvatar`（圆形立绘 + 白描边 + 可选在线点），当前主用立绘资产在 `src/assets/avatars/generated/*-imagegen.jpg`（6 张 376px JPEG ≈306KB，由 imagegen 生成的古代/神话谋略人物商务漫画头像：general=诸葛亮意象、strat=鬼谷子意象、growth=姜子牙意象、ip=文曲星意象、ops=刘伯温意象、org=张良意象；其余智能体按气质就近复用，未映射的按 key 哈希兜底）。旧版雪碧图裁切 `src/assets/avatars/*.jpg` 已删除（未引用即清理，控主包体积）。对话列表行、chat 头部与消息 who 行统一用它，不要再回退成图标色块。
@@ -161,7 +163,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 ### 7.2 关键 UI 约定（踩过的坑，勿回退）
 - **小程序工程约束清单（先读）**：
   - **项目导入与配置**：微信开发者工具只导入 `app/`；`app/project.config.json` 是正式配置，保持 AppID、`miniprogramRoot=dist/`、`libVersion=3.16.2`（真流式 `enableChunked` 目标基础库）、`urlCheck/es6/enhance/postcss/minified` 等正式校验/压缩开启；`app/src/app.config.ts` 保持 `lazyCodeLoading: "requiredComponents"`，且 `app/config/index.ts` 的 weapp webpack 链必须确保 `dist/app.json` 实际写出该字段；本机调试差异放 `app/project.private.config.json`，不要把根目录误生成的 DevTools 配置纳入提交。
-  - **发版构建必须清缓存（2026-07-29 实测白屏）**：`app/config/index.ts` 开了 webpack 持久化缓存（`cache:{enable:true}`，落在 `node_modules/.cache/webpack`，不是 `.cache`）。跨分包共享模块变动后（如 `services/creative.ts` 同时被 `packages/main/chat` 与 `packages/work/poster` 引用），缓存里的旧模块会和新构建的模块图拼在一起，产出**引用了不存在模块 id 的 chunk**；小程序运行时表现为 `TypeError: n[e] is not a function`（`n[e]` = `modules[moduleId]`）→ **整个页面白屏、无 React 报错**，后面跟一条 `Component is not found in path "wx://not-found"`。这类白屏与数据无关，别去查数据形状：先 `rm -rf dist .cache node_modules/.cache` 重建。`build:weapp:server` / `build:weapp:preprod` 已前置 `clean:build` 自动清理（发版构建以正确性优先，不吃增量缓存）；`dev:weapp --watch` 仍保留缓存以便迭代。自检办法：产物里若存在「被引用但全 dist 无定义」的模块 id，即为缓存脏。
+  - **发版构建必须清缓存并先做类型检查（2026-07-29 / 2026-08-05 两类白屏实测）**：`app/config/index.ts` 开了 webpack 持久化缓存（`cache:{enable:true}`，落在 `node_modules/.cache/webpack`，不是 `.cache`）。跨分包共享模块变动后（如 `services/creative.ts` 同时被 `packages/main/chat` 与 `packages/work/poster` 引用），缓存里的旧模块会和新构建的模块图拼在一起，产出**引用了不存在模块 id 的 chunk**；小程序运行时表现为 `TypeError: n[e] is not a function`（`n[e]` = `modules[moduleId]`）→ **整个页面白屏、无 React 报错**，后面跟一条 `Component is not found in path "wx://not-found"`。另一类白屏来自 Taro/Babel 只转译不查类型：未定义变量也会显示 `Compiled successfully`，直到真机渲染才 `ReferenceError`（军令页 `dateStr` 曾因此整页空白）。所以 `npm test`、`build:weapp`、`build:weapp:server`、`build:weapp:preprod` 与 H5 正式构建都必须先跑 `npm run typecheck`；server/preprod 构建还前置 `clean:build` 自动清缓存。`dev:weapp --watch` 仍保留缓存以便迭代。自检办法：产物里若存在「被引用但全 dist 无定义」的模块 id，即为缓存脏。
   - **上传前恢复正式域名校验**：`app/project.private.config.json` 的 `urlCheck:false` 仅用于局域网临时预览；上传/提审前必须在微信开发者工具「详情 → 本地设置」恢复合法域名、web-view 业务域名、TLS 与 HTTPS 证书检查，并用生产 API 域名完成一次真机回归，不能把“工具关闭校验后能请求”当成上线可用。
   - **原生 tabbar 只隐藏不恢复**：custom tabBar 模式下任何路径都不得调用 `Taro.showTabBar`。正常 Tab 挂载/切换只调用 `hideNativeTabBarOnly()` 压住微信原生底栏；全屏 overlay 用 `store.setOverlay(open, stableKey)` 写 storage 并隐藏自定义底栏，关闭/卸载时清理对应 key。custom-tab-bar 在无 overlay 时必须自动清理过期隐藏标记，避免真机重进后导航消失。
   - **弹层不进 custom-tab-bar**：`custom-tab-bar` 只做导航和 overlay 状态同步，不渲染 `Login` 或其它全屏业务弹层；未登录点击中间「对话」只提示并跳 `pages/chat`，由聊天页承接登录弹层。
@@ -580,7 +582,7 @@ cd admin && npm install && npm run dev   # 运营后台
 
 ### 构建校验基线（每次大改后应保持全绿）
 - `server`：`npx tsc -p tsconfig.json --noEmit` → 0
-- `app`：`npm run build:weapp` → Compiled successfully
+- `app`：`npm run build:weapp` → `typecheck` 0 + Compiled successfully（Taro/Babel 本身不检查未定义标识符，禁止绕过）
 - `admin`：`npx tsc -b && npx vite build` → 0 + built
 
 **app / admin 纯函数单测（2026-07-21 起，`node --import tsx --test`，与 server 同一套工具链，无需额外起服务）**：

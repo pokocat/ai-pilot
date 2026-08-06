@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, Input, Button } from '@tarojs/components';
 import Taro, { useDidShow, useShareAppMessage } from '@tarojs/taro';
 import Login from '../../../components/Login';
@@ -165,6 +165,14 @@ export default function MingpanReportPage() {
 
   const closeEditBirth = () => { setShowForm(false); setEditing(false); };
 
+  // 修改入口可能来自档头或报告中段。表单展开后统一把它带进视口，避免用户还要在长报告里找。
+  useEffect(() => {
+    if (!showForm || !editing) return;
+    Taro.nextTick(() => {
+      Taro.pageScrollTo({ selector: '#mingpan-birth-form', duration: 280 }).catch(() => {});
+    });
+  }, [showForm, editing]);
+
   const showFormBlock = needBazi || showForm;
 
   return (
@@ -189,13 +197,13 @@ export default function MingpanReportPage() {
         ) : report ? (
           <>
             {renderHead(report, seal, openEditBirth)}
+            {/* 编辑入口在档头，表单也紧跟档头；不再塞到整份长报告的页尾。 */}
+            {showForm ? renderForm() : null}
             {renderBazi(report)}
             {renderZiwei(report, setActivePalace, openEditBirth)}
             {renderYinzheng(report)}
             {renderTimeline(report)}
             {renderFoot(report)}
-            {/* 缺时辰时，补生辰入口点开后就地渲染表单 */}
-            {showForm ? renderForm() : null}
           </>
         ) : showFormBlock ? (
           <>
@@ -259,7 +267,7 @@ export default function MingpanReportPage() {
   // —— 补生辰表单（needBazi / 补时辰共用）——
   function renderForm() {
     return (
-      <View className="mp-form">
+      <View id="mingpan-birth-form" className="mp-form">
         <View className="mp-opts">
           {(['solar', 'lunar'] as const).map((cal) => (
             <View key={cal} className={`mp-opt ${calendar === cal ? 'on' : ''}`}
