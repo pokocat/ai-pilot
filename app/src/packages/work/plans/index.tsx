@@ -12,7 +12,7 @@ import { awaitPaymentApplied, ensurePayableEnv, payAppliedToast, payOrder } from
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
 import { paymentErrorMessage } from '../../../services/paymentFeedback';
 import { useMockApi } from '../../../services/runtimeMode';
-import { ACTION_LABEL, DEFAULT_PURCHASE_MODE, STATUS_LABEL, canStartPurchase, currentPlanOption, effectivePurchaseMode, isPlanExpired, promotionBadge, promotionNote, publicFeatures, type PurchaseMode, visiblePlanOptions } from './model';
+import { ACTION_LABEL, DEFAULT_PURCHASE_MODE, STATUS_LABEL, canStartPurchase, currentPlanOption, effectivePurchaseMode, isPlanExpired, promotionDeadline, promotionKicker, promotionSave, publicFeatures, type PurchaseMode, visiblePlanOptions } from './model';
 import './index.scss';
 
 function money(fen: number) { return `¥${(fen / 100).toLocaleString(undefined, { minimumFractionDigits: fen % 100 ? 2 : 0 })}`; }
@@ -32,25 +32,31 @@ function expiresSoon(value?: string | null) {
 }
 function clientRequestId() { return `plan-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; }
 
-/** 价格区：优惠中时「现价 + 划线挂牌价」。plan.price 已经是服务端算好的成交价，端上不做任何价格运算。 */
-function PriceBlock({ plan }: { plan: Plan }) {
-  if (plan.price < 0) return <Text className="option-price">面议</Text>;
-  return (
-    <View className="option-price-box">
-      <Text className="option-price">{money(plan.price)}</Text>
-      {plan.promotion && <Text className="option-price-was">{money(plan.promotion.listPrice)}</Text>}
-    </View>
-  );
+/** 折扣角标：只渲染服务端算好的折扣率，端上不按价格自己算。 */
+function PromoBadge({ plan }: { plan: Plan }) {
+  return plan.promotion ? <Text className="promo-badge">{plan.promotion.discountLabel}</Text> : null;
 }
 
-/** 折扣角标行：折扣率来自服务端（Plan.promotion.discountLabel），端上只拼文案。 */
-function PromoLine({ plan }: { plan: Plan }) {
-  if (!plan.promotion) return null;
+/**
+ * 价格区：优惠中时「活动名 → 大号现价 → 划线原价 → 立省 → 截止日」自上而下一条视线。
+ * 所有档共用同一套结构（现价永远是这一行的主角），优惠档靠角标、底色与原价/立省拉出对比，
+ * 而不是换一种排版——同一个列表里两种版式会看起来像坏了。
+ * plan.price 已是服务端算好的成交价，这里不做任何价格运算。
+ */
+function PriceBlock({ plan }: { plan: Plan }) {
+  const promo = plan.promotion;
+  if (plan.price < 0) return <View className="price-line"><Text className="price-now">面议</Text></View>;
   return (
-    <View className="promo-row">
-      <Text className="promo-pill">{promotionBadge(plan.promotion)}</Text>
-      <Text className="promo-note">{promotionNote(plan.promotion, { money, date: dateLabel })}</Text>
-    </View>
+    <>
+      {promo && <Text className="promo-kicker">{promotionKicker(promo)}</Text>}
+      <View className="price-line">
+        <Text className="price-now">{money(plan.price)}</Text>
+        <Text className="price-unit">/ {plan.period === 'year' ? '年' : '月'}</Text>
+        {promo && <Text className="price-was">原价 {money(promo.listPrice)}</Text>}
+        {promo && <Text className="price-save">{promotionSave(promo, money)}</Text>}
+      </View>
+      {promo?.endsAt && <Text className="promo-deadline">{promotionDeadline(promo, dateLabel)}</Text>}
+    </>
   );
 }
 export default function PlanManagement() {
@@ -193,10 +199,10 @@ export default function PlanManagement() {
             <View className="plan-pad">
               <View className="section-head"><Text className="section-title">选择方案</Text><View className="period-switch"><View className={period === 'month' ? 'active' : ''} onClick={() => setPeriod('month')}><Text>月付</Text></View><View className={period === 'year' ? 'active' : ''} onClick={() => setPeriod('year')}><Text>年付</Text></View></View></View>
               {guestOptions.map((plan) => (
-                <View key={plan.id} className="option-row">
+                <View key={plan.id} className={`option-row ${plan.promotion ? 'promo' : ''}`}>
                   <View className="option-main">
-                    <View className="option-title-row"><Text className="option-name">{plan.name}{plan.highlighted ? ' · 推荐' : ''}</Text><PriceBlock plan={plan} /></View>
-                    <PromoLine plan={plan} />
+                    <View className="option-title-row"><Text className="option-name">{plan.name}{plan.highlighted ? ' · 推荐' : ''}</Text><PromoBadge plan={plan} /></View>
+                    <PriceBlock plan={plan} />
                     <Text className="option-level">{plan.usageLabel}</Text>
                     <View className="feature-list">{publicFeatures(plan.featuresJson).map((feature) => <View key={feature}><Icon name="check" size={11} color={accent} /><Text>{feature}</Text></View>)}</View>
                   </View>
@@ -240,9 +246,9 @@ export default function PlanManagement() {
 
             <View className="section-head"><Text className="section-title">选择下一步</Text><View className="period-switch"><View className={period === 'month' ? 'active' : ''} onClick={() => setPeriod('month')}><Text>月付</Text></View><View className={period === 'year' ? 'active' : ''} onClick={() => setPeriod('year')}><Text>年付</Text></View></View></View>
             {options.map((option) => (
-              <View key={option.plan.id} className={`option-row ${option.canPurchase ? '' : 'disabled'}`}>
-                <View className="option-main"><View className="option-title-row"><Text className="option-name">{option.plan.name}{option.recommended ? ' · 推荐' : ''}</Text><PriceBlock plan={option.plan} /></View>
-                  <PromoLine plan={option.plan} />
+              <View key={option.plan.id} className={`option-row ${option.canPurchase ? '' : 'disabled'} ${option.plan.promotion ? 'promo' : ''}`}>
+                <View className="option-main"><View className="option-title-row"><Text className="option-name">{option.plan.name}{option.recommended ? ' · 推荐' : ''}</Text><PromoBadge plan={option.plan} /></View>
+                  <PriceBlock plan={option.plan} />
                   <Text className="option-level">{option.plan.usageLabel}</Text>
                   {option.pendingOrder?.payableUntil && <Text className="option-expiry">可在 {dateTimeLabel(option.pendingOrder.payableUntil)} 前继续支付</Text>}
                   <View className="feature-list">{publicFeatures(option.plan.featuresJson).map((feature) => <View key={feature}><Icon name="check" size={11} color={accent} /><Text>{feature}</Text></View>)}</View>
@@ -258,9 +264,11 @@ export default function PlanManagement() {
       {quote && <View className="quote-layer" onClick={() => { setQuote(null); setPurchaseIntentId(''); }}><View className="quote-panel" onClick={(e) => e.stopPropagation()}>
         <View className="quote-head"><Text className="quote-title">确认方案</Text><Text className="quote-close" onClick={() => { setQuote(null); setPurchaseIntentId(''); }}>×</Text></View>
         <View className="quote-route"><Text>{quote.currentPlan?.name || '未开通'}</Text><Text>→</Text><Text>{quote.targetPlan.name}</Text></View>
-        {/* 优惠中先摆挂牌价再摆折扣，让「为什么这个数」自上而下能对得上，最后才是实付。 */}
+        {/* 优惠中先摆挂牌价再摆折扣，让「为什么这个数」自上而下能对得上，最后才是实付。
+            折扣这一行给强调色：确认页要能一眼看出「省了多少」，但不做角标/底色——
+            付款前的界面越吵，用户越要停下来重读。 */}
         {quote.targetPlan.promotion && <View className="quote-line"><Text>挂牌价</Text><Text className="quote-was">{money(quote.targetPlan.promotion.listPrice)}</Text></View>}
-        {quote.targetPlan.promotion && <View className="quote-line"><Text>{promotionBadge(quote.targetPlan.promotion)}</Text><Text>-{money(quote.targetPlan.promotion.savedFen)}</Text></View>}
+        {quote.targetPlan.promotion && <View className="quote-line promo"><Text>{promotionKicker(quote.targetPlan.promotion)} · {quote.targetPlan.promotion.discountLabel}</Text><Text>-{money(quote.targetPlan.promotion.savedFen)}</Text></View>}
         <View className="quote-line"><Text>方案价格</Text><Text>{money(quote.fullPrice)}</Text></View>
         {quote.remainingValue > 0 && <View className="quote-line"><Text>当前剩余价值抵扣</Text><Text>-{money(quote.remainingValue)}</Text></View>}
         <View className="quote-total"><Text>本次实付</Text><Text>{money(quote.chargeAmount)}</Text></View>

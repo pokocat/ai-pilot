@@ -36,23 +36,24 @@ export function canStartPurchase(option: PlanOption): boolean {
 
 // —— 折扣展示 ——
 // 折扣率与生效时间窗一律由服务端算好（Plan.promotion）：端上再算一遍，迟早出现
-// 「小程序显示 1 折、下单扣原价」。这两个函数只做文案拼装，不碰价格规则。
+// 「小程序显示 1 折、下单扣原价」。这几个函数只做文案拼装，不碰价格规则。
 
-/** 折扣角标：有活动名就「活动名 · 折扣率」，否则只显示折扣率。 */
-export function promotionBadge(promotion: PlanPromotion | null | undefined): string {
-  if (!promotion) return '';
-  return promotion.label ? `${promotion.label} · ${promotion.discountLabel}` : promotion.discountLabel;
+/** 价格上方的活动名。运营没填时给中性兜底，避免折扣角标旁边空一块。 */
+export function promotionKicker(promotion: PlanPromotion | null | undefined): string {
+  return promotion ? (promotion.label?.trim() || '限时优惠') : '';
 }
 
-/** 折扣副文案：立省多少，以及（配了结束时间才有的）截止日。长期有效不写「长期有效」，少一句噪音。 */
-export function promotionNote(
+/** 立省金额（省了多少比「打几折」更直观，两者并列才有促销感）。 */
+export function promotionSave(promotion: PlanPromotion | null | undefined, money: (fen: number) => string): string {
+  return promotion ? `立省 ${money(promotion.savedFen)}` : '';
+}
+
+/** 截止提示：配了结束时间才出，长期有效返回 ''——不写「长期有效」，那是噪音不是紧迫感。 */
+export function promotionDeadline(
   promotion: PlanPromotion | null | undefined,
-  fmt: { money: (fen: number) => string; date: (iso: string) => string },
+  date: (iso: string) => string,
 ): string {
-  if (!promotion) return '';
-  const parts = [`立省 ${fmt.money(promotion.savedFen)}`];
-  if (promotion.endsAt) parts.push(`${fmt.date(promotion.endsAt)} 截止`);
-  return parts.join(' · ');
+  return promotion?.endsAt ? `优惠 ${date(promotion.endsAt)} 截止` : '';
 }
 
 export function publicFeatures(features: string[]): string[] {
