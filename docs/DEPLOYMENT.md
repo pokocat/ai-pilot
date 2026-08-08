@@ -107,6 +107,25 @@ journalctl -u junshi-api -f # 看日志，确认「军师 API ready」
 ```
 自检：`curl http://127.0.0.1:4000/api/health` → `{"ok":true}`。
 
+#### 大模型接入配置重设计发布（2026-08-08）
+
+**schema 变更已预检，`db push` 不需要 `ACCEPT_DATA_LOSS`。** 用 `prisma migrate diff` 对着改动前的库
+生成过实际 SQL，全量是：`ai_model` 加 6 列、`ai_setting` 加 2 列并改 4 个列默认值、新建 4 张表 + 4 个索引。
+**没有 DROP、没有对既有列 `SET NOT NULL`**；两个唯一索引都建在全新空表上，不同于 2026-08 微信
+`transactionId` 那次（给存量数据加约束、必须先查重复值）。所以这次**不要**去开 `ACCEPT_DATA_LOSS` —— 
+真要被 data-loss 门拦住，说明实际 schema 与预期不符，应当停下来查，而不是加开关绕过。
+
+复核用（生产上执行前可自行再跑一遍，只读不写）：
+
+```bash
+cd /srv/junshi/server && npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script
+```
+
+发布后**默认什么都不会变**：`AI_CONFIG_V2` 不设＝完全走旧表；四张新表建了但空着。
+一期修复（探活不再被端点池劫持等）与二期护栏（保存时的互斥校验、端点检测）即时生效。
+定时探活默认开启且会真实计费，要停设 `AI_PROBE_SCHEDULED=false`（见 §E3）。
+归一化切换是独立的一次性动作，见 §E2，与本次发布解耦。
+
 #### 持久对话生成首次发布（2026-08-05）
 
 本次数据库变更是加法：新增 `generation_job / generation_attempt / generation_effect`，并给
