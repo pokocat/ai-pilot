@@ -26,6 +26,24 @@ export function visiblePlanOptions(data: PlanOptionsResult | null, period: 'mont
   return (data?.options ?? []).filter((item) => item.plan.id !== data?.currentPlanId && (item.plan.price < 0 || item.plan.period === period));
 }
 
+export const PERIODS = ['month', 'year'] as const;
+export type PlanPeriod = (typeof PERIODS)[number];
+export const PERIOD_LABEL: Record<PlanPeriod, string> = { month: '月付', year: '年付' };
+
+/**
+ * 有货的周期才配拥有一个 tab。**判定必须复用真正的筛选器**（传 countFor），不能另写一套
+ * 「有没有月付档」的规则——两套规则一旦漂移，就会出现「月付 tab 点得进去、里面空着」。
+ * 运营只配了年付时返回 ['year']，页面据此把切换器整个收起来。
+ */
+export function availablePeriods(countFor: (period: PlanPeriod) => number): PlanPeriod[] {
+  return PERIODS.filter((period) => countFor(period) > 0);
+}
+
+/** 当前选中的周期没货就落到第一个有货的周期；一个都没有时保持原样，交给页面走空态。 */
+export function resolvePeriod(period: PlanPeriod, periods: PlanPeriod[]): PlanPeriod {
+  return periods.length === 0 || periods.includes(period) ? period : periods[0];
+}
+
 export function isPlanExpired(expiresAt?: string | null, at = Date.now()): boolean {
   return !!expiresAt && new Date(expiresAt).getTime() <= at;
 }

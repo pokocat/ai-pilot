@@ -37,9 +37,9 @@
 
       <view class="plans-section">
         <text class="plans-section-title">选择方案</text>
-        <view class="period-switch">
-          <view class="{{period==='month'?'on':''}}" data-period="month" bindtap="setPeriod">月付</view>
-          <view class="{{period==='year'?'on':''}}" data-period="year" bindtap="setPeriod">年付</view>
+        <!-- 只渲染真正有档的周期；只剩一种时整个收起来。tab 由 applyFilter 预计算。 -->
+        <view wx:if="{{showPeriodSwitch}}" class="period-switch">
+          <view wx:for="{{periodTabs}}" wx:key="value" class="{{period===item.value?'on':''}}" data-period="{{item.value}}" bindtap="setPeriod">{{item.label}}</view>
         </view>
       </view>
 

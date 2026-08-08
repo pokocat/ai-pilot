@@ -109,7 +109,8 @@ function paymentToast(state, mocked, appliedTitle) {
 Page({
   data: baseData({
     loading: true, showLogin: false, authed: false, period: 'month', current: null, usage: null,
-    subscription: null, options: [], quote: null, purchaseMode: 'manual', busy: '',
+    subscription: null, options: [], periodTabs: [], showPeriodSwitch: false,
+    quote: null, purchaseMode: 'manual', busy: '',
   }),
 
   onLoad() {
@@ -139,9 +140,23 @@ Page({
     this.applyFilter();
   },
 
+  /**
+   * 周期 tab 按**实际配出来的档**决定：运营只配了年付，就不该出现一个点进去空着的月付 tab。
+   * 「有没有这个周期」直接用同一个 filter 判空，不另写一套规则——两套规则一旦漂移，
+   * 就会出现 tab 点得进去、里面空着。只剩一种周期时整个切换器收起（选不动的二选一是纯噪音）。
+   * tab 文案同样预计算：WXML 不能调函数。
+   */
   applyFilter() {
     const all = this._options || [];
-    this.setData({ options: all.filter((item) => item.plan.period === this.data.period) });
+    const periods = ['month', 'year'].filter((period) => all.some((item) => item.plan.period === period));
+    // 当前选中的周期没货就落到第一个有货的；一个都没有时保持原样，交给空态文案。
+    const period = periods.length && periods.indexOf(this.data.period) < 0 ? periods[0] : this.data.period;
+    this.setData({
+      period,
+      periodTabs: periods.map((value) => ({ value, label: periodLabel(value) })),
+      showPeriodSwitch: periods.length > 1,
+      options: all.filter((item) => item.plan.period === period),
+    });
   },
 
   async load() {

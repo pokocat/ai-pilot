@@ -12,7 +12,7 @@ import { awaitPaymentApplied, ensurePayableEnv, payAppliedToast, payOrder } from
 import { requestWechatSubscribe } from '../../../services/wechatSubscribe';
 import { paymentErrorMessage } from '../../../services/paymentFeedback';
 import { useMockApi } from '../../../services/runtimeMode';
-import { ACTION_LABEL, DEFAULT_PURCHASE_MODE, STATUS_LABEL, canStartPurchase, currentPlanOption, effectivePurchaseMode, isPlanExpired, promotionDeadline, promotionKicker, promotionSave, publicFeatures, type PurchaseMode, visiblePlanOptions } from './model';
+import { ACTION_LABEL, DEFAULT_PURCHASE_MODE, PERIOD_LABEL, STATUS_LABEL, availablePeriods, canStartPurchase, currentPlanOption, effectivePurchaseMode, isPlanExpired, type PlanPeriod, promotionDeadline, promotionKicker, promotionSave, publicFeatures, type PurchaseMode, resolvePeriod, visiblePlanOptions } from './model';
 import './index.scss';
 
 function money(fen: number) { return `¥${(fen / 100).toLocaleString(undefined, { minimumFractionDigits: fen % 100 ? 2 : 0 })}`; }
@@ -31,6 +31,18 @@ function expiresSoon(value?: string | null) {
   return days >= 0 && days <= 7;
 }
 function clientRequestId() { return `plan-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; }
+
+/** 周期切换：只渲染真正有档的周期；只有一种周期时整个收起来——一个选不动的二选一是纯噪音。 */
+function PeriodSwitch({ periods, value, onChange }: { periods: PlanPeriod[]; value: PlanPeriod; onChange: (period: PlanPeriod) => void }) {
+  if (periods.length < 2) return null;
+  return (
+    <View className="period-switch">
+      {periods.map((period) => (
+        <View key={period} className={value === period ? 'active' : ''} onClick={() => onChange(period)}><Text>{PERIOD_LABEL[period]}</Text></View>
+      ))}
+    </View>
+  );
+}
 
 /** 折扣角标：只渲染服务端算好的折扣率，端上不按价格自己算。 */
 function PromoBadge({ plan }: { plan: Plan }) {
@@ -94,7 +106,14 @@ export default function PlanManagement() {
 
   const current = currentPlanOption(data);
   const currentExpired = isPlanExpired(current?.expiresAt);
-  const options = visiblePlanOptions(data, period);
+  // 周期 tab 按**实际配出来的档**决定：运营只配年付时不该出现一个点进去空着的月付 tab。
+  // 用派生值而不是在 load 里 setState 修正 period，避免「先渲染一帧空列表再跳」。
+  const guestPlansFor = (value: 'month' | 'year') => publicPlans.filter((plan) => plan.period === value);
+  const periods = s.isAuthed()
+    ? availablePeriods((value) => visiblePlanOptions(data, value).length)
+    : availablePeriods((value) => guestPlansFor(value).length);
+  const shownPeriod = resolvePeriod(period, periods);
+  const options = visiblePlanOptions(data, shownPeriod);
 
   const continuePayment = async (order: PayOrderListItem) => {
     if (busy || (!order.mock && !ensurePayableEnv())) return;
@@ -190,14 +209,14 @@ export default function PlanManagement() {
   };
 
   if (!s.isAuthed()) {
-    const guestOptions = publicPlans.filter((plan) => plan.period === period);
+    const guestOptions = guestPlansFor(shownPeriod);
     return (
       <View className={`page plan-page ${s.themeClass()}`}>
         <SafeHeader title="方案与权益" onBack={() => Taro.navigateBack()} />
         {loading && !publicPlans.length ? <View className="plan-pad"><AsyncState loading skeletonRows={4} /></View> : (
           <ScrollView scrollY enhanced showScrollbar={false} className="plan-scroll">
             <View className="plan-pad">
-              <View className="section-head"><Text className="section-title">选择方案</Text><View className="period-switch"><View className={period === 'month' ? 'active' : ''} onClick={() => setPeriod('month')}><Text>月付</Text></View><View className={period === 'year' ? 'active' : ''} onClick={() => setPeriod('year')}><Text>年付</Text></View></View></View>
+              <View className="section-head"><Text className="section-title">选择方案</Text><PeriodSwitch periods={periods} value={shownPeriod} onChange={setPeriod} /></View>
               {guestOptions.map((plan) => (
                 <View key={plan.id} className={`option-row ${plan.promotion ? 'promo' : ''}`}>
                   <View className="option-main">
@@ -244,7 +263,7 @@ export default function PlanManagement() {
               </View>
             ) : <View className="no-plan"><Text className="current-k">我的方案</Text><Text className="current-name">尚未开通</Text><Text className="current-meta">选择适合当前经营节奏的方案</Text></View>}
 
-            <View className="section-head"><Text className="section-title">选择下一步</Text><View className="period-switch"><View className={period === 'month' ? 'active' : ''} onClick={() => setPeriod('month')}><Text>月付</Text></View><View className={period === 'year' ? 'active' : ''} onClick={() => setPeriod('year')}><Text>年付</Text></View></View></View>
+            <View className="section-head"><Text className="section-title">选择下一步</Text><PeriodSwitch periods={periods} value={shownPeriod} onChange={setPeriod} /></View>
             {options.map((option) => (
               <View key={option.plan.id} className={`option-row ${option.canPurchase ? '' : 'disabled'} ${option.plan.promotion ? 'promo' : ''}`}>
                 <View className="option-main"><View className="option-title-row"><Text className="option-name">{option.plan.name}{option.recommended ? ' · 推荐' : ''}</Text><PromoBadge plan={option.plan} /></View>

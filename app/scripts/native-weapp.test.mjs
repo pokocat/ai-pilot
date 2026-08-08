@@ -391,6 +391,14 @@ test('原生方案卡折扣展示：文案全在 JS 预计算，WXML 不碰价�
   assert.match(wxml, /class="plan-option \{\{item\.promo\?'promo':''\}\}"/, '优惠档要能整卡提色');
   assert.match(wxml, /quote-line promo/, '确认弹层要单列折扣行');
 
+  // 周期 tab 按实际配出来的档决定：只配年付时不该出现一个点进去空着的月付 tab。
+  // 判定复用同一个 filter，避免「可选周期」与「实际展示」两套规则漂移。
+  assert.match(plans, /periodTabs: periods\.map/, '周期 tab 必须预计算（WXML 不能调函数）');
+  assert.match(plans, /showPeriodSwitch: periods\.length > 1/, '只剩一种周期时切换器要整个收起');
+  assert.match(plans, /periods\.length && periods\.indexOf\(this\.data\.period\) < 0 \? periods\[0\]/, '选中周期没货时要落到有货的周期');
+  assert.match(wxml, /wx:if="\{\{showPeriodSwitch\}\}"[\s\S]{0,120}wx:for="\{\{periodTabs\}\}"/, '切换器要按预计算的 tab 渲染');
+  assert.doesNotMatch(wxml, /data-period="month"|data-period="year"/, '不得再写死两个周期 tab');
+
   // 促销色必须跟随本命色（6 套主题）；写死红色会在其中 5 套里显脏
   assert.match(style, /\.promo-badge[^}]*background:\s*var\(--accent\)/, '折扣角标必须用本命色 token');
   const promoStyles = style.split('/* —— 价格区')[1] || '';

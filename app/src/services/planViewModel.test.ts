@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Plan, PlanOption, PlanOptionsResult } from './api';
-import { ACTION_LABEL, DEFAULT_PURCHASE_MODE, canStartPurchase, currentPlanOption, effectivePurchaseMode, isPlanExpired, promotionDeadline, promotionKicker, promotionSave, publicFeatures, visiblePlanOptions } from '../packages/work/plans/model';
+import { ACTION_LABEL, DEFAULT_PURCHASE_MODE, availablePeriods, canStartPurchase, currentPlanOption, effectivePurchaseMode, isPlanExpired, promotionDeadline, promotionKicker, promotionSave, publicFeatures, resolvePeriod, visiblePlanOptions } from '../packages/work/plans/model';
 
 function plan(id: string, period: 'month' | 'year' = 'month', price = 6_800): Plan {
   return {
@@ -70,6 +70,29 @@ test('方案文案：隐藏内部原始额度/顾问数量，只保留最多四�
     '100000 token/月', '每月 500 点', '每月约 20 次', '8 位顾问', '顾问共 8 位',
     '经营资料整理', '方案版本管理', '跨项目检索', '优先响应', '第五条不展示',
   ]), ['经营资料整理', '方案版本管理', '跨项目检索', '优先响应']);
+});
+
+test('周期 tab：只按实际配出来的档展示，只配年付时月付 tab 不出现', () => {
+  const year = option(plan('premier-year', 'year', 398_000));
+  const month = option(plan('starter-month', 'month', 9_900));
+  const onlyYear = result([year], null);
+  const both = result([year, month], null);
+
+  assert.deepEqual(availablePeriods((p) => visiblePlanOptions(onlyYear, p).length), ['year'], '没有月付档就不该有月付 tab');
+  assert.deepEqual(availablePeriods((p) => visiblePlanOptions(both, p).length), ['month', 'year']);
+  assert.deepEqual(availablePeriods(() => 0), [], '一档都没有时不出切换器，交给空态');
+
+  // 默认停在 month，但库里只有年付 —— 必须落到年付，否则用户开屏就是「暂无这一周期的方案」
+  assert.equal(resolvePeriod('month', ['year']), 'year');
+  assert.equal(resolvePeriod('month', ['month', 'year']), 'month', '有货就不动用户的选择');
+  assert.equal(resolvePeriod('year', []), 'year', '一个都没货时保持原样，页面走空态');
+});
+
+test('周期 tab：面议档在两个周期都算有货（它本来就在每个 tab 里展示）', () => {
+  // 判定复用 visiblePlanOptions，所以「哪个 tab 有货」和「tab 里实际显示什么」永远一致，
+  // 不会出现「月付 tab 点得进去、里面空着」。
+  const enterprise = option(plan('enterprise', 'year', -1), { relation: 'enterprise', action: 'contact', canPurchase: false });
+  assert.deepEqual(availablePeriods((p) => visiblePlanOptions(result([enterprise], null), p).length), ['month', 'year']);
 });
 
 test('折扣展示：文案只拼装服务端下发的口径，端上不按价格自己算', () => {
