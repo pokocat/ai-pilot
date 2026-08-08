@@ -77,7 +77,12 @@ export function modelsUrl(protocol: string, baseUrl: string): string {
 async function timed<T>(fn: () => Promise<T>): Promise<{ ms: number; value?: T; error?: Error }> {
   const t0 = Date.now();
   try {
-    return { ms: Date.now() - t0, value: await fn() };
+    // **必须先 await 再取时间**。写成 `{ ms: Date.now() - t0, value: await fn() }` 会恒为 0——
+    // 对象字面量按书写顺序求值，`ms` 在 `await` 之前就算好了。
+    // 这个写法在单测里看不出来（没人断言耗时 > 0），只有拿真实上游对一次才会暴露：
+    // 2026-08-08 预发实测同一次调用，探活记 0ms、自测墙钟 3374ms。
+    const value = await fn();
+    return { ms: Date.now() - t0, value };
   } catch (err) {
     return { ms: Date.now() - t0, error: err as Error };
   }

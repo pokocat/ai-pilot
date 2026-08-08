@@ -164,3 +164,16 @@ describe('定时探活', () => {
     assert.equal(after?.lastProbeAt, null);
   });
 });
+
+describe('探活耗时必须是真的', () => {
+  test('latencyMs 反映实际耗时，不能恒为 0', async () => {
+    // 这条针对一个真实踩过的坑：`{ ms: Date.now() - t0, value: await fn() }` 里 ms 先求值、
+    // 恒等于 0，而单测不断言耗时就完全看不出来——只有拿真实上游对一次才暴露
+    // （2026-08-08 预发：探活记 0ms、自测墙钟 3374ms）。指标 junshi_ai_endpoint_probe_duration_seconds
+    // 因此一直在记 0，等于废的。
+    const slow = mockCfg({ baseUrl: 'https://slow.invalid/v1', provider: 'openai', apiKey: 'sk-real-key-x' });
+    const out = await runProbes(slow, ['model_scope'], AT);
+    const r = out.results[0];
+    assert.ok((r.latencyMs ?? -1) > 0, `耗时应为正数，实际 ${r.latencyMs}`);
+  });
+});
