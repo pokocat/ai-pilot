@@ -254,7 +254,10 @@ body {
 .say-row .sb { flex: 1; min-width: 0; }
 .say-row .stx { font: 500 13.5px/1.45 var(--serif); color: var(--ink); }
 .say-row .smeta { font-size: 10.5px; color: var(--ink-3); margin-top: 6px; }
-.flag-num { width: 84px; flex: 0 0 auto; text-align: center; }
+/* 行内定宽数字输入（功能开关的数值项 / 问策灰度权重）。选择器必须带 .ai-input：单写 .flag-num
+   与 .ai-input 同特异性，而 .ai-input{width:100%} 在本文件更靠后 → 后者胜出，输入框会撑满整行，
+   把同一 .say-row 里的 .sb 挤成「每行一个字」的竖条（flex:0 0 auto 还不许它缩回去）。 */
+.ai-input.flag-num { width: 84px; flex: 0 0 auto; text-align: center; }
 /* 告警通知（功能开关页底部卡）：webhook 输入占满行，签名密钥定宽 */
 .hook-url { flex: 1; min-width: 0; }
 .hook-secret { width: 180px; flex: 0 0 auto; }

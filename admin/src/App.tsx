@@ -26,6 +26,7 @@ import { PlansView, SkusView, EcoToolsView } from './views/catalog';
 import { BenchmarksView, FlagsView, SayingsView, SurveyView, AccountsView } from './views/settings';
 import { ModelView } from './views/model';
 import { CreativeView } from './views/creative';
+import { WenceView } from './views/wence';
 
 export default function App() {
   const [authed, setAuthed] = useState(() => !!getAdminToken());
@@ -196,6 +197,7 @@ export default function App() {
               {key === 'model' && <ModelView toast={showToast} />}
               {key === 'flags' && <FlagsView toast={showToast} isSuper={isOwner} />}
               {key === 'creative' && <CreativeView toast={showToast} isSuper={isOwner} />}
+              {key === 'wence' && <WenceView toast={showToast} />}
               {key === 'form' && <SurveyView />}
               {key === 'plan' && <PlansView toast={showToast} />}
               {key === 'sku' && <SkusView toast={showToast} />}

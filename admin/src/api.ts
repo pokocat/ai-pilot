@@ -168,6 +168,7 @@ import type {
   EvalRunItem, EvalRunDetail, StartEvalRunRequest, PricingTier,
   AdminSku, AdminSkuUpdate, ServiceAssignmentView, ServiceAssignmentUpdate,
   AdminFeatureFlag, AdminMonitorNotify,
+  AdminWenceTemplate, AdminWenceTemplateCreate, AdminWenceTemplateUpdate, WenceTemplateKind,
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
   AdminBenchmark, AdminBenchmarkUpsert,
   AdminUserUsage, AdminPaymentsView, AdminPayReconcileResult,
@@ -175,6 +176,8 @@ import type {
   AdminCreativeConfig, AdminCreativeConfigUpdate, AdminCreativeDryRunResult, AdminCreativeJobsView,
 } from '../../shared/contracts';
 export type { AdminFeatureFlag, AdminMonitorNotify } from '../../shared/contracts';
+// —— 问策入口（WP1）：提示问题池 / 进场主动消息池 ——
+export type { AdminWenceTemplate, AdminWenceTemplateCreate, AdminWenceTemplateUpdate, WenceTemplateKind } from '../../shared/contracts';
 export type { AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel } from '../../shared/contracts';
 export type { AdminBenchmark, AdminBenchmarkUpsert } from '../../shared/contracts';
 // —— per-user 用量下钻 + 支付订单只读 ——
@@ -260,6 +263,16 @@ export const api = {
   flags: () => req<AdminFeatureFlag[]>('/admin/flags'),
   setFlag: (id: string, enabled: boolean) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { enabled }),
   setFlagValue: (id: string, value: number) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { value }),
+  // A/B 实验开关的分桶权重：与 enabled 是两件独立的事，可以单独提交（服务端只改 payload.arms，
+  // 不动 enabled）。未知臂名 / 全 0 / 单臂超 100 由服务端 400 挡下，文案原样透出给运营。
+  setFlagArms: (id: string, arms: Record<string, number>) => req<AdminFeatureFlag>(`/admin/flags/${id}`, 'PATCH', { arms }),
+  // —— 问策模板池（WP1）：hint = 输入框上方提示问题；proactive = 进场主动消息（含 chips）——
+  // 空池是合法状态（端上分别回退本地兜底词 / 不注入），所以这里不做「至少一条」的前端强校验。
+  wenceTemplates: (kind?: WenceTemplateKind) => req<AdminWenceTemplate[]>(`/admin/wence-templates${kind ? `?kind=${kind}` : ''}`),
+  createWenceTemplate: (body: AdminWenceTemplateCreate) => req<AdminWenceTemplate>('/admin/wence-templates', 'POST', body),
+  // chips 显式传 [] / null 才是「清空这一排」；不传该字段 = 不动（与服务端 PATCH 口径一致）。
+  updateWenceTemplate: (id: string, body: AdminWenceTemplateUpdate) => req<AdminWenceTemplate>(`/admin/wence-templates/${id}`, 'PATCH', body),
+  deleteWenceTemplate: (id: string) => req<{ ok: boolean }>(`/admin/wence-templates/${id}`, 'DELETE'),
   // —— 告警通知（监控大盘二期）：飞书群机器人 webhook，仅 owner/master 可写 ——
   monitorNotify: () => req<AdminMonitorNotify>('/admin/monitor-notify'),
   saveMonitorNotify: (url: string, secret: string) => req<AdminMonitorNotify>('/admin/monitor-notify', 'PUT', { url, secret }),

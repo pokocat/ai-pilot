@@ -18,11 +18,11 @@
 // 只读观测屏里，正是运营找不到东西的根因。同时初版「配置」堆到 8 项（商品+开关+内容+权限
 // 混装），已顶到本文件下方与 DESIGN.md 都写着的「超 8 项就拆组」上限。故按看/改重排为 7 组。
 
-/** 23 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
+/** 24 个目的地的稳定 key，同时是 hash 路由的第一段（`#/payments`）。改名会断已分享的链接。 */
 export type SectionKey =
   | 'home' | 'users' | 'usage' | 'payments' | 'funnel' | 'tokens' | 'trace' | 'agent'
   | 'skilllib' | 'knowledge' | 'retrieval' | 'audit' | 'moderation' | 'model' | 'say'
-  | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative';
+  | 'form' | 'plan' | 'sku' | 'eco' | 'benchmark' | 'account' | 'flags' | 'creative' | 'wence';
 
 export type GroupKey = 'today' | 'people' | 'revenue' | 'studio' | 'observe' | 'catalog' | 'settings';
 
@@ -95,6 +95,10 @@ export const NAV_SECTIONS: NavSection[] = [
   { key: 'creative', label: '创作任务', hint: '海报成品图开关、单价、图片供应商与任务台', icon: 'image', group: 'settings', aliases: ['海报', '成品图', '出图', '创作', 'canvas', 'canvas_design', 'poster', '供应商', '图片', '任务台', '重试', '钻石单价'] },
   { key: 'benchmark', label: '行业基准', hint: '行业指标分位值维护与 CSV 导入', icon: 'trend', group: 'settings', aliases: ['基准', 'benchmark', '指标', 'csv', '分位'] },
   { key: 'say', label: '每日献策', hint: '每日 08:00 推送的献策池', icon: 'spark', group: 'settings', aliases: ['献策', '推送', 'saying', '每日'] },
+  // 问策入口与「每日献策」同类：都是运营维护的**内容池**，故归「配置」而不是「智能体」——
+  // 池里存的是固定文案，不参与提示词调教，也没有版本发布；另带一个灰度开关（平台级可写项）。
+  // 单独成页而不塞进 settings.tsx 的开关段：两个池 + 权重编辑 + 用法说明，塞进去会把开关列表挤没。
+  { key: 'wence', label: '问策入口', hint: '提示问题池 / 进场主动消息池 / 改版灰度权重', icon: 'chat', group: 'settings', aliases: ['问策', 'wence', '提示词', '提示问题', '主动消息', '开场白', 'proactive', 'hint', 'chips', '灰度', '实验', 'ab', 'a/b', '入口'] },
   { key: 'form', label: '问卷', hint: '开局问卷题目（只读）', icon: 'doc', group: 'settings', aliases: ['问卷', 'survey', '题目'] },
   { key: 'account', label: '运营账户', hint: '新增运营、按 agent 授权、停用', icon: 'user', group: 'settings', ownerOnly: true, aliases: ['账号', '权限', 'account', '运营', '密码'] },
 ];
