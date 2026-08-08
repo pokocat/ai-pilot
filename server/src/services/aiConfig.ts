@@ -5,16 +5,20 @@
 // 存储：AiSetting / AiModel 的对话、Embedding、Rerank API Key 明文存库；读取兼容历史 enc:v1 密文，
 //       部署脚本会做一次性明文化迁移。对外一律只回传 hasKey，不出明文。
 
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { env, isRealKey } from '../env.js';
 import type { ModelRate } from '../data/modelPrices.js';
 import { aiCredentialReadFailed, plainAiCredential, readAiCredential, storeAiCredential } from './aiCredentialStorage.js';
-import type { AiProvider, AiThinkingMode, AiConfig, AiPreset, AiModel, AiModelUpsert, AiModelTest } from '../llm/schema.js';
+import type { AiProvider, AiThinkingMode, AiConfig, AiConfigUpdate, AiPreset, AiModel, AiModelUpsert, AiModelTest } from '../llm/schema.js';
 import {
   DEFAULT_THINKING_MODE,
+  dialectOf,
   normalizeThinkingBudget,
   normalizeThinkingMode,
 } from '../llm/thinking.js';
+import { readCaps } from '../llm/configSchemas.js';
+import { configForPurpose, syncV2FromLegacy, v2Enabled } from './aiRoutes.js';
 
 export interface ResolvedAiConfig {
   provider: AiProvider;
@@ -26,6 +30,12 @@ export interface ResolvedAiConfig {
   temperature: number;
   thinkingMode: AiThinkingMode;
   thinkingBudget: number;
+  // 协议方言（llm/dialects.ts）。显式值＝已固化，留空＝走 inferDialect 兜底。
+  // 必须一路带到 provider 的请求组装处：关闭思考该省略还是显式发、能不能带 budget_tokens，
+  // 全看它——端点池里每个端点可以是不同方言，不能用全局配置的方言去组装别的端点的请求。
+  dialect?: string | null;
+  /** 探活回填的能力标记（EndpointCaps）。thinking='no' 时一律不发 thinking 字段。 */
+  capsJson?: unknown;
   timeoutMs: number;
   // 向量嵌入接入（独立开关 + 可选凭证；baseUrl/key 留空回退对话模型）。
   embeddingEnabled: boolean;
@@ -54,14 +64,41 @@ export interface ResolvedAiConfig {
 }
 
 // 内置接入商目录：「添加模型」向导选其一即可一键填好 baseUrl/model（仍可改）。
-// 绝大多数国内厂商提供 OpenAI 兼容端点 → provider=openai；Anthropic 用 claude 原生协议。
+//
+// **一个厂商可能要占两条预设**：同一家的 OpenAI 协议与 Anthropic 协议是**两个不同的 baseUrl**
+// （七牛 `…/v1` vs 根路径、DeepSeek `/v1` vs `/anthropic`、火山 `/api/v3` vs `/api/coding`），
+// 选错入口就是上线后 404/400。协议不是「模型名的属性」，必须在选接入商这一步就定下来。
+//
+// model 只在**已实测可用**时才预填；没验证过的一律留空并把查法写进 note——
+// 预填一个不存在的模型名，失败时看起来像我们的 bug，比留空更糟。
 export const AI_PRESETS: AiPreset[] = [
+  // —— 七牛（生产在用）——
+  {
+    id: 'qiniu-anthropic', label: '七牛云 · Anthropic 协议', provider: 'claude',
+    baseUrl: 'https://api.qnaigc.com', model: 'claude-opus-4-6',
+    note: 'Anthropic /v1/messages。关闭 Thinking 时发 {type:"disabled"} 且**不得带 budget_tokens**（带了返回 400）',
+  },
+  {
+    id: 'qiniu', label: '七牛云 · OpenAI 兼容', provider: 'openai',
+    baseUrl: 'https://api.qnaigc.com/v1', model: '',
+    note: '模型名见控制台或 GET /v1/models。注意：七牛不提供 Embedding；API Key 有模型范围限制',
+  },
   { id: 'agnes', label: 'Agnes 2.0 Flash', provider: 'openai', baseUrl: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash', note: 'SapiensAI · OpenAI 兼容（含 tool calling）' },
   { id: 'deepseek', label: 'DeepSeek 深度求索', provider: 'openai', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', note: '深度求索 · OpenAI 兼容' },
+  {
+    id: 'deepseek-anthropic', label: 'DeepSeek · Anthropic 协议', provider: 'claude',
+    baseUrl: 'https://api.deepseek.com/anthropic', model: '',
+    note: 'Claude 模型名会被映射到 deepseek-v4-*（opus→pro，sonnet/haiku→flash）；**thinking 接受但 budget_tokens 被忽略**',
+  },
   { id: 'qwen', label: '通义千问 Qwen', provider: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', embeddingModel: 'text-embedding-v3', note: '阿里云 · 兼容模式' },
   { id: 'moonshot', label: 'Moonshot 月之暗面 (Kimi)', provider: 'openai', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k', note: 'Kimi · OpenAI 兼容' },
   { id: 'glm', label: '智谱 GLM', provider: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-plus', embeddingModel: 'embedding-3', note: '智谱清言 · OpenAI 兼容' },
   { id: 'doubao', label: '火山方舟 · 豆包', provider: 'openai', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-pro-32k', note: '字节火山引擎 · model 填接入点 ID' },
+  {
+    id: 'volcengine-anthropic', label: '火山方舟 · Anthropic 协议', provider: 'claude',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/coding', model: '',
+    note: '来自 Coding Plan 形态；标准 Chat API 是否另有 Anthropic 入口未见官方原文，接入前务必用「测试连接」直测',
+  },
   { id: 'siliconflow', label: '硅基流动 SiliconFlow', provider: 'openai', baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-72B-Instruct', note: '多模型聚合 · OpenAI 兼容' },
   { id: 'minimax', label: 'MiniMax', provider: 'openai', baseUrl: 'https://api.minimaxi.com/v1', model: 'abab6.5s-chat', note: 'MiniMax · OpenAI 兼容' },
   { id: 'baichuan', label: '百川 Baichuan', provider: 'openai', baseUrl: 'https://api.baichuan-ai.com/v1', model: 'Baichuan4', note: '百川智能 · OpenAI 兼容' },
@@ -108,7 +145,12 @@ const TTL = 4000;
 let rateCache: { map: Map<string, ModelRate>; at: number } | null = null;
 let lastRateIssueSignature = '';
 
-type RateRow = { model: string; priceInput: number; priceOutput: number; priceCachedInput: number };
+type RateRow = {
+  model: string; priceInput: number; priceOutput: number; priceCachedInput: number;
+  // 2026-08-07 新增第四档。历史行/未传值按 0 处理 → estimateCostMicros 继续用
+  // `in × CACHE_WRITE_MULTIPLIER` 推导，折算结果与加这一档之前逐位相同。
+  priceCacheWrite?: number;
+};
 
 export function buildConfiguredRateMap(rows: RateRow[]): { map: Map<string, ModelRate>; issues: string[] } {
   const grouped = new Map<string, ModelRate[]>();
@@ -116,7 +158,8 @@ export function buildConfiguredRateMap(rows: RateRow[]): { map: Map<string, Mode
   for (const r of rows) {
     const key = r.model.trim().toLowerCase();
     if (!key) continue;
-    const hasAny = r.priceInput > 0 || r.priceOutput > 0 || r.priceCachedInput > 0;
+    const cacheWrite = r.priceCacheWrite ?? 0;
+    const hasAny = r.priceInput > 0 || r.priceOutput > 0 || r.priceCachedInput > 0 || cacheWrite > 0;
     if (!hasAny) continue;
     if (!(r.priceInput > 0) || !(r.priceOutput > 0)) {
       issues.push(`${r.model}: 输入价和输出价必须同时配置`);
@@ -126,6 +169,7 @@ export function buildConfiguredRateMap(rows: RateRow[]): { map: Map<string, Mode
       in: r.priceInput,
       out: r.priceOutput,
       cachedIn: r.priceCachedInput > 0 ? r.priceCachedInput : undefined,
+      cacheWrite: cacheWrite > 0 ? cacheWrite : undefined,
     };
     const list = grouped.get(key) ?? [];
     list.push(rate);
@@ -135,8 +179,12 @@ export function buildConfiguredRateMap(rows: RateRow[]): { map: Map<string, Mode
   const map = new Map<string, ModelRate>();
   for (const [model, rates] of grouped) {
     const first = rates[0];
+    // 四档全部纳入一致性判定：只要有一档在同名端点间不一致，整个模型退回未校准，
+    // 而不是让无序 findMany() 的最后一行随机决定单价。
     const same = rates.every((r) =>
-      r.in === first.in && r.out === first.out && (r.cachedIn ?? 0) === (first.cachedIn ?? 0));
+      r.in === first.in && r.out === first.out
+      && (r.cachedIn ?? 0) === (first.cachedIn ?? 0)
+      && (r.cacheWrite ?? 0) === (first.cacheWrite ?? 0));
     if (!same) {
       issues.push(`${model}: 同名模型存在冲突单价`);
       continue;
@@ -150,7 +198,7 @@ async function configuredRates(force = false): Promise<Map<string, ModelRate>> {
   if (!force && rateCache && Date.now() - rateCache.at < TTL) return rateCache.map;
   const map = new Map<string, ModelRate>();
   try {
-    const rows = await prisma.aiModel.findMany({ select: { model: true, priceInput: true, priceOutput: true, priceCachedInput: true } });
+    const rows = await prisma.aiModel.findMany({ select: { model: true, priceInput: true, priceOutput: true, priceCachedInput: true, priceCacheWrite: true } });
     const built = buildConfiguredRateMap(rows);
     for (const [model, rate] of built.map) map.set(model, rate);
     const issueSignature = built.issues.join('；');
@@ -192,9 +240,29 @@ export async function maxConfiguredRateWeights(): Promise<ModelRate> {
   return { in: 1, out: outputWeight };
 }
 
-/** 解析当前生效配置（DB 优先，env 兜底，带缓存）。 */
+/**
+ * 解析当前生效配置（DB 优先，env 兜底，带缓存）。
+ *
+ * 三期起多了一层：`AI_CONFIG_V2=true` 且 `purpose='chat'` 真有可用路由时，走归一化表；
+ * 否则**静默回落旧路径**。回落不是兜底摆设——迁移没跑完、路由被清空、数据库刚恢复，
+ * 这几种情况都不该让 AI 停摆，而把开关关掉就是完整回滚（旧表一个字段都没动）。
+ */
 export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
   if (!force && cache && Date.now() - cache.at < TTL) return cache.cfg;
+  const legacy = await getLegacyAiConfig();
+  if (!v2Enabled()) { cache = { cfg: legacy, at: Date.now() }; return legacy; }
+
+  // chat 路由是主配置；嵌入 / 重排各自的路由投影回同一份 cfg 上的对应字段，
+  // 这样 services/{embedding,rerank} 那些既有消费方零改动就能吃到用途化的结果。
+  let cfg = (await configForPurpose('chat', legacy)) ?? legacy;
+  cfg = await auxServiceConfig('embedding', cfg);
+  cfg = await auxServiceConfig('rerank', cfg);
+  cache = { cfg, at: Date.now() };
+  return cfg;
+}
+
+/** 旧读路径（AiSetting 单例 > env）。三期切换后仍作为回落与迁移来源保留。 */
+async function getLegacyAiConfig(): Promise<ResolvedAiConfig> {
   let cfg = fromEnv();
   try {
     const row = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
@@ -208,6 +276,8 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
         embeddingModel: row.embeddingModel || '',
         thinkingMode: normalizeThinkingMode(row.thinkingMode),
         thinkingBudget: normalizeThinkingBudget(row.thinkingBudget),
+        dialect: row.dialect ?? null,
+        capsJson: row.capsJson ?? null,
         // 永远保留运营配置原值；Thinking 对 temperature=1 的约束只在最终请求组装时临时生效。
         temperature: typeof row.temperature === 'number' ? row.temperature : 0.7,
         timeoutMs: env.openaiTimeoutMs,
@@ -231,7 +301,6 @@ export async function getAiConfig(force = false): Promise<ResolvedAiConfig> {
   } catch {
     /* DB 不可达：用 env 兜底 */
   }
-  cache = { cfg, at: Date.now() };
   return cfg;
 }
 
@@ -285,6 +354,32 @@ export function resolveAuxConfig(main: ResolvedAiConfig): ResolvedAiConfig {
   };
 }
 
+/**
+ * 辅助档解析（三期版）：**优先用 `purpose='aux'` 路由**，没有才回落 `AI_AUX_*` 环境变量。
+ *
+ * 这就是「用途化」最直接的收益：辅助抽取此前**只能**改 env + 重启，运营在后台看不见它、
+ * 也测不了它。迁移把它收编成一条路由之后，它和主对话享有同一套 UI、校验与探活。
+ * env 仍保留一个版本作兜底，不立刻删——迁移期两条路都要能走。
+ */
+export async function resolveAuxConfigAsync(main: ResolvedAiConfig): Promise<ResolvedAiConfig> {
+  const routed = await configForPurpose('aux', main);
+  if (routed) return { ...routed, label: `${routed.label} · aux` };
+  return resolveAuxConfig(main);
+}
+
+/** 嵌入 / 重排：同样优先走各自的路由，没配才用 AiSetting 上的散字段。 */
+export async function auxServiceConfig(
+  kind: 'embedding' | 'rerank', main: ResolvedAiConfig,
+): Promise<ResolvedAiConfig> {
+  const routed = await configForPurpose(kind, main);
+  if (!routed) return main;
+  // 嵌入/重排的调用方读的是 embeddingBaseUrl / rerankBaseUrl 这组字段，
+  // 所以把路由结果投影回这组字段，调用方零改动。
+  return kind === 'embedding'
+    ? { ...main, embeddingEnabled: true, embeddingModel: routed.model, embeddingBaseUrl: routed.baseUrl, embeddingApiKey: routed.apiKey }
+    : { ...main, rerankEnabled: true, rerankModel: routed.model, rerankBaseUrl: routed.baseUrl, rerankApiKey: routed.apiKey };
+}
+
 /** 辅助档是否已独立配置（诊断 / 运维可见性用）。 */
 export function auxConfigured(): boolean {
   return !!(process.env.AI_AUX_MODEL ?? '').trim();
@@ -330,10 +425,12 @@ export async function setAiConfig(patch: {
     update: data,
     create: {
       id: 'default',
-      provider: patch.provider ?? 'openai',
-      label: patch.label ?? 'Agnes 2.0 Flash',
-      baseUrl: patch.baseUrl ?? 'https://apihub.agnes-ai.com/v1',
-      model: patch.model ?? 'agnes-2.0-flash',
+      // 首次建行时不再预置某一家厂商（历史值是已不在用的 Agnes，会把「没配过」显示成「配好了」）。
+      // 缺省落到 mock：未配 key 时 effectiveProvider 本来就降级 mock，这里只是把真相写进库。
+      provider: patch.provider ?? 'mock',
+      label: patch.label ?? '未配置',
+      baseUrl: patch.baseUrl ?? '',
+      model: patch.model ?? '',
       apiKey: storeAiCredential(patch.apiKey),
       embeddingModel: patch.embeddingModel ?? '',
       thinkingMode: normalizeThinkingMode(patch.thinkingMode),
@@ -349,6 +446,7 @@ export async function setAiConfig(patch: {
     },
   });
   cache = null;
+  await syncV2FromLegacy();
   return getAiConfig(true);
 }
 
@@ -360,8 +458,9 @@ export async function setAiConfig(patch: {
 type ModelRow = {
   id: string; provider: string; label: string; baseUrl: string; model: string;
   apiKey: string; embeddingModel: string; temperature: number; preset: string | null;
-  thinkingMode: string; thinkingBudget: number;
-  priceInput: number; priceOutput: number; priceCachedInput: number; updatedAt: Date;
+  thinkingMode: string; thinkingBudget: number; dialect?: string | null; capsJson?: unknown;
+  lastProbeAt?: Date | null; lastProbeOk?: boolean | null; probeJson?: unknown;
+  priceInput: number; priceOutput: number; priceCachedInput: number; priceCacheWrite?: number; updatedAt: Date;
   poolEnabled?: boolean; weight?: number; tier?: number; maxConcurrency?: number;
 };
 
@@ -377,12 +476,20 @@ export function publicModel(m: ModelRow, activeId: string | null): AiModel {
     thinkingMode: normalizeThinkingMode(m.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(m.thinkingBudget),
     temperature: m.temperature,
+    // 方言：显式值直接回传；没固化时把推断结果一并回传，后台标灰并提供「确认固化」，
+    // 让运营看得见「这个端点现在还在靠猜」。
+    dialect: m.dialect ?? null,
+    resolvedDialect: dialectOf({ provider: (m.provider as AiProvider) ?? 'mock', baseUrl: m.baseUrl, model: m.model, dialect: m.dialect }).dialect.id,
+    caps: readCaps(m.capsJson),
+    lastProbeAt: m.lastProbeAt?.toISOString?.() ?? null,
+    lastProbeOk: m.lastProbeOk ?? null,
     hasKey: isRealKey(readAiCredential(m.apiKey)),
     preset: m.preset ?? null,
     active: !!activeId && m.id === activeId,
     priceInput: m.priceInput ?? 0,
     priceOutput: m.priceOutput ?? 0,
     priceCachedInput: m.priceCachedInput ?? 0,
+    priceCacheWrite: m.priceCacheWrite ?? 0,
     poolEnabled: m.poolEnabled ?? false,
     weight: m.weight ?? 1,
     tier: m.tier ?? 0,
@@ -401,6 +508,11 @@ async function syncActiveSetting(m: ModelRow): Promise<void> {
     apiKey: plainAiCredential(m.apiKey),
     thinkingMode: normalizeThinkingMode(m.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(m.thinkingBudget),
+    // 方言与能力必须一起拷：只拷 thinkingMode 而漏掉方言，生效后请求会按推断值组装，
+    // 运营在端点上「确认固化」的那一次点击就白点了。
+    dialect: m.dialect ?? null,
+    // 可空 Json 列要清空必须用 Prisma.DbNull（JS 的 null 在 Prisma 里是「JSON null 值」而非 SQL NULL）。
+    capsJson: (m.capsJson ?? Prisma.DbNull) as Prisma.InputJsonValue,
     temperature: m.temperature,
     activeModelId: m.id,
   };
@@ -410,6 +522,8 @@ async function syncActiveSetting(m: ModelRow): Promise<void> {
     create: { id: 'default', ...fields },
   });
   cache = null;
+  // 切到 V2 后运行时读的是路由表：不投影过去，「切换生效模型」就只改了旧表、线上纹丝不动。
+  await syncV2FromLegacy();
 }
 
 // 首次进入：库里还没有任何模型时，用当前生效配置（DB 或 env 兜底）落一行并设为生效，平滑迁移。
@@ -443,6 +557,12 @@ export async function listModels(): Promise<AiModel[]> {
   }
 }
 
+// 端点池参数的取值口径（addModel / updateModel 必须同源）：
+// weight≥1（0 会让 HRW 打分恒为 0，等于悄悄踢出池）、tier≥0、maxConcurrency≥0（0=用全局默认）。
+const clampWeight = (v: number) => Math.max(1, Math.floor(v));
+const clampTier = (v: number) => Math.max(0, Math.floor(v));
+const clampConcurrency = (v: number) => Math.max(0, Math.floor(v));
+
 /** 添加模型（不自动生效；进入快速切换列表，由运营点选生效）。 */
 export async function addModel(input: AiModelUpsert): Promise<AiModel> {
   const created = await prisma.aiModel.create({
@@ -457,12 +577,23 @@ export async function addModel(input: AiModelUpsert): Promise<AiModel> {
       thinkingBudget: normalizeThinkingBudget(input.thinkingBudget),
       temperature: typeof input.temperature === 'number' ? input.temperature : 0.7,
       preset: input.preset ?? null,
+      dialect: input.dialect ?? null,
       priceInput: Math.max(0, input.priceInput ?? 0),
       priceOutput: Math.max(0, input.priceOutput ?? 0),
       priceCachedInput: Math.max(0, input.priceCachedInput ?? 0),
+      priceCacheWrite: Math.max(0, input.priceCacheWrite ?? 0),
+      // 池参数此前漏写：路由层为 poolEnabled 做了协议校验（会 409），校验通过后却没落库，
+      // 于是「新增时勾了入池」静默变成未入池，只有事后再 PATCH 一次才生效。
+      poolEnabled: !!input.poolEnabled,
+      weight: clampWeight(input.weight ?? 1),
+      tier: clampTier(input.tier ?? 0),
+      maxConcurrency: clampConcurrency(input.maxConcurrency ?? 0),
     },
   });
   rateCache = null;
+  // 新增的就是池端点时，让 llmPool 的 5s 配置缓存立刻失效（与 updateModel 同口径）。
+  void import('./llmPool.js').then((m) => m.__resetLlmPool()).catch(() => {});
+  await syncV2FromLegacy();
   const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
   return publicModel(created as ModelRow, setting?.activeModelId ?? null);
 }
@@ -484,15 +615,18 @@ export async function updateModel(id: string, patch: AiModelUpsert): Promise<AiM
   }
   if (patch.thinkingBudget !== undefined) data.thinkingBudget = normalizeThinkingBudget(patch.thinkingBudget);
   if (patch.preset !== undefined) data.preset = patch.preset;
+  if (patch.dialect !== undefined) data.dialect = patch.dialect || null;
   if (patch.priceInput !== undefined) data.priceInput = Math.max(0, patch.priceInput);
   if (patch.priceOutput !== undefined) data.priceOutput = Math.max(0, patch.priceOutput);
   if (patch.priceCachedInput !== undefined) data.priceCachedInput = Math.max(0, patch.priceCachedInput);
+  if (patch.priceCacheWrite !== undefined) data.priceCacheWrite = Math.max(0, patch.priceCacheWrite);
   if (patch.poolEnabled !== undefined) data.poolEnabled = !!patch.poolEnabled;
-  if (patch.weight !== undefined) data.weight = Math.max(1, Math.floor(patch.weight));
-  if (patch.tier !== undefined) data.tier = Math.max(0, Math.floor(patch.tier));
-  if (patch.maxConcurrency !== undefined) data.maxConcurrency = Math.max(0, Math.floor(patch.maxConcurrency));
+  if (patch.weight !== undefined) data.weight = clampWeight(patch.weight);
+  if (patch.tier !== undefined) data.tier = clampTier(patch.tier);
+  if (patch.maxConcurrency !== undefined) data.maxConcurrency = clampConcurrency(patch.maxConcurrency);
   const updated = await prisma.aiModel.update({ where: { id }, data });
   rateCache = null;
+  await syncV2FromLegacy();
   // 端点池配置变了 → 让 llmPool 的 5s 缓存立刻失效（本进程；其它实例最多 5s 陈旧）。
   void import('./llmPool.js').then((m) => m.__resetLlmPool()).catch(() => {});
   const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
@@ -511,6 +645,8 @@ export async function deleteModel(id: string): Promise<{ ok: boolean; reason?: s
   }
   await prisma.aiModel.delete({ where: { id } });
   rateCache = null;
+  // 投影会顺带清掉这一行对应的孤儿端点——否则它会继续留在路由里接流量。
+  await syncV2FromLegacy();
   return { ok: true };
 }
 
@@ -526,9 +662,13 @@ export async function activateModel(id: string): Promise<ResolvedAiConfig> {
 export async function mergedTestConfig(b: AiModelTest): Promise<ResolvedAiConfig> {
   const base = await getAiConfig(true); // 复用 timeoutMs / 全局嵌入兜底
   let apiKey = b.apiKey ?? '';
-  if ((!apiKey || !apiKey.length) && b.modelId) {
+  // 能力标记不在表单里（它是探活写的，不是运营填的），编辑既有端点时从库里取。
+  // 探活正是要验证这些标记，所以必须用被测端点自己的那份，不能用全局配置的。
+  let testCaps: unknown = null;
+  if (b.modelId) {
     const row = await prisma.aiModel.findUnique({ where: { id: b.modelId } });
-    apiKey = readAiCredential(row?.apiKey); // 明文直读；滚动迁移期兼容历史密文
+    if ((!apiKey || !apiKey.length)) apiKey = readAiCredential(row?.apiKey); // 明文直读；滚动迁移期兼容历史密文
+    testCaps = row?.capsJson ?? null;
   }
   return {
     ...base,
@@ -541,8 +681,50 @@ export async function mergedTestConfig(b: AiModelTest): Promise<ResolvedAiConfig
     thinkingMode: normalizeThinkingMode(b.thinkingMode ?? base.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(b.thinkingBudget ?? base.thinkingBudget),
     temperature: typeof b.temperature === 'number' ? b.temperature : base.temperature,
+    // 方言/能力也必须来自被测端点，否则探活验的是另一套请求组装规则。
+    dialect: b.dialect ?? null,
+    capsJson: testCaps,
+    poolBypass: true, // 见下方说明：探活必须打**被测端点本身**
   };
 }
+
+/**
+ * 把「当前保存配置」叠加本次未保存的改动，得到 `/admin/ai-config/test` 的探活配置。
+ * 各 apiKey 留空＝沿用已存 key（与保存路径同口径）。纯函数，不查库，便于回归。
+ */
+export function mergedConfigTest(saved: ResolvedAiConfig, b: AiConfigUpdate): ResolvedAiConfig {
+  return {
+    ...saved,
+    provider: b.provider ?? saved.provider,
+    baseUrl: b.baseUrl ?? saved.baseUrl,
+    model: b.model ?? saved.model,
+    apiKey: b.apiKey && b.apiKey.length ? b.apiKey : saved.apiKey,
+    embeddingModel: b.embeddingModel ?? saved.embeddingModel,
+    temperature: b.temperature ?? saved.temperature,
+    thinkingMode: b.thinkingMode ?? saved.thinkingMode,
+    thinkingBudget: b.thinkingBudget ?? saved.thinkingBudget,
+    embeddingEnabled: b.embeddingEnabled ?? saved.embeddingEnabled,
+    embeddingBaseUrl: b.embeddingBaseUrl ?? saved.embeddingBaseUrl,
+    embeddingApiKey: b.embeddingApiKey && b.embeddingApiKey.length ? b.embeddingApiKey : saved.embeddingApiKey,
+    rerankEnabled: b.rerankEnabled ?? saved.rerankEnabled,
+    rerankModel: b.rerankModel ?? saved.rerankModel,
+    rerankBaseUrl: b.rerankBaseUrl ?? saved.rerankBaseUrl,
+    rerankApiKey: b.rerankApiKey && b.rerankApiKey.length ? b.rerankApiKey : saved.rerankApiKey,
+    poolBypass: true, // 见下方说明
+  };
+}
+
+/*
+ * 为什么探活配置必须带 poolBypass（2026-08-07 修）
+ * ────────────────────────────────────────────────
+ * 探活走的是 pingModel → claudeRaw/openaiRaw → withEndpoint → resolveCandidates 这条正常外呼链路。
+ * `routingMode=pool` 时，resolveCandidates 会把传进去的配置**整体换成池成员**（llmPool.toCfg 覆盖
+ * baseUrl/apiKey/model/temperature/thinking），于是「测试连接」测的根本不是运营正在编辑的那个端点：
+ *   - 刚粘错的 key / URL 照样返回「连通 ✓」；
+ *   - 想确认某个端点是否已恢复，测到的却是另一个；
+ *   - 探活没有 affinityKey，HRW 的 key 恒为 'anon' → 永远命中同一个池成员，多测几次也发现不了。
+ * 探活的语义就是「测这一个端点」，任何路由改写都是错的，故走与辅助档同一个 bypass 通道。
+ */
 
 /** 脱敏对外视图（不含明文 key；独立嵌入/重排 key 只回传是否已配置）。 */
 export function publicConfig(cfg: ResolvedAiConfig): AiConfig {

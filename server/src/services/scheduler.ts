@@ -232,6 +232,18 @@ export async function scanPrescriptionFollowup(): Promise<number> {
 }
 
 // 注册内置任务（周期：每 6 小时扫一轮；召回/提醒按天幂等，多扫无副作用）
+// 端点探活（services/aiProbe）：把「能力靠猜、验证靠人记得点按钮」变成周期性证据。
+// 频率见 SCHEDULED_PROBES；探活是真实计费请求，用量按 kind='probe' 单独记账，
+// 并留 AI_PROBE_SCHEDULED=false 一键全停。
+registerJob({
+  name: 'ai-endpoint-probe',
+  intervalMs: 10 * 60_000,
+  run: async () => {
+    const { scheduledProbeSweep } = await import('./aiProbe.js');
+    await scheduledProbeSweep(now());
+  },
+});
+
 registerJob({ name: 'casefile-idle-recall', intervalMs: 6 * 3600_000, run: async () => { await scanIdleCasefiles(); } });
 registerJob({ name: 'review-gap-reminder', intervalMs: 6 * 3600_000, run: async () => { await scanReviewGaps(); } });
 registerJob({ name: 'daily-review-reminder', intervalMs: 30 * 60_000, run: async () => { await scanDailyReviewReminders(); } });

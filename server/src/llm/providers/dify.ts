@@ -103,7 +103,9 @@ async function callDify(ctx: GenContext, query: string): Promise<{ answer: strin
       });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as DifyStreamEvent;
-        throw Object.assign(new Error(`Dify ${res.status}: ${data.message ?? data.code ?? '请求失败'}`), { statusCode: res.status });
+        throw Object.assign(new Error(`Dify ${res.status}: ${data.message ?? data.code ?? '请求失败'}`), {
+          statusCode: res.status, providerErrorCode: data.code,
+        });
       }
       return await readDifyStream(res);
     });  // dify 是 per-agent 独立接入，不走 aux 辅助档 → 恒用 main 车道

@@ -1077,7 +1077,7 @@
     {
       "id": 62,
       "type": "row",
-      "title": "对话交互质量",
+      "title": "错误分布",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -1090,8 +1090,8 @@
     {
       "id": 63,
       "type": "stat",
-      "title": "首字延迟 P95(30m)",
-      "description": "用户唯一直接体感到的等待。实测干净时 4–11s；红线与后台「告警 · 首字延迟 P95 线」联动",
+      "title": "鉴权失败(15m)",
+      "description": ">0 即触发 JunshiLlmAuthErrors——对应来源的请求会持续失败，不会自愈",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1099,7 +1099,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum(rate(junshi_chat_first_token_seconds_bucket[30m])) by (le))",
+          "expr": "sum(increase(junshi_llm_errors_total{bucket=\"auth\"}[15m]))",
           "legendFormat": "__auto",
           "range": true,
           "datasource": {
@@ -1110,70 +1110,6 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 54,
-        "w": 4,
-        "h": 5
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "decimals": 1,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "value": null,
-                "color": "green"
-              },
-              {
-                "value": 12,
-                "color": "yellow"
-              },
-              {
-                "value": 20,
-                "color": "red"
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "graphMode": "area",
-        "colorMode": "value",
-        "textMode": "auto"
-      }
-    },
-    {
-      "id": 64,
-      "type": "stat",
-      "title": "流卡死(1h)",
-      "description": "空闲看门狗开火次数。这不是「慢」，是上游发完响应头就不发了；>0 就该查上游",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "sum(increase(junshi_chat_stream_stall_total[1h]))",
-          "legendFormat": "__auto",
-          "range": true,
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          }
-        }
-      ],
-      "gridPos": {
-        "x": 4,
         "y": 54,
         "w": 4,
         "h": 5
@@ -1211,10 +1147,10 @@
       }
     },
     {
-      "id": 65,
+      "id": 64,
       "type": "stat",
-      "title": "未写完交回用户(1h)",
-      "description": "自动续写后仍没写完、端上出「继续写完」的次数",
+      "title": "上下文超限(15m)",
+      "description": "用户输入/历史超过模型上限被直接拒绝，不会自动重试",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1222,7 +1158,70 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(increase(junshi_llm_output_truncated_total{resolved=\"given_up\"}[1h]))",
+          "expr": "sum(increase(junshi_llm_errors_total{bucket=\"context_length\"}[15m]))",
+          "legendFormat": "__auto",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 4,
+        "y": 54,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "yellow"
+              },
+              {
+                "value": 5,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 65,
+      "type": "stat",
+      "title": "内容策略拒绝(15m)",
+      "description": "模型服务侧内容策略拒绝，区别于我方审核拦截（moderation）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(junshi_llm_errors_total{bucket=\"content_filter\"}[15m]))",
           "legendFormat": "__auto",
           "range": true,
           "datasource": {
@@ -1276,6 +1275,572 @@
     {
       "id": 66,
       "type": "stat",
+      "title": "网络/过载类(15m)",
+      "description": "连接失败或上游明确过载；通常会先转移端点，仍频繁出现说明兜底也在失效",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(junshi_llm_errors_total{bucket=~\"network|overloaded\"}[15m]))",
+          "legendFormat": "__auto",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 54,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 3,
+                "color": "yellow"
+              },
+              {
+                "value": 10,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 67,
+      "type": "timeseries",
+      "title": "错误按类型分布(15m)",
+      "description": "一眼看出这轮错误主要是哪种类型，而不只是「错误率高了」",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (bucket) (increase(junshi_llm_errors_total[15m]))",
+          "legendFormat": "{{bucket}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 59,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 68,
+      "type": "timeseries",
+      "title": "错误明细（来源 × 模型 × 类型，1h）",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (provider, model, bucket) (increase(junshi_llm_errors_total[1h])) > 0",
+          "legendFormat": "{{provider}} {{model}} {{bucket}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 59,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 69,
+      "type": "row",
+      "title": "耗时分解",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 67,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 70,
+      "type": "timeseries",
+      "title": "排队等待分位（真实分布，替代峰值近似）",
+      "description": "junshi_llm_wait_seconds 含每次授予槽位的真实等待（含 0 等待），可算真实分位数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(junshi_llm_wait_seconds_bucket[15m])))",
+          "legendFormat": "P50",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(junshi_llm_wait_seconds_bucket[15m])))",
+          "legendFormat": "P95",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(junshi_llm_wait_seconds_bucket[15m])))",
+          "legendFormat": "P99",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 68,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 71,
+      "type": "timeseries",
+      "title": "模型调用 P95 按模型拆分",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(junshi_llm_call_duration_seconds_bucket[15m])))",
+          "legendFormat": "{{model}}",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 68,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 72,
+      "type": "timeseries",
+      "title": "耗时构成对比（P95：排队 / 模型调用 / 对话首字）",
+      "description": "三条线分别对应「等槽位」「打上游」「用户等到第一个字」，一眼定位耗时主要花在哪一段",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(junshi_llm_wait_seconds_bucket[15m])))",
+          "legendFormat": "排队等待",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(junshi_llm_call_duration_seconds_bucket[15m])))",
+          "legendFormat": "模型调用",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.95, sum(rate(junshi_chat_first_token_seconds_bucket[15m])) by (le))",
+          "legendFormat": "对话首字",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 76,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "lineWidth": 1,
+            "spanNulls": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 73,
+      "type": "row",
+      "title": "对话交互质量",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 84,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 74,
+      "type": "stat",
+      "title": "首字延迟 P95(30m)",
+      "description": "用户唯一直接体感到的等待。实测干净时 4–11s；红线与后台「告警 · 首字延迟 P95 线」联动",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(junshi_chat_first_token_seconds_bucket[30m])) by (le))",
+          "legendFormat": "__auto",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 85,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 12,
+                "color": "yellow"
+              },
+              {
+                "value": 20,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 75,
+      "type": "stat",
+      "title": "流卡死(1h)",
+      "description": "空闲看门狗开火次数。这不是「慢」，是上游发完响应头就不发了；>0 就该查上游",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(junshi_chat_stream_stall_total[1h]))",
+          "legendFormat": "__auto",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 4,
+        "y": 85,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 76,
+      "type": "stat",
+      "title": "未写完交回用户(1h)",
+      "description": "自动续写后仍没写完、端上出「继续写完」的次数",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(junshi_llm_output_truncated_total{resolved=\"given_up\"}[1h]))",
+          "legendFormat": "__auto",
+          "range": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "x": 8,
+        "y": 85,
+        "w": 4,
+        "h": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "value": null,
+                "color": "green"
+              },
+              {
+                "value": 1,
+                "color": "yellow"
+              },
+              {
+                "value": 5,
+                "color": "red"
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "graphMode": "area",
+        "colorMode": "value",
+        "textMode": "auto"
+      }
+    },
+    {
+      "id": 77,
+      "type": "stat",
       "title": "自动续写救回(1h)",
       "description": "用户无感，但每次都多烧一轮 token。持续偏高＝该调输出预算或提示词长度约束",
       "datasource": {
@@ -1296,7 +1861,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 54,
+        "y": 85,
         "w": 4,
         "h": 5
       },
@@ -1333,7 +1898,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 78,
       "type": "stat",
       "title": "残文保全(1h)",
       "description": "已下发正文没被换成错误气泡的次数。上面两格在涨而这里恒 0，说明安全网破了（见 JunshiChatPartialKeptBroken）",
@@ -1355,7 +1920,7 @@
       ],
       "gridPos": {
         "x": 16,
-        "y": 54,
+        "y": 85,
         "w": 4,
         "h": 5
       },
@@ -1388,7 +1953,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 79,
       "type": "stat",
       "title": "非流式对话占比(1h)",
       "description": "非流式没有逐字手感，且吃总时长超时。配了技能的智能体天然在这一类里",
@@ -1410,7 +1975,7 @@
       ],
       "gridPos": {
         "x": 20,
-        "y": 54,
+        "y": 85,
         "w": 4,
         "h": 5
       },
@@ -1452,7 +2017,7 @@
       }
     },
     {
-      "id": 69,
+      "id": 80,
       "type": "timeseries",
       "title": "首字延迟分位",
       "datasource": {
@@ -1483,7 +2048,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 59,
+        "y": 90,
         "w": 12,
         "h": 8
       },
@@ -1511,7 +2076,7 @@
       }
     },
     {
-      "id": 70,
+      "id": 81,
       "type": "timeseries",
       "title": "非流式回落原因",
       "description": "stream_failed 与 sync 同时抬头＝2026-08-04 那次「连续 60s 超时」的形状",
@@ -1533,7 +2098,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 59,
+        "y": 90,
         "w": 12,
         "h": 8
       },
@@ -1564,7 +2129,7 @@
       }
     },
     {
-      "id": 71,
+      "id": 82,
       "type": "timeseries",
       "title": "截断处置：救回 vs 交回用户",
       "description": "continued 高＝预算/长度约束该调；given_up 高＝用户真的在看到未写完",
@@ -1586,7 +2151,7 @@
       ],
       "gridPos": {
         "x": 0,
-        "y": 67,
+        "y": 98,
         "w": 12,
         "h": 8
       },
@@ -1614,7 +2179,7 @@
       }
     },
     {
-      "id": 72,
+      "id": 83,
       "type": "timeseries",
       "title": "流卡死与残文保全",
       "description": "first_event=发完头就断供；mid_stream=中途被掐。保全曲线该跟着卡死曲线走",
@@ -1646,7 +2211,7 @@
       ],
       "gridPos": {
         "x": 12,
-        "y": 67,
+        "y": 98,
         "w": 12,
         "h": 8
       },

@@ -52,6 +52,10 @@ export interface PoolEndpoint {
   temperature: number;
   thinkingMode: AiThinkingMode;
   thinkingBudget: number;
+  // 方言/能力按端点走：池里可以同时有「七牛 Anthropic 网关」和「Anthropic 官方直连」，
+  // 两者关闭思考的写法不同（显式 disabled vs 整体省略），用全局方言组装另一个端点的请求必错。
+  dialect: string | null;
+  capsJson: unknown;
   weight: number;
   tier: number;
   maxConcurrency: number;
@@ -106,6 +110,19 @@ export async function loadPool(force = false): Promise<{ endpoints: PoolEndpoint
   }
   let endpoints: PoolEndpoint[] = [];
   let settings: PoolSettings = { mode: 'single', sticky: true };
+
+  // 三期：切到归一化表后，池成员来自 purpose='chat' 路由，而不是 ai_model.poolEnabled。
+  // 没有可用路由（迁移没跑 / 路由被清空）就静默回落旧表——池的定位是「一个端点挂了还有别的」，
+  // 它自己绝不能因为读不到新表而把 AI 停掉。
+  const v2 = await routeForPool();
+  if (v2) {
+    for (const e of v2.endpoints) {
+      for (const cls of ['main', 'aux'] as LlmLaneClass[]) setLaneMaxConcurrency(endpointLane(cls, e.id), e.maxConcurrency);
+    }
+    cfgCache = { at: Date.now(), endpoints: v2.endpoints, settings: v2.settings };
+    return { endpoints: v2.endpoints, settings: v2.settings };
+  }
+
   try {
     const row = (await prisma.aiSetting.findUnique({ where: { id: 'default' } })) as Record<string, unknown> | null;
     settings = {
@@ -127,6 +144,8 @@ export async function loadPool(force = false): Promise<{ endpoints: PoolEndpoint
           temperature: typeof m.temperature === 'number' ? m.temperature : 0.7,
           thinkingMode: normalizeThinkingMode(m.thinkingMode),
           thinkingBudget: normalizeThinkingBudget(m.thinkingBudget),
+          dialect: (m.dialect as string | null) ?? null,
+          capsJson: m.capsJson ?? null,
           weight: Math.max(1, Number(m.weight ?? 1) || 1),
           tier: Math.max(0, Number(m.tier ?? 0) || 0),
           maxConcurrency: Math.max(0, Number(m.maxConcurrency ?? 0) || 0),
@@ -146,6 +165,25 @@ export async function loadPool(force = false): Promise<{ endpoints: PoolEndpoint
   }
   cfgCache = { at: Date.now(), endpoints, settings };
   return { endpoints, settings };
+}
+
+/** purpose='chat' 路由 → 池成员。返回 null 表示没切 V2 或该路由不可用，调用方回落旧表。 */
+async function routeForPool(): Promise<{ endpoints: PoolEndpoint[]; settings: PoolSettings } | null> {
+  const { resolveRoute } = await import('./aiRoutes.js');
+  const route = await resolveRoute('chat');
+  if (!route) return null;
+  if (route.mode !== 'pool') return { endpoints: [], settings: { mode: 'single', sticky: route.sticky } };
+  return {
+    settings: { mode: 'pool', sticky: route.sticky },
+    endpoints: route.endpoints.map((e) => ({
+      id: e.id, label: e.label, provider: e.provider, baseUrl: e.baseUrl, apiKey: e.apiKey,
+      model: e.model, temperature: e.temperature,
+      thinkingMode: e.thinkingMode as PoolEndpoint['thinkingMode'],
+      thinkingBudget: e.thinkingBudget,
+      dialect: e.dialect, capsJson: e.capsJson,
+      weight: e.weight, tier: e.tier, maxConcurrency: e.maxConcurrency,
+    })),
+  };
 }
 
 /** 刷新冷却视图（Redis → 本地缓存）。无 Redis 时只清理本地过期项。 */
@@ -261,6 +299,8 @@ function toCfg(base: ResolvedAiConfig, e: PoolEndpoint): ResolvedAiConfig {
     temperature: e.temperature,
     thinkingMode: e.thinkingMode,
     thinkingBudget: e.thinkingBudget,
+    dialect: e.dialect,
+    capsJson: e.capsJson,
     keyDecryptFailed: false, // loadPool 已滤掉解不开 key 的端点
     traceEndpointId: e.id,
     traceEndpointLabel: e.label || undefined,
@@ -354,6 +394,8 @@ export function __resetLlmPool(): void {
   cfgCache = null;
   localCool.clear();
   healthCacheAt = 0;
+  // 池成员在 V2 下来自路由表，两层缓存必须一起失效，否则「后台改完立刻生效」只对旧表成立。
+  void import('./aiRoutes.js').then((m) => m.__resetAiRoutes()).catch(() => {});
 }
 
 /** 仅供测试：注入端点池，跳过 DB。 */

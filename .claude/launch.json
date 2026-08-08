@@ -43,6 +43,17 @@
         "dev"
       ],
       "port": 5174
+    },
+    {
+      "name": "server-api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "server",
+        "run",
+        "dev"
+      ],
+      "port": 4000
     }
   ]
 }

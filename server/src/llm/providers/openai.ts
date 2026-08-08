@@ -54,12 +54,13 @@ export function openaiUserContent(userMessage: string, images?: ImageInput[]): s
 interface OAResponse {
   choices?: { message?: { content?: string | null; tool_calls?: OAToolCall[] }; finish_reason?: string | null }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; prompt_tokens_details?: { cached_tokens?: number } };
-  error?: { message?: string };
+  // type/code：OpenAI 标准错误体字段（如 context_length_exceeded），供 errorClassify 分类用。
+  error?: { message?: string; type?: string; code?: string | null };
 }
 interface OAStreamChunk {
   choices?: { delta?: { content?: string | null }; finish_reason?: string | null }[];
   usage?: OAResponse['usage'];
-  error?: { message?: string };
+  error?: { message?: string; type?: string; code?: string | null };
 }
 
 const DELIVERABLE_MAX_TOKENS = 8000; // 报告产出上限（放到整份报告够用，实际按需生成不硬凑）
@@ -157,8 +158,11 @@ async function callChat(
         });
         const data = (await res.json().catch(() => ({}))) as OAResponse;
         if (!res.ok) {
-          // 带上 statusCode，让闸门/池能确定性识别 429 而不是靠文案匹配（429 → 整窗冷却 + 转移）。
-          throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), { statusCode: res.status });
+          // 带上 statusCode，让闸门/池能确定性识别 429 而不是靠文案匹配（429 → 整窗冷却 + 转移）；
+          // providerErrorType/Code 供 errorClassify 分类成 context_length/content_filter 等 bucket。
+          throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), {
+            statusCode: res.status, providerErrorType: data.error?.type, providerErrorCode: data.error?.code ?? undefined,
+          });
         }
         return data;
       } finally {
@@ -204,7 +208,9 @@ async function* readOpenAIStream(res: Response, onChunk: () => void): AsyncGener
         let data: OAStreamChunk;
         try { data = JSON.parse(raw) as OAStreamChunk; }
         catch { continue; }
-        if (data.error?.message) throw new Error(data.error.message);
+        if (data.error?.message) {
+          throw Object.assign(new Error(data.error.message), { providerErrorType: data.error.type, providerErrorCode: data.error.code ?? undefined });
+        }
         yield data;
       }
     }
@@ -269,7 +275,9 @@ async function callChatStream(
           return text ? { error: { message: text } } : {};
         })) as OAResponse;
         if (res.status === 429) noteUpstreamRateLimited(undefined, lane);
-        throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), { statusCode: res.status });
+        throw Object.assign(new Error(`OpenAI 兼容接口 ${res.status}: ${data.error?.message ?? '请求失败'}`), {
+          statusCode: res.status, providerErrorType: data.error?.type, providerErrorCode: data.error?.code ?? undefined,
+        });
       }
       handedOff = true;
       return (async function* () {

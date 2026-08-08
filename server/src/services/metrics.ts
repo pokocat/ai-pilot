@@ -11,7 +11,7 @@
 // 端点只报 id / label / model / tier（都是运营自己填的展示信息）。
 
 import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
-import { llmGateStatsAll } from './llmGate.js';
+import { llmGateStatsAll, WAIT_BUCKET_BOUNDS_S } from './llmGate.js';
 import { poolStatus } from './llmPool.js';
 import { alertConfigValues } from './alertConfig.js';
 import { prisma } from '../db.js';
@@ -169,13 +169,21 @@ export function noteHttpTiming(method: string, route: string, status: number, se
 const llmCalls = new LabeledCounter('junshi_llm_calls_total', 'LLM 调用数（与 llm_trace 同口径，含 mock 与错误）');
 const llmCallDuration = new LabeledHistogram(
   'junshi_llm_call_duration_seconds',
-  'LLM 单次调用时长（含工具循环整体耗时）',
+  'LLM 单次调用时长（含工具循环整体耗时；按 model 拆分，供各模型延迟对比）',
   [0.5, 1, 2, 5, 10, 20, 30, 60, 120, 180, 300, 600],
 );
+// 错误分布：status='error' 时按 classifyLlmError()（见 llm/errorClassify.ts）分类计数，
+// 回答「错误码/类型的分布」——与 llmCalls 的粗粒度 ok/error 互补。
+const llmErrors = new LabeledCounter(
+  'junshi_llm_errors_total',
+  'LLM 调用失败按错误类型分布（bucket=busy|moderation|output_truncated|timeout|empty_response|auth|rate_limit|context_length|content_filter|invalid_request|overloaded|server_error|network|unknown）',
+  500,
+);
 
-export function noteLlmCall(kind: string, provider: string, status: 'ok' | 'error', latencyMs: number): void {
-  llmCalls.inc({ kind, provider, status });
-  llmCallDuration.observe({ kind, provider }, latencyMs / 1000);
+export function noteLlmCall(kind: string, provider: string, model: string, status: 'ok' | 'error', latencyMs: number, errorBucket?: string): void {
+  llmCalls.inc({ kind, provider, model, status });
+  llmCallDuration.observe({ kind, provider, model }, latencyMs / 1000);
+  if (status === 'error') llmErrors.inc({ kind, provider, model, bucket: errorBucket || 'unknown' });
 }
 
 /* ──────────────── Token 用量与成本（与 token_usage 同源） ──────────────── */
@@ -201,6 +209,19 @@ export function noteTokenUsage(args: {
 
 // 「报告假完成」「降级模板」这类缺陷线上最难被用户报出来——用户只觉得内容差，不会截图报错。
 // path 标签指认降级发生在哪条产出路径（gateway 各 fallback 分支）。
+// 端点探活（services/aiProbe）。定时项失败＝这个上游的某项能力现在不可用，
+// 与「用户请求失败」是两码事：探活先红，说明我们**在用户撞上之前**就发现了。
+const probeRuns = new LabeledCounter('junshi_ai_endpoint_probe_total', '端点探活次数（kind=检测项，status=ok|fail）');
+const probeLatency = new LabeledHistogram(
+  'junshi_ai_endpoint_probe_duration_seconds',
+  '端点探活耗时（按检测项）',
+  [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30, 60],
+);
+export function noteProbe(kind: string, ok: boolean, seconds: number): void {
+  probeRuns.inc({ kind, status: ok ? 'ok' : 'fail' });
+  probeLatency.observe({ kind }, seconds);
+}
+
 const genDegraded = new LabeledCounter('junshi_gen_degraded_total', '产出降级次数（mock 兜底 / 工程语境泄漏替换）');
 export function noteGenDegraded(path: string): void { genDegraded.inc({ path }); }
 
@@ -557,11 +578,13 @@ export async function renderMetrics(): Promise<string> {
 
   /* —— 路由级时延 / 状态 —— */
   httpDuration.renderInto(ms);
+  probeRuns.renderInto(ms); probeLatency.renderInto(ms);
   httpRouteResponses.renderInto(ms);
 
   /* —— LLM 调用 / Token / 成本 / 产出质量 —— */
   llmCalls.renderInto(ms);
   llmCallDuration.renderInto(ms);
+  llmErrors.renderInto(ms);
   llmTokens.renderInto(ms);
   llmCost.renderInto(ms);
   genDegraded.renderInto(ms);
@@ -639,6 +662,9 @@ export async function renderMetrics(): Promise<string> {
       cooldowns: push(metric('junshi_llm_cooldowns_total', '进入冷却的次数', 'counter')),
       qmax: push(metric('junshi_llm_queue_depth_max', '队列深度峰值', 'gauge')),
       wmax: push(metric('junshi_llm_wait_max_seconds', '排队等待峰值', 'gauge')),
+      // 真实等待分布（含立即授予的 0 等待）：配合 histogram_quantile 算真实 P95，弥补上面
+      // wmax 只是峰值近似的口径缺口（口径注见 docs/MONITORING.md §7）。
+      wait: push(metric('junshi_llm_wait_seconds', '排队等待时长分布（每次授予槽位记一次）', 'histogram')),
     };
     for (const s of lanes) {
       const l = { lane: s.lane };
@@ -657,6 +683,12 @@ export async function renderMetrics(): Promise<string> {
       g.cooldowns.samples.push(fmt('junshi_llm_cooldowns_total', s.cooldowns, l));
       g.qmax.samples.push(fmt('junshi_llm_queue_depth_max', s.maxQueueDepth, l));
       g.wmax.samples.push(fmt('junshi_llm_wait_max_seconds', s.maxWaitMs / 1000, l));
+      for (let i = 0; i < WAIT_BUCKET_BOUNDS_S.length; i++) {
+        g.wait.samples.push(fmt('junshi_llm_wait_seconds_bucket', s.waitBucketCounts[i], { ...l, le: String(WAIT_BUCKET_BOUNDS_S[i]) }));
+      }
+      g.wait.samples.push(fmt('junshi_llm_wait_seconds_bucket', s.waitCount, { ...l, le: '+Inf' }));
+      g.wait.samples.push(fmt('junshi_llm_wait_seconds_sum', s.waitSumMs / 1000, l));
+      g.wait.samples.push(fmt('junshi_llm_wait_seconds_count', s.waitCount, l));
     }
   } catch { /* 闸门未初始化时跳过 */ }
 
@@ -700,7 +732,8 @@ export function __resetMetrics(): void {
   responsesByClass.clear();
   overloadRejected = 0; rateLimited = 0;
   httpDuration.reset(); httpRouteResponses.reset();
-  llmCalls.reset(); llmCallDuration.reset(); llmTokens.reset(); llmCost.reset();
+  probeRuns.reset(); probeLatency.reset();
+  llmCalls.reset(); llmCallDuration.reset(); llmErrors.reset(); llmTokens.reset(); llmCost.reset();
   genDegraded.reset(); outputTruncated.reset(); asksRecovered.reset();
   chatStreamStall.reset(); chatNonStream.reset(); chatFirstToken.reset(); chatProviderFirstToken.reset(); chatPartialKept.reset();
   chatGenerations.reset(); chatGenerationDuration.reset(); chatGenerationRecovered.reset(); chatUsageEstimated.reset();

@@ -297,6 +297,53 @@ const llmDash = dashboard({
       promTarget('sum by (lane) (increase(junshi_llm_timed_out_total[10m]))', '{{lane}} 排队超时'),
     ] }),
 
+    // ── 错误分布（2026-08-07 补：只看 ok/error 太粗，出事时分不清该查密钥、上下文长度还是网络）──
+    // bucket 语义见 server/src/llm/errorClassify.ts；鉴权/上下文超限/内容策略对应新增告警
+    // JunshiLlmAuthErrors / JunshiLlmErrorByCategory（llm.rules.yml）。
+    row('错误分布'),
+    stat({
+      title: '鉴权失败(15m)', targets: [promTarget('sum(increase(junshi_llm_errors_total{bucket="auth"}[15m]))')],
+      steps: [[null, 'green'], [1, 'red']],
+      desc: '>0 即触发 JunshiLlmAuthErrors——对应来源的请求会持续失败，不会自愈',
+    }),
+    stat({
+      title: '上下文超限(15m)', targets: [promTarget('sum(increase(junshi_llm_errors_total{bucket="context_length"}[15m]))')],
+      steps: [[null, 'green'], [1, 'yellow'], [5, 'red']],
+      desc: '用户输入/历史超过模型上限被直接拒绝，不会自动重试',
+    }),
+    stat({
+      title: '内容策略拒绝(15m)', targets: [promTarget('sum(increase(junshi_llm_errors_total{bucket="content_filter"}[15m]))')],
+      steps: [[null, 'green'], [1, 'yellow'], [5, 'red']],
+      desc: '模型服务侧内容策略拒绝，区别于我方审核拦截（moderation）',
+    }),
+    stat({
+      title: '网络/过载类(15m)', targets: [promTarget('sum(increase(junshi_llm_errors_total{bucket=~"network|overloaded"}[15m]))')],
+      steps: [[null, 'green'], [3, 'yellow'], [10, 'red']],
+      desc: '连接失败或上游明确过载；通常会先转移端点，仍频繁出现说明兜底也在失效',
+    }),
+    timeseries({ title: '错误按类型分布(15m)', stack: true, targets: [
+      promTarget('sum by (bucket) (increase(junshi_llm_errors_total[15m]))', '{{bucket}}'),
+    ], desc: '一眼看出这轮错误主要是哪种类型，而不只是「错误率高了」' }),
+    timeseries({ title: '错误明细（来源 × 模型 × 类型，1h）', targets: [
+      promTarget('sum by (provider, model, bucket) (increase(junshi_llm_errors_total[1h])) > 0', '{{provider}} {{model}} {{bucket}}'),
+    ] }),
+
+    // ── 耗时分解（2026-08-07 补：此前排队等待只有峰值近似，模型调用也不分模型）──
+    row('耗时分解'),
+    timeseries({ title: '排队等待分位（真实分布，替代峰值近似）', unit: 's', targets: [
+      promTarget('histogram_quantile(0.5, sum by (le) (rate(junshi_llm_wait_seconds_bucket[15m])))', 'P50'),
+      promTarget('histogram_quantile(0.95, sum by (le) (rate(junshi_llm_wait_seconds_bucket[15m])))', 'P95'),
+      promTarget('histogram_quantile(0.99, sum by (le) (rate(junshi_llm_wait_seconds_bucket[15m])))', 'P99'),
+    ], desc: 'junshi_llm_wait_seconds 含每次授予槽位的真实等待（含 0 等待），可算真实分位数' }),
+    timeseries({ title: '模型调用 P95 按模型拆分', unit: 's', targets: [
+      promTarget('histogram_quantile(0.95, sum by (le, model) (rate(junshi_llm_call_duration_seconds_bucket[15m])))', '{{model}}'),
+    ] }),
+    timeseries({ title: '耗时构成对比（P95：排队 / 模型调用 / 对话首字）', unit: 's', targets: [
+      promTarget('histogram_quantile(0.95, sum by (le) (rate(junshi_llm_wait_seconds_bucket[15m])))', '排队等待'),
+      promTarget('histogram_quantile(0.95, sum by (le) (rate(junshi_llm_call_duration_seconds_bucket[15m])))', '模型调用'),
+      promTarget('histogram_quantile(0.95, sum(rate(junshi_chat_first_token_seconds_bucket[15m])) by (le))', '对话首字'),
+    ], desc: '三条线分别对应「等槽位」「打上游」「用户等到第一个字」，一眼定位耗时主要花在哪一段' }),
+
     // ── 对话交互质量（2026-08-04 截断/超时复盘后补）──
     // 上面那些指标全绿也可能体验很糟：首字等 40 秒、逐字流其实没在流、半篇回答被换成错误气泡。
     // 这一组专答「用户这一轮体验到了什么」，告警规则在 llm.rules.yml 的 junshi-chat 组。

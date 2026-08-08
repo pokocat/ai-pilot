@@ -15,7 +15,7 @@
   },
   "panels": [
     {
-      "id": 73,
+      "id": 84,
       "type": "stat",
       "title": "总用户数",
       "datasource": {
@@ -69,7 +69,7 @@
       }
     },
     {
-      "id": 74,
+      "id": 85,
       "type": "stat",
       "title": "今日注册",
       "datasource": {
@@ -123,7 +123,7 @@
       }
     },
     {
-      "id": 75,
+      "id": 86,
       "type": "stat",
       "title": "今日 GMV(元)",
       "datasource": {
@@ -178,7 +178,7 @@
       }
     },
     {
-      "id": 76,
+      "id": 87,
       "type": "stat",
       "title": "今日订单(入账)",
       "datasource": {
@@ -232,7 +232,7 @@
       }
     },
     {
-      "id": 77,
+      "id": 88,
       "type": "stat",
       "title": "卡单(已付未发放)",
       "description": ">0 超 10 分钟会触发 critical 告警,处理入口=运营后台「订单」页",
@@ -291,7 +291,7 @@
       }
     },
     {
-      "id": 78,
+      "id": 89,
       "type": "stat",
       "title": "今日产出(报告)",
       "datasource": {
@@ -345,7 +345,7 @@
       }
     },
     {
-      "id": 79,
+      "id": 90,
       "type": "row",
       "title": "支付可靠性与创作质量",
       "collapsed": false,
@@ -358,7 +358,7 @@
       "panels": []
     },
     {
-      "id": 80,
+      "id": 91,
       "type": "stat",
       "title": "支付 sweep(15m)",
       "description": "API 运行超过 20 分钟且这里为 0，会触发 JunshiPaySweepStopped",
@@ -417,7 +417,7 @@
       }
     },
     {
-      "id": 81,
+      "id": 92,
       "type": "stat",
       "title": "创作失败率(1h)",
       "description": "样本≥5 且 >20% 会触发 JunshiCreativeFailureRateHigh",
@@ -481,7 +481,7 @@
       }
     },
     {
-      "id": 82,
+      "id": 93,
       "type": "stat",
       "title": "AI 排版模板回退(1h)",
       "description": "任务可能成功，但 AI 排版已退化；>3 触发告警",
@@ -544,7 +544,7 @@
       }
     },
     {
-      "id": 83,
+      "id": 94,
       "type": "timeseries",
       "title": "创作任务结果（1h 滚动）",
       "datasource": {
@@ -593,7 +593,7 @@
       }
     },
     {
-      "id": 84,
+      "id": 95,
       "type": "timeseries",
       "title": "创作失败码（1h 滚动）",
       "datasource": {
@@ -642,7 +642,7 @@
       }
     },
     {
-      "id": 85,
+      "id": 96,
       "type": "timeseries",
       "title": "排版引擎实际落点（1h 滚动）",
       "description": "ai:Nrounds=AI 排版成功；template=主动模板；template_fallback=AI 失败后回落",
@@ -692,7 +692,7 @@
       }
     },
     {
-      "id": 86,
+      "id": 97,
       "type": "timeseries",
       "title": "注册趋势（日）",
       "datasource": {
@@ -741,7 +741,7 @@
       }
     },
     {
-      "id": 87,
+      "id": 98,
       "type": "timeseries",
       "title": "日活（当天有过模型调用的用户）",
       "datasource": {
@@ -790,7 +790,7 @@
       }
     },
     {
-      "id": 88,
+      "id": 99,
       "type": "timeseries",
       "title": "GMV 与订单量（日,按支付时间）",
       "description": "口径=完成支付的订单（含事后退款的）;退款金额单看下面退款面板",
@@ -850,7 +850,7 @@
       }
     },
     {
-      "id": 89,
+      "id": 100,
       "type": "timeseries",
       "title": "Token 成本（元/日,含基建调用）",
       "datasource": {
@@ -899,7 +899,7 @@
       }
     },
     {
-      "id": 90,
+      "id": 101,
       "type": "timeseries",
       "title": "算力流水（日）",
       "datasource": {
@@ -958,7 +958,7 @@
       }
     },
     {
-      "id": 91,
+      "id": 102,
       "type": "timeseries",
       "title": "产出量（日 × 类型）",
       "datasource": {
@@ -1007,7 +1007,7 @@
       }
     },
     {
-      "id": 92,
+      "id": 103,
       "type": "table",
       "title": "套餐分布（当前存量）",
       "datasource": {
@@ -1044,7 +1044,7 @@
       }
     },
     {
-      "id": 93,
+      "id": 104,
       "type": "timeseries",
       "title": "退款（日）",
       "datasource": {
@@ -1093,7 +1093,7 @@
       }
     },
     {
-      "id": 94,
+      "id": 105,
       "type": "timeseries",
       "title": "审核拦截（日 × 方向）",
       "datasource": {
@@ -1142,7 +1142,7 @@
       }
     },
     {
-      "id": 95,
+      "id": 106,
       "type": "timeseries",
       "title": "转化信号：禁写闸拦截（想用但没套餐/已到期）",
       "description": "none=未开通用户在尝试写操作（销售线索）;expired=到期用户还在用（续费提醒线索）",

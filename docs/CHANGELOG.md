@@ -59,6 +59,69 @@
 恢复在游客浏览改造中被删掉的新账号注册与入局主链，并同步迁入原生端：微信/手机号认证后若缺称呼，先进入历史“先让军师认得你”身份页，称呼必填、微信头像可选且走真实 `/me`/头像上传；权威未建档账号保存称呼后自动进入入局仪式。原生 onboarding 不再使用迁移期简化的“圆角四步顺序题”替代页，改为与 Taro 原稿同结构的六色卡与批语、三题 chip 云/其他自填、公司选填、Profile 保存硬闸门、quickscan 初步军情打字机、主要矛盾和今日一事，完成后继续五 Tab 功能点亮。已入局老账号不重复进入，中途退出由战局说明卡续做；H5 登录同样恢复身份页与自动导航。原生 mock 新账号同步移除“主公”假称呼，确保本地预览也真实经过身份补全；新增跨原生/H5 的注册主链回归断言。
 
 里程碑日志尝试同步 Notion：页面在现有 Chrome 登录态可打开，但自动编辑连续超时；为避免盲写或重复插入，本次未提交远端文档，待补内容已明确记入 `AGENTS.md` §13，仓库本条仍为当前完整真源。
+### 2026-08-08 · 补三期的写回缺口：切到 V2 后后台改配置必须真的生效 · 影响面：server（迁移体从 scripts 挪进 src）+ 新增 1 个测试文件 + docs
+
+**这是三期我自己埋进去的缺陷，复盘时才发现。** 切到 `AI_CONFIG_V2` 之后，运行时读的是 `ai_route`，而后台写的仍是 `ai_model` / `ai_setting`——中间没有任何东西把改动投影过去。表现是：运营在后台改完配置，页面显示已保存、审计日志有记录、旧表里确实变了，**但线上纹丝不动，且没有任何报错**。所有东西看起来都对，是最难排查的一类故障；要恢复只能有人手动重跑一次迁移脚本，而没人会知道该重跑。
+
+**修法：投影而不是另写一套同步。** 新增 `services/aiRoutes.syncV2FromLegacy()`，直接复用迁移体——它本来就是幂等的（端点按 `legacyModelId` upsert、凭证按 key 去重、路由成员全量重放）。另写一份同步逻辑迟早会和迁移分叉，而分叉的那天就是这个故障重新出现的那天。挂在五个写路径上：`setAiConfig` / `syncActiveSetting`（切换生效模型）/ `addModel` / `updateModel` / `deleteModel`，以及 `PUT /admin/ai-routing`。V2 没开时是空操作；投影失败只记日志不抛——配置已经写进旧表了，投影失败不该让后台的保存请求变红。
+
+**顺带修掉迁移的一个不完整**：此前只做「按旧表算出该有什么」的增量，没有清理**孤儿端点**——运营在后台删掉一个模型后，它对应的端点仍留在路由里继续接流量。现按 `legacyModelId` 反查并清理。
+
+**迁移体从 `scripts/` 挪进 `src/services/aiConfigMigrate.ts`**：它现在是运行时代码（投影函数），不再只是一次性脚本；`scripts/migrateAiConfig.ts` 退化成薄 CLI 壳。tsc 的 `rootDir` 也要求这么放。
+
+**顺着同一条线索又查出两处断线（同类缺陷，都已修）**：
+① **探活的能力回填到不了运行时**——`probeModelById` 写的是 `ai_model.capsJson`，切到 V2 后运行时读的却是 `ai_endpoint.capsJson`，中间同样没有投影。于是「探活证伪 → 校验器拦截 → 请求不再发 thinking」这个闭环恰好断在最后一环，而它正是二期的核心主张。现在探活写完也调 `syncV2FromLegacy()`。
+② **`model_scope` 探活把查回来的模型清单扔掉了**——`MODEL_OUT_OF_KEY_SCOPE` 这条规则等的就是它，而取数层读的是 `capsJson.modelScope` 这个从来没有人写过、且 `EndpointCapsSchema` 是 `.strict()` 根本不接受的字段。一根线的两头从来没接上，规则写了却永远不会触发。现在 caps schema 收下 `modelScope`，探活写入、校验器读取（迁移会把 caps 一起带进 V2，两种模式都通）。
+
+**验证**：新增 `test/aiV2Writeback.test.ts` **10 例**——改模型 / 改温度与思考模式 / 新增 / 切换生效 / 删除（含孤儿清理）/ V2 关闭时不写新表 / 投影失败不阻断保存 / 探活 caps 投影后真的影响请求组装 / 模型范围规则能被触发 / 没探过时不误报。server `tsc` 0 错、`npm test` **1409/1409**。
+
+**这三处是同一类缺陷**：写路径改了旧表、读路径已经切到新表，中间少一次投影——共同特征是**不报错**，页面、日志、旧表全都显示正常。三期引入双表并存就必然带来这类风险，凡是「写旧表」的地方都要问一句「投影了吗」。
+
+### 2026-08-07 · 重设计收尾：修掉 D1 的第三个入口 + 切换彩排 + 决策点证据收窄 · 影响面：server + admin + docs
+
+针对「哪些还没做」的复盘，把四条待办里能做的都做掉，并在过程中发现一个一期漏修的缺陷。
+
+**D1 还有第三个入口（新发现，已修）**。一期只修了 `/admin/ai-models/test` 与 `/admin/ai-config/test`；`gateway.pingAgentRuntime`——智能体自带接入（`providerMode=openai`）的探活——**同样自己拼 cfg + 调 `pingModel`**，在 `routingMode=pool` 下同样被端点池整体改写，测的不是这个智能体的端点。现补 `poolBypass: true`，并按设计稿决策点 5 的 B 项让它过 `validateEndpoint` 的 error 级校验（此前 Agent 这条路径完全不校验，`baseUrl` 粘成 `/v1/chat/completions` 也照测不误）。回归两例。这条正好印证了当初「唯独不要 C（明确不管）」的判断：盘点了五处配置只修三处，漏掉的那处就是缺陷藏身的地方。
+
+**切换彩排（`test/aiCutover.test.ts`，6 例）**。生产迁移与 `AI_CONFIG_V2` 切换属运维动作、需要窗口，但**切换真正的风险可以先在测试库上按生产形态跑掉**：两个 claude 端点直连七牛、池开启、粘性开启、adaptive 思考、四档单价。`aiMigrate` 验「写出来的行对不对」、`aiRoutes` 验「读出来的配置对不对」，而这里验的是**第三件、也是真正会出事的那件**——切过去之后运行时拿到的配置跟切之前是不是同一份。逐字段比对运行时配置、比对组装出的 thinking 参数（方言不能在迁移里丢）、比对池成员的数量/权重/tier、比对四档单价，以及关掉开关后的回滚等价性。任一字段在迁移中丢失，两边各自的单测都还是绿的，只有这个文件会红。
+
+**决策点 1 / 2 的证据收窄**（都没有据此改生产配置或记账常量——推断不是确认）。① 生产在用的 `/bypass/anthropic` **在七牛任何公开文档里都查不到**：FAQ 只讲 `https://api.qnaigc.com/v1`，官方 `qiniu/coding-helper` 写死 `ANTHROPIC_BASE_URL=https://api.qnaigc.com`。② 七牛模型广场的价目表**确有「缓存输入」档**（DeepSeek-V4-Pro 标「缓存输入 0.000025 元/K」），说明缓存读分开计价；但**没有单独的缓存写档位**——若七牛按输入价结算缓存写，我们默认的 `×1.25` 就是系统性高估 25%。两条都落成校验器 info 提示（`QINIU_ANTHROPIC_UNDOCUMENTED_PATH` / `PRICE_CACHE_WRITE_UNSET_QINIU`），让运营在改配置时当场看见，而不是躺在文档里。
+
+**旧列删除自检（`scripts/checkAiLegacyDrop.ts`）**。「观察一个发布周期」是时间条件、压不掉，但「能不能删」不该靠人凭印象拍板：现在一条命令检查读路径是否真的切过去、每行 `ai_model` 是否都有对应端点、chat 路由有无可用成员、旧表开着的能力在新表有无对应路由、有无待确认 vendor 的凭证。**全绿也不等于现在就删**——仍需人工确认已观察满一个周期且期间没回滚过开关，脚本会把这两条打印出来。
+
+**后台展示逻辑从组件闭包提成纯函数并补测**（`admin/src/modelGateway.ts` + 12 例）。运营后台的登录态实机走查我做不了——该页在管理员鉴权之后，登录要往表单里填 `ADMIN_TOKEN`，这是我不做的事。**这一条只能由你或运维完成**。能做的是别让判断逻辑处于零覆盖：方言展示（已固化 vs 推断中）、检测态展示（本次结果优先于历史值、从没测过要如实说「从未检测」）、嵌入/重排的保存前拦截，现在都是可单测的纯函数，JSX 只剩取值绑定。
+
+**验证**：server `tsc` 0 错、`npm test` **1399/1399**；admin `tsc -b` 0 错 + `lint:ui` + `build` 通过 + `modelGateway.test.ts` **26/26**。
+
+### 2026-08-07 · 大模型接入配置重设计二期 + 三期：方言表 / 互斥校验器 / 检测体系 / 四表归一化 · 影响面：server + admin + shared + Prisma（纯加法列 + 四张新表）+ 监控规则 + 新增 5 个测试文件 + docs
+
+承接同日一期。设计稿 `docs/[OPUS5]AI_CONFIG_REDESIGN_2026-08-07.md`。**默认零变化**：`AI_CONFIG_V2` 不开就完全走旧表；方言表与校验器对既有两条生产链路逐位不变，由全矩阵等价测试锁死。
+
+**二期① · 方言表：把「猜」变成数据（`llm/dialects.ts`）**。根因是 `provider: 'mock'|'claude'|'openai'` 一个字段同时扛四件事（厂商 / 协议 / 方言 / 就绪），信息丢了只能靠 `if (provider==='claude' && !baseUrl.trim())` 和 `/claude/i.test(model)` 两处推断补回来。现拆成 `WireProtocol`（请求形状）+ `Dialect`（同协议下的细节写法）+ `VendorCaps`（有没有这个能力）三个正交维度。**关闭思考有四种写法且各家不同**：Anthropic 官方整体省略、七牛等网关显式 `{type:'disabled'}` 且不得带 `budget_tokens`、OpenAI 协议**仅当运营开过时**才显式发（`explicit_when_configured` —— 这条极易在重构中丢掉：运营开过说明网关认这个扩展，工具/成果请求必须显式按下去，否则网关带着思考进多轮工具调用会破坏强制 `emit_deliverable` 收口）、以及压根没有该字段。`AiModel` 加**可空 `dialect` 列**（纯加法）——没有这一列，推断只是从三处 `if` 集中成一处，根因要拖到三期；后台端点行展示推断结果并提供「固化方言」一键写回。推断收敛到全仓唯一的 `inferDialect()`，且**严格复刻历史判据**（claude + baseUrl 空才算官方直连，非空一律网关——不「优化」成按域名认 `api.anthropic.com`，那会改掉既有端点的请求组装）。另加 `capsJson` 能力三态：探活证伪后 `caps.thinking='no'` 立刻压过模型名正则。**等价性由 `test/dialects.test.ts` 用 315 组全矩阵比对锁死**——把历史逻辑原样抄成 oracle，新旧任一组合不一致即红；两条刻意差异（`openai_official` / `mock` + claude 系模型名）登记在 `KNOWN_DELTAS` 并论证了不可能命中存量配置。
+
+**二期② · 互斥校验器收口（`llm/validate.ts` + `services/aiValidation.ts`）**。此前「保存端点 / 入池 / 切换生效 / 保存路由 / 探活」五处各写各的 `if`：池协议校验在 `routes/admin.ts` 抄了三遍、判据还都是 `AiSetting.provider` 这个**拷贝值**；而 thinking 的约束根本没有保存期校验，后台能存下运行时必然 400 的配置。现收成一个纯函数（事实由取数层查好传入），五个入口共用，返回 `error/warn/info` 三级：error 拒绝保存、warn 可存但后台常驻黄标。规则含 `THINKING_UNSUPPORTED_DIALECT`、`THINKING_CAP_NO`、`THINKING_BUDGET_IGNORED`（DeepSeek 的 Anthropic 端点收下 `budget_tokens` 但忽略取值——不提示的话运营以为调大预算就想得更深）、`BUDGET_EXCEEDS_MAX_TOKENS`、`BASEURL_HAS_ENDPOINT_PATH`（七牛 FAQ 点名过的错法）、`AUX_ORIGIN_PROTOCOL_MISMATCH` / `AUX_VENDOR_UNSUPPORTED`（**两条独立否决**，只判协议会漏掉七牛 OpenAI 入口那种「协议合法但厂商没有嵌入」）、`POOL_PROTOCOL_MISMATCH`（判据换成**成员自身的方言**，不再用任何全局拷贝值）等。`test/aiValidate.test.ts` 30 例，重点覆盖每条规则「不该误伤」的那一侧——校验器最容易出的事故不是漏拦，是把正常配置拦住让运营改不动线上。
+
+**二期③ · 检测体系（`services/aiProbe.ts`）**。从前只有一个按钮、一次 `'ping'`，只能回答「网络通不通」；而线上真正会炸的都不在覆盖里。现为 8 个独立检测项：`connectivity` / `model_scope`（`GET /v1/models` 验七牛 model groups）/ `thinking`（**按被测端点自己的方言真发一次**——2026-07-27 那次 400 只有真发才知道）/ `tools` / `streaming` / `long_output` / `embedding` / `rerank`。三条铁律：必须 `poolBypass`、必须与真实请求同一条组装路径、探活是真实计费请求故按 `kind='probe'` 单独记账并留 `AI_PROBE_SCHEDULED=false` 一键全停。结果落 `lastProbeAt/lastProbeOk/probeJson` 并**回填 `capsJson`** —— 探活说「不支持思考」，校验器下一秒开始拦截，这是「能力靠猜 → 能力靠测」的闭环。定时任务 `ai-endpoint-probe`（连通性 10min / thinking 1h / 模型范围 24h）+ `junshi_ai_endpoint_probe_*` 指标 + Alertmanager 规则 `JunshiAiEndpointProbeFailing` + 飞书卡片知识条目。注：该规则**不带 `signal` 标签**——本仓库 `signal` 的语义是成对 warning/critical 的抑制键，探活是先行指标只有一档。
+
+**三期 · 四表归一化（`ai_credential` / `ai_endpoint` / `ai_route` / `ai_route_member`）**。消掉三笔结构债：① **双真相源**——「生效」不再是把 8 个字段拷进 `AiSetting`，而是 `AiRouteMember.primary` 一个指针；② **key 复制 N 份**——key 提到凭证上，一把 key 喂多个端点，换 key 只改一处；③ **用途混用**——新增 `purpose` 维度（chat / deliverable / aux / embedding / rerank / moderation），各有各的端点、权重与预算，**辅助档从此不再只能用 `AI_AUX_*` 环境变量配**（运营在后台看得见、测得了）。迁移脚本 `scripts/migrateAiConfig.ts`（`npm run ai:migrate` 预演 / `ai:migrate:apply` 写入）：幂等（`legacyModelId` 唯一键 + 凭证按 apiKey 去重，可反复跑）、只增不删（旧表一个字段都不动）、**vendor 推断不出时只标黄不阻断**（在这里拦住会把 chat 路由迁成空的＝把线上 AI 关掉，比 vendor 标错严重得多）、算不出任何 chat 成员时宁可不迁。读路径由 `AI_CONFIG_V2` 切换（默认关），**且只有该用途真有可用路由时才走新表，否则静默回落旧路径**——迁移没跑完、路由被清空、数据库刚恢复都不该让 AI 停摆；回滚＝把开关关掉。`llmPool` 的池成员在 V2 下来自 chat 路由；`getAiConfig` 把嵌入 / 重排路由投影回原字段，让 `services/{embedding,rerank}` 零改动。新增 `GET /admin/ai-v2-status` 与后台只读分区（切换故意不做成一键开关：这是需要迁移窗口 + 观察期的读路径切换）。
+
+**验证**：server `prisma generate` + `tsc --noEmit` 0 错、`npm test` **1391/1391 全绿**（新增 `test/{dialects,aiValidate,aiProbe,aiRoutes,aiMigrate}.test.ts` 共 85 例）；admin `tsc -b` 0 错 + `lint:ui` 通过 + `vite build` 成功；app `tsc --noEmit` 0 错。**未做**：运营后台的登录态实机走查（该页在管理员鉴权之后，登录需填 `ADMIN_TOKEN`）；生产迁移与 `AI_CONFIG_V2` 切换（需迁移窗口，属运维决定）；旧列删除（按设计稿应观察一个发布周期后再做）。设计稿 §8 的五个决策点仍待拍板。
+
+### 2026-08-07 · 大模型接入配置重设计一期：修四个已确认缺陷 + 补七牛预设 · 影响面：server + admin + shared + Prisma（纯加法一列）+ 新增/扩展 4 个测试文件 + docs
+
+设计稿见 `docs/[OPUS5]AI_CONFIG_REDESIGN_2026-08-07.md`（六维度归一化目标结构、26 条互斥规则清单、检测体系、三期迁移路径）。本次只落一期：**不改数据结构语义，只修已实测确认的缺陷**，二期（方言表 + 校验器 + 检测体系）与三期（表结构归一化）另行排期。
+
+**D1 · 「测试连接」在 `routingMode=pool` 下测的不是被测端点（已实测复现）。** 探活走 `pingModel → claudeRaw/openaiRaw → withEndpoint → resolveCandidates` 这条正常外呼链路，而传进去的表单配置**没有 `poolBypass`**，于是被 `llmPool.toCfg()` 整体改写：实测输入 `baseUrl=being-edited / model=model-being-edited / apiKey=sk-being-edited / temperature=0.3 / thinking=enabled·4096`，实际发出的第一候选是 `pool-a / pool-model-a / sk-pool-a / 0.9 / disabled·1024`，**无一字段相同**。后果：刚粘错的 key 照样返回「连通 ✓」；想确认某端点是否恢复却测到另一个；探活没有 `affinityKey` → HRW 的 key 恒为 `'anon'` → 永远命中同一个池成员，多测几次也发现不了。**这是「配置改完看着没问题、上线却出事」最直接的来源。** 修法：`mergedTestConfig()` 与新提取的 `mergedConfigTest()` 一律返回 `poolBypass: true`（与 `AI_AUX_*` 辅助档同一个 bypass 通道）。**两个入口必须一起改**——`/admin/ai-models/test`（模型表单探活）与 `/admin/ai-config/test`（全局配置探活）此前各写一份合并逻辑，只修一个另一个照样被劫持，故把后者的合并整块提进 `aiConfig.mergedConfigTest()` 收成同源纯函数。
+
+**D2 · `POST /admin/ai-models` 静默丢弃池参数。** 路由层为 `poolEnabled` 做了协议校验（不匹配返回 409 `AI_POOL_PROVIDER_MISMATCH`），但 `addModel()` 的 `data` 里根本没有 `poolEnabled/weight/tier/maxConcurrency` 四个字段——校验通过后写库时被丢掉。契约 `AiModelUpsert` 声明支持、实际只有 `PATCH` 生效，于是「新增时勾了入池」静默变成未入池。修法：补写四字段，并把 clamp 提成 `clampWeight/clampTier/clampConcurrency` 三个常量供 `addModel`/`updateModel` 同源使用（`weight≥1` 是硬要求：0 会让 HRW 打分恒为 0，等于悄悄踢出池）；同时补上 `addModel` 后的 `__resetLlmPool()`，与 `updateModel` 同口径。
+
+**D4 · 缓存写单价这一档在库里不存在。** `data/modelPrices.ts` 的 `ModelRate.cacheWrite` 有读取逻辑、注释也写着「运营需显式填 `rate.cacheWrite`」，但 `AiModel` 没有这一列、后台没有输入框、`buildConfiguredRateMap()` 也不产出这一档——**实际永远走硬编码的 `CACHE_WRITE_MULTIPLIER = 1.25`**，而这个 1.25 的前提（上游透传 Anthropic 缓存计价）至今未向七牛确认。修法：`AiModel` 加 `priceCacheWrite Float @default(0)`（**纯加法列，`db push` 安全**）+ 后台第四个输入框 + `buildConfiguredRateMap` 产出该档并**纳入同名模型的一致性判定**（四档只要有一档不一致就整体退回未校准，维持既有确定性回退口径）。**向后兼容**：未填/历史行 → `cacheWrite` 为 `undefined` → 折算继续按 `in × 1.25` 推导，与加这一档之前逐位相同。
+
+**D5 · 嵌入 / 重排的「留空＝复用对话模型」是必错的默认值。** 服务端回退是 `cfg.xxxBaseUrl || cfg.baseUrl` + `cfg.xxxApiKey || cfg.apiKey`，而请求路径是 OpenAI 风格的 `${baseUrl}/embeddings`、`${baseUrl}/rerank`。**两条独立的否决理由**：① 对话端点走 Anthropic 协议时（生产正是如此），baseUrl 是 Anthropic 协议根，拼出的路径**协议上就不存在**；② [七牛官方 FAQ](https://developer.qiniu.com/aitokenapi/12897/how-to-use-ai-token-api) 明示「暂未提供文本向量/Embedding 模型」——**这一条协议上是合法的**（`api.qnaigc.com/v1` 是标准 OpenAI 兼容），所以只判协议会漏掉它。修法：新增 `admin/src/modelGateway.ts` 的 `auxReuseBlock(provider, baseUrl)`，两条理由都判；命中时后台禁用「留空」、把 baseUrl/Key 标为必填、给出具体原因，并在保存前拦截。**不改任何运行时行为**——只加闸门与文案（生产 `embeddingEnabled` 现状待确认，见决策点 3；若从未开启则 D5 是陷阱而非现役故障）。域名清单是一期的临时兜底，二期由 `VendorPreset.caps.embedding` 取代。
+
+**D7 · 生产在用的厂商不在预设表里。** `AI_PRESETS` 12 项里没有七牛，默认值还指向已不在用的 Agnes（`baseUrl=apihub.agnes-ai.com/v1`、label「Agnes 2.0 Flash」），运营接七牛只能手打 bypass 路径。修法：**一个厂商可能要占两条预设**——同一家的 OpenAI 协议与 Anthropic 协议是**两个不同的 baseUrl**（七牛 `…/v1` vs 根路径、DeepSeek `/v1` vs `/anthropic`、火山 `/api/v3` vs `/api/coding`），选错入口就是上线后 404/400，协议不是「模型名的属性」。新增 `qiniu-anthropic` / `qiniu` / `deepseek-anthropic` / `volcengine-anthropic` 四条，note 里写明各家方言差异（七牛 `disabled` 不得带 `budget_tokens`、DeepSeek 的 `budget_tokens` 被忽略、火山那条来自 Coding Plan 形态需直测）。**model 只在已实测可用时才预填**（七牛 Anthropic 填 `claude-opus-4-6`，2026-07-27 生产直测过），没验证过的一律留空并把查法写进 note——预填一个不存在的模型名，失败时看起来像我们的 bug，比留空更糟。`AiSetting` 的 Agnes 默认值改为 `mock`/空（未配 key 时 `effectiveProvider` 本就降级 mock，这里只是让库里的值与事实一致；`agnes` 预设本身保留，不动既有环境）。
+
+**验证**：server `prisma generate` + `tsc --noEmit` 0 错、`npm test` **1306/1306 全绿**（新增 `test/aiProbeBypass.test.ts` 6 例含一条**反向锁**——先证明不带 `poolBypass` 时确实会被池改写，再证明修复生效；新增 `test/aiModelUpsert.test.ts` 9 例覆盖池字段落库/clamp 同源/缓存写档存取/预设完整性；扩 `test/aiRates.test.ts` 至 9 例覆盖第四档）。admin `tsc -b` 0 错 + `lint:ui` 通过 + `vite build` 成功 + `modelGateway.test.ts` **10/10**（新增 7 例锁住两条否决理由、子域名命中、相似域名不误判）。运营后台页面本身未做登录态实机走查——该页在管理员鉴权之后，登录需要填 `ADMIN_TOKEN`，未做。**未做**：二期（`dialect` 列 + 方言表 + 互斥校验器 + 检测体系）、三期（四张新表归一化）；决策点 1–5 待拍板。
 
 ### 2026-08-06 · 监控告警整体梳理并升级高信息量飞书 Card 2.0 · 影响面：server + Prometheus/Alertmanager + 运维配置/文档
 

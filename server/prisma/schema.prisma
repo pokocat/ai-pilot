@@ -1267,16 +1267,21 @@ model ModerationLog {
 /// getAiConfig 仍只读本行，运行时路径不变。模型/Embedding/Rerank 凭证按产品决策明文存库，API 只回 hasKey。
 model AiSetting {
   id             String  @id @default("default")
-  provider       String  @default("openai") // mock | claude | openai(兼容 Agnes/DeepSeek/Qwen…)
-  label          String  @default("Agnes 2.0 Flash")
-  baseUrl        String  @default("https://apihub.agnes-ai.com/v1")
-  model          String  @default("agnes-2.0-flash")
+  // 缺省不预置任何厂商：历史默认是已不在用的 Agnes，会把「从没配过」显示成「已配好」。
+  // 未配 key 时 effectiveProvider 本就降级 mock，这里只是让库里的值与事实一致。
+  provider       String  @default("mock") // mock | claude | openai(兼容 DeepSeek/Qwen/七牛…)
+  label          String  @default("未配置")
+  baseUrl        String  @default("")
+  model          String  @default("")
   apiKey         String  @default("") @db.Text
   embeddingModel String  @default("")
   temperature    Float   @default(0.7)
   thinkingMode   String  @default("disabled") // disabled | enabled | adaptive
   thinkingBudget Int     @default(1024) // enabled 时生效；1024..7000
   activeModelId  String? // 指向当前生效的 AiModel.id（后台高亮用，运行时不依赖）
+  // 与 AiModel 上的同名列同义，由 syncActiveSetting 一并拷贝（本表是拷贝式生效，三期归一化后消失）。
+  dialect        String?
+  capsJson       Json?
 
   // 向量嵌入接入（开关 + 可独立配凭证；留空回退对话模型的 baseUrl/key）。
   embeddingEnabled Boolean @default(false)
@@ -1302,21 +1307,37 @@ model AiSetting {
 /// 已添加的模型接入点（运营可添加多个，快速切换其一生效）。
 /// 来源三种：内置接入商预设（preset 记其 id）/ 自定义通用兼容协议 / 完全自主定义。apiKey 明文存库，API 不回传。
 model AiModel {
-  id               String  @id @default(cuid())
-  provider         String  @default("openai") // mock | claude | openai
+  id               String    @id @default(cuid())
+  provider         String    @default("openai") // mock | claude | openai
   label            String // 展示名，如「Agnes 2.0 Flash」
-  baseUrl          String  @default("")
-  model            String  @default("")
-  apiKey           String  @default("") @db.Text
-  embeddingModel   String  @default("")
-  temperature      Float   @default(0.7)
-  thinkingMode     String  @default("disabled") // disabled | enabled | adaptive
-  thinkingBudget   Int     @default(1024) // enabled 时生效；1024..7000
+  baseUrl          String    @default("")
+  model            String    @default("")
+  apiKey           String    @default("") @db.Text
+  embeddingModel   String    @default("")
+  temperature      Float     @default(0.7)
+  thinkingMode     String    @default("disabled") // disabled | enabled | adaptive
+  thinkingBudget   Int       @default(1024) // enabled 时生效；1024..7000
   preset           String? // 来源内置接入商 id（自定义/自主定义则空）
+  // —— 协议方言（llm/dialects.ts）——
+  // 显式落库＝这个端点不再靠猜；留空＝走 inferDialect() 兜底（存量行皆为空，行为与旧版一致）。
+  // 没有这一列，「用 baseUrl 空不空猜官方/网关、用模型名猜 thinking 支持」只是从三处 if
+  // 集中成一处推断，根因并没有消掉。
+  dialect          String?
+  /// 能力三态（llm/configSchemas.ts 的 EndpointCaps）：探活回填 + 运营可覆盖。
+  /// 校验器据此拦截「已被证伪的能力」，取代按模型名正则猜。
+  capsJson         Json?
+  // —— 探活结果（只读，由 services/aiProbe 写）——
+  lastProbeAt      DateTime?
+  lastProbeOk      Boolean?
+  /// ProbeReport：逐项检测结果（connectivity/thinking/tools/…），供后台展示与趋势。
+  probeJson        Json?
   // 内部成本核算单价（元 / 1M token）。0=未配置 → 回退内置价表/兜底。Token 用量看板按此估算总成本。
-  priceInput       Float   @default(0)
-  priceOutput      Float   @default(0)
-  priceCachedInput Float   @default(0) // 命中缓存输入价；0=按 priceInput 计
+  priceInput       Float     @default(0)
+  priceOutput      Float     @default(0)
+  priceCachedInput Float     @default(0) // 命中缓存输入价；0=按 priceInput 计
+  // 写入缓存输入价。0=按 priceInput × CACHE_WRITE_MULTIPLIER（Anthropic 5m TTL 的 1.25×）推导。
+  // 1h TTL（2×）或供应商按统一单价结算（1×）时必须显式填，否则成本会系统性偏差。
+  priceCacheWrite  Float     @default(0)
 
   // —— 端点池（多路分流 + 故障转移，见 services/llmPool.ts）——
   // 默认 poolEnabled=false → 不入池，行为与旧版完全一致（仍可被 activateModel 单选生效）。
@@ -1329,6 +1350,116 @@ model AiModel {
   updatedAt DateTime @updatedAt
 
   @@map("ai_model")
+}
+
+/// —— 归一化接入配置（重设计三期，2026-08-07）——
+/// 目标结构：厂商 / 协议方言 / 凭证 / 端点 / 路由 / 用途 六个正交维度。
+/// 方言与厂商是代码常量（llm/dialects.ts、llm/vendors.ts）——它们是「事实」不是「运营数据」；
+/// 凭证 / 端点 / 路由入库，因为它们是运营资产。
+///
+/// 迁移期这四张表由 `scripts/migrateAiConfig.ts` 从 ai_model + ai_setting 生成，
+/// 读路径由 `AI_CONFIG_V2` 开关切换：关＝完全走旧表（默认，行为零变化），开＝走这里。
+/// 旧表在观察一个发布周期后再删列。
+
+/// 凭证：一把上游 API Key。key 是「账号级」资产，不是「模型级」——
+/// 旧结构里每个 AiModel 各存一份 apiKey，同一把 key 复制 N 份，换 key 要改 N 行。
+model AiCredential {
+  id     String @id @default(cuid())
+  label  String // 「七牛-主账号」
+  vendor String // llm/vendors.ts 的 VendorMeta.id；推断不出时为 'custom' 并标黄待确认
+  apiKey String @db.Text // 明文（沿用 2026-08-05 明文化决定）
+
+  /// 上游允许的模型范围（七牛 model groups）。由探活经 GET /v1/models 回填，运营不手填。
+  modelScope     Json?
+  scopeCheckedAt DateTime?
+  /// 迁移期推断不出 vendor 的凭证标黄；**迁移写入一律放行、只标黄**，
+  /// 「未确认的凭证不得加入路由」这条闸门只对迁移完成之后的新增/改动生效——
+  /// 否则双写迁移会把 chat 路由迁成空的，直接把线上 AI 关掉。
+  needsReview    Boolean   @default(false)
+
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  endpoints AiEndpoint[]
+
+  @@map("ai_credential")
+}
+
+/// 端点：一次可用外呼的最小单位 = 凭证 × 方言 × baseUrl × 模型 × 请求参数。
+/// 路由、并发车道、429 冷却、计价、探活——全部以它为单位。
+model AiEndpoint {
+  id           String @id @default(cuid())
+  label        String
+  credentialId String
+  /// 线协议方言（llm/dialects.ts）。三期起是必填：端点不该再靠推断组装请求。
+  dialect      String
+  provider     String // 与 dialect.protocol 同义，保留是为了让 provider 层零改动地复用
+  baseUrl      String @default("")
+  model        String @default("")
+
+  temperature    Float  @default(0.7)
+  thinkingMode   String @default("disabled")
+  thinkingBudget Int    @default(1024)
+
+  /// 能力三态（llm/configSchemas.ts 的 EndpointCaps）：探活回填 + 运营可覆盖。
+  capsJson Json?
+
+  // 单价（元 / 1M token），四档齐全。
+  priceInput       Float @default(0)
+  priceOutput      Float @default(0)
+  priceCachedInput Float @default(0)
+  priceCacheWrite  Float @default(0)
+
+  // 探活结果（只读，services/aiProbe 写）
+  lastProbeAt DateTime?
+  lastProbeOk Boolean?
+  probeJson   Json?
+
+  /// 迁移溯源：来自哪一行 ai_model。迁移脚本据此幂等重跑，不产生重复端点。
+  legacyModelId String? @unique
+
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  credential AiCredential    @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+  members    AiRouteMember[]
+
+  @@index([credentialId])
+  @@map("ai_endpoint")
+}
+
+/// 路由：某个「用途」怎么用一组端点。取代 activeModelId + routingMode + stickyRouting 这套单例字段。
+/// 用途化是三期的主要功能收益：对话 / 成果 / 辅助抽取 / 嵌入 / 重排各有各的路由与预算，
+/// 辅助档不再只能用 env 配、运营在后台看不见。
+model AiRoute {
+  id         String  @id @default(cuid())
+  purpose    String  @unique // chat | deliverable | aux | embedding | rerank | moderation
+  mode       String  @default("single") // single=只用 primary 成员 | pool=按权重分流 + 故障转移
+  sticky     Boolean @default(true)
+  enabled    Boolean @default(true)
+  /// 用途级请求预算（RouteBudgetSchema）：超时、正文 max_tokens、温度覆盖。
+  /// 今天这些是散在代码里的常量（对话 150s / 成果 300s / 辅助 20s）。
+  budgetJson Json?
+
+  updatedAt DateTime        @updatedAt
+  members   AiRouteMember[]
+
+  @@map("ai_route")
+}
+
+model AiRouteMember {
+  routeId        String
+  endpointId     String
+  enabled        Boolean @default(true)
+  primary        Boolean @default(false) // single 模式下唯一生效的那一个
+  weight         Int     @default(1)
+  tier           Int     @default(0)
+  maxConcurrency Int     @default(0) // 每实例上限（口径与旧版一致）
+
+  route    AiRoute    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  endpoint AiEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@id([routeId, endpointId])
+  @@index([endpointId])
+  @@map("ai_route_member")
 }
 
 /// 短信验证码（注册/登录前发放，先于账号存在，故按 phone 关联而非 userId）。

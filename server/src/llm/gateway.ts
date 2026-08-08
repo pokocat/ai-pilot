@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
-import { getAiConfig, effectiveProvider, resolveAuxConfig, resolveModelRate, type ResolvedAiConfig } from '../services/aiConfig.js';
+import { getAiConfig, effectiveProvider, resolveAuxConfigAsync, resolveModelRate, type ResolvedAiConfig } from '../services/aiConfig.js';
 // mockUpstream：仅当配了 AI_MOCK_LATENCY_MS 时，让 mock 占一个真实闸门槽位并模拟上游耗时，
 // 好让压测能压到 llmGate/端点池（见 providers/mock.ts 顶部注释）。默认 0 = 同步直出，行为不变。
 // **只用在「mock 就是配置的 provider」的分支**；真 provider 失败后的降级兜底一律不套——
@@ -18,6 +18,7 @@ import { ZERO_USAGE, extractAsks, looksLikeAsking, normalizeAsks, type Deliverab
 import { recordTokenUsage, recordAuxUsage, type UsageMeta } from '../services/usage.js';
 import { billableTokenEquivalents } from '../data/modelPrices.js';
 import { recordTrace } from '../services/trace.js';
+import { classifyLlmError } from './errorClassify.js';
 import { noteChatNonStream, noteGenDegraded, noteAsksRecovered } from '../services/metrics.js';
 import { moderate } from '../services/moderation.js';
 import { auditBannedWords } from '../services/bannedWords.js';
@@ -254,7 +255,7 @@ async function traced<T>(
       model: capture.hit?.model ?? '',
       endpointId: capture.hit?.endpointId,
       endpointLabel: capture.hit?.endpointLabel,
-      status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: args.ctx.userMessage,
+      status: 'error', errorMessage: (err as Error).message, errorBucket: classifyLlmError(err), latencyMs: Date.now() - t0, promptText: args.ctx.userMessage,
       context: args.ctx.contextTrace,
     });
     throw err;
@@ -636,7 +637,7 @@ async function* tracedChatProviderStream(
       model: capture.hit?.model ?? model,
       endpointId: capture.hit?.endpointId,
       endpointLabel: capture.hit?.endpointLabel,
-      status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
+      status: 'error', errorMessage: (err as Error).message, errorBucket: classifyLlmError(err), latencyMs: Date.now() - t0, promptText: ctx.userMessage,
       responseText: text, context: ctx.contextTrace,
     });
     throw err;
@@ -799,7 +800,7 @@ export async function generateAdaptive(ctx: GenContext, meta?: UsageMeta): Promi
       model: endpointCapture.hit?.model ?? '',
       endpointId: endpointCapture.hit?.endpointId,
       endpointLabel: endpointCapture.hit?.endpointLabel,
-      status: 'error', errorMessage: (err as Error).message, latencyMs: Date.now() - t0, promptText: ctx.userMessage,
+      status: 'error', errorMessage: (err as Error).message, errorBucket: classifyLlmError(err), latencyMs: Date.now() - t0, promptText: ctx.userMessage,
       context: ctx.contextTrace,
     });
     console.error('[gateway] adaptive fallback to mock:', (err as Error).message);
@@ -917,7 +918,32 @@ export async function pingAgentRuntime(rt: {
     return { ok: r.ok, latencyMs: r.latencyMs, sample: r.sample, error: r.error, missingInputs: r.missingInputs, provider: 'dify', model: 'chat-messages' };
   }
   const base = await getAiConfig(true);
-  const cfg: ResolvedAiConfig = { ...base, provider: 'openai', baseUrl: rt.baseUrl || base.baseUrl, model: rt.model || base.model, apiKey: rt.apiKey || '' };
+  const cfg: ResolvedAiConfig = {
+    ...base,
+    provider: 'openai',
+    baseUrl: rt.baseUrl || base.baseUrl,
+    model: rt.model || base.model,
+    apiKey: rt.apiKey || '',
+    // 与 mergedTestConfig 同一个理由：探活走的是同一条 withEndpoint 外呼链路，
+    // 不 bypass 就会被端点池整体改写成池成员——那样测的根本不是这个智能体自带的接入点。
+    // 这是 D1 的**第三个入口**，一期只修了 /admin/ai-models/test 与 /admin/ai-config/test 两个。
+    poolBypass: true,
+  };
+  // Agent 自带接入此前完全不过校验（设计稿决策点 5 的 B 项：至少共享地基）。
+  // 这里只报 error 级——它是探活入口，warn/info 不该挡住运营去测。
+  const { validateEndpoint, hasBlocking, blockingMessage } = await import('./validate.js');
+  const issues = validateEndpoint({
+    label: rt.model || '智能体自带接入',
+    provider: 'openai',
+    baseUrl: cfg.baseUrl,
+    model: cfg.model,
+    thinkingMode: 'disabled',
+    thinkingBudget: 1024,
+    hasKey: !!rt.apiKey,
+  });
+  if (hasBlocking(issues)) {
+    return { ok: false, provider: 'openai', model: cfg.model, error: blockingMessage(issues) };
+  }
   return pingModel(cfg);
 }
 
@@ -946,8 +972,8 @@ async function rawText(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
   opts?: { allowAux?: boolean; maxTokens?: number; signal?: AbortSignal; usageMeta?: UsageMeta },
 ): Promise<string> {
-  // 未配 AI_AUX_MODEL 时 resolveAuxConfig 原样返回，下面两行等于无操作（默认行为零变化）。
-  const useCfg = opts?.allowAux === false ? cfg : resolveAuxConfig(cfg);
+  // 未配 aux 路由且未配 AI_AUX_MODEL 时原样返回，下面两行等于无操作（默认行为零变化）。
+  const useCfg = opts?.allowAux === false ? cfg : await resolveAuxConfigAsync(cfg);
   const useLive: 'claude' | 'openai' = useCfg === cfg
     ? live
     : (useCfg.provider === 'claude' ? 'claude' : 'openai');
