@@ -146,7 +146,7 @@ export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthRes
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
 export type { AdminSku, AdminSkuUpdate, SkuKind, ServiceAssignmentView, ServiceAssignmentUpdate } from '../../shared/contracts';
-export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider, AiThinkingMode, AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus, AiDialectMeta, AiEndpointCaps, AiConfigIssue, AiProbeReport, AiProbeItem, AiV2Status } from '../../shared/contracts';
+export type { AiPreset, AiTestResult, AiProvider, AiThinkingMode, AiRouting, AiRoutingStatus, AiDialectMeta, AiEndpointCaps, AiConfigIssue, AiProbeReport, AiProbeItem, AiV2Status, AiV2View, AiEndpointView, AiCredentialView, AiRouteView, AiEndpointUpsert, AiEndpointTest, AiRouteUpsert, AiRouteBudget, AiVendorOption } from '../../shared/contracts';
 export type { AdminKnowledgeView, AdminKnowledgeItemRow, ReembedResult, AdminRetrievalDebug, RetrievalDebugCand } from '../../shared/contracts';
 export type { AdminUserContext, AdminUserMemory, KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow } from '../../shared/contracts';
 // —— 版本化 / 多运营 / 沙盒 / 评测（运营端调优发布） ——
@@ -159,9 +159,10 @@ export type {
 
 import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, AdminPlan, AdminPlanCreate, AdminPlanUpdate, AdminSaying,
-  AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
+  AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
   AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult, ToolStatsView, ToolStatItem,
-  AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus, AiDialectMeta, AiProbeReport, AiV2Status, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
+  AiEndpointTest, AiRoutingStatus, AiProbeReport, AiV2Status,
+  AiV2View, AiEndpointUpsert, AiRouteUpsert, AiConfigIssue, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
   AdminUserContext, KnowledgeDetail,
   AgentVersionListView, AgentVersionDetail, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   SandboxRequest, SandboxResult, EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalCaseRequest,
@@ -329,7 +330,7 @@ export const api = {
   // enabled 是**唯一**真源（行缺失视为关）：2026-07 删掉了部署级 CANVAS_DESIGN_ENABLED，不再有「双开才算开」。
   creativeConfig: () => req<AdminCreativeConfig>('/admin/creative/config'),
   // 图片供应商 apiKey：不传=不动、传空串=清空、传值=secretBox 加密写入；读回永远只有 hasKey。
-  // 注意大模型 AiSetting/AiModel 已改为明文存库，二者只共享表单语义，不共享存储口径。
+  // 注意历史 AiSetting/AiModel 凭证按产品决策明文存库；当前归一化凭证同样只回 hasKey。
   saveCreativeConfig: (body: AdminCreativeConfigUpdate) => req<AdminCreativeConfig>('/admin/creative/config', 'PUT', body),
   // 连通性试跑（仅 owner/master）：真发一次最小请求，只回通/不通 + 耗时，不落资产。
   creativeProviderDryRun: () => req<AdminCreativeDryRunResult>('/admin/creative/provider/dry-run', 'POST', {}),
@@ -350,25 +351,34 @@ export const api = {
     req<{ ok: boolean; planName: string; expiresAt: string | null; grantedCredits: number; carriedDays: number }>(`/admin/users/${userId}/plan`, 'POST', { planId, ...(force ? { force: true } : {}) }),
   grantUserModule: (userId: string, moduleKey: string) => req<{ ok: boolean }>(`/admin/users/${userId}/modules`, 'POST', { moduleKey }),
   revokeUserModule: (userId: string, moduleKey: string) => req<{ ok: boolean }>(`/admin/users/${userId}/modules/${encodeURIComponent(moduleKey)}`, 'DELETE'),
-  // —— 大模型配置（可随时切换） ——
-  aiConfig: () => req<AiConfigView>('/admin/ai-config'),
-  saveAiConfig: (body: AiConfigUpdate) => req<AiConfigView>('/admin/ai-config', 'PUT', body),
-  testAiConfig: (body: AiConfigUpdate) => req<AiTestResult>('/admin/ai-config/test', 'POST', body),
-  // —— 已添加模型：增删改 + 快速切换 + 探活 ——
-  addAiModel: (body: AiModelUpsert) => req<AiModel>('/admin/ai-models', 'POST', body),
-  updateAiModel: (id: string, body: AiModelUpsert) => req<AiModel>(`/admin/ai-models/${id}`, 'PATCH', body),
-  delAiModel: (id: string) => req<{ ok: boolean }>(`/admin/ai-models/${id}`, 'DELETE'),
-  activateAiModel: (id: string) => req<AiConfigView>(`/admin/ai-models/${id}/activate`, 'POST'),
-  testAiModel: (body: AiModelTest) => req<AiTestResult>('/admin/ai-models/test', 'POST', body),
-  // 方言目录（代码常量，运营只选不改）。协议决定请求形状，方言决定同协议下的细节写法。
-  aiDialects: () => req<{ dialects: AiDialectMeta[] }>('/admin/ai-dialects'),
-  // 归一化配置（三期）就绪状态。切 AI_CONFIG_V2 前先看这里。
+  /* —— 归一化接入配置（三期）：后台直接读写四张表 ——
+   * 旧版这里是 aiConfig / aiModels / aiRouting 三组接口，写的是 AiSetting + AiModel。
+   * 那套下面「生效」＝拷 8 个字段、换 key 要改 N 行、辅助档只能改 env。现在统一到这一组。 */
+  aiV2: () => req<AiV2View>('/admin/ai-v2'),
   aiV2Status: () => req<AiV2Status>('/admin/ai-v2-status'),
-  // 深度检测：按项跑，结果落库并回填能力标记（能力从「靠猜」变成「靠测」）。
-  probeAiModel: (id: string, kinds: string[]) => req<AiProbeReport>(`/admin/ai-models/${id}/probe`, 'POST', { kinds }),
-  // 端点池：多路分流 + 故障转移（services/llmPool）。status 带每个端点的实时冷却态。
+  /** 端点池实时冷却态（只读）：谁在被限流、几点恢复。 */
   aiRouting: () => req<AiRoutingStatus>('/admin/ai-routing'),
-  saveAiRouting: (body: Partial<AiRouting>) => req<AiRoutingStatus>('/admin/ai-routing', 'PUT', body),
+
+  addAiEndpoint: (body: AiEndpointUpsert) => req<{ id: string; issues: AiConfigIssue[] }>('/admin/ai-endpoints', 'POST', body),
+  updateAiEndpoint: (id: string, body: Partial<AiEndpointUpsert>) =>
+    req<{ ok: boolean; issues: AiConfigIssue[] }>(`/admin/ai-endpoints/${id}`, 'PATCH', body),
+  delAiEndpoint: (id: string) => req<{ ok: boolean }>(`/admin/ai-endpoints/${id}`, 'DELETE'),
+  /** 探活：用表单字段直测。endpointId 传入且 key 留空则取该端点凭证的 key。 */
+  testAiEndpoint: (body: AiEndpointTest) => req<AiTestResult>('/admin/ai-endpoints/test', 'POST', body),
+  /** 深度检测：结果直接写端点表并回填能力标记。 */
+  probeAiEndpoint: (id: string, kinds: string[]) => req<AiProbeReport>(`/admin/ai-endpoints/${id}/probe`, 'POST', { kinds }),
+  /** 入池 / 出池 ＝ chat 路由的成员增删。 */
+  setAiEndpointPool: (id: string, inPool: boolean) => req<{ ok: boolean }>(`/admin/ai-endpoints/${id}/pool`, 'POST', { inPool }),
+
+  /** 换 key 的唯一入口：改这一条，它下面所有端点一起生效。 */
+  updateAiCredential: (id: string, body: { label?: string; vendor?: string; apiKey?: string }) =>
+    req<{ ok: boolean }>(`/admin/ai-credentials/${id}`, 'PATCH', body),
+
+  saveAiRoute: (purpose: string, body: AiRouteUpsert) =>
+    req<{ ok: boolean; issues: AiConfigIssue[] }>(`/admin/ai-routes/${purpose}`, 'PUT', body),
+  /** 「设为生效」＝把某用途的 primary 指针指过去，没有任何字段拷贝。 */
+  setAiRoutePrimary: (purpose: string, endpointId: string) =>
+    req<{ ok: boolean }>(`/admin/ai-routes/${purpose}/primary/${endpointId}`, 'POST'),
 
   // —— 当前登录者（按角色显隐账户管理 / 过滤 agent）——
   me: () => req<AdminMe>('/admin/auth/me'),

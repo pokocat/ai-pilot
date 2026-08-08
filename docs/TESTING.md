@@ -87,7 +87,7 @@ node --import tsx --test test/dify.test.ts   # Dify 提供方（28 用例）：�
 | **TC-D** | 项目 + 知识库 + 跨对话召回 | 会话归属项目；知识入库→检索命中→**下次对话上下文自动召回**；**对话汇总→版本化报告+沉淀知识库** |
 | **TC-E** | 版本化报告 + diff | 同名续版本（v1→v2）；**同内容去重**不新增版本；两版 **section 级 + 词级**差异 |
 | **TC-G** | **★ 跨用户隔离（防泄露）** | A 的 项目/报告/方案库/知识 B 全不可见；**B 检索搜不到 A 的机密**；直取 A 资源→404；服务层 `hybridSearch`/`resolveReferences`/`recallMemories`/`buildGenContext` 跨租户一律隔离 |
-| **TC-H** | 模型配置 | 读配置含 `hasKey` 布尔、**绝不回传明文 apiKey**；切 Agnes；未配 key 实际降级 mock |
+| **TC-H** | 接入配置 V2 | 读归一化视图时端点/凭证只回 `hasKey`、**绝不回传明文 apiKey**；新建端点按方言/单价落库；空 JSON body 到不存在 primary 端点仍保持 404 |
 | **TC-I** | 流式产出（SSE） | `/generate` 按事件流式下发 `begin/section/footer/done` |
 | **TC-J** | 内容审核拦截 | 命中违规词输入 → 422 `MODERATION_BLOCK` |
 | **TC-K** | 算力账户 + 套餐购买 | 注册按套餐赠送、`/me` 见余额；**报告产出按次扣减、对话免费、`/me` 同步**；**余额不足→402 拦截且不留会话**；购买决策版后切套餐并入账算力、后台用量同步；购买企业版后余额 `-1` 且报告不扣费 |

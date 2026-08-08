@@ -4,10 +4,10 @@
 // 背景：探活走 pingModel → claudeRaw/openaiRaw → withEndpoint → resolveCandidates 这条正常外呼链路。
 // routingMode=pool 时 resolveCandidates 会把配置整体换成池成员（llmPool.toCfg 覆盖 baseUrl/apiKey/
 // model/temperature/thinking），于是「测试连接」测的不是运营正在编辑的端点——错的 key 也返回「连通 ✓」。
-// 两个入口（模型表单探活 / 全局配置探活）必须一起锁，否则修好一个另一个照样劫持。
+// V2 只有端点表单探活入口；它和智能体自带接入探活都必须锁住 bypass。
 import { describe, test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergedConfigTest, mergedTestConfig, type ResolvedAiConfig } from '../src/services/aiConfig.js';
+import { mergedTestConfig, type ResolvedAiConfig } from '../src/services/aiConfig.js';
 import { resolveCandidates, __resetLlmPool, __setPoolForTest, type PoolEndpoint } from '../src/services/llmPool.js';
 
 // 运营正在表单里编辑的那个端点：每个字段都与池成员不同，被改写就一定看得出来。
@@ -52,8 +52,7 @@ describe('探活必须打被测端点本身（不被端点池改写）', () => {
     assert.equal(first.thinkingMode, 'disabled');
   });
 
-  test('模型表单探活（/admin/ai-models/test）：mergedTestConfig 产出必带 poolBypass', async () => {
-    // 不传 modelId → 不查 aiModel；getAiConfig 的库访问自带 try/catch，DB 不可达时回落 env。
+  test('端点表单探活（/admin/ai-endpoints/test）：mergedTestConfig 产出必带 poolBypass', async () => {
     const cfg = await mergedTestConfig({
       provider: 'openai', label: FORM.label, baseUrl: FORM.baseUrl, model: FORM.model,
       apiKey: FORM.apiKey, temperature: FORM.temperature,
@@ -63,7 +62,7 @@ describe('探活必须打被测端点本身（不被端点池改写）', () => {
     assertIsFormEndpoint(cfg);
   });
 
-  test('模型表单探活：mergedTestConfig 的产物喂进路由也不被改写', async () => {
+  test('端点表单探活：mergedTestConfig 的产物喂进路由也不被改写', async () => {
     usePool();
     const cfg = await mergedTestConfig({
       provider: 'openai', label: FORM.label, baseUrl: FORM.baseUrl, model: FORM.model,
@@ -75,24 +74,9 @@ describe('探活必须打被测端点本身（不被端点池改写）', () => {
     assertIsFormEndpoint(cands[0]);
   });
 
-  test('全局配置探活（/admin/ai-config/test）：mergedConfigTest 产出必带 poolBypass', () => {
-    const merged = mergedConfigTest(FORM, { model: 'override-model' });
-    assert.equal(merged.poolBypass, true);
-    assert.equal(merged.model, 'override-model'); // 未保存改动照常生效
-    assert.equal(merged.apiKey, FORM.apiKey);     // key 留空＝沿用已存
-  });
-
-  test('全局配置探活：mergedConfigTest 的产物喂进路由也不被改写', async () => {
-    usePool();
-    const merged = mergedConfigTest(FORM, {});
-    const cands = await resolveCandidates(merged);
-    assert.equal(cands.length, 1);
-    assertIsFormEndpoint(cands[0]);
-  });
-
   test('智能体自带接入探活（pingAgentRuntime）同样不被劫持 —— D1 的第三个入口', async () => {
-    // 一期只修了 /admin/ai-models/test 与 /admin/ai-config/test；Agent 的 providerMode=openai
-    // 自带端点走 pingAgentRuntime，它也是自己拼 cfg + 调 pingModel，同样会被池整体改写。
+    // Agent 的 providerMode=openai 自带端点走 pingAgentRuntime；它也是自己拼 cfg + 调
+    // pingModel，同样可能被池整体改写。
     usePool();
     const { pingAgentRuntime } = await import('../src/llm/gateway.js');
     // 没配 key → effectiveProvider 降级 mock，pingModel 早退，不会真外呼；

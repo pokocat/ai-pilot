@@ -4,8 +4,8 @@
 > 把散在 `if` 里的互斥规则收成一张声明式表；把「测试连接」升级成可配置、可定时、可告警的**检测体系**；
 > 并让七牛之外（DeepSeek / 火山方舟 / Anthropic 官方 / OpenAI 官方 / 任意兼容网关）的接入变成**填表**而不是**改代码**。
 >
-> 状态：**一 / 二 / 三期代码均已落地（2026-08-07，见 CHANGELOG 同日两条）**。
-> 仍待运维动作：生产跑迁移脚本 → 看 `/admin/ai-v2-status` → 设 `AI_CONFIG_V2=true` 切读路径 → 观察一个发布周期后删旧列。§8 的五个决策点待拍板。
+> 状态：**一 / 二 / 三期全部落地，含三期写路径（2026-08-08 收尾）**。后台只写归一化表，旧表已降为只读。
+> 仍待运维动作：生产跑迁移脚本 → 看 `/admin/ai-v2-status`（读路径已默认 V2，无需再开开关）→ 观察一个发布周期后删旧列。§8 的五个决策点待拍板。
 >
 > 修订（2026-08-07 复核）：D1–D7 已第二轮独立对码确认，无一虚报，行号全部对得上。按复核结论修订四处：
 > ① 一期 D5 判据从「厂商 caps」改为「协议事实」——一期根本没有 vendor 维度可依据（§7.1-5、§7.4-8）；
@@ -200,7 +200,7 @@ export interface VendorPreset {
 
 **必须补进去的第一条就是七牛**（D7）。预设表**不含单价**——单价是运营数据，只能在后台填（沿用既有约定）。
 
-### 4.4 入库：三张表
+### 4.4 入库：四张表
 
 ```prisma
 /// 凭证：一把上游 API Key。key 是「账号级」资产，不是「模型级」——同一把 key 可喂多个端点。
@@ -386,12 +386,13 @@ export function validateRoute(route: RouteDraft, members: MemberDraft[], endpoin
 8. 新增 `validateEndpoint/validateRoute`，在保存、入池、探活三处接上；后台展示 error/warn。`pingAgentRuntime`（Agent 自带接入的探活）同样过 `validateEndpoint`——这是决策点 5 里成本最低的半步，先做掉。
 9. 检测体系落地（§6），先只做 `connectivity + thinking + model_scope` 三项 + 定时 + 指标。
 
-### 7.3 三期 · 表结构归一化（需要迁移窗口）— ✅ 代码已落地 2026-08-07，生产切换待运维
-10. 建 `ai_credential` / `ai_endpoint` / `ai_route` / `ai_route_member`，从 `ai_model` + `ai_setting` **双写迁移**：按 `(apiKey)` 去重生成凭证，每行 `AiModel` 生成一个端点，`activeModelId` → `purpose='chat'` 路由的 `primary` 成员，`routingMode/stickyRouting` → 该路由的 `mode/sticky`，`embedding*/rerank*` → 两条独立路由，`AI_AUX_*` → `purpose='aux'` 路由（env 保留一个版本作兜底）。
+### 7.3 三期 · 表结构归一化（需要迁移窗口）— ✅ 代码与写路径已于 2026-08-08 收尾，生产迁移待运维
+10. 建 `ai_credential` / `ai_endpoint` / `ai_route` / `ai_route_member`，从 `ai_model` + `ai_setting` 做**一次性幂等迁移**：按 `(apiKey)` 去重生成凭证，每行 `AiModel` 生成一个端点，`activeModelId` → `purpose='chat'` 路由的 `primary` 成员，`routingMode/stickyRouting` → 该路由的 `mode/sticky`，`embedding*/rerank*` → 两条独立路由，`AI_AUX_*` → `purpose='aux'` 路由（env 保留一个版本作兜底）。
     凭证 `vendor` 推断规则（迁移脚本动手前必须定死，否则写到凭证表第一行就卡住）：① 端点行 `dialect`/`preset` 非空 → 直接映射预设 id；② 否则按 baseUrl 域名匹配 `VendorPreset.entries`（如 `qnaigc.com` → `qiniu`）；③ 仍无法判定 → `vendor='custom'` 并标黄待运营确认。
     **③ 的「标黄」在迁移期不得升级为阻断**：双写迁移必须把 `activeModelId` 指向的端点填进 `purpose='chat'` 路由，若该端点的凭证恰好落到 `custom`（存量 Agnes 行就有这个风险）而阻断生效，chat 路由会被迁成空的、直接把线上 AI 关掉。故：**迁移写入一律放行、只标黄；「未确认 vendor 的凭证不得加入路由」这条闸门只对迁移完成之后的新增/改动生效**。
-11. 读路径切到新表（`getAiConfig` 改为 `resolveRoute(purpose)`），`AiSetting` 降级为只读兼容视图。
-12. 观察一个发布周期后删除旧列。
+11. 读路径默认切到新表（`getAiConfig` 改为 `resolveRoute(purpose)`），`AiSetting` / `AiModel` 降级为只读历史快照；用途没有可用路由时保留静默回落，显式 `AI_CONFIG_V2=false` 只作短时逃生。
+12. 后台写路径直接操作四张新表：`primary` 是指针、凭证可复用、六用途路由与预算可编辑；删除旧 CRUD/投影/旧 admin 路由。迁移期 `needsReview` 可保留现有路由，但迁移后的新增/改路由必须先确认 vendor。
+13. 观察一个发布周期后删除旧列。
 
 ---
 
@@ -430,7 +431,7 @@ export function validateRoute(route: RouteDraft, members: MemberDraft[], endpoin
 | 16 | `server/src/services/{scheduler,metrics}.ts` | 定时探活 + `junshi_ai_endpoint_probe_*` 指标；探活用量按 `purpose='probe'` 单独记账（§6.3） |
 | 17 | `deploy/monitoring/` + `services/alertCard.ts` | 探活失败接入既有飞书告警卡片 |
 
-**三期**（四表归一化）— ✅ 代码已落地，生产切换待运维
+**三期**（四表归一化）— ✅ 代码与写路径已落地，生产迁移待运维
 
 | # | 文件 | 改什么 |
 |---|---|---|
@@ -439,9 +440,11 @@ export function validateRoute(route: RouteDraft, members: MemberDraft[], endpoin
 | 20 | 新增 `server/src/services/aiRoutes.ts` | `resolveRoute(purpose)` + `routeToConfig` + `v2Status`；`AI_CONFIG_V2` 开关与**回落**逻辑 |
 | 21 | `server/src/services/aiConfig.ts` | `getAiConfig` 先试 chat 路由再回落旧路径；嵌入/重排路由投影回原字段（消费方零改动）；新增 `resolveAuxConfigAsync` |
 | 22 | `server/src/services/llmPool.ts` | V2 下池成员来自 chat 路由；`__resetLlmPool` 一并清路由缓存 |
-| 23 | `server/src/routes/admin.ts` + `admin/src/views/model.tsx` | `GET /admin/ai-v2-status` + 后台只读分区（切换故意不做成一键开关） |
+| 23 | `server/src/services/aiV2Admin.ts` | 端点 / 凭证 / 路由唯一写入口；事务化成员重建、primary 指针、凭证复用、缓存统一失效 |
+| 24 | `server/src/routes/admin.ts` + `admin/src/views/model.tsx` | 删除旧 CRUD，V2 admin API 成为唯一入口；后台按接入点 / 六用途路由 / 凭证三层编辑，含用途预算与凭证确认 |
+| 25 | `shared/contracts.d.ts` + `services/aiValidation.ts` | V2 契约补齐 vendor/预算/端点测试；端点更新、入池、切 primary、保存路由共用完整关系校验 |
 
-**为什么切换不做成后台开关**：这是一次读路径切换，需要迁移窗口 + 观察期，且回滚要能在不依赖后台可用的前提下完成（`AI_CONFIG_V2` 是环境变量，改完重启即可）。做成一键开关会诱使人在没跑迁移的情况下点开——而那一下就是把 AI 关掉。
+**为什么仍保留环境变量而不做后台开关**：正常读路径已默认 V2；`AI_CONFIG_V2=false` 只用于切换当天、后台不可用时的短时逃生。它读的是不再更新的历史快照，不能冒充长期回滚。迁移与就绪检查仍需在发布窗口完成，避免后台开始写 V2 后两边分叉。
 
 ---
 

@@ -1301,9 +1301,9 @@ model ModerationLog {
   @@map("moderation_log")
 }
 
-/// 大模型配置（单例，记录「当前生效」模型 = 运行时实际读取的解析配置）。
-/// 运营后台可在已添加的 AiModel 之间快速切换：切换=把目标 AiModel 拷进本行 + 记 activeModelId。
-/// getAiConfig 仍只读本行，运行时路径不变。模型/Embedding/Rerank 凭证按产品决策明文存库，API 只回 hasKey。
+/// 旧版大模型配置单例。三期写路径收尾后仅作 `AI_CONFIG_V2=false` 的应急历史快照；
+/// 运营后台不再写本表，正常运行时以 AiCredential/AiEndpoint/AiRoute/AiRouteMember 为真源。
+/// 模型/Embedding/Rerank 凭证按产品决策明文存库，API 从不回传明文。
 model AiSetting {
   id             String  @id @default("default")
   // 缺省不预置任何厂商：历史默认是已不在用的 Agnes，会把「从没配过」显示成「已配好」。
@@ -1317,8 +1317,8 @@ model AiSetting {
   temperature    Float   @default(0.7)
   thinkingMode   String  @default("disabled") // disabled | enabled | adaptive
   thinkingBudget Int     @default(1024) // enabled 时生效；1024..7000
-  activeModelId  String? // 指向当前生效的 AiModel.id（后台高亮用，运行时不依赖）
-  // 与 AiModel 上的同名列同义，由 syncActiveSetting 一并拷贝（本表是拷贝式生效，三期归一化后消失）。
+  activeModelId  String? // 历史快照：旧版当前生效 AiModel.id
+  // 历史拷贝字段；V2 正常写路径不再更新。
   dialect        String?
   capsJson       Json?
 
@@ -1343,8 +1343,8 @@ model AiSetting {
   @@map("ai_setting")
 }
 
-/// 已添加的模型接入点（运营可添加多个，快速切换其一生效）。
-/// 来源三种：内置接入商预设（preset 记其 id）/ 自定义通用兼容协议 / 完全自主定义。apiKey 明文存库，API 不回传。
+/// 旧版模型接入点。三期收尾后只供一次性迁移、应急历史快照与旧密文清理读取；后台不再 CRUD。
+/// apiKey 明文存库，API 不回传。
 model AiModel {
   id               String    @id @default(cuid())
   provider         String    @default("openai") // mock | claude | openai
@@ -1379,7 +1379,7 @@ model AiModel {
   priceCacheWrite  Float     @default(0)
 
   // —— 端点池（多路分流 + 故障转移，见 services/llmPool.ts）——
-  // 默认 poolEnabled=false → 不入池，行为与旧版完全一致（仍可被 activateModel 单选生效）。
+  // 历史端点池字段；正常运行时成员关系在 AiRouteMember。
   poolEnabled    Boolean @default(false)
   weight         Int     @default(1) // 相对权重，分流按权重摊
   tier           Int     @default(0) // 0=同质对等；1+=降级备份（低 tier 全冷却才启用）
@@ -1396,8 +1396,8 @@ model AiModel {
 /// 方言与厂商是代码常量（llm/dialects.ts、llm/vendors.ts）——它们是「事实」不是「运营数据」；
 /// 凭证 / 端点 / 路由入库，因为它们是运营资产。
 ///
-/// 迁移期这四张表由 `scripts/migrateAiConfig.ts` 从 ai_model + ai_setting 生成，
-/// 读路径由 `AI_CONFIG_V2` 开关切换：关＝完全走旧表（默认，行为零变化），开＝走这里。
+/// 首次上线由 `scripts/migrateAiConfig.ts` 从 ai_model + ai_setting 生成；此后后台直接写这四张表。
+/// 读路径默认走这里；显式 `AI_CONFIG_V2=false` 只用于短时读取旧表历史快照。
 /// 旧表在观察一个发布周期后再删列。
 
 /// 凭证：一把上游 API Key。key 是「账号级」资产，不是「模型级」——

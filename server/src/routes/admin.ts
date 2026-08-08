@@ -2,19 +2,20 @@
 // 鉴权：本插件内所有 /admin/* 路由统一走 requireAdmin 前置校验（共享密钥 ADMIN_TOKEN 或 role=admin 账号）。
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
+import { getAiConfig, effectiveProvider, mergedTestConfig } from '../services/aiConfig.js';
 import {
-  getAiConfig, setAiConfig, publicConfig, AI_PRESETS, effectiveProvider, type ResolvedAiConfig,
-  listModels, addModel, updateModel, deleteModel, activateModel, mergedTestConfig, mergedConfigTest,
-} from '../services/aiConfig.js';
-import {
-  checkEndpoint, checkPool, checkAux, draftFromUpsert, hasBlocking, blockingMessage,
+  checkEndpoint, hasBlocking, blockingMessage, draftFromEndpointUpsert, checkRoutePurpose,
+  checkEndpointRoutes, checkPrimaryPurpose, checkPoolMembershipPurpose,
 } from '../services/aiValidation.js';
-import { probeModelById, ALL_PROBES, type ProbeKind } from '../services/aiProbe.js';
+import { probeEndpointById, ALL_PROBES, type ProbeKind } from '../services/aiProbe.js';
 import { DIALECTS } from '../llm/dialects.js';
-import { syncV2FromLegacy, v2Status } from '../services/aiRoutes.js';
-import { poolStatus, __resetLlmPool } from '../services/llmPool.js';
-import { testEmbedding } from '../services/embedding.js';
-import { testRerank } from '../services/rerank.js';
+import { v2Status, PURPOSES, type AiPurpose } from '../services/aiRoutes.js';
+import {
+  v2View, createEndpoint, updateEndpoint, deleteEndpoint, updateCredential,
+  saveRoute, setPrimary, setPoolMembership,
+} from '../services/aiV2Admin.js';
+import type { AiEndpointUpsert, AiRouteUpsert } from '../llm/schema.js';
+import { poolStatus } from '../services/llmPool.js';
 import { pingModel, pingAgentRuntime, generateDeliverable, chatComplete } from '../llm/gateway.js';
 import { buildSandboxContext } from '../services/context.js';
 import {
@@ -48,7 +49,7 @@ import { retrievalDebug } from '../services/retrievalDebug.js';
 import { userContextView } from '../services/adminUserContext.js';
 import { deleteUserMemory, listAgentMemories, deleteAgentMemory } from '../services/memory.js';
 import { getKnowledgeDetail, deleteKnowledge, reembedItem, ingestUploadedFile } from '../services/knowledge.js';
-import type { AiConfigUpdate, AiModelUpsert, AiModelTest, AiRouting } from '../llm/schema.js';
+import type { AiEndpointTest } from '../llm/schema.js';
 import type {
   AdminAuditItem, AdminUserItem, AdminUsageView, AdminTokenUsageView,
   AdminAgentCreate, AdminAgentUpdate, AdminUserDetail, AdminUserAgentRow, AdminImpersonateResult, AgentBilling,
@@ -291,134 +292,116 @@ export async function adminRoutes(app: FastifyInstance) {
     return result;
   });
 
-  // —— 大模型配置（运营后台可随时切换；未配置时缺省 mock，由运营选接入商建第一个端点） ——
-  // config=当前生效配置；presets=内置接入商目录（添加向导用）；models=已添加模型（快速切换源）。
-  app.get('/admin/ai-config', async () => {
-    const cfg = await getAiConfig(true);
-    return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
-  });
-  app.put<{ Body: AiConfigUpdate }>('/admin/ai-config', async (req, reply) => {
-    // 嵌入/重排的「留空复用对话端点」要过协议 + 厂商两条否决；池的一致性另算。
-    const issues = [...await checkAux(req.body ?? {}), ...await checkPool()];
-    if (hasBlocking(issues)) {
-      return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
-    }
-    const cfg = await setAiConfig(req.body ?? {});
-    await recordAudit({ action: 'admin.ai.update', payload: { provider: cfg.provider, model: cfg.model } });
-    return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
-  });
-
-  // —— 已添加模型：增删改 + 快速切换（生效）+ 探活 ——
-  app.post<{ Body: AiModelUpsert }>('/admin/ai-models', async (req, reply) => {
-    const b = req.body;
-    if (!b || !b.label?.trim() || !b.provider) return reply.code(400).send({ error: '缺少展示名或协议' });
-    const draft = await draftFromUpsert(b);
-    const issues = [...await checkEndpoint(draft), ...await checkPool({ override: draft })];
-    if (hasBlocking(issues)) {
-      return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
-    }
-    const m = await addModel(b);
-    await recordAudit({ action: 'admin.ai.model.add', payload: { id: m.id, provider: m.provider, model: m.model } });
-    return { ...m, issues };
-  });
-  app.patch<{ Params: { id: string }; Body: AiModelUpsert }>('/admin/ai-models/:id', async (req, reply) => {
-    const existing = await prisma.aiModel.findUnique({ where: { id: req.params.id }, select: { id: true } });
-    if (!existing) return reply.code(404).send({ error: '模型不存在' });
-    // 用「这次要改成的值」代入池做预判，而不是拿库里的旧值算——否则运营保存完才发现协议冲突。
-    const draft = await draftFromUpsert(req.body ?? ({} as AiModelUpsert), req.params.id);
-    const issues = [...await checkEndpoint(draft), ...await checkPool({ override: draft })];
-    if (hasBlocking(issues)) {
-      return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
-    }
-    const m = await updateModel(req.params.id, req.body ?? ({} as AiModelUpsert));
-    if (!m) return reply.code(404).send({ error: '模型不存在' });
-    await recordAudit({ action: 'admin.ai.model.update', payload: { id: m.id, provider: m.provider, model: m.model } });
-    return { ...m, issues };
-  });
-  app.delete<{ Params: { id: string } }>('/admin/ai-models/:id', async (req, reply) => {
-    const r = await deleteModel(req.params.id);
-    if (!r.ok) return reply.code(409).send({ error: r.reason || '删除失败' });
-    await recordAudit({ action: 'admin.ai.model.delete', payload: { id: req.params.id } });
-    return { ok: true };
-  });
-  app.post<{ Params: { id: string } }>('/admin/ai-models/:id/activate', async (req, reply) => {
-    try {
-      const target = await prisma.aiModel.findUnique({ where: { id: req.params.id }, select: { id: true } });
-      if (!target) return reply.code(404).send({ error: '模型不存在' });
-      // 切换生效模型不会改变池的成员，但会改变「嵌入能否复用对话端点」这类判断，
-      // 所以池与 aux 两套一起过一遍——历史上这里只判了池协议。
-      const issues = [...await checkPool(), ...await checkAux({})];
-      if (hasBlocking(issues)) {
-        return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
-      }
-      const cfg = await activateModel(req.params.id);
-      await recordAudit({ action: 'admin.ai.model.activate', payload: { id: req.params.id, provider: cfg.provider, model: cfg.model } });
-      return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
-    } catch (err) {
-      return reply.code(404).send({ error: (err as Error).message });
-    }
-  });
-  // —— 端点池：路由模式 + 实时健康态 ——
-  // 单端点被上游限流时，池会按加权 Rendezvous 哈希把流量转到同 tier 的其它端点；
-  // 会话粘性保证同一会话固定落同一端点，不打散上游的提示词缓存。见 services/llmPool.ts。
+  // —— 端点池实时健康态（只读）——
+  // 谁在冷却、几点恢复。**改分流模式请走 `PUT /admin/ai-routes/chat`**：
+  // 分流是 chat 路由的属性，此前写 `AiSetting.routingMode` 再投影，那是拷贝式生效的最后一处残留。
   app.get('/admin/ai-routing', async () => poolStatus());
-  app.put<{ Body: Partial<AiRouting> }>('/admin/ai-routing', async (req, reply) => {
-    const b = req.body ?? {};
-    const data: Record<string, unknown> = {};
-    if (b.mode !== undefined) {
-      if (b.mode !== 'single' && b.mode !== 'pool') return reply.code(400).send({ error: 'mode 只能是 single 或 pool' });
-      data.routingMode = b.mode;
-    }
-    if (b.sticky !== undefined) data.stickyRouting = !!b.sticky;
-    if (!Object.keys(data).length) return reply.code(400).send({ error: '无可更新字段' });
-
-    // 切到 pool 前先确认池自洽（有成员、同协议、都有 key），否则等于把 AI 关了。
-    if (data.routingMode === 'pool') {
-      const issues = await checkPool({ mode: 'pool' });
-      if (hasBlocking(issues)) {
-        return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
-      }
-    }
-    await prisma.aiSetting.update({ where: { id: 'default' }, data });
-    __resetLlmPool();
-    await syncV2FromLegacy(); // 切到 V2 后，路由模式改在新表上才算数
-    await recordAudit({ action: 'admin.ai.routing.update', payload: { ...data } as Record<string, string | boolean> });
-    return poolStatus();
-  });
 
   // 方言目录（后台下拉 + 「确认固化」用）。代码常量，运营只选不改。
   app.get('/admin/ai-dialects', async () => ({ dialects: DIALECTS }));
 
+  /* ── 归一化接入配置：后台直接读写四张表（三期收尾）──────────────────────
+   * 此前后台写旧表、V2 靠投影，三笔债一笔没收。现在这组接口是唯一写路径：
+   * 「生效」＝改 primary 指针（没有拷贝）、换 key 改凭证一处（不再复制 N 份）、
+   * 每个用途一条路由（辅助档终于能在后台配）。 */
+  app.get('/admin/ai-v2', async () => v2View());
+
+  app.post<{ Body: AiEndpointUpsert }>('/admin/ai-endpoints', async (req, reply) => {
+    const b = req.body;
+    if (!b?.label?.trim() || !b.provider) return reply.code(400).send({ error: '缺少展示名或协议' });
+    const draft = await draftFromEndpointUpsert(b);
+    const issues = await checkEndpoint(draft);
+    if (hasBlocking(issues)) return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
+    const id = await createEndpoint(b);
+    await recordAudit({ action: 'admin.ai.endpoint.add', payload: { id, provider: b.provider, model: b.model ?? '' } });
+    return { id, issues };
+  });
+
+  app.patch<{ Params: { id: string }; Body: AiEndpointUpsert }>('/admin/ai-endpoints/:id', async (req, reply) => {
+    const draft = await draftFromEndpointUpsert(req.body ?? ({} as AiEndpointUpsert), req.params.id);
+    const issues = [...await checkEndpoint(draft), ...await checkEndpointRoutes(req.params.id, draft)];
+    if (hasBlocking(issues)) return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
+    if (!(await updateEndpoint(req.params.id, req.body ?? {}))) return reply.code(404).send({ error: '接入点不存在' });
+    await recordAudit({ action: 'admin.ai.endpoint.update', payload: { id: req.params.id } });
+    return { ok: true, issues };
+  });
+
+  app.delete<{ Params: { id: string } }>('/admin/ai-endpoints/:id', async (req, reply) => {
+    const r = await deleteEndpoint(req.params.id);
+    if (!r.ok) return reply.code(409).send({ error: r.reason });
+    await recordAudit({ action: 'admin.ai.endpoint.delete', payload: { id: req.params.id } });
+    return { ok: true };
+  });
+
+  // 换 key 的唯一入口：改这一条，它下面所有端点一起生效。
+  app.patch<{ Params: { id: string }; Body: { label?: string; vendor?: string; apiKey?: string } }>(
+    '/admin/ai-credentials/:id',
+    async (req, reply) => {
+      const result = await updateCredential(req.params.id, req.body ?? {});
+      if (!result.ok) {
+        return reply.code(result.reason === '凭证不存在' ? 404 : 400).send({ error: result.reason });
+      }
+      await recordAudit({ action: 'admin.ai.credential.update', payload: { id: req.params.id, rotated: !!req.body?.apiKey } });
+      return { ok: true };
+    },
+  );
+
+  app.put<{ Params: { purpose: string }; Body: AiRouteUpsert }>('/admin/ai-routes/:purpose', async (req, reply) => {
+    const purpose = req.params.purpose as AiPurpose;
+    if (!PURPOSES.includes(purpose)) return reply.code(400).send({ error: `未知用途 ${purpose}` });
+    const issues = await checkRoutePurpose(purpose, req.body ?? {});
+    if (hasBlocking(issues)) return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
+    await saveRoute(purpose, req.body ?? {});
+    await recordAudit({ action: 'admin.ai.route.update', payload: { purpose, mode: req.body?.mode ?? '' } });
+    return { ok: true, issues };
+  });
+
+  // 「设为生效」＝把某用途的 primary 指针指过去。没有任何字段拷贝。
+  app.post<{ Params: { purpose: string; id: string } }>('/admin/ai-routes/:purpose/primary/:id', async (req, reply) => {
+    const purpose = req.params.purpose as AiPurpose;
+    if (!PURPOSES.includes(purpose)) return reply.code(400).send({ error: `未知用途 ${purpose}` });
+    // 资源不存在仍保持 404；不要让关系校验先把它改写成 409，客户端依赖这层语义。
+    if (!await prisma.aiEndpoint.findUnique({ where: { id: req.params.id }, select: { id: true } })) {
+      return reply.code(404).send({ error: '接入点不存在' });
+    }
+    const issues = await checkPrimaryPurpose(purpose, req.params.id);
+    if (hasBlocking(issues)) return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
+    if (!(await setPrimary(purpose, req.params.id))) return reply.code(404).send({ error: '接入点不存在' });
+    await recordAudit({ action: 'admin.ai.route.primary', payload: { purpose, id: req.params.id } });
+    return { ok: true, issues };
+  });
+
+  // 入池 / 出池 ＝ chat 路由的成员增删。
+  app.post<{ Params: { id: string }; Body: { inPool: boolean } }>('/admin/ai-endpoints/:id/pool', async (req, reply) => {
+    const inPool = !!req.body?.inPool;
+    const issues = await checkPoolMembershipPurpose(req.params.id, inPool);
+    if (hasBlocking(issues)) return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
+    const r = await setPoolMembership(req.params.id, inPool);
+    if (!r.ok) return reply.code(409).send({ error: r.reason });
+    await recordAudit({ action: 'admin.ai.route.pool', payload: { id: req.params.id, inPool } });
+    return { ok: true, issues };
+  });
+
   // 归一化配置（三期）就绪状态：迁移跑没跑、各用途路由长什么样、有没有待确认的凭证。
-  // 切 AI_CONFIG_V2 之前先看这里——ready=false 时切过去就是把 AI 关掉。
+  // 首次生产迁移与发布验收必须看这里；ready=false 时运行时虽会回落旧快照，但后台新写只进 V2。
   app.get('/admin/ai-v2-status', async () => v2Status());
 
-  // 探活：用「添加/编辑表单」字段直测（modelId 传入且 key 空则取该模型已存 key）。
-  app.post<{ Body: AiModelTest }>('/admin/ai-models/test', async (req) => {
-    return pingModel(await mergedTestConfig(req.body ?? ({} as AiModelTest)));
+  // 探活：用「添加/编辑端点表单」的字段直测。`endpointId` 传入且 key 留空则取该端点凭证里的 key。
+  // 必带 poolBypass —— 测的必须是被测端点本身，不能被端点池改写（见 aiConfig 里的长注释）。
+  app.post<{ Body: AiEndpointTest }>('/admin/ai-endpoints/test', async (req) => {
+    return pingModel(await mergedTestConfig(req.body ?? ({} as AiEndpointTest)));
   });
 
   // 深度检测：按项跑（连通性 / 模型范围 / thinking 写法 / 工具 / 流式 / 长输出 / 嵌入 / 重排）。
-  // 结果落库并**回填能力标记**——探活说「这个模型不支持思考」，校验器下一秒就开始拦截。
-  app.post<{ Params: { id: string }; Body: { kinds?: ProbeKind[] } }>('/admin/ai-models/:id/probe', async (req, reply) => {
+  // 结果**直接写端点表并回填能力标记**——探活说「这个模型不支持思考」，校验器下一秒就开始拦截。
+  app.post<{ Params: { id: string }; Body: { kinds?: ProbeKind[] } }>('/admin/ai-endpoints/:id/probe', async (req, reply) => {
     const asked = req.body?.kinds?.length ? req.body.kinds : (['connectivity'] as ProbeKind[]);
     const kinds = asked.filter((k) => ALL_PROBES.includes(k));
     if (!kinds.length) return reply.code(400).send({ error: '没有可执行的检测项' });
-    const outcome = await probeModelById(req.params.id, kinds, now());
-    if (!outcome) return reply.code(404).send({ error: '模型不存在' });
-    await recordAudit({ action: 'admin.ai.model.probe', payload: { id: req.params.id, kinds: kinds.join(','), ok: outcome.ok } });
+    const outcome = await probeEndpointById(req.params.id, kinds, now());
+    if (!outcome) return reply.code(404).send({ error: '接入点不存在' });
+    await recordAudit({ action: 'admin.ai.endpoint.probe', payload: { id: req.params.id, kinds: kinds.join(','), ok: outcome.ok } });
     return outcome;
-  });
-  // 测试连接：用「当前保存配置」叠加本次未保存的改动（各 key 留空则用已存 key）。
-  // 对话模型必测；嵌入/重排若开启则一并探活回传。
-  // 合并逻辑（含 poolBypass）在 aiConfig.mergedConfigTest —— 与 mergedTestConfig 是同一缺陷的两个入口，
-  // 必须同源，否则修好一个另一个还会被端点池劫持。
-  app.post<{ Body: AiConfigUpdate }>('/admin/ai-config/test', async (req) => {
-    const merged: ResolvedAiConfig = mergedConfigTest(await getAiConfig(true), req.body ?? {});
-    const result: AiTestResult = await pingModel(merged);
-    if (merged.embeddingEnabled) result.embedding = await testEmbedding(merged);
-    if (merged.rerankEnabled) result.rerank = await testRerank(merged);
-    return result;
   });
 
   // agent 可勾选的工具（内置 + 启用的自定义工具）。

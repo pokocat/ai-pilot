@@ -13,7 +13,7 @@ import { hybridSearch, resolveReferences } from '../src/services/retrieval.js';
 import { ingestUploadedFile, getKnowledgeDetail } from '../src/services/knowledge.js';
 import type { MemoryConfig } from '../src/data/agents.js';
 import { recordTokenUsage, tokenUsageSummary } from '../src/services/usage.js';
-import { addModel } from '../src/services/aiConfig.js';
+import { createEndpoint, deleteEndpoint } from '../src/services/aiV2Admin.js';
 import { setQuota, getQuotaState, chargeQuota, ensureQuota, reserveQuota } from '../src/services/tokenQuota.js';
 import { loadConversationHistory, loadHistory } from '../src/routes/sessions.js';
 import { moderate, listModerationLogs } from '../src/services/moderation.js';
@@ -627,33 +627,42 @@ describe('TC-G ★ 跨用户知识库/数据隔离（防泄露）', () => {
   });
 });
 
-// ───────────────────────── TC-H 模型配置（不泄露明文 key） ─────────────────────────
-describe('TC-H 模型配置（默认 Agnes，可切换，不泄露明文 key）', () => {
-  test('H1 读配置：含 hasKey 布尔，绝不回传明文 apiKey；预设可用', async () => {
-    const r = await api('GET', '/api/admin/ai-config');
+// ───────────────────────── TC-H 接入配置（不泄露明文 key） ─────────────────────────
+describe('TC-H 接入配置（归一化四表；不泄露明文 key）', () => {
+  test('H1 读配置：端点/凭证只回 hasKey，绝不回传明文；预设与方言随视图下发', async () => {
+    const r = await api('GET', '/api/admin/ai-v2');
     assert.equal(r.status, 200);
-    assert.equal(typeof r.body.config.hasKey, 'boolean');
-    assert.ok(!('apiKey' in r.body.config), '对外配置不得包含明文 apiKey 字段');
-    assert.ok(r.body.presets.some((p: any) => p.id === 'agnes'), '应含 Agnes 预设');
+    assert.ok(Array.isArray(r.body.endpoints));
+    assert.ok(r.body.presets.some((p: any) => p.id === 'qiniu-anthropic'), '应含七牛预设');
+    assert.ok(r.body.dialects.some((d: any) => d.id === 'anthropic_gateway'), '应含方言目录');
+    assert.equal(JSON.stringify(r.body).includes('apiKey'), false, '对外视图不得包含 apiKey 字段');
   });
 
-  test('H2 改配置：切到 Agnes；未配 key 时实际降级 mock', async () => {
-    const r = await api('PUT', '/api/admin/ai-config', { body: { provider: 'openai', label: 'Agnes 2.0 Flash', baseUrl: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash' } });
-    assert.equal(r.body.config.model, 'agnes-2.0-flash');
-    assert.equal(r.body.config.hasKey, false, '未传 key → 无 key');
-    assert.equal(r.body.config.ready, false, '无真实 key → 未就绪');
-    assert.equal(r.body.config.effectiveProvider, 'mock', '未就绪应实际降级 mock');
-    assert.ok(!('apiKey' in r.body.config));
+  test('H2 建端点：明文 key 不回传，只回 hasKey；单价与方言如实落库', async () => {
+    const created = await api('POST', '/api/admin/ai-endpoints', {
+      body: {
+        label: 'TC-H 测试端点', provider: 'openai',
+        baseUrl: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash',
+        apiKey: 'sk-tch-secret', priceInput: 10, priceOutput: 20,
+      },
+    });
+    assert.equal(created.status, 200);
+    const view = await api('GET', '/api/admin/ai-v2');
+    const ep = view.body.endpoints.find((e: any) => e.label === 'TC-H 测试端点');
+    assert.ok(ep, '新建端点应出现在视图里');
+    assert.equal(ep.hasKey, true);
+    assert.equal(JSON.stringify(view.body).includes('sk-tch-secret'), false, '明文 key 绝不出视图');
+    await api('DELETE', `/api/admin/ai-endpoints/${ep.id}`);
   });
 
-  test('H3 空 body 的 application/json POST 不报 400（activate 等无 body 接口；防 FST_ERR_CTP_EMPTY_JSON_BODY 回归）', async () => {
+  test('H3 空 body 的 application/json POST 不报 400（防 FST_ERR_CTP_EMPTY_JSON_BODY 回归）', async () => {
     const app = await getApp();
     const res = await app.inject({
-      method: 'POST', url: '/api/admin/ai-models/bogus-id/activate',
+      method: 'POST', url: '/api/admin/ai-routes/chat/primary/bogus-id',
       headers: { 'content-type': 'application/json', 'x-admin-token': 'test-admin-token' }, payload: '',
     });
     assert.notEqual(res.statusCode, 400, '空 JSON body 不应触发 fastify 空体 400');
-    assert.equal(res.statusCode, 404, '应过 body 解析、走到路由自身的 404（模型不存在）');
+    assert.equal(res.statusCode, 404, '应过 body 解析、走到路由自身的 404（端点不存在）');
   });
 });
 
@@ -1369,8 +1378,8 @@ describe('TC-Y Token 用量计量', () => {
   test('Y1 recordTokenUsage 按已配单价算成本；未配价→0；零 token 跳过', async () => {
     const t = await login(uniquePhone(), 'Token甲');
     const tenantId = await tenantOf(t);
-    // 运营给 gpt-4o 配单价 in 18 / out 72（元/1M）；addModel 会清空费率缓存
-    const priced = await addModel({ provider: 'openai', label: 'GPT4o(测试价)', model: 'gpt-4o', priceInput: 18, priceOutput: 72 });
+    // 运营给 gpt-4o 配单价 in 18 / out 72（元/1M）。单价配在**端点**上，建端点会清空费率缓存。
+    const priced = await createEndpoint({ provider: 'openai', label: 'GPT4o(测试价)', model: 'gpt-4o', apiKey: 'sk-price-test', priceInput: 18, priceOutput: 72 });
     await recordTokenUsage({ tenantId, userId: t, sessionId: null, agentKey: 'strat', kind: 'deliverable', provider: 'openai', model: 'gpt-4o', usage: { inputTokens: 1000, outputTokens: 500, cachedInput: 0 } });
     await recordTokenUsage({ tenantId, userId: t, kind: 'chat', provider: 'openai', model: 'unpriced-model', usage: { inputTokens: 1000, outputTokens: 1000, cachedInput: 0 } });
     await recordTokenUsage({ tenantId, userId: t, kind: 'chat', provider: 'mock', model: 'template', usage: { inputTokens: 0, outputTokens: 0, cachedInput: 0 } });
@@ -1380,13 +1389,14 @@ describe('TC-Y Token 用量计量', () => {
     assert.equal(g.totalTokens, 1500);
     assert.equal(g.costMicros, 54000); // 1000*18 + 500*72（微元）= 已配单价
     assert.equal(rows.find((r) => r.model === 'unpriced-model')!.costMicros, 0, '未配单价 → 成本计 0，不回退估算');
-    await prisma.aiModel.delete({ where: { id: priced.id } });
+    await deleteEndpoint(priced);
   });
 
   test('Y2 tokenUsageSummary 与 /admin/token-usage 同口径；已配价标 calibrated', async () => {
     const t = await login(uniquePhone(), 'Token乙');
     const tenantId = await tenantOf(t);
-    const priced = await addModel({ provider: 'openai', label: 'GPT4o(测试价)', model: 'gpt-4o', priceInput: 18, priceOutput: 72 });
+    const priced = await createEndpoint({ provider: 'openai', label: 'GPT4o(测试价)', model: 'gpt-4o', apiKey: 'sk-price-test', priceInput: 18, priceOutput: 72 });
+    void priced;
     await recordTokenUsage({ tenantId, userId: t, kind: 'deliverable', provider: 'openai', model: 'gpt-4o', usage: { inputTokens: 2000, outputTokens: 1000, cachedInput: 0 } });
     const sum = await tokenUsageSummary(30);
     assert.ok(sum.totals.totalTokens >= 3000, '总 token 应累计');
@@ -1394,7 +1404,7 @@ describe('TC-Y Token 用量计量', () => {
     const view = await api('GET', '/api/admin/token-usage'); // helper 自动带 ADMIN_TOKEN
     assert.equal(view.status, 200);
     assert.equal(view.body.totals.totalTokens, sum.totals.totalTokens);
-    await prisma.aiModel.delete({ where: { id: priced.id } });
+    await deleteEndpoint(priced);
   });
 
   test('Y3 注销账号连带清除其 token 用量（外键安全）', async () => {

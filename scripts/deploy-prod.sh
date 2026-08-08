@@ -191,7 +191,9 @@ if [ "$DEPLOY_H5" = "1" ]; then
   TARO_APP_MODE=server TARO_APP_API="$TARO_APP_API" npm run build:h5
   sudo mkdir -p /var/www/junshi/h5
   sudo find /var/www/junshi/h5 -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  sudo cp -R dist/. /var/www/junshi/h5/
+  # 微信端迁到原生运行时后，Taro 只构建 H5，产物固定在 dist-h5/。
+  # 这里若仍复制旧 dist/，构建本身会成功，但发布在 cp 阶段中断，线上继续吃旧 H5。
+  sudo cp -R dist-h5/. /var/www/junshi/h5/
 fi
 
 printf '%s\n' "${SHA}" | sudo tee "$APP_ROOT/.deploy-version" >/dev/null

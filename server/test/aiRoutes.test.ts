@@ -24,7 +24,8 @@ const base: ResolvedAiConfig = {
 };
 
 let savedFlag: string | undefined;
-const useV2 = (on: boolean) => { if (on) process.env.AI_CONFIG_V2 = 'true'; else delete process.env.AI_CONFIG_V2; __resetAiRoutes(); };
+// 三期收尾后 V2 是默认路径：不设开关＝走归一化表；只有显式 'false' 才回落旧快照。
+const useV2 = (on: boolean) => { if (on) delete process.env.AI_CONFIG_V2; else process.env.AI_CONFIG_V2 = 'false'; __resetAiRoutes(); };
 
 async function wipe(): Promise<void> {
   await prisma.aiRouteMember.deleteMany({});
@@ -67,15 +68,19 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-describe('开关默认关 = 完全旧行为', () => {
-  test('不设 AI_CONFIG_V2 → v2Enabled 为假，任何用途都解析不出路由', async () => {
+describe('默认走归一化表；应急开关能退回旧快照', () => {
+  test('不设 AI_CONFIG_V2 → 默认就是 V2（三期收尾后旧表已不再被写）', async () => {
+    useV2(true); // beforeEach 把开关按到了 false，这条要验的是「不设」，得显式清掉
     await seedRoute('chat');
-    assert.equal(v2Enabled(), false);
-    for (const p of PURPOSES) assert.equal(await resolveRoute(p), null, `${p} 不该在关闭时生效`);
+    assert.equal(v2Enabled(), true);
+    assert.ok(await resolveRoute('chat'));
   });
 
-  test('不设开关时 getAiConfig 走旧表（哪怕新表里有完整路由）', async () => {
+  test('显式 AI_CONFIG_V2=false → 任何用途都解析不出路由，回落旧快照', async () => {
     await seedRoute('chat', { label: 'V2 专属端点', model: 'v2-only-model' });
+    useV2(false);
+    assert.equal(v2Enabled(), false);
+    for (const p of PURPOSES) assert.equal(await resolveRoute(p), null, `${p} 不该在关闭时生效`);
     const cfg = await getAiConfig(true);
     assert.notEqual(cfg.model, 'v2-only-model', '关闭状态下不该读到新表');
   });

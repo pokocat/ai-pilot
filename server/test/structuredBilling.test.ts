@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { getApp, closeApp, seedBaseline, cleanBusiness, login, api, uniquePhone } from './helpers.ts';
 import { prisma } from '../src/db.ts';
-import { setAiConfig } from '../src/services/aiConfig.ts';
+import { configurePurpose, __wipeAiV2 } from '../src/services/aiV2Admin.js';
 import { structuredMetered } from '../src/llm/gateway.ts';
 
 const CHAT_URL = '/chat/completions';
@@ -36,7 +36,8 @@ describe('P1-3 structured() 计费口径（真实调用发生但校验失败）'
     await cleanBusiness();
     await seedBaseline();
     // 全局配成 openai 兼容端点（明文 key，isRealKey=true）→ liveProvider=openai。
-    await setAiConfig({ provider: 'openai', baseUrl: 'http://mock.test/v1', model: 'mock-model', apiKey: 'sk-test-real-123' });
+    await __wipeAiV2();
+  await configurePurpose('chat', { label: '测试端点', provider: 'openai', baseUrl: 'http://mock.test/v1', model: 'mock-model', apiKey: 'sk-test-real-123' });
   });
   after(async () => {
     delete process.env.AI_ALLOW_REAL_PROVIDER;

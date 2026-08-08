@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness, api, login, uniquePhone } from './helpers.js';
 import { setQuota, getQuotaState, RESERVE_TOKENS } from '../src/services/tokenQuota.js';
-import { setAiConfig } from '../src/services/aiConfig.js';
+import { configurePurpose, __wipeAiV2 } from '../src/services/aiV2Admin.js';
 
 const tenantOf = async (token: string) => (await prisma.user.findUnique({ where: { id: token } }))!.tenantId;
 
@@ -21,14 +21,15 @@ function stubRawJsonFetch(payload: Record<string, unknown>) {
 async function withStubbedLiveProvider<T>(fn: () => Promise<T>): Promise<T> {
   const prevEnv = process.env.AI_ALLOW_REAL_PROVIDER;
   process.env.AI_ALLOW_REAL_PROVIDER = '1';
-  await setAiConfig({ provider: 'openai', baseUrl: 'http://mock.test/v1', model: 'mock-model', apiKey: 'sk-test-real-123' });
+  await __wipeAiV2();
+  await configurePurpose('chat', { label: '测试端点', provider: 'openai', baseUrl: 'http://mock.test/v1', model: 'mock-model', apiKey: 'sk-test-real-123' });
   stubRawJsonFetch({ entities: [], relations: [], points: ['要点'], conclusions: ['结论'], todos: ['待办'] });
   try {
     return await fn();
   } finally {
     globalThis.fetch = realFetch;
     process.env.AI_ALLOW_REAL_PROVIDER = prevEnv;
-    await setAiConfig({ provider: 'mock', apiKey: '' }); // 复位，避免污染后续测试
+    await __wipeAiV2(); // 复位，避免污染后续测试
   }
 }
 
