@@ -36,6 +36,7 @@ import { bustPlanGate } from '../services/planGate.js';
 import { prescriptionFunnel } from '../services/prescription.js';
 import { activationSourceCounts } from '../services/activation.js';
 import { setFeatureFlag, setFeatureFlagPayload, isComplianceFlag } from '../services/featureFlag.js';
+import { WENCE_FLAG, normalizeChips, effectiveArms } from '../services/wence.js';
 import { ALERT_CONFIG_DEFS, feishuStatus, setFeishuTarget, sendFeishuCard, formatAlertCard } from '../services/alertConfig.js';
 import { REVIEW_GRACE_PER_DAY, getQuotaState, getPlanStatus, setQuota } from '../services/tokenQuota.js';
 import { getBalance, grantCredits, chargeCredits } from '../services/credits.js';
@@ -75,14 +76,22 @@ import { papayConfigured } from '../services/wechatPapay.js';
 
 // 功能开关目录（P0-2 / D-10）：label/desc/compliance/kind 写死在代码；DB 存 enabled(toggle) 或 payload(number)。
 // number 类：payloadKey=payload 里的字段名；def=默认值；min/max=校验区间；unit=单位标签。
+// arms（A/B 实验开关，2026-08-08）：kind 仍是 toggle（开/关是主操作），另在 payload.arms 里存各臂权重；
+//   PATCH 传 { arms: {...} } 才动权重，只传 enabled 不覆盖已配权重（featureFlag.upsert 分字段写）。
 type FlagDef = {
   id: string; label: string; desc: string; compliance: boolean;
   kind: 'toggle' | 'number'; payloadKey?: string; def?: number; min?: number; max?: number; unit?: string;
+  arms?: string[]; // 允许的实验臂名（配了才接受 PATCH 的 arms 字段）
 };
 const FEATURE_FLAG_CATALOG: FlagDef[] = [
   { id: 'fortune', label: '命理能力', desc: '关闭即全产品下线八字/命盘/天时日历/送你一卦，对话不再引用命盘（合规一键降级）', compliance: isComplianceFlag('fortune'), kind: 'toggle' },
   // D-10 复盘保底额度：额度耗尽时复盘类调用每日仍放行的次数（覆盖「日复盘+军令生成+2-3 次追问」动线，默认 6）。
   { id: 'review-grace', label: '复盘保底额度', desc: '月度 token 额度耗尽时，复盘类对话每日仍放行的次数（保住留存动线）', compliance: false, kind: 'number', payloadKey: 'perDay', def: REVIEW_GRACE_PER_DAY, min: 0, max: 50, unit: '次/日' },
+  // 问策入口 A/B（WP1）：关闭 = 全量 control（现状军师列表，零改动）。开启后按 payload.arms 权重稳定分桶；
+  // **未配权重即按 DEFAULT_ARMS 三臂均分**（口径唯一真源在 services/wence.ts 的 effectiveArms，
+  // 展示与分桶共用它——开关拨开了就必须真的在分流，静默零分流最难发现）。
+  // 服务端在 /me.features.wenceForm 下发分组；主动消息注入也受本开关管（关 → reason='disabled'）。
+  { id: WENCE_FLAG, label: '问策入口改版 A/B', desc: '关闭即全量走现状军师列表；开启后按权重分组 control（现状）/ dock（列表页+输入坞）/ chat（对话即 tab），未配权重时三臂均分', compliance: false, kind: 'toggle', arms: ['control', 'dock', 'chat'] },
   // 监控告警阈值（监控大盘二期）：注册表在 services/alertConfig.ts，默认值=压测方案 §7 口径。
   // 值经 /api/metrics 的 junshi_alert_config 指标喂给 Prometheus 告警规则，改动 ≤75s 生效（60s 缓存 + 一个抓取周期）。
   ...ALERT_CONFIG_DEFS.map((d): FlagDef => ({
@@ -1486,6 +1495,74 @@ export async function adminRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  // —— 问策模板池（WP1）：提示问题 pill 词池(hint) + 进场主动消息(proactive) ——
+  // 与献策库同范式（GET/POST/PATCH/DELETE + recordAudit）。**内容归运营，代码不 seed**：
+  // 空池是合法状态（hints 回 []，proactive 回 empty-pool 且不建会话）。UI 见后续包。
+  const WENCE_KINDS = new Set(['hint', 'proactive']);
+  const shapeTemplate = (t: { id: string; kind: string; text: string; chipsJson: unknown; enabled: boolean; sort: number; createdAt: Date; updatedAt: Date }) => ({
+    id: t.id, kind: t.kind, text: t.text, chips: normalizeChips(t.chipsJson),
+    enabled: t.enabled, sort: t.sort, createdAt: isoSecond(t.createdAt), updatedAt: isoSecond(t.updatedAt),
+  });
+
+  app.get<{ Querystring: { kind?: string } }>('/admin/wence-templates', async (req, reply) => {
+    const kind = req.query?.kind;
+    if (kind !== undefined && !WENCE_KINDS.has(kind)) return reply.code(400).send({ error: 'kind 只能是 hint 或 proactive', code: 'BAD_KIND' });
+    const rows = await prisma.wenceTemplate.findMany({
+      where: kind ? { kind } : undefined,
+      orderBy: [{ kind: 'asc' }, { sort: 'asc' }, { createdAt: 'asc' }],
+    });
+    return rows.map(shapeTemplate);
+  });
+
+  app.post<{ Body: { kind?: string; text?: string; chips?: unknown; enabled?: boolean; sort?: number } }>('/admin/wence-templates', async (req, reply) => {
+    const b = req.body ?? {};
+    if (!b.kind || !WENCE_KINDS.has(b.kind)) return reply.code(400).send({ error: 'kind 只能是 hint 或 proactive', code: 'BAD_KIND' });
+    const text = String(b.text ?? '').trim();
+    if (!text) return reply.code(400).send({ error: '文案不能为空', code: 'BAD_TEXT' });
+    // sort 未给时排到同 kind 末尾（与献策库的 count 口径一致，但按 kind 分池计数）。
+    const sort = typeof b.sort === 'number' && Number.isFinite(b.sort) ? Math.floor(b.sort) : await prisma.wenceTemplate.count({ where: { kind: b.kind } });
+    const chips = normalizeChips(b.chips);
+    const row = await prisma.wenceTemplate.create({
+      data: { kind: b.kind, text, chipsJson: chips ?? undefined, enabled: b.enabled ?? true, sort },
+    });
+    await recordAudit({ action: 'admin.wenceTemplate.create', payload: { id: row.id, kind: row.kind, enabled: row.enabled } });
+    return shapeTemplate(row);
+  });
+
+  app.patch<{ Params: { id: string }; Body: { kind?: string; text?: string; chips?: unknown; enabled?: boolean; sort?: number } }>(
+    '/admin/wence-templates/:id',
+    async (req, reply) => {
+      const b = req.body ?? {};
+      const data: Record<string, unknown> = {};
+      if (b.kind !== undefined) {
+        if (!WENCE_KINDS.has(b.kind)) return reply.code(400).send({ error: 'kind 只能是 hint 或 proactive', code: 'BAD_KIND' });
+        data.kind = b.kind;
+      }
+      if (b.text !== undefined) {
+        const text = String(b.text).trim();
+        if (!text) return reply.code(400).send({ error: '文案不能为空', code: 'BAD_TEXT' });
+        data.text = text;
+      }
+      // chips 显式传 null / [] = 清空这一排（与「没传该字段」区分开，否则运营删不掉已配的 chips）。
+      if (b.chips !== undefined) data.chipsJson = normalizeChips(b.chips) ?? Prisma.DbNull;
+      if (typeof b.enabled === 'boolean') data.enabled = b.enabled;
+      if (typeof b.sort === 'number' && Number.isFinite(b.sort)) data.sort = Math.floor(b.sort);
+      const row = await prisma.wenceTemplate.findUnique({ where: { id: req.params.id } });
+      if (!row) return reply.code(404).send({ error: '模板不存在', code: 'TEMPLATE_NOT_FOUND' });
+      const updated = await prisma.wenceTemplate.update({ where: { id: req.params.id }, data });
+      await recordAudit({ action: 'admin.wenceTemplate.update', payload: { id: updated.id, kind: updated.kind, enabled: updated.enabled } });
+      return shapeTemplate(updated);
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>('/admin/wence-templates/:id', async (req, reply) => {
+    const row = await prisma.wenceTemplate.findUnique({ where: { id: req.params.id } });
+    if (!row) return reply.code(404).send({ error: '模板不存在', code: 'TEMPLATE_NOT_FOUND' });
+    await prisma.wenceTemplate.delete({ where: { id: req.params.id } });
+    await recordAudit({ action: 'admin.wenceTemplate.delete', payload: { id: req.params.id, kind: row.kind } });
+    return { ok: true };
+  });
+
   // —— 智能体配置（含 计费/价格 + System 提示词 + Agent Memory + 版本化） ——
   // 多运营：operator 仅见自己负责的 agent；owner/master 见全部。
   app.get('/admin/agents', async (req) => {
@@ -1921,12 +1998,19 @@ export async function adminRoutes(app: FastifyInstance) {
   // 开关目录写死在代码（label/desc/compliance），DB 只存 enabled；未落库的开关按默认开呈现。
   // 把 catalog 定义 + DB 行组装成对外的 AdminFeatureFlag（toggle 带 enabled；number 带 value/min/max/unit）。
   const shapeFlag = (f: FlagDef, row?: { enabled: boolean; payload: unknown } | null) => {
-    const base = { id: f.id, label: f.label, desc: f.desc, compliance: f.compliance, kind: f.kind, enabled: row?.enabled ?? true };
+    // 未落库的开关按 catalog 默认呈现：实验类（arms）默认**关**，其余默认开——
+    // 「行还没建」不该等于「实验已对全量用户开启」。
+    const base = { id: f.id, label: f.label, desc: f.desc, compliance: f.compliance, kind: f.kind, enabled: row?.enabled ?? !f.arms };
     if (f.kind === 'number') {
       const payload = (row?.payload ?? null) as Record<string, unknown> | null;
       const raw = payload && f.payloadKey ? payload[f.payloadKey] : undefined;
       const value = typeof raw === 'number' ? raw : (f.def ?? 0);
       return { ...base, value, min: f.min, max: f.max, unit: f.unit };
+    }
+    if (f.arms) {
+      // 展示与运行时**共用** effectiveArms：未配/非法 payload 在分桶侧会兜底成三臂均分，
+      // 这里就必须显示均分而不是 0/0/0——否则运营看到的权重不是实际生效的权重。
+      return { ...base, arms: effectiveArms(row?.payload ?? null) };
     }
     return base;
   };
@@ -1936,9 +2020,31 @@ export async function adminRoutes(app: FastifyInstance) {
     const byId = new Map(rows.map((r) => [r.id, r]));
     return FEATURE_FLAG_CATALOG.map((f) => shapeFlag(f, byId.get(f.id)));
   });
-  app.patch<{ Params: { id: string }; Body: { enabled?: boolean; value?: number } }>('/admin/flags/:id', async (req, reply) => {
+  app.patch<{ Params: { id: string }; Body: { enabled?: boolean; value?: number; arms?: Record<string, number> } }>('/admin/flags/:id', async (req, reply) => {
     const def = FEATURE_FLAG_CATALOG.find((f) => f.id === req.params.id);
     if (!def) return reply.code(404).send({ error: '未知功能开关', code: 'FLAG_NOT_FOUND' });
+    // A/B 权重（arms）：与 enabled 是两件独立的事，可单独提交，也可与 enabled 同批提交。
+    // 校验从严——权重全 0 或含未知臂名会让分桶静默全落 control，那种「开了但没生效」最难查。
+    if (def.arms && req.body?.arms !== undefined) {
+      const raw = req.body.arms;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return reply.code(400).send({ error: 'arms 必须是对象', code: 'BAD_ARMS' });
+      const arms: Record<string, number> = {};
+      let total = 0;
+      for (const [k, v] of Object.entries(raw)) {
+        if (!def.arms.includes(k)) return reply.code(400).send({ error: `未知实验臂：${k}`, code: 'BAD_ARMS' });
+        const n = Number(v);
+        if (!Number.isFinite(n) || n < 0 || n > 100) return reply.code(400).send({ error: '每臂权重需在 0-100 之间', code: 'BAD_ARMS' });
+        arms[k] = Math.floor(n);
+        total += arms[k];
+      }
+      if (total <= 0) return reply.code(400).send({ error: '权重总和必须大于 0', code: 'BAD_ARMS' });
+      await setFeatureFlagPayload(def.id, { arms });
+      await recordAudit({ action: 'admin.flag.update', payload: { id: def.id, arms } });
+      if (typeof req.body?.enabled !== 'boolean') {
+        const row = await prisma.featureFlag.findUnique({ where: { id: def.id } });
+        return shapeFlag(def, row);
+      }
+    }
     if (def.kind === 'number') {
       // D-10：数值配置（复盘保底 perDay），改动即时生效（普通 flag payload 60s 缓存内收敛）。
       const value = Number(req.body?.value);
@@ -1956,6 +2062,8 @@ export async function adminRoutes(app: FastifyInstance) {
     if (typeof req.body?.enabled !== 'boolean') return reply.code(400).send({ error: 'enabled 必须是布尔' });
     await setFeatureFlag(def.id, req.body.enabled); // 立即清缓存（合规开关本就直读 DB）
     await recordAudit({ action: 'admin.flag.update', payload: { id: def.id, enabled: req.body.enabled } });
+    // 带 payload 的开关（arms）要回读整行——不能拿 payload:null 拼回包，否则运营会以为权重被清了。
+    if (def.arms) return shapeFlag(def, await prisma.featureFlag.findUnique({ where: { id: def.id } }));
     return shapeFlag(def, { enabled: req.body.enabled, payload: null });
   });
 

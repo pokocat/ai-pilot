@@ -37,6 +37,8 @@ import { updateSessionDigest, readSessionDigest, type SessionDigestItem } from '
 import { enqueueDurableGeneration, type DurableGenerationBody } from '../services/generationRequest.js';
 import { generationSummary, generationView, GenerationJobError } from '../services/generationJobs.js';
 import { pipeGenerationSSE, setupGenerationSSE } from './generations.js';
+import { isFeatureEnabled } from '../services/featureFlag.js';
+import { WENCE_FLAG, firstProactiveTemplate, normalizeChips } from '../services/wence.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -280,8 +282,62 @@ export async function sessionRoutes(app: FastifyInstance) {
       activeGeneration: s.activeGeneration && !['completed', 'truncated', 'failed', 'cancelled'].includes(s.activeGeneration.status)
         ? generationSummary(s.activeGeneration)
         : null,
-      messages: s.messages.map((m) => ({ id: m.id, role: m.role, content: presentMessageContent(m.role, m.contentJson), at: m.createdAt, refs: (m.refsJson as MessageRef[] | null) ?? undefined })),
+      // chips（问策入口 WP1）：从 contentJson.chips 透出到消息层。注意**必须从原始 contentJson 取**——
+      // presentMessageContent 的清洗分支在 text 非字符串等情况下会重建对象，不能指望 chips 一定还在 content 里。
+      messages: s.messages.map((m) => ({
+        id: m.id, role: m.role, content: presentMessageContent(m.role, m.contentJson), at: m.createdAt,
+        refs: (m.refsJson as MessageRef[] | null) ?? undefined,
+        chips: normalizeChips((m.contentJson as { chips?: unknown } | null)?.chips) ?? undefined,
+      })),
     };
+  });
+
+  /**
+   * 进场主动消息注入（问策入口 WP1）：军师先开口。
+   *
+   * 只做「注入」，不做生成——本包的内容源是运营模板池（WenceTemplate kind='proactive'），
+   * 规格 §2.2 的数据异动/军令/命盘降级链路留待后续包，届时在这里前置分支即可。
+   *
+   * 四条不变式：
+   *  ① 频控幂等 = 已有 general 会话就不注入（每用户至多一条进场主动消息）。这既是频控也是幂等，
+   *     不额外建标记表——「有没有 general 会话」本来就是「触发人群」的判据（规格 §3.1）。
+   *  ② 空池不建会话：运营没录模板就什么都不发生，绝不建一个空会话把人骗进去。
+   *  ③ **不写 lastReadAt**：未读角标必须亮，这条消息的存在感就是入口改版的全部意义
+   *     （unreadCount 只数 assistant，见 GET /sessions）。
+   *  ④ 三种 injected:false 都是 200，不是错误——端上静默降级为 greet-only，不得阻塞进场（规格 §3.1）。
+   */
+  app.post('/sessions/proactive', async (req) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    // 开关关闭 = 实验没开，全量走现状，连库都不用查模板。
+    if (!(await isFeatureEnabled(WENCE_FLAG, false))) return { injected: false as const, reason: 'disabled' as const };
+
+    const existing = await prisma.session.findFirst({ where: { userId: user.id, agentKey: 'general' } });
+    if (existing) return { injected: false as const, reason: 'exists' as const };
+
+    const tpl = await firstProactiveTemplate();
+    if (!tpl) return { injected: false as const, reason: 'empty-pool' as const };
+
+    // 会话 + 首条 assistant 消息同事务落库：只建了会话却没落消息，用户会看到一个空的「新对话」，
+    // 而 ① 的幂等判据是「有没有 general 会话」，那种半截状态会让主动消息**永远**注入不成。
+    const sessionId = await prisma.$transaction(async (tx) => {
+      const session = await tx.session.create({
+        data: { tenantId: user.tenantId, userId: user.id, agentKey: 'general', title: tpl.text.slice(0, 18) },
+      });
+      await tx.message.create({
+        data: {
+          sessionId: session.id,
+          role: 'assistant',
+          // chips 与 text 同层，读取端 present 层原样透出为 SessionMessage.chips。
+          contentJson: { text: tpl.text, ...(tpl.chips ? { chips: tpl.chips } : {}) },
+        },
+      });
+      return session.id;
+    });
+    await recordAudit({
+      tenantId: user.tenantId, userId: user.id, action: 'user.wence.proactive',
+      payload: { sessionId, templateId: tpl.id, chips: tpl.chips?.length ?? 0 },
+    });
+    return { injected: true as const, sessionId };
   });
 
   app.delete<{ Params: { id: string } }>('/sessions/:id', async (req, reply) => {

@@ -11,6 +11,7 @@ import { ossConfigured, ossPutPublic } from '../services/ossUpload.js';
 import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.js';
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
+import { resolveWenceForm } from '../services/wence.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
 import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, usageView } from '../services/planRules.js';
 
@@ -73,6 +74,8 @@ export async function metaRoutes(app: FastifyInstance) {
     const service = await buildServiceView(user.id).catch(() => null); // V7-13：社群服务分配
     // P0-2：命理总开关下发前端（合规开关直读 DB，不吃 60s 缓存窗口）——前端据此隐藏全部命理入口
     const fortune = await isFeatureEnabled('fortune');
+    // 问策入口 WP1：A/B 分组由服务端稳定分桶后下发，客户端不猜（开关关闭 → control = 现状）。
+    const wenceForm = await resolveWenceForm(user.id);
     return {
       user: {
         id: user.id,
@@ -103,7 +106,7 @@ export async function metaRoutes(app: FastifyInstance) {
       understanding,
       inviteCode,
       service,
-      features: { fortune },
+      features: { fortune, wenceForm },
     };
   });
 

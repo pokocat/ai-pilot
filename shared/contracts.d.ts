@@ -346,9 +346,18 @@ export interface Me {
   features: FeatureFlags;          // P0-2：功能开关（前端条件渲染的真相源）——fortune 关则隐藏全部命理入口
 }
 
+/**
+ * 问策入口实验分组（问策入口改版 WP1）。服务端按 `wence_entry` 开关的 payload 权重对 userId 稳定分桶，
+ * 客户端只读不猜：control=现状军师列表；dock=列表页 + 常驻输入坞；chat=对话即 tab。
+ * 开关**关闭** → 一律 'control'（=零改动现状）；开关**开启**但权重未配/非法 → 按三臂均分兜底，
+ * 不回 control（「开着却静默零分流」会让运营以为实验在收数据，失败得无声）。
+ */
+export type WenceForm = 'control' | 'dock' | 'chat';
+
 /** 前端可见的功能开关集合（合规硬需求：审核事故时一键全产品降级）。默认全开。 */
 export interface FeatureFlags {
   fortune: boolean; // 命理（八字/命盘/天时日历/送你一卦）总开关；false = 全产品下线命理 UI/端点
+  wenceForm?: WenceForm; // 问策入口 A/B 分组（服务端稳定分桶下发；旧客户端可忽略，按 control 渲染）
 }
 
 export interface LoginRequest { phone: string; name?: string; code?: string; }
@@ -824,7 +833,45 @@ export interface SessionItem {
 export interface SessionMessage {
   id: string; role: string; content: any; at: string;
   refs?: MessageRef[]; // 本条消息引用的 项目/报告/知识/记忆
+  /**
+   * 快捷回应（问策入口改版 WP1）：服务端从 `Message.contentJson.chips` 原样透出。
+   * 当前唯一写入方是进场主动消息（POST /sessions/proactive）；点一下 = 以 chip 文案代用户发送。
+   * 无 chips 的消息不带该字段——端上据此决定渲不渲染这一排。
+   */
+  chips?: string[];
 }
+
+/* ────────────── 问策入口（WP1：提示词池 / 主动消息 / 埋点） ────────────── */
+/** 提示问题 pill 的一条词（GET /wence/hints）。id 用于 hint_tap 埋点回溯是哪条词促成了首发。 */
+export interface WenceHint { id: string; text: string }
+/** GET /wence/hints 返回体。空池是合法状态（运营后台未录入），端上回退本地兜底池。 */
+export interface WenceHintsResult { hints: WenceHint[] }
+/**
+ * POST /sessions/proactive 结果。injected=false 的三种原因都不是错误，端上一律静默降级为 greet-only：
+ * exists=该用户已有 general 会话（同时就是「每用户至多注入一次」的频控幂等）；
+ * empty-pool=运营未录入 proactive 模板（不建空会话）；disabled=`wence_entry` 开关关闭。
+ */
+export type ProactiveResult =
+  | { injected: true; sessionId: string }
+  | { injected: false; reason: 'exists' | 'empty-pool' | 'disabled' };
+
+/** 客户端埋点事件名白名单（POST /events）。非白名单一律 400——防止字段爆炸和脏事件污染漏斗。 */
+export type ClientEventName =
+  | 'wence_enter' | 'proactive_show' | 'chip_tap' | 'hint_tap'
+  | 'first_message_send' | 'drawer_open' | 'attach_open' | 'tab_switch';
+/** POST /events 请求体：鉴权可选（游客也上报，userId 空）。props 序列化后限 2KB，超限截断。 */
+export interface ClientEventRequest { name: ClientEventName; props?: Record<string, unknown> }
+export interface ClientEventResult { ok: true }
+
+/** 运营后台：问策模板池（提示词 + 主动消息），空池合法，禁止 seed。 */
+export type WenceTemplateKind = 'hint' | 'proactive';
+export interface AdminWenceTemplate {
+  id: string; kind: WenceTemplateKind; text: string;
+  chips?: string[] | null; // 仅 proactive 用：随主动消息下发的快捷回应
+  enabled: boolean; sort: number; createdAt: string; updatedAt: string;
+}
+export interface AdminWenceTemplateCreate { kind: WenceTemplateKind; text: string; chips?: string[] | null; enabled?: boolean; sort?: number }
+export interface AdminWenceTemplateUpdate { kind?: WenceTemplateKind; text?: string; chips?: string[] | null; enabled?: boolean; sort?: number }
 // 会话上下文快照（批次 3）：长会话只带最近 N 条原文，早期确认过的事实/约束/决策会掉出窗口。
 // 系统按时间增量抽取成结构化条目做「索引 + 压缩层」；原始消息始终是事实源，故每条必须能溯源回消息 id。
 // 只追加不改写：前后矛盾的两条都留着（按 at 升序），谁作数交给模型按时间判断，系统不替客户裁决。
@@ -1877,9 +1924,12 @@ export interface AdminFeatureFlag {
   min?: number;        // number 类：允许下限
   max?: number;        // number 类：允许上限
   unit?: string;       // number 类：单位标签（如「次/日」）
+  // A/B 实验开关（如 wence_entry）：kind 仍是 toggle，另在 payload.arms 存各臂权重。
+  // 该类开关**未落库时默认关**（不能因为「行还没建」就把全量用户扔进实验），其余开关仍默认开。
+  arms?: Record<string, number>;
 }
-/** 改开关（PATCH /admin/flags/:id）：toggle 传 enabled；number 传 value。 */
-export interface AdminFeatureFlagUpdate { enabled?: boolean; value?: number }
+/** 改开关（PATCH /admin/flags/:id）：toggle 传 enabled；number 传 value；实验开关可单独传 arms（只改 enabled 不清权重）。 */
+export interface AdminFeatureFlagUpdate { enabled?: boolean; value?: number; arms?: Record<string, number> }
 
 /** 告警通知渠道状态（GET/PUT /admin/monitor-notify）。webhook 加密落库，只回掩码，绝不回明文。 */
 export interface AdminMonitorNotify {

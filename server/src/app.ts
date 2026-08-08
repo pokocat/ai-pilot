@@ -28,6 +28,7 @@ import { moduleRoutes } from './routes/modules.js';
 import { searchRoutes } from './routes/search.js';
 import { reminderRoutes } from './routes/reminders.js';
 import { communityRoutes } from './routes/community.js';
+import { wenceRoutes } from './routes/wence.js';
 import { decisionRoutes } from './routes/decisions.js';
 import { prophecyRoutes } from './routes/prophecies.js';
 import { cardRoutes } from './routes/cards.js';
@@ -211,7 +212,9 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   // 应急开关：PLAN_WRITE_GATE=false 全局停用。
   if ((process.env.PLAN_WRITE_GATE ?? 'true') !== 'false') {
     const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-    const ALLOW_PREFIX = ['/api/auth/', '/api/pay/', '/api/plans/', '/api/skus/', '/api/wechat/', '/api/admin'];
+    // '/api/events' 是纯埋点写入，不是业务写：新注册用户在生产默认没有套餐（TEST_DEFAULT_PLAN_NAME 未配时），
+    // 被本闸拦住的恰恰是问策入口改版要观测的那批人——漏斗分母会系统性缺口，且失败得毫无声响。
+    const ALLOW_PREFIX = ['/api/auth/', '/api/pay/', '/api/plans/', '/api/skus/', '/api/wechat/', '/api/admin', '/api/events'];
     const ALLOW_NONE_ONLY = new Set([
       'PUT /api/me',
       'PUT /api/me/color',
@@ -275,6 +278,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(searchRoutes, { prefix: '/api' }); // V7-14：跨域搜索
   await app.register(reminderRoutes, { prefix: '/api' }); // V7-11：提醒日历（纯读派生）
   await app.register(communityRoutes, { prefix: '/api' }); // V7-13：邀请码 / 社群服务 / 档案工作台
+  await app.register(wenceRoutes, { prefix: '/api' }); // 问策入口 WP1：提示词池下发 + 客户端埋点（两条均游客可用）
   await app.register(memoryRoutes, { prefix: '/api' });
   await app.register(graphRoutes, { prefix: '/api' });
   await app.register(planRoutes, { prefix: '/api' });

@@ -780,6 +780,39 @@ model Saying {
   @@map("saying")
 }
 
+/// 问策入口模板池（WP1）：kind='hint' 提示问题 pill 词池 / kind='proactive' 进场主动消息。
+/// **禁止 seed**——对外内容归运营（同定价权益原则），空池是合法状态：hints 回空数组、
+/// proactive 直接回 {injected:false, reason:'empty-pool'} 且不建会话。运营后台录入（UI 后续包）。
+model WenceTemplate {
+  id        String   @id @default(cuid())
+  kind      String // 'hint' | 'proactive'（用 String，与 Agent.billing 等既有口径一致，不引 enum）
+  text      String   @db.Text
+  chipsJson Json? // 仅 proactive 用：string[]，随主动消息落到 Message.contentJson.chips
+  enabled   Boolean  @default(true)
+  sort      Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind, enabled, sort])
+  @@map("wence_template")
+}
+
+/// 客户端埋点事件（WP1）：问策入口漏斗（wence_enter → first_message_send）的原始事实表。
+/// 未登录游客也上报，故 userId/tenantId 可空且**不建外键**（与 CreativeJob 同口径：裸字符串列，
+/// 测试清库要显式 deleteMany，见 prisma/resetBusinessData.ts）。只写不查，无读端点。
+model ClientEvent {
+  id        String   @id @default(cuid())
+  userId    String? // 游客为空
+  tenantId  String?
+  name      String // 白名单见 shared/contracts.d.ts 的 ClientEventName
+  propsJson Json? // 序列化后限 2KB，超限截断为 { truncated: true, raw: '...' }
+  createdAt DateTime @default(now())
+
+  @@index([name, createdAt])
+  @@index([userId])
+  @@map("client_event")
+}
+
 /// 建档问卷（运营可配）
 model SurveyQuestion {
   id          String  @id @default(cuid())

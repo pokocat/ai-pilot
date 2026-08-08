@@ -6,6 +6,38 @@
 
 ## 变更日志
 
+### 2026-08-08 · 问策入口改版 WP1（契约 + 服务端） · 影响面：SSOT / Prisma / server 路由与服务 / 运营后台 API
+
+规格见 `docs/[FABLE5]WENCE_ENTRY_INTERACTION_SPEC.md`。本包只做契约与服务端，端上改造留给后续包。
+
+- **SSOT**：`WenceForm('control'|'dock'|'chat')` 挂进 `/me.features.wenceForm`；`SessionMessage` 加可选
+  `chips?: string[]`；新增 `WenceHint/WenceHintsResult`、`ProactiveResult`、`ClientEventName/ClientEventRequest`、
+  `AdminWenceTemplate*`。
+- **两张新表**：`WenceTemplate`（kind='hint'|'proactive' 的运营模板池）与 `ClientEvent`（埋点原始事实）。
+  **模板池禁止 seed**——对外内容归运营（同定价权益原则），空池是合法状态：`/wence/hints` 回 `[]`、
+  proactive 回 `empty-pool` 且不建会话。`ClientEvent` 的 userId/tenantId 无外键（游客为空），
+  已按 `CreativeJob` 同口径加进 `prisma/resetBusinessData.ts`；`WenceTemplate` 作为运营目录刻意不加。
+- **实验分桶**（`services/wence.ts`）：`wence_entry` 开关登记进 `FEATURE_FLAG_CATALOG`，payload 存
+  `{ arms: { control, dock, chat } }`。`resolveWenceForm` 用 **sha1(salt+userId) 稳定哈希**分桶，
+  绝不用 `Math.random`——否则用户每次进 tab 形态都在跳、A/B 也无从归因。**降级分两档**：开关**关闭** →
+  `control`（零改动现状，实验没开）；开关**开启**但 payload 缺失 / 权重全 0 / 形状不对 → `DEFAULT_ARMS`
+  三臂均分兜底，**不回 control**——「开关拨开了却静默零分流」会让运营以为实验在收数据，比误开实验更坏，
+  因为它失败得无声（写入端的 arms 校验已挡住非法权重入库，故均分兜底安全）。生效权重唯一真源是
+  `effectiveArms()`，**后台展示与运行时分桶共用它**，避免运营照着假数字调实验。开关目录新增 `arms` 类型：
+  实验开关**未落库时默认关**（既有开关仍默认开），PATCH 可单独提交 `arms` 且只改 `enabled` 不清权重。
+- **`POST /sessions/proactive`**：军师先开口。判据「已有 general 会话 → `exists`」同时就是每用户至多一次的
+  频控幂等，不另建标记表。会话 + 首条 assistant 消息**同事务**落库（半截状态会让主动消息永远注入不成），
+  且**刻意不写 `lastReadAt`**——未读角标必须亮。三种 `injected:false` 都回 200，端上静默降级为 greet-only。
+- **`GET /wence/hints`**、**`POST /events`**（`routes/wence.ts`）：两条都**不要求登录**（微信整改红线：
+  问策 tab 对游客完整可浏览）；带了 token 仍严格校验，无效 token 401 而非静默降级成游客。
+  `/events` 有八项事件名白名单（非白名单 400 且不写库），props 序列化超 2KB 截断但事件本身不丢。
+  `/api/events` 已加进 `app.ts` 商业化禁写闸的放行前缀——生产新注册用户默认无套餐，
+  不放行等于把要观测的那批人从漏斗分母里静默切掉。
+- **`/admin/wence-templates` CRUD**（照献策库范式 + `recordAudit`，支持 kind 过滤 / enabled / sort / chips 编辑）。
+  UI 留给后续包。
+- 测试：`server/test/wenceEntry.test.ts` 26 用例（分桶稳定性、proactive 幂等与空池降级、unreadCount=1 与
+  snippet、chips 透出、TC-G 跨用户隔离含 ClientEvent 归属、hints 游客可访问、events 白名单与截断、后台 CRUD）。
+
 ### 2026-08-08 · 周期 tab 按实际配出来的档展示 · 影响面：原生小程序 + H5 方案页
 
 运营只配了年付档时，方案页仍固定渲染「月付 / 年付」二选一且默认停在月付，用户开屏就是
