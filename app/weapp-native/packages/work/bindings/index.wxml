@@ -1,0 +1,10 @@
+<view class="page bindings-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="native-safe-head"><view class="native-safe-space"></view><view class="native-safe-row"><view class="safe-hbtn" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view><view class="safe-body"><text class="safe-title serif">数据源绑定</text></view><view class="safe-spacer"></view></view></view>
+  <view class="pad bindings-body">
+    <view class="db-hero card"><text class="kicker">Data Context</text><text class="h1">数据源绑定</text><text class="db-p">对话里会告诉你还缺哪些数据。绑定后，增长、IP、经营复盘等判断都能更贴近真实情况。</text></view>
+    <view class="db-security card"><view class="db-lock"><native-icon name="lock" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view><view class="db-sec-b"><text class="db-sec-t">数据只用于诊断与执行</text><text class="db-sec-d">敏感资料可只以摘要入库；深度分析会明确提示额度消耗。</text></view></view>
+    <view wx:for="{{items}}" wx:key="id" class="binding card" data-id="{{item.id}}" bindtap="tap"><view class="binding-ic"><native-icon name="{{item.icon}}" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view><view class="binding-b"><view class="binding-top"><text class="binding-provider">{{item.provider}}</text><text class="binding-price">{{item.price}}</text></view><text class="binding-t">{{item.title}}</text><text class="binding-d">{{item.desc}}</text></view><view class="binding-btn"><text>{{item.actionText}}</text></view></view>
+    <view class="db-action" bindtap="askPriority"><native-icon name="spark" tone="white" size="16"></native-icon><text>让军师判断绑定优先级</text></view>
+  </view>
+  <login-sheet open="{{showLogin}}" reason="upload" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

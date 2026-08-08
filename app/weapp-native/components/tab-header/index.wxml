@@ -1,0 +1,8 @@
+<view class="tab-head tab-page-head">
+  <text class="th-glyph serif">{{glyph}}</text>
+  <view class="th-titles">
+    <text class="th-kicker">{{kicker}}</text>
+    <text class="th-title serif">{{title}}</text>
+  </view>
+  <view class="th-rule"></view>
+</view>

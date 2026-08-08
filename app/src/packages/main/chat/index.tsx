@@ -11,7 +11,7 @@ import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
 import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate, type SessionDetail, type CreativeStatusResult } from '../../../services/api';
 import { STREAM_CHAT } from '../../../services/config';
-import { asReply, replyToText } from '../../../services/chatReply';
+import { asReply, attachmentOnlyPrompt, replyToText } from '../../../services/chatReply';
 import { diffPasted, pasteExcerpt, isSamePaste } from '../../../services/pasteAbsorb';
 import {
   startLiveGen, attachLiveGenView, detachLiveGenView, peekLiveGen, stopLiveGen, dropLiveGen, storedReplyFor,
@@ -1482,7 +1482,8 @@ export default function Chat() {
       Taro.showToast({ title: failed ? '请先处理归卷失败的长文' : '长文归卷中，稍候再发', icon: 'none' });
       return;
     }
-    const v = (typeof raw === 'string' ? raw : input).trim();
+    const typed = (typeof raw === 'string' ? raw : input).trim();
+    const v = typed || attachmentOnlyPrompt(refs);
     if (!v || !agent) return;
     // 软限制守卫：手动堆出的超长（非粘贴）在此拦下——粘贴早已转附卷，不会走到这。
     if (v.length > INPUT_MAX) {
@@ -2533,10 +2534,10 @@ export default function Chat() {
                   )
                 ) : (
                   <View
-                    className={`csend ${!input.trim() || pastePendings.length ? 'off' : ''}`}
+                    className={`csend ${(!input.trim() && !refs.length) || pastePendings.length ? 'off' : ''}`}
                     role="button"
                     aria-label="发送"
-                    style={input.trim() && !pastePendings.length ? { background: accent } : {}}
+                    style={(input.trim() || refs.length) && !pastePendings.length ? { background: accent } : {}}
                     onClick={(e) => { e.stopPropagation?.(); onSend(); }}
                   >
                     <Icon name="up" size={18} color="#fff" />

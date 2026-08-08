@@ -1,0 +1,13 @@
+@use "../../../styles/subpage.scss";
+@use "../../../../src/packages/work/mingpan/index.scss";
+
+.mp .mp-login,
+.mp .mp-opt.on,
+.mp .mp-btn:not(.off):not(.ghost) { background: var(--accent); border-color: var(--accent); }
+.mp .mp-option-row { margin-top: 10px; }
+.mp .mp-tsh-s,
+.mp .mp-eb-t,
+.mp .mp-gift-go { display: flex; align-items: center; gap: 3px; }
+.sheet-mask { position: fixed; inset: 0; z-index: 900; background: rgba(22, 25, 29, .55); display: flex; align-items: flex-end; justify-content: center; }
+.sheet-panel { width: 100%; max-height: 84vh; box-sizing: border-box; background: var(--bg); border-radius: var(--r-lg) var(--r-lg) 0 0; padding: 10px 22px calc(22px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 40px rgba(0,0,0,.18); }
+.sheet-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--line); margin: 0 auto 16px; }

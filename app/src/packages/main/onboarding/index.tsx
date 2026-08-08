@@ -171,7 +171,7 @@ export default function Onboarding() {
 
   return (
     <View className={`page onboarding ${s.themeClass()}`}>
-      {/* 建档是用户主动进入的可选流程，始终可返回或稍后再做。 */}
+      {/* 新账号登录后自动进入；中途仍可返回或稍后再做，战局说明卡保留为续做入口。 */}
       <SafeHeader className="ob-head" onBack={leaveOnboarding} rightReserve={false} />
       <ScrollView scrollY className="ob-scroll" enhanced showScrollbar={false}>
         {step === 'color' && (

@@ -87,8 +87,9 @@
 .lg-cbox-tick { font-size: 12px; line-height: 1; color: #143726; font-weight: 700; }
 .lg-link { color: rgba(243,240,230,.92); text-decoration: underline; }
 
-/* —— 表单（用户主动选择的手机号验证码登录） —— */
+/* —— 表单（手机号登录 / 首次身份） —— */
 .lg-form { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+.lg-complete { justify-content: flex-start; overflow-y: auto; padding-bottom: calc(env(safe-area-inset-bottom) + 18px); }
 .lg-kicker { font-size: 11px; letter-spacing: .2em; font-weight: 600; color: #D8B25A; }
 .lg-h { margin-top: 10px; font-size: 25px; font-weight: 600; color: #F5F1E6; }
 .lg-sub { margin-top: 7px; margin-bottom: 24px; font-size: 12.5px; color: rgba(243,240,230,.55); }
@@ -112,3 +113,27 @@
   box-shadow: 0 8px 22px rgba(168,127,44,.30);
 }
 .lg-cta.off { opacity: .6; }
+
+/* —— 首次身份：恢复注册后的称呼与头像采集；称呼必填，头像可选 —— */
+.lg-av-wrap { display: flex; flex-direction: column; align-items: center; margin: 18px 0 20px; }
+.lg-av-btn { position: relative; width: 82px; height: 82px; padding: 0; margin: 0; background: transparent; line-height: normal; }
+.lg-av-btn::after { border: none; }
+.lg-av { width: 82px; height: 82px; border-radius: 50%; border: 2px solid rgba(216,178,90,.5); box-sizing: border-box; }
+.lg-av-ph { display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.08); }
+.lg-av-cam {
+  position: absolute; right: -2px; bottom: -2px; width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: #E6C374; border: 2px solid #0E2A1E;
+}
+.lg-av-tip { margin-top: 10px; font-size: 12px; color: rgba(243,240,230,.6); }
+.lg-skip { margin-top: 16px; text-align: center; font-size: 13px; color: rgba(243,240,230,.6); }
+.lg-skip-weak { margin-top: 10px; font-size: 12px; color: rgba(243,240,230,.38); }
+.lg-phone-complete { width: 100%; }
+.lg-phone-bound {
+  width: 100%; min-height: 44px; box-sizing: border-box; border-radius: 13px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.lg-phone-bound { padding: 0 14px; color: #143726; background: #F4F1E8; font-size: 14px; font-weight: 600; }
+.lg-phone-or { display: block; margin: 10px 0 8px; text-align: center; color: rgba(243,240,230,.48); font-size: 11px; }
+.lg-field.compact { height: 44px; margin-bottom: 8px; }
+.lg-field.compact .lg-input { height: 44px; }

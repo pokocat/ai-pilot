@@ -1,0 +1,12 @@
+@use "../../../styles/subpage.scss";
+@use "../../../../src/packages/work/calendar/index.scss";
+
+.tcal .login-btn,
+.tcal .pf-opt.on,
+.tcal .tc-btn:not(.off),
+.tcal .tc-imgbtn:not(.off),
+.tcal .tc-img-act:not(.ghost) { background: var(--accent); border-color: var(--accent); }
+.tcal .tc-img-act.ghost { border-color: var(--accent); color: var(--accent); }
+.tcal .tc-option-row { margin-top: 10px; }
+.tcal .tc-legend .lg,
+.tcal .tc-eb-t { display: flex; align-items: center; gap: 4px; }

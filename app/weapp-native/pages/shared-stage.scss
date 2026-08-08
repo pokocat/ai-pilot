@@ -1,0 +1,16 @@
+.native-stage { box-sizing: border-box; }
+.stage-hero {
+  padding: 22px 20px; border-radius: 22px; color: #fff;
+  background: linear-gradient(145deg, var(--accent-deep), var(--accent));
+  box-shadow: 0 14px 30px var(--accent-glow);
+}
+.stage-kicker { display: block; font-size: 11px; letter-spacing: .18em; color: rgba(255,255,255,.72); }
+.stage-title { display: block; margin-top: 10px; font-size: 22px; line-height: 1.45; font-weight: 600; }
+.stage-desc { display: block; margin-top: 12px; font-size: 12.5px; line-height: 1.65; color: rgba(255,255,255,.72); }
+.stage-action { margin-top: 18px; height: 42px; padding: 0 20px; border-radius: 14px; background: #fff; color: var(--accent-deep); font-size: 14px; font-weight: 600; }
+.stage-grid { display: flex; gap: 8px; margin-top: 16px; }
+.stage-card { flex: 1; min-width: 0; padding: 16px 8px; border-radius: 16px; border: 1px solid var(--line-strong); background: #fff; text-align: center; font-size: 11px; color: var(--ink-3); }
+.stage-num { display: block; margin-bottom: 6px; font-size: 21px; font-weight: 600; color: var(--ink); }
+.stage-list { margin-top: 16px; border-radius: 18px; border: 1px solid var(--line-strong); background: #fff; overflow: hidden; }
+.stage-row { min-height: 54px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); font-size: 14px; color: var(--ink); }
+.stage-row:last-child { border-bottom: 0; }

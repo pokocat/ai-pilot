@@ -1,0 +1,7 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "login-sheet": "/components/login-sheet/index",
+    "native-icon": "/components/native-icon/index"
+  }
+}

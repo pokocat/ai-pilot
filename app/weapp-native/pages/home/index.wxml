@@ -1,0 +1,86 @@
+<view class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
+  <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
+    <view class="native-nav-inset"></view>
+    <view class="pad home">
+      <tab-header title="军情" kicker="看今日判断" glyph="势"></tab-header>
+      <view class="say-strip"><text class="say-k">今日献策 · {{sayingDate}}</text><text class="say-line serif">{{saying}}</text></view>
+
+      <block wx:if="{{!authed}}">
+        <view class="battle-empty"><text class="battle-empty-title serif">还没有战局判断</text><text class="battle-empty-desc">先和军师说说眼下最难拿主意的事，第一份判断会写在这里。</text><button bindtap="ask">去问策</button></view>
+      </block>
+      <block wx:else>
+        <view wx:if="{{onboardingKnown&&!onboarded}}" class="guest-notice card">
+          <view class="guest-notice-icon"><native-icon name="user" tone="accent" color-key="{{colorKey}}" size="17"></native-icon></view>
+          <view class="guest-notice-body"><text class="guest-notice-title serif">你的战局还没有建档</text><text class="guest-notice-desc">建档是自愿的；完成三问后，军师会把第一份判断写到这里。</text></view>
+          <view class="guest-notice-action" bindtap="goOnboarding"><text>开始建档</text></view>
+        </view>
+        <view wx:if="{{fortuneOn}}" class="battle-mode-tabs">
+          <view wx:for="{{modeTabs}}" wx:key="key" class="bmt {{mode===item.key?'on':''}}" data-mode="{{item.key}}" bindtap="setMode"><text>{{item.label}}</text></view>
+        </view>
+
+        <view wx:if="{{mode==='timing'}}" class="mode-panel">
+          <view class="timing-hero card"><text class="th-k">时运策 · {{chart?'已授权':'待补生辰'}}</text><text class="th-t serif">{{chart?chart.monthTitle:'录入生辰后再谈节奏'}}</text><text class="th-d">只调整行动节奏与优先级。经营判断仍以案卷、数据和执行回填为准。</text></view>
+          <block wx:if="{{chart}}">
+            <view class="timing-grid"><view class="tg-cell card"><text class="tg-t">本月攻守</text><text class="tg-d">{{chart.monthLine}}</text></view><view class="tg-cell card"><text class="tg-t">全年拐点</text><text class="tg-d">{{chart.turning}}</text></view></view>
+            <view class="timing-band card"><text class="section-label">本 周 边 界</text><view class="tb-row"><text class="tb-k">宜</text><text>{{chart.suits}}</text></view><view class="tb-row"><text class="tb-k danger">避</text><text>{{chart.avoid}}</text></view><text class="tb-src">格局：{{chart.patternName}} · {{chart.patternTraits}}</text></view>
+            <view class="mode-link card" bindtap="openCalendar"><text class="ml-t">天时日历 · 逐月攻守</text><view class="ml-go"><text>打开</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
+          </block>
+          <view wx:else class="force-empty card" bindtap="openCalendar"><text class="fe-t serif">还没有命盘</text><text class="fe-d">录入生辰后，天势会参命盘给出本月攻守和全年拐点。它只调节奏，不替你做经营判断。</text><view class="fe-go"><text>去录生辰</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
+          <view class="mode-back" data-mode="business" bindtap="setMode"><text>返回经营判断</text></view>
+        </view>
+
+        <view wx:if="{{mode==='destiny'}}" class="mode-panel">
+          <view class="destiny-hero card"><text class="th-k">命盘分析 · {{chart?'已授权':'待补生辰'}}</text><text class="th-t serif">以节律校准判断，不替代判断</text><text class="th-d">命盘只用来识别你的工作节律、决策偏好和风险提醒，不参与经营结论。</text></view>
+          <block wx:if="{{chart}}">
+            <view class="pillar-card card"><text class="section-label">命 盘 四 柱</text><view class="pillar-row"><view wx:for="{{chart.pillarCells}}" wx:key="key" class="pillar-cell"><text class="pc-k">{{item.key}}</text><text class="pc-v serif">{{item.value}}</text><text class="pc-tag">{{item.tag}}</text></view></view><text wx:if="{{!chart.hourKnown}}" class="pillar-note">时辰未录 · 补上后表达与外显判断会更准</text></view>
+            <view class="destiny-analysis card"><text class="section-label">对 应 分 析</text><view class="da-row"><text class="da-t">日主 · {{chart.dayMaster}}</text><text class="da-d">{{chart.favorable}}</text></view><view class="da-row"><text class="da-t">格局 · {{chart.patternName}}</text><text class="da-d">{{chart.patternTraits}}</text></view><view wx:if="{{chart.ziweiStars}}" class="da-row"><text class="da-t">紫微 · 命宫主星</text><text class="da-d">{{chart.ziweiStars}}</text></view></view>
+            <view class="mode-link card" bindtap="openMingpan"><text class="ml-t">命盘报告 · 八字紫微印证</text><view class="ml-go"><text>打开</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
+          </block>
+          <view wx:else class="force-empty card" bindtap="openMingpan"><text class="fe-t serif">还没有命盘</text><text class="fe-d">录入生辰后这里会显示四柱、日主和格局，用于校准你的工作节律。</text><view class="fe-go"><text>去命盘</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
+          <view class="mode-back" data-mode="business" bindtap="setMode"><text>返回经营判断</text></view>
+        </view>
+
+        <block wx:if="{{mode==='business'}}">
+        <view class="battle-hero" bindtap="toggleHero"><text class="bh-kicker">军师判断 · 主要矛盾</text><text class="bh-source">{{dossierTitle ? '当前案卷 · '+dossierTitle+' · 军师持续跟进，随变而调' : '还没有案卷 · 和军师聊一次，方案定了就成卷'}}</text><text class="bh-title serif {{heroExpanded?'expanded':''}}">{{summary}}</text><view class="bh-foot"><view class="bh-toggle"><text>{{heroExpanded?'收起':'展开全文'}}</text><native-icon name="{{heroExpanded?'collapse':'chevron'}}" tone="white" size="14"></native-icon></view><view class="bh-ask" catchtap="ask"><text>问军师</text><native-icon name="arrow" tone="white" size="14"></native-icon></view></view></view>
+
+        <view class="metric-grid"><view wx:for="{{metrics}}" wx:key="label" class="metric card" data-index="{{index}}" bindtap="tapMetric"><text class="metric-v serif {{item.tone}}">{{item.value}}</text><text class="metric-l">{{item.label}}</text></view></view>
+
+        <view class="nsc" bindtap="next"><view class="nsc-main"><text class="nsc-kicker">下一步</text><text class="nsc-title">{{nextTitle}}</text><text class="nsc-desc">{{nextDesc}}</text></view><view class="nsc-arrow"><native-icon name="arrow" tone="white" size="21"></native-icon></view></view>
+
+        <view class="force-panel"><view class="force-head"><text class="battle-h2" bindtap="openForces">三 势 判 断</text><view class="force-tools"><text wx:if="{{forces.length}}" class="force-hint" bindtap="openForces"><text class="fh-b">整卡</text>看全解 · 小框看单势</text><text class="force-redo" bindtap="refreshForces">{{refreshing?'刷新中…':'刷新判断'}}</text></view></view>
+          <view wx:if="{{forces.length}}" class="force-grid" bindtap="openForces"><view wx:for="{{forces}}" wx:key="kind" class="force card"><text class="force-tag">{{item.name}} · {{item.levelLabel}}</text><text class="force-concl serif">{{item.conclusion}}</text><text class="force-tactic {{item.tacticTone}}">打法：{{item.tactic}}</text><text class="force-note">{{item.note}}</text><view class="force-bar"><view class="force-fill {{item.kind}}" style="width:{{item.strength}}%"></view></view></view></view>
+          <view wx:else class="force-empty card" bindtap="ask"><text class="fe-t serif">三势还没断</text><text class="fe-d">跟我聊透目标、现状和卡点，天势、市势、人势自然就清楚了。</text><view class="fe-go"><text>去对话</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
+        </view>
+
+        <view wx:if="{{questions.length}}" class="battle-actions card"><text class="section-label">当 前 最 该 补</text><view wx:for="{{questions}}" wx:key="*this" class="linkmod" data-text="{{item}}" bindtap="askQuestion"><text class="linkmod-name serif">{{item}}</text><text class="linkmod-mini">去补</text></view></view>
+        <view wx:if="{{cited.length || questions.length}}" class="evidence-card card"><view class="ev-head"><text class="section-label">判 断 依 据</text><text class="ev-sum">已引用 {{cited.length}} 类 · 待补 {{questions.length}} 项</text></view><view wx:if="{{cited.length}}" class="ev-group"><text class="ev-gl">已引用证据</text><view class="ev-chips"><view wx:for="{{cited}}" wx:key="label" class="ev-chip" data-index="{{index}}" bindtap="tapEvidence"><text>{{item.label}} {{item.count}}</text></view></view></view></view>
+        <view wx:if="{{pendingDecision}}" class="decision-card card" bindtap="openLedger"><view class="dc-head"><text class="section-label">决 策 日 志 · 待验证</text><text class="dc-seq">决策 #{{pendingDecision.seq}}</text></view><text class="dc-t serif">{{pendingDecision.decision}}</text><text wx:if="{{pendingDecision.verifyStandard}}" class="dc-d">验证标准：{{pendingDecision.verifyStandard}}</text><view class="dc-go"><text>{{pendingDecision.verifyByDate?'验证日 '+pendingDecision.verifyByDate+' · 看战略账本':'看战略账本'}}</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
+        <view class="battle-actions module-card card"><text class="section-label">关 联 模 块</text><view wx:for="{{modules}}" wx:key="title" class="linkmod" bindtap="openMarket"><text class="linkmod-name serif">{{item.title}}</text><text class="linkmod-mini">{{item.owner}}</text><text class="module-tier tier-{{item.tier}}">{{item.price}}</text></view></view>
+
+        <view wx:if="{{kpi}}" class="kpi-card card" bindtap="openStudio"><view class="kpi-head"><text class="section-label">经 营 数 据</text><text class="kpi-sub">近 {{kpi.days}} 天记录</text></view><view class="kpi-row"><view wx:for="{{kpi.rows}}" wx:key="label" class="kpi-cell"><text class="kpi-v serif">{{item.value}}</text><text class="kpi-l">{{item.label}}</text></view></view></view>
+
+        <view wx:if="{{risks.length}}" class="nono-card card"><text class="section-label danger">现 在 不 能 做</text><view wx:for="{{risks}}" wx:key="*this" class="nono-row"><native-icon name="alert" tone="neutral" size="15"></native-icon><text class="nono">{{item}}</text></view><text class="nono-src">来自你定下的《{{dossierTitle}}》</text></view>
+
+        <view class="battle-cta {{committing?'generating':''}}" bindtap="commitBattle"><view class="bc-b"><text class="bc-t">{{committing?'正在翻你的案卷，排兵布阵…':'就按这个来 · 出军令与方案'}}</text><text class="bc-s">{{committing?'梳理战局、拆解任务、拟定军令':'军师拆成军令和方案，更新到执行页和方案库'}}</text></view><view class="bc-arrow"><text wx:if="{{committing}}">…</text><native-icon wx:else name="arrow" tone="white" size="18"></native-icon></view></view>
+        </block>
+      </block>
+      <view class="tabbar-space"></view>
+    </view>
+  </scroll-view>
+  <view wx:if="{{forcesOpen}}" class="force-sheet-mask" bindtap="closeForces" catchtouchmove="stop">
+    <view class="force-sheet fs-pad" catchtap="stop">
+      <view class="force-sheet-grip"></view>
+      <text class="fs-kicker">三 势 合 参</text>
+      <text class="fs-title serif">三势全解：先拆三势，再做合参</text>
+      <text class="fs-quote">三势不是三个孤立的数。天势看能不能借风，市势看怎么打出差异，人势看能不能放大。</text>
+      <scroll-view scroll-y class="fs-body">
+        <view class="forces-breakdown"><view wx:for="{{forceDetails}}" wx:key="kind" class="force-read {{item.kind}}"><text class="fr-label">{{item.label}}</text><text class="fr-title serif">{{item.title}}</text><text class="fr-body">{{item.body}}</text><text class="fr-tactic {{item.tacticTone}}">{{item.tactic}}</text><view wx:if="{{item.kind==='sky'&&fortuneOn}}" class="fr-chart"><text wx:if="{{chart}}" class="frc-line">{{chart.monthLine}} · 全年拐点月 {{chart.turning}}</text><text wx:else class="frc-empty" bindtap="openCalendar">生辰未录 · 录入后天势可参命盘</text></view></view></view>
+        <view wx:if="{{forceSynthesis}}" class="force-synthesis"><text class="fsy-title serif">{{forceSynthesis.title}}</text><text class="fsy-body">{{forceSynthesis.body}}</text></view>
+      </scroll-view>
+      <view class="fs-close" bindtap="closeForces"><text>收起</text></view>
+    </view>
+  </view>
+  <login-sheet open="{{showLogin}}" reason="profile" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <coach-marks></coach-marks>
+</view>

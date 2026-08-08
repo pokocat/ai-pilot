@@ -1,0 +1,8 @@
+@use "../../../styles/subpage.scss";
+@use "../../../../src/packages/work/ledger/index.scss";
+
+.ledger-page .lg-tabs { position: fixed; z-index: 80; top: calc(var(--native-nav-inset) + 61px); left: 0; right: 0; background: var(--paper); }
+.ledger-page .lg-scroll { position: fixed; top: calc(var(--native-nav-inset) + 108px); left: 0; right: 0; bottom: 0; height: auto; }
+.ledger-page .lg-act.ok { border-color: var(--accent); color: var(--accent); }
+.ledger-page .lg-dispute-send { color: var(--accent); }
+.ledger-page .lg-retry { margin: 14px auto 0; width: 110px; min-height: 40px; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: var(--accent); color: #fff; }

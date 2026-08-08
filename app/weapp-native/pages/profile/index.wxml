@@ -1,0 +1,65 @@
+<view class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
+  <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
+    <view class="native-nav-inset"></view>
+    <view class="pad account">
+      <tab-header title="老板" kicker="你自己" glyph="我"></tab-header>
+
+      <block wx:if="{{authed}}">
+        <view class="account-user-card account-service-card">
+          <view class="service-card-top">
+            <image wx:if="{{avatarUrl}}" class="au-av service-avatar" src="{{avatarUrl}}" mode="aspectFill"></image>
+            <view wx:else class="au-av service-avatar au-av-ph serif" bindtap="openIdentity">{{nameInitial}}</view>
+            <view class="sct-b" bindtap="openIdentity"><text class="account-profile-name serif">{{name}}</text><text class="account-profile-role">{{company}}</text></view>
+            <text class="member-pill" bindtap="openPlans">{{planName}}</text>
+          </view>
+          <view class="account-profile-meta"><text class="apm-line">手机 {{phoneDisplay}}</text><text class="apm-line">邀请码 <text class="apm-code">{{inviteCode}}</text></text></view>
+          <view class="account-benefit-grid">
+            <view class="account-benefit" data-route="/packages/work/credits/index" bindtap="openRoute"><text class="ab-t">算力</text><text class="ab-s">{{usagePercent}}% · {{creditBalance}} 钻石</text></view>
+            <view class="account-benefit" data-route="/packages/work/dossier/index" bindtap="openRoute"><text class="ab-t">深度报告</text><text class="ab-s">军师执笔</text></view>
+            <view class="account-benefit" data-route="/packages/work/enterprise/index" bindtap="openRoute"><text class="ab-t">企业服务</text><text class="ab-s">工商 / 财税 / 商标</text></view>
+          </view>
+          <view class="service-action-row">
+            <view class="service-action service-action-teacher {{serviceReady?'':'is-empty'}}">
+              <view class="service-action-main" bindtap="openTeacher"><view class="sa-i"><native-icon name="wechat" tone="white" size="15"></native-icon></view><text class="sa-t">{{serviceReady?teacherName+'微信':'老师微信'}}</text></view>
+              <view wx:if="{{serviceReady}}" class="teacher-wechat-id" bindtap="copyWechat"><text class="twi-id">{{teacherWechat}}</text><text class="twi-em">复制</text></view>
+              <view wx:else class="teacher-wechat-id twi-ph" bindtap="openCommunity"><text class="twi-ph-t">待分配 · 去申请分班</text><native-icon name="arrow" tone="neutral" size="10"></native-icon></view>
+            </view>
+            <view class="service-action service-action-group {{serviceReady?'':'is-empty'}}" bindtap="openGroup"><view class="sa-qr"><native-icon name="group" tone="green" size="18"></native-icon></view><view class="sa-b"><text class="sa-t">班级群</text><text class="sa-s">{{serviceReady?className+' · 服务中':'去申请分班'}}</text></view></view>
+          </view>
+          <view wx:if="{{fortuneOn && hasVerse}}" class="verse-band" data-route="/packages/work/mingpan/index" bindtap="openRoute"><view class="vb-head"><text class="vb-kicker">年 度 谶 语</text><text class="vb-sign serif">{{verseSign}}</text></view><view class="vb-lines"><text wx:for="{{verseLines}}" wx:key="*this" class="vb-line serif">{{item}}</text></view><text class="vb-moment">{{verseMoment}}</text></view>
+          <view wx:elif="{{fortuneOn}}" class="verse-band verse-ask" data-route="/packages/work/mingpan/index" bindtap="openRoute"><text class="va-t">年度谶语 · 你还没有今年的谶</text><view class="va-go"><text>去命盘领一句</text><native-icon name="arrow" tone="gold" size="14"></native-icon></view></view>
+        </view>
+
+        <view class="account-statline">
+          <view wx:for="{{counts}}" wx:key="label" class="account-stat card" data-index="{{index}}" bindtap="tapCount"><text class="as-n">{{item.value}}</text><text class="as-l">{{item.label}}</text></view>
+        </view>
+
+        <view wx:if="{{showRank}}" class="rank-card card" data-route="/packages/work/ledger/index" bindtap="openRoute"><view class="rk-badge"><text class="serif">{{progress.rank}}</text></view><view class="rk-b"><text class="rk-t serif">战略段位 · {{progress.rank}}</text><text class="rk-s">{{progressDesc}}</text><text class="rk-next">{{progressNext}}</text></view><native-icon name="arrow" tone="gold" size="15"></native-icon></view>
+
+        <view wx:for="{{menuGroups}}" wx:key="title" class="menu-group">
+          <text class="menu-group-title">{{item.title}}</text>
+          <view class="menu card">
+            <view wx:for="{{item.rows}}" wx:for-item="row" wx:for-index="rowIndex" wx:key="label" class="menu-row" data-group="{{index}}" data-index="{{rowIndex}}" bindtap="tapMenu">
+              <view class="menu-ic"><native-icon name="{{row.icon}}" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view>
+              <text class="menu-t">{{row.label}}</text><text class="menu-s">{{row.status}}</text><view class="menu-go"><native-icon name="arrow" tone="neutral" size="15"></native-icon></view>
+            </view>
+          </view>
+        </view>
+      </block>
+
+      <block wx:else>
+        <view class="profile-empty"><view class="profile-empty-icon"><native-icon name="user" tone="accent" color-key="{{colorKey}}" size="24"></native-icon></view><text class="profile-empty-title">尚未登录</text><button class="profile-login" bindtap="login">登录</button></view>
+        <view wx:for="{{guestGroups}}" wx:key="title" class="menu-group"><text class="menu-group-title">{{item.title}}</text><view class="menu card"><block wx:for="{{item.rows}}" wx:for-item="row" wx:for-index="rowIndex" wx:key="label"><button wx:if="{{row.action==='contact'}}" class="menu-row guest-contact" open-type="contact"><view class="menu-ic"><native-icon name="{{row.icon}}" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view><text class="menu-t">{{row.label}}</text><text class="menu-s"></text><view class="menu-go"><native-icon name="arrow" tone="neutral" size="15"></native-icon></view></button><view wx:else class="menu-row" data-group="{{index}}" data-index="{{rowIndex}}" bindtap="tapGuestMenu"><view class="menu-ic"><native-icon name="{{row.icon}}" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view><text class="menu-t">{{row.label}}</text><text class="menu-s"></text><view class="menu-go"><native-icon name="arrow" tone="neutral" size="15"></native-icon></view></view></block></view></view>
+      </block>
+      <view class="tabbar-space"></view>
+    </view>
+  </scroll-view>
+  <view wx:if="{{sheet}}" class="profile-sheet-mask" bindtap="closeSheet"><view class="profile-sheet" catchtap="stop"><view class="sheet-grip"></view><view class="profile-sheet-head"><view><text class="pf-kicker">{{sheet==='workbench'?'案 卷 档 案':sheet==='teacher'?'服 务 老 师':'社 群 二 维 码'}}</text><text class="pf-title serif">{{sheet==='workbench'?'个人 / 企业档案':sheet==='teacher'?teacherName+'微信':className+'群二维码'}}</text></view><view class="profile-sheet-close" bindtap="closeSheet"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
+    <scroll-view wx:if="{{sheet==='workbench'}}" scroll-y class="pf-body"><view class="profile-file-summary"><text class="pfs-k">当前档案完整度</text><text class="pfs-v serif">{{completeness}}%</text><text class="pfs-d">还差 {{workbenchMissing.length}} 项，补齐后会刷新战局判断和深度报告引用。</text><view class="profile-file-progress"><view class="pfp-i" style="width:{{completeness}}%"></view></view></view><view class="profile-file-sections"><view wx:for="{{workbenchSections}}" wx:key="key" class="profile-file-section"><view class="pfsec-b"><text class="pfsec-t">{{item.label}}</text><text class="pfsec-h">{{item.hint}}</text></view><text class="pfsec-c {{item.ready&&item.count>0?'ok':'miss'}}">{{item.ready&&item.count>0?item.count+' 份':'待补'}}</text></view></view><view class="pf-fieldrow" bindtap="openBrief"><text class="pf-fk">军师对我的理解</text><view class="pf-fv-go"><text>查看</text><native-icon name="arrow" tone="neutral" size="13"></native-icon></view></view><view class="profile-missing-list"><view class="pml-head"><text class="pml-t">当前最该补</text><text class="pml-s">按对战局判断的影响排序，补完会同步刷新案卷完整度。</text></view><view wx:for="{{workbenchMissing}}" wx:key="key" class="profile-missing-row"><text class="pmr-i serif">{{index+1}}</text><view class="pmr-b"><text class="pmr-t">{{item.title}}</text><text class="pmr-s">{{item.desc}}</text></view><text class="pmr-go" data-index="{{index}}" bindtap="fillMissing">去补</text></view></view></scroll-view>
+    <view wx:elif="{{sheet==='teacher'}}" class="pf-body"><view class="profile-teacher-card"><text class="ptc-av serif">{{teacherInitial}}</text><view class="ptc-b"><text class="ptc-name serif">{{teacherName||'服务老师'}}</text><text class="ptc-desc">{{className}}服务老师 · {{teacherNote}}</text></view></view><view class="pf-fieldrow" bindtap="copyWechat"><text class="pf-fk">微信号</text><text class="pf-fv serif">{{teacherWechat||'—'}}</text></view><view class="pf-primary" bindtap="copyWechat">复制微信号</view></view>
+    <view wx:else class="pf-body profile-group-body"><image wx:if="{{groupQrUrl}}" class="pf-qr" src="{{groupQrUrl}}" mode="aspectFit" show-menu-by-longpress bindtap="previewGroup"></image><view wx:else class="pf-qr pf-qr-ph"><text>二维码待分配</text></view><text class="pf-qr-tip">二维码有效期 7 天，过期可让服务老师重新发送。</text></view>
+  </view></view>
+  <login-sheet open="{{showLogin}}" reason="profile" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <coach-marks></coach-marks>
+</view>

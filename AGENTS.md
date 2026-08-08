@@ -46,14 +46,14 @@ repo/
 │   └── contracts.d.ts  # ★ SSOT：全栈数据契约（纯类型，运行时擦除）
 ├── docs/               # CHANGELOG.md（历史变更）· ROADMAP.md（进展/TODO）· TESTING.md（集成测试）· DEPLOYMENT.md（部署架构/上线）
 ├── deploy/             # 部署模板：nginx.conf.example（★分 A 主配置 + B 站点两段，两段都要改）· junshi-api.service · Dockerfile.server · docker-compose.yml · monitoring/（Prometheus+Grafana 监控栈，主文档 docs/MONITORING.md）
-├── app/                # Taro 移动端（微信小程序 weapp + H5），React + TS
+├── app/                # 微信原生小程序（weapp-native）+ Taro/React H5（src），共享同一后端契约
 ├── server/             # 后端 API：Fastify + Prisma + PostgreSQL + LLM Gateway（含 src/app.ts 工厂 + test/ 集成测试）
 ├── admin/              # 运营后台：Vite + React + TS
 ├── loadtest/           # 隔离压测：Docker Compose + 内网网关 + k6 只读场景（默认零外部资源；真实 LLM 仅受控最小探针）
 └── project/            # 原始高保真原型（设计事实来源，勿改）
 ```
 
-本地生成物约定：`app/project.config.json` 是正式小程序配置（需跟踪，保持 AppID/miniprogramRoot 正确并开启正式校验/压缩）；`app/src/app.config.ts` 生成正式 `app.json`，`app/config/index.ts` 会在 weapp 构建产物里强制补写 `lazyCodeLoading: "requiredComponents"`（Taro 3.6.34 不稳定透传该字段）；`app/project.private.config.json` 可在本机覆盖 DevTools 私有设置（例如局域网真机预览临时 `urlCheck:false`）；根目录误生成的 `project.config.json/project.private.config.json`、`weapp-preview*.json/png`、`weapp-auto-preview*.json/png`、`app/.impeccable/`、`app/tarojs-cli-*.tgz`、根目录空 `package-lock.json` 均为本机/工具产物，已在 `.gitignore` 排除，不纳入提交。**不要导入仓库根目录到微信开发者工具，只导入 `app/`。**
+本地生成物约定：微信源码在 `app/weapp-native/`，`app/scripts/build-native-weapp.mjs` 输出 `app/dist-native/`；Taro 只保留 H5，输出 `app/dist-h5/`。`app/project.config.json` 是发布/CLI 配置，固定 `miniprogramRoot=dist-native/`；构建还会在 `dist-native/project.config.json` 生成本地独立配置，当前微信开发者工具 RC 在外层目录热重建后若残留错误索引，直接导入 `app/dist-native/` 可稳定本地编译。`app/project.private.config.json` 只放本机差异。根目录误生成的 `project.config.json/project.private.config.json`、`weapp-preview*.json/png`、`weapp-auto-preview*.json/png`、`app/.impeccable/`、`app/tarojs-cli-*.tgz`、根目录空 `package-lock.json` 均为本机/工具产物，已在 `.gitignore` 排除，不纳入提交。**不要导入仓库根目录；日常本地走查优先导入 `app/dist-native/`，发布工具仍以 `app/` 为项目根。**
 
 ---
 
@@ -61,7 +61,8 @@ repo/
 
 | 层 | 技术 |
 |---|---|
-| 移动端 `app/` | Taro 3.6.34 · React 18 · TypeScript · Sass · Webpack5（一套码出 weapp + H5） |
+| 微信小程序 `app/weapp-native` | 微信原生 Page/Component · WXML/WXSS/JS · Sass 构建 · Lucide 静态 SVG（问策使用 `messages-square` 双对话气泡；微信登录使用 Simple Icons 品牌 SVG）· towxml-stream-typewriter 1.0.3（MIT，流式 Markdown） |
+| H5 `app/src` | Taro 3.6.34 · React 18 · TypeScript · Sass · Webpack5（只构建 H5） |
 | 后端 `server/` | Fastify 5 · Prisma 5 · PostgreSQL · Zod · `@anthropic-ai/sdk` · tsx/tsc · 可切换大模型（默认 **Agnes 2.0 Flash**，OpenAI 兼容；后台可切 DeepSeek/Qwen…） |
 | 运营端 `admin/` | Vite 5 · React 18 · TypeScript |
 | 数据契约 | `shared/contracts.d.ts`（被三端 `import type` 引用） |
@@ -74,19 +75,19 @@ repo/
 
 | 模式 | 行为 | 启动方式 |
 |---|---|---|
-| **mock**（默认） | 所有 `api.*` 走**纯前端数据源**（`app/src/services/mock.ts`），按账号隔离、落本地 storage，不连后端 | `cd app && npm run dev:weapp` |
-| **server** | 连真实后端 REST API | `TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp` |
+| **mock**（默认） | 原生端走 `app/weapp-native/services/mock.js`，H5 走 `app/src/services/mock.ts`；均按账号隔离并落本地 storage | `cd app && npm run dev:weapp` |
+| **server** | 连真实后端 REST API | `WEAPP_APP_MODE=server WEAPP_APP_API=https://你的域名/api npm run build:weapp`；生产快捷命令 `npm run build:weapp:server` |
 
 实现要点：
-- `app/config/index.ts`：通过 `defineConstants` 显式注入 `process.env.TARO_APP_MODE` / `process.env.TARO_APP_API`，确保 H5/weapp 构建产物在浏览器/小程序运行时拿到构建期模式与 API 地址。
-- **构建身份与防误传**：`app/config/index.ts` 同时注入 `TARO_APP_VERSION/TARO_APP_BUILD_SHA`，并给 weapp 产物生成 `dist/junshi-build-meta.json`（mode/api/version/gitSha）。mock 包五个主 Tab 左上常驻红色「MOCK · 本地数据」，设置页「当前版本」显示 `版本 · MOCK/正式 · commit`；正式发布统一走 `npm run release:weapp -- --version x.y.z --desc "说明"`，该命令会强制重建 server 包，再对 mode/API/版本做硬校验，任一不符直接拒绝上传。`upload:weapp` 及旧 CI 脚本也执行同口径元数据校验；不得用裸 DevTools CLI 或 GUI 绕过。
+- 原生小程序配置由 `build-native-weapp.mjs --mode/--api/--version` 写入 `dist-native/config/env.js`；环境变量前缀统一 `WEAPP_APP_*`。H5 继续由 `app/config/index.ts` 注入 `TARO_APP_*`，两套产物不得混目录或互相引用运行时。
+- **构建身份与防误传**：原生构建写 `dist-native/junshi-build-meta.json`（`schemaVersion=2`、`runtime=native-weapp`、mode/api/apiExplicit/version/gitSha）。mock 包五个主 Tab 左上常驻红色「MOCK · 本地数据」；正式发布统一走 `npm run release:weapp -- --version x.y.z --desc "说明"`，强制重建 server 包并校验 runtime/mode/API/`apiExplicit=true`/版本，未显式配置服务端地址或仍是旧 Taro 微信包都会被明确拒绝。`upload:weapp` 同口径校验；不得用裸 DevTools CLI 或 GUI 绕过。
 - `app/src/services/config.ts`：`APP_MODE`（读已注入的 `process.env.TARO_APP_MODE`，默认 `mock`）、`IS_MOCK`、`BASE_URL`（读已注入的 `TARO_APP_API`）。不要在浏览器运行时再用 `typeof process` 包裹，否则 H5 bundle 会退回 mock/default。
 - `app/src/services/api.ts`：每个方法按 `useMockApi()` 分流 mock 或真实请求（通常等价于构建期 `IS_MOCK`，附身会按下条运行时切换），**两种模式同口径**（同样的入参/返回类型）。
-- **附身登录是唯一运行时数据源例外**：`api.verifyImpersonation` 无论 `APP_MODE` 为 `mock` 还是 `server` 都必须直连真实 `/me`，绝不能回退 `mock.me()`；server 包复用当前 `BASE_URL`（生产/预发不串环境），mock 包优先使用显式 `TARO_APP_API`，未传时固定验生产 `https://wxapi.aibuzz.cn/api`。验令通过并把三段 JWT 落入 storage 后，`services/runtimeMode.ts` 会让整个会话（普通 API、文件上传、流式对话、案卷与支付环境判断）跟随该真实身份走同一服务端；退出/换回 `mock-*` token 后自动恢复本地 mock。附身 token 只由真实后端签发；仅修验令而不切后续数据源会出现“登录成功但看到 mock 账号”的假附身。
-- `app/src/services/mock.ts`：前端 mock 后端，实现 login/me/agents/survey/profile/sayings/sessions/generate/library 全量接口；mock 数据来自 `app/src/data/agents.ts`、`app/src/data/deliverables.ts`。两份镜像的**文案字段**由 `cd server && npm run copy:sync` 从服务端源同步，`npm run copy:sync -- --check` 只校验 agent 的 `greet/memText/learnText` 与 `REPLIES['默认']`；`enabled/owned/billing/price`、`DELIVERABLES` 全表等行为字段仍有意允许与服务端不同，不在该工具保护范围内，禁止把 `--check` 当成完整镜像一致性保障。
-- mock 模式下登录/数据按 `mock-<手机号>` token 隔离并持久化，可切换账号验证隔离。
-- weapp + server 模式下登录弹层优先提供「微信账号登录」：前端 `Taro.login` 取 code，后端 `/auth/wechat-login` 调微信 `jscode2session` 换 openid/unionid 并签发自有 token；H5/mock 不显示该入口。
-- **H5 浏览器手测（推荐替代小程序）**：weapp 与 H5 同一套码、无平台分叉。零后端走查 `npm run dev:h5`；连后端测真实变更 `npm run build:h5:server && npm run serve:h5`（→ http://localhost:5173，server 模式，默认指向 :4000）。H5 用 hash 路由，`dist/` 任意静态服务器可开。详见 `docs/TESTING.md` §五。
+- **附身登录是唯一运行时数据源例外**：`api.verifyImpersonation` 无论构建 mode 为 `mock` 还是 `server` 都必须直连真实 `/me`，绝不能回退本地 `mock.me()`；server 包复用当前 API 基址（生产/预发不串环境），mock 包优先使用构建时显式配置的 API，未显式配置才固定验生产 `https://wxapi.aibuzz.cn/api`。验令通过并把三段 JWT 落入 storage 后，H5 的 `services/runtimeMode.ts` 与原生端的 `weapp-native/services/runtime-mode.js` 都会让整个会话（普通 API、文件上传、流式对话、相对产物 URL、案卷与支付环境判断）跟随该真实身份走同一服务端；退出/换回 `mock-*` token 后自动恢复本地 mock。附身 token 只由真实后端签发；仅修验令而不切后续数据源会出现“登录成功但看到 mock 账号”的假附身。
+- 两端各有一份同契约 mock 后端：H5 为 `app/src/services/mock.ts`，原生为 `app/weapp-native/services/mock.js`。原生 mock 必须按账号隔离并持久化登录/档案/首判/会话/案卷/军令/目标/经营回填/方案与版本/资料与引用/数据源/模块/SKU/处方/战略账本/海报任务与图库/命盘；所有点击后提示成功的动作都必须能在刷新、回到列表或切换账号后看到相应真值，禁止用 `{ok:true}` 或空数组伪装完整流程。智能体/成果文案仍以服务端镜像同步工具保护的字段为准，行为与本地展示夹具允许按平台分别实现，但接口入参与返回结构必须同契约。
+- mock 模式下登录/数据按 `mock-<手机号>` token 隔离并持久化，可切换账号验证隔离；新 mock 账号的 `/me.user.name` 必须保持空值，直到用户在注册补全页保存真实称呼，禁止用「主公」等展示兜底名冒充已完成身份资料、从而跳过头像/称呼与首次入局。
+- weapp + server 模式下登录弹层优先提供「微信账号登录」：原生端用 `wx.login` 取 code，H5 保持原 Taro 适配；后端 `/auth/wechat-login` 调微信 `jscode2session` 换 openid/unionid 并签发自有 token。
+- **H5 与小程序是两套前端实现、同一后端契约**：H5 零后端走查 `npm run dev:h5`；连后端测真实变更 `npm run build:h5:server && npm run serve:h5`（→ http://localhost:5173）。H5 用 hash 路由，产物在 `dist-h5/`；微信问题必须回到 `weapp-native` 与 DevTools/真机验收，不能再用 H5 代替平台行为验证。详见 `docs/TESTING.md` §五。
 
 ---
 
@@ -110,7 +111,7 @@ repo/
 
 ## 6. 账号与数据隔离
 
-- **登录与游客态（2026-08 合规重构，默认微信优先）**：冷启动与五个主 Tab 不再自动弹登录；游客可浏览军师与开场白、每日一句、能力目录、套餐价格、协议/隐私/客服，只有发送对话、查看历史/搜索、上传/保存、执行、购买或维护档案等动作才打开可关闭的 `Login`，并用 `AuthReason` 明示本次目的。登录层右上角与遮罩均可退出，关闭后留在原页且不丢对话输入；页面本身**不得反复写「不登录也能看」「公开浏览」「游客浏览」等权限解释**，个人内容缺失统一用 `AsyncState` 的业务空态，真正触发受限动作时再由登录层说明本次目的。默认「微信账号登录」只用 `wx.login` code → `jscode2session` → openid/unionid 建号，**登录成功即完成，不要求手机号、头像、昵称或建档**；手机号验证码登录只是用户主动选择的替代方式。微信账号无手机号时数据库继续用 `wx_<openid>` 内部占位，`/me` 对外返回空手机号。登录后可在「设置 → 账号联系信息」自愿用短信验证码绑定手机号（`POST /auth/bind-phone`，跨账号占用返回 409 `PHONE_TAKEN`），可随时取消；头像、称呼、公司与本命色也均由用户主动设置。首次入局建档（择色→案卷→首判）只从登录后的说明卡主动进入，带返回键且每步可稍后退出，不再切 Tab 反复强拉。登录层不再承载运营附身入口；附身只保留在设置页长按版本号。新账号仍自动建独立租户+用户；是否自动开通套餐只由 `TEST_DEFAULT_PLAN_NAME` 决定，未配置时不赠送套餐或额度。
+- **登录与游客态（2026-08 合规重构，默认微信优先）**：冷启动与五个主 Tab 不再自动弹登录；游客可浏览军师与开场白、每日一句、能力目录、套餐价格、协议/隐私/客服，只有发送对话、查看历史/搜索、上传/保存、执行、购买或维护档案等动作才打开可关闭的 `Login`，并用 `AuthReason` 明示本次目的。登录层右上角与遮罩均可退出，关闭后留在原页且不丢对话输入；页面本身**不得反复写「不登录也能看」「公开浏览」「游客浏览」等权限解释**，个人内容缺失统一用 `AsyncState` 的业务空态。原生微信主按钮固定为「微信手机号一键登录」：未勾协议时只是普通按钮并提示先同意，勾选后才渲染 `open-type=getPhoneNumber`；一次点击取得 `phoneCode`，同时 `wx.login` 取 `loginCode`，统一交 `POST /auth/wechat-phone` 完成手机号注册/登录并关联 openid，禁止先创建无手机号微信账号、再到第二页重复补绑。拒绝手机号授权时保留手机号短信验证码登录/注册兜底。**新账号身份与入局主链恢复**：一键或短信登录成功后若账号没有称呼，只进入“先让军师认得你”补称呼与可选微信头像；手机号此时已经绑定，不再重复询问。保存后，权威 `onboarded=false` 自动进入「择本命色 → 填行业/营收阶段/痛点 → 军师首判」。已存在称呼的老账号不重复强拉补全，仍可在设置里绑定/更换手机号（`POST /auth/bind-phone`，跨账号占用返回 409 `PHONE_TAKEN`）并修改头像、称呼、公司和本命色。登录层不承载运营附身入口；附身只保留在设置页长按版本号。新账号仍自动建独立租户+用户；是否自动开通套餐只由 `TEST_DEFAULT_PLAN_NAME` 决定，未配置时不赠送套餐或额度。
 - **登录关闭按钮必须避让微信胶囊**：`Login` 是全屏自定义层，右上关闭按钮不能固定贴右；打开时读取 `getMenuButtonBoundingClientRect()`，与胶囊垂直居中并放在其左侧 12px，H5 / 旧基础库才使用 `safe-area + right:18px` 兜底。不要把按钮移回胶囊右侧、上方或同一命中区。
 - **测试期默认套餐**：服务端设置 `TEST_DEFAULT_PLAN_NAME=决策版` 后，微信/短信/本机号等所有新注册入口统一在建号事务中开通指定套餐并发放完整额度；存量低档用户运行 `npm run db:grant-test-plan -- --plan=决策版 --apply` 升级，脚本保留有效同档和企业私有化用户，不重复发放、不降级。测试结束后清空环境变量并重启 API，新注册即恢复默认不送套餐。
 - **无套餐首次入局例外**：`PLAN_WRITE_GATE` 仍默认禁止无套餐账号的业务写操作，但为了让默认不送套餐的新账号能完成「择色 → 立案卷 → 首判」，对 `state=none` 精确放行 `PUT /me`、`PUT /me/color`、`POST /me/avatar`、`PUT /profile` 和 `POST /quickscan`；不使用 `/me/*` 宽前缀。`/quickscan` 仍由 `grace:'quickscan'` 限制无额度时每日仅 1 次保底，第 2 次返回 `INSUFFICIENT_QUOTA`；套餐已过期用户不享受该例外，仍返回 `PLAN_EXPIRED`。
@@ -159,21 +160,28 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 
 军师拟人头像：`components/AdvisorAvatar`（圆形立绘 + 白描边 + 可选在线点），当前主用立绘资产在 `src/assets/avatars/generated/*-imagegen.jpg`（6 张 376px JPEG ≈306KB，由 imagegen 生成的古代/神话谋略人物商务漫画头像：general=诸葛亮意象、strat=鬼谷子意象、growth=姜子牙意象、ip=文曲星意象、ops=刘伯温意象、org=张良意象；其余智能体按气质就近复用，未映射的按 key 哈希兜底）。旧版雪碧图裁切 `src/assets/avatars/*.jpg` 已删除（未引用即清理，控主包体积）。对话列表行、chat 头部与消息 who 行统一用它，不要再回退成图标色块。
 
-战略案卷（执行闭环，已服务端化 · M0 PR-EX）：`services/dossier.ts` 是页面唯一入口——「认可方案→案卷（军令/风险锁/判断）→打卡→线索/咨询/成交回填→复盘 prompt」。server 模式走 `/casefile*` API（后端 `Casefile/CasefileOrder/CasefileMetric` 三表，按用户行级隔离，换设备不丢；军令/风险仍按 行动/风险 类分节标题启发式提取，服务端 `services/casefile.ts` 与前端 mock 分支同一套规则，**不预置业务结论**；自动拆军令和手动补军令均按「同一案卷 + 同一天 + 标准化文本」幂等，重复认可/重复添加不再追加列表）；mock 模式沿用本地 storage 实现（`junshi.dossier.<token>`）。老用户首次拉取会把本地案卷一次性导入服务端（`POST /casefile/import`，服务端幂等 + 本地 `junshi.dossier.migrated.<token>` 标记）。页面接口全部异步（`refreshDossier/acceptDeliverable/toggleOrder/addOrder/removeOrder/saveBackfill` 返回 Promise），打卡在执行页做乐观更新；完成军令不删除，今日页仅从待执行列表收起到默认折叠的归档区，周计划、复盘、每日战报继续读取 `done` 记录。战局页（案卷行/风险锁/CTA）与执行页共用该服务。
+战略案卷（执行闭环，已服务端化 · M0 PR-EX）：H5 的 `services/dossier.ts` 与原生端的 `services/api.js` 都承接「认可方案→案卷（军令/风险锁/判断/目标）→打卡→战果与经营数据回填→复盘」。server 模式走 `/casefile*` API（后端 `Casefile/CasefileOrder/CasefileMetric` 三表，按用户行级隔离，换设备不丢；军令/风险仍按行动/风险类分节标题启发式提取，服务端 `services/casefile.ts` 与前端 mock 分支同一套规则，**不预置业务结论**；自动拆军令和手动补军令均按「同一案卷 + 同一天 + 标准化文本」幂等，重复认可/重复添加不再追加列表）；mock 模式按账号落本地 storage。页面接口全部异步；完成军令后就地填写「做完了多少」，提交后才收进默认折叠的归档区，近 7 天周计划、复盘、每日战报继续读取 `done` 记录；目标阶梯四格读取并局部保存案卷 goals，复盘统一由总军师承接。战局页（案卷行/风险锁/CTA）与执行页共用该真值。
 
 ### 7.2 关键 UI 约定（踩过的坑，勿回退）
 - **小程序工程约束清单（先读）**：
-  - **项目导入与配置**：微信开发者工具只导入 `app/`；`app/project.config.json` 是正式配置，保持 AppID、`miniprogramRoot=dist/`、`libVersion=3.16.2`（真流式 `enableChunked` 目标基础库）、`urlCheck/es6/enhance/postcss/minified` 等正式校验/压缩开启；`app/src/app.config.ts` 保持 `lazyCodeLoading: "requiredComponents"`，且 `app/config/index.ts` 的 weapp webpack 链必须确保 `dist/app.json` 实际写出该字段；本机调试差异放 `app/project.private.config.json`，不要把根目录误生成的 DevTools 配置纳入提交。
-  - **发版构建必须清缓存并先做类型检查（2026-07-29 / 2026-08-05 两类白屏实测）**：`app/config/index.ts` 开了 webpack 持久化缓存（`cache:{enable:true}`，落在 `node_modules/.cache/webpack`，不是 `.cache`）。跨分包共享模块变动后（如 `services/creative.ts` 同时被 `packages/main/chat` 与 `packages/work/poster` 引用），缓存里的旧模块会和新构建的模块图拼在一起，产出**引用了不存在模块 id 的 chunk**；小程序运行时表现为 `TypeError: n[e] is not a function`（`n[e]` = `modules[moduleId]`）→ **整个页面白屏、无 React 报错**，后面跟一条 `Component is not found in path "wx://not-found"`。另一类白屏来自 Taro/Babel 只转译不查类型：未定义变量也会显示 `Compiled successfully`，直到真机渲染才 `ReferenceError`（军令页 `dateStr` 曾因此整页空白）。所以 `npm test`、`build:weapp`、`build:weapp:server`、`build:weapp:preprod` 与 H5 正式构建都必须先跑 `npm run typecheck`；server/preprod 构建还前置 `clean:build` 自动清缓存。`dev:weapp --watch` 仍保留缓存以便迭代。自检办法：产物里若存在「被引用但全 dist 无定义」的模块 id，即为缓存脏。
+  - **项目导入与配置**：微信源码唯一入口是 `app/weapp-native/`，`app/weapp-native/app.json` 自带 `lazyCodeLoading: "requiredComponents"`；`app/project.config.json` 保持 AppID、`miniprogramRoot=dist-native/`、`libVersion=3.16.2` 与正式校验/压缩配置。日常本地走查先构建，再导入 `app/dist-native/`（其中会生成 `miniprogramRoot=""` 的独立 DevTools 配置）；发布 CLI 仍指向 `app/`。不要导入仓库根目录，也不要再把 Taro `app/src/app.config.ts` 当微信 app.json 真源。
+  - **原生构建闸门**：`build-native-weapp.mjs` 编译 SCSS、复制源码与素材，38 条路由全部来自各自独立的 Page 四件套，不存在通用页或 generic fallback；构建会校验路由完整、所有 JS 语法、源码/产物无 Taro 引用，以及聊天 textarea 不得绑定 `value`。`npm test` 还检查路由覆盖、WXML 事件、Lucide 图标口径、禁用已弃用的 `text selectable`（统一 `user-select`）、mock 账号隔离与 H5/微信产物隔离。H5 仍需 `npm run typecheck`；旧 Taro Webpack 缓存白屏经验仅适用于 `dist-h5`，不再用于解释原生 `dist-native`。
   - **上传前恢复正式域名校验**：`app/project.private.config.json` 的 `urlCheck:false` 仅用于局域网临时预览；上传/提审前必须在微信开发者工具「详情 → 本地设置」恢复合法域名、web-view 业务域名、TLS 与 HTTPS 证书检查，并用生产 API 域名完成一次真机回归，不能把“工具关闭校验后能请求”当成上线可用。
-  - **原生 tabbar 只隐藏不恢复**：custom tabBar 模式下任何路径都不得调用 `Taro.showTabBar`。正常 Tab 挂载/切换只调用 `hideNativeTabBarOnly()` 压住微信原生底栏；全屏 overlay 用 `store.setOverlay(open, stableKey)` 写 storage 并隐藏自定义底栏，关闭/卸载时清理对应 key。custom-tab-bar 在无 overlay 时必须自动清理过期隐藏标记，避免真机重进后导航消失。
+  - **原生 tabbar 与图标**：`weapp-native/custom-tab-bar` 直接使用微信 custom tabBar，不得调用 `Taro.showTabBar` 或引入 Taro。问策使用 `lucide-static@1.27.0` 的 `messages-square` 双对话气泡；微信账号登录使用固定版本的 Simple Icons WeChat 品牌 SVG（CC0-1.0），不能用「微」字、通用消息框或自画圆标代替；军情/军令/锦囊/老板与其余功能图标同样从 Lucide 构建主题色 SVG，禁止再手绘或用 Unicode/emoji 冒充图标。不同 SVG 的 viewBox 留白不同，底栏统一 33px 图标槽后仍须按实际笔画包围盒做光学校准：archive 锦囊 26px，其余 Lucide 22px，不能只给所有 `<image>` 同一个盒子尺寸就声称视觉等高。全屏页按原生路由自然不显示 tabbar；组件式全屏层（登录、解锁、全文预览）打开时必须通过 `store.setOverlay(open,key)` 同步隐藏自定义底栏，不能只盖住页面内容却让底栏继续露在弹层上方。
+  - **登录协议勾选必须有对比度**：登录页选中框沿用浅米白底，勾选图标固定用 `#143726` 深绿 Lucide check；不得给浅底传 `tone="white"`，那会让节点存在但肉眼看成没有图标。微信登录主按钮的品牌图形为 21px，手机号登录页返回入口为 15px 浅色版本，尺寸和间距与原 Taro 登录层一致。
+  - **原生点选、图文入口与按钮不得依赖平台默认样式**：军情三模式的 `.bmt.on` 必须同时用本命色文字和边框表达当前项，不能只改白底与字重；「打开 + 箭头」等紧凑入口必须把文字和 Lucide 图标放在不换行的同一 flex 行；固定高度的原生 `<button>` 必须显式 `padding:0`、双轴 flex 居中并清掉 `::after` 默认描边，不能沿用 Taro `View` 的样式后期待微信默认按钮自动居中。
+  - **迁移复用类不能漏**：原生 WXML 复刻 Taro 层级时，不能只复制页面专属类而漏掉并列的通用类。老板页经营统计必须保持 `account-stat card`，由 `.card` 统一提供 `--line-strong` 实边和双层阴影；只剩 `account-stat` 会在同色页面底上失去整个卡片层级。
+  - **老板页服务双卡保持两行真结构**：`老师微信` 卡固定为“Lucide 白色消息图标 + 老师名称”首行和“微信号/分班入口”次行；`班级群` 卡固定为“Lucide 群组图标 + 标题/服务状态”两列。不要在卡片末尾追加独立箭头，老师卡为纵向 flex 时它会掉成第三行，群卡也会被额外挤窄；深绿 `.sa-i` 上不得再传主题绿图标造成绿底绿图不可见。
   - **弹层不进 custom-tab-bar**：`custom-tab-bar` 只做导航和 overlay 状态同步，不渲染 `Login` 或其它全屏业务弹层；未登录点击中间「对话」只提示并跳 `pages/chat`，由聊天页承接登录弹层。
   - **overlay 同步不用轮询**：底栏状态同步依赖 `eventCenter` + 页面 `useDidShow` + `hideNativeTabBarOnly()` 短延时兜底；不要恢复 250ms/1500ms 常驻 interval。
-  - **顶部安全区统一组件化**：Tab 页用 `Screen topInset`，非 Tab 自定义头用 `SafeHeader`；五个 tab 的标题区统一用 `components/TabHeader`（它自带 `tab-page-head`，高度由内容撑开；**不要加 `overflow:hidden`**——背景大字靠字号与下方留白配套，整字露出而不是被裁），安全区让位只由 `Screen` 的 `.nav-inset` 负责，页面内不要再单独测胶囊、写 `env(safe-area-inset-top)`，也不要再各页复制一套页头（`exec-nav/battle-nav/messages-head/think-nav/account-nav` 已删）；不要加伪状态栏 `9:41`。
+  - **顶部安全区统一组件化**：Tab 页用 `Screen topInset`，非 Tab 自定义头用 `SafeHeader`；原生端对应数据统一由 `weapp-native/services/page.js` 的 `capsuleMetrics()` 提供，并在页面根节点透出 `--native-nav-inset/top/row-height/right` 四个变量。非 Tab 标题行必须直接落在 `navTop + navRowHeight` 的胶囊同排区域：36px 返回按钮与胶囊按视觉中线对齐，行底至分隔线固定留 10px 呼吸；右侧按 `navRightInset` 避开系统按钮，正文/ScrollView 从单一 `navInset` 后开始。二级页标题统一在返回按钮后左对齐，不能以“扣掉胶囊后的剩余宽度”伪居中，否则标题会随设备胶囊宽度和右侧操作漂移；禁止再渲染一块 `navInset` 空白后额外叠 48–52px 标题行。`native-safe/form/sub/settings/plans/legal` 六套存量类由 `app.scss` 统一收口为同一结构，新增页面不得另造第七套高度。五个 tab 的标题区统一用 `components/TabHeader`（它在组件自身 WXSS 内建立定位上下文并保留背景大字落脚留白；**不要依赖页面级 `.tab-page-head { position:relative }`**，原生组件样式隔离会让大字改为相对视口定位并撞进微信胶囊；也不要加 `overflow:hidden`——背景大字靠 88px 字号、顶部偏移与 28px 下方留白配套，整字露出而不是被裁），安全区让位只由统一层负责；不要加伪状态栏 `9:41`。
   - **tab 页头零按钮**：设计稿页头右侧那枚「行业 tag」是装饰，已按定稿去掉，`TabHeader` 也**不提供 `right` 插槽**——不要为了省事又往页头塞入口。新功能入口一律挂到它所属的内容区（段头、卡片、菜单行），落位前先确认：① 它是不是同屏已有入口的重复（军令页原页头「复盘」就是，已删）；② 它是不是别的 tab 已经有的（案卷已在老板 tab 出现两次）；③ 它有没有别处替代（`历史`/`设置` 是唯一入口，必须给新家，分别落到搜索行右侧与老板页「系统」菜单组）。删入口前一定要先核 reachability，别把唯一入口当重复清掉。
-  - **组件样式导入顺序统一**：同一页面同时用 `Icon` 与 `SafeHeader` 时，保持 `Icon` import 在前、`SafeHeader` import 在后；同时出现 `Picker` 与直接或间接依赖的 `Sheet` 时，保持 `Picker` 在前、`Sheet` 在后，避免 Taro/mini-css-extract-plugin 在 common chunk 报 CSS order warning。
-  - **对话键盘与生成态按真机口径写**：`packages/main/chat` 保持页面 `disableScroll: true`、底部输入 `adjustPosition={false}`、`alwaysEmbed`、整条 `.box` 触发 focus、`onInput` 返回 `e.detail.value`、`onConfirm` 使用事件值发送，并由 `onKeyboardHeightChange` 写 `--keyboard-height` 让 `.chat` 自己压缩底部空间；反问卡「其他」保留卡片内输入外观和原交互，但卡片里只能用 View/Text 显示草稿，真正接收键盘字符的透明 Textarea 必须放在聊天 ScrollView 外，防止 Android 原生文字层漂到状态栏；微信端不存在 `enableNative=false` 能力（当前 Taro 只在支付宝端声明），不要照搬跨端属性；Android 真机的普通表单 Input 不得放在全屏纵向 `ScrollView` 或 fixed 弹层中，执行页因此使用 `Screen scroll={false}` 原生页面滚动，目标编辑器在目标阶梯下方就地展开；页内输入统一用 `KbInput`（`alwaysEmbed + adjustPosition=true`），聚焦期间禁止监听键盘后再改父级 `scrollTop`、追加键盘高度垫片、收缩容器、改 transform/margin 或按键盘 key 重建 Input，避免原生文字层不可见、停在旧坐标或失焦后才出现；Taro/微信首次渲染的 `style` 对象不得传 `undefined` 值（动态 CSS 变量给明确默认值，条件样式用空对象），否则运行时会在 `finalizeInitialChildren` 对 `undefined.toString()` 并整页白屏；等待回复 `busy` 时输入框必须真正锁定（不 focus、不更新草稿、不发送、不清空当前内容），主正文虽已落库但推荐项仍在 `finalize` 时也不得提前解锁；生成中退出聊天页后，客户端 `chatPending` 短标记先桥接“发送→服务端登记”的网络窗口，服务端继续按 `sessionId` 暴露 `SessionItem/SessionDetail.generating` 权威真值，列表摘要按 queue/context/provider/finalize 显示阶段，重进同一会话立即恢复权威全文快照并轮询到任务终态；重进若拿到 `activeGeneration.id` 可调用持久 cancel 展示真实停止键，拿不到 id 时不得展示无效停止键；`phase=finalize` 表示主正文已落库、只剩短暂推荐项收尾，此时继续锁输入但隐藏停止键，避免制造“已取消”假象；异常结束且尾条仍是用户消息时给出明确重试；用户上滑查看较早历史、离底部较远时显示「回到最新」浮层按钮，一键回到对话底部，且避让输入区/引用行/键盘；用户消息、AI 回复、记忆提示与成果卡必须支持长按复制（小程序自定义气泡不能依赖系统文本选择）；AI 普通文本回复用无卡片正文样式并开启文字选择复制，用户输入保留右侧气泡卡片。
-  - **长文粘贴归卷不许留「静默黑箱」**（2026-08-05 真机实拍修）：`packages/main/chat` 把超 `INPUT_MAX` 的粘贴自动转成附卷，这条链路上五件事都不能回退。① **不许有空窗**：清空输入框与卡片出现必须同帧——先落 pending 占位卡再打网络（`absorbPasteToFile`），绝不能等 `createKnowledge` 回来才 `setRefs`，弱网下那就是「框里的字没了、卡片还没来」，用户只会理解成粘贴失败又粘一遍。② **卡面必须露内容**：粘贴长文走独立 `.paste-card`（字数 + `pasteExcerpt` 首行摘要），不许退回只写「粘贴长文」四个字的 `.ref-chip`——输入区的信息量不得少于发出后的 `.uref-card`。③ **点卡片是看全文，不是删除**：整卡点击打开预览浮层（全文 + 复制 + 移除），删除只走右侧 `✕` 并 `stopPropagation`；全文存本地 `pasteTextRef`（本轮 composer 生命周期），预览不打网络。④ **去重按内容、不按时间窗**：判定用 `services/pasteAbsorb` 的 `isSamePaste`（去空白后互为前缀/后缀 + 九成重合），作用域=当前这一轮，在途那份也要先记账；不要恢复「N 秒内相同指纹」那套——用户「以为没成功、隔一会儿又粘一遍」正是要防的路径，窗口和首尾指纹都盖不住（实拍隔约一分钟、且第二次粘贴前先打了几个字）。⑤ **归卷未决就不许发送**：`uploading/failed` 卡存在时发送键置灰且 `onSend` 硬拦，避免晚到的 ref 串进下一轮；失败保留可预览全文并只提供重试/移除，不得异步 `writeInput(fullValue)` 覆盖用户已经继续写的新草稿。不要加「把附件放回输入框」（ChatGPT 的 Show in text field）：本页发送硬上限 2000 字，放回去必撞上限。
+  - **H5 组件样式顺序**：`Icon/SafeHeader`、`Picker/Sheet` 的 import 顺序只约束 `app/src` 的 Taro H5 构建；原生微信样式由各页 SCSS 编译成同名 WXSS，不存在 mini-css-extract common chunk。
+  - **原生对话输入铁律（华为 + 百度输入法）**：`weapp-native/packages/main/chat` 的两个 `<textarea>` 都不得出现 `value`；输入事件只写普通 JS 字段 `_draft`，编辑过程中绝不 `setData` 回灌文字，也不按输入内容重建节点。发送成功时可在两个无 value 的 textarea 间切换一次以清空；超 2000 字的长文粘贴转成 pending 附卷卡时也允许一次性切换并在卡外保留粘贴前提问，但日常逐字/语音输入仍绝不重建。保持 `adjust-position={{false}}`、`always-embed={{true}}`、`fixed={{true}}`，这些原生布尔属性必须用 WXML 表达式，不能写成字符串 `"false"` 后被平台按真值再次自动顶起；键盘高度只用于 composer 整体避让，键盘出现后滚到最新，失焦归零。composer 视觉结构必须保持“多行正文在上、附件与发送操作在独立底排”，不得把加号和发送键绝对定位到正文左右，多行时那会让按钮悬在段落旁边；底栏增高继续由 `measureComposer()` 实测回写滚动区。删除/光标问题不得用受控输入“修复”，那会重新引入语音转文字重复上屏、删除时光标跳尾并连删后文的问题。SSE/持久任务/停止/重试等生成态规则继续沿用下文既有口径。
+  - **军师追问的「其他」必须是真输入框**：问答卡内直接渲染可见的微信原生 `<input>`，让系统光标、点按定位、长按选字和粘贴自然工作；禁止再用普通 `<text>` 显示答案、另放 `1px` 透明 input 接键盘的“双层假输入”，那种结构视觉层没有光标也无法选字。短回答 input 可用 `ask.other` 作为打开时初值，但 `bindinput` 只写普通 JS 草稿，编辑中不得 `setData` 回灌 `value`；失焦或完成时再一次性提交答案与题目完成度。继续保持 `adjust-position={{false}}`，由页面键盘高度逻辑统一避让。每个 input 使用 `ask-other-m{messageIndex}-q{askIndex}` 稳定锚点；点「其他」、input 再获焦或键盘高度变化时只把当前 input 滚入缩小后的可视区，禁止调用会话级 `toBottom()`，否则长问答卡会把正在编辑的题滚到键盘上方之外。
+  - **原生流式正文不得跟着网络包抖动**：普通军师回复使用固定版本 `towxml-stream-typewriter@1.0.3`（MIT，源码与许可证在 `weapp-native/packages/main/vendor/towxml`）承接正在生成的 Markdown；网络层只把累计正文写入组件的 `setMdText` 缓冲，组件以稳定 6ms 字符节奏增量解析/复用已稳定节点，SSE token 到达时不得再对 `messages[index].text` 整段 `setData`。滚到底部按 180ms 节流，网络 `done` 后调用 `setStreamFinish`，用户停止/页面卸载调用 `stopImmediatelyCb`；历史消息继续用轻量 `markdown-text`，方案流继续用 `report-card`，不得为了套开源组件改写现有登录、引用、成果闸门或会话协议。上游固定 commit `5b64114d01b58638758009b7cab819f5c391a923`；本地只允许 `user-select` 新口径和禁用未启用的外部 LaTeX/YUML 地址两项兼容补丁，升级必须重新跑原生静态测试与 DevTools 真机长回复验收。
+  - **失败轮次重进后不能静默消失**：GenerationJob 建单会把用户消息持久化，但失败终态会清空 `activeGenerationId` 且不产生 assistant 消息；原生对话恢复会话或兼容轮询结束时，若服务端已不在生成且消息尾部仍是 user，必须识别为“问题已保存、回答未完成”，在尾部恢复明确的「重新回答」入口。重试复用最后一条用户文字与引用并设置 no-echo，不得重复插入用户气泡；正常 assistant/report 尾条、仍在生成或用户主动打开的新会话不得误报失败。
+  - **长文粘贴归卷不许留「静默黑箱」**（2026-08-05 真机实拍修）：H5 与原生 `packages/main/chat` 都把超 `INPUT_MAX` 的粘贴自动转成附卷，这条链路上五件事都不能回退。① **不许有空窗**：清空输入框与卡片出现必须同帧——先落 pending 占位卡再打网络，绝不能等 `createKnowledge` 回来才显示，弱网下那就是「框里的字没了、卡片还没来」。② **卡面必须露内容**：粘贴长文走独立 `.paste-card`（字数 + `pasteExcerpt` 首行摘要），不许退回只写「粘贴长文」四个字的 `.ref-chip`。③ **点卡片是看全文，不是删除**：整卡打开本地全文预览（复制 + 移除），删除只走右侧独立按钮并用 Lucide close/trash 图标；H5 全文存 `pasteTextRef`，原生存当前轮 `_pasteTexts`，预览不打网络。④ **去重按内容、不按时间窗**：H5 `services/pasteAbsorb` 与原生 `services/paste-absorb.js` 都用 `isSamePaste`（去空白后互为前缀/后缀 + 九成重合），当前轮与在途内容一并去重。⑤ **归卷未决就不许发送**：`uploading/failed` 卡存在时发送键置灰且 handler 硬拦；失败保留可预览全文并只提供重试/移除，不得异步回灌文字覆盖新草稿。不要加「把附件放回输入框」：本页发送硬上限 2000 字，放回去必撞上限。
   - **卡片的边不许用 `--line`（2026-08-05 实测定量）**：`--line` 是**分割线**色，当卡片边框用等于没画——它对 `--surface-2` 只有 1.12:1、对白底 1.27:1、对 `--paper` 1.22:1。卡片/附件一律用 `--line-strong`（白底 1.62:1）。同理 `--accent-soft` 当图标底时必须自带一圈 `--accent-glow`：它对白底 1.18:1、对 `--surface-2` 只有 1.04:1，裸用就是「图标浮在虚空里」。**还有一条更隐蔽的**：紧邻两块面不要用同一个填充 token —— 粘贴长文卡原本和下方输入框 `.composer .box` 同为 `--surface-2`，两块紧贴读成一整块灰，卡不像独立物件；卡改白底 + `--shadow-card` 浮起才分得开。改这类颜色前先算对比度，别凭眼睛在 DevTools 里判（那里看着有边，真机日光下没有）。
   - **卡片间距分三级，不许再凭页面感觉散写（2026-08-06 五 Tab 游客态走查）**：`app.scss` / `app.h5.scss` 以 `--rhythm-card=12px`、`--rhythm-block=16px`、`--rhythm-section=24px` 作为同组卡片、独立内容块、章节切换的统一语义标尺。相邻同类卡片用 12px；空态与下一块业务内容、搜索与卡组等独立块用 16px；标题分组、卡组跨章节用 24px。三列指标卡必须显式 `gap:8px` 并让子项 `flex:1; min-width:0`，不要再靠 `31.8% + space-between` 的剩余像素挤出约 5-6px 缝；两列仍遵守下方 `48.5% + space-between` 真机规则。`GuestNotice` 只用于登录后的上下文说明，不得拿来重复解释游客权限；它不内置外边距，页面按前后内容的语义就地选择 block/section，避免叠出双倍间距。
   - **深度靠渐隐，不靠 backdrop-filter**：小程序 WebView 对 `backdrop-filter` 支持不可靠，且本项目设计系统不走强玻璃。要表达「内容从面板底下过去」，用一条由 `rgba(255,255,255,0)` 渐到面色的渐变覆盖层（`.dock-fade` / `.paste-body-fade`），`pointer-events:none` 只挡视线不吃点击。渐变起点必须写 `rgba(255,255,255,0)` 而不是 `transparent`——老 WebKit 会让 `transparent` 经黑色插值，出灰带。覆盖层用真实 `View` 而不是伪元素（小程序端伪元素支持面窄），且 absolute 定位在 `.composer-dock` 盒外，不影响它的 `boundingClientRect`（`jump-latest` 靠它测高）。
@@ -188,7 +196,7 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **首页标题宋体化**：`pages/home` 通过 `Screen className="home"` 局部定义标题字体栈，品牌名、问候语、今日献策正文、对话卡提问、分区标题与卡片标题使用宋体优先；不要为此改全局 `--serif`，避免影响其它页面。
 - **战局页首屏层级**：`pages/home`（战局）的军师判断卡是**纯展示深色卡**（点按整卡进入总军师对话），不要往里塞输入框/chips——对话入口在底栏首位「对话」tab；避免把战局页做成权益/推荐墙。底栏保持浅纸底与明确选中态，避免回退成强玻璃装饰。
 - **前台商业文案克制**：面向用户的主路径不要写成“赠送 / 付费解锁 / 充值 / 最受欢迎 / 灵活付费”这类促销口吻；统一用「可用」「已启用」「专项能力」「产出额度」「方案与额度」「常用配置」表达，让用户感到是在调用工作台能力，而不是被推销。智能体费用展示用 `💎xN` / `💎xN/次`，不要写「启用需 N 点」「每次产出 N 点」；后台/代码契约仍可保留 `free/unlock/metered/credits` 等技术术语。
-- **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须通过 `components/MarkdownText` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；有序列表要兼容模型常见的松散写法（条目间空行且都写 `1.`），连续渲染为 1/2/3…；AI 普通回复传 `selectable` 以支持用户选择文字复制；不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`。
+- **Markdown 渲染**：AI 普通回复、成果卡正文、报告详情正文必须经 H5 `components/MarkdownText` 或原生 `components/markdown-text` 渲染，支持标题、段落、列表、引用、加粗、行内代码和代码块；有序列表要兼容模型常见的松散写法（条目间空行且都写 `1.`），连续渲染为 1/2/3…；AI 普通回复允许选择复制，原生流式尾段在尚未稳定时可先按纯文本渲染，稳定段再解析，避免半个 Markdown 标记闪烁。不要直接把模型返回的 `###` / `**` / `-` 原样塞进 `<Text>`；`ChatReply.asks` 必须独立渲染推荐答案与「其他」输入，不能随正文归一时丢掉。asks 的 JSON 协议块不是用户正文：服务端必须剥离标准 `ask` 围栏及可解析的尾部裸 JSON，客户端历史消息收口层还要在其与结构化 `asks` 完全一致时兼容清理旧数据；问答卡是选项的唯一可见出口，普通业务 JSON 不得被宽泛正则误删。
 - **前台记忆披露**：对话页用「军师印象」包装 Agent Memory（WO-01 名词统一，原「专属理解」；记忆条/记忆披露/@引用分组一致）；我的页只放「军师档案」菜单入口，详情页展示 AI 对客户的结构化理解（经营身份、创业路径、当前难题、已沉淀资料、待补问题），不要在我的页首页直接平铺大段内容。两者都不得暴露 `memoryConfig`/Agent Memory 等后台术语，也不得写死 mock 客户故事或展示 `用户123/企业123` 这类占位名；资料不足时让用户进入对话访谈，由军师先问 1-3 个简单问题，不要先分析旧报告或展开诊断。后端真实记忆开关见 §9。
 - **两列网格**：用 `justify-content: space-between` + `width: 48.5%`，**不要用 `calc(50%-5px)+gap`**（亚像素取整会溢出换行成竖排）。
 - **原生 Input 定高三件套**：微信原生 `Input` 不随内容撑高，仅靠垂直 padding 定高会把宋体高字形上下裁切（只露上半截，DevTools 看不出、真机必现）。任何单行 `<Input>` 必须显式 `height / min-height / line-height` 三等值（单行居中），padding 只写水平向；多行输入用 `<Textarea autoHeight>` 或显式高度。已两次踩坑：chat 问卷卡「其他」自填框（671779f）、onboarding 公司名输入。新写或改动任何输入框样式时先按此三件套自查。
@@ -197,11 +205,11 @@ Tab 页（自定义导航 `navigationStyle: custom` + 自定义底栏 `custom-ta
 - **H5 token 双写**：新增/修改 `app.scss` 里 `page {}` 的设计 token 时，必须同步 `app.h5.scss` 的 `:root` 兼容层（H5 没有 `page` 节点），否则 H5 上新 token 全部失效（深绿 hero 曾因此透明）。
 
 ### 7.3 启动流程
-`app.tsx` 启动拉 `loadAgents()` + `loadMe()` + `loadBadges()`（未登录跳过）。首页：未登录→登录弹层；已登录账号必须等 `/me.onboarded` 权威结果完成水合后再裁定是否进入全屏入局，不能把“本地无 `junshi.onboarded` / `/me` 尚未返回”当成未建档。服务端 `services/onboarding.ts` 统一判定：有 Profile、2026-07-21 入局仪式上线前创建的存量账号、或已有企业身份/会话/项目/成果/资料/案卷任一真实使用痕迹，均视为已入局；登录响应与 `/me` 必须复用该口径。只有服务端明确未完成的新账号才走「择本命色 → 填行业/阶段/痛点 → 首判」；Profile 保存失败必须停留原页显式重试，不得只写本地完成态。
+H5 `app.tsx` 与原生 `app.js` 都在启动时水合公开军师与本地身份；登录后再拉 `/me` 和个人角标。认证结果与 `/me.onboarded` 必须使用服务端 `services/onboarding.ts` 的同一权威口径：有 Profile、2026-07-21 入局仪式上线前创建的存量账号、或已有企业身份/会话/项目/成果/资料/案卷任一真实使用痕迹，均视为已入局。不能把“本地无 `junshi.onboarded` / `/me` 尚未返回”误判为新账号；只有认证已完成且权威确认 `onboarded=false`，才在称呼保存后自动导航一次入局页。原生与 H5 入局页同结构：六色卡与批语 → 行业/营收阶段/痛点 chip 云（“其他”就地自填）→ `PUT /profile` 成功 → `POST /quickscan` 初步军情打字机 → 主矛盾/今日一事；Profile 保存失败必须停留原页显式重试。用户中途退出后不循环强拉，战局说明卡承接续做；完成出口先按 token arm 五 Tab 功能点亮，再回问策。
 
 ### 7.4 状态与主题
-- `services/store.ts`：轻量全局 store（订阅式）。本命色 / 用户 / 智能体缓存 / tab / overlay / 登录态 / 底栏角标；`loadBadges()` 以 15 秒节流单飞聚合会话未读与复盘账本，问策显示未读数，21:00 后当日尚未复盘时军令显示红点，复盘落账后强制回刷熄灭。
-- `components/CoachMarks` 的五 Tab「功能点亮」不是“所有没看过 storage 的账号都补弹”：它只在真正完成首次入局的出口写入当前 token 的 `armed` 标记后展示，完成/跳过即清除；历史账号、换机或清 storage 后登录都不得因缺 `done` key 被重新引导。
+- H5 `services/store.ts` 与原生 `weapp-native/services/store.js` 都维护本命色、用户、智能体缓存、tab、overlay、登录态与入局权威状态；原生 `setOverlay(open,key)` 以来源集合记账并同步 custom tabbar，任一全屏预览/登录/解锁层都必须成对开关，不能因一个弹层关闭误清另一个。
+- H5 `components/CoachMarks` 与原生 `components/coach-marks` 的五 Tab「功能点亮」不是“所有没看过 storage 的账号都补弹”：它只在真正完成首次入局的出口写入当前 token 的 `armed` 标记后展示，按真实 route 推进，完成/跳过即清除；历史账号、换机或清 storage 后登录都不得因缺 `done` key 被重新引导。
 - `loadAgents()` 必须保留 `DEFAULT_AGENTS` 的 `billing/price/owned` 兜底字段；线上旧 `/agents` 若缺权益字段，不能覆盖掉前台解锁门禁，否则 `💎xN` 专项能力会被误判为可直接进入。
 - `data/colors.ts`：6 套本命色主题变量（`--accent` 系列）。
 
@@ -446,7 +454,7 @@ OPENAI_API_KEY  OPENAI_BASE_URL  OPENAI_MODEL  OPENAI_TIMEOUT_MS
 
 ### 常用操作路径（给 Agent 直接执行）
 
-默认仓库根目录：`/Users/donis/dev/ai-pilot`。微信开发者工具只导入 `/Users/donis/dev/ai-pilot/app`，不要导入仓库根目录或 `app/dist`；`app/project.config.json` 已把 `miniprogramRoot` 指向 `dist/`。本机预览二维码和信息文件统一输出到根目录 `weapp-preview.png` / `weapp-preview-info.json` / `weapp-auto-preview-info.json`，这些是本地工具产物，不纳入提交。
+默认仓库根目录：`/Users/donis/dev/ai-pilot`。微信源码在 `app/weapp-native`，产物在 `app/dist-native`；本地 DevTools 走查优先导入 `app/dist-native/`，发布/auto-preview CLI 仍指向 `app/`（`project.config.json` 的 `miniprogramRoot=dist-native/`）。H5 产物独立放在 `app/dist-h5/`。本机预览二维码和信息文件统一输出到根目录 `weapp-preview.png` / `weapp-preview-info.json` / `weapp-auto-preview-info.json`，均不纳入提交。
 
 **本地调试**
 ```bash
@@ -464,14 +472,14 @@ H5 单端走查：`cd app && npm run dev:h5`；H5 连真实后端：`cd app && n
 
 注意套餐额度调整只影响新用户：钱包 `quota` 是首建/购买时的快照，跨月重置也复用快照、不回读 live plan（见 `services/tokenQuota.ts`）。要给存量用户补额度，用运营后台的 per-user 额度写端点（`POST /admin/users/:id/token-quota`），不要再写批量刷库脚本。
 
-Taro Webpack5 持久化缓存已开启（`app/config/index.ts` 的 `cache.enable=true`），用于提升二次 `dev:weapp`/`build:weapp`/H5 编译速度；如果遇到疑似缓存脏数据，先删本地 `app/node_modules/.cache` 后重编，不要提交缓存目录。
+Taro Webpack5 缓存只服务 H5。微信原生构建不经过 Webpack；若 DevTools RC 在外层 `miniprogramRoot` 重建时保留旧文件索引，先关闭项目、完成 `npm run build:weapp:server`，再直接导入 `app/dist-native/`，不要把缓存报错误判成源码缺文件。
 
 **小程序真机实时预览**
 
 用户说“推送真机实时预览”时，优先复用/启动一个 `screen` 后台 watch，再触发微信开发者工具预览；不要开多个重复 watch。
 ```bash
 screen -ls | rg ai-pilot-weapp-watch || \
-screen -dmS ai-pilot-weapp-watch bash -lc 'cd /Users/donis/dev/ai-pilot/app && TARO_APP_MODE=mock npm run dev:weapp > /tmp/ai-pilot-weapp-screen.log 2>&1'
+screen -dmS ai-pilot-weapp-watch bash -lc 'cd /Users/donis/dev/ai-pilot/app && WEAPP_APP_MODE=mock npm run dev:weapp > /tmp/ai-pilot-weapp-screen.log 2>&1'
 
 tail -n 80 /tmp/ai-pilot-weapp-screen.log
 
@@ -503,7 +511,7 @@ LAN_IP="$(ipconfig getifaddr en0 || ipconfig getifaddr en1)"
 curl "http://$LAN_IP:4000/api/health"
 
 cd /Users/donis/dev/ai-pilot/app
-TARO_APP_MODE=server TARO_APP_API="http://$LAN_IP:4000/api" npm run dev:weapp
+WEAPP_APP_MODE=server WEAPP_APP_API="http://$LAN_IP:4000/api" npm run dev:weapp
 ```
 也可用本机技能脚本减少漂移：
 ```bash
@@ -522,14 +530,14 @@ TARO_APP_MODE=server TARO_APP_API="http://$LAN_IP:4000/api" npm run dev:weapp
 cd /Users/donis/dev/ai-pilot/app
 npm run release:weapp -- --version <版本号> --desc "<本次变更说明>"
 ```
-该命令依次执行 `build:weapp:server` → 校验 `dist/junshi-build-meta.json` 的 `mode=server`、生产 API 与上传版本完全一致 → 检查 DevTools 登录态 → CLI 上传；加 `--dry-run` 可只构建校验、不触达微信。产物在 `app/dist/`（`miniprogramRoot=dist/`）。**上传这一步由 agent 自己执行，不要甩给用户**。DevTools 需已打开且开启「设置 → 安全 → 服务端口」。底层等效命令如下，仅用于排障，正常发布不得直接调用：
-1. **微信开发者工具 CLI（底层首选，无需上传密钥）**：复用已登录的 DevTools 会话，`--project` 指向 `app/`（含 `project.config.json`，**不是** `dist/`）：
+该命令依次执行 `build:weapp:server` → 校验 `dist-native/junshi-build-meta.json` 的 `runtime=native-weapp`、`mode=server`、生产 API 与上传版本完全一致 → 检查 DevTools 登录态 → CLI 上传；加 `--dry-run` 可只构建校验、不触达微信。产物在 `app/dist-native/`（外层 `miniprogramRoot=dist-native/`）。**上传这一步由 agent 自己执行，不要甩给用户**。DevTools 需已打开且开启「设置 → 安全 → 服务端口」。底层等效命令如下，仅用于排障，正常发布不得直接调用：
+1. **微信开发者工具 CLI（底层首选，无需上传密钥）**：复用已登录的 DevTools 会话，`--project` 指向 `app/`（含发布配置；本地界面走查才导入 `dist-native/`）：
    ```bash
    /Applications/wechatwebdevtools.app/Contents/MacOS/cli upload \
      --project /Users/donis/dev/ai-pilot/app \
      -v <版本号> -d "<本次变更说明>"
    ```
-   退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。**版本号每次递增，最近一次上传 `0.2.28`**（2026-08-05）；上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 仅作为 CLI 不可用时的最后回退：上传前必须人工打开 `dist/junshi-build-meta.json` 核对 `mode=server`、API 与版本，且预览中不得出现红色 MOCK 标识。
+   退出码 0 且打印 `✔ upload` + 体积表即成功，进入 mp 后台「版本管理 · 开发版」。版本号每次递增，上传前后同步 `docs/WEAPP_RELEASES.md`。GUI 仅作为 CLI 不可用时的最后回退：上传前必须人工打开 `dist-native/junshi-build-meta.json` 核对 `runtime/mode/API/version`，且预览中不得出现红色 MOCK 标识。
 2. **miniprogram-ci（CI/headless 备选）**：需在 mp 后台 *开发管理 → 开发设置 → 小程序代码上传* 下载上传密钥 `private.<appid>.key` 并把**本机公网 IP**加进白名单。该密钥本地通常没有，**除非用户给出密钥路径，否则一律用①**：
    ```bash
    cd app && WEAPP_UPLOAD_KEY=/绝对路径/private.<appid>.key \
@@ -555,9 +563,9 @@ bash scripts/deploy-prod.sh
 ```
 脚本会打包当前 git `HEAD`、上传到 ECS、替换 tracked 应用目录（保留 `server/.env`、`logos/`、`backups/` 等运行时/主机产物）、执行 `npm ci` / `prisma generate` / `db push --skip-generate` / 后端构建重启 / admin 构建发布 / nginx reload / 公网 smoke。例行升级不跑 `npm run db:seed`，避免重灌演示数据影响线上业务；`server/.env` 不纳入上传包、不改权限。`npm audit` 提示只作为依赖治理信号，非部署阻断项；真正阻断以构建失败、`junshi-api` 非 active、裸 IP/域名 `/api/health` 非 200 或域名 `/admin/` 非 200 为准；裸 IP `/admin` 预期为 404。
 `.claude/worktrees/*/AGENTS.md` 是 Claude 工作树副本，不是维护源；需要固化流程时改根目录 `AGENTS.md`、`scripts/deploy-prod.sh` 和必要的 `docs/*`。
-正式微信小程序发布仍走 §11「本机上传到小程序平台」：上传前后同步 `docs/WEAPP_RELEASES.md`，版本号/描述与上传命令一致；连真实后端的小程序包用 `TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp`。
+正式微信小程序发布仍走 §11「本机上传到小程序平台」：上传前后同步 `docs/WEAPP_RELEASES.md`，版本号/描述与上传命令一致；连真实后端的小程序包用 `WEAPP_APP_MODE=server WEAPP_APP_API=https://你的域名/api npm run build:weapp`（生产固定域名直接用 `npm run build:weapp:server`）。
 
-**预发环境**固定为 `/opt/junshi-preprod` · `junshi-api-preprod` · `:4001` · DB `junshi_preprod` · `https://wxapi.aibuzz.cn/api_preprod`，只用 `scripts/deploy-preprod.sh`。该脚本每次部署都会复制生产 `ai_setting/ai_model` 供真实模型验收；AI 对话/Embedding/Rerank 凭证现统一明文存库，不再把生产 `APP_ENCRYPTION_KEY` 持久写进预发。兼容窗口里若生产行仍是旧 `enc:v1` 密文，脚本只在迁移进程环境中临时传入生产旧主密钥，整批解密成功后原子写为明文，并硬验密文为 0；生产完成同一迁移后自然不再需要主密钥。脚本仍会删除预发 `.env` 中所有 `WECHAT_PAY_*` 真商户凭据，并强制 `NODE_ENV=development` + `PAY_MOCK_SUCCESS=true` + `PAY_SANDBOX=false` + `ALLOW_DEMO_PURCHASE=false`：预发可走真实订单/权益状态机，但绝不触发微信真扣款。小程序预发包用 `cd app && npm run build:weapp:preprod`，并核对 `dist/junshi-build-meta.json` 的 `mode/api/gitSha`；DevTools CLI 的 `--project` 仍指向 `app/`，不是 `app/dist/`。
+**预发环境**固定为 `/opt/junshi-preprod` · `junshi-api-preprod` · `:4001` · DB `junshi_preprod` · `https://wxapi.aibuzz.cn/api_preprod`，只用 `scripts/deploy-preprod.sh`。该脚本每次部署都会复制生产 `ai_setting/ai_model` 供真实模型验收；AI 对话/Embedding/Rerank 凭证现统一明文存库，不再把生产 `APP_ENCRYPTION_KEY` 持久写进预发。兼容窗口里若生产行仍是旧 `enc:v1` 密文，脚本只在迁移进程环境中临时传入生产旧主密钥，整批解密成功后原子写为明文，并硬验密文为 0；生产完成同一迁移后自然不再需要主密钥。脚本仍会删除预发 `.env` 中所有 `WECHAT_PAY_*` 真商户凭据，并强制 `NODE_ENV=development` + `PAY_MOCK_SUCCESS=true` + `PAY_SANDBOX=false` + `ALLOW_DEMO_PURCHASE=false`：预发可走真实订单/权益状态机，但绝不触发微信真扣款。小程序预发包用 `cd app && npm run build:weapp:preprod`，并核对 `dist-native/junshi-build-meta.json` 的 `runtime/mode/api/gitSha`；DevTools CLI 的 `--project` 仍指向 `app/`。
 
 ### ★ 一键开发（PostgreSQL，推荐）
 ```bash
@@ -569,7 +577,7 @@ npm run dev            # 根目录：确保 PG → 建库 → 迁移 → (首次
 
 ### 本地 mock（零依赖，纯前端走查）
 ```bash
-cd app && npm install && npm run dev:weapp   # 微信开发者工具导入 app/ 目录；或 npm run dev:h5 浏览器
+cd app && npm install && npm run dev:weapp   # 微信开发者工具导入 app/dist-native/；或 npm run dev:h5 浏览器
 ```
 
 ### 真实后端（PostgreSQL）
@@ -578,13 +586,13 @@ cd server && npm install
 cp .env.example .env            # 配 DATABASE_URL；AI_PROVIDER 按需
 npm run db:push && npm run db:seed
 npm run dev                     # http://localhost:4000
-# 前端连后端：TARO_APP_MODE=server TARO_APP_API=http://localhost:4000/api npm run dev:weapp
+# 原生小程序连后端：WEAPP_APP_MODE=server WEAPP_APP_API=http://localhost:4000/api npm run dev:weapp
 cd admin && npm install && npm run dev   # 运营后台
 ```
 
 ### 构建校验基线（每次大改后应保持全绿）
 - `server`：`npx tsc -p tsconfig.json --noEmit` → 0
-- `app`：`npm run build:weapp` → `typecheck` 0 + Compiled successfully（Taro/Babel 本身不检查未定义标识符，禁止绕过）
+- `app`：`npm test` → 原生路由/非受控 textarea/Lucide/产物隔离 + H5 typecheck 全绿；`npm run build:weapp:server` → 原生 38 路由四件套、JS 语法、无 Taro 引用、生产元数据校验通过；`npm run build:h5` → Taro H5 构建成功
 - `admin`：`npx tsc -b && npx vite build` → 0 + built
 
 **app / admin 纯函数单测（2026-07-21 起，`node --import tsx --test`，与 server 同一套工具链，无需额外起服务）**：
@@ -652,9 +660,9 @@ cp .env.example .env
 npm run db:push && npm run dev
 
 cd ../app
-TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp
+WEAPP_APP_MODE=server WEAPP_APP_API=https://你的域名/api npm run build:weapp
 ```
-微信开发者工具导入 `app/`；本地调试可勾选“不校验合法域名”，真机/预览必须把 `TARO_APP_API` 的 HTTPS 域名加入小程序后台 request 合法域名。
+微信开发者工具本地走查导入 `app/dist-native/`；真机/预览必须把 `WEAPP_APP_API` 的 HTTPS 域名加入小程序后台 request 合法域名。
 
 ### 微信消息推送 URL 验签联调
 ```bash
@@ -687,8 +695,9 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
+- **Notion 工程变更日志待补本次原生微信迁移（2026-08-08）**：`docs/CHANGELOG.md` 已记录「微信端从 Taro 完整切换为原生小程序运行时」的完整结论，包括 38 路由覆盖、原生非受控对话输入、Taro 仅保留 H5、Lucide 图标口径和本地 DevTools 验收；Notion 页面在现有 Chrome 登录态可打开，但自动编辑连续超时，为避免盲写或重复插入未提交。浏览器编辑恢复后应在「军师 · 工程变更日志（持续更新）」顶部同步同一条产品可读记录，并在完成后删除本 TODO。
 - **Notion 工程变更日志待补登录后同步（2026-08-06）**：监控告警 Card 2.0 与 API 生产 SLO 已部署 `15647b7`，完成飞书客户端和 Grafana API 验收，仓库 `docs/CHANGELOG.md` 已记录完整结论；但当前浏览器无可用 Notion 登录会话，未能把现有「军师 · 工程变更日志（持续更新）」顶部记录从“尚未部署”更新为线上验收结果。取得登录态后应补写：51 条可处置规则、估算结算只保留看板指标、P1/P2/P3 直接标题与超限指标区、用户接口 P95 800ms/2s + 15m 最少 20 次样本、Grafana 挂载验收和生产实发通过。
-- **小程序登录合规仍有两类外部事实待运营补齐（2026-08-06，代码主链已完成）**：① `app/src/packages/main/legal/index.tsx` 已把微信登录无需手机号、可选自动续费、实际全额退款能力等代码事实改正并清掉正文 `【待确认】`，但经营主体全称、ICP、算法/生成式 AI 备案号、注册地址、客服邮箱、个人信息保护邮箱与管辖地在仓库及公开信息里均无法权威确认，当前 `【填写】` 不得靠猜；须由小程序主体负责人提供后再提审。② 微信后台《用户隐私保护指引》需由有后台权限的人按实际能力声明并提交，属于平台外部配置，代码无法代办；当前真实调用为 `Taro.login`（openid/unionid 登录）、`chooseAvatar`、`chooseImage`、`chooseMessageFile`、`saveImageToPhotosAlbum`、`requestSubscribeMessage`、`openType=contact` 与只写不读的 `setClipboardData`。当前包没有 `getPhoneNumber/getUserProfile/getUserInfo/getDeviceInfo`、剪贴板读取或位置接口，手机号只在用户主动选择短信登录/绑定时手输，后台不得超范围申报；逐项用途和调用点见登录整改方案 P0-9。未完成这两项不得宣称 P0 合规闭环或提交审核。
+- **小程序登录合规仍有两类外部事实待运营补齐（2026-08-08，代码主链已完成）**：① `app/src/packages/main/legal/index.tsx` 与原生协议页已按当前“协议勾选后主动触发微信手机号一键登录”、可选自动续费和实际退款能力更新，但经营主体全称、ICP、算法/生成式 AI 备案号、注册地址、客服邮箱、个人信息保护邮箱与管辖地在仓库及公开信息里均无法权威确认，当前 `【填写】` 不得靠猜；须由小程序主体负责人提供后再提审。② 微信后台《用户隐私保护指引》需由有后台权限的人按实际能力声明并提交，属于平台外部配置，代码无法代办；当前真实调用包含 `getPhoneNumber`（用户勾选协议并主动点一键登录后取得手机号）、`wx.login`（openid/unionid 账号关联）、`chooseAvatar`、`chooseImage`、`chooseMessageFile`、`saveImageToPhotosAlbum`、`requestSubscribeMessage`、`openType=contact` 与只写不读的 `setClipboardData`。当前包没有 `getUserProfile/getUserInfo/getDeviceInfo`、剪贴板读取或位置接口，后台不得漏报手机号，也不得超范围申报；逐项用途和调用点见登录整改方案 P0-9。未完成这两项不得宣称 P0 合规闭环或提交审核。
 - **游客完整速诊与足迹继承后置（2026-08-06）**：本轮按过审必需范围开放真实公共内容、军师开场白、能力目录与套餐价格；自由对话仍不向游客开放，`POST /quickscan` 仍需登录。若后续做游客 3 问速诊，必须先补设备指纹 + IP 双维度每日限流和低成本模型档，不能直接放开现有鉴权端点。游客浏览足迹归户、登录半屏化属于体验 P2，待上线后按转化数据决定。
 - **GenerationEffect 是 at-least-once，不是 exactly-once（2026-08-05）**：终态与 outbox 已同事务落库，pending/failed/stale-running 会补偿，报告通知也会等待真实发送结果后才完成 effect；但进程若在“外部动作已成功、effect 尚未标 completed”之间退出，仍可能重投。标题覆盖与记忆近重已有天然幂等，digest/预言有来源去重；微信报告通知等外部动作还没有统一的 `jobId/effectKey` 下游唯一键。上多实例或把通知升级为资金/权益类动作前，必须给目标账本补幂等键，不能依赖 effect 状态冒充 exactly-once。
 - **海报成品图 MVP 明确不做 / 后置项（2026-07-29，已拍板，不要当遗漏来"补齐"）**：

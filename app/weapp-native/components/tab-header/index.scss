@@ -1,0 +1,16 @@
+@use "../../../src/components/TabHeader/index.scss";
+
+/* 原生 tab 页标题区已经整体落在微信胶囊下方；背景字不能再用 H5 的 -10px
+   上溢，否则「我 / 令」会压进胶囊命中区。只在原生端覆盖，H5 视觉不变。 */
+.tab-head {
+  position: relative;
+  box-sizing: border-box;
+  margin-bottom: 28px;
+}
+
+.th-glyph {
+  top: 4px;
+  right: 0;
+  font-size: 88px;
+  opacity: .085;
+}

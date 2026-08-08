@@ -1,0 +1,50 @@
+<view class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
+  <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
+    <view class="native-nav-inset"></view>
+    <view class="pad council">
+      <tab-header title="问策" kicker="有事问军师" glyph="谋"></tab-header>
+      <view class="council-searchrow">
+        <view class="council-search"><native-icon name="target" tone="neutral" size="14"></native-icon><input class="cs-input" value="{{query}}" placeholder="搜索军师、案卷、方案或资料" bindinput="inputQuery" /><view wx:if="{{query}}" class="cs-clear" bindtap="clearQuery"><native-icon name="close" tone="neutral" size="12"></native-icon></view></view>
+        <view class="council-hist {{showHistory ? 'on' : ''}}" bindtap="toggleHistory"><text>{{showHistory ? '返回' : '历史'}}</text></view>
+      </view>
+
+      <block wx:if="{{query}}">
+        <view wx:if="{{!searchGroups.length}}" class="sess-empty"><text class="et">{{searching ? '正在检索…' : '没有匹配的结果'}}</text><text class="es">换个关键词，或用快捷入口继续。</text></view>
+        <view wx:for="{{searchGroups}}" wx:key="kind" class="search-results">
+          <view class="wx-section"><text>{{item.label}}</text></view>
+          <view class="wx-list">
+            <view wx:for="{{item.rows}}" wx:for-item="hit" wx:for-index="hitIndex" wx:key="id" class="sr-item" data-group="{{index}}" data-index="{{hitIndex}}" bindtap="tapHit">
+              <view class="sr-main"><text class="sr-title">{{hit.title}}</text><text wx:if="{{hit.snippet}}" class="sr-snippet">{{hit.snippet}}</text></view><view class="sr-arrow"><native-icon name="arrow" tone="neutral" size="16"></native-icon></view>
+            </view>
+          </view>
+        </view>
+      </block>
+
+      <block wx:elif="{{!showHistory}}">
+        <scroll-view scroll-x enhanced show-scrollbar="false" class="quick-row">
+          <view wx:for="{{quickCards}}" wx:key="title" class="quick-card card" data-index="{{index}}" bindtap="tapQuick"><text class="qt">{{item.title}}</text><text class="qd">{{item.desc}}</text></view>
+        </scroll-view>
+        <view class="wx-list">
+          <view wx:for="{{rows}}" wx:key="key" class="wx-item" data-key="{{item.key}}" bindtap="tapAgent">
+            <view class="advisor-avatar"><image class="aa-img" src="{{item.avatar}}" mode="aspectFill"></image><view wx:if="{{item.online}}" class="aa-dot"></view></view>
+            <view class="wx-main"><view class="wx-top"><view class="wx-id"><text class="wx-name">{{item.name}}</text><text wx:if="{{item.alias}}" class="wx-alias">{{item.alias}}</text><view wx:if="{{item.unreadText}}" class="unread"><text>{{item.unreadText}}</text></view></view><text class="wx-time">{{item.locked ? '需启用' : item.timeText}}</text></view><text class="wx-preview">{{item.preview}}</text></view>
+            <native-icon wx:if="{{item.locked}}" name="lock" tone="neutral" size="13"></native-icon>
+          </view>
+        </view>
+      </block>
+
+      <block wx:else>
+        <view class="wx-section"><text>最近会话{{historyRows.length ? ' · 长按可删除' : ''}}</text></view>
+        <view wx:if="{{loading}}" class="sess-empty"><text class="et">正在读取会话…</text></view>
+        <view wx:elif="{{error}}" class="sess-empty"><text class="et">会话读取失败</text><text class="es-link" bindtap="load">重新加载</text></view>
+        <view wx:elif="{{!historyRows.length}}" class="sess-empty"><text class="et">还没有会话</text><text class="es">跟谁聊都留底，要紧的我会汇到主线判断里。</text></view>
+        <view wx:else class="wx-list"><view wx:for="{{historyRows}}" wx:key="id" class="wx-item" data-id="{{item.id}}" bindtap="tapSession" bindlongpress="deleteSession"><view class="advisor-avatar"><image class="aa-img" src="{{item.avatar}}" mode="aspectFill"></image></view><view class="wx-main"><view class="wx-top"><view class="wx-id"><text class="wx-name">{{item.agentName}}</text><text class="wx-alias">{{item.alias}}</text><view wx:if="{{item.unreadText}}" class="unread"><text>{{item.unreadText}}</text></view></view><text class="wx-time">{{item.timeText}}</text></view><text class="wx-preview">{{item.preview}}</text></view></view></view>
+      </block>
+      <view class="tabbar-space"></view>
+    </view>
+  </scroll-view>
+  <agent-unlock agent="{{unlockAgent}}" bindclose="closeUnlock" bindunlocked="agentUnlocked"></agent-unlock>
+  <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <coach-marks></coach-marks>
+</view>

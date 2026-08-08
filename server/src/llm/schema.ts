@@ -735,16 +735,47 @@ export function normalizeAsks(parsed: unknown): ChatAsk[] | undefined {
   return asks.length ? asks : undefined;
 }
 
-// 从模型回复文本尾部解析 ```ask 结构块：命中即剥离（无论 JSON 是否合法，避免原始 JSON 漏给用户），
-// 合法则按 normalizeAsks 归一化。未命中原样返回。
+function asksFromPayload(parsed: unknown): ChatAsk[] | undefined {
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return normalizeAsks((parsed as Record<string, unknown>).asks);
+  }
+  return normalizeAsks(parsed);
+}
+
+function parseAskPayload(source: string): ChatAsk[] | undefined {
+  try { return asksFromPayload(JSON.parse(source)); } catch { return undefined; }
+}
+
+// 找正文末尾单独成行的 JSON。模型偶尔会漏掉 ```ask 围栏，直接吐出数组；只在 JSON
+// 真能归一成 ChatAsk[] 时才剥离，普通代码/业务 JSON 原样保留。
+function extractBareAskTail(text: string): { text: string; asks?: ChatAsk[] } | null {
+  const trimmed = text.trimEnd();
+  for (let index = trimmed.length - 1; index >= 0; index -= 1) {
+    const char = trimmed[index];
+    if (char !== '[' && char !== '{') continue;
+    const lineStart = trimmed.lastIndexOf('\n', index - 1) + 1;
+    if (trimmed.slice(lineStart, index).trim()) continue;
+    const asks = parseAskPayload(trimmed.slice(index));
+    if (asks) return { text: trimmed.slice(0, lineStart).trimEnd(), asks };
+  }
+  return null;
+}
+
+// 从模型回复文本尾部解析提问结构并从正文剥离：标准 ```ask 块继续兼容；同时收口模型
+// 偶发输出的 ```json / 裸 JSON asks，避免内部协议和问答卡在用户界面重复出现。
 export function extractAsks(text: string): { text: string; asks?: ChatAsk[] } {
-  const m = text.match(/```ask\s*([\s\S]*?)```\s*$/);
-  if (!m) return { text };
-  const stripped = text.slice(0, m.index).trimEnd();
-  let parsed: unknown;
-  try { parsed = JSON.parse(m[1]); } catch { return { text: stripped }; }
-  const asks = normalizeAsks(parsed);
-  return asks ? { text: stripped, asks } : { text: stripped };
+  const askFence = text.match(/```ask\s*([\s\S]*?)```\s*$/);
+  if (askFence) {
+    const stripped = text.slice(0, askFence.index).trimEnd();
+    const asks = parseAskPayload(askFence[1]);
+    return asks ? { text: stripped, asks } : { text: stripped };
+  }
+  const jsonFence = text.match(/```(?:json)?\s*([\s\S]*?)```\s*$/i);
+  if (jsonFence) {
+    const asks = parseAskPayload(jsonFence[1]);
+    if (asks) return { text: text.slice(0, jsonFence.index).trimEnd(), asks };
+  }
+  return extractBareAskTail(text) ?? { text };
 }
 
 /**

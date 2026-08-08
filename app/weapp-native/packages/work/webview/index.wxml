@@ -1,0 +1,6 @@
+<web-view wx:if="{{valid}}" src="{{url}}" binderror="loadError"></web-view>
+<view wx:else class="wv-empty">
+  <text class="wv-title">网页地址无效</text>
+  <text class="wv-desc">没有拿到有效的网页链接，可能是入口已过期。返回上一页再试一次。</text>
+  <button class="wv-back" bindtap="back">返回</button>
+</view>

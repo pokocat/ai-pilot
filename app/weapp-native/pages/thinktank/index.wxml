@@ -1,0 +1,97 @@
+<view class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
+  <scroll-view scroll-y enhanced class="native-scroll">
+    <view class="native-nav-inset"></view>
+    <view class="pad think think-native">
+      <tab-header title="锦囊" kicker="存你的家底" glyph="库"></tab-header>
+
+      <view class="think-tabs">
+        <view wx:for="{{segments}}" wx:key="*this" class="think-tab {{segment===index?'on':''}}" data-index="{{index}}" bindtap="switchSegment"><text>{{item}}</text></view>
+      </view>
+
+      <block wx:if="{{segment===0}}">
+        <view class="quota-grid">
+          <view class="quota-card card"><text class="qc-v serif">{{quotaDocs}}</text><text class="qc-l">免费资料额度</text></view>
+          <view class="quota-card card"><text class="qc-v serif">{{quotaText}}</text><text class="qc-l">可用空间 · 可扩容</text></view>
+          <view class="quota-card card" bindtap="deepFirst"><text class="qc-v serif">深度整理</text><text class="qc-l">去重 / 分类 / 优化</text></view>
+        </view>
+
+        <view class="stage-seg">
+          <view wx:for="{{stageTabs}}" wx:key="key" class="stage-tab {{stage===item.key?'on':''}} {{confirming?'locked':''}}" data-stage="{{item.key}}" bindtap="setStage">
+            <text class="stage-t">{{item.label}}</text><text class="stage-n">{{item.count}}</text>
+          </view>
+        </view>
+
+        <block wx:if="{{stage==='staging'}}">
+          <view class="upload-zone card" bindtap="chooseFiles">
+            <view class="uz-b"><text class="uz-k">第一步 · 接住乱资料</text><text class="uz-t serif">上传资料</text><text class="uz-d">先把资料放进来，我过一遍。理清楚了你点个头，我再收进知识库，判断时用上。</text><text wx:if="{{uploadText}}" class="upload-status">{{uploadText}}</text></view>
+            <view class="uz-btn"><native-icon name="upload" tone="white" size="15"></native-icon><text>{{uploading?'上传中…':'上传'}}</text></view>
+          </view>
+
+          <view wx:if="{{batches.length && !organizing}}" class="next-step">
+            <view class="next-step-top"><text class="next-step-k">下一步 · 资料整理</text><text class="next-step-count">2 / 3</text></view>
+            <text class="next-step-t serif">资料已接收，先让军师整理</text>
+            <text class="next-step-d">会先识别类型、去重、归类并提炼摘要。整理完成后，你再确认哪些资料进入知识库。</text>
+            <view class="next-step-actions"><button class="next-step-primary" style="background:var(--accent)" data-id="{{batches[0].id}}" bindtap="organize">{{organizing?'整理中…':'帮我整理这批资料'}}</button><button class="next-step-secondary" data-id="{{batches[0].id}}" bindtap="deepOrganize">深度整理</button></view>
+          </view>
+
+          <view wx:if="{{organizing}}" class="proc card">
+            <view class="proc-head"><view class="proc-ic"><native-icon name="spark" tone="green" size="20"></native-icon></view><view class="proc-b"><text class="proc-t serif">正在整理这一批资料</text></view><text class="proc-tag">处理中</text></view>
+            <view class="proc-steps"><view wx:for="{{processSteps}}" wx:key="*this" class="proc-row {{index===0?'active':''}}"><view class="proc-dot"></view><text class="proc-label">{{item}}</text></view></view>
+            <text class="proc-hint">资料会先保存在待整理区，整理完成后再由你确认是否入库。</text>
+          </view>
+
+          <view wx:for="{{batches}}" wx:key="id" class="pile card">
+            <view class="pile-head"><view class="pile-ic"><native-icon name="pouch" tone="green" size="20"></native-icon></view><view class="pile-b"><text class="pile-t serif">已接收 {{item.count}} 份原始素材</text><text class="pile-s">这一批资料还没整理，先集中放在待整理区</text></view><text class="pile-tag">待整理</text></view>
+            <view class="file-list"><view wx:for="{{item.files}}" wx:for-item="file" wx:key="id" class="file-row"><view class="fr-b"><text class="fr-name">{{file.displayName}}</text><text class="fr-meta">{{file.meta}}</text></view><text class="fr-badge {{file.statusClass}}">{{file.statusLabel}}</text><view class="fr-delete" data-id="{{file.id}}" data-name="{{file.displayName}}" catchtap="removeFile"><native-icon name="close" tone="neutral" size="14"></native-icon></view></view></view>
+            <view class="pile-actions"><button class="pile-btn primary" style="background:var(--accent)" data-id="{{item.id}}" bindtap="organize">帮我整理</button><button class="pile-btn" data-id="{{item.id}}" bindtap="deepOrganize">深度整理</button></view>
+          </view>
+          <view wx:if="{{!batches.length}}" class="stage-empty"><text class="se-t">还没放资料进来</text><text class="se-s">微信聊天、表格、文档、图片——散在各处的材料，先丢进来。</text></view>
+        </block>
+
+        <block wx:elif="{{stage==='optimized'}}">
+          <view class="stage-summary card"><text class="ss-t serif">已优化，等你确认</text><text class="ss-s">这是我理过一遍的，你过目，没问题我就入库了。</text><text class="ss-em">{{counts.optimized}} 份</text></view>
+          <view wx:if="{{optimizedItems.length}}" class="asset-list card">
+            <view wx:for="{{optimizedItems}}" wx:key="id" class="asset-list-item"><view class="asset-list-row"><view class="al-i"><text>{{item.char}}</text></view><view class="al-b"><text class="al-t serif">{{item.displayName}}</text><text class="al-name-source">{{item.nameSourceLabel}}</text><text class="al-s">{{item.summaryText}}</text></view><text class="al-tag">{{item.categoryLabel}}</text></view><view class="preview-toggle {{item.previewText?'':'disabled'}}" data-index="{{index}}" bindtap="togglePreview"><text>{{item.previewText?(item.previewOpen?'收起正文预览':'预览正文'):'未提取到可预览正文'}}</text><native-icon wx:if="{{item.previewText}}" name="{{item.previewOpen?'collapse':'chevron'}}" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view><scroll-view wx:if="{{item.previewOpen&&item.previewText}}" scroll-y class="item-preview" style="height:{{item.previewHeight}}px"><text class="item-preview-text" user-select="true">{{item.previewText}}</text></scroll-view></view>
+          </view>
+          <view wx:if="{{optimizedItems.length}}" class="confirm-library card {{confirming?'busy':''}}" bindtap="confirmOptimized"><text class="cl-t serif">{{confirming?'正在写入知识库':'确认，写入知识库'}}</text><text class="cl-s">{{confirming?'正在切片并建立检索索引，请稍候，不要重复操作。':'确认后将回写战局页、方案页和后续对话引用。'}}</text><view class="cl-btn" style="background:var(--accent)"><text>{{confirming?'正在处理…':confirmButton}}</text></view></view>
+          <view wx:if="{{!optimizedItems.length}}" class="stage-empty"><text class="se-t">还没有已优化的资料</text><text class="se-s">先到「待整理」上传并整理资料，优化结果会在这里等你确认入库。</text></view>
+        </block>
+
+        <block wx:else>
+          <view class="stage-summary card"><text class="ss-t serif">已进入知识库</text><text class="ss-s">这些资料我都读过了，做判断时会用上。</text><text class="ss-em">{{counts.confirmed}} 份</text></view>
+          <view wx:if="{{folders.length}}" class="folder-grid"><view wx:for="{{folders}}" wx:key="key" class="folder-tile card" bindtap="openKnowledge"><view class="ft-ic"><native-icon name="pouch" tone="green" size="18"></native-icon></view><text class="ft-t serif">{{item.label}}</text><view class="ft-n"><text>{{item.count}} 份</text><native-icon name="arrow" tone="neutral" size="13"></native-icon></view></view></view>
+          <view wx:if="{{!folders.length}}" class="stage-empty"><text class="se-t">知识库还空着</text><text class="se-s">资料理好、确认入库后，我做判断和出方案就能直接用上。</text></view>
+          <view class="knowledge-sync card" bindtap="refreshForces"><view class="ks-b"><text class="ks-t serif">让新资料进入战局判断</text><text class="ks-s">资料入库后可主动重算三势与主要矛盾。</text></view><view class="ks-go"><text>{{refreshingForces?'刷新中…':'刷新判断'}}</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
+        </block>
+
+        <view class="think-cta {{confirming?'busy':''}}" bindtap="chooseFiles"><native-icon name="upload" tone="white" size="16"></native-icon><text>{{confirming?'资料入库中，暂不能上传':'上传资料，让军师补全判断'}}</text></view>
+      </block>
+
+      <block wx:elif="{{segment===1}}">
+        <view class="ds-hero card"><text class="dh-k">账号资产 · 持续记忆 · 经营数据</text><text class="dh-t serif">让军师长期理解你正在做什么</text><text class="dh-d">每个来源独立授权，也可以随时暂停和删除。</text><view class="dh-metrics"><view class="dh-m"><text class="dh-mv serif">{{sourceStats.bound}}</text><text class="dh-ml">已绑定</text></view><view class="dh-m"><text class="dh-mv serif">{{sourceStats.needed}}</text><text class="dh-ml">待补关键项</text></view><view class="dh-m"><text class="dh-mv serif">{{sourceStats.total}}</text><text class="dh-ml">类经营来源</text></view></view></view>
+        <text class="think-h2">经营来源</text>
+        <view wx:for="{{sources}}" wx:key="key" class="data-source-card card" data-index="{{index}}" bindtap="dataSourceAction"><view class="dsc-ic"><native-icon name="flow" tone="green" size="20"></native-icon></view><view class="dsc-b"><text class="dsc-t serif">{{item.label}}</text><text class="dsc-s">{{item.desc}}</text></view><text class="dsc-state {{item.stateClass}}">{{item.statusLabel}}</text></view>
+        <view wx:if="{{!sources.length}}" class="stage-empty"><text class="se-t">数据源目录正在准备中</text><text class="se-s">接入后会在这里显示授权和同步状态。</text></view>
+      </block>
+
+      <block wx:elif="{{segment===2}}">
+        <view class="module-hero card"><text class="mh-k">能力中心</text><text class="mh-t serif">按当前案卷选能力</text><text class="mh-d">免费能力先判断，深度能力做推演，会员模块负责长期执行。</text><view class="mh-stats"><view class="mh-s"><text class="mh-sv serif">{{moduleStats.free}}</text><text class="mh-sl">免费可用</text></view><view class="mh-s"><text class="mh-sv serif">{{moduleStats.deep}}</text><text class="mh-sl">深度能力</text></view><view class="mh-s"><text class="mh-sv serif">{{moduleStats.member}}</text><text class="mh-sl">会员模块</text></view></view></view>
+        <view class="module-subtabs"><view wx:for="{{moduleTabs}}" wx:key="key" class="msub {{moduleTab===item.key?'on':''}}" data-key="{{item.key}}" bindtap="switchModuleTab"><text>{{item.label}}</text></view></view>
+        <view wx:for="{{filteredModules}}" wx:key="key" class="skill card {{purchasing===item.skuKey?'busy':''}}" data-index="{{item.sourceIndex}}" bindtap="moduleAction"><view class="skill-ic"><native-icon name="spark" tone="green" size="22"></native-icon></view><view class="skill-b"><view class="skill-top"><text class="skill-name serif">{{item.label}}</text><text class="tier-badge {{item.badgeClass}}">{{item.badgeLabel}}</text></view><text class="skill-sub">{{item.desc}}</text><text class="module-state">{{purchasing===item.skuKey?'开通中…':item.stateLabel}}</text></view></view>
+        <view wx:if="{{!filteredModules.length}}" class="stage-empty native-module-empty"><text class="se-t">这个分组暂时没有能力</text><text class="se-s">有新能力上架后会自动出现在这里。</text></view>
+      </block>
+
+      <block wx:else>
+        <text class="think-h2">方案与历史版本</text>
+        <view wx:for="{{reports}}" wx:key="id" class="report card" data-id="{{item.id}}" bindtap="openReport"><view class="report-ic"><native-icon name="doc" tone="green" size="18"></native-icon></view><view class="report-b"><text class="report-t serif">{{item.title}}</text><text class="report-s">{{item.meta}}</text></view><text class="report-state">查看</text></view>
+        <view wx:if="{{!reports.length}}" class="think-empty"><view class="e-ic icon-center" style="background:var(--accent-soft)"><native-icon name="doc" size="22"></native-icon></view><text class="et">还没有方案</text><text class="es">让军师出一份方案，每次都会按版本留档在这里。</text></view>
+        <view class="report card" bindtap="newReport"><view class="report-ic"><native-icon name="plus" tone="green" size="18"></native-icon></view><view class="report-b"><text class="report-t serif">让军师出新方案</text><text class="report-s">判断定了自动出方案，更新到执行页</text></view><text class="report-state">生成</text></view>
+        <view class="report card" bindtap="openLibrary"><view class="report-ic"><native-icon name="pouch" tone="green" size="18"></native-icon></view><view class="report-b"><text class="report-t serif">我的方案库</text><text class="report-s">对话里出的方案，存一次就留一版</text></view><text class="report-state">查看</text></view>
+      </block>
+      <view class="tabbar-space"></view>
+    </view>
+  </scroll-view>
+  <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <coach-marks></coach-marks>
+</view>

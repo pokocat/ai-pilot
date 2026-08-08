@@ -1,0 +1,8 @@
+@use "../../../styles/subpage.scss";
+@use "../../../../src/packages/work/gift/index.scss";
+
+.gift .pf-opt.on,
+.gift .gf-check.checked,
+.gift .gf-btn:not(.off),
+.gift .gf-act:not(.ghost) { background: var(--accent); border-color: var(--accent); }
+.gift .gf-act.ghost { border-color: var(--accent); color: var(--accent); }

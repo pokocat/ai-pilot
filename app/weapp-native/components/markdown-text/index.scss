@@ -1,0 +1,5 @@
+@use "../../../src/components/MarkdownText/index.scss";
+
+.md-quote text{color:var(--accent-ink);font-size:12.5px;line-height:1.55;}
+.md-strong{font-weight:600;color:var(--ink);}
+.md-tr.head .md-td{font-weight:600;color:var(--ink);background:var(--surface-2);}

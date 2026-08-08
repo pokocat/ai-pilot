@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asReply, replyToText } from './chatReply.js';
+import { asReply, attachmentOnlyPrompt, replyToText } from './chatReply.js';
 
 describe('asReply 收口落库回复', () => {
   test('正常形状原样过', () => {
@@ -29,6 +29,22 @@ describe('asReply 收口落库回复', () => {
     });
   });
 
+  test('历史回复里的 asks 裸 JSON 只保留问答卡，不再显示协议代码', () => {
+    const asks = [
+      { q: '每月刚性生活支出大概多少？', options: ['1万以下', '1-2万', '2-3万', '3万以上'] },
+      { q: '你打算做哪个市场？', options: ['A股', '美股', '加密货币', '期货/商品'] },
+    ];
+    const reply = asReply({ text: `还有两个问题。\n\n${JSON.stringify(asks)}`, asks });
+    assert.equal(reply.text, '还有两个问题。');
+    assert.deepEqual(reply.asks, asks);
+  });
+
+  test('与问答卡不一致的业务 JSON 不误删', () => {
+    const asks = [{ q: '选哪个？', options: ['A', 'B'] }];
+    const text = '数据样例：\n[{"q":"字段说明","options":["一","二"]}]';
+    assert.equal(asReply({ text, asks }).text, text);
+  });
+
   test('truncated 必须还原：退出重进后那条回复仍要带「继续写完」入口', () => {
     assert.equal(asReply({ text: '写到一半', truncated: true }).truncated, true);
   });
@@ -52,5 +68,16 @@ describe('replyToText', () => {
   test('缺字段不炸', () => {
     assert.equal(replyToText({ text: '' }), '');
     assert.equal(replyToText({ text: '只有正文' }), '只有正文');
+  });
+});
+
+describe('attachmentOnlyPrompt', () => {
+  test('单份文件与多份资料生成自然请求', () => {
+    assert.equal(attachmentOnlyPrompt([{ kind: 'knowledge', label: '现金流.xlsx' }]), '请通读我附上的《现金流.xlsx》，先概括重点，再告诉我最值得注意的判断。');
+    assert.match(attachmentOnlyPrompt([{ kind: 'knowledge', label: 'A.pdf' }, { kind: 'knowledge', label: 'B.docx' }]), /2份资料/);
+  });
+  test('单张图片使用看图口径，空引用不伪造文字', () => {
+    assert.match(attachmentOnlyPrompt([{ kind: 'image', label: '对话图片' }]), /请看我附上的图片/);
+    assert.equal(attachmentOnlyPrompt([]), '');
   });
 });

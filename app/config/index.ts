@@ -5,7 +5,11 @@ import { defineConfig } from '@tarojs/cli';
 import devConfig from './dev';
 import prodConfig from './prod';
 
-export default defineConfig(async (merge, { command, mode }) => {
+export default defineConfig(async (merge) => {
+  const taroEnv = process.env.TARO_ENV;
+  if (taroEnv && taroEnv !== 'h5') {
+    throw new Error(`Taro 仅保留 H5 构建；${taroEnv} 请使用 scripts/build-native-weapp.mjs。`);
+  }
   const taroAppMode = process.env.TARO_APP_MODE || 'mock';
   const taroAppApi = process.env.TARO_APP_API || '';
   const taroAppStream = process.env.TARO_APP_STREAM || ''; // P1-B3：聊天流式开关，须注入 defineConstants 否则运行期 process 未定义
@@ -36,65 +40,6 @@ export default defineConfig(async (merge, { command, mode }) => {
     ]);
   };
 
-  const patchWeappAppJson = (chain: WebpackChain) => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const webpack = require('webpack');
-
-    class PatchWeappAppJsonPlugin {
-      apply(compiler: any) {
-        compiler.hooks.thisCompilation.tap('PatchWeappAppJsonPlugin', (compilation: any) => {
-          compilation.hooks.processAssets.tap(
-            {
-              name: 'PatchWeappAppJsonPlugin',
-              stage: webpack.Compilation.PROCESS_ASSETS_STAGE_SUMMARIZE,
-            },
-            () => {
-              const asset = compilation.getAsset('app.json');
-              if (!asset) return;
-
-              let appJson: Record<string, unknown>;
-              try {
-                appJson = JSON.parse(asset.source.source().toString());
-              } catch {
-                return;
-              }
-
-              if (appJson.lazyCodeLoading === 'requiredComponents') return;
-              appJson.lazyCodeLoading = 'requiredComponents';
-              compilation.updateAsset('app.json', new webpack.sources.RawSource(JSON.stringify(appJson)));
-            }
-          );
-          compilation.hooks.processAssets.tap(
-            {
-              name: 'EmitJunshiBuildMetaPlugin',
-              stage: webpack.Compilation.PROCESS_ASSETS_STAGE_SUMMARIZE,
-            },
-            () => {
-              const buildMeta = {
-                schemaVersion: 1,
-                mode: taroAppMode,
-                api: taroAppApi,
-                version: taroAppVersion,
-                gitSha: taroAppBuildSha,
-              };
-              compilation.emitAsset(
-                'junshi-build-meta.json',
-                new webpack.sources.RawSource(JSON.stringify(buildMeta, null, 2))
-              );
-            }
-          );
-        });
-      }
-    }
-
-    chain.plugin('patch-weapp-app-json').use(PatchWeappAppJsonPlugin);
-  };
-
-  const configureMiniWebpack = (chain: WebpackChain) => {
-    stripMock(chain);
-    patchWeappAppJson(chain);
-  };
-
   const baseConfig = {
     projectName: 'junshi-app',
     date: '2026-6-1',
@@ -102,7 +47,8 @@ export default defineConfig(async (merge, { command, mode }) => {
     designWidth: 375,
     deviceRatio: { 640: 2.34 / 2, 750: 1, 375: 2 / 1, 828: 1.81 / 2 },
     sourceRoot: 'src',
-    outputRoot: 'dist',
+    // 微信端已迁移到 weapp-native → dist-native；Taro 仅保留 H5，产物必须物理隔离。
+    outputRoot: 'dist-h5',
     plugins: [],
     defineConstants: {
       'process.env.TARO_APP_MODE': JSON.stringify(taroAppMode),
@@ -118,17 +64,10 @@ export default defineConfig(async (merge, { command, mode }) => {
     sass: {
       resource: [],
     },
-    mini: {
-      postcss: {
-        pxtransform: { enable: true, config: {} },
-        cssModules: { enable: false },
-      },
-      webpackChain: configureMiniWebpack,
-    },
     h5: {
       publicPath: '/',
       staticDirectory: 'static',
-      // hash 路由：dist/ 可被任意静态服务器直接打开，无需 SPA 回退配置（便于本地 H5 测试）
+      // hash 路由：dist-h5/ 可被任意静态服务器直接打开，无需 SPA 回退配置（便于本地 H5 测试）
       router: { mode: 'hash' },
       esnextModules: ['@tarojs'],
       postcss: {

@@ -5,6 +5,46 @@
 // 退出重进后「继续写完」入口就没了），所以要能单测。
 import type { ChatReply } from '../../../shared/contracts';
 
+type AskRow = { q: string; options: string[] };
+
+function stripSerializedAsksTail(text: string, expected: AskRow[]): string {
+  if (!text || !expected.length) return text;
+  const normalize = (value: unknown): AskRow[] => Array.isArray(value)
+    ? value
+        .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
+        .map((row) => ({
+          q: typeof (row.q ?? row.question) === 'string' ? String(row.q ?? row.question).trim() : '',
+          options: Array.isArray(row.options) ? row.options.filter((item): item is string => typeof item === 'string' && !!item) : [],
+        }))
+        .filter((row) => row.q && row.options.length)
+    : [];
+  const parse = (source: string): AskRow[] => {
+    try {
+      const parsed = JSON.parse(source) as unknown;
+      return normalize(parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>).asks
+        : parsed);
+    } catch { return []; }
+  };
+  const same = (rows: AskRow[]) => rows.length === expected.length && rows.every((row, index) =>
+    row.q === expected[index].q
+    && row.options.length === expected[index].options.length
+    && row.options.every((option, optionIndex) => option === expected[index].options[optionIndex]));
+
+  const askFence = text.match(/```ask\s*([\s\S]*?)```\s*$/);
+  if (askFence) return text.slice(0, askFence.index).trimEnd();
+  const jsonFence = text.match(/```(?:json)?\s*([\s\S]*?)```\s*$/i);
+  if (jsonFence && same(parse(jsonFence[1]))) return text.slice(0, jsonFence.index).trimEnd();
+  const trimmed = text.trimEnd();
+  for (let index = trimmed.length - 1; index >= 0; index -= 1) {
+    if (trimmed[index] !== '[' && trimmed[index] !== '{') continue;
+    const lineStart = trimmed.lastIndexOf('\n', index - 1) + 1;
+    if (trimmed.slice(lineStart, index).trim()) continue;
+    if (same(parse(trimmed.slice(index)))) return trimmed.slice(0, lineStart).trimEnd();
+  }
+  return text;
+}
+
 /**
  * 服务端写的是 { text, points?, acts?, asks?, truncated? }，但存量/异常数据里出现过：
  * 整条不是对象、缺 text、points/asks 不是数组。这些值一路带进渲染期后：`m.reply.text` 交给
@@ -23,7 +63,7 @@ export function asReply(content: unknown): ChatReply {
         .filter((a) => a.q || a.options.length)
     : undefined;
   return {
-    text: txt(c.text),
+    text: stripSerializedAsksTail(txt(c.text), asks ?? []),
     ...(Array.isArray(c.points) ? { points: c.points.map(txt).filter(Boolean) } : {}),
     ...(Array.isArray(c.acts) ? { acts: c.acts as ChatReply['acts'] } : {}),
     ...(asks?.length ? { asks } : {}),
@@ -37,4 +77,15 @@ export function asReply(content: unknown): ChatReply {
 /** 复制/朗读用：正文 + 要点拼成一段纯文本。 */
 export function replyToText(reply: ChatReply): string {
   return [reply?.text, ...(Array.isArray(reply?.points) ? reply.points : [])].filter(Boolean).join('\n\n');
+}
+
+/** 用户只附资料、不输入文字时，为模型补一条自然且可见的请求，避免发送空 text。 */
+export function attachmentOnlyPrompt(refs: Array<{ kind?: string; label?: string }>): string {
+  const rows = Array.isArray(refs) ? refs.filter(Boolean) : [];
+  if (!rows.length) return '';
+  if (rows.length === 1 && rows[0]?.kind === 'image') {
+    return '请看我附上的图片，先说明你看到了什么，再给我最关键的判断。';
+  }
+  const label = rows.length === 1 ? String(rows[0]?.label || '').trim() : `${rows.length}份资料`;
+  return `请通读我附上的${label ? `《${label}》` : '资料'}，先概括重点，再告诉我最值得注意的判断。`;
 }

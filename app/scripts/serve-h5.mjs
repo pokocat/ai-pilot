@@ -1,4 +1,4 @@
-// 零依赖静态服务器：本地预览 H5 产物（dist/）。
+// 零依赖静态服务器：本地预览 H5 产物（dist-h5/）。
 // 用法：node scripts/serve-h5.mjs [port]    （默认 5173）
 // 配合 hash 路由，任意路径都回退到 index.html，单页可正常跳转。
 import { createServer } from 'node:http';
@@ -6,7 +6,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'dist');
+const root = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'dist-h5');
 const port = Number(process.argv[2] || process.env.PORT || 5173);
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',

@@ -1,0 +1,18 @@
+@use "../../../src/pages/thinktank/index.scss";
+
+.think-native { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
+.icon-center { display: flex; align-items: center; justify-content: center; }
+.uz-btn { gap: 5px; }
+.upload-status { display: block; margin-top: 7px; color: var(--green); font-size: 11px; }
+.pile + .pile { margin-top: 10px; }
+.pile-actions button { border: 0; }
+.native-module-empty { padding-top: 24px; }
+.think-cta { margin-bottom: 6px; }
+.ft-n { display: flex; align-items: center; gap: 2px; }
+.fr-delete { width: 30px; height: 30px; margin: -4px -6px -4px 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.knowledge-sync { margin-top: 12px; padding: 15px 16px; display: flex; align-items: center; gap: 12px; }
+.ks-b { flex: 1; min-width: 0; }
+.ks-t { display: block; font-size: 14px; font-weight: 600; }
+.ks-s { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
+.ks-go { display: flex; align-items: center; gap: 3px; color: var(--accent); font-size: 12px; font-weight: 600; }
+.skill.busy { opacity: .65; }

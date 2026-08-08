@@ -1,0 +1,15 @@
+@use "../../../../src/packages/main/onboarding/index.scss";
+
+.native-ob-head {
+  flex: none;
+  height: var(--native-nav-inset);
+  box-sizing: border-box;
+  padding: var(--native-nav-top) var(--native-nav-right) 2px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.native-ob-back, .native-ob-spacer { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; }
+.ob-judge-line { display: flex; align-items: flex-end; }
+.ob-judge-line .ob-judge { flex: 0 1 auto; white-space: pre-wrap; }
+.ob-caret { width: 2px; height: 22px; margin: 0 0 7px 3px; background: var(--accent); animation: obCaret 1s steps(1) infinite; }

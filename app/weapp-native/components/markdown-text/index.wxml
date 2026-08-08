@@ -1,0 +1,11 @@
+<view class="md">
+  <block wx:for="{{blocks}}" wx:key="key" wx:for-item="block">
+    <text wx:if="{{block.type==='heading'}}" class="md-h {{block.levelClass}}" user-select="{{copyable}}"><text wx:for="{{block.parts}}" wx:key="key" wx:for-item="part" class="{{part.className}}">{{part.text}}</text></text>
+    <view wx:elif="{{block.type==='quote'}}" class="md-quote"><text user-select="{{copyable}}"><text wx:for="{{block.parts}}" wx:key="key" wx:for-item="part" class="{{part.className}}">{{part.text}}</text></text></view>
+    <text wx:elif="{{block.type==='code'}}" class="md-codeblock" user-select="{{copyable}}">{{block.text}}</text>
+    <view wx:elif="{{block.type==='table'}}" class="md-table"><view wx:for="{{block.rows}}" wx:key="key" wx:for-item="row" class="md-tr {{row.head?'head':''}}"><text wx:for="{{row.cells}}" wx:key="key" wx:for-item="cell" class="md-td" user-select="{{copyable}}"><text wx:for="{{cell.parts}}" wx:key="key" wx:for-item="part" class="{{part.className}}">{{part.text}}</text></text></view></view>
+    <view wx:elif="{{block.type==='list'}}" class="md-list"><view wx:for="{{block.items}}" wx:key="key" wx:for-item="row" class="md-li"><text class="md-marker">{{row.marker}}</text><text class="md-li-text" user-select="{{copyable}}"><text wx:for="{{row.parts}}" wx:key="key" wx:for-item="part" class="{{part.className}}">{{part.text}}</text></text></view></view>
+    <text wx:else class="md-p" user-select="{{copyable}}"><text wx:for="{{block.parts}}" wx:key="key" wx:for-item="part" class="{{part.className}}">{{part.text}}</text></text>
+  </block>
+  <text wx:if="{{tailText}}" class="md-p" user-select="{{copyable}}">{{tailText}}</text>
+</view>

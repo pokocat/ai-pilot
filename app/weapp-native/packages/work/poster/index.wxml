@@ -1,0 +1,35 @@
+<view class="poster-set {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="form-header"><view class="form-safe"></view><view class="form-headrow"><view class="form-back" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view><text class="form-title serif">{{disabled?'成品图':'成品图需求单'}}</text><view class="form-spacer"></view></view></view>
+  <view class="ps-pad">
+    <view wx:if="{{loading}}" class="ps-loading"><text>正在取需求单</text></view>
+    <view wx:elif="{{disabled}}" class="ps-empty"><text class="ps-empty-t serif">成品图暂未开放</text><text class="ps-empty-d">海报设计师的文字方案不受影响，可继续在对话里推进。</text></view>
+    <block wx:else>
+      <view wx:if="{{reason}}" class="ps-reason"><view class="ps-reason-h"><native-icon name="spark" tone="green" size="14"></native-icon><text class="ps-reason-k">军师为什么这样设计</text></view><text class="ps-reason-b">{{reason}}</text></view>
+      <text wx:if="{{loadErr}}" class="ps-note">{{loadErr}}</text>
+
+      <text class="ps-sec">先说清这张图要干什么</text>
+      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">宣传什么</text><text class="ps-count {{goalOver?'over':''}}">{{goalCount}}</text></view><input class="ps-input" value="{{goal}}" placeholder="这张海报要促成什么" data-field="goal" bindinput="fieldInput"/><text wx:if="{{errors.goal}}" class="ps-ferr">{{errors.goal}}</text></view>
+      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">给谁看</text><text class="ps-count {{audienceOver?'over':''}}">{{audienceCount}}</text></view><input class="ps-input" value="{{audience}}" placeholder="目标客群是谁" data-field="audience" bindinput="fieldInput"/><text wx:if="{{errors.audience}}" class="ps-ferr">{{errors.audience}}</text></view>
+
+      <text class="ps-sec">画面上的字</text>
+      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">主标题</text><text class="ps-count {{headlineOver?'over':''}}">{{headlineCount}}</text></view><text class="ps-fhint">一张海报只讲一件事</text><input class="ps-input" value="{{headline}}" placeholder="最想让人记住的一句" data-field="headline" bindinput="fieldInput"/><text wx:if="{{errors.headline}}" class="ps-ferr">{{errors.headline}}</text></view>
+      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">副标题</text><text class="ps-count {{subheadlineOver?'over':''}}">{{subheadlineCount}}</text></view><input class="ps-input" value="{{subheadline}}" placeholder="可留空" data-field="subheadline" bindinput="fieldInput"/><text wx:if="{{errors.subheadline}}" class="ps-ferr">{{errors.subheadline}}</text></view>
+      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">卖点</text></view><text class="ps-fhint">最多 3 条，每条一句话</text><view wx:for="{{proofs}}" wx:key="index" class="ps-proof"><view class="ps-flabel"><text class="ps-fl sm">{{item.label}}</text><text class="ps-count {{item.over?'over':''}}">{{item.count}}</text></view><input class="ps-input" value="{{item.value}}" placeholder="{{index===0?'可留空':''}}" data-index="{{index}}" bindinput="proofInput"/><text wx:if="{{item.err}}" class="ps-ferr">{{item.err}}</text></view></view>
+      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">行动号召</text><text class="ps-count {{ctaOver?'over':''}}">{{ctaCount}}</text></view><input class="ps-input" value="{{cta}}" placeholder="如：扫码来聊" data-field="cta" bindinput="fieldInput"/><text wx:if="{{errors.cta}}" class="ps-ferr">{{errors.cta}}</text></view>
+
+      <text class="ps-sec">画面长什么样</text>
+      <view class="ps-field"><view class="ps-flabel"><text class="ps-fl">视觉方向</text><text class="ps-count {{visualOver?'over':''}}">{{visualCount}}</text></view><text class="ps-fhint">只写画面属性：结构 / 色彩 / 材质 / 光线 / 构图</text><textarea class="ps-area" value="{{visual}}" placeholder="如：干净留白、克制的墨色与暖金、正面柔光" data-field="visual" bindinput="fieldInput"></textarea><text wx:if="{{errors.visual}}" class="ps-ferr">{{errors.visual}}</text></view>
+      <view wx:if="{{templates.length}}" class="ps-field"><view class="ps-flabel"><text class="ps-fl">版式</text></view><view class="ps-tpls"><view wx:for="{{templates}}" wx:key="key" class="ps-tpl {{templateKey===item.key?'on':''}}" data-key="{{item.key}}" bindtap="chooseTemplate"><view class="ps-tpl-h"><text class="ps-tpl-n">{{item.name}}</text><native-icon wx:if="{{templateKey===item.key}}" name="check" tone="green" size="14"></native-icon></view><text class="ps-tpl-d">{{item.desc}}</text></view></view></view>
+
+      <text class="ps-sec">素材（可留空）</text>
+      <view class="ps-consent" bindtap="toggleConsent"><view class="ps-check {{consent?'on':''}}"><native-icon wx:if="{{consent}}" name="check" tone="white" size="12"></native-icon></view><view class="ps-consent-b"><text class="ps-consent-t">上传人像前请确认</text><text wx:for="{{consentLines}}" wx:key="*this" class="ps-consent-l">· {{item}}</text></view></view>
+      <text wx:if="{{errors.consent}}" class="ps-ferr">{{errors.consent}}</text>
+      <view class="ps-slots"><view wx:for="{{assets}}" wx:key="role" class="ps-slot"><view wx:if="{{item.path}}" class="ps-thumb-wrap"><image class="ps-thumb" src="{{item.path}}" mode="aspectFill"></image><view class="ps-thumb-x" data-role="{{item.role}}" catchtap="dropAsset"><native-icon name="close" tone="white" size="13"></native-icon></view></view><view wx:else class="ps-slot-add" data-role="{{item.role}}" bindtap="pickAsset"><native-icon name="image" tone="neutral" size="17"></native-icon><text class="ps-slot-t">{{item.uploading?'上传中':'传'+item.label}}</text></view><text class="ps-slot-k">{{item.label}}</text></view></view>
+
+      <view wx:if="{{submitErr}}" class="ps-submit-err"><text class="ps-submit-err-t">{{submitErr}}</text><text wx:if="{{submitErrCredits}}" class="ps-submit-err-a" bindtap="goCredits">去看余额</text></view>
+      <view class="ps-foot"><text class="ps-foot-note">出图约一分钟，成品可保存或转发。</text><button class="ps-btn" bindtap="submit"><text class="ps-btn-t">{{submitting?'正在发起':'生成成品图'}}</text><view wx:if="{{price!==null}}" class="ps-price"><native-icon name="diamond" tone="white" size="14"></native-icon><text class="ps-btn-c">x{{price}}</text></view></button></view>
+    </block>
+  </view>
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <agent-unlock agent="{{unlockAgent}}" source="poster" bindclose="closeUnlock" bindunlocked="agentUnlocked"></agent-unlock>
+</view>

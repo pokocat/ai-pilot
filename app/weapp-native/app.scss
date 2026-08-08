@@ -1,0 +1,139 @@
+@use "../src/app.scss";
+
+page {
+  min-height: 100%;
+}
+
+button {
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+}
+
+button::after { border: 0; }
+
+.native-page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  background: var(--paper);
+}
+
+/* 与原 Taro 页面事实源一致：设置与入局仪式使用暖灰页面底，白色只留给卡片。 */
+page .settings-page,
+page .onboard {
+  background: var(--bg);
+}
+
+.native-scroll {
+  height: 100vh;
+  box-sizing: border-box;
+}
+
+.native-nav-inset {
+  height: var(--native-nav-inset, calc(env(safe-area-inset-top) + 46px));
+}
+
+/* 原生自定义导航统一规范：状态栏、返回/标题、微信胶囊只占一层。
+   navTop/navRowHeight/navRight 均来自 getMenuButtonBoundingClientRect/getWindowInfo。 */
+page .native-safe-head,
+page .form-header {
+  position: relative;
+  height: var(--native-nav-inset);
+  box-sizing: border-box;
+}
+
+page .native-safe-space,
+page .form-safe,
+page .sub-safe,
+page .settings-safe,
+page .plans-safe,
+page .legal-safe { display: none; }
+
+page .native-safe-row,
+page .form-headrow,
+page .sub-headrow,
+page .settings-headrow,
+page .plans-headrow,
+page .legal-headrow {
+  position: absolute;
+  top: var(--native-nav-top);
+  left: 0;
+  right: 0;
+  height: var(--native-nav-row-height);
+  min-height: var(--native-nav-row-height);
+  padding: 0 var(--native-nav-right) 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+page .native-safe-row .safe-hbtn,
+page .form-back,
+page .sub-back,
+page .settings-back,
+page .plans-back,
+page .legal-back {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-sizing: border-box;
+}
+
+page .native-safe-row .safe-body,
+page .form-title,
+page .sub-title,
+page .settings-title,
+page .plans-title,
+page .legal-title {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+page .native-safe-row .safe-spacer,
+page .form-spacer,
+page .settings-spacer,
+page .plans-spacer,
+page .legal-spacer { display: none; }
+
+page .sub-header,
+page .settings-header,
+page .plans-header,
+page .legal-header { height: var(--native-nav-inset); }
+
+page .report-scroll,
+page .settings-scroll,
+page .plans-scroll,
+page .legal-scroll { top: var(--native-nav-inset); }
+
+page .native-ob-head {
+  height: var(--native-nav-inset);
+  padding: var(--native-nav-top) var(--native-nav-right) 10px 16px;
+}
+
+.native-mock-badge {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 7px);
+  left: 8px;
+  z-index: 899;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #9C4A38;
+  color: #fff;
+  font: 600 9px/1.2 var(--sans);
+  letter-spacing: .05em;
+  pointer-events: none;
+}

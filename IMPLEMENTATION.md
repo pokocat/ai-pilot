@@ -7,7 +7,7 @@
 
 ## 技术选型（按需求确认）
 
-- **移动端 App**：[Taro](https://taro.zone) 3.6（React + TypeScript），**一套代码同时产出微信小程序 + H5**，便于两端 review。
+- **移动端 App**：微信端使用原生 Page/Component + WXML/WXSS/JS；[Taro](https://taro.zone) 3.6（React + TypeScript）只保留 H5。两端共享后端契约与视觉 token，不再共享渲染运行时。
 - **运营后台**：Vite + React（移动端布局），消费同一套后端 API。
 - **后端**：Fastify + Prisma + **PostgreSQL**，自建 **LLM Gateway**。
 - **AI**：默认 `mock`（模板产出，零成本可离线）；可切换 `claude`（真实模型 + tool use 强约束结构化成果）。
@@ -16,7 +16,7 @@
 repo/
 ├── project/        # 原始原型（设计事实来源，保持不动）
 ├── server/         # 后端 API（LLM Gateway / 会话 / 记忆 / 成果库 / 运营配置）
-├── app/            # Taro 移动端（微信小程序 + H5）
+├── app/            # weapp-native 原生微信小程序 + src Taro H5
 └── admin/          # 运营后台（Vite + React）
 ```
 
@@ -67,14 +67,14 @@ npm run dev          # http://localhost:4000/api
 ```
 切真实模型：在 `server/.env` 设 `AI_PROVIDER=claude` 且 `ANTHROPIC_API_KEY=...`，重启即可（产出走 Claude tool use，结构与 mock 一致）。
 
-### 2. 移动端 App（Taro）
+### 2. 移动端 App（原生微信 + Taro H5）
 ```bash
 cd app
 npm install
-npm run dev:h5       # H5：dist/ 可用静态服务器打开，或 npm run build:h5
-npm run dev:weapp    # 微信小程序：用微信开发者工具打开 app/dist
+npm run dev:h5       # Taro H5：dist-h5/，或 npm run build:h5
+npm run dev:weapp    # 原生微信小程序：构建/监听 dist-native/
 ```
-H5 后端地址见 `app/.env.development`（`TARO_APP_API`）；小程序需在小程序后台配置合法域名。
+H5 后端地址见 `app/.env.development`（`TARO_APP_API`）；小程序用 `WEAPP_APP_API`，本地构建后在微信开发者工具导入 `app/dist-native/`，真机请求域名仍需在小程序后台配置。
 
 ### 3. 运营后台
 ```bash

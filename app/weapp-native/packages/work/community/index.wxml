@@ -1,0 +1,11 @@
+<view class="native-subpage page community-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="safe-head"><view class="safe-hbtn" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view><view class="safe-body"><view class="safe-title-wrap"><text class="safe-title serif">军师社群</text></view></view><view class="safe-spacer"></view></view>
+  <scroll-view scroll-y class="generic-scroll"><view class="pad route-body">
+    <view class="cm-hero card"><text class="kicker">Community</text><text class="h1">军师社群</text><text class="cm-p">让决策有章法，让增长有胜算。完成注册后，会根据你的身份、城市和方向分配班级与服务老师，方案提醒、班级任务和复盘通知统一同步。</text></view>
+    <view class="class-card card"><view class="class-top"><view><text class="class-k">我的班级</text><text class="class-t serif">{{classTitle}}</text></view><text class="class-st">分班准备中</text></view><text class="class-d">档案越完整，分班越精准。先完善企业档案与经营方向，运营确认后即分配班级与服务老师。</text><view class="class-btn" bindtap="openBrief"><text>完善我的档案</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="13"></native-icon></view></view>
+    <view class="sec-head"><text class="sec-title">三步完成入群</text><text class="sec-more">服务老师会协助确认</text></view>
+    <view class="steps card"><view wx:for="{{steps}}" wx:key="no" class="step"><view class="step-no {{item.active?'is-active':''}}"><text>{{item.no}}</text></view><view class="step-b"><text class="step-t">{{item.title}}</text><text class="step-d">{{item.desc}}</text></view></view></view>
+    <view class="teacher-card card"><view class="teacher-av"><native-icon name="user" tone="accent" color-key="{{colorKey}}" size="20"></native-icon></view><view class="teacher-b"><text class="teacher-name">服务老师 · 待分配</text><text class="teacher-role">分班完成后，这里会显示服务老师与班级二维码</text></view></view>
+    <view class="cm-submit" bindtap="openCouncil"><text>先进军师参谋室</text><native-icon name="send" tone="white" size="16"></native-icon></view><view class="route-bottom-space"></view>
+  </view></scroll-view>
+</view>

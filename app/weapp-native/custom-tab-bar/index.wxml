@@ -1,0 +1,12 @@
+<view wx:if="{{!overlay}}" class="tabbar {{themeClass}}">
+  <view class="tabbar-inner">
+    <view wx:for="{{tabs}}" wx:key="path" class="tab {{selected === index ? 'on' : ''}}" data-index="{{index}}" bindtap="switchTab">
+      <view class="tab-ic">
+        <image class="tab-icon tab-icon-{{item.icon}}" src="{{selected === index ? item.iconActive : item.iconNormal}}" mode="aspectFit"></image>
+        <view wx:if="{{index === 0 && unread > 0}}" class="tab-badge"><text class="tab-badge-n">{{unread > 99 ? '99+' : unread}}</text></view>
+        <view wx:if="{{index === 2 && reviewDue}}" class="tab-dot"></view>
+      </view>
+      <text class="tab-label">{{item.text}}</text>
+    </view>
+  </view>
+</view>

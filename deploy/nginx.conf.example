@@ -63,8 +63,8 @@ server {
     listen 80;
     server_name yourdomain.com;          # ← 改成你的域名
 
-    # H5（Taro 静态产物 app/dist）作为站点根
-    root /var/www/junshi/h5;             # ← 改成你放 app/dist 的路径
+    # H5（Taro 静态产物 app/dist-h5）作为站点根
+    root /var/www/junshi/h5;             # ← 改成你放 app/dist-h5 的路径
     index index.html;
 
     client_max_body_size 10m;            # 预留文档上传

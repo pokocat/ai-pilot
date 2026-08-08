@@ -1,0 +1,11 @@
+@use "../../src/custom-tab-bar/index.scss";
+
+.tab-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+.tab-icon-pouch { width: 26px; height: 26px; }
+
+.tab.on .tab-label { color: var(--accent); }

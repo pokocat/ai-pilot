@@ -1,0 +1,1 @@
+export default function(e){var a=e.getLanguage("c-like").rawDefinition();return a.name="C",a.aliases=["c","h"],a}

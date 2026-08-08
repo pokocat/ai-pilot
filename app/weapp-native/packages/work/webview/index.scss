@@ -1,0 +1,12 @@
+.wv-empty {
+  min-height: 100vh; box-sizing: border-box; padding: 0 40px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: var(--bg); color: var(--ink);
+}
+.wv-title { font-size: 15px; font-weight: 600; }
+.wv-desc { margin-top: 8px; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); text-align: center; }
+.wv-back {
+  margin-top: 20px; height: 40px; padding: 0 24px; border-radius: 10px;
+  border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--ink); font-size: 13px; font-weight: 600;
+}

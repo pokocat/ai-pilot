@@ -1,0 +1,17 @@
+<view class="gallery {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="form-header"><view class="form-safe"></view><view class="form-headrow"><view class="form-back" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view><text class="form-title serif">我的作品库</text><view class="form-spacer"></view></view></view>
+  <view class="pad">
+    <text class="gl-hint">出过的每一版海报都在这里，点开可以保存、分享，也能改文字重新排。</text>
+    <view class="gl-sec"><text class="gl-sec-t">海报成品图</text><text wx:if="{{items.length}}" class="gl-sec-n">{{items.length}} 张</text></view>
+
+    <view wx:if="{{loading&&!items.length}}" class="gl-state"><view class="gl-state-line"></view><view class="gl-state-line short"></view><text>正在读取作品</text></view>
+    <view wx:elif="{{failed&&!items.length}}" class="gl-state"><text>作品加载失败</text><button class="gl-more" bindtap="loadFirst">重试</button></view>
+    <view wx:elif="{{!items.length}}" class="gl-empty"><view class="e-ic"><native-icon name="image" tone="green" size="24"></native-icon></view><text class="et">还没有成品图</text><text class="es">{{canCreate?'在对话里让海报设计师出方案，再点「生成成品图」，出好的每一版都留在这里。':'成品图能力当前未开启，已出过的作品仍会保留在这里。'}}</text><button wx:if="{{canCreate}}" class="es-btn" bindtap="goPosterDesigner">去找海报设计师</button></view>
+    <block wx:else><view class="gl-grid"><view wx:for="{{items}}" wx:key="jobId" class="gl-tile card" data-id="{{item.jobId}}" bindtap="openJob"><view class="gl-thumb"><view wx:if="{{item.inFlight}}" class="gl-making"><view class="gl-spin"></view><text class="gl-making-t">{{item.progressLabel}}</text></view><image wx:elif="{{item.imageUrl}}" class="gl-img" src="{{item.imageUrl}}" mode="aspectFill" show-menu-by-longpress binderror="imageError"></image><view wx:else class="gl-making"><text class="gl-making-t">预览链接已过期</text></view><view class="gl-badge {{item.inFlight?'making':''}}"><text class="gl-badge-t">{{item.inFlight?'制作中':'已完成'}}</text></view><view wx:if="{{item.parentJobId}}" class="gl-tag"><text class="gl-tag-t">改版</text></view></view><text class="gl-t">{{item.headline}}</text><text class="gl-m">{{item.timeText}}</text></view></view><button wx:if="{{cursor}}" class="gl-more" bindtap="loadMore">{{more?'加载中':'加载更多'}}</button><text wx:else class="gl-end">已经到底了</text></block>
+
+    <view class="gl-sec"><text class="gl-sec-t">文字成果</text></view>
+    <view class="gl-row card" bindtap="goLibrary"><view class="gl-row-ic"><native-icon name="layers" tone="green" size="19"></native-icon></view><view class="gl-row-b"><text class="gl-row-t">我的方案库</text><text class="gl-row-s">对话里出的方案和报告，按版本留档</text></view><native-icon name="arrow" tone="neutral" size="18"></native-icon></view>
+    <view class="gl-safe-bottom"></view>
+  </view>
+  <login-sheet open="{{showLogin}}" reason="view-history" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

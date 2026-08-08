@@ -22,6 +22,31 @@ test('extractAsks：多问题各带选项（访谈模式一次三问）', () => 
   assert.equal(r.text, '三个问题：');
 });
 
+test('extractAsks：模型漏掉 ask 围栏时，裸 JSON 数组不再泄漏到正文', () => {
+  const payload = JSON.stringify([
+    { q: '每月刚性生活支出大概多少？', options: ['1万以下', '1-2万', '2-3万', '3万以上'] },
+    { q: '你打算做哪个市场？', options: ['A股', '美股', '加密货币', '期货/商品'] },
+  ]);
+  const r = extractAsks(`还有两个问题需要你回答。\n\n${payload}`);
+  assert.equal(r.text, '还有两个问题需要你回答。');
+  assert.equal(r.asks?.length, 2);
+  assert.equal(r.asks?.[0].q, '每月刚性生活支出大概多少？');
+});
+
+test('extractAsks：json 围栏与 {asks:[]} 包装均可收口', () => {
+  const payload = JSON.stringify({ asks: [{ q: '现在最缺什么？', options: ['现金流', '客户', '团队'] }] });
+  const r = extractAsks(`先答这一题。\n\n\`\`\`json\n${payload}\n\`\`\``);
+  assert.equal(r.text, '先答这一题。');
+  assert.deepEqual(r.asks, [{ q: '现在最缺什么？', options: ['现金流', '客户', '团队'] }]);
+});
+
+test('extractAsks：普通业务 JSON 与行内数组不误删', () => {
+  const business = '接口示例：\n```json\n{"revenue":100,"cost":60}\n```';
+  assert.equal(extractAsks(business).text, business);
+  const inline = '你可以把配置写成 [{"q":"字段名","options":["a","b"]}] 作为示例。';
+  assert.equal(extractAsks(inline).text, inline);
+});
+
 test('extractAsks：无 ask 块原样返回，不误伤正文中的普通代码块', () => {
   const text = '示例代码：\n```js\nconsole.log(1)\n```\n以上。';
   const r = extractAsks(text);

@@ -1,0 +1,4 @@
+@use "../../../styles/subpage.scss";
+@use "../../../../src/packages/work/dossier/index.scss";
+
+.dossier-page .ds-empty { top: calc(var(--native-nav-inset) + 61px); box-sizing: border-box; }

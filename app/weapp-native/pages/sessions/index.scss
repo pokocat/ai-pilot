@@ -1,0 +1,4 @@
+@use "../../../src/pages/sessions/index.scss" as sessions;
+@use "../../../src/components/AdvisorAvatar/index.scss" as avatar;
+
+.advisor-avatar { width: 50px; height: 50px; }

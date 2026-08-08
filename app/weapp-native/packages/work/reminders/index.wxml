@@ -1,0 +1,11 @@
+<view class="page reminders-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="native-safe-head"><view class="native-safe-space"></view><view class="native-safe-row"><view class="safe-hbtn" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view><view class="safe-body"><text class="safe-title serif">提醒与日历</text></view><view class="safe-spacer"></view></view></view>
+  <view class="pad reminders-body"><view class="rm-hero"><text class="rm-k">执 行 提 醒</text><text class="rm-title serif">按执行节奏提醒</text><text class="rm-desc">提醒不是个人中心里的杂项，而是当前执行闭环的一部分。军令、复盘与周计划按节奏推送。</text></view>
+    <view wx:if="{{loading}}" class="native-loading"><view wx:for="{{[1,2,3]}}" wx:key="*this" class="native-skeleton"></view></view>
+    <view wx:elif="{{errorText}}" class="native-state"><text>{{errorText}}</text><button bindtap="retry">重新读取</button></view>
+    <text wx:elif="{{!items.length}}" class="rm-empty">还没有提醒。军令和复盘出来后，提醒节奏就在这里。</text>
+    <view wx:else class="rm-list"><view wx:for="{{items}}" wx:key="key" class="rm-row"><view class="rm-time"><text class="rm-time-t serif">{{item.time}}</text></view><view class="rm-b"><text class="rm-t">{{item.title}}</text><text class="rm-s">{{item.desc}}</text></view><text class="{{item.stateClass==='action'?'rm-sub':'rm-state'}} {{item.stateClass==='muted'?'muted':''}} {{busy===item.key?'busy':''}}" data-key="{{item.key}}" bindtap="subscribe">{{busy===item.key ? '处理中…' : item.actionText}}</text></view></view>
+    <text class="rm-foot">订阅后，微信会在对应时间推送一次提醒；每次推送需单独授权。</text>
+  </view>
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

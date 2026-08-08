@@ -1,0 +1,11 @@
+{
+  "navigationStyle": "custom",
+  "disableScroll": true,
+  "usingComponents": {
+    "login-sheet": "/components/login-sheet/index",
+    "markdown-text": "/components/markdown-text/index",
+    "native-icon": "/components/native-icon/index",
+    "report-card": "/components/report-card/index",
+    "towxml": "/packages/main/vendor/towxml/towxml"
+  }
+}

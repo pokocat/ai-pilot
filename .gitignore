@@ -5,6 +5,8 @@ node_modules/
 # 构建产物
 dist/
 **/dist/
+**/dist-native/
+**/dist-h5/
 lib/
 .temp/
 .swc/

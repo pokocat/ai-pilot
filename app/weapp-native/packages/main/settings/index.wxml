@@ -1,0 +1,112 @@
+<view class="settings-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="settings-header">
+    <view class="settings-safe"></view>
+    <view class="settings-headrow">
+      <view class="settings-back" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view>
+      <text class="settings-title serif">设置</text>
+      <view class="settings-spacer"></view>
+    </view>
+  </view>
+
+  <scroll-view scroll-y class="settings-scroll">
+    <view class="settings-body">
+      <view class="settings-section">
+        <text class="settings-kicker">身份资料</text>
+        <view class="avatar-row" bindtap="chooseAvatar">
+          <view class="settings-avatar">
+            <image wx:if="{{avatarUrl}}" src="{{avatarUrl}}" mode="aspectFill"></image>
+            <text wx:else>主</text>
+          </view>
+          <view class="avatar-copy">
+            <text class="row-title">{{uploading?'上传中…':'更换头像'}}</text>
+            <text class="row-desc">由你主动选择，不影响登录</text>
+          </view>
+          <native-icon name="arrow" tone="neutral" size="17"></native-icon>
+        </view>
+        <view class="field"><text>称呼</text><input placeholder="{{name||'你希望军师如何称呼'}}" bindinput="inputName" /></view>
+        <view class="field"><text>公司 / 品牌</text><input placeholder="{{company||'选填'}}" bindinput="inputCompany" /></view>
+        <button class="save-btn" bindtap="saveIdentity">{{saving?'保存中…':'保存身份资料'}}</button>
+      </view>
+
+      <view class="settings-section">
+        <text class="settings-kicker">账号联系信息</text>
+        <text class="settings-note">微信账号登录不要求手机号；你可以自愿绑定，便于账号找回和服务联系。</text>
+        <view class="current-phone"><text>当前手机号</text><text>{{phoneDisplay}}</text></view>
+        <view class="field"><text>新手机号</text><input type="number" maxlength="11" placeholder="请输入手机号" bindinput="inputPhone" /></view>
+        <view class="field">
+          <text>验证码</text><input type="number" maxlength="6" placeholder="短信验证码" bindinput="inputCode" />
+          <text class="send-code" bindtap="sendCode">{{sent>0?sent+'s':(codeSending?'发送中…':'获取验证码')}}</text>
+        </view>
+        <button class="save-btn ghost" bindtap="bindPhone">{{binding?'处理中…':'绑定 / 更换手机号'}}</button>
+      </view>
+
+      <view class="settings-section">
+        <text class="settings-kicker">偏好</text>
+        <view class="preference-row" bindtap="openColorPicker">
+          <text class="preference-title">我的本命色</text>
+          <view class="preference-value">
+            <view class="preference-swatch"></view>
+            <text>{{colorName}}</text>
+            <native-icon name="arrow" tone="neutral" size="16"></native-icon>
+          </view>
+        </view>
+      </view>
+
+      <view class="settings-section">
+        <text class="settings-kicker">关于</text>
+        <view class="current-phone version-row" bindlongpress="openImpersonation">
+          <text>当前版本</text><text class="version-value {{isMockBuild?'is-mock':''}}">{{versionLabel}}</text>
+        </view>
+        <view class="current-phone"><text>微信关联</text><text>{{wechatLinked?'已关联':'未关联'}}</text></view>
+        <view class="settings-link-row" data-doc="agreement" bindtap="openDoc"><text>用户协议</text><native-icon name="arrow" tone="neutral" size="16"></native-icon></view>
+        <view class="settings-link-row" data-doc="privacy" bindtap="openDoc"><text>隐私政策</text><native-icon name="arrow" tone="neutral" size="16"></native-icon></view>
+        <view class="settings-link-row" data-doc="refund" bindtap="openDoc"><text>退款政策</text><native-icon name="arrow" tone="neutral" size="16"></native-icon></view>
+      </view>
+
+      <view class="settings-section">
+        <text class="settings-kicker">帮助与客服</text>
+        <button class="settings-link-row settings-contact-btn" open-type="contact"><text>联系客服</text><native-icon name="arrow" tone="neutral" size="16"></native-icon></button>
+      </view>
+
+      <button class="logout-btn" bindtap="logout"><native-icon name="lock" tone="red" size="15"></native-icon><text>退出登录</text></button>
+      <button class="delete-btn" bindtap="deleteAccount">删除账号与全部数据</button>
+      <view class="settings-bottom"></view>
+    </view>
+  </scroll-view>
+
+  <view wx:if="{{showColorPicker}}" class="color-mask" catchtouchmove="noop" bindtap="closeColorPicker">
+    <scroll-view scroll-y class="benming-card" catchtap="noop">
+      <view class="picker-close" bindtap="closeColorPicker"><native-icon name="close" tone="neutral" size="16"></native-icon></view>
+      <text class="picker-index">本命色 0{{colorNumber}} / 06</text>
+      <text class="picker-title serif">更换你的本命色</text>
+      <view class="color-hero">
+        <text class="color-watermark serif">{{selectedColor.wm}}</text>
+        <view class="color-seal"><text class="serif">{{selectedColor.seal}}</text></view>
+        <text class="color-cn serif">{{selectedColor.cn}}</text>
+        <text class="color-en">{{selectedColor.en}}</text>
+      </view>
+      <text class="color-verdict">{{selectedColor.verdict}}</text>
+      <view class="color-swatches">
+        <view wx:for="{{colors}}" wx:key="key" class="color-swatch theme-{{item.key}}" data-key="{{item.key}}" bindtap="selectColor">
+          <view class="color-disc {{colorKey===item.key?'on':''}}"><view class="color-dot"></view></view>
+          <text class="{{colorKey===item.key?'on':''}}">{{item.short}}</text>
+        </view>
+      </view>
+      <button class="color-confirm" bindtap="confirmColor">确认使用 {{selectedColor.short}}</button>
+    </scroll-view>
+  </view>
+
+  <view wx:if="{{showImpersonation}}" class="imp-mask" catchtouchmove="noop" bindtap="closeImpersonation">
+    <view class="imp-card" style="{{keyboardStyle}}" catchtap="noop">
+      <view class="imp-grip"></view>
+      <text class="imp-title serif">代主公巡视</text>
+      <text class="imp-desc">粘贴主公签发的令牌，即以其身份入局排查。仅供巡视，用后即弃。</text>
+      <textarea class="imp-input" placeholder="在此粘贴附身令牌" placeholder-class="imp-placeholder" maxlength="-1" auto-height adjust-position="{{false}}" bindinput="inputImpersonation" bindkeyboardheightchange="impersonationKeyboard"></textarea>
+      <button class="imp-cta {{impersonating?'off':''}}" disabled="{{impersonating}}" bindtap="submitImpersonation">
+        <native-icon name="lock" tone="white" size="15"></native-icon>
+        <text>{{impersonating?'验令中…':'登入'}}</text>
+      </button>
+      <text class="imp-cancel" bindtap="closeImpersonation">取消</text>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,18 @@
+@use "../../../../src/packages/work/gallery/index.scss" as original;
+
+.gallery { min-height: 100vh; box-sizing: border-box; background: var(--bg); color: var(--ink); }
+.form-header { background: var(--surface); border-bottom: 1px solid var(--line); }
+.form-safe { height: var(--native-nav-inset); }
+.form-headrow { height: 50px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; }
+.form-back, .form-spacer { width: 42px; height: 42px; display: flex; align-items: center; }
+.form-title { font-size: 16px; font-weight: 600; }
+.gallery > .pad { padding: 12px 16px 0; }
+.gl-spin { border-top-color: var(--accent); }
+.gl-badge.making { background: var(--accent); }
+.gl-empty .e-ic, .gl-row-ic { background: var(--accent-soft); }
+.gl-empty .es-btn { margin-left: auto; margin-right: auto; border: 0; background: var(--accent); line-height: 40px; }
+.gl-more { display: block; margin-left: auto; margin-right: auto; background: transparent; line-height: 36px; }
+.gl-state { padding: 50px 20px; text-align: center; color: var(--ink-3); font-size: 12px; }
+.gl-state-line { height: 90px; margin-bottom: 10px; border-radius: 14px; background: var(--surface-2); }
+.gl-state-line.short { height: 12px; width: 56%; margin: 0 auto 20px; }
+.gl-safe-bottom { height: calc(22px + env(safe-area-inset-bottom)); }

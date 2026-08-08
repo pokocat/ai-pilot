@@ -1,0 +1,24 @@
+@use "../../../src/pages/home/index.scss" as home;
+@use "../../../src/components/NextStepCard/index.scss" as nextstep;
+
+.home .nsc { margin: 16px 0 0; border-radius: 17px; }
+.guest-notice{display:flex;align-items:center;gap:11px;padding:14px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:var(--shadow-sm);}
+.guest-notice-icon{width:34px;height:34px;border-radius:11px;background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent-glow);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.guest-notice-body{flex:1;min-width:0;}
+.guest-notice-title{display:block;color:var(--ink);font-size:15px;font-weight:600;}
+.guest-notice-desc{display:block;margin-top:3px;color:var(--ink-3);font-size:12.5px;line-height:1.5;}
+.guest-notice-action{flex-shrink:0;min-width:58px;height:32px;padding:0 11px;border-radius:16px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;}
+.battle-empty { padding: 48px 18px; text-align: center; }
+.battle-empty-title { display: block; font-size: 17px; font-weight: 600; }
+.battle-empty-desc { display: block; max-width: 270px; margin: 8px auto 0; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
+.battle-empty button { width: 132px; height: 42px; margin: 16px auto 0; border-radius: 13px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; }
+.bmt.on { color: var(--accent); border-color: var(--accent); }
+.ml-go { display: flex; align-items: center; flex: 0 0 auto; gap: 2px; white-space: nowrap; }
+.ml-go > text { white-space: nowrap; }
+.bh-toggle, .bh-ask, .fe-go { display: flex; align-items: center; gap: 4px; }
+.nono-row{display:flex;align-items:flex-start;gap:8px;padding:6px 0;}
+.nono-row .nono{flex:1;min-width:0;padding:0;}
+.force-sheet-mask{position:fixed;inset:0;z-index:260;background:rgba(18,24,22,.46);display:flex;align-items:flex-end;justify-content:center;}
+.force-sheet{width:100%;max-height:86vh;box-sizing:border-box;padding:10px 20px calc(18px + env(safe-area-inset-bottom));border-radius:24px 24px 0 0;background:var(--bg);display:flex;flex-direction:column;box-shadow:0 -18px 52px rgba(15,31,25,.2);}
+.force-sheet-grip{width:40px;height:4px;margin:0 auto 14px;border-radius:2px;background:var(--line-strong);flex-shrink:0;}
+.force-sheet .fs-body{max-height:52vh;}

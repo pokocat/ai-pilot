@@ -1,0 +1,31 @@
+<view class="page brief-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="native-safe-head"><view class="native-safe-space"></view><view class="native-safe-row"><view class="safe-hbtn" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view><view class="safe-body"><text class="safe-title brief-title serif">个人档案</text></view><view class="safe-spacer"></view></view></view>
+  <view class="pad brief-pad">
+    <view wx:if="{{loading}}" class="native-loading"><view wx:for="{{[1,2,3,4]}}" wx:key="*this" class="native-skeleton"></view></view>
+    <view wx:elif="{{failed}}" class="native-state"><text>个人档案读取失败</text><button bindtap="retry">重新读取</button></view>
+    <block wx:else>
+      <view class="bf-hero">
+        <view class="bf-hero-top"><view class="bf-hero-ic"><native-icon name="insight" tone="accent" color-key="{{colorKey}}" size="20"></native-icon></view><view wx:if="{{understanding}}" class="bf-badge {{understanding.maturity}}"><text>{{understanding.maturityLabel}}</text></view></view>
+        <text class="bf-k">军师有多了解你的生意</text><text class="bf-t serif">{{understanding ? understanding.title : '个人档案'}}</text>
+        <text class="bf-summary">{{understanding ? understanding.summary : '登录并补充经营资料后，我会把对你的理解整理在这里。'}}</text>
+        <text wx:if="{{understanding}}" class="bf-counts">{{understanding.countsLine}}</text>
+      </view>
+      <view class="bf-sec">
+        <view class="bf-memhead"><text class="bf-sec-t">军师记忆</text><text class="bf-memcount">{{memoryTotal ? '已记住 '+memoryTotal+' 条' : '还没开始记'}}</text></view>
+        <view wx:for="{{memoryGroups}}" wx:key="key" class="bf-memcat">
+          <view class="bf-memcat-h"><view class="bf-memcat-ic" style="background:{{item.tint}}"><native-icon name="{{item.icon}}" tone="{{item.tone}}" size="15"></native-icon></view><view class="bf-memcat-tt"><text class="bf-memcat-t">{{item.title}}</text><text class="bf-memcat-s">{{item.sub}}</text></view><text class="bf-memcat-fill">{{item.fillLabel}}</text></view>
+          <view wx:for="{{item.entries}}" wx:for-item="entry" wx:key="id" class="bf-memrow"><view class="bf-memory-dot"></view><text class="bf-memrow-t">{{entry.text}}</text><text wx:if="{{entry.removable}}" class="bf-memrow-del" data-id="{{entry.id}}" catchtap="removeEntry">删</text></view>
+          <text wx:if="{{!item.entries.length}}" class="bf-memcat-empty">这方面军师还不太了解，多聊聊就补上了。</text>
+        </view>
+        <text class="bf-empty bf-memory-help">记错了点「删」；删掉后军师不再据此判断。</text>
+      </view>
+      <view class="bf-dossier" bindtap="openDossier"><view class="bf-dossier-ic"><native-icon name="insight" tone="gold" size="18"></native-icon></view><view class="bf-dossier-l"><text class="bf-dossier-t serif">完整履历 · 创始人战略档案</text><text class="bf-dossier-s">把军师记住的这些，蒸馏成一份完整档案</text></view><native-icon name="arrow" tone="gold" size="20"></native-icon></view>
+      <block wx:if="{{understanding}}"><view wx:for="{{sections}}" wx:key="key" class="bf-sec"><text class="bf-sec-t">{{item.title}}</text><text wx:for="{{item.items}}" wx:for-item="entry" wx:key="*this" class="bf-item">{{entry}}</text><text wx:if="{{!item.items.length}}" class="bf-empty">{{item.emptyText}}</text></view>
+        <view wx:if="{{questions.length}}" class="bf-sec"><text class="bf-sec-t">军师下一步会问</text><view class="bf-chip-wrap"><view wx:for="{{questions}}" wx:key="*this" class="bf-chip" data-question="{{item}}" bindtap="askQuestion"><text>{{item}}</text></view></view></view>
+      </block>
+      <view wx:else class="bf-sec"><text class="bf-empty">暂无资料。先完成建档，后续对话、案卷、方案和资料库都会慢慢存进个人档案。</text></view>
+      <view class="bf-cta" bindtap="askGeneral"><native-icon name="spark" tone="white" size="17"></native-icon><text>让军师来问我</text></view>
+    </block>
+  </view>
+  <login-sheet open="{{showLogin}}" reason="history" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

@@ -4,7 +4,7 @@
 //
 // 前置：
 //   1) mp 后台「上传密钥」下载 private.<appid>.key，并把**本机公网 IP** 加进该密钥 IP 白名单。
-//   2) 先 server 模式构建产物：npm run build:weapp:server
+//   2) 先构建原生产物；连真实后端时运行 npm run build:weapp:server。
 //
 // 用法（密钥只给路径，别贴聊天）：
 //   WEAPP_UPLOAD_KEY=/abs/path/private.<appid>.key \
@@ -13,6 +13,7 @@ import ci from 'miniprogram-ci';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { assertNativeBuild } from './weapp-build-meta.mjs';
 
 const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -23,14 +24,21 @@ const APPID = arg('appid', process.env.WEAPP_APPID || projectConfig.appid);
 const KEY = process.env.WEAPP_UPLOAD_KEY || arg('key');
 const DESC = arg('desc', process.env.WEAPP_DESC || '军师 · 真机预览');
 const PAGE = arg('page', process.env.WEAPP_PAGE || '');           // 可选：指定打开页，如 pages/index/index
-const PROJ = path.join(APP_ROOT, 'dist');
+const PROJ = path.join(APP_ROOT, 'dist-native');
 const QR_OUT = path.join(APP_ROOT, '..', 'weapp-preview.png');
 const INFO_OUT = path.join(APP_ROOT, '..', 'weapp-auto-preview-info.json');
 
 const die = (m) => { console.error(`[weapp] ✗ ${m}`); process.exit(1); };
+if (!fs.existsSync(path.join(PROJ, 'app.json'))) die(`未找到构建产物 ${PROJ}/app.json —— 先跑 npm run build:weapp`);
+if (!fs.existsSync(path.join(PROJ, 'project.config.json'))) die('dist-native 缺少独立 project.config.json；拒绝预览。');
+let buildMeta;
+try {
+  buildMeta = assertNativeBuild(PROJ);
+} catch (e) {
+  die(e instanceof Error ? e.message : String(e));
+}
 if (!KEY) die('缺少上传密钥：设 WEAPP_UPLOAD_KEY=/path/to/private.<appid>.key');
 if (!fs.existsSync(KEY)) die(`密钥文件不存在：${KEY}`);
-if (!fs.existsSync(path.join(PROJ, 'app.json'))) die(`未找到构建产物 ${PROJ}/app.json —— 先跑 npm run build:weapp:server`);
 
 const project = new ci.Project({
   appid: APPID,
@@ -40,7 +48,7 @@ const project = new ci.Project({
   ignores: ['node_modules/**/*'],
 });
 
-console.log(`[weapp] 生成预览二维码 appid=${APPID} desc="${DESC}"\n        from ${PROJ}`);
+console.log(`[weapp] 生成预览二维码 appid=${APPID} desc="${DESC}"\n        from ${PROJ} (${buildMeta.mode} · ${buildMeta.runtime})`);
 try {
   const r = await ci.preview({
     project,

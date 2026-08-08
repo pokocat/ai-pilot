@@ -12,7 +12,7 @@
                          ┌────────────────────────── 你的服务器 ──────────────────────────┐
    浏览器 / 微信小程序     │                                                                │
         │                │   Nginx (443, 反向代理 + 静态托管)                              │
-        ▼                │     ├── /          → H5 静态 (app/dist)          ── 静态        │
+        ▼                │     ├── /          → H5 静态 (app/dist-h5)       ── 静态        │
    https://域名 ─────────┼──►  ├── /admin/    → 运营后台静态 (admin/dist)   ── 静态        │
                          │     └── /api/      → 反代 http://127.0.0.1:4000  ── 动态        │
                          │                              │                                  │
@@ -40,11 +40,11 @@
 | 组件 | 目录 | 构建命令 | 产物 | 运行 |
 |---|---|---|---|---|
 | 后端 API | `server/` | `npm ci && npx prisma generate && npm run build` | `dist/` | `node dist/index.js`（systemd/pm2 守护） |
-| H5（移动端 Web） | `app/` | `TARO_APP_MODE=server TARO_APP_API=https://域名/api npm run build:h5` | `app/dist/`（静态） | Nginx 托管 |
+| H5（移动端 Web） | `app/` | `TARO_APP_MODE=server TARO_APP_API=https://域名/api npm run build:h5` | `app/dist-h5/`（静态） | Nginx 托管 |
 | 运营后台 | `admin/` | `npm ci && npm run build -- --base=/admin/` | `admin/dist/`（静态） | Nginx 托管 |
-| 微信小程序 | `app/` | `TARO_APP_MODE=server TARO_APP_API=https://域名/api npm run build:weapp` | `app/dist/`（weapp 包） | 微信开发者工具上传（见 §8） |
+| 微信小程序 | `app/weapp-native` | `WEAPP_APP_MODE=server WEAPP_APP_API=https://域名/api npm run build:weapp` | `app/dist-native/`（原生 weapp 包） | 微信开发者工具上传（见 §8） |
 
-> 小程序与 H5 是同一套码；上线小程序额外需要备案与合法域名（§8）。
+> 小程序与 H5 是两套渲染实现、同一后端契约；上线小程序额外需要备案与合法域名（§8）。
 > 测试期若需让新注册用户默认开通高级套餐，可在服务端 `.env` 设置 `TEST_DEFAULT_PLAN_NAME=决策版` 并重启；存量用户先运行 `npm run db:grant-test-plan -- --plan=决策版` 试算，确认后追加 `--apply`。脚本不会降级企业私有化或重复发放有效同档套餐。
 
 ## 3. 前置
@@ -173,7 +173,7 @@ npm run db:backfill-plan-commercial -- --apply
 # H5（指向你的公网 API）
 cd /opt/junshi/app && npm ci
 TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:h5
-sudo mkdir -p /var/www/junshi/h5 && sudo cp -r dist/* /var/www/junshi/h5/
+sudo mkdir -p /var/www/junshi/h5 && sudo cp -r dist-h5/* /var/www/junshi/h5/
 
 # 运营后台（子路径 /admin/ 需带 base 构建；后台用相对 /api，同源即可）
 cd /opt/junshi/admin && npm ci && npm run build -- --base=/admin/

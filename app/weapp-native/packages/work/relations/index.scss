@@ -1,0 +1,7 @@
+@use "../../../styles/subpage.scss";
+@use "../../../../src/packages/work/relations/index.scss";
+
+.rel-page .rel-src-st { color: var(--accent); }
+.rel-page .rel-privacy-ic { background: var(--accent-soft); }
+.rel-page .rel-act-main { background: var(--accent); }
+.rel-page .rel-act-secondary { border-color: var(--accent); color: var(--accent); }

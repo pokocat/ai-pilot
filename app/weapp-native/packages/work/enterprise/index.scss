@@ -1,0 +1,10 @@
+@use "../../../styles/subpage.scss";
+@use "../../../../src/packages/work/enterprise/index.scss";
+
+.ent-page .ent-cloud-ic,
+.ent-page .ent-mat-i { background: var(--accent-soft); color: var(--accent); }
+.ent-page .ent-cloud-go { display: flex; align-items: center; gap: 2px; }
+.ent-page .ent-fold,
+.ent-page .ent-private-go { color: var(--accent); }
+.ent-page .ent-act-main { background: var(--accent); }
+.ent-page .ent-act-secondary { border-color: var(--accent); color: var(--accent); }

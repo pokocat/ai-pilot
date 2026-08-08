@@ -1,0 +1,97 @@
+<view class="plans-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="plans-header">
+    <view class="plans-safe"></view>
+    <view class="plans-headrow">
+      <view class="plans-back" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view>
+      <text class="plans-title serif">方案与权益</text>
+      <view class="plans-spacer"></view>
+    </view>
+  </view>
+
+  <scroll-view scroll-y class="plans-scroll">
+    <view class="plans-body">
+      <view wx:if="{{current}}" class="current-plan">
+        <view class="current-top"><text>我的方案</text><text class="state-pill">{{current.expired?'已到期':'使用中'}}</text></view>
+        <text class="current-name serif">{{current.plan.name}}</text>
+        <text class="current-level">{{current.plan.usageLabel}}</text>
+        <text wx:if="{{current.expired}}" class="current-level">已于 {{current.expiresText}} 到期</text>
+        <block wx:else>
+          <view wx:if="{{usage&&!usage.unlimited}}" class="usage-line">
+            <view class="usage-track"><view class="usage-fill" style="width:{{usage.usagePercent}}%"></view></view>
+            <text>{{usage.usagePercent}}%</text>
+          </view>
+          <view wx:if="{{subscription}}" class="subscription-row">
+            <view class="subscription-copy">
+              <text class="subscription-title">{{subscription.statusTitle}}</text>
+              <text class="subscription-note">{{subscription.statusNote}}</text>
+            </view>
+            <text wx:if="{{subscription.canCancel}}" class="subscription-cancel" bindtap="cancelAutoRenew">{{busy===subscription.id?'处理中…':'关闭'}}</text>
+          </view>
+          <text wx:else class="manual-note">当前未开启自动续费</text>
+        </block>
+      </view>
+
+      <view wx:elif="{{authed}}" class="current-plan empty">
+        <text>尚未开通方案</text><text>选择适合当前经营节奏的方案</text>
+      </view>
+
+      <view class="plans-section">
+        <text class="plans-section-title">选择方案</text>
+        <view class="period-switch">
+          <view class="{{period==='month'?'on':''}}" data-period="month" bindtap="setPeriod">月付</view>
+          <view class="{{period==='year'?'on':''}}" data-period="year" bindtap="setPeriod">年付</view>
+        </view>
+      </view>
+
+      <view wx:if="{{loading}}" class="plans-state">正在读取方案…</view>
+      <view wx:elif="{{!options.length}}" class="plans-state">暂无这一周期的方案</view>
+      <view wx:else class="plan-list">
+        <view wx:for="{{options}}" wx:key="index" class="plan-option">
+          <view class="option-top">
+            <view>
+              <text class="option-name">{{item.plan.name}}</text>
+              <text class="option-level">{{item.plan.usageLabel}} · {{item.periodText}}</text>
+              <text wx:if="{{item.pendingText}}" class="option-expiry">{{item.pendingText}}</text>
+            </view>
+            <text class="option-price">{{item.priceText}}</text>
+          </view>
+          <view class="features">
+            <view wx:for="{{item.plan.featuresJson}}" wx:key="*this" class="feature-row">
+              <native-icon name="check" tone="green" size="14"></native-icon><text>{{item}}</text>
+            </view>
+          </view>
+          <button class="option-action {{item.canPurchase?'enabled':''}}" data-index="{{index}}" bindtap="choose">{{busy===item.busyKey?'处理中…':item.actionText}}</button>
+        </view>
+      </view>
+      <view class="plans-bottom"></view>
+    </view>
+  </scroll-view>
+
+  <view wx:if="{{quote}}" class="quote-layer" bindtap="closeQuote">
+    <view class="quote-panel" catchtap="stop">
+      <view class="quote-head">
+        <text class="quote-title serif">确认方案</text>
+        <view class="quote-close" bindtap="closeQuote"><native-icon name="close" tone="iron" size="20"></native-icon></view>
+      </view>
+      <view class="quote-route"><text>{{quote.currentName}}</text><native-icon name="arrow" tone="neutral" size="18"></native-icon><text>{{quote.targetPlan.name}}</text></view>
+      <view class="quote-line"><text>方案价格</text><text>{{quote.fullPriceText}}</text></view>
+      <view wx:if="{{quote.remainingValue>0}}" class="quote-line"><text>剩余价值抵扣</text><text>-{{quote.remainingValueText}}</text></view>
+      <view class="quote-total"><text>本次实付</text><text>{{quote.chargeText}}</text></view>
+
+      <view class="purchase-modes">
+        <view class="purchase-mode {{purchaseMode==='manual'?'selected':''}}" data-mode="manual" bindtap="chooseMode">
+          <native-icon class="mode-radio" name="{{purchaseMode==='manual'?'radioChecked':'radio'}}" tone="accent" color-key="{{colorKey}}" size="18"></native-icon>
+          <view><text class="mode-title">单次购买</text><text class="mode-desc">只购买当前周期，到期后由你决定是否续费</text></view>
+        </view>
+        <view wx:if="{{quote.targetPlan.autoRenewAvailable}}" class="purchase-mode {{purchaseMode==='auto'?'selected':''}}" data-mode="auto" bindtap="chooseMode">
+          <native-icon class="mode-radio" name="{{purchaseMode==='auto'?'radioChecked':'radio'}}" tone="accent" color-key="{{colorKey}}" size="18"></native-icon>
+          <view><text class="mode-title">自动续费</text><text class="mode-desc">本次 {{quote.chargeText}}，之后每{{quote.targetPlan.period==='year'?'年':'月'}} {{quote.fullPriceText}}；可随时关闭</text></view>
+        </view>
+      </view>
+      <text class="quote-note">{{purchaseMode==='auto'&&quote.targetPlan.autoRenewAvailable?'你将在微信支付页主动确认自动续费授权；后续按当前周期续费。':'本次为单次购买，不会自动续费。'}}</text>
+      <button class="quote-confirm" bindtap="confirmPay">{{busy?'处理中…':'确认并支付'}}</button>
+    </view>
+  </view>
+
+  <login-sheet open="{{showLogin}}" reason="purchase" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

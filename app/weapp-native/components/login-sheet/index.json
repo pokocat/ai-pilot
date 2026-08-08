@@ -1,0 +1,5 @@
+{
+  "component": true,
+  "styleIsolation": "apply-shared",
+  "usingComponents": { "native-icon": "/components/native-icon/index" }
+}

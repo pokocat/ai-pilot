@@ -1,0 +1,8 @@
+<view wx:if="{{active}}" class="coach" catchtouchmove="stop">
+  <view class="coach-panel">
+    <view class="cp-head"><view class="cp-lead"><view class="cp-seal"><text class="serif">师</text></view><text class="cp-kicker">{{kicker}}</text></view><text class="cp-skip" bindtap="skip">跳过</text></view>
+    <text class="cp-title serif">{{title}}</text><text class="cp-text">{{text}}</text>
+    <view class="cp-btn serif" bindtap="advance"><text>{{action}}</text></view>
+  </view>
+  <view class="coach-arrow" style="left:{{arrowLeft}}px"></view>
+</view>

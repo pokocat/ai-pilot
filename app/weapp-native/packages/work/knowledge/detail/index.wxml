@@ -1,0 +1,15 @@
+<view class="page knowledge-detail-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="native-safe-head"><view class="native-safe-space"></view><view class="native-safe-row"><view class="safe-hbtn" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view><view class="safe-body"><text class="safe-title serif">资料详情</text></view><view class="safe-spacer"></view></view></view>
+  <view class="pad detail-body">
+    <view wx:if="{{loading}}" class="native-loading"><view wx:for="{{[1,2,3]}}" wx:key="*this" class="native-skeleton"></view></view>
+    <view wx:elif="{{failed}}" class="native-state"><text>资料读取失败</text><button bindtap="retry">重新读取</button></view>
+    <block wx:elif="{{detail}}">
+      <view class="kd-head card"><view class="kd-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="20"></native-icon></view><view class="kd-hb"><text class="kd-t">{{detail.title}}</text><text class="kd-m">{{detail.meta}}</text></view></view>
+      <view wx:if="{{pollHint}}" class="kd-poll-hint"><text>还在解析中，下拉可刷新查看最新状态</text></view>
+      <view wx:if="{{detail.canAnalyze}}" class="kd-analyze card {{busy?'busy':''}}" bindtap="analyze"><view class="kd-an-ic"><native-icon name="chart" tone="accent" color-key="{{colorKey}}" size="20"></native-icon></view><view class="kd-an-b"><text class="kd-an-t">{{busy ? '正在检查…' : '帮我做经营体检'}}</text><text class="kd-an-s">让军师过一遍账，读出隐患，开三条军令</text></view><view class="kd-an-go"><native-icon name="arrow" tone="white" size="18"></native-icon></view></view>
+      <block wx:if="{{fullPreview}}"><text class="kd-sec-title">正文内容</text><view class="kd-preview card"><text class="kd-preview-t">{{preview}}</text><text wx:if="{{longPreview}}" class="kd-preview-more" bindtap="togglePreview">{{expanded ? '收起' : '展开全文'}}</text></view></block>
+      <block wx:elif="{{detail.settled}}"><text class="kd-sec-title">正文内容</text><view class="kd-preview card"><text class="kd-preview-empty">这份资料没有可显示的正文（可能是纯图片或扫描件，或解析未提取到文字）。</text></view></block>
+    </block>
+  </view>
+  <login-sheet open="{{showLogin}}" reason="history" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

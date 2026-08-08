@@ -5,8 +5,7 @@
 // 前置：
 //   1) 从 mp 后台下载「上传密钥」：开发管理 → 开发设置 → 小程序代码上传 → 生成并下载 private.<appid>.key
 //   2) 把**本机公网 IP** 加进该密钥的 IP 白名单（同一页面），否则上传被拒。
-//   3) 先 server 模式构建产物：
-//      TARO_APP_MODE=server TARO_APP_API=https://wxapi.aibuzz.cn/api npm run build:weapp
+//   3) 先构建原生 server 产物：npm run build:weapp:server
 //
 // 用法（密钥只给路径，不要贴进聊天）：
 //   WEAPP_UPLOAD_KEY=/绝对路径/private.<appid>.key \
@@ -26,8 +25,8 @@ const APPID = arg('appid', process.env.WEAPP_APPID || projectConfig.appid);
 const KEY = process.env.WEAPP_UPLOAD_KEY || arg('key');
 const VERSION = arg('version', process.env.WEAPP_VERSION);
 const DESC = arg('desc', process.env.WEAPP_DESC || '军师 · 例行更新');
-const PROJ = path.join(APP_ROOT, 'dist');
-const EXPECTED_API = process.env.WEAPP_EXPECTED_API || process.env.TARO_APP_API || 'https://wxapi.aibuzz.cn/api';
+const PROJ = path.join(APP_ROOT, 'dist-native');
+const EXPECTED_API = process.env.WEAPP_EXPECTED_API || process.env.WEAPP_APP_API || 'https://wxapi.aibuzz.cn/api';
 
 const die = (m) => { console.error(`[weapp] ✗ ${m}`); process.exit(1); };
 function readBuiltJs(dir) {
@@ -48,16 +47,18 @@ function assertServerBuild() {
   }
   const bundle = readBuiltJs(PROJ);
   if (!bundle.includes(EXPECTED_API)) {
-    die(`dist 未注入线上 API：${EXPECTED_API}。请先运行 npm run build:weapp:server，避免上传 mock 小程序包。`);
+    die(`dist-native 未注入线上 API：${EXPECTED_API}。请先运行 npm run build:weapp:server，避免上传 mock 小程序包。`);
   }
   if (bundle.includes('http://localhost:4000/api')) {
-    die('dist 仍包含默认 localhost API，疑似 mock/dev 构建；拒绝上传。');
+    die('dist-native 仍包含默认 localhost API，疑似 mock/dev 构建；拒绝上传。');
   }
 }
 if (!KEY) die('缺少上传密钥：设 WEAPP_UPLOAD_KEY=/path/to/private.<appid>.key（mp 后台下载）');
 if (!fs.existsSync(KEY)) die(`密钥文件不存在：${KEY}`);
 if (!VERSION) die('缺少版本号：加 --version 0.2.0');
+if (!/^\d+\.\d+\.\d+$/.test(VERSION)) die(`版本号格式无效：${VERSION}，应为 x.y.z`);
 if (!fs.existsSync(path.join(PROJ, 'app.json'))) die(`未找到已构建产物 ${PROJ}/app.json —— 先跑 server 模式 build:weapp`);
+if (!fs.existsSync(path.join(PROJ, 'project.config.json'))) die('dist-native 缺少独立 project.config.json；拒绝上传。');
 assertServerBuild();
 
 const project = new ci.Project({
@@ -70,7 +71,7 @@ const project = new ci.Project({
 
 console.log(`[weapp] 上传 appid=${APPID} version=${VERSION} desc="${DESC}"\n        from ${PROJ}`);
 try {
-  // 产物已由 Taro 构建并压缩，CI 不再二次编译/压缩，避免破坏已编译代码。
+  // 原生产物已由本地构建脚本完成校验，CI 不再二次转译。
   const r = await ci.upload({
     project,
     version: VERSION,

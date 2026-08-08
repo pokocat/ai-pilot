@@ -1,0 +1,18 @@
+@use "../../../../src/packages/work/poster/index.scss" as original;
+
+.poster-set { min-height: 100vh; box-sizing: border-box; color: var(--ink); }
+.form-header { background: var(--surface); border-bottom: 1px solid var(--line); }
+.form-safe { height: var(--native-nav-inset); }
+.form-headrow { height: 50px; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; }
+.form-back, .form-spacer { width: 42px; height: 42px; display: flex; align-items: center; }
+.form-title { font-size: 16px; font-weight: 600; }
+.ps-pad { padding-top: 10px; }
+.ps-reason { border-color: var(--accent); }
+.ps-tpl.on { border-color: var(--accent); }
+.ps-check.on { background: var(--accent); border-color: var(--accent); }
+.ps-thumb-x { display: flex; align-items: center; justify-content: center; }
+.ps-submit-err-a { color: var(--accent); }
+.ps-btn { width: 100%; margin: 0; background: var(--accent); border: 0; line-height: 50px; }
+.ps-price { display: flex; align-items: center; gap: 3px; }
+.ps-btn-c { line-height: 1; }
+.ps-foot { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }

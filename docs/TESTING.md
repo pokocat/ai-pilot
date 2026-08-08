@@ -121,9 +121,9 @@ node --import tsx --test test/dify.test.ts   # Dify 提供方（28 用例）：�
 - 断言服务层细节（召回/diff/隔离）可直接 import `server/src/services/*`，与路由共用同一 `prisma`。
 - 待补（见 ROADMAP P3）：性能基准（非冒烟）。
 
-## 五、附：H5 浏览器手测（替代小程序，推荐）
+## 五、附：H5 浏览器手测与原生小程序验收
 
-一套 Taro 码同出 weapp + H5、功能完全对齐（无任何平台分叉代码）。**用 H5 在浏览器里即可手测全部后端变更**（项目 / 知识 / 版本化报告 / @引用 / 汇总 / 算力扣减），免微信开发者工具。
+H5 继续用 Taro/React，微信端已迁移到 `app/weapp-native` 原生实现；二者共享后端 REST/SSE 契约，但不是同一套渲染代码。H5 适合快速验证后端流程，输入法、键盘、原生组件、分包、tabbar 与真机视觉必须在微信开发者工具/手机上验收，不能再用 H5 代替。
 
 ### 最简：一键起全栈（推荐）
 ```bash
@@ -142,13 +142,14 @@ npm run dev   # 根目录：确保 PG → 建库/迁移/首次种子 → 同起 
 
 ### 微信小程序账号联调
 1. 服务端 `.env` 填 `WECHAT_MINI_APPID`（与 `app/project.config.json` 一致）和 `WECHAT_MINI_SECRET`，执行 `cd server && npm run db:push && npm run dev`。
-2. 小程序构建走真实后端：`cd app && TARO_APP_MODE=server TARO_APP_API=https://你的域名/api npm run build:weapp`。
-3. 微信开发者工具导入 `app/`；本地调试可临时勾选“不校验合法域名”，真机/预览必须在微信后台把 `TARO_APP_API` 的 HTTPS 域名加入 request 合法域名。
+2. 小程序构建走真实后端：`cd app && WEAPP_APP_MODE=server WEAPP_APP_API=https://你的域名/api npm run build:weapp`；生产固定域名可直接 `npm run build:weapp:server`。
+3. 本地走查导入 `app/dist-native/`（构建会生成独立 DevTools 配置）；发布 CLI 仍指向 `app/`。真机/预览必须在微信后台把 `WEAPP_APP_API` 的 HTTPS 域名加入 request 合法域名。
 4. 登录弹层会在 weapp + server 模式显示“微信账号登录”；后端用 `wx.login` code 换 openid/unionid 后生成自有 token，`session_key` 不下发前端。
 
 ### 已验证（本地实跑，浏览器 :5173 → 后端 :4000）
 CORS 预检放行自定义头 `x-user-id`；登录→`/me`→产出全通；**算力实时扣减**（产出前 10 → 报告后 9、`/me` 同步）；`/me` 正确读出 `ai=Agnes 2.0 Flash`。
 
 ### 说明
-- H5 用 **hash 路由**，`dist/` 可被任意静态服务器打开；`serve:h5` 是零依赖内置静态服务器（`app/scripts/serve-h5.mjs`）。
+- H5 用 **hash 路由**，`dist-h5/` 可被任意静态服务器打开；`serve:h5` 是零依赖内置静态服务器（`app/scripts/serve-h5.mjs`）。
+- 原生小程序自动测试：`cd app && npm test` 会检查 38 条路由覆盖、源码/产物无 Taro、聊天 textarea 无 `value`、非品牌图标统一 Lucide，以及 H5/微信产物隔离；随后运行 `npm run build:weapp:server` 并在 DevTools 逐页走查。
 - 普通聊天默认走 `/generate` SSE 真流式：H5 用 `fetch` ReadableStream，小程序用 `enableChunked/onChunkReceived`；总军师 on-demand 普通问答走 token 流，明确成果请求才回同步成果路径；流式失败自动回退 `generate-sync`(POST)。TC-I 覆盖 `/generate` 事件流。

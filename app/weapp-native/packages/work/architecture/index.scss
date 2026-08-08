@@ -1,0 +1,7 @@
+@use "../../../styles/subpage.scss";
+@use "../../../../src/packages/work/architecture/index.scss";
+
+.arch-page .arch-row-i,
+.arch-page .arch-path-ic { background: var(--accent-soft); color: var(--accent); }
+.arch-page .arch-act-main { background: var(--accent); }
+.arch-page .arch-act-secondary { border-color: var(--accent); color: var(--accent); }

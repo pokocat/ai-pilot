@@ -1,0 +1,43 @@
+<view class="page onboarding {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="native-ob-head"><view class="native-ob-back" bindtap="leaveOnboarding"><native-icon name="back" tone="ink" size="24"></native-icon></view><view class="native-ob-spacer"></view></view>
+  <scroll-view scroll-y enhanced show-scrollbar="false" class="ob-scroll">
+    <view wx:if="{{step === 'color'}}" class="ob-step">
+      <text class="ob-kicker">壹 · 入 部</text><text class="ob-title serif">择一枚本命色</text>
+      <text class="ob-lead">一色一势。选中此后与你并肩的那一枚，军师的判词，也会随之落墨。</text>
+      <view class="ob-grid">
+        <view wx:for="{{colors}}" wx:key="key" class="ob-color {{colorKey === item.key ? 'on' : ''}}" data-key="{{item.key}}" bindtap="selectColor">
+          <view class="oc-head"><view class="oc-dot" style="background:{{item.accent}}"></view><text class="oc-name serif">{{item.cn}}</text><block wx:if="{{colorKey === item.key}}"><native-icon name="check" tone="accent" color-key="{{colorKey}}" size="13"></native-icon></block></view>
+          <text class="oc-motto">{{item.verdict}}</text>
+        </view>
+      </view>
+      <view class="ob-quote"><text class="oq-label">军 师 批 曰</text><text class="oq-body serif">「{{currentColor.verdict}}」</text></view>
+      <view class="ob-cta serif" bindtap="nextColor"><text>落 定 · 下 一 步</text></view>
+      <text class="ob-skip" bindtap="leaveOnboarding">稍后再说</text>
+    </view>
+
+    <view wx:elif="{{step === 'casefile'}}" class="ob-step">
+      <text class="ob-kicker">贰 · 立 案 卷</text><text class="ob-title serif">先给军师交个底</text>
+      <text class="ob-lead">三两下说清你的营生，答得越实，军师判得越准。</text>
+      <view wx:for="{{questions}}" wx:key="key" wx:for-item="question" class="ob-field">
+        <text class="of-label">{{question.title}}</text>
+        <view class="of-chips">
+          <view wx:for="{{question.options}}" wx:key="*this" wx:for-item="option" class="of-chip {{answers[question.key] === option ? 'on' : ''}}" data-key="{{question.key}}" data-value="{{option}}" bindtap="selectSurveyOption"><text>{{option}}</text></view>
+        </view>
+        <input wx:if="{{answers[question.key] === '其他' || answers[question.key] === '其它'}}" class="of-input of-other" value="{{custom[question.key] || ''}}" maxlength="20" placeholder="请补一句你的情况" data-key="{{question.key}}" bindinput="inputCustom" />
+      </view>
+      <view class="ob-field"><text class="of-label">公司 / 品牌名</text><input class="of-input" value="{{company}}" maxlength="40" placeholder="选填，便于军师称呼与建档" bindinput="inputCompany" /></view>
+      <view class="ob-cta serif {{surveyDone && !saving ? '' : 'disabled'}}" bindtap="submitCasefile"><text>{{saving ? '正在保存案卷…' : (surveyDone ? '请 军 师 首 判' : '先答完上面几题')}}</text></view>
+      <text class="ob-skip" bindtap="leaveOnboarding">稍后再建档</text>
+    </view>
+
+    <view wx:else class="ob-step">
+      <view class="ob-marshal"><view class="om-seal serif"><text>师</text></view><view class="om-meta"><text class="om-title serif">总军师 · {{judgeDone ? '研判已毕' : '正在研判'}}</text><view wx:if="{{!judgeDone}}" class="om-dots"><view class="omd"></view><view class="omd"></view><view class="omd"></view></view></view></view>
+      <text class="ob-kicker">初 步 军 情</text><view class="ob-judge-line"><text class="ob-judge serif">{{typed}}</text><view wx:if="{{!judgeDone}}" class="ob-caret"></view></view>
+      <block wx:if="{{judgeDone}}">
+        <view class="ob-conflict"><text class="ocf-label">主 要 矛 盾</text><text class="ocf-body serif">{{mainConflict}}</text></view>
+        <view wx:if="{{todoOne}}" class="ob-todo"><text class="ot-label">今 日 一 事</text><text class="ot-body">{{todoOne}}</text></view>
+        <view class="ob-cta serif" bindtap="enterHQ"><text>进 入 参 谋 部</text></view><text class="ob-skip" bindtap="leaveOnboarding">稍后再看</text>
+      </block>
+    </view>
+  </scroll-view>
+</view>

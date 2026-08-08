@@ -1,0 +1,8 @@
+@use "../../../styles/subpage.scss";
+@use "../../../../src/packages/work/community/index.scss";
+
+.community-page .class-st,
+.community-page .class-btn { color: var(--accent); border-color: var(--accent); }
+.community-page .step-no.is-active,
+.community-page .cm-submit { background: var(--accent); color: #FBFAF6; }
+.community-page .teacher-av { background: var(--accent-soft); }

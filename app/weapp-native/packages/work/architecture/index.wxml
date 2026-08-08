@@ -1,0 +1,14 @@
+<view class="native-subpage page arch-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="safe-head"><view class="safe-hbtn" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view><view class="safe-body"><view class="safe-title-wrap"><text class="safe-title serif">公司与事业架构</text></view></view><view class="safe-spacer"></view></view>
+  <scroll-view scroll-y class="generic-scroll"><view class="pad route-body">
+    <view class="arch-hero card"><text class="kicker">Strategy Report · 体系建设建议</text><text class="h1">先把事业理清，再谈主体</text><text class="arch-quote">不是先注册更多公司，而是先把事业、主体和实际控制关系理清。</text><text class="arch-p">这不是默认功能。只有当军师在诊断里识别到多主体经营、新事业承接和权责关系需要长期管理，才建议建立企业版图；建立之后它会持续维护，而不是一次性画张图。</text></view>
+    <view class="sec-head"><text class="sec-title">什么情况下需要</text><text class="sec-more">命中一条就值得建</text></view>
+    <view class="arch-list card"><view wx:for="{{triggers}}" wx:key="no" class="arch-row"><text class="arch-row-i serif">{{item.no}}</text><text class="arch-row-t">{{item.text}}</text></view></view>
+    <view class="sec-head"><text class="sec-title">建立后管理什么</text><text class="sec-more">四类长期关系</text></view>
+    <view class="arch-grid"><view wx:for="{{scopes}}" wx:key="title" class="arch-cell card"><text class="arch-cell-t">{{item.title}}</text><text class="arch-cell-d">{{item.desc}}</text></view></view>
+    <view class="sec-head"><text class="sec-title">两条起步路径</text><text class="sec-more">与军师确认后开始</text></view>
+    <view wx:for="{{paths}}" wx:key="title" class="arch-path card" bindtap="askAdvisor"><view class="arch-path-ic"><native-icon name="{{item.icon}}" tone="accent" color-key="{{colorKey}}" size="16"></native-icon></view><view class="arch-path-b"><text class="arch-path-t">{{item.title}}</text><text class="arch-path-d">{{item.desc}}</text></view><native-icon class="arch-path-go" name="arrow" tone="neutral" size="16"></native-icon></view>
+    <view class="arch-note card"><text class="arch-note-t">和现在的用法有什么变化</text><text class="arch-note-d">对话诊断、战略报告、军令、执行和复盘都不变。只有你认可这份建议之后，系统才会把版图作为长期入口维护，并把当前的整理任务同步到执行页。</text><text class="arch-note-d arch-note-warn">敏感账号只保存账号归属、保管人和密码库引用，不把明文密码交给 AI。</text></view>
+    <view class="arch-actions"><view class="arch-act arch-act-main" bindtap="askAdvisor"><text>跟军师确认要不要建</text><native-icon name="send" tone="white" size="15"></native-icon></view><view class="arch-act arch-act-secondary" bindtap="openEnterprise"><text>看企业服务办理台</text></view></view><view class="route-bottom-space"></view>
+  </view></scroll-view>
+</view>

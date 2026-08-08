@@ -1,0 +1,9 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "tab-header": "/components/tab-header/index",
+    "login-sheet": "/components/login-sheet/index",
+    "coach-marks": "/components/coach-marks/index",
+    "native-icon": "/components/native-icon/index"
+  }
+}

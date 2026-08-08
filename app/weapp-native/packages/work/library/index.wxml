@@ -1,0 +1,10 @@
+<view class="page library-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="native-safe-head"><view class="native-safe-space"></view><view class="native-safe-row"><view class="safe-hbtn" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view><view class="safe-body"><text class="safe-title lib-title serif">我的方案库</text></view><view class="safe-spacer"></view></view></view>
+  <view class="pad library-body">
+    <view wx:if="{{loading && !items.length}}" class="native-loading"><view wx:for="{{[1,2,3]}}" wx:key="*this" class="native-skeleton"></view></view>
+    <view wx:elif="{{errorText}}" class="native-state"><text>{{errorText}}</text><button bindtap="retry">重新读取</button></view>
+    <view wx:elif="{{!items.length}}" class="lib-empty"><view class="e-ic"><native-icon name="layers" tone="accent" color-key="{{colorKey}}" size="22"></native-icon></view><text class="et">方案库还是空的</text><text class="es">在对话里让军师产出方案后，点「存入方案库」即可在此查看与回溯。</text><view class="es-btn" bindtap="goChat"><text>去参谋室产出第一份方案</text></view></view>
+    <view wx:else class="lib-list"><view wx:for="{{items}}" wx:key="id" class="lib-item card" data-index="{{index}}" bindtap="open"><view class="li-ic"><native-icon name="{{item.icon}}" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view><view class="li-b"><text class="li-t">{{item.title}}</text><text class="li-m">{{item.agentName}} · {{item.atText}}</text></view><view wx:if="{{item.hasVersion}}" class="li-ver"><text>v{{item.version}}</text></view><native-icon name="arrow" tone="neutral" size="17"></native-icon></view></view>
+  </view>
+  <login-sheet open="{{showLogin}}" reason="history" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

@@ -1,0 +1,75 @@
+<view class="report-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="sub-header">
+    <view class="sub-safe"></view>
+    <view class="sub-headrow">
+      <view class="sub-back" bindtap="back"><native-icon name="back" tone="ink" size="24"></native-icon></view>
+      <text class="sub-title serif">{{title}}</text>
+      <view class="rp-share-btn" bindtap="shareImage"><native-icon name="image" tone="green" size="18"></native-icon><text>{{shareBusy?'生成中':'分享图'}}</text></view>
+    </view>
+  </view>
+
+  <scroll-view scroll-y class="report-scroll" enhanced show-scrollbar="{{false}}">
+    <view wx:if="{{loading}}" class="rp-loading"><text>加载中</text></view>
+    <view wx:elif="{{failed}}" class="rp-loading"><text>方案加载失败</text><button class="rp-retry" bindtap="loadDetail">重试</button></view>
+    <view wx:else class="pad">
+      <scroll-view scroll-x class="rp-versions" enhanced show-scrollbar="{{false}}">
+        <view class="rp-versions-inner">
+          <view wx:for="{{versions}}" wx:key="id" class="rp-v {{selectedVersion===item.version?'on':''}}" data-version="{{item.version}}" bindtap="selectVersion">
+            <view class="rp-v-top">
+              <text class="rp-v-no">v{{item.version}}</text>
+              <text wx:if="{{item.version===detail.currentVersion}}" class="rp-v-latest">最新</text>
+              <text class="rp-v-at">{{item.atText}}</text>
+            </view>
+            <text class="rp-v-sum">{{item.changeSummary}}</text>
+            <text class="rp-v-by">{{item.authorText}}</text>
+          </view>
+        </view>
+      </scroll-view>
+
+      <view class="rp-modes">
+        <view class="rp-mode {{mode==='content'?'on':''}}" data-mode="content" bindtap="setMode">查看内容</view>
+        <view class="rp-mode {{mode==='diff'?'on':''}}" data-mode="diff" bindtap="setMode">对比上一版</view>
+      </view>
+
+      <view wx:if="{{verLoading}}" class="rp-loading"><text>{{mode==='diff'?'计算差异中':'加载方案内容'}}</text></view>
+      <view wx:elif="{{verErr}}" class="rp-card card"><text class="rp-nodiff">{{mode==='diff'?'差异计算失败':'方案内容加载失败'}}</text><button class="rp-retry" bindtap="retryVariant">重试</button></view>
+
+      <view wx:elif="{{mode==='content'&&content}}" class="rp-reader">
+        <view class="report-cover">
+          <text class="rc-k">STRATEGY REPORT · 可查看</text>
+          <text class="rc-t serif">{{content.title}}</text>
+          <text class="rc-m">{{content.meta}} · v{{content.version}}</text>
+        </view>
+        <text wx:if="{{content.trust}}" class="report-quote serif">{{content.trust}}</text>
+        <view wx:for="{{content.sections}}" wx:key="no" class="report-section card">
+          <view class="rs-h serif"><text class="rs-no">{{item.no}}</text><text>{{item.h}}</text></view>
+          <text wx:if="{{item.b}}" class="rs-b" user-select>{{item.b}}</text>
+          <view wx:for="{{item.list}}" wx:for-item="line" wx:key="*this" class="rs-li"><view class="rs-dot"></view><text class="rs-li-t" user-select>{{line}}</text></view>
+        </view>
+      </view>
+
+      <view wx:elif="{{mode==='diff'&&selectedVersion<=1}}" class="rp-card card"><text class="rp-nodiff">这是第一个版本，没有可对比的上一版。</text></view>
+      <view wx:elif="{{mode==='diff'&&diff}}" class="rp-card card">
+        <view class="rp-diff-head"><text class="rp-diff-v">v{{diff.from}}</text><native-icon name="arrow" tone="green" size="15"></native-icon><text class="rp-diff-v">v{{diff.to}}</text><text class="rp-diff-sum">{{diff.summary}}</text></view>
+        <view wx:for="{{diff.sections}}" wx:key="id" class="rp-dsec {{item.change}}">
+          <view class="rp-dh"><text class="rp-badge {{item.change}}">{{item.badge}}</text><text class="rp-dh-t">{{item.title}}</text></view>
+          <view wx:if="{{item.change==='changed'&&item.words.length}}" class="rp-words"><text wx:for="{{item.words}}" wx:for-item="word" wx:key="id" class="rp-w {{word.t}}">{{word.s}}</text></view>
+          <view wx:elif="{{item.change==='changed'}}" class="rp-dchg"><view class="rp-dbefore"><text class="rp-dlabel">改前</text><text class="rp-dtext">{{item.beforeText}}</text></view><view class="rp-dafter"><text class="rp-dlabel">改后</text><text class="rp-dtext">{{item.afterText}}</text></view></view>
+          <text wx:else class="rp-dtext {{item.change==='unchanged'?'dim':''}}">{{item.text}}</text>
+        </view>
+      </view>
+      <view class="rp-bottom-space"></view>
+    </view>
+  </scroll-view>
+
+  <view wx:if="{{detail}}" class="rp-syncbar">
+    <button wx:if="{{synced}}" class="rp-sync-btn done" bindtap="goStudio">已同步，查看军令</button>
+    <button wx:else class="rp-sync-btn {{syncing?'busy':''}}" bindtap="sync">{{syncing?'同步中':'同步为军令'}}</button>
+  </view>
+
+  <canvas canvas-id="reportShareCanvas" class="rp-share-canvas" style="width:600px;height:900px"></canvas>
+  <view wx:if="{{sharePath}}" class="sp-mask" bindtap="closeShare" catchtouchmove="stopTap"><view class="sp-panel" catchtap="stopTap"><image class="sp-img" src="{{sharePath}}" mode="widthFix"></image><text class="sp-note">数字机密已自动隐去，可安心示人</text><view class="sp-acts"><button class="sp-btn primary" bindtap="shareFriend">发给好友</button><button class="sp-btn ghost" bindtap="saveShare">存入相册</button></view><button class="sp-close" bindtap="closeShare"><native-icon name="close" tone="white" size="20"></native-icon></button></view></view>
+
+  <view wx:if="{{syncOpen}}" class="sync-mask" bindtap="closeSync" catchtouchmove="stopTap"><view class="sync-panel" catchtap="stopTap"><view class="sync-grip"></view><view class="cs-hero"><view class="cs-check"><native-icon name="check" tone="white" size="25"></native-icon></view><text class="cs-t serif">方案已同步为今日军令</text><text class="cs-d">方案里的判断已拆成执行动作，并同步到执行页。</text></view><view class="cs-flow"><text class="cs-flow-i">方案</text><native-icon name="arrow" tone="neutral" size="14"></native-icon><text class="cs-flow-i on">军令</text><native-icon name="arrow" tone="neutral" size="14"></native-icon><text class="cs-flow-i">复盘</text></view><view class="cs-list"><view wx:for="{{syncOrders}}" wx:key="index" class="cs-cmd"><text class="cs-cmd-t">{{item.text}}</text><text class="cs-cmd-due">{{item.tag}}</text></view></view><view class="cs-actions"><button class="cs-secondary" bindtap="closeSync">留在这里</button><button class="cs-primary" bindtap="goStudio">去执行</button></view></view></view>
+  <login-sheet open="{{showLogin}}" reason="view-history" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

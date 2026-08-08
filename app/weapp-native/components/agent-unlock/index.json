@@ -1,0 +1,6 @@
+{
+  "component": true,
+  "usingComponents": {
+    "native-icon": "/components/native-icon/index"
+  }
+}

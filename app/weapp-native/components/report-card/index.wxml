@@ -1,0 +1,45 @@
+<view class="report-card-wrap">
+  <view class="report">
+    <view class="report-head">
+      <view class="report-icon"><native-icon name="{{card.icon}}" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view>
+      <view class="report-title-block">
+        <text class="report-title">{{card.title}}</text>
+        <text wx:if="{{card.meta}}" class="report-meta">{{card.meta}}</text>
+      </view>
+      <view wx:if="{{streaming}}" class="report-generating"><view class="report-spinner"></view><text>产出中</text></view>
+      <text wx:else class="report-status">{{operable?'已生成':'已中断'}}</text>
+    </view>
+
+    <view class="report-body">
+      <view wx:if="{{streaming&&!card.sections.length&&!fallbackText}}" class="report-skeleton">
+        <view class="report-skeleton-line heading"></view>
+        <view class="report-skeleton-line wide"></view>
+        <view class="report-skeleton-line medium"></view>
+        <view class="report-skeleton-line short"></view>
+      </view>
+      <text wx:if="{{!card.sections.length&&fallbackText}}" user-select class="report-fallback">{{fallbackText}}</text>
+      <view wx:for="{{card.sections}}" wx:key="key" class="report-section">
+        <view class="report-section-head"><text class="report-section-no">{{index+1}}</text><text class="report-section-title">{{item.h}}</text></view>
+        <text wx:if="{{item.b}}" user-select class="report-section-body">{{item.b}}</text>
+        <view wx:if="{{item.list.length}}" class="report-list">
+          <view wx:for="{{item.list}}" wx:for-item="line" wx:key="*this" class="report-list-item"><view class="report-list-dot"></view><text user-select class="report-list-text">{{line}}</text></view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{!streaming&&card.trust}}" class="report-trust"><native-icon name="shield" tone="neutral" size="13"></native-icon><text>{{card.trust}}</text></view>
+    <view wx:if="{{operable&&!streaming}}" class="report-actions">
+      <view class="report-action primary {{busy?'disabled':''}}" bindtap="viewReport"><native-icon name="doc" tone="white" size="14"></native-icon><text>查看报告</text></view>
+      <view class="report-action ghost {{busy?'disabled':''}}" bindtap="openMenu"><native-icon name="up" tone="iron" size="14"></native-icon><text>分享</text></view>
+      <view wx:if="{{saved}}" class="report-saved"><native-icon name="check" tone="accent" color-key="{{colorKey}}" size="12"></native-icon><text>已入库</text></view>
+      <view wx:else class="report-action ghost small {{busy?'disabled':''}}" bindtap="saveReport"><native-icon name="layers" tone="iron" size="13"></native-icon><text>存入</text></view>
+    </view>
+    <view wx:if="{{operable&&!streaming&&card.creativeJobId}}" class="rc-poster {{busy?'disabled':''}}" bindtap="viewPoster"><native-icon name="image" tone="accent" color-key="{{colorKey}}" size="14"></native-icon><text class="rc-poster-t">查看成品图</text><text class="rc-poster-c">不扣钻石</text></view>
+    <view wx:if="{{operable&&!streaming&&posterEnabled}}" class="rc-poster {{busy?'disabled':''}}" bindtap="generatePoster"><native-icon name="image" tone="accent" color-key="{{colorKey}}" size="14"></native-icon><text class="rc-poster-t">生成成品图</text><view class="rc-poster-cost"><native-icon name="diamond" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="rc-poster-c">x{{posterPrice}}</text></view></view>
+  </view>
+
+  <view wx:if="{{operable&&!streaming}}" class="accept-card">
+    <view class="accept-copy"><text class="accept-title">这份方案，就按这个来？</text><text class="accept-desc">存入方案库留一版，执行页承接军令与复盘。</text></view>
+    <view class="accept-action {{accepting?'disabled':''}}" bindtap="acceptReport"><native-icon name="check" tone="white" size="13"></native-icon><text>{{accepting?'正在拟定…':'就按这个来 · 去执行'}}</text></view>
+  </view>
+</view>
