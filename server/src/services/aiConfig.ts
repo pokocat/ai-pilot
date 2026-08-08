@@ -298,10 +298,35 @@ async function getLegacyAiConfig(): Promise<ResolvedAiConfig> {
           + '生产将抛 AI_UNAVAILABLE 而非静默降级 mock。请核对主密钥。');
       }
     }
-  } catch {
-    /* DB 不可达：用 env 兜底 */
+  } catch (err) {
+    // 读不到配置 → 回落 env（多半是 provider=mock），**全站产出因此静默降级成本地模板**。
+    // 以前这里连一行日志都没有，理由写的是「DB 不可达」——但那个假设已经不成立了：
+    // 2026-08-08 实测最常见的成因是**新代码 + 旧 schema**（部署时 db push 没跑或跑失败），
+    // 报错原文是 `The column ai_setting.dialect does not exist in the current database`。
+    // 这种情况下所有东西看起来都在正常运行，只是每个用户拿到的都是模板 —— 必须喊出来。
+    // 保留回落行为不变（DB 抖一下不该变成事故），只是不再沉默。
+    noteAiConfigFallback(err as Error);
   }
   return cfg;
+}
+
+// 同一个原因不重复刷屏：getAiConfig 有 4s 缓存，持续故障会每 4 秒来一次。
+let lastFallbackSig = '';
+let lastFallbackAt = 0;
+function noteAiConfigFallback(err: Error): void {
+  const msg = err?.message ?? String(err);
+  const schemaDrift = /does not exist in the current database|Unknown argument|Invalid `prisma/.test(msg);
+  const sig = schemaDrift ? 'schema' : msg.slice(0, 80);
+  const now = Date.now();
+  if (sig === lastFallbackSig && now - lastFallbackAt < 60_000) return;
+  lastFallbackSig = sig;
+  lastFallbackAt = now;
+  console.error(
+    schemaDrift
+      ? `[aiConfig] ❗ 数据库 schema 与代码不一致，读取模型配置失败 → **全站产出正在降级为本地模板**。`
+        + `请在服务端执行 \`npx prisma db push\` 后重启（部署脚本里 db push 应先于 restart）。原始报错：${msg}`
+      : `[aiConfig] ❗ 读取模型配置失败 → 已回落环境变量兜底，**产出可能降级为本地模板**：${msg}`,
+  );
 }
 
 /**

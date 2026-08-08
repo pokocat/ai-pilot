@@ -54,6 +54,14 @@
         "dev"
       ],
       "port": 4000
+    },
+    {
+      "name": "server-dist",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "server/dist/index.js"
+      ],
+      "port": 4000
     }
   ]
 }
