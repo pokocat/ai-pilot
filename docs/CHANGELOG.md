@@ -6,6 +6,15 @@
 
 ## 变更日志
 
+### 2026-08-08 · 问策入口改版 WP5（运营配置页） · 影响面：admin 导航/问策入口页/共享 CSS 一处修复
+
+- 新增「问策入口」独立页（`settings` 组，`admin/src/views/wence.tsx`）：hint / proactive 双池 CRUD
+  （文案、chips ≤4 条、启停、整段重排 sort）+ 灰度开关卡（chat 占比单滑杆 + 0/10/50/100 快捷档、
+  dock 保留臂如实提示、急停说明）。权重展示归一化到 100%，与服务端 `effectiveArms` 同一口径。
+- 修存量缺陷：`.flag-num` 与 `.ai-input` 同特异性且后者靠后，数值输入撑满整行挤垮同行按钮；
+  改 `.ai-input.flag-num` 提升特异性，功能开关页的数值项一并修复。
+- admin tsc / vite build / lint:ui 全绿；`npm test` 75/75（基线 61 + 本包 14）。
+
 ### 2026-08-08 · 问策入口改版 WP3'（终态：对话即 tab） · 影响面：weapp-native 问策 tab / chat-core / 埋点通道 / `GET /wence/hints`
 
 规格 `docs/[FABLE5]WENCE_ENTRY_INTERACTION_SPEC.md`（其中「分两步走 / A-B 过渡」的节奏描述已作废，
