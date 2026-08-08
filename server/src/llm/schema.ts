@@ -10,18 +10,20 @@ import type {
   Deliverable, DeliverableSection, DeliverableCover, DeliverableTone, DeliverableTableCell, ChatReply, ChatAsk,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
-  AiProvider, AiThinkingMode, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
-  AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus,
+  AiProvider, AiThinkingMode, AiPreset, AiTestResult, AiRouting, AiRoutingStatus,
   AiCapState, AiEndpointCaps, AiDialectMeta, AiConfigIssue, AiProbeItem, AiProbeReport, AiV2Status,
+  AiCredentialView, AiEndpointView, AiRouteView, AiV2View, AiEndpointUpsert, AiEndpointTest, AiRouteUpsert,
+  AiRouteBudget, AiVendorOption,
   SkillsConfig, LlmContextTrace,
 } from '../../../shared/contracts';
 export type {
   Deliverable, DeliverableSection, DeliverableCover, DeliverableTone, DeliverableTableCell, ChatReply, ChatAsk,
   KnowledgeItemT, KnowledgeKind, KnowledgeHit, MessageRef,
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
-  AiProvider, AiThinkingMode, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
-  AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus,
+  AiProvider, AiThinkingMode, AiPreset, AiTestResult, AiRouting, AiRoutingStatus,
   AiCapState, AiEndpointCaps, AiDialectMeta, AiConfigIssue, AiProbeItem, AiProbeReport, AiV2Status,
+  AiCredentialView, AiEndpointView, AiRouteView, AiV2View, AiEndpointUpsert, AiEndpointTest, AiRouteUpsert,
+  AiRouteBudget, AiVendorOption,
   SkillsConfig,
 };
 

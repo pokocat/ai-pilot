@@ -9,10 +9,11 @@ import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import {
-  runProbes, probeModelById, modelsUrl, probeSchedulerEnabled, scheduledProbeSweep,
+  runProbes, probeEndpointById, modelsUrl, probeSchedulerEnabled, scheduledProbeSweep,
   ALL_PROBES, SCHEDULED_PROBES, type ProbeKind,
 } from '../src/services/aiProbe.js';
 import type { ResolvedAiConfig } from '../src/services/aiConfig.js';
+import { createEndpoint, __wipeAiV2 } from '../src/services/aiV2Admin.js';
 
 const AT = new Date('2026-08-07T10:00:00.000Z');
 
@@ -25,11 +26,8 @@ const mockCfg = (over: Partial<ResolvedAiConfig> = {}): ResolvedAiConfig => ({
   ...over,
 });
 
-before(async () => { await prisma.aiModel.deleteMany({ where: { label: { startsWith: 'TEST-probe-' } } }); });
-after(async () => {
-  await prisma.aiModel.deleteMany({ where: { label: { startsWith: 'TEST-probe-' } } });
-  await prisma.$disconnect();
-});
+before(async () => { await __wipeAiV2(); });
+after(async () => { await __wipeAiV2(); await prisma.$disconnect(); });
 
 describe('GET /models 的地址拼装', () => {
   test('OpenAI 兼容：baseUrl 已含 /v1，直接接 /models', () => {
@@ -101,27 +99,25 @@ describe('探活编排', () => {
 });
 
 describe('落库与回填', () => {
-  test('probeModelById 把结果与能力写回该行；未配 key 的行不外呼、直接如实记未配置', async () => {
-    const row = await prisma.aiModel.create({
-      data: { provider: 'openai', label: 'TEST-probe-nokey', baseUrl: 'https://x/v1', model: 'm', apiKey: '' },
-    });
-    const out = await probeModelById(row.id, ['connectivity'], AT);
+  test('probeEndpointById 把结果与能力写回该行；未配 key 的行不外呼、直接如实记未配置', async () => {
+    const id = await createEndpoint({ label: 'TEST-probe-nokey', provider: 'openai', baseUrl: 'https://x/v1', model: 'm', apiKey: '' });
+    const row = { id };
+    const out = await probeEndpointById(row.id, ['connectivity'], AT);
     assert.ok(out);
     assert.equal(out!.ok, false);
     assert.match(out!.results[0].error ?? '', /API Key/);
 
-    const after = await prisma.aiModel.findUnique({ where: { id: row.id } });
+    const after = await prisma.aiEndpoint.findUnique({ where: { id: row.id } });
     // 未配 key 走的是早退分支：不该把「没试过」写成「试过且失败」。
     assert.equal(after?.lastProbeAt, null);
   });
 
   test('mock 端点探活会落库（含 lastProbeOk 与逐项结果）', async () => {
-    const row = await prisma.aiModel.create({
-      data: { provider: 'mock', label: 'TEST-probe-mock', baseUrl: '', model: 'template', apiKey: '' },
-    });
-    const out = await probeModelById(row.id, ['connectivity'], AT);
+    const id = await createEndpoint({ label: 'TEST-probe-mock', provider: 'mock', baseUrl: '', model: 'template', apiKey: '' });
+    const row = { id };
+    const out = await probeEndpointById(row.id, ['connectivity'], AT);
     assert.ok(out);
-    const after = await prisma.aiModel.findUnique({ where: { id: row.id } });
+    const after = await prisma.aiEndpoint.findUnique({ where: { id: row.id } });
     assert.equal(after?.lastProbeAt?.toISOString(), AT.toISOString());
     assert.equal(after?.lastProbeOk, out!.ok);
     const probe = after?.probeJson as { results?: { kind: string }[] } | null;
@@ -129,7 +125,7 @@ describe('落库与回填', () => {
   });
 
   test('模型不存在 → null，不抛', async () => {
-    assert.equal(await probeModelById('不存在的id', ['connectivity'], AT), null);
+    assert.equal(await probeEndpointById('不存在的id', ['connectivity'], AT), null);
   });
 });
 
@@ -156,11 +152,10 @@ describe('定时探活', () => {
   });
 
   test('未配 key 的端点被定时探活跳过（不浪费也不刷错误）', async () => {
-    const row = await prisma.aiModel.create({
-      data: { provider: 'openai', label: 'TEST-probe-skip', baseUrl: 'https://x/v1', model: 'm', apiKey: '' },
-    });
+    const id = await createEndpoint({ label: 'TEST-probe-skip', provider: 'openai', baseUrl: 'https://x/v1', model: 'm', apiKey: '' });
+    const row = { id };
     await scheduledProbeSweep(AT);
-    const after = await prisma.aiModel.findUnique({ where: { id: row.id } });
+    const after = await prisma.aiEndpoint.findUnique({ where: { id: row.id } });
     assert.equal(after?.lastProbeAt, null);
   });
 });

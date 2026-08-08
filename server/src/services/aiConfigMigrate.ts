@@ -6,7 +6,7 @@
 // ── 设计要点 ──────────────────────────────────────────────────────────────────
 //  ① **幂等**：端点带 `legacyModelId` 唯一键，重跑只更新不重复建；凭证按 apiKey 去重。
 //     迁移脚本必须能反复跑——一次跑不完、跑一半失败、迁完又新增了端点，都是常态。
-//  ② **只增不删**：旧表一个字段都不动。切读路径靠 `AI_CONFIG_V2` 开关，回滚＝把开关关掉。
+//  ② **只增不删**：旧表一个字段都不动；它们仅保留为切换当天的应急历史快照。
 //  ③ **迁移期只标黄不阻断**：vendor 推断不出来时写 `needsReview=true` 但**照样入路由**。
 //     若在这里就拦住，chat 路由会被迁成空的——直接把线上 AI 关掉，比 vendor 标错严重得多。
 //  ④ **辅助档从 env 收编进库**：`AI_AUX_*` 一直只能改 env + 重启，运营在后台看不见。
@@ -19,9 +19,8 @@ import { vendorOf } from '../llm/vendors.js';
 import { normalizeThinkingBudget, normalizeThinkingMode } from '../llm/thinking.js';
 import type { AiProvider } from '../llm/schema.js';
 
-// 本模块**既是迁移脚本的实现，也是运行时的投影函数**（services/aiRoutes.syncV2FromLegacy）。
-// 放在 src 而不是 scripts，正是因为后者：切到 V2 之后，后台每次写配置都要靠它把改动投影到新表，
-// 少了这一步「后台改完不生效」且毫无报错。CLI 壳在 scripts/migrateAiConfig.ts。
+// 本模块是一次性迁移脚本的实现；CLI 壳在 scripts/migrateAiConfig.ts。
+// 正常后台写路径直接操作归一化表（services/aiV2Admin.ts），不再运行投影。
 let APPLY = false;
 let QUIET = false;
 const log = (...a: unknown[]) => { if (!QUIET) console.log(APPLY ? '[apply]' : '[dry-run]', ...a); };
@@ -226,5 +225,5 @@ export async function migrateAiConfig(opts: { apply?: boolean; quiet?: boolean }
     await upsertRoute(kind, 'single', true, [{ endpointId: ep.id, primary: true }]);
   }
 
-  log('完成。切读路径请设 AI_CONFIG_V2=true 并重启；回滚＝把它关掉，旧表一个字段都没动。');
+  log('完成。归一化读路径默认开启；请确认 /admin/ai-v2-status.ready=true。AI_CONFIG_V2=false 只用于短时读取旧表历史快照。');
 }

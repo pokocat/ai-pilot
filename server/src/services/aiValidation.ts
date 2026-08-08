@@ -11,63 +11,19 @@ import { prisma } from '../db.js';
 import { isRealKey } from '../env.js';
 import { readAiCredential } from './aiCredentialStorage.js';
 import { CHAT_MAX_TOKENS } from '../llm/providers/completionGuard.js';
-import { readCaps } from '../llm/configSchemas.js';
+import { parseRouteBudget, readCaps } from '../llm/configSchemas.js';
+import { resolveDialect } from '../llm/dialects.js';
+import { vendorCapsOf, vendorOf } from '../llm/vendors.js';
 import {
-  validateEndpoint, validateRoute, validateAuxEndpoint, hasBlocking, blockingMessage,
+  validateEndpoint, validateRoute, hasBlocking, blockingMessage,
   type EndpointDraft, type EndpointFacts,
 } from '../llm/validate.js';
-import type { AiConfigIssue, AiProvider, AiModelUpsert, AiThinkingMode } from '../llm/schema.js';
+import type {
+  AiConfigIssue, AiProvider, AiThinkingMode, AiEndpointUpsert, AiRouteUpsert,
+} from '../llm/schema.js';
 import { normalizeThinkingBudget, normalizeThinkingMode } from '../llm/thinking.js';
 
 export { hasBlocking, blockingMessage };
-
-type Row = {
-  id: string; label: string; provider: string; baseUrl: string; model: string;
-  apiKey: string; dialect: string | null; capsJson: unknown;
-  thinkingMode: string; thinkingBudget: number; temperature: number;
-  priceInput: number; priceOutput: number; priceCachedInput: number; priceCacheWrite: number;
-  poolEnabled: boolean;
-};
-
-function toDraft(r: Row): EndpointDraft {
-  return {
-    id: r.id, label: r.label, provider: (r.provider as AiProvider) ?? 'mock',
-    baseUrl: r.baseUrl, model: r.model, dialect: r.dialect, capsJson: r.capsJson,
-    thinkingMode: normalizeThinkingMode(r.thinkingMode),
-    thinkingBudget: normalizeThinkingBudget(r.thinkingBudget),
-    temperature: r.temperature,
-    hasKey: isRealKey(readAiCredential(r.apiKey)),
-    priceInput: r.priceInput, priceOutput: r.priceOutput,
-    priceCachedInput: r.priceCachedInput, priceCacheWrite: r.priceCacheWrite,
-    poolEnabled: r.poolEnabled,
-  };
-}
-
-/** 把「新增/编辑表单 + 库里已存的值」合成待校验草稿。编辑时未传的字段沿用库里的（PATCH 语义）。 */
-export async function draftFromUpsert(patch: AiModelUpsert, id?: string): Promise<EndpointDraft> {
-  const existing = id ? ((await prisma.aiModel.findUnique({ where: { id } })) as Row | null) : null;
-  const base = existing ? toDraft(existing) : null;
-  const provider = (patch.provider ?? base?.provider ?? 'openai') as AiProvider;
-  return {
-    id,
-    label: patch.label ?? base?.label ?? '',
-    provider,
-    baseUrl: patch.baseUrl ?? base?.baseUrl ?? '',
-    model: patch.model ?? base?.model ?? '',
-    dialect: patch.dialect !== undefined ? (patch.dialect || null) : (base?.dialect ?? null),
-    capsJson: base?.capsJson ?? null,
-    thinkingMode: normalizeThinkingMode(patch.thinkingMode ?? base?.thinkingMode) as AiThinkingMode,
-    thinkingBudget: patch.thinkingBudget ?? base?.thinkingBudget ?? 1024,
-    temperature: patch.temperature ?? base?.temperature,
-    // key 留空＝不改，所以「有没有 key」要看库里；新增时看这次传没传。
-    hasKey: patch.apiKey ? isRealKey(patch.apiKey) : (base?.hasKey ?? false),
-    priceInput: patch.priceInput ?? base?.priceInput ?? 0,
-    priceOutput: patch.priceOutput ?? base?.priceOutput ?? 0,
-    priceCachedInput: patch.priceCachedInput ?? base?.priceCachedInput ?? 0,
-    priceCacheWrite: patch.priceCacheWrite ?? base?.priceCacheWrite ?? 0,
-    poolEnabled: patch.poolEnabled ?? base?.poolEnabled ?? false,
-  };
-}
 
 /** 查齐事实并校验单个端点。 */
 export async function checkEndpoint(draft: EndpointDraft): Promise<AiConfigIssue[]> {
@@ -75,7 +31,7 @@ export async function checkEndpoint(draft: EndpointDraft): Promise<AiConfigIssue
   try {
     // 同名模型在别的端点上的价格：单价是 model 级 SSOT，冲突会让整个模型退回未校准。
     if (draft.model) {
-      const sibs = (await prisma.aiModel.findMany({
+      const sibs = (await prisma.aiEndpoint.findMany({
         where: { model: draft.model, ...(draft.id ? { id: { not: draft.id } } : {}) },
         select: { priceInput: true, priceOutput: true, priceCachedInput: true, priceCacheWrite: true },
       })) as EndpointFacts['siblingPrices'];
@@ -91,58 +47,146 @@ export async function checkEndpoint(draft: EndpointDraft): Promise<AiConfigIssue
   return validateEndpoint(draft, facts);
 }
 
-/**
- * 端点池成员一致性。`override` 用于「保存前预判」——把这次要改的那个端点的新值代入，
- * 而不是拿库里的旧值算，否则运营改完保存才发现冲突。
- */
-export async function checkPool(
-  opts: { mode?: 'single' | 'pool'; override?: EndpointDraft; excludeId?: string } = {},
-): Promise<AiConfigIssue[]> {
-  const setting = await prisma.aiSetting.findUnique({ where: { id: 'default' }, select: { routingMode: true } });
-  const mode = opts.mode ?? (setting?.routingMode === 'pool' ? 'pool' : 'single');
-  if (mode !== 'pool') return [];
+/* ────────────── 归一化表（三期收尾）的取数层 ────────────── */
 
-  const rows = (await prisma.aiModel.findMany({ where: { poolEnabled: true } })) as Row[];
-  const members = rows
-    .filter((r) => r.id !== opts.excludeId && r.id !== opts.override?.id)
-    .map((r) => {
-      const d = toDraft(r);
-      return { id: d.id!, label: d.label, provider: d.provider, baseUrl: d.baseUrl, model: d.model, dialect: d.dialect, hasKey: d.hasKey };
-    });
-  const ov = opts.override;
-  if (ov?.poolEnabled) {
-    members.push({ id: ov.id ?? 'new', label: ov.label, provider: ov.provider, baseUrl: ov.baseUrl, model: ov.model, dialect: ov.dialect, hasKey: ov.hasKey });
-  }
-  return validateRoute({ mode: 'pool' }, members);
+/** 端点表单 + 库里已存的值 → 待校验草稿（PATCH 语义：未传的沿用库里的）。 */
+export async function draftFromEndpointUpsert(patch: AiEndpointUpsert, id?: string): Promise<EndpointDraft> {
+  const row = id ? await prisma.aiEndpoint.findUnique({ where: { id }, include: { credential: true } }) : null;
+  const provider = (patch.provider ?? row?.provider ?? 'openai') as AiProvider;
+  return {
+    id,
+    label: patch.label ?? row?.label ?? '',
+    provider,
+    baseUrl: patch.baseUrl ?? row?.baseUrl ?? '',
+    model: patch.model ?? row?.model ?? '',
+    dialect: patch.dialect !== undefined ? (patch.dialect || null) : (row?.dialect ?? null),
+    capsJson: row?.capsJson ?? null,
+    thinkingMode: normalizeThinkingMode(patch.thinkingMode ?? row?.thinkingMode) as AiThinkingMode,
+    thinkingBudget: patch.thinkingBudget ?? row?.thinkingBudget ?? 1024,
+    temperature: patch.temperature ?? row?.temperature,
+    // key 留空＝不改，所以「有没有 key」看库里那条凭证；新增时看这次传没传。
+    hasKey: patch.apiKey ? isRealKey(patch.apiKey) : isRealKey(readAiCredential(row?.credential.apiKey ?? '')),
+    priceInput: patch.priceInput ?? row?.priceInput ?? 0,
+    priceOutput: patch.priceOutput ?? row?.priceOutput ?? 0,
+    priceCachedInput: patch.priceCachedInput ?? row?.priceCachedInput ?? 0,
+    priceCacheWrite: patch.priceCacheWrite ?? row?.priceCacheWrite ?? 0,
+  };
 }
 
-/** 嵌入 / 重排配置：协议与厂商两条都判。 */
-export async function checkAux(patch: {
-  embeddingEnabled?: boolean; embeddingModel?: string; embeddingBaseUrl?: string; embeddingApiKey?: string;
-  rerankEnabled?: boolean; rerankModel?: string; rerankBaseUrl?: string; rerankApiKey?: string;
-}): Promise<AiConfigIssue[]> {
-  const row = await prisma.aiSetting.findUnique({ where: { id: 'default' } });
-  if (!row) return [];
-  const chat = {
-    provider: (row.provider as AiProvider) ?? 'mock',
-    baseUrl: row.baseUrl,
-    model: row.model,
-    dialect: row.dialect,
-    hasKey: isRealKey(readAiCredential(row.apiKey)),
-  };
-  const pick = <T>(next: T | undefined, cur: T): T => (next !== undefined ? next : cur);
-  return [
-    ...validateAuxEndpoint('embedding', {
-      enabled: pick(patch.embeddingEnabled, row.embeddingEnabled),
-      model: pick(patch.embeddingModel, row.embeddingModel),
-      baseUrl: pick(patch.embeddingBaseUrl, row.embeddingBaseUrl),
-      hasKey: patch.embeddingApiKey ? isRealKey(patch.embeddingApiKey) : isRealKey(readAiCredential(row.embeddingApiKey)),
-    }, chat),
-    ...validateAuxEndpoint('rerank', {
-      enabled: pick(patch.rerankEnabled, row.rerankEnabled),
-      model: pick(patch.rerankModel, row.rerankModel),
-      baseUrl: pick(patch.rerankBaseUrl, row.rerankBaseUrl),
-      hasKey: patch.rerankApiKey ? isRealKey(patch.rerankApiKey) : isRealKey(readAiCredential(row.rerankApiKey)),
-    }, chat),
-  ];
+/**
+ * 保存某个用途的路由前校验。
+ * 判据一律是**成员自身的方言**——归一化之后再没有任何全局拷贝值可依赖，这也正是想要的。
+ */
+export async function checkRoutePurpose(
+  purpose: string, patch: AiRouteUpsert, override?: EndpointDraft,
+): Promise<AiConfigIssue[]> {
+  const route = await prisma.aiRoute.findUnique({ where: { purpose }, include: { members: true } });
+  const wanted = patch.members ?? route?.members.map((m) => ({
+    endpointId: m.endpointId, primary: m.primary, weight: m.weight, tier: m.tier,
+    maxConcurrency: m.maxConcurrency, enabled: m.enabled,
+  })) ?? [];
+  const ids = wanted.filter((m) => m.enabled !== false).map((m) => m.endpointId);
+  const uniqueIds = [...new Set(ids)];
+  const eps = ids.length
+    ? await prisma.aiEndpoint.findMany({ where: { id: { in: uniqueIds } }, include: { credential: true } })
+    : [];
+  const endpointDrafts = eps.map((e): EndpointDraft => e.id === override?.id ? override : ({
+    id: e.id, label: e.label, provider: (e.provider as AiProvider) ?? 'mock',
+    baseUrl: e.baseUrl, model: e.model, dialect: e.dialect, capsJson: e.capsJson,
+    thinkingMode: normalizeThinkingMode(e.thinkingMode), thinkingBudget: e.thinkingBudget,
+    temperature: e.temperature, hasKey: isRealKey(readAiCredential(e.credential.apiKey)),
+    priceInput: e.priceInput, priceOutput: e.priceOutput,
+    priceCachedInput: e.priceCachedInput, priceCacheWrite: e.priceCacheWrite,
+  }));
+  const members = endpointDrafts.map((e) => ({
+    id: e.id!, label: e.label, provider: e.provider, baseUrl: e.baseUrl,
+    model: e.model, dialect: e.dialect, hasKey: e.hasKey,
+  }));
+  const mode = patch.mode ?? (route?.mode === 'pool' ? 'pool' : 'single');
+  const out = validateRoute({ mode }, members);
+  if (patch.budget !== undefined && patch.budget !== null) {
+    const parsed = parseRouteBudget(patch.budget);
+    if (!parsed.value) out.push({ level: 'error', code: 'ROUTE_BUDGET_INVALID', message: parsed.issue });
+  }
+  if (uniqueIds.length !== ids.length) {
+    out.push({ level: 'error', code: 'ROUTE_DUPLICATE_MEMBER', message: `「${purpose}」用途里有重复接入点，请每个端点只保留一项` });
+  }
+  const found = new Set(eps.map((e) => e.id));
+  const missing = uniqueIds.filter((id) => !found.has(id));
+  if (missing.length) {
+    out.push({ level: 'error', code: 'ROUTE_ENDPOINT_NOT_FOUND', message: `「${purpose}」用途引用了不存在的接入点：${missing.join('、')}` });
+  }
+  if (wanted.filter((m) => m.enabled !== false && m.primary).length > 1) {
+    out.push({ level: 'error', code: 'ROUTE_MULTIPLE_PRIMARY', message: `「${purpose}」用途只能有一个生效接入点` });
+  }
+  for (const e of eps) {
+    if (e.credential.needsReview) {
+      out.push({
+        level: 'error', code: 'CREDENTIAL_VENDOR_UNCONFIRMED',
+        message: `「${e.label}」的接入商尚未确认；请先在凭证区确认厂商或选择“自定义 / 其它”`,
+      });
+    }
+  }
+  if (purpose === 'embedding' || purpose === 'rerank') {
+    const name = purpose === 'embedding' ? '向量嵌入' : '重排';
+    for (const endpoint of endpointDrafts) {
+      const dialect = resolveDialect(endpoint).dialect;
+      if (dialect.protocol !== 'openai_chat') {
+        out.push({
+          level: 'error', code: 'AUX_ORIGIN_PROTOCOL_MISMATCH',
+          message: `「${endpoint.label}」走 ${dialect.label}，没有标准 /${purpose === 'embedding' ? 'embeddings' : 'rerank'} 请求形状；${name}请改用 OpenAI 兼容端点`,
+        });
+        continue;
+      }
+      const caps = vendorCapsOf(endpoint.baseUrl);
+      const supported = purpose === 'embedding' ? caps.embedding : caps.rerank;
+      if (!supported) {
+        out.push({
+          level: 'error', code: 'AUX_VENDOR_UNSUPPORTED',
+          message: `${vendorOf(endpoint.baseUrl)?.label ?? '当前接入商'}不提供${name}模型，不能用于「${purpose}」用途`,
+        });
+      }
+    }
+  }
+  // single 模式也要有端点：一条没有可用成员的路由 = 把这个用途关掉了，且不会报错。
+  if (mode === 'single' && members.length === 0 && (patch.members || route)) {
+    out.push({ level: 'error', code: 'ROUTE_EMPTY', message: `「${purpose}」用途没有可用接入点，保存后该用途会停摆` });
+  }
+  return out;
+}
+
+/** 编辑一个已被路由引用的端点时，用新值重算所有受影响路由，避免保存后才把池改成混协议。 */
+export async function checkEndpointRoutes(id: string, override: EndpointDraft): Promise<AiConfigIssue[]> {
+  const routes = await prisma.aiRoute.findMany({ where: { members: { some: { endpointId: id } } } });
+  const issues: AiConfigIssue[] = [];
+  for (const route of routes) issues.push(...await checkRoutePurpose(route.purpose, {}, override));
+  return issues;
+}
+
+/** 「设为生效」也属于保存路由，必须先过同一套用途校验。 */
+export async function checkPrimaryPurpose(purpose: string, endpointId: string): Promise<AiConfigIssue[]> {
+  const route = await prisma.aiRoute.findUnique({ where: { purpose }, include: { members: true } });
+  const poolable = purpose === 'chat' || purpose === 'deliverable';
+  const members = poolable
+    ? [
+        ...(route?.members ?? []).filter((m) => m.endpointId !== endpointId).map((m) => ({
+          endpointId: m.endpointId, primary: false, weight: m.weight, tier: m.tier,
+          maxConcurrency: m.maxConcurrency, enabled: m.enabled,
+        })),
+        { endpointId, primary: true, enabled: true },
+      ]
+    : [{ endpointId, primary: true, enabled: true }];
+  return checkRoutePurpose(purpose, { mode: poolable && route?.mode === 'pool' ? 'pool' : 'single', members });
+}
+
+/** 对话端点入池 / 出池前先验证变更后的完整成员集合；入池按 pool 语义检查，不能等切模式才报。 */
+export async function checkPoolMembershipPurpose(endpointId: string, inPool: boolean): Promise<AiConfigIssue[]> {
+  const route = await prisma.aiRoute.findUnique({ where: { purpose: 'chat' }, include: { members: true } });
+  if (!route) return [];
+  const existing = route.members.filter((m) => m.endpointId !== endpointId).map((m) => ({
+    endpointId: m.endpointId, primary: m.primary, weight: m.weight, tier: m.tier,
+    maxConcurrency: m.maxConcurrency, enabled: m.enabled,
+  }));
+  const members = inPool ? [...existing, { endpointId, primary: false, enabled: true }] : existing;
+  return checkRoutePurpose('chat', { mode: inPool ? 'pool' : (route.mode === 'pool' ? 'pool' : 'single'), members });
 }

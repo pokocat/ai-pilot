@@ -39,6 +39,12 @@ describe('端点自洽性', () => {
     assert.ok(hasBlocking(issues));
   });
 
+  test('显式方言与 provider 协议不一致 → error（不能拿 OpenAI SDK 组 Anthropic 方言）', () => {
+    const issues = validateEndpoint(ep({ provider: 'openai', dialect: 'anthropic_gateway' }));
+    assert.ok(has(issues, 'DIALECT_PROTOCOL_MISMATCH'));
+    assert.ok(hasBlocking(issues));
+  });
+
   test('探活已证伪 thinking → error，且拦得住（取代按模型名猜）', () => {
     const issues = validateEndpoint(ep({
       provider: 'claude', baseUrl: 'https://api.qnaigc.com', model: 'some-non-thinking-model',

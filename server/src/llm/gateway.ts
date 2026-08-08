@@ -926,7 +926,7 @@ export async function pingAgentRuntime(rt: {
     apiKey: rt.apiKey || '',
     // 与 mergedTestConfig 同一个理由：探活走的是同一条 withEndpoint 外呼链路，
     // 不 bypass 就会被端点池整体改写成池成员——那样测的根本不是这个智能体自带的接入点。
-    // 这是 D1 的**第三个入口**，一期只修了 /admin/ai-models/test 与 /admin/ai-config/test 两个。
+    // 这是 D1 当时漏掉的第三个入口；三期收尾后旧两个入口已统一为 /admin/ai-endpoints/test。
     poolBypass: true,
   };
   // Agent 自带接入此前完全不过校验（设计稿决策点 5 的 B 项：至少共享地基）。

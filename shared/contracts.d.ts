@@ -1054,40 +1054,6 @@ export interface SummarizeResult {
 export type AiProvider = 'mock' | 'claude' | 'openai';
 /** Claude 思考模式：关闭 / 固定预算 / 模型自适应。 */
 export type AiThinkingMode = 'disabled' | 'enabled' | 'adaptive';
-/** 对外暴露的当前配置（不含明文 key） */
-export interface AiConfig {
-  provider: AiProvider;
-  label: string;          // 展示名，如「Agnes 2.0 Flash」
-  baseUrl: string;        // openai 兼容地址通常带 /v1；claude 为 Anthropic 网关根路径，官方直连可空
-  model: string;          // 文本模型 id
-  embeddingModel: string; // 嵌入模型 id（留空=本地确定性嵌入）
-  temperature: number;
-  thinkingMode: AiThinkingMode;
-  thinkingBudget: number; // enabled 时生效；范围 1024..7000，且始终小于业务 max_tokens=8000
-  hasKey: boolean;        // 是否已配置 key（不回传明文）
-  ready: boolean;         // 当前是否就绪（provider+key 有效，否则降级 mock）
-  effectiveProvider: AiProvider; // 实际生效（未就绪时为 mock）
-  // 向量嵌入接入（开关 + 独立凭证；baseUrl/key 留空回退对话模型）。
-  embeddingEnabled: boolean;
-  embeddingBaseUrl: string;
-  hasEmbeddingKey: boolean; // 是否已配置独立嵌入 key
-  // 重排接入（开关 + 独立凭证）。
-  rerankEnabled: boolean;
-  rerankModel: string;
-  rerankBaseUrl: string;
-  hasRerankKey: boolean;    // 是否已配置独立 rerank key
-  /** 端点池路由（多路分流 + 故障转移）。缺省视为 { mode:'single', sticky:true } */
-  routing?: AiRouting;
-  updatedAt?: string;
-}
-/** 更新入参（各 apiKey 仅在传入非空时更新；留空表示不改） */
-export interface AiConfigUpdate {
-  provider?: AiProvider; label?: string; baseUrl?: string; model?: string;
-  apiKey?: string; embeddingModel?: string; temperature?: number;
-  thinkingMode?: AiThinkingMode; thinkingBudget?: number;
-  embeddingEnabled?: boolean; embeddingBaseUrl?: string; embeddingApiKey?: string;
-  rerankEnabled?: boolean; rerankModel?: string; rerankBaseUrl?: string; rerankApiKey?: string;
-}
 /** 能力三态。unknown=没探测过（不拦截）；no=已被探测或运营证伪（校验器据此拦截） */
 export type AiCapState = 'unknown' | 'yes' | 'no';
 /** 端点能力标记。来源优先级：运营显式覆盖 > 探活回填 > 厂商预设声明 */
@@ -1101,8 +1067,12 @@ export interface AiEndpointCaps {
 export interface AiDialectMeta {
   id: string; label: string;
   protocol: 'anthropic' | 'openai_chat' | 'dify' | 'mock';
-  /** 关闭思考的写法：省略 / 显式 disabled / 该方言没有 thinking 字段 */
-  thinkingOff: 'omit' | 'explicit' | 'unsupported';
+  /** 关闭思考的写法。四种都真实存在：
+   *  omit=省略整个字段（Anthropic 官方）；explicit=显式发 disabled（第三方 Anthropic 网关）；
+   *  explicit_when_configured=仅当运营开过思考时才显式发（OpenAI 协议下 thinking 是网关私有扩展，
+   *  没开过就完全省略，开过则说明网关认它、工具与成果请求必须显式按下去）；
+   *  unsupported=该方言压根没有这个字段 */
+  thinkingOff: 'omit' | 'explicit' | 'explicit_when_configured' | 'unsupported';
   /** 开启思考时 budget_tokens 是否真被上游采纳（DeepSeek 的 Anthropic 端点为 false） */
   budgetHonored: boolean;
   /** 嵌入/重排能否与对话端点同源（Anthropic 协议为 false：/embeddings 路径不存在） */
@@ -1130,6 +1100,100 @@ export interface AiProbeReport {
   /** 本次探活顺带回填的能力标记（后台可据此刷新展示） */
   caps?: AiEndpointCaps;
 }
+/* ── 归一化接入配置（三期）：后台直接读写四张表的视图 ────────────────────────
+ * 旧的 AiModel/AiConfig 那套是「一个全局配置 + 拷贝式生效」，这套是
+ * 凭证 → 端点 → 路由(用途) 三层。「生效」＝ AiRouteMember.primary 一个指针，没有拷贝。 */
+
+/** 凭证：一把上游 Key。**换 key 改这一条，它下面所有端点一起生效**（旧结构要改 N 行）。 */
+export interface AiCredentialView {
+  id: string; label: string; vendor: string;
+  hasKey: boolean;
+  /** 迁移时接入商没判出来，标黄待运营确认（只标黄不阻断） */
+  needsReview: boolean;
+  /** 有多少个端点在用它——这个数 > 1 就是「一把 key 喂多个端点」在生效 */
+  endpointCount: number;
+}
+
+/** 后台可确认的厂商目录；凭证只存 id，展示名由这张代码常量表提供。 */
+export interface AiVendorOption { id: string; label: string }
+
+/** 用途级请求预算。留空即沿用运行时默认；null 用于清空整份覆盖。 */
+export interface AiRouteBudget {
+  timeoutMs?: number;
+  bodyMaxTokens?: number;
+  temperature?: number;
+}
+
+/** 端点：一次可用外呼的最小单位 = 凭证 × 方言 × baseUrl × 模型 × 请求参数。 */
+export interface AiEndpointView {
+  id: string; label: string;
+  credentialId: string; credentialLabel: string;
+  provider: AiProvider;
+  /** 显式固化的方言；null = 还没固化 */
+  dialect: string | null;
+  /** 实际生效的方言（显式值或推断值） */
+  resolvedDialect: string;
+  baseUrl: string; model: string;
+  temperature: number;
+  thinkingMode: AiThinkingMode; thinkingBudget: number;
+  caps: AiEndpointCaps;
+  hasKey: boolean;
+  priceInput: number; priceOutput: number; priceCachedInput: number; priceCacheWrite: number;
+  lastProbeAt: string | null; lastProbeOk: boolean | null;
+  /** 被哪些用途引用——删之前必须看得见「删了会影响谁」 */
+  usedByPurposes: string[];
+}
+
+/** 路由：某个用途怎么用一组端点。 */
+export interface AiRouteView {
+  purpose: string;
+  /** false = 这个用途还没配（前端据此显示「未配置」而不是空池） */
+  exists: boolean;
+  mode: 'single' | 'pool';
+  sticky: boolean;
+  enabled: boolean;
+  budget: AiRouteBudget;
+  members: {
+    endpointId: string;
+    /** single 模式下唯一生效的那一个；「设为生效」改的就是它 */
+    primary: boolean;
+    weight: number; tier: number; maxConcurrency: number; enabled: boolean;
+  }[];
+}
+
+export interface AiV2View {
+  credentials: AiCredentialView[];
+  endpoints: AiEndpointView[];
+  routes: AiRouteView[];
+  /** 接入商预设（厂商 × 协议）。代码常量，随视图一起下发，省一次往返 */
+  presets: AiPreset[];
+  /** 协议方言目录。代码常量，运营只选不改 */
+  dialects: AiDialectMeta[];
+  /** 厂商目录。迁移标黄的凭证靠它完成显式确认 */
+  vendors: AiVendorOption[];
+}
+
+/** 端点新增/编辑入参（apiKey 留空＝不改；填了就按 key 找或建凭证）。 */
+export interface AiEndpointUpsert {
+  label: string; provider: AiProvider;
+  baseUrl?: string; model?: string; dialect?: string | null;
+  apiKey?: string; credentialId?: string;
+  temperature?: number; thinkingMode?: AiThinkingMode; thinkingBudget?: number;
+  priceInput?: number; priceOutput?: number; priceCachedInput?: number; priceCacheWrite?: number;
+}
+
+/** 测试一个接入点；endpointId 传入且 apiKey 留空时复用该端点凭证。 */
+export interface AiEndpointTest extends AiEndpointUpsert { endpointId?: string }
+
+/** 路由保存入参。members 传了就是全量重放。 */
+export interface AiRouteUpsert {
+  mode?: 'single' | 'pool';
+  sticky?: boolean;
+  enabled?: boolean;
+  budget?: AiRouteBudget | null;
+  members?: { endpointId: string; primary?: boolean; weight?: number; tier?: number; maxConcurrency?: number; enabled?: boolean }[];
+}
+
 /** 归一化接入配置（三期）的就绪状态。切 AI_CONFIG_V2 之前先看这里：ready=false 时切过去＝把 AI 关掉 */
 export interface AiV2Status {
   /** 读路径是否已切到归一化表（AI_CONFIG_V2） */
@@ -1144,55 +1208,6 @@ export interface AiV2Status {
 export interface AiPreset {
   id: string; label: string; provider: AiProvider;
   baseUrl: string; model: string; embeddingModel?: string; note?: string;
-}
-/** 一个已添加的模型接入点（运营可添加多个，快速切换其一生效；不回传明文 key） */
-export interface AiModel {
-  id: string;
-  provider: AiProvider;
-  label: string;          // 展示名，如「Agnes 2.0 Flash」
-  baseUrl: string;        // openai 兼容地址通常带 /v1；claude 为 Anthropic 网关根路径；mock 可空
-  model: string;          // 文本模型 id
-  embeddingModel: string; // 嵌入模型 id（可空）
-  temperature: number;
-  thinkingMode: AiThinkingMode;
-  thinkingBudget: number;
-  hasKey: boolean;        // 是否已配置 key（不回传明文）
-  preset?: string | null; // 来源内置接入商 id（自定义/自主定义则空）
-  /** 运营显式固化的协议方言 id；null=尚未固化，运行时走 inferDialect 推断 */
-  dialect?: string | null;
-  /** 实际生效的方言 id（显式值或推断值）。与 dialect 不等时说明「还在靠猜」，后台标灰并给「确认固化」 */
-  resolvedDialect?: string;
-  /** 能力三态（探活回填 + 运营可覆盖）。thinking='no' 会让校验器拦下开思考的配置 */
-  caps?: AiEndpointCaps;
-  lastProbeAt?: string | null;
-  lastProbeOk?: boolean | null;
-  active: boolean;        // 是否当前生效（= AiSetting.activeModelId 指向本行）
-  priceInput: number;       // 内部成本核算：元 / 1M 输入 token（0=未配置，回退内置价表）
-  priceOutput: number;      // 元 / 1M 输出 token
-  priceCachedInput: number; // 元 / 1M 命中缓存输入 token（0=按 priceInput 计）
-  /** 元 / 1M 写入缓存输入 token。0=按 priceInput × 1.25（Anthropic 5m TTL）推导；
-   *  1h TTL（2×）或供应商按统一单价结算（1×）时必须显式填 */
-  priceCacheWrite: number;
-  // —— 端点池（多路分流 + 故障转移；routingMode=pool 时生效）——
-  poolEnabled: boolean;    // 是否加入分流池。false=只作为「可切换的备选」，行为同旧版
-  weight: number;          // 相对权重（≥1）。分流按权重摊，不是均分
-  tier: number;            // 0=同质对等（互为平替，正常分流）；1+=降级备份，仅当低 tier 全不可用才启用
-  maxConcurrency: number;  // 该端点并发上限；0=用全局默认。注意这是**每实例**上限，见 llmPool 说明
-  /** 运行时健康态（只读，不入库）：冷却中说明近期撞过 429/5xx，暂时不参与分流 */
-  cooling?: boolean;
-  coolingUntil?: string | null;
-  coolingReason?: string | null;
-  updatedAt?: string;
-}
-/** 添加/编辑模型入参（apiKey 仅在传入非空时更新；留空表示不改） */
-export interface AiModelUpsert {
-  provider: AiProvider; label: string; baseUrl?: string; model: string;
-  apiKey?: string; embeddingModel?: string; temperature?: number; preset?: string | null;
-  /** 显式固化协议方言；'' 或 null=清空回到推断 */
-  dialect?: string | null;
-  thinkingMode?: AiThinkingMode; thinkingBudget?: number;
-  priceInput?: number; priceOutput?: number; priceCachedInput?: number; priceCacheWrite?: number;
-  poolEnabled?: boolean; weight?: number; tier?: number; maxConcurrency?: number;
 }
 /** 端点池实时状态（含每个端点的冷却态，供后台展示「谁在被限流」） */
 export interface AiRoutingStatus extends AiRouting {
@@ -1209,9 +1224,6 @@ export interface AiRouting {
   /** 会话粘性：同一会话固定落同一端点，保住上游提示词缓存。关掉会显著降低缓存命中率 */
   sticky: boolean;
 }
-/** 测试某个模型入参（连接探活；modelId 传入时，apiKey 留空则取该模型已存 key） */
-export interface AiModelTest extends AiModelUpsert { modelId?: string; }
-export interface AiConfigView { config: AiConfig; presets: AiPreset[]; models: AiModel[]; }
 export interface AiTestResult {
   ok: boolean; latencyMs?: number; sample?: string; error?: string; provider?: string; model?: string; missingInputs?: string[];
   // 可选子项：测试连接时若开启嵌入/重排，一并探活回传。

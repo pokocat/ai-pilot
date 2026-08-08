@@ -13,8 +13,8 @@
 - **对话汇总**：一键「生成纪要」→ 版本化报告 + 沉淀知识库。
 
 ### 2) 可切换大模型
-- 默认 **Agnes 2.0 Flash**（`apihub.agnes-ai.com/v1`，OpenAI 兼容）；运营后台「模型」页一键切 DeepSeek / Qwen / Moonshot / OpenAI / Claude / mock，含**测试连接**、即时生效。
-- DB 配置（`AiSetting`）> env 兜底；未配真实 key 自动降级 mock；对外不回传明文 key。
+- 运营后台「模型」页按凭证 / 接入点 / 六用途路由配置 DeepSeek / Qwen / Moonshot / OpenAI / Claude / mock，含端点直测、深度探活、分流池与用途预算，即时生效。
+- DB 归一化路由 > 旧表/env 兜底；未配真实 key 自动降级 mock；对外不回传明文 key。旧 `AiSetting`/`AiModel` 仅作一次性迁移与短时应急历史快照。
 - LLM 提炼记忆 / 汇总（有真实模型走结构化抽取/归纳，mock 确定性兜底）。
 
 ### 3) 检索/向量增强

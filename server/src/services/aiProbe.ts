@@ -27,7 +27,7 @@ import { prisma } from '../db.js';
 import { isRealKey } from '../env.js';
 import { readAiCredential } from './aiCredentialStorage.js';
 import { getAiConfig, type ResolvedAiConfig } from './aiConfig.js';
-import { syncV2FromLegacy } from './aiRoutes.js';
+import { __resetAiRoutes } from './aiRoutes.js';
 import { recordTokenUsage } from './usage.js';
 import { noteProbe } from './metrics.js';
 import { testEmbedding } from './embedding.js';
@@ -342,9 +342,9 @@ export async function runProbes(
   };
 }
 
-/** 按 AiModel.id 探活并把结果 + 能力回填落库。 */
-export async function probeModelById(id: string, kinds: ProbeKind[], at: Date): Promise<ProbeOutcome | null> {
-  const row = await prisma.aiModel.findUnique({ where: { id } });
+/** 按 AiEndpoint.id 探活并把结果 + 能力回填落库。 */
+export async function probeEndpointById(id: string, kinds: ProbeKind[], at: Date): Promise<ProbeOutcome | null> {
+  const row = await prisma.aiEndpoint.findUnique({ where: { id }, include: { credential: true } });
   if (!row) return null;
   const base = await getAiConfig(true);
   const cfg: ResolvedAiConfig = {
@@ -353,7 +353,7 @@ export async function probeModelById(id: string, kinds: ProbeKind[], at: Date): 
     label: row.label,
     baseUrl: row.baseUrl,
     model: row.model,
-    apiKey: readAiCredential(row.apiKey),
+    apiKey: readAiCredential(row.credential.apiKey),
     temperature: row.temperature,
     thinkingMode: normalizeThinkingMode(row.thinkingMode),
     thinkingBudget: normalizeThinkingBudget(row.thinkingBudget),
@@ -364,12 +364,17 @@ export async function probeModelById(id: string, kinds: ProbeKind[], at: Date): 
     traceEndpointLabel: row.label,
   };
   if (cfg.provider !== 'mock' && !isRealKey(cfg.apiKey)) {
-    return { endpointId: id, ok: false, caps: readCaps(row.capsJson), results: [{ kind: 'connectivity', ok: false, at: nowIso(at), error: '未配置 API Key' }] };
+    return {
+      endpointId: id, ok: false, caps: readCaps(row.capsJson),
+      results: [{ kind: 'connectivity', ok: false, at: nowIso(at), error: '该端点的凭证未配置 API Key' }],
+    };
   }
 
   const outcome = await runProbes(cfg, kinds, at);
   try {
-    await prisma.aiModel.update({
+    // 直接写端点表——运行时读的就是这里，能力回填（「这个模型不支持思考」）当场对校验器生效。
+    // 三期收尾前这里写的是 ai_model，还要靠投影才能到运行时，闭环恰好断在最要紧的一环。
+    await prisma.aiEndpoint.update({
       where: { id },
       data: {
         lastProbeAt: at,
@@ -378,24 +383,25 @@ export async function probeModelById(id: string, kinds: ProbeKind[], at: Date): 
         capsJson: outcome.caps as object,
       },
     });
+    __resetAiRoutes(); // 能力变了，路由缓存里的旧 caps 必须失效
   } catch (err) {
     console.error('[aiProbe] 探活结果落库失败：', (err as Error).message);
   }
-  // 切到 V2 后运行时读的是端点表：不投影过去，探活回填的能力（如「这个模型不支持思考」）
-  // 就到不了运行时，「能力靠测」的闭环恰好断在最要紧的那一环。
-  await syncV2FromLegacy();
   return outcome;
 }
 
 /** 定时探活：对所有配了 key 的端点跑到期的检测项。 */
 export async function scheduledProbeSweep(at: Date): Promise<void> {
   if (!probeSchedulerEnabled()) return;
-  const rows = await prisma.aiModel.findMany({ where: { provider: { not: 'mock' } } });
+  const rows = await prisma.aiEndpoint.findMany({
+    where: { provider: { not: 'mock' } },
+    include: { credential: true },
+  });
   for (const row of rows) {
-    if (!isRealKey(readAiCredential(row.apiKey))) continue;
+    if (!isRealKey(readAiCredential(row.credential.apiKey))) continue;
     const last = row.lastProbeAt ? row.lastProbeAt.getTime() : 0;
     const due = SCHEDULED_PROBES.filter((p) => at.getTime() - last >= p.everyMs).map((p) => p.kind);
     if (!due.length) continue;
-    await probeModelById(row.id, due, at);
+    await probeEndpointById(row.id, due, at);
   }
 }

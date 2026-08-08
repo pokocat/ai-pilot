@@ -12,6 +12,8 @@
 // 判据用域名而不是 preset id：端点存的是 baseUrl，运营完全可能不走预设直接手填。
 // 三期归一化后凭证上会有显式 `vendor` 字段，这张表退化为「新建端点时的默认值来源」。
 
+import type { AiPreset } from './schema.js';
+
 export interface VendorCaps {
   /** 提供文本向量（/embeddings）。false=该厂商下的嵌入端点必错，禁止「留空复用对话模型」。 */
   embedding: boolean;
@@ -78,6 +80,45 @@ export const VENDORS: VendorMeta[] = [
     hosts: ['dashscope.aliyuncs.com'],
     caps: { embedding: true, rerank: true, keyScoped: false },
   },
+];
+
+// 内置接入商目录：「添加接入点」向导选其一即可一键填好 baseUrl/model（仍可改）。
+//
+// **一个厂商可能要占两条预设**：同一家的 OpenAI 协议与 Anthropic 协议是两个不同的 baseUrl。
+// 这属于厂商接入事实，和运行时配置解析无关，所以跟 VENDORS 放在同一个模块里。
+export const AI_PRESETS: AiPreset[] = [
+  {
+    id: 'qiniu-anthropic', label: '七牛云 · Anthropic 协议', provider: 'claude',
+    baseUrl: 'https://api.qnaigc.com', model: 'claude-opus-4-6',
+    note: 'Anthropic /v1/messages。关闭 Thinking 时发 {type:"disabled"} 且不得带 budget_tokens（带了返回 400）',
+  },
+  {
+    id: 'qiniu', label: '七牛云 · OpenAI 兼容', provider: 'openai',
+    baseUrl: 'https://api.qnaigc.com/v1', model: '',
+    note: '模型名见控制台或 GET /v1/models。注意：七牛不提供 Embedding；API Key 有模型范围限制',
+  },
+  { id: 'agnes', label: 'Agnes 2.0 Flash', provider: 'openai', baseUrl: 'https://apihub.agnes-ai.com/v1', model: 'agnes-2.0-flash', note: 'SapiensAI · OpenAI 兼容（含 tool calling）' },
+  { id: 'deepseek', label: 'DeepSeek 深度求索', provider: 'openai', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', note: '深度求索 · OpenAI 兼容' },
+  {
+    id: 'deepseek-anthropic', label: 'DeepSeek · Anthropic 协议', provider: 'claude',
+    baseUrl: 'https://api.deepseek.com/anthropic', model: '',
+    note: 'Claude 模型名会被映射到 deepseek-v4-*（opus→pro，sonnet/haiku→flash）；thinking 接受但 budget_tokens 被忽略',
+  },
+  { id: 'qwen', label: '通义千问 Qwen', provider: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus', embeddingModel: 'text-embedding-v3', note: '阿里云 · 兼容模式' },
+  { id: 'moonshot', label: 'Moonshot 月之暗面 (Kimi)', provider: 'openai', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k', note: 'Kimi · OpenAI 兼容' },
+  { id: 'glm', label: '智谱 GLM', provider: 'openai', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-plus', embeddingModel: 'embedding-3', note: '智谱清言 · OpenAI 兼容' },
+  { id: 'doubao', label: '火山方舟 · 豆包', provider: 'openai', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-pro-32k', note: '字节火山引擎 · model 填接入点 ID' },
+  {
+    id: 'volcengine-anthropic', label: '火山方舟 · Anthropic 协议', provider: 'claude',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/coding', model: '',
+    note: '来自 Coding Plan 形态；标准 Chat API 是否另有 Anthropic 入口未见官方原文，接入前务必用「测试连接」直测',
+  },
+  { id: 'siliconflow', label: '硅基流动 SiliconFlow', provider: 'openai', baseUrl: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-72B-Instruct', note: '多模型聚合 · OpenAI 兼容' },
+  { id: 'minimax', label: 'MiniMax', provider: 'openai', baseUrl: 'https://api.minimaxi.com/v1', model: 'abab6.5s-chat', note: 'MiniMax · OpenAI 兼容' },
+  { id: 'baichuan', label: '百川 Baichuan', provider: 'openai', baseUrl: 'https://api.baichuan-ai.com/v1', model: 'Baichuan4', note: '百川智能 · OpenAI 兼容' },
+  { id: 'openai', label: 'OpenAI', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini', embeddingModel: 'text-embedding-3-small', note: '官方' },
+  { id: 'claude', label: 'Claude (Anthropic)', provider: 'claude', baseUrl: '', model: 'claude-sonnet-4-6', note: 'Anthropic 官方协议' },
+  { id: 'mock', label: '本地模板 (mock)', provider: 'mock', baseUrl: '', model: 'template', note: '零成本离线，演示兜底' },
 ];
 
 /**

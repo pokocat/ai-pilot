@@ -67,6 +67,14 @@ export function validateEndpoint(ep: EndpointDraft, facts: EndpointFacts = {}): 
     if (!ep.hasKey) out.push(issue('warn', 'KEY_MISSING', '未配置 API Key，该端点当前会降级为本地模板（mock）', 'apiKey'));
   }
 
+  // provider 决定走哪套 SDK/接口形状，显式方言必须属于同一协议族。否则保存能过，运行时会拿
+  // OpenAI SDK 去组 Anthropic 方言（或反过来），这类错配没有任何机会“自动兼容”。
+  const expectedProtocol = ep.provider === 'claude' ? 'anthropic' : ep.provider === 'openai' ? 'openai_chat' : 'mock';
+  if (dialect.protocol !== expectedProtocol) {
+    out.push(issue('error', 'DIALECT_PROTOCOL_MISMATCH',
+      `${dialect.label} 属于 ${dialect.protocol} 协议，与当前选择的 ${ep.provider} 请求协议不一致`, 'dialect'));
+  }
+
   // —— baseUrl 形状 ——
   // 七牛官方 FAQ 点名过这两种错法：写成域名根、或把完整接口路径粘进来。两者都是「填完看起来没问题、
   // 一调用就 404」，而 404 的报错里看不出是 baseUrl 的锅，值得在保存时就说清楚。

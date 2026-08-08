@@ -11,10 +11,10 @@
 // 归一化之后：「生效」是一个指针（`AiRouteMember.primary`），不再有拷贝；
 // key 提到凭证上；**每个用途一条路由**，各有各的端点、权重与预算。
 //
-// ── 切换与回滚 ────────────────────────────────────────────────────────────────
-// `AI_CONFIG_V2` 默认关＝完全走旧表，行为零变化。开了也只有在**该用途真有可用路由**时才走新表，
-// 否则静默回落旧路径——迁移没跑完、路由被清空、数据库刚恢复，这些情况都不该让 AI 停摆。
-// 回滚就是把开关关掉：旧表一个字段都没动。
+// ── 切换与应急逃生 ────────────────────────────────────────────────────────────
+// 三期写路径收尾后 `AI_CONFIG_V2` 默认开：后台只写四张归一化表。只有该用途真有可用路由时
+// 才走新表，否则静默回落旧路径，避免迁移没跑完或数据库刚恢复时直接停摆。
+// 显式 `AI_CONFIG_V2=false` 会读不再更新的旧表历史快照，只能短时救急，不能当长期回滚方案。
 
 import { prisma } from '../db.js';
 import { env, isRealKey } from '../env.js';
@@ -55,9 +55,15 @@ export interface ResolvedRoute {
   budget: { timeoutMs?: number; bodyMaxTokens?: number; temperature?: number };
 }
 
-/** 读路径是否切到归一化表。默认关——不配就完全是旧行为。 */
+/**
+ * 读路径是否走归一化表。**三期收尾后默认开**——后台已经只写这四张表，旧表不再被写入。
+ *
+ * 留 `AI_CONFIG_V2=false` 这个逃生口是给「切换当天发现问题」用的：关掉它会退回读
+ * `AiSetting` 的**历史快照**。注意那是快照不是真相——旧表自本次上线起不再更新，
+ * 关掉开关只能救急，不能长期跑，救完必须查清楚再切回来。
+ */
 export function v2Enabled(): boolean {
-  return (process.env.AI_CONFIG_V2 ?? 'false').trim() === 'true';
+  return (process.env.AI_CONFIG_V2 ?? 'true').trim() !== 'false';
 }
 
 const TTL = 4_000;
@@ -157,31 +163,6 @@ export function routeToConfig(route: ResolvedRoute, base: ResolvedAiConfig): Res
 export async function configForPurpose(purpose: AiPurpose, base: ResolvedAiConfig): Promise<ResolvedAiConfig | null> {
   const route = await resolveRoute(purpose);
   return route ? routeToConfig(route, base) : null;
-}
-
-/**
- * 把旧表的改动投影到归一化表（**切到 V2 之后每次后台写配置都要调**）。
- *
- * 为什么必须有：切换后运行时读的是 `ai_route`，而后台写的仍是 `ai_model` / `ai_setting`。
- * 少了这一步，**运营在后台改完配置不会生效**——页面显示已保存、线上还是旧的，
- * 而且没有任何报错。这是最难排查的一类故障：所有东西看起来都对。
- *
- * 实现直接复用迁移脚本：它本来就是幂等的（端点按 legacyModelId upsert、凭证按 key 去重、
- * 成员全量重放、孤儿端点清理），拿它当投影函数比另写一份同步逻辑更不容易走样——
- * 两份逻辑迟早会分叉，而分叉的那天就是「后台改了但线上没变」重新出现的那天。
- *
- * V2 没开时是空操作（旧路径本来就是真相源）。失败只记日志不抛：
- * 配置已经写进旧表了，投影失败不该让后台的保存请求变成红色错误。
- */
-export async function syncV2FromLegacy(): Promise<void> {
-  if (!v2Enabled()) return;
-  try {
-    const { migrateAiConfig } = await import('./aiConfigMigrate.js');
-    await migrateAiConfig({ apply: true, quiet: true });
-    __resetAiRoutes();
-  } catch (err) {
-    console.error('[aiRoutes] 归一化表投影失败（旧表已写入，运行时可能仍是旧配置）：', (err as Error).message);
-  }
 }
 
 /** 迁移是否已就绪（后台展示 + 切换前自检）。 */

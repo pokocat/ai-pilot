@@ -2,13 +2,13 @@
 
 > 每个智能体可以单独指定后端，而不必都共用「模型配置」里那一套全局大模型。
 > 三种接入方式：**跟随全局模型（inherit）**、**自定义 OpenAI 兼容端点（openai）**、**绑定 Dify 应用（dify）**。
-> 全局模型配置见运营后台「模型配置」页（`AiSetting` 单例）；本篇讲的是**智能体级**的接入覆盖。
+> 全局模型配置见运营后台「模型」页的凭证 / 接入点 / 用途路由；本篇讲的是尚未收编进该路由体系的**智能体级覆盖**。
 
 ---
 
 ## 一、为什么要 per-agent 接入
 
-「模型配置」是全局单例：所有智能体共用一个 provider/baseUrl/model/key，靠各自的 System 提示词区分。
+默认 `inherit` 的智能体走全局 `chat` 用途路由；所有这类智能体共享端点池与凭证，靠各自的 System 提示词区分。
 但有些智能体是在 **Dify** 上独立编排好的应用（自带提示词、工具、知识库、工作流），每个应用有自己专属的
 `api_key` 和 base URL —— 这类智能体没法塞进全局那一套配置。于是给 `Agent` 增加了「接入方式」：
 
@@ -179,7 +179,7 @@ API（`server/src/routes/admin.ts`）：
 
 ## 七、安全
 
-- `apiKey` / `difyApiKey` 目前**明文存库**（与全局 `AiSetting` 一个口径，仅为演示便利）；对外一律脱敏（`has*`）。
+- `apiKey` / `difyApiKey` 目前**明文存库**（与全局 `AiCredential` 的风险口径一致）；对外一律脱敏（`has*`）。
 - **生产建议**：密钥加密 / 接密管（KMS / Secrets Manager），并对 `/admin/*` 审计（已记 `admin.agent.update`，payload 含 `providerMode`/`runtimeChanged`，不含 key）。
 
 ---
