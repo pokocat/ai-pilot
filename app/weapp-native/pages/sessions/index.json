@@ -5,6 +5,12 @@
     "login-sheet": "/components/login-sheet/index",
     "agent-unlock": "/components/agent-unlock/index",
     "coach-marks": "/components/coach-marks/index",
-    "native-icon": "/components/native-icon/index"
+    "native-icon": "/components/native-icon/index",
+    "markdown-text": "/components/markdown-text/index",
+    "report-card": "/components/report-card/index",
+    "towxml": "/packages/main/vendor/towxml/towxml"
+  },
+  "componentPlaceholder": {
+    "towxml": "view"
   }
 }

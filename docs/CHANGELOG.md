@@ -6,6 +6,57 @@
 
 ## 变更日志
 
+### 2026-08-08 · 问策入口改版 WP3'（终态：对话即 tab） · 影响面：weapp-native 问策 tab / chat-core / 埋点通道 / `GET /wence/hints`
+
+规格 `docs/[FABLE5]WENCE_ENTRY_INTERACTION_SPEC.md`（其中「分两步走 / A-B 过渡」的节奏描述已作废，
+端上直接做终态）。背景：很多人不知道「在总军师里聊天就 OK」。北极星＝进入问策 → 首次发消息的转化率。
+
+- **`pages/sessions` 按 `/me.features.wenceForm` 分形态**。`'chat'` 走终态「总军师对话即 tab」；
+  `'control'` / `'dock'` / 字段缺失 / 取数失败一律落回**现状军师列表，一个节点都不动**（灰度回退的前提，
+  两棵树在同一份 WXML 里 `wx:if / wx:else` 并列）。形态初值取本地缓存 `junshi.wenceForm.<token>`，
+  默认 control，免得 chat 用户每次冷启动先闪一屏列表。
+- **终态结构**：自绘合一页头（固定不滚，kicker 位换成「总军师玄衡 · 在线」+ 大字问策 + 谋印 +
+  右侧「军师团 / 历史」双入口）+ chat-core 消息流 + 提示问题 pill + 底部合体浮岛（composer 模板 + 细线 +
+  与 `custom-tab-bar` 同源的五 tab 行）+ 军师团/历史半屏抽屉。**这个页头是新模式，不是 TabHeader 实例**，
+  与「tab 页头零按钮」不矛盾——那条约束的是 TabHeader 组件与它「用途小字」的语义（AGENTS §7.2 已立段说明）。
+- **会话装载**：已登录续接 `agentKey='general'` 最近会话 → 没有就 `POST /sessions/proactive` 注入主动消息 →
+  `injected:false`（exists / empty-pool / disabled）走 greet 空会话。游客走新加的
+  `chatCoreLoad({ localPrelude })` 本地开场序列（**零服务端写入**，文案在 `weapp-native/data/wence-defaults.js`），
+  发送动作才弹登录门（reason='chat'，可关、不丢输入）。切走再切回只同步角标与已读，不重复装载、不重复注入。
+- **towxml 跨包异步接线**（本包最关键的技术点）：主包页面用 `require.async('../../packages/main/vendor/towxml/globalCb.js')`
+  取流式回调，`index.json` 给 towxml 配 `componentPlaceholder: view`。**顺序铁律：先 `useStreamRenderer` 再
+  `chatCoreLoad`**，反过来第一轮流式的 `setMdText` 会打进 no-op。拿不到也不许白屏：chat-core 新增
+  `hasStreamRenderer()` 记账，没接上就不发 `streamRenderId`，模板退回 `markdown-text`，正文以 120ms 节流回写。
+- **chat-core 四项新能力**（chat 分包页自然继承 chips）：`localPrelude`、`SessionMessage.chips` 快捷回应
+  （点击即代发，本会话出现过 user 轮就整排作废）、`sendText(text, entry)`（有草稿拒发；**未登录写
+  `_pendingPrompt` 而不是 `_draft`**，否则登录回来是「空输入框 + 发送键亮着」）、`chatCoreEvent` 事件出口
+  （核心只发事件，映射与上报都在宿主页；核心自己不碰 `api.track`）。
+- **提示 pill 是「点击即代发」，不是原型的「点选即填」**：textarea 铁律禁止绑定 `value`，程序化回填在原生
+  没有实现路径；代发与 chip 同语义，也少一步「填进去还得自己点发送」。词池 `GET /wence/hints`，
+  空池/失败回退本地兜底池，3s 轮换，有草稿/生成中/键盘/抽屉时隐藏。
+- **未读三层引导链**：① 浮岛问策角标＝全会话聚合（`store.syncUnread`）② 「军师团」按钮右上＝除 general 外
+  各会话未读之和 ③ 抽屉行内各自角标。装载 general 会话后（服务端写 `lastReadAt`）本地缓存就地掉掉这份未读，
+  专业军师的一条不动。
+- **埋点通道 `api.track(name, props)`**：裸 `wx.request` 发 `POST /events`，fire-and-forget、失败完全静默、
+  游客照发。**刻意不走 `request()`**——那条路径上「带 token 的 401」会清登录态 + `reLaunch`，一条统计请求
+  能把正在打字的用户踢出对话。埋点位：`wence_enter` / `proactive_show` / `chip_tap` / `hint_tap` /
+  `first_message_send`（ttfm_ms + entry）/ `drawer_open` / `attach_open` / `tab_switch`。
+- **服务端只改一处**：`GET /wence/hints` 增加 `guestForm: 'control'|'chat'`（开关关 → control；开且
+  `effectiveArms().chat > 0` → chat）。游客没有 `/me` 也没有稳定 userId，不做三臂分流，只回答「chat 臂开没开」；
+  顺路搭在游客必发的这条请求上，省掉一次专为判形态的往返，也就没有「先渲染 control 再跳 chat」的闪烁。
+  `shared/contracts.d.ts` 的 `WenceHintsResult` 同步。
+- **底栏 tab 表抽到 `services/tabbar.js`**：`custom-tab-bar` 与浮岛那排 tab 同源（顺序/图标/主题态/角标口径），
+  样式也直接 `@use` `custom-tab-bar/index.scss`，不许再抄一套。
+- **浮岛刻意不上 `backdrop-filter`**（`custom-tab-bar` 那条有）：它会建立 fixed 定位包含块，把 composer 模板里的
+  附卷全文预览 / 引用资产选择器两个全屏层裁进 26px 圆角小盒子。底色从 `.9` 提到 `.96` 补足遮挡。
+- **其它**：`custom-tab-bar` 本体在终态下由 `store.setOverlay(true,'wence-isle')` 隐藏，`onHide/onUnload` 与
+  切 tab 前成对释放；`CHAT_TEXTAREA_TARGETS` 加入 `pages/sessions/index.wxml`（§7.2 新宿主页义务）；
+  CoachMarks 第一步文案改成两形态通用口径；mock 平价（`/me.features.wenceForm='chat'`、`wence/hints`
+  带 `guestForm`、`sessions/proactive` 按账号隔离持久化且二次调用回 `exists`、读详情清未读、`events` no-op）。
+- **测试**：`app` 48 + 93 全绿（新增 4 测：分形态与终态结构、埋点静默通道、chips 生命周期、mock 主动消息隔离；
+  既有断言一条未删，tab 表断言改指真源 `services/tabbar.js`）；`server` **1459/1459**（新增 guestForm 用例）。
+  三端构建 `build:weapp` / `build:weapp:server` / `build:h5` 全绿。
+
 ### 2026-08-08 · 问策入口改版 WP2'（对话核心抽到主包 chat-core） · 影响面：weapp-native 主包/分包结构 · 原生构建闸门 · 原生静态测试
 
 为下一包「问策 tab 内嵌总军师对话」做准备。分包可以引用主包、反向不行，所以先把

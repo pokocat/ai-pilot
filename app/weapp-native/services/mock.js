@@ -1,4 +1,5 @@
 const { setToken } = require('./token');
+const { GUEST_PRELUDE, FALLBACK_HINTS } = require('../data/wence-defaults');
 
 const DEFAULT_AGENTS = [
   { key: 'general', name: '总军师', role: '通用商业军师', type: 'general', billing: 'free', price: 0, owned: true, enabled: true, greet: '说说你的处境，我先判断主要矛盾，再调度专业军师。' },
@@ -50,8 +51,52 @@ function sessions() { return Promise.resolve(wx.getStorageSync(storageKey('sessi
 function session(id) {
   const detail = wx.getStorageSync(storageKey(`session.${id}`));
   if (!detail) return Promise.reject(Object.assign(new Error('会话不存在'), { code: 'NOT_FOUND' }));
+  // 服务端读详情会写 lastReadAt（未读归零）；mock 必须同口径，否则「进过会话仍挂着红点」
+  // 在刷新后依然可见，就是假的真值（§4 mock 铁律）。
+  const listKey = storageKey('sessions');
+  const list = wx.getStorageSync(listKey) || [];
+  if (list.some((item) => item.id === id && Number(item.unreadCount) > 0)) {
+    wx.setStorageSync(listKey, list.map((item) => (item.id === id ? Object.assign({}, item, { unreadCount: 0, hasUnread: false }) : item)));
+  }
   return Promise.resolve(detail);
 }
+
+/** 问策提示词池：mock 直接用本地兜底池，并按 mock 包默认展示终态给出 guestForm='chat'。 */
+function wenceHints() {
+  return Promise.resolve({
+    hints: FALLBACK_HINTS.map((text, index) => ({ id: `mock-hint-${index + 1}`, text })),
+    guestForm: 'chat',
+  });
+}
+
+/**
+ * 进场主动消息：按账号隔离并持久化。频控幂等口径与服务端一致——
+ * 已有 general 会话就回 exists（不再注入第二条），注入的会话与消息刷新/切账号后都还在。
+ */
+function proactiveSession() {
+  const listKey = storageKey('sessions');
+  const list = wx.getStorageSync(listKey) || [];
+  if (list.some((item) => item.agentKey === 'general')) return Promise.resolve({ injected: false, reason: 'exists' });
+  const template = GUEST_PRELUDE[0];
+  if (!template) return Promise.resolve({ injected: false, reason: 'empty-pool' });
+  const agent = DEFAULT_AGENTS[0];
+  const id = `native-proactive-${Date.now()}`;
+  const now = new Date().toISOString();
+  const title = template.text.slice(0, 18);
+  wx.setStorageSync(storageKey(`session.${id}`), {
+    id, agentKey: 'general', agent, title,
+    // chips 与服务端 present 层同构：消息级 chips 字段（contentJson 里也留一份，同后端存储形状）。
+    messages: [{ id: `a-${Date.now()}`, role: 'assistant', content: { text: template.text, chips: template.chips }, chips: template.chips, at: now }],
+  });
+  wx.setStorageSync(listKey, [{
+    id, agentKey: 'general', agentName: agent.name, title,
+    snippet: template.text, updatedAt: now, unreadCount: 1, hasUnread: true,
+  }].concat(list));
+  return Promise.resolve({ injected: true, sessionId: id });
+}
+
+/** 埋点：mock 包不落库也不打网络，只保证调用方拿到与线上同形状的 ok。 */
+function track() { return Promise.resolve({ ok: true }); }
 function search(q) {
   const needle = String(q || '').trim().toLowerCase();
   if (!needle) return Promise.resolve({ hits: [] });
@@ -136,7 +181,8 @@ function me() {
     tokenQuota: { limit: plan ? 100 : 0, used: 0, remaining: plan ? 100 : 0, unlimited: false },
     usage,
     inviteCode: 'JS2026',
-    features: { fortune: true },
+    // mock 包默认展示问策终态（对话即 tab），方便本地走查；线上形态由服务端稳定分桶下发。
+    features: { fortune: true, wenceForm: 'chat' },
   });
 }
 
@@ -1216,6 +1262,7 @@ function generate(body) {
 
 module.exports = {
   DEFAULT_AGENTS, agents, purchaseAgent, sessions, session, search, deleteSession, login, wechatLogin, wechatPhoneLogin, sendSmsCode, me, generate,
+  wenceHints, proactiveSession, track,
   updateIdentity, deleteAccount, bindPhone, setColor, uploadAvatar, getProfile, saveProfile, quickScan, journey, workbench,
   plans, planOptions, quotePlan, purchasePlan,
   skus, createSkuOrder, dataSources, requestDataSourceAuth, uploadDataSource, modules, enableModule, patchModule,

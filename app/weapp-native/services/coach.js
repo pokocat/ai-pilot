@@ -2,7 +2,10 @@ const { getToken } = require('./token');
 
 const KEY_PREFIX = 'junshi.coach.v1.';
 const STEPS = [
-  { route: '/pages/sessions/index', title: '问策 · 有事问军师', text: '总军师置顶统筹，专业军师分线出策，结论汇回主线。像发微信一样，直接说你的问题。' },
+  // 问策入口有两种形态（列表 / 对话即 tab），coach 数据是静态的，所以这句要两边都说得通：
+  // 「直接说」在两种形态下都成立，「军师团 / 历史看右上」在终态是页头双入口、在列表态是搜索行右侧，
+  // 都在右上方向，不误导。别写成只描述其中一种形态的话术。
+  { route: '/pages/sessions/index', title: '问策 · 有事问军师', text: '有事直接说，总军师在这等你。换专业军师、翻旧对话都在右上角；结论会汇回主线判断。' },
   { route: '/pages/home/index', title: '军情 · 每天的判断', text: '今天的主要矛盾、下一步就做、现在别做，一屏讲清——先判断，再行动。' },
   { route: '/pages/studio/index', title: '军令 · 把话变成事', text: '判断拆成今日任务：做完打卡、回填战果，军师据此修正下一轮判断。' },
   { route: '/pages/thinktank/index', title: '锦囊 · 越攒越值钱', text: '资料、方法、历次方案都留档在这，是你的家底，越攒越厚。' },

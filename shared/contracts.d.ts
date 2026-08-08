@@ -844,8 +844,16 @@ export interface SessionMessage {
 /* ────────────── 问策入口（WP1：提示词池 / 主动消息 / 埋点） ────────────── */
 /** 提示问题 pill 的一条词（GET /wence/hints）。id 用于 hint_tap 埋点回溯是哪条词促成了首发。 */
 export interface WenceHint { id: string; text: string }
-/** GET /wence/hints 返回体。空池是合法状态（运营后台未录入），端上回退本地兜底池。 */
-export interface WenceHintsResult { hints: WenceHint[] }
+/**
+ * GET /wence/hints 返回体。空池是合法状态（运营后台未录入），端上回退本地兜底池。
+ *
+ * `guestForm` 是**游客**（没有 /me、也就没有 userId 可分桶）的问策入口形态：
+ * 开关关 → 'control'（零改动现状）；开关开且 chat 臂权重 > 0 → 'chat'。
+ * 游客没有稳定身份，分桶没有意义也无法归因，所以这里只回答「chat 这条臂到底开没开」，
+ * 而不是把游客也塞进三臂分流；登录后一律改用 `/me.features.wenceForm` 的正式分桶。
+ * 'dock' 不下发给游客——那一臂仍是列表形态，与 control 同属现状渲染路径。
+ */
+export interface WenceHintsResult { hints: WenceHint[]; guestForm: 'control' | 'chat' }
 /**
  * POST /sessions/proactive 结果。injected=false 的三种原因都不是错误，端上一律静默降级为 greet-only：
  * exists=该用户已有 general 会话（同时就是「每用户至多注入一次」的频控幂等）；

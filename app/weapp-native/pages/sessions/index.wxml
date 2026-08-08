@@ -1,4 +1,123 @@
-<view class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+<import src="/chat-core/message-list.wxml"></import>
+<import src="/chat-core/composer.wxml"></import>
+
+<!-- 问策 tab 分形态渲染（/me.features.wenceForm，游客读 /wence/hints 的 guestForm）：
+     form==='chat' 走终态「总军师对话即 tab」；其余（control / dock / 字段缺失 / 取数失败）
+     一律落到下面那棵现状军师列表，一个节点都不动，灰度回退才有意义。-->
+<view wx:if="{{form === 'chat'}}" class="wence-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px;--wence-head-h:{{headHeight}}px">
+  <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
+
+  <!-- 合一页头：固定不滚。kicker 位换成对话对象身份（总军师 + 花名 + 在线），
+       大字与谋印沿用 TabHeader 度量；这是自绘页头，不是 TabHeader 实例（见 AGENTS §7.2）。-->
+  <view class="wence-head">
+    <view class="native-nav-inset"></view>
+    <view class="wh-head">
+      <text class="wh-glyph serif">谋</text>
+      <view class="wh-titles">
+        <text class="wh-kicker">{{title}}{{alias}} · 在线</text>
+        <view class="wh-titlerow">
+          <text class="wh-title serif">问策</text>
+          <view class="wh-entries">
+            <view class="wh-entry" bindtap="openCouncil">
+              <native-icon name="group" tone="accent" color-key="{{colorKey}}" size="13"></native-icon>
+              <text>军师团</text>
+              <view wx:if="{{councilUnreadText}}" class="unread wh-entry-badge"><text>{{councilUnreadText}}</text></view>
+            </view>
+            <view class="wh-entry" bindtap="openHistory">
+              <native-icon name="clock" tone="accent" color-key="{{colorKey}}" size="13"></native-icon>
+              <text>历史</text>
+            </view>
+          </view>
+        </view>
+      </view>
+      <view class="wh-rule"></view>
+    </view>
+  </view>
+
+  <!-- 对话区：滚动容器留在宿主页（scroll-into-view 不进模板，避免流式自动滚底带着整张列表重算）。-->
+  <scroll-view scroll-y enhanced show-scrollbar="false" scroll-into-view="{{bottomAnchor}}" class="wence-scroll">
+    <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast, chipsSpent}}"></template>
+  </scroll-view>
+
+  <!-- 提示问题 pill：浮在浮岛上方。点击 = 直接代发（textarea 铁律禁止 value 绑定，
+       原型的「点选即填」在原生没有实现路径；代发与 chip 同语义，见 AGENTS §7.2）。-->
+  <view wx:if="{{hintText && !drawerOpen && !busy && !inputCount && !keyboardHeight}}" class="wence-pill {{hintFade ? 'fade' : ''}}" bindtap="tapHint">
+    <view class="wp-mark"><text class="serif">问</text></view>
+    <text class="wp-q">{{hintText}}</text>
+  </view>
+
+  <!-- 底部合体浮岛：上=chat-core composer 模板，下=与 custom-tab-bar 同源的五 tab 行，同一块玻璃。
+       z-index 100 = --z-nav（本形态下 custom-tab-bar 本体由 store.setOverlay 隐藏）。-->
+  <view class="wence-isle">
+    <template is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteKept, pasteKeptExcerpt, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>
+    <view class="isle-div"></view>
+    <view class="tabbar-inner">
+      <view wx:for="{{isleTabs}}" wx:key="path" class="tab {{index === 0 ? 'on' : ''}}" data-index="{{index}}" bindtap="switchIsleTab">
+        <view class="tab-ic">
+          <image class="tab-icon tab-icon-{{item.icon}}" src="{{index === 0 ? item.iconActive : item.iconNormal}}" mode="aspectFit"></image>
+          <view wx:if="{{index === 0 && unread > 0}}" class="tab-badge"><text class="tab-badge-n">{{unread > 99 ? '99+' : unread}}</text></view>
+        </view>
+        <text class="tab-label">{{item.text}}</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 军师团 / 历史抽屉：双入口同一抽屉、各落各段，顶部分段器互切。z-index 900 = --z-sheet。-->
+  <view wx:if="{{drawerOpen}}" class="wd-mask" bindtap="closeDrawer"></view>
+  <view wx:if="{{drawerOpen}}" class="wd-sheet" catchtap="stop">
+    <view class="wd-grab"></view>
+    <view class="wd-seg">
+      <view class="wd-seg-item {{drawerSeg === 'council' ? 'on' : ''}}" data-seg="council" bindtap="switchSeg"><text>军师团</text></view>
+      <view class="wd-seg-item {{drawerSeg === 'history' ? 'on' : ''}}" data-seg="history" bindtap="switchSeg"><text>历史会话</text></view>
+    </view>
+    <view class="council-search wd-search">
+      <native-icon name="target" tone="neutral" size="14"></native-icon>
+      <input class="cs-input" value="{{query}}" placeholder="搜索军师、会话、方案或资料" bindinput="inputQuery" />
+      <view wx:if="{{query}}" class="cs-clear" bindtap="clearQuery"><native-icon name="close" tone="neutral" size="12"></native-icon></view>
+    </view>
+
+    <scroll-view scroll-y enhanced show-scrollbar="false" class="wd-body">
+      <block wx:if="{{query}}">
+        <view wx:if="{{!searchGroups.length}}" class="sess-empty"><text class="et">{{searching ? '正在检索…' : '没有匹配的结果'}}</text><text class="es">换个关键词，或直接问总军师。</text></view>
+        <view wx:for="{{searchGroups}}" wx:key="kind" class="search-results">
+          <view class="wx-section"><text>{{item.label}}</text></view>
+          <view class="wx-list wd-list">
+            <view wx:for="{{item.rows}}" wx:for-item="hit" wx:for-index="hitIndex" wx:key="id" class="sr-item" data-group="{{index}}" data-index="{{hitIndex}}" bindtap="tapHit">
+              <view class="sr-main"><text class="sr-title">{{hit.title}}</text><text wx:if="{{hit.snippet}}" class="sr-snippet">{{hit.snippet}}</text></view><view class="sr-arrow"><native-icon name="arrow" tone="neutral" size="16"></native-icon></view>
+            </view>
+          </view>
+        </view>
+      </block>
+
+      <block wx:elif="{{drawerSeg === 'council'}}">
+        <view wx:if="{{!councilRows.length}}" class="sess-empty"><text class="et">军师目录还没读到</text><text class="es-link" bindtap="load">重新加载</text></view>
+        <view wx:else class="wx-list wd-list">
+          <view wx:for="{{councilRows}}" wx:key="key" class="wx-item" data-key="{{item.key}}" bindtap="tapAgent">
+            <view class="advisor-avatar"><image class="aa-img" src="{{item.avatar}}" mode="aspectFill"></image><view wx:if="{{item.online}}" class="aa-dot"></view></view>
+            <view class="wx-main"><view class="wx-top"><view class="wx-id"><text class="wx-name">{{item.name}}</text><text wx:if="{{item.alias}}" class="wx-alias">{{item.alias}}</text><view wx:if="{{item.unreadText}}" class="unread"><text>{{item.unreadText}}</text></view></view><text class="wx-time">{{item.locked ? '需启用' : item.timeText}}</text></view><text class="wx-preview">{{item.preview}}</text></view>
+            <native-icon wx:if="{{item.locked}}" name="lock" tone="neutral" size="13"></native-icon>
+          </view>
+        </view>
+      </block>
+
+      <block wx:else>
+        <view wx:if="{{loading}}" class="sess-empty"><text class="et">正在读取会话…</text></view>
+        <view wx:elif="{{error}}" class="sess-empty"><text class="et">会话读取失败</text><text class="es-link" bindtap="load">重新加载</text></view>
+        <view wx:elif="{{!historyRows.length}}" class="sess-empty"><text class="et">还没有别的会话</text><text class="es">跟谁聊都留底，要紧的我会汇到主线判断里。</text></view>
+        <block wx:else>
+          <view class="wx-list wd-list"><view wx:for="{{historyRows}}" wx:key="id" class="wx-item" data-id="{{item.id}}" bindtap="tapSession" bindlongpress="deleteSession"><view class="advisor-avatar"><image class="aa-img" src="{{item.avatar}}" mode="aspectFill"></image></view><view class="wx-main"><view class="wx-top"><view class="wx-id"><text class="wx-name">{{item.agentName}}</text><text class="wx-alias">{{item.alias}}</text><view wx:if="{{item.unreadText}}" class="unread"><text>{{item.unreadText}}</text></view></view><text class="wx-time">{{item.timeText}}</text></view><text class="wx-preview">{{item.preview}}</text></view></view></view>
+          <text class="wd-foot">长按可删除 · 只列最近，更早的用上方搜索</text>
+        </block>
+      </block>
+    </scroll-view>
+  </view>
+
+  <agent-unlock agent="{{unlockAgent}}" bindclose="closeUnlock" bindunlocked="agentUnlocked"></agent-unlock>
+  <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <coach-marks></coach-marks>
+</view>
+
+<view wx:else class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
   <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>

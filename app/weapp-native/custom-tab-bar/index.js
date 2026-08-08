@@ -1,23 +1,6 @@
-const TABS = [
-  { path: '/pages/sessions/index', icon: 'conversation', text: '问策' },
-  { path: '/pages/home/index', icon: 'flag', text: '军情' },
-  { path: '/pages/studio/index', icon: 'token', text: '军令' },
-  { path: '/pages/thinktank/index', icon: 'pouch', text: '锦囊' },
-  { path: '/pages/profile/index', icon: 'crown', text: '老板' },
-];
-
-function toneOf(themeClass) {
-  const tone = String(themeClass || '').replace(/^theme-/, '');
-  return ['gold', 'green', 'red', 'blue', 'purple', 'iron'].includes(tone) ? tone : 'green';
-}
-
-function visualTabs(themeClass) {
-  const activeTone = toneOf(themeClass);
-  return TABS.map((item) => Object.assign({}, item, {
-    iconNormal: `/assets/native-icons/${item.icon}-neutral.svg`,
-    iconActive: `/assets/native-icons/${item.icon}-${activeTone}.svg`,
-  }));
-}
+// 底栏渲染壳。tab 表与主题态图标解析已抽到 services/tabbar.js，
+// 与问策终态浮岛里那排自绘 tab 同源（见该文件顶部说明）。
+const { TABS, visualTabs } = require('../services/tabbar');
 
 Component({
   data: { tabs: visualTabs('theme-green'), selected: 0, themeClass: 'theme-green', unread: 0, reviewDue: false, overlay: false },

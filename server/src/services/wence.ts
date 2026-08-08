@@ -86,6 +86,19 @@ export async function resolveWenceForm(userId: string): Promise<WenceForm> {
   return pickArm(userId, effectiveArms(await featureFlagPayload(WENCE_FLAG)));
 }
 
+/**
+ * 游客的问策入口形态（随 GET /wence/hints 下发，游客没有 /me 可读）。
+ * · 开关**关闭** → 'control'（零改动现状）。
+ * · 开关**开启**且 chat 臂权重 > 0 → 'chat'。
+ * 游客没有稳定 userId：分桶既算不出稳定值，也无法在漏斗里归因，所以不对游客做三臂分流，
+ * 只回答「chat 这条臂开没开」。'dock' 不下发——那一臂本来就是列表形态，与 control 同一条渲染路径。
+ * 登录后端上必须改读 /me.features.wenceForm 的正式分桶，不得继续用这个值。
+ */
+export async function resolveGuestForm(): Promise<'control' | 'chat'> {
+  if (!(await isFeatureEnabled(WENCE_FLAG, false))) return 'control';
+  return effectiveArms(await featureFlagPayload(WENCE_FLAG)).chat > 0 ? 'chat' : 'control';
+}
+
 /** 提示词池：enabled 的 hint 模板，按 sort 升序（同 sort 按创建时间稳定排）。空池返回 []。 */
 export async function listHints(): Promise<{ id: string; text: string }[]> {
   const rows = await prisma.wenceTemplate.findMany({

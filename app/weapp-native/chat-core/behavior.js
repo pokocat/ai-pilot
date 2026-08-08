@@ -12,12 +12,20 @@ const { stripSerializedAsksTail, attachmentOnlyPrompt } = require('../services/c
 // towxml 流式打字机（548K）留在 packages/main/vendor/towxml 分包里，主包不得反向 require 分包文件。
 // 宿主页在自己的包内取到 globalCb 后调用 useStreamRenderer 注入，下面的调用点与抽取前一字不差。
 const streamRenderer = { setMdText() {}, setStreamFinish() {}, stopImmediatelyCb() {} };
+// 打字机是否真的接上了。宿主页用 require.async 跨包异步取 globalCb 时**可能失败**（弱网首启、
+// 分包未下载完），那时三个回调仍是 no-op：如果照样给消息发 streamRenderId，模板就会渲染一个
+// 永远收不到文字的 towxml，真机上就是一片空白。所以这里记账，未接上时改走纯文本兜底（见 ensureStreamItem）。
+let streamRendererReady = false;
 function useStreamRenderer(next) {
-  if (!next || typeof next !== 'object') return;
+  if (!next || typeof next !== 'object') return false;
+  let injected = 0;
   for (const key of ['setMdText', 'setStreamFinish', 'stopImmediatelyCb']) {
-    if (typeof next[key] === 'function') streamRenderer[key] = next[key];
+    if (typeof next[key] === 'function') { streamRenderer[key] = next[key]; injected += 1; }
   }
+  if (injected === 3) streamRendererReady = true;
+  return streamRendererReady;
 }
+function hasStreamRenderer() { return streamRendererReady; }
 function setMdText(id, text) { streamRenderer.setMdText(id, text); }
 function setStreamFinish(id) { streamRenderer.setStreamFinish(id); }
 function stopImmediatelyCb(id) { streamRenderer.stopImmediatelyCb(id); }
@@ -38,6 +46,9 @@ const PASTE_DELTA_MIN = 500;
 const PASTE_SETTLE_MS = 250;
 const PASTE_DUP_FLASH_MS = 1800;
 const REF_LIMIT = 9;
+// 没有打字机时纯文本兜底的回写节流：这条路径本来就违反「SSE token 到达不整段 setData」的口径，
+// 只在降级时启用，节流到 120ms 把 setData 次数压到可接受范围（正常路径永远走 towxml 增量解析）。
+const PLAIN_STREAM_MS = 120;
 
 function avatarFor(agentKey) {
   const key = textOf(agentKey) || 'general';
@@ -245,8 +256,20 @@ function normalizeMessage(message, index) {
   const reply = normalizeReply(content);
   return {
     id: message.id || `a-${index}`, role: 'assistant', text: reply.text, points: reply.points, asks: reply.asks, truncated: reply.truncated,
+    // 快捷回应：服务端 SessionMessage.chips 原样带进消息对象（当前唯一写入方是进场主动消息）。
+    // 无 chips 的消息拿到空数组，模板据此不渲染这一排。
+    chips: stringList(message && message.chips),
     knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
   };
+}
+
+/**
+ * chips 是否已经作废。规则只有一条：**本会话里用户开过口就不再显示**——
+ * 点 chip 会立刻发出一条用户消息，手动发送同理，所以「有没有 user 轮」就是唯一判据，
+ * 不用再另存一个「点过了」的标记（重进会话也能自然收敛）。
+ */
+function chipsSpentFor(messages) {
+  return (messages || []).some((item) => item && item.role === 'user');
 }
 
 function normalizeDetailMessages(detail) {
@@ -278,6 +301,7 @@ const data = {
   showLogin: false, loginReason: 'chat', errorText: '', refs: [], uploading: false,
   regularRefs: [], pasteRefs: [], pastePendings: [], pasteHint: false, pasteDupId: '',
   pasteKept: '', pasteKeptExcerpt: '', pastePreview: null,
+  chipsSpent: false,
   showPicker: false, pickerLoading: false, pickGroups: [], accepting: false, reportBusy: '',
   posterEnabled: false, posterPrice: 0,
   askAnsweredCount: 0, askTotal: 0, askRemaining: 0, askReady: false,
@@ -307,6 +331,13 @@ const methods = {
     this._continue = config.continueLatest === true;
     this._refs = [];
     this._pendingPrompt = textOf(config.pendingPrompt);
+    // localPrelude：宿主页本地合成的开场 assistant 消息（text + chips），**只在内存里渲染，
+    // 零服务端写入**。用于游客态：他没有会话可续、也不该因为看一眼就在库里落一条消息。
+    this._localPrelude = Array.isArray(config.localPrelude) ? config.localPrelude : [];
+    this._sendEntry = '';
+    this._plainStreamTimer = null;
+    this._plainStreamIndex = null;
+    this._plainStreamText = '';
     this._pollTimer = null;
     this._streamControl = null;
     this._generationId = '';
@@ -329,6 +360,8 @@ const methods = {
     if (this._pasteSettleTimer) clearTimeout(this._pasteSettleTimer);
     if (this._pasteDupTimer) clearTimeout(this._pasteDupTimer);
     if (this._askScrollTimer) clearTimeout(this._askScrollTimer);
+    if (this._plainStreamTimer) clearTimeout(this._plainStreamTimer);
+    this._plainStreamTimer = null;
     this.stopStreamAutoScroll();
     const streamItem = this._streamIndex == null ? null : this.data.messages[this._streamIndex];
     if (streamItem && streamItem.streamRenderId) stopImmediatelyCb(streamItem.streamRenderId);
@@ -340,6 +373,50 @@ const methods = {
     this._streamControl = null;
   },
   isCurrent(epoch) { return this._alive && epoch === this._epoch; },
+  /**
+   * 对话核心 → 宿主页的单向事件出口。宿主页可选实现 `chatCoreEvent(name, props)`；
+   * chat 分包页不实现 = 完全不埋点（埋点是问策 tab 的入口实验口径，不该跟着核心散到每个宿主）。
+   * 埋点绝不能反过来影响对话：这里吞掉一切异常。
+   */
+  emitChatEvent(name, props) {
+    if (typeof this.chatCoreEvent !== 'function') return;
+    try { this.chatCoreEvent(name, props || {}); } catch (_) { /* 埋点失败不许波及主流程 */ }
+  },
+  /**
+   * 代用户发送一段既有文字（chip 快捷回应 / 提示 pill）。
+   * 刻意**不回填输入框**：textarea 铁律禁止绑定 value，没有任何合法路径能把文字写进去；
+   * 直接代发与 chip 语义一致，也少一次「填进去还得自己点发送」的门槛。
+   * 已有草稿时不发——那会静默吞掉用户正在写的话。
+   */
+  sendText(text, entry) {
+    const value = textOf(text).trim();
+    if (!value || this.data.busy) return false;
+    if (this.hasDraft()) { wx.showToast({ title: '输入框里还有内容，先发出去', icon: 'none' }); return false; }
+    if (!store.isAuthed()) {
+      // 游客：走 _pendingPrompt 而不是 _draft。textarea 是非受控的，往 _draft 里塞一句
+      // 屏幕上看不见的话，用户登录回来会看到「空输入框 + 发送键亮着」，一按发出一句他没写过的话。
+      this._pendingPrompt = value;
+      this._sendEntry = textOf(entry) || 'keyboard';
+      this.safeSetData({ showLogin: true, loginReason: 'chat' });
+      return false;
+    }
+    this._draft = value;
+    this._draftPrefix = '';
+    this._lastInputValue = '';
+    this._sendEntry = textOf(entry) || 'keyboard';
+    this.send();
+    return true;
+  },
+  tapChip(event) {
+    if (this.data.busy || this.data.chipsSpent) return;
+    const messageIndex = Number(event.currentTarget.dataset.message);
+    const chipIndex = Number(event.currentTarget.dataset.index);
+    const message = this.data.messages[messageIndex];
+    const chip = textOf(message && message.chips && message.chips[chipIndex]).trim();
+    if (!chip) return;
+    this.emitChatEvent('chip_tap', { message_id: textOf(message.id), chip_idx: chipIndex });
+    this.sendText(chip, 'chip');
+  },
   safeSetData(patch, callback) {
     if (!this._alive) return;
     this.setData(patch, () => { if (this._alive && callback) callback(); });
@@ -420,7 +497,16 @@ const methods = {
     await this.resolveContinueSession(epoch);
     if (!this.isCurrent(epoch)) return;
     if (this._sessionId && store.isAuthed()) await this.restoreSession(epoch);
-    else this.safeSetData(this.askPatch([{ id: 'greet', role: 'assistant', text: (agent && agent.greet) || '坐下来聊聊。你眼下最难拿主意的是哪件事？', points: [], greet: true }], false));
+    else if (this._localPrelude.length) {
+      // 本地开场序列走普通 assistant 气泡（不是 greet 样式）：它承担的是「军师先开口」的语义，
+      // 与服务端注入的主动消息在视觉上必须一致，否则游客登录后同一句话会换个长相。
+      const messages = this._localPrelude.map((item, index) => ({
+        id: `local-${index}`, role: 'assistant', text: textOf(item && item.text), points: [], asks: [],
+        chips: stringList(item && item.chips), local: true,
+      })).filter((item) => item.text);
+      this.safeSetData(Object.assign(this.askPatch(messages, false), { chipsSpent: false }));
+      this.emitChatEvent('prelude_show', { source: 'local', count: messages.length });
+    } else this.safeSetData(this.askPatch([{ id: 'greet', role: 'assistant', text: (agent && agent.greet) || '坐下来聊聊。你眼下最难拿主意的是哪件事？', points: [], greet: true }], false));
     if (!this.isCurrent(epoch)) return;
     this.toBottom();
     this.measureComposer();
@@ -441,6 +527,7 @@ const methods = {
       this._generationId = active ? active.id : '';
       this.safeSetData(Object.assign({}, this.askPatch(messages, generating), {
         title: agent.name || this.data.title, alias: ALIASES[this._agentKey] || '', advisorAvatar: avatarFor(this._agentKey), messages,
+        chipsSpent: chipsSpentFor(messages),
         busy: generating, canStop: Boolean(active), showThinking: generating, canSend: generating ? false : this.hasDraft(),
         canRetryLast, errorText: canRetryLast ? '军师这次没有完成回答。你的问题已经保留，可以直接重新回答。' : '',
       }), () => { this.toBottom(); this.measureComposer(); });
@@ -826,6 +913,7 @@ const methods = {
   pickAttachment() {
     if (!store.isAuthed()) { this.safeSetData({ showLogin: true, loginReason: 'upload' }); return; }
     if (this.data.busy || this.data.uploading || this._refs.length + this.data.pastePendings.length >= REF_LIMIT) return;
+    this.emitChatEvent('attach_open', {});
     wx.showActionSheet({ itemList: ['拍照或选择图片', '从微信聊天选择文件', '引用已有案卷 / 方案 / 资料', '粘贴长文为附卷'], success: (res) => { if (res.tapIndex === 0) this.pickImage(); else if (res.tapIndex === 1) this.pickFile(); else if (res.tapIndex === 2) this.openPicker(); else this.pasteKnowledge(); } });
   },
   pickImage() {
@@ -923,6 +1011,9 @@ const methods = {
     const text = typedText || attachmentOnlyPrompt(displayRefs);
     if (text.length > INPUT_MAX) { wx.showToast({ title: '言过两千，可精简或粘贴成附卷', icon: 'none' }); return; }
     if (!store.isAuthed()) { this.safeSetData({ showLogin: true, loginReason: 'chat' }); return; }
+    // 登录门放行之后才算「真的发出去了」——放在门前会把每次弹登录都记成一次发送。
+    this.emitChatEvent('send', { entry: this._sendEntry || 'keyboard' });
+    this._sendEntry = '';
     const epoch = this._epoch;
     const sendSeq = ++this._sendSeq;
     const active = () => this.isCurrent(epoch) && sendSeq === this._sendSeq;
@@ -944,6 +1035,9 @@ const methods = {
     this._streamDoneStatus = '';
     this._streamIndex = null;
     this._streamText = '';
+    if (this._plainStreamTimer) clearTimeout(this._plainStreamTimer);
+    this._plainStreamTimer = null;
+    this._plainStreamText = '';
     this.stopStreamAutoScroll();
     this._pollSeq += 1;
     if (this._pollTimer) clearTimeout(this._pollTimer);
@@ -951,7 +1045,7 @@ const methods = {
     // 仅发送成功起步时交替挂载两个无 value 的 textarea，达到原生清空；编辑过程中从不重建。
     this.safeSetData(Object.assign({}, this.askPatch(messages, true), {
       refs: [], regularRefs: [], pasteRefs: [], pastePendings: [], pasteHint: false,
-      pasteKept: '', pasteKeptExcerpt: '', pastePreview: null,
+      pasteKept: '', pasteKeptExcerpt: '', pastePreview: null, chipsSpent: true,
       busy: true, canStop: false, showThinking: true, canSend: false, inputCount: 0, showCount: false,
       composerOdd: !this.data.composerOdd, errorText: '',
     }), () => this.measureComposer());
@@ -1038,7 +1132,9 @@ const methods = {
       if (Object.keys(patch).length) this.safeSetData(patch);
       return this._streamIndex;
     }
-    const streamRenderId = report ? '' : uid('towxml');
+    // 没接上打字机（宿主页未注入 / require.async 跨包异步失败）就不发 streamRenderId：
+    // 模板会退回 markdown-text，由 updateStreamText 节流回写正文，宁可少一层打字机动画也不留白屏。
+    const streamRenderId = report || !hasStreamRenderer() ? '' : uid('towxml');
     const item = {
       id: uid(report ? 'report' : 'assistant'), role: 'assistant', text: '', points: [], asks: [], activeAsk: false, report: Boolean(report), reportReady: false, streaming: true,
       typing: !report, streamStarted: false, streamRenderId,
@@ -1054,10 +1150,28 @@ const methods = {
     const text = replace ? String(chunk || '') : `${this._streamText || ''}${chunk || ''}`;
     this._streamText = text;
     if (current.streamRenderId) setMdText(current.streamRenderId, text);
+    else this.flushPlainStream(index, text);
     if (!current.streamStarted && text) {
       this.safeSetData({ [`messages[${index}].streamStarted`]: true });
       this.startStreamAutoScroll();
     }
+  },
+  /** 取消在途的纯文本回写：收尾/中断时必须先取消，否则迟到的一帧会盖掉剥过 asks 的最终正文。 */
+  cancelPlainStream() {
+    if (this._plainStreamTimer) clearTimeout(this._plainStreamTimer);
+    this._plainStreamTimer = null;
+    this._plainStreamIndex = null;
+  },
+  /** 无打字机时的正文回写：节流 120ms 整段写入，只在降级路径生效（见 PLAIN_STREAM_MS）。 */
+  flushPlainStream(index, text) {
+    this._plainStreamIndex = index;
+    this._plainStreamText = text;
+    if (this._plainStreamTimer) return;
+    this._plainStreamTimer = setTimeout(() => {
+      this._plainStreamTimer = null;
+      if (!this._alive || this._plainStreamIndex == null) return;
+      this.safeSetData({ [`messages[${this._plainStreamIndex}].text`]: this._plainStreamText || '' });
+    }, PLAIN_STREAM_MS);
   },
   updateStreamReply(reply) {
     const index = this.ensureStreamItem(false); const value = normalizeReply(reply);
@@ -1089,6 +1203,7 @@ const methods = {
   finishStream(result, epoch) {
     const pageEpoch = epoch || this._epoch;
     if (!this.isCurrent(pageEpoch)) return;
+    this.cancelPlainStream();
     const index = this._streamIndex;
     let finished = null;
     if (index != null && this.data.messages[index]) {
@@ -1119,6 +1234,9 @@ const methods = {
       } else if (finished.streamRenderId) {
         if (finished.text) setMdText(finished.streamRenderId, finished.text);
         setStreamFinish(finished.streamRenderId);
+      } else if (!finished.text && this._streamText) {
+        // 纯文本兜底路径：最后一段节流可能还没落地，收尾时按累计正文补齐，别丢掉已经吐出来的字。
+        finished.text = this._streamText;
       }
       const next = this.data.messages.slice();
       next[index] = finished;
@@ -1136,6 +1254,7 @@ const methods = {
     this.toBottom();
   },
   markStreamInterrupted() {
+    this.cancelPlainStream();
     const index = this._streamIndex;
     if (index == null || !this.data.messages[index]) return;
     const current = this.data.messages[index];
@@ -1434,6 +1553,7 @@ const methods = {
 module.exports = {
   chatCore: Behavior({ data, methods }),
   useStreamRenderer,
+  hasStreamRenderer,
   decodeOption,
   textOf,
 };

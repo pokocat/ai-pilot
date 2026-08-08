@@ -1,4 +1,180 @@
 @use "../../../src/pages/sessions/index.scss" as sessions;
 @use "../../../src/components/AdvisorAvatar/index.scss" as avatar;
+// 对话核心的可共享样式（消息流 / composer / 附卷预览 / 引用选择器），与 chat 分包页同一份。
+@use "../../chat-core/chat-core.scss" as chatcore;
+// 浮岛里那排自绘 tab 与 custom-tab-bar 用同一份 SCSS（含 22/26px 图标光学校准），
+// 不另抄一套；本页没有 .tabbar 节点，那条规则只是随文件带进来的死规则。
+@use "../../custom-tab-bar/index.scss" as tabbar;
 
 .advisor-avatar { width: 50px; height: 50px; }
+
+/* ==========================================================================
+   问策终态（form === 'chat'）：合一页头 + 对话区 + 提示 pill + 底部合体浮岛 + 双段抽屉。
+   control 形态完全不碰下面任何一条规则（它的类名一个都不重合）。
+   z-index 一律写字面量并注明层级：60 页头 / 100 --z-nav 浮岛与 pill / 900 --z-sheet 抽屉。
+   ========================================================================== */
+.wence-page {
+  height: 100vh;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* —— 合一页头：固定不滚。**自绘，不是 TabHeader 实例**——kicker 位已从「用途」换成对话对象身份，
+   语义上是新模式；度量（29px 宋体大字 / 88px 谋印 / .085 透明度 / 14px 细线收口 / 字脚留白）
+   照 TabHeader 的约定复刻，改任何一处都要回去核 components/tab-header。 —— */
+.wence-head {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 60; /* 压住滚动内容，让在 coach-marks(90) 与浮岛(100) 之下 */
+  padding: 0 18px 24px; /* 下方 24px 是谋印的落脚留白，删掉字脚就被消息流压住 */
+  box-sizing: border-box;
+  background: var(--paper);
+}
+.wh-head { position: relative; padding-top: 14px; }
+.wh-glyph {
+  position: absolute;
+  top: 4px; right: 0;
+  font-size: 88px; line-height: 1; font-weight: 600;
+  color: var(--accent); opacity: .085;
+  pointer-events: none;
+}
+.wh-titles { position: relative; min-width: 0; }
+/* 字距比 TabHeader 的 .3em 收紧到 .2em：kicker 从两三个字变成「总军师玄衡 · 在线」八九个字，
+   .3em 会顶到右侧入口按钮。 */
+.wh-kicker {
+  display: block;
+  font-size: var(--fs-12); line-height: 1.2; letter-spacing: .2em;
+  color: var(--accent);
+}
+.wh-titlerow { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; }
+.wh-title { font-size: 29px; line-height: 1.1; font-weight: 600; letter-spacing: .03em; color: var(--ink); }
+.wh-entries { flex-shrink: 0; display: flex; gap: 6px; position: relative; z-index: 1; /* 压在谋印底纹之上 */ }
+.wh-entry {
+  position: relative;
+  display: flex; align-items: center; gap: 5px;
+  height: 30px; padding: 0 11px; box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-glow); /* accent-soft 单独用会浮在虚空里，必须自带一圈 glow */
+  color: var(--accent-ink);
+  font-size: var(--fs-12); font-weight: 600;
+}
+.wh-entry:active { opacity: .7; }
+.wh-entry-badge { position: absolute; top: -6px; right: -6px; }
+.wh-rule { height: 1px; margin-top: 14px; background: var(--line); }
+
+/* —— 对话区：滚动容器留在宿主页。上边界随页头实测高度，下边界 = 浮岛(composer + 63) + 14 呼吸 + 44 pill 位 —— */
+.wence-scroll {
+  position: fixed;
+  left: 0; right: 0;
+  top: var(--wence-head-h);
+  bottom: calc(var(--composer-height) + 121px + env(safe-area-inset-bottom) + var(--keyboard-height));
+}
+
+/* —— 提示问题 pill：浮在浮岛正上方，3s 轮换（淡出下移 → 换词 → 淡入） —— */
+.wence-pill {
+  position: fixed;
+  left: 14px;
+  bottom: calc(var(--composer-height) + 85px + env(safe-area-inset-bottom) + var(--keyboard-height));
+  z-index: 100; /* --z-nav */
+  max-width: 76%;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px 8px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: var(--shadow-card);
+  transition: opacity .32s ease, transform .32s ease;
+}
+.wence-pill.fade { opacity: 0; transform: translateY(6px); }
+.wence-pill:active { opacity: .75; }
+.wp-mark {
+  flex-shrink: 0;
+  width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent-ink);
+  font-size: 11px; font-weight: 600;
+}
+.wp-q {
+  min-width: 0;
+  font-family: var(--serif); font-size: 12.5px; font-weight: 600; color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* —— 底部合体浮岛：输入行 + 分隔线 + 五 tab 行长在同一块玻璃上 ——
+   ★ 刻意**不上 backdrop-filter**（custom-tab-bar 那条规则里有）：它会给浮岛建立 fixed 定位的
+   包含块，composer 模板里的附卷全文预览 / 引用资产选择器两个全屏层就会被这块 26px 圆角的
+   小盒子裁掉。底色因此从 .9 提到 .96 补足遮挡，视觉差异肉眼不可辨，行为差异是「弹层还在不在」。
+   同理不写 overflow:hidden，tab 行的下圆角由它自己的 border-radius 收。 */
+.wence-isle {
+  position: fixed;
+  left: 14px; right: 14px;
+  bottom: calc(14px + env(safe-area-inset-bottom) + var(--keyboard-height));
+  z-index: 100; /* --z-nav，与 custom-tab-bar 同层（本形态下后者由 setOverlay 隐藏） */
+  background: rgba(255, 255, 255, .96);
+  border: 1px solid rgba(255, 255, 255, .7);
+  border-radius: 26px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, .9) inset,
+    0 10px 30px rgba(22, 25, 29, .12),
+    0 4px 10px rgba(22, 25, 29, .06);
+}
+/* composer 模板整体嵌进浮岛：脱掉它在 chat 分包页上的固定定位与自带底板，只留内容。
+   高度约定：内容 78 + 上下 18 = 96，正好等于 measureComposer 的下限，
+   于是 --composer-height 与真实高度不打架（改 padding/min-height 要一起核）。 */
+.wence-isle .composer-dock {
+  position: static;
+  padding: 10px 14px 8px;
+  background: transparent;
+  border-top: 0;
+  z-index: auto;
+}
+.wence-isle .composer-box {
+  min-height: 78px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  border-radius: 0;
+}
+.isle-div { height: 1px; margin: 0 14px; background: var(--line); }
+.wence-isle .tabbar-inner {
+  padding: 8px 12px;
+  height: 62px;
+  border-radius: 0 0 26px 26px;
+}
+
+/* —— 军师团 / 历史抽屉（半屏）：双入口同一抽屉，顶部分段器互切 —— */
+.wd-mask { position: fixed; inset: 0; z-index: 900; /* --z-sheet */ background: rgba(22, 25, 29, .38); }
+.wd-sheet {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 900; /* --z-sheet */
+  max-height: 72vh;
+  padding: 10px 18px calc(18px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  border-radius: 26px 26px 0 0;
+  background: var(--paper);
+  display: flex; flex-direction: column;
+}
+.wd-grab { width: 36px; height: 4px; margin: 4px auto 12px; border-radius: 999px; background: var(--line-strong); }
+.wd-seg {
+  flex-shrink: 0;
+  display: flex; gap: 3px;
+  padding: 3px; border-radius: 999px;
+  background: var(--surface-2);
+}
+.wd-seg-item {
+  flex: 1; min-width: 0;
+  padding: 8px 0; border-radius: 999px;
+  text-align: center;
+  font-family: var(--serif); font-size: 13.5px; font-weight: 600; color: var(--ink-3);
+}
+.wd-seg-item.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+.wd-search { flex-shrink: 0; height: 40px; margin-top: 10px; border-radius: 14px; }
+.wd-search .cs-input { height: 40px; font-size: 13px; }
+/* 全屏/半屏层里的滚动区必须是带明确高度的原生 ScrollView（§7.2：View + overflow 在真机滑不动）。 */
+.wd-body { height: 46vh; margin-top: 4px; }
+/* 抽屉里的行不做通栏出血：去掉 .wx-list 的负边距与上下发丝线，让它贴着 sheet 的内边距。 */
+.wd-list { margin: 6px 0 0; padding: 0; background: transparent; border-top: 0; border-bottom: 0; }
+.wd-foot { display: block; padding: 12px 0 4px; text-align: center; font-size: 11px; color: var(--ink-3); }

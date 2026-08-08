@@ -272,9 +272,41 @@ describe('问策入口 WP1', () => {
     beforeEach(async () => { await clearTemplates(); });
 
     test('空池合法：返回 { hints: [] }，不是 404 也不是错误', async () => {
+      await disableWence();
       const r = await api('GET', '/api/wence/hints', {});
       assert.equal(r.status, 200);
-      assert.deepEqual(r.body, { hints: [] });
+      assert.deepEqual(r.body, { hints: [], guestForm: 'control' });
+    });
+
+    test('guestForm：开关关 → control；chat 臂有权重 → chat；chat 臂为 0 → control', async () => {
+      // 游客没有 /me、也没有稳定 userId，所以这里不分桶，只回答「chat 这条臂开没开」。
+      // 端上据此决定游客进问策 tab 落终态还是现状列表；登录后必须改读 /me.features.wenceForm。
+      await disableWence();
+      let r = await api('GET', '/api/wence/hints', {});
+      assert.equal(r.status, 200);
+      assert.equal(r.body.guestForm, 'control', '开关关 → 游客一律现状列表');
+
+      await enableWence({ control: 34, dock: 33, chat: 33 });
+      r = await api('GET', '/api/wence/hints', {});
+      assert.equal(r.body.guestForm, 'chat', 'chat 臂有权重 → 游客走终态');
+
+      await enableWence({ control: 0, dock: 0, chat: 100 });
+      r = await api('GET', '/api/wence/hints', {});
+      assert.equal(r.body.guestForm, 'chat');
+
+      await enableWence({ control: 50, dock: 50, chat: 0 });
+      r = await api('GET', '/api/wence/hints', {});
+      assert.equal(r.body.guestForm, 'control', 'chat 臂权重为 0 → 游客不该被扔进未分流的形态');
+
+      // 开关开但 payload 未配 → 均分兜底里 chat > 0，游客同样走终态（与 resolveWenceForm 同口径）
+      await prisma.featureFlag.deleteMany({ where: { id: WENCE_FLAG } });
+      await setFeatureFlag(WENCE_FLAG, true);
+      __clearFeatureCache();
+      assert.ok(DEFAULT_ARMS.chat > 0, '默认均分里 chat 必须有权重，否则下一条断言失去意义');
+      r = await api('GET', '/api/wence/hints', {});
+      assert.equal(r.body.guestForm, 'chat');
+
+      await disableWence();
     });
 
     test('游客（无 token）可访问；只回 enabled 的 hint，按 sort 排', async () => {

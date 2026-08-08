@@ -6,7 +6,7 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import { resolveUser } from '../services/context.js';
-import { listHints } from '../services/wence.js';
+import { listHints, resolveGuestForm } from '../services/wence.js';
 
 /** 埋点事件白名单（对齐 shared/contracts.d.ts 的 ClientEventName）。非白名单 400，不写库。 */
 const EVENT_NAMES = new Set([
@@ -20,7 +20,14 @@ const PROPS_MAX_BYTES = 2048;
 export async function wenceRoutes(app: FastifyInstance) {
   // 提示问题 pill 词池：只回 enabled 的 hint 模板（id+text，按 sort）。
   // 空池合法 → { hints: [] }，端上回退本地兜底池；不做鉴权、不按用户排序（画像排序留待后续包）。
-  app.get('/wence/hints', async () => ({ hints: await listHints() }));
+  //
+  // 同时下发 guestForm：游客没有 /me，也就拿不到 features.wenceForm。这条路由本来就是游客进
+  // 问策 tab 必发的一条，顺路带上形态，省掉一次「专为游客判形态」的往返（也就没有先渲染
+  // control 再跳 chat 的闪烁）。已登录端上仍以 /me.features.wenceForm 为准，不读这个字段。
+  app.get('/wence/hints', async () => {
+    const [hints, guestForm] = await Promise.all([listHints(), resolveGuestForm()]);
+    return { hints, guestForm };
+  });
 
   // 客户端埋点：鉴权可选。已登录带 userId/tenantId，游客 userId 为空。
   // 只写不查（无读端点，运营取数直接查库/BI），因此这里不做任何聚合与二次校验。

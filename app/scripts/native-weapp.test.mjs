@@ -410,6 +410,202 @@ test('对话核心抽到主包 chat-core，分包页只留页头与导航', () =
   assert.match(builder, /聊天 textarea 校验目标缺失/, '校验目标文件缺失本身必须让构建失败');
 });
 
+test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话即 tab 终态', () => {
+  const wxml = read(sourceRoot, 'pages/sessions/index.wxml');
+  const js = read(sourceRoot, 'pages/sessions/index.js');
+  const scss = read(sourceRoot, 'pages/sessions/index.scss');
+  const json = JSON.parse(read(sourceRoot, 'pages/sessions/index.json'));
+
+  // —— 分形态：两棵互斥的树，control 那棵必须保留现状列表的全部关键节点 ——
+  assert.match(wxml, /<view wx:if="\{\{form === 'chat'\}\}" class="wence-page/, '终态挂在 form==="chat" 上');
+  assert.match(wxml, /<view wx:else class="native-page \{\{themeClass\}\}"/, 'control 仍是原来那棵 native-page');
+  for (const node of ['<tab-header title="问策" kicker="有事问军师" glyph="谋">', 'class="council-searchrow"', 'class="quick-row"', 'bindtap="toggleHistory"', 'class="tabbar-space"']) {
+    assert.ok(wxml.includes(node), `control 形态缺少现状节点：${node}`);
+  }
+  // 形态未知时先按 control 画：默认值写错会把没进实验的用户扔进半成品形态。
+  assert.match(js, /form: safeGet\(`\$\{FORM_CACHE_PREFIX\}[^`]*`\) === 'chat' \? 'chat' : 'control'/);
+  assert.match(js, /if \(form\) return form === 'chat' \? 'chat' : 'control';/, "只认 'chat'，dock/字段缺失都落 control");
+  assert.match(js, /result && result\.guestForm === 'chat'/, '游客形态读 /wence/hints 的 guestForm');
+
+  // —— 合一页头：自绘（不是 TabHeader 实例）+ 谋印 + 身份 kicker + 双入口 ——
+  assert.match(wxml, /class="wh-glyph serif">谋</, '页头保留谋印背景大字');
+  assert.match(wxml, /class="wh-kicker">\{\{title\}\}\{\{alias\}\} · 在线</, 'kicker 位换成对话对象身份，花名取自 chat-core 的 ALIASES，不写死');
+  assert.match(wxml, /class="wh-title serif">问策</);
+  assert.match(wxml, /bindtap="openCouncil"[\s\S]{0,200}军师团/);
+  assert.match(wxml, /bindtap="openHistory"[\s\S]{0,200}历史/);
+  assert.match(scss, /\.wh-glyph \{[\s\S]*?font-size: 88px/, '谋印沿用 TabHeader 的原生度量');
+  assert.match(scss, /\.wh-kicker \{[\s\S]*?letter-spacing: \.2em/, 'kicker 字距收紧到 .2em');
+  assert.match(scss, /\.wh-title \{ font-size: 29px/);
+
+  // —— 底部合体浮岛：composer 模板 + 分隔线 + 与 custom-tab-bar 同源的五 tab ——
+  assert.match(wxml, /<import src="\/chat-core\/composer\.wxml">/);
+  assert.match(wxml, /<template is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
+  assert.match(wxml, /class="wence-isle"[\s\S]*?class="isle-div"[\s\S]*?class="tabbar-inner"/, '浮岛顺序：输入行 → 细线 → tab 行');
+  assert.match(wxml, /bindtap="switchIsleTab"/);
+  assert.match(js, /require\('\.\.\/\.\.\/services\/tabbar'\)/, '浮岛 tab 与底栏共用 services/tabbar.js');
+  assert.match(scss, /@use "\.\.\/\.\.\/custom-tab-bar\/index\.scss"/, '浮岛复用底栏同一份 SCSS（含图标光学校准）');
+  assert.doesNotMatch(wxml, /<textarea\b/, '输入区只能来自 composer 模板，页面不得再写一份 textarea');
+
+  // —— 提示 pill：代发 + 有草稿/生成中/键盘/抽屉都不显示 ——
+  assert.match(wxml, /class="wence-pill[\s\S]*?bindtap="tapHint"/);
+  assert.match(wxml, /wx:if="\{\{hintText && !drawerOpen && !busy && !inputCount && !keyboardHeight\}\}"/, 'pill 的隐藏条件全部在 WXML 表达式里，不靠 JS 同步');
+  assert.match(js, /this\.sendText\(text, 'hint'\)/, '点 pill = 直接代发（textarea 铁律禁止程序化回填）');
+  assert.match(js, /localHints\(\)/, '词池为空或拉取失败回退本地兜底池');
+
+  // —— 抽屉：双入口同一抽屉、分段互切、复用跨域搜索 ——
+  assert.match(wxml, /data-seg="council"[\s\S]*?data-seg="history"/);
+  assert.match(wxml, /class="wd-body"/);
+  assert.match(scss, /\.wd-body \{ height: 46vh/, '半屏层的滚动区必须是带明确高度的 ScrollView（§7.2 真机滑不动）');
+  assert.match(js, /openCouncil\(\) \{ this\.openDrawer\('council'\); \}/);
+  assert.match(js, /if \(seg === 'history' && !this\.requireLogin\('history'\)\) return;/, '游客翻历史走动作级登录门');
+  assert.match(js, /api\.search\(query\)/, '抽屉搜索复用现有跨域搜索');
+
+  // —— overlay 成对：浮岛与抽屉各自 setOverlay(true/false)，切 tab 前先释放 ——
+  for (const key of ['wence-isle', 'wence-drawer']) {
+    assert.ok(new RegExp(`setOverlay\\(true, '${key}'\\)`).test(js), `${key} 缺少 setOverlay(true)`);
+    assert.ok(new RegExp(`setOverlay\\(false, '${key}'\\)`).test(js), `${key} 缺少成对的 setOverlay(false)`);
+  }
+  assert.match(js, /onHide\(\) \{[\s\S]*?setOverlay\(false, 'wence-isle'\)[\s\S]*?setOverlay\(false, 'wence-drawer'\)/, '离开 tab 必须放开底栏');
+  assert.match(js, /setOverlay\(false, 'wence-isle'\);\s*\n\s*wx\.switchTab/, '切走前先释放 overlay，别让下一个 tab 没有底栏');
+
+  // —— 未读三层引导链 ——
+  assert.match(wxml, /index === 0 && unread > 0[\s\S]*?class="tab-badge"/, '① 浮岛问策角标 = 全会话聚合');
+  assert.match(wxml, /councilUnreadText[\s\S]*?class="unread wh-entry-badge"/, '② 军师团按钮聚合角标');
+  assert.match(js, /filter\(\(item\) => item\.agentKey !== 'general'\)\s*\n?\s*\.reduce/, '② 只聚合 general 以外的未读');
+  assert.match(js, /markGeneralRead\(\)/, '装载 general 会话后本地掉掉这份未读');
+  assert.match(wxml, /class="wx-id"[\s\S]*?class="unread"/, '③ 抽屉行内各自角标');
+
+  // —— towxml 跨包异步接线：componentPlaceholder + 先注入回调再装载会话 ——
+  assert.equal(json.usingComponents.towxml, '/packages/main/vendor/towxml/towxml');
+  assert.equal(json.componentPlaceholder?.towxml, 'view', '跨分包引用必须配 componentPlaceholder，否则主包页面根本引不到');
+  assert.equal(json.usingComponents['markdown-text'], '/components/markdown-text/index');
+  assert.equal(json.usingComponents['report-card'], '/components/report-card/index');
+  assert.match(js, /require\.async\('\.\.\/\.\.\/packages\/main\/vendor\/towxml\/globalCb\.js'\)[\s\S]*?useStreamRenderer\(mod\)/);
+  assert.match(js, /this\._streamReady = this\.setupStreamRenderer\(\);/);
+  assert.match(js, /await this\._streamReady;[\s\S]*?chatCoreLoad/, '★ 必须先注入流式回调再 chatCoreLoad，否则首轮流式打进 no-op');
+  assert.match(js, /\.catch\(\(\) => false\)/, 'require.async 失败要兜底，不许白屏');
+
+  // —— 会话装载分支：续接 / 注入主动消息 / greet 空会话 / 游客本地开场 ——
+  assert.match(js, /this\.chatCoreLoad\(\{ sessionId: latest\.id \}\)/);
+  assert.match(js, /api\.proactiveSession\(\)/);
+  assert.match(js, /this\.chatCoreLoad\(\{ agentKey: 'general' \}\)/, 'injected:false 三种原因都走 greet 空会话');
+  assert.match(js, /this\.chatCoreLoad\(\{ agentKey: 'general', localPrelude: GUEST_PRELUDE \}\)/, '游客走本地开场序列，零服务端写入');
+  assert.match(js, /if \(force \|\| changed \|\| !this\._chatBooted\) await this\.bootChat\(\);\s*\n\s*else await this\.refreshChat\(\);/, '切走再切回不重复装载/不重复注入');
+
+  // —— 登录门不得吞掉已写好的话 ——
+  assert.match(js, /const draft = this\._draft \|\| '';[\s\S]*?await this\.boot\(true\);[\s\S]*?this\._draft = draft;/);
+
+  // —— 输入铁律的构建校验必须把新宿主页也扫进去（§7.2 新义务）——
+  const builder = read(appRoot, 'scripts/build-native-weapp.mjs');
+  assert.match(builder, /CHAT_TEXTAREA_TARGETS = \[[^\]]*'pages\/sessions\/index\.wxml'/, '新的 composer 宿主页必须进 CHAT_TEXTAREA_TARGETS');
+
+  // —— z 轴写字面量并注明层级 ——
+  assert.match(scss, /z-index: 100; \/\* --z-nav/);
+  assert.match(scss, /z-index: 900; \/\* --z-sheet/);
+});
+
+test('问策终态埋点：全部经静默 track，401 不得打断用户', () => {
+  const js = read(sourceRoot, 'pages/sessions/index.js');
+  const behavior = read(chatCoreRoot, 'behavior.js');
+  const apiSource = read(sourceRoot, 'services/api.js');
+
+  for (const [name, where] of [
+    ['wence_enter', js], ['proactive_show', js], ['chip_tap', js], ['hint_tap', js],
+    ['first_message_send', js], ['drawer_open', js], ['attach_open', js], ['tab_switch', js],
+  ]) {
+    assert.ok(where.includes(`'${name}'`), `缺少埋点位 ${name}`);
+  }
+  assert.match(js, /const userState = !authed \? 'guest' : \(\(this\._sessions \|\| \[\]\)\.length \? 'returning' : 'new'\);/);
+  assert.match(js, /api\.track\('wence_enter', \{ form, user_state: userState \}\)/);
+  assert.match(js, /ttfm_ms: this\._enterAt \? Math\.max\(0, Date\.now\(\) - this\._enterAt\) : 0/);
+  assert.match(js, /entry: entry \|\| 'keyboard'/);
+  assert.match(js, /if \(safeGet\(key\) === '1'\) return;/, 'first_message_send 按账号只发一次');
+
+  // chat-core 只发事件，不认识埋点；映射与上报都在宿主页（chat 分包页不实现 = 不埋点）。
+  assert.match(behavior, /emitChatEvent\(name, props\) \{[\s\S]*?typeof this\.chatCoreEvent !== 'function'/);
+  assert.doesNotMatch(behavior, /api\.track\(/, '对话核心不得直接埋点');
+  assert.match(behavior, /this\.emitChatEvent\('send', \{ entry: this\._sendEntry \|\| 'keyboard' \} \);|this\.emitChatEvent\('send', \{ entry: this\._sendEntry \|\| 'keyboard' \}\);/);
+
+  // ★ track 必须绕开 request()：那条路径上带 token 的 401 会清登录态 + reLaunch。
+  const trackBlock = apiSource.match(/track: \(name, props\) => \{[\s\S]*?\n  \},/);
+  assert.ok(trackBlock, 'api 缺少 track');
+  // 只禁裸 request(（services/request.js 的封装），wx.request 正是这里要走的那条静默路径。
+  assert.doesNotMatch(trackBlock[0], /(^|[^.\w])request\(/m, '埋点不得走 request()，否则一条统计请求能把用户踢出登录');
+  assert.match(trackBlock[0], /wx\.request\(/);
+  assert.match(trackBlock[0], /fail\(\) \{/, '埋点失败必须静默');
+  assert.doesNotMatch(trackBlock[0], /showToast/, '埋点绝不 toast');
+});
+
+test('快捷回应 chips：服务端字段直达消息、点击即代发、用户开口后作废', () => {
+  const behavior = read(chatCoreRoot, 'behavior.js');
+  const messageList = read(chatCoreRoot, 'message-list.wxml');
+  const style = read(chatCoreRoot, 'chat-core.scss');
+  const chatWxml = read(sourceRoot, 'packages/main/chat/index.wxml');
+  const sessionsWxml = read(sourceRoot, 'pages/sessions/index.wxml');
+
+  assert.match(behavior, /chips: stringList\(message && message\.chips\)/, 'normalizeMessage 把 SessionMessage.chips 带进消息对象');
+  assert.match(behavior, /function chipsSpentFor\(messages\) \{[\s\S]*?role === 'user'/, '有 user 轮就作废：重进会话也能自然收敛');
+  assert.match(behavior, /chipsSpent: chipsSpentFor\(messages\)/);
+  assert.match(behavior, /pasteKept: '', pasteKeptExcerpt: '', pastePreview: null, chipsSpent: true/, '手动发送后整排消失');
+  assert.match(behavior, /this\.sendText\(chip, 'chip'\)/);
+  assert.match(behavior, /if \(this\.hasDraft\(\)\) \{ wx\.showToast/, '有草稿时不许被 chip 静默覆盖');
+
+  assert.match(messageList, /wx:if="\{\{!chipsSpent&&item\.chips&&item\.chips\.length\}\}"[\s\S]*?bindtap="tapChip"/);
+  assert.match(style, /\.chip \{[\s\S]*?border-radius: 999px/);
+  assert.doesNotMatch(style, /\.chip \{[\s\S]*?rgba\(22, ?63, ?48/, 'chip 边框用 token（--accent-glow），不落原型里的字面量');
+  // 两个宿主页都要把 chipsSpent 传进模板，否则 chips 永远不消失。
+  for (const [label, source] of [['chat 分包页', chatWxml], ['问策 tab', sessionsWxml]]) {
+    assert.match(source, /<template is="chat-message-list" data="\{\{[^"]*chipsSpent[^"]*\}\}"/, `${label} 未把 chipsSpent 传进消息流模板`);
+  }
+});
+
+test('原生 mock 问策终态：主动消息按账号注入一次、读详情清未读', async () => {
+  const values = new Map([['junshi.userId', 'mock-wence-a']]);
+  globalThis.wx = {
+    getStorageSync: (key) => values.get(key) ?? '',
+    setStorageSync: (key, value) => values.set(key, value),
+    removeStorageSync: (key) => values.delete(key),
+  };
+  try {
+    const require = createRequire(import.meta.url);
+    const mockPath = path.join(sourceRoot, 'services/mock.js');
+    delete require.cache[require.resolve(mockPath)];
+    const mock = require(mockPath);
+
+    // mock 包默认展示终态，方便本地走查
+    assert.equal((await mock.me()).features.wenceForm, 'chat');
+    const hints = await mock.wenceHints();
+    assert.equal(hints.guestForm, 'chat');
+    assert.ok(hints.hints.length > 1 && hints.hints.every((item) => item.id && item.text));
+    assert.deepEqual(await mock.track('wence_enter', {}), { ok: true });
+
+    const first = await mock.proactiveSession();
+    assert.equal(first.injected, true);
+    const list = await mock.sessions();
+    assert.equal(list.length, 1);
+    assert.equal(list[0].agentKey, 'general');
+    assert.equal(list[0].unreadCount, 1, '注入后未读必须亮起来');
+
+    // 频控幂等：再调一次只回 exists，不会造出第二条会话
+    assert.deepEqual(await mock.proactiveSession(), { injected: false, reason: 'exists' });
+    assert.equal((await mock.sessions()).length, 1);
+
+    // 读详情 = 服务端写 lastReadAt：未读归零且刷新后可见
+    const detail = await mock.session(first.sessionId);
+    assert.deepEqual(detail.messages[0].chips.length > 0, true, '主动消息带 chips');
+    assert.equal((await mock.sessions())[0].unreadCount, 0);
+
+    // 账号隔离：换个号还是可注入，切回来仍是 exists
+    values.set('junshi.userId', 'mock-wence-b');
+    assert.equal((await mock.sessions()).length, 0);
+    assert.equal((await mock.proactiveSession()).injected, true);
+    values.set('junshi.userId', 'mock-wence-a');
+    assert.deepEqual(await mock.proactiveSession(), { injected: false, reason: 'exists' });
+  } finally {
+    delete globalThis.wx;
+  }
+});
+
 test('除微信官方品牌图形外，功能图标统一通过 Lucide 组件输出', () => {
   const wxmlFiles = walk(sourceRoot).filter((file) => file.endsWith('.wxml'));
   const forbiddenGlyphs = /[‹›⌕＋↑←×✕✓■⌄⌃⌁→↻⌂◆☰▾⚠⚡✦★●○]/;
@@ -443,8 +639,12 @@ test('除微信官方品牌图形外，功能图标统一通过 Lucide 组件输
       assert.ok(mapped.has(match[1]), `Lucide 映射缺失 ${match[1]}：${path.relative(sourceRoot, file)}`);
     }
   }
+  // tab 表已抽到 services/tabbar.js（底栏与问策浮岛同源），断言跟着真源走。
+  const tabTable = fs.readFileSync(path.join(sourceRoot, 'services/tabbar.js'), 'utf8');
+  assert.match(tabTable, /pages\/sessions\/index', icon: 'conversation'/);
   const nativeTabs = fs.readFileSync(path.join(sourceRoot, 'custom-tab-bar/index.js'), 'utf8');
-  assert.match(nativeTabs, /pages\/sessions\/index', icon: 'conversation'/);
+  assert.match(nativeTabs, /require\('\.\.\/services\/tabbar'\)/, '底栏不得再自留一份 tab 表');
+  assert.doesNotMatch(nativeTabs, /const TABS = \[/, 'tab 表只允许存在于 services/tabbar.js');
   assert.match(builder, /conversation:\s*'messages-square'/);
   assert.doesNotMatch(builder, /readCustomHat|hat-\$\{tone\}/, '原生构建不应继续生成废弃的自绘帽子资源');
 });

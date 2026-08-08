@@ -94,8 +94,10 @@ const LUCIDE_ICON_MAP = {
 };
 
 // 聊天输入的两个 textarea 现在住在主包共享模板 chat-core/composer.wxml 里，
-// 分包页只剩页头与模板引用；两处都要扫，新增宿主页时把它的 WXML 也加进来。
-const CHAT_TEXTAREA_TARGETS = ['chat-core/composer.wxml', 'packages/main/chat/index.wxml'];
+// 宿主页只剩页头与模板引用；每个 <import> 了 composer 模板的宿主页都要列进来，
+// 文件缺失本身就让构建失败，防止铁律检查随文件搬家静默失效。
+// 当前宿主：chat 分包页 + 问策 tab 终态（对话即 tab）。
+const CHAT_TEXTAREA_TARGETS = ['chat-core/composer.wxml', 'packages/main/chat/index.wxml', 'pages/sessions/index.wxml'];
 
 if (!['mock', 'server'].includes(mode)) throw new Error(`无效 --mode ${mode}，只允许 mock/server`);
 if (mode === 'server' && !/^https:\/\//.test(api)) throw new Error(`server 构建必须使用 HTTPS API：${api}`);

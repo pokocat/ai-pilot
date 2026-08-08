@@ -1,6 +1,7 @@
 const mock = require('./mock');
 const { request, upload } = require('./request');
-const { getImpersonationBaseUrl, useMockApi } = require('./runtime-mode');
+const { getToken } = require('./token');
+const { getApiBaseUrl, getImpersonationBaseUrl, useMockApi } = require('./runtime-mode');
 
 const isMock = () => useMockApi();
 const query = (value) => encodeURIComponent(value == null ? '' : String(value));
@@ -14,6 +15,10 @@ const api = {
     ? mock.purchaseAgent(key, attribution)
     : request(`/agents/${query(key)}/purchase`, { method: 'POST', data: Object.assign({}, attribution || {}) }),
   sessions: () => isMock() ? mock.sessions() : request('/sessions'),
+  // 问策入口：提示词池与进场主动消息。两条都对游客开放（hints 无鉴权；proactive 需登录，
+  // 端上只在已登录分支调用），失败一律由调用方静默降级，不得阻塞进场。
+  wenceHints: () => isMock() ? mock.wenceHints() : request('/wence/hints'),
+  proactiveSession: () => isMock() ? mock.proactiveSession() : request('/sessions/proactive', { method: 'POST', data: {} }),
   session: (id) => isMock() ? mock.session(id) : request(`/sessions/${query(id)}`),
   deleteSession: (id) => isMock() ? mock.deleteSession(id) : request(`/sessions/${query(id)}`, { method: 'DELETE' }),
   search: (q) => isMock() ? mock.search(q) : request(`/search?q=${query(q)}`),
@@ -178,6 +183,31 @@ const api = {
   saveBackfill: (values) => isMock() ? mock.saveBackfill(values) : request('/casefile/backfill', { method: 'PUT', data: values }),
   saveGoals: (patch) => isMock() ? mock.saveGoals(patch) : request('/casefile/goals', { method: 'PUT', data: patch }),
   reviewCasefile: (layer) => isMock() ? mock.reviewCasefile(layer) : request('/casefile/review', { method: 'POST', data: { layer } }),
+
+  /**
+   * 客户端埋点（POST /events）：fire-and-forget，失败**完全静默**——不 toast、不 reject、不阻塞主流程。
+   *
+   * ★ 刻意不走 request()：那条路径上「带 token 的 401」会 clearToken + 触发全局 onAuthLost
+   * （清登录态 + 「登录态已失效」提示 + reLaunch 回问策）。埋点是背景动作，绝不能因为一条统计请求
+   * 把用户从正在打字的对话里踢出去；token 失效时宁可丢事件，也不许打断用户。
+   * 游客照发（服务端 userId 为空），这是漏斗分母的来源。
+   */
+  track: (name, props) => {
+    try {
+      if (!name) return;
+      if (isMock()) { mock.track(name, props); return; }
+      const token = getToken();
+      wx.request({
+        url: `${getApiBaseUrl()}/events`,
+        method: 'POST',
+        data: { name, props: props || {} },
+        header: Object.assign({ 'content-type': 'application/json' }, token ? { 'x-user-id': token } : {}),
+        timeout: 8000,
+        success() { /* 埋点没有回执可用 */ },
+        fail() { /* 静默：断网/超时都不该被用户看见 */ },
+      });
+    } catch (_) { /* 连 wx.request 都抛了也不许冒泡 */ }
+  },
 };
 
 module.exports = { api, isMock };
