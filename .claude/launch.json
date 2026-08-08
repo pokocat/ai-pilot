@@ -11,6 +11,18 @@
       "autoPort": true
     },
     {
+      "name": "scratchpad-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8928",
+        "--directory",
+        "/private/tmp/claude-501/-Users-donis-dev-ai-pilot/6979443f-816b-47c8-9fb4-ae038bf8d136/scratchpad"
+      ],
+      "port": 8928
+    },
+    {
       "name": "roadshow-slides",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

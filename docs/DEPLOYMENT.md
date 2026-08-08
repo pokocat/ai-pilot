@@ -227,6 +227,19 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 
 ### E1. 「模型」页走查清单（2026-08-07 二三期新增的界面，登录后两分钟过一遍）
 
+> **预发没有部署后台界面。** `deploy-preprod.sh` 只加了 `/api_preprod/` 这一个 API 反代，
+> 不构建也不部署 admin/H5 静态资源——所以 `https://wxapi.aibuzz.cn/api_preprod` 下面**没有界面可开**。
+> 要对着预发走查，用本地后台连预发 API（仓库里本就有这个脚本）：
+>
+> ```bash
+> cd admin && npm run dev:preprod   # 本地 :5174 → 代理到 https://wxapi.aibuzz.cn/api_preprod
+> ```
+>
+> **预发首次进入要先初始化管理员账号**：`GET /api_preprod/admin/auth/status` 返回
+> `{"initialized":false}`（生产是 `true`），即预发的 `admin_account` 表还是空的，
+> 首次进入需用后端 `ADMIN_TOKEN` 验明身份后设置日常账号密码。这一步只做一次。
+
+
 这些界面在管理员鉴权之后，自动化走不到；展示逻辑本身已提成 `admin/src/modelGateway.ts` 的纯函数并单测（26 例），
 所以要看的不是「文案对不对」，而是**取值有没有接上**——列表页每一项都该显示出真实值而不是空白或 `undefined`：
 
