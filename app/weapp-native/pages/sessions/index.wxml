@@ -40,8 +40,10 @@
   </scroll-view>
 
   <!-- 提示问题 pill：浮在浮岛上方。点击 = 直接代发（textarea 铁律禁止 value 绑定，
-       原型的「点选即填」在原生没有实现路径；代发与 chip 同语义，见 AGENTS §7.2）。-->
-  <view wx:if="{{hintText && !drawerOpen && !busy && !inputCount && !keyboardHeight}}" class="wence-pill {{hintFade ? 'fade' : ''}}" bindtap="tapHint">
+       原型的「点选即填」在原生没有实现路径；代发与 chip 同语义，见 AGENTS §7.2）。
+       只在「冷会话」出现：pill 的职责是降低首次开口门槛，本会话一旦有过 user 轮就永久收起
+       （判据 chipsSpent 与 chips 完全同源，别另造一套；老用户带历史会话进来 = 永不出现）。-->
+  <view wx:if="{{hintText && !chipsSpent && !drawerOpen && !busy && !inputCount && !keyboardHeight}}" class="wence-pill {{hintFade ? 'fade' : ''}}" bindtap="tapHint">
     <view class="wp-mark"><text class="serif">问</text></view>
     <text class="wp-q">{{hintText}}</text>
   </view>
@@ -49,7 +51,7 @@
   <!-- 底部合体浮岛：上=chat-core composer 模板，下=与 custom-tab-bar 同源的五 tab 行，同一块玻璃。
        z-index 100 = --z-nav（本形态下 custom-tab-bar 本体由 store.setOverlay 隐藏）。-->
   <view class="wence-isle">
-    <template is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteKept, pasteKeptExcerpt, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>
+    <template is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, composerSeed, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>
     <view class="isle-div"></view>
     <view class="tabbar-inner">
       <view wx:for="{{isleTabs}}" wx:key="path" class="tab {{index === 0 ? 'on' : ''}}" data-index="{{index}}" bindtap="switchIsleTab">

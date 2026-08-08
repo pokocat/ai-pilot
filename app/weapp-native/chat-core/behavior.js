@@ -7,7 +7,7 @@ const store = require('../services/store');
 const { generateStream } = require('../services/streaming');
 const { navTo } = require('../services/nav');
 const { diffPasted, pasteExcerpt, isSamePaste } = require('../services/paste-absorb');
-const { stripSerializedAsksTail, attachmentOnlyPrompt } = require('../services/chat-reply');
+const { stripSerializedAsksTail, streamVisibleText, extendsShown, attachmentOnlyPrompt } = require('../services/chat-reply');
 
 // towxml 流式打字机（548K）留在 packages/main/vendor/towxml 分包里，主包不得反向 require 分包文件。
 // 宿主页在自己的包内取到 globalCb 后调用 useStreamRenderer 注入，下面的调用点与抽取前一字不差。
@@ -297,10 +297,12 @@ function decodeOption(value) {
 const data = {
   title: '总军师', alias: '玄衡', agentKey: 'general', advisorAvatar: avatarFor('general'), messages: [],
   busy: false, canStop: false, showThinking: false, canSend: false, canRetryLast: false, inputCount: 0, showCount: false,
-  composerOdd: false, composerHeight: 124, keyboardHeight: 0, bottomAnchor: 'chat-bottom',
+  // composerSeed = textarea 的一次性初值，只在交替挂载的那一刻写。不变量：写进去之后
+  // 到下一次重建之前绝不再动它——中途改成 '' 就等于把用户正在编辑的文字回灌掉。
+  composerOdd: false, composerSeed: '', composerHeight: 124, keyboardHeight: 0, bottomAnchor: 'chat-bottom',
   showLogin: false, loginReason: 'chat', errorText: '', refs: [], uploading: false,
   regularRefs: [], pasteRefs: [], pastePendings: [], pasteHint: false, pasteDupId: '',
-  pasteKept: '', pasteKeptExcerpt: '', pastePreview: null,
+  pastePreview: null,
   chipsSpent: false,
   showPicker: false, pickerLoading: false, pickGroups: [], accepting: false, reportBusy: '',
   posterEnabled: false, posterPrice: 0,
@@ -317,7 +319,6 @@ const methods = {
     this._sendSeq = 0;
     this._pollSeq = 0;
     this._draft = '';
-    this._draftPrefix = '';
     this._lastInputValue = '';
     this._pasteBurst = null;
     this._pasteSettleTimer = null;
@@ -343,6 +344,7 @@ const methods = {
     this._generationId = '';
     this._streamIndex = null;
     this._streamText = '';
+    this._streamShown = '';
     this._streamAutoScrollTimer = null;
     this._streamDoneStatus = '';
     this._runKnowledgeUsed = [];
@@ -401,7 +403,6 @@ const methods = {
       return false;
     }
     this._draft = value;
-    this._draftPrefix = '';
     this._lastInputValue = '';
     this._sendEntry = textOf(entry) || 'keyboard';
     this.send();
@@ -430,17 +431,15 @@ const methods = {
       refs,
       pasteRefs: refs.filter((item) => item && item.isPaste),
       regularRefs: refs.filter((item) => !item || !item.isPaste),
-      canSend: !this.data.busy && !uploading && !pendings.length && Boolean(this.combinedDraft() || refs.length),
+      canSend: !this.data.busy && !uploading && !pendings.length && Boolean(this.draftText() || refs.length),
     }, next);
   },
-  combinedDraft() {
-    const prefix = textOf(this._draftPrefix).trim();
-    const current = textOf(this._draft).trim();
-    return [prefix, current].filter(Boolean).join(prefix && current ? '\n' : '');
-  },
+  // 草稿只有一个真相源：非受控 textarea 的 bindinput 写进来的 _draft。
+  // 长文粘贴不再把手打内容搬出输入框，所以这里没有第二段要拼。
+  draftText() { return textOf(this._draft).trim(); },
   hasPendingPaste() { return Array.isArray(this.data.pastePendings) && this.data.pastePendings.length > 0; },
   draftStatePatch(extra) {
-    const text = this.combinedDraft();
+    const text = this.draftText();
     const count = text.length;
     return Object.assign({
       canSend: Boolean(text || this._refs.length) && !this.data.busy && !this.data.uploading && !this.hasPendingPaste(),
@@ -463,7 +462,7 @@ const methods = {
       keyboardHeight: 0,
     };
   },
-  hasDraft() { return Boolean(this.combinedDraft()); },
+  hasDraft() { return Boolean(this.draftText()); },
   async resolveContinueSession(epoch) {
     if (this._sessionId || !this._continue || !store.isAuthed()) return;
     try {
@@ -696,7 +695,6 @@ const methods = {
     const text = textOf(value).trim();
     if (!text || this.data.busy) return;
     this._draft = text;
-    this._draftPrefix = '';
     this._lastInputValue = text;
     this.safeSetData({ askComposerOpen: false, askComposerMessage: -1, askComposerQuestion: -1, keyboardHeight: 0, canSend: true });
     const epoch = this._epoch;
@@ -743,7 +741,7 @@ const methods = {
     if (!pasted) return;
     const duplicateId = this.findDuplicatePaste(pasted);
     if (duplicateId) {
-      this.clearComposerAfterPaste(kept);
+      this.keepTypedAfterPaste(kept);
       this.safeSetData({ pasteDupId: duplicateId });
       if (this._pasteDupTimer) clearTimeout(this._pasteDupTimer);
       this._pasteDupTimer = setTimeout(() => {
@@ -758,24 +756,22 @@ const methods = {
       return;
     }
     this.absorbPasteToFile(pasted);
-    this.clearComposerAfterPaste(kept, true);
+    this.keepTypedAfterPaste(kept, true);
   },
-  clearComposerAfterPaste(kept, pending) {
-    const retained = [textOf(this._draftPrefix).trim(), textOf(kept).trim()].filter(Boolean).join('\n');
-    this._draftPrefix = retained;
-    this._draft = '';
-    this._lastInputValue = '';
+  // 粘贴超限时只把「粘进来的那一段」抽走归为附卷，用户自己打的字原样留在输入框里——
+  // 逐字打不到 2000 字，被判定成长文的必然是粘贴的那段，没有理由连他的提问一起收走。
+  // 实现上只能借交替挂载：给新挂载的那个 textarea 一次性初值 composerSeed。
+  // seed 写完就冻住，直到下一次重建（发送 / 再次粘贴）才会被覆盖。
+  keepTypedAfterPaste(kept, pending) {
+    const retained = textOf(kept).trim();
+    this._draft = retained;
+    this._lastInputValue = retained;
     this._pasteBurst = null;
     this.safeSetData(this.draftStatePatch({
       composerOdd: !this.data.composerOdd,
-      pasteKept: retained,
-      pasteKeptExcerpt: pasteExcerpt(retained),
+      composerSeed: retained,
       canSend: pending ? false : Boolean(retained || this._refs.length),
     }), () => this.measureComposer());
-  },
-  clearPasteKept() {
-    this._draftPrefix = '';
-    this.safeSetData(this.draftStatePatch({ pasteKept: '', pasteKeptExcerpt: '' }), () => this.measureComposer());
   },
   findDuplicatePaste(value) {
     let found = '';
@@ -821,7 +817,7 @@ const methods = {
         });
       }
       const next = this.data.pastePendings.filter((item) => item.key !== key);
-      const combined = this.combinedDraft();
+      const combined = this.draftText();
       this.safeSetData(this.refViewPatch({
         pastePendings: next,
         canSend: Boolean(combined || this._refs.length) && !this.data.busy && next.length === 0,
@@ -842,7 +838,7 @@ const methods = {
     const key = textOf(event.currentTarget.dataset.key);
     this._pasteTexts.delete(key);
     const next = this.data.pastePendings.filter((item) => item.key !== key);
-    const combined = this.combinedDraft();
+    const combined = this.draftText();
     this.safeSetData({ pastePendings: next, canSend: Boolean(combined || this._refs.length) && !this.data.busy && next.length === 0 }, () => this.measureComposer());
   },
   openPastePreview(event) {
@@ -878,7 +874,7 @@ const methods = {
       if (preview.status !== 'failed') return;
       this._pasteTexts.delete(preview.id);
       const next = this.data.pastePendings.filter((item) => item.key !== preview.id);
-      const combined = this.combinedDraft();
+      const combined = this.draftText();
       this.closePastePreview();
       this.safeSetData({ pastePendings: next, canSend: Boolean(combined || this._refs.length) && !this.data.busy && next.length === 0 }, () => this.measureComposer());
       return;
@@ -1006,7 +1002,7 @@ const methods = {
     }
     const retrying = Boolean(this._retryNoEcho);
     const displayRefs = retrying ? (this._retryRefs || []).slice() : this._refs.slice();
-    const typedText = this.combinedDraft();
+    const typedText = this.draftText();
     if (!typedText && !displayRefs.length) return;
     const text = typedText || attachmentOnlyPrompt(displayRefs);
     if (text.length > INPUT_MAX) { wx.showToast({ title: '言过两千，可精简或粘贴成附卷', icon: 'none' }); return; }
@@ -1022,7 +1018,6 @@ const methods = {
     const messages = decorateActiveAsks(retrying ? this.data.messages : this.data.messages.concat(userMessage), true);
     this._retryNoEcho = false; this._retryRefs = null;
     this._draft = '';
-    this._draftPrefix = '';
     this._lastInputValue = '';
     this._refs = [];
     this._pasteTexts.clear();
@@ -1035,6 +1030,7 @@ const methods = {
     this._streamDoneStatus = '';
     this._streamIndex = null;
     this._streamText = '';
+    this._streamShown = '';
     if (this._plainStreamTimer) clearTimeout(this._plainStreamTimer);
     this._plainStreamTimer = null;
     this._plainStreamText = '';
@@ -1042,12 +1038,13 @@ const methods = {
     this._pollSeq += 1;
     if (this._pollTimer) clearTimeout(this._pollTimer);
     this._pollTimer = null;
-    // 仅发送成功起步时交替挂载两个无 value 的 textarea，达到原生清空；编辑过程中从不重建。
+    // 仅发送成功起步时交替挂载两个 textarea 达到原生清空；编辑过程中从不重建。
+    // 这里必须把 composerSeed 一并清掉：粘贴留下的初值若不清，新挂载的框会把已发出去的话再显示一遍。
     this.safeSetData(Object.assign({}, this.askPatch(messages, true), {
       refs: [], regularRefs: [], pasteRefs: [], pastePendings: [], pasteHint: false,
-      pasteKept: '', pasteKeptExcerpt: '', pastePreview: null, chipsSpent: true,
+      pastePreview: null, chipsSpent: true,
       busy: true, canStop: false, showThinking: true, canSend: false, inputCount: 0, showCount: false,
-      composerOdd: !this.data.composerOdd, errorText: '',
+      composerOdd: !this.data.composerOdd, composerSeed: '', errorText: '',
     }), () => this.measureComposer());
     this.toBottom();
     try {
@@ -1127,6 +1124,7 @@ const methods = {
         patch[`messages[${this._streamIndex}].streamRenderId`] = '';
         patch[`messages[${this._streamIndex}].streamStarted`] = false;
         this._streamText = '';
+        this._streamShown = '';
         this.stopStreamAutoScroll();
       }
       if (Object.keys(patch).length) this.safeSetData(patch);
@@ -1147,8 +1145,12 @@ const methods = {
   },
   updateStreamText(chunk, replace) {
     const index = this.ensureStreamItem(false); const current = this.data.messages[index] || {};
-    const text = replace ? String(chunk || '') : `${this._streamText || ''}${chunk || ''}`;
-    this._streamText = text;
+    const raw = replace ? String(chunk || '') : `${this._streamText || ''}${chunk || ''}`;
+    this._streamText = raw;
+    // 扣尾：token 流是模型原文，尾部 ask 协议块要到完整结果处才被服务端剥离；打字机只增不减，
+    // 所以只把「已确定不是协议块」的部分喂下去，疑似段暂扣、被后文证伪后自然放行。
+    const text = streamVisibleText(raw);
+    this._streamShown = text;
     if (current.streamRenderId) setMdText(current.streamRenderId, text);
     else this.flushPlainStream(index, text);
     if (!current.streamStarted && text) {
@@ -1177,7 +1179,12 @@ const methods = {
     const index = this.ensureStreamItem(false); const value = normalizeReply(reply);
     const current = this.data.messages[index] || {};
     this._streamText = value.text;
-    if (current.streamRenderId && value.text) setMdText(current.streamRenderId, value.text);
+    // 服务端清洗后的正文可能比已打出的短（扣尾没兜住时）：打字机收不回去，回喂只会白费一帧，
+    // 该不该整条换渲染器交给 finishStream 判。
+    if (current.streamRenderId && value.text && extendsShown(value.text, this._streamShown)) {
+      this._streamShown = value.text;
+      setMdText(current.streamRenderId, value.text);
+    }
     const patch = {
       [`messages[${index}].text`]: value.text,
       [`messages[${index}].points`]: value.points,
@@ -1232,11 +1239,23 @@ const methods = {
         finished.streamRenderId = '';
         this.stopStreamAutoScroll();
       } else if (finished.streamRenderId) {
-        if (finished.text) setMdText(finished.streamRenderId, finished.text);
-        setStreamFinish(finished.streamRenderId);
-      } else if (!finished.text && this._streamText) {
-        // 纯文本兜底路径：最后一段节流可能还没落地，收尾时按累计正文补齐，别丢掉已经吐出来的字。
-        finished.text = this._streamText;
+        // 收尾一律以服务端清洗后的正文（= 落库版本）为准重渲染。towxml 打字机只增不减：
+        // 已打出的字不是最终正文的前缀时（扣尾没兜住的协议块残字、或流中途换了说法），
+        // 喂短文本收不回去，必须停掉打字机、清掉 streamRenderId，整条换回 markdown-text 渲染最终正文。
+        // 打字机压根没开口（think-dots 阶段就 done）同样要清，否则模板会永远停在三个点上。
+        if (!finished.streamStarted || !extendsShown(finished.text, this._streamShown)) {
+          stopImmediatelyCb(finished.streamRenderId);
+          finished.streamRenderId = '';
+          finished.streamStarted = false;
+          finished.typing = false;
+          this.stopStreamAutoScroll();
+        } else {
+          if (finished.text) setMdText(finished.streamRenderId, finished.text);
+          setStreamFinish(finished.streamRenderId);
+        }
+      } else if (!finished.text && this._streamShown) {
+        // 纯文本兜底路径：最后一段节流可能还没落地，收尾时按已下发正文补齐，别丢掉已经吐出来的字。
+        finished.text = this._streamShown;
       }
       const next = this.data.messages.slice();
       next[index] = finished;
@@ -1247,6 +1266,7 @@ const methods = {
     }
     this._streamIndex = null;
     this._streamText = '';
+    this._streamShown = '';
     this._generationId = '';
     this._pollSeq += 1;
     this.finishBusy({}, pageEpoch);
@@ -1262,7 +1282,8 @@ const methods = {
     const patch = {
       [`messages[${index}].streaming`]: false,
       [`messages[${index}].typing`]: false,
-      [`messages[${index}].text`]: current.text || this._streamText || '',
+      // 中断时也只留已下发的正文：_streamText 是含协议块的模型原文，不能当正文落进气泡。
+      [`messages[${index}].text`]: current.text || this._streamShown || '',
     };
     if (current.report) {
       patch[`messages[${index}].interrupted`] = true;
@@ -1271,6 +1292,7 @@ const methods = {
     }
     this.safeSetData(patch);
     this._streamText = '';
+    this._streamShown = '';
     if (!this.data.messages.some((item, itemIndex) => itemIndex !== index && item && item.typing)) this.stopStreamAutoScroll();
   },
   startStreamAutoScroll() {
@@ -1453,8 +1475,13 @@ const methods = {
       };
     }
     if (this._streamIndex != null && this.data.messages[this._streamIndex]) {
+      // 兜底路径同样以服务端清洗后的正文整条替换；替换掉的打字机要先停，别让它继续打已经作废的原文。
+      const previous = this.data.messages[this._streamIndex];
+      if (previous && previous.streamRenderId) stopImmediatelyCb(previous.streamRenderId);
       const next = this.data.messages.slice(); next[this._streamIndex] = item; this._streamIndex = null; this.safeSetData(this.askPatch(next, false));
     } else this.safeSetData(this.askPatch(this.data.messages.concat(item), false));
+    this._streamText = '';
+    this._streamShown = '';
     this._generationId = '';
     this._pollSeq += 1;
     this.finishBusy({}, pageEpoch);
@@ -1545,7 +1572,7 @@ const methods = {
     try { const result=await api.summarize(this._sessionId);wx.hideLoading();if(result.reportId)navTo(`/packages/work/report/index?id=${encodeURIComponent(result.reportId)}`);else wx.showToast({title:'整理已完成',icon:'none'}); }
     catch(error){wx.hideLoading();store.handleApiError(error,{fallbackTitle:error.message||'整理失败'});}
   },
-  retry() { const failed = this.data.messages.filter((item) => item.role === 'user').slice(-1)[0]; if (!failed) return; this._draft = failed.text; this._draftPrefix = ''; this._lastInputValue = failed.text; this._retryNoEcho = true; this._retryRefs = failed.refs || []; const epoch = this._epoch; this.safeSetData({ errorText: '', canRetryLast: false, canSend: true }); setTimeout(() => { if (this.isCurrent(epoch)) this.send(); }, 20); },
+  retry() { const failed = this.data.messages.filter((item) => item.role === 'user').slice(-1)[0]; if (!failed) return; this._draft = failed.text; this._lastInputValue = failed.text; this._retryNoEcho = true; this._retryRefs = failed.refs || []; const epoch = this._epoch; this.safeSetData({ errorText: '', canRetryLast: false, canSend: true }); setTimeout(() => { if (this.isCurrent(epoch)) this.send(); }, 20); },
   stop() {},
   toBottom() { const epoch = this._epoch; this.safeSetData({ bottomAnchor: '' }); setTimeout(() => { if (this.isCurrent(epoch)) this.safeSetData({ bottomAnchor: 'chat-bottom' }); }, 20); },
 };

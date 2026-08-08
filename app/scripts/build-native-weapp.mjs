@@ -212,13 +212,27 @@ function validate(sourceFiles) {
   if (/@tarojs|Taro\./.test(allJs)) throw new Error('dist-native 仍包含 Taro 运行时引用');
   // 聊天输入铁律的校验目标必须显式列全：composer 已抽到主包 chat-core，
   // 只扫分包页会让铁律随文件搬家而静默失效，所以文件缺失本身就要报错。
+  // 铁律守的是「编辑过程中回灌」，不是「出现 value 三个字母」。长文粘贴归卷后必须把用户
+  // 自己打的提问留在输入框里（他打不到 2000 字，超限的必然是粘进来那段），而原生唯一的
+  // 实现路径就是交替挂载时给新节点一次性初值。所以放行 value="{{composerSeed}}" 这一种
+  // 精确绑定，把守门位置挪到下面：真正会复现输入法重复上屏与光标跳尾的是编辑期改 seed。
   for (const relative of CHAT_TEXTAREA_TARGETS) {
     const file = path.join(OUTPUT_ROOT, relative);
     if (!fs.existsSync(file)) throw new Error(`聊天 textarea 校验目标缺失：${relative}（铁律检查不得随文件搬家失效）`);
     const source = fs.readFileSync(file, 'utf8');
-    if (/<textarea[^>]+\bvalue=/.test(source)) {
-      throw new Error(`原生聊天 textarea 禁止绑定 value（${relative}）：会重新引入华为/百度输入法重复与光标跳尾问题`);
+    for (const tag of source.match(/<textarea\b[^>]*>/g) || []) {
+      const bound = tag.match(/\bvalue="([^"]*)"/);
+      if (bound && bound[1] !== '{{composerSeed}}') {
+        throw new Error(`原生聊天 textarea 只允许 value="{{composerSeed}}" 这一种一次性初值（${relative} 出现 value="${bound[1]}"）：其它受控绑定会重新引入华为/百度输入法重复与光标跳尾问题`);
+      }
     }
+  }
+  const behaviorFile = path.join(OUTPUT_ROOT, 'chat-core/behavior.js');
+  if (!fs.existsSync(behaviorFile)) throw new Error('chat-core/behavior.js 缺失：编辑期回灌校验不得随文件搬家失效');
+  const onComposerInput = fs.readFileSync(behaviorFile, 'utf8').match(/\bonComposerInput\(event\)\s*\{[\s\S]*?\n {2}\},/);
+  if (!onComposerInput) throw new Error('未能定位 onComposerInput：编辑期回灌校验不得随重构静默失效');
+  if (/composerSeed/.test(onComposerInput[0])) {
+    throw new Error('onComposerInput 不得写 composerSeed：编辑过程中回灌 textarea 会重新引入华为/百度输入法重复与光标跳尾问题');
   }
 }
 

@@ -1,14 +1,11 @@
 <!-- 问策对话输入区（主包共享模板）：composer 本体 + 附卷全文预览 + 引用资产选择器。
      宿主页 import 本文件后，用 template is="chat-composer" 渲染。
-     原生对话输入铁律：这里的两个 textarea 永远不得绑定 value（见 AGENTS.md 7.2）。
+     原生对话输入铁律：这里的两个 textarea 只允许 value="{{composerSeed}}" 这一种绑定，
+     且 composerSeed 只在交替挂载那一刻写一次，编辑过程中绝不回灌（见 AGENTS.md 7.2）。
      build-native-weapp.mjs 与 scripts/native-weapp.test.mjs 都会直接扫描本文件。-->
 <template name="chat-composer">
   <view class="composer-dock {{askComposerOpen?'ask-hidden':''}}">
-    <view wx:if="{{pasteRefs.length||pastePendings.length||pasteKept}}" class="paste-stack">
-      <view wx:if="{{pasteKept}}" class="paste-kept">
-        <view class="paste-kept-copy"><text class="paste-kept-k">已保留原提问</text><text class="paste-kept-v">{{pasteKeptExcerpt}}</text></view>
-        <view class="paste-icon-hit" bindtap="clearPasteKept"><native-icon name="close" tone="neutral" size="14"></native-icon></view>
-      </view>
+    <view wx:if="{{pasteRefs.length||pastePendings.length}}" class="paste-stack">
       <view wx:for="{{pasteRefs}}" wx:key="id" class="paste-card {{pasteDupId===item.id?'dup':''}}" data-id="{{item.id}}" bindtap="openPastePreview">
         <view class="paste-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="15"></native-icon></view>
         <view class="paste-b"><text class="paste-t">粘贴长文 · {{item.chars}}字</text><text class="paste-m">{{item.excerpt}}</text></view>
@@ -32,8 +29,8 @@
       <view wx:if="{{uploading}}" class="ref-chip uploading">上传中…</view>
     </view>
     <view class="composer-box">
-      <textarea wx:if="{{composerOdd}}" class="composer-input" maxlength="-1" auto-height fixed="{{true}}" always-embed="{{true}}" adjust-position="{{false}}" disabled="{{busy}}" confirm-type="send" confirm-hold="{{true}}" show-confirm-bar="{{false}}" cursor-spacing="16" placeholder="把你正拿不准的事告诉军师" bindinput="onComposerInput" bindlinechange="onComposerResize" bindconfirm="onConfirm" bindblur="onComposerBlur" bindkeyboardheightchange="onKeyboardHeight"></textarea>
-      <textarea wx:else class="composer-input" maxlength="-1" auto-height fixed="{{true}}" always-embed="{{true}}" adjust-position="{{false}}" disabled="{{busy}}" confirm-type="send" confirm-hold="{{true}}" show-confirm-bar="{{false}}" cursor-spacing="16" placeholder="把你正拿不准的事告诉军师" bindinput="onComposerInput" bindlinechange="onComposerResize" bindconfirm="onConfirm" bindblur="onComposerBlur" bindkeyboardheightchange="onKeyboardHeight"></textarea>
+      <textarea wx:if="{{composerOdd}}" class="composer-input" value="{{composerSeed}}" maxlength="-1" auto-height fixed="{{true}}" always-embed="{{true}}" adjust-position="{{false}}" disabled="{{busy}}" confirm-type="send" confirm-hold="{{true}}" show-confirm-bar="{{false}}" cursor-spacing="16" placeholder="把你正拿不准的事告诉军师" bindinput="onComposerInput" bindlinechange="onComposerResize" bindconfirm="onConfirm" bindblur="onComposerBlur" bindkeyboardheightchange="onKeyboardHeight"></textarea>
+      <textarea wx:else class="composer-input" value="{{composerSeed}}" maxlength="-1" auto-height fixed="{{true}}" always-embed="{{true}}" adjust-position="{{false}}" disabled="{{busy}}" confirm-type="send" confirm-hold="{{true}}" show-confirm-bar="{{false}}" cursor-spacing="16" placeholder="把你正拿不准的事告诉军师" bindinput="onComposerInput" bindlinechange="onComposerResize" bindconfirm="onConfirm" bindblur="onComposerBlur" bindkeyboardheightchange="onKeyboardHeight"></textarea>
       <view class="composer-tools">
         <button class="attach-btn" bindtap="pickAttachment"><native-icon name="plus" tone="iron" size="19"></native-icon></button>
         <view class="composer-tools-right">

@@ -448,11 +448,13 @@ Page({
   },
   startHintRotation() {
     this.stopHintRotation();
-    if (!this._hints.length || this.data.form !== 'chat') return;
+    // 冷会话才轮播：用户开过口（chipsSpent）之后 pill 已经永久收起，再定时 setData 只是白烧帧。
+    if (!this._hints.length || this.data.form !== 'chat' || this.data.chipsSpent) return;
     this._hintIndex %= this._hints.length;
     this.applyHint();
     if (this._hints.length < 2) return;
     this._hintTimer = setInterval(() => {
+      if (this.data.chipsSpent) { this.stopHintRotation(); return; }
       this.setData({ hintFade: true });
       this._hintSwapTimer = setTimeout(() => {
         this._hintIndex = (this._hintIndex + 1) % this._hints.length;

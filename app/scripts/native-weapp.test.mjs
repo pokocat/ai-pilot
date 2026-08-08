@@ -63,14 +63,47 @@ test('原生历史对话剥离重复的 asks JSON，只让问答卡展示结构�
   assert.match(chatJs, /stripSerializedAsksTail\(value\.text, value\.asks\)/, '历史、轮询与流式终态必须统一经过 asks 正文净化');
 });
 
+test('原生流式扣尾：ask 协议块不进打字机缓冲，done 后按落库正文重渲染', () => {
+  const helperPath = path.join(sourceRoot, 'services/chat-reply.js');
+  delete cjsRequire.cache[cjsRequire.resolve(helperPath)];
+  const { streamVisibleText, extendsShown } = cjsRequire(helperPath);
+
+  // 真机漏出来的那一幕：协议块刚吐出半个开头就得扣住，不能让 towxml 把 JSON 打进气泡。
+  assert.equal(streamVisibleText('先聊聊你的情况。\n[{"q":"你做的是什么行业/品类？","o'), '先聊聊你的情况。');
+  assert.equal(streamVisibleText('先聊聊你的情况。\n```ask\n[{"q":"行业？","options":["餐饮","电商"]}]\n```'), '先聊聊你的情况。');
+  // 围栏/裸 JSON 还没写全时同样先扣住：宁可短暂少显示几个字。
+  assert.equal(streamVisibleText('正文。\n``'), '正文。');
+  assert.equal(streamVisibleText('正文。\n{"asks'), '正文。');
+  // 被后文证伪就立刻放行：普通代码块与正文一个字都不能少。
+  assert.equal(streamVisibleText('正文。\n```js\ncode()'), '正文。\n```js\ncode()');
+  const plain = '这段结尾没有协议块，问号也不算。你怎么想？';
+  assert.equal(streamVisibleText(plain), plain);
+  // 扣掉的永远是后缀 → 可见正文始终是最终正文的前缀，done 时打字机只需继续追加（只增不减）。
+  const withheld = streamVisibleText('业务数据：\n[{"q":"字段名","options":["a","b"]}]');
+  assert.equal(withheld, '业务数据：');
+  assert.equal(extendsShown('业务数据：\n[{"q":"字段名","options":["a","b"]}]', withheld), true);
+  assert.equal(extendsShown('先聊聊你的情况。', '先聊聊你的情况。\n[{"q":'), false);
+
+  const behavior = read(chatCoreRoot, 'behavior.js');
+  assert.match(behavior, /const text = streamVisibleText\(raw\);/, '喂给打字机/纯文本兜底的是扣过尾的正文，不是模型原文');
+  assert.match(behavior, /if \(current\.streamRenderId\) setMdText\(current\.streamRenderId, text\);/);
+  assert.doesNotMatch(behavior, /setMdText\(current\.streamRenderId, raw\)/, '模型原文不得进入打字机缓冲');
+  // done 收尾以服务端清洗后的正文（落库版本）为准；towxml 只增不减，已打出的字不是它的前缀就换渲染器。
+  assert.match(behavior, /if \(!finished\.streamStarted \|\| !extendsShown\(finished\.text, this\._streamShown\)\) \{[\s\S]*?finished\.streamRenderId = '';/);
+  assert.match(behavior, /setStreamFinish\(finished\.streamRenderId\)/);
+  // 中断/兜底路径也不能把含协议块的模型原文当正文落进气泡。
+  assert.match(behavior, /messages\[\$\{index\}\]\.text`\]: current\.text \|\| this\._streamShown \|\| ''/);
+});
+
 test('原生源码不引用 Taro，聊天 textarea 保持非受控', () => {
   const sourceFiles = walk(sourceRoot).filter((file) => /\.(js|json|wxml|scss)$/.test(file));
   const all = sourceFiles.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
   assert.doesNotMatch(all, /@tarojs|Taro\./);
   assert.doesNotMatch(all, /\bselectable(?:\s|=)/, '原生 text 使用 user-select，不得回退已弃用的 selectable');
   const chat = chatMarkup();
-  assert.doesNotMatch(chat, /<textarea[^>]+\bvalue=/, '输入文字不得通过 setData 回灌 textarea');
-  assert.equal((chat.match(/<textarea\b/g) || []).length, 2, '聊天发送后只通过两个非受控 textarea 交替挂载清空');
+  // 唯一放行的 value 绑定是交替挂载时的一次性初值；任何别的受控写法都会复现输入法重复上屏。
+  assert.doesNotMatch(chat, /<textarea[^>]+\bvalue="(?!\{\{composerSeed\}\})/, '除 composerSeed 初值外，输入文字不得通过 setData 回灌 textarea');
+  assert.equal((chat.match(/<textarea\b/g) || []).length, 2, '聊天发送后只通过两个 textarea 交替挂载清空');
   assert.match(chat, /<input\b[^>]*class="ask-other-input[^>]*\bvalue="\{\{ask\.other\}\}"[^>]*\bbindfocus="onAskOtherFocus"[^>]*\bbindinput="onAskOtherInput"/, '其他回答必须使用卡片内可见原生 input，支持光标与文本选区');
   assert.match(chat, /id="ask-other-m\{\{messageIndex\}\}-q\{\{askIndex\}\}" class="ask-other-anchor"/, '每个其他回答 input 前必须有稳定滚动锚点');
   assert.doesNotMatch(chat, /ask-keyboard-capture/, '不得再用 1px 隐形输入框劫持其他回答');
@@ -103,6 +136,17 @@ test('原生长文粘贴保持同帧卡片、内容去重、全文预览与发�
   assert.match(wxml, /bindtap="retryPaste"/);
   assert.match(wxml, /bindtap="removePastePending"/);
   assert.doesNotMatch(wxml, /把附件放回输入框|Show in text field/);
+
+  // 只有粘进来的那段变附件，用户自己打的字必须留在输入框里：逐字打不到 INPUT_MAX，
+  // 触发归卷的必然是粘贴那段，没有理由连他的提问一起收走再用一张 chip 复述。
+  assert.match(chat, /keepTypedAfterPaste\(kept, true\)/, '归卷后走保留手打内容的路径');
+  assert.match(chat, /keepTypedAfterPaste\(kept, pending\) \{[\s\S]*?this\._draft = retained;[\s\S]*?composerSeed: retained,/, '手打内容既写回 _draft，也作为新挂载 textarea 的一次性初值');
+  assert.doesNotMatch(chat, /pasteKept|_draftPrefix|clearPasteKept/, '「已保留原提问」chip 与第二段草稿真相源已废除');
+  assert.doesNotMatch(wxml, /已保留原提问/);
+  assert.match(chat, /composerOdd: !this\.data\.composerOdd, composerSeed: '',/, '发送时必须连 seed 一起清，否则新挂载的框会复述已发出的话');
+  const onComposerInput = chat.match(/\bonComposerInput\(event\)\s*\{[\s\S]*?\n {2}\},/);
+  assert.ok(onComposerInput, '未能定位 onComposerInput：编辑期回灌校验不得随重构失效');
+  assert.doesNotMatch(onComposerInput[0], /composerSeed/, '编辑过程中绝不碰 seed —— 那才是输入法重复上屏与光标跳尾的真正来源');
 });
 
 test('原生页头避让微信胶囊，登录全屏层同步隐藏自定义底栏', () => {
@@ -290,7 +334,8 @@ test('原生聊天保持可恢复生成、完整报告闸门与动态输入区',
 
   assert.equal(textareas.length, 2);
   for (const textarea of textareas) {
-    assert.doesNotMatch(textarea, /\bvalue=/);
+    assert.match(textarea, /\bvalue="\{\{composerSeed\}\}"/, '两个 textarea 必须对称绑同一个一次性初值，否则交替挂载会丢字');
+    assert.doesNotMatch(textarea, /\bvalue="(?!\{\{composerSeed\}\})/);
     assert.match(textarea, /\bdisabled="\{\{busy\}\}"/);
     assert.match(textarea, /\bbindlinechange="onComposerResize"/);
   }
@@ -408,6 +453,10 @@ test('对话核心抽到主包 chat-core，分包页只留页头与导航', () =
   assert.match(builder, /CHAT_TEXTAREA_TARGETS = \[[^\]]*'chat-core\/composer\.wxml'/, '构建校验必须扫描 chat-core/composer.wxml');
   assert.match(builder, /CHAT_TEXTAREA_TARGETS/, '构建校验目标必须显式列表化');
   assert.match(builder, /聊天 textarea 校验目标缺失/, '校验目标文件缺失本身必须让构建失败');
+  // 闸门守的是「编辑期回灌」而不是「出现 value」：白名单放行一次性初值，同时盯死 onComposerInput。
+  assert.match(builder, /bound\[1\] !== '\{\{composerSeed\}\}'/, '除 composerSeed 外的 value 绑定必须让构建失败');
+  assert.match(builder, /onComposerInput 不得写 composerSeed/, '编辑期回灌必须由构建闸门拦住');
+  assert.match(builder, /未能定位 onComposerInput/, '定位不到就要报错，铁律检查不得随重构静默失效');
 });
 
 test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话即 tab 终态', () => {
@@ -446,9 +495,13 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
   assert.match(scss, /@use "\.\.\/\.\.\/custom-tab-bar\/index\.scss"/, '浮岛复用底栏同一份 SCSS（含图标光学校准）');
   assert.doesNotMatch(wxml, /<textarea\b/, '输入区只能来自 composer 模板，页面不得再写一份 textarea');
 
-  // —— 提示 pill：代发 + 有草稿/生成中/键盘/抽屉都不显示 ——
+  // —— 提示 pill：代发 + 冷会话专属（有过 user 轮就永久收起）+ 有草稿/生成中/键盘/抽屉都不显示 ——
   assert.match(wxml, /class="wence-pill[\s\S]*?bindtap="tapHint"/);
-  assert.match(wxml, /wx:if="\{\{hintText && !drawerOpen && !busy && !inputCount && !keyboardHeight\}\}"/, 'pill 的隐藏条件全部在 WXML 表达式里，不靠 JS 同步');
+  assert.match(wxml, /wx:if="\{\{hintText && !chipsSpent && !drawerOpen && !busy && !inputCount && !keyboardHeight\}\}"/, 'pill 的隐藏条件全部在 WXML 表达式里，不靠 JS 同步');
+  // pill 只降低「首次开口」门槛：判据必须与 chips 同源（chat-core 的 chipsSpent = 本会话有无 user 轮），
+  // 不许另造一套「点过了」的标记，否则老用户带历史会话进来还会看到它。
+  assert.match(js, /this\.data\.form !== 'chat' \|\| this\.data\.chipsSpent/, '轮播启动前先看 chipsSpent');
+  assert.match(js, /if \(this\.data\.chipsSpent\) \{ this\.stopHintRotation\(\); return; \}/, '会话中途开口后停轮播');
   assert.match(js, /this\.sendText\(text, 'hint'\)/, '点 pill = 直接代发（textarea 铁律禁止程序化回填）');
   assert.match(js, /localHints\(\)/, '词池为空或拉取失败回退本地兜底池');
 
@@ -546,7 +599,7 @@ test('快捷回应 chips：服务端字段直达消息、点击即代发、用�
   assert.match(behavior, /chips: stringList\(message && message\.chips\)/, 'normalizeMessage 把 SessionMessage.chips 带进消息对象');
   assert.match(behavior, /function chipsSpentFor\(messages\) \{[\s\S]*?role === 'user'/, '有 user 轮就作废：重进会话也能自然收敛');
   assert.match(behavior, /chipsSpent: chipsSpentFor\(messages\)/);
-  assert.match(behavior, /pasteKept: '', pasteKeptExcerpt: '', pastePreview: null, chipsSpent: true/, '手动发送后整排消失');
+  assert.match(behavior, /pastePreview: null, chipsSpent: true/, '手动发送后整排消失');
   assert.match(behavior, /this\.sendText\(chip, 'chip'\)/);
   assert.match(behavior, /if \(this\.hasDraft\(\)\) \{ wx\.showToast/, '有草稿时不许被 chip 静默覆盖');
 

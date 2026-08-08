@@ -6,6 +6,33 @@
 
 ## 变更日志
 
+### 2026-08-08 · 问策终态首轮真机反馈修复（ask 协议块漏进正文 / 提示 pill 太频繁） · 影响面：weapp-native chat-core 流式收口 + 问策 tab pill（**纯端上，服务端零改动、不需要重新部署**）
+
+上线后首轮真机反馈两条，都在 `weapp-native`；第一条 **chat 分包页同病**（同一份 chat-core，只是以前没人盯着看），一处修复两页同治。
+
+- **ask 协议块漏进可见正文**。根因是三件事叠在一起：① SSE `token` 流是**模型原文**，尾部 ```ask 协议块原样流出——
+  剥离只发生在完整结果处（`server/src/llm/schema.ts` 的 `extractAsks`，gateway 注释写的就是「前端流式期间负责隐藏」，
+  而端上从来没做这件事）；② towxml 打字机**只增不减**（`c` 单调递增、`allText` 只累加），协议块一旦被打出来，
+  done 之后 `setMdText` 喂再短的文本也收不回去，`setStreamFinish` 的收尾还会把已打出的残段再解析一遍，
+  于是气泡底部留下被当代码渲染的 `[{"q":"你做的是什么行业/品类？","o`；③ done 时的替换源其实**已经是**服务端清洗后的正文，
+  但因为 ② 那次替换等于无效。两道都补：
+  - **流中扣尾**：新增 `services/chat-reply.js` 的 `streamVisibleText()`，喂给 `setMdText` 的累计正文先扣掉尾部疑似协议块
+    （```ask 围栏含没写全的开头；独占一行开头的裸 `[{"q"…` / `[{"question"…` / `{"asks"…`——判定特征镜像服务端 `extractAsks`，
+    流式期间只拿得到半个开头所以做前缀比对），被后文证伪自动放行。扣掉的永远是后缀 → 可见正文恒为最终正文的前缀。
+    只操作打字机缓冲，**没有**回到「token 到达整段 setData」。
+  - **收尾替换**：done 以服务端正文（落库版本）为准重渲染；已打出的字不是它的前缀（`extendsShown()` 为假）、
+    或打字机压根没开口（还停在 think-dots）时，`stopImmediatelyCb` + 清空 `streamRenderId`，整条换回 `markdown-text`。
+    顺带修好一个潜伏缺陷：done 早于首字时，旧代码会把 think-dots 永久留在屏幕上。
+  - 中断（`markStreamInterrupted`）与 `/generate-sync` 兜底（`finishResult`）也改成只落已下发正文 / 服务端正文，
+    不再把含协议块的 `_streamText` 原文当正文写进气泡；兜底替换前先停掉被替换掉的打字机。
+- **提示 pill 出现太频繁**（用户原话「一直出现也挺困扰的」）。pill 的职责只是降低**首次开口**门槛，
+  却只在草稿非空/生成中/键盘弹起/抽屉打开时隐藏，热聊中也常驻。改成**冷会话专属**：本会话存在任何 user 轮即永久收起，
+  判据直接复用 chat-core 的 `chipsSpent`（与 chips 完全同源，没另造标记），老用户带历史会话进来 = 永不出现；
+  轮播定时器同步在 `chipsSpent` 为真时停掉。
+- AGENTS §7.2 两处补写（流式打字机的「只增不减」两道硬约束、pill 的隐藏条件）。
+- `cd app && npm test` 全绿（49 + 93，新增静态断言：扣尾函数行为与接线、done 换渲染器、pill 条件含 `chipsSpent`）；
+  `npm run build:weapp:server` 绿。
+
 ### 2026-08-08 · 问策入口改版 WP5（运营配置页） · 影响面：admin 导航/问策入口页/共享 CSS 一处修复
 
 - 新增「问策入口」独立页（`settings` 组，`admin/src/views/wence.tsx`）：hint / proactive 双池 CRUD

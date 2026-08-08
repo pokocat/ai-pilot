@@ -15,7 +15,7 @@
     <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast, chipsSpent}}"></template>
   </scroll-view>
 
-  <template is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteKept, pasteKeptExcerpt, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>
+  <template is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, composerSeed, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>
 
   <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>
