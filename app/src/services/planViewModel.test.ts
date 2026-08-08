@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Plan, PlanOption, PlanOptionsResult } from './api';
-import { ACTION_LABEL, DEFAULT_PURCHASE_MODE, canStartPurchase, currentPlanOption, effectivePurchaseMode, isPlanExpired, publicFeatures, visiblePlanOptions } from '../packages/work/plans/model';
+import { ACTION_LABEL, DEFAULT_PURCHASE_MODE, canStartPurchase, currentPlanOption, effectivePurchaseMode, isPlanExpired, promotionBadge, promotionNote, publicFeatures, visiblePlanOptions } from '../packages/work/plans/model';
 
 function plan(id: string, period: 'month' | 'year' = 'month', price = 6_800): Plan {
   return {
     id, name: id, price, period, creditsPerMonth: 10, tokenQuotaPerMonth: 100_000,
     agentCount: 3, featuresJson: [], highlighted: false, planFamilyKey: id.split('-')[0],
     tierRank: 10, usageLevel: price < 0 ? 'custom' : 'standard', usageLabel: price < 0 ? '专属用量' : '标准用量',
-    autoRenewAvailable: false,
+    autoRenewAvailable: false, promotion: null,
   };
 }
 
@@ -70,6 +70,24 @@ test('方案文案：隐藏内部原始额度/顾问数量，只保留最多四�
     '100000 token/月', '每月 500 点', '每月约 20 次', '8 位顾问', '顾问共 8 位',
     '经营资料整理', '方案版本管理', '跨项目检索', '优先响应', '第五条不展示',
   ]), ['经营资料整理', '方案版本管理', '跨项目检索', '优先响应']);
+});
+
+test('折扣展示：折扣率只用服务端下发的口径，端上不按价格自己算', () => {
+  // 故意给一组「按 price/listPrice 自己算会得到 1 折」的数字，但服务端下发的是 2 折——
+  // 端上必须原样用服务端口径。任何一天这里开始自己算，就会出现「显示 1 折、实扣另一个价」。
+  const fmt = { money: (fen: number) => `¥${fen / 100}`, date: (iso: string) => iso.slice(0, 10) };
+  const promotion = { listPrice: 3_980_000, price: 398_000, savedFen: 3_582_000, discountRate: 2, discountLabel: '2折', label: null, endsAt: null };
+  assert.equal(promotionBadge(promotion), '2折');
+  assert.equal(promotionBadge({ ...promotion, label: '首发价' }), '首发价 · 2折');
+  assert.equal(promotionNote(promotion, fmt), '立省 ¥35820');
+  assert.equal(promotionNote({ ...promotion, endsAt: '2026-09-30T15:59:59.000Z' }, fmt), '立省 ¥35820 · 2026-09-30 截止');
+});
+
+test('折扣展示：没有折扣的档不产出任何角标文案（原价档不该多出一行空标签）', () => {
+  const fmt = { money: (fen: number) => `¥${fen / 100}`, date: (iso: string) => iso };
+  assert.equal(promotionBadge(null), '');
+  assert.equal(promotionNote(null, fmt), '');
+  assert.equal(promotionBadge(plan('starter').promotion), '');
 });
 
 test('购买方式：默认永远单次购买，自动续费不可用时强制回落单次', () => {

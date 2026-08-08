@@ -1165,27 +1165,74 @@ export interface Overview {
   feed: { icon: string; t: string; m: string; v: string }[];
 }
 export interface AdminSaying { id: string; text: string; enabled: boolean; pushedDate: string | null; }
+/** 套餐折扣展示口径（挂牌价 → 实际价）。**折扣率由服务端按生效时间窗算好再下发**，
+ *  端上只负责渲染——客户端复制折扣规则就会出现「小程序显示 1 折、下单扣原价」这类不一致。
+ *  仅当挂牌价 > 实际价且当前时刻落在生效窗口内时才有值，否则为 null（原价售卖）。 */
+export interface PlanPromotion {
+  /** 挂牌价（划线原价，分） */
+  listPrice: number;
+  /** 实际价（当前生效成交价，分）——与 Plan.price 相同 */
+  price: number;
+  /** 立省金额（分）= listPrice - price */
+  savedFen: number;
+  /** 折扣费率（中式「折」）：实际价 ÷ 挂牌价 × 10，保留一位小数。1 = 一折，8.5 = 八五折 */
+  discountRate: number;
+  /** 可直接展示的折扣文案，如「1折」「8.5折」 */
+  discountLabel: string;
+  /** 运营填的活动名（如「首发价」）；未填为 null */
+  label: string | null;
+  /** 优惠结束时间（ISO）；null = 长期有效 */
+  endsAt: string | null;
+}
 export interface Plan {
+  /** ⚠️ **当前实际生效价（用户要付的钱）**：优惠生效时即优惠价，否则等于挂牌价。
+   *  挂牌价只在 promotion.listPrice 里出现，用于划线与折扣率展示。 */
   id: string; name: string; price: number; period: string;
   creditsPerMonth: number; tokenQuotaPerMonth: number; agentCount: number; featuresJson: string[]; highlighted: boolean;
   planFamilyKey: string; tierRank: number; usageLevel: UsageLevel; usageLabel: string;
   /** 权限、V2 密钥、模板和套餐开关均齐全时才为 true；false 时前端只展示单次购买。 */
   autoRenewAvailable: boolean;
+  /** 折扣中则有值；null = 按 price 原价售卖。 */
+  promotion: PlanPromotion | null;
 }
 /** 运营后台的套餐行（GET /admin/plans）：**线上套餐目录的唯一真相源**——代码侧不再有同步脚本，
  *  seedConfig.DEV_PLANS 只是本地/测试夹具。比公开 Plan 多出 hidden（停售/白名单档）与 sort（展示序）。 */
 export interface AdminPlan extends Plan {
+  /** ⚠️ 与公开 `Plan.price` 语义不同：后台这一栏是**挂牌价**（运营填的标价，也是 PATCH 回写的字段）。
+   *  用户当前实际付的钱见 `effectivePrice`；两者只在优惠生效期内不同。 */
+  price: number;
+  /** 优惠价（分）；null = 未配置优惠 */
+  promoPrice: number | null;
+  /** 优惠生效时间（ISO）；null = 立即生效 */
+  promoStartsAt: string | null;
+  /** 优惠结束时间（ISO）；null = 长期有效 */
+  promoEndsAt: string | null;
+  /** 活动名（仅展示，如「首发价」） */
+  promoLabel: string | null;
+  /** 当前时刻优惠是否生效（服务端按生效窗口判定） */
+  promoActive: boolean;
+  /** 当前实际成交价（= promoActive ? promoPrice : price），只读，供后台核对用户侧看到的价 */
+  effectivePrice: number;
   hidden: boolean; sort: number; usageNormalPercent: number; usageNearPercent: number;
   autoRenewEnabled: boolean; wechatContractPlanId: string | null; autoRenewMode: 'delay_24h';
 }
 /** 新建套餐（POST /admin/plans，requireSuper）。period 只认 month/year；price 为分，-1=面议。 */
 export interface AdminPlanCreate {
+  /** 挂牌价（分）。-1=面议；优惠期内实际成交价见 promoPrice。 */
   name: string; price: number; period?: 'month' | 'year';
   planFamilyKey: string; tierRank: number; usageLevel: UsageLevel; usageLabel?: string;
   usageNormalPercent?: number; usageNearPercent?: number;
   creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number;
   featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number;
   autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: 'delay_24h';
+  /** 优惠价（分）。null / 省略 = 取消优惠；必须 1 ≤ promoPrice < price，且只能配在正价档上。 */
+  promoPrice?: number | null;
+  /** 优惠生效时间（ISO）；null = 立即生效。可预配未来生效的调价。 */
+  promoStartsAt?: string | null;
+  /** 优惠结束时间（ISO）；null = 长期有效。到点自动回到挂牌价，无需人工操作。 */
+  promoEndsAt?: string | null;
+  /** 活动名（≤20 字，仅展示） */
+  promoLabel?: string | null;
   /** 编辑同一商业档的月付/年付时，原子同步月度权益与公开用量配置。 */
   syncFamilyBenefits?: boolean;
 }

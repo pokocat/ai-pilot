@@ -61,6 +61,7 @@ import type {
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
 import { MAX_TIER_RANK, planTierRank } from '../services/planRules.js';
+import { effectivePrice, planPromotion, promoActive, type PlanPricingFields } from '../services/planPricing.js';
 import { isExpired, daysRemaining } from '../services/planTime.js';
 import { signUserToken, jwtEnabled } from '../services/userToken.js';
 import { Prisma } from '@prisma/client';
@@ -2030,8 +2031,15 @@ export async function adminRoutes(app: FastifyInstance) {
   //（它按 name 全字段 upsert，运营把入门版改 ¥99 之后任何一次全量同步都会打回代码里的 ¥68），
   // seedConfig.DEV_PLANS 降级为本地/测试夹具。所以运营必须能在后台**建档/改档/下架**，
   // 否则全新部署起来一个套餐都没有、付费转化路径直接断（无套餐用户被 planGate 全局禁写）。
-  const adminPlanView = <T extends { autoRenewEnabled: boolean; wechatContractPlanId: string | null; autoRenewMode: string; price: number }>(p: T) => ({
-    ...p, autoRenewAvailable: !!(papayConfigured() && p.autoRenewEnabled && p.wechatContractPlanId && p.autoRenewMode === 'delay_24h' && p.price > 0),
+  // ⚠️ 后台这一行的 `price` 是**挂牌价**（运营填的标价，也是 PATCH 回写的字段），与公开 `Plan.price`
+  // ＝「此刻成交价」的语义不同。用户实际付多少看 effectivePrice；promotion 是原样复用的用户侧折扣对象，
+  // 让运营在后台就能核对小程序上会显示成几折，而不是自己再算一遍。
+  const adminPlanView = <T extends { autoRenewEnabled: boolean; wechatContractPlanId: string | null; autoRenewMode: string; price: number } & PlanPricingFields>(p: T) => ({
+    ...p,
+    autoRenewAvailable: !!(papayConfigured() && p.autoRenewEnabled && p.wechatContractPlanId && p.autoRenewMode === 'delay_24h' && p.price > 0),
+    promoActive: promoActive(p),
+    effectivePrice: effectivePrice(p),
+    promotion: planPromotion(p),
   });
   app.get('/admin/plans', async () => (await prisma.plan.findMany({ orderBy: { sort: 'asc' } })).map(adminPlanView));
 
@@ -2039,12 +2047,31 @@ export async function adminRoutes(app: FastifyInstance) {
   const PLAN_PERIODS = ['month', 'year'] as const;
   const USAGE_LEVELS = ['standard', '5x', '20x', 'custom'] as const;
 
+  /** 请求体里的时间字段 → Date：空串/null 一律当「清空」，非法字符串明确报错而不是静默落 null。 */
+  function parsePromoAt(value: unknown, field: string): Date | null {
+    if (value === null || value === undefined || value === '') return null;
+    const at = new Date(String(value));
+    if (Number.isNaN(at.getTime())) throw Object.assign(new Error(`${field}格式非法`), { code: 'PLAN_PROMO_WINDOW_INVALID', statusCode: 400 });
+    return at;
+  }
+
   async function validatePlanCommercial(candidate: {
     id?: string; price: number; planFamilyKey: string; tierRank: number; usageLevel: string; usageLabel: string;
     tokenQuotaPerMonth: number; creditsPerMonth: number; agentCount: number;
     usageNormalPercent: number; usageNearPercent: number; syncFamilyBenefits?: boolean;
     autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: string;
+    promoPrice?: number | null; promoStartsAt?: Date | null; promoEndsAt?: Date | null;
   }) {
+    // 优惠价的护栏（读侧 planPricing 还会再兜一次底）：生效价必须恒为正，否则
+    // price<=0（免费层不设到期）/ price<0（面议档禁止自助购买）这些语义会被优惠悄悄翻转。
+    if (candidate.promoPrice !== null && candidate.promoPrice !== undefined) {
+      if (candidate.price <= 0) throw Object.assign(new Error('只有正价套餐可以配置优惠价（面议档与免费档不支持）'), { code: 'PLAN_PROMO_UNSUPPORTED', statusCode: 400 });
+      if (!Number.isInteger(candidate.promoPrice) || candidate.promoPrice < 1) throw Object.assign(new Error('优惠价必须是不小于 1 分的整数；要取消优惠请清空该字段'), { code: 'PLAN_PROMO_PRICE_INVALID', statusCode: 400 });
+      if (candidate.promoPrice >= candidate.price) throw Object.assign(new Error('优惠价必须低于挂牌价，否则展示不出折扣'), { code: 'PLAN_PROMO_PRICE_INVALID', statusCode: 400 });
+    }
+    if (candidate.promoStartsAt && candidate.promoEndsAt && candidate.promoEndsAt.getTime() <= candidate.promoStartsAt.getTime()) {
+      throw Object.assign(new Error('优惠结束时间必须晚于生效时间'), { code: 'PLAN_PROMO_WINDOW_INVALID', statusCode: 400 });
+    }
     if (!candidate.planFamilyKey.trim()) throw Object.assign(new Error('方案分组标识必填'), { code: 'PLAN_FAMILY_REQUIRED', statusCode: 400 });
     if (!Number.isInteger(candidate.tierRank) || candidate.tierRank < 0 || candidate.tierRank > MAX_TIER_RANK) throw Object.assign(new Error(`商业档位必须是 0-${MAX_TIER_RANK} 的整数`), { code: 'PLAN_TIER_INVALID', statusCode: 400 });
     if (!(USAGE_LEVELS as readonly string[]).includes(candidate.usageLevel)) throw Object.assign(new Error('公开用量等级无效'), { code: 'PLAN_USAGE_LEVEL_INVALID', statusCode: 400 });
@@ -2083,7 +2110,7 @@ export async function adminRoutes(app: FastifyInstance) {
   }
 
   // 新建套餐：与改价同级风险（新档立刻对外可售）→ requireSuper + 审计。
-  app.post<{ Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number; autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: string } }>(
+  app.post<{ Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number; autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: string; promoPrice?: number | null; promoStartsAt?: string | null; promoEndsAt?: string | null; promoLabel?: string | null } }>(
     '/admin/plans',
     async (req, reply) => {
       const actor = actorOf(req);
@@ -2116,7 +2143,15 @@ export async function adminRoutes(app: FastifyInstance) {
       const autoRenewEnabled = b.autoRenewEnabled === true;
       const wechatContractPlanId = typeof b.wechatContractPlanId === 'string' ? b.wechatContractPlanId.trim().slice(0, 32) || null : null;
       const autoRenewMode = 'delay_24h';
-      try { await validatePlanCommercial({ price, planFamilyKey, tierRank, usageLevel, usageLabel, tokenQuotaPerMonth, creditsPerMonth, agentCount, usageNormalPercent, usageNearPercent, autoRenewEnabled, wechatContractPlanId, autoRenewMode }); }
+      // 优惠价（分）：null/省略=不做优惠。价格与生效窗口的合法性统一在 validatePlanCommercial 里判。
+      const promoPrice = typeof b.promoPrice === 'number' && Number.isFinite(b.promoPrice) ? Math.round(b.promoPrice) : null;
+      const promoLabel = typeof b.promoLabel === 'string' ? b.promoLabel.trim().slice(0, 20) || null : null;
+      let promoStartsAt: Date | null; let promoEndsAt: Date | null;
+      try {
+        promoStartsAt = parsePromoAt(b.promoStartsAt, '优惠生效时间');
+        promoEndsAt = parsePromoAt(b.promoEndsAt, '优惠结束时间');
+      } catch (e) { return sendErr(reply, e); }
+      try { await validatePlanCommercial({ price, planFamilyKey, tierRank, usageLevel, usageLabel, tokenQuotaPerMonth, creditsPerMonth, agentCount, usageNormalPercent, usageNearPercent, autoRenewEnabled, wechatContractPlanId, autoRenewMode, promoPrice, promoStartsAt, promoEndsAt }); }
       catch (e) { return sendErr(reply, e); }
       // sort 缺省排到末尾，避免新档默契插到第一个（前台按 sort 展示，第一档还兼作历史默认档语义）。
       const maxSort = (await prisma.plan.aggregate({ _max: { sort: true } }))._max.sort ?? -1;
@@ -2128,19 +2163,20 @@ export async function adminRoutes(app: FastifyInstance) {
           highlighted: b.highlighted === true,
           hidden: b.hidden === true,
           autoRenewEnabled, wechatContractPlanId, autoRenewMode,
+          promoPrice, promoStartsAt, promoEndsAt, promoLabel,
           sort: num(b.sort, 0) ?? maxSort + 1,
         },
       });
       await recordAudit({
         action: 'admin.plan.create',
-        payload: { by: actorName(actor), id: plan.id, name: plan.name, price: plan.price, period: plan.period, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount, hidden: plan.hidden, sort: plan.sort },
+        payload: { by: actorName(actor), id: plan.id, name: plan.name, price: plan.price, period: plan.period, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount, hidden: plan.hidden, sort: plan.sort, promoPrice: plan.promoPrice, promoStartsAt: plan.promoStartsAt?.toISOString() ?? null, promoEndsAt: plan.promoEndsAt?.toISOString() ?? null },
       });
       return reply.code(201).send(adminPlanView(plan));
     },
   );
   // 改价直接影响营收：仅 owner/master（requireSuper，与资金三写同级）；字段白名单 + 数值校验
   //（此前 data: req.body 直透 prisma 属 mass-assignment 隐患）；审计带操作人与改前/改后快照。
-  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number; syncFamilyBenefits?: boolean; autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: string } }>(
+  app.patch<{ Params: { id: string }; Body: { name?: string; price?: number; period?: string; planFamilyKey?: string; tierRank?: number; usageLevel?: string; usageLabel?: string; usageNormalPercent?: number; usageNearPercent?: number; creditsPerMonth?: number; tokenQuotaPerMonth?: number; agentCount?: number; featuresJson?: string[]; highlighted?: boolean; hidden?: boolean; sort?: number; syncFamilyBenefits?: boolean; autoRenewEnabled?: boolean; wechatContractPlanId?: string | null; autoRenewMode?: string; promoPrice?: number | null; promoStartsAt?: string | null; promoEndsAt?: string | null; promoLabel?: string | null } }>(
     '/admin/plans/:id',
     async (req, reply) => {
       const actor = actorOf(req);
@@ -2172,6 +2208,14 @@ export async function adminRoutes(app: FastifyInstance) {
       if (typeof b.autoRenewEnabled === 'boolean') data.autoRenewEnabled = b.autoRenewEnabled;
       if (typeof b.wechatContractPlanId === 'string' || b.wechatContractPlanId === null) data.wechatContractPlanId = b.wechatContractPlanId?.trim().slice(0, 32) || null;
       if (typeof b.autoRenewMode === 'string') data.autoRenewMode = b.autoRenewMode;
+      // 优惠：显式传 null 才是「取消优惠」，不传则保持原样（PATCH 语义）。
+      if (b.promoPrice === null) data.promoPrice = null;
+      else if (typeof b.promoPrice === 'number' && Number.isFinite(b.promoPrice)) data.promoPrice = Math.round(b.promoPrice);
+      if (typeof b.promoLabel === 'string' || b.promoLabel === null) data.promoLabel = b.promoLabel?.trim().slice(0, 20) || null;
+      try {
+        if (b.promoStartsAt !== undefined) data.promoStartsAt = parsePromoAt(b.promoStartsAt, '优惠生效时间');
+        if (b.promoEndsAt !== undefined) data.promoEndsAt = parsePromoAt(b.promoEndsAt, '优惠结束时间');
+      } catch (e) { return sendErr(reply, e); }
       const candidate = { ...before, ...data } as typeof before;
       try {
         await validatePlanCommercial({
@@ -2181,6 +2225,7 @@ export async function adminRoutes(app: FastifyInstance) {
           usageNormalPercent: Number(candidate.usageNormalPercent), usageNearPercent: Number(candidate.usageNearPercent),
           syncFamilyBenefits: b.syncFamilyBenefits === true,
           autoRenewEnabled: Boolean(candidate.autoRenewEnabled), wechatContractPlanId: candidate.wechatContractPlanId, autoRenewMode: candidate.autoRenewMode,
+          promoPrice: candidate.promoPrice, promoStartsAt: candidate.promoStartsAt, promoEndsAt: candidate.promoEndsAt,
         });
       } catch (e) { return sendErr(reply, e); }
       const plan = await prisma.$transaction(async (tx) => {
@@ -2201,8 +2246,8 @@ export async function adminRoutes(app: FastifyInstance) {
         action: 'admin.plan.update',
         payload: {
           by: actorName(actor), id: plan.id, name: plan.name,
-          before: { price: before.price, period: before.period, creditsPerMonth: before.creditsPerMonth, tokenQuotaPerMonth: before.tokenQuotaPerMonth, agentCount: before.agentCount, hidden: before.hidden, sort: before.sort },
-          after: { price: plan.price, period: plan.period, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount, hidden: plan.hidden, sort: plan.sort },
+          before: { price: before.price, period: before.period, creditsPerMonth: before.creditsPerMonth, tokenQuotaPerMonth: before.tokenQuotaPerMonth, agentCount: before.agentCount, hidden: before.hidden, sort: before.sort, promoPrice: before.promoPrice, promoStartsAt: before.promoStartsAt?.toISOString() ?? null, promoEndsAt: before.promoEndsAt?.toISOString() ?? null },
+          after: { price: plan.price, period: plan.period, creditsPerMonth: plan.creditsPerMonth, tokenQuotaPerMonth: plan.tokenQuotaPerMonth, agentCount: plan.agentCount, hidden: plan.hidden, sort: plan.sort, promoPrice: plan.promoPrice, promoStartsAt: plan.promoStartsAt?.toISOString() ?? null, promoEndsAt: plan.promoEndsAt?.toISOString() ?? null },
           syncFamilyBenefits: b.syncFamilyBenefits === true, planFamilyKey: plan.planFamilyKey,
         },
       });

@@ -277,6 +277,12 @@ body {
 .plan-h { display: flex; align-items: baseline; gap: 9px; min-width: 0; flex-wrap: wrap; }
 .plan-h .pn { font: 600 16px/1 var(--serif); }
 .plan-h .pp { margin-left: auto; font: 600 18px/1 var(--serif); color: var(--accent-ink); }
+/* 优惠中的档：现价（.pp）后跟划线挂牌价与折扣角标——运营一眼看到「用户此刻看到的是哪个价、几折」。
+   .pp-was 不能 margin-left:auto，否则会和 .pp 抢右对齐把现价挤到左边。 */
+.plan-h .pp-was { font: 400 12.5px/1 var(--sans); color: var(--ink-3); text-decoration: line-through; }
+.plan-h .pp-off { font: 600 11px/1 var(--sans); color: var(--danger); background: var(--accent-soft); border-radius: 999px; padding: 4px 7px; }
+/* 已配好但还没到生效时间的优惠：用中性色，避免和「正在打折」混淆。 */
+.plan-h .pp-soon { font: 400 11px/1 var(--sans); color: var(--ink-3); border: 1px solid var(--line); border-radius: 999px; padding: 4px 7px; }
 .plan-meta { font-size: 12px; color: var(--ink-2); margin-top: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .plan-edit { margin-top: 13px; height: 36px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--ink-2); font-size: 12.5px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; }
 

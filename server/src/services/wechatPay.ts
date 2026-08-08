@@ -21,6 +21,7 @@ import { sandboxEnabled } from './sandbox.js';
 import { chargeCredits } from './credits.js';
 import { sendWechatSubscribeMessage } from './wechatSubscribe.js';
 import { revokePlanEntitlement } from './planEntitlements.js';
+import { withEffectivePrice } from './planPricing.js';
 
 // 微信支付 API 基址。默认真实商户网关；本地联调可用 WECHAT_PAY_BASE 指向
 // mock 微信支付服务器（scripts/wechat-pay-mock.ts），走完整签名/验签/AEAD 解密链路。
@@ -206,8 +207,11 @@ async function assertOrderRate(tx: Prisma.TransactionClient, userId: string): Pr
 // 也让 plan_not_found/sku_not_found 类卡单可以从快照恢复发放。
 export async function buildOrderSnapshot(args: { planId?: string; skuKey?: string }): Promise<Prisma.InputJsonValue | undefined> {
   if (args.planId) {
-    const p = await prisma.plan.findUnique({ where: { id: args.planId } });
-    if (!p) return undefined;
+    const row = await prisma.plan.findUnique({ where: { id: args.planId } });
+    if (!row) return undefined;
+    // 快照 = 冻结「下单这一刻的成交条件」，所以存的是解析后的成交价（优惠期内即优惠价），不是挂牌价。
+    // 回调入账时 markPaidAndApply 优先读快照，这里存挂牌价就会让权益账本按 ¥39800 记 ¥3980 的单。
+    const p = withEffectivePrice(row);
     return {
       kind: 'plan',
       plan: {
@@ -705,8 +709,9 @@ async function markPaidAndApplyTx(parsed: {
       // D-1 开通来源归因：SKU 发放成功 → 落 ActivationEvent（来源来自下单时随订单存的 attrSource；缺省 catalog）。
       await recordActivation({ tenantId: order.tenantId, userId: order.userId, itemType: 'sku', itemKey: sku.key, source: attrSource, refId: attrRefId }, tx).catch(() => {});
     } else {
+      // 无快照的存量订单才回读套餐：此时只能按「入账这一刻」解析成交价（快照才是准确的下单时条件）。
       const planRow = snapshot?.kind === 'plan' && snapshot.plan ? null : await tx.plan.findUnique({ where: { id: order.planId } });
-      const plan = snapshot?.kind === 'plan' && snapshot.plan ? snapshot.plan : planRow;
+      const plan = snapshot?.kind === 'plan' && snapshot.plan ? snapshot.plan : planRow && withEffectivePrice(planRow);
       if (!plan) return { applied: false, reason: 'plan_not_found' };
       await applyPlanPurchase(
         { id: order.userId, tenantId: order.tenantId },

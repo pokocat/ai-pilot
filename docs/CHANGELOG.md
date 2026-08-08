@@ -6,6 +6,16 @@
 
 ## 变更日志
 
+### 2026-08-08 · 套餐挂牌价/优惠价与生效时间（小程序显示折扣费率） · 影响面：SSOT 契约 + prisma schema（纯加法）+ server 定价读路径 + 运营后台「商品 · 套餐」+ 小程序方案页
+
+运营侧新增三件可配项：**挂牌价**（原 `Plan.price`，语义收敛为标价）、**优惠价** `promoPrice`、**生效时间窗** `promoStartsAt/promoEndsAt`，另加只展示的活动名 `promoLabel`。窗口到点自动切换，不需要人工二次改价：未到生效时间按挂牌价卖（可预约调价），过了结束时间自动回挂牌价。后台列表行直接回显「现价 + 划线挂牌价 + 折扣角标 + 生效状态」，运营不用自己心算用户看到的是几折。
+
+服务端把「此刻该收多少钱」收进 `services/planPricing.ts` 一个出口：`withEffectivePrice()` 把 `price` 换成成交价、把挂牌价挪到 `listPrice`、并算好用户侧折扣对象 `promotion`（含 `discountLabel`「1折」、`savedFen`、`endsAt`）。理由是报价、条款哈希、权益账本快照、委托代扣授权额读的都是同一个 `plan.price`，逐处判断必漏。已接入 `GET /plans`、`/plans/options`、`/plans/:id/quote|order|contract-order|purchase`、`quotePlanChange` 的在册档、`buildOrderSnapshot` 与 `scanAutoRenewals`。**开发期被新用例抓到一处真实资损路径**：订单快照 `buildOrderSnapshot` 原样存挂牌价，回调入账优先读快照，导致 `PlanEntitlement.listPrice` 记成 ¥39800——按 ¥3980 买的档在后续升级里能抵掉 ¥39800；已改为快照冻结下单时的成交价。
+
+护栏：`1 ≤ promoPrice < price` 且只允许配在正价档（`price>0`）上，写入口 400 拦截、读出口再兜一次底。这保证生效价恒为正，`price<=0`（免费层不设到期）与 `price<0`（面议档禁止自助购买、档位置顶）的语义不会被优惠翻转，调用方无需为优惠新增分支；`withEffectivePrice` 同时固化 `tierRank`，避免空 tierRank 的存量档因优惠掉档位、把升级判成降档。已开自动续费的档配优惠时，优惠结束后 `scanAutoRenewals` 发现成交价 ≠ 授权金额会转 `cancel_pending` 停扣并等用户重新确认，不按挂牌价静默续（用户侧确认页也写明这一点）。
+
+折扣率只有服务端一份实现（中式「折」，一位小数，深折下限 0.1 折、浅折写「限时优惠」不写「10折」）；小程序 `promotionBadge/promotionNote` 与后台列表都只做文案拼装，不按价格自己算——避免「显示 1 折、下单扣原价」。小程序方案页在游客列表、登录后列表与确认支付弹层三处展示现价 + 划线原价 + 折扣角标 + 立省/截止日。测试：新增 `server/test/planPromotion.test.ts`（15 例，覆盖折扣率算法、生效窗左闭右开、报价/订单/账本三处金额一致、后台护栏与审计）与 `app` 两条纯函数用例。部署带 `cd server && npm run db:push`（4 个可空列，纯加法）。
+
 ### 2026-08-08 · 问策底栏改用 Lucide 双对话气泡 · 影响面：原生微信/H5 底栏
 
 撤销军师帽图标及其全部自绘 SVG、构建分支和尺寸补偿，问策改用固定版本 `lucide-static@1.27.0` 的 `messages-square` 双对话气泡，直接表达会话、交谈与持续问策。原生微信由构建器从 Lucide 官方包生成全部本命色资源，H5 同步使用该官方图标的原始路径；显示尺寸回归通用 22px，与军情、军令和老板保持同一线宽与图标体系。静态回归同时禁止自绘帽子重新进入源码或构建产物。

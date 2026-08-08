@@ -1,18 +1,24 @@
 import { createHash } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
-import type { PlanQuote, PlanRelation } from '../../../shared/contracts';
+import type { PlanPromotion, PlanQuote, PlanRelation } from '../../../shared/contracts';
 import { prisma } from '../db.js';
 import { now } from './clock.js';
 import { computeExpiry, daysRemaining, isExpired, renewExpiry } from './planTime.js';
 import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, type PlanRuleFields } from './planRules.js';
+import { withEffectivePrice, type PlanPricingFields } from './planPricing.js';
 
-export interface CommercialPlan extends PlanRuleFields {
+/** 传进来的 plan **必须已过 withEffectivePrice()**：这里的 price 一律按「此刻的成交价」参与
+ *  报价、条款哈希与账本快照。挂牌价不进钱的链路，否则优惠期会按原价折抵/记账。 */
+export interface CommercialPlan extends PlanRuleFields, PlanPricingFields {
   name: string;
   creditsPerMonth: number;
   tokenQuotaPerMonth: number;
   agentCount: number;
   featuresJson: unknown;
   highlighted: boolean;
+  /** withEffectivePrice() 算好的折扣展示对象，原样透传给用户侧——**不要在下游重算**：
+   *  这里的 price 已是成交价，再算一次会判成「无优惠」。 */
+  promotion?: PlanPromotion | null;
 }
 
 function stable(value: unknown): string {
@@ -39,7 +45,7 @@ export function commercialTerms(plan: CommercialPlan) {
 }
 
 function publicPlan(plan: CommercialPlan) {
-  return { ...commercialTerms(plan), highlighted: plan.highlighted, autoRenewAvailable: false };
+  return { ...commercialTerms(plan), highlighted: plan.highlighted, autoRenewAvailable: false, promotion: plan.promotion ?? null };
 }
 
 function relationOf(current: CommercialPlan | null, target: CommercialPlan, active: boolean): PlanRelation {
@@ -72,7 +78,8 @@ export async function quotePlanChange(userId: string, target: CommercialPlan): P
     where: { id: userId },
     select: { planActivatedAt: true, planExpiresAt: true, plan: true },
   });
-  const current = user?.plan ?? null;
+  // 在册档同样按此刻的成交价解析：升级折抵、月付转年付的差价都要用同一把尺子。
+  const current = user?.plan ? withEffectivePrice(user.plan, at) : null;
   const active = !!current && !isExpired(user?.planExpiresAt, at);
   const relation = relationOf(current, target, active);
   if (relation === 'downgrade' || relation === 'enterprise') {
@@ -92,6 +99,8 @@ export async function quotePlanChange(userId: string, target: CommercialPlan): P
       sourceVersion = rows.map((row) => ({ id: row.id, updatedAt: row.updatedAt.toISOString(), available: row.listPrice - row.creditedAmount }));
     } else {
       // 存量用户尚无账本时只在迁移窗口回退一次旧口径；首笔新订单落账后不再使用价格猜测。
+      // （这条路径按「当前成交价」猜历史付款额，只对账本上线前的存量用户生效；带优惠的档
+      //  一定是新建档、每笔购买都有账本行，走不到这里。）
       const days = daysRemaining(user?.planExpiresAt, at) ?? 0;
       const nominal = current.period === 'year' ? 365 : 30;
       remainingValue = Math.min(current.price, Math.round((current.price / nominal) * days));
@@ -157,6 +166,8 @@ export async function recordPlanEntitlement(
     tenantId: args.tenantId, userId: args.userId, planId: args.plan.id,
     sourceOrderId: args.order?.id, sourceOutTradeNo: args.order?.outTradeNo,
     planFamilyKey: planFamilyKey(args.plan), tierRank: planTierRank(args.plan), period: args.plan.period,
+    // listPrice = 购买时的**成交价**快照（优惠期内就是优惠价），不是挂牌价：
+    // ledgerRemainingValue 按它折算升级抵扣，写挂牌价会让 ¥3980 买的档抵掉 ¥39800。
     listPrice: args.plan.price, paidAmount: args.order?.amount ?? 0,
     startsAt: args.startsAt, expiresAt: args.expiresAt, anchorAt: args.anchorAt,
     termsHash,

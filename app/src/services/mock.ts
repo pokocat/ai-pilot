@@ -59,6 +59,7 @@ const PLANS: Plan[] = [
     featuresJson: ['日常经营判断', '基础顾问阵容', '知识库与项目管理'],
     highlighted: false,
     autoRenewAvailable: false,
+    promotion: null,
   },
   {
     id: 'mock-plan-decision-monthly',
@@ -72,6 +73,7 @@ const PLANS: Plan[] = [
     featuresJson: ['持续经营分析', '更长的连续研判', '完整顾问阵容', '方案库与导出'],
     highlighted: false,
     autoRenewAvailable: false,
+    promotion: null,
   },
   {
     id: 'mock-plan-decision',
@@ -85,6 +87,8 @@ const PLANS: Plan[] = [
     featuresJson: ['持续经营分析', '更长的连续研判', '完整顾问阵容', '方案库与导出'],
     highlighted: true,
     autoRenewAvailable: false,
+    // 离线夹具：留一档带折扣的，方便 H5 预览折扣角标与划线价的排版。真实折扣只由运营后台配。
+    promotion: { listPrice: 396000, price: 198000, savedFen: 198000, discountRate: 5, discountLabel: '5折', label: '首发价', endsAt: null },
   },
   {
     id: 'mock-plan-enterprise',
@@ -98,6 +102,7 @@ const PLANS: Plan[] = [
     featuresJson: ['私有化部署', '接入内部系统', '专属助手配置', '数据不出内网'],
     highlighted: false,
     autoRenewAvailable: false,
+    promotion: null,
   },
 ];
 

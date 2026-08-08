@@ -66,7 +66,7 @@ export type {
   ReportItem, ReportDetail, ReportVersionItem, ReportVersionContent, ReportDiff, SectionDiff,
   KnowledgeItemT, KnowledgeHit, SummarizeResult, MessageRef, RefKind,
   KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow, AnalyzeResult,
-  Plan, PlanOptionsResult, PlanOption, PlanQuote, PlanRelation, PlanAction, PublicUsageView, UsageLevel, UsageStatus,
+  Plan, PlanOptionsResult, PlanOption, PlanQuote, PlanRelation, PlanAction, PlanPromotion, PublicUsageView, UsageLevel, UsageStatus,
   PlanPurchaseResult, AgentPurchaseResult, AgentBilling,
   ClientUnderstanding, ClientUnderstandingSection, UnderstandingMaturity, AliasSuggestionResult,
   TokenQuotaView, MyCreditItem, MyCreditsView,

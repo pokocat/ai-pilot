@@ -8,12 +8,16 @@ import { isExpired } from '../services/planTime.js';
 import { now } from '../services/clock.js';
 import { parseAttribution } from '../services/activation.js';
 import { recordAudit } from '../services/audit.js';
-import type { Plan as PlanView, PlanAction, PlanFunnelEvent, PlanOption, PlanOptionsResult, PlanPurchaseResult, PlanRelation, WechatOrderResult } from '../../../shared/contracts';
+import type { Plan as PlanView, PlanAction, PlanFunnelEvent, PlanOption, PlanOptionsResult, PlanPromotion, PlanPurchaseResult, PlanRelation, WechatOrderResult } from '../../../shared/contracts';
 import { getPlanStatus, getQuotaState } from '../services/tokenQuota.js';
 import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, usageView } from '../services/planRules.js';
 import { commercialTerms, hashTerms, quotePlanChange } from '../services/planEntitlements.js';
+import { withEffectivePrice } from '../services/planPricing.js';
 import { cancelSubscription, createContractOrder, papayConfigured, subscriptionView } from '../services/wechatPapay.js';
 
+// 本文件里的 plan 一律先过 withEffectivePrice()：price 即「此刻的成交价」（优惠生效时就是优惠价），
+// 挂牌价只经 promotion.listPrice 出现在展示层。约束保证生效价恒为正，故下面的
+// price>0 / price<0 / price<=0 分支语义与改造前完全一致。
 function publicPlan(plan: {
   id: string;
   name: string;
@@ -31,11 +35,13 @@ function publicPlan(plan: {
   autoRenewEnabled?: boolean;
   wechatContractPlanId?: string | null;
   autoRenewMode?: string;
+  promotion?: PlanPromotion | null;
 }): PlanView {
   return {
     id: plan.id,
     name: plan.name,
     price: plan.price,
+    promotion: plan.promotion ?? null,
     period: plan.period,
     creditsPerMonth: plan.creditsPerMonth,
     tokenQuotaPerMonth: plan.tokenQuotaPerMonth,
@@ -83,14 +89,14 @@ export async function planRoutes(app: FastifyInstance) {
     const user = await resolveUserOptional(req.headers['x-user-id'] as string | undefined);
     const where = canSeeHiddenPlans(user) ? {} : { hidden: false };
     const plans = await prisma.plan.findMany({ where, orderBy: { sort: 'asc' } });
-    return plans.map(publicPlan);
+    return plans.map((plan) => publicPlan(withEffectivePrice(plan)));
   });
 
   // 用户态方案目录：升降档关系和动作只由服务端计算，客户端不复制价格/周期启发式。
   app.get('/plans/options', async (req): Promise<PlanOptionsResult> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const visibleWhere = canSeeHiddenPlans(user) ? {} : { hidden: false };
-    const [plans, state, quota, pending, status, subscription] = await Promise.all([
+    const [rawPlans, state, quota, pending, status, subscription] = await Promise.all([
       prisma.plan.findMany({ where: visibleWhere, orderBy: { sort: 'asc' } }),
       prisma.user.findUnique({ where: { id: user.id }, select: { planId: true, planExpiresAt: true, plan: true } }),
       getQuotaState(user.id),
@@ -98,7 +104,8 @@ export async function planRoutes(app: FastifyInstance) {
       getPlanStatus(user.id),
       prisma.subscriptionContract.findFirst({ where: { userId: user.id, status: { in: ['pending', 'active', 'cancel_pending'] } }, orderBy: { createdAt: 'desc' } }),
     ]);
-    const current = state?.plan ?? null;
+    const plans = rawPlans.map((plan) => withEffectivePrice(plan));
+    const current = state?.plan ? withEffectivePrice(state.plan) : null;
     const active = !!current && !isExpired(state?.planExpiresAt, now());
     const pendingByPlan = new Map<string, (typeof pending)[number]>();
     for (const order of pending) if (order.planId && !pendingByPlan.has(order.planId)) pendingByPlan.set(order.planId, order);
@@ -164,8 +171,11 @@ export async function planRoutes(app: FastifyInstance) {
   // 官方「支付中签约」：首次付款与自动续费授权合并，但微信支付页的自动续费开关由用户主动选择，不能默认开启。
   app.post<{ Params: { id: string }; Body: { clientRequestId?: string; quoteFingerprint?: string; expectedChargeAmount?: number; source?: string; refId?: string } }>('/plans/:id/contract-order', async (req, reply): Promise<WechatOrderResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
-    if (!plan || (plan.hidden && !canSeeHiddenPlans(user))) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    const row = await prisma.plan.findUnique({ where: { id: req.params.id } });
+    if (!row || (row.hidden && !canSeeHiddenPlans(user))) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    // 签约金额按签约时的成交价固化（renewalAmount）；优惠到期后 scanAutoRenewals 的对账会发现
+    // 生效价与授权金额不符而停扣，等用户重新确认——不允许用旧授权静默扣新条款。
+    const plan = withEffectivePrice(row);
     if (!papayConfigured() || !plan.autoRenewEnabled || !plan.wechatContractPlanId) return reply.code(501).send({ error: '该方案自动续费尚未开放', code: 'PAPAY_NOT_CONFIGURED' });
     if (plan.price <= 0) return reply.code(400).send({ error: '该方案不支持自动续费', code: 'PLAN_AUTO_RENEW_UNAVAILABLE' });
     const openid = resolvePayerOpenid(user);
@@ -204,8 +214,9 @@ export async function planRoutes(app: FastifyInstance) {
 
   app.post<{ Params: { id: string } }>('/plans/:id/quote', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
-    if (!plan || (plan.hidden && !canSeeHiddenPlans(user))) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    const row = await prisma.plan.findUnique({ where: { id: req.params.id } });
+    if (!row || (row.hidden && !canSeeHiddenPlans(user))) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    const plan = withEffectivePrice(row);
     try {
       const quote = await quotePlanChange(user.id, plan);
       return { ...quote, currentPlan: quote.currentPlan ? { ...quote.currentPlan, autoRenewAvailable: false } : null, targetPlan: publicPlan(plan) };
@@ -219,8 +230,9 @@ export async function planRoutes(app: FastifyInstance) {
   // 演示购买：直接发放权益（不经支付）。仅免费套餐 + 演示环境可用；付费套餐必须走支付。
   app.post<{ Params: { id: string } }>('/plans/:id/purchase', async (req, reply): Promise<PlanPurchaseResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
-    if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    const row = await prisma.plan.findUnique({ where: { id: req.params.id } });
+    if (!row) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    const plan = withEffectivePrice(row);
     // 隐藏档对非白名单等同不存在（同 404，不泄露存在性）。
     if (plan.hidden && !canSeeHiddenPlans(user)) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
     // 面议档（price<0，企业版·私有化：不限量点数+不限量 token+永不过期）绝不自助发放——
@@ -246,8 +258,10 @@ export async function planRoutes(app: FastifyInstance) {
   // P2：接受 source/refId 归因（与 SKU 下单同口径），回调发放时落 ActivationEvent（itemType='plan'）。
   app.post<{ Params: { id: string }; Body: { openid?: string; source?: string; refId?: string; clientRequestId?: string; quoteFingerprint?: string; expectedChargeAmount?: number } }>('/plans/:id/order', async (req, reply): Promise<WechatOrderResult | void> => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    const plan = await prisma.plan.findUnique({ where: { id: req.params.id } });
-    if (!plan) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    const row = await prisma.plan.findUnique({ where: { id: req.params.id } });
+    if (!row) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
+    // 下单金额取 quote.chargeAmount，而 quote 是拿这里解析出的成交价算的 —— 挂牌价不参与扣款。
+    const plan = withEffectivePrice(row);
     // 隐藏档对非白名单等同不存在（同 404，不泄露存在性）。
     if (plan.hidden && !canSeeHiddenPlans(user)) return reply.code(404).send({ error: '套餐不存在', code: 'PLAN_NOT_FOUND' });
     // PAY_MOCK_SUCCESS 一并放行：它建的是**真实 PaymentOrder**（快照/金额/归因/频控/关旧单全走），

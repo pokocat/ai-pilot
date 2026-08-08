@@ -5,6 +5,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import type { Plan, Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { buildOrderSnapshot, genOutTradeNo, markPaidAndApply, orderPayable, orderPayableUntil } from './wechatPay.js';
+import { effectivePrice } from './planPricing.js';
 
 const HTTP_TIMEOUT_MS = 5_000;
 const DELAY_24H_MS = 24 * 3600_000;
@@ -327,7 +328,9 @@ export async function scanAutoRenewals(limit = 100): Promise<{ scanned: number; 
     try {
       const [plan, user] = await Promise.all([prisma.plan.findUnique({ where: { id: contract.planId } }), prisma.user.findUnique({ where: { id: contract.userId }, select: { planId: true, planExpiresAt: true } })]);
       // 改价、换档、关闭自动续费均不允许用旧授权静默扣新条款；停扣并等待用户重新选择。
-      if (!plan || !user || user.planId !== plan.id || !plan.autoRenewEnabled || plan.price !== contract.renewalAmount || plan.wechatContractPlanId !== contract.wechatPlanId) {
+      // 「改价」含**优惠开始/结束**：比的是此刻的成交价（effectivePrice），不是挂牌价——
+      // 否则优惠一到期就会按签约时的优惠价继续扣，或反过来在优惠期里按挂牌价扣。
+      if (!plan || !user || user.planId !== plan.id || !plan.autoRenewEnabled || effectivePrice(plan) !== contract.renewalAmount || plan.wechatContractPlanId !== contract.wechatPlanId) {
         await prisma.subscriptionContract.update({ where: { id: contract.id }, data: { status: 'cancel_pending', nextBillingAt: null } });
         failed += 1; continue;
       }

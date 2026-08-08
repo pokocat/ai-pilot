@@ -30,6 +30,13 @@
 .option-row.disabled { opacity: .72; }
 .option-name { color: var(--ink); font: 600 18px/1.2 var(--serif); }
 .option-price { color: var(--ink); font-size: 15px; font-weight: 600; }
+/* 优惠中的价格区：现价在前、划线挂牌价在后（基线对齐，别让删除线把两个价并成一坨） */
+.option-price-box { display: flex; align-items: baseline; gap: 6px; }
+.option-price-was { color: var(--ink-3); font-size: 12px; text-decoration: line-through; }
+.promo-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.promo-pill { padding: 3px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-ink); font-size: 11px; font-weight: 600; }
+.promo-note { color: var(--ink-3); font-size: 11px; }
+.quote-was { text-decoration: line-through; }
 .feature-list { margin-top: 13px; }
 .option-expiry { display: block; margin-top: 7px; color: var(--warn); font-size: 11px; }
 .feature-list > view { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--ink-2); font-size: 12px; }

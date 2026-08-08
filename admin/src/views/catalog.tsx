@@ -17,7 +17,23 @@ const PLAN_BLANK = {
   usageNormalPercent: 50, usageNearPercent: 80,
   creditsPerMonth: 0, tokenQuotaPerMonth: 0, agentCount: 0, features: '', highlighted: false, hidden: false, sort: 0,
   autoRenewEnabled: false, wechatContractPlanId: '',
+  // 优惠：挂牌价（priceYuan）之外的「实际价 + 生效时间」。promoYuan 留空 = 不做优惠、按挂牌价卖。
+  promoYuan: '', promoStartsAt: '', promoEndsAt: '', promoLabel: '',
 };
+
+// datetime-local 用**本机时区**的 'YYYY-MM-DDTHH:mm'，库里存 UTC；两头各转一次，
+// 运营填的「9 月 1 日 0 点」就是自己时区的 0 点，不会因为直接塞 ISO 串而整体偏 8 小时。
+function toLocalInput(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromLocalInput(value: string): string | null {
+  if (!value.trim()) return null;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
 
 export function PlansView({ toast }: { toast: (m: string) => void }) {
 
@@ -29,11 +45,15 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
   const list = res.data ?? [];
   const load = () => res.reload();
   const set = (patch: Partial<typeof PLAN_BLANK>) => setForm((f) => ({ ...f, ...patch }));
-  const priceLabel = (p: AdminPlan) => p.price < 0 ? '面议' : p.price === 0 ? '¥0' : `¥${(p.price / 100).toLocaleString()}${p.period === 'year' ? '/年' : '/月'}`;
+  const yuan = (fen: number) => `¥${(fen / 100).toLocaleString()}`;
+  // 列表展示的是**用户此刻实际看到的价**（effectivePrice），不是挂牌价——运营核价时要的就是这个。
+  const priceLabel = (p: AdminPlan) => p.price < 0 ? '面议' : p.effectivePrice === 0 ? '¥0' : `${yuan(p.effectivePrice)}${p.period === 'year' ? '/年' : '/月'}`;
   const startEdit = (p: AdminPlan) => {
     setAdding(false);
     setEditId(p.id);
     setForm({
+      promoYuan: p.promoPrice === null ? '' : String(p.promoPrice / 100),
+      promoStartsAt: toLocalInput(p.promoStartsAt), promoEndsAt: toLocalInput(p.promoEndsAt), promoLabel: p.promoLabel ?? '',
       name: p.name, priceYuan: p.price < 0 ? -1 : p.price / 100, period: p.period === 'year' ? 'year' : 'month',
       planFamilyKey: p.planFamilyKey, tierRank: p.tierRank, usageLevel: p.usageLevel, usageLabel: p.usageLabel,
       usageNormalPercent: p.usageNormalPercent, usageNearPercent: p.usageNearPercent,
@@ -46,6 +66,11 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
   const payload = () => ({
     name: form.name,
     price: form.priceYuan < 0 ? -1 : Math.round(form.priceYuan * 100),
+    // 优惠价留空 = 显式取消优惠（服务端把 null 当「清空」，不传才是「保持原样」）。
+    promoPrice: form.promoYuan.trim() ? Math.round(Number(form.promoYuan) * 100) : null,
+    promoStartsAt: fromLocalInput(form.promoStartsAt),
+    promoEndsAt: fromLocalInput(form.promoEndsAt),
+    promoLabel: form.promoLabel.trim() || null,
     period: form.period,
     planFamilyKey: form.planFamilyKey.trim(), tierRank: form.tierRank,
     usageLevel: form.usageLevel, usageLabel: form.usageLabel.trim(),
@@ -90,7 +115,14 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
   const fields = (
     <>
       <div className="ai-field"><div className="ai-fl">名称</div><input className="ai-input" value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="如 入门版" /></div>
-      <div className="ai-field"><div className="ai-fl">价格（元，-1=面议）</div><NumInput className="ai-input" value={form.priceYuan} onChange={(priceYuan) => set({ priceYuan })} /></div>
+      <div className="ai-field"><div className="ai-fl">挂牌价（元，-1=面议）</div><NumInput className="ai-input" value={form.priceYuan} onChange={(priceYuan) => set({ priceYuan })} /></div>
+      <div className="ai-field"><div className="ai-fl">优惠价（元，留空=按挂牌价售卖）</div><input className="ai-input" inputMode="decimal" value={form.promoYuan} onChange={(e) => set({ promoYuan: e.target.value })} placeholder={form.priceYuan > 0 ? `低于 ${form.priceYuan}，如 ${Math.round(form.priceYuan / 10)}` : '仅正价套餐可配'} /></div>
+      <div className="ai-field"><div className="ai-fl">优惠生效时间（留空=立即生效，本机时区）</div><input className="ai-input" type="datetime-local" value={form.promoStartsAt} onChange={(e) => set({ promoStartsAt: e.target.value })} /></div>
+      <div className="ai-field"><div className="ai-fl">优惠结束时间（留空=长期有效；到点自动回挂牌价，无需人工操作）</div><input className="ai-input" type="datetime-local" value={form.promoEndsAt} onChange={(e) => set({ promoEndsAt: e.target.value })} /></div>
+      <div className="ai-field"><div className="ai-fl">活动名（小程序折扣角标上显示，如「首发价」）</div><input className="ai-input" value={form.promoLabel} onChange={(e) => set({ promoLabel: e.target.value })} placeholder="留空则只显示折扣率" /></div>
+      {/* 折扣率不在这里算：它是用户侧口径，只有服务端一份实现（保存后这一档的列表行会回显真实折扣与生效状态）。 */}
+      {form.promoYuan.trim() && form.autoRenewEnabled
+        && <div className="ai-field"><div className="ai-fl">注意：本档已开自动续费——优惠结束后，代扣会自动停扣并等用户重新确认，不会按挂牌价静默续。</div></div>}
       <div className="ai-field">
         <div className="ai-fl">计费周期（参与到期日推算与升级折算）</div>
         <select className="ai-input" value={form.period} onChange={(e) => set({ period: e.target.value === 'year' ? 'year' : 'month' })}>
@@ -154,8 +186,12 @@ export function PlansView({ toast }: { toast: (m: string) => void }) {
               {p.hidden && <span className="tag">已隐藏</span>}
               {p.autoRenewEnabled && <span className="tag">{p.autoRenewAvailable ? '自动续费可用' : '自动续费待配置'}</span>}
               <span className="pp">{priceLabel(p)}</span>
+              {p.promotion && <span className="pp-was">{yuan(p.promotion.listPrice)}</span>}
+              {p.promotion && <span className="pp-off">{p.promotion.label ? `${p.promotion.label} · ${p.promotion.discountLabel}` : p.promotion.discountLabel}</span>}
+              {!p.promoActive && p.promoPrice !== null && <span className="pp-soon">优惠待生效 {yuan(p.promoPrice)}</span>}
             </div>
             <div className="plan-meta">{p.usageLabel} · 档位 {p.tierRank} · {p.planFamilyKey} · {p.creditsPerMonth < 0 ? '不限量权益点' : `${p.creditsPerMonth} 点/月`} · 含 {p.agentCount} 智能体 · {p.featuresJson.join(' · ')}</div>
+            {p.promoPrice !== null && <div className="plan-meta">优惠：{p.promoActive ? '生效中' : '未生效'} · {p.promoStartsAt ? `${new Date(p.promoStartsAt).toLocaleString()} 起` : '立即生效'} · {p.promoEndsAt ? `${new Date(p.promoEndsAt).toLocaleString()} 止` : '长期有效'}</div>}
             <button className="plan-edit" onClick={() => startEdit(p)}><Icon name="pen" size={13} /> 编辑套餐</button>
           </div>
         ))}

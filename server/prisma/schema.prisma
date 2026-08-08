@@ -794,26 +794,32 @@ model SurveyQuestion {
 
 /// 套餐与算力
 model Plan {
-  id                   String  @id @default(cuid())
+  id                   String    @id @default(cuid())
   name                 String
-  price                Int // 分
+  price                Int // 分 —— **挂牌价（标价/原价）**。优惠生效期内用户实付的是 promoPrice，
+  // 服务端一律经 services/planPricing.ts 的 withEffectivePrice() 解析后再进入报价/下单/账本，不要直接读这一列算钱。
+  promoPrice           Int? // 优惠价（分）：生效窗口内的实际成交价。约束 1 ≤ promoPrice < price，
+  // 且只允许配在正价档（price>0）上——否则 price<=0 的「免费/面议」语义会被优惠翻转（免费层不设到期、面议档禁止自助购买）。
+  promoStartsAt        DateTime? // 优惠生效时间；null=立即生效（可预配未来生效的调价）
+  promoEndsAt          DateTime? // 优惠结束时间；null=长期有效（到点自动回挂牌价，无需人工操作）
+  promoLabel           String? // 活动名（如「首发价」），仅展示
   period               String // month | year
   planFamilyKey        String? // 同一方案的月付/年付稳定分组；迁移期可空，服务层兼容回退 id
   tierRank             Int? // 商业档位排序；只用于升降档/折算，不与公开用量等级混用
   usageLevel           String? // standard | 5x | 20x | custom（对外用量等级）
   usageLabel           String? // 用户侧展示，如「标准用量」「扩展用量」「专属用量」
-  usageNormalPercent   Int     @default(50) // 用户侧「正常使用」阈值上界（整数百分比）
-  usageNearPercent     Int     @default(80) // 用户侧「接近上限」阈值起点（整数百分比）
+  usageNormalPercent   Int       @default(50) // 用户侧「正常使用」阈值上界（整数百分比）
+  usageNearPercent     Int       @default(80) // 用户侧「接近上限」阈值起点（整数百分比）
   creditsPerMonth      Int // 钻石(点)：每月赠送，用于一次性解锁 + 图片按张
-  tokenQuotaPerMonth   Int     @default(0) // 月度 token 额度（文本产出消耗池），-1=不限量
+  tokenQuotaPerMonth   Int       @default(0) // 月度 token 额度（文本产出消耗池），-1=不限量
   agentCount           Int
   featuresJson         Json
-  highlighted          Boolean @default(false)
-  hidden               Boolean @default(false) // 隐藏档：/plans 列表不返回、非白名单不可购（TEST_PLAN_PHONES）——生产支付链路验证专用
-  autoRenewEnabled     Boolean @default(false) // 是否允许用户选择微信委托代扣自动续费；还需全局 V2 配置与模板 id 齐全
+  highlighted          Boolean   @default(false)
+  hidden               Boolean   @default(false) // 隐藏档：/plans 列表不返回、非白名单不可购（TEST_PLAN_PHONES）——生产支付链路验证专用
+  autoRenewEnabled     Boolean   @default(false) // 是否允许用户选择微信委托代扣自动续费；还需全局 V2 配置与模板 id 齐全
   wechatContractPlanId String? // 微信支付委托代扣模板 ID（商户平台审核后填写）
-  autoRenewMode        String  @default("delay_24h") // 当前只支持官方默认「通知后 24h 扣费」
-  sort                 Int     @default(0)
+  autoRenewMode        String    @default("delay_24h") // 当前只支持官方默认「通知后 24h 扣费」
+  sort                 Int       @default(0)
 
   users User[]
 
