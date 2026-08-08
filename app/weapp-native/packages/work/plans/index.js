@@ -33,6 +33,27 @@ function isPlanExpired(value) {
   return Number.isFinite(expiresAt) && expiresAt <= Date.now();
 }
 
+/**
+ * 折扣展示。**折扣率、立省金额、生效时间窗全部由服务端算好**（Plan.promotion）——
+ * 端上再算一遍迟早出现「显示 1 折、下单扣原价」。这里只做文案拼装，且必须在 setData 前算完：
+ * WXML 不能调函数，漏一个字段就只能在模板里堆三目运算，下次改文案必漏。
+ * 没在优惠期返回 null，卡片上那几行连同角标一起不渲染。
+ */
+function promoView(plan) {
+  const promo = plan && plan.promotion;
+  if (!promo) return null;
+  return {
+    discountLabel: promo.discountLabel,
+    // 运营没填活动名时给中性兜底，避免角标旁边空一块
+    kickerText: String(promo.label || '').trim() || '限时优惠',
+    listPriceText: money(promo.listPrice),
+    saveText: `立省 ${money(promo.savedFen)}`,
+    savedAmountText: money(promo.savedFen),
+    // 长期有效不写「长期有效」，那是噪音不是紧迫感
+    deadlineText: promo.endsAt ? `优惠 ${dateLabel(promo.endsAt)} 截止` : '',
+  };
+}
+
 function normalizeOption(option, currentId) {
   const plan = option.plan || option;
   const action = option.action || (!currentId ? 'buy' : plan.id === currentId ? 'renew' : 'upgrade');
@@ -44,7 +65,10 @@ function normalizeOption(option, currentId) {
   return Object.assign({}, option, {
     plan,
     pendingOrder,
+    // priceText 已经是「此刻的成交价」（服务端 withEffectivePrice 解析过），挂牌价只在 promo.listPriceText 里
     priceText: money(plan.price),
+    priceUnitText: Number(plan.price) < 0 ? '' : `/ ${plan.period === 'year' ? '年' : '月'}`,
+    promo: promoView(plan),
     periodText: periodLabel(plan.period),
     pendingText: pendingOrder && pendingOrder.payableUntil ? `可在 ${dateTimeLabel(pendingOrder.payableUntil)} 前继续支付` : '',
     expired: plan.id === currentId && isPlanExpired(option.expiresAt),
@@ -179,6 +203,7 @@ Page({
       quote.remainingValueText = money(quote.remainingValue);
       quote.chargeText = money(quote.chargeAmount);
       quote.periodText = periodLabel(quote.targetPlan.period);
+      quote.promo = promoView(quote.targetPlan);
       quote.currentName = quote.currentPlan && quote.currentPlan.name ? quote.currentPlan.name : '未开通';
       this._intent = clientRequestId();
       this.setData({ quote, purchaseMode: 'manual' });

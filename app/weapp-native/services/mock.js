@@ -208,7 +208,13 @@ function setList(name, value) { wx.setStorageSync(listKey(name), value); }
 
 const MOCK_PLANS = [
   { id: 'mock-month', name: '决策版', period: 'month', price: 19900, usageLabel: '标准用量', featuresJson: ['每日问策', '方案与资料库', '执行复盘'], autoRenewAvailable: false },
-  { id: 'mock-year', name: '决策版', period: 'year', price: 199900, usageLabel: '标准用量', featuresJson: ['全年使用', '方案与资料库', '执行复盘'], autoRenewAvailable: false },
+  // 留一档带折扣的夹具，本地 mock 包就能走查角标/划线价/立省的排版。真实折扣只由运营后台配，
+  // promotion 由服务端算好下发（listPrice/discountLabel/savedFen/endsAt），端上不重算。
+  {
+    id: 'mock-year', name: '决策版', period: 'year', price: 199900, usageLabel: '标准用量',
+    featuresJson: ['全年使用', '方案与资料库', '执行复盘'], autoRenewAvailable: false,
+    promotion: { listPrice: 399800, price: 199900, savedFen: 199900, discountRate: 5, discountLabel: '5折', label: '首发价', endsAt: null },
+  },
 ];
 function currentMockPlan() {
   const id = wx.getStorageSync(storageKey('plan'));

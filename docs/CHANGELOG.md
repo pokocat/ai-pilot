@@ -6,6 +6,21 @@
 
 ## 变更日志
 
+### 2026-08-08 · 折扣展示移植到原生小程序端 · 影响面：app/weapp-native 方案页
+
+去 Taro 迁移后微信端从 `app/weapp-native/` 出包，而折扣 UI 此前只写在 Taro 侧（现为 H5 专用），
+线上小程序拿到服务端的 `promotion` 字段却整个忽略——用户只看得到 ¥3,980，看不到划线原价、
+折扣角标与立省。本次把同一套版式落到原生页：`normalizeOption` 增加 `promo`（`promoView()` 预计算
+`discountLabel/kickerText/listPriceText/saveText/deadlineText`）与 `priceUnitText`，报价对象补 `quote.promo`；
+WXML 用大号现价 + 周期单位替换标题行右侧的小字价，优惠档叠加右上角实心折扣角标、活动名 kicker、
+划线原价、立省胶囊、可选截止日，并整卡换本命色描边 + 顶部晕开底；确认弹层补「挂牌价 → 活动名·折扣 -¥X」
+两行并给折扣行强调色，自动续费说明补一句「优惠结束后不会按原价自动扣款」。
+
+关键约束与 H5 一致且新增静态用例钉住（`app/scripts/native-weapp.test.mjs`）：折扣率与立省金额只用服务端
+下发的 `promotion` 字段，端上不得相减或相除；**WXML 不能调函数**，所有文案必须在 `setData` 前算完，
+模板里不得出现价格算术；促销色只用 `--accent*` token（本命色 6 套主题，写死红会在其中 5 套里显脏）。
+原生 mock 增加一档带 `promotion` 的夹具，本地 mock 包即可走查排版。
+
 ### 2026-08-08 · 套餐挂牌价/优惠价与生效时间（小程序显示折扣费率） · 影响面：SSOT 契约 + prisma schema（纯加法）+ server 定价读路径 + 运营后台「商品 · 套餐」+ 小程序方案页
 
 运营侧新增三件可配项：**挂牌价**（原 `Plan.price`，语义收敛为标价）、**优惠价** `promoPrice`、**生效时间窗** `promoStartsAt/promoEndsAt`，另加只展示的活动名 `promoLabel`。窗口到点自动切换，不需要人工二次改价：未到生效时间按挂牌价卖（可预约调价），过了结束时间自动回挂牌价。后台列表行直接回显「现价 + 划线挂牌价 + 折扣角标 + 生效状态」，运营不用自己心算用户看到的是几折。

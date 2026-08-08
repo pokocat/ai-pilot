@@ -46,15 +46,25 @@
       <view wx:if="{{loading}}" class="plans-state">正在读取方案…</view>
       <view wx:elif="{{!options.length}}" class="plans-state">暂无这一周期的方案</view>
       <view wx:else class="plan-list">
-        <view wx:for="{{options}}" wx:key="index" class="plan-option">
+        <view wx:for="{{options}}" wx:key="index" class="plan-option {{item.promo?'promo':''}}">
           <view class="option-top">
             <view>
               <text class="option-name">{{item.plan.name}}</text>
               <text class="option-level">{{item.plan.usageLabel}} · {{item.periodText}}</text>
               <text wx:if="{{item.pendingText}}" class="option-expiry">{{item.pendingText}}</text>
             </view>
-            <text class="option-price">{{item.priceText}}</text>
+            <text wx:if="{{item.promo}}" class="promo-badge">{{item.promo.discountLabel}}</text>
           </view>
+          <!-- 价格区：所有档共用一套结构（大号现价 + 周期），优惠档才多出原价/立省/截止。
+               文案全在 normalizeOption 里算好——WXML 不能调函数。 -->
+          <text wx:if="{{item.promo}}" class="promo-kicker">{{item.promo.kickerText}}</text>
+          <view class="price-line">
+            <text class="price-now">{{item.priceText}}</text>
+            <text wx:if="{{item.priceUnitText}}" class="price-unit">{{item.priceUnitText}}</text>
+            <text wx:if="{{item.promo}}" class="price-was">原价 {{item.promo.listPriceText}}</text>
+            <text wx:if="{{item.promo}}" class="price-save">{{item.promo.saveText}}</text>
+          </view>
+          <text wx:if="{{item.promo.deadlineText}}" class="promo-deadline">{{item.promo.deadlineText}}</text>
           <view class="features">
             <view wx:for="{{item.plan.featuresJson}}" wx:key="*this" class="feature-row">
               <native-icon name="check" tone="green" size="14"></native-icon><text>{{item}}</text>
@@ -74,6 +84,10 @@
         <view class="quote-close" bindtap="closeQuote"><native-icon name="close" tone="iron" size="20"></native-icon></view>
       </view>
       <view class="quote-route"><text>{{quote.currentName}}</text><native-icon name="arrow" tone="neutral" size="18"></native-icon><text>{{quote.targetPlan.name}}</text></view>
+      <!-- 优惠中先摆挂牌价再摆折扣，让「为什么是这个数」自上而下对得上；只给折扣行上强调色，
+           不做角标底色——付款前的界面越吵，用户越要停下来重读。 -->
+      <view wx:if="{{quote.promo}}" class="quote-line"><text>挂牌价</text><text class="quote-was">{{quote.promo.listPriceText}}</text></view>
+      <view wx:if="{{quote.promo}}" class="quote-line promo"><text>{{quote.promo.kickerText}} · {{quote.promo.discountLabel}}</text><text>-{{quote.promo.savedAmountText}}</text></view>
       <view class="quote-line"><text>方案价格</text><text>{{quote.fullPriceText}}</text></view>
       <view wx:if="{{quote.remainingValue>0}}" class="quote-line"><text>剩余价值抵扣</text><text>-{{quote.remainingValueText}}</text></view>
       <view class="quote-total"><text>本次实付</text><text>{{quote.chargeText}}</text></view>
@@ -85,7 +99,7 @@
         </view>
         <view wx:if="{{quote.targetPlan.autoRenewAvailable}}" class="purchase-mode {{purchaseMode==='auto'?'selected':''}}" data-mode="auto" bindtap="chooseMode">
           <native-icon class="mode-radio" name="{{purchaseMode==='auto'?'radioChecked':'radio'}}" tone="accent" color-key="{{colorKey}}" size="18"></native-icon>
-          <view><text class="mode-title">自动续费</text><text class="mode-desc">本次 {{quote.chargeText}}，之后每{{quote.targetPlan.period==='year'?'年':'月'}} {{quote.fullPriceText}}；可随时关闭</text></view>
+          <view><text class="mode-title">自动续费</text><text class="mode-desc">本次 {{quote.chargeText}}，之后每{{quote.targetPlan.period==='year'?'年':'月'}} {{quote.fullPriceText}}；可随时关闭{{quote.promo?'。优惠结束后不会按原价自动扣款，会先暂停并请你重新确认':''}}</text></view>
         </view>
       </view>
       <text class="quote-note">{{purchaseMode==='auto'&&quote.targetPlan.autoRenewAvailable?'你将在微信支付页主动确认自动续费授权；后续按当前周期续费。':'本次为单次购买，不会自动续费。'}}</text>

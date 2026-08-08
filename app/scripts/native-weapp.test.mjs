@@ -371,6 +371,33 @@ test('除微信官方品牌图形外，功能图标统一通过 Lucide 组件输
   assert.doesNotMatch(builder, /readCustomHat|hat-\$\{tone\}/, '原生构建不应继续生成废弃的自绘帽子资源');
 });
 
+test('原生方案卡折扣展示：文案全在 JS 预计算，WXML 不碰价格算术', () => {
+  const plans = fs.readFileSync(path.join(sourceRoot, 'packages/work/plans/index.js'), 'utf8');
+  const wxml = fs.readFileSync(path.join(sourceRoot, 'packages/work/plans/index.wxml'), 'utf8');
+  const style = fs.readFileSync(path.join(sourceRoot, 'packages/work/plans/index.scss'), 'utf8');
+
+  // 折扣率/立省/截止一律用服务端下发的 promotion 字段拼装，端上不按价格自己算——
+  // 一旦端上重算，就会出现「小程序显示 1 折、下单扣原价」这类真金白银的不一致。
+  assert.match(plans, /function promoView\(plan\)/, '缺少折扣视图预计算');
+  assert.match(plans, /discountLabel: promo\.discountLabel/, '折扣率必须用服务端下发的，不得端上计算');
+  assert.doesNotMatch(plans, /promo\.listPrice\s*-\s*promo\.price/, '立省金额用服务端 savedFen，不得端上相减');
+  assert.doesNotMatch(plans, /promo\.price\s*\/\s*promo\.listPrice/, '折扣率不得端上计算');
+
+  // WXML 不能调函数：所有文案必须是 normalizeOption/quote 里算好的字段
+  for (const field of ['promo.discountLabel', 'promo.kickerText', 'promo.listPriceText', 'promo.saveText', 'promo.deadlineText', 'priceUnitText']) {
+    assert.ok(wxml.includes(`{{item.${field}}}`) || wxml.includes(`{{quote.${field}}}`) || wxml.includes(field), `WXML 应直接渲染预计算字段 ${field}`);
+  }
+  assert.doesNotMatch(wxml, /\{\{[^}]*(listPrice|savedFen)\s*[-/*][^}]*\}\}/, 'WXML 里不得出现价格算术');
+  assert.match(wxml, /class="plan-option \{\{item\.promo\?'promo':''\}\}"/, '优惠档要能整卡提色');
+  assert.match(wxml, /quote-line promo/, '确认弹层要单列折扣行');
+
+  // 促销色必须跟随本命色（6 套主题）；写死红色会在其中 5 套里显脏
+  assert.match(style, /\.promo-badge[^}]*background:\s*var\(--accent\)/, '折扣角标必须用本命色 token');
+  const promoStyles = style.split('/* —— 价格区')[1] || '';
+  assert.ok(promoStyles, '促销样式块应存在');
+  assert.doesNotMatch(promoStyles, /background:\s*#(?!fff\b)[0-9a-fA-F]{3,8}/, '促销底色不得写死非白色 hex（本命色 6 套主题）');
+});
+
 test('原生方案继续支付、到账提示、自动续费关闭与离线登录不回归', () => {
   const plans = fs.readFileSync(path.join(sourceRoot, 'packages/work/plans/index.js'), 'utf8');
   const plansWxml = fs.readFileSync(path.join(sourceRoot, 'packages/work/plans/index.wxml'), 'utf8');
