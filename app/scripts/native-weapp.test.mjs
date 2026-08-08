@@ -17,6 +17,25 @@ function walk(root) {
   });
 }
 
+// 对话核心已抽到主包 weapp-native/chat-core/，chat 分包页只剩页头与模板引用。
+// 断言的目标从「chat 页四件套」挪到「chat-core + chat 页」的并集，条数与语义一条不减；
+// chat-core 文件本身是否存在由下方「对话核心抽到主包」一测硬保。
+const chatCoreRoot = path.join(sourceRoot, 'chat-core');
+const read = (...segments) => fs.readFileSync(path.join(...segments), 'utf8');
+const chatSource = () => [
+  read(chatCoreRoot, 'behavior.js'),
+  read(sourceRoot, 'packages/main/chat/index.js'),
+].join('\n');
+const chatMarkup = () => [
+  read(sourceRoot, 'packages/main/chat/index.wxml'),
+  read(chatCoreRoot, 'message-list.wxml'),
+  read(chatCoreRoot, 'composer.wxml'),
+].join('\n');
+const chatStyle = () => [
+  read(sourceRoot, 'packages/main/chat/index.scss'),
+  read(chatCoreRoot, 'chat-core.scss'),
+].join('\n');
+
 test('原生小程序覆盖 app.json 声明的全部路由', () => {
   const app = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'app.json'), 'utf8'));
   const routes = [...app.pages];
@@ -40,7 +59,7 @@ test('原生历史对话剥离重复的 asks JSON，只让问答卡展示结构�
   assert.equal(stripSerializedAsksTail(`先答这一题。\n\`\`\`json\n${JSON.stringify({ asks })}\n\`\`\``, asks), '先答这一题。');
   const unrelated = '业务数据：\n[{"q":"字段名","options":["a","b"]}]';
   assert.equal(stripSerializedAsksTail(unrelated, asks), unrelated);
-  const chatJs = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
+  const chatJs = chatSource();
   assert.match(chatJs, /stripSerializedAsksTail\(value\.text, value\.asks\)/, '历史、轮询与流式终态必须统一经过 asks 正文净化');
 });
 
@@ -49,13 +68,13 @@ test('原生源码不引用 Taro，聊天 textarea 保持非受控', () => {
   const all = sourceFiles.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
   assert.doesNotMatch(all, /@tarojs|Taro\./);
   assert.doesNotMatch(all, /\bselectable(?:\s|=)/, '原生 text 使用 user-select，不得回退已弃用的 selectable');
-  const chat = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.wxml'), 'utf8');
+  const chat = chatMarkup();
   assert.doesNotMatch(chat, /<textarea[^>]+\bvalue=/, '输入文字不得通过 setData 回灌 textarea');
   assert.equal((chat.match(/<textarea\b/g) || []).length, 2, '聊天发送后只通过两个非受控 textarea 交替挂载清空');
   assert.match(chat, /<input\b[^>]*class="ask-other-input[^>]*\bvalue="\{\{ask\.other\}\}"[^>]*\bbindfocus="onAskOtherFocus"[^>]*\bbindinput="onAskOtherInput"/, '其他回答必须使用卡片内可见原生 input，支持光标与文本选区');
   assert.match(chat, /id="ask-other-m\{\{messageIndex\}\}-q\{\{askIndex\}\}" class="ask-other-anchor"/, '每个其他回答 input 前必须有稳定滚动锚点');
   assert.doesNotMatch(chat, /ask-keyboard-capture/, '不得再用 1px 隐形输入框劫持其他回答');
-  const chatJs = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
+  const chatJs = chatSource();
   assert.match(chatJs, /this\._draft\s*=\s*value/);
   assert.doesNotMatch(chatJs, /setData\([^)]*(?:draft|inputValue|composerValue)/, '输入事件不得把草稿通过 setData 写回视图层');
   assert.doesNotMatch(chatJs.match(/onAskOtherInput\(event\)\s*\{[\s\S]*?\n\s*\},/)?.[0] || '', /safeSetData|setData/, '其他回答编辑中不得回灌 value 干扰光标');
@@ -64,8 +83,8 @@ test('原生源码不引用 Taro，聊天 textarea 保持非受控', () => {
 });
 
 test('原生长文粘贴保持同帧卡片、内容去重、全文预览与发送硬拦', () => {
-  const chat = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
-  const wxml = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.wxml'), 'utf8');
+  const chat = chatSource();
+  const wxml = chatMarkup();
   const helperPath = path.join(sourceRoot, 'services/paste-absorb.js');
   delete cjsRequire.cache[cjsRequire.resolve(helperPath)];
   const helper = cjsRequire(helperPath);
@@ -125,9 +144,9 @@ test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与�
   const page = fs.readFileSync(path.join(sourceRoot, 'services/page.js'), 'utf8');
   const nativeAppScss = fs.readFileSync(path.join(sourceRoot, 'app.scss'), 'utf8');
   const subpageScss = fs.readFileSync(path.join(sourceRoot, 'styles/subpage.scss'), 'utf8');
-  const chat = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.wxml'), 'utf8');
-  const chatJs = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
-  const chatScss = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.scss'), 'utf8');
+  const chat = chatMarkup();
+  const chatJs = chatSource();
+  const chatScss = chatStyle();
   const tabbar = fs.readFileSync(path.join(sourceRoot, 'custom-tab-bar/index.wxml'), 'utf8');
   const tabbarScss = fs.readFileSync(path.join(sourceRoot, 'custom-tab-bar/index.scss'), 'utf8');
   const settings = fs.readFileSync(path.join(sourceRoot, 'packages/main/settings/index.scss'), 'utf8');
@@ -254,7 +273,7 @@ test('只附文件或图片也能发送，客户端补自然请求而不是要�
   const { attachmentOnlyPrompt } = cjsRequire(helperPath);
   assert.match(attachmentOnlyPrompt([{ kind: 'knowledge', label: '经营数据.xlsx' }]), /经营数据\.xlsx/);
   assert.match(attachmentOnlyPrompt([{ kind: 'image', label: '对话图片' }]), /请看我附上的图片/);
-  const nativeChat = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
+  const nativeChat = chatSource();
   const h5Chat = fs.readFileSync(path.join(appRoot, 'src/packages/main/chat/index.tsx'), 'utf8');
   assert.match(nativeChat, /if \(!typedText && !displayRefs\.length\) return;[\s\S]*?typedText \|\| attachmentOnlyPrompt\(displayRefs\)/);
   assert.match(nativeChat, /Boolean\(text \|\| this\._refs\.length\)/);
@@ -263,9 +282,9 @@ test('只附文件或图片也能发送，客户端补自然请求而不是要�
 });
 
 test('原生聊天保持可恢复生成、完整报告闸门与动态输入区', () => {
-  const chat = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.wxml'), 'utf8');
-  const chatJs = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
-  const chatScss = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.scss'), 'utf8');
+  const chat = chatMarkup();
+  const chatJs = chatSource();
+  const chatScss = chatStyle();
   const reportCard = fs.readFileSync(path.join(sourceRoot, 'components/report-card/index.wxml'), 'utf8');
   const textareas = [...chat.matchAll(/<textarea\b[^>]*>/g)].map((match) => match[0]);
 
@@ -310,8 +329,8 @@ test('原生聊天保持可恢复生成、完整报告闸门与动态输入区',
 });
 
 test('原生对话使用固定版本开源流式 Markdown 打字机并隔离网络突发节奏', () => {
-  const chatJs = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
-  const chatWxml = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.wxml'), 'utf8');
+  const chatJs = chatSource();
+  const chatWxml = chatMarkup();
   const chatJson = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.json'), 'utf8'));
   const vendorRoot = path.join(sourceRoot, 'packages/main/vendor/towxml');
   const upstream = fs.readFileSync(path.join(vendorRoot, 'UPSTREAM.md'), 'utf8');
@@ -335,6 +354,62 @@ test('原生对话使用固定版本开源流式 Markdown 打字机并隔离网�
   assert.doesNotMatch(typewriterWxml, /selectable=/);
 });
 
+test('对话核心抽到主包 chat-core，分包页只留页头与导航', () => {
+  for (const file of ['behavior.js', 'message-list.wxml', 'composer.wxml', 'chat-core.scss']) {
+    assert.ok(fs.existsSync(path.join(chatCoreRoot, file)), `chat-core 缺少 ${file}——上面所有聊天断言的目标就没了`);
+  }
+  const behavior = read(chatCoreRoot, 'behavior.js');
+  const messageList = read(chatCoreRoot, 'message-list.wxml');
+  const composer = read(chatCoreRoot, 'composer.wxml');
+  const pageJs = read(sourceRoot, 'packages/main/chat/index.js');
+  const pageWxml = read(sourceRoot, 'packages/main/chat/index.wxml');
+  const pageScss = read(sourceRoot, 'packages/main/chat/index.scss');
+  const chatJson = JSON.parse(read(sourceRoot, 'packages/main/chat/index.json'));
+
+  // 分包可以引用主包，反向不行——抽取物必须干净地留在主包。
+  assert.doesNotMatch(behavior.replace(/^\s*\/\/.*$/gm, ''), /require\(['"][^'"]*(?:packages\/|vendor\/)/, 'chat-core 属主包，不得反向 require 分包文件');
+  assert.match(behavior, /module\.exports = \{[\s\S]*?chatCore: Behavior\(\{ data, methods \}\)/, '对话核心以 Page Behavior 形式导出');
+  assert.match(behavior, /function useStreamRenderer\(next\)/, 'towxml 回调必须由宿主页注入，主包不能直接 require 分包的 globalCb');
+
+  assert.match(pageJs, /require\('\.\.\/\.\.\/\.\.\/chat-core\/behavior'\)/);
+  assert.match(pageJs, /behaviors: \[chatCore\]/, '页面通过 Page behaviors 复用对话核心');
+  assert.match(pageJs, /useStreamRenderer\(\{ setMdText, setStreamFinish, stopImmediatelyCb \}\)/, '同包页负责把 towxml 打字机回调注入对话核心');
+  assert.match(pageJs, /this\.chatCoreLoad\(\{[\s\S]*?continueLatest:[\s\S]*?pendingPrompt:/, '导航参数解析留在页面，只把解析结果交给对话核心');
+  assert.match(pageJs, /onUnload\(\) \{ this\.chatCoreUnload\(\); \}/);
+  assert.doesNotMatch(pageJs, /generateStream|absorbPasteToFile|normalizeMessage/, '对话逻辑不得在页面里留第二份');
+
+  assert.match(pageWxml, /<import src="\/chat-core\/message-list\.wxml">/);
+  assert.match(pageWxml, /<import src="\/chat-core\/composer\.wxml">/);
+  assert.match(pageWxml, /<template is="chat-message-list" data="\{\{[^"]*messages[^"]*\}\}"/);
+  assert.match(pageWxml, /<template is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
+  assert.doesNotMatch(pageWxml, /<textarea\b|class="chat-stream"/, '消息流与输入区已进模板，页面只保留页头与外壳');
+  assert.match(pageScss, /@use "\.\.\/\.\.\/\.\.\/chat-core\/chat-core\.scss"/);
+  assert.doesNotMatch(pageScss, /\.composer-box|\.ask-card|\.paste-card/, '可共享样式已迁走，页面 SCSS 只留页面外壳');
+
+  // 模板里绑定的每一个 handler 都必须真有同名方法，否则真机上是静默失效的死按钮。
+  const hasMethod = (name) => new RegExp(`^\\s{2}(?:async\\s+)?${name}\\(`, 'm').test(behavior)
+    || new RegExp(`^\\s{2}(?:async\\s+)?${name}\\(`, 'm').test(pageJs);
+  const handlers = new Set([...`${messageList}\n${composer}`.matchAll(/\b(?:bind|catch)[a-z]+="([A-Za-z_$][\w$]*)"/g)].map((match) => match[1]));
+  assert.ok(handlers.size >= 30, `模板事件绑定只扫到 ${handlers.size} 个，抽取可能漏了内容`);
+  for (const handler of handlers) assert.ok(hasMethod(handler), `模板绑定了 ${handler}，但 chat-core/behavior.js 与宿主页都没有这个方法`);
+
+  // 模板自己没有 json，用到的自定义组件必须由宿主页注册齐。
+  const templateMarkup = `${messageList}\n${composer}`;
+  const builtin = new Set(['scroll-view', 'cover-view', 'cover-image', 'rich-text', 'web-view', 'movable-view', 'picker-view']);
+  const tags = new Set([...templateMarkup.matchAll(/<([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b/g)].map((match) => match[1]));
+  if (/<towxml\b/.test(templateMarkup)) tags.add('towxml');
+  for (const tag of tags) {
+    if (builtin.has(tag)) continue;
+    assert.equal(typeof chatJson.usingComponents?.[tag], 'string', `宿主页未注册模板用到的组件：${tag}`);
+  }
+
+  // 输入铁律的静态校验必须跟着 composer 模板走，不能留在只剩页头的分包页上。
+  const builder = read(appRoot, 'scripts/build-native-weapp.mjs');
+  assert.match(builder, /CHAT_TEXTAREA_TARGETS = \[[^\]]*'chat-core\/composer\.wxml'/, '构建校验必须扫描 chat-core/composer.wxml');
+  assert.match(builder, /CHAT_TEXTAREA_TARGETS/, '构建校验目标必须显式列表化');
+  assert.match(builder, /聊天 textarea 校验目标缺失/, '校验目标文件缺失本身必须让构建失败');
+});
+
 test('除微信官方品牌图形外，功能图标统一通过 Lucide 组件输出', () => {
   const wxmlFiles = walk(sourceRoot).filter((file) => file.endsWith('.wxml'));
   const forbiddenGlyphs = /[‹›⌕＋↑←×✕✓■⌄⌃⌁→↻⌂◆☰▾⚠⚡✦★●○]/;
@@ -345,6 +420,9 @@ test('除微信官方品牌图形外，功能图标统一通过 Lucide 组件输
     if (!source.includes('<native-icon')) continue;
     if (file.includes(`${path.sep}templates${path.sep}`)) continue;
     const json = file.replace(/\.wxml$/, '.json');
+    // WXML 模板库（chat-core/*.wxml）没有自己的 json，组件由宿主页注册；
+    // 宿主页确实注册齐了由下方「对话核心抽到主包」一测逐个标签核对。
+    if (!fs.existsSync(json) && /<template\s+name=/.test(source)) continue;
     const config = JSON.parse(fs.readFileSync(json, 'utf8'));
     assert.equal(config.usingComponents?.['native-icon'], '/components/native-icon/index', `未注册 native-icon：${path.relative(sourceRoot, file)}`);
   }
@@ -959,9 +1037,9 @@ test('原生设置与游客老板页恢复政策、客服和退出登录', () =>
 });
 
 test('原生对话消息沿用 Taro 的身份行、正文与用户引用层级', () => {
-  const chatWxml = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.wxml'), 'utf8');
-  const chatScss = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.scss'), 'utf8');
-  const chatJs = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
+  const chatWxml = chatMarkup();
+  const chatScss = chatStyle();
+  const chatJs = chatSource();
   const chatJson = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.json'), 'utf8'));
 
   assert.match(chatWxml, /class="who"[\s\S]{0,240}src="{{advisorAvatar}}"[\s\S]{0,120}<text>{{title}}<\/text>/);
@@ -1013,15 +1091,15 @@ test('原生 ReportCard 归一 typed section，并用 reportReady 硬闸门保�
   assert.match(wxml, /native-icon name="shield"/);
   assert.equal(config.usingComponents?.['native-icon'], '/components/native-icon/index');
 
-  const chatWxml = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.wxml'), 'utf8');
-  const chatJs = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
+  const chatWxml = chatMarkup();
+  const chatJs = chatSource();
   assert.match(chatWxml, /operable="{{item\.reportReady}}"/);
   assert.match(chatJs, /textOf\(messageId\)\.trim\(\)[\s\S]*deliverable\.degraded !== true[\s\S]*deliverable\.sections\.length > 0/);
 });
 
 test('海报设计师成果卡、成品图路由与原地启用保持双层硬闸门', () => {
-  const chat = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.js'), 'utf8');
-  const chatWxml = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.wxml'), 'utf8');
+  const chat = chatSource();
+  const chatWxml = chatMarkup();
   const report = fs.readFileSync(path.join(sourceRoot, 'components/report-card/index.js'), 'utf8');
   const reportWxml = fs.readFileSync(path.join(sourceRoot, 'components/report-card/index.wxml'), 'utf8');
   const reportScss = fs.readFileSync(path.join(sourceRoot, 'components/report-card/index.scss'), 'utf8');

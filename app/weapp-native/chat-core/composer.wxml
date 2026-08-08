@@ -1,0 +1,76 @@
+<!-- 问策对话输入区（主包共享模板）：composer 本体 + 附卷全文预览 + 引用资产选择器。
+     宿主页 import 本文件后，用 template is="chat-composer" 渲染。
+     原生对话输入铁律：这里的两个 textarea 永远不得绑定 value（见 AGENTS.md 7.2）。
+     build-native-weapp.mjs 与 scripts/native-weapp.test.mjs 都会直接扫描本文件。-->
+<template name="chat-composer">
+  <view class="composer-dock {{askComposerOpen?'ask-hidden':''}}">
+    <view wx:if="{{pasteRefs.length||pastePendings.length||pasteKept}}" class="paste-stack">
+      <view wx:if="{{pasteKept}}" class="paste-kept">
+        <view class="paste-kept-copy"><text class="paste-kept-k">已保留原提问</text><text class="paste-kept-v">{{pasteKeptExcerpt}}</text></view>
+        <view class="paste-icon-hit" bindtap="clearPasteKept"><native-icon name="close" tone="neutral" size="14"></native-icon></view>
+      </view>
+      <view wx:for="{{pasteRefs}}" wx:key="id" class="paste-card {{pasteDupId===item.id?'dup':''}}" data-id="{{item.id}}" bindtap="openPastePreview">
+        <view class="paste-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="15"></native-icon></view>
+        <view class="paste-b"><text class="paste-t">粘贴长文 · {{item.chars}}字</text><text class="paste-m">{{item.excerpt}}</text></view>
+        <view class="paste-icon-hit" data-id="{{item.id}}" catchtap="removePasteRef"><native-icon name="close" tone="neutral" size="14"></native-icon></view>
+      </view>
+      <view wx:for="{{pastePendings}}" wx:key="key" class="paste-card pending {{item.status==='failed'?'failed':''}} {{pasteDupId===item.key?'dup':''}}" data-key="{{item.key}}" bindtap="openPastePreview">
+        <view class="paste-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="15"></native-icon></view>
+        <view class="paste-b"><text class="paste-t">粘贴长文 · {{item.chars}}字</text><text class="paste-m">{{item.excerpt}}</text></view>
+        <text wx:if="{{item.status==='uploading'}}" class="paste-badge">归卷中</text>
+        <view wx:else class="paste-failed-actions" catchtap="stop"><text class="paste-retry" data-key="{{item.key}}" bindtap="retryPaste">重试</text><text class="paste-remove" data-key="{{item.key}}" bindtap="removePastePending">移除</text></view>
+      </view>
+      <view wx:if="{{pasteHint}}" class="paste-hint"><text class="paste-hint-t">长文已归为附卷，军师会通读全文；点卡片可查看或移除。</text><text class="paste-hint-x" bindtap="dismissPasteHint">知道了</text></view>
+    </view>
+    <view wx:if="{{regularRefs.length||uploading}}" class="ref-strip">
+      <view wx:for="{{regularRefs}}" wx:key="id" class="ref-chip">
+        <image wx:if="{{item.kind==='image'&&item.previewUrl}}" class="ref-chip-thumb" src="{{item.previewUrl}}" mode="aspectFill"></image>
+        <native-icon wx:else name="{{item.kind==='image'?'image':'doc'}}" tone="neutral" size="13"></native-icon>
+        <text>{{item.kind==='image'?'图片':item.kind==='project'?'案卷':item.kind==='report'?'方案':item.kind==='memory'?'军师印象':'资料'}} · {{item.label}}</text>
+        <view class="ref-remove" data-kind="{{item.kind}}" data-id="{{item.id}}" bindtap="removeRef"><native-icon name="close" tone="danger" size="14"></native-icon></view>
+      </view>
+      <view wx:if="{{uploading}}" class="ref-chip uploading">上传中…</view>
+    </view>
+    <view class="composer-box">
+      <textarea wx:if="{{composerOdd}}" class="composer-input" maxlength="-1" auto-height fixed="{{true}}" always-embed="{{true}}" adjust-position="{{false}}" disabled="{{busy}}" confirm-type="send" confirm-hold="{{true}}" show-confirm-bar="{{false}}" cursor-spacing="16" placeholder="把你正拿不准的事告诉军师" bindinput="onComposerInput" bindlinechange="onComposerResize" bindconfirm="onConfirm" bindblur="onComposerBlur" bindkeyboardheightchange="onKeyboardHeight"></textarea>
+      <textarea wx:else class="composer-input" maxlength="-1" auto-height fixed="{{true}}" always-embed="{{true}}" adjust-position="{{false}}" disabled="{{busy}}" confirm-type="send" confirm-hold="{{true}}" show-confirm-bar="{{false}}" cursor-spacing="16" placeholder="把你正拿不准的事告诉军师" bindinput="onComposerInput" bindlinechange="onComposerResize" bindconfirm="onConfirm" bindblur="onComposerBlur" bindkeyboardheightchange="onKeyboardHeight"></textarea>
+      <view class="composer-tools">
+        <button class="attach-btn" bindtap="pickAttachment"><native-icon name="plus" tone="iron" size="19"></native-icon></button>
+        <view class="composer-tools-right">
+          <text wx:if="{{showCount}}" class="input-count">{{inputCount}}/2000</text>
+          <button wx:if="{{busy&&canStop}}" class="send-btn stop on" bindtap="stopGeneration"><native-icon name="stop" tone="white" size="13"></native-icon></button>
+          <view wx:elif="{{busy}}" class="send-btn wait"><native-icon name="more" tone="neutral" size="15"></native-icon></view>
+          <button wx:else class="send-btn {{canSend ? 'on' : ''}}" bindtap="send"><native-icon name="up" tone="white" size="17"></native-icon></button>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{pastePreview}}" class="paste-preview-mask" bindtap="closePastePreview">
+    <view class="paste-panel" catchtap="stop">
+      <view class="paste-panel-head"><view><text class="paste-panel-k">附 卷 正 文</text><text class="paste-panel-title serif">粘贴长文 · {{pastePreview.chars}}字</text></view><view class="paste-panel-close" bindtap="closePastePreview"><native-icon name="close" tone="ink" size="20"></native-icon></view></view>
+      <scroll-view scroll-y enhanced show-scrollbar="false" class="paste-body"><view class="paste-body-in"><text class="paste-full" user-select="true">{{pastePreview.text}}</text></view></scroll-view>
+      <view class="paste-acts"><view class="paste-act" bindtap="copyPastePreview"><native-icon name="copy" tone="accent" color-key="{{colorKey}}" size="15"></native-icon><text>复制全文</text></view><view wx:if="{{!pastePreview.pending||pastePreview.status==='failed'}}" class="paste-act del" bindtap="removePastePreview"><native-icon name="trash" tone="danger" size="15"></native-icon><text>移除这份</text></view></view>
+    </view>
+  </view>
+
+  <view wx:if="{{showPicker}}" class="ref-picker-mask" bindtap="closePicker">
+    <view class="ref-picker" catchtap="stop">
+      <view class="ref-picker-head">
+        <view><text class="ref-picker-k">引 用 资 产</text><text class="ref-picker-title serif">把旧案卷、方案或资料带进本轮</text></view>
+        <view class="ref-picker-done" bindtap="closePicker"><text>完成{{refs.length?' ('+refs.length+')':''}}</text></view>
+      </view>
+      <scroll-view scroll-y class="ref-picker-body">
+        <view wx:if="{{pickerLoading}}" class="ref-picker-empty">正在读取你的资产…</view>
+        <view wx:for="{{pickGroups}}" wx:for-index="groupIndex" wx:key="title" class="ref-group">
+          <text class="ref-gt">{{item.title}}</text>
+          <view wx:for="{{item.rows}}" wx:for-item="row" wx:for-index="rowIndex" wx:key="id" class="ref-item {{row.selected?'on':''}}" data-group="{{groupIndex}}" data-index="{{rowIndex}}" bindtap="togglePickerRef">
+            <view class="ref-ib"><text class="ref-il">{{row.label}}</text><text wx:if="{{row.sub}}" class="ref-is">{{row.sub}}</text></view>
+            <view class="ref-ck {{row.selected?'on':''}}"><native-icon wx:if="{{row.selected}}" name="check" tone="white" size="12"></native-icon></view>
+          </view>
+        </view>
+        <view wx:if="{{!pickerLoading&&!pickGroups.length}}" class="ref-picker-empty">这里还没有可引用的资产</view>
+      </scroll-view>
+    </view>
+  </view>
+</template>

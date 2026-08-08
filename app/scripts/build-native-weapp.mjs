@@ -93,6 +93,10 @@ const LUCIDE_ICON_MAP = {
   radioChecked: 'circle-dot',
 };
 
+// 聊天输入的两个 textarea 现在住在主包共享模板 chat-core/composer.wxml 里，
+// 分包页只剩页头与模板引用；两处都要扫，新增宿主页时把它的 WXML 也加进来。
+const CHAT_TEXTAREA_TARGETS = ['chat-core/composer.wxml', 'packages/main/chat/index.wxml'];
+
 if (!['mock', 'server'].includes(mode)) throw new Error(`无效 --mode ${mode}，只允许 mock/server`);
 if (mode === 'server' && !/^https:\/\//.test(api)) throw new Error(`server 构建必须使用 HTTPS API：${api}`);
 
@@ -204,9 +208,15 @@ function validate(sourceFiles) {
   }
   const allJs = walk(OUTPUT_ROOT).filter((file) => file.endsWith('.js')).map((file) => fs.readFileSync(file, 'utf8')).join('\n');
   if (/@tarojs|Taro\./.test(allJs)) throw new Error('dist-native 仍包含 Taro 运行时引用');
-  const chatWxml = fs.readFileSync(path.join(OUTPUT_ROOT, 'packages/main/chat/index.wxml'), 'utf8');
-  if (/<textarea[^>]+\bvalue=/.test(chatWxml)) {
-    throw new Error('原生聊天 textarea 禁止绑定 value：会重新引入华为/百度输入法重复与光标跳尾问题');
+  // 聊天输入铁律的校验目标必须显式列全：composer 已抽到主包 chat-core，
+  // 只扫分包页会让铁律随文件搬家而静默失效，所以文件缺失本身就要报错。
+  for (const relative of CHAT_TEXTAREA_TARGETS) {
+    const file = path.join(OUTPUT_ROOT, relative);
+    if (!fs.existsSync(file)) throw new Error(`聊天 textarea 校验目标缺失：${relative}（铁律检查不得随文件搬家失效）`);
+    const source = fs.readFileSync(file, 'utf8');
+    if (/<textarea[^>]+\bvalue=/.test(source)) {
+      throw new Error(`原生聊天 textarea 禁止绑定 value（${relative}）：会重新引入华为/百度输入法重复与光标跳尾问题`);
+    }
   }
 }
 

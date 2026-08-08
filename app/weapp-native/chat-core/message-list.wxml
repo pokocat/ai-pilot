@@ -1,0 +1,52 @@
+<!-- 问策对话消息流（主包共享模板）：只含 .chat-stream 内容，滚动容器由宿主页自己提供
+     （scroll-into-view 留在宿主页，避免 180ms 自动滚底把整张消息列表也带进重算）。
+     宿主页 import 本文件后，用 template is="chat-message-list" 渲染；
+     模板里绑定的 handler 名与 chat-core/behavior.js 的方法名一一对应，
+     native-icon / markdown-text / report-card / towxml 四个组件由宿主页自己注册。-->
+<template name="chat-message-list">
+  <view class="chat-stream">
+    <view wx:for="{{messages}}" wx:key="id" wx:for-index="messageIndex" class="msg {{item.role === 'user' ? 'u' : 'a'}}" data-index="{{messageIndex}}" bindlongpress="copyMessage">
+      <block wx:if="{{item.role === 'user'}}">
+        <view wx:if="{{item.refs&&item.refs.length}}" class="uref">
+          <block wx:for="{{item.refs}}" wx:key="id">
+            <view wx:if="{{item.isImage}}" class="uref-img">
+              <image wx:if="{{item.previewUrl}}" class="uref-img-el" src="{{item.previewUrl}}" mode="aspectFill"></image>
+              <view wx:else class="uref-img-ph"><native-icon name="image" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view>
+            </view>
+            <view wx:else class="uref-card">
+              <view class="uref-icon"><native-icon name="{{item.icon}}" tone="accent" color-key="{{colorKey}}" size="15"></native-icon></view>
+              <view class="uref-copy"><text class="uref-title">{{item.viewTitle}}</text><text class="uref-meta">{{item.viewMeta}}</text></view>
+            </view>
+          </block>
+        </view>
+        <view class="user-bubble"><text user-select>{{item.text}}</text></view>
+      </block>
+
+      <block wx:else>
+        <view class="who"><view class="advisor-avatar"><image class="aa-img" src="{{advisorAvatar}}" mode="aspectFill"></image></view><text>{{title}}</text></view>
+        <report-card wx:if="{{item.report}}" report="{{item.deliverable}}" fallback-text="{{item.text}}" streaming="{{item.streaming}}" operable="{{item.reportReady}}" saved="{{item.saved}}" accepting="{{accepting}}" busy="{{reportBusy===item.id}}" poster-enabled="{{item.reportReady&&posterEnabled}}" poster-price="{{posterPrice}}" color-key="{{colorKey}}" data-index="{{messageIndex}}" bindviewreport="viewReport" bindmenu="reportMenu" bindsave="saveReport" bindaccept="acceptReport" bindposter="openPoster" bindviewposter="openPosterJob"></report-card>
+        <view wx:elif="{{item.greet}}" class="bubble greet-bubble"><text user-select>{{item.text}}</text></view>
+        <view wx:else class="ai-text">
+          <block wx:if="{{item.streamRenderId}}">
+            <view wx:if="{{!item.streamStarted}}" class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view>
+            <towxml wx:else towxmlId="{{item.streamRenderId}}" speed="6" openTyper="{{true}}" theme="light" data-stream-id="{{item.streamRenderId}}" bindfinish="onStreamTypingFinish"></towxml>
+          </block>
+          <markdown-text wx:else text="{{item.text}}" streaming="{{item.streaming}}" copyable="{{true}}"></markdown-text>
+          <view wx:if="{{item.points&&item.points.length}}" class="points"><view wx:for="{{item.points}}" wx:key="*this" class="point"><view class="point-dot"></view><text user-select>{{item}}</text></view></view>
+        </view>
+        <text wx:if="{{item.knowledgeUsed&&item.knowledgeUsed.length}}" class="knowledge-used {{item.report?'report-note':''}}">参考了 {{item.knowledgeUsed.length}} 份资料：{{item.knowledgeUsedText}}</text>
+        <text wx:if="{{item.refNotices&&item.refNotices.length}}" class="ref-notices {{item.report?'report-note':''}}">引用提示：{{item.refNoticesText}}</text>
+        <view wx:if="{{item.truncated}}" class="unfinished"><native-icon name="pen" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text>内容较长，先写到这里</text></view>
+        <text wx:if="{{item.interrupted}}" class="report-interrupted">本次方案没有完整落库，以上内容仅供参考，不能采纳或转成军令。</text>
+        <view wx:if="{{item.activeAsk&&item.asks.length}}" class="ask-card">
+          <view class="ask-head"><native-icon name="pen" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="ask-head-t">{{item.asks.length>1?'逐题点选，答完一起发给军师':'点一项直接回复，也可选「其他」自己填'}}</text><text wx:if="{{item.asks.length>1}}" class="ask-head-c {{askAnsweredCount?'active':''}}">{{askAnsweredCount}}/{{askTotal}}</text></view>
+          <view class="ask-body"><view wx:for="{{item.asks}}" wx:key="key" wx:for-item="ask" wx:for-index="askIndex" class="ask-item"><view class="ask-q"><text wx:if="{{item.asks.length>1}}" class="ask-qn serif">{{askIndex+1}}</text><text class="ask-qt">{{ask.q}}</text></view><view class="ask-opts"><view wx:for="{{ask.options}}" wx:key="key" wx:for-item="option" class="ask-chip {{ask.selected===option.value?'on':''}}" data-message="{{messageIndex}}" data-question="{{askIndex}}" data-option="{{option.value}}" bindtap="pickAskOption"><text>{{option.value}}</text></view><view class="ask-chip other {{ask.selected==='__other__'?'on':''}}" data-message="{{messageIndex}}" data-question="{{askIndex}}" data-option="__other__" bindtap="pickAskOption"><text>其他…</text></view></view><view wx:if="{{ask.selected==='__other__'}}" id="ask-other-m{{messageIndex}}-q{{askIndex}}" class="ask-other-anchor"></view><input wx:if="{{ask.selected==='__other__'}}" class="ask-other-input {{askComposerOpen&&askComposerMessage===messageIndex&&askComposerQuestion===askIndex?'focus':''}}" value="{{ask.other}}" data-message="{{messageIndex}}" data-question="{{askIndex}}" focus="{{askComposerOpen&&askComposerMessage===messageIndex&&askComposerQuestion===askIndex}}" always-embed="{{true}}" adjust-position="{{false}}" cursor-spacing="24" maxlength="300" confirm-type="done" placeholder="输入你的答案…" bindfocus="onAskOtherFocus" bindinput="onAskOtherInput" bindconfirm="finishAskOther" bindblur="closeAskComposer" bindkeyboardheightchange="onAskKeyboardHeight"/></view></view>
+          <view wx:if="{{item.asks.length>1}}" class="ask-foot"><view class="ask-send {{askReady?'':'off'}}" bindtap="sendAskAnswers"><native-icon wx:if="{{askReady}}" name="up" tone="white" size="14"></native-icon><text>{{askReady?'发送回答':'还差 '+askRemaining+' 题'}}</text></view></view>
+        </view>
+      </block>
+    </view>
+    <view wx:if="{{showThinking}}" class="msg a thinking"><view class="who"><view class="advisor-avatar"><image class="aa-img" src="{{advisorAvatar}}" mode="aspectFill"></image></view><text>{{title}}</text></view><view class="bubble think-bubble"><view class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view><text class="think-text">正在梳理上下文</text></view></view>
+    <view wx:if="{{errorText}}" class="chat-error"><view class="chat-error-copy"><text class="chat-error-title">{{errorText}}</text><text wx:if="{{canRetryLast}}" class="chat-error-note">原问题和引用都已保留，不用重新输入。</text></view><view wx:if="{{canRetryLast}}" class="retry" bindtap="retry">重新回答</view></view>
+    <view id="chat-bottom" class="chat-bottom"></view>
+  </view>
+</template>

@@ -6,6 +6,33 @@
 
 ## 变更日志
 
+### 2026-08-08 · 问策入口改版 WP2'（对话核心抽到主包 chat-core） · 影响面：weapp-native 主包/分包结构 · 原生构建闸门 · 原生静态测试
+
+为下一包「问策 tab 内嵌总军师对话」做准备。分包可以引用主包、反向不行，所以先把
+`packages/main/chat`（分包）的对话核心抽成主包内可复用结构，**chat 分包页行为零变化**。
+
+- **新增 `weapp-native/chat-core/`（主包）四件物**：`behavior.js`（Page Behavior，基础库 2.9.2+）承载
+  消息加载/规范化、发送、SSE 流式对接、生成态/停止/重试、键盘避让、粘贴归卷、asks 问答卡、成果卡闭环；
+  `message-list.wxml` / `composer.wxml` 是 `<template name>` 模板库；`chat-core.scss` 是可共享样式。
+  方法体、WXML、SCSS 全部逐行搬运，未改写实现。
+- **chat 分包页只剩 33 行**：导航参数解析（解析完交给 `chatCoreLoad(config)`）、页头、返回键、页头菜单、
+  滚动容器。`scroll-into-view` 特意留在宿主页——放进模板会让流式期间 180ms 的自动滚底把整张消息列表
+  也带进重算。
+- **towxml 不动**（568K，仍在 `packages/main/vendor/towxml` 分包）。主包的 chat-core 不得反向 require 它，
+  改由同包宿主页 `useStreamRenderer({ setMdText, setStreamFinish, stopImmediatelyCb })` 注入；
+  调用点一字未改，新宿主页不注入就没有流式打字机（下一包要处理）。
+- **输入铁律的静态校验跟着模板走**：`build-native-weapp.mjs` 顶部新增 `CHAT_TEXTAREA_TARGETS` 显式列表
+  （`chat-core/composer.wxml` + chat 页），**列表里的文件缺失本身就让构建失败**，防止「只扫分包页 → 文件搬走
+  → 铁律静默失效」。两种失败模式都实测过会 throw。
+- **测试只挪目标不删断言**：`native-weapp.test.mjs` 里 21 处 chat 四件套读取改为读
+  `chat-core + chat 页` 的并集（`chatSource/chatMarkup/chatStyle`），原有正则一条未改；新增一测
+  `对话核心抽到主包 chat-core，分包页只留页头与导航`，硬保 chat-core 四件物存在、主包不反向引用分包、
+  模板 handler 名与 behavior 方法一一对应、模板用到的组件被宿主页注册齐、构建器扫 composer 模板。
+  `app` 静态测试 43 → 44 全绿；`npm run build:weapp:server` / `build:h5` 通过。
+- **体积**：主包 810,966 → 923,345 B（+112,379），`packages/` 分包 1,026,350 → 937,712 B（−88,638）。
+  主包增量里有 19,599 B 是构建把 `chat-core.scss` 也编译成了独立 `chat-core.wxss`——宿主页走 Sass `@use`
+  内联，这个独立产物当前无人引用（与既有 `styles/subpage.wxss`、`pages/shared-stage.wxss` 同类）。
+
 ### 2026-08-08 · 问策入口改版 WP1（契约 + 服务端） · 影响面：SSOT / Prisma / server 路由与服务 / 运营后台 API
 
 规格见 `docs/[FABLE5]WENCE_ENTRY_INTERACTION_SPEC.md`。本包只做契约与服务端，端上改造留给后续包。

@@ -1,3 +1,6 @@
+<import src="/chat-core/message-list.wxml"></import>
+<import src="/chat-core/composer.wxml"></import>
+
 <view class="chat-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-menu-top:{{navTop}}px;--native-menu-height:{{navRowHeight}}px;--native-menu-right:{{navRightInset}}px;--keyboard-height:{{keyboardHeight}}px;--composer-height:{{composerHeight}}px">
   <view class="chat-header">
     <view class="chat-safe"></view>
@@ -9,122 +12,10 @@
   </view>
 
   <scroll-view scroll-y enhanced show-scrollbar="false" scroll-into-view="{{bottomAnchor}}" class="chat-scroll">
-    <view class="chat-stream">
-      <view wx:for="{{messages}}" wx:key="id" wx:for-index="messageIndex" class="msg {{item.role === 'user' ? 'u' : 'a'}}" data-index="{{messageIndex}}" bindlongpress="copyMessage">
-        <block wx:if="{{item.role === 'user'}}">
-          <view wx:if="{{item.refs&&item.refs.length}}" class="uref">
-            <block wx:for="{{item.refs}}" wx:key="id">
-              <view wx:if="{{item.isImage}}" class="uref-img">
-                <image wx:if="{{item.previewUrl}}" class="uref-img-el" src="{{item.previewUrl}}" mode="aspectFill"></image>
-                <view wx:else class="uref-img-ph"><native-icon name="image" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view>
-              </view>
-              <view wx:else class="uref-card">
-                <view class="uref-icon"><native-icon name="{{item.icon}}" tone="accent" color-key="{{colorKey}}" size="15"></native-icon></view>
-                <view class="uref-copy"><text class="uref-title">{{item.viewTitle}}</text><text class="uref-meta">{{item.viewMeta}}</text></view>
-              </view>
-            </block>
-          </view>
-          <view class="user-bubble"><text user-select>{{item.text}}</text></view>
-        </block>
-
-        <block wx:else>
-          <view class="who"><view class="advisor-avatar"><image class="aa-img" src="{{advisorAvatar}}" mode="aspectFill"></image></view><text>{{title}}</text></view>
-          <report-card wx:if="{{item.report}}" report="{{item.deliverable}}" fallback-text="{{item.text}}" streaming="{{item.streaming}}" operable="{{item.reportReady}}" saved="{{item.saved}}" accepting="{{accepting}}" busy="{{reportBusy===item.id}}" poster-enabled="{{item.reportReady&&posterEnabled}}" poster-price="{{posterPrice}}" color-key="{{colorKey}}" data-index="{{messageIndex}}" bindviewreport="viewReport" bindmenu="reportMenu" bindsave="saveReport" bindaccept="acceptReport" bindposter="openPoster" bindviewposter="openPosterJob"></report-card>
-          <view wx:elif="{{item.greet}}" class="bubble greet-bubble"><text user-select>{{item.text}}</text></view>
-          <view wx:else class="ai-text">
-            <block wx:if="{{item.streamRenderId}}">
-              <view wx:if="{{!item.streamStarted}}" class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view>
-              <towxml wx:else towxmlId="{{item.streamRenderId}}" speed="6" openTyper="{{true}}" theme="light" data-stream-id="{{item.streamRenderId}}" bindfinish="onStreamTypingFinish"></towxml>
-            </block>
-            <markdown-text wx:else text="{{item.text}}" streaming="{{item.streaming}}" copyable="{{true}}"></markdown-text>
-            <view wx:if="{{item.points&&item.points.length}}" class="points"><view wx:for="{{item.points}}" wx:key="*this" class="point"><view class="point-dot"></view><text user-select>{{item}}</text></view></view>
-          </view>
-          <text wx:if="{{item.knowledgeUsed&&item.knowledgeUsed.length}}" class="knowledge-used {{item.report?'report-note':''}}">参考了 {{item.knowledgeUsed.length}} 份资料：{{item.knowledgeUsedText}}</text>
-          <text wx:if="{{item.refNotices&&item.refNotices.length}}" class="ref-notices {{item.report?'report-note':''}}">引用提示：{{item.refNoticesText}}</text>
-          <view wx:if="{{item.truncated}}" class="unfinished"><native-icon name="pen" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text>内容较长，先写到这里</text></view>
-          <text wx:if="{{item.interrupted}}" class="report-interrupted">本次方案没有完整落库，以上内容仅供参考，不能采纳或转成军令。</text>
-          <view wx:if="{{item.activeAsk&&item.asks.length}}" class="ask-card">
-            <view class="ask-head"><native-icon name="pen" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="ask-head-t">{{item.asks.length>1?'逐题点选，答完一起发给军师':'点一项直接回复，也可选「其他」自己填'}}</text><text wx:if="{{item.asks.length>1}}" class="ask-head-c {{askAnsweredCount?'active':''}}">{{askAnsweredCount}}/{{askTotal}}</text></view>
-            <view class="ask-body"><view wx:for="{{item.asks}}" wx:key="key" wx:for-item="ask" wx:for-index="askIndex" class="ask-item"><view class="ask-q"><text wx:if="{{item.asks.length>1}}" class="ask-qn serif">{{askIndex+1}}</text><text class="ask-qt">{{ask.q}}</text></view><view class="ask-opts"><view wx:for="{{ask.options}}" wx:key="key" wx:for-item="option" class="ask-chip {{ask.selected===option.value?'on':''}}" data-message="{{messageIndex}}" data-question="{{askIndex}}" data-option="{{option.value}}" bindtap="pickAskOption"><text>{{option.value}}</text></view><view class="ask-chip other {{ask.selected==='__other__'?'on':''}}" data-message="{{messageIndex}}" data-question="{{askIndex}}" data-option="__other__" bindtap="pickAskOption"><text>其他…</text></view></view><view wx:if="{{ask.selected==='__other__'}}" id="ask-other-m{{messageIndex}}-q{{askIndex}}" class="ask-other-anchor"></view><input wx:if="{{ask.selected==='__other__'}}" class="ask-other-input {{askComposerOpen&&askComposerMessage===messageIndex&&askComposerQuestion===askIndex?'focus':''}}" value="{{ask.other}}" data-message="{{messageIndex}}" data-question="{{askIndex}}" focus="{{askComposerOpen&&askComposerMessage===messageIndex&&askComposerQuestion===askIndex}}" always-embed="{{true}}" adjust-position="{{false}}" cursor-spacing="24" maxlength="300" confirm-type="done" placeholder="输入你的答案…" bindfocus="onAskOtherFocus" bindinput="onAskOtherInput" bindconfirm="finishAskOther" bindblur="closeAskComposer" bindkeyboardheightchange="onAskKeyboardHeight"/></view></view>
-            <view wx:if="{{item.asks.length>1}}" class="ask-foot"><view class="ask-send {{askReady?'':'off'}}" bindtap="sendAskAnswers"><native-icon wx:if="{{askReady}}" name="up" tone="white" size="14"></native-icon><text>{{askReady?'发送回答':'还差 '+askRemaining+' 题'}}</text></view></view>
-          </view>
-        </block>
-      </view>
-      <view wx:if="{{showThinking}}" class="msg a thinking"><view class="who"><view class="advisor-avatar"><image class="aa-img" src="{{advisorAvatar}}" mode="aspectFill"></image></view><text>{{title}}</text></view><view class="bubble think-bubble"><view class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view><text class="think-text">正在梳理上下文</text></view></view>
-      <view wx:if="{{errorText}}" class="chat-error"><view class="chat-error-copy"><text class="chat-error-title">{{errorText}}</text><text wx:if="{{canRetryLast}}" class="chat-error-note">原问题和引用都已保留，不用重新输入。</text></view><view wx:if="{{canRetryLast}}" class="retry" bindtap="retry">重新回答</view></view>
-      <view id="chat-bottom" class="chat-bottom"></view>
-    </view>
+    <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast}}"></template>
   </scroll-view>
 
-  <view class="composer-dock {{askComposerOpen?'ask-hidden':''}}">
-    <view wx:if="{{pasteRefs.length||pastePendings.length||pasteKept}}" class="paste-stack">
-      <view wx:if="{{pasteKept}}" class="paste-kept">
-        <view class="paste-kept-copy"><text class="paste-kept-k">已保留原提问</text><text class="paste-kept-v">{{pasteKeptExcerpt}}</text></view>
-        <view class="paste-icon-hit" bindtap="clearPasteKept"><native-icon name="close" tone="neutral" size="14"></native-icon></view>
-      </view>
-      <view wx:for="{{pasteRefs}}" wx:key="id" class="paste-card {{pasteDupId===item.id?'dup':''}}" data-id="{{item.id}}" bindtap="openPastePreview">
-        <view class="paste-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="15"></native-icon></view>
-        <view class="paste-b"><text class="paste-t">粘贴长文 · {{item.chars}}字</text><text class="paste-m">{{item.excerpt}}</text></view>
-        <view class="paste-icon-hit" data-id="{{item.id}}" catchtap="removePasteRef"><native-icon name="close" tone="neutral" size="14"></native-icon></view>
-      </view>
-      <view wx:for="{{pastePendings}}" wx:key="key" class="paste-card pending {{item.status==='failed'?'failed':''}} {{pasteDupId===item.key?'dup':''}}" data-key="{{item.key}}" bindtap="openPastePreview">
-        <view class="paste-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="15"></native-icon></view>
-        <view class="paste-b"><text class="paste-t">粘贴长文 · {{item.chars}}字</text><text class="paste-m">{{item.excerpt}}</text></view>
-        <text wx:if="{{item.status==='uploading'}}" class="paste-badge">归卷中</text>
-        <view wx:else class="paste-failed-actions" catchtap="stop"><text class="paste-retry" data-key="{{item.key}}" bindtap="retryPaste">重试</text><text class="paste-remove" data-key="{{item.key}}" bindtap="removePastePending">移除</text></view>
-      </view>
-      <view wx:if="{{pasteHint}}" class="paste-hint"><text class="paste-hint-t">长文已归为附卷，军师会通读全文；点卡片可查看或移除。</text><text class="paste-hint-x" bindtap="dismissPasteHint">知道了</text></view>
-    </view>
-    <view wx:if="{{regularRefs.length||uploading}}" class="ref-strip">
-      <view wx:for="{{regularRefs}}" wx:key="id" class="ref-chip">
-        <image wx:if="{{item.kind==='image'&&item.previewUrl}}" class="ref-chip-thumb" src="{{item.previewUrl}}" mode="aspectFill"></image>
-        <native-icon wx:else name="{{item.kind==='image'?'image':'doc'}}" tone="neutral" size="13"></native-icon>
-        <text>{{item.kind==='image'?'图片':item.kind==='project'?'案卷':item.kind==='report'?'方案':item.kind==='memory'?'军师印象':'资料'}} · {{item.label}}</text>
-        <view class="ref-remove" data-kind="{{item.kind}}" data-id="{{item.id}}" bindtap="removeRef"><native-icon name="close" tone="danger" size="14"></native-icon></view>
-      </view>
-      <view wx:if="{{uploading}}" class="ref-chip uploading">上传中…</view>
-    </view>
-    <view class="composer-box">
-      <textarea wx:if="{{composerOdd}}" class="composer-input" maxlength="-1" auto-height fixed="{{true}}" always-embed="{{true}}" adjust-position="{{false}}" disabled="{{busy}}" confirm-type="send" confirm-hold="{{true}}" show-confirm-bar="{{false}}" cursor-spacing="16" placeholder="把你正拿不准的事告诉军师" bindinput="onComposerInput" bindlinechange="onComposerResize" bindconfirm="onConfirm" bindblur="onComposerBlur" bindkeyboardheightchange="onKeyboardHeight"></textarea>
-      <textarea wx:else class="composer-input" maxlength="-1" auto-height fixed="{{true}}" always-embed="{{true}}" adjust-position="{{false}}" disabled="{{busy}}" confirm-type="send" confirm-hold="{{true}}" show-confirm-bar="{{false}}" cursor-spacing="16" placeholder="把你正拿不准的事告诉军师" bindinput="onComposerInput" bindlinechange="onComposerResize" bindconfirm="onConfirm" bindblur="onComposerBlur" bindkeyboardheightchange="onKeyboardHeight"></textarea>
-      <view class="composer-tools">
-        <button class="attach-btn" bindtap="pickAttachment"><native-icon name="plus" tone="iron" size="19"></native-icon></button>
-        <view class="composer-tools-right">
-          <text wx:if="{{showCount}}" class="input-count">{{inputCount}}/2000</text>
-          <button wx:if="{{busy&&canStop}}" class="send-btn stop on" bindtap="stopGeneration"><native-icon name="stop" tone="white" size="13"></native-icon></button>
-          <view wx:elif="{{busy}}" class="send-btn wait"><native-icon name="more" tone="neutral" size="15"></native-icon></view>
-          <button wx:else class="send-btn {{canSend ? 'on' : ''}}" bindtap="send"><native-icon name="up" tone="white" size="17"></native-icon></button>
-        </view>
-      </view>
-    </view>
-  </view>
+  <template is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteKept, pasteKeptExcerpt, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>
 
-  <view wx:if="{{pastePreview}}" class="paste-preview-mask" bindtap="closePastePreview">
-    <view class="paste-panel" catchtap="stop">
-      <view class="paste-panel-head"><view><text class="paste-panel-k">附 卷 正 文</text><text class="paste-panel-title serif">粘贴长文 · {{pastePreview.chars}}字</text></view><view class="paste-panel-close" bindtap="closePastePreview"><native-icon name="close" tone="ink" size="20"></native-icon></view></view>
-      <scroll-view scroll-y enhanced show-scrollbar="false" class="paste-body"><view class="paste-body-in"><text class="paste-full" user-select="true">{{pastePreview.text}}</text></view></scroll-view>
-      <view class="paste-acts"><view class="paste-act" bindtap="copyPastePreview"><native-icon name="copy" tone="accent" color-key="{{colorKey}}" size="15"></native-icon><text>复制全文</text></view><view wx:if="{{!pastePreview.pending||pastePreview.status==='failed'}}" class="paste-act del" bindtap="removePastePreview"><native-icon name="trash" tone="danger" size="15"></native-icon><text>移除这份</text></view></view>
-    </view>
-  </view>
-
-  <view wx:if="{{showPicker}}" class="ref-picker-mask" bindtap="closePicker">
-    <view class="ref-picker" catchtap="stop">
-      <view class="ref-picker-head">
-        <view><text class="ref-picker-k">引 用 资 产</text><text class="ref-picker-title serif">把旧案卷、方案或资料带进本轮</text></view>
-        <view class="ref-picker-done" bindtap="closePicker"><text>完成{{refs.length?' ('+refs.length+')':''}}</text></view>
-      </view>
-      <scroll-view scroll-y class="ref-picker-body">
-        <view wx:if="{{pickerLoading}}" class="ref-picker-empty">正在读取你的资产…</view>
-        <view wx:for="{{pickGroups}}" wx:for-index="groupIndex" wx:key="title" class="ref-group">
-          <text class="ref-gt">{{item.title}}</text>
-          <view wx:for="{{item.rows}}" wx:for-item="row" wx:for-index="rowIndex" wx:key="id" class="ref-item {{row.selected?'on':''}}" data-group="{{groupIndex}}" data-index="{{rowIndex}}" bindtap="togglePickerRef">
-            <view class="ref-ib"><text class="ref-il">{{row.label}}</text><text wx:if="{{row.sub}}" class="ref-is">{{row.sub}}</text></view>
-            <view class="ref-ck {{row.selected?'on':''}}"><native-icon wx:if="{{row.selected}}" name="check" tone="white" size="12"></native-icon></view>
-          </view>
-        </view>
-        <view wx:if="{{!pickerLoading&&!pickGroups.length}}" class="ref-picker-empty">这里还没有可引用的资产</view>
-      </scroll-view>
-    </view>
-  </view>
   <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>
