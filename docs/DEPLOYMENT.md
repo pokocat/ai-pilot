@@ -270,6 +270,24 @@ cd /srv/junshi/server && npm run ai:check-drop
 
    全绿也**不等于**现在就删——脚本会提示还需人工确认「已观察满一个周期」且「期间没回滚过开关」，这两条机器查不了。
 
+> **切换已在预发按真实生产配置彩排过（2026-08-08）。** 预发从生产复制了真实 `ai_setting`/`ai_model`
+> （5 个端点、3 家接入商），完整跑过 迁移 → 切 `AI_CONFIG_V2=true` → 回滚 一整圈：
+>
+> | 阶段 | 运行时解析 | `traceEndpointId` | `dialect` |
+> |---|---|---|---|
+> | 切换前 | claude · dj-claude-4.6-opus | `cmqnfcn9p00hv…`（`ai_model` 行） | null（推断） |
+> | 切到 V2 | claude · dj-claude-4.6-opus | `cmsk3dj4c0008…`（`ai_endpoint` 行） | `anthropic_gateway`（已固化） |
+> | 回滚后 | claude · dj-claude-4.6-opus | `cmqnfcn9p00hv…` | null |
+>
+> provider / model / 嵌入配置三个阶段逐项一致；`traceEndpointId` 换成端点表的 id，
+> 证明读路径真的走了新表而不是「看起来切了」。迁移把 5 个端点 + 2 个嵌入/重排端点收敛到
+> **3 条凭证**（三个 qnaigc 共用一条、硅基的对话与嵌入共用一条），「key 复制 N 份」在真实数据上确实被消掉。
+> 一处需要运营确认：Agnes 那把 key 因不在厂商表里被标为 `vendor=custom · 待确认`（标黄放行，符合设计）。
+>
+> **预发当前状态**：`AI_CONFIG_V2=false`（与生产发布后的默认一致）、`AI_PROBE_SCHEDULED=false`
+> ——预发带的是**生产真实 key**，定时探活会持续产生真实费用，非生产环境不该常开。
+> 要在预发上再验一次切换：把 `AI_CONFIG_V2` 改回 `true` 并 `systemctl restart junshi-api-preprod`。
+
 ### E3. 定时探活（默认开启）
 
 端点探活会周期性外呼（连通性 10 分钟 / Thinking 写法 1 小时 / 模型范围 24 小时），**是真实计费请求**，用量按 `kind='probe'` 单独记账、成本看板可与用户流量分开看。要停：`AI_PROBE_SCHEDULED=false`。探活连续失败会走 Alertmanager → 飞书卡片（`JunshiAiEndpointProbeFailing`），它是**先行指标**——探活先红意味着在用户撞上之前就发现了。
