@@ -6,6 +6,10 @@
 
 ## 变更日志
 
+### 2026-08-08 · 修复完整部署在 H5 复制阶段中断 · 影响面：生产部署脚本 + 工程/部署文档
+
+主分支 `205b4d9` 走 `DEPLOY_H5=1 bash scripts/deploy-prod.sh` 时，server、schema 与 admin 均已成功构建并更新，但 H5 构建成功后脚本仍执行 `cp dist/.`；微信端迁为原生运行时后 Taro H5 产物早已固定到 `app/dist-h5/`，因此发布在复制阶段报 `cannot stat 'dist/.'`，版本标记、Nginx/监控验收也随之中止，线上 H5 继续保留旧包。现生产脚本改为只复制 `dist-h5/`，并在 AGENTS/DEPLOYMENT 固化这条产物边界；后续完整部署必须跑到 `DEPLOYED <sha>` 与公网 smoke，不能把“Webpack 编译成功”当作 H5 已上线。
+
 ### 2026-08-08 · 三期收尾：后台直接写归一化表，旧表降为只读 · 影响面：server（删旧 CRUD + 新写路径）+ admin（模型页重写）+ shared + 测试重组 + docs
 
 三期此前只建了四张表、读路径带开关，**后台仍写旧表、V2 靠 `syncV2FromLegacy` 投影**——于是三笔债一笔都没收，反而多了一层拷贝（净负）。本次把写路径也搬过去，三笔债一次性收掉。

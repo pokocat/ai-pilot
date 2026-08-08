@@ -463,6 +463,6 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 ## 10. 运维
 - 健康检查：`GET /api/health`（可挂监控/负载均衡探针）。
 - 日志：`journalctl -u junshi-api -f`（或 pm2 logs）。
-- 现有固定 ECS（`ecs-user@8.136.36.175`，`/opt/junshi` 上传包式部署）升级：从本机仓库根目录执行 `bash scripts/deploy-prod.sh`，默认发布 `server + admin`；如需同步 H5，加 `DEPLOY_H5=1`。不要在远端 `git pull`，脚本会上传当前 git `HEAD` 归档、保留 `server/.env`、构建重启 API、覆盖 `/var/www/junshi/admin/` 并做公网 smoke。裸 IP 只验 `/api/health`；`/admin/` 只验域名入口，裸 IP `/admin` 预期为 404。
+- 现有固定 ECS（`ecs-user@8.136.36.175`，`/opt/junshi` 上传包式部署）升级：从本机仓库根目录执行 `bash scripts/deploy-prod.sh`，默认发布 `server + admin`；如需同步 H5，加 `DEPLOY_H5=1`。不要在远端 `git pull`，脚本会上传当前 git `HEAD` 归档、保留 `server/.env`、构建重启 API、覆盖 `/var/www/junshi/admin/`，并在 H5 模式下把 `app/dist-h5/` 覆盖到 `/var/www/junshi/h5/` 后做公网 smoke；原生微信迁移后 `app/dist/` 已不是 H5 产物。裸 IP 只验 `/api/health`；`/admin/` 只验域名入口，裸 IP `/admin` 预期为 404。
 - 首次部署或换新机器：仍按 §4 裸机步骤准备数据库、systemd、Nginx 与 HTTPS，再把 `scripts/deploy-prod.sh` 的 `DEPLOY_HOST`/`REMOTE_ROOT`/`PUBLIC_BASE`/`PUBLIC_DOMAIN` 指向新环境。
 - 回滚：保留上一个 `dist/` 与前端产物；DB 变更前先 `pg_dump` 备份。
