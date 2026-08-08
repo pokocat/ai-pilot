@@ -109,16 +109,24 @@ journalctl -u junshi-api -f # 看日志，确认「军师 API ready」
 
 #### 大模型接入配置重设计发布（2026-08-08）
 
-**schema 变更已预检，`db push` 不需要 `ACCEPT_DATA_LOSS`。** 用 `prisma migrate diff` 对着改动前的库
+**schema 变更已对着生产库本体预检（2026-08-08，只读），`db push` 不需要 `ACCEPT_DATA_LOSS`。**
+在生产机上用 `prisma migrate diff --from-schema-datasource`（读的是**线上真实 schema**，不是本地 dev 库）
 生成过实际 SQL，全量是：`ai_model` 加 6 列、`ai_setting` 加 2 列并改 4 个列默认值、新建 4 张表 + 4 个索引。
 **没有 DROP、没有对既有列 `SET NOT NULL`**；两个唯一索引都建在全新空表上，不同于 2026-08 微信
 `transactionId` 那次（给存量数据加约束、必须先查重复值）。所以这次**不要**去开 `ACCEPT_DATA_LOSS` —— 
 真要被 data-loss 门拦住，说明实际 schema 与预期不符，应当停下来查，而不是加开关绕过。
 
-复核用（生产上执行前可自行再跑一遍，只读不写）：
+> **预发出现过 data-loss 警告，那是预发自己的情况，别据此推断生产。**
+> 预发部署时报了 `You are about to drop the column embedding_vec on knowledge_chunk`——
+> 那是 pgvector 建的列（`prisma/pgvector.sql`，**不归 Prisma 管**），所以任何 `db push` 都想删它，
+> 预发脚本因此硬编码了 `--accept-data-loss`。已只读核对：**生产库没有 `embedding_vec` 列**
+> （pgvector 未在生产启用），故这条不适用于生产。**若将来生产启用 pgvector，这个门会成为
+> 每次部署的常驻障碍，届时要先解决它，而不是顺手打开 ACCEPT_DATA_LOSS。**
+
+复核用（发布前在生产机上再跑一遍，只读不写；`--from-schema-datasource` 读的是线上真实 schema）：
 
 ```bash
-cd /srv/junshi/server && npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --script
+cd /opt/junshi/server && ./node_modules/.bin/prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel <新版 schema 路径> --script
 ```
 
 发布后**默认什么都不会变**：`AI_CONFIG_V2` 不设＝完全走旧表；四张新表建了但空着。

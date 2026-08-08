@@ -54,7 +54,9 @@ return cfg.provider === 'claude' || /claude/i.test(cfg.model);
 实际发出的第一候选  : baseUrl=https://pool-a/v1        model=pool-model-a        apiKey=sk-pool-a        temperature=0.9  thinking=disabled/1024
 ```
 
-后果：① 刚粘错的 key/URL 照样显示「连通 ✓」；② 想验证某个端点是否恢复，测到的却是另一个；③ 因为探活没有 `affinityKey`，HRW 的 key 恒为 `'anon'`，**永远命中同一个池成员**，多测几次也发现不了。这是「配置改完看起来没问题、上线却出事」最直接的来源。
+后果：① 刚粘错的 key/URL 照样显示「连通 ✓」；② 想验证某个端点是否恢复，测到的却是另一个；③ 因为探活没有 `affinityKey`，HRW 的 key 恒为 `'anon'`，**永远命中同一个池成员**，多测几次也发现不了。
+
+> **现网影响更正（2026-08-08）**：登生产核对后发现，`ai_setting.routingMode` 确实是 `pool`，但**五个 `ai_model` 没有一个 `poolEnabled=true`**。`resolveCandidates` 在成员为空时直接回落单端点，所以**这个缺陷当前并没有在误导任何人**——它是潜伏的，任何人点一次「入池」就立刻生效。此前把它描述成「现在就在骗运营」是错的，紧迫性应按「潜伏但必炸」而不是「正在发生」来排。顺带一提：生产开着 pool 却零成员，等于端点池从未真正启用过，这本身也值得运营确认是不是本意。
 
 **D2 · `POST /admin/ai-models` 静默丢弃池参数。** `routes/admin.ts:308` 会为 `poolEnabled` 做协议校验并可能返回 409，但 `aiConfig.addModel()` 的 `data` 里根本没有 `poolEnabled/weight/tier/maxConcurrency` 四个字段——校验通过后写库时被丢掉。API 契约（`AiModelUpsert`）声明支持，实际只有 `PATCH` 生效。
 
@@ -447,7 +449,7 @@ export function validateRoute(route: RouteDraft, members: MemberDraft[], endpoin
 
 1. **生产 Anthropic 协议的权威 baseUrl 到底是哪个？** ⬅ **证据已收窄（2026-08-07 二次核对）**：`/bypass/anthropic` 这个路径**在七牛任何公开文档里都查不到**——FAQ 只讲 `https://api.qnaigc.com/v1`（OpenAI 协议），官方 Claude Code 配置工具 [qiniu/coding-helper](https://github.com/qiniu/coding-helper) 写死 `ANTHROPIC_BASE_URL=https://api.qnaigc.com`。两个都能调通不代表等价：中转路径不同，上游后端扇出与提示词缓存的归属可能不同，而 2026-07 那条「缓存 88% 未命中」至今没有别的解释。**已落地的处置**：预设表 `qiniu-anthropic` 用官方值；校验器对 `/bypass/` 路径出 `QINIU_ANTHROPIC_UNDOCUMENTED_PATH`（info，提示不阻断）。**仍需人做的**：向七牛确认后统一，并观察缓存命中率是否变化——这个动作要改生产配置，不该由我替运营决定。
 2. **七牛是否透传 Anthropic 的缓存计价？** ⬅ **证据已收窄（2026-08-07 核对模型广场）**：七牛的价目表**确实有「缓存输入」这一档**（如 DeepSeek-V4-Pro「缓存输入 0.000025 元/K」），说明缓存**读**是分开计价的；但公开价表里**没有单独的缓存写档位**，只有「输入 / 输出 / 缓存输入」三档。若七牛按输入价结算缓存写，我们默认的 `× 1.25`（Anthropic 5m TTL 口径）就是**系统性高估 25%**。**已落地的处置**：`priceCacheWrite` 已建列可填；校验器对七牛端点出 `PRICE_CACHE_WRITE_UNSET_QINIU`（info），建议确认后显式填成与输入价相同。**没做的**：没有据此改 `CACHE_WRITE_MULTIPLIER` 常量——「公开价表没列」是推断不是确认，拿推断去改一个正在记账的常量不合适。
-3. **嵌入 / 重排换到哪一家？** 七牛没有 embedding，当前生产的嵌入实际是本地确定性兜底还是指向别家，需要确认后再决定是「明确保持本地」还是「接第二家厂商」——这直接决定 §7.1 第 5 条与 §7.4 第 8 条的文案怎么写。确认动作很便宜：生产库查一眼 `AiSetting.embeddingEnabled / embeddingBaseUrl` 即可；若从未开启，一期第 5 条只加闸门与文案、不动行为。
+3. ~~**嵌入 / 重排换到哪一家？**~~ ✅ **已查明（2026-08-08，预发从生产复制配置后实测）**：生产**已开启**嵌入与重排，且**显式指向硅基流动**——`BAAI/bge-m3` / `BAAI/bge-reranker-v2-m3`，`baseUrl=https://api.siliconflow.cn/v1`，没有走「留空复用对话模型」那条在七牛下必错的回退。**结论：D5 确实是陷阱不是现役故障**，一期加的闸门只防将来有人把它清空，不改变任何现行行为。本条无需再向任何人确认。~~七牛没有 embedding，当前生产的嵌入实际是本地确定性兜底还是指向别家，需要确认~~——这直接决定 §7.1 第 5 条与 §7.4 第 8 条的文案怎么写。确认动作很便宜：生产库查一眼 `AiSetting.embeddingEnabled / embeddingBaseUrl` 即可；若从未开启，一期第 5 条只加闸门与文案、不动行为。
 4. **三期要不要做。** 一期 + 二期（**含 §7.2-6 的 `dialect` 列**）就能消掉全部已确认缺陷和「猜方言」的根因——注意该结论以 dialect 列为前提，若二期砍掉这一列，推断只是被集中化，根因要拖到三期。三期解决的是「双真相源 / key 复制 / 用途混用」这类结构债，收益真实、代价也真实：迁移窗口之外，四张表 + 六条路由对「一家厂商、一位运营」的现状是不小的心智成本。建议：一二期立即排期；三期挂起到第二家厂商真正要接入时再启动——届时 dialect 列已把最难的地基打好。
 5. **Agent 第三套接入（§1.1-#3）与 FeatureFlag 阈值（#5）的去向。** 目标结构只收编了五处配置里的 #1/#2/#4：`Agent.providerMode/dify` 在新结构中没有位置（`AiRoute.purpose` 全局唯一，表达不了 per-agent 路由），告警阈值也仍与模型配置分屏。三个选项：
    - **A · 收编**：路由加作用域维度（`purpose` 唯一约束改为 `(purpose, scope)`，`scope: 'global' | 'agent:<id>'`），Agent 覆盖变成一条 scoped 路由。最彻底，但把三期的迁移面再扩一圈。
