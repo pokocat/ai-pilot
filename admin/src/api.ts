@@ -146,7 +146,7 @@ export type { AdminAuthStatus, AdminInitRequest, AdminLoginRequest, AdminAuthRes
 export type { AdminSaying as Saying } from '../../shared/contracts';
 export type { SurveyAdmin as SurveyQ } from '../../shared/contracts';
 export type { AdminSku, AdminSkuUpdate, SkuKind, ServiceAssignmentView, ServiceAssignmentUpdate } from '../../shared/contracts';
-export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider, AiThinkingMode, AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus } from '../../shared/contracts';
+export type { AiConfig, AiConfigView, AiPreset, AiTestResult, AiConfigUpdate, AiProvider, AiThinkingMode, AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus, AiDialectMeta, AiEndpointCaps, AiConfigIssue, AiProbeReport, AiProbeItem, AiV2Status } from '../../shared/contracts';
 export type { AdminKnowledgeView, AdminKnowledgeItemRow, ReembedResult, AdminRetrievalDebug, RetrievalDebugCand } from '../../shared/contracts';
 export type { AdminUserContext, AdminUserMemory, KnowledgeDocRow, KnowledgeDetail, KnowledgeChunkRow } from '../../shared/contracts';
 // —— 版本化 / 多运营 / 沙盒 / 评测（运营端调优发布） ——
@@ -161,7 +161,7 @@ import type {
   Overview, AdminAgent, AgentDetail, AdminAgentCreate, AdminAgentUpdate, SurveyAdmin, AdminPlan, AdminPlanCreate, AdminPlanUpdate, AdminSaying,
   AiConfigView, AiConfigUpdate, AiTestResult, AdminUserItem, AdminUserDetail, AdminUsageView, AdminTokenUsageView, AdminAuditItem,
   AgentRuntimeUpdate, SkillToolMeta, AdminTraceListView, AdminTraceDetail, AdminModerationLogView, AdminAgentMemoryView, SkillToolDef, SkillToolUpsert, AgentToolDryRunResult, ToolStatsView, ToolStatItem,
-  AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
+  AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus, AiDialectMeta, AiProbeReport, AiV2Status, AdminKnowledgeView, ReembedResult, AdminRetrievalDebug,
   AdminUserContext, KnowledgeDetail,
   AgentVersionListView, AgentVersionDetail, PublishAgentResult, AdminAccountItem, AdminMe, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   SandboxRequest, SandboxResult, EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalCaseRequest,
@@ -347,6 +347,12 @@ export const api = {
   delAiModel: (id: string) => req<{ ok: boolean }>(`/admin/ai-models/${id}`, 'DELETE'),
   activateAiModel: (id: string) => req<AiConfigView>(`/admin/ai-models/${id}/activate`, 'POST'),
   testAiModel: (body: AiModelTest) => req<AiTestResult>('/admin/ai-models/test', 'POST', body),
+  // 方言目录（代码常量，运营只选不改）。协议决定请求形状，方言决定同协议下的细节写法。
+  aiDialects: () => req<{ dialects: AiDialectMeta[] }>('/admin/ai-dialects'),
+  // 归一化配置（三期）就绪状态。切 AI_CONFIG_V2 前先看这里。
+  aiV2Status: () => req<AiV2Status>('/admin/ai-v2-status'),
+  // 深度检测：按项跑，结果落库并回填能力标记（能力从「靠猜」变成「靠测」）。
+  probeAiModel: (id: string, kinds: string[]) => req<AiProbeReport>(`/admin/ai-models/${id}/probe`, 'POST', { kinds }),
   // 端点池：多路分流 + 故障转移（services/llmPool）。status 带每个端点的实时冷却态。
   aiRouting: () => req<AiRoutingStatus>('/admin/ai-routing'),
   saveAiRouting: (body: Partial<AiRouting>) => req<AiRoutingStatus>('/admin/ai-routing', 'PUT', body),

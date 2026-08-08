@@ -4,8 +4,14 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../db.js';
 import {
   getAiConfig, setAiConfig, publicConfig, AI_PRESETS, effectiveProvider, type ResolvedAiConfig,
-  listModels, addModel, updateModel, deleteModel, activateModel, mergedTestConfig,
+  listModels, addModel, updateModel, deleteModel, activateModel, mergedTestConfig, mergedConfigTest,
 } from '../services/aiConfig.js';
+import {
+  checkEndpoint, checkPool, checkAux, draftFromUpsert, hasBlocking, blockingMessage,
+} from '../services/aiValidation.js';
+import { probeModelById, ALL_PROBES, type ProbeKind } from '../services/aiProbe.js';
+import { DIALECTS } from '../llm/dialects.js';
+import { syncV2FromLegacy, v2Status } from '../services/aiRoutes.js';
 import { poolStatus, __resetLlmPool } from '../services/llmPool.js';
 import { testEmbedding } from '../services/embedding.js';
 import { testRerank } from '../services/rerank.js';
@@ -276,26 +282,17 @@ export async function adminRoutes(app: FastifyInstance) {
     return result;
   });
 
-  // —— 大模型配置（运营后台可随时切换；默认 Agnes 2.0 Flash） ——
+  // —— 大模型配置（运营后台可随时切换；未配置时缺省 mock，由运营选接入商建第一个端点） ——
   // config=当前生效配置；presets=内置接入商目录（添加向导用）；models=已添加模型（快速切换源）。
   app.get('/admin/ai-config', async () => {
     const cfg = await getAiConfig(true);
     return { config: publicConfig(cfg), presets: AI_PRESETS, models: await listModels() };
   });
   app.put<{ Body: AiConfigUpdate }>('/admin/ai-config', async (req, reply) => {
-    if (req.body?.provider !== undefined) {
-      const [setting, poolRows] = await Promise.all([
-        prisma.aiSetting.findUnique({ where: { id: 'default' }, select: { routingMode: true } }),
-        prisma.aiModel.findMany({ where: { poolEnabled: true }, select: { label: true, provider: true } }),
-      ]);
-      const incompatible = poolRows.filter((m) => m.provider !== req.body.provider);
-      if (setting?.routingMode === 'pool' && (req.body.provider === 'mock' || incompatible.length > 0)) {
-        return reply.code(409).send({
-          error: `端点池已启用，修改协议前请先移出不同协议端点`
-            + (incompatible.length ? `：${incompatible.map((m) => m.label).join('、')}` : ''),
-          code: 'AI_POOL_PROVIDER_MISMATCH',
-        });
-      }
+    // 嵌入/重排的「留空复用对话端点」要过协议 + 厂商两条否决；池的一致性另算。
+    const issues = [...await checkAux(req.body ?? {}), ...await checkPool()];
+    if (hasBlocking(issues)) {
+      return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
     }
     const cfg = await setAiConfig(req.body ?? {});
     await recordAudit({ action: 'admin.ai.update', payload: { provider: cfg.provider, model: cfg.model } });
@@ -306,40 +303,28 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post<{ Body: AiModelUpsert }>('/admin/ai-models', async (req, reply) => {
     const b = req.body;
     if (!b || !b.label?.trim() || !b.provider) return reply.code(400).send({ error: '缺少展示名或协议' });
-    if (b.poolEnabled) {
-      const setting = await prisma.aiSetting.findUnique({
-        where: { id: 'default' },
-        select: { provider: true, routingMode: true },
-      });
-      if (setting?.routingMode === 'pool' && b.provider !== setting.provider) {
-        return reply.code(409).send({
-          error: `端点池已启用，只能新增与当前生效模型相同协议（${setting.provider}）的池端点`,
-          code: 'AI_POOL_PROVIDER_MISMATCH',
-        });
-      }
+    const draft = await draftFromUpsert(b);
+    const issues = [...await checkEndpoint(draft), ...await checkPool({ override: draft })];
+    if (hasBlocking(issues)) {
+      return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
     }
     const m = await addModel(b);
     await recordAudit({ action: 'admin.ai.model.add', payload: { id: m.id, provider: m.provider, model: m.model } });
-    return m;
+    return { ...m, issues };
   });
   app.patch<{ Params: { id: string }; Body: AiModelUpsert }>('/admin/ai-models/:id', async (req, reply) => {
-    const [existing, setting] = await Promise.all([
-      prisma.aiModel.findUnique({ where: { id: req.params.id }, select: { provider: true, poolEnabled: true } }),
-      prisma.aiSetting.findUnique({ where: { id: 'default' }, select: { provider: true, routingMode: true } }),
-    ]);
+    const existing = await prisma.aiModel.findUnique({ where: { id: req.params.id }, select: { id: true } });
     if (!existing) return reply.code(404).send({ error: '模型不存在' });
-    const nextProvider = req.body?.provider ?? existing.provider;
-    const nextPoolEnabled = req.body?.poolEnabled ?? existing.poolEnabled;
-    if (setting?.routingMode === 'pool' && nextPoolEnabled && nextProvider !== setting.provider) {
-      return reply.code(409).send({
-        error: `端点池已启用，只能加入与当前生效模型相同协议（${setting.provider}）的端点`,
-        code: 'AI_POOL_PROVIDER_MISMATCH',
-      });
+    // 用「这次要改成的值」代入池做预判，而不是拿库里的旧值算——否则运营保存完才发现协议冲突。
+    const draft = await draftFromUpsert(req.body ?? ({} as AiModelUpsert), req.params.id);
+    const issues = [...await checkEndpoint(draft), ...await checkPool({ override: draft })];
+    if (hasBlocking(issues)) {
+      return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
     }
     const m = await updateModel(req.params.id, req.body ?? ({} as AiModelUpsert));
     if (!m) return reply.code(404).send({ error: '模型不存在' });
     await recordAudit({ action: 'admin.ai.model.update', payload: { id: m.id, provider: m.provider, model: m.model } });
-    return m;
+    return { ...m, issues };
   });
   app.delete<{ Params: { id: string } }>('/admin/ai-models/:id', async (req, reply) => {
     const r = await deleteModel(req.params.id);
@@ -349,18 +334,13 @@ export async function adminRoutes(app: FastifyInstance) {
   });
   app.post<{ Params: { id: string } }>('/admin/ai-models/:id/activate', async (req, reply) => {
     try {
-      const [target, setting, poolRows] = await Promise.all([
-        prisma.aiModel.findUnique({ where: { id: req.params.id }, select: { provider: true } }),
-        prisma.aiSetting.findUnique({ where: { id: 'default' }, select: { routingMode: true } }),
-        prisma.aiModel.findMany({ where: { poolEnabled: true }, select: { label: true, provider: true } }),
-      ]);
+      const target = await prisma.aiModel.findUnique({ where: { id: req.params.id }, select: { id: true } });
       if (!target) return reply.code(404).send({ error: '模型不存在' });
-      const incompatible = poolRows.filter((m) => m.provider !== target.provider);
-      if (setting?.routingMode === 'pool' && (target.provider === 'mock' || incompatible.length > 0)) {
-        return reply.code(409).send({
-          error: `端点池已启用，切换前请先移出不同协议端点：${incompatible.map((m) => m.label).join('、')}`,
-          code: 'AI_POOL_PROVIDER_MISMATCH',
-        });
+      // 切换生效模型不会改变池的成员，但会改变「嵌入能否复用对话端点」这类判断，
+      // 所以池与 aux 两套一起过一遍——历史上这里只判了池协议。
+      const issues = [...await checkPool(), ...await checkAux({})];
+      if (hasBlocking(issues)) {
+        return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
       }
       const cfg = await activateModel(req.params.id);
       await recordAudit({ action: 'admin.ai.model.activate', payload: { id: req.params.id, provider: cfg.provider, model: cfg.model } });
@@ -383,56 +363,49 @@ export async function adminRoutes(app: FastifyInstance) {
     if (b.sticky !== undefined) data.stickyRouting = !!b.sticky;
     if (!Object.keys(data).length) return reply.code(400).send({ error: '无可更新字段' });
 
-    // 切到 pool 前先确认池里真有可用端点，否则等于把 AI 关了。
+    // 切到 pool 前先确认池自洽（有成员、同协议、都有 key），否则等于把 AI 关了。
     if (data.routingMode === 'pool') {
-      const [setting, models] = await Promise.all([
-        prisma.aiSetting.findUnique({ where: { id: 'default' }, select: { provider: true } }),
-        prisma.aiModel.findMany({ where: { poolEnabled: true }, select: { label: true, provider: true } }),
-      ]);
-      if (models.length === 0) return reply.code(409).send({ error: '池内没有已启用的端点，请先在模型列表勾选「加入分流池」' });
-      const activeProvider = setting?.provider ?? '';
-      const incompatible = models.filter((m) => m.provider !== activeProvider);
-      if (activeProvider === 'mock' || incompatible.length > 0) {
-        return reply.code(409).send({
-          error: `端点池只能包含与当前生效模型相同协议（${activeProvider || '未配置'}）的端点`
-            + (incompatible.length ? `；请先移出：${incompatible.map((m) => m.label).join('、')}` : ''),
-          code: 'AI_POOL_PROVIDER_MISMATCH',
-        });
+      const issues = await checkPool({ mode: 'pool' });
+      if (hasBlocking(issues)) {
+        return reply.code(409).send({ error: blockingMessage(issues), code: 'AI_CONFIG_INVALID', issues });
       }
     }
     await prisma.aiSetting.update({ where: { id: 'default' }, data });
     __resetLlmPool();
+    await syncV2FromLegacy(); // 切到 V2 后，路由模式改在新表上才算数
     await recordAudit({ action: 'admin.ai.routing.update', payload: { ...data } as Record<string, string | boolean> });
     return poolStatus();
   });
+
+  // 方言目录（后台下拉 + 「确认固化」用）。代码常量，运营只选不改。
+  app.get('/admin/ai-dialects', async () => ({ dialects: DIALECTS }));
+
+  // 归一化配置（三期）就绪状态：迁移跑没跑、各用途路由长什么样、有没有待确认的凭证。
+  // 切 AI_CONFIG_V2 之前先看这里——ready=false 时切过去就是把 AI 关掉。
+  app.get('/admin/ai-v2-status', async () => v2Status());
 
   // 探活：用「添加/编辑表单」字段直测（modelId 传入且 key 空则取该模型已存 key）。
   app.post<{ Body: AiModelTest }>('/admin/ai-models/test', async (req) => {
     return pingModel(await mergedTestConfig(req.body ?? ({} as AiModelTest)));
   });
+
+  // 深度检测：按项跑（连通性 / 模型范围 / thinking 写法 / 工具 / 流式 / 长输出 / 嵌入 / 重排）。
+  // 结果落库并**回填能力标记**——探活说「这个模型不支持思考」，校验器下一秒就开始拦截。
+  app.post<{ Params: { id: string }; Body: { kinds?: ProbeKind[] } }>('/admin/ai-models/:id/probe', async (req, reply) => {
+    const asked = req.body?.kinds?.length ? req.body.kinds : (['connectivity'] as ProbeKind[]);
+    const kinds = asked.filter((k) => ALL_PROBES.includes(k));
+    if (!kinds.length) return reply.code(400).send({ error: '没有可执行的检测项' });
+    const outcome = await probeModelById(req.params.id, kinds, now());
+    if (!outcome) return reply.code(404).send({ error: '模型不存在' });
+    await recordAudit({ action: 'admin.ai.model.probe', payload: { id: req.params.id, kinds: kinds.join(','), ok: outcome.ok } });
+    return outcome;
+  });
   // 测试连接：用「当前保存配置」叠加本次未保存的改动（各 key 留空则用已存 key）。
   // 对话模型必测；嵌入/重排若开启则一并探活回传。
+  // 合并逻辑（含 poolBypass）在 aiConfig.mergedConfigTest —— 与 mergedTestConfig 是同一缺陷的两个入口，
+  // 必须同源，否则修好一个另一个还会被端点池劫持。
   app.post<{ Body: AiConfigUpdate }>('/admin/ai-config/test', async (req) => {
-    const saved = await getAiConfig(true);
-    const b = req.body ?? {};
-    const merged: ResolvedAiConfig = {
-      ...saved,
-      provider: b.provider ?? saved.provider,
-      baseUrl: b.baseUrl ?? saved.baseUrl,
-      model: b.model ?? saved.model,
-      apiKey: b.apiKey && b.apiKey.length ? b.apiKey : saved.apiKey,
-      embeddingModel: b.embeddingModel ?? saved.embeddingModel,
-      temperature: b.temperature ?? saved.temperature,
-      thinkingMode: b.thinkingMode ?? saved.thinkingMode,
-      thinkingBudget: b.thinkingBudget ?? saved.thinkingBudget,
-      embeddingEnabled: b.embeddingEnabled ?? saved.embeddingEnabled,
-      embeddingBaseUrl: b.embeddingBaseUrl ?? saved.embeddingBaseUrl,
-      embeddingApiKey: b.embeddingApiKey && b.embeddingApiKey.length ? b.embeddingApiKey : saved.embeddingApiKey,
-      rerankEnabled: b.rerankEnabled ?? saved.rerankEnabled,
-      rerankModel: b.rerankModel ?? saved.rerankModel,
-      rerankBaseUrl: b.rerankBaseUrl ?? saved.rerankBaseUrl,
-      rerankApiKey: b.rerankApiKey && b.rerankApiKey.length ? b.rerankApiKey : saved.rerankApiKey,
-    };
+    const merged: ResolvedAiConfig = mergedConfigTest(await getAiConfig(true), req.body ?? {});
     const result: AiTestResult = await pingModel(merged);
     if (merged.embeddingEnabled) result.embedding = await testEmbedding(merged);
     if (merged.rerankEnabled) result.rerank = await testRerank(merged);

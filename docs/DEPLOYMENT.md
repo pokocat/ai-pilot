@@ -107,6 +107,33 @@ journalctl -u junshi-api -f # 看日志，确认「军师 API ready」
 ```
 自检：`curl http://127.0.0.1:4000/api/health` → `{"ok":true}`。
 
+#### 大模型接入配置重设计发布（2026-08-08）
+
+**schema 变更已对着生产库本体预检（2026-08-08，只读），`db push` 不需要 `ACCEPT_DATA_LOSS`。**
+在生产机上用 `prisma migrate diff --from-schema-datasource`（读的是**线上真实 schema**，不是本地 dev 库）
+生成过实际 SQL，全量是：`ai_model` 加 6 列、`ai_setting` 加 2 列并改 4 个列默认值、新建 4 张表 + 4 个索引。
+**没有 DROP、没有对既有列 `SET NOT NULL`**；两个唯一索引都建在全新空表上，不同于 2026-08 微信
+`transactionId` 那次（给存量数据加约束、必须先查重复值）。所以这次**不要**去开 `ACCEPT_DATA_LOSS` —— 
+真要被 data-loss 门拦住，说明实际 schema 与预期不符，应当停下来查，而不是加开关绕过。
+
+> **预发出现过 data-loss 警告，那是预发自己的情况，别据此推断生产。**
+> 预发部署时报了 `You are about to drop the column embedding_vec on knowledge_chunk`——
+> 那是 pgvector 建的列（`prisma/pgvector.sql`，**不归 Prisma 管**），所以任何 `db push` 都想删它，
+> 预发脚本因此硬编码了 `--accept-data-loss`。已只读核对：**生产库没有 `embedding_vec` 列**
+> （pgvector 未在生产启用），故这条不适用于生产。**若将来生产启用 pgvector，这个门会成为
+> 每次部署的常驻障碍，届时要先解决它，而不是顺手打开 ACCEPT_DATA_LOSS。**
+
+复核用（发布前在生产机上再跑一遍，只读不写；`--from-schema-datasource` 读的是线上真实 schema）：
+
+```bash
+cd /opt/junshi/server && ./node_modules/.bin/prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel <新版 schema 路径> --script
+```
+
+发布后**默认什么都不会变**：`AI_CONFIG_V2` 不设＝完全走旧表；四张新表建了但空着。
+一期修复（探活不再被端点池劫持等）与二期护栏（保存时的互斥校验、端点检测）即时生效。
+定时探活默认开启且会真实计费，要停设 `AI_PROBE_SCHEDULED=false`（见 §E3）。
+归一化切换是独立的一次性动作，见 §E2，与本次发布解耦。
+
 #### 持久对话生成首次发布（2026-08-05）
 
 本次数据库变更是加法：新增 `generation_job / generation_attempt / generation_effect`，并给
@@ -194,7 +221,130 @@ sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 如果线上保留裸 IP 的 HTTP server 块（例如固定 ECS 的 `http://8.136.36.175`），裸 IP 只用于 `/api/` 健康检查和兼容回调，不暴露运营后台：`/admin` 与 `/admin/` 必须直接返回 404。运营后台统一从域名 HTTPS 入口访问：`https://wxapi.aibuzz.cn/admin/`。
 
 ### E. 配置大模型（可随时切换）
-打开 `https://你的域名/admin/` → **「模型」页** → 默认 **Agnes 2.0 Flash**（`apihub.agnes-ai.com/v1`）→ 填 API Key → **测试连接** → 保存即生效。要换 DeepSeek/Qwen/OpenAI/Claude：点对应预设再填该家的 key。**未配 key 时全站自动用本地 mock**（零成本可演示）。
+打开 `https://你的域名/admin/` → **「模型」页** → 选内置接入商预设（**七牛分两条：Anthropic 协议 / OpenAI 兼容——同一家两个协议是两个不同的 baseUrl，选错就是上线后 404/400**）→ 填 API Key → **测试连接** → 保存即生效。**未配 key 时全站自动用本地 mock**（零成本可演示）。
+
+保存时后台会跑互斥校验：`error` 直接拒绝（这份配置发出去必然失败），`warn` 可存但常驻黄标（能跑，但结果不是你以为的那样，例如 DeepSeek 的 Anthropic 端点会忽略思考预算）。端点行的「检测」按钮跑连通性 / Thinking 写法 / 模型范围三项，结果会回填能力标记；「固化方言」把当前推断出的协议方言写死，之后请求组装不再靠推断。
+
+### E1. 「模型」页走查清单（2026-08-07 二三期新增的界面，登录后两分钟过一遍）
+
+> **预发没有部署后台界面。** `deploy-preprod.sh` 只加了 `/api_preprod/` 这一个 API 反代，
+> 不构建也不部署 admin/H5 静态资源——所以 `https://wxapi.aibuzz.cn/api_preprod` 下面**没有界面可开**。
+> 要对着预发走查，用本地后台连预发 API（仓库里本就有这个脚本）：
+>
+> ```bash
+> cd admin && npm run dev:preprod   # 本地 :5174 → 代理到 https://wxapi.aibuzz.cn/api_preprod
+> ```
+>
+> **预发首次进入要先初始化管理员账号**：`GET /api_preprod/admin/auth/status` 返回
+> `{"initialized":false}`（生产是 `true`），即预发的 `admin_account` 表还是空的，
+> 首次进入需用后端 `ADMIN_TOKEN` 验明身份后设置日常账号密码。这一步只做一次。
+
+
+这些界面在管理员鉴权之后，自动化走不到；展示逻辑本身已提成 `admin/src/modelGateway.ts` 的纯函数并单测（26 例），
+所以要看的不是「文案对不对」，而是**取值有没有接上**——列表页每一项都该显示出真实值而不是空白或 `undefined`：
+
+| # | 位置 | 该看到什么 | 不对的话说明 |
+|---|---|---|---|
+| 1 | 页面结构 | 只有两层：**接入点**（一行一个上游）+ **路由**（对话分流 / 检索增强）。**不应再有**「快速切换」「已添加模型」「端点池」三个并列分区 | 还是旧三段＝构建产物没更新 |
+| 2 | 接入点行 · 第一排 | `Anthropic 协议 · 模型名 · Thinking:… · 方言 …（已固化/推断中）` | 显示 `claude`/`openai` 这种裸 provider＝没走新文案 |
+| 3 | 接入点行 · 第二排 | 单价与检测态：`单价 入¥…/出¥… · 上次检测…` 或 `单价待配（成本记 0）` / `从未检测` | 从没测过却显示「通过」＝取值接错 |
+| 4 | 接入点行 · 池参数 | 「在分流池」的行**内联展开**权重/备份层/并发；**不应**在页面下方另起一个分区 | 参数还在下面＝同一端点的属性又被劈成两半 |
+| 5 | 接入点行 · 按钮 | 未固化方言的行才有「固化方言」；点一次后消失、第一排变「已固化」 | 点完不变＝PATCH 没带 dialect |
+| 6 | 「检测」按钮 | 跑完 toast 里未过项用中文名（「Thinking 写法」），不是 `thinking` | 出现英文枚举＝没走 probeName |
+| 7 | 添加接入点 · 表单顶部 | **「接入商」+「协议」两个独立下拉**，协议始终可见；协议下再有「协议方言」（默认「跟随接入商自动判定」）。**不应**出现「内置接入商 / 通用兼容协议 / 完全自主定义」三选一 | 还是三选一＝假分类没换掉 |
+| 8 | 表单 · 单价区 | **四个**输入框（输入 / 输出 / 缓存读 / 缓存写） | 只有三个＝priceCacheWrite 没接上 |
+| 9 | 表单 · 保存 | 故意把 baseUrl 填成 `…/v1/chat/completions` → 保存被拒并说明原因 | 存进去了＝校验器没接上 |
+| 10 | 检索增强区 | 对话端点是 Anthropic 协议 / 七牛时出现红条，且 baseUrl 与 Key 标「（必填）」 | 仍写「留空＝复用对话模型」＝闸门没生效 |
+| 11 | 归一化配置区 | 跑过迁移才出现；显示各用途路由与主端点 | 迁移前不出现是**正常**的 |
+
+第 9、10 两条是**故意造错来验拦截**，验完记得改回去。
+
+### E2. 归一化接入配置切换（重设计三期 · 一次性，可回滚）
+
+> 背景与设计见 `docs/[OPUS5]AI_CONFIG_REDESIGN_2026-08-07.md`。**不做这一步也完全正常**——`AI_CONFIG_V2` 不开就是旧行为。
+> 做了之后的收益：对话 / 成果 / 辅助抽取 / 嵌入 / 重排各走各的路由（辅助档不再只能改 env + 重启），一把 key 喂多个端点、换 key 只改一处。
+
+```bash
+cd /srv/junshi/server
+npx prisma db push                 # 建四张新表（纯新增，旧表一字不动）
+npm run ai:migrate                 # ① 预演：只打印要发生什么，不写库
+npm run ai:migrate:apply           # ② 写入（幂等，可反复跑）
+```
+
+③ 打开后台「模型」页看**「归一化接入配置」**分区，或直接 `GET /api/admin/ai-v2-status`：
+   - `ready` 必须为 `true`（chat 路由有可用端点）。**`false` 时切过去就是把 AI 关掉**，别切。
+   - 有「待确认接入商」的凭证就先在后台确认——迁移期只标黄不阻断，但删旧列之前必须清零。
+
+④ 切读路径：`server/.env` 加 `AI_CONFIG_V2=true` → `systemctl restart junshi-api`。
+   **回滚 = 把这行删掉再重启**，旧表一个字段都没动。切换等价性已在测试库按生产形态彩排并钉成回归（`test/aiCutover.test.ts`）。
+
+⑤ 观察一个发布周期后再考虑删旧列。**能不能删跑一条命令**：
+
+```bash
+cd /srv/junshi/server && npm run ai:check-drop
+```
+
+   全绿也**不等于**现在就删——脚本会提示还需人工确认「已观察满一个周期」且「期间没回滚过开关」，这两条机器查不了。
+
+> **切换已在预发按真实生产配置彩排过（2026-08-08）。** 预发从生产复制了真实 `ai_setting`/`ai_model`
+> （5 个端点、3 家接入商），完整跑过 迁移 → 切 `AI_CONFIG_V2=true` → 回滚 一整圈：
+>
+> | 阶段 | 运行时解析 | `traceEndpointId` | `dialect` |
+> |---|---|---|---|
+> | 切换前 | claude · dj-claude-4.6-opus | `cmqnfcn9p00hv…`（`ai_model` 行） | null（推断） |
+> | 切到 V2 | claude · dj-claude-4.6-opus | `cmsk3dj4c0008…`（`ai_endpoint` 行） | `anthropic_gateway`（已固化） |
+> | 回滚后 | claude · dj-claude-4.6-opus | `cmqnfcn9p00hv…` | null |
+>
+> provider / model / 嵌入配置三个阶段逐项一致；`traceEndpointId` 换成端点表的 id，
+> 证明读路径真的走了新表而不是「看起来切了」。迁移把 5 个端点 + 2 个嵌入/重排端点收敛到
+> **3 条凭证**（三个 qnaigc 共用一条、硅基的对话与嵌入共用一条），「key 复制 N 份」在真实数据上确实被消掉。
+> 一处需要运营确认：Agnes 那把 key 因不在厂商表里被标为 `vendor=custom · 待确认`（标黄放行，符合设计）。
+>
+> **预发当前状态**：`AI_CONFIG_V2=false`（与生产发布后的默认一致）、`AI_PROBE_SCHEDULED=false`
+> ——预发带的是**生产真实 key**，定时探活会持续产生真实费用，非生产环境不该常开。
+> 要在预发上再验一次切换：把 `AI_CONFIG_V2` 改回 `true` 并 `systemctl restart junshi-api-preprod`。
+
+### E3. 定时探活（默认开启）
+
+端点探活会周期性外呼（连通性 10 分钟 / Thinking 写法 1 小时 / 模型范围 24 小时），**是真实计费请求**，用量按 `kind='probe'` 单独记账、成本看板可与用户流量分开看。要停：`AI_PROBE_SCHEDULED=false`。探活连续失败会走 Alertmanager → 飞书卡片（`JunshiAiEndpointProbeFailing`），它是**先行指标**——探活先红意味着在用户撞上之前就发现了。
+
+### E4. 待向七牛确认的两个事实（影响生产配置与成本记账）
+
+两条都已查到公开证据但**未获供应商确认**，故代码里只做了 info 级提示、没有擅自改生产值：
+
+| 待确认 | 已查到的证据 | 确认后要做什么 |
+|---|---|---|
+| Anthropic 协议的权威 baseUrl | 生产在用的 `/bypass/anthropic` **在七牛公开文档里查不到**；官方 `qiniu/coding-helper` 写死 `ANTHROPIC_BASE_URL=https://api.qnaigc.com` | 统一到官方值，并观察提示词缓存命中率是否变化（2026-07 那条「缓存 88% 未命中」至今无别的解释） |
+| 缓存写是否单独计价 | 模型广场**有「缓存输入」档**（缓存读分开计价），但**没有单独的缓存写档位** | 若按输入价结算，把每个七牛端点的「缓存写单价」显式填成与输入价相同——否则按默认的 ×1.25 推导会**系统性高估 25%** |
+
+<details>
+<summary>可直接发给七牛技术支持的问法（点开复制）</summary>
+
+> 你好，我们在用贵司 AI 大模型推理服务调用 Claude 系模型（Anthropic 协议），有两个问题想确认：
+>
+> **1. Anthropic 协议的权威接入地址。**
+> 我们目前用的是 `https://api.qnaigc.com/bypass/anthropic`，但这个路径在贵司公开文档里没有找到；
+> 而贵司官方的 Claude Code 配置工具（github.com/qiniu/coding-helper）写的是
+> `ANTHROPIC_BASE_URL=https://api.qnaigc.com`。
+> 想确认：**这两个地址是否等价？** 如果不等价，区别是什么（是否走不同的中转/上游账号池）？我们应该用哪一个？
+> 背景：我们观察到提示词缓存命中率长期偏低（近 30 天约 10%，而同一会话的相邻请求间隔多在 5 分钟内），
+> 怀疑与请求被分发到不同上游账号有关——Anthropic 的提示词缓存是按账号隔离的。
+> 如果贵司侧可以固定后端/账号，也想了解如何配置。
+>
+> **2. 提示词缓存的计费口径。**
+> 我们在模型广场看到有「缓存输入」这一档单价，理解为**缓存读**（cache_read_input_tokens）单独计价。
+> 想确认：**缓存写**（cache_creation_input_tokens）是按哪个价格结算？
+> - 是按普通输入价（1×）？
+> - 还是像 Anthropic 官方那样按 1.25×（5 分钟 TTL）/ 2×（1 小时 TTL）？
+> 我们的成本核算目前按 1.25× 估算，如果贵司实际按输入价结算，我们会高估约 25%，希望按真实口径对齐。
+>
+> 另外如果有 Claude 系模型的完整价目表（含上述各档），也麻烦提供一份。谢谢！
+
+拿到答复后：
+- 问题 1 → 若不等价，统一到官方地址并观察缓存命中率变化；同时更新 `AI_PRESETS` 里 `qiniu-anthropic` 的 `baseUrl`。
+- 问题 2 → 若按 1× 结算，把每个七牛端点的「缓存写单价」填成与输入价相同；
+  若确认按 1.25×/2×，则填对应值。**两种情况都是在后台填，不用改代码**（`priceCacheWrite` 已是可填字段）。
+</details>
 
 完成后访问 `https://你的域名/` 用手机号 `13800000000` 登录即是演示账号（含演示项目/版本化报告/知识）。
 

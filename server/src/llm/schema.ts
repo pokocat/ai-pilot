@@ -12,6 +12,7 @@ import type {
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
   AiProvider, AiThinkingMode, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
   AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus,
+  AiCapState, AiEndpointCaps, AiDialectMeta, AiConfigIssue, AiProbeItem, AiProbeReport, AiV2Status,
   SkillsConfig, LlmContextTrace,
 } from '../../../shared/contracts';
 export type {
@@ -20,6 +21,7 @@ export type {
   ReportDiff, SectionDiff, WordOp, SaveReportResult, SummarizeResult,
   AiProvider, AiThinkingMode, AiConfig, AiConfigUpdate, AiPreset, AiConfigView, AiTestResult,
   AiModel, AiModelUpsert, AiModelTest, AiRouting, AiRoutingStatus,
+  AiCapState, AiEndpointCaps, AiDialectMeta, AiConfigIssue, AiProbeItem, AiProbeReport, AiV2Status,
   SkillsConfig,
 };
 

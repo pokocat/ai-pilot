@@ -25,6 +25,8 @@ export interface TraceInput {
   endpointLabel?: string | null;
   status: 'ok' | 'error';
   errorMessage?: string | null;
+  /** classifyLlmError() 的分类结果；只喂 Prometheus 错误分布指标，不落库（无 schema 变更）。 */
+  errorBucket?: string | null;
   latencyMs: number;
   toolCalls?: number;
   iterations?: number;
@@ -37,7 +39,7 @@ export interface TraceInput {
 /** 记一条 trace。内部 catch，绝不影响主流程。 */
 export async function recordTrace(t: TraceInput): Promise<void> {
   // Prometheus 侧同口径计数（先记内存再写库：写库失败也不能丢观测）。
-  noteLlmCall(t.kind, t.provider, t.status, t.latencyMs);
+  noteLlmCall(t.kind, t.provider, t.model, t.status, t.latencyMs, t.errorBucket ?? undefined);
   try {
     const u = t.usage;
     await prisma.llmTrace.create({

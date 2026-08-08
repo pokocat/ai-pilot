@@ -1088,6 +1088,58 @@ export interface AiConfigUpdate {
   embeddingEnabled?: boolean; embeddingBaseUrl?: string; embeddingApiKey?: string;
   rerankEnabled?: boolean; rerankModel?: string; rerankBaseUrl?: string; rerankApiKey?: string;
 }
+/** 能力三态。unknown=没探测过（不拦截）；no=已被探测或运营证伪（校验器据此拦截） */
+export type AiCapState = 'unknown' | 'yes' | 'no';
+/** 端点能力标记。来源优先级：运营显式覆盖 > 探活回填 > 厂商预设声明 */
+export interface AiEndpointCaps {
+  thinking?: AiCapState; tools?: AiCapState; streaming?: AiCapState; vision?: AiCapState;
+  maxOutputTokens?: number;
+  /** 运营手动锁定的能力项，探活回填时不覆盖 */
+  locked?: string[];
+}
+/** 协议方言目录项（代码常量，运营只选不改）。协议决定请求形状，方言决定同协议下的细节写法 */
+export interface AiDialectMeta {
+  id: string; label: string;
+  protocol: 'anthropic' | 'openai_chat' | 'dify' | 'mock';
+  /** 关闭思考的写法：省略 / 显式 disabled / 该方言没有 thinking 字段 */
+  thinkingOff: 'omit' | 'explicit' | 'unsupported';
+  /** 开启思考时 budget_tokens 是否真被上游采纳（DeepSeek 的 Anthropic 端点为 false） */
+  budgetHonored: boolean;
+  /** 嵌入/重排能否与对话端点同源（Anthropic 协议为 false：/embeddings 路径不存在） */
+  auxEndpointsSameOrigin: boolean;
+  note?: string;
+}
+/** 配置互斥校验的一条结论。error=拒绝保存；warn=可保存但后台常驻黄标；info=提示 */
+export interface AiConfigIssue {
+  level: 'error' | 'warn' | 'info';
+  code: string;
+  field?: string;
+  message: string;
+}
+/** 单项探活结果 */
+export interface AiProbeItem {
+  kind: string; ok: boolean; at: string;
+  latencyMs?: number; error?: string;
+  detail?: Record<string, unknown>;
+}
+/** 一次探活的完整回执 */
+export interface AiProbeReport {
+  endpointId?: string;
+  ok: boolean;
+  results: AiProbeItem[];
+  /** 本次探活顺带回填的能力标记（后台可据此刷新展示） */
+  caps?: AiEndpointCaps;
+}
+/** 归一化接入配置（三期）的就绪状态。切 AI_CONFIG_V2 之前先看这里：ready=false 时切过去＝把 AI 关掉 */
+export interface AiV2Status {
+  /** 读路径是否已切到归一化表（AI_CONFIG_V2） */
+  enabled: boolean;
+  /** chat 路由是否有可用端点——这是「能不能切」的最低门槛 */
+  ready: boolean;
+  routes: { purpose: string; mode: string; members: number; primary: string | null }[];
+  /** 迁移时 vendor 推断不出、被标黄待确认的凭证（只标黄不阻断，但必须看得见） */
+  credentialsNeedingReview: { id: string; label: string }[];
+}
 /** 内置接入商预设：选择后一键填好某家大模型的 baseUrl/model（添加模型向导用） */
 export interface AiPreset {
   id: string; label: string; provider: AiProvider;
@@ -1106,10 +1158,21 @@ export interface AiModel {
   thinkingBudget: number;
   hasKey: boolean;        // 是否已配置 key（不回传明文）
   preset?: string | null; // 来源内置接入商 id（自定义/自主定义则空）
+  /** 运营显式固化的协议方言 id；null=尚未固化，运行时走 inferDialect 推断 */
+  dialect?: string | null;
+  /** 实际生效的方言 id（显式值或推断值）。与 dialect 不等时说明「还在靠猜」，后台标灰并给「确认固化」 */
+  resolvedDialect?: string;
+  /** 能力三态（探活回填 + 运营可覆盖）。thinking='no' 会让校验器拦下开思考的配置 */
+  caps?: AiEndpointCaps;
+  lastProbeAt?: string | null;
+  lastProbeOk?: boolean | null;
   active: boolean;        // 是否当前生效（= AiSetting.activeModelId 指向本行）
   priceInput: number;       // 内部成本核算：元 / 1M 输入 token（0=未配置，回退内置价表）
   priceOutput: number;      // 元 / 1M 输出 token
   priceCachedInput: number; // 元 / 1M 命中缓存输入 token（0=按 priceInput 计）
+  /** 元 / 1M 写入缓存输入 token。0=按 priceInput × 1.25（Anthropic 5m TTL）推导；
+   *  1h TTL（2×）或供应商按统一单价结算（1×）时必须显式填 */
+  priceCacheWrite: number;
   // —— 端点池（多路分流 + 故障转移；routingMode=pool 时生效）——
   poolEnabled: boolean;    // 是否加入分流池。false=只作为「可切换的备选」，行为同旧版
   weight: number;          // 相对权重（≥1）。分流按权重摊，不是均分
@@ -1125,8 +1188,10 @@ export interface AiModel {
 export interface AiModelUpsert {
   provider: AiProvider; label: string; baseUrl?: string; model: string;
   apiKey?: string; embeddingModel?: string; temperature?: number; preset?: string | null;
+  /** 显式固化协议方言；'' 或 null=清空回到推断 */
+  dialect?: string | null;
   thinkingMode?: AiThinkingMode; thinkingBudget?: number;
-  priceInput?: number; priceOutput?: number; priceCachedInput?: number;
+  priceInput?: number; priceOutput?: number; priceCachedInput?: number; priceCacheWrite?: number;
   poolEnabled?: boolean; weight?: number; tier?: number; maxConcurrency?: number;
 }
 /** 端点池实时状态（含每个端点的冷却态，供后台展示「谁在被限流」） */

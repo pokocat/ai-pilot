@@ -2,18 +2,18 @@
 import { useEffect, useState } from 'react';
 import Icon from '../Icon';
 import NumInput from '../NumInput';
-import { api, type AiConfig, type AiPreset, type AiProvider, type AiThinkingMode, type AiModel, type AiRouting, type AiRoutingStatus, type AiModelUpsert } from '../api';
+import { api, type AiConfig, type AiPreset, type AiProvider, type AiThinkingMode, type AiModel, type AiRouting, type AiRoutingStatus, type AiModelUpsert, type AiDialectMeta, type AiProbeReport, type AiV2Status } from '../api';
 import { Field } from '../format';
 import { PageHead, ErrorState, Skeleton, ConfirmDialog, type ConfirmSpec } from '../components';
-import { modelGatewayField, modelSupportsThinking } from '../modelGateway';
-// —— 大模型配置：运营自行「添加模型」（内置接入商 / 通用兼容 / 自主定义），添加后进入快速切换 ——
-type ModelMode = 'builtin' | 'compatible' | 'custom';
-
+import { modelGatewayField, modelSupportsThinking, auxReuseBlock, probeName, dialectLine as fmtDialectLine, probeLine as fmtProbeLine, auxMissingReason } from '../modelGateway';
+// —— 大模型配置：运营添加接入点（接入商 × 协议 × 方言三个正交维度）——
+// 旧版这里有个 ModelMode（builtin/compatible/custom）三选一，那是假分类：把「你怎么填的表」
+// 和「这是什么协议」混成一档。预设现在本身就是「厂商 × 协议」，三选一因此彻底没有意义，已删。
 interface ModelForm {
   id?: string;          // 编辑时有
-  mode: ModelMode;
-  preset: string;       // builtin 选中的内置接入商 id（'' = 未选）
-  provider: AiProvider;
+  preset: string;       // 选中的接入商预设 id（'' = 自定义手填）
+  provider: AiProvider; // 线协议
+  dialect: string;      // 协议方言；'' = 跟随接入商自动判定
   label: string;
   baseUrl: string;
   model: string;
@@ -24,13 +24,14 @@ interface ModelForm {
   priceInput: number;       // 元 / 1M 输入 token（内部成本核算）
   priceOutput: number;      // 元 / 1M 输出 token
   priceCachedInput: number; // 元 / 1M 命中缓存输入 token（0=同输入价）
+  priceCacheWrite: number;  // 元 / 1M 写入缓存输入 token（0=按输入价 ×1.25 推导）
   hasKey: boolean;      // 编辑时该模型是否已存 key（决定 Key 占位符）
 }
 
 const BLANK_MODEL: ModelForm = {
-  mode: 'builtin', preset: '', provider: 'openai', label: '', baseUrl: '', model: '', apiKey: '',
+  preset: '', provider: 'openai', dialect: '', label: '', baseUrl: '', model: '', apiKey: '',
   temperature: 0.7, thinkingMode: 'disabled', thinkingBudget: 1024,
-  priceInput: 0, priceOutput: 0, priceCachedInput: 0, hasKey: false,
+  priceInput: 0, priceOutput: 0, priceCachedInput: 0, priceCacheWrite: 0, hasKey: false,
 };
 
 export function ModelView({ toast }: { toast: (m: string) => void }) {
@@ -45,6 +46,13 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
   const [auxTest, setAuxTest] = useState<{ ok: boolean; msg: string } | null>(null);
   // 端点池：多路分流 + 故障转移。单端点被上游限流时把流量转到同 tier 的其它端点。
   const [routing, setRouting] = useState<AiRoutingStatus | null>(null);
+  // 协议方言目录：显式固化后这个端点不再靠推断组装请求（见 server/src/llm/dialects.ts）。
+  const [dialects, setDialects] = useState<AiDialectMeta[]>([]);
+  // 深度检测结果：按端点 id 存最近一次。
+  const [probes, setProbes] = useState<Record<string, AiProbeReport>>({});
+  // 归一化接入配置（三期）的就绪状态。只读展示——切换靠 AI_CONFIG_V2 环境变量，
+  // 故意不做成后台开关：这是一次需要迁移窗口 + 观察期的读路径切换，不该一键点开。
+  const [v2, setV2] = useState<AiV2Status | null>(null);
 
   const [loadErr, setLoadErr] = useState('');
   const [confirmSpec, setConfirmSpec] = useState<ConfirmSpec | null>(null);
@@ -57,7 +65,13 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
     });
   }).catch((e: unknown) => setLoadErr((e as Error)?.message || '模型配置加载失败'));
   const loadRouting = () => api.aiRouting().then(setRouting).catch(() => { /* 端点池状态次要，失败不挡主配置 */ });
-  useEffect(() => { load(); loadRouting(); }, []);
+  useEffect(() => {
+    load();
+    loadRouting();
+    // 方言目录是代码常量，取一次即可；失败不挡主配置（端点行退回只显示推断值）。
+    api.aiDialects().then((v) => setDialects(v.dialects)).catch(() => { /* 次要 */ });
+    api.aiV2Status().then(setV2).catch(() => { /* 未迁移时后端也可能没这张表，忽略 */ });
+  }, []);
   // 模型配置是「改一下全线上都变」的屏，加载失败必须明说并可重试，不能空白等着运营乱点。
   if (!cfg) {
     return (
@@ -112,30 +126,57 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
       .then((r) => { setRouting(r); toast('已保存路由设置'); })
       .catch((e) => toast(e?.message || '保存失败'));
   };
+  // 深度检测：连通性 + thinking 写法 + 模型范围。结果回填能力标记，校验器立刻据此拦截。
+  // 只跑这三项而不是全部八项：它们最便宜、覆盖了线上最常炸的那几类，且不产生长输出账单。
+  const probe = (m: AiModel) => {
+    if (busy) return;
+    setBusy(true);
+    api.probeAiModel(m.id, ['connectivity', 'thinking', 'model_scope'])
+      .then((r) => {
+        setProbes((prev) => ({ ...prev, [m.id]: r }));
+        const bad = r.results.filter((x) => !x.ok);
+        toast(bad.length ? `检测未通过：${bad.map((x) => `${probeName(x.kind)}(${x.error || '失败'})`).join('；')}` : '检测全部通过');
+        load(); // 能力标记可能被回填，刷新列表
+      })
+      .catch((e) => toast(e?.message || '检测请求失败'))
+      .finally(() => setBusy(false));
+  };
+  // 「确认固化」：把当前推断出的方言写死进这个端点，从此不再靠猜。
+  const fixDialect = (m: AiModel) => {
+    const target = m.resolvedDialect;
+    if (!target || busy) return;
+    setBusy(true);
+    api.updateAiModel(m.id, { provider: m.provider, label: m.label, model: m.model, dialect: target })
+      .then(() => { toast(`已固化方言：${dialectLabel(target)}`); load(); })
+      .catch((e) => toast(e?.message || '固化失败'))
+      .finally(() => setBusy(false));
+  };
+  const dialectLabel = (id?: string | null) => dialects.find((d) => d.id === id)?.label || id || '未知';
+  // 展示口径全部收在 modelGateway 的纯函数里（可单测）；这里只做取值绑定。
+  const dialectLine = (m: AiModel) => fmtDialectLine(m, dialectLabel);
+  const probeLine = (m: AiModel) => fmtProbeLine(m, probes[m.id]);
   const edit = (m: AiModel) => {
     setTest(null);
     setForm({
-      id: m.id, mode: m.preset ? 'builtin' : m.provider === 'openai' ? 'compatible' : 'custom',
-      preset: m.preset || '', provider: m.provider, label: m.label, baseUrl: m.baseUrl, model: m.model,
+      id: m.id, preset: m.preset || '', provider: m.provider, dialect: m.dialect || '',
+      label: m.label, baseUrl: m.baseUrl, model: m.model,
       apiKey: '', temperature: m.temperature,
       thinkingMode: m.thinkingMode, thinkingBudget: m.thinkingBudget,
-      priceInput: m.priceInput, priceOutput: m.priceOutput, priceCachedInput: m.priceCachedInput, hasKey: m.hasKey,
+      priceInput: m.priceInput, priceOutput: m.priceOutput, priceCachedInput: m.priceCachedInput,
+      priceCacheWrite: m.priceCacheWrite, hasKey: m.hasKey,
     });
   };
 
   // —— 添加/编辑表单 ——
   if (form) {
-    const setMode = (mode: ModelMode) => {
-      setTest(null);
-      if (mode === 'compatible') set({ mode, provider: 'openai', preset: '' });
-      else if (mode === 'custom') set({ mode, preset: '' });
-      else set({ mode });
-    };
     const applyPreset = (id: string) => {
       setTest(null);
       const p = presets.find((x) => x.id === id);
-      if (!p) { set({ preset: '' }); return; }
-      set({ preset: p.id, provider: p.provider, label: form.label.trim() ? form.label : p.label, baseUrl: p.baseUrl, model: p.model });
+      if (!p) { set({ preset: '' }); return; }  // 自定义：只清预设标记，已填的地址/模型保留
+      set({
+        preset: p.id, provider: p.provider, dialect: '',
+        label: form.label.trim() ? form.label : p.label, baseUrl: p.baseUrl, model: p.model,
+      });
     };
     const gatewayField = modelGatewayField(form.provider);
     const showKey = form.provider !== 'mock';
@@ -162,8 +203,10 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
       const body: AiModelUpsert = {
         provider: form.provider, label: form.label.trim(), baseUrl: form.baseUrl.trim(), model: form.model.trim(),
         temperature: Number(form.temperature), preset: form.preset || null,
+        dialect: form.dialect || null,
         thinkingMode: form.thinkingMode, thinkingBudget: Number(form.thinkingBudget),
-        priceInput: Number(form.priceInput) || 0, priceOutput: Number(form.priceOutput) || 0, priceCachedInput: Number(form.priceCachedInput) || 0,
+        priceInput: Number(form.priceInput) || 0, priceOutput: Number(form.priceOutput) || 0,
+        priceCachedInput: Number(form.priceCachedInput) || 0, priceCacheWrite: Number(form.priceCacheWrite) || 0,
         ...(form.apiKey ? { apiKey: form.apiKey } : {}),
       };
       const p = form.id ? api.updateAiModel(form.id, body) : api.addAiModel(body);
@@ -174,34 +217,43 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
       <>
         <div className="sec-h"><span className="t">{form.id ? '编辑模型' : '添加模型'}</span><span className="s">{form.id ? '保存后若为生效模型则即时更新' : '保存后进入快速切换'}</span></div>
         <div className="pad">
-          {/* 选择接入商模式 */}
-          <Field label="接入方式">
-            <div className="bill-seg">
-              {([['builtin', '内置接入商'], ['compatible', '通用兼容协议'], ['custom', '完全自主定义']] as const).map(([v, l]) => (
-                <div key={v} className={`bill-opt ${form.mode === v ? 'on' : ''}`} onClick={() => setMode(v)}><div className="bo-t">{l}</div></div>
-              ))}
-            </div>
+          {/* 接入商 × 协议 —— 两个正交维度。
+              旧版这里是「内置接入商 / 通用兼容协议 / 完全自主定义」三选一，那是个假分类：
+              它把「你怎么填的表」和「这是什么协议」混成一档，而协议只在「完全自主定义」下才露面。
+              预设本身现在已经是「厂商 × 协议」（七牛占两条：Anthropic 与 OpenAI 兼容各一），
+              所以这里改成先选接入商、协议随之带出且始终可见可改。 */}
+          <Field label="接入商">
+            <select className="ai-input" value={form.preset} onChange={(e) => applyPreset(e.target.value)}>
+              <option value="">自定义（手填网关地址）</option>
+              {presets.map((p) => <option key={p.id} value={p.id}>{p.label}{p.note ? ` · ${p.note}` : ''}</option>)}
+            </select>
           </Field>
 
-          {form.mode === 'builtin' && (
-            <Field label="内置接入商（选择后自动填好网关 / 模型，仍可改）">
-              <select className="ai-input" value={form.preset} onChange={(e) => applyPreset(e.target.value)}>
-                <option value="">— 选择接入商 —</option>
-                {presets.map((p) => <option key={p.id} value={p.id}>{p.label}{p.note ? ` · ${p.note}` : ''}</option>)}
-              </select>
-            </Field>
-          )}
-          {form.mode === 'compatible' && (
-            <div className="ai-note" style={{ marginTop: 0, marginBottom: 12 }}>通用 OpenAI 兼容协议：填入任意兼容厂商的网关地址（带 /v1）与模型名即可。</div>
-          )}
-          {form.mode === 'custom' && (
-            <Field label="协议 provider">
-              <select className="ai-input" value={form.provider} onChange={(e) => set({ provider: e.target.value as AiProvider })}>
-                <option value="openai">openai（兼容 Agnes/DeepSeek/Qwen…）</option>
-                <option value="claude">claude（Anthropic）</option>
-                <option value="mock">mock（本地模板）</option>
-              </select>
-            </Field>
+          <Field label="协议">
+            <select className="ai-input" value={form.provider} onChange={(e) => set({ provider: e.target.value as AiProvider, dialect: '' })}>
+              <option value="claude">Anthropic 协议（/v1/messages）</option>
+              <option value="openai">OpenAI 兼容协议（/v1/chat/completions）</option>
+              <option value="mock">本地模板（不外呼）</option>
+            </select>
+          </Field>
+          <div className="ai-note" style={{ marginTop: 0, marginBottom: 12 }}>
+            协议决定请求长什么样，**不是模型名的属性**——同一家厂商的两种协议是两个不同的网关地址，选错就是上线后 404/400。
+          </div>
+
+          {form.provider !== 'mock' && dialects.length > 0 && (
+            <>
+              <Field label="协议方言">
+                <select className="ai-input" value={form.dialect} onChange={(e) => set({ dialect: e.target.value })}>
+                  <option value="">跟随接入商自动判定</option>
+                  {dialects.filter((d) => d.protocol === (form.provider === 'claude' ? 'anthropic' : 'openai_chat'))
+                    .map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+                </select>
+              </Field>
+              <div className="ai-note" style={{ marginTop: 0, marginBottom: 12 }}>
+                同一协议下各家的细节写法不同（关闭思考是省略字段还是显式发、能不能带思考预算）。
+                留「自动判定」即按接入商推断；确认过就显式选定，这个端点从此不靠猜。
+              </div>
+            </>
           )}
 
           <Field label="展示名"><input className="ai-input" value={form.label} onChange={(e) => set({ label: e.target.value })} placeholder="Agnes 2.0 Flash" /></Field>
@@ -261,10 +313,12 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
 
           {form.provider !== 'mock' && (
             <>
-              <div className="ai-note" style={{ marginTop: 0, marginBottom: 8 }}>Token 单价（元 / 1M token）· 仅用于内部成本核算，不影响对用户计费 · 留 0 走内置价表估算。</div>
+              <div className="ai-note" style={{ marginTop: 0, marginBottom: 8 }}>Token 单价（元 / 1M token）· 仅用于内部成本核算，不影响对用户计费 · 输入价与输出价必须同时填，缺一档整个模型不校准（成本记 0）。</div>
               <Field label="输入单价（元 / 1M token）"><NumInput className="ai-input" min={0} step={0.01} value={form.priceInput} onChange={(priceInput) => set({ priceInput })} /></Field>
               <Field label="输出单价（元 / 1M token）"><NumInput className="ai-input" min={0} step={0.01} value={form.priceOutput} onChange={(priceOutput) => set({ priceOutput })} /></Field>
-              <Field label="缓存输入单价（元 / 1M token · 0=同输入价）"><NumInput className="ai-input" min={0} step={0.01} value={form.priceCachedInput} onChange={(priceCachedInput) => set({ priceCachedInput })} /></Field>
+              <Field label="缓存读单价（元 / 1M token · 0=同输入价）"><NumInput className="ai-input" min={0} step={0.01} value={form.priceCachedInput} onChange={(priceCachedInput) => set({ priceCachedInput })} /></Field>
+              <Field label="缓存写单价（元 / 1M token · 0=按输入价 ×1.25 推导）"><NumInput className="ai-input" min={0} step={0.01} value={form.priceCacheWrite} onChange={(priceCacheWrite) => set({ priceCacheWrite })} /></Field>
+              <div className="ai-note" style={{ marginTop: 0, marginBottom: 12 }}>缓存写默认按 Anthropic 5 分钟 TTL 的 1.25× 推导。用 1 小时 TTL（2×）、或供应商按统一单价结算（此时应填成与输入价相同）时，必须在这里显式填，否则成本会系统性偏差。</div>
             </>
           )}
 
@@ -282,8 +336,13 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
     );
   }
 
-  // —— 检索增强（嵌入 / 重排）：全局开关 + 可独立配凭证（留空回退当前生效模型）——
+  // —— 检索增强（嵌入 / 重排）：全局开关 + 独立凭证 ——
+  // 「留空＝复用对话模型」不是永远可用的：对话端点走 Anthropic 协议时拼出的 /embeddings 不存在；
+  // 七牛这类不提供嵌入的厂商即使协议合法也必定失败。命中任一条就必须显式填网关与 Key。
+  const reuse = auxReuseBlock(cfg.provider, cfg.baseUrl);
   const setA = (p: Partial<typeof aux>) => setAux((a) => ({ ...a, ...p }));
+  /** 闸门命中且开了增强项却没填独立网关 → 这份配置存下去必然静默失败，先拦住。 */
+  const auxMissing = () => auxMissingReason(reuse.blocked, aux, cfg);
   const auxPayload = () => ({
     embeddingEnabled: aux.embeddingEnabled, embeddingModel: aux.embeddingModel, embeddingBaseUrl: aux.embeddingBaseUrl,
     rerankEnabled: aux.rerankEnabled, rerankModel: aux.rerankModel, rerankBaseUrl: aux.rerankBaseUrl,
@@ -303,6 +362,8 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
     setBusy(false);
   };
   const saveAux = async () => {
+    const missing = auxMissing();
+    if (missing) { toast(missing); return; }
     setBusy(true);
     try { const v = await api.saveAiConfig(auxPayload()); setCfg(v.config); setAux((a) => ({ ...a, embeddingApiKey: '', rerankApiKey: '' })); toast('检索增强配置已保存并即时生效'); }
     catch { toast('保存失败'); }
@@ -336,45 +397,87 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
           </div>
         </div>
 
-        {/* 快速切换：点选已添加模型即时生效 */}
-        <div className="ai-label">快速切换</div>
-        <div className="ai-presets">
-          {models.map((m) => (
-            <button key={m.id} className={`ai-preset ${m.active ? 'on' : ''}`} disabled={busy} onClick={() => activate(m)} title={`${m.provider} · ${m.model}${m.hasKey ? '' : ' · 未配 Key'}`}>{m.label}</button>
-          ))}
-          <button className="ai-preset add" onClick={() => { setTest(null); setForm({ ...BLANK_MODEL }); }}>＋ 添加模型</button>
-        </div>
-
-        {/* 已添加模型管理 */}
-        <div className="ai-label">已添加模型</div>
-        {models.length === 0 && <div className="usage-meta" style={{ padding: '10px 0' }}>还没有模型。点「添加模型」接入一个大模型。</div>}
-        {models.map((m) => (
-          <div key={m.id} className="mem-card">
-            <span className="mi"><Icon name="insight" size={16} /></span>
-            <div className="mb" style={{ cursor: 'pointer' }} onClick={() => edit(m)}>
-              <div className="mt">{m.label}{m.active && <span className="tag" style={{ marginLeft: 6 }}>生效中</span>}{!m.hasKey && m.provider !== 'mock' && <span className="tag" style={{ marginLeft: 6 }}>未配 Key</span>}</div>
-              <div className="mm">{m.provider} · {m.model || '—'}{modelSupportsThinking(m.provider, m.model) ? ` · Thinking:${m.thinkingMode}` : ''}{m.preset ? ` · 内置:${m.preset}` : ''}{(m.priceInput > 0 || m.priceOutput > 0) ? ` · 单价 入¥${m.priceInput}/出¥${m.priceOutput} 每1M` : ' · 单价待配'}{m.poolEnabled ? ` · 池内 权重${m.weight}${m.tier > 0 ? ` 备份T${m.tier}` : ''}${m.maxConcurrency > 0 ? ` 并发${m.maxConcurrency}` : ''}` : ''}</div>
+        {/* ── 接入点 ──────────────────────────────────────────────────────────
+            旧版这里是三块：「快速切换」（一排按钮）+「已添加模型」（一排卡片）+「端点池」
+            （权重/备份层/并发另起一个分区）。前两块是同一批对象渲染两遍；第三块把同一个端点
+            的属性劈到了两个地方，运营要来回找。现在合成一块：一行一个接入点，它的全部属性和
+            操作都在这一行里。 */}
+        <div className="ai-label">接入点 · {models.length} 个</div>
+        {models.length === 0 && <div className="usage-meta" style={{ padding: '10px 0' }}>还没有接入点。点下方「添加接入点」接一个上游。</div>}
+        {models.map((m) => {
+          const st = routing?.endpoints.find((x: AiRoutingStatus['endpoints'][number]) => x.id === m.id);
+          return (
+            <div key={m.id} className="mem-card">
+              <span className="mi"><Icon name="insight" size={16} /></span>
+              <div className="mb" style={{ cursor: 'pointer' }} onClick={() => edit(m)}>
+                <div className="mt">
+                  {m.label}
+                  {m.active && <span className="tag" style={{ marginLeft: 6 }}>对话生效中</span>}
+                  {m.poolEnabled && <span className="tag" style={{ marginLeft: 6 }}>在分流池</span>}
+                  {st?.cooling && <span className="tag off" style={{ marginLeft: 6 }}>冷却中</span>}
+                  {!m.hasKey && m.provider !== 'mock' && <span className="tag" style={{ marginLeft: 6 }}>未配 Key</span>}
+                </div>
+                {/* 第一行＝这个端点「是什么」：协议 · 模型 · 思考 · 方言 */}
+                <div className="mm">
+                  {m.provider === 'claude' ? 'Anthropic 协议' : m.provider === 'openai' ? 'OpenAI 兼容' : '本地模板'}
+                  {' · '}{m.model || '—'}
+                  {modelSupportsThinking(m.provider, m.model) ? ` · Thinking:${m.thinkingMode}` : ''}
+                  {dialectLine(m) ? ` · ${dialectLine(m)}` : ''}
+                </div>
+                {/* 第二行＝「花多少钱、健不健康」 */}
+                <div className="mm">
+                  {(m.priceInput > 0 && m.priceOutput > 0) ? `单价 入¥${m.priceInput}/出¥${m.priceOutput} 每1M` : '单价待配（成本记 0）'}
+                  {probeLine(m)}
+                  {st?.cooling && st.coolingUntil ? ` · ${st.coolingReason === 'rate_limited' ? '被限流' : '连续报错'}，${new Date(st.coolingUntil).toLocaleTimeString()} 后恢复` : ''}
+                </div>
+              </div>
+              {!m.active && <button className="mini-btn" onClick={() => activate(m)} disabled={busy} title="把对话用途切到这个接入点">设为对话生效</button>}
+              <button className="mini-btn" disabled={busy} title="跑一遍连通性 / Thinking 写法 / 模型范围三项检测，结果会回填能力标记" onClick={() => probe(m)}>检测</button>
+              {!m.dialect && m.resolvedDialect && m.provider !== 'mock' && (
+                <button className="mini-btn" disabled={busy} title="把当前推断出的协议方言写死到这个端点，之后请求组装不再靠推断" onClick={() => fixDialect(m)}>固化方言</button>
+              )}
+              <button className={`mini-btn ${m.poolEnabled ? 'primary' : ''}`} disabled={busy} title={m.poolEnabled ? '已在分流池内，点击移出' : '加入分流池，参与多路分流与故障转移'} onClick={() => togglePool(m)}>
+                {m.poolEnabled ? '移出池' : '入池'}
+              </button>
+              <button className="mini-btn danger" onClick={() => del(m)}>删除</button>
+              {/* 池参数内联：它是这个端点的属性，不该跑到另一个分区去 */}
+              {m.poolEnabled && routing?.mode === 'pool' && (
+                <div className="usage-row" style={{ width: '100%' }}>
+                  <Field label="权重">
+                    <input className="ai-input" type="number" min={1} defaultValue={m.weight}
+                      onBlur={(e) => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== m.weight) setPoolField(m, { weight: v }); }} />
+                  </Field>
+                  <Field label="备份层">
+                    <input className="ai-input" type="number" min={0} defaultValue={m.tier}
+                      onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.tier) setPoolField(m, { tier: v }); }} />
+                  </Field>
+                  <Field label="并发/实例">
+                    <input className="ai-input" type="number" min={0} defaultValue={m.maxConcurrency}
+                      onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.maxConcurrency) setPoolField(m, { maxConcurrency: v }); }} />
+                  </Field>
+                </div>
+              )}
             </div>
-            {!m.active && <button className="mini-btn" onClick={() => activate(m)} disabled={busy}>切换</button>}
-            <button className={`mini-btn ${m.poolEnabled ? 'primary' : ''}`} disabled={busy} title={m.poolEnabled ? '已在分流池内，点击移出' : '加入分流池，参与多路分流与故障转移'} onClick={() => togglePool(m)}>
-              {m.poolEnabled ? '在池中' : '入池'}
-            </button>
-            <button className="mini-btn danger" onClick={() => del(m)}>删除</button>
-          </div>
-        ))}
-        {/* —— 端点池：多路分流 + 故障转移 —— */}
-        <div className="ai-label" style={{ marginTop: 18 }}>端点池（多路分流 · 故障转移）</div>
-        <div className={`ai-test ${routing?.mode === 'pool' ? 'ok' : ''}`} style={{ margin: '0 0 12px' }}>
-          <Icon name={routing?.mode === 'pool' ? 'check' : 'alert'} size={13} />
-          <span>
-            {routing?.mode === 'pool'
-              ? `分流中：池内 ${routing.endpoints.length} 个端点。某个端点被上游限流时，流量自动转到同层的其它端点；${routing.sticky ? '同一会话固定落同一端点（保住上游提示词缓存）' : '会话粘性已关闭，缓存命中率会下降'}。`
-              : '当前只用「生效中」那一个端点——它被上游限流时全站 AI 会一起停摆。把多个端点「入池」后即可开启分流。'}
-          </span>
-        </div>
+          );
+        })}
+        <button className="add-btn full" onClick={() => { setTest(null); setForm({ ...BLANK_MODEL }); }}>＋ 添加接入点</button>
+
+        {/* ── 路由：哪个用途用哪些接入点 ────────────────────────────────────
+            旧版把「对话怎么分流」叫「端点池」、把「嵌入/重排用谁」叫「检索增强」，
+            两者结构其实同构（用途 → 接入点），界面却是完全不同的两套，运营要学两遍。
+            现在归到同一层「路由」之下。 */}
+        <div className="ai-label" style={{ marginTop: 18 }}>路由 · 哪个用途用哪些接入点</div>
+
         <div className="ai-sub">
           <div className="ai-sub-h">
-            <div className="b"><div className="t">启用端点池</div><div className="s">关＝只用生效中的那一个；开＝按权重分流到池内端点，撞 429/5xx 自动转移并冷却该端点</div></div>
+            <div className="b">
+              <div className="t">对话 / 成果 · 多路分流</div>
+              <div className="s">
+                {routing?.mode === 'pool'
+                  ? `分流中：${models.filter((m) => m.poolEnabled).length} 个接入点参与。撞 429/5xx 自动转移并冷却该端点`
+                  : '关＝只用「对话生效中」那一个；开＝按权重分流，某个端点被限流时全站 AI 不会一起停摆'}
+              </div>
+            </div>
             <div className={`sw ${routing?.mode === 'pool' ? 'on' : ''}`} onClick={() => saveRouting({ mode: routing?.mode === 'pool' ? 'single' : 'pool' })}><i /></div>
           </div>
           {routing?.mode === 'pool' && (
@@ -383,50 +486,30 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
               <div className={`sw ${routing.sticky ? 'on' : ''}`} onClick={() => saveRouting({ sticky: !routing.sticky })}><i /></div>
             </div>
           )}
-          {routing?.mode === 'pool' && routing.endpoints.length === 0 && (
-            <div className="usage-meta" style={{ padding: '10px 0' }}>池里还没有端点。在上面的模型列表里点「入池」。</div>
+          {routing?.mode === 'pool' && models.filter((m) => m.poolEnabled).length === 0 && (
+            <div className="usage-meta" style={{ padding: '10px 0' }}>分流已开但池里没有接入点——在上面的列表里点「入池」，否则等于没开。</div>
           )}
-          {routing?.mode === 'pool' && models.filter((m) => m.poolEnabled).map((m) => {
-            const st = routing.endpoints.find((x: AiRoutingStatus['endpoints'][number]) => x.id === m.id);
-            return (
-              <div key={m.id} className="usage-row">
-                <div className="usage-name">
-                  {m.label}
-                  {st?.cooling && <span className="tag off" style={{ marginLeft: 6 }}>冷却中</span>}
-                  <div className="usage-meta">
-                    {m.model || '—'}
-                    {st?.cooling && st.coolingUntil ? ` · ${st.coolingReason === 'rate_limited' ? '被限流' : '连续报错'}，${new Date(st.coolingUntil).toLocaleTimeString()} 后恢复` : ''}
-                  </div>
-                </div>
-                <Field label="权重">
-                  <input className="ai-input" type="number" min={1} defaultValue={m.weight}
-                    onBlur={(e) => { const v = Math.max(1, Number(e.target.value) || 1); if (v !== m.weight) setPoolField(m, { weight: v }); }} />
-                </Field>
-                <Field label="备份层">
-                  <input className="ai-input" type="number" min={0} defaultValue={m.tier}
-                    onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.tier) setPoolField(m, { tier: v }); }} />
-                </Field>
-                <Field label="并发/实例">
-                  <input className="ai-input" type="number" min={0} defaultValue={m.maxConcurrency}
-                    onBlur={(e) => { const v = Math.max(0, Number(e.target.value) || 0); if (v !== m.maxConcurrency) setPoolField(m, { maxConcurrency: v }); }} />
-                </Field>
-              </div>
-            );
-          })}
           {routing?.mode === 'pool' && (
             <div className="ai-note">
-              权重＝分流占比（按权重摊，不是均分）。备份层 0＝正常分流；填 1 以上＝降级备份，只有第 0 层全部冷却时才启用——
-              放不同模型会改变回答质量，按需使用。并发是<b>每个实例</b>的上限，多实例部署请按实例数分摊；0＝用全局默认。
+              权重＝分流占比（按权重摊，不是均分），在上面每个接入点行内直接改。备份层 0＝正常分流；
+              填 1 以上＝降级备份，只有第 0 层全部冷却时才启用——放不同模型会改变回答质量，按需使用。
+              并发是<b>每个实例</b>的上限，多实例部署请按实例数分摊；0＝用全局默认。
             </div>
           )}
         </div>
 
-        {/* —— 检索增强：向量嵌入 / 重排（全局开关，不随对话模型切换）—— */}
-        <div className="ai-label" style={{ marginTop: 18 }}>检索增强（知识库 / 记忆）</div>
+        {/* 嵌入 / 重排：结构上就是另外两个用途的路由，故与上面的分流开关同属「路由」层。 */}
+        <div className="ai-label" style={{ marginTop: 14 }}>检索增强用途 · 嵌入与重排</div>
         <div className={`ai-test ${embReady || rerankReady ? 'ok' : 'err'}`} style={{ margin: '0 0 12px' }}>
           <Icon name={embReady || rerankReady ? 'check' : 'alert'} size={13} />
           <span>当前生效：嵌入 {embReady ? `远程·${cfg.embeddingModel}` : '本地确定性兜底'} ｜ 重排 {rerankReady ? `远程·${cfg.rerankModel}` : '未启用（融合分顺序）'}。配置可用≠每次调用都成功——点下方「测试增强项」实地探活；调用失败会静默回退本地。</span>
         </div>
+        {reuse.blocked && (
+          <div className="ai-test err" style={{ margin: '0 0 12px' }}>
+            <Icon name="alert" size={13} />
+            <span>{reuse.reason}留空不会报错，只会在每次检索时静默回退本地嵌入——所以这里必须填满，不能靠「复用对话模型」。</span>
+          </div>
+        )}
         <div className="ai-sub">
           <div className="ai-sub-h">
             <div className="b"><div className="t">向量嵌入 Embedding</div><div className="s">关＝本地确定性嵌入（零依赖）；开＝调用嵌入模型，语义召回更准</div></div>
@@ -435,9 +518,11 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
           {aux.embeddingEnabled && (
             <>
               <Field label="嵌入模型 model"><input className="ai-input" value={aux.embeddingModel} onChange={(e) => setA({ embeddingModel: e.target.value })} placeholder="text-embedding-3-small / text-embedding-v3" /></Field>
-              <Field label="接入地址 baseUrl（留空＝复用当前生效模型）"><input className="ai-input" value={aux.embeddingBaseUrl} onChange={(e) => setA({ embeddingBaseUrl: e.target.value })} placeholder="留空复用对话模型网关" /></Field>
-              <Field label={`API Key${cfg.hasEmbeddingKey ? '（已配置，留空＝不改）' : '（留空＝复用对话模型）'}`}>
-                <input className="ai-input" type="password" value={aux.embeddingApiKey} onChange={(e) => setA({ embeddingApiKey: e.target.value })} placeholder={cfg.hasEmbeddingKey ? '••••••（留空保留现有）' : '留空复用对话模型 Key'} />
+              <Field label={`接入地址 baseUrl${reuse.blocked ? '（必填）' : '（留空＝复用当前生效模型）'}`}>
+                <input className="ai-input" value={aux.embeddingBaseUrl} onChange={(e) => setA({ embeddingBaseUrl: e.target.value })} placeholder={reuse.blocked ? '如 https://api.siliconflow.cn/v1' : '留空复用对话模型网关'} />
+              </Field>
+              <Field label={`API Key${cfg.hasEmbeddingKey ? '（已配置，留空＝不改）' : reuse.blocked ? '（必填）' : '（留空＝复用对话模型）'}`}>
+                <input className="ai-input" type="password" value={aux.embeddingApiKey} onChange={(e) => setA({ embeddingApiKey: e.target.value })} placeholder={cfg.hasEmbeddingKey ? '••••••（留空保留现有）' : reuse.blocked ? '粘贴该厂商的 API Key' : '留空复用对话模型 Key'} />
               </Field>
             </>
           )}
@@ -451,9 +536,11 @@ export function ModelView({ toast }: { toast: (m: string) => void }) {
           {aux.rerankEnabled && (
             <>
               <Field label="重排模型 model"><input className="ai-input" value={aux.rerankModel} onChange={(e) => setA({ rerankModel: e.target.value })} placeholder="bge-reranker-v2-m3 / rerank-3 …" /></Field>
-              <Field label="接入地址 baseUrl（留空＝复用当前生效模型）"><input className="ai-input" value={aux.rerankBaseUrl} onChange={(e) => setA({ rerankBaseUrl: e.target.value })} placeholder="如 https://api.siliconflow.cn/v1" /></Field>
-              <Field label={`API Key${cfg.hasRerankKey ? '（已配置，留空＝不改）' : '（留空＝复用对话模型）'}`}>
-                <input className="ai-input" type="password" value={aux.rerankApiKey} onChange={(e) => setA({ rerankApiKey: e.target.value })} placeholder={cfg.hasRerankKey ? '••••••（留空保留现有）' : '留空复用对话模型 Key'} />
+              <Field label={`接入地址 baseUrl${reuse.blocked ? '（必填）' : '（留空＝复用当前生效模型）'}`}>
+                <input className="ai-input" value={aux.rerankBaseUrl} onChange={(e) => setA({ rerankBaseUrl: e.target.value })} placeholder="如 https://api.siliconflow.cn/v1" />
+              </Field>
+              <Field label={`API Key${cfg.hasRerankKey ? '（已配置，留空＝不改）' : reuse.blocked ? '（必填）' : '（留空＝复用对话模型）'}`}>
+                <input className="ai-input" type="password" value={aux.rerankApiKey} onChange={(e) => setA({ rerankApiKey: e.target.value })} placeholder={cfg.hasRerankKey ? '••••••（留空保留现有）' : reuse.blocked ? '粘贴该厂商的 API Key' : '留空复用对话模型 Key'} />
               </Field>
             </>
           )}

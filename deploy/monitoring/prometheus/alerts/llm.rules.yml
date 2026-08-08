@@ -32,6 +32,19 @@ groups:
           summary: "模型服务限流严重，生成等待和失败风险快速上升。"
           current: "10 分钟限流率 {{ $value | humanizePercentage }}"
 
+      # 端点探活（services/aiProbe）：定时对每个上游端点跑连通性 / thinking 写法 / 模型范围三项。
+      # 与「模型调用失败率」是两码事——探活先红意味着我们**在用户撞上之前**就发现了这个端点坏了。
+      # 只在连续失败时告警：单次失败可能只是一次抖动，探活本身也走网络。
+      - alert: JunshiAiEndpointProbeFailing
+        expr: >
+          sum by (kind) (increase(junshi_ai_endpoint_probe_total{status="fail"}[30m])) >= 3
+          and on(kind) sum by (kind) (increase(junshi_ai_endpoint_probe_total[30m])) >= 3
+        for: 10m
+        labels: { severity: warning, category: llm_gateway }
+        annotations:
+          summary: "上游端点检测连续失败，该能力当前不可用。"
+          current: "30 分钟内 {{ $labels.kind }} 检测失败 {{ $value | printf \"%.0f\" }} 次"
+
       - alert: JunshiLlmErrorRateHigh
         expr: >
           (
@@ -46,6 +59,30 @@ groups:
           summary: "模型调用失败率超过 10%，对话或方案生成可能失败。"
           current: "15 分钟错误率 {{ $value | humanizePercentage }}"
 
+      # 按错误类型细分（区别于上面的整体错误率）：不同类型处置动作完全不同，混在一起
+      # 只知道「错误率高了」，不知道该查密钥、上下文长度还是网络。bucket 语义见
+      # server/src/llm/errorClassify.ts。
+      - alert: JunshiLlmAuthErrors
+        expr: sum by (provider) (increase(junshi_llm_errors_total{bucket="auth"}[15m])) > 0
+        for: 5m
+        labels: { severity: critical, category: llm_gateway }
+        annotations:
+          summary: "模型服务鉴权失败，对应模型来源在问题解决前会持续报错。"
+          current: "来源 {{ $labels.provider }} · 15 分钟鉴权失败 {{ $value | printf \"%.0f\" }} 次"
+
+      # 覆盖除鉴权/限流/我方主动决策（排队拒绝、审核拦截、续写失败）外的其余错误类型——
+      # 那几类已有各自专属告警，混进来会重复响铃。
+      - alert: JunshiLlmErrorByCategory
+        expr: >
+          sum by (provider, model, bucket) (
+            increase(junshi_llm_errors_total{bucket!~"busy|moderation|output_truncated|rate_limit|auth"}[15m])
+          ) > 3
+        for: 10m
+        labels: { severity: warning, category: llm_gateway }
+        annotations:
+          summary: "模型调用出现特定类型的失败，处置方式因类型而异，不是简单重试能解决的。"
+          current: "来源 {{ $labels.provider }} · 模型 {{ $labels.model }} · 类型 {{ $labels.bucket }} · 15 分钟 {{ $value | printf \"%.0f\" }} 次"
+
       - alert: JunshiLlmCallP95Slow
         expr: >
           histogram_quantile(0.95, sum by (le) (
@@ -57,8 +94,10 @@ groups:
           summary: "模型调用耗时持续超过预警线，用户等待时间正在变长。"
           current: "30 分钟调用 P95 {{ $value | printf \"%.1f\" }} 秒"
 
-      # 口径注：进程只报等待峰值（gauge），没有等待分位直方图；用峰值近似 §7 的「等待 P95」，
-      # 阈值不变（峰值≥P95，触发只会更早不会漏）。
+      # 口径注：告警仍用等待峰值（gauge）近似 §7 的「等待 P95」，阈值不变——峰值≥P95，
+      # 触发只会更早不会漏，沿用是为了不改动这条已验证过的告警。2026-08-07 起
+      # junshi_llm_wait_seconds 直方图已能算真实分位数，看板用它画真实曲线；
+      # 后续如要把这条告警也换成真实 P95，两条一起改、别只改一条留下口径分叉。
       - alert: JunshiLlmQueueWaitLong
         expr: max(junshi_llm_wait_max_seconds) >= scalar(junshi_alert_config{key="llm_wait_warn_s"})
         for: 5m

@@ -105,6 +105,12 @@ export interface LlmSlot {
 
 type Waiter = { resolve: (s: LlmSlot) => void; reject: (e: Error) => void; timer: NodeJS.Timeout; at: number };
 
+/**
+ * 排队等待直方图的桶边界（秒）。5s/15s 对齐 §7 的等待预警/严重线，方便 Grafana 的
+ * histogram_quantile 曲线与既有告警阈值对着看。
+ */
+export const WAIT_BUCKET_BOUNDS_S = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60];
+
 function freshLane() {
   return {
     inFlight: 0,
@@ -120,7 +126,13 @@ function freshLane() {
     /** 显式速率窗口的请求时间戳环（仅在 ratePerMin > 0 时使用）。 */
     recent: [] as number[],
     wakeTimer: null as NodeJS.Timeout | null,
-    stats: { granted: 0, rejected: 0, timedOut: 0, seen429: 0, cooldowns: 0, maxQueueDepth: 0, maxWaitMs: 0 },
+    stats: {
+      granted: 0, rejected: 0, timedOut: 0, seen429: 0, cooldowns: 0, maxQueueDepth: 0, maxWaitMs: 0,
+      // 等待直方图（真实分位数，替代仅有峰值近似）：counts[i] = 等待 ≤ WAIT_BUCKET_BOUNDS_S[i] 的次数（累计语义）。
+      waitBucketCounts: new Array(WAIT_BUCKET_BOUNDS_S.length).fill(0) as number[],
+      waitCount: 0,
+      waitSumMs: 0,
+    },
   };
 }
 type LaneState = ReturnType<typeof freshLane>;
@@ -130,6 +142,15 @@ function laneOf(lane: LlmLane = 'main'): LaneState {
   let s = lanes.get(lane);
   if (!s) { s = freshLane(); lanes.set(lane, s); }
   return s;
+}
+
+/** 记一次「授予槽位」的等待时长（含立即授予的 0 等待），供 /metrics 渲染成真实分位直方图。 */
+function recordWait(s: LaneState, waitMs: number): void {
+  const sec = waitMs / 1000;
+  for (let i = 0; i < WAIT_BUCKET_BOUNDS_S.length; i++) if (sec <= WAIT_BUCKET_BOUNDS_S[i]) s.stats.waitBucketCounts[i]++;
+  s.stats.waitCount++;
+  s.stats.waitSumMs += waitMs;
+  s.stats.maxWaitMs = Math.max(s.stats.maxWaitMs, waitMs);
 }
 
 function busyError(reason: string): Error {
@@ -209,7 +230,7 @@ function pump(lane: LlmLane): void {
     s.inFlight++;
     if (cfg(lane).ratePerMin > 0) s.recent.push(now);
     s.stats.granted++;
-    s.stats.maxWaitMs = Math.max(s.stats.maxWaitMs, now - w.at);
+    recordWait(s, now - w.at);
     w.resolve(makeSlot(lane));
   }
   // 还有人在排队但当前放不出槽位：如果是冷却导致的，到点后主动再 pump 一次。
@@ -227,6 +248,7 @@ export async function acquireLlmSlot(lane: LlmLane = 'main'): Promise<LlmSlot> {
     s.inFlight++;
     if (c.ratePerMin > 0) s.recent.push(now);
     s.stats.granted++;
+    recordWait(s, 0);
     return makeSlot(lane);
   }
 

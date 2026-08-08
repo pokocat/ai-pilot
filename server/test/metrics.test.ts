@@ -142,13 +142,15 @@ describe('指标内容', () => {
   });
 
   test('LLM 调用 / token / 成本计数与告警口径对齐', async () => {
-    noteLlmCall('chat', 'claude', 'ok', 3200);
-    noteLlmCall('deliverable', 'claude', 'error', 60000);
+    noteLlmCall('chat', 'claude', 'claude-opus-4-6', 'ok', 3200);
+    noteLlmCall('deliverable', 'claude', 'claude-opus-4-6', 'error', 60000, 'server_error');
     noteTokenUsage({ kind: 'chat', provider: 'claude', model: 'claude-opus-4-6', inputTokens: 1000, outputTokens: 500, cachedInput: 200, cacheWrite: 0, costMicros: 12_340_000 });
     const body = await get();
-    assert.match(body, /junshi_llm_calls_total\{kind="chat",provider="claude",status="ok"\} 1/);
-    assert.match(body, /junshi_llm_calls_total\{kind="deliverable",provider="claude",status="error"\} 1/);
-    assert.match(body, /junshi_llm_call_duration_seconds_bucket\{kind="chat",provider="claude",le="5"\} 1/);
+    assert.match(body, /junshi_llm_calls_total\{kind="chat",provider="claude",model="claude-opus-4-6",status="ok"\} 1/);
+    assert.match(body, /junshi_llm_calls_total\{kind="deliverable",provider="claude",model="claude-opus-4-6",status="error"\} 1/);
+    assert.match(body, /junshi_llm_call_duration_seconds_bucket\{kind="chat",provider="claude",model="claude-opus-4-6",le="5"\} 1/);
+    // 错误分布：未分类的调用方（本测试）落 bucket 由调用方显式传入，验证按 bucket 分开计数。
+    assert.match(body, /junshi_llm_errors_total\{kind="deliverable",provider="claude",model="claude-opus-4-6",bucket="server_error"\} 1/);
     assert.match(body, /junshi_llm_tokens_total\{kind="chat",provider="claude",model="claude-opus-4-6",dir="input"\} 1000/);
     assert.match(body, /junshi_llm_tokens_total\{[^}]*dir="cached_input"\} 200/);
     // 12_340_000 微元 = 12.34 元
@@ -258,6 +260,10 @@ describe('指标内容', () => {
     assert.match(body, /junshi_llm_max_concurrency\{lane="main"\} 8/);
     assert.match(body, /junshi_llm_queued\{lane="main"\} 0/);
     assert.match(body, /junshi_llm_cooling\{lane="main"\} 0/);
+    // 立即授予（未排队）也要记一次 0 等待，直方图才能算出「多少比例根本没等」。
+    assert.match(body, /# TYPE junshi_llm_wait_seconds histogram/);
+    assert.match(body, /junshi_llm_wait_seconds_bucket\{lane="main",le="0\.1"\} 1/);
+    assert.match(body, /junshi_llm_wait_seconds_count\{lane="main"\} 1/);
     slot.release();
   });
 

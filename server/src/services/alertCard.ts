@@ -66,11 +66,11 @@ const DASHBOARD_UIDS: Record<string, string> = {
 
 const SEVERITY_LABELS: Record<string, string> = { critical: 'P1 严重', warning: 'P2 预警', info: 'P3 提示' };
 const SEVERITY_RANK: Record<string, number> = { critical: 3, warning: 2, info: 1 };
-const LABEL_ORDER = ['instance', 'job', 'route', 'method', 'lane', 'provider', 'model', 'phase', 'path', 'ref', 'mountpoint', 'skill', 'code'];
+const LABEL_ORDER = ['instance', 'job', 'route', 'method', 'lane', 'provider', 'model', 'phase', 'path', 'ref', 'mountpoint', 'skill', 'code', 'bucket'];
 const LABEL_LABELS: Record<string, string> = {
   instance: '目标', job: '采集任务', route: '接口', method: '请求方式', lane: '调用通道',
   provider: '模型来源', model: '模型', phase: '发生阶段', path: '降级路径', ref: '审核来源',
-  mountpoint: '磁盘', skill: '能力', code: '错误码',
+  mountpoint: '磁盘', skill: '能力', code: '错误码', bucket: '错误类型',
 };
 
 interface AlertKnowledge { title: string; threshold: string; impact: string; action: string }
@@ -94,6 +94,9 @@ export const ALERT_KNOWLEDGE: Record<string, AlertKnowledge> = {
   JunshiLlm429RateHigh: K('模型服务限流率升高', '10 分钟至少 20 次请求且限流率超过预警线', '部分生成会排队、重试或降级，首字延迟开始变差。', '按调用通道和模型来源查看限流分布，核对上游配额并收紧并发。'),
   JunshiLlm429RateCritical: K('模型服务限流严重', '10 分钟至少 20 次请求且限流率超过严重线', '生成失败和长等待将集中出现，可能影响全体对话用户。', '立即降低模型调用并发并延长重试间隔；必要时切换健康端点。'),
   JunshiLlmErrorRateHigh: K('模型调用失败率升高', '15 分钟至少 10 次调用且错误率超过 10%', '对话与方案生成可能报错或走降级内容。', '按模型来源与业务类型查看失败分布，确认鉴权、超时、协议与上游状态。'),
+  JunshiAiEndpointProbeFailing: K('上游端点检测连续失败', '30 分钟内同一检测项失败 3 次以上并持续 10 分钟', '该上游的某项能力当前不可用；用户可能还没撞上，但下一次用到就会失败。', '看失败的是哪一项：连通性=网络或 Key，Thinking 写法=方言与上游对不上（换网关或改方言固化），模型范围=该 Key 没被授权这个模型。'),
+  JunshiLlmAuthErrors: K('模型服务鉴权失败', '15 分钟内出现任意一次鉴权失败并持续 5 分钟', '对应模型来源的全部请求会持续失败，直到密钥或权限问题解决，不会自动恢复。', '立即核对该来源的密钥是否过期、被吊销或欠费，以及账号是否有该模型的调用权限。'),
+  JunshiLlmErrorByCategory: K('模型调用按类型出现特定失败', '15 分钟内同一错误类型超过 3 次并持续 10 分钟', '不同类型影响不同：上下文超限和内容策略拒绝会让对应请求直接失败且不会自动重试；网络或过载类通常会先转移到其它端点，仍频繁出现说明兜底也在失效。', '按告警里的错误类型分别处理：上下文超限查历史裁剪与模型上限，内容策略拒绝核对触发内容或更换模型，网络/过载类检查目标端点健康状况与转移是否生效。'),
   JunshiLlmCallP95Slow: K('模型调用耗时过长', '30 分钟调用 P95 超过后台配置线', '用户首字和完整成果等待时间都会拉长，并占满并发容量。', '拆分模型来源与业务类型时延，确认是排队、模型推理还是工具调用变慢。'),
   JunshiLlmQueueWaitLong: K('模型请求排队过长', '等待峰值超过预警线并持续 5 分钟', '用户在请求真正发往模型前已经等待。', '查看调用通道并发、队列深度和上游限流，避免盲目提高本地并发。'),
   JunshiLlmQueueWaitCritical: K('模型请求排队严重', '等待峰值超过严重线并持续 5 分钟', '请求接近主动超时，用户将看到忙碌或失败提示。', '降级或暂停接单，释放非核心任务并恢复健康端点容量。'),
