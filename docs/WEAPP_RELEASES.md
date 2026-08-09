@@ -17,6 +17,7 @@
 
 | 日期 | 版本号 | 上传描述 | 提交 | AppID | API | 工具 | 包体 | 状态 |
 |---|---|---|---|---|---|---|---|---|
+| 2026-08-09 | `0.2.30` | `修复停止回复后续发失败` | `fd7b328` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.6 MB / 1726044 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-06 | `0.2.29` | `游客浏览与动作登录优化` | `9f7167e` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp` | 1.3 MB / 1412678 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-05 | `0.2.28` | `断连续生成、内嵌战报与命盘军令修复` | `279fa6c` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.3 MB / 1407403 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
 | 2026-08-05 | `0.2.27` | `粘贴长文归卷交互与附件卡视觉` | `8c32d65` | `wx810ebe6dfef8e75f` | `https://wxapi.aibuzz.cn/api` | `npm run release:weapp`（先 dry-run 校验） | 1.3 MB / 1384219 B | 上传成功：开发版已进入微信后台，尚未提交审核或发布 |
