@@ -68,7 +68,10 @@ import type {
 } from '../../../shared/contracts';
 import { reconcileOrder, refundWechatOrder, isMockOrder } from '../services/wechatPay.js';
 import { applyPlanPurchase } from '../services/purchase.js';
-import { MAX_TIER_RANK, planTierRank } from '../services/planRules.js';
+import {
+  MAX_TIER_RANK, planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel,
+  type PlanRuleFields,
+} from '../services/planRules.js';
 import { effectivePrice, planPromotion, promoActive, type PlanPricingFields } from '../services/planPricing.js';
 import { isExpired, daysRemaining } from '../services/planTime.js';
 import { signUserToken, jwtEnabled } from '../services/userToken.js';
@@ -2098,8 +2101,16 @@ export async function adminRoutes(app: FastifyInstance) {
   // ⚠️ 后台这一行的 `price` 是**挂牌价**（运营填的标价，也是 PATCH 回写的字段），与公开 `Plan.price`
   // ＝「此刻成交价」的语义不同。用户实际付多少看 effectivePrice；promotion 是原样复用的用户侧折扣对象，
   // 让运营在后台就能核对小程序上会显示成几折，而不是自己再算一遍。
-  const adminPlanView = <T extends { autoRenewEnabled: boolean; wechatContractPlanId: string | null; autoRenewMode: string; price: number } & PlanPricingFields>(p: T) => ({
+  const adminPlanView = <T extends { autoRenewEnabled: boolean; wechatContractPlanId: string | null; autoRenewMode: string } & PlanRuleFields & PlanPricingFields>(p: T) => ({
     ...p,
+    // Plan 的商业字段在 Prisma 里迁移期仍允许 null，但 AdminPlan 契约承诺这里都是可直接编辑的真值。
+    // 若原样透传，catalog 表单保存时对 planFamilyKey / usageLabel 调 trim() 会直接在浏览器崩溃。
+    planFamilyKey: planFamilyKey(p),
+    tierRank: planTierRank(p),
+    usageLevel: publicUsageLevel(p),
+    usageLabel: publicUsageLabel(p),
+    usageNormalPercent: p.usageNormalPercent ?? 50,
+    usageNearPercent: p.usageNearPercent ?? 80,
     autoRenewAvailable: !!(papayConfigured() && p.autoRenewEnabled && p.wechatContractPlanId && p.autoRenewMode === 'delay_24h' && p.price > 0),
     promoActive: promoActive(p),
     effectivePrice: effectivePrice(p),

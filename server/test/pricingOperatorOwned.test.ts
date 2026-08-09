@@ -75,6 +75,38 @@ describe('套餐目录：运营后台是唯一入口', () => {
     assert.equal((audit!.payloadJson as { price?: number }).price, 9900);
   });
 
+  test('GET /admin/plans：存量 nullable 商业字段按 AdminPlan 契约补齐，回填后可保存', async () => {
+    const created = await api('POST', '/api/admin/plans', { body: NEW_PLAN });
+    await prisma.plan.update({
+      where: { id: created.body.id },
+      data: {
+        planFamilyKey: null, tierRank: null, usageLevel: null, usageLabel: null,
+      },
+    });
+
+    const listed = await api('GET', '/api/admin/plans');
+    assert.equal(listed.status, 200);
+    const legacy = listed.body.find((p: { id: string }) => p.id === created.body.id);
+    assert.ok(legacy);
+    assert.equal(legacy.planFamilyKey, created.body.id);
+    assert.equal(legacy.tierRank, NEW_PLAN.price);
+    assert.equal(legacy.usageLevel, 'custom');
+    assert.equal(legacy.usageLabel, '方案用量');
+    assert.equal(legacy.usageNormalPercent, 50);
+    assert.equal(legacy.usageNearPercent, 80);
+
+    const saved = await api('PATCH', `/api/admin/plans/${created.body.id}`, { body: {
+      planFamilyKey: legacy.planFamilyKey,
+      tierRank: legacy.tierRank,
+      usageLevel: legacy.usageLevel,
+      usageLabel: legacy.usageLabel,
+      usageNormalPercent: legacy.usageNormalPercent,
+      usageNearPercent: legacy.usageNearPercent,
+    } });
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.planFamilyKey, created.body.id);
+  });
+
   test('建档：operator 无权（requireSuper），套餐一点不动', async () => {
     const r = await api('POST', '/api/admin/plans', { body: { ...NEW_PLAN, name: '运营自建档-越权' }, adminToken: await operatorToken() });
     assert.equal(r.status, 403);
