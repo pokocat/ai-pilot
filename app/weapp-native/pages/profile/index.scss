@@ -19,7 +19,7 @@
   font-weight: 600;
   line-height: 42px;
 }
-.sa-qr { display: flex; align-items: center; justify-content: center; }
+/* .sa-qr 的居中已并回 src/pages/profile/index.scss（与 .sa-i 同规格），此处不再局部覆盖。 */
 .twi-ph { white-space: nowrap; }
 .twi-ph-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .va-go { display: flex; align-items: center; gap: 3px; }

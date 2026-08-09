@@ -1694,3 +1694,19 @@ test('教学层展示期间问策浮岛让位，不遮挡面板', () => {
   assert.match(wxml, /class="wence-pill"|!coachOn && !drawerOpen/, '教学期间提示 pill 必须收起');
   assert.match(wxml, /class="tabbar-inner"/, 'tab 行必须保留——教学箭头指的就是底栏');
 });
+
+// 2026-08-08 真机：老板页服务双卡没对齐——群卡横排（图标对两行文本居中）、老师卡纵排且图标
+// 参与首行排版，首行被 26px 图标撑高，两卡的标题中心与图标中心各差几个像素。
+test('老板页服务双卡内部节奏一致（图标对整卡居中，两行共用左基线）', () => {
+  const scss = fs.readFileSync(path.join(appRoot, 'src/pages/profile/index.scss'), 'utf8');
+  const wxml = read(sourceRoot, 'pages/profile/index.wxml');
+
+  // 老师卡的图标必须脱离首行、对整卡垂直居中；两行文本靠卡片 padding-left 给同一条左基线。
+  assert.match(scss, /\.service-action-teacher\s*\{[^}]*position:\s*relative[^}]*padding-left:\s*42px/s);
+  assert.match(scss, /\.service-action-teacher \.sa-i\s*\{[^}]*position:\s*absolute[^}]*translateY\(-50%\)/s);
+  assert.doesNotMatch(scss, /\.twi-ph\s*\{[^}]*padding-left:\s*33px/s, '次行不再各自缩进，左基线由卡片给');
+  // 两个图标底盒同规格（26/圆角 9/居中），群卡不得留「四点码眼」时代的内边距与换行。
+  assert.match(scss, /\.sa-qr\s*\{[^}]*border-radius:\s*9px[^}]*align-items:\s*center/s);
+  assert.doesNotMatch(scss, /\.sa-qr\s*\{[^}]*flex-wrap:\s*wrap/s);
+  assert.match(wxml, /class="sa-qr"><native-icon name="group" tone="green" size="16"/, '群图标与消息图标做过光学配平');
+});

@@ -93,12 +93,22 @@
 /* 未分配态：压暗但**可点**——点了去军师社群页申请分班（拿到老师和群的真路径），不是死按钮 */
 .service-action.is-empty { opacity: .62; }
 
-/* 老师卡：上行主动作（图标 + 老师微信），下行微信号复制条 */
-.service-action-teacher { flex-direction: column; align-items: stretch; justify-content: center; gap: 4px; }
+/* 老师卡：上行主动作（图标 + 老师名），下行微信号复制条。
+   **两张卡的内部节奏必须一致**（2026-08-08 真机：右卡标题偏高、左卡图标偏高，肉眼可见没对齐）。
+   原因是结构不对称：群卡是横排，图标对「标题+次行」整块垂直居中；老师卡是纵排，图标参与首行排版，
+   首行被 26px 图标撑高 → 标题中心比群卡低约 4.5px、图标中心又比群卡高约 2px。
+   解法是让图标脱离首行、对整卡垂直居中，两行文本共用同一条左基线——**不动 DOM**，
+   H5 与原生共用本文件，同一处修两端都对齐。改 padding 时记得同步 .sa-i 的 left。 */
+.service-action-teacher {
+  position: relative;
+  flex-direction: column; align-items: stretch; justify-content: center; gap: 2px;
+  padding-left: 42px; /* 9(卡片内边距) + 26(图标) + 7(与文字的间距) */
+}
+.service-action-teacher .sa-i { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); }
 .service-action-main { display: flex; align-items: center; gap: 7px; }
 .service-action-main:active { opacity: .7; }
 .teacher-wechat-id {
-  display: flex; align-items: center; gap: 5px; padding-left: 33px;
+  display: flex; align-items: center; gap: 5px;
   overflow: hidden;
 }
 .teacher-wechat-id:active { opacity: .7; }
@@ -107,7 +117,7 @@
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .twi-em { flex-shrink: 0; color: var(--ink-3); font-size: 9.5px; font-weight: 600; }
-.twi-ph { padding-left: 33px; color: var(--ink-3); font-size: 9.5px; font-weight: 600; }
+.twi-ph { color: var(--ink-3); font-size: 9.5px; font-weight: 600; }
 
 .sa-i {
   width: 26px; height: 26px; flex-shrink: 0; border-radius: 9px;
@@ -118,8 +128,8 @@
 /* 群二维码图标：设计稿限定 26px 小图标（原来是「码」字块，撑版面）——四点码眼，两行两列，右下留空 */
 .sa-qr {
   width: 26px; height: 26px; flex-shrink: 0; box-sizing: border-box;
-  padding: 4px; border-radius: 8px;
-  display: flex; flex-wrap: wrap; gap: 2px; align-content: center;
+  border-radius: 9px; /* 与 .sa-i 同规格：图标换成 Lucide 后不再需要「码眼」时代的 4px 内边距与换行 */
+  display: flex; align-items: center; justify-content: center;
   background: #fff; border: 1px solid rgba(30, 90, 67, .18);
 }
 .sa-qr-d { width: 7px; height: 7px; border-radius: 2px; background: var(--green); }
