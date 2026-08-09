@@ -1574,6 +1574,13 @@ test('停止生成后必须能立刻重发，且空气泡不留屏', () => {
   // ② 会话上真有在途生成（另一端发起）时接管它，而不是把用户晾在错误态里。
   assert.match(core, /GENERATION_IN_PROGRESS[\s\S]{0,400}startPolling\(inProgressId/,
     '收到 GENERATION_IN_PROGRESS 必须接管那条生成');
+
+  // ③ stop/cancel 是两条独立网络请求；续发必须先等取消事务确认（其中会释放旧任务预留），
+  //    不能只在本地把 busy 清掉就立刻建下一轮。
+  assert.match(core, /this\._cancelPromise\s*=\s*pendingCancel/,
+    '停止生成必须保存服务端取消确认 Promise');
+  assert.match(core, /const pendingCancel = this\._cancelPromise;[\s\S]{0,180}await pendingCancel;/,
+    '下一轮发送必须等待上一轮取消确认');
 });
 
 test('历史会话行的多行文本在数据层折行，不指望 white-space', () => {

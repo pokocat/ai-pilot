@@ -341,6 +341,7 @@ const methods = {
     this._plainStreamText = '';
     this._pollTimer = null;
     this._streamControl = null;
+    this._cancelPromise = null;
     this._generationId = '';
     this._streamIndex = null;
     this._streamText = '';
@@ -373,6 +374,7 @@ const methods = {
     this._pasteDupTimer = null;
     this._askScrollTimer = null;
     this._streamControl = null;
+    this._cancelPromise = null;
   },
   isCurrent(epoch) { return this._alive && epoch === this._epoch; },
   /**
@@ -1012,6 +1014,13 @@ const methods = {
     if (!store.isAuthed()) { this.safeSetData({ showLogin: true, loginReason: 'chat' }); return; }
     // 未开通方案：在这里拦，不让用户写完一整段再被服务端 403 打回来（草稿保留，开通回来即可发）。
     if (store.planRequired()) { store.promptPlanRequired(); return; }
+    // 停止接口会在同一事务里标记取消并释放旧任务的额度预留。用户点停后马上发送时，
+    // 先等这笔事务确认，再建下一轮，避免 cancel/send 两条请求在网络上乱序后撞回旧在途任务或 402。
+    const pendingCancel = this._cancelPromise;
+    if (pendingCancel) {
+      await pendingCancel;
+      if (!this._alive || this.data.busy) return;
+    }
     // 登录门放行之后才算「真的发出去了」——放在门前会把每次弹登录都记成一次发送。
     this.emitChatEvent('send', { entry: this._sendEntry || 'keyboard' });
     this._sendEntry = '';
@@ -1355,7 +1364,13 @@ const methods = {
     if (this._pollTimer) clearTimeout(this._pollTimer);
     this._pollTimer = null;
     if (this._streamControl && this._streamControl.abort) this._streamControl.abort();
-    if (generationId) api.cancelGeneration(generationId).catch(() => {});
+    if (generationId) {
+      const pendingCancel = api.cancelGeneration(generationId).catch(() => null);
+      this._cancelPromise = pendingCancel;
+      void pendingCancel.then(() => {
+        if (this._cancelPromise === pendingCancel) this._cancelPromise = null;
+      });
+    }
     this.markStreamInterrupted();
     this._streamIndex = null;
     this._streamControl = null;

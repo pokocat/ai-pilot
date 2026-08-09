@@ -453,9 +453,32 @@ export async function requestGenerationCancel(
     return cancelled;
   }
 
-  const updated = await prisma.generationJob.update({
-    where: { id: current.id },
-    data: { cancelRequestedAt: current.cancelRequestedAt ?? now() },
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM generation_job WHERE id = ${current.id} FOR UPDATE`;
+    const job = await tx.generationJob.findUniqueOrThrow({ where: { id: current.id } });
+    if (TERMINAL.has(job.status)) return job;
+
+    // running 取消是软取消，worker 仍需在拿到 provider 实际 usage 后落最终账。这里先把尚未
+    // 结算的预留全额放回钱包，让用户点停后可以立即开始下一轮；quotaReserved 归零但保留
+    // settlementStatus=reserved，finalize 时会以 reserved=0 扣除旧任务已经真实产生的消耗。
+    // job 行锁与钱包锁把「释放预留」和 worker 的最终结算串行化，避免重复退款或漏记消耗。
+    let quotaReserved = job.quotaReserved;
+    if (job.settlementStatus === GenerationSettlementStatus.reserved && quotaReserved > 0) {
+      await settleDurableQuotaInTransaction(tx, {
+        userId: job.userId,
+        periodKey: job.quotaPeriodKey,
+        reserved: quotaReserved,
+        charged: 0,
+      });
+      quotaReserved = 0;
+    }
+    return tx.generationJob.update({
+      where: { id: job.id },
+      data: {
+        cancelRequestedAt: job.cancelRequestedAt ?? now(),
+        quotaReserved,
+      },
+    });
   });
   controllers.get(current.id)?.controller.abort(new Error('user_cancelled'));
   return updated;

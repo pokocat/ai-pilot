@@ -127,12 +127,22 @@ describe('GenerationJob durable lifecycle', () => {
     // 进 running 后再取消 —— 这才会走软取消分支（queued 态取消是就地终结，不构成路障）。
     const claimed = await claimNextGenerationJob('worker-stop', 15_000);
     assert.equal(claimed?.id, first.job.id);
-    await startGenerationAttempt(first.job.id, 'worker-stop', claimed!.leaseVersion, 'main');
+    const firstAttempt = await startGenerationAttempt(first.job.id, 'worker-stop', claimed!.leaseVersion, 'main');
+    assert.ok(first.job.quotaReserved > 0, '回归场景需要旧任务真实占住一笔额度预留');
+    // 模拟旧任务恰好占完当前可用额度：旧实现只写 cancelRequestedAt，不释放这笔预留，
+    // 所以下一条消息会稳定 402，点「重新回答」也只会继续撞同一笔冻结额度。
+    await prisma.tokenWallet.update({ where: { userId: user.id }, data: { balance: 0 } });
     const cancelling = await requestGenerationCancel(first.job.id, user);
     assert.ok(cancelling.cancelRequestedAt, '软取消必须留下 cancelRequestedAt');
     assert.ok(!['cancelled', 'completed', 'failed', 'truncated'].includes(cancelling.status), '这一步还没落终态');
+    assert.equal(cancelling.quotaReserved, 0, '取消确认必须把未结算预留转回钱包，finalize 再按实际 usage 扣费');
+    assert.equal(
+      (await prisma.tokenWallet.findUniqueOrThrow({ where: { userId: user.id } })).balance,
+      first.job.quotaReserved,
+      '停止返回时额度必须已经可供下一轮使用',
+    );
 
-    // 关键断言：此时重发不得被 409 挡回，且拿到的是一条全新的 job。
+    // 关键断言：此时重发既不得被 409 挡回，也不得因旧预留仍冻结而 402。
     const second = await enqueueDurableGeneration(user, {
       text: '停完马上换个问法再问一次',
       agentKey: 'general',
@@ -143,6 +153,33 @@ describe('GenerationJob durable lifecycle', () => {
     const session = await prisma.session.findUniqueOrThrow({ where: { id: first.session.id } });
     assert.equal(session.activeGenerationId, second.job.id, '会话的在途任务必须让位给新消息');
     await requestGenerationCancel(second.job.id, user);
+
+    // 提前释放不是免单：旧任务最终拿到 provider usage 后，仍要从钱包扣掉真实消耗。
+    const balanceBeforeFinalize = (await prisma.tokenWallet.findUniqueOrThrow({ where: { userId: user.id } })).balance;
+    await finishGenerationAttempt({
+      jobId: first.job.id,
+      attemptNo: firstAttempt,
+      leaseVersion: claimed!.leaseVersion,
+      status: 'cancelled',
+      usage: { inputTokens: 11, outputTokens: 7, cachedInput: 0, billableTokens: 18 },
+      usageSource: 'provider',
+      provider: 'openai',
+      model: 'test-model',
+      terminationReason: 'user_cancelled',
+    });
+    const finalized = await finalizeGeneration({
+      jobId: first.job.id,
+      workerId: 'worker-stop',
+      leaseVersion: claimed!.leaseVersion,
+      status: 'cancelled',
+      terminationReason: 'user_cancelled',
+    });
+    assert.ok(finalized.quotaCharged > 0);
+    assert.equal(
+      (await prisma.tokenWallet.findUniqueOrThrow({ where: { userId: user.id } })).balance,
+      balanceBeforeFinalize - finalized.quotaCharged,
+      '旧任务提前释放预留后，最终真实消耗仍必须入账',
+    );
   });
 
   test('expired lease is reclaimed, old attempt is conservatively billed and stale worker is fenced out', async () => {
