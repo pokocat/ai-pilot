@@ -17,10 +17,10 @@
       <view class="lg-actions">
         <text class="lg-reason">{{reasonText}}</text>
         <button wx:if="{{agreed}}" class="lg-wechat {{busy ? 'off' : ''}}" open-type="getPhoneNumber" bindgetphonenumber="submitWechatPhone">
-          <image class="lg-wechat-icon" src="/assets/brand-icons/wechat.svg" mode="aspectFit"></image><text class="lg-wechat-t">{{busy ? '登录中…' : '微信手机号一键登录'}}</text>
+          <text class="lg-wechat-t">{{busy ? '登录中…' : '手机号快捷登录'}}</text>
         </button>
         <button wx:else class="lg-wechat {{busy ? 'off' : ''}}" bindtap="ensureAgreed">
-          <image class="lg-wechat-icon" src="/assets/brand-icons/wechat.svg" mode="aspectFit"></image><text class="lg-wechat-t">微信手机号一键登录</text>
+          <text class="lg-wechat-t">手机号快捷登录</text>
         </button>
         <view class="lg-switch" bindtap="switchPhone"><text>手机号验证码登录</text><native-icon name="arrow" tone="green" size="14"></native-icon></view>
         <view class="lg-consent">
@@ -39,7 +39,7 @@
         <button class="lg-cta {{busy ? 'off' : ''}}" bindtap="submitPhone"><text>{{busy ? '登录中…' : '登录 / 注册'}}</text></button>
       </view>
       <view class="lg-actions">
-        <view class="lg-switch" bindtap="switchWechat"><image class="lg-wechat-icon small" src="/assets/brand-icons/wechat-light.svg" mode="aspectFit"></image><text>返回微信账号登录</text></view>
+        <view class="lg-switch" bindtap="switchWechat"><text>返回手机号快捷登录</text></view>
         <view class="lg-consent"><view class="lg-cbox {{agreed ? 'on' : ''}}" bindtap="toggleAgree"><native-icon wx:if="{{agreed}}" name="check" tone="brand" size="12"></native-icon></view><text class="lg-agree">我已阅读并同意<text class="lg-link" bindtap="openAgreement">《用户协议》</text>与<text class="lg-link" bindtap="openPrivacy">《隐私政策》</text></text></view>
       </view>
     </block>
@@ -54,9 +54,9 @@
             <view wx:else class="lg-av lg-av-ph"><native-icon name="user" tone="white" size="27"></native-icon></view>
             <view class="lg-av-cam"><native-icon name="image" tone="brand" size="13"></native-icon></view>
           </button>
-          <text class="lg-av-tip">点头像可使用微信头像（可选）</text>
+          <text class="lg-av-tip">点头像可设置（可选）</text>
         </view>
-        <view class="lg-field"><input class="lg-input" type="nickname" maxlength="20" value="{{nickname}}" focus="{{nameFocus}}" placeholder="填写称呼，点此可使用微信昵称" placeholder-class="lg-ph" bindinput="inputNickname" bindblur="blurNickname" /></view>
+        <view class="lg-field"><input class="lg-input" type="nickname" maxlength="20" value="{{nickname}}" focus="{{nameFocus}}" placeholder="填写称呼" placeholder-class="lg-ph" bindinput="inputNickname" bindblur="blurNickname" /></view>
         <view class="lg-cta {{busy ? 'off' : ''}}" bindtap="finishComplete"><text>{{busy ? '保存中…' : '完成并开始入局'}}</text></view>
         <text class="lg-skip lg-skip-weak" bindtap="logoutComplete">退出登录</text>
       </view>

@@ -1,5 +1,5 @@
 @use "../../../src/components/Login/index.scss";
 
-.lg-wechat-icon { display: block; flex: 0 0 auto; width: 21px; height: 21px; }
-.lg-wechat-icon.small { width: 15px; height: 15px; }
+/* 2026-08-08 审核整改：登录页去掉了平台品牌图形（`.lg-wechat-icon` 两条规则随之删除），
+   主按钮只剩中性文案，居中对齐由 .lg-wechat 的 flex 兜住。 */
 .lg-switch { display: flex; align-items: center; justify-content: center; gap: 4px; }

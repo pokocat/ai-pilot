@@ -102,14 +102,15 @@ Component({
           success: resolve,
           fail: reject,
         }));
-        if (!loginResult.code) throw new Error('微信登录未返回 code');
+        // 面向用户的文案一律不出现平台名（审核口径：登录页不得混淆腾讯官方元素，2026-08-08 驳回）。
+        if (!loginResult.code) throw new Error('快捷登录未能取得凭证，请重试');
         const result = await api.wechatPhoneLogin(phoneCode, loginResult.code);
         await store.afterLogin(result);
         this.presentAfterAuth(result);
       } catch (error) {
         const code = error && error.data && error.data.code;
         wx.showToast({
-          title: code === 'WECHAT_CONFIG_MISSING' ? '本地未配置微信登录，请用短信验证码登录' : (error.message || '微信手机号登录失败'),
+          title: code === 'WECHAT_CONFIG_MISSING' ? '当前环境未开通快捷登录，请用短信验证码登录' : (error.message || '手机号快捷登录失败'),
           icon: 'none',
         });
       } finally { this.setData({ busy: false }); }

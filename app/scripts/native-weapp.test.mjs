@@ -257,25 +257,27 @@ test('老板页老师微信与班级群保持原稿双卡排版', () => {
   assert.match(groupCard, /class="sa-qr"[^>]*><native-icon name="group"/, '班级群继续使用 Lucide 开源群组图标');
 });
 
-test('原生登录页恢复微信品牌图形与可见的协议勾选', () => {
+// 2026-08-08 审核驳回：「登录页面或弹窗（调用手机号快速验证组件的前置页面），存在混淆腾讯官方的元素，
+// 包括但不限于『微信』字样、微信官方 logo」。本测反向钉死——登录弹层不得出现平台名与平台标识。
+// 注意这条**推翻了**此前「登录页必须用 Simple Icons 微信品牌 SVG」的老约定，那两个 svg 已删除。
+test('登录弹层不得出现「微信」字样或微信官方标识（审核红线）', () => {
   const wxml = fs.readFileSync(path.join(sourceRoot, 'components/login-sheet/index.wxml'), 'utf8');
-  const scss = fs.readFileSync(path.join(sourceRoot, 'components/login-sheet/index.scss'), 'utf8');
-  const builder = fs.readFileSync(path.join(appRoot, 'scripts/build-native-weapp.mjs'), 'utf8');
-  const brandIcon = fs.readFileSync(path.join(sourceRoot, 'assets/brand-icons/wechat.svg'), 'utf8');
-  const lightIcon = fs.readFileSync(path.join(sourceRoot, 'assets/brand-icons/wechat-light.svg'), 'utf8');
+  const js = fs.readFileSync(path.join(sourceRoot, 'components/login-sheet/index.js'), 'utf8');
 
-  assert.match(wxml, /class="lg-wechat-icon" src="\/assets\/brand-icons\/wechat\.svg"/);
-  assert.match(wxml, /class="lg-wechat-icon small" src="\/assets\/brand-icons\/wechat-light\.svg"/);
-  assert.doesNotMatch(wxml, /lg-wechat-mark|>微<|name="back"[^>]*返回微信账号登录/, '微信入口不得再回退成文字或返回箭头占位');
+  // ① 可见文案：WXML 里的中文串与 JS 里会进 showToast/showModal 的文案，都不许带「微信」。
+  assert.doesNotMatch(wxml, /微信/, '登录弹层的可见文案不得出现「微信」');
+  for (const literal of js.match(/'[^']*'|"[^"]*"/g) || []) {
+    if (/微信/.test(literal)) assert.fail(`登录弹层的用户可见文案不得出现「微信」：${literal}`);
+  }
+  // ② 平台标识：不许再引任何品牌图形（那两个 Simple Icons SVG 已随本次整改删除）。
+  assert.doesNotMatch(wxml, /brand-icons|wechat\.svg|wechat-light\.svg/, '登录弹层不得引用微信品牌图形');
+  assert.ok(!fs.existsSync(path.join(sourceRoot, 'assets/brand-icons')), '微信品牌图形资源不得留在包内');
+  assert.doesNotMatch(wxml, /<image[^>]*class="lg-wechat-icon"/, '一键登录按钮不得再挂品牌图标');
+  // ③ 主按钮沿用审核建议的中性表述，且能力本身（getPhoneNumber）不受影响。
+  assert.match(wxml, /open-type="getPhoneNumber"[\s\S]{0,200}手机号快捷登录/, '主按钮仍走手机号快速验证组件，文案用中性表述');
+  // ④ 协议勾选的可见性照旧（历史坑，别在整改里被顺手改回白勾）。
   assert.equal((wxml.match(/name="check" tone="brand" size="12"/g) || []).length, 2, '两个登录方式的协议框都必须使用深绿勾');
   assert.doesNotMatch(wxml, /name="check" tone="white"/, '浅色选中框上不得继续放不可见白勾');
-  assert.match(scss, /\.lg-wechat-icon\s*\{[^}]*width:\s*21px;[^}]*height:\s*21px;/s);
-  assert.match(builder, /brand:\s*'#143726'/);
-  for (const icon of [brandIcon, lightIcon]) {
-    assert.match(icon, /Simple Icons v16\.21\.0/);
-    assert.match(icon, /License: CC0-1\.0/);
-    assert.match(icon, /<title>WeChat<\/title>/);
-  }
 });
 
 test('新账号恢复称呼头像并自动进入本命色与首判仪式', () => {
