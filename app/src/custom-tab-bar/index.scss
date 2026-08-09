@@ -5,13 +5,18 @@
   left: 14px; right: 14px;
   bottom: calc(14px + constant(safe-area-inset-bottom));
   bottom: calc(14px + env(safe-area-inset-bottom));
-  background: rgba(255, 255, 255, .86);
-  border: 1px solid rgba(255, 255, 255, .7);
+  /* 底色与描边（2026-08-09 视觉反馈「底栏跟页面太像、有时看不清」）：
+     原先是白玻璃 + **白描边**——页面是米白（--paper）、卡片是纯白，唯一的分界是一圈白色 border，
+     等于没画。改成三层分离：① 底色压深一档到暖米色（比 --paper 深、比卡片更远），白卡片从
+     栏下滚过时始终有色差；② 描边换成看得见的暖发丝线（--line-strong 同族加透明度）；
+     ③ 投影加深一档补浮起感。玻璃 blur 保留。 */
+  background: rgba(246, 243, 235, .92);
+  border: 1px solid rgba(203, 193, 168, .55);
   border-radius: 26px;
   box-shadow:
-    0 1px 0 rgba(255, 255, 255, .9) inset,
-    0 10px 30px rgba(22, 25, 29, .12),
-    0 4px 10px rgba(22, 25, 29, .06);
+    0 1px 0 rgba(255, 255, 255, .75) inset,
+    0 12px 32px rgba(22, 25, 29, .16),
+    0 3px 8px rgba(22, 25, 29, .07);
   backdrop-filter: blur(18px) saturate(1.4);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
   z-index: 100;

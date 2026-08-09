@@ -6,6 +6,8 @@
   height: 22px;
 }
 
-.tab-icon-pouch { width: 26px; height: 26px; }
+/* 锦囊不再单独放大：那是给 lucide archive（矮宽收纳箱）补视觉分量的旧校准。
+   五个 tab 现已统一为 H5 自绘线稿（袋形锦囊、stroke 1.6），同一 22px 下分量本就一致，
+   再放大反而复现「锦囊大一号」。 */
 
 .tab.on .tab-label { color: var(--accent); }

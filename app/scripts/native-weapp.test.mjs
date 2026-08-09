@@ -306,7 +306,9 @@ test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与�
 
   assert.match(tabbar, /class="tab-icon tab-icon-\{\{item\.icon\}\}"/);
   assert.doesNotMatch(tabbarScss, /tab-icon-hat/);
-  assert.match(tabbarScss, /\.tab-icon-pouch\s*\{\s*width:\s*26px;\s*height:\s*26px;/);
+  // 锦囊 26px 特调必须保持删除态：那是给 lucide archive 补分量的旧校准，五图标统一
+  // 自绘线稿后再放大就复现「锦囊不激活也大一号」（2026-08-09 视觉反馈）。
+  assert.doesNotMatch(tabbarScss, /\.tab-icon-pouch\s*\{\s*width/);
   for (const selector of ['save-btn', 'delete-btn', 'color-confirm']) {
     assert.match(settings, new RegExp(`\\.${selector}\\s*\\{[^}]*padding:\\s*0;[^}]*display:\\s*flex;[^}]*align-items:\\s*center;[^}]*justify-content:\\s*center;`, 's'));
   }
@@ -1641,4 +1643,26 @@ test('自带字体：family 名三处一致，未配托管地址时静默跳过�
   // 只在 onLaunch 触发一次
   assert.match(appJs, /onLaunch\(\)\s*\{[\s\S]{0,200}loadAppFont\(\)/);
   assert.match(font, /let started = false;[\s\S]{0,400}if \(started\) return;/);
+});
+
+test('底栏五图标与 H5 同一套自绘线稿：stroke 1.6、路径逐字一致、锦囊是袋不是箱', () => {
+  // 2026-08-09 视觉反馈的根因：两端图标不是一套——weapp 走 lucide（stroke 2 偏粗；pouch 映到
+  // archive 收纳箱，靠 26px 特调补分量）。构建脚本现从 H5 Icon 组件抽取同一份路径发射 SVG。
+  const iconTsx = fs.readFileSync(path.join(appRoot, 'src', 'components', 'Icon', 'index.tsx'), 'utf8');
+  const dist = path.join(appRoot, 'dist-native', 'assets', 'native-icons');
+  if (!fs.existsSync(dist)) return; // 未构建时跳过（与字体产物断言同一模式）
+  for (const name of ['conversation', 'flag', 'token', 'pouch', 'crown']) {
+    const m = iconTsx.match(new RegExp(`^\\s{2}${name}: '(.+)',$`, 'm'));
+    assert.ok(m, `Icon/index.tsx 里找不到 ${name} —— PATHS 写法变了要同步 build 脚本的抽取正则`);
+    const svg = fs.readFileSync(path.join(dist, `${name}-neutral.svg`), 'utf8');
+    assert.ok(svg.includes('stroke-width="1.6"'), `${name} 应为 1.6 细笔画，不是 lucide 的 2`);
+    assert.ok(svg.includes(m[1].replaceAll('CCC', '#969BA1')), `${name} 产物路径与 H5 不一致`);
+  }
+  // 底栏分离三件套：暖底、暖发丝线、白描边死刑——白边压白底等于没画。
+  const barScss = fs.readFileSync(path.join(appRoot, 'src', 'custom-tab-bar', 'index.scss'), 'utf8');
+  assert.match(barScss, /background: rgba\(246, 243, 235, \.92\)/);
+  assert.match(barScss, /border: 1px solid rgba\(203, 193, 168, \.55\)/);
+  // 只盯 .tabbar 块本身：角标（.tab-badge/.tab-dot）的白描边是压在半透明底栏上的，该留。
+  const barBlock = barScss.match(/\.tabbar \{[\s\S]*?\n\}/)[0];
+  assert.doesNotMatch(barBlock, /rgba\(255, 255, 255, \.7\)/, '白描边压白底等于没画，别改回来');
 });

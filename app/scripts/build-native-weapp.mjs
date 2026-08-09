@@ -123,6 +123,24 @@ function clearOutputRoot() {
   }
 }
 
+// 底栏五 tab 的图标不走 lucide，改用 H5 Icon 组件的自绘路径（src/components/Icon/index.tsx 的 PATHS）。
+// 动因（2026-08-09 视觉反馈）：lucide 默认 stroke-width 2，22px 下明显偏粗；且 `pouch` 映到 lucide
+// 的 archive 是个收纳箱——为补它的视觉分量曾单独放大到 26px，造成「锦囊不激活也大一号」。
+// H5 那套是 stroke 1.6 的自绘线稿（锦囊是真的袋形），两端从此同一套字形。
+// 路径直接从 tsx 里正则抽取：格式是稳定的单行 `  name: '<path .../>'`，抽不到就构建失败，
+// 不会静默退回 lucide。
+const CUSTOM_TAB_ICONS = ['conversation', 'flag', 'token', 'pouch', 'crown'];
+function extractIconPaths(names) {
+  const source = fs.readFileSync(path.join(APP_ROOT, 'src', 'components', 'Icon', 'index.tsx'), 'utf8');
+  const paths = {};
+  for (const name of names) {
+    const m = source.match(new RegExp(`^\\s{2}${name}: '(.+)',$`, 'm'));
+    if (!m) throw new Error(`未能从 Icon/index.tsx 抽出 ${name} 的路径——PATHS 写法变了就同步改这里`);
+    paths[name] = m[1];
+  }
+  return paths;
+}
+
 function emitSharedIcons() {
   const targetRoot = path.join(OUTPUT_ROOT, 'assets', 'native-icons');
   fs.mkdirSync(targetRoot, { recursive: true });
@@ -131,11 +149,20 @@ function emitSharedIcons() {
   if (!fs.existsSync(licenseFile)) throw new Error('缺少 lucide-static，请先 npm install');
   fs.copyFileSync(licenseFile, path.join(targetRoot, 'LUCIDE-LICENSE.txt'));
   for (const [name, lucideName] of Object.entries(LUCIDE_ICON_MAP)) {
+    if (CUSTOM_TAB_ICONS.includes(name)) continue; // 底栏五图标走下面的自绘发射
     const sourceFile = path.join(lucideRoot, 'icons', `${lucideName}.svg`);
     if (!fs.existsSync(sourceFile)) throw new Error(`Lucide 图标不存在：${lucideName}`);
     const source = fs.readFileSync(sourceFile, 'utf8');
     for (const [tone, color] of Object.entries(ICON_COLORS)) {
       fs.writeFileSync(path.join(targetRoot, `${name}-${tone}.svg`), source.replaceAll('currentColor', color));
+    }
+  }
+  // 与 H5 Icon 组件 dataUri() 同一 SVG 骨架（viewBox 24 / stroke 1.6 / round），CCC 是填充色占位。
+  const customPaths = extractIconPaths(CUSTOM_TAB_ICONS);
+  for (const [name, inner] of Object.entries(customPaths)) {
+    for (const [tone, color] of Object.entries(ICON_COLORS)) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${inner.replaceAll('CCC', color)}</svg>`;
+      fs.writeFileSync(path.join(targetRoot, `${name}-${tone}.svg`), svg);
     }
   }
 }
