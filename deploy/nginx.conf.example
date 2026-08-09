@@ -146,6 +146,19 @@ server {
         try_files $uri $uri/ /admin/index.html;
     }
 
+    # —— C 端自带中文衬线字体（思源宋体子集，随 H5 产物发布，物理上只有一份）——
+    # H5 用相对路径 /fonts/ 取（与页面同源，不走 CORS）。
+    # ⚠️ 如果 H5 与 API 不在同一个域名（本项目就是：H5 在 aibuzz.cn、API/小程序合法域名是
+    # wxapi.aibuzz.cn），**API 那个 server 块也要复制这一段**——小程序 wx.loadFontFace 只能给
+    # 绝对地址，而它只被允许访问 downloadFile 白名单里的域名。少配这一段的表现是：H5 字体正常、
+    # 真机小程序静默回退系统字体，机型间时有时无，极难归因。
+    location /fonts/ {
+        root /var/www/junshi/h5;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        add_header Access-Control-Allow-Origin "*";
+        try_files $uri =404;
+    }
+
     # —— H5 兜底（hash 路由其实不依赖回退，保留无妨）——
     location / {
         try_files $uri $uri/ /index.html;
