@@ -3,7 +3,7 @@
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>
     <view class="pad home">
-      <tab-header title="军情" kicker="看今日判断" glyph="势"></tab-header>
+      <tab-header title="沙盘" kicker="看今日判断" glyph="势"></tab-header>
       <view class="say-strip"><text class="say-k">今日献策 · {{sayingDate}}</text><text class="say-line serif">{{saying}}</text></view>
 
       <block wx:if="{{!authed}}">

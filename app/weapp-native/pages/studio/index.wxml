@@ -1,7 +1,7 @@
 <view class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
   <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll"><view class="native-nav-inset"></view><view class="pad execution">
-    <tab-header title="军令" kicker="做今天的事" glyph="令"></tab-header>
+    <tab-header title="点兵" kicker="做今天的事" glyph="令"></tab-header>
 
     <view wx:if="{{prescriptions.length}}" class="rx-strip">
       <view wx:for="{{prescriptions}}" wx:key="id" class="rx-item" data-id="{{item.id}}" bindtap="openPrescription">

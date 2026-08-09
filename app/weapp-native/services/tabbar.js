@@ -6,11 +6,11 @@
 // 角标数据同样只有一个来源：`store.snapshot().unread`（syncUnread 聚合全部会话未读）。
 
 const TABS = [
-  { path: '/pages/sessions/index', icon: 'conversation', text: '问策' },
-  { path: '/pages/home/index', icon: 'flag', text: '军情' },
-  { path: '/pages/studio/index', icon: 'token', text: '军令' },
-  { path: '/pages/thinktank/index', icon: 'pouch', text: '锦囊' },
-  { path: '/pages/profile/index', icon: 'crown', text: '老板' },
+  { path: '/pages/sessions/index', icon: 'counsel', text: '问策' },
+  { path: '/pages/home/index', icon: 'sandtable', text: '沙盘' },
+  { path: '/pages/studio/index', icon: 'muster', text: '点兵' },
+  { path: '/pages/thinktank/index', icon: 'brocade', text: '锦囊' },
+  { path: '/pages/profile/index', icon: 'lord', text: '主公' },
 ];
 
 const THEME_TONES = ['gold', 'green', 'red', 'blue', 'purple', 'iron'];

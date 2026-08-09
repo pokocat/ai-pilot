@@ -43,6 +43,13 @@ const PATHS: Record<string, string> = {
   lock: '<rect x="5" y="10.5" width="14" height="9.5" rx="2.2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15" r="1.1" fill="CCC" stroke="none"/>',
   diamond: '<path d="M6 4h12l3 5-9 12L3 9l3-5Z"/><path d="M3 9h18M9 4l-3 5 6 12 6-12-3-5"/>',
   phone: '<rect x="6.5" y="3" width="11" height="18" rx="2.5"/><path d="M10 18h4"/>',
+  // —— 底栏五图标（2026-08-09 重设计定稿：问策泡/沙盘旗台/点兵名册/锦囊束口袋/主公玉玺）。
+  // 老键 conversation/flag/token/pouch/crown 在报告卡等处还有别的消费方，不动。
+  counsel: '<path d="M12 4.6c4.4 0 7.6 2.7 7.6 6.1s-3.2 6.1-7.6 6.1c-.55 0-1.1-.04-1.62-.12l-3.05 1.98a.5.5 0 0 1-.77-.5l.53-3.05C5.4 14.1 4.4 12.5 4.4 10.7c0-3.4 3.2-6.1 7.6-6.1Z"/><circle cx="8.9" cy="10.7" r=".8" fill="CCC" stroke="none"/><circle cx="12" cy="10.7" r=".8" fill="CCC" stroke="none"/><circle cx="15.1" cy="10.7" r=".8" fill="CCC" stroke="none"/>',
+  sandtable: '<rect x="3.8" y="14" width="16.4" height="5.2" rx="1.5"/><path d="M11.2 14V4.6"/><path d="M11.2 4.6h5.6l-1.9 2.3 1.9 2.3h-5.6"/><circle cx="7.4" cy="16.6" r=".85" fill="CCC" stroke="none"/><circle cx="16.6" cy="16.6" r=".85" fill="CCC" stroke="none"/>',
+  muster: '<path d="M4.4 6.1l1.3 1.3 2.2-2.4"/><path d="M11 6.6h8.6"/><path d="M4.4 11.9l1.3 1.3 2.2-2.4"/><path d="M11 12.4h8.6"/><circle cx="6" cy="18" r="1.4"/><path d="M11 18.2h8.6"/>',
+  brocade: '<path d="M9.6 4.7c1.55.78 3.25.78 4.8 0"/><path d="M9.6 4.7 8.6 8.5"/><path d="M14.4 4.7l1 3.8"/><path d="M8 8.8c2.55-.68 5.45-.68 8 0"/><path d="M8.2 8.9c-1.95 1.65-3.05 3.65-3.05 5.65 0 3.35 2.95 5.35 6.85 5.35s6.85-2 6.85-5.35c0-2-1.1-4-3.05-5.65"/>',
+  lord: '<path d="M9.3 12.6v-3c0-2.1 1.1-3.8 2.7-3.8s2.7 1.7 2.7 3.8v3"/><rect x="6.4" y="12.6" width="11.2" height="4.6" rx="1.2"/><path d="M5 20.4h14"/>',
   wechat: '<path d="M8.4 4C4.9 4 2 6.5 2 9.6c0 1.7.9 3.3 2.4 4.3l-.6 2.2 2.5-1.3c.6.2 1.2.3 1.9.3"/><path d="M22 14.4c0-2.6-2.5-4.7-5.6-4.7-3.1 0-5.6 2.1-5.6 4.7s2.5 4.7 5.6 4.7c.6 0 1.2-.1 1.8-.3l2.2 1.2-.5-1.9c1.3-.9 2.1-2.2 2.1-3.7Z"/><circle cx="6.3" cy="9" r="1" fill="CCC" stroke="none"/><circle cx="10.5" cy="9" r="1" fill="CCC" stroke="none"/><circle cx="14.6" cy="13.8" r=".9" fill="CCC" stroke="none"/><circle cx="18.2" cy="13.8" r=".9" fill="CCC" stroke="none"/>',
 };
 

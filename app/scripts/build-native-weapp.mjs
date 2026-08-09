@@ -129,7 +129,9 @@ function clearOutputRoot() {
 // H5 那套是 stroke 1.6 的自绘线稿（锦囊是真的袋形），两端从此同一套字形。
 // 路径直接从 tsx 里正则抽取：格式是稳定的单行 `  name: '<path .../>'`，抽不到就构建失败，
 // 不会静默退回 lucide。
-const CUSTOM_TAB_ICONS = ['conversation', 'flag', 'token', 'pouch', 'crown'];
+// 新五键 = 2026-08-09 重设计的底栏图标（问策泡/沙盘旗台/点兵名册/锦囊束口袋/主公玉玺）；
+// 老五键仍被报告卡/项目页等处消费，继续按 H5 同源路径发射，不回退 lucide。
+const CUSTOM_TAB_ICONS = ['counsel', 'sandtable', 'muster', 'brocade', 'lord', 'conversation', 'flag', 'token', 'pouch', 'crown'];
 function extractIconPaths(names) {
   const source = fs.readFileSync(path.join(APP_ROOT, 'src', 'components', 'Icon', 'index.tsx'), 'utf8');
   const paths = {};

@@ -3,7 +3,7 @@
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>
     <view class="pad account">
-      <tab-header title="老板" kicker="你自己" glyph="我"></tab-header>
+      <tab-header title="主公" kicker="你自己" glyph="主"></tab-header>
 
       <block wx:if="{{authed}}">
         <view class="account-user-card account-service-card">

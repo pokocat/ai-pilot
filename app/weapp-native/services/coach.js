@@ -6,10 +6,10 @@ const STEPS = [
   // 「直接说」在两种形态下都成立，「军师团 / 历史看右上」在终态是页头双入口、在列表态是搜索行右侧，
   // 都在右上方向，不误导。别写成只描述其中一种形态的话术。
   { route: '/pages/sessions/index', title: '问策 · 有事问军师', text: '有事直接说，总军师在这等你。换专业军师、翻旧对话都在右上角；结论会汇回主线判断。' },
-  { route: '/pages/home/index', title: '军情 · 每天的判断', text: '今天的主要矛盾、下一步就做、现在别做，一屏讲清——先判断，再行动。' },
-  { route: '/pages/studio/index', title: '军令 · 把话变成事', text: '判断拆成今日任务：做完打卡、回填战果，军师据此修正下一轮判断。' },
+  { route: '/pages/home/index', title: '沙盘 · 每天的判断', text: '今天的主要矛盾、下一步就做、现在别做，一屏讲清——先判断，再行动。' },
+  { route: '/pages/studio/index', title: '点兵 · 把话变成事', text: '判断拆成今日任务：做完打卡、回填战果，军师据此修正下一轮判断。' },
   { route: '/pages/thinktank/index', title: '锦囊 · 越攒越值钱', text: '资料、方法、历次方案都留档在这，是你的家底，越攒越厚。' },
-  { route: '/pages/profile/index', title: '老板 · 你自己', text: '档案、算力、服务老师都在这里打理。往后有事，随时唤军师。' },
+  { route: '/pages/profile/index', title: '主公 · 你自己', text: '档案、算力、服务老师都在这里打理。往后有事，随时唤军师。' },
 ];
 const CN = ['一', '二', '三', '四', '五'];
 

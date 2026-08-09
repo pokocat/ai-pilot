@@ -801,7 +801,13 @@ test('除微信官方品牌图形外，功能图标统一通过 Lucide 组件输
   }
   // tab 表已抽到 services/tabbar.js（底栏与问策浮岛同源），断言跟着真源走。
   const tabTable = fs.readFileSync(path.join(sourceRoot, 'services/tabbar.js'), 'utf8');
-  assert.match(tabTable, /pages\/sessions\/index', icon: 'conversation'/);
+  // 底栏五图标 2026-08-09 起为自绘新键（counsel/sandtable/muster/brocade/lord），
+  // 不再经 LUCIDE 映射；其余 native-icon 名仍必须映射齐全（上面的循环）。
+  assert.match(tabTable, /pages\/sessions\/index', icon: 'counsel'/);
+  assert.match(tabTable, /icon: 'sandtable', text: '沙盘'/);
+  assert.match(tabTable, /icon: 'muster', text: '点兵'/);
+  assert.match(tabTable, /icon: 'brocade', text: '锦囊'/);
+  assert.match(tabTable, /icon: 'lord', text: '主公'/);
   const nativeTabs = fs.readFileSync(path.join(sourceRoot, 'custom-tab-bar/index.js'), 'utf8');
   assert.match(nativeTabs, /require\('\.\.\/services\/tabbar'\)/, '底栏不得再自留一份 tab 表');
   assert.doesNotMatch(nativeTabs, /const TABS = \[/, 'tab 表只允许存在于 services/tabbar.js');
@@ -1651,7 +1657,7 @@ test('底栏五图标与 H5 同一套自绘线稿：stroke 1.6、路径逐字一
   const iconTsx = fs.readFileSync(path.join(appRoot, 'src', 'components', 'Icon', 'index.tsx'), 'utf8');
   const dist = path.join(appRoot, 'dist-native', 'assets', 'native-icons');
   if (!fs.existsSync(dist)) return; // 未构建时跳过（与字体产物断言同一模式）
-  for (const name of ['conversation', 'flag', 'token', 'pouch', 'crown']) {
+  for (const name of ['counsel', 'sandtable', 'muster', 'brocade', 'lord', 'conversation', 'flag', 'token', 'pouch', 'crown']) {
     const m = iconTsx.match(new RegExp(`^\\s{2}${name}: '(.+)',$`, 'm'));
     assert.ok(m, `Icon/index.tsx 里找不到 ${name} —— PATHS 写法变了要同步 build 脚本的抽取正则`);
     const svg = fs.readFileSync(path.join(dist, `${name}-neutral.svg`), 'utf8');

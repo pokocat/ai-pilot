@@ -208,7 +208,7 @@ export default function Home() {
     if (s.isAuthed()) {
       jobs.push(api.refreshForces().then(() => store.loadMe()).catch(s.handleApiError)); // V7-04：刷新结构化三势后回读 /me
     }
-    Promise.all(jobs).then(() => Taro.showToast({ title: '军情已更新', icon: 'none' }));
+    Promise.all(jobs).then(() => Taro.showToast({ title: '沙盘已更新', icon: 'none' }));
   };
   // 聚合入口（「待补资料 N」指标格）：不指定哪条，让军师挑最关键的几条问。
   const startInterview = () =>
@@ -252,7 +252,7 @@ export default function Home() {
     return (
       <Screen topInset className="home">
         <View className="pad">
-          <TabHeader title="军情" kicker="看今日判断" glyph="势" />
+          <TabHeader title="沙盘" kicker="看今日判断" glyph="势" />
           <View className="say-strip">
             <Text className="say-k" style={{ color: accent }}>今日献策 · {saying.date}</Text>
             <SayingLine html={saying.text} accent={accent} />
@@ -293,7 +293,7 @@ export default function Home() {
         {/* 页头（TabHeader）：小字用途 + 大字「军情」+ 背景「势」，不挂按钮。
             原页头右侧的「案卷」回归老板 tab；刷新不是简单重拉（它调 refreshForces 重算三势），
             所以下移到「三势判断」段头，动作与它的作用对上。 */}
-        <TabHeader title="军情" kicker="看今日判断" glyph="势" />
+        <TabHeader title="沙盘" kicker="看今日判断" glyph="势" />
 
         {/* 今日献策（每日批语）：从页尾提到页头，紧接标题区那条细线当一句眉批。
             放页尾时它一天一换却基本没人滚到，而且夹在「现在不能做」和认可 CTA 之间会打断

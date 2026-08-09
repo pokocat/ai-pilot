@@ -207,7 +207,7 @@ export default function Profile() {
     return (
       <Screen topInset>
         <View className="pad account">
-          <TabHeader title="老板" kicker="你自己" glyph="我" />
+          <TabHeader title="主公" kicker="你自己" glyph="主" />
           <AsyncState
             empty
             emptyText="尚未登录"
@@ -243,7 +243,7 @@ export default function Profile() {
       <View className="pad account">
         {/* 页头（TabHeader）：小字用途 + 大字「老板」+ 背景「我」，不挂按钮。
             「设置」下移到下方「系统」菜单组首行。 */}
-        <TabHeader title="老板" kicker="你自己" glyph="我" />
+        <TabHeader title="主公" kicker="你自己" glyph="主" />
 
         {/* 账户服务卡（深绿 · §10.1）：头像 + 姓名 + 会员牌 / 手机·社群·邀请码 / 权益三格 / 服务动作 */}
         <View className="account-user-card account-service-card">
