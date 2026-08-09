@@ -511,7 +511,8 @@ test('对话核心抽到主包 chat-core，分包页只留页头与导航', () =
   assert.match(pageWxml, /<import src="\/chat-core\/message-list\.wxml">/);
   assert.match(pageWxml, /<import src="\/chat-core\/composer\.wxml">/);
   assert.match(pageWxml, /<template is="chat-message-list" data="\{\{[^"]*messages[^"]*\}\}"/);
-  assert.match(pageWxml, /<template is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
+  // 教学层期间输入行整体让位（wx:if="{{!coachOn}}"），所以这里允许模板带条件渲染。
+  assert.match(pageWxml, /<template (?:wx:if="\{\{![a-zA-Z]+\}\}" )?is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
   assert.doesNotMatch(pageWxml, /<textarea\b|class="chat-stream"/, '消息流与输入区已进模板，页面只保留页头与外壳');
   assert.match(pageScss, /@use "\.\.\/\.\.\/\.\.\/chat-core\/chat-core\.scss"/);
   assert.doesNotMatch(pageScss, /\.composer-box|\.ask-card|\.paste-card/, '可共享样式已迁走，页面 SCSS 只留页面外壳');
@@ -573,8 +574,8 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
 
   // —— 底部合体浮岛：composer 模板 + 分隔线 + 与 custom-tab-bar 同源的五 tab ——
   assert.match(wxml, /<import src="\/chat-core\/composer\.wxml">/);
-  assert.match(wxml, /<template is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
-  assert.match(wxml, /class="wence-isle"[\s\S]*?class="isle-div"[\s\S]*?class="tabbar-inner"/, '浮岛顺序：输入行 → 细线 → tab 行');
+  assert.match(wxml, /<template (?:wx:if="\{\{![a-zA-Z]+\}\}" )?is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
+  assert.match(wxml, /class="wence-isle[^"]*"[\s\S]*?class="isle-div"[\s\S]*?class="tabbar-inner"/, '浮岛顺序：输入行 → 细线 → tab 行');
   assert.match(wxml, /bindtap="switchIsleTab"/);
   assert.match(js, /require\('\.\.\/\.\.\/services\/tabbar'\)/, '浮岛 tab 与底栏共用 services/tabbar.js');
   assert.match(scss, /@use "\.\.\/\.\.\/custom-tab-bar\/index\.scss"/, '浮岛复用底栏同一份 SCSS（含图标光学校准）');
@@ -582,7 +583,11 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
 
   // —— 提示 pill：代发 + 冷会话专属（有过 user 轮就永久收起）+ 有草稿/生成中/键盘/抽屉都不显示 ——
   assert.match(wxml, /class="wence-pill[\s\S]*?bindtap="tapHint"/);
-  assert.match(wxml, /wx:if="\{\{hintText && !chipsSpent && !drawerOpen && !busy && !inputCount && !keyboardHeight\}\}"/, 'pill 的隐藏条件全部在 WXML 表达式里，不靠 JS 同步');
+  // 逐字匹配整串太脆（每加一个隐藏条件就红一次），改为「必须逐项出现在同一个 wx:if 里」。
+  const pillIf = (wxml.match(/wx:if="\{\{hintText[^"]*\}\}"/) || [''])[0];
+  for (const cond of ['hintText', '!chipsSpent', '!coachOn', '!drawerOpen', '!busy', '!inputCount', '!keyboardHeight']) {
+    assert.ok(pillIf.includes(cond), `pill 隐藏条件缺少 ${cond}（必须写在 WXML 表达式里，不靠 JS 同步）`);
+  }
   // pill 只降低「首次开口」门槛：判据必须与 chips 同源（chat-core 的 chipsSpent = 本会话有无 user 轮），
   // 不许另造一套「点过了」的标记，否则老用户带历史会话进来还会看到它。
   assert.match(js, /this\.data\.form !== 'chat' \|\| this\.data\.chipsSpent/, '轮播启动前先看 chipsSpent');
@@ -1671,4 +1676,21 @@ test('底栏五图标与 H5 同一套自绘线稿：stroke 1.6、路径逐字一
   // 只盯 .tabbar 块本身：角标（.tab-badge/.tab-dot）的白描边是压在半透明底栏上的，该留。
   const barBlock = barScss.match(/\.tabbar \{[\s\S]*?\n\}/)[0];
   assert.doesNotMatch(barBlock, /rgba\(255, 255, 255, \.7\)/, '白描边压白底等于没画，别改回来');
+});
+
+// 2026-08-08 真机：首次入局的五步教学层被问策终态的底部浮岛压住（面板底部留白按 66px 旧底栏算，
+// 浮岛约 159px），「下一步」按钮连同半截正文被盖掉。教学期间浮岛必须收成纯 tab 行。
+test('教学层展示期间问策浮岛让位，不遮挡面板', () => {
+  const wxml = read(sourceRoot, 'pages/sessions/index.wxml');
+  const js = read(sourceRoot, 'pages/sessions/index.js');
+  const coachJs = read(sourceRoot, 'components/coach-marks/index.js');
+
+  assert.match(coachJs, /triggerEvent\('coachstate'/, '教学层开合必须广播给宿主页');
+  assert.match(wxml, /<coach-marks bindcoachstate="onCoachState">/, '问策页必须接住教学层状态');
+  assert.match(js, /onCoachState\(event\)[\s\S]{0,320}setData\(\{ coachOn \}\)/);
+  // 输入行、分隔线、提示 pill 三者在教学期间都要让位；tab 行保留（箭头指的就是它）。
+  assert.match(wxml, /<template wx:if="\{\{!coachOn\}\}" is="chat-composer"/, '教学期间输入行必须收起');
+  assert.match(wxml, /wx:if="\{\{!coachOn\}\}" class="isle-div"/);
+  assert.match(wxml, /class="wence-pill"|!coachOn && !drawerOpen/, '教学期间提示 pill 必须收起');
+  assert.match(wxml, /class="tabbar-inner"/, 'tab 行必须保留——教学箭头指的就是底栏');
 });

@@ -111,7 +111,7 @@ Page({
     showHistory: false, showLogin: false, loginReason: 'chat', unlockAgent: null, loading: true, error: false, searching: false,
     // 终态专属
     isleTabs: visualTabs('theme-green'), unread: 0, councilUnreadText: '',
-    headHeight: 0, drawerOpen: false, drawerSeg: 'council',
+    headHeight: 0, drawerOpen: false, drawerSeg: 'council', coachOn: false,
     hintText: '', hintId: '', hintFade: false,
   }),
 
@@ -472,6 +472,18 @@ Page({
     if (seg === this.data.drawerSeg) return;
     if (seg === 'history' && !this.requireLogin('history')) return;
     this.setData({ drawerSeg: seg });
+  },
+
+  /**
+   * 首次入局的五步教学层开合。终态的底部浮岛（输入行 + tab 行）比教学层假设的 66px 底栏高得多，
+   * 不让位就会把面板下半截连同「下一步」按钮一起盖住（2026-08-08 真机实拍）。
+   * 教学期间浮岛只留 tab 行——箭头指的本来就是底栏，输入行与提示 pill 此时都不是教学对象。
+   */
+  onCoachState(event) {
+    const coachOn = Boolean(event && event.detail && event.detail.active);
+    if (coachOn === Boolean(this.data.coachOn)) return;
+    this.setData({ coachOn });
+    if (coachOn) this.stopHintRotation(); else this.startHintRotation();
   },
 
   switchIsleTab(event) {

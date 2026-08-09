@@ -35,7 +35,7 @@
   </view>
 
   <!-- 对话区：滚动容器留在宿主页（scroll-into-view 不进模板，避免流式自动滚底带着整张列表重算）。-->
-  <scroll-view scroll-y enhanced show-scrollbar="false" scroll-into-view="{{bottomAnchor}}" class="wence-scroll">
+  <scroll-view scroll-y enhanced show-scrollbar="false" scroll-into-view="{{bottomAnchor}}" class="wence-scroll {{coachOn ? 'coach-lift' : ''}}">
     <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast, chipsSpent}}"></template>
   </scroll-view>
 
@@ -43,16 +43,16 @@
        原型的「点选即填」在原生没有实现路径；代发与 chip 同语义，见 AGENTS §7.2）。
        只在「冷会话」出现：pill 的职责是降低首次开口门槛，本会话一旦有过 user 轮就永久收起
        （判据 chipsSpent 与 chips 完全同源，别另造一套；老用户带历史会话进来 = 永不出现）。-->
-  <view wx:if="{{hintText && !chipsSpent && !drawerOpen && !busy && !inputCount && !keyboardHeight}}" class="wence-pill {{hintFade ? 'fade' : ''}}" bindtap="tapHint">
+  <view wx:if="{{hintText && !chipsSpent && !coachOn && !drawerOpen && !busy && !inputCount && !keyboardHeight}}" class="wence-pill {{hintFade ? 'fade' : ''}}" bindtap="tapHint">
     <view class="wp-mark"><text class="serif">问</text></view>
     <text class="wp-q">{{hintText}}</text>
   </view>
 
   <!-- 底部合体浮岛：上=chat-core composer 模板，下=与 custom-tab-bar 同源的五 tab 行，同一块玻璃。
        z-index 100 = --z-nav（本形态下 custom-tab-bar 本体由 store.setOverlay 隐藏）。-->
-  <view class="wence-isle">
-    <template is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, composerSeed, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>
-    <view class="isle-div"></view>
+  <view class="wence-isle {{coachOn ? 'coach-lift' : ''}}">
+    <template wx:if="{{!coachOn}}" is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, composerSeed, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>
+    <view wx:if="{{!coachOn}}" class="isle-div"></view>
     <view class="tabbar-inner">
       <view wx:for="{{isleTabs}}" wx:key="path" class="tab {{index === 0 ? 'on' : ''}}" data-index="{{index}}" bindtap="switchIsleTab">
         <view class="tab-ic">
@@ -118,7 +118,7 @@
 
   <agent-unlock agent="{{unlockAgent}}" bindclose="closeUnlock" bindunlocked="agentUnlocked"></agent-unlock>
   <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
-  <coach-marks></coach-marks>
+  <coach-marks bindcoachstate="onCoachState"></coach-marks>
 </view>
 
 <view wx:else class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
@@ -169,5 +169,5 @@
   </scroll-view>
   <agent-unlock agent="{{unlockAgent}}" bindclose="closeUnlock" bindunlocked="agentUnlocked"></agent-unlock>
   <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
-  <coach-marks></coach-marks>
+  <coach-marks bindcoachstate="onCoachState"></coach-marks>
 </view>

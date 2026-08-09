@@ -123,6 +123,12 @@
     0 12px 32px rgba(22, 25, 29, .16),
     0 3px 8px rgba(22, 25, 29, .07);
 }
+/* 教学层（coach-marks 五步）展示期间：浮岛只留 tab 行。教学面板的底部留白按 66px 旧底栏算
+   （components/coach-marks 的 padding-bottom: safe-area + 122px），而完整浮岛约 159px，
+   不让位就会把面板下半截连同「下一步」按钮一起盖住（2026-08-08 真机实拍）。
+   输入行与提示 pill 此时都不是教学对象，箭头指的本来就是底栏，所以收起最省事也最准。 */
+.wence-scroll.coach-lift { bottom: calc(80px + env(safe-area-inset-bottom)); }
+
 /* composer 模板整体嵌进浮岛：脱掉它在 chat 分包页上的固定定位与自带底板，只留内容。
    高度约定：内容 78 + 上下 18 = 96，正好等于 measureComposer 的下限，
    于是 --composer-height 与真实高度不打架（改 padding/min-height 要一起核）。 */
