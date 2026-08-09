@@ -38,12 +38,15 @@
   color: var(--ink);
 }
 
+/* 收口线：页头与内容的唯一分界。原先是 --line（#E7E4DB）1px，压在同色系的 --paper 底上
+   几乎看不见——页头与首屏卡片糊成一片，用户反馈「跟页面区分识别度不够」。
+   改用 --line-strong 并把线前留白拉开，让这一刀真的切得出来；仍是 1px 细线，不喧宾夺主。 */
 .th-rule {
   height: 1px;
-  margin-top: 14px;
-  background: var(--line);
+  margin-top: 18px;
+  background: var(--line-strong);
 }
 
 /* 标题区与下方内容的统一呼吸（各页不要再自加头部间距）。
    这段留白同时是背景大字的落脚处——见 .th-glyph 注释，两者配套调。 */
-.tab-head { margin-bottom: 18px; }
+.tab-head { margin-bottom: 22px; }

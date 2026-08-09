@@ -14,7 +14,9 @@ function capsuleMetrics() {
     const navRowHeight = Math.max(36, capsuleHeight);
     const navTop = Math.max(0, (Number(rect.top) || 0) - ((navRowHeight - capsuleHeight) / 2));
     return {
-      navInset: navTop + navRowHeight + 10,
+      // 胶囊行底部留白：10 → 18px。10px 时标题「军情/问策」几乎贴着胶囊下沿，真机上整个页头
+      // 像是被顶在屏幕边上；抬到 18px 后标题区自己成一块，与状态栏/胶囊明显分层。
+      navInset: navTop + navRowHeight + 18,
       navTop,
       navRowHeight,
       navRightInset: Math.max(16, win && win.windowWidth ? win.windowWidth - rect.left + 12 : 16),

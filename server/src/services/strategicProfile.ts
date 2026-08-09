@@ -13,6 +13,7 @@ import { isFeatureEnabled } from './featureFlag.js';
 import { loadChart } from './paipan.js';
 import { composeAnnualVerse } from './mingpan.js';
 import { recordProphecy } from './prophecyLog.js';
+import { plainText } from './plainText.js';
 import type { ForcesView, ForceVerdict, ForceView, StrategicProfile, StrategicProfilePatch, VerseMoment } from '../../../shared/contracts';
 import type { DeliverableSection } from '../llm/schema.js';
 
@@ -105,7 +106,9 @@ function verseCandidate(raw?: string): string | undefined {
  */
 export function extractStrategicFacts(d: DeliverableInput): StrategicPatch {
   const out: StrategicPatch = {};
-  const firstLine = (s?: string) => (s || '').split('\n')[0].trim().slice(0, 300);
+  // 取正文首行并洗掉行内 Markdown：这些字段全部落进「只当纯文本渲染」的位（首页主要矛盾卡、
+  // 老板页战略事实、记忆库条目、brandKit 提示词），带着 ==高亮== / **加粗** 进去就是可见的乱码。
+  const firstLine = (s?: string) => plainText((s || '').split('\n')[0]).slice(0, 300);
   let verseBody: string | undefined;
   for (const sec of normalizedSections(d)) {
     const h = sec.h || '';
@@ -364,12 +367,15 @@ export async function loadStrategicProfile(userId: string): Promise<StrategicVie
   const row = await prisma.strategicProfile.findUnique({ where: { userId } });
   if (!row) return null;
   const extra = verseExtraOf(row); // verseSource / verseHistory 只服务写侧守卫与岁验，不下发
+  // 出口再洗一次：写侧的清洗只管以后，**存量行里已经躺着 ==…==**（真机实拍即为此），
+  // 洗在出口才能让老数据立刻恢复正常，且不必回写全表。
+  // mainContradiction 契约上可空：null 保持 null（「没有这条事实」≠「有一条空字符串」）。
   return {
-    mainContradiction: row.mainContradiction,
-    positioning: row.positioning,
-    track: row.track,
-    stage: row.stage,
-    narrative: extra.narrative ?? '',
+    mainContradiction: row.mainContradiction ? plainText(row.mainContradiction) : row.mainContradiction,
+    positioning: plainText(row.positioning),
+    track: plainText(row.track),
+    stage: plainText(row.stage),
+    narrative: plainText(extra.narrative),
     verse: extra.verse ?? '',
     verseYear: typeof extra.verseYear === 'number' ? extra.verseYear : null,
     verseAt: extra.verseAt ?? null,

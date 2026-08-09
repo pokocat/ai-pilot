@@ -5,10 +5,25 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover" />
   <meta http-equiv="X-UA-Compatible" content="ie=edge" />
   <title>军师 · AI 商业军师</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <!-- 字体改为随产物自托管（见下方 @font-face，与小程序同一份思源宋体子集，同源无跨域）。
+       原先这里拉的是 fonts.googleapis.com —— 该域名在国内大量网络不可达，等于「能不能看到宋体」
+       取决于用户的网络，且每次都要一次跨境请求。自托管后 H5 与小程序观感完全一致。
+       --sans 不再下载 Noto Sans SC，落回系统黑体（PingFang / 各家 ROM 自带），无可用性风险。 -->
   <style>
+    /* 自带中文衬线字体（思源宋体 SC 子集，与小程序同一份文件、同一个 family 名）。
+       写在这里而不是 SCSS：webpack 的 css 链路会把 `url(/fonts/…)` 当模块解析，构建会直接失败。
+       同源相对路径 → 浏览器不走 CORS（跨域托管必须给那个域名配 CORS，否则字体被拒）。
+       swap：先用系统字体把内容显示出来，字体到位再替换，绝不为字体白屏。 */
+    @font-face {
+      font-family: "JunshiSerif";
+      src: url("/fonts/junshi-serif-400.woff2") format("woff2");
+      font-weight: 400; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: "JunshiSerif";
+      src: url("/fonts/junshi-serif-600.woff2") format("woff2");
+      font-weight: 600; font-style: normal; font-display: swap;
+    }
     html, body { margin: 0; padding: 0; background: #F4F2EC; }
     /* 居中模拟手机视口（H5 review 用；小程序天然全屏） */
     @media (min-width: 480px) {

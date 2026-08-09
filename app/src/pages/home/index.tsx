@@ -242,7 +242,7 @@ export default function Home() {
       .catch((e: unknown) => {
         setCta('idle');
         const code = String((e as { code?: string; data?: { code?: string } })?.code || (e as { data?: { code?: string } })?.data?.code || '');
-        if (code === 'PLAN_EXPIRED') { setPayOpen(true); return; } // 套餐过期 → 续费付费屏
+        if (code === 'PLAN_EXPIRED' || code === 'PLAN_REQUIRED') { setPayOpen(true); return; } // 到期续费 / 未开通 → 同一付费屏
         if (code === 'INSUFFICIENT_QUOTA' || code === 'INSUFFICIENT_CREDITS' || code === 'SKU_REQUIRED') { setExceptionOpen(true); return; } // 额度/算力不足 → 异常屏
         s.handleApiError(e);
       });

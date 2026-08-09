@@ -43,7 +43,16 @@ page {
   --danger: #9C4A38;
   --warn: #A8772E;
 
-  --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  /* 宋体链。iOS 命中 Songti SC，macOS/Windows 命中 STSong/SimSun，安卓靠末尾的 generic serif
+     落到系统的 Noto Serif CJK（2026-08-09 实测：OPPO ColorOS 的 Chrome 里运营后台就是这么出的宋体，
+     后台那条链同样以 serif 收尾）。
+     所以**安卓端字体是在的**，端上看不到宋体不是这条链的问题，别再往里堆族名——
+     堆得越多越可能在某台机器上误命中一个不想要的字体。真正的差异在渲染环境（微信小程序内核），
+     见 docs 与 wx.loadFontFace 方案。 */
+  /* JunshiSerif = 自带的思源宋体子集：小程序由 services/font.js 的 wx.loadFontFace 注入，
+     H5 由 app.h5.scss 的 @font-face 注入。没加载成功就顺着后面的系统字体走，不会白屏。
+     这个名字在三处必须一致：本行、scripts/build-native-weapp.mjs 的 APP_FONT_FAMILY、@font-face。 */
+  --serif: "JunshiSerif", "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "Noto Serif SC", "SimSun", serif;
   --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
 
   --r-sm: 10px;

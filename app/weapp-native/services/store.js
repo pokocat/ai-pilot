@@ -60,8 +60,34 @@ function handleApiError(error, options) {
     if (!opts.silent) wx.showToast({ title: error.message || opts.fallbackTitle || '网络请求失败', icon: 'none' });
     return 'network';
   }
+  // 未开通方案（服务端禁写闸 403）：所有写操作都会撞上这条，通用兜底只会弹一句「XX 失败」，
+  // 把付费转化路径断在最后一步。这里统一给开通入口——silent 调用方自己渲染，只拿 code。
+  if (code === 'PLAN_REQUIRED') {
+    if (!opts.silent) promptPlanRequired();
+    return 'plan_required';
+  }
   if (!opts.silent && opts.fallbackTitle) wx.showToast({ title: opts.fallbackTitle, icon: 'none' });
   return 'other';
+}
+
+let planModalOpen = false;
+/** 「未开通方案」引导弹窗（去开通 → 方案页）。同屏多请求并发失败时只弹一次。 */
+function promptPlanRequired() {
+  if (planModalOpen) return;
+  planModalOpen = true;
+  wx.showModal({
+    title: '尚未开通方案',
+    content: '开通方案后即可使用军师的推演与成果能力，未开通前内容可以随便看。',
+    confirmText: '去开通',
+    cancelText: '再看看',
+    complete: () => { planModalOpen = false; },
+    success: (result) => { if (result.confirm) wx.navigateTo({ url: '/packages/work/plans/index' }); },
+  });
+}
+
+/** 当前账号是否从未开通方案（/me.planStatus.none）。取不到 me 时按「已开通」处理，不误拦。 */
+function planRequired() {
+  return Boolean(state.me && state.me.planStatus && state.me.planStatus.none);
 }
 
 setAuthLostHandler(() => handleApiError({ code: 'UNAUTHORIZED', hadToken: true }));
@@ -152,4 +178,5 @@ function snapshot() {
 module.exports = {
   bootstrap, snapshot, isAuthed: () => Boolean(getToken()), loadAgents, loadMe,
   afterLogin, syncUnread, handleApiError, resetAuth, setColor, completeOnboarding, setOverlay,
+  planRequired, promptPlanRequired,
 };

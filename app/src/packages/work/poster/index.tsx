@@ -297,6 +297,9 @@ export default function PosterConfirmPage() {
         Taro.showToast({ title: '今日额度已满', icon: 'none' });
       } else if (code === 'PLAN_EXPIRED') {
         setSubmitErr('当前方案已到期，续期后可继续出图。');
+      } else if (code === 'PLAN_REQUIRED') {
+        setSubmitErr('尚未开通方案，开通后即可出图。');
+        Taro.showToast({ title: '尚未开通方案', icon: 'none' });
       } else if (code === 'BRIEF_INVALID' || code === 'MODERATION_BLOCKED') {
         setSubmitErr(msg || '需求单没通过校验，改一下再试。');
         // 版式在本页停留期间被后台停用（服务端对显式请求停用版式一律 422，不静默换版照常扣费）：

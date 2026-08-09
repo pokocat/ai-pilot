@@ -152,6 +152,41 @@ function emitStandaloneDevtoolsConfig() {
   fs.writeFileSync(path.join(OUTPUT_ROOT, 'project.config.json'), `${JSON.stringify(config, null, 2)}\n`);
 }
 
+// 字体 token 落成字面量（只在小程序产物里做，H5 不动）。
+//
+// 现象（2026-08-09 真机）：同一台 OPPO，Chrome 与微信内置浏览器打开 H5/运营后台，中文都是宋体；
+// 只有小程序里不是。两个浏览器环境证明设备有中文衬线字体、字体栈本身也没写错，
+// 差别只剩「小程序的 WXSS 运行时」这一处。而本仓早有两处教训写着真机对 page 级 token 不可靠
+// （见 src/app.scss 的 z-index 注释与主题类必须就地覆盖业务主色的注释）——
+// font-family 走的正是同一条 `page` 定义 + 子元素 var() 取值的链路。
+//
+// 所以把 --serif / --sans 在编译产物里直接展开成字面量：SCSS 里仍是单一事实源（改 token 即可），
+// 但小程序真机不再需要在运行时解析这两个变量。对浏览器零影响，改错也只是白写一遍同样的值。
+const FONT_TOKEN_RE = /^\s*--(serif|sans):\s*([^;]+);/gm;
+/** 自带字体的 family 名：必须与 src/app.scss 字体栈第一位、config/env.js 的 FONT_FAMILY 三处一致。 */
+const APP_FONT_FAMILY = 'JunshiSerif';
+// 字体托管位置：与 H5 同一份文件、同一个地址（H5 走同源 `/fonts`，小程序只能给绝对地址）。
+// 文件由 app/src/assets/fonts/ 随 H5 产物发布，所以**发小程序前要先发过一次 H5**。
+// ⚠️ 该域名必须在微信后台的 downloadFile 合法域名里，否则 loadFontFace 会被直接拒绝。
+const APP_FONT_BASE = (process.env.WEAPP_APP_FONT_BASE || 'https://wxapi.aibuzz.cn/fonts').replace(/\/+$/, '');
+/** 只发 400/600 两个字重：正文与标题各一份，合计约 1.8MB；其余字重由渲染器就近取，不再多下文件。 */
+const APP_FONT_WEIGHTS = [400, 600];
+function fontTokenLiterals() {
+  const tokens = new Map();
+  const css = fs.readFileSync(path.join(APP_ROOT, 'src', 'app.scss'), 'utf8');
+  for (const m of css.matchAll(FONT_TOKEN_RE)) tokens.set(m[1], m[2].trim());
+  if (!tokens.has('serif') || !tokens.has('sans')) {
+    throw new Error('未能从 src/app.scss 解析出 --serif / --sans 字体栈：字体 token 改名了就得同步改这里');
+  }
+  return tokens;
+}
+function inlineFontTokens(css) {
+  const tokens = fontTokenLiterals();
+  return css
+    .replace(/var\(--serif\)/g, tokens.get('serif'))
+    .replace(/var\(--sans\)/g, tokens.get('sans'));
+}
+
 function build() {
   clearOutputRoot();
   const sourceFiles = walk(SOURCE_ROOT);
@@ -162,7 +197,7 @@ function build() {
       const target = path.join(OUTPUT_ROOT, relative.replace(/\.scss$/, '.wxss'));
       ensureParent(target);
       const result = sass.compile(source, { style: 'expanded', loadPaths: [APP_ROOT] });
-      fs.writeFileSync(target, result.css);
+      fs.writeFileSync(target, inlineFontTokens(result.css));
     } else {
       const target = path.join(OUTPUT_ROOT, relative);
       ensureParent(target);
@@ -171,7 +206,9 @@ function build() {
   }
   fs.cpSync(ASSET_ROOT, path.join(OUTPUT_ROOT, 'assets'), { recursive: true });
   emitSharedIcons();
-  const envSource = `module.exports = ${JSON.stringify({ APP_MODE: mode, BASE_URL: api, CONFIGURED_API: apiExplicit ? api : '', API_EXPLICIT: apiExplicit, VERSION: version, GIT_SHA: gitSha, STREAM_CHAT: process.env.WEAPP_APP_STREAM !== '0' }, null, 2)};\n`;
+  // 自带字体：FONT_BASE 置空 → services/font.js 直接跳过加载，CSS 落回系统字体，本地开发不受影响。
+  // family 名与 src/app.scss 字体栈第一位必须一致（构建期展开成字面量，见 inlineFontTokens）。
+  const envSource = `module.exports = ${JSON.stringify({ APP_MODE: mode, BASE_URL: api, CONFIGURED_API: apiExplicit ? api : '', API_EXPLICIT: apiExplicit, VERSION: version, GIT_SHA: gitSha, STREAM_CHAT: process.env.WEAPP_APP_STREAM !== '0', FONT_FAMILY: APP_FONT_FAMILY, FONT_BASE: APP_FONT_BASE, FONT_WEIGHTS: APP_FONT_WEIGHTS }, null, 2)};\n`;
   ensureParent(path.join(OUTPUT_ROOT, 'config', 'env.js'));
   fs.writeFileSync(path.join(OUTPUT_ROOT, 'config', 'env.js'), envSource);
   fs.writeFileSync(path.join(OUTPUT_ROOT, 'junshi-build-meta.json'), JSON.stringify({ schemaVersion: 2, runtime: 'native-weapp', mode, api, apiExplicit, version, gitSha }, null, 2));

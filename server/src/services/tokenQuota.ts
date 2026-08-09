@@ -455,22 +455,27 @@ export async function assertPlanActive(userId: string): Promise<void> {
 }
 
 export interface PlanStatus {
-  active: boolean; // 套餐是否有效（未过期）
-  expired: boolean; // 是否已过期（→ 前端只读模式）
-  expiresAt: string | null; // 绝对到期时间（ISO）；null=不到期
+  active: boolean; // 套餐是否有效（已开通且未过期）
+  expired: boolean; // 已开通但已过期（→ 前端只读模式，引导续费）
+  none: boolean; // 从未开通（→ 前端引导开通；与 expired 互斥）
+  expiresAt: string | null; // 绝对到期时间（ISO）；null=不到期或未开通
   daysRemaining: number | null; // 剩余天数（向上取整）；null=不到期
   nextResetAt: string; // 下次月度额度重置时刻（ISO）
 }
 
 /** 套餐状态（供 /me 展示到期日 / 剩余天数 / 下次额度重置日 + 驱动前端只读态）。 */
 export async function getPlanStatus(userId: string): Promise<PlanStatus> {
-  const u = await prisma.user.findUnique({ where: { id: userId }, select: { planActivatedAt: true, planExpiresAt: true } });
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { planId: true, planActivatedAt: true, planExpiresAt: true } });
   const at = now();
   const expiresAt = u?.planExpiresAt ?? null;
   const expired = isExpired(expiresAt, at);
+  // 未开通与「企业版不限期」在到期字段上完全同形（expiresAt=null、expired=false），
+  // 必须单独出 none，否则前端无从区分，只能等写操作吃 403 PLAN_REQUIRED。
+  const none = !u?.planId;
   return {
-    active: !expired,
+    active: !expired && !none,
     expired,
+    none,
     expiresAt: expiresAt ? expiresAt.toISOString() : null,
     daysRemaining: daysRemaining(expiresAt, at),
     nextResetAt: nextResetAt(u?.planActivatedAt ?? null, at).toISOString(),

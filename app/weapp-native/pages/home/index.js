@@ -166,7 +166,10 @@ Page({
         { value: String(workbench && workbench.missing ? workbench.missing.length : questions.length), label: '待补资料', tone: 'warn' },
         { value: dossier.risks.length ? String(dossier.risks.length) : '—', label: '风险锁', tone: dossier.risks.length ? 'danger' : '' },
       ],
-      dossierTitle: dossier.dossier && dossier.dossier.title || workbench && workbench.title || '',
+      // 只认真实案卷标题。曾经这里还兜底读 workbench.title，但 WorkbenchView 契约就只有
+      // completeness / sections / missing 三个键，服务端 buildWorkbench 物理上不会给 title——
+      // 那条兜底从上线起就是死代码，唯一效果是让 mock 显示出线上永远不会出现的横幅标题。
+      dossierTitle: dossier.dossier && dossier.dossier.title || '',
       loading: false,
     });
   },
@@ -192,7 +195,20 @@ Page({
   },
   toggleHero() { this.setData({ heroExpanded: !this.data.heroExpanded }); },
   tapMetric(event) { const index = Number(event.currentTarget.dataset.index); if (index === 0) navTo('/packages/main/brief/index'); else if (index === 2) this.askRisks(); else this.ask(); },
-  next() { if (this.requireLogin()) navTo(this.data.nextRoute || '/packages/main/chat/index?agentKey=general&continue=1'); },
+  // WO-07「下一步」卡的 route 是**语义 key 不是小程序路径**（server/src/services/journey.ts
+  // 下发 'chat' / 'studio'，只有速诊那条是真路由），约定与 Taro 的 NextStepCard 同源：
+  // 'chat'→总军师对话、'studio'→执行 tab、以 '/' 开头→按真路由跳。
+  // 移植原生时漏了这层映射，直接 navTo('studio') 会被 wx.navigateTo 判为非法路径，
+  // 用户点「今日军令 x/y」只会吃到一句「页面打开失败，请重试」。mock 只下发真路由，所以
+  // 这个坑到连真服务端才暴露——mock 现已对齐语义 key，本地也能走到这条分支。
+  next() {
+    if (!this.requireLogin()) return;
+    const route = String(this.data.nextRoute || '');
+    if (route.charAt(0) === '/') { navTo(route); return; }
+    // 'studio' 是 tab，navTo 内部按 TAB_ROUTES 自动走 switchTab；未知值一律回总军师，
+    // 卡片已经在诱导「下一步」，点了没反应比跳得笼统更糟。
+    navTo(route === 'studio' ? '/pages/studio/index' : '/packages/main/chat/index?agentKey=general&continue=1');
+  },
   askQuestion(event) { if (!this.requireLogin()) return; navTo(`/packages/main/chat/index?agentKey=general&continue=1&prompt=${encodeURIComponent(event.currentTarget.dataset.text || '')}`); },
   async refreshForces() {
     if (!this.requireLogin() || this.data.refreshing) return;

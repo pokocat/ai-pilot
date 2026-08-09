@@ -1,3 +1,11 @@
+/* 自带中文衬线字体（与小程序同一份子集文件，family 名也必须同名 JunshiSerif）。
+   font-display: swap —— 先用系统字体把内容显示出来，字体到位再替换；绝不为字体白屏。
+   TARO_APP_FONT_URL 未配时这段 src 指向空串，浏览器直接判为不可用并落回后面的系统字体栈。 */
+/* 自带字体的 @font-face 写在 src/index.html 的内联 <style> 里，不在这里。
+   原因：webpack 的 css 链路会把 `url(/fonts/…)` 当成模块去解析，构建直接失败
+   （Module not found: app/fonts/junshi-serif-400.woff2）。写进 index.html 就没有任何打包器碰它，
+   URL 也保持同源相对路径。字体文件由 config/index.ts 的 copy 落到 dist-h5/fonts/。 */
+
 /* H5 兼容层：小程序有真实 page 节点，H5 没有；把设计 token 补到浏览器根节点。 */
 :root,
 html,
@@ -41,7 +49,8 @@ body,
   --danger: #9C4A38;
   --warn: #A8772E;
 
-  --serif: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+  /* 与 app.scss 同一条链，改一处必须改两处（H5 与小程序各编各的）。JunshiSerif 由下方 @font-face 注入。 */
+  --serif: "JunshiSerif", "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC", "Noto Serif SC", "SimSun", serif;
   --sans: "Noto Sans SC", -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
 
   --r-sm: 10px;

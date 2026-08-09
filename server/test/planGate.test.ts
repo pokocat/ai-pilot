@@ -143,3 +143,36 @@ test('套餐目录：免费档已移除，第一档为付费入门版', async ()
   assert.equal(first.name, '入门版');
   assert.ok(first.price > 0, '起步就收费');
 });
+
+test('/me 必须能区分「未开通」与「不限期」：planStatus.none 独立成字段', async () => {
+  // 无套餐用户的到期字段与企业版·不限期完全同形（expiresAt=null、expired=false）。
+  // 少了 none，端上只能等写操作吃 403 才知道要开通——用户白写一段话才被拦。
+  const bare = await bareUser();
+  const r1 = await api('GET', '/api/me', { token: bare });
+  assert.equal(r1.status, 200, JSON.stringify(r1.body));
+  assert.equal(r1.body.planStatus.none, true);
+  assert.equal(r1.body.planStatus.expired, false, '从未开通 ≠ 已到期（两者引导文案不同）');
+  assert.equal(r1.body.planStatus.active, false, '没开通就不算「有效」');
+
+  const paid = await login(uniquePhone(), '已开通用户');
+  const r2 = await api('GET', '/api/me', { token: paid });
+  assert.equal(r2.body.planStatus.none, false);
+  assert.equal(r2.body.planStatus.active, true);
+});
+
+test('生产硬化：NODE_ENV=production 时 TEST_DEFAULT_PLAN_NAME 一律失效（.env 回滚也复活不了免费开通）', async (t) => {
+  const { registrationDefaultPlanName } = await import('../src/env.ts');
+  const savedEnv = process.env.NODE_ENV;
+  const savedPlan = process.env.TEST_DEFAULT_PLAN_NAME;
+  t.after(() => {
+    process.env.NODE_ENV = savedEnv;
+    if (savedPlan === undefined) delete process.env.TEST_DEFAULT_PLAN_NAME;
+    else process.env.TEST_DEFAULT_PLAN_NAME = savedPlan;
+  });
+
+  process.env.TEST_DEFAULT_PLAN_NAME = '决策版';
+  process.env.NODE_ENV = 'production';
+  assert.equal(registrationDefaultPlanName(), '', '生产环境必须忽略该开关');
+  process.env.NODE_ENV = 'development';
+  assert.equal(registrationDefaultPlanName(), '决策版', '非生产仍可用于测试期开通');
+});

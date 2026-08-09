@@ -462,6 +462,8 @@ export default function ThinkTank() {
         setExc({ open: true, kind: 'power', title: '算力不足', desc: '启用该能力所需算力不足，可购买算力或改用免费能力。', onPrimary: () => { closeExc(); navTo('/packages/work/credits/index'); } });
       } else if (code === 'PLAN_EXPIRED') {
         Taro.showToast({ title: '会员已过期，续费后可继续使用', icon: 'none' });
+      } else if (code === 'PLAN_REQUIRED') {
+        setExc({ open: true, kind: 'power', title: '尚未开通方案', desc: '开通方案后即可启用这项能力，未开通前内容可以随便看。', onPrimary: () => { closeExc(); navTo('/packages/work/plans/index'); } });
       } else s.handleApiError(e, { fallbackTitle: '启用失败，请重试' });
     }
   };

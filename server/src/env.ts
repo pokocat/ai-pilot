@@ -34,8 +34,17 @@ export function isAiTestMode(): boolean {
   return process.env.NODE_ENV === 'test';
 }
 
-/** 测试期可指定新注册用户默认套餐；运行时读取，便于测试隔离与关闭后即时恢复默认体验版。 */
+/**
+ * 测试期可指定新注册用户默认套餐；运行时读取，便于测试隔离与关闭后即时恢复。
+ *
+ * **生产恒返回空**（2026-08-09 正式发布起）：正式发布后「注册即送套餐」必须只能是测试期行为。
+ * 此前它只靠生产 .env 里一个空值挡着——恢复一次 .env 备份、重灌一次配置、或者谁为了排查
+ * 临时填个值忘了删，免费开通就悄悄复活，而代码里完全看不出线上开没开。判断放在这里而不是
+ * 调用点：所有入口（微信/短信/本机号注册）都经过本函数，堵一处即全堵。
+ * 需要在类生产环境验证测试期开通，用 NODE_ENV=development 的预发，不要动生产。
+ */
 export function registrationDefaultPlanName(): string {
+  if (process.env.NODE_ENV === 'production') return '';
   return (process.env.TEST_DEFAULT_PLAN_NAME ?? '').trim();
 }
 

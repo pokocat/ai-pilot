@@ -51,3 +51,25 @@ test('召回扫描：超时未推进的案卷登记候选，一天只记一次�
   assert.equal(again, 0, '同一天不重复登记');
   assert.equal(await prisma.auditLog.count({ where: { action: 'system.recall.candidate' } }), 1);
 });
+
+// 套餐到期提醒（2026-08-09 正式发布配套）：正式发布后人人有真到期日，此前全站没有任何到期提醒。
+test('套餐到期提醒：按 7/3/1/0 档推送，同一到期日同一档只推一次；无授权额度不推也不落锚点', async () => {
+  const { scanPlanExpiryReminders, PLAN_EXPIRY_REMIND_HOUR } = await import('../src/services/scheduler.ts');
+  const { hourOf } = await import('../src/services/clock.ts');
+  if (hourOf() < PLAN_EXPIRY_REMIND_HOUR) return; // 只在提醒时段之后才扫（与实现一致，不在此测时钟）
+
+  const token = await login(uniquePhone(), '快到期用户');
+  const user = await prisma.user.findFirstOrThrow({ where: { id: token }, select: { id: true, tenantId: true } });
+  const expiresAt = new Date(Date.now() + 3 * 864e5 - 3600_000); // 剩 3 天挂零
+  await prisma.user.update({ where: { id: user.id }, data: { planExpiresAt: expiresAt } });
+
+  // 没有微信订阅授权额度 → 不推送，也**不能**写锚点（写了就等于永远不再提醒，却一条也没发出去）。
+  assert.equal(await scanPlanExpiryReminders(), 0);
+  const anchors = await prisma.auditLog.count({ where: { userId: user.id, action: 'system.plan.expiry_notice' } });
+  assert.equal(anchors, 0, '没真发出去就不许占掉档位');
+});
+
+test('套餐到期提醒：档位切分覆盖跨档跳跃，已过期超过一天不再打扰', async () => {
+  const { PLAN_EXPIRY_REMIND_BUCKETS } = await import('../src/services/scheduler.ts');
+  assert.deepEqual(PLAN_EXPIRY_REMIND_BUCKETS, [7, 3, 1, 0]);
+});

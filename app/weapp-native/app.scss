@@ -42,6 +42,11 @@ page .form-header {
   position: relative;
   height: var(--native-nav-inset);
   box-sizing: border-box;
+  /* 分层：导航行与正文同色同底时，滚动起来标题会和内容糊在一起（用户反馈「区分识别度不够」）。
+     给导航层一条 1px 收口线 + 略提亮的底，滚动时内容从线下穿过，边界始终看得见。
+     只做这两笔，不加阴影——阴影在暖纸底上会脏。 */
+  background: var(--paper);
+  border-bottom: 1px solid var(--line-strong);
 }
 
 page .native-safe-space,

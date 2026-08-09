@@ -311,8 +311,13 @@ export interface PublicUsageView {
 }
 /** 套餐有效期状态：驱动前端只读态 + 展示到期/剩余天数/下次额度重置日。 */
 export interface PlanStatusView {
-  active: boolean;            // 套餐有效（未过期）
-  expired: boolean;          // 已过期 → 前端只读模式
+  active: boolean;            // 套餐有效（已开通且未过期）
+  expired: boolean;          // 已开通但已过期 → 前端只读模式，引导续费
+  // 从未开通（planId 为空）→ 前端引导开通，与 expired 互斥。
+  // 缺了这个字段的话「无套餐」和「企业版不限期」在 /me 里长得一模一样（expiresAt=null、expired=false），
+  // 前端只能等写操作吃到 403 PLAN_REQUIRED 才知道，用户白写一段话才被拦。
+  none: boolean;
+  expiresAt: string | null;  // 绝对到期时间（ISO）；null=不到期（企业/历史）或未开通
   expiresAt: string | null;  // 绝对到期时间（ISO）；null=不到期（免费/企业/历史）
   daysRemaining: number | null; // 剩余天数；null=不到期
   nextResetAt: string;       // 下次月度额度重置时刻（ISO）

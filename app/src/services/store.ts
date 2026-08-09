@@ -57,7 +57,7 @@ function todayKey(d = new Date()): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-type ApiErrorKind = 'unauthorized' | 'network' | 'other';
+type ApiErrorKind = 'unauthorized' | 'network' | 'plan_required' | 'other';
 
 function apiErrorCode(e: unknown): string {
   return String((e as any)?.code || (e as any)?.data?.code || '');
@@ -101,6 +101,13 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
       Taro.showToast({ title: msg, icon: 'none' });
     }
     return 'network';
+  }
+
+  // 未开通方案（服务端禁写闸 403）：写操作全部会撞上，通用兜底只弹「XX 失败」，
+  // 等于把付费转化路径断在最后一步。统一给开通提示；silent 调用方自己渲染，只取 kind。
+  if (apiErrorCode(e) === 'PLAN_REQUIRED') {
+    if (!options.silent) Taro.showToast({ title: '尚未开通方案，开通后即可使用', icon: 'none' });
+    return 'plan_required';
   }
 
   if (!options.silent && options.fallbackTitle) {

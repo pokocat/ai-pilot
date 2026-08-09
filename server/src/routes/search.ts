@@ -37,7 +37,14 @@ export async function searchRoutes(app: FastifyInstance) {
           id: a.key,
           title: a.name,
           snippet: a.role,
-          route: `/pages/chat/index?agentKey=${a.key}&fresh=1`,
+          // 对话页早已从主包迁到 packages/main（两端同构），这里的路由当年没跟着搬，
+          // 端上拿到就是死路由 → 只会弹一句「页面打开失败」。app/scripts/native-weapp.test.mjs
+          // 有一条断言逐个核对本文件的路由字面量确实在 app.json 里，别再改回主包路径。
+          // continue=1 不是 fresh=1：搜索命中一个军师属于「业务快捷入口」，必须续接他的最近线程
+          // （AGENTS §路由表：只有用户明确点「新对话」、参谋室派单、项目内新建才用 fresh=1）。
+          // 端上判据是 continueLatest = continue==='1' && fresh!=='1'，发 fresh=1 会静默开新会话、
+          // 丢掉用户本来想找回的那轮上下文——而 mock 一直发的是 continue=1，所以本地看不出来。
+          route: `/packages/main/chat/index?agentKey=${a.key}&continue=1`,
         });
         if (++agentCount >= PER_KIND) break;
       }
@@ -62,7 +69,7 @@ export async function searchRoutes(app: FastifyInstance) {
         id: s.id,
         title: s.title,
         snippet: snippet.slice(0, 120),
-        route: `/pages/chat/index?sessionId=${s.id}`,
+        route: `/packages/main/chat/index?sessionId=${s.id}`,
       });
     }
 

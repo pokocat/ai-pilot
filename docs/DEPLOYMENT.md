@@ -424,7 +424,18 @@ fc-list :lang=zh | wc -l && fc-match "Noto Sans CJK SC" && fc-match "Noto Serif 
 - Debian/Ubuntu：`sudo apt-get install -y fontconfig fonts-noto-cjk fonts-noto-cjk-extra && fc-cache -f`
 - RHEL/Anolis/alinux：`sudo dnf install -y fontconfig google-noto-sans-cjk-fonts google-noto-serif-cjk-fonts && fc-cache -f`
 
-⚠️ **family 名的坑**：Pan-CJK 包装出来的名字是 `Noto Sans CJK SC`，与 Google Fonts 子集版的 `Noto Sans SC` 是**两个不同 family**。生产实测 `fc-match "Noto Sans SC"` 命中的是纯拉丁的 `NotoSans-VF.ttf`（连 `fc-match "Noto Serif SC"` 也是它，衬线都不保）。`templates.ts` 的字体栈两种名字都写了，动那里时不要删掉 CJK 名——只留子集名会让整栈落空到通用 `sans-serif`，中文全靠 Chromium 逐字回退，版式的衬线区分随之丢失。仓库**不提交字体二进制**。
+⚠️ **family 名的坑**：Pan-CJK 包装出来的名字是 `Noto Sans CJK SC`，与 Google Fonts 子集版的 `Noto Sans SC` 是**两个不同 family**。生产实测 `fc-match "Noto Sans SC"` 命中的是纯拉丁的 `NotoSans-VF.ttf`（连 `fc-match "Noto Serif SC"` 也是它，衬线都不保）。`templates.ts` 的字体栈两种名字都写了，动那里时不要删掉 CJK 名——只留子集名会让整栈落空到通用 `sans-serif`，中文全靠 Chromium 逐字回退，版式的衬线区分随之丢失。**服务端渲染字体一律装在主机上，仓库不提交这类字体二进制。**
+
+### 5.3 客户端自带字体（C 端 H5 / 小程序，2026-08-09）
+
+⚠️ 与上一节相反：`app/src/assets/fonts/junshi-serif-{400,600}.woff2`（思源宋体 SC 子集，OFL，共约 1.8MB）**是提交进仓库的**，这是刻意的例外，理由如下：
+
+- **为什么必须自带**：小程序既没有 `<link>` 也没有任何 webfont，字体 100% 靠设备，而各家安卓 ROM 对 generic `serif` 的映射各装各的 —— 同一版包在不同机型上一个宋体一个黑体（真机实拍两种都见过）。CSS 层面无解。H5 此前之所以「到哪都是宋体」，是因为 `index.html` 在拉 Google Fonts，而 `fonts.googleapis.com` 在国内大量网络不可达 —— 等于「能不能看到宋体」取决于用户网络。现已去掉该依赖。
+- **为什么不放 OSS**：字体在浏览器里是 CORS 资源，跨域托管必须给桶配 `Access-Control-Allow-Origin`，否则浏览器直接拒（实测 `ERR_FAILED`）。而部署用的 RAM Key **没有桶级配置权限**（`GetBucketCORS` 返回 403 `The bucket you access does not belong to you`）。放进仓库 → 随 H5 产物发到 `https://域名/fonts/`，与页面同源，没有 CORS 这回事。
+- **两端同址**：H5 用同源相对路径 `/fonts/`（`@font-face` 写在 `src/index.html` 的内联 `<style>` 里——写进 SCSS 会被 webpack 当模块解析，构建直接失败）；小程序 `services/font.js` 用 `wx.loadFontFace` 指向同一个绝对地址。因此 **发小程序前必须先发过一次 H5**（`DEPLOY_H5=1`），否则字体 404。
+- **微信后台前置条件**：`wxapi.aibuzz.cn` 必须在小程序「开发管理 → 服务器域名 → downloadFile 合法域名」里，否则 `loadFontFace` 被直接拒绝。
+- **改字表/换字体**：重新子集化后替换这两个文件即可，family 名 `JunshiSerif` 在三处必须同步（`src/app.scss` 字体栈第一位、`scripts/build-native-weapp.mjs` 的 `APP_FONT_FAMILY`、`index.html` 的 `@font-face`），有测试锁住。
+- **想换 CDN**：给目标域名配好 CORS 后，`TARO_APP_FONT_BASE` / `WEAPP_APP_FONT_BASE` 覆盖即可，代码不用动。
 
 **放量 / 回滚（都不动部署）**：三步做完后，到运营后台「创作任务」页打开功能开关即放量；关掉即熔断。两个方向都约 1 分钟内生效（`FeatureFlag` 有 60s 读缓存），不发版、不重启、不 SSH。已入队任务留在库里，重新打开后 worker 接着跑。
 

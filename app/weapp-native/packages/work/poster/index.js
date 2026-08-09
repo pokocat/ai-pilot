@@ -246,6 +246,7 @@ Page({
       } else if (code === 'INSUFFICIENT_CREDITS') this.setData({ submitErr: '钻石不足，去「我的 · 权益额度」看看余额。', submitErrCredits: true });
       else if (code === 'CREATIVE_DAILY_LIMIT') this.setData({ submitErr: '今日出图额度已满，明天再来。', submitErrCredits: false });
       else if (code === 'PLAN_EXPIRED') this.setData({ submitErr: '当前方案已到期，续期后可继续出图。', submitErrCredits: false });
+      else if (code === 'PLAN_REQUIRED') { this.setData({ submitErr: '尚未开通方案，开通后即可出图。', submitErrCredits: false }); store.promptPlanRequired(); }
       else if (code === 'BRIEF_INVALID' || code === 'MODERATION_BLOCKED') {
         this.setData({ submitErr: message || '需求单没通过校验，改一下再试。', submitErrCredits: false });
         if (/版式/.test(message)) this.refreshTemplates();

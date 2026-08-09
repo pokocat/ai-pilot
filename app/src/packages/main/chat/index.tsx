@@ -915,6 +915,24 @@ export default function Chat() {
         }
         return [...m, { role: 'assistant', reply: res.reply!, knowledgeUsed: res.knowledgeUsed, refNotices: res.refNotices, uid: replyUid }];
       });
+    } else if (res.status === 'failed' || res.status === 'cancelled') {
+      // 终态却零产出：服务端 finalizeGeneration 对 failed 明确不回填 replyJson，而 /generate-sync
+      // 仍以 HTTP 200 + status:'failed' 返回一具没有 reply/deliverable 的空壳——既不像成功也不像
+      // 失败，catch 抓不到。上面两个分支都不命中时若直接返回，就是「消息发出去、圈转完、什么都
+      // 没有」：没报错、没重试、没线索，比报错更糟。话术与 liveGen 的 error 分支保持一致。
+      // 只认明确的终态失败；其它两分支不命中的未知形状维持原行为，不在这里扩大误伤面。
+      const interruptedText = res.status === 'cancelled' ? '本次回复已停止' : '军师暂时没有接上，请重试';
+      const interruptedUid = nextMsgUid();
+      setMsgs((m) => {
+        const i = m.length - 1;
+        // 流式占位（聊天气泡或还没出内容的报告卡）就地换成错误气泡，沿用其 uid 保持 key 稳定。
+        if (replaceStreamingAssistant && i >= 0 && (m[i].role === 'assistant' || m[i].role === 'report') && (m[i] as { streaming?: boolean }).streaming) {
+          const copy = m.slice();
+          copy[i] = { role: 'assistant', reply: { text: interruptedText }, retryText: degradedRetryText, uid: (m[i] as { uid?: string }).uid ?? interruptedUid };
+          return copy;
+        }
+        return [...m, { role: 'assistant', reply: { text: interruptedText }, retryText: degradedRetryText, uid: interruptedUid }];
+      });
     }
   };
 
@@ -1137,6 +1155,13 @@ export default function Chat() {
     // 过期只读锁定（D4）：到期后前端即拦 AI 交互，提示续费（后端 PLAN_EXPIRED 403 为兜底硬保证）。
     if (s.me()?.planStatus?.expired) {
       Taro.showToast({ title: '套餐已到期，续费后可继续对话', icon: 'none' });
+      return;
+    }
+    // 从未开通：同样在发送前拦（后端 PLAN_REQUIRED 403 为兜底），直接把人带到方案页，
+    // 别让用户写完一整段话才被打回来。
+    if (s.me()?.planStatus?.none) {
+      Taro.showToast({ title: '尚未开通方案，开通后即可对话', icon: 'none' });
+      setTimeout(() => navTo('/packages/work/plans/index'), 600);
       return;
     }
     setBusy(true);

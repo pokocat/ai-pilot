@@ -103,7 +103,12 @@ export async function listKnowledge(
 ): Promise<KnowledgeItemT[]> {
   const rows = await prisma.knowledgeItem.findMany({
     // 图片（sourceType='image'）是聊天多模态上下文，不是可 @ 引用的资料，从候选列表排除。
-    where: { tenantId, sourceType: { not: 'image' }, ...(filter?.projectId ? { projectId: filter.projectId } : {}), ...(filter?.kind ? { kind: filter.kind } : {}) },
+    // **只给 confirmed**：三段式管道里 staging（待整理）/ optimized（已优化待确认）都还没入库、
+    // 也没嵌入切片，引用了也取不到内容。这跟 /search 是同一条隔离铁律（见 routes/search.ts 抬头），
+    // 此前这里漏了过滤，用户在智库上传但没点「确认入库」的资料能在对话 @引用选择器里被选中。
+    // stage 列 @default("confirmed") 且非空，历史数据与聊天图片天然在内，加这条不会误伤存量。
+    // 注意别顺手改 listKnowledgeDocs：资料库文档视图要显示全部阶段供用户管理（前端标注不过滤）。
+    where: { tenantId, stage: 'confirmed', sourceType: { not: 'image' }, ...(filter?.projectId ? { projectId: filter.projectId } : {}), ...(filter?.kind ? { kind: filter.kind } : {}) },
     orderBy: { createdAt: 'desc' },
     take: 200,
   });

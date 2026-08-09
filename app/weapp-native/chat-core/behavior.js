@@ -964,7 +964,10 @@ const methods = {
       const groups = [
         { title: '案卷', kind: 'project', rows: asList(projects).map((item) => ({ id: item.id, label: item.name || item.title || '未命名案卷', sub: item.summary || '' })) },
         { title: '方案', kind: 'report', rows: asList(reports).map((item) => ({ id: item.id, label: item.title || '未命名方案', version: item.currentVersion || item.version, sub: item.type || '' })) },
-        { title: '资料', kind: 'knowledge', rows: asList(knowledge).map((item) => ({ id: item.id, label: item.fileName || item.title || '未命名资料', sub: item.summary || item.category || '' })) },
+        // 只读 KnowledgeItemT 真有的字段：title 服务端已经过 bestUploadName 归一（含源文件名），
+        // 副标题用 tags 回退正文摘要。此前写的是 fileName / summary / category —— 契约里没有这三个，
+        // 真机上 label 靠回退侥幸正常，副标题则永远是空的。
+        { title: '资料', kind: 'knowledge', rows: asList(knowledge).map((item) => ({ id: item.id, label: item.title || '未命名资料', sub: (item.tags || []).filter(Boolean).join('、') || textOf(item.text).slice(0, 40) })) },
         { title: '军师印象', kind: 'memory', rows: asList(memories).map((item) => ({ id: item.id, label: item.text || item.title || '一条军师印象', sub: item.agentName || '' })) },
       ].filter((group) => group.rows.length).map((group) => Object.assign({}, group, { rows: group.rows.map((row) => Object.assign({}, row, { selected: this._refs.some((ref) => ref.kind === group.kind && ref.id === row.id) })) }));
       if (!this.isCurrent(epoch)) return;
@@ -1007,6 +1010,8 @@ const methods = {
     const text = typedText || attachmentOnlyPrompt(displayRefs);
     if (text.length > INPUT_MAX) { wx.showToast({ title: '言过两千，可精简或粘贴成附卷', icon: 'none' }); return; }
     if (!store.isAuthed()) { this.safeSetData({ showLogin: true, loginReason: 'chat' }); return; }
+    // 未开通方案：在这里拦，不让用户写完一整段再被服务端 403 打回来（草稿保留，开通回来即可发）。
+    if (store.planRequired()) { store.promptPlanRequired(); return; }
     // 登录门放行之后才算「真的发出去了」——放在门前会把每次弹登录都记成一次发送。
     this.emitChatEvent('send', { entry: this._sendEntry || 'keyboard' });
     this._sendEntry = '';
@@ -1075,10 +1080,7 @@ const methods = {
       if (streamed.error && streamed.error.code === 'CANCELLED') { this.finishBusy({ errorText: '' }, epoch); return; }
       if (streamed.error) throw streamed.error;
       if (this._streamDoneStatus === 'failed' || this._streamDoneStatus === 'cancelled') {
-        this.markStreamInterrupted();
-        this._streamIndex = null;
-        this._generationId = '';
-        this.finishBusy({ errorText: this._streamDoneStatus === 'cancelled' ? '本次回复已停止' : '军师暂时没有接上，请重试', canRetryLast: true }, epoch);
+        this.finishInterrupted(this._streamDoneStatus, epoch);
         return;
       }
       if (streamed.available && streamed.rendered && streamed.finished) { this.finishStream(streamed, epoch); return; }
@@ -1104,8 +1106,14 @@ const methods = {
         this.startPolling(inProgressId, epoch);
         return;
       }
-      store.handleApiError(error, { silent: true });
+      const kind = store.handleApiError(error, { silent: true });
       this.markStreamInterrupted();
+      // 未开通方案不是「没接上」：重试多少次都还是 403，给开通入口而不是重试按钮。
+      if (kind === 'plan_required') {
+        store.promptPlanRequired();
+        this.finishBusy({ errorText: '尚未开通方案，开通后即可继续对话。', canRetryLast: false }, epoch);
+        return;
+      }
       this.finishBusy({ errorText: error.message || '军师暂时没有接上，请重试', canRetryLast: true }, epoch);
     }
   },
@@ -1459,11 +1467,8 @@ const methods = {
         return;
       }
       if (result.status === 'failed' || result.status === 'cancelled') {
-        this.markStreamInterrupted();
-        this._streamIndex = null;
-        this._generationId = '';
         this._pollSeq += 1;
-        this.finishBusy({ errorText: result.status === 'cancelled' ? '本次回复已停止' : '军师暂时没有接上，请重试', canRetryLast: true }, epoch);
+        this.finishInterrupted(result.status, epoch);
         return;
       }
       this.finishResult(result, epoch);
@@ -1476,9 +1481,28 @@ const methods = {
       this.finishBusy({ errorText: error.message || '回复读取失败', canRetryLast: true }, epoch);
     }
   },
+  // 生成以失败/取消收场时的统一收尾：停打字机、清流式态、给中断话术 + ↻ 重试入口。
+  // 三条路径（SSE done、轮询终态、同步兜底）必须共用这一处，否则话术会各自漂移。
+  finishInterrupted(status, epoch) {
+    this.markStreamInterrupted();
+    this._streamIndex = null;
+    this._generationId = '';
+    this.finishBusy({
+      errorText: status === 'cancelled' ? '本次回复已停止' : '军师暂时没有接上，请重试',
+      canRetryLast: true,
+    }, epoch || this._epoch);
+  },
   finishResult(result, epoch) {
     const pageEpoch = epoch || this._epoch;
     if (!this.isCurrent(pageEpoch)) return;
+    // 终态失败 / 取消却零产出：服务端 finalizeGeneration 对 failed 明确不回填 replyJson，
+    // 而 /generate-sync 仍以 HTTP 200 + status:'failed' 返回一具没有 reply/deliverable 的空壳
+    // （既不像成功也不像失败，catch 抓不到）。放任它往下走，normalizeReply 会把 undefined
+    // 归一成空字符串，于是聊天流里插进一条空白气泡——没报错、没重试、没线索。
+    // 轮询路径本来就在外面判过，这里兜住的是 send() 里 api.generate 那条同步兜底。
+    const status = textOf(result && result.status);
+    const barren = !result || (!result.reply && !result.deliverable && !textOf(result.partialText));
+    if (barren && (status === 'failed' || status === 'cancelled')) { this.finishInterrupted(status, pageEpoch); return; }
     const messageId = textOf(result && (result.messageId || result.resultMessageId));
     const knowledgeUsed = mergedStrings(this._runKnowledgeUsed, result && result.knowledgeUsed);
     const refNotices = mergedStrings(this._runRefNotices, result && result.refNotices);

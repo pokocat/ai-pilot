@@ -180,6 +180,71 @@ export async function scanDailyReviewReminders(): Promise<number> {
   return sent;
 }
 
+// ============ 任务：套餐到期提醒 ============
+// 2026-08-09 正式发布起，关掉注册自动开通、所有人都有真到期日，而全站此前**没有任何**到期提醒：
+// 到期那天 planGate 直接翻只读、AI 交互全停，用户只会看到「方案已到期」的拦截弹窗——续费提醒
+// 必须提前送到手机上，而不是等他撞墙。
+//
+// 借 review 场景模板（与 scanDueProphecies / reminders.ts 同口径，不新增 scene）：新模板要走微信后台
+// 申请与逐字核键，而 26922「最新分析报告提醒」本就是 类型/名称/备注/时间 的通用提醒位，语义装得下。
+//
+// 幂等：每个「用户 × 本次到期日 × 提前天数档」只发一次，锚点写 audit_log（key 里带 expiresAt，
+// 续费换了到期日就是新一轮，不会因为上次发过而永远不再提醒）。
+export const PLAN_EXPIRY_REMIND_HOUR = Number(process.env.PLAN_EXPIRY_REMIND_HOUR ?? 10);
+/** 提前天数档：7/3/1 天各推一次，0 = 到期当天补一条（此时已只读，是最后的续费触点）。 */
+export const PLAN_EXPIRY_REMIND_BUCKETS = [7, 3, 1, 0];
+
+/** 落在哪个提醒档：剩余天数向上取整后取「不大于它的最大档」，跨档跳跃（扫描漏了一天）也不会漏提醒。 */
+function expiryBucketOf(daysLeft: number): number | null {
+  if (daysLeft < 0) return null; // 已过期超过一天：不再打扰，续费引导由端上只读态承担
+  for (const b of PLAN_EXPIRY_REMIND_BUCKETS) if (daysLeft >= b) return b;
+  return null;
+}
+
+export async function scanPlanExpiryReminders(): Promise<number> {
+  if (hourOf() < PLAN_EXPIRY_REMIND_HOUR) return 0; // 不在凌晨推送
+  const at = now();
+  const horizon = new Date(at.getTime() + (PLAN_EXPIRY_REMIND_BUCKETS[0] + 1) * 864e5);
+  const users = await prisma.user.findMany({
+    where: { planId: { not: null }, planExpiresAt: { not: null, lte: horizon, gte: new Date(at.getTime() - 864e5) } },
+    select: { id: true, tenantId: true, planExpiresAt: true, plan: { select: { name: true } } },
+    take: 500,
+  });
+  let sent = 0;
+  for (const u of users) {
+    const daysLeft = Math.ceil((u.planExpiresAt!.getTime() - at.getTime()) / 864e5);
+    const bucket = expiryBucketOf(daysLeft);
+    if (bucket === null) continue;
+    const key = `${u.id}:${u.planExpiresAt!.toISOString()}:${bucket}`;
+    const done = await prisma.auditLog.findFirst({
+      where: { userId: u.id, action: 'system.plan.expiry_notice', payloadJson: { path: ['key'], equals: key } },
+      select: { id: true },
+    });
+    if (done) continue;
+    // 与当晚复盘提醒共用同一份一次性授权额度：同一天不叠着推两条（复盘先到就让给复盘，明天再提醒）。
+    if (await hasSentWechatNotificationToday(u.id, 'review')) continue;
+    if (!(await hasWechatSubscriptionQuota(u.id, 'review'))) continue;
+    const planName = u.plan?.name ?? '当前方案';
+    const r = await sendWechatSubscribeMessage({
+      tenantId: u.tenantId,
+      userId: u.id,
+      scene: 'review',
+      category: bucket === 0 ? '方案到期' : '方案续期提醒',
+      title: bucket === 0 ? `${planName}今日到期` : `${planName}还有${bucket}天到期`,
+      note: bucket === 0 ? '续期后可继续对话与出成果' : '提前续期，避免推演中断',
+    });
+    if (!r.sent) continue;
+    // 锚点只在**真发出去之后**才写：没送达就不该占掉这一档，否则用户一条提醒都收不到却显示已提醒过。
+    await recordAudit({
+      tenantId: u.tenantId, userId: u.id, action: 'system.plan.expiry_notice',
+      payload: { key, bucket, daysLeft, planName, expiresAt: u.planExpiresAt!.toISOString() },
+    });
+    sent += 1;
+  }
+  if (sent) console.log(`[scheduler] plan expiry reminders sent: ${sent}`);
+  return sent;
+}
+
 // ============ 任务：预言到期验证候选（M2 PR-9） ============
 // pending 且 dueDate ≤ 今天 且未提醒过 → 登记「天机对账」候选（行级 dueNotifiedAt 幂等），
 // 下次日/月复盘时由军师带出来逐条对账。
@@ -248,6 +313,8 @@ registerJob({ name: 'casefile-idle-recall', intervalMs: 6 * 3600_000, run: async
 registerJob({ name: 'review-gap-reminder', intervalMs: 6 * 3600_000, run: async () => { await scanReviewGaps(); } });
 registerJob({ name: 'daily-review-reminder', intervalMs: 30 * 60_000, run: async () => { await scanDailyReviewReminders(); } });
 registerJob({ name: 'prophecy-due-scan', intervalMs: 6 * 3600_000, run: async () => { await scanDueProphecies(); } });
+// 套餐到期提醒：每 2 小时扫一轮（PLAN_EXPIRY_REMIND_HOUR 之前直接短路），按「用户×到期日×档位」幂等。
+registerJob({ name: 'plan-expiry-reminder', intervalMs: 2 * 3600_000, run: async () => { await scanPlanExpiryReminders(); } });
 registerJob({ name: 'prescription-followup-scan', intervalMs: 6 * 3600_000, run: async () => { await scanPrescriptionFollowup(); } });
 // V7-11：09:00 军令提醒 + 周五周复盘提醒（scan 函数在 services/reminders.ts，job 常量在此注册）。
 registerJob(MORNING_ORDER_JOB);

@@ -216,7 +216,9 @@ function quickScan(body) {
 function journey() {
   const profile = wx.getStorageSync(storageKey('profile')) || null;
   return Promise.resolve(profile && profile.industry
-    ? { stage: 'diagnosing', diagRound: 2, nextStep: { key: 'continue_diagnosis', title: '继续完善当前判断', desc: '把打法聊定，方案定了就自动拆成军令。', route: '/packages/main/chat/index?agentKey=general&continue=1' } }
+    // route 跟服务端一样下发语义 key（不是小程序路径），页面负责映射；mock 若只发真路由，
+    // 映射分支在本地永远走不到，真机连真服务端才炸。
+    ? { stage: 'diagnosing', diagRound: 2, nextStep: { key: 'continue_diagnosis', title: '继续完善当前判断', desc: '把打法聊定，方案定了就自动拆成军令。', route: 'chat' } }
     : { stage: 'new', diagRound: 0, nextStep: { key: 'scan', title: '先做一次军师首判', desc: '三问形成第一份判断', route: '/packages/work/quickscan/index' } });
 }
 function workbench() {
@@ -226,7 +228,8 @@ function workbench() {
   if (!profile || !profile.stage) missing.push({ key: 'next-stage', title: '当前经营阶段', desc: '用于判断进攻、验证或守成节奏。' });
   if (!profile || !profile.pain) missing.push({ key: 'next-pain', title: '当前最卡的问题', desc: '用于确定主要矛盾。' });
   const completeness = profile ? Math.max(35, 100 - missing.length * 20) : 0;
-  return Promise.resolve({ completeness, sections: [{ key: 'profile', label: '老板与企业档案', hint: '行业、阶段、当前难题', count: profile ? 1 : 0, ready: Boolean(profile) }], missing, title: profile && profile.industry ? `${profile.industry}经营案卷` : '' });
+  // 严格按 WorkbenchView 契约三个键返回：mock 多给一个 title 会让本地看到线上不存在的横幅。
+  return Promise.resolve({ completeness, sections: [{ key: 'profile', label: '老板与企业档案', hint: '行业、阶段、当前难题', count: profile ? 1 : 0, ready: Boolean(profile) }], missing });
 }
 
 function updateIdentity(body) {
@@ -455,7 +458,11 @@ function knowledgeDocs(projectId) { const rows = getList('knowledge'); return Pr
 function knowledge(projectId, kind) {
   return Promise.resolve(getList('knowledge')
     .filter((item) => (!item.stage || item.stage === 'confirmed') && (!projectId || item.projectId === projectId) && (!kind || item.kind === kind))
-    .map((item) => Object.assign({}, item, {
+    // 逐字段构造，不要 Object.assign({}, item, ...) —— 那样会把本地存的 summary / fileName /
+    // category 等**契约外**字段一起透传出去，端上就会顺手消费这些真服务端永远不给的字段。
+    // KnowledgeItemT 就这九个键，多一个都不给。
+    .map((item) => ({
+      id: item.id,
       projectId: item.projectId || null,
       kind: item.kind || 'document',
       title: item.title || item.fileName || null,
@@ -674,7 +681,13 @@ function summarize(sessionId) {
   setList('knowledge', knowledgeRows);
   return Promise.resolve({ reportId, version, title, knowledgeAdded: insight ? 1 : 0 });
 }
-function credits() { return Promise.resolve({ balance: mockCreditBalance(), usedPercent: 0, plan: currentMockPlan() }); }
+// GET /me/credits 的契约只有 { items }（钻石流水），余额与用量归 /me。mock 从前多给
+// balance/usedPercent/plan 又不给 items，正好把「端上兜底读了服务端不存在的字段」盖住。
+function credits() {
+  const balance = mockCreditBalance();
+  const at = new Date().toISOString();
+  return Promise.resolve({ items: [{ at, reason: '本地样例 · 解锁专业军师', delta: -20, balance }] });
+}
 
 // 命理 mock 只负责提供一份确定性 UI 样例，不冒充真实排盘；字段与 Taro mock / 服务端契约同构。
 function sampleChart() {

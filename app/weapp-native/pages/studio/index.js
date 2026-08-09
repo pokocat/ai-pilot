@@ -259,7 +259,10 @@ Page({
     wx.showModal({ title: '新增今日军令', editable: true, placeholderText: '今天必须完成的一件事', confirmText: '加入', success: async (result) => { const text = String(result.content || '').trim(); if (!result.confirm || !text) return; try { await api.addOrder(text); await this.load(); } catch (error) { wx.showToast({ title: error.message || '添加失败', icon: 'none' }); } } });
   },
   inputOrder(event) { this._orderText = event.detail.value; },
-  async addInlineOrder() { const text = String(this._orderText || '').trim(); if (!text) { wx.showToast({ title: '先写下今天要完成的事', icon: 'none' }); return; } try { await api.addOrder(text); this._orderText = ''; await this.load(); } catch (error) { wx.showToast({ title: error.message || '添加失败', icon: 'none' }); } },
+  // 没案卷先说清楚，别让用户打完字再吃一个服务端 409（/casefile/orders 与 /casefile/backfill
+  // 都要求先有 active casefile）。门禁口径与同页 openGoalEdit 对齐；mock 会当场捏一份空案卷，
+  // 所以这条路径在本地永远成功，缺门禁只在真机暴露。
+  async addInlineOrder() { const text = String(this._orderText || '').trim(); if (!text) { wx.showToast({ title: '先写下今天要完成的事', icon: 'none' }); return; } if (!this.data.hasDossier) { wx.showToast({ title: '先和军师定下一份方案，生成案卷', icon: 'none' }); return; } try { await api.addOrder(text); this._orderText = ''; await this.load(); } catch (error) { wx.showToast({ title: error.message || '添加失败', icon: 'none' }); } },
   async toggleOrder(event) {
     const id = event.currentTarget.dataset.id;
     const current = this.data.orders.find((item) => item.id === id);
@@ -319,7 +322,7 @@ Page({
     } catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '目标保存失败' }); }
     finally { this.setData({ savingGoal: false }); }
   },
-  async saveBackfill() { if (this.data.savingBackfill) return; const current = this.data.backfill || {}; const values = { leads: String(this._backfill.leads != null ? this._backfill.leads : current.leads || ''), consults: String(this._backfill.consults != null ? this._backfill.consults : current.consults || ''), deals: String(this._backfill.deals != null ? this._backfill.deals : current.deals || '') }; this.setData({ savingBackfill: true }); try { await api.saveBackfill(values); this._backfill = {}; await this.load(); wx.showToast({ title: '今日数据已回填', icon: 'none' }); } catch (error) { wx.showToast({ title: error.message || '回填失败', icon: 'none' }); } finally { this.setData({ savingBackfill: false }); } },
+  async saveBackfill() { if (this.data.savingBackfill) return; if (!this.data.hasDossier) { wx.showToast({ title: '先和军师定下一份方案，生成案卷', icon: 'none' }); return; } const current = this.data.backfill || {}; const values = { leads: String(this._backfill.leads != null ? this._backfill.leads : current.leads || ''), consults: String(this._backfill.consults != null ? this._backfill.consults : current.consults || ''), deals: String(this._backfill.deals != null ? this._backfill.deals : current.deals || '') }; this.setData({ savingBackfill: true }); try { await api.saveBackfill(values); this._backfill = {}; await this.load(); wx.showToast({ title: '今日数据已回填', icon: 'none' }); } catch (error) { wx.showToast({ title: error.message || '回填失败', icon: 'none' }); } finally { this.setData({ savingBackfill: false }); } },
   async reviewToday() {
     if (!this.requireLogin()) return;
     const checks = this.data.battleForces.filter((item) => this._forceVerdicts[item.kind]).map((item) => `${item.label}：今天${this._forceVerdicts[item.kind] === 'on' ? '符合主线' : '偏离主线'}（打法：${item.tactic}）`);

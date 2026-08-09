@@ -19,6 +19,7 @@ import {
 const REVIEW_DESC = '20:30 今晚复盘。';
 const ORDER_DESC = '18:00 前补充高意向咨询记录。';
 const WEEKLY_DESC = '本周五检查成交漏斗和内容表现。';
+const EXPIRY_DESC = '方案到期前提前提醒续期，避免推演中断。';
 
 // 日历派生（YYYY-MM-DD / HH:mm / 当天零点 / 本周一零点）一律走 clock 的 Asia/Shanghai 工具（P1-4）。
 
@@ -59,6 +60,10 @@ export async function buildReminderView(args: { tenantId: string; userId: string
     { key: 'order', time: orderTime, title: '今日军令截止', desc: ORDER_DESC, kind: 'order', ...base },
     { key: 'review', time: '20:30', title: '今日复盘', desc: REVIEW_DESC, kind: 'review', ...base },
     { key: 'weekly', time: '周五', title: '周复盘', desc: WEEKLY_DESC, kind: 'weekly', ...base },
+    // 方案到期提醒（2026-08-09）：与上面三条共用同一份 review 一次性授权额度（scene 不新增），
+    // 但必须在设置页单列一条——不列出来，用户根本不知道「到期前会有提醒」这回事，
+    // 而到期是全站最贵的一次流失点（到期即只读、AI 交互全停）。
+    { key: 'plan_expiry', time: '到期前 7/3/1 天', title: '方案到期提醒', desc: EXPIRY_DESC, kind: 'custom', ...base },
   ];
 
   return { items, subscribeReady: items.some((i) => i.canSubscribe) };

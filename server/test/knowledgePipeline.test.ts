@@ -16,6 +16,7 @@ import {
   FREE_DOCS,
 } from '../src/services/knowledgePipeline.js';
 import { hybridSearch } from '../src/services/retrieval.js';
+import { listKnowledge } from '../src/services/knowledge.js';
 
 let tenantA = '', userA = '', tenantB = '', userB = '';
 
@@ -49,6 +50,27 @@ test('staged 上传创建 staging 条目且无 chunk，不出现在 hybridSearch
 
   const hits = await hybridSearch({ tenantId: tenantA, userId: userA, query: 'zebrakeyword 成交漏斗' });
   assert.equal(hits.length, 0, 'staging 条目不应出现在检索结果（无 chunk）');
+
+  // 「不可搜」还不够：@ 引用候选走的是 listKnowledge 而不是检索，此前它只排除了 image，
+  // 于是没点过「确认入库」的资料能在对话引用选择器里被选中——隔离在这个入口上是漏的。
+  const referable = await listKnowledge(tenantA);
+  assert.equal(referable.some((i) => i.id === r.id), false, 'staging 条目不得进入 @ 引用候选');
+});
+
+// 三段式的隔离必须覆盖「可引用」这条路，不只是「可搜索」：只有 confirmed 能被 @ 引用。
+test('listKnowledge 只吐 confirmed：staging / optimized 都不进 @ 引用候选', async () => {
+  const batchId = 'batch-referable-1';
+  const staged = await ingestStagedFile({
+    tenantId: tenantA, userId: userA, fileName: '待整理草稿.txt', mime: 'text/plain',
+    buf: buf('这份还没确认入库'), batchId,
+  });
+  await organizeBatch({ tenantId: tenantA, userId: userA, batchId });
+  const optimized = await prisma.knowledgeItem.findUnique({ where: { id: staged.id } });
+  assert.equal(optimized!.stage, 'optimized', '前置条件：organize 后应为 optimized');
+  assert.equal((await listKnowledge(tenantA)).some((i) => i.id === staged.id), false, 'optimized 也不得可引用');
+
+  await confirmItems({ tenantId: tenantA, userId: userA, ids: [staged.id] });
+  assert.equal((await listKnowledge(tenantA)).some((i) => i.id === staged.id), true, '确认入库后才可引用');
 });
 
 // 2) organize：写 bizCategory + 置 optimized + 同名同大小去重标记 dupOfId。

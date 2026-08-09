@@ -3,6 +3,7 @@ type PaymentStage = 'quote' | 'order' | 'payment' | 'apply' | 'entitlement';
 const SAFE_MESSAGES: Record<string, string> = {
   PLAN_SWITCH_BLOCKED: '当前方案到期后可购买',
   PLAN_EXPIRED: '当前方案已到期，请重新开通',
+  PLAN_REQUIRED: '尚未开通方案，开通后即可使用',
   OPENID_REQUIRED: '请先使用微信账号登录后支付',
   QUOTE_CHANGED: '方案价格或权益状态已变化，请重新确认',
   ORDER_CREATING: '订单正在创建，请稍后刷新',

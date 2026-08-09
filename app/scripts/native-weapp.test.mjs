@@ -184,6 +184,84 @@ test('军情模式点选、单行入口与方案按钮保持原稿视觉状态',
   assert.match(plans, /\.option-action::after,\.quote-confirm::after\s*\{\s*border:\s*0;/, '原生 button 默认描边必须清除');
 });
 
+test('WO-07「下一步」卡：服务端下发的是语义 key，页面必须映射成真路由', () => {
+  const homeJs = read(sourceRoot, 'pages/home/index.js');
+  const mock = read(sourceRoot, 'services/mock.js');
+  const journey = fs.readFileSync(path.join(appRoot, '../server/src/services/journey.ts'), 'utf8');
+
+  // 契约锚点：服务端确实在下发 'chat' / 'studio' 这种非路径值。它一旦改成真路由，
+  // 这条断言会先红，提醒同步端上的映射，而不是让用户先吃到「页面打开失败」。
+  assert.match(journey, /route: 'chat'/, '服务端下一步仍以语义 key 下发');
+  assert.match(journey, /route: 'studio'/);
+
+  // 直接 navTo(nextRoute) 会把 'studio' 当路径丢给 wx.navigateTo —— 非法路径，必然失败。
+  assert.doesNotMatch(homeJs, /navTo\(this\.data\.nextRoute/, '不得把语义 key 当路由直接跳');
+  assert.match(homeJs, /route === 'studio' \? '\/pages\/studio\/index'/, "'studio' 必须映射到执行 tab");
+  assert.match(homeJs, /route\.charAt\(0\) === '\/'/, '以 / 开头的真路由原样放行');
+  assert.match(homeJs, /packages\/main\/chat\/index\?agentKey=general&continue=1/, "'chat' 与未知值回总军师");
+
+  // mock 必须跟服务端同契约，否则映射分支在本地永远走不到，只有真机连真服务端才炸。
+  assert.match(mock, /route: 'chat'/, 'mock 的 journey 也要下发语义 key');
+});
+
+test('生成以 failed/cancelled 收场时必须给中断话术，不许留空白气泡', () => {
+  const behavior = read(chatCoreRoot, 'behavior.js');
+
+  // 服务端 finalizeGeneration 对 failed 不回填 replyJson，/generate-sync 仍以 200 + status:'failed'
+  // 返回没有 reply/deliverable 的空壳。放任它进 normalizeReply，undefined 会被归一成空字符串，
+  // 于是聊天流里插进一条空白气泡——没报错、没重试、没线索。
+  assert.match(behavior, /const barren = !result \|\| \(!result\.reply && !result\.deliverable && !textOf\(result\.partialText\)\)/, 'finishResult 必须先识别「终态却零产出」');
+  assert.match(behavior, /if \(barren && \(status === 'failed' \|\| status === 'cancelled'\)\) \{ this\.finishInterrupted\(status, pageEpoch\); return; \}/);
+
+  // 三条路径（SSE done / 轮询终态 / 同步兜底）共用一处收尾，话术不许各写各的。
+  assert.match(behavior, /finishInterrupted\(status, epoch\) \{[\s\S]*?markStreamInterrupted\(\)[\s\S]*?canRetryLast: true,/, '中断收尾必须停打字机并给出重试入口');
+  assert.equal((behavior.match(/this\.finishInterrupted\(/g) || []).length, 3, 'SSE / 轮询 / 同步兜底三处都要走同一个收尾');
+  assert.equal((behavior.match(/军师暂时没有接上，请重试/g) || []).length, 2, '中断话术只应出现在 finishInterrupted 与 catch 兜底两处');
+});
+
+test('mock 不得比真服务端「友好」：多给的字段会让端上写出真机取不到的消费', () => {
+  const mock = read(sourceRoot, 'services/mock.js');
+  const behavior = read(chatCoreRoot, 'behavior.js');
+  const home = read(sourceRoot, 'pages/home/index.js');
+  const credits = read(sourceRoot, 'packages/work/credits/index.js');
+  const studio = read(sourceRoot, 'pages/studio/index.js');
+
+  // WorkbenchView 契约只有 completeness/sections/missing，服务端物理上不会给 title。
+  assert.doesNotMatch(mock, /missing, title:/, 'mock workbench 不得多给契约外的 title');
+  assert.doesNotMatch(home, /workbench && workbench\.title/, '端上不得兜底读服务端永远不给的字段');
+
+  // GET /me/credits 只返回 { items }：余额与用量归 /me，端上兜底读 credits.balance 会静默显示错数。
+  assert.match(mock, /function credits\(\) \{[\s\S]*?items: \[/, 'mock credits 要按契约返回 items');
+  assert.doesNotMatch(credits, /credits && credits\.(balance|usedPercent)/, '端上不得读 /me/credits 不存在的余额字段');
+  // usageLabel 里的「本月已用 x%」是正常用法（有 usage 才调）；不许的是 usage 缺失时的兜底也编一个数。
+  assert.match(credits, /usageText: usage \? usageLabel\(usage\) : ''/, '拿不到用量就留空，别显示看起来正常的「已用 0%」');
+
+  // KnowledgeItemT 只有九个键：mock 用 Object.assign 透传原始对象会带出 summary/fileName/category。
+  assert.doesNotMatch(mock, /\.map\(\(item\) => Object\.assign\(\{\}, item, \{\s*\n\s*projectId/, 'mock knowledge 必须逐字段构造，不得透传契约外字段');
+  assert.doesNotMatch(behavior, /item\.summary \|\| item\.category/, '@引用资料行不得消费契约里没有的字段');
+
+  // /casefile/orders 与 /casefile/backfill 都要求先有 active casefile，mock 却会当场捏一份。
+  assert.equal((studio.match(/if \(!this\.data\.hasDossier\) \{ wx\.showToast\(\{ title: '先和军师定下一份方案，生成案卷'/g) || []).length, 3, '加军令 / 回填数据 / 改目标三处门禁口径一致');
+});
+
+test('服务端下发给端上的页面路由必须真实存在（页面搬家要连服务端一起搬）', () => {
+  // 服务端有几处直接下发小程序页面路径（/search 的结果行、/journey 的速诊那条）。
+  // 这类路由没有任何编译期约束：页面一搬包，服务端还在发老路径，用户点了只会吃到
+  // 「页面打开失败，请重试」——对话页从主包迁到 packages/main 时就这么坏过一次。
+  const app = JSON.parse(read(sourceRoot, 'app.json'));
+  const routes = new Set((app.pages || []).map((page) => `/${page}`));
+  for (const pkg of app.subPackages || []) for (const page of pkg.pages || []) routes.add(`/${pkg.root}/${page}`);
+
+  const serverRoot = path.join(appRoot, '..', 'server', 'src');
+  const dead = [];
+  for (const file of walk(serverRoot).filter((item) => item.endsWith('.ts'))) {
+    for (const found of read(file).matchAll(/['`"](\/(?:pages|packages)\/[A-Za-z0-9_/-]+)/g)) {
+      if (!routes.has(found[1])) dead.push(`${path.relative(serverRoot, file)} → ${found[1]}`);
+    }
+  }
+  assert.deepEqual(dead, [], `服务端下发了 app.json 里不存在的页面路由：\n${dead.join('\n')}`);
+});
+
 test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与设置按钮做光学校准', () => {
   const page = fs.readFileSync(path.join(sourceRoot, 'services/page.js'), 'utf8');
   const nativeAppScss = fs.readFileSync(path.join(sourceRoot, 'app.scss'), 'utf8');
@@ -197,7 +275,10 @@ test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与�
 
   assert.match(page, /const navRowHeight = Math\.max\(36, capsuleHeight\)/);
   assert.match(page, /const navTop = Math\.max\(0, \(Number\(rect\.top\) \|\| 0\) - \(\(navRowHeight - capsuleHeight\) \/ 2\)\)/);
-  assert.match(page, /navInset:\s*navTop \+ navRowHeight \+ 10/);
+  // 胶囊行底部呼吸：10 → 18px（2026-08-09 视觉反馈「页头贴着胶囊、跟页面分不开」）。
+  assert.match(page, /navInset:\s*navTop \+ navRowHeight \+ 18/);
+  // 导航层必须自带收口线：同色同底时滚动内容会和标题糊在一起。
+  assert.match(nativeAppScss, /page \.native-safe-head,[\s\S]{0,400}border-bottom:\s*1px solid var\(--line-strong\)/, '导航层缺少与正文的分界线');
   assert.match(page, /navRightInset:\s*Math\.max\(16, win && win\.windowWidth \? win\.windowWidth - rect\.left \+ 12/);
   assert.match(nativeAppScss, /page \.native-safe-space,[\s\S]*?page \.legal-safe \{ display: none; \}/, '各类旧安全区占位必须统一折叠');
   assert.match(nativeAppScss, /page \.native-safe-row,[\s\S]*?top:\s*var\(--native-nav-top\);[\s\S]*?padding:\s*0 var\(--native-nav-right\) 0 12px;/, '标题行必须与胶囊同排并精确避让右侧系统按钮');
@@ -1092,7 +1173,9 @@ test('原生 mock 资料、三势、账本与对话汇总形成账号隔离真�
     await mock.confirmKnowledge({ ids: [staged.id] });
     const projectKnowledge = await mock.knowledge('project-a', 'document');
     assert.equal(projectKnowledge.length, 1);
-    assert.equal(projectKnowledge[0].fileName, '复购访谈.txt');
+    // 源文件名经 title 下发：KnowledgeItemT 没有 fileName 字段，服务端 listKnowledge 把
+    // bestUploadName(fileName, title) 归一进 title。断言 fileName 等于把 mock 的透传锁成契约。
+    assert.equal(projectKnowledge[0].title, '复购访谈.txt');
     assert.equal(projectKnowledge[0].projectId, 'project-a');
 
     await mock.saveProfile({ industry: '消费零售', stage: '增长中', pain: '复购下滑' });
@@ -1463,6 +1546,7 @@ test('预览、上传与正式发布只接受 dist-native 原生产物', () => {
   assert.doesNotMatch(release, /build:weapp:server|--project', APP_ROOT/);
   assert.doesNotMatch(scripts, /path\.join\(APP_ROOT, ['"]dist['"]\)|TARO_APP_|taro\s+build/);
 });
+
 // 2026-08-08 真机三反馈（停止后重发卡死 / 历史行铺满屏 / 资料库混进粘贴附卷）的回归闸门。
 // 三条都是「看起来对、真机才炸」的类型，静态钉死比事后复盘便宜。
 test('停止生成后必须能立刻重发，且空气泡不留屏', () => {
@@ -1496,4 +1580,65 @@ test('资料库把对话附卷与主动上传分组，且不隐藏', () => {
   // 分组必须仍可展开、可删除——那些附卷还被会话引用着，隐藏掉等于用户再也管不到它们。
   assert.match(wxml, /kb-paste-head[\s\S]{0,200}bindtap="togglePaste"/);
   assert.match(wxml, /wx:if="\{\{pasteOpen\}\}"[\s\S]{0,600}catchtap="remove"/);
+});
+
+test('未开通方案有明确的开通入口，不落到通用「XX 失败」兜底', () => {
+  const store = read(sourceRoot, 'services/store.js');
+  // 禁写闸（服务端 403 PLAN_REQUIRED）打在每一个写操作上。通用兜底只会弹一句失败，
+  // 用户看不出「要先开通」，付费转化路径断在最后一步 —— 必须由 store 统一给开通入口。
+  assert.match(store, /code === 'PLAN_REQUIRED'[\s\S]{0,200}return 'plan_required'/);
+  assert.match(store, /function promptPlanRequired\(\)[\s\S]{0,600}\/packages\/work\/plans\/index/);
+  // silent 调用方（对话流）自己渲染，store 不能替它弹窗，否则错误态会双弹。
+  assert.match(store, /if \(!opts\.silent\) promptPlanRequired\(\);/);
+
+  const core = chatSource();
+  // ① 发送前就拦：别让用户写完一整段话才被 403 打回来。
+  assert.match(core, /store\.planRequired\(\)[\s\S]{0,120}store\.promptPlanRequired\(\)/);
+  // ② 真撞上 403 时不能给「重试」——重试多少次都还是 403。
+  assert.match(core, /kind === 'plan_required'[\s\S]{0,240}canRetryLast: false/);
+});
+
+test('字体栈在小程序产物里必须是字面量，不留 var(--serif) 给真机运行时解析', () => {
+  // 2026-08-09 真机：同一台安卓机，Chrome 与微信内置浏览器打开 H5/后台中文都是宋体，只有小程序不是。
+  // 两个浏览器环境已排除「设备没字体」和「字体栈写错」；剩下的差别只有 WXSS 运行时，
+  // 而本仓早有两处教训写着真机对 page 级 token 不可靠（z-index、主题色都被迫就地展开）。
+  const dist = path.join(appRoot, 'dist-native');
+  if (!fs.existsSync(dist)) return; // 未构建时跳过（CI 里由构建步骤保证）
+  const wxss = walk(dist).filter((file) => file.endsWith('.wxss'));
+  assert.ok(wxss.length, '产物里应有 wxss');
+  for (const file of wxss) {
+    const css = fs.readFileSync(file, 'utf8');
+    assert.ok(!/var\(--serif\)|var\(--sans\)/.test(css), `${path.relative(dist, file)} 仍在用 var() 取字体，真机可能解析不出`);
+  }
+  const app = fs.readFileSync(path.join(dist, 'app.wxss'), 'utf8');
+  assert.match(app, /\.serif \{\s*font-family: "JunshiSerif", "Songti SC"/, '.serif 必须落成字面量字体栈（自带字体排第一位）');
+  // token 本身仍留在 :root/page 上作单一事实源——展开发生在构建期，SCSS 里别去掉定义。
+  assert.match(app, /--serif:\s*"JunshiSerif", "Songti SC"/, '字体 token 定义不能删：它是构建期展开的事实源');
+});
+
+test('自带字体：family 名三处一致，未配托管地址时静默跳过而不是报错', () => {
+  const font = read(sourceRoot, 'services/font.js');
+  const appJs = read(sourceRoot, 'app.js');
+  const scss = fs.readFileSync(path.join(appRoot, 'src', 'app.scss'), 'utf8');
+  const builder = fs.readFileSync(path.join(appRoot, 'scripts', 'build-native-weapp.mjs'), 'utf8');
+
+  // family 名分散在三处（字体栈第一位 / 构建期常量 / loadFontFace 的 family），对不上就是白加载。
+  assert.match(scss, /--serif:\s*"JunshiSerif",/, '字体栈第一位必须是自带字体');
+  assert.match(builder, /APP_FONT_FAMILY = 'JunshiSerif'/);
+  assert.match(builder, /APP_FONT_WEIGHTS = \[400, 600\]/, '只发正文与标题两个字重');
+  assert.match(font, /junshi-serif-\$\{weight\}\.woff2"\) format\("woff2"\)/);
+  // 字体文件随 H5 产物发布，两端必须指同一个地址，否则会出现「H5 是宋体、小程序不是」的老问题。
+  assert.match(builder, /APP_FONT_BASE = \(process\.env\.WEAPP_APP_FONT_BASE \|\| 'https:\/\/wxapi\.aibuzz\.cn\/fonts'\)/);
+  assert.match(font, /desc: \{ style: 'normal', weight: String\(weight\) \}/, '两个字重必须各自声明 desc，否则后一个会盖掉前一个');
+
+  // 未配 base / 老版本基础库没有 loadFontFace → 直接 return，不许抛。字体是观感增强，不能拖垮启动。
+  assert.match(font, /if \(!base \|\| !family \|\| !weights\.length\) return;/);
+  assert.match(font, /typeof wx\.loadFontFace !== 'function'\) return;/);
+  assert.match(font, /global: true/);
+  assert.match(font, /scopes: \['webview', 'native'\]/);
+  // 失败静默：不弹 toast、不打断
+  assert.match(font, /fail: \(\) => \{\}/);
+  // 只在 onLaunch 触发一次
+  assert.match(appJs, /onLaunch\(\)\s*\{[\s\S]{0,200}loadAppFont\(\)/);
+  assert.match(font, /let started = false;[\s\S]{0,400}if \(started\) return;/);
 });

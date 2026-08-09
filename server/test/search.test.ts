@@ -77,7 +77,8 @@ test('聚合四域命中；staging 资料被隔离（关键断言）', async () 
   // 会话命中 + 路由。
   const sh = of('session').find((h) => h.id === sessionId);
   assert.ok(sh, '应命中标题含关键词的会话');
-  assert.equal(sh.route, `/pages/chat/index?sessionId=${sessionId}`);
+  // 对话页在 packages/main 分包（主包只留 5 个 tab 页）；下发主包老路径端上是死路由。
+  assert.equal(sh.route, `/packages/main/chat/index?sessionId=${sessionId}`);
 
   // 报告命中 + snippet=type + 路由。
   const rh = of('report').find((h) => h.id === reportId);
@@ -102,7 +103,8 @@ test('军师按 role 关键词命中（大小写不敏感）', async () => {
   const strat = agentHits.find((h) => h.id === 'strat');
   assert.ok(strat, '应按 role 关键词命中战略诊断官');
   assert.equal(strat.snippet, '定位 · 卡点 · SWOT'); // snippet = role
-  assert.equal(strat.route, '/pages/chat/index?agentKey=strat&fresh=1');
+  // continue=1：搜索命中军师要续接他的最近线程，不是开新会话（fresh=1 会丢上下文）。
+  assert.equal(strat.route, '/packages/main/chat/index?agentKey=strat&continue=1');
 });
 
 test('军师按 name 关键词命中', async () => {

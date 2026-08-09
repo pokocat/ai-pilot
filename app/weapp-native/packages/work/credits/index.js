@@ -26,10 +26,14 @@ Page({
     if (!this._loaded) this.setData({ loading: true });
     try {
       const [credits, orderResult, me] = await Promise.all([api.credits(), api.orders().catch(() => ({ items: [] })), store.loadMe()]);
-      const usage = me && me.usage; const balance = me && me.creditBalance != null ? me.creditBalance : credits && credits.balance;
+      // 余额与用量的唯一真源是 /me（creditBalance / usage）。这里曾兜底读 credits.balance 与
+      // credits.usedPercent，但 /me/credits 只返回 { items }，这两个字段真服务端永远是 undefined：
+      // store.loadMe() 内部吞掉请求错误直接返回 null，于是弱网下 /me 一失败，用量就被静默写成
+      // 「本月已用 0%」——一个看起来正常的错数，比留空更误导。拿不到就不显示这行。
+      const usage = me && me.usage; const balance = me && me.creditBalance != null ? me.creditBalance : null;
       this._loaded = true; this.setData({
         loading: false, errorText: '', creditBalance: Number(balance) < 0 ? '不限量' : String(balance == null ? '—' : balance),
-        usageText: usage ? usageLabel(usage) : `本月已用 ${Number(credits && credits.usedPercent) || 0}%`, usagePercent: usage && usage.unlimited ? 100 : Number(usage && usage.usagePercent != null ? usage.usagePercent : credits && credits.usedPercent) || 0, usageUnlimited: Boolean(usage && usage.unlimited),
+        usageText: usage ? usageLabel(usage) : '', usagePercent: usage && usage.unlimited ? 100 : Number(usage && usage.usagePercent) || 0, usageUnlimited: Boolean(usage && usage.unlimited),
         items: (credits && credits.items || []).map((item) => Object.assign({}, item, { atText: fmtAt(item.at), deltaText: Number(item.delta) >= 0 ? `+${item.delta}` : String(item.delta), positive: Number(item.delta) >= 0 })),
         orders: (orderResult.items || orderResult || []).map(mapOrder),
       });

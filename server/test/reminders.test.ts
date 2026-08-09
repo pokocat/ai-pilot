@@ -45,12 +45,12 @@ async function makeCasefileWithOrder(opts: { done?: boolean; date?: string; dueA
   return cf;
 }
 
-test('buildReminderView：活跃案卷 + 军令 → 三条提醒节奏（逐字文案）', async () => {
+test('buildReminderView：活跃案卷 + 军令 → 四条提醒节奏（逐字文案）', async () => {
   await makeCasefileWithOrder({ dueAt: '17:00' });
   const view = await buildReminderView({ tenantId, userId });
 
-  assert.equal(view.items.length, 3);
-  assert.deepEqual(view.items.map((i) => i.kind), ['order', 'review', 'weekly']);
+  assert.equal(view.items.length, 4);
+  assert.deepEqual(view.items.map((i) => i.kind), ['order', 'review', 'weekly', 'custom']);
 
   const order = view.items.find((i) => i.kind === 'order')!;
   assert.equal(order.time, '17:00', 'order 时间取未完成军令 dueAt');
@@ -66,10 +66,14 @@ test('buildReminderView：活跃案卷 + 军令 → 三条提醒节奏（逐字�
 
   // 测试环境未配模板 → canSubscribe/subscribeReady=false；无订阅行 → subscribed=false
   assert.equal(view.subscribeReady, false);
-  assert.deepEqual(view.items.map((i) => i.canSubscribe), [false, false, false]);
+  assert.deepEqual(view.items.map((i) => i.canSubscribe), [false, false, false, false]);
   assert.equal(order.subscribed, false);
-  // 三条提醒的场景一律 review：服务端推送扣的就是 review 额度，前端不得自行映射到 report
-  assert.deepEqual(view.items.map((i) => i.scene), ['review', 'review', 'review']);
+  const expiry = view.items.find((i) => i.key === 'plan_expiry')!;
+  assert.equal(expiry.title, '方案到期提醒');
+  assert.equal(expiry.desc, '方案到期前提前提醒续期，避免推演中断。');
+
+  // 四条提醒的场景一律 review：服务端推送扣的就是 review 额度，前端不得自行映射到 report
+  assert.deepEqual(view.items.map((i) => i.scene), ['review', 'review', 'review', 'review']);
 });
 
 test('buildReminderView：配了 review 模板 → canSubscribe=true；额度耗尽（remaining=0）→ 回到未订阅可续订', async () => {
@@ -79,29 +83,29 @@ test('buildReminderView：配了 review 模板 → canSubscribe=true；额度耗
 
     const ready = await buildReminderView({ tenantId, userId });
     assert.equal(ready.subscribeReady, true);
-    assert.deepEqual(ready.items.map((i) => i.canSubscribe), [true, true, true]);
-    assert.deepEqual(ready.items.map((i) => i.subscribed), [false, false, false]);
+    assert.deepEqual(ready.items.map((i) => i.canSubscribe), [true, true, true, true]);
+    assert.deepEqual(ready.items.map((i) => i.subscribed), [false, false, false, false]);
 
-    // 授权一次 → 三条都显示已订阅（共享同一模板额度池）
+    // 授权一次 → 四条都显示已订阅（共享同一模板额度池；方案到期提醒 2026-08-09 起同池）
     const sub = await prisma.wechatSubscription.create({
       data: { tenantId, userId, scene: 'review', templateId: 'tpl-review-reminders', status: 'accept', remaining: 1, acceptedAt: now() },
     });
     const accepted = await buildReminderView({ tenantId, userId });
-    assert.deepEqual(accepted.items.map((i) => i.subscribed), [true, true, true]);
+    assert.deepEqual(accepted.items.map((i) => i.subscribed), [true, true, true, true]);
 
     // 推送一次后 remaining→0、status 仍是 accept：必须回到「可订阅」，否则永久停在已订阅、续订不了
     await prisma.wechatSubscription.update({ where: { id: sub.id }, data: { remaining: 0 } });
     const spent = await buildReminderView({ tenantId, userId });
-    assert.deepEqual(spent.items.map((i) => i.subscribed), [false, false, false]);
-    assert.deepEqual(spent.items.map((i) => i.canSubscribe), [true, true, true]);
+    assert.deepEqual(spent.items.map((i) => i.subscribed), [false, false, false, false]);
+    assert.deepEqual(spent.items.map((i) => i.canSubscribe), [true, true, true, true]);
   } finally {
     delete process.env.WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID;
   }
 });
 
-test('buildReminderView：无 dueAt / 无案卷 → order 时间默认 18:00，仍返回三条', async () => {
+test('buildReminderView：无 dueAt / 无案卷 → order 时间默认 18:00，仍返回四条', async () => {
   const noCf = await buildReminderView({ tenantId, userId });
-  assert.equal(noCf.items.length, 3);
+  assert.equal(noCf.items.length, 4);
   assert.equal(noCf.items.find((i) => i.kind === 'order')!.time, '18:00');
 
   await makeCasefileWithOrder(); // 军令无 dueAt

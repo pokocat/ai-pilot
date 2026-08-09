@@ -57,7 +57,9 @@ export default defineConfig(async (merge) => {
       'process.env.TARO_APP_VERSION': JSON.stringify(taroAppVersion),
       'process.env.TARO_APP_BUILD_SHA': JSON.stringify(taroAppBuildSha),
     },
-    copy: { patterns: [], options: {} },
+    // 自带字体随 H5 产物发出去，落到 `/fonts/`：与页面同源 → 浏览器不走 CORS。
+    // （字体是 CORS 资源，放 OSS 必须给桶配 Access-Control-Allow-Origin，而部署用的 RAM Key 改不了桶级配置。）
+    copy: { patterns: [{ from: 'src/assets/fonts/', to: 'dist-h5/fonts/' }], options: {} },
     framework: 'react',
     compiler: { type: 'webpack5', prebundle: { enable: false } },
     cache: { enable: true },

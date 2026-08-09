@@ -992,7 +992,7 @@ export const mock = {
         const usagePercent = q.unlimited ? 0 : q.limit > 0 ? Math.min(100, Math.max(0, Math.round((q.used / q.limit) * 100))) : 100;
         return { usagePercent, usageStatus: usagePercent >= 100 ? 'exhausted' as const : usagePercent >= 80 ? 'near_limit' as const : usagePercent >= 50 ? 'normal' as const : 'sufficient' as const, resetsAt: new Date(Date.now() + 30 * 86400000).toISOString(), unlimited: q.unlimited };
       })(),
-      planStatus: { active: true, expired: false, expiresAt: null, daysRemaining: null, nextResetAt: new Date(Date.now() + 30 * 86400000).toISOString() },
+      planStatus: { active: true, expired: false, none: false, expiresAt: null, daysRemaining: null, nextResetAt: new Date(Date.now() + 30 * 86400000).toISOString() },
       onboarded: d.onboarded,
       ai: { provider: 'mock', model: 'template', ready: false, claudeReady: false },
       understanding: buildUnderstandingM(d),
