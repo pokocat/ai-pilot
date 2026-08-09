@@ -89,6 +89,13 @@ function buildRows(agents, sessions, authed) {
   });
 }
 
+/**
+ * 折成一行。**必须在数据层折**：微信 `<text>` 组件把内容里的 `\n` 当真换行渲染，
+ * WXSS 的 `white-space:nowrap` 管不住它——抽屉历史行的摘要因此在真机上铺了十几行
+ * （2026-08-08 真机实拍）。省略号仍由 CSS 的 text-overflow 负责，这里只统一空白。
+ */
+function oneLine(value) { return String(value == null ? '' : value).replace(/\s+/g, ' ').trim(); }
+
 function badgeText(count) { return count > 0 ? (count > 99 ? '99+' : String(count)) : ''; }
 function safeGet(key) { try { return wx.getStorageSync(key) || ''; } catch (_) { return ''; } }
 function safeSet(key, value) { try { wx.setStorageSync(key, value); } catch (_) { /* storage 满/禁用都不该影响主流程 */ } }
@@ -337,9 +344,9 @@ Page({
         preview: `${item.title} · ${item.snippet}`,
         // 终态抽屉：主行=会话标题、辅行=花名·时间、第三行=摘要。花名缺失（未映射的军师）退回本名，
         // 别让辅行出现一个孤零零的「· 3 天前」。
-        title: item.title || '新对话',
+        title: oneLine(item.title) || '新对话',
         metaText: `${alias || item.agentName} · ${timeText}`,
-        snippet: item.snippet || '',
+        snippet: oneLine(item.snippet),
         unreadText: badgeText(Number(item.unreadCount) || 0),
       };
     });

@@ -1461,3 +1461,37 @@ test('预览、上传与正式发布只接受 dist-native 原生产物', () => {
   assert.doesNotMatch(release, /build:weapp:server|--project', APP_ROOT/);
   assert.doesNotMatch(scripts, /path\.join\(APP_ROOT, ['"]dist['"]\)|TARO_APP_|taro\s+build/);
 });
+// 2026-08-08 真机三反馈（停止后重发卡死 / 历史行铺满屏 / 资料库混进粘贴附卷）的回归闸门。
+// 三条都是「看起来对、真机才炸」的类型，静态钉死比事后复盘便宜。
+test('停止生成后必须能立刻重发，且空气泡不留屏', () => {
+  const core = read(chatCoreRoot, 'behavior.js');
+
+  // ① thinking 阶段按停止：那条一个字都没出的军师气泡必须从消息流里摘掉，
+  //    否则它会和下一轮的 thinking 点叠成两个「军师 ···」（真机实拍）。
+  const interrupted = core.match(/markStreamInterrupted\(\)\s*\{[\s\S]*?\n {2}\},/);
+  assert.ok(interrupted, '未能定位 markStreamInterrupted');
+  assert.match(interrupted[0], /messages\.slice\(0, index\)/, '停在 thinking 阶段时必须移除空气泡');
+
+  // ② 会话上真有在途生成（另一端发起）时接管它，而不是把用户晾在错误态里。
+  assert.match(core, /GENERATION_IN_PROGRESS[\s\S]{0,400}startPolling\(inProgressId/,
+    '收到 GENERATION_IN_PROGRESS 必须接管那条生成');
+});
+
+test('历史会话行的多行文本在数据层折行，不指望 white-space', () => {
+  const sessions = read(sourceRoot, 'pages/sessions/index.js');
+  // 微信 <text> 会把 \n 当真换行渲染，CSS 的 nowrap 管不住；不折就会铺满半屏（真机实拍）。
+  assert.match(sessions, /function oneLine\(value\)[\s\S]{0,160}replace\(\/\\s\+\/g, ' '\)/);
+  assert.match(sessions, /title: oneLine\(item\.title\)/);
+  assert.match(sessions, /snippet: oneLine\(item\.snippet\)/);
+});
+
+test('资料库把对话附卷与主动上传分组，且不隐藏', () => {
+  const js = read(sourceRoot, 'packages/work/knowledge/index.js');
+  const wxml = read(sourceRoot, 'packages/work/knowledge/index.wxml');
+  assert.match(js, /function isPasted\(row\)[\s\S]{0,220}sourceType === 'paste'/);
+  assert.match(js, /items: uploads\.map\(viewRow\)/);
+  assert.match(js, /pasteItems: pastes\.map\(viewRow\)/);
+  // 分组必须仍可展开、可删除——那些附卷还被会话引用着，隐藏掉等于用户再也管不到它们。
+  assert.match(wxml, /kb-paste-head[\s\S]{0,200}bindtap="togglePaste"/);
+  assert.match(wxml, /wx:if="\{\{pasteOpen\}\}"[\s\S]{0,600}catchtap="remove"/);
+});

@@ -112,6 +112,39 @@ describe('GenerationJob durable lifecycle', () => {
     await requestGenerationCancel(first.job.id, user);
   });
 
+  // 真机 2026-08-08：发送 → 点停止 → 再发送，用户看到的是「石沉大海」。
+  // running 态的取消是软取消（只写 cancelRequestedAt，落终态要等 worker 那一拍），
+  // 这段窗口里旧实现照旧抛 GENERATION_IN_PROGRESS，把用户已经明确放弃的那条回复变成路障。
+  test('cancelled-but-not-yet-finalized generation must not block the next message', async () => {
+    const phone = uniquePhone();
+    await login(phone, '停止后重发用户');
+    const user = await prisma.user.findUniqueOrThrow({ where: { phone } });
+    const first = await enqueueDurableGeneration(user, {
+      text: '这条我马上就会点停止',
+      agentKey: 'general',
+      clientRequestId: `generation-stop-${Date.now()}`,
+    });
+    // 进 running 后再取消 —— 这才会走软取消分支（queued 态取消是就地终结，不构成路障）。
+    const claimed = await claimNextGenerationJob('worker-stop', 15_000);
+    assert.equal(claimed?.id, first.job.id);
+    await startGenerationAttempt(first.job.id, 'worker-stop', claimed!.leaseVersion, 'main');
+    const cancelling = await requestGenerationCancel(first.job.id, user);
+    assert.ok(cancelling.cancelRequestedAt, '软取消必须留下 cancelRequestedAt');
+    assert.ok(!['cancelled', 'completed', 'failed', 'truncated'].includes(cancelling.status), '这一步还没落终态');
+
+    // 关键断言：此时重发不得被 409 挡回，且拿到的是一条全新的 job。
+    const second = await enqueueDurableGeneration(user, {
+      text: '停完马上换个问法再问一次',
+      agentKey: 'general',
+      sessionId: first.session.id,
+      clientRequestId: `generation-resend-${Date.now()}`,
+    });
+    assert.notEqual(second.job.id, first.job.id);
+    const session = await prisma.session.findUniqueOrThrow({ where: { id: first.session.id } });
+    assert.equal(session.activeGenerationId, second.job.id, '会话的在途任务必须让位给新消息');
+    await requestGenerationCancel(second.job.id, user);
+  });
+
   test('expired lease is reclaimed, old attempt is conservatively billed and stale worker is fenced out', async () => {
     const phone = uniquePhone();
     await login(phone, '租约接管用户');

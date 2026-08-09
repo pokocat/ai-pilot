@@ -4,8 +4,19 @@
     <view class="kb-up card" bindtap="chooseUpload"><view class="kb-up-ic"><native-icon name="upload" tone="accent" color-key="{{colorKey}}" size="20"></native-icon></view><view class="kb-up-b"><text class="kb-up-t">{{busy ? '上传中… '+pct+'%' : '上传资料'}}</text><text class="kb-up-s">先发到微信聊天（如文件传输助手）再选 · PDF/Word/Excel/MD/TXT</text><view wx:if="{{busy}}" class="kb-up-bar"><view class="kb-up-fill" style="width:{{pct < 4 ? 4 : pct}}%"></view></view></view><text wx:if="{{busy}}" class="kb-up-cancel" catchtap="cancelUpload">取消</text></view>
     <view wx:if="{{loading && !items.length}}" class="native-loading"><view wx:for="{{[1,2,3]}}" wx:key="*this" class="native-skeleton"></view></view>
     <view wx:elif="{{errorText}}" class="native-state"><text>{{errorText}}</text><button bindtap="retry">重新读取</button></view>
-    <view wx:elif="{{!items.length}}" class="kb-empty"><view class="e-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="22"></native-icon></view><text class="et">资料库还是空的</text><text class="es">上传你的业务资料，军师在咨询时会自动参考。微信里需先把文件发到「文件传输助手」，再回来选取。</text></view>
-    <view wx:else class="kb-list"><view wx:if="{{pollHint}}" class="kb-poll-hint"><text>有资料还在解析中，下拉可刷新查看最新状态</text></view><view wx:for="{{items}}" wx:key="id" class="kb-item card" data-id="{{item.id}}" bindtap="openDetail"><view class="ki-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view><view class="ki-b"><view class="ki-tr"><text class="ki-t">{{item.title}}</text><text wx:if="{{item.stageLabel}}" class="ki-stage {{item.stageClass}}">{{item.stageLabel}}</text><text class="ki-status {{item.statusClass}}">{{item.statusLabel}}</text></view><text class="ki-sum">{{item.summary}}</text><text class="ki-m">{{item.meta}}</text></view><view class="ki-del" data-id="{{item.id}}" catchtap="remove"><text>删除</text></view></view></view>
+    <view wx:elif="{{!items.length && !pasteCount}}" class="kb-empty"><view class="e-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="22"></native-icon></view><text class="et">资料库还是空的</text><text class="es">上传你的业务资料，军师在咨询时会自动参考。微信里需先把文件发到「文件传输助手」，再回来选取。</text></view>
+    <block wx:else>
+      <view class="kb-list"><view wx:if="{{pollHint}}" class="kb-poll-hint"><text>有资料还在解析中，下拉可刷新查看最新状态</text></view><view wx:for="{{items}}" wx:key="id" class="kb-item card" data-id="{{item.id}}" bindtap="openDetail"><view class="ki-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view><view class="ki-b"><view class="ki-tr"><text class="ki-t">{{item.title}}</text><text wx:if="{{item.stageLabel}}" class="ki-stage {{item.stageClass}}">{{item.stageLabel}}</text><text class="ki-status {{item.statusClass}}">{{item.statusLabel}}</text></view><text class="ki-sum">{{item.summary}}</text><text class="ki-m">{{item.meta}}</text></view><view class="ki-del" data-id="{{item.id}}" catchtap="remove"><text>删除</text></view></view></view>
+      <!-- 对话附卷（粘贴长文自动归卷）：与主动上传的文件分开，默认收起。仍可展开查看与删除。 -->
+      <view wx:if="{{pasteCount}}" class="kb-paste-group">
+        <view class="kb-paste-head" bindtap="togglePaste">
+          <text class="kb-paste-t">对话附卷 · {{pasteCount}} 份</text>
+          <text class="kb-paste-x">{{pasteOpen ? '收起' : '展开'}}</text>
+        </view>
+        <text wx:if="{{pasteOpen}}" class="kb-paste-note">对话里粘贴的长文会自动归卷，军师照常参考；不需要了可以删掉。</text>
+        <view wx:if="{{pasteOpen}}" class="kb-list"><view wx:for="{{pasteItems}}" wx:key="id" class="kb-item card" data-id="{{item.id}}" bindtap="openDetail"><view class="ki-ic"><native-icon name="doc" tone="accent" color-key="{{colorKey}}" size="18"></native-icon></view><view class="ki-b"><view class="ki-tr"><text class="ki-t">{{item.title}}</text><text class="ki-status {{item.statusClass}}">{{item.statusLabel}}</text></view><text class="ki-sum">{{item.summary}}</text><text class="ki-m">{{item.meta}}</text></view><view class="ki-del" data-id="{{item.id}}" catchtap="remove"><text>删除</text></view></view></view>
+      </view>
+    </block>
   </view>
   <login-sheet open="{{showLogin}}" reason="upload" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

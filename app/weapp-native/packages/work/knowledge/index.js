@@ -19,6 +19,14 @@ function cleanSourceName(value) {
   return name;
 }
 function displayName(row) { return cleanSourceName(row.fileName) || cleanSourceName(row.title) || '待识别资料'; }
+/**
+ * 对话里粘贴长文自动归卷的条目。判据优先用服务端的 `sourceType='paste'`（chat-core 归卷时就传了）；
+ * 存量数据没有该字段，退回按标题启发式认（归卷标题固定形如「粘贴长文·N字」），不写迁移脚本。
+ */
+function isPasted(row) {
+  if (row && row.sourceType === 'paste') return true;
+  return /^粘贴长文/.test(String((row && (row.title || row.fileName)) || ''));
+}
 function fmtSize(bytes) {
   const value = Number(bytes) || 0;
   if (!value) return '';
@@ -50,7 +58,8 @@ function viewRow(row) {
 function parseUploadBody(value) { if (typeof value !== 'string') return value; try { return JSON.parse(value); } catch (_) { return {}; } }
 
 Page({
-  data: baseData({ loading: true, items: [], busy: false, pct: 0, pollHint: false, errorText: '', showLogin: false }),
+  data: baseData({ loading: true, items: [], pasteItems: [], pasteCount: 0, pasteOpen: false, busy: false, pct: 0, pollHint: false, errorText: '', showLogin: false }),
+  togglePaste() { this.setData({ pasteOpen: !this.data.pasteOpen }); },
   onLoad() { this._attempt = 0; this.load(true); },
   onShow() { this.setData({ themeClass: store.snapshot().themeClass }); if (this._loaded) { this._attempt = 0; this.load(true); } },
   onHide() { this.clearPoll(); },
@@ -65,7 +74,17 @@ Page({
     if (!this._loaded) this.setData({ loading: true });
     try {
       const rows = await api.knowledgeDocs(); this._rows = rows || []; this._loaded = true;
-      this.setData({ loading: false, errorText: '', items: this._rows.map(viewRow) });
+      // 对话里粘贴超限自动归卷的长文也是 KnowledgeItem，会和用户主动上传的文件混在同一列表里
+      // （2026-08-08 真机反馈：「知识库里为什么混进去粘贴板内容了」）。它们仍被会话引用着、
+      // 也得能删，所以不隐藏，只按来源分组：主列表=自己上传的，附卷收进下面可展开的一组。
+      const uploads = this._rows.filter((row) => !isPasted(row));
+      const pastes = this._rows.filter(isPasted);
+      this.setData({
+        loading: false, errorText: '',
+        items: uploads.map(viewRow),
+        pasteItems: pastes.map(viewRow),
+        pasteCount: pastes.length,
+      });
       if (!poll) return;
       this.clearPoll();
       if (!this._rows.some((row) => !isSettled(row.status))) { this._attempt = 0; this.setData({ pollHint: false }); return; }

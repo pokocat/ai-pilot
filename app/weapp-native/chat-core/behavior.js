@@ -1094,6 +1094,16 @@ const methods = {
       this.finishResult(result, epoch);
     } catch (error) {
       if (!active()) return;
+      // 会话上真有一条在途生成（多为另一端发起）：接管它而不是把用户晾在错误里——
+      // 那条回复本来就是他要的，服务端也不会因为这次 409 丢东西。自己点过停止的情况
+      // 服务端已让位（见 generationJobs.createGenerationJob 的 superseded 分支），走不到这里。
+      const inProgressId = error && error.code === 'GENERATION_IN_PROGRESS'
+        && (error.data && error.data.generationId);
+      if (inProgressId) {
+        this.markStreamInterrupted();
+        this.startPolling(inProgressId, epoch);
+        return;
+      }
       store.handleApiError(error, { silent: true });
       this.markStreamInterrupted();
       this.finishBusy({ errorText: error.message || '军师暂时没有接上，请重试', canRetryLast: true }, epoch);
@@ -1279,6 +1289,17 @@ const methods = {
     if (index == null || !this.data.messages[index]) return;
     const current = this.data.messages[index];
     if (current.streamRenderId) stopImmediatelyCb(current.streamRenderId);
+    // 一个字都没出就被停掉（thinking 阶段按停止）：这条气泡没有任何内容可留，
+    // 留下就是一个永远空着的军师气泡——它还会跟下一轮的 thinking 点叠成两个「军师 ···」。
+    // 只在它是最后一条时移除，避免动到后面消息的下标。
+    if (!current.text && !this._streamShown && !current.report && index === this.data.messages.length - 1) {
+      this.safeSetData({ messages: this.data.messages.slice(0, index), showThinking: false });
+      this._streamText = '';
+      this._streamShown = '';
+      this._streamIndex = null;
+      this.stopStreamAutoScroll();
+      return;
+    }
     const patch = {
       [`messages[${index}].streaming`]: false,
       [`messages[${index}].typing`]: false,

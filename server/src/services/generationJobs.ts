@@ -181,7 +181,14 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
 
     if (session.activeGenerationId) {
       const active = await tx.generationJob.findUnique({ where: { id: session.activeGenerationId } });
-      if (active && !TERMINAL.has(active.status)) throw new GenerationInProgressError(active.id);
+      // 用户已经点过「停止」的任务不得再挡住下一条消息。running 态的取消是**软取消**
+      // （requestGenerationCancel 只写 cancelRequestedAt + abort 控制器，落终态要等 worker 那一拍），
+      // 若这段窗口里照旧抛 GENERATION_IN_PROGRESS，用户的表现就是「停完再发，石沉大海」——
+      // 他已经明确表达不要那条回复了，服务端还拿它挡路是最难自证的一类卡死。
+      // 让位是安全的：老任务自己的 finalize 用 `activeGenerationId: job.id` 做条件更新，
+      // 抢不回已经指向新任务的会话，退款/结算路径也不受影响。
+      const superseded = Boolean(active?.cancelRequestedAt);
+      if (active && !TERMINAL.has(active.status) && !superseded) throw new GenerationInProgressError(active.id);
       await tx.session.updateMany({
         where: { id: session.id, activeGenerationId: session.activeGenerationId },
         data: { activeGenerationId: null },
