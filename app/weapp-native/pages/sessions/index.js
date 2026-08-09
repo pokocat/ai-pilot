@@ -32,6 +32,30 @@ const FIRST_SEND_PREFIX = 'junshi.wence.firstsend.';
 const HINT_ROTATE_MS = 3000;
 const HINT_FADE_MS = 320;
 
+/**
+ * 主线会话闲置多久算「过一段时间再进来」。超过它且没有未读，冷进时不再续接旧会话，
+ * 改开一条新的（旧的自然归档进历史抽屉）——常见 AI app 的口径，也免得用户对着三天前的
+ * 半截对话继续说话。**纯客户端判定**，服务端没有过期概念，旧会话原封不动躺在那儿。
+ */
+const SESSION_IDLE_HOURS = 24;
+
+/**
+ * 过期只在**冷进**（bootChat）判，refreshChat（切 tab 回来）绝不判：
+ * 用户正聊着聊着跨过 24 小时整点就被切走是最恶心的一种"聪明"。
+ * 这条依赖 `_chatBooted` 缓存——同一次小程序生命周期内只 boot 一次，所以判定天然只在
+ * 冷启动/杀进程重进时发生，正好对上"过一段时间再进去"的语义。改动 `_chatBooted` 的
+ * 复用范围前先回来看这条。
+ *
+ * 有未读时**照旧续接**：军师主动说了新东西，连续性比新鲜感重要；进入即读、角标照常清。
+ */
+function isSessionStale(item) {
+  if (!item) return false;
+  if (Number(item.unreadCount) > 0) return false;
+  const idleMs = Date.now() - new Date(item.updatedAt).getTime();
+  if (!Number.isFinite(idleMs)) return false; // 时间戳读不出来一律按不过期，宁可续接也不误开新会话
+  return idleMs > SESSION_IDLE_HOURS * 3600 * 1000;
+}
+
 function relTime(iso) {
   const seconds = (Date.now() - new Date(iso).getTime()) / 1000;
   if (!Number.isFinite(seconds) || seconds < 60) return '刚刚';
@@ -200,8 +224,11 @@ Page({
     }
     await this.fetchSessions();
     const latest = (this._sessions || []).find((item) => item.agentKey === 'general');
-    if (latest) { this.chatCoreLoad({ sessionId: latest.id }); this.markGeneralRead(); return; }
+    // 闲置超过 SESSION_IDLE_HOURS 且无未读 → 不续接，落到下面的「无会话」分支重开一条。
+    if (latest && !isSessionStale(latest)) { this.chatCoreLoad({ sessionId: latest.id }); this.markGeneralRead(); return; }
 
+    // 无会话（或旧会话已过期）：先试主动消息注入。已有会话的用户会拿到 reason='exists'，
+    // 这是**预期结果**不是错误——过期路径本来就是「服务端还有会话、端上不想续接」。
     let result = null;
     try { result = await api.proactiveSession(); } catch (_) { /* 主动消息失败一律静默降级，不得阻塞进场 */ }
     if (result && result.injected && result.sessionId) {
@@ -300,11 +327,22 @@ Page({
   refreshRows() {
     const q = String(this.data.query || '').trim().toLowerCase();
     const rows = buildRows(this._agents, this._sessions, store.isAuthed()).filter((row) => !q || `${row.name}${row.alias}${row.role}`.toLowerCase().includes(q));
-    const historyRows = this._sessions.filter((item) => !q || `${item.agentName}${item.title}${item.snippet}`.toLowerCase().includes(q)).map((item) => ({
-      id: item.id, agentKey: item.agentKey, agentName: item.agentName, alias: ALIASES[item.agentKey] || '',
-      avatar: avatarFor(item.agentKey), timeText: relTime(item.updatedAt), preview: `${item.title} · ${item.snippet}`,
-      unreadText: badgeText(Number(item.unreadCount) || 0),
-    }));
+    const historyRows = this._sessions.filter((item) => !q || `${item.agentName}${item.title}${item.snippet}`.toLowerCase().includes(q)).map((item) => {
+      const alias = ALIASES[item.agentKey] || '';
+      const timeText = relTime(item.updatedAt);
+      return {
+        id: item.id, agentKey: item.agentKey, agentName: item.agentName, alias,
+        avatar: avatarFor(item.agentKey), timeText,
+        // control 形态那棵树读的是 preview（军师名当主行、标题挤在摘要里），一个字都不许动。
+        preview: `${item.title} · ${item.snippet}`,
+        // 终态抽屉：主行=会话标题、辅行=花名·时间、第三行=摘要。花名缺失（未映射的军师）退回本名，
+        // 别让辅行出现一个孤零零的「· 3 天前」。
+        title: item.title || '新对话',
+        metaText: `${alias || item.agentName} · ${timeText}`,
+        snippet: item.snippet || '',
+        unreadText: badgeText(Number(item.unreadCount) || 0),
+      };
+    });
     // 未读三层引导链：① 浮岛/底栏问策角标 = 全会话聚合；② 军师团按钮 = 除 general 外之和；③ 抽屉行内各自。
     const councilUnread = (this._sessions || []).filter((item) => item.agentKey !== 'general')
       .reduce((sum, item) => sum + (Number(item.unreadCount) || 0), 0);

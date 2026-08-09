@@ -6,6 +6,35 @@
 
 ## 变更日志
 
+### 2026-08-08 · 问策终态第二轮产品反馈：主线会话过期 + 会话标题 LLM 摘要 · 影响面：weapp-native 问策 tab（纯端上）+ server 会话标题服务（**需要重新部署服务端**）
+
+用户反馈两条：「会话有没有过期一说？很多 app 过段时间再进就另开新会话了」「历史会话不显示标题，常见 AI app 是根据用户第一个问题抽象成会话标题」。
+
+- **主线会话过期（纯客户端，`pages/sessions/index.js`）**。服务端不引入过期概念——旧会话原封不动躺在历史抽屉里，
+  只是端上冷进时不再自动续接。规则：`SESSION_IDLE_HOURS=24`，`updatedAt` 闲置超 24h **且 `unreadCount===0`** → 走
+  「无会话」分支重开（`proactiveSession()` 对已有会话用户回 `exists`，是**预期结果**，照常回落 greet 空会话）；
+  闲置超 24h **但有未读仍续接**——军师主动说了新东西，连续性比新鲜感重要。**只在 `bootChat` 判、`refreshChat` 绝不判**：
+  切 tab 回来时判会让人聊着聊着跨过 24h 整点就被切走。判定天然只发生在冷启动/杀进程重进（依赖 `_chatBooted` 缓存
+  「同一次生命周期只 boot 一次」），正好对上「过一段时间再进去」的语义。
+- **会话标题改成首轮问答的 LLM 摘要（`server/src/services/sessionTitle.ts`）**。原来是首问前 18 字硬截断，
+  历史列表里一排「我想请教一下今年餐饮门店到底」认不出哪条是哪条。改动要点：
+  - 触发点从**建会话那一刻**挪到**首轮回复落库之后**（旧的 `refineSessionTitle` 在建会话时就调，那时根本没有回复可用）。
+    提炼素材 = 首条 user + 它后面第一条 assistant/report：很多开场是「帮我看看」这种没信息量的一句，
+    只喂 user 文本会拟出与内容无关的标题。
+  - 挂在**所有**完成路径：持久任务的 `title` post-effect（`generationWorker`）+ 内联 `/generate-sync`、`/generate`
+    的八个落库点（`sessions.ts` 的 `bumpSessionTitle`）。一律 `void ... .catch()` 即发即忘，函数自身也整体 try/catch。
+  - **只在首轮改**（user 消息恰好一条 + 其后已有回复），后续轮次不再动——标题反复横跳比截断更难用。
+    幂等靠「标题还是占位吗」判、不建标记列：占位只有 `'新对话'` / 首条 user 前 18 字 / **主动消息注入会话的模板前 18 字**
+    三种形状，第三种让 proactive 会话也能在用户首次回复后取到名。用户改过名的标题一律不覆盖。
+  - `summarizeSessionTitle(userText, assistantText)` 走辅助档，预算固定 200 token；`normalizeSessionTitle` 剥引号/书名号/
+    句末标点**剥到不动为止**（`《…》。` 的书名号被句号挡在里面），上限 12 字。无真实 provider（测试 / 未配 key 的 mock 降级）
+    走 `fallbackSessionTitle` 确定性兜底，真实模型在位却失败则静默保留现状，不拿兜底顶替真结果。
+- **历史抽屉版式（`pages/sessions/index.wxml|scss`）**。终态抽屉的历史行改为：主行=会话标题（宋体 15 加粗）+ 未读角标，
+  辅行=军师花名 · 相对时间，第三行=snippet；三行都单行省略（抽屉固定 46vh，任一行换行把可见条数压掉一半）。
+  **control 形态那棵历史列表一个节点都不动**，仍读 `preview`（`${title} · ${snippet}`）。
+- 测试：server `test/sessionTitle.test.ts` 重写（12 例：mock 确定性 / 幂等不重写 / 只在首轮 / 改过名不覆盖 /
+  proactive 同规则 / 失败静默 / TC-G 跨用户）→ 1479 例全绿；app 静态断言补过期常量与新版式 → 93 + 40 例全绿。
+
 ### 2026-08-08 · 问策终态首轮真机反馈修复（ask 协议块漏进正文 / 提示 pill 太频繁） · 影响面：weapp-native chat-core 流式收口 + 问策 tab pill（**纯端上，服务端零改动、不需要重新部署**）
 
 上线后首轮真机反馈两条，都在 `weapp-native`；第一条 **chat 分包页同病**（同一份 chat-core，只是以前没人盯着看），一处修复两页同治。

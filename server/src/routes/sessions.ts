@@ -11,7 +11,7 @@ import { learnFromConversation } from '../services/memory.js';
 import { noteChatNonStream } from '../services/metrics.js';
 import { ingestKnowledge } from '../services/knowledge.js';
 import { summarizeSession } from '../services/summarize.js';
-import { refineSessionTitle } from '../services/sessionTitle.js';
+import { maybeGenerateTitle } from '../services/sessionTitle.js';
 import { reserveCredits, type CreditReservation } from '../services/credits.js';
 import {
   reserveQuota,
@@ -156,10 +156,17 @@ export async function loadTurnDigest(p: {
   return readOnly();
 }
 
-// 每轮收尾即发即忘更新快照（写法参照同文件的 refineSessionTitle）：让下一轮聊天纯读就能读到含本轮的脉络。
+// 每轮收尾即发即忘更新快照：让下一轮聊天纯读就能读到含本轮的脉络。
 // 只挂在成功路径上——失败的一轮没有可信内容可摘。失败静默，绝不回头影响已经完成的这一轮。
 function bumpSessionDigest(user: { tenantId: string; id: string }, sessionId: string): void {
   void updateSessionDigest({ tenantId: user.tenantId, userId: user.id, sessionId }).catch(() => {});
+}
+
+// 会话标题：同样即发即忘，挂在**回复已落库之后**——标题要拿首轮问答一起提炼，建会话那一刻
+// 还没有回复可用。只在首轮生效、后续轮次由 maybeGenerateTitle 自己判掉，这里无条件调即可。
+// （持久任务链路走 generationWorker 的 title post-effect，不经过这里。）
+function bumpSessionTitle(sessionId: string): void {
+  void maybeGenerateTitle(sessionId).catch(() => {});
 }
 
 type GenerationError = Error & { code?: string; statusCode?: number };
@@ -492,14 +499,11 @@ export async function sessionRoutes(app: FastifyInstance) {
         include: { agent: true },
       });
       created = true;
-      // 会话标题自动总结：首轮硬截断占位后，异步用轻量模型提炼短标题覆盖（即发即忘，不影响主流程）。
-      void refineSessionTitle(session.id, text, session.title).catch(() => {});
     } else {
       const patch: { title?: string; projectId?: string } = {};
       if (session.title === '新对话') patch.title = text.slice(0, 18);
       if (!session.projectId && projectId) patch.projectId = projectId;
       if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
-      if (patch.title) void refineSessionTitle(session.id, text, patch.title).catch(() => {});
     }
     const finishGeneration = trackSessionGeneration(session.id);
     try {
@@ -555,6 +559,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: replyChat as object } });
           harvestProphecies(user, agentKey, replyChat.text, replyChat.truncated);
           bumpSessionDigest(user, session.id);
+          bumpSessionTitle(session.id);
+        bumpSessionTitle(session.id);
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
           const creditBalance = creditReservation?.balance ?? 0;
@@ -569,6 +575,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         harvestProphecies(user, agentKey, harvestText(deliverable));
         notifySessionReport(user, deliverable);
         bumpSessionDigest(user, session.id);
+        bumpSessionTitle(session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const learned = await learn();
         const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
@@ -586,6 +593,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         });
         notifySessionReport(user, deliverable);
         bumpSessionDigest(user, session.id);
+        bumpSessionTitle(session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         // A-3：总军师也写记忆（含产出结论）。
         const learned = await learnFromConversation({
@@ -765,14 +773,11 @@ export async function sessionRoutes(app: FastifyInstance) {
           include: { agent: true },
         });
         send('session', { id: session.id, agentKey, title: session.title, projectId });
-        // 会话标题自动总结：首轮硬截断占位后，异步用轻量模型提炼短标题覆盖（即发即忘，不影响主流程）。
-        void refineSessionTitle(session.id, text, session.title).catch(() => {});
       } else {
         const patch: { title?: string; projectId?: string } = {};
         if (session.title === '新对话') patch.title = text.slice(0, 18);
         if (!session.projectId && projectId) patch.projectId = projectId;
         if (Object.keys(patch).length) await prisma.session.update({ where: { id: session.id }, data: patch });
-        if (patch.title) void refineSessionTitle(session.id, text, patch.title).catch(() => {});
       }
 
       finishGeneration = trackSessionGeneration(session.id);
@@ -845,6 +850,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         const msg = await prisma.message.create({ data: { sessionId: session.id, role: 'assistant', contentJson: reply2 as object } });
         harvestProphecies(user, agentKey, reply2?.text, reply2?.truncated);
         bumpSessionDigest(user, session.id);
+        bumpSessionTitle(session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
         const creditBalance = creditReservation?.balance ?? 0;
@@ -862,6 +868,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         harvestProphecies(user, agentKey, harvestText(deliverable));
         notifySessionReport(user, deliverable);
         bumpSessionDigest(user, session.id);
+        bumpSessionTitle(session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         await learnSse();
         const creditBalance = await settleCreditForDeliverable(creditReservation, deliverable.degraded);
@@ -886,6 +893,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         });
         notifySessionReport(user, deliverable);
         bumpSessionDigest(user, session.id);
+        bumpSessionTitle(session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
 
         // A-3：记忆学习（含总军师；用户级共享事实池）。
@@ -926,6 +934,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         });
         harvestProphecies(user, agentKey, reply2?.text, reply2?.truncated);
         bumpSessionDigest(user, session.id);
+        bumpSessionTitle(session.id);
         await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
         const creditBalance = creditReservation?.balance ?? 0;
         const tokenQuota = quotaReservation ? await quotaReservation.settle(billableOf(usage), ratio) : null;

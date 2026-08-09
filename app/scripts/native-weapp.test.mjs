@@ -528,6 +528,20 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
   assert.match(js, /markGeneralRead\(\)/, '装载 general 会话后本地掉掉这份未读');
   assert.match(wxml, /class="wx-id"[\s\S]*?class="unread"/, '③ 抽屉行内各自角标');
 
+  // —— 抽屉历史行版式：主行=会话标题、辅行=花名·时间、第三行=摘要（control 那棵树一个字不动） ——
+  assert.match(wxml, /class="wx-item wd-item"[\s\S]{0,400}class="wd-title serif">\{\{item\.title\}\}/, '历史行主行是会话标题');
+  assert.match(wxml, /class="wd-meta">\{\{item\.metaText\}\}/, '辅行=军师花名 · 相对时间');
+  assert.match(wxml, /class="wd-snippet">\{\{item\.snippet\}\}/, '第三行=摘要');
+  assert.match(js, /metaText: `\$\{alias \|\| item\.agentName\} · \$\{timeText\}`/, '花名缺失退回本名，别出现孤零零的「· 3 天前」');
+  assert.match(js, /preview: `\$\{item\.title\} · \$\{item\.snippet\}`/, 'control 形态仍读 preview，字段不许删');
+  for (const cls of ['.wd-title', '.wd-meta', '.wd-snippet']) {
+    assert.match(scss, new RegExp(`\\${cls} \\{[\\s\\S]*?text-overflow: ellipsis;`), `${cls} 必须单行省略（抽屉 46vh 固定高，换行会把可见条数压掉一半）`);
+  }
+  // control 形态那棵树的历史行保持原样：军师名主行 + preview 双行摘要。
+  const controlTree = wxml.slice(wxml.indexOf('<view wx:else class="native-page'));
+  assert.match(controlTree, /class="wx-name">\{\{item\.agentName\}\}<\/text><text class="wx-alias">\{\{item\.alias\}\}/, 'control 历史行保持军师名主行');
+  assert.match(controlTree, /class="wx-preview">\{\{item\.preview\}\}/, 'control 历史行仍是 preview 双行摘要');
+
   // —— towxml 跨包异步接线：componentPlaceholder + 先注入回调再装载会话 ——
   assert.equal(json.usingComponents.towxml, '/packages/main/vendor/towxml/towxml');
   assert.equal(json.componentPlaceholder?.towxml, 'view', '跨分包引用必须配 componentPlaceholder，否则主包页面根本引不到');
@@ -540,6 +554,14 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
 
   // —— 会话装载分支：续接 / 注入主动消息 / greet 空会话 / 游客本地开场 ——
   assert.match(js, /this\.chatCoreLoad\(\{ sessionId: latest\.id \}\)/);
+  // 主线会话过期（纯客户端）：闲置 > 24h 且**无未读**才不续接；有未读一律续接（军师说了新东西）。
+  assert.match(js, /const SESSION_IDLE_HOURS = 24;/, '阈值必须是页面顶部的具名常量，不许散在判断里');
+  assert.match(js, /function isSessionStale\(item\) \{[\s\S]*?if \(Number\(item\.unreadCount\) > 0\) return false;/, '有未读时连续性优先，不判过期');
+  assert.match(js, /idleMs > SESSION_IDLE_HOURS \* 3600 \* 1000/);
+  assert.match(js, /if \(latest && !isSessionStale\(latest\)\) \{ this\.chatCoreLoad\(\{ sessionId: latest\.id \}\)/, '过期的会话落到「无会话」分支');
+  // 过期只在冷进（bootChat）判：refreshChat 是切 tab 回来，聊着聊着跨过整点被切走是最恶心的"聪明"。
+  assert.match(js, /async refreshChat\(\) \{[\s\S]*?\n  \},/, 'refreshChat 存在');
+  assert.doesNotMatch(js.slice(js.indexOf('async refreshChat()'), js.indexOf('async fetchSessions()')), /isSessionStale/, 'refreshChat 不得做过期判定');
   assert.match(js, /api\.proactiveSession\(\)/);
   assert.match(js, /this\.chatCoreLoad\(\{ agentKey: 'general' \}\)/, 'injected:false 三种原因都走 greet 空会话');
   assert.match(js, /this\.chatCoreLoad\(\{ agentKey: 'general', localPrelude: GUEST_PRELUDE \}\)/, '游客走本地开场序列，零服务端写入');

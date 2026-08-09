@@ -107,7 +107,9 @@
         <view wx:elif="{{error}}" class="sess-empty"><text class="et">会话读取失败</text><text class="es-link" bindtap="load">重新加载</text></view>
         <view wx:elif="{{!historyRows.length}}" class="sess-empty"><text class="et">还没有别的会话</text><text class="es">跟谁聊都留底，要紧的我会汇到主线判断里。</text></view>
         <block wx:else>
-          <view class="wx-list wd-list"><view wx:for="{{historyRows}}" wx:key="id" class="wx-item" data-id="{{item.id}}" bindtap="tapSession" bindlongpress="deleteSession"><view class="advisor-avatar"><image class="aa-img" src="{{item.avatar}}" mode="aspectFill"></image></view><view class="wx-main"><view class="wx-top"><view class="wx-id"><text class="wx-name">{{item.agentName}}</text><text class="wx-alias">{{item.alias}}</text><view wx:if="{{item.unreadText}}" class="unread"><text>{{item.unreadText}}</text></view></view><text class="wx-time">{{item.timeText}}</text></view><text class="wx-preview">{{item.preview}}</text></view></view></view>
+          <!-- 终态抽屉的历史行：主行=会话标题（宋体 15 加粗，单行省略）+ 未读角标；辅行=军师花名 · 相对时间；第三行=摘要。
+               军师名不再当主行——一屏全是「总军师 · 玄衡」认不出哪条是哪条，能区分的是这次聊了什么。 -->
+          <view class="wx-list wd-list"><view wx:for="{{historyRows}}" wx:key="id" class="wx-item wd-item" data-id="{{item.id}}" bindtap="tapSession" bindlongpress="deleteSession"><view class="advisor-avatar"><image class="aa-img" src="{{item.avatar}}" mode="aspectFill"></image></view><view class="wx-main"><view class="wx-top"><view class="wx-id"><text class="wd-title serif">{{item.title}}</text><view wx:if="{{item.unreadText}}" class="unread"><text>{{item.unreadText}}</text></view></view></view><text class="wd-meta">{{item.metaText}}</text><text class="wd-snippet">{{item.snippet}}</text></view></view></view>
           <text class="wd-foot">长按可删除 · 只列最近，更早的用上方搜索</text>
         </block>
       </block>

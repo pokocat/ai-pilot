@@ -178,3 +178,26 @@
 /* 抽屉里的行不做通栏出血：去掉 .wx-list 的负边距与上下发丝线，让它贴着 sheet 的内边距。 */
 .wd-list { margin: 6px 0 0; padding: 0; background: transparent; border-top: 0; border-bottom: 0; }
 .wd-foot { display: block; padding: 12px 0 4px; text-align: center; font-size: 11px; color: var(--ink-3); }
+
+/* —— 历史行三层：会话标题 / 花名·时间 / 摘要 ——
+   主行给标题（服务端按首轮问答提炼的 ≤12 字短标题，早期会话可能还是硬截断），军师身份降到辅行。
+   三行都单行省略：抽屉高度固定 46vh，任何一行换行都会把可见条数从 5 条压到 3 条。
+   `.wx-top` 的 space-between 在只剩一个子节点时会把标题贴左、角标贴右，正是要的效果。 */
+.wd-item .wx-top { margin-bottom: 4px; }
+.wd-item .wx-id { flex: 1; min-width: 0; align-items: center; }
+.wd-title {
+  flex: 1; min-width: 0;
+  font-size: 15px; font-weight: 600; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wd-meta {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11px; font-weight: 600; color: var(--gold);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wd-snippet {
+  display: block;
+  font-size: 12px; line-height: 1.35; color: var(--ink-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}

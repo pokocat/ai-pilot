@@ -13,7 +13,7 @@ import { learnFromConversation } from './memory.js';
 import { extractAndRecordProphecies } from './prophecyLog.js';
 import { notifyReportReady } from './wechatSubscribe.js';
 import { updateSessionDigest } from './sessionDigest.js';
-import { refineSessionTitle } from './sessionTitle.js';
+import { maybeGenerateTitle } from './sessionTitle.js';
 import { cardSection } from './deliverableSection.js';
 import {
   claimNextGenerationJob,
@@ -260,7 +260,8 @@ async function runPostEffects(job: GenerationJob, frozen: FrozenContext, content
   const effectKeys = ['title', 'memory', 'digest', ...(job.agentKey === 'general' ? ['prophecy'] : []), ...(isReport ? ['notification'] : [])];
   await enqueueGenerationEffects(job.id, effectKeys);
   const effects: Record<string, () => Promise<void>> = {
-    title: async () => { await refineSessionTitle(job.sessionId, request.text, request.text.slice(0, 18)); },
+    // 标题只在首轮生效，且要读到已落库的首条回复——所以挂在 post-effect（结果已终态落库）而不是建单处。
+    title: async () => { await maybeGenerateTitle(job.sessionId); },
     memory: async () => {
       await learnFromConversation({
         tenantId: job.tenantId,

@@ -998,7 +998,7 @@ async function rawText(
 // —— 内部：文本 → JSON 对象（正则抠 {…} + JSON.parse）。既有洞察抽取/汇总沿用此松散口径。 ——
 async function rawJson(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
-  opts?: { allowAux?: boolean; signal?: AbortSignal; usageMeta?: UsageMeta },
+  opts?: { allowAux?: boolean; maxTokens?: number; signal?: AbortSignal; usageMeta?: UsageMeta },
 ): Promise<Record<string, unknown> | null> {
   const content = await rawText(cfg, live, system, user, opts);
   const m = content.match(/\{[\s\S]*\}/);
@@ -1204,30 +1204,49 @@ export async function summarizePoints(transcript: string): Promise<{ points: str
   }
 }
 
-/** 会话首轮标题提炼：用一次轻量模型调用把用户开场输入概括成不超过 12 字的中文短标题，替代硬截断。
- *  只在真实 provider 就绪时运行（测试/mock 返回 null → 调用方保留硬截断占位）；解析失败即放弃。 */
-export async function summarizeSessionTitle(text: string): Promise<string | null> {
-  const raw = (text ?? '').trim();
-  if (!raw) return null;
+/** 会话标题提炼：用一次轻量模型调用把**首轮问答**（用户开场 + 军师第一条回复）概括成不超过 12 字的
+ *  中文短标题，替代硬截断。带上回复是因为很多开场只有「帮我看看」「在吗」这种没有信息量的一句，
+ *  只喂 user 文本会拟出一个和内容无关的标题；回复里才有本轮真正谈的是什么。
+ *  只在真实 provider 就绪时运行（测试/mock 返回 null → 调用方走确定性兜底）；解析失败即放弃。
+ *  预算 200 token：标题只有十来个字，给多了纯属让辅助档替正文抢配额。 */
+export async function summarizeSessionTitle(userText: string, assistantText?: string): Promise<string | null> {
+  const asked = (userText ?? '').trim();
+  const answered = (assistantText ?? '').trim();
+  if (!asked) return null;
   const cfg = await getAiConfig();
   const live = liveProvider(cfg);
   if (!live) return null;
   try {
-    const sys = '你是会话取名助手。把用户的开场输入概括成一个不超过 12 个字的中文短标题，只保留业务主题。'
+    const sys = '你是会话取名助手。把这轮对话概括成一个不超过 12 个字的中文名词短语，作为这次谈话的标题，只保留业务主题。'
       + '不要引号、书名号、句末标点，不要“关于/请教/如何/怎么”之类的虚词开头，不要任何解释或前后缀。'
-      + '标题给用户看，语气平实，像给一次谈话拟的小标题。只输出 JSON：{"title":"…"}。';
-    const json = await rawJson(cfg, live, sys, raw.slice(0, 400));
-    let title = json && typeof json.title === 'string' ? json.title.trim() : '';
-    if (!title) return null;
-    // 防御：去首尾引号/书名号/空白 → 去句末标点 → 超 20 字截断 → 空串归 null。
-    title = title.replace(/^[\s"'“”‘’「」『』《》【】]+|[\s"'“”‘’「」『』《》【】]+$/g, '').trim();
-    title = title.replace(/[。！？!?.,，、；;：:]+$/, '').trim();
-    if (title.length > 20) title = title.slice(0, 20);
-    return title || null;
+      + '标题给用户看，语气平实克制，不要“深度/全面/终极”这类推销腔。只输出 JSON：{"title":"…"}。';
+    const material = answered ? `用户：${asked.slice(0, 400)}\n军师：${answered.slice(0, 400)}` : `用户：${asked.slice(0, 400)}`;
+    const json = await rawJson(cfg, live, sys, material, { maxTokens: SESSION_TITLE_MAX_TOKENS });
+    const title = json && typeof json.title === 'string' ? json.title : '';
+    return normalizeSessionTitle(title);
   } catch (err) {
     console.error('[gateway] summarizeSessionTitle fallback:', (err as Error).message);
     return null;
   }
+}
+
+/** 标题预算：十来个字的产出不需要更多，且它走辅助档、与正文共享上游配额。 */
+export const SESSION_TITLE_MAX_TOKENS = 200;
+/** 标题上限（字）：产品口径 ≤12 字；模型偶尔超一两个字就直接截，不为此再跑一轮。 */
+export const SESSION_TITLE_MAX_CHARS = 12;
+
+/** 标题归一：去首尾引号/书名号/空白 → 去句末标点 → 压掉换行 → 超长截断 → 空串归 null。 */
+export function normalizeSessionTitle(raw: string | null | undefined): string | null {
+  let title = String(raw ?? '').replace(/\s+/g, ' ').trim();
+  // 两类要剥的尾巴会互相遮挡（`《现金流吃紧》。` 的书名号被句号挡在里面），所以剥到不动为止。
+  for (let i = 0; i < 4; i++) {
+    const before = title;
+    title = title.replace(/^[\s"'“”‘’「」『』《》【】]+|[\s"'“”‘’「」『』《》【】]+$/g, '').trim();
+    title = title.replace(/[。！？!?.,，、；;：:]+$/, '').trim();
+    if (title === before) break;
+  }
+  if (title.length > SESSION_TITLE_MAX_CHARS) title = title.slice(0, SESSION_TITLE_MAX_CHARS);
+  return title || null;
 }
 
 /** 预言抽取（M2 PR-9）：从总军师输出里抽「具体、可验证、有期限」的天势判断。
