@@ -260,3 +260,26 @@ groups:
         annotations:
           summary: "对话生成任务发生自动接管，通常表示服务重启或任务长时间未完成。"
           current: "15 分钟自动接管 {{ $value | printf \"%.0f\" }} 次"
+
+      # 长会话不能再靠 24 小时断链“重置”。摘要一旦撞顶，用户后续新增事实就不会进入上下文，
+      # 表面是 200 成功，实际体感是军师突然失忆，因此 capped 必须按用户体验事故处理。
+      - alert: JunshiSessionDigestCapped
+        expr: sum(increase(junshi_session_digest_updates_total{status="capped"}[15m])) > 0
+        labels: { severity: critical, category: chat_experience }
+        annotations:
+          summary: "有长会话摘要已撞上限，军师可能无法记住后续新增事实。"
+          current: "15 分钟撞顶 {{ $value | printf \"%.0f\" }} 次"
+
+      - alert: JunshiSessionDigestCompactionFailed
+        expr: sum(increase(junshi_session_digest_compactions_total{outcome="failed"}[15m])) > 0
+        labels: { severity: warning, category: chat_experience }
+        annotations:
+          summary: "长会话滚动压缩失败，摘要仍保留原游标但连续性开始承压。"
+          current: "15 分钟失败 {{ $value | printf \"%.0f\" }} 次"
+
+      - alert: JunshiSessionDigestUnhealthy
+        expr: sum(increase(junshi_session_digest_updates_total{status=~"failed|cooldown"}[15m])) > 2
+        labels: { severity: warning, category: chat_experience }
+        annotations:
+          summary: "会话摘要连续未能追平，近期回答可能缺少较早的客户事实。"
+          current: "15 分钟异常 {{ $value | printf \"%.0f\" }} 次"

@@ -20,6 +20,7 @@
       <view wx:if="{{pasteHint}}" class="paste-hint"><text class="paste-hint-t">长文已归为附卷，军师会通读全文；点卡片可查看或移除。</text><text class="paste-hint-x" bindtap="dismissPasteHint">知道了</text></view>
     </view>
     <view wx:if="{{regularRefs.length||uploading}}" class="ref-strip">
+      <text wx:if="{{imageSelectedCount}}" class="image-ref-count">图片 {{imageSelectedCount}}/{{imageLimit}}</text>
       <view wx:for="{{regularRefs}}" wx:key="id" class="ref-chip">
         <image wx:if="{{item.kind==='image'&&item.previewUrl}}" class="ref-chip-thumb" src="{{item.previewUrl}}" mode="aspectFill"></image>
         <native-icon wx:else name="{{item.kind==='image'?'image':'doc'}}" tone="neutral" size="13"></native-icon>

@@ -58,7 +58,7 @@ import type {
   AdminAccountItem, CreateAdminAccountRequest, UpdateAdminAccountRequest,
   AgentVersionListView, AgentVersionItem, AgentVersionDetail, PublishAgentRequest, PublishAgentResult, RollbackAgentRequest,
   SandboxRequest, SandboxResult, SandboxTarget,
-  EvalSetItem, EvalSetDetail, EvalCaseItem, UpsertEvalSetRequest, UpsertEvalCaseRequest,
+  EvalSetItem, EvalSetDetail, EvalCaseItem, EvalCaseContext, UpsertEvalSetRequest, UpsertEvalCaseRequest,
   EvalRunItem, EvalRunDetail, EvalCaseResultItem, StartEvalRunRequest, PricingTier,
   AdminProjectItem, AdminReportItem,
   AdminEcoTool, AdminEcoToolCreate, AdminEcoToolUpdate, AdminPrescriptionFunnel,
@@ -1838,7 +1838,7 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!s) return reply.code(404).send({ error: 'not found' });
     return {
       id: s.id, agentKey: s.agentKey, name: s.name, caseCount: s.cases.length, createdAt: isoSecond(s.createdAt),
-      cases: s.cases.map((c): EvalCaseItem => ({ id: c.id, input: c.input, rubric: c.rubric, weight: c.weight, sort: c.sort, context: (c.contextJson as Record<string, unknown> | null) ?? null })),
+      cases: s.cases.map((c): EvalCaseItem => ({ id: c.id, input: c.input, rubric: c.rubric, weight: c.weight, sort: c.sort, context: (c.contextJson as EvalCaseContext | null) ?? null })),
     };
   });
   app.patch<{ Params: { id: string }; Body: UpsertEvalSetRequest }>('/admin/eval-sets/:id', async (req, reply) => {
@@ -1871,7 +1871,7 @@ export async function adminRoutes(app: FastifyInstance) {
         contextJson: (b.context ?? undefined) as Prisma.InputJsonValue | undefined,
       },
     });
-    return { id: c.id, input: c.input, rubric: c.rubric, weight: c.weight, sort: c.sort, context: (c.contextJson as Record<string, unknown> | null) ?? null };
+    return { id: c.id, input: c.input, rubric: c.rubric, weight: c.weight, sort: c.sort, context: (c.contextJson as EvalCaseContext | null) ?? null };
   });
   app.patch<{ Params: { id: string }; Body: UpsertEvalCaseRequest }>('/admin/eval-cases/:id', async (req, reply) => {
     const key = await agentKeyOfCase(req.params.id);

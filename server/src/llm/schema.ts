@@ -65,6 +65,14 @@ export interface GenContext {
   progressLine?: string | null;
   // 本轮导引（M3 PR-11/12/14）：模式/角色语气/诊断轮次指令（每轮变化 → dynamic 首位）。
   modeLine?: string | null;
+  // 复杂方案阶段导引：由 GenerationJob 的冻结路由生成，只能放 dynamic，重试/接管不得重分类。
+  deliveryLine?: string | null;
+  // 当前有效的 asserted/confirmed 客户硬事实；pending/rejected/superseded 永不进入本块。
+  factsLine?: string | null;
+  // 显式新 Session 从上一主线检查点继承的交接包；不复制原始消息，不临时全量总结。
+  handoffLine?: string | null;
+  // 多图专用轻量观察结果；最终主模型只读文本观察，不再携带 9 张原始 base64。
+  imageObservationLine?: string | null;
   // 会话既往脉络（批次 3）：本会话早期事实/约束/决策的结构化索引块（services/sessionDigest.formatDigestBlock）。
   // 每轮可能变化 → 只能进 dynamic 段；无快照/空快照不注入。
   digestLine?: string | null;
@@ -867,7 +875,10 @@ const STABLE_POINTER: Record<VolatilePlaceholder, string> = {
  * 也不要让它一头写到撞上限——撞上限即使能自动续写，也是白烧 token 且读起来啰嗦。
  */
 export const CHAT_STYLE_GUIDE = [
-  '回复要冷静、克制、机构级，给出可执行判断；结尾不必每次免责。',
+  '普通对话要像一个真正了解客户的真人教练或老朋友：先接住他此刻的处境和真实难点，再给有立场的判断；保持专业，但不要写成机构公文、客服话术或通用 AI 模板。',
+  '上下文里已有客户事实、关键决策或最近脉络时，先用其中最相关的一两条来校准回答，让客户看得出你记得他；不要复述整份档案，也不要编造缺失信息。',
+  '明确指出哪里做得好、哪里有风险、为什么，并给出你最推荐的一条路径；不要为了显得客观而只罗列没有取舍的选项。',
+  '“有惊喜”必须来自事实之间的联系、反常识判断或更深一层的因果，不靠夸张金句；信息不足时只追问决定判断的 1-3 个关键问题。',
   // 「严禁 JSON」这条必须显式豁免 ```ask 块，否则它就是在禁止下面那份提问选项协议：ask 块本身
   // 正是 [{...}] 形态的 JSON 数组。线上实测过一条 2845 字的长回复，结尾问了三个问题却一个 ask
   // 块都没带，正文里连半截围栏都没有——模型压根没写。
@@ -953,12 +964,16 @@ export function buildSystemParts(prompt: string, ctx: GenContext, kind?: PromptK
 
   const parts: string[] = [];
   if (ctx.modeLine) parts.push(ctx.modeLine); // 本轮导引（模式/角色/轮次）：每轮变化，dynamic 首位
+  if (ctx.deliveryLine) parts.push(ctx.deliveryLine);
   if (active) parts.push(fillPlaceholders(active, ctx)); // 本轮生效的按需模块（在参考资料之前）
   // WO-12【可开方工具表】：只在方案生成轮注入（与 active 的 ===MODULE deliverable=== 同门槛），
   // 让军师开方时只认表内 toolKey；对话轮不注入（省 token，也避免误导闲聊出方案）。
   if (kind === 'deliverable' && ctx.toolMenuLine) parts.push(ctx.toolMenuLine);
 
   const blocks: string[] = [];
+  if (ctx.factsLine) blocks.push(ctx.factsLine);
+  if (ctx.handoffLine) blocks.push(ctx.handoffLine);
+  if (ctx.imageObservationLine) blocks.push(ctx.imageObservationLine);
   if (ctx.strategicLine) blocks.push(ctx.strategicLine); // 战略档案：已确认事实，放在推断的客户档案之前
   if (ctx.goalsLine) blocks.push(`【目标阶梯（客户确认，跨期沿用）】\n${ctx.goalsLine}`); // V7-10
   if (ctx.decisionLine) blocks.push(ctx.decisionLine);   // 决策账本：系统计数（准确率等禁止 AI 自算）

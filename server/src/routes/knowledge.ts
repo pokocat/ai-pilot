@@ -156,14 +156,22 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     }
 
     const rawOriginal = (data.fields as Record<string, { value?: string } | undefined> | undefined)?.originalName?.value;
-    return ingestChatImage({
-      tenantId: user.tenantId,
-      userId: user.id,
-      projectId: req.query.projectId ?? null,
-      mime: data.mimetype,
-      buf,
-      fileName: rawOriginal || data.filename || null,
-    });
+    try {
+      return await ingestChatImage({
+        tenantId: user.tenantId,
+        userId: user.id,
+        projectId: req.query.projectId ?? null,
+        mime: data.mimetype,
+        buf,
+        fileName: rawOriginal || data.filename || null,
+      });
+    } catch (error) {
+      const detail = error as Error & { statusCode?: number; code?: string };
+      return reply.code(detail.statusCode ?? 500).send({
+        error: detail.statusCode && detail.statusCode < 500 ? detail.message : '图片处理失败，请稍后重试',
+        code: detail.code ?? 'IMAGE_PROCESS_FAILED',
+      });
+    }
   });
 
   // 摄取一条知识（手动笔记 / 文本）

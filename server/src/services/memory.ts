@@ -184,10 +184,10 @@ export async function learnFromConversation(opts: {
   const expiresAt = ttlFromConfig(cfg);
   for (const { text, category } of insights) {
     const embedding = await embed(text);
-    // E1：与近期记忆近重 → 加权刷新（提权 + 刷新时间，配合 E2 衰减），不再堆重复行。
+    // E1：与近期记忆近重 → 加权强化但保留原始发生时间。createdAt 是审计时间，不能被“又提到一次”污染。
     const dup = await findDuplicateMemory(userId, text, embedding);
     if (dup) {
-      await prisma.memory.update({ where: { id: dup.id }, data: { weight: Math.min(2, dup.weight + 0.1), createdAt: new Date(), expiresAt } });
+      await prisma.memory.update({ where: { id: dup.id }, data: { weight: Math.min(2, dup.weight + 0.1), reinforcedAt: new Date(), expiresAt } });
       if (pgvectorEnabled()) await upsertMemoryVector(dup.id, embedding).catch(() => {});
       continue;
     }

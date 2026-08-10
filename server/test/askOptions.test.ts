@@ -96,7 +96,7 @@ test('looksLikeAsking：只看尾部——结尾提问命中，中段修辞反�
 
 // 提示词装配的回归闸：ask 协议必须在尾部指令里、且排在体例约束之后（位置就是这次修的东西）。
 test('CHAT_TAIL_DIRECTIVE：含提问选项协议，且排在体例约束之后', () => {
-  const styleIdx = CHAT_TAIL_DIRECTIVE.indexOf('回复要冷静、克制、机构级');
+  const styleIdx = CHAT_TAIL_DIRECTIVE.indexOf('真人教练或老朋友');
   const askIdx = CHAT_TAIL_DIRECTIVE.indexOf('提问选项协议');
   assert.ok(styleIdx >= 0, '体例约束应在尾部指令内');
   assert.ok(askIdx > styleIdx, 'ask 协议必须排在体例约束之后（靠近生成点）');
@@ -104,4 +104,7 @@ test('CHAT_TAIL_DIRECTIVE：含提问选项协议，且排在体例约束之后'
   assert.match(CHAT_TAIL_DIRECTIVE, /唯一例外是下面「提问选项协议」规定的 ```ask 块/);
   // 长回复丢块是线上实测的主要失败形态，复查指令不能被后续改动删掉
   assert.match(CHAT_TAIL_DIRECTIVE, /长回复（含表格、分段、多标题的回复）同样不能省/);
+  assert.match(CHAT_TAIL_DIRECTIVE, /不要写成机构公文、客服话术或通用 AI 模板/);
+  assert.match(CHAT_TAIL_DIRECTIVE, /哪里做得好、哪里有风险、为什么/);
+  assert.match(CHAT_TAIL_DIRECTIVE, /事实之间的联系、反常识判断或更深一层的因果/);
 });

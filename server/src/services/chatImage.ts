@@ -7,6 +7,7 @@
 // 存储抽象：生产走 OSS 私有对象；测试/未配 OSS 时落进程内内存暂存（够单测读回 base64，绝不触达真实 OSS）。
 
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { env } from '../env.js';
 import { prisma } from '../db.js';
 import { ossConfigured, ossPutBuffer, ossGetBuffer } from './ossUpload.js';
@@ -31,7 +32,56 @@ const EXT_MEDIA_TYPE: Record<string, string> = {
 };
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 单张 ≤10MB
-export const MAX_IMAGES_PER_MESSAGE = 4;         // 单条消息至多带 4 张（超出忽略并留日志）
+export const MAX_ATTACHMENTS_PER_MESSAGE = 9;    // 图片与其它引用共用 9 份总上限
+export const MAX_IMAGES_PER_MESSAGE = 9;         // 单条消息至多 9 张；运行时权威值由 /me 下发
+export const MAX_IMAGES_PER_BATCH = 4;           // 任一上游视觉请求至多 4 张
+export const MAX_IMAGE_BATCH_BYTES = 12 * 1024 * 1024;
+export const MAX_IMAGE_MESSAGE_BYTES = 24 * 1024 * 1024;
+export const MAX_INFERENCE_IMAGE_EDGE = 2048;
+
+export const ATTACHMENT_CAPABILITIES = {
+  maxAttachmentsPerMessage: MAX_ATTACHMENTS_PER_MESSAGE,
+  maxImagesPerMessage: MAX_IMAGES_PER_MESSAGE,
+  maxImagesPerBatch: MAX_IMAGES_PER_BATCH,
+  maxImageBytes: MAX_IMAGE_BYTES,
+  maxImageBatchBytes: MAX_IMAGE_BATCH_BYTES,
+  maxImageMessageBytes: MAX_IMAGE_MESSAGE_BYTES,
+} as const;
+
+export interface ResolvedChatImage {
+  index: number; // 本轮图片序号，1-based，供最终回答引用「图 3」
+  refId: string;
+  mediaType: string;
+  base64: string;
+  bytes: number;
+}
+
+export interface ResolvedImageRefs {
+  requestedCount: number;
+  images: ResolvedChatImage[];
+  skipped: { index: number; refId: string; reason: string }[];
+  totalBytes: number;
+}
+
+/**
+ * 建单前用上传元数据做廉价总量闸门，避免明知超限仍落用户消息、预留额度再让 Worker 失败。
+ * Worker 读取原件后还会按真实字节复核；缺失项留给阅图阶段生成明确 notices。
+ */
+export async function validateImageReferenceBudget(tenantId: string, refs: MessageRef[] | undefined): Promise<void> {
+  const imageRefs = (refs ?? []).filter((ref) => ref.kind === 'image');
+  if (!imageRefs.length) return;
+  const rows = await prisma.knowledgeItem.findMany({
+    where: { tenantId, sourceType: 'image', id: { in: imageRefs.map((ref) => ref.id) } },
+    select: { id: true, fileSize: true, inferenceFileSize: true },
+  });
+  const sizes = new Map(rows.map((row) => [row.id, Math.max(0, Number(row.inferenceFileSize ?? row.fileSize) || 0)]));
+  const totalBytes = imageRefs.reduce((sum, ref) => sum + (sizes.get(ref.id) ?? 0), 0);
+  if (totalBytes > MAX_IMAGE_MESSAGE_BYTES) {
+    throw Object.assign(new Error(`这组图片合计超过 ${Math.floor(MAX_IMAGE_MESSAGE_BYTES / 1024 / 1024)}MB，请压缩或分两次发送`), {
+      statusCode: 413, code: 'IMAGE_MESSAGE_TOO_LARGE', limitBytes: MAX_IMAGE_MESSAGE_BYTES,
+    });
+  }
+}
 
 /** MIME → 扩展名；不在白名单返回 null。 */
 export function imageExtFromMime(mime: string | undefined): string | null {
@@ -61,6 +111,57 @@ async function getChatImage(key: string): Promise<Buffer | null> {
   return memStore.get(key) ?? null;
 }
 
+interface InferenceImageCopy {
+  buf: Buffer;
+  mediaType: string;
+  ext: string;
+  resized: boolean;
+}
+
+/**
+ * 生成视觉模型专用副本。小图不重复编码；超出 2048px 时按原格式压缩，GIF 固定转 WebP 首帧。
+ * 原图始终保留，模型只读取这里返回的受控副本。
+ */
+export async function createInferenceImageCopy(buf: Buffer, mediaType: string): Promise<InferenceImageCopy> {
+  try {
+    const source = sharp(buf, { animated: false, failOn: 'error' });
+    const metadata = await source.metadata();
+    const width = metadata.width ?? 0;
+    const height = metadata.height ?? 0;
+    if (!width || !height) throw new Error('无法识别图片尺寸');
+    if (Math.max(width, height) <= MAX_INFERENCE_IMAGE_EDGE) {
+      const ext = imageExtFromMime(mediaType) ?? 'jpg';
+      return { buf, mediaType: mediaTypeFromExt(ext), ext, resized: false };
+    }
+
+    let pipeline = sharp(buf, { animated: false, failOn: 'error' })
+      .rotate()
+      .resize({
+        width: MAX_INFERENCE_IMAGE_EDGE,
+        height: MAX_INFERENCE_IMAGE_EDGE,
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+    const normalized = mediaType.toLowerCase();
+    if (normalized === 'image/png') {
+      pipeline = pipeline.png({ compressionLevel: 9, adaptiveFiltering: true });
+      return { buf: await pipeline.toBuffer(), mediaType: 'image/png', ext: 'png', resized: true };
+    }
+    if (normalized === 'image/webp' || normalized === 'image/gif') {
+      pipeline = pipeline.webp({ quality: 88 });
+      return { buf: await pipeline.toBuffer(), mediaType: 'image/webp', ext: 'webp', resized: true };
+    }
+    pipeline = pipeline.jpeg({ quality: 88, mozjpeg: true });
+    return { buf: await pipeline.toBuffer(), mediaType: 'image/jpeg', ext: 'jpg', resized: true };
+  } catch (cause) {
+    throw Object.assign(new Error('图片内容无法识别，请重新选择或先另存为 JPG/PNG'), {
+      statusCode: 400,
+      code: 'IMAGE_DECODE_FAILED',
+      cause,
+    });
+  }
+}
+
 /** OSS 是否已就绪（供路由判断生产未配 → 503）。 */
 export function chatImageStorageReady(): boolean {
   return ossConfigured();
@@ -80,7 +181,10 @@ export async function ingestChatImage(opts: {
 }): Promise<{ id: string }> {
   const ext = imageExtFromMime(opts.mime) ?? 'jpg';
   const key = `${env.ossKeyPrefix ? env.ossKeyPrefix + '/' : ''}chatimg/${opts.tenantId}/${randomUUID()}.${ext}`;
+  const inference = await createInferenceImageCopy(opts.buf, opts.mime);
+  const inferenceKey = inference.resized ? `${key}.inference.${inference.ext}` : key;
   await putChatImage(key, opts.buf, opts.mime);
+  if (inference.resized) await putChatImage(inferenceKey, inference.buf, inference.mediaType);
   const item = await prisma.knowledgeItem.create({
     data: {
       tenantId: opts.tenantId,
@@ -95,6 +199,9 @@ export async function ingestChatImage(opts: {
       fileType: ext,
       fileSize: opts.buf.length,
       fileKey: key,
+      inferenceFileKey: inferenceKey,
+      inferenceFileType: inference.ext,
+      inferenceFileSize: inference.buf.length,
       tagsJson: [],
     },
   });
@@ -102,33 +209,89 @@ export async function ingestChatImage(opts: {
 }
 
 /**
- * 把本轮消息里的 image 引用解析成多模态入参 { mediaType, base64 }[]（严格租户隔离，只取 sourceType='image'）。
- * 单条消息至多 MAX_IMAGES_PER_MESSAGE 张，超出忽略并留日志；读不出的图跳过（不塞空块）。
+ * 把本轮 image 引用解析为带 1-based 序号的推理副本。失败项必须进入 skipped，禁止静默截断。
  */
+export async function resolveImageRefsDetailed(
+  tenantId: string,
+  refs: MessageRef[] | undefined,
+): Promise<ResolvedImageRefs> {
+  const imageRefs = (refs ?? []).filter((r) => r.kind === 'image');
+  if (!imageRefs.length) return { requestedCount: 0, images: [], skipped: [], totalBytes: 0 };
+  if (imageRefs.length > MAX_IMAGES_PER_MESSAGE) {
+    throw Object.assign(new Error(`一条消息最多带 ${MAX_IMAGES_PER_MESSAGE} 张图片，请分两次发送`), {
+      statusCode: 400, code: 'TOO_MANY_IMAGES', limit: MAX_IMAGES_PER_MESSAGE,
+    });
+  }
+  const images: ResolvedChatImage[] = [];
+  const skipped: ResolvedImageRefs['skipped'] = [];
+  let totalBytes = 0;
+  for (let position = 0; position < imageRefs.length; position++) {
+    const ref = imageRefs[position];
+    const index = position + 1;
+    try {
+      const item = await prisma.knowledgeItem.findFirst({
+        where: { id: ref.id, tenantId, sourceType: 'image' },
+        select: {
+          id: true,
+          fileKey: true,
+          fileType: true,
+          fileSize: true,
+          inferenceFileKey: true,
+          inferenceFileType: true,
+          inferenceFileSize: true,
+        },
+      });
+      if (!item?.fileKey) {
+        skipped.push({ index, refId: ref.id, reason: '图片不存在或无权读取' });
+        continue;
+      }
+      const stored = await getChatImage(item.inferenceFileKey ?? item.fileKey);
+      if (!stored?.length) {
+        skipped.push({ index, refId: ref.id, reason: '图片原件读取失败' });
+        continue;
+      }
+      let buf = stored;
+      let mediaType = mediaTypeFromExt(item.inferenceFileType ?? item.fileType);
+      if (!item.inferenceFileKey) {
+        // 存量图片懒生成推理副本；后续轮次直接复用，不重复转码。
+        const inference = await createInferenceImageCopy(stored, mediaTypeFromExt(item.fileType));
+        const inferenceKey = inference.resized ? `${item.fileKey}.inference.${inference.ext}` : item.fileKey;
+        if (inference.resized) await putChatImage(inferenceKey, inference.buf, inference.mediaType);
+        await prisma.knowledgeItem.update({
+          where: { id: item.id },
+          data: {
+            inferenceFileKey: inferenceKey,
+            inferenceFileType: inference.ext,
+            inferenceFileSize: inference.buf.length,
+          },
+        });
+        buf = inference.buf;
+        mediaType = inference.mediaType;
+      }
+      if (buf.length > MAX_IMAGE_BYTES) {
+        skipped.push({ index, refId: ref.id, reason: `图片超过 ${Math.floor(MAX_IMAGE_BYTES / 1024 / 1024)}MB` });
+        continue;
+      }
+      totalBytes += buf.length;
+      images.push({ index, refId: ref.id, mediaType, base64: buf.toString('base64'), bytes: buf.length });
+    } catch (e) {
+      console.error(`[chatImage] 图 ${index} 读取失败：`, (e as Error).message);
+      skipped.push({ index, refId: ref.id, reason: '图片原件读取失败' });
+    }
+  }
+  if (totalBytes > MAX_IMAGE_MESSAGE_BYTES) {
+    throw Object.assign(new Error(`这组图片合计超过 ${Math.floor(MAX_IMAGE_MESSAGE_BYTES / 1024 / 1024)}MB，请压缩或分两次发送`), {
+      statusCode: 413, code: 'IMAGE_MESSAGE_TOO_LARGE', limitBytes: MAX_IMAGE_MESSAGE_BYTES,
+    });
+  }
+  return { requestedCount: imageRefs.length, images, skipped, totalBytes };
+}
+
+/** 兼容旧调用：返回全部可读图片，不再静默限制为 4；上游调用方必须自行按批次约束。 */
 export async function resolveImageRefs(
   tenantId: string,
   refs: MessageRef[] | undefined,
 ): Promise<{ mediaType: string; base64: string }[]> {
-  const imageRefs = (refs ?? []).filter((r) => r.kind === 'image');
-  if (!imageRefs.length) return [];
-  const taken = imageRefs.slice(0, MAX_IMAGES_PER_MESSAGE);
-  if (imageRefs.length > MAX_IMAGES_PER_MESSAGE) {
-    console.warn(`[chatImage] 单条消息图片数 ${imageRefs.length} 超过上限 ${MAX_IMAGES_PER_MESSAGE}，仅取前 ${MAX_IMAGES_PER_MESSAGE} 张`);
-  }
-  const out: { mediaType: string; base64: string }[] = [];
-  for (const ref of taken) {
-    try {
-      const item = await prisma.knowledgeItem.findFirst({
-        where: { id: ref.id, tenantId, sourceType: 'image' },
-        select: { fileKey: true, fileType: true },
-      });
-      if (!item?.fileKey) continue;
-      const buf = await getChatImage(item.fileKey);
-      if (!buf?.length) continue;
-      out.push({ mediaType: mediaTypeFromExt(item.fileType), base64: buf.toString('base64') });
-    } catch (e) {
-      console.error('[chatImage] resolveImageRefs 单张失败：', (e as Error).message);
-    }
-  }
-  return out;
+  const resolved = await resolveImageRefsDetailed(tenantId, refs);
+  return resolved.images.map(({ mediaType, base64 }) => ({ mediaType, base64 }));
 }

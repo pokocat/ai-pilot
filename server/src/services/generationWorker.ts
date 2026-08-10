@@ -21,6 +21,7 @@ import {
   finalizeGeneration,
   finishGenerationAttempt,
   freezeGenerationContext,
+  generationSummary,
   GenerationLeaseLostError,
   heartbeatGenerationLease,
   persistGenerationResult,
@@ -29,11 +30,13 @@ import {
   startGenerationAttempt,
   writeGenerationSnapshot,
 } from './generationJobs.js';
+import { classifyNextPendingGeneration, stageInstruction } from './deliveryComplexity.js';
+import { captureAssistantFactCandidates, captureDirectUserFacts, pendingDocumentFactCard } from './userFacts.js';
+import { applyPreparedImages, prepareImageObservations } from './imageObservation.js';
 import {
   deliverableRecentLimit,
   loadConversationHistory,
   loadTurnDigest,
-  wantsDeliverableRequest,
 } from '../routes/sessions.js';
 
 const WORKER_POLL_MS = 300;
@@ -52,6 +55,8 @@ type RequestData = {
   refs?: unknown[];
   billingRatio?: number;
   effectiveVersionId?: string | null;
+  newChapter?: boolean;
+  chapterGapHours?: number | null;
 };
 
 type FrozenContext = {
@@ -72,9 +77,10 @@ function requestOf(job: GenerationJob): RequestData {
 }
 
 function withoutRuntimeSecrets(ctx: GenContext): GenContext {
-  if (!ctx.runtime) return ctx;
+  const { images: _images, ...withoutImages } = ctx;
+  if (!ctx.runtime) return withoutImages;
   const { apiKey: _apiKey, difyApiKey: _difyApiKey, ...runtime } = ctx.runtime;
-  return { ...ctx, runtime };
+  return { ...withoutImages, runtime };
 }
 
 async function loadOrBuildContext(job: GenerationJob): Promise<FrozenContext> {
@@ -103,6 +109,15 @@ async function loadOrBuildContext(job: GenerationJob): Promise<FrozenContext> {
   }
 
   const session = await prisma.session.findUniqueOrThrow({ where: { id: job.sessionId } });
+  // 用户亲口陈述在进入模型前即落 asserted；同 key 更正走替代链，“这条别记”也在这里处理。
+  // 幂等重试只会强化同一条，不会重复造事实。
+  await captureDirectUserFacts({
+    tenantId: job.tenantId,
+    userId: job.userId,
+    sessionId: job.sessionId,
+    userMessageId: job.userMessageId,
+    text: request.text,
+  });
   const { intent, persist } = resolveMode(request.text, session.mode);
   if (persist !== undefined) await prisma.session.update({ where: { id: session.id }, data: { mode: persist } });
   if (intent.mode === 'review' && intent.reviewLayer) {
@@ -115,10 +130,8 @@ async function loadOrBuildContext(job: GenerationJob): Promise<FrozenContext> {
   const previousMessages = await prisma.message.count({
     where: { sessionId: job.sessionId, id: { not: job.userMessageId } },
   });
-  const isDeliverable = !!effective.deliverableKey;
-  const onDemand = isDeliverable
-    && (effective.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
-  const willDeliver = onDemand ? wantsDeliverableRequest(request.text) : isDeliverable;
+  // 路由在建单时已冻结；Worker 不再用另一套规则重算，避免排队前后 chat/report 漂移。
+  const willDeliver = job.kind === GenerationKind.report;
   const digest = await loadTurnDigest({
     tenantId: job.tenantId,
     userId: job.userId,
@@ -146,7 +159,33 @@ async function loadOrBuildContext(job: GenerationJob): Promise<FrozenContext> {
     historyTrace: conversation.trace,
     sessionMode: persist !== undefined ? persist : session.mode,
     digestItems: digest?.items ?? null,
+    digestTrace: digest ?? null,
+    deferImages: true,
   });
+  const routing = generationSummary(job);
+  const currentStage = routing.delivery?.stages.find((stage) => stage.key === routing.delivery?.currentStageKey);
+  if (routing.delivery && currentStage) built.ctx.deliveryLine = stageInstruction(currentStage, routing.delivery.stages);
+  built.ctx.contextTrace = {
+    ...(built.ctx.contextTrace ?? { recallIntent: false, history: { recentMessages: 0, carryoverMessages: 0, totalChars: 0 }, memories: [] }),
+    continuity: {
+      sessionId: session.id,
+      lineageId: session.lineageId,
+      continuationOf: session.continuationOf,
+      sourceSessionId: session.continuationOf,
+      newChapter: request.newChapter === true,
+      chapterGapHours: typeof request.chapterGapHours === 'number' ? request.chapterGapHours : null,
+      inheritedChars: (built.ctx.factsLine?.length ?? 0) + (built.ctx.handoffLine?.length ?? 0),
+    },
+    routing: {
+      requestedOutput: routing.requestedOutput,
+      deliveryMode: routing.deliveryMode,
+      complexityScore: routing.complexity?.score ?? null,
+      complexityReasons: routing.complexity?.reasons ?? [],
+      deliveryPlanId: routing.delivery?.deliveryPlanId ?? null,
+      stageKey: routing.delivery?.currentStageKey ?? null,
+      stageNumber: routing.delivery?.currentStageNumber ?? 1,
+    },
+  };
   const snapshot: FrozenContext = {
     ctx: withoutRuntimeSecrets(built.ctx),
     memoryConfig: built.memoryConfig,
@@ -254,6 +293,32 @@ function reportText(deliverable: Deliverable): string {
   return `${deliverable.title}\n${deliverable.sections.map(cardSection).map((s) => `${s.h}\n${s.b ?? ''}\n${(s.list ?? []).join('\n')}`).join('\n')}`;
 }
 
+async function attachFactConfirmation<T extends ChatReply | Deliverable>(
+  job: GenerationJob,
+  content: T,
+  assistantMessageId: string,
+): Promise<T> {
+  const [documentCard, assistantCard] = await Promise.all([
+    pendingDocumentFactCard(job.userId).catch(() => null),
+    captureAssistantFactCandidates({
+      tenantId: job.tenantId,
+      userId: job.userId,
+      sessionId: job.sessionId,
+      userMessageId: job.userMessageId,
+      assistantMessageId,
+      assistantText: job.kind === GenerationKind.report ? reportText(content as Deliverable) : (content as ChatReply).text,
+    }).catch(() => null),
+  ]);
+  const items = [...(assistantCard?.items ?? []), ...(documentCard?.items ?? [])]
+    .filter((item, index, all) => all.findIndex((other) => other.id === item.id) === index)
+    .slice(0, 3);
+  if (!items.length) return { ...content, factConfirmation: undefined };
+  const title = assistantCard && documentCard
+    ? '这几条来自我的推断或资料识别，请你核一下'
+    : assistantCard?.title ?? documentCard!.title;
+  return { ...content, factConfirmation: { title, items } };
+}
+
 async function runPostEffects(job: GenerationJob, frozen: FrozenContext, content: ChatReply | Deliverable): Promise<void> {
   const request = requestOf(job);
   const isReport = job.kind === GenerationKind.report;
@@ -309,7 +374,15 @@ async function resumePersistedFinalize(
     return false;
   }
   if (job.kind === GenerationKind.report) {
-    const deliverable = job.replyJson as unknown as Deliverable;
+    let deliverable = job.replyJson as unknown as Deliverable;
+    const withFact = await attachFactConfirmation(job, deliverable, job.resultMessageId);
+    if (withFact !== deliverable) {
+      deliverable = withFact;
+      await persistGenerationResult({
+        jobId: job.id, workerId, leaseVersion, role: 'report', content: deliverable,
+        partialText: reportText(deliverable), kind: 'report',
+      });
+    }
     await finalizeGeneration({
       jobId: job.id,
       workerId,
@@ -323,6 +396,14 @@ async function resumePersistedFinalize(
   }
 
   let reply = job.replyJson as unknown as ChatReply;
+  const withFact = await attachFactConfirmation(job, reply, job.resultMessageId);
+  if (withFact !== reply) {
+    reply = withFact;
+    await persistGenerationResult({
+      jobId: job.id, workerId, leaseVersion, role: 'assistant', content: reply,
+      partialText: reply.text, kind: 'chat',
+    });
+  }
   // finalize 后的 cancel 不撤销已交付正文；只是不再启动可选的推荐项补生成。
   if (!job.cancelRequestedAt && !reply.truncated) {
     const recovered = await recoverRecommendedOptions(job, leaseVersion, reply, frozen.ctx);
@@ -433,12 +514,30 @@ async function processJob(job: GenerationJob): Promise<void> {
       return;
     }
     if (latest.cancelRequestedAt) controller.abort(new Error('user_cancelled'));
-    const frozen = await loadOrBuildContext(latest);
+    let frozen = await loadOrBuildContext(latest);
     frozenContext = frozen;
     if (await resumePersistedFinalize(latest, frozen, leaseVersion)) return;
     if (controller.signal.aborted) {
       await finalizeGeneration({ jobId: job.id, workerId, leaseVersion, status: 'cancelled', terminationReason: 'user_cancelled_before_provider' });
       return;
+    }
+
+    const request = requestOf(latest);
+    if ((request.refs ?? []).some((ref) => ref && typeof ref === 'object' && (ref as { kind?: string }).kind === 'image')) {
+      const prepared = await prepareImageObservations({
+        job: latest,
+        workerId,
+        leaseVersion,
+        refs: request.refs as Parameters<typeof prepareImageObservations>[0]['refs'],
+        userQuestion: request.text,
+        signal: controller.signal,
+      });
+      frozen = {
+        ...frozen,
+        ctx: applyPreparedImages(frozen.ctx, prepared),
+        refNotices: Array.from(new Set([...(frozen.refNotices ?? []), ...prepared.notices])),
+      };
+      frozenContext = frozen;
     }
 
     attemptNo = await startGenerationAttempt(job.id, workerId, leaseVersion, 'main');
@@ -453,10 +552,17 @@ async function processJob(job: GenerationJob): Promise<void> {
       });
       providerUsage = metered.usage;
       providerInvoked = metered.providerInvoked;
-      accumulated = reportText(metered.result);
+      const delivery = generationSummary(latest).delivery;
+      let result: Deliverable = delivery ? { ...metered.result, delivery } : metered.result;
+      accumulated = reportText(result);
       const measured = conservativeUsage(providerUsage, frozen.ctx, accumulated, providerInvoked);
       await finishGenerationAttempt({ jobId: job.id, attemptNo, leaseVersion, status: controller.signal.aborted ? 'cancelled' : 'completed', usage: measured.usage, usageSource: measured.source });
-      await persistGenerationResult({ jobId: job.id, workerId, leaseVersion, role: 'report', content: metered.result, partialText: accumulated, kind: 'report' });
+      const resultMessageId = await persistGenerationResult({ jobId: job.id, workerId, leaseVersion, role: 'report', content: result, partialText: accumulated, kind: 'report' });
+      const withFact = await attachFactConfirmation(job, result, resultMessageId);
+      if (withFact !== result) {
+        result = withFact;
+        await persistGenerationResult({ jobId: job.id, workerId, leaseVersion, role: 'report', content: result, partialText: accumulated, kind: 'report' });
+      }
       const cancelled = (await prisma.generationJob.findUnique({ where: { id: job.id }, select: { cancelRequestedAt: true } }))?.cancelRequestedAt;
       await finalizeGeneration({
         jobId: job.id,
@@ -466,7 +572,7 @@ async function processJob(job: GenerationJob): Promise<void> {
         terminationReason: cancelled ? 'user_cancelled' : hardTimedOut ? 'job_budget_exceeded' : null,
         effectKeys: cancelled ? [] : postEffectKeys(job),
       });
-      if (!cancelled) void runPostEffects(job, frozen, metered.result);
+      if (!cancelled) void runPostEffects(job, frozen, result);
       return;
     }
 
@@ -512,7 +618,11 @@ async function processJob(job: GenerationJob): Promise<void> {
       usageSource: measured.source,
       terminationReason: cancelled ? 'user_cancelled' : hardTimedOut ? 'job_budget_exceeded' : null,
     });
-    await persistGenerationResult({ jobId: job.id, workerId, leaseVersion, role: 'assistant', content: finalReply, partialText: accumulated, kind: 'chat' });
+    const resultMessageId = await persistGenerationResult({ jobId: job.id, workerId, leaseVersion, role: 'assistant', content: finalReply, partialText: accumulated, kind: 'chat' });
+    finalReply = await attachFactConfirmation(job, finalReply, resultMessageId);
+    if (finalReply.factConfirmation?.items?.length) {
+      await persistGenerationResult({ jobId: job.id, workerId, leaseVersion, role: 'assistant', content: finalReply, partialText: accumulated, kind: 'chat' });
+    }
     // 主正文先落库，再给推荐选项最多 3s 的独立 attempt。失败/超时只少选项，不回滚正文。
     if (!cancelled && !hardTimedOut && !finalReply.truncated) {
       const recovered = await recoverRecommendedOptions(job, leaseVersion, finalReply, frozen.ctx);
@@ -583,6 +693,7 @@ export async function tickGenerationWorker(): Promise<boolean> {
   if (ticking) return false;
   ticking = true;
   try {
+    if (await classifyNextPendingGeneration()) return true;
     const job = await claimNextGenerationJob(workerId);
     if (!job) return tickGenerationEffects();
     await processJob(job);

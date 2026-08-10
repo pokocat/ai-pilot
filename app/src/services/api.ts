@@ -25,6 +25,7 @@ import type {
   CreatePosterJobRequest, RevisePosterJobRequest, RegeneratePosterJobRequest,
   CreativePosterListResult,
   GenerationView,
+  FactConfirmationRequest, FactConfirmationResult,
 } from '../../../shared/contracts';
 
 // 数据模型统一来自 SSOT（shared/contracts）。下面按旧名再导出，保证调用方零改动。
@@ -582,12 +583,17 @@ export const api = {
     useMockApi() ? mock.fateCardPreview(body) : request<FateCardContent>('/cards/fate/preview', 'POST', body),
   todaySaying: () => (useMockApi() ? mock.todaySaying() : request<TodaySaying>('/sayings/today')),
   sessions: () => (useMockApi() ? mock.sessions() : request<SessionItem[]>('/sessions')),
-  session: (id: string) => (useMockApi() ? mock.session(id) : request<SessionDetail>(`/sessions/${id}`)),
+  session: (id: string, before?: string | null) => (useMockApi()
+    ? mock.session(id, before || undefined)
+    : request<SessionDetail>(`/sessions/${id}${before ? `?before=${encodeURIComponent(before)}` : ''}`)),
   deleteSession: (id: string) =>
     useMockApi() ? mock.deleteSession(id) : request(`/sessions/${id}`, 'DELETE'),
   generate: (body: GenRequest) =>
     useMockApi() ? mock.generate(body) : request<GenResult>('/generate-sync', 'POST', body),
   generation: (id: string) => request<GenerationView>(`/generations/${id}`),
+  nextDeliveryStage: (id: string) => request<GenResult>(`/generations/${id}/next-stage`, 'POST', {}),
+  confirmFact: (id: string, body: FactConfirmationRequest) =>
+    request<FactConfirmationResult>(`/facts/${id}/confirm`, 'POST', body),
   cancelGeneration: (id: string) => request<GenerationView>(`/generations/${id}/cancel`, 'POST', {}),
   library: () => (useMockApi() ? mock.library() : request<LibItem[]>('/library')),
   saveToLibrary: (body: SaveLibRequest) =>

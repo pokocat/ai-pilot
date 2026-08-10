@@ -46,6 +46,67 @@ export async function hasLiveProvider(): Promise<boolean> {
   return liveProvider(cfg) !== null;
 }
 
+export interface ImageBatchInput { index: number; mediaType: string; base64: string }
+export interface ImageBatchObservation {
+  result: string;
+  usage: Usage;
+  provider: 'openai' | 'claude' | 'mock';
+  model: string;
+  providerInvoked: boolean;
+}
+
+const IMAGE_OBSERVATION_SYSTEM = `你是图片观察器，只负责忠实读图，不做最终商业方案。
+逐张输出，必须用输入指定的序号开头，如“[图3]”。描述可见文字、数字、主体、布局、异常和不确定处；看不清就明确写看不清，禁止猜测。
+最后补一行“本批共读取 N 张”。只输出观察记录，控制在 700 字以内。`;
+
+/** 多图编排的轻量观察调用：无完整军师 system prompt、无历史、无客户档案，每批由调用方限制 ≤4 张。 */
+export async function observeImageBatch(args: {
+  images: ImageBatchInput[];
+  userQuestion: string;
+  signal?: AbortSignal;
+  usageMeta?: UsageMeta;
+}): Promise<ImageBatchObservation> {
+  const cfg = await getAiConfig();
+  const live = liveProvider(cfg);
+  const indexes = args.images.map((image) => image.index);
+  const user = `图片序号：${indexes.map((index) => `图${index}`).join('、')}\n用户想解决的问题：${args.userQuestion.slice(0, 1_200)}\n请只观察本批图片。`;
+  if (!live) {
+    return {
+      result: `${indexes.map((index) => `[图${index}] 已读取；测试环境不生成视觉细节。`).join('\n')}\n本批共读取 ${indexes.length} 张`,
+      usage: { ...ZERO_USAGE }, provider: 'mock', model: 'template', providerInvoked: false,
+    };
+  }
+  const images = args.images.map(({ mediaType, base64 }) => ({ mediaType, base64 }));
+  if (live === 'openai') {
+    const { openaiRawMetered } = await import('./providers/openai.js');
+    const out = await openaiRawMetered(cfg, IMAGE_OBSERVATION_SYSTEM, user, {
+      allowThinking: false, maxTokens: 900, signal: args.signal, images,
+      affinityKey: `image-observation:${indexes.join('-')}`,
+    });
+    await recordTokenUsage({
+      ...args.usageMeta,
+      kind: 'image_observation',
+      provider: live,
+      model: cfg.model,
+      usage: out.usage,
+    });
+    return { ...out, provider: live, model: cfg.model, providerInvoked: true };
+  }
+  const { claudeRawMetered } = await import('./providers/claude.js');
+  const out = await claudeRawMetered(cfg, IMAGE_OBSERVATION_SYSTEM, user, {
+    allowThinking: false, maxTokens: 900, signal: args.signal, images,
+    affinityKey: `image-observation:${indexes.join('-')}`,
+  });
+  await recordTokenUsage({
+    ...args.usageMeta,
+    kind: 'image_observation',
+    provider: live,
+    model: cfg.model,
+    usage: out.usage,
+  });
+  return { ...out, provider: live, model: cfg.model, providerInvoked: true };
+}
+
 // 真实 provider 调用失败：生产（AI_FALLBACK_MOCK=false）不静默兜底 mock，抛错让前端提示重试，避免答非所问。
 function aiUnavailable(err: unknown): Error {
   const e = err as Error & { code?: string };
@@ -314,7 +375,11 @@ function openaiOverrideCfg(ctx: GenContext, base: ResolvedAiConfig): ResolvedAiC
     model: rt.model || base.model,
     apiKey: rt.apiKey || '',
     temperature: rt.temperature ?? base.temperature,
+    // providerMode=openai 表示该智能体明确绑定自己的接入；不能再被全局 chat 端点池改写。
+    // 探活早已遵守同一边界，真实生成也必须 bypass，否则“测试的是 A、线上跑到 B”。
+    poolBypass: true,
     // per-agent 自定义接入不等于全局 activeModelId，避免 trace 误归因。
+    endpointId: undefined,
     traceEndpointId: undefined,
     traceEndpointLabel: `${ctx.agentKey} 自定义端点`,
   };
@@ -1038,7 +1103,10 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
   // maxTokens：产出预算（provider 缺省 700，见 rawText）。**长文 JSON 必须显式给**——
   // 2026-07-30 生产实锤：海报宣言（4-6 段中文 + JSON 壳）被 700 拦腰截断，首轮与纠错轮
   // 一起截，structured 恒 null，AI 排版引擎 100% 回落模板，而错误话术只说「产出不完整」。
-  o: { system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string },
+  o: {
+    system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
+    signal?: AbortSignal; usageMeta?: UsageMeta;
+  },
 ): Promise<StructuredOutcome<z.output<S>>> {
   let attempts = 0;
   let live = false;
@@ -1054,12 +1122,16 @@ export async function structuredMetered<S extends z.ZodTypeAny>(
     // 调用前自增：即使 rawText 抛错（超时/5xx），provider 侧可能已计费——保守计入本轮。
     attempts++;
     const mt = o.maxTokens ? { maxTokens: o.maxTokens } : {};
-    const first = coerceJson(schema, await rawText(cfg, lp, o.system, user, { allowAux: !o.model, ...mt }));
+    const first = coerceJson(schema, await rawText(cfg, lp, o.system, user, {
+      allowAux: !o.model, ...mt, signal: o.signal, usageMeta: o.usageMeta,
+    }));
     if (first.ok) return { data: first.data, attempts, live };
     // 一轮修复：把校验错误回喂，要求只输出合规 JSON。
     const repairSys = `${o.system}\n\n【纠错】上次输出无法通过校验：${first.error}。请只输出严格符合要求的 JSON，不要任何解释或多余文字。`;
     attempts++;
-    const second = coerceJson(schema, await rawText(cfg, lp, repairSys, user, { allowAux: !o.model, ...mt }));
+    const second = coerceJson(schema, await rawText(cfg, lp, repairSys, user, {
+      allowAux: !o.model, ...mt, signal: o.signal, usageMeta: o.usageMeta,
+    }));
     return { data: second.ok ? second.data : null, attempts, live };
   } catch (err) {
     console.error('[gateway] structured failed:', (err as Error).message);
@@ -1085,7 +1157,10 @@ export function structuredBillTokens(o: { ok: boolean; attempts: number; estToke
  */
 export async function structured<S extends z.ZodTypeAny>(
   schema: S,
-  o: { system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string },
+  o: {
+    system: string; user: string; maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
+    signal?: AbortSignal; usageMeta?: UsageMeta;
+  },
 ): Promise<z.output<S> | null> {
   return (await structuredMetered(schema, o)).data;
 }

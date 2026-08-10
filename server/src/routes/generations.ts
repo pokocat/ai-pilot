@@ -8,6 +8,7 @@ import {
   requestGenerationCancel,
 } from '../services/generationJobs.js';
 import { prisma } from '../db.js';
+import { enqueueNextDeliveryStage } from '../services/generationRequest.js';
 
 const TERMINAL = new Set(['completed', 'truncated', 'failed', 'cancelled']);
 const POLL_MS = 350;
@@ -109,6 +110,30 @@ export async function generationRoutes(app: FastifyInstance): Promise<void> {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {
       return generationView(await requestGenerationCancel(req.params.id, user));
+    } catch (error) {
+      const out = publicError(error);
+      return reply.code(out.statusCode).send(out.body);
+    }
+  });
+
+  app.post<{ Params: { id: string } }>('/generations/:id/next-stage', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      const created = await enqueueNextDeliveryStage(user, req.params.id);
+      const view = generationView(created.job);
+      const statusCode = TERMINAL.has(view.status) ? 200 : 202;
+      return reply.code(statusCode).send({
+        sessionId: created.job.sessionId,
+        created: false,
+        agentKey: created.agentKey,
+        kind: created.kind,
+        generationId: created.job.id,
+        status: view.status,
+        snapshotVersion: view.snapshotVersion,
+        messageId: view.resultMessageId ?? undefined,
+        ...(view.reply ? { reply: view.reply } : {}),
+        ...(view.deliverable ? { deliverable: view.deliverable } : {}),
+      });
     } catch (error) {
       const out = publicError(error);
       return reply.code(out.statusCode).send(out.body);

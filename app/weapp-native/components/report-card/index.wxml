@@ -28,6 +28,10 @@
     </view>
 
     <view wx:if="{{!streaming&&card.trust}}" class="report-trust"><native-icon name="shield" tone="neutral" size="13"></native-icon><text>{{card.trust}}</text></view>
+    <view wx:if="{{operable&&!streaming&&card.delivery&&card.delivery.nextStage}}" class="delivery-next">
+      <view class="delivery-next-copy"><text class="delivery-next-k">已交第 {{card.delivery.currentStageNumber}}/{{card.delivery.totalStages}} 阶段</text><text class="delivery-next-t">继续深化：{{card.delivery.nextStage.title}}</text><text class="delivery-next-d">{{card.delivery.nextStage.objective}}</text><text class="delivery-next-u">{{card.delivery.usageNotice}}</text></view>
+      <view class="delivery-next-btn {{busy?'disabled':''}}" bindtap="continueStage"><text>继续深化</text><native-icon name="arrow" tone="white" size="13"></native-icon></view>
+    </view>
     <view wx:if="{{operable&&!streaming}}" class="report-actions">
       <view class="report-action primary {{busy?'disabled':''}}" bindtap="viewReport"><native-icon name="doc" tone="white" size="14"></native-icon><text>查看报告</text></view>
       <view class="report-action ghost {{busy?'disabled':''}}" bindtap="openMenu"><native-icon name="up" tone="iron" size="14"></native-icon><text>分享</text></view>

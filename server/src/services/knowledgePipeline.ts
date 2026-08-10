@@ -20,6 +20,7 @@ import { TRUST_NOTE } from '../data/deliverables.js';
 import { parseDocument, detectDocType, normalizeDocumentText } from './docParse.js';
 import { BIZ_CATEGORIES, BIZ_CATEGORY_KEYS, bizCategoryLabel, isBizCategory, type BizCategoryKey } from '../data/bizCategories.js';
 import { bestUploadName, displayUploadName, inferUploadNameFromContent } from './uploadName.js';
+import { captureDocumentFactCandidates } from './userFacts.js';
 import type { Deliverable } from '../llm/schema.js';
 import type { KnowledgePipelineView, KnowledgePipelineFolder, KnowledgeBatch, KnowledgeBatchTypeStat, KnowledgeBatchFile, OrganizeItem } from '../../../shared/contracts';
 
@@ -413,6 +414,14 @@ export async function confirmItems(args: { tenantId: string; userId: string; ids
       ingested += 1;
     }
     await prisma.knowledgeItem.update({ where: { id: it.id }, data: { stage: 'confirmed', status: 'ready' } });
+    if (it.dupOfId == null && it.text.trim()) {
+      await captureDocumentFactCandidates({
+        tenantId,
+        userId,
+        documentId: it.id,
+        text: it.text,
+      }).catch((error) => console.error('[knowledge] 资料事实提取失败：', (error as Error).message));
+    }
     doneIds.push(it.id);
   }
   return { count: doneIds.length, ingested, ids: doneIds };

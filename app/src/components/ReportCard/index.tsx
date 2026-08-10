@@ -50,6 +50,7 @@ interface Props {
   // 已出过成品图时的回看入口。判据是 deliverable.creativeJobId（任务成功后服务端回写进本条成果消息），
   // 由父级传入。没有这一行的话，用户一离开详情页（本地在途标记随即清空）就再也回不到那张海报。
   onViewPoster?: () => void;
+  onNextStage?: () => void;
 }
 
 // data 的最后兜底：调用方透传的是落库 contentJson，脏数据下整条可能缺失。
@@ -59,7 +60,7 @@ const EMPTY_DELIVERABLE = { title: '', icon: 'doc', meta: '', sections: [], trus
 // 结构化成果卡 —— 对齐原型 renderReport：骨架 → 分段渐显 → 可信赖页脚 + 操作。
 export default function ReportCard({
   data = EMPTY_DELIVERABLE, animate = false, streaming = false, operable = true, saved = false,
-  onSave, onView, onShareMenu, posterPrice, onPoster, onViewPoster,
+  onSave, onView, onShareMenu, posterPrice, onPoster, onViewPoster, onNextStage,
 }: Props) {
   const s = useStore();
   const accent = s.color().vars['--accent'];
@@ -224,6 +225,19 @@ export default function ReportCard({
             <Icon name="shield" size={13} color="#7E848B" />
             <Text className="foot-t">{plain(data.trust)}</Text>
           </View>
+          {operable && data.delivery?.nextStage && onNextStage ? (
+            <View className="delivery-next">
+              <View className="delivery-next-copy">
+                <Text className="delivery-next-k">已交第 {data.delivery.currentStageNumber}/{data.delivery.totalStages} 阶段</Text>
+                <Text className="delivery-next-t">继续深化：{plain(data.delivery.nextStage.title)}</Text>
+                <Text className="delivery-next-d">{plain(data.delivery.nextStage.objective)}</Text>
+                <Text className="delivery-next-u">{plain(data.delivery.usageNotice)}</Text>
+              </View>
+              <View className="delivery-next-btn" style={{ background: accent }} onClick={onNextStage}>
+                <Text>继续深化</Text><Icon name="arrow" size={13} color="#fff" />
+              </View>
+            </View>
+          ) : null}
           {/* 操作行硬条件：非 operable（无落库 id / 降级 / 中断）只留 trust 行说明现状，
               查看/分享/存入一律不开——半截或未落库的内容开放操作只会引导用户拿到错误结果。 */}
           {operable && (

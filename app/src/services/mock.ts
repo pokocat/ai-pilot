@@ -998,7 +998,11 @@ export const mock = {
       understanding: buildUnderstandingM(d),
       inviteCode: 'JS2026',
       service: { teacherName: '林老师', teacherWechat: 'lin_junshi_03', className: '上海 3 班', groupQrUrl: '', taskDone: 4, taskTotal: 6, note: '负责资料确认和入群任务' },
-      features: { fortune: true }, // P0-2：mock 默认开命理，本地/H5 可完整走查
+      features: { fortune: true, conversationContinuity: true }, // mock 默认启用命理与连续主线
+      capabilities: { attachments: {
+        maxAttachmentsPerMessage: 9, maxImagesPerMessage: 9, maxImagesPerBatch: 4,
+        maxImageBytes: 10 * 1024 * 1024, maxImageBatchBytes: 12 * 1024 * 1024, maxImageMessageBytes: 24 * 1024 * 1024,
+      } },
     });
   },
 
@@ -1581,15 +1585,19 @@ export const mock = {
     );
   },
 
-  async session(id: string): Promise<SessionDetail> {
+  async session(id: string, before?: string): Promise<SessionDetail> {
     const { d } = current();
     const s = d.sessions.find((x) => x.id === id);
     if (!s) throw Object.assign(new Error('session not found'), { code: 'NOT_FOUND' });
     const ag = agentOf(s.agentKey);
+    const rawEnd = before && /^mock:\d+$/.test(before) ? Number(before.slice(5)) : s.messages.length;
+    const end = Math.max(0, Math.min(s.messages.length, rawEnd));
+    const start = Math.max(0, end - 100);
     return delay({
       id: s.id, agentKey: s.agentKey,
       agent: { key: ag.key, name: ag.name, role: ag.role, icon: ag.icon, greet: ag.greet, chips: ag.chips, memText: ag.memText, learnText: ag.learnText },
-      title: s.title, projectId: s.projectId, messages: s.messages,
+      title: s.title, projectId: s.projectId, messages: s.messages.slice(start, end),
+      messagePage: { hasMore: start > 0, nextCursor: start > 0 ? `mock:${start}` : null, limit: 100 },
     });
   },
 

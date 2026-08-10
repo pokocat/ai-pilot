@@ -36,6 +36,19 @@ enum GenerationKind {
   report
 }
 
+enum DeliveryMode {
+  single
+  staged
+}
+
+enum GenerationClassificationStatus {
+  not_required
+  pending
+  running
+  completed
+  failed
+}
+
 enum GenerationSettlementStatus {
   none
   reserved
@@ -56,6 +69,21 @@ enum GenerationEffectStatus {
   running
   completed
   failed
+}
+
+enum UserFactStatus {
+  asserted
+  pending
+  confirmed
+  rejected
+  superseded
+}
+
+enum UserFactSourceType {
+  user_message
+  document
+  assistant_inference
+  manual_edit
 }
 
 /// WO-07：用户级 journey 状态机（stage + 关键事件时间戳）。diagRound 仍以 StrategicProfile 为真源，派生时读入。
@@ -185,6 +213,7 @@ model Tenant {
   tokenUsages    TokenUsage[]
   tokenWallets   TokenWallet[]
   generationJobs GenerationJob[]
+  userFacts      UserFact[]
 
   @@map("tenant")
 }
@@ -222,6 +251,7 @@ model User {
   wechatSubscriptions WechatSubscription[]
   wechatNotifications WechatNotificationLog[]
   generationJobs      GenerationJob[]
+  userFacts           UserFact[]
 
   @@map("app_user")
 }
@@ -428,6 +458,8 @@ model Session {
   mode               String? // 会话模式（M3 PR-11 粘性）：'review:week' | 'urgent' | 'timing' | …；null=strategy
   lastReadAt         DateTime? // 未读判定：最后一条 AI 回复晚于此即未读；打开会话时置 now
   activeGenerationId String?   @unique // 同一会话最多一个在途 GenerationJob；终态事务清空
+  lineageId         String? // 同一主线标识；新建主线显式写入，存量/非聊天会话允许空以便无损迁移
+  continuationOf    String? // 直接来源 Session；自关联只用于血缘，不复制消息
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -440,8 +472,15 @@ model Session {
   digest           SessionContextSnapshot?
   generationJobs   GenerationJob[]         @relation("SessionGenerations")
   activeGeneration GenerationJob?          @relation("SessionActiveGeneration", fields: [activeGenerationId], references: [id], onDelete: SetNull)
+  predecessor      Session?                @relation("SessionContinuation", fields: [continuationOf], references: [id], onDelete: SetNull)
+  continuations    Session[]               @relation("SessionContinuation")
+  handoff          SessionHandoff?         @relation("SessionHandoffTarget")
+  sourceHandoffs   SessionHandoff[]         @relation("SessionHandoffSource")
+  sourceFacts      UserFact[]
 
   @@index([userId, agentKey])
+  @@index([lineageId])
+  @@index([continuationOf])
   @@index([projectId])
   @@map("session")
 }
@@ -476,6 +515,22 @@ model GenerationJob {
   status                 GenerationStatus           @default(queued)
   phase                  GenerationPhase            @default(queue)
   kind                   GenerationKind             @default(chat)
+  requestedOutput        String                     @default("unspecified")
+  deliveryMode           DeliveryMode               @default(single)
+  classificationStatus   GenerationClassificationStatus @default(not_required)
+  classificationLeaseExpiresAt DateTime?
+  complexityJson         Json?
+  deliveryPlanId         String?
+  stageKey               String?
+  stageNumber            Int                        @default(1)
+  stageAttempt           Int                        @default(1)
+  deliveryStagesJson     Json?
+  imageCount             Int                        @default(0)
+  imageBatchCount        Int                        @default(0)
+  imageCompletedBatches  Int                        @default(0)
+  imageObservationsJson  Json?
+  imageSkippedIndexesJson Json?
+  imageTotalBytes        Int                        @default(0)
   userMessageId          String                     @unique
   resultMessageId        String?                    @unique
   requestJson            Json
@@ -517,6 +572,7 @@ model GenerationJob {
   effects          GenerationEffect[]
 
   @@unique([userId, clientRequestId])
+  @@unique([userId, deliveryPlanId, stageKey, stageAttempt])
   @@index([status, leaseExpiresAt, createdAt])
   @@index([sessionId, createdAt])
   @@index([tenantId, createdAt])
@@ -535,6 +591,7 @@ model GenerationAttempt {
   providerRequestId String?
   status            GenerationAttemptStatus @default(pending)
   usageJson         Json?
+  resultJson        Json? // image_observation 等辅助 attempt 的可恢复结果；主正文仍在 GenerationJob.replyJson
   usageSource       String?
   terminationReason String?
   leaseVersion      Int
@@ -571,8 +628,8 @@ model GenerationEffect {
 
 /// 会话上下文快照（批次 3）：长会话的「带来源的结构化摘要层」。
 /// 原始 Message 始终是事实源，本表只是索引与压缩层——每条摘要经 sourceMessageIds 可溯源回原始消息。
-/// itemsJson 只追加不改写：前后矛盾的事实各留一条按时间排序，由模型在读取时按「时间靠后为准」判断，
-/// 系统不做覆盖（覆盖等于替客户做了它没授权的事实判定）。
+/// itemsJson 为兼容信封：activeItems（滚动压缩后的活跃态）+ segmentItems（本段增量索引）。
+/// 合并只压缩索引且保留来源消息 id；原始 Message 始终不改写，后续事实确认由独立 UserFact 承担。
 model SessionContextSnapshot {
   id            String    @id @default(cuid())
   sessionId     String    @unique
@@ -580,8 +637,8 @@ model SessionContextSnapshot {
   userId        String
   version       Int       @default(0)
   lastMessageId String? // 已消化到的最后一条消息（含）
-  lastMessageAt DateTime? // 增量游标：只处理 createdAt 严格大于此值的消息
-  itemsJson     Json // SessionDigestItem[]（只追加，不改写既有条目）
+  lastMessageAt DateTime? // 增量复合游标：(createdAt,lastMessageId)，同毫秒按 id 继续处理
+  itemsJson     Json // 旧值可为 SessionDigestItem[]；新值为 {activeItems,segmentItems,segment}
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -629,6 +686,7 @@ model Memory {
   weight    Float     @default(1.0)
   source    String // conversation | document | deliverable_feedback
   createdAt DateTime  @default(now())
+  reinforcedAt DateTime? // 近重提权时间；不得再改写原始 createdAt
   expiresAt DateTime?
 
   tenant  Tenant   @relation(fields: [tenantId], references: [id])
@@ -640,6 +698,63 @@ model Memory {
   @@index([userId, category]) // 记忆库按类分组读取
   @@index([projectId])
   @@map("memory")
+}
+
+/// 可审计客户硬事实：与语义 Memory 分离。只有当前 asserted/confirmed 会进入模型上下文。
+model UserFact {
+  id               String             @id @default(cuid())
+  tenantId         String
+  userId           String
+  factKey          String
+  valueText        String             @db.Text
+  status           UserFactStatus
+  sourceType       UserFactSourceType
+  sourceMessageIds Json
+  sourceSessionId  String?
+  sourceDocumentId String?
+  supersedesId     String?
+  confidence       Float?
+  assertedAt       DateTime?
+  confirmedAt      DateTime?
+  rejectedAt       DateTime?
+  supersededAt     DateTime?
+  reinforcedAt     DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceSession Session? @relation(fields: [sourceSessionId], references: [id], onDelete: SetNull)
+  supersedes   UserFact? @relation("UserFactReplacement", fields: [supersedesId], references: [id], onDelete: SetNull)
+  replacements UserFact[] @relation("UserFactReplacement")
+
+  @@index([tenantId, userId, factKey, status])
+  @@index([sourceSessionId])
+  @@index([sourceDocumentId])
+  @@index([supersedesId])
+  @@map("user_fact")
+}
+
+/// 显式新会谈的轻量交接包。只含当前事实、关键决策、约束和未完成脉络，不复制原始消息。
+model SessionHandoff {
+  id                   String   @id @default(cuid())
+  sessionId            String   @unique
+  sourceSessionId      String?
+  handoffVersion       Int      @default(1)
+  lastSourceMessageId  String?
+  factsJson            Json
+  decisionsJson        Json
+  constraintsJson      Json
+  recentContextJson    Json
+  sourceMessageIdsJson Json
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  session       Session  @relation("SessionHandoffTarget", fields: [sessionId], references: [id], onDelete: Cascade)
+  sourceSession Session? @relation("SessionHandoffSource", fields: [sourceSessionId], references: [id], onDelete: SetNull)
+
+  @@index([sourceSessionId])
+  @@map("session_handoff")
 }
 
 /// 项目（企业事务主线）—— 串起 会话 / 报告 / 知识 / 记忆，租户级
@@ -734,6 +849,10 @@ model KnowledgeItem {
   fileType     String? // mime 或扩展名（pdf/docx/xlsx/md/txt）
   fileSize     Int? // 字节
   fileKey      String? // OSS 对象 key（原件，预览/重解析用；不可猜 cuid 前缀）
+  // 对话图片专用的受控推理副本（最长边 2048px）；原件继续保留用于审计/未来重处理。
+  inferenceFileKey  String?
+  inferenceFileType String?
+  inferenceFileSize Int?
   error        String?  @db.Text // 解析/嵌入失败原因
   // WO-09 经营体检：财务表结构化抽取 + 纯代码派生指标的落库快照（{ financials, metrics }）。
   // 报告正文数字一律以此为准（数字铁律）；非财务/未分析条目为 null。db push 纯加法。

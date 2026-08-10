@@ -349,6 +349,7 @@ export interface Me {
   inviteCode?: string;             // V7-13：邀请码（惰性生成）
   service?: ServiceAssignmentView | null; // V7-13：社群服务分配（无则 null）
   features: FeatureFlags;          // P0-2：功能开关（前端条件渲染的真相源）——fortune 关则隐藏全部命理入口
+  capabilities?: { attachments: AttachmentCapabilities }; // 运行时权威上限；旧服务端缺失时客户端保守兜底
 }
 
 /**
@@ -363,6 +364,7 @@ export type WenceForm = 'control' | 'dock' | 'chat';
 export interface FeatureFlags {
   fortune: boolean; // 命理（八字/命盘/天时日历/送你一卦）总开关；false = 全产品下线命理 UI/端点
   wenceForm?: WenceForm; // 问策入口 A/B 分组（服务端稳定分桶下发；旧客户端可忽略，按 control 渲染）
+  conversationContinuity?: boolean; // 总军师跨 24h 仍续接同一 Session；false 时回退为新 Session + 交接包
 }
 
 export interface LoginRequest { phone: string; name?: string; code?: string; }
@@ -442,6 +444,54 @@ export interface JourneyView {
   nextStep: JourneyNextStep | null; // 服务端派生，前端只渲染
 }
 
+/* ────────────── 可审计客户事实（独立于语义 Memory） ────────────── */
+export type UserFactStatus = 'asserted' | 'pending' | 'confirmed' | 'rejected' | 'superseded';
+export type UserFactSourceType = 'user_message' | 'document' | 'assistant_inference' | 'manual_edit';
+export interface UserFactView {
+  id: string;
+  factKey: string;
+  valueText: string;
+  status: UserFactStatus;
+  sourceType: UserFactSourceType;
+  sourceMessageIds: string[];
+  sourceSessionId?: string | null;
+  sourceDocumentId?: string | null;
+  supersedesId?: string | null;
+  confidence?: number | null;
+  assertedAt?: string | null;
+  confirmedAt?: string | null;
+  supersededAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface FactConfirmationItem {
+  id: string;
+  factKey: string;
+  valueText: string;
+  reason: 'assistant_inference' | 'document_extraction' | 'conflict' | 'high_impact';
+}
+/** 独立确认卡：按钮调用事实接口，不会伪造用户聊天消息，也不会再次触发模型。 */
+export interface FactConfirmationCard {
+  title: string;
+  items: FactConfirmationItem[];
+}
+export type FactConfirmationAction = 'confirm' | 'edit' | 'session_only';
+export interface FactConfirmationRequest { action: FactConfirmationAction; valueText?: string; }
+export interface FactConfirmationResult {
+  fact: UserFactView;
+  resolution: 'confirmed' | 'edited' | 'session_only';
+}
+
+/** 服务端权威附件能力；客户端只用本地常量做旧服务端兜底。 */
+export interface AttachmentCapabilities {
+  maxAttachmentsPerMessage: number;
+  maxImagesPerMessage: number;
+  maxImagesPerBatch: number;
+  maxImageBytes: number;
+  maxImageBatchBytes: number;
+  maxImageMessageBytes: number;
+}
+
 /* ────────────── 结构化成果 ────────────── */
 // 报告 V2：类型化交付物。section 增加 `type` 判别字段；无 type = 旧版白卡（{h,b,list}），存量报告原样渲染。
 // 兼容性设计：旧字段 h/b/list/sub 以「可选」形式挂在所有变体的公共基上——既保留判别联合语义（按 type 分发渲染），
@@ -509,6 +559,35 @@ export interface DeliverableAsset {
   previewUrl?: string;  // 私有 OSS 签名预览链接（短时效，服务端每次下发时重签）
   downloadUrl?: string; // 私有 OSS 签名下载链接（短时效）
 }
+/** 用户本轮对交付形态的明确意图；unspecified 由智能体自身模式决定。 */
+export type RequestedOutput = 'chat' | 'report' | 'unspecified';
+/** 复杂度只决定一次交完还是分阶段，不能覆盖 requestedOutput。 */
+export type DeliveryMode = 'single' | 'staged';
+export type ComplexityDimensionKey = 'scope' | 'deliverables' | 'timeline' | 'objects' | 'dependencies';
+export interface ComplexityDimensionScore { key: ComplexityDimensionKey; score: 0 | 1 | 2; reason: string }
+export interface ComplexityAssessment {
+  score: number;
+  dimensions: ComplexityDimensionScore[];
+  reasons: string[];
+  source: 'rule' | 'model' | 'fallback';
+}
+export interface DeliveryStage {
+  key: string;
+  number: number;
+  title: string;
+  objective: string;
+}
+/** 报告随结果下发的阶段链；按钮只触发 nextStage，绝不自动连跑。 */
+export interface StagedDeliveryView {
+  generationId: string;
+  deliveryPlanId: string;
+  currentStageKey: string;
+  currentStageNumber: number;
+  totalStages: number;
+  stages: DeliveryStage[];
+  nextStage?: DeliveryStage | null;
+  usageNotice: string;
+}
 export interface Deliverable {
   title: string; icon: string; meta: string;
   cover?: DeliverableCover; // 报告 V2：封面文案
@@ -519,6 +598,8 @@ export interface Deliverable {
   prescriptions?: DeliverablePrescription[]; // WO-12：方案开出的处方（问题→打法→生态工具 key，最多 3 条）
   assets?: DeliverableAsset[]; // 海报成品图等二进制交付物（任务成功后按「成果补丁」路径回写，同 htmlUrl）
   creativeJobId?: string;      // 产出上述 assets 的创作任务 id（最近一次成功的；版本链见 CreativeJobView.parentJobId）
+  delivery?: StagedDeliveryView; // 复杂方案的持久阶段链；无则为普通单次交付
+  factConfirmation?: FactConfirmationCard; // 待核对事实；按钮不进入聊天消息流
 }
 /** 成果模板（mock 提供方 / few-shot 结构约束消费） */
 export interface DeliverableTemplate { icon: string; title: string; sections: DeliverableSection[]; }
@@ -816,6 +897,7 @@ export interface AdminCreativeJobsView {
 export interface ChatAsk { q: string; options: string[]; }
 export interface ChatReply {
   text: string; points?: string[]; acts?: [string, string][]; asks?: ChatAsk[];
+  factConfirmation?: FactConfirmationCard; // 独立确认卡，不复用 asks/chips
   /**
    * 正文撞了模型输出上限、**服务端自动续写后仍未写完**（正常情况看不到这个标记：
    * 撞上限会先自动续写，用户无感）。text 是可读的真实内容，不是错误——端上要按
@@ -834,6 +916,8 @@ export interface SessionItem {
   activeGeneration?: GenerationSummary | null; // 持久生成事实；旧客户端可继续只读 generating
   hasUnread?: boolean; // 有未读 AI 回复（列表红点；退出后台生成完即置 true，打开会话即清）
   unreadCount?: number; // V7-15：未读 assistant 消息数（自 lastReadAt 起，服务端算；hasUnread 保留兼容）
+  lineageId?: string; // 同一主线会谈的稳定标识
+  continuationOf?: string | null; // 显式新会谈继承自哪一条 Session
 }
 export interface SessionMessage {
   id: string; role: string; content: any; at: string;
@@ -844,6 +928,12 @@ export interface SessionMessage {
    * 无 chips 的消息不带该字段——端上据此决定渲不渲染这一排。
    */
   chips?: string[];
+}
+export interface SessionMessagePage {
+  hasMore: boolean;
+  /** 向前翻页的不透明游标；null 表示已经到会话开头。 */
+  nextCursor: string | null;
+  limit: number;
 }
 
 /* ────────────── 问策入口（WP1：提示词池 / 主动消息 / 埋点） ────────────── */
@@ -889,6 +979,7 @@ export interface AdminWenceTemplateUpdate { kind?: WenceTemplateKind; text?: str
 // 系统按时间增量抽取成结构化条目做「索引 + 压缩层」；原始消息始终是事实源，故每条必须能溯源回消息 id。
 // 只追加不改写：前后矛盾的两条都留着（按 at 升序），谁作数交给模型按时间判断，系统不替客户裁决。
 export type SessionDigestKind = 'fact' | 'goal' | 'constraint' | 'metric' | 'decision' | 'advice' | 'open_question' | 'action_item' | 'quote' | 'deliverable_ref';
+export type SessionDigestStatus = 'caught_up' | 'pending' | 'capped' | 'cooldown' | 'failed' | 'unknown';
 export interface SessionDigestItem {
   kind: SessionDigestKind;
   text: string;               // 一句话，含具体数字/名词，≤160 字符
@@ -903,6 +994,9 @@ export interface SessionDetail {
   generating?: boolean; // 服务端仍在处理本会话的回复；客户端重进后据此续显思考态并刷新结果
   activeGeneration?: GenerationSummary | null;
   messages: SessionMessage[];
+  messagePage?: SessionMessagePage; // 新服务端恒有；可选仅用于旧 mock/滚动发布兼容
+  lineageId?: string;
+  continuationOf?: string | null;
 }
 
 /* ────────────── 产出请求 / 结果 ────────────── */
@@ -916,9 +1010,27 @@ export interface GenerationSummary {
   status: GenerationStatus;
   phase: GenerationPhase;
   kind: GenerationKind;
+  requestedOutput: RequestedOutput;
+  deliveryMode: DeliveryMode;
+  complexity?: ComplexityAssessment | null;
+  delivery?: StagedDeliveryView | null;
   snapshotVersion: number;
   cancelRequested: boolean;
   resultMessageId?: string | null;
+  imageProgress?: ImageGenerationProgress | null;
+}
+export interface ImageObservationView {
+  batchKey: string;
+  batchNumber: number;
+  imageIndexes: number[];
+  observation: string;
+}
+export interface ImageGenerationProgress {
+  totalImages: number;
+  totalBatches: number;
+  completedBatches: number;
+  skippedImageIndexes: number[];
+  phase: 'reading' | 'synthesizing' | 'done';
 }
 export interface GenerationView extends GenerationSummary {
   partialText: string;
@@ -930,6 +1042,8 @@ export interface GenerationView extends GenerationSummary {
   createdAt: string;
   startedAt?: string | null;
   completedAt?: string | null;
+  refNotices?: string[];
+  knowledgeUsed?: string[];
 }
 export interface GenerationSnapshotEvent {
   generationId: string;
@@ -1853,6 +1967,15 @@ export interface AdminTraceListView {
 }
 export interface LlmContextTrace {
   recallIntent: boolean;
+  continuity?: {
+    sessionId: string;
+    lineageId: string | null;
+    continuationOf: string | null;
+    sourceSessionId: string | null;
+    newChapter: boolean;
+    chapterGapHours: number | null;
+    inheritedChars: number;
+  };
   history: {
     recentMessages: number;
     carryoverMessages: number;
@@ -1865,7 +1988,30 @@ export interface LlmContextTrace {
     createdAt: string;
   }>;
   // 会话摘要注入（批次 3）：本轮快照条目数与实际注入字符数（超 cap 丢类后的真实值），排障用；未注入则缺省。
-  digest?: { items: number; injectedChars: number };
+  digest?: {
+    items: number;
+    injectedChars: number;
+    status: SessionDigestStatus;
+    coveredThroughMessageId: string | null;
+    coveredThroughAt: string | null;
+    pendingMessages: number;
+  };
+  routing?: {
+    requestedOutput: RequestedOutput;
+    deliveryMode: DeliveryMode;
+    complexityScore: number | null;
+    complexityReasons: string[];
+    deliveryPlanId: string | null;
+    stageKey: string | null;
+    stageNumber: number;
+  };
+  images?: {
+    imageCount: number;
+    batchCount: number;
+    completedBatches: number;
+    skippedImageIndexes: number[];
+    totalBytes: number;
+  };
 }
 export interface AdminTraceDetail extends AdminTraceItem {
   iterations: number;
@@ -1966,6 +2112,14 @@ export interface AdminMonitorNotify {
 /* ────────────── 调教沙盒（用草稿/某版本即时试跑，返回产出 + 诊断 trace） ────────────── */
 export type SandboxTarget = 'draft' | 'published' | { versionId: string };
 export interface SandboxProfile { companyName?: string; industry?: string; stage?: string; pain?: string }
+export interface EvalConversationTurn { role: 'user' | 'assistant'; text: string }
+/** 评测用例可模拟一段真实客户关系，而不只是四个档案字段。 */
+export interface EvalCaseContext extends SandboxProfile {
+  history?: EvalConversationTurn[];
+  memories?: string[];
+  understanding?: string[];
+  digestItems?: SessionDigestItem[];
+}
 export interface SandboxRequest {
   text: string;
   target?: SandboxTarget;     // 默认 draft（沙盒就是试草稿）
@@ -1987,11 +2141,11 @@ export interface SandboxResult {
 }
 
 /* ────────────── 评测（黄金测试集 + LLM 评委打分 → 建议定价档位） ────────────── */
-export interface EvalCaseItem { id: string; input: string; rubric: string | null; weight: number; sort: number; context?: Record<string, unknown> | null }
+export interface EvalCaseItem { id: string; input: string; rubric: string | null; weight: number; sort: number; context?: EvalCaseContext | null }
 export interface EvalSetItem { id: string; agentKey: string; name: string; caseCount: number; createdAt: string }
 export interface EvalSetDetail extends EvalSetItem { cases: EvalCaseItem[] }
 export interface UpsertEvalSetRequest { name: string }
-export interface UpsertEvalCaseRequest { input: string; rubric?: string; weight?: number; sort?: number; context?: Record<string, unknown> | null }
+export interface UpsertEvalCaseRequest { input: string; rubric?: string; weight?: number; sort?: number; context?: EvalCaseContext | null }
 export interface EvalRunItem {
   id: string; agentKey: string; setId: string; setName?: string;
   targetRef: string; targetLabel: string | null;

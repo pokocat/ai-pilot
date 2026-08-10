@@ -51,12 +51,24 @@ function displayText(value) {
 
 function normalizeReport(value) {
   const report = value && typeof value === 'object' ? value : {};
+  const delivery = report.delivery && typeof report.delivery === 'object' ? report.delivery : null;
+  const nextStage = delivery && delivery.nextStage && typeof delivery.nextStage === 'object' ? delivery.nextStage : null;
   return {
     icon: ICONS.has(str(report.icon)) ? str(report.icon) : 'doc',
     title: stripInlineMarks(report.title) || '军师方案',
     meta: displayText(report.meta),
     trust: displayText(report.trust),
     creativeJobId: str(report.creativeJobId),
+    delivery: delivery ? {
+      generationId: str(delivery.generationId),
+      currentStageNumber: Number(delivery.currentStageNumber) || 1,
+      totalStages: Number(delivery.totalStages) || 1,
+      nextStage: nextStage ? {
+        key: str(nextStage.key), number: Number(nextStage.number) || 0,
+        title: str(nextStage.title), objective: str(nextStage.objective),
+      } : null,
+      usageNotice: str(delivery.usageNotice),
+    } : null,
     sections: arr(report.sections).map((section, index) => {
       const normalized = cardSection(section);
       return {
@@ -106,6 +118,10 @@ Component({
     acceptReport() {
       if (this.data.accepting) return;
       this.emitAction('accept');
+    },
+    continueStage() {
+      if (!this.data.card.delivery || !this.data.card.delivery.nextStage) return;
+      this.emitAction('nextstage');
     },
   },
 });

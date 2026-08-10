@@ -5,9 +5,16 @@
 // 走确定性 mock provider，故这里只单测「组装逻辑」与「注入结果」，不发真实多模态请求。
 import { test, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import sharp from 'sharp';
 import { prisma } from '../src/db.js';
 import { getApp, closeApp, seedBaseline, cleanBusiness, login, uniquePhone } from './helpers.js';
-import { ingestChatImage, resolveImageRefs, MAX_IMAGES_PER_MESSAGE } from '../src/services/chatImage.js';
+import {
+  createInferenceImageCopy,
+  ingestChatImage,
+  MAX_IMAGES_PER_MESSAGE,
+  MAX_INFERENCE_IMAGE_EDGE,
+  resolveImageRefs,
+} from '../src/services/chatImage.js';
 import { buildGenContext } from '../src/services/context.js';
 import { claudeUserContent } from '../src/llm/providers/claude.js';
 import { openaiUserContent } from '../src/llm/providers/openai.js';
@@ -29,6 +36,13 @@ function imageMultipart(fileName: string, contentType: string, body: Buffer): { 
   );
   const post = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
   return { payload: Buffer.concat([pre, body, post]), headers: { 'content-type': `multipart/form-data; boundary=${boundary}` } };
+}
+
+async function validImage(format: 'png' | 'jpeg' | 'webp', width = 8, height = 8): Promise<Buffer> {
+  const pipeline = sharp({ create: { width, height, channels: 3, background: { r: 40, g: 90, b: 120 } } });
+  if (format === 'png') return pipeline.png().toBuffer();
+  if (format === 'webp') return pipeline.webp().toBuffer();
+  return pipeline.jpeg().toBuffer();
 }
 
 // ───────────────── 1) 上传端点：MIME / 大小 / 成功 ─────────────────
@@ -54,7 +68,7 @@ test('POST /chat/image-upload 超 10MB → 413', async () => {
 test('POST /chat/image-upload 成功 → 200 + 建 sourceType=image、status=ready 条目', async () => {
   const token = await login(uniquePhone(), '图客丙');
   const app = await getApp();
-  const { payload, headers } = imageMultipart('shot.png', 'image/png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]));
+  const { payload, headers } = imageMultipart('shot.png', 'image/png', await validImage('png'));
   const res = await app.inject({ method: 'POST', url: '/api/chat/image-upload', headers: { ...headers, 'x-user-id': token }, payload });
   assert.equal(res.statusCode, 200, `实得 ${res.statusCode} ${res.body}`);
   const { id } = res.json();
@@ -64,6 +78,38 @@ test('POST /chat/image-upload 成功 → 200 + 建 sourceType=image、status=rea
   assert.equal(item?.status, 'ready');
   assert.equal(item?.fileType, 'png');
   assert.ok(item?.fileKey, '应落 OSS/内存暂存 key');
+  assert.ok(item?.inferenceFileKey, '应记录受控推理副本 key');
+  assert.ok((item?.inferenceFileSize ?? 0) > 0, '应记录推理副本字节数');
+});
+
+test('图片内容损坏时显式返回 400，超长边图片生成不超过 2048px 的推理副本', async () => {
+  const token = await login(uniquePhone(), '图客损坏图');
+  const app = await getApp();
+  const broken = imageMultipart('broken.png', 'image/png', Buffer.from('not-an-image'));
+  const failed = await app.inject({ method: 'POST', url: '/api/chat/image-upload', headers: { ...broken.headers, 'x-user-id': token }, payload: broken.payload });
+  assert.equal(failed.statusCode, 400, failed.body);
+  assert.equal(failed.json().code, 'IMAGE_DECODE_FAILED');
+
+  const original = await validImage('png', 3000, 1200);
+  const inference = await createInferenceImageCopy(original, 'image/png');
+  const metadata = await sharp(inference.buf).metadata();
+  assert.equal(inference.resized, true);
+  assert.ok(Math.max(metadata.width ?? 0, metadata.height ?? 0) <= MAX_INFERENCE_IMAGE_EDGE);
+});
+
+test('GET /me 下发服务端权威附件能力，9 张消息 / 4 张单批口径锁定', async () => {
+  const token = await login(uniquePhone(), '能力口径用户');
+  const app = await getApp();
+  const res = await app.inject({ method: 'GET', url: '/api/me', headers: { 'x-user-id': token } });
+  assert.equal(res.statusCode, 200, res.body);
+  assert.deepEqual(res.json().capabilities.attachments, {
+    maxAttachmentsPerMessage: 9,
+    maxImagesPerMessage: 9,
+    maxImagesPerBatch: 4,
+    maxImageBytes: 10 * 1024 * 1024,
+    maxImageBatchBytes: 12 * 1024 * 1024,
+    maxImageMessageBytes: 24 * 1024 * 1024,
+  });
 });
 
 // ───────────────── 2) 图片排除资料库列表（@引用候选 + 文档视图） ─────────────────
@@ -74,7 +120,7 @@ test('图片不进 @引用候选（listKnowledge）与我的资料库（listKnow
   const tid = u!.tenantId;
   // 一份普通文档 + 一张图。
   await prisma.knowledgeItem.create({ data: { tenantId: tid, userId: token, kind: 'document', title: '经营表', text: '营收数据', sourceType: 'upload', status: 'ready', stage: 'confirmed', tagsJson: [] } });
-  await ingestChatImage({ tenantId: tid, userId: token, mime: 'image/png', buf: Buffer.from([1, 2, 3]), fileName: 'x.png' });
+  await ingestChatImage({ tenantId: tid, userId: token, mime: 'image/png', buf: await validImage('png'), fileName: 'x.png' });
 
   const cand = await listKnowledge(tid);
   assert.equal(cand.length, 1, '候选只应含文档');
@@ -85,11 +131,11 @@ test('图片不进 @引用候选（listKnowledge）与我的资料库（listKnow
 
 // ───────────────── 3) image ref → 多模态入参（resolveImageRefs + buildGenContext.images） ─────────────────
 
-test('resolveImageRefs：读回原件转 base64（严格租户隔离），最多 4 张', async () => {
+test('resolveImageRefs：读回原件转 base64（严格租户隔离），9 张全读且第 10 张显式拒绝', async () => {
   const token = await login(uniquePhone(), '图客戊');
   const u = await prisma.user.findUnique({ where: { id: token }, select: { tenantId: true } });
   const tid = u!.tenantId;
-  const bytes = Buffer.from([10, 20, 30, 40, 50]);
+  const bytes = await validImage('jpeg');
   const { id } = await ingestChatImage({ tenantId: tid, userId: token, mime: 'image/jpeg', buf: bytes, fileName: 'p.jpg' });
 
   const got = await resolveImageRefs(tid, [{ kind: 'image', id, label: '图片' }]);
@@ -101,21 +147,25 @@ test('resolveImageRefs：读回原件转 base64（严格租户隔离），最多
   const other = await resolveImageRefs('tenant-other', [{ kind: 'image', id, label: '图片' }]);
   assert.equal(other.length, 0);
 
-  // 超 4 张只取前 4。
+  // 9 张必须全部读到，不再只取前 4；第 10 张必须显式失败，禁止静默截断。
   const many: MessageRef[] = [];
-  for (let i = 0; i < MAX_IMAGES_PER_MESSAGE + 2; i++) {
-    const r = await ingestChatImage({ tenantId: tid, userId: token, mime: 'image/png', buf: Buffer.from([i]), fileName: `m${i}.png` });
+  const png = await validImage('png');
+  for (let i = 0; i < MAX_IMAGES_PER_MESSAGE; i++) {
+    const r = await ingestChatImage({ tenantId: tid, userId: token, mime: 'image/png', buf: png, fileName: `m${i}.png` });
     many.push({ kind: 'image', id: r.id, label: '图片' });
   }
-  const capped = await resolveImageRefs(tid, many);
-  assert.equal(capped.length, MAX_IMAGES_PER_MESSAGE);
+  assert.equal((await resolveImageRefs(tid, many)).length, MAX_IMAGES_PER_MESSAGE);
+  await assert.rejects(
+    resolveImageRefs(tid, [...many, { kind: 'image', id, label: '第十张' }]),
+    (error: Error & { code?: string }) => error.code === 'TOO_MANY_IMAGES',
+  );
 });
 
 test('buildGenContext：本轮 image 引用注入 ctx.images', async () => {
   const token = await login(uniquePhone(), '图客己');
   const u = await prisma.user.findUnique({ where: { id: token }, select: { tenantId: true } });
   const tid = u!.tenantId;
-  const { id } = await ingestChatImage({ tenantId: tid, userId: token, mime: 'image/webp', buf: Buffer.from([7, 7, 7]), fileName: 'g.webp' });
+  const { id } = await ingestChatImage({ tenantId: tid, userId: token, mime: 'image/webp', buf: await validImage('webp'), fileName: 'g.webp' });
 
   const { ctx } = await buildGenContext({
     userId: token, tenantId: tid, agentKey: 'general', userMessage: '看看这张图',

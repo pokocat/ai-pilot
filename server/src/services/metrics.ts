@@ -295,6 +295,41 @@ const chatGenerationDuration = new LabeledHistogram(
 const chatGenerationRecovered = new LabeledCounter('junshi_chat_generation_recovered_total', 'GenerationJob 租约过期后被新 worker 接管的任务数');
 const chatUsageEstimated = new LabeledCounter('junshi_chat_usage_estimated_total', '对话任务使用本地估算用量结算的次数（provider=unknown 代表 attempt 未取得来源）');
 
+// 长会话摘要健康度：不带 sessionId / userId，避免用户级标签把 Prometheus 基数打爆。
+// updates_total 回答「这次上下文准备最后处于什么状态」；pressure 把接近旧 400 条上限的趋势
+// 提前暴露；compactions_total 则直接判断滚动压缩是否能把长期会话持续续上。
+const sessionDigestUpdates = new LabeledCounter(
+  'junshi_session_digest_updates_total',
+  '会话摘要更新结果（status=caught_up|pending|capped|cooldown|failed|unknown，pressure=normal|near_cap|capped）',
+);
+const sessionDigestCompactions = new LabeledCounter(
+  'junshi_session_digest_compactions_total',
+  '会话摘要滚动压缩结果（outcome=succeeded|failed）',
+);
+const sessionDigestItems = new LabeledHistogram(
+  'junshi_session_digest_items',
+  '会话摘要更新结束时的条目数分布（active 与当前分段合计）',
+  [25, 50, 100, 200, 300, 350, 375, 400],
+);
+const sessionDigestPending = new LabeledHistogram(
+  'junshi_session_digest_pending_messages',
+  '会话摘要更新结束时仍未覆盖的消息数分布',
+  [0, 1, 5, 10, 20, 50, 100, 250, 500, 1000],
+);
+
+export type SessionDigestMetricStatus = 'caught_up' | 'pending' | 'capped' | 'cooldown' | 'failed' | 'unknown';
+
+export function noteSessionDigestState(status: SessionDigestMetricStatus, itemCount: number, pendingMessages: number): void {
+  const pressure = itemCount >= 400 ? 'capped' : itemCount >= 350 ? 'near_cap' : 'normal';
+  sessionDigestUpdates.inc({ status, pressure });
+  sessionDigestItems.observe({ status }, Math.max(0, itemCount));
+  sessionDigestPending.observe({ status }, Math.max(0, pendingMessages));
+}
+
+export function noteSessionDigestCompaction(outcome: 'succeeded' | 'failed'): void {
+  sessionDigestCompactions.inc({ outcome });
+}
+
 export function noteChatGenerationFinalized(args: {
   result: 'completed' | 'truncated' | 'failed' | 'cancelled';
   queueSeconds: number;
@@ -331,6 +366,12 @@ function seedClosedMetricSeries(): void {
   for (const phase of ['queue', 'provider', 'finalize', 'job']) chatGenerationDuration.ensure({ phase });
   chatGenerationRecovered.ensure({});
   for (const provider of ['claude', 'openai', 'dify', 'unknown']) chatUsageEstimated.ensure({ provider });
+  for (const status of ['caught_up', 'pending', 'capped', 'cooldown', 'failed', 'unknown']) {
+    for (const pressure of ['normal', 'near_cap', 'capped']) sessionDigestUpdates.ensure({ status, pressure });
+    sessionDigestItems.ensure({ status });
+    sessionDigestPending.ensure({ status });
+  }
+  for (const outcome of ['succeeded', 'failed']) sessionDigestCompactions.ensure({ outcome });
 }
 
 seedClosedMetricSeries();
@@ -599,6 +640,10 @@ export async function renderMetrics(): Promise<string> {
   chatGenerationDuration.renderInto(ms);
   chatGenerationRecovered.renderInto(ms);
   chatUsageEstimated.renderInto(ms);
+  sessionDigestUpdates.renderInto(ms);
+  sessionDigestCompactions.renderInto(ms);
+  sessionDigestItems.renderInto(ms);
+  sessionDigestPending.renderInto(ms);
 
   /* —— 业务事件 —— */
   registrations.renderInto(ms);
@@ -737,6 +782,7 @@ export function __resetMetrics(): void {
   genDegraded.reset(); outputTruncated.reset(); asksRecovered.reset();
   chatStreamStall.reset(); chatNonStream.reset(); chatFirstToken.reset(); chatProviderFirstToken.reset(); chatPartialKept.reset();
   chatGenerations.reset(); chatGenerationDuration.reset(); chatGenerationRecovered.reset(); chatUsageEstimated.reset();
+  sessionDigestUpdates.reset(); sessionDigestCompactions.reset(); sessionDigestItems.reset(); sessionDigestPending.reset();
   registrations.reset(); moderationChecks.reset(); creditsFlow.reset(); knownCreditReasons.clear(); planGateBlocked.reset();
   creativeJobs.reset(); creativeFailures.reset(); creativeEngines.reset();
   payOrdersCreated.reset(); payApplied.reset(); payAmount.reset(); payRefunds.reset(); payRefundAmount.reset(); payMockEvents.reset();

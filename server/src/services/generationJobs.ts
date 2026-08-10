@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   GenerationKind,
+  GenerationClassificationStatus,
   GenerationPhase,
   GenerationSettlementStatus,
   GenerationStatus,
@@ -10,6 +11,12 @@ import {
 } from '@prisma/client';
 import type {
   Deliverable,
+  ComplexityAssessment,
+  DeliveryMode,
+  DeliveryStage,
+  ImageObservationView,
+  RequestedOutput,
+  StagedDeliveryView,
   GenerationSummary,
   GenerationView,
   MessageRef,
@@ -26,6 +33,7 @@ import {
 import { chargeCreditsOnce, refundCreditsOnce } from './credits.js';
 import { recordAudit } from './audit.js';
 import { noteChatGenerationFinalized } from './metrics.js';
+import { createSessionHandoffInTransaction } from './sessionHandoff.js';
 
 const TERMINAL: ReadonlySet<GenerationStatus> = new Set([
   GenerationStatus.completed,
@@ -99,6 +107,17 @@ export interface CreateGenerationJobInput {
   grace?: GraceKind;
   creditCost?: number;
   requestMeta?: Record<string, unknown>;
+  requestedOutput?: RequestedOutput;
+  deliveryMode?: DeliveryMode;
+  classificationRequired?: boolean;
+  complexity?: ComplexityAssessment | null;
+  deliveryPlanId?: string | null;
+  stageKey?: string | null;
+  stageNumber?: number;
+  stageAttempt?: number;
+  deliveryStages?: DeliveryStage[];
+  imageCount?: number;
+  imageBatchCount?: number;
 }
 
 export interface CreatedGenerationJob {
@@ -117,6 +136,17 @@ function requestSnapshot(input: CreateGenerationJobInput): Record<string, unknow
     projectId: input.projectId ?? null,
     refs: input.refs ?? [],
     kind: input.kind,
+    requestedOutput: input.requestedOutput ?? 'unspecified',
+    deliveryMode: input.deliveryMode ?? 'single',
+    classificationRequired: input.classificationRequired ?? false,
+    complexity: input.complexity ?? null,
+    deliveryPlanId: input.deliveryPlanId ?? null,
+    stageKey: input.stageKey ?? null,
+    stageNumber: Math.max(1, input.stageNumber ?? 1),
+    stageAttempt: Math.max(1, input.stageAttempt ?? 1),
+    deliveryStages: input.deliveryStages ?? [],
+    imageCount: Math.max(0, input.imageCount ?? 0),
+    imageBatchCount: Math.max(0, input.imageBatchCount ?? 0),
     billingRatio: input.billingRatio,
     creditCost: input.creditCost ?? 0,
     ...(input.requestMeta ?? {}),
@@ -163,7 +193,26 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
       })
       : null;
     if (input.sessionId && !session) throw new GenerationNotFoundError();
+    // 兼容上线前的存量 Session：第一次继续对话时惰性补主线 id，避免 trace/后续新会谈血缘为空。
+    if (session && !session.lineageId) {
+      session = await tx.session.update({ where: { id: session.id }, data: { lineageId: `lineage-${randomUUID()}` } });
+    }
     if (!session) {
+      // sessionId 为空代表用户明确开启一场新会谈（或首次对话）。沿用主线血缘并从现成检查点写交接包，
+      // 不复制旧消息、不临时全量总结；首次对话没有 predecessor，自然不建交接包。
+      const previous = await tx.session.findFirst({
+        where: {
+          tenantId: input.tenantId,
+          userId: input.userId,
+          agentKey: input.agentKey,
+          projectId: input.projectId ?? null,
+        },
+        orderBy: { updatedAt: 'desc' },
+      });
+      const lineageId = previous?.lineageId ?? `lineage-${randomUUID()}`;
+      if (previous && !previous.lineageId) {
+        await tx.session.update({ where: { id: previous.id }, data: { lineageId } });
+      }
       session = await tx.session.create({
         data: {
           tenantId: input.tenantId,
@@ -171,8 +220,19 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
           agentKey: input.agentKey,
           projectId: input.projectId ?? null,
           title: input.text.slice(0, 18) || '新对话',
+          lineageId,
+          ...(previous ? { continuationOf: previous.id } : {}),
         },
       });
+      if (previous) {
+        await createSessionHandoffInTransaction({
+          tx,
+          tenantId: input.tenantId,
+          userId: input.userId,
+          sourceSessionId: previous.id,
+          targetSessionId: session.id,
+        });
+      }
       createdSession = true;
     }
     if (session.agentKey !== input.agentKey) {
@@ -205,12 +265,29 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
       }
     }
 
+    // 章节是服务端根据真实消息时间冻结的可观测事实，不能信客户端传值。它不驱动 Session
+    // 切换，也不创建假消息；前端仍按消息时间自行渲染，二者可在 trace 中互相核对。
+    const previousMessage = await tx.message.findFirst({
+      where: { sessionId: session.id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: { createdAt: true },
+    });
+    const messageCreatedAt = now();
+    const chapterGapHours = previousMessage
+      ? Math.max(0, (messageCreatedAt.getTime() - previousMessage.createdAt.getTime()) / 3_600_000)
+      : null;
+    const frozenSnapshot = {
+      ...snapshot,
+      newChapter: chapterGapHours != null && chapterGapHours > 24,
+      chapterGapHours,
+    };
     const userMessage = await tx.message.create({
       data: {
         sessionId: session.id,
         role: 'user',
         contentJson: { text: input.text },
         refsJson: input.refs?.length ? input.refs as unknown as Prisma.InputJsonValue : undefined,
+        createdAt: messageCreatedAt,
       },
     });
     let job = await tx.generationJob.create({
@@ -223,8 +300,23 @@ export async function createGenerationJob(input: CreateGenerationJobInput): Prom
         requestFingerprint,
         parentGenerationId: input.parentGenerationId ?? null,
         kind: input.kind === 'report' ? GenerationKind.report : GenerationKind.chat,
+        requestedOutput: input.requestedOutput ?? 'unspecified',
+        deliveryMode: input.deliveryMode ?? 'single',
+        classificationStatus: input.classificationRequired
+          ? GenerationClassificationStatus.pending
+          : GenerationClassificationStatus.not_required,
+        complexityJson: input.complexity ? input.complexity as unknown as Prisma.InputJsonValue : undefined,
+        deliveryPlanId: input.deliveryPlanId ?? null,
+        stageKey: input.stageKey ?? null,
+        stageNumber: Math.max(1, input.stageNumber ?? 1),
+        stageAttempt: Math.max(1, input.stageAttempt ?? 1),
+        deliveryStagesJson: input.deliveryStages?.length
+          ? input.deliveryStages as unknown as Prisma.InputJsonValue
+          : undefined,
+        imageCount: Math.max(0, input.imageCount ?? 0),
+        imageBatchCount: Math.max(0, input.imageBatchCount ?? 0),
         userMessageId: userMessage.id,
-        requestJson: snapshot as Prisma.InputJsonValue,
+        requestJson: frozenSnapshot as Prisma.InputJsonValue,
       },
     });
 
@@ -317,20 +409,66 @@ function usageObject(raw: unknown): GenerationView['usage'] {
 }
 
 export function generationSummary(job: GenerationJob): GenerationSummary {
+  const complexity = job.complexityJson && typeof job.complexityJson === 'object'
+    ? job.complexityJson as unknown as ComplexityAssessment
+    : null;
+  const stages = Array.isArray(job.deliveryStagesJson)
+    ? job.deliveryStagesJson as unknown as DeliveryStage[]
+    : [];
+  const currentIndex = stages.findIndex((stage) => stage.key === job.stageKey);
+  const delivery: StagedDeliveryView | null = job.deliveryMode === 'staged' && job.deliveryPlanId && job.stageKey && stages.length
+    ? {
+      generationId: job.id,
+      deliveryPlanId: job.deliveryPlanId,
+      currentStageKey: job.stageKey,
+      currentStageNumber: job.stageNumber,
+      totalStages: stages.length,
+      stages,
+      nextStage: currentIndex >= 0 ? stages[currentIndex + 1] ?? null : null,
+      usageNotice: '继续深化会新建一轮交付，并继续消耗本方案用量。',
+    }
+    : null;
   return {
     id: job.id,
     sessionId: job.sessionId,
     status: job.status,
     phase: job.phase,
     kind: job.kind,
+    requestedOutput: (['chat', 'report', 'unspecified'].includes(job.requestedOutput)
+      ? job.requestedOutput
+      : 'unspecified') as RequestedOutput,
+    deliveryMode: job.deliveryMode as DeliveryMode,
+    complexity,
+    delivery,
     snapshotVersion: job.snapshotVersion,
     cancelRequested: !!job.cancelRequestedAt,
     resultMessageId: job.resultMessageId,
+    imageProgress: job.imageCount > 0 ? {
+      totalImages: job.imageCount,
+      totalBatches: job.imageBatchCount,
+      completedBatches: job.imageCompletedBatches,
+      skippedImageIndexes: Array.isArray(job.imageSkippedIndexesJson)
+        ? job.imageSkippedIndexesJson.filter((value): value is number => Number.isInteger(value))
+        : [],
+      phase: TERMINAL.has(job.status)
+        ? 'done'
+        : job.imageCompletedBatches < job.imageBatchCount ? 'reading' : 'synthesizing',
+    } : null,
   };
 }
 
 export function generationView(job: GenerationJob): GenerationView {
   const reply = job.replyJson && typeof job.replyJson === 'object' ? job.replyJson as unknown : null;
+  const frozen = job.contextJson && typeof job.contextJson === 'object'
+    ? job.contextJson as { knowledgeUsed?: unknown; refNotices?: unknown }
+    : null;
+  const skipped = Array.isArray(job.imageSkippedIndexesJson)
+    ? job.imageSkippedIndexesJson.filter((value): value is number => Number.isInteger(value))
+    : [];
+  const refNotices = [
+    ...(Array.isArray(frozen?.refNotices) ? frozen.refNotices.filter((value): value is string => typeof value === 'string') : []),
+    ...(skipped.length ? [`${skipped.map((index) => `图 ${index}`).join('、')}未成功读取，其余图片已继续分析。`] : []),
+  ];
   return {
     ...generationSummary(job),
     partialText: job.partialText,
@@ -342,6 +480,8 @@ export function generationView(job: GenerationJob): GenerationView {
     createdAt: job.createdAt.toISOString(),
     startedAt: job.startedAt?.toISOString() ?? null,
     completedAt: job.completedAt?.toISOString() ?? null,
+    ...(refNotices.length ? { refNotices: Array.from(new Set(refNotices)) } : {}),
+    ...(Array.isArray(frozen?.knowledgeUsed) ? { knowledgeUsed: frozen.knowledgeUsed.filter((value): value is string => typeof value === 'string') } : {}),
   };
 }
 
@@ -492,7 +632,7 @@ export async function claimNextGenerationJob(
     const at = now();
     const rows = await tx.$queryRaw<{ id: string }[]>`
       SELECT id FROM generation_job
-      WHERE status = 'queued'
+      WHERE (status = 'queued' AND "classificationStatus" IN ('not_required', 'completed', 'failed'))
          OR (status = 'running' AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" < ${at}))
       ORDER BY "createdAt" ASC
       LIMIT 1
@@ -584,7 +724,7 @@ export async function startGenerationAttempt(
   jobId: string,
   workerId: string,
   leaseVersion: number,
-  kind: 'main' | 'continue' | 'fallback' | 'ask_recovery',
+  kind: 'main' | 'continue' | 'fallback' | 'ask_recovery' | `image_observation:${number}`,
 ): Promise<number> {
   return prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM generation_job WHERE id = ${jobId} FOR UPDATE`;
@@ -621,6 +761,7 @@ export async function finishGenerationAttempt(args: {
   model?: string | null;
   endpointId?: string | null;
   providerRequestId?: string | null;
+  result?: unknown;
 }): Promise<void> {
   const changed = await prisma.generationAttempt.updateMany({
     where: {
@@ -638,7 +779,37 @@ export async function finishGenerationAttempt(args: {
       model: args.model ?? null,
       endpointId: args.endpointId ?? null,
       providerRequestId: args.providerRequestId ?? null,
+      resultJson: args.result == null ? undefined : args.result as Prisma.InputJsonValue,
       completedAt: now(),
+    },
+  });
+  if (changed.count !== 1) throw new GenerationLeaseLostError();
+}
+
+export async function saveImageObservationProgress(args: {
+  jobId: string;
+  workerId: string;
+  leaseVersion: number;
+  observations: ImageObservationView[];
+  skippedImageIndexes: number[];
+  imageBatchCount: number;
+  imageTotalBytes: number;
+}): Promise<void> {
+  const changed = await prisma.generationJob.updateMany({
+    where: {
+      id: args.jobId,
+      status: GenerationStatus.running,
+      leaseOwner: args.workerId,
+      leaseVersion: args.leaseVersion,
+    },
+    data: {
+      imageObservationsJson: args.observations as unknown as Prisma.InputJsonValue,
+      imageSkippedIndexesJson: args.skippedImageIndexes as unknown as Prisma.InputJsonValue,
+      imageBatchCount: args.imageBatchCount,
+      imageCompletedBatches: args.observations.length,
+      imageTotalBytes: args.imageTotalBytes,
+      snapshotVersion: { increment: 1 },
+      heartbeatAt: now(),
     },
   });
   if (changed.count !== 1) throw new GenerationLeaseLostError();

@@ -19,7 +19,9 @@ const api = {
   // 端上只在已登录分支调用），失败一律由调用方静默降级，不得阻塞进场。
   wenceHints: () => isMock() ? mock.wenceHints() : request('/wence/hints'),
   proactiveSession: () => isMock() ? mock.proactiveSession() : request('/sessions/proactive', { method: 'POST', data: {} }),
-  session: (id) => isMock() ? mock.session(id) : request(`/sessions/${query(id)}`),
+  session: (id, before) => isMock()
+    ? mock.session(id, before)
+    : request(`/sessions/${query(id)}${before ? `?before=${query(before)}` : ''}`),
   deleteSession: (id) => isMock() ? mock.deleteSession(id) : request(`/sessions/${query(id)}`, { method: 'DELETE' }),
   search: (q) => isMock() ? mock.search(q) : request(`/search?q=${query(q)}`),
   sendSmsCode: (phone, scene) => isMock() ? mock.sendSmsCode(phone, scene) : request('/auth/sms/send', { method: 'POST', data: { phone, scene } }),
@@ -46,6 +48,12 @@ const api = {
   quickScan: (body) => isMock() ? mock.quickScan(body) : request('/quickscan', { method: 'POST', data: body, timeout: 180000 }),
   generate: (body) => isMock() ? mock.generate(body) : request('/generate-sync', { method: 'POST', data: body, timeout: 180000 }),
   generation: (id) => isMock() ? Promise.resolve({ id, status: 'completed' }) : request(`/generations/${query(id)}`),
+  nextDeliveryStage: (id) => isMock()
+    ? Promise.reject(new Error('本地演示暂不生成后续阶段'))
+    : request(`/generations/${query(id)}/next-stage`, { method: 'POST', data: {} }),
+  confirmFact: (id, body) => isMock()
+    ? Promise.resolve({ fact: { id, valueText: body && body.valueText || '', status: body && body.action === 'session_only' ? 'rejected' : 'confirmed' }, resolution: body && body.action === 'edit' ? 'edited' : body && body.action === 'session_only' ? 'session_only' : 'confirmed' })
+    : request(`/facts/${query(id)}/confirm`, { method: 'POST', data: body || {} }),
   cancelGeneration: (id) => isMock() ? Promise.resolve({ id, status: 'cancelled' }) : request(`/generations/${query(id)}/cancel`, { method: 'POST', data: {} }),
   reviews: () => isMock() ? mock.reviews() : request('/reviews'),
   todaySaying: () => isMock() ? Promise.resolve({ text: '谋定而后动，先把主要矛盾看清。', date: '' }) : request('/sayings/today'),

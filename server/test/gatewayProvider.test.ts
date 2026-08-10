@@ -37,6 +37,9 @@ async function resetGeneral() {
 function stubFetch(handler: (url?: any, init?: RequestInit) => { ok: boolean; status: number; body: unknown } | Promise<never>) {
   globalThis.fetch = (async (url: any, init?: RequestInit) => {
     if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    const auxiliary = auxiliaryResponse(body);
+    if (auxiliary) return auxiliary;
     const r = await handler(url, init);
     return { ok: r.ok, status: r.status, json: async () => r.body } as unknown as Response;
   }) as unknown as typeof fetch;
@@ -52,12 +55,33 @@ function streamResponse(chunks: string[]): Response {
   }), { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
 
+/**
+ * 主回答落库后还会异步触发标题、记忆与摘要提炼。它们共用同一自定义端点，但不属于本文件要
+ * 统计的 provider 主链调用；若让它们落进下一条用例的 fetch stub，调用次数会随调度时序漂移。
+ */
+function auxiliaryResponse(body: Record<string, unknown>): Response | null {
+  const messages = Array.isArray(body.messages) ? body.messages as { role?: string; content?: unknown }[] : [];
+  const system = messages.find((item) => item.role === 'system')?.content;
+  const prompt = typeof system === 'string' ? system : '';
+  let content: string | null = null;
+  if (/记忆抽取官/.test(prompt)) content = '{"facts":[]}';
+  else if (/会话取名助手/.test(prompt)) content = '{"title":"测试会话"}';
+  else if (/会话索引器/.test(prompt)) content = '{"items":[]}';
+  if (content === null) return null;
+  return Response.json({
+    choices: [{ finish_reason: 'stop', message: { content } }],
+    usage: { prompt_tokens: 1, completion_tokens: 1 },
+  });
+}
+
 /** 按调用序返回不同的流：第 n 次请求用 sequences[n]（用尽后沿用最后一条）。供续写路径测试。 */
 function stubStreamSeq(sequences: string[][], inspect?: (body: Record<string, unknown>, call: number) => void) {
   let call = 0;
   globalThis.fetch = (async (url: any, init?: RequestInit) => {
     if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
     const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    const auxiliary = auxiliaryResponse(body);
+    if (auxiliary) return auxiliary;
     const i = call++;
     inspect?.(body, i);
     return streamResponse(sequences[Math.min(i, sequences.length - 1)]);
@@ -69,6 +93,8 @@ function stubStream(chunks: string[], inspect?: (body: Record<string, unknown>) 
   globalThis.fetch = (async (url: any, init?: RequestInit) => {
     if (!String(url).includes(CHAT_URL)) throw new Error(`unexpected fetch: ${url}`);
     const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    const auxiliary = auxiliaryResponse(body);
+    if (auxiliary) return auxiliary;
     inspect?.(body);
     return streamResponse(chunks);
   }) as unknown as typeof fetch;
@@ -124,7 +150,7 @@ describe('Gateway × Provider 错误路径', () => {
     assert.equal(r.body.kind, 'chat');
     assert.equal(r.body.reply.text, '机构级判断：先稳现金流，再谈增长。');
     const trace = await prisma.llmTrace.findFirstOrThrow({
-      where: { userId: t, status: 'ok' },
+      where: { userId: t, status: 'ok', kind: 'chat' },
       orderBy: { createdAt: 'desc' },
     });
     assert.equal(trace.model, 'mock-model', 'trace 应记录实际请求 model');
@@ -184,7 +210,9 @@ describe('Gateway × Provider 错误路径', () => {
       assert.match(msgs[msgs.length - 1].content, /接着写完/);
     });
     const t = await loginReady();
-    const r = await api('POST', '/api/generate', { token: t, body: { text: '给我完整长方案', agentKey: 'general' } });
+    // 不使用“给我出方案/报告”等明确成果动作词：统一输出意图路由会正确切到报告链，
+    // 这里要锁的是普通聊天正文撞上限后的流式续写。
+    const r = await api('POST', '/api/generate', { token: t, body: { text: '把这个问题完整讲透，细节多一些', agentKey: 'general' } });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     assert.equal(calls(), 2, '撞上限应自动续写一轮');
     const sse = String(r.body);

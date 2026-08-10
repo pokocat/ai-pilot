@@ -19,17 +19,41 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { structured } from '../llm/gateway.js';
 import { calendarParts } from './clock.js';
-import type { SessionDigestItem, SessionDigestKind } from '../../../shared/contracts';
+import { noteSessionDigestCompaction, noteSessionDigestState } from './metrics.js';
+import type { SessionDigestItem, SessionDigestKind, SessionDigestStatus } from '../../../shared/contracts';
 
-export type { SessionDigestItem, SessionDigestKind };
+export type { SessionDigestItem, SessionDigestKind, SessionDigestStatus };
 
 const BATCH_MESSAGES = 20;        // 每批喂给抽取器的消息条数
 const DEFAULT_MAX_BATCHES = 5;    // 单次调用最多处理几批（报告轮传 3，控制同步补齐的延迟）
 const MAX_ITEMS_PER_BATCH = 10;   // 每批最多采纳几条（多了截断——一批 20 条消息抽不出 10 条以上的硬信息）
+const MAX_ACTIVE_ITEMS = 120;
+const COMPACT_TOTAL_THRESHOLD = 350;
 const MAX_SOURCE_IDS = 8;
 const MAX_ITEM_CHARS = 160;       // 提示词要 ≤80 字，代码侧按 160 字符 clamp（模型超一点不至于整条丢）
 /** 条目总量上限。到顶只停抽取、不丢既有条目——合并/压缩是后续工作，先守住上限别让注入无限膨胀。 */
 const MAX_ITEMS_TOTAL = 400;
+
+export interface SessionDigestState {
+  items: SessionDigestItem[];
+  version: number;
+  /** 兼容既有调用；新代码与 trace 以 status 为准。 */
+  caughtUp: boolean;
+  status: SessionDigestStatus;
+  coveredThroughMessageId: string | null;
+  coveredThroughAt: string | null;
+  pendingMessages: number;
+  activeItems: SessionDigestItem[];
+  segmentItems: SessionDigestItem[];
+  segment: number;
+}
+
+interface DigestStoreV2 {
+  schemaVersion: 2;
+  activeItems: SessionDigestItem[];
+  segmentItems: SessionDigestItem[];
+  segment: number;
+}
 
 const DIGEST_KINDS = [
   'fact', 'goal', 'constraint', 'metric', 'decision',
@@ -46,10 +70,16 @@ const KIND_LABEL: Record<SessionDigestKind, string> = {
 export interface DigestBatchMessage { id: string; role: string; text: string; at: Date }
 export interface DigestExtraction { items: { kind: SessionDigestKind; text: string; sourceMessageIds: string[] }[] }
 export type DigestExtractor = (p: { existing: SessionDigestItem[]; batch: DigestBatchMessage[] }) => Promise<DigestExtraction | null>;
+export type DigestCompactor = (p: { active: SessionDigestItem[]; segment: SessionDigestItem[] }) => Promise<DigestExtraction | null>;
 
 /** 测试 seam：注入确定性抽取器，不触真实模型（参照 alertConfig.__setFeishuTransportForTest 先例）。 */
 export function __setDigestExtractorForTest(fn: DigestExtractor | null): void {
   extractor = fn ?? defaultExtractor;
+}
+
+/** 测试 seam：滚动合并必须能覆盖崩溃恢复与幂等，不依赖真实模型。 */
+export function __setDigestCompactorForTest(fn: DigestCompactor | null): void {
+  compactor = fn ?? defaultCompactor;
 }
 
 /* ─────────────── 默认抽取器（走 structured() 原语） ─────────────── */
@@ -130,6 +160,28 @@ const defaultExtractor: DigestExtractor = async ({ existing, batch }) => {
 
 let extractor: DigestExtractor = defaultExtractor;
 
+const COMPACT_SYS = `你是「军师」会话索引的滚动合并器。把【当前活跃态】与【本段增量】合并为下一版受限活跃态。
+
+只保留仍值得跨轮使用的：客户事实、目标、约束、最新经营数据、已拍板决策、未完成行动和待确认问题。历史建议、已完成行动、重复表述优先删除；同一事实有新旧说法时保留较新的说法，必要时保留冲突说明。
+
+硬规则：
+1. 最多 ${MAX_ACTIVE_ITEMS} 条；每条 text ≤80 字；kind 仍只能用既有十种类型。
+2. sourceMessageIds 只能从输入条目已有的来源 id 中选择，最多 8 个；必须至少保留一个可验证来源，禁止编造。
+3. 合并相近条目时保留最能支撑结论的来源；不要输出任何没有来源的概括。
+4. 只输出 JSON：{"items":[{"kind":"fact","text":"…","sourceMessageIds":["…"]}]}。`;
+
+function compactBlock(items: SessionDigestItem[]): string {
+  return items.map((item, index) => `[${index}] ${item.kind} ${item.at} ${item.text} | sources=${item.sourceMessageIds.join(',')}`).join('\n');
+}
+
+const defaultCompactor: DigestCompactor = async ({ active, segment }) => structured(ExtractResultZ, {
+  system: COMPACT_SYS,
+  user: `【当前活跃态】\n${compactBlock(active) || '（空）'}\n\n【本段增量】\n${compactBlock(segment) || '（空）'}`,
+  maxChars: 40_000,
+});
+
+let compactor: DigestCompactor = defaultCompactor;
+
 /* ─────────────── 同会话串行化 ─────────────── */
 
 // 同一会话可能同时有「本轮收尾的即发即忘更新」与「下一轮报告的同步补齐」两次 update 在跑。
@@ -176,6 +228,26 @@ function readItems(json: unknown): SessionDigestItem[] {
   });
 }
 
+function readStore(json: unknown): DigestStoreV2 {
+  if (json && typeof json === 'object' && !Array.isArray(json)) {
+    const value = json as Partial<DigestStoreV2>;
+    if (value.schemaVersion === 2) {
+      return {
+        schemaVersion: 2,
+        activeItems: readItems(value.activeItems),
+        segmentItems: readItems(value.segmentItems),
+        segment: Number.isInteger(value.segment) && Number(value.segment) >= 0 ? Number(value.segment) : 0,
+      };
+    }
+  }
+  // 旧快照数组无损迁入“当前增量段”，首次接近阈值时再滚动合并。
+  return { schemaVersion: 2, activeItems: [], segmentItems: readItems(json), segment: 0 };
+}
+
+function storedJson(activeItems: SessionDigestItem[], segmentItems: SessionDigestItem[], segment: number): Prisma.InputJsonValue {
+  return { schemaVersion: 2, activeItems, segmentItems, segment } as unknown as Prisma.InputJsonValue;
+}
+
 type MessageRow = { id: string; role: string; contentJson: unknown; createdAt: Date };
 
 /** 一条消息在抽取批次里的文本形态。report 折叠成标题+小节标题（与 routes/sessions.ts historyMessage 同口径）。 */
@@ -206,6 +278,28 @@ function acceptItems(raw: DigestExtraction['items'], batchRows: MessageRow[]): S
     if (!text) continue;
     const earliest = Math.min(...ids.map((id) => createdAtById.get(id)!.getTime()));
     out.push({ kind: it.kind, text, sourceMessageIds: ids, at: new Date(earliest).toISOString() });
+  }
+  return out;
+}
+
+function acceptCompactedItems(raw: DigestExtraction['items'], existing: SessionDigestItem[]): SessionDigestItem[] {
+  const atBySource = new Map<string, number>();
+  for (const item of existing) for (const id of item.sourceMessageIds) {
+    const at = new Date(item.at).getTime();
+    if (Number.isFinite(at)) atBySource.set(id, Math.min(atBySource.get(id) ?? at, at));
+  }
+  const out: SessionDigestItem[] = [];
+  const seen = new Set<string>();
+  for (const item of raw.slice(0, MAX_ACTIVE_ITEMS)) {
+    if (!isDigestKind(item?.kind)) continue;
+    const ids = [...new Set(item.sourceMessageIds ?? [])];
+    if (!ids.length || ids.length > MAX_SOURCE_IDS || ids.some((id) => !atBySource.has(id))) continue;
+    const text = sanitizeDigestText(item.text ?? '').slice(0, MAX_ITEM_CHARS);
+    if (!text) continue;
+    const key = `${item.kind}\u0000${text}\u0000${ids.join(',')}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ kind: item.kind, text, sourceMessageIds: ids, at: new Date(Math.min(...ids.map((id) => atBySource.get(id)!))).toISOString() });
   }
   return out;
 }
@@ -256,88 +350,196 @@ export async function updateSessionDigest(p: {
   userId: string;
   sessionId: string;
   maxBatches?: number;
-}): Promise<{ items: SessionDigestItem[]; version: number; caughtUp: boolean }> {
-  return withSessionLock(p.sessionId, () => runUpdate(p));
+}): Promise<SessionDigestState> {
+  const result = await withSessionLock(p.sessionId, async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { return await runUpdate(p); }
+      catch (error) {
+        if (!(error instanceof DigestSnapshotConflictError) || attempt === 2) throw error;
+      }
+    }
+    throw new DigestSnapshotConflictError();
+  });
+  noteSessionDigestState(result.status, result.items.length, result.pendingMessages);
+  return result;
 }
 
 /**
- * 把 rows 切成批。每批 ≤20 条，但**绝不从同毫秒组中间切开**——游标是 (createdAt 严格大于)，
- * 从同毫秒组中间断开会让该组剩下的兄弟消息被下一次查询直接跳过（永久漏采）。
- * 代价是跨组的那一批可能略超 20 条，这个方向的偏差无害。
+ * 把 rows 切成固定批。游标已是 (createdAt,id) 复合键，同毫秒消息可安全跨批。
  */
 function sliceBatches(rows: MessageRow[]): MessageRow[][] {
   const out: MessageRow[][] = [];
   let i = 0;
   while (i < rows.length) {
-    let end = Math.min(i + BATCH_MESSAGES, rows.length);
-    end = extendToMillisecondBoundary(rows, end);
+    const end = Math.min(i + BATCH_MESSAGES, rows.length);
     out.push(rows.slice(i, end));
     i = end;
   }
   return out;
 }
 
-/** 把切点往后推到「与 rows[end-1] 同毫秒的消息全部包含进来」为止。 */
-function extendToMillisecondBoundary(rows: MessageRow[], end: number): number {
-  if (end <= 0 || end >= rows.length) return end;
-  const boundary = rows[end - 1].createdAt.getTime();
-  let out = end;
-  while (out < rows.length && rows[out].createdAt.getTime() === boundary) out++;
-  return out;
+function afterCursor(lastMessageAt: Date | null, lastMessageId: string | null): Prisma.MessageWhereInput {
+  if (!lastMessageAt) return {};
+  if (!lastMessageId) return { createdAt: { gt: lastMessageAt } }; // 兼容迁移前只写时间的旧快照
+  return {
+    OR: [
+      { createdAt: { gt: lastMessageAt } },
+      { createdAt: lastMessageAt, id: { gt: lastMessageId } },
+    ],
+  };
+}
+
+async function pendingMessageCount(sessionId: string, at: Date | null, id: string | null): Promise<number> {
+  return prisma.message.count({
+    where: {
+      sessionId,
+      role: { in: ['user', 'assistant', 'report'] },
+      ...afterCursor(at, id),
+    },
+  });
+}
+
+function stateOf(args: {
+  activeItems: SessionDigestItem[];
+  segmentItems: SessionDigestItem[];
+  segment: number;
+  version: number;
+  status: SessionDigestStatus;
+  lastMessageAt: Date | null;
+  lastMessageId: string | null;
+  pendingMessages: number;
+}): SessionDigestState {
+  const items = [...args.activeItems, ...args.segmentItems];
+  return {
+    items,
+    version: args.version,
+    caughtUp: args.status === 'caught_up',
+    status: args.status,
+    coveredThroughMessageId: args.lastMessageId,
+    coveredThroughAt: args.lastMessageAt?.toISOString() ?? null,
+    pendingMessages: args.pendingMessages,
+    activeItems: args.activeItems,
+    segmentItems: args.segmentItems,
+    segment: args.segment,
+  };
+}
+
+class DigestSnapshotConflictError extends Error {
+  constructor() { super('session digest snapshot changed concurrently'); }
+}
+
+async function persistSnapshot(args: {
+  exists: boolean;
+  sessionId: string;
+  tenantId: string;
+  userId: string;
+  expectedVersion: number;
+  lastMessageId: string | null;
+  lastMessageAt: Date | null;
+  activeItems: SessionDigestItem[];
+  segmentItems: SessionDigestItem[];
+  segment: number;
+}): Promise<number> {
+  const version = args.expectedVersion + 1;
+  const data = {
+    version,
+    lastMessageId: args.lastMessageId,
+    lastMessageAt: args.lastMessageAt,
+    itemsJson: storedJson(args.activeItems, args.segmentItems, args.segment),
+  };
+  if (args.exists) {
+    const updated = await prisma.sessionContextSnapshot.updateMany({
+      where: { sessionId: args.sessionId, version: args.expectedVersion },
+      data,
+    });
+    if (updated.count !== 1) throw new DigestSnapshotConflictError();
+    return version;
+  }
+  try {
+    await prisma.sessionContextSnapshot.create({
+      data: {
+        sessionId: args.sessionId, tenantId: args.tenantId, userId: args.userId,
+        ...data,
+      },
+    });
+    return version;
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new DigestSnapshotConflictError();
+    throw error;
+  }
 }
 
 async function runUpdate(p: {
   tenantId: string; userId: string; sessionId: string; maxBatches?: number;
-}): Promise<{ items: SessionDigestItem[]; version: number; caughtUp: boolean }> {
+}): Promise<SessionDigestState> {
   const snap = await prisma.sessionContextSnapshot.findUnique({ where: { sessionId: p.sessionId } });
   // 归属校验：快照行自带 userId，对不上说明调用方传错了会话（越权或串号），一律不写、也不回传条目。
   if (snap && snap.userId !== p.userId) {
     console.warn(`[sessionDigest] 会话 ${p.sessionId} 快照归属不符（快照属于 ${snap.userId}，调用方 ${p.userId}），拒绝更新`);
-    return { items: [], version: snap.version, caughtUp: false };
+    return stateOf({ activeItems: [], segmentItems: [], segment: 0, version: snap.version, status: 'failed', lastMessageAt: snap.lastMessageAt, lastMessageId: snap.lastMessageId, pendingMessages: 0 });
   }
-  let items = readItems(snap?.itemsJson);
+  const store = readStore(snap?.itemsJson);
+  let activeItems = store.activeItems;
+  let segmentItems = store.segmentItems;
+  let segment = store.segment;
+  let snapshotExists = Boolean(snap);
   let version = snap?.version ?? 0;
-  const cursor = snap?.lastMessageAt ?? null;
+  let cursorAt = snap?.lastMessageAt ?? null;
+  let cursorId = snap?.lastMessageId ?? null;
+
+  // 先滚动合并再读新消息：合并失败不推进消息游标；成功后即使进程在下一批抽取前退出，
+  // 新活跃态也已按版本 CAS 原子落库，下次可从原游标继续。
+  if (activeItems.length + segmentItems.length >= COMPACT_TOTAL_THRESHOLD) {
+    let result: DigestExtraction | null = null;
+    try { result = await compactor({ active: activeItems, segment: segmentItems }); } catch { result = null; }
+    const compacted = result ? acceptCompactedItems(result.items ?? [], [...activeItems, ...segmentItems]) : [];
+    if (!result || (!compacted.length && activeItems.length + segmentItems.length > 0)) {
+      noteSessionDigestCompaction('failed');
+      const count = await pendingMessageCount(p.sessionId, cursorAt, cursorId);
+      const status: SessionDigestStatus = activeItems.length + segmentItems.length >= MAX_ITEMS_TOTAL ? 'capped' : 'failed';
+      return stateOf({ activeItems, segmentItems, segment, version, status, lastMessageAt: cursorAt, lastMessageId: cursorId, pendingMessages: count });
+    }
+    version = await persistSnapshot({
+      exists: snapshotExists, sessionId: p.sessionId, tenantId: p.tenantId, userId: p.userId,
+      expectedVersion: version, lastMessageId: cursorId, lastMessageAt: cursorAt,
+      activeItems: compacted, segmentItems: [], segment: segment + 1,
+    });
+    noteSessionDigestCompaction('succeeded');
+    snapshotExists = true;
+    activeItems = compacted;
+    segmentItems = [];
+    segment += 1;
+  }
 
   const maxBatches = Math.max(1, p.maxBatches ?? DEFAULT_MAX_BATCHES);
   const capacity = maxBatches * BATCH_MESSAGES; // 本次最多消化多少条消息
-  // 多取一批余量：既用来判断「本次处理完是否还有剩余」，也留出把 capacity 边界上的同毫秒组补齐的空间。
-  const takeLimit = capacity + BATCH_MESSAGES + 1;
-  const where = {
+  // 多取 1 条判断本次处理后是否还有剩余；复合游标不再需要整组同毫秒余量。
+  const takeLimit = capacity + 1;
+  const where: Prisma.MessageWhereInput = {
     sessionId: p.sessionId,
     role: { in: ['user', 'assistant', 'report'] },
-    ...(cursor ? { createdAt: { gt: cursor } } : {}),
+    ...afterCursor(cursorAt, cursorId),
   };
   const select = { id: true, role: true, contentJson: true, createdAt: true } as const;
-  let rows: MessageRow[] = await prisma.message.findMany({
-    where, orderBy: { createdAt: 'asc' }, take: takeLimit, select,
+  const rows: MessageRow[] = await prisma.message.findMany({
+    where, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: takeLimit, select,
   });
-
-  // 本次要消化到哪：先按 capacity 截，再把边界上的同毫秒组补完整（同上，切在组中间=永久漏采）。
-  let end = extendToMillisecondBoundary(rows, Math.min(capacity, rows.length));
-  // 极端情况：整批余量都被同一毫秒占满，组在取数窗口处仍未闭合。补一次针对该毫秒的精确查询把组取全，
-  // 否则推进游标就会把该组剩余部分永久跳过。（现实里同一毫秒 20+ 条只可能出现在批量造数场景。）
-  if (end === rows.length && rows.length === takeLimit) {
-    const groupAt = rows[rows.length - 1].createdAt;
-    const whole: MessageRow[] = await prisma.message.findMany({
-      where: { ...where, createdAt: groupAt }, orderBy: { id: 'asc' }, select,
-    });
-    const seen = new Set(rows.map((r) => r.id));
-    rows = [...rows, ...whole.filter((r) => !seen.has(r.id))];
-    end = rows.length;
-  }
-  const hasMore = rows.length > end;
-  const pending = rows.slice(0, end);
-  if (!pending.length) return { items, version, caughtUp: true };
+  const hasMore = rows.length > capacity;
+  const pending = rows.slice(0, capacity);
+  if (!pending.length) return stateOf({ activeItems, segmentItems, segment, version, status: 'caught_up', lastMessageAt: cursorAt, lastMessageId: cursorId, pendingMessages: 0 });
 
   // 熔断冷却期：直接返回现状，一次真实调用都不发（见 noteExtractOutcome 的注释）。
-  if (inExtractCooldown(p.sessionId)) return { items, version, caughtUp: false };
+  if (inExtractCooldown(p.sessionId)) {
+    const count = await pendingMessageCount(p.sessionId, cursorAt, cursorId);
+    return stateOf({ activeItems, segmentItems, segment, version, status: 'cooldown', lastMessageAt: cursorAt, lastMessageId: cursorId, pendingMessages: count });
+  }
 
-  let stopped = false;
+  let stoppedStatus: SessionDigestStatus | null = null;
   for (const batchRows of sliceBatches(pending)) {
+    const items = [...activeItems, ...segmentItems];
     if (items.length >= MAX_ITEMS_TOTAL) {
       console.warn(`[sessionDigest] 会话 ${p.sessionId} 摘要条目已达上限 ${MAX_ITEMS_TOTAL}，停止继续抽取（待实现合并/压缩）`);
-      stopped = true;
+      stoppedStatus = 'capped';
       break;
     }
     const batch: DigestBatchMessage[] = batchRows
@@ -359,43 +561,50 @@ async function runUpdate(p: {
 
     if (!result) {
       // 无 live provider / 抽取失败 → 不落伪造条目，也不推进游标（推进了这批就永久没人再抽）。
-      noteExtractOutcome(p.sessionId, false, cursor);
-      stopped = true;
+      noteExtractOutcome(p.sessionId, false, cursorAt);
+      stoppedStatus = 'failed';
       break;
     }
-    noteExtractOutcome(p.sessionId, true, cursor);
+    noteExtractOutcome(p.sessionId, true, cursorAt);
 
-    items = [...items, ...acceptItems(result.items ?? [], batchRows)];
-    version += 1;
+    const accepted = acceptItems(result.items ?? [], batchRows);
+    const remainingSlots = Math.max(0, MAX_ITEMS_TOTAL - items.length);
+    segmentItems = [...segmentItems, ...accepted.slice(0, remainingSlots)];
     const last = batchRows[batchRows.length - 1];
-    await prisma.sessionContextSnapshot.upsert({
-      where: { sessionId: p.sessionId },
-      create: {
-        sessionId: p.sessionId, tenantId: p.tenantId, userId: p.userId,
-        version, lastMessageId: last.id, lastMessageAt: last.createdAt,
-        itemsJson: items as unknown as Prisma.InputJsonValue,
-      },
-      update: {
-        version, lastMessageId: last.id, lastMessageAt: last.createdAt,
-        itemsJson: items as unknown as Prisma.InputJsonValue,
-      },
+    cursorAt = last.createdAt;
+    cursorId = last.id;
+    version = await persistSnapshot({
+      exists: snapshotExists, sessionId: p.sessionId, tenantId: p.tenantId, userId: p.userId,
+      expectedVersion: version, lastMessageId: cursorId, lastMessageAt: cursorAt,
+      activeItems, segmentItems, segment,
     });
+    snapshotExists = true;
   }
 
-  return { items, version, caughtUp: !stopped && !hasMore };
+  const status: SessionDigestStatus = stoppedStatus ?? (hasMore ? 'pending' : 'caught_up');
+  const count = status === 'caught_up' ? 0 : await pendingMessageCount(p.sessionId, cursorAt, cursorId);
+  return stateOf({ activeItems, segmentItems, segment, version, status, lastMessageAt: cursorAt, lastMessageId: cursorId, pendingMessages: count });
 }
 
 /** 纯读快照（不触发任何 LLM 调用）。无快照或归属不符 → null（userId 直接进 where，不给越权读的机会）。 */
 export async function readSessionDigest(
   sessionId: string,
   userId: string,
-): Promise<{ items: SessionDigestItem[]; version: number } | null> {
+): Promise<SessionDigestState | null> {
   const snap = await prisma.sessionContextSnapshot.findFirst({
     where: { sessionId, userId },
-    select: { itemsJson: true, version: true },
+    select: { itemsJson: true, version: true, lastMessageId: true, lastMessageAt: true },
   });
   if (!snap) return null;
-  return { items: readItems(snap.itemsJson), version: snap.version };
+  const store = readStore(snap.itemsJson);
+  const items = [...store.activeItems, ...store.segmentItems];
+  const pendingMessages = await pendingMessageCount(sessionId, snap.lastMessageAt, snap.lastMessageId);
+  const status: SessionDigestStatus = pendingMessages === 0 ? 'caught_up' : items.length >= MAX_ITEMS_TOTAL ? 'capped' : 'pending';
+  return stateOf({
+    activeItems: store.activeItems, segmentItems: store.segmentItems, segment: store.segment,
+    version: snap.version, status,
+    lastMessageAt: snap.lastMessageAt, lastMessageId: snap.lastMessageId, pendingMessages,
+  });
 }
 
 /* ─────────────── 注入块渲染（纯函数） ─────────────── */

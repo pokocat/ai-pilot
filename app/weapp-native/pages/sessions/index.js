@@ -32,23 +32,16 @@ const FIRST_SEND_PREFIX = 'junshi.wence.firstsend.';
 const HINT_ROTATE_MS = 3000;
 const HINT_FADE_MS = 320;
 
-/**
- * 主线会话闲置多久算「过一段时间再进来」。超过它且没有未读，冷进时不再续接旧会话，
- * 改开一条新的（旧的自然归档进历史抽屉）——常见 AI app 的口径，也免得用户对着三天前的
- * 半截对话继续说话。**纯客户端判定**，服务端没有过期概念，旧会话原封不动躺在那儿。
- */
+/** 主线闲置多久在视觉上另起一段；底层仍续接同一个 Session，客户事实与决策不断链。 */
 const SESSION_IDLE_HOURS = 24;
 
 /**
- * 过期只在**冷进**（bootChat）判，refreshChat（切 tab 回来）绝不判：
- * 用户正聊着聊着跨过 24 小时整点就被切走是最恶心的一种"聪明"。
- * 这条依赖 `_chatBooted` 缓存——同一次小程序生命周期内只 boot 一次，所以判定天然只在
- * 冷启动/杀进程重进时发生，正好对上"过一段时间再进去"的语义。改动 `_chatBooted` 的
- * 复用范围前先回来看这条。
+ * 分章只在冷进（bootChat）判，refreshChat（切 tab 回来）绝不判，避免聊着聊着跨过整点
+ * 突然插入分隔。它只决定是否显示“新的一段”，绝不能再决定换 Session。
  *
- * 有未读时**照旧续接**：军师主动说了新东西，连续性比新鲜感重要；进入即读、角标照常清。
+ * 有未读时不插空分隔：军师刚主动说了新东西，用户看到的就是这条新脉络。
  */
-function isSessionStale(item) {
+function shouldStartNewChapter(item) {
   if (!item) return false;
   if (Number(item.unreadCount) > 0) return false;
   const idleMs = Date.now() - new Date(item.updatedAt).getTime();
@@ -231,11 +224,21 @@ Page({
     }
     await this.fetchSessions();
     const latest = (this._sessions || []).find((item) => item.agentKey === 'general');
-    // 闲置超过 SESSION_IDLE_HOURS 且无未读 → 不续接，落到下面的「无会话」分支重开一条。
-    if (latest && !isSessionStale(latest)) { this.chatCoreLoad({ sessionId: latest.id }); this.markGeneralRead(); return; }
+    const me = store.snapshot().me;
+    const continuityEnabled = !(me && me.features && me.features.conversationContinuity === false);
+    if (latest && !continuityEnabled && shouldStartNewChapter(latest)) {
+      // 运营逃生开关：回退为独立新 Session；服务端会建立 lineage + handoff，不会再退化成零上下文。
+      this.chatCoreLoad({ agentKey: 'general' });
+      return;
+    }
+    // 无论闲置多久都续接同一主线；超过 24h 只在底部显示一个可重算的视觉分章。
+    if (latest) {
+      this.chatCoreLoad({ sessionId: latest.id, startNewChapter: shouldStartNewChapter(latest) });
+      this.markGeneralRead();
+      return;
+    }
 
-    // 无会话（或旧会话已过期）：先试主动消息注入。已有会话的用户会拿到 reason='exists'，
-    // 这是**预期结果**不是错误——过期路径本来就是「服务端还有会话、端上不想续接」。
+    // 真正从未有过会话：先试主动消息注入。
     let result = null;
     try { result = await api.proactiveSession(); } catch (_) { /* 主动消息失败一律静默降级，不得阻塞进场 */ }
     if (result && result.injected && result.sessionId) {

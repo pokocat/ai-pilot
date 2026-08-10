@@ -2,7 +2,7 @@ import { getApiBaseUrl } from './runtimeMode';
 import { getToken } from './token';
 import { parseSSE, decodeUtf8, sliceCompleteBlocks } from './sse';
 import { streamClosedWithoutVerdict } from './liveGenCore';
-import type { GenRequest, ChatReply, Deliverable, DeliverableSection, GenerationPhase, GenerationStatus } from '../../../shared/contracts';
+import type { GenRequest, ChatReply, Deliverable, DeliverableSection, GenerationPhase, GenerationStatus, ImageGenerationProgress } from '../../../shared/contracts';
 
 // 错误分两类，收尾语义不同：'disconnect' 是链路被掐断（小程序切后台被杀请求 / 网络抖动），
 // 服务端不受影响，报告类多半照常生成并落库，调用方应先对账再判生死；
@@ -11,7 +11,7 @@ export type StreamErrorKind = 'disconnect' | 'fatal';
 
 export interface StreamHandlers {
   onSession?: (id: string) => void;
-  onGeneration?: (data: { generationId: string; sessionId?: string; snapshotVersion?: number; phase?: GenerationPhase; status?: GenerationStatus }) => void;
+  onGeneration?: (data: { generationId: string; sessionId?: string; snapshotVersion?: number; phase?: GenerationPhase; status?: GenerationStatus; imageProgress?: ImageGenerationProgress | null; refNotices?: string[] }) => void;
   onToken?: (text: string, replace?: boolean) => void; // 增量 token；replace=true 表示权威全文替换
   onChat?: (reply: ChatReply) => void; // 完整回复兜底（含 points/acts）
   onReportStart?: () => void; // report meta 已到达：先渲染成果卡骨架，避免当前页长时间只有 thinking
@@ -93,7 +93,7 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
     const d = e.data as {
       id?: string; text?: string; messageId?: string; message?: string; code?: string; kind?: string;
       generationId?: string; sessionId?: string; snapshotVersion?: number; replace?: boolean;
-      status?: GenerationStatus; phase?: GenerationPhase;
+      status?: GenerationStatus; phase?: GenerationPhase; imageProgress?: ImageGenerationProgress | null;
       title?: string; icon?: string; meta?: string; index?: number; h?: string; b?: string; list?: string[];
       trust?: string; actions?: string[]; learned?: boolean; agentName?: string; refNotices?: string[];
     } & ChatReply;
@@ -105,7 +105,10 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
         snapshotVersion: d.snapshotVersion,
         phase: d.phase,
         status: d.status,
+        imageProgress: d.imageProgress,
+        refNotices: Array.isArray(d.refNotices) ? d.refNotices : undefined,
       });
+      if (Array.isArray(d?.refNotices) && d.refNotices.length) h.onRefNotices?.(d.refNotices);
     }
     else if (e.event === 'session') h.onSession?.(d?.id ?? '');
     else if (e.event === 'token') { state.rendered = true; h.onToken?.(d?.text ?? '', d?.replace === true); }

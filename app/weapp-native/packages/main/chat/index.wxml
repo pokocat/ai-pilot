@@ -12,7 +12,7 @@
   </view>
 
   <scroll-view scroll-y enhanced show-scrollbar="false" scroll-into-view="{{bottomAnchor}}" class="chat-scroll">
-    <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast, chipsSpent}}"></template>
+    <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast, chipsSpent, chapterPending, chapterPendingLabel, historyHasMore, historyLoading}}"></template>
   </scroll-view>
 
   <template is="chat-composer" data="{{askComposerOpen, colorKey, pasteRefs, pastePendings, pasteDupId, pasteHint, regularRefs, uploading, composerOdd, composerSeed, busy, showCount, inputCount, canStop, canSend, pastePreview, showPicker, pickerLoading, pickGroups, refs}}"></template>

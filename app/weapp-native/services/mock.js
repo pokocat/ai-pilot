@@ -48,7 +48,7 @@ function purchaseAgent(key) {
   return Promise.resolve({ ok: true, agentKey: key, pricePaid: balance < 0 ? 0 : Number(agent.price || 0), creditBalance: nextBalance, alreadyOwned: false });
 }
 function sessions() { return Promise.resolve(wx.getStorageSync(storageKey('sessions')) || []); }
-function session(id) {
+function session(id, before) {
   const detail = wx.getStorageSync(storageKey(`session.${id}`));
   if (!detail) return Promise.reject(Object.assign(new Error('会话不存在'), { code: 'NOT_FOUND' }));
   // 服务端读详情会写 lastReadAt（未读归零）；mock 必须同口径，否则「进过会话仍挂着红点」
@@ -58,7 +58,14 @@ function session(id) {
   if (list.some((item) => item.id === id && Number(item.unreadCount) > 0)) {
     wx.setStorageSync(listKey, list.map((item) => (item.id === id ? Object.assign({}, item, { unreadCount: 0, hasUnread: false }) : item)));
   }
-  return Promise.resolve(detail);
+  const all = Array.isArray(detail.messages) ? detail.messages : [];
+  const rawEnd = before && /^mock:\d+$/.test(before) ? Number(before.slice(5)) : all.length;
+  const end = Math.max(0, Math.min(all.length, rawEnd));
+  const start = Math.max(0, end - 100);
+  return Promise.resolve(Object.assign({}, detail, {
+    messages: all.slice(start, end),
+    messagePage: { hasMore: start > 0, nextCursor: start > 0 ? `mock:${start}` : null, limit: 100 },
+  }));
 }
 
 /** 问策提示词池：mock 直接用本地兜底池，并按 mock 包默认展示终态给出 guestForm='chat'。 */
@@ -182,7 +189,11 @@ function me() {
     usage,
     inviteCode: 'JS2026',
     // mock 包默认展示问策终态（对话即 tab），方便本地走查；线上形态由服务端稳定分桶下发。
-    features: { fortune: true, wenceForm: 'chat' },
+    features: { fortune: true, wenceForm: 'chat', conversationContinuity: true },
+    capabilities: { attachments: {
+      maxAttachmentsPerMessage: 9, maxImagesPerMessage: 9, maxImagesPerBatch: 4,
+      maxImageBytes: 10 * 1024 * 1024, maxImageBatchBytes: 12 * 1024 * 1024, maxImageMessageBytes: 24 * 1024 * 1024,
+    } },
   });
 }
 

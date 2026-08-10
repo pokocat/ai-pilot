@@ -221,7 +221,12 @@ function normalizeReply(reply) {
     const options = stringList(source.options).map((option, optionIndex) => ({ key: optionIndex, value: option }));
     return { key: index, q, options, selected: '', other: '', answer: '' };
   }).filter((ask) => ask.q && ask.options.length) : [];
-  return { text: stripSerializedAsksTail(value.text, value.asks), points, asks, truncated: value.truncated === true };
+  const rawFact = value.factConfirmation && typeof value.factConfirmation === 'object' ? value.factConfirmation : {};
+  const factItems = Array.isArray(rawFact.items) ? rawFact.items.map((item) => ({
+    id: textOf(item && item.id), factKey: textOf(item && item.factKey), valueText: textOf(item && item.valueText), reason: textOf(item && item.reason),
+  })).filter((item) => item.id && item.factKey && item.valueText) : [];
+  const factConfirmation = factItems.length ? { title: textOf(rawFact.title) || '这条是我的推断，想请你核一下', items: factItems } : null;
+  return { text: stripSerializedAsksTail(value.text, value.asks), points, asks, factConfirmation, truncated: value.truncated === true };
 }
 
 function decorateActiveAsks(messages, busy) {
@@ -244,24 +249,47 @@ function activeAskState(messages) {
   return { messageIndex, answered, total: asks.length, ready: asks.length > 1 && answered === asks.length };
 }
 
+const CHAPTER_GAP_MS = 24 * 60 * 60 * 1000;
+
+function chapterLabel(iso) {
+  const at = new Date(iso || Date.now());
+  if (!Number.isFinite(at.getTime())) return '新的一段';
+  return `${at.getMonth() + 1}月${at.getDate()}日 · 新的一段`;
+}
+
 function normalizeMessage(message, index) {
   const content = message && message.content;
   const knowledgeUsed = stringList(message && message.knowledgeUsed);
   const refNotices = stringList(message && message.refNotices);
-  if (message.role === 'user') return { id: message.id || `u-${index}`, role: 'user', text: textOf(content && content.text), points: [], refs: presentRefs(message.refs) };
+  const at = textOf(message && message.at);
+  if (message.role === 'user') return { id: message.id || `u-${index}`, role: 'user', text: textOf(content && content.text), points: [], refs: presentRefs(message.refs), at };
   if (message.role === 'report') return {
     id: message.id || `r-${index}`, messageId: message.id || '', role: 'assistant', text: reportText(content), points: [],
     report: true, reportReady: isReportReady(message.id, content), deliverable: content, saved: Boolean(message.saved || (content && content.saved)),
-    knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
+    factConfirmation: normalizeReply(content).factConfirmation,
+    knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'), at,
   };
   const reply = normalizeReply(content);
   return {
-    id: message.id || `a-${index}`, role: 'assistant', text: reply.text, points: reply.points, asks: reply.asks, truncated: reply.truncated,
+    id: message.id || `a-${index}`, role: 'assistant', text: reply.text, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, truncated: reply.truncated,
     // 快捷回应：服务端 SessionMessage.chips 原样带进消息对象（当前唯一写入方是进场主动消息）。
     // 无 chips 的消息拿到空数组，模板据此不渲染这一排。
     chips: stringList(message && message.chips),
-    knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
+    knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'), at,
   };
+}
+
+/** 分隔只挂在真实 user 消息前，不创建假消息；换设备/清缓存后也能由消息时间重新算出。 */
+function decorateChapters(messages) {
+  let previousAt = null;
+  return (messages || []).map((message) => {
+    const at = new Date(message && message.at).getTime();
+    const validAt = Number.isFinite(at);
+    const newChapter = Boolean(message && message.role === 'user' && validAt && previousAt != null && at - previousAt > CHAPTER_GAP_MS);
+    const next = newChapter ? Object.assign({}, message, { newChapter: true, chapterLabel: chapterLabel(message.at) }) : message;
+    if (validAt) previousAt = at;
+    return next;
+  });
 }
 
 /**
@@ -273,11 +301,17 @@ function chipsSpentFor(messages) {
   return (messages || []).some((item) => item && item.role === 'user');
 }
 
-function normalizeDetailMessages(detail) {
-  const messages = (detail && Array.isArray(detail.messages) ? detail.messages : [])
+function normalizePageMessages(detail) {
+  return (detail && Array.isArray(detail.messages) ? detail.messages : [])
     .map(normalizeMessage)
     .filter((item) => item.text || item.report || (item.refs && item.refs.length) || (item.points && item.points.length) || (item.asks && item.asks.length));
-  return decorateActiveAsks(messages, Boolean(detail && detail.generating));
+}
+
+function normalizeDetailMessages(detail, earlier) {
+  const tail = normalizePageMessages(detail);
+  const seen = new Set(tail.map((item) => item.id));
+  const combined = [...(earlier || []).filter((item) => !seen.has(item.id)), ...tail];
+  return decorateActiveAsks(decorateChapters(combined), Boolean(detail && detail.generating));
 }
 
 function hasUnansweredTurn(messages, generating) {
@@ -290,6 +324,20 @@ function asList(value) { return Array.isArray(value) ? value : (value && Array.i
 function cleanRef(ref) { return { kind: ref.kind, id: ref.id, label: ref.label, ...(ref.version ? { version: ref.version } : {}) }; }
 
 function uid(prefix) { return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`; }
+
+function generationProgressText(progress) {
+  if (!progress || !Number(progress.totalBatches)) return '正在梳理上下文';
+  const total = Number(progress.totalBatches);
+  const completed = Math.min(Number(progress.completedBatches) || 0, total);
+  if (progress.phase === 'synthesizing' || completed >= total) return '图片读完，正在综合判断';
+  return `正在阅图 ${completed}/${total} 批`;
+}
+
+function imageAttachmentLimit() {
+  const me = store.snapshot().me;
+  const caps = me && me.capabilities && me.capabilities.attachments;
+  return Math.max(1, Number(caps && caps.maxImagesPerMessage) || 9);
+}
 
 function chatErrorPatch(error, fallback) {
   const view = chatErrorPresentation(error, fallback);
@@ -308,17 +356,21 @@ function decodeOption(value) {
 const data = {
   title: '总军师', alias: '玄衡', agentKey: 'general', advisorAvatar: avatarFor('general'), messages: [],
   busy: false, canStop: false, showThinking: false, canSend: false, canRetryLast: false, inputCount: 0, showCount: false,
+  thinkingText: '正在梳理上下文',
   // composerSeed = textarea 的一次性初值，只在交替挂载的那一刻写。不变量：写进去之后
   // 到下一次重建之前绝不再动它——中途改成 '' 就等于把用户正在编辑的文字回灌掉。
   composerOdd: false, composerSeed: '', composerHeight: 124, keyboardHeight: 0, bottomAnchor: 'chat-bottom',
   showLogin: false, loginReason: 'chat', errorText: '', errorNote: '', errorAction: '', refs: [], uploading: false,
   regularRefs: [], pasteRefs: [], pastePendings: [], pasteHint: false, pasteDupId: '',
+  imageSelectedCount: 0, imageLimit: 9,
   pastePreview: null,
   chipsSpent: false,
   showPicker: false, pickerLoading: false, pickGroups: [], accepting: false, reportBusy: '',
   posterEnabled: false, posterPrice: 0,
   askAnsweredCount: 0, askTotal: 0, askRemaining: 0, askReady: false,
   askComposerOpen: false, askComposerMessage: -1, askComposerQuestion: -1,
+  chapterPending: false, chapterPendingLabel: '',
+  historyHasMore: false, historyLoading: false,
 };
 
 // 宿主页在自己的 onLoad 里解析导航参数后调用；behavior 只认已解析好的配置对象。
@@ -341,6 +393,9 @@ const methods = {
     this._agentKey = textOf(config.agentKey) || 'general';
     this._projectId = textOf(config.projectId);
     this._continue = config.continueLatest === true;
+    this._startNewChapter = config.startNewChapter === true;
+    this._historyCursor = '';
+    this._earlierMessages = [];
     this._refs = [];
     this._pendingPrompt = textOf(config.pendingPrompt);
     // localPrelude：宿主页本地合成的开场 assistant 消息（text + chips），**只在内存里渲染，
@@ -444,6 +499,8 @@ const methods = {
       refs,
       pasteRefs: refs.filter((item) => item && item.isPaste),
       regularRefs: refs.filter((item) => !item || !item.isPaste),
+      imageSelectedCount: refs.filter((item) => item && item.kind === 'image').length,
+      imageLimit: imageAttachmentLimit(),
       canSend: !this.data.busy && !uploading && !pendings.length && Boolean(this.draftText() || refs.length),
     }, next);
   },
@@ -531,7 +588,9 @@ const methods = {
       if (!this.isCurrent(pageEpoch)) return false;
       const agent = detail.agent || {};
       this._agentKey = detail.agentKey || this._agentKey;
-      const messages = normalizeDetailMessages(detail);
+      this._earlierMessages = [];
+      const messages = normalizeDetailMessages(detail, this._earlierMessages);
+      this._historyCursor = textOf(detail.messagePage && detail.messagePage.nextCursor);
       const active = detail.activeGeneration && !TERMINAL.has(detail.activeGeneration.status) ? detail.activeGeneration : null;
       const generating = Boolean(active || detail.generating);
       const canRetryLast = hasUnansweredTurn(messages, generating);
@@ -542,6 +601,10 @@ const methods = {
         chipsSpent: chipsSpentFor(messages),
         busy: generating, canStop: Boolean(active), showThinking: generating, canSend: generating ? false : this.hasDraft(),
         canRetryLast,
+        chapterPending: this._startNewChapter,
+        chapterPendingLabel: this._startNewChapter ? chapterLabel(new Date().toISOString()) : '',
+        historyHasMore: Boolean(detail.messagePage && detail.messagePage.hasMore && this._historyCursor),
+        historyLoading: false,
         errorText: canRetryLast ? '军师这次没有完成回答。你的问题已经保留，可以直接重新回答。' : '',
         errorNote: canRetryLast ? '原问题和引用都已保留，不用重新输入。' : '', errorAction: '',
       }), () => { this.toBottom(); this.measureComposer(); });
@@ -556,6 +619,32 @@ const methods = {
       if (kind === 'unauthorized') this.safeSetData({ showLogin: true });
       else this.safeSetData({ errorText: error.message || '会话读取失败', errorNote: '', errorAction: '' });
       return false;
+    }
+  },
+  async loadEarlierMessages() {
+    const epoch = this._epoch;
+    const cursor = this._historyCursor;
+    if (!this._sessionId || !cursor || this.data.historyLoading) return;
+    this.safeSetData({ historyLoading: true });
+    try {
+      const detail = await api.session(this._sessionId, cursor);
+      if (!this.isCurrent(epoch) || cursor !== this._historyCursor) return;
+      const older = normalizePageMessages(detail);
+      const known = new Set(this._earlierMessages.map((item) => item.id));
+      this._earlierMessages = [...older.filter((item) => !known.has(item.id)), ...this._earlierMessages];
+      this._historyCursor = textOf(detail.messagePage && detail.messagePage.nextCursor);
+      const currentIds = new Set(this.data.messages.map((item) => item.id));
+      const added = older.filter((item) => !currentIds.has(item.id));
+      const messages = decorateActiveAsks(decorateChapters([...added, ...this.data.messages]), Boolean(this.data.busy));
+      this.safeSetData(Object.assign({}, this.askPatch(messages, this.data.busy), {
+        historyHasMore: Boolean(detail.messagePage && detail.messagePage.hasMore && this._historyCursor),
+        historyLoading: false,
+      }));
+      this.hydrateImageRefs(messages, epoch);
+    } catch (error) {
+      if (!this.isCurrent(epoch)) return;
+      this.safeSetData({ historyLoading: false });
+      store.handleApiError(error, { fallbackTitle: '更早的对话暂时没读出来' });
     }
   },
   closeLogin() { this.safeSetData({ showLogin: false }); },
@@ -928,7 +1017,12 @@ const methods = {
     wx.showActionSheet({ itemList: ['拍照或选择图片', '从微信聊天选择文件', '引用已有案卷 / 方案 / 资料', '粘贴长文为附卷'], success: (res) => { if (res.tapIndex === 0) this.pickImage(); else if (res.tapIndex === 1) this.pickFile(); else if (res.tapIndex === 2) this.openPicker(); else this.pasteKnowledge(); } });
   },
   pickImage() {
-    wx.chooseMedia({ count: Math.min(4, REF_LIMIT - this._refs.length - this.data.pastePendings.length), mediaType: ['image'], sourceType: ['album', 'camera'], sizeType: ['compressed'], success: async (result) => {
+    const currentImages = this._refs.filter((item) => item.kind === 'image').length;
+    const remainingImages = imageAttachmentLimit() - currentImages;
+    const remainingRefs = REF_LIMIT - this._refs.length - this.data.pastePendings.length;
+    const count = Math.min(remainingImages, remainingRefs);
+    if (count <= 0) { wx.showToast({ title: `一次至多带 ${imageAttachmentLimit()} 张图片`, icon: 'none' }); return; }
+    wx.chooseMedia({ count, mediaType: ['image'], sourceType: ['album', 'camera'], sizeType: ['compressed'], success: async (result) => {
       for (const file of result.tempFiles || []) {
         if (Number(file.size || 0) > 10 * 1024 * 1024) { wx.showToast({ title: '单张图片不能超过 10MB', icon: 'none' }); continue; }
         this.safeSetData({ uploading: true, canSend: false }, () => this.measureComposer());
@@ -1041,9 +1135,14 @@ const methods = {
     const sendSeq = ++this._sendSeq;
     const active = () => this.isCurrent(epoch) && sendSeq === this._sendSeq;
     const sendRefs = displayRefs.map(cleanRef);
-    const userMessage = { id: uid('user'), role: 'user', text, points: [], refs: presentRefs(displayRefs) };
+    const nowIso = new Date().toISOString();
+    const userMessage = {
+      id: uid('user'), role: 'user', text, points: [], refs: presentRefs(displayRefs), at: nowIso,
+      ...(this.data.chapterPending ? { newChapter: true, chapterLabel: chapterLabel(nowIso) } : {}),
+    };
     const messages = decorateActiveAsks(retrying ? this.data.messages : this.data.messages.concat(userMessage), true);
     this._retryNoEcho = false; this._retryRefs = null;
+    this._startNewChapter = false;
     this._draft = '';
     this._lastInputValue = '';
     this._refs = [];
@@ -1069,8 +1168,10 @@ const methods = {
     // 这里必须把 composerSeed 一并清掉：粘贴留下的初值若不清，新挂载的框会把已发出去的话再显示一遍。
     this.safeSetData(Object.assign({}, this.askPatch(messages, true), {
       refs: [], regularRefs: [], pasteRefs: [], pastePendings: [], pasteHint: false,
-      pastePreview: null, chipsSpent: true,
+      imageSelectedCount: 0, imageLimit: imageAttachmentLimit(),
+      pastePreview: null, chipsSpent: true, chapterPending: false, chapterPendingLabel: '',
       busy: true, canStop: false, showThinking: true, canSend: false, inputCount: 0, showCount: false,
+      thinkingText: '正在梳理上下文',
       composerOdd: !this.data.composerOdd, composerSeed: '', errorText: '', errorNote: '', errorAction: '',
     }), () => this.measureComposer());
     this.toBottom();
@@ -1081,7 +1182,16 @@ const methods = {
       };
       const streamed = await generateStream(body, {
         onControl: (control) => { if (active()) this._streamControl = control; else if (control && control.abort) control.abort(); },
-        onGeneration: (data) => { if (!active()) return; this._generationId = data.generationId || data.id || this._generationId; if (data.sessionId) this._sessionId = data.sessionId; this.safeSetData({ canStop: Boolean(this._generationId) }); },
+        onGeneration: (data) => {
+          if (!active()) return;
+          this._generationId = data.generationId || data.id || this._generationId;
+          if (data.sessionId) this._sessionId = data.sessionId;
+          this._runRefNotices = mergedStrings(this._runRefNotices, data.refNotices);
+          const thinkingText = generationProgressText(data.imageProgress);
+          const patch = { canStop: Boolean(this._generationId), thinkingText };
+          if (this._streamIndex != null && this.data.messages[this._streamIndex]) patch[`messages[${this._streamIndex}].streamHint`] = thinkingText;
+          this.safeSetData(patch);
+        },
         onSession: (id) => { if (active() && id) this._sessionId = id; },
         onMeta: (data) => {
           if (!active()) return;
@@ -1176,6 +1286,7 @@ const methods = {
     const item = {
       id: uid(report ? 'report' : 'assistant'), role: 'assistant', text: '', points: [], asks: [], activeAsk: false, report: Boolean(report), reportReady: false, streaming: true,
       typing: !report, streamStarted: false, streamRenderId,
+      streamHint: this.data.thinkingText,
       knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
     };
     this._streamIndex = this.data.messages.length;
@@ -1229,6 +1340,7 @@ const methods = {
       [`messages[${index}].text`]: value.text,
       [`messages[${index}].points`]: value.points,
       [`messages[${index}].asks`]: value.asks,
+      [`messages[${index}].factConfirmation`]: value.factConfirmation,
       [`messages[${index}].truncated`]: value.truncated,
     };
     if (!current.streamStarted && value.text) patch[`messages[${index}].streamStarted`] = true;
@@ -1266,13 +1378,14 @@ const methods = {
         id: current.id, messageId, streaming: false, typing: Boolean(!current.report && current.streamRenderId && current.streamStarted), interrupted: false,
         reportReady: isReportReady(messageId, current.deliverable),
         knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
-        ...(result && result.deliverable ? { deliverable: result.deliverable, text: reportText(result.deliverable), report: true } : {}),
+        ...(result && result.deliverable ? { deliverable: result.deliverable, text: reportText(result.deliverable), report: true, factConfirmation: normalizeReply(result.deliverable).factConfirmation } : {}),
       });
       if (result && result.reply && !finished.report) {
         const reply = normalizeReply(result.reply);
         finished.text = reply.text;
         finished.points = reply.points;
         finished.asks = reply.asks;
+        finished.factConfirmation = reply.factConfirmation;
         finished.truncated = reply.truncated;
       }
       if (finished.report) {
@@ -1416,7 +1529,7 @@ const methods = {
       const agent = detail.agent || {};
       this._agentKey = detail.agentKey || this._agentKey;
       if (active) {
-        const messages = normalizeDetailMessages(detail);
+        const messages = normalizeDetailMessages(detail, this._earlierMessages);
         this.safeSetData(Object.assign({}, this.askPatch(messages, true), {
           title: agent.name || this.data.title, alias: ALIASES[this._agentKey] || '', messages,
           busy: true, canStop: true, showThinking: true, canSend: false, canRetryLast: false,
@@ -1432,7 +1545,7 @@ const methods = {
         }, 1500);
         return;
       }
-      const messages = normalizeDetailMessages(detail);
+      const messages = normalizeDetailMessages(detail, this._earlierMessages);
       const canRetryLast = hasUnansweredTurn(messages, false);
       this._streamIndex = null;
       this._generationId = '';
@@ -1476,6 +1589,11 @@ const methods = {
   },
   applyGenerationSnapshot(result) {
     if (!result) return;
+    this._runRefNotices = mergedStrings(this._runRefNotices, result.refNotices);
+    const thinkingText = generationProgressText(result.imageProgress);
+    const progressPatch = { thinkingText };
+    if (this._streamIndex != null && this.data.messages[this._streamIndex]) progressPatch[`messages[${this._streamIndex}].streamHint`] = thinkingText;
+    this.safeSetData(progressPatch);
     if (result.kind === 'report' || result.deliverable) {
       const index = this.ensureStreamItem(true);
       const deliverable = result.deliverable;
@@ -1546,12 +1664,13 @@ const methods = {
     if (result.kind === 'report' || result.deliverable) item = {
       id: messageId || uid('report'), messageId, role: 'assistant', text: reportText(result.deliverable) || textOf(result.partialText), points: [],
       report: true, reportReady: isReportReady(messageId, result.deliverable), deliverable: result.deliverable, saved: false,
+      factConfirmation: normalizeReply(result.deliverable).factConfirmation,
       knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
     };
     else {
       const reply = normalizeReply(result.reply || { text: result.partialText, truncated: result.status === 'truncated' });
       item = {
-        id: messageId || uid('assistant'), messageId, role: 'assistant', text: reply.text, points: reply.points, asks: reply.asks, truncated: reply.truncated,
+        id: messageId || uid('assistant'), messageId, role: 'assistant', text: reply.text, points: reply.points, asks: reply.asks, factConfirmation: reply.factConfirmation, truncated: reply.truncated,
         knowledgeUsed, knowledgeUsedText: knowledgeUsed.join('、'), refNotices, refNoticesText: refNotices.join('；'),
       };
     }
@@ -1570,6 +1689,72 @@ const methods = {
     this.toBottom();
   },
   reportMessage(index) { const item = this.data.messages[Number(index)]; return item && item.report ? item : null; },
+  async continueDeliveryStage(event) {
+    const item = this.reportMessage(event.currentTarget.dataset.index);
+    const delivery = item && item.deliverable && item.deliverable.delivery;
+    const next = delivery && delivery.nextStage;
+    if (!item || !item.reportReady || !next || !delivery.generationId || this.data.busy || this.data.reportBusy) return;
+    const epoch = this._epoch;
+    const prompt = `继续深化第 ${Number(next.number) || ''} 阶段「${textOf(next.title)}」`;
+    const userItem = { id: uid('user'), role: 'user', text: prompt, points: [], asks: [], refs: [] };
+    this._streamIndex = null;
+    this.safeSetData({ messages: this.data.messages.concat(userItem), busy: true, canStop: false, showThinking: true, reportBusy: item.id });
+    this.ensureStreamItem(true);
+    this.toBottom();
+    try {
+      const result = await api.nextDeliveryStage(delivery.generationId);
+      if (!this.isCurrent(epoch)) return;
+      this.safeSetData({ reportBusy: '' });
+      if (result.generationId && !TERMINAL.has(result.status)) {
+        this.startPolling(result.generationId, epoch);
+        return;
+      }
+      this.finishResult(result, epoch);
+    } catch (error) {
+      if (!this.isCurrent(epoch)) return;
+      this._streamIndex = null;
+      const messages = this.data.messages.filter((message) => !message.streaming);
+      this.safeSetData({ messages, reportBusy: '' });
+      this.finishBusy(chatErrorPatch(error, '后续阶段暂时没有接上'), epoch);
+    }
+  },
+  removeFactCardItem(messageIndex, factId) {
+    const index = Number(messageIndex);
+    const message = this.data.messages[index];
+    const card = message && message.factConfirmation;
+    if (!card || !Array.isArray(card.items)) return;
+    const items = card.items.filter((item) => item.id !== factId);
+    this.safeSetData({ [`messages[${index}].factConfirmation`]: items.length ? Object.assign({}, card, { items }) : null });
+  },
+  async resolveFactCard(event, action, valueText) {
+    const messageIndex = Number(event.currentTarget.dataset.message);
+    const factId = textOf(event.currentTarget.dataset.fact);
+    if (!factId || !Number.isInteger(messageIndex)) return;
+    try {
+      await api.confirmFact(factId, Object.assign({ action }, valueText ? { valueText } : {}));
+      this.removeFactCardItem(messageIndex, factId);
+      const title = action === 'session_only' ? '只在这次会谈里参考' : action === 'edit' ? '已按你的修正记住' : '已确认记住';
+      wx.showToast({ title, icon: 'none' });
+    } catch (error) {
+      store.handleApiError(error, { fallbackTitle: error.message || '这条事实暂时没处理好' });
+    }
+  },
+  confirmFact(event) { return this.resolveFactCard(event, 'confirm'); },
+  sessionOnlyFact(event) { return this.resolveFactCard(event, 'session_only'); },
+  editFact(event) {
+    wx.showModal({
+      title: '改成准确说法',
+      content: '请写完整的一句话，军师会用它替换刚才的推断。',
+      editable: true,
+      placeholderText: '例如：目前有 6 家直营店',
+      confirmText: '保存修正',
+      success: (result) => {
+        const value = textOf(result && result.content).trim();
+        if (result.confirm && value) this.resolveFactCard(event, 'edit', value);
+        else if (result.confirm) wx.showToast({ title: '请先写下准确说法', icon: 'none' });
+      },
+    });
+  },
   reportBody(item, auto) {
     return { title: item.deliverable.title || this.data.title, type: item.deliverable.type || item.deliverable.title || '方案', agentKey: this._agentKey, sessionId: this._sessionId || undefined, content: item.deliverable, projectId: this._projectId || undefined, ...(auto ? { auto: true } : {}) };
   },

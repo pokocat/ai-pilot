@@ -12,6 +12,7 @@ import { resolveIndustryPack, hasIndustryIdentity } from '../data/industryPacks.
 import { ensureInviteCode, buildServiceView } from '../services/community.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { resolveWenceForm } from '../services/wence.js';
+import { ATTACHMENT_CAPABILITIES } from '../services/chatImage.js';
 import { hasCompletedOnboarding } from '../services/onboarding.js';
 import { planFamilyKey, planTierRank, publicUsageLabel, publicUsageLevel, usageView } from '../services/planRules.js';
 
@@ -74,6 +75,8 @@ export async function metaRoutes(app: FastifyInstance) {
     const service = await buildServiceView(user.id).catch(() => null); // V7-13：社群服务分配
     // P0-2：命理总开关下发前端（合规开关直读 DB，不吃 60s 缓存窗口）——前端据此隐藏全部命理入口
     const fortune = await isFeatureEnabled('fortune');
+    // 连续主线逃生开关：默认开；关闭后客户端跨 24h 创建新 Session，服务端仍用 handoff 继承上下文。
+    const conversationContinuity = await isFeatureEnabled('conversation-continuity', true);
     // 问策入口 WP1：A/B 分组由服务端稳定分桶后下发，客户端不猜（开关关闭 → control = 现状）。
     const wenceForm = await resolveWenceForm(user.id);
     return {
@@ -106,7 +109,8 @@ export async function metaRoutes(app: FastifyInstance) {
       understanding,
       inviteCode,
       service,
-      features: { fortune, wenceForm },
+      features: { fortune, wenceForm, conversationContinuity },
+      capabilities: { attachments: ATTACHMENT_CAPABILITIES },
     };
   });
 

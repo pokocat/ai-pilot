@@ -33,14 +33,32 @@ import { notifyReportReady } from '../services/wechatSubscribe.js';
 import { isRecallIntent, sessionRecallScore } from '../services/recallIntent.js';
 import { isSessionGenerating, trackSessionGeneration } from '../services/sessionGeneration.js';
 import { cardSection } from '../services/deliverableSection.js';
-import { updateSessionDigest, readSessionDigest, type SessionDigestItem } from '../services/sessionDigest.js';
+import { updateSessionDigest, readSessionDigest, type SessionDigestItem, type SessionDigestState } from '../services/sessionDigest.js';
 import { enqueueDurableGeneration, type DurableGenerationBody } from '../services/generationRequest.js';
 import { generationSummary, generationView, GenerationJobError } from '../services/generationJobs.js';
 import { pipeGenerationSSE, setupGenerationSSE } from './generations.js';
 import { isFeatureEnabled } from '../services/featureFlag.js';
 import { WENCE_FLAG, firstProactiveTemplate, normalizeChips } from '../services/wence.js';
+import { wantsDeliverableRequest } from '../services/outputIntent.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const SESSION_MESSAGE_PAGE_DEFAULT = 100;
+const SESSION_MESSAGE_PAGE_MAX = 200;
+
+type SessionMessageCursor = { at: string; id: string };
+
+function encodeMessageCursor(row: { createdAt: Date; id: string }): string {
+  return Buffer.from(JSON.stringify({ at: row.createdAt.toISOString(), id: row.id } satisfies SessionMessageCursor)).toString('base64url');
+}
+
+function decodeMessageCursor(raw: unknown): { at: Date; id: string } | null {
+  if (typeof raw !== 'string' || !raw) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as SessionMessageCursor;
+    const at = new Date(parsed.at);
+    return parsed.id && Number.isFinite(at.getTime()) ? { at, id: parsed.id } : null;
+  } catch { return null; }
+}
 
 type GenerationRequestBody = {
   agentKey?: string;
@@ -129,12 +147,10 @@ const DIGEST_BUDGET_EXCEEDED = Symbol('digest-budget-exceeded');
 export async function loadTurnDigest(p: {
   tenantId: string; userId: string; sessionId: string; isNewSession: boolean; willDeliver: boolean;
   budgetMs?: number;
-}): Promise<{ items: SessionDigestItem[]; caughtUp: boolean } | null> {
+}): Promise<SessionDigestState | null> {
   if (p.isNewSession) return null;
-  // caughtUp 只用于报告轮收窄历史窗；纯读路径恒为 false（读到的快照未必已追平，宁可不收窄）。
   const readOnly = async () => {
-    const read = await readSessionDigest(p.sessionId, p.userId).catch(() => null);
-    return read ? { items: read.items, caughtUp: false } : null;
+    return readSessionDigest(p.sessionId, p.userId).catch(() => null);
   };
   if (!p.willDeliver) return readOnly();
 
@@ -255,6 +271,8 @@ export async function sessionRoutes(app: FastifyInstance) {
           projectId: s.projectId,
           generating,
           activeGeneration,
+          lineageId: s.lineageId,
+          continuationOf: s.continuationOf,
           unreadCount,
           // 未读红点（保留兼容既有消费者）：有未读 assistant（=unreadCount>0），或尾条为未读 report
           //（后台产出即置——列表红点提示，见 generate* 的 role='report' 落库）。
@@ -264,19 +282,40 @@ export async function sessionRoutes(app: FastifyInstance) {
     );
   });
 
-  // 会话详情（还原全部历史消息）
-  app.get<{ Params: { id: string } }>('/sessions/:id', async (req, reply) => {
+  // 会话详情：默认只回尾页，向前用不透明复合游标分页。模型上下文由摘要层负责，不靠把全历史塞给端上。
+  app.get<{ Params: { id: string }; Querystring: { messageLimit?: string; before?: string } }>('/sessions/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    const limitRaw = Number(req.query?.messageLimit ?? SESSION_MESSAGE_PAGE_DEFAULT);
+    const messageLimit = Number.isFinite(limitRaw)
+      ? Math.max(1, Math.min(SESSION_MESSAGE_PAGE_MAX, Math.floor(limitRaw)))
+      : SESSION_MESSAGE_PAGE_DEFAULT;
+    const before = req.query?.before ? decodeMessageCursor(req.query.before) : null;
+    if (req.query?.before && !before) return reply.code(400).send({ error: '无效的会话翻页游标', code: 'INVALID_MESSAGE_CURSOR' });
     const s = await prisma.session.findFirst({
       where: { id: req.params.id, userId: user.id },
-      include: { messages: { orderBy: { createdAt: 'asc' } }, agent: true, activeGeneration: true },
+      include: { agent: true, activeGeneration: true },
     });
     if (!s) return reply.code(404).send({ error: '这段对话不存在或已删除', code: 'SESSION_NOT_FOUND' });
+    const pageDesc = await prisma.message.findMany({
+      where: {
+        sessionId: s.id,
+        ...(before ? {
+          OR: [
+            { createdAt: { lt: before.at } },
+            { createdAt: before.at, id: { lt: before.id } },
+          ],
+        } : {}),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: messageLimit + 1,
+    });
+    const hasMore = pageDesc.length > messageLimit;
+    const pageRows = pageDesc.slice(0, messageLimit).reverse();
     // 打开会话即标记已读（消除列表未读红点）。必须 await：此前 fire-and-forget（void + 不等待）
     // 与紧随其后的 GET /sessions 之间存在竞态——客户端拿到本次响应后立刻刷新列表时，
     // lastReadAt 的写入可能还没落库，导致未读红点没有如实清除（已由测试复现）。
     // 这是一次按主键的单行 UPDATE，代价极小，不值得为省这点延迟牺牲「打开即已读」的确定性。
-    await prisma.session.update({ where: { id: s.id }, data: { lastReadAt: new Date() } }).catch(() => {});
+    if (!before) await prisma.session.update({ where: { id: s.id }, data: { lastReadAt: new Date() } }).catch(() => {});
     // P1-A5：会话头的 greet/chips/memText/learnText 与 /agents 列表同口径——取已发布版本，旧版本相应列为 null 则回退 Agent 行。
     const pub = s.agent.publishedVersionId ? await prisma.agentVersion.findUnique({ where: { id: s.agent.publishedVersionId } }) : null;
     return {
@@ -285,17 +324,24 @@ export async function sessionRoutes(app: FastifyInstance) {
       agent: { key: s.agent.key, name: s.agent.name, role: s.agent.role, icon: s.agent.icon, greet: pub?.greet ?? s.agent.greet, chips: (pub?.chipsJson ?? s.agent.chipsJson), memText: pub?.memText ?? s.agent.memText, learnText: pub?.learnText ?? s.agent.learnText },
       title: s.title,
       projectId: s.projectId,
+      lineageId: s.lineageId,
+      continuationOf: s.continuationOf,
       generating: !!(s.activeGeneration && !['completed', 'truncated', 'failed', 'cancelled'].includes(s.activeGeneration.status)) || isSessionGenerating(s.id),
       activeGeneration: s.activeGeneration && !['completed', 'truncated', 'failed', 'cancelled'].includes(s.activeGeneration.status)
         ? generationSummary(s.activeGeneration)
         : null,
       // chips（问策入口 WP1）：从 contentJson.chips 透出到消息层。注意**必须从原始 contentJson 取**——
       // presentMessageContent 的清洗分支在 text 非字符串等情况下会重建对象，不能指望 chips 一定还在 content 里。
-      messages: s.messages.map((m) => ({
+      messages: pageRows.map((m) => ({
         id: m.id, role: m.role, content: presentMessageContent(m.role, m.contentJson), at: m.createdAt,
         refs: (m.refsJson as MessageRef[] | null) ?? undefined,
         chips: normalizeChips((m.contentJson as { chips?: unknown } | null)?.chips) ?? undefined,
       })),
+      messagePage: {
+        hasMore,
+        nextCursor: hasMore && pageRows.length ? encodeMessageCursor(pageRows[0]) : null,
+        limit: messageLimit,
+      },
     };
   });
 
@@ -545,6 +591,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       historyTrace: conversation.trace,
       sessionMode,
       digestItems: digest?.items ?? null,
+      digestTrace: digest ?? null,
       });
 
     try {
@@ -560,7 +607,6 @@ export async function sessionRoutes(app: FastifyInstance) {
           harvestProphecies(user, agentKey, replyChat.text, replyChat.truncated);
           bumpSessionDigest(user, session.id);
           bumpSessionTitle(session.id);
-        bumpSessionTitle(session.id);
           await prisma.session.update({ where: { id: session.id }, data: { updatedAt: new Date() } });
           const learned = await learn();
           const creditBalance = creditReservation?.balance ?? 0;
@@ -826,6 +872,7 @@ export async function sessionRoutes(app: FastifyInstance) {
         historyTrace: conversation.trace,
         sessionMode,
         digestItems: digest?.items ?? null,
+        digestTrace: digest ?? null,
       });
 
       const learnSse = async () => {
@@ -1073,9 +1120,10 @@ function mergeHistory(messages: { role: string; text: string }[]): { role: strin
 /** 本轮该带几条原文：仅「报告轮 + 快照已追平且非空」三条件同时成立才收窄到 8 条，其余一律沿用 16 条。 */
 export function deliverableRecentLimit(
   willDeliver: boolean,
-  digest: { items: SessionDigestItem[]; caughtUp: boolean } | null,
+  digest: Pick<SessionDigestState, 'items' | 'caughtUp' | 'status'> | ({ items: SessionDigestItem[]; caughtUp: boolean; status?: undefined }) | null,
 ): number | undefined {
-  return willDeliver && digest?.caughtUp && digest.items.length > 0 ? DELIVERABLE_HISTORY_MESSAGES : undefined;
+  const caughtUp = digest?.status ? digest.status === 'caught_up' : digest?.caughtUp;
+  return willDeliver && caughtUp && digest!.items.length > 0 ? DELIVERABLE_HISTORY_MESSAGES : undefined;
 }
 
 export async function loadConversationHistory(
@@ -1170,6 +1218,4 @@ function setupSSE(reply: FastifyReply) {
   });
 }
 
-export function wantsDeliverableRequest(text: string): boolean {
-  return /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|(?:重新)?出.{0,4}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|战略体检|转成军令|生成纪要/.test(text);
-}
+export { wantsDeliverableRequest } from '../services/outputIntent.js';

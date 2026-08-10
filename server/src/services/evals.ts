@@ -11,7 +11,7 @@ import { generateDeliverable, chatComplete, completeJson } from '../llm/gateway.
 import { getAiConfig } from './aiConfig.js';
 import { cardSection } from './deliverableSection.js';
 import type { PreviewTarget } from './agentVersions.js';
-import type { Deliverable, PricingTier, SuggestedTier } from '../../../shared/contracts';
+import type { Deliverable, EvalCaseContext, PricingTier, SuggestedTier } from '../../../shared/contracts';
 
 // 评分 → 建议定价档位（token 消耗倍率）。从高到低取第一个达标的。
 export const PRICING_TIERS: PricingTier[] = [
@@ -25,6 +25,35 @@ export function suggestTier(score: number | null): SuggestedTier {
   if (score === null) return { score: null, tier: null };
   const tier = PRICING_TIERS.find((t) => score >= t.minScore) ?? PRICING_TIERS[PRICING_TIERS.length - 1];
   return { score, tier };
+}
+
+export const COACH_QUALITY_RUBRIC = [
+  '像了解客户的真人教练，而不是通用 AI：能准确接住客户此刻的处境，并使用给定上下文中的具体事实校准回答。',
+  '有清晰立场：指出哪里做得好、哪里有风险、原因是什么，不用无取舍的选项堆砌代替判断。',
+  '有人情味但不谄媚：语气自然、尊重、能共情，不写机构公文、客服话术或空泛鼓励。',
+  '有基于事实的洞见或惊喜：能连接事实、指出更深因果或反常识之处，同时不编造。',
+  '给出与当前阶段匹配、足够具体的下一步；信息不足时只追问真正影响判断的关键问题。',
+].join('\n');
+
+export function effectiveEvalRubric(caseRubric: string | null | undefined): string {
+  const specific = caseRubric?.trim();
+  return specific ? `${COACH_QUALITY_RUBRIC}\n本用例额外标准：${specific}` : COACH_QUALITY_RUBRIC;
+}
+
+/** 把评测用的已知客户上下文交给评委，否则“是否理解我”这一维没有可核对的事实基线。 */
+export function evalJudgeInput(input: string, context?: EvalCaseContext | null): string {
+  if (!context) return input;
+  const facts = [
+    context.companyName ? `公司/品牌：${context.companyName}` : '',
+    context.industry ? `行业：${context.industry}` : '',
+    context.stage ? `阶段：${context.stage}` : '',
+    context.pain ? `当前难点：${context.pain}` : '',
+    ...(context.memories ?? []).map((v) => `长期记忆：${v}`),
+    ...(context.understanding ?? []).map((v) => `客户理解：${v}`),
+    ...(context.digestItems ?? []).map((v) => `既往脉络：${v.text}`),
+    ...(context.history ?? []).map((v) => `最近对话-${v.role === 'user' ? '客户' : '军师'}：${v.text}`),
+  ].map((v) => v.trim()).filter(Boolean).slice(0, 40);
+  return facts.length ? `${input}\n\n【评委可核对的已知客户上下文】\n${facts.join('\n')}` : input;
 }
 
 // P1-A2：回收卡死的 run（进程重启/异常导致永久 running），下次启动评测时清理。
@@ -51,7 +80,7 @@ async function judge(input: string, output: string, rubric: string | null): Prom
     '你是严格、客观的 AI 回答评测评委。根据【评分标准】给【被测回答】打 0-10 分（10=完全达标且出色，5=及格，0=完全跑题/有害）。',
     '重点看：是否切题、是否专业可执行、是否符合标准、有无编造。只输出 JSON：{"score": 数字, "note": "一句话理由"}。',
   ].join('\n');
-  const user = `【用户问题】\n${input}\n\n【评分标准】\n${rubric || '回答是否专业、切题、可执行、无编造。'}\n\n【被测回答】\n${output.slice(0, 6000)}`;
+  const user = `【用户问题】\n${input}\n\n【评分标准】\n${effectiveEvalRubric(rubric)}\n\n【被测回答】\n${output.slice(0, 6000)}`;
   // P1-A2：评分用 temperature=0（可复现）+ 可选独立评委模型 JUDGE_MODEL（避免被测模型自评；留空=同全局模型）。
   const j = await completeJson(sys, user, { temperature: 0, model: process.env.JUDGE_MODEL || undefined });
   if (!j || typeof j.score !== 'number') return { score: null, note: '未配置真实模型，无法评分（mock）' };
@@ -104,7 +133,7 @@ async function processRun(runId: string, agentKey: string, cases: CaseRow[], tar
   let weightTotal = 0;
   let scored = 0;
   for (const c of cases) {
-    const profile = (c.contextJson as { companyName?: string; industry?: string; stage?: string; pain?: string } | null) ?? undefined;
+    const profile = (c.contextJson as EvalCaseContext | null) ?? undefined;
     const built = await buildSandboxContext({ agentKey, userMessage: c.input, target, profile });
     if (!built) continue;
     const t0 = Date.now();
@@ -130,7 +159,7 @@ async function processRun(runId: string, agentKey: string, cases: CaseRow[], tar
     // P1-A2：产出失败不送评委打分（否则把「基建失败」混成「答得差」，污染均分），标记 unscored。
     const { score, note } = failed
       ? { score: null as number | null, note: '产出失败，本条不计分' }
-      : await judge(c.input, output, c.rubric);
+      : await judge(evalJudgeInput(c.input, profile), output, c.rubric);
     await prisma.evalCaseResult.create({
       data: { runId, caseId: c.id, input: c.input, output: output.slice(0, 8000), judgeScore: score, judgeNote: note, inputTokens, outputTokens, latencyMs },
     });

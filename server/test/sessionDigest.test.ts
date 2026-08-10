@@ -17,8 +17,10 @@ import {
   readSessionDigest,
   formatDigestBlock,
   __setDigestExtractorForTest,
+  __setDigestCompactorForTest,
   type DigestBatchMessage,
   type SessionDigestItem,
+  type SessionDigestState,
 } from '../src/services/sessionDigest.js';
 import { buildGenContext } from '../src/services/context.js';
 import { loadConversationHistory, loadTurnDigest, deliverableRecentLimit } from '../src/routes/sessions.js';
@@ -27,11 +29,13 @@ import { buildSystemParts, type GenContext } from '../src/llm/schema.js';
 before(async () => { await getApp(); });
 after(async () => {
   __setDigestExtractorForTest(null);
+  __setDigestCompactorForTest(null);
   await closeApp();
 });
 
 beforeEach(async () => {
   __setDigestExtractorForTest(null);
+  __setDigestCompactorForTest(null);
   await cleanBusiness();
   await seedBaseline();
 });
@@ -64,7 +68,7 @@ async function seedSession(n: number, atMs?: (i: number) => number): Promise<Fix
       sessionId: session.id,
       role: isUser ? 'user' : 'assistant',
       contentJson: { text: i === 2 ? `我们${KEY_FACT_TEXT}` : `${isUser ? '客户' : '军师'}第 ${i} 轮的常规发言，没有硬信息。` },
-      // 逐条错开 1 分钟：游标是 createdAt 严格大于，缺省用严格递增让分批确定。
+      // 缺省逐条错开 1 分钟；同毫秒回归会覆盖成相同时间，靠 (createdAt,id) 复合游标续读。
       createdAt: new Date(atMs ? atMs(i) : BASE_AT + i * 60_000),
     });
   }
@@ -81,7 +85,7 @@ async function appendMessage(f: Fixture, id: string, text: string, offsetMin: nu
 }
 
 /** 反复调用直到追平（防止无限循环：批数上限内必须收敛）。 */
-async function drain(f: Fixture): Promise<{ items: SessionDigestItem[]; version: number; caughtUp: boolean }> {
+async function drain(f: Fixture): Promise<SessionDigestState> {
   let res = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
   for (let guard = 0; !res.caughtUp && guard < 20; guard++) {
     res = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
@@ -111,6 +115,8 @@ describe('长会话：早期事实进快照、可溯源、能注入', () => {
 
     const res = await drain(f);
     assert.equal(res.caughtUp, true, '循环调用后应当追平');
+    assert.equal(res.status, 'caught_up');
+    assert.equal(res.pendingMessages, 0);
     assert.equal(batches.length, 10, '200 条 / 每批 20 条 = 10 批');
     assert.ok(batches.every((b) => b.length <= 20), '时间戳互不相同时任何一批都不超过 20 条');
     // 强断言：批次并集必须**严格等于**全部消息、顺序一致、无重复——漏一条或重一条都算增量游标写错了。
@@ -143,11 +149,14 @@ describe('长会话：早期事实进快照、可溯源、能注入', () => {
 
     // buildGenContext 侧接线：传 digestItems 就该渲染出 digestLine 并记 trace。
     const { ctx } = await buildGenContext({
-      userId: f.userId, tenantId: f.tenantId, agentKey: 'general', userMessage: '接下来怎么打', digestItems: res.items,
+      userId: f.userId, tenantId: f.tenantId, agentKey: 'general', userMessage: '接下来怎么打',
+      digestItems: res.items, digestTrace: res,
     });
     assert.ok(ctx.digestLine?.includes(KEY_FACT_TEXT), 'buildGenContext 把条目渲染进 digestLine');
     assert.equal(ctx.contextTrace?.digest?.items, res.items.length);
     assert.equal(ctx.contextTrace?.digest?.injectedChars, ctx.digestLine!.length);
+    assert.equal(ctx.contextTrace?.digest?.status, 'caught_up');
+    assert.equal(ctx.contextTrace?.digest?.coveredThroughMessageId, f.ids[f.ids.length - 1]);
 
     // 不传则完全不注入（无快照的会话行为不变）。
     const { ctx: bare } = await buildGenContext({
@@ -264,6 +273,7 @@ describe('mock 安全', () => {
     const res = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
     assert.deepEqual(res.items, [], '宁缺勿假：一条伪造摘要都不许有');
     assert.equal(res.caughtUp, false, '没消化成功就不能报告追平');
+    assert.equal(res.status, 'failed');
     assert.equal(await readSessionDigest(f.sessionId, f.userId), null, '不落快照行 → 之后真实 provider 就绪时还能从头补');
   });
 
@@ -273,6 +283,7 @@ describe('mock 安全', () => {
     const res = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
     assert.deepEqual(res.items, []);
     assert.equal(res.caughtUp, false);
+    assert.equal(res.status, 'failed');
   });
 });
 
@@ -451,6 +462,7 @@ describe('抽取失败熔断', () => {
     const res = await updateSessionDigest(args);
     assert.equal(calls, 3, '第 4 次落在冷却期内，一次调用都不该发出');
     assert.equal(res.caughtUp, false, '冷却期返回现状且不谎报追平');
+    assert.equal(res.status, 'cooldown');
     assert.deepEqual(res.items, [], '冷却期不伪造条目');
   });
 
@@ -484,7 +496,7 @@ describe('抽取失败熔断', () => {
 // ───────────────── 12) 同毫秒边界（P2-1） ─────────────────
 
 describe('同毫秒边界', () => {
-  test('capacity 边界落在同毫秒组中间 → 组被补齐，不丢消息', async () => {
+  test('capacity 边界落在同毫秒组中间 → 复合游标续读，不丢消息', async () => {
     // 25 条：第 20、21 条（下标 19/20）同毫秒。capacity=20 恰好切在这一组中间。
     const f = await seedSession(25, (i) => BASE_AT + (i >= 20 ? 19 : i) * 60_000);
     const batches: DigestBatchMessage[][] = [];
@@ -496,25 +508,160 @@ describe('同毫秒边界', () => {
 
     assert.equal(res.caughtUp, true);
     const covered = batches.flat().map((m) => m.id);
-    assert.deepEqual([...covered].sort(), [...f.ids].sort(), '25 条一条都不能少（同毫秒兄弟不得被游标跳过）');
+    assert.deepEqual(covered, f.ids, '25 条一条都不能少且顺序稳定（同毫秒兄弟不得被游标跳过）');
     assert.equal(new Set(covered).size, covered.length, '也不该重复喂');
-    assert.ok(batches[0].length >= 21, '首批为闭合同毫秒组而略超 20 条——这个方向的偏差是对的');
+    assert.equal(batches[0].length, 20, '固定批大小不再被同毫秒组撑大');
+    assert.equal(batches[1].length, 5, '下一次从同毫秒内的下一个 id 继续');
   });
 
-  test('分批切片同样不从同毫秒组中间切开', async () => {
-    // 40 条全部同毫秒：只能整组一批送出，绝不能切成两批（切了就丢后半组）。
+  test('40 条全部同毫秒仍可安全分成两批', async () => {
     const f = await seedSession(40, () => BASE_AT);
     const batches: DigestBatchMessage[][] = [];
     __setDigestExtractorForTest(async ({ batch }) => { batches.push(batch); return { items: [] }; });
 
     const res = await drain(f);
     assert.equal(res.caughtUp, true);
-    assert.equal(batches.length, 1, '同毫秒组不可分割 → 只能一批');
-    assert.equal(batches[0].length, 40, '整组 40 条全部送进同一批');
+    assert.equal(batches.length, 2);
+    assert.ok(batches.every((batch) => batch.length === 20));
+    assert.deepEqual(batches.flat().map((m) => m.id), f.ids);
+  });
+
+  test('游标推进后补写同毫秒且 id 更后的消息，下一次仍能拾取', async () => {
+    const f = await seedSession(1, () => BASE_AT);
+    const batches: DigestBatchMessage[][] = [];
+    __setDigestExtractorForTest(async ({ batch }) => { batches.push(batch); return { items: [] }; });
+    await drain(f);
+
+    await prisma.message.create({
+      data: { id: 'zz-late-same-ms', sessionId: f.sessionId, role: 'user', contentJson: { text: '同毫秒晚到的补充' }, createdAt: new Date(BASE_AT) },
+    });
+    const next = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
+    assert.equal(next.status, 'caught_up');
+    assert.deepEqual(batches.at(-1)?.map((m) => m.id), ['zz-late-same-ms']);
   });
 });
 
-// ───────────────── 13) 归属校验（P2-2） ─────────────────
+// ───────────────── 13) 上限状态（不再与“尚未追平”混为一谈） ─────────────────
+
+describe('摘要上限状态', () => {
+  test('已有 400 条且仍有未处理消息 → 明确返回 capped，不再伪装 pending', async () => {
+    const f = await seedSession(1);
+    const items: SessionDigestItem[] = Array.from({ length: 400 }, (_, i) => ({
+      kind: 'fact', text: `存量事实 ${i}`, sourceMessageIds: [`source-${i}`], at: new Date(BASE_AT).toISOString(),
+    }));
+    await prisma.sessionContextSnapshot.create({
+      data: { sessionId: f.sessionId, tenantId: f.tenantId, userId: f.userId, version: 40, itemsJson: items },
+    });
+    let calls = 0;
+    __setDigestExtractorForTest(async () => { calls++; return { items: [] }; });
+
+    const got = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
+    assert.equal(got.status, 'capped');
+    assert.equal(got.caughtUp, false);
+    assert.equal(got.pendingMessages, 1);
+    assert.equal(calls, 0, '撞顶后不继续空烧抽取调用');
+    assert.equal((await readSessionDigest(f.sessionId, f.userId))?.status, 'capped');
+  });
+});
+
+// ───────────────── 14) 滚动合并与多实例写保护（A2） ─────────────────
+
+describe('摘要滚动合并', () => {
+  const oldItems = (count: number): SessionDigestItem[] => Array.from({ length: count }, (_, i) => ({
+    kind: i % 5 === 0 ? 'decision' : 'fact',
+    text: `历史索引 ${i}`,
+    sourceMessageIds: [`source-${i}`],
+    at: new Date(BASE_AT + i * 1_000).toISOString(),
+  }));
+
+  test('接近上限先合并成活跃态，再从原游标继续抽本段增量', async () => {
+    const f = await seedSession(1);
+    await prisma.sessionContextSnapshot.create({
+      data: { sessionId: f.sessionId, tenantId: f.tenantId, userId: f.userId, version: 35, itemsJson: oldItems(350) },
+    });
+    let compactCalls = 0;
+    __setDigestCompactorForTest(async ({ active, segment }) => {
+      compactCalls++;
+      return { items: [...active, ...segment].slice(-80).map(({ kind, text, sourceMessageIds }) => ({ kind, text, sourceMessageIds })) };
+    });
+    __setDigestExtractorForTest(async ({ batch }) => ({
+      items: [{ kind: 'fact', text: '合并后新增：门店 18 家', sourceMessageIds: [batch[0].id] }],
+    }));
+
+    const got = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
+    assert.equal(got.status, 'caught_up');
+    assert.equal(got.segment, 1);
+    assert.equal(got.activeItems.length, 80);
+    assert.equal(got.segmentItems.length, 1);
+    assert.ok(got.segmentItems[0].sourceMessageIds.includes(f.ids[0]));
+    assert.equal(compactCalls, 1);
+
+    const again = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
+    assert.equal(again.version, got.version, '没有新消息、未再次达阈值时完全幂等');
+    assert.equal(compactCalls, 1);
+  });
+
+  test('合并崩溃不推进消息游标、不擦旧索引', async () => {
+    const f = await seedSession(1);
+    await prisma.sessionContextSnapshot.create({
+      data: { sessionId: f.sessionId, tenantId: f.tenantId, userId: f.userId, version: 7, itemsJson: oldItems(350) },
+    });
+    __setDigestCompactorForTest(async () => { throw new Error('compactor crashed'); });
+    let extractCalls = 0;
+    __setDigestExtractorForTest(async () => { extractCalls++; return { items: [] }; });
+
+    const got = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
+    assert.equal(got.status, 'failed');
+    assert.equal(got.version, 7);
+    assert.equal(got.coveredThroughMessageId, null);
+    assert.equal(got.items.length, 350);
+    assert.equal(extractCalls, 0, '合并未落稳前不能越过它继续推进新消息');
+  });
+
+  test('1000 条持续更新会触发滚动合并，最终仍追平且不撞 capped', async () => {
+    const f = await seedSession(1_000);
+    const covered: string[] = [];
+    let compactCalls = 0;
+    __setDigestExtractorForTest(async ({ batch }) => {
+      covered.push(...batch.map((m) => m.id));
+      return { items: batch.slice(0, 10).map((m) => ({ kind: 'fact' as const, text: `索引 ${m.id}`, sourceMessageIds: [m.id] })) };
+    });
+    __setDigestCompactorForTest(async ({ active, segment }) => {
+      compactCalls++;
+      return { items: [...active, ...segment].slice(-80).map(({ kind, text, sourceMessageIds }) => ({ kind, text, sourceMessageIds })) };
+    });
+
+    const got = await drain(f);
+    assert.equal(got.status, 'caught_up');
+    assert.equal(got.pendingMessages, 0);
+    assert.equal(got.coveredThroughMessageId, f.ids.at(-1));
+    assert.ok(compactCalls >= 1, `应至少发生一次滚动合并，实际 ${compactCalls}`);
+    assert.deepEqual(covered, f.ids, '消息游标始终无重无漏');
+    assert.ok(got.items.length < 350, '活跃态 + 当前段回到安全水位');
+  });
+
+  test('版本 CAS 冲突会重读后重试，不让外部实例写入被覆盖', async () => {
+    const f = await seedSession(1);
+    let calls = 0;
+    __setDigestExtractorForTest(async ({ batch }) => {
+      calls++;
+      if (calls === 1) {
+        await prisma.sessionContextSnapshot.create({
+          data: { sessionId: f.sessionId, tenantId: f.tenantId, userId: f.userId, version: 1, itemsJson: [] },
+        });
+      }
+      return { items: [{ kind: 'fact', text: 'CAS 后仍写入', sourceMessageIds: [batch[0].id] }] };
+    });
+
+    const got = await updateSessionDigest({ tenantId: f.tenantId, userId: f.userId, sessionId: f.sessionId });
+    assert.equal(got.status, 'caught_up');
+    assert.equal(got.version, 2);
+    assert.equal(calls, 2, '首次 create 冲突后应重读快照并重新抽取');
+    assert.ok(got.items.some((item) => item.text === 'CAS 后仍写入'));
+  });
+});
+
+// ───────────────── 15) 归属校验（P2-2） ─────────────────
 
 describe('快照归属', () => {
   test('他人既读不到也写不了，原主不受影响', async () => {
@@ -538,7 +685,7 @@ describe('快照归属', () => {
   });
 });
 
-// ───────────────── 14) 提示词注入清洗（P1-3） ─────────────────
+// ───────────────── 16) 提示词注入清洗（P1-3） ─────────────────
 
 describe('摘要文本清洗', () => {
   test('抽取器返回带换行与【】的文本 → 写路径清洗，伪造块进不了 system 段', async () => {
@@ -591,7 +738,7 @@ describe('摘要文本清洗', () => {
   });
 });
 
-// ───────────────── 15) 级联删除 ─────────────────
+// ───────────────── 17) 级联删除 ─────────────────
 
 describe('会话删除', () => {
   test('删会话 → 快照行随之消失（含路由的「先删消息再删会话」顺序）', async () => {

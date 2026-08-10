@@ -42,6 +42,8 @@ export async function resetBusinessData(prisma: PrismaClient): Promise<void> {
   await prisma.knowledgeChunk.deleteMany();
   await prisma.knowledgeItem.deleteMany();
   await prisma.deliverable.deleteMany();
+  // 可确认客户事实引用 User/Tenant，且可能关联来源会话/消息；必须在会话、用户之前清空。
+  await prisma.userFact.deleteMany();
   await prisma.session.deleteMany();
   await prisma.memory.deleteMany();
   await prisma.project.deleteMany();

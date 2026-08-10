@@ -169,6 +169,25 @@ ORDER BY status;
 入口；若回滚服务端，先确认没有 active job，保留新增表与可空字段，避免向后迁移造成数据损失。上线后按
 `docs/CHAT_STREAMING_RELIABILITY_PLAN.md` §12.4 连续观察 24 小时，达标前不得标记生产验收完成。
 
+#### 连续会话、事实确认与 9 图批处理首次发布（2026-08-10）
+
+本次 schema 仍是加法：新增 `user_fact`、`session_handoff` 与两组 enum；`session` 增加血缘字段；
+`generation_job/attempt` 增加复杂交付、分类和图片检查点字段；`memory` 增加 `reinforcedAt`；
+`knowledge_item` 增加受控推理副本的 key/type/size。存量 Session 血缘与存量图片推理副本均按首次使用懒补，
+不做停机全表回填。服务端新增 `sharp` 原生依赖，生产必须从新版 lockfile 执行 `npm ci`，不能只复制旧
+`node_modules`；构建机/运行机平台不同时应在目标 Linux 主机重新安装依赖。
+
+发布顺序：
+
+1. 备份数据库，先用 `prisma migrate diff --from-schema-datasource ... --script` 对线上真 schema 复核；出现 DROP、缩窄类型或存量非空唯一约束时停止，禁止直接加 `--accept-data-loss`。
+2. 发布服务端并执行 `npm ci && npx prisma generate && npm run db:push && npm run build`；先不上传小程序。
+3. 运行 `npm run db:prewarm-session-digests` 只读统计长主线。确认目标量和模型余量后，才运行 `npm run db:prewarm-session-digests -- --apply --limit=200 --min-messages=17`；非 `caught_up` 会以退出码 2 明确失败。
+4. 内部账号验收：跨 24h 续接同 `sessionId`、尾页 100 条可向上翻、事实确认不新增聊天消息、否定报告不进成果路径、复杂方案只在点击后生成下一阶段、9 图显示 `4+4+1` 阅图进度且失败图号可见。
+5. 核对 `/api/metrics` 的摘要 pending/capped/compaction 指标和告警，再上传原生小程序。`FeatureFlag.id='conversation-continuity'` 默认不存在即视为开启；需要逃生时写一条 `enabled=false`，此后跨 24h 改建新 Session，但仍有 handoff，不回退零上下文。
+
+回滚应用版本时保留新增表、enum、可空列与图片推理副本；不要向后删 schema。只关闭连续主线开关不会影响
+在途任务，也不会拆分现有 Session，只影响下一次跨 24h 的冷进和首条新消息。
+
 #### 方案/支付账本首次发布前置（2026-08-02）
 
 本次 schema 会为微信 `transactionId` 与 `(userId, clientRequestId)` 增加唯一约束。不要直接把 `db push` 当成数据清洗；先只读检查历史重复值（正常应为 0 行）：

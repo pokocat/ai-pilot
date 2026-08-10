@@ -622,20 +622,32 @@ export async function* openaiChatStream(
 }
 
 /** 轻量纯文本补全（供记忆抽取 / 汇总归纳）：返回 content 文本。 */
-export async function openaiRaw(
+export interface OpenaiRawOptions { allowThinking?: boolean; affinityKey?: string; maxTokens?: number; signal?: AbortSignal; images?: ImageInput[] }
+
+export async function openaiRawMetered(
   cfg: ResolvedAiConfig,
   system: string,
   user: string,
   // maxTokens：**缺省仍是 700**（辅助抽取的既定预算，不动）。只有产物本身就长的调用方才传大值——
   // 目前唯一的是海报 AI 排版引擎（gateway.completeText，一整页 HTML/CSS 几千 token，700 会被硬截断成半张页面）。
-  opts: { allowThinking?: boolean; affinityKey?: string; maxTokens?: number; signal?: AbortSignal } = {},
-): Promise<string> {
+  opts: OpenaiRawOptions = {},
+): Promise<Metered<string>> {
   const allowThinking = opts.allowThinking ?? true;
   const data = await callChat(cfg, {
     max_tokens: maxTokensForThinking(opts.maxTokens ?? 700, cfg, allowThinking),
-    messages: [{ role: 'system', content: system }, { role: 'user', content: user }] as OAMessage[],
+    messages: [{ role: 'system', content: system }, { role: 'user', content: openaiUserContent(user, opts.images) }] as OAMessage[],
   }, 'chat_completion', opts.affinityKey, allowThinking, opts.signal);
-  return (data.choices?.[0]?.message?.content ?? '').trim();
+  return { result: (data.choices?.[0]?.message?.content ?? '').trim(), usage: usageOf(data) };
+}
+
+/** 兼容既有辅助调用的纯文本出口。 */
+export async function openaiRaw(
+  cfg: ResolvedAiConfig,
+  system: string,
+  user: string,
+  opts: OpenaiRawOptions = {},
+): Promise<string> {
+  return (await openaiRawMetered(cfg, system, user, opts)).result;
 }
 
 // —— 工具调用循环的 provider step（多轮 search_knowledge / recall_memory → 最终答案）——

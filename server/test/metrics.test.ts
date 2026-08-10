@@ -19,6 +19,7 @@ import {
   noteRegistration, noteModeration, noteCreditDelta, notePlanGateBlocked,
   notePayOrderCreated, notePayApplied, notePayRefund, notePaySweep,
   noteChatFirstToken, noteChatGenerationFinalized,
+  noteSessionDigestState, noteSessionDigestCompaction,
 } from '../src/services/metrics.js';
 import { __setPoolForTest, __resetLlmPool } from '../src/services/llmPool.js';
 import { __resetLlmGate, acquireLlmSlot } from '../src/services/llmGate.js';
@@ -181,6 +182,23 @@ describe('指标内容', () => {
     assert.match(body, /junshi_chat_generation_total\{result="failed"\} 1/);
     assert.match(body, /^junshi_chat_generation_recovered_total 1$/m);
     assert.match(body, /junshi_chat_usage_estimated_total\{provider="unknown"\} 1/);
+  });
+
+  test('长会话摘要状态、压力与滚动压缩均可告警且不带用户级标签', async () => {
+    noteSessionDigestState('caught_up', 42, 0);
+    noteSessionDigestState('pending', 360, 18);
+    noteSessionDigestState('capped', 400, 75);
+    noteSessionDigestCompaction('succeeded');
+    noteSessionDigestCompaction('failed');
+    const body = await get();
+    assert.match(body, /junshi_session_digest_updates_total\{status="caught_up",pressure="normal"\} 1/);
+    assert.match(body, /junshi_session_digest_updates_total\{status="pending",pressure="near_cap"\} 1/);
+    assert.match(body, /junshi_session_digest_updates_total\{status="capped",pressure="capped"\} 1/);
+    assert.match(body, /junshi_session_digest_compactions_total\{outcome="succeeded"\} 1/);
+    assert.match(body, /junshi_session_digest_compactions_total\{outcome="failed"\} 1/);
+    assert.match(body, /junshi_session_digest_items_bucket\{status="pending",le="375"\} 1/);
+    assert.match(body, /junshi_session_digest_pending_messages_bucket\{status="capped",le="100"\} 1/);
+    assert.doesNotMatch(body, /sessionId|userId/);
   });
 
   test('产出降级 / 截断 / 审核 / 禁写闸计数', async () => {

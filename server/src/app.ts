@@ -38,6 +38,7 @@ import { reportShareRoutes } from './routes/reportShare.js';
 import { knowledgeRoutes } from './routes/knowledge.js';
 import { knowledgePipelineRoutes } from './routes/knowledgePipeline.js';
 import { memoryRoutes } from './routes/memories.js';
+import { factRoutes } from './routes/facts.js';
 import { graphRoutes } from './routes/graph.js';
 import { planRoutes } from './routes/plans.js';
 import { skuRoutes } from './routes/sku.js';
@@ -280,6 +281,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(communityRoutes, { prefix: '/api' }); // V7-13：邀请码 / 社群服务 / 档案工作台
   await app.register(wenceRoutes, { prefix: '/api' }); // 问策入口 WP1：提示词池下发 + 客户端埋点（两条均游客可用）
   await app.register(memoryRoutes, { prefix: '/api' });
+  await app.register(factRoutes, { prefix: '/api' }); // 可审计客户事实确认；按钮不产生聊天消息
   await app.register(graphRoutes, { prefix: '/api' });
   await app.register(planRoutes, { prefix: '/api' });
   await app.register(skuRoutes, { prefix: '/api' }); // V7-12：单次付费商品（SKU 下单，回调复用 pay 幂等底座）

@@ -36,7 +36,7 @@
 
   <!-- 对话区：滚动容器留在宿主页（scroll-into-view 不进模板，避免流式自动滚底带着整张列表重算）。-->
   <scroll-view scroll-y enhanced show-scrollbar="false" scroll-into-view="{{bottomAnchor}}" class="wence-scroll {{coachOn ? 'coach-lift' : ''}}">
-    <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast, chipsSpent}}"></template>
+    <template is="chat-message-list" data="{{messages, title, advisorAvatar, colorKey, accepting, reportBusy, posterEnabled, posterPrice, askAnsweredCount, askTotal, askReady, askRemaining, askComposerOpen, askComposerMessage, askComposerQuestion, showThinking, errorText, canRetryLast, chipsSpent, chapterPending, chapterPendingLabel, historyHasMore, historyLoading}}"></template>
   </scroll-view>
 
   <!-- 提示问题 pill：浮在浮岛上方。点击 = 直接代发（textarea 铁律禁止 value 绑定，

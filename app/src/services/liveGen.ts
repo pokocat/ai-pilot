@@ -5,7 +5,7 @@ import { classifyReconcileTick, reportCloseAction, type ReconcileOutcome } from 
 import { apiErrorPresentation } from './apiError';
 import type {
   GenRequest, GenResult, ChatReply, Deliverable, DeliverableSection, SessionDetail, SessionMessage,
-  GenerationPhase, GenerationStatus,
+  GenerationPhase, GenerationStatus, ImageGenerationProgress,
 } from '../../../shared/contracts';
 
 // 收尾裁决的纯逻辑在 liveGenCore（可单测）；这里保留 re-export 兼容既有引用（chat/index.tsx）。
@@ -54,7 +54,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 // 页面据此做 setMsgs / 滚动 / busy 等副作用。所有方法都应对「当前无对应气泡」保持幂等/安全。
 export interface LiveGenView {
   onSession(sessionId: string): void;
-  onGeneration(data: { generationId: string; phase?: GenerationPhase; status?: GenerationStatus }): void;
+  onGeneration(data: { generationId: string; phase?: GenerationPhase; status?: GenerationStatus; imageProgress?: ImageGenerationProgress | null; refNotices?: string[] }): void;
   startChat(): void;
   appendToken(text: string): void;
   replaceToken(text: string): void;
@@ -108,6 +108,7 @@ interface LiveGenEntry {
   generationId?: string;
   generationPhase?: GenerationPhase;
   generationStatus?: GenerationStatus;
+  imageProgress?: ImageGenerationProgress | null;
   buildDeliverable: LiveGenStartParams['buildDeliverable'];
   autoSave: LiveGenStartParams['autoSave'];
   // —— 累计快照 ——
@@ -267,12 +268,14 @@ function makeHandlers(entry: LiveGenEntry): StreamHandlers {
       entry.generationId = data.generationId;
       entry.generationPhase = data.phase;
       entry.generationStatus = data.status;
+      entry.imageProgress = data.imageProgress;
+      if (data.refNotices?.length) entry.pendingRefNotices = data.refNotices;
       if (data.sessionId) bindSession(entry, data.sessionId);
       entry.view?.onGeneration(data);
       // 用户可能在建单响应回来前就点了停止；拿到持久任务 id 后才真正发取消，
       // 不能只 abort 订阅连接（退出/断网都不等于取消）。
       if (entry.aborted) {
-        void api.cancelGeneration(data.generationId).finally(() => entry.control.abort());
+        void cancelThenAbort(entry, data.generationId);
       }
     },
     onSession: (id) => { if (id) { bindSession(entry, id); entry.view?.onSession(id); } },
@@ -443,7 +446,7 @@ export function attachLiveGenView(key: string, view: LiveGenView): { active: boo
 
 function replay(entry: LiveGenEntry, view: LiveGenView) {
   if (entry.generationId) {
-    view.onGeneration({ generationId: entry.generationId, phase: entry.generationPhase, status: entry.generationStatus });
+    view.onGeneration({ generationId: entry.generationId, phase: entry.generationPhase, status: entry.generationStatus, imageProgress: entry.imageProgress, refNotices: entry.refNotices });
   }
   // 仅重放「进行中」内容以重建气泡；已 done/error 的对账交给调用方（以落库消息为准），此处不重放终态。
   if (entry.kind === 'chat') {
@@ -466,13 +469,26 @@ export function detachLiveGenView(key: string, view: LiveGenView) {
   if (entry && entry.view === view) entry.view = null;
 }
 
+/**
+ * 通知服务端取消，然后无论成败都断掉本地订阅。
+ * 取消失败对用户是不可行动的（本地已经停了，服务端那边最多多算一轮），所以吞掉错误——
+ * 但必须显式 catch：`void p.finally(...)` 里 finally 返回的仍是会继承拒绝的 promise，
+ * 取消接口一失败就是一条 unhandled rejection。
+ */
+async function cancelThenAbort(entry: LiveGenEntry, generationId: string): Promise<void> {
+  try { await api.cancelGeneration(generationId); } catch { /* 取消失败不影响本地收尾 */ }
+  entry.control.abort();
+}
+
 /** 用户点「停止」：中断底层请求；drive 的收尾走 aborted 分支。 */
 export function stopLiveGen(key: string) {
   const entry = lookup(key);
   if (!entry) return;
   entry.aborted = true;
+  // 尚未拿到 generationId 时只置 aborted：建单响应回来后由 onGeneration 补发取消。
+  // 只 abort 订阅连接不等于取消（退出/断网都会断订阅，服务端仍照常算完）。
   if (entry.generationId) {
-    void api.cancelGeneration(entry.generationId).finally(() => entry.control.abort());
+    void cancelThenAbort(entry, entry.generationId);
   }
 }
 

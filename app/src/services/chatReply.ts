@@ -62,11 +62,28 @@ export function asReply(content: unknown): ChatReply {
         .map((a) => ({ q: txt(a.q), options: (Array.isArray(a.options) ? a.options : []).map(txt).filter(Boolean) }))
         .filter((a) => a.q || a.options.length)
     : undefined;
+  const rawFact = c.factConfirmation && typeof c.factConfirmation === 'object'
+    ? c.factConfirmation as Record<string, unknown>
+    : null;
+  const factItems = rawFact && Array.isArray(rawFact.items)
+    ? rawFact.items
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item) => ({
+          id: txt(item.id),
+          factKey: txt(item.factKey),
+          valueText: txt(item.valueText),
+          reason: ['assistant_inference', 'document_extraction', 'conflict', 'high_impact'].includes(txt(item.reason))
+            ? txt(item.reason) as 'assistant_inference' | 'document_extraction' | 'conflict' | 'high_impact'
+            : 'assistant_inference' as const,
+        }))
+        .filter((item) => item.id && item.factKey && item.valueText)
+    : [];
   return {
     text: stripSerializedAsksTail(txt(c.text), asks ?? []),
     ...(Array.isArray(c.points) ? { points: c.points.map(txt).filter(Boolean) } : {}),
     ...(Array.isArray(c.acts) ? { acts: c.acts as ChatReply['acts'] } : {}),
     ...(asks?.length ? { asks } : {}),
+    ...(factItems.length ? { factConfirmation: { title: txt(rawFact?.title) || '这条是我的推断，想请你核一下', items: factItems } } : {}),
     // 「还没写完」要跟着历史一起还原：退出重进本会话后，那条回复仍应带「继续写完」入口，
     // 而不是变成一条看起来正常结束、实际断在半句的回复。只认布尔 true，不做真值转换——
     // 存量数据里的字符串 "false" 之类不能被当成「未写完」。

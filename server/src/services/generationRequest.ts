@@ -1,4 +1,5 @@
-import type { User } from '@prisma/client';
+import { GenerationKind, type User } from '@prisma/client';
+import type { ComplexityAssessment, DeliveryMode, DeliveryStage, RequestedOutput } from '../../../shared/contracts';
 import type { MessageRef } from '../llm/schema.js';
 import { KEY2AGENT } from '../data/agents.js';
 import { prisma } from '../db.js';
@@ -10,6 +11,19 @@ import {
   type GraceKind,
 } from './tokenQuota.js';
 import { createGenerationJob, type CreatedGenerationJob } from './generationJobs.js';
+import { resolveRequestedOutput } from './outputIntent.js';
+import {
+  classifyGenerationJob,
+  complexityDecisionForDirect,
+  deliveryPlanIdFor,
+  prefilterDeliveryComplexity,
+} from './deliveryComplexity.js';
+import {
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  MAX_IMAGES_PER_BATCH,
+  MAX_IMAGES_PER_MESSAGE,
+  validateImageReferenceBudget,
+} from './chatImage.js';
 
 export interface DurableGenerationBody {
   agentKey?: string;
@@ -27,8 +41,15 @@ export interface DurableGenerationCreated extends CreatedGenerationJob {
   refNotices: string[];
 }
 
-function wantsDeliverable(text: string): boolean {
-  return /(生成|输出|整理|做一份|出一份|给我一份|形成).{0,8}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|(?:重新)?出.{0,4}(方案|报告|成果|卡片|纪要|计划|军令|文案|脚本|海报)|战略体检|转成军令|生成纪要/.test(text);
+interface ForcedDeliveryStage {
+  requestedOutput: RequestedOutput;
+  deliveryMode: DeliveryMode;
+  assessment: ComplexityAssessment | null;
+  deliveryPlanId: string;
+  stage: DeliveryStage;
+  stageAttempt: number;
+  stages: DeliveryStage[];
+  parentGenerationId: string;
 }
 
 async function resolveProjectId(tenantId: string, bodyProjectId?: string, sessionProjectId?: string | null): Promise<string | null> {
@@ -45,12 +66,22 @@ async function resolveProjectId(tenantId: string, bodyProjectId?: string, sessio
 export async function enqueueDurableGeneration(
   user: Pick<User, 'id' | 'tenantId'>,
   body: DurableGenerationBody,
+  forcedStage?: ForcedDeliveryStage,
 ): Promise<DurableGenerationCreated> {
   const text = (body.text || '').trim();
   if (!text) throw Object.assign(new Error('empty text'), { statusCode: 400, code: 'EMPTY_TEXT' });
   if (!body.clientRequestId?.trim()) {
     throw Object.assign(new Error('clientRequestId required'), { statusCode: 400, code: 'CLIENT_REQUEST_ID_REQUIRED' });
   }
+  const refs = Array.isArray(body.refs) ? body.refs : [];
+  const imageCount = refs.filter((ref) => ref?.kind === 'image').length;
+  if (refs.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+    throw Object.assign(new Error(`一条消息最多带 ${MAX_ATTACHMENTS_PER_MESSAGE} 份附件，请分两次发送`), { statusCode: 400, code: 'TOO_MANY_ATTACHMENTS' });
+  }
+  if (imageCount > MAX_IMAGES_PER_MESSAGE) {
+    throw Object.assign(new Error(`一条消息最多带 ${MAX_IMAGES_PER_MESSAGE} 张图片，请分两次发送`), { statusCode: 400, code: 'TOO_MANY_IMAGES' });
+  }
+  await validateImageReferenceBudget(user.tenantId, refs);
   const session = body.sessionId
     ? await prisma.session.findFirst({ where: { id: body.sessionId, userId: user.id } })
     : null;
@@ -76,27 +107,128 @@ export async function enqueueDurableGeneration(
   const isDeliverable = !!effective.deliverableKey;
   const onDemand = isDeliverable
     && (effective.skillsConfig as { deliverableMode?: string } | null)?.deliverableMode === 'on-demand';
-  const kind: 'chat' | 'report' = isDeliverable && (!onDemand || wantsDeliverable(text)) ? 'report' : 'chat';
+  const requestedOutput = forcedStage?.requestedOutput ?? resolveRequestedOutput(text);
+  const kind: 'chat' | 'report' = forcedStage
+    ? 'report'
+    : isDeliverable && (!onDemand || requestedOutput === 'report') ? 'report' : 'chat';
+  const prefilter = forcedStage || requestedOutput === 'chat'
+    ? { kind: 'none' as const }
+    : prefilterDeliveryComplexity(text);
+  const direct = prefilter.kind === 'direct' ? complexityDecisionForDirect(prefilter) : null;
+  const classificationRequired = !forcedStage && prefilter.kind === 'candidate';
+  const deliveryMode = forcedStage?.deliveryMode ?? direct?.deliveryMode ?? 'single';
+  const deliveryPlanId = forcedStage?.deliveryPlanId ?? (direct || classificationRequired
+    ? deliveryPlanIdFor(user.id, body.clientRequestId.trim())
+    : null);
+  const stages = forcedStage?.stages ?? direct?.stages ?? [];
+  const stage = forcedStage?.stage ?? stages[0] ?? null;
+  const assessment = forcedStage?.assessment ?? direct?.assessment ?? null;
 
-  const created = await createGenerationJob({
+  let created = await createGenerationJob({
     tenantId: user.tenantId,
     userId: user.id,
     agentKey,
     text,
     clientRequestId: body.clientRequestId.trim(),
     sessionId: session?.id ?? null,
-    parentGenerationId: body.parentGenerationId ?? null,
+    parentGenerationId: forcedStage?.parentGenerationId ?? body.parentGenerationId ?? null,
     projectId,
     refs: body.refs,
+    imageCount,
+    imageBatchCount: imageCount ? Math.ceil(imageCount / MAX_IMAGES_PER_BATCH) : 0,
     kind,
     billingRatio: ratio,
     quotaReserveTokens: reserveTokens,
     grace,
     creditCost,
+    requestedOutput,
+    deliveryMode,
+    classificationRequired,
+    complexity: assessment,
+    deliveryPlanId,
+    stageKey: stage?.key ?? null,
+    stageNumber: stage?.number ?? 1,
+    stageAttempt: forcedStage?.stageAttempt ?? 1,
+    deliveryStages: stages,
     requestMeta: {
       effectiveVersionId: effective.versionId,
       effectiveVersionNumber: effective.versionNumber,
     },
   });
-  return { ...created, agentKey, kind, refNotices: [] };
+  if (classificationRequired && created.job.classificationStatus === 'pending') {
+    const classified = await classifyGenerationJob(created.job.id);
+    if (classified) created = { ...created, job: classified };
+  }
+  return { ...created, agentKey, kind: created.job.kind, refNotices: [] };
+}
+
+const TERMINAL = new Set(['completed', 'truncated', 'failed', 'cancelled']);
+
+/**
+ * 用户显式继续复杂方案：服务端从冻结阶段链选择下一项，客户端不能伪造 plan/stage。
+ * 同一 plan+stage 的 clientRequestId 与数据库唯一键均稳定，重复点击只复用同一任务。
+ */
+export async function enqueueNextDeliveryStage(
+  user: Pick<User, 'id' | 'tenantId'>,
+  fromGenerationId: string,
+): Promise<DurableGenerationCreated> {
+  const source = await prisma.generationJob.findFirst({
+    where: { id: fromGenerationId, userId: user.id, tenantId: user.tenantId },
+  });
+  if (!source) throw Object.assign(new Error('阶段任务不存在'), { statusCode: 404, code: 'DELIVERY_STAGE_NOT_FOUND' });
+  if (source.deliveryMode !== 'staged' || !source.deliveryPlanId || !Array.isArray(source.deliveryStagesJson)) {
+    throw Object.assign(new Error('这不是分阶段交付'), { statusCode: 409, code: 'DELIVERY_NOT_STAGED' });
+  }
+  const stages = (source.deliveryStagesJson as unknown as DeliveryStage[])
+    .filter((stage) => stage && typeof stage.key === 'string' && Number.isInteger(stage.number))
+    .sort((a, b) => a.number - b.number);
+  const planJobs = await prisma.generationJob.findMany({
+    where: { userId: user.id, deliveryPlanId: source.deliveryPlanId },
+    orderBy: [{ stageNumber: 'asc' }, { createdAt: 'asc' }],
+  });
+  const delivered = new Set(planJobs.filter((job) => job.stageKey && job.status === 'completed').map((job) => job.stageKey!));
+  const existingInFlight = planJobs.find((job) => !TERMINAL.has(job.status));
+  if (existingInFlight) {
+    return {
+      job: existingInFlight,
+      session: await prisma.session.findUniqueOrThrow({ where: { id: existingInFlight.sessionId } }),
+      createdSession: false,
+      attached: true,
+      agentKey: existingInFlight.agentKey,
+      kind: existingInFlight.kind,
+      refNotices: [],
+    };
+  }
+  const next = stages.find((stage) => !delivered.has(stage.key));
+  if (!next) throw Object.assign(new Error('全部阶段已经交付完成'), { statusCode: 409, code: 'DELIVERY_PLAN_COMPLETED' });
+  const previous = [...planJobs]
+    .filter((job) => job.status === 'completed' && job.stageNumber < next.number)
+    .sort((a, b) => b.stageNumber - a.stageNumber)[0];
+  if (!previous) {
+    throw Object.assign(new Error('上一阶段尚未完成，请先重试上一阶段'), { statusCode: 409, code: 'DELIVERY_PREVIOUS_INCOMPLETE' });
+  }
+  const sourceRequest = source.requestJson && typeof source.requestJson === 'object'
+    ? source.requestJson as Record<string, unknown>
+    : {};
+  const assessment = source.complexityJson && typeof source.complexityJson === 'object'
+    ? source.complexityJson as unknown as ComplexityAssessment
+    : null;
+  const stageAttempt = Math.max(0, ...planJobs.filter((job) => job.stageKey === next.key).map((job) => job.stageAttempt)) + 1;
+  return enqueueDurableGeneration(user, {
+    agentKey: source.agentKey,
+    sessionId: source.sessionId,
+    text: `继续深化第 ${next.number} 阶段「${next.title}」：${next.objective}`,
+    projectId: typeof sourceRequest.projectId === 'string' ? sourceRequest.projectId : undefined,
+    clientRequestId: `delivery:${source.deliveryPlanId}:${next.key}:${stageAttempt}`,
+    parentGenerationId: previous.id,
+  }, {
+    requestedOutput: 'report',
+    deliveryMode: 'staged',
+    assessment,
+    deliveryPlanId: source.deliveryPlanId,
+    stage: next,
+    stageAttempt,
+    stages,
+    parentGenerationId: previous.id,
+  });
 }

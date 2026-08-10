@@ -5,7 +5,9 @@
      native-icon / markdown-text / report-card / towxml 四个组件由宿主页自己注册。-->
 <template name="chat-message-list">
   <view class="chat-stream">
+    <view wx:if="{{historyHasMore}}" class="history-more {{historyLoading ? 'loading' : ''}}" bindtap="loadEarlierMessages"><text>{{historyLoading ? '正在翻阅…' : '阅早前问对'}}</text></view>
     <view wx:for="{{messages}}" wx:key="id" wx:for-index="messageIndex" class="msg {{item.role === 'user' ? 'u' : 'a'}}" data-index="{{messageIndex}}" bindlongpress="copyMessage">
+      <view wx:if="{{item.newChapter}}" class="chapter-divider"><view class="chapter-line"></view><text>{{item.chapterLabel}}</text><view class="chapter-line"></view></view>
       <block wx:if="{{item.role === 'user'}}">
         <view wx:if="{{item.refs&&item.refs.length}}" class="uref">
           <block wx:for="{{item.refs}}" wx:key="id">
@@ -24,18 +26,31 @@
 
       <block wx:else>
         <view class="who"><view class="advisor-avatar"><image class="aa-img" src="{{advisorAvatar}}" mode="aspectFill"></image></view><text>{{title}}</text></view>
-        <report-card wx:if="{{item.report}}" report="{{item.deliverable}}" fallback-text="{{item.text}}" streaming="{{item.streaming}}" operable="{{item.reportReady}}" saved="{{item.saved}}" accepting="{{accepting}}" busy="{{reportBusy===item.id}}" poster-enabled="{{item.reportReady&&posterEnabled}}" poster-price="{{posterPrice}}" color-key="{{colorKey}}" data-index="{{messageIndex}}" bindviewreport="viewReport" bindmenu="reportMenu" bindsave="saveReport" bindaccept="acceptReport" bindposter="openPoster" bindviewposter="openPosterJob"></report-card>
+        <report-card wx:if="{{item.report}}" report="{{item.deliverable}}" fallback-text="{{item.text}}" streaming="{{item.streaming}}" operable="{{item.reportReady}}" saved="{{item.saved}}" accepting="{{accepting}}" busy="{{reportBusy===item.id}}" poster-enabled="{{item.reportReady&&posterEnabled}}" poster-price="{{posterPrice}}" color-key="{{colorKey}}" data-index="{{messageIndex}}" bindviewreport="viewReport" bindmenu="reportMenu" bindsave="saveReport" bindaccept="acceptReport" bindposter="openPoster" bindviewposter="openPosterJob" bindnextstage="continueDeliveryStage"></report-card>
+        <text wx:if="{{item.report&&item.streaming&&item.streamHint}}" class="stream-hint report-note">{{item.streamHint}}</text>
         <view wx:elif="{{item.greet}}" class="bubble greet-bubble"><text user-select>{{item.text}}</text></view>
         <view wx:else class="ai-text">
           <block wx:if="{{item.streamRenderId}}">
-            <view wx:if="{{!item.streamStarted}}" class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view>
+            <view wx:if="{{!item.streamStarted}}" class="stream-wait"><view class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view><text wx:if="{{item.streamHint}}" class="stream-hint">{{item.streamHint}}</text></view>
             <towxml wx:else towxmlId="{{item.streamRenderId}}" speed="6" openTyper="{{true}}" theme="light" data-stream-id="{{item.streamRenderId}}" bindfinish="onStreamTypingFinish"></towxml>
           </block>
+          <view wx:elif="{{item.streaming&&!item.text}}" class="stream-wait"><view class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view><text wx:if="{{item.streamHint}}" class="stream-hint">{{item.streamHint}}</text></view>
           <markdown-text wx:else text="{{item.text}}" streaming="{{item.streaming}}" copyable="{{true}}"></markdown-text>
           <view wx:if="{{item.points&&item.points.length}}" class="points"><view wx:for="{{item.points}}" wx:key="*this" class="point"><view class="point-dot"></view><text user-select>{{item}}</text></view></view>
         </view>
         <text wx:if="{{item.knowledgeUsed&&item.knowledgeUsed.length}}" class="knowledge-used {{item.report?'report-note':''}}">参考了 {{item.knowledgeUsed.length}} 份资料：{{item.knowledgeUsedText}}</text>
         <text wx:if="{{item.refNotices&&item.refNotices.length}}" class="ref-notices {{item.report?'report-note':''}}">引用提示：{{item.refNoticesText}}</text>
+        <view wx:if="{{item.factConfirmation&&item.factConfirmation.items.length}}" class="fact-card">
+          <view class="fact-head"><native-icon name="pen" tone="accent" color-key="{{colorKey}}" size="14"></native-icon><text>{{item.factConfirmation.title}}</text></view>
+          <view wx:for="{{item.factConfirmation.items}}" wx:key="id" wx:for-item="fact" class="fact-item">
+            <text class="fact-value">{{fact.valueText}}</text>
+            <view class="fact-actions">
+              <view class="fact-action primary" data-message="{{messageIndex}}" data-fact="{{fact.id}}" bindtap="confirmFact"><text>确认无误</text></view>
+              <view class="fact-action" data-message="{{messageIndex}}" data-fact="{{fact.id}}" bindtap="editFact"><text>改一下</text></view>
+              <view class="fact-action quiet" data-message="{{messageIndex}}" data-fact="{{fact.id}}" bindtap="sessionOnlyFact"><text>仅本次参考</text></view>
+            </view>
+          </view>
+        </view>
         <view wx:if="{{item.truncated}}" class="unfinished"><native-icon name="pen" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text>内容较长，先写到这里</text></view>
         <text wx:if="{{item.interrupted}}" class="report-interrupted">本次方案没有完整落库，以上内容仅供参考，不能采纳或转成军令。</text>
         <view wx:if="{{item.activeAsk&&item.asks.length}}" class="ask-card">
@@ -49,7 +64,8 @@
         </view>
       </block>
     </view>
-    <view wx:if="{{showThinking}}" class="msg a thinking"><view class="who"><view class="advisor-avatar"><image class="aa-img" src="{{advisorAvatar}}" mode="aspectFill"></image></view><text>{{title}}</text></view><view class="bubble think-bubble"><view class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view><text class="think-text">正在梳理上下文</text></view></view>
+    <view wx:if="{{chapterPending}}" class="chapter-divider pending"><view class="chapter-line"></view><text>{{chapterPendingLabel}}</text><view class="chapter-line"></view></view>
+    <view wx:if="{{showThinking}}" class="msg a thinking"><view class="who"><view class="advisor-avatar"><image class="aa-img" src="{{advisorAvatar}}" mode="aspectFill"></image></view><text>{{title}}</text></view><view class="bubble think-bubble"><view class="think-dots"><view class="think-dot"></view><view class="think-dot delay-two"></view><view class="think-dot delay-three"></view></view><text class="think-text">{{thinkingText}}</text></view></view>
     <view wx:if="{{errorText}}" class="chat-error"><view class="chat-error-copy"><text class="chat-error-title">{{errorText}}</text><text wx:if="{{errorNote}}" class="chat-error-note">{{errorNote}}</text></view><view wx:if="{{canRetryLast}}" class="retry" bindtap="retry">重新回答</view><view wx:elif="{{errorAction==='plans'||errorAction==='credits'}}" class="retry" bindtap="openErrorAction">{{errorAction==='credits'?'查看算力':'查看方案'}}</view></view>
     <view id="chat-bottom" class="chat-bottom"></view>
   </view>

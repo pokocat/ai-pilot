@@ -26,7 +26,10 @@ import type { GenContext, MessageRef, AgentRuntime } from '../llm/schema.js';
 import type { MemoryConfig } from '../data/agents.js';
 import { resolveEffectiveAgent, type EffectiveAgentConfig, type PreviewTarget } from './agentVersions.js';
 import { isRecallIntent } from './recallIntent.js';
-import { formatDigestBlock, type SessionDigestItem } from './sessionDigest.js';
+import { formatDigestBlock, type SessionDigestItem, type SessionDigestState } from './sessionDigest.js';
+import { activeUserFactsBlock } from './userFacts.js';
+import { sessionHandoffBlock } from './sessionHandoff.js';
+import type { EvalCaseContext } from '../../../shared/contracts';
 
 // 把 Agent 的「接入方式」解析成运行时覆盖。inherit / 未配置完整 → null（走全局模型）。
 export function resolveAgentRuntime(
@@ -97,6 +100,8 @@ export async function buildGenContext(opts: {
   // 会话既往脉络（批次 3）：由路由传入已就绪的快照条目——本函数不做任何 DB/LLM 调用来取它，
   // 因为「要不要现抽」是路由层的决策（报告轮同步补齐 / 聊天轮纯读）。
   digestItems?: SessionDigestItem[] | null;
+  digestTrace?: Pick<SessionDigestState, 'status' | 'coveredThroughMessageId' | 'coveredThroughAt' | 'pendingMessages'> | null;
+  deferImages?: boolean; // durable worker 自己做可恢复分批观察；legacy 调用仍可直接取图
 }): Promise<{ ctx: GenContext; memoryConfig: MemoryConfig; knowledgeUsed: string[]; refNotices: string[]; effective: EffectiveAgentConfig }> {
   // C 端默认读 Agent.publishedVersionId 指向的已发布快照（resolveEffectiveAgent）；
   // 草稿/历史版本由 opts.preview 指定（沙盒、评测、AB）。调用方可传 opts.effective 复用。
@@ -126,7 +131,7 @@ export async function buildGenContext(opts: {
     fortuneOn, diagRound,
     memoryHits, projRow, refsResult, hits,
     prescriptionEffectLine, toolMenuLine, followupTools,
-    healthLine,
+    healthLine, factsLine, handoffLine,
   ] = await Promise.all([
     prisma.profile.findFirst({ where: { tenantId: opts.tenantId }, orderBy: { updatedAt: 'desc' } }),
     prisma.user.findUnique({ where: { id: opts.userId } }),
@@ -166,6 +171,9 @@ export async function buildGenContext(opts: {
     needFollowupNudge ? pendingFollowupTools(opts.userId).catch(() => []) : Promise.resolve<string[]>([]),
     // D-3-3 月战报【健康度·军师估测】块：只读落库估测（无则不注入；写侧在月复盘收尾 maybeEstimateMonthlyHealth）。
     healthBlock(opts.userId).catch(() => null),
+    // 硬事实与跨 Session 交接独立于语义 Memory；失败时宁缺勿假，不阻塞回复。
+    activeUserFactsBlock(opts.userId).catch(() => null),
+    sessionHandoffBlock(opts.sessionId).catch(() => null),
   ]);
 
   // 批次 2：依赖批次 1 的 profile / user / fortune 结果。
@@ -179,7 +187,7 @@ export async function buildGenContext(opts: {
     // 天势档案（M1 PR-2）：命盘算好存库，这里只组装简报；不信命理/开关关闭 → 走 opt-out，无命盘 → 不注入。
     believe ? loadChart(opts.userId) : Promise.resolve(null),
     // 本轮消息里的图片引用 → 多模态入参（读 OSS 原件转 base64，至多 4 张）；档案访谈轮不带图。
-    briefInterview ? Promise.resolve<{ mediaType: string; base64: string }[]>([]) : resolveImageRefs(opts.tenantId, opts.refs),
+    briefInterview || opts.deferImages ? Promise.resolve<{ mediaType: string; base64: string }[]>([]) : resolveImageRefs(opts.tenantId, opts.refs),
   ]);
 
   const strategicLine = strategicBlock(strategicRaw);
@@ -238,6 +246,8 @@ export async function buildGenContext(opts: {
     bizMetricLine,
     prescriptionEffectLine,
     healthLine,
+    factsLine,
+    handoffLine,
     toolMenuLine,
     modeLine,
     stageLine,
@@ -259,7 +269,14 @@ export async function buildGenContext(opts: {
         createdAt: m.createdAt.toISOString(),
       })),
       // 注入的是渲染后的块（可能因 cap 丢过条目），故 injectedChars 记实际字符数而非条目数推算值。
-      ...(digestLine ? { digest: { items: opts.digestItems?.length ?? 0, injectedChars: digestLine.length } } : {}),
+      ...(digestLine && opts.digestTrace ? { digest: {
+        items: opts.digestItems?.length ?? 0,
+        injectedChars: digestLine.length,
+        status: opts.digestTrace.status,
+        coveredThroughMessageId: opts.digestTrace.coveredThroughMessageId,
+        coveredThroughAt: opts.digestTrace.coveredThroughAt,
+        pendingMessages: opts.digestTrace.pendingMessages,
+      } } : {}),
     },
     references: refLines,
     knowledge,
@@ -287,12 +304,24 @@ export async function buildSandboxContext(opts: {
   agentKey: string;
   userMessage: string;
   target?: PreviewTarget; // 默认已发布版本；沙盒通常传 'draft'
-  profile?: { companyName?: string; industry?: string; stage?: string; pain?: string };
+  profile?: EvalCaseContext;
 }): Promise<{ ctx: GenContext; effective: EffectiveAgentConfig } | null> {
   const effective = await resolveEffectiveAgent(opts.agentKey, opts.target);
   if (!effective) return null;
   const p = opts.profile;
   const hasProfile = !!(p && (p.industry || p.stage || p.pain));
+  const lines = (values: unknown, maxItems: number, maxChars: number): string[] => Array.isArray(values)
+    ? values.map((value) => String(value ?? '').trim().slice(0, maxChars)).filter(Boolean).slice(0, maxItems)
+    : [];
+  const history = Array.isArray(p?.history)
+    ? p.history
+      .filter((turn) => turn && (turn.role === 'user' || turn.role === 'assistant') && typeof turn.text === 'string' && turn.text.trim())
+      .slice(-16)
+      .map((turn) => ({ role: turn.role, text: turn.text.trim().slice(0, 2_000) }))
+    : [];
+  const memories = lines(p?.memories, 12, 500);
+  const understanding = lines(p?.understanding, 12, 500);
+  const digestItems = Array.isArray(p?.digestItems) ? p.digestItems.slice(0, 80) as SessionDigestItem[] : [];
   const ctx: GenContext = {
     agentKey: effective.key,
     versionId: effective.versionId,
@@ -301,15 +330,17 @@ export async function buildSandboxContext(opts: {
     deliverableKey: effective.deliverableKey,
     companyName: p?.companyName || null,
     profile: hasProfile ? { industry: p?.industry ?? null, stage: p?.stage ?? null, pain: p?.pain ?? null } : null,
-    memories: [],
+    memories,
     benmingColor: 'green',
     benchmark: resolveIndustryPack(p?.industry).benchmark,
     userMessage: opts.userMessage,
+    history,
+    digestLine: formatDigestBlock(digestItems),
     references: [],
     knowledge: [],
-    understanding: [],
+    understanding,
     understandingQuestions: [],
-    understandingMaturity: 'empty',
+    understandingMaturity: understanding.length || memories.length || digestItems.length ? 'ready' : hasProfile ? 'forming' : 'empty',
     briefInterview: false,
     tenantId: null,
     userId: null,

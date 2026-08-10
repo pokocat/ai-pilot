@@ -477,7 +477,8 @@ test('原生聊天保持可恢复生成、完整报告闸门与动态输入区',
   assert.doesNotMatch(chat, /tone="green"/, '聊天功能图标必须跟随本命色');
   assert.doesNotMatch(chat, /\{\{[^}]*\.[A-Za-z_$][\w$]*\s*\(/, 'WXML 不得调用 JS 方法');
   assert.match(chatJs, /function hasUnansweredTurn\(messages, generating\)[\s\S]*?last\.role === 'user'/, '重进会话必须识别已落库但尚未得到回答的尾部用户消息');
-  assert.ok((chatJs.match(/canRetryLast,\s*errorText: canRetryLast \?/g) || []).length >= 2, '首次恢复与兼容轮询结束都要恢复重试入口');
+  assert.ok((chatJs.match(/const canRetryLast = hasUnansweredTurn/g) || []).length >= 2, '首次恢复与兼容轮询结束都要计算重试入口');
+  assert.ok((chatJs.match(/errorText: canRetryLast \?/g) || []).length >= 2, '两条恢复路径都要把重试文案写回页面');
   assert.match(chat, /wx:if="\{\{canRetryLast\}\}" class="retry" bindtap="retry">重新回答/, '失败轮次必须给明确下一步，而不是重进后静默消失');
 
   assert.match(chatJs, /detail\.activeGeneration/);
@@ -682,16 +683,24 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
   assert.match(js, /\.catch\(\(\) => false\)/, 'require.async 失败要兜底，不许白屏');
 
   // —— 会话装载分支：续接 / 注入主动消息 / greet 空会话 / 游客本地开场 ——
-  assert.match(js, /this\.chatCoreLoad\(\{ sessionId: latest\.id \}\)/);
-  // 主线会话过期（纯客户端）：闲置 > 24h 且**无未读**才不续接；有未读一律续接（军师说了新东西）。
+  // 闲置 >24h 只视觉分章，底层仍续接同一 Session；有未读时不额外插空分隔。
   assert.match(js, /const SESSION_IDLE_HOURS = 24;/, '阈值必须是页面顶部的具名常量，不许散在判断里');
-  assert.match(js, /function isSessionStale\(item\) \{[\s\S]*?if \(Number\(item\.unreadCount\) > 0\) return false;/, '有未读时连续性优先，不判过期');
+  assert.match(js, /function shouldStartNewChapter\(item\) \{[\s\S]*?if \(Number\(item\.unreadCount\) > 0\) return false;/, '有未读时不插空分章');
   assert.match(js, /idleMs > SESSION_IDLE_HOURS \* 3600 \* 1000/);
-  assert.match(js, /if \(latest && !isSessionStale\(latest\)\) \{ this\.chatCoreLoad\(\{ sessionId: latest\.id \}\)/, '过期的会话落到「无会话」分支');
-  // 过期只在冷进（bootChat）判：refreshChat 是切 tab 回来，聊着聊着跨过整点被切走是最恶心的"聪明"。
+  assert.match(js, /conversationContinuity === false/, '必须保留服务端下发的连续主线逃生开关');
+  assert.match(js, /if \(latest && !continuityEnabled && shouldStartNewChapter\(latest\)\) \{[\s\S]{0,180}chatCoreLoad\(\{ agentKey: 'general' \}\)/, '关闭开关时跨 24h 回退为带交接包的新 Session');
+  assert.match(js, /if \(latest\) \{[\s\S]{0,220}chatCoreLoad\(\{ sessionId: latest\.id, startNewChapter: shouldStartNewChapter\(latest\) \}\)/, '开关正常时无论闲置多久都续接同一主线');
+  // 分章只在冷进（bootChat）判：refreshChat 是切 tab 回来，不得跨整点突然插分隔。
   assert.match(js, /async refreshChat\(\) \{[\s\S]*?\n  \},/, 'refreshChat 存在');
-  assert.doesNotMatch(js.slice(js.indexOf('async refreshChat()'), js.indexOf('async fetchSessions()')), /isSessionStale/, 'refreshChat 不得做过期判定');
+  assert.doesNotMatch(js.slice(js.indexOf('async refreshChat()'), js.indexOf('async fetchSessions()')), /shouldStartNewChapter/, 'refreshChat 不得做分章判定');
   assert.match(js, /api\.proactiveSession\(\)/);
+  assert.match(read(chatCoreRoot, 'behavior.js'), /function decorateChapters\(messages\)/, '历史分章必须由真实消息时间可重算');
+  assert.match(read(chatCoreRoot, 'message-list.wxml'), /item\.newChapter[\s\S]*?class="chapter-divider"/, '分隔挂在消息前，不创建假消息');
+  const behavior = read(chatCoreRoot, 'behavior.js');
+  const mock = read(sourceRoot, 'services/mock.js');
+  assert.match(behavior, /maxImagesPerMessage\) \|\| 9/, '旧服务端缺能力字段时，原生端必须保守兜底 9 张');
+  assert.match(behavior, /wx\.chooseMedia\(\{ count,/, '选图数量必须使用运行时能力计算后的 count，不得写死 4');
+  assert.match(mock, /maxAttachmentsPerMessage: 9, maxImagesPerMessage: 9, maxImagesPerBatch: 4/, 'mock 与生产附件能力口径必须一致');
   assert.match(js, /this\.chatCoreLoad\(\{ agentKey: 'general' \}\)/, 'injected:false 三种原因都走 greet 空会话');
   assert.match(js, /this\.chatCoreLoad\(\{ agentKey: 'general', localPrelude: GUEST_PRELUDE \}\)/, '游客走本地开场序列，零服务端写入');
   assert.match(js, /if \(force \|\| changed \|\| !this\._chatBooted\) await this\.bootChat\(\);\s*\n\s*else await this\.refreshChat\(\);/, '切走再切回不重复装载/不重复注入');

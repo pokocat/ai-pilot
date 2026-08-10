@@ -30,6 +30,7 @@ import { chatPendingAge, clearChatPending, isChatPending, markChatPending } from
 import { getCreativeStatus, peekCreativeStatus } from '../../../services/creative';
 import { chatErrorPresentation, type ChatErrorAction, type ChatErrorPresentation } from '../../../services/chatError';
 import type { AuthReason } from '../../../services/authGate';
+import type { FactConfirmationAction, FactConfirmationCard, FactConfirmationItem } from '../../../../../shared/contracts';
 import './index.scss';
 
 // uid：每条消息的稳定 key（服务端消息用其 id，本地临时消息造递增 uid），供列表渲染 key 用。
@@ -239,6 +240,14 @@ const UPLOAD_COUNT_MAX = 9;
 // 一批就能吃掉本月 200MB 免费额度的九成——真传上去也是逐份 402，不如在选完就说清楚。
 const MAX_BATCH_UPLOAD_BYTES = 60 * 1024 * 1024; // 60MB/批
 
+const generationProgressText = (progress?: { totalBatches: number; completedBatches: number; phase: 'reading' | 'synthesizing' | 'done' } | null) => {
+  if (!progress?.totalBatches) return '正在梳理上下文';
+  const completed = Math.min(progress.completedBatches || 0, progress.totalBatches);
+  return progress.phase === 'synthesizing' || progress.phase === 'done' || completed >= progress.totalBatches
+    ? '图片读完，正在综合判断'
+    : `正在阅图 ${completed}/${progress.totalBatches} 批`;
+};
+
 // 每份上传的账：真进度 + 真取消都按份记，批次只是这些份的集合。
 type UploadStatus = 'waiting' | 'uploading' | 'done' | 'failed' | 'cancelled';
 type PastePending = {
@@ -316,6 +325,7 @@ export default function Chat() {
   const forceTag = decodeURIComponent((router.params as Record<string, string>).force || '');
   const s = useStore();
   const accent = s.color().vars['--accent'];
+  const maxImagesPerMessage = Math.max(1, s.me()?.capabilities?.attachments?.maxImagesPerMessage || 9);
   const [agent, setAgent] = useState<Agent | null>(null);
   const [sessionId, setSessionId] = useState<string>('');
   const [projectId, setProjectId] = useState<string>('');
@@ -324,6 +334,7 @@ export default function Chat() {
   const [inputFocus, setInputFocus] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [thinkingText, setThinkingText] = useState('正在梳理上下文');
   // true 表示 busy 来自“重进后恢复”；停止动作改走持久 generationId，不依赖原请求句柄。
   const [reattachedBusy, setReattachedBusy] = useState(false);
   const [activeGenerationId, setActiveGenerationId] = useState('');
@@ -346,6 +357,9 @@ export default function Chat() {
   // 历史窗口化：完整消息列表存 ref（restore 全量落此），msgs 只保留当前窗口；histShown 记已展开条数。
   const fullMsgsRef = useRef<Msg[]>([]);
   const [histShown, setHistShown] = useState(0);
+  const historyPageRef = useRef<NonNullable<SessionDetail['messagePage']>>({ hasMore: false, nextCursor: null, limit: 100 });
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // B1 贴底跟随：atBottom 记录用户是否停留在底部；上滑离开即暂停自动跟随。
   const atBottomRef = useRef(true);
@@ -659,7 +673,7 @@ export default function Chat() {
         setAgent(ag);
         setSessionId(sid);
         if (detail.projectId) setProjectId(detail.projectId);
-        restore(ag, detail.messages);
+        restore(ag, detail.messages, detail.messagePage);
         loadDraft(sid);
         takeOverGeneration(ag, sid, detail);
         return;
@@ -678,7 +692,7 @@ export default function Chat() {
           const detail = await api.session(latest.id);
           setSessionId(latest.id);
           if (detail.projectId) setProjectId(detail.projectId);
-          restore(fallbackAgent, detail.messages);
+          restore(fallbackAgent, detail.messages, detail.messagePage);
           loadDraft(latest.id);
           // 同上：liveGen 续流 / 轮询兜底 / 自动发送三者互斥，无人接管本轮才轮到自动发送。
           if (!takeOverGeneration(fallbackAgent, latest.id, detail) && send) {
@@ -705,8 +719,8 @@ export default function Chat() {
     initChat();
   }, []);
 
-  function restore(ag: Agent, messages: { id: string; role: string; content: any; refs?: MessageRef[] }[]) {
-    const out: Msg[] = [{ role: 'greet', agent: ag, uid: 'greet' }];
+  function mapServerMessages(ag: Agent, messages: { id: string; role: string; content: any; refs?: MessageRef[] }[], includeGreet: boolean): Msg[] {
+    const out: Msg[] = includeGreet ? [{ role: 'greet', agent: ag, uid: 'greet' }] : [];
     let lastUserText = '';
     messages.forEach((m) => {
       // 稳定 key：服务端消息一律用其 id 作 uid（重复 restore/轮询不换 key，避免整列重挂）。
@@ -730,11 +744,19 @@ export default function Chat() {
       // 补成 { text: '' }，否则渲染期 m.reply.text / m.reply.asks 会抛错。
       else out.push({ role: 'assistant', reply: asReply(m.content), uid: m.id });
     });
+    return out;
+  }
+
+  function restore(ag: Agent, messages: { id: string; role: string; content: any; refs?: MessageRef[] }[], page?: NonNullable<SessionDetail['messagePage']>) {
+    const out = mapServerMessages(ag, messages, true);
+    const safePage = page ?? { hasMore: false, nextCursor: null, limit: 100 };
     // 末条仍是用户消息 = 有一轮问对尚未落回复：记下原文，回前台对账据此认领本轮。
     const tail = messages[messages.length - 1];
     if (tail?.role === 'user') lastSentTextRef.current = String(tail.content?.text || '');
     // 历史窗口化：完整列表存 ref，初始只渲染最近 HISTORY_WINDOW 条；顶部「阅早前问对」按需向前补。
     fullMsgsRef.current = out;
+    historyPageRef.current = safePage;
+    setHistoryHasMore(Boolean(safePage.hasMore && safePage.nextCursor));
     const shown = Math.min(out.length, HISTORY_WINDOW);
     setHistShown(shown);
     setMsgs(out.slice(out.length - shown));
@@ -743,14 +765,41 @@ export default function Chat() {
 
   // 阅早前问对：向列表顶部补一窗更早的历史（稳定 uid 令已在屏的消息不重挂）。
   // 补入后不强制滚动——微信 ScrollView 顶部插入的轻微跳动可接受，不做额外锚定工程。
-  const expandEarlier = () => {
+  const expandEarlier = async () => {
     const full = fullMsgsRef.current;
     const cur = histShown;
     const next = Math.min(full.length, cur + HISTORY_WINDOW);
-    if (next <= cur) return;
-    const add = full.slice(full.length - next, full.length - cur);
-    setHistShown(next);
-    setMsgs((m) => [...add, ...m]);
+    if (next > cur) {
+      const add = full.slice(full.length - next, full.length - cur);
+      setHistShown(next);
+      setMsgs((m) => [...add, ...m]);
+      return;
+    }
+    const page = historyPageRef.current;
+    const sid = sessionIdRef.current;
+    const ag = agentRef.current;
+    if (!sid || !ag || !page.hasMore || !page.nextCursor || historyLoading) return;
+    setHistoryLoading(true);
+    try {
+      const detail = await api.session(sid, page.nextCursor);
+      if (!aliveRef.current || sid !== sessionIdRef.current) return;
+      const older = mapServerMessages(ag, detail.messages, false);
+      const existing = new Set(fullMsgsRef.current.map((m) => m.uid));
+      const added = older.filter((m) => !existing.has(m.uid));
+      const current = fullMsgsRef.current;
+      fullMsgsRef.current = current[0]?.role === 'greet'
+        ? [current[0], ...added, ...current.slice(1)]
+        : [...added, ...current];
+      const nextPage = detail.messagePage ?? { hasMore: false, nextCursor: null, limit: 100 };
+      historyPageRef.current = nextPage;
+      setHistoryHasMore(Boolean(nextPage.hasMore && nextPage.nextCursor));
+      setHistShown((shown) => shown + added.length);
+      setMsgs((visible) => visible[0]?.role === 'greet'
+        ? [visible[0], ...added, ...visible.slice(1)]
+        : [...added, ...visible]);
+    } catch (error) {
+      Taro.showToast({ title: (error as Error)?.message || '更早的对话暂时没读出来', icon: 'none' });
+    } finally { if (aliveRef.current) setHistoryLoading(false); }
   };
 
   // 页面退出不会中断 GenerationJob。重新进入后：
@@ -763,6 +812,7 @@ export default function Chat() {
     const seq = ++pollSeqRef.current; // 本代轮询的代号，见 pollSeqRef
     setBusy(true);
     setReattachedBusy(true);
+    setThinkingText('正在梳理上下文');
 
     const finish = () => {
       setBusy(false);
@@ -783,10 +833,11 @@ export default function Chat() {
         activeGenerationPhaseRef.current = detail.activeGeneration?.phase || '';
         setActiveGenerationId(activeGenerationId || '');
         setActiveGenerationPhase(detail.activeGeneration?.phase || '');
-        if (activeGenerationId && detail.activeGeneration?.kind !== 'report') {
+        if (activeGenerationId) {
           const snapshot = await api.generation(activeGenerationId).catch(() => null);
           if (!aliveRef.current || seq !== pollSeqRef.current) return;
-          if (snapshot?.partialText) {
+          if (snapshot) setThinkingText(generationProgressText(snapshot.imageProgress));
+          if (detail.activeGeneration?.kind !== 'report' && snapshot?.partialText) {
             setMsgs((current) => {
               const next = current.slice();
               const tail = next[next.length - 1];
@@ -809,7 +860,7 @@ export default function Chat() {
         // 否则重进用户会提前获得发送能力，下一问又被服务端 409 拒绝。
         if (!detail.generating && (replyStored || !locallyHandingOff)) {
           clearChatPending(sid);
-          restore(ag, detail.messages);
+          restore(ag, detail.messages, detail.messagePage);
           if (last?.role === 'user') {
             const retryText = String(last.content?.text || '').trim();
             setMsgs((m) => [...m, {
@@ -969,6 +1020,7 @@ export default function Chat() {
         activeGenerationPhaseRef.current = data.phase || '';
         setActiveGenerationId(data.generationId);
         setActiveGenerationPhase(data.phase || '');
+        setThinkingText(generationProgressText(data.imageProgress));
       },
       startReport: () => { patchReport((d) => d); setTimeout(scrollToEnd, 30); },
       // meta kind=chat：先建聊天气泡（think-dots），避免 LLM 首字延迟期只剩全局 busy 无反馈。
@@ -1013,7 +1065,7 @@ export default function Chat() {
         if (reattachTimerRef.current) { clearTimeout(reattachTimerRef.current); reattachTimerRef.current = null; }
         pollSeqRef.current += 1; // 作废在途轮询：本轮已有定论，两条恢复路径不并存
         streamBrokenRef.current = false;
-        restore(ag, detail.messages);
+        restore(ag, detail.messages, detail.messagePage);
       },
       // 断流对账「服务端仍在生成」：交回本页的 generating 轮询。liveGen 已退出本轮，仍是单方接管。
       resumeServerPolling: (sid) => {
@@ -1129,7 +1181,7 @@ export default function Chat() {
     if (reattachTimerRef.current) { clearTimeout(reattachTimerRef.current); reattachTimerRef.current = null; }
     pollSeqRef.current += 1;
     // 本轮已落库 → 以服务端为准重绘；否则不动页面现状（失败气泡与用户提问都留着，可点重试）。
-    if (storedReplyFor(detail.messages, lastSentTextRef.current)) restore(ag, detail.messages);
+    if (storedReplyFor(detail.messages, lastSentTextRef.current)) restore(ag, detail.messages, detail.messagePage);
     streamBrokenRef.current = false;
     if (!takeOverGeneration(ag, sid, detail)) { setBusy(false); setReattachedBusy(false); }
   };
@@ -1144,6 +1196,102 @@ export default function Chat() {
     if (peekLiveGen(sid)?.active) return;    // liveGen 仍在实时推演：它才是接管方
     void reconcileOnShow(sid);
   });
+
+  const continueDeliveryStage = async (delivery: NonNullable<Deliverable['delivery']>) => {
+    const sid = sessionIdRef.current;
+    const currentAgent = agentRef.current;
+    if (busy || !delivery.nextStage || !delivery.generationId || !currentAgent || !sid) return;
+    if (!store.isAuthed()) { promptLogin('登录后可继续深化这份方案', 'chat'); return; }
+    const prompt = `继续深化第 ${delivery.nextStage.number} 阶段「${delivery.nextStage.title}」`;
+    setBusy(true);
+    setThinkingText('正在梳理上下文');
+    setReattachedBusy(false);
+    setMsgs((current) => [...current, { role: 'user', text: prompt, uid: nextMsgUid() }]);
+    setTimeout(scrollToEnd, 30);
+    let handedOff = false;
+    try {
+      const result = await api.nextDeliveryStage(delivery.generationId);
+      if (result.generationId && (result.status === 'queued' || result.status === 'running')) {
+        handedOff = true;
+        activeGenerationIdRef.current = result.generationId;
+        setActiveGenerationId(result.generationId);
+        setReattachedBusy(true);
+        markChatPending(result.sessionId);
+        resumeGeneration(result.sessionId, currentAgent, result.generationId);
+      } else {
+        renderGenerateResult(result, false, prompt);
+      }
+    } catch (error) {
+      const shown = errorReply(error);
+      setMsgs((current) => [...current, {
+        role: 'assistant', reply: { text: shown.message },
+        retryText: shown.retryable ? prompt : undefined,
+        errorAction: shown.action,
+        uid: nextMsgUid(),
+      }]);
+    } finally {
+      if (!handedOff) { setBusy(false); setReattachedBusy(false); }
+    }
+  };
+
+  const removeFactCardItem = (messageIndex: number, factId: string) => {
+    setMsgs((current) => current.map((message, index) => {
+      if (index !== messageIndex) return message;
+      if (message.role === 'assistant') {
+        const card = message.reply.factConfirmation;
+        const items = card?.items.filter((item) => item.id !== factId) ?? [];
+        return { ...message, reply: { ...message.reply, factConfirmation: items.length ? { ...card!, items } : undefined } };
+      }
+      if (message.role === 'report') {
+        const card = message.deliverable.factConfirmation;
+        const items = card?.items.filter((item) => item.id !== factId) ?? [];
+        return { ...message, deliverable: { ...message.deliverable, factConfirmation: items.length ? { ...card!, items } : undefined } };
+      }
+      return message;
+    }));
+  };
+
+  const resolveFactCard = async (messageIndex: number, fact: FactConfirmationItem, action: FactConfirmationAction) => {
+    let valueText: string | undefined;
+    if (action === 'edit') {
+      const result = await Taro.showModal({
+        title: '改成准确说法',
+        content: '请写完整的一句话，军师会用它替换刚才的推断。',
+        editable: true,
+        placeholderText: '例如：目前有 6 家直营店',
+        confirmText: '保存修正',
+      } as Parameters<typeof Taro.showModal>[0] & { editable: boolean; placeholderText: string }) as Awaited<ReturnType<typeof Taro.showModal>> & { content?: string };
+      valueText = String(result.content ?? '').trim();
+      if (!result.confirm) return;
+      if (!valueText) { Taro.showToast({ title: '请先写下准确说法', icon: 'none' }); return; }
+    }
+    try {
+      await api.confirmFact(fact.id, { action, ...(valueText ? { valueText } : {}) });
+      removeFactCardItem(messageIndex, fact.id);
+      Taro.showToast({
+        title: action === 'session_only' ? '只在这次会谈里参考' : action === 'edit' ? '已按你的修正记住' : '已确认记住',
+        icon: 'none',
+      });
+    } catch (error) {
+      store.handleApiError(error, { fallbackTitle: (error as Error).message || '这条事实暂时没处理好' });
+    }
+  };
+
+  const renderFactCard = (card: FactConfirmationCard | undefined, messageIndex: number) => card?.items?.length ? (
+    <View className="fact-card">
+      <View className="fact-head"><Icon name="pen" size={14} color={accent} /><Text>{card.title}</Text></View>
+      {card.items.map((fact) => (
+        <View key={fact.id} className="fact-item">
+          <Text className="fact-value">{fact.valueText}</Text>
+          <View className="fact-actions">
+            <View className="fact-action primary" style={{ borderColor: accent, color: accent }} onClick={() => resolveFactCard(messageIndex, fact, 'confirm')}><Text>确认无误</Text></View>
+            <View className="fact-action" onClick={() => resolveFactCard(messageIndex, fact, 'edit')}><Text>改一下</Text></View>
+            <View className="fact-action quiet" onClick={() => resolveFactCard(messageIndex, fact, 'session_only')}><Text>仅本次参考</Text></View>
+          </View>
+        </View>
+      ))}
+    </View>
+  ) : null;
 
   async function doSend(text: string, sid: string, agentKey: string, sendRefs: MessageRef[] = [], echo = true, activeProjectId = projectId) {
     if (busy) return;
@@ -1164,6 +1312,7 @@ export default function Chat() {
       return;
     }
     setBusy(true);
+    setThinkingText('正在梳理上下文');
     // 本页主动发起 → 非「重进被动等待」，停止键有效。
     setReattachedBusy(false);
     // 本轮原文：断流对账认领本轮全靠它（重试 echo=false 也要更新，那同样是新一轮）。
@@ -1920,11 +2069,12 @@ export default function Chat() {
     }
   };
 
-  // 上传图片：微信选图（相册/拍照）→ 逐张呈送 → 挂为本轮 image 引用。单条至多 4 张（与服务端阅图上限对齐）。
+  // 上传图片：微信选图（相册/拍照）→ 逐张呈送 → 挂为本轮 image 引用。数量以 /me capabilities 为准。
   const uploadImage = async () => {
     if (!IS_WEAPP) { Taro.showToast({ title: '请在微信小程序内上传图片', icon: 'none' }); return; }
-    const remain = Math.min(4, UPLOAD_COUNT_MAX - refs.length);
-    if (remain <= 0) { Taro.showToast({ title: `一次至多带 ${UPLOAD_COUNT_MAX} 份，容后再呈`, icon: 'none' }); return; }
+    const currentImages = refs.filter((ref) => ref.kind === 'image').length;
+    const remain = Math.min(maxImagesPerMessage - currentImages, UPLOAD_COUNT_MAX - refs.length);
+    if (remain <= 0) { Taro.showToast({ title: `一次至多带 ${maxImagesPerMessage} 张图片`, icon: 'none' }); return; }
     let chosen: Taro.chooseImage.SuccessCallbackResult;
     try {
       chosen = await Taro.chooseImage({ count: remain, sizeType: ['compressed'], sourceType: ['album', 'camera'] });
@@ -2095,9 +2245,9 @@ export default function Chat() {
         {/* 合规：AI 生成内容显式标识（《标识办法》2025-09-01 强制） */}
         <View className="chat-ai-note"><Text>内容由 AI 生成，仅供参考</Text></View>
         {/* 历史窗口化：仅当仍有更早历史未展开时露出——点一次向前补一窗（军师文风）。 */}
-        {histShown < fullMsgsRef.current.length ? (
+        {histShown < fullMsgsRef.current.length || historyHasMore ? (
           <View className="hist-more" onClick={expandEarlier}>
-            <Text className="hist-more-t" style={{ color: accent }}>阅早前问对</Text>
+            <Text className="hist-more-t" style={{ color: accent }}>{historyLoading ? '正在翻阅…' : '阅早前问对'}</Text>
           </View>
         ) : null}
         {msgs.map((m, i) => {
@@ -2197,10 +2347,13 @@ export default function Chat() {
                 <View className="who"><AdvisorAvatar agentKey={agent?.key ?? 'general'} size={24} /><Text>{agent?.name}</Text></View>
                 <View className="ai-text" onLongPress={() => copyText(replyToText(m.reply))}>
                   {m.streaming && !m.reply?.text ? (
-                    <View className="think-dots">
-                      <View className="think-dot" style={{ background: accent }} />
-                      <View className="think-dot d2" style={{ background: accent }} />
-                      <View className="think-dot d3" style={{ background: accent }} />
+                    <View className="stream-wait">
+                      <View className="think-dots">
+                        <View className="think-dot" style={{ background: accent }} />
+                        <View className="think-dot d2" style={{ background: accent }} />
+                        <View className="think-dot d3" style={{ background: accent }} />
+                      </View>
+                      <Text className="stream-hint">{thinkingText}</Text>
                     </View>
                   ) : (
                     <MarkdownText text={m.streaming ? visibleStreamText(m.reply?.text) : m.reply?.text} streaming={m.streaming} selectable />
@@ -2234,6 +2387,7 @@ export default function Chat() {
                   </View>
                 ) : null}
                 <RefNotices notices={m.refNotices} />
+                {renderFactCard(m.reply?.factConfirmation, i)}
                 {/* 军师反问选项卡：保留卡片内填写；可见文字用 View 渲染，键盘由 ScrollView 外的 Textarea 承接。 */}
                 {i === activeAskIdx && activeAsks.length ? (
                   <View className="ask-card">
@@ -2347,8 +2501,10 @@ export default function Chat() {
                   posterPrice={posterEntryOn ? creativeStatus!.pricePerPoster : undefined}
                   onPoster={posterEntryOn ? () => openPosterConfirm(m.messageId) : undefined}
                   onViewPoster={m.deliverable?.creativeJobId ? () => openPosterJob(m.deliverable.creativeJobId) : undefined}
+                  onNextStage={reportReady && m.deliverable?.delivery?.nextStage ? () => continueDeliveryStage(m.deliverable.delivery!) : undefined}
                 />
               </View>
+              {m.streaming ? <Text className="stream-hint report-progress">{thinkingText}</Text> : null}
               {/* 记债项10：报告流失败/降级——单一话术（trust 行「生成中断——已生成部分已保留，可点击重试补全」）+ ↻ 重试入口。
                   原「保底草案，已免扣额度」独立提示已并入 trust 行，degraded 仅留作状态位。 */}
               {!m.streaming && m.retryText ? (
@@ -2365,6 +2521,7 @@ export default function Chat() {
                 </View>
               ) : null}
               <RefNotices notices={m.refNotices} />
+              {renderFactCard(m.deliverable?.factConfirmation, i)}
               {/* 认可方案 → 沉淀报告并进入执行承接（对齐「认可后拆成军令/复盘」动线）。
                   硬条件同上（reportReady），中断/降级/未落库一律不开放认可，先重试补全再认可。 */}
               {reportReady && !m.retryText ? (
@@ -2392,7 +2549,7 @@ export default function Chat() {
                 <View className="think-dot d2" style={{ background: accent }} />
                 <View className="think-dot d3" style={{ background: accent }} />
               </View>
-              <Text className="think-text">正在梳理上下文</Text>
+              <Text className="think-text">{thinkingText}</Text>
             </View>
           </View>
         ) : null}
@@ -2453,6 +2610,9 @@ export default function Chat() {
             粘贴长文单独走一张宽卡：露字数 + 内容摘要 + 可点开看全文，主公才认得出「这就是我刚粘的那段」。 */}
         {(refs.length || pastePendings.length) ? (
           <View className="ref-row">
+            {refs.some((ref) => ref.kind === 'image') ? (
+              <Text className="image-ref-count">图片 {refs.filter((ref) => ref.kind === 'image').length}/{maxImagesPerMessage}</Text>
+            ) : null}
             {refs.map((r, j) => {
               if (isPasteRef(r)) {
                 const c = refCardParts(r);
