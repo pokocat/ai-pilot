@@ -151,22 +151,58 @@ nginx 模板有 `location /pc/`。）
 
 ---
 
-## 6. 设计稿怎么取
+## 6. 设计稿怎么取（**三个待做区全靠这个，别凭空发挥**）
 
-设计项目（claude_design MCP，`DesignSync` 工具）：
+设计稿是用户在 Claude Design 里画好的，**不是我们编的**。原始出处：
 
+- 分享链接：`https://claude.ai/design/p/db1411d1-ff9f-4bc8-8320-6fbb4b96c23f?file=%E5%86%9B%E5%B8%88+PC.dc.html`
+- MCP：`https://api.anthropic.com/v1/design/mcp`，鉴权走 `/design-login`（工具名 `DesignSync`）
 - projectId：`db1411d1-ff9f-4bc8-8320-6fbb4b96c23f`
-- 文件：`军师 PC.dc.html`（约 113KB，1444 行）
 
 ```
-DesignSync { method: "get_file", projectId: "db1411d1-...", path: "军师 PC.dc.html" }
+DesignSync { method: "list_files",  projectId: "db1411d1-ff9f-4bc8-8320-6fbb4b96c23f" }
+DesignSync { method: "get_file",    projectId: "db1411d1-...", path: "军师 PC.dc.html" }
 ```
 
-三个待做区在原文件里的大致行段：**沙盘 270–389**、**点兵 392–538**、**主公 728–785**。
-（`sc-if` / `sc-for` 是设计工具的模板标签，`{{ }}` 是占位数据，照着结构和尺寸实现即可。）
+主文件 `军师 PC.dc.html`（约 113KB / 1444 行）会超出单次读取上限，`get_file` 的结果会落到
+一个 JSON 文件里，取正文这样剥：
 
-关键尺寸：三栏 `76px / var(--list-w, 348px) / 1fr`，抽屉 `432px`，对话区内容列 `760px` 居中。
-颜色全部走 `pc/index.scss` 里的 CSS 变量，**不许写死十六进制**（本命色要能整套换）。
+```python
+import json; print(json.load(open('<那个结果文件>'))['content'])
+```
+
+项目里还有 `support.js`（设计工具的运行时，**不用读，与实现无关**）、`assets/avatars/*.jpg`、
+`assets/fonts/*.woff2`。**素材都别下载**：仓库自己有一套立绘
+（`app/src/assets/avatars/generated/*-imagegen.jpg`，见 `pc/portraits.ts`），字体走站点根 `/fonts/`。
+
+### 文件里的行段地图（已核对）
+
+| 位置 | 行 | 状态 |
+|---|---|---|
+| 外壳（导航轨 / 列表栏 / 顶栏 / 主区骨架） | 29–181 | ✅ 已实现 |
+| 问策 · 对话 | 183–267 | ✅ 已实现 |
+| **沙盘** | **270–389** | ⬜ 待做 |
+| **点兵** | **392–538** | ⬜ 待做 |
+| 锦囊 | 541–725 | ✅ 已实现 |
+| **主公** | **728–785** | ⬜ 待做 |
+| 右侧抽屉 | 789–823 | ✅ 已实现（`Chrome.tsx` 的 `Stage`） |
+| 右键菜单 / Toast | 828–845 | ✅ 已实现 |
+| **数据段** `<script type="text/x-dc">` | **849–1444** | 见下 |
+
+**数据段是宝藏，别忽略。** 849 行往后是设计稿的示例数据与交互逻辑：`FORCES`（三势）、
+`ORDERS`（军令表行）、`DOCS`、`MODULES`、`REPORTS`、各区的 `navGroups` 与顶栏 `actions` 文案、
+右键菜单项与快捷键标注。做沙盘/点兵时**先读这一段**，能直接看出每个字段的预期形态和文案口径，
+比对着模板标签猜快得多。849 行那条 `data-props` 里还有六套本命色的完整色值和
+`listWidth` / `showRailLabels` 的默认值。
+
+`sc-if` / `sc-for` 是设计工具的模板标签，`{{ }}` 是占位数据 —— 照结构和尺寸实现即可，
+标签本身不用还原。
+
+### 实现约束
+
+- 三栏 `76px / var(--list-w, 348px) / 1fr`，抽屉 `432px`，对话区内容列 `760px` 居中
+- 颜色**全部**走 `pc/index.scss` 的 CSS 变量，**不许写死十六进制**（本命色要能整套换）
+- 设计稿里 `{{ f.toneColor }}` `{{ o.stateBg }}` 这类「把颜色当数据传」的写法，一律改成按状态派生 CSS 类（见第 4 节 ⑤）
 
 ---
 
