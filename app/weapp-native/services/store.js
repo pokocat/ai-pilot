@@ -3,6 +3,7 @@ const { getToken, setToken, clearToken } = require('./token');
 const { setAuthLostHandler } = require('./request');
 const { DEFAULT_AGENTS } = require('./mock');
 const { isColorKey } = require('./colors');
+const { apiErrorPresentation } = require('./api-error');
 
 const COLOR_KEY = 'junshi.color';
 const ONBOARDED_KEY = 'junshi.onboarded';
@@ -56,32 +57,39 @@ function handleApiError(error, options) {
     }
     return 'unauthorized';
   }
-  if (code === 'NETWORK_ERROR') {
-    if (!opts.silent) wx.showToast({ title: error.message || opts.fallbackTitle || '网络请求失败', icon: 'none' });
-    return 'network';
+  const view = apiErrorPresentation(error, opts.fallbackTitle);
+  if (!opts.silent) {
+    if (view.action === 'plans' || view.action === 'credits') promptErrorAction(view);
+    else if (view.kind !== 'cancelled') wx.showToast({ title: view.message, icon: 'none' });
   }
-  // 未开通方案（服务端禁写闸 403）：所有写操作都会撞上这条，通用兜底只会弹一句「XX 失败」，
-  // 把付费转化路径断在最后一步。这里统一给开通入口——silent 调用方自己渲染，只拿 code。
-  if (code === 'PLAN_REQUIRED') {
-    if (!opts.silent) promptPlanRequired();
-    return 'plan_required';
-  }
-  if (!opts.silent && opts.fallbackTitle) wx.showToast({ title: opts.fallbackTitle, icon: 'none' });
-  return 'other';
+  return view.kind;
 }
 
 let planModalOpen = false;
-/** 「未开通方案」引导弹窗（去开通 → 方案页）。同屏多请求并发失败时只弹一次。 */
-function promptPlanRequired() {
+function promptErrorAction(view) {
   if (planModalOpen) return;
   planModalOpen = true;
+  const credits = view.action === 'credits';
+  const title = view.kind === 'quota' ? '当前用量已用完'
+    : view.kind === 'plan_expired' ? '当前方案已到期'
+      : credits ? '当前算力不足' : '尚未开通方案';
   wx.showModal({
-    title: '尚未开通方案',
-    content: '开通方案后即可使用军师的推演与成果能力，未开通前内容可以随便看。',
-    confirmText: '去开通',
-    cancelText: '再看看',
+    title,
+    content: view.message,
+    confirmText: credits ? '查看算力' : '查看方案',
+    cancelText: '暂不处理',
     complete: () => { planModalOpen = false; },
-    success: (result) => { if (result.confirm) wx.navigateTo({ url: '/packages/work/plans/index' }); },
+    success: (result) => {
+      if (result.confirm) wx.navigateTo({ url: credits ? '/packages/work/credits/index' : '/packages/work/plans/index' });
+    },
+  });
+}
+
+/** 「未开通方案」引导弹窗（去开通 → 方案页）。同屏多请求并发失败时只弹一次。 */
+function promptPlanRequired() {
+  promptErrorAction({
+    kind: 'plan_required', action: 'plans',
+    message: '开通方案后即可使用军师的推演与成果能力。',
   });
 }
 

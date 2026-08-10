@@ -94,7 +94,7 @@ Page({
     this.setData({ saving: true });
     try {
       const company = String(this.data.company || '').trim();
-      if (company) await api.updateIdentity({ company }).catch(() => {});
+      if (company) await api.updateIdentity({ company });
       await api.saveProfile(answers);
       await store.loadMe();
       store.completeOnboarding();

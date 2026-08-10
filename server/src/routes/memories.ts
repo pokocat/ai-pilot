@@ -37,9 +37,9 @@ export async function memoryRoutes(app: FastifyInstance) {
   app.patch<{ Params: { id: string }; Body: { text?: string } }>('/memories/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const text = (req.body?.text ?? '').trim();
-    if (!text) return reply.code(400).send({ error: 'empty text' });
+    if (!text) return reply.code(400).send({ error: '记忆内容不能为空', code: 'EMPTY_TEXT' });
     const ok = await updateOwnMemory(user.tenantId, user.id, req.params.id, text);
-    if (!ok) return reply.code(404).send({ error: 'memory not found' });
+    if (!ok) return reply.code(404).send({ error: '这条记忆不存在或已删除', code: 'MEMORY_NOT_FOUND' });
     await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.memory.update', payload: { memoryId: req.params.id } });
     return { ok: true };
   });

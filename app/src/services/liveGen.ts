@@ -2,6 +2,7 @@ import { generateStream, type StreamControl, type StreamHandlers, type StreamErr
 import { api } from './api';
 import { markChatPending, clearChatPending } from './chatPending';
 import { classifyReconcileTick, reportCloseAction, type ReconcileOutcome } from './liveGenCore';
+import { apiErrorPresentation } from './apiError';
 import type {
   GenRequest, GenResult, ChatReply, Deliverable, DeliverableSection, SessionDetail, SessionMessage,
   GenerationPhase, GenerationStatus,
@@ -41,8 +42,6 @@ function mergeSnapshotSection(
   return next.filter(Boolean);
 }
 
-const isModerationErr = (s?: string) => !!s && /审核/.test(s);
-
 // 断流对账：客户端断链 ≠ 生成失败。小程序切后台会杀掉在途请求，而服务端照常算完并落库（报告尤其如此：
 // 正文一次性生成，逐段下发只是呈现节奏）。故断流后先向服务端核实再判生死，最多 RECONCILE_TRIES 次、
 // 每次间隔 RECONCILE_GAP_MS；次数用尽仍无定论才落回失败态——有限重试，绝不无限循环。
@@ -67,7 +66,7 @@ export interface LiveGenView {
   finishChat(messageId: string | undefined, refNotices: string[] | undefined): void;
   finishReport(messageId: string | undefined, refNotices: string[] | undefined): void;
   // broken=true：断流对账后仍判定失败（链路断的，非服务端明确回错）。页面据此记账，回前台时再兜一次底。
-  error(kind: LiveKind, message: string, retry: string | undefined, broken?: boolean): void;
+  error(kind: LiveKind, message: string, retry: string | undefined, broken?: boolean, code?: string, statusCode?: number): void;
   fallbackDone(res: GenResult, retryText: string): void;
   // 断流对账「已落库」：以服务端消息为准整体重绘本页（走与加载路径同一套 restore），不留半截中断卡。
   restoreServerTruth(detail: SessionDetail): void;
@@ -124,6 +123,8 @@ interface LiveGenEntry {
   pendingRefNotices: string[];
   learnedAgentName: string;
   errorMessage?: string;
+  errorCode?: string;
+  errorStatusCode?: number;
   // —— 运行态 ——
   view: LiveGenView | null;
   control: StreamControl;
@@ -191,15 +192,19 @@ function handleDone(entry: LiveGenEntry, messageId?: string) {
   if (entry.learnedAgentName) entry.view?.memoryLearned(entry.learnedAgentName);
 }
 
-function surfaceError(entry: LiveGenEntry, message: string, broken = false) {
-  const retry = isModerationErr(message) ? undefined : entry.userText;
-  entry.view?.error(entry.kind, message, retry, broken);
+function surfaceError(entry: LiveGenEntry, message: string, broken = false, code = entry.errorCode, statusCode = entry.errorStatusCode) {
+  const source = Object.assign(new Error(message), { code, statusCode });
+  const shown = apiErrorPresentation(source, message);
+  const retry = shown.retryable ? entry.userText : undefined;
+  entry.view?.error(entry.kind, shown.message, retry, broken, code, statusCode);
 }
 
-function handleError(entry: LiveGenEntry, message: string, kind: StreamErrorKind) {
+function handleError(entry: LiveGenEntry, message: string, kind: StreamErrorKind, code?: string, statusCode?: number) {
   // streamErrored 立刻置位：对账推迟的只是「怎么收尾」，不能让 drive 的静默失败兜底趁这个空档重发一轮。
   entry.streamErrored = true;
   entry.errorMessage = message;
+  entry.errorCode = code;
+  entry.errorStatusCode = statusCode;
   if (kind === 'disconnect' && !entry.aborted) {
     entry.disconnected = true; // 断线不当死讯：收尾交给 drive 的对账
     return;
@@ -213,6 +218,8 @@ type ReconcileResult = Exclude<ReconcileOutcome, null>;
 function applyStoredReply(entry: LiveGenEntry, detail: SessionDetail, stored: SessionMessage) {
   entry.streamErrored = false;
   entry.errorMessage = undefined;
+  entry.errorCode = undefined;
+  entry.errorStatusCode = undefined;
   entry.kind = stored.role === 'report' ? 'report' : 'chat';
   entry.messageId = stored.id;
   entry.view?.restoreServerTruth(detail);
@@ -306,7 +313,7 @@ function makeHandlers(entry: LiveGenEntry): StreamHandlers {
     onRefNotices: (ns) => { entry.pendingRefNotices = ns; },
     onMemory: (data) => { if (data.learned && data.agentName) entry.learnedAgentName = data.agentName; },
     onDone: (messageId) => handleDone(entry, messageId),
-    onError: (em, kind) => handleError(entry, em, kind),
+    onError: (em, kind, code, statusCode) => handleError(entry, em, kind, code, statusCode),
   };
 }
 
@@ -352,9 +359,13 @@ async function drive(entry: LiveGenEntry) {
       }
     } catch (e) {
       const msg = String((e as { message?: string })?.message || '') || '生成失败';
+      const code = String((e as { code?: string })?.code || '') || undefined;
+      const statusCode = Number((e as { statusCode?: number })?.statusCode) || undefined;
       entry.streamErrored = true;
       entry.errorMessage = msg;
-      entry.view?.error(entry.kind, msg, isModerationErr(msg) ? undefined : entry.userText);
+      entry.errorCode = code;
+      entry.errorStatusCode = statusCode;
+      surfaceError(entry, msg, false, code, statusCode);
     }
   }
 

@@ -34,11 +34,15 @@ export default function Market() {
   }, [pid]);
 
   // 记为开通（模块/已拥有/未识别 agent 的兜底确认）。
-  const ackRx = () => {
+  const ackRx = async () => {
     if (!rx) return;
-    api.prescriptionAction(rx.id, 'activated').catch(() => {});
-    Taro.showToast({ title: '已记为开通', icon: 'success' });
-    setTimeout(() => Taro.navigateBack(), 600);
+    try {
+      await api.prescriptionAction(rx.id, 'activated');
+      Taro.showToast({ title: '已记为开通', icon: 'success' });
+      setTimeout(() => Taro.navigateBack(), 600);
+    } catch (e) {
+      s.handleApiError(e, { fallbackTitle: '状态没有保存，请重试' });
+    }
   };
   // D-1/D-3-7：处方开通——若开的是可解锁专项军师且未拥有，走真实解锁弹层（带 source:'prescription'+refId=处方 id，
   // 用户在弹层内确认额度消耗）；否则按兜底记为开通。
@@ -46,7 +50,7 @@ export default function Market() {
     if (!rx) return;
     const agent = s.agents().find((a) => a.key === rx.toolKey);
     if (agent && agent.billing === 'unlock' && !agent.owned) { setBuying(agent); return; }
-    ackRx();
+    void ackRx();
   };
 
   const goChat = (agentKey: string, prompt: string) =>

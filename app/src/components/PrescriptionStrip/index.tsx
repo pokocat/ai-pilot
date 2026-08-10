@@ -13,7 +13,12 @@ const IS_WEAPP = process.env.TARO_ENV === 'weapp';
 export default function PrescriptionStrip() {
   const [items, setItems] = useState<PrescriptionView[]>([]);
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => { api.prescriptions().then((r) => setItems(r.items)).catch(() => {}).finally(() => setLoaded(true)); }, []);
+  const [failed, setFailed] = useState(false);
+  const load = () => {
+    setLoaded(false); setFailed(false);
+    api.prescriptions().then((r) => { setItems(r.items); setFailed(false); }).catch(() => setFailed(true)).finally(() => setLoaded(true));
+  };
+  useEffect(load, []);
   const active = items.filter((p) => p.status !== 'dismissed' && p.status !== 'activated');
 
   // 首帧未加载完成：占位骨架，避免处方条「后弹入」挤动布局；加载完无处方则收起。
@@ -25,6 +30,16 @@ export default function PrescriptionStrip() {
             <View className="rx-sk rx-sk-for" />
             <View className="rx-sk rx-sk-play" />
           </View>
+        </View>
+      </View>
+    );
+  }
+  if (failed) {
+    return (
+      <View className="rx-strip">
+        <View className="rx-item" onClick={load}>
+          <View className="rx-main"><Text className="rx-for">专项建议暂时没取到</Text><Text className="rx-play">点这里重新加载</Text></View>
+          <Text className="rx-cta">↻ 重试</Text>
         </View>
       </View>
     );

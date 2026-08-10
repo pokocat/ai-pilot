@@ -2,6 +2,7 @@ const env = require('../config/env');
 const { getToken } = require('./token');
 const { getApiBaseUrl, useMockApi } = require('./runtime-mode');
 const { networkErrorInfo, unauthorized, parseBody } = require('./request');
+const { apiErrorPresentation, httpErrorInfo } = require('./api-error');
 
 function decodeUtf8(bytes) {
   let out = ''; let i = 0;
@@ -55,7 +56,13 @@ function generateStream(body, handlers) {
         else if (entry.event === 'section') { rendered = true; if (!state.deliverable) state.deliverable = { title: '', sections: [], trust: '', actions: [] }; state.deliverable.sections.push(data); handlers.onReport && handlers.onReport(state.deliverable); }
         else if (entry.event === 'footer') { if (!state.deliverable) state.deliverable = { title: '', sections: [], trust: '', actions: [] }; state.deliverable.trust = data.trust || ''; state.deliverable.actions = data.actions || []; handlers.onReport && handlers.onReport(state.deliverable); }
         else if (entry.event === 'done') { state.messageId = data.messageId || ''; finished = true; handlers.onDone && handlers.onDone(data); }
-        else if (entry.event === 'error') { finished = true; state.error = Object.assign(new Error(data.message || '军师暂时没能完成这次回答'), { code: data.code || 'GENERATION_FAILED' }); handlers.onError && handlers.onError(state.error); }
+        else if (entry.event === 'error') {
+          finished = true;
+          const source = Object.assign(new Error(data.message || ''), { code: data.code || 'GENERATION_FAILED' });
+          const view = apiErrorPresentation(source, '军师暂时没能完成这次回答，请稍后重试。');
+          state.error = Object.assign(new Error(view.message), { code: source.code, technicalMessage: data.message || undefined });
+          handlers.onError && handlers.onError(state.error);
+        }
       }
     };
     const consume = (text) => { const parsed = parseSSE(text); dispatch(parsed.events); return parsed.rest; };
@@ -75,7 +82,15 @@ function generateStream(body, handlers) {
       success: (res) => {
         const data = parseBody(res.data);
         if (res.statusCode === 401) state.error = unauthorized(tokenAtRequest, data);
-        else if (res.statusCode < 200 || res.statusCode >= 300) state.error = Object.assign(new Error((data && data.error) || `请求失败（${res.statusCode}）`), { code: (data && data.code) || `HTTP_${res.statusCode}`, statusCode: res.statusCode, data });
+        else if (res.statusCode < 200 || res.statusCode >= 300) {
+          const info = httpErrorInfo(res.statusCode, data, '请求');
+          state.error = Object.assign(new Error(info.message), {
+            code: info.code || `HTTP_${res.statusCode}`,
+            statusCode: res.statusCode,
+            data,
+            technicalMessage: info.technicalMessage,
+          });
+        }
         finish(data);
       },
       fail: (error) => {

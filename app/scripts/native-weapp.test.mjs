@@ -36,6 +36,44 @@ const chatStyle = () => [
   read(chatCoreRoot, 'chat-core.scss'),
 ].join('\n');
 
+test('原生 402 保留业务错误码，额度耗尽只给方案入口不再诱导重试', () => {
+  const requestPath = path.join(sourceRoot, 'services/request.js');
+  const errorPath = path.join(sourceRoot, 'services/chat-error.js');
+  const apiErrorPath = path.join(sourceRoot, 'services/api-error.js');
+  delete cjsRequire.cache[cjsRequire.resolve(requestPath)];
+  delete cjsRequire.cache[cjsRequire.resolve(errorPath)];
+  delete cjsRequire.cache[cjsRequire.resolve(apiErrorPath)];
+  const { parseBody } = cjsRequire(requestPath);
+  const { chatErrorPresentation } = cjsRequire(errorPath);
+  const { apiErrorPresentation, httpErrorInfo } = cjsRequire(apiErrorPath);
+  const bytes = new TextEncoder().encode(JSON.stringify({
+    error: '本月 token 额度已用尽，请续费或升级套餐', code: 'INSUFFICIENT_QUOTA',
+  }));
+  const parsed = parseBody(bytes.buffer);
+  assert.equal(parsed.code, 'INSUFFICIENT_QUOTA', 'enableChunked 的 ArrayBuffer 4xx 不得退化成 HTTP_402');
+  assert.deepEqual(chatErrorPresentation(Object.assign(new Error(parsed.error), { code: parsed.code, data: parsed })), {
+    title: '本月方案用量已用完',
+    note: '可前往「方案与权益」查看恢复时间或更换方案。原问题和引用已保留。',
+    action: 'plans',
+    retryable: false,
+  });
+  const markup = read(chatCoreRoot, 'message-list.wxml');
+  assert.match(markup, /errorAction==='plans'/);
+  assert.match(markup, /查看方案/);
+  assert.deepEqual(chatErrorPresentation({ code: 'INSUFFICIENT_CREDITS' }), {
+    title: '当前算力不足',
+    note: '可前往「算力明细」查看。原问题和引用已保留。',
+    action: 'credits',
+    retryable: false,
+  });
+  assert.match(markup, /errorAction==='credits'/);
+  assert.equal(apiErrorPresentation({ code: 'RATE_LIMITED' }).retryable, false);
+  assert.equal(apiErrorPresentation({ code: 'CLIENT_REQUEST_ID_REQUIRED' }).kind, 'validation');
+  assert.deepEqual(httpErrorInfo(500, { error: 'Prisma exploded', code: 'FAIL' }), {
+    message: '军师服务暂时不可用，请稍后重试。', code: 'FAIL', technicalMessage: 'Prisma exploded',
+  });
+});
+
 test('原生小程序覆盖 app.json 声明的全部路由', () => {
   const app = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'app.json'), 'utf8'));
   const routes = [...app.pages];
@@ -216,7 +254,8 @@ test('生成以 failed/cancelled 收场时必须给中断话术，不许留空�
   // 三条路径（SSE done / 轮询终态 / 同步兜底）共用一处收尾，话术不许各写各的。
   assert.match(behavior, /finishInterrupted\(status, epoch\) \{[\s\S]*?markStreamInterrupted\(\)[\s\S]*?canRetryLast: true,/, '中断收尾必须停打字机并给出重试入口');
   assert.equal((behavior.match(/this\.finishInterrupted\(/g) || []).length, 3, 'SSE / 轮询 / 同步兜底三处都要走同一个收尾');
-  assert.equal((behavior.match(/军师暂时没有接上，请重试/g) || []).length, 2, '中断话术只应出现在 finishInterrupted 与 catch 兜底两处');
+  assert.equal((behavior.match(/军师暂时没有接上，请重试/g) || []).length, 1, '中断终态保留统一话术；HTTP catch 交错误语义映射，不再写死同一句');
+  assert.match(behavior, /this\.finishBusy\(chatErrorPatch\(error\), epoch\)/, 'HTTP 失败必须先判断是否真的可重试');
 });
 
 test('mock 不得比真服务端「友好」：多给的字段会让端上写出真机取不到的消费', () => {
@@ -438,7 +477,7 @@ test('原生聊天保持可恢复生成、完整报告闸门与动态输入区',
   assert.doesNotMatch(chat, /tone="green"/, '聊天功能图标必须跟随本命色');
   assert.doesNotMatch(chat, /\{\{[^}]*\.[A-Za-z_$][\w$]*\s*\(/, 'WXML 不得调用 JS 方法');
   assert.match(chatJs, /function hasUnansweredTurn\(messages, generating\)[\s\S]*?last\.role === 'user'/, '重进会话必须识别已落库但尚未得到回答的尾部用户消息');
-  assert.ok((chatJs.match(/canRetryLast, errorText: canRetryLast \?/g) || []).length >= 2, '首次恢复与兼容轮询结束都要恢复重试入口');
+  assert.ok((chatJs.match(/canRetryLast,\s*errorText: canRetryLast \?/g) || []).length >= 2, '首次恢复与兼容轮询结束都要恢复重试入口');
   assert.match(chat, /wx:if="\{\{canRetryLast\}\}" class="retry" bindtap="retry">重新回答/, '失败轮次必须给明确下一步，而不是重进后静默消失');
 
   assert.match(chatJs, /detail\.activeGeneration/);
@@ -1606,16 +1645,18 @@ test('未开通方案有明确的开通入口，不落到通用「XX 失败」�
   const store = read(sourceRoot, 'services/store.js');
   // 禁写闸（服务端 403 PLAN_REQUIRED）打在每一个写操作上。通用兜底只会弹一句失败，
   // 用户看不出「要先开通」，付费转化路径断在最后一步 —— 必须由 store 统一给开通入口。
-  assert.match(store, /code === 'PLAN_REQUIRED'[\s\S]{0,200}return 'plan_required'/);
-  assert.match(store, /function promptPlanRequired\(\)[\s\S]{0,600}\/packages\/work\/plans\/index/);
+  assert.match(store, /apiErrorPresentation\(error, opts\.fallbackTitle\)/);
+  assert.match(store, /function promptErrorAction\(view\)[\s\S]{0,900}\/packages\/work\/plans\/index/);
   // silent 调用方（对话流）自己渲染，store 不能替它弹窗，否则错误态会双弹。
-  assert.match(store, /if \(!opts\.silent\) promptPlanRequired\(\);/);
+  assert.match(store, /if \(!opts\.silent\)[\s\S]{0,240}promptErrorAction\(view\)/);
 
   const core = chatSource();
   // ① 发送前就拦：别让用户写完一整段话才被 403 打回来。
   assert.match(core, /store\.planRequired\(\)[\s\S]{0,120}store\.promptPlanRequired\(\)/);
   // ② 真撞上 403 时不能给「重试」——重试多少次都还是 403。
-  assert.match(core, /kind === 'plan_required'[\s\S]{0,240}canRetryLast: false/);
+  assert.match(core, /kind === 'plan_required'[\s\S]{0,240}this\.finishBusy\(chatErrorPatch\(error\), epoch\)/);
+  const errorSemantic = read(sourceRoot, 'services/chat-error.js');
+  assert.match(errorSemantic, /code === 'PLAN_REQUIRED'[\s\S]{0,260}action: 'plans'[\s\S]{0,120}retryable: false/);
 });
 
 test('字体栈在小程序产物里必须是字面量，不留 var(--serif) 给真机运行时解析', () => {

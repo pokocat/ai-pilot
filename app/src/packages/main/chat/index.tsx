@@ -28,6 +28,7 @@ import { acceptDeliverable } from '../../../services/dossier';
 import { navTo } from '../../../services/nav';
 import { chatPendingAge, clearChatPending, isChatPending, markChatPending } from '../../../services/chatPending';
 import { getCreativeStatus, peekCreativeStatus } from '../../../services/creative';
+import { chatErrorPresentation, type ChatErrorAction, type ChatErrorPresentation } from '../../../services/chatError';
 import type { AuthReason } from '../../../services/authGate';
 import './index.scss';
 
@@ -36,8 +37,8 @@ import './index.scss';
 type Msg =
   | { role: 'greet'; agent: Agent; uid?: string }
   | { role: 'user'; text: string; refs?: MessageRef[]; uid?: string }
-  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; refNotices?: string[]; retryText?: string; streaming?: boolean; uid?: string }
-  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; refNotices?: string[]; streaming?: boolean; retryText?: string; uid?: string }
+  | { role: 'assistant'; reply: ChatReplyT; knowledgeUsed?: string[]; refNotices?: string[]; retryText?: string; errorAction?: ChatErrorAction; streaming?: boolean; uid?: string }
+  | { role: 'report'; deliverable: Deliverable; animate: boolean; saved?: boolean; messageId?: string; knowledgeUsed?: string[]; refNotices?: string[]; streaming?: boolean; retryText?: string; errorAction?: ChatErrorAction; uid?: string }
   | { role: 'memory'; agentName: string; uid?: string };
 
 // 本地临时消息的稳定 uid：模块级单调计数，跨渲染/实例不重复。仅在事件处理/副作用里调用（非渲染期）。
@@ -597,14 +598,9 @@ export default function Chat() {
   const isUnauthorized = (e: unknown) =>
     (e as any)?.code === 'UNAUTHORIZED' || String((e as any)?.message || '').includes('未登录');
 
-  const errorReply = (e: unknown): string => {
-    if (isUnauthorized(e)) return '登录态已失效，请重新登录后再发送。';
-    if ((e as any)?.data?.code === 'AGENT_LOCKED') return '这位军师还没启用，去锦囊里看看。';
-    if ((e as any)?.data?.code === 'INSUFFICIENT_QUOTA') return '本月额度已用尽，可在「我的」升级套餐，或下月再用。';
-    if ((e as any)?.data?.code === 'INSUFFICIENT_CREDITS') return '算力不足，可在「我的」充值后继续。';
-    const msg = String((e as any)?.message || '');
-    if (msg && msg !== 'undefined') return msg;
-    return '没出来，再试一次？还是不行就换个说法。';
+  const errorReply = (e: unknown): ChatErrorPresentation => {
+    if (isUnauthorized(e)) return { message: '登录态已失效，请重新登录后再发送。', retryable: false };
+    return chatErrorPresentation(e, '没出来，再试一次？还是不行就换个说法。');
   };
 
   // 审核类错误（输入/输出未通过内容审核）：重试同样内容必再次被拦，故不提供「重试」，也避免叠出重复气泡。
@@ -1026,8 +1022,10 @@ export default function Chat() {
         streamBrokenRef.current = false;
         resumeGeneration(sid, ag);
       },
-      error: (kind, message, retry, broken) => {
+      error: (kind, message, retry, broken, code, statusCode) => {
         flushTokenBuf(); // 报错前先把已流出的 token 落屏，保留部分内容
+        const shown = chatErrorPresentation(Object.assign(new Error(message), { code, statusCode }));
+        const retryText = shown.retryable ? retry : undefined;
         // 断链判死（对账也没能问出结果）：多半是切后台被杀请求。记一笔，回前台时再兜一次底。
         if (broken) streamBrokenRef.current = true;
         if (kind === 'report') {
@@ -1042,20 +1040,21 @@ export default function Chat() {
               copy[i] = {
                 ...cur,
                 streaming: false,
-                retryText: retry,
+                retryText,
+                errorAction: shown.action,
                 deliverable: { ...cur.deliverable, trust: REPORT_INTERRUPTED_TRUST, degraded: true },
               };
             } else {
               // 完全无内容：不留半空报告卡，改普通错误气泡 + 重试（对齐聊天气泡）。保留原 uid，key 稳定。
-              copy[i] = { role: 'assistant', reply: { text: message || '生成失败' }, retryText: retry, uid: cur.uid };
+              copy[i] = { role: 'assistant', reply: { text: shown.message || '生成失败' }, retryText, errorAction: shown.action, uid: cur.uid };
             }
             return copy;
           });
         } else if (kind === 'chat') {
-          patchChat((msg) => ({ ...msg, reply: { text: message || '生成失败' }, retryText: retry, streaming: false }));
+          patchChat((msg) => ({ ...msg, reply: { text: shown.message || '生成失败' }, retryText, errorAction: shown.action, streaming: false }));
         } else {
           // 错误早于任何 meta（如 HTTP 层直接失败）：既无报告卡也无聊天气泡可就地更新，补一条错误气泡 + 重试。
-          setMsgs((m) => [...m, { role: 'assistant', reply: { text: message || '生成失败' }, retryText: retry, uid: nextMsgUid() }]);
+          setMsgs((m) => [...m, { role: 'assistant', reply: { text: shown.message || '生成失败' }, retryText, errorAction: shown.action, uid: nextMsgUid() }]);
         }
       },
       fallbackDone: (res, retryText) => { renderGenerateResult(res, true, retryText); setTimeout(scrollToEnd, 80); },
@@ -1230,9 +1229,14 @@ export default function Chat() {
       }
     } catch (e) {
       if (isUnauthorized(e)) promptLogin('登录态已失效，请重新登录');
-      const reply = errorReply(e);
+      const shown = errorReply(e);
       // P2-15：保留原文供重试；但审核类错误不给重试（重试必再被拦）。
-      setMsgs((m) => [...m, { role: 'assistant', reply: { text: reply }, retryText: isModerationErr(reply) ? undefined : text, uid: nextMsgUid() }]);
+      setMsgs((m) => [...m, {
+        role: 'assistant', reply: { text: shown.message },
+        retryText: shown.retryable && !isModerationErr(shown.message) ? text : undefined,
+        errorAction: shown.action,
+        uid: nextMsgUid(),
+      }]);
     } finally {
       if (!handedOff) {
         if (pendingSessionIdRef.current) clearChatPending(pendingSessionIdRef.current);
@@ -1592,8 +1596,13 @@ export default function Chat() {
       markMsgSaved(messageId);
       return;
     }
-    // 手动路径：保留原有乐观行为 + toast
-    await api.saveToLibrary(body).catch(() => {});
+    // 手动路径必须以服务端成功为准；失败时不能仍点亮 saved 并提示「已存入」。
+    try {
+      await api.saveToLibrary(body);
+    } catch (e) {
+      s.handleApiError(e, { fallbackTitle: '存入方案库没有完成，请重试' });
+      return;
+    }
     // B4：本地记下已入库的报告 messageId，历史 restore 时回填 saved 真值，避免重复显示「存入方案库」。
     markReportSaved(messageId);
     markMsgSaved(messageId);
@@ -2297,6 +2306,11 @@ export default function Chat() {
                 {m.retryText ? (
                   <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => doSend(m.retryText!, sessionId, agent?.key ?? '', [], false)}>↻ 重试</Text>
                 ) : null}
+                {m.errorAction === 'plans' ? (
+                  <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => navTo('/packages/work/plans/index')}>查看方案与权益 →</Text>
+                ) : m.errorAction === 'credits' ? (
+                  <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => navTo('/packages/work/credits/index')}>查看算力明细 →</Text>
+                ) : null}
               </View>
             );
           }
@@ -2339,6 +2353,11 @@ export default function Chat() {
                   原「保底草案，已免扣额度」独立提示已并入 trust 行，degraded 仅留作状态位。 */}
               {!m.streaming && m.retryText ? (
                 <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => doSend(m.retryText!, sessionId, agent?.key ?? '', [], false)}>↻ 重试</Text>
+              ) : null}
+              {!m.streaming && m.errorAction === 'plans' ? (
+                <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => navTo('/packages/work/plans/index')}>查看方案与权益 →</Text>
+              ) : !m.streaming && m.errorAction === 'credits' ? (
+                <Text style={{ marginTop: '6px', color: accent, fontSize: '13px' }} onClick={() => navTo('/packages/work/credits/index')}>查看算力明细 →</Text>
               ) : null}
               {m.knowledgeUsed && m.knowledgeUsed.length ? (
                 <View style={{ marginTop: '6px', fontSize: '12px', opacity: 0.6 }}>

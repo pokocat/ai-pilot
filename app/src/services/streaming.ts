@@ -23,7 +23,7 @@ export interface StreamHandlers {
   onReportFooter?: (data: Pick<Deliverable, 'trust' | 'actions'>) => void;
   onMemory?: (data: { learned?: boolean; agentName?: string }) => void;
   onDone?: (messageId?: string) => void;
-  onError?: (message: string, kind: StreamErrorKind) => void;
+  onError?: (message: string, kind: StreamErrorKind, code?: string, statusCode?: number) => void;
 }
 
 // B2 停止生成：调用方传入一个 control 对象，generateStream 在启动时把 abort 句柄挂上去；
@@ -76,12 +76,15 @@ function friendlyStreamError(message: string | undefined, code: string | undefin
   return raw || '军师暂时没能完成这次回答，请稍后重试。';
 }
 
-async function responseErrorMessage(res: Response): Promise<string> {
-  try { return messageFromData(await res.clone().json(), res.status); }
+async function responseErrorInfo(res: Response): Promise<{ message: string; code?: string; statusCode: number }> {
+  let data: unknown;
+  try { data = await res.clone().json(); }
   catch {
-    try { return messageFromData(await res.text(), res.status); }
-    catch { return `HTTP ${res.status}`; }
+    try { data = await res.text(); }
+    catch { data = ''; }
   }
+  const code = data && typeof data === 'object' ? String((data as { code?: string }).code || '') || undefined : undefined;
+  return { message: messageFromData(data, res.status), code, statusCode: res.status };
 }
 
 function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers, state: { rendered: boolean; finished: boolean }): boolean {
@@ -134,7 +137,7 @@ function dispatch(events: { event: string; data: unknown }[], h: StreamHandlers,
     else if (e.event === 'error') {
       ok = false;
       state.finished = true;
-      h.onError?.(friendlyStreamError(d?.message, d?.code), 'fatal');
+      h.onError?.(friendlyStreamError(d?.message, d?.code), 'fatal', d?.code);
     }
   }
   return ok;
@@ -157,7 +160,11 @@ export async function generateStream(body: GenRequest, h: StreamHandlers, contro
     let res: Response;
     try { res = await fetch(url, { method: 'POST', headers: header, body: JSON.stringify(body), signal: ac?.signal }); }
     catch { if (aborted) return false; h.onError?.(NETWORK_HINT, 'disconnect'); return false; }
-    if (!res.ok || !res.body) { h.onError?.(await responseErrorMessage(res), 'fatal'); return false; }
+    if (!res.ok || !res.body) {
+      const error = await responseErrorInfo(res);
+      h.onError?.(error.message, 'fatal', error.code, error.statusCode);
+      return false;
+    }
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = '';

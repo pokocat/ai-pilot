@@ -1,5 +1,6 @@
 const { getToken, clearToken } = require('./token');
 const { getApiBaseUrl } = require('./runtime-mode');
+const { httpErrorInfo } = require('./api-error');
 
 let onAuthLost = null;
 
@@ -42,10 +43,33 @@ function unauthorized(tokenAtRequest, data, isolatedAuth) {
   });
 }
 
+function decodeUtf8(bytes) {
+  let out = ''; let index = 0;
+  while (index < bytes.length) {
+    const first = bytes[index++];
+    if (first < 0x80) out += String.fromCharCode(first);
+    else if (first < 0xe0) out += String.fromCharCode(((first & 0x1f) << 6) | (bytes[index++] & 0x3f));
+    else if (first < 0xf0) out += String.fromCharCode(((first & 0x0f) << 12) | ((bytes[index++] & 0x3f) << 6) | (bytes[index++] & 0x3f));
+    else {
+      const point = ((first & 7) << 18) | ((bytes[index++] & 63) << 12) | ((bytes[index++] & 63) << 6) | (bytes[index++] & 63);
+      const pair = point - 0x10000;
+      out += String.fromCharCode(0xd800 + (pair >> 10), 0xdc00 + (pair & 1023));
+    }
+  }
+  return out;
+}
+
 function parseBody(data) {
-  if (typeof data !== 'string') return data;
-  if (!data) return null;
-  try { return JSON.parse(data); } catch (_) { return data; }
+  let body = data;
+  // enableChunked=true 的 4xx 在部分微信基础库里会把 JSON 响应作为 ArrayBuffer 交给 success；
+  // 若不先解码，业务 code 会丢成 HTTP_402，端上只能显示「请求失败（402）」。
+  if (typeof ArrayBuffer !== 'undefined' && body instanceof ArrayBuffer) body = decodeUtf8(new Uint8Array(body));
+  else if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(body)) {
+    body = decodeUtf8(new Uint8Array(body.buffer, body.byteOffset, body.byteLength));
+  }
+  if (typeof body !== 'string') return body;
+  if (!body) return null;
+  try { return JSON.parse(body); } catch (_) { return body; }
 }
 
 function request(path, options) {
@@ -69,13 +93,12 @@ function request(path, options) {
         const data = parseBody(res.data);
         if (res.statusCode === 401) { reject(unauthorized(tokenAtRequest, data, opts.isolatedAuth)); return; }
         if (res.statusCode < 200 || res.statusCode >= 300) {
-          const message = data && typeof data === 'object' && data.error
-            ? data.error
-            : `请求失败（${res.statusCode}）`;
-          reject(Object.assign(new Error(message), {
-            code: (data && data.code) || `HTTP_${res.statusCode}`,
+          const info = httpErrorInfo(res.statusCode, data, '请求');
+          reject(Object.assign(new Error(info.message), {
+            code: info.code || `HTTP_${res.statusCode}`,
             statusCode: res.statusCode,
             data,
+            technicalMessage: info.technicalMessage,
           }));
           return;
         }
@@ -102,10 +125,12 @@ function upload(path, filePath, formData, options) {
         const data = parseBody(res.data);
         if (res.statusCode === 401) { reject(unauthorized(tokenAtRequest, data)); return; }
         if (res.statusCode < 200 || res.statusCode >= 300) {
-          reject(Object.assign(new Error((data && data.error) || `上传失败（${res.statusCode}）`), {
-            code: (data && data.code) || `HTTP_${res.statusCode}`,
+          const info = httpErrorInfo(res.statusCode, data, '上传');
+          reject(Object.assign(new Error(info.message), {
+            code: info.code || `HTTP_${res.statusCode}`,
             statusCode: res.statusCode,
             data,
+            technicalMessage: info.technicalMessage,
           }));
           return;
         }

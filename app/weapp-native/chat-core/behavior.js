@@ -6,6 +6,7 @@ const { api } = require('../services/api');
 const store = require('../services/store');
 const { generateStream } = require('../services/streaming');
 const { navTo } = require('../services/nav');
+const { chatErrorPresentation } = require('../services/chat-error');
 const { diffPasted, pasteExcerpt, isSamePaste } = require('../services/paste-absorb');
 const { stripSerializedAsksTail, streamVisibleText, extendsShown, attachmentOnlyPrompt } = require('../services/chat-reply');
 
@@ -290,6 +291,16 @@ function cleanRef(ref) { return { kind: ref.kind, id: ref.id, label: ref.label, 
 
 function uid(prefix) { return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 10000)}`; }
 
+function chatErrorPatch(error, fallback) {
+  const view = chatErrorPresentation(error, fallback);
+  return {
+    errorText: view.title,
+    errorNote: view.note,
+    errorAction: view.action,
+    canRetryLast: view.retryable,
+  };
+}
+
 function decodeOption(value) {
   try { return decodeURIComponent(value || ''); } catch (_) { return String(value || ''); }
 }
@@ -300,7 +311,7 @@ const data = {
   // composerSeed = textarea 的一次性初值，只在交替挂载的那一刻写。不变量：写进去之后
   // 到下一次重建之前绝不再动它——中途改成 '' 就等于把用户正在编辑的文字回灌掉。
   composerOdd: false, composerSeed: '', composerHeight: 124, keyboardHeight: 0, bottomAnchor: 'chat-bottom',
-  showLogin: false, loginReason: 'chat', errorText: '', refs: [], uploading: false,
+  showLogin: false, loginReason: 'chat', errorText: '', errorNote: '', errorAction: '', refs: [], uploading: false,
   regularRefs: [], pasteRefs: [], pastePendings: [], pasteHint: false, pasteDupId: '',
   pastePreview: null,
   chipsSpent: false,
@@ -530,7 +541,9 @@ const methods = {
         title: agent.name || this.data.title, alias: ALIASES[this._agentKey] || '', advisorAvatar: avatarFor(this._agentKey), messages,
         chipsSpent: chipsSpentFor(messages),
         busy: generating, canStop: Boolean(active), showThinking: generating, canSend: generating ? false : this.hasDraft(),
-        canRetryLast, errorText: canRetryLast ? '军师这次没有完成回答。你的问题已经保留，可以直接重新回答。' : '',
+        canRetryLast,
+        errorText: canRetryLast ? '军师这次没有完成回答。你的问题已经保留，可以直接重新回答。' : '',
+        errorNote: canRetryLast ? '原问题和引用都已保留，不用重新输入。' : '', errorAction: '',
       }), () => { this.toBottom(); this.measureComposer(); });
       this.loadCreativeStatus(pageEpoch);
       this.hydrateImageRefs(messages, pageEpoch);
@@ -541,7 +554,7 @@ const methods = {
       if (!this.isCurrent(pageEpoch)) return false;
       const kind = store.handleApiError(error, { silent: true });
       if (kind === 'unauthorized') this.safeSetData({ showLogin: true });
-      else this.safeSetData({ errorText: error.message || '会话读取失败' });
+      else this.safeSetData({ errorText: error.message || '会话读取失败', errorNote: '', errorAction: '' });
       return false;
     }
   },
@@ -1058,7 +1071,7 @@ const methods = {
       refs: [], regularRefs: [], pasteRefs: [], pastePendings: [], pasteHint: false,
       pastePreview: null, chipsSpent: true,
       busy: true, canStop: false, showThinking: true, canSend: false, inputCount: 0, showCount: false,
-      composerOdd: !this.data.composerOdd, composerSeed: '', errorText: '',
+      composerOdd: !this.data.composerOdd, composerSeed: '', errorText: '', errorNote: '', errorAction: '',
     }), () => this.measureComposer());
     this.toBottom();
     try {
@@ -1117,13 +1130,13 @@ const methods = {
       }
       const kind = store.handleApiError(error, { silent: true });
       this.markStreamInterrupted();
-      // 未开通方案不是「没接上」：重试多少次都还是 403，给开通入口而不是重试按钮。
+      // 套餐/额度门禁不是「没接上」：重试多少次都还是同一个 402/403，给方案入口而不是重试按钮。
       if (kind === 'plan_required') {
         store.promptPlanRequired();
-        this.finishBusy({ errorText: '尚未开通方案，开通后即可继续对话。', canRetryLast: false }, epoch);
+        this.finishBusy(chatErrorPatch(error), epoch);
         return;
       }
-      this.finishBusy({ errorText: error.message || '军师暂时没有接上，请重试', canRetryLast: true }, epoch);
+      this.finishBusy(chatErrorPatch(error), epoch);
     }
   },
   ensureStreamItem(report) {
@@ -1229,7 +1242,11 @@ const methods = {
     const pageEpoch = epoch || this._epoch;
     if (!this.isCurrent(pageEpoch)) return;
     this._streamControl = null;
-    this.safeSetData(Object.assign({ busy: false, canStop: false, showThinking: false, canSend: Boolean(this.hasDraft() || this._refs.length), canRetryLast: false }, extra || {}), () => {
+    this.safeSetData(Object.assign({
+      busy: false, canStop: false, showThinking: false,
+      canSend: Boolean(this.hasDraft() || this._refs.length), canRetryLast: false,
+      errorText: '', errorNote: '', errorAction: '',
+    }, extra || {}), () => {
       this.measureComposer();
       this.flushPendingPrompt(pageEpoch);
     });
@@ -1375,7 +1392,7 @@ const methods = {
     this._streamIndex = null;
     this._streamControl = null;
     this._generationId = '';
-    this.finishBusy({ errorText: '' }, epoch);
+    this.finishBusy({ errorText: '', errorNote: '', errorAction: '' }, epoch);
   },
   startSessionPolling(epoch) {
     const pageEpoch = epoch || this._epoch;
@@ -1402,7 +1419,8 @@ const methods = {
         const messages = normalizeDetailMessages(detail);
         this.safeSetData(Object.assign({}, this.askPatch(messages, true), {
           title: agent.name || this.data.title, alias: ALIASES[this._agentKey] || '', messages,
-          busy: true, canStop: true, showThinking: true, canSend: false, canRetryLast: false, errorText: '',
+          busy: true, canStop: true, showThinking: true, canSend: false, canRetryLast: false,
+          errorText: '', errorNote: '', errorAction: '',
         }), () => { this.toBottom(); this.measureComposer(); });
         this.hydrateImageRefs(messages, epoch);
         this.startPolling(active.id, epoch);
@@ -1422,7 +1440,9 @@ const methods = {
       this.safeSetData(Object.assign({}, this.askPatch(messages, false), {
         title: agent.name || this.data.title, alias: ALIASES[this._agentKey] || '', messages,
         busy: false, canStop: false, showThinking: false, canSend: this.hasDraft(),
-        canRetryLast, errorText: canRetryLast ? '军师这次没有完成回答。你的问题已经保留，可以直接重新回答。' : '',
+        canRetryLast,
+        errorText: canRetryLast ? '军师这次没有完成回答。你的问题已经保留，可以直接重新回答。' : '',
+        errorNote: canRetryLast ? '原问题和引用都已保留，不用重新输入。' : '', errorAction: '',
       }), () => {
         this.hydrateImageRefs(messages, epoch);
         this.toBottom();
@@ -1493,7 +1513,7 @@ const methods = {
       this._streamIndex = null;
       this._generationId = '';
       this._pollSeq += 1;
-      this.finishBusy({ errorText: error.message || '回复读取失败', canRetryLast: true }, epoch);
+      this.finishBusy(chatErrorPatch(error, '回复读取失败'), epoch);
     }
   },
   // 生成以失败/取消收场时的统一收尾：停打字机、清流式态、给中断话术 + ↻ 重试入口。
@@ -1504,6 +1524,7 @@ const methods = {
     this._generationId = '';
     this.finishBusy({
       errorText: status === 'cancelled' ? '本次回复已停止' : '军师暂时没有接上，请重试',
+      errorNote: '原问题和引用都已保留，不用重新输入。', errorAction: '',
       canRetryLast: true,
     }, epoch || this._epoch);
   },
@@ -1632,7 +1653,11 @@ const methods = {
     try { const result=await api.summarize(this._sessionId);wx.hideLoading();if(result.reportId)navTo(`/packages/work/report/index?id=${encodeURIComponent(result.reportId)}`);else wx.showToast({title:'整理已完成',icon:'none'}); }
     catch(error){wx.hideLoading();store.handleApiError(error,{fallbackTitle:error.message||'整理失败'});}
   },
-  retry() { const failed = this.data.messages.filter((item) => item.role === 'user').slice(-1)[0]; if (!failed) return; this._draft = failed.text; this._lastInputValue = failed.text; this._retryNoEcho = true; this._retryRefs = failed.refs || []; const epoch = this._epoch; this.safeSetData({ errorText: '', canRetryLast: false, canSend: true }); setTimeout(() => { if (this.isCurrent(epoch)) this.send(); }, 20); },
+  retry() { const failed = this.data.messages.filter((item) => item.role === 'user').slice(-1)[0]; if (!failed) return; this._draft = failed.text; this._lastInputValue = failed.text; this._retryNoEcho = true; this._retryRefs = failed.refs || []; const epoch = this._epoch; this.safeSetData({ errorText: '', errorNote: '', errorAction: '', canRetryLast: false, canSend: true }); setTimeout(() => { if (this.isCurrent(epoch)) this.send(); }, 20); },
+  openErrorAction() {
+    if (this.data.errorAction === 'plans') navTo('/packages/work/plans/index');
+    else if (this.data.errorAction === 'credits') navTo('/packages/work/credits/index');
+  },
   stop() {},
   toBottom() { const epoch = this._epoch; this.safeSetData({ bottomAnchor: '' }); setTimeout(() => { if (this.isCurrent(epoch)) this.safeSetData({ bottomAnchor: 'chat-bottom' }); }, 20); },
 };

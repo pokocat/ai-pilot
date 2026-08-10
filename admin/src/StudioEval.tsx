@@ -16,17 +16,24 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
   const [busy, setBusy] = useState(false);
   const poll = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const loadSets = () => api.evalSets(agentKey).then(setSets).catch(() => setSets([]));
-  const [err, setErr] = useState('');
-  const loadRuns = () => api.evalRuns(agentKey).then((r) => { setRuns(r); setErr(''); }).catch((e: unknown) => setErr((e as Error)?.message || '跑分记录加载失败'));
+  const [setsErr, setSetsErr] = useState('');
+  const [runsErr, setRunsErr] = useState('');
+  const loadSets = () => api.evalSets(agentKey)
+    .then((items) => { setSets(items); setSetsErr(''); })
+    .catch((e: unknown) => { setSets([]); setSetsErr((e as Error)?.message || '测试集加载失败'); });
+  const loadRuns = () => api.evalRuns(agentKey)
+    .then((items) => { setRuns(items); setRunsErr(''); })
+    .catch((e: unknown) => setRunsErr((e as Error)?.message || '跑分记录加载失败'));
   useEffect(() => { loadSets(); loadRuns(); return () => { if (poll.current) clearInterval(poll.current); }; }, [agentKey]);
 
-  const openSet = (id: string) => api.evalSet(id).then(setSel).catch((e: unknown) => setErr((e as Error)?.message || '测试集加载失败'));
+  const openSet = (id: string) => api.evalSet(id)
+    .then((item) => { setSel(item); setSetsErr(''); })
+    .catch((e: unknown) => { const message = (e as Error)?.message || '测试集加载失败'; setSetsErr(message); toast(message); });
 
   const createSet = async () => {
     if (!newName.trim()) return;
     try { const s = await api.createEvalSet(agentKey, newName.trim()); setNewName(''); await loadSets(); openSet(s.id); }
-    catch { toast('创建失败'); }
+    catch (e) { toast((e as Error)?.message || '创建失败'); }
   };
 
   const startRun = async () => {
@@ -47,7 +54,7 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
     setBusy(false);
   };
 
-  const openRun = (id: string) => { if (poll.current) clearInterval(poll.current); api.evalRun(id).then((d) => { setRun(d); if (d.status === 'running') { poll.current = setInterval(async () => { const x = await api.evalRun(id).catch(() => null); if (x) { setRun(x); if (x.status !== 'running' && poll.current) clearInterval(poll.current); } }, 2500); } }).catch((e: unknown) => setErr((e as Error)?.message || '跑分详情加载失败')); };
+  const openRun = (id: string) => { if (poll.current) clearInterval(poll.current); api.evalRun(id).then((d) => { setRun(d); if (d.status === 'running') { poll.current = setInterval(async () => { const x = await api.evalRun(id).catch(() => null); if (x) { setRun(x); if (x.status !== 'running' && poll.current) clearInterval(poll.current); } }, 2500); } }).catch((e: unknown) => setRunsErr((e as Error)?.message || '跑分详情加载失败')); };
 
   if (sets === null) return <Loading />;
 
@@ -85,7 +92,7 @@ export default function StudioEval({ agentKey, toast }: { agentKey: string; toas
   // —— 集合列表 + 历史跑分 ——
   return (
     <div className="ad-db">
-      {err && <ErrorState msg={err} onRetry={loadRuns} stale />}
+      {(setsErr || runsErr) && <ErrorState msg={setsErr || runsErr} onRetry={() => { loadSets(); loadRuns(); }} stale />}
       <div className="blk">
         <div className="blk-h"><Icon name="doc" size={15} /><span className="t">黄金测试集</span></div>
         <div className="blk-d">把「好答案长什么样」固化成一组测试用例，调教后反复跑分，量化进步。</div>
@@ -167,7 +174,7 @@ function CaseEditor({ set, onChanged, toast }: { set: EvalSetDetail; onChanged: 
     try { await api.addEvalCase(set.id, { input: input.trim(), rubric: rubric.trim() || undefined, weight }); setInput(''); setRubric(''); setWeight(1); onChanged(); }
     catch (e) { toast((e as Error)?.message || '添加失败'); }
   };
-  const del = async (id: string) => { try { await api.delEvalCase(id); onChanged(); } catch { toast('删除失败'); } };
+  const del = async (id: string) => { try { await api.delEvalCase(id); onChanged(); } catch (e) { toast((e as Error)?.message || '删除失败'); } };
 
   return (
     <>

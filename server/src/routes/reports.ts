@@ -31,7 +31,7 @@ export async function reportRoutes(app: FastifyInstance) {
       where: { id: req.params.id, tenantId: user.tenantId },
       include: { agent: true, versions: { orderBy: { version: 'desc' } } },
     });
-    if (!d) return reply.code(404).send({ error: 'report not found' });
+    if (!d) return reply.code(404).send({ error: '方案不存在或已删除', code: 'REPORT_NOT_FOUND' });
     const versions: ReportVersionItem[] = d.versions.map((v) => ({
       id: v.id, version: v.version, title: v.title, changeSummary: v.changeSummary,
       authorKind: v.authorKind, sessionId: v.sessionId, at: v.createdAt.toISOString(),
@@ -48,11 +48,11 @@ export async function reportRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string }; Querystring: { v?: string } }>('/reports/:id/version', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const d = await prisma.reportDoc.findFirst({ where: { id: req.params.id, tenantId: user.tenantId } });
-    if (!d) return reply.code(404).send({ error: 'report not found' });
+    if (!d) return reply.code(404).send({ error: '方案不存在或已删除', code: 'REPORT_NOT_FOUND' });
     const ver = req.query.v
       ? await prisma.reportVersion.findFirst({ where: { reportId: d.id, version: Number(req.query.v) } })
       : await prisma.reportVersion.findFirst({ where: { reportId: d.id }, orderBy: { version: 'desc' } });
-    if (!ver) return reply.code(404).send({ error: 'version not found' });
+    if (!ver) return reply.code(404).send({ error: '这个方案版本不存在', code: 'VERSION_NOT_FOUND' });
     const out: ReportVersionContent = {
       reportId: d.id, version: ver.version, title: ver.title,
       content: deliverableFrom(ver.contentJson), at: ver.createdAt.toISOString(),
@@ -64,18 +64,18 @@ export async function reportRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string } }>('/reports/:id/diff', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const d = await prisma.reportDoc.findFirst({ where: { id: req.params.id, tenantId: user.tenantId } });
-    if (!d) return reply.code(404).send({ error: 'report not found' });
+    if (!d) return reply.code(404).send({ error: '方案不存在或已删除', code: 'REPORT_NOT_FOUND' });
     const to = Number(req.query.to ?? d.currentVersion);
     const from = Number(req.query.from ?? Math.max(1, to - 1));
     const diff = await getReportDiff(user.tenantId, d.id, from, to);
-    if (!diff) return reply.code(404).send({ error: 'version not found' });
+    if (!diff) return reply.code(404).send({ error: '要对比的方案版本不存在', code: 'VERSION_NOT_FOUND' });
     return diff;
   });
 
   // 新存一版（同名归一、同内容去重、自动变更摘要）
   app.post<{ Body: SaveReportRequest }>('/reports', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
-    if (!req.body?.title || !req.body?.content) return reply.code(400).send({ error: '缺少 title / content' });
+    if (!req.body?.title || !req.body?.content) return reply.code(400).send({ error: '方案标题和内容不能为空', code: 'BAD_REQUEST' });
     const saved = await saveReportVersion({
       tenantId: user.tenantId, userId: user.id, projectId: req.body.projectId ?? null,
       title: req.body.title, type: req.body.type || '成果', agentKey: req.body.agentKey ?? null,
@@ -90,7 +90,7 @@ export async function reportRoutes(app: FastifyInstance) {
     const title = (req.body?.title ?? '').trim();
     if (!title) return reply.code(400).send({ error: '缺少 title', code: 'TITLE_REQUIRED' });
     const r = await prisma.reportDoc.updateMany({ where: { id: req.params.id, tenantId: user.tenantId }, data: { title } });
-    if (r.count === 0) return reply.code(404).send({ error: 'report not found' });
+    if (r.count === 0) return reply.code(404).send({ error: '方案不存在或已删除', code: 'REPORT_NOT_FOUND' });
     return { ok: true, title };
   });
 

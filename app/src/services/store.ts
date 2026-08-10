@@ -6,6 +6,7 @@ import { api, getUserId, setUserId, clearUserId, setAuthLostHandler, type Agent,
 // wechatSubscribe 只依赖 ./api、不反向依赖 store，无循环引用。
 import { prefetchWechatSubscribeTemplates } from './wechatSubscribe';
 import { syncTabBarHidden } from './tabbar';
+import { apiErrorCode, apiErrorPresentation, type ApiErrorKind, type ApiErrorPresentation } from './apiError';
 
 // 轻量全局状态：本命色主题 + 用户/智能体缓存 + 订阅。
 // 跨页面共享，避免每页重复拉取。
@@ -44,6 +45,7 @@ const state: AppState = {
 };
 const overlayKeys = new Set<string>();
 let lastUnauthorizedPromptAt = 0;
+let entitlementPromptOpen = false;
 
 // —— 底栏角标：拉取节流与「今日复盘」判定 ——
 const BADGE_THROTTLE_MS = 15_000;     // 同一批数据 15 秒内不重复拉（tab 间来回切换不打服务端）
@@ -57,14 +59,25 @@ function todayKey(d = new Date()): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-type ApiErrorKind = 'unauthorized' | 'network' | 'plan_required' | 'other';
-
-function apiErrorCode(e: unknown): string {
-  return String((e as any)?.code || (e as any)?.data?.code || '');
-}
-
 function isUnauthorizedError(e: unknown): boolean {
   return apiErrorCode(e) === 'UNAUTHORIZED' || String((e as any)?.message || '').includes('未登录');
+}
+
+function promptErrorAction(view: ApiErrorPresentation) {
+  if (entitlementPromptOpen) return;
+  entitlementPromptOpen = true;
+  const credits = view.action === 'credits';
+  const title = view.kind === 'quota' ? '当前用量已用完'
+    : view.kind === 'plan_expired' ? '当前方案已到期'
+      : credits ? '当前算力不足' : '尚未开通方案';
+  void Taro.showModal({
+    title,
+    content: view.message,
+    confirmText: credits ? '查看算力' : '查看方案',
+    cancelText: '暂不处理',
+  }).then((result) => {
+    if (result.confirm) void Taro.navigateTo({ url: credits ? '/packages/work/credits/index' : '/packages/work/plans/index' });
+  }).finally(() => { entitlementPromptOpen = false; });
 }
 
 function resetAuthState() {
@@ -95,25 +108,12 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
     return 'unauthorized';
   }
 
-  if (apiErrorCode(e) === 'NETWORK_ERROR') {
-    if (!options.silent) {
-      const msg = String((e as any)?.message || options.fallbackTitle || '网络请求失败');
-      Taro.showToast({ title: msg, icon: 'none' });
-    }
-    return 'network';
+  const view = apiErrorPresentation(e, options.fallbackTitle);
+  if (!options.silent) {
+    if (view.action === 'plans' || view.action === 'credits') promptErrorAction(view);
+    else if (view.kind !== 'cancelled') Taro.showToast({ title: view.message, icon: 'none' });
   }
-
-  // 未开通方案（服务端禁写闸 403）：写操作全部会撞上，通用兜底只弹「XX 失败」，
-  // 等于把付费转化路径断在最后一步。统一给开通提示；silent 调用方自己渲染，只取 kind。
-  if (apiErrorCode(e) === 'PLAN_REQUIRED') {
-    if (!options.silent) Taro.showToast({ title: '尚未开通方案，开通后即可使用', icon: 'none' });
-    return 'plan_required';
-  }
-
-  if (!options.silent && options.fallbackTitle) {
-    Taro.showToast({ title: options.fallbackTitle, icon: 'none' });
-  }
-  return 'other';
+  return view.kind;
 }
 
 // 全局登录态失效处理：api.request() 只有在请求发出时携带过 token 且收到 401 才回调这里；

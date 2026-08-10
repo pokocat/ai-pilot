@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { View, Text, ScrollView } from '@tarojs/components';
 import Taro from '@tarojs/taro';
 import SafeHeader from '../../../components/SafeHeader';
+import AsyncState from '../../../components/AsyncState';
 import { useStore } from '../../../hooks/useStore';
 import { api, type BrandKitView } from '../../../services/api';
 import './index.scss';
@@ -24,8 +25,17 @@ export default function BrandKitPage() {
   const s = useStore();
   const [bk, setBk] = useState<BrandKitView | null>(null);
   const [busy, setBusy] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => { api.brandKit().then(setBk).catch(() => {}); }, []);
+  const load = () => {
+    setLoadError(false);
+    api.brandKit()
+      .then((value) => { setBk(value); setLoadError(false); })
+      .catch((e) => { s.handleApiError(e, { silent: true }); setLoadError(true); })
+      .finally(() => setLoaded(true));
+  };
+  useEffect(load, []);
 
   const generate = async () => {
     if (busy) return; setBusy('gen');
@@ -44,7 +54,11 @@ export default function BrandKitPage() {
     <View className="bk-page">
       <SafeHeader title="我的品牌资产" onBack={() => Taro.navigateBack()} />
       <ScrollView scrollY className="bk-scroll">
-        {!bk ? (
+        {!loaded ? (
+          <AsyncState loading skeletonRows={4} />
+        ) : loadError ? (
+          <AsyncState error onRetry={load} />
+        ) : !bk ? (
           <View className="bk-empty">
             <Text className="bk-empty-t">还没有品牌资产包</Text>
             <Text className="bk-empty-d">军师根据你的定位，一键生成 IP 人设、话术库、视觉调性——数字人 / 短视频开箱即用。</Text>

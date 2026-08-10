@@ -27,7 +27,7 @@ export async function agentRoutes(app: FastifyInstance) {
 
   app.get<{ Params: { key: string } }>('/agents/:key', async (req, reply): Promise<AgentView | void> => {
     const a = await prisma.agent.findUnique({ where: { key: req.params.key } });
-    if (!a) return reply.code(404).send({ error: 'agent not found' });
+    if (!a) return reply.code(404).send({ error: '这位军师暂时不可用', code: 'AGENT_NOT_FOUND' });
     const owned = await ownedKeysForHeader(req.headers['x-user-id'] as string | undefined);
     const ver = a.publishedVersionId ? await prisma.agentVersion.findUnique({ where: { id: a.publishedVersionId } }) : null;
     return publicAgent(overlayPublished(a, ver), owned);

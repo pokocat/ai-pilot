@@ -77,11 +77,19 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
 
   const finishProfile = async () => {
     // 登录只建立账号，不强制补资料；这里也只收公司（选填）与问卷，称呼可在「我的」里随时完善。
-    if (company.trim()) await api.updateIdentity({ company: company.trim() }).catch(() => {});
-    if (Object.keys(answers).length) await api.saveProfile(answers).catch(() => {});
-    await store.loadMe();
-    if (first && fortuneOn) setStep('bazi'); // 命理关则不进天势档案，直接入局
-    else confirmColor();
+    if (saving) return;
+    setSaving(true);
+    try {
+      if (company.trim()) await api.updateIdentity({ company: company.trim() });
+      if (Object.keys(answers).length) await api.saveProfile(answers);
+      await store.loadMe();
+      if (first && fortuneOn) setStep('bazi'); // 命理关则不进天势档案，直接入局
+      else confirmColor();
+    } catch (e) {
+      store.handleApiError(e, { fallbackTitle: '档案没有保存，请检查后重试' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   // 天势档案：生辰交给服务端排盘引擎；跳过/不用命理都放行，绝不卡入局。
@@ -90,17 +98,30 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
     if (!y || !m || !d) { confirmColor(); return; } // 没填完整视同跳过
     if (!bz.gender) return; // 排盘必须有性别（按钮态提示）
     setSaving(true);
-    await api.saveBazi({
-      calendar: bz.calendar, year: y, month: m, day: d,
-      hour: SHICHEN[bz.hourIdx].hour, gender: bz.gender,
-      birthPlace: bz.place.trim() || undefined,
-    }).catch(() => {});
-    setSaving(false);
-    confirmColor();
+    try {
+      await api.saveBazi({
+        calendar: bz.calendar, year: y, month: m, day: d,
+        hour: SHICHEN[bz.hourIdx].hour, gender: bz.gender,
+        birthPlace: bz.place.trim() || undefined,
+      });
+      confirmColor();
+    } catch (e) {
+      store.handleApiError(e, { fallbackTitle: '天势档案没有保存，请重试' });
+    } finally {
+      setSaving(false);
+    }
   };
   const optOutBazi = async () => {
-    await api.saveBazi({ believe: false }).catch(() => {});
-    confirmColor();
+    if (saving) return;
+    setSaving(true);
+    try {
+      await api.saveBazi({ believe: false });
+      confirmColor();
+    } catch (e) {
+      store.handleApiError(e, { fallbackTitle: '选择没有保存，请重试' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -192,7 +213,7 @@ export default function Picker({ open, first, onClose, onConfirm }: Props) {
             </View>
 
             <View className="pk-cta" style={{ background: c.vars['--accent'] }} onClick={finishProfile}>
-              <Text>{first && fortuneOn ? '下一步 · 天势档案' : '完成 · 进入军师'}</Text>
+              <Text>{saving ? '正在保存…' : first && fortuneOn ? '下一步 · 天势档案' : '完成 · 进入军师'}</Text>
             </View>
             <Text className="pk-skip" onClick={confirmColor}>暂时跳过</Text>
           </>

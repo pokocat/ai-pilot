@@ -194,7 +194,7 @@ export function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: s
       if (owned) { await api.revokeAgent(userId, key); toast(`已取消「${name}」`); }
       else { await api.grantAgent(userId, key); toast(`已为该用户开通「${name}」`); }
       await load();
-    } catch { toast('操作失败'); }
+    } catch (e) { toast((e as Error)?.message || '操作失败'); }
     setBusy('');
   };
   // 删记忆/删知识项都会改变该用户后续产出，回显具体内容再确认（原生 confirm 只有一句干话）。
@@ -213,12 +213,13 @@ export function UserDetailPanel({ userId, isOwner, onClose, toast }: { userId: s
   const openDetail = async (kid: string, force = false) => {
     if (openDoc === kid && !force) { setOpenDoc(''); setDocDetail(null); return; }
     setOpenDoc(kid); setDocDetail(null);
-    try { setDocDetail(await api.userKnowledgeDetail(userId, kid)); } catch { /* 详情失败不阻塞 */ }
+    try { setDocDetail(await api.userKnowledgeDetail(userId, kid)); }
+    catch (e) { toast((e as Error)?.message || '知识详情加载失败'); }
   };
   const reembedKb = async (kid: string) => {
     setBusy('k' + kid);
     try { const r = await api.reembedUserKnowledge(userId, kid); toast(`已重嵌 ${r.chunks} 切片`); await loadCtx(); if (openDoc === kid) await openDetail(kid, true); }
-    catch { toast('重嵌失败'); }
+    catch (e) { toast((e as Error)?.message || '重嵌失败'); }
     setBusy('');
   };
   const delKb = (kid: string, title: string, chunks: number) => setConfirmSpec({
@@ -688,7 +689,10 @@ function ServiceBlock({ userId, toast }: { userId: string; toast: (m: string) =>
   const [assigned, setAssigned] = useState<boolean | null>(null);
   const [form, setForm] = useState<ServiceAssignmentView>(blank);
   const [busy, setBusy] = useState(false);
-  const load = () => api.userService(userId).then(({ service }) => { setAssigned(!!service); setForm(service ?? blank); }).catch(() => setAssigned(false));
+  const [loadErr, setLoadErr] = useState('');
+  const load = () => api.userService(userId)
+    .then(({ service }) => { setAssigned(!!service); setForm(service ?? blank); setLoadErr(''); })
+    .catch((e: unknown) => { setAssigned(null); setLoadErr((e as Error)?.message || '社群服务加载失败'); });
   useEffect(() => { load(); }, [userId]);
   const set = (p: Partial<ServiceAssignmentView>) => setForm((f) => ({ ...f, ...p }));
   const save = async () => {
@@ -700,13 +704,14 @@ function ServiceBlock({ userId, toast }: { userId: string; toast: (m: string) =>
         taskDone: form.taskDone, taskTotal: form.taskTotal, note: form.note.trim(),
       });
       setAssigned(!!service); setForm(service ?? blank); toast('社群服务已保存');
-    } catch { toast('保存失败'); }
+    } catch (e) { toast((e as Error)?.message || '保存失败'); }
     setBusy(false);
   };
   return (
     <div className="blk">
       <div className="blk-h"><Icon name="chat" size={15} /><span className="t">社群服务</span><span className="badge">{assigned == null ? '…' : assigned ? '已分配' : '待分配'}</span></div>
       <div className="blk-d">分配班主任 / 班级 / 群二维码与陪跑任务进度，前台「我的服务」据此展示。留空即视为未填。</div>
+      {loadErr && <ErrorState msg={loadErr} onRetry={load} stale />}
       <div className="ai-field"><div className="ai-fl">班主任姓名</div><input className="ai-input" value={form.teacherName} onChange={(e) => set({ teacherName: e.target.value })} placeholder="如 张老师" /></div>
       <div className="ai-field"><div className="ai-fl">班主任微信</div><input className="ai-input" value={form.teacherWechat} onChange={(e) => set({ teacherWechat: e.target.value })} placeholder="微信号" /></div>
       <div className="ai-field"><div className="ai-fl">班级</div><input className="ai-input" value={form.className} onChange={(e) => set({ className: e.target.value })} placeholder="如 2026 春季 3 班" /></div>

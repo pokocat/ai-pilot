@@ -10,6 +10,11 @@ import { navTo } from '../../../services/nav';
 import { api, type SurveyQ, type QuickScanResult } from '../../../services/api';
 import './index.scss';
 
+const FALLBACK_SURVEY: SurveyQ[] = [
+  { key: 'industry', title: '你的行业？', options: ['SaaS / 软件', '电商 / 跨境', '餐饮 / 食品', '美业 / 医美', '大健康 / 养生', '教育 / 培训', '医疗 / 医药', '制造 / 工业', '专业服务 / 咨询', '本地生活服务', '文旅 / 酒店', '房产 / 家居', '消费 / 零售', '其他'] },
+  { key: 'stage', title: '年营收大概在？', options: ['100 万以下', '100-500 万', '500 万-5000 万', '5000 万以上'] },
+];
+
 export default function QuickScanPage() {
   const s = useStore();
   const [survey, setSurvey] = useState<SurveyQ[]>([]);
@@ -22,7 +27,7 @@ export default function QuickScanPage() {
   const [editBasics, setEditBasics] = useState(false);
 
   useEffect(() => {
-    api.survey().then(setSurvey).catch(() => {});
+    api.survey().then((items) => setSurvey(items.length ? items : FALLBACK_SURVEY)).catch(() => setSurvey(FALLBACK_SURVEY));
     // 复用注册入场引导已收的档案：行业/阶段已答就预填并折叠，避免重复问，用户只补「最痛的一件事」。
     api.getProfile().then((p) => {
       if (!p) return;

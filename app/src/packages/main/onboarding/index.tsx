@@ -137,7 +137,7 @@ export default function Onboarding() {
     submittingRef.current = true;
     const eff = effectiveAnswers();
     try {
-      if (company.trim()) await api.updateIdentity({ company: company.trim() }).catch(() => {});
+      if (company.trim()) await api.updateIdentity({ company: company.trim() });
       // Profile 是服务端首次入局的完成锚点，失败时必须留在本页显式重试，不能只写本地完成态。
       await api.saveProfile(eff);
       await store.loadMe();

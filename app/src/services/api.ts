@@ -4,6 +4,7 @@ import { getToken, setToken, clearToken } from './token';
 import { getApiBaseUrl, useMockApi } from './runtimeMode';
 import { mock } from './mock';
 import { shouldInterruptForUnauthorized } from './authGate';
+import { httpErrorInfo } from './apiError';
 import type {
   Me, Agent, SurveyQuestion, SessionItem, SessionDetail,
   GenResult, GenRequest, LibItem, LoginResult, Profile, TodaySaying, SaveLibRequest,
@@ -286,20 +287,6 @@ function networkErrorInfo(errMsg: string, origin: string): { reason: NetworkReas
   };
 }
 
-function httpErrorInfo(statusCode: number, data: unknown): { message: string; code?: string; technicalMessage?: string } {
-  const body = (data || {}) as { error?: string; code?: string };
-  if (statusCode === 408 || statusCode === 504) return { message: '军师响应超时了，请稍后重试。', code: body.code };
-  if (statusCode === 429) return { message: '请求有点频繁，请稍后再试。', code: body.code };
-  if (statusCode >= 500) {
-    return {
-      message: '军师服务暂时不可用，请稍后重试。',
-      code: body.code,
-      technicalMessage: body.error || `HTTP ${statusCode}`,
-    };
-  }
-  return { message: body.error || `HTTP ${statusCode}`, code: body.code };
-}
-
 // 导出给领域服务复用（如 services/dossier 案卷闭环）；页面代码仍应走 api.* 方法。
 export async function request<T>(path: string, method: keyof typeof Taro.request | any = 'GET', data?: object): Promise<T> {
   const apiBaseUrl = getApiBaseUrl();
@@ -371,6 +358,18 @@ export interface UploadHooks {
   onTask?: (task: Taro.UploadTask) => void;        // 拿到 task 后可 task.abort() 真中止
 }
 
+function uploadResponseError(statusCode: number, raw: string, noun = '上传'): Error {
+  let data: unknown = {};
+  try { data = JSON.parse(raw); } catch { data = {}; }
+  const info = httpErrorInfo(statusCode, data, noun);
+  return Object.assign(new Error(info.message), {
+    code: info.code || `HTTP_${statusCode}`,
+    statusCode,
+    data,
+    technicalMessage: info.technicalMessage || (raw || `HTTP ${statusCode}`),
+  });
+}
+
 // 文档上传：Taro.uploadFile 走 multipart（request() 只发 JSON，文件需单独上传）。仅 weapp 有文件可选。
 // originalName：随上传带上的「原始文件名」——微信 tempFilePath 是 tmp 名，服务端以此字段作展示名（缺省回退兼容）。
 async function uploadKnowledgeFile(
@@ -396,11 +395,7 @@ async function uploadKnowledgeFile(
   hooks?.onTask?.(task);
   const res = await task;
   if (res.statusCode === 401) throwUnauthorized(tokenAtRequest);
-  if (res.statusCode >= 400) {
-    let msg = `HTTP ${res.statusCode}`;
-    try { msg = (JSON.parse(res.data) as { error?: string }).error || msg; } catch { /* 非 JSON 响应 */ }
-    throw new Error(msg);
-  }
+  if (res.statusCode >= 400) throw uploadResponseError(res.statusCode, res.data);
   try { return JSON.parse(res.data) as { id: string; status: string }; } catch { return { id: '', status: 'parsing' }; }
 }
 
@@ -424,11 +419,7 @@ async function uploadChatImageFile(
   hooks?.onTask?.(task);
   const res = await task;
   if (res.statusCode === 401) throwUnauthorized(tokenAtRequest);
-  if (res.statusCode >= 400) {
-    let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
-    try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }
-    throw Object.assign(new Error(msg), { code });
-  }
+  if (res.statusCode >= 400) throw uploadResponseError(res.statusCode, res.data);
   try { return JSON.parse(res.data) as { id: string }; } catch { return { id: '' }; }
 }
 
@@ -443,11 +434,7 @@ async function uploadCreativeAssetFile(filePath: string, role: CreativeUploadRol
     header: { 'x-user-id': tokenAtRequest },
   });
   if (res.statusCode === 401) throwUnauthorized(tokenAtRequest);
-  if (res.statusCode >= 400) {
-    let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
-    try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }
-    throw Object.assign(new Error(msg), { code, statusCode: res.statusCode });
-  }
+  if (res.statusCode >= 400) throw uploadResponseError(res.statusCode, res.data);
   return JSON.parse(res.data) as CreativeUploadResult;
 }
 
@@ -456,11 +443,7 @@ async function uploadAvatarFile(filePath: string): Promise<{ ok: boolean; avatar
   const tokenAtRequest = getToken();
   const res = await Taro.uploadFile({ url: `${getApiBaseUrl()}/me/avatar`, filePath, name: 'file', header: { 'x-user-id': tokenAtRequest } });
   if (res.statusCode === 401) throwUnauthorized(tokenAtRequest);
-  if (res.statusCode >= 400) {
-    let msg = `HTTP ${res.statusCode}`; let code: string | undefined;
-    try { const j = JSON.parse(res.data) as { error?: string; code?: string }; msg = j.error || msg; code = j.code; } catch { /* 非 JSON */ }
-    throw Object.assign(new Error(msg), { code });
-  }
+  if (res.statusCode >= 400) throw uploadResponseError(res.statusCode, res.data);
   return JSON.parse(res.data) as { ok: boolean; avatarUrl: string };
 }
 

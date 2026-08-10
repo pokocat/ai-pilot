@@ -49,7 +49,7 @@ export async function projectRoutes(app: FastifyInstance) {
   app.post<{ Body: CreateProjectRequest }>('/projects', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const name = (req.body.name || '').trim();
-    if (!name) return reply.code(400).send({ error: '项目名不能为空' });
+    if (!name) return reply.code(400).send({ error: '案卷名称不能为空', code: 'BAD_NAME' });
     const baseSlug = slugify(name);
     for (let attempt = 0; attempt < 5; attempt++) {
       const slug = slugCandidate(baseSlug, attempt);
@@ -73,7 +73,7 @@ export async function projectRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/projects/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const p = await prisma.project.findFirst({ where: { id: req.params.id, tenantId: user.tenantId } });
-    if (!p) return reply.code(404).send({ error: 'project not found' });
+    if (!p) return reply.code(404).send({ error: '案卷不存在或已删除', code: 'PROJECT_NOT_FOUND' });
 
     const [sessionsRaw, reportsRaw, knowledgeRaw] = await Promise.all([
       prisma.session.findMany({ where: { projectId: p.id }, orderBy: { updatedAt: 'desc' }, include: { agent: true, messages: { orderBy: { createdAt: 'desc' }, take: 1 } } }),
@@ -109,7 +109,7 @@ export async function projectRoutes(app: FastifyInstance) {
   app.put<{ Params: { id: string }; Body: UpdateProjectRequest }>('/projects/:id', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     const p = await prisma.project.findFirst({ where: { id: req.params.id, tenantId: user.tenantId } });
-    if (!p) return reply.code(404).send({ error: 'project not found' });
+    if (!p) return reply.code(404).send({ error: '案卷不存在或已删除', code: 'PROJECT_NOT_FOUND' });
     let updated;
     try {
       updated = await prisma.project.update({

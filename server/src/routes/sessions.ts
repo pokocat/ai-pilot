@@ -271,7 +271,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       where: { id: req.params.id, userId: user.id },
       include: { messages: { orderBy: { createdAt: 'asc' } }, agent: true, activeGeneration: true },
     });
-    if (!s) return reply.code(404).send({ error: 'session not found' });
+    if (!s) return reply.code(404).send({ error: '这段对话不存在或已删除', code: 'SESSION_NOT_FOUND' });
     // 打开会话即标记已读（消除列表未读红点）。必须 await：此前 fire-and-forget（void + 不等待）
     // 与紧随其后的 GET /sessions 之间存在竞态——客户端拿到本次响应后立刻刷新列表时，
     // lastReadAt 的写入可能还没落库，导致未读红点没有如实清除（已由测试复现）。
@@ -384,7 +384,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       where: { id: req.params.mid, role: 'report', session: { id: req.params.id, userId: user.id } },
       include: { session: { include: { agent: true } } },
     });
-    if (!msg) return reply.code(404).send({ error: 'report not found' });
+    if (!msg) return reply.code(404).send({ error: '这份方案不存在或已删除', code: 'REPORT_NOT_FOUND' });
     const deliverable = msg.contentJson as unknown as Deliverable;
     if (deliverable?.htmlUrl) {
       const htmlUrl = webviewSafeReportUrl(deliverable.htmlUrl);
@@ -452,7 +452,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       }
     }
     const text = (req.body.text || '').trim();
-    if (!text) return reply.code(400).send({ error: 'empty text' });
+    if (!text) return reply.code(400).send({ error: '发送内容不能为空', code: 'EMPTY_TEXT' });
     const refs = req.body.refs;
 
     let session = req.body.sessionId
@@ -709,7 +709,7 @@ export async function sessionRoutes(app: FastifyInstance) {
       }
     }
     const text = (req.body.text || '').trim();
-    if (!text) return reply.code(400).send({ error: 'empty text' });
+    if (!text) return reply.code(400).send({ error: '发送内容不能为空', code: 'EMPTY_TEXT' });
     const refs = req.body.refs;
 
     // 确定会话与智能体

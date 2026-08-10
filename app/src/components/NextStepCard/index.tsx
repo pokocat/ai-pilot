@@ -9,7 +9,12 @@ import './index.scss';
 export default function NextStepCard() {
   const [j, setJ] = useState<JourneyView | null>(null);
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => { api.journey().then(setJ).catch(() => {}).finally(() => setLoaded(true)); }, []);
+  const [failed, setFailed] = useState(false);
+  const load = () => {
+    setLoaded(false); setFailed(false);
+    api.journey().then((value) => { setJ(value); setFailed(false); }).catch(() => setFailed(true)).finally(() => setLoaded(true));
+  };
+  useEffect(load, []);
   const ns = j?.nextStep;
 
   // 首帧未加载完成：渲染等高骨架占位，避免数据回来后卡片「后弹入」挤动下方布局。
@@ -21,6 +26,14 @@ export default function NextStepCard() {
           <View className="nsc-sk nsc-sk-t" />
           <View className="nsc-sk nsc-sk-d" />
         </View>
+      </View>
+    );
+  }
+  if (failed) {
+    return (
+      <View className="nsc" onClick={load}>
+        <View className="nsc-main"><Text className="nsc-kicker">下一步</Text><Text className="nsc-title">暂时没取到建议</Text><Text className="nsc-desc">点这里重新加载</Text></View>
+        <Text className="nsc-arrow">↻</Text>
       </View>
     );
   }
