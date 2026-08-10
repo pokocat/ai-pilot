@@ -11,6 +11,7 @@
 - 回形针从占位提示改为浏览器文件选择和拖放，支持 PDF、Word、Excel、CSV、MD、TXT；与移动端共用 20MB/份、9 份/轮、60MB/批边界。
 - 每份资料走现有 `/knowledge/upload` 真链路，显示上传进度并支持取消、失败重试和移除；上传中不能抢跑发送。
 - 上传成功后以 `MessageRef(kind='knowledge')` 随当前 `GenRequest.refs` 发给军师；只附资料不输入文字也能发送自然请求，历史用户气泡保留资料签。
+- 生产静态站已更新应用提交 `1e999ef` 到 `https://copilot.aibuzz.cn/`，首页、当前 JS 资源与同源 `/api/health` 公网验收通过。
 
 ### 2026-08-10 · PC 独立生产域名发布能力 · 影响面：PC 构建基址、窄屏分流、Nginx 与 HTTPS
 
