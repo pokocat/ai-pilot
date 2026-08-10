@@ -1,0 +1,200 @@
+/* 锦囊区 · 案卷资产。按桌面稿 1:1 写 px；颜色只取 index.scss 顶部的 token，不写死十六进制。
+   单独一份文件而不是并进 index.scss：这一屏体量最大，混进公共表会让别人改别的区时天天冲突。 */
+
+.pc-asset-file { display: none; }
+
+/* ══ 额度三格 ══ */
+/* auto-fit 而不是写死 3 列：右侧抽屉一开，主区只剩四百来 px，
+   固定三列会把「深度整理」折成两行。三格宽裕时仍是设计稿的一行三列。 */
+.pc-asset-quota {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;
+}
+.pc-asset-qcard {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+  padding: 16px 16px 14px; border-radius: 16px; text-align: left;
+  background: var(--pc-surface); border: 1px solid var(--pc-line-strong);
+  box-shadow: 0 2px 6px rgba(22, 25, 29, .04);
+  cursor: pointer; transition: border-color .14s ease;
+  &:hover { border-color: var(--accent); }
+  &:disabled { cursor: default; opacity: .55; }
+  &:disabled:hover { border-color: var(--pc-line-strong); }
+}
+.pc-asset-qv { font-size: 21px; font-weight: 600; color: var(--accent); }
+.pc-asset-ql { font-size: 11.5px; font-weight: 600; color: var(--pc-ink-2); }
+
+/* ══ 上传卡（点选 + 整块投放） ══ */
+.pc-asset-drop {
+  margin-top: 16px; padding: 18px 20px; border-radius: 18px;
+  background: var(--pc-surface); border: 1px dashed var(--pc-line-strong);
+  transition: border-color .14s ease, background .14s ease;
+}
+/* 拖到卡上时整块变强调色：桌面端要让人一眼确认「松手就进这儿」。 */
+.pc-asset-drop.pc-on {
+  border-color: var(--accent); border-style: solid; background: var(--accent-soft);
+}
+.pc-asset-drop-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.pc-asset-drop-main { min-width: 0; }
+.pc-asset-drop-k { font-size: 11.5px; font-weight: 700; letter-spacing: .1em; color: var(--accent); }
+.pc-asset-drop-t { margin-top: 6px; font-size: 18px; font-weight: 600; color: var(--pc-ink); }
+.pc-asset-drop-d { margin-top: 6px; font-size: 12.5px; line-height: 1.6; color: var(--pc-ink-3); }
+.pc-asset-drop-btn {
+  flex: none; height: 44px; padding: 0 22px; border-radius: 13px; border: 0;
+  background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: filter .12s ease;
+  &:hover { filter: brightness(1.08); }
+  &:disabled { cursor: default; filter: grayscale(.35) brightness(1.1); }
+}
+
+/* 逐份进度条。设计稿没有这一块——桌面端一次几十份，没有进度就等于黑箱。 */
+.pc-asset-queue {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--pc-line-2);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.pc-asset-qrow {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--pc-sans); font-size: 11.5px; color: var(--pc-ink-3);
+}
+.pc-asset-qname {
+  flex: none; width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--pc-ink-2); font-weight: 600;
+}
+.pc-asset-qbar {
+  flex: 1; min-width: 0; height: 4px; border-radius: 99px; background: var(--pc-surface-2); overflow: hidden;
+}
+.pc-asset-qfill { display: block; height: 100%; background: var(--accent); transition: width .2s ease; }
+.pc-asset-qpct { flex: none; width: 56px; text-align: right; }
+.pc-asset-qsize { flex: none; width: 52px; text-align: right; }
+.pc-asset-qx {
+  flex: none; width: 52px; padding: 0; border: 0; background: transparent;
+  color: var(--pc-danger); font-family: var(--pc-sans); font-size: 11.5px; cursor: pointer; text-align: right;
+}
+.pc-asset-qrow.pc-fail { color: var(--pc-danger); }
+.pc-asset-qrow.pc-fail .pc-asset-qfill { background: var(--pc-danger); }
+.pc-asset-qrow.pc-cancel { opacity: .6; }
+
+/* ══ 三段 tabs ══ */
+.pc-asset-tabs { display: flex; margin-top: 20px; border-bottom: 1px solid var(--pc-line); }
+.pc-asset-tab {
+  display: flex; align-items: center; gap: 7px;
+  padding: 10px 18px; border: 0; border-bottom: 2px solid transparent;
+  background: transparent; cursor: pointer;
+  font-size: 13.5px; font-weight: 600; color: var(--pc-ink-3);
+  &:hover { color: var(--pc-ink-2); }
+}
+.pc-asset-tab.pc-on { border-bottom-color: var(--accent); color: var(--accent); }
+.pc-asset-tab-n { font-family: var(--pc-sans); font-size: 11.5px; color: var(--pc-ink-3); }
+.pc-asset-tab.pc-on .pc-asset-tab-n { color: var(--accent); }
+
+/* ══ 资料表 ══ */
+.pc-asset-card {
+  margin-top: 16px; border-radius: 18px; overflow: hidden;
+  background: var(--pc-surface); border: 1px solid var(--pc-line-strong);
+  box-shadow: var(--pc-shadow-card);
+}
+.pc-asset-card-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 13px 18px; border-bottom: 1px solid var(--pc-line); background: var(--pc-paper);
+}
+.pc-asset-card-t { font-size: 13px; font-weight: 600; letter-spacing: .14em; color: var(--accent); }
+.pc-asset-card-s { font-size: 11.5px; color: var(--pc-ink-3); }
+.pc-asset-card-gap { flex: 1; }
+.pc-asset-card-btn {
+  flex: none; height: 32px; padding: 0 14px; border-radius: 10px; border: 0;
+  background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: filter .12s ease;
+  &:hover { filter: brightness(1.08); }
+  &:disabled { cursor: default; filter: grayscale(.35) brightness(1.1); }
+}
+
+/* 抽屉一开主区就窄到四百多 px，六列硬挤会把表头压成竖排文字。
+   宁可让表格自己横向滚动，也不能把「名称来源」竖着码。 */
+.pc-asset-scroll { overflow-x: auto; }
+
+.pc-asset-table {
+  width: 100%; min-width: 680px; border-collapse: collapse; font-size: 13px;
+
+  thead tr { background: var(--pc-paper); }
+  th {
+    padding: 9px 12px; border-bottom: 1px solid var(--pc-line);
+    text-align: left; font-size: 11.5px; font-weight: 600; color: var(--pc-ink-3);
+  }
+  td { padding: 12px; border-bottom: 1px solid var(--pc-line-2); vertical-align: middle; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: var(--pc-row-hover); }
+  tbody tr:last-child td { border-bottom: 0; }
+
+  input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+}
+.pc-asset-th-ck { width: 44px; padding: 9px 0 9px 18px !important; }
+.pc-asset-th-cat { width: 120px; }
+.pc-asset-th-src { width: 110px; }
+.pc-asset-th-size { width: 80px; }
+.pc-asset-th-st { width: 88px; padding-right: 18px !important; }
+.pc-asset-td-ck { padding: 12px 0 12px 18px !important; }
+.pc-asset-table td:last-child { padding-right: 18px; }
+
+.pc-asset-name { font-size: 14px; font-weight: 600; color: var(--pc-ink); }
+.pc-asset-sum {
+  margin-top: 3px; font-size: 11.5px; line-height: 1.45; color: var(--pc-ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pc-asset-pill {
+  display: inline-block; padding: 3px 9px; border-radius: 8px;
+  background: var(--pc-surface-2); color: var(--pc-ink-2); font-size: 11px; font-weight: 600;
+}
+.pc-asset-src { font-size: 11.5px; color: var(--pc-ink-3); }
+.pc-asset-size { font-family: var(--pc-sans); font-size: 12px; color: var(--pc-ink-3); }
+.pc-asset-st {
+  display: inline-block; padding: 3px 9px; border-radius: 99px;
+  font-size: 11px; font-weight: 600;
+  background: var(--pc-surface-2); color: var(--pc-ink-2);
+}
+.pc-asset-st.pc-ok { background: var(--accent-soft); color: var(--accent); }
+.pc-asset-st.pc-run { background: var(--pc-surface-2); color: var(--pc-warn); }
+.pc-asset-st.pc-bad { background: var(--pc-surface-2); color: var(--pc-danger); }
+
+.pc-asset-blank {
+  padding: 40px 18px !important; text-align: center;
+  font-size: 12.5px; line-height: 1.7; color: var(--pc-ink-3);
+}
+.pc-asset-retry {
+  margin-left: 10px; height: 26px; padding: 0 12px; border-radius: 8px;
+  border: 1px solid var(--pc-line-strong); background: var(--pc-surface);
+  color: var(--pc-ink-2); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.pc-asset-skel td { padding: 16px 18px !important; }
+.pc-asset-skel-l {
+  display: block; height: 12px; border-radius: 6px; background: var(--pc-surface-2);
+  animation: pcRise .4s ease both;
+}
+
+/* ══ 知识库目录格 ══ */
+.pc-asset-folders-head {
+  display: flex; align-items: center; justify-content: space-between; margin: 26px 0 12px;
+}
+.pc-asset-folders-t { font-size: 16px; font-weight: 600; color: var(--pc-ink); }
+.pc-asset-folders-s { font-size: 12px; color: var(--pc-ink-3); }
+.pc-asset-folders {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px;
+}
+.pc-asset-folder {
+  display: flex; flex-direction: column; align-items: flex-start; text-align: left;
+  padding: 16px 15px; border-radius: 16px;
+  background: var(--pc-surface); border: 1px solid var(--pc-line-strong);
+  box-shadow: 0 2px 6px rgba(22, 25, 29, .04);
+  cursor: pointer; transition: transform .14s ease, border-color .14s ease;
+  &:hover { transform: translateY(-2px); border-color: var(--accent); }
+}
+.pc-asset-folder-ic {
+  width: 32px; height: 32px; border-radius: 10px;
+  background: var(--accent-soft); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: 600;
+}
+.pc-asset-folder-t { margin-top: 10px; font-size: 14.5px; font-weight: 600; color: var(--pc-ink); }
+.pc-asset-folder-n { margin-top: 4px; font-size: 11.5px; color: var(--pc-ink-3); }
+.pc-asset-folders-empty {
+  padding: 24px 18px; border-radius: 16px; text-align: center;
+  background: var(--pc-paper); border: 1px dashed var(--pc-line-strong);
+  font-size: 12.5px; line-height: 1.7; color: var(--pc-ink-3);
+}

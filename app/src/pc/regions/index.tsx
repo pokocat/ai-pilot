@@ -3,6 +3,10 @@ import type { Region } from './types';
 import { makePlaceholder } from './placeholder';
 import SessionsListBody from './sessions';
 import SessionsMain, { useChatBar } from './chat';
+import ThinkAssets from './thinkAssets';
+import ThinkData from './thinkData';
+import ThinkModules from './thinkModules';
+import ThinkReports from './thinkReports';
 
 // 五个区的注册表。Phase 0 只有导航骨架，主工作区是占位；
 // 后续每落地一个区，就把这里的 Main 换成真实实现（Shell 不用改）。
@@ -73,7 +77,13 @@ const think: Region = {
     modules: { title: '能力', sub: '免费能力先判断，深度能力做推演，会员模块负责长期执行' },
     reports: { title: '方案', sub: '对话里出的方案，存一次就留一版' },
   }[st.view] || { title: '锦囊' }),
-  Main: makePlaceholder('囊', '锦囊工作区', '资料三段流 · 知识库 · 方案库，Phase 1 落地'),
+  // 四个子区各是一个组件：换子区就是换组件类型，React 自然卸载重挂，
+  // 各自的 hook 表互不相干（外壳侧的同类陷阱见 App.tsx 的 RegionBar 说明）。
+  Main: ({ st }) => {
+    const View = { assets: ThinkAssets, data: ThinkData, modules: ThinkModules, reports: ThinkReports }[st.view]
+      || ThinkAssets;
+    return <View st={st} />;
+  },
 };
 
 const lord: Region = {

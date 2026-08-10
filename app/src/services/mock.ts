@@ -967,11 +967,13 @@ export const mock = {
   },
 
   // 上传头像（演示）：无 OSS，直接把传入的本地路径当作头像链接回显。
-  async uploadAvatar(filePath: string): Promise<{ ok: boolean; avatarUrl: string }> {
+  // 载体两端不同：小程序给临时文件路径，PC/Web 给 File。mock 不上传，只造一个能显示的本地 URL。
+  async uploadAvatar(file: File | Blob | string): Promise<{ ok: boolean; avatarUrl: string }> {
     const { token, d } = current();
-    d.avatarUrl = filePath;
+    const url = typeof file === 'string' ? file : URL.createObjectURL(file);
+    d.avatarUrl = url;
     save(token, d);
-    return delay({ ok: true, avatarUrl: filePath });
+    return delay({ ok: true, avatarUrl: url });
   },
 
   async me(): Promise<Me> {

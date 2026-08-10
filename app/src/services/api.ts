@@ -522,8 +522,8 @@ export const api = {
     useMockApi() ? mock.setColor(color) : request<{ ok: boolean }>('/me/color', 'PUT', { color }),
   updateIdentity: (body: { name?: string; company?: string; avatarUrl?: string }) =>
     useMockApi() ? mock.updateIdentity(body) : request<{ ok: boolean; name?: string; company?: string; avatarUrl?: string }>('/me', 'PUT', body),
-  uploadAvatar: (filePath: string) =>
-    useMockApi() ? mock.uploadAvatar(filePath) : uploadAvatarFile(filePath),
+  uploadAvatar: (file: UploadSource) =>
+    useMockApi() ? mock.uploadAvatar(file) : uploadAvatarFile(file),
   deleteAccount: () =>
     useMockApi() ? mock.deleteAccount() : request<{ ok: boolean }>('/me', 'DELETE'),
   agents: () => (useMockApi() ? mock.agents() : request<Agent[]>('/agents')),
@@ -667,11 +667,11 @@ export const api = {
     useMockApi() ? mock.analyzeKnowledge(id) : request<AnalyzeResult>(`/knowledge/${id}/analyze`, 'POST', {}),
   reembedKnowledge: (id: string) =>
     useMockApi() ? Promise.resolve({ chunks: 0 }) : request<{ chunks: number }>(`/knowledge/${id}/reembed`, 'POST', {}),
-  uploadKnowledge: (filePath: string, projectId?: string, staged?: boolean, batchId?: string, originalName?: string, hooks?: UploadHooks) =>
-    useMockApi() ? mock.uploadKnowledgeStaged(staged, batchId, originalName) : uploadKnowledgeFile(filePath, { projectId, staged, batchId, originalName }, hooks),
+  uploadKnowledge: (file: UploadSource, projectId?: string, staged?: boolean, batchId?: string, originalName?: string, hooks?: UploadHooks) =>
+    useMockApi() ? mock.uploadKnowledgeStaged(staged, batchId, originalName) : uploadKnowledgeFile(file, { projectId, staged, batchId, originalName }, hooks),
   // 聊天图片上传（多模态阅图）：存 OSS 私有 + 建 image 条目，返回 { id }。
-  uploadChatImage: (filePath: string, projectId?: string, originalName?: string, hooks?: UploadHooks) =>
-    useMockApi() ? Promise.resolve({ id: `mock-img-${Date.now()}` }) : uploadChatImageFile(filePath, { projectId, originalName }, hooks),
+  uploadChatImage: (file: UploadSource, projectId?: string, originalName?: string, hooks?: UploadHooks) =>
+    useMockApi() ? Promise.resolve({ id: `mock-img-${Date.now()}` }) : uploadChatImageFile(file, { projectId, originalName }, hooks),
   // 图片有时限签名预览 URL（复用 knowledge 原件预览端点）：渲染缩略图 / 点开大图用。
   chatImageUrl: (id: string) =>
     useMockApi() ? Promise.resolve({ url: '' }) : request<{ url: string }>(`/knowledge/${id}/preview`),
@@ -728,8 +728,8 @@ export const api = {
     if (messageId) qs.push(`messageId=${encodeURIComponent(messageId)}`);
     return request<PosterBriefDraft>(`/creative/posters/brief-draft${qs.length ? `?${qs.join('&')}` : ''}`);
   },
-  uploadCreativeAsset: (filePath: string, role: CreativeUploadRole) =>
-    useMockApi() ? mock.uploadCreativeAsset(role) : uploadCreativeAssetFile(filePath, role),
+  uploadCreativeAsset: (file: UploadSource, role: CreativeUploadRole) =>
+    useMockApi() ? mock.uploadCreativeAsset(role) : uploadCreativeAssetFile(file, role),
   // 建任务（幂等键按用户唯一 → 重复点击拿回原任务，reused=true 且不重复扣费）。
   createPosterJob: (body: CreatePosterJobRequest) =>
     useMockApi() ? mock.createPosterJob(body) : request<CreatePosterJobResult>('/creative/posters', 'POST', body),

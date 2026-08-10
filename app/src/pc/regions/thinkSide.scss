@@ -1,0 +1,169 @@
+/* 锦囊区 · 账号与数据 / 能力 / 方案 三个子区的样式。
+   放在 index.scss 之外单独一份，是因为这三块与「案卷资产」并行开发：公共 token 仍从 .pc-shell
+   继承（--pc-* / --accent*），这里只写子区自己的类，谁也不用去动公共文件。
+   与 index.scss 同规矩：px 直接写（PC 不过 Taro 的 px→rem 管线），颜色一律走变量。 */
+
+/* ══ 三子区共用：概览卡 / 分区小标题 / 三态 ══ */
+.pc-side-hero {
+  padding: 20px 22px; border-radius: 18px;
+  background: var(--pc-surface); border: 1px solid var(--pc-line-strong);
+  box-shadow: 0 2px 6px rgba(22, 25, 29, .04);
+}
+.pc-side-hero-k { font-size: 11.5px; font-weight: 700; letter-spacing: .1em; color: var(--accent); }
+.pc-side-hero-t { margin-top: 7px; font-size: 20px; font-weight: 600; color: var(--pc-ink); }
+.pc-side-hero-d { margin-top: 8px; max-width: 720px; font-size: 12.5px; line-height: 1.65; color: var(--pc-ink-2); }
+.pc-side-metrics { display: flex; gap: 36px; margin-top: 16px; }
+.pc-side-mv { font-size: 22px; font-weight: 600; color: var(--accent); }
+.pc-side-ml { margin-top: 3px; font-size: 11.5px; font-weight: 600; color: var(--pc-ink-3); }
+
+.pc-side-label { margin: 22px 0 10px; font-size: 13px; font-weight: 600; letter-spacing: .16em; color: var(--accent); }
+
+/* 骨架：给未登录/首屏一个有形状的等待面，别让整块工作区空着。 */
+.pc-side-skel { display: grid; gap: 12px; }
+.pc-side-skel-b {
+  height: 66px; border-radius: 16px; background: var(--pc-surface-2);
+  animation: pcSideBreathe 1.1s ease-in-out infinite alternate;
+}
+.pc-side-skel-b.pc-tall { height: 128px; }
+@keyframes pcSideBreathe { from { opacity: .5; } to { opacity: 1; } }
+
+/* 取数失败 / 未登录的提示条，形状与卡片一致，虚线边表示「这里本该有内容」。 */
+.pc-side-note {
+  display: flex; align-items: center; gap: 14px;
+  padding: 18px 20px; border-radius: 16px;
+  background: var(--pc-surface); border: 1px dashed var(--pc-line-strong);
+}
+.pc-side-note-t { flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.6; color: var(--pc-ink-3); }
+/* 概览卡下面直接接提示条时补上与卡片网格一致的间距。 */
+.pc-side-note.pc-gap { margin-top: 16px; }
+
+/* ══ 账号与数据 ══ */
+.pc-ds-hubs { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+.pc-ds-hub {
+  display: flex; align-items: flex-start; gap: 12px;
+  width: 100%; padding: 16px 18px; border-radius: 16px;
+  background: var(--pc-surface); border: 1px solid var(--pc-line-strong);
+  cursor: pointer; text-align: left; transition: border-color .14s ease;
+  &:hover { border-color: var(--accent); }
+}
+.pc-ds-hub-ic {
+  flex: none; width: 34px; height: 34px; border-radius: 11px;
+  background: var(--accent-soft); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: 600;
+}
+.pc-ds-hub-b { flex: 1; min-width: 0; }
+.pc-ds-hub-t { display: block; font-size: 15px; font-weight: 600; color: var(--pc-ink); }
+.pc-ds-hub-s { display: block; margin-top: 4px; font-size: 12px; line-height: 1.55; color: var(--pc-ink-3); }
+.pc-ds-hub-m { display: block; margin-top: 6px; font-size: 11px; color: var(--pc-ink-3); }
+.pc-ds-hub-em { flex: none; font-size: 12px; font-weight: 600; color: var(--accent); }
+
+.pc-ds-list {
+  border-radius: 18px; overflow: hidden;
+  background: var(--pc-surface); border: 1px solid var(--pc-line-strong);
+}
+.pc-ds-row {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 14px 18px;
+  border: 0; border-bottom: 1px solid var(--pc-line-2);
+  background: transparent; cursor: pointer; text-align: left;
+  transition: background .12s ease;
+  /* 最后一行不留线：容器自己有 1px 边，再叠一条就是双线。 */
+  &:last-child { border-bottom: 0; }
+  &:hover { background: var(--pc-row-hover); }
+}
+.pc-ds-ic {
+  flex: none; width: 30px; height: 30px; border-radius: 10px;
+  background: var(--pc-surface-2); color: var(--pc-ink-2);
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.pc-ds-b { flex: 1; min-width: 0; }
+.pc-ds-t { display: block; font-size: 14px; font-weight: 600; color: var(--pc-ink); }
+.pc-ds-s {
+  display: block; margin-top: 3px; font-size: 11.5px; color: var(--pc-ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pc-ds-pill {
+  flex: none; padding: 3px 10px; border-radius: 99px;
+  font-size: 11px; font-weight: 600;
+  background: var(--pc-surface-2); color: var(--pc-ink-2);
+  &.pc-ok { background: var(--accent-soft); color: var(--accent); }
+  &.pc-miss { color: var(--pc-danger); }
+  &.pc-warn { color: var(--pc-warn); }
+}
+
+/* ══ 能力 ══ */
+.pc-mod-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 12px; margin-top: 16px;
+}
+.pc-mod-card {
+  display: flex; align-items: flex-start; gap: 12px;
+  width: 100%; padding: 16px 18px; border-radius: 16px;
+  background: var(--pc-surface); border: 1px solid var(--pc-line-strong);
+  box-shadow: 0 2px 6px rgba(22, 25, 29, .04);
+  cursor: pointer; text-align: left;
+  transition: transform .14s ease, border-color .14s ease;
+  &:hover { transform: translateY(-2px); border-color: var(--accent); }
+}
+.pc-mod-ic {
+  flex: none; width: 34px; height: 34px; border-radius: 11px;
+  background: var(--pc-surface-2); color: var(--pc-ink);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: 600;
+}
+.pc-mod-b { flex: 1; min-width: 0; }
+.pc-mod-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pc-mod-t {
+  font-size: 15px; font-weight: 600; color: var(--pc-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pc-mod-badge {
+  flex: none; padding: 2px 8px; border-radius: 99px;
+  font-size: 10.5px; font-weight: 600;
+  background: var(--pc-surface-2); color: var(--pc-ink-2);
+  &.pc-free { background: var(--accent-soft); color: var(--accent); }
+  &.pc-sku { color: var(--pc-warn); }
+  &.pc-member { background: var(--pc-ink); color: var(--pc-surface); }
+}
+.pc-mod-d { display: block; margin-top: 5px; font-size: 12px; line-height: 1.55; color: var(--pc-ink-3); }
+.pc-mod-state { display: block; margin-top: 7px; font-size: 11.5px; font-weight: 600; color: var(--accent); }
+
+/* ══ 方案 ══ */
+.pc-rep-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  margin-bottom: 12px;
+}
+.pc-rep-head-t { font-size: 13px; font-weight: 600; letter-spacing: .16em; color: var(--accent); }
+.pc-rep-head-s { font-size: 12px; color: var(--pc-ink-3); }
+.pc-rep-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.pc-rep-card {
+  display: block; width: 100%; padding: 18px 18px 16px; border-radius: 16px;
+  background: var(--pc-surface); border: 1px solid var(--pc-line-strong);
+  box-shadow: 0 2px 6px rgba(22, 25, 29, .04);
+  cursor: pointer; text-align: left;
+  transition: transform .14s ease, border-color .14s ease;
+  &:hover { transform: translateY(-2px); border-color: var(--accent); }
+}
+.pc-rep-top { display: flex; align-items: center; gap: 10px; }
+.pc-rep-ic {
+  flex: none; width: 32px; height: 32px; border-radius: 10px;
+  background: var(--accent-soft); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 600;
+}
+.pc-rep-v {
+  flex: none; padding: 2px 8px; border-radius: 99px;
+  background: var(--pc-surface-2); color: var(--pc-ink-2);
+  font-size: 10.5px; font-weight: 600;
+}
+.pc-rep-gap { flex: 1; }
+.pc-rep-time { flex: none; font-size: 11px; color: var(--pc-ink-3); }
+.pc-rep-t { display: block; margin-top: 12px; font-size: 16px; font-weight: 600; line-height: 1.4; color: var(--pc-ink); }
+.pc-rep-m { display: block; margin-top: 6px; font-size: 11.5px; color: var(--pc-ink-3); }
+.pc-rep-s {
+  margin-top: 10px; font-size: 12.5px; line-height: 1.6; color: var(--pc-ink-2);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* 列表接口不带摘要，未取到正文时这一行是「怎么用」的提示，压暗一档以示区别。 */
+.pc-rep-s.pc-hint { color: var(--pc-ink-3); }

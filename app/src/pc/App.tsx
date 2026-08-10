@@ -5,13 +5,44 @@ import ListPane from './ListPane';
 import Login from './Login';
 import { ContextMenu, Stage, Toast, TopBar } from './Chrome';
 import { REGIONS } from './regions';
-import { usePcState } from './state';
+import type { Region } from './regions/types';
+import { usePcState, type PcState } from './state';
 import { bindToast } from './toastBridge';
 import { bindLoginGate } from './authBridge';
 import type { AuthReason } from '../services/authGate';
 
 // PC 工作台外壳：导航轨 + 列表栏 + 主工作区（含右侧抽屉），叠加右键菜单与 Toast。
 // 换区不跳页，只改 usePcState 的状态；地址栏由 state.ts 同步。
+
+/**
+ * 各区的 `useBar` / `useGroups` **是 hook**（问策区的 useChatBar 里有 useStore/useState/useEffect，
+ * 其余区暂时是零 hook 的纯函数）。所以绝不能在 App 函数体里直接调 `region.useBar(st)`——
+ * 换区时 App 这一个组件实例的 hook 数量会变，React 直接抛
+ * 「Rendered more hooks than during the previous render」并卸载整棵树，表现为切区白屏。
+ *
+ * 拆成下面两个以 `st.tab` 为 key 的子组件：区一换就是新实例，hook 表各算各的，
+ * 后来的区想加多少 hook 都不会串位。
+ */
+function RegionBar({ region, st }: { region: Region; st: PcState }) {
+  const bar = region.useBar(st);
+  return <TopBar title={bar.title} sub={bar.sub} actions={bar.actions} />;
+}
+
+function RegionList({ region, st }: { region: Region; st: PcState }) {
+  const groups = region.useGroups?.(st);
+  const ListBody = region.ListBody;
+  return (
+    <ListPane
+      st={st}
+      glyph={region.head.glyph}
+      kicker={region.head.kicker}
+      title={region.head.title}
+      groups={groups}
+    >
+      {ListBody && <ListBody st={st} />}
+    </ListPane>
+  );
+}
 
 export default function App() {
   const st = usePcState();
@@ -43,9 +74,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [st]);
 
-  const groups = region.useGroups?.(st);
-  const bar = region.useBar(st);
-  const ListBody = region.ListBody;
   const Main = region.Main;
 
   return (
@@ -55,18 +83,11 @@ export default function App() {
     >
       <NavRail st={st} />
 
-      <ListPane
-        st={st}
-        glyph={region.head.glyph}
-        kicker={region.head.kicker}
-        title={region.head.title}
-        groups={groups}
-      >
-        {ListBody && <ListBody st={st} />}
-      </ListPane>
+      {/* key={st.tab}：见下方 RegionList / RegionBar 的说明，切区必须整体重挂载 */}
+      <RegionList key={st.tab} region={region} st={st} />
 
       <main className="pc-main">
-        <TopBar title={bar.title} sub={bar.sub} actions={bar.actions} />
+        <RegionBar key={st.tab} region={region} st={st} />
         <Stage st={st}>
           <Main st={st} />
         </Stage>
