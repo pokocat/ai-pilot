@@ -50,9 +50,9 @@ export default defineAppConfig({
         // 海报成品图（canvas_design）：需求单确认页 + 任务详情页，入口在对话页的海报设计师成果卡。
         'poster/index',
         'posterJob/index',
-        // 作品库：历史成品图网格（+ 文字成果跳方案库）。入口在老板 tab「资产」组与军令 tab「内容出品」区块。
+        // 作品库：历史成品图网格（+ 文字成果跳方案库）。入口在主公 tab「资产」组与点兵 tab「内容出品」区块。
         'gallery/index',
-        // 新设计稿新增的三个业务面，入口都在老板 tab（账户权益格 + 档案菜单组）：
+        // 新设计稿新增的三个业务面，入口都在主公 tab（账户权益格 + 档案菜单组）：
         // architecture=公司与事业架构、relations=人脉圈与持续记忆、enterprise=企业服务办理台。
         'architecture/index',
         'relations/index',
@@ -61,7 +61,7 @@ export default defineAppConfig({
     },
   ],
   preloadRule: {
-    // chat 已迁入 packages/main：从入口 tab 预下载 main 分包，保证「问策/军情」进对话不卡首屏。
+    // chat 已迁入 packages/main：从入口 tab 预下载 main 分包，保证「问策/沙盘」进对话不卡首屏。
     'pages/sessions/index': {
       network: 'wifi',
       packages: ['packages/main'],
@@ -99,10 +99,10 @@ export default defineAppConfig({
     backgroundColor: '#FBFAF6',
     list: [
       { pagePath: 'pages/sessions/index', text: '问策' },
-      { pagePath: 'pages/home/index', text: '军情' },
-      { pagePath: 'pages/studio/index', text: '军令' },
+      { pagePath: 'pages/home/index', text: '沙盘' },
+      { pagePath: 'pages/studio/index', text: '点兵' },
       { pagePath: 'pages/thinktank/index', text: '锦囊' },
-      { pagePath: 'pages/profile/index', text: '老板' },
+      { pagePath: 'pages/profile/index', text: '主公' },
     ],
   },
 });

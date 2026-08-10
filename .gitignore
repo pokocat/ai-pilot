@@ -7,6 +7,7 @@ dist/
 **/dist/
 **/dist-native/
 **/dist-h5/
+**/dist-pc/
 lib/
 .temp/
 .swc/

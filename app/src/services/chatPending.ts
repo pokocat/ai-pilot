@@ -1,4 +1,4 @@
-import Taro from '@tarojs/taro';
+import { platform } from './platform';
 
 // 客户端的极短交接标记：用户点发送后页面会立刻进入 busy，但服务端从收到请求到创建/登记会话仍有
 // 一个很短的窗口。把 sessionId + 时间写入 storage，可保证“立刻返回列表再进入”也不会闪掉思考态。
@@ -10,7 +10,7 @@ type PendingMap = Record<string, number>;
 
 function read(): PendingMap {
   try {
-    const raw = Taro.getStorageSync(KEY);
+    const raw = platform.storage.get(KEY);
     const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
     const now = Date.now();
@@ -24,8 +24,9 @@ function read(): PendingMap {
 
 function write(value: PendingMap) {
   try {
-    if (Object.keys(value).length) Taro.setStorageSync(KEY, value);
-    else Taro.removeStorageSync(KEY);
+    // 垫片只收字符串（Taro 允许直接存对象）；read() 两种都吃，历史数据不受影响。
+    if (Object.keys(value).length) platform.storage.set(KEY, JSON.stringify(value));
+    else platform.storage.remove(KEY);
   } catch { /* storage 不可用时回退服务端 generating */ }
 }
 

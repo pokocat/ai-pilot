@@ -1,4 +1,4 @@
-import Taro from '@tarojs/taro';
+import { platform } from './platform';
 import type {
   Agent, Me, LoginResult, SurveyQuestion, Profile, TodaySaying,
   SessionItem, SessionDetail, SessionMessage, GenRequest, GenResult,
@@ -245,7 +245,7 @@ const mockSmsCodes: Record<string, string> = {};
 
 function load(token: string): UserData {
   try {
-    const raw = Taro.getStorageSync(dataKey(token));
+    const raw = platform.storage.get(dataKey(token));
     if (raw) {
       const d = (typeof raw === 'string' ? JSON.parse(raw) : raw) as UserData;
       // 兼容旧存档：补齐新增集合
@@ -285,7 +285,7 @@ function load(token: string): UserData {
   };
 }
 function save(token: string, d: UserData) {
-  try { Taro.setStorageSync(dataKey(token), JSON.stringify(d)); } catch { /* noop */ }
+  try { platform.storage.set(dataKey(token), JSON.stringify(d)); } catch { /* noop */ }
 }
 function current(): { token: string; d: UserData } {
   const token = getToken();
@@ -687,10 +687,10 @@ function seedLedgerM(): LedgerM {
   };
 }
 function loadLedgerM(token: string): LedgerM {
-  try { const raw = Taro.getStorageSync(`mock.ledger.${token}`); if (raw) return (typeof raw === 'string' ? JSON.parse(raw) : raw) as LedgerM; } catch { /* noop */ }
+  try { const raw = platform.storage.get(`mock.ledger.${token}`); if (raw) return (typeof raw === 'string' ? JSON.parse(raw) : raw) as LedgerM; } catch { /* noop */ }
   return seedLedgerM();
 }
-function saveLedgerM(token: string, l: LedgerM) { try { Taro.setStorageSync(`mock.ledger.${token}`, JSON.stringify(l)); } catch { /* noop */ } }
+function saveLedgerM(token: string, l: LedgerM) { try { platform.storage.set(`mock.ledger.${token}`, JSON.stringify(l)); } catch { /* noop */ } }
 const accM = (c: number, r: number) => (c + r >= 5 ? Math.round((c / (c + r)) * 100) : null);
 function decStatsM(items: DecisionView[]): DecisionStats {
   const correct = items.filter((i) => i.status === 'correct').length;
@@ -734,10 +734,10 @@ function seedBizSeriesM(): BizMetricWeek[] {
   ];
 }
 function loadBizSeriesM(token: string): BizMetricWeek[] {
-  try { const raw = Taro.getStorageSync(`mock.bizmetrics.${token}`); if (raw) return (typeof raw === 'string' ? JSON.parse(raw) : raw) as BizMetricWeek[]; } catch { /* noop */ }
+  try { const raw = platform.storage.get(`mock.bizmetrics.${token}`); if (raw) return (typeof raw === 'string' ? JSON.parse(raw) : raw) as BizMetricWeek[]; } catch { /* noop */ }
   return seedBizSeriesM();
 }
-function saveBizSeriesM(token: string, s: BizMetricWeek[]) { try { Taro.setStorageSync(`mock.bizmetrics.${token}`, JSON.stringify(s)); } catch { /* noop */ } }
+function saveBizSeriesM(token: string, s: BizMetricWeek[]) { try { platform.storage.set(`mock.bizmetrics.${token}`, JSON.stringify(s)); } catch { /* noop */ } }
 
 /* ────────────── 海报成品图 mock（canvas_design · P4） ──────────────
  * 与服务端同口径：建单只回 { jobId,status,creditCost,reused }，详情由 GET /creative/jobs/:id 给全量视图。
@@ -770,7 +770,7 @@ interface CreativeJobRec {
 }
 function loadCreativeM(token: string): CreativeJobRec[] {
   try {
-    const raw = Taro.getStorageSync(`mock.creative.${token}`);
+    const raw = platform.storage.get(`mock.creative.${token}`);
     if (raw) {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
       if (Array.isArray(parsed)) return parsed as CreativeJobRec[];
@@ -780,7 +780,7 @@ function loadCreativeM(token: string): CreativeJobRec[] {
 }
 function saveCreativeM(token: string, jobs: CreativeJobRec[]) {
   // 只留最近 30 条，避免长期本地演示把 storage 撑爆。
-  try { Taro.setStorageSync(`mock.creative.${token}`, JSON.stringify(jobs.slice(-30))); } catch { /* noop */ }
+  try { platform.storage.set(`mock.creative.${token}`, JSON.stringify(jobs.slice(-30))); } catch { /* noop */ }
 }
 /** 时间差 → 状态与阶段（与服务端 progress 取值一致：philosophy | visual | render | upload）。 */
 function creativePhaseM(rec: CreativeJobRec): { status: CreativeJobView['status']; progress: string } {
@@ -905,7 +905,7 @@ export const mock = {
       delete mockSmsCodes[phone];
     }
     const token = `mock-${phone}`;
-    const existed = !!Taro.getStorageSync(dataKey(token));
+    const existed = !!platform.storage.get(dataKey(token));
     const d = load(token);
     if (name) d.name = name;
     save(token, d);
@@ -921,7 +921,7 @@ export const mock = {
     for (let i = 0; i < phoneCode.length; i++) h = (h * 31 + phoneCode.charCodeAt(i)) >>> 0;
     const phone = ('1' + String(3_900_000_000 + (h % 90_000_000)).padStart(10, '0')).slice(0, 11);
     const token = `mock-${phone}`;
-    const existed = !!Taro.getStorageSync(dataKey(token));
+    const existed = !!platform.storage.get(dataKey(token));
     const d = load(token);
     if (name) d.name = name;
     save(token, d);
@@ -934,7 +934,7 @@ export const mock = {
   async wechatLogin(code: string, nickname?: string, avatarUrl?: string): Promise<LoginResult> {
     const key = code.replace(/[^\w-]/g, '').slice(0, 40) || 'dev';
     const token = `mock-wx-${key}`;
-    const existed = !!Taro.getStorageSync(dataKey(token));
+    const existed = !!platform.storage.get(dataKey(token));
     const d = load(token);
     if (nickname) d.name = nickname;
     if (avatarUrl) d.avatarUrl = avatarUrl;
@@ -1017,7 +1017,7 @@ export const mock = {
 
   async deleteAccount(): Promise<{ ok: boolean }> {
     const { token } = current();
-    try { Taro.removeStorageSync(dataKey(token)); } catch { /* noop */ }
+    try { platform.storage.remove(dataKey(token)); } catch { /* noop */ }
     return delay({ ok: true });
   },
 
@@ -1829,7 +1829,7 @@ export const mock = {
     };
     let dossier: LocalDossier | null = null;
     try {
-      const raw = Taro.getStorageSync(`junshi.dossier.${token}`);
+      const raw = platform.storage.get(`junshi.dossier.${token}`);
       if (raw) dossier = (typeof raw === 'string' ? JSON.parse(raw) : raw) as LocalDossier;
     } catch { /* 空案卷按真实端空态返回 */ }
     const orders = (dossier?.orders ?? []).filter((order) => order.date === date);
@@ -1943,7 +1943,7 @@ export const mock = {
   async dossier(): Promise<DossierView> {
     const { token } = current();
     try {
-      const raw = Taro.getStorageSync(`mock.dossier.${token}`);
+      const raw = platform.storage.get(`mock.dossier.${token}`);
       if (raw) { const r = (typeof raw === 'string' ? JSON.parse(raw) : raw) as DossierReport; return delay({ report: r, generatedAt: r.generatedAt }); }
     } catch { /* noop */ }
     return delay({ report: null, generatedAt: null });
@@ -2008,7 +2008,7 @@ export const mock = {
       sections,
       generatedAt: new Date().toISOString(),
     };
-    try { Taro.setStorageSync(`mock.dossier.${token}`, JSON.stringify(report)); } catch { /* noop */ }
+    try { platform.storage.set(`mock.dossier.${token}`, JSON.stringify(report)); } catch { /* noop */ }
     return delay({ report, generatedAt: report.generatedAt });
   },
   async knowledgeSearch(q: string, projectId?: string): Promise<KnowledgeHit[]> {

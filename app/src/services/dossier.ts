@@ -1,4 +1,4 @@
-import Taro from '@tarojs/taro';
+import { platform } from './platform';
 import { getToken } from './token';
 import { request } from './api';
 import { useMockApi } from './runtimeMode';
@@ -71,7 +71,7 @@ function normalizeOrderText(text: string): string {
 
 function loadLocal(): Dossier | null {
   try {
-    const raw = Taro.getStorageSync(storageKey());
+    const raw = platform.storage.get(storageKey());
     if (!raw) return null;
     return typeof raw === 'string' ? (JSON.parse(raw) as Dossier) : (raw as Dossier);
   } catch {
@@ -81,7 +81,7 @@ function loadLocal(): Dossier | null {
 
 function saveLocal(d: Dossier) {
   d.updatedAt = new Date().toISOString();
-  try { Taro.setStorageSync(storageKey(), JSON.stringify(d)); } catch { /* noop */ }
+  try { platform.storage.set(storageKey(), JSON.stringify(d)); } catch { /* noop */ }
 }
 
 // 从认可的成果中提取「可执行动作」：优先取标题含 行动/动作/下一步/清单/计划/建议 的分节列表，
@@ -175,15 +175,15 @@ async function migrateLocalIfNeeded(): Promise<Dossier | null> {
   if (!token) return null;
   const flagKey = `${MIGRATED_PREFIX}${token}`;
   try {
-    if (Taro.getStorageSync(flagKey)) return null;
+    if (platform.storage.get(flagKey)) return null;
   } catch { /* noop */ }
   const local = loadLocal();
   if (!local) {
-    try { Taro.setStorageSync(flagKey, '1'); } catch { /* noop */ }
+    try { platform.storage.set(flagKey, '1'); } catch { /* noop */ }
     return null;
   }
   const r = await request<CasefileRes>('/casefile/import', 'POST', { dossier: local });
-  try { Taro.setStorageSync(flagKey, '1'); } catch { /* noop */ }
+  try { platform.storage.set(flagKey, '1'); } catch { /* noop */ }
   return r.casefile;
 }
 

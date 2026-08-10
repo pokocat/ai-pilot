@@ -7,6 +7,7 @@ import AsyncState from '../../../components/AsyncState';
 import { useStore } from '../../../hooks/useStore';
 import { navTo } from '../../../services/nav';
 import { api, type KnowledgeDocRow } from '../../../services/api';
+import type { UploadHandle } from '../../../services/platform';
 import { checkUpload } from '../../../services/uploadGuard';
 import { displaySourceName, sourceUploadName } from '../../../services/uploadName';
 import './index.scss';
@@ -50,7 +51,7 @@ export default function Knowledge() {
   const [items, setItems] = useState<KnowledgeDocRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [pct, setPct] = useState(0); // 真实上传进度（0–100）
-  const uploadTask = useRef<Taro.UploadTask | null>(null); // 透出的 UploadTask，取消时 abort() 真中止
+  const uploadTask = useRef<UploadHandle | null>(null); // 透出的上传句柄，取消时 abort() 真中止
   const uploadCancelled = useRef(false);
   const [loaded, setLoaded] = useState(false); // D2：首屏加载与空态区分，避免拉取期间闪空态
   const [pollHint, setPollHint] = useState(false); // 轮询到上限仍有未就绪项 → 提示下拉刷新

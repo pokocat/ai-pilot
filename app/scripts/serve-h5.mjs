@@ -21,21 +21,29 @@ async function send(res, file) {
   res.end(buf);
 }
 
+// PC 工作台是独立产物（dist-pc/），线上挂在同源的 /pc/ 下。这里照同样的路径映射，
+// 本地预览才和生产一致（PC ↔ 移动的视口互跳都是按 /pc/ 与 / 写死的）。
+const pcRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'dist-pc');
+
 createServer(async (req, res) => {
   try {
     const url = decodeURIComponent((req.url || '/').split('?')[0]);
-    let file = join(root, normalize(url).replace(/^(\.\.[/\\])+/, ''));
+    const isPc = url === '/pc' || url.startsWith('/pc/');
+    const base = isPc ? pcRoot : root;
+    const rel = isPc ? url.replace(/^\/pc\/?/, '/') : url;
+    let file = join(base, normalize(rel).replace(/^(\.\.[/\\])+/, ''));
     try {
       const s = await stat(file);
       if (s.isDirectory()) file = join(file, 'index.html');
       await send(res, file);
     } catch {
-      await send(res, join(root, 'index.html')); // SPA 回退
+      await send(res, join(base, 'index.html')); // SPA 回退
     }
   } catch (e) {
     res.writeHead(500); res.end(String(e));
   }
 }).listen(port, () => {
-  console.log(`H5 预览：http://localhost:${port}  （服务目录 ${root}）`);
-  console.log('提示：需先 `TARO_APP_MODE=server npm run build:h5` 并启动后端（server: npm run dev）');
+  console.log(`移动 H5：http://localhost:${port}      （${root}）`);
+  console.log(`PC 工作台：http://localhost:${port}/pc/ （${pcRoot}）`);
+  console.log('提示：连真后端需 `TARO_APP_MODE=server npm run build:h5 && npm run build:pc:server` 并启动 server');
 });

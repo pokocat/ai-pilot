@@ -146,6 +146,19 @@ server {
         try_files $uri $uri/ /admin/index.html;
     }
 
+    location = /pc {
+        return 301 /pc/;                 # 同 /admin：避免被 H5 fallback 当成主页
+    }
+
+    # PC 工作台（app/dist-pc，独立 Vite 应用，与移动 H5 同源不同路径）。
+    # 桌面浏览器访问站点根会被 H5 的启动脚本按视口重定向到这里；窄屏访问这里会被送回根。
+    # 字体不在这个目录里：PC 的 @font-face 指向 /fonts/（下方 location，物理上在 h5 目录），
+    # 所以 PC 上线前必须先发过一次 H5，否则宋体拿不到、静默回退系统字体。
+    location /pc/ {
+        alias /var/www/junshi/pc/;
+        try_files $uri $uri/ /pc/index.html;
+    }
+
     # —— C 端自带中文衬线字体（思源宋体子集，随 H5 产物发布，物理上只有一份）——
     # H5 用相对路径 /fonts/ 取（与页面同源，不走 CORS）。
     # ⚠️ 如果 H5 与 API 不在同一个域名（本项目就是：H5 在 aibuzz.cn、API/小程序合法域名是

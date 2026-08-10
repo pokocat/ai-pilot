@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1280" />
+  <title>军师 · 工作台</title>
+  <style>
+    /* 自带中文衬线字体：与移动 H5 / 小程序同一份思源宋体子集。
+       字体文件由移动 H5 的构建落到站点根 /fonts/（见 config/index.ts 的 copy 规则），
+       PC 挂在 /pc/ 下但同源，用绝对路径直接取，不重复打一份。
+       swap：先用系统字体把内容显示出来，字体到位再替换，绝不为字体白屏。 */
+    @font-face {
+      font-family: "JunshiSerif";
+      src: url("/fonts/junshi-serif-400.woff2") format("woff2");
+      font-weight: 400; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: "JunshiSerif";
+      src: url("/fonts/junshi-serif-600.woff2") format("woff2");
+      font-weight: 600; font-style: normal; font-display: swap;
+    }
+    html, body { margin: 0; padding: 0; background: #F4F2EC; }
+    #root { min-height: 100vh; }
+  </style>
+  <script>
+    /* 反向分流：窄屏访问 PC 站 → 回移动版对应 tab。
+       桌面 → 移动的那一半在移动版 index.html 里。 */
+    (function () {
+      if (window.innerWidth >= 1024) return;
+      var BACK = {
+        sessions: '/#/pages/sessions/index', sand: '/#/pages/home/index', exec: '/#/pages/studio/index',
+        think: '/#/pages/thinktank/index', lord: '/#/pages/profile/index'
+      };
+      var tab = (location.hash.replace(/^#\//, '').split('?')[0]) || 'sessions';
+      location.replace(BACK[tab] || BACK.sessions);
+    })();
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="./main.tsx"></script>
+</body>
+</html>

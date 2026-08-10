@@ -16,13 +16,16 @@
     "dev:h5": "taro build --type h5 --watch",
     "build:h5:server": "npm run typecheck && TARO_APP_MODE=server taro build --type h5",
     "dev:h5:server": "TARO_APP_MODE=server taro build --type h5 --watch",
-    "clean:build": "node -e \"require('fs').rmSync('dist-native',{recursive:true,force:true});require('fs').rmSync('dist-h5',{recursive:true,force:true});require('fs').rmSync('node_modules/.cache',{recursive:true,force:true})\"",
+    "clean:build": "node -e \"require('fs').rmSync('dist-native',{recursive:true,force:true});require('fs').rmSync('dist-h5',{recursive:true,force:true});require('fs').rmSync('dist-pc',{recursive:true,force:true});require('fs').rmSync('node_modules/.cache',{recursive:true,force:true})\"",
     "build:weapp:server": "node scripts/build-native-weapp.mjs --mode server --api https://wxapi.aibuzz.cn/api",
     "build:weapp:preprod": "node scripts/build-native-weapp.mjs --mode server --api https://wxapi.aibuzz.cn/api_preprod",
     "release:weapp": "node scripts/weapp-release.mjs",
     "upload:weapp": "node scripts/weapp-upload.mjs",
     "serve:h5": "node scripts/serve-h5.mjs",
-    "test": "npm run typecheck && node --test scripts/*.test.mjs && node --import tsx --test src/**/*.test.ts"
+    "test": "npm run typecheck && node --test scripts/*.test.mjs && node --import tsx --test src/**/*.test.ts",
+    "build:pc": "npm run typecheck && vite build --config vite.pc.config.ts",
+    "dev:pc": "vite --config vite.pc.config.ts",
+    "build:pc:server": "npm run typecheck && TARO_APP_MODE=server vite build --config vite.pc.config.ts"
   },
   "browserslist": [
     "last 3 versions",
@@ -48,14 +51,16 @@
     "@tarojs/webpack5-runner": "3.6.34",
     "@types/react": "^18.2.0",
     "@types/webpack-env": "^1.18.0",
+    "@vitejs/plugin-react": "^4.7.0",
     "babel-preset-taro": "3.6.34",
     "lucide-static": "1.27.0",
     "miniprogram-automator": "^0.12.1",
     "miniprogram-ci": "^2.1.31",
     "postcss": "^8.4.0",
-    "sass": "^1.69.0",
+    "sass": "^1.102.0",
     "tsx": "^4.19.2",
     "typescript": "^5.4.0",
+    "vite": "^5.4.21",
     "webpack": "5.91.0"
   }
 }

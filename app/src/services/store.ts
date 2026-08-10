@@ -1,11 +1,9 @@
-import Taro from '@tarojs/taro';
+import { platform } from './platform';
 import { colorByKey } from '../data/colors';
 import { DEFAULT_AGENTS } from '../data/agents';
 import { api, getUserId, setUserId, clearUserId, setAuthLostHandler, type Agent, type Me } from './api';
 // 静态引入（勿改动态 import）：小程序打包会把动态 import 切成独立 chunk，真机上有解析风险。
 // wechatSubscribe 只依赖 ./api、不反向依赖 store，无循环引用。
-import { prefetchWechatSubscribeTemplates } from './wechatSubscribe';
-import { syncTabBarHidden } from './tabbar';
 import { apiErrorCode, apiErrorPresentation, type ApiErrorKind, type ApiErrorPresentation } from './apiError';
 
 // 轻量全局状态：本命色主题 + 用户/智能体缓存 + 订阅。
@@ -70,13 +68,13 @@ function promptErrorAction(view: ApiErrorPresentation) {
   const title = view.kind === 'quota' ? '当前用量已用完'
     : view.kind === 'plan_expired' ? '当前方案已到期'
       : credits ? '当前算力不足' : '尚未开通方案';
-  void Taro.showModal({
+  void platform.confirm({
     title,
     content: view.message,
     confirmText: credits ? '查看算力' : '查看方案',
     cancelText: '暂不处理',
-  }).then((result) => {
-    if (result.confirm) void Taro.navigateTo({ url: credits ? '/packages/work/credits/index' : '/packages/work/plans/index' });
+  }).then((ok) => {
+    if (ok) platform.navigate(credits ? '/packages/work/credits/index' : '/packages/work/plans/index');
   }).finally(() => { entitlementPromptOpen = false; });
 }
 
@@ -99,10 +97,10 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
       const shouldPrompt = now - lastUnauthorizedPromptAt > 1500;
       if (shouldPrompt) {
         lastUnauthorizedPromptAt = now;
-        Taro.showToast({ title: '登录态已失效，请重新登录', icon: 'none' });
+        platform.toast('登录态已失效，请重新登录');
       }
       if (currentRoute() !== 'pages/sessions/index') {
-        setTimeout(() => Taro.reLaunch({ url: '/pages/sessions/index' }), 250);
+        setTimeout(() => platform.relaunch('/pages/sessions/index'), 250);
       }
     }
     return 'unauthorized';
@@ -111,7 +109,7 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
   const view = apiErrorPresentation(e, options.fallbackTitle);
   if (!options.silent) {
     if (view.action === 'plans' || view.action === 'credits') promptErrorAction(view);
-    else if (view.kind !== 'cancelled') Taro.showToast({ title: view.message, icon: 'none' });
+    else if (view.kind !== 'cancelled') platform.toast(view.message);
   }
   return view.kind;
 }
@@ -120,6 +118,21 @@ function reportApiError(e: unknown, options: { silent?: boolean; fallbackTitle?:
 // 即便页面 .catch 吞掉了错误，也会走到「清登录态 + 提示重新登录 + reLaunch 回登录入口」。
 // 游客请求的 401 留给动作级登录门处理，不提示“登录态失效”。
 setAuthLostHandler(() => reportApiError({ code: 'UNAUTHORIZED', hadToken: true }));
+
+/**
+ * 宿主钩子：store 里少数「只有某一端才有意义」的副作用，由宿主在启动时注入，默认不做事。
+ * 这样 store 不必静态 import 小程序专用模块（Taro 底栏、订阅消息），PC 包才能不含 Taro 运行时。
+ */
+export interface HostHooks {
+  /** 全屏弹层开合：移动端据此同步隐藏自定义底栏；PC 没有底栏，不注册。 */
+  onOverlayChange?: (hidden: boolean) => void;
+  /** 用户信息加载完成：移动端据此预取微信订阅模板；PC 无订阅消息，不注册。 */
+  onMeLoaded?: () => void;
+}
+let hostHooks: HostHooks = {};
+export function setHostHooks(hooks: HostHooks): void {
+  hostHooks = { ...hostHooks, ...hooks };
+}
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -132,10 +145,10 @@ function emit() {
 }
 
 function safeGet(k: string): string {
-  try { return Taro.getStorageSync(k) || ''; } catch { return ''; }
+  return platform.storage.get(k);
 }
 function safeSet(k: string, v: string) {
-  try { Taro.setStorageSync(k, v); } catch { /* noop */ }
+  platform.storage.set(k, v);
 }
 function currentRoute(): string {
   try {
@@ -220,7 +233,7 @@ export const store = {
     const next = overlayKeys.size > 0;
     if (state.overlay !== next) {
       state.overlay = next;
-      syncTabBarHidden(next);
+      hostHooks.onOverlayChange?.(next);
       emit();
     }
   },
@@ -272,7 +285,7 @@ export const store = {
     // requestSubscribeMessage 之前 → 手势上下文丢失 → 微信拒（can only be invoked by user TAP
     // gesture）→ 弹窗不出、不留记录、购买照常继续，用户永远拿不到 payment 配额、收不到到账通知。
     // 内部对 tplCache 已有幂等判断，已热则直接返回。
-    void prefetchWechatSubscribeTemplates();
+    hostHooks.onMeLoaded?.();
   },
   logout() {
     clearUserId();
@@ -284,7 +297,7 @@ export const store = {
     badgesFetchedAt = 0;
     overlayKeys.clear();
     state.overlay = false;
-    syncTabBarHidden(false);
+    hostHooks.onOverlayChange?.(false);
     safeSet(LS_ONBOARDED, '');
     emit();
   },

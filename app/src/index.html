@@ -25,12 +25,34 @@
       font-weight: 600; font-style: normal; font-display: swap;
     }
     html, body { margin: 0; padding: 0; background: #F4F2EC; }
-    /* 居中模拟手机视口（H5 review 用；小程序天然全屏） */
+    /* 桌面上打开移动版页面时居中成手机宽度。
+       主入口在桌面会被下面的脚本送去 /pc/，这里兜的是一期未桌面化的长尾子页
+       （settings、mingpan 等）以及 480–1024 的中间宽度。 */
     @media (min-width: 480px) {
       body { display: flex; justify-content: center; }
       #app { width: 390px; min-height: 100vh; box-shadow: 0 0 60px rgba(0,0,0,.12); }
     }
   </style>
+  <script>
+    /* 视口分流：桌面进 PC 工作台（独立应用，部署在 /pc/），窄屏留在这套移动版。
+       在 Taro 启动前跑，避免先渲染一帧手机版再跳走。
+       只拦五个 tab 主入口；长尾子页两边都不拦，桌面上以居中窄栏打开。 */
+    (function () {
+      if (window.innerWidth < 1024) return;
+      var TABS = {
+        '/pages/sessions/index': 'sessions',
+        '/pages/home/index': 'sand',
+        '/pages/studio/index': 'exec',
+        '/pages/thinktank/index': 'think',
+        '/pages/profile/index': 'lord'
+      };
+      var raw = location.hash.replace(/^#/, '') || '/';
+      var path = raw.split('?')[0];
+      if (path === '/' || path === '') path = '/pages/sessions/index';
+      var tab = TABS[path];
+      if (tab) location.replace('/pc/#/' + tab);
+    })();
+  </script>
 </head>
 <body>
   <div id="app"></div>

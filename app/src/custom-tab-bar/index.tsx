@@ -7,7 +7,7 @@ import { hideNativeTabBarOnly, onTabBarHiddenChange, readTabBarHidden, syncTabBa
 import './index.scss';
 
 // 悬浮胶囊式底栏 —— 五个平铺 tab，「问策」（参谋室，第一入口）居首，选中态为本命色柔底。
-// 取名与图标对齐军师帐下议事的氛围：问策（对话）· 军情（战局）· 军令（执行）· 锦囊（智库）· 老板（我的）。
+// 取名与图标对齐军师帐下议事的氛围：问策（对话）· 沙盘（战局）· 点兵（执行）· 锦囊（智库）· 主公（我的）。
 const TABS = [
   { path: '/pages/sessions/index', icon: 'counsel', text: '问策' },
   { path: '/pages/home/index', icon: 'sandtable', text: '沙盘' },

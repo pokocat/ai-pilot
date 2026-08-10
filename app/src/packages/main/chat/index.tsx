@@ -9,6 +9,7 @@ import SafeHeader from '../../../components/SafeHeader';
 import AdvisorAvatar from '../../../components/AdvisorAvatar';
 import { useStore } from '../../../hooks/useStore';
 import { store } from '../../../services/store';
+import type { UploadHandle } from '../../../services/platform';
 import { api, reportPdfUrl, type Agent, type Deliverable, type Section, type ChatReplyT, type MessageRef, type ProjectItem, type ReportItem, type KnowledgeItemT, type MemoryCandidate, type SessionDetail, type CreativeStatusResult } from '../../../services/api';
 import { STREAM_CHAT } from '../../../services/config';
 import { asReply, attachmentOnlyPrompt, replyToText } from '../../../services/chatReply';
@@ -419,7 +420,7 @@ export default function Chat() {
   // 多份上传后按「份」记账（不退化成整批一个进度条）：每份各有真进度、各能单独取消/重试。
   const [uploads, setUploads] = useState<Record<string, UploadEntry>>({});
   const uploadCancelledRef = useRef<Record<string, boolean>>({});
-  const uploadTasksRef = useRef<Record<string, Taro.UploadTask | null>>({});
+  const uploadTasksRef = useRef<Record<string, UploadHandle | null>>({});
   const uploadList = Object.values(uploads);
   const uploading = uploadList.some((u) => u.status === 'waiting' || u.status === 'uploading');
   // 刚传上来的资料还在后台拆读（解析异步），此刻发问军师未必读得到正文——引用签上标「拆读中」明示。

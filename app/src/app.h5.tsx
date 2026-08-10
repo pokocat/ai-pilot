@@ -1,11 +1,31 @@
 import { PropsWithChildren } from 'react';
 import { createPortal } from 'react-dom';
-import { useLaunch } from '@tarojs/taro';
+import Taro, { useLaunch } from '@tarojs/taro';
 import CustomTabBar from './custom-tab-bar';
-import { store } from './services/store';
+import { store, setHostHooks } from './services/store';
 import { setToken } from './services/token';
+import { setPlatform } from './services/platform';
+import { syncTabBarHidden } from './services/tabbar';
+import { prefetchWechatSubscribeTemplates } from './services/wechatSubscribe';
 import './app.scss';
 import './app.h5.scss';
+
+// services 层已与 Taro 解耦（见 services/platform.ts）。移动端在这里把提示与导航换回 Taro 实现，
+// 行为与解耦前逐帧一致；存储与请求沿用垫片的 Web 默认实现（Taro H5 底层本来就是 localStorage / XHR，
+// 且垫片照抄了 Taro 的 {"data": v} 存储格式，老用户登录态不受影响）。
+setPlatform({
+  toast: (title) => { Taro.showToast({ title, icon: 'none' }); },
+  confirm: (o) => Taro.showModal(o).then((r) => !!r.confirm),
+  navigate: (url) => { void Taro.navigateTo({ url }); },
+  relaunch: (url) => { void Taro.reLaunch({ url }); },
+});
+
+// store 里两处只有移动端才有意义的副作用（隐藏自定义底栏、预取微信订阅模板）由宿主注入。
+// store 不再静态 import 这两个 Taro 模块，PC 包因此不会被拖进 Taro 运行时。
+setHostHooks({
+  onOverlayChange: syncTabBarHidden,
+  onMeLoaded: () => { void prefetchWechatSubscribeTemplates(); },
+});
 
 // 附身登录（运营排查）：H5 链接可带 ?imp_token=<token>，以目标用户身份登入。
 // Taro H5 用 hash 路由，参数可能落在 search（?imp_token=…）或 hash 内（#/pages/…?imp_token=…），两处都兜。

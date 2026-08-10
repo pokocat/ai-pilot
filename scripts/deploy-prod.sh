@@ -7,6 +7,7 @@
 # 用法：
 #   bash scripts/deploy-prod.sh
 #   DEPLOY_H5=1 bash scripts/deploy-prod.sh
+#   DEPLOY_PC=1 bash scripts/deploy-prod.sh      # PC 工作台（/pc/）
 #   ACCEPT_DATA_LOSS=1 bash scripts/deploy-prod.sh   # schema 含新唯一约束/破坏性列变更时，让 db push 接受 prisma 的 data-loss 门；默认关（保护线上数据）
 #   DEPLOY_HOST=ecs-user@1.2.3.4 SSH_KEY=/path/key REMOTE_ROOT=/opt/junshi bash scripts/deploy-prod.sh
 set -euo pipefail
@@ -20,6 +21,7 @@ REMOTE_RUNTIME_USER="${REMOTE_RUNTIME_USER:-junshi}"
 PUBLIC_BASE="${PUBLIC_BASE:-http://8.136.36.175}"
 PUBLIC_DOMAIN="${PUBLIC_DOMAIN:-https://wxapi.aibuzz.cn}"
 DEPLOY_H5="${DEPLOY_H5:-0}"
+DEPLOY_PC="${DEPLOY_PC:-0}"
 TARO_APP_API="${TARO_APP_API:-https://wxapi.aibuzz.cn/api}"
 ACCEPT_DATA_LOSS="${ACCEPT_DATA_LOSS:-0}"   # 1=schema push 追加 --accept-data-loss（按需，默认关）
 
@@ -45,7 +47,7 @@ scp "${SSH_OPTS[@]}" "$ARCHIVE" "$DEPLOY_HOST:/tmp/"
 
 log "远端构建并发布 server + admin"
 ssh "${SSH_OPTS[@]}" "$DEPLOY_HOST" \
-  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' TARO_APP_API='$TARO_APP_API' ACCEPT_DATA_LOSS='$ACCEPT_DATA_LOSS' bash -se" <<'REMOTE'
+  "SHA='${SHA}' REMOTE_ROOT='$REMOTE_ROOT' REMOTE_RUNTIME_USER='$REMOTE_RUNTIME_USER' DEPLOY_H5='$DEPLOY_H5' DEPLOY_PC='$DEPLOY_PC' TARO_APP_API='$TARO_APP_API' ACCEPT_DATA_LOSS='$ACCEPT_DATA_LOSS' bash -se" <<'REMOTE'
 set -euo pipefail
 
 APP_ROOT="$REMOTE_ROOT"
@@ -196,6 +198,18 @@ if [ "$DEPLOY_H5" = "1" ]; then
   sudo cp -R dist-h5/. /var/www/junshi/h5/
 fi
 
+if [ "$DEPLOY_PC" = "1" ]; then
+  echo "== pc workbench build and publish =="
+  cd "$APP_ROOT/app"
+  npm ci
+  # PC 是独立的 Vite 应用（零 Taro），产物 dist-pc/，线上挂在 /pc/ 下。
+  # 字体不自带：@font-face 指向站点根 /fonts/（由 H5 构建落地），所以首次上线 PC 前必须先发过一次 H5。
+  TARO_APP_MODE=server TARO_APP_API="$TARO_APP_API" npm run build:pc:server
+  sudo mkdir -p /var/www/junshi/pc
+  sudo find /var/www/junshi/pc -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  sudo cp -R dist-pc/. /var/www/junshi/pc/
+fi
+
 printf '%s\n' "${SHA}" | sudo tee "$APP_ROOT/.deploy-version" >/dev/null
 
 echo "== nginx reload =="
@@ -303,6 +317,9 @@ echo
 curl -fsSI http://127.0.0.1/admin/ >/dev/null
 if [ "$DEPLOY_H5" = "1" ]; then
   curl -fsSI http://127.0.0.1/ >/dev/null
+fi
+if [ "$DEPLOY_PC" = "1" ]; then
+  curl -fsSI http://127.0.0.1/pc/ >/dev/null
 fi
 
 echo "DEPLOYED ${SHA}"
