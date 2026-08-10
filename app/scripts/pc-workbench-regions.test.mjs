@@ -78,3 +78,12 @@ test('PC 未登录只渲染不可关闭的硬登录门，个人工作区必须�
   assert.match(login, /if \(required \|\| !onClose\) return undefined/);
   assert.doesNotMatch(main, /store\.load(?:Agents|Me)\(\)/, '游客首屏不得预拉公开目录或个人接口');
 });
+
+test('PC 问策回形针走真实文档上传并把资料 refs 带进本轮生成', () => {
+  const chat = read('src/pc/regions/chat.tsx');
+  assert.match(chat, /type="file"/);
+  assert.match(chat, /api\.uploadKnowledge\(/);
+  assert.match(chat, /refs:\s*sendingRefs\.length\s*\?/);
+  assert.match(chat, /attachmentOnlyPrompt\(uploadRefs\)/);
+  assert.doesNotMatch(chat, /附件上传随锦囊一起落地/);
+});

@@ -11,8 +11,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../../hooks/useStore';
 import { store } from '../../services/store';
-import { api, type Agent, type Deliverable, type GenRequest, type Section, type SessionDetail } from '../../services/api';
-import { asReply } from '../../services/chatReply';
+import { api, type Agent, type Deliverable, type GenRequest, type MessageRef, type Section, type SessionDetail } from '../../services/api';
+import { asReply, attachmentOnlyPrompt } from '../../services/chatReply';
+import type { UploadHandle } from '../../services/platform';
 import {
   attachLiveGenView, detachLiveGenView, dropLiveGen, peekLiveGen, startLiveGen, stopLiveGen,
   type LiveGenView,
@@ -24,6 +25,9 @@ import { requireAuth } from '../authBridge';
 import type { PcState } from '../state';
 import { chatKeyOf, parseChatKey } from './sessions';
 import { portraitOf } from '../portraits';
+import {
+  CHAT_UPLOAD_EXT, chatUploadIssue, formatUploadBytes,
+} from '../chatUploadModel';
 
 /**
  * memText 存的是带 <b> 标记的富文本（运营后台里就那么录的），记忆条是纯文本节点，
@@ -67,6 +71,19 @@ interface Bubble {
   streaming?: boolean;
   /** 失败气泡可重发的原文；无则不给重试（审核类错误重试必再被拦）。 */
   retryText?: string;
+  refs?: MessageRef[];
+}
+
+type ChatUploadStatus = 'waiting' | 'uploading' | 'done' | 'failed';
+interface ChatUploadEntry {
+  uid: string;
+  file: File;
+  name: string;
+  size: number;
+  percent: number;
+  status: ChatUploadStatus;
+  ref?: MessageRef;
+  error?: string;
 }
 
 let uidSeq = 0;
@@ -91,7 +108,7 @@ function bubblesOf(messages: SessionDetail['messages']): Bubble[] {
     const uid = m.id || nextUid();
     if (m.role === 'user') {
       const c = (m.content || {}) as { text?: string };
-      return { uid, role: 'user' as const, text: String(c.text || '') };
+      return { uid, role: 'user' as const, text: String(c.text || ''), refs: m.refs };
     }
     if (m.role === 'report') {
       const d = (m.content || {}) as Deliverable;
@@ -180,6 +197,8 @@ export default function Main({ st }: { st: PcState }) {
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState('');
+  const [uploads, setUploads] = useState<Record<string, ChatUploadEntry>>({});
+  const [dragOver, setDragOver] = useState(false);
 
   const sessionIdRef = useRef('');
   const agentRef = useRef<ChatAgent | null>(null);
@@ -187,6 +206,9 @@ export default function Main({ st }: { st: PcState }) {
   const liveViewRef = useRef<LiveGenView | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const uploadTasksRef = useRef<Record<string, UploadHandle | null>>({});
+  const uploadCancelledRef = useRef<Record<string, boolean>>({});
   const stickRef = useRef(true);
   const tokenBufRef = useRef('');
   const flushTimerRef = useRef<ReturnType<typeof setTimeout>>();
@@ -196,6 +218,10 @@ export default function Main({ st }: { st: PcState }) {
 
   sessionIdRef.current = sessionId;
   agentRef.current = agent;
+
+  const uploadList = Object.values(uploads);
+  const uploadActive = uploadList.some((u) => u.status === 'waiting' || u.status === 'uploading');
+  const uploadRefs = uploadList.flatMap((u) => (u.status === 'done' && u.ref ? [u.ref] : []));
 
   // 沙盘/点兵带上下文切进问策时，只预填不代用户发送。消费后立即清掉跨区草稿，
   // 否则用户再切回来会重复覆盖自己刚写的内容。
@@ -381,6 +407,8 @@ export default function Main({ st }: { st: PcState }) {
     setBusy(false);
     setMsgs([]);
     setSessionId('');
+    setUploads({});
+    setDragOver(false);
     stickRef.current = true;
 
     newSessionRef.current = '';
@@ -438,6 +466,8 @@ export default function Main({ st }: { st: PcState }) {
       liveViewRef.current = null;
       liveKeyRef.current = '';
       clearTimeout(flushTimerRef.current);
+      Object.values(uploadTasksRef.current).forEach((task) => task?.abort());
+      uploadTasksRef.current = {};
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [st.chatKey, authed]);
@@ -460,10 +490,73 @@ export default function Main({ st }: { st: PcState }) {
     el.style.height = `${Math.min(180, Math.max(46, el.scrollHeight))}px`;
   }, []);
 
+  const patchUpload = useCallback((uid: string, patch: Partial<ChatUploadEntry>) => {
+    setUploads((cur) => (cur[uid] ? { ...cur, [uid]: { ...cur[uid], ...patch } } : cur));
+  }, []);
+
+  const runUpload = useCallback(async (entry: ChatUploadEntry): Promise<boolean> => {
+    uploadCancelledRef.current[entry.uid] = false;
+    patchUpload(entry.uid, { status: 'uploading', percent: 0, error: undefined });
+    try {
+      const result = await api.uploadKnowledge(entry.file, undefined, undefined, undefined, entry.name, {
+        onProgress: (percent) => patchUpload(entry.uid, { percent }),
+        onTask: (task) => { uploadTasksRef.current[entry.uid] = task; },
+      });
+      if (uploadCancelledRef.current[entry.uid]) return false;
+      if (!result.id) throw new Error('服务端没有返回资料编号，请重试');
+      patchUpload(entry.uid, {
+        status: 'done', percent: 100,
+        ref: { kind: 'knowledge', id: result.id, label: entry.name },
+      });
+      return true;
+    } catch (error) {
+      if (uploadCancelledRef.current[entry.uid]) return false;
+      const message = (error as Error)?.message || `「${entry.name}」没能上传`;
+      patchUpload(entry.uid, { status: 'failed', error: message });
+      s.handleApiError(error, { fallbackTitle: message });
+      return false;
+    } finally {
+      uploadTasksRef.current[entry.uid] = null;
+    }
+  }, [patchUpload, s]);
+
+  const queueFiles = useCallback(async (files: File[]) => {
+    if (!files.length || !requireAuth('upload')) return;
+    const currentCount = uploadList.filter((u) => u.status !== 'failed').length;
+    const issue = chatUploadIssue(files, currentCount);
+    if (issue) { st.say(issue); return; }
+    const batch = files.map((file, index): ChatUploadEntry => ({
+      uid: `pc-up-${Date.now()}-${index}`,
+      file, name: file.name || '待识别资料', size: file.size || 0,
+      percent: 0, status: 'waiting',
+    }));
+    setUploads((cur) => ({ ...cur, ...Object.fromEntries(batch.map((u) => [u.uid, u])) }));
+    let succeeded = 0;
+    for (const entry of batch) if (await runUpload(entry)) succeeded += 1;
+    if (succeeded) st.say(`${succeeded} 份资料已附上，可以直接发问`);
+  }, [runUpload, st, uploadList]);
+
+  const cancelUpload = useCallback((uid: string) => {
+    uploadCancelledRef.current[uid] = true;
+    uploadTasksRef.current[uid]?.abort();
+    uploadTasksRef.current[uid] = null;
+    setUploads((cur) => { const next = { ...cur }; delete next[uid]; return next; });
+  }, []);
+
+  const retryUpload = useCallback((uid: string) => {
+    const entry = uploads[uid];
+    if (entry) void runUpload(entry);
+  }, [runUpload, uploads]);
+
+  const pickFiles = useCallback(() => {
+    if (!requireAuth('upload') || uploadActive || busy) return;
+    fileRef.current?.click();
+  }, [busy, uploadActive]);
+
   const send = useCallback((raw: string) => {
-    const text = raw.trim();
+    const text = raw.trim() || attachmentOnlyPrompt(uploadRefs);
     const ag = agentRef.current;
-    if (!text || busy || !ag) return;
+    if (!text || busy || uploadActive || !ag) return;
     if (!requireAuth('chat')) return;
     const plan = s.me()?.planStatus;
     // 到期/未开通在前端就拦：后端的 403 是兜底，别让人写完一整段话才被打回来。
@@ -473,13 +566,18 @@ export default function Main({ st }: { st: PcState }) {
     setBusy(true);
     setDraft('');
     if (taRef.current) taRef.current.style.height = '46px';
-    setMsgs((m) => [...m, { uid: nextUid(), role: 'user', text }]);
+    const sendingRefs = uploadRefs;
+    setUploads((cur) => Object.fromEntries(Object.entries(cur).filter(([, u]) => u.status !== 'done')));
+    setMsgs((m) => [...m, { uid: nextUid(), role: 'user', text, refs: sendingRefs }]);
     stickRef.current = true;
 
     const sid = sessionIdRef.current;
     // 同一次点击一个稳定 clientRequestId：同轮的补发/兜底复用它，服务端据此幂等，不会重复落消息。
     const clientRequestId = `pc-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const body: GenRequest = { text, sessionId: sid || undefined, agentKey: ag.key, clientRequestId };
+    const body: GenRequest = {
+      text, sessionId: sid || undefined, agentKey: ag.key, clientRequestId,
+      refs: sendingRefs.length ? sendingRefs : undefined,
+    };
     const view = buildView(ag);
     liveViewRef.current = view;
     liveKeyRef.current = startLiveGen({
@@ -507,7 +605,7 @@ export default function Main({ st }: { st: PcState }) {
         }).catch(() => { /* 静默：入库失败不打扰对话，方案仍在消息里 */ });
       },
     });
-  }, [buildView, busy, s, st]);
+  }, [buildView, busy, s, st, uploadActive, uploadRefs]);
 
   const stop = useCallback(() => {
     if (!busy) return;
@@ -566,7 +664,10 @@ export default function Main({ st }: { st: PcState }) {
           {msgs.map((m) => (
             <div className={`pc-chat-msg${m.role === 'user' ? ' pc-u' : ' pc-a'}`} key={m.uid}>
               {m.role === 'user' ? (
-                <div className="pc-chat-bubble">{m.text}</div>
+                <div className="pc-chat-bubble">
+                  {m.text}
+                  {!!m.refs?.length && <div className="pc-chat-bubble-refs">{m.refs.map((ref) => <span key={`${m.uid}-${ref.kind}-${ref.id}`}>▣ {ref.label}</span>)}</div>}
+                </div>
               ) : (
                 <div className="pc-chat-agent">
                   <div className="pc-chat-who">
@@ -629,6 +730,18 @@ export default function Main({ st }: { st: PcState }) {
 
       <div className="pc-chat-composer">
         <div className="pc-chat-composer-in">
+          <input
+            ref={fileRef}
+            className="pc-chat-file-input"
+            type="file"
+            multiple
+            accept={CHAT_UPLOAD_EXT.map((ext) => `.${ext}`).join(',')}
+            onChange={(event) => {
+              const files = Array.from(event.target.files || []);
+              event.target.value = '';
+              void queueFiles(files);
+            }}
+          />
           <div className="pc-chat-dispatch">
             <span className="pc-chat-dispatch-l">派给</span>
             {dispatch.map((d) => (
@@ -643,7 +756,37 @@ export default function Main({ st }: { st: PcState }) {
             ))}
           </div>
 
-          <div className="pc-chat-box">
+          <div
+            className={`pc-chat-box${dragOver ? ' pc-drag' : ''}`}
+            onDragEnter={(event) => { event.preventDefault(); setDragOver(true); }}
+            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false); }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragOver(false);
+              if (busy || uploadActive) return;
+              void queueFiles(Array.from(event.dataTransfer.files || []));
+            }}
+          >
+            {!!uploadList.length && (
+              <div className="pc-chat-files">
+                {uploadList.map((upload) => (
+                  <div className={`pc-chat-file-row pc-${upload.status}`} key={upload.uid} title={upload.error || upload.name}>
+                    <span className="pc-chat-file-icon">文</span>
+                    <span className="pc-chat-file-main">
+                      <b>{upload.name}</b>
+                      <small>
+                        {formatUploadBytes(upload.size)} · {upload.status === 'waiting' ? '排队中' : upload.status === 'uploading' ? `上传中 ${upload.percent}%` : upload.status === 'done' ? '已附上，拆读中' : upload.error || '上传失败'}
+                      </small>
+                      {upload.status === 'uploading' && <i><em style={{ width: `${upload.percent}%` }} /></i>}
+                    </span>
+                    {upload.status === 'failed'
+                      ? <button type="button" onClick={() => retryUpload(upload.uid)}>重试</button>
+                      : <button type="button" onClick={() => cancelUpload(upload.uid)}>{upload.status === 'done' ? '移除' : '取消'}</button>}
+                  </div>
+                ))}
+              </div>
+            )}
             <textarea
               ref={taRef}
               className="pc-chat-ta"
@@ -662,17 +805,18 @@ export default function Main({ st }: { st: PcState }) {
               <button
                 type="button"
                 className="pc-chat-attach"
-                title="附加资料"
-                onClick={() => st.say('附件上传随锦囊一起落地，这一版先用文字描述')}
+                title="上传资料（支持拖放）"
+                disabled={busy || uploadActive}
+                onClick={pickFiles}
               >
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
                   <path d="M20 11.5l-7.6 7.6a4 4 0 0 1-5.7-5.7l7.6-7.6a2.6 2.6 0 0 1 3.7 3.7l-7.5 7.5a1.2 1.2 0 0 1-1.7-1.7l6.9-6.9" />
                 </svg>
               </button>
-              <span className="pc-chat-hint">{busy ? '军师正在推演…' : 'Enter 发送 · Shift+Enter 换行'}</span>
+              <span className="pc-chat-hint">{uploadActive ? '资料上传中…' : uploadRefs.length ? `已附 ${uploadRefs.length} 份 · 可直接发送` : busy ? '军师正在推演…' : 'Enter 发送 · Shift+Enter 换行'}</span>
               {busy
                 ? <button type="button" className="pc-chat-send pc-stop" onClick={stop}>停止</button>
-                : <button type="button" className="pc-chat-send" onClick={() => send(draft)}>发送</button>}
+                : <button type="button" className="pc-chat-send" disabled={uploadActive || (!draft.trim() && !uploadRefs.length)} onClick={() => send(draft)}>发送</button>}
             </div>
           </div>
         </div>

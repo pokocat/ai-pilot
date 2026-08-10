@@ -510,6 +510,7 @@
   background: var(--pc-surface); border-top: 1px solid var(--pc-line);
 }
 .pc-chat-composer-in { max-width: 760px; margin: 0 auto; }
+.pc-chat-file-input { display: none; }
 .pc-chat-dispatch {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 9px;
   button {
@@ -530,6 +531,31 @@
   background: var(--pc-surface-2); border: 1px solid var(--pc-line-2);
   transition: border-color .14s ease;
   &:focus-within { border-color: var(--pc-line-strong); }
+  &.pc-drag { border-color: var(--accent); background: var(--accent-soft); }
+}
+.pc-chat-files { display: flex; flex-direction: column; gap: 7px; }
+.pc-chat-file-row {
+  display: flex; align-items: center; gap: 9px; min-width: 0;
+  padding: 8px 9px; border: 1px solid var(--pc-line); border-radius: 12px;
+  background: var(--pc-surface); font-family: var(--pc-sans);
+  &.pc-failed { border-color: var(--pc-danger); }
+  > button {
+    flex: none; border: 0; background: transparent; color: var(--accent);
+    font-size: 11px; font-weight: 600; cursor: pointer;
+  }
+}
+.pc-chat-file-icon {
+  flex: none; width: 28px; height: 28px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent); font: 600 12px var(--pc-serif);
+}
+.pc-chat-file-main {
+  flex: 1; min-width: 0;
+  b, small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  b { color: var(--pc-ink-2); font-size: 11.5px; }
+  small { margin-top: 2px; color: var(--pc-ink-3); font-size: 10.5px; }
+  i { display: block; margin-top: 5px; height: 3px; border-radius: 99px; overflow: hidden; background: var(--pc-line-2); }
+  em { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .18s ease; }
 }
 .pc-chat-ta {
   width: 100%; min-height: 46px; max-height: 180px;
@@ -542,6 +568,7 @@
   background: transparent; cursor: pointer; color: var(--pc-ink-3);
   display: flex; align-items: center; justify-content: center;
   &:hover { background: var(--pc-line); }
+  &:disabled { cursor: default; opacity: .45; }
 }
 .pc-chat-hint {
   flex: 1; min-width: 0; font-family: var(--pc-sans); font-size: 10.5px; color: var(--pc-ink-3);
@@ -553,10 +580,19 @@
   font-size: 13.5px; font-weight: 600; cursor: pointer;
   transition: filter .12s ease;
   &:hover { filter: brightness(1.08); }
+  &:disabled { cursor: default; opacity: .45; filter: none; }
   /* 停止态：设计稿没有这一态（它只画了「发送」），按同尺寸做成次要按钮，不抢主色 */
   &.pc-stop {
     background: var(--pc-surface); color: var(--pc-ink-2);
     box-shadow: inset 0 0 0 1px var(--pc-line-strong);
     &:hover { filter: none; background: var(--pc-hover); }
+  }
+}
+.pc-chat-bubble-refs {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px;
+  span {
+    max-width: 260px; padding: 4px 8px; border-radius: 8px;
+    background: rgba(255,255,255,.17); color: inherit;
+    font: 10.5px var(--pc-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 }
