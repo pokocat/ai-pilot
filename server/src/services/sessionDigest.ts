@@ -34,6 +34,12 @@ const MAX_ITEM_CHARS = 160;       // 提示词要 ≤80 字，代码侧按 160 �
 /** 条目总量上限。到顶只停抽取、不丢既有条目——合并/压缩是后续工作，先守住上限别让注入无限膨胀。 */
 const MAX_ITEMS_TOTAL = 400;
 
+// 辅助模型的通用默认输出只有 700 token，不足以容纳「10 条摘要 + 来源 id」的 JSON，更不足以
+// 容纳滚动合并结果。生产预热实测会出现首批被截断、structured 修复轮仍被同一预算再次截断，
+// 最终返回 failed 且游标不前移。这里必须按产物上限显式给预算；合并档不超过报告既有的 8k 上限。
+export const SESSION_DIGEST_EXTRACT_MAX_TOKENS = 4_000;
+export const SESSION_DIGEST_COMPACT_MAX_TOKENS = 8_000;
+
 export interface SessionDigestState {
   items: SessionDigestItem[];
   version: number;
@@ -155,7 +161,12 @@ const defaultExtractor: DigestExtractor = async ({ existing, batch }) => {
   const user = `【既有摘要（已记录过，不要重复抽取；矛盾处新开一条）】\n${existingBlock(existing)}\n\n【本批消息（sourceMessageIds 只能用下面方括号里的 id）】\n${batchBlock(batch)}`;
   // maxChars 必须显式给大：structured 默认只截 4000 字符，20 条消息（每条上限 600 字）会被拦腰截断，
   // 后半批的消息 id 连出现都没出现过，抽出来的条目全会因「批外 id」被丢弃。
-  return structured(ExtractResultZ, { system: EXTRACT_SYS, user, maxChars: 20_000 });
+  return structured(ExtractResultZ, {
+    system: EXTRACT_SYS,
+    user,
+    maxChars: 20_000,
+    maxTokens: SESSION_DIGEST_EXTRACT_MAX_TOKENS,
+  });
 };
 
 let extractor: DigestExtractor = defaultExtractor;
@@ -178,6 +189,7 @@ const defaultCompactor: DigestCompactor = async ({ active, segment }) => structu
   system: COMPACT_SYS,
   user: `【当前活跃态】\n${compactBlock(active) || '（空）'}\n\n【本段增量】\n${compactBlock(segment) || '（空）'}`,
   maxChars: 40_000,
+  maxTokens: SESSION_DIGEST_COMPACT_MAX_TOKENS,
 });
 
 let compactor: DigestCompactor = defaultCompactor;

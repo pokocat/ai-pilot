@@ -18,6 +18,8 @@ import {
   formatDigestBlock,
   __setDigestExtractorForTest,
   __setDigestCompactorForTest,
+  SESSION_DIGEST_EXTRACT_MAX_TOKENS,
+  SESSION_DIGEST_COMPACT_MAX_TOKENS,
   type DigestBatchMessage,
   type SessionDigestItem,
   type SessionDigestState,
@@ -42,6 +44,11 @@ beforeEach(async () => {
 
 const KEY_FACT_TEXT = '注册资本 300 万，主营宠物烘焙，直营门店 3 家';
 const BASE_AT = Date.UTC(2026, 6, 1, 2, 0, 0); // 2026-07-01 10:00 上海
+
+test('摘要抽取与滚动合并显式覆盖辅助模型 700 token 默认值', () => {
+  assert.equal(SESSION_DIGEST_EXTRACT_MAX_TOKENS, 4_000);
+  assert.equal(SESSION_DIGEST_COMPACT_MAX_TOKENS, 8_000);
+});
 
 interface Fixture { tenantId: string; userId: string; sessionId: string; ids: string[] }
 
