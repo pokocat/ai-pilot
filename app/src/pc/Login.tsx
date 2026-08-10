@@ -10,11 +10,16 @@ import './Login.scss';
 // 不做微信扫码：那需要开放平台「网站应用」资质，审核周期不可控。手机号登录服务端早就通了，
 // 不该为一个还没有的资质卡住整个 PC 端。
 //
-// 游客可浏览：登录门是**动作级**的（发问、上传、保存时才弹），不在进站时拦人。
+// PC 是个人工作台，未登录时该组件以 required 形态独占首屏，不允许遮罩 / Esc / 关闭按钮退出。
+// onClose 只保留给可能复用的非强制弹层形态；移动 H5 与小程序登录策略不受这里影响。
 
 const PHONE_RE = /^1[3-9]\d{9}$/;
 
-export default function Login({ reason, onClose }: { reason?: AuthReason; onClose: () => void }) {
+export default function Login({ reason, required = false, onClose }: {
+  reason?: AuthReason;
+  required?: boolean;
+  onClose?: () => void;
+}) {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [agreed, setAgreed] = useState(false);
@@ -30,10 +35,11 @@ export default function Login({ reason, onClose }: { reason?: AuthReason; onClos
   useEffect(() => () => clearInterval(timer.current), []);
 
   useEffect(() => {
+    if (required || !onClose) return undefined;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, required]);
 
   const startCooldown = (sec: number) => {
     setCooldown(sec);
@@ -73,7 +79,7 @@ export default function Login({ reason, onClose }: { reason?: AuthReason; onClos
     try {
       const res = await api.login(phone, undefined, code);
       await store.afterLogin(res.token, res.onboarded, res.user.benmingColor);
-      onClose();
+      onClose?.();
     } catch (e) {
       setError((e as Error)?.message || '登录失败，请重试');
     } finally {
@@ -82,13 +88,13 @@ export default function Login({ reason, onClose }: { reason?: AuthReason; onClos
   };
 
   return (
-    <div className="pc-login-mask" onClick={onClose}>
-      <div className="pc-login" onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="pc-login-x" onClick={onClose} title="关闭（Esc）">✕</button>
+    <div className={`pc-login-mask${required ? ' pc-login-required' : ''}`} onClick={() => { if (!required) onClose?.(); }}>
+      <div className="pc-login" role="dialog" aria-modal="true" aria-label="登录军师 PC 工作台" onClick={(e) => e.stopPropagation()}>
+        {!required && onClose && <button type="button" className="pc-login-x" onClick={onClose} title="关闭（Esc）">✕</button>}
 
         <div className="pc-login-seal">军</div>
-        <div className="pc-login-title">请军师入帐</div>
-        <div className="pc-login-sub">{authReasonText(reason)}</div>
+        <div className="pc-login-title">{required ? '登录军师工作台' : '请军师入帐'}</div>
+        <div className="pc-login-sub">{required ? 'PC 版仅向已登录用户开放。登录后才能查看你的对话、案卷、军令与权益。' : authReasonText(reason)}</div>
 
         <div className="pc-login-field">
           <input

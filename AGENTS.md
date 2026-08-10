@@ -238,6 +238,17 @@ H5 `app.tsx` 与原生 `app.js` 都在启动时水合公开军师与本地身份
 - `loadAgents()` 必须保留 `DEFAULT_AGENTS` 的 `billing/price/owned` 兜底字段；线上旧 `/agents` 若缺权益字段，不能覆盖掉前台解锁门禁，否则 `💎xN` 专项能力会被误判为可直接进入。
 - `data/colors.ts`：6 套本命色主题变量（`--accent` 系列）。
 
+### 7.5 PC 工作台（`/pc/`，2026-08-10）
+- PC 是 `app/src/pc/` 下独立的 Vite + React DOM 应用，产物 `app/dist-pc/`、线上路径 `/pc/`；移动 H5 仍走 Taro 与 `dist-h5/`。两端共用 `services/`、`data/` 与 `shared/contracts.d.ts`，宿主差异只经 `services/platform.ts` 注入。PC 源码不得直接引用 Taro，也不得引用仍绑定 Taro 的 `pay/tabbar/wechatSubscribe/creative/canvasCard/reportShareCard/posterPending/nav`；`app/scripts/pc-bundle.test.mjs` 是强制守卫。
+- **PC 独立硬登录门（不改变移动端游客策略）**：`pc/App.tsx` 在无 token 时只渲染 `Login required`，遮罩、Esc 与关闭按钮均不可退出，五区外壳和公开目录都不挂载、不预拉；历史 token 必须先经 `store.loadMe()` 验真，验证完成前只显示核验屏，401 立即清态退回登录，网络失败停在可重试页，绝不能短暂闪出个人工作区。登录成功后才加载军师目录并进入原 hash 对应区；`requireAuth` 继续作为运行中掉线的第二道防线。小程序与移动 H5 仍按 §6 的游客浏览口径执行。
+- 三栏外壳固定为导航轨 / 列表栏 / 主工作区；五区注册表在 `pc/regions/index.tsx`。`App.tsx` 只挂一层 `Stage`，区组件只能返回页面体，禁止再次套 `Stage`（否则滚动与抽屉重复）；`Stage` 在 `tab/view` 切换时归零主区滚动。`useBar/useGroups` 可含 hook，必须由按 `st.tab` keyed 的 `RegionBar/RegionList` 调用，不能挪回 App 主函数。
+- 已桌面化五区：问策（线程+对话）、沙盘（经营战局/时运策/命盘）、点兵（今日/周计划/复盘）、锦囊（案卷资产/数据/能力/方案）、主公（总览/方案权益/算力账本）。桌面稿未覆盖的子视图沿用「深色主判断 + 纸面证据卡 + 明确行动落点」语言；头像/创作军师立绘统一复用 `pc/portraits.ts`，字体复用站点根 `/fonts/junshi-serif-*`，不引入设计项目素材。
+- 沙盘真相源是 `/me.understanding`（`mainContradiction/summary/battleForces/evidenceCount/nextQuestions`）+ `services/dossier.refreshDossier()`；决策走 `api.decisions/verifyDecision`，时运命盘走 `api.myChart` 且先过 `features.fortune`，认可判断走 `api.battleCommit`。不得把 `journey`、周粒度 `bizMetricSeries` 或生态 `prescriptions` 冒充日战局数据。
+- 点兵真相源是 `services/dossier.ts` 的案卷军令、目标、日回填与复盘接口，经营周报另走 `bizMetric*`；表格支持新增、勾选、批量完成/删除、战果回填与 CSV 导出。现有契约没有军令改期接口，「顺延到明天」必须继续显示「施工中」且不改数据，直到先补 SSOT + 后端接口再启用。
+- 主公总览读取 `store.me`、`library/projects/reports/progress/strategicProfile/workbench`；方案子视图只按 `planOptions.canPurchase/action/relation` 渲染，算力账本读 `myCredits`。涉及微信支付/签约仍在新标签交给既有移动支付页，PC 不复制支付状态机、不 import `pay.ts`。
+- 跨区发问用 `PcState.chatDraft` 内存承接，只预填、由用户确认发送；草稿不得写 URL 或 localStorage。移动长尾路由在 `pc/main.tsx` 映射，未桌面化的页面新标签打开移动 H5。
+- 本地：`cd app && npm run dev:pc -- --host 127.0.0.1`（默认 `http://127.0.0.1:5175/pc/`）；四道门为 `npm run typecheck && npm test && npm run build:pc && npm run build:h5`。PC 区域数据源/单层 Stage/施工中约束另由 `scripts/pc-workbench-regions.test.mjs` 锁定。
+
 ---
 
 ## 8. 后端（server）
@@ -630,7 +641,7 @@ cd admin && npm install && npm run dev   # 运营后台
 
 ### 构建校验基线（每次大改后应保持全绿）
 - `server`：`npx tsc -p tsconfig.json --noEmit` → 0
-- `app`：`npm test` → 原生路由/非受控 textarea/Lucide/产物隔离 + H5 typecheck 全绿；`npm run build:weapp:server` → 原生 38 路由四件套、JS 语法、无 Taro 引用、生产元数据校验通过；`npm run build:h5` → Taro H5 构建成功
+- `app`：`npm test` → 原生路由/非受控 textarea/Lucide/产物隔离 + H5 typecheck + PC 零 Taro/区域真源守卫全绿；`npm run build:weapp:server` → 原生 38 路由四件套、JS 语法、无 Taro 引用、生产元数据校验通过；`npm run build:h5` → Taro H5 构建成功；改 PC 另跑 `npm run build:pc`
 - `admin`：`npx tsc -b && npx vite build` → 0 + built
 
 **app / admin 纯函数单测（2026-07-21 起，`node --import tsx --test`，与 server 同一套工具链，无需额外起服务）**：
@@ -734,6 +745,7 @@ mock 可随时预览；**正式上传/审核**还需：
 
 ## 13. 已知限制 / TODO
 
+- **PC 工作台外部与接口边界（2026-08-10）**：沙盘/点兵/主公主区已落地并完成 mock 下 1440×900、1024×768 浏览器验收；仍有三条明确边界：① `CasefileOrder` 现无改期接口，点兵「顺延到明天」只能标「施工中」且不改数据，后续必须先扩 `shared/contracts.d.ts` 与后端再启用；② PC 不复制微信支付/自动续费状态机，方案页到付款步骤会开既有移动 H5，再由其按环境引导微信小程序；③ 真实 server 模式尚需用有案卷、三势、命盘、军令、账本和谶语的账号逐项回归，mock 只证明前端状态机与持久化形状。里程碑的 Notion「军师 · 工程变更日志」本会话没有可用 Notion 连接器，待连接恢复后同步本文与 CHANGELOG 的产品可读结论，完成后删除本句。
 - **真人教练感仍需真实模型发布闸门（2026-08-10）**：自动化已锁定上下文继承、事实可信度、路由和通用 `CHAT_STYLE_GUIDE/COACH_QUALITY_RUBRIC`，但 mock 与静态断言不能证明用户主观上“更聪明、更懂我、更有人情味”。放量前必须用生产同款 provider + 当前已发布 `AgentVersion` + 至少 20 组脱敏真实上下文做新旧盲测和预发真机走查；准确使用客户事实不得退步，真人教练感综合偏好率需 ≥60%，事实编造率不得上升。未过时只能继续调优或停止放量，不能把构建/单测全绿当作体验验收。出现跨日质量反馈时先按 `LlmTrace.versionId/provider/model/endpointId/createdAt` 与部署版本核对真实运行身份，再比较上下文 trace；不能只看仓库 seed prompt。另需在 1,000+ 消息真实形态会话上验证 WXML 滚动、阅读位置保持和分页接缝；当前自动化只证明 205 条同毫秒 API 分页无重无漏及 1,000 条摘要持续更新。
 - **可审计客户事实首版词典边界（2026-08-10）**：`UserFact` 已覆盖用户明确“帮我记住”的任意文本，以及门店数、经营年限、团队人数、年营收、当前预算、创始人持股六类可稳定归一的高影响事实；用户原话直接 `asserted`，资料抽取/军师新推断只进 `pending` 并在下一轮显示独立确认卡。其它开放域事实仍留在语义 Memory，不会冒充可替代硬事实。扩词典时必须同时定义稳定 `factKey`、否定/假设反例与替代链测试；禁止用向量相似度猜 key。旧 Memory 按保守迁移决策不批量升级，只有用户重新陈述、明确确认或手动编辑后才进入 `UserFact`。
 - **问策入口改版（终态 WP3' 已落地，2026-08-08）未做的**：规格 `docs/[FABLE5]WENCE_ENTRY_INTERACTION_SPEC.md`（其中「分两步走 / A-B 过渡」的节奏描述已作废，端上直接做的终态）。

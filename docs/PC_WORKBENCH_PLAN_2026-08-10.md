@@ -4,7 +4,7 @@
 > 主干（main）同期有「连续会话与渐进交付」在推进，两条线互不落地。
 > 该 worktree 的 `h5-preview` 预览端口改为 **5199**（主干占 5173），移动 H5 在 `/`、PC 在 `/pc/`。
 
-设计稿：claude.ai/design 项目 `db1411d1-ff9f-4bc8-8320-6fbb4b96c23f` 的 `军师 PC.dc.html`（1440 基准，三栏工作台）。
+设计稿：claude.ai/design 项目 `db1411d1-ff9f-4bc8-8320-6fbb4b96c23f` 的 `军师 PC.dc.html`（1440 基准，三栏工作台）；本轮另有用户上传的 `/Users/donis/Downloads/军师小程序H5转PC版适配-handoff.zip`。
 本文档记录五项决策定案、架构方案、设计元素 → 现有 API 映射，以及分期与阻塞项。
 
 ## 一、决策定案（用户 2026-08-10 拍板）
@@ -15,7 +15,7 @@
 | 2 | 一期范围 | 按三档：五大区+报告/资料详情进 Shell；settings 等长尾页居中窄栏兜底；poster/market/community/gift/onboarding 一期不给 PC 入口。**PC 定位：上传文件、整理资料、出报告为主场景；高频日常在小程序。** |
 | 3 | 设计未覆盖处 | 后端不动。设计稿有而后端无数据的块，用现有 API 近似渲染或隐藏；未画设计的子页面按设计稿的桌面设计语言实现（分期做）。 |
 | 4 | 命名 | 三端统一改名：军情→**沙盘**、军令→**点兵**、老板→**主公**（问策、锦囊不变）。小程序随下版发布。 |
-| 5 | 登录/支付 | PC 登录用**手机号 + 短信验证码**（服务端已有，无阻塞；不做微信扫码，那需要开放平台「网站应用」资质，审核周期不可控）。**支付一期关闭**：PC 只展示权益，购买引导去微信小程序完成。 |
+| 5 | 登录/支付 | PC 登录用**手机号 + 短信验证码**（服务端已有，无阻塞；不做微信扫码，那需要开放平台「网站应用」资质，审核周期不可控）。**PC 必须登录才能使用**：未登录不挂载五区或公开目录，存量 token 先经 `/me` 验真；移动 H5 / 小程序游客策略不变。PC 展示真实方案关系，但不直接接微信支付：购买统一打开既有移动 H5 / 微信小程序安全链路。 |
 
 ## 二、架构
 
@@ -42,7 +42,7 @@
 - **视口分流**：移动 `index.html` 在 Taro 启动前判断 `innerWidth ≥ 1024` 且落在五个 tab 主入口 → `location.replace('/pc/#/<tab>')`；PC `index.html` 反向：窄屏 → 回移动版对应 tab。长尾子页两边都不拦，桌面上以 390px 居中窄栏打开。
 - **样式**：Vite 直接编译，px 就是 px（不经 Taro 的 px→rem 管线）。类名统一 `pc-` 前缀；颜色全部走 `index.scss` 顶部的 `--pc-*` 变量，`--accent*` 由 App 按本命色写在根节点行内。
 - **主题**：6 套本命色对齐现有 `setColor`；列表宽度（280–460，拖拽把手）与导航文字开关落 localStorage。
-- **登录**：手机号 + 验证码（`src/pc/Login.tsx`）。游客可浏览，**动作级**登录门 —— 各区调 `requireAuth('chat')`（`src/pc/authBridge.ts`），未登录才弹。
+- **登录**：手机号 + 验证码（`src/pc/Login.tsx`）。PC 使用不可关闭的首屏硬登录门：无 token 只渲染登录，存量 token 先请求 `/me` 验真，未通过时不挂载 Shell；`requireAuth` 仅保留为运行中掉线的第二道防线。
 - **交互增强**：右键菜单、Esc 就近关闭、Enter 发送 / Shift+Enter 换行、拖拽上传（锦囊）、hover 与自定义滚动条按设计稿实现。
 
 ## 三、设计元素 → API 映射
@@ -61,24 +61,24 @@
 | 设计元素 | 数据源 |
 |---|---|
 | 今日献策 | `api.todaySaying` |
-| 主要矛盾卡（判断+依据计数） | `api.dailyBattleReport` / `api.journey` |
-| 三势卡+全解抽屉 | `journey.forces` + `api.refreshForces` |
-| 判断依据/待补证据 | `journey`/`dossier` 内证据字段（以实际字段为准，缺则隐藏待补区） |
-| 指标格 | `api.progress` / `myCredits` |
+| 主要矛盾卡（判断+依据计数） | `store.me().understanding.mainContradiction/summary/evidenceCount`，战略案卷 `judgment` 只作兜底 |
+| 三势卡+全解抽屉 | `store.me().understanding.battleForces` + `api.refreshForces`，抽屉按三势真值前端合参 |
+| 判断依据/待补证据 | `understanding.evidenceCount` + `understanding.nextQuestions` |
+| 指标格 | `understanding.maturity` + `nextQuestions.length` + `dossier.risks.length` |
 | 决策日志·待验证 | `api.decisions` + `verifyDecision` |
-| 经营数据（设计为日粒度） | `api.bizMetricSeries`（**周粒度近似**，文案改「本周」） |
-| 现在不能做 | `prescriptions` 中禁做类，缺则隐藏 |
+| 经营数据（日粒度） | 战略案卷 `dossier.backfill[today()]`，与点兵今日回填同源 |
+| 现在不能做 | 战略案卷 `dossier.risks`；为空就隐藏，不造风险文案 |
 | CTA 升帐点兵 | `api.battleCommit` |
-| 子分区：时运策/命盘分析 | `api.myChart` / `myChartReport`（monthlyOutlook） |
+| 子分区：时运策/命盘分析 | `api.myChart` 的 `monthlyOutlook/dayMaster/pattern/ziwei`；先服从 `/me.features.fortune`，无权限或无命盘用明确空态 |
 
 ### 点兵（原军令/studio）
 | 设计元素 | 数据源 |
 |---|---|
-| 今日战役/献策三步/今日主令/提醒节奏四卡 | `dailyBattleReport` + `prescriptions` + `api.reminders` |
-| 军令表（勾选批量、右键、回填） | `prescriptions` + `prescriptionAction`；**负责人/预计工时列无字段 → 一期省列**；「自己补一条」走现有创建入口，无则隐藏输入框 |
-| 周计划/复盘视图 | `api.reviews` 有则接，无按钮态近似；复盘前检查用 `reviews` 待办近似 |
-| 经营数据回填 | `bizMetricTemplate` + `saveBizMetrics`（周粒度） |
-| 内容出品卡 | `services/creative` + `api.library`（gallery 数据） |
+| 今日战役/献策三步/今日主令/提醒节奏四卡 | `refreshDossier()` + `api.reminders`；主令和完成度均从今日案卷军令实时派生 |
+| 军令表（勾选批量、右键、回填） | `ordersOf/toggleOrder/addOrder/removeOrder/setOrderResult`；展示契约已有 `ownerName/dueAt/etaMinutes/steps/metrics`，缺字段显示 `—`；批量完成 / 删除写真案卷，顺延因无服务端动作明确标「施工中」 |
+| 周计划/复盘视图 | `recentOrders` + `api.reviews/decisions/reminders`；`startReview` 落复盘记录，决策验证走 `verifyDecision` |
+| 经营数据回填 | 今日 `saveBackfill`；周指标 `bizMetricTemplate` + `api.saveBizMetrics`，历史趋势读 `api.bizMetricSeries` |
+| 内容出品卡 | `store.agents` 中 `type='creative'` 的已上架军师；按权益进入问策或成果入口，不引用 Taro-only `services/creative` |
 
 ### 锦囊（thinktank，PC 主场景）
 | 设计元素 | 数据源 |
@@ -94,20 +94,21 @@
 ### 主公（原老板/profile）
 | 设计元素 | 数据源 |
 |---|---|
-| 会员卡+权益三格 | `store.me` + `myCredits` + `plans` |
+| 会员卡+权益三格 | `store.me` + `myCredits`；方案入口另读 `planOptions/plans` |
 | 年度谶语+点谶记录 | `strategicProfile` + `prophecies` + `verifyProphecy` |
-| 统计三格 | `progress`（rank/streak/decisionAccuracy） |
-| 档案/资产/系统菜单组 | 现有 profile 页菜单数据；目标阶梯无 API → 一期隐藏 |
+| 统计与段位 | `api.library/projects/reports` 计数 + `api.progress`（rank/streak/decisionAccuracy）+ `api.workbench` |
+| 档案/资产/系统菜单组 | 复用现有 profile 长尾路由；PC 内可承接的方案、算力、锦囊、问策直接在工作台切区，其余进入既有页面 |
+| 方案与算力子视图 | 登录后读 `api.planOptions/myCredits`；PC 不提供游客公开方案视图。不可购买 / 降档关系严格禁用，支付交给移动链路 |
 
 ### 通用件
 详情抽屉（432px）、右键菜单、Toast、顶栏动作 —— 纯前端；抽屉内容按上表数据源。
 
 ## 四、分期
 
-1. **Phase 0**：宿主页+分流+样式管线+三栏骨架+主题（任务 #2）
-2. **Phase 1**：问策双栏（#3）→ 锦囊（#4，主场景）→ 沙盘/点兵/主公（#5）
-3. **Phase 2**：命名三端统一（#6）；登录/支付服务端（#7）
-4. **Phase 3**：长尾子页按设计语言逐步桌面化；键盘快捷键打磨
+1. **Phase 0（已完成）**：宿主页 + 分流 + 样式管线 + 三栏骨架 + 主题。
+2. **Phase 1（已完成）**：问策双栏 → 锦囊 → 沙盘 / 点兵 / 主公五大主工作区。
+3. **Phase 2（已完成 PC 范围）**：PC 命名、手机号登录、方案关系与移动支付交接；移动端跟随自身发布节奏。
+4. **Phase 3（持续演进）**：问策高级消息形态、真后端专项回归、长尾子页桌面化与键盘快捷键打磨。
 
 ## 五、部署
 
@@ -127,9 +128,9 @@ DEPLOY_H5=1 DEPLOY_PC=1 bash scripts/deploy-prod.sh
 
 ## 六、遗留 / 待办
 
-- **支付**：一期关闭。`services/pay.ts` 的 `payEnvSupported()` 在非小程序环境本就返回 false 并提示「请在微信小程序内完成支付」，PC 侧只做静态引导文案 + 小程序入口说明，**不得 import pay.ts**（会把 Taro 带回来）。
+- **支付**：PC 不直接创建支付单。方案页读取真实 relation/action/canPurchase，只有可执行关系才开放按钮，再打开既有移动 H5 / 微信小程序购买页。PC **不得 import `services/pay.ts`**（会把 Taro 带回来）。
 - **微信扫码登录**：后置。需微信开放平台「网站应用」资质（企业认证 + 审核），想做时再启动。
 - **移动 H5 的 Taro**：本次未动。等 PC 稳定后若决定下线移动 web（移动端流量走小程序），删掉 `app/src` 的 Taro 页面即可让 Taro 彻底退出仓库——垫片已经把业务层准备好了。
-- 沙盘「判断依据/待补证据」「复盘检查」等字段以后端实际返回为准，开发中逐块核对，无则隐藏。
+- **点兵顺延**：当前案卷接口没有“延期原因 / 新日期”动作，按钮明确显示「施工中」；在契约补齐前不得本地改日期假装成功。
 - **问策一期未做**（有契约、设计稿未画或留到后面）：`ChatReply.asks` 反问选项、`factConfirmation` 事实确认卡、`SessionMessage.chips`、`refs` 引用角标、`messagePage` 向上翻页（现在只显示服务端返回的最近一页）、附件上传（随锦囊一起做）。`role='report'` 消息降级成「标题 + 分段」并入军师气泡，未复刻报告卡——表格/甘特/评分盘类 typed section 会退化成文字。
 - **问策未在真后端验过的路径**：报告流（`begin`/`section`/`footer`）、断流对账、轮询兜底、报告自动入库。这些按 liveGen 契约实现，但 mock 无流式分支，只用本地 SSE 桩覆盖了 `generation/meta/token/chat/done` 五种事件。接真后端时要专门回归这几条。

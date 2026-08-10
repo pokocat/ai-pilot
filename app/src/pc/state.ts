@@ -12,7 +12,7 @@ export type PcTab = 'sessions' | 'sand' | 'exec' | 'think' | 'lord';
 export type SandView = 'business' | 'timing' | 'destiny';
 export type ExecView = 'today' | 'week' | 'review';
 export type ThinkView = 'assets' | 'data' | 'modules' | 'reports';
-export type LordView = 'overview';
+export type LordView = 'overview' | 'plans' | 'credits';
 
 /** 抽屉内容：由各区自行构造，Shell 只负责壳与开合。 */
 export interface DrawerBlock {
@@ -99,6 +99,9 @@ export function usePcState() {
   const [view, setViewRaw] = useState<string>(q0.get('view') || DEFAULT_VIEW[tab0]);
   // 当前选中的会话/军师 key（问策区）。空 = 用第一条。
   const [chatKey, setChatKeyRaw] = useState<string>(q0.get('k') || '');
+  // 跨区动作（沙盘补问、点兵复盘）把上下文带进问策输入框。只活在当前内存会话，
+  // 不写地址栏，也不落 localStorage，避免把经营事实暴露在可分享 URL 里。
+  const [chatDraft, setChatDraft] = useState('');
 
   const [drawer, setDrawer] = useState<DrawerData | null>(null);
   const [ctx, setCtx] = useState<CtxData | null>(null);
@@ -164,7 +167,7 @@ export function usePcState() {
   const closeCtx = useCallback(() => setCtx(null), []);
 
   return {
-    tab, view, chatKey,
+    tab, view, chatKey, chatDraft, setChatDraft,
     go, setView, setChatKey,
     drawer, setDrawer, closeDrawer: () => setDrawer(null),
     ctx, openCtx, closeCtx,

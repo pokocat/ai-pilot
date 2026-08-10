@@ -1,5 +1,6 @@
 // 主工作区的通用外壳件：顶栏、详情抽屉、右键菜单、Toast、空态。
 
+import { useEffect, useRef } from 'react';
 import type { CtxData, DrawerData, PcState } from './state';
 
 export interface BarAction {
@@ -116,9 +117,13 @@ export function Empty({ glyph, title, sub }: { glyph: string; title: string; sub
 
 /** 主工作区右侧抽屉 + 内容体的组合容器。 */
 export function Stage({ st, children }: { st: PcState; children: React.ReactNode }) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // 区/子视图都是工作台内切换，不触发浏览器导航；手动归零才能避免从长页面切走后
+  // 新页面从半截开始。抽屉开合不在依赖里，不会打断用户阅读位置。
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [st.tab, st.view]);
   return (
     <div className="pc-stage">
-      <div className="pc-stage-body">{children}</div>
+      <div className="pc-stage-body" ref={bodyRef}>{children}</div>
       {st.drawer && <Drawer data={st.drawer} onClose={st.closeDrawer} />}
     </div>
   );

@@ -48,20 +48,34 @@ export default function App() {
   const st = usePcState();
   const s = useStore();
   const color = s.color();
+  const authed = s.isAuthed();
+  const me = s.me();
   const region = REGIONS[st.tab];
 
   // 业务层（services/store 的错误提示等）经 platform.toast 投递到这里的 Toast。
   useEffect(() => { bindToast(st.say); }, [st.say]);
 
-  // 动作级登录门：各区调 requireAuth('chat') 等，最终落到这里开弹层。
-  // 游客可以自由浏览，只有要动数据时才拦。
+  // PC 是个人工作台，不提供游客态：没有 token 时只渲染不可关闭的登录屏；有历史 token 时
+  // 先用 /me 验真，验证完成前也不挂载任何区组件，避免失效 token 短暂闪出个人工作区。
+  // requireAuth 仍保留为登录态在动作瞬间失效时的第二道防线。
   const [loginReason, setLoginReason] = useState<AuthReason | null>(null);
-  const [loginOpen, setLoginOpen] = useState(false);
+  const [authChecking, setAuthChecking] = useState(authed && !me);
   const openLogin = useCallback((reason?: AuthReason) => {
     setLoginReason(reason ?? null);
-    setLoginOpen(true);
   }, []);
   useEffect(() => { bindLoginGate(openLogin); }, [openLogin]);
+
+  const verifyAuth = useCallback(async () => {
+    if (!s.isAuthed() || s.me()) return;
+    setAuthChecking(true);
+    try {
+      await s.loadMe();
+      if (s.isAuthed() && s.me()) await s.loadAgents();
+    } finally {
+      setAuthChecking(false);
+    }
+  }, [s]);
+  useEffect(() => { void verifyAuth(); }, [verifyAuth, authed, me]);
 
   // Esc：先关右键菜单，再关抽屉（就近关闭，符合桌面直觉）。
   useEffect(() => {
@@ -75,11 +89,42 @@ export default function App() {
   }, [st]);
 
   const Main = region.Main;
+  const shellStyle = { ...color.vars, '--pc-list-w': `${st.listW}px` } as React.CSSProperties;
+
+  if (!authed) {
+    return (
+      <div className="pc-shell pc-auth-shell" style={shellStyle}>
+        <Login required reason={loginReason ?? undefined} />
+      </div>
+    );
+  }
+
+  if (!me) {
+    return (
+      <div className="pc-shell pc-auth-shell" style={shellStyle}>
+        <div className="pc-login-mask pc-login-required">
+          <div className="pc-login pc-login-check" role="status">
+            <div className="pc-login-seal">军</div>
+            <div className="pc-login-title">{authChecking ? '正在核验登录态' : '暂时无法进入工作台'}</div>
+            <div className="pc-login-sub">
+              {authChecking ? '正在连接军师服务，确认账户与个人数据。' : '账户尚未通过线上校验，请检查网络后重试。'}
+            </div>
+            {authChecking ? <div className="pc-login-loader"><i /><i /><i /></div> : (
+              <div className="pc-login-check-actions">
+                <button type="button" className="pc-login-submit" onClick={() => { void verifyAuth(); }}>重新验证</button>
+                <button type="button" className="pc-login-switch" onClick={() => s.logout()}>换账号登录</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
       className="pc-shell"
-      style={{ ...color.vars, '--pc-list-w': `${st.listW}px` } as React.CSSProperties}
+      style={shellStyle}
     >
       <NavRail st={st} />
 
@@ -94,7 +139,6 @@ export default function App() {
       </main>
 
       {st.ctx && <ContextMenu data={st.ctx} onClose={st.closeCtx} />}
-      {loginOpen && <Login reason={loginReason ?? undefined} onClose={() => setLoginOpen(false)} />}
       {st.toast && <Toast text={st.toast} />}
     </div>
   );

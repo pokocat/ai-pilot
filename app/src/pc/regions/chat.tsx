@@ -197,6 +197,15 @@ export default function Main({ st }: { st: PcState }) {
   sessionIdRef.current = sessionId;
   agentRef.current = agent;
 
+  // 沙盘/点兵带上下文切进问策时，只预填不代用户发送。消费后立即清掉跨区草稿，
+  // 否则用户再切回来会重复覆盖自己刚写的内容。
+  useEffect(() => {
+    if (!st.chatDraft) return;
+    setDraft(st.chatDraft);
+    st.setChatDraft('');
+    requestAnimationFrame(() => taRef.current?.focus());
+  }, [st.chatDraft, st.setChatDraft]);
+
   // —— 滚动跟随：只在用户仍贴底时跟，上滚翻旧消息时不许把人拽回来 ——
   const onScroll = useCallback(() => {
     const el = scrollRef.current;

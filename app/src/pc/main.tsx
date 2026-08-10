@@ -52,9 +52,6 @@ function routeFromMobilePath(url: string) {
   } catch { /* 地址栏清理失败不阻断登入 */ }
 })();
 
-store.loadAgents();
-store.loadMe();
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

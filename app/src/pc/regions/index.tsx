@@ -1,8 +1,11 @@
 import type { PcTab } from '../state';
 import type { Region } from './types';
-import { makePlaceholder } from './placeholder';
+import { platform } from '../../services/platform';
 import SessionsListBody from './sessions';
 import SessionsMain, { useChatBar } from './chat';
+import SandMain, { SAND_REFRESH_EVENT } from './sand';
+import ExecMain, { EXEC_EXPORT_EVENT } from './exec';
+import LordMain from './lord';
 import ThinkAssets from './thinkAssets';
 import ThinkData from './thinkData';
 import ThinkModules from './thinkModules';
@@ -31,11 +34,11 @@ const sand: Region = {
     },
   ],
   useBar: (st) => ({
-    business: { title: '经营战局', sub: '判断随案卷与数据变化，随变而调' },
-    timing: { title: '时运策', sub: '本月攻守 · 全年拐点' },
-    destiny: { title: '命盘分析', sub: '四柱 · 日主 · 格局' },
+    business: { title: '经营战局', sub: '判断随案卷与数据变化，随变而调', actions: [{ t: '刷新判断', ghost: true, go: () => window.dispatchEvent(new CustomEvent(SAND_REFRESH_EVENT)) }] },
+    timing: { title: '时运策', sub: '本月攻守 · 全年拐点', actions: [{ t: '天时日历', go: () => platform.navigate('/packages/work/calendar/index') }] },
+    destiny: { title: '命盘分析', sub: '四柱 · 日主 · 格局', actions: [{ t: '完整命盘', go: () => platform.navigate('/packages/work/mingpan/index') }] },
   }[st.view] || { title: '沙盘' }),
-  Main: makePlaceholder('盘', '沙盘工作区', '主要矛盾 · 三势 · 判断依据 · 决策日志，Phase 1 落地'),
+  Main: SandMain,
 };
 
 const exec: Region = {
@@ -51,11 +54,11 @@ const exec: Region = {
     },
   ],
   useBar: (st) => ({
-    today: { title: '今日军令', sub: '完成度与复盘节奏' },
+    today: { title: '今日军令', sub: '完成度与复盘节奏', actions: [{ t: '导出今日军令', go: () => window.dispatchEvent(new CustomEvent(EXEC_EXPORT_EVENT)) }, { t: '开始复盘', primary: true, go: () => st.setView('review') }] },
     week: { title: '周计划', sub: '按天保留执行记录' },
-    review: { title: '复盘', sub: '三势检查 · 决策验证' },
+    review: { title: '复盘', sub: '三势检查 · 决策验证', actions: [{ t: '返回今日军令', go: () => st.setView('today') }] },
   }[st.view] || { title: '点兵' }),
-  Main: makePlaceholder('兵', '点兵工作区', '今日军令表 · 经营数据回填 · 内容出品，Phase 1 落地'),
+  Main: ExecMain,
 };
 
 const think: Region = {
@@ -88,16 +91,22 @@ const think: Region = {
 
 const lord: Region = {
   head: { glyph: '公', kicker: '你 自 己', title: '主公' },
-  useGroups: () => [
+  useGroups: (st) => [
     {
-      label: '档 案',
+      label: '账 户',
       rows: [
-        { key: 'overview', ic: '总', t: '总览', s: '会员 · 谶语 · 统计', on: true, go: () => { /* 单视图 */ } },
+        { key: 'overview', ic: '总', t: '总览', s: '会员 · 谶语 · 统计', on: st.view === 'overview', go: () => st.setView('overview') },
+        { key: 'plans', ic: '权', t: '方案与权益', s: '当前方案 · 可选档位', on: st.view === 'plans', go: () => st.setView('plans') },
+        { key: 'credits', ic: '算', t: '算力账本', s: '余额 · 变动明细', on: st.view === 'credits', go: () => st.setView('credits') },
       ],
     },
   ],
-  useBar: () => ({ title: '主公', sub: '账户 · 权益 · 战略档案' }),
-  Main: makePlaceholder('公', '主公工作区', '会员卡 · 年度谶语 · 档案菜单，Phase 1 落地'),
+  useBar: (st) => ({
+    overview: { title: '主公', sub: '账户 · 权益 · 战略档案', actions: [{ t: '设置', go: () => platform.navigate('/packages/main/settings/index') }] },
+    plans: { title: '方案与权益', sub: '当前方案 · 可选档位' },
+    credits: { title: '算力账本', sub: '余额 · 变动明细' },
+  }[st.view] || { title: '主公' }),
+  Main: LordMain,
 };
 
 export const REGIONS: Record<PcTab, Region> = { sessions, sand, exec, think, lord };
