@@ -235,6 +235,24 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo apt install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d 你的域名        # 自动签证书 + 跳转 443
 ```
+
+### PC 独立域名 `copilot.aibuzz.cn`
+
+PC 默认仍按 `/pc/` 构建；独立域名必须使用根基址、同源 API，并明确把窄屏送回移动站：
+
+```bash
+cd app
+PC_BASE=/ \
+VITE_PC_MOBILE_ORIGIN=https://wxapi.aibuzz.cn \
+TARO_APP_MODE=server \
+TARO_APP_API=https://copilot.aibuzz.cn/api \
+npm run build:pc
+```
+
+产物发布到 `/var/www/junshi/copilot`，站点配置使用 `deploy/nginx.copilot.conf.example`。先让
+`/.well-known/acme-challenge/` 经 80 端口可达，再用 certbot webroot 申请证书；启用 443 后必须验证
+站点根、静态资源、`/api/health`、字体以及未登录硬登录门。该目录与 `/var/www/junshi/pc` 分离，避免
+根基址产物覆盖仍挂在 `/pc/` 的默认产物。
 要点（已在模板里）：`/api/` 反代 :4000；SSE 流式需 `proxy_buffering off`；`proxy_read_timeout 180s` 给 LLM 产出留时间。
 
 如果线上保留裸 IP 的 HTTP server 块（例如固定 ECS 的 `http://8.136.36.175`），裸 IP 只用于 `/api/` 健康检查和兼容回调，不暴露运营后台：`/admin` 与 `/admin/` 必须直接返回 404。运营后台统一从域名 HTTPS 入口访问：`https://wxapi.aibuzz.cn/admin/`。

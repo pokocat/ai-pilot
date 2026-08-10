@@ -238,8 +238,8 @@ H5 `app.tsx` 与原生 `app.js` 都在启动时水合公开军师与本地身份
 - `loadAgents()` 必须保留 `DEFAULT_AGENTS` 的 `billing/price/owned` 兜底字段；线上旧 `/agents` 若缺权益字段，不能覆盖掉前台解锁门禁，否则 `💎xN` 专项能力会被误判为可直接进入。
 - `data/colors.ts`：6 套本命色主题变量（`--accent` 系列）。
 
-### 7.5 PC 工作台（`/pc/`，2026-08-10）
-- PC 是 `app/src/pc/` 下独立的 Vite + React DOM 应用，产物 `app/dist-pc/`、线上路径 `/pc/`；移动 H5 仍走 Taro 与 `dist-h5/`。两端共用 `services/`、`data/` 与 `shared/contracts.d.ts`，宿主差异只经 `services/platform.ts` 注入。PC 源码不得直接引用 Taro，也不得引用仍绑定 Taro 的 `pay/tabbar/wechatSubscribe/creative/canvasCard/reportShareCard/posterPending/nav`；`app/scripts/pc-bundle.test.mjs` 是强制守卫。
+### 7.5 PC 工作台（`/pc/` / `copilot.aibuzz.cn`，2026-08-10）
+- PC 是 `app/src/pc/` 下独立的 Vite + React DOM 应用，产物 `app/dist-pc/`；默认线上路径仍为 `/pc/`，独立生产域名为 `https://copilot.aibuzz.cn/`。移动 H5 仍走 Taro 与 `dist-h5/`。两端共用 `services/`、`data/` 与 `shared/contracts.d.ts`，宿主差异只经 `services/platform.ts` 注入。PC 源码不得直接引用 Taro，也不得引用仍绑定 Taro 的 `pay/tabbar/wechatSubscribe/creative/canvasCard/reportShareCard/posterPending/nav`；`app/scripts/pc-bundle.test.mjs` 是强制守卫。
 - **PC 独立硬登录门（不改变移动端游客策略）**：`pc/App.tsx` 在无 token 时只渲染 `Login required`，遮罩、Esc 与关闭按钮均不可退出，五区外壳和公开目录都不挂载、不预拉；历史 token 必须先经 `store.loadMe()` 验真，验证完成前只显示核验屏，401 立即清态退回登录，网络失败停在可重试页，绝不能短暂闪出个人工作区。登录成功后才加载军师目录并进入原 hash 对应区；`requireAuth` 继续作为运行中掉线的第二道防线。小程序与移动 H5 仍按 §6 的游客浏览口径执行。
 - 三栏外壳固定为导航轨 / 列表栏 / 主工作区；五区注册表在 `pc/regions/index.tsx`。`App.tsx` 只挂一层 `Stage`，区组件只能返回页面体，禁止再次套 `Stage`（否则滚动与抽屉重复）；`Stage` 在 `tab/view` 切换时归零主区滚动。`useBar/useGroups` 可含 hook，必须由按 `st.tab` keyed 的 `RegionBar/RegionList` 调用，不能挪回 App 主函数。
 - 已桌面化五区：问策（线程+对话）、沙盘（经营战局/时运策/命盘）、点兵（今日/周计划/复盘）、锦囊（案卷资产/数据/能力/方案）、主公（总览/方案权益/算力账本）。桌面稿未覆盖的子视图沿用「深色主判断 + 纸面证据卡 + 明确行动落点」语言；头像/创作军师立绘统一复用 `pc/portraits.ts`，字体复用站点根 `/fonts/junshi-serif-*`，不引入设计项目素材。
@@ -247,7 +247,7 @@ H5 `app.tsx` 与原生 `app.js` 都在启动时水合公开军师与本地身份
 - 点兵真相源是 `services/dossier.ts` 的案卷军令、目标、日回填与复盘接口，经营周报另走 `bizMetric*`；表格支持新增、勾选、批量完成/删除、战果回填与 CSV 导出。现有契约没有军令改期接口，「顺延到明天」必须继续显示「施工中」且不改数据，直到先补 SSOT + 后端接口再启用。
 - 主公总览读取 `store.me`、`library/projects/reports/progress/strategicProfile/workbench`；方案子视图只按 `planOptions.canPurchase/action/relation` 渲染，算力账本读 `myCredits`。涉及微信支付/签约仍在新标签交给既有移动支付页，PC 不复制支付状态机、不 import `pay.ts`。
 - 跨区发问用 `PcState.chatDraft` 内存承接，只预填、由用户确认发送；草稿不得写 URL 或 localStorage。移动长尾路由在 `pc/main.tsx` 映射，未桌面化的页面新标签打开移动 H5。
-- 本地：`cd app && npm run dev:pc -- --host 127.0.0.1`（默认 `http://127.0.0.1:5175/pc/`）；四道门为 `npm run typecheck && npm test && npm run build:pc && npm run build:h5`。PC 区域数据源/单层 Stage/施工中约束另由 `scripts/pc-workbench-regions.test.mjs` 锁定。
+- 本地：`cd app && npm run dev:pc -- --host 127.0.0.1`（默认 `http://127.0.0.1:5175/pc/`）；四道门为 `npm run typecheck && npm test && npm run build:pc && npm run build:h5`。独立域名构建使用 `PC_BASE=/ VITE_PC_MOBILE_ORIGIN=https://wxapi.aibuzz.cn TARO_APP_MODE=server TARO_APP_API=https://copilot.aibuzz.cn/api npm run build:pc`，窄屏会回现有移动 H5，不能留空导致同域循环。Nginx 模板见 `deploy/nginx.copilot.conf.example`。PC 区域数据源/单层 Stage/施工中约束另由 `scripts/pc-workbench-regions.test.mjs` 锁定。
 
 ---
 

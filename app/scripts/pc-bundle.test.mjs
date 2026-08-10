@@ -61,3 +61,11 @@ test('dist-pc 产物不含 Taro 运行时', () => {
     .filter((f) => /tarojs|TaroElement|TaroRootElement/.test(fs.readFileSync(path.join(assetsDir, f), 'utf8')));
   assert.deepEqual(offenders, [], `PC 产物里出现 Taro：${offenders.join(', ')}`);
 });
+
+test('PC 默认保留 /pc/，独立域名可改根路径并把窄屏送回移动站', () => {
+  const viteConfig = fs.readFileSync(path.join(appRoot, 'vite.pc.config.ts'), 'utf8');
+  const html = fs.readFileSync(path.join(pcSrc, 'index.html'), 'utf8');
+  assert.match(viteConfig, /process\.env\.PC_BASE\s*\|\|\s*['"]\/pc\/['"]/);
+  assert.match(html, /VITE_PC_MOBILE_ORIGIN/);
+  assert.match(html, /mobileOrigin\s*\+\s*\(BACK\[tab\]/);
+});

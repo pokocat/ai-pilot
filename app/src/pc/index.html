@@ -27,12 +27,15 @@
        桌面 → 移动的那一半在移动版 index.html 里。 */
     (function () {
       if (window.innerWidth >= 1024) return;
+      var mobileOrigin = '%VITE_PC_MOBILE_ORIGIN%';
+      if (!mobileOrigin || mobileOrigin.charAt(0) === '%') mobileOrigin = '';
+      mobileOrigin = mobileOrigin.replace(/\/$/, '');
       var BACK = {
         sessions: '/#/pages/sessions/index', sand: '/#/pages/home/index', exec: '/#/pages/studio/index',
         think: '/#/pages/thinktank/index', lord: '/#/pages/profile/index'
       };
       var tab = (location.hash.replace(/^#\//, '').split('?')[0]) || 'sessions';
-      location.replace(BACK[tab] || BACK.sessions);
+      location.replace(mobileOrigin + (BACK[tab] || BACK.sessions));
     })();
   </script>
 </head>

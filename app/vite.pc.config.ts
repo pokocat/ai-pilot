@@ -22,10 +22,12 @@ export default defineConfig(() => {
   // 与 Taro 侧同名同义：mock = 本地假数据，server = 连真实后端。
   const mode = process.env.TARO_APP_MODE || 'mock';
   const api = process.env.TARO_APP_API || '';
+  // 默认仍挂在移动站的 /pc/；独立域名构建可显式设 PC_BASE=/，互不覆盖产物约定。
+  const base = process.env.PC_BASE || '/pc/';
 
   return {
     root: path.resolve(__dirname, 'src/pc'),
-    base: '/pc/',
+    base,
     plugins: [react()],
     build: {
       outDir: path.resolve(__dirname, 'dist-pc'),

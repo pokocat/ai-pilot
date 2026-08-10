@@ -6,6 +6,12 @@
 
 ## 变更日志
 
+### 2026-08-10 · PC 独立生产域名发布能力 · 影响面：PC 构建基址、窄屏分流、Nginx 与 HTTPS
+
+- PC 构建基址新增 `PC_BASE` 覆盖：默认仍为移动站 `/pc/`，`copilot.aibuzz.cn` 可构建为根路径，不影响原部署方式。
+- 独立域名构建必须设置 `VITE_PC_MOBILE_ORIGIN=https://wxapi.aibuzz.cn`，窄屏访问会回移动 H5，不在独立 PC 域名内自循环。
+- 新增 `deploy/nginx.copilot.conf.example`，固定同源 `/api` 反代、SSE、字体复用、静态缓存、SPA fallback、ACME 验证和 HTTPS 证书路径。
+
 ### 2026-08-10 · PC 工作台改为强制登录 · 影响面：PC 首屏、登录态验真、线上数据访问边界
 
 - PC 未登录时不再渲染导航轨、五区内容或游客公开目录，只显示手机号 + 短信验证码登录屏；登录层没有关闭按钮，遮罩与 Esc 均不能绕过。
