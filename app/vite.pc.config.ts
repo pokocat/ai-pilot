@@ -42,6 +42,7 @@ export default defineConfig(() => {
       'process.env.TARO_APP_STREAM': JSON.stringify(process.env.TARO_APP_STREAM || ''),
       'process.env.TARO_APP_VERSION': JSON.stringify(process.env.TARO_APP_VERSION || pkg.version),
       'process.env.TARO_APP_BUILD_SHA': JSON.stringify(process.env.TARO_APP_BUILD_SHA || gitSha),
+      'process.env.TARO_APP_MOBILE_ORIGIN': JSON.stringify(process.env.VITE_PC_MOBILE_ORIGIN || ''),
       // services 里少数分支用 TARO_ENV 判端；PC 归为 h5（非小程序）。
       'process.env.TARO_ENV': JSON.stringify('h5'),
     },

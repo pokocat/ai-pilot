@@ -4,6 +4,7 @@ import { setPlatform } from '../services/platform';
 import { store } from '../services/store';
 import { setToken } from '../services/token';
 import App from './App';
+import { mobileHashUrl } from './mobile';
 import { pushToast } from './toastBridge';
 import './index.scss';
 
@@ -35,7 +36,7 @@ function routeFromMobilePath(url: string) {
   const target = MOBILE_TO_PC[path];
   if (target) { window.location.hash = target.slice(1); return; }
   // 未桌面化的页面：开新标签跳移动版，PC 这边不动。
-  window.open(`/#${url}`, '_blank', 'noopener');
+  window.open(mobileHashUrl(url), '_blank', 'noopener');
 }
 
 // 附身登录（运营排查）：?imp_token=<token> 以目标用户身份登入，随后从地址栏抹掉。

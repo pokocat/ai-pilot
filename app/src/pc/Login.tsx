@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { store } from '../services/store';
+import { mobileHashUrl } from './mobile';
 import { authReasonText, type AuthReason } from '../services/authGate';
 import './Login.scss';
 
@@ -140,9 +141,9 @@ export default function Login({ reason, required = false, onClose }: {
           <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
           <span>
             我已阅读并同意
-            <a href="/#/packages/main/legal/index?doc=terms" target="_blank" rel="noopener">《用户协议》</a>
+            <a href={mobileHashUrl('/packages/main/legal/index?doc=terms')} target="_blank" rel="noopener">《用户协议》</a>
             与
-            <a href="/#/packages/main/legal/index?doc=privacy" target="_blank" rel="noopener">《隐私政策》</a>
+            <a href={mobileHashUrl('/packages/main/legal/index?doc=privacy')} target="_blank" rel="noopener">《隐私政策》</a>
           </span>
         </label>
 

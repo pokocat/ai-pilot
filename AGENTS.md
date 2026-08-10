@@ -246,7 +246,7 @@ H5 `app.tsx` 与原生 `app.js` 都在启动时水合公开军师与本地身份
 - 沙盘真相源是 `/me.understanding`（`mainContradiction/summary/battleForces/evidenceCount/nextQuestions`）+ `services/dossier.refreshDossier()`；决策走 `api.decisions/verifyDecision`，时运命盘走 `api.myChart` 且先过 `features.fortune`，认可判断走 `api.battleCommit`。不得把 `journey`、周粒度 `bizMetricSeries` 或生态 `prescriptions` 冒充日战局数据。
 - 点兵真相源是 `services/dossier.ts` 的案卷军令、目标、日回填与复盘接口，经营周报另走 `bizMetric*`；表格支持新增、勾选、批量完成/删除、战果回填与 CSV 导出。现有契约没有军令改期接口，「顺延到明天」必须继续显示「施工中」且不改数据，直到先补 SSOT + 后端接口再启用。
 - 主公总览读取 `store.me`、`library/projects/reports/progress/strategicProfile/workbench`；方案子视图只按 `planOptions.canPurchase/action/relation` 渲染，算力账本读 `myCredits`。涉及微信支付/签约仍在新标签交给既有移动支付页，PC 不复制支付状态机、不 import `pay.ts`。
-- 跨区发问用 `PcState.chatDraft` 内存承接，只预填、由用户确认发送；草稿不得写 URL 或 localStorage。移动长尾路由在 `pc/main.tsx` 映射，未桌面化的页面新标签打开移动 H5。
+- 跨区发问用 `PcState.chatDraft` 内存承接，只预填、由用户确认发送；草稿不得写 URL 或 localStorage。移动长尾路由在 `pc/main.tsx` 映射，未桌面化页面、协议链接与移动支付入口统一经 `pc/mobile.ts` 打开移动 H5；独立域名构建不得写同源 `/#/...`，否则会重新打开 PC 自己。
 - 本地：`cd app && npm run dev:pc -- --host 127.0.0.1`（默认 `http://127.0.0.1:5175/pc/`）；四道门为 `npm run typecheck && npm test && npm run build:pc && npm run build:h5`。独立域名构建使用 `PC_BASE=/ VITE_PC_MOBILE_ORIGIN=https://wxapi.aibuzz.cn TARO_APP_MODE=server TARO_APP_API=https://copilot.aibuzz.cn/api npm run build:pc`，窄屏会回现有移动 H5，不能留空导致同域循环。Nginx 模板见 `deploy/nginx.copilot.conf.example`。PC 区域数据源/单层 Stage/施工中约束另由 `scripts/pc-workbench-regions.test.mjs` 锁定。
 
 ---

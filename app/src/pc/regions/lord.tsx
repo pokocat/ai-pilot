@@ -9,6 +9,7 @@ import {
 import { platform } from '../../services/platform';
 import { requireAuth } from '../authBridge';
 import { Empty } from '../Chrome';
+import { mobileHashUrl } from '../mobile';
 import type { PcState } from '../state';
 import { chatKeyOf } from './sessions';
 import './lord.scss';
@@ -50,7 +51,7 @@ function powerLine(me: Me | null) {
 }
 
 function openMobile(path: string) {
-  window.open(`/#${path}`, '_blank', 'noopener');
+  window.open(mobileHashUrl(path), '_blank', 'noopener');
 }
 
 function openGeneral(st: PcState, prompt?: string) {

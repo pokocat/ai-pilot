@@ -65,7 +65,15 @@ test('dist-pc 产物不含 Taro 运行时', () => {
 test('PC 默认保留 /pc/，独立域名可改根路径并把窄屏送回移动站', () => {
   const viteConfig = fs.readFileSync(path.join(appRoot, 'vite.pc.config.ts'), 'utf8');
   const html = fs.readFileSync(path.join(pcSrc, 'index.html'), 'utf8');
+  const pcSource = walk(pcSrc)
+    .filter((f) => /\.(ts|tsx)$/.test(f))
+    .map((f) => fs.readFileSync(f, 'utf8'))
+    .join('\n');
   assert.match(viteConfig, /process\.env\.PC_BASE\s*\|\|\s*['"]\/pc\/['"]/);
+  assert.match(viteConfig, /TARO_APP_MOBILE_ORIGIN/);
   assert.match(html, /VITE_PC_MOBILE_ORIGIN/);
   assert.match(html, /mobileOrigin\s*\+\s*\(BACK\[tab\]/);
+  assert.match(pcSource, /function mobileHashUrl/);
+  assert.doesNotMatch(pcSource, /window\.open\(`\/#/);
+  assert.doesNotMatch(pcSource, /href=["']\/#\/packages/);
 });
