@@ -6,6 +6,7 @@
 
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { jsonrepair } from 'jsonrepair';
 import { env, isRealKey, isAiTestMode } from '../env.js';
 import { prisma } from '../db.js';
 import { getAiConfig, effectiveProvider, resolveAuxConfigAsync, resolveModelRate, type ResolvedAiConfig } from '../services/aiConfig.js';
@@ -1081,7 +1082,14 @@ export function coerceJson<S extends z.ZodTypeAny>(schema: S, text: string): { o
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return { ok: false, error: '未找到 JSON 对象' };
   let raw: unknown;
-  try { raw = JSON.parse(m[0]); } catch { return { ok: false, error: 'JSON 解析失败' }; }
+  try {
+    raw = JSON.parse(m[0]);
+  } catch {
+    // 真实模型偶尔会把客户原话里的英文双引号原样写进 JSON string（未转义），或留下尾逗号。
+    // 先严格 parse，只有语法失败才修复；修复后仍必须通过调用方 Zod，摘要层还会继续校验 kind 与批内来源，
+    // 因此这里只恢复 JSON 结构，不会把不可信字段升级成事实。
+    try { raw = JSON.parse(jsonrepair(m[0])); } catch { return { ok: false, error: 'JSON 解析与修复失败' }; }
+  }
   const parsed = schema.safeParse(raw);
   if (parsed.success) return { ok: true, data: parsed.data };
   return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ').slice(0, 300) };

@@ -77,6 +77,15 @@ describe('coerceJson × ProphecyResult（纯逻辑）', () => {
     assert.equal(r.data.prophecies[0].prophecy, '下季度回款改善');
   });
 
+  test('模型把原话双引号写进 JSON string 未转义 → 修复语法后仍过 Zod', () => {
+    const malformed = '{"prophecies":[{"prophecy":"客户强调"现金流优先"","verifyStandard":"月末余额为正"}]}';
+    const r = coerceJson(ProphecyResult, malformed);
+    assert.equal(r.ok, true);
+    if (!r.ok) return;
+    assert.equal(r.data.prophecies[0].prophecy, '客户强调"现金流优先"');
+    assert.equal(r.data.prophecies[0].verifyStandard, '月末余额为正');
+  });
+
   test('非 JSON 文本 → ok:false 带错误信息（供修复轮回喂）', () => {
     const r = coerceJson(ProphecyResult, '军师这轮没有给出预言。');
     assert.equal(r.ok, false);
