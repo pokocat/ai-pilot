@@ -90,13 +90,24 @@ export function __setDigestCompactorForTest(fn: DigestCompactor | null): void {
 
 /* ─────────────── 默认抽取器（走 structured() 原语） ─────────────── */
 
+// 模型一次最多回 10 条；其中一条 kind/source 格式不规范时，不能让 Zod 把整批其余好条目一起判废。
+// 这里仅做逐条字段形状容错，真正的可信度闸仍在 acceptItems/acceptCompactedItems：kind 白名单、
+// 非空文本、1~8 个来源、来源必须属于当前批次（或既有摘要）任一不满足都整条丢弃。
+const RawDigestItemZ = z.object({
+  kind: z.string().catch(''),
+  text: z.string().catch(''),
+  sourceMessageIds: z.array(z.string()).catch([]),
+}).catch({ kind: '', text: '', sourceMessageIds: [] });
+
 const ExtractResultZ = z.object({
-  items: z.array(z.object({
-    kind: z.enum(DIGEST_KINDS),
-    text: z.string().min(1),
-    sourceMessageIds: z.array(z.string()).min(1).max(MAX_SOURCE_IDS),
-  })).default([]),
-});
+  items: z.array(RawDigestItemZ).default([]),
+}).transform(({ items }) => ({ items: items as DigestExtraction['items'] }));
+
+/** 纯逻辑回归入口：证明单条坏结构不会吞掉同批好条目；生产抽取仍统一走 structured()。 */
+export function parseDigestModelOutput(raw: unknown): DigestExtraction | null {
+  const parsed = ExtractResultZ.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
 
 const EXTRACT_SYS = `你是「军师」商业咨询系统的会话索引器。任务：把本批对话里「值得跨轮复用的硬信息」抽成结构化条目，供后续对话与报告引用。
 

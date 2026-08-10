@@ -20,6 +20,7 @@ import {
   __setDigestCompactorForTest,
   SESSION_DIGEST_EXTRACT_MAX_TOKENS,
   SESSION_DIGEST_COMPACT_MAX_TOKENS,
+  parseDigestModelOutput,
   type DigestBatchMessage,
   type SessionDigestItem,
   type SessionDigestState,
@@ -45,9 +46,23 @@ beforeEach(async () => {
 const KEY_FACT_TEXT = '注册资本 300 万，主营宠物烘焙，直营门店 3 家';
 const BASE_AT = Date.UTC(2026, 6, 1, 2, 0, 0); // 2026-07-01 10:00 上海
 
-test('摘要抽取与滚动合并显式覆盖辅助模型 700 token 默认值', () => {
+test('摘要模型边界：显式输出预算，且单条坏结构不吞掉同批好条目', () => {
   assert.equal(SESSION_DIGEST_EXTRACT_MAX_TOKENS, 4_000);
   assert.equal(SESSION_DIGEST_COMPACT_MAX_TOKENS, 8_000);
+  const parsed = parseDigestModelOutput({
+    items: [
+      { kind: 'fact', text: '直营网点 6 家', sourceMessageIds: ['msg-good'] },
+      { kind: '模型自造类型', text: 42, sourceMessageIds: 'msg-bad' },
+    ],
+  });
+  assert.ok(parsed);
+  assert.deepEqual(parsed.items[0], { kind: 'fact', text: '直营网点 6 家', sourceMessageIds: ['msg-good'] });
+  assert.deepEqual(
+    parsed.items[1],
+    { kind: '模型自造类型', text: '', sourceMessageIds: [] },
+    '坏字段归空、非法 kind 保留给来源闸识别并整条丢弃',
+  );
+  assert.equal(parseDigestModelOutput([]), null, '顶层不是对象仍拒绝，不能把完全坏响应当空摘要推进游标');
 });
 
 interface Fixture { tenantId: string; userId: string; sessionId: string; ids: string[] }
