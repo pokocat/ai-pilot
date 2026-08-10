@@ -5,9 +5,10 @@
       "name": "h5-preview",
       "runtimeExecutable": "node",
       "runtimeArgs": [
-        "app/scripts/serve-h5.mjs"
+        "app/scripts/serve-h5.mjs",
+        "5199"
       ],
-      "port": 5173,
+      "port": 5199,
       "autoPort": true
     },
     {

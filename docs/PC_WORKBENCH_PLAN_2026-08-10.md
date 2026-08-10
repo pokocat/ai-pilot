@@ -1,5 +1,9 @@
 # PC 工作台方案（2026-08-10 定案）
 
+> **开发位置**：本特性在独立 worktree 上做 —— `.claude/worktrees/pc-workbench`，分支 `feat/pc-workbench`。
+> 主干（main）同期有「连续会话与渐进交付」在推进，两条线互不落地。
+> 该 worktree 的 `h5-preview` 预览端口改为 **5199**（主干占 5173），移动 H5 在 `/`、PC 在 `/pc/`。
+
 设计稿：claude.ai/design 项目 `db1411d1-ff9f-4bc8-8320-6fbb4b96c23f` 的 `军师 PC.dc.html`（1440 基准，三栏工作台）。
 本文档记录五项决策定案、架构方案、设计元素 → 现有 API 映射，以及分期与阻塞项。
 
