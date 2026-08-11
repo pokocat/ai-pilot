@@ -35,6 +35,7 @@
 .ts-tail-copy { position: relative; z-index: 1; min-height: 72px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; padding: 12px 14px; background: linear-gradient(90deg, rgba(29,26,23,.72), rgba(29,26,23,.08)); color: #FFF; }
 .ts-tail-name { font-size: 13px; font-weight: 600; }
 .ts-tail-meta { margin-top: 4px; font-size: 10px; color: rgba(255,255,255,.74); }
+.ts-tail-play { position: absolute; z-index: 2; right: 10px; top: 10px; min-width: 52px; height: 32px; padding: 0 10px; box-sizing: border-box; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 4px; background: rgba(20,18,17,.62); color: #FFF; font-size: 10px; }
 .ts-note { display: block; margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--vd-avatar-soft); font-size: 12px; line-height: 1.65; color: var(--vd-ink-2); }
 
 .tp-price { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -45,3 +46,11 @@
 .tpp-side { text-align: right; }
 .tpp-value { display: block; font-size: 16px; font-weight: 700; color: var(--vd-ink); font-variant-numeric: tabular-nums; }
 .tpp-sub { display: block; margin-top: 4px; font-size: 10px; color: var(--vd-muted); }
+
+.tail-preview-mask { position: fixed; inset: 0; z-index: 220; display: flex; align-items: flex-end; background: rgba(20,18,17,.5); }
+.tail-preview-sheet { width: 100%; padding: 18px 20px calc(20px + env(safe-area-inset-bottom)); box-sizing: border-box; border-radius: 24px 24px 0 0; background: var(--vd-bg); }
+.tail-preview-head { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.tail-preview-title { display: block; font-family: var(--vd-serif); font-size: 20px; font-weight: 600; }
+.tail-preview-sub { display: block; margin-top: 3px; font-size: 11px; color: var(--vd-muted); }
+.tail-preview-close { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #FFF; }
+.tail-preview-video { width: 100%; height: 58vh; max-height: 520px; margin-top: 12px; border-radius: 18px; overflow: hidden; background: #111; }

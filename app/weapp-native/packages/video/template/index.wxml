@@ -48,9 +48,10 @@
             <text class="vd-tag tail"><text class="sq"></text>固定片段</text>
             <text class="ts-text">{{template.tailLabel}} · {{template.tailDurationSec}} 秒，可整段替换</text>
           </view>
-          <view class="ts-tail-preview {{template.tailCoverUrl ? '' : 'vd-grain'}}">
+          <view class="ts-tail-preview {{template.tailCoverUrl ? '' : 'vd-grain'}}" bindtap="openTailPreview">
             <image wx:if="{{template.tailCoverUrl}}" class="ts-tail-image" src="{{template.tailCoverUrl}}" mode="aspectFill"></image>
             <view class="ts-tail-copy"><text class="ts-tail-name">{{template.tailLabel}}</text><text class="ts-tail-meta">固定视频 · {{template.tailDurationSec}} 秒</text></view>
+            <view class="ts-tail-play"><native-icon name="play" tone="white" size="14"></native-icon><text>预览</text></view>
           </view>
 
           <text class="ts-note">模板是一版可以直接用的起点。下一步可以让 AI 和你聊几句，再改成真正属于你的稿。</text>
@@ -68,6 +69,13 @@
 
   <view class="vd-footer">
     <view class="vd-btn" style="flex:1" bindtap="start">{{creating ? '正在创建…' : '用这个模板开始'}}</view>
+  </view>
+
+  <view wx:if="{{tailPreviewOpen && template}}" class="tail-preview-mask" catchtap="closeTailPreview">
+    <view class="tail-preview-sheet" catchtap="swallow">
+      <view class="tail-preview-head"><view><text class="tail-preview-title">{{template.tailLabel}}</text><text class="tail-preview-sub">固定片段 · {{template.tailDurationSec}} 秒</text></view><view class="tail-preview-close" bindtap="closeTailPreview"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
+      <video class="tail-preview-video" src="{{template.tailMediaUrl}}" poster="{{template.tailCoverUrl}}" controls autoplay show-center-play-btn enable-progress-gesture object-fit="contain"></video>
+    </view>
   </view>
 
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

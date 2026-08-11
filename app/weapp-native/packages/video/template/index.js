@@ -30,6 +30,7 @@ Page({
     avatar: null,
     avatarChecked: false,
     creating: false,
+    tailPreviewOpen: false,
     showLogin: false,
   }),
 
@@ -58,6 +59,10 @@ Page({
         this.setData({ loading: false });
         host.toast(error && error.message ? error.message : '打开失败');
       });
+  },
+
+  onUnload() {
+    if (this.data.tailPreviewOpen) host.setOverlay(false, 'video-template-tail');
   },
 
   loadAvatar() {
@@ -98,6 +103,19 @@ Page({
         host.toast(error && error.message ? error.message : '创建失败');
       });
   },
+
+  openTailPreview() {
+    if (!this.data.template || !this.data.template.tailMediaUrl) { host.toast('这个固定片段暂时没有预览视频'); return; }
+    host.setOverlay(true, 'video-template-tail');
+    this.setData({ tailPreviewOpen: true });
+  },
+
+  closeTailPreview() {
+    host.setOverlay(false, 'video-template-tail');
+    this.setData({ tailPreviewOpen: false });
+  },
+
+  swallow() {},
 
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },

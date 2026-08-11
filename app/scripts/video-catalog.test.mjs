@@ -158,6 +158,9 @@ test('模板详情、工程初始镜头和固定片段共用同一时长真源',
   assert.match(templateView, /tailDurationSec/);
   assert.match(templateSource, /template\.tailPreviewUrl/);
   assert.match(templateView, /tailCoverUrl/);
+  assert.match(templateView, /bindtap="openTailPreview"/);
+  assert.match(templateView, /src="\{\{template\.tailMediaUrl\}\}"/);
+  assert.match(templateSource, /setOverlay\(true, 'video-template-tail'\)/);
   assert.match(shotsView, /固定视频 · \{\{item\.seconds\}\} 秒/);
   assert.match(shotsView, /item\.framePreviewUrl/);
 });
