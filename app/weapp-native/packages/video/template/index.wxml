@@ -13,39 +13,48 @@
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
 
       <block wx:else>
-        <view class="vd-portrait tp-hero">
-          <view class="inner vd-grain {{template.coverTone}}"></view>
-          <view class="vd-ai-badge tp-badge">AI 生成</view>
-          <text class="tp-dur">{{durationText}}</text>
+        <view class="tp-hero-card">
+          <view class="vd-portrait tp-hero">
+            <view class="inner vd-grain {{template.coverTone}}"><view class="tp-glow"></view><text class="tp-poster-word">STORY</text></view>
+            <view class="vd-ai-badge tp-badge">AI 生成</view>
+            <text class="tp-dur">{{durationText}}</text>
+          </view>
+          <view class="tp-intro">
+            <text class="tp-industry">{{template.industry}} · 竖屏故事</text>
+            <text class="tp-name">{{template.name}}</text>
+            <text class="tp-desc">{{template.description}}</text>
+            <view class="tp-chips"><text>带字幕</text><text>可改稿</text><text>可换画面</text></view>
+          </view>
         </view>
-
-        <text class="tp-industry">{{template.industry}}</text>
-        <text class="tp-name">{{template.name}}</text>
-        <text class="tp-desc">{{template.description}}</text>
 
         <!-- 结构拆解 -->
         <view class="tp-struct vd-card">
-          <text class="ts-title">这条片子是怎么组成的</text>
+          <text class="ts-kicker">成片结构</text>
+          <text class="ts-title">三种画面，已经替你排好</text>
+          <text class="ts-sub">你只需要决定哪些段由自己出镜，哪些段放店铺画面。</text>
 
           <view class="ts-row">
+            <text class="ts-no">01</text>
             <text class="vd-tag avatar"><text class="sq"></text>分身出镜</text>
             <text class="ts-text">约 {{template.avatarSecHint}} 秒 · 开头一段，中段再穿插一次</text>
           </view>
           <view class="ts-row">
+            <text class="ts-no">02</text>
             <text class="vd-tag broll"><text class="sq"></text>配画面</text>
             <text class="ts-text">其余句子用你自己拍的店铺画面，声音继续念</text>
           </view>
           <view class="ts-row">
+            <text class="ts-no">03</text>
             <text class="vd-tag tail"><text class="sq"></text>固定片段</text>
             <text class="ts-text">{{template.tailLabel}} · {{template.tailDurationSec}} 秒，可整段替换</text>
           </view>
 
-          <text class="ts-note">出镜时间越长积分越多。模板已经配好一版，你只需要微调。</text>
+          <text class="ts-note">模板是一版可以直接用的起点。下一步可以让 AI 和你聊几句，再改成真正属于你的稿。</text>
         </view>
 
         <view class="tp-price vd-card">
-          <view class="tpp-main"><text class="num">约 {{template.creditHint}}</text><text class="unit">积分</text></view>
-          <text class="tpp-sub">{{template.segmentCount}} 句 · 成片约 {{durationText}}</text>
+          <view><text class="tpp-label">本模板预估</text><view class="tpp-main"><text class="num">{{template.creditHint}}</text><text class="unit">积分起</text></view></view>
+          <view class="tpp-side"><text class="tpp-value">{{durationText}}</text><text class="tpp-sub">预计成片 · {{template.segmentCount}} 个内容段</text></view>
         </view>
       </block>
 
@@ -54,7 +63,7 @@
   </scroll-view>
 
   <view class="vd-footer">
-    <view class="vd-btn" style="flex:1" bindtap="start">{{creating ? '正在创建…' : '开始制作'}}</view>
+    <view class="vd-btn" style="flex:1" bindtap="start">{{creating ? '正在创建…' : '用这个模板开始'}}</view>
   </view>
 
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

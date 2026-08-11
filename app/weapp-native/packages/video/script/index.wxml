@@ -14,35 +14,33 @@
       <view class="vd-step-line"></view>
       <view class="vd-step"><view class="dot">3</view><text>出片</text></view>
     </view>
-
-    <view class="script-tools">
-      <view class="st-btn {{rewriting ? 'busy' : ''}}" bindtap="rewriteAll">{{rewriting ? '改写中…' : '整段帮我改写'}}</view>
-      <view class="st-btn ghost" bindtap="restoreTemplate">恢复模板原文</view>
-      <text class="st-count">共 {{rows.length}} 句</text>
-    </view>
   </view>
 
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="script-body">
       <view class="ai-writer">
         <view class="aw-head">
-          <view>
-            <text class="aw-kicker">AI 文案搭档</text>
-            <text class="aw-title">先聊清楚，再一起把稿写出来</text>
+          <view class="aw-identity">
+            <view class="aw-orb"><native-icon name="pen" tone="white" size="19"></native-icon></view>
+            <view>
+              <text class="aw-kicker">AI 文案搭档</text>
+              <text class="aw-title">说说你想怎么讲</text>
+            </view>
           </view>
-          <text class="aw-state">{{chatting ? '正在想…' : '可连续追问'}}</text>
+          <text class="aw-state">{{chatting ? '正在写' : '随时可聊'}}</text>
         </view>
+        <text class="aw-intro">它会结合模板和现有稿追问，聊清楚后直接更新下方文案。</text>
 
-        <view class="aw-thread">
+        <scroll-view class="aw-thread" scroll-y enable-flex>
           <view wx:if="{{!chatMessages.length}}" class="aw-message assistant">
-            <text>告诉我这条视频想给谁看、最想讲什么。信息不够我会追问，够了就直接把新稿放到下方。</text>
+            <text>这条视频最想让谁看到？你希望他看完记住什么？</text>
           </view>
           <view wx:for="{{chatMessages}}" wx:key="id" class="aw-message {{item.role}}">
             <text>{{item.content}}</text>
             <text wx:if="{{item.role === 'assistant' && item.applied}}" class="aw-applied">已更新下方文案</text>
           </view>
           <view wx:if="{{chatting}}" class="aw-message assistant typing"><text>正在结合现有稿整理…</text></view>
-        </view>
+        </scroll-view>
 
         <scroll-view class="aw-suggestions" scroll-x enable-flex>
           <view
@@ -62,13 +60,22 @@
             auto-height
             maxlength="600"
             adjust-position="{{true}}"
-            placeholder="例如：给附近上班族看，语气朴实一点，突出我做了十几年"
+            placeholder="例如：给附近上班族看，朴实一点，突出我做了十几年"
           />
           <view class="aw-send {{chatting ? 'busy' : ''}}" bindtap="sendChat">{{chatting ? '生成中' : '发送'}}</view>
         </view>
       </view>
 
-      <text class="sb-label">口播文案 · 你的声线</text>
+      <view class="script-tools">
+        <view class="st-btn {{rewriting ? 'busy' : ''}}" bindtap="rewriteAll">{{rewriting ? '改写中…' : '整稿优化'}}</view>
+        <view class="st-btn ghost" bindtap="restoreTemplate">恢复模板</view>
+        <text class="st-count">{{rows.length}} 段</text>
+      </view>
+
+      <view class="sb-head">
+        <view><text class="sb-kicker">当前成稿</text><text class="sb-title">口播文案</text></view>
+        <text class="sb-help">点任一段即可细改</text>
+      </view>
 
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
 
@@ -82,7 +89,7 @@
           <!-- 编辑态：展开动作区 -->
           <view wx:else class="line-edit vd-card">
             <view class="le-head">
-              <text class="le-title">第 {{item.no}} 句 · 正在改</text>
+              <text class="le-title">第 {{item.no}} 段 · 正在改</text>
               <text class="le-sec">约 {{editingSeconds}} 秒</text>
             </view>
             <textarea
@@ -92,11 +99,11 @@
               auto-height
               maxlength="-1"
               adjust-position="{{true}}"
-              placeholder="写这一句要说的话"
+              placeholder="写这一段要说的话"
             />
             <view class="le-acts">
-              <view class="le-act {{previewing ? 'busy' : ''}}" bindtap="previewVoice">{{previewing ? '合成中…' : '试听这句'}}</view>
-              <view class="le-act {{rewriting ? 'busy' : ''}}" bindtap="rewriteOne">{{rewriting ? '改写中…' : '这句帮我改'}}</view>
+              <view class="le-act {{previewing ? 'busy' : ''}}" bindtap="previewVoice">{{previewing ? '合成中…' : '试听这段'}}</view>
+              <view class="le-act {{rewriting ? 'busy' : ''}}" bindtap="rewriteOne">{{rewriting ? '改写中…' : 'AI 改这段'}}</view>
               <view class="le-act main" bindtap="commitEdit">改好了</view>
             </view>
           </view>

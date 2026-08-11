@@ -21,6 +21,11 @@
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在核算…</text></view>
 
       <block wx:else>
+        <view class="cf-ready">
+          <view class="cfr-icon"><native-icon name="check" tone="white" size="18"></native-icon></view>
+          <view><text class="cfr-kicker">最后确认</text><text class="cfr-title">画面和文案都准备好了</text><text class="cfr-sub">确认价格后开始生成，关掉小程序也不会中断。</text></view>
+        </view>
+
         <!-- 首帧预览 -->
         <view class="cf-preview vd-card">
           <view class="vd-portrait cf-thumb">
@@ -32,8 +37,8 @@
             <text class="cf-pv-sub">竖屏 · 带字幕</text>
             <view class="cf-stats">
               <view class="cf-stat"><text class="k">成片时长</text><text class="v">{{totalText}}</text></view>
-              <view class="cf-stat"><text class="k">分身出镜</text><text class="v">{{summary.avatarSec}} 秒 · {{summary.avatarCount}} 句</text></view>
-              <view class="cf-stat"><text class="k">配画面</text><text class="v">{{summary.brollCount}} 句</text></view>
+              <view class="cf-stat"><text class="k">分身出镜</text><text class="v">{{summary.avatarSec}} 秒 · {{summary.avatarCount}} 段</text></view>
+              <view class="cf-stat"><text class="k">配画面</text><text class="v">{{summary.brollCount}} 段</text></view>
               <view class="cf-stat"><text class="k">结尾固定段</text><text class="v">{{summary.tailSec}} 秒</text></view>
             </view>
           </view>
@@ -49,7 +54,8 @@
 
         <!-- 积分明细 -->
         <view wx:if="{{estimate}}" class="cf-bill vd-card">
-          <text class="cb-title">这条片子要花多少积分</text>
+          <text class="cb-kicker">费用明细</text>
+          <text class="cb-title">只为实际生成的内容计费</text>
           <view wx:for="{{estimate.items}}" wx:key="key" class="cb-row">
             <text class="cb-k">{{item.label}}</text>
             <text class="cb-v {{item.freeText ? 'free' : ''}}">{{item.freeText || item.credits}}</text>
@@ -84,7 +90,7 @@
       class="vd-btn {{(loading || !quoteReady || problems.length || submitting) ? 'disabled' : ''}}"
       style="flex:1"
       bindtap="submit"
-    >{{loading || !quoteReady ? '等待服务端报价…' : (submitting ? '提交中…' : '出片 · 扣 ' + estimate.total + ' 积分')}}</view>
+    >{{loading || !quoteReady ? '等待服务端报价…' : (submitting ? '正在提交…' : '确认出片 · ' + estimate.total + ' 积分')}}</view>
   </view>
 
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

@@ -13,6 +13,10 @@
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
 
       <block wx:else>
+        <view class="wd-ready">
+          <view class="wdr-icon"><native-icon name="check" tone="white" size="18"></native-icon></view>
+          <view><text class="wdr-kicker">生成完成</text><text class="wdr-title">你的故事，已经成片</text></view>
+        </view>
         <!-- 播放器（视频源接入前是占位；AI 角标必须常驻） -->
         <view class="vd-portrait wd-player">
           <video
@@ -33,7 +37,8 @@
 
         <!-- 代发 -->
         <view class="wd-section">
-          <text class="wd-sec-title">一键代发</text>
+          <text class="wd-sec-kicker">下一步</text>
+          <text class="wd-sec-title">保存，或者直接发布</text>
           <view class="wd-platforms">
             <view
               wx:for="{{platforms}}"

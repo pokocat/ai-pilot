@@ -6,7 +6,7 @@
 //     改为本页底部的三个入口行 + 各自的独立页面。
 const host = require('../host');
 const api = require('../api');
-const { formatDuration } = require('../model');
+const { formatDuration, ensureShots } = require('../model');
 
 Page({
   data: host.hostBaseData({
@@ -52,15 +52,15 @@ Page({
       .catch(() => {});
   },
 
-  /** 「14 句里已配好 6 句」这类进度文案在端上算，避免多一次接口。 */
+  /** 进度按视觉镜头算，不再用文案句数冒充已配画面的完成度。 */
   decorateOngoing(project) {
     const segments = project.segments || [];
-    const broll = segments.filter((s) => s.role === 'broll');
-    const filled = broll.filter((s) => s.assetId).length;
+    const broll = ensureShots(segments, project.shots).filter((shot) => shot.role === 'broll');
+    const filled = broll.filter((shot) => shot.assetId).length;
     const stepText = project.step === 2 ? '第 2 步 配画面' : (project.step === 3 ? '第 3 步 出片' : '第 1 步 改文案');
     return Object.assign({}, project, {
       stepText,
-      progressText: `${segments.length} 句里已配好 ${filled} 句`,
+      progressText: `${broll.length} 个画面段，已配好 ${filled} 个`,
       percent: broll.length ? Math.round((filled / broll.length) * 100) : 0,
     });
   },

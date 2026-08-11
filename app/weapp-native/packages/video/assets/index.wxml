@@ -7,7 +7,7 @@
       <text class="vd-headact" bindtap="upload">上传</text>
     </view>
 
-    <text class="as-note">{{picking ? '点一张就配到第 ' + pickNo + ' 句上。' : '你拍过的店铺画面都存在这里，任何模板都能直接用。'}}</text>
+    <text class="as-note">{{picking ? '点一下，就会配到刚才选中的画面段。' : '你拍过的店铺画面都存在这里，任何模板都能直接用。'}}</text>
 
     <scroll-view class="as-tags" scroll-x enable-flex>
       <view class="as-tagrow">

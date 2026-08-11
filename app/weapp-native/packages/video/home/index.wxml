@@ -4,12 +4,29 @@
     <view class="vd-headrow">
       <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
       <text class="vd-title">快出片</text>
-      <text class="vd-headact" bindtap="openWorks">我的作品</text>
+      <text class="vd-headact" bindtap="openWorks">作品</text>
     </view>
   </view>
 
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="vd-body">
+
+      <view class="home-intro">
+        <view class="hi-glow"></view>
+        <view class="hi-top">
+          <text class="hi-kicker">AI 视频工作台</text>
+          <text class="hi-mark">9:16</text>
+        </view>
+        <text class="hi-title">把今天的生意，讲成一条能发的视频</text>
+        <text class="hi-sub">不用剪辑。选模板、聊文案、配几段店铺画面，就能生成完整竖屏片。</text>
+        <view class="hi-flow">
+          <view class="hi-step"><text class="n">01</text><text>选故事</text></view>
+          <view class="hi-line"></view>
+          <view class="hi-step"><text class="n">02</text><text>聊文案</text></view>
+          <view class="hi-line"></view>
+          <view class="hi-step"><text class="n">03</text><text>配画面</text></view>
+        </view>
+      </view>
 
       <!-- 继续上次 -->
       <view wx:if="{{ongoing}}" class="vd-card resume-card" bindtap="resume">
@@ -26,40 +43,14 @@
         </view>
       </view>
 
-      <!-- 数字分身状态 -->
-      <view class="vd-card avatar-card" bindtap="tapAvatarCard">
-        <block wx:if="{{avatar && avatar.imageStatus === 'ready' && avatar.voiceStatus === 'ready'}}">
-          <view class="ac-dot ready"></view>
-          <view class="ac-body">
-            <text class="ac-title">我的数字分身 · 可用</text>
-            <text class="ac-sub">形象与声音都已训练好，出片时用你自己的脸和声线。</text>
-          </view>
-          <native-icon class="ac-arrow" name="arrow" tone="neutral" size="15"></native-icon>
-        </block>
-        <block wx:elif="{{avatar && (avatar.imageStatus === 'training' || avatar.voiceStatus === 'training')}}">
-          <view class="ac-dot training"></view>
-          <view class="ac-body">
-            <text class="ac-title">分身正在训练</text>
-            <text class="ac-sub">好了会发消息通知你。这期间可以先用平台预置形象出片。</text>
-          </view>
-          <native-icon class="ac-arrow" name="arrow" tone="neutral" size="15"></native-icon>
-        </block>
-        <block wx:else>
-          <view class="ac-body wide">
-            <text class="ac-title lead">花 5 分钟，克隆你的数字分身</text>
-            <text class="ac-sub">克隆一次，之后每条片子都用你自己的形象和声音，不用再出镜拍摄。</text>
-            <view class="ac-cta"><text>开始创建</text><native-icon name="arrow" tone="neutral" size="14"></native-icon></view>
-          </view>
-        </block>
-      </view>
-
       <!-- 模板精选 -->
       <view class="sec-head">
         <view class="sec-copy">
-          <text class="sec-title">挑一个模板开始</text>
-          <text class="sec-sub">改几句文案就能出片</text>
+          <text class="sec-kicker">从这里开始</text>
+          <text class="sec-title">选一个你想讲的故事</text>
+          <text class="sec-sub">模板已经写好结构，内容会换成你的生意</text>
         </view>
-        <text class="sec-count">3 个内置模板</text>
+        <text class="sec-count">3 个模板</text>
       </view>
 
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
@@ -67,29 +58,62 @@
       <view wx:else class="tpl-list">
         <view wx:for="{{templates}}" wx:key="id" class="vd-card tpl-card" data-id="{{item.id}}" bindtap="openTemplate">
           <view class="vd-portrait tpl-thumb">
-            <view class="inner vd-grain {{item.coverTone}}"></view>
+            <view class="inner vd-grain {{item.coverTone}}">
+              <view class="tpl-glow"></view>
+              <text class="tpl-serial">0{{index + 1}}</text>
+              <text class="tpl-cover-label">{{item.industry}}</text>
+            </view>
             <text class="tpl-dur">{{item.durationText}}</text>
           </view>
           <view class="tpl-body">
-            <text class="tpl-industry">{{item.industry}}</text>
+            <view class="tpl-top"><text class="tpl-industry">{{item.industry}}</text><text class="tpl-format">竖屏模板</text></view>
             <text class="tpl-name">{{item.name}}</text>
             <text class="tpl-desc">{{item.description}}</text>
             <view class="tpl-meta">
-              <text class="vd-tag avatar"><text class="sq"></text>出镜约 {{item.avatarSecHint}} 秒</text>
-              <text class="tpl-credit">约 {{item.creditHint}} 积分</text>
+              <text class="tpl-credit">约 {{item.creditHint}} 积分 · 出镜 {{item.avatarSecHint}} 秒</text>
+              <view class="tpl-go"><native-icon name="arrow" tone="white" size="15"></native-icon></view>
             </view>
           </view>
         </view>
       </view>
 
-      <!-- 次级入口（分包没有 tabBar，这里补齐设计稿的另外两个 tab） -->
-      <view class="entry-row vd-card" bindtap="openAssets">
-        <view class="er-body"><text class="er-t">我的素材</text><text class="er-s">拍过的店铺画面存在这里，任何模板都能用</text></view>
-        <native-icon class="ac-arrow" name="arrow" tone="neutral" size="15"></native-icon>
+      <!-- 数字分身状态：模板是主任务，分身能力放到模板之后。 -->
+      <view class="cap-head"><text class="cap-kicker">让每条片更像你</text><text class="cap-title">你的出镜能力</text></view>
+      <view class="vd-card avatar-card" bindtap="tapAvatarCard">
+        <view class="ac-visual"><native-icon name="user" tone="red" size="23"></native-icon></view>
+        <block wx:if="{{avatar && avatar.imageStatus === 'ready' && avatar.voiceStatus === 'ready'}}">
+          <view class="ac-body">
+            <text class="ac-title">数字分身已就绪</text>
+            <text class="ac-sub">形象与声音都已训练好，出片时可以直接使用。</text>
+          </view>
+          <view class="ac-state ready">可用</view>
+        </block>
+        <block wx:elif="{{avatar && (avatar.imageStatus === 'training' || avatar.voiceStatus === 'training')}}">
+          <view class="ac-body">
+            <text class="ac-title">分身正在训练</text>
+            <text class="ac-sub">好了会通知你，这期间可先用平台预置形象。</text>
+          </view>
+          <view class="ac-state training">训练中</view>
+        </block>
+        <block wx:else>
+          <view class="ac-body">
+            <text class="ac-title">5 分钟创建数字分身</text>
+            <text class="ac-sub">克隆一次，之后用你自己的形象和声音出片。</text>
+          </view>
+          <view class="ac-state action">去创建</view>
+        </block>
       </view>
-      <view class="entry-row vd-card" bindtap="openAvatar">
-        <view class="er-body"><text class="er-t">分身管理</text><text class="er-s">形象与声音、授权记录、随时删除</text></view>
-        <native-icon class="ac-arrow" name="arrow" tone="neutral" size="15"></native-icon>
+
+      <!-- 次级入口（分包没有 tabBar，这里补齐设计稿的另外两个 tab） -->
+      <view class="entry-grid">
+        <view class="entry-row vd-card" bindtap="openAssets">
+          <view class="er-icon blue"><native-icon name="image" tone="blue" size="21"></native-icon></view>
+          <view class="er-body"><text class="er-t">我的素材</text><text class="er-s">店铺画面统一管理</text></view>
+        </view>
+        <view class="entry-row vd-card" bindtap="openAvatar">
+          <view class="er-icon orange"><native-icon name="user" tone="red" size="21"></native-icon></view>
+          <view class="er-body"><text class="er-t">分身管理</text><text class="er-s">形象、声音与授权</text></view>
+        </view>
       </view>
 
       <view class="vd-footer-space"></view>

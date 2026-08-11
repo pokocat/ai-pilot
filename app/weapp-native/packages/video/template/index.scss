@@ -2,33 +2,41 @@
 
 .vd-template { display: flex; flex-direction: column; height: 100vh; }
 .vd-scroll { flex: 1; min-height: 0; }
-.tp-body { padding: 0 20px; }
+.tp-body { padding: 8px 20px 0; }
 
-.tp-hero { padding-bottom: 0; height: 380px; margin-bottom: 16px; }
-.tp-badge { position: absolute; left: 10px; top: 10px; z-index: 1; }
-.tp-dur {
-  position: absolute; right: 10px; bottom: 10px; z-index: 1;
-  font-size: 11px; color: rgba(36, 30, 26, 0.7);
-  background: rgba(251, 247, 242, 0.8);
-  padding: 4px 7px; border-radius: 5px;
+.tp-hero-card {
+  display: flex; align-items: center; gap: 20px;
+  padding: 20px; margin-bottom: 16px;
+  border-radius: 24px; background: #202326; color: #FFF;
+  box-shadow: 0 16px 36px rgba(49,38,31,.16);
 }
+.tp-hero { width: 112px; flex: none; padding-bottom: 0; height: 199px; box-shadow: 0 12px 28px rgba(0,0,0,.2); }
+.tp-glow { position: absolute; width: 120px; height: 120px; right: -42px; top: -32px; border-radius: 50%; background: rgba(255,255,255,.28); filter: blur(18px); }
+.tp-poster-word { position: absolute; left: 12px; bottom: 48px; font-size: 22px; font-weight: 700; letter-spacing: .04em; color: rgba(255,255,255,.58); writing-mode: vertical-rl; }
+.tp-badge { position: absolute; left: 8px; top: 8px; z-index: 1; font-size: 9px; }
+.tp-dur { position: absolute; right: 8px; bottom: 8px; z-index: 1; font-size: 9px; color: var(--vd-ink-2); background: rgba(255,255,255,.86); padding: 4px 6px; border-radius: 999px; }
 
-.tp-industry { font-size: 12px; color: var(--vd-broll); font-weight: 600; }
-.tp-name { display: block; font-family: var(--vd-serif); font-size: 24px; font-weight: 700; margin: 6px 0 8px; }
-.tp-desc { display: block; font-size: 14px; line-height: 1.75; color: var(--vd-ink-2); margin-bottom: 16px; }
+.tp-intro { flex: 1; min-width: 0; }
+.tp-industry { display: block; font-size: 10px; color: #FF9973; font-weight: 700; letter-spacing: .08em; }
+.tp-name { display: block; font-family: var(--vd-serif); font-size: 25px; font-weight: 600; line-height: 1.35; margin: 10px 0 8px; }
+.tp-desc { display: block; font-size: 12px; line-height: 1.7; color: rgba(255,255,255,.68); }
+.tp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+.tp-chips text { padding: 5px 7px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); font-size: 9px; color: rgba(255,255,255,.72); }
 
 .tp-struct { margin-bottom: 12px; }
-.ts-title { display: block; font-size: 14px; font-weight: 600; margin-bottom: 12px; }
-.ts-row { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
-.ts-text { flex: 1; font-size: 13px; line-height: 1.6; color: var(--vd-ink-2); padding-top: 3px; }
-.ts-note {
-  display: block; margin-top: 10px; padding-top: 10px;
-  border-top: 1px solid var(--vd-line-soft);
-  font-size: 12px; line-height: 1.6; color: var(--vd-muted);
-}
+.ts-kicker { display: block; font-size: 10px; font-weight: 700; color: var(--vd-avatar-deep); letter-spacing: .14em; }
+.ts-title { display: block; margin-top: 4px; font-family: var(--vd-serif); font-size: 19px; font-weight: 600; }
+.ts-sub { display: block; margin: 6px 0 18px; font-size: 12px; line-height: 1.55; color: var(--vd-muted); }
+.ts-row { display: grid; grid-template-columns: 24px auto 1fr; align-items: start; gap: 10px; padding: 12px 0; border-top: 1px solid var(--vd-line-soft); }
+.ts-no { padding-top: 6px; font-size: 10px; font-weight: 700; color: var(--vd-faint); }
+.ts-text { font-size: 12px; line-height: 1.6; color: var(--vd-ink-2); padding-top: 3px; }
+.ts-note { display: block; margin-top: 12px; padding: 12px; border-radius: 12px; background: var(--vd-avatar-soft); font-size: 12px; line-height: 1.65; color: var(--vd-ink-2); }
 
-.tp-price { display: flex; align-items: baseline; justify-content: space-between; }
-.tpp-main { display: flex; align-items: baseline; gap: 4px; }
-.tpp-main .num { font-size: 24px; font-weight: 700; color: var(--vd-avatar-deep); }
-.tpp-main .unit { font-size: 13px; color: var(--vd-avatar-deep); }
-.tpp-sub { font-size: 12px; color: var(--vd-muted); }
+.tp-price { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.tpp-label { display: block; font-size: 10px; color: var(--vd-muted); }
+.tpp-main { display: flex; align-items: baseline; gap: 4px; margin-top: 4px; }
+.tpp-main .num { font-size: 30px; font-weight: 700; color: var(--vd-avatar-deep); font-variant-numeric: tabular-nums; }
+.tpp-main .unit { font-size: 12px; color: var(--vd-avatar-deep); }
+.tpp-side { text-align: right; }
+.tpp-value { display: block; font-size: 16px; font-weight: 700; color: var(--vd-ink); font-variant-numeric: tabular-nums; }
+.tpp-sub { display: block; margin-top: 4px; font-size: 10px; color: var(--vd-muted); }

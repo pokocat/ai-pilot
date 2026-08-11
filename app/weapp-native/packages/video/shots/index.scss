@@ -3,34 +3,26 @@
 .vd-shots { display: flex; flex-direction: column; height: 100vh; }
 .vd-scroll { flex: 1; min-height: 0; }
 
-/* ── 价格条 ────────────────────────────────────────────────────────── */
-// position:sticky 在小程序 scroll-view 里失效（见 apps/miniprogram/agent.md 的坑库），
-// 所以整个 vd-head 放在 scroll-view 外面，靠 flex 布局占位，不用 sticky。
-
+/* 报价进入内容流，页头只保留导航和步骤，避免小屏首屏只看到固定信息。 */
 .price-bar {
-  margin: 0 20px 12px;
-  padding: 12px 14px;
-  border-radius: var(--vd-r-field);
-  background: var(--vd-avatar-soft);
-  border: 1px solid var(--vd-avatar-line);
+  display: flex; align-items: center; gap: 16px;
+  margin: 8px 0 12px; padding: 18px 20px;
+  border-radius: 20px; color: #FFF; background: #202326;
+  box-shadow: 0 14px 30px rgba(49,38,31,.14);
 }
-
+.pb-copy { flex: none; }
+.pb-kicker { display: block; font-size: 10px; letter-spacing: .12em; color: rgba(255,255,255,.55); }
 .pb-main { display: flex; align-items: baseline; gap: 6px; }
-.pb-num { font-size: 26px; font-weight: 700; color: var(--vd-avatar-deep); line-height: 1; }
-.pb-unit { font-size: 13px; color: var(--vd-avatar-deep); margin-right: 8px; }
-
-.pb-stat { display: flex; gap: 10px; font-size: 12px; color: var(--vd-ink-3); }
-.pb-stat .dim { color: var(--vd-muted); }
-
-.pb-flash { display: flex; align-items: baseline; gap: 6px; }
+.pb-num { margin-top: 4px; font-size: 28px; font-weight: 700; color: #FF946E; line-height: 1; font-variant-numeric: tabular-nums; }
+.pb-unit { font-size: 12px; color: #FFB59A; }
+.pb-stat { flex: 1; display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; font-size: 10px; color: rgba(255,255,255,.5); }
+.pb-stat .strong { font-size: 12px; font-weight: 700; color: rgba(255,255,255,.9); font-variant-numeric: tabular-nums; }
+.pb-flash { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .pb-delta {
-  font-size: 13px; font-weight: 700; color: #FFF;
-  background: var(--vd-avatar); border-radius: var(--vd-r-chip);
-  padding: 2px 8px;
+  align-self: flex-start; font-size: 12px; font-weight: 700; color: #FFF;
+  background: var(--vd-avatar); border-radius: 999px; padding: 4px 8px;
 }
-.pb-flash-text { font-size: 12px; color: var(--vd-avatar-deep); }
-
-.pb-hint { display: block; margin-top: 8px; font-size: 11px; line-height: 1.5; color: var(--vd-ink-3); }
+.pb-flash-text { font-size: 10px; line-height: 1.5; color: rgba(255,255,255,.62); }
 
 /* ── 逐句行 ────────────────────────────────────────────────────────── */
 // 「填格子」而不是轨道：每行是一张独立卡片，左侧序号，右侧内容。
@@ -39,42 +31,46 @@
 .rows { padding: 0 20px; }
 
 .group-tool {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  margin-bottom: 12px; padding: 13px 14px;
-  border: 1px dashed var(--vd-broll-line); border-radius: var(--vd-r-field);
-  background: var(--vd-broll-soft);
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 28px; padding: 16px;
+  border: 1px solid var(--vd-broll-line); border-radius: 18px; background: var(--vd-broll-soft);
 }
-.gt-title { display: block; font-size: 14px; font-weight: 600; color: var(--vd-ink); }
-.gt-sub { display: block; margin-top: 4px; font-size: 11px; line-height: 1.45; color: var(--vd-muted); }
-.gt-go { flex: none; font-size: 12px; font-weight: 600; color: var(--vd-broll); }
+.gt-icon { width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: rgba(255,255,255,.72); }
+.gt-copy { flex: 1; min-width: 0; }
+.gt-title { display: block; font-size: 14px; font-weight: 700; color: var(--vd-ink); }
+.gt-sub { display: block; margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--vd-muted); }
+.gt-go { width: 36px; height: 36px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(255,255,255,.7); }
+.rows-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.rh-kicker { display: block; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--vd-broll); }
+.rh-title { display: block; margin-top: 3px; font-family: var(--vd-serif); font-size: 20px; font-weight: 600; }
+.rh-help { font-size: 11px; color: var(--vd-muted); }
 
 .row {
-  display: flex; gap: 10px;
   background: var(--vd-surface);
   border-radius: var(--vd-r-card);
   border: 1px solid var(--vd-line-soft);
-  border-left-width: 3px;
-  padding: 12px 14px 12px 11px;
-  margin-bottom: 10px;
+  border-top-width: 3px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: var(--vd-shadow-soft);
 }
 
-.row.avatar { border-left-color: var(--vd-avatar); }
-.row.broll { border-left-color: var(--vd-broll); }
-.row.tail { border-left-color: var(--vd-fixed); background: var(--vd-fixed-soft); }
+.row.avatar { border-top-color: var(--vd-avatar); }
+.row.broll { border-top-color: var(--vd-broll); }
+.row.tail { border-top-color: var(--vd-fixed); background: var(--vd-fixed-soft); box-shadow: none; }
 
 .row-no {
-  flex: none; width: 54px;
-  font-size: 12px; font-weight: 700; color: var(--vd-faint);
-  padding-top: 2px;
+  font-size: 10px; font-weight: 700; color: var(--vd-faint); letter-spacing: .04em;
 }
 
 .row-body { flex: 1; min-width: 0; }
-.row-copy-head { display: flex; align-items: center; justify-content: space-between; min-height: 18px; margin-bottom: 2px; }
-.row-count { padding: 2px 6px; border-radius: var(--vd-r-chip); background: var(--vd-broll-soft); font-size: 10px; color: var(--vd-broll); }
-.row-split { padding: 2px 0 4px 10px; font-size: 11px; color: var(--vd-muted); }
-.row-text { display: block; font-size: 15px; line-height: 1.6; color: var(--vd-ink); }
+.row-copy-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; margin-bottom: 8px; }
+.row-range { display: flex; align-items: center; gap: 8px; }
+.row-count { padding: 4px 7px; border-radius: 999px; background: var(--vd-broll-soft); font-size: 10px; color: var(--vd-broll); }
+.row-split { min-height: 32px; display: flex; align-items: center; padding-left: 10px; font-size: 11px; color: var(--vd-muted); }
+.row-text { display: block; font-size: 15px; line-height: 1.72; color: var(--vd-ink); }
 
-.row-ctl { display: flex; align-items: center; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
+.row-ctl { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 .vd-tag.tappable { padding-right: 8px; }
 .vd-tag .swap { margin-left: 2px; font-size: 12px; opacity: 0.75; }
 .row-meta { font-size: 12px; color: var(--vd-muted); flex: 1; min-width: 0; }
@@ -82,7 +78,7 @@
 /* 未配画面：虚线框提示 */
 .row-pick {
   display: flex; align-items: center; gap: 8px;
-  margin-top: 10px; padding: 10px 12px;
+  min-height: 48px; box-sizing: border-box; margin-top: 12px; padding: 10px 12px;
   border: 1px dashed var(--vd-broll-line);
   border-radius: 12px;
   background: var(--vd-broll-soft);
@@ -91,13 +87,13 @@
 .rp-text { font-size: 12px; color: var(--vd-broll); }
 
 /* 已配画面 */
-.row-asset { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-.ra-thumb { width: 40px; height: 40px; border-radius: 8px; flex: none; }
+.row-asset { display: flex; align-items: center; gap: 10px; min-height: 52px; margin-top: 12px; }
+.ra-thumb { width: 44px; height: 44px; border-radius: 12px; flex: none; }
 .ra-label { font-size: 12px; color: var(--vd-ink-2); flex: 1; }
 .ra-change { font-size: 12px; color: var(--vd-broll); }
 
 /* 出镜行 */
-.row-avatar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.row-avatar { display: flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 10px; }
 .ra-face {
   width: 32px; height: 32px; border-radius: 50%;
   background: var(--vd-avatar-soft);

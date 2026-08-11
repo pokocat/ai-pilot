@@ -2,72 +2,65 @@
 
 .vd-script { display: flex; flex-direction: column; height: 100vh; }
 .vd-scroll { flex: 1; min-height: 0; }
+.script-body { padding: 8px 20px 0; }
 
-.script-tools { display: flex; align-items: center; gap: 8px; padding: 0 20px 12px; }
-.st-btn {
-  padding: 8px 14px; border-radius: var(--vd-r-chip);
-  background: var(--vd-avatar-soft); color: var(--vd-avatar-deep);
-  font-size: 13px; font-weight: 600;
-}
-.st-btn.ghost { background: transparent; border: 1px solid var(--vd-line); color: var(--vd-ink-2); font-weight: 500; }
-.st-btn.busy { opacity: 0.6; }
-.st-count { margin-left: auto; font-size: 12px; color: var(--vd-muted); }
-
-.script-body { padding: 0 20px; }
-.sb-label { display: block; font-size: 12px; color: var(--vd-muted); margin-bottom: 10px; }
-
+/* AI 对话是文案页主动作，用熟悉的聊天界面包住复杂生成能力。 */
 .ai-writer {
-  margin-bottom: 18px; padding: 15px;
-  border: 1px solid var(--vd-avatar-line); border-radius: var(--vd-r-card);
-  background: linear-gradient(145deg, var(--vd-avatar-soft), var(--vd-surface) 62%);
+  position: relative; overflow: hidden;
+  margin-bottom: 16px; padding: 20px;
+  border-radius: 24px; background: #202326; color: #FFF;
+  box-shadow: 0 16px 36px rgba(49,38,31,.16);
 }
-.aw-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.aw-kicker { display: block; font-size: 11px; letter-spacing: .16em; color: var(--vd-avatar-deep); }
-.aw-title { display: block; margin-top: 4px; font-family: var(--vd-serif); font-size: 18px; line-height: 1.35; color: var(--vd-ink); }
-.aw-state { flex: none; margin-top: 2px; padding: 4px 8px; border-radius: var(--vd-r-chip); background: var(--vd-surface); font-size: 10px; color: var(--vd-avatar-deep); }
-.aw-thread { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow: hidden; margin-top: 13px; }
-.aw-message { max-width: 86%; box-sizing: border-box; padding: 9px 11px; border-radius: 12px; font-size: 13px; line-height: 1.55; }
-.aw-message.assistant { align-self: flex-start; background: var(--vd-surface); color: var(--vd-ink-2); border: 1px solid var(--vd-line-soft); }
-.aw-message.user { align-self: flex-end; background: var(--vd-avatar); color: #FFF; }
-.aw-message.typing { color: var(--vd-muted); }
-.aw-applied { display: block; margin-top: 5px; font-size: 10px; color: var(--vd-avatar-deep); }
-.aw-suggestions { display: flex; white-space: nowrap; margin-top: 11px; }
-.aw-suggestion { display: inline-flex; margin-right: 7px; padding: 6px 10px; border: 1px solid var(--vd-line); border-radius: var(--vd-r-chip); background: rgba(255,255,255,.65); font-size: 11px; color: var(--vd-ink-3); }
-.aw-compose { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; }
-.aw-input { flex: 1; min-height: 38px; max-height: 96px; box-sizing: border-box; padding: 9px 11px; border: 1px solid var(--vd-line); border-radius: 12px; background: var(--vd-surface); font-size: 13px; line-height: 1.5; color: var(--vd-ink); }
-.aw-send { flex: none; min-width: 52px; padding: 10px 9px; text-align: center; border-radius: 11px; background: var(--vd-avatar); color: #FFF; font-size: 12px; font-weight: 600; }
+.ai-writer::after { content: ""; position: absolute; width: 160px; height: 160px; right: -64px; top: -82px; border-radius: 50%; background: rgba(240,100,53,.36); filter: blur(24px); pointer-events: none; }
+.aw-head { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.aw-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.aw-orb { width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 15px; background: var(--vd-avatar); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 8px 18px rgba(240,100,53,.26); }
+.aw-kicker { display: block; font-size: 10px; font-weight: 700; letter-spacing: .12em; color: #FF9C77; }
+.aw-title { display: block; margin-top: 3px; font-family: var(--vd-serif); font-size: 19px; line-height: 1.35; color: #FFF; }
+.aw-state { flex: none; margin-top: 6px; padding: 5px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); font-size: 9px; color: rgba(255,255,255,.7); }
+.aw-intro { position: relative; z-index: 1; display: block; margin-top: 12px; font-size: 12px; line-height: 1.6; color: rgba(255,255,255,.6); }
+
+.aw-thread { position: relative; z-index: 1; display: flex; max-height: 244px; margin-top: 16px; }
+.aw-message { display: block; max-width: 86%; box-sizing: border-box; padding: 10px 12px; margin-bottom: 8px; border-radius: 14px; font-size: 13px; line-height: 1.55; }
+.aw-message.assistant { margin-right: auto; background: rgba(255,255,255,.1); color: rgba(255,255,255,.86); border: 1px solid rgba(255,255,255,.09); border-bottom-left-radius: 5px; }
+.aw-message.user { margin-left: auto; background: var(--vd-avatar); color: #FFF; border-bottom-right-radius: 5px; }
+.aw-message.typing { color: rgba(255,255,255,.58); }
+.aw-applied { display: block; margin-top: 6px; font-size: 9px; color: #FFA17F; }
+.aw-suggestions { position: relative; z-index: 1; display: flex; white-space: nowrap; margin-top: 8px; }
+.aw-suggestion { display: inline-flex; min-height: 36px; box-sizing: border-box; align-items: center; margin-right: 8px; padding: 0 11px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.72); }
+.aw-compose { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: 8px; margin-top: 12px; padding: 6px; border-radius: 16px; background: #FFF; }
+.aw-input { flex: 1; min-height: 40px; max-height: 96px; box-sizing: border-box; padding: 9px 8px; border: 0; background: transparent; font-size: 13px; line-height: 1.5; color: var(--vd-ink); }
+.aw-send { flex: none; min-width: 58px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; padding: 0 10px; text-align: center; border-radius: 12px; background: var(--vd-avatar); color: #FFF; font-size: 12px; font-weight: 700; box-shadow: inset 0 1px 0 rgba(255,255,255,.35); }
 .aw-send.busy { opacity: .58; }
 
-/* 只读行：像一段连读的文章，不像表单 */
-.lines { background: var(--vd-surface); border-radius: var(--vd-r-card); border: 1px solid var(--vd-line-soft); padding: 16px; }
-.line { padding: 7px 0; }
-.line-text { font-size: 16px; line-height: 1.85; color: var(--vd-ink); }
+.script-tools { display: flex; align-items: center; gap: 8px; margin-bottom: 28px; }
+.st-btn { min-height: 40px; box-sizing: border-box; display: flex; align-items: center; padding: 0 14px; border-radius: 999px; background: var(--vd-avatar-soft); color: var(--vd-avatar-deep); font-size: 12px; font-weight: 700; }
+.st-btn.ghost { background: var(--vd-surface); border: 1px solid var(--vd-line); color: var(--vd-ink-2); font-weight: 500; }
+.st-btn.busy { opacity: .6; }
+.st-count { margin-left: auto; font-size: 11px; color: var(--vd-muted); }
 
-/* 编辑态 */
-.line-edit { margin: 10px -6px; border-color: var(--vd-avatar-line); background: var(--vd-avatar-soft); }
+.sb-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.sb-kicker { display: block; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--vd-avatar-deep); }
+.sb-title { display: block; margin-top: 3px; font-family: var(--vd-serif); font-size: 20px; font-weight: 600; }
+.sb-help { font-size: 11px; color: var(--vd-muted); }
+
+/* 文案像文章而不是密集表单；段落之间用节奏留白。 */
+.lines { background: var(--vd-surface); border-radius: 20px; border: 1px solid var(--vd-line-soft); padding: 16px 20px; box-shadow: var(--vd-shadow-soft); }
+.line { position: relative; padding: 10px 0 10px 16px; border-bottom: 1px solid var(--vd-line-soft); }
+.line:last-child { border-bottom: 0; }
+.line::before { content: ""; position: absolute; left: 0; top: 18px; width: 5px; height: 5px; border-radius: 50%; background: var(--vd-avatar); opacity: .45; }
+.line-text { font-size: 15px; line-height: 1.82; color: var(--vd-ink); }
+
+.line-edit { margin: 12px -8px; padding: 16px; border-color: var(--vd-avatar-line); background: var(--vd-avatar-soft); box-shadow: none; }
 .le-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
-.le-title { font-size: 12px; font-weight: 600; color: var(--vd-avatar-deep); }
-.le-sec { font-size: 12px; color: var(--vd-ink-3); }
-.le-input {
-  width: 100%; box-sizing: border-box;
-  background: var(--vd-surface);
-  border: 1px solid var(--vd-line);
-  border-radius: 12px;
-  padding: 12px;
-  font-size: 16px; line-height: 1.7; color: var(--vd-ink);
-  min-height: 60px;
-}
+.le-title { font-size: 11px; font-weight: 700; color: var(--vd-avatar-deep); }
+.le-sec { font-size: 11px; color: var(--vd-ink-3); font-variant-numeric: tabular-nums; }
+.le-input { width: 100%; box-sizing: border-box; background: var(--vd-surface); border: 1px solid var(--vd-line); border-radius: 14px; padding: 12px; font-size: 15px; line-height: 1.7; color: var(--vd-ink); min-height: 72px; }
 .le-acts { display: flex; gap: 8px; margin-top: 10px; }
-.le-act {
-  flex: 1; text-align: center;
-  padding: 10px 0; border-radius: 10px;
-  background: var(--vd-surface); border: 1px solid var(--vd-line);
-  font-size: 13px; color: var(--vd-ink-2);
-}
-.le-act.main { background: var(--vd-avatar); border-color: var(--vd-avatar); color: #FFF; font-weight: 600; }
-.le-act.busy { opacity: 0.6; }
+.le-act { flex: 1; min-height: 44px; display: flex; align-items: center; justify-content: center; text-align: center; border-radius: 12px; background: var(--vd-surface); border: 1px solid var(--vd-line); font-size: 11px; color: var(--vd-ink-2); }
+.le-act.main { background: var(--vd-avatar); border-color: var(--vd-avatar); color: #FFF; font-weight: 700; }
+.le-act.busy { opacity: .6; }
 
-/* 底部时长 */
 .foot-stat { display: flex; flex-direction: column; gap: 2px; flex: none; }
-.fs-num { font-size: 15px; font-weight: 700; color: var(--vd-ink); }
-.fs-sub { font-size: 11px; color: var(--vd-muted); }
+.fs-num { font-size: 15px; font-weight: 700; color: var(--vd-ink); font-variant-numeric: tabular-nums; }
+.fs-sub { font-size: 10px; color: var(--vd-muted); }

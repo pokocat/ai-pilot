@@ -13,29 +13,30 @@
       <view class="vd-step-line"></view>
       <view class="vd-step"><view class="dot">3</view><text>出片</text></view>
     </view>
-    <view class="price-bar">
-      <view class="pb-main">
-        <text class="pb-num">{{credits}}</text><text class="pb-unit">积分</text>
-        <view wx:if="{{flash}}" class="pb-flash"><text class="pb-delta">{{flash.delta}}</text><text class="pb-flash-text">{{flash.text}}</text></view>
-        <view wx:else class="pb-stat"><text>成片 {{totalText}}</text><text class="dim">出镜 {{avatarSec}} 秒</text></view>
-      </view>
-      <text class="pb-hint">一个画面可以承接连续多句话；分身出镜的时间越长，积分越多。</text>
-    </view>
   </view>
 
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="rows">
-      <view class="group-tool" bindtap="openRange">
-        <view><text class="gt-title">圈选多句话，共用一个画面</text><text class="gt-sub">点起句和止句即可，不会合并或改乱原文</text></view>
-        <text class="gt-go">去圈选</text>
+      <view class="price-bar">
+        <view class="pb-copy">
+          <text class="pb-kicker">当前方案</text>
+          <view class="pb-main"><text class="pb-num">{{credits}}</text><text class="pb-unit">积分</text></view>
+        </view>
+        <view wx:if="{{flash}}" class="pb-flash"><text class="pb-delta">{{flash.delta}}</text><text class="pb-flash-text">{{flash.text}}</text></view>
+        <view wx:else class="pb-stat"><text class="strong">{{totalText}}</text><text>预计成片</text><text class="strong">{{avatarSec}} 秒</text><text>分身出镜</text></view>
       </view>
+      <view class="group-tool" bindtap="openRange">
+        <view class="gt-icon"><native-icon name="layers" tone="blue" size="21"></native-icon></view>
+        <view class="gt-copy"><text class="gt-title">圈选多句话，共用一个画面</text><text class="gt-sub">点起句和止句，原文不会被合并或改乱</text></view>
+        <view class="gt-go"><native-icon name="arrow" tone="blue" size="16"></native-icon></view>
+      </view>
+      <view class="rows-head"><view><text class="rh-kicker">画面清单</text><text class="rh-title">逐段检查</text></view><text class="rh-help">点标签可切换出镜方式</text></view>
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
       <view wx:for="{{rows}}" wx:key="id" class="row {{item.roleClass}}">
-        <text class="row-no">{{item.rangeText}}</text>
         <view class="row-body">
           <view class="row-copy-head">
-            <text wx:if="{{item.multi}}" class="row-count">{{item.sentenceCount}} 句共用</text>
-            <text wx:if="{{item.multi && item.roleClass !== 'tail'}}" class="row-split" data-id="{{item.id}}" catchtap="splitShot">拆开</text>
+            <view class="row-range"><text class="row-no">{{item.rangeText}}</text><text wx:if="{{item.multi}}" class="row-count">{{item.sentenceCount}} 句共用</text></view>
+            <text wx:if="{{item.multi && item.roleClass !== 'tail'}}" class="row-split" data-id="{{item.id}}" catchtap="splitShot">拆成单句</text>
           </view>
           <text class="row-text">{{item.text}}</text>
           <view class="row-ctl">

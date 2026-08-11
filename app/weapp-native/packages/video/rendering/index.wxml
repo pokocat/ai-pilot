@@ -15,14 +15,16 @@
         <view class="inner vd-grain"></view>
         <view class="rd-overlay">
           <text class="rd-pct">{{progress}}%</text>
-          <text class="rd-ratio">正在合成 9:16</text>
+          <text class="rd-ratio">正在合成 9:16 竖屏片</text>
+          <view class="rd-track"><view class="rd-fill" style="width:{{progress}}%"></view></view>
         </view>
       </view>
 
-      <text class="rd-title">正在给你出片</text>
-      <text class="rd-sub">可以直接退出去忙，出好了在「我的作品」里等你。</text>
+      <view class="rd-live"><view class="rd-live-dot"></view><text>任务已在云端稳定运行</text></view>
+      <text class="rd-title">正在把你的故事做成片</text>
+      <text class="rd-sub">可以直接退出去忙。生成完成后，作品会留在「我的作品」。</text>
 
-      <view class="rd-stages">
+      <view class="rd-stages vd-card">
         <view wx:for="{{stageRows}}" wx:key="key" class="rd-stage {{item.state}}">
           <view class="rs-dot">
             <native-icon wx:if="{{item.state === 'done'}}" name="check" tone="white" size="11"></native-icon>
@@ -38,6 +40,7 @@
 
     <block wx:else>
       <view class="vd-empty">
+        <view class="rd-fail-icon"><native-icon name="alert" tone="red" size="24"></native-icon></view>
         <text class="t">这条没能出成</text>
         <text class="s">{{errorMessage}}</text>
       </view>

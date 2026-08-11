@@ -11,32 +11,38 @@
 
 .vd {
   // 底色
-  --vd-canvas: #F1E9DF;      // 页面最外层
-  --vd-bg: #FBF7F2;          // 屏幕底
+  --vd-canvas: #ECE9E3;      // 页面最外层
+  --vd-bg: #F7F6F2;          // 屏幕底
   --vd-surface: #FFFFFF;     // 卡片
-  --vd-sunken: #F0E6DC;      // 进度槽 / 分隔块
+  --vd-sunken: #EFEEE9;      // 进度槽 / 分隔块
 
   // 文字
-  --vd-ink: #241E1A;
-  --vd-ink-2: #5C524A;
-  --vd-ink-3: #7A6E64;
-  --vd-muted: #8E8177;
-  --vd-faint: #B0A69C;
+  --vd-ink: #191A1C;
+  --vd-ink-2: #494B4F;
+  --vd-ink-3: #686A6F;
+  --vd-muted: #81838A;
+  --vd-faint: #AAA9A6;
 
   // 线
-  --vd-line: rgba(36, 30, 26, 0.12);
-  --vd-line-soft: rgba(36, 30, 26, 0.08);
+  --vd-line: rgba(25, 26, 28, 0.12);
+  --vd-line-soft: rgba(25, 26, 28, 0.07);
 
   // 分身出镜 = 橙（贵的那个，视觉上要最重）
-  --vd-avatar: #E4622B;
-  --vd-avatar-deep: #C74A1C;
-  --vd-avatar-soft: #FBEADF;
-  --vd-avatar-line: rgba(228, 98, 43, 0.28);
+  --vd-avatar: #F06435;
+  --vd-avatar-deep: #C74920;
+  --vd-avatar-soft: #FFF0E9;
+  --vd-avatar-line: rgba(240, 100, 53, 0.25);
 
   // 配画面 = 蓝（便宜的那个）
-  --vd-broll: #35607F;
-  --vd-broll-soft: #E6EDF2;
-  --vd-broll-line: rgba(53, 96, 127, 0.24);
+  --vd-broll: #326B86;
+  --vd-broll-soft: #EDF5F8;
+  --vd-broll-line: rgba(50, 107, 134, 0.22);
+
+  // 状态
+  --vd-success: #2F7D5B;
+  --vd-success-soft: #EAF5EF;
+  --vd-danger: #B94B3C;
+  --vd-danger-soft: #FBEDEA;
 
   // 固定片段 = 灰（不可切换）
   --vd-fixed: #9A8F84;
@@ -49,10 +55,14 @@
 
   // 圆角
   --vd-r-card: 20px;
-  --vd-r-field: 14px;
+  --vd-r-field: 16px;
   --vd-r-chip: 999px;
+  --vd-shadow: 0 10px 28px rgba(95, 72, 55, 0.08);
+  --vd-shadow-soft: 0 4px 14px rgba(95, 72, 55, 0.06);
 
-  background: var(--vd-bg);
+  background:
+    radial-gradient(circle at 86% 0%, rgba(240, 100, 53, 0.07), transparent 24%),
+    var(--vd-bg);
   color: var(--vd-ink);
   font-family: var(--vd-sans);
   min-height: 100vh;
@@ -69,7 +79,7 @@
   top: 0;
   z-index: 10;
   flex: none;
-  border-bottom: 1px solid var(--vd-line-soft);
+  border-bottom: 1px solid rgba(25, 26, 28, 0.05);
 }
 
 .vd-headrow {
@@ -87,11 +97,12 @@
 }
 
 .vd-back {
-  width: 36px; height: 36px; flex: 0 0 36px;
+  width: 44px; height: 44px; flex: 0 0 44px;
   display: flex; align-items: center; justify-content: center;
-  border-radius: 10px;
-  background: var(--vd-surface);
-  border: 1px solid var(--vd-line-soft);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(25, 26, 28, 0.06);
+  box-shadow: var(--vd-shadow-soft);
   font-size: 22px; color: var(--vd-ink); line-height: 1;
   box-sizing: border-box;
 }
@@ -101,7 +112,7 @@
   min-width: 0;
   font-family: var(--vd-serif);
   font-weight: 600;
-  font-size: 17px;
+  font-size: 18px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -111,31 +122,34 @@
   flex: none;
   font-size: 14px;
   color: var(--vd-avatar-deep);
-  padding: 7px 0 7px 10px;
+  min-height: 44px;
+  padding: 0 0 0 10px;
+  display: flex;
+  align-items: center;
 }
 
 /* ── 三步进度条（改文案 / 配画面 / 出片）─────────────────────────────── */
 
 .vd-steps {
   display: flex; align-items: center; gap: 8px;
-  padding: 6px 20px 14px;
+  padding: 4px 20px 12px;
 }
 
 .vd-step {
   display: flex; align-items: center; gap: 6px;
-  font-size: 13px; color: var(--vd-faint);
+  font-size: 12px; color: var(--vd-faint);
 }
 
 .vd-step .dot {
-  width: 20px; height: 20px; border-radius: 50%;
+  width: 24px; height: 24px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; font-weight: 700;
   background: var(--vd-sunken); color: var(--vd-muted);
 }
 
 .vd-step.on { color: var(--vd-ink); font-weight: 600; }
-.vd-step.on .dot { background: var(--vd-avatar); color: #FFF; }
-.vd-step.done .dot { background: var(--vd-avatar-soft); color: var(--vd-avatar-deep); }
+.vd-step.on .dot { background: var(--vd-avatar); color: #FFF; box-shadow: 0 5px 14px rgba(240, 100, 53, 0.24); }
+.vd-step.done .dot { background: var(--vd-success-soft); color: var(--vd-success); }
 .vd-step-line { flex: 1; height: 1px; background: var(--vd-line); }
 
 /* ── 通用卡片 / 按钮 ─────────────────────────────────────────────────── */
@@ -144,27 +158,31 @@
   background: var(--vd-surface);
   border-radius: var(--vd-r-card);
   border: 1px solid var(--vd-line-soft);
-  padding: 14px;
+  padding: 20px;
+  box-shadow: var(--vd-shadow-soft);
   box-sizing: border-box;
 }
 
 .vd-btn {
-  height: 52px;
+  height: 56px;
   min-width: 0;
   box-sizing: border-box;
   border-radius: var(--vd-r-field);
   background: var(--vd-avatar);
   color: #FFF;
-  font-size: 17px; font-weight: 700;
+  font-size: 16px; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 22px rgba(240, 100, 53, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
+.vd-btn:active { transform: scale(0.985); opacity: 0.92; }
 
 .vd-btn.ghost {
-  background: transparent;
+  background: var(--vd-surface);
   color: var(--vd-ink-2);
   border: 1px solid var(--vd-line);
   font-weight: 500; font-size: 15px;
-  height: 48px;
+  height: 52px;
+  box-shadow: none;
 }
 
 .vd-btn.disabled { opacity: 0.45; }
@@ -175,8 +193,9 @@
   position: fixed; left: 0; right: 0; bottom: 0;
   width: 100%;
   box-sizing: border-box;
-  background: var(--vd-bg);
-  border-top: 1px solid var(--vd-line);
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid var(--vd-line-soft);
+  box-shadow: 0 -10px 30px rgba(69, 54, 44, 0.08);
   // 不能把旧 iOS 的 constant() 放进整条 shorthand：不支持该函数的基础库会丢弃
   // 整个 padding，导致左侧时长贴边、右侧按钮越出屏幕。
   padding: 12px 20px;
@@ -195,7 +214,7 @@
   width: 100%;
   height: 0;
   padding-bottom: 177.8%;
-  border-radius: 12px;
+  border-radius: 16px;
   overflow: hidden;
   background: var(--vd-sunken);
 }
@@ -206,14 +225,15 @@
 
 .vd-grain {
   background-image:
-    repeating-linear-gradient(64deg, rgba(36, 30, 26, 0.16) 0 1px, rgba(255, 255, 255, 0) 1px 3px),
-    repeating-linear-gradient(-27deg, rgba(255, 255, 255, 0.14) 0 1px, rgba(255, 255, 255, 0) 1px 4px),
-    repeating-linear-gradient(118deg, #C9A985 0 9px, #BE9C79 9px 18px);
+    radial-gradient(circle at 74% 20%, rgba(255, 221, 187, .72) 0 13%, transparent 34%),
+    linear-gradient(155deg, rgba(44, 37, 33, .08), transparent 48%),
+    linear-gradient(140deg, #C59268 0%, #976B50 54%, #53443B 100%);
 }
 
-.vd-grain.morning { background-image: repeating-linear-gradient(64deg, rgba(36, 30, 26, 0.14) 0 1px, rgba(255, 255, 255, 0) 1px 3px), repeating-linear-gradient(122deg, #D9BFA2 0 8px, #CDAF90 8px 16px); }
-.vd-grain.craft { background-image: repeating-linear-gradient(64deg, rgba(36, 30, 26, 0.18) 0 1px, rgba(255, 255, 255, 0) 1px 3px), repeating-linear-gradient(118deg, #B99C7C 0 9px, #A98C6C 9px 18px); }
-.vd-grain.street { background-image: repeating-linear-gradient(64deg, rgba(36, 30, 26, 0.15) 0 1px, rgba(255, 255, 255, 0) 1px 3px), repeating-linear-gradient(110deg, #C2AC93 0 9px, #B39C83 9px 18px); }
+.vd-grain.morning { background-image: radial-gradient(circle at 72% 18%, rgba(255,244,205,.85) 0 12%, transparent 34%), linear-gradient(145deg, #E8B679 0%, #C77A53 52%, #6D554B 100%); }
+.vd-grain.craft { background-image: radial-gradient(circle at 22% 76%, rgba(229,179,121,.4) 0 16%, transparent 38%), linear-gradient(145deg, #9C7555 0%, #695044 56%, #2F3332 100%); }
+.vd-grain.street { background-image: radial-gradient(circle at 78% 28%, rgba(244,214,178,.55) 0 12%, transparent 35%), linear-gradient(150deg, #C9A682 0%, #8A7565 54%, #4A4C4C 100%); }
+.vd-grain.warm { background-image: radial-gradient(circle at 72% 18%, rgba(255,210,164,.65) 0 14%, transparent 35%), linear-gradient(145deg, #C7825A 0%, #8D5E48 52%, #383A39 100%); }
 
 /* ── AI 生成角标（合规硬要求，见方案 §9.1）──────────────────────────── */
 

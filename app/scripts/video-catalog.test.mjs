@@ -67,3 +67,21 @@ test('快出片所有页面只占一层原生导航高度', () => {
   assert.match(tokens, /\.vd-footer\s*\{[\s\S]*width: 100%;[\s\S]*box-sizing: border-box;[\s\S]*padding: 12px 20px;/);
   assert.doesNotMatch(tokens, /padding:[^;]*constant\(safe-area-inset-bottom\)/);
 });
+
+test('快出片移动视觉层级固定主任务、拇指区和高风险确认顺序', () => {
+  const read = (page) => fs.readFileSync(path.join(videoRoot, page, 'index.wxml'), 'utf8');
+  const tokens = fs.readFileSync(path.join(videoRoot, 'styles/tokens.scss'), 'utf8');
+  const home = read('home');
+  const script = read('script');
+  const shots = read('shots');
+  const confirm = read('confirm');
+
+  assert.match(tokens, /--vd-success:/);
+  assert.match(tokens, /--vd-shadow:/);
+  assert.match(tokens, /\.vd-back\s*\{[\s\S]*width: 44px; height: 44px;/);
+  assert.match(tokens, /\.vd-btn\s*\{[\s\S]*height: 56px;/);
+  assert.ok(home.indexOf('<!-- 模板精选 -->') < home.indexOf('<!-- 数字分身状态：模板是主任务'));
+  assert.ok(script.indexOf('class="ai-writer"') < script.indexOf('class="script-tools"'));
+  assert.ok(shots.indexOf('class="vd-scroll"') < shots.indexOf('class="price-bar"'));
+  assert.ok(confirm.indexOf('class="cf-ready"') < confirm.indexOf('class="cf-preview'));
+});
