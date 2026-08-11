@@ -12,7 +12,7 @@
 - 删除会把用户阻断在 403 的“授权视频先行”产品硬闸。石榴 Train Avatar Model 的 `authId` 是可选校验项，普通创建现在按“先克隆声音 → 上传形象视频 → 云端训练”完成；历史账号已有 authId 时后端仍兼容携带。`ClipCaptureRequirements` 新增 `authorizationVideoRequired=false`，回归测试禁止恢复 `CLIP_CONSENT_REQUIRED`。
 - 声音克隆同时支持页面内照稿录制和上传现有音频；形象相机不再要求朗读固定授权稿，微信原生全屏录制只承担拍摄。形象上传区压缩为 176px，选中后的播放器固定 238px 并使用 `object-fit=contain`，横竖视频都完整显示，不再出现 380px 大空框。
 - 依据 `mobile-app-ui-design` 的任务优先、单主动作、44px 点击区和 8 点间距重新组织页面：三步进度只显示真实任务，拍摄指南压为两列，素材使用权改为轻量声明且保留删除能力。自动化只走 HTTP 桩和本地媒体策略，没有创建真实 speaker/avatar/video 任务、没有消耗石榴点数。
-- 已部署军师预发 `b0c647d` 与 AIStar `83670b5e-20260811T144740Z`；两服务 active、`NRestarts=0`，在线 requirements 为 `authorizationVideoRequired=false / avatarMin=5 / voiceMin=3`。server 包已 auto-preview 到 AppID `wx810ebe6dfef8e75f`，构建身份为 `native-weapp / server / https://wxapi.aibuzz.cn/api_preprod / b0c647d`。
+- 已部署军师预发 `b0c647d` 与 AIStar `83670b5e-20260811T144740Z`；两服务 active、`NRestarts=0`，在线 requirements 为 `authorizationVideoRequired=false / avatarMin=5 / voiceMin=3`。麦克风权限热修 `67f0fb1` 无需重启服务，server 包已重新 auto-preview 到 AppID `wx810ebe6dfef8e75f`，构建身份为 `native-weapp / server / https://wxapi.aibuzz.cn/api_preprod / 67f0fb1`。
 
 ### 2026-08-11 · 「快出片」采集时长按石榴官方硬门纠偏 · 影响面：分身采集提示、端上前检、AIStar 媒体校验
 

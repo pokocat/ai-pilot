@@ -2,7 +2,7 @@
 
 > **状态**：M1 工程、石榴 v0.118 官方采集/训练/生成契约（`authId` 可选）、阿里云多模态机审适配器与完整多段总装已落地；真实供应商链已具备本人真机验收条件。测试阶段允许隔离预发显式审核旁路，production 硬拒绝。本人素材质量实测、真实发布与生产合规门槛仍未完成。
 
-> **当前预发**：军师 `b0c647d` / AIStar `83670b5e-20260811T144740Z`，两服务 active、`NRestarts=0`；requirements 为 `authorizationVideoRequired=false / avatarMin=5 / voiceMin=3`，真机 server 包已 auto-preview。
+> **当前预发**：军师服务 `b0c647d` / AIStar `83670b5e-20260811T144740Z`，两服务 active、`NRestarts=0`；requirements 为 `authorizationVideoRequired=false / avatarMin=5 / voiceMin=3`。麦克风权限热修真机包 `67f0fb1` 已 auto-preview。
 > **创建**：2026-08-10
 > **上游**：产品方案见 `AIStarEcosystem/docs/clip-avatar-video-plan.md`（549 行，本文不重复其内容，只记**因为改成军师分包而变化的部分**）。
 > **设计稿**：`13屏原型与设计确认-handoff.zip` → `快出片 原型.dc.html`（13 屏，暖橙人文纪实）。
