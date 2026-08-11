@@ -25,6 +25,11 @@ const SCENE_META: Record<WechatSubscribeScene, { title: string; description: str
     description: '支付成功、权益到账后提醒确认',
     env: ['WECHAT_SUBSCRIBE_PAYMENT_TEMPLATE_ID', 'WECHAT_PAYMENT_TEMPLATE_ID'],
   },
+  avatar: {
+    title: '数字分身训练',
+    description: '数字人形象训练完成或失败后提醒',
+    env: ['WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID'],
+  },
 };
 
 function envFirst(keys: string[]): string {
@@ -115,6 +120,7 @@ function miniprogramState(): 'developer' | 'trial' | 'formal' {
 }
 
 function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | null } = {}): string {
+  if (scene === 'avatar') return 'packages/video/clone/index?step=2';
   if (scene === 'report' && opts.reportId) return `packages/work/report/index?id=${encodeURIComponent(opts.reportId)}`;
   if (scene === 'report') return 'packages/work/library/index';
   if (scene === 'payment') return 'packages/work/credits/index'; // 订单明细页（含支付订单段）
@@ -125,7 +131,7 @@ function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | n
 // 事后翻 WechatNotificationLog 才看得出——所以每个 scene 的键都必须对着后台模板逐字核过，
 // 不能照别的模板抄。核对方法：微信公众平台 → 订阅消息 → 我的模板 → 详细内容里的 {{thingN.DATA}}。
 //
-// 三个 scene 的键，2026-07-30 全部对着后台模板详情逐字核过：
+// 四个 scene 的键都必须对着后台模板详情逐字核过：
 //   review （26922「最新分析报告提醒」）：thing2=报告类型 thing3=报告名称 thing5=备注 time6=生成时间
 //     ⚠️ 此前发的是 thing1/time2/thing3，与模板完全不符 → 所有借它的推送（早间军令 / 每日复盘 /
 //     周复盘 / 久不复盘召回 / 预言到期 / 岁验）在生产恒 47003 拒发，用户一条也收不到。
@@ -138,9 +144,18 @@ function pageForScene(scene: WechatSubscribeScene, opts: { reportId?: string | n
 //     number6 是数字类型（纯数字，≤32 位）——我们自己的 outTradeNo 形如 js{时间戳}{hex} 带字母，
 //     发上去必被拒，故优先用微信自己的 transactionId（全数字，也正是用户在微信账单里看到的那个号），
 //     缺失时退化为从 outTradeNo 抽数字。
+//   avatar（32308「服务进度通知」）：thing13=业务标题 phrase16=状态 thing5=温馨提示 time12=完成时间。
 function dataForScene(scene: WechatSubscribeScene, opts: {
-  title: string; note?: string; category?: string; userName?: string; amountFen?: number; orderNo?: string;
+  title: string; note?: string; category?: string; userName?: string; amountFen?: number; orderNo?: string; statusText?: string;
 }) {
+  if (scene === 'avatar') {
+    return {
+      thing13: { value: clip(opts.title || '数字分身训练', 20) },
+      phrase16: { value: clip(opts.statusText || '已完成', 5) },
+      thing5: { value: clip(opts.note || '分身已就绪，点击查看', 20) },
+      time12: { value: timeValue() },
+    };
+  }
   if (scene === 'payment') {
     return {
       thing1: { value: clip(opts.title, 20) },
@@ -222,6 +237,7 @@ export async function sendWechatSubscribeMessage(args: {
   category?: string; // review 模板的「报告类型」位（提醒品类）；缺省「军师提醒」
   amountFen?: number; // payment 模板的「金额」位（分）
   orderNo?: string; // payment 模板的「订单号」位；传微信 transactionId 优先（纯数字）
+  statusText?: string; // avatar 模板的「状态」位：已完成 / 训练失败
   reportId?: string | null;
   logSkipped?: boolean;
 }): Promise<{ sent: boolean; reason?: string; retryable?: boolean }> {
@@ -269,7 +285,7 @@ export async function sendWechatSubscribeMessage(args: {
     lang: 'zh_CN',
     data: dataForScene(args.scene, {
       title: args.title, note: args.note, category: args.category,
-      userName: user.name, amountFen: args.amountFen, orderNo: args.orderNo,
+      userName: user.name, amountFen: args.amountFen, orderNo: args.orderNo, statusText: args.statusText,
     }),
   };
 

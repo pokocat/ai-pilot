@@ -275,12 +275,12 @@ module.exports = {
     if (!payload || !payload.filePath) return Promise.reject(Object.assign(new Error('缺少采集文件'), { code: 'CLIP_CLONE_FILE_REQUIRED' }));
     avatar = Object.assign({}, avatar || {}, kind === 'voice'
       ? { voiceStatus: 'training', voiceProgress: 12, voiceMessage: null, voiceTrainedText: '' }
-      : { imageStatus: 'training', imageProgress: 8, imageMessage: null, imageTrainedText: '' }, { engine: 'shiliu', presetAvailable: true });
+      : { imageStatus: 'training', imageProgress: 8, imageMessage: null, imageTrainedText: '', voiceStatus: 'training', voiceProgress: 6, voiceMessage: null, voiceTrainedText: '' }, { engine: 'shiliu', presetAvailable: true });
     setTimeout(() => {
       if (!avatar) return;
       avatar = Object.assign({}, avatar, kind === 'voice'
         ? { voiceStatus: 'ready', voiceProgress: 100, voiceTrainedText: '刚刚' }
-        : { imageStatus: 'ready', imageProgress: 100, imageTrainedText: '刚刚' });
+        : { imageStatus: 'ready', imageProgress: 100, imageTrainedText: '刚刚', voiceStatus: 'ready', voiceProgress: 100, voiceTrainedText: '刚刚' });
     }, 2500);
     return delay({ ok: true, kind, status: 'training' }, 500);
   },

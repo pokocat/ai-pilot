@@ -88,6 +88,34 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
 });
 
+test('数字分身训练通知必须由用户点击授权并回写 avatar 场景', () => {
+  const cloneJs = read(sourceRoot, 'packages/video/clone/index.js');
+  const cloneWxml = read(sourceRoot, 'packages/video/clone/index.wxml');
+  const videoApi = read(sourceRoot, 'packages/video/api.js');
+  assert.match(cloneJs, /wx\.requestSubscribeMessage\s*\(/);
+  assert.match(cloneJs, /scene:\s*'avatar'/);
+  assert.match(cloneJs, /notificationTemplate/);
+  assert.match(cloneWxml, /训练好通知我/);
+  assert.match(videoApi, /\/wechat\/subscribe\/templates/);
+  assert.match(videoApi, /\/wechat\/subscribe/);
+});
+
+test('数字人主链是上传视频后直接训练，单独声音采集只是可选增强', () => {
+  const cloneJs = read(sourceRoot, 'packages/video/clone/index.js');
+  const cloneWxml = read(sourceRoot, 'packages/video/clone/index.wxml');
+  const avatarWxml = read(sourceRoot, 'packages/video/avatar/index.wxml');
+  const homeWxml = read(sourceRoot, 'packages/video/home/index.wxml');
+  assert.match(cloneJs, /\{ no: 1, key: 'video', label: '上传视频' \}/);
+  assert.match(cloneJs, /\{ no: 2, key: 'training', label: '云端训练' \}/);
+  assert.doesNotMatch(cloneJs, /\{ no: 1, key: 'voice'/);
+  assert.match(cloneWxml, /mode === 'voice' && step === 1/);
+  assert.match(cloneWxml, /一段视频即可创建/);
+  assert.match(avatarWxml, /可选增强/);
+  assert.match(avatarWxml, /av-primary/);
+  assert.match(homeWxml, /avatar\.imageStatus === 'ready'/);
+  assert.doesNotMatch(homeWxml, /avatar\.imageStatus === 'ready' && avatar\.voiceStatus === 'ready'/);
+});
+
 test('原生历史对话剥离重复的 asks JSON，只让问答卡展示结构化选项', () => {
   const helperPath = path.join(sourceRoot, 'services/chat-reply.js');
   delete cjsRequire.cache[cjsRequire.resolve(helperPath)];

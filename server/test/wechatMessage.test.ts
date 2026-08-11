@@ -5,6 +5,7 @@ import { getApp, closeApp, api, cleanBusiness, login, uniquePhone, anyPlanId } f
 import { prisma } from '../src/db.js';
 import { signWechatMessage, verifyWechatMessageSignature, _resetTokenCache } from '../src/services/wechat.js';
 import { sendWechatSubscribeMessage } from '../src/services/wechatSubscribe.js';
+import { avatarNotificationOutcome } from '../src/services/video/avatarNotification.js';
 
 const TOKEN = 'unit-wechat-message-token';
 const timestamp = '1780000000';
@@ -19,9 +20,59 @@ before(async () => {
 after(async () => {
   delete process.env.WECHAT_MESSAGE_TOKEN;
   delete process.env.WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID;
+  delete process.env.WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID;
   delete process.env.WECHAT_MINI_APPID;
   delete process.env.WECHAT_MINI_SECRET;
   await closeApp();
+});
+
+test('数字分身模板 32308 字段与完成判定对齐', async () => {
+  assert.equal(avatarNotificationOutcome(null), null);
+  assert.equal(avatarNotificationOutcome({ imageStatus: 'training', voiceStatus: 'ready' } as never), null);
+  assert.equal(avatarNotificationOutcome({ imageStatus: 'ready', voiceStatus: 'ready' } as never), 'ready');
+  assert.equal(avatarNotificationOutcome({ imageStatus: 'training', voiceStatus: 'failed' } as never), null);
+  assert.equal(avatarNotificationOutcome({ imageStatus: 'failed', voiceStatus: 'ready' } as never), 'failed');
+
+  await cleanBusiness();
+  process.env.WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID = 'tpl-avatar';
+  process.env.WECHAT_MINI_APPID = 'wx-test-app';
+  process.env.WECHAT_MINI_SECRET = 'secret-test';
+  _resetTokenCache();
+  const token = await login(uniquePhone(), '分身订阅用户');
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: token } });
+  await prisma.user.update({ where: { id: token }, data: { wechatOpenId: 'openid-avatar-user' } });
+  await api('POST', '/api/wechat/subscribe', {
+    token,
+    body: { choices: [{ scene: 'avatar', templateId: 'tpl-avatar', status: 'accept' }] },
+  });
+
+  const oldFetch = globalThis.fetch;
+  let payload: { page?: string; data: Record<string, { value: string }> } | null = null;
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (href.includes('/message/subscribe/send')) payload = JSON.parse(String(init!.body));
+    return { ok: true, headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => (href.includes('/stable_token') ? { access_token: 'avatar-token', expires_in: 7200 } : { errcode: 0 }) } as unknown as Response;
+  }) as typeof fetch;
+  try {
+    const sent = await sendWechatSubscribeMessage({
+      tenantId: user.tenantId, userId: token, scene: 'avatar', title: '数字分身训练',
+      statusText: '已完成', note: '形象和声音已就绪，可以开始出片',
+    });
+    assert.equal(sent.sent, true);
+  } finally {
+    globalThis.fetch = oldFetch;
+    delete process.env.WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID;
+    delete process.env.WECHAT_MINI_APPID;
+    delete process.env.WECHAT_MINI_SECRET;
+    _resetTokenCache();
+  }
+  assert.ok(payload);
+  assert.equal(payload.page, 'packages/video/clone/index?step=2');
+  assert.deepEqual(Object.keys(payload.data).sort(), ['phrase16', 'thing13', 'thing5', 'time12']);
+  assert.equal(payload.data.thing13.value, '数字分身训练');
+  assert.equal(payload.data.phrase16.value, '已完成');
+  assert.match(payload.data.time12.value, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
 });
 
 test('服务层按微信规则生成并校验 signature', () => {

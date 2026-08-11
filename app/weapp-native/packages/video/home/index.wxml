@@ -81,14 +81,14 @@
       <view class="cap-head"><text class="cap-kicker">让每条片更像你</text><text class="cap-title">你的出镜能力</text></view>
       <view class="vd-card avatar-card" bindtap="tapAvatarCard">
         <view class="ac-visual"><native-icon name="user" tone="red" size="23"></native-icon></view>
-        <block wx:if="{{avatar && avatar.imageStatus === 'ready' && avatar.voiceStatus === 'ready'}}">
+        <block wx:if="{{avatar && avatar.imageStatus === 'ready'}}">
           <view class="ac-body">
             <text class="ac-title">数字分身已就绪</text>
-            <text class="ac-sub">形象与声音都已训练好，出片时可以直接使用。</text>
+            <text class="ac-sub">{{avatar.voiceStatus === 'ready' ? '形象与视频原声已可用，可以直接出片。' : '形象已可用，还可补录专属声音提升效果。'}}</text>
           </view>
           <view class="ac-state ready">可用</view>
         </block>
-        <block wx:elif="{{avatar && (avatar.imageStatus === 'training' || avatar.voiceStatus === 'training')}}">
+        <block wx:elif="{{avatar && avatar.imageStatus === 'training'}}">
           <view class="ac-body">
             <text class="ac-title">分身正在训练</text>
             <text class="ac-sub">好了会通知你，这期间可先用平台预置形象。</text>
@@ -97,8 +97,8 @@
         </block>
         <block wx:else>
           <view class="ac-body">
-            <text class="ac-title">5 分钟创建数字分身</text>
-            <text class="ac-sub">克隆一次，之后用你自己的形象和声音出片。</text>
+            <text class="ac-title">一段视频创建数字分身</text>
+            <text class="ac-sub">上传 5 秒以上的正脸视频，不用先单独录音。</text>
           </view>
           <view class="ac-state action">去创建</view>
         </block>

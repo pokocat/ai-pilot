@@ -108,6 +108,14 @@ const api = {
     ? mock.deleteAvatar()
     : call('/avatar', { method: 'DELETE' })),
 
+  /* ── 微信订阅消息：走宿主 BFF 通用端点，不挂 /video 前缀 ── */
+  subscribeTemplates: () => (useMock()
+    ? Promise.resolve({ scenes: [] })
+    : host.httpRequest('/wechat/subscribe/templates')),
+  recordSubscribeChoice: (choice) => (useMock()
+    ? Promise.resolve({ ok: true, accepted: 0 })
+    : host.httpRequest('/wechat/subscribe', { method: 'POST', data: { choices: [choice] } })),
+
   isMock: useMock,
 };
 

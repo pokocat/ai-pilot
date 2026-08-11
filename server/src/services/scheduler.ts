@@ -17,6 +17,7 @@ import {
   notifyReviewReminder,
   sendWechatSubscribeMessage,
 } from './wechatSubscribe.js';
+import { scanAvatarTrainingNotifications } from './video/avatarNotification.js';
 
 export interface ScheduledJob {
   name: string;
@@ -316,6 +317,14 @@ registerJob({ name: 'prophecy-due-scan', intervalMs: 6 * 3600_000, run: async ()
 // 套餐到期提醒：每 2 小时扫一轮（PLAN_EXPIRY_REMIND_HOUR 之前直接短路），按「用户×到期日×档位」幂等。
 registerJob({ name: 'plan-expiry-reminder', intervalMs: 2 * 3600_000, run: async () => { await scanPlanExpiryReminders(); } });
 registerJob({ name: 'prescription-followup-scan', intervalMs: 6 * 3600_000, run: async () => { await scanPrescriptionFollowup(); } });
+// 数字分身训练是石榴云端异步任务；用户离开小程序后由服务端继续轮询。
+// 只扫最近 24h 主动点过“训练好通知我”的账号，不启动新训练、不消耗石榴生成点数。
+registerJob({ name: 'avatar-training-notification', intervalMs: 60_000, run: async () => {
+  const result = await scanAvatarTrainingNotifications();
+  if (result.scanned || result.failed) {
+    console.log(`[scheduler] avatar training notifications: sent=${result.sent} failed=${result.failed} (scanned ${result.scanned})`);
+  }
+} });
 // V7-11：09:00 军令提醒 + 周五周复盘提醒（scan 函数在 services/reminders.ts，job 常量在此注册）。
 registerJob(MORNING_ORDER_JOB);
 registerJob(WEEKLY_REVIEW_JOB);

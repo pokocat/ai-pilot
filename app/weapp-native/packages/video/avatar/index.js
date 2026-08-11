@@ -17,8 +17,8 @@ function decorateAvatar(avatar) {
     return '未采集';
   };
   return Object.assign({}, avatar, {
-    imageStatusText: statusText(avatar.imageStatus, avatar.imageProgress, '可用', '需重拍'),
-    voiceStatusText: statusText(avatar.voiceStatus, avatar.voiceProgress, '可用', '需重录'),
+    imageStatusText: statusText(avatar.imageStatus, avatar.imageProgress, '已就绪', '需重拍'),
+    voiceStatusText: statusText(avatar.voiceStatus, avatar.voiceProgress, '已增强', '可重录'),
   });
 }
 
@@ -43,7 +43,7 @@ Page({
   recapture(event) {
     const kind = String(event.currentTarget.dataset.kind || '');
     if (!host.requireLogin(this, 'execute')) return;
-    host.go(`clone/index?step=${kind === 'voice' ? '1' : '2'}&recapture=1`);
+    host.go(`clone/index?mode=${kind === 'voice' ? 'voice' : 'avatar'}&recapture=1`);
   },
 
   startClone() {

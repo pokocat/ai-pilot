@@ -1,15 +1,13 @@
-// 屏 04 · 视频数字分身创建。按石榴真实能力组织为：声音克隆 → 形象视频 → 云端训练。
+// 屏 04 · 视频数字分身创建。按石榴官方契约组织为：上传视频 → 云端训练。
 //
-// 石榴 avatar/create 的 authId 是可选校验项，不再把“另录一段授权视频”做成创建硬闸。
-// 用户只需确认自己对上传的声音和视频有合法使用权，并且始终可以删除分身。
+// speakerId 和 authId 都是 avatar/create 的可选项；单独声音采集只是后续增强，不得阻断形象创建。
 const host = require('../host');
 const api = require('../api');
 const { POLL_INTERVAL_MS } = require('../config');
 
 const STEPS = [
-  { no: 1, key: 'voice', label: '声音' },
-  { no: 2, key: 'avatar', label: '形象' },
-  { no: 3, key: 'training', label: '训练' },
+  { no: 1, key: 'video', label: '上传视频' },
+  { no: 2, key: 'training', label: '云端训练' },
 ];
 
 /** 录音时页面保持可见，用户可以直接照读。 */
@@ -21,9 +19,22 @@ const FALLBACK_REQUIREMENTS = {
   voice: { vendorMinDurationSec: 2, vendorMaxDurationSec: 0, minDurationSec: 3, recommendedMinDurationSec: 8, recommendedMaxDurationSec: 15, maxDurationSec: 120, vendorMaxBytes: 20 * 1024 * 1024, maxBytes: 20 * 1024 * 1024, vendorFormats: ['wav', 'mp3', 'ogg', 'm4a', 'aac', 'pcm'], formats: ['wav', 'mp3', 'ogg', 'm4a', 'aac'] },
 };
 
+function initialTraining(mode) {
+  return {
+    percent: 0,
+    etaText: mode === 'voice' ? '专属声音会在云端继续训练' : '形象会在云端继续训练',
+    imageDone: false,
+    voiceDone: false,
+    imageStateText: '读取中',
+    voiceStateText: '读取中',
+    hasFailure: false,
+  };
+}
+
 Page({
   data: host.hostBaseData({
     steps: STEPS,
+    mode: 'avatar',
     step: 1,
     agreed: false,
     requirements: FALLBACK_REQUIREMENTS,
@@ -39,23 +50,29 @@ Page({
     recaptureKind: null,
     presetAvailable: api.isMock(),
     submitting: false,
+    notificationTemplate: null,
+    notificationRequesting: false,
     showLogin: false,
   }),
 
   onLoad(options) {
     const opts = options || {};
-    const step = Number(opts.step || 1);
-    if (String(opts.recapture || '') === '1' && (step === 1 || step === 2) && host.isLoggedIn()) {
-      api.avatar().then((avatar) => {
-        if (avatar) this.setData({ step, recaptureKind: step === 1 ? 'voice' : 'avatar' });
-      }).catch(() => {});
-    }
+    const legacyStep = Number(opts.step || 1);
+    const mode = String(opts.mode || '') === 'voice' || (String(opts.recapture || '') === '1' && legacyStep === 1) ? 'voice' : 'avatar';
+    const step = legacyStep >= 2 && String(opts.recapture || '') !== '1' ? 2 : 1;
+    this.setData({
+      mode,
+      step,
+      recaptureKind: String(opts.recapture || '') === '1' ? mode : null,
+      training: step === 2 ? initialTraining(mode) : null,
+    });
     if (!host.isLoggedIn()) this.setData({ showLogin: true });
     this.loadRequirements();
+    if (host.isLoggedIn()) this.loadNotificationTemplate();
   },
 
   onShow() {
-    if (this.data.step === 3 && !this.trainingTimer) this.startTrainingPolling();
+    if (this.data.step === 2 && !this.trainingTimer) this.startTrainingPolling();
   },
   onHide() { this.stopTrainingPolling(); },
   onUnload() { this.stopTrainingPolling(); this.stopRecordStartTimer(); this.stopRecordTimer(); this.stopRecorder(); },
@@ -67,6 +84,17 @@ Page({
         this.setData({ requirements, requirementsReady: true });
       })
       .catch(() => this.setData({ requirementsReady: true }));
+  },
+
+  loadNotificationTemplate() {
+    if (api.isMock()) return;
+    api.subscribeTemplates()
+      .then((result) => {
+        const scenes = result && Array.isArray(result.scenes) ? result.scenes : [];
+        const template = scenes.find((item) => item && item.scene === 'avatar') || null;
+        this.setData({ notificationTemplate: template });
+      })
+      .catch(() => {});
   },
 
   captureRule(kind) { return (this.data.requirements && this.data.requirements[kind]) || FALLBACK_REQUIREMENTS[kind]; },
@@ -88,7 +116,7 @@ Page({
     return true;
   },
 
-  /* ── 第 1 步：声音克隆 ── */
+  /* ── 可选增强：单独采集专属声音 ── */
 
   toggleRecord() {
     if (this.data.recording) { this.stopRecorder(); return; }
@@ -203,20 +231,16 @@ Page({
   submitVoice() {
     if (!this.data.voiceFile) { host.toast('先录一段声音或上传音频'); return; }
     if (this.data.submitting) return;
-    if (this.data.voiceSubmitted && this.data.recaptureKind !== 'voice') { this.setData({ step: 2 }); return; }
     this.setData({ submitting: true });
     api.startClone('voice', { filePath: this.data.voiceFile.path })
-      .then(() => {
-        if (this.data.recaptureKind === 'voice') this.enterTraining();
-        else this.setData({ submitting: false, voiceSubmitted: true, step: 2 });
-      })
+      .then(() => this.enterTraining())
       .catch((error) => {
         this.setData({ submitting: false });
         host.toast(error && error.message ? error.message : '声音提交失败');
       });
   },
 
-  /* ── 第 2 步：形象视频 ── */
+  /* ── 第 1 步：一段视频创建数字人 ── */
 
   recordFace() { this.chooseFace('camera'); },
   pickFace() { this.chooseFace('album'); },
@@ -264,14 +288,15 @@ Page({
       });
   },
 
-  /* ── 第 3 步：训练 ── */
+  /* ── 第 2 步：训练 ── */
 
   enterTraining() {
     this.setData({
       submitting: false,
-      step: 3,
-      training: { percent: 0, etaText: '训练在云端继续，完成后可以直接出片', imageDone: false, voiceDone: false, imageStateText: '读取中', voiceStateText: '读取中', hasFailure: false },
+      step: 2,
+      training: initialTraining(this.data.mode),
     });
+    this.loadNotificationTemplate();
     this.startTrainingPolling();
   },
 
@@ -284,17 +309,21 @@ Page({
         const voiceFailed = avatar && avatar.voiceStatus === 'failed';
         const imageProgress = imageDone ? 100 : Math.max(0, Number(avatar && avatar.imageProgress) || 0);
         const voiceProgress = voiceDone ? 100 : Math.max(0, Number(avatar && avatar.voiceProgress) || 0);
+        const voiceOnly = this.data.mode === 'voice';
+        const mainProgress = voiceOnly ? voiceProgress : imageProgress;
+        const mainFailed = voiceOnly ? voiceFailed : imageFailed;
+        const mainDone = voiceOnly ? voiceDone : imageDone;
         this.setData({
           presetAvailable: Boolean(avatar && avatar.presetAvailable),
           training: Object.assign({}, this.data.training, {
             imageDone, voiceDone,
-            percent: Math.round((imageProgress + voiceProgress) / 2),
+            percent: mainProgress,
             imageStateText: imageDone ? '完成' : (imageFailed ? (avatar.imageMessage || '需要重新采集') : `${imageProgress}%`),
             voiceStateText: voiceDone ? '完成' : (voiceFailed ? (avatar.voiceMessage || '需要重新录制') : `${voiceProgress}%`),
-            imageFailed, voiceFailed, hasFailure: Boolean(imageFailed || voiceFailed),
+            imageFailed, voiceFailed, hasFailure: Boolean(mainFailed),
           }),
         });
-        if ((imageDone && voiceDone) || imageFailed || voiceFailed) this.stopTrainingPolling();
+        if (mainDone || mainFailed) this.stopTrainingPolling();
       })
       .catch(() => {});
   },
@@ -311,14 +340,51 @@ Page({
   },
 
   usePreset() { host.toast('先用平台预置形象出片'); host.go('home/index'); },
-  leaveTraining() { host.go('home/index'); },
-  retryImage() { this.setData({ step: 2, recaptureKind: 'avatar', faceFile: null, agreed: false, training: null }); },
-  retryVoice() { this.setData({ step: 1, recaptureKind: 'voice', voiceFile: null, voiceSubmitted: false, recordSeconds: 0, training: null }); },
+  leaveTraining() {
+    if (this.data.notificationRequesting) return;
+    if (this.data.mode === 'voice') {
+      host.toast('声音会在后台继续训练');
+      setTimeout(() => host.go('avatar/index'), 500);
+      return;
+    }
+    if (api.isMock()) {
+      host.toast('训练会在后台继续');
+      setTimeout(() => host.go('home/index'), 500);
+      return;
+    }
+    const template = this.data.notificationTemplate;
+    if (!template || !template.templateId) {
+      this.loadNotificationTemplate();
+      host.toast('通知服务正在准备，请稍后再点');
+      return;
+    }
+    this.setData({ notificationRequesting: true });
+    wx.requestSubscribeMessage({
+      tmplIds: [template.templateId],
+      success: (result) => {
+        const raw = result && result[template.templateId];
+        const status = ['accept', 'reject', 'ban', 'filter'].includes(raw) ? raw : 'reject';
+        api.recordSubscribeChoice({ scene: 'avatar', templateId: template.templateId, status })
+          .catch(() => null)
+          .then(() => {
+            this.setData({ notificationRequesting: false });
+            host.toast(status === 'accept' ? '训练好会用微信通知你' : '训练会继续，本次不发微信通知');
+            setTimeout(() => host.go('home/index'), 700);
+          });
+      },
+      fail: () => {
+        this.setData({ notificationRequesting: false });
+        host.toast('未开启微信通知，训练会继续');
+        setTimeout(() => host.go('home/index'), 700);
+      },
+    });
+  },
+  retryImage() { this.setData({ mode: 'avatar', step: 1, recaptureKind: 'avatar', faceFile: null, agreed: false, training: null }); },
+  retryVoice() { this.setData({ mode: 'voice', step: 1, recaptureKind: 'voice', voiceFile: null, voiceSubmitted: false, recordSeconds: 0, training: null }); },
 
   back() {
-    if (this.data.step === 2) { this.setData({ step: 1 }); return; }
     host.back();
   },
   closeLogin() { this.setData({ showLogin: false }); },
-  loggedIn() { this.setData({ showLogin: false }); },
+  loggedIn() { this.setData({ showLogin: false }); this.loadNotificationTemplate(); },
 });

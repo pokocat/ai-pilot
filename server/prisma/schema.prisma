@@ -1644,7 +1644,7 @@ model WechatSubscription {
   id         String    @id @default(cuid())
   tenantId   String
   userId     String
-  scene      String // review | report
+  scene      String // review | report | payment | avatar
   templateId String
   status     String    @default("accept") // accept | reject | ban | filter
   remaining  Int       @default(0)
@@ -1665,7 +1665,7 @@ model WechatNotificationLog {
   id          String    @id @default(cuid())
   tenantId    String
   userId      String
-  scene       String // review | report
+  scene       String // review | report | payment | avatar
   templateId  String?
   title       String
   status      String // sent | failed | skipped

@@ -397,7 +397,7 @@ cd /srv/junshi/server && npm run ai:check-drop
 | `AI_PROVIDER` | 旧表/env 均不可用时的兜底 provider | `mock`（真实模型走后台凭证/端点/用途路由） |
 | `WECHAT_MINI_APPID`/`WECHAT_MINI_SECRET` | 小程序 `wx.login` 后端换 openid | AppSecret 只放服务端环境变量，不入前端包 |
 | `WECHAT_MESSAGE_TOKEN` | 微信后台消息推送 URL 验签 Token（URL：`https://域名/api/wechat/message`） | 高强度随机串；必须与微信后台填写值一致，只放服务端 |
-| `WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID`/`WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID` | 小程序订阅消息模板：复盘提醒 / 报告生成 | 模板字段需匹配 `.env.example` 注释；订阅消息一次授权只发送一次 |
+| `WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID`/`WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID`/`WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID` | 小程序订阅消息模板：复盘提醒 / 报告生成 / 数字分身训练 | 模板字段需匹配 `.env.example` 注释；数字分身使用 32308「服务进度通知」，订阅消息一次授权只发送一次 |
 | `SMS_PROVIDER`/`SMS_REQUIRE_CODE` | 短信验证码通道与登录校验开关 | 生产设 `aliyun` / `true` |
 | `ALIYUN_SMS_ACCESS_KEY_ID`/`ALIYUN_SMS_ACCESS_KEY_SECRET`/`ALIYUN_SMS_SIGN_NAME` | 阿里云短信凭证与签名 | 只放服务端环境变量 |
 | `ALIYUN_SMS_TEMPLATE_CODE` | 阿里云短信验证码模板 | 当前固定 `SMS_508120103`，模板变量名须为 `code` |
@@ -495,7 +495,7 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 ## 8. 微信小程序上线（硬门槛）
 1. 真实 **AppID**（替换 `app/project.config.json` 的 `touristappid`）。
 2. 后端公网 **HTTPS + ICP 备案域名**，并加入小程序后台 **request 合法域名**。
-3. 如启用微信后台消息推送，服务端配置 `WECHAT_MESSAGE_TOKEN`；后台 URL 填 `https://你的域名/api/wechat/message`，Token 填同一个值。订阅消息另在小程序后台配置模板，并把模板 ID 写入 `WECHAT_SUBSCRIBE_REVIEW_TEMPLATE_ID` / `WECHAT_SUBSCRIBE_REPORT_TEMPLATE_ID`。
+3. 如启用微信后台消息推送，服务端配置 `WECHAT_MESSAGE_TOKEN`；后台 URL 填 `https://你的域名/api/wechat/message`，Token 填同一个值。订阅消息另在小程序后台配置模板，并把模板 ID 写入对应 `WECHAT_SUBSCRIBE_*_TEMPLATE_ID`；数字分身训练使用 `WECHAT_SUBSCRIBE_AVATAR_TEMPLATE_ID`，字段必须为 32308 的 `thing13/phrase16/thing5/time12`。
 4. **生成式 AI 备案 / 算法备案 + 内容安全**（AI 类小程序审核硬性门槛；国内合规建议用已备案的国产模型，走 OpenAI 兼容协议即可）。
 5. 在 `docs/WEAPP_RELEASES.md` 记录本次版本号/上传描述/提交；执行 `cd app && npm run release:weapp -- --version x.y.z --desc "说明"`，由脚本强制重建 server 包并核对构建模式、生产 API、版本号后上传开发版。上传命令的版本号/描述必须与记录一致；不要裸调 DevTools CLI/GUI 绕过校验。
 

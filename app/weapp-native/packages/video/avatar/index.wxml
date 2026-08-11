@@ -15,37 +15,37 @@
       <block wx:elif="{{!avatar}}">
         <view class="vd-empty">
           <text class="t">还没有数字分身</text>
-          <text class="s">克隆一次你的形象和声音，之后每条片子都不用再出镜拍摄。</text>
-          <view class="vd-btn av-empty-btn" bindtap="startClone">花 5 分钟创建</view>
+          <text class="s">上传一段正脸视频就能创建，之后每条片子都不用再出镜拍摄。</text>
+          <view class="vd-btn av-empty-btn" bindtap="startClone">上传视频创建</view>
         </view>
       </block>
 
       <block wx:else>
-        <!-- 形象 / 声音两张卡 -->
-        <view class="av-cards">
-          <view class="vd-card av-card">
-            <view class="avc-head">
-              <text class="avc-k">形象</text>
-              <text class="avc-status {{avatar.imageStatus}}">{{avatar.imageStatusText}}</text>
-            </view>
-            <view class="avc-face"></view>
-            <text class="avc-date">{{avatar.imageTrainedText || '—'}}</text>
-            <text wx:if="{{avatar.imageMessage}}" class="avc-message">{{avatar.imageMessage}}</text>
-            <view class="avc-act" data-kind="image" bindtap="recapture">重新采集</view>
+        <!-- 视频创建是主任务；声音是次级增强，不再做成两张同级卡。 -->
+        <view class="vd-card av-primary">
+          <view class="avp-head">
+            <view><text class="avp-kicker">你的出镜形象</text><text class="avp-title">视频数字人</text></view>
+            <text class="avc-status {{avatar.imageStatus}}">{{avatar.imageStatusText}}</text>
           </view>
+          <view class="avp-body">
+            <view class="avc-face"><native-icon name="user" tone="red" size="28"></native-icon></view>
+            <view class="avp-copy">
+              <text class="avp-state">{{avatar.imageStatus === 'ready' ? '形象已可用' : (avatar.imageStatus === 'failed' ? '这段视频需要重拍' : '正在云端训练')}}</text>
+              <text class="avp-date">{{avatar.imageTrainedText || '训练完成后可直接出片'}}</text>
+            </view>
+          </view>
+          <text wx:if="{{avatar.imageMessage}}" class="avc-message">{{avatar.imageMessage}}</text>
+          <view class="avc-act" data-kind="image" bindtap="recapture">{{avatar.imageStatus === 'failed' ? '重拍一段视频' : '更换形象视频'}}</view>
+        </view>
 
-          <view class="vd-card av-card">
-            <view class="avc-head">
-              <text class="avc-k">声音</text>
-              <text class="avc-status {{avatar.voiceStatus}}">{{avatar.voiceStatusText}}</text>
-            </view>
-            <view class="avc-wave">
-              <view class="wv" wx:for="{{[6,14,9,18,11,7,15,10]}}" wx:key="*this" style="height:{{item}}px"></view>
-            </view>
-            <text class="avc-date">{{avatar.voiceTrainedText || '—'}}</text>
-            <text wx:if="{{avatar.voiceMessage}}" class="avc-message">{{avatar.voiceMessage}}</text>
-            <view class="avc-act" data-kind="voice" bindtap="recapture">重新采集</view>
+        <view class="vd-card av-voice">
+          <view class="avv-icon"><view class="avc-wave"><view class="wv" wx:for="{{[6,14,9,18,11,7,15,10]}}" wx:key="*this" style="height:{{item}}px"></view></view></view>
+          <view class="avv-copy">
+            <view class="avv-title-row"><text class="avv-title">专属声音</text><text class="avv-optional">可选增强</text></view>
+            <text class="avv-desc">{{avatar.voiceStatus === 'ready' ? '声音已可用，单独补录可让音色更稳定' : '不影响形象创建；补录后口播会更像你'}}</text>
+            <text wx:if="{{avatar.voiceMessage}}" class="avv-message">{{avatar.voiceMessage}}</text>
           </view>
+          <view class="avv-act" data-kind="voice" bindtap="recapture">{{avatar.voiceStatus === 'ready' ? '提升' : '去录制'}}</view>
         </view>
 
         <text class="av-note">请只使用本人或已获合法使用权的素材。你可以随时删除分身，删除后所有新的生成能力立即停用。</text>

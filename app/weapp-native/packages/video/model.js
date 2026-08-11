@@ -329,9 +329,10 @@ function preflight(project, avatar) {
     if (!avatar || avatar.imageStatus !== 'ready') {
       problems.push({ code: 'CLIP_AVATAR_NOT_READY', message: '你的形象还没训练好，可以先用平台预置形象出片。' });
     }
-    if (!avatar || avatar.voiceStatus !== 'ready') {
-      problems.push({ code: 'CLIP_VOICE_NOT_READY', message: '你的声音还没训练好。' });
-    }
+  }
+  const hasSpeech = rendered.some((s) => s.role !== ROLE.TAIL);
+  if (hasSpeech && (!avatar || avatar.voiceStatus !== 'ready')) {
+    problems.push({ code: 'CLIP_VOICE_NOT_READY', message: '视频原声暂不可用，请在分身管理中补录一段专属声音。' });
   }
 
   const tooLong = rendered.filter((s) => s.role === ROLE.AVATAR && segmentSeconds(s) > MAX_AVATAR_SEGMENT_SEC);

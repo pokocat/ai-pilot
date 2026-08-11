@@ -3,11 +3,11 @@
     <view class="vd-safe"></view>
     <view class="vd-headrow">
       <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
-      <text class="vd-title">创建我的数字分身</text>
+      <text class="vd-title">{{mode === 'voice' ? '提升专属声音' : '创建我的数字分身'}}</text>
       <text class="vd-headact"> </text>
     </view>
 
-    <view class="cl-steps">
+    <view wx:if="{{mode === 'avatar'}}" class="cl-steps">
       <view wx:for="{{steps}}" wx:key="no" class="cl-step {{step === item.no ? 'on' : (step > item.no ? 'done' : '')}}">
         <view class="cs-dot"><native-icon wx:if="{{step > item.no}}" name="check" tone="white" size="12"></native-icon><text wx:else>{{item.no}}</text></view>
         <text class="cs-label">{{item.label}}</text>
@@ -18,11 +18,13 @@
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="cl-body">
 
-      <!-- ① 声音克隆：页面内录音，朗读稿始终可见；也支持上传现有音频。 -->
-      <block wx:if="{{step === 1}}">
-        <view class="cl-type"><text class="cl-type-k">视频数字人</text><text class="cl-type-v">先让分身学会你的声音</text></view>
-        <text class="cl-h">第 1 步 · 克隆你的声音</text>
-        <text class="cl-s">在线录制时朗读稿会一直留在屏幕上；也可以直接上传一段干净的单人音频。</text>
+      <!-- 可选声音增强：它是管理页的独立任务，不在数字人创建主链上。 -->
+      <block wx:if="{{mode === 'voice' && step === 1}}">
+        <view class="cl-enhance-intro">
+          <text class="cl-enhance-kicker">可选增强</text>
+          <text class="cl-h">让分身更像你的声音</text>
+          <text class="cl-s">数字人已经可以由一段视频创建。单独录一段干净人声，只是让后续口播的音色更稳定、更像你。</text>
+        </view>
 
         <view class="cl-source-tabs">
           <view class="cl-source on" bindtap="toggleRecord"><text>{{recording ? '结束录制' : (startingRecord ? '正在开启…' : '在线录制')}}</text></view>
@@ -50,18 +52,19 @@
 
         <view wx:if="{{voiceFile}}" class="cl-acts">
           <view class="vd-btn ghost cl-act" bindtap="retakeVoice">重新选择</view>
-          <view class="vd-btn cl-act" bindtap="submitVoice">{{submitting ? '提交中…' : (recaptureKind === 'voice' ? '提交训练' : '下一步 · 上传形象')}}</view>
+          <view class="vd-btn cl-act" bindtap="submitVoice">{{submitting ? '提交中…' : '提交声音增强'}}</view>
         </view>
       </block>
 
-      <!-- ② 形象视频：直接上传训练，不再要求另录授权口播。 -->
-      <block wx:elif="{{step === 2}}">
-        <text class="cl-h">第 2 步 · 上传形象视频</text>
-        <text class="cl-s">录满 {{requirements.avatar.minDurationSec}} 秒即可提交，建议 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒。录制时不需要念固定文案，正脸自然说话或做轻微动作即可。</text>
+      <!-- ① 只需一段视频就创建 Avatar；speakerId / authId 都不再做前置。 -->
+      <block wx:elif="{{mode === 'avatar' && step === 1}}">
+        <text class="cl-kicker">一段视频即可创建</text>
+        <text class="cl-h">上传你的出镜视频</text>
+        <text class="cl-s">录满 {{requirements.avatar.minDurationSec}} 秒即可提交，建议 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒。直接创建形象；视频里有清楚人声时，还会同步生成基础声音。</text>
 
         <view wx:if="{{!faceFile}}" class="cl-upload" bindtap="pickFace">
           <view class="cl-upload-plus"><native-icon name="plus" tone="neutral" size="24"></native-icon></view>
-          <text class="cl-upload-title">选择形象视频</text>
+          <text class="cl-upload-title">选择或录制视频</text>
           <text class="cl-upload-meta">支持竖屏 · MP4/MOV · H.264 · 360p–4K</text>
         </view>
 
@@ -76,14 +79,14 @@
             <view class="cl-guide-item"><view class="cgi-dot"><native-icon name="check" tone="white" size="10"></native-icon></view><text>光线照在脸上</text></view>
             <view class="cl-guide-item"><view class="cgi-dot"><native-icon name="check" tone="white" size="10"></native-icon></view><text>只拍一位人物</text></view>
             <view class="cl-guide-item"><view class="cgi-dot"><native-icon name="check" tone="white" size="10"></native-icon></view><text>正脸看向镜头</text></view>
-            <view class="cl-guide-item"><view class="cgi-dot"><native-icon name="check" tone="white" size="10"></native-icon></view><text>手机固定不晃动</text></view>
+            <view class="cl-guide-item"><view class="cgi-dot"><native-icon name="check" tone="white" size="10"></native-icon></view><text>自然说几句话</text></view>
           </view>
-          <text class="cl-guide-note">相机录制会进入微信原生全屏界面；因为无需念稿，按上面四点自然拍摄即可。</text>
+          <text class="cl-guide-note">不用念固定文案。正脸看镜头，用平时的语速自然说几句就好。</text>
         </view>
 
         <view wx:if="{{!faceFile}}" class="cl-acts">
-          <view class="vd-btn cl-act" bindtap="pickFace">从相册选视频</view>
-          <view class="vd-btn ghost cl-act" bindtap="recordFace">现在录制</view>
+          <view class="vd-btn cl-act" bindtap="recordFace">现在录制</view>
+          <view class="vd-btn ghost cl-act" bindtap="pickFace">从相册选择</view>
         </view>
         <view wx:else class="cl-acts">
           <view class="vd-btn ghost cl-act" bindtap="retakeFace">更换视频</view>
@@ -92,7 +95,7 @@
 
         <view class="cl-agree" bindtap="toggleAgree">
           <view class="ca-box {{agreed ? 'on' : ''}}"><native-icon wx:if="{{agreed}}" name="check" tone="white" size="12"></native-icon></view>
-          <text class="ca-text">我确认对上传的声音和视频有合法使用权，并同意<text class="ca-link" catchtap="openUsageDoc">《数字分身素材使用说明》</text>。</text>
+          <text class="ca-text">我确认对上传的视频有合法使用权；若视频含人声，同意用于生成基础声音。并同意<text class="ca-link" catchtap="openUsageDoc">《数字分身素材使用说明》</text>。</text>
         </view>
       </block>
 
@@ -103,19 +106,24 @@
           <text class="cp-label">正在学习</text>
         </view>
 
-        <text class="cl-h center">分身正在训练</text>
+        <text class="cl-h center">{{mode === 'voice' ? '专属声音正在训练' : '数字分身正在训练'}}</text>
         <text class="cl-s center">{{training.etaText}}。可以先退出，回来会继续显示真实进度。</text>
 
         <view class="cl-track vd-card">
-          <view class="ct-row {{training.voiceDone ? 'done' : 'busy'}}">
+          <view wx:if="{{mode === 'voice'}}" class="ct-row {{training.voiceDone ? 'done' : 'busy'}}">
             <view class="ct-dot"><native-icon wx:if="{{training.voiceDone}}" name="check" tone="white" size="12"></native-icon></view>
             <text class="ct-label">声音克隆</text>
             <text class="ct-state {{training.voiceFailed ? 'failed' : ''}}">{{training.voiceStateText}}</text>
           </view>
-          <view class="ct-row {{training.imageDone ? 'done' : 'busy'}}">
+          <view wx:if="{{mode === 'avatar'}}" class="ct-row {{training.imageDone ? 'done' : 'busy'}}">
             <view class="ct-dot"><native-icon wx:if="{{training.imageDone}}" name="check" tone="white" size="12"></native-icon></view>
             <text class="ct-label">形象训练</text>
             <text class="ct-state {{training.imageFailed ? 'failed' : ''}}">{{training.imageStateText}}</text>
+          </view>
+          <view wx:if="{{mode === 'avatar'}}" class="ct-row optional {{training.voiceDone ? 'done' : 'busy'}}">
+            <view class="ct-dot"><native-icon wx:if="{{training.voiceDone}}" name="check" tone="white" size="12"></native-icon></view>
+            <view class="ct-copy"><text class="ct-label">视频原声</text><text class="ct-optional">后台增强，不影响形象创建</text></view>
+            <text class="ct-state {{training.voiceFailed ? 'failed' : ''}}">{{training.voiceDone ? '已生成' : (training.voiceFailed ? '可稍后补录' : training.voiceStateText)}}</text>
           </view>
         </view>
 
@@ -124,7 +132,7 @@
           <text class="ci-row">按上面的提示重录即可，已经完成的另一项不用重做。</text>
           <view class="cl-acts retry">
             <view wx:if="{{training.imageFailed}}" class="vd-btn ghost" bindtap="retryImage">重拍形象</view>
-            <view wx:if="{{training.voiceFailed}}" class="vd-btn ghost" bindtap="retryVoice">重录声音</view>
+            <view wx:if="{{mode === 'voice' && training.voiceFailed}}" class="vd-btn ghost" bindtap="retryVoice">重录声音</view>
           </view>
         </view>
 
@@ -134,7 +142,7 @@
           <view class="vd-btn cl-preset-btn" bindtap="usePreset">先用预置形象出片</view>
         </view>
 
-        <view class="vd-btn ghost" bindtap="leaveTraining">训练好通知我 · 返回</view>
+        <view class="vd-btn ghost {{notificationRequesting ? 'disabled' : ''}}" bindtap="leaveTraining">{{notificationRequesting ? '正在开启通知…' : '训练好通知我 · 返回'}}</view>
       </block>
 
       <view class="vd-footer-space"></view>

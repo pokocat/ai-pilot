@@ -39,6 +39,10 @@ test('快出片 preflight 返回稳定业务错误码', () => {
     ['EMPTY_TEXT', 'CLIP_AVATAR_NOT_READY', 'CLIP_VOICE_NOT_READY', 'CLIP_ASSET_NOT_ALLOWED'],
   );
   assert.equal(model.preflight({ segments: [{ no: 1, text: '正常', role: model.ROLE.BROLL, assetId: 'ca_1' }] }, readyAvatar).ok, true);
+  assert.deepEqual(
+    model.preflight({ segments: [{ no: 1, text: '正常', role: model.ROLE.BROLL, assetId: 'ca_1' }] }, null).problems.map((item) => item.code),
+    ['CLIP_VOICE_NOT_READY'],
+  );
 });
 
 test('快出片进度阶段映射保持已完成、进行中、等待中顺序', () => {

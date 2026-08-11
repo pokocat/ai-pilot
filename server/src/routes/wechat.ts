@@ -13,7 +13,7 @@ const verifyQuerySchema = z.object({
   nonce: z.string().trim().min(1),
   echostr: z.string().min(1).max(2048).optional(),
 });
-const subscribeSceneSchema = z.enum(['review', 'report']);
+const subscribeSceneSchema = z.enum(['review', 'report', 'payment', 'avatar']);
 const subscribeStatusSchema = z.enum(['accept', 'reject', 'ban', 'filter']);
 const subscribeRecordSchema = z.object({
   choices: z.array(z.object({
