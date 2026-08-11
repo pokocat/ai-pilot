@@ -125,6 +125,7 @@ set_env_value NODE_ENV development
 set_env_value PAY_MOCK_SUCCESS true
 set_env_value PAY_SANDBOX false
 set_env_value ALLOW_DEMO_PURCHASE false
+set_env_value CLIP_MEDIA_MODERATION_BYPASS true
 sudo chown "$RUNTIME_USER:$RUNTIME_USER" "$PREPROD_ROOT/server/.env"
 sudo chmod 600 "$PREPROD_ROOT/server/.env"
 if sudo grep -qE '^WECHAT_PAY_[A-Z0-9_]*=.' "$PREPROD_ROOT/server/.env"; then
@@ -132,7 +133,7 @@ if sudo grep -qE '^WECHAT_PAY_[A-Z0-9_]*=.' "$PREPROD_ROOT/server/.env"; then
   exit 1
 fi
 echo "  AI 模型凭证不再要求预发持有生产 APP_ENCRYPTION_KEY"
-echo "  支付隔离已锁定：PAY_MOCK_SUCCESS=true · WECHAT_PAY_*=unset"
+echo "  测试旁路已锁定：PAY_MOCK_SUCCESS=true · CLIP_MEDIA_MODERATION_BYPASS=true · WECHAT_PAY_*=unset"
 
 echo "== systemd 单元 $SERVICE =="
 if [ ! -f "/etc/systemd/system/${SERVICE}.service" ]; then

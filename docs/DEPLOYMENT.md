@@ -504,6 +504,7 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 - 军师服务端必须配置 `AIDRAMA_CLIP_BASE_URL`、与 AIStar 完全一致的高强度 `AIDRAMA_CLIP_SERVICE_TOKEN`，以及合理的 `AIDRAMA_CLIP_TIMEOUT_MS`；仅受控 VPC 回源才允许 `AIDRAMA_CLIP_ALLOW_PRIVATE_NET=true`。
 - AIStar 必须配置 `AEP_CLIP_SERVICE_TOKEN`、石榴 base URL/token、三项非空定价、素材上限与任务超时；production/mysql 环境禁止 `AEP_CLIP_ALLOW_MOCK=true`。官方真实 BaseURL 是 `https://api.16ai.chat/api/v1/`（`api.16ai.vip` 是文档站）；token 只进 0600 运行时 env，不进库、不进日志。
 - 预发固定为同机隔离实例 `aistareco-clip-preprod`（`127.0.0.1:8081`、`/opt/aistareco-clip-preprod`、`/etc/aistareco/clip-preprod.env`），军师预发 BFF 配 `AIDRAMA_CLIP_BASE_URL=http://127.0.0.1:8081` 与 `AIDRAMA_CLIP_ALLOW_PRIVATE_NET=true`。Nginx 只允许 `/clip_preprod/cdn|files/`，不得把 AIStar `/api/**` 整段公开。
+- 测试阶段的隔离预发脚本固定写 `CLIP_MEDIA_MODERATION_BYPASS=true`：旁路只接受支持的媒体类型并留审计，用于在阿里云内容安全未开通时先验收产品工程链；`NODE_ENV=production` 会在启动前硬拒绝该开关。AIStar 预发默认 `AEP_CLIP_FORCE_MOCK=true`，实际产出带永久「测试演示」的可播放 MP4 并继续通过 ffmpeg 总装、质量门、缩略图与存储；验证真实石榴时分别关闭这两个测试开关，production/mysql 不允许 force-mock。
 - 军师已提供 `CLIP_MEDIA_MODERATION_PROVIDER=aliyun-green` 的真实图片/视频/语音审核适配器；启用前必须由正确阿里云主账号开通内容安全增强版、给专用 RAM 身份授予 `AliyunYundunGreenWebFullAccess`，并只把该身份的 `ALIYUN_GREEN_ACCESS_KEY_ID/SECRET` 写入 0600 运行时 env。配置不全、权限/欠费、超时或异常返回都会 fail-closed；不得复用文本 `MODERATION_FAIL_OPEN`、其它账号 OSS/SMS 密钥或把 provider 改成伪放行。
 - AIStar 已完成逐段 avatar/b-roll/尾段标准化、H.264/AAC 多段 ffmpeg 总装、字幕、全程 AI 标识和缩略图；但固定正式尾片素材、亮度/响度质量阈值、真实长视频压力验收及四平台真实发布未完成前，仍不得打开生产入口、提交微信审核或宣称完整出片闭环。若后续把大文件改为签名直传/直取，还要在微信后台补齐对应 OSS/CDN 的 `uploadFile / downloadFile` 合法域名。
 

@@ -2,7 +2,13 @@ import { after, before, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { prisma } from '../src/db.js';
 import { assertAidramaGatewayUrl } from '../src/services/video/aidramaGateway.js';
+import {
+  assertVideoMediaModerationReady,
+  assertVideoUploadContent,
+  clipMediaModerationBypassEnabled,
+} from '../src/services/video/moderation.js';
 import { getBalance, grantCredits } from '../src/services/credits.js';
+import { assertSandboxSafe } from '../src/services/sandbox.js';
 import { api, cleanBusiness, closeApp, getApp, login, seedBaseline, uniquePhone } from './helpers.js';
 
 process.env.AIDRAMA_CLIP_BASE_URL = 'https://aidrama.example.test';
@@ -75,6 +81,35 @@ test('视频 BFF 未登录一律 401', async () => {
 test('视频 BFF 拒绝非法或带凭据的网关地址', async () => {
   await assert.rejects(() => assertAidramaGatewayUrl('file:///etc/passwd'), /配置非法/);
   await assert.rejects(() => assertAidramaGatewayUrl('https://user:pass@example.com'), /配置非法/);
+});
+
+test('媒体机审旁路只在非生产显式开启，并留下独立审计', async () => {
+  const token = await login(uniquePhone(), '视频旁路用户');
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: token }, select: { tenantId: true } });
+  const savedNodeEnv = process.env.NODE_ENV;
+  const savedBypass = process.env.CLIP_MEDIA_MODERATION_BYPASS;
+  try {
+    process.env.NODE_ENV = 'development';
+    process.env.CLIP_MEDIA_MODERATION_BYPASS = 'true';
+    assert.equal(clipMediaModerationBypassEnabled(), true);
+    await assertVideoMediaModerationReady('image/png');
+    await assertVideoUploadContent(Buffer.from('test-image'), 'image/png', { tenantId: user.tenantId, userId: token });
+    assert.equal(await prisma.auditLog.count({
+      where: { userId: token, action: 'user.video.media.moderation.bypassed' },
+    }), 1);
+
+    process.env.NODE_ENV = 'production';
+    assert.equal(clipMediaModerationBypassEnabled(), false, 'production 不能因误配而实际旁路');
+    assert.throws(() => assertSandboxSafe(), /CLIP_MEDIA_MODERATION_BYPASS/);
+    await assert.rejects(
+      () => assertVideoMediaModerationReady('image/png'),
+      (error: unknown) => (error as { code?: string }).code === 'CLIP_MEDIA_MODERATION_NOT_CONFIGURED',
+    );
+  } finally {
+    if (savedNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedNodeEnv;
+    if (savedBypass === undefined) delete process.env.CLIP_MEDIA_MODERATION_BYPASS;
+    else process.env.CLIP_MEDIA_MODERATION_BYPASS = savedBypass;
+  }
 });
 
 test('出片按 clientRequestId 幂等预扣，上游失败只退款一次', async () => {

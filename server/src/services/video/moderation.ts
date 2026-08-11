@@ -20,6 +20,11 @@ export class VideoMediaTypeUnsupportedError extends Error {
   constructor() { super('暂不支持该素材格式'); }
 }
 
+/** 测试期显式旁路：只允许 test/development，production 即使误配也永远返回 false。 */
+export function clipMediaModerationBypassEnabled(): boolean {
+  return process.env.CLIP_MEDIA_MODERATION_BYPASS === 'true' && process.env.NODE_ENV !== 'production';
+}
+
 function projectText(project: unknown): string {
   const p = project && typeof project === 'object' ? project as Record<string, unknown> : {};
   const segments = Array.isArray(p.segments)
@@ -55,6 +60,14 @@ export async function assertVideoUploadContent(
   identity: { tenantId: string; userId: string },
 ) {
   if (!clipMediaKind(mimeType)) throw new VideoMediaTypeUnsupportedError();
+  if (clipMediaModerationBypassEnabled()) {
+    await recordAudit({
+      ...identity,
+      action: 'user.video.media.moderation.bypassed',
+      payload: { provider: 'test-bypass', mimeType, bytes: input.length, pass: true },
+    });
+    return;
+  }
   let verdict;
   try {
     verdict = await moderateClipMedia(input, mimeType);
@@ -86,5 +99,6 @@ export async function assertVideoUploadContent(
 /** 在读取大文件前先确认审核 provider 真存在；避免“明知会拒绝”仍把 100MB 读进内存。 */
 export async function assertVideoMediaModerationReady(mimeType: string) {
   if (!clipMediaKind(mimeType)) throw new VideoMediaTypeUnsupportedError();
+  if (clipMediaModerationBypassEnabled()) return;
   if (!isAliyunGreenConfigured(aliyunGreenConfig())) throw new VideoMediaModerationUnavailableError();
 }

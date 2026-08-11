@@ -30,15 +30,16 @@ export function demoPurchaseEnabled(): boolean {
 }
 
 /**
- * 启动期硬护栏：生产环境若误开任何免支付权益通道 → 抛错拒绝启动。
+ * 启动期硬护栏：生产环境若误开任何测试旁路 → 抛错拒绝启动。
  * 在 buildApp() 最早期调用，覆盖 listen 与测试两条入口。
  */
 export function assertSandboxSafe(): void {
   if (process.env.NODE_ENV !== 'production') return;
-  const unsafe = ['PAY_SANDBOX', 'PAY_MOCK_SUCCESS', 'ALLOW_DEMO_PURCHASE'].filter((key) => process.env[key] === 'true');
+  const unsafe = ['PAY_SANDBOX', 'PAY_MOCK_SUCCESS', 'ALLOW_DEMO_PURCHASE', 'CLIP_MEDIA_MODERATION_BYPASS']
+    .filter((key) => process.env[key] === 'true');
   if (unsafe.length) {
     throw new Error(
-      `[安全] 生产环境禁止开启免支付权益通道：${unsafe.join(', ')}。请移除后再启动。`,
+      `[安全] 生产环境禁止开启测试旁路：${unsafe.join(', ')}。请移除后再启动。`,
     );
   }
 }
