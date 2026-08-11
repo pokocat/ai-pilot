@@ -101,6 +101,17 @@ export const env = {
 
   moderationEnabled: (process.env.MODERATION_ENABLED ?? 'true') === 'true',
 
+  // 「快出片」用户媒体机器审核。与文本 MODERATION_* 分开：图片/视频/语音任一未真正审核都必须 fail-closed。
+  clipMediaModerationProvider: (process.env.CLIP_MEDIA_MODERATION_PROVIDER ?? 'none') as 'none' | 'aliyun-green',
+  aliyunGreenAccessKeyId: process.env.ALIYUN_GREEN_ACCESS_KEY_ID ?? '',
+  aliyunGreenAccessKeySecret: process.env.ALIYUN_GREEN_ACCESS_KEY_SECRET ?? '',
+  aliyunGreenEndpoint: process.env.ALIYUN_GREEN_ENDPOINT ?? 'green-cip.cn-shanghai.aliyuncs.com',
+  aliyunGreenImageService: process.env.ALIYUN_GREEN_IMAGE_SERVICE ?? 'baselineCheck',
+  aliyunGreenVideoService: process.env.ALIYUN_GREEN_VIDEO_SERVICE ?? 'videoDetection',
+  aliyunGreenVoiceService: process.env.ALIYUN_GREEN_VOICE_SERVICE ?? 'audio_media_detection',
+  aliyunGreenTimeoutMs: envNum('ALIYUN_GREEN_TIMEOUT_MS', 150000),
+  aliyunGreenPollIntervalMs: envNum('ALIYUN_GREEN_POLL_INTERVAL_MS', 3000),
+
   // LLM 调用诊断 trace 是否落库 prompt/输出原文（便于排查，含 PII/敏感内容）。默认关，仅记指标。
   llmTraceCaptureText: (process.env.LLM_TRACE_CAPTURE_TEXT ?? 'false') === 'true',
 

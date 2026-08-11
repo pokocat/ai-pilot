@@ -504,8 +504,8 @@ DB + API 用 `deploy/docker-compose.yml`；H5/后台静态仍交给宿主 Nginx�
 - 军师服务端必须配置 `AIDRAMA_CLIP_BASE_URL`、与 AIStar 完全一致的高强度 `AIDRAMA_CLIP_SERVICE_TOKEN`，以及合理的 `AIDRAMA_CLIP_TIMEOUT_MS`；仅受控 VPC 回源才允许 `AIDRAMA_CLIP_ALLOW_PRIVATE_NET=true`。
 - AIStar 必须配置 `AEP_CLIP_SERVICE_TOKEN`、石榴 base URL/token、三项非空定价、素材上限与任务超时；production/mysql 环境禁止 `AEP_CLIP_ALLOW_MOCK=true`。官方真实 BaseURL 是 `https://api.16ai.chat/api/v1/`（`api.16ai.vip` 是文档站）；token 只进 0600 运行时 env，不进库、不进日志。
 - 预发固定为同机隔离实例 `aistareco-clip-preprod`（`127.0.0.1:8081`、`/opt/aistareco-clip-preprod`、`/etc/aistareco/clip-preprod.env`），军师预发 BFF 配 `AIDRAMA_CLIP_BASE_URL=http://127.0.0.1:8081` 与 `AIDRAMA_CLIP_ALLOW_PRIVATE_NET=true`。Nginx 只允许 `/clip_preprod/cdn|files/`，不得把 AIStar `/api/**` 整段公开。
-- 当前军师图片审核 provider 不能满足视频/音频审核，生产媒体上传会返回 `CLIP_MEDIA_MODERATION_NOT_CONFIGURED`。必须先接入并验收真实图片、视频、音频审核服务；不得把 `MODERATION_FAIL_OPEN=true` 当作视频线放量配置。
-- 石榴时效成片的即时持久化不等于模板总装。多段 avatar/b-roll/固定尾片 ffmpeg 总装、成片内 AI 标识及四平台真实发布未完成前，不得打开生产入口、提交微信审核或宣称完整出片闭环。若后续把大文件改为签名直传/直取，还要在微信后台补齐对应 OSS/CDN 的 `uploadFile / downloadFile` 合法域名。
+- 军师已提供 `CLIP_MEDIA_MODERATION_PROVIDER=aliyun-green` 的真实图片/视频/语音审核适配器；启用前必须由正确阿里云主账号开通内容安全增强版、给专用 RAM 身份授予 `AliyunYundunGreenWebFullAccess`，并只把该身份的 `ALIYUN_GREEN_ACCESS_KEY_ID/SECRET` 写入 0600 运行时 env。配置不全、权限/欠费、超时或异常返回都会 fail-closed；不得复用文本 `MODERATION_FAIL_OPEN`、其它账号 OSS/SMS 密钥或把 provider 改成伪放行。
+- AIStar 已完成逐段 avatar/b-roll/尾段标准化、H.264/AAC 多段 ffmpeg 总装、字幕、全程 AI 标识和缩略图；但固定正式尾片素材、亮度/响度质量阈值、真实长视频压力验收及四平台真实发布未完成前，仍不得打开生产入口、提交微信审核或宣称完整出片闭环。若后续把大文件改为签名直传/直取，还要在微信后台补齐对应 OSS/CDN 的 `uploadFile / downloadFile` 合法域名。
 
 ## 9. 上线前安全/生产硬约束（务必过一遍 · 详见 ROADMAP P2）
 - [ ] **鉴权**：短信验证码与小程序本机号登录已接入；当前小程序登录态仍是 `token=userId`（演示）→ 换 JWT；运营后台已有 `ADMIN_TOKEN`/`role=admin` 基线鉴权，生产仍需细粒度 RBAC、管理员账号体系与密钥轮换策略。

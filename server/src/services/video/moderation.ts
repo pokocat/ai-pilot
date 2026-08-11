@@ -1,5 +1,6 @@
 import { moderate } from '../moderation.js';
-import { checkImage, resolveImageModerator } from '../creative/imageModeration.js';
+import { recordAudit } from '../audit.js';
+import { aliyunGreenConfig, clipMediaKind, isAliyunGreenConfigured, moderateClipMedia } from './aliyunGreenMedia.js';
 
 export class VideoContentBlockedError extends Error {
   statusCode = 422;
@@ -11,6 +12,12 @@ export class VideoMediaModerationUnavailableError extends Error {
   statusCode = 503;
   code = 'CLIP_MEDIA_MODERATION_NOT_CONFIGURED';
   constructor() { super('视频素材审核能力尚未完成配置'); }
+}
+
+export class VideoMediaTypeUnsupportedError extends Error {
+  statusCode = 415;
+  code = 'CLIP_MEDIA_TYPE_UNSUPPORTED';
+  constructor() { super('暂不支持该素材格式'); }
 }
 
 function projectText(project: unknown): string {
@@ -41,21 +48,43 @@ export async function assertVideoRewriteOutput(result: unknown, identity: { tena
   if (!pass) throw new VideoContentBlockedError();
 }
 
-/** 图片可复用现有审核接口，但 provider=none/skipped 时也必须阻断；视频审核未接入前同样 fail-closed。 */
+/** 图片/视频/语音统一走阿里云内容安全；medium 无人工复核队列，和 high 一样失败关闭。 */
 export async function assertVideoUploadContent(
   input: Buffer,
   mimeType: string,
   identity: { tenantId: string; userId: string },
 ) {
-  if (!mimeType.startsWith('image/')) throw new VideoMediaModerationUnavailableError();
-  const verdict = await checkImage(input, { ...identity, scene: 'source' });
-  if (verdict.skipped || verdict.provider === 'none') throw new VideoMediaModerationUnavailableError();
+  if (!clipMediaKind(mimeType)) throw new VideoMediaTypeUnsupportedError();
+  let verdict;
+  try {
+    verdict = await moderateClipMedia(input, mimeType);
+  } catch (error) {
+    await recordAudit({
+      ...identity,
+      action: 'user.video.media.moderation.failed',
+      payload: { provider: 'aliyun-green', mimeType, bytes: input.length, code: (error as { code?: string }).code ?? 'UNKNOWN' },
+    });
+    throw error;
+  }
+  await recordAudit({
+    ...identity,
+    action: 'user.video.media.moderation',
+    payload: {
+      provider: verdict.provider,
+      kind: verdict.kind,
+      mimeType,
+      bytes: input.length,
+      pass: verdict.pass,
+      riskLevel: verdict.riskLevel,
+      labels: verdict.labels,
+      requestId: verdict.requestId,
+    },
+  });
   if (!verdict.pass) throw new VideoContentBlockedError();
 }
 
 /** 在读取大文件前先确认审核 provider 真存在；避免“明知会拒绝”仍把 100MB 读进内存。 */
 export async function assertVideoMediaModerationReady(mimeType: string) {
-  if (!mimeType.startsWith('image/')) throw new VideoMediaModerationUnavailableError();
-  const moderator = await resolveImageModerator();
-  if (moderator.provider === 'none') throw new VideoMediaModerationUnavailableError();
+  if (!clipMediaKind(mimeType)) throw new VideoMediaTypeUnsupportedError();
+  if (!isAliyunGreenConfigured(aliyunGreenConfig())) throw new VideoMediaModerationUnavailableError();
 }
