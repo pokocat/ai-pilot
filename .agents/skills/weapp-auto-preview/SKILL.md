@@ -5,7 +5,7 @@ description: 编译军师当前原生微信小程序并用微信开发者工具 
 
 # 军师原生小程序 · 构建并推真机
 
-当前微信端是 `app/weapp-native/`，输出 `app/dist-native/`。日常 DevTools 预览直接使用生成的 `app/dist-native/` 独立项目（其 `miniprogramRoot=""`）；上传/发布工具仍使用外层 `app/`，其 `project.config.json` 必须保持 `miniprogramRoot=dist-native/`。
+当前微信端是 `app/weapp-native/`，输出 `app/dist-native/`。手工导入 DevTools 时可使用生成的 `app/dist-native/` 独立项目（其 `miniprogramRoot=""`）；CLI 真机预览与上传/发布都使用外层 `app/`，其 `project.config.json` 必须保持 `miniprogramRoot=dist-native/`。
 
 禁止使用旧 Taro 微信构建、`app/dist/`、`TARO_APP_MODE` 或 `TARO_APP_API`。
 
@@ -17,7 +17,7 @@ description: 编译军师当前原生微信小程序并用微信开发者工具 
 
 ## 首选命令
 
-使用全局 helper，它能处理当前 git worktree、依赖软链、build meta 校验和 DevTools 输出，并直接预览生成的 `app/dist-native/`，避免 DevTools RC 复用外层旧索引后误报找不到 `app.json`。CLI 即使编译失败也可能退出 0，helper 只认输出中的 `✔ auto-preview`。
+使用全局 helper，它能处理当前 git worktree、依赖软链、build meta 校验和 DevTools 输出。helper 校验 `dist-native` 构建身份后把 CLI 指向外层 `app/`，由 `miniprogramRoot=dist-native/` 完成打包；当前 DevTools CLI 若直接指向 `dist-native/`，即使文件存在也可能报 800059 `app.js, file not found`。CLI 即使编译失败也可能退出 0，helper 只认输出中的 `✔ auto-preview`。
 
 ```bash
 PREVIEW=/Users/donis/.codex/skills/ai-pilot-weapp-preview/scripts/weapp_preview.sh
@@ -48,7 +48,7 @@ node scripts/build-native-weapp.mjs --mode mock
 node scripts/build-native-weapp.mjs --mode server --api http://192.168.x.x:4000/api
 
 /Applications/wechatwebdevtools.app/Contents/MacOS/cli auto-preview \
-  --project /path/to/worktree/app/dist-native \
+  --project /path/to/worktree/app \
   --info-output /path/to/worktree/weapp-auto-preview-info.json \
   --lang zh
 ```

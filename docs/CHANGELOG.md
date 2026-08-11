@@ -6,6 +6,11 @@
 
 ## 变更日志
 
+### 2026-08-11 · 真机预览 skill 修正 DevTools CLI 项目根 · 影响面：原生小程序 auto-preview、静态 preview、worktree 验收
+
+- 实测当前微信开发者工具 CLI 直接以 `app/dist-native/` 为项目根会在文件实际存在时仍报 800059 `app.js, file not found`；改为以外层 `app/` 为项目根，由 `miniprogramRoot=dist-native/` 打包。
+- 全局 helper 与仓库内 `weapp-auto-preview` 说明同步修正；仍先校验 server/mock 构建身份与 API，只把 CLI 项目根切回外层目录，手工 IDE 导入 `dist-native/` 的兜底不变。
+
 ### 2026-08-10 · 「快出片」接入石榴官方真实链路并部署隔离预发 · 影响面：视频 BFF、本人授权、AIStar 回源、预发运维
 
 - 军师 `/api/video/avatar/consent` 从前端布尔桩改为真实 multipart 授权视频 + 固定口令；原生端使用前置摄像头录制后上传，未获石榴 `authId` 不得进入克隆步骤。
