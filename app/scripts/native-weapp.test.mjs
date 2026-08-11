@@ -130,6 +130,19 @@ test('更换形象显式 mode=avatar 优先于旧 step 路由兼容判断', () =
   assert.match(homeWxml, /avatar && avatar\.imagePreviewUrl/);
 });
 
+test('配画面只展示可读素材名和真实缩略图，预览底栏不覆盖列表', () => {
+  const shotsJs = read('weapp-native/packages/video/shots/index.js');
+  const shotsWxml = read('weapp-native/packages/video/shots/index.wxml');
+  const shotsScss = read('weapp-native/packages/video/shots/index.scss');
+  assert.match(shotsJs, /assetDisplayLabel/);
+  assert.doesNotMatch(shotsWxml, /\{\{item\.assetLabel\}\}/);
+  assert.match(shotsWxml, /item\.assetPreviewUrl/);
+  assert.match(shotsWxml, /item\.framePreviewUrl/);
+  assert.match(shotsWxml, /class="pv-actions"/);
+  assert.match(shotsScss, /\.pv-scroll\s*\{[^}]*min-height:\s*0/);
+  assert.match(shotsScss, /\.pv-actions\s*\{[^}]*flex:\s*none/);
+});
+
 test('原生历史对话剥离重复的 asks JSON，只让问答卡展示结构化选项', () => {
   const helperPath = path.join(sourceRoot, 'services/chat-reply.js');
   delete cjsRequire.cache[cjsRequire.resolve(helperPath)];

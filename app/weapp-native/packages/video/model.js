@@ -85,6 +85,16 @@ function formatDuration(totalSec) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
+/** 微信临时路径/长哈希不是用户可读名称；所有素材展示统一收口到这里。 */
+function assetDisplayLabel(label, kind) {
+  const value = String(label || '').trim();
+  const lower = value.toLowerCase();
+  const temporary = !value || lower.startsWith('tmp_') || lower.startsWith('wxfile:')
+    || lower.includes('/tmp/') || value.length > 52 || /^[0-9a-f_-]{24,}(\.[a-z0-9]+)?$/i.test(value);
+  if (temporary) return kind === 'image' ? '我的图片素材' : '我的视频素材';
+  return value;
+}
+
 /** 汇总：成片时长、出镜秒数、各角色段数。 */
 function summarize(segments, shots) {
   const list = shots ? materializeShots(segments, shots) : (Array.isArray(segments) ? segments : []);
@@ -369,7 +379,7 @@ function stageRows(stage, progress) {
 
 module.exports = {
   ROLE, STAGES,
-  estimateSeconds, segmentSeconds, formatDuration,
+  estimateSeconds, segmentSeconds, formatDuration, assetDisplayLabel,
   summarize, estimateCredits, toggleRole, commitSegmentText, preflight, stageRows,
   defaultShots, ensureShots, materializeShots, toggleShotRole, mergeShotRange, splitShot,
   regroupShotSelection, mergeAdjacentShots,

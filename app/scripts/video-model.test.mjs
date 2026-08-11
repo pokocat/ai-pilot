@@ -7,6 +7,12 @@ const model = require('../weapp-native/packages/video/model.js');
 
 const readyAvatar = { imageStatus: 'ready', voiceStatus: 'ready' };
 
+test('微信临时素材名不会进入配画面和预览 UI', () => {
+  assert.equal(model.assetDisplayLabel('tmp_fc984c89bb3436e0ed4f696c98b19a63963.mp4', 'video'), '我的视频素材');
+  assert.equal(model.assetDisplayLabel('wxfile://tmp_aabbcc', 'image'), '我的图片素材');
+  assert.equal(model.assetDisplayLabel('店铺门头', 'video'), '店铺门头');
+});
+
 test('快出片切换出镜角色时积分增量与整单报价一致', () => {
   const segments = [
     { no: 1, text: '一二三四五六七八', role: model.ROLE.BROLL },

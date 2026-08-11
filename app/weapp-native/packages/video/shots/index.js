@@ -26,6 +26,7 @@ Page({
     flash: null, previewOpen: false, rangeOpen: false,
     groupCount: 0, rangeShotId: '', rangeTitle: '', rangeRows: [],
     rangeSelectedCount: 0, rangeInvalid: false, rangeText: '',
+    assetsById: {}, avatarPreviewUrl: '',
     showLogin: false,
   }),
 
@@ -44,10 +45,21 @@ Page({
   },
 
   load() {
-    api.project(this.data.projectId)
-      .then((project) => {
+    Promise.all([
+      api.project(this.data.projectId),
+      api.assets().catch(() => []),
+      api.avatar().catch(() => null),
+    ])
+      .then(([project, assets, avatar]) => {
         const normalized = Object.assign({}, project, { shots: model.ensureShots(project.segments, project.shots) });
-        this.setData({ loading: false, project: normalized });
+        const assetsById = {};
+        (Array.isArray(assets) ? assets : []).forEach((asset) => { if (asset && asset.id) assetsById[asset.id] = asset; });
+        this.setData({
+          loading: false,
+          project: normalized,
+          assetsById,
+          avatarPreviewUrl: avatar && avatar.imagePreviewUrl ? avatar.imagePreviewUrl : '',
+        });
         host.writeDraft(this.data.projectId, { project: normalized, step: 2 });
         this.recompute();
       })
@@ -83,6 +95,9 @@ Page({
     const seconds = model.segmentSeconds(shot);
     const isTail = shot.role === ROLE.TAIL;
     const isAvatar = shot.role === ROLE.AVATAR;
+    const asset = shot.assetId ? this.data.assetsById[shot.assetId] : null;
+    const assetKind = asset && asset.kind ? asset.kind : 'video';
+    const assetDisplayLabel = model.assetDisplayLabel(asset && asset.label ? asset.label : shot.assetLabel, assetKind);
     const count = shot.endNo - shot.startNo + 1;
     const range = count > 1 ? `${String(shot.startNo).padStart(2, '0')}–${String(shot.endNo).padStart(2, '0')}` : String(shot.startNo).padStart(2, '0');
     return Object.assign({}, shot, {
@@ -93,7 +108,12 @@ Page({
       metaText: isTail
         ? `${shot.durationSec} 秒 · 可整段替换`
         : (isAvatar ? `出镜 ${seconds} 秒 · 你的脸和声音`
-          : (shot.assetLabel ? `已选：${shot.assetLabel}` : (shot.hint || '还没配画面'))),
+          : (shot.assetId ? `${seconds} 秒 · 画面已选` : (shot.hint || '还没配画面'))),
+      assetDisplayLabel,
+      assetTypeText: assetKind === 'image' ? '图片素材' : '视频素材',
+      assetPreviewUrl: asset && asset.previewUrl ? asset.previewUrl : '',
+      framePreviewUrl: isAvatar ? this.data.avatarPreviewUrl : (asset && asset.previewUrl ? asset.previewUrl : ''),
+      previewMeta: isTail ? '固定片段' : (isAvatar ? '分身出镜' : (assetKind === 'image' ? '已选图片素材' : '已选视频素材')),
       hasAsset: Boolean(shot.assetId), switchable: !isTail,
       canMergeNext: !isTail && Boolean(following && following.role !== ROLE.TAIL),
     });
@@ -232,10 +252,13 @@ Page({
 
   assignAsset(shotId, asset) {
     const project = this.data.project;
+    const displayLabel = model.assetDisplayLabel(asset && asset.label, asset && asset.kind);
     const shots = project.shots.map((shot) => (shot.id === shotId
-      ? Object.assign({}, shot, { assetId: asset.id, assetLabel: asset.label }) : shot));
-    this.setData({ project: Object.assign({}, project, { shots }) });
-    this.recompute(); this.scheduleSave();
+      ? Object.assign({}, shot, { assetId: asset.id, assetLabel: displayLabel }) : shot));
+    const assetsById = Object.assign({}, this.data.assetsById, { [asset.id]: Object.assign({}, asset, { label: displayLabel }) });
+    this.setData({ project: Object.assign({}, project, { shots }), assetsById }, () => {
+      this.recompute(); this.scheduleSave();
+    });
   },
 
   scheduleSave() {
