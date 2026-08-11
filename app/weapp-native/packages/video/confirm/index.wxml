@@ -29,7 +29,8 @@
         <!-- 首帧预览 -->
         <view class="cf-preview vd-card">
           <view class="vd-portrait cf-thumb">
-            <view class="inner vd-grain"></view>
+            <image wx:if="{{avatar && avatar.imagePreviewUrl}}" class="inner" src="{{avatar.imagePreviewUrl}}" mode="aspectFill"></image>
+            <view wx:else class="inner vd-grain"></view>
             <view class="vd-ai-badge cf-badge">AI 生成</view>
           </view>
           <view class="cf-pv-body">

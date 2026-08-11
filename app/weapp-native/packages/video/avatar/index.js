@@ -59,7 +59,7 @@ function decorateAvatar(avatar) {
 Page({
   data: host.hostBaseData({
     loading: true,
-    avatar: null,
+    avatars: [],
     me: null,
     showLogin: false,
   }),
@@ -72,17 +72,17 @@ Page({
   load() {
     this.stopPolling();
     if (!host.isLoggedIn()) { this.setData({ loading: false }); return; }
-    api.avatar()
-      .then((avatar) => {
-        const decorated = decorateAvatar(avatar);
-        this.setData({ loading: false, avatar: decorated, me: host.currentUser() });
+    api.avatars()
+      .then((avatars) => {
+        const decorated = (Array.isArray(avatars) ? avatars : []).map(decorateAvatar);
+        this.setData({ loading: false, avatars: decorated, me: host.currentUser() });
         this.schedulePolling(decorated);
       })
       .catch(() => this.setData({ loading: false }));
   },
 
-  schedulePolling(avatar) {
-    if (!avatar || (avatar.imageStatus !== 'training' && avatar.voiceStatus !== 'training')) return;
+  schedulePolling(avatars) {
+    if (!(avatars || []).some((avatar) => avatar.imageStatus === 'training' || avatar.voiceStatus === 'training')) return;
     this._avatarPollTimer = setTimeout(() => this.load(), 5000);
   },
 
@@ -94,12 +94,14 @@ Page({
 
   recapture(event) {
     const kind = String(event.currentTarget.dataset.kind || '');
+    const avatarId = String(event.currentTarget.dataset.id || '');
+    const avatar = this.data.avatars.find((item) => item.id === avatarId);
     if (!host.requireLogin(this, 'execute')) return;
-    if (kind === 'voice' && this.data.avatar && this.data.avatar.voiceStatus === 'training') {
-      host.toast(`专属声音正在训练 ${this.data.avatar.voiceProgress || 0}%`);
+    if (kind === 'voice' && avatar && avatar.voiceStatus === 'training') {
+      host.toast(`专属声音正在训练 ${avatar.voiceProgress || 0}%`);
       return;
     }
-    host.go(`clone/index?mode=${kind === 'voice' ? 'voice' : 'avatar'}&recapture=1`);
+    host.go(`clone/index?mode=${kind === 'voice' ? 'voice' : 'avatar'}&recapture=1&avatarId=${encodeURIComponent(avatarId)}`);
   },
 
   startClone() {
@@ -127,19 +129,21 @@ Page({
   },
 
   /** 删除分身：合规要求的「可删除权」。二次确认 + 明确后果。 */
-  removeAvatar() {
+  removeAvatar(event) {
+    const avatarId = String(event.currentTarget.dataset.id || '');
+    const target = this.data.avatars.find((item) => item.id === avatarId);
     host.confirm({
-      title: '删除我的数字分身',
+      title: `删除${target ? `「${target.name}」` : '这个数字分身'}`,
       content: '删除后形象和声音立即停用，已出的片子不受影响。要重新用就得再采集一次。',
       confirmText: '删除',
     }).then((ok) => {
       if (!ok) return;
       host.loading('正在删除');
-      api.deleteAvatar()
+      api.deleteAvatarById(avatarId)
         .then(() => {
           host.hideLoading();
           this.stopPolling();
-          this.setData({ avatar: null });
+          this.setData({ avatars: this.data.avatars.filter((item) => item.id !== avatarId) });
           host.toast('数字分身已删除', 'success');
         })
         .catch((error) => {

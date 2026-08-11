@@ -2,7 +2,7 @@
 //
 // 这里是端内可体验模板的唯一事实源：模板列表、详情与 mock 项目骨架都从这里取，
 // 避免接口未启动时首页变成空白，也避免多个模板实际上共用同一份脚本。
-const { ROLE } = require('./model');
+const { ROLE, summarize } = require('./model');
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -12,7 +12,7 @@ const BUILTIN_TEMPLATES = [
     name: '为实体发声',
     industry: '实体商家',
     themeKey: 'advocacy',
-    description: '2 分 42 秒纪实倡导片。暖光街景、褪色招牌，讲你守着这家店的这些年。',
+    description: '纪实倡导片。暖光街景、褪色招牌，讲你守着这家店的这些年。',
     estDurationSec: 162,
     avatarSecHint: 38,
     creditHint: 68,
@@ -95,6 +95,10 @@ const BUILTIN_TEMPLATES = [
 function templateMeta(template) {
   if (!template) return null;
   const result = clone(template);
+  result.scriptSkeleton = { segments: clone(result.segments), variables: Object.keys(result.variables || {}).map((key) => ({ key, placeholder: result.variables[key] })) };
+  result.estDurationSec = summarize(result.segments).totalSec;
+  const tail = result.segments.find((item) => item.role === ROLE.TAIL);
+  if (tail) { result.tailLabel = tail.text; result.tailDurationSec = tail.durationSec || 0; }
   delete result.variables;
   delete result.segments;
   return result;

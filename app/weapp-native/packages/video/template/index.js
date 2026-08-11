@@ -6,6 +6,21 @@ const host = require('../host');
 const api = require('../api');
 const model = require('../model');
 
+function decorateTemplate(template) {
+  if (!template) return null;
+  const segments = template.scriptSkeleton && Array.isArray(template.scriptSkeleton.segments) ? template.scriptSkeleton.segments : [];
+  const summary = segments.length ? model.summarize(segments) : null;
+  const tail = segments.find((item) => item.role === model.ROLE.TAIL) || null;
+  const durationSec = summary ? summary.totalSec : Number(template.estDurationSec) || 0;
+  return Object.assign({}, template, {
+    estDurationSec: durationSec,
+    tailLabel: template.tailLabel || (tail && tail.text) || '固定收尾片段',
+    tailDurationSec: Number(template.tailDurationSec || (tail && tail.durationSec) || 0),
+    tailMediaUrl: template.tailVideoUrl || '',
+    tailCoverUrl: template.tailPreviewUrl || '',
+  });
+}
+
 Page({
   data: host.hostBaseData({
     templateId: '',
@@ -24,18 +39,19 @@ Page({
     this.setData({ templateId });
     this.loadAvatar();
     api.template(templateId)
-      .then((template) => this.setData({
+      .then((raw) => { const template = decorateTemplate(raw); this.setData({
         loading: false,
         template,
         durationText: model.formatDuration(template.estDurationSec),
-      }))
+      }); })
       .catch((error) => {
         const builtIn = api.builtInTemplate(templateId);
         if (builtIn) {
+          const template = decorateTemplate(builtIn);
           this.setData({
             loading: false,
-            template: builtIn,
-            durationText: model.formatDuration(builtIn.estDurationSec),
+            template,
+            durationText: model.formatDuration(template.estDurationSec),
           });
           return;
         }
@@ -46,7 +62,8 @@ Page({
 
   loadAvatar() {
     if (!host.isLoggedIn()) { this.setData({ avatar: null, avatarChecked: false }); return Promise.resolve(null); }
-    return api.avatar().catch(() => null).then((avatar) => {
+    return api.avatars().catch(() => []).then((avatars) => {
+      const avatar = (Array.isArray(avatars) ? avatars : []).find((item) => item.imageStatus === 'ready') || (avatars && avatars[0]) || null;
       this.setData({ avatar, avatarChecked: true });
       return avatar;
     });

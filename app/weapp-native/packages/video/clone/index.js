@@ -46,6 +46,10 @@ Page({
     voiceFile: null,
     voiceSubmitted: false,
     faceFile: null,
+    avatarId: '',
+    avatarName: '',
+    voices: [],
+    selectedVoiceId: '',
     training: null,
     recaptureKind: null,
     presetAvailable: api.isMock(),
@@ -69,11 +73,13 @@ Page({
     this.setData({
       mode,
       step,
+      avatarId: String(opts.avatarId || ''),
       recaptureKind: String(opts.recapture || '') === '1' ? mode : null,
       training: step === 2 ? initialTraining(mode) : null,
     });
     if (!host.isLoggedIn()) this.setData({ showLogin: true });
     this.loadRequirements();
+    this.loadVoices();
     if (host.isLoggedIn()) this.loadNotificationTemplate();
   },
 
@@ -91,6 +97,14 @@ Page({
       })
       .catch(() => this.setData({ requirementsReady: true }));
   },
+
+  loadVoices() {
+    if (!host.isLoggedIn()) return;
+    api.voices().then((voices) => this.setData({ voices: (Array.isArray(voices) ? voices : []).filter((item) => item.status === 'ready') })).catch(() => {});
+  },
+
+  changeAvatarName(event) { this.setData({ avatarName: String(event.detail.value || '').slice(0, 20) }); },
+  chooseExistingVoice(event) { this.setData({ selectedVoiceId: String(event.currentTarget.dataset.id || '') }); },
 
   loadNotificationTemplate() {
     if (api.isMock()) return;
@@ -238,7 +252,7 @@ Page({
     if (!this.data.voiceFile) { host.toast('先录一段声音或上传音频'); return; }
     if (this.data.submitting) return;
     this.setData({ submitting: true });
-    api.startClone('voice', { filePath: this.data.voiceFile.path })
+    api.startClone('voice', { filePath: this.data.voiceFile.path, avatarId: this.data.avatarId })
       .then(() => this.enterTraining())
       .catch((error) => {
         this.setData({ submitting: false });
@@ -286,8 +300,8 @@ Page({
     if (!this.data.agreed) { host.toast('请先确认素材使用权'); return; }
     if (this.data.submitting) return;
     this.setData({ submitting: true });
-    api.startClone('avatar', { filePath: this.data.faceFile.path })
-      .then(() => this.enterTraining())
+    api.startClone('avatar', { filePath: this.data.faceFile.path, avatarId: this.data.avatarId, voiceId: this.data.selectedVoiceId, name: this.data.avatarName })
+      .then((result) => { if (result && result.avatarId) this.setData({ avatarId: result.avatarId }); this.enterTraining(); })
       .catch((error) => {
         this.setData({ submitting: false });
         host.toast(error && error.message ? error.message : '形象提交失败');
@@ -307,7 +321,7 @@ Page({
   },
 
   pollTraining() {
-    api.avatar()
+    (this.data.avatarId ? api.avatarById(this.data.avatarId) : api.avatar())
       .then((avatar) => {
         const imageDone = avatar && avatar.imageStatus === 'ready';
         const voiceDone = avatar && avatar.voiceStatus === 'ready';
@@ -392,5 +406,5 @@ Page({
     host.back();
   },
   closeLogin() { this.setData({ showLogin: false }); },
-  loggedIn() { this.setData({ showLogin: false }); this.loadNotificationTemplate(); },
+  loggedIn() { this.setData({ showLogin: false }); this.loadNotificationTemplate(); this.loadVoices(); },
 });

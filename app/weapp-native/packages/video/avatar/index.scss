@@ -3,6 +3,10 @@
 .vd-avatar { display: flex; flex-direction: column; height: 100vh; }
 .vd-scroll { flex: 1; min-height: 0; }
 .av-body { padding: 0 20px; }
+.av-list-head { min-height: 60px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.av-list-kicker { display: block; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--vd-avatar-deep); }
+.av-list-title { display: block; margin-top: 4px; font-family: var(--vd-serif); font-size: 21px; font-weight: 600; }
+.av-add { min-width: 72px; min-height: 44px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--vd-avatar-line); border-radius: 12px; font-size: 13px; font-weight: 700; color: var(--vd-avatar-deep); }
 
 .av-primary { margin-bottom: 12px; padding: 20px; }
 .avp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -24,6 +28,7 @@
 .avp-copy { flex: 1; min-width: 0; }
 .avp-state { display: block; font-size: 15px; font-weight: 600; color: var(--vd-ink); }
 .avp-date { display: block; margin-top: 6px; font-size: 12px; line-height: 1.55; color: var(--vd-muted); }
+.avp-voice { display: block; margin-top: 5px; font-size: 11px; color: var(--vd-avatar-deep); }
 .avc-wave { height: 44px; display: flex; align-items: center; justify-content: center; gap: 3px; }
 .avc-wave .wv { width: 3px; border-radius: 2px; background: var(--vd-broll); opacity: 0.7; }
 .avc-message { display: block; margin: -4px 0 12px; font-size: 12px; line-height: 1.5; color: #9B3E34; }
@@ -33,6 +38,10 @@
   font-size: 14px; font-weight: 600; color: var(--vd-ink-2);
   display: flex; align-items: center; justify-content: center;
 }
+.av-item-actions { display: grid; grid-template-columns: 1fr 1fr 56px; gap: 8px; }
+.av-item-actions .avc-act { font-size: 12px; }
+.av-item-actions .avc-act.voice { color: var(--vd-avatar-deep); border-color: var(--vd-avatar-line); }
+.av-delete-one { min-height: 44px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #9E2B25; }
 
 .av-voice { min-height: 112px; padding: 16px; display: flex; align-items: center; gap: 12px; }
 .avv-icon { width: 52px; height: 52px; border-radius: 16px; flex: none; background: rgba(80, 139, 155, .10); }
@@ -50,6 +59,7 @@
 .avv-message { display: block; margin-top: 4px; font-size: 10px; color: #9B3E34; }
 .avv-act { width: 68px; height: 44px; flex: none; border-radius: 12px; border: 1px solid var(--vd-avatar-line); color: var(--vd-avatar-deep); font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; }
 .avv-act.disabled { color: var(--vd-faint); border-color: var(--vd-line); background: var(--vd-sunken); }
+.av-shared-voice { margin-top: 4px; }
 
 .av-note { display: block; margin: 16px 0; font-size: 12px; line-height: 1.7; color: var(--vd-muted); }
 

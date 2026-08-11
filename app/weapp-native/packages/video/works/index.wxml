@@ -36,7 +36,9 @@
           bindtap="openWork"
         >
           <view class="vd-portrait wk-thumb">
-            <view class="inner vd-grain"></view>
+            <image wx:if="{{item.thumbnailUrl}}" class="inner wk-thumb-image" src="{{item.thumbnailUrl}}" mode="aspectFill"></image>
+            <view wx:else class="inner vd-grain"></view>
+            <view wx:if="{{item.status !== 'generating'}}" class="wk-play"><native-icon name="play" tone="white" size="18"></native-icon></view>
             <text wx:if="{{item.status !== 'generating'}}" class="wk-dur">{{item.durationText}}</text>
           </view>
 

@@ -39,6 +39,14 @@
 .gt-copy { flex: 1; min-width: 0; }
 .gt-title { display: block; font-size: 14px; font-weight: 700; color: var(--vd-ink); }
 .gt-sub { display: block; margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--vd-muted); }
+.avatar-choice { min-height: 72px; margin: -8px 0 20px; padding: 10px 12px; box-sizing: border-box; display: flex; align-items: center; gap: 12px; border: 1px solid var(--vd-avatar-line); border-radius: 18px; background: var(--vd-avatar-soft); }
+.ac-face { width: 52px; height: 52px; flex: none; overflow: hidden; border-radius: 15px; background: var(--vd-sunken); }
+.ac-face image { display: block; width: 100%; height: 100%; }
+.ac-copy { flex: 1; min-width: 0; }
+.ac-kicker { display: block; font-size: 9px; font-weight: 700; letter-spacing: .12em; color: var(--vd-avatar-deep); }
+.ac-name { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 700; color: var(--vd-ink); }
+.ac-voice { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--vd-muted); }
+.ac-action { min-width: 52px; min-height: 44px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--vd-avatar-deep); }
 .rows-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .rh-kicker { display: block; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--vd-broll); }
 .rh-title { display: block; margin-top: 3px; font-family: var(--vd-serif); font-size: 20px; font-weight: 600; }
@@ -105,6 +113,9 @@
   background: var(--vd-avatar-soft);
   border: 1px solid var(--vd-avatar-line);
 }
+.ra-face image { display: block; width: 100%; height: 100%; }
+.ra-avatar-copy { flex: 1; min-width: 0; }
+.ra-avatar-copy .ra-sub { margin-top: 2px; }
 
 /* 只编辑当前画面段里的组合，避免在整篇脚本里重新猜起止位置。 */
 .range-mask {
@@ -170,3 +181,22 @@
 .amp-video, .amp-image { display: block; width: 100%; height: 100%; }
 .amp-foot { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; font-size: 11px; color: var(--vd-muted); }
 .amp-foot .vd-btn { width: 112px; min-height: 44px; }
+
+.avatar-picker-mask { position: fixed; inset: 0; z-index: 1340; display: flex; align-items: flex-end; background: rgba(24,21,18,.52); }
+.avatar-picker-sheet { width: 100%; max-height: 78vh; box-sizing: border-box; display: flex; flex-direction: column; padding: 20px 20px calc(16px + env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; background: var(--vd-bg); }
+.ap-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.ap-title { display: block; font-family: var(--vd-serif); font-size: 21px; font-weight: 600; }
+.ap-sub { display: block; margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--vd-muted); }
+.ap-close { width: 44px; height: 44px; flex: none; margin: -8px -8px 0 0; display: flex; align-items: center; justify-content: center; }
+.ap-list { flex: 1; min-height: 180px; }
+.ap-row { min-height: 76px; margin-bottom: 8px; padding: 10px; box-sizing: border-box; display: flex; align-items: center; gap: 12px; border: 1px solid var(--vd-line-soft); border-radius: 16px; background: var(--vd-surface); }
+.ap-row.selected { border-color: var(--vd-avatar); background: var(--vd-avatar-soft); }
+.ap-row.disabled { opacity: .5; }
+.ap-photo { width: 56px; height: 56px; flex: none; overflow: hidden; border-radius: 14px; background: var(--vd-sunken); }
+.ap-photo image { display: block; width: 100%; height: 100%; }
+.ap-copy { flex: 1; min-width: 0; }
+.ap-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 700; }
+.ap-meta { display: block; margin-top: 5px; font-size: 11px; color: var(--vd-muted); }
+.ap-check { width: 24px; height: 24px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--vd-avatar); }
+.ap-row:not(.selected) .ap-check { border: 1px solid var(--vd-line); background: transparent; }
+.ap-new { min-height: 48px; margin-top: 8px; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--vd-avatar-line); border-radius: 14px; font-size: 13px; font-weight: 700; color: var(--vd-avatar-deep); }

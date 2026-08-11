@@ -32,7 +32,7 @@
           <native-icon wx:else name="user" tone="{{avatar && avatar.imageStatus === 'ready' ? 'green' : 'red'}}" size="24"></native-icon>
         </view>
         <block wx:if="{{avatar && avatar.imageStatus === 'ready'}}">
-          <view class="ag-body"><text class="ag-kicker">开拍条件已满足</text><text class="ag-title">数字分身已就绪</text><text class="ag-sub">可以直接选模板出片</text></view>
+          <view class="ag-body"><text class="ag-kicker">开拍条件已满足</text><text class="ag-title">{{avatar.name || '数字分身'}}已就绪</text><text class="ag-sub">{{avatarCount > 1 ? '共 ' + avatarCount + ' 个形象，配画面时可选择' : '可以直接选模板出片'}}</text></view>
           <view class="ag-action quiet">管理</view>
         </block>
         <block wx:elif="{{avatar && avatar.imageStatus === 'training'}}">

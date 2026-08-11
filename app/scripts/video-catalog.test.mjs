@@ -138,3 +138,42 @@ test('快出片移动视觉层级固定主任务、拇指区和高风险确认�
   assert.match(shots, /与下一段合并/);
   assert.ok(confirm.indexOf('class="cf-ready"') < confirm.indexOf('class="cf-preview'));
 });
+
+test('我的作品默认展示全部，并为已完成作品显示真实预览入口', () => {
+  const source = fs.readFileSync(path.join(videoRoot, 'works/index.js'), 'utf8');
+  const view = fs.readFileSync(path.join(videoRoot, 'works/index.wxml'), 'utf8');
+  assert.match(source, /\{ key: 'all', label: '全部' \}/);
+  assert.match(source, /active: 'all'/);
+  assert.match(source, /item\.status === 'done' \|\| item\.status === 'published'/);
+  assert.match(view, /wx:if="\{\{item\.thumbnailUrl\}\}"/);
+  assert.match(view, /name="play"/);
+});
+
+test('模板详情、工程初始镜头和固定片段共用同一时长真源', () => {
+  const templateSource = fs.readFileSync(path.join(videoRoot, 'template/index.js'), 'utf8');
+  const templateView = fs.readFileSync(path.join(videoRoot, 'template/index.wxml'), 'utf8');
+  const shotsView = fs.readFileSync(path.join(videoRoot, 'shots/index.wxml'), 'utf8');
+  assert.match(templateSource, /template\.scriptSkeleton/);
+  assert.match(templateSource, /model\.summarize/);
+  assert.match(templateView, /tailDurationSec/);
+  assert.match(templateSource, /template\.tailPreviewUrl/);
+  assert.match(templateView, /tailCoverUrl/);
+  assert.match(shotsView, /固定视频 · \{\{item\.seconds\}\} 秒/);
+  assert.match(shotsView, /item\.framePreviewUrl/);
+});
+
+test('多数字人可复用声音，并在配画面时按项目选择且自动带入声音', () => {
+  const apiSource = fs.readFileSync(path.join(videoRoot, 'api.js'), 'utf8');
+  const cloneSource = fs.readFileSync(path.join(videoRoot, 'clone/index.js'), 'utf8');
+  const shotsSource = fs.readFileSync(path.join(videoRoot, 'shots/index.js'), 'utf8');
+  const shotsView = fs.readFileSync(path.join(videoRoot, 'shots/index.wxml'), 'utf8');
+  assert.match(apiSource, /avatars\(\)/);
+  assert.match(apiSource, /voices\(\)/);
+  assert.match(cloneSource, /selectedVoiceId/);
+  assert.match(cloneSource, /voiceId: this\.data\.selectedVoiceId/);
+  assert.match(shotsSource, /voiceId: selectedAvatar\.linkedVoiceId/);
+  assert.match(shotsSource, /api\.saveProject\(this\.data\.projectId, \{ avatarId:/);
+  assert.match(shotsView, /选择本片数字人/);
+  assert.match(shotsView, /关联声音会自动带入/);
+  assert.match(shotsView, /imagePreviewUrl/);
+});

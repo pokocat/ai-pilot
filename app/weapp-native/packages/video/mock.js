@@ -86,6 +86,7 @@ const WORKS = [
 /* ── 分身 ──────────────────────────────────────────────────────────── */
 
 const AVATAR = {
+  id: 'av_mock', name: '门店日常', linkedVoiceId: 'vo_mock', linkedVoiceName: '张姐原声',
   imageStatus: 'ready', voiceStatus: 'ready', voiceSource: 'dedicated',
   imageTrainedText: '7 月 28 日', voiceTrainedText: '7 月 28 日',
   imageProgress: 100, voiceProgress: 100, imageMessage: null, voiceMessage: null,
@@ -103,7 +104,8 @@ const CAPTURE_REQUIREMENTS = {
 const projects = new Map([[ONGOING.id, clone(ONGOING)]]);
 let assets = clone(ASSETS);
 let works = clone(WORKS);
-let avatar = clone(AVATAR);
+let avatars = [clone(AVATAR), Object.assign({}, clone(AVATAR), { id: 'av_mock_2', name: '工作室正装', linkedVoiceId: 'vo_mock', linkedVoiceName: '张姐原声' })];
+let voices = [{ id: 'vo_mock', name: '张姐原声', status: 'ready', source: 'dedicated', trainedText: '7 月 28 日', progress: 100 }];
 const consentHistory = [{ id: 'cc_mock_1', status: 'verified', createdText: '8 月 10 日', scope: '本人形象与声音出片' }];
 const usageHistory = [{ id: 'cu_mock_1', createdText: '8 月 6 日', action: '生成《今天开门了 · 周三》', status: '完成' }];
 
@@ -264,7 +266,9 @@ module.exports = {
     return delay({ ok: true, status: 'submitted', platform });
   },
 
-  avatar: () => delay(avatar ? clone(avatar) : null),
+  avatar: () => delay(avatars.length ? clone(avatars[0]) : null),
+  avatars: () => delay(clone(avatars)),
+  voices: () => delay(clone(voices)),
   avatarRequirements: () => delay(clone(CAPTURE_REQUIREMENTS)),
   startConsent: () => {
     const record = { id: `cc_mock_${Date.now()}`, status: 'submitted', accepted: true, verified: false, createdText: '刚刚', scope: '本人形象与声音出片' };
@@ -273,22 +277,28 @@ module.exports = {
   },
   startClone: (kind, payload) => {
     if (!payload || !payload.filePath) return Promise.reject(Object.assign(new Error('缺少采集文件'), { code: 'CLIP_CLONE_FILE_REQUIRED' }));
-    avatar = Object.assign({}, avatar || {}, kind === 'voice'
+    const targetIndex = payload.avatarId ? avatars.findIndex((item) => item.id === payload.avatarId) : -1;
+    const target = avatars[targetIndex] || Object.assign({}, clone(AVATAR), { id: `av_mock_${Date.now()}`, name: payload.name || `数字分身 ${avatars.length + 1}` });
+    const avatar = Object.assign({}, target, kind === 'voice'
       ? { voiceStatus: 'training', voiceSource: 'dedicated', voiceProgress: 12, voiceMessage: null, voiceTrainedText: '' }
       : { imageStatus: 'training', imageProgress: 8, imageMessage: null, imageTrainedText: '', voiceStatus: 'training', voiceSource: 'video', voiceProgress: 6, voiceMessage: null, voiceTrainedText: '' }, { engine: 'shiliu', presetAvailable: true });
     setTimeout(() => {
-      if (!avatar) return;
-      avatar = Object.assign({}, avatar, kind === 'voice'
+      const currentIndex = avatars.findIndex((item) => item.id === avatar.id);
+      const ready = Object.assign({}, avatar, kind === 'voice'
         ? { voiceStatus: 'ready', voiceSource: 'dedicated', voiceProgress: 100, voiceTrainedText: new Date().toISOString() }
         : { imageStatus: 'ready', imageProgress: 100, imageTrainedText: '刚刚', voiceStatus: 'ready', voiceSource: 'video', voiceProgress: 100, voiceTrainedText: '刚刚' });
+      if (currentIndex >= 0) avatars[currentIndex] = ready; else avatars.unshift(ready);
     }, 2500);
+    const currentIndex = avatars.findIndex((item) => item.id === avatar.id);
+    if (currentIndex >= 0) avatars[currentIndex] = avatar; else avatars.unshift(avatar);
     return delay({ ok: true, kind, status: 'training' }, 500);
   },
   consentLogs: () => delay(clone(consentHistory)),
   usageLogs: () => delay(clone(usageHistory)),
   deleteAvatar: () => {
-    avatar = null;
+    avatars = [];
     usageHistory.unshift({ id: `cu_mock_${Date.now()}`, createdText: '刚刚', action: '删除数字分身', status: '完成' });
     return delay({ ok: true });
   },
+  deleteAvatarById: (id) => { avatars = avatars.filter((item) => item.id !== id); return delay({ ok: true }); },
 };

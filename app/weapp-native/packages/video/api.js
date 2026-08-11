@@ -88,6 +88,9 @@ const api = {
 
   /* ── 分身（走 aidrama 的 dap 域扩展，见方案 §6.5）── */
   avatar: () => (useMock() ? mock.avatar() : call('/avatar')),
+  avatars: () => (useMock() ? mock.avatars() : call('/avatars')),
+  avatarById: (id) => (useMock() ? mock.avatars().then((rows) => rows.find((item) => item.id === id) || null) : call(`/avatars/${q(id)}`)),
+  voices: () => (useMock() ? mock.voices() : call('/voices')),
   avatarRequirements: () => (useMock() ? mock.avatarRequirements() : call('/avatar/requirements')),
   startConsent: (payload) => {
     if (useMock()) return mock.startConsent(payload);
@@ -100,13 +103,21 @@ const api = {
     if (useMock()) return mock.startClone(kind, payload);
     const filePath = payload && payload.filePath;
     if (!filePath) return Promise.reject(Object.assign(new Error('缺少采集文件'), { code: 'CLIP_CLONE_FILE_REQUIRED' }));
-    return host.httpUpload(`${config.BFF_PREFIX}/avatar/clone`, filePath, { kind }, { timeout: 180000 });
+    return host.httpUpload(`${config.BFF_PREFIX}/avatar/clone`, filePath, {
+      kind,
+      avatarId: payload.avatarId || '',
+      voiceId: payload.voiceId || '',
+      name: payload.name || '',
+    }, { timeout: 180000 });
   },
   consentLogs: () => (useMock() ? mock.consentLogs() : call('/avatar/consents')),
   usageLogs: () => (useMock() ? mock.usageLogs() : call('/avatar/usages')),
   deleteAvatar: () => (useMock()
     ? mock.deleteAvatar()
     : call('/avatar', { method: 'DELETE' })),
+  deleteAvatarById: (id) => (useMock()
+    ? mock.deleteAvatarById(id)
+    : call(`/avatars/${q(id)}`, { method: 'DELETE' })),
 
   /* ── 微信订阅消息：走宿主 BFF 通用端点，不挂 /video 前缀 ── */
   subscribeTemplates: () => (useMock()

@@ -1,4 +1,4 @@
-// 屏 11 · 我的作品。生成中 / 已完成 / 已发布 三段 + 空态。
+// 屏 11 · 我的作品。默认全部，生成中 / 已完成只作为筛选。
 //
 // 设计稿里这是一个 tabBar 页；分包做不了 tabBar，改为从快出片首页进入的独立页。
 const host = require('../host');
@@ -7,19 +7,19 @@ const model = require('../model');
 const { POLL_INTERVAL_MS } = require('../config');
 
 const TABS = [
+  { key: 'all', label: '全部' },
   { key: 'generating', label: '生成中' },
   { key: 'done', label: '已完成' },
-  { key: 'published', label: '已发布' },
 ];
 
 Page({
   data: host.hostBaseData({
     loading: true,
     tabs: TABS,
-    active: 'generating',
+    active: 'all',
     works: [],
     visible: [],
-    counts: { generating: 0, done: 0, published: 0 },
+    counts: { all: 0, generating: 0, done: 0 },
     showLogin: false,
   }),
 
@@ -46,9 +46,9 @@ Page({
           durationText: model.formatDuration(item.durationSec),
         }));
         const counts = {
+          all: decorated.length,
           generating: decorated.filter((i) => i.status === 'generating').length,
-          done: decorated.filter((i) => i.status === 'done').length,
-          published: decorated.filter((i) => i.status === 'published').length,
+          done: decorated.filter((i) => i.status === 'done' || i.status === 'published').length,
         };
         this.setData({ loading: false, works: decorated, counts });
         this.applyFilter();
@@ -58,7 +58,9 @@ Page({
   },
 
   applyFilter() {
-    this.setData({ visible: this.data.works.filter((item) => item.status === this.data.active) });
+    const active = this.data.active;
+    this.setData({ visible: this.data.works.filter((item) => active === 'all'
+      || (active === 'done' ? item.status === 'done' || item.status === 'published' : item.status === active)) });
   },
 
   selectTab(event) {

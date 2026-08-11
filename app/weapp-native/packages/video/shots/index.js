@@ -26,7 +26,7 @@ Page({
     flash: null, previewOpen: false, rangeOpen: false,
     groupCount: 0, rangeShotId: '', rangeTitle: '', rangeRows: [],
     rangeSelectedCount: 0, rangeInvalid: false, rangeText: '',
-    assetsById: {}, avatarPreviewUrl: '',
+    assetsById: {}, avatars: [], selectedAvatar: null, avatarPreviewUrl: '', avatarPickerOpen: false,
     assetPreviewOpen: false, previewAsset: null,
     showLogin: false,
   }),
@@ -44,24 +44,37 @@ Page({
     if (this.data.previewOpen) host.setOverlay(false, 'video-preview');
     if (this.data.rangeOpen) host.setOverlay(false, 'video-shot-range');
     if (this.data.assetPreviewOpen) host.setOverlay(false, 'video-asset-preview');
+    if (this.data.avatarPickerOpen) host.setOverlay(false, 'video-avatar-picker');
   },
 
   load() {
     Promise.all([
       api.project(this.data.projectId),
       api.assets().catch(() => []),
-      api.avatar().catch(() => null),
+      api.avatars().catch(() => []),
     ])
-      .then(([project, assets, avatar]) => {
-        const normalized = Object.assign({}, project, { shots: model.ensureShots(project.segments, project.shots) });
+      .then(([project, assets, avatars]) => {
+        const avatarList = Array.isArray(avatars) ? avatars : [];
+        const selectedAvatar = avatarList.find((item) => item.id === project.avatarId)
+          || avatarList.find((item) => item.imageStatus === 'ready') || avatarList[0] || null;
+        const normalized = Object.assign({}, project, {
+          shots: model.ensureShots(project.segments, project.shots),
+          avatarId: selectedAvatar ? selectedAvatar.id : null,
+          voiceId: selectedAvatar ? selectedAvatar.linkedVoiceId || null : null,
+        });
         const assetsById = {};
         (Array.isArray(assets) ? assets : []).forEach((asset) => { if (asset && asset.id) assetsById[asset.id] = asset; });
         this.setData({
           loading: false,
           project: normalized,
           assetsById,
-          avatarPreviewUrl: avatar && avatar.imagePreviewUrl ? avatar.imagePreviewUrl : '',
+          avatars: avatarList,
+          selectedAvatar,
+          avatarPreviewUrl: selectedAvatar && selectedAvatar.imagePreviewUrl ? selectedAvatar.imagePreviewUrl : '',
         });
+        if (selectedAvatar && (project.avatarId !== normalized.avatarId || project.voiceId !== normalized.voiceId)) {
+          api.saveProject(this.data.projectId, { avatarId: normalized.avatarId, voiceId: normalized.voiceId, step: 2 }).catch(() => {});
+        }
         host.writeDraft(this.data.projectId, { project: normalized, step: 2 });
         this.recompute();
       })
@@ -223,6 +236,29 @@ Page({
     this.setData({ rangeOpen: false, rangeShotId: '', rangeRows: [] });
   },
 
+  openAvatarPicker() {
+    if (!this.data.avatars.length) { host.go('clone/index'); return; }
+    host.setOverlay(true, 'video-avatar-picker');
+    this.setData({ avatarPickerOpen: true });
+  },
+
+  closeAvatarPicker() {
+    host.setOverlay(false, 'video-avatar-picker');
+    this.setData({ avatarPickerOpen: false });
+  },
+
+  openNewAvatar() { this.closeAvatarPicker(); host.go('clone/index?new=1'); },
+
+  chooseAvatar(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    const selectedAvatar = this.data.avatars.find((item) => item.id === id);
+    if (!selectedAvatar || selectedAvatar.imageStatus !== 'ready') { host.toast('这个数字人还没训练好'); return; }
+    const project = Object.assign({}, this.data.project, { avatarId: id, voiceId: selectedAvatar.linkedVoiceId || null });
+    this.setData({ project, selectedAvatar, avatarPreviewUrl: selectedAvatar.imagePreviewUrl || '' });
+    this.closeAvatarPicker(); this.recompute(); this.scheduleSave();
+    host.toast(selectedAvatar.linkedVoiceId ? '已切换数字人，关联声音也已带入' : '已切换数字人，请先为它关联声音', 'success');
+  },
+
   pickAsset(event) {
     const shotId = String(event.currentTarget.dataset.id || '');
     if (!host.requireLogin(this, 'execute')) return;
@@ -286,7 +322,7 @@ Page({
 
   flush() {
     const project = this.data.project; if (!project) return;
-    api.saveProject(this.data.projectId, { segments: project.segments, shots: project.shots, step: 2 }).catch(() => {});
+    api.saveProject(this.data.projectId, { segments: project.segments, shots: project.shots, avatarId: project.avatarId, voiceId: project.voiceId, step: 2 }).catch(() => {});
   },
 
   prev() { host.back(); },

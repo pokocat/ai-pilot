@@ -2392,6 +2392,8 @@ export interface ClipTemplate {
   id: string; name: string; industry: string; themeKey: string; description: string;
   estDurationSec: number; avatarSecHint: number; creditHint?: number | null; segmentCount: number;
   coverTone?: string | null; scriptSkeleton?: { segments: ClipSegment[]; variables?: Array<{ key: string; label: string; placeholder?: string; required?: boolean }> };
+  tailLabel?: string | null; tailDurationSec?: number; tailAssetId?: string | null;
+  tailPreviewUrl?: string | null; tailVideoUrl?: string | null;
 }
 export interface ClipProject {
   id: string; templateId: string; templateName?: string; title: string;
@@ -2429,6 +2431,7 @@ export interface ClipWork {
   durationSec: number; avatarSec: number; credits?: number; videoUrl?: string | null; thumbnailUrl?: string | null;
 }
 export interface ClipAvatarView {
+  id: string; name: string;
   imageStatus: 'none' | 'training' | 'ready' | 'failed'; voiceStatus: 'none' | 'training' | 'ready' | 'failed';
   /** video=形象视频原声生成的基础声音；dedicated=用户主动补录的专属声音。 */
   voiceSource?: 'video' | 'dedicated' | null;
@@ -2438,6 +2441,11 @@ export interface ClipAvatarView {
   imageProgress: number; voiceProgress: number;
   imageMessage?: string | null; voiceMessage?: string | null;
   engine?: string | null; presetAvailable?: boolean;
+  linkedVoiceId?: string | null; linkedVoiceName?: string | null;
+}
+export interface ClipVoiceView {
+  id: string; name: string; status: 'none' | 'training' | 'ready' | 'failed';
+  source?: 'video' | 'dedicated' | null; trainedText?: string | null; progress: number;
 }
 export interface ClipCaptureRule {
   kind: 'consent' | 'avatar' | 'voice';

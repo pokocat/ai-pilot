@@ -60,6 +60,15 @@ before(async () => {
     if (url.pathname === '/api/me/clip/jobs/cj_test') {
       return json({ id: 'cj_test', status: jobStatus, stage: 'avatar', progress: jobStatus === 'failed' ? 40 : 10, errorMessage: jobStatus === 'failed' ? '上游失败' : null });
     }
+    if (url.pathname === '/api/me/clip/avatars' && (!init?.method || init.method === 'GET')) {
+      return json([{ id: 'DH-scene', name: '门店形象', imageStatus: 'ready', voiceStatus: 'ready', linkedVoiceId: 'VC-scene', linkedVoiceName: '主理人声线' }]);
+    }
+    if (url.pathname === '/api/me/clip/voices') {
+      return json([{ id: 'VC-scene', name: '主理人声线', status: 'ready', source: 'dedicated', progress: 100 }]);
+    }
+    if (url.pathname === '/api/me/clip/avatars/DH-scene' && init?.method === 'DELETE') {
+      return json({ ok: true });
+    }
     return json({ error: 'not found', code: 'CLIP_NOT_FOUND' }, 404);
   };
   await getApp();
@@ -89,6 +98,22 @@ test('视频 BFF 未登录一律 401', async () => {
 test('视频 BFF 拒绝非法或带凭据的网关地址', async () => {
   await assert.rejects(() => assertAidramaGatewayUrl('file:///etc/passwd'), /配置非法/);
   await assert.rejects(() => assertAidramaGatewayUrl('https://user:pass@example.com'), /配置非法/);
+});
+
+test('视频 BFF 返回多数字人和可复用声音，并支持按分身删除', async () => {
+  const token = await login(uniquePhone(), '多数字人用户');
+  const avatarResult = await api('GET', '/api/video/avatars', { token });
+  assert.equal(avatarResult.status, 200, JSON.stringify(avatarResult.body));
+  assert.equal(avatarResult.body[0].id, 'DH-scene');
+  assert.equal(avatarResult.body[0].linkedVoiceId, 'VC-scene');
+
+  const voiceResult = await api('GET', '/api/video/voices', { token });
+  assert.equal(voiceResult.status, 200, JSON.stringify(voiceResult.body));
+  assert.equal(voiceResult.body[0].name, '主理人声线');
+
+  const deleted = await api('DELETE', '/api/video/avatars/DH-scene', { token });
+  assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+  assert.equal(deleted.body.ok, true);
 });
 
 test('初始文案支持连续 AI 对话；测试环境无真实模型时诚实保留原稿', async () => {

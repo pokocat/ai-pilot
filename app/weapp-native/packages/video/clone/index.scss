@@ -1,5 +1,17 @@
 @use "../styles/tokens.scss";
 
+.cl-profile { margin: 16px 0 12px; padding: 16px; }
+.cl-profile-label { display: block; font-size: 11px; font-weight: 700; color: var(--vd-ink-2); }
+.cl-profile-label.voice { margin-top: 16px; }
+.cl-name-input { height: 46px; margin-top: 8px; padding: 0 12px; box-sizing: border-box; border: 1px solid var(--vd-line); border-radius: 12px; background: var(--vd-sunken); font-size: 14px; color: var(--vd-ink); }
+.cl-voice-scroll { width: 100%; margin-top: 8px; }
+.cl-voice-options { display: flex; gap: 8px; padding-bottom: 2px; }
+.cl-voice-option { min-width: 112px; min-height: 52px; padding: 8px 12px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; border: 1px solid var(--vd-line); border-radius: 13px; background: var(--vd-surface); }
+.cl-voice-option.on { border-color: var(--vd-avatar); background: var(--vd-avatar-soft); }
+.cl-voice-option .name { font-size: 12px; font-weight: 700; color: var(--vd-ink); }
+.cl-voice-option .meta { margin-top: 3px; font-size: 9px; color: var(--vd-muted); }
+.cl-profile-note { display: block; margin-top: 9px; font-size: 10px; line-height: 1.5; color: var(--vd-muted); }
+
 .vd-clone { display: flex; flex-direction: column; height: 100vh; }
 .vd-scroll { flex: 1; min-height: 0; }
 .cl-body { padding: 0 20px; }

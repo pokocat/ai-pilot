@@ -61,6 +61,7 @@ const LUCIDE_ICON_MAP = {
   close: 'x',
   more: 'ellipsis',
   stop: 'square',
+  play: 'play',
   alert: 'triangle-alert',
   trend: 'trending-up',
   check: 'check',

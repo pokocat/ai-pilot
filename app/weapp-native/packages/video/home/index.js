@@ -13,6 +13,7 @@ Page({
     loading: true,
     ongoing: null,
     avatar: null,
+    avatarCount: 0,
     templates: [],
     showLogin: false,
     loginReason: 'execute',
@@ -30,16 +31,22 @@ Page({
     const builtIns = api.builtInTemplates();
     Promise.all([
       api.templates().catch(() => builtIns),
-      host.isLoggedIn() ? api.avatar().catch(() => null) : Promise.resolve(null),
+      host.isLoggedIn() ? api.avatars().catch(() => []) : Promise.resolve([]),
       host.isLoggedIn() ? api.ongoingProject().catch(() => null) : Promise.resolve(null),
-    ]).then(([templates, avatar, ongoing]) => {
+    ]).then(([templates, avatars, ongoing]) => {
       const availableTemplates = Array.isArray(templates) && templates.length ? templates : builtIns;
+      const avatarList = Array.isArray(avatars) ? avatars : [];
+      const avatar = avatarList.find((item) => item.imageStatus === 'ready')
+        || avatarList.find((item) => item.imageStatus === 'training')
+        || avatarList[0]
+        || null;
       this.setData({
         loading: false,
         templates: availableTemplates.map((item) => Object.assign({}, item, {
           durationText: formatDuration(item.estDurationSec),
         })),
         avatar,
+        avatarCount: avatarList.length,
         ongoing: ongoing ? this.decorateOngoing(ongoing) : null,
       });
     });
@@ -48,12 +55,20 @@ Page({
   refreshAccountState() {
     if (!host.isLoggedIn()) return;
     Promise.all([
-      api.avatar().catch(() => null),
+      api.avatars().catch(() => []),
       api.ongoingProject().catch(() => null),
-    ]).then(([avatar, ongoing]) => this.setData({
+    ]).then(([avatars, ongoing]) => {
+      const avatarList = Array.isArray(avatars) ? avatars : [];
+      const avatar = avatarList.find((item) => item.imageStatus === 'ready')
+        || avatarList.find((item) => item.imageStatus === 'training')
+        || avatarList[0]
+        || null;
+      this.setData({
       avatar,
+      avatarCount: avatarList.length,
       ongoing: ongoing ? this.decorateOngoing(ongoing) : null,
-    }));
+      });
+    });
   },
 
   /** 进度按视觉镜头算，不再用文案句数冒充已配画面的完成度。 */

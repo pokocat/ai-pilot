@@ -9,7 +9,7 @@ import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideo
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
 import type {
   ClipAsset, ClipAvatarView, ClipCaptureRequirements, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
-  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipWork,
+  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoiceView, ClipWork,
 } from '../../../shared/contracts';
 
 type Identity = { userId: string; tenantId: string };
@@ -297,6 +297,16 @@ export async function videoRoutes(app: FastifyInstance) {
     try { return await aidramaJson<ClipAvatarView | null>('/api/me/clip/avatar', identityOf(user)); }
     catch (e) { return sendErr(reply, e, 502); }
   });
+  app.get('/video/avatars', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try { return await aidramaJson<ClipAvatarView[]>('/api/me/clip/avatars', identityOf(user)); }
+    catch (e) { return sendErr(reply, e, 502); }
+  });
+  app.get('/video/voices', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try { return await aidramaJson<ClipVoiceView[]>('/api/me/clip/voices', identityOf(user)); }
+    catch (e) { return sendErr(reply, e, 502); }
+  });
   app.get('/video/avatar/requirements', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try { return await aidramaJson<ClipCaptureRequirements>('/api/me/clip/avatar/requirements', identityOf(user)); }
@@ -325,13 +335,19 @@ export async function videoRoutes(app: FastifyInstance) {
       const data = await req.file();
       if (!data) return reply.code(400).send({ error: '未收到采集文件', code: 'CLIP_CLONE_FILE_REQUIRED' });
       const buffer = await data.toBuffer();
-      const rawKind = (data.fields as Record<string, { value?: unknown }> | undefined)?.kind?.value;
+      const fields = data.fields as Record<string, { value?: unknown }> | undefined;
+      const rawKind = fields?.kind?.value;
       const kind = String(rawKind ?? '');
       if (!['avatar', 'voice'].includes(kind)) throw Object.assign(new Error('采集类型非法'), { statusCode: 422, code: 'CLIP_CLONE_KIND_INVALID' });
       assertCaptureUpload(kind as 'avatar' | 'voice', data.mimetype, buffer.length, data.file.truncated);
       await assertVideoMediaModerationReady(data.mimetype);
       await assertVideoUploadContent(buffer, data.mimetype, identityOf(user));
-      return await aidramaUpload('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as 'avatar' | 'voice', data.filename, data.mimetype), mimeType: data.mimetype }, { kind });
+      return await aidramaUpload('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as 'avatar' | 'voice', data.filename, data.mimetype), mimeType: data.mimetype }, {
+        kind,
+        avatarId: String(fields?.avatarId?.value ?? ''),
+        voiceId: String(fields?.voiceId?.value ?? ''),
+        name: String(fields?.name?.value ?? ''),
+      });
     } catch (e) { return sendErr(reply, e, 422); }
   });
   app.get('/video/avatar/consents', async (req, reply) => {
@@ -349,6 +365,15 @@ export async function videoRoutes(app: FastifyInstance) {
     try {
       const result = await aidramaJson('/api/me/clip/avatar', identityOf(user), { method: 'DELETE' });
       await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.video.avatar.delete', payload: { upstreamDeleted: true } });
+      return result;
+    } catch (e) { return sendErr(reply, e, 422); }
+  });
+  app.delete<{ Params: { id: string } }>('/video/avatars/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      const result = await aidramaJson(`/api/me/clip/avatars/${enc(req.params.id)}`, identityOf(user), { method: 'DELETE' });
+      await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.video.avatar.delete_one', payload: { avatarId: req.params.id, upstreamDeleted: true } });
       return result;
     } catch (e) { return sendErr(reply, e, 422); }
   });

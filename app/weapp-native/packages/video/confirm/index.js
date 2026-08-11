@@ -35,8 +35,9 @@ Page({
   load() {
     Promise.all([
       api.project(this.data.projectId),
-      api.avatar().catch(() => null),
-    ]).then(([project, avatar]) => {
+      api.avatars().catch(() => []),
+    ]).then(([project, avatars]) => {
+      const avatar = (Array.isArray(avatars) ? avatars : []).find((item) => item.id === project.avatarId) || null;
       const check = model.preflight(project, avatar);
       const local = model.estimateCredits(project.segments, project.shots);
       const me = host.currentUser();

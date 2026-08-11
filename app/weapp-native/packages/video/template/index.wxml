@@ -48,6 +48,10 @@
             <text class="vd-tag tail"><text class="sq"></text>固定片段</text>
             <text class="ts-text">{{template.tailLabel}} · {{template.tailDurationSec}} 秒，可整段替换</text>
           </view>
+          <view class="ts-tail-preview {{template.tailCoverUrl ? '' : 'vd-grain'}}">
+            <image wx:if="{{template.tailCoverUrl}}" class="ts-tail-image" src="{{template.tailCoverUrl}}" mode="aspectFill"></image>
+            <view class="ts-tail-copy"><text class="ts-tail-name">{{template.tailLabel}}</text><text class="ts-tail-meta">固定视频 · {{template.tailDurationSec}} 秒</text></view>
+          </view>
 
           <text class="ts-note">模板是一版可以直接用的起点。下一步可以让 AI 和你聊几句，再改成真正属于你的稿。</text>
         </view>
