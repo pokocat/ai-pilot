@@ -8,6 +8,7 @@
 ## 执行结果（2026-08-10）
 
 - 端上只保留 `mock / bff` 两种数据源；删除会把军师 JWT 发往第三方域名的 `direct` 形态。报价条可本地即时反馈，但提交前必须取得服务端权威报价并原样回传，报价变化返回 409 且不扣积分、不建任务。
+- 文案首步新增连续 AI 对话：模型结合模板、当前稿和最近消息追问或出稿，`scriptChat` 随项目持久化；生成输出会主动把碎句收成完整语义段。文案 `segments` 与视觉 `shots` 已分层，配画面支持圈选连续句范围共用同一素材，默认相邻 b-roll 每 3 句一镜；报价、preflight、worker 与总装均按 shot 聚合。
 - 军师 BFF 已落地 `/api/video/**`、service-token 身份桥、`externalOwnerId` 隔离、SSRF/重定向防护、限流、文本审核，以及积分 `hold → settle/refund` 幂等状态机；同一请求并发只允许一个请求创建 AIStar 任务。
 - AIStar 已落地独立 `clip_template / clip_project / clip_render_job / clip_asset` 域、OpenAPI、管理员模板与 preset 上传、30 天回收、数据库租约 worker 和 stale reaper。Scheme A 已定：AIStar 不扣用户钱包，只记录军师报价与供应商成本事实。
 - 石榴官方 API v1 已接真实授权视频、speaker/avatar 训练、TTS、文案/音频出片、状态轮询与删除；上游时效成片会立即转存我方持久存储。账号只读验真为 12,000 点、当前无已训练分身/音色，真实 key 只落预发 0600 env。

@@ -6,6 +6,7 @@ import {
   attachVideoJob, refundStaleUnsubmittedVideoHolds, refundVideoHold, reserveVideoCredits, settleVideoJob,
 } from '../services/video/credits.js';
 import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent } from '../services/video/moderation.js';
+import { generateClipScriptTurn } from '../services/video/scriptChat.js';
 import type {
   ClipAsset, ClipAvatarView, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
   ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipWork,
@@ -85,6 +86,8 @@ export async function videoRoutes(app: FastifyInstance) {
       assertId(req.params.id);
       const body = req.body ?? {};
       if (body.segments && !Array.isArray(body.segments)) throw Object.assign(new Error('segments 必须是数组'), { statusCode: 422, code: 'CLIP_PROJECT_INVALID' });
+      if (body.shots && !Array.isArray(body.shots)) throw Object.assign(new Error('shots 必须是数组'), { statusCode: 422, code: 'CLIP_PROJECT_INVALID' });
+      if (body.scriptChat && !Array.isArray(body.scriptChat)) throw Object.assign(new Error('scriptChat 必须是数组'), { statusCode: 422, code: 'CLIP_PROJECT_INVALID' });
       return await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identityOf(user), { method: 'PUT', body });
     } catch (e) { return sendErr(reply, e, 422); }
   });
@@ -104,6 +107,29 @@ export async function videoRoutes(app: FastifyInstance) {
       const result = await aidramaJson(`/api/me/clip/projects/${enc(req.params.id)}/script/ai-rewrite`, identityOf(user), { method: 'POST', body });
       await assertVideoRewriteOutput(result, identityOf(user));
       return result;
+    } catch (e) { return sendErr(reply, e, 422); }
+  });
+
+  app.post<{ Params: { id: string }; Body: { message?: string } }>('/video/projects/:id/script/chat', { config: { rateLimit: { max: 30, timeWindow: '10 minutes' } } }, async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      const message = String(req.body?.message ?? '').trim();
+      if (!message || message.length > 600) throw Object.assign(new Error('请用 600 字以内说说你想怎么写'), { statusCode: 422, code: 'CLIP_SCRIPT_CHAT_INVALID' });
+      const identity = identityOf(user);
+      await assertVideoProjectContent({ segments: [{ role: 'broll', text: message }] }, identity);
+      const project = await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity);
+      const turn = await generateClipScriptTurn(project, message);
+      await assertVideoRewriteOutput({ segments: turn.segments }, identity);
+      await assertVideoRewriteOutput({ text: turn.reply }, identity);
+      const saved = await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity, {
+        method: 'PUT', body: { segments: turn.segments, shots: turn.shots, scriptChat: turn.scriptChat, step: 1 },
+      });
+      await recordAudit({
+        tenantId: user.tenantId, userId: user.id, action: 'user.video.script.chat',
+        payload: { projectId: req.params.id, applied: turn.applied, segmentCount: turn.segments.length, shotCount: turn.shots.length },
+      });
+      return { reply: turn.reply, applied: turn.applied, project: saved };
     } catch (e) { return sendErr(reply, e, 422); }
   });
 
@@ -134,7 +160,7 @@ export async function videoRoutes(app: FastifyInstance) {
       const identity = identityOf(user);
       const project = await aidramaJson<ClipProject>(`/api/me/clip/projects/${enc(req.params.id)}`, identity);
       await assertVideoProjectContent(project, identity);
-      const estimate = await aidramaJson<ClipEstimate>(`/api/me/clip/projects/${enc(req.params.id)}/estimate`, identity, { method: 'POST', body: { segments: project.segments } });
+      const estimate = await aidramaJson<ClipEstimate>(`/api/me/clip/projects/${enc(req.params.id)}/estimate`, identity, { method: 'POST', body: { segments: project.segments, shots: project.shots } });
       if (!Number.isSafeInteger(estimate.total) || estimate.total < 0 || estimate.total > 1_000_000) {
         throw Object.assign(new Error('视频服务返回的报价无效'), { statusCode: 502, code: 'CLIP_ESTIMATE_INVALID' });
       }

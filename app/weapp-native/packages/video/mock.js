@@ -29,6 +29,8 @@ function buildProject(templateId, id) {
     segments: seed.segments.map((line) => Object.assign({
       assetId: null, assetLabel: null, actualDurationSec: 0,
     }, line)),
+    shots: [],
+    scriptChat: [],
     avatarId: 'av_mock',
     voiceId: 'vo_mock',
     updatedAt: Date.now(),
@@ -38,15 +40,13 @@ function buildProject(templateId, id) {
 /* 已有项目（首页「继续上次」用）：第 2 步做到一半，14 句里配好 6 句。 */
 const ONGOING = (() => {
   const project = buildProject('ct_shiti', 'cp_mock_ongoing');
-  const labels = ['门口清早', '手上活儿', '老招牌', '隔壁空店', '店里中景', '顾客取鞋'];
+  const labels = ['门口清早', '手上活儿', '老招牌', '店里中景'];
   let filled = 0;
-  project.segments = project.segments.map((segment) => {
-    if (segment.role === ROLE.BROLL && filled < labels.length) {
-      const next = Object.assign({}, segment, { assetId: `ca_mock_${filled}`, assetLabel: labels[filled] });
-      filled += 1;
-      return next;
-    }
-    return segment;
+  project.shots = require('./model').defaultShots(project.segments).map((shot) => {
+    if (shot.role !== ROLE.BROLL || filled >= labels.length) return shot;
+    const next = Object.assign({}, shot, { assetId: `ca_mock_${filled}`, assetLabel: labels[filled] });
+    filled += 1;
+    return next;
   });
   project.step = 2;
   return project;
@@ -100,7 +100,10 @@ const usageHistory = [{ id: 'cu_mock_1', createdText: '8 月 6 日', action: '�
 
 function getProject(id) {
   if (!projects.has(id)) projects.set(id, buildProject('ct_shiti', id));
-  return projects.get(id);
+  const project = projects.get(id);
+  if (!project.shots || !project.shots.length) project.shots = require('./model').defaultShots(project.segments);
+  if (!Array.isArray(project.scriptChat)) project.scriptChat = [];
+  return project;
 }
 
 function resetSegments(project) {
@@ -150,20 +153,46 @@ module.exports = {
         text: `${String(segment.text || '').replace(/[。.]$/, '')}。这是我守店这些年最想说的一句话。`,
         actualDurationSec: 0,
       })));
-    projects.set(id, Object.assign({}, project, { segments, updatedAt: Date.now() }));
+    const shots = require('./model').defaultShots(segments);
+    projects.set(id, Object.assign({}, project, { segments, shots, updatedAt: Date.now() }));
     return delay({ scope, segments: clone(segments) }, 900);
+  },
+  scriptChat: (id, message) => {
+    const project = getProject(id);
+    const now = new Date().toISOString();
+    const user = { id: `csm_u_${Date.now()}`, role: 'user', content: String(message || ''), at: now };
+    const current = project.segments.filter((segment) => segment.role !== ROLE.TAIL);
+    const compacted = [];
+    current.forEach((segment) => {
+      const previous = compacted[compacted.length - 1];
+      if (previous && previous.role === segment.role && `${previous.text}${segment.text}`.length <= 70) previous.text += segment.text;
+      else compacted.push(Object.assign({}, segment));
+    });
+    const tail = project.segments.filter((segment) => segment.role === ROLE.TAIL);
+    const segments = compacted.concat(tail).map((segment, index) => Object.assign({}, segment, { no: index + 1, actualDurationSec: 0 }));
+    const reply = '我先把碎句收成了更完整的表达段落。你还可以继续说“更口语”“突出手艺”或“结尾更有行动感”。';
+    const assistant = { id: `csm_a_${Date.now()}`, role: 'assistant', content: reply, at: now, applied: true };
+    const next = Object.assign({}, project, {
+      segments,
+      shots: require('./model').defaultShots(segments),
+      scriptChat: (project.scriptChat || []).concat([user, assistant]).slice(-40),
+      updatedAt: Date.now(),
+    });
+    projects.set(id, next);
+    return delay({ reply, applied: true, project: clone(next) }, 850);
   },
   resetScript: (id) => {
     const project = getProject(id);
     const segments = resetSegments(project);
-    projects.set(id, Object.assign({}, project, { segments, updatedAt: Date.now() }));
-    return delay({ segments: clone(segments) });
+    const shots = require('./model').defaultShots(segments);
+    projects.set(id, Object.assign({}, project, { segments, shots, updatedAt: Date.now() }));
+    return delay({ segments: clone(segments), shots: clone(shots) });
   },
   previewVoice: (_id, no, text) => delay({
     no, audioUrl: '', actualDurationSec: Math.max(2, Math.round(String(text || '').length / 4)),
   }, 700),
 
-  estimate: (segments) => delay(require('./model').estimateCredits(segments)),
+  estimate: (segments, shots) => delay(require('./model').estimateCredits(segments, shots)),
   render: (id) => delay({ jobId: `cj_mock_${Date.now()}`, projectId: id, status: 'queued' }, 500),
 
   job: (() => {

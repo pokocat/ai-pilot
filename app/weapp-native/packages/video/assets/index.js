@@ -15,7 +15,7 @@ Page({
     activeTag: '',
     /** 挑选态 */
     picking: false,
-    pickNo: 0,
+    pickShotId: '',
     pickProjectId: '',
     showLogin: false,
   }),
@@ -24,7 +24,7 @@ Page({
     const opts = options || {};
     this.setData({
       picking: String(opts.pick || '') === '1',
-      pickNo: Number(opts.no || 0),
+      pickShotId: String(opts.shotId || ''),
       pickProjectId: String(opts.projectId || ''),
     });
     this.load();
@@ -60,11 +60,11 @@ Page({
 
     if (!this.data.picking) { host.toast('长按可以改标签'); return; }
 
-    // 挑选态：把选中的素材塞回上一页（配画面屏），由它自己写进 segment
+    // 挑选态：把选中的素材塞回上一页，由配画面屏写进整个 shot 范围。
     const pages = getCurrentPages();
     const previous = pages[pages.length - 2];
     if (previous && typeof previous.assignAsset === 'function') {
-      previous.assignAsset(this.data.pickNo, asset);
+      previous.assignAsset(this.data.pickShotId, asset);
     }
     host.back();
   },

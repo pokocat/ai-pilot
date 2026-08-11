@@ -38,7 +38,7 @@ Page({
       api.avatar().catch(() => null),
     ]).then(([project, avatar]) => {
       const check = model.preflight(project, avatar);
-      const local = model.estimateCredits(project.segments);
+      const local = model.estimateCredits(project.segments, project.shots);
       const me = host.currentUser();
       const mockBalance = api.mockCreditBalance();
       const balance = mockBalance != null
@@ -60,7 +60,7 @@ Page({
       });
 
       // 服务端报价才是扣费口径，端上这份只用于首屏即时显示；拿到服务端结果后覆盖
-      api.estimate(this.data.projectId, project.segments)
+      api.estimate(this.data.projectId, project.segments, project.shots)
         .then((remote) => {
           if (!remote || typeof remote.total !== 'number') return;
           this.setData({

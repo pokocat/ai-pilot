@@ -24,6 +24,50 @@
 
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="script-body">
+      <view class="ai-writer">
+        <view class="aw-head">
+          <view>
+            <text class="aw-kicker">AI 文案搭档</text>
+            <text class="aw-title">先聊清楚，再一起把稿写出来</text>
+          </view>
+          <text class="aw-state">{{chatting ? '正在想…' : '可连续追问'}}</text>
+        </view>
+
+        <view class="aw-thread">
+          <view wx:if="{{!chatMessages.length}}" class="aw-message assistant">
+            <text>告诉我这条视频想给谁看、最想讲什么。信息不够我会追问，够了就直接把新稿放到下方。</text>
+          </view>
+          <view wx:for="{{chatMessages}}" wx:key="id" class="aw-message {{item.role}}">
+            <text>{{item.content}}</text>
+            <text wx:if="{{item.role === 'assistant' && item.applied}}" class="aw-applied">已更新下方文案</text>
+          </view>
+          <view wx:if="{{chatting}}" class="aw-message assistant typing"><text>正在结合现有稿整理…</text></view>
+        </view>
+
+        <scroll-view class="aw-suggestions" scroll-x enable-flex>
+          <view
+            wx:for="{{chatSuggestions}}"
+            wx:key="*this"
+            class="aw-suggestion"
+            data-prompt="{{item}}"
+            bindtap="useSuggestion"
+          >{{item}}</view>
+        </scroll-view>
+
+        <view class="aw-compose">
+          <textarea
+            class="aw-input"
+            value="{{chatInput}}"
+            bindinput="inputChat"
+            auto-height
+            maxlength="600"
+            adjust-position="{{true}}"
+            placeholder="例如：给附近上班族看，语气朴实一点，突出我做了十几年"
+          />
+          <view class="aw-send {{chatting ? 'busy' : ''}}" bindtap="sendChat">{{chatting ? '生成中' : '发送'}}</view>
+        </view>
+      </view>
+
       <text class="sb-label">口播文案 · 你的声线</text>
 
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>

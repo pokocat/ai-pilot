@@ -2370,6 +2370,24 @@ export interface ClipSegment {
   brollSource?: 'user' | 'preset' | null;
   replaceable?: boolean;
 }
+/** 文案仍按句编辑；镜头只记录一段连续句子的画面安排，避免“一句话切一次画面”。 */
+export interface ClipShot {
+  id: string;
+  startNo: number;
+  endNo: number;
+  role: ClipSegmentRole;
+  assetId?: string | null;
+  assetLabel?: string | null;
+  brollSource?: 'user' | 'preset' | null;
+  hint?: string | null;
+}
+export interface ClipScriptMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  at?: string;
+  applied?: boolean;
+}
 export interface ClipTemplate {
   id: string; name: string; industry: string; themeKey: string; description: string;
   estDurationSec: number; avatarSecHint: number; creditHint?: number | null; segmentCount: number;
@@ -2379,8 +2397,10 @@ export interface ClipProject {
   id: string; templateId: string; templateName?: string; title: string;
   status: 'draft' | 'generating' | 'done' | 'failed';
   variables: Record<string, string>; segments: ClipSegment[];
+  shots?: ClipShot[]; scriptChat?: ClipScriptMessage[];
   avatarId?: string | null; voiceId?: string | null; step?: number; updatedAt?: string | number;
 }
+export interface ClipScriptChatResult { reply: string; applied: boolean; project: ClipProject; }
 export interface ClipEstimateItem { key: string; label: string; credits: number; freeText?: string; }
 export interface ClipEstimate {
   items: ClipEstimateItem[];

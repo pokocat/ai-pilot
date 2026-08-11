@@ -36,9 +36,9 @@ test('快出片 preflight 返回稳定业务错误码', () => {
   };
   assert.deepEqual(
     model.preflight(project, null).problems.map((item) => item.code),
-    ['EMPTY_TEXT', 'CLIP_AVATAR_NOT_READY', 'CLIP_VOICE_NOT_READY'],
+    ['EMPTY_TEXT', 'CLIP_AVATAR_NOT_READY', 'CLIP_VOICE_NOT_READY', 'CLIP_ASSET_NOT_ALLOWED'],
   );
-  assert.equal(model.preflight({ segments: [{ no: 1, text: '正常', role: model.ROLE.BROLL }] }, readyAvatar).ok, true);
+  assert.equal(model.preflight({ segments: [{ no: 1, text: '正常', role: model.ROLE.BROLL, assetId: 'ca_1' }] }, readyAvatar).ok, true);
 });
 
 test('快出片进度阶段映射保持已完成、进行中、等待中顺序', () => {
@@ -53,4 +53,42 @@ test('试听后未改字保留真实时长，继续改字则清零', () => {
   assert.equal(unchanged[0].actualDurationSec, 9);
   const changed = model.commitSegmentText(segments, 1, '改过的句子', '原句');
   assert.equal(changed[0].actualDurationSec, 0);
+});
+
+test('连续配画面句默认每三句合成一个镜头，文案仍保持逐句', () => {
+  const segments = [
+    { no: 1, text: '开场', role: 'avatar' },
+    { no: 2, text: '门头', role: 'broll' },
+    { no: 3, text: '手艺', role: 'broll' },
+    { no: 4, text: '顾客', role: 'broll' },
+    { no: 5, text: '收束', role: 'broll' },
+    { no: 6, text: '结尾', role: 'tail', durationSec: 3 },
+  ];
+  const shots = model.defaultShots(segments);
+  assert.deepEqual(shots.map((shot) => [shot.startNo, shot.endNo, shot.role]), [
+    [1, 1, 'avatar'], [2, 4, 'broll'], [5, 5, 'broll'], [6, 6, 'tail'],
+  ]);
+  assert.equal(model.materializeShots(segments, shots)[1].text, '门头手艺顾客');
+  assert.equal(segments.length, 6);
+});
+
+test('圈选连续多句会切开原镜头并生成一个共享画面段', () => {
+  const segments = Array.from({ length: 6 }, (_, index) => ({ no: index + 1, text: `第${index + 1}句。`, role: 'broll' }));
+  const result = model.mergeShotRange(segments, model.defaultShots(segments), 2, 5);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.shots.map((shot) => [shot.startNo, shot.endNo]), [[1, 1], [2, 5], [6, 6]]);
+  assert.equal(result.shots[1].assetId, null);
+  assert.deepEqual(model.splitShot(segments, result.shots, result.shots[1].id).map((shot) => [shot.startNo, shot.endNo]),
+    [[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]);
+});
+
+test('多句镜头按镜头计画面段数，并按合计时长限制分身出镜', () => {
+  const segments = [
+    { no: 1, text: '甲'.repeat(70), role: 'broll' },
+    { no: 2, text: '乙'.repeat(70), role: 'broll' },
+  ];
+  const shots = model.defaultShots(segments);
+  assert.equal(model.estimateCredits(segments, shots).summary.brollCount, 1);
+  const toggled = model.toggleShotRole(segments, shots, shots[0].id);
+  assert.match(toggled.error, /超过单次分身出镜上限/);
 });

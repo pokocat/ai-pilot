@@ -16,6 +16,28 @@
 .script-body { padding: 0 20px; }
 .sb-label { display: block; font-size: 12px; color: var(--vd-muted); margin-bottom: 10px; }
 
+.ai-writer {
+  margin-bottom: 18px; padding: 15px;
+  border: 1px solid var(--vd-avatar-line); border-radius: var(--vd-r-card);
+  background: linear-gradient(145deg, var(--vd-avatar-soft), var(--vd-surface) 62%);
+}
+.aw-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.aw-kicker { display: block; font-size: 11px; letter-spacing: .16em; color: var(--vd-avatar-deep); }
+.aw-title { display: block; margin-top: 4px; font-family: var(--vd-serif); font-size: 18px; line-height: 1.35; color: var(--vd-ink); }
+.aw-state { flex: none; margin-top: 2px; padding: 4px 8px; border-radius: var(--vd-r-chip); background: var(--vd-surface); font-size: 10px; color: var(--vd-avatar-deep); }
+.aw-thread { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow: hidden; margin-top: 13px; }
+.aw-message { max-width: 86%; box-sizing: border-box; padding: 9px 11px; border-radius: 12px; font-size: 13px; line-height: 1.55; }
+.aw-message.assistant { align-self: flex-start; background: var(--vd-surface); color: var(--vd-ink-2); border: 1px solid var(--vd-line-soft); }
+.aw-message.user { align-self: flex-end; background: var(--vd-avatar); color: #FFF; }
+.aw-message.typing { color: var(--vd-muted); }
+.aw-applied { display: block; margin-top: 5px; font-size: 10px; color: var(--vd-avatar-deep); }
+.aw-suggestions { display: flex; white-space: nowrap; margin-top: 11px; }
+.aw-suggestion { display: inline-flex; margin-right: 7px; padding: 6px 10px; border: 1px solid var(--vd-line); border-radius: var(--vd-r-chip); background: rgba(255,255,255,.65); font-size: 11px; color: var(--vd-ink-3); }
+.aw-compose { display: flex; align-items: flex-end; gap: 8px; margin-top: 10px; }
+.aw-input { flex: 1; min-height: 38px; max-height: 96px; box-sizing: border-box; padding: 9px 11px; border: 1px solid var(--vd-line); border-radius: 12px; background: var(--vd-surface); font-size: 13px; line-height: 1.5; color: var(--vd-ink); }
+.aw-send { flex: none; min-width: 52px; padding: 10px 9px; text-align: center; border-radius: 11px; background: var(--vd-avatar); color: #FFF; font-size: 12px; font-weight: 600; }
+.aw-send.busy { opacity: .58; }
+
 /* 只读行：像一段连读的文章，不像表单 */
 .lines { background: var(--vd-surface); border-radius: var(--vd-r-card); border: 1px solid var(--vd-line-soft); padding: 16px; }
 .line { padding: 7px 0; }

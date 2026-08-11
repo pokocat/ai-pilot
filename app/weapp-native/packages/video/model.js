@@ -22,6 +22,63 @@ function segmentSeconds(segment) {
   return estimateSeconds(segment.text);
 }
 
+const shotId = (startNo, endNo) => `shot_${startNo}_${endNo}`;
+
+/** 老草稿没有 shots 时按语义角色生成默认镜头；连续实拍句每 3 句共用一个画面。 */
+function defaultShots(segments) {
+  const list = Array.isArray(segments) ? segments : [];
+  const shots = [];
+  for (let index = 0; index < list.length;) {
+    const first = list[index];
+    if (first.role !== ROLE.BROLL) {
+      shots.push({
+        id: shotId(first.no, first.no), startNo: first.no, endNo: first.no, role: first.role,
+        assetId: first.assetId || null, assetLabel: first.assetLabel || null,
+        brollSource: first.brollSource || null, hint: first.hint || null,
+      });
+      index += 1;
+      continue;
+    }
+    let endIndex = index;
+    while (endIndex + 1 < list.length
+      && list[endIndex + 1].role === ROLE.BROLL
+      && String(list[endIndex + 1].assetId || '') === String(first.assetId || '')
+      && endIndex - index + 1 < 3) endIndex += 1;
+    const last = list[endIndex];
+    shots.push({
+      id: shotId(first.no, last.no), startNo: first.no, endNo: last.no, role: ROLE.BROLL,
+      assetId: first.assetId || null, assetLabel: first.assetLabel || null,
+      brollSource: first.brollSource || null, hint: first.hint || null,
+    });
+    index = endIndex + 1;
+  }
+  return shots;
+}
+
+function ensureShots(segments, shots) {
+  const list = Array.isArray(shots) ? shots.filter((shot) => shot && shot.startNo > 0 && shot.endNo >= shot.startNo) : [];
+  return list.length ? list.map((shot) => Object.assign({}, shot)) : defaultShots(segments);
+}
+
+/** 把“句子层 + 镜头层”投影成报价、预检和预览使用的真实生成段。 */
+function materializeShots(segments, shots) {
+  const source = Array.isArray(segments) ? segments : [];
+  return ensureShots(source, shots).map((shot, index) => {
+    const members = source.filter((segment) => segment.no >= shot.startNo && segment.no <= shot.endNo);
+    const actuals = members.map((segment) => Number(segment.actualDurationSec || 0));
+    const durations = members.map((segment) => segmentSeconds(segment));
+    return Object.assign({}, shot, {
+      no: index + 1,
+      sourceNos: members.map((segment) => segment.no),
+      text: members.map((segment) => String(segment.text || '')).join(''),
+      durationSec: durations.reduce((sum, value) => sum + value, 0),
+      actualDurationSec: actuals.length && actuals.every((value) => value > 0)
+        ? actuals.reduce((sum, value) => sum + value, 0) : 0,
+      hint: shot.hint || members.map((segment) => segment.hint).filter(Boolean).join(' · '),
+    });
+  });
+}
+
 /** 秒 → mm:ss。 */
 function formatDuration(totalSec) {
   const sec = Math.max(0, Math.round(Number(totalSec) || 0));
@@ -29,8 +86,8 @@ function formatDuration(totalSec) {
 }
 
 /** 汇总：成片时长、出镜秒数、各角色段数。 */
-function summarize(segments) {
-  const list = Array.isArray(segments) ? segments : [];
+function summarize(segments, shots) {
+  const list = shots ? materializeShots(segments, shots) : (Array.isArray(segments) ? segments : []);
   let totalSec = 0; let avatarSec = 0; let tailSec = 0;
   let avatarCount = 0; let brollCount = 0; let tailCount = 0;
   let chars = 0;
@@ -52,8 +109,8 @@ function summarize(segments) {
  * 端上报价预估。返回明细，供「出片确认」屏逐行展示（设计稿屏 07）。
  * 尾段固定免费（模板自带的预渲染素材，无生成成本）。
  */
-function estimateCredits(segments) {
-  const sum = summarize(segments);
+function estimateCredits(segments, shots) {
+  const sum = summarize(segments, shots);
   const tts = Math.ceil((sum.chars / 1000) * PRICING.creditPerKChar);
   const avatar = Math.ceil(sum.avatarSec * PRICING.creditPerAvatarSecond);
   const broll = sum.brollCount * PRICING.creditPerBrollSegment;
@@ -68,6 +125,70 @@ function estimateCredits(segments) {
     total: tts + avatar + broll + assemble,
     summary: sum,
   };
+}
+
+/** 切换整个镜头的角色；多句合并镜头按合计时长校验分身引擎上限。 */
+function toggleShotRole(segments, shots, id) {
+  const list = ensureShots(segments, shots);
+  const index = list.findIndex((shot) => shot.id === id);
+  if (index < 0) return { shots: list, delta: 0, error: null };
+  const current = list[index];
+  if (current.role === ROLE.TAIL) return { shots: list, delta: 0, error: '结尾是固定片段，不能切换；可以整段替换。' };
+  const before = estimateCredits(segments, list).total;
+  const role = current.role === ROLE.AVATAR ? ROLE.BROLL : ROLE.AVATAR;
+  if (role === ROLE.AVATAR) {
+    const rendered = materializeShots(segments, [current])[0];
+    const sec = segmentSeconds(rendered);
+    if (sec > MAX_AVATAR_SEGMENT_SEC) {
+      return { shots: list, delta: 0, error: `这段约 ${sec} 秒，超过单次分身出镜上限；请先拆开。` };
+    }
+  }
+  list[index] = Object.assign({}, current, {
+    role,
+    assetId: role === ROLE.BROLL ? current.assetId || null : null,
+    assetLabel: role === ROLE.BROLL ? current.assetLabel || null : null,
+  });
+  return { shots: list, delta: estimateCredits(segments, list).total - before, error: null };
+}
+
+/** 将任意连续句区间圈成一个镜头；被切到的旧镜头会保留左右剩余范围。 */
+function mergeShotRange(segments, shots, startNo, endNo) {
+  const source = Array.isArray(segments) ? segments : [];
+  const start = Math.min(Number(startNo), Number(endNo));
+  const end = Math.max(Number(startNo), Number(endNo));
+  const members = source.filter((segment) => segment.no >= start && segment.no <= end);
+  if (members.length < 2 || members[0].no !== start || members[members.length - 1].no !== end) {
+    return { shots: ensureShots(source, shots), error: '请至少连续选择两句话。' };
+  }
+  if (members.some((segment) => segment.role === ROLE.TAIL)) {
+    return { shots: ensureShots(source, shots), error: '固定结尾不能和正文合并。' };
+  }
+  const current = ensureShots(source, shots);
+  const next = [];
+  current.forEach((shot) => {
+    if (shot.endNo < start || shot.startNo > end) { next.push(shot); return; }
+    if (shot.startNo < start) next.push(Object.assign({}, shot, { id: shotId(shot.startNo, start - 1), endNo: start - 1 }));
+    if (shot.endNo > end) next.push(Object.assign({}, shot, { id: shotId(end + 1, shot.endNo), startNo: end + 1 }));
+  });
+  next.push({
+    id: shotId(start, end), startNo: start, endNo: end,
+    role: ROLE.BROLL,
+    assetId: null, assetLabel: null,
+    hint: members.map((segment) => segment.hint).filter(Boolean).join(' · ') || null,
+  });
+  next.sort((a, b) => a.startNo - b.startNo);
+  return { shots: next, error: null };
+}
+
+function splitShot(segments, shots, id) {
+  const current = ensureShots(segments, shots);
+  const target = current.find((shot) => shot.id === id);
+  if (!target || target.startNo === target.endNo) return current;
+  return current.flatMap((shot) => (shot.id !== id ? [shot]
+    : Array.from({ length: target.endNo - target.startNo + 1 }, (_, offset) => {
+      const no = target.startNo + offset;
+      return Object.assign({}, target, { id: shotId(no, no), startNo: no, endNo: no });
+    })));
 }
 
 /**
@@ -122,13 +243,15 @@ function commitSegmentText(segments, no, nextText, previewedText) {
 function preflight(project, avatar) {
   const problems = [];
   const segments = (project && project.segments) || [];
+  const shots = ensureShots(segments, project && project.shots);
+  const rendered = materializeShots(segments, shots);
 
   if (!segments.length) problems.push({ code: 'NO_SEGMENTS', message: '文案还是空的。' });
 
   const emptyText = segments.filter((s) => s.role !== ROLE.TAIL && !String(s.text || '').trim());
   if (emptyText.length) problems.push({ code: 'EMPTY_TEXT', message: `第 ${emptyText.map((s) => s.no).join('、')} 句还没写内容。` });
 
-  const hasAvatar = segments.some((s) => s.role === ROLE.AVATAR);
+  const hasAvatar = rendered.some((s) => s.role === ROLE.AVATAR);
   if (hasAvatar) {
     if (!avatar || avatar.imageStatus !== 'ready') {
       problems.push({ code: 'CLIP_AVATAR_NOT_READY', message: '你的形象还没训练好，可以先用平台预置形象出片。' });
@@ -138,13 +261,16 @@ function preflight(project, avatar) {
     }
   }
 
-  const tooLong = segments.filter((s) => s.role === ROLE.AVATAR && segmentSeconds(s) > MAX_AVATAR_SEGMENT_SEC);
+  const tooLong = rendered.filter((s) => s.role === ROLE.AVATAR && segmentSeconds(s) > MAX_AVATAR_SEGMENT_SEC);
   if (tooLong.length) {
     problems.push({
       code: 'CLIP_SEGMENT_TOO_LONG',
-      message: `第 ${tooLong.map((s) => s.no).join('、')} 句作为出镜段太长，拆短一点。`,
+      message: `${tooLong.map((s) => `第 ${s.startNo}${s.endNo > s.startNo ? `–${s.endNo}` : ''} 句`).join('、')}作为出镜段太长，拆短一点。`,
     });
   }
+
+  const missingAssets = rendered.filter((s) => s.role === ROLE.BROLL && !s.assetId);
+  if (missingAssets.length) problems.push({ code: 'CLIP_ASSET_NOT_ALLOWED', message: '还有画面段没有选择素材。' });
 
   return { ok: problems.length === 0, problems };
 }
@@ -171,4 +297,5 @@ module.exports = {
   ROLE, STAGES,
   estimateSeconds, segmentSeconds, formatDuration,
   summarize, estimateCredits, toggleRole, commitSegmentText, preflight, stageRows,
+  defaultShots, ensureShots, materializeShots, toggleShotRole, mergeShotRange, splitShot,
 };

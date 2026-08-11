@@ -24,6 +24,10 @@ Page({
     previewedText: null,
     rewriting: false,
     previewing: false,
+    chatting: false,
+    chatInput: '',
+    chatMessages: [],
+    chatSuggestions: ['写得更口语一点', '突出我的手艺和可信感', '开头更抓人，但别像广告'],
     showLogin: false,
   }),
 
@@ -43,14 +47,22 @@ Page({
   load() {
     api.project(this.data.projectId)
       .then((project) => {
-        this.setData({ loading: false, project });
-        host.writeDraft(this.data.projectId, { project, step: 1 });
-        this.recompute(project.segments);
+        const normalized = Object.assign({}, project, {
+          shots: model.ensureShots(project.segments, project.shots),
+          scriptChat: Array.isArray(project.scriptChat) ? project.scriptChat : [],
+        });
+        this.setData({ loading: false, project: normalized, chatMessages: normalized.scriptChat });
+        host.writeDraft(this.data.projectId, { project: normalized, step: 1 });
+        this.recompute(normalized.segments);
       })
       .catch((error) => {
         const draft = host.readDraft(this.data.projectId);
         if (draft && draft.project && Array.isArray(draft.project.segments)) {
-          this.setData({ loading: false, project: draft.project });
+          const normalized = Object.assign({}, draft.project, {
+            shots: model.ensureShots(draft.project.segments, draft.project.shots),
+            scriptChat: Array.isArray(draft.project.scriptChat) ? draft.project.scriptChat : [],
+          });
+          this.setData({ loading: false, project: normalized, chatMessages: normalized.scriptChat });
           this.recompute(draft.project.segments);
           host.toast('网络不稳，已打开本地草稿');
           return;
@@ -168,7 +180,10 @@ Page({
           return;
         }
         if (result.segments) {
-          const project = Object.assign({}, this.data.project, { segments: result.segments });
+          const project = Object.assign({}, this.data.project, {
+            segments: result.segments,
+            shots: model.defaultShots(result.segments),
+          });
           this.setData({ project });
           this.recompute(result.segments);
           this.scheduleSave();
@@ -182,6 +197,39 @@ Page({
       });
   },
 
+  /* ── 和 AI 对话写稿 ── */
+
+  inputChat(event) { this.setData({ chatInput: String(event.detail.value || '') }); },
+
+  useSuggestion(event) {
+    this.setData({ chatInput: String(event.currentTarget.dataset.prompt || '') });
+    this.sendChat();
+  },
+
+  sendChat() {
+    if (!host.requireLogin(this, 'execute')) return;
+    const message = String(this.data.chatInput || '').trim();
+    if (!message) { host.toast('先说说你想怎么写'); return; }
+    if (this.data.chatting) return;
+    const optimistic = (this.data.chatMessages || []).concat([{ id: `local_${Date.now()}`, role: 'user', content: message }]);
+    this.setData({ chatting: true, chatInput: '', chatMessages: optimistic });
+    api.scriptChat(this.data.projectId, message)
+      .then((result) => {
+        const project = Object.assign({}, result.project, {
+          shots: model.ensureShots(result.project.segments, result.project.shots),
+          scriptChat: Array.isArray(result.project.scriptChat) ? result.project.scriptChat : [],
+        });
+        this.setData({ chatting: false, project, chatMessages: project.scriptChat });
+        this.recompute(project.segments);
+        host.writeDraft(this.data.projectId, { project, step: 1 });
+        if (result.applied) host.toast('新稿已放进下方，可继续聊着改', 'success');
+      })
+      .catch((error) => {
+        this.setData({ chatting: false, chatMessages: this.data.project.scriptChat || [], chatInput: message });
+        host.toast(error && error.message ? error.message : 'AI 暂时没接上，请重试');
+      });
+  },
+
   restoreTemplate() {
     host.confirm({ title: '恢复模板原文', content: '你改过的文字会被覆盖，确定吗？' }).then((ok) => {
       if (!ok) return;
@@ -191,7 +239,8 @@ Page({
           host.hideLoading();
           const segments = result && result.segments;
           if (!Array.isArray(segments)) throw new Error('恢复结果不完整');
-          const project = Object.assign({}, this.data.project, { segments });
+          const shots = Array.isArray(result.shots) && result.shots.length ? result.shots : model.defaultShots(segments);
+          const project = Object.assign({}, this.data.project, { segments, shots });
           this.setData({ project, editingNo: null, previewedText: null });
           this.recompute(segments);
           this.scheduleSave();
@@ -218,7 +267,12 @@ Page({
   flush() {
     const project = this.data.project;
     if (!project) return;
-    api.saveProject(this.data.projectId, { segments: project.segments, step: 1 }).catch(() => {});
+    api.saveProject(this.data.projectId, {
+      segments: project.segments,
+      shots: model.ensureShots(project.segments, project.shots),
+      scriptChat: project.scriptChat || [],
+      step: 1,
+    }).catch(() => {});
   },
 
   saveDraft() {

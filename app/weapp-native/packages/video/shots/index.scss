@@ -38,6 +38,16 @@
 
 .rows { padding: 0 20px; }
 
+.group-tool {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 12px; padding: 13px 14px;
+  border: 1px dashed var(--vd-broll-line); border-radius: var(--vd-r-field);
+  background: var(--vd-broll-soft);
+}
+.gt-title { display: block; font-size: 14px; font-weight: 600; color: var(--vd-ink); }
+.gt-sub { display: block; margin-top: 4px; font-size: 11px; line-height: 1.45; color: var(--vd-muted); }
+.gt-go { flex: none; font-size: 12px; font-weight: 600; color: var(--vd-broll); }
+
 .row {
   display: flex; gap: 10px;
   background: var(--vd-surface);
@@ -53,12 +63,15 @@
 .row.tail { border-left-color: var(--vd-fixed); background: var(--vd-fixed-soft); }
 
 .row-no {
-  flex: none; width: 22px;
+  flex: none; width: 54px;
   font-size: 12px; font-weight: 700; color: var(--vd-faint);
   padding-top: 2px;
 }
 
 .row-body { flex: 1; min-width: 0; }
+.row-copy-head { display: flex; align-items: center; justify-content: space-between; min-height: 18px; margin-bottom: 2px; }
+.row-count { padding: 2px 6px; border-radius: var(--vd-r-chip); background: var(--vd-broll-soft); font-size: 10px; color: var(--vd-broll); }
+.row-split { padding: 2px 0 4px 10px; font-size: 11px; color: var(--vd-muted); }
 .row-text { display: block; font-size: 15px; line-height: 1.6; color: var(--vd-ink); }
 
 .row-ctl { display: flex; align-items: center; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
@@ -90,6 +103,27 @@
   background: var(--vd-avatar-soft);
   border: 1px solid var(--vd-avatar-line);
 }
+
+/* 连续范围选择：仍是“句子清单”，不是剪辑轨道。 */
+.range-mask {
+  position: fixed; inset: 0; z-index: 1250; display: flex; align-items: flex-end;
+  background: rgba(24,21,18,.46);
+}
+.range-sheet {
+  width: 100%; max-height: 84vh; box-sizing: border-box; display: flex; flex-direction: column;
+  padding: 18px 20px calc(16px + env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; background: var(--vd-bg);
+}
+.range-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.range-title { display: block; font-family: var(--vd-serif); font-size: 21px; color: var(--vd-ink); }
+.range-sub { display: block; margin-top: 4px; font-size: 12px; color: var(--vd-broll); }
+.range-close { padding: 0 2px 8px 16px; font-size: 28px; line-height: 1; color: var(--vd-muted); }
+.range-list { flex: 1; min-height: 220px; }
+.range-row { display: flex; align-items: flex-start; gap: 10px; padding: 11px 10px; margin-bottom: 7px; border: 1px solid var(--vd-line-soft); border-radius: 12px; background: var(--vd-surface); }
+.range-row.selected { border-color: var(--vd-broll-line); background: var(--vd-broll-soft); }
+.range-check { flex: none; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--vd-line); border-radius: 50%; font-size: 10px; color: var(--vd-muted); }
+.range-row.selected .range-check { border-color: var(--vd-broll); background: var(--vd-broll); color: #FFF; }
+.range-copy { flex: 1; font-size: 14px; line-height: 1.55; color: var(--vd-ink); }
+.range-actions { display: flex; gap: 10px; padding-top: 12px; }
 
 /* 轻量顺序预览：不冒充可播放成片，只让用户在扣费前核对脚本与画面角色。 */
 .pv-mask {

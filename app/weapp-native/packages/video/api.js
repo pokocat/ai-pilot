@@ -43,6 +43,9 @@ const api = {
   aiRewrite: (id, scope, no, text) => (useMock()
     ? mock.aiRewrite(id, scope, no, text)
     : call(`/projects/${q(id)}/script/ai-rewrite`, { method: 'POST', data: { scope, no, text }, timeout: 120000 })),
+  scriptChat: (id, message) => (useMock()
+    ? mock.scriptChat(id, message)
+    : call(`/projects/${q(id)}/script/chat`, { method: 'POST', data: { message }, timeout: 120000 })),
   resetScript: (id) => (useMock()
     ? mock.resetScript(id)
     : call(`/projects/${q(id)}/script/reset`, { method: 'POST', data: {} })),
@@ -53,9 +56,9 @@ const api = {
 
   /* ── 出片 ── */
   /** 服务端报价。端上 model.estimateCredits 只是预估，**扣费以本接口为准**。 */
-  estimate: (id, segments) => (useMock()
-    ? mock.estimate(segments)
-    : call(`/projects/${q(id)}/estimate`, { method: 'POST', data: { segments } })),
+  estimate: (id, segments, shots) => (useMock()
+    ? mock.estimate(segments, shots)
+    : call(`/projects/${q(id)}/estimate`, { method: 'POST', data: { segments, shots } })),
   render: (id, clientRequestId, expectedCredits) => (useMock()
     ? mock.render(id)
     : call(`/projects/${q(id)}/render`, { method: 'POST', data: { clientRequestId, expectedCredits }, timeout: 60000 })),
