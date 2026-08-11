@@ -10,6 +10,7 @@
 
 - 修正把质量建议误做成强制门槛的问题：声音由至少 20 秒改为服务端严格 `>2s`、端上按整秒提示至少 3 秒；形象视频由至少 15 秒改为至少 5 秒。8–15 秒声音和 10–20 秒形象只作为效果建议，短素材不再被产品侧拦截。
 - 声音示例朗读稿缩短为约 10 秒，录音时长保留小数，避免 2 秒边界附近被四舍五入误判。server requirements、原生 fallback、mock 与页面文案保持同口径；格式、大小、H.264、分辨率、音轨等真实媒体校验保持不变。
+- AIStar 采集策略 4/4、军师原生 94/94、共享前端 103/103 通过。已部署军师 `f6cb58d` 与 AIStar `b5140a8a-20260811T132756Z`；两服务 active、`NRestarts=0`、force-mock 关闭。AIStar 与公网 BFF requirements 双层验真一致；server 包已 auto-preview 到 AppID `wx810ebe6dfef8e75f`，构建身份为 `native-weapp / server / https://wxapi.aibuzz.cn/api_preprod / f6cb58d`。本轮未创建石榴计费任务。
 
 ### 2026-08-11 · 「快出片」对齐石榴采集与数字人真实链路 · 影响面：分身采集、授权、训练进度、视频生成与预发验收
 

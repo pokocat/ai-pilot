@@ -1,6 +1,6 @@
 # 「快出片」视频子应用 · 技术方案（军师分包形态）
 
-> **状态**：M1 工程、石榴 v0.116 官方采集/授权/训练/生成契约、阿里云多模态机审适配器与完整多段总装已落地；真实供应商链已具备本人真机验收条件。测试阶段允许隔离预发显式审核旁路，production 硬拒绝。本人素材质量实测、真实发布与生产合规门槛仍未完成。
+> **状态**：M1 工程、石榴 v0.117 官方采集/授权/训练/生成契约、阿里云多模态机审适配器与完整多段总装已落地；真实供应商链已具备本人真机验收条件。测试阶段允许隔离预发显式审核旁路，production 硬拒绝。本人素材质量实测、真实发布与生产合规门槛仍未完成。
 > **创建**：2026-08-10
 > **上游**：产品方案见 `AIStarEcosystem/docs/clip-avatar-video-plan.md`（549 行，本文不重复其内容，只记**因为改成军师分包而变化的部分**）。
 > **设计稿**：`13屏原型与设计确认-handoff.zip` → `快出片 原型.dc.html`（13 屏，暖橙人文纪实）。
@@ -16,7 +16,7 @@
 - 军师 BFF 已实现阿里云内容安全增强版图片/视频/语音审核：本地文件通过官方临时 OSS 凭证上传，图片同步判定，视频/语音轮询异步任务；只放行 `none/low`，`medium/high`、配置/权限/欠费、超时和异常返回全部 fail-closed。测试阶段隔离预发显式设置 `CLIP_MEDIA_MODERATION_BYPASS=true`，仍校验媒体类型并记录 `user.video.media.moderation.bypassed` 审计；production 启动硬拒绝该开关。待正确账号开通内容安全并授权专用身份后，再关闭旁路做本人素材验收。
 - AIStar v0.113 预发已完成逐段 avatar/b-roll 标准化、真实 TTS 时长、H.264/AAC 多段总装、可选低音量 BGM、字幕与全程 AI 标识、三套模板各自的运行时固定品牌尾卡、最终音轨 -16 LUFS / -1.5 dBTP 归一、平均亮度/综合响度/真峰值失败关闭和作品缩略图。预发宿主 180 秒 720×1280 合成探针得到平均亮度 125.50、-16.05 LUFS、单音轨并通过解析；这只证明宿主编解码/滤镜链路，不替代本人授权真实长片压力验收。
 - 预发采用同机隔离拓扑：军师 `junshi-api-preprod :4001` 通过独立 service token 回源 `aistareco-clip-preprod 127.0.0.1:8081`，公网仅暴露预发 BFF 和 `/clip_preprod/cdn|files/`，AIStar 生产未修改。
-- v0.116 已部署军师 `9a1700b` 与 AIStar `458246e1-20260811T124030Z`；两服务 active、`NRestarts=0`，AIStar 当前关闭 force-mock 并走真实石榴。requirements 通过 AIStar/BFF 两层鉴权探针，石榴只读权益仍为 12000 点、0 分身、0 音色；没有用自动化创建任务。AppID `wx810ebe6dfef8e75f` 已收到指向预发的 server auto-preview。
+- v0.117 已部署军师 `f6cb58d` 与 AIStar `b5140a8a-20260811T132756Z`；两服务 active、`NRestarts=0`，AIStar 关闭 force-mock 并走真实石榴。AIStar 与公网军师 BFF 的 requirements 均返回形象硬门 5 秒/建议 10–20 秒、声音供应商硬门 2 秒/端上硬门 3 秒/建议 8–15 秒；自动化没有创建计费任务。AppID `wx810ebe6dfef8e75f` 已收到构建身份为 `native-weapp / server / https://wxapi.aibuzz.cn/api_preprod / f6cb58d` 的 auto-preview。
 - 隔离预发公网验收已完成：素材上传 → 本人授权 → 声音/形象克隆 → 三套内置模板 → 文案/配画面 → 权威报价 → 军师积分预扣/结算 → AIStar worker → ffmpeg 总装/质检/封面 → 作品 → 抖音 mock 发布状态全部成功。样本成片 44.05 秒、720×1280、H.264/AAC，抽帧可见「测试演示」「AI 生成」和字幕；该次 force-mock 未调用石榴。随后以 server 模式指向预发完成 AppID `wx810ebe6dfef8e75f` 真机 auto-preview。
 - 非生产 mock 可以闭环演示；纯 `api.isMock()` 会话使用 200 点演示额度，避免主应用默认无套餐的新 mock 账号在确认页被 0 余额挡住。隔离预发还可令 AIStar 显式 force-mock：保留真实石榴凭据但以确定性媒体走真实 ffmpeg/质检/存储链，产出永久带「测试演示」的可播放 MP4，不用状态假成功。附身 JWT / server 模式不使用演示额度。production 会同时拒绝媒体审核旁路和 AIStar force-mock。四平台真实代发仍保持 `CLIP_PUBLISH_NOT_CONFIGURED`。
 - 端内新增 `catalog.js` 作为三套体验模板的唯一事实源；列表、详情、mock 建项目与重置脚本共用同一目录，每套模板都有独立文案和镜头结构。11 个页面的自定义导航已收成与微信胶囊同层，不再重复叠加 50px 标题栏。
