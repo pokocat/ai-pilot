@@ -25,7 +25,7 @@
         <text class="cl-s">在线录制时朗读稿会一直留在屏幕上；也可以直接上传一段干净的单人音频。</text>
 
         <view class="cl-source-tabs">
-          <view class="cl-source on" bindtap="toggleRecord"><text>{{recording ? '结束录制' : '在线录制'}}</text></view>
+          <view class="cl-source on" bindtap="toggleRecord"><text>{{recording ? '结束录制' : (startingRecord ? '正在开启…' : '在线录制')}}</text></view>
           <view class="cl-source" bindtap="pickVoice"><text>上传音频</text></view>
         </view>
 
@@ -40,7 +40,7 @@
         </view>
 
         <view class="cl-mic {{recording ? 'on' : ''}}" bindtap="toggleRecord">
-          <text>{{recording ? '正在录，点一下结束' : (voiceFile ? '重新录一段' : '开始录制')}}</text>
+          <text>{{recording ? '正在录，点一下结束' : (startingRecord ? '正在开启麦克风…' : (voiceFile ? '重新录一段' : '开始录制'))}}</text>
         </view>
 
         <view wx:if="{{voiceFile}}" class="cl-file-ready">

@@ -30,6 +30,7 @@ Page({
     requirementsReady: false,
     readingScript: READING_SCRIPT,
     recording: false,
+    startingRecord: false,
     recordSeconds: 0,
     voiceFile: null,
     voiceSubmitted: false,
@@ -57,7 +58,7 @@ Page({
     if (this.data.step === 3 && !this.trainingTimer) this.startTrainingPolling();
   },
   onHide() { this.stopTrainingPolling(); },
-  onUnload() { this.stopTrainingPolling(); this.stopRecordTimer(); this.stopRecorder(); },
+  onUnload() { this.stopTrainingPolling(); this.stopRecordStartTimer(); this.stopRecordTimer(); this.stopRecorder(); },
 
   loadRequirements() {
     api.avatarRequirements()
@@ -91,37 +92,90 @@ Page({
 
   toggleRecord() {
     if (this.data.recording) { this.stopRecorder(); return; }
-    this.startRecorder();
+    if (this.data.startingRecord) return;
+    this.requestRecordPermission();
+  },
+
+  requestRecordPermission() {
+    const begin = () => this.startRecorder();
+    if (typeof wx.getSetting !== 'function' || typeof wx.authorize !== 'function') { begin(); return; }
+    wx.getSetting({
+      success: (result) => {
+        const state = result && result.authSetting && result.authSetting['scope.record'];
+        if (state === true) { begin(); return; }
+        if (state === false) { this.openRecordSettings(); return; }
+        wx.authorize({
+          scope: 'scope.record',
+          success: begin,
+          fail: () => this.openRecordSettings(),
+        });
+      },
+      fail: () => host.toast('无法读取麦克风权限，请稍后重试'),
+    });
+  },
+
+  openRecordSettings() {
+    host.confirm({ title: '需要麦克风权限', content: '打开麦克风权限后，才能录制并克隆你的声音。', confirmText: '去设置' })
+      .then((ok) => {
+        if (!ok) return;
+        wx.openSetting({
+          success: (result) => {
+            if (result && result.authSetting && result.authSetting['scope.record']) {
+              host.toast('麦克风已开启，请再点一次开始录制', 'success');
+            }
+          },
+        });
+      });
   },
 
   startRecorder() {
     const manager = wx.getRecorderManager();
     this.recorder = manager;
+    this.setData({ startingRecord: true });
+    if (typeof manager.offStart === 'function') manager.offStart();
     if (typeof manager.offStop === 'function') manager.offStop();
     if (typeof manager.offError === 'function') manager.offError();
+    manager.onStart(() => {
+      this.stopRecordStartTimer();
+      this.setData({ startingRecord: false, recording: true, recordSeconds: 0, voiceFile: null, voiceSubmitted: false });
+      this.stopRecordTimer();
+      this.recordTimer = setInterval(() => this.setData({ recordSeconds: this.data.recordSeconds + 1 }), 1000);
+    });
     manager.onStop((res) => {
+      this.stopRecordStartTimer();
       this.stopRecordTimer();
       const file = { path: res.tempFilePath, duration: (res.duration || 0) / 1000, size: res.fileSize || 0, source: 'record' };
       if (!this.validateCapture('voice', file)) { this.setData({ recording: false, voiceFile: null }); return; }
       this.setData({ recording: false, voiceFile: file, voiceSubmitted: false });
     });
     manager.onError((error) => {
+      this.stopRecordStartTimer();
       this.stopRecordTimer();
-      this.setData({ recording: false });
+      this.setData({ startingRecord: false, recording: false });
       const message = String(error && (error.errMsg || error.message) || '');
       if (/auth|deny|permission/i.test(message)) {
-        host.confirm({ title: '需要麦克风权限', content: '去设置里打开麦克风权限后，就能录制你的声音。', confirmText: '去设置' })
-          .then((ok) => { if (ok) wx.openSetting({}); });
+        this.openRecordSettings();
         return;
       }
-      host.toast('录音失败');
+      host.toast(message ? `录音失败：${message.slice(0, 40)}` : '录音失败，请重试');
     });
-    manager.start({ duration: Math.min(120, this.captureRule('voice').maxDurationSec) * 1000, format: 'mp3', sampleRate: 44100, numberOfChannels: 1 });
-    this.setData({ recording: true, recordSeconds: 0, voiceFile: null, voiceSubmitted: false });
-    this.recordTimer = setInterval(() => this.setData({ recordSeconds: this.data.recordSeconds + 1 }), 1000);
+    this.stopRecordStartTimer();
+    this.recordStartTimer = setTimeout(() => {
+      if (!this.data.startingRecord) return;
+      this.setData({ startingRecord: false, recording: false });
+      host.toast('麦克风启动超时，请检查权限后重试');
+    }, 5000);
+    try {
+      manager.start({ duration: Math.min(120, this.captureRule('voice').maxDurationSec) * 1000, format: 'mp3', sampleRate: 44100, numberOfChannels: 1 });
+    } catch (error) {
+      this.stopRecordStartTimer();
+      this.setData({ startingRecord: false, recording: false });
+      host.toast(error && error.message ? error.message : '录音启动失败');
+    }
   },
 
   stopRecorder() { if (this.recorder && this.data.recording) this.recorder.stop(); },
+  stopRecordStartTimer() { if (this.recordStartTimer) { clearTimeout(this.recordStartTimer); this.recordStartTimer = null; } },
   stopRecordTimer() { if (this.recordTimer) { clearInterval(this.recordTimer); this.recordTimer = null; } },
 
   pickVoice() {

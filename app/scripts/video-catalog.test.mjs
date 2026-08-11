@@ -68,12 +68,16 @@ test('快出片数字分身按石榴直传创建，authId 可选且较长时长�
 
   const view = fs.readFileSync(path.join(videoRoot, 'clone/index.wxml'), 'utf8');
   const style = fs.readFileSync(path.join(videoRoot, 'clone/index.scss'), 'utf8');
+  const appConfig = JSON.parse(fs.readFileSync(path.resolve(videoRoot, '../../app.json'), 'utf8'));
   assert.match(view, /object-fit="contain"/);
   assert.match(view, /先让分身学会你的声音/);
   assert.match(view, /录制时不需要念固定文案/);
   assert.match(view, /《数字分身素材使用说明》/);
   assert.doesNotMatch(view, /录制授权视频/);
   assert.match(style, /\.cl-video-card\s*\{[\s\S]*height: 238px;/);
+  assert.match(source, /wx\.authorize\([\s\S]*scope: 'scope\.record'/);
+  assert.match(source, /manager\.onStart\(/);
+  assert.equal(appConfig.permission['scope.record'].desc.includes('数字分身声音'), true);
 });
 
 test('快出片所有页面只占一层原生导航高度', () => {

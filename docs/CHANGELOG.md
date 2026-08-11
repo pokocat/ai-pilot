@@ -8,6 +8,7 @@
 
 ### 2026-08-11 · 「快出片」数字分身创建对齐石榴直传逻辑 · 影响面：克隆向导、竖屏预览、石榴 avatar 训练契约
 
+- 真机补丁：补齐 `scope.record` 用途声明与“检查现状 → 首次授权 → 拒绝后去设置”的完整麦克风权限链；录音 UI 只在 `RecorderManager.onStart` 后开始计时，启动失败显示实际短错误，不再出现点击“开始录制”无反馈。
 - 删除会把用户阻断在 403 的“授权视频先行”产品硬闸。石榴 Train Avatar Model 的 `authId` 是可选校验项，普通创建现在按“先克隆声音 → 上传形象视频 → 云端训练”完成；历史账号已有 authId 时后端仍兼容携带。`ClipCaptureRequirements` 新增 `authorizationVideoRequired=false`，回归测试禁止恢复 `CLIP_CONSENT_REQUIRED`。
 - 声音克隆同时支持页面内照稿录制和上传现有音频；形象相机不再要求朗读固定授权稿，微信原生全屏录制只承担拍摄。形象上传区压缩为 176px，选中后的播放器固定 238px 并使用 `object-fit=contain`，横竖视频都完整显示，不再出现 380px 大空框。
 - 依据 `mobile-app-ui-design` 的任务优先、单主动作、44px 点击区和 8 点间距重新组织页面：三步进度只显示真实任务，拍摄指南压为两列，素材使用权改为轻量声明且保留删除能力。自动化只走 HTTP 桩和本地媒体策略，没有创建真实 speaker/avatar/video 任务、没有消耗石榴点数。
