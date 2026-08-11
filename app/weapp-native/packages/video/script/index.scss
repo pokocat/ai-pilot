@@ -4,31 +4,47 @@
 .vd-scroll { flex: 1; min-height: 0; }
 .script-body { padding: 8px 20px 0; }
 
-/* AI 对话是文案页主动作，用熟悉的聊天界面包住复杂生成能力。 */
-.ai-writer {
-  position: relative; overflow: hidden;
-  margin-bottom: 16px; padding: 20px;
-  border-radius: 24px; background: #202326; color: #FFF;
-  box-shadow: 0 16px 36px rgba(49,38,31,.16);
+/* AI 改稿退到熟悉的悬浮助手：正文保持专注，点开后使用独立对话抽屉。 */
+.ai-fab {
+  position: fixed; right: 20px; bottom: 102px; z-index: 28;
+  bottom: calc(94px + constant(safe-area-inset-bottom));
+  bottom: calc(94px + env(safe-area-inset-bottom));
+  width: 62px; height: 62px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  border-radius: 50%; background: var(--vd-avatar); color: #FFF;
+  box-shadow: 0 12px 26px rgba(240,100,53,.34), inset 0 1px 0 rgba(255,255,255,.35);
 }
-.ai-writer::after { content: ""; position: absolute; width: 160px; height: 160px; right: -64px; top: -82px; border-radius: 50%; background: rgba(240,100,53,.36); filter: blur(24px); pointer-events: none; }
-.aw-head { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.ai-fab text { font-size: 9px; font-weight: 700; letter-spacing: .03em; }
+.ai-fab-dot { position: absolute; right: 3px; top: 3px; width: 9px; height: 9px; border: 2px solid #FFF; border-radius: 50%; background: var(--vd-success); }
+.ai-mask { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: flex-end; background: rgba(24,21,18,.46); }
+.ai-sheet {
+  width: 100%; height: 82vh; box-sizing: border-box; display: flex; flex-direction: column;
+  padding: 8px 18px 12px;
+  padding-bottom: calc(12px + constant(safe-area-inset-bottom));
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  border-radius: 26px 26px 0 0; background: #202326; color: #FFF;
+  box-shadow: 0 -18px 50px rgba(20,18,16,.24); overflow: hidden;
+}
+.ai-handle { width: 38px; height: 4px; flex: none; margin: 0 auto 10px; border-radius: 999px; background: rgba(255,255,255,.2); }
+.aw-head { position: relative; z-index: 1; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex: none; }
 .aw-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .aw-orb { width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 15px; background: var(--vd-avatar); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 8px 18px rgba(240,100,53,.26); }
 .aw-kicker { display: block; font-size: 10px; font-weight: 700; letter-spacing: .12em; color: #FF9C77; }
-.aw-title { display: block; margin-top: 3px; font-family: var(--vd-serif); font-size: 19px; line-height: 1.35; color: #FFF; }
-.aw-state { flex: none; margin-top: 6px; padding: 5px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,.14); font-size: 9px; color: rgba(255,255,255,.7); }
-.aw-intro { position: relative; z-index: 1; display: block; margin-top: 12px; font-size: 12px; line-height: 1.6; color: rgba(255,255,255,.6); }
+.aw-title { display: block; margin-top: 3px; font-family: var(--vd-serif); font-size: 18px; line-height: 1.35; color: #FFF; }
+.aw-close { width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: rgba(255,255,255,.08); }
+.aw-intro { position: relative; z-index: 1; display: block; flex: none; margin: 12px 2px 8px; font-size: 12px; line-height: 1.6; color: rgba(255,255,255,.6); }
 
-.aw-thread { position: relative; z-index: 1; display: flex; max-height: 244px; margin-top: 16px; }
+.aw-thread { position: relative; z-index: 1; flex: 1; min-height: 148px; }
+.aw-thread-inner { display: flex; flex-direction: column; align-items: stretch; padding: 8px 0 12px; }
 .aw-message { display: block; max-width: 86%; box-sizing: border-box; padding: 10px 12px; margin-bottom: 8px; border-radius: 14px; font-size: 13px; line-height: 1.55; }
 .aw-message.assistant { margin-right: auto; background: rgba(255,255,255,.1); color: rgba(255,255,255,.86); border: 1px solid rgba(255,255,255,.09); border-bottom-left-radius: 5px; }
 .aw-message.user { margin-left: auto; background: var(--vd-avatar); color: #FFF; border-bottom-right-radius: 5px; }
 .aw-message.typing { color: rgba(255,255,255,.58); }
 .aw-applied { display: block; margin-top: 6px; font-size: 9px; color: #FFA17F; }
-.aw-suggestions { position: relative; z-index: 1; display: flex; white-space: nowrap; margin-top: 8px; }
+.aw-suggestions { position: relative; z-index: 1; flex: none; width: 100%; white-space: nowrap; margin-top: 4px; }
+.aw-suggestions-inner { display: inline-flex; padding-right: 12px; }
 .aw-suggestion { display: inline-flex; min-height: 36px; box-sizing: border-box; align-items: center; margin-right: 8px; padding: 0 11px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: rgba(255,255,255,.06); font-size: 11px; color: rgba(255,255,255,.72); }
-.aw-compose { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: 8px; margin-top: 12px; padding: 6px; border-radius: 16px; background: #FFF; }
+.aw-compose { position: relative; z-index: 1; flex: none; display: flex; align-items: flex-end; gap: 8px; margin-top: 12px; padding: 6px; border-radius: 16px; background: #FFF; }
 .aw-input { flex: 1; min-height: 40px; max-height: 96px; box-sizing: border-box; padding: 9px 8px; border: 0; background: transparent; font-size: 13px; line-height: 1.5; color: var(--vd-ink); }
 .aw-send { flex: none; min-width: 58px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; padding: 0 10px; text-align: center; border-radius: 12px; background: var(--vd-avatar); color: #FFF; font-size: 12px; font-weight: 700; box-shadow: inset 0 1px 0 rgba(255,255,255,.35); }
 .aw-send.busy { opacity: .58; }

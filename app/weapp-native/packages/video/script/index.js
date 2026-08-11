@@ -25,8 +25,10 @@ Page({
     rewriting: false,
     previewing: false,
     chatting: false,
+    aiOpen: false,
     chatInput: '',
     chatMessages: [],
+    chatScrollTop: 0,
     chatSuggestions: ['写得更口语一点', '突出我的手艺和可信感', '开头更抓人，但别像广告'],
     showLogin: false,
   }),
@@ -42,6 +44,7 @@ Page({
   onUnload() {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; this.flush(); }
     if (this.audio) { this.audio.stop(); this.audio.destroy(); this.audio = null; }
+    if (this.data.aiOpen) host.setOverlay(false, 'video-script-ai');
   },
 
   load() {
@@ -199,6 +202,16 @@ Page({
 
   /* ── 和 AI 对话写稿 ── */
 
+  openAi() {
+    host.setOverlay(true, 'video-script-ai');
+    this.setData({ aiOpen: true, chatScrollTop: 999999 });
+  },
+
+  closeAi() {
+    host.setOverlay(false, 'video-script-ai');
+    this.setData({ aiOpen: false });
+  },
+
   inputChat(event) { this.setData({ chatInput: String(event.detail.value || '') }); },
 
   useSuggestion(event) {
@@ -212,14 +225,14 @@ Page({
     if (!message) { host.toast('先说说你想怎么写'); return; }
     if (this.data.chatting) return;
     const optimistic = (this.data.chatMessages || []).concat([{ id: `local_${Date.now()}`, role: 'user', content: message }]);
-    this.setData({ chatting: true, chatInput: '', chatMessages: optimistic });
+    this.setData({ chatting: true, chatInput: '', chatMessages: optimistic, chatScrollTop: this.data.chatScrollTop + 999999 });
     api.scriptChat(this.data.projectId, message)
       .then((result) => {
         const project = Object.assign({}, result.project, {
           shots: model.ensureShots(result.project.segments, result.project.shots),
           scriptChat: Array.isArray(result.project.scriptChat) ? result.project.scriptChat : [],
         });
-        this.setData({ chatting: false, project, chatMessages: project.scriptChat });
+        this.setData({ chatting: false, project, chatMessages: project.scriptChat, chatScrollTop: this.data.chatScrollTop + 999999 });
         this.recompute(project.segments);
         host.writeDraft(this.data.projectId, { project, step: 1 });
         if (result.applied) host.toast('新稿已放进下方，可继续聊着改', 'success');
@@ -287,6 +300,7 @@ Page({
   },
 
   back() { host.back(); },
+  swallow() {},
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false }); },
 });

@@ -82,6 +82,39 @@ test('圈选连续多句会切开原镜头并生成一个共享画面段', () =>
     [[1, 1], [2, 2], [3, 3], [4, 4], [5, 5], [6, 6]]);
 });
 
+test('调整当前画面段时，取消勾选的句子单独成段且不丢原文覆盖', () => {
+  const segments = Array.from({ length: 5 }, (_, index) => ({ no: index + 1, text: `第${index + 1}句。`, role: 'broll' }));
+  const shots = model.defaultShots(segments);
+  const result = model.regroupShotSelection(segments, shots, shots[0].id, [2, 3]);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.shots.map((shot) => [shot.startNo, shot.endNo]), [[1, 1], [2, 3], [4, 5]]);
+  assert.deepEqual(model.materializeShots(segments, result.shots).flatMap((shot) => shot.sourceNos), [1, 2, 3, 4, 5]);
+});
+
+test('当前画面段不允许保留非连续勾选，全部取消则拆成单句', () => {
+  const segments = Array.from({ length: 3 }, (_, index) => ({ no: index + 1, text: `第${index + 1}句。`, role: 'broll' }));
+  const shots = model.defaultShots(segments);
+  const invalid = model.regroupShotSelection(segments, shots, shots[0].id, [1, 3]);
+  assert.match(invalid.error, /需要连续/);
+  assert.deepEqual(invalid.shots, shots);
+  const split = model.regroupShotSelection(segments, shots, shots[0].id, []);
+  assert.equal(split.error, null);
+  assert.deepEqual(split.shots.map((shot) => [shot.startNo, shot.endNo]), [[1, 1], [2, 2], [3, 3]]);
+});
+
+test('相邻画面段可直接合并，素材不同则清空后重新选择', () => {
+  const segments = Array.from({ length: 4 }, (_, index) => ({ no: index + 1, text: `第${index + 1}句。`, role: 'broll' }));
+  const shots = [
+    { id: 'shot_1_2', startNo: 1, endNo: 2, role: 'broll', assetId: 'a', assetLabel: '门头' },
+    { id: 'shot_3_4', startNo: 3, endNo: 4, role: 'broll', assetId: 'b', assetLabel: '后厨' },
+  ];
+  const result = model.mergeAdjacentShots(segments, shots, shots[0].id);
+  assert.equal(result.error, null);
+  assert.deepEqual(result.shots.map((shot) => [shot.startNo, shot.endNo]), [[1, 4]]);
+  assert.equal(result.shots[0].assetId, null);
+  assert.deepEqual(model.materializeShots(segments, result.shots)[0].sourceNos, [1, 2, 3, 4]);
+});
+
 test('多句镜头按镜头计画面段数，并按合计时长限制分身出镜', () => {
   const segments = [
     { no: 1, text: '甲'.repeat(70), role: 'broll' },

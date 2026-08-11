@@ -7,12 +7,25 @@ const { ROLE } = model;
 
 const SAVE_DEBOUNCE_MS = 1200;
 
+function rangeSelectionState(rows) {
+  const selected = (Array.isArray(rows) ? rows : []).filter((row) => row.selected).map((row) => row.no);
+  const contiguous = selected.every((no, index) => index === 0 || no === selected[index - 1] + 1);
+  return {
+    count: selected.length,
+    invalid: !contiguous,
+    text: !selected.length
+      ? '全部取消后，每句话都会单独成段'
+      : (contiguous ? `已选 ${selected.length} 句继续共用一个画面` : '保留在一起的句子需要连续'),
+  };
+}
+
 Page({
   data: host.hostBaseData({
     projectId: '', loading: true, project: null, rows: [],
     totalText: '0:00', avatarSec: 0, credits: 0,
     flash: null, previewOpen: false, rangeOpen: false,
-    rangeStart: 0, rangeEnd: 0, rangeRows: [], rangeText: '先点起句，再点止句',
+    groupCount: 0, rangeShotId: '', rangeTitle: '', rangeRows: [],
+    rangeSelectedCount: 0, rangeInvalid: false, rangeText: '',
     showLogin: false,
   }),
 
@@ -58,14 +71,15 @@ Page({
     const estimate = model.estimateCredits(project.segments, shots);
     this.setData({
       project: Object.assign({}, project, { shots }),
-      rows: rendered.map((shot) => this.decorate(shot)),
+      rows: rendered.map((shot, index) => this.decorate(shot, rendered[index + 1])),
+      groupCount: rendered.filter((shot) => shot.role !== ROLE.TAIL).length,
       totalText: model.formatDuration(estimate.summary.totalSec),
       avatarSec: estimate.summary.avatarSec,
       credits: estimate.total,
     });
   },
 
-  decorate(shot) {
+  decorate(shot, following) {
     const seconds = model.segmentSeconds(shot);
     const isTail = shot.role === ROLE.TAIL;
     const isAvatar = shot.role === ROLE.AVATAR;
@@ -81,6 +95,7 @@ Page({
         : (isAvatar ? `出镜 ${seconds} 秒 · 你的脸和声音`
           : (shot.assetLabel ? `已选：${shot.assetLabel}` : (shot.hint || '还没配画面'))),
       hasAsset: Boolean(shot.assetId), switchable: !isTail,
+      canMergeNext: !isTail && Boolean(following && following.role !== ROLE.TAIL),
     });
   },
 
@@ -103,34 +118,74 @@ Page({
     this.flashTimer = setTimeout(() => this.setData({ flash: null }), 3000);
   },
 
-  openRange() {
-    const segments = this.data.project.segments.filter((segment) => segment.role !== ROLE.TAIL);
+  openRange(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    const shot = this.data.project.shots.find((item) => item.id === id);
+    if (!shot || shot.role === ROLE.TAIL || shot.startNo === shot.endNo) return;
+    const rows = this.data.project.segments
+      .filter((segment) => segment.no >= shot.startNo && segment.no <= shot.endNo)
+      .map((segment) => ({ no: segment.no, text: segment.text, selected: true }));
+    const state = rangeSelectionState(rows);
     host.setOverlay(true, 'video-shot-range');
     this.setData({
-      rangeOpen: true, rangeStart: 0, rangeEnd: 0, rangeText: '先点起句，再点止句',
-      rangeRows: segments.map((segment) => ({ no: segment.no, text: segment.text, selected: false })),
+      rangeOpen: true,
+      rangeShotId: id,
+      rangeTitle: shot.startNo === shot.endNo ? `第 ${shot.startNo} 句` : `第 ${shot.startNo}–${shot.endNo} 句`,
+      rangeRows: rows,
+      rangeSelectedCount: state.count,
+      rangeInvalid: state.invalid,
+      rangeText: state.text,
     });
   },
 
   tapRangeSentence(event) {
     const no = Number(event.currentTarget.dataset.no);
-    let start = this.data.rangeStart; let end = this.data.rangeEnd;
-    if (!start || (start && end && start !== end)) { start = no; end = no; }
-    else { const anchor = start; start = Math.min(anchor, no); end = Math.max(anchor, no); }
+    const rows = this.data.rangeRows.map((row) => (row.no === no ? Object.assign({}, row, { selected: !row.selected }) : row));
+    const state = rangeSelectionState(rows);
     this.setData({
-      rangeStart: start, rangeEnd: end,
-      rangeText: start === end ? `已选第 ${start} 句，再点一句作为止句` : `将第 ${start}–${end} 句共用一个画面`,
-      rangeRows: this.data.rangeRows.map((row) => Object.assign({}, row, { selected: row.no >= start && row.no <= end })),
+      rangeRows: rows,
+      rangeSelectedCount: state.count,
+      rangeInvalid: state.invalid,
+      rangeText: state.text,
     });
   },
 
   applyRange() {
     const project = this.data.project;
-    const result = model.mergeShotRange(project.segments, project.shots, this.data.rangeStart, this.data.rangeEnd);
+    const selectedNos = this.data.rangeRows.filter((row) => row.selected).map((row) => row.no);
+    const result = model.regroupShotSelection(project.segments, project.shots, this.data.rangeShotId, selectedNos);
     if (result.error) { host.toast(result.error); return; }
     this.setData({ project: Object.assign({}, project, { shots: result.shots }) });
     this.closeRange(); this.recompute(); this.scheduleSave();
-    host.toast('已合成一个画面段', 'success');
+    host.toast('已按勾选重新分段', 'success');
+  },
+
+  splitRange() {
+    const project = this.data.project;
+    const shots = model.splitShot(project.segments, project.shots, this.data.rangeShotId);
+    this.setData({ project: Object.assign({}, project, { shots }) });
+    this.closeRange(); this.recompute(); this.scheduleSave();
+    host.toast('这段已拆成单句', 'success');
+  },
+
+  mergeNext(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    const project = this.data.project;
+    const index = project.shots.findIndex((shot) => shot.id === id);
+    const current = project.shots[index];
+    const following = project.shots[index + 1];
+    const apply = () => {
+      const result = model.mergeAdjacentShots(project.segments, project.shots, id);
+      if (result.error) { host.toast(result.error); return; }
+      this.setData({ project: Object.assign({}, project, { shots: result.shots }) });
+      this.recompute(); this.scheduleSave();
+      host.toast('已和下一段合并', 'success');
+    };
+    const needsNewAsset = current && following && (current.assetId || following.assetId)
+      && String(current.assetId || '') !== String(following.assetId || '');
+    if (!needsNewAsset) { apply(); return; }
+    host.confirm({ title: '合并并重新选画面？', content: '这两段当前画面不同，合并后需要为整段重新选择一个画面。' })
+      .then((ok) => { if (ok) apply(); });
   },
 
   splitShot(event) {
@@ -143,7 +198,7 @@ Page({
 
   closeRange() {
     host.setOverlay(false, 'video-shot-range');
-    this.setData({ rangeOpen: false });
+    this.setData({ rangeOpen: false, rangeShotId: '', rangeRows: [] });
   },
 
   pickAsset(event) {

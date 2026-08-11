@@ -32,14 +32,13 @@
 
 .group-tool {
   display: flex; align-items: center; gap: 12px;
-  margin-bottom: 28px; padding: 16px;
+  margin-bottom: 20px; padding: 14px 16px;
   border: 1px solid var(--vd-broll-line); border-radius: 18px; background: var(--vd-broll-soft);
 }
 .gt-icon { width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 14px; background: rgba(255,255,255,.72); }
 .gt-copy { flex: 1; min-width: 0; }
 .gt-title { display: block; font-size: 14px; font-weight: 700; color: var(--vd-ink); }
 .gt-sub { display: block; margin-top: 4px; font-size: 11px; line-height: 1.5; color: var(--vd-muted); }
-.gt-go { width: 36px; height: 36px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 12px; background: rgba(255,255,255,.7); }
 .rows-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .rh-kicker { display: block; font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--vd-broll); }
 .rh-title { display: block; margin-top: 3px; font-family: var(--vd-serif); font-size: 20px; font-weight: 600; }
@@ -67,7 +66,9 @@
 .row-copy-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; margin-bottom: 8px; }
 .row-range { display: flex; align-items: center; gap: 8px; }
 .row-count { padding: 4px 7px; border-radius: 999px; background: var(--vd-broll-soft); font-size: 10px; color: var(--vd-broll); }
-.row-split { min-height: 32px; display: flex; align-items: center; padding-left: 10px; font-size: 11px; color: var(--vd-muted); }
+.row-actions { display: flex; flex: none; align-items: center; gap: 10px; }
+.row-action { min-height: 36px; display: flex; align-items: center; font-size: 11px; font-weight: 700; color: var(--vd-broll); }
+.row-action.muted { color: var(--vd-muted); font-weight: 500; }
 .row-text { display: block; font-size: 15px; line-height: 1.72; color: var(--vd-ink); }
 
 .row-ctl { display: flex; align-items: center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
@@ -100,7 +101,7 @@
   border: 1px solid var(--vd-avatar-line);
 }
 
-/* 连续范围选择：仍是“句子清单”，不是剪辑轨道。 */
+/* 只编辑当前画面段里的组合，避免在整篇脚本里重新猜起止位置。 */
 .range-mask {
   position: fixed; inset: 0; z-index: 1250; display: flex; align-items: flex-end;
   background: rgba(24,21,18,.46);
@@ -118,7 +119,10 @@
 .range-row.selected { border-color: var(--vd-broll-line); background: var(--vd-broll-soft); }
 .range-check { flex: none; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--vd-line); border-radius: 50%; font-size: 10px; color: var(--vd-muted); }
 .range-row.selected .range-check { border-color: var(--vd-broll); background: var(--vd-broll); color: #FFF; }
-.range-copy { flex: 1; font-size: 14px; line-height: 1.55; color: var(--vd-ink); }
+.range-copy-wrap { flex: 1; min-width: 0; }
+.range-copy { display: block; font-size: 14px; line-height: 1.55; color: var(--vd-ink); }
+.range-note { display: block; margin-top: 5px; font-size: 10px; color: var(--vd-muted); }
+.range-row.selected .range-note { color: var(--vd-broll); }
 .range-actions { display: flex; gap: 10px; padding-top: 12px; }
 
 /* 轻量顺序预览：不冒充可播放成片，只让用户在扣费前核对脚本与画面角色。 */

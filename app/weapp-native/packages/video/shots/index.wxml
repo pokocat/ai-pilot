@@ -25,10 +25,9 @@
         <view wx:if="{{flash}}" class="pb-flash"><text class="pb-delta">{{flash.delta}}</text><text class="pb-flash-text">{{flash.text}}</text></view>
         <view wx:else class="pb-stat"><text class="strong">{{totalText}}</text><text>预计成片</text><text class="strong">{{avatarSec}} 秒</text><text>分身出镜</text></view>
       </view>
-      <view class="group-tool" bindtap="openRange">
+      <view class="group-tool">
         <view class="gt-icon"><native-icon name="layers" tone="blue" size="21"></native-icon></view>
-        <view class="gt-copy"><text class="gt-title">圈选多句话，共用一个画面</text><text class="gt-sub">点起句和止句，原文不会被合并或改乱</text></view>
-        <view class="gt-go"><native-icon name="arrow" tone="blue" size="16"></native-icon></view>
+        <view class="gt-copy"><text class="gt-title">已自动整理成 {{groupCount}} 个画面段</text><text class="gt-sub">在每段右上角调整组合，原文不会被删改</text></view>
       </view>
       <view class="rows-head"><view><text class="rh-kicker">画面清单</text><text class="rh-title">逐段检查</text></view><text class="rh-help">点标签可切换出镜方式</text></view>
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
@@ -36,7 +35,10 @@
         <view class="row-body">
           <view class="row-copy-head">
             <view class="row-range"><text class="row-no">{{item.rangeText}}</text><text wx:if="{{item.multi}}" class="row-count">{{item.sentenceCount}} 句共用</text></view>
-            <text wx:if="{{item.multi && item.roleClass !== 'tail'}}" class="row-split" data-id="{{item.id}}" catchtap="splitShot">拆成单句</text>
+            <view wx:if="{{item.roleClass !== 'tail'}}" class="row-actions">
+              <text wx:if="{{item.multi}}" class="row-action" data-id="{{item.id}}" catchtap="openRange">调整组合</text>
+              <text wx:if="{{item.canMergeNext}}" class="row-action muted" data-id="{{item.id}}" catchtap="mergeNext">与下一段合并</text>
+            </view>
           </view>
           <text class="row-text">{{item.text}}</text>
           <view class="row-ctl">
@@ -62,13 +64,14 @@
 
   <view wx:if="{{rangeOpen}}" class="range-mask" catchtap="closeRange">
     <view class="range-sheet" catchtap="swallow">
-      <view class="range-head"><view><text class="range-title">圈选一个画面段</text><text class="range-sub">{{rangeText}}</text></view><view class="range-close" bindtap="closeRange"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
+      <view class="range-head"><view><text class="range-title">调整 {{rangeTitle}} 的组合</text><text class="range-sub">{{rangeText}}</text></view><view class="range-close" bindtap="closeRange"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
       <scroll-view class="range-list" scroll-y enable-flex>
         <view wx:for="{{rangeRows}}" wx:key="no" class="range-row {{item.selected ? 'selected' : ''}}" data-no="{{item.no}}" bindtap="tapRangeSentence">
-          <view class="range-check"><native-icon wx:if="{{item.selected}}" name="check" tone="white" size="12"></native-icon><text wx:else>{{item.no}}</text></view><text class="range-copy">{{item.text}}</text>
+          <view class="range-check"><native-icon wx:if="{{item.selected}}" name="check" tone="white" size="12"></native-icon><text wx:else>{{item.no}}</text></view>
+          <view class="range-copy-wrap"><text class="range-copy">{{item.text}}</text><text class="range-note">{{item.selected ? '留在这个画面段' : '取消组合 · 将单独成段'}}</text></view>
         </view>
       </scroll-view>
-      <view class="range-actions"><view class="vd-btn ghost" bindtap="closeRange">取消</view><view class="vd-btn" style="flex:1" bindtap="applyRange">合成一个画面段</view></view>
+      <view class="range-actions"><view class="vd-btn ghost" bindtap="splitRange">全部拆开</view><view class="vd-btn {{rangeInvalid ? 'disabled' : ''}}" style="flex:1" bindtap="applyRange">保存组合</view></view>
     </view>
   </view>
 

@@ -18,54 +18,6 @@
 
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="script-body">
-      <view class="ai-writer">
-        <view class="aw-head">
-          <view class="aw-identity">
-            <view class="aw-orb"><native-icon name="pen" tone="white" size="19"></native-icon></view>
-            <view>
-              <text class="aw-kicker">AI 文案搭档</text>
-              <text class="aw-title">说说你想怎么讲</text>
-            </view>
-          </view>
-          <text class="aw-state">{{chatting ? '正在写' : '随时可聊'}}</text>
-        </view>
-        <text class="aw-intro">它会结合模板和现有稿追问，聊清楚后直接更新下方文案。</text>
-
-        <scroll-view class="aw-thread" scroll-y enable-flex>
-          <view wx:if="{{!chatMessages.length}}" class="aw-message assistant">
-            <text>这条视频最想让谁看到？你希望他看完记住什么？</text>
-          </view>
-          <view wx:for="{{chatMessages}}" wx:key="id" class="aw-message {{item.role}}">
-            <text>{{item.content}}</text>
-            <text wx:if="{{item.role === 'assistant' && item.applied}}" class="aw-applied">已更新下方文案</text>
-          </view>
-          <view wx:if="{{chatting}}" class="aw-message assistant typing"><text>正在结合现有稿整理…</text></view>
-        </scroll-view>
-
-        <scroll-view class="aw-suggestions" scroll-x enable-flex>
-          <view
-            wx:for="{{chatSuggestions}}"
-            wx:key="*this"
-            class="aw-suggestion"
-            data-prompt="{{item}}"
-            bindtap="useSuggestion"
-          >{{item}}</view>
-        </scroll-view>
-
-        <view class="aw-compose">
-          <textarea
-            class="aw-input"
-            value="{{chatInput}}"
-            bindinput="inputChat"
-            auto-height
-            maxlength="600"
-            adjust-position="{{true}}"
-            placeholder="例如：给附近上班族看，朴实一点，突出我做了十几年"
-          />
-          <view class="aw-send {{chatting ? 'busy' : ''}}" bindtap="sendChat">{{chatting ? '生成中' : '发送'}}</view>
-        </view>
-      </view>
-
       <view class="script-tools">
         <view class="st-btn {{rewriting ? 'busy' : ''}}" bindtap="rewriteAll">{{rewriting ? '改写中…' : '整稿优化'}}</view>
         <view class="st-btn ghost" bindtap="restoreTemplate">恢复模板</view>
@@ -120,6 +72,68 @@
       <text class="fs-sub">读完全文的时长</text>
     </view>
     <view class="vd-btn" style="flex:1" bindtap="next">下一步 · 配画面</view>
+  </view>
+
+  <view wx:if="{{!aiOpen}}" class="ai-fab" bindtap="openAi">
+    <native-icon name="pen" tone="white" size="22"></native-icon>
+    <text>AI 改稿</text>
+    <view wx:if="{{chatMessages.length}}" class="ai-fab-dot"></view>
+  </view>
+
+  <view wx:if="{{aiOpen}}" class="ai-mask" catchtap="closeAi">
+    <view class="ai-sheet" catchtap="swallow">
+      <view class="ai-handle"></view>
+      <view class="aw-head">
+        <view class="aw-identity">
+          <view class="aw-orb"><native-icon name="pen" tone="white" size="19"></native-icon></view>
+          <view>
+            <text class="aw-kicker">AI 文案搭档</text>
+            <text class="aw-title">聊着改，成稿会留在原处</text>
+          </view>
+        </view>
+        <view class="aw-close" bindtap="closeAi"><native-icon name="close" tone="white" size="18"></native-icon></view>
+      </view>
+      <text class="aw-intro">说你想改哪里。它会结合模板和当前稿追问，确认后直接更新文案。</text>
+
+      <scroll-view class="aw-thread" scroll-y scroll-top="{{chatScrollTop}}">
+        <view class="aw-thread-inner">
+          <view wx:if="{{!chatMessages.length}}" class="aw-message assistant">
+            <text>这条视频最想让谁看到？你希望他看完记住什么？</text>
+          </view>
+          <view wx:for="{{chatMessages}}" wx:key="id" class="aw-message {{item.role}}">
+            <text>{{item.content}}</text>
+            <text wx:if="{{item.role === 'assistant' && item.applied}}" class="aw-applied">已更新文案</text>
+          </view>
+          <view wx:if="{{chatting}}" class="aw-message assistant typing"><text>正在结合现有稿整理…</text></view>
+        </view>
+      </scroll-view>
+
+      <scroll-view class="aw-suggestions" scroll-x>
+        <view class="aw-suggestions-inner">
+          <view
+            wx:for="{{chatSuggestions}}"
+            wx:key="*this"
+            class="aw-suggestion"
+            data-prompt="{{item}}"
+            bindtap="useSuggestion"
+          >{{item}}</view>
+        </view>
+      </scroll-view>
+
+      <view class="aw-compose">
+        <textarea
+          class="aw-input"
+          value="{{chatInput}}"
+          bindinput="inputChat"
+          auto-height
+          maxlength="600"
+          adjust-position="{{true}}"
+          cursor-spacing="18"
+          placeholder="例如：朴实一点，突出我做了十几年"
+        />
+        <view class="aw-send {{chatting ? 'busy' : ''}}" bindtap="sendChat">{{chatting ? '生成中' : '发送'}}</view>
+      </view>
+    </view>
   </view>
 
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

@@ -192,6 +192,79 @@ function splitShot(segments, shots, id) {
 }
 
 /**
+ * 只调整当前镜头里的组合关系：保留勾选的连续句为一段，取消勾选的句子各自成段。
+ * 这样用户面对的是“当前画面段”，而不是在整篇脚本里重新猜起止位置。
+ */
+function regroupShotSelection(segments, shots, id, selectedNos) {
+  const source = Array.isArray(segments) ? segments : [];
+  const current = ensureShots(source, shots);
+  const target = current.find((shot) => shot.id === id);
+  if (!target) return { shots: current, error: '没有找到要调整的画面段。' };
+  if (target.role === ROLE.TAIL) return { shots: current, error: '固定结尾不能拆分或重组。' };
+
+  const members = source
+    .filter((segment) => segment.no >= target.startNo && segment.no <= target.endNo)
+    .map((segment) => segment.no);
+  const selectedSet = new Set((Array.isArray(selectedNos) ? selectedNos : []).map(Number));
+  const selected = members.filter((no) => selectedSet.has(no));
+  if (!selected.length) return { shots: splitShot(source, current, id), error: null };
+
+  const contiguous = selected.every((no, index) => index === 0 || no === selected[index - 1] + 1);
+  if (!contiguous) return { shots: current, error: '保留在一起的句子需要连续，请补选中间句或分两次调整。' };
+  if (selected.length === members.length) return { shots: current, error: null };
+
+  const selectedStart = selected[0];
+  const selectedEnd = selected[selected.length - 1];
+  const pieces = members.flatMap((no) => {
+    if (no < selectedStart || no > selectedEnd) {
+      return [Object.assign({}, target, { id: shotId(no, no), startNo: no, endNo: no })];
+    }
+    if (no === selectedStart) {
+      return [Object.assign({}, target, {
+        id: shotId(selectedStart, selectedEnd), startNo: selectedStart, endNo: selectedEnd,
+      })];
+    }
+    return [];
+  });
+  return {
+    shots: current.flatMap((shot) => (shot.id === id ? pieces : [shot])),
+    error: null,
+  };
+}
+
+/** 把当前镜头和紧邻的下一镜头合并；固定尾段不参与，素材不一致时要求重新选。 */
+function mergeAdjacentShots(segments, shots, id) {
+  const source = Array.isArray(segments) ? segments : [];
+  const current = ensureShots(source, shots);
+  const index = current.findIndex((shot) => shot.id === id);
+  if (index < 0 || index >= current.length - 1) return { shots: current, error: '后面没有可以合并的画面段。' };
+  const target = current[index];
+  const following = current[index + 1];
+  if (target.endNo + 1 !== following.startNo) return { shots: current, error: '只能合并相邻的画面段。' };
+  if (target.role === ROLE.TAIL || following.role === ROLE.TAIL) return { shots: current, error: '固定结尾不能和正文合并。' };
+
+  const role = target.role === following.role ? target.role : ROLE.BROLL;
+  const sameAsset = role === ROLE.BROLL && target.assetId && target.assetId === following.assetId;
+  const merged = {
+    id: shotId(target.startNo, following.endNo),
+    startNo: target.startNo,
+    endNo: following.endNo,
+    role,
+    assetId: sameAsset ? target.assetId : null,
+    assetLabel: sameAsset ? target.assetLabel || following.assetLabel || null : null,
+    brollSource: role === ROLE.BROLL && target.brollSource && target.brollSource === following.brollSource ? target.brollSource : null,
+    hint: [target.hint, following.hint].filter(Boolean).join(' · ') || null,
+  };
+  if (role === ROLE.AVATAR && segmentSeconds(materializeShots(source, [merged])[0]) > MAX_AVATAR_SEGMENT_SEC) {
+    return { shots: current, error: '合并后超过单次分身出镜上限，请保持分段。' };
+  }
+  return {
+    shots: current.slice(0, index).concat([merged], current.slice(index + 2)),
+    error: null,
+  };
+}
+
+/**
  * 切换一段的角色，返回 { segments, delta, error }。
  * delta 是积分变化量 —— 设计稿屏 06 顶部要显示「+8 刚把第 9 句改成分身出镜」。
  */
@@ -298,4 +371,5 @@ module.exports = {
   estimateSeconds, segmentSeconds, formatDuration,
   summarize, estimateCredits, toggleRole, commitSegmentText, preflight, stageRows,
   defaultShots, ensureShots, materializeShots, toggleShotRole, mergeShotRange, splitShot,
+  regroupShotSelection, mergeAdjacentShots,
 };

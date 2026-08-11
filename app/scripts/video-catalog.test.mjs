@@ -75,13 +75,19 @@ test('快出片移动视觉层级固定主任务、拇指区和高风险确认�
   const script = read('script');
   const shots = read('shots');
   const confirm = read('confirm');
+  const scriptJs = fs.readFileSync(path.join(videoRoot, 'script/index.js'), 'utf8');
 
   assert.match(tokens, /--vd-success:/);
   assert.match(tokens, /--vd-shadow:/);
   assert.match(tokens, /\.vd-back\s*\{[\s\S]*width: 44px; height: 44px;/);
   assert.match(tokens, /\.vd-btn\s*\{[\s\S]*height: 56px;/);
   assert.ok(home.indexOf('<!-- 模板精选 -->') < home.indexOf('<!-- 数字分身状态：模板是主任务'));
-  assert.ok(script.indexOf('class="ai-writer"') < script.indexOf('class="script-tools"'));
+  assert.match(script, /class="ai-fab"/);
+  assert.match(script, /class="ai-sheet"/);
+  assert.match(scriptJs, /setOverlay\(true, 'video-script-ai'\)/);
+  assert.match(scriptJs, /setOverlay\(false, 'video-script-ai'\)/);
   assert.ok(shots.indexOf('class="vd-scroll"') < shots.indexOf('class="price-bar"'));
+  assert.match(shots, /调整组合/);
+  assert.match(shots, /与下一段合并/);
   assert.ok(confirm.indexOf('class="cf-ready"') < confirm.indexOf('class="cf-preview'));
 });
