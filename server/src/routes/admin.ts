@@ -1334,7 +1334,7 @@ export async function adminRoutes(app: FastifyInstance) {
     if (!data) return reply.code(400).send({ error: '未收到文件' });
     let buf: Buffer;
     try { buf = await data.toBuffer(); } catch { return reply.code(413).send({ error: '文件过大（上限 20MB）' }); }
-    if (data.file.truncated) return reply.code(413).send({ error: '文件过大（上限 20MB）' });
+    if (data.file.truncated || buf.length > 20 * 1024 * 1024) return reply.code(413).send({ error: '文件过大（上限 20MB）' });
     if (!buf.length) return reply.code(400).send({ error: '空文件' });
     const r = await ingestUploadedFile({ tenantId: user.tenantId, userId: user.id, fileName: data.filename || '未命名文件', mime: data.mimetype, buf });
     await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'admin.user.knowledge.upload', payload: { itemId: r.id, fileName: data.filename } });

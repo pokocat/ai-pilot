@@ -1,0 +1,91 @@
+<view class="vd vd-confirm {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">确认出片</text>
+      <text class="vd-headact"> </text>
+    </view>
+    <view class="vd-steps">
+      <view class="vd-step done"><view class="dot"><native-icon name="check" tone="white" size="11"></native-icon></view><text>改文案</text></view>
+      <view class="vd-step-line"></view>
+      <view class="vd-step done"><view class="dot"><native-icon name="check" tone="white" size="11"></native-icon></view><text>配画面</text></view>
+      <view class="vd-step-line"></view>
+      <view class="vd-step on"><view class="dot">3</view><text>出片</text></view>
+    </view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="cf-body">
+
+      <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在核算…</text></view>
+
+      <block wx:else>
+        <!-- 首帧预览 -->
+        <view class="cf-preview vd-card">
+          <view class="vd-portrait cf-thumb">
+            <view class="inner vd-grain"></view>
+            <view class="vd-ai-badge cf-badge">AI 生成</view>
+          </view>
+          <view class="cf-pv-body">
+            <text class="cf-pv-title">{{project.templateName}}</text>
+            <text class="cf-pv-sub">竖屏 · 带字幕</text>
+            <view class="cf-stats">
+              <view class="cf-stat"><text class="k">成片时长</text><text class="v">{{totalText}}</text></view>
+              <view class="cf-stat"><text class="k">分身出镜</text><text class="v">{{summary.avatarSec}} 秒 · {{summary.avatarCount}} 句</text></view>
+              <view class="cf-stat"><text class="k">配画面</text><text class="v">{{summary.brollCount}} 句</text></view>
+              <view class="cf-stat"><text class="k">结尾固定段</text><text class="v">{{summary.tailSec}} 秒</text></view>
+            </view>
+          </view>
+        </view>
+
+        <!-- preflight 问题 -->
+        <view wx:if="{{problems.length}}" class="cf-problems">
+          <text class="cp-title">还差这些才能出片</text>
+          <view wx:for="{{problems}}" wx:key="code" class="cp-row">
+            <text class="cp-dot">·</text><text class="cp-text">{{item.message}}</text>
+          </view>
+        </view>
+
+        <!-- 积分明细 -->
+        <view wx:if="{{estimate}}" class="cf-bill vd-card">
+          <text class="cb-title">这条片子要花多少积分</text>
+          <view wx:for="{{estimate.items}}" wx:key="key" class="cb-row">
+            <text class="cb-k">{{item.label}}</text>
+            <text class="cb-v {{item.freeText ? 'free' : ''}}">{{item.freeText || item.credits}}</text>
+          </view>
+          <view class="cb-total">
+            <text class="cb-k">合计</text>
+            <view class="cb-total-v"><text class="num">{{estimate.total}}</text><text class="unit">积分</text></view>
+          </view>
+          <view wx:if="{{balance !== null}}" class="cb-balance">
+            <text>当前余额 {{balance}}</text>
+            <text class="dim">出完还剩 {{afterBalance}}</text>
+          </view>
+        </view>
+        <view wx:else class="cf-quote-error vd-card">
+          <text class="cp-title">还没拿到可确认的价格</text>
+          <text class="cp-text">{{quoteError || '正在向服务端核算，请稍等。'}}</text>
+          <view class="cf-retry" bindtap="load">重新核算</view>
+        </view>
+
+        <text class="cf-note">
+          成片会带「AI 生成」角标，声音和形象来自你本人授权的分身。出片后不满意可以改文案重出，只按新的出镜时长收费。
+        </text>
+      </block>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <view class="vd-footer">
+    <view class="vd-btn ghost" bindtap="prev">上一步</view>
+    <view
+      class="vd-btn {{(loading || !quoteReady || problems.length || submitting) ? 'disabled' : ''}}"
+      style="flex:1"
+      bindtap="submit"
+    >{{loading || !quoteReady ? '等待服务端报价…' : (submitting ? '提交中…' : '出片 · 扣 ' + estimate.total + ' 积分')}}</view>
+  </view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

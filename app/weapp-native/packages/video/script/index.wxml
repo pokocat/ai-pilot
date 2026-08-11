@@ -1,0 +1,75 @@
+<view class="vd vd-script {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">{{project.templateName || '改文案'}}</text>
+      <text class="vd-headact" bindtap="saveDraft">存草稿</text>
+    </view>
+
+    <view class="vd-steps">
+      <view class="vd-step on"><view class="dot">1</view><text>改文案</text></view>
+      <view class="vd-step-line"></view>
+      <view class="vd-step"><view class="dot">2</view><text>配画面</text></view>
+      <view class="vd-step-line"></view>
+      <view class="vd-step"><view class="dot">3</view><text>出片</text></view>
+    </view>
+
+    <view class="script-tools">
+      <view class="st-btn {{rewriting ? 'busy' : ''}}" bindtap="rewriteAll">{{rewriting ? '改写中…' : '整段帮我改写'}}</view>
+      <view class="st-btn ghost" bindtap="restoreTemplate">恢复模板原文</view>
+      <text class="st-count">共 {{rows.length}} 句</text>
+    </view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="script-body">
+      <text class="sb-label">口播文案 · 你的声线</text>
+
+      <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
+
+      <view wx:else class="lines">
+        <block wx:for="{{rows}}" wx:key="no">
+          <!-- 只读态：整段连读 -->
+          <view wx:if="{{!item.editing}}" class="line" data-no="{{item.no}}" bindtap="startEdit">
+            <text class="line-text">{{item.text}}</text>
+          </view>
+
+          <!-- 编辑态：展开动作区 -->
+          <view wx:else class="line-edit vd-card">
+            <view class="le-head">
+              <text class="le-title">第 {{item.no}} 句 · 正在改</text>
+              <text class="le-sec">约 {{editingSeconds}} 秒</text>
+            </view>
+            <textarea
+              class="le-input"
+              value="{{editingText}}"
+              bindinput="inputText"
+              auto-height
+              maxlength="-1"
+              adjust-position="{{true}}"
+              placeholder="写这一句要说的话"
+            />
+            <view class="le-acts">
+              <view class="le-act {{previewing ? 'busy' : ''}}" bindtap="previewVoice">{{previewing ? '合成中…' : '试听这句'}}</view>
+              <view class="le-act {{rewriting ? 'busy' : ''}}" bindtap="rewriteOne">{{rewriting ? '改写中…' : '这句帮我改'}}</view>
+              <view class="le-act main" bindtap="commitEdit">改好了</view>
+            </view>
+          </view>
+        </block>
+      </view>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <view class="vd-footer">
+    <view class="foot-stat">
+      <text class="fs-num">预计 {{totalText}}</text>
+      <text class="fs-sub">读完全文的时长</text>
+    </view>
+    <view class="vd-btn" style="flex:1" bindtap="next">下一步 · 配画面</view>
+  </view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

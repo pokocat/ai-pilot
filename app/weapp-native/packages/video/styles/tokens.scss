@@ -1,0 +1,250 @@
+// 「快出片」设计令牌 —— 自包含，**不 @use 军师的 src/app.scss**。
+//
+// 两个理由：
+//   1. 色系完全不同。军师是墨绿 + 米白的东方谋士调；快出片是暖橙人文纪实调
+//      （设计稿主色 #E4622B「攒一束光」，辅深灰蓝 #35607F）。硬套军师变量会串味。
+//   2. 本分包要能整体抽走。军师原生端有 39/50 个 scss 反向依赖 app/src/ 的 Taro 样式，
+//      那是迁移遗留的债；新分包不再加这笔债，抽走时样式零牵连。
+//
+// 字体：serif 走军师已装载的自带思源宋体（services/font.js 的 wx.loadFontFace 是 global:true），
+// 但用 var() 兜底声明，独立形态下自动落到系统字体，不白屏。
+
+.vd {
+  // 底色
+  --vd-canvas: #F1E9DF;      // 页面最外层
+  --vd-bg: #FBF7F2;          // 屏幕底
+  --vd-surface: #FFFFFF;     // 卡片
+  --vd-sunken: #F0E6DC;      // 进度槽 / 分隔块
+
+  // 文字
+  --vd-ink: #241E1A;
+  --vd-ink-2: #5C524A;
+  --vd-ink-3: #7A6E64;
+  --vd-muted: #8E8177;
+  --vd-faint: #B0A69C;
+
+  // 线
+  --vd-line: rgba(36, 30, 26, 0.12);
+  --vd-line-soft: rgba(36, 30, 26, 0.08);
+
+  // 分身出镜 = 橙（贵的那个，视觉上要最重）
+  --vd-avatar: #E4622B;
+  --vd-avatar-deep: #C74A1C;
+  --vd-avatar-soft: #FBEADF;
+  --vd-avatar-line: rgba(228, 98, 43, 0.28);
+
+  // 配画面 = 蓝（便宜的那个）
+  --vd-broll: #35607F;
+  --vd-broll-soft: #E6EDF2;
+  --vd-broll-line: rgba(53, 96, 127, 0.24);
+
+  // 固定片段 = 灰（不可切换）
+  --vd-fixed: #9A8F84;
+  --vd-fixed-ink: #6B6259;
+  --vd-fixed-soft: #EDE7E0;
+
+  // 字体
+  --vd-serif: var(--serif, "junshi-serif", "Noto Serif SC", "Songti SC", serif);
+  --vd-sans: var(--sans, -apple-system, "PingFang SC", "Noto Sans SC", sans-serif);
+
+  // 圆角
+  --vd-r-card: 20px;
+  --vd-r-field: 14px;
+  --vd-r-chip: 999px;
+
+  background: var(--vd-bg);
+  color: var(--vd-ink);
+  font-family: var(--vd-sans);
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+/* ── 页头（自定义导航栏；分包所有页面共用）───────────────────────────── */
+
+.vd-safe { height: var(--native-nav-inset, 70px); }
+
+.vd-head {
+  background: var(--vd-bg);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex: none;
+  border-bottom: 1px solid var(--vd-line-soft);
+}
+
+.vd-headrow {
+  position: absolute;
+  top: var(--native-nav-top, 20px);
+  left: 0;
+  right: 0;
+  height: var(--native-nav-row-height, 40px);
+  min-height: var(--native-nav-row-height, 40px);
+  padding: 0 var(--native-nav-right, 16px) 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+.vd-back {
+  width: 36px; height: 36px; flex: 0 0 36px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 10px;
+  background: var(--vd-surface);
+  border: 1px solid var(--vd-line-soft);
+  font-size: 22px; color: var(--vd-ink); line-height: 1;
+  box-sizing: border-box;
+}
+
+.vd-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--vd-serif);
+  font-weight: 600;
+  font-size: 17px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.vd-headact {
+  flex: none;
+  font-size: 14px;
+  color: var(--vd-avatar-deep);
+  padding: 7px 0 7px 10px;
+}
+
+/* ── 三步进度条（改文案 / 配画面 / 出片）─────────────────────────────── */
+
+.vd-steps {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 20px 14px;
+}
+
+.vd-step {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--vd-faint);
+}
+
+.vd-step .dot {
+  width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  background: var(--vd-sunken); color: var(--vd-muted);
+}
+
+.vd-step.on { color: var(--vd-ink); font-weight: 600; }
+.vd-step.on .dot { background: var(--vd-avatar); color: #FFF; }
+.vd-step.done .dot { background: var(--vd-avatar-soft); color: var(--vd-avatar-deep); }
+.vd-step-line { flex: 1; height: 1px; background: var(--vd-line); }
+
+/* ── 通用卡片 / 按钮 ─────────────────────────────────────────────────── */
+
+.vd-card {
+  background: var(--vd-surface);
+  border-radius: var(--vd-r-card);
+  border: 1px solid var(--vd-line-soft);
+  padding: 14px;
+  box-sizing: border-box;
+}
+
+.vd-btn {
+  height: 52px;
+  min-width: 0;
+  box-sizing: border-box;
+  border-radius: var(--vd-r-field);
+  background: var(--vd-avatar);
+  color: #FFF;
+  font-size: 17px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.vd-btn.ghost {
+  background: transparent;
+  color: var(--vd-ink-2);
+  border: 1px solid var(--vd-line);
+  font-weight: 500; font-size: 15px;
+  height: 48px;
+}
+
+.vd-btn.disabled { opacity: 0.45; }
+
+/* ── 底部操作条（出片流程各步共用）──────────────────────────────────── */
+
+.vd-footer {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--vd-bg);
+  border-top: 1px solid var(--vd-line);
+  // 不能把旧 iOS 的 constant() 放进整条 shorthand：不支持该函数的基础库会丢弃
+  // 整个 padding，导致左侧时长贴边、右侧按钮越出屏幕。
+  padding: 12px 20px;
+  padding-bottom: calc(12px + constant(safe-area-inset-bottom));
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: 12px;
+  z-index: 20;
+}
+
+.vd-footer-space { height: 96px; }
+
+/* ── 9:16 竖屏占位（WXSS 不支持 aspect-ratio，用 padding-bottom hack）── */
+
+.vd-portrait {
+  position: relative;
+  width: 100%;
+  height: 0;
+  padding-bottom: 177.8%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--vd-sunken);
+}
+
+.vd-portrait > .inner { position: absolute; left: 0; top: 0; right: 0; bottom: 0; }
+
+/* ── 素材占位底纹（设计稿用斜纹表示"这里是照片"）────────────────────── */
+
+.vd-grain {
+  background-image:
+    repeating-linear-gradient(64deg, rgba(36, 30, 26, 0.16) 0 1px, rgba(255, 255, 255, 0) 1px 3px),
+    repeating-linear-gradient(-27deg, rgba(255, 255, 255, 0.14) 0 1px, rgba(255, 255, 255, 0) 1px 4px),
+    repeating-linear-gradient(118deg, #C9A985 0 9px, #BE9C79 9px 18px);
+}
+
+.vd-grain.morning { background-image: repeating-linear-gradient(64deg, rgba(36, 30, 26, 0.14) 0 1px, rgba(255, 255, 255, 0) 1px 3px), repeating-linear-gradient(122deg, #D9BFA2 0 8px, #CDAF90 8px 16px); }
+.vd-grain.craft { background-image: repeating-linear-gradient(64deg, rgba(36, 30, 26, 0.18) 0 1px, rgba(255, 255, 255, 0) 1px 3px), repeating-linear-gradient(118deg, #B99C7C 0 9px, #A98C6C 9px 18px); }
+.vd-grain.street { background-image: repeating-linear-gradient(64deg, rgba(36, 30, 26, 0.15) 0 1px, rgba(255, 255, 255, 0) 1px 3px), repeating-linear-gradient(110deg, #C2AC93 0 9px, #B39C83 9px 18px); }
+
+/* ── AI 生成角标（合规硬要求，见方案 §9.1）──────────────────────────── */
+
+.vd-ai-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 9px;
+  border-radius: var(--vd-r-chip);
+  background: rgba(36, 30, 26, 0.55);
+  color: #FFF;
+  font-size: 11px; font-weight: 500;
+}
+
+/* ── 角色标签（分身出镜 / 配画面 / 固定片段）────────────────────────── */
+
+.vd-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--vd-r-chip);
+  font-size: 12px; font-weight: 500;
+}
+
+.vd-tag .sq { width: 7px; height: 7px; border-radius: 2px; }
+.vd-tag.avatar { background: var(--vd-avatar-soft); border: 1px solid var(--vd-avatar-line); color: var(--vd-avatar-deep); }
+.vd-tag.avatar .sq { background: var(--vd-avatar); }
+.vd-tag.broll { background: var(--vd-broll-soft); border: 1px solid var(--vd-broll-line); color: var(--vd-broll); }
+.vd-tag.broll .sq { background: var(--vd-broll); }
+.vd-tag.tail { background: var(--vd-fixed-soft); border: 1px solid var(--vd-line); color: var(--vd-fixed-ink); }
+.vd-tag.tail .sq { background: var(--vd-fixed); }
+
+/* ── 空态 ───────────────────────────────────────────────────────────── */
+
+.vd-empty { padding: 60px 32px; text-align: center; }
+.vd-empty .t { font-family: var(--vd-serif); font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+.vd-empty .s { font-size: 14px; line-height: 1.7; color: var(--vd-muted); }

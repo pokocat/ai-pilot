@@ -111,7 +111,7 @@ function request(path, options) {
 
 function upload(path, filePath, formData, options) {
   const opts = options || {};
-  const tokenAtRequest = getToken();
+  const tokenAtRequest = opts.token === undefined ? getToken() : opts.token;
   const origin = opts.baseUrl || getApiBaseUrl();
   return new Promise((resolve, reject) => {
     const task = wx.uploadFile({

@@ -82,7 +82,7 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
     const hasDedicated = ['js', 'json', 'wxml', 'scss'].every((ext) => fs.existsSync(path.join(sourceRoot, `${route}.${ext}`)));
     assert.ok(hasDedicated, `路由缺少独立原生四件套：${route}`);
   }
-  assert.equal(routes.length, 38, '路由数量变化时必须同步审计原生迁移覆盖');
+  assert.equal(routes.length, 49, '路由数量变化时必须同步审计原生迁移覆盖');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'route-manifest.json')), false, '完整迁移后不得保留通用路由清单');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'services/generic-page.js')), false, '完整迁移后不得保留通用页面渲染器');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
@@ -187,9 +187,10 @@ test('原生长文粘贴保持同帧卡片、内容去重、全文预览与发�
   assert.doesNotMatch(onComposerInput[0], /composerSeed/, '编辑过程中绝不碰 seed —— 那才是输入法重复上屏与光标跳尾的真正来源');
 });
 
-test('原生页头避让微信胶囊，登录全屏层同步隐藏自定义底栏', () => {
+test('原生页头避让微信胶囊，登录与智能体启用层同步隐藏自定义底栏', () => {
   const tabHeader = fs.readFileSync(path.join(sourceRoot, 'components/tab-header/index.scss'), 'utf8');
   const login = fs.readFileSync(path.join(sourceRoot, 'components/login-sheet/index.js'), 'utf8');
+  const unlock = fs.readFileSync(path.join(sourceRoot, 'components/agent-unlock/index.js'), 'utf8');
   const store = fs.readFileSync(path.join(sourceRoot, 'services/store.js'), 'utf8');
   const page = fs.readFileSync(path.join(sourceRoot, 'services/page.js'), 'utf8');
   const tabbarJs = fs.readFileSync(path.join(sourceRoot, 'custom-tab-bar/index.js'), 'utf8');
@@ -200,6 +201,8 @@ test('原生页头避让微信胶囊，登录全屏层同步隐藏自定义底�
   assert.match(tabHeader, /\.th-glyph\s*\{[\s\S]*?top:\s*4px/, '原生背景字不得向上侵入胶囊区');
   assert.match(login, /store\.setOverlay\(Boolean\(open\), 'login-sheet'\)/);
   assert.match(login, /detached\(\)[\s\S]*?store\.setOverlay\(false, 'login-sheet'\)/);
+  assert.match(unlock, /store\.setOverlay\(Boolean\(agent\), 'agent-unlock'\)/);
+  assert.match(unlock, /detached\(\)[\s\S]*?store\.setOverlay\(false, 'agent-unlock'\)/);
   assert.match(store, /tabbar\.syncState\(\{ overlay: state\.overlay \}\)/);
   assert.match(page, /overlay: snapshot\.overlay/);
   assert.match(tabbarJs, /overlay: false/);
@@ -328,7 +331,8 @@ test('原生页面头统一复用胶囊行、键盘只避让一次，底栏与�
   assert.match(subpageScss, /\.safe-title-wrap\s*\{[^}]*text-align:\s*left;/s);
   assert.match(subpageScss, /\.native-subpage-scroll,\.generic-scroll\s*\{[^}]*top:\s*var\(--native-nav-inset\);/s);
   const navRoots = walk(sourceRoot).filter((file) => file.endsWith('.wxml') && !file.endsWith('packages/main/chat/index.wxml') && fs.readFileSync(file, 'utf8').includes('--native-nav-inset:{{navInset}}px'));
-  assert.equal(navRoots.length, 36);
+  // 主包/既有分包 36 页 + 快出片分包 11 页，全部复用同一套胶囊几何。
+  assert.equal(navRoots.length, 47);
   for (const file of navRoots) {
     const source = fs.readFileSync(file, 'utf8');
     for (const variable of ['--native-nav-top:{{navTop}}px', '--native-nav-row-height:{{navRowHeight}}px', '--native-nav-right:{{navRightInset}}px']) {

@@ -20,6 +20,14 @@
         "brandkit/index", "webview/index", "command/index", "reminders/index", "daily/index", "poster/index",
         "posterJob/index", "gallery/index", "architecture/index", "relations/index", "enterprise/index"
       ]
+    },
+    {
+      "root": "packages/video",
+      "pages": [
+        "home/index", "template/index", "clone/index",
+        "script/index", "shots/index", "confirm/index", "rendering/index",
+        "work/index", "works/index", "assets/index", "avatar/index"
+      ]
     }
   ],
   "preloadRule": {
@@ -38,6 +46,10 @@
     "pages/thinktank/index": {
       "network": "all",
       "packages": ["packages/work"]
+    },
+    "pages/studio/index": {
+      "network": "wifi",
+      "packages": ["packages/video"]
     },
     "packages/main/chat/index": {
       "network": "all",

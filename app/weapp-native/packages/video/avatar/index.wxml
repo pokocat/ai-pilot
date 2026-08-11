@@ -1,0 +1,65 @@
+<view class="vd vd-avatar {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">我的数字分身</text>
+      <text class="vd-headact"> </text>
+    </view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="av-body">
+      <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
+
+      <block wx:elif="{{!avatar}}">
+        <view class="vd-empty">
+          <text class="t">还没有数字分身</text>
+          <text class="s">克隆一次你的形象和声音，之后每条片子都不用再出镜拍摄。</text>
+          <view class="vd-btn av-empty-btn" bindtap="startClone">花 5 分钟创建</view>
+        </view>
+      </block>
+
+      <block wx:else>
+        <!-- 形象 / 声音两张卡 -->
+        <view class="av-cards">
+          <view class="vd-card av-card">
+            <view class="avc-head">
+              <text class="avc-k">形象</text>
+              <text class="avc-status {{avatar.imageStatus}}">{{avatar.imageStatus === 'ready' ? '可用' : (avatar.imageStatus === 'training' ? '训练中' : '未采集')}}</text>
+            </view>
+            <view class="avc-face"></view>
+            <text class="avc-date">{{avatar.imageTrainedText || '—'}}</text>
+            <view class="avc-act" data-kind="image" bindtap="recapture">重新采集</view>
+          </view>
+
+          <view class="vd-card av-card">
+            <view class="avc-head">
+              <text class="avc-k">声音</text>
+              <text class="avc-status {{avatar.voiceStatus}}">{{avatar.voiceStatus === 'ready' ? '可用' : (avatar.voiceStatus === 'training' ? '训练中' : '未采集')}}</text>
+            </view>
+            <view class="avc-wave">
+              <view class="wv" wx:for="{{[6,14,9,18,11,7,15,10]}}" wx:key="*this" style="height:{{item}}px"></view>
+            </view>
+            <text class="avc-date">{{avatar.voiceTrainedText || '—'}}</text>
+            <view class="avc-act" data-kind="voice" bindtap="recapture">重新采集</view>
+          </view>
+        </view>
+
+        <text class="av-note">只有你本人能用这个分身出片。授权记录可以随时查看，删除后所有生成能力立即停用。</text>
+
+        <view class="av-rows">
+          <view class="av-row" bindtap="openConsentLog"><text class="ar-t">授权记录</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
+          <view class="av-row" bindtap="openUsageLog"><text class="ar-t">使用记录</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
+          <view class="av-row" bindtap="openCredits"><text class="ar-t">我的积分与充值</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
+        </view>
+
+        <view class="av-danger" bindtap="removeAvatar">删除我的分身</view>
+      </block>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

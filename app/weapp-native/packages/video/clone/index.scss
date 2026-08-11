@@ -1,0 +1,107 @@
+@use "../styles/tokens.scss";
+
+.vd-clone { display: flex; flex-direction: column; height: 100vh; }
+.vd-scroll { flex: 1; min-height: 0; }
+.cl-body { padding: 0 20px; }
+
+/* 四步指示 */
+.cl-steps { display: flex; gap: 6px; padding: 0 20px 16px; }
+.cl-step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.cs-dot {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 700;
+  background: var(--vd-sunken); color: var(--vd-muted);
+}
+.cl-step.on .cs-dot { background: var(--vd-avatar); color: #FFF; }
+.cl-step.done .cs-dot { background: var(--vd-avatar-soft); color: var(--vd-avatar-deep); }
+.cs-label { font-size: 11px; color: var(--vd-muted); }
+.cl-step.on .cs-label { color: var(--vd-ink); font-weight: 600; }
+
+.cl-h { display: block; font-family: var(--vd-serif); font-size: 22px; font-weight: 600; margin-bottom: 8px; }
+.cl-h.center { text-align: center; }
+.cl-s { display: block; font-size: 14px; line-height: 1.7; color: var(--vd-ink-3); margin-bottom: 18px; }
+.cl-s.center { text-align: center; }
+
+/* 人脸核验圈 */
+.cl-ring {
+  width: 200px; height: 200px; border-radius: 50%;
+  margin: 6px auto 20px;
+  border: 2px dashed var(--vd-avatar-line);
+  background: var(--vd-avatar-soft);
+  display: flex; align-items: center; justify-content: center;
+}
+.cr-text { font-size: 13px; color: var(--vd-avatar-deep); }
+
+/* 信息块 */
+.cl-info, .cl-tips, .cl-reading, .cl-preset { margin-bottom: 16px; }
+.ci-title { display: block; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+.ci-row { display: block; font-size: 13px; line-height: 1.8; color: var(--vd-ink-2); }
+
+/* 同意勾选 */
+.cl-agree { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 18px; }
+.ca-box {
+  flex: none; width: 18px; height: 18px; border-radius: 5px;
+  border: 1.5px solid var(--vd-faint);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: #FFF; margin-top: 1px;
+}
+.ca-box.on { background: var(--vd-avatar); border-color: var(--vd-avatar); }
+.ca-text { flex: 1; font-size: 12px; line-height: 1.7; color: var(--vd-ink-3); }
+.ca-link { color: var(--vd-avatar-deep); }
+
+/* 取景框 */
+.cl-frame { padding-bottom: 0; height: 380px; margin-bottom: 16px; }
+.cl-frame-empty {
+  display: flex; align-items: center; justify-content: center;
+  border: 2px dashed var(--vd-line);
+  border-radius: 12px;
+  background: var(--vd-surface);
+}
+.cf-text { font-size: 13px; color: var(--vd-muted); }
+
+.cl-acts { display: flex; gap: 10px; margin-bottom: 12px; }
+
+/* 朗读稿 */
+.cr-label { display: block; font-size: 12px; color: var(--vd-muted); margin-bottom: 8px; }
+.cr-script { display: block; font-family: var(--vd-serif); font-size: 18px; line-height: 1.9; color: var(--vd-ink); }
+
+/* 录音 */
+.cl-recorder { display: flex; align-items: baseline; justify-content: center; gap: 6px; margin-bottom: 14px; }
+.cl-timer { font-size: 30px; font-weight: 700; color: var(--vd-avatar-deep); }
+.cl-timer-hint { font-size: 13px; color: var(--vd-muted); }
+.cl-mic {
+  height: 56px; border-radius: var(--vd-r-field);
+  background: var(--vd-avatar); color: #FFF;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 600;
+  margin-bottom: 12px;
+}
+.cl-mic.on { background: var(--vd-avatar-deep); animation: vd-pulse 1.4s infinite; }
+@keyframes vd-pulse { 0%, 100% { opacity: 0.75; } 50% { opacity: 1; } }
+.cl-note { display: block; font-size: 12px; line-height: 1.7; color: var(--vd-muted); margin-bottom: 16px; }
+
+/* 训练中 */
+.cl-progress {
+  width: 140px; height: 140px; border-radius: 50%;
+  margin: 10px auto 20px;
+  background: var(--vd-avatar-soft);
+  border: 2px solid var(--vd-avatar-line);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+}
+.cp-num { font-size: 32px; font-weight: 700; color: var(--vd-avatar-deep); }
+.cp-label { font-size: 12px; color: var(--vd-avatar-deep); }
+
+.cl-track { margin: 18px 0 16px; }
+.ct-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; }
+.ct-dot {
+  width: 18px; height: 18px; border-radius: 50%; flex: none;
+  background: var(--vd-sunken); color: #FFF;
+  display: flex; align-items: center; justify-content: center; font-size: 10px;
+}
+.ct-row.done .ct-dot { background: #4A7C59; }
+.ct-row.busy .ct-dot { background: var(--vd-avatar); }
+.ct-label { flex: 1; font-size: 14px; }
+.ct-state { font-size: 12px; color: var(--vd-muted); }
+
+.cl-preset-btn { margin-top: 12px; }

@@ -1,0 +1,140 @@
+<view class="vd vd-clone {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">创建我的数字分身</text>
+      <text class="vd-headact"> </text>
+    </view>
+
+    <view class="cl-steps">
+      <view wx:for="{{steps}}" wx:key="no" class="cl-step {{step === item.no ? 'on' : (step > item.no ? 'done' : '')}}">
+        <view class="cs-dot"><native-icon wx:if="{{step > item.no}}" name="check" tone="white" size="12"></native-icon><text wx:else>{{item.no}}</text></view>
+        <text class="cs-label">{{item.label}}</text>
+      </view>
+    </view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="cl-body">
+
+      <!-- ① 授权核验 -->
+      <block wx:if="{{step === 1}}">
+        <text class="cl-h">先确认是你本人</text>
+        <text class="cl-s">数字分身会用你的脸和声音说话，所以必须由你亲自授权。</text>
+
+        <view class="cl-ring"><text class="cr-text">录制时正脸看镜头</text></view>
+
+        <view class="cl-reading vd-card">
+          <text class="cr-label">核验时请完整念出</text>
+          <text class="cr-script">{{consentScript}}</text>
+        </view>
+
+        <view class="cl-info vd-card">
+          <text class="ci-title">这些信息用来做什么</text>
+          <text class="ci-row">· 只用来生成你本人的口播视频，不会给别人使用。</text>
+          <text class="ci-row">· 核验只确认身份，原始核验视频不保存。</text>
+          <text class="ci-row">· 你可以在「分身管理」里随时删除分身，删除后立即停用。</text>
+        </view>
+
+        <view class="cl-agree" bindtap="toggleAgree">
+          <view class="ca-box {{agreed ? 'on' : ''}}"><native-icon wx:if="{{agreed}}" name="check" tone="white" size="12"></native-icon></view>
+          <text class="ca-text">我已阅读并同意<text class="ca-link" catchtap="openConsentDoc">《数字分身本人授权书》</text>，确认由本人操作。</text>
+        </view>
+
+        <view class="vd-btn {{(agreed && !submitting) ? '' : 'disabled'}}" bindtap="startFaceVerify">{{submitting ? '核验中…' : '录制授权视频并核验'}}</view>
+      </block>
+
+      <!-- ② 形象采集 -->
+      <block wx:elif="{{step === 2}}">
+        <text class="cl-h">第 2 步 · 拍你的形象</text>
+        <text class="cl-s">上半身放进取景框，随便说 30 秒。</text>
+
+        <view class="vd-portrait cl-frame">
+          <view wx:if="{{!faceFile}}" class="inner cl-frame-empty"><text class="cf-text">上半身放进取景框</text></view>
+          <video wx:else class="inner" src="{{faceFile.path}}" object-fit="cover"></video>
+        </view>
+
+        <view class="cl-tips vd-card">
+          <text class="ci-title">拍好这几点，分身更像你</text>
+          <text class="ci-row">· 正脸看镜头，手机放稳，别晃</text>
+          <text class="ci-row">· 光打在脸上，窗户在你前面，不要背光</text>
+          <text class="ci-row">· 随便说 30 秒，语速跟平时一样</text>
+          <text class="ci-row">· 别戴口罩、墨镜、帽子</text>
+        </view>
+
+        <view wx:if="{{!faceFile}}" class="cl-acts">
+          <view class="vd-btn ghost" style="flex:1" bindtap="pickFace">从相册选视频</view>
+          <view class="vd-btn" style="flex:1" bindtap="recordFace">录 30 秒</view>
+        </view>
+        <view wx:else class="cl-acts">
+          <view class="vd-btn ghost" style="flex:1" bindtap="retakeFace">重拍</view>
+          <view class="vd-btn" style="flex:1" bindtap="nextFromFace">下一步</view>
+        </view>
+      </block>
+
+      <!-- ③ 声音采集 -->
+      <block wx:elif="{{step === 3}}">
+        <text class="cl-h">第 3 步 · 录你的声音</text>
+        <text class="cl-s">照着屏幕念一遍就行，念完你的分身就会用这个声音说话。</text>
+
+        <view class="cl-reading vd-card">
+          <text class="cr-label">念这段 · 约 40 秒</text>
+          <text class="cr-script">{{readingScript}}</text>
+        </view>
+
+        <view class="cl-recorder">
+          <text class="cl-timer">{{recordSeconds}}s</text>
+          <text class="cl-timer-hint">/ 建议 40s</text>
+        </view>
+
+        <view class="cl-mic {{recording ? 'on' : ''}}" bindtap="toggleRecord">
+          <text>{{recording ? '正在录，点一下停' : (voiceFile ? '重新录' : '开始录')}}</text>
+        </view>
+
+        <text class="cl-note">找个安静的地方，手机离嘴 20 厘米左右。念错了不要紧，停一下重念那句就好。</text>
+
+        <view wx:if="{{voiceFile}}" class="cl-acts">
+          <view class="vd-btn ghost" style="flex:1" bindtap="retakeVoice">重录</view>
+          <view class="vd-btn" style="flex:1" bindtap="submit">{{submitting ? '提交中…' : '提交训练'}}</view>
+        </view>
+      </block>
+
+      <!-- ④ 训练中 -->
+      <block wx:else>
+        <view class="cl-progress">
+          <text class="cp-num">{{training.percent}}%</text>
+          <text class="cp-label">正在学你</text>
+        </view>
+
+        <text class="cl-h center">分身正在训练</text>
+        <text class="cl-s center">{{training.etaText}}。可以退出去做别的，好了会发消息通知你。</text>
+
+        <view class="cl-track vd-card">
+          <view class="ct-row {{training.imageDone ? 'done' : 'busy'}}">
+            <view class="ct-dot"><native-icon wx:if="{{training.imageDone}}" name="check" tone="white" size="12"></native-icon></view>
+            <text class="ct-label">形象学习</text>
+            <text class="ct-state">{{training.imageDone ? '完成' : '进行中'}}</text>
+          </view>
+          <view class="ct-row {{training.voiceDone ? 'done' : 'busy'}}">
+            <view class="ct-dot"><native-icon wx:if="{{training.voiceDone}}" name="check" tone="white" size="12"></native-icon></view>
+            <text class="ct-label">声音学习</text>
+            <text class="ct-state">{{training.voiceDone ? '完成' : '进行中'}}</text>
+          </view>
+        </view>
+
+        <view wx:if="{{presetAvailable}}" class="cl-preset vd-card">
+          <text class="ci-title">不想等？先做第一条</text>
+          <text class="ci-row">用平台提供的形象和声音先出一条片子，你的分身训练好之后，一键换成你自己。</text>
+          <view class="vd-btn cl-preset-btn" bindtap="usePreset">先用预置形象出片</view>
+        </view>
+
+        <view class="vd-btn ghost" bindtap="leaveTraining">训练好通知我 · 返回</view>
+      </block>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

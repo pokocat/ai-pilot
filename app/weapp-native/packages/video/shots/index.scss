@@ -1,0 +1,119 @@
+@use "../styles/tokens.scss";
+
+.vd-shots { display: flex; flex-direction: column; height: 100vh; }
+.vd-scroll { flex: 1; min-height: 0; }
+
+/* ── 价格条 ────────────────────────────────────────────────────────── */
+// position:sticky 在小程序 scroll-view 里失效（见 apps/miniprogram/agent.md 的坑库），
+// 所以整个 vd-head 放在 scroll-view 外面，靠 flex 布局占位，不用 sticky。
+
+.price-bar {
+  margin: 0 20px 12px;
+  padding: 12px 14px;
+  border-radius: var(--vd-r-field);
+  background: var(--vd-avatar-soft);
+  border: 1px solid var(--vd-avatar-line);
+}
+
+.pb-main { display: flex; align-items: baseline; gap: 6px; }
+.pb-num { font-size: 26px; font-weight: 700; color: var(--vd-avatar-deep); line-height: 1; }
+.pb-unit { font-size: 13px; color: var(--vd-avatar-deep); margin-right: 8px; }
+
+.pb-stat { display: flex; gap: 10px; font-size: 12px; color: var(--vd-ink-3); }
+.pb-stat .dim { color: var(--vd-muted); }
+
+.pb-flash { display: flex; align-items: baseline; gap: 6px; }
+.pb-delta {
+  font-size: 13px; font-weight: 700; color: #FFF;
+  background: var(--vd-avatar); border-radius: var(--vd-r-chip);
+  padding: 2px 8px;
+}
+.pb-flash-text { font-size: 12px; color: var(--vd-avatar-deep); }
+
+.pb-hint { display: block; margin-top: 8px; font-size: 11px; line-height: 1.5; color: var(--vd-ink-3); }
+
+/* ── 逐句行 ────────────────────────────────────────────────────────── */
+// 「填格子」而不是轨道：每行是一张独立卡片，左侧序号，右侧内容。
+// 三种角色靠左边框色 + 标签色区分，一眼可辨。
+
+.rows { padding: 0 20px; }
+
+.row {
+  display: flex; gap: 10px;
+  background: var(--vd-surface);
+  border-radius: var(--vd-r-card);
+  border: 1px solid var(--vd-line-soft);
+  border-left-width: 3px;
+  padding: 12px 14px 12px 11px;
+  margin-bottom: 10px;
+}
+
+.row.avatar { border-left-color: var(--vd-avatar); }
+.row.broll { border-left-color: var(--vd-broll); }
+.row.tail { border-left-color: var(--vd-fixed); background: var(--vd-fixed-soft); }
+
+.row-no {
+  flex: none; width: 22px;
+  font-size: 12px; font-weight: 700; color: var(--vd-faint);
+  padding-top: 2px;
+}
+
+.row-body { flex: 1; min-width: 0; }
+.row-text { display: block; font-size: 15px; line-height: 1.6; color: var(--vd-ink); }
+
+.row-ctl { display: flex; align-items: center; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
+.vd-tag.tappable { padding-right: 8px; }
+.vd-tag .swap { margin-left: 2px; font-size: 12px; opacity: 0.75; }
+.row-meta { font-size: 12px; color: var(--vd-muted); flex: 1; min-width: 0; }
+
+/* 未配画面：虚线框提示 */
+.row-pick {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px dashed var(--vd-broll-line);
+  border-radius: 12px;
+  background: var(--vd-broll-soft);
+}
+.rp-plus { font-size: 16px; color: var(--vd-broll); }
+.rp-text { font-size: 12px; color: var(--vd-broll); }
+
+/* 已配画面 */
+.row-asset { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.ra-thumb { width: 40px; height: 40px; border-radius: 8px; flex: none; }
+.ra-label { font-size: 12px; color: var(--vd-ink-2); flex: 1; }
+.ra-change { font-size: 12px; color: var(--vd-broll); }
+
+/* 出镜行 */
+.row-avatar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.ra-face {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--vd-avatar-soft);
+  border: 1px solid var(--vd-avatar-line);
+}
+
+/* 轻量顺序预览：不冒充可播放成片，只让用户在扣费前核对脚本与画面角色。 */
+.pv-mask {
+  position: fixed; inset: 0; z-index: 1200;
+  display: flex; align-items: flex-end;
+  background: rgba(24, 21, 18, 0.46);
+}
+.pv-sheet {
+  width: 100%; max-height: 86vh; box-sizing: border-box;
+  display: flex; flex-direction: column;
+  padding: 18px 20px calc(18px + env(safe-area-inset-bottom));
+  border-radius: 24px 24px 0 0;
+  background: var(--vd-bg);
+}
+.pv-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+.pv-title { display: block; font-family: var(--vd-serif); font-size: 21px; font-weight: 600; color: var(--vd-ink); }
+.pv-sub { display: block; margin-top: 4px; font-size: 12px; color: var(--vd-muted); }
+.pv-close { padding: 0 2px 8px 16px; font-size: 28px; line-height: 1; color: var(--vd-muted); }
+.pv-scroll { flex: 1; min-height: 140px; }
+.pv-row { display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--vd-line-soft); }
+.pv-frame { position: relative; width: 72px; height: 96px; flex: none; border-radius: 10px; overflow: hidden; }
+.pv-kind { position: absolute; left: 5px; bottom: 5px; padding: 2px 5px; border-radius: 8px; background: rgba(255,255,255,.86); font-size: 9px; color: var(--vd-ink-2); }
+.pv-no { position: absolute; right: 6px; top: 5px; font-size: 10px; color: rgba(255,255,255,.88); }
+.pv-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; justify-content: center; gap: 6px; }
+.pv-text { font-size: 14px; line-height: 1.55; color: var(--vd-ink); }
+.pv-meta { font-size: 11px; line-height: 1.4; color: var(--vd-muted); }
+.pv-total { padding: 12px 0; text-align: center; font-size: 12px; color: var(--vd-ink-3); }

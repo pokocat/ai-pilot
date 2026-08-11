@@ -1,0 +1,63 @@
+<view class="vd vd-assets {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">{{picking ? '选一张画面' : '我的素材'}}</text>
+      <text class="vd-headact" bindtap="upload">上传</text>
+    </view>
+
+    <text class="as-note">{{picking ? '点一张就配到第 ' + pickNo + ' 句上。' : '你拍过的店铺画面都存在这里，任何模板都能直接用。'}}</text>
+
+    <scroll-view class="as-tags" scroll-x enable-flex>
+      <view class="as-tagrow">
+        <view class="as-tag {{!activeTag ? 'on' : ''}}" data-tag="" bindtap="selectTag">全部 {{assets.length}}</view>
+        <view
+          wx:for="{{tags}}"
+          wx:key="*this"
+          class="as-tag {{activeTag === item ? 'on' : ''}}"
+          data-tag="{{item}}"
+          bindtap="selectTag"
+        >{{item}}</view>
+      </view>
+    </scroll-view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="as-body">
+      <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
+
+      <view wx:elif="{{!visible.length}}" class="vd-empty">
+        <text class="t">还没有素材</text>
+        <text class="s">拍一段店里的画面，之后配画面就能直接用。</text>
+        <view class="vd-btn as-empty-btn" bindtap="upload">拍 / 上传</view>
+      </view>
+
+      <view wx:else class="as-grid">
+        <view class="as-cell as-add" bindtap="upload">
+          <native-icon class="ac-plus" name="plus" tone="neutral" size="24"></native-icon>
+          <text class="ac-text">拍/上传</text>
+        </view>
+
+        <view
+          wx:for="{{visible}}"
+          wx:key="id"
+          class="as-cell"
+          data-id="{{item.id}}"
+          bindtap="tapAsset"
+          bindlongpress="longPressAsset"
+        >
+          <view class="ac-thumb vd-grain {{item.tone}}"></view>
+          <text class="ac-label">{{item.label}}</text>
+          <text class="ac-used">{{item.usedCount ? '用过 ' + item.usedCount + ' 次' : '没用过'}}</text>
+        </view>
+      </view>
+
+      <text wx:if="{{visible.length && !picking}}" class="as-tip">长按可以给素材改标签。配画面那一步会优先推荐标签对得上的素材。</text>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

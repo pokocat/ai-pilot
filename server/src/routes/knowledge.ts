@@ -75,7 +75,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     } catch {
       return reply.code(413).send({ error: '文件过大（上限 20MB）' });
     }
-    if (data.file.truncated) return reply.code(413).send({ error: '文件过大（上限 20MB）' });
+    if (data.file.truncated || buf.length > 20 * 1024 * 1024) return reply.code(413).send({ error: '文件过大（上限 20MB）' });
     if (!buf.length) return reply.code(400).send({ error: '空文件' });
 
     // 新上传优先保存客户端传来的源文件名。微信临时路径不是源文件名，不能落库；

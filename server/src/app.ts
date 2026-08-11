@@ -46,6 +46,7 @@ import { payRoutes } from './routes/pay.js';
 import { wechatRoutes } from './routes/wechat.js';
 import { adminRoutes } from './routes/admin.js';
 import { adminAccountRoutes } from './routes/adminAccount.js';
+import { videoRoutes } from './routes/video.js';
 import { registerHttpAudit } from './services/audit.js';
 import { sandboxEnabled, assertSandboxSafe } from './services/sandbox.js';
 import { enterNow } from './services/clock.js';
@@ -101,7 +102,8 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
 
   await app.register(cors, { origin: true });
   // 知识库文档上传：单文件、≤20MB（解析器在 docParse 按需动态加载）。
-  await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 5 } });
+  // 快出片视频素材允许 100MB；其余上传路由继续在自身 handler 按 5/10/20MB 业务上限二次校验。
+  await app.register(multipart, { limits: { fileSize: 100 * 1024 * 1024, files: 1, fields: 5 } });
 
   // 全站限流（此前完全无 limit_req，SMS/AI 生成/下单等成本型接口零防刷，机器常态被扫描器扫——见售卖前体检 P1）。
   // 全局宽松兜底（正常用户远不会触及），成本/鉴权型路由用 route-level config.rateLimit 收紧（见 auth.ts 等）。
@@ -259,6 +261,7 @@ export async function buildApp(opts: { logger?: boolean } = {}): Promise<Fastify
   await app.register(prescriptionRoutes, { prefix: '/api' }); // 处方引擎（WO-12：诊断结论 → 生态工具的结构化桥）
   await app.register(brandKitRoutes, { prefix: '/api' }); // 品牌资产包（WO-13：档案 → 数字人/短剧预填输入）
   await app.register(creativeRoutes, { prefix: '/api' }); // 海报成品图（canvas_design：产物型技能 kind='artifact'）
+  await app.register(videoRoutes, { prefix: '/api' }); // 快出片 BFF：军师鉴权/钻石账/审核 → aidrama clip
   await app.register(bizMetricRoutes, { prefix: '/api' }); // 结构化经营周报（WO-10：报什么就能对比什么）
   await app.register(sayingRoutes, { prefix: '/api' });
   await app.register(sessionRoutes, { prefix: '/api' });

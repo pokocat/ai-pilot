@@ -1,0 +1,61 @@
+<view class="vd vd-template {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">模板</text>
+      <text class="vd-headact"> </text>
+    </view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="tp-body">
+      <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
+
+      <block wx:else>
+        <view class="vd-portrait tp-hero">
+          <view class="inner vd-grain {{template.coverTone}}"></view>
+          <view class="vd-ai-badge tp-badge">AI 生成</view>
+          <text class="tp-dur">{{durationText}}</text>
+        </view>
+
+        <text class="tp-industry">{{template.industry}}</text>
+        <text class="tp-name">{{template.name}}</text>
+        <text class="tp-desc">{{template.description}}</text>
+
+        <!-- 结构拆解 -->
+        <view class="tp-struct vd-card">
+          <text class="ts-title">这条片子是怎么组成的</text>
+
+          <view class="ts-row">
+            <text class="vd-tag avatar"><text class="sq"></text>分身出镜</text>
+            <text class="ts-text">约 {{template.avatarSecHint}} 秒 · 开头一段，中段再穿插一次</text>
+          </view>
+          <view class="ts-row">
+            <text class="vd-tag broll"><text class="sq"></text>配画面</text>
+            <text class="ts-text">其余句子用你自己拍的店铺画面，声音继续念</text>
+          </view>
+          <view class="ts-row">
+            <text class="vd-tag tail"><text class="sq"></text>固定片段</text>
+            <text class="ts-text">{{template.tailLabel}} · {{template.tailDurationSec}} 秒，可整段替换</text>
+          </view>
+
+          <text class="ts-note">出镜时间越长积分越多。模板已经配好一版，你只需要微调。</text>
+        </view>
+
+        <view class="tp-price vd-card">
+          <view class="tpp-main"><text class="num">约 {{template.creditHint}}</text><text class="unit">积分</text></view>
+          <text class="tpp-sub">{{template.segmentCount}} 句 · 成片约 {{durationText}}</text>
+        </view>
+      </block>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <view class="vd-footer">
+    <view class="vd-btn" style="flex:1" bindtap="start">{{creating ? '正在创建…' : '开始制作'}}</view>
+  </view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

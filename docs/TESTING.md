@@ -151,5 +151,19 @@ CORS 预检放行自定义头 `x-user-id`；登录→`/me`→产出全通；**�
 
 ### 说明
 - H5 用 **hash 路由**，`dist-h5/` 可被任意静态服务器打开；`serve:h5` 是零依赖内置静态服务器（`app/scripts/serve-h5.mjs`）。
-- 原生小程序自动测试：`cd app && npm test` 会检查 38 条路由覆盖、源码/产物无 Taro、聊天 textarea 无 `value`、非品牌图标统一 Lucide，以及 H5/微信产物隔离；随后运行 `npm run build:weapp:server` 并在 DevTools 逐页走查。
+- 原生小程序自动测试：`cd app && npm test` 会检查 49 条路由覆盖、源码/产物无 Taro、聊天 textarea 无 `value`、非品牌图标统一 Lucide，以及 H5/微信产物隔离；随后运行 `npm run build:weapp:server` 并在 DevTools 逐页走查。
 - 普通聊天默认走 `/generate` SSE 真流式：H5 用 `fetch` ReadableStream，小程序用 `enableChunked/onChunkReceived`；总军师 on-demand 普通问答走 token 流，明确成果请求才回同步成果路径；流式失败自动回退 `generate-sync`(POST)。TC-I 覆盖 `/generate` 事件流。
+
+## 六、「快出片」分包与 BFF 回归
+
+```bash
+cd app
+node --test scripts/video-model.test.mjs
+npm run build:weapp
+
+cd ../server
+npm run build
+node --env-file=.env.test --test --import tsx test/video.test.ts
+```
+
+`video-model.test.mjs` 锁定逐段角色切换、固定尾段、preflight、任务进度与试听时长保留；`video.test.ts` 锁定未登录 401、网关配置校验、用户 token 不外传、权威报价变化不扣费/不建单、重复请求幂等，以及并发提交只建一个 AIStar 任务且不会由旁路请求退款。mock 闭环仅用于状态机回归；真实媒体、石榴、总装和发布必须另做供应商沙箱与微信真机验收。

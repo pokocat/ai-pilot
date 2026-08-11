@@ -193,6 +193,10 @@ Page({
   openGallery() {
     if (!navTo('/packages/work/gallery/index')) wx.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
   },
+  // 「快出片」子应用入口。分包 packages/video，对游客开放浏览（出片/克隆时才要登录）。
+  openVideo() {
+    if (!navTo('/packages/video/home/index')) wx.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
+  },
   openPrescription(event) {
     const id = String(event.currentTarget.dataset.id || '');
     if (!id) return;

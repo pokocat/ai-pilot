@@ -1,0 +1,35 @@
+@use "../styles/tokens.scss";
+
+.vd-rendering { display: flex; flex-direction: column; height: 100vh; }
+.rd-body { flex: 1; padding: 12px 32px 32px; display: flex; flex-direction: column; align-items: center; }
+
+.rd-thumb { width: 168px; padding-bottom: 0; height: 299px; flex: none; }
+.rd-overlay {
+  position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  background: rgba(36, 30, 26, 0.28);
+}
+.rd-pct { font-size: 34px; font-weight: 700; color: #FFF; }
+.rd-ratio { font-size: 11px; color: rgba(255, 255, 255, 0.85); }
+
+.rd-title { font-family: var(--vd-serif); font-size: 20px; font-weight: 600; margin-top: 22px; }
+.rd-sub { font-size: 13px; line-height: 1.7; color: var(--vd-muted); text-align: center; margin-top: 8px; }
+
+.rd-stages { width: 100%; margin-top: 26px; display: flex; flex-direction: column; gap: 2px; }
+.rd-stage { display: flex; align-items: center; gap: 10px; padding: 11px 0; }
+.rs-dot {
+  width: 20px; height: 20px; border-radius: 50%; flex: none;
+  background: var(--vd-sunken);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: #FFF;
+}
+.rd-stage.done .rs-dot { background: #4A7C59; }
+.rd-stage.busy .rs-dot { background: var(--vd-avatar); animation: vd-pulse 1.6s infinite; }
+@keyframes vd-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+.rs-label { flex: 1; font-size: 14px; color: var(--vd-ink); }
+.rd-stage.wait .rs-label { color: var(--vd-faint); }
+.rs-text { font-size: 12px; color: var(--vd-muted); }
+.rd-stage.busy .rs-text { color: var(--vd-avatar-deep); font-weight: 600; }
+
+.rd-leave { width: 100%; margin-top: 16px; }
+.rd-note { font-size: 11px; color: var(--vd-faint); margin-top: 10px; }

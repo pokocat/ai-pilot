@@ -18,6 +18,7 @@ Component({
   },
   observers: {
     agent(agent) {
+      store.setOverlay(Boolean(agent), 'agent-unlock');
       if (!agent) return;
       const snapshot = store.snapshot();
       const balance = Number(snapshot.me && snapshot.me.creditBalance != null ? snapshot.me.creditBalance : 0);
@@ -32,6 +33,9 @@ Component({
         colorKey: snapshot.colorKey,
       });
     },
+  },
+  lifetimes: {
+    detached() { store.setOverlay(false, 'agent-unlock'); },
   },
   methods: {
     stop() {},

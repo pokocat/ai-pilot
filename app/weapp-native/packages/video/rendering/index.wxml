@@ -1,0 +1,49 @@
+<view class="vd vd-rendering {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">{{failed ? '出片失败' : '正在给你出片'}}</text>
+      <text class="vd-headact"> </text>
+    </view>
+  </view>
+
+  <view class="rd-body">
+
+    <block wx:if="{{!failed}}">
+      <view class="vd-portrait rd-thumb">
+        <view class="inner vd-grain"></view>
+        <view class="rd-overlay">
+          <text class="rd-pct">{{progress}}%</text>
+          <text class="rd-ratio">正在合成 9:16</text>
+        </view>
+      </view>
+
+      <text class="rd-title">正在给你出片</text>
+      <text class="rd-sub">可以直接退出去忙，出好了在「我的作品」里等你。</text>
+
+      <view class="rd-stages">
+        <view wx:for="{{stageRows}}" wx:key="key" class="rd-stage {{item.state}}">
+          <view class="rs-dot">
+            <native-icon wx:if="{{item.state === 'done'}}" name="check" tone="white" size="11"></native-icon>
+          </view>
+          <text class="rs-label">{{item.label}}</text>
+          <text class="rs-text">{{item.text}}</text>
+        </view>
+      </view>
+
+      <view class="vd-btn ghost rd-leave" bindtap="leave">先去忙，好了通知我</view>
+      <text class="rd-note">关掉小程序也不影响出片</text>
+    </block>
+
+    <block wx:else>
+      <view class="vd-empty">
+        <text class="t">这条没能出成</text>
+        <text class="s">{{errorMessage}}</text>
+      </view>
+      <view class="vd-btn rd-leave" bindtap="retry">回去改改再出</view>
+      <view class="vd-btn ghost rd-leave" bindtap="leave">看我的作品</view>
+    </block>
+
+  </view>
+</view>

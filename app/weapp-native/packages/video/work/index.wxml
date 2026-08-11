@@ -1,0 +1,64 @@
+<view class="vd vd-work {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">成片</text>
+      <text class="vd-headact"> </text>
+    </view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="wd-body">
+      <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在打开…</text></view>
+
+      <block wx:else>
+        <!-- 播放器（视频源接入前是占位；AI 角标必须常驻） -->
+        <view class="vd-portrait wd-player">
+          <video
+            wx:if="{{work.videoUrl}}"
+            class="inner"
+            src="{{work.videoUrl}}"
+            object-fit="cover"
+            show-fullscreen-btn="{{true}}"
+            poster="{{work.thumbnailUrl}}"
+          ></video>
+          <view wx:else class="inner vd-grain"></view>
+          <view class="vd-ai-badge wd-badge">AI 生成</view>
+        </view>
+
+        <text class="wd-title">{{work.title}}</text>
+        <text class="wd-meta">{{durationText}} · 竖屏 · 字幕已生成 · 出镜 {{work.avatarSec}} 秒</text>
+        <text wx:if="{{work.credits}}" class="wd-credits">已扣 {{work.credits}} 积分</text>
+
+        <!-- 代发 -->
+        <view class="wd-section">
+          <text class="wd-sec-title">一键代发</text>
+          <view class="wd-platforms">
+            <view
+              wx:for="{{platforms}}"
+              wx:key="key"
+              class="wd-platform {{publishing === item.key ? 'busy' : ''}}"
+              data-key="{{item.key}}"
+              bindtap="publish"
+            >{{publishing === item.key ? '提交中…' : item.label}}</view>
+          </view>
+        </view>
+
+        <view class="vd-btn wd-act" bindtap="saveToAlbum">{{saving ? '保存中…' : '保存到相册'}}</view>
+
+        <view class="wd-again vd-card" bindtap="again">
+          <view class="wa-body">
+            <text class="wa-t">再出一条</text>
+            <text class="wa-s">换个店名或一两句话，1 分钟复制一条新的</text>
+          </view>
+          <native-icon class="wa-arrow" name="arrow" tone="neutral" size="15"></native-icon>
+        </view>
+      </block>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

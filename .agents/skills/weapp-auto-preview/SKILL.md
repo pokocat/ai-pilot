@@ -1,62 +1,63 @@
 ---
 name: weapp-auto-preview
-description: 编译军师小程序并用微信开发者工具 CLI 的 auto-preview 把当前代码热推到手机。当用户想"编译小程序并推到手机/真机预览/实时预览/auto-preview/推手机看效果"时使用。涵盖前置编译动作 + DevTools CLI 调用 + 输出路径必须可写（禁用 /tmp）这一关键坑。
+description: 编译军师当前原生微信小程序并用微信开发者工具 CLI auto-preview 推到真机。用于“编译推手机”“真机预览”“实时预览”“auto-preview”“看当前 worktree 效果”。支持 mock/server 显式选择、dist-native 构建身份校验、局域网 API 与可写输出路径。
 ---
 
-# 军师小程序 · 编译 + auto-preview 热推手机
+# 军师原生小程序 · 构建并推真机
 
-把 `app/` 当前代码编译成小程序产物，再用微信开发者工具（DevTools）CLI 的 `auto-preview` 直接推到手机，免上传密钥、免扫码、改完即推。
+当前微信端是 `app/weapp-native/`，输出 `app/dist-native/`。日常 DevTools 预览直接使用生成的 `app/dist-native/` 独立项目（其 `miniprogramRoot=""`）；上传/发布工具仍使用外层 `app/`，其 `project.config.json` 必须保持 `miniprogramRoot=dist-native/`。
 
-## 适用 / 不适用
-- ✅ 本机已装微信开发者工具、已登录开发者账号；想快速在真机看当前改动。
-- ❌ 要发体验版/正式版 → 走 `npm run upload:weapp`（另一条线）。
-- ❌ 要给别人扫码的可分享预览码 → 用 `app/scripts/weapp-preview.mjs`（miniprogram-ci，需上传密钥 + 本机公网 IP 白名单）。
+禁止使用旧 Taro 微信构建、`app/dist/`、`TARO_APP_MODE` 或 `TARO_APP_API`。
 
-## 前置条件（真机这端，替代不了）
-1. **手机微信在前台运行**，且登录的是**开发者本人账号**（本项目是 `duó`）——auto-preview 按账号推送。
-2. DevTools 已登录（CLI 会自动拉起 IDE）。
-3. 小程序 AppID：`wx810ebe6dfef8e75f`（`app/project.config.json`，`miniprogramRoot: dist/`）。
+## 模式选择
 
-## 步骤
+- 常规真机验收用 `server`，API 必须是手机可访问的 Mac 局域网地址或明确指定的 HTTPS 环境，不能用 `localhost`。
+- 真实外部依赖尚未接通、只看 UI/交互时才用 `mock`，并向用户明确说明。
+- 体验版/正式版不走本 skill；只有用户明确要求发布时才运行 `upload:weapp` / `release:weapp`。
 
-### 1) 前置编译（必做）
-在 `app/` 目录，server 模式编译产物到 `dist/`：
+## 首选命令
+
+使用全局 helper，它能处理当前 git worktree、依赖软链、build meta 校验和 DevTools 输出，并直接预览生成的 `app/dist-native/`，避免 DevTools RC 复用外层旧索引后误报找不到 `app.json`。CLI 即使编译失败也可能退出 0，helper 只认输出中的 `✔ auto-preview`。
+
 ```bash
-cd /Users/donis/dev/ai-pilot/app
-npx tsc --noEmit          # 类型检查（可选但建议；无输出即通过）
-npm run build:weapp:server # → dist/，流式响应已默认开启（除非 TARO_APP_STREAM=0）
+PREVIEW=/Users/donis/.codex/skills/ai-pilot-weapp-preview/scripts/weapp_preview.sh
+
+# 当前 worktree 的 mock 界面验收
+AI_PILOT_REPO=/path/to/worktree WEAPP_PREVIEW_MODE=mock "$PREVIEW" push
+
+# 当前 worktree 的局域网 server 验收
+AI_PILOT_REPO=/path/to/worktree WEAPP_PREVIEW_MODE=server LAN_IP=192.168.x.x "$PREVIEW" check-api
+AI_PILOT_REPO=/path/to/worktree WEAPP_PREVIEW_MODE=server LAN_IP=192.168.x.x "$PREVIEW" push
+
+# 明确的 HTTPS 环境
+AI_PILOT_REPO=/path/to/worktree WEAPP_PREVIEW_MODE=server \
+  WEAPP_APP_API=https://example.com/api "$PREVIEW" push
 ```
-编译末尾常见一条 `mini-css-extract-plugin Conflicting order` 的 CSS 引入顺序 **warning，无害**，可忽略；只要看到 `Compiled successfully` 即可。
 
-### 2) auto-preview 热推手机
+可用动作：`print-env`、`check-api`、`build`、`watch`、`auto-preview`、`preview`、`push`。其中 `push = build + auto-preview`；`watch` 是长运行命令。
+
+## 手工兜底
+
 ```bash
+cd /path/to/worktree/app
+
+# mock
+node scripts/build-native-weapp.mjs --mode mock
+
+# server
+node scripts/build-native-weapp.mjs --mode server --api http://192.168.x.x:4000/api
+
 /Applications/wechatwebdevtools.app/Contents/MacOS/cli auto-preview \
-  --project /Users/donis/dev/ai-pilot/app \
-  --info-output /Users/donis/dev/ai-pilot/weapp-auto-preview-info.json \
+  --project /path/to/worktree/app/dist-native \
+  --info-output /path/to/worktree/weapp-auto-preview-info.json \
   --lang zh
 ```
-看到 `✔ auto-preview` 即成功，手机上会自动弹出/刷新到当前版本。`--info-output` 里是各分包体积。
 
-## ⚠️ 关键坑：输出路径必须可写，禁用 /tmp
-DevTools 是独立 GUI 应用，**对 `/tmp` 没有写权限**（macOS 下它的 `/tmp` 与 shell 不是同一个）。若把 `--info-output`（或 `preview` 的 `-o` 二维码路径）指到 `/tmp`，会报：
+报告成功前确认：
 
-```
-错误 Error: 二维码输出路径无效或不存在 %s (code 17)
-```
+1. 构建输出是 `app/dist-native/`。
+2. `dist-native/junshi-build-meta.json` 的 `runtime=native-weapp`，mode/API 与本次请求一致。
+3. CLI 显示 AppID `wx810ebe6dfef8e75f` 和 `✔ auto-preview`。
+4. 明确告诉用户推的是 mock 还是 server。
 
-这个报错**误导性极强**——它甩锅给"二维码"，实际是**输出路径不可写**。注意 `%s` 占位符没被填值，正是路径变量为空的征兆。
-**对策：所有输出路径放可写目录**（仓库内或 `$HOME`），永远别用 `/tmp`。和主体资质、手机绑定都无关。
-
-## 兜底：静态预览码（auto-preview 不可用时）
-若 DevTools 未登录/账号对不上，退而生成可扫的预览码（同样别用 /tmp）：
-```bash
-/Applications/wechatwebdevtools.app/Contents/MacOS/cli preview \
-  -f image -o "$HOME/junshi-preview-qr.png" \
-  --project /Users/donis/dev/ai-pilot/app
-# 再发给用户扫码：
-cc-connect send --image "$HOME/junshi-preview-qr.png" --message "军师小程序预览码，用微信扫码预览"
-```
-
-## 备注
-- 流式响应（聊天逐 token）现为**默认开**：`app/src/services/config.ts` 的 `STREAM_CHAT = process.env.TARO_APP_STREAM !== '0'`。普通 `build:weapp:server` 即启用，无需额外 flag。
-- 微信「一键获取手机号」按钮受 `app/src/components/Login/index.tsx` 的 `WX_PHONE_ONETAP` 控制；真机生效需小程序为**企业主体 + 已开通「手机号快速验证」**，否则报 `jsapi has no permission`（短信兜底仍可登录）。
+`--info-output` 与二维码路径必须放仓库或其他可写目录，禁止 `/tmp`；DevTools 对 `/tmp` 可能报误导性的 code 17。预览 JSON/二维码是本机产物，不纳入提交。

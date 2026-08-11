@@ -1,0 +1,100 @@
+<view class="vd vd-home {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
+  <view class="vd-head">
+    <view class="vd-safe"></view>
+    <view class="vd-headrow">
+      <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
+      <text class="vd-title">快出片</text>
+      <text class="vd-headact" bindtap="openWorks">我的作品</text>
+    </view>
+  </view>
+
+  <scroll-view class="vd-scroll" scroll-y enable-flex>
+    <view class="vd-body">
+
+      <!-- 继续上次 -->
+      <view wx:if="{{ongoing}}" class="vd-card resume-card" bindtap="resume">
+        <view class="vd-portrait resume-thumb">
+          <view class="inner vd-grain"></view>
+          <text class="ratio">9:16</text>
+        </view>
+        <view class="resume-body">
+          <text class="resume-step">继续上次 · {{ongoing.stepText}}</text>
+          <text class="resume-title">《{{ongoing.templateName}}》</text>
+          <text class="resume-progress">{{ongoing.progressText}}</text>
+          <view class="resume-bar"><view class="fill" style="width:{{ongoing.percent}}%"></view></view>
+          <view class="resume-go"><text>接着做</text><native-icon name="arrow" tone="neutral" size="14"></native-icon></view>
+        </view>
+      </view>
+
+      <!-- 数字分身状态 -->
+      <view class="vd-card avatar-card" bindtap="tapAvatarCard">
+        <block wx:if="{{avatar && avatar.imageStatus === 'ready' && avatar.voiceStatus === 'ready'}}">
+          <view class="ac-dot ready"></view>
+          <view class="ac-body">
+            <text class="ac-title">我的数字分身 · 可用</text>
+            <text class="ac-sub">形象与声音都已训练好，出片时用你自己的脸和声线。</text>
+          </view>
+          <native-icon class="ac-arrow" name="arrow" tone="neutral" size="15"></native-icon>
+        </block>
+        <block wx:elif="{{avatar && (avatar.imageStatus === 'training' || avatar.voiceStatus === 'training')}}">
+          <view class="ac-dot training"></view>
+          <view class="ac-body">
+            <text class="ac-title">分身正在训练</text>
+            <text class="ac-sub">好了会发消息通知你。这期间可以先用平台预置形象出片。</text>
+          </view>
+          <native-icon class="ac-arrow" name="arrow" tone="neutral" size="15"></native-icon>
+        </block>
+        <block wx:else>
+          <view class="ac-body wide">
+            <text class="ac-title lead">花 5 分钟，克隆你的数字分身</text>
+            <text class="ac-sub">克隆一次，之后每条片子都用你自己的形象和声音，不用再出镜拍摄。</text>
+            <view class="ac-cta"><text>开始创建</text><native-icon name="arrow" tone="neutral" size="14"></native-icon></view>
+          </view>
+        </block>
+      </view>
+
+      <!-- 模板精选 -->
+      <view class="sec-head">
+        <view class="sec-copy">
+          <text class="sec-title">挑一个模板开始</text>
+          <text class="sec-sub">改几句文案就能出片</text>
+        </view>
+        <text class="sec-count">3 个内置模板</text>
+      </view>
+
+      <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
+
+      <view wx:else class="tpl-list">
+        <view wx:for="{{templates}}" wx:key="id" class="vd-card tpl-card" data-id="{{item.id}}" bindtap="openTemplate">
+          <view class="vd-portrait tpl-thumb">
+            <view class="inner vd-grain {{item.coverTone}}"></view>
+            <text class="tpl-dur">{{item.durationText}}</text>
+          </view>
+          <view class="tpl-body">
+            <text class="tpl-industry">{{item.industry}}</text>
+            <text class="tpl-name">{{item.name}}</text>
+            <text class="tpl-desc">{{item.description}}</text>
+            <view class="tpl-meta">
+              <text class="vd-tag avatar"><text class="sq"></text>出镜约 {{item.avatarSecHint}} 秒</text>
+              <text class="tpl-credit">约 {{item.creditHint}} 积分</text>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <!-- 次级入口（分包没有 tabBar，这里补齐设计稿的另外两个 tab） -->
+      <view class="entry-row vd-card" bindtap="openAssets">
+        <view class="er-body"><text class="er-t">我的素材</text><text class="er-s">拍过的店铺画面存在这里，任何模板都能用</text></view>
+        <native-icon class="ac-arrow" name="arrow" tone="neutral" size="15"></native-icon>
+      </view>
+      <view class="entry-row vd-card" bindtap="openAvatar">
+        <view class="er-body"><text class="er-t">分身管理</text><text class="er-s">形象与声音、授权记录、随时删除</text></view>
+        <native-icon class="ac-arrow" name="arrow" tone="neutral" size="15"></native-icon>
+      </view>
+
+      <view class="vd-footer-space"></view>
+    </view>
+  </scroll-view>
+
+  <login-sheet open="{{showLogin}}" reason="{{loginReason}}" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+</view>

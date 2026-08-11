@@ -2078,3 +2078,25 @@ model CreativeAsset {
   @@index([userId, createdAt])
   @@map("creative_asset")
 }
+
+/// 快出片 BFF 的积分 hold 事实源。视频项目/作品真值在 aidrama；本表只保证军师钻石账幂等、失败只退一次。
+model VideoCreditHold {
+  id              String   @id @default(cuid())
+  tenantId        String
+  userId          String
+  projectId       String
+  clientRequestId String
+  upstreamJobId   String?  @unique
+  credits         Int
+  status          String   @default("submitting") // submitting | submitted | settled | refunded
+  lastJobStatus   String?
+  chargedAt       DateTime @default(now())
+  refundedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([userId, clientRequestId])
+  @@index([userId, createdAt])
+  @@index([status, updatedAt])
+  @@map("video_credit_hold")
+}

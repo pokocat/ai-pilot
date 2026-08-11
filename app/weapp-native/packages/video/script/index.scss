@@ -1,0 +1,51 @@
+@use "../styles/tokens.scss";
+
+.vd-script { display: flex; flex-direction: column; height: 100vh; }
+.vd-scroll { flex: 1; min-height: 0; }
+
+.script-tools { display: flex; align-items: center; gap: 8px; padding: 0 20px 12px; }
+.st-btn {
+  padding: 8px 14px; border-radius: var(--vd-r-chip);
+  background: var(--vd-avatar-soft); color: var(--vd-avatar-deep);
+  font-size: 13px; font-weight: 600;
+}
+.st-btn.ghost { background: transparent; border: 1px solid var(--vd-line); color: var(--vd-ink-2); font-weight: 500; }
+.st-btn.busy { opacity: 0.6; }
+.st-count { margin-left: auto; font-size: 12px; color: var(--vd-muted); }
+
+.script-body { padding: 0 20px; }
+.sb-label { display: block; font-size: 12px; color: var(--vd-muted); margin-bottom: 10px; }
+
+/* 只读行：像一段连读的文章，不像表单 */
+.lines { background: var(--vd-surface); border-radius: var(--vd-r-card); border: 1px solid var(--vd-line-soft); padding: 16px; }
+.line { padding: 7px 0; }
+.line-text { font-size: 16px; line-height: 1.85; color: var(--vd-ink); }
+
+/* 编辑态 */
+.line-edit { margin: 10px -6px; border-color: var(--vd-avatar-line); background: var(--vd-avatar-soft); }
+.le-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.le-title { font-size: 12px; font-weight: 600; color: var(--vd-avatar-deep); }
+.le-sec { font-size: 12px; color: var(--vd-ink-3); }
+.le-input {
+  width: 100%; box-sizing: border-box;
+  background: var(--vd-surface);
+  border: 1px solid var(--vd-line);
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 16px; line-height: 1.7; color: var(--vd-ink);
+  min-height: 60px;
+}
+.le-acts { display: flex; gap: 8px; margin-top: 10px; }
+.le-act {
+  flex: 1; text-align: center;
+  padding: 10px 0; border-radius: 10px;
+  background: var(--vd-surface); border: 1px solid var(--vd-line);
+  font-size: 13px; color: var(--vd-ink-2);
+}
+.le-act.main { background: var(--vd-avatar); border-color: var(--vd-avatar); color: #FFF; font-weight: 600; }
+.le-act.busy { opacity: 0.6; }
+
+/* 底部时长 */
+.foot-stat { display: flex; flex-direction: column; gap: 2px; flex: none; }
+.fs-num { font-size: 15px; font-weight: 700; color: var(--vd-ink); }
+.fs-sub { font-size: 11px; color: var(--vd-muted); }

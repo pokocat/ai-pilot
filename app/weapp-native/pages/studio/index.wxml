@@ -54,6 +54,7 @@
       </view>
     </view>
     <view class="works-row card" bindtap="openGallery"><view class="wr-ic"><native-icon name="image" tone="accent" color-key="{{colorKey}}" size="16"></native-icon></view><view class="wr-b"><text class="wr-t">我的作品库</text><text class="wr-s">出过的每一版海报都在这里回看、保存与分享</text></view><native-icon name="arrow" tone="neutral" size="15"></native-icon></view>
+    <view class="works-row card" bindtap="openVideo"><view class="wr-ic"><native-icon name="video" tone="accent" color-key="{{colorKey}}" size="16"></native-icon></view><view class="wr-b"><text class="wr-t">快出片 · 数字分身口播</text><text class="wr-s">克隆一次形象和声音，之后三步出片</text></view><native-icon name="arrow" tone="neutral" size="15"></native-icon></view>
     <view class="tabbar-space"></view>
   </view></scroll-view>
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
