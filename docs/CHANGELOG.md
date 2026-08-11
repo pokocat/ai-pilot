@@ -11,6 +11,7 @@
 - `ClipAvatarView` 新增 `voiceSource=video|dedicated`，分身管理能区分“形象视频自动提取的基础声音”和“用户主动补录的专属声音”，不再把两者都显示成“提升”。
 - 声音卡直接展示训练百分比、失败原因或完成时间；停留页面时每 5 秒只读轮询已有任务，完成后自动切为“已增强 / 重新录制”，训练中禁止重复提交，避免重复消耗石榴点数。
 - 按 `mobile-app-ui-design` 的单卡单任务和 44px 点击区原则保持紧凑层级；同时补齐 H5 端 `avatar` 订阅成功提示，使全量 typecheck 与原生链路口径一致。
+- AIStar 预发已发布 `fb94dee0-20260811T163943Z`，服务 active/running、`NRestarts=0`；既有账号只读验收返回形象与专属声音均 ready、`voiceSource=dedicated`、进度 100%。server 真机包 `82dbf89` 已指向 `https://wxapi.aibuzz.cn/api_preprod` 并 auto-preview 到 AppID `wx810ebe6dfef8e75f`。
 
 ### 2026-08-11 · 修复配画面素材展示与出片预览遮挡 · 影响面：素材上传、画面卡、出片预览、AIStar 素材缩略图
 
