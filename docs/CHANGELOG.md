@@ -11,7 +11,7 @@
 - 新增 `/api/video/avatar/requirements`，由 AIStar v0.116 返回石榴官方资源限制、军师产品质量门、建议采集区间与固定授权口播；端上不再写死供应商规格。授权/形象只接 MP4/MOV H.264，声音产品链只接 WAV/MP3/OGG/M4A/AAC；供应商虽支持 24k 单声道 PCM，但当前小程序明确不把它列为可上传格式。
 - 授权视频、形象视频与声音样本先在军师 BFF 校验 MIME/大小，再由 AIStar 用 ffprobe 验证真实时长、编码、分辨率与音轨，失败在调用石榴前给出可操作提示。授权 `authId` 统一表述为“声明已提交并受理”，不冒充独立实名认证；上游受理后我方删除临时授权原片。
 - 声音固定使用石榴 V2.0 克隆；所有非尾段先生成同一 V2 speaker 的段音频，b-roll 直接使用，数字人段改走 `/video/createByVoiceV2`，不再混用文本直出内嵌 TTS。训练页显示上游真实进度/失败原因，并支持只重拍形象或只重录声音，不要求已经成功的另一项重做。
-- 自动化只覆盖 HTTP 桩、媒体策略、worker、契约与离线构建，不创建真实 speaker/avatar/video 任务，不消耗石榴点数。预发部署、线上只读探针和真机包结果在本条发布完成后补记。
+- 自动化只覆盖 HTTP 桩、媒体策略、worker、契约与离线构建，不创建真实 speaker/avatar/video 任务。已部署军师预发 `9a1700b` 与 AIStar clip `458246e1-20260811T124030Z`，两服务均为 active、`NRestarts=0`；AIStar 已关闭 force-mock，requirements 经 AIStar/BFF 两层验收。石榴只读权益探针为 `code=0 / 12000 点 / 0 分身 / 0 音色`，没有消耗点数。server 包已用 DevTools `auto-preview` 推到 AppID `wx810ebe6dfef8e75f`，构建身份为 `native-weapp / server / https://wxapi.aibuzz.cn/api_preprod / 9a1700b`。后续只有用户在真机提交本人素材才会创建真实任务并扣石榴点数。
 
 ### 2026-08-11 · 「快出片」改稿助手悬浮化并重做段落组合 · 影响面：视频文案页、画面段编辑、镜头纯函数与真机交互
 
