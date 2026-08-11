@@ -80,7 +80,10 @@
       <!-- 数字分身状态：模板是主任务，分身能力放到模板之后。 -->
       <view class="cap-head"><text class="cap-kicker">让每条片更像你</text><text class="cap-title">你的出镜能力</text></view>
       <view class="vd-card avatar-card" bindtap="tapAvatarCard">
-        <view class="ac-visual"><native-icon name="user" tone="red" size="23"></native-icon></view>
+        <view class="ac-visual">
+          <image wx:if="{{avatar && avatar.imagePreviewUrl}}" class="ac-photo" src="{{avatar.imagePreviewUrl}}" mode="aspectFill"></image>
+          <native-icon wx:else name="user" tone="red" size="23"></native-icon>
+        </view>
         <block wx:if="{{avatar && avatar.imageStatus === 'ready'}}">
           <view class="ac-body">
             <text class="ac-title">数字分身已就绪</text>

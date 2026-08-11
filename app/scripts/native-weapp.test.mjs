@@ -125,6 +125,9 @@ test('更换形象显式 mode=avatar 优先于旧 step 路由兼容判断', () =
   const avatarWxml = read('weapp-native/packages/video/avatar/index.wxml');
   assert.match(avatarWxml, /avatar\.imageStatus === 'training' \? '正在云端训练' : '还没有创建形象'/);
   assert.match(avatarWxml, /avatar\.imageStatus === 'none' \? '上传形象视频'/);
+  assert.match(avatarWxml, /wx:if="\{\{avatar\.imagePreviewUrl\}\}"[^>]+src="\{\{avatar\.imagePreviewUrl\}\}"/);
+  const homeWxml = read('weapp-native/packages/video/home/index.wxml');
+  assert.match(homeWxml, /avatar && avatar\.imagePreviewUrl/);
 });
 
 test('原生历史对话剥离重复的 asks JSON，只让问答卡展示结构化选项', () => {

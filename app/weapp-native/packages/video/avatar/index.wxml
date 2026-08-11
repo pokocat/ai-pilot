@@ -28,7 +28,10 @@
             <text class="avc-status {{avatar.imageStatus}}">{{avatar.imageStatusText}}</text>
           </view>
           <view class="avp-body">
-            <view class="avc-face"><native-icon name="user" tone="red" size="28"></native-icon></view>
+            <view class="avc-face">
+              <image wx:if="{{avatar.imagePreviewUrl}}" class="avc-photo" src="{{avatar.imagePreviewUrl}}" mode="aspectFill"></image>
+              <native-icon wx:else name="user" tone="red" size="28"></native-icon>
+            </view>
             <view class="avp-copy">
               <text class="avp-state">{{avatar.imageStatus === 'ready' ? '形象已可用' : (avatar.imageStatus === 'failed' ? '这段视频需要重拍' : (avatar.imageStatus === 'training' ? '正在云端训练' : '还没有创建形象'))}}</text>
               <text class="avp-date">{{avatar.imageStatus === 'none' ? '上传一段视频即可创建' : (avatar.imageTrainedText || '训练完成后可直接出片')}}</text>

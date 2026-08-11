@@ -73,7 +73,8 @@
 /* 分身是增强能力，不抢“选模板”的主层级。 */
 .cap-head { display: flex; flex-direction: column; gap: 4px; margin: 32px 0 12px; }
 .avatar-card { display: flex; align-items: center; gap: 14px; }
-.ac-visual { width: 48px; height: 48px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 16px; background: var(--vd-avatar-soft); }
+.ac-visual { width: 48px; height: 48px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 16px; background: var(--vd-avatar-soft); overflow: hidden; }
+.ac-photo { width: 100%; height: 100%; display: block; }
 .ac-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .ac-title { font-size: 15px; font-weight: 600; }
 .ac-sub { font-size: 12px; line-height: 1.55; color: var(--vd-muted); }
