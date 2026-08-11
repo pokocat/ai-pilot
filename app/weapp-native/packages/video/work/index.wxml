@@ -17,18 +17,20 @@
           <view class="wdr-icon"><native-icon name="check" tone="white" size="18"></native-icon></view>
           <view><text class="wdr-kicker">生成完成</text><text class="wdr-title">你的故事，已经成片</text></view>
         </view>
-        <!-- 播放器（视频源接入前是占位；AI 角标必须常驻） -->
-        <view class="vd-portrait wd-player">
-          <video
-            wx:if="{{work.videoUrl}}"
-            class="inner"
-            src="{{work.videoUrl}}"
-            object-fit="cover"
-            show-fullscreen-btn="{{true}}"
-            poster="{{work.thumbnailUrl}}"
-          ></video>
-          <view wx:else class="inner vd-grain"></view>
-          <view class="vd-ai-badge wd-badge">AI 生成</view>
+        <!-- 成片固定用真实 9:16 容器；外层控制宽度，内层 padding 比例不能再被固定高度覆盖。 -->
+        <view class="wd-player-wrap">
+          <view class="vd-portrait wd-player">
+            <video
+              wx:if="{{work.videoUrl}}"
+              class="inner"
+              src="{{work.videoUrl}}"
+              object-fit="contain"
+              show-fullscreen-btn="{{true}}"
+              poster="{{work.thumbnailUrl}}"
+            ></video>
+            <view wx:else class="inner vd-grain"></view>
+            <view class="vd-ai-badge wd-badge">AI 生成</view>
+          </view>
         </view>
 
         <text class="wd-title">{{work.title}}</text>

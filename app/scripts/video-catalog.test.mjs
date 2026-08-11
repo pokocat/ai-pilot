@@ -107,6 +107,7 @@ test('快出片移动视觉层级固定主任务、拇指区和高风险确认�
   const read = (page) => fs.readFileSync(path.join(videoRoot, page, 'index.wxml'), 'utf8');
   const tokens = fs.readFileSync(path.join(videoRoot, 'styles/tokens.scss'), 'utf8');
   const home = read('home');
+  const templateJs = fs.readFileSync(path.join(videoRoot, 'template/index.js'), 'utf8');
   const script = read('script');
   const shots = read('shots');
   const confirm = read('confirm');
@@ -116,7 +117,18 @@ test('快出片移动视觉层级固定主任务、拇指区和高风险确认�
   assert.match(tokens, /--vd-shadow:/);
   assert.match(tokens, /\.vd-back\s*\{[\s\S]*width: 44px; height: 44px;/);
   assert.match(tokens, /\.vd-btn\s*\{[\s\S]*height: 56px;/);
-  assert.ok(home.indexOf('<!-- 模板精选 -->') < home.indexOf('<!-- 数字分身状态：模板是主任务'));
+  assert.ok(home.indexOf('<!-- 数字分身是开拍前置条件') < home.indexOf('<!-- 模板精选：横向浏览'),
+    '数字分身门槛必须先于模板，避免用户进入制作后才发现不能出片');
+  assert.match(home, /class="home-tools"/);
+  assert.match(home, /class="tpl-scroll" scroll-x/);
+  assert.doesNotMatch(home, /class="vd-headact" bindtap="openWorks"/, '作品入口不能继续藏在导航角落');
+  assert.match(templateJs, /avatar\.imageStatus !== 'ready'/);
+  assert.match(templateJs, /先创建数字分身，再开始出片/);
+  const work = read('work');
+  const workScss = fs.readFileSync(path.join(videoRoot, 'work/index.scss'), 'utf8');
+  assert.match(work, /class="wd-player-wrap"/);
+  assert.match(work, /object-fit="contain"/);
+  assert.doesNotMatch(workScss, /\.wd-player\s*\{[^}]*height:\s*420px/);
   assert.match(script, /class="ai-fab"/);
   assert.match(script, /class="ai-sheet"/);
   assert.match(scriptJs, /setOverlay\(true, 'video-script-ai'\)/);

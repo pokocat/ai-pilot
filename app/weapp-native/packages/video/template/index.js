@@ -12,6 +12,8 @@ Page({
     loading: true,
     template: null,
     durationText: '',
+    avatar: null,
+    avatarChecked: false,
     creating: false,
     showLogin: false,
   }),
@@ -20,6 +22,7 @@ Page({
     const templateId = String((options && options.templateId) || '');
     if (!templateId) { host.toast('缺少模板参数'); host.back(); return; }
     this.setData({ templateId });
+    this.loadAvatar();
     api.template(templateId)
       .then((template) => this.setData({
         loading: false,
@@ -41,8 +44,31 @@ Page({
       });
   },
 
+  loadAvatar() {
+    if (!host.isLoggedIn()) { this.setData({ avatar: null, avatarChecked: false }); return Promise.resolve(null); }
+    return api.avatar().catch(() => null).then((avatar) => {
+      this.setData({ avatar, avatarChecked: true });
+      return avatar;
+    });
+  },
+
   start() {
     if (!host.requireLogin(this, 'execute')) return;
+    if (!this.data.avatarChecked) {
+      this.loadAvatar().then(() => this.start());
+      return;
+    }
+    const avatar = this.data.avatar;
+    if (!avatar || avatar.imageStatus !== 'ready') {
+      if (avatar && avatar.imageStatus === 'training') {
+        host.toast('数字分身还在训练，先看看进度');
+        host.go('avatar/index');
+      } else {
+        host.toast('先创建数字分身，再开始出片');
+        host.go('clone/index');
+      }
+      return;
+    }
     if (this.data.creating) return;
     this.setData({ creating: true });
     api.createProject(this.data.templateId)
@@ -58,5 +84,5 @@ Page({
 
   back() { host.back(); },
   closeLogin() { this.setData({ showLogin: false }); },
-  loggedIn() { this.setData({ showLogin: false }); },
+  loggedIn() { this.setData({ showLogin: false }); this.loadAvatar(); },
 });

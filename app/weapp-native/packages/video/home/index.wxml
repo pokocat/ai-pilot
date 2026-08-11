@@ -4,120 +4,87 @@
     <view class="vd-headrow">
       <view class="vd-back" bindtap="back"><native-icon name="back" tone="ink" size="22"></native-icon></view>
       <text class="vd-title">快出片</text>
-      <text class="vd-headact" bindtap="openWorks">作品</text>
+      <text class="vd-headact"> </text>
     </view>
   </view>
 
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="vd-body">
 
-      <view class="home-intro">
-        <view class="hi-glow"></view>
-        <view class="hi-top">
-          <text class="hi-kicker">AI 视频工作台</text>
-          <text class="hi-mark">9:16</text>
+      <!-- 高频入口必须在首屏可见，不能藏进导航角落或页面底部。 -->
+      <view class="home-tools">
+        <view class="home-tool" bindtap="openWorks">
+          <view class="ht-icon"><native-icon name="video" tone="red" size="20"></native-icon></view>
+          <view class="ht-copy"><text class="ht-title">我的作品</text><text class="ht-sub">查看生成与成片</text></view>
+          <native-icon name="arrow" tone="neutral" size="14"></native-icon>
         </view>
-        <text class="hi-title">把今天的生意，讲成一条能发的视频</text>
-        <text class="hi-sub">不用剪辑。选模板、聊文案、配几段店铺画面，就能生成完整竖屏片。</text>
-        <view class="hi-flow">
-          <view class="hi-step"><text class="n">01</text><text>选故事</text></view>
-          <view class="hi-line"></view>
-          <view class="hi-step"><text class="n">02</text><text>聊文案</text></view>
-          <view class="hi-line"></view>
-          <view class="hi-step"><text class="n">03</text><text>配画面</text></view>
+        <view class="home-tool" bindtap="openAssets">
+          <view class="ht-icon blue"><native-icon name="image" tone="blue" size="20"></native-icon></view>
+          <view class="ht-copy"><text class="ht-title">素材库</text><text class="ht-sub">预览店铺画面</text></view>
+          <native-icon name="arrow" tone="neutral" size="14"></native-icon>
         </view>
       </view>
 
-      <!-- 继续上次 -->
-      <view wx:if="{{ongoing}}" class="vd-card resume-card" bindtap="resume">
-        <view class="vd-portrait resume-thumb">
-          <view class="inner vd-grain"></view>
-          <text class="ratio">9:16</text>
+      <!-- 数字分身是开拍前置条件，状态必须先于模板出现。 -->
+      <view class="avatar-gate {{avatar && avatar.imageStatus === 'ready' ? 'ready' : (avatar && avatar.imageStatus === 'training' ? 'training' : 'missing')}}" bindtap="tapAvatarCard">
+        <view class="ag-visual">
+          <image wx:if="{{avatar && avatar.imagePreviewUrl}}" class="ag-photo" src="{{avatar.imagePreviewUrl}}" mode="aspectFill"></image>
+          <native-icon wx:else name="user" tone="{{avatar && avatar.imageStatus === 'ready' ? 'green' : 'red'}}" size="24"></native-icon>
         </view>
+        <block wx:if="{{avatar && avatar.imageStatus === 'ready'}}">
+          <view class="ag-body"><text class="ag-kicker">开拍条件已满足</text><text class="ag-title">数字分身已就绪</text><text class="ag-sub">可以直接选模板出片</text></view>
+          <view class="ag-action quiet">管理</view>
+        </block>
+        <block wx:elif="{{avatar && avatar.imageStatus === 'training'}}">
+          <view class="ag-body"><text class="ag-kicker">正在准备开拍</text><text class="ag-title">数字分身训练中</text><text class="ag-sub">训练完成后即可选择模板</text></view>
+          <view class="ag-action quiet">看进度</view>
+        </block>
+        <block wx:else>
+          <view class="ag-body"><text class="ag-kicker">开拍前先完成这一步</text><text class="ag-title">创建你的数字分身</text><text class="ag-sub">上传 5 秒以上正脸视频即可</text></view>
+          <view class="ag-action">去创建</view>
+        </block>
+      </view>
+
+      <!-- 继续上次：压成状态行，不再用大幅草稿卡占据首屏。 -->
+      <view wx:if="{{ongoing}}" class="resume-card" bindtap="resume">
+        <view class="resume-icon"><text>续</text></view>
         <view class="resume-body">
-          <text class="resume-step">继续上次 · {{ongoing.stepText}}</text>
-          <text class="resume-title">《{{ongoing.templateName}}》</text>
-          <text class="resume-progress">{{ongoing.progressText}}</text>
+          <view class="resume-top"><text class="resume-title">《{{ongoing.templateName}}》</text><text class="resume-step">{{ongoing.stepText}}</text></view>
+          <view class="resume-progress-row"><text>{{ongoing.progressText}}</text><text class="resume-percent">{{ongoing.percent}}%</text></view>
           <view class="resume-bar"><view class="fill" style="width:{{ongoing.percent}}%"></view></view>
-          <view class="resume-go"><text>接着做</text><native-icon name="arrow" tone="neutral" size="14"></native-icon></view>
         </view>
+        <view class="resume-go"><text>继续</text><native-icon name="arrow" tone="red" size="13"></native-icon></view>
       </view>
 
-      <!-- 模板精选 -->
+      <view class="home-intro">
+        <view class="hi-copy"><text class="hi-kicker">AI 视频工作台 · 9:16</text><text class="hi-title">选个故事，今天就发</text><text class="hi-sub">聊文案、配画面，自动生成完整竖屏片</text></view>
+        <view class="hi-mark"><text>3</text><text class="small">步成片</text></view>
+      </view>
+
+      <!-- 模板精选：横向浏览，保留选择效率但不让三张卡占满整页。 -->
       <view class="sec-head">
-        <view class="sec-copy">
-          <text class="sec-kicker">从这里开始</text>
-          <text class="sec-title">选一个你想讲的故事</text>
-          <text class="sec-sub">模板已经写好结构，内容会换成你的生意</text>
-        </view>
-        <text class="sec-count">3 个模板</text>
+        <view class="sec-copy"><text class="sec-kicker">从这里开始</text><text class="sec-title">选择故事模板</text></view>
+        <text class="sec-tip">左右滑动</text>
       </view>
 
       <view wx:if="{{loading}}" class="vd-empty"><text class="s">正在加载…</text></view>
-
-      <view wx:else class="tpl-list">
-        <view wx:for="{{templates}}" wx:key="id" class="vd-card tpl-card" data-id="{{item.id}}" bindtap="openTemplate">
-          <view class="vd-portrait tpl-thumb">
-            <view class="inner vd-grain {{item.coverTone}}">
-              <view class="tpl-glow"></view>
-              <text class="tpl-serial">0{{index + 1}}</text>
-              <text class="tpl-cover-label">{{item.industry}}</text>
+      <scroll-view wx:else class="tpl-scroll" scroll-x enable-flex show-scrollbar="{{false}}">
+        <view class="tpl-list">
+          <view wx:for="{{templates}}" wx:key="id" class="tpl-card" data-id="{{item.id}}" bindtap="openTemplate">
+            <view class="vd-portrait tpl-thumb">
+              <view class="inner vd-grain {{item.coverTone}}"><view class="tpl-glow"></view><text class="tpl-serial">0{{index + 1}}</text></view>
+              <text class="tpl-dur">{{item.durationText}}</text>
             </view>
-            <text class="tpl-dur">{{item.durationText}}</text>
-          </view>
-          <view class="tpl-body">
-            <view class="tpl-top"><text class="tpl-industry">{{item.industry}}</text><text class="tpl-format">竖屏模板</text></view>
-            <text class="tpl-name">{{item.name}}</text>
-            <text class="tpl-desc">{{item.description}}</text>
-            <view class="tpl-meta">
-              <text class="tpl-credit">约 {{item.creditHint}} 积分 · 出镜 {{item.avatarSecHint}} 秒</text>
-              <view class="tpl-go"><native-icon name="arrow" tone="white" size="15"></native-icon></view>
+            <view class="tpl-body">
+              <text class="tpl-industry">{{item.industry}} · 竖屏模板</text>
+              <text class="tpl-name">{{item.name}}</text>
+              <text class="tpl-desc">{{item.description}}</text>
+              <view class="tpl-meta"><text>约 {{item.creditHint}} 积分</text><view class="tpl-go"><native-icon name="arrow" tone="white" size="14"></native-icon></view></view>
             </view>
           </view>
+          <view class="tpl-end"><text>更多模板</text><text>持续上新</text></view>
         </view>
-      </view>
-
-      <!-- 数字分身状态：模板是主任务，分身能力放到模板之后。 -->
-      <view class="cap-head"><text class="cap-kicker">让每条片更像你</text><text class="cap-title">你的出镜能力</text></view>
-      <view class="vd-card avatar-card" bindtap="tapAvatarCard">
-        <view class="ac-visual">
-          <image wx:if="{{avatar && avatar.imagePreviewUrl}}" class="ac-photo" src="{{avatar.imagePreviewUrl}}" mode="aspectFill"></image>
-          <native-icon wx:else name="user" tone="red" size="23"></native-icon>
-        </view>
-        <block wx:if="{{avatar && avatar.imageStatus === 'ready'}}">
-          <view class="ac-body">
-            <text class="ac-title">数字分身已就绪</text>
-            <text class="ac-sub">{{avatar.voiceStatus === 'ready' ? '形象与视频原声已可用，可以直接出片。' : '形象已可用，还可补录专属声音提升效果。'}}</text>
-          </view>
-          <view class="ac-state ready">可用</view>
-        </block>
-        <block wx:elif="{{avatar && avatar.imageStatus === 'training'}}">
-          <view class="ac-body">
-            <text class="ac-title">分身正在训练</text>
-            <text class="ac-sub">好了会通知你，这期间可先用平台预置形象。</text>
-          </view>
-          <view class="ac-state training">训练中</view>
-        </block>
-        <block wx:else>
-          <view class="ac-body">
-            <text class="ac-title">一段视频创建数字分身</text>
-            <text class="ac-sub">上传 5 秒以上的正脸视频，不用先单独录音。</text>
-          </view>
-          <view class="ac-state action">去创建</view>
-        </block>
-      </view>
-
-      <!-- 次级入口（分包没有 tabBar，这里补齐设计稿的另外两个 tab） -->
-      <view class="entry-grid">
-        <view class="entry-row vd-card" bindtap="openAssets">
-          <view class="er-icon blue"><native-icon name="image" tone="blue" size="21"></native-icon></view>
-          <view class="er-body"><text class="er-t">我的素材</text><text class="er-s">店铺画面统一管理</text></view>
-        </view>
-        <view class="entry-row vd-card" bindtap="openAvatar">
-          <view class="er-icon orange"><native-icon name="user" tone="red" size="21"></native-icon></view>
-          <view class="er-body"><text class="er-t">分身管理</text><text class="er-s">形象、声音与授权</text></view>
-        </view>
-      </view>
+      </scroll-view>
 
       <view class="vd-footer-space"></view>
     </view>

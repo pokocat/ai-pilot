@@ -21,8 +21,8 @@ Page({
   onLoad() { this.load(); },
 
   onShow() {
-    // 从制作流程返回时刷新「继续上次」的进度
-    if (!this.data.loading) this.loadOngoing();
+    // 从采集/制作流程返回时同时刷新分身门槛与草稿，避免首页展示旧状态。
+    if (!this.data.loading) this.refreshAccountState();
   },
 
   load() {
@@ -45,11 +45,15 @@ Page({
     });
   },
 
-  loadOngoing() {
+  refreshAccountState() {
     if (!host.isLoggedIn()) return;
-    api.ongoingProject()
-      .then((ongoing) => this.setData({ ongoing: ongoing ? this.decorateOngoing(ongoing) : null }))
-      .catch(() => {});
+    Promise.all([
+      api.avatar().catch(() => null),
+      api.ongoingProject().catch(() => null),
+    ]).then(([avatar, ongoing]) => this.setData({
+      avatar,
+      ongoing: ongoing ? this.decorateOngoing(ongoing) : null,
+    }));
   },
 
   /** 进度按视觉镜头算，不再用文案句数冒充已配画面的完成度。 */
@@ -84,7 +88,10 @@ Page({
     host.go('clone/index');
   },
 
-  openWorks() { host.go('works/index'); },
+  openWorks() {
+    if (!host.requireLogin(this, 'execute')) return;
+    host.go('works/index');
+  },
   openAssets() {
     if (!host.requireLogin(this, 'execute')) return;
     host.go('assets/index');
