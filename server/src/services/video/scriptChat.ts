@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import type { ClipProject, ClipScriptMessage, ClipSegment, ClipShot } from '../../../../shared/contracts';
-import { llmJson } from '../../llm/gateway.js';
+import { structuredMetered } from '../../llm/gateway.js';
 
 type AiDraft = { reply: string; applied: boolean; segments?: ClipSegment[] };
 
@@ -12,9 +13,21 @@ const SYSTEM = `你是“快出片”的短视频文案搭档，和实体店老�
 3. hint 用一句很短的画面建议。不要生成结尾品牌尾卡，系统会自动保留。
 4. 保留真实信息，不编造销量、年份、荣誉、顾客评价或经营数字。
 5. 用户在继续对话时，要结合现有稿和前文修改，不要重新问已经回答过的问题。
+6. 用户说“换成 / 改成某个行业、门店或产品”就是明确改稿指令：必须立刻重写整稿，删除旧行业、旧商品和旧动作，不得只整理段落后声称已经修改。
 只输出 JSON：
 信息不足：{"action":"question","reply":"一个具体问题","segments":[]}
 可以成稿：{"action":"draft","reply":"简短说明这版怎么改的","segments":[{"text":"完整语义段","role":"avatar","hint":"正面口播"}]}`;
+
+const SegmentSchema = z.object({
+  text: z.string().min(1).max(180),
+  role: z.enum(['avatar', 'broll']),
+  hint: z.string().max(60).nullable().optional(),
+});
+
+const ScriptTurnSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('question'), reply: z.string().min(1).max(800), segments: z.array(SegmentSchema).max(0).default([]) }),
+  z.object({ action: z.literal('draft'), reply: z.string().min(1).max(800), segments: z.array(SegmentSchema).min(2).max(12) }),
+]);
 
 const text = (value: unknown, max = 4000) => String(value ?? '').trim().slice(0, max);
 
@@ -45,12 +58,9 @@ function fallbackDraft(project: ClipProject, message: string): AiDraft {
   if (message.replace(/\s/g, '').length < 6 && !(project.scriptChat?.length)) {
     return { reply: '你最想让谁看完这条视频，又希望他看完以后做什么？', applied: false };
   }
-  const current = project.segments.filter((item) => item.role !== 'tail');
-  const compacted = compactSegments(current);
   return {
-    reply: '我先按你刚才的要求，把现有内容收成了更完整的表达段落。还想换语气或补卖点，继续告诉我就行。',
-    applied: compacted.length > 0,
-    segments: compacted,
+    reply: '这次 AI 没有生成出可用新稿，原稿没有改动。请再发一次，我会接着当前内容修改。',
+    applied: false,
   };
 }
 
@@ -105,8 +115,19 @@ export async function generateClipScriptTurn(project: ClipProject, message: stri
   shots: ClipShot[];
   scriptChat: ClipScriptMessage[];
 }> {
-  const raw = await llmJson(SYSTEM, joinForPrompt(project, message), 12_000);
-  const draft = normalizeClipScriptAi(raw, project, message);
+  const outcome = await structuredMetered(ScriptTurnSchema, {
+    system: SYSTEM,
+    user: joinForPrompt(project, message),
+    maxChars: 12_000,
+    // 辅助模型默认 700 token 会把 6-10 段 JSON 拦腰截断；改稿必须给足完整稿预算。
+    maxTokens: 2_400,
+  });
+  if (outcome.live && !outcome.data) {
+    throw Object.assign(new Error('AI 改稿结果不完整，原稿没有改动，请再试一次'), {
+      code: 'CLIP_SCRIPT_AI_INVALID', statusCode: 502,
+    });
+  }
+  const draft = normalizeClipScriptAi(outcome.data as Record<string, unknown> | null, project, message);
   const tail = project.segments.filter((item) => item.role === 'tail').map((item) => ({ ...item }));
   const content = draft.applied && draft.segments?.length ? draft.segments : project.segments.filter((item) => item.role !== 'tail').map((item) => ({ ...item }));
   const segments = content.concat(tail).map((item, index) => ({ ...item, no: index + 1 }));

@@ -91,17 +91,18 @@ test('视频 BFF 拒绝非法或带凭据的网关地址', async () => {
   await assert.rejects(() => assertAidramaGatewayUrl('https://user:pass@example.com'), /配置非法/);
 });
 
-test('初始文案支持连续 AI 对话并把对话与新稿一起存进项目', async () => {
+test('初始文案支持连续 AI 对话；测试环境无真实模型时诚实保留原稿', async () => {
   const token = await login(uniquePhone(), '文案对话用户');
   const result = await api('POST', '/api/video/projects/cp_test/script/chat', {
     token,
     body: { message: '帮我写得更像老板本人说话，别太像广告。' },
   });
   assert.equal(result.status, 200, JSON.stringify(result.body));
-  assert.equal(result.body.applied, true);
+  assert.equal(result.body.applied, false);
   assert.equal(result.body.project.scriptChat.length, 2);
   assert.deepEqual(result.body.project.scriptChat.map((item: { role: string }) => item.role), ['user', 'assistant']);
   assert.ok(result.body.project.shots.length >= 1);
+  assert.match(result.body.reply, /原稿没有改动/);
 });
 
 test('媒体机审旁路只在非生产显式开启，并留下独立审计', async () => {

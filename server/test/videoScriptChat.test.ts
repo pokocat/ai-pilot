@@ -27,3 +27,22 @@ test('默认镜头让连续三段实拍共用一个画面', () => {
   ]);
   assert.deepEqual(shots.map((shot) => [shot.startNo, shot.endNo]), [[1, 3], [4, 4]]);
 });
+
+test('结构化模型失败时不得把原稿重新分段后冒充改稿成功', () => {
+  const result = normalizeClipScriptAi(null, project, '换成煎饼果子摊');
+  assert.equal(result.applied, false);
+  assert.equal(result.segments, undefined);
+  assert.match(result.reply, /原稿没有改动/);
+});
+
+test('明确换品类的完整新稿会替换旧主体', () => {
+  const result = normalizeClipScriptAi({
+    action: 'draft', reply: '已经换成煎饼果子摊', segments: [
+      { text: '大家好，我是街口煎饼摊的陈姐。', role: 'avatar', hint: '摊位前口播' },
+      { text: '每天清晨和面、摊饼、打蛋，热乎的早餐现点现做。', role: 'broll', hint: '制作过程' },
+    ],
+  }, project, '换成煎饼果子摊');
+  assert.equal(result.applied, true);
+  assert.equal(result.segments?.some((row) => /修鞋/.test(row.text)), false);
+  assert.equal(result.segments?.some((row) => /煎饼/.test(row.text)), true);
+});
