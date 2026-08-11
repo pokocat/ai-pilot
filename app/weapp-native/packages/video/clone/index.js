@@ -58,7 +58,13 @@ Page({
   onLoad(options) {
     const opts = options || {};
     const legacyStep = Number(opts.step || 1);
-    const mode = String(opts.mode || '') === 'voice' || (String(opts.recapture || '') === '1' && legacyStep === 1) ? 'voice' : 'avatar';
+    const requestedMode = String(opts.mode || '');
+    const hasExplicitMode = requestedMode === 'voice' || requestedMode === 'avatar';
+    // 新路由显式 mode 优先；只有没有 mode 的旧链接才用 step=1 推断为声音。
+    // 否则 mode=avatar&recapture=1 会被 legacyStep 默认值 1 错判成声音页。
+    const mode = hasExplicitMode
+      ? requestedMode
+      : (String(opts.recapture || '') === '1' && legacyStep === 1 ? 'voice' : 'avatar');
     const step = legacyStep >= 2 && String(opts.recapture || '') !== '1' ? 2 : 1;
     this.setData({
       mode,

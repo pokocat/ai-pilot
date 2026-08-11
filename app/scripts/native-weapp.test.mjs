@@ -116,6 +116,17 @@ test('数字人主链是上传视频后直接训练，单独声音采集只是�
   assert.doesNotMatch(homeWxml, /avatar\.imageStatus === 'ready' && avatar\.voiceStatus === 'ready'/);
 });
 
+test('更换形象显式 mode=avatar 优先于旧 step 路由兼容判断', () => {
+  const cloneJs = read('weapp-native/packages/video/clone/index.js');
+  const avatarJs = read('weapp-native/packages/video/avatar/index.js');
+  assert.match(avatarJs, /clone\/index\?mode=\$\{kind === 'voice' \? 'voice' : 'avatar'\}&recapture=1/);
+  assert.match(cloneJs, /const hasExplicitMode = requestedMode === 'voice' \|\| requestedMode === 'avatar'/);
+  assert.match(cloneJs, /const mode = hasExplicitMode\s*\? requestedMode\s*:/);
+  const avatarWxml = read('weapp-native/packages/video/avatar/index.wxml');
+  assert.match(avatarWxml, /avatar\.imageStatus === 'training' \? '正在云端训练' : '还没有创建形象'/);
+  assert.match(avatarWxml, /avatar\.imageStatus === 'none' \? '上传形象视频'/);
+});
+
 test('原生历史对话剥离重复的 asks JSON，只让问答卡展示结构化选项', () => {
   const helperPath = path.join(sourceRoot, 'services/chat-reply.js');
   delete cjsRequire.cache[cjsRequire.resolve(helperPath)];
