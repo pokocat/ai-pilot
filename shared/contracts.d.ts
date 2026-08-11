@@ -2417,7 +2417,13 @@ export interface ClipJobView {
   id: string; status: 'queued' | 'generating' | 'assembling' | 'succeeded' | 'failed' | 'cancelled';
   stage?: string; progress?: number; workId?: string | null; errorMessage?: string | null;
 }
-export interface ClipAsset { id: string; label: string; tag?: string | null; kind: 'video' | 'image' | 'bgm'; durationSec?: number; usedCount?: number; previewUrl?: string | null; }
+export interface ClipAsset {
+  id: string; label: string; tag?: string | null; kind: 'video' | 'image' | 'bgm'; durationSec?: number; usedCount?: number;
+  /** 列表封面：图片原图或视频抽帧 JPEG。 */
+  previewUrl?: string | null;
+  /** 用户主动点开预览时才使用的原始媒体签名地址。 */
+  contentUrl?: string | null;
+}
 export interface ClipWork {
   id: string; projectId?: string | null; title: string; status: 'generating' | 'done' | 'published';
   durationSec: number; avatarSec: number; credits?: number; videoUrl?: string | null; thumbnailUrl?: string | null;

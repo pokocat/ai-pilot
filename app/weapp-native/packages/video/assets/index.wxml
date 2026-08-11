@@ -47,7 +47,10 @@
           bindtap="tapAsset"
           bindlongpress="longPressAsset"
         >
-          <view class="ac-thumb vd-grain {{item.tone}}"></view>
+          <view class="ac-thumb {{item.previewUrl ? '' : 'vd-grain'}} {{item.tone}}">
+            <image wx:if="{{item.previewUrl}}" class="ac-thumb-image" src="{{item.previewUrl}}" mode="aspectFill"></image>
+            <view class="ac-preview" data-id="{{item.id}}" catchtap="previewAsset">{{item.kind === 'video' ? '播放' : '预览'}}</view>
+          </view>
           <text class="ac-label">{{item.label}}</text>
           <text class="ac-used">{{item.usedCount ? '用过 ' + item.usedCount + ' 次' : '没用过'}}</text>
         </view>
@@ -58,6 +61,17 @@
       <view class="vd-footer-space"></view>
     </view>
   </scroll-view>
+
+  <view wx:if="{{previewOpen && previewAsset}}" class="amp-mask" catchtap="closePreview">
+    <view class="amp-sheet" catchtap="swallow">
+      <view class="amp-head"><view><text class="amp-title">{{previewAsset.label}}</text><text class="amp-sub">{{previewAsset.kind === 'video' ? '视频素材' : '图片素材'}}</text></view><view class="amp-close" bindtap="closePreview"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
+      <view class="amp-stage">
+        <video wx:if="{{previewAsset.kind === 'video'}}" class="amp-video" src="{{previewAsset.contentUrl}}" poster="{{previewAsset.previewUrl}}" controls autoplay show-center-play-btn enable-progress-gesture object-fit="contain"></video>
+        <image wx:else class="amp-image" src="{{previewAsset.contentUrl}}" mode="aspectFit" show-menu-by-longpress></image>
+      </view>
+      <view class="amp-foot"><text>{{previewAsset.kind === 'video' && previewAsset.durationSec ? previewAsset.durationSec + ' 秒' : '双指缩放或长按可保存图片'}}</text><view class="vd-btn ghost" bindtap="closePreview">看完了</view></view>
+    </view>
+  </view>
 
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
 </view>

@@ -150,9 +150,22 @@ test('配画面只展示可读素材名和真实缩略图，预览底栏不覆�
   assert.doesNotMatch(shotsWxml, /\{\{item\.assetLabel\}\}/);
   assert.match(shotsWxml, /item\.assetPreviewUrl/);
   assert.match(shotsWxml, /item\.framePreviewUrl/);
+  assert.match(shotsWxml, /previewSelectedAsset/);
+  assert.match(shotsWxml, /previewAsset\.contentUrl/);
   assert.match(shotsWxml, /class="pv-actions"/);
   assert.match(shotsScss, /\.pv-scroll\s*\{[^}]*min-height:\s*0/);
   assert.match(shotsScss, /\.pv-actions\s*\{[^}]*flex:\s*none/);
+});
+
+test('素材库显示真实封面，浏览与挑选态都保留可播放预览', () => {
+  const assetsJs = read('weapp-native/packages/video/assets/index.js');
+  const assetsWxml = read('weapp-native/packages/video/assets/index.wxml');
+  assert.match(assetsJs, /this\.data\.picking[\s\S]*this\.openPreview\(asset\)/);
+  assert.match(assetsJs, /asset\.contentUrl \|\| asset\.previewUrl/);
+  assert.match(assetsWxml, /wx:if="\{\{item\.previewUrl\}\}"[^>]+src="\{\{item\.previewUrl\}\}"/);
+  assert.match(assetsWxml, /catchtap="previewAsset"/);
+  assert.match(assetsWxml, /previewAsset\.contentUrl/);
+  assert.match(assetsWxml, /poster="\{\{previewAsset\.previewUrl\}\}"/);
 });
 
 test('原生历史对话剥离重复的 asks JSON，只让问答卡展示结构化选项', () => {

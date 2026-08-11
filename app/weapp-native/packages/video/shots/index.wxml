@@ -50,10 +50,12 @@
           <view wx:if="{{item.roleClass === 'broll' && !item.hasAsset}}" class="row-pick" data-id="{{item.id}}" bindtap="pickAsset">
             <native-icon class="rp-plus" name="plus" tone="neutral" size="23"></native-icon><text class="rp-text">为这 {{item.sentenceCount}} 句选一个画面</text>
           </view>
-          <view wx:elif="{{item.roleClass === 'broll' && item.hasAsset}}" class="row-asset" data-id="{{item.id}}" bindtap="pickAsset">
-            <view class="ra-thumb {{item.assetPreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{item.assetPreviewUrl}}" class="ra-thumb-image" src="{{item.assetPreviewUrl}}" mode="aspectFill"></image></view>
-            <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">{{item.assetTypeText}} · 已用于{{item.rangeText}}</text></view>
-            <text class="ra-change">更换</text>
+          <view wx:elif="{{item.roleClass === 'broll' && item.hasAsset}}" class="row-asset">
+            <view class="ra-open" data-asset-id="{{item.assetId}}" bindtap="previewSelectedAsset">
+              <view class="ra-thumb {{item.assetPreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{item.assetPreviewUrl}}" class="ra-thumb-image" src="{{item.assetPreviewUrl}}" mode="aspectFill"></image><text class="ra-play">{{item.assetTypeText === '视频素材' ? '播放' : '预览'}}</text></view>
+              <view class="ra-copy"><text class="ra-label">{{item.assetDisplayLabel}}</text><text class="ra-sub">{{item.assetTypeText}} · 点开预览</text></view>
+            </view>
+            <text class="ra-change" data-id="{{item.id}}" bindtap="pickAsset">更换</text>
           </view>
           <view wx:elif="{{item.roleClass === 'avatar'}}" class="row-avatar"><view class="ra-face"></view><text class="ra-label">这 {{item.sentenceCount}} 句连续由分身出镜</text></view>
         </view>
@@ -83,12 +85,19 @@
       <scroll-view class="pv-scroll" scroll-y enable-flex>
         <view class="pv-list">
           <view wx:for="{{rows}}" wx:key="id" class="pv-row {{item.roleClass}}">
-            <view class="pv-frame {{item.framePreviewUrl ? '' : 'vd-grain'}}"><image wx:if="{{item.framePreviewUrl}}" class="pv-frame-image" src="{{item.framePreviewUrl}}" mode="aspectFill"></image><text class="pv-kind">{{item.roleLabel}}</text><text class="pv-no">{{item.rangeText}}</text></view>
+            <view class="pv-frame {{item.framePreviewUrl ? '' : 'vd-grain'}}" data-asset-id="{{item.roleClass === 'broll' ? item.assetId : ''}}" bindtap="previewSelectedAsset"><image wx:if="{{item.framePreviewUrl}}" class="pv-frame-image" src="{{item.framePreviewUrl}}" mode="aspectFill"></image><text class="pv-kind">{{item.roleLabel}}</text><text class="pv-no">{{item.rangeText}}</text><text wx:if="{{item.roleClass === 'broll' && item.hasAsset}}" class="pv-open">点开</text></view>
             <view class="pv-copy"><text class="pv-text">{{item.text}}</text><text class="pv-meta">{{item.seconds}} 秒 · {{item.previewMeta}}</text></view>
           </view>
         </view>
       </scroll-view>
       <view class="pv-actions"><view class="pv-total"><text>预计 {{totalText}}</text><text>分身 {{avatarSec}} 秒</text><text>{{credits}} 积分</text></view><view class="vd-btn" bindtap="closePreview">确认画面安排</view></view>
+    </view>
+  </view>
+  <view wx:if="{{assetPreviewOpen && previewAsset}}" class="amp-mask" catchtap="closeAssetPreview">
+    <view class="amp-sheet" catchtap="swallow">
+      <view class="amp-head"><view><text class="amp-title">{{previewAsset.label}}</text><text class="amp-sub">{{previewAsset.kind === 'video' ? '视频素材' : '图片素材'}}</text></view><view class="amp-close" bindtap="closeAssetPreview"><native-icon name="close" tone="neutral" size="18"></native-icon></view></view>
+      <view class="amp-stage"><video wx:if="{{previewAsset.kind === 'video'}}" class="amp-video" src="{{previewAsset.contentUrl}}" poster="{{previewAsset.previewUrl}}" controls autoplay show-center-play-btn enable-progress-gesture object-fit="contain"></video><image wx:else class="amp-image" src="{{previewAsset.contentUrl}}" mode="aspectFit" show-menu-by-longpress></image></view>
+      <view class="amp-foot"><text>{{previewAsset.kind === 'video' && previewAsset.durationSec ? previewAsset.durationSec + ' 秒' : '素材预览'}}</text><view class="vd-btn ghost" bindtap="closeAssetPreview">看完了</view></view>
     </view>
   </view>
   <login-sheet open="{{showLogin}}" reason="execute" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>

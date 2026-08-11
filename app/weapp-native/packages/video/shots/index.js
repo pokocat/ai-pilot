@@ -27,6 +27,7 @@ Page({
     groupCount: 0, rangeShotId: '', rangeTitle: '', rangeRows: [],
     rangeSelectedCount: 0, rangeInvalid: false, rangeText: '',
     assetsById: {}, avatarPreviewUrl: '',
+    assetPreviewOpen: false, previewAsset: null,
     showLogin: false,
   }),
 
@@ -42,6 +43,7 @@ Page({
     if (this.flashTimer) clearTimeout(this.flashTimer);
     if (this.data.previewOpen) host.setOverlay(false, 'video-preview');
     if (this.data.rangeOpen) host.setOverlay(false, 'video-shot-range');
+    if (this.data.assetPreviewOpen) host.setOverlay(false, 'video-asset-preview');
   },
 
   load() {
@@ -233,6 +235,21 @@ Page({
         this.chooseMedia(shotId, res.tapIndex === 0 ? 'camera' : 'album');
       },
     });
+  },
+
+  previewSelectedAsset(event) {
+    const id = String(event.currentTarget.dataset.assetId || '');
+    if (!id) return;
+    const asset = this.data.assetsById[id];
+    const contentUrl = asset && (asset.contentUrl || asset.previewUrl);
+    if (!contentUrl) { host.toast('这个素材暂时没有可预览文件'); return; }
+    host.setOverlay(true, 'video-asset-preview');
+    this.setData({ assetPreviewOpen: true, previewAsset: Object.assign({}, asset, { contentUrl }) });
+  },
+
+  closeAssetPreview() {
+    host.setOverlay(false, 'video-asset-preview');
+    this.setData({ assetPreviewOpen: false, previewAsset: null });
   },
 
   chooseMedia(shotId, sourceType) {

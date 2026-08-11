@@ -17,6 +17,8 @@ Page({
     picking: false,
     pickShotId: '',
     pickProjectId: '',
+    previewOpen: false,
+    previewAsset: null,
     showLogin: false,
   }),
 
@@ -28,6 +30,10 @@ Page({
       pickProjectId: String(opts.projectId || ''),
     });
     this.load();
+  },
+
+  onUnload() {
+    if (this.data.previewOpen) host.setOverlay(false, 'video-asset-preview');
   },
 
   load() {
@@ -58,7 +64,7 @@ Page({
     const asset = this.data.assets.find((item) => item.id === id);
     if (!asset) return;
 
-    if (!this.data.picking) { host.toast('长按可以改标签'); return; }
+    if (!this.data.picking) { this.openPreview(asset); return; }
 
     // 挑选态：把选中的素材塞回上一页，由配画面屏写进整个 shot 范围。
     const pages = getCurrentPages();
@@ -68,6 +74,26 @@ Page({
     }
     host.back();
   },
+
+  previewAsset(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    const asset = this.data.assets.find((item) => item.id === id);
+    if (asset) this.openPreview(asset);
+  },
+
+  openPreview(asset) {
+    const contentUrl = asset && (asset.contentUrl || asset.previewUrl);
+    if (!contentUrl) { host.toast('这个素材暂时没有可预览文件'); return; }
+    host.setOverlay(true, 'video-asset-preview');
+    this.setData({ previewOpen: true, previewAsset: Object.assign({}, asset, { contentUrl }) });
+  },
+
+  closePreview() {
+    host.setOverlay(false, 'video-asset-preview');
+    this.setData({ previewOpen: false, previewAsset: null });
+  },
+
+  swallow() {},
 
   /** 长按改标签（浏览态）。 */
   longPressAsset(event) {
