@@ -92,8 +92,9 @@ const AVATAR = {
   engine: 'shiliu', presetAvailable: true,
 };
 const CAPTURE_REQUIREMENTS = {
+  authorizationVideoRequired: false,
   consentText: '我是本次出镜者本人，特此声明，我授权军师参谋部使用我提交的视频和声音资料，为我的账号创建数字分身，并仅在我的账号中使用它。',
-  agreementTitle: '数字分身本人授权书', officialDocsLastReviewed: '2026-08-11', officialDocs: [], pollIntervalMs: 3000,
+  agreementTitle: '数字分身素材使用说明', officialDocsLastReviewed: '2026-08-11', officialDocs: [], pollIntervalMs: 3000,
   consent: { kind: 'consent', vendorMinDurationSec: 5, vendorMaxDurationSec: 300, minDurationSec: 5, recommendedMinDurationSec: 8, recommendedMaxDurationSec: 20, maxDurationSec: 30, vendorMaxBytes: 200 * 1024 * 1024, maxBytes: 100 * 1024 * 1024, vendorFormats: ['mp4', 'mov'], formats: ['mp4', 'mov'], codec: 'H.264', guidance: [] },
   avatar: { kind: 'avatar', vendorMinDurationSec: 5, vendorMaxDurationSec: 300, minDurationSec: 5, recommendedMinDurationSec: 10, recommendedMaxDurationSec: 20, maxDurationSec: 300, vendorMaxBytes: 200 * 1024 * 1024, maxBytes: 100 * 1024 * 1024, vendorFormats: ['mp4', 'mov'], formats: ['mp4', 'mov'], codec: 'H.264', guidance: [] },
   voice: { kind: 'voice', vendorMinDurationSec: 2, vendorMaxDurationSec: 0, minDurationSec: 3, recommendedMinDurationSec: 8, recommendedMaxDurationSec: 15, maxDurationSec: 120, vendorMaxBytes: 20 * 1024 * 1024, maxBytes: 20 * 1024 * 1024, vendorFormats: ['wav', 'mp3', 'ogg', 'm4a', 'aac', 'pcm'], formats: ['wav', 'mp3', 'ogg', 'm4a', 'aac'], sampleRateHz: 44100, channels: 1, guidance: [] },

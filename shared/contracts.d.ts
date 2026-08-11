@@ -2438,6 +2438,8 @@ export interface ClipCaptureRule {
   sampleRateHz?: number | null; channels?: number | null; guidance: string[];
 }
 export interface ClipCaptureRequirements {
+  /** 石榴 authId 是可选校验项；当前直传创建链路不要求另录授权视频。 */
+  authorizationVideoRequired: boolean;
   consentText: string; agreementTitle: string; officialDocsLastReviewed: string; officialDocs: string[];
   consent: ClipCaptureRule; avatar: ClipCaptureRule; voice: ClipCaptureRule; pollIntervalMs: number;
 }

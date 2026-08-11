@@ -48,10 +48,10 @@
           </view>
         </view>
 
-        <text class="av-note">只有你本人能用这个分身出片。授权记录可以随时查看，删除后所有生成能力立即停用。</text>
+        <text class="av-note">请只使用本人或已获合法使用权的素材。你可以随时删除分身，删除后所有新的生成能力立即停用。</text>
 
         <view class="av-rows">
-          <view class="av-row" bindtap="openConsentLog"><text class="ar-t">授权记录</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
+          <view class="av-row" bindtap="openConsentLog"><text class="ar-t">历史素材声明</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
           <view class="av-row" bindtap="openUsageLog"><text class="ar-t">使用记录</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
           <view class="av-row" bindtap="openCredits"><text class="ar-t">我的积分与充值</text><native-icon class="ar-a" name="arrow" tone="neutral" size="15"></native-icon></view>
         </view>

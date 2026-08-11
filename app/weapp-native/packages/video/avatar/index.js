@@ -43,7 +43,7 @@ Page({
   recapture(event) {
     const kind = String(event.currentTarget.dataset.kind || '');
     if (!host.requireLogin(this, 'execute')) return;
-    host.go(`clone/index?step=${kind === 'voice' ? '3' : '2'}&recapture=1`);
+    host.go(`clone/index?step=${kind === 'voice' ? '1' : '2'}&recapture=1`);
   },
 
   startClone() {

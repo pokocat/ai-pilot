@@ -46,9 +46,9 @@ test('快出片纯 mock 会话自带可跑完整出片链路的演示额度', ()
   assert.ok(mock.creditBalance() > mostExpensive);
 });
 
-test('快出片采集硬门对齐石榴官方下限，较长时长只作建议', async () => {
+test('快出片数字分身按石榴直传创建，authId 可选且较长时长只作建议', async () => {
   const requirements = await mock.avatarRequirements();
-  assert.equal(requirements.consent.vendorMinDurationSec, 5);
+  assert.equal(requirements.authorizationVideoRequired, false);
   assert.equal(requirements.avatar.minDurationSec, 5);
   assert.equal(requirements.avatar.recommendedMinDurationSec, 10);
   assert.equal(requirements.voice.vendorMinDurationSec, 2);
@@ -56,13 +56,24 @@ test('快出片采集硬门对齐石榴官方下限，较长时长只作建议',
   assert.equal(requirements.voice.recommendedMinDurationSec, 8);
   assert.ok(requirements.voice.vendorFormats.includes('pcm'));
   assert.ok(!requirements.voice.formats.includes('pcm'));
-  assert.match(requirements.consentText, /授权军师参谋部/);
 
   const source = fs.readFileSync(path.join(videoRoot, 'clone/index.js'), 'utf8');
   assert.match(source, /api\.avatarRequirements\(\)/);
-  assert.match(source, /text: this\.data\.consentScript/);
+  assert.doesNotMatch(source, /api\.startConsent/);
+  assert.doesNotMatch(source, /CLIP_CONSENT_REQUIRED/);
+  assert.match(source, /key: 'voice'[\s\S]*key: 'avatar'[\s\S]*key: 'training'/);
   assert.match(source, /recaptureKind === 'voice'/);
-  assert.match(source, /submitOne\('avatar'\)/);
+  assert.match(source, /api\.startClone\('voice'/);
+  assert.match(source, /api\.startClone\('avatar'/);
+
+  const view = fs.readFileSync(path.join(videoRoot, 'clone/index.wxml'), 'utf8');
+  const style = fs.readFileSync(path.join(videoRoot, 'clone/index.scss'), 'utf8');
+  assert.match(view, /object-fit="contain"/);
+  assert.match(view, /先让分身学会你的声音/);
+  assert.match(view, /录制时不需要念固定文案/);
+  assert.match(view, /《数字分身素材使用说明》/);
+  assert.doesNotMatch(view, /录制授权视频/);
+  assert.match(style, /\.cl-video-card\s*\{[\s\S]*height: 238px;/);
 });
 
 test('快出片所有页面只占一层原生导航高度', () => {

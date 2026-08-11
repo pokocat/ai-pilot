@@ -18,110 +18,104 @@
   <scroll-view class="vd-scroll" scroll-y enable-flex>
     <view class="cl-body">
 
-      <!-- ① 授权核验 -->
+      <!-- ① 声音克隆：页面内录音，朗读稿始终可见；也支持上传现有音频。 -->
       <block wx:if="{{step === 1}}">
-        <text class="cl-h">先确认是你本人</text>
-        <text class="cl-s">数字分身会用你的脸和声音说话。先录一段本人授权视频，训练时会把这份授权一并交给数字人服务核验。</text>
+        <view class="cl-type"><text class="cl-type-k">视频数字人</text><text class="cl-type-v">先让分身学会你的声音</text></view>
+        <text class="cl-h">第 1 步 · 克隆你的声音</text>
+        <text class="cl-s">在线录制时朗读稿会一直留在屏幕上；也可以直接上传一段干净的单人音频。</text>
 
-        <view class="cl-ring"><text class="cr-text">录制时正脸看镜头</text></view>
+        <view class="cl-source-tabs">
+          <view class="cl-source on" bindtap="toggleRecord"><text>{{recording ? '结束录制' : '在线录制'}}</text></view>
+          <view class="cl-source" bindtap="pickVoice"><text>上传音频</text></view>
+        </view>
 
         <view class="cl-reading vd-card">
-          <text class="cr-label">核验时请完整念出</text>
-          <text class="cr-script">{{consentScript}}</text>
-          <text class="cr-meta">连续录 {{requirements.consent.minDurationSec}}–{{requirements.consent.recommendedMaxDurationSec}} 秒 · MP4/MOV · H.264</text>
-        </view>
-
-        <view class="cl-info vd-card">
-          <text class="ci-title">这些信息用来做什么</text>
-          <text class="ci-row">· 只用来生成你本人的口播视频，不会给别人使用。</text>
-          <text class="ci-row">· 原始授权视频提交给数字人服务后，我方立即删除，只保留授权记录。</text>
-          <text class="ci-row">· 你可以在「分身管理」里随时删除分身，删除后立即停用。</text>
-        </view>
-
-        <view class="cl-agree" bindtap="toggleAgree">
-          <view class="ca-box {{agreed ? 'on' : ''}}"><native-icon wx:if="{{agreed}}" name="check" tone="white" size="12"></native-icon></view>
-          <text class="ca-text">我已阅读并同意<text class="ca-link" catchtap="openConsentDoc">《数字分身本人授权书》</text>，确认由本人操作。</text>
-        </view>
-
-        <view class="vd-btn {{(agreed && !submitting) ? '' : 'disabled'}}" bindtap="startFaceVerify">{{submitting ? '核验中…' : '录制授权视频并核验'}}</view>
-      </block>
-
-      <!-- ② 形象采集 -->
-      <block wx:elif="{{step === 2}}">
-        <text class="cl-h">第 2 步 · 拍你的形象</text>
-        <text class="cl-s">上半身放进取景框，录满 {{requirements.avatar.minDurationSec}} 秒即可提交；想让动作更自然，建议录 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒。</text>
-
-        <view class="vd-portrait cl-frame">
-          <view wx:if="{{!faceFile}}" class="inner cl-frame-empty"><text class="cf-text">上半身放进取景框</text></view>
-          <video wx:else class="inner" src="{{faceFile.path}}" object-fit="cover"></video>
-        </view>
-
-        <view class="cl-tips vd-card">
-          <text class="ci-title">拍好这几点，分身更像你</text>
-          <text class="ci-row">· 正脸看镜头，手机放稳，别晃</text>
-          <text class="ci-row">· 光打在脸上，窗户在你前面，不要背光</text>
-          <text class="ci-row">· {{requirements.avatar.minDurationSec}} 秒即可提交，{{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒只是效果建议</text>
-          <text class="ci-row">· 使用 MP4/MOV、H.264，短边至少 360p</text>
-          <text class="ci-row">· 别戴口罩、墨镜、帽子</text>
-        </view>
-
-        <view wx:if="{{!faceFile}}" class="cl-acts">
-          <view class="vd-btn ghost" style="flex:1" bindtap="pickFace">从相册选视频</view>
-          <view class="vd-btn" style="flex:1" bindtap="recordFace">现在录制</view>
-        </view>
-        <view wx:else class="cl-acts">
-          <view class="vd-btn ghost" style="flex:1" bindtap="retakeFace">重拍</view>
-          <view class="vd-btn" style="flex:1" bindtap="nextFromFace">{{recaptureKind === 'avatar' ? (submitting ? '提交中…' : '提交训练') : '下一步'}}</view>
-        </view>
-      </block>
-
-      <!-- ③ 声音采集 -->
-      <block wx:elif="{{step === 3}}">
-        <text class="cl-h">第 3 步 · 录你的声音</text>
-        <text class="cl-s">照着屏幕念一遍就行，念完你的分身就会用这个声音说话。</text>
-
-        <view class="cl-reading vd-card">
-          <text class="cr-label">念这段 · 约 10 秒（录满 {{requirements.voice.minDurationSec}} 秒即可提交）</text>
+          <text class="cr-label">自然读一遍 · {{requirements.voice.minDurationSec}} 秒可提交，建议 {{requirements.voice.recommendedMinDurationSec}}–{{requirements.voice.recommendedMaxDurationSec}} 秒</text>
           <text class="cr-script">{{readingScript}}</text>
         </view>
 
         <view class="cl-recorder">
           <text class="cl-timer">{{recordSeconds}}s</text>
-          <text class="cl-timer-hint">/ {{requirements.voice.minDurationSec}}s 可提交 · 建议 {{requirements.voice.recommendedMinDurationSec}}–{{requirements.voice.recommendedMaxDurationSec}}s</text>
+          <text class="cl-timer-hint">安静环境 · 一个人说话 · 正常语速</text>
         </view>
 
         <view class="cl-mic {{recording ? 'on' : ''}}" bindtap="toggleRecord">
-          <text>{{recording ? '正在录，点一下停' : (voiceFile ? '重新录' : '开始录')}}</text>
+          <text>{{recording ? '正在录，点一下结束' : (voiceFile ? '重新录一段' : '开始录制')}}</text>
         </view>
 
-        <text class="cl-note">找个安静的地方，关闭音乐，手机离嘴约 20 厘米。只保留你一个人的声音，连续自然朗读。</text>
+        <view wx:if="{{voiceFile}}" class="cl-file-ready">
+          <view class="cfr-check"><native-icon name="check" tone="white" size="12"></native-icon></view>
+          <view class="cfr-copy"><text class="cfr-title">{{voiceFile.source === 'file' ? (voiceFile.name || '音频已选择') : '录音已完成'}}</text><text class="cfr-meta">{{voiceFile.duration ? voiceFile.duration + ' 秒' : '提交后会检查真实时长与音质'}}</text></view>
+        </view>
 
         <view wx:if="{{voiceFile}}" class="cl-acts">
-          <view class="vd-btn ghost" style="flex:1" bindtap="retakeVoice">重录</view>
-          <view class="vd-btn" style="flex:1" bindtap="submit">{{submitting ? '提交中…' : '提交训练'}}</view>
+          <view class="vd-btn ghost cl-act" bindtap="retakeVoice">重新选择</view>
+          <view class="vd-btn cl-act" bindtap="submitVoice">{{submitting ? '提交中…' : (recaptureKind === 'voice' ? '提交训练' : '下一步 · 上传形象')}}</view>
         </view>
       </block>
 
-      <!-- ④ 训练中 -->
+      <!-- ② 形象视频：直接上传训练，不再要求另录授权口播。 -->
+      <block wx:elif="{{step === 2}}">
+        <text class="cl-h">第 2 步 · 上传形象视频</text>
+        <text class="cl-s">录满 {{requirements.avatar.minDurationSec}} 秒即可提交，建议 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒。录制时不需要念固定文案，正脸自然说话或做轻微动作即可。</text>
+
+        <view wx:if="{{!faceFile}}" class="cl-upload" bindtap="pickFace">
+          <view class="cl-upload-plus"><native-icon name="plus" tone="neutral" size="24"></native-icon></view>
+          <text class="cl-upload-title">选择形象视频</text>
+          <text class="cl-upload-meta">支持竖屏 · MP4/MOV · H.264 · 360p–4K</text>
+        </view>
+
+        <view wx:else class="cl-video-card">
+          <video class="cl-video" src="{{faceFile.path}}" object-fit="contain" controls show-center-play-btn enable-progress-gesture></video>
+          <view class="cl-video-meta"><text>形象视频已选择</text><text>{{faceFile.duration ? faceFile.duration + ' 秒' : '等待提交检查'}}</text></view>
+        </view>
+
+        <view class="cl-guide vd-card">
+          <text class="ci-title">拍摄指南</text>
+          <view class="cl-guide-grid">
+            <view class="cl-guide-item"><view class="cgi-dot"><native-icon name="check" tone="white" size="10"></native-icon></view><text>光线照在脸上</text></view>
+            <view class="cl-guide-item"><view class="cgi-dot"><native-icon name="check" tone="white" size="10"></native-icon></view><text>只拍一位人物</text></view>
+            <view class="cl-guide-item"><view class="cgi-dot"><native-icon name="check" tone="white" size="10"></native-icon></view><text>正脸看向镜头</text></view>
+            <view class="cl-guide-item"><view class="cgi-dot"><native-icon name="check" tone="white" size="10"></native-icon></view><text>手机固定不晃动</text></view>
+          </view>
+          <text class="cl-guide-note">相机录制会进入微信原生全屏界面；因为无需念稿，按上面四点自然拍摄即可。</text>
+        </view>
+
+        <view wx:if="{{!faceFile}}" class="cl-acts">
+          <view class="vd-btn cl-act" bindtap="pickFace">从相册选视频</view>
+          <view class="vd-btn ghost cl-act" bindtap="recordFace">现在录制</view>
+        </view>
+        <view wx:else class="cl-acts">
+          <view class="vd-btn ghost cl-act" bindtap="retakeFace">更换视频</view>
+          <view class="vd-btn cl-act {{agreed ? '' : 'disabled'}}" bindtap="submitAvatar">{{submitting ? '提交中…' : '创建视频数字人'}}</view>
+        </view>
+
+        <view class="cl-agree" bindtap="toggleAgree">
+          <view class="ca-box {{agreed ? 'on' : ''}}"><native-icon wx:if="{{agreed}}" name="check" tone="white" size="12"></native-icon></view>
+          <text class="ca-text">我确认对上传的声音和视频有合法使用权，并同意<text class="ca-link" catchtap="openUsageDoc">《数字分身素材使用说明》</text>。</text>
+        </view>
+      </block>
+
+      <!-- ③ 训练中 -->
       <block wx:else>
         <view class="cl-progress">
           <text class="cp-num">{{training.percent}}%</text>
-          <text class="cp-label">正在学你</text>
+          <text class="cp-label">正在学习</text>
         </view>
 
         <text class="cl-h center">分身正在训练</text>
         <text class="cl-s center">{{training.etaText}}。可以先退出，回来会继续显示真实进度。</text>
 
         <view class="cl-track vd-card">
-          <view class="ct-row {{training.imageDone ? 'done' : 'busy'}}">
-            <view class="ct-dot"><native-icon wx:if="{{training.imageDone}}" name="check" tone="white" size="12"></native-icon></view>
-            <text class="ct-label">形象学习</text>
-            <text class="ct-state {{training.imageFailed ? 'failed' : ''}}">{{training.imageStateText}}</text>
-          </view>
           <view class="ct-row {{training.voiceDone ? 'done' : 'busy'}}">
             <view class="ct-dot"><native-icon wx:if="{{training.voiceDone}}" name="check" tone="white" size="12"></native-icon></view>
-            <text class="ct-label">声音学习</text>
+            <text class="ct-label">声音克隆</text>
             <text class="ct-state {{training.voiceFailed ? 'failed' : ''}}">{{training.voiceStateText}}</text>
+          </view>
+          <view class="ct-row {{training.imageDone ? 'done' : 'busy'}}">
+            <view class="ct-dot"><native-icon wx:if="{{training.imageDone}}" name="check" tone="white" size="12"></native-icon></view>
+            <text class="ct-label">形象训练</text>
+            <text class="ct-state {{training.imageFailed ? 'failed' : ''}}">{{training.imageStateText}}</text>
           </view>
         </view>
 

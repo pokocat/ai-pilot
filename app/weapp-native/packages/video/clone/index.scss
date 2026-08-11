@@ -4,8 +4,8 @@
 .vd-scroll { flex: 1; min-height: 0; }
 .cl-body { padding: 0 20px; }
 
-/* 四步指示 */
-.cl-steps { display: flex; gap: 6px; padding: 0 20px 16px; }
+/* 三段任务进度：只保留可完成的真实步骤。 */
+.cl-steps { display: flex; gap: 8px; padding: 0 20px 16px; }
 .cl-step { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .cs-dot {
   width: 24px; height: 24px; border-radius: 50%;
@@ -18,81 +18,112 @@
 .cs-label { font-size: 11px; color: var(--vd-muted); }
 .cl-step.on .cs-label { color: var(--vd-ink); font-weight: 600; }
 
+.cl-type {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 13px; margin-bottom: 16px; border-radius: 12px;
+  background: var(--vd-avatar-soft); border: 1px solid var(--vd-avatar-line);
+}
+.cl-type-k { font-size: 13px; font-weight: 700; color: var(--vd-avatar-deep); }
+.cl-type-v { font-size: 11px; color: var(--vd-ink-3); }
 .cl-h { display: block; font-family: var(--vd-serif); font-size: 22px; font-weight: 600; margin-bottom: 8px; }
 .cl-h.center { text-align: center; }
-.cl-s { display: block; font-size: 14px; line-height: 1.7; color: var(--vd-ink-3); margin-bottom: 18px; }
+.cl-s { display: block; font-size: 14px; line-height: 1.65; color: var(--vd-ink-3); margin-bottom: 16px; }
 .cl-s.center { text-align: center; }
 
-/* 人脸核验圈 */
-.cl-ring {
-  width: 200px; height: 200px; border-radius: 50%;
-  margin: 6px auto 20px;
-  border: 2px dashed var(--vd-avatar-line);
-  background: var(--vd-avatar-soft);
-  display: flex; align-items: center; justify-content: center;
+/* 录制 / 上传是同一声音任务的两种来源。 */
+.cl-source-tabs {
+  display: flex; height: 44px; margin-bottom: 14px;
+  border: 1px solid var(--vd-avatar); border-radius: 12px; overflow: hidden;
 }
-.cr-text { font-size: 13px; color: var(--vd-avatar-deep); }
-
-/* 信息块 */
-.cl-info, .cl-tips, .cl-reading, .cl-preset { margin-bottom: 16px; }
-.ci-title { display: block; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
-.ci-row { display: block; font-size: 13px; line-height: 1.8; color: var(--vd-ink-2); }
-
-/* 同意勾选 */
-.cl-agree { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 18px; }
-.ca-box {
-  flex: none; width: 18px; height: 18px; border-radius: 5px;
-  border: 1.5px solid var(--vd-faint);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12px; color: #FFF; margin-top: 1px;
+.cl-source {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  color: var(--vd-avatar-deep); font-size: 14px; font-weight: 600;
 }
-.ca-box.on { background: var(--vd-avatar); border-color: var(--vd-avatar); }
-.ca-text { flex: 1; font-size: 12px; line-height: 1.7; color: var(--vd-ink-3); }
-.ca-link { color: var(--vd-avatar-deep); }
+.cl-source.on { color: #FFF; background: var(--vd-avatar); }
 
-/* 取景框 */
-.cl-frame { padding-bottom: 0; height: 380px; margin-bottom: 16px; }
-.cl-frame-empty {
-  display: flex; align-items: center; justify-content: center;
-  border: 2px dashed var(--vd-line);
-  border-radius: 12px;
-  background: var(--vd-surface);
-}
-.cf-text { font-size: 13px; color: var(--vd-muted); }
-
-.cl-acts { display: flex; gap: 10px; margin-bottom: 12px; }
-
-/* 朗读稿 */
-.cr-label { display: block; font-size: 12px; color: var(--vd-muted); margin-bottom: 8px; }
-.cr-script { display: block; font-family: var(--vd-serif); font-size: 18px; line-height: 1.9; color: var(--vd-ink); }
-.cr-meta { display: block; margin-top: 10px; font-size: 11px; line-height: 1.6; color: var(--vd-muted); }
-
-/* 录音 */
-.cl-recorder { display: flex; align-items: baseline; justify-content: center; gap: 6px; margin-bottom: 14px; }
+.cl-reading, .cl-preset, .cl-guide { margin-bottom: 14px; }
+.cr-label { display: block; font-size: 11px; line-height: 1.5; color: var(--vd-muted); margin-bottom: 8px; }
+.cr-script { display: block; font-family: var(--vd-serif); font-size: 17px; line-height: 1.8; color: var(--vd-ink); }
+.cl-recorder { display: flex; align-items: baseline; justify-content: center; gap: 8px; margin: 4px 0 12px; }
 .cl-timer { font-size: 30px; font-weight: 700; color: var(--vd-avatar-deep); }
-.cl-timer-hint { font-size: 13px; color: var(--vd-muted); }
+.cl-timer-hint { font-size: 11px; color: var(--vd-muted); }
 .cl-mic {
   height: 56px; border-radius: var(--vd-r-field);
   background: var(--vd-avatar); color: #FFF;
   display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 600;
-  margin-bottom: 12px;
+  font-size: 15px; font-weight: 600; margin-bottom: 12px;
 }
 .cl-mic.on { background: var(--vd-avatar-deep); animation: vd-pulse 1.4s infinite; }
-@keyframes vd-pulse { 0%, 100% { opacity: 0.75; } 50% { opacity: 1; } }
-.cl-note { display: block; font-size: 12px; line-height: 1.7; color: var(--vd-muted); margin-bottom: 16px; }
+@keyframes vd-pulse { 0%, 100% { opacity: .76; } 50% { opacity: 1; } }
 
-/* 训练中 */
+.cl-file-ready {
+  display: flex; align-items: center; gap: 10px; padding: 11px 13px;
+  margin-bottom: 12px; border-radius: 12px; background: var(--vd-surface);
+  border: 1px solid var(--vd-line);
+}
+.cfr-check {
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center; background: var(--vd-success);
+}
+.cfr-copy { flex: 1; min-width: 0; }
+.cfr-title { display: block; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cfr-meta { display: block; margin-top: 2px; font-size: 11px; color: var(--vd-muted); }
+
+/* 紧凑上传与预览：竖屏完整显示，不再继承全页 9:16 占位高度。 */
+.cl-upload {
+  height: 176px; margin-bottom: 14px; border-radius: 16px;
+  border: 1.5px dashed var(--vd-avatar-line); background: var(--vd-avatar-soft);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.cl-upload-plus {
+  width: 44px; height: 44px; border-radius: 14px; margin-bottom: 10px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--vd-avatar-line); color: var(--vd-avatar-deep); font-size: 26px;
+}
+.cl-upload-title { font-size: 15px; font-weight: 700; color: var(--vd-ink); }
+.cl-upload-meta { margin-top: 6px; font-size: 11px; color: var(--vd-muted); }
+.cl-video-card {
+  height: 238px; margin-bottom: 14px; border-radius: 16px; overflow: hidden;
+  background: #171513; box-shadow: var(--vd-shadow); position: relative;
+}
+.cl-video { width: 100%; height: 202px; display: block; background: #171513; }
+.cl-video-meta {
+  height: 36px; padding: 0 12px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: space-between;
+  color: rgba(255, 255, 255, .88); font-size: 11px; background: #23201E;
+}
+
+.ci-title { display: block; font-size: 14px; font-weight: 700; margin-bottom: 9px; }
+.ci-row { display: block; font-size: 13px; line-height: 1.75; color: var(--vd-ink-2); }
+.cl-guide-grid { display: flex; flex-wrap: wrap; gap: 8px 0; }
+.cl-guide-item { width: 50%; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--vd-ink-2); }
+.cgi-dot {
+  width: 17px; height: 17px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: #FFF; background: var(--vd-success); font-size: 10px;
+}
+.cl-guide-note { display: block; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--vd-line); font-size: 11px; line-height: 1.55; color: var(--vd-muted); }
+
+.cl-acts { display: flex; gap: 10px; margin-bottom: 12px; }
+.cl-act { flex: 1; min-width: 0; }
+.cl-agree { display: flex; gap: 9px; align-items: flex-start; margin: 2px 0 18px; }
+.ca-box {
+  flex: none; width: 20px; height: 20px; border-radius: 6px;
+  border: 1.5px solid var(--vd-faint); display: flex; align-items: center; justify-content: center;
+  color: #FFF; margin-top: 1px;
+}
+.ca-box.on { background: var(--vd-avatar); border-color: var(--vd-avatar); }
+.ca-text { flex: 1; font-size: 12px; line-height: 1.65; color: var(--vd-ink-3); }
+.ca-link { color: var(--vd-avatar-deep); }
+
+/* 训练中。 */
 .cl-progress {
-  width: 140px; height: 140px; border-radius: 50%;
-  margin: 10px auto 20px;
-  background: var(--vd-avatar-soft);
-  border: 2px solid var(--vd-avatar-line);
+  width: 132px; height: 132px; border-radius: 50%; margin: 10px auto 20px;
+  background: var(--vd-avatar-soft); border: 2px solid var(--vd-avatar-line);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
 }
 .cp-num { font-size: 32px; font-weight: 700; color: var(--vd-avatar-deep); }
 .cp-label { font-size: 12px; color: var(--vd-avatar-deep); }
-
 .cl-track { margin: 18px 0 16px; }
 .ct-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; }
 .ct-dot {
@@ -100,13 +131,12 @@
   background: var(--vd-sunken); color: #FFF;
   display: flex; align-items: center; justify-content: center; font-size: 10px;
 }
-.ct-row.done .ct-dot { background: #4A7C59; }
+.ct-row.done .ct-dot { background: var(--vd-success); }
 .ct-row.busy .ct-dot { background: var(--vd-avatar); }
 .ct-label { flex: 1; font-size: 14px; }
 .ct-state { font-size: 12px; color: var(--vd-muted); }
 .ct-state.failed { max-width: 48%; color: #9B3E34; text-align: right; line-height: 1.45; }
-.cl-retry { margin-bottom: 16px; border-color: rgba(155, 62, 52, 0.22); }
+.cl-retry { margin-bottom: 16px; border-color: rgba(155, 62, 52, .22); }
 .cl-acts.retry { margin: 12px 0 0; }
 .cl-acts.retry .vd-btn { flex: 1; }
-
 .cl-preset-btn { margin-top: 12px; }
