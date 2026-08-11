@@ -44,11 +44,13 @@
         <view class="vd-card av-voice">
           <view class="avv-icon"><view class="avc-wave"><view class="wv" wx:for="{{[6,14,9,18,11,7,15,10]}}" wx:key="*this" style="height:{{item}}px"></view></view></view>
           <view class="avv-copy">
-            <view class="avv-title-row"><text class="avv-title">专属声音</text><text class="avv-optional">可选增强</text></view>
-            <text class="avv-desc">{{avatar.voiceStatus === 'ready' ? '声音已可用，单独补录可让音色更稳定' : '不影响形象创建；补录后口播会更像你'}}</text>
+            <view class="avv-title-row"><text class="avv-title">专属声音</text><text class="avv-status {{avatar.voiceStatus}}">{{avatar.voiceBadgeText}}</text></view>
+            <text class="avv-desc">{{avatar.voiceDesc}}</text>
+            <view wx:if="{{avatar.voiceStatus === 'training'}}" class="avv-progress"><view class="avv-progress-fill" style="width:{{avatar.voiceProgress}}%"></view></view>
+            <text wx:if="{{avatar.voiceCompletedText}}" class="avv-complete">{{avatar.voiceCompletedText}}</text>
             <text wx:if="{{avatar.voiceMessage}}" class="avv-message">{{avatar.voiceMessage}}</text>
           </view>
-          <view class="avv-act" data-kind="voice" bindtap="recapture">{{avatar.voiceStatus === 'ready' ? '提升' : '去录制'}}</view>
+          <view class="avv-act {{avatar.voiceStatus === 'training' ? 'disabled' : ''}}" data-kind="voice" bindtap="recapture">{{avatar.voiceActionText}}</view>
         </view>
 
         <text class="av-note">请只使用本人或已获合法使用权的素材。你可以随时删除分身，删除后所有新的生成能力立即停用。</text>

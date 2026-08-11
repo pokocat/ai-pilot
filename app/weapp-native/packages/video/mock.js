@@ -86,7 +86,7 @@ const WORKS = [
 /* ── 分身 ──────────────────────────────────────────────────────────── */
 
 const AVATAR = {
-  imageStatus: 'ready', voiceStatus: 'ready',
+  imageStatus: 'ready', voiceStatus: 'ready', voiceSource: 'dedicated',
   imageTrainedText: '7 月 28 日', voiceTrainedText: '7 月 28 日',
   imageProgress: 100, voiceProgress: 100, imageMessage: null, voiceMessage: null,
   engine: 'shiliu', presetAvailable: true,
@@ -274,13 +274,13 @@ module.exports = {
   startClone: (kind, payload) => {
     if (!payload || !payload.filePath) return Promise.reject(Object.assign(new Error('缺少采集文件'), { code: 'CLIP_CLONE_FILE_REQUIRED' }));
     avatar = Object.assign({}, avatar || {}, kind === 'voice'
-      ? { voiceStatus: 'training', voiceProgress: 12, voiceMessage: null, voiceTrainedText: '' }
-      : { imageStatus: 'training', imageProgress: 8, imageMessage: null, imageTrainedText: '', voiceStatus: 'training', voiceProgress: 6, voiceMessage: null, voiceTrainedText: '' }, { engine: 'shiliu', presetAvailable: true });
+      ? { voiceStatus: 'training', voiceSource: 'dedicated', voiceProgress: 12, voiceMessage: null, voiceTrainedText: '' }
+      : { imageStatus: 'training', imageProgress: 8, imageMessage: null, imageTrainedText: '', voiceStatus: 'training', voiceSource: 'video', voiceProgress: 6, voiceMessage: null, voiceTrainedText: '' }, { engine: 'shiliu', presetAvailable: true });
     setTimeout(() => {
       if (!avatar) return;
       avatar = Object.assign({}, avatar, kind === 'voice'
-        ? { voiceStatus: 'ready', voiceProgress: 100, voiceTrainedText: '刚刚' }
-        : { imageStatus: 'ready', imageProgress: 100, imageTrainedText: '刚刚', voiceStatus: 'ready', voiceProgress: 100, voiceTrainedText: '刚刚' });
+        ? { voiceStatus: 'ready', voiceSource: 'dedicated', voiceProgress: 100, voiceTrainedText: new Date().toISOString() }
+        : { imageStatus: 'ready', imageProgress: 100, imageTrainedText: '刚刚', voiceStatus: 'ready', voiceSource: 'video', voiceProgress: 100, voiceTrainedText: '刚刚' });
     }, 2500);
     return delay({ ok: true, kind, status: 'training' }, 500);
   },

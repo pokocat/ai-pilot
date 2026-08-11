@@ -8,6 +8,14 @@
 const host = require('../host');
 const api = require('../api');
 
+function formatCompletedAt(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${date.getMonth() + 1}月${date.getDate()}日 ${pad(date.getHours())}:${pad(date.getMinutes())} 完成`;
+}
+
 function decorateAvatar(avatar) {
   if (!avatar) return null;
   const statusText = (status, progress, ready, failed) => {
@@ -16,9 +24,35 @@ function decorateAvatar(avatar) {
     if (status === 'failed') return failed;
     return '未采集';
   };
+  const dedicatedVoice = avatar.voiceSource === 'dedicated';
+  const voiceStatus = avatar.voiceStatus || 'none';
+  const voiceProgress = Math.max(0, Math.min(100, Number(avatar.voiceProgress) || 0));
+  const voiceBadgeText = voiceStatus === 'training'
+    ? `训练 ${voiceProgress}%`
+    : voiceStatus === 'failed'
+      ? '需重录'
+      : voiceStatus === 'ready'
+        ? (dedicatedVoice ? '已增强' : '视频原声')
+        : '未采集';
+  const voiceDesc = voiceStatus === 'training'
+    ? (dedicatedVoice ? '专属声音正在云端训练，完成后会自动更新' : '正在从形象视频生成基础声音，完成后会自动更新')
+    : voiceStatus === 'failed'
+      ? '这次录音训练失败，可以重新录制'
+      : voiceStatus === 'ready' && dedicatedVoice
+        ? '专属声音已完成，后续口播会优先使用这版音色'
+        : voiceStatus === 'ready'
+          ? '当前使用视频原声，补录后音色会更稳定'
+          : '不影响形象创建；补录后口播会更像你';
   return Object.assign({}, avatar, {
     imageStatusText: statusText(avatar.imageStatus, avatar.imageProgress, '已就绪', '需重拍'),
     voiceStatusText: statusText(avatar.voiceStatus, avatar.voiceProgress, '已增强', '可重录'),
+    voiceProgress,
+    voiceBadgeText,
+    voiceDesc,
+    voiceActionText: voiceStatus === 'training'
+      ? '训练中'
+      : (dedicatedVoice || voiceStatus === 'failed') ? '重新录制' : voiceStatus === 'ready' ? '提升' : '去录制',
+    voiceCompletedText: dedicatedVoice && voiceStatus === 'ready' ? formatCompletedAt(avatar.voiceTrainedText) : '',
   });
 }
 
@@ -32,17 +66,39 @@ Page({
 
   onLoad() { this.load(); },
   onShow() { if (!this.data.loading) this.load(); },
+  onHide() { this.stopPolling(); },
+  onUnload() { this.stopPolling(); },
 
   load() {
+    this.stopPolling();
     if (!host.isLoggedIn()) { this.setData({ loading: false }); return; }
     api.avatar()
-      .then((avatar) => this.setData({ loading: false, avatar: decorateAvatar(avatar), me: host.currentUser() }))
+      .then((avatar) => {
+        const decorated = decorateAvatar(avatar);
+        this.setData({ loading: false, avatar: decorated, me: host.currentUser() });
+        this.schedulePolling(decorated);
+      })
       .catch(() => this.setData({ loading: false }));
+  },
+
+  schedulePolling(avatar) {
+    if (!avatar || (avatar.imageStatus !== 'training' && avatar.voiceStatus !== 'training')) return;
+    this._avatarPollTimer = setTimeout(() => this.load(), 5000);
+  },
+
+  stopPolling() {
+    if (!this._avatarPollTimer) return;
+    clearTimeout(this._avatarPollTimer);
+    this._avatarPollTimer = null;
   },
 
   recapture(event) {
     const kind = String(event.currentTarget.dataset.kind || '');
     if (!host.requireLogin(this, 'execute')) return;
+    if (kind === 'voice' && this.data.avatar && this.data.avatar.voiceStatus === 'training') {
+      host.toast(`专属声音正在训练 ${this.data.avatar.voiceProgress || 0}%`);
+      return;
+    }
     host.go(`clone/index?mode=${kind === 'voice' ? 'voice' : 'avatar'}&recapture=1`);
   },
 
@@ -82,6 +138,7 @@ Page({
       api.deleteAvatar()
         .then(() => {
           host.hideLoading();
+          this.stopPolling();
           this.setData({ avatar: null });
           host.toast('数字分身已删除', 'success');
         })

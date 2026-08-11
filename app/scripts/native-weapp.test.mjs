@@ -110,10 +110,22 @@ test('数字人主链是上传视频后直接训练，单独声音采集只是�
   assert.doesNotMatch(cloneJs, /\{ no: 1, key: 'voice'/);
   assert.match(cloneWxml, /mode === 'voice' && step === 1/);
   assert.match(cloneWxml, /一段视频即可创建/);
-  assert.match(avatarWxml, /可选增强/);
+  assert.match(avatarWxml, /voiceBadgeText/);
   assert.match(avatarWxml, /av-primary/);
   assert.match(homeWxml, /avatar\.imageStatus === 'ready'/);
   assert.doesNotMatch(homeWxml, /avatar\.imageStatus === 'ready' && avatar\.voiceStatus === 'ready'/);
+});
+
+test('专属声音明确展示来源、训练进度和完成结果，并在页面内轮询', () => {
+  const avatarJs = read(sourceRoot, 'packages/video/avatar/index.js');
+  const avatarWxml = read(sourceRoot, 'packages/video/avatar/index.wxml');
+  assert.match(avatarJs, /avatar\.voiceSource === 'dedicated'/);
+  assert.match(avatarJs, /voiceActionText/);
+  assert.match(avatarJs, /setTimeout\(\(\) => this\.load\(\), 5000\)/);
+  assert.match(avatarWxml, /voiceBadgeText/);
+  assert.match(avatarWxml, /class="avv-progress"/);
+  assert.match(avatarWxml, /voiceCompletedText/);
+  assert.match(avatarWxml, /voiceActionText/);
 });
 
 test('更换形象显式 mode=avatar 优先于旧 step 路由兼容判断', () => {

@@ -2424,6 +2424,8 @@ export interface ClipWork {
 }
 export interface ClipAvatarView {
   imageStatus: 'none' | 'training' | 'ready' | 'failed'; voiceStatus: 'none' | 'training' | 'ready' | 'failed';
+  /** video=形象视频原声生成的基础声音；dedicated=用户主动补录的专属声音。 */
+  voiceSource?: 'video' | 'dedicated' | null;
   /** 用户上传/拍摄的形象视频抽帧；用于确认当前训练的是哪一个本人形象。 */
   imagePreviewUrl?: string | null;
   imageTrainedText?: string | null; voiceTrainedText?: string | null;
