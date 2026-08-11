@@ -12,6 +12,7 @@
 - `ClipProject` 将文案 `segments` 与视觉 `shots` 分层：shot 用 `startNo/endNo` 表示连续句范围。配画面页默认把相邻实拍内容每 2～3 句组成一段，并支持点起句/止句圈选合并、拆开、整段切换分身/实拍和整段选素材；原文句子不会因编排被合并或丢失。
 - AIStar v0.115 新增唯一 `ClipShotPlan` 投影层；旧草稿无 shot 时防御性生成，显式范围必须完整、连续、无重叠覆盖全部句子。报价、preflight、TTS/数字人 worker、测试媒体与正式 ffmpeg 总装统一消费聚合后的生成段，确保同一素材连续承接多句话，而不是只改前端展示。
 - AI 对话调用军师现有 LLM 路由，不调用石榴；本次自动化与预发验收继续保持 `AEP_CLIP_FORCE_MOCK=true`，不得为界面测试消耗石榴点数。
+- 已部署军师预发 `78260bd` 与 AIStar clip 预发 `e9ff7fc5-20260811T104108Z`；两服务均为 active、`NRestarts=0`，公网健康与未登录 401 鉴权探针正常。新 server 包已用微信开发者工具 `auto-preview` 推到 AppID `wx810ebe6dfef8e75f`，构建身份为 `native-weapp / server / https://wxapi.aibuzz.cn/api_preprod / 78260bd`；本轮未发起视频生成。
 
 ### 2026-08-11 · 「快出片」打通隔离预发测试媒体全链路 · 影响面：视频 BFF、媒体上传、AIStar 回源、预发验收
 
