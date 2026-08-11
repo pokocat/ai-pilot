@@ -2424,7 +2424,22 @@ export interface ClipWork {
 }
 export interface ClipAvatarView {
   imageStatus: 'none' | 'training' | 'ready' | 'failed'; voiceStatus: 'none' | 'training' | 'ready' | 'failed';
-  imageTrainedText?: string | null; voiceTrainedText?: string | null; engine?: string | null; presetAvailable?: boolean;
+  imageTrainedText?: string | null; voiceTrainedText?: string | null;
+  imageProgress: number; voiceProgress: number;
+  imageMessage?: string | null; voiceMessage?: string | null;
+  engine?: string | null; presetAvailable?: boolean;
 }
-export interface ClipConsentResult { id: string; status: 'pending' | 'verified' | 'rejected'; verified: boolean; }
+export interface ClipCaptureRule {
+  kind: 'consent' | 'avatar' | 'voice';
+  vendorMinDurationSec: number; vendorMaxDurationSec: number; minDurationSec: number;
+  recommendedMinDurationSec: number; recommendedMaxDurationSec: number; maxDurationSec: number;
+  vendorMaxBytes: number; maxBytes: number; vendorFormats: string[]; formats: string[];
+  codec?: string | null; minShortSidePx?: number | null; maxLongSidePx?: number | null;
+  sampleRateHz?: number | null; channels?: number | null; guidance: string[];
+}
+export interface ClipCaptureRequirements {
+  consentText: string; agreementTitle: string; officialDocsLastReviewed: string; officialDocs: string[];
+  consent: ClipCaptureRule; avatar: ClipCaptureRule; voice: ClipCaptureRule; pollIntervalMs: number;
+}
+export interface ClipConsentResult { id: string; status: 'submitted' | 'verified' | 'rejected'; accepted: boolean; verified: boolean; }
 export interface ClipAuditEntry { id: string; createdAt?: string; createdText?: string; scope?: string; action?: string; status: string; }

@@ -88,6 +88,7 @@ const api = {
 
   /* ── 分身（走 aidrama 的 dap 域扩展，见方案 §6.5）── */
   avatar: () => (useMock() ? mock.avatar() : call('/avatar')),
+  avatarRequirements: () => (useMock() ? mock.avatarRequirements() : call('/avatar/requirements')),
   startConsent: (payload) => {
     if (useMock()) return mock.startConsent(payload);
     const filePath = payload && payload.filePath;

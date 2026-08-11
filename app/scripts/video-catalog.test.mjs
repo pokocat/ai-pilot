@@ -46,6 +46,22 @@ test('快出片纯 mock 会话自带可跑完整出片链路的演示额度', ()
   assert.ok(mock.creditBalance() > mostExpensive);
 });
 
+test('快出片采集要求区分石榴硬限制与小程序实际支持格式', async () => {
+  const requirements = await mock.avatarRequirements();
+  assert.equal(requirements.consent.vendorMinDurationSec, 5);
+  assert.equal(requirements.avatar.minDurationSec, 15);
+  assert.equal(requirements.voice.minDurationSec, 20);
+  assert.ok(requirements.voice.vendorFormats.includes('pcm'));
+  assert.ok(!requirements.voice.formats.includes('pcm'));
+  assert.match(requirements.consentText, /授权军师参谋部/);
+
+  const source = fs.readFileSync(path.join(videoRoot, 'clone/index.js'), 'utf8');
+  assert.match(source, /api\.avatarRequirements\(\)/);
+  assert.match(source, /text: this\.data\.consentScript/);
+  assert.match(source, /recaptureKind === 'voice'/);
+  assert.match(source, /submitOne\('avatar'\)/);
+});
+
 test('快出片所有页面只占一层原生导航高度', () => {
   const pages = fs.readdirSync(videoRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(videoRoot, entry.name, 'index.wxml')))

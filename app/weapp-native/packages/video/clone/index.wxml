@@ -21,19 +21,20 @@
       <!-- ① 授权核验 -->
       <block wx:if="{{step === 1}}">
         <text class="cl-h">先确认是你本人</text>
-        <text class="cl-s">数字分身会用你的脸和声音说话，所以必须由你亲自授权。</text>
+        <text class="cl-s">数字分身会用你的脸和声音说话。先录一段本人授权视频，训练时会把这份授权一并交给数字人服务核验。</text>
 
         <view class="cl-ring"><text class="cr-text">录制时正脸看镜头</text></view>
 
         <view class="cl-reading vd-card">
           <text class="cr-label">核验时请完整念出</text>
           <text class="cr-script">{{consentScript}}</text>
+          <text class="cr-meta">连续录 {{requirements.consent.minDurationSec}}–{{requirements.consent.recommendedMaxDurationSec}} 秒 · MP4/MOV · H.264</text>
         </view>
 
         <view class="cl-info vd-card">
           <text class="ci-title">这些信息用来做什么</text>
           <text class="ci-row">· 只用来生成你本人的口播视频，不会给别人使用。</text>
-          <text class="ci-row">· 核验只确认身份，原始核验视频不保存。</text>
+          <text class="ci-row">· 原始授权视频提交给数字人服务后，我方立即删除，只保留授权记录。</text>
           <text class="ci-row">· 你可以在「分身管理」里随时删除分身，删除后立即停用。</text>
         </view>
 
@@ -48,7 +49,7 @@
       <!-- ② 形象采集 -->
       <block wx:elif="{{step === 2}}">
         <text class="cl-h">第 2 步 · 拍你的形象</text>
-        <text class="cl-s">上半身放进取景框，随便说 30 秒。</text>
+        <text class="cl-s">上半身放进取景框，自然说话 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒。</text>
 
         <view class="vd-portrait cl-frame">
           <view wx:if="{{!faceFile}}" class="inner cl-frame-empty"><text class="cf-text">上半身放进取景框</text></view>
@@ -59,17 +60,18 @@
           <text class="ci-title">拍好这几点，分身更像你</text>
           <text class="ci-row">· 正脸看镜头，手机放稳，别晃</text>
           <text class="ci-row">· 光打在脸上，窗户在你前面，不要背光</text>
-          <text class="ci-row">· 随便说 30 秒，语速跟平时一样</text>
+          <text class="ci-row">· 至少连续 {{requirements.avatar.minDurationSec}} 秒，建议 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒</text>
+          <text class="ci-row">· 使用 MP4/MOV、H.264，短边至少 360p</text>
           <text class="ci-row">· 别戴口罩、墨镜、帽子</text>
         </view>
 
         <view wx:if="{{!faceFile}}" class="cl-acts">
           <view class="vd-btn ghost" style="flex:1" bindtap="pickFace">从相册选视频</view>
-          <view class="vd-btn" style="flex:1" bindtap="recordFace">录 30 秒</view>
+          <view class="vd-btn" style="flex:1" bindtap="recordFace">现在录制</view>
         </view>
         <view wx:else class="cl-acts">
           <view class="vd-btn ghost" style="flex:1" bindtap="retakeFace">重拍</view>
-          <view class="vd-btn" style="flex:1" bindtap="nextFromFace">下一步</view>
+          <view class="vd-btn" style="flex:1" bindtap="nextFromFace">{{recaptureKind === 'avatar' ? (submitting ? '提交中…' : '提交训练') : '下一步'}}</view>
         </view>
       </block>
 
@@ -79,20 +81,20 @@
         <text class="cl-s">照着屏幕念一遍就行，念完你的分身就会用这个声音说话。</text>
 
         <view class="cl-reading vd-card">
-          <text class="cr-label">念这段 · 约 40 秒</text>
+          <text class="cr-label">念这段 · 约 40 秒（至少 {{requirements.voice.minDurationSec}} 秒）</text>
           <text class="cr-script">{{readingScript}}</text>
         </view>
 
         <view class="cl-recorder">
           <text class="cl-timer">{{recordSeconds}}s</text>
-          <text class="cl-timer-hint">/ 建议 40s</text>
+          <text class="cl-timer-hint">/ 建议 {{requirements.voice.recommendedMinDurationSec}}–{{requirements.voice.recommendedMaxDurationSec}}s</text>
         </view>
 
         <view class="cl-mic {{recording ? 'on' : ''}}" bindtap="toggleRecord">
           <text>{{recording ? '正在录，点一下停' : (voiceFile ? '重新录' : '开始录')}}</text>
         </view>
 
-        <text class="cl-note">找个安静的地方，手机离嘴 20 厘米左右。念错了不要紧，停一下重念那句就好。</text>
+        <text class="cl-note">找个安静的地方，关闭音乐，手机离嘴约 20 厘米。只保留你一个人的声音，连续自然朗读。</text>
 
         <view wx:if="{{voiceFile}}" class="cl-acts">
           <view class="vd-btn ghost" style="flex:1" bindtap="retakeVoice">重录</view>
@@ -108,18 +110,27 @@
         </view>
 
         <text class="cl-h center">分身正在训练</text>
-        <text class="cl-s center">{{training.etaText}}。可以退出去做别的，好了会发消息通知你。</text>
+        <text class="cl-s center">{{training.etaText}}。可以先退出，回来会继续显示真实进度。</text>
 
         <view class="cl-track vd-card">
           <view class="ct-row {{training.imageDone ? 'done' : 'busy'}}">
             <view class="ct-dot"><native-icon wx:if="{{training.imageDone}}" name="check" tone="white" size="12"></native-icon></view>
             <text class="ct-label">形象学习</text>
-            <text class="ct-state">{{training.imageDone ? '完成' : '进行中'}}</text>
+            <text class="ct-state {{training.imageFailed ? 'failed' : ''}}">{{training.imageStateText}}</text>
           </view>
           <view class="ct-row {{training.voiceDone ? 'done' : 'busy'}}">
             <view class="ct-dot"><native-icon wx:if="{{training.voiceDone}}" name="check" tone="white" size="12"></native-icon></view>
             <text class="ct-label">声音学习</text>
-            <text class="ct-state">{{training.voiceDone ? '完成' : '进行中'}}</text>
+            <text class="ct-state {{training.voiceFailed ? 'failed' : ''}}">{{training.voiceStateText}}</text>
+          </view>
+        </view>
+
+        <view wx:if="{{training.hasFailure}}" class="cl-retry vd-card">
+          <text class="ci-title">有一项需要重新采集</text>
+          <text class="ci-row">按上面的提示重录即可，已经完成的另一项不用重做。</text>
+          <view class="cl-acts retry">
+            <view wx:if="{{training.imageFailed}}" class="vd-btn ghost" bindtap="retryImage">重拍形象</view>
+            <view wx:if="{{training.voiceFailed}}" class="vd-btn ghost" bindtap="retryVoice">重录声音</view>
           </view>
         </view>
 

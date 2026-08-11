@@ -88,7 +88,15 @@ const WORKS = [
 const AVATAR = {
   imageStatus: 'ready', voiceStatus: 'ready',
   imageTrainedText: '7 月 28 日', voiceTrainedText: '7 月 28 日',
+  imageProgress: 100, voiceProgress: 100, imageMessage: null, voiceMessage: null,
   engine: 'shiliu', presetAvailable: true,
+};
+const CAPTURE_REQUIREMENTS = {
+  consentText: '我是本次出镜者本人，特此声明，我授权军师参谋部使用我提交的视频和声音资料，为我的账号创建数字分身，并仅在我的账号中使用它。',
+  agreementTitle: '数字分身本人授权书', officialDocsLastReviewed: '2026-08-11', officialDocs: [], pollIntervalMs: 3000,
+  consent: { kind: 'consent', vendorMinDurationSec: 5, vendorMaxDurationSec: 300, minDurationSec: 5, recommendedMinDurationSec: 8, recommendedMaxDurationSec: 20, maxDurationSec: 30, vendorMaxBytes: 200 * 1024 * 1024, maxBytes: 100 * 1024 * 1024, vendorFormats: ['mp4', 'mov'], formats: ['mp4', 'mov'], codec: 'H.264', guidance: [] },
+  avatar: { kind: 'avatar', vendorMinDurationSec: 5, vendorMaxDurationSec: 300, minDurationSec: 15, recommendedMinDurationSec: 20, recommendedMaxDurationSec: 60, maxDurationSec: 300, vendorMaxBytes: 200 * 1024 * 1024, maxBytes: 100 * 1024 * 1024, vendorFormats: ['mp4', 'mov'], formats: ['mp4', 'mov'], codec: 'H.264', guidance: [] },
+  voice: { kind: 'voice', vendorMinDurationSec: 2, vendorMaxDurationSec: 0, minDurationSec: 20, recommendedMinDurationSec: 30, recommendedMaxDurationSec: 60, maxDurationSec: 120, vendorMaxBytes: 20 * 1024 * 1024, maxBytes: 20 * 1024 * 1024, vendorFormats: ['wav', 'mp3', 'ogg', 'm4a', 'aac', 'pcm'], formats: ['wav', 'mp3', 'ogg', 'm4a', 'aac'], sampleRateHz: 44100, channels: 1, guidance: [] },
 };
 
 const projects = new Map([[ONGOING.id, clone(ONGOING)]]);
@@ -256,21 +264,22 @@ module.exports = {
   },
 
   avatar: () => delay(avatar ? clone(avatar) : null),
+  avatarRequirements: () => delay(clone(CAPTURE_REQUIREMENTS)),
   startConsent: () => {
-    const record = { id: `cc_mock_${Date.now()}`, status: 'verified', verified: true, createdText: '刚刚', scope: '本人形象与声音出片' };
+    const record = { id: `cc_mock_${Date.now()}`, status: 'submitted', accepted: true, verified: false, createdText: '刚刚', scope: '本人形象与声音出片' };
     consentHistory.unshift(record);
     return delay(clone(record), 600);
   },
   startClone: (kind, payload) => {
     if (!payload || !payload.filePath) return Promise.reject(Object.assign(new Error('缺少采集文件'), { code: 'CLIP_CLONE_FILE_REQUIRED' }));
     avatar = Object.assign({}, avatar || {}, kind === 'voice'
-      ? { voiceStatus: 'training', voiceTrainedText: '' }
-      : { imageStatus: 'training', imageTrainedText: '' }, { engine: 'shiliu', presetAvailable: true });
+      ? { voiceStatus: 'training', voiceProgress: 12, voiceMessage: null, voiceTrainedText: '' }
+      : { imageStatus: 'training', imageProgress: 8, imageMessage: null, imageTrainedText: '' }, { engine: 'shiliu', presetAvailable: true });
     setTimeout(() => {
       if (!avatar) return;
       avatar = Object.assign({}, avatar, kind === 'voice'
-        ? { voiceStatus: 'ready', voiceTrainedText: '刚刚' }
-        : { imageStatus: 'ready', imageTrainedText: '刚刚' });
+        ? { voiceStatus: 'ready', voiceProgress: 100, voiceTrainedText: '刚刚' }
+        : { imageStatus: 'ready', imageProgress: 100, imageTrainedText: '刚刚' });
     }, 2500);
     return delay({ ok: true, kind, status: 'training' }, 500);
   },

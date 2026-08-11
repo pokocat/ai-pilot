@@ -8,6 +8,20 @@
 const host = require('../host');
 const api = require('../api');
 
+function decorateAvatar(avatar) {
+  if (!avatar) return null;
+  const statusText = (status, progress, ready, failed) => {
+    if (status === 'ready') return ready;
+    if (status === 'training') return `训练 ${Math.max(0, Number(progress) || 0)}%`;
+    if (status === 'failed') return failed;
+    return '未采集';
+  };
+  return Object.assign({}, avatar, {
+    imageStatusText: statusText(avatar.imageStatus, avatar.imageProgress, '可用', '需重拍'),
+    voiceStatusText: statusText(avatar.voiceStatus, avatar.voiceProgress, '可用', '需重录'),
+  });
+}
+
 Page({
   data: host.hostBaseData({
     loading: true,
@@ -22,7 +36,7 @@ Page({
   load() {
     if (!host.isLoggedIn()) { this.setData({ loading: false }); return; }
     api.avatar()
-      .then((avatar) => this.setData({ loading: false, avatar, me: host.currentUser() }))
+      .then((avatar) => this.setData({ loading: false, avatar: decorateAvatar(avatar), me: host.currentUser() }))
       .catch(() => this.setData({ loading: false }));
   },
 

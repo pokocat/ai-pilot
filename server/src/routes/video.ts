@@ -8,7 +8,7 @@ import {
 import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideoRewriteOutput, assertVideoUploadContent } from '../services/video/moderation.js';
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
 import type {
-  ClipAsset, ClipAvatarView, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
+  ClipAsset, ClipAvatarView, ClipCaptureRequirements, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
   ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipWork,
 } from '../../../shared/contracts';
 
@@ -37,6 +37,33 @@ function rewriteBody(body: unknown) {
   const text = typeof row.text === 'string' ? row.text.trim() : null;
   if (scope === 'segment' && !text) throw Object.assign(new Error('单句文案不能为空'), { statusCode: 422, code: 'CLIP_REWRITE_INVALID' });
   return { scope, no: typeof row.no === 'number' ? row.no : null, text };
+}
+
+const VIDEO_CAPTURE_MIMES = new Set(['video/mp4', 'video/quicktime']);
+const VOICE_CAPTURE_MIMES = new Set(['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/mp4', 'audio/aac', 'audio/x-m4a']);
+
+function assertCaptureUpload(kind: 'consent' | 'avatar' | 'voice', mimeType: string, bytes: number, truncated: boolean) {
+  const voice = kind === 'voice';
+  const maxBytes = voice ? 20 * 1024 * 1024 : 100 * 1024 * 1024;
+  const allowed = voice ? VOICE_CAPTURE_MIMES : VIDEO_CAPTURE_MIMES;
+  if (!allowed.has(String(mimeType || '').toLowerCase())) {
+    throw Object.assign(new Error(voice ? '声音只支持 WAV、MP3、OGG、M4A 或 AAC' : '视频只支持 MP4 或 MOV'), { statusCode: 422, code: 'CLIP_CAPTURE_FORMAT_INVALID' });
+  }
+  if (truncated || bytes <= 0 || bytes > maxBytes) {
+    throw Object.assign(new Error(voice ? '声音文件不能超过 20MB' : '视频文件不能超过 100MB'), { statusCode: 413, code: 'CLIP_CAPTURE_TOO_LARGE' });
+  }
+}
+
+function captureFileName(kind: 'consent' | 'avatar' | 'voice', fileName: string | undefined, mimeType: string) {
+  const supplied = String(fileName || '').trim();
+  if (/\.[a-z0-9]{2,5}$/i.test(supplied)) return supplied;
+  if (kind !== 'voice') return kind === 'consent' ? 'consent.mp4' : 'avatar.mp4';
+  const mime = String(mimeType || '').toLowerCase();
+  if (mime.includes('wav')) return 'voice.wav';
+  if (mime.includes('ogg')) return 'voice.ogg';
+  if (mime.includes('mp4') || mime.includes('m4a')) return 'voice.m4a';
+  if (mime.includes('aac')) return 'voice.aac';
+  return 'voice.mp3';
 }
 
 export async function videoRoutes(app: FastifyInstance) {
@@ -270,6 +297,11 @@ export async function videoRoutes(app: FastifyInstance) {
     try { return await aidramaJson<ClipAvatarView | null>('/api/me/clip/avatar', identityOf(user)); }
     catch (e) { return sendErr(reply, e, 502); }
   });
+  app.get('/video/avatar/requirements', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try { return await aidramaJson<ClipCaptureRequirements>('/api/me/clip/avatar/requirements', identityOf(user)); }
+    catch (e) { return sendErr(reply, e, 502); }
+  });
   app.post('/video/avatar/consent', { config: { rateLimit: { max: 6, timeWindow: '1 hour' } } }, async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try {
@@ -277,13 +309,13 @@ export async function videoRoutes(app: FastifyInstance) {
       if (!data) return reply.code(400).send({ error: '未收到本人授权视频', code: 'CLIP_CONSENT_VIDEO_REQUIRED' });
       await assertVideoMediaModerationReady(data.mimetype);
       const buffer = await data.toBuffer();
-      if (data.file.truncated || buffer.length > 100 * 1024 * 1024) return reply.code(413).send({ error: '授权视频超过 100MB', code: 'CLIP_ASSET_TOO_LARGE' });
+      assertCaptureUpload('consent', data.mimetype, buffer.length, data.file.truncated);
       await assertVideoUploadContent(buffer, data.mimetype, identityOf(user));
       const rawText = (data.fields as Record<string, { value?: unknown }> | undefined)?.text?.value;
       const text = String(rawText ?? '').trim();
       if (!text || text.length > 300) throw Object.assign(new Error('授权口令无效'), { statusCode: 422, code: 'CLIP_CONSENT_TEXT_REQUIRED' });
       return await aidramaUpload<ClipConsentResult>('/api/me/clip/avatar/consent', identityOf(user),
-        { buffer, fileName: data.filename || 'consent.mp4', mimeType: data.mimetype }, { text });
+        { buffer, fileName: captureFileName('consent', data.filename, data.mimetype), mimeType: data.mimetype }, { text });
     }
     catch (e) { return sendErr(reply, e, 422); }
   });
@@ -292,14 +324,14 @@ export async function videoRoutes(app: FastifyInstance) {
     try {
       const data = await req.file();
       if (!data) return reply.code(400).send({ error: '未收到采集文件', code: 'CLIP_CLONE_FILE_REQUIRED' });
-      await assertVideoMediaModerationReady(data.mimetype);
       const buffer = await data.toBuffer();
-      if (data.file.truncated || buffer.length > 100 * 1024 * 1024) return reply.code(413).send({ error: '采集文件超过 100MB', code: 'CLIP_ASSET_TOO_LARGE' });
-      await assertVideoUploadContent(buffer, data.mimetype, identityOf(user));
       const rawKind = (data.fields as Record<string, { value?: unknown }> | undefined)?.kind?.value;
       const kind = String(rawKind ?? '');
       if (!['avatar', 'voice'].includes(kind)) throw Object.assign(new Error('采集类型非法'), { statusCode: 422, code: 'CLIP_CLONE_KIND_INVALID' });
-      return await aidramaUpload('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: data.filename || 'capture', mimeType: data.mimetype }, { kind });
+      assertCaptureUpload(kind as 'avatar' | 'voice', data.mimetype, buffer.length, data.file.truncated);
+      await assertVideoMediaModerationReady(data.mimetype);
+      await assertVideoUploadContent(buffer, data.mimetype, identityOf(user));
+      return await aidramaUpload('/api/me/clip/avatar/clone', identityOf(user), { buffer, fileName: captureFileName(kind as 'avatar' | 'voice', data.filename, data.mimetype), mimeType: data.mimetype }, { kind });
     } catch (e) { return sendErr(reply, e, 422); }
   });
   app.get('/video/avatar/consents', async (req, reply) => {

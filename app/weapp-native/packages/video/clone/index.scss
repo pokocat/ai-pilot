@@ -65,6 +65,7 @@
 /* 朗读稿 */
 .cr-label { display: block; font-size: 12px; color: var(--vd-muted); margin-bottom: 8px; }
 .cr-script { display: block; font-family: var(--vd-serif); font-size: 18px; line-height: 1.9; color: var(--vd-ink); }
+.cr-meta { display: block; margin-top: 10px; font-size: 11px; line-height: 1.6; color: var(--vd-muted); }
 
 /* 录音 */
 .cl-recorder { display: flex; align-items: baseline; justify-content: center; gap: 6px; margin-bottom: 14px; }
@@ -103,5 +104,9 @@
 .ct-row.busy .ct-dot { background: var(--vd-avatar); }
 .ct-label { flex: 1; font-size: 14px; }
 .ct-state { font-size: 12px; color: var(--vd-muted); }
+.ct-state.failed { max-width: 48%; color: #9B3E34; text-align: right; line-height: 1.45; }
+.cl-retry { margin-bottom: 16px; border-color: rgba(155, 62, 52, 0.22); }
+.cl-acts.retry { margin: 12px 0 0; }
+.cl-acts.retry .vd-btn { flex: 1; }
 
 .cl-preset-btn { margin-top: 12px; }

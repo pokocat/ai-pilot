@@ -26,22 +26,24 @@
           <view class="vd-card av-card">
             <view class="avc-head">
               <text class="avc-k">形象</text>
-              <text class="avc-status {{avatar.imageStatus}}">{{avatar.imageStatus === 'ready' ? '可用' : (avatar.imageStatus === 'training' ? '训练中' : '未采集')}}</text>
+              <text class="avc-status {{avatar.imageStatus}}">{{avatar.imageStatusText}}</text>
             </view>
             <view class="avc-face"></view>
             <text class="avc-date">{{avatar.imageTrainedText || '—'}}</text>
+            <text wx:if="{{avatar.imageMessage}}" class="avc-message">{{avatar.imageMessage}}</text>
             <view class="avc-act" data-kind="image" bindtap="recapture">重新采集</view>
           </view>
 
           <view class="vd-card av-card">
             <view class="avc-head">
               <text class="avc-k">声音</text>
-              <text class="avc-status {{avatar.voiceStatus}}">{{avatar.voiceStatus === 'ready' ? '可用' : (avatar.voiceStatus === 'training' ? '训练中' : '未采集')}}</text>
+              <text class="avc-status {{avatar.voiceStatus}}">{{avatar.voiceStatusText}}</text>
             </view>
             <view class="avc-wave">
               <view class="wv" wx:for="{{[6,14,9,18,11,7,15,10]}}" wx:key="*this" style="height:{{item}}px"></view>
             </view>
             <text class="avc-date">{{avatar.voiceTrainedText || '—'}}</text>
+            <text wx:if="{{avatar.voiceMessage}}" class="avc-message">{{avatar.voiceMessage}}</text>
             <view class="avc-act" data-kind="voice" bindtap="recapture">重新采集</view>
           </view>
         </view>

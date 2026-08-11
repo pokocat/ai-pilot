@@ -11,6 +11,7 @@
 .avc-status { font-size: 11px; padding: 3px 8px; border-radius: var(--vd-r-chip); background: var(--vd-sunken); color: var(--vd-muted); }
 .avc-status.ready { background: rgba(74, 124, 89, 0.14); color: #3D6A4A; }
 .avc-status.training { background: var(--vd-avatar-soft); color: var(--vd-avatar-deep); }
+.avc-status.failed { background: rgba(155, 62, 52, 0.12); color: #9B3E34; }
 
 .avc-face {
   width: 60px; height: 60px; border-radius: 50%;
@@ -21,6 +22,7 @@
 .avc-wave .wv { width: 3px; border-radius: 2px; background: var(--vd-broll); opacity: 0.7; }
 
 .avc-date { font-size: 11px; color: var(--vd-faint); }
+.avc-message { min-height: 32px; font-size: 11px; line-height: 1.45; color: #9B3E34; text-align: center; }
 .avc-act {
   width: 100%; text-align: center;
   padding: 8px 0; border-radius: 10px;
