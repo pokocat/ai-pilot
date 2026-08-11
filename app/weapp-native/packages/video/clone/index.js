@@ -17,14 +17,14 @@ const STEPS = [
   { no: 4, key: 'training', label: '训练' },
 ];
 
-/** 约 40 秒的连续朗读稿；比供应商 2 秒硬下限更长，用产品质量门换取稳定声线。 */
-const READING_SCRIPT = '我在这条街上开了十二年店。每天卷闸门一拉开，第一件事是把门口扫干净。来的大多是熟客，谁家孩子上几年级，谁最近换了工作，我都记得。做生意没有什么捷径，就是把每一件小事做稳，把每一句答应过的话做到。今天我把这段经历讲给你听，希望我的声音自然、清楚，也像平常说话一样有温度。以后，就让这个数字分身替我分享更多真实的故事。';
+/** 约 10 秒的自然朗读稿；石榴硬限制是 >2 秒，较长时长只作质量建议。 */
+const READING_SCRIPT = '我一直认真做着自己的事，也愿意把真实的经验分享给你。以后，就让这个数字分身用我平时说话的声音，讲更多值得讲的故事。';
 const CONSENT_SCRIPT = '我是本次出镜者本人，特此声明，我授权军师参谋部使用我提交的视频和声音资料，为我的账号创建数字分身，并仅在我的账号中使用它。';
 const FALLBACK_REQUIREMENTS = {
   consentText: CONSENT_SCRIPT, pollIntervalMs: POLL_INTERVAL_MS,
   consent: { vendorMinDurationSec: 5, vendorMaxDurationSec: 300, minDurationSec: 5, recommendedMinDurationSec: 8, recommendedMaxDurationSec: 20, maxDurationSec: 30, vendorMaxBytes: 200 * 1024 * 1024, maxBytes: 100 * 1024 * 1024, vendorFormats: ['mp4', 'mov'], formats: ['mp4', 'mov'] },
-  avatar: { vendorMinDurationSec: 5, vendorMaxDurationSec: 300, minDurationSec: 15, recommendedMinDurationSec: 20, recommendedMaxDurationSec: 60, maxDurationSec: 300, vendorMaxBytes: 200 * 1024 * 1024, maxBytes: 100 * 1024 * 1024, vendorFormats: ['mp4', 'mov'], formats: ['mp4', 'mov'] },
-  voice: { vendorMinDurationSec: 2, vendorMaxDurationSec: 0, minDurationSec: 20, recommendedMinDurationSec: 30, recommendedMaxDurationSec: 60, maxDurationSec: 120, vendorMaxBytes: 20 * 1024 * 1024, maxBytes: 20 * 1024 * 1024, vendorFormats: ['wav', 'mp3', 'ogg', 'm4a', 'aac', 'pcm'], formats: ['wav', 'mp3', 'ogg', 'm4a', 'aac'] },
+  avatar: { vendorMinDurationSec: 5, vendorMaxDurationSec: 300, minDurationSec: 5, recommendedMinDurationSec: 10, recommendedMaxDurationSec: 20, maxDurationSec: 300, vendorMaxBytes: 200 * 1024 * 1024, maxBytes: 100 * 1024 * 1024, vendorFormats: ['mp4', 'mov'], formats: ['mp4', 'mov'] },
+  voice: { vendorMinDurationSec: 2, vendorMaxDurationSec: 0, minDurationSec: 3, recommendedMinDurationSec: 8, recommendedMaxDurationSec: 15, maxDurationSec: 120, vendorMaxBytes: 20 * 1024 * 1024, maxBytes: 20 * 1024 * 1024, vendorFormats: ['wav', 'mp3', 'ogg', 'm4a', 'aac', 'pcm'], formats: ['wav', 'mp3', 'ogg', 'm4a', 'aac'] },
 };
 
 Page({
@@ -191,7 +191,7 @@ Page({
     this.recorder = manager;
     manager.onStop((res) => {
       this.stopRecordTimer();
-      const file = { path: res.tempFilePath, duration: Math.round((res.duration || 0) / 1000), size: res.fileSize || 0 };
+      const file = { path: res.tempFilePath, duration: (res.duration || 0) / 1000, size: res.fileSize || 0 };
       if (!this.validateCapture('voice', file)) { this.setData({ recording: false, voiceFile: null }); return; }
       this.setData({ recording: false, voiceFile: file });
     });

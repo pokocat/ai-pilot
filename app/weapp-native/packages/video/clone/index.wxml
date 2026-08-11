@@ -49,7 +49,7 @@
       <!-- ② 形象采集 -->
       <block wx:elif="{{step === 2}}">
         <text class="cl-h">第 2 步 · 拍你的形象</text>
-        <text class="cl-s">上半身放进取景框，自然说话 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒。</text>
+        <text class="cl-s">上半身放进取景框，录满 {{requirements.avatar.minDurationSec}} 秒即可提交；想让动作更自然，建议录 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒。</text>
 
         <view class="vd-portrait cl-frame">
           <view wx:if="{{!faceFile}}" class="inner cl-frame-empty"><text class="cf-text">上半身放进取景框</text></view>
@@ -60,7 +60,7 @@
           <text class="ci-title">拍好这几点，分身更像你</text>
           <text class="ci-row">· 正脸看镜头，手机放稳，别晃</text>
           <text class="ci-row">· 光打在脸上，窗户在你前面，不要背光</text>
-          <text class="ci-row">· 至少连续 {{requirements.avatar.minDurationSec}} 秒，建议 {{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒</text>
+          <text class="ci-row">· {{requirements.avatar.minDurationSec}} 秒即可提交，{{requirements.avatar.recommendedMinDurationSec}}–{{requirements.avatar.recommendedMaxDurationSec}} 秒只是效果建议</text>
           <text class="ci-row">· 使用 MP4/MOV、H.264，短边至少 360p</text>
           <text class="ci-row">· 别戴口罩、墨镜、帽子</text>
         </view>
@@ -81,13 +81,13 @@
         <text class="cl-s">照着屏幕念一遍就行，念完你的分身就会用这个声音说话。</text>
 
         <view class="cl-reading vd-card">
-          <text class="cr-label">念这段 · 约 40 秒（至少 {{requirements.voice.minDurationSec}} 秒）</text>
+          <text class="cr-label">念这段 · 约 10 秒（录满 {{requirements.voice.minDurationSec}} 秒即可提交）</text>
           <text class="cr-script">{{readingScript}}</text>
         </view>
 
         <view class="cl-recorder">
           <text class="cl-timer">{{recordSeconds}}s</text>
-          <text class="cl-timer-hint">/ 建议 {{requirements.voice.recommendedMinDurationSec}}–{{requirements.voice.recommendedMaxDurationSec}}s</text>
+          <text class="cl-timer-hint">/ {{requirements.voice.minDurationSec}}s 可提交 · 建议 {{requirements.voice.recommendedMinDurationSec}}–{{requirements.voice.recommendedMaxDurationSec}}s</text>
         </view>
 
         <view class="cl-mic {{recording ? 'on' : ''}}" bindtap="toggleRecord">

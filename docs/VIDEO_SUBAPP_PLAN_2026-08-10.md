@@ -12,7 +12,7 @@
 - 军师 BFF 已落地 `/api/video/**`、service-token 身份桥、`externalOwnerId` 隔离、SSRF/重定向防护、限流、文本审核，以及积分 `hold → settle/refund` 幂等状态机；同一请求并发只允许一个请求创建 AIStar 任务。
 - AIStar 已落地独立 `clip_template / clip_project / clip_render_job / clip_asset` 域、OpenAPI、管理员模板与 preset 上传、30 天回收、数据库租约 worker 和 stale reaper。Scheme A 已定：AIStar 不扣用户钱包，只记录军师报价与供应商成本事实。
 - 石榴官方 API v1 已接真实授权视频、speaker/avatar 训练、V2 TTS、V2 音频驱动出片、状态轮询与删除；上游时效成片会立即转存我方持久存储。所有非尾段先生成同一 V2 speaker 音频，avatar 和 b-roll 共用该音频策略，不再混用文本直出的内嵌 TTS。
-- 新增采集 requirements：授权视频 5–30 秒、形象视频 15–300 秒、声音 20–120 秒；客户端显示建议区间并前检时长/大小，BFF 验 MIME/大小，AIStar 以 ffprobe 验 H.264、360p–4K、音轨与真实时长。石榴支持的 24k 单声道 PCM 只列在供应商格式中，当前小程序产品上传不开放 PCM。授权 `authId` 仅表述为声明已受理，不冒充实名认证。
+- 采集 requirements 已按石榴官方硬门纠偏：授权/形象视频均为至少 5 秒，声音真实时长必须超过 2 秒（端上按整秒提示至少 3 秒）；8–15 秒声音与 10–20 秒形象仅作效果建议，不阻断提交。客户端前检时长/大小，BFF 验 MIME/大小，AIStar 以 ffprobe 验 H.264、360p–4K、音轨与真实时长。石榴支持的 24k 单声道 PCM 只列在供应商格式中，当前小程序产品上传不开放 PCM。授权 `authId` 仅表述为声明已受理，不冒充实名认证。
 - 军师 BFF 已实现阿里云内容安全增强版图片/视频/语音审核：本地文件通过官方临时 OSS 凭证上传，图片同步判定，视频/语音轮询异步任务；只放行 `none/low`，`medium/high`、配置/权限/欠费、超时和异常返回全部 fail-closed。测试阶段隔离预发显式设置 `CLIP_MEDIA_MODERATION_BYPASS=true`，仍校验媒体类型并记录 `user.video.media.moderation.bypassed` 审计；production 启动硬拒绝该开关。待正确账号开通内容安全并授权专用身份后，再关闭旁路做本人素材验收。
 - AIStar v0.113 预发已完成逐段 avatar/b-roll 标准化、真实 TTS 时长、H.264/AAC 多段总装、可选低音量 BGM、字幕与全程 AI 标识、三套模板各自的运行时固定品牌尾卡、最终音轨 -16 LUFS / -1.5 dBTP 归一、平均亮度/综合响度/真峰值失败关闭和作品缩略图。预发宿主 180 秒 720×1280 合成探针得到平均亮度 125.50、-16.05 LUFS、单音轨并通过解析；这只证明宿主编解码/滤镜链路，不替代本人授权真实长片压力验收。
 - 预发采用同机隔离拓扑：军师 `junshi-api-preprod :4001` 通过独立 service token 回源 `aistareco-clip-preprod 127.0.0.1:8081`，公网仅暴露预发 BFF 和 `/clip_preprod/cdn|files/`，AIStar 生产未修改。

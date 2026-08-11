@@ -46,11 +46,14 @@ test('快出片纯 mock 会话自带可跑完整出片链路的演示额度', ()
   assert.ok(mock.creditBalance() > mostExpensive);
 });
 
-test('快出片采集要求区分石榴硬限制与小程序实际支持格式', async () => {
+test('快出片采集硬门对齐石榴官方下限，较长时长只作建议', async () => {
   const requirements = await mock.avatarRequirements();
   assert.equal(requirements.consent.vendorMinDurationSec, 5);
-  assert.equal(requirements.avatar.minDurationSec, 15);
-  assert.equal(requirements.voice.minDurationSec, 20);
+  assert.equal(requirements.avatar.minDurationSec, 5);
+  assert.equal(requirements.avatar.recommendedMinDurationSec, 10);
+  assert.equal(requirements.voice.vendorMinDurationSec, 2);
+  assert.equal(requirements.voice.minDurationSec, 3);
+  assert.equal(requirements.voice.recommendedMinDurationSec, 8);
   assert.ok(requirements.voice.vendorFormats.includes('pcm'));
   assert.ok(!requirements.voice.formats.includes('pcm'));
   assert.match(requirements.consentText, /授权军师参谋部/);
