@@ -196,7 +196,8 @@ Page({
       forceDetails: forces.map((item) => ({
         kind: item.kind,
         label: `${item.name} · ${item.levelLabel}`,
-        title: `${item.conclusion}，${item.tactic}`,
+        // title 只放结论——打法已有独立的「打法：」行，拼进标题会整段重复且标点错乱（截图实证）。
+        title: item.conclusion,
         body: item.note,
         tactic: `打法：${item.tactic}`,
         tacticTone: item.tacticTone,
@@ -230,10 +231,16 @@ Page({
   requireLogin() { if (store.isAuthed()) return true; this.setData({ showLogin: true }); return false; },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false, authed: true }); this.load(); },
-  openEvidence() { this.setData({ evidenceOpen: true }); },
-  closeEvidence() { this.setData({ evidenceOpen: false }); },
-  openReview() { if (this.requireLogin()) this.setData({ reviewOpen: true }); },
-  closeReview() { this.setData({ reviewOpen: false }); },
+  // 三个抽屉都是组件式全屏层：必须走 store.setOverlay 隐藏自定义底栏——
+  // 单纯 z-index 压不过微信独立 custom tabbar 层（AGENTS §7.2，agent-unlock 踩过）。
+  _sheet(field, open) {
+    store.setOverlay(open, `battle-${field}`);
+    this.setData({ [field]: open });
+  },
+  openEvidence() { this._sheet('evidenceOpen', true); },
+  closeEvidence() { this._sheet('evidenceOpen', false); },
+  openReview() { if (this.requireLogin()) this._sheet('reviewOpen', true); },
+  closeReview() { this._sheet('reviewOpen', false); },
   goOnboarding() {
     try {
       const pages = getCurrentPages();
@@ -259,8 +266,15 @@ Page({
     catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '刷新失败' }); }
     finally { this.setData({ refreshing: false }); }
   },
-  openForces() { if (this.data.forces.length) this.setData({ forcesOpen: true }); },
-  closeForces() { this.setData({ forcesOpen: false }); },
+  openForces() { if (this.data.forces.length) this._sheet('forcesOpen', true); },
+  closeForces() { this._sheet('forcesOpen', false); },
+  onHide() { this._closeSheets(); },
+  onUnload() { this._closeSheets(); },
+  _closeSheets() {
+    for (const field of ['forcesOpen', 'evidenceOpen', 'reviewOpen']) {
+      if (this.data[field]) this._sheet(field, false);
+    }
+  },
   stop() {},
   askRisks() {
     if (!this.requireLogin()) return;

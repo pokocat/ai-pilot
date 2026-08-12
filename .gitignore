@@ -70,3 +70,4 @@ coverage/
 *.key
 
 loadtest
+ui-review/
