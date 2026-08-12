@@ -63,7 +63,7 @@ export async function refundVideoHold(holdId: string, lastJobStatus = 'failed') 
       hold.tenantId,
       hold.userId,
       hold.credits,
-      '快出片 · 失败退回',
+      ['cancelled', 'work_deleted'].includes(lastJobStatus) ? '快出片 · 取消退回' : '快出片 · 失败退回',
       `video:refund:${hold.id}`,
       tx,
     );

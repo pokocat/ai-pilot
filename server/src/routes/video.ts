@@ -9,7 +9,7 @@ import { assertVideoMediaModerationReady, assertVideoProjectContent, assertVideo
 import { generateClipScriptTurn } from '../services/video/scriptChat.js';
 import type {
   ClipAsset, ClipAvatarView, ClipCaptureRequirements, ClipConsentResult, ClipEstimate, ClipJobView, ClipProject,
-  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoiceView, ClipWork,
+  ClipRenderRequest, ClipRenderResult, ClipTemplate, ClipVoiceView, ClipWork, ClipWorkDeleteResult,
 } from '../../../shared/contracts';
 
 type Identity = { userId: string; tenantId: string };
@@ -281,6 +281,18 @@ export async function videoRoutes(app: FastifyInstance) {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
     try { assertId(req.params.id); return await aidramaJson<ClipWork>(`/api/me/clip/works/${enc(req.params.id)}`, identityOf(user)); }
     catch (e) { return sendErr(reply, e, 404); }
+  });
+  app.delete<{ Params: { id: string } }>('/video/works/:id', async (req, reply) => {
+    const user = await resolveUser(req.headers['x-user-id'] as string | undefined);
+    try {
+      assertId(req.params.id);
+      const result = await aidramaJson<ClipWorkDeleteResult>(`/api/me/clip/works/${enc(req.params.id)}`, identityOf(user), { method: 'DELETE' });
+      const cancelledJobIds = Array.isArray(result.cancelledJobIds) ? result.cancelledJobIds.filter(validId) : [];
+      for (const jobId of cancelledJobIds) await settleVideoJob(jobId, 'cancelled');
+      await recordAudit({ tenantId: user.tenantId, userId: user.id, action: 'user.video.work.delete', payload: { projectId: req.params.id, cancelledJobIds } });
+      return result;
+    }
+    catch (e) { return sendErr(reply, e, 500); }
   });
   app.post<{ Params: { id: string }; Body: { platform?: string } }>('/video/works/:id/publish', async (req, reply) => {
     const user = await resolveUser(req.headers['x-user-id'] as string | undefined);

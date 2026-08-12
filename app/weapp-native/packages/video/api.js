@@ -82,6 +82,9 @@ const api = {
   /* ── 作品 ── */
   works: () => (useMock() ? mock.works() : call('/works')),
   work: (id) => (useMock() ? mock.work(id) : call(`/works/${q(id)}`)),
+  deleteWork: (id) => (useMock()
+    ? mock.deleteWork(id)
+    : call(`/works/${q(id)}`, { method: 'DELETE' })),
   publish: (id, platform) => (useMock()
     ? mock.publish(id, platform)
     : call(`/works/${q(id)}/publish`, { method: 'POST', data: { platform } })),

@@ -2435,8 +2435,13 @@ export interface ClipAsset {
 export interface ClipWork {
   id: string; projectId?: string | null; title: string; status: 'generating' | 'done' | 'published';
   durationSec: number; avatarSec: number; credits?: number; videoUrl?: string | null; thumbnailUrl?: string | null;
+  /** 本次生成任务创建时间；生成中的作品据此显示开始时间。 */
+  createdAt: string;
+  /** 成片实际完成时间；生成中为空，历史兼容数据可由服务端用最后更新时间补齐。 */
+  generatedAt?: string | null;
   aiWatermark?: boolean;
 }
+export interface ClipWorkDeleteResult { ok: boolean; cancelledJobIds: string[]; }
 export interface ClipAvatarView {
   id: string; name: string;
   imageStatus: 'none' | 'training' | 'ready' | 'failed'; voiceStatus: 'none' | 'training' | 'ready' | 'failed';

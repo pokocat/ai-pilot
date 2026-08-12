@@ -24,7 +24,14 @@
   padding: 2px 5px; border-radius: 4px;
 }
 .wk-body-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.wk-title { font-family: var(--vd-serif); font-size: 16px; font-weight: 600; }
+.wk-title-row { min-height: 44px; display: flex; align-items: flex-start; gap: 8px; margin: -8px -8px -4px 0; }
+.wk-title { flex: 1; min-width: 0; padding-top: 9px; font-family: var(--vd-serif); font-size: 16px; font-weight: 600; }
+.wk-delete {
+  width: 48px; min-height: 44px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--vd-faint); font-size: 12px;
+}
+.wk-delete:active { color: var(--vd-danger); background: var(--vd-danger-soft); border-radius: 12px; }
 .wk-progress { font-size: 12px; color: var(--vd-avatar-deep); font-weight: 600; }
 .wk-bar { height: 5px; border-radius: 3px; background: var(--vd-sunken); overflow: hidden; }
 .wk-bar .fill { display: block; height: 100%; background: var(--vd-avatar); }

@@ -69,6 +69,15 @@ before(async () => {
     if (url.pathname === '/api/me/clip/avatars/DH-scene' && init?.method === 'DELETE') {
       return json({ ok: true });
     }
+    if (url.pathname === '/api/me/clip/works' && (!init?.method || init.method === 'GET')) {
+      return json([{
+        id: 'cp_test', projectId: 'cp_test', title: '测试作品', status: 'done', durationSec: 12, avatarSec: 4,
+        createdAt: '2026-08-11T18:01:02Z', generatedAt: '2026-08-11T18:04:05Z', aiWatermark: false,
+      }]);
+    }
+    if (url.pathname === '/api/me/clip/works/cp_test' && init?.method === 'DELETE') {
+      return json({ ok: true, cancelledJobIds: ['cj_test'] });
+    }
     return json({ error: 'not found', code: 'CLIP_NOT_FOUND' }, 404);
   };
   await getApp();
@@ -114,6 +123,31 @@ test('视频 BFF 返回多数字人和可复用声音，并支持按分身删除
   const deleted = await api('DELETE', '/api/video/avatars/DH-scene', { token });
   assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
   assert.equal(deleted.body.ok, true);
+});
+
+test('视频 BFF 透传作品生成时间并支持删除作品', async () => {
+  const token = await login(uniquePhone(), '作品管理用户');
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: token }, select: { tenantId: true } });
+  await grantCredits(user.tenantId, token, 20, '作品删除退款测试');
+  const beforeBalance = await getBalance(token);
+  const works = await api('GET', '/api/video/works', { token });
+  assert.equal(works.status, 200, JSON.stringify(works.body));
+  assert.equal(works.body[0].createdAt, '2026-08-11T18:01:02Z');
+  assert.equal(works.body[0].generatedAt, '2026-08-11T18:04:05Z');
+
+  const render = await api('POST', '/api/video/projects/cp_test/render', {
+    token,
+    body: { clientRequestId: 'clip:test:delete-001', expectedCredits: 6 },
+  });
+  assert.equal(render.status, 200, JSON.stringify(render.body));
+  assert.equal(await getBalance(token), beforeBalance - 6);
+
+  const deleted = await api('DELETE', '/api/video/works/cp_test', { token });
+  assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+  assert.equal(deleted.body.ok, true);
+  assert.deepEqual(deleted.body.cancelledJobIds, ['cj_test']);
+  assert.equal(await getBalance(token), beforeBalance, '删除生成中作品必须立即退回未结算预扣');
+  assert.equal(await prisma.videoCreditHold.count({ where: { userId: token, status: 'refunded' } }), 1);
 });
 
 test('视频 BFF 原样保存默认关闭的 AI 水印偏好', async () => {

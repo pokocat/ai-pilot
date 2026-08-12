@@ -43,7 +43,11 @@
           </view>
 
           <view class="wk-body-col">
-            <text class="wk-title">{{item.title}}</text>
+            <view class="wk-title-row">
+              <text class="wk-title">{{item.title}}</text>
+              <view class="wk-delete" data-id="{{item.id}}" catchtap="removeWork">删除</view>
+            </view>
+            <text wx:if="{{item.createdText}}" class="wk-meta">{{item.createdText}}</text>
 
             <block wx:if="{{item.status === 'generating'}}">
               <text class="wk-progress">正在出片 {{item.progress}}% · {{item.etaText}}</text>
@@ -52,14 +56,13 @@
             </block>
 
             <block wx:elif="{{item.status === 'published'}}">
-              <text class="wk-meta">{{item.createdText}}</text>
               <view wx:for="{{item.publishStats}}" wx:for-item="stat" wx:key="platform" class="wk-stat">
                 <text class="ws-p">{{stat.platform}}</text><text class="ws-t">{{stat.text}}</text>
               </view>
             </block>
 
             <block wx:else>
-              <text class="wk-meta">{{item.createdText}} · 出镜 {{item.avatarSec}} 秒</text>
+              <text class="wk-note">分身出镜 {{item.avatarSec}} 秒</text>
               <text class="wk-note">已扣 {{item.credits}} 积分</text>
             </block>
           </view>

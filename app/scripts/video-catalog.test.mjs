@@ -142,11 +142,29 @@ test('快出片移动视觉层级固定主任务、拇指区和高风险确认�
 test('我的作品默认展示全部，并为已完成作品显示真实预览入口', () => {
   const source = fs.readFileSync(path.join(videoRoot, 'works/index.js'), 'utf8');
   const view = fs.readFileSync(path.join(videoRoot, 'works/index.wxml'), 'utf8');
+  const apiSource = fs.readFileSync(path.join(videoRoot, 'api.js'), 'utf8');
+  const bffSource = fs.readFileSync(path.resolve(here, '../../server/src/routes/video.ts'), 'utf8');
   assert.match(source, /\{ key: 'all', label: '全部' \}/);
   assert.match(source, /active: 'all'/);
   assert.match(source, /item\.status === 'done' \|\| item\.status === 'published'/);
+  assert.match(source, /model\.workTimeText\(item\)/);
+  assert.match(source, /host\.confirm\(/);
+  assert.match(source, /api\.deleteWork\(id\)/);
   assert.match(view, /wx:if="\{\{item\.thumbnailUrl\}\}"/);
   assert.match(view, /name="play"/);
+  assert.match(view, /class="wk-meta">\{\{item\.createdText\}\}/);
+  assert.match(view, /catchtap="removeWork"/);
+  assert.match(apiSource, /deleteWork: \(id\)/);
+  assert.match(bffSource, /app\.delete<\{ Params: \{ id: string \} \}>\('\/video\/works\/:id'/);
+});
+
+test('作品时间保留到分钟并区分开始生成和完成', () => {
+  assert.match(model.workTimeText({ createdAt: '2026-08-11T18:21:00+08:00' }), /^开始生成 · /);
+  assert.match(model.workTimeText({
+    createdAt: '2026-08-11T18:21:00+08:00',
+    generatedAt: '2026-08-11T18:24:00+08:00',
+  }), /^生成时间 · /);
+  assert.match(model.formatWorkTimestamp('2026-08-11T18:24:00+08:00'), /:\d{2}$/);
 });
 
 test('模板详情、工程初始镜头和固定片段共用同一时长真源', () => {

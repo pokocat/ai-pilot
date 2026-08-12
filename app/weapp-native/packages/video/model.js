@@ -85,6 +85,24 @@ function formatDuration(totalSec) {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
+/** 作品时间使用设备所在时区；今年省略年份，但始终保留分钟，便于区分同日多次生成。 */
+function formatWorkTimestamp(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const year = date.getFullYear() === now.getFullYear() ? '' : `${date.getFullYear()}年`;
+  return `${year}${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function workTimeText(work) {
+  const item = work || {};
+  const generated = formatWorkTimestamp(item.generatedAt);
+  if (generated) return `生成时间 · ${generated}`;
+  const created = formatWorkTimestamp(item.createdAt);
+  return created ? `开始生成 · ${created}` : '';
+}
+
 /** 微信临时路径/长哈希不是用户可读名称；所有素材展示统一收口到这里。 */
 function assetDisplayLabel(label, kind) {
   const value = String(label || '').trim();
@@ -379,7 +397,7 @@ function stageRows(stage, progress) {
 
 module.exports = {
   ROLE, STAGES,
-  estimateSeconds, segmentSeconds, formatDuration, assetDisplayLabel,
+  estimateSeconds, segmentSeconds, formatDuration, formatWorkTimestamp, workTimeText, assetDisplayLabel,
   summarize, estimateCredits, toggleRole, commitSegmentText, preflight, stageRows,
   defaultShots, ensureShots, materializeShots, toggleShotRole, mergeShotRange, splitShot,
   regroupShotSelection, mergeAdjacentShots,

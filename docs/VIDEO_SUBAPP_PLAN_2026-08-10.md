@@ -12,7 +12,7 @@
 - 端上只保留 `mock / bff` 两种数据源；删除会把军师 JWT 发往第三方域名的 `direct` 形态。报价条可本地即时反馈，但提交前必须取得服务端权威报价并原样回传，报价变化返回 409 且不扣积分、不建任务。
 - 文案首步新增连续 AI 对话：模型结合模板、当前稿和最近消息追问或出稿，`scriptChat` 随项目持久化；生成输出会主动把碎句收成完整语义段。文案 `segments` 与视觉 `shots` 已分层，配画面支持圈选连续句范围共用同一素材，默认相邻 b-roll 每 3 句一镜；报价、preflight、worker 与总装均按 shot 聚合。
 - 军师 BFF 已落地 `/api/video/**`、service-token 身份桥、`externalOwnerId` 隔离、SSRF/重定向防护、限流、文本审核，以及积分 `hold → settle/refund` 幂等状态机；同一请求并发只允许一个请求创建 AIStar 任务。
-- AIStar 已落地独立 `clip_template / clip_project / clip_render_job / clip_asset` 域、OpenAPI、管理员模板与 preset 上传、30 天回收、数据库租约 worker 和 stale reaper。Scheme A 已定：AIStar 不扣用户钱包，只记录军师报价与供应商成本事实。
+- AIStar 已落地独立 `clip_template / clip_project / clip_render_job / clip_asset` 域、OpenAPI、管理员模板与 preset 上传、30 天回收、数据库租约 worker 和 stale reaper。作品列表回传任务开始/成片完成两个时间，用户可删除完成作品或取消并删除生成中任务；删除后立即退出列表并进入同一 30 天回收机制。Scheme A 已定：AIStar 不扣用户钱包，只记录军师报价与供应商成本事实。
 - 石榴官方 API v1 已接 speaker/avatar 训练、可选授权视频、V2 TTS、V2 音频驱动出片、状态轮询与删除；Train Avatar Model 的 `authId` 不再被误做必填。上游时效成片会立即转存我方持久存储。所有非尾段先生成同一 V2 speaker 音频，avatar 和 b-roll 共用该音频策略，不再混用文本直出的内嵌 TTS。
 - 数字人创建主链按官方契约收成“一段视频 → Avatar 训练”：`speakerId` 只是制作 demo 的选填参数，未克隆声音时也必须立即调用 `/avatar/create`。AIStar 会 best-effort 从视频中提取原声创建基础 V2 speaker，任何提取/声音失败都不回滚形象；专门采集声音是独立增强。出片前仍需可用 speaker，视频原声不可用时提示用户补录，而不是把该限制前置成创建门槛。
 - 采集 requirements 已按石榴官方硬门纠偏：授权/形象视频均为至少 5 秒，声音真实时长必须超过 2 秒（端上按整秒提示至少 3 秒）；8–15 秒声音与 10–20 秒形象仅作效果建议，不阻断提交。客户端前检时长/大小，BFF 验 MIME/大小，AIStar 以 ffprobe 验 H.264、360p–4K、音轨与真实时长。石榴支持的 24k 单声道 PCM 只列在供应商格式中，当前小程序产品上传不开放 PCM。授权 `authId` 仅表述为声明已受理，不冒充实名认证。
@@ -63,7 +63,7 @@ app/weapp-native/packages/video/
 | 08 正在出片 | `rendering/` | 做实（轮询 + 四阶段） |
 | 09 成片详情 | `work/` | 做实；播放器待真实视频源，代发是桩 |
 | 10 我的素材库 | `assets/` | 做实（含从配画面屏跳来的挑选态） |
-| 11 我的作品 | `works/` | 做实（三段 + 空态 + 生成中轮询） |
+| 11 我的作品 | `works/` | 做实（默认全部 + 状态筛选 + 缩略图 + 分钟级生成时间 + 二次确认删除 + 生成中轮询） |
 | 12 我的 | `avatar/` | 只做分身管理；**积分部分不实现**，跳军师 credits 页 |
 
 「做实」= 交互链路通、mock 态可完整走完；**所有服务端行为都是桩**。

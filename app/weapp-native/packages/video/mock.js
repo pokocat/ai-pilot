@@ -68,15 +68,18 @@ const ASSETS = [
 const WORKS = [
   {
     id: 'cw_mock_1', title: '为实体发声 · 张姐', status: 'generating',
-    progress: 65, stage: 'avatar', etaText: '还要 3 分钟', durationSec: 162, avatarSec: 38, aiWatermark: false,
+    progress: 65, stage: 'avatar', etaText: '还要 3 分钟', durationSec: 162, avatarSec: 38,
+    createdAt: '2026-08-11T18:21:00+08:00', generatedAt: null, aiWatermark: false,
   },
   {
     id: 'cw_mock_2', title: '今天开门了 · 周三', status: 'done',
-    durationSec: 80, avatarSec: 12, createdText: '8 月 6 日出片', credits: 32, aiWatermark: false,
+    durationSec: 80, avatarSec: 12, createdAt: '2026-08-06T09:12:00+08:00',
+    generatedAt: '2026-08-06T09:15:00+08:00', credits: 32, aiWatermark: false,
   },
   {
     id: 'cw_mock_3', title: '为实体发声 · 首条', status: 'published',
-    durationSec: 162, avatarSec: 38, createdText: '7 月 29 日出片', credits: 68, aiWatermark: false,
+    durationSec: 162, avatarSec: 38, createdAt: '2026-07-29T15:26:00+08:00',
+    generatedAt: '2026-07-29T15:31:00+08:00', credits: 68, aiWatermark: false,
     publishStats: [
       { platform: '抖音', text: '1.2 万播放 · 86 赞' },
       { platform: '视频号', text: '3400 播放 · 12 转发' },
@@ -254,7 +257,15 @@ module.exports = {
   },
 
   works: () => delay(clone(works)),
-  work: (id) => delay(clone(works.find((item) => item.id === id) || works[1])),
+  work: (id) => {
+    const item = works.find((row) => row.id === id);
+    return item ? delay(clone(item)) : Promise.reject(Object.assign(new Error('作品不存在'), { code: 'CLIP_WORK_NOT_FOUND' }));
+  },
+  deleteWork: (id) => {
+    if (!works.some((item) => item.id === id)) return Promise.reject(Object.assign(new Error('作品不存在'), { code: 'CLIP_WORK_NOT_FOUND' }));
+    works = works.filter((item) => item.id !== id);
+    return delay({ ok: true });
+  },
   publish: (id, platform) => {
     const index = works.findIndex((item) => item.id === id);
     if (index < 0) return Promise.reject(Object.assign(new Error('作品不存在'), { code: 'CLIP_WORK_NOT_FOUND' }));

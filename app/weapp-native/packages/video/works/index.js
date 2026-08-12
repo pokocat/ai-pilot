@@ -44,17 +44,23 @@ Page({
       .then((works) => {
         const decorated = works.map((item) => Object.assign({}, item, {
           durationText: model.formatDuration(item.durationSec),
+          createdText: model.workTimeText(item),
         }));
-        const counts = {
-          all: decorated.length,
-          generating: decorated.filter((i) => i.status === 'generating').length,
-          done: decorated.filter((i) => i.status === 'done' || i.status === 'published').length,
-        };
-        this.setData({ loading: false, works: decorated, counts });
-        this.applyFilter();
-        if (!counts.generating) this.stopPolling(); else if (!this.timer) this.startPolling();
+        this.setWorks(decorated);
       })
       .catch(() => this.setData({ loading: false }));
+  },
+
+  setWorks(works) {
+    const rows = Array.isArray(works) ? works : [];
+    const counts = {
+      all: rows.length,
+      generating: rows.filter((i) => i.status === 'generating').length,
+      done: rows.filter((i) => i.status === 'done' || i.status === 'published').length,
+    };
+    this.setData({ loading: false, works: rows, counts });
+    this.applyFilter();
+    if (!counts.generating) this.stopPolling(); else if (!this.timer) this.startPolling();
   },
 
   applyFilter() {
@@ -74,6 +80,35 @@ Page({
     if (!work) return;
     if (work.status === 'generating') { host.toast('还在出片，好了会通知你'); return; }
     host.go(`work/index?workId=${encodeURIComponent(id)}`);
+  },
+
+  removeWork(event) {
+    const id = String(event.currentTarget.dataset.id || '');
+    const work = this.data.works.find((item) => item.id === id);
+    if (!work) return;
+    const generating = work.status === 'generating';
+    host.confirm({
+      title: generating ? '取消并删除作品？' : '删除这个作品？',
+      content: generating
+        ? '删除后会取消正在生成的任务，并从作品集移除。'
+        : '删除后作品会从作品集移除，成片将无法再打开。',
+      confirmText: '删除',
+    }).then((confirmed) => {
+      if (!confirmed) return;
+      this.stopPolling();
+      host.loading('正在删除');
+      api.deleteWork(id)
+        .then(() => {
+          host.hideLoading();
+          this.setWorks(this.data.works.filter((item) => item.id !== id));
+          host.toast('作品已删除', 'success');
+        })
+        .catch((error) => {
+          host.hideLoading();
+          this.startPolling();
+          host.toast(error && error.message ? error.message : '删除失败');
+        });
+    });
   },
 
   pickTemplate() { host.back(); },
