@@ -11,6 +11,7 @@
 - `CLIP_MEDIA_MODERATION_BYPASS=true` 在 production 不再单独生效；必须同时显式设置 `CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION=true`，避免历史或误配值静默放开。
 - 临时放开只跳过外部图片/视频/语音机审，MIME、大小和后续 AIStar ffprobe 质量门不变；每个素材仍写 `user.video.media.moderation.bypassed`，production 的 provider 标为 `operator-bypass`。
 - 正式媒体机审接入后必须同时关闭两个开关；该测试旁路不代表审核、备案或发布合规完成。
+- 已部署生产 `ae99c3e` 并打开双开关：服务 active、`NRestarts=0`，公网 health/运营后台/H5 源站为 200、裸 IP 后台为 404、无新增错误日志；720×1280 本地探针图片上传与随即删除均为 200，审计 provider=`operator-bypass`。探针不创建训练/出片任务，不调用石榴、不消耗点数。
 
 ### 2026-08-12 · 快出片全链路合并并部署生产 · 影响面：军师小程序、军师 BFF、AIStar clip 域、模板、数字人、作品与 iOS 资料补全
 
