@@ -3,8 +3,8 @@ const store = require('../../../services/store');
 const { baseData } = require('../../../services/page');
 
 const STEP_ROLES = ['准备', '处理', '回写'];
-const ACTION_LABEL = { upload: '去智库上传', backfill: '回填面板', review: '发起复盘', topics: '智库能力', none: '去执行' };
-const ACTION_HINT = { upload: '上传后进入智库待整理区，再回写到军师判断。', backfill: '记录线索、咨询、成交，提交后进入今日复盘。', review: '填入完成数据，今晚复盘并调整明日军令。', topics: '去能力页找对应军师，把军令落到工具。', none: '按步骤推进这条军令，完成后回执行页打卡。' };
+const ACTION_LABEL = { upload: '去图籍上传', backfill: '回填面板', review: '发起复盘', topics: '锦囊手艺', none: '去执行' };
+const ACTION_HINT = { upload: '上传后进入智库待整理区，再回写到军师判断。', backfill: '记录线索、咨询、成交，提交后进入今日复盘。', review: '填入完成数据，今晚复盘并调整明日军令。', topics: '去锦囊挑一门手艺，把这条军令落成成品。', none: '按步骤推进这条军令，完成后回执行页打卡。' };
 
 Page({
   data: baseData({ loading: true, failed: false, order: null, no: 1, steps: [], metrics: [], actionLabel: '', actionHint: '', showLogin: false }),
@@ -25,5 +25,6 @@ Page({
     } catch (error) { const kind = store.handleApiError(error, { silent: true }); this.setData({ loading: false, failed: kind !== 'unauthorized', showLogin: kind === 'unauthorized' }); }
   },
   retry() { this.load(); },
-  runAction() { if (this._actionType === 'upload' || this._actionType === 'topics') wx.switchTab({ url: '/pages/thinktank/index' }); else wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/home/index' }) }); },
+  runAction() { if (this._actionType === 'upload') wx.switchTab({ url: '/pages/thinktank/index' });
+    else if (this._actionType === 'topics') wx.switchTab({ url: '/pages/pouch/index' }); else wx.navigateBack({ fail: () => wx.switchTab({ url: '/pages/home/index' }) }); },
 });

@@ -28,8 +28,9 @@
           </view>
         </view></scroll-view>
       </block>
-      <!-- 空态（游客或全无作品）：不催登录，只把人指回战局领军令。 -->
-      <view wx:elif="{{!loading}}" class="pouch-empty card">
+      <!-- 空态（游客或全无作品）：不催登录，只把人指回战局领军令。
+           取数失败时不出这张卡——上面已经有重试条，一边说「读不出来」一边说「还没有作品」是自相矛盾。 -->
+      <view wx:elif="{{!loading && !loadFailed}}" class="pouch-empty card">
         <text class="pe-t serif">还没有作品</text>
         <text class="pe-d">去战局领今日军令，能代笔的军师会给你配兵器。方案、海报、成片做出第一件，就归到这里。</text>
         <view class="pe-go" bindtap="goBattle"><text>去战局领今日军令</text><native-icon name="arrow" tone="green" size="14"></native-icon></view>
@@ -53,6 +54,6 @@
   <!-- 启用层：未启用的创意军师在这里付费启用（卡面不标价，价格只在这一刻出现），
        启用后直接进这位军师的对话。组件自己管 setOverlay。 -->
   <agent-unlock agent="{{unlockAgent}}" source="pouch" bindclose="closeUnlock" bindunlocked="agentUnlocked"></agent-unlock>
-  <login-sheet open="{{showLogin}}" reason="save" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
+  <login-sheet open="{{showLogin}}" reason="purchase" bindclose="closeLogin" bindloggedin="loggedIn"></login-sheet>
   <coach-marks></coach-marks>
 </view>

@@ -5,14 +5,14 @@ const { navTo } = require('../../../services/nav');
 
 const CATEGORIES = ['全部', '战略目标', '执行拆解', 'IP 增长', '个人成长', '企业经营', '组织管理', '知识资产', '数据增强'];
 const MODULES = [
-  { id: 'strategic-goals', icon: 'target', category: '战略目标', title: '3-5 年目标体系', desc: '把长期愿景拆成年度目标、季度战役、月度里程碑和本周动作。', status: '基础可用', tier: 'power', price: '80', priceIcon: true, depth: '深度推演按次产出', placement: '战局 / 执行', agentKey: 'strat', prompt: '帮我把 3-5 年目标拆成年度目标、季度战役、月度里程碑和本周动作。' },
-  { id: 'daily-command', icon: 'check', category: '执行拆解', title: '每日军令与周计划', desc: '方案定了，自动拆成每日任务、提醒、复盘和数据记录。', status: '已启用', tier: 'free', price: '基础版', depth: '自动排程属方案权益', placement: '执行', agentKey: 'general', prompt: '按我们最近定的方案，出今天的军令和本周计划。' },
-  { id: 'ip-os', icon: 'image', category: 'IP 增长', title: '创始人 IP 打造', desc: '定位、内容日历、选题库、AI 创作与发布复盘一体化。', status: '基础可用', tier: 'power', price: '60', priceIcon: true, depth: 'AI 创作发布按次产出', placement: '执行 / 智库', agentKey: 'ip', prompt: '帮我做一份创始人个人 IP 打造方案，从定位到选题库和发布日历。' },
-  { id: 'study-map', icon: 'crown', category: '个人成长', title: '年度学习与读书计划', desc: '围绕事业阶段生成学习主题、书单、训练任务和认知复盘。', status: '可添加', tier: 'single', price: '39/次', priceIcon: true, depth: '细化到每日训练需开通', placement: '执行 / 我的', agentKey: 'general', prompt: '围绕我当前的事业阶段，帮我生成一份年度学习与读书计划。' },
-  { id: 'enterprise-growth', icon: 'trend', category: '企业经营', title: '企业增长执行图', desc: '围绕获客、转化、复购、客单价和组织协作生成增长动作。', status: '基础可用', tier: 'plan', price: '方案权益', depth: '绑定经营数据后增强', placement: '战局 / 执行', agentKey: 'growth', prompt: '帮我生成一份企业增长执行图，覆盖获客、转化、复购和客单价。' },
+  { id: 'strategic-goals', icon: 'target', category: '战略目标', title: '3-5 年目标体系', desc: '把长期愿景拆成年度目标、季度战役、月度里程碑和本周动作。', status: '基础可用', tier: 'power', price: '80', priceIcon: true, depth: '深度推演按次产出', placement: '战局', agentKey: 'strat', prompt: '帮我把 3-5 年目标拆成年度目标、季度战役、月度里程碑和本周动作。' },
+  { id: 'daily-command', icon: 'check', category: '执行拆解', title: '每日军令与周计划', desc: '方案定了，自动拆成每日任务、提醒、复盘和数据记录。', status: '已启用', tier: 'free', price: '基础版', depth: '自动排程属方案权益', placement: '战局', agentKey: 'general', prompt: '按我们最近定的方案，出今天的军令和本周计划。' },
+  { id: 'ip-os', icon: 'image', category: 'IP 增长', title: '创始人 IP 打造', desc: '定位、内容日历、选题库、AI 创作与发布复盘一体化。', status: '基础可用', tier: 'power', price: '60', priceIcon: true, depth: 'AI 创作发布按次产出', placement: '战局 / 图籍', agentKey: 'ip', prompt: '帮我做一份创始人个人 IP 打造方案，从定位到选题库和发布日历。' },
+  { id: 'study-map', icon: 'crown', category: '个人成长', title: '年度学习与读书计划', desc: '围绕事业阶段生成学习主题、书单、训练任务和认知复盘。', status: '可添加', tier: 'single', price: '39/次', priceIcon: true, depth: '细化到每日训练需开通', placement: '战局 / 主公', agentKey: 'general', prompt: '围绕我当前的事业阶段，帮我生成一份年度学习与读书计划。' },
+  { id: 'enterprise-growth', icon: 'trend', category: '企业经营', title: '企业增长执行图', desc: '围绕获客、转化、复购、客单价和组织协作生成增长动作。', status: '基础可用', tier: 'plan', price: '方案权益', depth: '绑定经营数据后增强', placement: '战局', agentKey: 'growth', prompt: '帮我生成一份企业增长执行图，覆盖获客、转化、复购和客单价。' },
   { id: 'org-management', icon: 'layers', category: '组织管理', title: '组织与人才盘点', desc: '识别组织瓶颈、关键岗位、协作机制和管理节奏。', status: '可添加', tier: 'power', price: '90', priceIcon: true, depth: '深度组织诊断按次产出', placement: '战局', agentKey: 'org', prompt: '帮我做一次组织与人才盘点，找出组织瓶颈和关键岗位缺口。' },
-  { id: 'knowledge-base', icon: 'doc', category: '知识资产', title: '客户知识库', desc: '上传资料后由军师自动参考，判断更贴近真实业务。', status: '已启用', tier: 'free', price: '基础版', depth: '多资料交叉分析按次产出', placement: '智库' },
-  { id: 'data-bindings', icon: 'attach', category: '数据增强', title: '数据源绑定', desc: '绑定企业、店铺、内容账号、财务表和 CRM，让诊断从事实出发。', status: '待绑定', tier: 'single', price: '按数据源', depth: '部分数据源需单独开通', placement: '智库 / 我的' },
+  { id: 'knowledge-base', icon: 'doc', category: '知识资产', title: '客户知识库', desc: '上传资料后由军师自动参考，判断更贴近真实业务。', status: '已启用', tier: 'free', price: '基础版', depth: '多资料交叉分析按次产出', placement: '图籍' },
+  { id: 'data-bindings', icon: 'attach', category: '数据增强', title: '数据源绑定', desc: '绑定企业、店铺、内容账号、财务表和 CRM，让诊断从事实出发。', status: '待绑定', tier: 'single', price: '按数据源', depth: '部分数据源需单独开通', placement: '图籍 / 主公' },
 ].map((item) => Object.assign({}, item, { actionText: item.status === '已启用' ? '使用' : item.agentKey ? '启用' : '了解' }));
 const SKILLS = [
   { id: 'forces', icon: 'flow', title: '三势初判', desc: '天势、市势、人势合参，先定局再落子。', status: '默认启用', tier: 'free', cost: '基础诊断', prompt: '用三势判断（天势、市势、人势）帮我重新看一遍当前局势。' },

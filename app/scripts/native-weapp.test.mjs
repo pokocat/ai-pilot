@@ -377,8 +377,10 @@ test('服务端下发给端上的页面路由必须真实存在（页面搬家�
   const serverRoot = path.join(appRoot, '..', 'server', 'src');
   const dead = [];
   for (const file of walk(serverRoot).filter((item) => item.endsWith('.ts'))) {
-    for (const found of read(file).matchAll(/['`"](\/(?:pages|packages)\/[A-Za-z0-9_/-]+)/g)) {
-      if (!routes.has(found[1])) dead.push(`${path.relative(serverRoot, file)} → ${found[1]}`);
+    // 前导斜杠可有可无：订阅消息的默认落地页就写成 'pages/studio/index'（无斜杠），
+    // 旧正则要求引号紧跟 `/`，于是它逃过了扫描——一旦那页被删注册，落地页会静默失效。
+    for (const found of read(file).matchAll(/['`"]\/?((?:pages|packages)\/[A-Za-z0-9_/-]+)/g)) {
+      if (!routes.has(`/${found[1]}`)) dead.push(`${path.relative(serverRoot, file)} → ${found[1]}`);
     }
   }
   assert.deepEqual(dead, [], `服务端下发了 app.json 里不存在的页面路由：\n${dead.join('\n')}`);

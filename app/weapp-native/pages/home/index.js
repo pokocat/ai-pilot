@@ -164,7 +164,7 @@ Page({
     metrics: [{ value: '—', label: '案卷完整度', tone: '' }, { value: '0', label: '待补资料', tone: 'warn' }, { value: '—', label: '风险锁', tone: '' }],
     forces: [], questions: [], saying: '谋定而后动，先把主要矛盾看清。', sayingDate: '', dossierTitle: '', refreshing: false,
     // —— 军令区（原点兵，按设计稿收敛：军令带兵器 → 回填 → 复盘抽屉） ——
-    streak: 0, reminders: [], pendingDecisions: 0, hasDossier: false, dossierSource: '',
+    streak: 0, reminders: [], hasDossier: false,
     // 日 / 周两段：日计划做今天，周计划看连续性——打卡机制的两半，缺一半就没有「别断」的压力。
     segments: ['今日军令', '本周'], segment: 0,
     weekGroups: [], weekStrip: [], weekDone: 0, weekTotal: 0,
@@ -190,6 +190,7 @@ Page({
     this.load();
   },
   async load() {
+    if (this.data.loading) return;
     this.setData({ loading: true });
     api.todaySaying().then((value) => this.setData({ saying: String(value.text || this.data.saying).replace(/<\/?em>/g, ''), sayingDate: value.date || '' })).catch(() => {});
     if (!store.isAuthed()) { this.setData({ loading: false }); return; }
@@ -198,9 +199,9 @@ Page({
       api.reminders(), api.reviews(), api.bizMetricTemplate(), api.bizMetricSeries(8), api.prescriptions(),
     ]);
     const me = meResult.status === 'fulfilled' ? meResult.value : null;
-    // 判断与案卷两条主干都没回来 = 网络/服务端问题。给一条可重试的提示条，
-    // 否则页面会拿默认文案假装「你还没有判断」——空态和读失败必须分得开。
-    this.setData({ loadFailed: meResult.status !== 'fulfilled' && casefileResult.status !== 'fulfilled' });
+    // 判断或案卷**任一**没回来就提示可重试：原先要求两条都挂才报，结果只挂案卷时页面会说
+    // 「还没有案卷 / 还没有军令」——把读失败说成空态，是最容易骗到自己的一种假象。
+    this.setData({ loadFailed: meResult.status !== 'fulfilled' || casefileResult.status !== 'fulfilled' });
     const workbench = workbenchResult.status === 'fulfilled' ? workbenchResult.value : null;
     const decisions = decisionsResult.status === 'fulfilled' ? decisionsResult.value : { stats: { pending: 0 } };
     const casefile = casefileResult.status === 'fulfilled' ? casefileResult.value : null;
@@ -288,9 +289,8 @@ Page({
       dossierTitle: plainInline(dossier && dossier.title) || '',
       // —— 军令区 ——
       reminders: remindersView.items || [], streak: Number(reviews.streak) || 0,
-      pendingDecisions: Number(decisions.stats && decisions.stats.pending) || (decision ? 1 : 0), pendingDecision: decision, battleForces,
+      pendingDecision: decision, battleForces,
       bizItems, bizSaved: Boolean(savedMetrics), bizEditing: false, hasDossier: Boolean(dossier),
-      dossierSource: plainInline(dossier && dossier.sourceAgent) || '军师',
       orders, displayOrders, leftoverWeapons, orderDone,
       weekGroups: recentOrderGroups(allOrders), weekStrip: weekStrip(allOrders),
       weekDone: weekOrders.filter((item) => item.done).length, weekTotal: weekOrders.length,
@@ -399,7 +399,7 @@ Page({
     this.setData({ verifying: true });
     try {
       await api.verifyDecision(this.data.pendingDecision.id, outcome);
-      this.setData({ pendingDecision: null, pendingDecisions: Math.max(0, this.data.pendingDecisions - 1) });
+      this.setData({ pendingDecision: null });
       wx.showToast({ title: outcome === 'correct' ? '已记为判断正确' : '已记为需修正', icon: 'none' });
     } catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '记录失败' }); }
     finally { this.setData({ verifying: false }); }

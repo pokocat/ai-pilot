@@ -1,11 +1,9 @@
 @use "../../../src/pages/home/index.scss" as home;
 @use "../../../src/pages/studio/index.scss" as studio;
-@use "../../../src/components/NextStepCard/index.scss" as nextstep;
 
 /* 战局 = 沙盘(home) + 点兵(studio) 合并页。两份 src scss 同时导入（选择器全局，H5 仍在消费，
    不动 src；wxss 体积代价已知）。下方补丁 = 原 home 补丁 + 原 studio 补丁中随执行区块搬来的部分。 */
 
-.home .nsc { margin: 16px 0 0; border-radius: 17px; }
 .guest-notice{display:flex;align-items:center;gap:11px;padding:14px;border:1px solid var(--line-strong);background:var(--surface);box-shadow:var(--shadow-sm);}
 .guest-notice-icon{width:34px;height:34px;border-radius:11px;background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent-glow);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .guest-notice-body{flex:1;min-width:0;}
@@ -16,8 +14,6 @@
 .battle-empty-title { display: block; font-size: 17px; font-weight: 600; }
 .battle-empty-desc { display: block; max-width: 270px; margin: 8px auto 0; font-size: 12px; line-height: 1.6; color: var(--ink-3); }
 .battle-empty button { width: 132px; height: 42px; margin: 16px auto 0; border-radius: 13px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600; }
-.ml-go { display: flex; align-items: center; flex: 0 0 auto; gap: 2px; white-space: nowrap; }
-.ml-go > text { white-space: nowrap; }
 .bh-toggle, .bh-ask, .fe-go { display: flex; align-items: center; gap: 4px; }
 .nono-row{display:flex;align-items:flex-start;gap:8px;padding:6px 0;}
 .nono-row .nono{flex:1;min-width:0;padding:0;}

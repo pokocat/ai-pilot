@@ -1,5 +1,10 @@
 @use "../../../src/pages/thinktank/index.scss";
 
+/* 游客态一屏：把「未登录」说清楚，别让假额度卡冒充「功能还没上线」。 */
+.think-guest { padding: 34px 20px; }
+.think-guest .se-s { max-width: 22em; }
+.think-guest .think-cta { margin-top: 18px; }
+
 /* 取数失败提示条（2026-08-12）：与锦囊同款，可点重试。空列表与「读不出来」必须分得开。 */
 .think-retry {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -9,12 +14,10 @@
 .think-retry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
 
 .think-native { padding-bottom: calc(28px + env(safe-area-inset-bottom)); }
-.icon-center { display: flex; align-items: center; justify-content: center; }
 .uz-btn { gap: 5px; }
 .upload-status { display: block; margin-top: 7px; color: var(--green); font-size: 11px; }
 .pile + .pile { margin-top: 10px; }
 .pile-actions button { border: 0; }
-.native-module-empty { padding-top: 24px; }
 .think-cta { margin-bottom: 6px; }
 .ft-n { display: flex; align-items: center; gap: 2px; }
 .fr-delete { width: 30px; height: 30px; margin: -4px -6px -4px 0; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -23,4 +26,3 @@
 .ks-t { display: block; font-size: 14px; font-weight: 600; }
 .ks-s { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.5; color: var(--ink-3); }
 .ks-go { display: flex; align-items: center; gap: 3px; color: var(--accent); font-size: 12px; font-weight: 600; }
-.skill.busy { opacity: .65; }

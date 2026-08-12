@@ -25,7 +25,7 @@
 
         <!-- ② 三势压成一行：只给结论和强度，点开是三势合参抽屉。 -->
         <view wx:if="{{forces.length}}" class="force-grid bf-compact" bindtap="openForces"><view wx:for="{{forces}}" wx:key="kind" class="force card"><text class="force-tag">{{item.name}} · {{item.levelLabel}}</text><text class="force-concl serif">{{item.conclusion}}</text><view class="force-bar"><view class="force-fill {{item.kind}}" style="width:{{item.strength}}%"></view></view></view></view>
-        <view wx:else class="force-empty card" bindtap="ask"><text class="fe-t serif">三势还没断</text><text class="fe-d">跟我聊透目标、现状和卡点，天势、市势、人势自然就清楚了。</text><view class="fe-go"><text>去对话</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
+        <view wx:elif="{{!loading}}" class="force-empty card" bindtap="ask"><text class="fe-t serif">三势还没断</text><text class="fe-d">跟我聊透目标、现状和卡点，天势、市势、人势自然就清楚了。</text><view class="fe-go"><text>去对话</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
 
         <view wx:if="{{risks.length}}" class="nono-card card"><text class="section-label danger">现 在 不 能 做</text><view wx:for="{{risks}}" wx:key="*this" class="nono-row"><native-icon name="alert" tone="neutral" size="15"></native-icon><text class="nono">{{item}}</text></view><text class="nono-src">来自你定下的《{{dossierTitle}}》</text></view>
 
@@ -34,7 +34,7 @@
         <view class="exec-seg"><view wx:for="{{segments}}" wx:key="*this" class="seg-item {{segment===index?'on':''}}" data-index="{{index}}" bindtap="selectSegment">{{item}}</view></view>
 
         <block wx:if="{{segment===0}}">
-        <view wx:if="{{!orders.length}}" class="orders-empty card" bindtap="makeCommand"><text class="oe-t serif">还没有军令</text><text class="oe-d">先让总军师把当前判断拆成可执行动作。</text><view class="oe-go"><text>去对话</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view></view>
+        <view wx:if="{{!orders.length && !loading}}" class="orders-empty card" bindtap="makeCommand"><text class="oe-t serif">还没有军令</text><text class="oe-d">先让总军师把当前判断拆成可执行动作。</text><view class="oe-go"><text>去对话</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view></view>
         <view wx:for="{{displayOrders}}" wx:key="id" class="task card {{item.done?'done':''}}" data-id="{{item.id}}" data-text="{{item.text}}" bindtap="openOrder" bindlongpress="removeOrder">
           <view class="task-b">
             <text class="task-t serif {{item.done?'struck':''}}">{{item.text}}</text>

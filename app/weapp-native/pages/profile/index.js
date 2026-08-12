@@ -60,7 +60,7 @@ function buildMenuGroups(completeness, missingCount, fortuneOn) {
 
 Page({
   data: baseData({
-    showLogin: false, authed: false, loading: false, sheet: '', name: '老板', nameInitial: '主', company: '你的经营案卷',
+    showLogin: false, authed: false, loading: false, loadFailed: false, sheet: '', name: '老板', nameInitial: '主', company: '你的经营案卷',
     planName: '尚未开通', phoneDisplay: '未绑定', inviteCode: '—', avatarUrl: '', creditBalance: 0, usagePercent: 0,
     counts: [{ value: 0, label: '案卷' }, { value: 0, label: '方案' }, { value: 0, label: '资料' }],
     menuGroups: MENU_GROUPS, guestGroups: GUEST_GROUPS, serviceReady: false, teacherName: '', teacherInitial: '师', teacherWechat: '', teacherNote: '', className: '', groupQrUrl: '',
@@ -80,6 +80,8 @@ Page({
       store.loadMe(), api.projects(), api.reports(), api.raw('/knowledge/docs'), api.library(), api.progress(), api.strategicProfile(), api.workbench(),
     ]);
     const me = meResult.status === 'fulfilled' ? meResult.value : null;
+    // /me 挂了整页会退化成「全新空账号」（0 案卷 / 尚未开通 / 完整度 0%），与真实空账号无法区分。
+    this.setData({ loadFailed: meResult.status !== 'fulfilled' });
     const user = me && me.user || {};
     const tenant = me && me.tenant || {};
     const service = me && me.service || null;
@@ -115,6 +117,7 @@ Page({
   switchMockProfile() {
     mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load(); });
   },
+  retry() { this.setData({ loadFailed: false }); this.load(); },
   login() { this.setData({ showLogin: true }); },
   closeLogin() { this.setData({ showLogin: false }); },
   loggedIn() { this.setData({ showLogin: false, authed: true }); this.load(); },

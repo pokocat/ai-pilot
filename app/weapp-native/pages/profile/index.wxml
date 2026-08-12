@@ -5,6 +5,13 @@
     <view class="pad account">
       <tab-header title="主公" kicker="你自己" glyph="主"></tab-header>
 
+      <!-- /me 挂了整页会退化成「全新空账号」（0 案卷 / 尚未开通 / 完整度 0%），
+           与真实空账号无法区分——必须明说是读失败并给重试。 -->
+      <view wx:if="{{authed && loadFailed}}" class="account-retry card" bindtap="retry">
+        <text class="account-retry-t">账号信息没读出来，下面显示的可能不是最新的</text>
+        <text class="account-retry-go">重试</text>
+      </view>
+
       <block wx:if="{{authed}}">
         <view class="account-user-card account-service-card">
           <view class="service-card-top">

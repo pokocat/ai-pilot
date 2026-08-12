@@ -78,7 +78,7 @@ function normalize(type, id, title, updatedAt, from, verbRoute, thumb) {
 /**
  * 海报（GET /creative/posters → CreativePosterListResult）。
  * 只收 succeeded：pending/running 还没有成品，摆进作品流会给出一句「再来一张」却无物可看。
- * 缩略图走 poster.previewUrl —— 600 秒签名链接，所以本页每次 onShow 都重新取数，不做缓存。
+ * 缩略图走 poster.previewUrl —— 600 秒签名链接，页面侧的 90 秒缓存远在有效期内（见 load 注释）。
  */
 function posterWorks(payload) {
   return safeList(payload && payload.items)
@@ -175,9 +175,18 @@ Page({
   /**
    * 取数：agents + 三条作品通道一律 Promise.allSettled，任何一路失败都不拦页面。
    * 游客只取 agents（/agents 免登录可得），三条作品通道不请求——不能为了一格计数把人推去登录。
+   *
+   * 90 秒内切回本 tab 直接用上一次结果（`force=true` 跳过，用于启用/切档案后的主动刷新）。
+   * 动因：`/video/works` 是服务端到 aidrama 的**同步代理**（上游预算 15–60s），且不在
+   * server 过载闸 MAX_IN_FLIGHT 的豁免名单里；本页从子页升成一级 tab 后，每次 onShow 都打一次
+   * 会把在途槽位耗在等外部上游上，拖累无关的快接口。海报缩略图是 600 秒签名链接，90 秒缓存远在有效期内。
+   * 正解是服务端把 BFF 代理排除在过载计数外，已记 AGENTS §13。
    */
-  async load() {
+  async load(options) {
     if (this.data.loading) return;
+    const force = Boolean(options && options.force);
+    const fresh = this._loadedAt && (Date.now() - this._loadedAt) < 90000;
+    if (!force && fresh && this.data.recent.length) return;
     this.setData({ loading: true });
     const authed = store.isAuthed();
     const [agentsResult, postersResult, clipsResult, reportsResult] = await Promise.allSettled([
@@ -195,8 +204,9 @@ Page({
       clip: clips ? clips.length : null,
       report: reports ? reports.length : null,
     };
-    // 三条都塌了 = 网络/服务端问题，给一条可重试的提示条；只塌一条时各格自己显示「—」，不打扰。
-    const loadFailed = authed && posters === null && clips === null && reports === null;
+    // 任一通道塌了就提示可重试：只塌一条时作品流会静默残缺（少一类作品，用户看不出是漏了还是没有），
+    // 各格的「—」只说明这一格没数，说不清整页缺了东西。
+    const loadFailed = authed && (posters === null || clips === null || reports === null);
     const recent = []
       .concat(posters || [], clips || [], reports || [])
       .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -213,9 +223,11 @@ Page({
       }))
       .concat(agents.filter((agent) => agent && text(agent.type) === 'creative' && text(agent.key)).map(craftFromAgent));
 
+    // 只有真取到过数才记时间戳：失败不算「刚刷过」，否则 90 秒内都拿不到重试机会。
+    this._loadedAt = loadFailed ? 0 : Date.now();
     this.setData({ authed, recent, crafts, loadFailed, loading: false });
   },
-  retry() { this.setData({ loadFailed: false }); this.load(); },
+  retry() { this.setData({ loadFailed: false }); this.load({ force: true }); },
 
   /** 真实成品图取不到（签名过期 / 已清理）时换成该类型插画，不留破图。 */
   onThumbError(event) {
@@ -227,7 +239,7 @@ Page({
 
   /** MOCK 角标即档案开关：切「经营中 / 空态」后重取本页数据（作品流与手艺格计数一起变）。 */
   switchMockProfile() {
-    mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load(); });
+    mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load({ force: true }); });
   },
 
   requireLogin() {
@@ -236,7 +248,7 @@ Page({
     return false;
   },
   closeLogin() { this.setData({ showLogin: false }); },
-  loggedIn() { this.setData({ showLogin: false, authed: true }); this.load(); },
+  loggedIn() { this.setData({ showLogin: false, authed: true }); this.load({ force: true }); },
 
   /** 作品小卡整卡即动词：海报去出图、成片去出片、方案去改版。 */
   openWork(event) {
@@ -254,6 +266,9 @@ Page({
       if (!this.requireLogin()) return;
       const agent = this._agentsByKey && this._agentsByKey[item.agentKey];
       if (agent) { this.setData({ unlockAgent: agent }); return; }
+      // 目录没取到这位军师（/agents 挂了）：locked 格的 route 是空串，再往下走会点了没反应。
+      wx.showToast({ title: '军师目录没读到，下拉重试一次', icon: 'none' });
+      return;
     }
     if (item.route) navTo(item.route);
   },
@@ -261,8 +276,8 @@ Page({
   agentUnlocked(event) {
     const agent = event.detail && event.detail.agent;
     this.setData({ unlockAgent: null });
-    if (!agent || !agent.key) { this.load(); return; }
-    this.load();
+    if (!agent || !agent.key) { this.load({ force: true }); return; }
+    this.load({ force: true });
     navTo(`/packages/main/chat/index?agentKey=${encodeURIComponent(agent.key)}&continue=1`);
   },
   goBattle() { wx.switchTab({ url: '/pages/home/index' }); },

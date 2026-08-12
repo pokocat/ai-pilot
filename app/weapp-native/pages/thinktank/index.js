@@ -118,12 +118,14 @@ Page({
     this.setData({optimizedItems:items});
   },
   retry(){this.setData({loadFailed:false});this.load();},
+  askLogin(){this.requireLogin('history');},
   async load(){
     if(!store.isAuthed())return;
     this.setData({loading:true});
     const [p,d,s]=await Promise.allSettled([api.knowledgePipeline(),api.dataSources(),api.skus()]);
-    // 管道与数据源都没回来 = 网络/服务端问题，给一条可重试的提示条，别把空列表说成「你还没上传」。
-    this.setData({loadFailed:p.status!=='fulfilled'&&d.status!=='fulfilled'});
+    // 管道或数据源**任一**没回来就提示可重试（原先要求两条都挂）：只挂管道时页面会说
+    // 「还没放资料进来」，把读失败说成空态。
+    this.setData({loadFailed:p.status!=='fulfilled'||d.status!=='fulfilled'});
     const pipe=p.status==='fulfilled'?(p.value||{}):{};
     const counts=pipe.counts||{staging:0,optimized:0,confirmed:0};
     const quota=pipe.quota||{};
@@ -155,10 +157,11 @@ Page({
   async uploadFiles(files){ if(!files.length||this.data.confirming)return; this.setData({uploading:true,uploadText:`正在上传 0/${files.length}`}); let done=0;let batchId=''; for(const file of files){ try{const uploaded=await api.uploadKnowledge(file.path,{staged:true,batchId:batchId||undefined,originalName:file.name});batchId=uploaded.batchId||batchId;done+=1;this.setData({uploadText:`正在上传 ${done}/${files.length}`});}catch(error){wx.showToast({title:error.message||`${file.name} 上传失败`,icon:'none'});} } this.setData({uploading:false,uploadText:`已送达 ${done} 份，等待整理`}); await this.load(); },
   async organize(event){if(this.data.organizing)return;const batchId=event.currentTarget.dataset.id;if(!batchId)return;this.setData({organizing:true});try{await api.organizeBatch(batchId);await this.load();wx.showToast({title:'资料已整理，等待确认',icon:'none'});}catch(error){store.handleApiError(error,{fallbackTitle:error.message||'整理失败'});}finally{this.setData({organizing:false});}},
   async deepOrganize(event){if(this.data.organizing)return;const batchId=event.currentTarget.dataset.id;if(!batchId)return;this.setData({organizing:true});try{await api.deepOrganize(batchId);await this.load();wx.showToast({title:'深度整理已完成',icon:'none'});}catch(error){const code=error.code||(error.data&&error.data.code);if(code==='SKU_REQUIRED')this.openSkuPurchase('deep-organize','深度资料整理',()=>this.deepOrganize({currentTarget:{dataset:{id:batchId}}}));else store.handleApiError(error,{fallbackTitle:error.message||'深度整理失败'});}finally{this.setData({organizing:false});}},
-  deepFirst(){const batch=this.data.batches[0];if(batch)this.deepOrganize({currentTarget:{dataset:{id:batch.id}}});else wx.showToast({title:'先上传资料到待整理区',icon:'none'});},
+  deepFirst(){if(!this.requireLogin('upload'))return;const batch=this.data.batches[0];if(batch)this.deepOrganize({currentTarget:{dataset:{id:batch.id}}});else wx.showToast({title:'先上传资料到待整理区',icon:'none'});},
   confirmOptimized(){if(this.data.confirming||!this.data.optimizedItems.length)return;const noPreview=this.data.optimizedItems.filter((item)=>!item.preview).length;wx.showModal({title:'确认写入知识库',content:noPreview?`共 ${this.data.optimizedItems.length} 份，其中 ${noPreview} 份没有提取到可预览正文。仍要继续吗？`:`共 ${this.data.optimizedItems.length} 份。确认后将供战局、方案和对话引用。`,confirmText:noPreview?'仍然入库':'确认入库',success:async(result)=>{if(!result.confirm)return;this.setData({confirming:true});try{const ids=this.data.optimizedItems.map((item)=>item.id);const saved=await api.confirmKnowledge({ids});await this.load();await api.refreshForces().catch(()=>{});this.setData({stage:'confirmed'});wx.showToast({title:`${saved.count||ids.length} 份资料已入库`,icon:'none'});}catch(error){store.handleApiError(error,{fallbackTitle:error.message||'入库失败'});}finally{this.setData({confirming:false});}}});},
   removeFile(event){const id=event.currentTarget.dataset.id;const name=event.currentTarget.dataset.name||'这份资料';if(!id)return;wx.showModal({title:'删除这份资料',content:`删除「${name}」？删掉后可重新上传这一份。`,confirmText:'删除',success:async(result)=>{if(!result.confirm)return;try{await api.deleteKnowledge(id);await this.load();wx.showToast({title:'已删除',icon:'none'});}catch(error){store.handleApiError(error,{fallbackTitle:error.message||'删除失败'});}}});},
-  async refreshForces(){if(this.data.refreshingForces)return;this.setData({refreshingForces:true});try{await api.refreshForces();wx.showToast({title:'已刷新战局判断',icon:'none'});}catch(error){store.handleApiError(error,{fallbackTitle:error.message||'刷新失败'});}finally{this.setData({refreshingForces:false});}},
+  // 刷新判断会让服务端重算三势并落库——与战局同一个 API，门禁口径必须一致（战局侧一直有门）。
+  async refreshForces(){if(!this.requireLogin('execute')||this.data.refreshingForces)return;this.setData({refreshingForces:true});try{await api.refreshForces();wx.showToast({title:'已刷新战局判断',icon:'none'});}catch(error){store.handleApiError(error,{fallbackTitle:error.message||'刷新失败'});}finally{this.setData({refreshingForces:false});}},
   openKnowledge(){if(this.requireLogin('history'))navTo('/packages/work/knowledge/index');},
   async dataSourceAction(event){if(!this.requireLogin('execute'))return;const item=this.data.sources[Number(event.currentTarget.dataset.index)];if(!item)return;try{if(item.status==='unbound')await api.requestDataSourceAuth(item.key);else await api.uploadDataSource(item.key);await this.load();}catch(error){store.handleApiError(error,{fallbackTitle:error.message||'操作失败'});}},
   openSkuPurchase(key,title,after){

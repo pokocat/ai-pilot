@@ -10,6 +10,18 @@
         <text class="think-retry-go">重试</text>
       </view>
 
+      <!-- 游客态：图籍整页都要登录后才有真数据，早退前必须自己出一屏，
+           否则会拿假额度卡 + 「还没放资料进来」把「未登录」说成「功能还没上线」。 -->
+      <block wx:if="{{!authed}}">
+        <view class="stage-empty think-guest">
+          <text class="se-t">图籍要登录后才看得见</text>
+          <text class="se-s">资料与数据源是军师断事的依据，属于你的账号私产；登录后这里会显示已入库的资料、剩余额度和数据源授权状态。</text>
+          <view class="think-cta" bindtap="askLogin"><native-icon name="user" tone="white" size="16"></native-icon><text>登录后打开图籍</text></view>
+        </view>
+        <view class="tabbar-space"></view>
+      </block>
+
+      <block wx:else>
       <view class="think-tabs">
         <view wx:for="{{segments}}" wx:key="*this" class="think-tab {{segment===index?'on':''}}" data-index="{{index}}" bindtap="switchSegment"><text>{{item}}</text></view>
       </view>
@@ -51,7 +63,7 @@
             <view class="file-list"><view wx:for="{{item.files}}" wx:for-item="file" wx:key="id" class="file-row"><view class="fr-b"><text class="fr-name">{{file.displayName}}</text><text class="fr-meta">{{file.meta}}</text></view><text class="fr-badge {{file.statusClass}}">{{file.statusLabel}}</text><view class="fr-delete" data-id="{{file.id}}" data-name="{{file.displayName}}" catchtap="removeFile"><native-icon name="close" tone="neutral" size="14"></native-icon></view></view></view>
             <view class="pile-actions"><button class="pile-btn primary" style="background:var(--accent)" data-id="{{item.id}}" bindtap="organize">帮我整理</button><button class="pile-btn" data-id="{{item.id}}" bindtap="deepOrganize">深度整理</button></view>
           </view>
-          <view wx:if="{{!batches.length}}" class="stage-empty"><text class="se-t">还没放资料进来</text><text class="se-s">微信聊天、表格、文档、图片——散在各处的材料，先丢进来。</text></view>
+          <view wx:if="{{!batches.length && !loading}}" class="stage-empty"><text class="se-t">还没放资料进来</text><text class="se-s">微信聊天、表格、文档、图片——散在各处的材料，先丢进来。</text></view>
         </block>
 
         <block wx:elif="{{stage==='optimized'}}">
@@ -60,13 +72,13 @@
             <view wx:for="{{optimizedItems}}" wx:key="id" class="asset-list-item"><view class="asset-list-row"><view class="al-i"><text>{{item.char}}</text></view><view class="al-b"><text class="al-t serif">{{item.displayName}}</text><text class="al-name-source">{{item.nameSourceLabel}}</text><text class="al-s">{{item.summaryText}}</text></view><text class="al-tag">{{item.categoryLabel}}</text></view><view class="preview-toggle {{item.previewText?'':'disabled'}}" data-index="{{index}}" bindtap="togglePreview"><text>{{item.previewText?(item.previewOpen?'收起正文预览':'预览正文'):'未提取到可预览正文'}}</text><native-icon wx:if="{{item.previewText}}" name="{{item.previewOpen?'collapse':'chevron'}}" tone="accent" color-key="{{colorKey}}" size="14"></native-icon></view><scroll-view wx:if="{{item.previewOpen&&item.previewText}}" scroll-y class="item-preview" style="height:{{item.previewHeight}}px"><text class="item-preview-text" user-select="true">{{item.previewText}}</text></scroll-view></view>
           </view>
           <view wx:if="{{optimizedItems.length}}" class="confirm-library card {{confirming?'busy':''}}" bindtap="confirmOptimized"><text class="cl-t serif">{{confirming?'正在写入知识库':'确认，写入知识库'}}</text><text class="cl-s">{{confirming?'正在切片并建立检索索引，请稍候，不要重复操作。':'确认后将回写战局页、方案页和后续对话引用。'}}</text><view class="cl-btn" style="background:var(--accent)"><text>{{confirming?'正在处理…':confirmButton}}</text></view></view>
-          <view wx:if="{{!optimizedItems.length}}" class="stage-empty"><text class="se-t">还没有已优化的资料</text><text class="se-s">先到「待整理」上传并整理资料，优化结果会在这里等你确认入库。</text></view>
+          <view wx:if="{{!optimizedItems.length && !loading}}" class="stage-empty"><text class="se-t">还没有已优化的资料</text><text class="se-s">先到「待整理」上传并整理资料，优化结果会在这里等你确认入库。</text></view>
         </block>
 
         <block wx:else>
           <view class="stage-summary card"><text class="ss-t serif">已进入知识库</text><text class="ss-s">这些资料我都读过了，做判断时会用上。</text><text class="ss-em">{{counts.confirmed}} 份</text></view>
           <view wx:if="{{folders.length}}" class="folder-grid"><view wx:for="{{folders}}" wx:key="key" class="folder-tile card" bindtap="openKnowledge"><view class="ft-ic"><native-icon name="pouch" tone="green" size="18"></native-icon></view><text class="ft-t serif">{{item.label}}</text><view class="ft-n"><text>{{item.count}} 份</text><native-icon name="arrow" tone="neutral" size="13"></native-icon></view></view></view>
-          <view wx:if="{{!folders.length}}" class="stage-empty"><text class="se-t">知识库还空着</text><text class="se-s">资料理好、确认入库后，我做判断和出方案就能直接用上。</text></view>
+          <view wx:if="{{!folders.length && !loading}}" class="stage-empty"><text class="se-t">知识库还空着</text><text class="se-s">资料理好、确认入库后，我做判断和出方案就能直接用上。</text></view>
           <view class="knowledge-sync card" bindtap="refreshForces"><view class="ks-b"><text class="ks-t serif">让新资料进入战局判断</text><text class="ks-s">资料入库后可主动重算三势与主要矛盾。</text></view><view class="ks-go"><text>{{refreshingForces?'刷新中…':'刷新判断'}}</text><native-icon name="arrow" tone="green" size="14"></native-icon></view></view>
         </block>
 
@@ -77,7 +89,8 @@
         <view class="ds-hero card"><text class="dh-k">账号资产 · 持续记忆 · 经营数据</text><text class="dh-t serif">让军师长期理解你正在做什么</text><text class="dh-d">每个来源独立授权，也可以随时暂停和删除。</text><view class="dh-metrics"><view class="dh-m"><text class="dh-mv serif">{{sourceStats.bound}}</text><text class="dh-ml">已绑定</text></view><view class="dh-m"><text class="dh-mv serif">{{sourceStats.needed}}</text><text class="dh-ml">待补关键项</text></view><view class="dh-m"><text class="dh-mv serif">{{sourceStats.total}}</text><text class="dh-ml">类经营来源</text></view></view></view>
         <text class="think-h2">经营来源</text>
         <view wx:for="{{sources}}" wx:key="key" class="data-source-card card" data-index="{{index}}" bindtap="dataSourceAction"><view class="dsc-ic"><native-icon name="flow" tone="green" size="20"></native-icon></view><view class="dsc-b"><text class="dsc-t serif">{{item.label}}</text><text class="dsc-s">{{item.desc}}</text></view><text class="dsc-state {{item.stateClass}}">{{item.statusLabel}}</text></view>
-        <view wx:if="{{!sources.length}}" class="stage-empty"><text class="se-t">数据源目录正在准备中</text><text class="se-s">接入后会在这里显示授权和同步状态。</text></view>
+        <view wx:if="{{!sources.length && !loading}}" class="stage-empty"><text class="se-t">数据源目录正在准备中</text><text class="se-s">接入后会在这里显示授权和同步状态。</text></view>
+      </block>
       </block>
 
       <view class="tabbar-space"></view>

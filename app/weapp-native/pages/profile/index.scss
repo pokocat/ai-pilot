@@ -1,5 +1,13 @@
 @use "../../../src/pages/profile/index.scss";
 
+/* 取数失败提示条：与战局/锦囊/图籍同款口径，空账号与读失败必须分得开。 */
+.account-retry {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 12px; padding: 12px 14px;
+}
+.account-retry-t { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+.account-retry-go { flex-shrink: 0; font-size: 13px; font-weight: 600; color: var(--accent); }
+
 /* 老师 / 班级群未分配时的占位（2026-08-12）：占位框改成纵向图标+文案，
    次要按钮（先去军师社群）用描边态，不跟已分配态的实心主按钮抢。 */
 /* 占位框比真二维码小一档：留出说明与「先去军师社群」的位置，别把按钮挤出可视区。 */

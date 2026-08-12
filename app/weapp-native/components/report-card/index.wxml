@@ -43,7 +43,7 @@
   </view>
 
   <view wx:if="{{operable&&!streaming}}" class="accept-card">
-    <view class="accept-copy"><text class="accept-title">这份方案，就按这个来？</text><text class="accept-desc">存入方案库留一版，执行页承接军令与复盘。</text></view>
+    <view class="accept-copy"><text class="accept-title">这份方案，就按这个来？</text><text class="accept-desc">存入方案库留一版，战局承接军令与复盘。</text></view>
     <view class="accept-action {{accepting?'disabled':''}}" bindtap="acceptReport"><native-icon name="check" tone="white" size="13"></native-icon><text>{{accepting?'正在拟定…':'就按这个来 · 去执行'}}</text></view>
   </view>
 </view>

@@ -1,9 +1,14 @@
-/* 两份来源都叫 index.scss，同名 namespace 会被 sass 判重；这里显式改名（本文件只取它们的选择器，不取成员）。 */
-@use "../../../src/pages/home/index.scss" as battle;
-@use "../../../src/pages/studio/index.scss" as muster;
+/* 本页不 @use 任何页面级 scss：.card / .pad 来自 app.scss 全局，唯一借用的 .section-label
+   照抄在下面（原样一份，改样式时与 src/pages/home/index.scss 那份对齐即可）。
+   曾经 @use 了战局 + 点兵两份（392 + 488 行），本页实际命中 1 个选择器——纯 wxss 死重。 */
+.section-label {
+  display: block; margin-bottom: 4px;
+  color: var(--green);
+  font-size: 13px; font-weight: 600; letter-spacing: .18em; line-height: 1.35;
+}
 
 /* 锦囊 · 作品页。
-   骨架借战局的 .card / .section-label / .pad；手艺格与作品流是本页自己的东西，类名统一 pch- 前缀。
+   骨架只有全局的 .card / .pad 与本文件自带的 .section-label；手艺格与作品流是本页自己的东西，pch- 前缀。
 
    识别靠插画（src/assets/craft/*.jpg，与生成头像同一条资产路子），不靠彩色卡体——
    一页里同时出现四五门手艺时，彩色卡体会把整页打成拼贴画。卡体一律暖纸白卡。
