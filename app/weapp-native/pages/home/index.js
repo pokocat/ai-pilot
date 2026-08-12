@@ -63,20 +63,6 @@ function thisMonday() {
   date.setDate(date.getDate() - diff);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
-function dateLabel(value) {
-  if (value === today()) return '今天';
-  const parts = String(value || '').split('-');
-  return parts.length === 3 ? `${Number(parts[1])}月${Number(parts[2])}日` : String(value || '');
-}
-function todayLabel() {
-  const parts = today().split('-');
-  return `${Number(parts[1])}月${Number(parts[2])}日`;
-}
-function dayKey(offset) {
-  const date = new Date();
-  date.setDate(date.getDate() + Number(offset || 0));
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
 function plainInline(value) {
   let text = String(value || '')
     .replace(/```[\s\S]*?```/g, ' ')
@@ -90,19 +76,6 @@ function plainInline(value) {
     text = text.replace(/^[A-Za-zāáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ]+\s*[·•-]\s*/u, '');
   }
   return text;
-}
-function recentOrderGroups(orders) {
-  const groups = new Map();
-  const minDate = dayKey(-6);
-  const maxDate = today();
-  for (const order of Array.isArray(orders) ? orders : []) {
-    if (!order || !order.date || order.date < minDate || order.date > maxDate) continue;
-    if (!groups.has(order.date)) groups.set(order.date, []);
-    groups.get(order.date).push(order);
-  }
-  return [...groups.entries()]
-    .sort((left, right) => left[0] < right[0] ? 1 : -1)
-    .map(([date, rows]) => ({ date, label: dateLabel(date), orders: rows }));
 }
 const GOAL_FIELDS = [['weekly', '本周'], ['quarterly', '季度'], ['annual', '年度'], ['longTerm', '3-5年']];
 function goalRows(goals) {
@@ -122,22 +95,18 @@ Page({
   data: baseData({
     authed: false, onboarded: false, onboardingKnown: false, showLogin: false, loading: false, heroExpanded: false, committing: false,
     fortuneOn: false, chart: null, cited: [],
-    forcesOpen: false, forceDetails: [], forceSynthesis: null, risks: [], kpi: null,
+    forcesOpen: false, evidenceOpen: false, reviewOpen: false,
+    forceDetails: [], forceSynthesis: null, risks: [], kpi: null,
     summary: '先说说你眼下最难拿主意的事，我来判断主要矛盾。',
-    nextTitle: '先做一次军师首判', nextDesc: '三问形成第一份判断', nextRoute: '/packages/work/quickscan/index',
     metrics: [{ value: '—', label: '案卷完整度', tone: '' }, { value: '0', label: '待补资料', tone: 'warn' }, { value: '—', label: '风险锁', tone: '' }],
     forces: [], questions: [], saying: '谋定而后动，先把主要矛盾看清。', sayingDate: '', dossierTitle: '', refreshing: false,
-    scrollAnchor: '',
-    // —— 执行区（原点兵） ——
-    streak: 0, reminders: [], pendingDecisions: 0, hasDossier: false, dossierSource: '', dateText: todayLabel(),
-    orders: [], pendingOrders: [], visibleOrders: [], archivedOrders: [], weekGroups: [], deckOrders: [], backfill: null, savingBackfill: false,
-    orderDone: 0, orderPercent: 0, orderProgressText: '还没出', mainOrderTitle: '今天还没有军令', mainOrderDesc: '让军师根据案卷生成今天最重要的 1-3 件事。', mainOrderButton: '帮我出今日军令',
-    showDoneArchive: false, fillingOrderId: '', fillingOrderText: '', savingOrderResult: false,
+    // —— 军令区（原点兵，按设计稿收敛：军令带兵器 → 回填 → 复盘抽屉） ——
+    streak: 0, reminders: [], pendingDecisions: 0, hasDossier: false, dossierSource: '',
+    orders: [], displayOrders: [], leftoverWeapons: [], backfill: null, savingBackfill: false,
+    orderDone: 0, fillingOrderId: '', fillingOrderText: '', savingOrderResult: false,
     goalRows: goalRows(null), goalEdit: null, goalDraft: '', savingGoal: false,
     battleForces: [], pendingDecision: null, verifying: false,
     bizItems: [], bizSaved: false, bizEditing: false, savingBiz: false,
-    segments: ['今日军令', '周计划', '复盘'], segment: 0,
-    prescriptions: [],
   }),
   onLoad() { this._backfill = {}; this._orderText = ''; this._orderResultText = ''; this._goalDraft = ''; this._bizDraft = {}; this._forceVerdicts = {}; },
   onShow() {
@@ -151,23 +120,17 @@ Page({
       onboardingKnown: state.onboardingKnown,
     });
     syncTabBar(this, 1);
-    this.loadPrescriptions();
     this.load();
-  },
-  async loadPrescriptions() {
-    if (!store.isAuthed()) { this.setData({ prescriptions: [] }); return; }
-    try { this.setData({ prescriptions: activePrescriptions(await api.prescriptions()) }); } catch (_) { /* 处方条缺席不拦页面 */ }
   },
   async load() {
     this.setData({ loading: true });
     api.todaySaying().then((value) => this.setData({ saying: String(value.text || this.data.saying).replace(/<\/?em>/g, ''), sayingDate: value.date || '' })).catch(() => {});
     if (!store.isAuthed()) { this.setData({ loading: false }); return; }
-    const [meResult, journeyResult, workbenchResult, decisionsResult, casefileResult, remindersResult, reviewsResult, bizTemplateResult, bizSeriesResult] = await Promise.allSettled([
-      store.loadMe(), api.journey(), api.workbench(), api.decisions(), api.casefile(),
-      api.reminders(), api.reviews(), api.bizMetricTemplate(), api.bizMetricSeries(8),
+    const [meResult, workbenchResult, decisionsResult, casefileResult, remindersResult, reviewsResult, bizTemplateResult, bizSeriesResult, prescriptionsResult] = await Promise.allSettled([
+      store.loadMe(), api.workbench(), api.decisions(), api.casefile(),
+      api.reminders(), api.reviews(), api.bizMetricTemplate(), api.bizMetricSeries(8), api.prescriptions(),
     ]);
     const me = meResult.status === 'fulfilled' ? meResult.value : null;
-    const journey = journeyResult.status === 'fulfilled' ? journeyResult.value : null;
     const workbench = workbenchResult.status === 'fulfilled' ? workbenchResult.value : null;
     const decisions = decisionsResult.status === 'fulfilled' ? decisionsResult.value : { stats: { pending: 0 } };
     const casefile = casefileResult.status === 'fulfilled' ? casefileResult.value : null;
@@ -213,17 +176,17 @@ Page({
     }));
     this._bizDraft = Object.fromEntries(bizItems.map((item) => [item.key, item.value]));
     const allOrders = dossier && Array.isArray(dossier.orders) ? dossier.orders : [];
-    const orders = allOrders.filter((item) => item.date === today()).map((item, index) => Object.assign({}, item, { no: index + 1 }));
-    const pendingOrders = orders.filter((item) => !item.done);
-    const fillingOrderId = this.data.fillingOrderId;
-    const visibleOrders = orders.filter((item) => !item.done || item.id === fillingOrderId);
-    const archivedOrders = orders.filter((item) => item.done && item.id !== fillingOrderId);
-    const orderDone = orders.filter((item) => item.done).length;
-    const orderPercent = orders.length ? Math.round(orderDone / orders.length * 100) : 0;
-    const firstPending = pendingOrders[0] || null;
-    const mainOrderTitle = firstPending ? firstPending.text : orders.length ? '今日军令已归档' : '今天还没有军令';
-    const mainOrderDesc = firstPending ? '可让 IP 军师直接生成配套内容脚本。' : orders.length ? '完成项已归档，去录入数据、做复盘。' : '让军师根据案卷生成今天最重要的 1-3 件事。';
-    const mainOrderButton = firstPending ? '帮我写脚本' : orders.length ? '开始复盘' : '帮我出今日军令';
+    const orders = allOrders.filter((item) => item.date === today());
+    const pendingOrders = orders.filter((item) => !item.done).map((item, index) => Object.assign({}, item, { no: index + 1 }));
+    const doneOrders = orders.filter((item) => item.done);
+    const orderDone = doneOrders.length;
+    // 兵器挂在军令上（设计稿 ③）：处方按顺序贴到待执行军令；多出来的以独立兵器条排在军令之后。
+    // 服务端 order.weapon 字段是下一期（AGENTS §13），先用处方做展示层挂接，点击行为不变。
+    const weapons = prescriptionsResult.status === 'fulfilled' ? activePrescriptions(prescriptionsResult.value) : [];
+    const displayOrders = pendingOrders
+      .map((item, index) => Object.assign({}, item, { weapon: weapons[index] || null }))
+      .concat(doneOrders);
+    const leftoverWeapons = weapons.slice(pendingOrders.length);
     const backfill = dossier && dossier.backfill ? dossier.backfill[today()] || null : null;
     this.setData({
       summary, questions, forces, fortuneOn, chart, cited,
@@ -240,9 +203,6 @@ Page({
       kpi: dossierInfo.kpi,
       onboarded: store.snapshot().onboarded,
       onboardingKnown: store.snapshot().onboardingKnown,
-      nextTitle: journey && journey.nextStep ? journey.nextStep.title : this.data.nextTitle,
-      nextDesc: journey && journey.nextStep ? journey.nextStep.desc : this.data.nextDesc,
-      nextRoute: journey && journey.nextStep ? journey.nextStep.route : this.data.nextRoute,
       metrics: [
         { value: `${workbench ? Number(workbench.completeness) || 0 : 0}%`, label: '案卷完整度', tone: '' },
         { value: String(workbench && workbench.missing ? workbench.missing.length : questions.length), label: '待补资料', tone: 'warn' },
@@ -250,20 +210,23 @@ Page({
       ],
       // 只认真实案卷标题（workbench 契约里没有 title，历史兜底是死代码，勿加回）。
       dossierTitle: plainInline(dossier && dossier.title) || '',
-      // —— 执行区 ——
+      // —— 军令区 ——
       reminders: remindersView.items || [], streak: Number(reviews.streak) || 0,
       pendingDecisions: Number(decisions.stats && decisions.stats.pending) || (decision ? 1 : 0), pendingDecision: decision, battleForces,
       bizItems, bizSaved: Boolean(savedMetrics), bizEditing: false, hasDossier: Boolean(dossier),
       dossierSource: plainInline(dossier && dossier.sourceAgent) || '军师',
-      orders, pendingOrders, visibleOrders, archivedOrders, weekGroups: recentOrderGroups(allOrders), deckOrders: pendingOrders.length ? pendingOrders.slice(0, 3) : archivedOrders.slice(0, 3),
-      orderDone, orderPercent, orderProgressText: orders.length ? `${orderDone}/${orders.length}` : '还没出', mainOrderTitle, mainOrderDesc, mainOrderButton,
+      orders, displayOrders, leftoverWeapons, orderDone,
       goalRows: goalRows(dossier && dossier.goals), backfill,
       loading: false,
     });
   },
   requireLogin() { if (store.isAuthed()) return true; this.setData({ showLogin: true }); return false; },
   closeLogin() { this.setData({ showLogin: false }); },
-  loggedIn() { this.setData({ showLogin: false, authed: true }); this.loadPrescriptions(); this.load(); },
+  loggedIn() { this.setData({ showLogin: false, authed: true }); this.load(); },
+  openEvidence() { this.setData({ evidenceOpen: true }); },
+  closeEvidence() { this.setData({ evidenceOpen: false }); },
+  openReview() { if (this.requireLogin()) this.setData({ reviewOpen: true }); },
+  closeReview() { this.setData({ reviewOpen: false }); },
   goOnboarding() {
     try {
       const pages = getCurrentPages();
@@ -273,7 +236,6 @@ Page({
   },
   ask() { navTo('/packages/main/chat/index?agentKey=general&continue=1'); },
   openCalendar() { navTo('/packages/work/calendar/index'); },
-  openMingpan() { navTo('/packages/work/mingpan/index'); },
   openLedger() { if (this.requireLogin()) navTo('/packages/work/ledger/index'); },
   tapEvidence(event) {
     const item = this.data.cited[Number(event.currentTarget.dataset.index)];
@@ -282,20 +244,6 @@ Page({
   },
   toggleHero() { this.setData({ heroExpanded: !this.data.heroExpanded }); },
   tapMetric(event) { const index = Number(event.currentTarget.dataset.index); if (index === 0) navTo('/packages/main/brief/index'); else if (index === 2) this.askRisks(); else this.ask(); },
-  // 军令区在本页下半场：scroll-into-view 锚点滚动，替代旧的 switchTab studio。
-  scrollToOrders() {
-    this.setData({ scrollAnchor: 'orders-zone' });
-    setTimeout(() => this.setData({ scrollAnchor: '' }), 600);
-  },
-  // 「下一步」卡 route 是语义 key（server journey.ts 下发 'chat'/'studio'，速诊是真路由）。
-  // 'studio' 在合并后指本页军令区——滚过去，不再跳 tab。
-  next() {
-    if (!this.requireLogin()) return;
-    const route = String(this.data.nextRoute || '');
-    if (route.charAt(0) === '/') { navTo(route); return; }
-    if (route === 'studio') { this.scrollToOrders(); return; }
-    navTo('/packages/main/chat/index?agentKey=general&continue=1');
-  },
   askQuestion(event) { if (!this.requireLogin()) return; navTo(`/packages/main/chat/index?agentKey=general&continue=1&prompt=${encodeURIComponent(event.currentTarget.dataset.text || '')}`); },
   async refreshForces() {
     if (!this.requireLogin() || this.data.refreshing) return;
@@ -316,7 +264,7 @@ Page({
   async commitBattle() {
     if (!this.requireLogin() || this.data.committing) return;
     this.setData({ committing: true });
-    try { await api.battleCommit(); wx.showToast({ title: '军令和方案已出', icon: 'none' }); await this.load(); this.scrollToOrders(); }
+    try { await api.battleCommit(); wx.showToast({ title: '军令和方案已出', icon: 'none' }); await this.load(); }
     catch (error) {
       const code = businessGateCode(error);
       if (code === 'PLAN_EXPIRED') {
@@ -336,19 +284,9 @@ Page({
       wx.showToast({ title: '页面正在打开，请稍候', icon: 'none' });
     }
   },
-  // —— 执行区（原点兵逻辑整体迁入） ——
-  selectSegment(event) { this.setData({ segment: Number(event.currentTarget.dataset.index) }); },
-  openFirstOrder() { const first = this.data.pendingOrders[0]; if (first) navTo(`/packages/work/command/index?id=${encodeURIComponent(first.id)}`); },
-  deckAction() { if (this.data.pendingOrders.length) this.makeScript(); else if (this.data.orders.length) this.reviewToday(); else this.makeCommand(); },
-  focusAction() { if (this.data.pendingOrders.length) this.openFirstOrder(); else if (this.data.orders.length) this.reviewToday(); else this.makeCommand(); },
+  // —— 军令区（原点兵逻辑按设计稿收敛后迁入） ——
   makeCommand() { if (this.requireLogin()) navTo('/packages/main/chat/index?agentKey=general&continue=1&send=' + encodeURIComponent('按我们最近定下的方案，把今天最重要的 1-3 件事拆成今日军令，并给出每件事的完成标准。')); },
   makeGoalPlan() { if (this.requireLogin()) navTo('/packages/main/chat/index?agentKey=strat&continue=1&send=' + encodeURIComponent('帮我把目标拆成阶梯：本周、季度、年度、3-5 年各一句话，并给出关键指标。')); },
-  makeScript() {
-    if (!this.requireLogin()) return;
-    const first = this.data.pendingOrders[0];
-    const prompt = first ? `围绕这条军令帮我产出可直接使用的内容脚本：「${first.text}」。` : '按我们最近定下的方案，帮我写今天要发布的内容脚本。';
-    navTo(`/packages/main/chat/index?agentKey=ip&continue=1&send=${encodeURIComponent(prompt)}`);
-  },
   openReminders() { if (this.requireLogin()) navTo('/packages/work/reminders/index'); },
   openDaily() { if (this.requireLogin()) navTo('/packages/work/daily/index'); },
   chooseForce(event) {
@@ -425,7 +363,6 @@ Page({
     } catch (error) { store.handleApiError(error, { fallbackTitle: error.message || '回填未成，稍后再试' }); }
     finally { this.setData({ savingOrderResult: false }); }
   },
-  toggleDoneArchive() { this.setData({ showDoneArchive: !this.data.showDoneArchive }); },
   openOrder(event) { const id = event.currentTarget.dataset.id; if (id) navTo(`/packages/work/command/index?id=${encodeURIComponent(id)}`); },
   removeOrder(event) { const id = event.currentTarget.dataset.id; const text = event.currentTarget.dataset.text || '这条军令'; wx.showModal({ title: '删除军令', content: `确认删除「${text}」？`, confirmText: '删除', success: async (result) => { if (!result.confirm) return; await api.removeOrder(id).catch((error) => wx.showToast({ title: error.message || '删除失败', icon: 'none' })); await this.load(); } }); },
   inputBackfill(event) { this._backfill[event.currentTarget.dataset.field] = event.detail.value; },
