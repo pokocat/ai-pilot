@@ -11,7 +11,7 @@
 - `ClipWork` 新增任务开始时间 `createdAt` 与真实成片时间 `generatedAt`。作品卡按设备时区显示到分钟：生成中展示“开始生成”，完成/发布展示“生成时间”，同日多次出片也能快速区分。
 - 每张作品卡新增独立 44px“删除”命中区与二次确认，点击不再冒泡打开作品；删除成功后立即重算“全部 / 生成中 / 已完成”数量并从当前筛选移除。
 - 军师新增 `DELETE /api/video/works/:id` BFF 转发；AIStar 删除时取消该项目全部活跃生成任务、返回实际取消的 jobId，再将项目移入既有 30 天回收区；军师只按这些 jobId 逐单幂等退回对应预扣，已完成或已结算成片删除不退款。针对性测试只使用 mock/Mockito，不调用石榴、不消耗点数。
-- 已部署隔离预发：AIStar `549d0fb0-20260812T030337Z`、军师 `0c902ad`，两服务均 active、`NRestarts=0`，AIStar `force-mock=false`；只读模板返回 3 套，军师公网 health 为 `ok/db up`、pgvector 存量向量 `2/2`。`0c902ad` 原生 server 包已指向 `https://wxapi.aibuzz.cn/api_preprod` 并 auto-preview 到 AppID `wx810ebe6dfef8e75f`；发布验收没有创建石榴任务。
+- 已部署隔离预发：AIStar `f5e21ee5-20260812T031204Z`、军师 `0c902ad`，两服务均 active、`NRestarts=0`，AIStar `force-mock=false`；删除重试可继续返回原取消 jobId，避免响应中断时漏退积分。只读模板返回 3 套，军师公网 health 为 `ok/db up`、pgvector 存量向量 `2/2`。`0c902ad` 原生 server 包已指向 `https://wxapi.aibuzz.cn/api_preprod` 并 auto-preview 到 AppID `wx810ebe6dfef8e75f`；发布验收没有创建石榴任务。
 
 ### 2026-08-11 · AI 生成水印改为默认关闭 · 影响面：出片确认、作品预览、发布提示、AIStar 总装
 
