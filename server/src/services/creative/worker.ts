@@ -366,6 +366,9 @@ async function runAiEngine(
     manifesto = await (deps.manifesto ?? generateManifesto)({
       brief, brandKit: input.brandKit, fallbackPalette: philosophy.palette,
       tenantId: job.tenantId, userId: job.userId, allowPhoto,
+      // 高级档不给模型选路线的机会：给了选项它就可能选 graphic 且不给 subject，
+      // 而那会让一张已经付了高级价的单在路线归一处直接判失败（预发实测过一次）。
+      forcePhoto: isPremiumTier(brief),
     });
   } catch (e) {
     if (e instanceof JobCancelled) throw e;
