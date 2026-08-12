@@ -29,6 +29,7 @@ import {
   runWithEndpointCapture,
   type EndpointCapture,
 } from '../services/llmPool.js';
+import { chatMaxTokens } from './thinking.js';
 
 // 当前生效 provider（已就绪才返回 claude/openai，否则 null → mock 兜底）。
 function liveProvider(cfg: ResolvedAiConfig): 'claude' | 'openai' | null {
@@ -1062,11 +1063,20 @@ async function rawText(
   // 用输入摘要做稳定亲和键，既能跨双端点分流，又让同一抽取复用同端点缓存。
   const affinityKey = `aux:${createHash('sha1').update(system).update('\0').update(user).digest('hex').slice(0, 16)}`;
 
-  // maxTokens 只在调用方显式要求时传（缺省 undefined → provider 沿用 700 的辅助档预算，行为零变化）。
-  const mt = opts?.maxTokens ? { maxTokens: opts.maxTokens } : {};
-  const im = opts?.images?.length ? { images: opts.images } : {};
   // 缺省 false = 既有辅助抽取行为一字不变；只有显式要求的调用方（海报创作）才开思考。
   const allowThinking = opts?.allowThinking === true;
+  // maxTokens 只在调用方显式要求时传（缺省 undefined → provider 沿用 700 的辅助档预算，行为零变化）。
+  //
+  // ★ 开思考时必须把 maxTokens 换算成**净正文预算**（chatMaxTokens）：
+  //   `max_tokens` 在 Anthropic 协议里管的是「thinking + 正文」的总量，而 provider 侧的
+  //   `maxTokensForThinking` 只在 thinkingMode='enabled' 时加预留，**adaptive 档原样返回**。
+  //   线上正是 adaptive：于是 12000 全被思考吃掉，接口成功返回但正文是空串 → completeText 返回 null
+  //   → 引擎判「模型不可用」→ 整单回落模板。2026-08-12 预发实测到的就是这一格，
+  //   现象与 chat 路径当年那个「回复未完整结束」是同一个根因（见 thinking.chatMaxTokens 注释）。
+  const mt = opts?.maxTokens
+    ? { maxTokens: allowThinking ? chatMaxTokens(opts.maxTokens, useCfg, true) : opts.maxTokens }
+    : {};
+  const im = opts?.images?.length ? { images: opts.images } : {};
   let out: string;
   if (useLive === 'openai') {
     const { openaiRaw } = await import('./providers/openai.js');
