@@ -6,6 +6,12 @@
 
 ## 变更日志
 
+### 2026-08-11 · 预发全量开启新版问策页 · 影响面：预发功能开关、问策首屏、真机预览
+
+- 预发此前没有 `wence_entry` 行，服务端按默认关闭下发 `control`，因此真机仍展示旧军师列表。现已显式写入 `enabled=true` 与 `arms={control:0,dock:0,chat:100}`，游客和登录用户均全量进入新版“对话即 Tab”。
+- 重启 `junshi-api-preprod` 清除普通开关 60 秒内存缓存；服务 active、`NRestarts=0`，本机与公网 `GET /wence/hints` 均返回 `guestForm=chat`。
+- 原生 server 包 `9078b02` 已指向 `https://wxapi.aibuzz.cn/api_preprod` 并 auto-preview 到 AppID `wx810ebe6dfef8e75f`；本次只调整预发配置，没有修改生产开关。
+
 ### 2026-08-11 · 作品集补生成时间与删除闭环 · 影响面：作品列表、军师 BFF、AIStar 作品契约与任务状态
 
 - `ClipWork` 新增任务开始时间 `createdAt` 与真实成片时间 `generatedAt`。作品卡按设备时区显示到分钟：生成中展示“开始生成”，完成/发布展示“生成时间”，同日多次出片也能快速区分。
