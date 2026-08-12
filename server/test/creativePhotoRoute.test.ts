@@ -369,7 +369,11 @@ describe('排版层 · photo 变体提示词（全幅铺底 + 安全区叠层）
     route: { mode: 'photo', styleKey: 'mono_authority_portrait', subject: SUBJECT },
   };
 
-  /** 跑一轮引擎，回收两轮提示词（stub 渲染恒干净 → 创作 + 无条件打磨共两次调用）。 */
+  /**
+   * 跑一轮引擎，回收两轮提示词（stub 渲染恒干净 → 创作 + 无条件打磨共两次调用）。
+   * 显式关掉视觉评审：这一组钉的是 **photo 变体提示词**本身，评审开着会在中间插一次看图调用，
+   * 把 calls[1] 从「打磨轮」挪成「评审轮」——那测的就不是这里要测的东西了。
+   */
   async function prompts(photo: boolean): Promise<{ system: string; user: string }[]> {
     const calls: { system: string; user: string }[] = [];
     const complete: CompleteTextFn = async (system, user) => { calls.push({ system, user }); return html; };
@@ -381,7 +385,7 @@ describe('排版层 · photo 变体提示词（全幅铺底 + 安全区叠层）
       manifesto,
       assets: photo ? { visualUrl: 'data:image/png;base64,AAA' } : {},
       ...(photo ? { photoStyle: POSTER_STYLES.mono_authority_portrait } : {}),
-    }, { complete, render, moderateText: async () => true });
+    }, { complete, render, moderateText: async () => true, critique: async () => null });
     assert.equal(r.ok, true, r.ok ? '' : r.reason);
     return calls;
   }

@@ -427,6 +427,8 @@ async function runAiEngine(
         aiMode: o.aiMode,
         movement,
         rounds: o.poster.rounds,
+        visualCritiques: o.poster.visualCritiques,
+        critiquePassed: o.poster.critiquePassed,
         violationsFixed: o.poster.violationsFixed,
         polishReverted: o.poster.polishReverted,
         aiMarkInjected: o.poster.aiMarkInjected,

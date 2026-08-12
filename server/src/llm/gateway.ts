@@ -1036,7 +1036,23 @@ export async function providerInfo() {
 // 那种指定是有意的，不能被辅助档覆盖。
 async function rawText(
   cfg: ResolvedAiConfig, live: 'claude' | 'openai', system: string, user: string,
-  opts?: { allowAux?: boolean; maxTokens?: number; signal?: AbortSignal; usageMeta?: UsageMeta },
+  opts?: {
+    allowAux?: boolean; maxTokens?: number; signal?: AbortSignal; usageMeta?: UsageMeta;
+    /**
+     * 随本次补全一起发的图片（两端 provider 的 raw 出口都已支持，挂在 user 消息上）。
+     * 目前唯一调用方是海报 AI 排版引擎的「看图打磨」：把上一版渲染出的成品 PNG 交回模型，
+     * 让它像人一样先看画面再改代码。缺省不传 = 纯文本，既有辅助抽取行为零变化。
+     */
+    images?: { mediaType: string; base64: string }[];
+    /**
+     * 缺省 **false**（辅助抽取的既定行为，不动）。只有「产物本身要动脑子」的调用方才开：
+     * 海报的宣言与整页 HTML 创作属于这一类——上游 canvas-design 在 Claude Code 里就是
+     * 长思考之后才动笔的。注意开了之后 Anthropic 会把 temperature 强制为 1（见 thinking.ts），
+     * 所以**只有产出格式本身容错的调用方**能开：HTML 有 `<!DOCTYPE` 起始与围栏剥离兜底，
+     * 而依赖尾部格式约定的调用方（ask 块那类）绝不能开。
+     */
+    allowThinking?: boolean;
+  },
 ): Promise<string> {
   // 未配 aux 路由且未配 AI_AUX_MODEL 时原样返回，下面两行等于无操作（默认行为零变化）。
   const useCfg = opts?.allowAux === false ? cfg : await resolveAuxConfigAsync(cfg);
@@ -1048,13 +1064,16 @@ async function rawText(
 
   // maxTokens 只在调用方显式要求时传（缺省 undefined → provider 沿用 700 的辅助档预算，行为零变化）。
   const mt = opts?.maxTokens ? { maxTokens: opts.maxTokens } : {};
+  const im = opts?.images?.length ? { images: opts.images } : {};
+  // 缺省 false = 既有辅助抽取行为一字不变；只有显式要求的调用方（海报创作）才开思考。
+  const allowThinking = opts?.allowThinking === true;
   let out: string;
   if (useLive === 'openai') {
     const { openaiRaw } = await import('./providers/openai.js');
-    out = await openaiRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt, signal: opts?.signal });
+    out = await openaiRaw(useCfg, system, user, { allowThinking, affinityKey, ...mt, ...im, signal: opts?.signal });
   } else {
     const { claudeRaw } = await import('./providers/claude.js');
-    out = await claudeRaw(useCfg, system, user, { allowThinking: false, affinityKey, ...mt, signal: opts?.signal });
+    out = await claudeRaw(useCfg, system, user, { allowThinking, affinityKey, ...mt, ...im, signal: opts?.signal });
   }
   // 辅助调用（洞察/预言/势研判/履历/汇总/图谱等）此前不入 token_usage → 成本低估。按 kind='aux' 记入基建用量。
   recordAuxUsage(useCfg.model, useLive, `${system}\n${user}`, out, opts?.usageMeta);
@@ -1185,11 +1204,18 @@ export async function structured<S extends z.ZodTypeAny>(
  * 两个刻意的默认值：
  * · `maxTokens` 默认 4000（`rawText`/provider 的辅助档缺省是 700，会把一页 HTML 拦腰截断）；
  * · `allowAux: false` —— 这不是记忆抽取那类辅助任务，切到小模型等于把「画质」这件事交给最弱的模型。
+ *
+ * `images` / `allowThinking` 为海报引擎而加（缺省不传 = 老行为）：前者让模型看见自己上一版渲染出的
+ * 成品图再改，后者让它动笔前先想（两者的取舍见 rawText 上同名参数的注释）。
  */
 export async function completeText(
   system: string,
   user: string,
-  o: { maxChars?: number; maxTokens?: number; temperature?: number; model?: string } = {},
+  o: {
+    maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
+    images?: { mediaType: string; base64: string }[];
+    allowThinking?: boolean;
+  } = {},
 ): Promise<string | null> {
   const base = await getAiConfig();
   const live = liveProvider(base);
@@ -1201,6 +1227,8 @@ export async function completeText(
     const text = await rawText(cfg, live, system, user.slice(0, o.maxChars ?? 12_000), {
       allowAux: false,
       maxTokens: o.maxTokens ?? 4000,
+      ...(o.images?.length ? { images: o.images } : {}),
+      ...(o.allowThinking ? { allowThinking: true } : {}),
     });
     return text.trim() || null;
   } catch (err) {
