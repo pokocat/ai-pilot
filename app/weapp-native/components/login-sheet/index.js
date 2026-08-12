@@ -28,6 +28,9 @@ Component({
     'open,reason': function(open, reason) {
       store.setOverlay(Boolean(open), 'login-sheet');
       if (!open) return;
+      // 登录层会覆盖带原生 textarea 的对话页；先收起键盘，宿主页再用 showLogin
+      // 卸载 composer，避免 iOS 独立原生输入层继续截获头像与昵称区域的触摸。
+      try { wx.hideKeyboard(); } catch (_) { /* 当前没有键盘时无需处理 */ }
       let closeTop = 18; let closeRight = 18;
       try {
         const rect = wx.getMenuButtonBoundingClientRect();
@@ -165,7 +168,10 @@ Component({
     },
     chooseAvatar(event) {
       const filePath = event && event.detail && event.detail.avatarUrl;
-      if (!filePath) return;
+      if (!filePath) {
+        wx.showToast({ title: '未取得头像，请重新选择', icon: 'none' });
+        return;
+      }
       this.setData({ avatarLocal: filePath, avatarShown: filePath, nameFocus: !String(this.data.nickname || '').trim() });
     },
     inputNickname(event) { this.setData({ nickname: event.detail.value }); },

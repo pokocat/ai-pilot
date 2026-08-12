@@ -12,18 +12,18 @@
     <view class="settings-body">
       <view class="settings-section">
         <text class="settings-kicker">身份资料</text>
-        <view class="avatar-row" bindtap="chooseAvatar">
+        <button class="avatar-row avatar-authorize" open-type="chooseAvatar" bindchooseavatar="chooseAvatar" disabled="{{uploading}}">
           <view class="settings-avatar">
             <image wx:if="{{avatarUrl}}" src="{{avatarUrl}}" mode="aspectFill"></image>
             <text wx:else>主</text>
           </view>
           <view class="avatar-copy">
             <text class="row-title">{{uploading?'上传中…':'更换头像'}}</text>
-            <text class="row-desc">由你主动选择，不影响登录</text>
+            <text class="row-desc">从微信头像中选择，也可使用新头像</text>
           </view>
           <native-icon name="arrow" tone="neutral" size="17"></native-icon>
-        </view>
-        <view class="field"><text>称呼</text><input placeholder="{{name||'你希望军师如何称呼'}}" bindinput="inputName" /></view>
+        </button>
+        <view class="field"><text>称呼</text><input type="nickname" maxlength="20" value="{{name}}" placeholder="填写或选择微信昵称" bindinput="inputName" bindblur="inputName" /></view>
         <view class="field"><text>公司 / 品牌</text><input placeholder="{{company||'选填'}}" bindinput="inputCompany" /></view>
         <button class="save-btn" bindtap="saveIdentity">{{saving?'保存中…':'保存身份资料'}}</button>
       </view>

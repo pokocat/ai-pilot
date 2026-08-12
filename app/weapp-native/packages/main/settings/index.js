@@ -126,27 +126,24 @@ Page({
     }
   },
 
-  chooseAvatar() {
+  async chooseAvatar(event) {
     if (this.data.uploading) return;
-    wx.chooseMedia({
-      count: 1,
-      mediaType: ['image'],
-      sourceType: ['album', 'camera'],
-      success: async (result) => {
-        const file = result.tempFiles && result.tempFiles[0];
-        if (!file) return;
-        this.setData({ uploading: true });
-        try {
-          const value = await api.uploadAvatar(file.tempFilePath);
-          this.setData({ avatarUrl: value.avatarUrl || '' });
-          wx.showToast({ title: '头像已更新', icon: 'none' });
-        } catch (error) {
-          store.handleApiError(error, { fallbackTitle: error.message || '上传失败' });
-        } finally {
-          this.setData({ uploading: false });
-        }
-      },
-    });
+    const filePath = event && event.detail && event.detail.avatarUrl;
+    if (!filePath) {
+      wx.showToast({ title: '未取得头像，请重新选择', icon: 'none' });
+      return;
+    }
+    this.setData({ uploading: true, avatarUrl: filePath });
+    try {
+      const value = await api.uploadAvatar(filePath);
+      this.setData({ avatarUrl: value.avatarUrl || filePath });
+      wx.showToast({ title: '头像已更新', icon: 'none' });
+    } catch (error) {
+      await this.load().catch(() => {});
+      store.handleApiError(error, { fallbackTitle: error.message || '上传失败' });
+    } finally {
+      this.setData({ uploading: false });
+    }
   },
 
   async sendCode() {

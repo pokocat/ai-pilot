@@ -8,7 +8,7 @@
       <block wx:if="{{authed}}">
         <view class="account-user-card account-service-card">
           <view class="service-card-top">
-            <image wx:if="{{avatarUrl}}" class="au-av service-avatar" src="{{avatarUrl}}" mode="aspectFill"></image>
+            <image wx:if="{{avatarUrl}}" class="au-av service-avatar" src="{{avatarUrl}}" mode="aspectFill" bindtap="openIdentity"></image>
             <view wx:else class="au-av service-avatar au-av-ph serif" bindtap="openIdentity">{{nameInitial}}</view>
             <view class="sct-b" bindtap="openIdentity"><text class="account-profile-name serif">{{name}}</text><text class="account-profile-role">{{company}}</text></view>
             <text class="member-pill" bindtap="openPlans">{{planName}}</text>

@@ -519,6 +519,30 @@ test('新账号恢复称呼头像并自动进入本命色与首判仪式', () =>
   assert.match(h5Login, /Taro\.navigateTo\(\{ url: '\/packages\/main\/onboarding\/index' \}\)/);
 });
 
+test('iOS 登录补档不得被底层原生输入框拦截，头像无结果必须有反馈', () => {
+  const sessionsWxml = fs.readFileSync(path.join(sourceRoot, 'pages/sessions/index.wxml'), 'utf8');
+  const chatWxml = fs.readFileSync(path.join(sourceRoot, 'packages/main/chat/index.wxml'), 'utf8');
+  const login = fs.readFileSync(path.join(sourceRoot, 'components/login-sheet/index.js'), 'utf8');
+
+  assert.match(sessionsWxml, /wx:if="\{\{!coachOn && !showLogin\}\}" is="chat-composer"/, '问策登录层打开时必须卸载原生 textarea');
+  assert.match(chatWxml, /wx:if="\{\{!showLogin\}\}" is="chat-composer"/, '独立对话登录层打开时必须卸载原生 textarea');
+  assert.match(login, /if \(!open\) return;[\s\S]{0,260}wx\.hideKeyboard\(\)/, '登录层打开时必须主动收起宿主页键盘');
+  assert.match(login, /chooseAvatar\(event\)[\s\S]{0,220}未取得头像，请重新选择/, '头像组件未返回临时地址时不得静默无响应');
+});
+
+test('个人设置使用微信头像昵称组件并保存到现有身份接口', () => {
+  const settings = fs.readFileSync(path.join(sourceRoot, 'packages/main/settings/index.js'), 'utf8');
+  const settingsWxml = fs.readFileSync(path.join(sourceRoot, 'packages/main/settings/index.wxml'), 'utf8');
+  const profileWxml = fs.readFileSync(path.join(sourceRoot, 'pages/profile/index.wxml'), 'utf8');
+
+  assert.match(settingsWxml, /<button class="avatar-row avatar-authorize" open-type="chooseAvatar" bindchooseavatar="chooseAvatar"/);
+  assert.match(settingsWxml, /<input type="nickname"[^>]*bindinput="inputName"[^>]*bindblur="inputName"/);
+  assert.doesNotMatch(settings, /wx\.chooseMedia\(/, '设置头像不得绕回普通相册选择器');
+  assert.match(settings, /async chooseAvatar\(event\)[\s\S]{0,500}api\.uploadAvatar\(filePath\)/);
+  assert.match(settings, /saveIdentity\(\)[\s\S]{0,400}api\.updateIdentity\(\{ name, company \}\)/);
+  assert.match(profileWxml, /wx:if="\{\{avatarUrl\}\}"[^>]*bindtap="openIdentity"/, '已有头像也必须能点进身份设置');
+});
+
 test('只附文件或图片也能发送，客户端补自然请求而不是要求额外打字', () => {
   const helperPath = path.join(sourceRoot, 'services/chat-reply.js');
   delete cjsRequire.cache[cjsRequire.resolve(helperPath)];
@@ -636,7 +660,7 @@ test('对话核心抽到主包 chat-core，分包页只留页头与导航', () =
   assert.match(pageWxml, /<import src="\/chat-core\/composer\.wxml">/);
   assert.match(pageWxml, /<template is="chat-message-list" data="\{\{[^"]*messages[^"]*\}\}"/);
   // 教学层期间输入行整体让位（wx:if="{{!coachOn}}"），所以这里允许模板带条件渲染。
-  assert.match(pageWxml, /<template (?:wx:if="\{\{![a-zA-Z]+\}\}" )?is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
+  assert.match(pageWxml, /<template (?:wx:if="[^"]+" )?is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
   assert.doesNotMatch(pageWxml, /<textarea\b|class="chat-stream"/, '消息流与输入区已进模板，页面只保留页头与外壳');
   assert.match(pageScss, /@use "\.\.\/\.\.\/\.\.\/chat-core\/chat-core\.scss"/);
   assert.doesNotMatch(pageScss, /\.composer-box|\.ask-card|\.paste-card/, '可共享样式已迁走，页面 SCSS 只留页面外壳');
@@ -698,7 +722,7 @@ test('问策 tab 按 wenceForm 分形态：control 一行不动，chat 走对话
 
   // —— 底部合体浮岛：composer 模板 + 分隔线 + 与 custom-tab-bar 同源的五 tab ——
   assert.match(wxml, /<import src="\/chat-core\/composer\.wxml">/);
-  assert.match(wxml, /<template (?:wx:if="\{\{![a-zA-Z]+\}\}" )?is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
+  assert.match(wxml, /<template (?:wx:if="[^"]+" )?is="chat-composer" data="\{\{[^"]*composerOdd[^"]*\}\}"/);
   assert.match(wxml, /class="wence-isle[^"]*"[\s\S]*?class="isle-div"[\s\S]*?class="tabbar-inner"/, '浮岛顺序：输入行 → 细线 → tab 行');
   assert.match(wxml, /bindtap="switchIsleTab"/);
   assert.match(js, /require\('\.\.\/\.\.\/services\/tabbar'\)/, '浮岛 tab 与底栏共用 services/tabbar.js');
@@ -1830,8 +1854,8 @@ test('教学层展示期间问策浮岛让位，不遮挡面板', () => {
   assert.match(wxml, /<coach-marks bindcoachstate="onCoachState">/, '问策页必须接住教学层状态');
   assert.match(js, /onCoachState\(event\)[\s\S]{0,320}setData\(\{ coachOn \}\)/);
   // 输入行、分隔线、提示 pill 三者在教学期间都要让位；tab 行保留（箭头指的就是它）。
-  assert.match(wxml, /<template wx:if="\{\{!coachOn\}\}" is="chat-composer"/, '教学期间输入行必须收起');
-  assert.match(wxml, /wx:if="\{\{!coachOn\}\}" class="isle-div"/);
+  assert.match(wxml, /<template wx:if="\{\{!coachOn && !showLogin\}\}" is="chat-composer"/, '教学或登录期间输入行必须收起');
+  assert.match(wxml, /wx:if="\{\{!coachOn && !showLogin\}\}" class="isle-div"/);
   assert.match(wxml, /class="wence-pill"|!coachOn && !drawerOpen/, '教学期间提示 pill 必须收起');
   assert.match(wxml, /class="tabbar-inner"/, 'tab 行必须保留——教学箭头指的就是底栏');
 });
