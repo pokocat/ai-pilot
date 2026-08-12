@@ -1215,13 +1215,28 @@ export async function completeText(
     maxChars?: number; maxTokens?: number; temperature?: number; model?: string;
     images?: { mediaType: string; base64: string }[];
     allowThinking?: boolean;
+    /**
+     * 单次请求的挂钟超时，覆盖全局 `OPENAI_TIMEOUT_MS`（缺省 60s）。
+     *
+     * 为海报而加，2026-08-12 预发实测：一整页手写 HTML/CSS（开思考、上万 token 产出，打磨轮还带一张
+     * 成品图作输入）**跑不进 60s**——`completeText` 超时返回 null，引擎当成「模型不可用」直接回落模板。
+     * 也就是说画质最高的那条路径会被一个与它无关的全局旋钮悄悄掐死。
+     * 不改全局值：那个 60s 罩着对话等所有链路，为海报调宽它等于让别的链路陪着一起等。
+     * cfg 里改了就够——`llmPool.toCfg` 会把 base 整份铺到每个候选端点上。
+     */
+    timeoutMs?: number;
   } = {},
 ): Promise<string | null> {
   const base = await getAiConfig();
   const live = liveProvider(base);
   if (!live) return null;
-  const cfg: ResolvedAiConfig = (o.temperature != null || o.model)
-    ? { ...base, ...(o.temperature != null ? { temperature: o.temperature } : {}), ...(o.model ? { model: o.model } : {}) }
+  const cfg: ResolvedAiConfig = (o.temperature != null || o.model || o.timeoutMs)
+    ? {
+      ...base,
+      ...(o.temperature != null ? { temperature: o.temperature } : {}),
+      ...(o.model ? { model: o.model } : {}),
+      ...(o.timeoutMs ? { timeoutMs: o.timeoutMs } : {}),
+    }
     : base;
   try {
     const text = await rawText(cfg, live, system, user.slice(0, o.maxChars ?? 12_000), {

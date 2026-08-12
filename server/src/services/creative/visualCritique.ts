@@ -170,7 +170,10 @@ export function parseCritique(raw: string | null | undefined): VisualCritique | 
 export type CritiqueCompleteFn = (
   system: string,
   user: string,
-  o: { maxChars?: number; maxTokens?: number; temperature?: number; images?: { mediaType: string; base64: string }[] },
+  o: {
+    maxChars?: number; maxTokens?: number; temperature?: number; timeoutMs?: number;
+    images?: { mediaType: string; base64: string }[];
+  },
 ) => Promise<string | null>;
 
 /**

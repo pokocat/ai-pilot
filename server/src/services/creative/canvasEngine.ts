@@ -34,8 +34,14 @@ import { critiqueDirective, requestVisualCritique, type VisualCritique } from '.
 import type { NormalizedPosterBrief } from './schema.js';
 import type { PosterManifesto } from './manifesto.js';
 
-/** HTML 相关的 LLM 调用上限（生成 1 + 打磨/修复 3）。 */
-export const MAX_HTML_CALLS = 4;
+/**
+ * HTML 相关的 LLM 调用上限（生成 1 + 打磨/修复 2）。
+ *
+ * 曾在 2026-08-12 提到 4，当天预发实测后改回 3：开思考 + 上万 token 产出 + 打磨轮带图，
+ * 单轮挂钟就要 1–2.5 分钟，第 4 轮**在整段预算里根本排不下**。留着它就是一个不会兑现的承诺
+ * （与当初删掉 `_MAX_CONCURRENCY` 同一条教训：旋钮写得出来、跑起来永远到不了）。
+ */
+export const MAX_HTML_CALLS = 3;
 /**
  * 视觉评审（看图）调用上限。它是**顾问**不是闸门，所以单独计数、单独设顶：
  * 评审失灵最多退化成「没有评审」的老行为，不占 HTML 轮次，也不该把预算烧在看图上。
@@ -45,19 +51,37 @@ export const MAX_VISION_CALLS = 2;
 /**
  * 整段预算（含全部 LLM 往返与渲染）。超时即用手上最好的结果，没有就回落模板。
  *
- * ★ 300s 这个数受 `worker.STALE_RUNNING_MS`（10min）约束，不是随手写的：
+ * ★ 360s 这个数受 `worker.STALE_RUNNING_MS`（10min）约束，不是随手写的：
  *   `runAiEngine` 的 `budget()` 从**它自己开始**算，所以这一个数同时罩住宣言 + 主视觉生图 + 排版全程；
  *   加上上传与结算，一单的挂钟时间要稳稳落在 sweep 判卡死的 10 分钟内，否则同一单被跑两遍、出两张资产。
- *   180s → 300s 是为了容下「创作 → 看图 → 打磨 → 再看图 → 再打磨」这条闭环（老的 180s 只够创作 + 一轮）。
- *   photo 子路失败退回 graphic 时两次排版**共享**这一个预算，最坏情况见 worker.runAiEngine 的注释。
+ *   算过的最坏情况：360s 排版 + 90s（photo 失败退回 graphic 的下限余量）+ 宣言约 40s + 上传约 15s ≈ 505s。
+ *   180s → 360s 是为了容下「创作 → 看图 → 打磨 → 看图 → 打磨」这条闭环：单轮 HTML 开了思考之后
+ *   挂钟就要 1–2.5 分钟（2026-08-12 预发实测），老的 180s 连「创作 + 一轮打磨」都跑不完就超时了。
  */
-export const AI_ENGINE_BUDGET_MS = 300_000;
+export const AI_ENGINE_BUDGET_MS = 360_000;
 /**
  * 单次渲染的下限超时。渲染超时取「后台配的 timeoutMs」与「本引擎剩余预算」的较小值——
  * 否则运营把渲染超时配到 480s 时，一次渲染就能把整段预算连同 sweep 的 10 分钟一起吃穿。
  * 给 15s 下限是不让剩余预算见底时传一个 0/负数进去（那等于每次渲染必超时）。
  */
 const MIN_RENDER_TIMEOUT_MS = 15_000;
+/**
+ * 单次 HTML 生成的挂钟上限，**覆盖全局 `OPENAI_TIMEOUT_MS`（60s）**。
+ *
+ * 2026-08-12 预发实测（`model=dj-claude-4.6-opus`、`thinkingMode=adaptive`）：创作轮勉强压线，
+ * 打磨轮因为输入多了「上一版 HTML + 成品图」直接撞 60s → `completeText` 返回 null →
+ * 引擎判「打磨轮模型调用失败」→ 整单回落模板。**画质最高的那条路径被一个与画质无关的全局旋钮掐死**，
+ * 而且现象是「悄悄变成模板图」，不看 `aiEngineError` 根本发现不了。
+ */
+const MAX_LLM_TIMEOUT_MS = 150_000;
+/**
+ * 起新一轮的最低剩余预算。低于它就不再开新一轮——**不是为了省钱，是为了不越过 deadline**：
+ * 单次 LLM 调用的超时被 `min(MAX_LLM_TIMEOUT_MS, 剩余预算)` 夹住，只要开轮时剩余 ≥ 这个数，
+ * 这一轮就一定在 deadline 之前收尾，整单也就不会漂到 sweep 的 10 分钟以外。
+ */
+const MIN_LLM_TIMEOUT_MS = 60_000;
+/** 看图评审的挂钟上限：它只写一行判定 + 几条意见，产出很短，不需要按创作轮那样给。 */
+const CRITIQUE_TIMEOUT_MS = 60_000;
 /**
  * 单次 HTML 生成的 token 预算。
  * 6000 → 12000（2026-08-12）：一页有密度的手写 HTML/CSS，光 CSS 就能写掉 4k token，
@@ -292,6 +316,8 @@ export type CompleteTextFn = (
     images?: { mediaType: string; base64: string }[];
     /** 创作与打磨轮开思考（上游 canvas-design 也是想清楚才动笔）。 */
     allowThinking?: boolean;
+    /** 单次调用挂钟上限，覆盖全局 OPENAI_TIMEOUT_MS（整页 HTML 跑不进那 60s）。 */
+    timeoutMs?: number;
   },
 ) => Promise<string | null>;
 
@@ -450,7 +476,10 @@ export async function generateCanvasPoster(
   const now = deps.now ?? (() => Date.now());
   const moderateText = deps.moderateText ?? ((t: string) => moderate('output', t));
   const deadline = now() + (input.budgetMs ?? AI_ENGINE_BUDGET_MS);
-  const outOfTime = (): boolean => now() >= deadline;
+  const remaining = (): number => deadline - now();
+  const outOfTime = (): boolean => remaining() <= 0;
+  /** 单次 LLM 调用的挂钟上限：被剩余预算夹住，保证任何一轮都不会跨过 deadline。 */
+  const llmTimeout = (): number => Math.min(MAX_LLM_TIMEOUT_MS, Math.max(0, remaining()));
   /**
    * 本次渲染允许用多久 = min(后台配的渲染超时, 本引擎剩余预算)，下限 MIN_RENDER_TIMEOUT_MS。
    * 没有这一层的话，运营把渲染超时配到上限 480s 时，单次渲染就能越过本引擎的整段预算，
@@ -506,7 +535,10 @@ export async function generateCanvasPoster(
   const user = canvasUserPrompt({ ...input, photo });
   /** 缺省实现走同一个 complete（带图发出去），测试可注入桩绕开真实模型。 */
   const critique: CritiqueFn = deps.critique
-    ?? ((i) => requestVisualCritique(i, (s, u, o) => complete(s, u, o)));
+    ?? ((i) => requestVisualCritique(i, (s, u, o) => complete(s, u, {
+      ...o,
+      timeoutMs: Math.min(CRITIQUE_TIMEOUT_MS, Math.max(0, remaining())),
+    })));
 
   let calls = 0;
   let firstViolationCount = 0;
@@ -518,8 +550,10 @@ export async function generateCanvasPoster(
   let reason = '未知原因';
 
   while (calls < MAX_HTML_CALLS) {
-    if (outOfTime()) {
-      reason = `AI 引擎超出 ${input.budgetMs ?? AI_ENGINE_BUDGET_MS}ms 预算`;
+    // 剩余预算不足以完整跑完一轮就别开这一轮：开了也只会在半路被自己的超时掐断，
+    // 白烧一次调用还什么都拿不到（手上若已有干净图，循环外会照常把它交出去）。
+    if (remaining() < MIN_LLM_TIMEOUT_MS) {
+      reason = `AI 引擎剩余预算不足一轮（总预算 ${input.budgetMs ?? AI_ENGINE_BUDGET_MS}ms）`;
       break;
     }
     // 第一次是「创作」，之后按手上有什么决定打磨的依据，优先级：
@@ -548,6 +582,8 @@ export async function generateCanvasPoster(
       // 动笔前先想：上游 canvas-design 在 Claude Code 里就是长思考之后才写第一行代码的。
       // HTML 的产出格式容错（有 <!DOCTYPE 起始 + 围栏剥离兜底），不怕 thinking 把格式约定带偏。
       allowThinking: true,
+      // 覆盖全局 60s：整页 HTML 跑不进那个数（见 MAX_LLM_TIMEOUT_MS 的实测记录）。
+      timeoutMs: llmTimeout(),
       ...(images ? { images } : {}),
     });
     if (!raw) {
@@ -566,7 +602,9 @@ export async function generateCanvasPoster(
       lastClean = r.attempt;
       // 量测干净只说明「没排坏」，不说明「好看」。这里请艺术总监看一眼真图再决定收不收工。
       let verdict: VisualCritique | null = null;
-      if (visionCalls < MAX_VISION_CALLS && !outOfTime()) {
+      // 剩余预算连一次评审都放不下时就别看了：评审的价值全在「看完还能再改一轮」，
+      // 改不动了才去看，纯属白花一次调用。
+      if (visionCalls < MAX_VISION_CALLS && remaining() > CRITIQUE_TIMEOUT_MS) {
         visionCalls++;
         try {
           verdict = await critique({ png: r.attempt.buffer, brief: input.brief, manifesto: input.manifesto, photo });

@@ -66,11 +66,15 @@ type StubCall = {
   /** 本轮是否把上一版成品图发了过去（看图打磨的断言锚点）。 */
   hasImage: boolean;
   allowThinking: boolean;
+  timeoutMs?: number;
 };
 function stubComplete(replies: (string | null)[]): { fn: CompleteTextFn; calls: StubCall[] } {
   const calls: StubCall[] = [];
   const fn: CompleteTextFn = async (system, user, o) => {
-    calls.push({ system, user, hasImage: !!o?.images?.length, allowThinking: !!o?.allowThinking });
+    calls.push({
+      system, user, hasImage: !!o?.images?.length, allowThinking: !!o?.allowThinking,
+      ...(o?.timeoutMs ? { timeoutMs: o.timeoutMs } : {}),
+    });
     return replies[calls.length - 1] ?? null;
   };
   return { fn, calls };
@@ -390,12 +394,14 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
     assert.ok(!r.ok && /量测未生效/.test(r.reason));
   });
 
+  // 预算数值要贴着真实量级写：引擎的开轮闸是「剩余 < 60s 就不开新一轮」（单轮 HTML 开思考
+  // 挂钟 1–2.5 分钟，剩 30s 开一轮只会被自己的超时掐断）。所以这里给 90s 预算 + 每轮走 70s：
+  // 第一轮开得起来，跑完剩 20s，第二轮被闸住。用 500ms/700ms 那种玩具数值会连第一轮都开不了。
   test('超预算但手上有干净图 → 交那张（rounds=1 是唯一一种打磨没跑完的合法形态）', async () => {
     let t = 0;
     const c = stubComplete([okHtml('a'), okHtml('b')]);
-    // 每次 LLM 调用推进 700ms；预算 500ms → 第一轮跑完就超预算
-    const complete: CompleteTextFn = async (s, u) => { const r = await c.fn(s, u); t += 700; return r; };
-    const r = await runEngine(complete, stubRender([[], []]).fn, { budgetMs: 500, now: () => t });
+    const complete: CompleteTextFn = async (s, u) => { const r = await c.fn(s, u); t += 70_000; return r; };
+    const r = await runEngine(complete, stubRender([[], []]).fn, { budgetMs: 90_000, now: () => t });
     assert.equal(r.ok, true);
     assert.ok(r.ok && r.poster.rounds === 1);
     assert.equal(c.calls.length, 1, '超预算就不再开新一轮');
@@ -404,8 +410,8 @@ describe('AI 排版引擎 · refine 闭环（无条件打磨是核心机制，�
   test('超预算且手上没有干净图 → ok:false（回落模板，不交违规产物）', async () => {
     let t = 0;
     const c = stubComplete([okHtml('a'), okHtml('b')]);
-    const complete: CompleteTextFn = async (s, u) => { const r = await c.fn(s, u); t += 700; return r; };
-    const r = await runEngine(complete, stubRender([[marginViolation]]).fn, { budgetMs: 500, now: () => t });
+    const complete: CompleteTextFn = async (s, u) => { const r = await c.fn(s, u); t += 70_000; return r; };
+    const r = await runEngine(complete, stubRender([[marginViolation]]).fn, { budgetMs: 90_000, now: () => t });
     assert.equal(r.ok, false);
     assert.ok(!r.ok && /预算/.test(r.reason), `原因应指明超预算：${!r.ok ? r.reason : ''}`);
   });
@@ -549,6 +555,20 @@ describe('AI 排版引擎 · 看图打磨闭环', () => {
     assert.equal(c.calls[0].hasImage, false, '首轮没有"上一版"可看');
     assert.equal(c.calls[1].hasImage, true, '★ 这一条就是本次改动的核心：作者必须看见自己画成了什么样');
     assert.match(c.calls[1].system, /右下角留白塌了/, '评审意见要逐条回喂，不是喂个"再改改"');
+  });
+
+  // ★ 2026-08-12 预发实锤：全局 OPENAI_TIMEOUT_MS=60s，而整页 HTML（开思考、上万 token 产出，
+  //   打磨轮还带一张图作输入）跑不进 60s → completeText 返回 null → 引擎判「模型调用失败」→
+  //   整单悄悄回落模板。**画质最高的那条路径被一个与画质无关的全局旋钮掐死**，现象只是「图变模板了」。
+  //   这条用例钉住「海报调用必须自带超时」，删掉它这个坑会原样回来。
+  test('每轮 HTML 调用都自带超时，且不小于全局那 60s（否则整页 HTML 必被掐断）', async () => {
+    const c = stubComplete([okHtml('first'), okHtml('polished')]);
+    await runEngine(c.fn, stubRender([[], []]).fn, {
+      critique: stubCritique([{ pass: false, notes: ['再收一点'] }, { pass: true, notes: [] }]).fn,
+    });
+    for (const call of c.calls) {
+      assert.ok(call.timeoutMs && call.timeoutMs >= 60_000, `本轮没带够超时：${call.timeoutMs}`);
+    }
   });
 
   test('评审看的是刚渲染出来的那一张（不是上一轮的旧图）', async () => {

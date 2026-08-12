@@ -383,8 +383,12 @@ async function runAiEngine(
   const moderateText = (t: string): Promise<boolean> =>
     // 交付闸门带任务上下文：审核记录要能落到这单头上（与宣言过审同一口径）。
     moderate('output', t, { tenantId: job.tenantId, userId: job.userId });
-  // 预算扣掉已花的时间，且至少留 30s（不留余量的话超时判定会在第一轮就命中，等于从不启用）。
-  const budget = (): number => Math.max(30_000, AI_ENGINE_BUDGET_MS - (Date.now() - startedAt));
+  // 预算扣掉已花的时间，且至少留 90s。
+  // 这个下限 2026-08-12 从 30s 提到 90s：引擎侧现在要求「剩余 < 60s 就不开新一轮」
+  // （单轮 HTML 开了思考挂钟就要 1–2.5 分钟），30s 的余量意味着 photo 烧穿预算后
+  // graphic 那次重排**一轮都开不了**，三层回落链的中间那层等于不存在。
+  // 最坏情况仍在 sweep 的 10 分钟内：360s 排版 + 90s 下限 + 宣言约 40s + 上传约 15s ≈ 505s。
+  const budget = (): number => Math.max(90_000, AI_ENGINE_BUDGET_MS - (Date.now() - startedAt));
 
   const compose = async (assets: TemplateAssets, photoStyle: ResolvedPosterRoute['style'] | null): Promise<CanvasAttempt> => {
     try {
