@@ -5,6 +5,8 @@ const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo } = require('../../services/nav');
 const { baseData, syncTabBar } = require('../../services/page');
+// mock 数据档案：只有 mock 包才渲染角标，非 mock 构建下这几行是死代码（留着无害）。
+const mockProfile = require('../../services/mockProfile');
 
 const PHASE_WORD = { 进攻: '攻', 防守: '守', 平稳: '稳中蓄力' };
 
@@ -115,6 +117,7 @@ Page({
       themeClass: state.themeClass,
       colorKey: state.colorKey,
       isMock: state.mock,
+      mockProfileLabel: state.mock ? mockProfile.label() : '',
       authed: state.authed,
       onboarded: state.onboarded,
       onboardingKnown: state.onboardingKnown,
@@ -219,6 +222,10 @@ Page({
       goalRows: goalRows(dossier && dossier.goals), backfill,
       loading: false,
     });
+  },
+  /** MOCK 角标即档案开关：切「经营中 / 空态」后重取本页数据，用来验收满态与空态两种排版。 */
+  switchMockProfile() {
+    mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load(); });
   },
   requireLogin() { if (store.isAuthed()) return true; this.setData({ showLogin: true }); return false; },
   closeLogin() { this.setData({ showLogin: false }); },

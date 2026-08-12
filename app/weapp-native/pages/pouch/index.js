@@ -13,6 +13,8 @@ const { api } = require('../../services/api');
 const store = require('../../services/store');
 const { navTo } = require('../../services/nav');
 const { baseData, syncTabBar } = require('../../services/page');
+// mock 数据档案：只有 mock 包才渲染角标，非 mock 构建下这几行是死代码（留着无害）。
+const mockProfile = require('../../services/mockProfile');
 
 /** 分类型复出动词（文案铁律，不得改写）：海报「再来一张」、成片「再出一条」、方案「改一版」。 */
 const TYPES = {
@@ -151,6 +153,7 @@ Page({
     const state = store.snapshot();
     this.setData({
       themeClass: state.themeClass, colorKey: state.colorKey, isMock: state.mock,
+      mockProfileLabel: state.mock ? mockProfile.label() : '',
       authed: state.authed,
     });
     syncTabBar(this, 2);
@@ -195,6 +198,11 @@ Page({
       .concat(agents.filter((agent) => agent && text(agent.type) === 'creative' && text(agent.key)).map(craftFromAgent));
 
     this.setData({ authed, recent, crafts, loading: false });
+  },
+
+  /** MOCK 角标即档案开关：切「经营中 / 空态」后重取本页数据（作品流与手艺格计数一起变）。 */
+  switchMockProfile() {
+    mockProfile.switchProfile(() => { this.setData({ mockProfileLabel: mockProfile.label() }); this.load(); });
   },
 
   requireLogin() {

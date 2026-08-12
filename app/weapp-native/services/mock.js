@@ -1,5 +1,14 @@
 const { setToken } = require('./token');
 const { GUEST_PRELUDE, FALLBACK_HINTS } = require('../data/wence-defaults');
+// 数据档案（services/mockProfile.js）：真机 mock 包在页面角标上切「经营中 / 空态」，
+// 用来在同一个包里验收两种页面形态。分叉只发生在下面标了「档案」的数据工厂里——
+// 存储口径、写入路径与其余函数一律不变，别为了空态再复制一份 mock。
+// 档案的取舍：「经营中」= 有种子；存储里已经有更真的那一份（refreshForces 的三势、
+// 已存的案卷 / 复盘 / 方案 / 海报任务）一律优先，种子只在这份账号还什么都没有时兜底。
+// 「空态」= 直接回空，既不读存储也不写种子，切回「经营中」时数据还在。
+const mockProfile = require('./mockProfile');
+function dataProfile() { return mockProfile.current(); }
+function isEmptyProfile() { return dataProfile() === 'empty'; }
 
 const DEFAULT_AGENTS = [
   { key: 'general', name: '总军师', role: '通用商业军师', type: 'general', billing: 'free', price: 0, owned: true, enabled: true, greet: '说说你的处境，我先判断主要矛盾，再调度专业军师。' },
@@ -152,6 +161,38 @@ function buildBattleForces(profile) {
     { kind: 'people', label: '人势', level: 'mid', conclusion: '人手和注意力只压在一个可验证结果上。', tactic: '先聚焦', note: `避免同时铺开多条战线。 ${evidenceNote}` },
   ];
 }
+// —— 档案 · 判断层种子（战局页顶部一张牌 + 三势一行 + 判断依据抽屉） ——
+const FULL_MAIN_CONTRADICTION = '线索不缺，缺的是到店转化——本周一切动作围绕到店率';
+const FULL_BATTLE_FORCES = [
+  { kind: 'sky', label: '天势', level: 'strong', conclusion: '开学季客流回升，未来三周是窗口。', tactic: '借势推', note: '同商圈近两周人流环比 +18%，开学前后是全年第二个高峰。' },
+  { kind: 'market', label: '市势', level: 'mid', conclusion: '同商圈三家竞对都在打折，硬拼价格会先伤客单。', tactic: '差异打', note: '三家竞对主打低价体验券；你的底子是服务口碑，不该被拖到同一条价格赛道上。' },
+  { kind: 'people', label: '人势', level: 'weak', conclusion: '老客口碑未外显，好评只留在私聊里。', tactic: '先聚焦', note: '近 30 天 11 条好评全在微信私聊，没有一条被做成能外发的见证物料。' },
+];
+const FULL_NEXT_QUESTIONS = ['门店近 30 天的到店人数和成交，能给我一组真实数吗？', '三家竞对里，客人最常拿来跟你比的是哪一家？'];
+const FULL_EVIDENCE_COUNT = { profile: 1, memories: 0, projects: 1, knowledge: 2, sessions: 3 };
+const EMPTY_UNDERSTANDING_SUMMARY = '我还没有足够资料下判断。把基本情况补齐，后面的建议才能贴着你的真实业务走。';
+/**
+ * 档案分叉点：understanding。
+ * 空态 → 三势 / 主要矛盾 / 待补问题 / 证据计数全无，战局页因此出「三势还没断」。
+ * 经营中 → 三势与主要矛盾优先用存储里的真值（refreshForces / 三问填过的 pain），
+ *          没有才落种子；待补问题与证据计数固定用种子，走查要的是「还差两问」的形态。
+ */
+function understandingView(base) {
+  if (isEmptyProfile()) {
+    return Object.assign({}, base, {
+      maturity: 'empty', summary: EMPTY_UNDERSTANDING_SUMMARY, mainContradiction: null,
+      battleForces: [], nextQuestions: [], evidenceCount: {},
+    });
+  }
+  const contradiction = base.mainContradiction || FULL_MAIN_CONTRADICTION;
+  return Object.assign({}, base, {
+    maturity: 'ready', summary: contradiction, mainContradiction: contradiction,
+    battleForces: base.battleForces && base.battleForces.length ? base.battleForces : FULL_BATTLE_FORCES.map((item) => Object.assign({}, item)),
+    nextQuestions: FULL_NEXT_QUESTIONS.slice(),
+    evidenceCount: Object.assign({}, FULL_EVIDENCE_COUNT),
+  });
+}
+
 function me() {
   const identity = wx.getStorageSync(storageKey('identity')) || {};
   const profile = wx.getStorageSync(storageKey('profile')) || null;
@@ -182,7 +223,7 @@ function me() {
     user: Object.assign({ id: wx.getStorageSync('junshi.userId') || 'mock-user', name: '', company: '', phone: '', benmingColor: wx.getStorageSync('junshi.color') || 'green' }, identity),
     tenant: { id: `mock-tenant-${wx.getStorageSync('junshi.userId') || 'guest'}`, name: identity.company || '', industry: profile && profile.industry || null, stage: profile && profile.stage || null },
     onboarded: Boolean(profile) || wx.getStorageSync('junshi.onboarded') === '1',
-    understanding: { title: '个人档案', subtitle: '军师有多了解你的生意', maturity, summary, mainContradiction: pain ? summary : null, battleForces, nextQuestions: nextQuestions.slice(0, 4), evidenceCount, sections: [], updatedAt: forcesUpdatedAt },
+    understanding: understandingView({ title: '个人档案', subtitle: '军师有多了解你的生意', maturity, summary, mainContradiction: pain ? summary : null, battleForces, nextQuestions: nextQuestions.slice(0, 4), evidenceCount, sections: [], updatedAt: forcesUpdatedAt }),
     plan,
     creditBalance: mockCreditBalance(),
     tokenQuota: { limit: plan ? 100 : 0, used: 0, remaining: plan ? 100 : 0, unlimited: false },
@@ -232,15 +273,30 @@ function journey() {
     ? { stage: 'diagnosing', diagRound: 2, nextStep: { key: 'continue_diagnosis', title: '继续完善当前判断', desc: '把打法聊定，方案定了就自动拆成军令。', route: 'chat' } }
     : { stage: 'new', diagRound: 0, nextStep: { key: 'scan', title: '先做一次军师首判', desc: '三问形成第一份判断', route: '/packages/work/quickscan/index' } });
 }
+function profileSection(ready) {
+  return { key: 'profile', label: '老板与企业档案', hint: '行业、阶段、当前难题', count: ready ? 1 : 0, ready: Boolean(ready) };
+}
+// 档案 · 家底种子：还差两项，对应战局页「案卷完整度 62% / 待补资料 2」。
+const FULL_WORKBENCH_MISSING = [
+  { key: 'next-funnel', title: '近 30 天到店与成交明细', desc: '用于把到店率算准，验证本周军令。' },
+  { key: 'next-proof', title: '老客见证与好评原文', desc: '用于把口碑做成能外发的物料。' },
+];
+/**
+ * 档案分叉点：workbench。
+ * 空态 → 完整度 0、无待补项（战局页三个指标全空）。
+ * 经营中 → 三问填过就照存储真算（保留「补档案→完整度上升」这条真实交互），
+ *          这份账号还没填过才落 62% / 差两项的种子。
+ */
 function workbench() {
   const profile = wx.getStorageSync(storageKey('profile')) || null;
-  const missing = [];
-  if (!profile || !profile.industry) missing.push({ key: 'next-industry', title: '主营行业或品类', desc: '用于校准客户与竞争判断。' });
-  if (!profile || !profile.stage) missing.push({ key: 'next-stage', title: '当前经营阶段', desc: '用于判断进攻、验证或守成节奏。' });
-  if (!profile || !profile.pain) missing.push({ key: 'next-pain', title: '当前最卡的问题', desc: '用于确定主要矛盾。' });
-  const completeness = profile ? Math.max(35, 100 - missing.length * 20) : 0;
   // 严格按 WorkbenchView 契约三个键返回：mock 多给一个 title 会让本地看到线上不存在的横幅。
-  return Promise.resolve({ completeness, sections: [{ key: 'profile', label: '老板与企业档案', hint: '行业、阶段、当前难题', count: profile ? 1 : 0, ready: Boolean(profile) }], missing });
+  if (isEmptyProfile()) return Promise.resolve({ completeness: 0, sections: [profileSection(false)], missing: [] });
+  if (!profile) return Promise.resolve({ completeness: 62, sections: [profileSection(true)], missing: FULL_WORKBENCH_MISSING.map((item) => Object.assign({}, item)) });
+  const missing = [];
+  if (!profile.industry) missing.push({ key: 'next-industry', title: '主营行业或品类', desc: '用于校准客户与竞争判断。' });
+  if (!profile.stage) missing.push({ key: 'next-stage', title: '当前经营阶段', desc: '用于判断进攻、验证或守成节奏。' });
+  if (!profile.pain) missing.push({ key: 'next-pain', title: '当前最卡的问题', desc: '用于确定主要矛盾。' });
+  return Promise.resolve({ completeness: Math.max(35, 100 - missing.length * 20), sections: [profileSection(true)], missing });
 }
 
 function updateIdentity(body) {
@@ -512,10 +568,34 @@ function seedReportRow() {
     versions: [{ id: 'mock-report-growth-plan-v1', version: 1, title: content.title, content, changeSummary: '首个版本', authorKind: 'agent', sessionId: null, at }],
   };
 }
+// 档案 · 第二份方案：与「经营中」案卷同名同源（案卷是这份方案定下来之后成的卷）。
+function seedCasefileReportContent() {
+  return {
+    title: '门店增长方案 v3',
+    icon: 'doc',
+    meta: '增长操盘手 · 经营方案',
+    sections: [
+      { h: '主要矛盾', b: FULL_MAIN_CONTRADICTION },
+      { h: '本周三件事', list: ['发一条到店体验的口播视频，挂门店位置', '把三条老客见证整理成朋友圈素材', '给上周留资的 20 位客人逐个回访，约到店'] },
+      { h: '验证标准', list: ['到店率从 18% 提到 25%', '老客见证至少 3 条能外发'] },
+    ],
+    trust: '这份样例方案只用于本地预览；真实结论会以你的案卷、资料和对话为依据。',
+    actions: ['save_to_library', 'export_pdf'],
+  };
+}
+function seedCasefileReportRow() {
+  const at = new Date().toISOString();
+  const content = seedCasefileReportContent();
+  return {
+    id: 'mock-report-store-growth-v3', title: content.title, slug: 'store-growth-v3', type: '经营方案',
+    agentKey: 'growth', agentName: '增长操盘手', projectId: null, currentVersion: 3, updatedAt: at,
+    versions: [{ id: 'mock-report-store-growth-v3-v3', version: 3, title: content.title, content, changeSummary: '按到店转化重排本周动作', authorKind: 'agent', sessionId: null, at }],
+  };
+}
 function ensureReports() {
   const rows = getList('reports');
   if (rows.length) return rows;
-  const seeded = [seedReportRow()];
+  const seeded = [seedReportRow(), seedCasefileReportRow()];
   setList('reports', seeded);
   return seeded;
 }
@@ -526,7 +606,9 @@ function reportSummary(row) {
     projectId: row.projectId || null, currentVersion: Number(row.currentVersion || 1), updatedAt: row.updatedAt,
   };
 }
+/** 档案分叉点：reports。空态直接回空数组，且不落种子（锦囊「方案报告」格因此显示「还没有作品」）。 */
 function reports(projectId) {
+  if (isEmptyProfile()) return Promise.resolve([]);
   return Promise.resolve(ensureReports()
     .filter((row) => !projectId || row.projectId === projectId)
     .slice().sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
@@ -845,8 +927,14 @@ function ensureBizMetricSeries() {
   setList('bizMetrics', seeded);
   return seeded;
 }
-function bizMetricTemplate() { return Promise.resolve({ items: MOCK_BIZ_METRIC_TEMPLATE.map((item) => Object.assign({}, item)) }); }
+// 档案 · 经营指标模板只发三项：复盘抽屉里一屏填得完；模板不是空/满的差异点，两档同形。
+const MOCK_BIZ_METRIC_KEYS = ['monthly_revenue', 'store_conversion', 'new_customers'];
+function bizMetricTemplate() {
+  return Promise.resolve({ items: MOCK_BIZ_METRIC_TEMPLATE.filter((item) => MOCK_BIZ_METRIC_KEYS.includes(item.metricKey)).map((item) => Object.assign({}, item)) });
+}
+/** 档案分叉点：bizMetricSeries。空态回空（复盘抽屉出空输入）；经营中是上两周有值、本周留白待填。 */
 function bizMetricSeries(weeks) {
+  if (isEmptyProfile()) return Promise.resolve({ items: [] });
   const size = Math.max(1, Math.trunc(Number(weeks) || 8));
   const items = ensureBizMetricSeries().slice().sort((a, b) => String(a.weekStart).localeCompare(String(b.weekStart))).slice(-size);
   return Promise.resolve({ items });
@@ -866,8 +954,18 @@ const MOCK_POSTER_TEMPLATES = [
   { key: 'editorial', name: '编辑杂志', desc: '杂志内页式排版，图文并重' },
   { key: 'business_launch', name: '商业发布', desc: '发布会 / 新品公告气质' },
 ];
+// 档案 · 兵器（处方）：战局页把它们按序挂到待执行军令上，措辞与军令一一对齐——
+// 第一条口播视频配「快出片」，第二条见证素材配「海报代笔」。
+function seedPrescriptions() {
+  const day = today();
+  return [
+    { id: 'rx1', problem: '到店转化上不去', playbook: '快出片 · 用你的分身三步出这条片', toolKey: 'shortvideo', toolType: 'agent', externalUrl: null, status: 'proposed', proposedAt: `${day} 09:10` },
+    { id: 'rx2', problem: '老客口碑没外显', playbook: '海报代笔 · 见证卡一键排版', toolKey: 'poster', toolType: 'agent', externalUrl: null, status: 'proposed', proposedAt: `${day} 09:12` },
+  ];
+}
+/** 档案分叉点：prescriptions。空态回空，军令上就不会挂兵器条。 */
 function prescriptions() {
-  return Promise.resolve({ items: [{ id: 'rx1', problem: '获客越来越贵', playbook: '做影响力短视频获客', toolKey: 'brand', toolType: 'agent', externalUrl: null, status: 'proposed', proposedAt: '2026-07-08 10:00' }] });
+  return Promise.resolve({ items: isEmptyProfile() ? [] : seedPrescriptions() });
 }
 function prescriptionAction() { return Promise.resolve({ ok: true }); }
 function creativeStatus() { return Promise.resolve({ enabled: true, pricePerPoster: 10, templates: MOCK_POSTER_TEMPLATES }); }
@@ -993,8 +1091,26 @@ function creativePosterItem(row) {
     parentJobId: row.parentJobId || undefined,
   };
 }
+// 档案 · 海报作品种子：createdAt 拉到一两天前，creativePhase 直接判 succeeded，
+// 不用等本地那 3.2 秒的假进度条。两条都带 headline，锦囊作品流才有可读标题。
+function seedCreativeJobs() {
+  const day = 24 * 60 * 60 * 1000;
+  return [
+    { id: 'mock-poster-seed-1', createdAt: Date.now() - day * 2, terminalAt: Date.now() - day * 2 + 3200, idempotencyKey: 'seed:poster:store-gift', creditCost: MOCK_POSTER_PRICE, brief: { headline: '开学季到店礼 · 只做三天', templateKey: 'business_launch' } },
+    { id: 'mock-poster-seed-2', createdAt: Date.now() - day, terminalAt: Date.now() - day + 3200, idempotencyKey: 'seed:poster:old-customer', creditCost: MOCK_POSTER_PRICE, brief: { headline: '她第 3 次回来 · 老客见证', templateKey: 'editorial' } },
+  ];
+}
+function ensureCreativeJobs() {
+  const rows = loadCreativeJobs();
+  if (rows.length) return rows;
+  const seeded = seedCreativeJobs();
+  saveCreativeJobs(seeded);
+  return seeded;
+}
+/** 档案分叉点：creativePosters。空态回空且不落种子；经营中已有任务照读，没有才落两张已出图海报。 */
 function creativePosters(cursor, limit) {
-  const all = loadCreativeJobs().map(creativePosterItem).filter(Boolean).sort((a, b) => {
+  if (isEmptyProfile()) return Promise.resolve({ items: [] });
+  const all = ensureCreativeJobs().map(creativePosterItem).filter(Boolean).sort((a, b) => {
     const time = Date.parse(b.createdAt) - Date.parse(a.createdAt);
     return time || (a.jobId < b.jobId ? 1 : -1);
   });
@@ -1036,10 +1152,47 @@ const MOCK_CLIP_WORKS = [
     createdAt: '2026-08-11T20:04:00+08:00', generatedAt: null, aiWatermark: false,
   },
 ];
-function videoWorks() { return Promise.resolve(MOCK_CLIP_WORKS.map((item) => Object.assign({}, item))); }
+/** 档案分叉点：videoWorks。空态回空数组，锦囊「快出片」格因此显示「还没有作品」。 */
+function videoWorks() { return Promise.resolve(isEmptyProfile() ? [] : MOCK_CLIP_WORKS.map((item) => Object.assign({}, item))); }
 function today() { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+function daysAgo(offset) { const date = new Date(); date.setDate(date.getDate() - Number(offset || 0)); return ymd(date); }
+// 档案 · 案卷种子：今天 3 条军令（2 待执行挂兵器 + 1 已办带回填结果）、近 5 天历史回填
+// （**今天故意留空**，走查时自己填一次验证回填交互）、目标阶梯只给本周与季度。
+// 日期一律用运行时 new Date 生成，不写死任何一天。
+function seedCasefile() {
+  const day = today();
+  const now = new Date().toISOString();
+  const backfill = {};
+  [[1, 14, 6, 2], [2, 12, 5, 1], [3, 16, 7, 3], [4, 11, 4, 1], [5, 15, 6, 2]].forEach(([offset, leads, consults, deals]) => {
+    const date = daysAgo(offset);
+    backfill[date] = { leads: String(leads), consults: String(consults), deals: String(deals), savedAt: `${date}T21:30:00.000Z` };
+  });
+  return {
+    id: 'mock-casefile-full', title: '门店增长方案 v3', sourceAgent: '增长操盘手',
+    createdAt: `${daysAgo(12)}T10:00:00.000Z`, updatedAt: now,
+    judgment: FULL_MAIN_CONTRADICTION,
+    risks: ['到店转化没跑通前，不要再加投第二个渠道。'],
+    goals: { weekly: '到店率从 18% 提到 25%', quarterly: '单店月营收站上 26 万', annual: '', longTerm: '', updatedAt: now },
+    orders: [
+      { id: 'mock-order-full-1', text: '发一条到店体验的口播视频，挂门店位置', from: '增长操盘手', tag: '军令 · 增长操盘手', date: day, done: false },
+      { id: 'mock-order-full-2', text: '把三条老客见证整理成朋友圈素材', from: '海报设计师', tag: '军令 · 海报设计师', date: day, done: false },
+      { id: 'mock-order-full-3', text: '给上周留资的 20 位客人逐个回访，约到店', from: '增长操盘手', tag: '军令 · 增长操盘手', date: day, done: true, resultNote: '接通 9 · 约到店 4' },
+    ],
+    backfill,
+  };
+}
 function casefileKey() { return `junshi.dossier.${wx.getStorageSync('junshi.userId') || 'guest'}`; }
-function casefile() { const value = wx.getStorageSync(casefileKey()); if (!value) return Promise.resolve({ casefile: null }); try { return Promise.resolve({ casefile: typeof value === 'string' ? JSON.parse(value) : value }); } catch (_) { return Promise.resolve({ casefile: null }); } }
+/**
+ * 档案分叉点：casefile。
+ * 空态 → 恒为 null（战局页出「还没有案卷」「还没有军令」，加军令/回填/改目标三处门禁生效）。
+ * 经营中 → 已有案卷照读；这份账号还没有案卷才落种子并写回存储，之后勾选/回填都作用在同一份上。
+ */
+function casefile() {
+  if (isEmptyProfile()) return Promise.resolve({ casefile: null });
+  const value = wx.getStorageSync(casefileKey());
+  if (!value) return Promise.resolve({ casefile: saveCasefile(seedCasefile()) });
+  try { return Promise.resolve({ casefile: typeof value === 'string' ? JSON.parse(value) : value }); } catch (_) { return Promise.resolve({ casefile: null }); }
+}
 function saveCasefile(value) { value.updatedAt = new Date().toISOString(); wx.setStorageSync(casefileKey(), JSON.stringify(value)); return value; }
 function ensureCasefile() { return casefile().then((r) => r.casefile || { id: `mock-casefile-${Date.now()}`, title: '我的经营案卷', sourceAgent: '我', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), judgment: '', risks: [], orders: [], backfill: {} }); }
 function addOrder(text) { return ensureCasefile().then((value) => { value.orders.unshift({ id: `mock-order-${Date.now()}`, text, from: '我', tag: '军令 · 自定', date: today(), done: false }); return { casefile: saveCasefile(value) }; }); }
@@ -1063,8 +1216,28 @@ function reviewStreakFrom(items) {
   }
   return streak;
 }
+// 档案 · 复盘种子：昨天往前连续 6 天各一条日复盘 → 战局页出「今晚复盘 · 连续 6 天」，
+// 今天那条空着，走查时点一次复盘就能看到连胜涨到 7。
+function seedReviews() {
+  const rows = [];
+  for (let offset = 1; offset <= 6; offset += 1) {
+    const date = daysAgo(offset);
+    const done = 3 - (offset % 2);
+    rows.push({ id: `mock-review-${date}-daily`, layer: 'daily', date, ordersTotal: 3, ordersDone: done, alignRate: Math.round((done / 3) * 100), hasBackfill: true, createdAt: `${date}T21:40:00.000Z` });
+  }
+  return rows;
+}
+function ensureReviews() {
+  const rows = getList('reviews');
+  if (rows.length) return rows;
+  const seeded = seedReviews();
+  setList('reviews', seeded);
+  return seeded;
+}
+/** 档案分叉点：reviews。空态回 streak 0 且不落种子；经营中已有复盘照读，没有才落 6 天连胜。 */
 function reviews() {
-  const items = getList('reviews').slice().sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)));
+  if (isEmptyProfile()) return Promise.resolve({ items: [], streak: 0 });
+  const items = ensureReviews().slice().sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)));
   const streak = reviewStreakFrom(items);
   wx.setStorageSync(storageKey('reviewStreak'), streak);
   return Promise.resolve({ items, streak });
@@ -1091,22 +1264,24 @@ function reviewCasefile(layer) {
 }
 function seedLedger() {
   const day = today();
-  const decision = (seq, text, status, fast, scene) => ({
+  const decision = (seq, text, status, fast, scene, verifyStandard) => ({
     id: `d${seq}`, seq, scene: scene || '战略规划', decision: text, reasons: [], tianshiRef: '', expected: '',
-    verifyStandard: '', verifyByDate: day, status, verifyNote: '', fast, createdAt: `${day} 10:0${seq}`,
+    verifyStandard: verifyStandard || '', verifyByDate: day, status, verifyNote: '', fast, createdAt: `${day} 10:0${seq}`,
   });
   const prophecy = (seq, text, status) => ({
     id: `p${seq}`, seq, prophecy: text, basis: '流月', verifyStandard: '', dueDate: day,
     status, verifyNote: '', createdAt: `${day} 10:0${seq}`,
   });
   return {
+    // 档案 · 战略账本：「经营中」只留 **1 条待验证**（stats.pending === 1），
+    // 战局页复盘抽屉因此恰好摆一张决策验证卡；其余五条已有结论，账本页仍有准确率可看。
     decisions: [
       decision(1, '先收缩到复购最好的两家店，砍掉拖后腿的第4家', 'correct', false),
       decision(2, '把9800年卡改成体验—复购分层，先拉复购率', 'correct', false),
       decision(3, '暂缓加盟扩张，先把直营模型跑透', 'revise', true, '紧急战况'),
-      decision(4, '上私域内容获客，替代高价投放', 'pending', null),
-      decision(5, '把技师提成和复购挂钩', 'pending', null),
-      decision(6, '开一条轻医美高毛利线试水', 'pending', null),
+      decision(4, '本周把力气全压到到店转化，暂不加投第二个渠道', 'pending', null, undefined, '两周内到店率从 18% 提到 25%，且新客获客成本不上升'),
+      decision(5, '把技师提成和复购挂钩', 'correct', false),
+      decision(6, '开一条轻医美高毛利线试水', 'revise', true),
     ],
     prophecies: [
       prophecy(1, '3月忌神当令，现金流会有压力', 'hit'),
@@ -1147,7 +1322,9 @@ function prophecyStats(items) {
   const miss = items.filter((item) => item.status === 'miss').length;
   return { total: items.length, pending: items.length - hit - miss, hit, miss, hitRate: ratio(hit, miss) };
 }
+/** 档案分叉点：decisions。空态回空 items + stats.pending 0（复盘抽屉不出决策卡），也不落账本种子。 */
 function decisions() {
+  if (isEmptyProfile()) return Promise.resolve({ items: [], stats: decisionStats([]) });
   const value = loadLedger();
   return Promise.resolve({ items: value.decisions.slice().sort((a, b) => Number(b.seq) - Number(a.seq)), stats: decisionStats(value.decisions) });
 }

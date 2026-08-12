@@ -82,7 +82,8 @@ test('原生小程序覆盖 app.json 声明的全部路由', () => {
     const hasDedicated = ['js', 'json', 'wxml', 'scss'].every((ext) => fs.existsSync(path.join(sourceRoot, `${route}.${ext}`)));
     assert.ok(hasDedicated, `路由缺少独立原生四件套：${route}`);
   }
-  assert.equal(routes.length, 49, '路由数量变化时必须同步审计原生迁移覆盖');
+  // 2026-08-12 IA 重排：+1 = pages/pouch（锦囊作品页）。studio 降为过渡跳转页但仍注册（接老分享卡）。
+  assert.equal(routes.length, 50, '路由数量变化时必须同步审计原生迁移覆盖');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'route-manifest.json')), false, '完整迁移后不得保留通用路由清单');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'services/generic-page.js')), false, '完整迁移后不得保留通用页面渲染器');
   assert.equal(fs.existsSync(path.join(sourceRoot, 'templates/generic-page.wxml')), false, '完整迁移后不得保留通用页面模板');
@@ -290,14 +291,19 @@ test('原生页头避让微信胶囊，登录与智能体启用层同步隐藏�
   assert.match(profileScss, /\.profile-login\s*\{[\s\S]*?align-items:\s*center;[\s\S]*?justify-content:\s*center;/);
 });
 
-test('军情模式点选、单行入口与方案按钮保持原稿视觉状态', () => {
-  const home = fs.readFileSync(path.join(sourceRoot, 'pages/home/index.scss'), 'utf8');
+test('战局页不再平铺命盘/时运模式，方案按钮保持原稿视觉状态', () => {
+  const homeJs = fs.readFileSync(path.join(sourceRoot, 'pages/home/index.js'), 'utf8');
   const homeWxml = fs.readFileSync(path.join(sourceRoot, 'pages/home/index.wxml'), 'utf8');
+  const profile = fs.readFileSync(path.join(sourceRoot, 'pages/profile/index.js'), 'utf8');
   const plans = fs.readFileSync(path.join(sourceRoot, 'packages/work/plans/index.scss'), 'utf8');
 
-  assert.match(homeWxml, /class="bmt \{\{mode===item\.key\?'on':''\}\}"/, '模式切换必须把点选态落到 on 类');
-  assert.match(home, /\.bmt\.on\s*\{[^}]*color:\s*var\(--accent\);[^}]*border-color:\s*var\(--accent\);/s, '点选态必须同时显出本命色文字与边框');
-  assert.match(home, /\.ml-go\s*\{[^}]*display:\s*flex;[^}]*align-items:\s*center;[^}]*white-space:\s*nowrap;/s, '打开文字与箭头必须保持同一行');
+  // 2026-08-12 IA 重排：命盘/时运两个 mode 从战局首屏移出，常驻入口在主公；
+  // 战局只保留三势合参 sheet 里 fortuneOn && chart 的天势一栏（情景入口）。
+  assert.doesNotMatch(homeWxml, /battle-mode-tabs|mode===item\.key/, '战局首屏不得再平铺模式切换');
+  assert.match(homeWxml, /item\.kind==='sky'&&fortuneOn/, '三势 sheet 保留天势参命盘的情景入口');
+  assert.match(homeJs, /fortuneOn/, 'fortuneOn 开关仍须尊重（运营可关命理）');
+  assert.match(profile, /\/packages\/work\/mingpan\/index/, '命盘常驻入口在主公');
+  assert.match(profile, /\/packages\/work\/calendar\/index/, '天时日历常驻入口在主公');
   for (const selector of ['option-action', 'quote-confirm']) {
     const rule = new RegExp(`\\.${selector}\\s*\\{[^}]*padding:\\s*0;[^}]*display:\\s*flex;[^}]*align-items:\\s*center;[^}]*justify-content:\\s*center;`, 's');
     assert.match(plans, rule, `${selector} 必须清掉原生 button 默认内边距并双轴居中`);
@@ -305,24 +311,18 @@ test('军情模式点选、单行入口与方案按钮保持原稿视觉状态',
   assert.match(plans, /\.option-action::after,\.quote-confirm::after\s*\{\s*border:\s*0;/, '原生 button 默认描边必须清除');
 });
 
-test('WO-07「下一步」卡：服务端下发的是语义 key，页面必须映射成真路由', () => {
+test('WO-07「下一步」卡已随 IA 重排删除：语义 key 不得再被端上当路由消费', () => {
   const homeJs = read(sourceRoot, 'pages/home/index.js');
-  const mock = read(sourceRoot, 'services/mock.js');
   const journey = fs.readFileSync(path.join(appRoot, '../server/src/services/journey.ts'), 'utf8');
 
-  // 契约锚点：服务端确实在下发 'chat' / 'studio' 这种非路径值。它一旦改成真路由，
-  // 这条断言会先红，提醒同步端上的映射，而不是让用户先吃到「页面打开失败」。
+  // 契约锚点：服务端 journey 仍下发 'chat' / 'studio' 语义 key（PC 端等仍可消费）。
   assert.match(journey, /route: 'chat'/, '服务端下一步仍以语义 key 下发');
   assert.match(journey, /route: 'studio'/);
 
-  // 直接 navTo(nextRoute) 会把 'studio' 当路径丢给 wx.navigateTo —— 非法路径，必然失败。
-  assert.doesNotMatch(homeJs, /navTo\(this\.data\.nextRoute/, '不得把语义 key 当路由直接跳');
-  assert.match(homeJs, /route === 'studio' \? '\/pages\/studio\/index'/, "'studio' 必须映射到执行 tab");
-  assert.match(homeJs, /route\.charAt\(0\) === '\/'/, '以 / 开头的真路由原样放行');
-  assert.match(homeJs, /packages\/main\/chat\/index\?agentKey=general&continue=1/, "'chat' 与未知值回总军师");
-
-  // mock 必须跟服务端同契约，否则映射分支在本地永远走不到，只有真机连真服务端才炸。
-  assert.match(mock, /route: 'chat'/, 'mock 的 journey 也要下发语义 key');
+  // 2026-08-12 战局页按设计稿收敛后不再渲染「下一步」卡，也不再请求 journey——
+  // 语义 key 在小程序端没有消费者，历史上把 'studio' 当路径跳导致「页面打开失败」的坑就此关死。
+  assert.doesNotMatch(homeJs, /api\.journey\(/, '战局页不再请求 journey');
+  assert.doesNotMatch(homeJs, /nextRoute/, '语义 key 不得再进入页面状态');
 });
 
 test('生成以 failed/cancelled 收场时必须给中断话术，不许留空白气泡', () => {
@@ -346,7 +346,6 @@ test('mock 不得比真服务端「友好」：多给的字段会让端上写出
   const behavior = read(chatCoreRoot, 'behavior.js');
   const home = read(sourceRoot, 'pages/home/index.js');
   const credits = read(sourceRoot, 'packages/work/credits/index.js');
-  const studio = read(sourceRoot, 'pages/studio/index.js');
 
   // WorkbenchView 契约只有 completeness/sections/missing，服务端物理上不会给 title。
   assert.doesNotMatch(mock, /missing, title:/, 'mock workbench 不得多给契约外的 title');
@@ -363,7 +362,8 @@ test('mock 不得比真服务端「友好」：多给的字段会让端上写出
   assert.doesNotMatch(behavior, /item\.summary \|\| item\.category/, '@引用资料行不得消费契约里没有的字段');
 
   // /casefile/orders 与 /casefile/backfill 都要求先有 active casefile，mock 却会当场捏一份。
-  assert.equal((studio.match(/if \(!this\.data\.hasDossier\) \{ wx\.showToast\(\{ title: '先和军师定下一份方案，生成案卷'/g) || []).length, 3, '加军令 / 回填数据 / 改目标三处门禁口径一致');
+  // 执行区已随 IA 重排并入战局页（pages/home），门禁跟着搬家。
+  assert.equal((home.match(/if \(!this\.data\.hasDossier\) \{ wx\.showToast\(\{ title: '先和军师定下一份方案，生成案卷'/g) || []).length, 3, '加军令 / 回填数据 / 改目标三处门禁口径一致');
 });
 
 test('服务端下发给端上的页面路由必须真实存在（页面搬家要连服务端一起搬）', () => {
@@ -964,10 +964,11 @@ test('除微信官方品牌图形外，功能图标统一通过 Lucide 组件输
   const tabTable = fs.readFileSync(path.join(sourceRoot, 'services/tabbar.js'), 'utf8');
   // 底栏五图标 2026-08-09 起为自绘新键（counsel/sandtable/muster/brocade/lord），
   // 不再经 LUCIDE 映射；其余 native-icon 名仍必须映射齐全（上面的循环）。
+  // 2026-08-12 IA 重排：战局沿用沙盘旗台字形；锦囊（作品页）拿回束口袋；图籍借点兵的名册字形（册=档案义）。
   assert.match(tabTable, /pages\/sessions\/index', icon: 'counsel'/);
-  assert.match(tabTable, /icon: 'sandtable', text: '沙盘'/);
-  assert.match(tabTable, /icon: 'muster', text: '点兵'/);
-  assert.match(tabTable, /icon: 'brocade', text: '锦囊'/);
+  assert.match(tabTable, /icon: 'sandtable', text: '战局'/);
+  assert.match(tabTable, /pages\/pouch\/index', icon: 'brocade', text: '锦囊'/);
+  assert.match(tabTable, /pages\/thinktank\/index', icon: 'muster', text: '图籍'/);
   assert.match(tabTable, /icon: 'lord', text: '主公'/);
   const nativeTabs = fs.readFileSync(path.join(sourceRoot, 'custom-tab-bar/index.js'), 'utf8');
   assert.match(nativeTabs, /require\('\.\.\/services\/tabbar'\)/, '底栏不得再自留一份 tab 表');
@@ -1088,48 +1089,54 @@ test('原生会话恢复专项军师启用层，方案过期口径不回归', ()
   assert.match(plansWxml, /<block wx:else>[\s\S]*?usage&&!usage\.unlimited[\s\S]*?subscription/);
 });
 
-test('原生 Studio 恢复动态创作军师、作品库与真实处方主链路', () => {
+test('IA 重排后：兵器/军令主链路在战局，手艺格在锦囊，studio 只做过渡跳转', () => {
+  // 2026-08-12 五 tab 重排：原点兵页拆解——执行链路（军令/回填/复盘/处方）并入 pages/home（战局），
+  // 创意手艺与作品入口归 pages/pouch（锦囊）。studio 保留注册一个发布周期，接住老分享卡。
   const studio = fs.readFileSync(path.join(sourceRoot, 'pages/studio/index.js'), 'utf8');
-  const wxml = fs.readFileSync(path.join(sourceRoot, 'pages/studio/index.wxml'), 'utf8');
-  const scss = fs.readFileSync(path.join(sourceRoot, 'pages/studio/index.scss'), 'utf8');
-  const config = JSON.parse(fs.readFileSync(path.join(sourceRoot, 'pages/studio/index.json'), 'utf8'));
+  const home = fs.readFileSync(path.join(sourceRoot, 'pages/home/index.js'), 'utf8');
+  const homeWxml = fs.readFileSync(path.join(sourceRoot, 'pages/home/index.wxml'), 'utf8');
+  const homeScss = fs.readFileSync(path.join(sourceRoot, 'pages/home/index.scss'), 'utf8');
+  const pouch = fs.readFileSync(path.join(sourceRoot, 'pages/pouch/index.js'), 'utf8');
+  const pouchWxml = fs.readFileSync(path.join(sourceRoot, 'pages/pouch/index.wxml'), 'utf8');
   const api = fs.readFileSync(path.join(sourceRoot, 'services/api.js'), 'utf8');
   const mock = fs.readFileSync(path.join(sourceRoot, 'services/mock.js'), 'utf8');
 
-  assert.match(studio, /Promise\.all\(\[store\.loadAgents\(\), authed \? store\.loadMe\(\) : Promise\.resolve\(null\)\]\)/, '启用层打开前必须同步真实余额');
-  assert.match(studio, /agent\.type === 'creative' && agent\.enabled !== false/);
-  assert.match(studio, /locked = Boolean\(authed && agent\.billing === 'unlock' && !agent\.owned\)/, '游客可浏览，登录后才显示锁态');
-  assert.match(studio, /api\.prescriptions\(\)/);
-  assert.match(studio, /item\.status !== 'dismissed' && item\.status !== 'activated'/);
-  assert.match(studio, /api\.prescriptionAction\(id, 'clicked'\)\.catch/);
-  assert.match(studio, /\/packages\/work\/market\/index\?from=prescription&pid=/);
-  assert.match(studio, /\/packages\/work\/gallery\/index/);
-  assert.match(studio, /agentUnlocked\(event\)[\s\S]*?agentKey=\$\{encodeURIComponent\(agent\.key\)\}&continue=1/);
-  assert.match(wxml, /军师代笔 · 内容出品/);
-  assert.match(wxml, /wx:for="\{\{creativeAgents\}\}"/);
-  assert.match(wxml, /<agent-unlock agent="\{\{unlockAgent\}\}"[^>]*bindunlocked="agentUnlocked"/);
-  assert.match(wxml, /class="works-row card" bindtap="openGallery"/);
-  assert.match(wxml, /wx:if="\{\{prescriptions\.length\}\}"/);
-  assert.match(wxml, /native-icon name="bolt"/);
-  assert.equal(config.usingComponents?.['agent-unlock'], '/components/agent-unlock/index');
-  assert.match(scss, /\.rx-item\s*\{/);
-  assert.match(scss, /background:\s*var\(--accent-soft\)/);
+  // studio = 纯跳转壳：不得残留业务逻辑，跳转必须指战局。
+  assert.match(studio, /wx\.switchTab\(\{ url: '\/pages\/home\/index' \}\)/, 'studio 过渡页必须跳战局');
+  assert.doesNotMatch(studio, /api\.|store\.loadAgents|prescriptions/, 'studio 过渡页不得残留业务逻辑');
+
+  // 兵器主链路在战局：处方过滤、点击上报、挂到军令、伏笔样式。
+  assert.match(home, /api\.prescriptions\(\)/);
+  assert.match(home, /item\.status !== 'dismissed' && item\.status !== 'activated'/);
+  assert.match(home, /api\.prescriptionAction\(id, 'clicked'\)\.catch/);
+  assert.match(home, /\/packages\/work\/market\/index\?from=prescription&pid=/);
+  assert.match(homeWxml, /item\.weapon/, '兵器条必须挂在军令卡内（主分发位）');
+  assert.match(homeWxml, /wx:for="\{\{leftoverWeapons\}\}"/, '未挂上军令的处方以独立兵器条陈列');
+  assert.match(homeWxml, /native-icon name="bolt"/);
+  assert.match(homeScss, /\.rx-item\s*\{/);
+  assert.match(homeScss, /\.task-weapon\s*\{/);
+
+  // 执行链路在战局：军令回填、目标、复盘、案卷标题清洗与门禁话术。
+  assert.match(home, /function plainInline\(value\)/, '案卷标题进入深色卡前必须去 Markdown 标记');
+  assert.match(home, /api\.saveGoals\(/);
+  assert.match(home, /api\.setOrderResult\(/);
+  assert.match(home, /api\.reviewCasefile\('day'\)[\s\S]*?agentKey=general/);
+  assert.match(homeWxml, /做完了多少/);
+  assert.match(homeWxml, /bindtap="openReminders"/);
+
+  // 手艺格在锦囊：创意 agents 动态格 + 已启用判定 + 置灰格走军师导览（不标价、不放开通按钮）。
+  assert.match(pouch, /text\(agent\.type\) === 'creative'/);
+  assert.match(pouch, /Boolean\(agent\.owned\) \|\| text\(agent\.billing\) !== 'unlock'/, '已启用判定');
+  assert.match(pouch, /agentKey=general&continue=1&send=/, '置灰格点击回问策军师导览');
+  assert.match(pouch, /\/packages\/work\/gallery\/index/);
+  assert.doesNotMatch(pouchWxml, /price|costText|开通/, '锦囊不得出现价格与开通（分发铁律）');
+
+  // 数据通道与 mock 契约不变。
   assert.match(api, /prescriptions:\s*\(\) => isMock\(\) \? mock\.prescriptions\(\)/);
   assert.match(mock, /id: 'rx1'[\s\S]{0,160}status: 'proposed'/);
   for (const key of ['ip', 'promo', 'poster', 'shortvideo', 'copy']) {
     assert.match(mock, new RegExp(`key: '${key}'[^\n]+type: 'creative'`), `mock 缺少创作军师 ${key}`);
   }
-
-  assert.match(studio, /function plainInline\(value\)/, '案卷标题进入深色卡前必须去 Markdown 标记');
-  assert.match(studio, /const minDate = dayKey\(-6\)/, '周计划只能展示今天起近 7 天，而不是最近七个任意日期');
-  assert.match(studio, /api\.saveGoals\(/);
-  assert.match(studio, /api\.setOrderResult\(/);
-  assert.match(studio, /api\.reviewCasefile\('day'\)[\s\S]*?agentKey=general/);
-  assert.match(wxml, /源自已定方案 · 由'\+dossierSource\+'给出/);
-  assert.doesNotMatch(wxml, /\{\{judgement\|\|/, '今日战役卡不得直接塞入整段 Markdown 判断导致卡片失控');
-  assert.match(wxml, /class="done-archive card"/);
-  assert.match(wxml, /做完了多少/);
-  assert.match(wxml, /bindtap="openReminders"[\s\S]*?提醒节奏/);
 });
 
 test('智库确认入库期间锁定上传、阶段切换与重复确认', () => {
@@ -1218,7 +1225,8 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
     assert.equal(reviewState.streak, 1);
     assert.equal(reviewState.items[0]?.hasBackfill, true);
 
-    assert.equal((await mock.bizMetricTemplate()).items.length, 5);
+    // 经营指标模板收到 3 项（services/mockProfile.js 的数据档案：复盘抽屉一屏填得完）。
+    assert.equal((await mock.bizMetricTemplate()).items.length, 3);
     await mock.saveBizMetrics('2026-08-03', { monthly_revenue: 23, new_customers: 61 });
     assert.deepEqual((await mock.bizMetricSeries(8)).items.find((item) => item.weekStart === '2026-08-03')?.metrics, { monthly_revenue: 23, new_customers: 61 });
 
@@ -1260,8 +1268,12 @@ test('原生 mock 目录、经营复盘与海报任务按账号持久化', async
     values.set('junshi.userId', 'mock-truth-b');
     assert.equal((await mock.dataSources()).sources.find((item) => item.key === 'crm')?.status, 'unbound');
     assert.equal((await mock.modules()).modules.find((item) => item.key === 'finance')?.enabled, false);
-    assert.equal((await mock.reviews()).streak, 0);
-    assert.equal((await mock.creativePosters('', 20)).items.length, 0);
+    // 换账号看到的不是 A 号写下的东西，而是「经营中」档案给每个账号各落一份的种子
+    // （services/mockProfile.js：6 天连胜 + 2 张已出图海报）；A 号自己造的任务不会串过来。
+    assert.equal((await mock.reviews()).streak, 6);
+    const seededPosters = await mock.creativePosters('', 20);
+    assert.equal(seededPosters.items.length, 2);
+    assert.equal(seededPosters.items.some((item) => item.jobId === created.jobId), false, 'A 号的海报任务不得串到 B 号');
   } finally {
     Date.now = realNow;
     delete globalThis.wx;
@@ -1357,10 +1369,13 @@ test('原生 mock 资料、三势、账本与对话汇总形成账号隔离真�
 
     const initialDecisions = await mock.decisions();
     assert.equal(initialDecisions.items[0].seq, 6);
-    assert.equal(initialDecisions.stats.pending, 3);
+    // 「经营中」档案只留 1 条待验证（战局页复盘抽屉恰好摆一张决策卡），其余五条已有结论：
+    // 正确 3 / 需修正 2 → 准确率 60%。验掉那条 pending 后是 4 正确 / 2 修正 = 67%。
+    assert.equal(initialDecisions.stats.pending, 1);
+    assert.equal(initialDecisions.stats.accuracy, 60);
     await mock.verifyDecision('d4', 'correct', '私域试验有效');
     const fifth = await mock.verifyDecision('d5', 'correct');
-    assert.equal(fifth.stats.accuracy, 80);
+    assert.equal(fifth.stats.accuracy, 67);
     assert.equal((await mock.disputeDecision('d6', '毛利线尚未真正上线')).ok, true);
     assert.equal((await mock.decisions()).items.find((item) => item.id === 'd6').disputeNote, '毛利线尚未真正上线');
 
@@ -1369,7 +1384,7 @@ test('原生 mock 资料、三势、账本与对话汇总形成账号隔离真�
     const fifthProphecy = await mock.verifyProphecy('p5', 'miss', '窗口未出现');
     assert.equal(fifthProphecy.stats.hitRate, 60);
     const progress = await mock.progress();
-    assert.equal(progress.progress.decisionAccuracy, 80);
+    assert.equal(progress.progress.decisionAccuracy, 67);
     assert.equal(progress.progress.prophecyHitRate, 60);
 
     const generated = await mock.generate({ agentKey: 'growth', text: '怎么把复购拉起来？' });
@@ -1391,12 +1406,16 @@ test('原生 mock 资料、三势、账本与对话汇总形成账号隔离真�
 
     values.set('junshi.userId', 'mock-loop-b');
     assert.equal((await mock.knowledge()).length, 0);
-    assert.equal((await mock.me()).understanding.battleForces.length, 0);
+    // B 号看到的三势是「经营中」档案的种子（3 条），不是 A 号 refreshForces 写下的那份——
+    // 种子里 note 不会带上 A 号的资料计数，串号就会在这条上露出来。
+    const seededForces = (await mock.me()).understanding.battleForces;
+    assert.equal(seededForces.length, 3);
+    assert.doesNotMatch(seededForces[0].note, /份资料/, 'A 号刷新出来的三势不得串到 B 号');
     assert.equal((await mock.decisions()).items.find((item) => item.id === 'd4').status, 'pending');
     await assert.rejects(mock.report(summary.reportId), (error) => error && error.code === 'NOT_FOUND');
 
     values.set('junshi.userId', 'mock-loop-a');
-    assert.equal((await mock.progress()).progress.decisionAccuracy, 80);
+    assert.equal((await mock.progress()).progress.decisionAccuracy, 67);
     assert.equal((await mock.report(summary.reportId)).currentVersion, 2);
   } finally {
     if (previousWx === undefined) delete globalThis.wx;

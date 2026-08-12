@@ -1,5 +1,5 @@
 <view class="native-page {{themeClass}}" style="--native-nav-inset:{{navInset}}px;--native-nav-top:{{navTop}}px;--native-nav-row-height:{{navRowHeight}}px;--native-nav-right:{{navRightInset}}px">
-  <view wx:if="{{isMock}}" class="native-mock-badge"><text>MOCK · 本地数据</text></view>
+  <view wx:if="{{isMock}}" class="native-mock-badge" bindtap="switchMockProfile"><text>MOCK · {{mockProfileLabel}}</text></view>
   <scroll-view scroll-y enhanced show-scrollbar="false" class="native-scroll">
     <view class="native-nav-inset"></view>
     <view class="pad home execution">
@@ -32,7 +32,7 @@
           <view class="task-b">
             <text class="task-t serif {{item.done?'struck':''}}">{{item.text}}</text>
             <text class="task-meta-info">{{item.done?(item.resultNote?'回填：'+item.resultNote:'已办 · 长按删除'):('来自 '+(item.from||'案卷')+' · 优先级 '+item.no)}}</text>
-            <view wx:if="{{item.weapon}}" class="task-weapon" data-id="{{item.weapon.id}}" catchtap="openPrescription"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="tw-line">军师配了兵器 · <text class="tw-b">{{item.weapon.playbook}}</text></text><text class="tw-go">带我做 →</text></view>
+            <view wx:if="{{item.weapon}}" class="task-weapon" data-id="{{item.weapon.id}}" catchtap="openPrescription"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text class="tw-line">军师配了兵器 · <text class="tw-b">{{item.weapon.playbook}}</text></text><view class="tw-go"><text>带我做</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
             <view wx:if="{{fillingOrderId===item.id}}" class="task-fill" catchtap="stop"><text class="tf-k">数 据 回 填 · 做完了多少？</text><view class="tf-row"><input class="tf-input native-result-input" value="{{fillingOrderText}}" maxlength="200" placeholder="如：发 8 条 / 见 3 个客户 / 回款 2 万" bindinput="inputOrderResult" bindconfirm="saveOrderResult"/><view class="tf-btn {{savingOrderResult?'busy':''}}" bindtap="saveOrderResult"><text>{{savingOrderResult?'保存中…':'回填'}}</text></view></view></view>
           </view>
           <view class="task-check" data-id="{{item.id}}" catchtap="toggleOrder"><native-icon wx:if="{{item.done}}" name="check" tone="white" size="15"></native-icon></view>
@@ -40,7 +40,7 @@
         <view wx:for="{{leftoverWeapons}}" wx:key="id" class="rx-item card" data-id="{{item.id}}" bindtap="openPrescription"><view class="rx-main"><text class="rx-for">为「{{item.problem}}」</text><text class="rx-play">{{item.playbook}}</text></view><view class="rx-cta"><native-icon name="bolt" tone="accent" color-key="{{colorKey}}" size="13"></native-icon><text>军师配了兵器</text><native-icon name="arrow" tone="accent" color-key="{{colorKey}}" size="12"></native-icon></view></view>
         <view wx:if="{{orders.length}}" class="order-add"><input class="oa-input" placeholder="手动加一条今天的军令" bindinput="inputOrder" /><view class="oa-btn" bindtap="addInlineOrder">加入</view></view>
 
-        <!-- ④ 回填与复盘只出现一次：做完 → 填数 → 复盘，次序即页面次序。 -->
+        <!-- ④ 回填与复盘只出现一次：做完、填数、复盘，次序即页面次序。 -->
         <view class="data-fill"><view class="df-head"><text class="df-t serif">今日数据回填</text><text class="df-s {{backfill?'ok':''}}">{{backfill?'今日已回填':'线索 / 咨询 / 成交'}}</text></view><view class="df-row"><view class="df-cell"><text class="df-label">线索</text><input class="df-input" type="number" value="{{backfill.leads||''}}" data-field="leads" bindinput="inputBackfill" /></view><view class="df-cell"><text class="df-label">咨询</text><input class="df-input" type="number" value="{{backfill.consults||''}}" data-field="consults" bindinput="inputBackfill" /></view><view class="df-cell"><text class="df-label">成交</text><input class="df-input" type="number" value="{{backfill.deals||''}}" data-field="deals" bindinput="inputBackfill" /></view></view><view class="df-save" bindtap="saveBackfill">{{savingBackfill?'保存中…':'保存今日数据'}}</view></view>
 
         <view class="review-entry card" bindtap="openReview"><view class="re-b"><text class="re-t serif">{{streak?('今晚复盘 · 连续 '+streak+' 天'):'今晚复盘'}}</text><text class="re-s">军令 + 数据都在，复盘决定明日军令</text></view><native-icon name="arrow" tone="green" size="16"></native-icon></view>
