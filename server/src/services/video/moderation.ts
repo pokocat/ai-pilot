@@ -20,9 +20,14 @@ export class VideoMediaTypeUnsupportedError extends Error {
   constructor() { super('暂不支持该素材格式'); }
 }
 
-/** 测试期显式旁路：只允许 test/development，production 即使误配也永远返回 false。 */
+/**
+ * 测试期显式旁路。production 必须同时打开二次确认开关，避免单个历史配置误带上线。
+ * 旁路仍只跳过外部机审，不跳过 MIME/大小校验，并为每次素材写独立审计。
+ */
 export function clipMediaModerationBypassEnabled(): boolean {
-  return process.env.CLIP_MEDIA_MODERATION_BYPASS === 'true' && process.env.NODE_ENV !== 'production';
+  if (process.env.CLIP_MEDIA_MODERATION_BYPASS !== 'true') return false;
+  return process.env.NODE_ENV !== 'production'
+    || process.env.CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION === 'true';
 }
 
 function projectText(project: unknown): string {
@@ -64,7 +69,12 @@ export async function assertVideoUploadContent(
     await recordAudit({
       ...identity,
       action: 'user.video.media.moderation.bypassed',
-      payload: { provider: 'test-bypass', mimeType, bytes: input.length, pass: true },
+      payload: {
+        provider: process.env.NODE_ENV === 'production' ? 'operator-bypass' : 'test-bypass',
+        mimeType,
+        bytes: input.length,
+        pass: true,
+      },
     });
     return;
   }

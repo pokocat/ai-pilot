@@ -35,8 +35,12 @@ export function demoPurchaseEnabled(): boolean {
  */
 export function assertSandboxSafe(): void {
   if (process.env.NODE_ENV !== 'production') return;
-  const unsafe = ['PAY_SANDBOX', 'PAY_MOCK_SUCCESS', 'ALLOW_DEMO_PURCHASE', 'CLIP_MEDIA_MODERATION_BYPASS']
+  const unsafe = ['PAY_SANDBOX', 'PAY_MOCK_SUCCESS', 'ALLOW_DEMO_PURCHASE']
     .filter((key) => process.env[key] === 'true');
+  if (process.env.CLIP_MEDIA_MODERATION_BYPASS === 'true'
+    && process.env.CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION !== 'true') {
+    unsafe.push('CLIP_MEDIA_MODERATION_BYPASS（需同时显式开启 CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION）');
+  }
   if (unsafe.length) {
     throw new Error(
       `[安全] 生产环境禁止开启测试旁路：${unsafe.join(', ')}。请移除后再启动。`,

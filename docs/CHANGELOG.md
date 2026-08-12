@@ -6,6 +6,12 @@
 
 ## 变更日志
 
+### 2026-08-12 · 测试阶段允许生产素材审核双开关旁路 · 影响面：快出片素材上传、启动护栏、审计与生产配置
+
+- `CLIP_MEDIA_MODERATION_BYPASS=true` 在 production 不再单独生效；必须同时显式设置 `CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION=true`，避免历史或误配值静默放开。
+- 临时放开只跳过外部图片/视频/语音机审，MIME、大小和后续 AIStar ffprobe 质量门不变；每个素材仍写 `user.video.media.moderation.bypassed`，production 的 provider 标为 `operator-bypass`。
+- 正式媒体机审接入后必须同时关闭两个开关；该测试旁路不代表审核、备案或发布合规完成。
+
 ### 2026-08-12 · 快出片全链路合并并部署生产 · 影响面：军师小程序、军师 BFF、AIStar clip 域、模板、数字人、作品与 iOS 资料补全
 
 - `ai-pilot` 主分支已合入并部署 `cb786ea`，`AIStarEcosystem` 主分支已合入 `49cb2086`，AIStar 生产 release 为 `49cb2086-20260812T112519Z`；两端服务均为 active、`NRestarts=0`，数据库结构无漂移，AIStar Flyway 已到 V15。

@@ -174,11 +174,12 @@ test('初始文案支持连续 AI 对话；测试环境无真实模型时诚实�
   assert.match(result.body.reply, /原稿没有改动/);
 });
 
-test('媒体机审旁路只在非生产显式开启，并留下独立审计', async () => {
+test('媒体机审旁路需显式开启；生产还要二次确认，并留下独立审计', async () => {
   const token = await login(uniquePhone(), '视频旁路用户');
   const user = await prisma.user.findUniqueOrThrow({ where: { id: token }, select: { tenantId: true } });
   const savedNodeEnv = process.env.NODE_ENV;
   const savedBypass = process.env.CLIP_MEDIA_MODERATION_BYPASS;
+  const savedProductionBypass = process.env.CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION;
   try {
     process.env.NODE_ENV = 'development';
     process.env.CLIP_MEDIA_MODERATION_BYPASS = 'true';
@@ -190,16 +191,30 @@ test('媒体机审旁路只在非生产显式开启，并留下独立审计', as
     }), 1);
 
     process.env.NODE_ENV = 'production';
-    assert.equal(clipMediaModerationBypassEnabled(), false, 'production 不能因误配而实际旁路');
+    delete process.env.CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION;
+    assert.equal(clipMediaModerationBypassEnabled(), false, 'production 单开旁路不能生效');
     assert.throws(() => assertSandboxSafe(), /CLIP_MEDIA_MODERATION_BYPASS/);
     await assert.rejects(
       () => assertVideoMediaModerationReady('image/png'),
       (error: unknown) => (error as { code?: string }).code === 'CLIP_MEDIA_MODERATION_NOT_CONFIGURED',
     );
+
+    process.env.CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION = 'true';
+    assert.equal(clipMediaModerationBypassEnabled(), true, 'production 双开关才允许运营旁路');
+    assert.doesNotThrow(() => assertSandboxSafe());
+    await assertVideoMediaModerationReady('image/png');
+    await assertVideoUploadContent(Buffer.from('production-test-image'), 'image/png', { tenantId: user.tenantId, userId: token });
+    const productionAudit = await prisma.auditLog.findFirstOrThrow({
+      where: { userId: token, action: 'user.video.media.moderation.bypassed' },
+      orderBy: { createdAt: 'desc' },
+    });
+    assert.equal((productionAudit.payloadJson as { provider?: string }).provider, 'operator-bypass');
   } finally {
     if (savedNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = savedNodeEnv;
     if (savedBypass === undefined) delete process.env.CLIP_MEDIA_MODERATION_BYPASS;
     else process.env.CLIP_MEDIA_MODERATION_BYPASS = savedBypass;
+    if (savedProductionBypass === undefined) delete process.env.CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION;
+    else process.env.CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION = savedProductionBypass;
   }
 });
 

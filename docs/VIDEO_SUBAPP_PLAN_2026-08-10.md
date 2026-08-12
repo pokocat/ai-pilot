@@ -1,6 +1,6 @@
 # 「快出片」视频子应用 · 技术方案（军师分包形态）
 
-> **状态**：M1 工程、石榴 v0.119 官方单视频 Avatar 创建（`speakerId/authId` 均选填）、可选声音增强、阿里云多模态机审适配器与完整多段总装已落地；真实供应商链已具备本人真机验收条件。测试阶段允许隔离预发显式审核旁路，production 硬拒绝。本人素材质量实测、真实发布与生产合规门槛仍未完成。
+> **状态**：M1 工程、石榴 v0.119 官方单视频 Avatar 创建（`speakerId/authId` 均选填）、可选声音增强、阿里云多模态机审适配器与完整多段总装已落地；真实供应商链已具备本人真机验收条件。测试阶段允许显式审核旁路；production 需 `CLIP_MEDIA_MODERATION_BYPASS + CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION` 双开关并逐素材留审计。本人素材质量实测、真实发布与生产合规门槛仍未完成。
 
 > **当前预发**：军师服务 `0c902ad` / AIStar `f5e21ee5-20260812T031204Z`，两服务 active、`NRestarts=0`，AIStar `force-mock=false`；作品生成时间与可重试的取消/删除闭环已上线，requirements 继续保持 `authorizationVideoRequired=false / avatarMin=5 / voiceMin=3`，微信 32308 avatar 模板已配置。同 SHA server 真机包已 auto-preview 到 AppID `wx810ebe6dfef8e75f`。
 > **创建**：2026-08-10
@@ -16,12 +16,12 @@
 - 石榴官方 API v1 已接 speaker/avatar 训练、可选授权视频、V2 TTS、V2 音频驱动出片、状态轮询与删除；Train Avatar Model 的 `authId` 不再被误做必填。上游时效成片会立即转存我方持久存储。所有非尾段先生成同一 V2 speaker 音频，avatar 和 b-roll 共用该音频策略，不再混用文本直出的内嵌 TTS。
 - 数字人创建主链按官方契约收成“一段视频 → Avatar 训练”：`speakerId` 只是制作 demo 的选填参数，未克隆声音时也必须立即调用 `/avatar/create`。AIStar 会 best-effort 从视频中提取原声创建基础 V2 speaker，任何提取/声音失败都不回滚形象；专门采集声音是独立增强。出片前仍需可用 speaker，视频原声不可用时提示用户补录，而不是把该限制前置成创建门槛。
 - 采集 requirements 已按石榴官方硬门纠偏：授权/形象视频均为至少 5 秒，声音真实时长必须超过 2 秒（端上按整秒提示至少 3 秒）；8–15 秒声音与 10–20 秒形象仅作效果建议，不阻断提交。客户端前检时长/大小，BFF 验 MIME/大小，AIStar 以 ffprobe 验 H.264、360p–4K、音轨与真实时长。石榴支持的 24k 单声道 PCM 只列在供应商格式中，当前小程序产品上传不开放 PCM。授权 `authId` 仅表述为声明已受理，不冒充实名认证。
-- 军师 BFF 已实现阿里云内容安全增强版图片/视频/语音审核：本地文件通过官方临时 OSS 凭证上传，图片同步判定，视频/语音轮询异步任务；只放行 `none/low`，`medium/high`、配置/权限/欠费、超时和异常返回全部 fail-closed。测试阶段隔离预发显式设置 `CLIP_MEDIA_MODERATION_BYPASS=true`，仍校验媒体类型并记录 `user.video.media.moderation.bypassed` 审计；production 启动硬拒绝该开关。待正确账号开通内容安全并授权专用身份后，再关闭旁路做本人素材验收。
+- 军师 BFF 已实现阿里云内容安全增强版图片/视频/语音审核：本地文件通过官方临时 OSS 凭证上传，图片同步判定，视频/语音轮询异步任务；只放行 `none/low`，`medium/high`、配置/权限/欠费、超时和异常返回全部 fail-closed。测试阶段可显式设置 `CLIP_MEDIA_MODERATION_BYPASS=true`，仍校验媒体类型并记录 `user.video.media.moderation.bypassed` 审计；production 必须再显式设置 `CLIP_MEDIA_MODERATION_ALLOW_PRODUCTION=true`，审计 provider 标为 `operator-bypass`。待正确账号开通内容安全并授权专用身份后，两个开关必须同时恢复为 false。
 - AIStar v0.113 预发已完成逐段 avatar/b-roll 标准化、真实 TTS 时长、H.264/AAC 多段总装、可选低音量 BGM、字幕与全程 AI 标识、三套模板各自的运行时固定品牌尾卡、最终音轨 -16 LUFS / -1.5 dBTP 归一、平均亮度/综合响度/真峰值失败关闭和作品缩略图。预发宿主 180 秒 720×1280 合成探针得到平均亮度 125.50、-16.05 LUFS、单音轨并通过解析；这只证明宿主编解码/滤镜链路，不替代本人授权真实长片压力验收。
 - 预发采用同机隔离拓扑：军师 `junshi-api-preprod :4001` 通过独立 service token 回源 `aistareco-clip-preprod 127.0.0.1:8081`，公网仅暴露预发 BFF 和 `/clip_preprod/cdn|files/`，AIStar 生产未修改。
 - v0.117 已部署军师 `f6cb58d` 与 AIStar `b5140a8a-20260811T132756Z`；两服务 active、`NRestarts=0`，AIStar 关闭 force-mock 并走真实石榴。AIStar 与公网军师 BFF 的 requirements 均返回形象硬门 5 秒/建议 10–20 秒、声音供应商硬门 2 秒/端上硬门 3 秒/建议 8–15 秒；自动化没有创建计费任务。AppID `wx810ebe6dfef8e75f` 已收到构建身份为 `native-weapp / server / https://wxapi.aibuzz.cn/api_preprod / f6cb58d` 的 auto-preview。
 - 隔离预发公网验收已完成：素材上传 → 本人授权 → 声音/形象克隆 → 三套内置模板 → 文案/配画面 → 权威报价 → 军师积分预扣/结算 → AIStar worker → ffmpeg 总装/质检/封面 → 作品 → 抖音 mock 发布状态全部成功。样本成片 44.05 秒、720×1280、H.264/AAC，抽帧可见「测试演示」「AI 生成」和字幕；该次 force-mock 未调用石榴。随后以 server 模式指向预发完成 AppID `wx810ebe6dfef8e75f` 真机 auto-preview。
-- 非生产 mock 可以闭环演示；纯 `api.isMock()` 会话使用 200 点演示额度，避免主应用默认无套餐的新 mock 账号在确认页被 0 余额挡住。隔离预发还可令 AIStar 显式 force-mock：保留真实石榴凭据但以确定性媒体走真实 ffmpeg/质检/存储链，产出永久带「测试演示」的可播放 MP4，不用状态假成功。附身 JWT / server 模式不使用演示额度。production 会同时拒绝媒体审核旁路和 AIStar force-mock。四平台真实代发仍保持 `CLIP_PUBLISH_NOT_CONFIGURED`。
+- 非生产 mock 可以闭环演示；纯 `api.isMock()` 会话使用 200 点演示额度，避免主应用默认无套餐的新 mock 账号在确认页被 0 余额挡住。隔离预发还可令 AIStar 显式 force-mock：保留真实石榴凭据但以确定性媒体走真实 ffmpeg/质检/存储链，产出永久带「测试演示」的可播放 MP4，不用状态假成功。附身 JWT / server 模式不使用演示额度。production 仍硬拒绝 AIStar force-mock；媒体审核旁路仅在军师双开关明确授权时生效。四平台真实代发仍保持 `CLIP_PUBLISH_NOT_CONFIGURED`。
 - 端内新增 `catalog.js` 作为三套体验模板的唯一事实源；列表、详情、mock 建项目与重置脚本共用同一目录，每套模板都有独立文案和镜头结构。11 个页面的自定义导航已收成与微信胶囊同层，不再重复叠加 50px 标题栏。
 - 外部上线门槛仍包括：军师小程序类目/重新提审与深度合成备案、阿里云内容安全开通和专用 RAM 调用身份、本人合规素材的音色/口型/质量/时延/规格/成本实测、7 项商务/授权决策、授权群像尾片或运营 preset、四平台真实发布接入与双端真机验收。自动化不得替用户创建真实 speaker/avatar/video；真机本人验收才允许消耗点数。
 
